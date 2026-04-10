@@ -86,7 +86,8 @@ type ConfirmResponseMsg struct {
 
 // Daemon -> Client
 type HandshakeOkMsg struct {
-	Version string `json:"version"`
+	Version       string `json:"version"`
+	DaemonVersion string `json:"daemon_version"`
 }
 
 type HandshakeErrMsg struct {
