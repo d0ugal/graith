@@ -74,7 +74,7 @@ func repoHash(repoPath string) string {
 }
 
 // Create starts a new agent session in a git worktree.
-func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch string, rows, cols uint16) (*SessionState, error) {
+func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt string, rows, cols uint16) (*SessionState, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -137,6 +137,9 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch string, r
 	if err != nil {
 		_ = git.TeardownSession(repoRoot, worktreePath, branchName)
 		return nil, fmt.Errorf("expand agent args: %w", err)
+	}
+	if prompt != "" {
+		expandedArgs = append(expandedArgs, prompt)
 	}
 
 	logPath := filepath.Join(sm.paths.LogDir, id+".log")

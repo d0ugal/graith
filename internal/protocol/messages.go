@@ -43,6 +43,7 @@ type CreateMsg struct {
 	Agent    string `json:"agent"`
 	RepoPath string `json:"repo_path"`
 	Base     string `json:"base,omitempty"`
+	Prompt   string `json:"prompt,omitempty"`
 }
 
 type AttachMsg struct {
