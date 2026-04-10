@@ -25,12 +25,59 @@ func TestStateSaveLoad(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if loaded.Version != CurrentStateVersion {
+		t.Errorf("version = %d, want %d", loaded.Version, CurrentStateVersion)
+	}
 	s, ok := loaded.Sessions["abc123"]
 	if !ok {
 		t.Fatal("session not found after load")
 	}
 	if s.Name != "fix-bug" || s.Agent != "claude" || s.Status != StatusRunning {
 		t.Errorf("session = %+v", s)
+	}
+}
+
+func TestLoadStateV0Migration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	// Write a v0 state file (no version field)
+	v0Data := []byte(`{"sessions":{"s1":{"id":"s1","name":"old-session","status":"running"}}}`)
+	if err := writeFileAtomic(path, v0Data); err != nil {
+		t.Fatal(err)
+	}
+	state, err := LoadState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Version != CurrentStateVersion {
+		t.Errorf("version = %d, want %d after migration", state.Version, CurrentStateVersion)
+	}
+	if s, ok := state.Sessions["s1"]; !ok {
+		t.Fatal("session lost during migration")
+	} else if s.Name != "old-session" {
+		t.Errorf("name = %q, want %q", s.Name, "old-session")
+	}
+}
+
+func TestLoadStateFutureVersion(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	futureData := []byte(`{"version":999,"sessions":{}}`)
+	if err := writeFileAtomic(path, futureData); err != nil {
+		t.Fatal(err)
+	}
+	_, err := LoadState(path)
+	if err == nil {
+		t.Fatal("expected error for future version")
+	}
+}
+
+func TestSaveStateSetsVersion(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	state := &State{Version: 0, Sessions: make(map[string]*SessionState)}
+	if err := SaveState(path, state); err != nil {
+		t.Fatal(err)
+	}
+	if state.Version != CurrentStateVersion {
+		t.Errorf("version = %d after save, want %d", state.Version, CurrentStateVersion)
 	}
 }
 

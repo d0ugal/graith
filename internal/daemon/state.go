@@ -11,6 +11,8 @@ import (
 	"time"
 )
 
+const CurrentStateVersion = 1
+
 type SessionStatus string
 
 const (
@@ -38,11 +40,12 @@ type SessionState struct {
 }
 
 type State struct {
+	Version  int                      `json:"version"`
 	Sessions map[string]*SessionState `json:"sessions"`
 }
 
 func NewState() *State {
-	return &State{Sessions: make(map[string]*SessionState)}
+	return &State{Version: CurrentStateVersion, Sessions: make(map[string]*SessionState)}
 }
 
 func LoadState(path string) (*State, error) {
@@ -61,15 +64,48 @@ func LoadState(path string) (*State, error) {
 	if state.Sessions == nil {
 		state.Sessions = make(map[string]*SessionState)
 	}
+
+	if state.Version > CurrentStateVersion {
+		return nil, fmt.Errorf("state file version %d is newer than this binary supports (%d) — upgrade graith", state.Version, CurrentStateVersion)
+	}
+
+	if err := migrateState(&state); err != nil {
+		slog.Warn("state migration failed, starting fresh", "path", path, "err", err)
+		return NewState(), nil
+	}
+
 	return &state, nil
 }
 
 func SaveState(path string, state *State) error {
+	state.Version = CurrentStateVersion
 	data, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal state: %w", err)
 	}
 	return writeFileAtomic(path, data)
+}
+
+var migrations = map[int]func(*State) error{
+	0: migrateV0ToV1,
+}
+
+func migrateState(state *State) error {
+	for state.Version < CurrentStateVersion {
+		fn, ok := migrations[state.Version]
+		if !ok {
+			return fmt.Errorf("no migration from version %d", state.Version)
+		}
+		if err := fn(state); err != nil {
+			return fmt.Errorf("migrate v%d→v%d: %w", state.Version, state.Version+1, err)
+		}
+		state.Version++
+	}
+	return nil
+}
+
+func migrateV0ToV1(state *State) error {
+	return nil
 }
 
 func writeFileAtomic(path string, data []byte) error {
