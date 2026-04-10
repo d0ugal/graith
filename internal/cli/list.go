@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/dougalmatthews/graith/internal/client"
@@ -34,6 +35,16 @@ var listCmd = &cobra.Command{
 
 		var list protocol.SessionListMsg
 		protocol.DecodePayload(resp, &list)
+
+		if listRepo != "" {
+			filtered := list.Sessions[:0]
+			for _, s := range list.Sessions {
+				if s.RepoPath == listRepo || strings.HasSuffix(s.RepoPath, "/"+listRepo) || s.RepoName == listRepo {
+					filtered = append(filtered, s)
+				}
+			}
+			list.Sessions = filtered
+		}
 
 		if jsonOutput {
 			return out.JSON(list)

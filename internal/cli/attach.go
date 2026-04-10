@@ -93,6 +93,9 @@ func runAttachByID(c *client.Client, sessionID string) error {
 		result := c.RunPassthrough(ctx, prefixByte)
 		switch result {
 		case client.ResultOverlay:
+			c.SendControl("detach", struct{}{})
+			c.ReadControlResponse()
+
 			c.SendControl("list", struct{}{})
 			listResp, err := c.ReadControlResponse()
 			if err != nil {
@@ -103,10 +106,14 @@ func runAttachByID(c *client.Client, sessionID string) error {
 
 			overlayResult := client.RunOverlay(list.Sessions)
 			if overlayResult == nil {
+				c.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+				c.ReadControlResponse()
 				continue
 			}
 			if overlayResult.Action == "delete" {
 				c.SendControl("delete", protocol.DeleteMsg{SessionID: overlayResult.SessionID})
+				c.ReadControlResponse()
+				c.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
 				c.ReadControlResponse()
 				continue
 			}
@@ -116,6 +123,9 @@ func runAttachByID(c *client.Client, sessionID string) error {
 			continue
 
 		case client.ResultShell:
+			c.SendControl("detach", struct{}{})
+			c.ReadControlResponse()
+
 			c.SendControl("list", struct{}{})
 			infoResp, _ := c.ReadControlResponse()
 			var infoList protocol.SessionListMsg
@@ -126,6 +136,9 @@ func runAttachByID(c *client.Client, sessionID string) error {
 					break
 				}
 			}
+
+			c.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+			c.ReadControlResponse()
 			continue
 
 		case client.ResultDetached, client.ResultQuit:

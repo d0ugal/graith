@@ -302,11 +302,10 @@ func (sm *SessionManager) StopAll(ctx context.Context) {
 		}
 	}
 
-	deadline := time.After(5 * time.Second)
 	for id, sess := range sm.sessions {
 		select {
 		case <-sess.Done():
-		case <-deadline:
+		case <-time.After(5 * time.Second):
 			sm.log.Warn("force killing session", "id", id)
 			_ = sess.ForceKill()
 		}
