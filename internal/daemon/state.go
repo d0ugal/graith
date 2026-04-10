@@ -2,10 +2,12 @@ package daemon
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"syscall"
 	"time"
 )
 
@@ -113,5 +115,9 @@ func isProcessAlive(pid int) bool {
 	if err != nil {
 		return false
 	}
-	return proc.Signal(os.Signal(nil)) == nil
+	err = proc.Signal(syscall.Signal(0))
+	if err == nil {
+		return true
+	}
+	return errors.Is(err, syscall.EPERM)
 }
