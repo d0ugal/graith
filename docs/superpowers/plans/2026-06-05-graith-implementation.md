@@ -493,6 +493,7 @@ type Keybindings struct {
     RenameSession string `toml:"rename_session"`
     Search        string `toml:"search"`
     ScrollMode    string `toml:"scroll_mode"`
+    Shell         string `toml:"shell"`
 }
 
 type Agent struct {
@@ -534,6 +535,7 @@ func Default() *Config {
             RenameSession: ",",
             Search:        "/",
             ScrollMode:    "[",
+            Shell:         "s",
         },
         Agents: map[string]Agent{
             "claude": {
@@ -3159,6 +3161,7 @@ type PassthroughResult int
 const (
     ResultDetached PassthroughResult = iota
     ResultOverlay
+    ResultShell
     ResultQuit
 )
 
@@ -3250,6 +3253,10 @@ func (c *Client) RunPassthrough(ctx context.Context, prefixByte byte) Passthroug
                         }
                         if next == 'w' || next == 0 {
                             result = ResultOverlay
+                            return
+                        }
+                        if next == 's' {
+                            result = ResultShell
                             return
                         }
                     } else {
@@ -3555,10 +3562,42 @@ func (c *Client) RunOverlay(sessions []protocol.SessionInfo) *OverlayResult {
 Run: `go build ./...`
 Expected: compiles
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 3: Add shell-in-worktree support**
+
+Create `internal/client/shell.go`:
+
+```go
+// internal/client/shell.go
+package client
+
+import (
+    "os"
+    "os/exec"
+)
+
+func runShellInWorktree(worktreePath string) error {
+    shell := os.Getenv("SHELL")
+    if shell == "" {
+        shell = "/bin/sh"
+    }
+
+    cmd := exec.Command(shell)
+    cmd.Dir = worktreePath
+    cmd.Stdin = os.Stdin
+    cmd.Stdout = os.Stdout
+    cmd.Stderr = os.Stderr
+    cmd.Env = append(os.Environ(), "GRAITH_WORKTREE="+worktreePath)
+
+    return cmd.Run()
+}
+```
+
+This spawns the user's shell in the worktree directory. The `GRAITH_WORKTREE` env var lets shell prompts show context. Terminal is already in cooked mode when this runs (passthrough restores it before returning).
+
+- [ ] **Step 4: Commit**
 
 ```bash
-git add -A && git commit -m "feat: add bubbletea overlay UI for session list"
+git add -A && git commit -m "feat: add bubbletea overlay UI and shell-in-worktree shortcut"
 ```
 
 ---
@@ -3904,6 +3943,20 @@ func runAttachByID(c *client.Client, sessionID string) error {
             }
             c.SendControl("attach", protocol.AttachMsg{SessionID: overlayResult.SessionID})
             c.ReadControlResponse()
+            continue
+
+        case client.ResultShell:
+            c.SendControl("list", struct{}{})
+            infoResp, _ := c.ReadControlResponse()
+            var infoList protocol.SessionListMsg
+            protocol.DecodePayload(infoResp, &infoList)
+            // Find the worktree path for the currently attached session
+            for _, s := range infoList.Sessions {
+                if s.ID == sessionID {
+                    runShellInWorktree(s.WorktreePath)
+                    break
+                }
+            }
             continue
 
         case client.ResultDetached, client.ResultQuit:

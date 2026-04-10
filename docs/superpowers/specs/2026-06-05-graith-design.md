@@ -171,13 +171,20 @@ read byte from stdin
 ├─ Is it the prefix key?
 │   ├─ Read next byte (with ~500ms timeout):
 │   │   ├─ prefix key again → send one prefix key to agent (escape hatch)
-│   │   ├─ known action key → execute action
+│   │   ├─ known action key → execute action (see keybindings)
+│   │   │   (includes: s → open shell in worktree)
 │   │   ├─ timeout → open overlay (prefix alone = session list, same as ctrl+b w)
 │   │   └─ unknown key → discard
 └─ Not prefix key → forward to daemon
 ```
 
 Bracketed paste detection: when paste mode is active (ESC[200~ ... ESC[201~), prefix key detection is disabled and all bytes pass through raw.
+
+### Shell in Worktree
+
+`ctrl+b s` opens the user's `$SHELL` in the current session's worktree directory. This allows running arbitrary commands (git operations, tests, file inspection) in the exact location the agent is working, without having to find the worktree path manually.
+
+Implementation: the client suspends passthrough mode, restores the terminal to cooked mode, spawns `$SHELL` as a child process with `cwd` set to the session's worktree path, and waits for it to exit. On exit, the client re-enters raw mode and resumes passthrough. The daemon connection stays alive throughout — the agent keeps running while the user is in the shell. The shell process is purely client-side; the daemon is not involved.
 
 ### Multi-Client
 
@@ -330,6 +337,7 @@ resume_session = "R"
 rename_session = ","
 search = "/"
 scroll_mode = "["
+shell = "s"
 
 [agents.claude]
 command = "claude"
