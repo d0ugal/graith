@@ -17,6 +17,7 @@ const (
 	ResultOverlay
 	ResultShell
 	ResultQuit
+	ResultDisconnected
 )
 
 func (c *Client) RunPassthrough(ctx context.Context, prefixByte byte) PassthroughResult {
@@ -59,6 +60,9 @@ func (c *Client) RunPassthrough(ctx context.Context, prefixByte byte) Passthroug
 		for {
 			frame, err := c.ReadFrame()
 			if err != nil {
+				if innerCtx.Err() == nil {
+					result = ResultDisconnected
+				}
 				return
 			}
 			select {

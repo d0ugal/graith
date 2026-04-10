@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/dougalmatthews/graith/internal/client"
 	"github.com/dougalmatthews/graith/internal/protocol"
@@ -141,8 +142,52 @@ func runAttachByID(c *client.Client, sessionID string) error {
 			c.ReadControlResponse()
 			continue
 
+		case client.ResultDisconnected:
+			c.Close()
+			out.Print("Connection lost. Reconnecting...\n")
+			newClient, err := reconnectToSession(sessionID)
+			if err != nil {
+				out.Print("Could not reconnect: %s\n", err)
+				return nil
+			}
+			c = newClient
+			continue
+
 		case client.ResultDetached, client.ResultQuit:
 			return nil
 		}
 	}
+}
+
+func reconnectToSession(sessionID string) (*client.Client, error) {
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		time.Sleep(250 * time.Millisecond)
+		c, err := client.New(cfg, paths, cfgFile)
+		if err != nil {
+			continue
+		}
+		if err := c.Handshake(); err != nil {
+			c.Close()
+			continue
+		}
+		if _, err := c.ReadControlResponse(); err != nil {
+			c.Close()
+			continue
+		}
+		c.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+		resp, err := c.ReadControlResponse()
+		if err != nil {
+			c.Close()
+			continue
+		}
+		if resp.Type == "error" {
+			c.Close()
+			var e protocol.ErrorMsg
+			protocol.DecodePayload(resp, &e)
+			return nil, fmt.Errorf("session unavailable: %s", e.Message)
+		}
+		return c, nil
+	}
+	return nil, fmt.Errorf("timed out after 10s")
 }
