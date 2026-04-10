@@ -19,25 +19,60 @@ import (
 	grpty "github.com/dougalmatthews/graith/internal/pty"
 )
 
+type attachedClient struct {
+	conn net.Conn
+	kick func()
+}
+
 // SessionManager orchestrates PTY sessions, state persistence, and git worktrees.
 type SessionManager struct {
-	mu       sync.RWMutex
-	state    *State
-	sessions map[string]*grpty.Session
-	cfg      *config.Config
-	paths    config.Paths
-	log      *slog.Logger
+	mu              sync.RWMutex
+	state           *State
+	sessions        map[string]*grpty.Session
+	attachedClients map[string]*attachedClient
+	cfg             *config.Config
+	paths           config.Paths
+	log             *slog.Logger
+	configFile      string
+	upgradeCh       chan struct{}
 }
 
 // NewSessionManager creates a SessionManager with the given config and paths.
 func NewSessionManager(cfg *config.Config, paths config.Paths, log *slog.Logger) *SessionManager {
 	return &SessionManager{
-		state:    NewState(),
-		sessions: make(map[string]*grpty.Session),
-		cfg:      cfg,
-		paths:    paths,
-		log:      log,
+		state:           NewState(),
+		sessions:        make(map[string]*grpty.Session),
+		attachedClients: make(map[string]*attachedClient),
+		cfg:             cfg,
+		paths:           paths,
+		log:             log,
 	}
+}
+
+func (sm *SessionManager) KickAttachedClient(sessionID string) {
+	sm.mu.Lock()
+	ac, ok := sm.attachedClients[sessionID]
+	if ok {
+		delete(sm.attachedClients, sessionID)
+	}
+	sm.mu.Unlock()
+	if ok {
+		ac.kick()
+	}
+}
+
+func (sm *SessionManager) SetAttachedClient(sessionID string, conn net.Conn, kick func()) {
+	sm.mu.Lock()
+	sm.attachedClients[sessionID] = &attachedClient{conn: conn, kick: kick}
+	sm.mu.Unlock()
+}
+
+func (sm *SessionManager) ClearAttachedClient(sessionID string, conn net.Conn) {
+	sm.mu.Lock()
+	if ac, ok := sm.attachedClients[sessionID]; ok && ac.conn == conn {
+		delete(sm.attachedClients, sessionID)
+	}
+	sm.mu.Unlock()
 }
 
 // LoadState reads persisted state from disk and reconciles dead processes.
@@ -48,6 +83,39 @@ func (sm *SessionManager) LoadState() error {
 	}
 	state.Reconcile()
 	sm.state = state
+	return sm.saveState()
+}
+
+func (sm *SessionManager) AdoptSessions(manifest *UpgradeManifest) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	for _, us := range manifest.Sessions {
+		sessState, ok := sm.state.Sessions[us.ID]
+		if !ok {
+			sm.log.Warn("manifest references unknown session", "id", us.ID)
+			continue
+		}
+
+		logPath := filepath.Join(sm.paths.LogDir, us.ID+".log")
+		ptySess, err := grpty.AdoptSession(grpty.AdoptOpts{
+			ID:         us.ID,
+			Fd:         uintptr(us.Fd),
+			PID:        us.PID,
+			LogPath:    logPath,
+			MaxLogSize: 100 * 1024 * 1024,
+		})
+		if err != nil {
+			sm.log.Warn("failed to adopt session", "id", us.ID, "err", err)
+			sessState.Status = StatusStopped
+			continue
+		}
+
+		sm.sessions[us.ID] = ptySess
+		go sm.watchSession(us.ID, ptySess)
+		sm.log.Info("adopted session", "id", us.ID, "pid", us.PID)
+	}
+
 	return sm.saveState()
 }
 
@@ -319,30 +387,66 @@ func (sm *SessionManager) StopAll(ctx context.Context) {
 }
 
 // Run starts the daemon: acquires PID file, listens on the Unix socket,
-// serves connections, and blocks until SIGTERM/SIGINT.
-func Run(cfg *config.Config, paths config.Paths) error {
-	log := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
-
+// serves connections, and blocks until SIGTERM/SIGINT or an upgrade signal.
+func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) error {
 	if err := paths.EnsureDirs(); err != nil {
 		return err
 	}
 
-	if err := AcquirePIDFile(paths.PIDFile); err != nil {
-		return err
-	}
-	defer ReleasePIDFile(paths.PIDFile)
-
-	l, err := Listen(paths.SocketPath)
+	logFile, err := os.OpenFile(paths.DaemonLog, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
-		return err
+		return fmt.Errorf("open daemon log: %w", err)
 	}
-	defer os.Remove(paths.SocketPath)
-	defer l.Close()
+	defer logFile.Close()
+	log := slog.New(slog.NewJSONHandler(logFile, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
 	sm := NewSessionManager(cfg, paths, log)
-	if err := sm.LoadState(); err != nil {
-		log.Warn("failed to load state", "err", err)
+	sm.configFile = configFile
+	sm.upgradeCh = make(chan struct{}, 1)
+
+	var l net.Listener
+
+	if adoptFrom != "" {
+		manifest, err := ReadManifest(adoptFrom)
+		if err != nil {
+			return fmt.Errorf("read upgrade manifest: %w", err)
+		}
+		os.Remove(adoptFrom)
+
+		f := os.NewFile(uintptr(manifest.ListenerFd), "listener")
+		l, err = net.FileListener(f)
+		f.Close()
+		if err != nil {
+			return fmt.Errorf("adopt listener from fd %d: %w", manifest.ListenerFd, err)
+		}
+
+		if err := sm.LoadState(); err != nil {
+			log.Warn("failed to load state", "err", err)
+		}
+		if err := sm.AdoptSessions(manifest); err != nil {
+			log.Warn("failed to adopt sessions", "err", err)
+		}
+
+		log.Info("daemon upgraded", "adopted_sessions", len(manifest.Sessions), "pid", os.Getpid())
+	} else {
+		if err := AcquirePIDFile(paths.PIDFile); err != nil {
+			return err
+		}
+
+		var listenErr error
+		l, listenErr = Listen(paths.SocketPath)
+		if listenErr != nil {
+			ReleasePIDFile(paths.PIDFile)
+			return listenErr
+		}
+
+		if err := sm.LoadState(); err != nil {
+			log.Warn("failed to load state", "err", err)
+		}
+
+		log.Info("daemon started", "socket", paths.SocketPath, "pid", os.Getpid())
 	}
+	defer l.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -353,16 +457,56 @@ func Run(cfg *config.Config, paths config.Paths) error {
 
 	go srv.Serve(ctx)
 
-	log.Info("daemon started", "socket", paths.SocketPath, "pid", os.Getpid())
-
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
-	<-sigCh
 
-	log.Info("shutting down")
-	cancel()
-	sm.StopAll(ctx)
-	srv.Shutdown()
+	select {
+	case <-sigCh:
+		log.Info("shutting down")
+		cancel()
+		sm.StopAll(ctx)
+		srv.Shutdown()
+		os.Remove(paths.SocketPath)
+		ReleasePIDFile(paths.PIDFile)
+
+	case <-sm.upgradeCh:
+		log.Info("preparing upgrade")
+
+		unixL, ok := l.(*net.UnixListener)
+		if !ok {
+			log.Error("listener is not a unix listener, cannot upgrade")
+			return fmt.Errorf("upgrade failed: listener type mismatch")
+		}
+		listenerFile, err := unixL.File()
+		if err != nil {
+			log.Error("get listener fd", "err", err)
+			return fmt.Errorf("upgrade failed: %w", err)
+		}
+		listenerFd := listenerFile.Fd()
+
+		manifest, err := sm.PrepareUpgrade(listenerFd, configFile)
+		if err != nil {
+			listenerFile.Close()
+			log.Error("prepare upgrade", "err", err)
+			return fmt.Errorf("upgrade failed: %w", err)
+		}
+
+		manifestPath, err := WriteManifest(paths.RuntimeDir, manifest)
+		if err != nil {
+			listenerFile.Close()
+			log.Error("write manifest", "err", err)
+			return fmt.Errorf("upgrade failed: %w", err)
+		}
+
+		log.Info("exec-ing new binary", "manifest", manifestPath, "sessions", len(manifest.Sessions))
+
+		if err := ExecUpgrade(manifestPath, configFile); err != nil {
+			listenerFile.Close()
+			os.Remove(manifestPath)
+			log.Error("exec failed", "err", err)
+			return fmt.Errorf("upgrade exec failed: %w", err)
+		}
+	}
 
 	return nil
 }

@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/creack/pty"
 )
@@ -23,6 +24,7 @@ type Session struct {
 	done           chan struct{}
 	exitCode       int
 	exited         bool
+	adoptedPID     int
 }
 
 type SessionOpts struct {
@@ -66,6 +68,73 @@ func NewSession(opts SessionOpts) (*Session, error) {
 	go s.waitLoop()
 
 	return s, nil
+}
+
+type AdoptOpts struct {
+	ID         string
+	Fd         uintptr
+	PID        int
+	LogPath    string
+	MaxLogSize int64
+}
+
+func AdoptSession(opts AdoptOpts) (*Session, error) {
+	ptmx := os.NewFile(opts.Fd, fmt.Sprintf("ptmx-%s", opts.ID))
+	if ptmx == nil {
+		return nil, fmt.Errorf("invalid fd %d for session %s", opts.Fd, opts.ID)
+	}
+
+	sb, err := NewScrollback(opts.LogPath, opts.MaxLogSize)
+	if err != nil {
+		return nil, fmt.Errorf("open scrollback: %w", err)
+	}
+
+	s := &Session{
+		ID:         opts.ID,
+		Ptmx:       ptmx,
+		Scrollback: sb,
+		done:       make(chan struct{}),
+		adoptedPID: opts.PID,
+	}
+
+	go s.readLoop()
+	go s.adoptedWaitLoop()
+
+	return s, nil
+}
+
+func (s *Session) adoptedWaitLoop() {
+	exitCode := -1
+
+	proc, _ := os.FindProcess(s.adoptedPID)
+	ps, waitErr := proc.Wait()
+	if waitErr == nil {
+		exitCode = ps.ExitCode()
+	} else {
+		for {
+			time.Sleep(time.Second)
+			if syscall.Kill(s.adoptedPID, 0) != nil {
+				break
+			}
+		}
+	}
+
+	s.mu.Lock()
+	s.exited = true
+	s.exitCode = exitCode
+	s.mu.Unlock()
+	close(s.done)
+}
+
+func (s *Session) ProcessPID() int {
+	if s.Cmd != nil && s.Cmd.Process != nil {
+		return s.Cmd.Process.Pid
+	}
+	return s.adoptedPID
+}
+
+func (s *Session) Fd() uintptr {
+	return s.Ptmx.Fd()
 }
 
 func (s *Session) readLoop() {
@@ -113,24 +182,34 @@ func (s *Session) Resize(rows, cols uint16) error {
 	return pty.Setsize(s.Ptmx, &pty.Winsize{Rows: rows, Cols: cols})
 }
 
-func (s *Session) Attach(w io.Writer)    { s.mu.Lock(); s.attachedWriter = w; s.mu.Unlock() }
-func (s *Session) Detach()               { s.mu.Lock(); s.attachedWriter = nil; s.mu.Unlock() }
+func (s *Session) Attach(w io.Writer) { s.mu.Lock(); s.attachedWriter = w; s.mu.Unlock() }
+func (s *Session) Detach()            { s.mu.Lock(); s.attachedWriter = nil; s.mu.Unlock() }
+
+func (s *Session) DetachWriter(w io.Writer) {
+	s.mu.Lock()
+	if s.attachedWriter == w {
+		s.attachedWriter = nil
+	}
+	s.mu.Unlock()
+}
 func (s *Session) Done() <-chan struct{}  { return s.done }
 func (s *Session) Exited() bool          { s.mu.RLock(); defer s.mu.RUnlock(); return s.exited }
 func (s *Session) ExitCode() int         { s.mu.RLock(); defer s.mu.RUnlock(); return s.exitCode }
 
 func (s *Session) Kill() error {
-	if s.Cmd.Process == nil {
+	pid := s.ProcessPID()
+	if pid == 0 {
 		return nil
 	}
-	return syscall.Kill(-s.Cmd.Process.Pid, syscall.SIGTERM)
+	return syscall.Kill(-pid, syscall.SIGTERM)
 }
 
 func (s *Session) ForceKill() error {
-	if s.Cmd.Process == nil {
+	pid := s.ProcessPID()
+	if pid == 0 {
 		return nil
 	}
-	return syscall.Kill(-s.Cmd.Process.Pid, syscall.SIGKILL)
+	return syscall.Kill(-pid, syscall.SIGKILL)
 }
 
 func (s *Session) Close() {
