@@ -12,7 +12,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var adoptFrom string
+var (
+	adoptFrom  string
+	forceClean bool
+)
 
 var daemonCmd = &cobra.Command{
 	Use:   "daemon",
@@ -41,25 +44,20 @@ var daemonStopCmd = &cobra.Command{
 
 var daemonRestartCmd = &cobra.Command{
 	Use:   "restart",
-	Short: "Stop and restart the daemon (sessions are preserved as stopped)",
+	Short: "Restart the daemon (preserves sessions by default)",
+	Long: `Restart the daemon, picking up the latest binary and config.
+
+By default, live sessions are preserved via exec (same as 'upgrade').
+Use --force to do a clean stop/start, which kills running agent sessions.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		_ = daemon.StopDaemon(paths.PIDFile)
-
-		// Wait for the old socket to be cleaned up before starting a new daemon
-		for range 20 {
-			if _, err := os.Stat(paths.SocketPath); os.IsNotExist(err) {
-				break
-			}
-			time.Sleep(100 * time.Millisecond)
+		if forceClean {
+			return restartClean()
 		}
-		os.Remove(paths.SocketPath)
-
-		conn, err := client.EnsureDaemon(paths.SocketPath, cfgFile)
+		err := execUpgrade("Daemon restarted (sessions preserved)")
 		if err != nil {
-			return fmt.Errorf("restart daemon: %w", err)
+			out.Print("Preserve failed: %s\nFalling back to clean restart...\n", err)
+			return restartClean()
 		}
-		conn.Close()
-		out.Print("Daemon restarted\n")
 		return nil
 	},
 }
@@ -68,45 +66,68 @@ var daemonUpgradeCmd = &cobra.Command{
 	Use:   "upgrade",
 	Short: "Upgrade daemon binary without losing sessions",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		c, err := client.New(cfg, paths, cfgFile)
-		if err != nil {
-			return fmt.Errorf("connect to daemon: %w", err)
-		}
-
-		if err := c.Handshake(); err != nil {
-			c.Close()
-			return err
-		}
-		c.ReadControlResponse()
-
-		c.SendControl("upgrade", struct{}{})
-		resp, err := c.ReadControlResponse()
-		if err != nil {
-			// Connection dropped — expected, the daemon exec'd itself
-			c.Close()
-
-			// Wait for the new daemon to be ready
-			for range 20 {
-				time.Sleep(250 * time.Millisecond)
-				conn, err := net.DialTimeout("unix", paths.SocketPath, 500*time.Millisecond)
-				if err == nil {
-					conn.Close()
-					out.Print("Daemon upgraded successfully\n")
-					return nil
-				}
-			}
-			return fmt.Errorf("new daemon not responding after upgrade")
-		}
-
-		c.Close()
-		if resp.Type == "error" {
-			var e protocol.ErrorMsg
-			protocol.DecodePayload(resp, &e)
-			return fmt.Errorf("upgrade failed: %s", e.Message)
-		}
-		out.Print("Daemon upgrade initiated\n")
-		return nil
+		return execUpgrade("Daemon upgraded successfully")
 	},
+}
+
+func execUpgrade(successMsg string) error {
+	c, err := client.New(cfg, paths, cfgFile)
+	if err != nil {
+		return fmt.Errorf("connect to daemon: %w", err)
+	}
+
+	if err := c.Handshake(); err != nil {
+		c.Close()
+		return err
+	}
+	c.ReadControlResponse()
+
+	c.SendControl("upgrade", struct{}{})
+	resp, err := c.ReadControlResponse()
+	if err != nil {
+		// Connection dropped — expected, the daemon exec'd itself
+		c.Close()
+
+		for range 20 {
+			time.Sleep(250 * time.Millisecond)
+			conn, err := net.DialTimeout("unix", paths.SocketPath, 500*time.Millisecond)
+			if err == nil {
+				conn.Close()
+				out.Print("%s\n", successMsg)
+				return nil
+			}
+		}
+		return fmt.Errorf("new daemon not responding after exec")
+	}
+
+	c.Close()
+	if resp.Type == "error" {
+		var e protocol.ErrorMsg
+		protocol.DecodePayload(resp, &e)
+		return fmt.Errorf("%s", e.Message)
+	}
+	out.Print("%s\n", successMsg)
+	return nil
+}
+
+func restartClean() error {
+	_ = daemon.StopDaemon(paths.PIDFile)
+
+	for range 20 {
+		if _, err := os.Stat(paths.SocketPath); os.IsNotExist(err) {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	os.Remove(paths.SocketPath)
+
+	conn, err := client.EnsureDaemon(paths.SocketPath, cfgFile)
+	if err != nil {
+		return fmt.Errorf("restart daemon: %w", err)
+	}
+	conn.Close()
+	out.Print("Daemon restarted (sessions killed)\n")
+	return nil
 }
 
 func init() {
@@ -118,4 +139,6 @@ func init() {
 
 	daemonStartCmd.Flags().StringVar(&adoptFrom, "adopt-from", "", "")
 	daemonStartCmd.Flags().MarkHidden("adopt-from")
+
+	daemonRestartCmd.Flags().BoolVar(&forceClean, "force", false, "Kill sessions and do a clean stop/start")
 }
