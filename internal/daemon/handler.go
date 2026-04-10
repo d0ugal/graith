@@ -111,8 +111,6 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				attachedSessionID = a.SessionID
 				attachedDataWriter = &frameDataWriter{writer: writer}
 
-				ptySess.Attach(attachedDataWriter)
-
 				sm.KickAttachedClient(a.SessionID)
 				sm.SetAttachedClient(a.SessionID, conn, func() {
 					data, _ := protocol.EncodeControl("detached", protocol.DetachedMsg{Reason: "replaced"})
@@ -128,6 +126,12 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 
 				sess, _ := sm.Get(a.SessionID)
 				sendControl("attached", toSessionInfo(sess))
+
+				if tail, err := ptySess.Scrollback.Tail(300); err == nil && len(tail) > 0 {
+					_ = writer.WriteFrame(protocol.ChannelData, tail)
+				}
+
+				ptySess.Attach(attachedDataWriter)
 
 			case "detach":
 				if attachedSessionID != "" {
