@@ -14,6 +14,7 @@ var (
 	newBase       string
 	newBackground bool
 	newPrompt     string
+	newPromptFile string
 )
 
 var newCmd = &cobra.Command{
@@ -29,6 +30,15 @@ var newCmd = &cobra.Command{
 			agent = cfg.DefaultAgent
 		}
 
+		prompt := newPrompt
+		if newPromptFile != "" {
+			data, err := os.ReadFile(newPromptFile)
+			if err != nil {
+				return fmt.Errorf("read prompt file: %w", err)
+			}
+			prompt = string(data)
+		}
+
 		c, err := client.Connect(cfg, paths, cfgFile)
 		if err != nil {
 			return err
@@ -40,7 +50,7 @@ var newCmd = &cobra.Command{
 			Agent:    agent,
 			RepoPath: cwd,
 			Base:     newBase,
-			Prompt:   newPrompt,
+			Prompt:   prompt,
 		})
 
 		resp, err := c.ReadControlResponse()
@@ -77,4 +87,5 @@ func init() {
 	newCmd.Flags().StringVar(&newBase, "base", "", "base branch")
 	newCmd.Flags().BoolVar(&newBackground, "background", false, "create without attaching")
 	newCmd.Flags().StringVarP(&newPrompt, "prompt", "p", "", "initial prompt for the agent")
+	newCmd.Flags().StringVar(&newPromptFile, "prompt-file", "", "read initial prompt from file")
 }
