@@ -276,14 +276,20 @@ func (sm *SessionManager) watchSession(id string, sess *grpty.Session) {
 // Delete stops a session, removes its worktree/branch, and deletes state.
 func (sm *SessionManager) Delete(id string) error {
 	sm.mu.Lock()
-	defer sm.mu.Unlock()
 
 	sessState, ok := sm.state.Sessions[id]
 	if !ok {
+		sm.mu.Unlock()
 		return fmt.Errorf("session %q not found", id)
 	}
 
+	ac, hasClient := sm.attachedClients[id]
+	if hasClient {
+		delete(sm.attachedClients, id)
+	}
+
 	if ptySess, ok := sm.sessions[id]; ok {
+		ptySess.Detach()
 		if !ptySess.Exited() {
 			_ = ptySess.Kill()
 			select {
@@ -300,7 +306,14 @@ func (sm *SessionManager) Delete(id string) error {
 	_ = os.Remove(filepath.Join(sm.paths.LogDir, id+".log"))
 
 	delete(sm.state.Sessions, id)
-	return sm.saveState()
+	err := sm.saveState()
+	sm.mu.Unlock()
+
+	if hasClient {
+		ac.kick()
+	}
+
+	return err
 }
 
 // Rename changes the display name of a session.
