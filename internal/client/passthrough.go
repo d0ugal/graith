@@ -65,7 +65,7 @@ type frameDemux struct {
 	done      chan struct{}
 }
 
-func (c *Client) startDemux() *frameDemux {
+func (c *Client) startDemux(ctx context.Context) *frameDemux {
 	d := &frameDemux{
 		dataCh:    make(chan []byte, 64),
 		controlCh: make(chan protocol.Envelope, 4),
@@ -85,10 +85,18 @@ func (c *Client) startDemux() *frameDemux {
 			}
 			switch frame.Channel {
 			case protocol.ChannelData:
-				d.dataCh <- frame.Payload
+				select {
+				case d.dataCh <- frame.Payload:
+				case <-ctx.Done():
+					return
+				}
 			case protocol.ChannelControl:
 				msg, _ := protocol.DecodeControl(frame.Payload)
-				d.controlCh <- msg
+				select {
+				case d.controlCh <- msg:
+				case <-ctx.Done():
+					return
+				}
 			}
 		}
 	}()
@@ -113,7 +121,7 @@ func (c *Client) runPassthroughLoop(ctx context.Context, prefixByte byte, stdin 
 		resultOnce.Do(func() { result = r })
 	}
 
-	demux := c.startDemux()
+	demux := c.startDemux(innerCtx)
 
 	// Read from daemon via demux, write to stdout
 	go func() {

@@ -207,6 +207,56 @@ func TestDisconnectDetection(t *testing.T) {
 	}
 }
 
+func TestOverlayUnderHeavyOutput(t *testing.T) {
+	clientConn, daemonConn := net.Pipe()
+	defer clientConn.Close()
+	defer daemonConn.Close()
+
+	c := newTestClient(clientConn)
+
+	// Flood data frames as fast as possible — simulates a busy agent session
+	writer := protocol.NewFrameWriter(daemonConn)
+	floodDone := make(chan struct{})
+	go func() {
+		defer close(floodDone)
+		chunk := bytes.Repeat([]byte("x"), 4096)
+		for {
+			if err := writer.WriteFrame(protocol.ChannelData, chunk); err != nil {
+				return
+			}
+		}
+	}()
+
+	stdinR, stdinW := io.Pipe()
+	stdout := io.Discard
+
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		stdinW.Write([]byte{0x02})
+		time.Sleep(10 * time.Millisecond)
+		stdinW.Write([]byte{'w'})
+	}()
+
+	ctx := context.Background()
+	done := make(chan PassthroughResult, 1)
+	go func() {
+		done <- c.runPassthroughLoop(ctx, 0x02, stdinR, stdout)
+	}()
+
+	select {
+	case result := <-done:
+		if result != ResultOverlay {
+			t.Fatalf("expected ResultOverlay (%d), got %d", ResultOverlay, result)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("runPassthroughLoop did not return within 5s (deadlock in drain)")
+	}
+
+	// Verify connection is clean after overlay
+	daemonConn.Close() // stop flood
+	<-floodDone
+}
+
 func TestNormalDataPassthrough(t *testing.T) {
 	clientConn, daemonConn := net.Pipe()
 	defer clientConn.Close()
