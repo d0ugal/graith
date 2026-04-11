@@ -18,18 +18,11 @@ var listCmd = &cobra.Command{
 	Aliases: []string{"ls"},
 	Short:   "List all sessions",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		c, err := client.New(cfg, paths, cfgFile)
+		c, err := client.Connect(cfg, paths, cfgFile)
 		if err != nil {
 			return err
 		}
 		defer c.Close()
-
-		if err := c.Handshake(); err != nil {
-			return err
-		}
-		if _, err := c.ReadControlResponse(); err != nil {
-			return err
-		}
 
 		c.SendControl("list", struct{}{})
 		resp, err := c.ReadControlResponse()

@@ -29,16 +29,11 @@ var newCmd = &cobra.Command{
 			agent = cfg.DefaultAgent
 		}
 
-		c, err := client.New(cfg, paths, cfgFile)
+		c, err := client.Connect(cfg, paths, cfgFile)
 		if err != nil {
 			return err
 		}
 		defer c.Close()
-
-		if err := c.Handshake(); err != nil {
-			return err
-		}
-		c.ReadControlResponse()
 
 		c.SendControl("create", protocol.CreateMsg{
 			Name:     name,
