@@ -3,6 +3,7 @@ package pty
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"sync"
 )
@@ -42,25 +43,55 @@ func (s *Scrollback) Write(data []byte) (int, error) {
 func (s *Scrollback) Tail(lines int) ([]byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	data, err := os.ReadFile(s.path)
+
+	f, err := os.Open(s.path)
 	if err != nil {
 		return nil, err
 	}
-	if lines <= 0 {
-		return data, nil
+	defer f.Close()
+
+	info, err := f.Stat()
+	if err != nil {
+		return nil, err
 	}
-	idx := len(data)
+	size := info.Size()
+	if size == 0 {
+		return nil, nil
+	}
+
+	if lines <= 0 {
+		data := make([]byte, size)
+		_, err := io.ReadFull(f, data)
+		return data, err
+	}
+
+	const chunkSize = 8192
 	count := 0
-	for idx > 0 && count < lines {
-		idx--
-		if data[idx] == '\n' && idx < len(data)-1 {
-			count++
+	remaining := size
+	var buf []byte
+
+	for remaining > 0 {
+		readSize := min(int64(chunkSize), remaining)
+		remaining -= readSize
+
+		chunk := make([]byte, readSize)
+		if _, err := f.ReadAt(chunk, remaining); err != nil {
+			return nil, err
+		}
+
+		buf = append(chunk, buf...)
+
+		for i := len(chunk) - 1; i >= 0; i-- {
+			if chunk[i] == '\n' && remaining+int64(i) < size-1 {
+				count++
+				if count >= lines {
+					return bytes.Clone(buf[i+1:]), nil
+				}
+			}
 		}
 	}
-	if idx > 0 {
-		idx++
-	}
-	return bytes.Clone(data[idx:]), nil
+
+	return bytes.Clone(buf), nil
 }
 
 func (s *Scrollback) Close() error { return s.file.Close() }
