@@ -318,6 +318,29 @@ func (sm *SessionManager) Delete(id string) error {
 	return err
 }
 
+// Stop sends SIGTERM to a session's process without removing the session or worktree.
+func (sm *SessionManager) Stop(id string) error {
+	sm.mu.Lock()
+	sessState, ok := sm.state.Sessions[id]
+	sm.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("session %q not found", id)
+	}
+	if sessState.Status != StatusRunning {
+		return fmt.Errorf("session %q is not running", id)
+	}
+
+	ptySess, ok := sm.GetPTY(id)
+	if !ok {
+		return fmt.Errorf("session %q has no PTY", id)
+	}
+
+	if err := ptySess.Kill(); err != nil {
+		return fmt.Errorf("send SIGTERM: %w", err)
+	}
+	return nil
+}
+
 // Rename changes the display name of a session.
 func (sm *SessionManager) Rename(id, newName string) error {
 	sm.mu.Lock()

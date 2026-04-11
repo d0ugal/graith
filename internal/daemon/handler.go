@@ -169,6 +169,20 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					}{d.SessionID})
 				}
 
+			case "stop":
+				var s protocol.StopMsg
+				if err := protocol.DecodePayload(msg, &s); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid stop message"})
+					continue
+				}
+				if err := sm.Stop(s.SessionID); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+				} else {
+					sendControl("stopped", struct {
+						SessionID string `json:"session_id"`
+					}{s.SessionID})
+				}
+
 			case "rename":
 				var r protocol.RenameMsg
 				if err := protocol.DecodePayload(msg, &r); err != nil {
