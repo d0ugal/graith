@@ -183,6 +183,47 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					}{r.SessionID, r.NewName})
 				}
 
+			case "logs":
+				var l protocol.LogsMsg
+				if err := protocol.DecodePayload(msg, &l); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid logs message"})
+					continue
+				}
+				ptySess, ok := sm.GetPTY(l.SessionID)
+				if !ok {
+					sendControl("error", protocol.ErrorMsg{Message: "session not found"})
+					continue
+				}
+				lines := l.Lines
+				if lines == 0 {
+					lines = 300
+				}
+				if tail, err := ptySess.Scrollback.Tail(lines); err == nil && len(tail) > 0 {
+					_ = writer.WriteFrame(protocol.ChannelData, tail)
+				}
+				if !l.Follow {
+					sendControl("logs_done", struct{}{})
+					continue
+				}
+				logsWriter := &frameDataWriter{writer: writer}
+				ptySess.Attach(logsWriter)
+				sendControl("logs_following", struct{}{})
+				for {
+					f, err := reader.ReadFrame()
+					if err != nil {
+						ptySess.DetachWriter(logsWriter)
+						return
+					}
+					if f.Channel == protocol.ChannelControl {
+						ctrl, _ := protocol.DecodeControl(f.Payload)
+						if ctrl.Type == "detach" {
+							ptySess.DetachWriter(logsWriter)
+							sendControl("logs_done", struct{}{})
+							break
+						}
+					}
+				}
+
 			case "resize":
 				var r protocol.ResizeMsg
 				if err := protocol.DecodePayload(msg, &r); err != nil {

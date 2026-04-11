@@ -68,6 +68,12 @@ type ResizeMsg struct {
 	Rows uint16 `json:"rows"`
 }
 
+type LogsMsg struct {
+	SessionID string `json:"session_id"`
+	Lines     int    `json:"lines"`
+	Follow    bool   `json:"follow"`
+}
+
 type ScrollbackMsg struct {
 	SessionID string `json:"session_id"`
 	Lines     int    `json:"lines"`
