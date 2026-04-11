@@ -11,9 +11,10 @@ import (
 )
 
 var attachCmd = &cobra.Command{
-	Use:   "attach [name-or-id]",
-	Short: "Attach to a session",
-	Args:  cobra.MaximumNArgs(1),
+	Use:               "attach [name-or-id]",
+	Short:             "Attach to a session",
+	Args:              cobra.MaximumNArgs(1),
+	ValidArgsFunction: completeSessionNames,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := ""
 		if len(args) > 0 {
