@@ -258,40 +258,85 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid msg_sub message"})
 					continue
 				}
+
+				// Subscribe before reading to avoid missing messages published
+				// between Read and Subscribe.
+				var sub chan Message
+				var unsub func()
+				if m.Wait || m.Follow {
+					sub, unsub = sm.messages.Subscribe(m.Stream)
+				}
+
 				msgs, err := sm.messages.Read(m.Stream, m.Subscriber, m.OnlyUnread, m.ThreadID)
 				if err != nil {
+					if unsub != nil {
+						unsub()
+					}
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 					continue
 				}
 				for _, msg := range msgs {
 					sendControl("msg_message", msg)
 				}
-				if m.Ack && m.Subscriber != "" && len(msgs) > 0 {
-					sm.messages.Ack(m.Stream, m.Subscriber)
+
+				var lastDeliveredSeq int64
+				if len(msgs) > 0 {
+					lastDeliveredSeq = msgs[len(msgs)-1].Seq
 				}
+				if m.Ack && m.Subscriber != "" && lastDeliveredSeq > 0 {
+					sm.messages.Ack(m.Stream, m.Subscriber, lastDeliveredSeq)
+				}
+
 				if !m.Wait && !m.Follow {
+					if unsub != nil {
+						unsub()
+					}
 					sendControl("msg_done", struct{}{})
 					continue
 				}
 				if m.Wait && len(msgs) > 0 {
+					unsub()
 					sendControl("msg_done", struct{}{})
 					continue
 				}
-				sub, unsub := sm.messages.Subscribe(m.Stream)
+
 				sendControl("msg_following", struct{}{})
+				detachCh := make(chan struct{})
+				go func() {
+					for {
+						f, err := reader.ReadFrame()
+						if err != nil {
+							close(detachCh)
+							return
+						}
+						if f.Channel == protocol.ChannelControl {
+							ctrl, _ := protocol.DecodeControl(f.Payload)
+							if ctrl.Type == "detach" {
+								close(detachCh)
+								return
+							}
+						}
+					}
+				}()
 				func() {
 					defer unsub()
 					for {
 						select {
 						case tmsg := <-sub:
+							if m.ThreadID != "" && tmsg.ThreadID != m.ThreadID {
+								continue
+							}
 							sendControl("msg_message", tmsg)
 							if m.Ack && m.Subscriber != "" {
-								sm.messages.Ack(m.Stream, m.Subscriber)
+								sm.messages.Ack(m.Stream, m.Subscriber, tmsg.Seq)
 							}
 							if m.Wait {
 								sendControl("msg_done", struct{}{})
 								return
 							}
+						case <-detachCh:
+							sendControl("msg_done", struct{}{})
+							return
 						case <-ctx.Done():
 							return
 						}
@@ -304,7 +349,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid msg_ack message"})
 					continue
 				}
-				if err := sm.messages.Ack(m.Stream, m.Subscriber); err != nil {
+				if err := sm.messages.AckLatest(m.Stream, m.Subscriber); err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 				} else {
 					sendControl("msg_acked", struct{}{})

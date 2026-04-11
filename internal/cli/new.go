@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/dougalmatthews/graith/internal/client"
 	"github.com/dougalmatthews/graith/internal/protocol"
@@ -28,6 +29,8 @@ var newCmd = &cobra.Command{
 		repoPath := newRepo
 		if repoPath == "" {
 			repoPath, _ = os.Getwd()
+		} else {
+			repoPath, _ = filepath.Abs(repoPath)
 		}
 		agent := newAgent
 		if agent == "" {
