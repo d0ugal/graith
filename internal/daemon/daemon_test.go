@@ -389,7 +389,7 @@ func TestToSessionInfo(t *testing.T) {
 	exitCode := 42
 	createdAt := time.Date(2025, 1, 15, 10, 30, 0, 0, time.UTC)
 
-	sess := &SessionState{
+	sess := SessionState{
 		ID:             "abc123",
 		Name:           "fix-bug",
 		RepoPath:       "/home/user/repo",
@@ -442,7 +442,7 @@ func TestToSessionInfo(t *testing.T) {
 }
 
 func TestToSessionInfoNilExitCode(t *testing.T) {
-	sess := &SessionState{
+	sess := SessionState{
 		ID:        "abc",
 		Name:      "test",
 		Status:    StatusRunning,

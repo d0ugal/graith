@@ -142,29 +142,29 @@ func repoHash(repoPath string) string {
 }
 
 // Create starts a new agent session in a git worktree.
-func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt string, rows, cols uint16) (*SessionState, error) {
+func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt string, rows, cols uint16) (SessionState, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
 	if !git.IsInsideGitRepo(repoPath) {
-		return nil, fmt.Errorf("not inside a git repository: %s", repoPath)
+		return SessionState{}, fmt.Errorf("not inside a git repository: %s", repoPath)
 	}
 
 	repoRoot, err := git.RepoRootPath(repoPath)
 	if err != nil {
-		return nil, fmt.Errorf("find repo root: %w", err)
+		return SessionState{}, fmt.Errorf("find repo root: %w", err)
 	}
 
 	if baseBranch == "" {
 		baseBranch, err = git.DiscoverDefaultBranch(repoRoot)
 		if err != nil {
-			return nil, err
+			return SessionState{}, err
 		}
 	}
 
 	agent, ok := sm.cfg.Agents[agentName]
 	if !ok {
-		return nil, fmt.Errorf("unknown agent %q", agentName)
+		return SessionState{}, fmt.Errorf("unknown agent %q", agentName)
 	}
 
 	id := generateID()
@@ -184,7 +184,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 	worktreePath := filepath.Join(sm.paths.DataDir, "worktrees", repoHash(repoRoot), id)
 
 	if err := git.SetupSession(repoRoot, worktreePath, branchName, baseBranch, sm.cfg.FetchOnCreate); err != nil {
-		return nil, fmt.Errorf("setup git session: %w", err)
+		return SessionState{}, fmt.Errorf("setup git session: %w", err)
 	}
 
 	agentSessionID := ""
@@ -204,7 +204,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 	expandedArgs, err := config.ExpandSlice(agent.Args, vars)
 	if err != nil {
 		_ = git.TeardownSession(repoRoot, worktreePath, branchName)
-		return nil, fmt.Errorf("expand agent args: %w", err)
+		return SessionState{}, fmt.Errorf("expand agent args: %w", err)
 	}
 	if prompt != "" {
 		expandedArgs = append(expandedArgs, prompt)
@@ -225,7 +225,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 	})
 	if err != nil {
 		_ = git.TeardownSession(repoRoot, worktreePath, branchName)
-		return nil, fmt.Errorf("start pty session: %w", err)
+		return SessionState{}, fmt.Errorf("start pty session: %w", err)
 	}
 
 	sessState := &SessionState{
@@ -252,7 +252,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 		sm.log.Error("failed to save state", "err", err)
 	}
 
-	return sessState, nil
+	return *sessState, nil
 }
 
 // watchSession waits for a PTY session to exit and updates state accordingly.
@@ -331,24 +331,27 @@ func (sm *SessionManager) Rename(id, newName string) error {
 	return sm.saveState()
 }
 
-// List returns all known session states.
-func (sm *SessionManager) List() []*SessionState {
+// List returns copies of all known session states.
+func (sm *SessionManager) List() []SessionState {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 
-	list := make([]*SessionState, 0, len(sm.state.Sessions))
+	list := make([]SessionState, 0, len(sm.state.Sessions))
 	for _, s := range sm.state.Sessions {
-		list = append(list, s)
+		list = append(list, *s)
 	}
 	return list
 }
 
-// Get returns a session state by ID.
-func (sm *SessionManager) Get(id string) (*SessionState, bool) {
+// Get returns a copy of a session state by ID.
+func (sm *SessionManager) Get(id string) (SessionState, bool) {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 	s, ok := sm.state.Sessions[id]
-	return s, ok
+	if !ok {
+		return SessionState{}, false
+	}
+	return *s, ok
 }
 
 // GetPTY returns the live PTY session by ID.
@@ -360,23 +363,23 @@ func (sm *SessionManager) GetPTY(id string) (*grpty.Session, bool) {
 }
 
 // FindByName looks up a session by exact name, then by prefix match.
-func (sm *SessionManager) FindByName(name string) (*SessionState, bool) {
+func (sm *SessionManager) FindByName(name string) (SessionState, bool) {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 
 	for _, s := range sm.state.Sessions {
 		if s.Name == name {
-			return s, true
+			return *s, true
 		}
 	}
 
 	for _, s := range sm.state.Sessions {
 		if len(name) > 0 && len(s.Name) >= len(name) && s.Name[:len(name)] == name {
-			return s, true
+			return *s, true
 		}
 	}
 
-	return nil, false
+	return SessionState{}, false
 }
 
 // StopAll gracefully terminates all running sessions.
