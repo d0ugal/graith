@@ -21,7 +21,11 @@ func SetupSession(repoPath, worktreePath, branchName, baseBranch string, fetch b
 			return fmt.Errorf("fetch: %w", err)
 		}
 	}
-	if err := CreateBranch(repoPath, branchName, "origin/"+baseBranch); err != nil {
+	startRef := "origin/" + baseBranch
+	if !RefExists(repoPath, startRef) {
+		startRef = baseBranch
+	}
+	if err := CreateBranch(repoPath, branchName, startRef); err != nil {
 		return fmt.Errorf("create branch: %w", err)
 	}
 	if err := CreateWorktree(repoPath, worktreePath, branchName); err != nil {
