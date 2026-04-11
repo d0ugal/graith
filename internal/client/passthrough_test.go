@@ -19,72 +19,26 @@ func newTestClient(conn net.Conn) *Client {
 	}
 }
 
-// fakeDaemon simulates the daemon side: continuously sends data frames
-// and responds to control messages.
-func fakeDaemon(t *testing.T, conn net.Conn) {
-	t.Helper()
-	reader := protocol.NewFrameReader(conn)
-	writer := protocol.NewFrameWriter(conn)
-
-	// Send data frames continuously until we get a control message
-	stopData := make(chan struct{})
-	go func() {
-		ticker := time.NewTicker(10 * time.Millisecond)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-stopData:
-				return
-			case <-ticker.C:
-				writer.WriteFrame(protocol.ChannelData, []byte("output\n"))
-			}
-		}
-	}()
-
-	for {
-		frame, err := reader.ReadFrame()
-		if err != nil {
-			close(stopData)
-			return
-		}
-		if frame.Channel == protocol.ChannelControl {
-			msg, _ := protocol.DecodeControl(frame.Payload)
-			switch msg.Type {
-			case "detach":
-				close(stopData)
-				data, _ := protocol.EncodeControl("detached", struct{ Reason string }{"user"})
-				writer.WriteFrame(protocol.ChannelControl, data)
-				// Now respond to further control messages
-				for {
-					frame, err := reader.ReadFrame()
-					if err != nil {
-						return
-					}
-					if frame.Channel == protocol.ChannelControl {
-						msg, _ := protocol.DecodeControl(frame.Payload)
-						if msg.Type == "list" {
-							data, _ := protocol.EncodeControl("session_list", struct{ Sessions []string }{[]string{}})
-							writer.WriteFrame(protocol.ChannelControl, data)
-						}
-					}
-				}
-			}
-		}
-	}
-}
-
 func TestPrefixKeyOverlay(t *testing.T) {
 	clientConn, daemonConn := net.Pipe()
-	defer clientConn.Close()
 	defer daemonConn.Close()
 
 	c := newTestClient(clientConn)
-	go fakeDaemon(t, daemonConn)
+
+	// Simple daemon: send data frames
+	go func() {
+		writer := protocol.NewFrameWriter(daemonConn)
+		for {
+			if err := writer.WriteFrame(protocol.ChannelData, []byte("output\n")); err != nil {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}()
 
 	// Give daemon time to start sending data
 	time.Sleep(50 * time.Millisecond)
 
-	// Simulate stdin: send ctrl+b then 'w'
 	stdinR, stdinW := io.Pipe()
 	stdout := &bytes.Buffer{}
 
@@ -102,27 +56,19 @@ func TestPrefixKeyOverlay(t *testing.T) {
 		t.Fatalf("expected ResultOverlay (%d), got %d", ResultOverlay, result)
 	}
 
-	// THE CRITICAL CHECK: after passthrough returns, the connection must
-	// be clean for control messages. This is what was broken before —
-	// the leaked reader goroutine would consume frames meant for us.
-	c.SendControl("detach", struct{}{})
-	resp, err := c.ReadControlResponse()
-	if err != nil {
-		t.Fatalf("ReadControlResponse after overlay failed: %v", err)
-	}
-	if resp.Type != "detached" {
-		t.Fatalf("expected detached response, got %q", resp.Type)
+	// Connection is closed after passthrough — verify it's unusable
+	err := c.SendData([]byte("test"))
+	if err == nil {
+		t.Fatal("expected error writing to closed connection")
 	}
 }
 
 func TestPrefixKeyDetach(t *testing.T) {
 	clientConn, daemonConn := net.Pipe()
-	defer clientConn.Close()
 	defer daemonConn.Close()
 
 	c := newTestClient(clientConn)
 
-	// Simple daemon: just send some data
 	go func() {
 		writer := protocol.NewFrameWriter(daemonConn)
 		for {
@@ -153,7 +99,6 @@ func TestPrefixKeyDetach(t *testing.T) {
 
 func TestPrefixKeyShell(t *testing.T) {
 	clientConn, daemonConn := net.Pipe()
-	defer clientConn.Close()
 	defer daemonConn.Close()
 
 	c := newTestClient(clientConn)
@@ -186,7 +131,6 @@ func TestPrefixKeyShell(t *testing.T) {
 
 func TestDisconnectDetection(t *testing.T) {
 	clientConn, daemonConn := net.Pipe()
-	defer clientConn.Close()
 
 	c := newTestClient(clientConn)
 
@@ -209,16 +153,13 @@ func TestDisconnectDetection(t *testing.T) {
 
 func TestOverlayUnderHeavyOutput(t *testing.T) {
 	clientConn, daemonConn := net.Pipe()
-	defer clientConn.Close()
 	defer daemonConn.Close()
 
 	c := newTestClient(clientConn)
 
-	// Flood data frames as fast as possible — simulates a busy agent session
-	writer := protocol.NewFrameWriter(daemonConn)
-	floodDone := make(chan struct{})
+	// Flood data frames as fast as possible
 	go func() {
-		defer close(floodDone)
+		writer := protocol.NewFrameWriter(daemonConn)
 		chunk := bytes.Repeat([]byte("x"), 4096)
 		for {
 			if err := writer.WriteFrame(protocol.ChannelData, chunk); err != nil {
@@ -249,17 +190,12 @@ func TestOverlayUnderHeavyOutput(t *testing.T) {
 			t.Fatalf("expected ResultOverlay (%d), got %d", ResultOverlay, result)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("runPassthroughLoop did not return within 5s (deadlock in drain)")
+		t.Fatal("runPassthroughLoop did not return within 5s (deadlock)")
 	}
-
-	// Verify connection is clean after overlay
-	daemonConn.Close() // stop flood
-	<-floodDone
 }
 
 func TestNormalDataPassthrough(t *testing.T) {
 	clientConn, daemonConn := net.Pipe()
-	defer clientConn.Close()
 	defer daemonConn.Close()
 
 	c := newTestClient(clientConn)
@@ -316,5 +252,31 @@ func TestNormalDataPassthrough(t *testing.T) {
 	// Verify daemon output reached stdout
 	if !bytes.Contains(stdout.Bytes(), []byte("hello")) {
 		t.Fatalf("expected 'hello' in stdout, got %q", stdout.String())
+	}
+}
+
+func TestDaemonDetachesClient(t *testing.T) {
+	clientConn, daemonConn := net.Pipe()
+	defer daemonConn.Close()
+
+	c := newTestClient(clientConn)
+	writer := protocol.NewFrameWriter(daemonConn)
+
+	// Send some data then a detach control message
+	go func() {
+		writer.WriteFrame(protocol.ChannelData, []byte("hello"))
+		time.Sleep(50 * time.Millisecond)
+		data, _ := protocol.EncodeControl("detached", struct{ Reason string }{"replaced"})
+		writer.WriteFrame(protocol.ChannelControl, data)
+	}()
+
+	stdinR, _ := io.Pipe()
+	stdout := &bytes.Buffer{}
+
+	ctx := context.Background()
+	result := c.runPassthroughLoop(ctx, 0x02, stdinR, stdout)
+
+	if result != ResultDetached {
+		t.Fatalf("expected ResultDetached (%d), got %d", ResultDetached, result)
 	}
 }

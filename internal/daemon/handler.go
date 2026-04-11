@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/dougalmatthews/graith/internal/protocol"
@@ -16,7 +17,7 @@ const protocolVersion = "1.0"
 // HandleConnection processes the frame protocol for a single client connection.
 func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, log *slog.Logger) {
 	reader := protocol.NewFrameReader(conn)
-	writer := protocol.NewFrameWriter(conn)
+	writer := &safeFrameWriter{writer: protocol.NewFrameWriter(conn)}
 
 	var attachedSessionID string
 	var attachedDataWriter *frameDataWriter
@@ -196,9 +197,22 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 	}
 }
 
-// frameDataWriter adapts a FrameWriter into an io.Writer that sends data frames.
-type frameDataWriter struct {
+// safeFrameWriter wraps a FrameWriter with a mutex so multiple goroutines
+// (handler loop + PTY readLoop) can write frames concurrently.
+type safeFrameWriter struct {
+	mu     sync.Mutex
 	writer *protocol.FrameWriter
+}
+
+func (w *safeFrameWriter) WriteFrame(channel byte, payload []byte) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.writer.WriteFrame(channel, payload)
+}
+
+// frameDataWriter adapts a safeFrameWriter into an io.Writer that sends data frames.
+type frameDataWriter struct {
+	writer *safeFrameWriter
 }
 
 func (w *frameDataWriter) Write(p []byte) (int, error) {

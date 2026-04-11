@@ -103,12 +103,11 @@ func (c *Client) startDemux(ctx context.Context) *frameDemux {
 	return d
 }
 
-// drain stops the demux by setting a read deadline on the connection,
-// waits for the reader goroutine to exit, then clears the deadline.
-func (c *Client) drainDemux(d *frameDemux) {
-	c.conn.SetReadDeadline(shortDeadline())
+// stopDemux closes the connection to force the reader goroutine to exit,
+// then waits for it to finish. The connection is unusable after this call.
+func (c *Client) stopDemux(d *frameDemux) {
+	c.conn.Close()
 	<-d.done
-	c.conn.SetReadDeadline(noDeadline())
 }
 
 func (c *Client) runPassthroughLoop(ctx context.Context, prefixByte byte, stdin io.Reader, stdout io.Writer) PassthroughResult {
@@ -198,7 +197,7 @@ func (c *Client) runPassthroughLoop(ctx context.Context, prefixByte byte, stdin 
 	}()
 
 	<-innerCtx.Done()
-	c.drainDemux(demux)
+	c.stopDemux(demux)
 
 	return result
 }
