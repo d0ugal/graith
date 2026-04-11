@@ -1,7 +1,9 @@
 package client
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"os/signal"
@@ -21,6 +23,17 @@ const (
 	ResultQuit
 	ResultDisconnected
 )
+
+// kittyCtrlSeq returns the Kitty keyboard protocol escape sequence for
+// Ctrl+<letter>. For example, Ctrl+b (prefixByte=0x02) produces "\x1b[98;5u".
+// Terminals like Ghostty use this encoding instead of sending raw control bytes.
+func kittyCtrlSeq(prefixByte byte) []byte {
+	if prefixByte < 1 || prefixByte > 26 {
+		return nil
+	}
+	codepoint := int(prefixByte) + 96
+	return []byte(fmt.Sprintf("\x1b[%d;5u", codepoint))
+}
 
 func (c *Client) RunPassthrough(ctx context.Context, prefixByte byte) PassthroughResult {
 	fd := int(os.Stdin.Fd())
@@ -55,9 +68,6 @@ func (c *Client) RunPassthrough(ctx context.Context, prefixByte byte) Passthroug
 	return c.runPassthroughLoop(ctx, prefixByte, os.Stdin, os.Stdout)
 }
 
-// frameDemux reads frames from the connection and dispatches them to
-// channels. It provides exclusive read access — no other goroutine
-// should call ReadFrame while a demux is running.
 type frameDemux struct {
 	dataCh    chan []byte
 	controlCh chan protocol.Envelope
@@ -103,8 +113,6 @@ func (c *Client) startDemux(ctx context.Context) *frameDemux {
 	return d
 }
 
-// stopDemux closes the connection to force the reader goroutine to exit,
-// then waits for it to finish. The connection is unusable after this call.
 func (c *Client) stopDemux(d *frameDemux) {
 	c.conn.Close()
 	<-d.done
@@ -114,6 +122,8 @@ func (c *Client) runPassthroughLoop(ctx context.Context, prefixByte byte, stdin 
 	innerCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	kittySeq := kittyCtrlSeq(prefixByte)
+
 	result := ResultQuit
 	var resultOnce sync.Once
 	setResult := func(r PassthroughResult) {
@@ -122,7 +132,6 @@ func (c *Client) runPassthroughLoop(ctx context.Context, prefixByte byte, stdin 
 
 	demux := c.startDemux(innerCtx)
 
-	// Read from daemon via demux, write to stdout
 	go func() {
 		defer cancel()
 		for {
@@ -143,7 +152,6 @@ func (c *Client) runPassthroughLoop(ctx context.Context, prefixByte byte, stdin 
 		}
 	}()
 
-	// Read from stdin, write to daemon (with prefix key interception)
 	go func() {
 		defer cancel()
 		buf := make([]byte, 4096)
@@ -159,11 +167,20 @@ func (c *Client) runPassthroughLoop(ctx context.Context, prefixByte byte, stdin 
 			default:
 			}
 
+			// Replace Kitty keyboard protocol sequences with raw prefix byte
+			// so the scanning loop below can handle both traditional and
+			// modern terminal encodings uniformly.
+			input := buf[:n]
+			if kittySeq != nil && bytes.Contains(input, kittySeq) {
+				input = bytes.ReplaceAll(input, kittySeq, []byte{prefixByte})
+				n = len(input)
+			}
+
 			sendStart := 0
 			for i := 0; i < n; i++ {
 				if prefixSeen {
 					prefixSeen = false
-					switch buf[i] {
+					switch input[i] {
 					case prefixByte:
 						c.SendData([]byte{prefixByte})
 					case 'd':
@@ -176,14 +193,14 @@ func (c *Client) runPassthroughLoop(ctx context.Context, prefixByte byte, stdin 
 						setResult(ResultShell)
 						return
 					default:
-						c.SendData([]byte{prefixByte, buf[i]})
+						c.SendData([]byte{prefixByte, input[i]})
 					}
 					sendStart = i + 1
 					continue
 				}
-				if buf[i] == prefixByte {
+				if input[i] == prefixByte {
 					if i > sendStart {
-						c.SendData(buf[sendStart:i])
+						c.SendData(input[sendStart:i])
 					}
 					prefixSeen = true
 					sendStart = i + 1
@@ -191,7 +208,7 @@ func (c *Client) runPassthroughLoop(ctx context.Context, prefixByte byte, stdin 
 				}
 			}
 			if sendStart < n && !prefixSeen {
-				c.SendData(buf[sendStart:n])
+				c.SendData(input[sendStart:n])
 			}
 		}
 	}()
