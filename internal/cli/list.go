@@ -62,9 +62,19 @@ var listCmd = &cobra.Command{
 		})
 
 		tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "ID\tNAME\tREPO\tAGENT\tSTATUS")
+		fmt.Fprintln(tw, "ID\tNAME\tREPO\tAGENT\tSTATUS\tGIT")
 		for _, s := range list.Sessions {
-			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", s.ID, s.Name, s.RepoName, s.Agent, s.Status)
+			gitStatus := ""
+			if s.Dirty {
+				gitStatus = "dirty"
+			}
+			if s.UnpushedCount > 0 {
+				if gitStatus != "" {
+					gitStatus += ", "
+				}
+				gitStatus += fmt.Sprintf("%d unpushed", s.UnpushedCount)
+			}
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", s.ID, s.Name, s.RepoName, s.Agent, s.Status, gitStatus)
 		}
 		tw.Flush()
 
