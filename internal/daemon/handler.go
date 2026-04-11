@@ -64,7 +64,10 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 			switch msg.Type {
 			case "handshake":
 				var h protocol.HandshakeMsg
-				_ = protocol.DecodePayload(msg, &h)
+				if err := protocol.DecodePayload(msg, &h); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid handshake"})
+					continue
+				}
 				clientCols = h.TerminalSize[0]
 				clientRows = h.TerminalSize[1]
 				sendControl("handshake_ok", protocol.HandshakeOkMsg{Version: protocolVersion, DaemonVersion: version.Version})
@@ -80,7 +83,10 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 
 			case "create":
 				var c protocol.CreateMsg
-				_ = protocol.DecodePayload(msg, &c)
+				if err := protocol.DecodePayload(msg, &c); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid create message"})
+					continue
+				}
 				agentName := c.Agent
 				if agentName == "" {
 					agentName = sm.cfg.DefaultAgent
@@ -94,7 +100,10 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 
 			case "attach":
 				var a protocol.AttachMsg
-				_ = protocol.DecodePayload(msg, &a)
+				if err := protocol.DecodePayload(msg, &a); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid attach message"})
+					continue
+				}
 
 				if attachedSessionID != "" {
 					sm.ClearAttachedClient(attachedSessionID, conn)
@@ -147,7 +156,10 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 
 			case "delete":
 				var d protocol.DeleteMsg
-				_ = protocol.DecodePayload(msg, &d)
+				if err := protocol.DecodePayload(msg, &d); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid delete message"})
+					continue
+				}
 				if err := sm.Delete(d.SessionID); err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 				} else {
@@ -158,7 +170,10 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 
 			case "rename":
 				var r protocol.RenameMsg
-				_ = protocol.DecodePayload(msg, &r)
+				if err := protocol.DecodePayload(msg, &r); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid rename message"})
+					continue
+				}
 				if err := sm.Rename(r.SessionID, r.NewName); err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 				} else {
@@ -170,7 +185,9 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 
 			case "resize":
 				var r protocol.ResizeMsg
-				_ = protocol.DecodePayload(msg, &r)
+				if err := protocol.DecodePayload(msg, &r); err != nil {
+					continue
+				}
 				if attachedSessionID != "" {
 					if pty, ok := sm.GetPTY(attachedSessionID); ok {
 						_ = pty.Resize(r.Rows, r.Cols)

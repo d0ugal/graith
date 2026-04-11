@@ -19,13 +19,22 @@ var renameCmd = &cobra.Command{
 		}
 		defer c.Close()
 
-		c.Handshake()
-		c.ReadControlResponse()
+		if err := c.Handshake(); err != nil {
+			return err
+		}
+		if _, err := c.ReadControlResponse(); err != nil {
+			return err
+		}
 
 		c.SendControl("list", struct{}{})
-		listResp, _ := c.ReadControlResponse()
+		listResp, err := c.ReadControlResponse()
+		if err != nil {
+			return err
+		}
 		var list protocol.SessionListMsg
-		protocol.DecodePayload(listResp, &list)
+		if err := protocol.DecodePayload(listResp, &list); err != nil {
+			return err
+		}
 
 		var sessionID string
 		for _, s := range list.Sessions {
@@ -39,7 +48,7 @@ var renameCmd = &cobra.Command{
 		}
 
 		c.SendControl("rename", protocol.RenameMsg{SessionID: sessionID, NewName: args[1]})
-		resp, _ := c.ReadControlResponse()
+		resp, err := c.ReadControlResponse()
 		if resp.Type == "error" {
 			var e protocol.ErrorMsg
 			protocol.DecodePayload(resp, &e)
