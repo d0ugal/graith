@@ -32,6 +32,7 @@ type SessionState struct {
 	Agent          string        `json:"agent"`
 	AgentSessionID string        `json:"agent_session_id,omitempty"`
 	Status         SessionStatus `json:"status"`
+	AgentStatus    string        `json:"agent_status,omitempty"`
 	ExitCode       *int          `json:"exit_code,omitempty"`
 	PID            int           `json:"pid,omitempty"`
 	CreatedAt      time.Time     `json:"created_at"`

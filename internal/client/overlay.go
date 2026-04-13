@@ -41,7 +41,11 @@ func (s sessionItem) Title() string {
 }
 
 func (s sessionItem) Description() string {
-	return fmt.Sprintf("%s  %s", s.info.Agent, s.info.Status)
+	desc := fmt.Sprintf("%s  %s", s.info.Agent, s.info.Status)
+	if s.info.AgentStatus != "" && s.info.Status == "running" {
+		desc += fmt.Sprintf("  [%s]", s.info.AgentStatus)
+	}
+	return desc
 }
 
 func (s sessionItem) FilterValue() string {

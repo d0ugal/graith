@@ -146,6 +146,7 @@ type SessionInfo struct {
 	Agent          string `json:"agent"`
 	AgentSessionID string `json:"agent_session_id,omitempty"`
 	Status         string `json:"status"`
+	AgentStatus    string `json:"agent_status,omitempty"`
 	ExitCode       *int   `json:"exit_code,omitempty"`
 	CreatedAt      string `json:"created_at"`
 	Dirty          bool   `json:"dirty,omitempty"`

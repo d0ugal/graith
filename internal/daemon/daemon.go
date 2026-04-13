@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/dougalmatthews/graith/internal/config"
+	"github.com/dougalmatthews/graith/internal/detector"
 	"github.com/dougalmatthews/graith/internal/git"
 	grpty "github.com/dougalmatthews/graith/internal/pty"
 )
@@ -436,6 +437,60 @@ func (sm *SessionManager) StopAll(ctx context.Context) {
 	}
 }
 
+// RunDetectionLoop periodically scans PTY scrollback to detect agent status
+// (active, needs approval, ready) for all running sessions.
+func (sm *SessionManager) RunDetectionLoop(ctx context.Context) {
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			sm.detectAgentStatuses()
+		}
+	}
+}
+
+func (sm *SessionManager) detectAgentStatuses() {
+	sm.mu.RLock()
+	var targets []struct {
+		id    string
+		agent string
+		pty   *grpty.Session
+	}
+	for id, s := range sm.state.Sessions {
+		if s.Status != StatusRunning {
+			continue
+		}
+		if ptySess, ok := sm.sessions[id]; ok {
+			targets = append(targets, struct {
+				id    string
+				agent string
+				pty   *grpty.Session
+			}{id, s.Agent, ptySess})
+		}
+	}
+	sm.mu.RUnlock()
+
+	for _, t := range targets {
+		tail, err := t.pty.Scrollback.Tail(20)
+		if err != nil || len(tail) == 0 {
+			continue
+		}
+
+		d := detector.New(t.agent)
+		status := string(d.Detect(string(tail)))
+
+		sm.mu.Lock()
+		if s, ok := sm.state.Sessions[t.id]; ok {
+			s.AgentStatus = status
+		}
+		sm.mu.Unlock()
+	}
+}
+
 // Run starts the daemon: acquires PID file, listens on the Unix socket,
 // serves connections, and blocks until SIGTERM/SIGINT or an upgrade signal.
 func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) error {
@@ -513,6 +568,7 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 	}, log)
 
 	go srv.Serve(ctx)
+	go sm.RunDetectionLoop(ctx)
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
