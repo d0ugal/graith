@@ -85,6 +85,26 @@ func runAttachByID(c *client.Client, sessionID string) error {
 		return fmt.Errorf("%s", e.Message)
 	}
 
+	var info protocol.SessionInfo
+	protocol.DecodePayload(resp, &info)
+	if info.Status == "stopped" {
+		fmt.Print("Session is stopped. Resume? [Y/n] ")
+		var answer string
+		fmt.Scanln(&answer)
+		if answer == "" || answer == "y" || answer == "Y" || answer == "yes" {
+			c.SendControl("resume", protocol.ResumeMsg{SessionID: sessionID})
+			resumeResp, err := c.ReadControlResponse()
+			if err != nil {
+				return err
+			}
+			if resumeResp.Type == "error" {
+				var e protocol.ErrorMsg
+				protocol.DecodePayload(resumeResp, &e)
+				return fmt.Errorf("resume failed: %s", e.Message)
+			}
+		}
+	}
+
 	ctx := context.Background()
 	prefixByte := parsePrefixKey(cfg.Keybindings.Prefix)
 
@@ -147,6 +167,27 @@ func runAttachByID(c *client.Client, sessionID string) error {
 				}
 			}
 
+			nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+			nc.ReadControlResponse()
+			c = nc
+			continue
+
+		case client.ResultRestart:
+			nc, err := freshClient()
+			if err != nil {
+				return err
+			}
+			nc.SendControl("resume", protocol.ResumeMsg{SessionID: sessionID})
+			resumeResp, err := nc.ReadControlResponse()
+			if err != nil {
+				nc.Close()
+				return err
+			}
+			if resumeResp.Type == "error" {
+				var e protocol.ErrorMsg
+				protocol.DecodePayload(resumeResp, &e)
+				out.Print("Resume failed: %s\n", e.Message)
+			}
 			nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
 			nc.ReadControlResponse()
 			c = nc

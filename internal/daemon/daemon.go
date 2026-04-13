@@ -285,6 +285,89 @@ func (sm *SessionManager) watchSession(id string, sess *grpty.Session) {
 	sm.log.Info("session exited", "id", id, "exit_code", sess.ExitCode())
 }
 
+// Resume restarts a stopped session using the agent's resume_args.
+func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, error) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	sessState, ok := sm.state.Sessions[id]
+	if !ok {
+		return SessionState{}, fmt.Errorf("session %q not found", id)
+	}
+	if sessState.Status == StatusRunning {
+		return *sessState, nil
+	}
+
+	agent, ok := sm.cfg.Agents[sessState.Agent]
+	if !ok {
+		return SessionState{}, fmt.Errorf("unknown agent %q", sessState.Agent)
+	}
+
+	args := agent.ResumeArgs
+	if len(args) == 0 {
+		args = agent.Args
+	}
+
+	username := sm.cfg.GitHubUsername
+	if username == "" {
+		username, _ = git.DiscoverGitHubUsername(sessState.RepoPath)
+	}
+	if username == "" {
+		username = "user"
+	}
+
+	vars := config.TemplateVars{
+		Username:       username,
+		AgentSessionID: sessState.AgentSessionID,
+		SessionName:    sessState.Name,
+		SessionID:      sessState.ID,
+		WorktreePath:   sessState.WorktreePath,
+	}
+	expandedArgs, err := config.ExpandSlice(args, vars)
+	if err != nil {
+		return SessionState{}, fmt.Errorf("expand resume args: %w", err)
+	}
+
+	logPath := filepath.Join(sm.paths.LogDir, id+".log")
+
+	env := make(map[string]string, len(agent.Env)+3)
+	for k, v := range agent.Env {
+		env[k] = v
+	}
+	env["GRAITH_SESSION_ID"] = id
+	env["GRAITH_SESSION_NAME"] = sessState.Name
+	env["GRAITH_WORKTREE_PATH"] = sessState.WorktreePath
+
+	ptySess, err := grpty.NewSession(grpty.SessionOpts{
+		ID:         id,
+		Command:    agent.Command,
+		Args:       expandedArgs,
+		Dir:        sessState.WorktreePath,
+		Env:        env,
+		Rows:       rows,
+		Cols:       cols,
+		LogPath:    logPath,
+		MaxLogSize: 100 * 1024 * 1024,
+	})
+	if err != nil {
+		return SessionState{}, fmt.Errorf("start pty session: %w", err)
+	}
+
+	sessState.Status = StatusRunning
+	sessState.ExitCode = nil
+	sessState.PID = ptySess.Cmd.Process.Pid
+	sessState.AgentStatus = ""
+
+	sm.sessions[id] = ptySess
+	go sm.watchSession(id, ptySess)
+
+	if err := sm.saveState(); err != nil {
+		sm.log.Error("failed to save state", "err", err)
+	}
+
+	return *sessState, nil
+}
+
 // Delete stops a session, removes its worktree/branch, and deletes state.
 func (sm *SessionManager) Delete(id string) error {
 	sm.mu.Lock()
