@@ -208,6 +208,11 @@ func buildGroupedItems(sessions []protocol.SessionInfo) []list.Item {
 		groups[repo] = append(groups[repo], s)
 	}
 	sort.Strings(repoOrder)
+	for _, sessions := range groups {
+		sort.Slice(sessions, func(i, j int) bool {
+			return sessions[i].Name < sessions[j].Name
+		})
+	}
 
 	var items []list.Item
 	for _, repo := range repoOrder {
