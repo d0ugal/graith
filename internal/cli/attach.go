@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/d0ugal/graith/internal/client"
@@ -106,10 +107,14 @@ func runAttachByID(c *client.Client, sessionID string) error {
 	}
 
 	ctx := context.Background()
-	prefixByte := parsePrefixKey(cfg.Keybindings.Prefix)
+	keys := client.PassthroughKeys{
+		Prefix:      parsePrefixKey(cfg.Keybindings.Prefix),
+		NextSession: cfg.Keybindings.NextSession[0],
+		PrevSession: cfg.Keybindings.PrevSession[0],
+	}
 
 	for {
-		result := c.RunPassthrough(ctx, prefixByte)
+		result := c.RunPassthrough(ctx, keys)
 		// RunPassthrough closes the connection — c is dead after this point.
 		// Every code path must either return or create a fresh client.
 
@@ -203,6 +208,32 @@ func runAttachByID(c *client.Client, sessionID string) error {
 			c = nc
 			continue
 
+		case client.ResultNextSession, client.ResultPrevSession:
+			nc, err := freshClient()
+			if err != nil {
+				return err
+			}
+			nc.SendControl("list", struct{}{})
+			listResp, err := nc.ReadControlResponse()
+			if err != nil {
+				nc.Close()
+				return err
+			}
+			var list protocol.SessionListMsg
+			if err := protocol.DecodePayload(listResp, &list); err != nil {
+				nc.Close()
+				return err
+			}
+
+			ids := sortedSessionIDs(list.Sessions)
+			if next := adjacentSession(ids, sessionID, result == client.ResultNextSession); next != "" {
+				sessionID = next
+			}
+			nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+			nc.ReadControlResponse()
+			c = nc
+			continue
+
 		case client.ResultDetached, client.ResultQuit:
 			return nil
 		}
@@ -211,6 +242,38 @@ func runAttachByID(c *client.Client, sessionID string) error {
 
 func freshClient() (*client.Client, error) {
 	return client.Connect(cfg, paths, cfgFile)
+}
+
+// sortedSessionIDs returns session IDs ordered by repo name then session name,
+// matching the overlay's display order.
+func sortedSessionIDs(sessions []protocol.SessionInfo) []string {
+	sort.SliceStable(sessions, func(i, j int) bool {
+		ri, rj := sessions[i].RepoName, sessions[j].RepoName
+		if ri != rj {
+			return ri < rj
+		}
+		return sessions[i].Name < sessions[j].Name
+	})
+	ids := make([]string, len(sessions))
+	for i, s := range sessions {
+		ids[i] = s.ID
+	}
+	return ids
+}
+
+func adjacentSession(ids []string, current string, forward bool) string {
+	if len(ids) < 2 {
+		return ""
+	}
+	for i, id := range ids {
+		if id == current {
+			if forward {
+				return ids[(i+1)%len(ids)]
+			}
+			return ids[(i-1+len(ids))%len(ids)]
+		}
+	}
+	return ""
 }
 
 func reconnectToSession(sessionID string) (*client.Client, error) {
