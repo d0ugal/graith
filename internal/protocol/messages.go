@@ -64,6 +64,12 @@ type StopMsg struct {
 	SessionID string `json:"session_id"`
 }
 
+type TypeMsg struct {
+	SessionID string `json:"session_id"`
+	Input     string `json:"input"`
+	NoNewline bool   `json:"no_newline,omitempty"`
+}
+
 type ResumeMsg struct {
 	SessionID string `json:"session_id"`
 }
