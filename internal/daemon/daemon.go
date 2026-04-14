@@ -164,7 +164,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 
 	if noRepo {
 		worktreePath = filepath.Join(sm.paths.DataDir, "scratch", id)
-		if err := os.MkdirAll(worktreePath, 0o750); err != nil {
+		if err := os.MkdirAll(worktreePath, 0o700); err != nil {
 			return SessionState{}, fmt.Errorf("create scratch dir: %w", err)
 		}
 	} else {
@@ -574,21 +574,24 @@ func (sm *SessionManager) RunDetectionLoop(ctx context.Context) {
 
 func (sm *SessionManager) detectAgentStatuses() {
 	sm.mu.RLock()
-	var targets []struct {
-		id    string
-		agent string
-		pty   *grpty.Session
+	type target struct {
+		id           string
+		agent        string
+		pty          *grpty.Session
+		worktreePath string
+		baseBranch   string
+		repoPath     string
 	}
+	var targets []target
 	for id, s := range sm.state.Sessions {
 		if s.Status != StatusRunning {
 			continue
 		}
 		if ptySess, ok := sm.sessions[id]; ok {
-			targets = append(targets, struct {
-				id    string
-				agent string
-				pty   *grpty.Session
-			}{id, s.Agent, ptySess})
+			targets = append(targets, target{
+				id: id, agent: s.Agent, pty: ptySess,
+				worktreePath: s.WorktreePath, baseBranch: s.BaseBranch, repoPath: s.RepoPath,
+			})
 		}
 	}
 	sm.mu.RUnlock()
@@ -602,9 +605,24 @@ func (sm *SessionManager) detectAgentStatuses() {
 		d := detector.New(t.agent)
 		status := string(d.Detect(string(tail)))
 
+		var dirty bool
+		var unpushed int
+		if t.worktreePath != "" && t.repoPath != "" {
+			if d, err := git.HasUncommittedChanges(t.worktreePath); err == nil {
+				dirty = d
+			}
+			if t.baseBranch != "" {
+				if n, err := git.UnpushedCommitCount(t.worktreePath, t.baseBranch); err == nil {
+					unpushed = n
+				}
+			}
+		}
+
 		sm.mu.Lock()
 		if s, ok := sm.state.Sessions[t.id]; ok {
 			s.AgentStatus = status
+			s.GitDirty = dirty
+			s.GitUnpushed = unpushed
 		}
 		sm.mu.Unlock()
 	}

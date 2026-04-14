@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dougalmatthews/graith/internal/git"
 	"github.com/dougalmatthews/graith/internal/protocol"
 	"github.com/dougalmatthews/graith/internal/version"
 )
@@ -440,7 +439,7 @@ func (w *frameDataWriter) Write(p []byte) (int, error) {
 }
 
 func toSessionInfo(s SessionState) protocol.SessionInfo {
-	info := protocol.SessionInfo{
+	return protocol.SessionInfo{
 		ID:             s.ID,
 		Name:           s.Name,
 		RepoPath:       s.RepoPath,
@@ -453,16 +452,7 @@ func toSessionInfo(s SessionState) protocol.SessionInfo {
 		AgentStatus:    s.AgentStatus,
 		ExitCode:       s.ExitCode,
 		CreatedAt:      s.CreatedAt.Format(time.RFC3339),
+		Dirty:          s.GitDirty,
+		UnpushedCount:  s.GitUnpushed,
 	}
-	if s.WorktreePath != "" && s.RepoPath != "" {
-		if dirty, err := git.HasUncommittedChanges(s.WorktreePath); err == nil {
-			info.Dirty = dirty
-		}
-		if s.BaseBranch != "" {
-			if n, err := git.UnpushedCommitCount(s.WorktreePath, s.BaseBranch); err == nil {
-				info.UnpushedCount = n
-			}
-		}
-	}
-	return info
 }

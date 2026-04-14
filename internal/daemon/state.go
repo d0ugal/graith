@@ -33,6 +33,8 @@ type SessionState struct {
 	AgentSessionID string        `json:"agent_session_id,omitempty"`
 	Status         SessionStatus `json:"status"`
 	AgentStatus    string        `json:"agent_status,omitempty"`
+	GitDirty       bool          `json:"-"`
+	GitUnpushed    int           `json:"-"`
 	ExitCode       *int          `json:"exit_code,omitempty"`
 	PID            int           `json:"pid,omitempty"`
 	CreatedAt      time.Time     `json:"created_at"`
@@ -111,7 +113,7 @@ func migrateV0ToV1(state *State) error {
 
 func writeFileAtomic(path string, data []byte) error {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o750); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create dir: %w", err)
 	}
 	tmp, err := os.CreateTemp(dir, ".state-*.tmp")

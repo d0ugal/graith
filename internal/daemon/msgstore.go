@@ -40,7 +40,7 @@ type MsgStore struct {
 }
 
 func NewMsgStore(dbPath string) (*MsgStore, error) {
-	if err := os.MkdirAll(filepath.Dir(dbPath), 0o750); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
 		return nil, fmt.Errorf("create messages db dir: %w", err)
 	}
 	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(wal)&_pragma=busy_timeout(5000)")

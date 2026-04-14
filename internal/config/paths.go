@@ -53,7 +53,7 @@ func runtimeDirForGraith() string {
 func (p Paths) EnsureDirs() error {
 	dirs := []string{filepath.Dir(p.ConfigFile), p.DataDir, p.RuntimeDir, p.LogDir}
 	for _, dir := range dirs {
-		if err := os.MkdirAll(dir, 0o750); err != nil {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return fmt.Errorf("create directory %s: %w", dir, err)
 		}
 	}
