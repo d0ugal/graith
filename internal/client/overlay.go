@@ -2,6 +2,7 @@ package client
 
 import (
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 	"time"
@@ -26,64 +27,127 @@ type sessionItem struct {
 	info protocol.SessionInfo
 }
 
-func (s sessionItem) Title() string {
-	indicator := "●"
-	color := lipgloss.Color("#00ff87")
-	switch s.info.Status {
-	case "stopped":
-		indicator = "○"
-		color = lipgloss.Color("#626262")
-	case "errored":
-		indicator = "✗"
-		color = lipgloss.Color("#ff5f5f")
-	}
-	styled := lipgloss.NewStyle().Foreground(color).Render(indicator)
-	return fmt.Sprintf("%s %s", styled, s.info.Name)
+func (s sessionItem) Title() string       { return s.info.Name }
+func (s sessionItem) Description() string { return "" }
+func (s sessionItem) FilterValue() string { return s.info.Name + " " + s.info.RepoName }
+
+type groupHeader struct {
+	name string
 }
 
-func (s sessionItem) Description() string {
+func (g groupHeader) Title() string       { return g.name }
+func (g groupHeader) Description() string { return "" }
+func (g groupHeader) FilterValue() string { return "" }
+
+// compactDelegate renders each item on a single line using horizontal columns.
+type compactDelegate struct{}
+
+func (d compactDelegate) Height() int                          { return 1 }
+func (d compactDelegate) Spacing() int                         { return 0 }
+func (d compactDelegate) Update(tea.Msg, *list.Model) tea.Cmd  { return nil }
+
+func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
+	selected := index == m.Index()
+	width := m.Width()
+
+	if gh, ok := item.(groupHeader); ok {
+		style := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7B61FF"))
+		line := style.Render("▸ " + gh.name)
+		fmt.Fprint(w, line)
+		return
+	}
+
+	si, ok := item.(sessionItem)
+	if !ok {
+		return
+	}
+
 	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("#626262"))
 
-	var parts []string
-	parts = append(parts, s.info.Agent)
+	// Status indicator
+	indicator := "●"
+	indicatorColor := lipgloss.Color("#00ff87")
+	switch si.info.Status {
+	case "stopped":
+		indicator = "○"
+		indicatorColor = lipgloss.Color("#626262")
+	case "errored":
+		indicator = "✗"
+		indicatorColor = lipgloss.Color("#ff5f5f")
+	}
+	prefix := lipgloss.NewStyle().Foreground(indicatorColor).Render(indicator)
 
-	if s.info.AgentStatus != "" && s.info.Status == "running" {
-		parts = append(parts, fmt.Sprintf("[%s]", s.info.AgentStatus))
-	} else {
-		parts = append(parts, s.info.Status)
+	// Name
+	name := si.info.Name
+
+	// Agent status or session status
+	status := si.info.Status
+	if si.info.AgentStatus != "" && si.info.Status == "running" {
+		status = si.info.AgentStatus
 	}
 
-	if s.info.Branch != "" {
-		branch := s.info.Branch
-		// Strip common graith prefix (username/graith/...) to save space.
-		if p := strings.SplitN(branch, "/", 3); len(p) == 3 {
-			branch = p[2]
-		}
-		parts = append(parts, dim.Render(branch))
+	// Branch (stripped prefix)
+	branch := si.info.Branch
+	if p := strings.SplitN(branch, "/", 3); len(p) == 3 {
+		branch = p[2]
 	}
 
+	// Git
 	var gitParts []string
-	if s.info.Dirty {
+	if si.info.Dirty {
 		gitParts = append(gitParts, "dirty")
 	}
-	if s.info.UnpushedCount > 0 {
-		gitParts = append(gitParts, fmt.Sprintf("%d ahead", s.info.UnpushedCount))
+	if si.info.UnpushedCount > 0 {
+		gitParts = append(gitParts, fmt.Sprintf("%d↑", si.info.UnpushedCount))
 	}
-	if len(gitParts) > 0 {
-		parts = append(parts, strings.Join(gitParts, ", "))
+	gitStr := strings.Join(gitParts, " ")
+
+	// Age
+	now := time.Now()
+	age := ""
+	if t, err := time.Parse(time.RFC3339, si.info.CreatedAt); err == nil {
+		age = shortDur(now.Sub(t))
 	}
 
-	now := time.Now()
-	if t, err := time.Parse(time.RFC3339, s.info.CreatedAt); err == nil {
-		parts = append(parts, dim.Render(shortDur(now.Sub(t))))
-	}
-	if s.info.LastAttachedAt != "" {
-		if t, err := time.Parse(time.RFC3339, s.info.LastAttachedAt); err == nil {
-			parts = append(parts, dim.Render("attached "+shortDur(now.Sub(t))+" ago"))
+	// Last attached
+	attached := ""
+	if si.info.LastAttachedAt != "" {
+		if t, err := time.Parse(time.RFC3339, si.info.LastAttachedAt); err == nil {
+			attached = shortDur(now.Sub(t)) + " ago"
 		}
 	}
 
-	return strings.Join(parts, "  ")
+	// Build the line: indicator name | status | branch | git | age | attached
+	var right []string
+	right = append(right, status)
+	if branch != "" {
+		right = append(right, dim.Render(branch))
+	}
+	if gitStr != "" {
+		right = append(right, gitStr)
+	}
+	if age != "" {
+		right = append(right, dim.Render(age))
+	}
+	if attached != "" {
+		right = append(right, dim.Render(attached))
+	}
+
+	detail := strings.Join(right, dim.Render("  "))
+	line := fmt.Sprintf("  %s %s  %s", prefix, name, detail)
+
+	if selected {
+		cursor := "> "
+		line = fmt.Sprintf("%s%s %s  %s", cursor, prefix, name, detail)
+		line = lipgloss.NewStyle().Bold(true).Render(line)
+	}
+
+	// Truncate to terminal width
+	if width > 0 && lipgloss.Width(line) > width {
+		line = line[:width]
+	}
+
+	fmt.Fprint(w, line)
 }
 
 func shortDur(d time.Duration) string {
@@ -103,20 +167,6 @@ func shortDur(d time.Duration) string {
 	}
 	return fmt.Sprintf("%dd", int(d.Hours())/24)
 }
-
-func (s sessionItem) FilterValue() string {
-	return s.info.Name + " " + s.info.RepoName
-}
-
-type groupHeader struct {
-	name string
-}
-
-func (g groupHeader) Title() string {
-	return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7B61FF")).Render(g.name)
-}
-func (g groupHeader) Description() string { return "" }
-func (g groupHeader) FilterValue() string { return "" }
 
 type overlayModel struct {
 	list        list.Model
@@ -139,11 +189,15 @@ func buildGroupedItems(sessions []protocol.SessionInfo) []list.Item {
 	seen := map[string]bool{}
 
 	for _, s := range sessions {
-		if !seen[s.RepoName] {
-			repoOrder = append(repoOrder, s.RepoName)
-			seen[s.RepoName] = true
+		repo := s.RepoName
+		if repo == "" {
+			repo = "(no repo)"
 		}
-		groups[s.RepoName] = append(groups[s.RepoName], s)
+		if !seen[repo] {
+			repoOrder = append(repoOrder, repo)
+			seen[repo] = true
+		}
+		groups[repo] = append(groups[repo], s)
 	}
 	sort.Strings(repoOrder)
 
@@ -160,10 +214,7 @@ func buildGroupedItems(sessions []protocol.SessionInfo) []list.Item {
 func newOverlayModel(sessions []protocol.SessionInfo) overlayModel {
 	items := buildGroupedItems(sessions)
 
-	delegate := list.NewDefaultDelegate()
-	delegate.ShowDescription = true
-
-	l := list.New(items, delegate, 60, 20)
+	l := list.New(items, compactDelegate{}, 80, 20)
 	l.Title = "Sessions"
 	l.SetShowHelp(false)
 	l.SetShowStatusBar(false)
