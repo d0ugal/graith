@@ -14,10 +14,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/dougalmatthews/graith/internal/config"
-	"github.com/dougalmatthews/graith/internal/detector"
-	"github.com/dougalmatthews/graith/internal/git"
-	grpty "github.com/dougalmatthews/graith/internal/pty"
+	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/detector"
+	"github.com/d0ugal/graith/internal/git"
+	grpty "github.com/d0ugal/graith/internal/pty"
 )
 
 type attachedClient struct {

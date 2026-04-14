@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dougalmatthews/graith/internal/protocol"
+	"github.com/d0ugal/graith/internal/protocol"
 )
 
 func newTestClient(conn net.Conn) *Client {

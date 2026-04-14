@@ -10,7 +10,7 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/dougalmatthews/graith/internal/protocol"
+	"github.com/d0ugal/graith/internal/protocol"
 	"golang.org/x/term"
 )
 

@@ -12,7 +12,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/dougalmatthews/graith/internal/protocol"
+	"github.com/d0ugal/graith/internal/protocol"
 )
 
 type overlayState int

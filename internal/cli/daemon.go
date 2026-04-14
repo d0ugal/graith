@@ -6,9 +6,9 @@ import (
 	"os"
 	"time"
 
-	"github.com/dougalmatthews/graith/internal/client"
-	"github.com/dougalmatthews/graith/internal/daemon"
-	"github.com/dougalmatthews/graith/internal/protocol"
+	"github.com/d0ugal/graith/internal/client"
+	"github.com/d0ugal/graith/internal/daemon"
+	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/spf13/cobra"
 )
 
