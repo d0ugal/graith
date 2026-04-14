@@ -39,12 +39,69 @@ func (g groupHeader) Title() string       { return g.name }
 func (g groupHeader) Description() string { return "" }
 func (g groupHeader) FilterValue() string { return "" }
 
-// compactDelegate renders each item on a single line using horizontal columns.
-type compactDelegate struct{}
+type columnWidths struct {
+	name   int
+	status int
+	branch int
+	git    int
+	age    int
+}
+
+func computeColumnWidths(sessions []protocol.SessionInfo) columnWidths {
+	var cw columnWidths
+	now := time.Now()
+	for _, s := range sessions {
+		if n := len(s.Name); n > cw.name {
+			cw.name = n
+		}
+		status := s.Status
+		if s.AgentStatus != "" && s.Status == "running" {
+			status = s.AgentStatus
+		}
+		if n := len(status); n > cw.status {
+			cw.status = n
+		}
+		branch := s.Branch
+		if p := strings.SplitN(branch, "/", 3); len(p) == 3 {
+			branch = p[2]
+		}
+		if n := len(branch); n > cw.branch {
+			cw.branch = n
+		}
+		var gp []string
+		if s.Dirty {
+			gp = append(gp, "dirty")
+		}
+		if s.UnpushedCount > 0 {
+			gp = append(gp, fmt.Sprintf("%d↑", s.UnpushedCount))
+		}
+		if n := len(strings.Join(gp, " ")); n > cw.git {
+			cw.git = n
+		}
+		if t, err := time.Parse(time.RFC3339, s.CreatedAt); err == nil {
+			if n := len(shortDur(now.Sub(t))); n > cw.age {
+				cw.age = n
+			}
+		}
+	}
+	return cw
+}
+
+// compactDelegate renders each item on a single line with aligned columns.
+type compactDelegate struct {
+	cols columnWidths
+}
 
 func (d compactDelegate) Height() int                          { return 1 }
 func (d compactDelegate) Spacing() int                         { return 0 }
 func (d compactDelegate) Update(tea.Msg, *list.Model) tea.Cmd  { return nil }
+
+func pad(s string, width int) string {
+	if n := width - len(s); n > 0 {
+		return s + strings.Repeat(" ", n)
+	}
+	return s
+}
 
 func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
 	selected := index == m.Index()
@@ -64,7 +121,6 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 
 	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("#626262"))
 
-	// Status indicator
 	indicator := "●"
 	indicatorColor := lipgloss.Color("#00ff87")
 	switch si.info.Status {
@@ -77,22 +133,20 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	}
 	prefix := lipgloss.NewStyle().Foreground(indicatorColor).Render(indicator)
 
-	// Name
-	name := si.info.Name
+	name := pad(si.info.Name, d.cols.name)
 
-	// Agent status or session status
 	status := si.info.Status
 	if si.info.AgentStatus != "" && si.info.Status == "running" {
 		status = si.info.AgentStatus
 	}
+	status = pad(status, d.cols.status)
 
-	// Branch (stripped prefix)
 	branch := si.info.Branch
 	if p := strings.SplitN(branch, "/", 3); len(p) == 3 {
 		branch = p[2]
 	}
+	branch = pad(branch, d.cols.branch)
 
-	// Git
 	var gitParts []string
 	if si.info.Dirty {
 		gitParts = append(gitParts, "dirty")
@@ -100,16 +154,15 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	if si.info.UnpushedCount > 0 {
 		gitParts = append(gitParts, fmt.Sprintf("%d↑", si.info.UnpushedCount))
 	}
-	gitStr := strings.Join(gitParts, " ")
+	gitStr := pad(strings.Join(gitParts, " "), d.cols.git)
 
-	// Age
 	now := time.Now()
 	age := ""
 	if t, err := time.Parse(time.RFC3339, si.info.CreatedAt); err == nil {
 		age = shortDur(now.Sub(t))
 	}
+	age = pad(age, d.cols.age)
 
-	// Last attached
 	attached := ""
 	if si.info.LastAttachedAt != "" {
 		if t, err := time.Parse(time.RFC3339, si.info.LastAttachedAt); err == nil {
@@ -117,32 +170,22 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 		}
 	}
 
-	// Build the line: indicator name | status | branch | git | age | attached
-	var right []string
-	right = append(right, status)
-	if branch != "" {
-		right = append(right, dim.Render(branch))
-	}
-	if gitStr != "" {
-		right = append(right, gitStr)
-	}
-	if age != "" {
-		right = append(right, dim.Render(age))
-	}
+	sep := dim.Render("  ")
+	line := fmt.Sprintf("  %s %s%s%s%s%s%s%s%s%s",
+		prefix, name, sep, status, sep, dim.Render(branch), sep, gitStr, sep, dim.Render(age))
 	if attached != "" {
-		right = append(right, dim.Render(attached))
+		line += sep + dim.Render(attached)
 	}
-
-	detail := strings.Join(right, dim.Render("  "))
-	line := fmt.Sprintf("  %s %s  %s", prefix, name, detail)
 
 	if selected {
-		cursor := "> "
-		line = fmt.Sprintf("%s%s %s  %s", cursor, prefix, name, detail)
+		line = fmt.Sprintf("> %s %s%s%s%s%s%s%s%s%s",
+			prefix, name, sep, status, sep, dim.Render(branch), sep, gitStr, sep, dim.Render(age))
+		if attached != "" {
+			line += sep + dim.Render(attached)
+		}
 		line = lipgloss.NewStyle().Bold(true).Render(line)
 	}
 
-	// Truncate to terminal width
 	if width > 0 && lipgloss.Width(line) > width {
 		line = line[:width]
 	}
@@ -226,8 +269,9 @@ func buildGroupedItems(sessions []protocol.SessionInfo) []list.Item {
 
 func newOverlayModel(sessions []protocol.SessionInfo, fetchPreview func(sessionID string) string) overlayModel {
 	items := buildGroupedItems(sessions)
+	cols := computeColumnWidths(sessions)
 
-	l := list.New(items, compactDelegate{}, 80, 20)
+	l := list.New(items, compactDelegate{cols: cols}, 80, 20)
 	l.Title = "Sessions"
 	l.SetShowHelp(false)
 	l.SetShowStatusBar(false)
