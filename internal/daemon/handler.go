@@ -439,7 +439,7 @@ func (w *frameDataWriter) Write(p []byte) (int, error) {
 }
 
 func toSessionInfo(s SessionState) protocol.SessionInfo {
-	return protocol.SessionInfo{
+	info := protocol.SessionInfo{
 		ID:             s.ID,
 		Name:           s.Name,
 		RepoPath:       s.RepoPath,
@@ -455,4 +455,8 @@ func toSessionInfo(s SessionState) protocol.SessionInfo {
 		Dirty:          s.GitDirty,
 		UnpushedCount:  s.GitUnpushed,
 	}
+	if s.LastAttachedAt != nil {
+		info.LastAttachedAt = s.LastAttachedAt.Format(time.RFC3339)
+	}
+	return info
 }
