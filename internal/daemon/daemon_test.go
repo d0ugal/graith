@@ -455,3 +455,138 @@ func TestToSessionInfoNilExitCode(t *testing.T) {
 		t.Errorf("ExitCode = %v, want nil", info.ExitCode)
 	}
 }
+
+func TestIdleTracking(t *testing.T) {
+	t.Run("idle since set when detached and ready", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		s := &SessionState{
+			ID: "s1", Name: "test", Status: StatusRunning,
+			Agent: "claude", AgentStatus: "ready",
+		}
+		sm.state.Sessions["s1"] = s
+
+		if s.IdleSince != nil {
+			t.Fatal("IdleSince should be nil initially")
+		}
+
+		sm.checkIdleSession(s)
+
+		if s.IdleSince == nil {
+			t.Fatal("IdleSince should be set for detached+ready session")
+		}
+	})
+
+	t.Run("idle since cleared when client attached", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		now := time.Now()
+		s := &SessionState{
+			ID: "s1", Name: "test", Status: StatusRunning,
+			Agent: "claude", AgentStatus: "ready", IdleSince: &now,
+		}
+		sm.state.Sessions["s1"] = s
+		sm.SetAttachedClient("s1", &net.UnixConn{}, func() {})
+
+		sm.checkIdleSession(s)
+
+		if s.IdleSince != nil {
+			t.Error("IdleSince should be cleared when client is attached")
+		}
+	})
+
+	t.Run("idle since cleared when agent active", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		now := time.Now()
+		s := &SessionState{
+			ID: "s1", Name: "test", Status: StatusRunning,
+			Agent: "claude", AgentStatus: "active", IdleSince: &now,
+		}
+		sm.state.Sessions["s1"] = s
+
+		sm.checkIdleSession(s)
+
+		if s.IdleSince != nil {
+			t.Error("IdleSince should be cleared when agent is active")
+		}
+	})
+
+	t.Run("not re-set on subsequent checks", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		s := &SessionState{
+			ID: "s1", Name: "test", Status: StatusRunning,
+			Agent: "claude", AgentStatus: "ready",
+		}
+		sm.state.Sessions["s1"] = s
+
+		sm.checkIdleSession(s)
+		first := *s.IdleSince
+
+		time.Sleep(time.Millisecond)
+		sm.checkIdleSession(s)
+
+		if !s.IdleSince.Equal(first) {
+			t.Error("IdleSince should not be updated on subsequent checks")
+		}
+	})
+
+	t.Run("returns true when idle exceeds timeout", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.cfg.Agents["claude"] = config.Agent{
+			Command:     "claude",
+			ResumeArgs:  []string{"--resume"},
+			IdleTimeout: "100ms",
+		}
+		past := time.Now().Add(-200 * time.Millisecond)
+		s := &SessionState{
+			ID: "s1", Name: "test", Status: StatusRunning,
+			Agent: "claude", AgentStatus: "ready", IdleSince: &past,
+		}
+		sm.state.Sessions["s1"] = s
+
+		shouldStop := sm.checkIdleSession(s)
+
+		if !shouldStop {
+			t.Error("should return true when idle duration exceeds timeout")
+		}
+	})
+
+	t.Run("returns false when idle within timeout", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.cfg.Agents["claude"] = config.Agent{
+			Command:     "claude",
+			ResumeArgs:  []string{"--resume"},
+			IdleTimeout: "1h",
+		}
+		now := time.Now()
+		s := &SessionState{
+			ID: "s1", Name: "test", Status: StatusRunning,
+			Agent: "claude", AgentStatus: "ready", IdleSince: &now,
+		}
+		sm.state.Sessions["s1"] = s
+
+		shouldStop := sm.checkIdleSession(s)
+
+		if shouldStop {
+			t.Error("should return false when idle duration is within timeout")
+		}
+	})
+
+	t.Run("disabled timeout never stops", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.cfg.Agents["codex"] = config.Agent{
+			Command:     "codex",
+			IdleTimeout: "0",
+		}
+		past := time.Now().Add(-24 * time.Hour)
+		s := &SessionState{
+			ID: "s1", Name: "test", Status: StatusRunning,
+			Agent: "codex", AgentStatus: "ready", IdleSince: &past,
+		}
+		sm.state.Sessions["s1"] = s
+
+		shouldStop := sm.checkIdleSession(s)
+
+		if shouldStop {
+			t.Error("should never stop when idle timeout is disabled")
+		}
+	})
+}

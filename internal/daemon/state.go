@@ -33,6 +33,7 @@ type SessionState struct {
 	AgentSessionID string        `json:"agent_session_id,omitempty"`
 	Status         SessionStatus `json:"status"`
 	AgentStatus    string        `json:"agent_status,omitempty"`
+	IdleSince      *time.Time    `json:"-"`
 	GitDirty       bool          `json:"-"`
 	GitUnpushed    int           `json:"-"`
 	ExitCode       *int          `json:"exit_code,omitempty"`
