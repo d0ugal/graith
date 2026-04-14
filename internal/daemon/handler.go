@@ -92,7 +92,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				if agentName == "" {
 					agentName = sm.cfg.DefaultAgent
 				}
-				sess, err := sm.Create(c.Name, agentName, c.RepoPath, c.Base, c.Prompt, clientRows, clientCols)
+				sess, err := sm.Create(c.Name, agentName, c.RepoPath, c.Base, c.Prompt, c.NoRepo, clientRows, clientCols)
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 				} else {
@@ -454,7 +454,7 @@ func toSessionInfo(s SessionState) protocol.SessionInfo {
 		ExitCode:       s.ExitCode,
 		CreatedAt:      s.CreatedAt.Format(time.RFC3339),
 	}
-	if s.WorktreePath != "" {
+	if s.WorktreePath != "" && s.RepoPath != "" {
 		if dirty, err := git.HasUncommittedChanges(s.WorktreePath); err == nil {
 			info.Dirty = dirty
 		}

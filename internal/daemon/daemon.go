@@ -143,26 +143,11 @@ func repoHash(repoPath string) string {
 	return hex.EncodeToString(b)[:12]
 }
 
-// Create starts a new agent session in a git worktree.
-func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt string, rows, cols uint16) (SessionState, error) {
+// Create starts a new agent session, either in a git worktree or as a
+// standalone scratch session (when noRepo is true).
+func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt string, noRepo bool, rows, cols uint16) (SessionState, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
-
-	if !git.IsInsideGitRepo(repoPath) {
-		return SessionState{}, fmt.Errorf("not inside a git repository: %s", repoPath)
-	}
-
-	repoRoot, err := git.RepoRootPath(repoPath)
-	if err != nil {
-		return SessionState{}, fmt.Errorf("find repo root: %w", err)
-	}
-
-	if baseBranch == "" {
-		baseBranch, err = git.DiscoverDefaultBranch(repoRoot)
-		if err != nil {
-			return SessionState{}, err
-		}
-	}
 
 	agent, ok := sm.cfg.Agents[agentName]
 	if !ok {
@@ -170,23 +155,50 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 	}
 
 	id := generateID()
-	repoName := filepath.Base(repoRoot)
 
-	username := sm.cfg.GitHubUsername
-	if username == "" {
-		username, _ = git.DiscoverGitHubUsername(repoRoot)
-	}
-	if username == "" {
-		username = "user"
-	}
+	var repoRoot, repoName, worktreePath, branchName string
 
-	branchPrefix, _ := config.Expand(sm.cfg.BranchPrefix, config.TemplateVars{Username: username})
-	branchName := fmt.Sprintf("%s/%s-%s", branchPrefix, name, id)
+	if noRepo {
+		worktreePath = filepath.Join(sm.paths.DataDir, "scratch", id)
+		if err := os.MkdirAll(worktreePath, 0o750); err != nil {
+			return SessionState{}, fmt.Errorf("create scratch dir: %w", err)
+		}
+	} else {
+		if !git.IsInsideGitRepo(repoPath) {
+			return SessionState{}, fmt.Errorf("not inside a git repository: %s (use --no-repo for sessions without a repo)", repoPath)
+		}
 
-	worktreePath := filepath.Join(sm.paths.DataDir, "worktrees", repoHash(repoRoot), id)
+		var err error
+		repoRoot, err = git.RepoRootPath(repoPath)
+		if err != nil {
+			return SessionState{}, fmt.Errorf("find repo root: %w", err)
+		}
 
-	if err := git.SetupSession(repoRoot, worktreePath, branchName, baseBranch, sm.cfg.FetchOnCreate); err != nil {
-		return SessionState{}, fmt.Errorf("setup git session: %w", err)
+		if baseBranch == "" {
+			baseBranch, err = git.DiscoverDefaultBranch(repoRoot)
+			if err != nil {
+				return SessionState{}, err
+			}
+		}
+
+		repoName = filepath.Base(repoRoot)
+
+		username := sm.cfg.GitHubUsername
+		if username == "" {
+			username, _ = git.DiscoverGitHubUsername(repoRoot)
+		}
+		if username == "" {
+			username = "user"
+		}
+
+		branchPrefix, _ := config.Expand(sm.cfg.BranchPrefix, config.TemplateVars{Username: username})
+		branchName = fmt.Sprintf("%s/%s-%s", branchPrefix, name, id)
+
+		worktreePath = filepath.Join(sm.paths.DataDir, "worktrees", repoHash(repoRoot), id)
+
+		if err := git.SetupSession(repoRoot, worktreePath, branchName, baseBranch, sm.cfg.FetchOnCreate); err != nil {
+			return SessionState{}, fmt.Errorf("setup git session: %w", err)
+		}
 	}
 
 	agentSessionID := ""
@@ -194,6 +206,14 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 		b := make([]byte, 16)
 		_, _ = rand.Read(b)
 		agentSessionID = fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+	}
+
+	username := sm.cfg.GitHubUsername
+	if username == "" && repoRoot != "" {
+		username, _ = git.DiscoverGitHubUsername(repoRoot)
+	}
+	if username == "" {
+		username = "user"
 	}
 
 	vars := config.TemplateVars{
@@ -205,7 +225,11 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 	}
 	expandedArgs, err := config.ExpandSlice(agent.Args, vars)
 	if err != nil {
-		_ = git.TeardownSession(repoRoot, worktreePath, branchName)
+		if noRepo {
+			os.RemoveAll(worktreePath)
+		} else {
+			_ = git.TeardownSession(repoRoot, worktreePath, branchName)
+		}
 		return SessionState{}, fmt.Errorf("expand agent args: %w", err)
 	}
 	if prompt != "" {
@@ -234,7 +258,11 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 		MaxLogSize: 100 * 1024 * 1024,
 	})
 	if err != nil {
-		_ = git.TeardownSession(repoRoot, worktreePath, branchName)
+		if noRepo {
+			os.RemoveAll(worktreePath)
+		} else {
+			_ = git.TeardownSession(repoRoot, worktreePath, branchName)
+		}
 		return SessionState{}, fmt.Errorf("start pty session: %w", err)
 	}
 
@@ -397,7 +425,11 @@ func (sm *SessionManager) Delete(id string) error {
 		delete(sm.sessions, id)
 	}
 
-	_ = git.TeardownSession(sessState.RepoPath, sessState.WorktreePath, sessState.Branch)
+	if sessState.RepoPath != "" {
+		_ = git.TeardownSession(sessState.RepoPath, sessState.WorktreePath, sessState.Branch)
+	} else if sessState.WorktreePath != "" {
+		_ = os.RemoveAll(sessState.WorktreePath)
+	}
 	_ = os.Remove(filepath.Join(sm.paths.LogDir, id+".log"))
 
 	delete(sm.state.Sessions, id)

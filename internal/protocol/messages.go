@@ -44,6 +44,7 @@ type CreateMsg struct {
 	RepoPath string `json:"repo_path"`
 	Base     string `json:"base,omitempty"`
 	Prompt   string `json:"prompt,omitempty"`
+	NoRepo   bool   `json:"no_repo,omitempty"`
 }
 
 type AttachMsg struct {

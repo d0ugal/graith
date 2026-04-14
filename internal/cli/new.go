@@ -17,6 +17,7 @@ var (
 	newPrompt     string
 	newPromptFile string
 	newRepo       string
+	newNoRepo     bool
 )
 
 var newCmd = &cobra.Command{
@@ -58,6 +59,7 @@ var newCmd = &cobra.Command{
 			RepoPath: repoPath,
 			Base:     newBase,
 			Prompt:   prompt,
+			NoRepo:   newNoRepo,
 		})
 
 		resp, err := c.ReadControlResponse()
@@ -78,7 +80,11 @@ var newCmd = &cobra.Command{
 			return out.JSON(info)
 		}
 
-		out.Print("Created session %s (%s) in %s\n", info.Name, info.ID, info.WorktreePath)
+		location := info.WorktreePath
+		if location == "" {
+			location = "(no repo)"
+		}
+		out.Print("Created session %s (%s) in %s\n", info.Name, info.ID, location)
 
 		if newBackground {
 			return nil
@@ -96,4 +102,5 @@ func init() {
 	newCmd.Flags().StringVarP(&newPrompt, "prompt", "p", "", "initial prompt for the agent")
 	newCmd.Flags().StringVar(&newPromptFile, "prompt-file", "", "read initial prompt from file")
 	newCmd.Flags().StringVarP(&newRepo, "repo", "C", "", "path to git repo (default: cwd)")
+	newCmd.Flags().BoolVar(&newNoRepo, "no-repo", false, "create session without a git repo or worktree")
 }
