@@ -3,6 +3,7 @@ package client
 import (
 	"fmt"
 	"io"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -505,11 +506,15 @@ func (m overlayModel) View() string {
 		offsetX = 0
 	}
 
-	pad := strings.Repeat(" ", offsetX)
+	leftPad := strings.Repeat(" ", offsetX)
 	for i, pl := range panelLines {
 		row := offsetY + i
 		if row >= 0 && row < h {
-			bgLines[row] = pad + pl
+			line := leftPad + pl
+			if vis := lipgloss.Width(line); vis < w {
+				line += strings.Repeat(" ", w-vis)
+			}
+			bgLines[row] = line
 		}
 	}
 
@@ -521,7 +526,8 @@ func (m overlayModel) View() string {
 // It may be nil, in which case no preview is shown.
 func RunOverlay(sessions []protocol.SessionInfo, fetchPreview func(sessionID string) string) *OverlayResult {
 	m := newOverlayModel(sessions, fetchPreview)
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	fmt.Fprint(os.Stdout, "\x1b[?25l\x1b[H")
+	p := tea.NewProgram(m)
 
 	final, err := p.Run()
 	if err != nil {
