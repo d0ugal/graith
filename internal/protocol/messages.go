@@ -179,3 +179,17 @@ type SessionUpdateMsg struct {
 	Status    string `json:"status"`
 	ExitCode  *int   `json:"exit_code,omitempty"`
 }
+
+type ScreenSnapshotMsg struct {
+	SessionID string `json:"session_id"`
+}
+
+type ScreenSnapshotResponseMsg struct {
+	SessionID     string `json:"session_id"`
+	Frame         string `json:"frame"`
+	CursorX       int    `json:"cursor_x"`
+	CursorY       int    `json:"cursor_y"`
+	CursorVisible bool   `json:"cursor_visible"`
+	Cols          int    `json:"cols"`
+	Rows          int    `json:"rows"`
+}
