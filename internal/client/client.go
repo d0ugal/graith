@@ -9,7 +9,6 @@ import (
 
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
-	"github.com/hinshun/vt10x"
 	"golang.org/x/term"
 )
 
@@ -147,10 +146,6 @@ func FetchScreenSnapshot(cfg *config.Config, paths config.Paths, configFile stri
 	return &snap
 }
 
-// FetchScrollbackPreview opens a throwaway connection to the daemon,
-// requests scrollback for the given session, processes it through a VT
-// emulator to get the rendered screen state, and returns it as a string.
-// Errors are silently swallowed (returns "").
 func FetchScrollbackPreview(cfg *config.Config, paths config.Paths, configFile string, sessionID string) string {
 	c, err := Connect(cfg, paths, configFile)
 	if err != nil {
@@ -158,47 +153,18 @@ func FetchScrollbackPreview(cfg *config.Config, paths config.Paths, configFile s
 	}
 	defer c.Close()
 
-	if err := c.SendControl("logs", protocol.LogsMsg{
-		SessionID: sessionID,
-		Lines:     1000,
-		Follow:    false,
-	}); err != nil {
+	if err := c.SendControl("screen_preview", protocol.ScreenPreviewMsg{SessionID: sessionID}); err != nil {
 		return ""
 	}
 
-	var scrollback []byte
-	for {
-		frame, err := c.ReadFrame()
-		if err != nil {
-			break
-		}
-		if frame.Channel == protocol.ChannelData {
-			scrollback = append(scrollback, frame.Payload...)
-			continue
-		}
-		if frame.Channel == protocol.ChannelControl {
-			break
-		}
-	}
-	if len(scrollback) == 0 {
+	resp, err := c.ReadControlResponse()
+	if err != nil || resp.Type != "screen_preview_response" {
 		return ""
 	}
 
-	cols, rows := 120, 40
-	if w, h, err := term.GetSize(int(os.Stdout.Fd())); err == nil {
-		cols, rows = w, h
+	var preview protocol.ScreenPreviewResponseMsg
+	if err := protocol.DecodePayload(resp, &preview); err != nil {
+		return ""
 	}
-	vt := vt10x.New(vt10x.WithSize(cols, rows))
-	_, _ = vt.Write(scrollback)
-
-	var result strings.Builder
-	for y := 0; y < rows; y++ {
-		var line strings.Builder
-		for x := 0; x < cols; x++ {
-			line.WriteRune(vt.Cell(x, y).Char)
-		}
-		result.WriteString(strings.TrimRight(line.String(), " "))
-		result.WriteByte('\n')
-	}
-	return result.String()
+	return preview.Preview
 }
