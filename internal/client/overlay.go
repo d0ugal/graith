@@ -3,7 +3,6 @@ package client
 import (
 	"fmt"
 	"io"
-	"os"
 	"sort"
 	"strings"
 	"time"
@@ -331,8 +330,9 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case previewMsg:
 		// Guard against stale fetches: only apply if the result
-		// matches the currently selected session.
-		if item, ok := m.list.SelectedItem().(sessionItem); ok && item.info.ID == msg.sessionID {
+		// matches the currently selected session. Don't cache empty
+		// results so the fetch retries on the next selection change.
+		if item, ok := m.list.SelectedItem().(sessionItem); ok && item.info.ID == msg.sessionID && strings.TrimSpace(msg.content) != "" {
 			m.previewSessionID = msg.sessionID
 			m.previewContent = msg.content
 		}
@@ -526,8 +526,7 @@ func (m overlayModel) View() string {
 // It may be nil, in which case no preview is shown.
 func RunOverlay(sessions []protocol.SessionInfo, fetchPreview func(sessionID string) string) *OverlayResult {
 	m := newOverlayModel(sessions, fetchPreview)
-	fmt.Fprint(os.Stdout, "\x1b[?25l\x1b[H")
-	p := tea.NewProgram(m)
+	p := tea.NewProgram(m, tea.WithAltScreen())
 
 	final, err := p.Run()
 	if err != nil {

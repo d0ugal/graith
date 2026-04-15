@@ -145,6 +145,9 @@ func renderPreview(vt vt10x.Terminal) string {
 	var result strings.Builder
 	result.Grow(cols * rows)
 	for y := 0; y < rows; y++ {
+		if y > 0 {
+			result.WriteByte('\n')
+		}
 		var line strings.Builder
 		for x := 0; x < cols; x++ {
 			ch := vt.Cell(x, y).Char
@@ -154,7 +157,6 @@ func renderPreview(vt vt10x.Terminal) string {
 			line.WriteRune(ch)
 		}
 		result.WriteString(strings.TrimRight(line.String(), " "))
-		result.WriteByte('\n')
 	}
 	return result.String()
 }
