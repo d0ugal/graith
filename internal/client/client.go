@@ -107,6 +107,23 @@ func (c *Client) ReadControlResponse() (protocol.Envelope, error) {
 	return protocol.DecodeControl(frame.Payload)
 }
 
+func WriteScreenRestore(snap *protocol.ScreenSnapshotResponseMsg) {
+	if snap == nil || snap.Frame == "" {
+		return
+	}
+	var buf strings.Builder
+	buf.WriteString("\x1b[?2026h")
+	buf.WriteString("\x1b[?25l")
+	buf.WriteString("\x1b[H")
+	buf.WriteString(snap.Frame)
+	fmt.Fprintf(&buf, "\x1b[%d;%dH", snap.CursorY+1, snap.CursorX+1)
+	if snap.CursorVisible {
+		buf.WriteString("\x1b[?25h")
+	}
+	buf.WriteString("\x1b[?2026l")
+	os.Stdout.WriteString(buf.String())
+}
+
 func FetchScreenSnapshot(cfg *config.Config, paths config.Paths, configFile string, sessionID string) *protocol.ScreenSnapshotResponseMsg {
 	c, err := Connect(cfg, paths, configFile)
 	if err != nil {
