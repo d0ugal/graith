@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"fmt"
+
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/output"
 	"github.com/d0ugal/graith/internal/version"
@@ -19,10 +21,15 @@ var rootCmd = &cobra.Command{
 	Use:     "gr",
 	Short:   "graith — AI agent session manager",
 	Version: version.Version,
-	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		cfg = config.LoadOrDefault(cfgFile)
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		var err error
+		cfg, err = config.LoadOrDefault(cfgFile)
+		if err != nil {
+			return fmt.Errorf("loading config: %w", err)
+		}
 		paths = config.ResolvePaths()
 		out = output.New(jsonOutput)
+		return nil
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runAttach(cmd, "")

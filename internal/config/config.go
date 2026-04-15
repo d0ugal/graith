@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -98,14 +99,17 @@ func Default() *Config {
 	}
 }
 
-func LoadOrDefault(path string) *Config {
+func LoadOrDefault(path string) (*Config, error) {
 	if path == "" {
 		p := ResolvePaths()
 		path = p.ConfigFile
 	}
 	cfg, err := Load(path)
 	if err != nil {
-		return Default()
+		if errors.Is(err, os.ErrNotExist) {
+			return Default(), nil
+		}
+		return nil, err
 	}
-	return cfg
+	return cfg, nil
 }
