@@ -622,13 +622,13 @@ func (sm *SessionManager) detectAgentStatuses() {
 	var toAutoStop []string
 
 	for _, t := range targets {
-		tail, err := t.pty.Scrollback.Tail(20)
-		if err != nil || len(tail) == 0 {
+		content := t.pty.ScreenPreview()
+		if content == "" {
 			continue
 		}
 
 		d := detector.New(t.agent)
-		status := string(d.Detect(string(tail)))
+		status := string(d.Detect(content))
 
 		var dirty bool
 		var unpushed int
