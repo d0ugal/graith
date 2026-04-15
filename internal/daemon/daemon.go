@@ -417,7 +417,23 @@ func (sm *SessionManager) Delete(id string) error {
 		delete(sm.attachedClients, id)
 	}
 
-	if ptySess, ok := sm.sessions[id]; ok {
+	// Snapshot PTY session and remove from map under the lock so no concurrent
+	// access is possible, then release the lock before blocking waits.
+	ptySess, hasPTY := sm.sessions[id]
+	if hasPTY {
+		delete(sm.sessions, id)
+	}
+
+	repoPath := sessState.RepoPath
+	worktreePath := sessState.WorktreePath
+	branch := sessState.Branch
+
+	delete(sm.state.Sessions, id)
+	err := sm.saveState()
+	sm.mu.Unlock()
+
+	// Blocking operations outside the lock.
+	if hasPTY {
 		ptySess.Detach()
 		if !ptySess.Exited() {
 			_ = ptySess.Kill()
@@ -428,19 +444,14 @@ func (sm *SessionManager) Delete(id string) error {
 			}
 		}
 		ptySess.Close()
-		delete(sm.sessions, id)
 	}
 
-	if sessState.RepoPath != "" {
-		_ = git.TeardownSession(sessState.RepoPath, sessState.WorktreePath, sessState.Branch)
-	} else if sessState.WorktreePath != "" {
-		_ = os.RemoveAll(sessState.WorktreePath)
+	if repoPath != "" {
+		_ = git.TeardownSession(repoPath, worktreePath, branch)
+	} else if worktreePath != "" {
+		_ = os.RemoveAll(worktreePath)
 	}
 	_ = os.Remove(filepath.Join(sm.paths.LogDir, id+".log"))
-
-	delete(sm.state.Sessions, id)
-	err := sm.saveState()
-	sm.mu.Unlock()
 
 	if hasClient {
 		ac.kick()
@@ -539,21 +550,29 @@ func (sm *SessionManager) FindByName(name string) (SessionState, bool) {
 // StopAll gracefully terminates all running sessions.
 func (sm *SessionManager) StopAll(ctx context.Context) {
 	sm.mu.Lock()
-	defer sm.mu.Unlock()
-
+	type snapshot struct {
+		id   string
+		sess *grpty.Session
+	}
+	sessions := make([]snapshot, 0, len(sm.sessions))
 	for id, sess := range sm.sessions {
-		if !sess.Exited() {
-			sm.log.Info("stopping session", "id", id)
-			_ = sess.Kill()
+		sessions = append(sessions, snapshot{id, sess})
+	}
+	sm.mu.Unlock()
+
+	for _, s := range sessions {
+		if !s.sess.Exited() {
+			sm.log.Info("stopping session", "id", s.id)
+			_ = s.sess.Kill()
 		}
 	}
 
-	for id, sess := range sm.sessions {
+	for _, s := range sessions {
 		select {
-		case <-sess.Done():
+		case <-s.sess.Done():
 		case <-time.After(5 * time.Second):
-			sm.log.Warn("force killing session", "id", id)
-			_ = sess.ForceKill()
+			sm.log.Warn("force killing session", "id", s.id)
+			_ = s.sess.ForceKill()
 		}
 	}
 }
