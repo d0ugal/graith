@@ -279,6 +279,11 @@ func newOverlayModel(sessions []protocol.SessionInfo, fetchPreview func(sessionI
 	l.SetFilteringEnabled(false)
 	l.KeyMap.Quit = key.NewBinding(key.WithKeys())
 
+	// Skip past the initial group header so the cursor starts on the first session.
+	if _, ok := l.SelectedItem().(groupHeader); ok {
+		l.CursorDown()
+	}
+
 	fi := textinput.New()
 	fi.Placeholder = "filter..."
 	fi.CharLimit = 64
@@ -443,7 +448,7 @@ func (m overlayModel) View() string {
 		Render(panelContent.String())
 
 	// --- Build background from preview scrollback ---
-	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#333333"))
+	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
 	bgLines := make([]string, h)
 	if m.previewContent != "" {
 		raw := strings.Split(m.previewContent, "\n")
