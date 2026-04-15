@@ -27,6 +27,9 @@ brews:
   - repository:
       owner: d0ugal
       name: homebrew-tap
+      # homebrew-tap is a separate repo; the default GITHUB_TOKEN can't push to
+      # it, so use a PAT with contents:write on homebrew-tap.
+      token: "{{ .Env.RELEASE_TOKEN }}"
     homepage: https://github.com/d0ugal/graith
     description: Terminal session manager for AI coding agents
     license: MIT
