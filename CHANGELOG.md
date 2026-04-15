@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/d0ugal/graith/compare/v0.1.0...v0.1.1) (2026-04-15)
+
+
+### Bug Fixes
+
+* fetch tags after release-please before goreleaser ([b3406e4](https://github.com/d0ugal/graith/commit/b3406e4bbd3f65a5fdfc3cb9d57324c0fb1721ed))
+
 ## [0.1.0](https://github.com/d0ugal/graith/compare/v0.0.1...v0.1.0) (2026-04-15)
 
 
