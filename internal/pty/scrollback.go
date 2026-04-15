@@ -113,6 +113,6 @@ func (s *Scrollback) Tail(lines int) ([]byte, error) {
 func (s *Scrollback) Close() error { return s.file.Close() }
 
 func (s *Scrollback) Remove() error {
-	s.Close()
+	_ = s.Close()
 	return os.Remove(s.path)
 }
