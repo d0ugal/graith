@@ -94,14 +94,23 @@ func AdoptSession(opts AdoptOpts) (*Session, error) {
 		return nil, fmt.Errorf("open scrollback: %w", err)
 	}
 
+	cols, rows := 80, 24
+	if ws, err := pty.GetsizeFull(ptmx); err == nil && ws.Cols > 0 && ws.Rows > 0 {
+		cols, rows = int(ws.Cols), int(ws.Rows)
+	}
+
 	s := &Session{
 		ID:         opts.ID,
 		Ptmx:       ptmx,
 		Scrollback: sb,
-		screen:     vt10x.New(vt10x.WithSize(80, 24)),
+		screen:     vt10x.New(vt10x.WithSize(cols, rows)),
 		done:       make(chan struct{}),
 		readDone:   make(chan struct{}),
 		adoptedPID: opts.PID,
+	}
+
+	if tail, err := sb.Tail(1000); err == nil && len(tail) > 0 {
+		s.screen.Write(tail)
 	}
 
 	go s.readLoop()
