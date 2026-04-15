@@ -23,6 +23,9 @@ jobs:
           path: .
           token: ${{ secrets.RELEASE_TOKEN }}
           target-branch: main
+      - name: Fetch new tag
+        if: steps.release_please.outputs.release_created == 'true'
+        run: git fetch --tags origin
       - uses: actions/setup-go@v6
         if: steps.release_please.outputs.release_created == 'true'
         with:
