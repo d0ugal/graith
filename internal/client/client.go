@@ -12,7 +12,7 @@ import (
 	"golang.org/x/term"
 )
 
-var ansiRe = regexp.MustCompile(`\x1b\[[?>=<]*[0-9;]*[a-zA-Z~]|\x1b\][^\x07]*\x07|\x1b[()][0-9A-B]|\x1b[78=>]`)
+var ansiRe = regexp.MustCompile(`\x1b(?:\[[^@-~]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[^\[\]].?)|\r`)
 
 type Client struct {
 	conn   net.Conn

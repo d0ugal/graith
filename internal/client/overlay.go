@@ -48,6 +48,11 @@ type columnWidths struct {
 	age    int
 }
 
+func (cw columnWidths) totalWidth() int {
+	// "  ● " + name + "  " + status + "  " + branch + "  " + git + "  " + age + margin
+	return 4 + cw.name + 2 + cw.status + 2 + cw.branch + 2 + cw.git + 2 + cw.age + 4
+}
+
 func computeColumnWidths(sessions []protocol.SessionInfo) columnWidths {
 	var cw columnWidths
 	now := time.Now()
@@ -224,6 +229,7 @@ type overlayModel struct {
 	selected         *protocol.SessionInfo
 	width            int
 	height           int
+	contentWidth     int
 	fetchPreview     func(sessionID string) string
 	previewContent   string
 	previewSessionID string
@@ -271,8 +277,9 @@ func buildGroupedItems(sessions []protocol.SessionInfo) []list.Item {
 func newOverlayModel(sessions []protocol.SessionInfo, fetchPreview func(sessionID string) string) overlayModel {
 	items := buildGroupedItems(sessions)
 	cols := computeColumnWidths(sessions)
+	contentWidth := cols.totalWidth()
 
-	l := list.New(items, compactDelegate{cols: cols}, 80, 20)
+	l := list.New(items, compactDelegate{cols: cols}, contentWidth, len(items)+2)
 	l.Title = "Sessions"
 	l.SetShowHelp(false)
 	l.SetShowStatusBar(false)
@@ -292,6 +299,7 @@ func newOverlayModel(sessions []protocol.SessionInfo, fetchPreview func(sessionI
 		list:         l,
 		filterInput:  fi,
 		state:        stateList,
+		contentWidth: contentWidth,
 		fetchPreview: fetchPreview,
 	}
 }
@@ -332,8 +340,9 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		panelWidth := min(60, msg.Width-4)
-		m.list.SetSize(panelWidth-4, msg.Height-6)
+		panelWidth := min(m.contentWidth+4, msg.Width-4)
+		panelHeight := min(len(m.list.Items())+4, msg.Height-6)
+		m.list.SetSize(panelWidth-4, panelHeight)
 		return m, nil
 
 	case tea.KeyMsg:
@@ -415,7 +424,7 @@ func (m overlayModel) View() string {
 	}
 
 	// --- Build panel content ---
-	panelWidth := min(60, w-4)
+	panelWidth := min(m.contentWidth+4, w-4)
 
 	var panelContent strings.Builder
 	if m.state == stateFilter {
