@@ -242,7 +242,7 @@ func runAttachByID(c *client.Client, sessionID string) error {
 
 func previewFetcher() func(string) string {
 	return func(sessionID string) string {
-		return client.FetchScrollbackPreview(cfg, paths, cfgFile, sessionID, 50)
+		return client.FetchScrollbackPreview(cfg, paths, cfgFile, sessionID)
 	}
 }
 
