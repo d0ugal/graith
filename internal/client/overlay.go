@@ -528,7 +528,10 @@ func RunOverlay(sessions []protocol.SessionInfo, fetchPreview func(sessionID str
 		return nil
 	}
 
-	result := final.(overlayModel)
+	result, ok := final.(overlayModel)
+	if !ok {
+		return nil
+	}
 	if result.selected != nil {
 		action := "attach"
 		if result.state == stateConfirmDelete {
