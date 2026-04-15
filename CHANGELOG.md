@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.2.0](https://github.com/d0ugal/graith/compare/v0.1.1...v0.2.0) (2026-06-06)
+
+
+### Features
+
+* add daemon-side vt10x screen model with ANSI repaint renderer ([5b31c21](https://github.com/d0ugal/graith/commit/5b31c21711f744e4a9fb769afbff14956a25e28f))
+* add gr approvals command and highlight approval status in list ([1abe27d](https://github.com/d0ugal/graith/commit/1abe27d91dec1dea8501412e9806aa8ba9524e8d))
+* add notifications on agent status changes ([04e48d6](https://github.com/d0ugal/graith/commit/04e48d68745ec2f2355bcea0261396c5c7c1a52a))
+* add screen_snapshot protocol message for color-accurate restore ([8a1bf0f](https://github.com/d0ugal/graith/commit/8a1bf0f5dededbbdbede5fb269b4c26b7aa355f0))
+* remove alt screen from overlay to eliminate flash ([e4f67be](https://github.com/d0ugal/graith/commit/e4f67bef2e28a29c91492316ee53a190de168e89))
+* restore screen with ANSI repaint frame after overlay dismiss ([1ae353c](https://github.com/d0ugal/graith/commit/1ae353c369a8f00d65f3c36914b062436a5b75e5))
+
+
+### Bug Fixes
+
+* attach scrollback replay before registering writer ([#12](https://github.com/d0ugal/graith/issues/12)) ([8f83170](https://github.com/d0ugal/graith/commit/8f83170c13f34b18f9dd57a532a49a7071b33041))
+* close existing connections on shutdown ([#53](https://github.com/d0ugal/graith/issues/53)) ([13530aa](https://github.com/d0ugal/graith/commit/13530aaa2b4cfed180db17d3a43864259b476291))
+* goroutine leak in msg_sub follow path ([#13](https://github.com/d0ugal/graith/issues/13)) ([2b2e776](https://github.com/d0ugal/graith/commit/2b2e776305111e2427ea358629528daf1c02e662))
+* guard type assertion in RunOverlay against unexpected exit ([#15](https://github.com/d0ugal/graith/issues/15)) ([ef8f06d](https://github.com/d0ugal/graith/commit/ef8f06dcbc5efbae5498b9f8e96e7872a438af8c))
+* prevent panic on empty keybinding string ([#16](https://github.com/d0ugal/graith/issues/16)) ([de88a9f](https://github.com/d0ugal/graith/commit/de88a9f06f54b28fdc06aea9981c92029166d2eb))
+* release lock before blocking waits in StopAll and Delete ([#52](https://github.com/d0ugal/graith/issues/52)) ([3b47e2e](https://github.com/d0ugal/graith/commit/3b47e2ec450cc447706aa8708600211455c93ac2))
+* session Close races with readLoop on scrollback ([#14](https://github.com/d0ugal/graith/issues/14)) ([d205fbf](https://github.com/d0ugal/graith/commit/d205fbfcb2324f7907292ec343efbd2ab2397588))
+* surface config parse errors instead of silent fallback ([#17](https://github.com/d0ugal/graith/issues/17)) ([cc58969](https://github.com/d0ugal/graith/commit/cc58969b81c71004132c6b093aad9871e46d1292))
+
 ## [0.1.1](https://github.com/d0ugal/graith/compare/v0.1.0...v0.1.1) (2026-06-06)
 
 
