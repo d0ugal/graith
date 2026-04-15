@@ -302,9 +302,9 @@ func (sm *SessionManager) watchSession(id string, sess *grpty.Session) {
 	<-sess.Done()
 
 	sm.mu.Lock()
-	defer sm.mu.Unlock()
-
+	var name string
 	if s, ok := sm.state.Sessions[id]; ok {
+		name = s.Name
 		exitCode := sess.ExitCode()
 		s.Status = StatusStopped
 		s.ExitCode = &exitCode
@@ -313,8 +313,10 @@ func (sm *SessionManager) watchSession(id string, sess *grpty.Session) {
 			sm.log.Error("failed to save state after session exit", "id", id, "err", err)
 		}
 	}
+	sm.mu.Unlock()
 
 	sm.log.Info("session exited", "id", id, "exit_code", sess.ExitCode())
+	sm.onAgentStatusChange(id, name, "running", "stopped")
 }
 
 // Resume restarts a stopped session using the agent's resume_args.
@@ -576,7 +578,9 @@ func (sm *SessionManager) detectAgentStatuses() {
 	sm.mu.RLock()
 	type target struct {
 		id           string
+		name         string
 		agent        string
+		prevStatus   string
 		pty          *grpty.Session
 		worktreePath string
 		baseBranch   string
@@ -589,7 +593,7 @@ func (sm *SessionManager) detectAgentStatuses() {
 		}
 		if ptySess, ok := sm.sessions[id]; ok {
 			targets = append(targets, target{
-				id: id, agent: s.Agent, pty: ptySess,
+				id: id, name: s.Name, agent: s.Agent, prevStatus: s.AgentStatus, pty: ptySess,
 				worktreePath: s.WorktreePath, baseBranch: s.BaseBranch, repoPath: s.RepoPath,
 			})
 		}
@@ -618,6 +622,10 @@ func (sm *SessionManager) detectAgentStatuses() {
 					unpushed = n
 				}
 			}
+		}
+
+		if status != t.prevStatus {
+			sm.onAgentStatusChange(t.id, t.name, t.prevStatus, status)
 		}
 
 		sm.mu.Lock()
