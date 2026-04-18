@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.1](https://github.com/d0ugal/graith/compare/v0.2.0...v0.2.1) (2026-06-07)
+
+
+### Bug Fixes
+
+* resolve golangci-lint warnings in render and handler ([850f706](https://github.com/d0ugal/graith/commit/850f706125f53fac75786ed015ff0c31993b042b))
+* split goreleaser into separate tag-triggered workflow ([a1719aa](https://github.com/d0ugal/graith/commit/a1719aacbbcb6a25675693a4f63627df9c2afc94))
+
 ## [0.2.0](https://github.com/d0ugal/graith/compare/v0.1.1...v0.2.0) (2026-06-06)
 
 
