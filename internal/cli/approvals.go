@@ -59,7 +59,7 @@ var approvalsCmd = &cobra.Command{
 		for _, s := range waiting {
 			age := ""
 			if t, err := time.Parse(time.RFC3339, s.CreatedAt); err == nil {
-				age = shortDuration(now.Sub(t))
+				age = client.ShortDuration(now.Sub(t))
 			}
 			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", s.Name, s.RepoName, s.Agent, age)
 		}

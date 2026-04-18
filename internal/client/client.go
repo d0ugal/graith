@@ -68,7 +68,7 @@ func (c *Client) Handshake() error {
 	}
 
 	return c.SendControl("handshake", protocol.HandshakeMsg{
-		Version:      "1.0",
+		Version:      protocol.Version,
 		ClientID:     fmt.Sprintf("%d", os.Getpid()),
 		TerminalSize: [2]uint16{uint16(cols), uint16(rows)},
 		Cwd:          cwd,
