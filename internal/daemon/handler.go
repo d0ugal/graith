@@ -463,6 +463,26 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("reloaded", struct{}{})
 				}
 
+			case "status":
+				var sr protocol.StatusRequestMsg
+				if err := protocol.DecodePayload(msg, &sr); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid status message"})
+					continue
+				}
+				sess, ok := sm.Get(sr.SessionID)
+				if !ok {
+					sendControl("error", protocol.ErrorMsg{Message: "session not found"})
+					continue
+				}
+				unread := 0
+				if sm.messages != nil {
+					unread = sm.messages.TotalUnread(sr.SessionID)
+				}
+				sendControl("status_response", protocol.StatusResponseMsg{
+					Session:     toSessionInfo(sess),
+					UnreadCount: unread,
+				})
+
 			case "upgrade":
 				select {
 				case sm.upgradeCh <- struct{}{}:
