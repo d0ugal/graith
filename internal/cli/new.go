@@ -104,4 +104,8 @@ func init() {
 	newCmd.Flags().StringVar(&newPromptFile, "prompt-file", "", "read initial prompt from file")
 	newCmd.Flags().StringVarP(&newRepo, "repo", "C", "", "path to git repo (default: cwd)")
 	newCmd.Flags().BoolVar(&newNoRepo, "no-repo", false, "create session without a git repo or worktree")
+
+	newCmd.RegisterFlagCompletionFunc("agent", completeAgentNames)
+	newCmd.RegisterFlagCompletionFunc("repo", completeRepoPaths)
+	newCmd.RegisterFlagCompletionFunc("base", completeBranchNames)
 }
