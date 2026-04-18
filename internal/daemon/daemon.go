@@ -577,6 +577,41 @@ func (sm *SessionManager) StopAll(ctx context.Context) {
 	}
 }
 
+func (sm *SessionManager) RunMessageCleanupLoop(ctx context.Context) {
+	maxAge := sm.cfg.Messages.MaxAgeDuration()
+	maxPerStream := sm.cfg.Messages.MaxPerStream
+	if maxAge == 0 && maxPerStream == 0 {
+		return
+	}
+	if sm.messages == nil {
+		return
+	}
+
+	sm.runMessageCleanup(maxAge, maxPerStream)
+
+	ticker := time.NewTicker(time.Hour)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			sm.runMessageCleanup(maxAge, maxPerStream)
+		}
+	}
+}
+
+func (sm *SessionManager) runMessageCleanup(maxAge time.Duration, maxPerStream int) {
+	deleted, err := sm.messages.Cleanup(maxAge, maxPerStream)
+	if err != nil {
+		sm.log.Error("message cleanup failed", "err", err)
+		return
+	}
+	if deleted > 0 {
+		sm.log.Info("message cleanup", "deleted", deleted)
+	}
+}
+
 // RunDetectionLoop periodically scans PTY scrollback to detect agent status
 // (active, needs approval, ready) for all running sessions.
 func (sm *SessionManager) RunDetectionLoop(ctx context.Context) {
@@ -791,6 +826,7 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 
 	go func() { _ = srv.Serve(ctx) }()
 	go sm.RunDetectionLoop(ctx)
+	go sm.RunMessageCleanupLoop(ctx)
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
