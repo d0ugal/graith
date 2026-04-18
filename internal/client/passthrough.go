@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/d0ugal/graith/internal/protocol"
 	"golang.org/x/term"
@@ -35,7 +36,7 @@ func kittyCtrlSeq(prefixByte byte) []byte {
 		return nil
 	}
 	codepoint := int(prefixByte) + 96
-	return []byte(fmt.Sprintf("\x1b[%d;5u", codepoint))
+	return fmt.Appendf(nil, "\x1b[%d;5u", codepoint)
 }
 
 // showHelpBar renders a one-line help bar at the bottom of the screen using
@@ -56,13 +57,43 @@ type PassthroughKeys struct {
 	PrevSession byte
 }
 
-func (c *Client) RunPassthrough(ctx context.Context, keys PassthroughKeys) PassthroughResult {
+type PassthroughOpts struct {
+	Keys      PassthroughKeys
+	SessionID string
+	Info      *protocol.SessionInfo
+	StatusBar *StatusBarCfg
+}
+
+type StatusBarCfg struct {
+	Position string
+}
+
+func (c *Client) RunPassthrough(ctx context.Context, opts PassthroughOpts) PassthroughResult {
 	fd := int(os.Stdin.Fd())
 	oldState, err := term.MakeRaw(fd)
 	if err != nil {
 		return ResultQuit
 	}
 	defer func() { _ = term.Restore(fd, oldState) }()
+
+	var sb *statusBarState
+	if opts.StatusBar != nil && opts.Info != nil {
+		w, h := 80, 24
+		if tw, th, err := term.GetSize(fd); err == nil {
+			w, h = tw, th
+		}
+		sb = &statusBarState{
+			sessionID: opts.SessionID,
+			info:      newStatusBarInfo(*opts.Info, 0),
+			rows:      h,
+			cols:      w,
+			position:  opts.StatusBar.Position,
+		}
+		_ = c.SendControl("resize", protocol.ResizeMsg{
+			Cols: uint16(w),
+			Rows: uint16(h - 1),
+		})
+	}
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGWINCH)
@@ -77,16 +108,22 @@ func (c *Client) RunPassthrough(ctx context.Context, keys PassthroughKeys) Passt
 				return
 			case <-sigCh:
 				if w, h, err := term.GetSize(fd); err == nil {
+					rows := uint16(h)
+					if sb != nil {
+						sb.updateSize(h, w)
+						sb.setup(os.Stdout)
+						rows = uint16(h - 1)
+					}
 					_ = c.SendControl("resize", protocol.ResizeMsg{
 						Cols: uint16(w),
-						Rows: uint16(h),
+						Rows: rows,
 					})
 				}
 			}
 		}
 	}()
 
-	return c.runPassthroughLoop(ctx, keys, os.Stdin, os.Stdout)
+	return c.runPassthroughLoop(ctx, opts.Keys, os.Stdin, os.Stdout, sb)
 }
 
 type frameDemux struct {
@@ -139,9 +176,14 @@ func (c *Client) stopDemux(d *frameDemux) {
 	<-d.done
 }
 
-func (c *Client) runPassthroughLoop(ctx context.Context, keys PassthroughKeys, stdin io.Reader, stdout io.Writer) PassthroughResult {
+func (c *Client) runPassthroughLoop(ctx context.Context, keys PassthroughKeys, stdin io.Reader, stdout io.Writer, sb *statusBarState) PassthroughResult {
 	innerCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+
+	if sb != nil {
+		sb.setup(stdout)
+		defer sb.teardown(stdout)
+	}
 
 	prefixByte := keys.Prefix
 	kittySeq := kittyCtrlSeq(prefixByte)
@@ -163,9 +205,18 @@ func (c *Client) runPassthroughLoop(ctx context.Context, keys PassthroughKeys, s
 			case data := <-demux.dataCh:
 				stdout.Write(data)
 			case msg := <-demux.controlCh:
-				if msg.Type == "detached" {
+				switch msg.Type {
+				case "detached":
 					setResult(ResultDetached)
 					return
+				case "status_response":
+					if sb != nil {
+						var resp protocol.StatusResponseMsg
+						if protocol.DecodePayload(msg, &resp) == nil {
+							sb.updateInfo(newStatusBarInfo(resp.Session, resp.UnreadCount))
+							sb.render(stdout)
+						}
+					}
 				}
 			case <-demux.errCh:
 				setResult(ResultDisconnected)
@@ -173,6 +224,24 @@ func (c *Client) runPassthroughLoop(ctx context.Context, keys PassthroughKeys, s
 			}
 		}
 	}()
+
+	if sb != nil {
+		go func() {
+			ticker := time.NewTicker(2 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-innerCtx.Done():
+					return
+				case <-ticker.C:
+					sb.render(stdout)
+					_ = c.SendControl("status", protocol.StatusRequestMsg{
+						SessionID: sb.sessionID,
+					})
+				}
+			}
+		}()
+	}
 
 	go func() {
 		defer cancel()
