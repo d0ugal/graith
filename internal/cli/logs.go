@@ -19,6 +19,7 @@ var (
 
 var logsCmd = &cobra.Command{
 	Use:               "logs <name-or-id>",
+	Aliases:           []string{"l"},
 	Short:             "Show session output without attaching",
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeSessionNames,
