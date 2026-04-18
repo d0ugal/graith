@@ -26,9 +26,9 @@ type ScreenCapture struct {
 
 func (s *Session) ScreenSnapshot() ScreenCapture {
 	s.mu.Lock()
-	cap := renderFrame(s.screen)
+	snap := renderFrame(s.screen)
 	s.mu.Unlock()
-	return cap
+	return snap
 }
 
 func (s *Session) ScreenPreview() string {
@@ -46,8 +46,8 @@ func renderFrame(vt vt10x.Terminal) ScreenCapture {
 	var buf strings.Builder
 	buf.Grow(cols * rows * 8)
 
-	var prevFG vt10x.Color = vt10x.DefaultFG
-	var prevBG vt10x.Color = vt10x.DefaultBG
+	var prevFG = vt10x.DefaultFG
+	var prevBG = vt10x.DefaultBG
 	var prevMode int16
 
 	for y := 0; y < rows; y++ {
@@ -110,25 +110,26 @@ func writeColor(buf *strings.Builder, c vt10x.Color, bg bool) {
 	if !bg && c == vt10x.DefaultFG {
 		return
 	}
-	if c < 8 {
+	switch {
+	case c < 8:
 		base := 30
 		if bg {
 			base = 40
 		}
 		fmt.Fprintf(buf, ";%d", base+int(c))
-	} else if c < 16 {
+	case c < 16:
 		base := 90
 		if bg {
 			base = 100
 		}
 		fmt.Fprintf(buf, ";%d", base+int(c)-8)
-	} else if c < 256 {
+	case c < 256:
 		if bg {
 			fmt.Fprintf(buf, ";48;5;%d", c)
 		} else {
 			fmt.Fprintf(buf, ";38;5;%d", c)
 		}
-	} else {
+	default:
 		r := (uint32(c) >> 16) & 0xFF
 		g := (uint32(c) >> 8) & 0xFF
 		b := uint32(c) & 0xFF
