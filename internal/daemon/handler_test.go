@@ -20,12 +20,13 @@ import (
 
 // testHarness wraps a client connection to HandleConnection for testing.
 type testHarness struct {
-	sm     *SessionManager
-	conn   net.Conn
-	reader *protocol.FrameReader
-	writer *protocol.FrameWriter
-	cancel context.CancelFunc
-	done   chan struct{}
+	sm         *SessionManager
+	conn       net.Conn
+	serverConn net.Conn
+	reader     *protocol.FrameReader
+	writer     *protocol.FrameWriter
+	cancel     context.CancelFunc
+	done       chan struct{}
 }
 
 func newTestHarness(t *testing.T) *testHarness {
@@ -56,12 +57,13 @@ func newTestHarness(t *testing.T) *testHarness {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	h := &testHarness{
-		sm:     sm,
-		conn:   clientConn,
-		reader: protocol.NewFrameReader(clientConn),
-		writer: protocol.NewFrameWriter(clientConn),
-		cancel: cancel,
-		done:   make(chan struct{}),
+		sm:         sm,
+		conn:       clientConn,
+		serverConn: serverConn,
+		reader:     protocol.NewFrameReader(clientConn),
+		writer:     protocol.NewFrameWriter(clientConn),
+		cancel:     cancel,
+		done:       make(chan struct{}),
 	}
 
 	go func() {
@@ -156,6 +158,9 @@ func (h *testHarness) addPTYSession(t *testing.T, id, name string) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
+		h.cancel()
+		h.conn.Close()
+		h.serverConn.Close()
 		sess.Kill()
 		<-sess.Done()
 		sess.Close()
