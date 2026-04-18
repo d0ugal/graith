@@ -1,6 +1,8 @@
 package client
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -8,7 +10,7 @@ import (
 	"github.com/d0ugal/graith/internal/protocol"
 )
 
-func testSessions() []protocol.SessionInfo {
+func dashboardTestSessions() []protocol.SessionInfo {
 	return []protocol.SessionInfo{
 		{
 			ID:        "s1",
@@ -42,7 +44,7 @@ func updateDashKey(m DashboardModel, keyType tea.KeyType) (DashboardModel, tea.C
 }
 
 func TestDashboardNavigation(t *testing.T) {
-	sessions := testSessions()
+	sessions := dashboardTestSessions()
 	m := NewDashboardModel(sessions, nil)
 	m.width = 120
 	m.height = 40
@@ -73,7 +75,7 @@ func TestDashboardNavigation(t *testing.T) {
 }
 
 func TestDashboardAttach(t *testing.T) {
-	sessions := testSessions()
+	sessions := dashboardTestSessions()
 	m := NewDashboardModel(sessions, nil)
 	m.width = 120
 	m.height = 40
@@ -94,7 +96,7 @@ func TestDashboardAttach(t *testing.T) {
 }
 
 func TestDashboardDeleteConfirm(t *testing.T) {
-	sessions := testSessions()
+	sessions := dashboardTestSessions()
 	m := NewDashboardModel(sessions, nil)
 	m.width = 120
 	m.height = 40
@@ -123,7 +125,7 @@ func TestDashboardDeleteConfirm(t *testing.T) {
 }
 
 func TestDashboardStopConfirm(t *testing.T) {
-	sessions := testSessions()
+	sessions := dashboardTestSessions()
 	m := NewDashboardModel(sessions, nil)
 	m.width = 120
 	m.height = 40
@@ -143,7 +145,7 @@ func TestDashboardStopConfirm(t *testing.T) {
 }
 
 func TestDashboardStopOnlyStopping(t *testing.T) {
-	sessions := testSessions()
+	sessions := dashboardTestSessions()
 	m := NewDashboardModel(sessions, nil)
 	m.width = 120
 	m.height = 40
@@ -157,7 +159,7 @@ func TestDashboardStopOnlyStopping(t *testing.T) {
 }
 
 func TestDashboardResumeOnlyStopped(t *testing.T) {
-	sessions := testSessions()
+	sessions := dashboardTestSessions()
 	m := NewDashboardModel(sessions, nil)
 	m.width = 120
 	m.height = 40
@@ -179,7 +181,7 @@ func TestDashboardResumeOnlyStopped(t *testing.T) {
 }
 
 func TestDashboardViewRendersContent(t *testing.T) {
-	sessions := testSessions()
+	sessions := dashboardTestSessions()
 	m := NewDashboardModel(sessions, nil)
 	m.width = 120
 	m.height = 40
@@ -191,19 +193,19 @@ func TestDashboardViewRendersContent(t *testing.T) {
 
 	checks := []string{"graith dashboard", "fix-bug", "add-feature", "attach", "stop", "delete", "resume", "quit"}
 	for _, check := range checks {
-		if !containsStr(view, check) {
+		if !strings.Contains(view, check) {
 			t.Errorf("view should contain %q", check)
 		}
 	}
 }
 
 func TestDashboardRefresh(t *testing.T) {
-	sessions := testSessions()
+	sessions := dashboardTestSessions()
 	m := NewDashboardModel(sessions, nil)
 	m.width = 120
 	m.height = 40
 
-	newSessions := append(testSessions(), protocol.SessionInfo{
+	newSessions := append(dashboardTestSessions(), protocol.SessionInfo{
 		ID:        "s3",
 		Name:      "new-work",
 		RepoName:  "myrepo",
@@ -219,19 +221,32 @@ func TestDashboardRefresh(t *testing.T) {
 	}
 }
 
+func TestDashboardRefreshNilPreservesState(t *testing.T) {
+	sessions := dashboardTestSessions()
+	m := NewDashboardModel(sessions, nil)
+	m.width = 120
+	m.height = 40
+
+	result, _ := m.Update(refreshMsg{sessions: nil})
+	dm := result.(DashboardModel)
+	if len(dm.sessions) != 2 {
+		t.Errorf("sessions count = %d, want 2 (preserved on nil refresh)", len(dm.sessions))
+	}
+}
+
 func TestDashboardEmptySessions(t *testing.T) {
 	m := NewDashboardModel(nil, nil)
 	m.width = 120
 	m.height = 40
 
 	view := m.View()
-	if !containsStr(view, "No sessions") {
+	if !strings.Contains(view, "No sessions") {
 		t.Error("empty dashboard should show 'No sessions' message")
 	}
 }
 
 func TestDashboardCursorPreservedOnRefresh(t *testing.T) {
-	sessions := testSessions()
+	sessions := dashboardTestSessions()
 	m := NewDashboardModel(sessions, nil)
 	m.width = 120
 	m.height = 40
@@ -241,7 +256,7 @@ func TestDashboardCursorPreservedOnRefresh(t *testing.T) {
 		t.Fatalf("cursor = %d, want 1", dm.cursor)
 	}
 
-	result, _ := dm.Update(refreshMsg{sessions: testSessions()})
+	result, _ := dm.Update(refreshMsg{sessions: dashboardTestSessions()})
 	dm = result.(DashboardModel)
 	if dm.cursor != 1 {
 		t.Errorf("cursor after refresh = %d, want 1 (preserved)", dm.cursor)
@@ -251,15 +266,57 @@ func TestDashboardCursorPreservedOnRefresh(t *testing.T) {
 	}
 }
 
-func containsStr(s, substr string) bool {
-	return len(s) >= len(substr) && searchStr(s, substr)
+func TestDashboardNarrowTerminal(t *testing.T) {
+	sessions := dashboardTestSessions()
+	m := NewDashboardModel(sessions, nil)
+	m.width = 3
+	m.height = 10
+
+	view := m.View()
+	if view == "" {
+		t.Error("view should not be empty even with narrow terminal")
+	}
 }
 
-func searchStr(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
+func TestDashboardViewportScrolling(t *testing.T) {
+	var sessions []protocol.SessionInfo
+	for i := range 20 {
+		sessions = append(sessions, protocol.SessionInfo{
+			ID:        fmt.Sprintf("s%d", i),
+			Name:      fmt.Sprintf("session-%d", i),
+			RepoName:  "myrepo",
+			Agent:     "claude",
+			Status:    "running",
+			CreatedAt: time.Now().Add(-time.Duration(i) * time.Minute).Format(time.RFC3339),
+		})
 	}
-	return false
+
+	m := NewDashboardModel(sessions, nil)
+	m.width = 120
+	m.height = 15
+
+	view := m.View()
+	if !strings.Contains(view, "session-0") {
+		t.Error("first session should be visible initially")
+	}
+	if !strings.Contains(view, "more below") {
+		t.Error("should show 'more below' indicator when sessions overflow")
+	}
+
+	// Navigate to the bottom
+	dm := m
+	for range 19 {
+		dm = updateDash(dm, "j")
+	}
+	if dm.cursor != 19 {
+		t.Fatalf("cursor = %d, want 19", dm.cursor)
+	}
+
+	view = dm.View()
+	if !strings.Contains(view, "session-19") {
+		t.Error("last session should be visible after scrolling down")
+	}
+	if !strings.Contains(view, "more above") {
+		t.Error("should show 'more above' indicator when scrolled down")
+	}
 }

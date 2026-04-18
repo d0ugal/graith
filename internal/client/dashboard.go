@@ -34,6 +34,7 @@ type DashboardResult struct {
 type DashboardModel struct {
 	sessions []protocol.SessionInfo
 	cursor   int
+	offset   int
 	width    int
 	height   int
 	state    dashboardState
@@ -65,12 +66,43 @@ func (m DashboardModel) Init() tea.Cmd {
 	return tickCmd()
 }
 
+// visibleRows returns how many session rows fit in the viewport.
+// Reserves lines for: header (2), column header (1), separator (1),
+// confirmation prompt (2 when active), footer (2).
+func (m DashboardModel) visibleRows() int {
+	reserved := 6
+	if m.state != dashStateNormal {
+		reserved += 2
+	}
+	rows := m.height - reserved
+	if rows < 1 {
+		rows = 1
+	}
+	return rows
+}
+
+func (m *DashboardModel) scrollToCursor() {
+	visible := m.visibleRows()
+	if m.cursor < m.offset {
+		m.offset = m.cursor
+	}
+	if m.cursor >= m.offset+visible {
+		m.offset = m.cursor - visible + 1
+	}
+	if m.offset < 0 {
+		m.offset = 0
+	}
+}
+
 func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tickMsg:
 		return m, tea.Batch(tickCmd(), m.doRefresh())
 
 	case refreshMsg:
+		if msg.sessions == nil {
+			return m, nil
+		}
 		selectedID := m.selectedSessionID()
 		m.sessions = msg.sessions
 		m.clampCursor()
@@ -82,11 +114,13 @@ func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
+		m.scrollToCursor()
 		return m, nil
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.scrollToCursor()
 		return m, nil
 
 	case tea.KeyMsg:
@@ -124,11 +158,13 @@ func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "j", "down":
 				if m.cursor < len(m.sessions)-1 {
 					m.cursor++
+					m.scrollToCursor()
 				}
 				return m, nil
 			case "k", "up":
 				if m.cursor > 0 {
 					m.cursor--
+					m.scrollToCursor()
 				}
 				return m, nil
 			case "enter", "a":
@@ -204,18 +240,35 @@ func (m DashboardModel) View() string {
 		b.WriteString("\n")
 
 		// Separator
-		sep := dimStyle.Render("  " + strings.Repeat("─", min(m.width-4, cols.totalDashWidth()-4)))
+		sepWidth := max(0, min(m.width-4, cols.totalDashWidth()-4))
+		sep := dimStyle.Render("  " + strings.Repeat("─", sepWidth))
 		b.WriteString(sep)
 		b.WriteString("\n")
 
-		// Session rows
+		// Session rows (viewport windowed)
+		visible := m.visibleRows()
+		end := m.offset + visible
+		if end > len(m.sessions) {
+			end = len(m.sessions)
+		}
 		now := time.Now()
-		for i, s := range m.sessions {
-			line := m.renderRow(s, cols, now, i == m.cursor, dimStyle, selectedStyle)
+
+		if m.offset > 0 {
+			b.WriteString(dimStyle.Render(fmt.Sprintf("  ↑ %d more above", m.offset)))
+			b.WriteString("\n")
+		}
+
+		for i := m.offset; i < end; i++ {
+			line := m.renderRow(m.sessions[i], cols, now, i == m.cursor, dimStyle, selectedStyle)
 			if m.width > 0 && lipgloss.Width(line) > m.width {
 				line = ansi.Truncate(line, m.width, "")
 			}
 			b.WriteString(line)
+			b.WriteString("\n")
+		}
+
+		if end < len(m.sessions) {
+			b.WriteString(dimStyle.Render(fmt.Sprintf("  ↓ %d more below", len(m.sessions)-end)))
 			b.WriteString("\n")
 		}
 	}
@@ -321,13 +374,13 @@ func (m DashboardModel) computeDashCols() dashCols {
 			dc.git = n
 		}
 		if t, err := time.Parse(time.RFC3339, s.CreatedAt); err == nil {
-			if n := len(shortDur(now.Sub(t))); n > dc.age {
+			if n := len(ShortDuration(now.Sub(t))); n > dc.age {
 				dc.age = n
 			}
 		}
 		if s.LastAttachedAt != "" {
 			if t, err := time.Parse(time.RFC3339, s.LastAttachedAt); err == nil {
-				att := shortDur(now.Sub(t)) + " ago"
+				att := ShortDuration(now.Sub(t)) + " ago"
 				if n := len(att); n > dc.attached {
 					dc.attached = n
 				}
@@ -373,13 +426,13 @@ func (m DashboardModel) renderRow(s protocol.SessionInfo, cols dashCols, now tim
 
 	age := ""
 	if t, err := time.Parse(time.RFC3339, s.CreatedAt); err == nil {
-		age = shortDur(now.Sub(t))
+		age = ShortDuration(now.Sub(t))
 	}
 
 	attached := ""
 	if s.LastAttachedAt != "" {
 		if t, err := time.Parse(time.RFC3339, s.LastAttachedAt); err == nil {
-			attached = shortDur(now.Sub(t)) + " ago"
+			attached = ShortDuration(now.Sub(t)) + " ago"
 		}
 	}
 

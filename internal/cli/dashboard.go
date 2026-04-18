@@ -19,7 +19,10 @@ var dashboardCmd = &cobra.Command{
 
 		for {
 			result := client.RunDashboard(sessions, func() []protocol.SessionInfo {
-				s, _ := fetchSessions()
+				s, err := fetchSessions()
+				if err != nil {
+					return nil
+				}
 				return s
 			})
 			if result == nil {
@@ -32,8 +35,9 @@ var dashboardCmd = &cobra.Command{
 				if err != nil {
 					return err
 				}
-				defer c.Close()
-				return runAttachByID(c, result.SessionID)
+				err = runAttachByID(c, result.SessionID)
+				c.Close()
+				return err
 
 			case "delete":
 				if err := sendAction("delete", protocol.DeleteMsg{SessionID: result.SessionID}); err != nil {
