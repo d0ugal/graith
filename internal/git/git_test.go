@@ -88,6 +88,85 @@ func TestIsInsideGitRepo(t *testing.T) {
 	}
 }
 
+func TestDirtyFiles(t *testing.T) {
+	dir := setupTestRepo(t)
+
+	files, err := DirtyFiles(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 0 {
+		t.Errorf("clean repo: got %d dirty files, want 0", len(files))
+	}
+
+	os.WriteFile(filepath.Join(dir, "new.txt"), []byte("new"), 0o644)
+	os.WriteFile(filepath.Join(dir, "README.md"), []byte("modified"), 0o644)
+
+	files, err = DirtyFiles(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 2 {
+		t.Errorf("got %d dirty files, want 2: %v", len(files), files)
+	}
+}
+
+func TestDirtyFilesInvalidDir(t *testing.T) {
+	_, err := DirtyFiles("/nonexistent-dir-abc123")
+	if err == nil {
+		t.Error("expected error for nonexistent directory")
+	}
+}
+
+func TestUnpushedCommitSummaries(t *testing.T) {
+	dir := setupTestRepo(t)
+
+	commits, err := UnpushedCommitSummaries(dir, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(commits) != 0 {
+		t.Errorf("no extra commits: got %d, want 0", len(commits))
+	}
+
+	run := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
+			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	run("checkout", "-b", "feature")
+	os.WriteFile(filepath.Join(dir, "a.txt"), []byte("a"), 0o644)
+	run("add", ".")
+	run("commit", "-m", "first feature commit")
+	os.WriteFile(filepath.Join(dir, "b.txt"), []byte("b"), 0o644)
+	run("add", ".")
+	run("commit", "-m", "second feature commit")
+
+	commits, err = UnpushedCommitSummaries(dir, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(commits) != 2 {
+		t.Errorf("got %d unpushed commits, want 2: %v", len(commits), commits)
+	}
+}
+
+func TestUnpushedCommitSummariesNoRemote(t *testing.T) {
+	dir := setupTestRepo(t)
+
+	_, err := UnpushedCommitSummaries(dir, "nonexistent-branch")
+	if err == nil {
+		t.Error("expected error for nonexistent base branch")
+	}
+}
+
 func TestParseGitHubUsernameSSH(t *testing.T) {
 	u, ok := ParseGitHubUsername("git@github.com:d0ugal/graith.git")
 	if !ok || u != "d0ugal" {
