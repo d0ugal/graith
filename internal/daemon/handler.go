@@ -516,6 +516,7 @@ func toSessionInfo(s SessionState) protocol.SessionInfo {
 		RepoName:       s.RepoName,
 		WorktreePath:   s.WorktreePath,
 		Branch:         s.Branch,
+		BaseBranch:     s.BaseBranch,
 		Agent:          s.Agent,
 		AgentSessionID: s.AgentSessionID,
 		Status:         string(s.Status),
