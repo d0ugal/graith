@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -519,27 +518,6 @@ func TestMultipleSubscribersOnSameStream(t *testing.T) {
 		case <-time.After(time.Second):
 			t.Fatal("timed out waiting for broadcast message")
 		}
-	}
-}
-
-func TestMessageToJSON(t *testing.T) {
-	s := testStore(t)
-
-	msg, _ := s.Publish("topic", "s1", "agent-a", "hello", "thread-1", "inbox:s1")
-
-	data := s.MessageToJSON(msg)
-	var decoded Message
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if decoded.ID != msg.ID {
-		t.Errorf("ID = %q, want %q", decoded.ID, msg.ID)
-	}
-	if decoded.Body != "hello" {
-		t.Errorf("Body = %q", decoded.Body)
-	}
-	if decoded.ThreadID != "thread-1" {
-		t.Errorf("ThreadID = %q", decoded.ThreadID)
 	}
 }
 

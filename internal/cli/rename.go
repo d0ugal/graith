@@ -20,25 +20,9 @@ var renameCmd = &cobra.Command{
 		}
 		defer c.Close()
 
-		c.SendControl("list", struct{}{})
-		listResp, err := c.ReadControlResponse()
+		sessionID, err := resolveSession(c, args[0])
 		if err != nil {
 			return err
-		}
-		var list protocol.SessionListMsg
-		if err := protocol.DecodePayload(listResp, &list); err != nil {
-			return err
-		}
-
-		var sessionID string
-		for _, s := range list.Sessions {
-			if s.Name == args[0] || s.ID == args[0] {
-				sessionID = s.ID
-				break
-			}
-		}
-		if sessionID == "" {
-			return fmt.Errorf("session %q not found", args[0])
 		}
 
 		c.SendControl("rename", protocol.RenameMsg{SessionID: sessionID, NewName: args[1]})
