@@ -8,10 +8,11 @@ import (
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/d0ugal/graith/internal/protocol"
 )
 
-func testSessions() []protocol.SessionInfo {
+func overlayTestSessions() []protocol.SessionInfo {
 	return []protocol.SessionInfo{
 		{
 			ID:        "s1",
@@ -43,7 +44,7 @@ func testSessions() []protocol.SessionInfo {
 	}
 }
 
-func testSessionsWithGitStatus() []protocol.SessionInfo {
+func overlayTestSessionsWithGitStatus() []protocol.SessionInfo {
 	return []protocol.SessionInfo{
 		{
 			ID:            "s1",
@@ -83,7 +84,7 @@ func asOverlay(m tea.Model) overlayModel {
 // --- buildGroupedItems ---
 
 func TestBuildGroupedItems_GroupsByRepo(t *testing.T) {
-	sessions := testSessions()
+	sessions := overlayTestSessions()
 	items := buildGroupedItems(sessions)
 
 	// Expect: groupHeader("graith"), 2 sessions, groupHeader("other-repo"), 1 session
@@ -176,7 +177,7 @@ func TestShortDur(t *testing.T) {
 // --- computeColumnWidths ---
 
 func TestComputeColumnWidths(t *testing.T) {
-	sessions := testSessionsWithGitStatus()
+	sessions := overlayTestSessionsWithGitStatus()
 	cw := computeColumnWidths(sessions)
 
 	if cw.name < len("dirty-session") {
@@ -230,7 +231,7 @@ func TestGroupHeaderFilterValue(t *testing.T) {
 // --- newOverlayModel ---
 
 func TestNewOverlayModel_CursorSkipsGroupHeader(t *testing.T) {
-	sessions := testSessions()
+	sessions := overlayTestSessions()
 	m := newOverlayModel(sessions, nil)
 	item := m.list.SelectedItem()
 	if _, ok := item.(groupHeader); ok {
@@ -247,7 +248,7 @@ func TestNewOverlayModel_CursorSkipsGroupHeader(t *testing.T) {
 }
 
 func TestNewOverlayModel_InitialState(t *testing.T) {
-	m := newOverlayModel(testSessions(), nil)
+	m := newOverlayModel(overlayTestSessions(), nil)
 	if m.state != stateList {
 		t.Errorf("initial state = %d, want stateList(%d)", m.state, stateList)
 	}
@@ -267,7 +268,7 @@ func TestInit_WithFetchPreview(t *testing.T) {
 		called = true
 		return "content"
 	}
-	m := newOverlayModel(testSessions(), fetch)
+	m := newOverlayModel(overlayTestSessions(), fetch)
 	cmd := m.Init()
 	if cmd == nil {
 		t.Fatal("Init() should return a command when fetchPreview is set")
@@ -286,7 +287,7 @@ func TestInit_WithFetchPreview(t *testing.T) {
 }
 
 func TestInit_WithoutFetchPreview(t *testing.T) {
-	m := newOverlayModel(testSessions(), nil)
+	m := newOverlayModel(overlayTestSessions(), nil)
 	cmd := m.Init()
 	if cmd != nil {
 		t.Error("Init() should return nil when fetchPreview is nil")
@@ -296,7 +297,7 @@ func TestInit_WithoutFetchPreview(t *testing.T) {
 // --- Update: previewMsg ---
 
 func TestUpdate_PreviewMsg_Applied(t *testing.T) {
-	m := newOverlayModel(testSessions(), noopFetchPreview)
+	m := newOverlayModel(overlayTestSessions(), noopFetchPreview)
 	selected := m.list.SelectedItem().(sessionItem)
 
 	updated, _ := m.Update(previewMsg{sessionID: selected.info.ID, content: "hello"})
@@ -310,7 +311,7 @@ func TestUpdate_PreviewMsg_Applied(t *testing.T) {
 }
 
 func TestUpdate_PreviewMsg_StaleGuard(t *testing.T) {
-	m := newOverlayModel(testSessions(), noopFetchPreview)
+	m := newOverlayModel(overlayTestSessions(), noopFetchPreview)
 	m.previewContent = "old"
 
 	updated, _ := m.Update(previewMsg{sessionID: "nonexistent", content: "stale"})
@@ -321,7 +322,7 @@ func TestUpdate_PreviewMsg_StaleGuard(t *testing.T) {
 }
 
 func TestUpdate_PreviewMsg_EmptyContentSkipsSessionID(t *testing.T) {
-	m := newOverlayModel(testSessions(), noopFetchPreview)
+	m := newOverlayModel(overlayTestSessions(), noopFetchPreview)
 	selected := m.list.SelectedItem().(sessionItem)
 
 	updated, _ := m.Update(previewMsg{sessionID: selected.info.ID, content: "   \n  "})
@@ -334,7 +335,7 @@ func TestUpdate_PreviewMsg_EmptyContentSkipsSessionID(t *testing.T) {
 // --- Update: WindowSizeMsg ---
 
 func TestUpdate_WindowSizeMsg(t *testing.T) {
-	m := newOverlayModel(testSessions(), nil)
+	m := newOverlayModel(overlayTestSessions(), nil)
 
 	updated, _ := sendWindowSize(m, 120, 40)
 	om := asOverlay(updated)
@@ -344,7 +345,7 @@ func TestUpdate_WindowSizeMsg(t *testing.T) {
 }
 
 func TestUpdate_WindowSizeMsg_Small(t *testing.T) {
-	m := newOverlayModel(testSessions(), nil)
+	m := newOverlayModel(overlayTestSessions(), nil)
 
 	updated, _ := sendWindowSize(m, 20, 5)
 	om := asOverlay(updated)
@@ -355,24 +356,32 @@ func TestUpdate_WindowSizeMsg_Small(t *testing.T) {
 
 // --- Update: List state key handling ---
 
-func TestUpdate_QuitKeys(t *testing.T) {
-	for _, k := range []string{"q", "esc"} {
-		t.Run(k, func(t *testing.T) {
-			m := newOverlayModel(testSessions(), nil)
-			_, cmd := sendKey(m, k)
-			if cmd == nil {
-				t.Fatal("quit key should produce a command")
-			}
-			msg := cmd()
-			if _, ok := msg.(tea.QuitMsg); !ok {
-				t.Errorf("expected QuitMsg, got %T", msg)
-			}
-		})
+func TestUpdate_QuitQ(t *testing.T) {
+	m := newOverlayModel(overlayTestSessions(), nil)
+	_, cmd := sendKey(m, "q")
+	if cmd == nil {
+		t.Fatal("q should produce a command")
+	}
+	msg := cmd()
+	if _, ok := msg.(tea.QuitMsg); !ok {
+		t.Errorf("expected QuitMsg, got %T", msg)
+	}
+}
+
+func TestUpdate_QuitEsc(t *testing.T) {
+	m := newOverlayModel(overlayTestSessions(), nil)
+	_, cmd := sendSpecialKey(m, tea.KeyEscape)
+	if cmd == nil {
+		t.Fatal("esc should produce a command")
+	}
+	msg := cmd()
+	if _, ok := msg.(tea.QuitMsg); !ok {
+		t.Errorf("expected QuitMsg, got %T", msg)
 	}
 }
 
 func TestUpdate_EnterSelectsSession(t *testing.T) {
-	m := newOverlayModel(testSessions(), nil)
+	m := newOverlayModel(overlayTestSessions(), nil)
 	selected := m.list.SelectedItem().(sessionItem)
 
 	updated, cmd := sendSpecialKey(m, tea.KeyEnter)
@@ -393,22 +402,22 @@ func TestUpdate_EnterOnGroupHeader_NoSelection(t *testing.T) {
 		{ID: "s1", Name: "only", RepoName: "repo", Status: "running", CreatedAt: time.Now().Format(time.RFC3339)},
 	}
 	m := newOverlayModel(sessions, nil)
-	// Force cursor to group header by moving up
-	m.list.CursorUp()
-	m.list.CursorUp()
+	// Force cursor to group header
+	m.list.Select(0)
 
-	// If selected item is a group header, enter should not select anything
-	if _, ok := m.list.SelectedItem().(groupHeader); ok {
-		updated, _ := sendSpecialKey(m, tea.KeyEnter)
-		om := asOverlay(updated)
-		if om.selected != nil {
-			t.Error("enter on group header should not select anything")
-		}
+	if _, ok := m.list.SelectedItem().(groupHeader); !ok {
+		t.Fatal("setup failed: expected cursor on group header")
+	}
+
+	updated, _ := sendSpecialKey(m, tea.KeyEnter)
+	om := asOverlay(updated)
+	if om.selected != nil {
+		t.Error("enter on group header should not select anything")
 	}
 }
 
 func TestUpdate_XEntersDeleteConfirm(t *testing.T) {
-	m := newOverlayModel(testSessions(), nil)
+	m := newOverlayModel(overlayTestSessions(), nil)
 
 	updated, _ := sendKey(m, "x")
 	om := asOverlay(updated)
@@ -418,7 +427,7 @@ func TestUpdate_XEntersDeleteConfirm(t *testing.T) {
 }
 
 func TestUpdate_SlashEntersFilter(t *testing.T) {
-	m := newOverlayModel(testSessions(), nil)
+	m := newOverlayModel(overlayTestSessions(), nil)
 
 	updated, cmd := sendKey(m, "/")
 	om := asOverlay(updated)
@@ -433,7 +442,7 @@ func TestUpdate_SlashEntersFilter(t *testing.T) {
 // --- Update: Navigation ---
 
 func TestUpdate_JKNavigation(t *testing.T) {
-	m := newOverlayModel(testSessions(), nil)
+	m := newOverlayModel(overlayTestSessions(), nil)
 	initial := m.list.SelectedItem().(sessionItem)
 
 	// Move down
@@ -454,7 +463,7 @@ func TestUpdate_JKNavigation(t *testing.T) {
 }
 
 func TestUpdate_NavigationSkipsGroupHeaders(t *testing.T) {
-	sessions := testSessions() // graith group (2 items) + other-repo group (1 item)
+	sessions := overlayTestSessions() // graith group (2 items) + other-repo group (1 item)
 	m := newOverlayModel(sessions, nil)
 
 	// Cursor starts on first session in "graith" group (add-tests)
@@ -476,7 +485,7 @@ func TestUpdate_NavigationSkipsGroupHeaders(t *testing.T) {
 }
 
 func TestUpdate_NavigationUpSkipsGroupHeaders(t *testing.T) {
-	sessions := testSessions()
+	sessions := overlayTestSessions()
 	m := newOverlayModel(sessions, nil)
 
 	// Navigate to the last item (feature-x in other-repo group)
@@ -503,10 +512,10 @@ func TestUpdate_NavigationUpSkipsGroupHeaders(t *testing.T) {
 }
 
 func TestUpdate_DownArrowNavigation(t *testing.T) {
-	m := newOverlayModel(testSessions(), nil)
+	m := newOverlayModel(overlayTestSessions(), nil)
 	initial := m.list.SelectedItem().(sessionItem)
 
-	updated, _ := sendKey(m, "down")
+	updated, _ := sendSpecialKey(m, tea.KeyDown)
 	om := asOverlay(updated)
 	after := om.list.SelectedItem().(sessionItem)
 	if after.info.ID == initial.info.ID {
@@ -520,7 +529,7 @@ func TestUpdate_NavigationFetchesPreview(t *testing.T) {
 		fetched[id] = true
 		return "preview"
 	}
-	m := newOverlayModel(testSessions(), fetch)
+	m := newOverlayModel(overlayTestSessions(), fetch)
 
 	_, cmd := sendKey(m, "j")
 	if cmd == nil {
@@ -539,10 +548,10 @@ func TestUpdate_NavigationFetchesPreview(t *testing.T) {
 // --- Update: Filter state ---
 
 func TestUpdate_FilterEscReturnsToList(t *testing.T) {
-	m := newOverlayModel(testSessions(), nil)
+	m := newOverlayModel(overlayTestSessions(), nil)
 	updated, _ := sendKey(m, "/")
 
-	updated, _ = sendKey(asOverlay(updated), "esc")
+	updated, _ = sendSpecialKey(asOverlay(updated), tea.KeyEscape)
 	om := asOverlay(updated)
 	if om.state != stateList {
 		t.Errorf("esc in filter should return to stateList, got %d", om.state)
@@ -550,7 +559,7 @@ func TestUpdate_FilterEscReturnsToList(t *testing.T) {
 }
 
 func TestUpdate_FilterEnterReturnsToList(t *testing.T) {
-	m := newOverlayModel(testSessions(), nil)
+	m := newOverlayModel(overlayTestSessions(), nil)
 	updated, _ := sendKey(m, "/")
 
 	updated, _ = sendSpecialKey(asOverlay(updated), tea.KeyEnter)
@@ -561,7 +570,7 @@ func TestUpdate_FilterEnterReturnsToList(t *testing.T) {
 }
 
 func TestUpdate_FilterTypingUpdatesInput(t *testing.T) {
-	m := newOverlayModel(testSessions(), nil)
+	m := newOverlayModel(overlayTestSessions(), nil)
 	updated, _ := sendKey(m, "/")
 
 	updated, _ = sendKey(asOverlay(updated), "f")
@@ -576,7 +585,7 @@ func TestUpdate_FilterTypingUpdatesInput(t *testing.T) {
 // --- Update: Confirm delete state ---
 
 func TestUpdate_ConfirmDeleteY(t *testing.T) {
-	m := newOverlayModel(testSessions(), nil)
+	m := newOverlayModel(overlayTestSessions(), nil)
 	selected := m.list.SelectedItem().(sessionItem)
 
 	// Enter delete confirmation
@@ -598,7 +607,7 @@ func TestUpdate_ConfirmDeleteY(t *testing.T) {
 }
 
 func TestUpdate_ConfirmDeleteUpperY(t *testing.T) {
-	m := newOverlayModel(testSessions(), nil)
+	m := newOverlayModel(overlayTestSessions(), nil)
 
 	updated, _ := sendKey(m, "x")
 	updated, cmd := sendKey(asOverlay(updated), "Y")
@@ -612,7 +621,7 @@ func TestUpdate_ConfirmDeleteUpperY(t *testing.T) {
 }
 
 func TestUpdate_ConfirmDeleteCancel(t *testing.T) {
-	m := newOverlayModel(testSessions(), nil)
+	m := newOverlayModel(overlayTestSessions(), nil)
 
 	updated, _ := sendKey(m, "x")
 	updated, _ = sendKey(asOverlay(updated), "n")
@@ -628,7 +637,7 @@ func TestUpdate_ConfirmDeleteCancel(t *testing.T) {
 func TestUpdate_ConfirmDeleteAnyKeyCancel(t *testing.T) {
 	for _, k := range []string{"a", "q", "z"} {
 		t.Run(k, func(t *testing.T) {
-			m := newOverlayModel(testSessions(), nil)
+			m := newOverlayModel(overlayTestSessions(), nil)
 			updated, _ := sendKey(m, "x")
 			updated, _ = sendKey(asOverlay(updated), k)
 			om := asOverlay(updated)
@@ -642,14 +651,14 @@ func TestUpdate_ConfirmDeleteAnyKeyCancel(t *testing.T) {
 // --- View ---
 
 func TestView_ZeroSize(t *testing.T) {
-	m := newOverlayModel(testSessions(), nil)
+	m := newOverlayModel(overlayTestSessions(), nil)
 	if v := m.View(); v != "" {
 		t.Errorf("View() with zero size should be empty, got %d chars", len(v))
 	}
 }
 
 func TestView_RendersSessionList(t *testing.T) {
-	m := newOverlayModel(testSessions(), nil)
+	m := newOverlayModel(overlayTestSessions(), nil)
 	updated, _ := sendWindowSize(m, 120, 40)
 	om := asOverlay(updated)
 	view := om.View()
@@ -665,7 +674,7 @@ func TestView_RendersSessionList(t *testing.T) {
 }
 
 func TestView_ShowsGroupHeaders(t *testing.T) {
-	m := newOverlayModel(testSessions(), nil)
+	m := newOverlayModel(overlayTestSessions(), nil)
 	updated, _ := sendWindowSize(m, 120, 40)
 	om := asOverlay(updated)
 	view := om.View()
@@ -679,7 +688,7 @@ func TestView_ShowsGroupHeaders(t *testing.T) {
 }
 
 func TestView_ShowsHelpBar(t *testing.T) {
-	m := newOverlayModel(testSessions(), nil)
+	m := newOverlayModel(overlayTestSessions(), nil)
 	updated, _ := sendWindowSize(m, 120, 40)
 	view := asOverlay(updated).View()
 
@@ -689,7 +698,7 @@ func TestView_ShowsHelpBar(t *testing.T) {
 }
 
 func TestView_ConfirmDeleteShowsPrompt(t *testing.T) {
-	m := newOverlayModel(testSessions(), nil)
+	m := newOverlayModel(overlayTestSessions(), nil)
 	updated, _ := sendWindowSize(m, 120, 40)
 	updated, _ = sendKey(asOverlay(updated), "x")
 	view := asOverlay(updated).View()
@@ -700,7 +709,7 @@ func TestView_ConfirmDeleteShowsPrompt(t *testing.T) {
 }
 
 func TestView_FilterModeShowsInput(t *testing.T) {
-	m := newOverlayModel(testSessions(), nil)
+	m := newOverlayModel(overlayTestSessions(), nil)
 	updated, _ := sendWindowSize(m, 120, 40)
 	updated, _ = sendKey(asOverlay(updated), "/")
 	view := asOverlay(updated).View()
@@ -708,10 +717,21 @@ func TestView_FilterModeShowsInput(t *testing.T) {
 	if !strings.Contains(view, "Filter") {
 		t.Error("filter mode should show 'Filter'")
 	}
+	if !strings.Contains(view, "filter...") {
+		t.Error("filter mode should show placeholder text 'filter...'")
+	}
+
+	// Verify list mode does NOT show filter prompt
+	m2 := newOverlayModel(overlayTestSessions(), nil)
+	updated2, _ := sendWindowSize(m2, 120, 40)
+	listView := asOverlay(updated2).View()
+	if strings.Contains(listView, "Filter:") {
+		t.Error("list mode should not show filter prompt")
+	}
 }
 
 func TestView_SmallTerminal(t *testing.T) {
-	m := newOverlayModel(testSessions(), nil)
+	m := newOverlayModel(overlayTestSessions(), nil)
 	updated, _ := sendWindowSize(m, 30, 8)
 	view := asOverlay(updated).View()
 
@@ -722,18 +742,26 @@ func TestView_SmallTerminal(t *testing.T) {
 }
 
 func TestView_PreviewBackground(t *testing.T) {
-	m := newOverlayModel(testSessions(), noopFetchPreview)
+	m := newOverlayModel(overlayTestSessions(), noopFetchPreview)
 	updated, _ := sendWindowSize(m, 120, 40)
 	om := asOverlay(updated)
 
-	// Apply a preview
+	// Apply a preview with distinctive content
 	selected := om.list.SelectedItem().(sessionItem)
-	updated, _ = om.Update(previewMsg{sessionID: selected.info.ID, content: "line1\nline2\nline3"})
+	updated, _ = om.Update(previewMsg{sessionID: selected.info.ID, content: "UNIQUE_PREVIEW_LINE_1\nUNIQUE_PREVIEW_LINE_2"})
 	om = asOverlay(updated)
 
 	view := om.View()
-	if view == "" {
-		t.Fatal("view should not be empty with preview content")
+	if !strings.Contains(view, "UNIQUE_PREVIEW_LINE_1") {
+		t.Error("view should render preview content in the background")
+	}
+
+	// Verify view without preview does NOT contain the preview text
+	m2 := newOverlayModel(overlayTestSessions(), nil)
+	updated2, _ := sendWindowSize(m2, 120, 40)
+	viewNoPreview := asOverlay(updated2).View()
+	if strings.Contains(viewNoPreview, "UNIQUE_PREVIEW_LINE_1") {
+		t.Error("view without preview should not contain preview text")
 	}
 }
 
@@ -787,7 +815,7 @@ func TestEmptySessionList(t *testing.T) {
 }
 
 func TestFetchPreviewCmd_NilFetchPreview(t *testing.T) {
-	m := newOverlayModel(testSessions(), nil)
+	m := newOverlayModel(overlayTestSessions(), nil)
 	cmd := m.fetchPreviewCmd()
 	if cmd != nil {
 		t.Error("fetchPreviewCmd should return nil when fetchPreview is nil")
@@ -795,7 +823,7 @@ func TestFetchPreviewCmd_NilFetchPreview(t *testing.T) {
 }
 
 func TestFetchPreviewCmd_GroupHeaderSelected(t *testing.T) {
-	sessions := testSessions()
+	sessions := overlayTestSessions()
 	m := newOverlayModel(sessions, noopFetchPreview)
 	// Force cursor onto a group header
 	m.list.Select(0)
@@ -806,33 +834,66 @@ func TestFetchPreviewCmd_GroupHeaderSelected(t *testing.T) {
 	}
 }
 
-// --- RunOverlay result construction ---
+// --- OverlayResult construction ---
 
-func TestRunOverlay_AttachAction(t *testing.T) {
-	// Test the result construction logic by simulating what RunOverlay does
-	m := newOverlayModel(testSessions(), nil)
-	updated, _ := sendSpecialKey(m, tea.KeyEnter)
-	om := asOverlay(updated)
-
-	if om.selected == nil {
-		t.Fatal("selected should not be nil after enter")
+func overlayResultFromModel(om overlayModel) *OverlayResult {
+	if om.selected != nil {
+		action := "attach"
+		if om.state == stateConfirmDelete {
+			action = "delete"
+		}
+		return &OverlayResult{
+			Action:    action,
+			SessionID: om.selected.ID,
+		}
 	}
-	if om.state == stateConfirmDelete {
-		t.Error("state should not be confirmDelete for attach")
+	return nil
+}
+
+func TestOverlayResult_Attach(t *testing.T) {
+	m := newOverlayModel(overlayTestSessions(), nil)
+	selected := m.list.SelectedItem().(sessionItem)
+
+	updated, _ := sendSpecialKey(m, tea.KeyEnter)
+	result := overlayResultFromModel(asOverlay(updated))
+
+	if result == nil {
+		t.Fatal("result should not be nil after enter")
+	}
+	if result.Action != "attach" {
+		t.Errorf("action = %q, want %q", result.Action, "attach")
+	}
+	if result.SessionID != selected.info.ID {
+		t.Errorf("session ID = %q, want %q", result.SessionID, selected.info.ID)
 	}
 }
 
-func TestRunOverlay_DeleteAction(t *testing.T) {
-	m := newOverlayModel(testSessions(), nil)
+func TestOverlayResult_Delete(t *testing.T) {
+	m := newOverlayModel(overlayTestSessions(), nil)
+	selected := m.list.SelectedItem().(sessionItem)
+
 	updated, _ := sendKey(m, "x")
 	updated, _ = sendKey(asOverlay(updated), "y")
-	om := asOverlay(updated)
+	result := overlayResultFromModel(asOverlay(updated))
 
-	if om.selected == nil {
-		t.Fatal("selected should not be nil after delete confirm")
+	if result == nil {
+		t.Fatal("result should not be nil after delete confirm")
 	}
-	if om.state != stateConfirmDelete {
-		t.Errorf("state should be stateConfirmDelete, got %d", om.state)
+	if result.Action != "delete" {
+		t.Errorf("action = %q, want %q", result.Action, "delete")
+	}
+	if result.SessionID != selected.info.ID {
+		t.Errorf("session ID = %q, want %q", result.SessionID, selected.info.ID)
+	}
+}
+
+func TestOverlayResult_Quit(t *testing.T) {
+	m := newOverlayModel(overlayTestSessions(), nil)
+	updated, _ := sendKey(m, "q")
+	result := overlayResultFromModel(asOverlay(updated))
+
+	if result != nil {
+		t.Error("quitting without selection should return nil result")
 	}
 }
 
@@ -857,7 +918,7 @@ func TestCompactDelegate_Update(t *testing.T) {
 }
 
 func TestCompactDelegate_RenderSessionItem(t *testing.T) {
-	sessions := testSessions()
+	sessions := overlayTestSessions()
 	cols := computeColumnWidths(sessions)
 	d := compactDelegate{cols: cols}
 
@@ -876,7 +937,7 @@ func TestCompactDelegate_RenderSessionItem(t *testing.T) {
 
 func TestCompactDelegate_RenderGroupHeader(t *testing.T) {
 	d := compactDelegate{}
-	items := buildGroupedItems(testSessions())
+	items := buildGroupedItems(overlayTestSessions())
 	l := list.New(items, d, 120, 10)
 
 	var buf strings.Builder
@@ -939,7 +1000,7 @@ func TestCompactDelegate_RenderAgentStatusOverride(t *testing.T) {
 }
 
 func TestCompactDelegate_RenderDirtyAndUnpushed(t *testing.T) {
-	sessions := testSessionsWithGitStatus()
+	sessions := overlayTestSessionsWithGitStatus()
 	cols := computeColumnWidths(sessions)
 	d := compactDelegate{cols: cols}
 	items := buildGroupedItems(sessions)
@@ -957,7 +1018,7 @@ func TestCompactDelegate_RenderDirtyAndUnpushed(t *testing.T) {
 }
 
 func TestCompactDelegate_RenderSelectedVsUnselected(t *testing.T) {
-	sessions := testSessions()
+	sessions := overlayTestSessions()
 	cols := computeColumnWidths(sessions)
 	d := compactDelegate{cols: cols}
 	items := buildGroupedItems(sessions)
@@ -1008,13 +1069,24 @@ func TestCompactDelegate_RenderTruncatesLongLine(t *testing.T) {
 	cols := computeColumnWidths(sessions)
 	d := compactDelegate{cols: cols}
 	items := buildGroupedItems(sessions)
-	l := list.New(items, d, 40, 10) // narrow width
+	narrowWidth := 40
+	l := list.New(items, d, narrowWidth, 10)
 
-	var buf strings.Builder
-	d.Render(&buf, l, 1, items[1])
-	// Should not panic, and line should be truncated
-	if buf.Len() == 0 {
-		t.Error("render should produce output even when truncating")
+	var narrowBuf strings.Builder
+	d.Render(&narrowBuf, l, 1, items[1])
+
+	// Render at full width for comparison
+	wideList := list.New(items, d, 200, 10)
+	var wideBuf strings.Builder
+	d.Render(&wideBuf, wideList, 1, items[1])
+
+	narrowVis := lipgloss.Width(narrowBuf.String())
+	wideVis := lipgloss.Width(wideBuf.String())
+	if narrowVis >= wideVis {
+		t.Errorf("narrow render (%d visible chars) should be shorter than wide render (%d visible chars)", narrowVis, wideVis)
+	}
+	if narrowVis > narrowWidth {
+		t.Errorf("truncated line visual width %d exceeds list width %d", narrowVis, narrowWidth)
 	}
 }
 
