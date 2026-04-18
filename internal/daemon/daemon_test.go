@@ -3,6 +3,7 @@ package daemon
 import (
 	"log/slog"
 	"net"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -589,4 +590,69 @@ func TestIdleTracking(t *testing.T) {
 			t.Error("should never stop when idle timeout is disabled")
 		}
 	})
+}
+
+func TestApplyConfig(t *testing.T) {
+	sm := newTestSessionManager(t)
+	oldCfg := sm.cfg
+
+	newCfg := config.Default()
+	newCfg.DefaultAgent = "codex"
+	newCfg.Agents["newagent"] = config.Agent{Command: "newagent"}
+
+	sm.applyConfig(newCfg)
+
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	if sm.cfg != newCfg {
+		t.Error("config was not swapped")
+	}
+	if sm.cfg == oldCfg {
+		t.Error("config still points to old config")
+	}
+	if sm.cfg.DefaultAgent != "codex" {
+		t.Errorf("DefaultAgent = %q, want %q", sm.cfg.DefaultAgent, "codex")
+	}
+	if _, ok := sm.cfg.Agents["newagent"]; !ok {
+		t.Error("new agent not present in config")
+	}
+}
+
+func TestReloadConfig(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(cfgPath, []byte("default_agent = \"codex\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	sm := newTestSessionManager(t)
+	sm.configFile = cfgPath
+
+	if err := sm.ReloadConfig(); err != nil {
+		t.Fatalf("ReloadConfig() error = %v", err)
+	}
+
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	if sm.cfg.DefaultAgent != "codex" {
+		t.Errorf("DefaultAgent = %q, want %q", sm.cfg.DefaultAgent, "codex")
+	}
+}
+
+func TestReloadConfigInvalidFile(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(cfgPath, []byte("{{invalid"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	sm := newTestSessionManager(t)
+	sm.configFile = cfgPath
+
+	err := sm.ReloadConfig()
+	if err == nil {
+		t.Fatal("expected error for invalid config file")
+	}
 }
