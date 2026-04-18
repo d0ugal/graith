@@ -178,3 +178,12 @@ type ScreenSnapshotResponseMsg struct {
 	Cols          int    `json:"cols"`
 	Rows          int    `json:"rows"`
 }
+
+type StatusRequestMsg struct {
+	SessionID string `json:"session_id"`
+}
+
+type StatusResponseMsg struct {
+	Session     SessionInfo `json:"session"`
+	UnreadCount int         `json:"unread_count"`
+}
