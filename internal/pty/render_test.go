@@ -11,14 +11,14 @@ func TestRenderFramePlainText(t *testing.T) {
 	vt := vt10x.New(vt10x.WithSize(10, 3))
 	vt.Write([]byte("hello"))
 
-	cap := renderFrame(vt)
-	if cap.Cols != 10 || cap.Rows != 3 {
-		t.Errorf("Size = (%d, %d), want (10, 3)", cap.Cols, cap.Rows)
+	frame := renderFrame(vt)
+	if frame.Cols != 10 || frame.Rows != 3 {
+		t.Errorf("Size = (%d, %d), want (10, 3)", frame.Cols, frame.Rows)
 	}
-	if !strings.Contains(cap.Frame, "hello") {
-		t.Errorf("Frame should contain 'hello', got %q", cap.Frame)
+	if !strings.Contains(frame.Frame, "hello") {
+		t.Errorf("Frame should contain 'hello', got %q", frame.Frame)
 	}
-	if !strings.HasSuffix(cap.Frame, "\x1b[0m") {
+	if !strings.HasSuffix(frame.Frame, "\x1b[0m") {
 		t.Error("Frame should end with SGR reset")
 	}
 }
@@ -27,15 +27,15 @@ func TestRenderFrameColors(t *testing.T) {
 	vt := vt10x.New(vt10x.WithSize(20, 3))
 	vt.Write([]byte("\x1b[31mred\x1b[0m normal"))
 
-	cap := renderFrame(vt)
-	if !strings.Contains(cap.Frame, ";31m") {
-		t.Errorf("Frame should contain red FG SGR, got %q", cap.Frame)
+	frame := renderFrame(vt)
+	if !strings.Contains(frame.Frame, ";31m") {
+		t.Errorf("Frame should contain red FG SGR, got %q", frame.Frame)
 	}
-	if !strings.Contains(cap.Frame, "red") {
-		t.Errorf("Frame should contain 'red', got %q", cap.Frame)
+	if !strings.Contains(frame.Frame, "red") {
+		t.Errorf("Frame should contain 'red', got %q", frame.Frame)
 	}
-	if !strings.Contains(cap.Frame, "normal") {
-		t.Errorf("Frame should contain 'normal', got %q", cap.Frame)
+	if !strings.Contains(frame.Frame, "normal") {
+		t.Errorf("Frame should contain 'normal', got %q", frame.Frame)
 	}
 }
 
@@ -43,9 +43,9 @@ func TestRenderFrameBold(t *testing.T) {
 	vt := vt10x.New(vt10x.WithSize(20, 2))
 	vt.Write([]byte("\x1b[1mbold\x1b[0m"))
 
-	cap := renderFrame(vt)
-	if !strings.Contains(cap.Frame, ";1m") {
-		t.Errorf("Frame should contain bold SGR, got %q", cap.Frame)
+	frame := renderFrame(vt)
+	if !strings.Contains(frame.Frame, ";1m") {
+		t.Errorf("Frame should contain bold SGR, got %q", frame.Frame)
 	}
 }
 
@@ -53,9 +53,9 @@ func TestRenderFrame256Color(t *testing.T) {
 	vt := vt10x.New(vt10x.WithSize(20, 2))
 	vt.Write([]byte("\x1b[38;5;208morange\x1b[0m"))
 
-	cap := renderFrame(vt)
-	if !strings.Contains(cap.Frame, ";38;5;208m") {
-		t.Errorf("Frame should contain 256-color SGR, got %q", cap.Frame)
+	frame := renderFrame(vt)
+	if !strings.Contains(frame.Frame, ";38;5;208m") {
+		t.Errorf("Frame should contain 256-color SGR, got %q", frame.Frame)
 	}
 }
 
@@ -63,9 +63,9 @@ func TestRenderFrameCursorPosition(t *testing.T) {
 	vt := vt10x.New(vt10x.WithSize(20, 5))
 	vt.Write([]byte("line1\nline2"))
 
-	cap := renderFrame(vt)
-	if cap.CursorY < 1 {
-		t.Errorf("CursorY = %d, want >= 1 after newline", cap.CursorY)
+	frame := renderFrame(vt)
+	if frame.CursorY < 1 {
+		t.Errorf("CursorY = %d, want >= 1 after newline", frame.CursorY)
 	}
 }
 
@@ -73,8 +73,8 @@ func TestRenderFrameRows(t *testing.T) {
 	vt := vt10x.New(vt10x.WithSize(10, 4))
 	vt.Write([]byte("abc"))
 
-	cap := renderFrame(vt)
-	rows := strings.Split(cap.Frame, "\r\n")
+	frame := renderFrame(vt)
+	rows := strings.Split(frame.Frame, "\r\n")
 	if len(rows) != 4 {
 		t.Errorf("Expected 4 rows separated by \\r\\n, got %d", len(rows))
 	}
@@ -129,9 +129,9 @@ func TestScreenSnapshotUsesLock(t *testing.T) {
 	}
 	defer s.Close()
 
-	cap := s.ScreenSnapshot()
-	if cap.Cols != 80 || cap.Rows != 24 {
-		t.Errorf("Snapshot size = (%d, %d), want (80, 24)", cap.Cols, cap.Rows)
+	snap := s.ScreenSnapshot()
+	if snap.Cols != 80 || snap.Rows != 24 {
+		t.Errorf("Snapshot size = (%d, %d), want (80, 24)", snap.Cols, snap.Rows)
 	}
 }
 
