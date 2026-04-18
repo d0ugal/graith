@@ -16,8 +16,9 @@ import (
 )
 
 var msgCmd = &cobra.Command{
-	Use:   "msg",
-	Short: "Inter-agent messaging",
+	Use:     "msg",
+	Aliases: []string{"m"},
+	Short:   "Inter-agent messaging",
 }
 
 // --- gr msg pub ---

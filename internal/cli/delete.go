@@ -10,6 +10,7 @@ import (
 
 var deleteCmd = &cobra.Command{
 	Use:               "delete <name-or-id>",
+	Aliases:           []string{"rm"},
 	Short:             "Delete a session by name or ID",
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeSessionNames,

@@ -21,9 +21,10 @@ var (
 )
 
 var newCmd = &cobra.Command{
-	Use:   "new <name>",
-	Short: "Create a new agent session",
-	Args:  cobra.ExactArgs(1),
+	Use:     "new <name>",
+	Aliases: []string{"n"},
+	Short:   "Create a new agent session",
+	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 

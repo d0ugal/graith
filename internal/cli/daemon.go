@@ -18,8 +18,9 @@ var (
 )
 
 var daemonCmd = &cobra.Command{
-	Use:   "daemon",
-	Short: "Manage the graith daemon",
+	Use:     "daemon",
+	Aliases: []string{"d"},
+	Short:   "Manage the graith daemon",
 }
 
 var daemonStartCmd = &cobra.Command{
