@@ -27,8 +27,11 @@ func (s *syncBuf) Bytes() []byte {
 
 func TestSessionEcho(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "test.log")
+	// Use sh -c with a brief sleep so the PTY slave stays open long enough
+	// for the master to read the output. On macOS, bare "echo" can exit
+	// before the master-side read drains the buffer, causing EIO and lost data.
 	s, err := NewSession(SessionOpts{
-		ID: "test", Command: "echo", Args: []string{"hello graith"},
+		ID: "test", Command: "sh", Args: []string{"-c", "echo hello graith; sleep 0.1"},
 		Dir: t.TempDir(), Rows: 24, Cols: 80,
 		LogPath: logPath, MaxLogSize: 1024 * 1024,
 	})
