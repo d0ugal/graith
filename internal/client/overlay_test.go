@@ -147,9 +147,9 @@ func TestBuildGroupedItems_GroupsSorted(t *testing.T) {
 	}
 }
 
-// --- shortDur ---
+// --- ShortDuration ---
 
-func TestShortDur(t *testing.T) {
+func TestShortDuration(t *testing.T) {
 	tests := []struct {
 		d    time.Duration
 		want string
@@ -166,9 +166,9 @@ func TestShortDur(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.d.String(), func(t *testing.T) {
-			got := shortDur(tt.d)
+			got := ShortDuration(tt.d)
 			if got != tt.want {
-				t.Errorf("shortDur(%v) = %q, want %q", tt.d, got, tt.want)
+				t.Errorf("ShortDuration(%v) = %q, want %q", tt.d, got, tt.want)
 			}
 		})
 	}
