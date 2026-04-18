@@ -28,6 +28,7 @@ type Session struct {
 	exitCode       int
 	exited         bool
 	adoptedPID     int
+	lastOutputAt   time.Time
 }
 
 type SessionOpts struct {
@@ -164,6 +165,7 @@ func (s *Session) readLoop() {
 			_, _ = s.Scrollback.Write(chunk)
 			s.mu.Lock()
 			_, _ = s.screen.Write(chunk)
+			s.lastOutputAt = time.Now()
 			w := s.attachedWriter
 			s.mu.Unlock()
 			if w != nil {
@@ -216,9 +218,10 @@ func (s *Session) DetachWriter(w io.Writer) {
 	}
 	s.mu.Unlock()
 }
-func (s *Session) Done() <-chan struct{} { return s.done }
-func (s *Session) Exited() bool          { s.mu.RLock(); defer s.mu.RUnlock(); return s.exited }
-func (s *Session) ExitCode() int         { s.mu.RLock(); defer s.mu.RUnlock(); return s.exitCode }
+func (s *Session) Done() <-chan struct{}   { return s.done }
+func (s *Session) LastOutputAt() time.Time { s.mu.RLock(); defer s.mu.RUnlock(); return s.lastOutputAt }
+func (s *Session) Exited() bool            { s.mu.RLock(); defer s.mu.RUnlock(); return s.exited }
+func (s *Session) ExitCode() int           { s.mu.RLock(); defer s.mu.RUnlock(); return s.exitCode }
 
 func (s *Session) Kill() error {
 	pid := s.ProcessPID()
