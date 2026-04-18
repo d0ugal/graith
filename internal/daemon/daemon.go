@@ -662,8 +662,13 @@ func (sm *SessionManager) detectAgentStatuses() {
 			continue
 		}
 
+		outputAge := detector.OutputAgeUnknown
+		if lastOut := t.pty.LastOutputAt(); !lastOut.IsZero() {
+			outputAge = time.Since(lastOut)
+		}
+
 		d := detector.New(t.agent)
-		status := string(d.Detect(content))
+		status := string(d.Detect(content, outputAge))
 
 		var dirty bool
 		var unpushed int
