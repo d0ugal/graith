@@ -194,8 +194,8 @@ func TestHandshake(t *testing.T) {
 	}
 	var ok protocol.HandshakeOkMsg
 	protocol.DecodePayload(env, &ok)
-	if ok.Version != protocolVersion {
-		t.Errorf("version = %q, want %q", ok.Version, protocolVersion)
+	if ok.Version != protocol.Version {
+		t.Errorf("version = %q, want %q", ok.Version, protocol.Version)
 	}
 }
 
