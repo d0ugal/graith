@@ -57,6 +57,28 @@ func UnpushedCommitCount(worktreePath, baseBranch string) (int, error) {
 	return n, nil
 }
 
+func DirtyFiles(dir string) ([]string, error) {
+	out, err := RunOutput(dir, "status", "--porcelain")
+	if err != nil {
+		return nil, err
+	}
+	if out == "" {
+		return nil, nil
+	}
+	return strings.Split(out, "\n"), nil
+}
+
+func UnpushedCommitSummaries(worktreePath, baseBranch string) ([]string, error) {
+	out, err := RunOutput(worktreePath, "log", "--oneline", "origin/"+baseBranch+"..HEAD")
+	if err != nil {
+		return nil, err
+	}
+	if out == "" {
+		return nil, nil
+	}
+	return strings.Split(out, "\n"), nil
+}
+
 func RepoRootPath(dir string) (string, error) {
 	return RunOutput(dir, "rev-parse", "--show-toplevel")
 }
