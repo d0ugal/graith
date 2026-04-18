@@ -3,11 +3,11 @@ package cli
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"sort"
 	"strings"
 
 	"github.com/d0ugal/graith/internal/client"
+	"github.com/d0ugal/graith/internal/git"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/spf13/cobra"
 )
@@ -116,16 +116,23 @@ func completeBranchNames(cmd *cobra.Command, _ []string, _ string) ([]string, co
 		repoPath, _ = os.Getwd()
 	}
 
-	out, err := exec.Command("git", "-C", repoPath, "for-each-ref", "--format=%(refname:short)", "refs/heads/").Output()
+	out, err := git.RunOutput(repoPath, "for-each-ref", "--format=%(refname:short)", "refs/heads/", "refs/remotes/")
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
 
+	seen := make(map[string]bool)
 	var branches []string
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if line != "" {
-			branches = append(branches, line)
+	for _, line := range strings.Split(out, "\n") {
+		if line == "" {
+			continue
 		}
+		name := strings.TrimPrefix(line, "origin/")
+		if name == "HEAD" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		branches = append(branches, name)
 	}
 	return branches, cobra.ShellCompDirectiveNoFileComp
 }
