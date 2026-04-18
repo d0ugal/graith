@@ -83,6 +83,7 @@ var (
 	msgSendFile     string
 	msgSendThreadID string
 	msgSendReplyTo  string
+	msgSendQuiet    bool
 )
 
 var msgSendCmd = &cobra.Command{
@@ -126,6 +127,23 @@ var msgSendCmd = &cobra.Command{
 			var e protocol.ErrorMsg
 			protocol.DecodePayload(resp, &e)
 			return fmt.Errorf("%s", e.Message)
+		}
+
+		if !msgSendQuiet {
+			hint := fmt.Sprintf("You have a new message. Read it with: gr msg sub --topic inbox:%s --all", sessionID)
+			c.SendControl("type", protocol.TypeMsg{
+				SessionID: sessionID,
+				Input:     hint,
+			})
+			typeResp, err := c.ReadControlResponse()
+			if err != nil {
+				return fmt.Errorf("failed to notify session: %w", err)
+			}
+			if typeResp.Type == "error" {
+				var e protocol.ErrorMsg
+				protocol.DecodePayload(typeResp, &e)
+				return fmt.Errorf("failed to notify session: %s", e.Message)
+			}
 		}
 
 		if jsonOutput {
@@ -323,6 +341,7 @@ func init() {
 	msgSendCmd.Flags().StringVarP(&msgSendFile, "file", "f", "", "read body from file")
 	msgSendCmd.Flags().StringVar(&msgSendThreadID, "thread", "", "thread ID to continue")
 	msgSendCmd.Flags().StringVar(&msgSendReplyTo, "reply-to", "", "stream for replies")
+	msgSendCmd.Flags().BoolVarP(&msgSendQuiet, "quiet", "q", false, "don't type a notification into the session")
 
 	msgCmd.AddCommand(msgSubCmd)
 	msgSubCmd.Flags().StringVarP(&msgSubStream, "topic", "t", "", "stream/topic name")
