@@ -221,13 +221,14 @@ func (m DashboardModel) View() string {
 	}
 
 	// Confirmation prompts
-	if m.state == dashStateConfirmDelete {
+	switch m.state {
+	case dashStateConfirmDelete:
 		if s := m.selectedSession(); s != nil {
 			b.WriteString("\n")
 			b.WriteString(warningStyle.Render(fmt.Sprintf("  Delete '%s'? [y/N]", s.Name)))
 			b.WriteString("\n")
 		}
-	} else if m.state == dashStateConfirmStop {
+	case dashStateConfirmStop:
 		if s := m.selectedSession(); s != nil {
 			b.WriteString("\n")
 			b.WriteString(warningStyle.Render(fmt.Sprintf("  Stop '%s'? [y/N]", s.Name)))
