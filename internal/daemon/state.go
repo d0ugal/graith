@@ -107,7 +107,9 @@ func migrateState(state *State) error {
 	return nil
 }
 
-func migrateV0ToV1(state *State) error {
+// migrateV0ToV1 is a no-op: v0 and v1 share the same schema. Kept because
+// removing it would break the migration chain for any state file at version 0.
+func migrateV0ToV1(_ *State) error {
 	return nil
 }
 
