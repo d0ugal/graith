@@ -1,0 +1,39 @@
+version: 2
+
+builds:
+  - main: ./cmd/graith
+    binary: gr
+    ldflags:
+      - -s -w
+      - -X github.com/d0ugal/graith/internal/version.Version={{.Version}}
+      - -X github.com/d0ugal/graith/internal/version.CommitSHA={{.Commit}}
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - format: tar.gz
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  disable: true
+
+nightly:
+  tag_name: dev
+  version_template: "{{ incpatch .Version }}-dev.{{ .ShortCommit }}"
+
+brews:
+  - repository:
+      owner: d0ugal
+      name: homebrew-graith-dev
+      token: "{{ .Env.RELEASE_TOKEN }}"
+    homepage: https://github.com/d0ugal/graith
+    description: "Terminal session manager for AI coding agents (dev build)"
+    license: MIT
+    install: |
+      bin.install "gr"
