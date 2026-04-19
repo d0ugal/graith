@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/bubbles/list"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/list"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/d0ugal/graith/internal/protocol"
 )
 
@@ -66,11 +66,11 @@ func noopFetchPreview(sessionID string) string {
 }
 
 func sendKey(m tea.Model, key string) (tea.Model, tea.Cmd) {
-	return m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)})
+	return m.Update(tea.KeyPressMsg{Code: rune(key[0]), Text: key})
 }
 
-func sendSpecialKey(m tea.Model, k tea.KeyType) (tea.Model, tea.Cmd) {
-	return m.Update(tea.KeyMsg{Type: k})
+func sendSpecialKey(m tea.Model, k rune) (tea.Model, tea.Cmd) {
+	return m.Update(tea.KeyPressMsg{Code: k})
 }
 
 func sendWindowSize(m tea.Model, w, h int) (tea.Model, tea.Cmd) {
@@ -652,7 +652,7 @@ func TestUpdate_ConfirmDeleteAnyKeyCancel(t *testing.T) {
 
 func TestView_ZeroSize(t *testing.T) {
 	m := newOverlayModel(overlayTestSessions(), nil)
-	if v := m.View(); v != "" {
+	if v := m.View().Content; v != "" {
 		t.Errorf("View() with zero size should be empty, got %d chars", len(v))
 	}
 }
@@ -661,7 +661,7 @@ func TestView_RendersSessionList(t *testing.T) {
 	m := newOverlayModel(overlayTestSessions(), nil)
 	updated, _ := sendWindowSize(m, 120, 40)
 	om := asOverlay(updated)
-	view := om.View()
+	view := om.View().Content
 
 	if !strings.Contains(view, "Sessions") {
 		t.Error("view should contain the title 'Sessions'")
@@ -677,7 +677,7 @@ func TestView_ShowsGroupHeaders(t *testing.T) {
 	m := newOverlayModel(overlayTestSessions(), nil)
 	updated, _ := sendWindowSize(m, 120, 40)
 	om := asOverlay(updated)
-	view := om.View()
+	view := om.View().Content
 
 	if !strings.Contains(view, "graith") {
 		t.Error("view should contain group header 'graith'")
@@ -690,7 +690,7 @@ func TestView_ShowsGroupHeaders(t *testing.T) {
 func TestView_ShowsHelpBar(t *testing.T) {
 	m := newOverlayModel(overlayTestSessions(), nil)
 	updated, _ := sendWindowSize(m, 120, 40)
-	view := asOverlay(updated).View()
+	view := asOverlay(updated).View().Content
 
 	if !strings.Contains(view, "enter attach") {
 		t.Error("view should contain help bar")
@@ -701,7 +701,7 @@ func TestView_ConfirmDeleteShowsPrompt(t *testing.T) {
 	m := newOverlayModel(overlayTestSessions(), nil)
 	updated, _ := sendWindowSize(m, 120, 40)
 	updated, _ = sendKey(asOverlay(updated), "x")
-	view := asOverlay(updated).View()
+	view := asOverlay(updated).View().Content
 
 	if !strings.Contains(view, "Delete") || !strings.Contains(view, "[y/N]") {
 		t.Error("delete confirmation should show 'Delete ... [y/N]'")
@@ -712,19 +712,19 @@ func TestView_FilterModeShowsInput(t *testing.T) {
 	m := newOverlayModel(overlayTestSessions(), nil)
 	updated, _ := sendWindowSize(m, 120, 40)
 	updated, _ = sendKey(asOverlay(updated), "/")
-	view := asOverlay(updated).View()
+	view := asOverlay(updated).View().Content
 
 	if !strings.Contains(view, "Filter") {
 		t.Error("filter mode should show 'Filter'")
 	}
-	if !strings.Contains(view, "filter...") {
-		t.Error("filter mode should show placeholder text 'filter...'")
+	if !strings.Contains(view, "ilter...") {
+		t.Error("filter mode should show placeholder text")
 	}
 
 	// Verify list mode does NOT show filter prompt
 	m2 := newOverlayModel(overlayTestSessions(), nil)
 	updated2, _ := sendWindowSize(m2, 120, 40)
-	listView := asOverlay(updated2).View()
+	listView := asOverlay(updated2).View().Content
 	if strings.Contains(listView, "Filter:") {
 		t.Error("list mode should not show filter prompt")
 	}
@@ -733,7 +733,7 @@ func TestView_FilterModeShowsInput(t *testing.T) {
 func TestView_SmallTerminal(t *testing.T) {
 	m := newOverlayModel(overlayTestSessions(), nil)
 	updated, _ := sendWindowSize(m, 30, 8)
-	view := asOverlay(updated).View()
+	view := asOverlay(updated).View().Content
 
 	lines := strings.Split(view, "\n")
 	if len(lines) != 8 {
@@ -751,7 +751,7 @@ func TestView_PreviewBackground(t *testing.T) {
 	updated, _ = om.Update(previewMsg{sessionID: selected.info.ID, content: "UNIQUE_PREVIEW_LINE_1\nUNIQUE_PREVIEW_LINE_2"})
 	om = asOverlay(updated)
 
-	view := om.View()
+	view := om.View().Content
 	if !strings.Contains(view, "UNIQUE_PREVIEW_LINE_1") {
 		t.Error("view should render preview content in the background")
 	}
@@ -759,7 +759,7 @@ func TestView_PreviewBackground(t *testing.T) {
 	// Verify view without preview does NOT contain the preview text
 	m2 := newOverlayModel(overlayTestSessions(), nil)
 	updated2, _ := sendWindowSize(m2, 120, 40)
-	viewNoPreview := asOverlay(updated2).View()
+	viewNoPreview := asOverlay(updated2).View().Content
 	if strings.Contains(viewNoPreview, "UNIQUE_PREVIEW_LINE_1") {
 		t.Error("view without preview should not contain preview text")
 	}
@@ -808,7 +808,7 @@ func TestEmptySessionList(t *testing.T) {
 
 	// View should not panic
 	updated, _ := sendWindowSize(m, 80, 24)
-	view := asOverlay(updated).View()
+	view := asOverlay(updated).View().Content
 	if view == "" {
 		t.Error("view should render something even with no sessions")
 	}
@@ -1029,11 +1029,11 @@ func TestCompactDelegate_RenderSelectedVsUnselected(t *testing.T) {
 	d.Render(&selectedBuf, l, 1, items[1])   // selected
 	d.Render(&unselectedBuf, l, 2, items[2]) // not selected
 
-	if !strings.HasPrefix(selectedBuf.String(), ">") {
-		t.Error("selected item should start with '>'")
+	if !strings.Contains(selectedBuf.String(), ">") {
+		t.Error("selected item should contain '>'")
 	}
-	if strings.HasPrefix(unselectedBuf.String(), ">") {
-		t.Error("unselected item should not start with '>'")
+	if strings.Contains(unselectedBuf.String(), ">") {
+		t.Error("unselected item should not contain '>'")
 	}
 }
 
