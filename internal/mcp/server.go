@@ -96,11 +96,11 @@ type SessionStatusInput struct {
 }
 
 type CreateSessionInput struct {
-	Name   string `json:"name" jsonschema:"description=Human-readable session name"`
-	Agent  string `json:"agent,omitempty" jsonschema:"description=Agent type (e.g. claude, codex, agy). Defaults to configured default."`
-	Repo   string `json:"repo,omitempty" jsonschema:"description=Path to the git repository"`
-	Base   string `json:"base,omitempty" jsonschema:"description=Base branch to create worktree from"`
-	Prompt string `json:"prompt,omitempty" jsonschema:"description=Initial prompt to send to the agent"`
+	Name   string `json:"name"              jsonschema:"description=Human-readable session name"`
+	Agent  string `json:"agent,omitempty"   jsonschema:"description=Agent type (e.g. claude, codex, agy). Defaults to configured default."`
+	Repo   string `json:"repo,omitempty"    jsonschema:"description=Path to the git repository"`
+	Base   string `json:"base,omitempty"    jsonschema:"description=Base branch to create worktree from"`
+	Prompt string `json:"prompt,omitempty"  jsonschema:"description=Initial prompt to send to the agent"`
 	NoRepo bool   `json:"no_repo,omitempty" jsonschema:"description=Create session without a git worktree"`
 }
 
@@ -114,11 +114,11 @@ type CreateSessionOutput struct {
 }
 
 type PublishMessageInput struct {
-	Topic    string `json:"topic" jsonschema:"description=Topic/stream name to publish to"`
-	Body     string `json:"body" jsonschema:"description=Message body"`
-	Sender   string `json:"sender,omitempty" jsonschema:"description=Sender name for attribution"`
+	Topic    string `json:"topic"               jsonschema:"description=Topic/stream name to publish to"`
+	Body     string `json:"body"                jsonschema:"description=Message body"`
+	Sender   string `json:"sender,omitempty"    jsonschema:"description=Sender name for attribution"`
 	ThreadID string `json:"thread_id,omitempty" jsonschema:"description=Thread ID for threaded conversations"`
-	ReplyTo  string `json:"reply_to,omitempty" jsonschema:"description=Topic where replies should be sent"`
+	ReplyTo  string `json:"reply_to,omitempty"  jsonschema:"description=Topic where replies should be sent"`
 }
 
 type PublishMessageOutput struct {
@@ -129,11 +129,11 @@ type PublishMessageOutput struct {
 }
 
 type ReadMessagesInput struct {
-	Topic      string `json:"topic" jsonschema:"description=Topic/stream name to read from"`
+	Topic      string `json:"topic"                jsonschema:"description=Topic/stream name to read from"`
 	Subscriber string `json:"subscriber,omitempty" jsonschema:"description=Subscriber ID for tracking read position"`
-	All        bool   `json:"all,omitempty" jsonschema:"description=Read all messages instead of only unread"`
-	ThreadID   string `json:"thread_id,omitempty" jsonschema:"description=Filter to a specific thread"`
-	Ack        bool   `json:"ack,omitempty" jsonschema:"description=Acknowledge messages after reading"`
+	All        bool   `json:"all,omitempty"        jsonschema:"description=Read all messages instead of only unread"`
+	ThreadID   string `json:"thread_id,omitempty"  jsonschema:"description=Filter to a specific thread"`
+	Ack        bool   `json:"ack,omitempty"        jsonschema:"description=Acknowledge messages after reading"`
 }
 
 type MessageOutput struct {
@@ -153,10 +153,10 @@ type ReadMessagesOutput struct {
 }
 
 type SubscribeInput struct {
-	Topic      string `json:"topic" jsonschema:"description=Topic/stream name to subscribe to"`
+	Topic      string `json:"topic"                jsonschema:"description=Topic/stream name to subscribe to"`
 	Subscriber string `json:"subscriber,omitempty" jsonschema:"description=Subscriber ID for tracking read position"`
-	ThreadID   string `json:"thread_id,omitempty" jsonschema:"description=Filter to a specific thread"`
-	Ack        bool   `json:"ack,omitempty" jsonschema:"description=Acknowledge the message after receiving it"`
+	ThreadID   string `json:"thread_id,omitempty"  jsonschema:"description=Filter to a specific thread"`
+	Ack        bool   `json:"ack,omitempty"        jsonschema:"description=Acknowledge the message after receiving it"`
 }
 
 type SubscribeOutput struct {
