@@ -16,6 +16,7 @@ builds:
 
 archives:
   - format: tar.gz
+    name_template: "graith-dev_{{ .Os }}_{{ .Arch }}"
 
 checksum:
   name_template: checksums.txt
@@ -23,18 +24,5 @@ checksum:
 changelog:
   disable: true
 
-nightly:
-  tag_name: dev
+snapshot:
   version_template: "{{ incpatch .Version }}-dev.{{ .ShortCommit }}"
-
-brews:
-  - name: graith-dev
-    repository:
-      owner: d0ugal
-      name: homebrew-tap
-      token: "{{ .Env.RELEASE_TOKEN }}"
-    homepage: https://github.com/d0ugal/graith
-    description: "Terminal session manager for AI coding agents (dev build)"
-    license: MIT
-    install: |
-      bin.install "gr-dev"
