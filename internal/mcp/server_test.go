@@ -1,0 +1,379 @@
+package mcp
+
+import (
+	"context"
+	"log/slog"
+	"net"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"testing"
+
+	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/daemon"
+	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
+)
+
+type testEnv struct {
+	srv        *Server
+	daemonSrv  *daemon.Server
+	cancel     context.CancelFunc
+	socketPath string
+	repo       string
+}
+
+func setup(t *testing.T) *testEnv {
+	t.Helper()
+	tmpDir := t.TempDir()
+
+	repo := filepath.Join(tmpDir, "repo")
+	os.MkdirAll(repo, 0o755)
+	gitRun(t, repo, "init", "-b", "main")
+	gitRun(t, repo, "commit", "--allow-empty", "-m", "init")
+
+	socketDir, _ := os.MkdirTemp("/tmp", "graith-mcp-test-*")
+	t.Cleanup(func() { os.RemoveAll(socketDir) })
+	socketPath := filepath.Join(socketDir, "gr.sock")
+
+	paths := config.Paths{
+		SocketPath: socketPath,
+		StateFile:  filepath.Join(tmpDir, "state.json"),
+		LogDir:     filepath.Join(tmpDir, "logs"),
+		DataDir:    filepath.Join(tmpDir, "data"),
+		RuntimeDir: tmpDir,
+		MessagesDB: filepath.Join(tmpDir, "messages.db"),
+	}
+	os.MkdirAll(paths.LogDir, 0o755)
+	os.MkdirAll(paths.DataDir, 0o755)
+
+	cfg := config.Default()
+	cfg.FetchOnCreate = false
+	cfg.Agents["echo"] = config.Agent{
+		Command:    "sh",
+		Args:       []string{"-c", "echo 'ready'; exec cat"},
+		ResumeArgs: []string{"-c", "echo 'resumed'; exec cat"},
+	}
+
+	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	sm := daemon.NewSessionManager(cfg, paths, log)
+
+	msgStore, err := daemon.NewMsgStore(paths.MessagesDB)
+	if err != nil {
+		t.Fatalf("open message store: %v", err)
+	}
+	t.Cleanup(func() { msgStore.Close() })
+	sm.SetMsgStore(msgStore)
+
+	l, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	daemonSrv := daemon.NewServer(l, func(ctx context.Context, conn net.Conn) {
+		daemon.HandleConnection(ctx, conn, sm, log)
+	}, log)
+	go daemonSrv.Serve(ctx)
+	go sm.RunDetectionLoop(ctx)
+
+	mcpSrv := NewServer(cfg, paths, "")
+
+	return &testEnv{
+		srv:        mcpSrv,
+		daemonSrv:  daemonSrv,
+		cancel:     cancel,
+		socketPath: socketPath,
+		repo:       repo,
+	}
+}
+
+func (e *testEnv) teardown() {
+	e.cancel()
+	e.daemonSrv.Shutdown()
+}
+
+func gitRun(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	allArgs := append([]string{"-c", "commit.gpgsign=false"}, args...)
+	cmd := exec.Command("git", allArgs...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
+		"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
+func TestListSessionsEmpty(t *testing.T) {
+	env := setup(t)
+	defer env.teardown()
+
+	ctx := context.Background()
+	_, out, err := env.srv.listSessions(ctx, &gomcp.CallToolRequest{}, ListSessionsInput{})
+	if err != nil {
+		t.Fatalf("list sessions: %v", err)
+	}
+	if len(out.Sessions) != 0 {
+		t.Errorf("expected 0 sessions, got %d", len(out.Sessions))
+	}
+}
+
+func TestCreateAndListSessions(t *testing.T) {
+	env := setup(t)
+	defer env.teardown()
+
+	ctx := context.Background()
+
+	_, created, err := env.srv.createSession(ctx, &gomcp.CallToolRequest{}, CreateSessionInput{
+		Name:  "test-session",
+		Agent: "echo",
+		Repo:  env.repo,
+		Base:  "main",
+	})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	if created.Name != "test-session" {
+		t.Errorf("name = %q, want %q", created.Name, "test-session")
+	}
+	if created.Agent != "echo" {
+		t.Errorf("agent = %q, want %q", created.Agent, "echo")
+	}
+	if created.Status != "running" {
+		t.Errorf("status = %q, want %q", created.Status, "running")
+	}
+	if created.ID == "" {
+		t.Error("expected non-empty session ID")
+	}
+
+	_, list, err := env.srv.listSessions(ctx, &gomcp.CallToolRequest{}, ListSessionsInput{})
+	if err != nil {
+		t.Fatalf("list sessions: %v", err)
+	}
+	if len(list.Sessions) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(list.Sessions))
+	}
+	if list.Sessions[0].Name != "test-session" {
+		t.Errorf("listed name = %q, want %q", list.Sessions[0].Name, "test-session")
+	}
+}
+
+func TestSessionStatus(t *testing.T) {
+	env := setup(t)
+	defer env.teardown()
+
+	ctx := context.Background()
+
+	_, created, err := env.srv.createSession(ctx, &gomcp.CallToolRequest{}, CreateSessionInput{
+		Name:  "status-test",
+		Agent: "echo",
+		Repo:  env.repo,
+		Base:  "main",
+	})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	_, status, err := env.srv.sessionStatus(ctx, &gomcp.CallToolRequest{}, SessionStatusInput{
+		Session: "status-test",
+	})
+	if err != nil {
+		t.Fatalf("session status by name: %v", err)
+	}
+	if status.ID != created.ID {
+		t.Errorf("id = %q, want %q", status.ID, created.ID)
+	}
+	if status.Status != "running" {
+		t.Errorf("status = %q, want %q", status.Status, "running")
+	}
+
+	_, status, err = env.srv.sessionStatus(ctx, &gomcp.CallToolRequest{}, SessionStatusInput{
+		Session: created.ID,
+	})
+	if err != nil {
+		t.Fatalf("session status by ID: %v", err)
+	}
+	if status.Name != "status-test" {
+		t.Errorf("name = %q, want %q", status.Name, "status-test")
+	}
+}
+
+func TestSessionStatusNotFound(t *testing.T) {
+	env := setup(t)
+	defer env.teardown()
+
+	ctx := context.Background()
+	_, _, err := env.srv.sessionStatus(ctx, &gomcp.CallToolRequest{}, SessionStatusInput{
+		Session: "nonexistent",
+	})
+	if err == nil {
+		t.Fatal("expected error for nonexistent session")
+	}
+}
+
+func TestPublishAndReadMessages(t *testing.T) {
+	env := setup(t)
+	defer env.teardown()
+
+	ctx := context.Background()
+
+	_, pub, err := env.srv.publishMessage(ctx, &gomcp.CallToolRequest{}, PublishMessageInput{
+		Topic:  "test-topic",
+		Body:   "hello from MCP",
+		Sender: "test-agent",
+	})
+	if err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	if pub.Stream != "test-topic" {
+		t.Errorf("stream = %q, want %q", pub.Stream, "test-topic")
+	}
+	if pub.ID == "" {
+		t.Error("expected non-empty message ID")
+	}
+
+	_, pub2, err := env.srv.publishMessage(ctx, &gomcp.CallToolRequest{}, PublishMessageInput{
+		Topic: "test-topic",
+		Body:  "second message",
+	})
+	if err != nil {
+		t.Fatalf("publish second: %v", err)
+	}
+	if pub2.Seq <= pub.Seq {
+		t.Errorf("second seq %d should be > first seq %d", pub2.Seq, pub.Seq)
+	}
+
+	_, msgs, err := env.srv.readMessages(ctx, &gomcp.CallToolRequest{}, ReadMessagesInput{
+		Topic: "test-topic",
+		All:   true,
+	})
+	if err != nil {
+		t.Fatalf("read messages: %v", err)
+	}
+	if len(msgs.Messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(msgs.Messages))
+	}
+	if msgs.Messages[0].Body != "hello from MCP" {
+		t.Errorf("first body = %q, want %q", msgs.Messages[0].Body, "hello from MCP")
+	}
+	if msgs.Messages[0].SenderName != "test-agent" {
+		t.Errorf("sender = %q, want %q", msgs.Messages[0].SenderName, "test-agent")
+	}
+	if msgs.Messages[1].Body != "second message" {
+		t.Errorf("second body = %q, want %q", msgs.Messages[1].Body, "second message")
+	}
+}
+
+func TestReadMessagesEmpty(t *testing.T) {
+	env := setup(t)
+	defer env.teardown()
+
+	ctx := context.Background()
+	_, msgs, err := env.srv.readMessages(ctx, &gomcp.CallToolRequest{}, ReadMessagesInput{
+		Topic: "empty-topic",
+		All:   true,
+	})
+	if err != nil {
+		t.Fatalf("read messages: %v", err)
+	}
+	if len(msgs.Messages) != 0 {
+		t.Errorf("expected 0 messages, got %d", len(msgs.Messages))
+	}
+}
+
+func TestSubscribeReceivesMessage(t *testing.T) {
+	env := setup(t)
+	defer env.teardown()
+
+	ctx := context.Background()
+
+	errCh := make(chan error, 1)
+	outCh := make(chan SubscribeOutput, 1)
+	go func() {
+		_, out, err := env.srv.subscribe(ctx, &gomcp.CallToolRequest{}, SubscribeInput{
+			Topic:      "sub-topic",
+			Subscriber: "test-sub",
+		})
+		if err != nil {
+			errCh <- err
+			return
+		}
+		outCh <- out
+	}()
+
+	_, _, err := env.srv.publishMessage(ctx, &gomcp.CallToolRequest{}, PublishMessageInput{
+		Topic: "sub-topic",
+		Body:  "subscribed message",
+	})
+	if err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	select {
+	case err := <-errCh:
+		t.Fatalf("subscribe error: %v", err)
+	case out := <-outCh:
+		if out.Message.Body != "subscribed message" {
+			t.Errorf("body = %q, want %q", out.Message.Body, "subscribed message")
+		}
+	}
+}
+
+func TestCreateSessionNoRepo(t *testing.T) {
+	env := setup(t)
+	defer env.teardown()
+
+	ctx := context.Background()
+	_, created, err := env.srv.createSession(ctx, &gomcp.CallToolRequest{}, CreateSessionInput{
+		Name:   "no-repo-session",
+		Agent:  "echo",
+		NoRepo: true,
+	})
+	if err != nil {
+		t.Fatalf("create no-repo session: %v", err)
+	}
+	if created.Name != "no-repo-session" {
+		t.Errorf("name = %q, want %q", created.Name, "no-repo-session")
+	}
+	if created.Branch != "" {
+		t.Errorf("branch = %q, want empty", created.Branch)
+	}
+}
+
+func TestPublishMessageWithThread(t *testing.T) {
+	env := setup(t)
+	defer env.teardown()
+
+	ctx := context.Background()
+
+	_, pub, err := env.srv.publishMessage(ctx, &gomcp.CallToolRequest{}, PublishMessageInput{
+		Topic:    "threaded-topic",
+		Body:     "thread starter",
+		ThreadID: "thread-1",
+		ReplyTo:  "reply-topic",
+	})
+	if err != nil {
+		t.Fatalf("publish threaded: %v", err)
+	}
+	if pub.ID == "" {
+		t.Error("expected non-empty message ID")
+	}
+
+	_, msgs, err := env.srv.readMessages(ctx, &gomcp.CallToolRequest{}, ReadMessagesInput{
+		Topic:    "threaded-topic",
+		All:      true,
+		ThreadID: "thread-1",
+	})
+	if err != nil {
+		t.Fatalf("read threaded: %v", err)
+	}
+	if len(msgs.Messages) != 1 {
+		t.Fatalf("expected 1 threaded message, got %d", len(msgs.Messages))
+	}
+	if msgs.Messages[0].ThreadID != "thread-1" {
+		t.Errorf("thread_id = %q, want %q", msgs.Messages[0].ThreadID, "thread-1")
+	}
+}
