@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/d0ugal/graith/compare/v0.3.0...v0.3.1) (2026-04-19)
+
+
+### Bug Fixes
+
+* delete dev tag before goreleaser snapshot ([246f631](https://github.com/d0ugal/graith/commit/246f6312920bc1403e19ea8ab27f7d487a1fae7d))
+
 ## [0.3.0](https://github.com/d0ugal/graith/compare/v0.2.1...v0.3.0) (2026-04-19)
 
 
