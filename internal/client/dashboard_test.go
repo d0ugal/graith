@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/d0ugal/graith/internal/protocol"
 )
 
@@ -34,12 +34,12 @@ func dashboardTestSessions() []protocol.SessionInfo {
 }
 
 func updateDash(m DashboardModel, key string) DashboardModel {
-	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)})
+	result, _ := m.Update(tea.KeyPressMsg{Code: rune(key[0]), Text: key})
 	return result.(DashboardModel)
 }
 
-func updateDashKey(m DashboardModel, keyType tea.KeyType) (DashboardModel, tea.Cmd) {
-	result, cmd := m.Update(tea.KeyMsg{Type: keyType})
+func updateDashKey(m DashboardModel, k rune) (DashboardModel, tea.Cmd) {
+	result, cmd := m.Update(tea.KeyPressMsg{Code: k})
 	return result.(DashboardModel), cmd
 }
 
@@ -186,7 +186,7 @@ func TestDashboardViewRendersContent(t *testing.T) {
 	m.width = 120
 	m.height = 40
 
-	view := m.View()
+	view := m.View().Content
 	if view == "" {
 		t.Error("view should not be empty")
 	}
@@ -239,7 +239,7 @@ func TestDashboardEmptySessions(t *testing.T) {
 	m.width = 120
 	m.height = 40
 
-	view := m.View()
+	view := m.View().Content
 	if !strings.Contains(view, "No sessions") {
 		t.Error("empty dashboard should show 'No sessions' message")
 	}
@@ -272,7 +272,7 @@ func TestDashboardNarrowTerminal(t *testing.T) {
 	m.width = 3
 	m.height = 10
 
-	view := m.View()
+	view := m.View().Content
 	if view == "" {
 		t.Error("view should not be empty even with narrow terminal")
 	}
@@ -295,7 +295,7 @@ func TestDashboardViewportScrolling(t *testing.T) {
 	m.width = 120
 	m.height = 15
 
-	view := m.View()
+	view := m.View().Content
 	if !strings.Contains(view, "session-0") {
 		t.Error("first session should be visible initially")
 	}
@@ -312,7 +312,7 @@ func TestDashboardViewportScrolling(t *testing.T) {
 		t.Fatalf("cursor = %d, want 19", dm.cursor)
 	}
 
-	view = dm.View()
+	view = dm.View().Content
 	if !strings.Contains(view, "session-19") {
 		t.Error("last session should be visible after scrolling down")
 	}
