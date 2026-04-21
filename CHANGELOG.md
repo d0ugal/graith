@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.0](https://github.com/d0ugal/graith/compare/v0.3.1...v0.4.0) (2026-04-21)
+
+
+### Features
+
+* include repo name in worktree directory path ([2f3f1bf](https://github.com/d0ugal/graith/commit/2f3f1bf410271bce71d863cac48e88db3c5071f0))
+
+
+### Bug Fixes
+
+* update github.com/charmbracelet/ultraviolet digest to 35bcb73 ([aaf9c82](https://github.com/d0ugal/graith/commit/aaf9c8246ffe24645676df306a5af2de9b2178cb))
+* update module modernc.org/libc to v1.73.0 ([9b990f6](https://github.com/d0ugal/graith/commit/9b990f61126564acdeeb3a07946ee76cad611880))
+
 ## [0.3.1](https://github.com/d0ugal/graith/compare/v0.3.0...v0.3.1) (2026-04-19)
 
 
