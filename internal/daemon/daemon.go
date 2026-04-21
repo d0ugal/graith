@@ -198,7 +198,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 		branchPrefix, _ := config.Expand(sm.cfg.BranchPrefix, config.TemplateVars{Username: username})
 		branchName = fmt.Sprintf("%s/%s-%s", branchPrefix, name, id)
 
-		worktreePath = filepath.Join(sm.paths.DataDir, "worktrees", repoHash(repoRoot), id)
+		worktreePath = filepath.Join(sm.paths.DataDir, "worktrees", repoName, repoHash(repoRoot), id)
 
 		if err := git.SetupSession(repoRoot, worktreePath, branchName, baseBranch, sm.cfg.FetchOnCreate); err != nil {
 			return SessionState{}, fmt.Errorf("setup git session: %w", err)
