@@ -117,7 +117,7 @@ When you create a session:
 
 1. Fetches latest from origin (configurable)
 2. Creates a branch: `{username}/graith/{name}-{id}` from the default branch
-3. Creates a worktree at `~/.local/share/graith/worktrees/{repo-hash}/{id}/`
+3. Creates a worktree at `~/.local/share/graith/worktrees/{repo-name}/{repo-hash}/{id}/`
 4. Starts the agent in that worktree
 
 When you delete a session:
