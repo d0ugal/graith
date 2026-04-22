@@ -409,12 +409,13 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "session not found"})
 					continue
 				}
-				if err := pty.WriteInput([]byte(t.Input)); err != nil {
+				input := t.Input
+				if !t.NoNewline {
+					input += "\r"
+				}
+				if err := pty.WriteInput([]byte(input)); err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: "write failed: " + err.Error()})
 					continue
-				}
-				if !t.NoNewline {
-					_ = pty.WriteInput([]byte("\r"))
 				}
 				sendControl("typed", struct {
 					SessionID string `json:"session_id"`
