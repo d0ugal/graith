@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/d0ugal/graith/compare/v0.7.0...v0.8.0) (2026-04-22)
+
+
+### Features
+
+* simplify daemon subcommands and auto-reload on brew upgrade ([91a586a](https://github.com/d0ugal/graith/commit/91a586a8281221d3f5c852ab7dcaa588ac198484))
+
 ## [0.7.0](https://github.com/d0ugal/graith/compare/v0.6.1...v0.7.0) (2026-04-22)
 
 
