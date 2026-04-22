@@ -266,7 +266,23 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	if si.info.AgentStatus != "" && si.info.Status == "running" {
 		status = si.info.AgentStatus
 	}
-	status = pad(status, d.cols.status)
+	statusRendered := pad(status, d.cols.status)
+	switch status {
+	case "active":
+		statusRendered = lipgloss.NewStyle().Foreground(lipgloss.Color("#00ff87")).Render(statusRendered)
+	case "approval":
+		statusRendered = lipgloss.NewStyle().Foreground(lipgloss.Color("#ff5f5f")).Bold(true).Render(statusRendered)
+	case "ready":
+		statusRendered = lipgloss.NewStyle().Foreground(lipgloss.Color("#87afff")).Render(statusRendered)
+	case "stopped":
+		statusRendered = dim.Render(statusRendered)
+	case "errored":
+		statusRendered = lipgloss.NewStyle().Foreground(lipgloss.Color("#ff5f5f")).Render(statusRendered)
+	case "running":
+		statusRendered = lipgloss.NewStyle().Foreground(lipgloss.Color("#00ff87")).Render(statusRendered)
+	default:
+		statusRendered = dim.Render(statusRendered)
+	}
 
 	branchVal := displayBranch(si.info.Branch, si.info.Name)
 	branchRendered := dim.Render(pad(branchVal, d.cols.branch))
@@ -291,7 +307,7 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 
 	line := fmt.Sprintf("%s%s%s %s%s%s%s%s%s%s%s%s",
 		selPrefix, currentMark, styledIndicator,
-		name, sep, status, sep, branchRendered, sep, gitRendered, sep, lastRendered)
+		name, sep, statusRendered, sep, branchRendered, sep, gitRendered, sep, lastRendered)
 
 	if selected {
 		line = lipgloss.NewStyle().Bold(true).Render(line)
