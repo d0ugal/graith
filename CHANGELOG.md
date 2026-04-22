@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.5.0](https://github.com/d0ugal/graith/compare/v0.4.0...v0.5.0) (2026-06-08)
+
+
+### Features
+
+* redesign session switcher overlay ([82f3504](https://github.com/d0ugal/graith/commit/82f3504c475cc22b0f8ab88de42c8863ff4127aa)), closes [#80](https://github.com/d0ugal/graith/issues/80)
+
+
+### Bug Fixes
+
+* add graith binary to .gitignore ([2c233e9](https://github.com/d0ugal/graith/commit/2c233e99ca89489be2999576ef448c36f4a45d2f))
+
 ## [0.4.0](https://github.com/d0ugal/graith/compare/v0.3.1...v0.4.0) (2026-06-08)
 
 
