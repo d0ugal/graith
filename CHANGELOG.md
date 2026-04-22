@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/d0ugal/graith/compare/v0.8.0...v0.9.0) (2026-04-22)
+
+
+### Features
+
+* add ctrl+b n (new) and ctrl+b f (fork) keybindings ([a4bd9ec](https://github.com/d0ugal/graith/commit/a4bd9eccb8a39333c1f02e416d8f1daadc6765cf))
+
 ## [0.8.0](https://github.com/d0ugal/graith/compare/v0.7.0...v0.8.0) (2026-04-22)
 
 
