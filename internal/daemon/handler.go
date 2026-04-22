@@ -96,6 +96,19 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("created", toSessionInfo(sess))
 				}
 
+			case "fork":
+				var f protocol.ForkMsg
+				if err := protocol.DecodePayload(msg, &f); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid fork message"})
+					continue
+				}
+				sess, err := sm.Fork(f.Name, f.SourceSessionID, clientRows, clientCols)
+				if err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+				} else {
+					sendControl("created", toSessionInfo(sess))
+				}
+
 			case "attach":
 				var a protocol.AttachMsg
 				if err := protocol.DecodePayload(msg, &a); err != nil {
