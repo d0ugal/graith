@@ -8,20 +8,22 @@ import (
 var varPattern = regexp.MustCompile(`\{(\w+)\}`)
 
 type TemplateVars struct {
-	Username       string
-	AgentSessionID string
-	SessionName    string
-	SessionID      string
-	WorktreePath   string
+	Username                 string
+	AgentSessionID           string
+	SessionName              string
+	SessionID                string
+	WorktreePath             string
+	ForkSourceAgentSessionID string
 }
 
 func (v TemplateVars) toMap() map[string]string {
 	return map[string]string{
-		"username":         v.Username,
-		"agent_session_id": v.AgentSessionID,
-		"session_name":     v.SessionName,
-		"session_id":       v.SessionID,
-		"worktree_path":    v.WorktreePath,
+		"username":                     v.Username,
+		"agent_session_id":             v.AgentSessionID,
+		"session_name":                 v.SessionName,
+		"session_id":                   v.SessionID,
+		"worktree_path":                v.WorktreePath,
+		"fork_source_agent_session_id": v.ForkSourceAgentSessionID,
 	}
 }
 

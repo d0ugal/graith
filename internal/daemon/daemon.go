@@ -298,6 +298,125 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 	return *sessState, nil
 }
 
+// Fork creates a new session that branches from an existing session's git state
+// and uses the agent's fork_args to carry over the conversation history.
+func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) (SessionState, error) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	source, ok := sm.state.Sessions[sourceSessionID]
+	if !ok {
+		return SessionState{}, fmt.Errorf("source session %q not found", sourceSessionID)
+	}
+
+	agentName := source.Agent
+	agent, ok := sm.cfg.Agents[agentName]
+	if !ok {
+		return SessionState{}, fmt.Errorf("unknown agent %q", agentName)
+	}
+
+	id := generateID()
+
+	repoRoot := source.RepoPath
+	repoName := source.RepoName
+	baseBranch := source.Branch
+
+	username := sm.cfg.GitHubUsername
+	if username == "" && repoRoot != "" {
+		username, _ = git.DiscoverGitHubUsername(repoRoot)
+	}
+	if username == "" {
+		username = "user"
+	}
+
+	branchPrefix, _ := config.Expand(sm.cfg.BranchPrefix, config.TemplateVars{Username: username})
+	branchName := fmt.Sprintf("%s/%s-%s", branchPrefix, name, id)
+
+	worktreePath := filepath.Join(sm.paths.DataDir, "worktrees", repoName, repoHash(repoRoot), id)
+
+	if err := git.SetupSession(repoRoot, worktreePath, branchName, baseBranch, sm.cfg.FetchOnCreate); err != nil {
+		return SessionState{}, fmt.Errorf("setup git session: %w", err)
+	}
+
+	agentSessionID := ""
+	if agentName == "claude" {
+		b := make([]byte, 16)
+		_, _ = rand.Read(b)
+		agentSessionID = fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+	}
+
+	vars := config.TemplateVars{
+		Username:                 username,
+		AgentSessionID:           agentSessionID,
+		SessionName:              name,
+		SessionID:                id,
+		WorktreePath:             worktreePath,
+		ForkSourceAgentSessionID: source.AgentSessionID,
+	}
+
+	args := agent.ForkArgs
+	if len(args) == 0 {
+		args = agent.Args
+	}
+	expandedArgs, err := config.ExpandSlice(args, vars)
+	if err != nil {
+		_ = git.TeardownSession(repoRoot, worktreePath, branchName)
+		return SessionState{}, fmt.Errorf("expand fork args: %w", err)
+	}
+
+	logPath := filepath.Join(sm.paths.LogDir, id+".log")
+
+	env := make(map[string]string, len(agent.Env)+3)
+	for k, v := range agent.Env {
+		env[k] = v
+	}
+	env["GRAITH_SESSION_ID"] = id
+	env["GRAITH_SESSION_NAME"] = name
+	env["GRAITH_WORKTREE_PATH"] = worktreePath
+
+	ptySess, err := grpty.NewSession(grpty.SessionOpts{
+		ID:         id,
+		Command:    agent.Command,
+		Args:       expandedArgs,
+		Dir:        worktreePath,
+		Env:        env,
+		Rows:       rows,
+		Cols:       cols,
+		LogPath:    logPath,
+		MaxLogSize: 100 * 1024 * 1024,
+	})
+	if err != nil {
+		_ = git.TeardownSession(repoRoot, worktreePath, branchName)
+		return SessionState{}, fmt.Errorf("start pty session: %w", err)
+	}
+
+	sessState := &SessionState{
+		ID:             id,
+		Name:           name,
+		RepoPath:       repoRoot,
+		RepoName:       repoName,
+		WorktreePath:   worktreePath,
+		Branch:         branchName,
+		BaseBranch:     baseBranch,
+		Agent:          agentName,
+		AgentSessionID: agentSessionID,
+		Status:         StatusRunning,
+		PID:            ptySess.Cmd.Process.Pid,
+		CreatedAt:      time.Now().UTC(),
+	}
+
+	sm.state.Sessions[id] = sessState
+	sm.sessions[id] = ptySess
+
+	go sm.watchSession(id, ptySess)
+
+	if err := sm.saveState(); err != nil {
+		sm.log.Error("failed to save state", "err", err)
+	}
+
+	return *sessState, nil
+}
+
 // watchSession waits for a PTY session to exit and updates state accordingly.
 func (sm *SessionManager) watchSession(id string, sess *grpty.Session) {
 	<-sess.Done()
