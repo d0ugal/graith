@@ -331,7 +331,7 @@ type OverlayResult struct {
 	SessionID string
 }
 
-func sortSessions(sessions []protocol.SessionInfo, currentSessionID string) {
+func SortSessions(sessions []protocol.SessionInfo, currentSessionID string) {
 	sort.SliceStable(sessions, func(i, j int) bool {
 		si, sj := sessions[i], sessions[j]
 
@@ -382,7 +382,7 @@ func buildGroupedItems(sessions []protocol.SessionInfo, currentSessionID string)
 	}
 	sort.Strings(repoOrder)
 	for _, g := range groups {
-		sortSessions(g, currentSessionID)
+		SortSessions(g, currentSessionID)
 	}
 
 	var items []list.Item
@@ -519,6 +519,7 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				filtered := filterSessions(m.allSessions, m.filterInput.Value())
 				items := buildGroupedItems(filtered, m.currentSessionID)
 				m.list.SetItems(items)
+				m.list.Select(0)
 				if len(items) > 0 {
 					if _, ok := m.list.SelectedItem().(groupHeader); ok {
 						m.list.CursorDown()
