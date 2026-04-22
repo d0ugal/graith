@@ -110,6 +110,39 @@ func (s *Scrollback) Tail(lines int) ([]byte, error) {
 	return bytes.Join(chunks, nil), nil
 }
 
+// TailBytes returns up to maxBytes from the end of the scrollback file.
+func (s *Scrollback) TailBytes(maxBytes int64) ([]byte, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	f, err := os.Open(s.path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	info, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	size := info.Size()
+	if size == 0 {
+		return nil, nil
+	}
+
+	readSize := size
+	if maxBytes > 0 && readSize > maxBytes {
+		readSize = maxBytes
+	}
+
+	data := make([]byte, readSize)
+	_, err = f.ReadAt(data, size-readSize)
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
 func (s *Scrollback) Close() error { return s.file.Close() }
 
 func (s *Scrollback) Remove() error {
