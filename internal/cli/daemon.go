@@ -24,8 +24,9 @@ var daemonCmd = &cobra.Command{
 }
 
 var daemonStartCmd = &cobra.Command{
-	Use:   "start",
-	Short: "Start the daemon",
+	Use:    "start",
+	Short:  "Start the daemon",
+	Hidden: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return daemon.Run(cfg, paths, cfgFile, adoptFrom)
 	},
@@ -48,7 +49,7 @@ var daemonRestartCmd = &cobra.Command{
 	Short: "Restart the daemon (preserves sessions by default)",
 	Long: `Restart the daemon, picking up the latest binary and config.
 
-By default, live sessions are preserved via exec (same as 'upgrade').
+By default, live sessions are preserved via exec.
 Use --force to do a clean stop/start, which kills running agent sessions.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if forceClean {
@@ -69,7 +70,13 @@ var daemonReloadCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		c, err := client.Connect(cfg, paths, cfgFile)
 		if err != nil {
-			return fmt.Errorf("connect to daemon: %w", err)
+			conn, startErr := client.EnsureDaemon(paths.SocketPath, cfgFile)
+			if startErr != nil {
+				return fmt.Errorf("start daemon: %w", startErr)
+			}
+			conn.Close()
+			out.Print("Daemon started with current config\n")
+			return nil
 		}
 		defer c.Close()
 
@@ -87,14 +94,6 @@ var daemonReloadCmd = &cobra.Command{
 		}
 		out.Print("Config reloaded\n")
 		return nil
-	},
-}
-
-var daemonUpgradeCmd = &cobra.Command{
-	Use:   "upgrade",
-	Short: "Upgrade daemon binary without losing sessions",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return execUpgrade("Daemon upgraded successfully")
 	},
 }
 
@@ -164,8 +163,6 @@ func init() {
 	daemonCmd.AddCommand(daemonStopCmd)
 	daemonCmd.AddCommand(daemonRestartCmd)
 	daemonCmd.AddCommand(daemonReloadCmd)
-	daemonCmd.AddCommand(daemonUpgradeCmd)
-
 	daemonStartCmd.Flags().StringVar(&adoptFrom, "adopt-from", "", "")
 	daemonStartCmd.Flags().MarkHidden("adopt-from")
 
