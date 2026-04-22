@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/d0ugal/graith/compare/v0.5.1...v0.6.0) (2026-04-22)
+
+
+### Features
+
+* color-code session status in overlay ([f7d5a2c](https://github.com/d0ugal/graith/commit/f7d5a2c7e856561966e9c65441301ceb005be3ed))
+
 ## [0.5.1](https://github.com/d0ugal/graith/compare/v0.5.0...v0.5.1) (2026-04-22)
 
 
