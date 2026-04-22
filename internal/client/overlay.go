@@ -25,6 +25,18 @@ const (
 	stateConfirmDelete
 )
 
+var (
+	colorGreen   = lipgloss.Color("#00ff87")
+	colorRed     = lipgloss.Color("#ff5f5f")
+	colorBlue    = lipgloss.Color("#87afff")
+	colorGold    = lipgloss.Color("#FFD700")
+	colorPurple  = lipgloss.Color("#7B61FF")
+	colorDim     = lipgloss.Color("#626262")
+	colorFaint   = lipgloss.Color("#444444")
+	colorPreview = lipgloss.Color("#555555")
+	colorPanel   = lipgloss.Color("#1a1a1a")
+)
+
 type sessionItem struct {
 	info protocol.SessionInfo
 }
@@ -229,7 +241,7 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	width := m.Width()
 
 	if gh, ok := item.(groupHeader); ok {
-		style := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7B61FF"))
+		style := lipgloss.NewStyle().Bold(true).Foreground(colorPurple)
 		line := style.Render(fmt.Sprintf("▸ %s (%d)", gh.name, gh.count))
 		_, _ = fmt.Fprint(w, line)
 		return
@@ -240,24 +252,24 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 		return
 	}
 
-	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("#626262"))
+	dim := lipgloss.NewStyle().Foreground(colorDim)
 	isCurrent := si.info.ID == d.currentSessionID
 
 	indicator := "●"
-	indicatorColor := lipgloss.Color("#00ff87")
+	indicatorColor := colorGreen
 	switch si.info.Status {
 	case "stopped":
 		indicator = "○"
-		indicatorColor = lipgloss.Color("#626262")
+		indicatorColor = colorDim
 	case "errored":
 		indicator = "✗"
-		indicatorColor = lipgloss.Color("#ff5f5f")
+		indicatorColor = colorRed
 	}
 	styledIndicator := lipgloss.NewStyle().Foreground(indicatorColor).Render(indicator)
 
 	currentMark := "  "
 	if isCurrent {
-		currentMark = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFD700")).Render("★") + " "
+		currentMark = lipgloss.NewStyle().Foreground(colorGold).Render("★") + " "
 	}
 
 	name := pad(si.info.Name, d.cols.name)
@@ -268,18 +280,14 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	}
 	statusRendered := pad(status, d.cols.status)
 	switch status {
-	case "active":
-		statusRendered = lipgloss.NewStyle().Foreground(lipgloss.Color("#00ff87")).Render(statusRendered)
+	case "active", "running":
+		statusRendered = lipgloss.NewStyle().Foreground(colorGreen).Render(statusRendered)
 	case "approval":
-		statusRendered = lipgloss.NewStyle().Foreground(lipgloss.Color("#ff5f5f")).Bold(true).Render(statusRendered)
+		statusRendered = lipgloss.NewStyle().Foreground(colorRed).Bold(true).Render(statusRendered)
 	case "ready":
-		statusRendered = lipgloss.NewStyle().Foreground(lipgloss.Color("#87afff")).Render(statusRendered)
-	case "stopped":
-		statusRendered = dim.Render(statusRendered)
+		statusRendered = lipgloss.NewStyle().Foreground(colorBlue).Render(statusRendered)
 	case "errored":
-		statusRendered = lipgloss.NewStyle().Foreground(lipgloss.Color("#ff5f5f")).Render(statusRendered)
-	case "running":
-		statusRendered = lipgloss.NewStyle().Foreground(lipgloss.Color("#00ff87")).Render(statusRendered)
+		statusRendered = lipgloss.NewStyle().Foreground(colorRed).Render(statusRendered)
 	default:
 		statusRendered = dim.Render(statusRendered)
 	}
@@ -661,7 +669,7 @@ func (m overlayModel) View() tea.View {
 	}
 
 	panelWidth := min(m.contentWidth+4, w-4)
-	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("#626262"))
+	dim := lipgloss.NewStyle().Foreground(colorDim)
 
 	var panelContent strings.Builder
 
@@ -670,7 +678,7 @@ func (m overlayModel) View() tea.View {
 		panelContent.WriteString(m.filterInput.View())
 		panelContent.WriteString("\n")
 	} else {
-		titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7B61FF"))
+		titleStyle := lipgloss.NewStyle().Bold(true).Foreground(colorPurple)
 		panelContent.WriteString(titleStyle.Render("Sessions"))
 		panelContent.WriteString("\n")
 	}
@@ -739,25 +747,25 @@ func (m overlayModel) View() tea.View {
 		if item, ok := m.list.SelectedItem().(sessionItem); ok {
 			panelContent.WriteString("\n")
 			panelContent.WriteString(lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#ff5f5f")).
+				Foreground(colorRed).
 				Render(fmt.Sprintf("Delete '%s'? [y/N]", item.info.Name)))
 		}
 	}
 
-	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#444444"))
+	helpStyle := lipgloss.NewStyle().Foreground(colorFaint)
 	panelContent.WriteString("\n")
 	panelContent.WriteString(helpStyle.Render("enter attach  / filter  tab group  x delete  q quit"))
 
 	panel := lipgloss.NewStyle().
 		Width(panelWidth).
-		Background(lipgloss.Color("#1a1a1a")).
+		Background(colorPanel).
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#444444")).
+		BorderForeground(colorFaint).
 		Padding(0, 1).
 		Render(panelContent.String())
 
 	// --- Build background from preview scrollback ---
-	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
+	dimStyle := lipgloss.NewStyle().Foreground(colorPreview)
 	bgLines := make([]string, h)
 	if m.previewContent != "" {
 		raw := strings.Split(m.previewContent, "\n")
