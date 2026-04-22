@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.7.0](https://github.com/d0ugal/graith/compare/v0.6.1...v0.7.0) (2026-04-22)
+
+
+### Features
+
+* redesign status bar with colors and fleet summary ([3a7e3cf](https://github.com/d0ugal/graith/commit/3a7e3cf60ee4d0e966158497c99975e9f24a5e41))
+
+
+### Bug Fixes
+
+* update module golang.org/x/sync to v0.21.0 ([ad408f3](https://github.com/d0ugal/graith/commit/ad408f327b85721875a466fbb09eabb24d6e5c61))
+* update module golang.org/x/sys to v0.46.0 ([09e327f](https://github.com/d0ugal/graith/commit/09e327fdb93035d4d734f16508c2eeabfa414e36))
+
 ## [0.6.1](https://github.com/d0ugal/graith/compare/v0.6.0...v0.6.1) (2026-04-22)
 
 
