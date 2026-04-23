@@ -304,6 +304,63 @@ func TestSandboxConfigMergeAgentEnabled(t *testing.T) {
 	}
 }
 
+func TestExpandPath(t *testing.T) {
+	home, _ := os.UserHomeDir()
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"~/Code", filepath.Join(home, "Code")},
+		{"/absolute/path", "/absolute/path"},
+		{"~/", home},
+	}
+	for _, tt := range tests {
+		got := ExpandPath(tt.input)
+		if got != tt.want {
+			t.Errorf("ExpandPath(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestRepoPathAllowed(t *testing.T) {
+	home, _ := os.UserHomeDir()
+
+	t.Run("empty allows all", func(t *testing.T) {
+		cfg := &Config{}
+		if !cfg.RepoPathAllowed("/any/path") {
+			t.Error("empty AllowedRepoPaths should allow all")
+		}
+	})
+
+	t.Run("exact match", func(t *testing.T) {
+		cfg := &Config{AllowedRepoPaths: []string{"~/Code"}}
+		if !cfg.RepoPathAllowed(filepath.Join(home, "Code")) {
+			t.Error("exact match should be allowed")
+		}
+	})
+
+	t.Run("subdir allowed", func(t *testing.T) {
+		cfg := &Config{AllowedRepoPaths: []string{"~/Code"}}
+		if !cfg.RepoPathAllowed(filepath.Join(home, "Code/graith")) {
+			t.Error("subdir should be allowed")
+		}
+	})
+
+	t.Run("outside denied", func(t *testing.T) {
+		cfg := &Config{AllowedRepoPaths: []string{"~/Code"}}
+		if cfg.RepoPathAllowed("/tmp/evil-repo") {
+			t.Error("path outside allowed dirs should be denied")
+		}
+	})
+
+	t.Run("prefix trick denied", func(t *testing.T) {
+		cfg := &Config{AllowedRepoPaths: []string{"~/Code"}}
+		if cfg.RepoPathAllowed(filepath.Join(home, "Code-evil")) {
+			t.Error("prefix without separator should be denied")
+		}
+	})
+}
+
 func TestSandboxConfigMergeDeduplicatesFeatures(t *testing.T) {
 	global := SandboxConfig{
 		Enabled:  true,
