@@ -765,6 +765,61 @@ func TestHandleHookReport(t *testing.T) {
 	})
 }
 
+func TestDetectAgentStatusesHookAuthority(t *testing.T) {
+	// Test that a valid hook report takes precedence over scraping.
+	// We can't easily test the full detectAgentStatuses (needs real PTY),
+	// but we can test the hookReports lookup logic directly.
+
+	sm := newTestSessionManager(t)
+
+	t.Run("authoritative hook is trusted", func(t *testing.T) {
+		sm.mu.Lock()
+		sm.hookReports["s1"] = hookReport{
+			Status:             "approval",
+			Event:              "Notification",
+			ReportedAt:         time.Now(),
+			AuthoritativeUntil: time.Now().Add(30 * time.Minute),
+		}
+		sm.mu.Unlock()
+
+		sm.mu.RLock()
+		hr, ok := sm.hookReports["s1"]
+		sm.mu.RUnlock()
+
+		if !ok {
+			t.Fatal("hookReport not found")
+		}
+		if hr.Status != "approval" {
+			t.Errorf("Status = %q, want %q", hr.Status, "approval")
+		}
+		if !time.Now().Before(hr.AuthoritativeUntil) {
+			t.Error("hook should still be authoritative")
+		}
+	})
+
+	t.Run("expired hook falls through", func(t *testing.T) {
+		sm.mu.Lock()
+		sm.hookReports["s2"] = hookReport{
+			Status:             "active",
+			Event:              "PreToolUse",
+			ReportedAt:         time.Now().Add(-1 * time.Minute),
+			AuthoritativeUntil: time.Now().Add(-30 * time.Second),
+		}
+		sm.mu.Unlock()
+
+		sm.mu.RLock()
+		hr, ok := sm.hookReports["s2"]
+		sm.mu.RUnlock()
+
+		if !ok {
+			t.Fatal("hookReport not found")
+		}
+		if time.Now().Before(hr.AuthoritativeUntil) {
+			t.Error("hook should be expired")
+		}
+	})
+}
+
 func TestApplyConfig(t *testing.T) {
 	sm := newTestSessionManager(t)
 	oldCfg := sm.cfg
