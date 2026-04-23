@@ -19,8 +19,9 @@ var (
 
 // hookStdin represents common fields from Claude/Codex hook JSON payloads.
 type hookStdin struct {
-	ToolName string `json:"tool_name"`
-	Model    struct {
+	ToolName         string `json:"tool_name"`
+	NotificationType string `json:"notification_type"`
+	Model            struct {
 		DisplayName string `json:"display_name"`
 	} `json:"model"`
 	Cost struct {
@@ -46,23 +47,33 @@ var reportStatusCmd = &cobra.Command{
 			return nil
 		}
 
-		// Try to parse stdin for enrichment data (non-blocking)
-		var stdinData hookStdin
-		stdinParsed := false
-		done := make(chan struct{})
+		// Try to parse stdin for enrichment data (non-blocking, channel-safe)
+		type stdinResult struct {
+			data   hookStdin
+			parsed bool
+		}
+		ch := make(chan stdinResult, 1)
 		go func() {
-			defer close(done)
 			data, err := io.ReadAll(os.Stdin)
 			if err == nil && len(data) > 0 {
-				if json.Unmarshal(data, &stdinData) == nil {
-					stdinParsed = true
+				var parsed hookStdin
+				if json.Unmarshal(data, &parsed) == nil {
+					ch <- stdinResult{data: parsed, parsed: true}
+					return
 				}
 			}
+			ch <- stdinResult{}
 		}()
-		// Wait up to 100ms for stdin
+
+		var stdin stdinResult
 		select {
-		case <-done:
+		case stdin = <-ch:
 		case <-time.After(100 * time.Millisecond):
+		}
+
+		// Filter Notification events: only permission_prompt maps to approval
+		if event == "Notification" && stdin.parsed && stdin.data.NotificationType != "permission_prompt" {
+			return nil
 		}
 
 		msg := protocol.StatusReportMsg{
@@ -71,19 +82,19 @@ var reportStatusCmd = &cobra.Command{
 			ToolName:  reportTool,
 		}
 
-		if stdinParsed {
-			if stdinData.ToolName != "" && msg.ToolName == "" {
-				msg.ToolName = stdinData.ToolName
+		if stdin.parsed {
+			if stdin.data.ToolName != "" && msg.ToolName == "" {
+				msg.ToolName = stdin.data.ToolName
 			}
-			if stdinData.Model.DisplayName != "" {
-				msg.Model = stdinData.Model.DisplayName
+			if stdin.data.Model.DisplayName != "" {
+				msg.Model = stdin.data.Model.DisplayName
 			}
-			if stdinData.Cost.TotalCostUSD > 0 {
-				cost := stdinData.Cost.TotalCostUSD
+			if stdin.data.Cost.TotalCostUSD > 0 {
+				cost := stdin.data.Cost.TotalCostUSD
 				msg.Usage = &protocol.UsageReport{CostUSD: &cost}
 			}
-			if stdinData.ContextWindow.UsedPercentage > 0 {
-				pct := stdinData.ContextWindow.UsedPercentage
+			if stdin.data.ContextWindow.UsedPercentage > 0 {
+				pct := stdin.data.ContextWindow.UsedPercentage
 				msg.Context = &protocol.ContextReport{Percent: &pct}
 			}
 		}

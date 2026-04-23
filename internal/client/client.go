@@ -64,6 +64,7 @@ func ConnectFast(paths config.Paths) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("daemon not reachable: %w", err)
 	}
+	conn.SetDeadline(time.Now().Add(2 * time.Second))
 	c := &Client{
 		conn:   conn,
 		reader: protocol.NewFrameReader(conn),
