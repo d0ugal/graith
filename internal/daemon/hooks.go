@@ -78,7 +78,7 @@ func (sm *SessionManager) generateClaudeSettings(sessionID, hookScript string) (
 	}
 	for _, event := range events {
 		settings.Hooks[event] = []hookEntry{
-			{Type: "command", Command: fmt.Sprintf("%s --event %s", hookScript, event)},
+			{Type: "command", Command: fmt.Sprintf("'%s' --event %s", hookScript, event)},
 		}
 	}
 
@@ -139,7 +139,7 @@ func (sm *SessionManager) injectCodexHooks(sessionID string) (extraArgs []string
 	}
 
 	for filename, eventName := range events {
-		script := fmt.Sprintf("#!/bin/sh\nexec %s --event %s\n", hookScript, eventName)
+		script := fmt.Sprintf("#!/bin/sh\nexec '%s' --event %s\n", hookScript, eventName)
 		path := filepath.Join(hooksDir, filename)
 		if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 			return nil, nil, fmt.Errorf("write codex hook %s: %w", filename, err)
