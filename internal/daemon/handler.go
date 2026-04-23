@@ -499,6 +499,15 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					Fleet:       fleet,
 				})
 
+			case "status_report":
+				var sr protocol.StatusReportMsg
+				if err := protocol.DecodePayload(msg, &sr); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid status_report"})
+					continue
+				}
+				sm.HandleHookReport(sr)
+				sendControl("status_reported", struct{}{})
+
 			case "upgrade":
 				select {
 				case sm.upgradeCh <- struct{}{}:
