@@ -393,19 +393,25 @@ func TestSetAndClearAttachedClient(t *testing.T) {
 func TestToSessionInfo(t *testing.T) {
 	exitCode := 42
 	createdAt := time.Date(2025, 1, 15, 10, 30, 0, 0, time.UTC)
+	cost := 0.12
+	ctxPct := 55.5
 
 	sess := SessionState{
-		ID:             "abc123",
-		Name:           "fix-bug",
-		RepoPath:       "/home/user/repo",
-		RepoName:       "repo",
-		WorktreePath:   "/home/user/.local/share/graith/worktrees/abc123",
-		Branch:         "user/graith/fix-bug-abc123",
-		Agent:          "claude",
-		AgentSessionID: "session-id-123",
-		Status:         StatusStopped,
-		ExitCode:       &exitCode,
-		CreatedAt:      createdAt,
+		ID:                 "abc123",
+		Name:               "fix-bug",
+		RepoPath:           "/home/user/repo",
+		RepoName:           "repo",
+		WorktreePath:       "/home/user/.local/share/graith/worktrees/abc123",
+		Branch:             "user/graith/fix-bug-abc123",
+		Agent:              "claude",
+		AgentSessionID:     "session-id-123",
+		Status:             StatusStopped,
+		ExitCode:           &exitCode,
+		CreatedAt:          createdAt,
+		HookModel:          "claude-sonnet-4-5-20250514",
+		HookToolName:       "Bash",
+		HookCostUSD:        &cost,
+		HookContextPercent: &ctxPct,
 	}
 
 	info := toSessionInfo(sess)
@@ -443,6 +449,18 @@ func TestToSessionInfo(t *testing.T) {
 	wantCreatedAt := createdAt.Format(time.RFC3339)
 	if info.CreatedAt != wantCreatedAt {
 		t.Errorf("CreatedAt = %q, want %q", info.CreatedAt, wantCreatedAt)
+	}
+	if info.Model != "claude-sonnet-4-5-20250514" {
+		t.Errorf("Model = %q, want %q", info.Model, "claude-sonnet-4-5-20250514")
+	}
+	if info.ToolName != "Bash" {
+		t.Errorf("ToolName = %q, want %q", info.ToolName, "Bash")
+	}
+	if info.CostUSD == nil || *info.CostUSD != 0.12 {
+		t.Errorf("CostUSD = %v, want 0.12", info.CostUSD)
+	}
+	if info.ContextPercent == nil || *info.ContextPercent != 55.5 {
+		t.Errorf("ContextPercent = %v, want 55.5", info.ContextPercent)
 	}
 }
 
@@ -754,6 +772,7 @@ func TestHandleHookReport(t *testing.T) {
 
 		sm.mu.RLock()
 		report, ok := sm.hookReports["sess1"]
+		sess := sm.state.Sessions["sess1"]
 		sm.mu.RUnlock()
 
 		if !ok {
@@ -761,6 +780,108 @@ func TestHandleHookReport(t *testing.T) {
 		}
 		if report.ToolName != "Bash" {
 			t.Errorf("ToolName = %q, want %q", report.ToolName, "Bash")
+		}
+		if sess.HookToolName != "Bash" {
+			t.Errorf("sess.HookToolName = %q, want %q", sess.HookToolName, "Bash")
+		}
+	})
+
+	t.Run("enrichment data accumulated", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.state.Sessions["s1"] = &SessionState{
+			ID: "s1", Name: "test", Status: StatusRunning, Agent: "claude",
+		}
+
+		cost := 0.05
+		sm.HandleHookReport(protocol.StatusReportMsg{
+			SessionID: "s1",
+			Event:     "Stop",
+			Model:     "claude-sonnet-4-5-20250514",
+			Usage:     &protocol.UsageReport{CostUSD: &cost},
+		})
+
+		sm.mu.RLock()
+		hr := sm.hookReports["s1"]
+		sess := sm.state.Sessions["s1"]
+		sm.mu.RUnlock()
+
+		if hr.Model != "claude-sonnet-4-5-20250514" {
+			t.Errorf("Model = %q, want %q", hr.Model, "claude-sonnet-4-5-20250514")
+		}
+		if hr.CostUSD == nil || *hr.CostUSD != 0.05 {
+			t.Errorf("CostUSD = %v, want 0.05", hr.CostUSD)
+		}
+		if sess.HookModel != "claude-sonnet-4-5-20250514" {
+			t.Errorf("sess.HookModel = %q, want %q", sess.HookModel, "claude-sonnet-4-5-20250514")
+		}
+		if sess.HookCostUSD == nil || *sess.HookCostUSD != 0.05 {
+			t.Errorf("sess.HookCostUSD = %v, want 0.05", sess.HookCostUSD)
+		}
+
+		// Send another event without cost — cost should be preserved
+		sm.HandleHookReport(protocol.StatusReportMsg{
+			SessionID: "s1",
+			Event:     "PreToolUse",
+			ToolName:  "Bash",
+		})
+
+		sm.mu.RLock()
+		hr2 := sm.hookReports["s1"]
+		sess2 := sm.state.Sessions["s1"]
+		sm.mu.RUnlock()
+
+		if hr2.CostUSD == nil || *hr2.CostUSD != 0.05 {
+			t.Errorf("CostUSD should be preserved, got %v", hr2.CostUSD)
+		}
+		if hr2.Model != "claude-sonnet-4-5-20250514" {
+			t.Errorf("Model should be preserved, got %q", hr2.Model)
+		}
+		if sess2.HookCostUSD == nil || *sess2.HookCostUSD != 0.05 {
+			t.Errorf("sess.HookCostUSD should be preserved, got %v", sess2.HookCostUSD)
+		}
+		if sess2.HookModel != "claude-sonnet-4-5-20250514" {
+			t.Errorf("sess.HookModel should be preserved, got %q", sess2.HookModel)
+		}
+	})
+
+	t.Run("context percent accumulated", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.state.Sessions["s1"] = &SessionState{
+			ID: "s1", Name: "test", Status: StatusRunning, Agent: "claude",
+		}
+
+		pct := 42.5
+		sm.HandleHookReport(protocol.StatusReportMsg{
+			SessionID: "s1",
+			Event:     "PostToolUse",
+			Context:   &protocol.ContextReport{Percent: &pct},
+		})
+
+		sm.mu.RLock()
+		hr := sm.hookReports["s1"]
+		sess := sm.state.Sessions["s1"]
+		sm.mu.RUnlock()
+
+		if hr.ContextPercent == nil || *hr.ContextPercent != 42.5 {
+			t.Errorf("ContextPercent = %v, want 42.5", hr.ContextPercent)
+		}
+		if sess.HookContextPercent == nil || *sess.HookContextPercent != 42.5 {
+			t.Errorf("sess.HookContextPercent = %v, want 42.5", sess.HookContextPercent)
+		}
+
+		// Send another event without context — should be preserved
+		sm.HandleHookReport(protocol.StatusReportMsg{
+			SessionID: "s1",
+			Event:     "PreToolUse",
+			ToolName:  "Read",
+		})
+
+		sm.mu.RLock()
+		hr2 := sm.hookReports["s1"]
+		sm.mu.RUnlock()
+
+		if hr2.ContextPercent == nil || *hr2.ContextPercent != 42.5 {
+			t.Errorf("ContextPercent should be preserved, got %v", hr2.ContextPercent)
 		}
 	})
 }

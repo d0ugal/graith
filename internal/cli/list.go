@@ -71,7 +71,7 @@ var listCmd = &cobra.Command{
 		now := time.Now()
 
 		tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "NAME\tREPO\tAGENT\tSTATUS\tACTIVITY\tBRANCH\tGIT\tAGE\tATTACHED")
+		fmt.Fprintln(tw, "NAME\tREPO\tAGENT\tSTATUS\tACTIVITY\tMODEL\tCOST\tBRANCH\tGIT\tAGE\tATTACHED")
 		for _, s := range list.Sessions {
 			gitStatus := ""
 			if s.Dirty {
@@ -90,6 +90,18 @@ var listCmd = &cobra.Command{
 			}
 			if agentStatus == "approval" {
 				agentStatus = "⚠ approval"
+			} else if agentStatus == "active" && s.ToolName != "" {
+				agentStatus = fmt.Sprintf("active (%s)", s.ToolName)
+			}
+
+			model := ""
+			if s.Model != "" {
+				model = s.Model
+			}
+
+			cost := ""
+			if s.CostUSD != nil {
+				cost = fmt.Sprintf("$%.2f", *s.CostUSD)
 			}
 
 			age := ""
@@ -113,8 +125,8 @@ var listCmd = &cobra.Command{
 				}
 			}
 
-			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				s.Name, s.RepoName, s.Agent, s.Status, agentStatus, branch, gitStatus, age, attached)
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				s.Name, s.RepoName, s.Agent, s.Status, agentStatus, model, cost, branch, gitStatus, age, attached)
 		}
 		tw.Flush()
 
