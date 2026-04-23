@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/protocol"
 )
 
 func newTestSessionManager(t *testing.T) *SessionManager {
@@ -99,6 +100,9 @@ func TestNewSessionManager(t *testing.T) {
 	}
 	if sm.attachedClients == nil {
 		t.Fatal("attachedClients map is nil")
+	}
+	if sm.hookReports == nil {
+		t.Fatal("hookReports map is nil")
 	}
 	if sm.cfg != cfg {
 		t.Error("cfg not set correctly")
@@ -588,6 +592,175 @@ func TestIdleTracking(t *testing.T) {
 
 		if shouldStop {
 			t.Error("should never stop when idle timeout is disabled")
+		}
+	})
+}
+
+func TestHandleHookReport(t *testing.T) {
+	t.Run("active event", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.state.Sessions["sess1"] = &SessionState{
+			ID: "sess1", Name: "test", Status: StatusRunning,
+		}
+
+		sm.HandleHookReport(protocol.StatusReportMsg{
+			SessionID: "sess1",
+			Event:     "PreToolUse",
+			ToolName:  "Bash",
+		})
+
+		sm.mu.RLock()
+		report, ok := sm.hookReports["sess1"]
+		sm.mu.RUnlock()
+
+		if !ok {
+			t.Fatal("hookReport not found for sess1")
+		}
+		if report.Status != "active" {
+			t.Errorf("Status = %q, want %q", report.Status, "active")
+		}
+		if report.Event != "PreToolUse" {
+			t.Errorf("Event = %q, want %q", report.Event, "PreToolUse")
+		}
+		// AuthoritativeUntil should be ~30s in the future
+		untilDelta := time.Until(report.AuthoritativeUntil)
+		if untilDelta < 29*time.Second || untilDelta > 31*time.Second {
+			t.Errorf("AuthoritativeUntil delta = %v, want ~30s", untilDelta)
+		}
+	})
+
+	t.Run("approval event", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.state.Sessions["sess1"] = &SessionState{
+			ID: "sess1", Name: "test", Status: StatusRunning,
+		}
+
+		sm.HandleHookReport(protocol.StatusReportMsg{
+			SessionID: "sess1",
+			Event:     "Notification",
+		})
+
+		sm.mu.RLock()
+		report, ok := sm.hookReports["sess1"]
+		sm.mu.RUnlock()
+
+		if !ok {
+			t.Fatal("hookReport not found for sess1")
+		}
+		if report.Status != "approval" {
+			t.Errorf("Status = %q, want %q", report.Status, "approval")
+		}
+		// AuthoritativeUntil should be ~30 minutes in the future (sticky)
+		untilDelta := time.Until(report.AuthoritativeUntil)
+		if untilDelta < 29*time.Minute || untilDelta > 31*time.Minute {
+			t.Errorf("AuthoritativeUntil delta = %v, want ~30m", untilDelta)
+		}
+	})
+
+	t.Run("ready event", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.state.Sessions["sess1"] = &SessionState{
+			ID: "sess1", Name: "test", Status: StatusRunning,
+		}
+
+		sm.HandleHookReport(protocol.StatusReportMsg{
+			SessionID: "sess1",
+			Event:     "Stop",
+		})
+
+		sm.mu.RLock()
+		report, ok := sm.hookReports["sess1"]
+		sm.mu.RUnlock()
+
+		if !ok {
+			t.Fatal("hookReport not found for sess1")
+		}
+		if report.Status != "ready" {
+			t.Errorf("Status = %q, want %q", report.Status, "ready")
+		}
+	})
+
+	t.Run("unknown session", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+
+		// Should not panic
+		sm.HandleHookReport(protocol.StatusReportMsg{
+			SessionID: "nonexistent",
+			Event:     "PreToolUse",
+		})
+
+		sm.mu.RLock()
+		_, ok := sm.hookReports["nonexistent"]
+		sm.mu.RUnlock()
+
+		if ok {
+			t.Error("hookReport should not be created for unknown session")
+		}
+	})
+
+	t.Run("unknown event", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.state.Sessions["sess1"] = &SessionState{
+			ID: "sess1", Name: "test", Status: StatusRunning,
+		}
+
+		sm.HandleHookReport(protocol.StatusReportMsg{
+			SessionID: "sess1",
+			Event:     "SomeFutureEvent",
+		})
+
+		sm.mu.RLock()
+		_, ok := sm.hookReports["sess1"]
+		sm.mu.RUnlock()
+
+		if ok {
+			t.Error("hookReport should not be created for unknown event")
+		}
+	})
+
+	t.Run("status change updates AgentStatus", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.state.Sessions["sess1"] = &SessionState{
+			ID: "sess1", Name: "test", Status: StatusRunning,
+			AgentStatus: "active",
+		}
+
+		sm.HandleHookReport(protocol.StatusReportMsg{
+			SessionID: "sess1",
+			Event:     "Stop",
+		})
+
+		sm.mu.RLock()
+		sess := sm.state.Sessions["sess1"]
+		agentStatus := sess.AgentStatus
+		sm.mu.RUnlock()
+
+		if agentStatus != "ready" {
+			t.Errorf("AgentStatus = %q, want %q", agentStatus, "ready")
+		}
+	})
+
+	t.Run("tool name stored", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.state.Sessions["sess1"] = &SessionState{
+			ID: "sess1", Name: "test", Status: StatusRunning,
+		}
+
+		sm.HandleHookReport(protocol.StatusReportMsg{
+			SessionID: "sess1",
+			Event:     "PreToolUse",
+			ToolName:  "Bash",
+		})
+
+		sm.mu.RLock()
+		report, ok := sm.hookReports["sess1"]
+		sm.mu.RUnlock()
+
+		if !ok {
+			t.Fatal("hookReport not found for sess1")
+		}
+		if report.ToolName != "Bash" {
+			t.Errorf("ToolName = %q, want %q", report.ToolName, "Bash")
 		}
 	})
 }

@@ -27,12 +27,23 @@ type attachedClient struct {
 	kick func()
 }
 
+// hookReport tracks the latest status report from an agent hook.
+// This is runtime-only and NOT persisted to state.json.
+type hookReport struct {
+	Status             string
+	Event              string
+	ToolName           string
+	ReportedAt         time.Time
+	AuthoritativeUntil time.Time
+}
+
 // SessionManager orchestrates PTY sessions, state persistence, and git worktrees.
 type SessionManager struct {
 	mu              sync.RWMutex
 	state           *State
 	sessions        map[string]*grpty.Session
 	attachedClients map[string]*attachedClient
+	hookReports     map[string]hookReport
 	cfg             *config.Config
 	paths           config.Paths
 	log             *slog.Logger
@@ -47,6 +58,7 @@ func NewSessionManager(cfg *config.Config, paths config.Paths, log *slog.Logger)
 		state:           NewState(),
 		sessions:        make(map[string]*grpty.Session),
 		attachedClients: make(map[string]*attachedClient),
+		hookReports:     make(map[string]hookReport),
 		cfg:             cfg,
 		paths:           paths,
 		log:             log,
@@ -55,6 +67,67 @@ func NewSessionManager(cfg *config.Config, paths config.Paths, log *slog.Logger)
 
 func (sm *SessionManager) SetMsgStore(ms *MsgStore) {
 	sm.messages = ms
+}
+
+// HandleHookReport processes a status report from an agent hook, updating the
+// in-memory hookReports map and the session's AgentStatus. This is the
+// authoritative source of agent status when hooks are active.
+func (sm *SessionManager) HandleHookReport(sr protocol.StatusReportMsg) {
+	var status string
+	var staleness time.Duration
+
+	switch sr.Event {
+	case "SessionStart":
+		status = "active"
+		staleness = 5 * time.Second
+	case "UserPromptSubmit", "PreToolUse", "PostToolUse":
+		status = "active"
+		staleness = 30 * time.Second
+	case "Notification", "PermissionRequest":
+		status = "approval"
+		staleness = 30 * time.Minute
+	case "Stop":
+		status = "ready"
+		staleness = 30 * time.Minute
+	default:
+		sm.log.Info("ignoring unknown hook event", "event", sr.Event, "session_id", sr.SessionID)
+		return
+	}
+
+	now := time.Now()
+	report := hookReport{
+		Status:             status,
+		Event:              sr.Event,
+		ToolName:           sr.ToolName,
+		ReportedAt:         now,
+		AuthoritativeUntil: now.Add(staleness),
+	}
+
+	var oldStatus string
+	var name string
+	var changed bool
+
+	sm.mu.Lock()
+	sess, ok := sm.state.Sessions[sr.SessionID]
+	if !ok {
+		sm.mu.Unlock()
+		sm.log.Info("hook report for unknown session", "session_id", sr.SessionID)
+		return
+	}
+	oldStatus = sess.AgentStatus
+	name = sess.Name
+	sm.hookReports[sr.SessionID] = report
+	changed = oldStatus != status
+	sess.AgentStatus = status
+	sm.mu.Unlock()
+
+	sm.log.Info("hook report processed",
+		"session_id", sr.SessionID, "event", sr.Event,
+		"status", status, "tool_name", sr.ToolName)
+
+	if changed {
+		sm.onAgentStatusChange(sr.SessionID, name, oldStatus, status)
+	}
 }
 
 func (sm *SessionManager) KickAttachedClient(sessionID string) {
