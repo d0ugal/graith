@@ -228,6 +228,77 @@ gr completion fish | source
   - Channel `0x00`: JSON control messages, envelope `{"type":"...","payload":{...}}`
   - Channel `0x01`: raw PTY data
 
+## Sandbox (macOS)
+
+graith can wrap agent processes with [safehouse](https://github.com/nicholasgasior/safehouse), a macOS kernel-level sandbox. This lets you run agents with their "skip permissions" flags (e.g. `--dangerously-skip-permissions` for Claude, `--dangerously-bypass-approvals-and-sandbox` for Codex) while confining them to a deny-by-default sandbox that restricts file access, network, and system calls.
+
+Sandboxing is **config-only** — there are no CLI flags to enable or disable it. This prevents a sandboxed agent from spawning a child agent that escapes the sandbox.
+
+### Setup
+
+1. Install safehouse: `brew install nicholasgasior/tools/safehouse`
+2. Verify: `gr doctor` (checks for safehouse on `$PATH`)
+3. Add to your config:
+
+```toml
+allowed_repo_paths = ["~/Code"]         # restrict which repos the daemon will create sessions in
+
+[sandbox]
+enabled  = true                         # wrap all agents with safehouse
+features = ["ssh", "process-control"]   # safehouse feature gates to enable
+read_dirs  = ["~/Code"]                 # additional read-only paths
+write_dirs = []                         # additional read-write paths
+
+[agents.claude]
+command     = "claude"
+args        = ["--dangerously-skip-permissions", "--session-id", "{agent_session_id}"]
+resume_args = ["--dangerously-skip-permissions", "--resume", "{agent_session_id}"]
+
+[agents.codex]
+command     = "codex"
+args        = ["--dangerously-bypass-approvals-and-sandbox"]
+resume_args = ["resume", "--last", "--dangerously-bypass-approvals-and-sandbox"]
+```
+
+### How it works
+
+When `sandbox.enabled = true`, the daemon wraps the agent command with `safehouse wrap`. The agent process runs inside a macOS `sandbox-exec` policy that:
+
+- **Denies all file access by default**, then allows the session worktree (read-write), plus any paths in `read_dirs`/`write_dirs`
+- **Strips the environment** (`/usr/bin/env -i`) and re-adds only what the agent needs
+- **Gates capabilities** behind `features` — e.g. `ssh` grants `SSH_AUTH_SOCK` access, `process-control` allows signal sending
+
+The sandbox **fails closed**: if `sandbox.enabled = true` but safehouse isn't installed, session creation is refused with an error. `gr doctor` checks this proactively.
+
+### Per-agent overrides
+
+Each agent can extend or disable the global sandbox config:
+
+```toml
+[sandbox]
+enabled  = true
+features = ["ssh"]
+
+[agents.claude.sandbox]
+features = ["clipboard"]                # merged with global: ["ssh", "clipboard"]
+write_dirs = ["~/.claude"]             # agent-specific write access
+
+[agents.codex.sandbox]
+disabled = true                         # opt this agent out of sandboxing
+```
+
+Features and directories are merged (global + agent). Setting `disabled = true` on an agent overrides `enabled = true` on the global config.
+
+### Path restrictions
+
+`allowed_repo_paths` limits which directories the daemon will accept for `--repo` / `-C`. If set, any repo path outside these prefixes is rejected. Paths support `~` expansion and are resolved to absolute paths before comparison.
+
+```toml
+allowed_repo_paths = ["~/Code", "~/Work"]
+```
+
+When empty (the default), any repo path is accepted.
+
 ## Configuration
 
 Config lives at `~/.config/graith/config.toml` (or `$XDG_CONFIG_HOME/graith/config.toml`). All fields are optional — sensible defaults are provided. The block below shows every option at its default value.
@@ -237,6 +308,14 @@ default_agent   = "claude"              # agent used when --agent isn't given
 github_username = ""                    # used by {username} in branch_prefix
 branch_prefix   = "{username}/graith"   # template for new branch names
 fetch_on_create = true                  # fetch origin before creating a worktree
+# allowed_repo_paths = ["~/Code"]       # restrict which repos the daemon allows (empty = any)
+
+[sandbox]
+enabled    = false                      # wrap agents with safehouse (macOS only)
+# command  = "safehouse"               # path to safehouse binary (default: "safehouse")
+# features = ["ssh", "process-control"] # safehouse feature gates
+# read_dirs  = []                       # additional read-only paths for sandboxed agents
+# write_dirs = []                       # additional read-write paths for sandboxed agents
 
 [status_bar]
 enabled  = true                         # show a status bar while attached
@@ -273,6 +352,9 @@ args        = ["--session-id", "{agent_session_id}"]
 resume_args = ["--resume", "{agent_session_id}"]
 # env         = { KEY = "value" }       # extra env for the agent process (optional)
 # idle_timeout = "1h"                   # stop after idle (defaults to 1h if resume_args set)
+# [agents.claude.sandbox]              # per-agent sandbox overrides (merged with global)
+# features  = ["clipboard"]
+# write_dirs = ["~/.claude"]
 
 [agents.codex]
 command     = "codex"
