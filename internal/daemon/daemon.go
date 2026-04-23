@@ -354,7 +354,8 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 	env["GRAITH_SESSION_NAME"] = name
 	env["GRAITH_WORKTREE_PATH"] = worktreePath
 
-	if agentName == "claude" {
+	switch agentName {
+	case "claude":
 		hookArgs, hookEnv, err := sm.injectClaudeHooks(id)
 		if err != nil {
 			sm.log.Warn("failed to inject hooks", "session_id", id, "err", err)
@@ -364,7 +365,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 				env[k] = v
 			}
 		}
-	} else if agentName == "codex" {
+	case "codex":
 		hookArgs, hookEnv, err := sm.injectCodexHooks(id)
 		if err != nil {
 			sm.log.Warn("failed to inject hooks", "session_id", id, "err", err)
@@ -524,7 +525,8 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 	env["GRAITH_SESSION_NAME"] = name
 	env["GRAITH_WORKTREE_PATH"] = worktreePath
 
-	if agentName == "claude" {
+	switch agentName {
+	case "claude":
 		hookArgs, hookEnv, err := sm.injectClaudeHooks(id)
 		if err != nil {
 			sm.log.Warn("failed to inject hooks", "session_id", id, "err", err)
@@ -534,7 +536,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 				env[k] = v
 			}
 		}
-	} else if agentName == "codex" {
+	case "codex":
 		hookArgs, hookEnv, err := sm.injectCodexHooks(id)
 		if err != nil {
 			sm.log.Warn("failed to inject hooks", "session_id", id, "err", err)
@@ -692,7 +694,8 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 	env["GRAITH_SESSION_NAME"] = sessState.Name
 	env["GRAITH_WORKTREE_PATH"] = sessState.WorktreePath
 
-	if sessState.Agent == "claude" {
+	switch sessState.Agent {
+	case "claude":
 		hookArgs, hookEnv, err := sm.injectClaudeHooks(id)
 		if err != nil {
 			sm.log.Warn("failed to inject hooks", "session_id", id, "err", err)
@@ -702,7 +705,7 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 				env[k] = v
 			}
 		}
-	} else if sessState.Agent == "codex" {
+	case "codex":
 		hookArgs, hookEnv, err := sm.injectCodexHooks(id)
 		if err != nil {
 			sm.log.Warn("failed to inject hooks", "session_id", id, "err", err)
