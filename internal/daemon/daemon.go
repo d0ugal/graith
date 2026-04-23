@@ -255,7 +255,15 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 	env["GRAITH_SESSION_NAME"] = name
 	env["GRAITH_WORKTREE_PATH"] = worktreePath
 
-	sandboxed := sm.resolveSandbox(agentName)
+	sandboxed, err := sm.resolveSandbox(agentName)
+	if err != nil {
+		if noRepo {
+			os.RemoveAll(worktreePath)
+		} else {
+			_ = git.TeardownSession(repoRoot, worktreePath, branchName)
+		}
+		return SessionState{}, err
+	}
 	command := agent.Command
 	finalArgs := expandedArgs
 	if sandboxed {
@@ -396,6 +404,15 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 	command := agent.Command
 	finalArgs := expandedArgs
 	if sandboxed {
+		merged := sm.cfg.Sandbox.Merge(sm.cfg.Agents[agentName].Sandbox)
+		cmd := merged.Command
+		if cmd == "" {
+			cmd = "safehouse"
+		}
+		if !sandbox.AvailableCommand(cmd) {
+			_ = git.TeardownSession(repoRoot, worktreePath, branchName)
+			return SessionState{}, fmt.Errorf("source session was sandboxed but %q is no longer available", cmd)
+		}
 		envKeys := []string{"GRAITH_SESSION_ID", "GRAITH_SESSION_NAME", "GRAITH_WORKTREE_PATH", "TERM"}
 		for k := range agent.Env {
 			envKeys = append(envKeys, k)
@@ -527,6 +544,14 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 	command := agent.Command
 	finalArgs := expandedArgs
 	if sessState.Sandboxed {
+		merged := sm.cfg.Sandbox.Merge(sm.cfg.Agents[sessState.Agent].Sandbox)
+		cmd := merged.Command
+		if cmd == "" {
+			cmd = "safehouse"
+		}
+		if !sandbox.AvailableCommand(cmd) {
+			return SessionState{}, fmt.Errorf("session was sandboxed but %q is no longer available — install safehouse or delete and recreate the session", cmd)
+		}
 		envKeys := []string{"GRAITH_SESSION_ID", "GRAITH_SESSION_NAME", "GRAITH_WORKTREE_PATH", "TERM"}
 		for k := range agent.Env {
 			envKeys = append(envKeys, k)
@@ -995,16 +1020,19 @@ func (sm *SessionManager) applyConfig(newCfg *config.Config) {
 	}
 }
 
-func (sm *SessionManager) resolveSandbox(agentName string) bool {
+func (sm *SessionManager) resolveSandbox(agentName string) (bool, error) {
 	merged := sm.cfg.Sandbox.Merge(sm.cfg.Agents[agentName].Sandbox)
 	if !merged.Enabled {
-		return false
+		return false, nil
 	}
 	cmd := merged.Command
 	if cmd == "" {
 		cmd = "safehouse"
 	}
-	return sandbox.AvailableCommand(cmd)
+	if !sandbox.AvailableCommand(cmd) {
+		return false, fmt.Errorf("sandbox enabled for agent %q but %q is not available — install safehouse or disable sandbox in config", agentName, cmd)
+	}
+	return true, nil
 }
 
 func (sm *SessionManager) sandboxOpts(agentName, worktreePath string, envKeys []string) sandbox.WrapOpts {
