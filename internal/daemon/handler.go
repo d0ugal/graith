@@ -571,6 +571,10 @@ func toSessionInfo(s SessionState) protocol.SessionInfo {
 		Dirty:          s.GitDirty,
 		UnpushedCount:  s.GitUnpushed,
 		Sandboxed:      s.Sandboxed,
+		Model:          s.HookModel,
+		ToolName:       s.HookToolName,
+		CostUSD:        s.HookCostUSD,
+		ContextPercent: s.HookContextPercent,
 	}
 	if s.LastAttachedAt != nil {
 		info.LastAttachedAt = s.LastAttachedAt.Format(time.RFC3339)

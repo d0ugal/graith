@@ -191,6 +191,9 @@ func computeColumnWidths(sessions []protocol.SessionInfo, currentSessionID strin
 		status := s.Status
 		if s.AgentStatus != "" && s.Status == "running" {
 			status = s.AgentStatus
+			if status == "active" && s.ToolName != "" {
+				status = fmt.Sprintf("active(%s)", s.ToolName)
+			}
 		}
 		if n := lipgloss.Width(status); n > cw.status {
 			cw.status = n
@@ -277,6 +280,9 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	status := si.info.Status
 	if si.info.AgentStatus != "" && si.info.Status == "running" {
 		status = si.info.AgentStatus
+		if status == "active" && si.info.ToolName != "" {
+			status = fmt.Sprintf("active(%s)", si.info.ToolName)
+		}
 	}
 	statusRendered := pad(status, d.cols.status)
 	switch status {
