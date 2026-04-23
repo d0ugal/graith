@@ -47,7 +47,6 @@ type CreateMsg struct {
 	Base     string `json:"base,omitempty"`
 	Prompt   string `json:"prompt,omitempty"`
 	NoRepo   bool   `json:"no_repo,omitempty"`
-	Sandbox  *bool  `json:"sandbox,omitempty"`
 }
 
 type ForkMsg struct {
