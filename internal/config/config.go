@@ -18,6 +18,7 @@ type Config struct {
 	Keybindings    Keybindings      `toml:"keybindings"`
 	Notifications  Notifications    `toml:"notifications"`
 	Messages       Messages         `toml:"messages"`
+	Sandbox        SandboxConfig    `toml:"sandbox"`
 	Agents         map[string]Agent `toml:"agents"`
 }
 
@@ -82,6 +83,7 @@ type Agent struct {
 	ForkArgs    []string          `toml:"fork_args"`
 	Env         map[string]string `toml:"env"`
 	IdleTimeout string            `toml:"idle_timeout"`
+	Sandbox     SandboxConfig     `toml:"sandbox"`
 }
 
 func (a Agent) IdleTimeoutDuration() time.Duration {
@@ -96,6 +98,53 @@ func (a Agent) IdleTimeoutDuration() time.Duration {
 		return 0
 	}
 	return d
+}
+
+type SandboxConfig struct {
+	Enabled   bool     `toml:"enabled"`
+	Disabled  *bool    `toml:"disabled,omitempty"`
+	Command   string   `toml:"command"`
+	Features  []string `toml:"features"`
+	ReadDirs  []string `toml:"read_dirs"`
+	WriteDirs []string `toml:"write_dirs"`
+}
+
+func (s SandboxConfig) Merge(agent SandboxConfig) SandboxConfig {
+	merged := SandboxConfig{
+		Enabled: s.Enabled,
+		Command: s.Command,
+	}
+
+	if agent.Disabled != nil && *agent.Disabled {
+		merged.Enabled = false
+		return merged
+	}
+
+	merged.Features = dedup(append(s.Features, agent.Features...))
+	merged.ReadDirs = dedup(append(s.ReadDirs, agent.ReadDirs...))
+	merged.WriteDirs = dedup(append(s.WriteDirs, agent.WriteDirs...))
+
+	if agent.Command != "" {
+		merged.Command = agent.Command
+	}
+
+	return merged
+}
+
+func dedup(ss []string) []string {
+	if len(ss) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(ss))
+	out := make([]string, 0, len(ss))
+	for _, s := range ss {
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	return out
 }
 
 func Load(path string) (*Config, error) {
