@@ -328,6 +328,18 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 	env["GRAITH_SESSION_NAME"] = name
 	env["GRAITH_WORKTREE_PATH"] = worktreePath
 
+	if agentName == "claude" {
+		hookArgs, hookEnv, err := sm.injectClaudeHooks(id)
+		if err != nil {
+			sm.log.Warn("failed to inject hooks", "session_id", id, "err", err)
+		} else {
+			expandedArgs = append(expandedArgs, hookArgs...)
+			for k, v := range hookEnv {
+				env[k] = v
+			}
+		}
+	}
+
 	sandboxed, err := sm.resolveSandbox(agentName)
 	if err != nil {
 		if noRepo {
@@ -342,6 +354,9 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 	if sandboxed {
 		envKeys := []string{"GRAITH_SESSION_ID", "GRAITH_SESSION_NAME", "GRAITH_WORKTREE_PATH", "TERM"}
 		for k := range agent.Env {
+			envKeys = append(envKeys, k)
+		}
+		for k := range env {
 			envKeys = append(envKeys, k)
 		}
 		opts := sm.sandboxOpts(agentName, worktreePath, envKeys)
@@ -473,6 +488,18 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 	env["GRAITH_SESSION_NAME"] = name
 	env["GRAITH_WORKTREE_PATH"] = worktreePath
 
+	if agentName == "claude" {
+		hookArgs, hookEnv, err := sm.injectClaudeHooks(id)
+		if err != nil {
+			sm.log.Warn("failed to inject hooks", "session_id", id, "err", err)
+		} else {
+			expandedArgs = append(expandedArgs, hookArgs...)
+			for k, v := range hookEnv {
+				env[k] = v
+			}
+		}
+	}
+
 	sandboxed := source.Sandboxed
 	command := agent.Command
 	finalArgs := expandedArgs
@@ -488,6 +515,9 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 		}
 		envKeys := []string{"GRAITH_SESSION_ID", "GRAITH_SESSION_NAME", "GRAITH_WORKTREE_PATH", "TERM"}
 		for k := range agent.Env {
+			envKeys = append(envKeys, k)
+		}
+		for k := range env {
 			envKeys = append(envKeys, k)
 		}
 		opts := sm.sandboxOpts(agentName, worktreePath, envKeys)
@@ -574,6 +604,8 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 		return *sessState, nil
 	}
 
+	delete(sm.hookReports, id)
+
 	agent, ok := sm.cfg.Agents[sessState.Agent]
 	if !ok {
 		return SessionState{}, fmt.Errorf("unknown agent %q", sessState.Agent)
@@ -614,6 +646,18 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 	env["GRAITH_SESSION_NAME"] = sessState.Name
 	env["GRAITH_WORKTREE_PATH"] = sessState.WorktreePath
 
+	if sessState.Agent == "claude" {
+		hookArgs, hookEnv, err := sm.injectClaudeHooks(id)
+		if err != nil {
+			sm.log.Warn("failed to inject hooks", "session_id", id, "err", err)
+		} else {
+			expandedArgs = append(expandedArgs, hookArgs...)
+			for k, v := range hookEnv {
+				env[k] = v
+			}
+		}
+	}
+
 	command := agent.Command
 	finalArgs := expandedArgs
 	if sessState.Sandboxed {
@@ -627,6 +671,9 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 		}
 		envKeys := []string{"GRAITH_SESSION_ID", "GRAITH_SESSION_NAME", "GRAITH_WORKTREE_PATH", "TERM"}
 		for k := range agent.Env {
+			envKeys = append(envKeys, k)
+		}
+		for k := range env {
 			envKeys = append(envKeys, k)
 		}
 		opts := sm.sandboxOpts(sessState.Agent, sessState.WorktreePath, envKeys)
@@ -691,6 +738,7 @@ func (sm *SessionManager) Delete(id string) error {
 	branch := sessState.Branch
 
 	delete(sm.state.Sessions, id)
+	delete(sm.hookReports, id)
 	err := sm.saveState()
 	sm.mu.Unlock()
 
@@ -714,6 +762,7 @@ func (sm *SessionManager) Delete(id string) error {
 		_ = os.RemoveAll(worktreePath)
 	}
 	_ = os.Remove(filepath.Join(sm.paths.LogDir, id+".log"))
+	sm.cleanupHooks(id)
 
 	if hasClient {
 		ac.kick()
@@ -945,21 +994,33 @@ func (sm *SessionManager) detectAgentStatuses() {
 	var toAutoStop []string
 
 	for _, t := range targets {
-		content := t.pty.ScreenPreview()
-		if content == "" {
-			continue
-		}
+		var status string
 
-		outputAge := detector.OutputAgeUnknown
-		if lastOut := t.pty.LastOutputAt(); !lastOut.IsZero() {
-			outputAge = time.Since(lastOut)
-		}
+		// Check if we have an authoritative hook report for this session
+		sm.mu.RLock()
+		hr, hasHook := sm.hookReports[t.id]
+		sm.mu.RUnlock()
 
-		d := detector.New(t.agent)
-		status := string(d.Detect(content, outputAge))
+		if hasHook && time.Now().Before(hr.AuthoritativeUntil) {
+			status = hr.Status
+		} else {
+			// Fall back to PTY scraping
+			content := t.pty.ScreenPreview()
+			if content == "" {
+				continue
+			}
 
-		if status == string(detector.StatusUnknown) && t.prevStatus != "" && t.pty.RecentlyAdopted(60*time.Second) {
-			status = t.prevStatus
+			outputAge := detector.OutputAgeUnknown
+			if lastOut := t.pty.LastOutputAt(); !lastOut.IsZero() {
+				outputAge = time.Since(lastOut)
+			}
+
+			d := detector.New(t.agent)
+			status = string(d.Detect(content, outputAge))
+
+			if status == string(detector.StatusUnknown) && t.prevStatus != "" && t.pty.RecentlyAdopted(60*time.Second) {
+				status = t.prevStatus
+			}
 		}
 
 		var dirty bool
