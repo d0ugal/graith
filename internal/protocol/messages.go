@@ -47,6 +47,7 @@ type CreateMsg struct {
 	Base     string `json:"base,omitempty"`
 	Prompt   string `json:"prompt,omitempty"`
 	NoRepo   bool   `json:"no_repo,omitempty"`
+	Sandbox  *bool  `json:"sandbox,omitempty"`
 }
 
 type ForkMsg struct {
@@ -151,6 +152,7 @@ type SessionInfo struct {
 	LastAttachedAt string `json:"last_attached_at,omitempty"`
 	Dirty          bool   `json:"dirty,omitempty"`
 	UnpushedCount  int    `json:"unpushed_count,omitempty"`
+	Sandboxed      bool   `json:"sandboxed,omitempty"`
 }
 
 type DetachedMsg struct {
