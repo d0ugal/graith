@@ -1000,7 +1000,11 @@ func (sm *SessionManager) resolveSandbox(agentName string, override *bool) bool 
 	if !merged.Enabled {
 		return false
 	}
-	return sandbox.Available()
+	cmd := merged.Command
+	if cmd == "" {
+		cmd = "safehouse"
+	}
+	return sandbox.AvailableCommand(cmd)
 }
 
 func (sm *SessionManager) sandboxOpts(agentName, worktreePath string, envKeys []string) sandbox.WrapOpts {
