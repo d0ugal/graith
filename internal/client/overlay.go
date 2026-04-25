@@ -23,6 +23,7 @@ const (
 	stateList overlayState = iota
 	stateFilter
 	stateConfirmDelete
+	stateConfirmRestart
 )
 
 var (
@@ -563,6 +564,18 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
+		case stateConfirmRestart:
+			switch msg.String() {
+			case "y", "Y":
+				if item, ok := m.list.SelectedItem().(sessionItem); ok {
+					m.selected = &item.info
+				}
+				return m, tea.Quit
+			default:
+				m.state = stateList
+				return m, nil
+			}
+
 		case stateList:
 			switch msg.String() {
 			case "q", "esc":
@@ -577,6 +590,12 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "x":
 				if _, ok := m.list.SelectedItem().(sessionItem); ok {
 					m.state = stateConfirmDelete
+				}
+				return m, nil
+
+			case "r":
+				if item, ok := m.list.SelectedItem().(sessionItem); ok && item.info.Status == "stopped" {
+					m.state = stateConfirmRestart
 				}
 				return m, nil
 
@@ -742,18 +761,26 @@ func (m overlayModel) View() tea.View {
 		}
 	}
 
-	if m.state == stateConfirmDelete {
+	switch m.state {
+	case stateConfirmDelete:
 		if item, ok := m.list.SelectedItem().(sessionItem); ok {
 			panelContent.WriteString("\n")
 			panelContent.WriteString(lipgloss.NewStyle().
 				Foreground(colorRed).
 				Render(fmt.Sprintf("Delete '%s'? [y/N]", item.info.Name)))
 		}
+	case stateConfirmRestart:
+		if item, ok := m.list.SelectedItem().(sessionItem); ok {
+			panelContent.WriteString("\n")
+			panelContent.WriteString(lipgloss.NewStyle().
+				Foreground(colorGreen).
+				Render(fmt.Sprintf("Restart '%s'? [y/N]", item.info.Name)))
+		}
 	}
 
 	helpStyle := lipgloss.NewStyle().Foreground(colorFaint)
 	panelContent.WriteString("\n")
-	panelContent.WriteString(helpStyle.Render("enter attach  / filter  tab group  x delete  q quit"))
+	panelContent.WriteString(helpStyle.Render("enter attach  / filter  tab group  x delete  r restart  q quit"))
 
 	panel := lipgloss.NewStyle().
 		Width(panelWidth).
@@ -846,8 +873,11 @@ func RunOverlay(sessions []protocol.SessionInfo, currentSessionID string, fetchP
 	}
 	if result.selected != nil {
 		action := "attach"
-		if result.state == stateConfirmDelete {
+		switch result.state {
+		case stateConfirmDelete:
 			action = "delete"
+		case stateConfirmRestart:
+			action = "restart"
 		}
 		return &OverlayResult{
 			Action:    action,
