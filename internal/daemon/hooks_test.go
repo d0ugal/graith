@@ -90,11 +90,14 @@ func TestGenerateClaudeSettings(t *testing.T) {
 		t.Fatalf("read settings: %v", err)
 	}
 
-	// Verify valid JSON.
+	// Verify valid JSON with matcher+hooks schema.
 	var parsed struct {
 		Hooks map[string][]struct {
-			Type    string `json:"type"`
-			Command string `json:"command"`
+			Matcher string `json:"matcher"`
+			Hooks   []struct {
+				Type    string `json:"type"`
+				Command string `json:"command"`
+			} `json:"hooks"`
 		} `json:"hooks"`
 	}
 	if err := json.Unmarshal(data, &parsed); err != nil {
@@ -112,24 +115,32 @@ func TestGenerateClaudeSettings(t *testing.T) {
 	}
 
 	for _, event := range expectedEvents {
-		entries, ok := parsed.Hooks[event]
+		matchers, ok := parsed.Hooks[event]
 		if !ok {
 			t.Errorf("missing hook event %q", event)
 			continue
 		}
-		if len(entries) != 1 {
-			t.Errorf("event %q has %d entries, want 1", event, len(entries))
+		if len(matchers) != 1 {
+			t.Errorf("event %q has %d matcher groups, want 1", event, len(matchers))
 			continue
 		}
-		if entries[0].Type != "command" {
-			t.Errorf("event %q type = %q, want %q", event, entries[0].Type, "command")
+		if matchers[0].Matcher != "" {
+			t.Errorf("event %q matcher = %q, want empty (match-all)", event, matchers[0].Matcher)
+		}
+		if len(matchers[0].Hooks) != 1 {
+			t.Errorf("event %q has %d hooks, want 1", event, len(matchers[0].Hooks))
+			continue
+		}
+		hook := matchers[0].Hooks[0]
+		if hook.Type != "command" {
+			t.Errorf("event %q type = %q, want %q", event, hook.Type, "command")
 		}
 		quotedPath := "'" + hookScript + "'"
-		if !strings.Contains(entries[0].Command, quotedPath) {
-			t.Errorf("event %q command = %q, does not contain quoted hook script path %q", event, entries[0].Command, quotedPath)
+		if !strings.Contains(hook.Command, quotedPath) {
+			t.Errorf("event %q command = %q, does not contain quoted hook script path %q", event, hook.Command, quotedPath)
 		}
-		if !strings.Contains(entries[0].Command, "--event "+event) {
-			t.Errorf("event %q command = %q, does not contain --event %s", event, entries[0].Command, event)
+		if !strings.Contains(hook.Command, "--event "+event) {
+			t.Errorf("event %q command = %q, does not contain --event %s", event, hook.Command, event)
 		}
 	}
 
