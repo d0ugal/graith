@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.12.0](https://github.com/d0ugal/graith/compare/v0.11.0...v0.12.0) (2026-06-09)
+
+
+### Features
+
+* add back-and-forth session switching (ctrl+b l) ([f67a226](https://github.com/d0ugal/graith/commit/f67a2269cdc01966f63ddc9930a60c4d82e14634)), closes [#164](https://github.com/d0ugal/graith/issues/164)
+* add gr restart command and overlay restart action ([e141ec0](https://github.com/d0ugal/graith/commit/e141ec0be86cf70a2e9302d1ab18da7245bc55ed)), closes [#155](https://github.com/d0ugal/graith/issues/155)
+
+
+### Bug Fixes
+
+* use ~/.config for config path instead of macOS Application Support ([3b049c0](https://github.com/d0ugal/graith/commit/3b049c0df82765a154362439f3279b5f6a4ecd5f))
+* use tuple swap for prevSessionID (gocritic valSwap) ([7e9c2ec](https://github.com/d0ugal/graith/commit/7e9c2ecca328711f7cd556efad26609260530d6a))
+
 ## [0.11.0](https://github.com/d0ugal/graith/compare/v0.10.0...v0.11.0) (2026-06-08)
 
 
