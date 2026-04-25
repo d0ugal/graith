@@ -124,9 +124,12 @@ func runAttachByID(c *client.Client, sessionID string) error {
 		Prefix:      parsePrefixKey(cfg.Keybindings.Prefix),
 		NextSession: parseKeyByte(cfg.Keybindings.NextSession),
 		PrevSession: parseKeyByte(cfg.Keybindings.PrevSession),
+		LastSession: parseKeyByte(cfg.Keybindings.LastSession),
 		NewSession:  parseKeyByte(cfg.Keybindings.NewSession),
 		ForkSession: parseKeyByte(cfg.Keybindings.ForkSession),
 	}
+
+	prevSessionID := ""
 
 	opts := client.PassthroughOpts{
 		Keys:      keys,
@@ -204,6 +207,7 @@ func runAttachByID(c *client.Client, sessionID string) error {
 			nc.SendControl("attach", protocol.AttachMsg{SessionID: overlayResult.SessionID})
 			attachResp, _ := nc.ReadControlResponse()
 			protocol.DecodePayload(attachResp, &info)
+			prevSessionID = sessionID
 			sessionID = overlayResult.SessionID
 			opts.SessionID = sessionID
 			opts.Info = &info
@@ -272,6 +276,35 @@ func runAttachByID(c *client.Client, sessionID string) error {
 			c = nc
 			continue
 
+		case client.ResultLastSession:
+			if prevSessionID == "" {
+				nc, err := freshClient()
+				if err != nil {
+					return err
+				}
+				nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+				attachResp, _ := nc.ReadControlResponse()
+				protocol.DecodePayload(attachResp, &info)
+				opts.SessionID = sessionID
+				opts.Info = &info
+				c = nc
+				continue
+			}
+			nc, err := freshClient()
+			if err != nil {
+				return err
+			}
+			oldSessionID := sessionID
+			sessionID = prevSessionID
+			prevSessionID = oldSessionID
+			nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+			attachResp, _ := nc.ReadControlResponse()
+			protocol.DecodePayload(attachResp, &info)
+			opts.SessionID = sessionID
+			opts.Info = &info
+			c = nc
+			continue
+
 		case client.ResultNextSession, client.ResultPrevSession:
 			nc, err := freshClient()
 			if err != nil {
@@ -291,6 +324,7 @@ func runAttachByID(c *client.Client, sessionID string) error {
 
 			ids := sortedSessionIDs(list.Sessions, sessionID)
 			if next := adjacentSession(ids, sessionID, result == client.ResultNextSession); next != "" {
+				prevSessionID = sessionID
 				sessionID = next
 			}
 			nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
@@ -355,6 +389,7 @@ func runAttachByID(c *client.Client, sessionID string) error {
 			nc.SendControl("attach", protocol.AttachMsg{SessionID: newInfo.ID})
 			attachResp, _ := nc.ReadControlResponse()
 			protocol.DecodePayload(attachResp, &info)
+			prevSessionID = sessionID
 			sessionID = newInfo.ID
 			opts.SessionID = sessionID
 			opts.Info = &info
@@ -415,6 +450,7 @@ func runAttachByID(c *client.Client, sessionID string) error {
 			nc.SendControl("attach", protocol.AttachMsg{SessionID: newInfo.ID})
 			attachResp, _ := nc.ReadControlResponse()
 			protocol.DecodePayload(attachResp, &info)
+			prevSessionID = sessionID
 			sessionID = newInfo.ID
 			opts.SessionID = sessionID
 			opts.Info = &info

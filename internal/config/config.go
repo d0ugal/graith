@@ -66,6 +66,7 @@ type Keybindings struct {
 	SessionList   string `toml:"session_list"`
 	NextSession   string `toml:"next_session"`
 	PrevSession   string `toml:"prev_session"`
+	LastSession   string `toml:"last_session"`
 	ResumeSession string `toml:"resume_session"`
 	RenameSession string `toml:"rename_session"`
 	Search        string `toml:"search"`
@@ -205,7 +206,7 @@ func Default() *Config {
 		Keybindings: Keybindings{
 			Prefix: "ctrl+b", NewSession: "n", ForkSession: "f",
 			DeleteSession: "x", Detach: "d", SessionList: "w",
-			NextSession: ")", PrevSession: "(", ResumeSession: "R",
+			NextSession: ")", PrevSession: "(", LastSession: "l", ResumeSession: "R",
 			RenameSession: ",", Search: "/", ScrollMode: "[", Shell: "s",
 		},
 		Agents: map[string]Agent{
