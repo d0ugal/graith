@@ -204,9 +204,9 @@ func Default() *Config {
 			OnApproval: true,
 		},
 		Keybindings: Keybindings{
-			Prefix: "ctrl+b", NewSession: "n", ForkSession: "f",
+			Prefix: "ctrl+b", NewSession: "c", ForkSession: "f",
 			DeleteSession: "x", Detach: "d", SessionList: "w",
-			NextSession: ")", PrevSession: "(", LastSession: "l", ResumeSession: "R",
+			NextSession: "n", PrevSession: "p", LastSession: "l", ResumeSession: "R",
 			RenameSession: ",", Search: "/", ScrollMode: "[", Shell: "s",
 		},
 		Agents: map[string]Agent{
