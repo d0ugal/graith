@@ -124,7 +124,7 @@ func TestListStreams(t *testing.T) {
 	s.Publish("beta", "s1", "a", "m3", "", "")
 	s.AckLatest("alpha", "reader1")
 
-	streams, err := s.ListStreams("reader1")
+	streams, err := s.ListStreams("reader1", true)
 	if err != nil {
 		t.Fatalf("ListStreams: %v", err)
 	}
@@ -408,12 +408,51 @@ func TestPublishEmptyThreadAndReplyStoreAsEmpty(t *testing.T) {
 func TestListStreamsEmpty(t *testing.T) {
 	s := testStore(t)
 
-	streams, err := s.ListStreams("anyone")
+	streams, err := s.ListStreams("anyone", true)
 	if err != nil {
 		t.Fatalf("ListStreams: %v", err)
 	}
 	if len(streams) != 0 {
 		t.Errorf("got %d streams, want 0", len(streams))
+	}
+}
+
+func TestListStreamsExcludesSystem(t *testing.T) {
+	s := testStore(t)
+
+	s.Publish("alpha", "s1", "a", "m1", "", "")
+	s.Publish("_system.status", "s1", "a", "status change", "", "")
+
+	streams, err := s.ListStreams("", false)
+	if err != nil {
+		t.Fatalf("ListStreams: %v", err)
+	}
+	if len(streams) != 1 {
+		t.Fatalf("got %d streams, want 1 (system excluded)", len(streams))
+	}
+	if streams[0].Name != "alpha" {
+		t.Errorf("got stream %q, want alpha", streams[0].Name)
+	}
+
+	streams, err = s.ListStreams("", true)
+	if err != nil {
+		t.Fatalf("ListStreams with system: %v", err)
+	}
+	if len(streams) != 2 {
+		t.Fatalf("got %d streams, want 2 (system included)", len(streams))
+	}
+}
+
+func TestTotalUnreadExcludesSystem(t *testing.T) {
+	s := testStore(t)
+
+	s.Publish("alpha", "s1", "a", "m1", "", "")
+	s.Publish("_system.status", "s1", "a", "status change", "", "")
+	s.Publish("_system.status", "s1", "a", "another change", "", "")
+
+	count := s.TotalUnread("reader1")
+	if count != 1 {
+		t.Errorf("TotalUnread = %d, want 1 (system excluded)", count)
 	}
 }
 
@@ -423,7 +462,7 @@ func TestListStreamsNoSubscriber(t *testing.T) {
 	s.Publish("alpha", "s1", "a", "m1", "", "")
 	s.Publish("beta", "s1", "a", "m2", "", "")
 
-	streams, err := s.ListStreams("")
+	streams, err := s.ListStreams("", true)
 	if err != nil {
 		t.Fatalf("ListStreams: %v", err)
 	}
