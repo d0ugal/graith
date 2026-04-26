@@ -389,7 +389,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid msg_topics message"})
 					continue
 				}
-				streams, err := sm.messages.ListStreams(m.Subscriber)
+				streams, err := sm.messages.ListStreams(m.Subscriber, m.IncludeSystem)
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 				} else {

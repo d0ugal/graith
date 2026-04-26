@@ -117,7 +117,8 @@ type MsgAckMsg struct {
 }
 
 type MsgTopicsMsg struct {
-	Subscriber string `json:"subscriber"`
+	Subscriber    string `json:"subscriber"`
+	IncludeSystem bool   `json:"include_system,omitempty"`
 }
 
 // Client -> Daemon (hook reporting)
