@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.12.5](https://github.com/d0ugal/graith/compare/v0.12.4...v0.12.5) (2026-04-26)
+
+
+### Bug Fixes
+
+* exclude _system.* streams from unread count and topic listing ([f515a92](https://github.com/d0ugal/graith/commit/f515a92ea6f59ea320ba46495f55d5c083df3503))
+* scope status bar unread count to session inbox only ([1961a68](https://github.com/d0ugal/graith/commit/1961a68046c4791df6c957f9e6e75fdacedb7925))
+
 ## [0.12.4](https://github.com/d0ugal/graith/compare/v0.12.3...v0.12.4) (2026-04-26)
 
 
