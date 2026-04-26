@@ -1234,9 +1234,13 @@ func (sm *SessionManager) sandboxOpts(agentName, sessionID, worktreePath string,
 	readDirs := expandPaths(merged.ReadDirs)
 	writeDirs := expandPaths(merged.WriteDirs)
 
-	// The daemon injects hook files (settings.json, hook.sh) into the data
-	// dir. The agent process must be able to read and execute them.
+	// Hooks: the agent needs to read settings.json, execute `gr`, and
+	// connect to the daemon socket for report-status.
 	readDirs = append(readDirs, sm.hookDir(sessionID))
+	if grBin := resolveGrBin(); grBin != "gr" {
+		readDirs = append(readDirs, filepath.Dir(grBin))
+	}
+	readDirs = append(readDirs, sm.paths.RuntimeDir)
 
 	// Agents need read/write access to their own config and data directories
 	// (e.g. ~/.claude, ~/.local/share/claude for Claude Code).
