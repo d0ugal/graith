@@ -1005,3 +1005,90 @@ func TestReloadConfigInvalidFile(t *testing.T) {
 		t.Fatal("expected error for invalid config file")
 	}
 }
+
+func TestToSessionInfoSharedWorktree(t *testing.T) {
+	sess := SessionState{
+		ID:             "abc123",
+		Name:           "reviewer",
+		WorktreePath:   "/shared/path",
+		Agent:          "claude",
+		Status:         StatusRunning,
+		SharedWorktree: true,
+		CreatedAt:      time.Now().UTC(),
+	}
+
+	info := toSessionInfo(sess)
+
+	if !info.SharedWorktree {
+		t.Error("SharedWorktree = false, want true")
+	}
+
+	sess.SharedWorktree = false
+	info = toSessionInfo(sess)
+	if info.SharedWorktree {
+		t.Error("SharedWorktree = true, want false")
+	}
+}
+
+func TestDeleteSharedWorktreeSkipsGitTeardown(t *testing.T) {
+	tmpDir := t.TempDir()
+	sm := NewSessionManager(config.Default(), config.Paths{
+		StateFile: filepath.Join(tmpDir, "state.json"),
+		DataDir:   tmpDir,
+		LogDir:    tmpDir,
+	}, slog.Default())
+
+	scratchDir := filepath.Join(tmpDir, "scratch", "shared1")
+	if err := os.MkdirAll(scratchDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	sm.state.Sessions["shared1"] = &SessionState{
+		ID:             "shared1",
+		Name:           "reviewer",
+		RepoPath:       "/does/not/exist/repo",
+		WorktreePath:   "/does/not/exist/worktree",
+		Branch:         "some-branch",
+		SharedWorktree: true,
+		Status:         StatusStopped,
+	}
+
+	if err := sm.Delete("shared1"); err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+
+	if _, ok := sm.state.Sessions["shared1"]; ok {
+		t.Error("session should be removed from state after delete")
+	}
+
+	if _, err := os.Stat(scratchDir); !os.IsNotExist(err) {
+		t.Error("scratch dir should be cleaned up after delete")
+	}
+}
+
+func TestStateSaveLoadSharedWorktree(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	state := &State{
+		Sessions: map[string]*SessionState{
+			"s1": {
+				ID: "s1", Name: "reviewer", WorktreePath: "/shared/path",
+				Agent: "claude", Status: StatusRunning,
+				SharedWorktree: true, CreatedAt: time.Now().UTC(),
+			},
+		},
+	}
+	if err := SaveState(path, state); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, ok := loaded.Sessions["s1"]
+	if !ok {
+		t.Fatal("session not found after load")
+	}
+	if !s.SharedWorktree {
+		t.Error("SharedWorktree not preserved across save/load")
+	}
+}
