@@ -54,7 +54,7 @@ var doctorCmd = &cobra.Command{
 
 					if hsOk.DaemonVersion != version.Version {
 						out.Print("  ✗ Version mismatch: CLI=%s, daemon=%s\n", version.Version, hsOk.DaemonVersion)
-						out.Print("    → Run: gr daemon upgrade\n")
+						out.Print("    → Run: gr daemon restart\n")
 						ok = false
 					}
 				} else {

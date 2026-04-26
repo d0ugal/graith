@@ -215,8 +215,7 @@ The daemon auto-starts on first command. To manage it explicitly:
 ```bash
 gr daemon start
 gr daemon stop
-gr daemon restart         # preserves sessions
-gr daemon upgrade         # hot-upgrade: rebuild binary, then restart
+gr daemon restart         # preserves sessions (picks up new binary)
 ```
 
 After rebuilding `gr` (e.g., `go build -o $(which gr) ./cmd/graith`), run

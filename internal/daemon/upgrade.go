@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"syscall"
 	"time"
@@ -91,7 +92,7 @@ func ReadManifest(path string) (*UpgradeManifest, error) {
 }
 
 func ExecUpgrade(manifestPath, configFile string) error {
-	execPath, err := os.Executable()
+	execPath, err := resolveExecutable()
 	if err != nil {
 		return fmt.Errorf("resolve executable: %w", err)
 	}
@@ -102,6 +103,28 @@ func ExecUpgrade(manifestPath, configFile string) error {
 	}
 
 	return syscall.Exec(execPath, args, os.Environ())
+}
+
+// resolveExecutable finds the current binary on disk. os.Executable() can
+// return a stale path after a package-manager upgrade (e.g. Homebrew removes
+// the old Cellar directory), so we fall back to a PATH lookup.
+func resolveExecutable() (string, error) {
+	execPath, err := os.Executable()
+	if err == nil {
+		if _, statErr := os.Stat(execPath); statErr == nil {
+			return execPath, nil
+		}
+	}
+
+	name := "gr"
+	if execPath != "" {
+		name = filepath.Base(execPath)
+	}
+	lookPath, lookErr := exec.LookPath(name)
+	if lookErr != nil {
+		return "", fmt.Errorf("executable gone and not in PATH: %w", lookErr)
+	}
+	return lookPath, nil
 }
 
 func StopDaemon(pidFile string) error {
