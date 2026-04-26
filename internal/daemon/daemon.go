@@ -23,8 +23,9 @@ import (
 )
 
 type attachedClient struct {
-	conn net.Conn
-	kick func()
+	conn        net.Conn
+	kick        func()
+	sendControl func(msgType string, payload any)
 }
 
 // hookReport tracks the latest status report from an agent hook.
@@ -42,29 +43,31 @@ type hookReport struct {
 
 // SessionManager orchestrates PTY sessions, state persistence, and git worktrees.
 type SessionManager struct {
-	mu              sync.RWMutex
-	state           *State
-	sessions        map[string]*grpty.Session
-	attachedClients map[string]*attachedClient
-	hookReports     map[string]hookReport
-	cfg             *config.Config
-	paths           config.Paths
-	log             *slog.Logger
-	configFile      string
-	upgradeCh       chan struct{}
-	messages        *MsgStore
+	mu               sync.RWMutex
+	state            *State
+	sessions         map[string]*grpty.Session
+	attachedClients  map[string]*attachedClient
+	hookReports      map[string]hookReport
+	pendingApprovals map[string]*pendingApproval
+	cfg              *config.Config
+	paths            config.Paths
+	log              *slog.Logger
+	configFile       string
+	upgradeCh        chan struct{}
+	messages         *MsgStore
 }
 
 // NewSessionManager creates a SessionManager with the given config and paths.
 func NewSessionManager(cfg *config.Config, paths config.Paths, log *slog.Logger) *SessionManager {
 	return &SessionManager{
-		state:           NewState(),
-		sessions:        make(map[string]*grpty.Session),
-		attachedClients: make(map[string]*attachedClient),
-		hookReports:     make(map[string]hookReport),
-		cfg:             cfg,
-		paths:           paths,
-		log:             log,
+		state:            NewState(),
+		sessions:         make(map[string]*grpty.Session),
+		attachedClients:  make(map[string]*attachedClient),
+		hookReports:      make(map[string]hookReport),
+		pendingApprovals: make(map[string]*pendingApproval),
+		cfg:              cfg,
+		paths:            paths,
+		log:              log,
 	}
 }
 
@@ -168,9 +171,9 @@ func (sm *SessionManager) KickAttachedClient(sessionID string) {
 	}
 }
 
-func (sm *SessionManager) SetAttachedClient(sessionID string, conn net.Conn, kick func()) {
+func (sm *SessionManager) SetAttachedClient(sessionID string, conn net.Conn, kick func(), sendCtrl func(string, any)) {
 	sm.mu.Lock()
-	sm.attachedClients[sessionID] = &attachedClient{conn: conn, kick: kick}
+	sm.attachedClients[sessionID] = &attachedClient{conn: conn, kick: kick, sendControl: sendCtrl}
 	sm.mu.Unlock()
 }
 
