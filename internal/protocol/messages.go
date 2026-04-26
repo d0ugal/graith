@@ -199,6 +199,43 @@ type ScreenPreviewResponseMsg struct {
 	Preview   string `json:"preview"`
 }
 
+// Approval protocol messages
+
+// ApprovalRequestMsg is sent by the hook CLI (gr approve-request) to the daemon.
+// The handler blocks until a decision is made.
+type ApprovalRequestMsg struct {
+	RequestID string `json:"request_id"`
+	SessionID string `json:"session_id"`
+	ToolName  string `json:"tool_name"`
+	ToolInput string `json:"tool_input,omitempty"`
+}
+
+type ApprovalInfo struct {
+	RequestID   string `json:"request_id"`
+	SessionID   string `json:"session_id"`
+	SessionName string `json:"session_name"`
+	ToolName    string `json:"tool_name"`
+	ToolInput   string `json:"tool_input,omitempty"`
+	Agent       string `json:"agent"`
+	RepoName    string `json:"repo_name"`
+	RequestedAt string `json:"requested_at"`
+}
+
+type ApprovalNotificationMsg struct {
+	Pending []ApprovalInfo `json:"pending"`
+}
+
+type ApprovalRespondMsg struct {
+	RequestID string `json:"request_id"`
+	Decision  string `json:"decision"`
+	Reason    string `json:"reason,omitempty"`
+}
+
+type ApprovalDecisionMsg struct {
+	Decision string `json:"decision"`
+	Reason   string `json:"reason,omitempty"`
+}
+
 type ScreenSnapshotMsg struct {
 	SessionID string `json:"session_id"`
 }

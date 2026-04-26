@@ -23,6 +23,7 @@ type Config struct {
 	Notifications    Notifications    `toml:"notifications"`
 	Messages         Messages         `toml:"messages"`
 	Sandbox          SandboxConfig    `toml:"sandbox"`
+	Approvals        Approvals        `toml:"approvals"`
 	Agents           map[string]Agent `toml:"agents"`
 }
 
@@ -79,6 +80,20 @@ type Notifications struct {
 	OnApproval bool   `toml:"on_approval"`
 	OnStopped  bool   `toml:"on_stopped"`
 	Command    string `toml:"command"`
+}
+
+type Approvals struct {
+	Mode    string `toml:"mode"`
+	AutoPop bool   `toml:"auto_pop"`
+	Timeout string `toml:"timeout"`
+	Command string `toml:"command"`
+}
+
+func (a Approvals) TimeoutDuration() time.Duration {
+	if a.Timeout == "" {
+		return 10 * time.Minute
+	}
+	return ParseDurationWithDays(a.Timeout)
 }
 
 type Agent struct {
@@ -202,6 +217,10 @@ func Default() *Config {
 		Notifications: Notifications{
 			Enabled:    true,
 			OnApproval: true,
+		},
+		Approvals: Approvals{
+			Mode:    "prompt",
+			Timeout: "10m",
 		},
 		Keybindings: Keybindings{
 			Prefix: "ctrl+b", NewSession: "c", ForkSession: "f",
