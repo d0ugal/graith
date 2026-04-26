@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.13.0](https://github.com/d0ugal/graith/compare/v0.12.5...v0.13.0) (2026-04-26)
+
+
+### Features
+
+* add --share-worktree flag for read-only worktree sharing ([964c569](https://github.com/d0ugal/graith/commit/964c56908e2999bc30e82b9a4762d6993bf74c53)), closes [#183](https://github.com/d0ugal/graith/issues/183)
+* add approval overlay UI and passthrough integration ([3084ce7](https://github.com/d0ugal/graith/commit/3084ce791d5d0ad124914f7d2eaa5a423016397d))
+* add cross-session approval system protocol, config, and daemon ([3dc1f64](https://github.com/d0ugal/graith/commit/3dc1f645234bb35c2c83c9690e220c368d906ff7))
+* add gr approve-request CLI and wire hooks ([3efd8e9](https://github.com/d0ugal/graith/commit/3efd8e94b9c03286632605e6fa7ecbdd3b2122ee))
+
+
+### Bug Fixes
+
+* resolve stale binary path during daemon upgrade ([a28263d](https://github.com/d0ugal/graith/commit/a28263d8c849a0eaea68eb882a4ab1d94e06d31a))
+* rewrite if-else chains to switch for gocritic lint ([fe7e5b8](https://github.com/d0ugal/graith/commit/fe7e5b8ddb99afe7565e84add93ee15c7b46a5c7))
+
 ## [0.12.5](https://github.com/d0ugal/graith/compare/v0.12.4...v0.12.5) (2026-04-26)
 
 
