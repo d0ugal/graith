@@ -24,38 +24,17 @@ func resolveGrBin() string {
 	return "gr"
 }
 
-// generateHookScript writes a shell script that forwards hook events to gr report-status.
-// It returns the absolute path to the script.
-func (sm *SessionManager) generateHookScript(sessionID string) (string, error) {
+// generateClaudeSettings writes a Claude Code settings JSON file that registers
+// hooks for all relevant lifecycle events. Returns the path to the settings file.
+func (sm *SessionManager) generateClaudeSettings(sessionID string) (string, error) {
 	dir := sm.hookDir(sessionID)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("create hook dir: %w", err)
 	}
-
-	scriptPath := filepath.Join(dir, "hook.sh")
-	script := `#!/bin/sh
-if [ -n "${GRAITH_BIN:-}" ] && [ -x "$GRAITH_BIN" ]; then
-  exec "$GRAITH_BIN" report-status "$@" >/dev/null 2>&1
-fi
-if command -v gr >/dev/null 2>&1; then
-  exec gr report-status "$@" >/dev/null 2>&1
-fi
-exit 0
-`
-	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
-		return "", fmt.Errorf("write hook script: %w", err)
-	}
-	return scriptPath, nil
-}
-
-// generateClaudeSettings writes a Claude Code settings JSON file that registers
-// hooks for all relevant lifecycle events. Returns the path to the settings file.
-func (sm *SessionManager) generateClaudeSettings(sessionID, hookScript string) (string, error) {
-	dir := sm.hookDir(sessionID)
 	settingsPath := filepath.Join(dir, "settings.json")
 
-	// Each event gets its own hook entry, passing --event <name> to the hook script.
-	// The hook script forwards this to gr report-status.
+	grBin := resolveGrBin()
+
 	events := []string{
 		"SessionStart",
 		"UserPromptSubmit",
@@ -85,7 +64,7 @@ func (sm *SessionManager) generateClaudeSettings(sessionID, hookScript string) (
 			{
 				Matcher: "",
 				Hooks: []hookHandler{
-					{Type: "command", Command: fmt.Sprintf("'%s' --event %s", hookScript, event)},
+					{Type: "command", Command: fmt.Sprintf("%s report-status --event %s", grBin, event)},
 				},
 			},
 		}
@@ -104,35 +83,22 @@ func (sm *SessionManager) generateClaudeSettings(sessionID, hookScript string) (
 // injectClaudeHooks generates hook files for a Claude session and returns
 // the extra args and env vars to add to the agent launch.
 func (sm *SessionManager) injectClaudeHooks(sessionID string) (extraArgs []string, extraEnv map[string]string, err error) {
-	hookScript, err := sm.generateHookScript(sessionID)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	settingsPath, err := sm.generateClaudeSettings(sessionID, hookScript)
+	settingsPath, err := sm.generateClaudeSettings(sessionID)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	extraArgs = []string{"--settings", settingsPath}
-	extraEnv = map[string]string{
-		"GRAITH_BIN": resolveGrBin(),
-	}
-
 	sm.log.Info("injected claude hooks", "session_id", sessionID, "settings", settingsPath)
-	return extraArgs, extraEnv, nil
+	return extraArgs, nil, nil
 }
 
 // injectCodexHooks generates per-event hook scripts for a Codex session and
 // returns extra env vars (including CODEX_HOOKS_DIR) to add to the agent launch.
 func (sm *SessionManager) injectCodexHooks(sessionID string) (extraArgs []string, extraEnv map[string]string, err error) {
-	hookScript, err := sm.generateHookScript(sessionID)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	// Generate per-event wrapper scripts in a codex-hooks subdirectory.
 	dir := sm.hookDir(sessionID)
+	grBin := resolveGrBin()
+
 	events := map[string]string{
 		"session-start":      "SessionStart",
 		"user-prompt-submit": "UserPromptSubmit",
@@ -148,7 +114,7 @@ func (sm *SessionManager) injectCodexHooks(sessionID string) (extraArgs []string
 	}
 
 	for filename, eventName := range events {
-		script := fmt.Sprintf("#!/bin/sh\nexec '%s' --event %s\n", hookScript, eventName)
+		script := fmt.Sprintf("#!/bin/sh\nexec '%s' report-status --event %s\n", grBin, eventName)
 		path := filepath.Join(hooksDir, filename)
 		if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 			return nil, nil, fmt.Errorf("write codex hook %s: %w", filename, err)
@@ -156,12 +122,11 @@ func (sm *SessionManager) injectCodexHooks(sessionID string) (extraArgs []string
 	}
 
 	extraEnv = map[string]string{
-		"GRAITH_BIN":      resolveGrBin(),
 		"CODEX_HOOKS_DIR": hooksDir,
 	}
 
 	sm.log.Info("injected codex hooks", "session_id", sessionID, "hooks_dir", hooksDir)
-	return nil, extraEnv, nil // no extra args needed, just env
+	return nil, extraEnv, nil
 }
 
 // cleanupHooks removes generated hook files for a session.
