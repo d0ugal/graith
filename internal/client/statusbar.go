@@ -202,12 +202,13 @@ func formatFleetMinimal(fleet protocol.FleetSummary) string {
 }
 
 type statusBarState struct {
-	mu        sync.Mutex
-	sessionID string
-	info      statusBarInfo
-	rows      int
-	cols      int
-	position  string
+	mu               sync.Mutex
+	sessionID        string
+	info             statusBarInfo
+	rows             int
+	cols             int
+	position         string
+	pendingApprovals int
 }
 
 func (sb *statusBarState) barRow() int {
@@ -261,6 +262,12 @@ func (sb *statusBarState) teardown(w io.Writer) {
 func (sb *statusBarState) updateInfo(info statusBarInfo) {
 	sb.mu.Lock()
 	sb.info = info
+	sb.mu.Unlock()
+}
+
+func (sb *statusBarState) updatePendingApprovals(count int) {
+	sb.mu.Lock()
+	sb.pendingApprovals = count
 	sb.mu.Unlock()
 }
 

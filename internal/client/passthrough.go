@@ -29,6 +29,7 @@ const (
 	ResultNewSession
 	ResultForkSession
 	ResultLastSession
+	ResultApprovalOverlay
 )
 
 // kittyCtrlSeq returns the Kitty keyboard protocol escape sequence for
@@ -45,7 +46,7 @@ func kittyCtrlSeq(prefixByte byte) []byte {
 // showHelpBar renders a one-line help bar at the bottom of the screen using
 // ANSI save-cursor / restore-cursor so the agent's output isn't disturbed.
 func showHelpBar(w io.Writer) {
-	help := "\x1b[7m d detach  w sessions  l last  n/p next/prev  c new  f fork  s shell  r restart \x1b[0m"
+	help := "\x1b[7m d detach  w sessions  a approvals  l last  n/p next/prev  c new  f fork  s shell  r restart \x1b[0m"
 	_, _ = w.Write([]byte("\x1b7\x1b[999B\r\x1b[2K" + help + "\x1b8"))
 }
 
@@ -63,10 +64,11 @@ type PassthroughKeys struct {
 }
 
 type PassthroughOpts struct {
-	Keys      PassthroughKeys
-	SessionID string
-	Info      *protocol.SessionInfo
-	StatusBar *StatusBarCfg
+	Keys            PassthroughKeys
+	SessionID       string
+	Info            *protocol.SessionInfo
+	StatusBar       *StatusBarCfg
+	AutoPopApproval bool
 }
 
 type StatusBarCfg struct {
@@ -128,7 +130,7 @@ func (c *Client) RunPassthrough(ctx context.Context, opts PassthroughOpts) Passt
 		}
 	}()
 
-	return c.runPassthroughLoop(ctx, opts.Keys, os.Stdin, os.Stdout, sb)
+	return c.runPassthroughLoop(ctx, opts, os.Stdin, os.Stdout, sb)
 }
 
 type frameDemux struct {
@@ -181,7 +183,8 @@ func (c *Client) stopDemux(d *frameDemux) {
 	<-d.done
 }
 
-func (c *Client) runPassthroughLoop(ctx context.Context, keys PassthroughKeys, stdin io.Reader, stdout io.Writer, sb *statusBarState) PassthroughResult {
+func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, stdin io.Reader, stdout io.Writer, sb *statusBarState) PassthroughResult {
+	keys := opts.Keys
 	innerCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -220,6 +223,18 @@ func (c *Client) runPassthroughLoop(ctx context.Context, keys PassthroughKeys, s
 						if protocol.DecodePayload(msg, &resp) == nil {
 							sb.updateInfo(newStatusBarInfo(resp.Session, resp.UnreadCount, resp.Fleet))
 							sb.render(stdout)
+						}
+					}
+				case "approval_notification":
+					var notif protocol.ApprovalNotificationMsg
+					if protocol.DecodePayload(msg, &notif) == nil {
+						if sb != nil {
+							sb.updatePendingApprovals(len(notif.Pending))
+							sb.render(stdout)
+						}
+						if len(notif.Pending) > 0 && opts.AutoPopApproval {
+							setResult(ResultApprovalOverlay)
+							return
 						}
 					}
 				}
@@ -282,6 +297,9 @@ func (c *Client) runPassthroughLoop(ctx context.Context, keys PassthroughKeys, s
 						_ = c.SendData([]byte{prefixByte})
 					case 'd':
 						setResult(ResultDetached)
+						return
+					case 'a':
+						setResult(ResultApprovalOverlay)
 						return
 					case 'w', 0:
 						setResult(ResultOverlay)
