@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.3](https://github.com/d0ugal/graith/compare/v0.12.2...v0.12.3) (2026-04-26)
+
+
+### Bug Fixes
+
+* include config dir in sandbox read paths for hook scripts ([1e92c0f](https://github.com/d0ugal/graith/commit/1e92c0fd3727fd8324cc743251b16d29543462d0))
+
 ## [0.12.2](https://github.com/d0ugal/graith/compare/v0.12.1...v0.12.2) (2026-04-26)
 
 
