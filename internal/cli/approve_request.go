@@ -94,10 +94,11 @@ var approveRequestCmd = &cobra.Command{
 		if resp.Type == "approval_decision" {
 			var decision protocol.ApprovalDecisionMsg
 			protocol.DecodePayload(resp, &decision)
-			out, _ := json.Marshal(map[string]string{
-				"decision": decision.Decision,
-				"reason":   decision.Reason,
-			})
+			result := map[string]string{"decision": decision.Decision}
+			if decision.Reason != "" {
+				result["reason"] = decision.Reason
+			}
+			out, _ := json.Marshal(result)
 			fmt.Println(string(out))
 		} else {
 			// Unexpected response — fail-open.
