@@ -51,6 +51,7 @@ func (sm *SessionManager) SubmitApproval(ctx context.Context, req protocol.Appro
 	sm.pendingApprovals[req.RequestID] = pa
 	sm.mu.Unlock()
 
+	sm.log.Info("approval queued for user", "request_id", req.RequestID, "tool", req.ToolName, "session", info.SessionName)
 	sm.broadcastApprovalNotification()
 
 	timeout := sm.cfg.Approvals.TimeoutDuration()
@@ -124,6 +125,7 @@ func (sm *SessionManager) broadcastApprovalNotification() {
 	}
 	sm.mu.RUnlock()
 
+	sm.log.Info("broadcasting approval notification", "pending", len(pending), "clients", len(clients))
 	for _, send := range clients {
 		send("approval_notification", msg)
 	}
