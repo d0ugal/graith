@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.14.0](https://github.com/d0ugal/graith/compare/v0.13.0...v0.14.0) (2026-04-27)
+
+
+### Features
+
+* add logging to approval request handling ([dc2a20a](https://github.com/d0ugal/graith/commit/dc2a20a6e120ec6289b7393dc263982cf379d3a3))
+* improve approval overlay formatting ([575f925](https://github.com/d0ugal/graith/commit/575f9258056b6849139801531f63392998190350))
+* improved approval overlay with detail panel ([3c827ce](https://github.com/d0ugal/graith/commit/3c827cebe01b3f4835101775a70f1921d99e291f))
+* inject unread inbox messages on session start ([f775b3c](https://github.com/d0ugal/graith/commit/f775b3c818a83eec90ab9904d68386d411cb8341))
+* make approval hooks opt-in per session with --approvals flag ([99792c8](https://github.com/d0ugal/graith/commit/99792c8c8617fefd5f41728b6097b6a33172cbc2))
+* red status bar and approval status for pending approvals ([c290dd4](https://github.com/d0ugal/graith/commit/c290dd4ddd197e2f79702a22d6c5e42cdf5676c5))
+
+
+### Bug Fixes
+
+* handle Kitty keyboard protocol release events and encoded follow-up keys ([82207c6](https://github.com/d0ugal/graith/commit/82207c6581f3c6461b806f9b735c974dd8615fa6))
+* remove TODO comment that triggers godox lint ([31a82ba](https://github.com/d0ugal/graith/commit/31a82ba0ac569f8e04596a968b80546e5be882cb))
+* replace naked returns in parseKittyCSIu to satisfy nakedret lint ([20c5ef8](https://github.com/d0ugal/graith/commit/20c5ef8fd2f37c54641bb833ed5dbd60e053cd81))
+
 ## [0.13.0](https://github.com/d0ugal/graith/compare/v0.12.5...v0.13.0) (2026-04-26)
 
 
