@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.1](https://github.com/d0ugal/graith/compare/v0.16.0...v0.16.1) (2026-04-27)
+
+
+### Bug Fixes
+
+* only add hooks dir to sandbox read paths when agent hooks are enabled ([682682f](https://github.com/d0ugal/graith/commit/682682ff6d75da5afdeb457dab9e13e6e4bdb73e))
+
 ## [0.16.0](https://github.com/d0ugal/graith/compare/v0.15.0...v0.16.0) (2026-04-27)
 
 
