@@ -69,24 +69,39 @@ func TestGenerateClaudeSettings(t *testing.T) {
 		if matchers[0].Matcher != "" {
 			t.Errorf("event %q matcher = %q, want empty (match-all)", event, matchers[0].Matcher)
 		}
-		if len(matchers[0].Hooks) != 1 {
-			t.Errorf("event %q has %d hooks, want 1", event, len(matchers[0].Hooks))
-			continue
-		}
-		hook := matchers[0].Hooks[0]
-		if hook.Type != "command" {
-			t.Errorf("event %q type = %q, want %q", event, hook.Type, "command")
-		}
-		if event == "PreToolUse" {
-			if !strings.Contains(hook.Command, "approve-request") {
-				t.Errorf("event %q command = %q, does not contain approve-request", event, hook.Command)
+		for _, hook := range matchers[0].Hooks {
+			if hook.Type != "command" {
+				t.Errorf("event %q type = %q, want %q", event, hook.Type, "command")
 			}
-		} else {
-			if !strings.Contains(hook.Command, "report-status") {
-				t.Errorf("event %q command = %q, does not contain report-status", event, hook.Command)
+		}
+		switch event {
+		case "PreToolUse":
+			if len(matchers[0].Hooks) != 1 {
+				t.Errorf("event %q has %d hooks, want 1", event, len(matchers[0].Hooks))
+			} else if !strings.Contains(matchers[0].Hooks[0].Command, "approve-request") {
+				t.Errorf("event %q command = %q, does not contain approve-request", event, matchers[0].Hooks[0].Command)
 			}
-			if !strings.Contains(hook.Command, "--event "+event) {
-				t.Errorf("event %q command = %q, does not contain --event %s", event, hook.Command, event)
+		case "SessionStart":
+			if len(matchers[0].Hooks) != 2 {
+				t.Errorf("event %q has %d hooks, want 2", event, len(matchers[0].Hooks))
+			} else {
+				if !strings.Contains(matchers[0].Hooks[0].Command, "report-status") {
+					t.Errorf("SessionStart hook[0] = %q, want report-status", matchers[0].Hooks[0].Command)
+				}
+				if !strings.Contains(matchers[0].Hooks[1].Command, "check-inbox") {
+					t.Errorf("SessionStart hook[1] = %q, want check-inbox", matchers[0].Hooks[1].Command)
+				}
+			}
+		default:
+			if len(matchers[0].Hooks) != 1 {
+				t.Errorf("event %q has %d hooks, want 1", event, len(matchers[0].Hooks))
+			} else {
+				if !strings.Contains(matchers[0].Hooks[0].Command, "report-status") {
+					t.Errorf("event %q command = %q, does not contain report-status", event, matchers[0].Hooks[0].Command)
+				}
+				if !strings.Contains(matchers[0].Hooks[0].Command, "--event "+event) {
+					t.Errorf("event %q command = %q, does not contain --event %s", event, matchers[0].Hooks[0].Command, event)
+				}
 			}
 		}
 	}
@@ -303,11 +318,19 @@ func TestCodexHookScriptContent(t *testing.T) {
 		if !strings.HasPrefix(content, "#!/bin/sh") {
 			t.Errorf("codex hook %q missing shebang", filename)
 		}
-		if filename == "permission-request" {
+		switch filename {
+		case "permission-request":
 			if !strings.Contains(content, "approve-request") {
 				t.Errorf("codex hook %q does not contain approve-request; content = %q", filename, content)
 			}
-		} else {
+		case "session-start":
+			if !strings.Contains(content, "report-status") {
+				t.Errorf("codex hook %q does not contain report-status; content = %q", filename, content)
+			}
+			if !strings.Contains(content, "check-inbox") {
+				t.Errorf("codex hook %q does not contain check-inbox; content = %q", filename, content)
+			}
+		default:
 			if !strings.Contains(content, "--event "+eventName) {
 				t.Errorf("codex hook %q does not contain --event %s; content = %q", filename, eventName, content)
 			}
