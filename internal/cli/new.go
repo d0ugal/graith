@@ -19,7 +19,7 @@ var (
 	newRepo          string
 	newNoRepo        bool
 	newShareWorktree string
-	newApprovals     bool
+	newAgentHooks    bool
 )
 
 var newCmd = &cobra.Command{
@@ -64,7 +64,7 @@ var newCmd = &cobra.Command{
 			Prompt:        prompt,
 			NoRepo:        newNoRepo,
 			ShareWorktree: newShareWorktree,
-			Approvals:     newApprovals,
+			AgentHooks:    newAgentHooks,
 		})
 
 		resp, err := c.ReadControlResponse()
@@ -109,8 +109,8 @@ func init() {
 	newCmd.Flags().StringVarP(&newRepo, "repo", "C", "", "path to git repo (default: cwd)")
 	newCmd.Flags().BoolVar(&newNoRepo, "no-repo", false, "create session without a git repo or worktree")
 	newCmd.Flags().StringVar(&newShareWorktree, "share-worktree", "", "share another session's worktree (read-only)")
-	// TODO: consider making --approvals the default once the hook output is stable
-	newCmd.Flags().BoolVar(&newApprovals, "approvals", false, "enable cross-session approval hooks for this session")
+	// TODO: make --agent-hooks the default once hooks are well-tested
+	newCmd.Flags().BoolVar(&newAgentHooks, "agent-hooks", false, "enable agent lifecycle hooks (status, approvals, inbox)")
 	newCmd.RegisterFlagCompletionFunc("agent", completeAgentNames)
 	newCmd.RegisterFlagCompletionFunc("repo", completeRepoPaths)
 	newCmd.RegisterFlagCompletionFunc("base", completeBranchNames)
