@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0](https://github.com/d0ugal/graith/compare/v0.14.0...v0.15.0) (2026-06-09)
+
+
+### Features
+
+* rename --approvals to --agent-hooks with all-or-nothing semantics ([811d1e7](https://github.com/d0ugal/graith/commit/811d1e7158f1fd7c6e1279dd14e436691d51a3ab))
+
 ## [0.14.0](https://github.com/d0ugal/graith/compare/v0.13.0...v0.14.0) (2026-06-09)
 
 
