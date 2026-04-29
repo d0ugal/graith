@@ -378,6 +378,10 @@ func (s *MsgStore) Cleanup(maxAge time.Duration, maxPerStream int) (int64, error
 		}
 	}
 
+	s.db.Exec(`DELETE FROM acked_messages WHERE NOT EXISTS (
+		SELECT 1 FROM messages WHERE messages.stream = acked_messages.stream AND messages.seq = acked_messages.seq
+	)`)
+
 	return total, nil
 }
 
