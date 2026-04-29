@@ -12,6 +12,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
+func upgradeMsg() protocol.UpgradeMsg {
+	execPath, _ := os.Executable()
+	return protocol.UpgradeMsg{ExecPath: execPath}
+}
+
 var (
 	adoptFrom  string
 	forceClean bool
@@ -109,7 +114,7 @@ func execUpgrade(successMsg string) error {
 	}
 	c.ReadControlResponse()
 
-	c.SendControl("upgrade", struct{}{})
+	c.SendControl("upgrade", upgradeMsg())
 	resp, err := c.ReadControlResponse()
 	if err != nil {
 		// Connection dropped — expected, the daemon exec'd itself
