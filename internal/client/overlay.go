@@ -810,10 +810,24 @@ func (m overlayModel) View() tea.View {
 	switch m.state {
 	case stateConfirmDelete:
 		if item, ok := m.list.SelectedItem().(sessionItem); ok {
+			s := item.info
+			if s.Dirty || s.UnpushedCount > 0 {
+				warnStyle := lipgloss.NewStyle().Foreground(colorRed).Bold(true)
+				panelContent.WriteString("\n")
+				panelContent.WriteString(warnStyle.Render("⚠ Session has unsaved work:"))
+				if s.Dirty {
+					panelContent.WriteString("\n")
+					panelContent.WriteString(warnStyle.Render("  • Uncommitted changes"))
+				}
+				if s.UnpushedCount > 0 {
+					panelContent.WriteString("\n")
+					panelContent.WriteString(warnStyle.Render(fmt.Sprintf("  • %d unpushed commit(s)", s.UnpushedCount)))
+				}
+			}
 			panelContent.WriteString("\n")
 			panelContent.WriteString(lipgloss.NewStyle().
 				Foreground(colorRed).
-				Render(fmt.Sprintf("Delete '%s'? [y/N]", item.info.Name)))
+				Render(fmt.Sprintf("Delete '%s'? [y/N]", s.Name)))
 		}
 	case stateConfirmRestart:
 		if item, ok := m.list.SelectedItem().(sessionItem); ok {
