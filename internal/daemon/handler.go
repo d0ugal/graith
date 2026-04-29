@@ -137,6 +137,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					func() {
 						data, _ := protocol.EncodeControl("detached", protocol.DetachedMsg{Reason: "replaced"})
 						_ = writer.WriteFrame(protocol.ChannelControl, data)
+						conn.Close()
 					},
 					sendControl,
 				)
