@@ -415,6 +415,10 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 		cleanupOnError()
 		return SessionState{}, err
 	}
+	if sharedWorktree && !sandboxed {
+		cleanupOnError()
+		return SessionState{}, fmt.Errorf("--share-worktree requires sandbox to enforce read-only access; enable sandbox in config or install safehouse")
+	}
 	command := agent.Command
 	finalArgs := expandedArgs
 	var scratchDir string
