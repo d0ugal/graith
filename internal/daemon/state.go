@@ -142,13 +142,26 @@ func writeFileAtomic(path string, data []byte) error {
 	}
 	if err := tmp.Close(); err != nil {
 		os.Remove(tmpPath)
-		return err
+		return fmt.Errorf("close temp: %w", err)
 	}
 	if err := os.Rename(tmpPath, path); err != nil {
 		os.Remove(tmpPath)
 		return fmt.Errorf("rename: %w", err)
 	}
+	if err := syncDir(dir); err != nil {
+		return fmt.Errorf("sync dir: %w", err)
+	}
 	return nil
+}
+
+func syncDir(path string) error {
+	d, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	err = d.Sync()
+	d.Close()
+	return err
 }
 
 func (s *State) Reconcile() {
