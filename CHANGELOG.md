@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.16.2](https://github.com/d0ugal/graith/compare/v0.16.1...v0.16.2) (2026-06-10)
+
+
+### Bug Fixes
+
+* make TestSessionAttachDetach more robust against PTY timing ([5457255](https://github.com/d0ugal/graith/commit/5457255a8bd1b0ea34f933691a577c40a6721611))
+* make TestSessionAttachDetach more robust against PTY timing ([97fdd5a](https://github.com/d0ugal/graith/commit/97fdd5a15fe93cc0896ca90d7791b2aa6c6d0381))
+
 ## [0.16.1](https://github.com/d0ugal/graith/compare/v0.16.0...v0.16.1) (2026-06-09)
 
 
