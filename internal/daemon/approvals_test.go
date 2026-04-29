@@ -1,0 +1,106 @@
+package daemon
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/d0ugal/graith/internal/protocol"
+)
+
+func TestSubmitApprovalTimeoutBlocksBeforeContextCancel(t *testing.T) {
+	sm := newTestSessionManager(t)
+	sm.cfg.Approvals.Timeout = "100ms"
+
+	sm.mu.Lock()
+	sm.state.Sessions["sess1"] = &SessionState{Name: "test-session"}
+	sm.mu.Unlock()
+
+	req := protocol.ApprovalRequestMsg{
+		RequestID: "req1",
+		SessionID: "sess1",
+		ToolName:  "Bash",
+	}
+
+	decision := sm.SubmitApproval(context.Background(), req)
+
+	if decision.Decision != "block" {
+		t.Errorf("expected block on timeout, got %q", decision.Decision)
+	}
+	if decision.Reason != "approval request timed out" {
+		t.Errorf("unexpected reason: %q", decision.Reason)
+	}
+}
+
+func TestSubmitApprovalContextCancelAllows(t *testing.T) {
+	sm := newTestSessionManager(t)
+	sm.cfg.Approvals.Timeout = "10s"
+
+	sm.mu.Lock()
+	sm.state.Sessions["sess1"] = &SessionState{Name: "test-session"}
+	sm.mu.Unlock()
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	req := protocol.ApprovalRequestMsg{
+		RequestID: "req2",
+		SessionID: "sess1",
+		ToolName:  "Bash",
+	}
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
+
+	decision := sm.SubmitApproval(ctx, req)
+
+	if decision.Decision != "allow" {
+		t.Errorf("expected allow on context cancel, got %q", decision.Decision)
+	}
+}
+
+func TestSubmitApprovalUserDecision(t *testing.T) {
+	sm := newTestSessionManager(t)
+	sm.cfg.Approvals.Timeout = "10s"
+
+	sm.mu.Lock()
+	sm.state.Sessions["sess1"] = &SessionState{Name: "test-session"}
+	sm.mu.Unlock()
+
+	req := protocol.ApprovalRequestMsg{
+		RequestID: "req3",
+		SessionID: "sess1",
+		ToolName:  "Bash",
+	}
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		sm.RespondToApproval("req3", "allow", "user approved")
+	}()
+
+	decision := sm.SubmitApproval(context.Background(), req)
+
+	if decision.Decision != "allow" {
+		t.Errorf("expected allow, got %q", decision.Decision)
+	}
+	if decision.Reason != "user approved" {
+		t.Errorf("unexpected reason: %q", decision.Reason)
+	}
+}
+
+func TestSubmitApprovalMissingSessionAllows(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	req := protocol.ApprovalRequestMsg{
+		RequestID: "req4",
+		SessionID: "nonexistent",
+		ToolName:  "Bash",
+	}
+
+	decision := sm.SubmitApproval(context.Background(), req)
+
+	if decision.Decision != "allow" {
+		t.Errorf("expected allow for missing session, got %q", decision.Decision)
+	}
+}

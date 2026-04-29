@@ -124,6 +124,38 @@ func TestIdleTimeoutDuration(t *testing.T) {
 	}
 }
 
+func TestApprovalTimeoutDuration(t *testing.T) {
+	tests := []struct {
+		name string
+		a    Approvals
+		want time.Duration
+	}{
+		{
+			name: "default when empty",
+			a:    Approvals{},
+			want: 10 * time.Minute,
+		},
+		{
+			name: "explicit duration",
+			a:    Approvals{Timeout: "30m"},
+			want: 30 * time.Minute,
+		},
+		{
+			name: "days",
+			a:    Approvals{Timeout: "1d"},
+			want: 24 * time.Hour,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.a.TimeoutDuration()
+			if got != tt.want {
+				t.Errorf("TimeoutDuration() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseDurationWithDays(t *testing.T) {
 	tests := []struct {
 		input string
