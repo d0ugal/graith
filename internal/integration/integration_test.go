@@ -60,6 +60,10 @@ func setup(t *testing.T) *testEnv {
 		Args:       []string{"-c", "echo 'ready'; exec cat"},
 		ResumeArgs: []string{"-c", "echo 'resumed'; exec cat"},
 	}
+	cfg.Agents["sleeper"] = config.Agent{
+		Command: "bash",
+		Args:    []string{"-c", "trap 'read line; echo got:$line; exit' WINCH; echo ready; sleep 600 & wait"},
+	}
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
@@ -625,14 +629,19 @@ func TestTypeDeliversInput(t *testing.T) {
 	if !ok {
 		t.Fatal("PTY session not found")
 	}
+	ready := false
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if tail, err := ptySess.Scrollback.TailBytes(4096); err == nil {
 			if strings.Contains(string(tail), "ready") {
+				ready = true
 				break
 			}
 		}
 		time.Sleep(50 * time.Millisecond)
+	}
+	if !ready {
+		t.Fatal("timed out waiting for echo agent to become ready")
 	}
 
 	// Send type command — cat should echo the text back.
@@ -667,6 +676,73 @@ func TestTypeDeliversInput(t *testing.T) {
 	}
 }
 
+func TestTypeWakesSleepingAgent(t *testing.T) {
+	env := setup(t)
+	defer env.teardown()
+
+	r, w := env.connect(t)
+	handshake(t, r, w)
+
+	// The "sleeper" agent only reads stdin inside a SIGWINCH trap handler.
+	// Without the Poke (SIGWINCH), typed input would never be consumed.
+	sendControl(t, w, "create", protocol.CreateMsg{
+		Name: "wake-test", Agent: "sleeper", NoRepo: true,
+	})
+	createResp := readControl(t, r)
+	if createResp.Type == "error" {
+		var e protocol.ErrorMsg
+		protocol.DecodePayload(createResp, &e)
+		t.Fatalf("create error: %s", e.Message)
+	}
+	var info protocol.SessionInfo
+	protocol.DecodePayload(createResp, &info)
+
+	ptySess, ok := env.sm.GetPTY(info.ID)
+	if !ok {
+		t.Fatal("PTY session not found")
+	}
+	ready := false
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if tail, err := ptySess.Scrollback.TailBytes(4096); err == nil {
+			if strings.Contains(string(tail), "ready") {
+				ready = true
+				break
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !ready {
+		t.Fatal("timed out waiting for sleeper agent to become ready")
+	}
+
+	sendControl(t, w, "type", protocol.TypeMsg{
+		SessionID: info.ID,
+		Input:     "wake-test-input",
+	})
+	typeResp := readControl(t, r)
+	if typeResp.Type != "typed" {
+		t.Fatalf("expected typed, got %s", typeResp.Type)
+	}
+
+	// The sleeper only reads stdin in its SIGWINCH trap. If the Poke
+	// didn't send SIGWINCH, the input would never appear in output.
+	found := false
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if tail, err := ptySess.Scrollback.TailBytes(4096); err == nil {
+			if strings.Contains(string(tail), "got:wake-test-input") {
+				found = true
+				break
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !found {
+		t.Error("sleeper agent did not read input — SIGWINCH poke failed to wake the process")
+	}
+}
+
 func TestTypeExitedSessionFails(t *testing.T) {
 	env := setup(t)
 	defer env.teardown()
@@ -691,7 +767,15 @@ func TestTypeExitedSessionFails(t *testing.T) {
 	}
 
 	// Wait for the process to actually exit.
-	time.Sleep(500 * time.Millisecond)
+	ptySess, ok := env.sm.GetPTY(info.ID)
+	if !ok {
+		t.Fatal("PTY session not found")
+	}
+	select {
+	case <-ptySess.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for session to exit")
+	}
 
 	// Type into the exited session — should get an error.
 	sendControl(t, w, "type", protocol.TypeMsg{
