@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -86,8 +87,8 @@ func stopDaemonByPID(pidFile string) {
 	if err != nil {
 		return
 	}
-	var pid int
-	if _, err := fmt.Sscanf(string(data), "%d", &pid); err != nil || pid <= 1 {
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil || pid <= 1 {
 		return
 	}
 	_ = syscall.Kill(pid, syscall.SIGTERM)
