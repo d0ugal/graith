@@ -90,6 +90,11 @@ func initSchema(db *sql.DB) error {
 			acked_at   TEXT NOT NULL,
 			PRIMARY KEY (subscriber, stream, seq)
 		);
+
+		CREATE TABLE IF NOT EXISTS stream_hwm (
+			stream  TEXT PRIMARY KEY,
+			max_seq INTEGER NOT NULL DEFAULT 0
+		);
 	`)
 	if err != nil {
 		return fmt.Errorf("init messages schema: %w", err)
@@ -114,9 +119,23 @@ func (s *MsgStore) Publish(stream, senderID, senderName, body, threadID, replyTo
 	defer tx.Rollback()
 
 	var seq int64
-	err = tx.QueryRow("SELECT COALESCE(MAX(seq), 0) + 1 FROM messages WHERE stream = ?", stream).Scan(&seq)
+	err = tx.QueryRow(`
+		SELECT MAX(next) + 1 FROM (
+			SELECT COALESCE(MAX(seq), 0) AS next FROM messages WHERE stream = ?
+			UNION ALL
+			SELECT COALESCE(MAX(max_seq), 0) AS next FROM stream_hwm WHERE stream = ?
+		)`, stream, stream).Scan(&seq)
 	if err != nil {
 		return Message{}, fmt.Errorf("next seq: %w", err)
+	}
+
+	_, err = tx.Exec(
+		`INSERT INTO stream_hwm (stream, max_seq) VALUES (?, ?)
+		 ON CONFLICT(stream) DO UPDATE SET max_seq = excluded.max_seq`,
+		stream, seq,
+	)
+	if err != nil {
+		return Message{}, fmt.Errorf("update hwm: %w", err)
 	}
 
 	msg := Message{
@@ -240,7 +259,12 @@ func (s *MsgStore) AckMessages(stream, subscriber string, seqs []int64) error {
 
 func (s *MsgStore) AckLatest(stream, subscriber string) error {
 	var maxSeq int64
-	err := s.db.QueryRow("SELECT COALESCE(MAX(seq), 0) FROM messages WHERE stream = ?", stream).Scan(&maxSeq)
+	err := s.db.QueryRow(`
+		SELECT MAX(s) FROM (
+			SELECT COALESCE(MAX(seq), 0) AS s FROM messages WHERE stream = ?
+			UNION ALL
+			SELECT COALESCE(max_seq, 0) AS s FROM stream_hwm WHERE stream = ?
+		)`, stream, stream).Scan(&maxSeq)
 	if err != nil {
 		return fmt.Errorf("ack latest: %w", err)
 	}
