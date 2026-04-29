@@ -1342,11 +1342,6 @@ func (sm *SessionManager) resolveStoredSandboxConfig(sess *SessionState) config.
 	return merged
 }
 
-func (sm *SessionManager) sandboxOpts(agentName, sessionID, worktreePath string, envKeys []string, agentHooks bool) sandbox.WrapOpts {
-	merged := sm.cfg.Sandbox.Merge(sm.cfg.Agents[agentName].Sandbox)
-	return sm.sandboxOptsFromConfig(merged, sessionID, worktreePath, envKeys, agentHooks)
-}
-
 func (sm *SessionManager) sandboxOptsFromConfig(merged config.SandboxConfig, sessionID, worktreePath string, envKeys []string, agentHooks bool) sandbox.WrapOpts {
 	readDirs := expandPaths(merged.ReadDirs)
 	writeDirs := expandPaths(merged.WriteDirs)
