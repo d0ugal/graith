@@ -340,6 +340,11 @@ type previewMsg struct {
 	content   string
 }
 
+type deleteResultMsg struct {
+	sessionID string
+	err       error
+}
+
 type overlayModel struct {
 	list             list.Model
 	filterInput      textinput.Model
@@ -352,6 +357,7 @@ type overlayModel struct {
 	currentSessionID string
 	allSessions      []protocol.SessionInfo
 	fetchPreview     func(sessionID string) string
+	deleteSession    func(sessionID string) error
 	previewContent   string
 	previewSessionID string
 }
@@ -420,7 +426,7 @@ func buildGroupedItems(sessions []protocol.SessionInfo) []list.Item {
 	return items
 }
 
-func newOverlayModel(sessions []protocol.SessionInfo, currentSessionID string, fetchPreview func(sessionID string) string) overlayModel {
+func newOverlayModel(sessions []protocol.SessionInfo, currentSessionID string, fetchPreview func(sessionID string) string, deleteSession func(sessionID string) error) overlayModel {
 	cols := computeColumnWidths(sessions, currentSessionID)
 	contentWidth := cols.totalWidth()
 	items := buildGroupedItems(sessions)
@@ -463,6 +469,7 @@ func newOverlayModel(sessions []protocol.SessionInfo, currentSessionID string, f
 		currentSessionID: currentSessionID,
 		allSessions:      sessions,
 		fetchPreview:     fetchPreview,
+		deleteSession:    deleteSession,
 	}
 }
 
@@ -495,6 +502,40 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
+
+	case deleteResultMsg:
+		if msg.err != nil {
+			m.state = stateList
+			return m, nil
+		}
+		var newSessions []protocol.SessionInfo
+		for _, s := range m.allSessions {
+			if s.ID != msg.sessionID {
+				newSessions = append(newSessions, s)
+			}
+		}
+		m.allSessions = newSessions
+		if len(newSessions) == 0 {
+			return m, tea.Quit
+		}
+		curIdx := m.list.Index()
+		m.cols = computeColumnWidths(newSessions, m.currentSessionID)
+		m.contentWidth = m.cols.totalWidth()
+		items := buildGroupedItems(newSessions)
+		m.list.SetItems(items)
+		m.list.SetDelegate(compactDelegate{cols: m.cols, currentSessionID: m.currentSessionID})
+		if curIdx >= len(items) {
+			curIdx = len(items) - 1
+		}
+		m.list.Select(curIdx)
+		if _, ok := m.list.SelectedItem().(groupHeader); ok {
+			m.list.CursorDown()
+			if _, ok := m.list.SelectedItem().(groupHeader); ok {
+				m.list.CursorUp()
+			}
+		}
+		m.state = stateList
+		return m, m.fetchPreviewCmd()
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -556,9 +597,14 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch msg.String() {
 			case "y", "Y":
 				if item, ok := m.list.SelectedItem().(sessionItem); ok {
-					m.selected = &item.info
+					sid := item.info.ID
+					deleteFn := m.deleteSession
+					return m, func() tea.Msg {
+						return deleteResultMsg{sessionID: sid, err: deleteFn(sid)}
+					}
 				}
-				return m, tea.Quit
+				m.state = stateList
+				return m, nil
 			default:
 				m.state = stateList
 				return m, nil
@@ -858,8 +904,8 @@ func (m overlayModel) View() tea.View {
 // RunOverlay launches the bubbletea overlay listing sessions grouped by repo.
 // currentSessionID highlights the session the user was just attached to.
 // fetchPreview is called asynchronously to load scrollback for the selected session.
-func RunOverlay(sessions []protocol.SessionInfo, currentSessionID string, fetchPreview func(sessionID string) string) *OverlayResult {
-	m := newOverlayModel(sessions, currentSessionID, fetchPreview)
+func RunOverlay(sessions []protocol.SessionInfo, currentSessionID string, fetchPreview func(sessionID string) string, deleteSession func(sessionID string) error) *OverlayResult {
+	m := newOverlayModel(sessions, currentSessionID, fetchPreview, deleteSession)
 	p := tea.NewProgram(m)
 
 	final, err := p.Run()

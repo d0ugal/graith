@@ -54,13 +54,8 @@ func runAttach(cmd *cobra.Command, name string) error {
 	}
 
 	if name == "" {
-		result := client.RunOverlay(list.Sessions, "", previewFetcher())
+		result := client.RunOverlay(list.Sessions, "", previewFetcher(), deleteSession)
 		if result == nil {
-			return nil
-		}
-		if result.Action == "delete" {
-			c.SendControl("delete", protocol.DeleteMsg{SessionID: result.SessionID})
-			c.ReadControlResponse()
 			return nil
 		}
 		if result.Action == "restart" {
@@ -164,20 +159,8 @@ func runAttachByID(c *client.Client, sessionID string) error {
 			var list protocol.SessionListMsg
 			protocol.DecodePayload(listResp, &list)
 
-			overlayResult := client.RunOverlay(list.Sessions, sessionID, previewFetcher())
+			overlayResult := client.RunOverlay(list.Sessions, sessionID, previewFetcher(), deleteSession)
 			if overlayResult == nil {
-				restoreScreen(sessionID)
-				nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
-				attachResp, _ := nc.ReadControlResponse()
-				protocol.DecodePayload(attachResp, &info)
-				opts.SessionID = sessionID
-				opts.Info = &info
-				c = nc
-				continue
-			}
-			if overlayResult.Action == "delete" {
-				nc.SendControl("delete", protocol.DeleteMsg{SessionID: overlayResult.SessionID})
-				nc.ReadControlResponse()
 				restoreScreen(sessionID)
 				nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
 				attachResp, _ := nc.ReadControlResponse()
@@ -520,6 +503,17 @@ func previewFetcher() func(string) string {
 
 func freshClient() (*client.Client, error) {
 	return client.Connect(cfg, paths, cfgFile)
+}
+
+func deleteSession(sessionID string) error {
+	dc, err := freshClient()
+	if err != nil {
+		return err
+	}
+	defer dc.Close()
+	dc.SendControl("delete", protocol.DeleteMsg{SessionID: sessionID})
+	_, err = dc.ReadControlResponse()
+	return err
 }
 
 // sortedSessionIDs returns session IDs in the same order as the overlay:
