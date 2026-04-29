@@ -60,3 +60,35 @@ func TestIsPIDAlivePID1(t *testing.T) {
 		t.Error("PID 1 should be alive (EPERM means alive)")
 	}
 }
+
+func TestIsGraithDaemon(t *testing.T) {
+	t.Run("pid 0 rejected", func(t *testing.T) {
+		if IsGraithDaemon(0) {
+			t.Error("pid 0 should be rejected")
+		}
+	})
+
+	t.Run("pid 1 rejected", func(t *testing.T) {
+		if IsGraithDaemon(1) {
+			t.Error("pid 1 (init) should be rejected")
+		}
+	})
+
+	t.Run("negative pid rejected", func(t *testing.T) {
+		if IsGraithDaemon(-1) {
+			t.Error("negative pid should be rejected")
+		}
+	})
+
+	t.Run("non-existent pid rejected", func(t *testing.T) {
+		if IsGraithDaemon(999999) {
+			t.Error("non-existent pid should be rejected")
+		}
+	})
+
+	t.Run("non-graith process rejected", func(t *testing.T) {
+		if IsGraithDaemon(os.Getpid()) {
+			t.Error("current process (go test) should not be identified as graith")
+		}
+	})
+}
