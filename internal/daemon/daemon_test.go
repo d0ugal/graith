@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -1090,5 +1091,31 @@ func TestStateSaveLoadSharedWorktree(t *testing.T) {
 	}
 	if !s.SharedWorktree {
 		t.Error("SharedWorktree not preserved across save/load")
+	}
+}
+
+func TestShareWorktreeRequiresSandbox(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := config.Default()
+	sm := NewSessionManager(cfg, config.Paths{
+		StateFile: filepath.Join(tmpDir, "state.json"),
+		DataDir:   tmpDir,
+		LogDir:    tmpDir,
+	}, slog.Default())
+
+	sm.state.Sessions["src1"] = &SessionState{
+		ID:           "src1",
+		Name:         "source",
+		Agent:        "claude",
+		WorktreePath: "/tmp/fake-worktree",
+		Status:       StatusRunning,
+	}
+
+	_, err := sm.Create("reviewer", "claude", "", "", "", false, "source", false, 24, 80)
+	if err == nil {
+		t.Fatal("expected error when --share-worktree used without sandbox, got nil")
+	}
+	if !strings.Contains(err.Error(), "requires sandbox") {
+		t.Errorf("unexpected error message: %v", err)
 	}
 }
