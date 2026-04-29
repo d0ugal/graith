@@ -45,17 +45,22 @@ func (m Messages) MaxAgeDuration() time.Duration {
 }
 
 func ParseDurationWithDays(s string) time.Duration {
-	if len(s) > 1 && s[len(s)-1] == 'd' {
+	var total time.Duration
+	if i := strings.Index(s, "d"); i > 0 {
 		var days int
-		if _, err := fmt.Sscanf(s, "%dd", &days); err == nil {
-			return time.Duration(days) * 24 * time.Hour
+		if _, err := fmt.Sscanf(s[:i+1], "%dd", &days); err == nil {
+			total = time.Duration(days) * 24 * time.Hour
+			s = s[i+1:]
 		}
+	}
+	if s == "" {
+		return total
 	}
 	d, err := time.ParseDuration(s)
 	if err != nil {
 		return 0
 	}
-	return d
+	return total + d
 }
 
 type Keybindings struct {
