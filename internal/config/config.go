@@ -126,12 +126,12 @@ func (a Agent) IdleTimeoutDuration() time.Duration {
 }
 
 type SandboxConfig struct {
-	Enabled   bool     `toml:"enabled"`
-	Disabled  *bool    `toml:"disabled,omitempty"`
-	Command   string   `toml:"command"`
-	Features  []string `toml:"features"`
-	ReadDirs  []string `toml:"read_dirs"`
-	WriteDirs []string `toml:"write_dirs"`
+	Enabled   bool     `toml:"enabled" json:"enabled"`
+	Disabled  *bool    `toml:"disabled,omitempty" json:"disabled,omitempty"`
+	Command   string   `toml:"command" json:"command,omitempty"`
+	Features  []string `toml:"features" json:"features,omitempty"`
+	ReadDirs  []string `toml:"read_dirs" json:"read_dirs,omitempty"`
+	WriteDirs []string `toml:"write_dirs" json:"write_dirs,omitempty"`
 }
 
 func (s SandboxConfig) Merge(agent SandboxConfig) SandboxConfig {

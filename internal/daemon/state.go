@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"syscall"
 	"time"
+
+	"github.com/d0ugal/graith/internal/config"
 )
 
 const CurrentStateVersion = 1
@@ -22,31 +24,32 @@ const (
 )
 
 type SessionState struct {
-	ID                 string        `json:"id"`
-	Name               string        `json:"name"`
-	RepoPath           string        `json:"repo_path"`
-	RepoName           string        `json:"repo_name"`
-	WorktreePath       string        `json:"worktree_path"`
-	Branch             string        `json:"branch"`
-	BaseBranch         string        `json:"base_branch"`
-	Agent              string        `json:"agent"`
-	AgentSessionID     string        `json:"agent_session_id,omitempty"`
-	Status             SessionStatus `json:"status"`
-	AgentStatus        string        `json:"agent_status,omitempty"`
-	IdleSince          *time.Time    `json:"-"`
-	GitDirty           bool          `json:"-"`
-	GitUnpushed        int           `json:"-"`
-	HookModel          string        `json:"-"`
-	HookToolName       string        `json:"-"`
-	HookCostUSD        *float64      `json:"-"`
-	HookContextPercent *float64      `json:"-"`
-	ExitCode           *int          `json:"exit_code,omitempty"`
-	PID                int           `json:"pid,omitempty"`
-	Sandboxed          bool          `json:"sandboxed,omitempty"`
-	SharedWorktree     bool          `json:"shared_worktree,omitempty"`
-	AgentHooks         bool          `json:"agent_hooks,omitempty"`
-	CreatedAt          time.Time     `json:"created_at"`
-	LastAttachedAt     *time.Time    `json:"last_attached_at,omitempty"`
+	ID                 string                `json:"id"`
+	Name               string                `json:"name"`
+	RepoPath           string                `json:"repo_path"`
+	RepoName           string                `json:"repo_name"`
+	WorktreePath       string                `json:"worktree_path"`
+	Branch             string                `json:"branch"`
+	BaseBranch         string                `json:"base_branch"`
+	Agent              string                `json:"agent"`
+	AgentSessionID     string                `json:"agent_session_id,omitempty"`
+	Status             SessionStatus         `json:"status"`
+	AgentStatus        string                `json:"agent_status,omitempty"`
+	IdleSince          *time.Time            `json:"-"`
+	GitDirty           bool                  `json:"-"`
+	GitUnpushed        int                   `json:"-"`
+	HookModel          string                `json:"-"`
+	HookToolName       string                `json:"-"`
+	HookCostUSD        *float64              `json:"-"`
+	HookContextPercent *float64              `json:"-"`
+	ExitCode           *int                  `json:"exit_code,omitempty"`
+	PID                int                   `json:"pid,omitempty"`
+	Sandboxed          bool                  `json:"sandboxed,omitempty"`
+	SandboxConfig      *config.SandboxConfig `json:"sandbox_config,omitempty"`
+	SharedWorktree     bool                  `json:"shared_worktree,omitempty"`
+	AgentHooks         bool                  `json:"agent_hooks,omitempty"`
+	CreatedAt          time.Time             `json:"created_at"`
+	LastAttachedAt     *time.Time            `json:"last_attached_at,omitempty"`
 }
 
 type State struct {

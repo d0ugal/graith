@@ -1415,3 +1415,63 @@ func TestResumeRollsBackOnSaveStateFailure(t *testing.T) {
 		t.Error("PTY session should be removed after rollback")
 	}
 }
+
+func TestResolveStoredSandboxConfig(t *testing.T) {
+	t.Run("uses stored config when present", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.cfg.Sandbox = config.SandboxConfig{
+			Enabled:  true,
+			ReadDirs: []string{"/current-config-dir"},
+		}
+
+		stored := &config.SandboxConfig{
+			Enabled:  true,
+			ReadDirs: []string{"/creation-time-dir"},
+		}
+		sess := &SessionState{Agent: "claude", SandboxConfig: stored}
+
+		got := sm.resolveStoredSandboxConfig(sess)
+		if len(got.ReadDirs) != 1 || got.ReadDirs[0] != "/creation-time-dir" {
+			t.Errorf("ReadDirs = %v, want [/creation-time-dir] (should use stored config)", got.ReadDirs)
+		}
+	})
+
+	t.Run("falls back to current config when nil", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.cfg.Sandbox = config.SandboxConfig{
+			Enabled:  true,
+			ReadDirs: []string{"/current-config-dir"},
+		}
+
+		sess := &SessionState{Agent: "claude", SandboxConfig: nil}
+
+		got := sm.resolveStoredSandboxConfig(sess)
+		if len(got.ReadDirs) != 1 || got.ReadDirs[0] != "/current-config-dir" {
+			t.Errorf("ReadDirs = %v, want [/current-config-dir] (should fall back to current config)", got.ReadDirs)
+		}
+	})
+
+	t.Run("falls back merges global and agent config", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.cfg.Sandbox = config.SandboxConfig{
+			Enabled:  true,
+			ReadDirs: []string{"/global-dir"},
+		}
+		sm.cfg.Agents["claude"] = config.Agent{
+			Command: "claude",
+			Sandbox: config.SandboxConfig{
+				ReadDirs: []string{"/agent-dir"},
+			},
+		}
+
+		sess := &SessionState{Agent: "claude", SandboxConfig: nil}
+
+		got := sm.resolveStoredSandboxConfig(sess)
+		if len(got.ReadDirs) != 2 {
+			t.Fatalf("ReadDirs = %v, want [/global-dir /agent-dir]", got.ReadDirs)
+		}
+		if got.ReadDirs[0] != "/global-dir" || got.ReadDirs[1] != "/agent-dir" {
+			t.Errorf("ReadDirs = %v, want [/global-dir /agent-dir]", got.ReadDirs)
+		}
+	})
+}
