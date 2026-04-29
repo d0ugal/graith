@@ -444,17 +444,17 @@ func TestRepoPathAllowed(t *testing.T) {
 	})
 
 	t.Run("allowed path itself is a symlink", func(t *testing.T) {
-		real := t.TempDir()
-		repo := filepath.Join(real, "myrepo")
+		actual := t.TempDir()
+		repo := filepath.Join(actual, "myrepo")
 		if err := os.Mkdir(repo, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		link := filepath.Join(t.TempDir(), "link-to-real")
-		if err := os.Symlink(real, link); err != nil {
+		link := filepath.Join(t.TempDir(), "link-to-actual")
+		if err := os.Symlink(actual, link); err != nil {
 			t.Skipf("symlinks not supported: %v", err)
 		}
 		cfg := &Config{AllowedRepoPaths: []string{link}}
-		if !cfg.RepoPathAllowed(filepath.Join(real, "myrepo")) {
+		if !cfg.RepoPathAllowed(filepath.Join(actual, "myrepo")) {
 			t.Error("repo under resolved allowed symlink should be permitted")
 		}
 	})
