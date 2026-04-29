@@ -82,6 +82,14 @@ func initSchema(db *sql.DB) error {
 			updated_at TEXT NOT NULL,
 			PRIMARY KEY (subscriber, stream)
 		);
+
+		CREATE TABLE IF NOT EXISTS acked_messages (
+			subscriber TEXT NOT NULL,
+			stream     TEXT NOT NULL,
+			seq        INTEGER NOT NULL,
+			acked_at   TEXT NOT NULL,
+			PRIMARY KEY (subscriber, stream, seq)
+		);
 	`)
 	if err != nil {
 		return fmt.Errorf("init messages schema: %w", err)
@@ -160,6 +168,8 @@ func (s *MsgStore) Read(stream, subscriber string, onlyUnread bool, threadID str
 	if onlyUnread && subscriber != "" {
 		q += " AND seq > COALESCE((SELECT ack_seq FROM cursors WHERE subscriber = ? AND stream = ?), 0)"
 		args = append(args, subscriber, stream)
+		q += " AND seq NOT IN (SELECT seq FROM acked_messages WHERE subscriber = ? AND stream = ?)"
+		args = append(args, subscriber, stream)
 	}
 
 	if threadID != "" {
@@ -201,6 +211,33 @@ func (s *MsgStore) Ack(stream, subscriber string, upToSeq int64) error {
 	return nil
 }
 
+func (s *MsgStore) AckMessages(stream, subscriber string, seqs []int64) error {
+	if len(seqs) == 0 {
+		return nil
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("ack messages: begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	stmt, err := tx.Prepare(
+		`INSERT OR IGNORE INTO acked_messages (subscriber, stream, seq, acked_at)
+		 VALUES (?, ?, ?, ?)`)
+	if err != nil {
+		return fmt.Errorf("ack messages: prepare: %w", err)
+	}
+	defer stmt.Close()
+
+	for _, seq := range seqs {
+		if _, err := stmt.Exec(subscriber, stream, seq, now); err != nil {
+			return fmt.Errorf("ack messages: insert seq %d: %w", seq, err)
+		}
+	}
+	return tx.Commit()
+}
+
 func (s *MsgStore) AckLatest(stream, subscriber string) error {
 	var maxSeq int64
 	err := s.db.QueryRow("SELECT COALESCE(MAX(seq), 0) FROM messages WHERE stream = ?", stream).Scan(&maxSeq)
@@ -218,9 +255,9 @@ func (s *MsgStore) ListStreams(subscriber string, includeSystem bool) ([]StreamI
 			COUNT(*) - COALESCE(
 				(SELECT COUNT(*) FROM messages m2
 				 WHERE m2.stream = m.stream
-				   AND m2.seq <= COALESCE(
+				   AND (m2.seq <= COALESCE(
 				     (SELECT ack_seq FROM cursors WHERE subscriber = ? AND stream = m.stream), 0
-				   )
+				   ) OR m2.seq IN (SELECT seq FROM acked_messages WHERE subscriber = ? AND stream = m.stream))
 				), 0
 			) as unread,
 			MAX(m.created_at) as latest_at
@@ -231,7 +268,7 @@ func (s *MsgStore) ListStreams(subscriber string, includeSystem bool) ([]StreamI
 	q += `
 		GROUP BY m.stream
 		ORDER BY latest_at DESC`
-	rows, err := s.db.Query(q, subscriber)
+	rows, err := s.db.Query(q, subscriber, subscriber)
 	if err != nil {
 		return nil, fmt.Errorf("list streams: %w", err)
 	}
@@ -256,8 +293,12 @@ func (s *MsgStore) TotalUnread(subscriber string) int {
 		  AND m.seq > COALESCE(
 			(SELECT c.ack_seq FROM cursors c
 			 WHERE c.subscriber = ? AND c.stream = m.stream), 0
-		)
-	`, subscriber, subscriber).Scan(&count)
+		  )
+		  AND m.seq NOT IN (
+			SELECT seq FROM acked_messages
+			WHERE subscriber = ? AND stream = m.stream
+		  )
+	`, subscriber, subscriber, subscriber).Scan(&count)
 	if err != nil {
 		return 0
 	}
