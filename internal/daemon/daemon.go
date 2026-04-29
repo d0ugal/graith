@@ -482,7 +482,14 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 	go sm.watchSession(id, ptySess)
 
 	if err := sm.saveState(); err != nil {
-		sm.log.Error("failed to save state", "err", err)
+		delete(sm.state.Sessions, id)
+		delete(sm.sessions, id)
+		_ = ptySess.Kill()
+		cleanupOnError()
+		if scratchDir != "" {
+			os.RemoveAll(scratchDir)
+		}
+		return SessionState{}, fmt.Errorf("persist session state: %w", err)
 	}
 
 	return *sessState, nil
@@ -647,7 +654,11 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 	go sm.watchSession(id, ptySess)
 
 	if err := sm.saveState(); err != nil {
-		sm.log.Error("failed to save state", "err", err)
+		delete(sm.state.Sessions, id)
+		delete(sm.sessions, id)
+		_ = ptySess.Kill()
+		_ = git.TeardownSession(repoRoot, worktreePath, branchName)
+		return SessionState{}, fmt.Errorf("persist session state: %w", err)
 	}
 
 	return *sessState, nil
@@ -791,6 +802,11 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 		return SessionState{}, fmt.Errorf("start pty session: %w", err)
 	}
 
+	prevStatus := sessState.Status
+	prevExitCode := sessState.ExitCode
+	prevPID := sessState.PID
+	prevAgentStatus := sessState.AgentStatus
+
 	sessState.Status = StatusRunning
 	sessState.ExitCode = nil
 	sessState.PID = ptySess.Cmd.Process.Pid
@@ -800,7 +816,13 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 	go sm.watchSession(id, ptySess)
 
 	if err := sm.saveState(); err != nil {
-		sm.log.Error("failed to save state", "err", err)
+		sessState.Status = prevStatus
+		sessState.ExitCode = prevExitCode
+		sessState.PID = prevPID
+		sessState.AgentStatus = prevAgentStatus
+		delete(sm.sessions, id)
+		_ = ptySess.Kill()
+		return SessionState{}, fmt.Errorf("persist session state: %w", err)
 	}
 
 	return *sessState, nil
