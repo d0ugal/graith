@@ -391,6 +391,30 @@ func TestSetAndClearAttachedClient(t *testing.T) {
 	})
 }
 
+func TestIsAttachedClient(t *testing.T) {
+	sm := newTestSessionManager(t)
+	conn1 := &net.UnixConn{}
+	conn2 := &net.UnixConn{}
+
+	sm.SetAttachedClient("sess1", conn1, func() {}, nil)
+
+	if !sm.IsAttachedClient("sess1", conn1) {
+		t.Error("expected true for matching conn")
+	}
+	if sm.IsAttachedClient("sess1", conn2) {
+		t.Error("expected false for different conn")
+	}
+	if sm.IsAttachedClient("nonexistent", conn1) {
+		t.Error("expected false for nonexistent session")
+	}
+
+	sm.KickAttachedClient("sess1")
+
+	if sm.IsAttachedClient("sess1", conn1) {
+		t.Error("expected false after kick")
+	}
+}
+
 func TestToSessionInfo(t *testing.T) {
 	exitCode := 42
 	createdAt := time.Date(2025, 1, 15, 10, 30, 0, 0, time.UTC)
