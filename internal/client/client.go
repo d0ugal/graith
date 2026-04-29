@@ -134,15 +134,15 @@ func ConnectFast(paths config.Paths) (*Client, error) {
 }
 
 // ConnectForApproval is like ConnectFast but with a long deadline suitable
-// for blocking on approval responses. The deadline should be at least as long
-// as the configured approval timeout so the connection outlives the daemon's
-// timeout and receives the decision rather than disconnecting early.
-func ConnectForApproval(paths config.Paths, deadline time.Duration) (*Client, error) {
+// for blocking on approval responses. The socket deadline is set to
+// approvalTimeout plus a one-minute grace period (minimum one minute total)
+// so the connection outlives the daemon's approval timer.
+func ConnectForApproval(paths config.Paths, approvalTimeout time.Duration) (*Client, error) {
 	conn, err := net.DialTimeout("unix", paths.SocketPath, 500*time.Millisecond)
 	if err != nil {
 		return nil, fmt.Errorf("daemon not reachable: %w", err)
 	}
-	conn.SetDeadline(time.Now().Add(deadline))
+	conn.SetDeadline(time.Now().Add(approvalDeadline(approvalTimeout)))
 	c := &Client{
 		conn:   conn,
 		reader: protocol.NewFrameReader(conn),
@@ -157,6 +157,14 @@ func ConnectForApproval(paths config.Paths, deadline time.Duration) (*Client, er
 		return nil, err
 	}
 	return c, nil
+}
+
+func approvalDeadline(approvalTimeout time.Duration) time.Duration {
+	d := approvalTimeout + time.Minute
+	if d < time.Minute {
+		d = time.Minute
+	}
+	return d
 }
 
 func (c *Client) Close() {

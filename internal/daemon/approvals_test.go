@@ -30,6 +30,15 @@ func TestSubmitApprovalTimeoutBlocksBeforeContextCancel(t *testing.T) {
 	if decision.Reason != "approval request timed out" {
 		t.Errorf("unexpected reason: %q", decision.Reason)
 	}
+
+	sm.mu.RLock()
+	if _, exists := sm.pendingApprovals["req1"]; exists {
+		t.Error("pending approval not cleaned up after timeout")
+	}
+	if sm.state.Sessions["sess1"].AgentStatus == "approval" {
+		t.Error("session status not restored after timeout")
+	}
+	sm.mu.RUnlock()
 }
 
 func TestSubmitApprovalContextCancelAllows(t *testing.T) {
@@ -58,6 +67,15 @@ func TestSubmitApprovalContextCancelAllows(t *testing.T) {
 	if decision.Decision != "allow" {
 		t.Errorf("expected allow on context cancel, got %q", decision.Decision)
 	}
+
+	sm.mu.RLock()
+	if _, exists := sm.pendingApprovals["req2"]; exists {
+		t.Error("pending approval not cleaned up after context cancel")
+	}
+	if sm.state.Sessions["sess1"].AgentStatus == "approval" {
+		t.Error("session status not restored after context cancel")
+	}
+	sm.mu.RUnlock()
 }
 
 func TestSubmitApprovalUserDecision(t *testing.T) {
@@ -87,6 +105,15 @@ func TestSubmitApprovalUserDecision(t *testing.T) {
 	if decision.Reason != "user approved" {
 		t.Errorf("unexpected reason: %q", decision.Reason)
 	}
+
+	sm.mu.RLock()
+	if _, exists := sm.pendingApprovals["req3"]; exists {
+		t.Error("pending approval not cleaned up after user decision")
+	}
+	if sm.state.Sessions["sess1"].AgentStatus == "approval" {
+		t.Error("session status not restored after user decision")
+	}
+	sm.mu.RUnlock()
 }
 
 func TestSubmitApprovalMissingSessionAllows(t *testing.T) {
