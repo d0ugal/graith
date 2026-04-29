@@ -137,16 +137,22 @@ func TestBuildEnvPreservesParentVars(t *testing.T) {
 
 func TestBuildEnvNoDuplicateKeys(t *testing.T) {
 	t.Setenv("TERM", "dumb")
+	t.Setenv("GRAITH_SESSION_ID", "parent-id")
 
-	env := buildEnv(map[string]string{"TERM": "screen"})
-	count := 0
-	for _, e := range env {
-		if strings.HasPrefix(e, "TERM=") {
-			count++
+	env := buildEnv(map[string]string{
+		"TERM":              "screen",
+		"GRAITH_SESSION_ID": "child-id",
+	})
+	for _, key := range []string{"TERM", "GRAITH_SESSION_ID"} {
+		count := 0
+		for _, e := range env {
+			if strings.HasPrefix(e, key+"=") {
+				count++
+			}
 		}
-	}
-	if count != 1 {
-		t.Errorf("found %d TERM entries, want exactly 1", count)
+		if count != 1 {
+			t.Errorf("found %d %s entries, want exactly 1", count, key)
+		}
 	}
 }
 
