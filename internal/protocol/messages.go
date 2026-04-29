@@ -83,6 +83,10 @@ type ResumeMsg struct {
 	SessionID string `json:"session_id"`
 }
 
+type UpgradeMsg struct {
+	ExecPath string `json:"exec_path,omitempty"`
+}
+
 type ResizeMsg struct {
 	Cols uint16 `json:"cols"`
 	Rows uint16 `json:"rows"`

@@ -559,8 +559,10 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				sendControl("status_reported", struct{}{})
 
 			case "upgrade":
+				var u protocol.UpgradeMsg
+				_ = protocol.DecodePayload(msg, &u)
 				select {
-				case sm.upgradeCh <- struct{}{}:
+				case sm.upgradeCh <- u.ExecPath:
 					sendControl("upgrading", struct{}{})
 				default:
 					sendControl("error", protocol.ErrorMsg{Message: "upgrade already in progress"})
