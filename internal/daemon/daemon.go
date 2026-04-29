@@ -1295,20 +1295,6 @@ func (sm *SessionManager) sandboxOpts(agentName, sessionID, worktreePath string,
 	}
 	readDirs = append(readDirs, sm.paths.RuntimeDir)
 
-	// Agents need read/write access to their own config and data directories
-	// (e.g. ~/.claude, ~/.local/share/claude for Claude Code).
-	home, _ := os.UserHomeDir()
-	switch agentName {
-	case "claude":
-		readDirs = append(readDirs, filepath.Join(home, ".claude"))
-		writeDirs = append(writeDirs, filepath.Join(home, ".local", "share", "claude"))
-	case "codex":
-		readDirs = append(readDirs, filepath.Join(home, ".codex"))
-	case "agy":
-		readDirs = append(readDirs, filepath.Join(home, ".gemini"))
-		writeDirs = append(writeDirs, filepath.Join(home, ".gemini"))
-	}
-
 	return sandbox.WrapOpts{
 		WorktreeDir:      worktreePath,
 		ReadDirs:         readDirs,
