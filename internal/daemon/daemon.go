@@ -740,6 +740,10 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 	env["GRAITH_SESSION_NAME"] = sessState.Name
 	env["GRAITH_WORKTREE_PATH"] = sessState.WorktreePath
 
+	if sessState.SharedWorktree && !sessState.Sandboxed {
+		return SessionState{}, fmt.Errorf("shared-worktree session %q was created without sandbox and cannot be resumed safely; delete and recreate with sandbox enabled", id)
+	}
+
 	if sessState.AgentHooks {
 		switch sessState.Agent {
 		case "claude":
@@ -763,10 +767,6 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 				}
 			}
 		}
-	}
-
-	if sessState.SharedWorktree && !sessState.Sandboxed {
-		return SessionState{}, fmt.Errorf("shared-worktree session %q was created without sandbox and cannot be resumed safely; delete and recreate with sandbox enabled", id)
 	}
 
 	command := agent.Command
