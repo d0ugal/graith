@@ -135,6 +135,11 @@ func writeFileAtomic(path string, data []byte) error {
 		os.Remove(tmpPath)
 		return fmt.Errorf("write temp: %w", err)
 	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return fmt.Errorf("sync temp: %w", err)
+	}
 	if err := tmp.Close(); err != nil {
 		os.Remove(tmpPath)
 		return err
