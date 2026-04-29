@@ -1092,7 +1092,7 @@ func TestView_ConfirmDeleteShowsUnsavedWarning(t *testing.T) {
 	if !strings.Contains(view, "Uncommitted changes") {
 		t.Error("delete confirmation should mention uncommitted changes")
 	}
-	if !strings.Contains(view, "3 unpushed commit(s)") {
+	if !strings.Contains(view, "3 unpushed commits") {
 		t.Error("delete confirmation should mention unpushed commits")
 	}
 }
@@ -1136,6 +1136,40 @@ func TestView_ConfirmDeleteDirtyOnly(t *testing.T) {
 	}
 }
 
+func TestView_ConfirmDeleteUnpushedSingular(t *testing.T) {
+	sessions := []protocol.SessionInfo{
+		{
+			ID:            "s1",
+			Name:          "one-commit",
+			RepoName:      "graith",
+			Status:        "running",
+			UnpushedCount: 1,
+			CreatedAt:     time.Now().Format(time.RFC3339),
+		},
+	}
+	m := newOverlayModel(sessions, "", nil, nil)
+	updated, _ := sendWindowSize(m, 120, 40)
+	updated, _ = sendKey(asOverlay(updated), "x")
+	view := asOverlay(updated).View().Content
+
+	if !strings.Contains(view, "1 unpushed commit") {
+		t.Error("should use singular 'commit' for count of 1")
+	}
+	if strings.Contains(view, "commits") {
+		t.Error("should not use plural 'commits' for count of 1")
+	}
+}
+
+func TestUpdate_ConfirmDeleteNilCallback(t *testing.T) {
+	m := newOverlayModel(overlayTestSessions(), "", nil, nil)
+	updated, _ := sendKey(m, "x")
+	updated, _ = sendKey(asOverlay(updated), "y")
+	om := asOverlay(updated)
+	if om.state != stateList {
+		t.Errorf("confirming delete with nil callback should return to list, got state %d", om.state)
+	}
+}
+
 func TestView_ConfirmDeleteUnpushedOnly(t *testing.T) {
 	sessions := []protocol.SessionInfo{
 		{
@@ -1155,7 +1189,7 @@ func TestView_ConfirmDeleteUnpushedOnly(t *testing.T) {
 	if strings.Contains(view, "Uncommitted changes") {
 		t.Error("should not mention uncommitted changes when there are none")
 	}
-	if !strings.Contains(view, "5 unpushed commit(s)") {
+	if !strings.Contains(view, "5 unpushed commits") {
 		t.Error("should warn about unpushed commits")
 	}
 }

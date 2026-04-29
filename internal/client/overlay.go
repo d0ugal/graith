@@ -596,7 +596,7 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case stateConfirmDelete:
 			switch msg.String() {
 			case "y", "Y":
-				if item, ok := m.list.SelectedItem().(sessionItem); ok {
+				if item, ok := m.list.SelectedItem().(sessionItem); ok && m.deleteSession != nil {
 					sid := item.info.ID
 					deleteFn := m.deleteSession
 					return m, func() tea.Msg {
@@ -821,7 +821,11 @@ func (m overlayModel) View() tea.View {
 				}
 				if s.UnpushedCount > 0 {
 					panelContent.WriteString("\n")
-					panelContent.WriteString(warnStyle.Render(fmt.Sprintf("  • %d unpushed commit(s)", s.UnpushedCount)))
+					label := "commits"
+					if s.UnpushedCount == 1 {
+						label = "commit"
+					}
+					panelContent.WriteString(warnStyle.Render(fmt.Sprintf("  • %d unpushed %s", s.UnpushedCount, label)))
 				}
 			}
 			panelContent.WriteString("\n")
