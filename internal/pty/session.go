@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -256,10 +257,23 @@ func (s *Session) Close() {
 }
 
 func buildEnv(extra map[string]string) []string {
-	env := os.Environ()
-	env = append(env, "TERM=xterm-256color")
+	overrides := make(map[string]string, len(extra)+1)
+	overrides["TERM"] = "xterm-256color"
 	for k, v := range extra {
+		overrides[k] = v
+	}
+
+	env := make([]string, 0, len(overrides)+len(os.Environ()))
+	for k, v := range overrides {
 		env = append(env, k+"="+v)
+	}
+	for _, e := range os.Environ() {
+		if k, _, ok := strings.Cut(e, "="); ok {
+			if _, overridden := overrides[k]; overridden {
+				continue
+			}
+		}
+		env = append(env, e)
 	}
 	return env
 }
