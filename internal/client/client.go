@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/daemon"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/d0ugal/graith/internal/version"
 	"golang.org/x/term"
@@ -71,9 +72,10 @@ func connect(cfg *config.Config, paths config.Paths, configFile string, autoUpgr
 			if hsOk.DaemonVersion != "" && hsOk.DaemonVersion != version.Version {
 				fmt.Fprintf(os.Stderr, "Daemon version mismatch (daemon=%s, cli=%s), restarting daemon...\n", hsOk.DaemonVersion, version.Version)
 				c.Close()
-				stopDaemonByPID(paths.PIDFile)
-				waitForSocketGone(paths.SocketPath)
-				os.Remove(paths.SocketPath)
+				if stopDaemonByPID(paths.PIDFile) {
+					waitForSocketGone(paths.SocketPath)
+					os.Remove(paths.SocketPath)
+				}
 				return connect(cfg, paths, configFile, false)
 			}
 		}
@@ -82,22 +84,26 @@ func connect(cfg *config.Config, paths config.Paths, configFile string, autoUpgr
 	return c, nil
 }
 
-func stopDaemonByPID(pidFile string) {
+func stopDaemonByPID(pidFile string) bool {
 	data, err := os.ReadFile(pidFile)
 	if err != nil {
-		return
+		return false
 	}
 	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
 	if err != nil || pid <= 1 {
-		return
+		return false
+	}
+	if !daemon.IsGraithDaemon(pid) {
+		return false
 	}
 	_ = syscall.Kill(pid, syscall.SIGTERM)
 	for range 50 {
 		if syscall.Kill(pid, 0) != nil {
-			return
+			return true
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
+	return false
 }
 
 func waitForSocketGone(sockPath string) {
