@@ -456,6 +456,57 @@ args = []
 	}
 }
 
+func TestLoadExplicitEmptyResumeAndForkArgs(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	toml := `
+[agents.claude]
+resume_args = []
+fork_args = []
+`
+	os.WriteFile(cfgPath, []byte(toml), 0o644)
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	claude := cfg.Agents["claude"]
+	if len(claude.ResumeArgs) != 0 {
+		t.Errorf("claude.ResumeArgs = %v, want [] (explicit empty overrides default)", claude.ResumeArgs)
+	}
+	if len(claude.ForkArgs) != 0 {
+		t.Errorf("claude.ForkArgs = %v, want [] (explicit empty overrides default)", claude.ForkArgs)
+	}
+	if len(claude.Args) != 2 {
+		t.Errorf("claude.Args = %v, want default preserved when not specified", claude.Args)
+	}
+	if claude.Command != "claude" {
+		t.Errorf("claude.Command = %q, want default preserved", claude.Command)
+	}
+}
+
+func TestLoadExplicitEmptyEnv(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	toml := `
+[agents.claude]
+env = {}
+`
+	os.WriteFile(cfgPath, []byte(toml), 0o644)
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	claude := cfg.Agents["claude"]
+	if claude.Env == nil {
+		t.Error("claude.Env = nil, want empty map (explicit empty should override)")
+	}
+	if len(claude.Args) != 2 {
+		t.Errorf("claude.Args = %v, want default preserved", claude.Args)
+	}
+}
+
 func TestLoadCustomAgentPreserved(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.toml")
