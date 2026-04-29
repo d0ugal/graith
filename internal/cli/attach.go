@@ -526,7 +526,7 @@ func deleteSession(sessionID string) error {
 
 // sortedSessionIDs returns session IDs in the same order as the overlay:
 // grouped by repo (alphabetically), then within each group sorted by
-// current → running → recently attached → alphabetical.
+// running status first, then alphabetically by name.
 func sortedSessionIDs(sessions []protocol.SessionInfo, currentSessionID string) []string {
 	groups := map[string][]protocol.SessionInfo{}
 	var repoOrder []string
