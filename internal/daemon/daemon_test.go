@@ -1224,3 +1224,110 @@ func TestResumeSharedWorktreeWithoutSandboxRejects(t *testing.T) {
 		t.Errorf("unexpected error message: %v", err)
 	}
 }
+
+func TestCreateRollsBackOnSaveStateFailure(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Place a regular file where writeFileAtomic needs a directory,
+	// so MkdirAll fails and saveState returns an error.
+	blocker := filepath.Join(tmpDir, "block")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.Default()
+	cfg.Agents["sleeper"] = config.Agent{
+		Command: "sleep",
+		Args:    []string{"60"},
+	}
+
+	sm := NewSessionManager(cfg, config.Paths{
+		StateFile: filepath.Join(blocker, "sub", "state.json"),
+		DataDir:   tmpDir,
+		LogDir:    tmpDir,
+	}, slog.Default())
+
+	_, err := sm.Create("test-sess", "sleeper", "", "", "", true, "", false, 24, 80)
+	if err == nil {
+		t.Fatal("expected error when saveState fails, got nil")
+	}
+
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	if len(sm.state.Sessions) != 0 {
+		t.Errorf("sessions not rolled back: got %d, want 0", len(sm.state.Sessions))
+	}
+	if len(sm.sessions) != 0 {
+		t.Errorf("PTY sessions not rolled back: got %d, want 0", len(sm.sessions))
+	}
+
+	// Scratch dir should be cleaned up
+	matches, _ := filepath.Glob(filepath.Join(tmpDir, "scratch", "*"))
+	if len(matches) != 0 {
+		t.Errorf("orphaned scratch dirs not cleaned up: %v", matches)
+	}
+}
+
+func TestResumeRollsBackOnSaveStateFailure(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile := filepath.Join(tmpDir, "state.json")
+
+	cfg := config.Default()
+	cfg.Agents["sleeper"] = config.Agent{
+		Command: "sleep",
+		Args:    []string{"60"},
+	}
+
+	sm := NewSessionManager(cfg, config.Paths{
+		StateFile: stateFile,
+		DataDir:   tmpDir,
+		LogDir:    tmpDir,
+	}, slog.Default())
+
+	exitCode := 42
+	sm.state.Sessions["s1"] = &SessionState{
+		ID:           "s1",
+		Name:         "test",
+		Agent:        "sleeper",
+		Status:       StatusStopped,
+		ExitCode:     &exitCode,
+		AgentStatus:  "ready",
+		WorktreePath: tmpDir,
+	}
+
+	// Save valid state first, then break the path
+	if err := sm.saveState(); err != nil {
+		t.Fatal(err)
+	}
+
+	blocker := filepath.Join(tmpDir, "block")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sm.paths.StateFile = filepath.Join(blocker, "sub", "state.json")
+
+	_, err := sm.Resume("s1", 24, 80)
+	if err == nil {
+		t.Fatal("expected error when saveState fails, got nil")
+	}
+
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	s := sm.state.Sessions["s1"]
+	if s.Status != StatusStopped {
+		t.Errorf("status not rolled back: got %q, want %q", s.Status, StatusStopped)
+	}
+	if s.ExitCode == nil || *s.ExitCode != 42 {
+		t.Errorf("exit code not rolled back: got %v, want 42", s.ExitCode)
+	}
+	if s.PID != 0 {
+		t.Errorf("PID not rolled back: got %d, want 0", s.PID)
+	}
+	if s.AgentStatus != "ready" {
+		t.Errorf("agent status not rolled back: got %q, want %q", s.AgentStatus, "ready")
+	}
+	if _, ok := sm.sessions["s1"]; ok {
+		t.Error("PTY session should be removed after rollback")
+	}
+}
