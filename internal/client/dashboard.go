@@ -116,14 +116,8 @@ func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		if m.confirmSessionID != "" {
-			found := false
-			for _, s := range m.sessions {
-				if s.ID == m.confirmSessionID {
-					found = true
-					break
-				}
-			}
-			if !found {
+			target := m.sessionByID(m.confirmSessionID)
+			if target == nil || (m.state == dashStateConfirmStop && target.Status != "running") {
 				m.state = dashStateNormal
 				m.confirmSessionID = ""
 			}

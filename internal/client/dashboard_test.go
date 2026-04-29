@@ -427,6 +427,76 @@ func TestDashboardStopConfirmTargetsOriginalSession(t *testing.T) {
 	}
 }
 
+func TestDashboardStopConfirmSurvivesRefreshWithTarget(t *testing.T) {
+	sessions := dashboardTestSessions()
+	m := NewDashboardModel(sessions, nil)
+	m.width = 120
+	m.height = 40
+
+	dm := updateDash(m, "s")
+	if dm.confirmSessionID != "s1" {
+		t.Fatalf("confirmSessionID = %q, want %q", dm.confirmSessionID, "s1")
+	}
+
+	// Refresh that keeps s1 but adds a new session before it
+	newSessions := []protocol.SessionInfo{
+		{
+			ID:        "s0",
+			Name:      "aaa-first",
+			RepoName:  "myrepo",
+			Agent:     "claude",
+			Status:    "running",
+			CreatedAt: sessions[0].CreatedAt,
+		},
+		sessions[0],
+		sessions[1],
+	}
+	result, _ := dm.Update(refreshMsg{sessions: newSessions})
+	dm = result.(DashboardModel)
+
+	if dm.state != dashStateConfirmStop {
+		t.Fatalf("state = %d, want dashStateConfirmStop", dm.state)
+	}
+
+	dm = updateDash(dm, "y")
+	if dm.result == nil {
+		t.Fatal("expected result after y confirm")
+	}
+	if dm.result.Action != "stop" {
+		t.Errorf("action = %q, want %q", dm.result.Action, "stop")
+	}
+	if dm.result.SessionID != "s1" {
+		t.Errorf("session_id = %q, want %q (should target original session)", dm.result.SessionID, "s1")
+	}
+}
+
+func TestDashboardStopConfirmCancelledWhenTargetStops(t *testing.T) {
+	sessions := dashboardTestSessions()
+	m := NewDashboardModel(sessions, nil)
+	m.width = 120
+	m.height = 40
+
+	dm := updateDash(m, "s")
+	if dm.state != dashStateConfirmStop {
+		t.Fatalf("state = %d, want dashStateConfirmStop", dm.state)
+	}
+
+	// Refresh where the target session changed from running to stopped
+	stoppedSessions := make([]protocol.SessionInfo, len(sessions))
+	copy(stoppedSessions, sessions)
+	stoppedSessions[0].Status = "stopped"
+
+	result, _ := dm.Update(refreshMsg{sessions: stoppedSessions})
+	dm = result.(DashboardModel)
+
+	if dm.state != dashStateNormal {
+		t.Errorf("state = %d, want dashStateNormal (stop cancelled because target stopped)", dm.state)
+	}
+	if dm.confirmSessionID != "" {
+		t.Errorf("confirmSessionID = %q, want empty", dm.confirmSessionID)
+	}
+}
+
 func TestDashboardConfirmCancelClearsSessionID(t *testing.T) {
 	sessions := dashboardTestSessions()
 	m := NewDashboardModel(sessions, nil)
