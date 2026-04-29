@@ -1119,3 +1119,63 @@ func TestShareWorktreeRequiresSandbox(t *testing.T) {
 		t.Errorf("unexpected error message: %v", err)
 	}
 }
+
+func TestShareWorktreeRequiresSandboxPerAgent(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := config.Default()
+	cfg.Sandbox.Enabled = true
+	disabled := true
+	agent := cfg.Agents["claude"]
+	agent.Sandbox = config.SandboxConfig{Disabled: &disabled}
+	cfg.Agents["claude"] = agent
+
+	sm := NewSessionManager(cfg, config.Paths{
+		StateFile: filepath.Join(tmpDir, "state.json"),
+		DataDir:   tmpDir,
+		LogDir:    tmpDir,
+	}, slog.Default())
+
+	sm.state.Sessions["src1"] = &SessionState{
+		ID:           "src1",
+		Name:         "source",
+		Agent:        "claude",
+		WorktreePath: "/tmp/fake-worktree",
+		Status:       StatusRunning,
+	}
+
+	_, err := sm.Create("reviewer", "claude", "", "", "", false, "source", false, 24, 80)
+	if err == nil {
+		t.Fatal("expected error when --share-worktree used with per-agent sandbox disabled, got nil")
+	}
+	if !strings.Contains(err.Error(), "requires sandbox") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestResumeSharedWorktreeWithoutSandboxRejects(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := config.Default()
+	sm := NewSessionManager(cfg, config.Paths{
+		StateFile: filepath.Join(tmpDir, "state.json"),
+		DataDir:   tmpDir,
+		LogDir:    tmpDir,
+	}, slog.Default())
+
+	sm.state.Sessions["legacy1"] = &SessionState{
+		ID:             "legacy1",
+		Name:           "legacy-reviewer",
+		Agent:          "claude",
+		WorktreePath:   "/tmp/fake-worktree",
+		SharedWorktree: true,
+		Sandboxed:      false,
+		Status:         StatusStopped,
+	}
+
+	_, err := sm.Resume("legacy1", 24, 80)
+	if err == nil {
+		t.Fatal("expected error when resuming shared-worktree session without sandbox, got nil")
+	}
+	if !strings.Contains(err.Error(), "cannot be resumed safely") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
