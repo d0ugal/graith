@@ -512,8 +512,16 @@ func deleteSession(sessionID string) error {
 	}
 	defer dc.Close()
 	dc.SendControl("delete", protocol.DeleteMsg{SessionID: sessionID})
-	_, err = dc.ReadControlResponse()
-	return err
+	resp, err := dc.ReadControlResponse()
+	if err != nil {
+		return err
+	}
+	if resp.Type == "error" {
+		var e protocol.ErrorMsg
+		protocol.DecodePayload(resp, &e)
+		return fmt.Errorf("%s", e.Message)
+	}
+	return nil
 }
 
 // sortedSessionIDs returns session IDs in the same order as the overlay:
