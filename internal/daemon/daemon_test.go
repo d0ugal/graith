@@ -1417,6 +1417,49 @@ func TestResumeRollsBackOnSaveStateFailure(t *testing.T) {
 	}
 }
 
+func TestExpandPathsGlob(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"id_rsa.pub", "id_ed25519.pub", "id_rsa", "config"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	t.Run("expands globs", func(t *testing.T) {
+		got := expandPaths([]string{filepath.Join(dir, "*.pub")})
+		if len(got) != 2 {
+			t.Fatalf("expandPaths glob = %v, want 2 matches", got)
+		}
+		for _, p := range got {
+			if !strings.HasSuffix(p, ".pub") {
+				t.Errorf("unexpected match: %s", p)
+			}
+		}
+	})
+
+	t.Run("non-glob passed through", func(t *testing.T) {
+		got := expandPaths([]string{"/some/plain/path"})
+		if len(got) != 1 || got[0] != "/some/plain/path" {
+			t.Errorf("expandPaths plain = %v, want [/some/plain/path]", got)
+		}
+	})
+
+	t.Run("unmatched glob passed through", func(t *testing.T) {
+		pattern := filepath.Join(dir, "*.zzz")
+		got := expandPaths([]string{pattern})
+		if len(got) != 1 || got[0] != pattern {
+			t.Errorf("expandPaths no-match = %v, want [%s]", got, pattern)
+		}
+	})
+
+	t.Run("nil input", func(t *testing.T) {
+		got := expandPaths(nil)
+		if got != nil {
+			t.Errorf("expandPaths(nil) = %v, want nil", got)
+		}
+	})
+}
+
 func TestResolveStoredSandboxConfig(t *testing.T) {
 	t.Run("uses stored config when present", func(t *testing.T) {
 		sm := newTestSessionManager(t)
