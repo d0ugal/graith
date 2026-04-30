@@ -70,8 +70,22 @@ func connect(cfg *config.Config, paths config.Paths, configFile string, autoUpgr
 		var hsOk protocol.HandshakeOkMsg
 		if err := protocol.DecodePayload(resp, &hsOk); err == nil {
 			if hsOk.DaemonVersion != "" && hsOk.DaemonVersion != version.Version {
-				fmt.Fprintf(os.Stderr, "Daemon version mismatch (daemon=%s, cli=%s), restarting daemon...\n", hsOk.DaemonVersion, version.Version)
-				c.Close()
+				fmt.Fprintf(os.Stderr, "Daemon version mismatch (daemon=%s, cli=%s), upgrading daemon...\n", hsOk.DaemonVersion, version.Version)
+				// Try exec upgrade first — it preserves sessions by
+				// passing PTY file descriptors to the new process.
+				if requestUpgrade(c) {
+					c.Close()
+					if waitForDaemon(paths.SocketPath) {
+						if v := probeDaemonVersion(paths.SocketPath); v == version.Version {
+							return connect(cfg, paths, configFile, false)
+						}
+						fmt.Fprintf(os.Stderr, "Exec upgrade did not produce correct version, falling back to clean restart...\n")
+					}
+				} else {
+					c.Close()
+				}
+				// Fall back: kill and restart. This loses sessions but
+				// ensures the new version actually runs.
 				if stopDaemonByPID(paths.PIDFile) {
 					waitForSocketGone(paths.SocketPath)
 					os.Remove(paths.SocketPath)
@@ -82,6 +96,55 @@ func connect(cfg *config.Config, paths config.Paths, configFile string, autoUpgr
 	}
 
 	return c, nil
+}
+
+func probeDaemonVersion(sockPath string) string {
+	conn, err := net.DialTimeout("unix", sockPath, 500*time.Millisecond)
+	if err != nil {
+		return ""
+	}
+	defer conn.Close()
+
+	reader := protocol.NewFrameReader(conn)
+	writer := protocol.NewFrameWriter(conn)
+
+	hsData, _ := protocol.EncodeControl("handshake", protocol.HandshakeMsg{
+		Version:  protocol.Version,
+		ClientID: fmt.Sprintf("upgrade-check-%d", os.Getpid()),
+	})
+	_ = writer.WriteFrame(protocol.ChannelControl, hsData)
+
+	frame, err := reader.ReadFrame()
+	if err != nil || frame.Channel != protocol.ChannelControl {
+		return ""
+	}
+	env, _ := protocol.DecodeControl(frame.Payload)
+	var hsOk protocol.HandshakeOkMsg
+	if err := protocol.DecodePayload(env, &hsOk); err != nil {
+		return ""
+	}
+	return hsOk.DaemonVersion
+}
+
+func requestUpgrade(c *Client) bool {
+	execPath, _ := os.Executable()
+	if err := c.SendControl("upgrade", protocol.UpgradeMsg{ExecPath: execPath}); err != nil {
+		return false
+	}
+	// Connection drop is expected — the daemon exec'd itself.
+	c.ReadControlResponse()
+	return true
+}
+
+func waitForDaemon(sockPath string) bool {
+	for range 20 {
+		time.Sleep(250 * time.Millisecond)
+		if conn, err := net.DialTimeout("unix", sockPath, 500*time.Millisecond); err == nil {
+			conn.Close()
+			return true
+		}
+	}
+	return false
 }
 
 func stopDaemonByPID(pidFile string) bool {
