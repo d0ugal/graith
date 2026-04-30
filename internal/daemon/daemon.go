@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -1380,9 +1381,16 @@ func expandPaths(paths []string) []string {
 	if len(paths) == 0 {
 		return nil
 	}
-	out := make([]string, len(paths))
-	for i, p := range paths {
-		out[i] = config.ExpandPath(p)
+	var out []string
+	for _, p := range paths {
+		expanded := config.ExpandPath(p)
+		if strings.ContainsAny(expanded, "*?[") {
+			if matches, err := filepath.Glob(expanded); err == nil && len(matches) > 0 {
+				out = append(out, matches...)
+				continue
+			}
+		}
+		out = append(out, expanded)
 	}
 	return out
 }
