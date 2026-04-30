@@ -1629,7 +1629,7 @@ func TestResumeResetsIdleSince(t *testing.T) {
 	}
 
 	// Wait for the process to exit, close PTY file handles, then
-	// lock/unlock sm.mu to ensure watchSession has finished writing
+	// acquire sm.mu to ensure watchSession has finished writing
 	// state.json — all before t.TempDir() cleanup removes the directory.
 	if ptySess != nil {
 		select {
@@ -1639,6 +1639,7 @@ func TestResumeResetsIdleSince(t *testing.T) {
 		}
 		ptySess.Close()
 		sm.mu.Lock()
+		_ = sm.state.Sessions[id]
 		sm.mu.Unlock()
 	}
 }
