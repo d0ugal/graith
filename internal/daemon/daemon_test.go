@@ -1523,27 +1523,23 @@ func TestWatchSessionStaleAfterReplace(t *testing.T) {
 		ID: id, Name: "test", Status: StatusRunning, Agent: "claude",
 	}
 
-	oldSess := newTestPTYSession(t, "sleep", "100")
+	oldSess := newTestPTYSession(t, "true")
 	newSess := newTestPTYSession(t, "sleep", "100")
 
-	sm.sessions[id] = oldSess
-	go sm.watchSession(id, oldSess)
-
-	// Simulate Resume: replace the session in the map.
-	sm.mu.Lock()
-	sm.sessions[id] = newSess
-	sm.mu.Unlock()
-
-	// Kill old process to trigger the stale watcher.
-	_ = oldSess.Kill()
+	// Wait for old process to exit so Done() is closed.
 	select {
 	case <-oldSess.Done():
 	case <-time.After(5 * time.Second):
 		t.Fatal("timeout waiting for old session to exit")
 	}
 
-	// Give the goroutine time to run.
-	time.Sleep(100 * time.Millisecond)
+	// Replace session in the map before calling watchSession,
+	// simulating a Resume that happened while the old process was dying.
+	sm.sessions[id] = newSess
+
+	// Call watchSession synchronously — it returns immediately because
+	// Done() is already closed. This is deterministic: no goroutine, no sleep.
+	sm.watchSession(id, oldSess)
 
 	sm.mu.RLock()
 	status := sm.state.Sessions[id].Status
@@ -1564,16 +1560,17 @@ func TestWatchSessionCurrentUpdatesState(t *testing.T) {
 
 	sess := newTestPTYSession(t, "true")
 
-	sm.sessions[id] = sess
-	go sm.watchSession(id, sess)
-
+	// Wait for exit so Done() is closed.
 	select {
 	case <-sess.Done():
 	case <-time.After(5 * time.Second):
 		t.Fatal("timeout waiting for session to exit")
 	}
 
-	time.Sleep(100 * time.Millisecond)
+	sm.sessions[id] = sess
+
+	// Call synchronously — deterministic, no sleep.
+	sm.watchSession(id, sess)
 
 	sm.mu.RLock()
 	status := sm.state.Sessions[id].Status
@@ -1585,5 +1582,40 @@ func TestWatchSessionCurrentUpdatesState(t *testing.T) {
 	}
 	if exitCode == nil || *exitCode != 0 {
 		t.Errorf("exit code = %v, want 0", exitCode)
+	}
+}
+
+func TestResumeResetsIdleSince(t *testing.T) {
+	sm := newTestSessionManager(t)
+	sm.cfg.Agents["claude"] = config.Agent{
+		Command:     "true",
+		Args:        []string{},
+		ResumeArgs:  []string{},
+		IdleTimeout: "5m",
+	}
+
+	past := time.Now().Add(-10 * time.Minute)
+	id := "sess-idle"
+	sm.state.Sessions[id] = &SessionState{
+		ID: id, Name: "idle-test", Status: StatusStopped, Agent: "claude",
+		WorktreePath: t.TempDir(),
+		IdleSince:    &past,
+	}
+
+	resumed, err := sm.Resume(id, 24, 80)
+	if err != nil {
+		t.Fatalf("Resume() error = %v", err)
+	}
+
+	if resumed.Status != StatusRunning {
+		t.Errorf("status = %q, want %q", resumed.Status, StatusRunning)
+	}
+
+	sm.mu.RLock()
+	idleSince := sm.state.Sessions[id].IdleSince
+	sm.mu.RUnlock()
+
+	if idleSince != nil {
+		t.Errorf("IdleSince = %v, want nil after Resume", idleSince)
 	}
 }
