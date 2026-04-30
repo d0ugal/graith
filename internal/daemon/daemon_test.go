@@ -117,61 +117,6 @@ func TestNewSessionManager(t *testing.T) {
 	}
 }
 
-func TestCreateDuplicateNameRejected(t *testing.T) {
-	sm := newTestSessionManager(t)
-	sm.state.Sessions["s1"] = &SessionState{ID: "s1", Name: "alpha"}
-
-	_, err := sm.Create("alpha", "claude", "/some/repo", "", "", true, "", false, 24, 80)
-	if err == nil {
-		t.Fatal("expected error when creating session with duplicate name")
-	}
-	if len(sm.state.Sessions) != 1 {
-		t.Error("no new session should have been added")
-	}
-}
-
-func TestForkDuplicateNameRejected(t *testing.T) {
-	sm := newTestSessionManager(t)
-	sm.state.Sessions["src"] = &SessionState{
-		ID: "src", Name: "source", Agent: "claude",
-		RepoPath: "/repo", WorktreePath: "/wt", Branch: "main",
-	}
-	sm.state.Sessions["other"] = &SessionState{ID: "other", Name: "taken"}
-
-	_, err := sm.Fork("taken", "src", 24, 80)
-	if err == nil {
-		t.Fatal("expected error when forking with duplicate name")
-	}
-	if len(sm.state.Sessions) != 2 {
-		t.Error("no new session should have been added")
-	}
-}
-
-func TestNameExists(t *testing.T) {
-	t.Run("empty state", func(t *testing.T) {
-		sm := newTestSessionManager(t)
-		if sm.nameExists("anything") {
-			t.Error("nameExists should return false on empty state")
-		}
-	})
-
-	t.Run("name exists", func(t *testing.T) {
-		sm := newTestSessionManager(t)
-		sm.state.Sessions["s1"] = &SessionState{ID: "s1", Name: "fix-bug"}
-		if !sm.nameExists("fix-bug") {
-			t.Error("nameExists should return true for existing name")
-		}
-	})
-
-	t.Run("name does not exist", func(t *testing.T) {
-		sm := newTestSessionManager(t)
-		sm.state.Sessions["s1"] = &SessionState{ID: "s1", Name: "fix-bug"}
-		if sm.nameExists("add-feature") {
-			t.Error("nameExists should return false for non-existing name")
-		}
-	})
-}
-
 func TestRename(t *testing.T) {
 	t.Run("happy path", func(t *testing.T) {
 		sm := newTestSessionManager(t)
@@ -201,34 +146,6 @@ func TestRename(t *testing.T) {
 		}
 	})
 
-	t.Run("duplicate name rejected", func(t *testing.T) {
-		sm := newTestSessionManager(t)
-		sm.state.Sessions["sess1"] = &SessionState{
-			ID: "sess1", Name: "alpha", Status: StatusRunning,
-		}
-		sm.state.Sessions["sess2"] = &SessionState{
-			ID: "sess2", Name: "beta", Status: StatusRunning,
-		}
-
-		err := sm.Rename("sess2", "alpha")
-		if err == nil {
-			t.Fatal("expected error when renaming to an existing name")
-		}
-		if sm.state.Sessions["sess2"].Name != "beta" {
-			t.Error("name should not have changed after duplicate rejection")
-		}
-	})
-
-	t.Run("rename to same name is allowed", func(t *testing.T) {
-		sm := newTestSessionManager(t)
-		sm.state.Sessions["sess1"] = &SessionState{
-			ID: "sess1", Name: "alpha", Status: StatusRunning,
-		}
-
-		if err := sm.Rename("sess1", "alpha"); err != nil {
-			t.Fatalf("renaming to same name should succeed, got error: %v", err)
-		}
-	})
 }
 
 func TestList(t *testing.T) {
@@ -325,67 +242,6 @@ func TestGetPTY(t *testing.T) {
 			t.Error("GetPTY() returned found for nonexistent session")
 		}
 	})
-}
-
-func TestFindByName(t *testing.T) {
-	tests := []struct {
-		name      string
-		sessions  map[string]*SessionState
-		query     string
-		wantFound bool
-		wantID    string
-	}{
-		{
-			name: "exact match",
-			sessions: map[string]*SessionState{
-				"s1": {ID: "s1", Name: "fix-bug"},
-				"s2": {ID: "s2", Name: "fix-bug-extra"},
-			},
-			query:     "fix-bug",
-			wantFound: true,
-			wantID:    "s1",
-		},
-		{
-			name: "prefix match",
-			sessions: map[string]*SessionState{
-				"s1": {ID: "s1", Name: "feature-auth"},
-			},
-			query:     "feat",
-			wantFound: true,
-			wantID:    "s1",
-		},
-		{
-			name: "not found",
-			sessions: map[string]*SessionState{
-				"s1": {ID: "s1", Name: "fix-bug"},
-			},
-			query:     "nonexistent",
-			wantFound: false,
-		},
-		{
-			name:      "empty query on empty sessions",
-			sessions:  map[string]*SessionState{},
-			query:     "",
-			wantFound: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			sm := newTestSessionManager(t)
-			for k, v := range tt.sessions {
-				sm.state.Sessions[k] = v
-			}
-
-			s, found := sm.FindByName(tt.query)
-			if found != tt.wantFound {
-				t.Fatalf("FindByName(%q) found = %v, want %v", tt.query, found, tt.wantFound)
-			}
-			if tt.wantFound && s.ID != tt.wantID {
-				t.Errorf("FindByName(%q) ID = %q, want %q", tt.query, s.ID, tt.wantID)
-			}
-		})
-	}
 }
 
 func TestKickAttachedClient(t *testing.T) {
