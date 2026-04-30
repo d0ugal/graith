@@ -160,10 +160,9 @@ func probeDaemonVersion() string {
 	reader := protocol.NewFrameReader(conn)
 	writer := protocol.NewFrameWriter(conn)
 
-	hsData, _ := protocol.EncodeControl("handshake", protocol.HandshakeMsg{
-		Version:  protocol.Version,
-		ClientID: fmt.Sprintf("upgrade-check-%d", os.Getpid()),
-	})
+	hs := client.BuildHandshake(paths, 0, 0, "")
+	hs.ClientID = fmt.Sprintf("upgrade-check-%d", os.Getpid())
+	hsData, _ := protocol.EncodeControl("handshake", hs)
 	_ = writer.WriteFrame(protocol.ChannelControl, hsData)
 
 	frame, err := reader.ReadFrame()

@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -65,6 +66,12 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				if err := protocol.DecodePayload(msg, &h); err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: "invalid handshake"})
 					continue
+				}
+				if h.Profile != sm.paths.Profile {
+					sendControl("handshake_err", protocol.HandshakeErrMsg{
+						Reason: fmt.Sprintf("profile mismatch: client is %q but daemon is %q", h.Profile, sm.paths.Profile),
+					})
+					return
 				}
 				clientCols = h.TerminalSize[0]
 				clientRows = h.TerminalSize[1]
