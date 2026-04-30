@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.7](https://github.com/d0ugal/graith/compare/v0.16.6...v0.16.7) (2026-06-10)
+
+
+### Bug Fixes
+
+* use os.MkdirTemp with retry cleanup in TestResumeResetsIdleSince ([27cd1c4](https://github.com/d0ugal/graith/commit/27cd1c489e58038ebaee63ef75a281aa4f32775a))
+
 ## [0.16.6](https://github.com/d0ugal/graith/compare/v0.16.5...v0.16.6) (2026-06-10)
 
 
