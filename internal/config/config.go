@@ -305,19 +305,23 @@ func Default() *Config {
 }
 
 func LoadOrDefault(path string) (*Config, error) {
+	var profile string
 	if path == "" {
 		p, err := ResolvePaths()
 		if err != nil {
 			return nil, err
 		}
 		path = p.ConfigFile
+		profile = p.Profile
 	}
 	cfg, err := Load(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			if legacy := legacyConfigFile(); legacy != "" {
-				if lcfg, lerr := Load(legacy); lerr == nil {
-					return lcfg, nil
+			if profile == "" {
+				if legacy := legacyConfigFile(); legacy != "" {
+					if lcfg, lerr := Load(legacy); lerr == nil {
+						return lcfg, nil
+					}
 				}
 			}
 			return Default(), nil

@@ -56,6 +56,10 @@ var listCmd = &cobra.Command{
 			return out.JSON(list)
 		}
 
+		if paths.Profile != "" {
+			fmt.Fprintf(cmd.OutOrStdout(), "Profile: %s\n\n", paths.Profile)
+		}
+
 		if len(list.Sessions) == 0 {
 			out.Print("No sessions. Create one with: gr new <name>\n")
 			return nil
@@ -69,10 +73,6 @@ var listCmd = &cobra.Command{
 		})
 
 		now := time.Now()
-
-		if paths.Profile != "" {
-			fmt.Fprintf(cmd.OutOrStdout(), "Profile: %s\n\n", paths.Profile)
-		}
 
 		tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
 		fmt.Fprintln(tw, "NAME\tREPO\tAGENT\tSTATUS\tACTIVITY\tMODEL\tCOST\tBRANCH\tGIT\tAGE\tATTACHED")

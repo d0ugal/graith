@@ -71,6 +71,10 @@ func connect(cfg *config.Config, paths config.Paths, configFile string, autoUpgr
 		c.Close()
 		return nil, fmt.Errorf("handshake rejected: %s", hsErr.Reason)
 	}
+	if resp.Type != "handshake_ok" {
+		c.Close()
+		return nil, fmt.Errorf("unexpected handshake response: %s", resp.Type)
+	}
 
 	if autoUpgrade && version.Version != "dev" {
 		var hsOk protocol.HandshakeOkMsg
@@ -212,6 +216,10 @@ func ConnectFast(paths config.Paths) (*Client, error) {
 		c.Close()
 		return nil, fmt.Errorf("handshake rejected: %s", hsErr.Reason)
 	}
+	if resp.Type != "handshake_ok" {
+		c.Close()
+		return nil, fmt.Errorf("unexpected handshake response: %s", resp.Type)
+	}
 	return c, nil
 }
 
@@ -245,6 +253,10 @@ func ConnectForApproval(paths config.Paths, approvalTimeout time.Duration) (*Cli
 		_ = protocol.DecodePayload(resp, &hsErr)
 		c.Close()
 		return nil, fmt.Errorf("handshake rejected: %s", hsErr.Reason)
+	}
+	if resp.Type != "handshake_ok" {
+		c.Close()
+		return nil, fmt.Errorf("unexpected handshake response: %s", resp.Type)
 	}
 	return c, nil
 }
