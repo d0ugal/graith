@@ -1586,7 +1586,21 @@ func TestWatchSessionCurrentUpdatesState(t *testing.T) {
 }
 
 func TestResumeResetsIdleSince(t *testing.T) {
-	tmpDir := t.TempDir()
+	// Use os.MkdirTemp instead of t.TempDir — on macOS, writeFileAtomic's
+	// syncDir can leave a recently-closed directory fd that races with
+	// t.TempDir's strict RemoveAll cleanup, causing flaky failures.
+	tmpDir, err := os.MkdirTemp("", "TestResumeResetsIdleSince")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		for range 5 {
+			if err := os.RemoveAll(tmpDir); err == nil {
+				return
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	}()
 
 	cfg := config.Default()
 	cfg.Agents["claude"] = config.Agent{
@@ -1628,9 +1642,6 @@ func TestResumeResetsIdleSince(t *testing.T) {
 		t.Errorf("IdleSince = %v, want nil after Resume", idleSince)
 	}
 
-	// Wait for the process to exit, close PTY file handles, then
-	// acquire sm.mu to ensure watchSession has finished writing
-	// state.json — all before t.TempDir() cleanup removes the directory.
 	if ptySess != nil {
 		select {
 		case <-ptySess.Done():
