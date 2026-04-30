@@ -11,6 +11,7 @@ import (
 
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
+	grpty "github.com/d0ugal/graith/internal/pty"
 )
 
 func newTestSessionManager(t *testing.T) *SessionManager {
@@ -1492,4 +1493,97 @@ func TestResolveStoredSandboxConfig(t *testing.T) {
 			t.Errorf("ReadDirs = %v, want [/global-dir /agent-dir]", got.ReadDirs)
 		}
 	})
+}
+
+func newTestPTYSession(t *testing.T, command string, args ...string) *grpty.Session {
+	t.Helper()
+	sess, err := grpty.NewSession(grpty.SessionOpts{
+		ID: "test", Command: command, Args: args,
+		Dir: t.TempDir(), Rows: 24, Cols: 80,
+		LogPath:    filepath.Join(t.TempDir(), "pty.log"),
+		MaxLogSize: 1024 * 1024,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if !sess.Exited() {
+			_ = sess.Kill()
+		}
+		sess.Close()
+	})
+	return sess
+}
+
+func TestWatchSessionStaleAfterReplace(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	id := "sess-watch"
+	sm.state.Sessions[id] = &SessionState{
+		ID: id, Name: "test", Status: StatusRunning, Agent: "claude",
+	}
+
+	oldSess := newTestPTYSession(t, "sleep", "100")
+	newSess := newTestPTYSession(t, "sleep", "100")
+
+	sm.sessions[id] = oldSess
+	go sm.watchSession(id, oldSess)
+
+	// Simulate Resume: replace the session in the map.
+	sm.mu.Lock()
+	sm.sessions[id] = newSess
+	sm.mu.Unlock()
+
+	// Kill old process to trigger the stale watcher.
+	_ = oldSess.Kill()
+	select {
+	case <-oldSess.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for old session to exit")
+	}
+
+	// Give the goroutine time to run.
+	time.Sleep(100 * time.Millisecond)
+
+	sm.mu.RLock()
+	status := sm.state.Sessions[id].Status
+	sm.mu.RUnlock()
+
+	if status != StatusRunning {
+		t.Errorf("status = %q, want %q — stale watcher overwrote state", status, StatusRunning)
+	}
+}
+
+func TestWatchSessionCurrentUpdatesState(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	id := "sess-watch-current"
+	sm.state.Sessions[id] = &SessionState{
+		ID: id, Name: "test", Status: StatusRunning, Agent: "claude",
+	}
+
+	sess := newTestPTYSession(t, "true")
+
+	sm.sessions[id] = sess
+	go sm.watchSession(id, sess)
+
+	select {
+	case <-sess.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for session to exit")
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	sm.mu.RLock()
+	status := sm.state.Sessions[id].Status
+	exitCode := sm.state.Sessions[id].ExitCode
+	sm.mu.RUnlock()
+
+	if status != StatusStopped {
+		t.Errorf("status = %q, want %q", status, StatusStopped)
+	}
+	if exitCode == nil || *exitCode != 0 {
+		t.Errorf("exit code = %v, want 0", exitCode)
+	}
 }
