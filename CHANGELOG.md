@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.17.0](https://github.com/d0ugal/graith/compare/v0.16.7...v0.17.0) (2026-04-30)
+
+
+### Features
+
+* expand globs in sandbox read_dirs and write_dirs ([74ce38b](https://github.com/d0ugal/graith/commit/74ce38bfcd298f2ed39057d1dcb229a794e68553))
+
+
+### Bug Fixes
+
+* allow duplicate session names ([78ddf87](https://github.com/d0ugal/graith/commit/78ddf870de488e07044446c21c7f7f61398a0338))
+* remove trailing newline in TestRename to pass whitespace linter ([b4e3a82](https://github.com/d0ugal/graith/commit/b4e3a82bb888f7a7e0df7c7b7c2888bd0b8a986e))
+
 ## [0.16.7](https://github.com/d0ugal/graith/compare/v0.16.6...v0.16.7) (2026-04-30)
 
 
