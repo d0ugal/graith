@@ -38,6 +38,7 @@ type HandshakeMsg struct {
 	ClientID     string    `json:"client_id"`
 	TerminalSize [2]uint16 `json:"terminal_size"`
 	Cwd          string    `json:"cwd"`
+	Profile      string    `json:"profile,omitempty"`
 }
 
 type CreateMsg struct {
