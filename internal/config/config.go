@@ -305,14 +305,16 @@ func Default() *Config {
 }
 
 func LoadOrDefault(path string) (*Config, error) {
-	var profile string
+	profile, _, err := ResolveProfile()
+	if err != nil {
+		return nil, err
+	}
 	if path == "" {
 		p, err := ResolvePaths()
 		if err != nil {
 			return nil, err
 		}
 		path = p.ConfigFile
-		profile = p.Profile
 	}
 	cfg, err := Load(path)
 	if err != nil {
