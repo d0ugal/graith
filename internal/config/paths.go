@@ -11,7 +11,7 @@ import (
 
 const baseAppName = "graith"
 
-var validProfile = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+var validProfile = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
 
 type Paths struct {
 	Profile    string
