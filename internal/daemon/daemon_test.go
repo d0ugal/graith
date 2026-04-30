@@ -1586,19 +1586,27 @@ func TestWatchSessionCurrentUpdatesState(t *testing.T) {
 }
 
 func TestResumeResetsIdleSince(t *testing.T) {
-	sm := newTestSessionManager(t)
-	sm.cfg.Agents["claude"] = config.Agent{
+	tmpDir := t.TempDir()
+
+	cfg := config.Default()
+	cfg.Agents["claude"] = config.Agent{
 		Command:     "true",
 		Args:        []string{},
 		ResumeArgs:  []string{},
 		IdleTimeout: "5m",
 	}
 
+	sm := NewSessionManager(cfg, config.Paths{
+		StateFile: filepath.Join(tmpDir, "state.json"),
+		DataDir:   tmpDir,
+		LogDir:    tmpDir,
+	}, slog.Default())
+
 	past := time.Now().Add(-10 * time.Minute)
 	id := "sess-idle"
 	sm.state.Sessions[id] = &SessionState{
 		ID: id, Name: "idle-test", Status: StatusStopped, Agent: "claude",
-		WorktreePath: t.TempDir(),
+		WorktreePath: tmpDir,
 		IdleSince:    &past,
 	}
 
@@ -1607,8 +1615,8 @@ func TestResumeResetsIdleSince(t *testing.T) {
 		t.Fatalf("Resume() error = %v", err)
 	}
 
-	// Clean up the PTY session so its file handles are closed before
-	// t.TempDir() cleanup removes the working directory.
+	// Wait for the short-lived process to exit and close PTY file handles
+	// before t.TempDir() cleanup removes the directory.
 	t.Cleanup(func() {
 		sm.mu.RLock()
 		ptySess := sm.sessions[id]
