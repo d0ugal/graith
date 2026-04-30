@@ -121,8 +121,11 @@ func TestEnsureDirsIdempotent(t *testing.T) {
 }
 
 func TestResolvePathsIndirectlyTestsRuntimeDir(t *testing.T) {
-	// runtimeDirForGraith is unexported but indirectly exercised via ResolvePaths.
-	p := ResolvePaths()
+	t.Setenv("GRAITH_PROFILE", "")
+	p, err := ResolvePaths()
+	if err != nil {
+		t.Fatalf("ResolvePaths() error: %v", err)
+	}
 	if p.RuntimeDir == "" {
 		t.Error("RuntimeDir should not be empty")
 	}
