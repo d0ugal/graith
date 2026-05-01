@@ -485,7 +485,9 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 			opts.WorktreeDir = scratchDir
 		}
 		command, finalArgs = sandbox.Wrap(agent.Command, expandedArgs, opts)
-		sm.log.Info("sandboxing session", "id", id, "agent", agentName)
+		sm.log.Info("sandboxing session", "id", id, "agent", agentName,
+			"command", command, "read_dirs", opts.ReadDirs, "write_dirs", opts.WriteDirs,
+			"features", opts.Features, "workdir", opts.WorktreeDir)
 	}
 
 	ptySess, err := grpty.NewSession(grpty.SessionOpts{
@@ -674,7 +676,9 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 		}
 		opts := sm.sandboxOptsFromConfig(merged, id, worktreePath, envKeys, source.AgentHooks)
 		command, finalArgs = sandbox.Wrap(agent.Command, expandedArgs, opts)
-		sm.log.Info("sandboxing forked session", "id", id)
+		sm.log.Info("sandboxing forked session", "id", id,
+			"command", command, "read_dirs", opts.ReadDirs, "write_dirs", opts.WriteDirs,
+			"features", opts.Features, "workdir", opts.WorktreeDir)
 	}
 
 	ptySess, err := grpty.NewSession(grpty.SessionOpts{
@@ -887,7 +891,9 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 			opts.WorktreeDir = scratchDir
 		}
 		command, finalArgs = sandbox.Wrap(agent.Command, expandedArgs, opts)
-		sm.log.Info("sandboxing resumed session", "id", id)
+		sm.log.Info("sandboxing resumed session", "id", id,
+			"command", command, "read_dirs", opts.ReadDirs, "write_dirs", opts.WriteDirs,
+			"features", opts.Features, "workdir", opts.WorktreeDir)
 	}
 
 	ptySess, err := grpty.NewSession(grpty.SessionOpts{
