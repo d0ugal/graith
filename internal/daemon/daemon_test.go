@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -1555,9 +1556,28 @@ func TestResumeResetsIdleSince(t *testing.T) {
 
 // --- In-place session tests ---
 
+func initTempGitRepo(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test", "GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run("init")
+	run("commit", "--allow-empty", "-m", "init")
+	return dir
+}
+
 func TestCreateInPlaceRejectsUnconfiguredRepo(t *testing.T) {
 	sm := newTestSessionManager(t)
-	_, err := sm.Create("test", "claude", "/tmp/fake-repo", "", "", false, "", false, true, false, 24, 80)
+	repoDir := initTempGitRepo(t)
+	_, err := sm.Create("test", "claude", repoDir, "", "", false, "", false, true, false, 24, 80)
 	if err == nil {
 		t.Fatal("expected error for unconfigured repo")
 	}
@@ -1588,21 +1608,32 @@ func TestCreateInPlaceMutuallyExclusiveFlags(t *testing.T) {
 			t.Errorf("error = %q, want mutually exclusive", err.Error())
 		}
 	})
+
+	t.Run("in-place with base", func(t *testing.T) {
+		_, err := sm.Create("test", "claude", "/tmp/whatever", "main", "", false, "", false, true, false, 24, 80)
+		if err == nil {
+			t.Fatal("expected error for --in-place with --base")
+		}
+		if !strings.Contains(err.Error(), "mutually exclusive") {
+			t.Errorf("error = %q, want mutually exclusive", err.Error())
+		}
+	})
 }
 
 func TestCreateInPlaceRejectsConcurrent(t *testing.T) {
 	sm := newTestSessionManager(t)
-	sm.cfg.Repos = []config.RepoConfig{{Path: "/tmp/fake-repo"}}
+	repoDir := initTempGitRepo(t)
+	sm.cfg.Repos = []config.RepoConfig{{Path: repoDir}}
 
 	sm.state.Sessions["existing"] = &SessionState{
 		ID:           "existing",
 		Name:         "first",
-		WorktreePath: "/tmp/fake-repo",
+		WorktreePath: repoDir,
 		InPlace:      true,
 		Status:       StatusRunning,
 	}
 
-	_, err := sm.Create("second", "claude", "/tmp/fake-repo", "", "", false, "", false, true, false, 24, 80)
+	_, err := sm.Create("second", "claude", repoDir, "", "", false, "", false, true, false, 24, 80)
 	if err == nil {
 		t.Fatal("expected error for concurrent in-place session")
 	}
@@ -1613,18 +1644,19 @@ func TestCreateInPlaceRejectsConcurrent(t *testing.T) {
 
 func TestCreateInPlaceAllowConcurrentFlag(t *testing.T) {
 	sm := newTestSessionManager(t)
-	sm.cfg.Repos = []config.RepoConfig{{Path: "/tmp/fake-repo"}}
+	repoDir := initTempGitRepo(t)
+	sm.cfg.Repos = []config.RepoConfig{{Path: repoDir}}
 
 	sm.state.Sessions["existing"] = &SessionState{
 		ID:           "existing",
 		Name:         "first",
-		WorktreePath: "/tmp/fake-repo",
+		WorktreePath: repoDir,
 		InPlace:      true,
 		Status:       StatusRunning,
 	}
 
-	// With --allow-concurrent, should pass the concurrent check (will fail later on git check)
-	_, err := sm.Create("second", "claude", "/tmp/fake-repo", "", "", false, "", false, true, true, 24, 80)
+	// With --allow-concurrent, should pass the concurrent check (will fail later on agent start)
+	_, err := sm.Create("second", "claude", repoDir, "", "", false, "", false, true, true, 24, 80)
 	if err != nil && strings.Contains(err.Error(), "already running") {
 		t.Fatalf("--allow-concurrent should bypass concurrent check, got: %v", err)
 	}
@@ -1632,18 +1664,19 @@ func TestCreateInPlaceAllowConcurrentFlag(t *testing.T) {
 
 func TestCreateInPlaceConfigAllowConcurrent(t *testing.T) {
 	sm := newTestSessionManager(t)
-	sm.cfg.Repos = []config.RepoConfig{{Path: "/tmp/fake-repo", AllowConcurrent: true}}
+	repoDir := initTempGitRepo(t)
+	sm.cfg.Repos = []config.RepoConfig{{Path: repoDir, AllowConcurrent: true}}
 
 	sm.state.Sessions["existing"] = &SessionState{
 		ID:           "existing",
 		Name:         "first",
-		WorktreePath: "/tmp/fake-repo",
+		WorktreePath: repoDir,
 		InPlace:      true,
 		Status:       StatusRunning,
 	}
 
 	// Config allow_concurrent should pass the concurrent check
-	_, err := sm.Create("second", "claude", "/tmp/fake-repo", "", "", false, "", false, true, false, 24, 80)
+	_, err := sm.Create("second", "claude", repoDir, "", "", false, "", false, true, false, 24, 80)
 	if err != nil && strings.Contains(err.Error(), "already running") {
 		t.Fatalf("config allow_concurrent should bypass concurrent check, got: %v", err)
 	}
@@ -1695,12 +1728,13 @@ func TestForkInPlaceRejects(t *testing.T) {
 
 func TestResumeInPlaceRejectsRemovedConfig(t *testing.T) {
 	sm := newTestSessionManager(t)
+	repoDir := initTempGitRepo(t)
 
 	sm.state.Sessions["inplace1"] = &SessionState{
 		ID:           "inplace1",
 		Name:         "my-inplace",
-		RepoPath:     "/tmp/my-repo",
-		WorktreePath: "/tmp/my-repo",
+		RepoPath:     repoDir,
+		WorktreePath: repoDir,
 		Agent:        "claude",
 		InPlace:      true,
 		Status:       StatusStopped,
@@ -1717,13 +1751,14 @@ func TestResumeInPlaceRejectsRemovedConfig(t *testing.T) {
 
 func TestResumeInPlaceRejectsConcurrentRunning(t *testing.T) {
 	sm := newTestSessionManager(t)
-	sm.cfg.Repos = []config.RepoConfig{{Path: "/tmp/my-repo"}}
+	repoDir := initTempGitRepo(t)
+	sm.cfg.Repos = []config.RepoConfig{{Path: repoDir}}
 
 	sm.state.Sessions["inplace1"] = &SessionState{
 		ID:           "inplace1",
 		Name:         "first",
-		RepoPath:     "/tmp/my-repo",
-		WorktreePath: "/tmp/my-repo",
+		RepoPath:     repoDir,
+		WorktreePath: repoDir,
 		Agent:        "claude",
 		InPlace:      true,
 		Status:       StatusStopped,
@@ -1731,8 +1766,8 @@ func TestResumeInPlaceRejectsConcurrentRunning(t *testing.T) {
 	sm.state.Sessions["inplace2"] = &SessionState{
 		ID:           "inplace2",
 		Name:         "second",
-		RepoPath:     "/tmp/my-repo",
-		WorktreePath: "/tmp/my-repo",
+		RepoPath:     repoDir,
+		WorktreePath: repoDir,
 		Agent:        "claude",
 		InPlace:      true,
 		Status:       StatusRunning,
@@ -1744,6 +1779,43 @@ func TestResumeInPlaceRejectsConcurrentRunning(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "already running") {
 		t.Errorf("error = %q, want mention of already running", err.Error())
+	}
+}
+
+func TestResumeInPlaceRejectsDeletedRepo(t *testing.T) {
+	sm := newTestSessionManager(t)
+	repoDir := initTempGitRepo(t)
+	sm.cfg.Repos = []config.RepoConfig{{Path: repoDir}}
+
+	sm.state.Sessions["inplace1"] = &SessionState{
+		ID:           "inplace1",
+		Name:         "my-inplace",
+		RepoPath:     repoDir,
+		WorktreePath: repoDir,
+		Agent:        "claude",
+		InPlace:      true,
+		Status:       StatusStopped,
+	}
+
+	os.RemoveAll(repoDir)
+
+	_, err := sm.Resume("inplace1", 24, 80)
+	if err == nil {
+		t.Fatal("expected error resuming after repo deleted")
+	}
+	if !strings.Contains(err.Error(), "no longer a git repository") {
+		t.Errorf("error = %q, want mention of no longer a git repository", err.Error())
+	}
+}
+
+func TestCreateInPlaceBaseRejectedByDaemon(t *testing.T) {
+	sm := newTestSessionManager(t)
+	_, err := sm.Create("test", "claude", "/tmp/whatever", "main", "", false, "", false, true, false, 24, 80)
+	if err == nil {
+		t.Fatal("expected error for --in-place with --base")
+	}
+	if !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Errorf("error = %q, want mutually exclusive", err.Error())
 	}
 }
 
