@@ -18,6 +18,7 @@ type Config struct {
 	BranchPrefix     string           `toml:"branch_prefix"`
 	FetchOnCreate    bool             `toml:"fetch_on_create"`
 	AllowedRepoPaths []string         `toml:"allowed_repo_paths"`
+	Repos            []RepoConfig     `toml:"repos"`
 	StatusBar        StatusBar        `toml:"status_bar"`
 	Keybindings      Keybindings      `toml:"keybindings"`
 	Notifications    Notifications    `toml:"notifications"`
@@ -25,6 +26,11 @@ type Config struct {
 	Sandbox          SandboxConfig    `toml:"sandbox"`
 	Approvals        Approvals        `toml:"approvals"`
 	Agents           map[string]Agent `toml:"agents"`
+}
+
+type RepoConfig struct {
+	Path            string `toml:"path"`
+	AllowConcurrent bool   `toml:"allow_concurrent"`
 }
 
 type StatusBar struct {
@@ -182,6 +188,16 @@ func ExpandPath(p string) string {
 		p = abs
 	}
 	return filepath.Clean(p)
+}
+
+func (c *Config) FindRepo(repoPath string) (RepoConfig, bool) {
+	repoPath = ResolvePath(repoPath)
+	for _, r := range c.Repos {
+		if ResolvePath(r.Path) == repoPath {
+			return r, true
+		}
+	}
+	return RepoConfig{}, false
 }
 
 func (c *Config) RepoPathAllowed(repoPath string) bool {

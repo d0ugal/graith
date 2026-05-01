@@ -300,6 +300,9 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	}
 
 	branchVal := displayBranch(si.info.Branch, si.info.Name)
+	if branchVal == "" && si.info.InPlace {
+		branchVal = "(in-place)"
+	}
 	branchRendered := dim.Render(pad(branchVal, d.cols.branch))
 
 	gitVal := displayGit(si.info.Dirty, si.info.UnpushedCount)
@@ -774,6 +777,8 @@ func (m overlayModel) View() tea.View {
 				branch = p[2]
 			}
 			line1 = append(line1, "branch: "+branch)
+		} else if s.InPlace {
+			line1 = append(line1, "mode: in-place")
 		}
 		if s.BaseBranch != "" {
 			line1 = append(line1, "base: "+s.BaseBranch)

@@ -42,7 +42,7 @@ var deleteCmd = &cobra.Command{
 			return err
 		}
 
-		if !deleteBatch.force && session.WorktreePath != "" {
+		if !deleteBatch.force && session.WorktreePath != "" && !session.InPlace {
 			confirmed, err := confirmDelete(session)
 			if err != nil {
 				return err

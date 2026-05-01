@@ -42,14 +42,16 @@ type HandshakeMsg struct {
 }
 
 type CreateMsg struct {
-	Name          string `json:"name"`
-	Agent         string `json:"agent"`
-	RepoPath      string `json:"repo_path"`
-	Base          string `json:"base,omitempty"`
-	Prompt        string `json:"prompt,omitempty"`
-	NoRepo        bool   `json:"no_repo,omitempty"`
-	ShareWorktree string `json:"share_worktree,omitempty"`
-	AgentHooks    bool   `json:"agent_hooks,omitempty"`
+	Name            string `json:"name"`
+	Agent           string `json:"agent"`
+	RepoPath        string `json:"repo_path"`
+	Base            string `json:"base,omitempty"`
+	Prompt          string `json:"prompt,omitempty"`
+	NoRepo          bool   `json:"no_repo,omitempty"`
+	ShareWorktree   string `json:"share_worktree,omitempty"`
+	AgentHooks      bool   `json:"agent_hooks,omitempty"`
+	InPlace         bool   `json:"in_place,omitempty"`
+	AllowConcurrent bool   `json:"allow_concurrent,omitempty"`
 }
 
 type ForkMsg struct {
@@ -184,6 +186,7 @@ type SessionInfo struct {
 	UnpushedCount  int      `json:"unpushed_count,omitempty"`
 	Sandboxed      bool     `json:"sandboxed,omitempty"`
 	SharedWorktree bool     `json:"shared_worktree,omitempty"`
+	InPlace        bool     `json:"in_place,omitempty"`
 	Model          string   `json:"model,omitempty"`
 	ToolName       string   `json:"tool_name,omitempty"`
 	CostUSD        *float64 `json:"cost_usd,omitempty"`
