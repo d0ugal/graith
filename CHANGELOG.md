@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.18.0](https://github.com/d0ugal/graith/compare/v0.17.0...v0.18.0) (2026-06-10)
+
+
+### Features
+
+* add GRAITH_PROFILE support to config layer ([fb01feb](https://github.com/d0ugal/graith/commit/fb01feba6fa232a3d9abe5164be444fb387b2e4f))
+* add in-place sessions for repos without remotes ([39fd832](https://github.com/d0ugal/graith/commit/39fd8327b6e816b2bbd28f11d7608ad15c4237de))
+* add profile to handshake protocol with shared builder and mismatch rejection ([530f3b2](https://github.com/d0ugal/graith/commit/530f3b24ffe2df5d5bf73f9e15de359212bfeba7))
+* propagate GRAITH_PROFILE to agent env and guard legacy cleanup ([e6de49b](https://github.com/d0ugal/graith/commit/e6de49b64c42430272911b09cf33c2ce94700ad1))
+* show profile indicator in overlay, list, and doctor for non-default profiles ([b6fdd2f](https://github.com/d0ugal/graith/commit/b6fdd2fa58067c66b7c0749a3db6a46c033eedb0))
+
+
+### Bug Fixes
+
+* address Codex review findings for GRAITH_PROFILE ([0779e71](https://github.com/d0ugal/graith/commit/0779e710654752ac7a9eabd5e6232cdfe21ecf51))
+* address Codex review findings for in-place sessions ([1de9965](https://github.com/d0ugal/graith/commit/1de9965a6ccbe4c46ca6bf87cb992f024be5ad5c))
+* align struct tags in MCP CreateSessionInput to satisfy tagalign linter ([3f6cdc9](https://github.com/d0ugal/graith/commit/3f6cdc9b8074add0c54039a909a015dfafbc237f))
+* resolve profile independently of --config path in LoadOrDefault ([3628989](https://github.com/d0ugal/graith/commit/3628989481065f4efdd5f57dffbe7fbfc52f20e0))
+
 ## [0.17.0](https://github.com/d0ugal/graith/compare/v0.16.7...v0.17.0) (2026-06-10)
 
 
