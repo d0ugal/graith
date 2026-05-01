@@ -259,11 +259,18 @@ func repoHash(repoPath string) string {
 	return hex.EncodeToString(b)[:12]
 }
 
-// Create starts a new agent session, either in a git worktree or as a
-// standalone scratch session (when noRepo is true).
-func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt string, noRepo bool, shareWorktree string, agentHooks bool, rows, cols uint16) (SessionState, error) {
+// Create starts a new agent session, either in a git worktree, in-place
+// in an existing repo, or as a standalone scratch session (when noRepo is true).
+func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt string, noRepo bool, shareWorktree string, agentHooks bool, inPlace, allowConcurrent bool, rows, cols uint16) (SessionState, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
+
+	if inPlace && noRepo {
+		return SessionState{}, fmt.Errorf("--in-place and --no-repo are mutually exclusive")
+	}
+	if inPlace && shareWorktree != "" {
+		return SessionState{}, fmt.Errorf("--in-place and --share-worktree are mutually exclusive")
+	}
 
 	agent, ok := sm.cfg.Agents[agentName]
 	if !ok {
@@ -300,6 +307,33 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 		if err := os.MkdirAll(worktreePath, 0o700); err != nil {
 			return SessionState{}, fmt.Errorf("create scratch dir: %w", err)
 		}
+	case inPlace:
+		rc, ok := sm.cfg.FindRepo(repoPath)
+		if !ok {
+			return SessionState{}, fmt.Errorf("repo path %q is not configured in [[repos]] — add it to config to use --in-place", repoPath)
+		}
+
+		if !allowConcurrent && !rc.AllowConcurrent {
+			resolvedPath := config.ResolvePath(repoPath)
+			for _, s := range sm.state.Sessions {
+				if s.InPlace && config.ResolvePath(s.WorktreePath) == resolvedPath && s.Status == StatusRunning {
+					return SessionState{}, fmt.Errorf("an in-place session %q is already running in %q — use --allow-concurrent to override", s.Name, repoPath)
+				}
+			}
+		}
+
+		if !git.IsInsideGitRepo(repoPath) {
+			return SessionState{}, fmt.Errorf("not inside a git repository: %s", repoPath)
+		}
+
+		var err error
+		repoRoot, err = git.RepoRootPath(repoPath)
+		if err != nil {
+			return SessionState{}, fmt.Errorf("find repo root: %w", err)
+		}
+
+		repoName = filepath.Base(repoRoot)
+		worktreePath = repoRoot
 	default:
 		if !sm.cfg.RepoPathAllowed(repoPath) {
 			return SessionState{}, fmt.Errorf("repo path %q is not under any allowed_repo_paths", repoPath)
@@ -365,7 +399,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 	}
 	cleanupOnError := func() {
 		sm.cleanupHooks(id)
-		if sharedWorktree {
+		if sharedWorktree || inPlace {
 			return
 		}
 		if noRepo {
@@ -395,6 +429,9 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 	env["GRAITH_WORKTREE_PATH"] = worktreePath
 	if sm.paths.Profile != "" {
 		env["GRAITH_PROFILE"] = sm.paths.Profile
+	}
+	if inPlace {
+		env["GRAITH_IN_PLACE"] = "true"
 	}
 
 	sandboxed, err := sm.resolveSandbox(agentName)
@@ -480,6 +517,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 		Sandboxed:      sandboxed,
 		SandboxConfig:  mergedSandbox,
 		SharedWorktree: sharedWorktree,
+		InPlace:        inPlace,
 		AgentHooks:     agentHooks,
 		Status:         StatusRunning,
 		PID:            ptySess.Cmd.Process.Pid,
@@ -521,6 +559,10 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 
 	if source.RepoPath == "" {
 		return SessionState{}, fmt.Errorf("cannot fork session %q: source has no repo (fork requires a git repository)", source.Name)
+	}
+
+	if source.InPlace {
+		return SessionState{}, fmt.Errorf("cannot fork session %q: in-place sessions cannot be forked", source.Name)
 	}
 
 	agentName := source.Agent
@@ -778,6 +820,21 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 		return SessionState{}, fmt.Errorf("shared-worktree session %q was created without sandbox and cannot be resumed safely; delete and recreate with sandbox enabled", id)
 	}
 
+	if sessState.InPlace {
+		rc, ok := sm.cfg.FindRepo(sessState.WorktreePath)
+		if !ok {
+			return SessionState{}, fmt.Errorf("repo path %q is no longer configured in [[repos]] — add it back to config to resume this in-place session", sessState.WorktreePath)
+		}
+		if !rc.AllowConcurrent {
+			for _, s := range sm.state.Sessions {
+				if s.ID != id && s.InPlace && config.ResolvePath(s.WorktreePath) == config.ResolvePath(sessState.WorktreePath) && s.Status == StatusRunning {
+					return SessionState{}, fmt.Errorf("another in-place session %q is already running in %q — stop it first or use allow_concurrent in config", s.Name, sessState.WorktreePath)
+				}
+			}
+		}
+		env["GRAITH_IN_PLACE"] = "true"
+	}
+
 	if sessState.AgentHooks {
 		hookArgs, hookEnv, err := sm.injectHooks(sessState.Agent, id)
 		if err != nil {
@@ -891,6 +948,7 @@ func (sm *SessionManager) Delete(id string) error {
 	worktreePath := sessState.WorktreePath
 	branch := sessState.Branch
 	shared := sessState.SharedWorktree
+	inPlace := sessState.InPlace
 
 	delete(sm.state.Sessions, id)
 	delete(sm.hookReports, id)
@@ -915,6 +973,8 @@ func (sm *SessionManager) Delete(id string) error {
 	case shared:
 		scratchDir := filepath.Join(sm.paths.DataDir, "scratch", id)
 		_ = os.RemoveAll(scratchDir)
+	case inPlace:
+		// In-place sessions: leave the repo completely untouched
 	case repoPath != "":
 		_ = git.TeardownSession(repoPath, worktreePath, branch)
 	case worktreePath != "":
