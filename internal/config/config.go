@@ -306,7 +306,7 @@ func Default() *Config {
 				Command:    "claude",
 				Args:       []string{"--session-id", "{agent_session_id}"},
 				ResumeArgs: []string{"--resume", "{agent_session_id}"},
-				ForkArgs:   []string{"--session-id", "{agent_session_id}", "--fork-session", "{fork_source_agent_session_id}"},
+				ForkArgs:   []string{"--resume", "{fork_source_agent_session_id}", "--fork-session", "--session-id", "{agent_session_id}"},
 			},
 			"codex": {
 				Command:    "codex",
