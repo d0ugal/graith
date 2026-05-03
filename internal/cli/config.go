@@ -79,12 +79,7 @@ var configDiffCmd = &cobra.Command{
 			target = paths.ConfigFile
 		}
 
-		if _, err := os.Stat(target); os.IsNotExist(err) {
-			fmt.Fprintf(os.Stderr, "No config file found at %s. Using built-in defaults.\n", target)
-			return nil
-		}
-
-		userCfg, err := config.Load(target)
+		userCfg, err := config.LoadOrDefault(target)
 		if err != nil {
 			return fmt.Errorf("parse config: %w", err)
 		}
