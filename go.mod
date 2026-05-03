@@ -13,6 +13,7 @@ require (
 	github.com/hinshun/vt10x v0.0.0-20220301184237-5011da428d02
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/pelletier/go-toml/v2 v2.3.1
+	github.com/pmezard/go-difflib v1.0.0
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/term v0.44.0
 	modernc.org/sqlite v1.52.0
@@ -36,7 +37,6 @@ require (
 	github.com/mattn/go-runewidth v0.0.24 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
-	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/sahilm/fuzzy v0.1.2 // indirect
