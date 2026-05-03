@@ -71,6 +71,7 @@ var doctorCmd = &cobra.Command{
 			out.Print("  ✓ Config file: %s\n", paths.ConfigFile)
 		} else {
 			out.Print("  ○ No config file (using defaults): %s\n", paths.ConfigFile)
+			out.Print("    → Run: gr config reset (to create one)\n")
 		}
 
 		if paths.Profile != "" {
