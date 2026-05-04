@@ -37,6 +37,7 @@ var checkInboxCmd = &cobra.Command{
 			Stream:     "inbox:" + sessionID,
 			Subscriber: sessionID,
 			OnlyUnread: true,
+			Ack:        true,
 		})
 
 		var messages []inboxMessage
