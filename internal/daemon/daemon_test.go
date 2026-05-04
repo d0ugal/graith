@@ -1569,7 +1569,7 @@ func initTempGitRepo(t *testing.T) string {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
 	}
-	run("init")
+	run("init", "-b", "main")
 	run("commit", "--allow-empty", "-m", "init")
 	return dir
 }
