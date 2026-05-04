@@ -86,13 +86,44 @@ func resolveSessionInfo(c *client.Client, nameOrID string) (*protocol.SessionInf
 	return nil, fmt.Errorf("session %q not found", nameOrID)
 }
 
+type repoStatus struct {
+	name            string
+	dirtyFiles      []string
+	unpushedCommits []string
+	gitFailed       bool
+}
+
 func confirmDelete(session *protocol.SessionInfo) (bool, error) {
-	dirtyFiles, dirtyErr := git.DirtyFiles(session.WorktreePath)
-	unpushedCommits, unpushedErr := git.UnpushedCommitSummaries(session.WorktreePath, session.BaseBranch)
+	var repos []repoStatus
 
-	gitFailed := dirtyErr != nil || (session.BaseBranch != "" && unpushedErr != nil)
+	mainDirty, mainDirtyErr := git.DirtyFiles(session.WorktreePath)
+	mainUnpushed, mainUnpushedErr := git.UnpushedCommitSummaries(session.WorktreePath, session.BaseBranch)
+	repos = append(repos, repoStatus{
+		name:            session.RepoName,
+		dirtyFiles:      mainDirty,
+		unpushedCommits: mainUnpushed,
+		gitFailed:       mainDirtyErr != nil || (session.BaseBranch != "" && mainUnpushedErr != nil),
+	})
 
-	if len(dirtyFiles) == 0 && len(unpushedCommits) == 0 && !gitFailed {
+	for _, inc := range session.Includes {
+		incDirty, incDirtyErr := git.DirtyFiles(inc.WorktreePath)
+		incUnpushed, incUnpushedErr := git.UnpushedCommitSummaries(inc.WorktreePath, inc.BaseBranch)
+		repos = append(repos, repoStatus{
+			name:            inc.RepoName,
+			dirtyFiles:      incDirty,
+			unpushedCommits: incUnpushed,
+			gitFailed:       incDirtyErr != nil || (inc.BaseBranch != "" && incUnpushedErr != nil),
+		})
+	}
+
+	hasWork := false
+	for _, r := range repos {
+		if len(r.dirtyFiles) > 0 || len(r.unpushedCommits) > 0 || r.gitFailed {
+			hasWork = true
+			break
+		}
+	}
+	if !hasWork {
 		return true, nil
 	}
 
@@ -106,24 +137,29 @@ func confirmDelete(session *protocol.SessionInfo) (bool, error) {
 
 	out.Print("Session %q has unsaved work:\n\n", session.Name)
 
-	if len(dirtyFiles) > 0 {
-		out.Print("  Dirty files:\n")
-		for _, f := range dirtyFiles {
-			out.Print("    %s\n", f)
+	for _, r := range repos {
+		if len(r.dirtyFiles) == 0 && len(r.unpushedCommits) == 0 && !r.gitFailed {
+			continue
+		}
+		if len(repos) > 1 {
+			out.Print("  %s:\n", r.name)
+		}
+		if len(r.dirtyFiles) > 0 {
+			out.Print("    Dirty files:\n")
+			for _, f := range r.dirtyFiles {
+				out.Print("      %s\n", f)
+			}
+		}
+		if len(r.unpushedCommits) > 0 {
+			out.Print("    Unpushed commits:\n")
+			for _, c := range r.unpushedCommits {
+				out.Print("      %s\n", c)
+			}
+		}
+		if r.gitFailed {
+			out.Print("    Warning: could not fully check worktree status\n")
 		}
 		out.Print("\n")
-	}
-
-	if len(unpushedCommits) > 0 {
-		out.Print("  Unpushed commits:\n")
-		for _, c := range unpushedCommits {
-			out.Print("    %s\n", c)
-		}
-		out.Print("\n")
-	}
-
-	if gitFailed {
-		out.Print("  Warning: could not fully check worktree status\n\n")
 	}
 
 	out.Print("Delete anyway? [y/N] ")
