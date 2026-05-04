@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/output"
@@ -18,9 +19,11 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:     "gr",
-	Short:   "graith — AI agent session manager",
-	Version: version.Version,
+	Use:           "gr",
+	Short:         "graith — AI agent session manager",
+	Version:       version.Version,
+	SilenceErrors: true,
+	SilenceUsage:  true,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		var err error
 		cfg, err = config.LoadOrDefault(cfgFile)
@@ -40,7 +43,23 @@ var rootCmd = &cobra.Command{
 }
 
 func Execute() error {
-	return rootCmd.Execute()
+	return executeWithArgs(os.Args[1:])
+}
+
+func executeWithArgs(args []string) error {
+	rootCmd.SetArgs(args)
+	err := rootCmd.Execute()
+	if err != nil {
+		w := out
+		if w == nil {
+			// Cobra skips persistent flag parsing for some errors (e.g.
+			// unknown subcommand). Parse them here so --json is respected.
+			rootCmd.PersistentFlags().Parse(args)
+			w = output.New(jsonOutput)
+		}
+		w.Error(err)
+	}
+	return err
 }
 
 func init() {
