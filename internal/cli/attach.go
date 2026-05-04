@@ -339,6 +339,7 @@ func runAttachByID(c *client.Client, sessionID string) error {
 			}
 			nc.SendControl("create", protocol.CreateMsg{
 				Name:     name,
+				ParentID: sessionID,
 				RepoPath: info.RepoPath,
 			})
 			createResp, err := nc.ReadControlResponse()

@@ -13,7 +13,10 @@ import (
 	"golang.org/x/term"
 )
 
-var deleteBatch batchFlags
+var (
+	deleteBatch    batchFlags
+	deleteChildren bool
+)
 
 var deleteCmd = &cobra.Command{
 	Use:     "delete <name-or-id>",
@@ -27,6 +30,9 @@ var deleteCmd = &cobra.Command{
 	},
 	ValidArgsFunction: completeSessionNames,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if deleteChildren && deleteBatch.active() {
+			return fmt.Errorf("--children cannot be combined with batch filters")
+		}
 		if deleteBatch.active() {
 			return deleteBatchRun(cmd)
 		}
@@ -52,7 +58,7 @@ var deleteCmd = &cobra.Command{
 			}
 		}
 
-		c.SendControl("delete", protocol.DeleteMsg{SessionID: session.ID})
+		c.SendControl("delete", protocol.DeleteMsg{SessionID: session.ID, Children: deleteChildren})
 		resp, err := c.ReadControlResponse()
 		if err != nil {
 			return err
@@ -63,7 +69,15 @@ var deleteCmd = &cobra.Command{
 			return fmt.Errorf("%s", e.Message)
 		}
 
-		out.Print("Session deleted\n")
+		if deleteChildren {
+			var result struct {
+				Deleted []string `json:"deleted"`
+			}
+			protocol.DecodePayload(resp, &result)
+			out.Print("Deleted %d sessions\n", len(result.Deleted))
+		} else {
+			out.Print("Session deleted\n")
+		}
 		return nil
 	},
 }
@@ -231,5 +245,6 @@ func deleteBatchRun(cmd *cobra.Command) error {
 
 func init() {
 	addBatchFlags(deleteCmd, &deleteBatch)
+	deleteCmd.Flags().BoolVar(&deleteChildren, "children", false, "also delete all descendant sessions")
 	rootCmd.AddCommand(deleteCmd)
 }
