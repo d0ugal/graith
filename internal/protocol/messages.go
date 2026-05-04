@@ -29,6 +29,9 @@ func DecodeControl(raw []byte) (Envelope, error) {
 }
 
 func DecodePayload(m Envelope, target any) error {
+	if len(m.Payload) == 0 || string(m.Payload) == "null" {
+		return fmt.Errorf("decode payload: missing or null payload")
+	}
 	return json.Unmarshal(m.Payload, target)
 }
 
