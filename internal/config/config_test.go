@@ -66,6 +66,28 @@ resume_args = ["resume", "--last"]
 	}
 }
 
+func TestLoadConfigDataDir(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	toml := `data_dir = "~/.graith"
+`
+	os.WriteFile(cfgPath, []byte(toml), 0o644)
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.DataDir != "~/.graith" {
+		t.Errorf("DataDir = %q, want ~/.graith", cfg.DataDir)
+	}
+}
+
+func TestDefaultConfigDataDirEmpty(t *testing.T) {
+	cfg := Default()
+	if cfg.DataDir != "" {
+		t.Errorf("default DataDir = %q, want empty", cfg.DataDir)
+	}
+}
+
 func TestLoadConfigMissing(t *testing.T) {
 	_, err := Load("/nonexistent/config.toml")
 	if err == nil {

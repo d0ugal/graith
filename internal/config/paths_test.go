@@ -112,6 +112,52 @@ func TestConfigHomeRespectsXDGEnv(t *testing.T) {
 	}
 }
 
+func TestWithDataDir(t *testing.T) {
+	t.Setenv("GRAITH_PROFILE", "")
+	p, err := ResolvePaths()
+	if err != nil {
+		t.Fatalf("ResolvePaths() error: %v", err)
+	}
+	override := p.WithDataDir("/tmp/graith-test-data")
+
+	if override.DataDir != "/tmp/graith-test-data" {
+		t.Errorf("DataDir = %q, want /tmp/graith-test-data", override.DataDir)
+	}
+	if override.StateFile != filepath.Join("/tmp/graith-test-data", "state.json") {
+		t.Errorf("StateFile = %q, want state.json under new DataDir", override.StateFile)
+	}
+	if override.LogDir != filepath.Join("/tmp/graith-test-data", "logs") {
+		t.Errorf("LogDir = %q, want logs under new DataDir", override.LogDir)
+	}
+	if override.DaemonLog != filepath.Join("/tmp/graith-test-data", "daemon.log") {
+		t.Errorf("DaemonLog = %q, want daemon.log under new DataDir", override.DaemonLog)
+	}
+	if override.MessagesDB != filepath.Join("/tmp/graith-test-data", "messages.sqlite") {
+		t.Errorf("MessagesDB = %q, want messages.sqlite under new DataDir", override.MessagesDB)
+	}
+	if override.ConfigFile != p.ConfigFile {
+		t.Errorf("ConfigFile changed: got %q, want %q", override.ConfigFile, p.ConfigFile)
+	}
+	if override.SocketPath != p.SocketPath {
+		t.Errorf("SocketPath changed: got %q, want %q", override.SocketPath, p.SocketPath)
+	}
+}
+
+func TestWithDataDirExpandsTilde(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("cannot determine home dir")
+	}
+	t.Setenv("GRAITH_PROFILE", "")
+	p, _ := ResolvePaths()
+	override := p.WithDataDir("~/.graith")
+
+	want := filepath.Join(home, ".graith")
+	if override.DataDir != want {
+		t.Errorf("DataDir = %q, want %q", override.DataDir, want)
+	}
+}
+
 func TestConfigFileUnderDotConfig(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "")
 	t.Setenv("GRAITH_PROFILE", "")
