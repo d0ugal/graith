@@ -2,6 +2,7 @@ package git
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -52,6 +53,45 @@ func TestDiscoverDefaultBranch(t *testing.T) {
 	}
 	if branch != "main" {
 		t.Errorf("DiscoverDefaultBranch = %q, want %q", branch, "main")
+	}
+}
+
+func TestDiscoverDefaultBranchLocalOnly(t *testing.T) {
+	dir := setupTestRepo(t)
+
+	branch, err := DiscoverDefaultBranch(dir)
+	if err != nil {
+		t.Fatalf("DiscoverDefaultBranch (no origin): %v", err)
+	}
+	if branch != "main" {
+		t.Errorf("DiscoverDefaultBranch = %q, want %q", branch, "main")
+	}
+}
+
+func TestDiscoverDefaultBranchLocalMaster(t *testing.T) {
+	dir := t.TempDir()
+	run := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
+			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run("init", "-b", "master")
+	os.WriteFile(filepath.Join(dir, "README.md"), []byte("test"), 0o644)
+	run("add", ".")
+	run("commit", "-m", "initial")
+
+	branch, err := DiscoverDefaultBranch(dir)
+	if err != nil {
+		t.Fatalf("DiscoverDefaultBranch (local master): %v", err)
+	}
+	if branch != "master" {
+		t.Errorf("DiscoverDefaultBranch = %q, want %q", branch, "master")
 	}
 }
 
@@ -207,5 +247,26 @@ func TestSetupAndTeardownSession(t *testing.T) {
 				t.Error("worktree directory should be removed after TeardownSession")
 			}
 		})
+	}
+}
+
+func TestSetupSessionNoOrigin(t *testing.T) {
+	dir := setupTestRepo(t)
+	worktreePath := filepath.Join(t.TempDir(), "no-origin-wt")
+	branchName := "graith/no-origin-session"
+
+	if err := SetupSession(dir, worktreePath, branchName, "main", true); err != nil {
+		t.Fatalf("SetupSession with fetch=true and no origin should succeed: %v", err)
+	}
+
+	if !RefExists(dir, branchName) {
+		t.Error("branch should exist after SetupSession")
+	}
+	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
+		t.Error("worktree directory should exist after SetupSession")
+	}
+
+	if err := TeardownSession(dir, worktreePath, branchName); err != nil {
+		t.Fatalf("TeardownSession: %v", err)
 	}
 }

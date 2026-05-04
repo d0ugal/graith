@@ -111,6 +111,29 @@ func TestDirtyFiles(t *testing.T) {
 	}
 }
 
+func TestHasRemote(t *testing.T) {
+	dir := setupTestRepo(t)
+
+	if HasRemote(dir, "origin") {
+		t.Error("fresh repo should not have origin remote")
+	}
+
+	bare := t.TempDir()
+	if _, err := RunOutput(bare, "clone", "--bare", dir, bare+"/repo.git"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RunOutput(dir, "remote", "add", "origin", bare+"/repo.git"); err != nil {
+		t.Fatal(err)
+	}
+
+	if !HasRemote(dir, "origin") {
+		t.Error("repo with origin should report HasRemote=true")
+	}
+	if HasRemote(dir, "upstream") {
+		t.Error("repo without upstream should report HasRemote=false")
+	}
+}
+
 func TestDirtyFilesInvalidDir(t *testing.T) {
 	_, err := DirtyFiles("/nonexistent-dir-abc123")
 	if err == nil {
