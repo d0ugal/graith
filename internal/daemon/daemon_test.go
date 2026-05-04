@@ -2138,7 +2138,7 @@ func TestResumeIncludesValidatesMissingWorktree(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing included worktree")
 	}
-	if !strings.Contains(err.Error(), "no longer exists") {
-		t.Errorf("error = %q, want mention of no longer exists", err.Error())
+	if !strings.Contains(err.Error(), "no longer a valid git repo") {
+		t.Errorf("error = %q, want mention of no longer a valid git repo", err.Error())
 	}
 }
