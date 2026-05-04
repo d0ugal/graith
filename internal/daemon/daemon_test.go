@@ -1342,6 +1342,7 @@ func TestResolveStoredSandboxConfig(t *testing.T) {
 			Enabled:  true,
 			ReadDirs: []string{"/current-config-dir"},
 		}
+		sm.cfg.Agents["claude"] = config.Agent{Command: "claude"}
 
 		sess := &SessionState{Agent: "claude", SandboxConfig: nil}
 
@@ -1357,6 +1358,7 @@ func TestResolveStoredSandboxConfig(t *testing.T) {
 			Enabled:  true,
 			ReadDirs: []string{"~/some-dir"},
 		}
+		sm.cfg.Agents["claude"] = config.Agent{Command: "claude"}
 
 		sess := &SessionState{Agent: "claude", SandboxConfig: nil}
 
