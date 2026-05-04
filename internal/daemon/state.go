@@ -66,6 +66,15 @@ type IncludedRepoState struct {
 	unpushed int  `json:"-"`
 }
 
+func cloneSessionState(s *SessionState) SessionState {
+	c := *s
+	if len(s.Includes) > 0 {
+		c.Includes = make([]IncludedRepoState, len(s.Includes))
+		copy(c.Includes, s.Includes)
+	}
+	return c
+}
+
 type State struct {
 	Version  int                      `json:"version"`
 	Sessions map[string]*SessionState `json:"sessions"`
