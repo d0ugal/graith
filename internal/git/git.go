@@ -39,6 +39,19 @@ func RefExists(dir string, ref string) bool {
 	return RunCheck(dir, "rev-parse", "--verify", ref)
 }
 
+func HasRemote(dir string, name string) bool {
+	out, err := RunOutput(dir, "remote")
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if strings.TrimSpace(line) == name {
+			return true
+		}
+	}
+	return false
+}
+
 func HasUncommittedChanges(dir string) (bool, error) {
 	out, err := RunOutput(dir, "status", "--porcelain")
 	if err != nil {

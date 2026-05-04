@@ -6,12 +6,20 @@ import (
 )
 
 func DiscoverDefaultBranch(repoPath string) (string, error) {
-	out, err := RunOutput(repoPath, "rev-parse", "--abbrev-ref", "origin/HEAD")
-	if err == nil && out != "origin/HEAD" {
-		return strings.TrimPrefix(out, "origin/"), nil
+	hasOrigin := HasRemote(repoPath, "origin")
+	if hasOrigin {
+		out, err := RunOutput(repoPath, "rev-parse", "--abbrev-ref", "origin/HEAD")
+		if err == nil && out != "origin/HEAD" {
+			return strings.TrimPrefix(out, "origin/"), nil
+		}
+		for _, branch := range []string{"main", "master"} {
+			if RefExists(repoPath, "origin/"+branch) {
+				return branch, nil
+			}
+		}
 	}
 	for _, branch := range []string{"main", "master"} {
-		if RefExists(repoPath, "origin/"+branch) {
+		if RefExists(repoPath, branch) {
 			return branch, nil
 		}
 	}
