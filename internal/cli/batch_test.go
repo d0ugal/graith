@@ -49,7 +49,8 @@ func TestFilterSessions(t *testing.T) {
 		{ID: "2", Name: "stopped-graith", RepoName: "graith", Status: "stopped", LastAttachedAt: old},
 		{ID: "3", Name: "running-other", RepoName: "other", Status: "running", LastAttachedAt: old},
 		{ID: "4", Name: "errored-graith", RepoName: "graith", Status: "errored", LastAttachedAt: old},
-		{ID: "5", Name: "never-attached", RepoName: "graith", Status: "stopped", LastAttachedAt: ""},
+		{ID: "5", Name: "never-attached", RepoName: "graith", Status: "stopped", LastAttachedAt: "", CreatedAt: old},
+		{ID: "6", Name: "never-attached-recent", RepoName: "graith", Status: "running", LastAttachedAt: "", CreatedAt: recent},
 	}
 
 	tests := []struct {
@@ -60,7 +61,7 @@ func TestFilterSessions(t *testing.T) {
 		{
 			name:    "repo filter",
 			flags:   batchFlags{repo: "graith"},
-			wantIDs: []string{"1", "2", "4", "5"},
+			wantIDs: []string{"1", "2", "4", "5", "6"},
 		},
 		{
 			name:    "stopped filter",
@@ -68,9 +69,9 @@ func TestFilterSessions(t *testing.T) {
 			wantIDs: []string{"2", "4", "5"},
 		},
 		{
-			name:    "stale filter excludes never-attached",
+			name:    "stale filter includes never-attached",
 			flags:   batchFlags{stale: "6h"},
-			wantIDs: []string{"2", "3", "4"},
+			wantIDs: []string{"2", "3", "4", "5"},
 		},
 		{
 			name:    "repo + stopped",
@@ -80,7 +81,7 @@ func TestFilterSessions(t *testing.T) {
 		{
 			name:    "repo + stopped + stale",
 			flags:   batchFlags{repo: "graith", stopped: true, stale: "6h"},
-			wantIDs: []string{"2", "4"},
+			wantIDs: []string{"2", "4", "5"},
 		},
 		{
 			name:    "stale with no matches",
