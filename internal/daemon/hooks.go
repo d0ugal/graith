@@ -6,7 +6,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
+
+// shellQuote wraps s in single quotes for use in shell scripts,
+// escaping any embedded single quotes with the '\” idiom.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
 
 // hookDir returns the directory for hook files for a session.
 func (sm *SessionManager) hookDir(sessionID string) string {
@@ -131,15 +138,16 @@ func (sm *SessionManager) injectCodexHooks(sessionID string) (extraArgs []string
 		return nil, nil, fmt.Errorf("create codex hooks dir: %w", err)
 	}
 
+	quoted := shellQuote(grBin)
 	for filename, eventName := range events {
 		var script string
 		switch filename {
 		case "permission-request":
-			script = fmt.Sprintf("#!/bin/sh\nexec '%s' approve-request\n", grBin)
+			script = fmt.Sprintf("#!/bin/sh\nexec %s approve-request\n", quoted)
 		case "session-start":
-			script = fmt.Sprintf("#!/bin/sh\n'%s' report-status --event %s\nexec '%s' check-inbox\n", grBin, eventName, grBin)
+			script = fmt.Sprintf("#!/bin/sh\n%s report-status --event %s\nexec %s check-inbox\n", quoted, eventName, quoted)
 		default:
-			script = fmt.Sprintf("#!/bin/sh\nexec '%s' report-status --event %s\n", grBin, eventName)
+			script = fmt.Sprintf("#!/bin/sh\nexec %s report-status --event %s\n", quoted, eventName)
 		}
 		path := filepath.Join(hooksDir, filename)
 		if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
