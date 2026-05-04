@@ -61,6 +61,9 @@ type IncludedRepoState struct {
 	WorktreePath string `json:"worktree_path"`
 	Branch       string `json:"branch"`
 	BaseBranch   string `json:"base_branch"`
+
+	dirty    bool `json:"-"`
+	unpushed int  `json:"-"`
 }
 
 type State struct {
