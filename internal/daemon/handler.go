@@ -155,7 +155,9 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				if s, ok := sm.state.Sessions[a.SessionID]; ok {
 					s.LastAttachedAt = &now
 				}
-				_ = sm.saveState()
+				if err := sm.saveState(); err != nil {
+					log.Error("failed to save state after attach", "session", a.SessionID, "err", err)
+				}
 				sm.mu.Unlock()
 
 				_ = ptySess.Resize(clientRows, clientCols)
