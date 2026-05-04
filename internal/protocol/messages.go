@@ -46,6 +46,7 @@ type HandshakeMsg struct {
 
 type CreateMsg struct {
 	Name            string `json:"name"`
+	ParentID        string `json:"parent_id,omitempty"`
 	Agent           string `json:"agent"`
 	RepoPath        string `json:"repo_path"`
 	Base            string `json:"base,omitempty"`
@@ -68,6 +69,7 @@ type AttachMsg struct {
 
 type DeleteMsg struct {
 	SessionID string `json:"session_id"`
+	Children  bool   `json:"children,omitempty"`
 }
 
 type RenameMsg struct {
@@ -172,6 +174,7 @@ type SessionListMsg struct {
 
 type SessionInfo struct {
 	ID             string             `json:"id"`
+	ParentID       string             `json:"parent_id,omitempty"`
 	Name           string             `json:"name"`
 	RepoPath       string             `json:"repo_path"`
 	RepoName       string             `json:"repo_name"`

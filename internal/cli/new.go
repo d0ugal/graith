@@ -77,6 +77,7 @@ var newCmd = &cobra.Command{
 
 		c.SendControl("create", protocol.CreateMsg{
 			Name:            name,
+			ParentID:        os.Getenv("GRAITH_SESSION_ID"),
 			Agent:           agent,
 			RepoPath:        repoPath,
 			Base:            newBase,
