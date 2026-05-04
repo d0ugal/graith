@@ -1726,6 +1726,55 @@ func TestForkInPlaceRejects(t *testing.T) {
 	}
 }
 
+func TestForkUsesSourceBaseBranch(t *testing.T) {
+	repoDir := initTempGitRepo(t)
+	tmpDir := t.TempDir()
+
+	cfg := config.Default()
+	cfg.FetchOnCreate = false
+	cfg.Agents["sleeper"] = config.Agent{
+		Command: "sleep",
+		Args:    []string{"60"},
+	}
+
+	sm := NewSessionManager(cfg, config.Paths{
+		StateFile: filepath.Join(tmpDir, "state.json"),
+		DataDir:   tmpDir,
+		LogDir:    tmpDir,
+	}, slog.Default())
+
+	sm.state.Sessions["src1"] = &SessionState{
+		ID:             "src1",
+		Name:           "source-session",
+		RepoPath:       repoDir,
+		RepoName:       "testrepo",
+		WorktreePath:   repoDir,
+		Branch:         "feat/my-feature",
+		BaseBranch:     "main",
+		Agent:          "sleeper",
+		AgentSessionID: "test-agent-id",
+		Status:         StatusRunning,
+	}
+
+	forked, err := sm.Fork("forked", "src1", 24, 80)
+	if err != nil {
+		t.Fatalf("Fork() unexpected error: %v", err)
+	}
+	t.Cleanup(func() {
+		if sess, ok := sm.sessions[forked.ID]; ok {
+			_ = sess.Kill()
+			sess.Close()
+		}
+	})
+
+	if forked.BaseBranch != "main" {
+		t.Errorf("Fork() BaseBranch = %q, want %q", forked.BaseBranch, "main")
+	}
+	if forked.BaseBranch == "feat/my-feature" {
+		t.Error("Fork() incorrectly used source Branch as BaseBranch")
+	}
+}
+
 func TestResumeInPlaceRejectsRemovedConfig(t *testing.T) {
 	sm := newTestSessionManager(t)
 	repoDir := initTempGitRepo(t)
