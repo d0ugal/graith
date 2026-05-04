@@ -239,6 +239,9 @@ func (rc RepoConfig) Validate() error {
 
 func (c *Config) Validate() error {
 	var errs []error
+	if c.DataDir != "" && !filepath.IsAbs(c.DataDir) && !strings.HasPrefix(c.DataDir, "~/") {
+		errs = append(errs, fmt.Errorf("data_dir %q must be an absolute path or start with ~/", c.DataDir))
+	}
 	for _, r := range c.Repos {
 		if err := r.Validate(); err != nil {
 			errs = append(errs, err)

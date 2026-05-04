@@ -88,6 +88,30 @@ func TestDefaultConfigDataDirEmpty(t *testing.T) {
 	}
 }
 
+func TestDataDirValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		dataDir string
+		wantErr bool
+	}{
+		{"empty is valid", "", false},
+		{"absolute path", "/tmp/graith", false},
+		{"home relative", "~/graith", false},
+		{"relative path rejected", "graith-data", true},
+		{"dot relative rejected", "./graith-data", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := Default()
+			cfg.DataDir = tt.dataDir
+			err := cfg.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestLoadConfigMissing(t *testing.T) {
 	_, err := Load("/nonexistent/config.toml")
 	if err == nil {
