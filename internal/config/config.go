@@ -33,8 +33,10 @@ type Config struct {
 }
 
 type RepoConfig struct {
-	Path            string `toml:"path"`
-	AllowConcurrent bool   `toml:"allow_concurrent"`
+	Path            string   `toml:"path"`
+	AllowConcurrent bool     `toml:"allow_concurrent"`
+	Singleton       bool     `toml:"singleton"`
+	Includes        []string `toml:"includes"`
 }
 
 type StatusBar struct {
@@ -200,6 +202,50 @@ func ExpandPath(p string) string {
 		p = abs
 	}
 	return filepath.Clean(p)
+}
+
+func (rc RepoConfig) ValidateIncludes() error {
+	if len(rc.Includes) == 0 {
+		return nil
+	}
+	if rc.Singleton && rc.AllowConcurrent {
+		return fmt.Errorf("repo %q: singleton and allow_concurrent cannot both be set", rc.Path)
+	}
+
+	mainBase := strings.ToLower(filepath.Base(ResolvePath(rc.Path)))
+	basenames := map[string]string{mainBase: rc.Path}
+	envNames := map[string]string{}
+
+	for _, inc := range rc.Includes {
+		resolved := ResolvePath(inc)
+		if resolved == ResolvePath(rc.Path) {
+			return fmt.Errorf("repo %q: cannot include itself", rc.Path)
+		}
+		base := strings.ToLower(filepath.Base(resolved))
+		if prev, ok := basenames[base]; ok {
+			return fmt.Errorf("repo %q: duplicate basename %q from %q and %q", rc.Path, base, prev, inc)
+		}
+		basenames[base] = inc
+
+		envName := IncludeEnvVarName(filepath.Base(resolved))
+		if prev, ok := envNames[envName]; ok {
+			return fmt.Errorf("repo %q: env var collision %s from %q and %q", rc.Path, envName, prev, inc)
+		}
+		envNames[envName] = inc
+	}
+	return nil
+}
+
+func IncludeEnvVarName(repoBasename string) string {
+	name := strings.ToUpper(repoBasename)
+	name = strings.NewReplacer("-", "_", ".", "_").Replace(name)
+	var clean []rune
+	for _, r := range name {
+		if (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' {
+			clean = append(clean, r)
+		}
+	}
+	return "GRAITH_INCLUDE_" + string(clean) + "_PATH"
 }
 
 func (c *Config) FindRepo(repoPath string) (RepoConfig, bool) {
