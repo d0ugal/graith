@@ -285,6 +285,11 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid msg_pub message"})
 					continue
 				}
+				if m.SenderID != "" {
+					if sess, ok := sm.Get(m.SenderID); ok {
+						m.SenderName = sess.Name
+					}
+				}
 				published, err := sm.messages.Publish(m.Stream, m.SenderID, m.SenderName, m.Body, m.ThreadID, m.ReplyTo)
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
