@@ -901,6 +901,46 @@ func TestMsgSubWithAck(t *testing.T) {
 	}
 }
 
+func TestMsgSubOnlyUnreadWithAck(t *testing.T) {
+	h := newTestHarness(t)
+
+	h.sm.messages.Publish("inbox:sess1", "sender1", "Alice", "hello", "", "")
+	h.sm.messages.Publish("inbox:sess1", "sender2", "Bob", "world", "", "")
+
+	// First read: OnlyUnread + Ack (mimics check-inbox hook)
+	h.sendControl(t, "msg_sub", protocol.MsgSubMsg{
+		Stream:     "inbox:sess1",
+		Subscriber: "sess1",
+		OnlyUnread: true,
+		Ack:        true,
+	})
+
+	env := h.readControlMsg(t)
+	if env.Type != "msg_message" {
+		t.Fatalf("first sub: expected msg_message, got %q", env.Type)
+	}
+	env = h.readControlMsg(t)
+	if env.Type != "msg_message" {
+		t.Fatalf("first sub: expected second msg_message, got %q", env.Type)
+	}
+	env = h.readControlMsg(t)
+	if env.Type != "msg_done" {
+		t.Fatalf("first sub: expected msg_done, got %q", env.Type)
+	}
+
+	// Second read: same subscriber, OnlyUnread — should see nothing
+	h.sendControl(t, "msg_sub", protocol.MsgSubMsg{
+		Stream:     "inbox:sess1",
+		Subscriber: "sess1",
+		OnlyUnread: true,
+	})
+
+	env = h.readControlMsg(t)
+	if env.Type != "msg_done" {
+		t.Fatalf("second sub: expected msg_done (no unread), got %q", env.Type)
+	}
+}
+
 func TestMsgSubInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
