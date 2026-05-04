@@ -977,6 +977,25 @@ func TestReloadConfig(t *testing.T) {
 	}
 }
 
+func TestReloadConfigRejectsDataDirChange(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(cfgPath, []byte("data_dir = \"/tmp/new-graith\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	sm := newTestSessionManager(t)
+	sm.configFile = cfgPath
+
+	err := sm.ReloadConfig()
+	if err == nil {
+		t.Fatal("expected error when data_dir changes")
+	}
+	if !strings.Contains(err.Error(), "data_dir changed") {
+		t.Errorf("error = %q, want it to mention data_dir changed", err)
+	}
+}
+
 func TestReloadConfigInvalidFile(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.toml")

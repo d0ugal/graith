@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 
 	"github.com/adrg/xdg"
 )
@@ -87,12 +88,22 @@ func runtimeDirForApp(appName string) string {
 }
 
 func (p Paths) WithDataDir(dataDir string) Paths {
+	oldDataDir := p.DataDir
 	dataDir = ExpandPath(dataDir)
 	p.DataDir = dataDir
 	p.StateFile = filepath.Join(dataDir, "state.json")
 	p.LogDir = filepath.Join(dataDir, "logs")
 	p.DaemonLog = filepath.Join(dataDir, "daemon.log")
 	p.MessagesDB = filepath.Join(dataDir, "messages.sqlite")
+	if strings.HasPrefix(p.RuntimeDir, oldDataDir+string(filepath.Separator)) || p.RuntimeDir == oldDataDir {
+		rel, err := filepath.Rel(oldDataDir, p.RuntimeDir)
+		if err == nil {
+			runtimeDir := filepath.Join(dataDir, rel)
+			p.RuntimeDir = runtimeDir
+			p.SocketPath = filepath.Join(runtimeDir, "graith.sock")
+			p.PIDFile = filepath.Join(runtimeDir, "graith.pid")
+		}
+	}
 	return p
 }
 
