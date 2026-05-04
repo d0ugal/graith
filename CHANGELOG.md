@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.1](https://github.com/d0ugal/graith/compare/v0.20.0...v0.20.1) (2026-06-11)
+
+
+### Bug Fixes
+
+* populate snapshots in DeleteWithChildren so cleanup actually runs ([e1e2baf](https://github.com/d0ugal/graith/commit/e1e2baf98f488a3709cf7aeb5673e88802328d3c))
+
 ## [0.20.0](https://github.com/d0ugal/graith/compare/v0.19.0...v0.20.0) (2026-06-11)
 
 
