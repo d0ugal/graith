@@ -1535,6 +1535,41 @@ func TestAttachSetsLastAttachedAt(t *testing.T) {
 	}
 }
 
+func TestAttachPersistsLastAttachedAt(t *testing.T) {
+	h := newTestHarness(t)
+	h.addPTYSession(t, "persist-ts", "persist-timestamp")
+
+	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "persist-ts"})
+	env := h.readControlMsg(t)
+	if env.Type != "attached" {
+		t.Fatalf("expected attached, got %q", env.Type)
+	}
+
+	h.sm.mu.RLock()
+	inMemory := h.sm.state.Sessions["persist-ts"].LastAttachedAt
+	h.sm.mu.RUnlock()
+
+	if inMemory == nil {
+		t.Fatal("LastAttachedAt should be set after attach")
+	}
+
+	reloaded, err := LoadState(h.sm.paths.StateFile)
+	if err != nil {
+		t.Fatalf("LoadState: %v", err)
+	}
+
+	s, ok := reloaded.Sessions["persist-ts"]
+	if !ok {
+		t.Fatal("session not found in reloaded state")
+	}
+	if s.LastAttachedAt == nil {
+		t.Fatal("LastAttachedAt not persisted to disk")
+	}
+	if !s.LastAttachedAt.Equal(*inMemory) {
+		t.Errorf("persisted LastAttachedAt %v != in-memory %v", s.LastAttachedAt, inMemory)
+	}
+}
+
 func TestAttachSwitchSession(t *testing.T) {
 	h := newTestHarness(t)
 	h.addPTYSession(t, "sw1", "session-one")
