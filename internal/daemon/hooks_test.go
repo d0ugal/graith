@@ -359,6 +359,19 @@ func TestShellQuote(t *testing.T) {
 }
 
 func TestCodexHookScriptsEscapeSingleQuotes(t *testing.T) {
+	// Create a fake gr binary in a directory whose name contains a single quote.
+	fakeDir := filepath.Join(t.TempDir(), "o'malley", "bin")
+	if err := os.MkdirAll(fakeDir, 0o755); err != nil {
+		t.Fatalf("create fake dir: %v", err)
+	}
+	fakeBin := filepath.Join(fakeDir, "gr")
+	if err := os.WriteFile(fakeBin, []byte("#!/bin/sh\necho ok\n"), 0o755); err != nil {
+		t.Fatalf("write fake binary: %v", err)
+	}
+
+	// Override PATH so resolveGrBin finds our fake binary.
+	t.Setenv("PATH", fakeDir+":"+os.Getenv("PATH"))
+
 	sm := newTestSessionManagerWithDataDir(t)
 	sessionID := "test-session-codex-quote"
 
@@ -368,6 +381,7 @@ func TestCodexHookScriptsEscapeSingleQuotes(t *testing.T) {
 	}
 
 	hooksDir := filepath.Join(sm.hookDir(sessionID), "codex-hooks")
+	expectedQuoted := shellQuote(fakeBin)
 
 	scripts := []string{"permission-request", "session-start", "stop"}
 	for _, name := range scripts {
@@ -378,12 +392,55 @@ func TestCodexHookScriptsEscapeSingleQuotes(t *testing.T) {
 			continue
 		}
 		content := string(data)
-		if strings.Contains(content, "''") && !strings.Contains(content, "'\\''") {
-			t.Errorf("codex hook %q has unescaped empty quotes but no escaped quotes", name)
+		if !strings.Contains(content, expectedQuoted) {
+			t.Errorf("codex hook %q does not contain properly escaped path %q; content = %q", name, expectedQuoted, content)
 		}
-		// The binary path must be single-quoted (shellQuote wraps in quotes)
-		if !strings.Contains(content, "'") {
-			t.Errorf("codex hook %q does not contain single-quoted binary path", name)
+	}
+}
+
+func TestClaudeSettingsEscapeSingleQuotes(t *testing.T) {
+	fakeDir := filepath.Join(t.TempDir(), "o'malley", "bin")
+	if err := os.MkdirAll(fakeDir, 0o755); err != nil {
+		t.Fatalf("create fake dir: %v", err)
+	}
+	fakeBin := filepath.Join(fakeDir, "gr")
+	if err := os.WriteFile(fakeBin, []byte("#!/bin/sh\necho ok\n"), 0o755); err != nil {
+		t.Fatalf("write fake binary: %v", err)
+	}
+	t.Setenv("PATH", fakeDir+":"+os.Getenv("PATH"))
+
+	sm := newTestSessionManagerWithDataDir(t)
+	sessionID := "test-session-claude-quote"
+
+	settingsPath, err := sm.generateClaudeSettings(sessionID)
+	if err != nil {
+		t.Fatalf("generateClaudeSettings() error = %v", err)
+	}
+
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("read settings: %v", err)
+	}
+
+	var parsed struct {
+		Hooks map[string][]struct {
+			Hooks []struct {
+				Command string `json:"command"`
+			} `json:"hooks"`
+		} `json:"hooks"`
+	}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("unmarshal settings: %v", err)
+	}
+
+	expectedQuoted := shellQuote(fakeBin)
+	for event, matchers := range parsed.Hooks {
+		for _, m := range matchers {
+			for _, h := range m.Hooks {
+				if !strings.HasPrefix(h.Command, expectedQuoted+" ") {
+					t.Errorf("event %q command does not start with quoted path %q; got %q", event, expectedQuoted, h.Command)
+				}
+			}
 		}
 	}
 }
