@@ -1935,7 +1935,7 @@ func TestSingletonBlocksCreateWhenRunning(t *testing.T) {
 		Status:   StatusRunning,
 	}
 
-	_, err := sm.Create("second", "claude", repoDir, "main", "", false, "", false, false, false, 24, 80)
+	_, err := sm.Create("second", "claude", repoDir, "main", "", "", false, "", false, false, false, 24, 80)
 	if err == nil {
 		t.Fatal("expected error for singleton repo with running session")
 	}
@@ -1956,8 +1956,7 @@ func TestSingletonAllowsCreateWhenStopped(t *testing.T) {
 		Status:   StatusStopped,
 	}
 
-	// Should pass the singleton check (may fail later on agent start, but that's fine)
-	_, err := sm.Create("second", "claude", repoDir, "main", "", false, "", false, false, false, 24, 80)
+	_, err := sm.Create("second", "claude", repoDir, "main", "", "", false, "", false, false, false, 24, 80)
 	if err != nil && strings.Contains(err.Error(), "singleton") {
 		t.Fatalf("singleton should not block when existing session is stopped, got: %v", err)
 	}
@@ -1969,7 +1968,7 @@ func TestInPlaceRejectsRepoWithIncludes(t *testing.T) {
 	incDir := initTempGitRepo(t)
 	sm.cfg.Repos = []config.RepoConfig{{Path: repoDir, Includes: []string{incDir}}}
 
-	_, err := sm.Create("test", "claude", repoDir, "", "", false, "", false, true, false, 24, 80)
+	_, err := sm.Create("test", "claude", repoDir, "", "", "", false, "", false, true, false, 24, 80)
 	if err == nil {
 		t.Fatal("expected error for --in-place with includes configured")
 	}
@@ -2140,5 +2139,105 @@ func TestResumeIncludesValidatesMissingWorktree(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "no longer a valid git repo") {
 		t.Errorf("error = %q, want mention of no longer a valid git repo", err.Error())
+	}
+}
+
+func TestParentIDPersistence(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	state := &State{
+		Version: CurrentStateVersion,
+		Sessions: map[string]*SessionState{
+			"child1": {
+				ID:           "child1",
+				ParentID:     "parent1",
+				Name:         "child",
+				Agent:        "claude",
+				WorktreePath: "/some/path",
+				Status:       StatusRunning,
+				CreatedAt:    time.Now().UTC(),
+			},
+		},
+	}
+	if err := SaveState(path, state); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := loaded.Sessions["child1"]
+	if s.ParentID != "parent1" {
+		t.Errorf("ParentID = %q, want %q", s.ParentID, "parent1")
+	}
+}
+
+func TestToSessionInfoParentID(t *testing.T) {
+	sess := SessionState{
+		ID:        "child",
+		ParentID:  "parent",
+		Name:      "test",
+		Agent:     "claude",
+		Status:    StatusRunning,
+		CreatedAt: time.Now().UTC(),
+	}
+	info := toSessionInfo(sess)
+	if info.ParentID != "parent" {
+		t.Errorf("SessionInfo.ParentID = %q, want %q", info.ParentID, "parent")
+	}
+}
+
+func TestCollectDescendants(t *testing.T) {
+	sm := newTestSessionManager(t)
+	sm.state.Sessions = map[string]*SessionState{
+		"root":       {ID: "root", Name: "root"},
+		"child1":     {ID: "child1", ParentID: "root", Name: "child1"},
+		"child2":     {ID: "child2", ParentID: "root", Name: "child2"},
+		"grandchild": {ID: "grandchild", ParentID: "child1", Name: "grandchild"},
+		"unrelated":  {ID: "unrelated", Name: "unrelated"},
+	}
+
+	result := sm.collectDescendants("root")
+
+	if len(result) != 4 {
+		t.Fatalf("expected 4 sessions (root + 3 descendants), got %d: %v", len(result), result)
+	}
+
+	resultSet := make(map[string]bool)
+	for _, id := range result {
+		resultSet[id] = true
+	}
+	for _, expected := range []string{"root", "child1", "child2", "grandchild"} {
+		if !resultSet[expected] {
+			t.Errorf("missing expected session %q in result", expected)
+		}
+	}
+	if resultSet["unrelated"] {
+		t.Error("unrelated session should not be in result")
+	}
+
+	indexOf := make(map[string]int)
+	for i, id := range result {
+		indexOf[id] = i
+	}
+	if indexOf["grandchild"] > indexOf["child1"] {
+		t.Error("grandchild should come before child1 (leaves first)")
+	}
+	if indexOf["child1"] > indexOf["root"] {
+		t.Error("child1 should come before root (leaves first)")
+	}
+}
+
+func TestStateVersionRejectsNewer(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	data := []byte(`{"version":999,"sessions":{}}`)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := LoadState(path)
+	if err == nil {
+		t.Fatal("expected error loading state with newer version")
+	}
+	if !strings.Contains(err.Error(), "newer than this binary") {
+		t.Errorf("unexpected error: %v", err)
 	}
 }
