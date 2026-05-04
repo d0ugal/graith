@@ -34,6 +34,9 @@ var rootCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		if cfg.DataDir != "" {
+			paths = paths.WithDataDir(cfg.DataDir)
+		}
 		out = output.New(jsonOutput)
 		return nil
 	},

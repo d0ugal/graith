@@ -20,6 +20,7 @@ type Config struct {
 	DefaultAgent     string           `toml:"default_agent"`
 	GitHubUsername   string           `toml:"github_username"`
 	BranchPrefix     string           `toml:"branch_prefix"`
+	DataDir          string           `toml:"data_dir"`
 	FetchOnCreate    bool             `toml:"fetch_on_create"`
 	AllowedRepoPaths []string         `toml:"allowed_repo_paths"`
 	Repos            []RepoConfig     `toml:"repos"`
