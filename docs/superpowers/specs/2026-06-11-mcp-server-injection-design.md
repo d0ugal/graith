@@ -120,9 +120,14 @@ args = ["@anthropic-ai/chrome-devtools-mcp@latest", "--browserUrl", "http://127.
 
 graith's own MCP server (`gr mcp`) is always injected as the `graith` MCP server, even if not declared in config. This gives agents access to session management tools (list sessions, publish messages, read messages, etc.) without any user configuration. The `GRAITH_SESSION_ID` and `GRAITH_SESSION_NAME` env vars set by the daemon are inherited by MCP child processes, so `gr mcp` automatically knows which session it belongs to.
 
-Users can disable auto-injection using the same override mechanism as any other MCP server:
+Users can disable auto-injection per-agent or globally:
 
 ```toml
+# Disable for a specific agent
+[agents.claude.mcp_servers.graith]
+disabled = true
+
+# Or disable globally
 [[mcp_servers]]
 name = "graith"
 disabled = true
@@ -236,11 +241,10 @@ TBD — to be filled after review and discussion.
   1. **Config load time** (`mergeAgent()` in config.go): Preserve user's per-agent `MCPServers` map, same as `Sandbox` and `Chrome` fields. No special merge logic needed here.
   2. **Session creation time** (new `mergeMCPServers()` function): Takes global `[]MCPServerConfig` list + per-agent `map[string]MCPServerConfig` overrides. Iterates global list by name, applies overrides (replace `args`/`env`/`command`, honor `disabled`). Per-agent entries not in global list are added as agent-specific servers.
 - **Auto-injection:** Before merging, prepend a `graith` entry (using `resolveGrBin()`) to the global list. If the user has declared `name = "graith"` with `disabled = true` in the global list, the prepended entry is overridden.
-- **Signature changes:** `injectHooks(agentName, sessionID)` → `injectHooks(agentName, sessionID, mcpServers []MCPServerConfig)`. Cascades to `injectClaudeHooks` → `generateClaudeSettings`. The caller in daemon.go calls `mergeMCPServers()` and passes the result.
-- **Validation:** `Config.Validate()` should enforce: no duplicate `name` values in `[[mcp_servers]]`, `command` is required (non-empty) for non-disabled entries.
+- **MCP resolution:** `injectHooks` keeps its existing `(agentName, sessionID)` signature. MCP servers are resolved internally via `resolveMCPServers()` and passed to agent-specific injection functions. Callers don't need to know about MCP.
+- **Validation:** `Config.Validate()` enforces: no duplicate `name` values in `[[mcp_servers]]`, `command` is required (non-empty) for non-disabled entries (both global and per-agent additions that don't override a global server).
 - **Serialization:** Use `omitempty` on `Args` and `Env` fields to avoid emitting `null` in JSON output.
-- **Agent-specific injection functions:** `injectCodexMCP()` (generate TOML profile file, return `--profile` in `extraArgs`), `injectOpenCodeMCP()` (generate JSON string, return `OPENCODE_CONFIG_CONTENT` in `extraEnv`), `injectAgyMCP()` (write JSON to data dir, symlink into worktree). Each translates `MCPServerConfig` to the agent's native format.
-- **Restructure `injectHooks`:** Rename to `injectAgentConfig` (or similar). Currently errors for agents without hook support. With MCP injection, OpenCode and Agy support MCP but not hooks — the function should handle both independently and only error if an agent supports neither.
+- **Future agent-specific injection:** `injectCodexMCP()` (generate TOML profile file, return `--profile` in `extraArgs`), `injectOpenCodeMCP()` (generate JSON string, return `OPENCODE_CONFIG_CONTENT` in `extraEnv`), `injectAgyMCP()` (write JSON to data dir, symlink into worktree). Each translates `MCPServerConfig` to the agent's native format. These are future work — initial implementation supports Claude only, other agents silently skip MCP.
 - **MCP config file location:** Write to `~/.graith/mcp/` (one file per agent type). These are regenerated when config changes, not per-session. Claude is the exception — its `settings.json` is per-session (in hooks dir) because it bundles hooks + MCP together.
 - **No state changes:** No new fields in `SessionState`, no state migration needed. MCP config is re-evaluated from current config on every create/resume.
 - **No protocol changes:** MCP injection happens entirely within the existing hook/agent-config injection path.
