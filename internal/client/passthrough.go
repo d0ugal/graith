@@ -290,8 +290,18 @@ func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, s
 
 	demux := c.startDemux(innerCtx)
 
+	var tickerCh <-chan time.Time
+	var ticker *time.Ticker
+	if sb != nil {
+		ticker = time.NewTicker(2 * time.Second)
+		tickerCh = ticker.C
+	}
+
 	go func() {
 		defer cancel()
+		if ticker != nil {
+			defer ticker.Stop()
+		}
 		for {
 			select {
 			case <-innerCtx.Done():
@@ -324,30 +334,17 @@ func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, s
 						}
 					}
 				}
+			case <-tickerCh:
+				sb.render(stdout)
+				_ = c.SendControl("status", protocol.StatusRequestMsg{
+					SessionID: sb.sessionID,
+				})
 			case <-demux.errCh:
 				setResult(ResultDisconnected)
 				return
 			}
 		}
 	}()
-
-	if sb != nil {
-		go func() {
-			ticker := time.NewTicker(2 * time.Second)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-innerCtx.Done():
-					return
-				case <-ticker.C:
-					sb.render(stdout)
-					_ = c.SendControl("status", protocol.StatusRequestMsg{
-						SessionID: sb.sessionID,
-					})
-				}
-			}
-		}()
-	}
 
 	go func() {
 		defer cancel()
