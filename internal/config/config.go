@@ -17,20 +17,21 @@ import (
 var defaultConfigTOML []byte
 
 type Config struct {
-	DefaultAgent     string           `toml:"default_agent"`
-	GitHubUsername   string           `toml:"github_username"`
-	BranchPrefix     string           `toml:"branch_prefix"`
-	DataDir          string           `toml:"data_dir"`
-	FetchOnCreate    bool             `toml:"fetch_on_create"`
-	AllowedRepoPaths []string         `toml:"allowed_repo_paths"`
-	Repos            []RepoConfig     `toml:"repos"`
-	StatusBar        StatusBar        `toml:"status_bar"`
-	Keybindings      Keybindings      `toml:"keybindings"`
-	Notifications    Notifications    `toml:"notifications"`
-	Messages         Messages         `toml:"messages"`
-	Sandbox          SandboxConfig    `toml:"sandbox"`
-	Approvals        Approvals        `toml:"approvals"`
-	Agents           map[string]Agent `toml:"agents"`
+	DefaultAgent     string            `toml:"default_agent"`
+	GitHubUsername   string            `toml:"github_username"`
+	BranchPrefix     string            `toml:"branch_prefix"`
+	DataDir          string            `toml:"data_dir"`
+	FetchOnCreate    bool              `toml:"fetch_on_create"`
+	AllowedRepoPaths []string          `toml:"allowed_repo_paths"`
+	Repos            []RepoConfig      `toml:"repos"`
+	StatusBar        StatusBar         `toml:"status_bar"`
+	Keybindings      Keybindings       `toml:"keybindings"`
+	Notifications    Notifications     `toml:"notifications"`
+	Messages         Messages          `toml:"messages"`
+	Sandbox          SandboxConfig     `toml:"sandbox"`
+	Approvals        Approvals         `toml:"approvals"`
+	MCPServers       []MCPServerConfig `toml:"mcp_servers"`
+	Agents           map[string]Agent  `toml:"agents"`
 }
 
 type RepoConfig struct {
@@ -122,14 +123,23 @@ func (a Approvals) TimeoutDuration() time.Duration {
 	return d
 }
 
+type MCPServerConfig struct {
+	Name     string            `toml:"name"               json:"-"`
+	Command  string            `toml:"command"             json:"command"`
+	Args     []string          `toml:"args,omitempty"      json:"args,omitempty"`
+	Env      map[string]string `toml:"env,omitempty"       json:"env,omitempty"`
+	Disabled bool              `toml:"disabled,omitempty"  json:"-"`
+}
+
 type Agent struct {
-	Command     string            `toml:"command"`
-	Args        []string          `toml:"args"`
-	ResumeArgs  []string          `toml:"resume_args"`
-	ForkArgs    []string          `toml:"fork_args"`
-	Env         map[string]string `toml:"env"`
-	IdleTimeout string            `toml:"idle_timeout"`
-	Sandbox     SandboxConfig     `toml:"sandbox"`
+	Command     string                     `toml:"command"`
+	Args        []string                   `toml:"args"`
+	ResumeArgs  []string                   `toml:"resume_args"`
+	ForkArgs    []string                   `toml:"fork_args"`
+	Env         map[string]string          `toml:"env"`
+	IdleTimeout string                     `toml:"idle_timeout"`
+	Sandbox     SandboxConfig              `toml:"sandbox"`
+	MCPServers  map[string]MCPServerConfig `toml:"mcp_servers"`
 }
 
 func (a Agent) IdleTimeoutDuration() time.Duration {
@@ -153,6 +163,45 @@ type SandboxConfig struct {
 	Features  []string `json:"features,omitempty"   toml:"features"`
 	ReadDirs  []string `json:"read_dirs,omitempty"  toml:"read_dirs"`
 	WriteDirs []string `json:"write_dirs,omitempty" toml:"write_dirs"`
+}
+
+func MergeMCPServers(global []MCPServerConfig, overrides map[string]MCPServerConfig) []MCPServerConfig {
+	byName := make(map[string]MCPServerConfig, len(global))
+	var order []string
+	for _, s := range global {
+		byName[s.Name] = s
+		order = append(order, s.Name)
+	}
+	for name, ovr := range overrides {
+		if _, exists := byName[name]; exists {
+			if ovr.Disabled {
+				delete(byName, name)
+				continue
+			}
+			base := byName[name]
+			if ovr.Command != "" {
+				base.Command = ovr.Command
+			}
+			if ovr.Args != nil {
+				base.Args = ovr.Args
+			}
+			if ovr.Env != nil {
+				base.Env = ovr.Env
+			}
+			byName[name] = base
+		} else if !ovr.Disabled {
+			ovr.Name = name
+			byName[name] = ovr
+			order = append(order, name)
+		}
+	}
+	var result []MCPServerConfig
+	for _, name := range order {
+		if s, ok := byName[name]; ok {
+			result = append(result, s)
+		}
+	}
+	return result
 }
 
 func (s SandboxConfig) Merge(agent SandboxConfig) SandboxConfig {
@@ -245,6 +294,19 @@ func (c *Config) Validate() error {
 	for _, r := range c.Repos {
 		if err := r.Validate(); err != nil {
 			errs = append(errs, err)
+		}
+	}
+	seen := make(map[string]bool, len(c.MCPServers))
+	for _, s := range c.MCPServers {
+		if s.Name == "" {
+			errs = append(errs, fmt.Errorf("mcp_servers: entry with empty name"))
+		} else if seen[s.Name] {
+			errs = append(errs, fmt.Errorf("mcp_servers: duplicate name %q", s.Name))
+		} else {
+			seen[s.Name] = true
+		}
+		if !s.Disabled && s.Command == "" {
+			errs = append(errs, fmt.Errorf("mcp_servers: %q has no command", s.Name))
 		}
 	}
 	return errors.Join(errs...)
@@ -349,6 +411,9 @@ func mergeAgent(def, usr Agent) Agent {
 	if usr.Sandbox.Enabled || usr.Sandbox.Disabled != nil || usr.Sandbox.Command != "" ||
 		usr.Sandbox.Features != nil || usr.Sandbox.ReadDirs != nil || usr.Sandbox.WriteDirs != nil {
 		def.Sandbox = usr.Sandbox
+	}
+	if usr.MCPServers != nil {
+		def.MCPServers = usr.MCPServers
 	}
 	return def
 }
