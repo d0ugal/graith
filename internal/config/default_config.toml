@@ -34,6 +34,10 @@ on_approval = true
 mode = "prompt"
 timeout = "10m"
 
+# [chrome]
+# enabled = false  # Start Chrome with --remote-debugging-port for sandboxed agents
+# path = ""        # Chrome binary path (auto-detected if empty)
+
 [keybindings]
 prefix = "ctrl+b"
 new_session = "c"

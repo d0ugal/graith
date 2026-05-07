@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/d0ugal/graith/internal/chrome"
 	"github.com/d0ugal/graith/internal/config"
 )
 
@@ -54,6 +55,7 @@ type SessionState struct {
 	AgentHooks             bool                  `json:"agent_hooks,omitempty"`
 	ChromePID              int                   `json:"chrome_pid,omitempty"`
 	ChromePort             int                   `json:"chrome_port,omitempty"`
+	ChromeDir              string                `json:"chrome_dir,omitempty"`
 	CreatedAt              time.Time             `json:"created_at"`
 	LastAttachedAt         *time.Time            `json:"last_attached_at,omitempty"`
 }
@@ -200,6 +202,15 @@ func syncDir(path string) error {
 
 func (s *State) Reconcile() {
 	for id, sess := range s.Sessions {
+		if sess.ChromePID > 0 {
+			if isProcessAlive(sess.ChromePID) {
+				slog.Info("killing orphaned chrome process", "id", id, "chrome_pid", sess.ChromePID)
+				chrome.StopByPID(sess.ChromePID, sess.ChromeDir)
+			}
+			sess.ChromePID = 0
+			sess.ChromePort = 0
+			sess.ChromeDir = ""
+		}
 		if sess.Status == StatusRunning && sess.PID > 0 {
 			if !isProcessAlive(sess.PID) {
 				slog.Info("session process died, marking stopped", "id", id, "pid", sess.PID)
