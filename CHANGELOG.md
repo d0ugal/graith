@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.23.1](https://github.com/d0ugal/graith/compare/v0.23.0...v0.23.1) (2026-05-07)
+
+
+### Bug Fixes
+
+* strip description= prefix from jsonschema struct tags ([927f3b8](https://github.com/d0ugal/graith/commit/927f3b8f362f56157e5ce05062c81de240767ac6))
+* update module modernc.org/libc to v1.73.1 ([83688ce](https://github.com/d0ugal/graith/commit/83688ce0ee8f1b321c95dc753f8cda752ae3b419))
+
 ## [0.23.0](https://github.com/d0ugal/graith/compare/v0.22.0...v0.23.0) (2026-05-07)
 
 
