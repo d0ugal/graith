@@ -314,6 +314,12 @@ func (c *Client) SendData(data []byte) error {
 	return c.writer.WriteFrame(protocol.ChannelData, data)
 }
 
+func (c *Client) SendFrame(channel byte, data []byte) error {
+	c.wmu.Lock()
+	defer c.wmu.Unlock()
+	return c.writer.WriteFrame(channel, data)
+}
+
 func (c *Client) ReadFrame() (protocol.Frame, error) {
 	return c.reader.ReadFrame()
 }
