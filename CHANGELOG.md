@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.22.0](https://github.com/d0ugal/graith/compare/v0.21.0...v0.22.0) (2026-06-12)
+
+
+### Features
+
+* add MCP server injection for agent sessions ([95ecd5e](https://github.com/d0ugal/graith/commit/95ecd5eb39e79102e3bf666b2eb39e65ede3f4ff))
+* refresh sandbox config from current settings on resume and fork ([b983a2f](https://github.com/d0ugal/graith/commit/b983a2f0febc304004992e29f854cb8d380830ff)), closes [#361](https://github.com/d0ugal/graith/issues/361)
+* start Chrome with remote debugging for sandboxed agents ([cd9038d](https://github.com/d0ugal/graith/commit/cd9038d6132e13b5b3fedd6e96f0940a1b3fd9d2)), closes [#359](https://github.com/d0ugal/graith/issues/359)
+
+
+### Bug Fixes
+
+* address lint issues in MCPServerConfig ([c54ed3b](https://github.com/d0ugal/graith/commit/c54ed3b28e0cd5ea183d26e2c72f856ee35cfa5c))
+* address review tribunal findings for Chrome remote debugging ([57ee712](https://github.com/d0ugal/graith/commit/57ee7128d8c72ce77bba124f135f037f99965f55))
+* address review tribunal findings for MCP injection ([773dd55](https://github.com/d0ugal/graith/commit/773dd55b198a211fb56a4eaad06613eda73da7d0))
+* clean up leaked process in sandbox resume test ([ac928dc](https://github.com/d0ugal/graith/commit/ac928dcc9a1868c917d117b190f71b24285b9274))
+* wait for PTY exit in sandbox resume tests to prevent TempDir cleanup race ([6a32d24](https://github.com/d0ugal/graith/commit/6a32d24e5f6b5b9e0908050fb9af5579f4764cbc))
+
+
+### Reverts
+
+* remove Chrome-specific code in favor of MCP injection ([710a082](https://github.com/d0ugal/graith/commit/710a082b4bf7cdb2d0ac0e1813322d816effd99b))
+
 ## [0.21.0](https://github.com/d0ugal/graith/compare/v0.20.1...v0.21.0) (2026-06-11)
 
 
