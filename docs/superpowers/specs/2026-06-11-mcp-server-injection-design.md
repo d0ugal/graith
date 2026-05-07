@@ -152,16 +152,22 @@ Claude Code reads this via `--settings` and starts MCP servers as child processe
 
 #### Injection mechanism — other agents
 
-Each agent has its own config format for MCP servers. graith writes the appropriate project-scoped config file in the session worktree before launching the agent:
+Each agent has its own config format and injection path. Where possible, graith avoids writing to the worktree by using env vars or CLI flags. MCP config files are written to `~/.graith/mcp/` (one per agent type, not per session) and referenced by flag/env/symlink.
 
-| Agent    | MCP support | Injection path | Config file |
-|----------|-------------|----------------|-------------|
-| Claude   | Yes | Extend `generateClaudeSettings()` — add `mcpServers` to settings.json | `hooks/<id>/settings.json` (via `--settings`) |
-| Codex    | Yes | Write `.codex/config.toml` in worktree root | `.codex/config.toml` with `[mcp_servers.X]` tables |
-| OpenCode | Yes | Write `opencode.json` in worktree root | `opencode.json` with `mcp` key; uses `type: "local"`, combines command+args into single `command` array, uses `environment` instead of `env` |
-| Agy      | Partial | Write `.agents/mcp_config.json` in worktree root | `.agents/mcp_config.json` with `mcpServers` key; known bug where project-local config may be ignored — fallback: override `$HOME` to a temp dir with `.gemini/config/mcp_config.json` |
+| Agent    | MCP support | Injection mechanism | Output location |
+|----------|-------------|---------------------|-----------------|
+| Claude   | Yes | `--settings` flag (existing path) | `hooks/<id>/settings.json` |
+| Codex    | Yes | `--profile graith` flag → TOML profile file | `~/.graith/mcp/codex-mcp.config.toml` |
+| OpenCode | Yes | `OPENCODE_CONFIG_CONTENT` env var (inline JSON) | None (env var) |
+| Agy      | Yes | `.gemini/settings.json` symlink in worktree → file in data dir | `~/.graith/mcp/gemini-settings.json` → symlinked as `.gemini/settings.json` in worktree |
 
-Agents without MCP support silently skip injection — no error, just a debug log. Each injection function handles the format translation from graith's canonical `MCPServerConfig` to the agent's native format.
+**Codex** supports `--profile <name>` which loads an additional TOML config layer on top of the user's base config. graith generates a profile file containing `[mcp_servers.X]` tables. This preserves the user's existing Codex config while layering MCP servers on top. The profile file maps fields directly: `command`, `args`, `env` are identical; `disabled` maps to `enabled = false`.
+
+**OpenCode** supports `OPENCODE_CONFIG_CONTENT` env var with inline JSON config, deep-merged with project/global configs. No files needed — the cleanest injection path. Format differences: `command` + `args` combine into a single `command` string array, `env` becomes `environment`, and each entry needs `"type": "local"`.
+
+**Agy (Gemini CLI)** reads `.gemini/settings.json` from the project root. The format is identical to Claude Code (`mcpServers` with `command`, `args`, `env`). graith writes the config to `~/.graith/mcp/gemini-settings.json` and symlinks it into the worktree as `.gemini/settings.json`. If the repo already has a `.gemini/settings.json`, graith reads and merges `mcpServers` into it. The symlink (or modified file) is added to `.git/info/exclude` to prevent dirty git state.
+
+Each injection function handles the format translation from graith's canonical `MCPServerConfig` to the agent's native format. Agents without MCP support silently skip injection — no error, just a debug log.
 
 #### Sandbox interaction
 
@@ -233,7 +239,9 @@ TBD — to be filled after review and discussion.
 - **Signature changes:** `injectHooks(agentName, sessionID)` → `injectHooks(agentName, sessionID, mcpServers []MCPServerConfig)`. Cascades to `injectClaudeHooks` → `generateClaudeSettings`. The caller in daemon.go calls `mergeMCPServers()` and passes the result.
 - **Validation:** `Config.Validate()` should enforce: no duplicate `name` values in `[[mcp_servers]]`, `command` is required (non-empty) for non-disabled entries.
 - **Serialization:** Use `omitempty` on `Args` and `Env` fields to avoid emitting `null` in JSON output.
-- **Agent-specific injection functions:** Add `injectCodexMCPServers()` (write `.codex/config.toml`), `injectOpenCodeMCPServers()` (write `opencode.json`), `injectAgyMCPServers()` (write `.agents/mcp_config.json`). Each translates `MCPServerConfig` to the agent's native format.
+- **Agent-specific injection functions:** `injectCodexMCP()` (generate TOML profile file, return `--profile` in `extraArgs`), `injectOpenCodeMCP()` (generate JSON string, return `OPENCODE_CONFIG_CONTENT` in `extraEnv`), `injectAgyMCP()` (write JSON to data dir, symlink into worktree). Each translates `MCPServerConfig` to the agent's native format.
+- **Restructure `injectHooks`:** Rename to `injectAgentConfig` (or similar). Currently errors for agents without hook support. With MCP injection, OpenCode and Agy support MCP but not hooks — the function should handle both independently and only error if an agent supports neither.
+- **MCP config file location:** Write to `~/.graith/mcp/` (one file per agent type). These are regenerated when config changes, not per-session. Claude is the exception — its `settings.json` is per-session (in hooks dir) because it bundles hooks + MCP together.
 - **No state changes:** No new fields in `SessionState`, no state migration needed. MCP config is re-evaluated from current config on every create/resume.
-- **No protocol changes:** MCP injection happens entirely within the existing hook injection path.
+- **No protocol changes:** MCP injection happens entirely within the existing hook/agent-config injection path.
 - **Existing code to extend:** `hooks.go`, `config.go`, `default_config.toml`.
