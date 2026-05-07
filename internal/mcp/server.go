@@ -92,18 +92,18 @@ type ListSessionsOutput struct {
 }
 
 type SessionStatusInput struct {
-	Session string `json:"session" jsonschema:"description=Session name or ID"`
+	Session string `json:"session" jsonschema:"Session name or ID"`
 }
 
 type CreateSessionInput struct {
-	Name            string `json:"name"                       jsonschema:"description=Human-readable session name"`
-	Agent           string `json:"agent,omitempty"            jsonschema:"description=Agent type (e.g. claude, codex, agy). Defaults to configured default."`
-	Repo            string `json:"repo,omitempty"             jsonschema:"description=Path to the git repository"`
-	Base            string `json:"base,omitempty"             jsonschema:"description=Base branch to create worktree from"`
-	Prompt          string `json:"prompt,omitempty"           jsonschema:"description=Initial prompt to send to the agent"`
-	NoRepo          bool   `json:"no_repo,omitempty"          jsonschema:"description=Create session without a git worktree"`
-	InPlace         bool   `json:"in_place,omitempty"         jsonschema:"description=Run agent directly in repo without creating a worktree"`
-	AllowConcurrent bool   `json:"allow_concurrent,omitempty" jsonschema:"description=Allow multiple in-place sessions on same repo"`
+	Name            string `json:"name"                       jsonschema:"Human-readable session name"`
+	Agent           string `json:"agent,omitempty"            jsonschema:"Agent type (e.g. claude, codex, agy). Defaults to configured default."`
+	Repo            string `json:"repo,omitempty"             jsonschema:"Path to the git repository"`
+	Base            string `json:"base,omitempty"             jsonschema:"Base branch to create worktree from"`
+	Prompt          string `json:"prompt,omitempty"           jsonschema:"Initial prompt to send to the agent"`
+	NoRepo          bool   `json:"no_repo,omitempty"          jsonschema:"Create session without a git worktree"`
+	InPlace         bool   `json:"in_place,omitempty"         jsonschema:"Run agent directly in repo without creating a worktree"`
+	AllowConcurrent bool   `json:"allow_concurrent,omitempty" jsonschema:"Allow multiple in-place sessions on same repo"`
 }
 
 type CreateSessionOutput struct {
@@ -116,11 +116,11 @@ type CreateSessionOutput struct {
 }
 
 type PublishMessageInput struct {
-	Topic    string `json:"topic"               jsonschema:"description=Topic/stream name to publish to"`
-	Body     string `json:"body"                jsonschema:"description=Message body"`
-	Sender   string `json:"sender,omitempty"    jsonschema:"description=Sender name for attribution"`
-	ThreadID string `json:"thread_id,omitempty" jsonschema:"description=Thread ID for threaded conversations"`
-	ReplyTo  string `json:"reply_to,omitempty"  jsonschema:"description=Topic where replies should be sent"`
+	Topic    string `json:"topic"               jsonschema:"Topic/stream name to publish to"`
+	Body     string `json:"body"                jsonschema:"Message body"`
+	Sender   string `json:"sender,omitempty"    jsonschema:"Sender name for attribution"`
+	ThreadID string `json:"thread_id,omitempty" jsonschema:"Thread ID for threaded conversations"`
+	ReplyTo  string `json:"reply_to,omitempty"  jsonschema:"Topic where replies should be sent"`
 }
 
 type PublishMessageOutput struct {
@@ -131,11 +131,11 @@ type PublishMessageOutput struct {
 }
 
 type ReadMessagesInput struct {
-	Topic      string `json:"topic"                jsonschema:"description=Topic/stream name to read from"`
-	Subscriber string `json:"subscriber,omitempty" jsonschema:"description=Subscriber ID for tracking read position"`
-	All        bool   `json:"all,omitempty"        jsonschema:"description=Read all messages instead of only unread"`
-	ThreadID   string `json:"thread_id,omitempty"  jsonschema:"description=Filter to a specific thread"`
-	Ack        bool   `json:"ack,omitempty"        jsonschema:"description=Acknowledge messages after reading"`
+	Topic      string `json:"topic"                jsonschema:"Topic/stream name to read from"`
+	Subscriber string `json:"subscriber,omitempty" jsonschema:"Subscriber ID for tracking read position"`
+	All        bool   `json:"all,omitempty"        jsonschema:"Read all messages instead of only unread"`
+	ThreadID   string `json:"thread_id,omitempty"  jsonschema:"Filter to a specific thread"`
+	Ack        bool   `json:"ack,omitempty"        jsonschema:"Acknowledge messages after reading"`
 }
 
 type MessageOutput struct {
@@ -155,10 +155,10 @@ type ReadMessagesOutput struct {
 }
 
 type SubscribeInput struct {
-	Topic      string `json:"topic"                jsonschema:"description=Topic/stream name to subscribe to"`
-	Subscriber string `json:"subscriber,omitempty" jsonschema:"description=Subscriber ID for tracking read position"`
-	ThreadID   string `json:"thread_id,omitempty"  jsonschema:"description=Filter to a specific thread"`
-	Ack        bool   `json:"ack,omitempty"        jsonschema:"description=Acknowledge the message after receiving it"`
+	Topic      string `json:"topic"                jsonschema:"Topic/stream name to subscribe to"`
+	Subscriber string `json:"subscriber,omitempty" jsonschema:"Subscriber ID for tracking read position"`
+	ThreadID   string `json:"thread_id,omitempty"  jsonschema:"Filter to a specific thread"`
+	Ack        bool   `json:"ack,omitempty"        jsonschema:"Acknowledge the message after receiving it"`
 }
 
 type SubscribeOutput struct {
