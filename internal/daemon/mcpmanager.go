@@ -92,11 +92,10 @@ func (m *MCPManager) Disconnect(proxyID string) {
 	}
 }
 
-// Reload updates the server config. Running processes for changed servers are
-// killed (proxies will reconnect).
+// Reload updates the server config. Running processes for removed or changed
+// servers are killed so proxies reconnect with the new config.
 func (m *MCPManager) Reload(cfg *config.Config) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	newServers := make(map[string]config.MCPServerConfig, len(cfg.MCPServers))
 	for _, s := range cfg.MCPServers {
@@ -104,8 +103,39 @@ func (m *MCPManager) Reload(cfg *config.Config) {
 			newServers[s.Name] = s
 		}
 	}
+
+	var toKill []string
+	configChanged := len(newServers) != len(m.servers)
+	if !configChanged {
+		for name, newCfg := range newServers {
+			oldCfg, ok := m.servers[name]
+			if !ok || oldCfg.Command != newCfg.Command || !slicesEqual(oldCfg.Args, newCfg.Args) {
+				configChanged = true
+				break
+			}
+		}
+	}
+
+	if configChanged {
+		for proxyID := range m.processes {
+			toKill = append(toKill, proxyID)
+		}
+	}
+
+	killed := make(map[string]*MCPProcess, len(toKill))
+	for _, proxyID := range toKill {
+		killed[proxyID] = m.processes[proxyID]
+		delete(m.processes, proxyID)
+	}
+
 	m.servers = newServers
 	m.globalSbx = cfg.Sandbox
+	m.mu.Unlock()
+
+	for proxyID, proc := range killed {
+		m.killProcess(proc)
+		m.log.Info("MCP server stopped (config reload)", "proxy_id", proxyID)
+	}
 }
 
 // Shutdown kills all running MCP server processes.
@@ -219,6 +249,18 @@ func (m *MCPManager) startProcess(serverCfg config.MCPServerConfig, proxyID stri
 	}()
 
 	return proc, nil
+}
+
+func slicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func (m *MCPManager) killProcess(proc *MCPProcess) {
