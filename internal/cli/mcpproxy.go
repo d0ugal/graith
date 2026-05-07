@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/d0ugal/graith/internal/client"
@@ -25,27 +26,72 @@ var mcpProxyCmd = &cobra.Command{
 	},
 }
 
+// stdinChunk carries data read from os.Stdin.
+type stdinChunk struct {
+	data []byte
+	err  error
+}
+
 func runMCPProxy(serverName, sessionID string) error {
 	const maxBackoff = 30 * time.Second
 	backoff := time.Second
 
+	// Single long-lived goroutine reading stdin. Shared across reconnect
+	// cycles to prevent goroutine leaks (os.Stdin.Read blocks forever and
+	// cannot be cancelled).
+	stdinCh := make(chan stdinChunk, 1)
+	go func() {
+		buf := make([]byte, 32*1024)
+		for {
+			n, err := os.Stdin.Read(buf)
+			if n > 0 {
+				cp := make([]byte, n)
+				copy(cp, buf[:n])
+				stdinCh <- stdinChunk{data: cp}
+			}
+			if err != nil {
+				stdinCh <- stdinChunk{err: err}
+				return
+			}
+		}
+	}()
+
 	for {
-		err := mcpProxySession(serverName, sessionID)
+		start := time.Now()
+		err := mcpProxySession(serverName, sessionID, stdinCh)
 		if err == nil {
 			return nil
 		}
 
-		// Return a JSON-RPC error on stderr so agents can see what happened.
+		if isPermanentError(err) {
+			return err
+		}
+
+		// Emit JSON-RPC error so agents don't hang waiting for a response.
+		writeJSONRPCError(os.Stdout, nil, -32603, fmt.Sprintf("MCP server %q temporarily unavailable", serverName))
 		fmt.Fprintf(os.Stderr, "mcp-proxy: connection lost: %v, reconnecting in %s\n", err, backoff)
+
 		time.Sleep(backoff)
-		backoff *= 2
-		if backoff > maxBackoff {
-			backoff = maxBackoff
+
+		if time.Since(start) > 30*time.Second {
+			backoff = time.Second
+		} else {
+			backoff *= 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
 		}
 	}
 }
 
-func mcpProxySession(serverName, sessionID string) error {
+func isPermanentError(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, "unknown MCP server") ||
+		strings.Contains(msg, "MCP manager not initialized") ||
+		strings.Contains(msg, "is not enabled for agent")
+}
+
+func mcpProxySession(serverName, sessionID string, stdinCh <-chan stdinChunk) error {
 	c, err := client.Connect(cfg, paths, cfgFile)
 	if err != nil {
 		return fmt.Errorf("connect to daemon: %w", err)
@@ -67,7 +113,6 @@ func mcpProxySession(serverName, sessionID string) error {
 	if resp.Type == "error" {
 		var e protocol.ErrorMsg
 		protocol.DecodePayload(resp, &e)
-		// Non-retriable errors: unknown server, etc.
 		writeJSONRPCError(os.Stdout, nil, -32603, fmt.Sprintf("MCP server %q: %s", serverName, e.Message))
 		return fmt.Errorf("%s", e.Message)
 	}
@@ -83,39 +128,21 @@ func mcpProxySession(serverName, sessionID string) error {
 
 	mcpChannel := connectOk.Channel
 
-	// Bridge: stdin → daemon (as MCP channel frames),
+	// Bridge: stdinCh → daemon (as MCP channel frames),
 	//         daemon MCP channel frames → stdout.
-	done := make(chan error, 2)
-
-	// stdin → daemon
-	go func() {
-		buf := make([]byte, 32*1024)
-		for {
-			n, err := os.Stdin.Read(buf)
-			if n > 0 {
-				if serr := c.SendFrame(mcpChannel, buf[:n]); serr != nil {
-					done <- serr
-					return
-				}
-			}
-			if err != nil {
-				done <- err
-				return
-			}
-		}
-	}()
+	daemonDone := make(chan error, 1)
 
 	// daemon → stdout
 	go func() {
 		for {
 			frame, err := c.ReadFrame()
 			if err != nil {
-				done <- err
+				daemonDone <- err
 				return
 			}
 			if frame.Channel == mcpChannel {
 				if _, werr := os.Stdout.Write(frame.Payload); werr != nil {
-					done <- werr
+					daemonDone <- werr
 					return
 				}
 			} else if frame.Channel == protocol.ChannelControl {
@@ -123,18 +150,33 @@ func mcpProxySession(serverName, sessionID string) error {
 				if ctrl.Type == "error" {
 					var e protocol.ErrorMsg
 					protocol.DecodePayload(ctrl, &e)
-					done <- fmt.Errorf("server error: %s", e.Message)
+					daemonDone <- fmt.Errorf("server error: %s", e.Message)
 					return
 				}
 			}
 		}
 	}()
 
-	err = <-done
-	if err == io.EOF {
-		return nil
+	// stdin → daemon (uses shared stdinCh, no new goroutine per session)
+	for {
+		select {
+		case chunk := <-stdinCh:
+			if chunk.err != nil {
+				if chunk.err == io.EOF {
+					return nil
+				}
+				return chunk.err
+			}
+			if err := c.SendFrame(mcpChannel, chunk.data); err != nil {
+				return err
+			}
+		case err := <-daemonDone:
+			if err == io.EOF {
+				return fmt.Errorf("daemon connection closed")
+			}
+			return err
+		}
 	}
-	return err
 }
 
 func writeJSONRPCError(w io.Writer, id any, code int, message string) {

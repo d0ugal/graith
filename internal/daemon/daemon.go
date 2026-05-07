@@ -1959,6 +1959,10 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 		case clientExecPath := <-sm.upgradeCh:
 			log.Info("preparing upgrade", "client_exec_path", clientExecPath)
 
+			// Kill MCP server processes before exec — defers don't
+			// run when syscall.Exec replaces the process image.
+			mcpMgr.Shutdown()
+
 			unixL, ok := l.(*net.UnixListener)
 			if !ok {
 				log.Error("listener is not a unix listener, cannot upgrade")
