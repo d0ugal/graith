@@ -1180,7 +1180,7 @@ func TestResumeSharedWorktreeWithoutSandboxRejects(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when resuming shared-worktree session without sandbox, got nil")
 	}
-	if !strings.Contains(err.Error(), "cannot be resumed safely") {
+	if !strings.Contains(err.Error(), "requires sandbox") {
 		t.Errorf("unexpected error message: %v", err)
 	}
 }
@@ -1335,82 +1335,183 @@ func TestExpandPathsGlob(t *testing.T) {
 	})
 }
 
-func TestResolveStoredSandboxConfig(t *testing.T) {
-	t.Run("uses stored config when present", func(t *testing.T) {
-		sm := newTestSessionManager(t)
-		sm.cfg.Sandbox = config.SandboxConfig{
+func TestResumeRefreshesSandboxConfig(t *testing.T) {
+	t.Run("resume uses current config not stored config", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := config.Default()
+		cfg.Sandbox = config.SandboxConfig{
 			Enabled:  true,
-			ReadDirs: []string{"/current-config-dir"},
+			ReadDirs: []string{"/updated-dir"},
+		}
+		cfg.Agents["sleeper"] = config.Agent{
+			Command: "sleep",
+			Args:    []string{"60"},
 		}
 
-		stored := &config.SandboxConfig{
-			Enabled:  true,
-			ReadDirs: []string{"/creation-time-dir"},
-		}
-		sess := &SessionState{Agent: "claude", SandboxConfig: stored}
+		sm := NewSessionManager(cfg, config.Paths{
+			StateFile:  filepath.Join(tmpDir, "state.json"),
+			DataDir:    tmpDir,
+			LogDir:     tmpDir,
+			RuntimeDir: tmpDir,
+		}, slog.Default())
 
-		got := sm.resolveStoredSandboxConfig(sess)
-		if len(got.ReadDirs) != 1 || got.ReadDirs[0] != "/creation-time-dir" {
-			t.Errorf("ReadDirs = %v, want [/creation-time-dir] (should use stored config)", got.ReadDirs)
-		}
-	})
-
-	t.Run("falls back to current config when nil", func(t *testing.T) {
-		sm := newTestSessionManager(t)
-		sm.cfg.Sandbox = config.SandboxConfig{
-			Enabled:  true,
-			ReadDirs: []string{"/current-config-dir"},
-		}
-		sm.cfg.Agents["claude"] = config.Agent{Command: "claude"}
-
-		sess := &SessionState{Agent: "claude", SandboxConfig: nil}
-
-		got := sm.resolveStoredSandboxConfig(sess)
-		if len(got.ReadDirs) != 1 || got.ReadDirs[0] != "/current-config-dir" {
-			t.Errorf("ReadDirs = %v, want [/current-config-dir] (should fall back to current config)", got.ReadDirs)
-		}
-	})
-
-	t.Run("fallback expands relative paths", func(t *testing.T) {
-		sm := newTestSessionManager(t)
-		sm.cfg.Sandbox = config.SandboxConfig{
-			Enabled:  true,
-			ReadDirs: []string{"~/some-dir"},
-		}
-		sm.cfg.Agents["claude"] = config.Agent{Command: "claude"}
-
-		sess := &SessionState{Agent: "claude", SandboxConfig: nil}
-
-		got := sm.resolveStoredSandboxConfig(sess)
-		if len(got.ReadDirs) != 1 {
-			t.Fatalf("ReadDirs = %v, want 1 element", got.ReadDirs)
-		}
-		if got.ReadDirs[0] == "~/some-dir" {
-			t.Error("ReadDirs should be expanded, got raw ~/some-dir")
-		}
-	})
-
-	t.Run("falls back merges global and agent config", func(t *testing.T) {
-		sm := newTestSessionManager(t)
-		sm.cfg.Sandbox = config.SandboxConfig{
-			Enabled:  true,
-			ReadDirs: []string{"/global-dir"},
-		}
-		sm.cfg.Agents["claude"] = config.Agent{
-			Command: "claude",
-			Sandbox: config.SandboxConfig{
-				ReadDirs: []string{"/agent-dir"},
+		sm.state.Sessions["s1"] = &SessionState{
+			ID:           "s1",
+			Name:         "test",
+			Agent:        "sleeper",
+			Status:       StatusStopped,
+			Sandboxed:    true,
+			WorktreePath: tmpDir,
+			SandboxConfig: &config.SandboxConfig{
+				Enabled:  true,
+				ReadDirs: []string{"/old-creation-time-dir"},
 			},
 		}
 
-		sess := &SessionState{Agent: "claude", SandboxConfig: nil}
-
-		got := sm.resolveStoredSandboxConfig(sess)
-		if len(got.ReadDirs) != 2 {
-			t.Fatalf("ReadDirs = %v, want [/global-dir /agent-dir]", got.ReadDirs)
+		if err := sm.saveState(); err != nil {
+			t.Fatal(err)
 		}
-		if got.ReadDirs[0] != "/global-dir" || got.ReadDirs[1] != "/agent-dir" {
-			t.Errorf("ReadDirs = %v, want [/global-dir /agent-dir]", got.ReadDirs)
+
+		_, err := sm.Resume("s1", 24, 80)
+		// Resume will fail because safehouse isn't installed, but if it gets
+		// far enough to update the session state, we can check the config.
+		// On macOS without safehouse, resolveSandbox returns an error.
+		if err != nil {
+			// Check that the error is about safehouse availability, not about
+			// using the old config.
+			if !strings.Contains(err.Error(), "not available") {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			return
+		}
+
+		sm.mu.RLock()
+		s := sm.state.Sessions["s1"]
+		sm.mu.RUnlock()
+
+		if s.SandboxConfig == nil {
+			t.Fatal("SandboxConfig should not be nil after resume")
+		}
+		found := false
+		for _, d := range s.SandboxConfig.ReadDirs {
+			if d == "/updated-dir" {
+				found = true
+			}
+			if d == "/old-creation-time-dir" {
+				t.Error("SandboxConfig still contains old creation-time dir after resume")
+			}
+		}
+		if !found {
+			t.Errorf("SandboxConfig.ReadDirs = %v, want to contain /updated-dir", s.SandboxConfig.ReadDirs)
+		}
+	})
+
+	t.Run("resume without sandbox when config disables it", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := config.Default()
+		cfg.Sandbox = config.SandboxConfig{Enabled: false}
+		cfg.Agents["sleeper"] = config.Agent{
+			Command: "sleep",
+			Args:    []string{"60"},
+		}
+
+		sm := NewSessionManager(cfg, config.Paths{
+			StateFile: filepath.Join(tmpDir, "state.json"),
+			DataDir:   tmpDir,
+			LogDir:    tmpDir,
+		}, slog.Default())
+
+		sm.state.Sessions["s1"] = &SessionState{
+			ID:           "s1",
+			Name:         "test",
+			Agent:        "sleeper",
+			Status:       StatusStopped,
+			Sandboxed:    true,
+			WorktreePath: tmpDir,
+			SandboxConfig: &config.SandboxConfig{
+				Enabled:  true,
+				ReadDirs: []string{"/old-dir"},
+			},
+		}
+
+		if err := sm.saveState(); err != nil {
+			t.Fatal(err)
+		}
+
+		sess, err := sm.Resume("s1", 24, 80)
+		if err != nil {
+			t.Fatalf("Resume failed: %v", err)
+		}
+
+		if sess.Sandboxed {
+			t.Error("session should not be sandboxed after resume with sandbox disabled in config")
+		}
+		if sess.SandboxConfig != nil {
+			t.Errorf("SandboxConfig should be nil when sandbox is disabled, got %+v", sess.SandboxConfig)
+		}
+
+		ptySess, ok := sm.GetPTY("s1")
+		if ok && !ptySess.Exited() {
+			_ = ptySess.Kill()
+		}
+	})
+
+	t.Run("resume rollback restores sandbox fields", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		stateFile := filepath.Join(tmpDir, "state.json")
+
+		cfg := config.Default()
+		cfg.Sandbox = config.SandboxConfig{Enabled: false}
+		cfg.Agents["sleeper"] = config.Agent{
+			Command: "sleep",
+			Args:    []string{"60"},
+		}
+
+		sm := NewSessionManager(cfg, config.Paths{
+			StateFile: stateFile,
+			DataDir:   tmpDir,
+			LogDir:    tmpDir,
+		}, slog.Default())
+
+		oldConfig := &config.SandboxConfig{
+			Enabled:  true,
+			ReadDirs: []string{"/old-dir"},
+		}
+		sm.state.Sessions["s1"] = &SessionState{
+			ID:            "s1",
+			Name:          "test",
+			Agent:         "sleeper",
+			Status:        StatusStopped,
+			Sandboxed:     true,
+			SandboxConfig: oldConfig,
+			WorktreePath:  tmpDir,
+		}
+
+		if err := sm.saveState(); err != nil {
+			t.Fatal(err)
+		}
+
+		// Break the state file path to force saveState failure
+		blocker := filepath.Join(tmpDir, "block")
+		if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		sm.paths.StateFile = filepath.Join(blocker, "sub", "state.json")
+
+		_, err := sm.Resume("s1", 24, 80)
+		if err == nil {
+			t.Fatal("expected error when saveState fails, got nil")
+		}
+
+		sm.mu.RLock()
+		s := sm.state.Sessions["s1"]
+		sm.mu.RUnlock()
+
+		if !s.Sandboxed {
+			t.Error("Sandboxed should be rolled back to true")
+		}
+		if s.SandboxConfig != oldConfig {
+			t.Error("SandboxConfig should be rolled back to original pointer")
 		}
 	})
 }
