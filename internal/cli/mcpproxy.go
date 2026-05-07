@@ -140,12 +140,13 @@ func mcpProxySession(serverName, sessionID string, stdinCh <-chan stdinChunk) er
 				daemonDone <- err
 				return
 			}
-			if frame.Channel == mcpChannel {
+			switch frame.Channel {
+			case mcpChannel:
 				if _, werr := os.Stdout.Write(frame.Payload); werr != nil {
 					daemonDone <- werr
 					return
 				}
-			} else if frame.Channel == protocol.ChannelControl {
+			case protocol.ChannelControl:
 				ctrl, _ := protocol.DecodeControl(frame.Payload)
 				if ctrl.Type == "error" {
 					var e protocol.ErrorMsg
