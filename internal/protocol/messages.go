@@ -277,6 +277,18 @@ type ScreenSnapshotResponseMsg struct {
 	Rows          int    `json:"rows"`
 }
 
+// MCP proxy messages
+
+type MCPConnectMsg struct {
+	Server    string `json:"server"`
+	SessionID string `json:"session_id"`
+}
+
+type MCPConnectOkMsg struct {
+	Server  string `json:"server"`
+	Channel byte   `json:"channel"`
+}
+
 type StatusRequestMsg struct {
 	SessionID string `json:"session_id"`
 }

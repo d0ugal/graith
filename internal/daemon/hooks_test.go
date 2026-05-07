@@ -433,26 +433,28 @@ func TestGenerateClaudeSettingsWithMCPServers(t *testing.T) {
 		t.Fatalf("mcpServers has %d entries, want 2", len(parsed.MCPServers))
 	}
 
+	grBin := resolveGrBin()
+
 	graith, ok := parsed.MCPServers["graith"]
 	if !ok {
 		t.Fatal("mcpServers missing graith")
 	}
-	if graith.Command != "/usr/bin/gr" {
-		t.Errorf("graith command = %q, want /usr/bin/gr", graith.Command)
+	if graith.Command != grBin {
+		t.Errorf("graith command = %q, want %q", graith.Command, grBin)
 	}
-	if len(graith.Args) != 1 || graith.Args[0] != "mcp" {
-		t.Errorf("graith args = %v, want [mcp]", graith.Args)
+	if len(graith.Args) != 2 || graith.Args[0] != "mcp-proxy" || graith.Args[1] != "graith" {
+		t.Errorf("graith args = %v, want [mcp-proxy graith]", graith.Args)
 	}
 
 	chrome, ok := parsed.MCPServers["chrome"]
 	if !ok {
 		t.Fatal("mcpServers missing chrome")
 	}
-	if chrome.Command != "npx" {
-		t.Errorf("chrome command = %q, want npx", chrome.Command)
+	if chrome.Command != grBin {
+		t.Errorf("chrome command = %q, want %q", chrome.Command, grBin)
 	}
-	if chrome.Env["DISPLAY"] != ":0" {
-		t.Errorf("chrome env = %v, want DISPLAY=:0", chrome.Env)
+	if len(chrome.Args) != 2 || chrome.Args[0] != "mcp-proxy" || chrome.Args[1] != "chrome" {
+		t.Errorf("chrome args = %v, want [mcp-proxy chrome]", chrome.Args)
 	}
 }
 

@@ -99,9 +99,14 @@ func (sm *SessionManager) generateClaudeSettings(sessionID string, mcpServers []
 	}
 
 	if len(mcpServers) > 0 {
+		grBin := resolveGrBin()
 		settings.MCPServers = make(map[string]config.MCPServerConfig, len(mcpServers))
 		for _, s := range mcpServers {
-			settings.MCPServers[s.Name] = s
+			proxyArgs := []string{"mcp-proxy", s.Name}
+			settings.MCPServers[s.Name] = config.MCPServerConfig{
+				Command: grBin,
+				Args:    proxyArgs,
+			}
 		}
 	}
 
