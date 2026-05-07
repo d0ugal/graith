@@ -613,9 +613,11 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 	}
 
 	var chromePID, chromePort int
+	var chromeDir string
 	if chromeInst != nil {
 		chromePID = chromeInst.PID()
 		chromePort = chromeInst.Port()
+		chromeDir = chromeInst.Dir()
 		sm.chromeInstances[id] = chromeInst
 	}
 
@@ -639,6 +641,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 		AgentHooks:             agentHooks,
 		ChromePID:              chromePID,
 		ChromePort:             chromePort,
+		ChromeDir:              chromeDir,
 		Status:                 StatusRunning,
 		PID:                    ptySess.Cmd.Process.Pid,
 		CreatedAt:              time.Now().UTC(),
@@ -872,9 +875,11 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 	}
 
 	var chromePID, chromePort int
+	var chromeDir string
 	if chromeInst != nil {
 		chromePID = chromeInst.PID()
 		chromePort = chromeInst.Port()
+		chromeDir = chromeInst.Dir()
 		sm.chromeInstances[id] = chromeInst
 	}
 
@@ -895,6 +900,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 		Includes:       forkIncludes,
 		ChromePID:      chromePID,
 		ChromePort:     chromePort,
+		ChromeDir:      chromeDir,
 		Status:         StatusRunning,
 		PID:            ptySess.Cmd.Process.Pid,
 		CreatedAt:      time.Now().UTC(),
@@ -938,6 +944,7 @@ func (sm *SessionManager) watchSession(id string, sess *grpty.Session) {
 			s.PID = 0
 			s.ChromePID = 0
 			s.ChromePort = 0
+			s.ChromeDir = ""
 			if err := sm.saveState(); err != nil {
 				sm.log.Error("failed to save state after session exit", "id", id, "err", err)
 			}
@@ -1075,6 +1082,11 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 	if chromeInst != nil {
 		env["CHROME_REMOTE_DEBUGGING_URL"] = chromeInst.URL()
 	}
+	stopChrome := func() {
+		if chromeInst != nil {
+			chromeInst.Stop()
+		}
+	}
 
 	command := agent.Command
 	finalArgs := expandedArgs
@@ -1085,6 +1097,7 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 			cmd = "safehouse"
 		}
 		if !sandbox.AvailableCommand(cmd) {
+			stopChrome()
 			return SessionState{}, fmt.Errorf("session was sandboxed but %q is no longer available — install safehouse or delete and recreate the session", cmd)
 		}
 		envKeys := []string{"GRAITH_SESSION_ID", "GRAITH_SESSION_NAME", "GRAITH_WORKTREE_PATH", "TERM"}
@@ -1101,6 +1114,7 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 		if sessState.SharedWorktree {
 			scratchDir := filepath.Join(sm.paths.DataDir, "scratch", id)
 			if err := os.MkdirAll(scratchDir, 0o700); err != nil {
+				stopChrome()
 				return SessionState{}, fmt.Errorf("create scratch dir for shared worktree resume: %w", err)
 			}
 			opts.ReadDirs = append(opts.ReadDirs, sessState.WorktreePath)
@@ -1129,9 +1143,7 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 		MaxLogSize: 100 * 1024 * 1024,
 	})
 	if err != nil {
-		if chromeInst != nil {
-			chromeInst.Stop()
-		}
+		stopChrome()
 		return SessionState{}, fmt.Errorf("start pty session: %w", err)
 	}
 
@@ -1141,6 +1153,7 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 	prevAgentStatus := sessState.AgentStatus
 	prevChromePID := sessState.ChromePID
 	prevChromePort := sessState.ChromePort
+	prevChromeDir := sessState.ChromeDir
 
 	sessState.Status = StatusRunning
 	sessState.ExitCode = nil
@@ -1151,6 +1164,7 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 	if chromeInst != nil {
 		sessState.ChromePID = chromeInst.PID()
 		sessState.ChromePort = chromeInst.Port()
+		sessState.ChromeDir = chromeInst.Dir()
 		sm.chromeInstances[id] = chromeInst
 	}
 
@@ -1163,6 +1177,7 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 		sessState.AgentStatus = prevAgentStatus
 		sessState.ChromePID = prevChromePID
 		sessState.ChromePort = prevChromePort
+		sessState.ChromeDir = prevChromeDir
 		sm.stopChromeForSession(id)
 		delete(sm.sessions, id)
 		_ = ptySess.Kill()
