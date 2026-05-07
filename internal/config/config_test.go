@@ -988,3 +988,94 @@ func TestAgySandboxPathsMergedWithGlobal(t *testing.T) {
 		t.Errorf("merged.ReadDirs = %v, want ~/.gemini included", merged.ReadDirs)
 	}
 }
+
+func TestChromeConfigMerge(t *testing.T) {
+	t.Run("global enabled propagates", func(t *testing.T) {
+		global := ChromeConfig{Enabled: true, Path: "/usr/bin/chrome"}
+		agent := ChromeConfig{}
+		merged := global.Merge(agent)
+		if !merged.Enabled {
+			t.Error("merged.Enabled = false, want true")
+		}
+		if merged.Path != "/usr/bin/chrome" {
+			t.Errorf("merged.Path = %q, want /usr/bin/chrome", merged.Path)
+		}
+	})
+
+	t.Run("agent enabled propagates", func(t *testing.T) {
+		global := ChromeConfig{}
+		agent := ChromeConfig{Enabled: true}
+		merged := global.Merge(agent)
+		if !merged.Enabled {
+			t.Error("merged.Enabled = false, want true")
+		}
+	})
+
+	t.Run("agent disabled overrides global", func(t *testing.T) {
+		global := ChromeConfig{Enabled: true}
+		disabled := true
+		agent := ChromeConfig{Disabled: &disabled}
+		merged := global.Merge(agent)
+		if merged.Enabled {
+			t.Error("merged.Enabled = true, want false (agent disabled)")
+		}
+	})
+
+	t.Run("agent path overrides global", func(t *testing.T) {
+		global := ChromeConfig{Enabled: true, Path: "/global/chrome"}
+		agent := ChromeConfig{Path: "/agent/chrome"}
+		merged := global.Merge(agent)
+		if merged.Path != "/agent/chrome" {
+			t.Errorf("merged.Path = %q, want /agent/chrome", merged.Path)
+		}
+	})
+
+	t.Run("empty agent preserves global path", func(t *testing.T) {
+		global := ChromeConfig{Enabled: true, Path: "/global/chrome"}
+		agent := ChromeConfig{}
+		merged := global.Merge(agent)
+		if merged.Path != "/global/chrome" {
+			t.Errorf("merged.Path = %q, want /global/chrome", merged.Path)
+		}
+	})
+}
+
+func TestLoadConfigChrome(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	toml := `
+[chrome]
+enabled = true
+path = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+
+[agents.claude]
+command = "claude"
+
+[agents.claude.chrome]
+enabled = true
+`
+	os.WriteFile(cfgPath, []byte(toml), 0o644)
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Chrome.Enabled {
+		t.Error("Chrome.Enabled = false, want true")
+	}
+	if cfg.Chrome.Path != "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" {
+		t.Errorf("Chrome.Path = %q", cfg.Chrome.Path)
+	}
+	claude := cfg.Agents["claude"]
+	if !claude.Chrome.Enabled {
+		t.Error("claude.Chrome.Enabled = false, want true")
+	}
+}
+
+func TestMergeAgentChrome(t *testing.T) {
+	def := Agent{Command: "claude"}
+	usr := Agent{Chrome: ChromeConfig{Enabled: true}}
+	got := mergeAgent(def, usr)
+	if !got.Chrome.Enabled {
+		t.Error("merged Chrome.Enabled = false, want true")
+	}
+}

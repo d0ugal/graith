@@ -29,6 +29,7 @@ type Config struct {
 	Notifications    Notifications    `toml:"notifications"`
 	Messages         Messages         `toml:"messages"`
 	Sandbox          SandboxConfig    `toml:"sandbox"`
+	Chrome           ChromeConfig     `toml:"chrome"`
 	Approvals        Approvals        `toml:"approvals"`
 	Agents           map[string]Agent `toml:"agents"`
 }
@@ -130,6 +131,7 @@ type Agent struct {
 	Env         map[string]string `toml:"env"`
 	IdleTimeout string            `toml:"idle_timeout"`
 	Sandbox     SandboxConfig     `toml:"sandbox"`
+	Chrome      ChromeConfig      `toml:"chrome"`
 }
 
 func (a Agent) IdleTimeoutDuration() time.Duration {
@@ -153,6 +155,27 @@ type SandboxConfig struct {
 	Features  []string `json:"features,omitempty"   toml:"features"`
 	ReadDirs  []string `json:"read_dirs,omitempty"  toml:"read_dirs"`
 	WriteDirs []string `json:"write_dirs,omitempty" toml:"write_dirs"`
+}
+
+type ChromeConfig struct {
+	Enabled  bool   `json:"enabled"            toml:"enabled"`
+	Disabled *bool  `json:"disabled,omitempty" toml:"disabled,omitempty"`
+	Path     string `json:"path,omitempty"     toml:"path"`
+}
+
+func (c ChromeConfig) Merge(agent ChromeConfig) ChromeConfig {
+	merged := ChromeConfig{
+		Enabled: c.Enabled || agent.Enabled,
+		Path:    c.Path,
+	}
+	if agent.Disabled != nil && *agent.Disabled {
+		merged.Enabled = false
+		return merged
+	}
+	if agent.Path != "" {
+		merged.Path = agent.Path
+	}
+	return merged
 }
 
 func (s SandboxConfig) Merge(agent SandboxConfig) SandboxConfig {
@@ -349,6 +372,9 @@ func mergeAgent(def, usr Agent) Agent {
 	if usr.Sandbox.Enabled || usr.Sandbox.Disabled != nil || usr.Sandbox.Command != "" ||
 		usr.Sandbox.Features != nil || usr.Sandbox.ReadDirs != nil || usr.Sandbox.WriteDirs != nil {
 		def.Sandbox = usr.Sandbox
+	}
+	if usr.Chrome.Enabled || usr.Chrome.Disabled != nil || usr.Chrome.Path != "" {
+		def.Chrome = usr.Chrome
 	}
 	return def
 }
