@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.23.0](https://github.com/d0ugal/graith/compare/v0.22.0...v0.23.0) (2026-05-07)
+
+
+### Features
+
+* implement daemon-managed MCP proxy (Proposal 2) ([ba0950b](https://github.com/d0ugal/graith/commit/ba0950b345e21ab12a0459e65b4394da74566fe7))
+
+
+### Bug Fixes
+
+* address lint issues in MCPServerConfig ([4cd87dc](https://github.com/d0ugal/graith/commit/4cd87dc358322eec9a789c12e411b843e6c29326))
+* address review tribunal findings for MCP injection ([cbb71e5](https://github.com/d0ugal/graith/commit/cbb71e5c2ecbdb74cd6dafd9d2423f26fb67ff59))
+* eliminate stdout write race between PTY data and status bar ticker ([6ce1072](https://github.com/d0ugal/graith/commit/6ce10729c307beff4844856012b7b4b7e3eac018))
+
 ## [0.22.0](https://github.com/d0ugal/graith/compare/v0.21.0...v0.22.0) (2026-05-07)
 
 
