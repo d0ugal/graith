@@ -1404,6 +1404,11 @@ func TestResumeRefreshesSandboxConfig(t *testing.T) {
 		if !found {
 			t.Errorf("SandboxConfig.ReadDirs = %v, want to contain /updated-dir", s.SandboxConfig.ReadDirs)
 		}
+
+		ptySess, ok := sm.GetPTY("s1")
+		if ok && !ptySess.Exited() {
+			_ = ptySess.Kill()
+		}
 	})
 
 	t.Run("resume without sandbox when config disables it", func(t *testing.T) {
