@@ -35,5 +35,6 @@ brews:
     license: MIT
     install: |
       bin.install "gr"
-    post_install: |
-      system bin/"gr", "daemon", "restart"
+    caveats: |
+      To restart the graith daemon after upgrading:
+        gr daemon restart
