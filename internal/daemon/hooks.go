@@ -37,7 +37,7 @@ func resolveGrBin() string {
 // hooks for all relevant lifecycle events. Returns the path to the settings file.
 // All supported hooks are generated including PreToolUse (approve-request) and
 // SessionStart (check-inbox). Only called when agent hooks are enabled.
-func (sm *SessionManager) generateClaudeSettings(sessionID string, mcpServers []config.MCPServerConfig) (string, error) {
+func (sm *SessionManager) generateClaudeSettings(sessionID string) (string, error) {
 	dir := sm.hookDir(sessionID)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("create hook dir: %w", err)
@@ -149,7 +149,7 @@ func (sm *SessionManager) generateMCPConfig(sessionID string, mcpServers []confi
 // injectClaudeHooks generates hook files for a Claude session and returns
 // the extra args and env vars to add to the agent launch.
 func (sm *SessionManager) injectClaudeHooks(sessionID string, mcpServers []config.MCPServerConfig) (extraArgs []string, extraEnv map[string]string, err error) {
-	settingsPath, err := sm.generateClaudeSettings(sessionID, mcpServers)
+	settingsPath, err := sm.generateClaudeSettings(sessionID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -162,9 +162,11 @@ func (sm *SessionManager) injectClaudeHooks(sessionID string, mcpServers []confi
 			return nil, nil, err
 		}
 		extraArgs = append(extraArgs, "--mcp-config", mcpConfigPath)
+		sm.log.Info("injected claude hooks", "session_id", sessionID, "settings", settingsPath, "mcp_config", mcpConfigPath, "mcp_servers", len(mcpServers))
+	} else {
+		sm.log.Info("injected claude hooks", "session_id", sessionID, "settings", settingsPath, "mcp_servers", 0)
 	}
 
-	sm.log.Info("injected claude hooks", "session_id", sessionID, "settings", settingsPath, "mcp_servers", len(mcpServers))
 	return extraArgs, nil, nil
 }
 
