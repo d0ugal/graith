@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.24.1](https://github.com/d0ugal/graith/compare/v0.24.0...v0.24.1) (2026-05-08)
+
+
+### Bug Fixes
+
+* clean up unused param, add mcp_config to log, add integration test ([724178f](https://github.com/d0ugal/graith/commit/724178f702c941ade0fdc78e5541f59724376233))
+* use --mcp-config instead of --settings for Claude Code MCP servers ([02bf1ac](https://github.com/d0ugal/graith/commit/02bf1aca4045ee24e53054f326feb4d9c15c89e4))
+
 ## [0.24.0](https://github.com/d0ugal/graith/compare/v0.23.1...v0.24.0) (2026-05-08)
 
 
