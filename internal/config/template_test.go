@@ -3,12 +3,13 @@ package config
 import "testing"
 
 func TestExpand(t *testing.T) {
-	vars := TemplateVars{Username: "d0ugal", AgentSessionID: "abc-123", SessionName: "fix-bug", SessionID: "a3f2b1c9", WorktreePath: "/tmp/worktree"}
+	vars := TemplateVars{Username: "d0ugal", AgentSessionID: "abc-123", SessionName: "fix-bug", SessionID: "a3f2b1c9", WorktreePath: "/tmp/worktree", Model: "claude-opus-4"}
 	tests := []struct{ input, want string }{
 		{"{username}/graith", "d0ugal/graith"},
 		{"--session-id {agent_session_id}", "--session-id abc-123"},
 		{"no vars here", "no vars here"},
 		{"{session_name}-{session_id}", "fix-bug-a3f2b1c9"},
+		{"--model {model}", "--model claude-opus-4"},
 	}
 	for _, tt := range tests {
 		got, err := Expand(tt.input, vars)
