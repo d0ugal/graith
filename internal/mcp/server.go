@@ -101,6 +101,7 @@ type CreateSessionInput struct {
 	Repo            string `json:"repo,omitempty"             jsonschema:"Path to the git repository"`
 	Base            string `json:"base,omitempty"             jsonschema:"Base branch to create worktree from"`
 	Prompt          string `json:"prompt,omitempty"           jsonschema:"Initial prompt to send to the agent"`
+	Model           string `json:"model,omitempty"            jsonschema:"Model for the agent to use (expands {model} in agent args)"`
 	NoRepo          bool   `json:"no_repo,omitempty"          jsonschema:"Create session without a git worktree"`
 	InPlace         bool   `json:"in_place,omitempty"         jsonschema:"Run agent directly in repo without creating a worktree"`
 	AllowConcurrent bool   `json:"allow_concurrent,omitempty" jsonschema:"Allow multiple in-place sessions on same repo"`
@@ -243,6 +244,7 @@ func (s *Server) createSession(_ context.Context, _ *gomcp.CallToolRequest, inpu
 		RepoPath:        input.Repo,
 		Base:            input.Base,
 		Prompt:          input.Prompt,
+		Model:           input.Model,
 		NoRepo:          input.NoRepo,
 		InPlace:         input.InPlace,
 		AllowConcurrent: input.AllowConcurrent,
