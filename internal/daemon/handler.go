@@ -96,7 +96,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				if agentName == "" {
 					agentName = sm.cfg.DefaultAgent
 				}
-				sess, err := sm.Create(c.Name, agentName, c.RepoPath, c.Base, c.Prompt, c.ParentID, c.NoRepo, c.ShareWorktree, c.AgentHooks, c.InPlace, c.AllowConcurrent, clientRows, clientCols)
+				sess, err := sm.Create(c.Name, agentName, c.RepoPath, c.Base, c.Prompt, c.Model, c.ParentID, c.NoRepo, c.ShareWorktree, c.AgentHooks, c.InPlace, c.AllowConcurrent, clientRows, clientCols)
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 				} else {
