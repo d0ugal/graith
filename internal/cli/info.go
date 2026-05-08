@@ -43,6 +43,9 @@ var infoCmd = &cobra.Command{
 		}
 		out.Print("Session:   %s (%s)\n", best.Name, best.ID)
 		out.Print("Agent:     %s\n", best.Agent)
+		if best.Model != "" {
+			out.Print("Model:     %s\n", best.Model)
+		}
 		out.Print("Repo:      %s\n", best.RepoName)
 		out.Print("Branch:    %s\n", best.Branch)
 		out.Print("Worktree:  %s\n", best.WorktreePath)
