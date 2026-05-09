@@ -219,12 +219,12 @@ func (sm *SessionManager) injectCodexHooks(sessionID string) (extraArgs []string
 // The graith server is unsandboxed because it needs to connect to the
 // daemon socket via client.Connect().
 func graithMCPServer() config.MCPServerConfig {
-	noSandbox := false
+	sandboxed := false
 	return config.MCPServerConfig{
 		Name:    "graith",
 		Command: resolveGrBin(),
 		Args:    []string{"mcp"},
-		Sandbox: &noSandbox,
+		Sandbox: &sandboxed,
 	}
 }
 

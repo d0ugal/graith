@@ -226,4 +226,15 @@ func TestMCPManagerExtraServers(t *testing.T) {
 	if mgr.HasServer("configured") {
 		t.Error("should not have 'configured' after reload")
 	}
+
+	// User config can disable an extra server.
+	mgr.Reload(&config.Config{
+		MCPServers: []config.MCPServerConfig{
+			{Name: "injected", Command: "cat", Disabled: true},
+		},
+	})
+
+	if mgr.HasServer("injected") {
+		t.Error("should not have 'injected' after user disables it")
+	}
 }
