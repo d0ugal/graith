@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.24.2](https://github.com/d0ugal/graith/compare/v0.24.1...v0.24.2) (2026-05-09)
+
+
+### Bug Fixes
+
+* replace post_install with caveats in Homebrew formula ([5088de7](https://github.com/d0ugal/graith/commit/5088de72b29c346eddbfb287909092fa80e59610))
+* update module charm.land/lipgloss/v2 to v2.0.4 ([e5c771d](https://github.com/d0ugal/graith/commit/e5c771dc5991adff0065a353f6919fef8b4521d1))
+
 ## [0.24.1](https://github.com/d0ugal/graith/compare/v0.24.0...v0.24.1) (2026-05-08)
 
 
