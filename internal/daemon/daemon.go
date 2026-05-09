@@ -1862,7 +1862,7 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 	defer func() { _ = msgStore.Close() }()
 	sm.messages = msgStore
 
-	mcpMgr := NewMCPManager(cfg, paths.LogDir, log)
+	mcpMgr := NewMCPManager(cfg, []config.MCPServerConfig{graithMCPServer()}, paths.LogDir, log)
 	sm.mcpManager = mcpMgr
 	defer mcpMgr.Shutdown()
 
