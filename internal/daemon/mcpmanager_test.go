@@ -148,26 +148,21 @@ func TestMCPManagerStderrCapture(t *testing.T) {
 		t.Fatalf("Connect() error = %v", err)
 	}
 
-	// Wait for the echo to stderr to be written and flushed.
 	_ = proc
-	// Give the sh process time to write stderr output before disconnect.
-	for range 20 {
-		logPath := logDir + "/mcp/stderr-test-proxy-1.log"
-		if data, err := os.ReadFile(logPath); err == nil && len(data) > 0 {
+	logPath := logDir + "/mcp/stderr-test-proxy-1.log"
+	var data []byte
+	for range 50 {
+		if d, err := os.ReadFile(logPath); err == nil && len(d) > 0 {
+			data = d
 			break
 		}
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 	}
 
 	mgr.Disconnect("proxy-1")
 
-	logPath := logDir + "/mcp/stderr-test-proxy-1.log"
-	data, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatalf("read stderr log: %v", err)
-	}
 	if len(data) == 0 {
-		t.Error("stderr log should have content")
+		t.Fatal("stderr log should have content")
 	}
 }
 

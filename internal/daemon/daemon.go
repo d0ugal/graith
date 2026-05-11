@@ -1346,6 +1346,7 @@ func (sm *SessionManager) Restart(id string, rows, cols uint16) (SessionState, e
 			s.Status = StatusStopped
 			s.ExitCode = &exitCode
 			s.PID = 0
+			sm.saveState()
 		}
 		sm.mu.Unlock()
 	}
