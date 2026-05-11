@@ -59,14 +59,14 @@ func runAttach(cmd *cobra.Command, name string) error {
 			return nil
 		}
 		if result.Action == "restart" {
-			c.SendControl("resume", protocol.ResumeMsg{SessionID: result.SessionID})
-			resumeResp, err := c.ReadControlResponse()
+			c.SendControl("restart", protocol.RestartMsg{SessionID: result.SessionID})
+			restartResp, err := c.ReadControlResponse()
 			if err != nil {
 				return err
 			}
-			if resumeResp.Type == "error" {
+			if restartResp.Type == "error" {
 				var e protocol.ErrorMsg
-				protocol.DecodePayload(resumeResp, &e)
+				protocol.DecodePayload(restartResp, &e)
 				return fmt.Errorf("restart failed: %s", e.Message)
 			}
 		}
@@ -171,11 +171,11 @@ func runAttachByID(c *client.Client, sessionID string) error {
 				continue
 			}
 			if overlayResult.Action == "restart" {
-				nc.SendControl("resume", protocol.ResumeMsg{SessionID: overlayResult.SessionID})
-				resumeResp, _ := nc.ReadControlResponse()
-				if resumeResp.Type == "error" {
+				nc.SendControl("restart", protocol.RestartMsg{SessionID: overlayResult.SessionID})
+				restartResp, _ := nc.ReadControlResponse()
+				if restartResp.Type == "error" {
 					var e protocol.ErrorMsg
-					protocol.DecodePayload(resumeResp, &e)
+					protocol.DecodePayload(restartResp, &e)
 					out.Print("Restart failed: %s\n", e.Message)
 					restoreScreen(sessionID)
 					nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})

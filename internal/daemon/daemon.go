@@ -1330,6 +1330,29 @@ func (sm *SessionManager) Stop(id string) error {
 	return nil
 }
 
+// Restart stops a running session (or no-ops if already stopped) and resumes it,
+// picking up the current agent and sandbox configuration.
+func (sm *SessionManager) Restart(id string, rows, cols uint16) (SessionState, error) {
+	ptySess, hasPTY := sm.GetPTY(id)
+	if hasPTY && !ptySess.Exited() {
+		if err := ptySess.Kill(); err != nil {
+			return SessionState{}, fmt.Errorf("stop session: %w", err)
+		}
+		<-ptySess.Done()
+
+		sm.mu.Lock()
+		if s, ok := sm.state.Sessions[id]; ok && s.Status == StatusRunning {
+			exitCode := ptySess.ExitCode()
+			s.Status = StatusStopped
+			s.ExitCode = &exitCode
+			s.PID = 0
+		}
+		sm.mu.Unlock()
+	}
+
+	return sm.Resume(id, rows, cols)
+}
+
 // Rename changes the display name of a session.
 func (sm *SessionManager) Rename(id, newName string) error {
 	sm.mu.Lock()
