@@ -7,14 +7,29 @@ type approvalResponse struct {
 	Reason   string `json:"reason,omitempty"`
 }
 
+type cursorApprovalResponse struct {
+	Permission string `json:"permission"`
+	Reason     string `json:"reason,omitempty"`
+}
+
 // Approval returns JSON for a hook approval decision formatted for the given agent.
 // The decision parameter uses graith's internal values ("allow", "block", "deny").
 // Each agent maps these to its own hook schema vocabulary.
 func Approval(agent, decision, reason string) string {
-	mapped := mapDecision(agent, decision)
-	resp := approvalResponse{Decision: mapped, Reason: reason}
-	out, _ := json.Marshal(resp)
-	return string(out)
+	switch agent {
+	case "cursor":
+		resp := cursorApprovalResponse{
+			Permission: cursorDecision(decision),
+			Reason:     reason,
+		}
+		out, _ := json.Marshal(resp)
+		return string(out)
+	default:
+		mapped := mapDecision(agent, decision)
+		resp := approvalResponse{Decision: mapped, Reason: reason}
+		out, _ := json.Marshal(resp)
+		return string(out)
+	}
 }
 
 // AllowAll returns a fail-open approval response for the given agent.
@@ -48,6 +63,14 @@ func claudeDecision(d string) string {
 
 // Codex uses "allow" and "deny" natively; the daemon uses "block" internally.
 func codexDecision(d string) string {
+	if d == "block" {
+		return "deny"
+	}
+	return d
+}
+
+// Cursor uses "permission" field with "allow" and "deny" values.
+func cursorDecision(d string) string {
 	if d == "block" {
 		return "deny"
 	}

@@ -149,7 +149,7 @@ func TestCleanupHooks(t *testing.T) {
 		t.Fatalf("hook dir does not exist before cleanup: %v", err)
 	}
 
-	sm.cleanupHooks(sessionID)
+	sm.cleanupHooks(sessionID, "claude", "")
 
 	if _, err := os.Stat(hookDir); !os.IsNotExist(err) {
 		t.Errorf("hook dir still exists after cleanup: err = %v", err)
@@ -158,7 +158,29 @@ func TestCleanupHooks(t *testing.T) {
 
 func TestCleanupHooksNonexistent(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
-	sm.cleanupHooks("nonexistent-session")
+	sm.cleanupHooks("nonexistent-session", "claude", "")
+}
+
+func TestCleanupCursorHooks(t *testing.T) {
+	sm := newTestSessionManagerWithDataDir(t)
+	sessionID := "test-cursor-cleanup"
+	worktree := t.TempDir()
+
+	_, _, err := sm.injectCursorHooks(sessionID, worktree)
+	if err != nil {
+		t.Fatalf("injectCursorHooks() error = %v", err)
+	}
+
+	hooksPath := filepath.Join(worktree, ".cursor", "hooks.json")
+	if _, err := os.Stat(hooksPath); err != nil {
+		t.Fatalf("cursor hooks.json not created: %v", err)
+	}
+
+	sm.cleanupHooks(sessionID, "cursor", worktree)
+
+	if _, err := os.Stat(hooksPath); !os.IsNotExist(err) {
+		t.Errorf("cursor hooks.json still exists after cleanup: err = %v", err)
+	}
 }
 
 func TestResolveGrBin(t *testing.T) {
@@ -286,7 +308,7 @@ func TestCodexHookScriptContent(t *testing.T) {
 func TestInjectHooksSupported(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 
-	args, env, err := sm.injectHooks("claude", "test-supported-claude")
+	args, env, err := sm.injectHooks("claude", "test-supported-claude", "")
 	if err != nil {
 		t.Fatalf("injectHooks(claude) error = %v", err)
 	}
@@ -297,7 +319,7 @@ func TestInjectHooksSupported(t *testing.T) {
 		t.Errorf("injectHooks(claude) returned unexpected env: %v", env)
 	}
 
-	args, env, err = sm.injectHooks("codex", "test-supported-codex")
+	args, env, err = sm.injectHooks("codex", "test-supported-codex", "")
 	if err != nil {
 		t.Fatalf("injectHooks(codex) error = %v", err)
 	}
@@ -307,13 +329,29 @@ func TestInjectHooksSupported(t *testing.T) {
 	if _, ok := env["CODEX_HOOKS_DIR"]; !ok {
 		t.Error("injectHooks(codex) missing CODEX_HOOKS_DIR")
 	}
+
+	worktree := t.TempDir()
+	args, env, err = sm.injectHooks("cursor", "test-supported-cursor", worktree)
+	if err != nil {
+		t.Fatalf("injectHooks(cursor) error = %v", err)
+	}
+	if len(args) != 0 {
+		t.Errorf("injectHooks(cursor) returned unexpected args: %v", args)
+	}
+	if env != nil {
+		t.Errorf("injectHooks(cursor) returned unexpected env: %v", env)
+	}
+	hooksPath := filepath.Join(worktree, ".cursor", "hooks.json")
+	if _, err := os.Stat(hooksPath); err != nil {
+		t.Errorf("cursor hooks.json not created: %v", err)
+	}
 }
 
 func TestInjectHooksUnsupportedIsNoop(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 
 	for _, agent := range []string{"agy", "opencode", "custom-agent"} {
-		args, env, err := sm.injectHooks(agent, "test-unsupported")
+		args, env, err := sm.injectHooks(agent, "test-unsupported", "")
 		if err != nil {
 			t.Errorf("injectHooks(%q) unexpected error: %v", agent, err)
 		}
@@ -626,6 +664,111 @@ func TestResolveMCPServers(t *testing.T) {
 			t.Errorf("got %d graith entries, want exactly 1", count)
 		}
 	})
+}
+
+func TestInjectCursorHooks(t *testing.T) {
+	sm := newTestSessionManagerWithDataDir(t)
+	sessionID := "test-session-cursor-01"
+	worktree := t.TempDir()
+
+	extraArgs, extraEnv, err := sm.injectCursorHooks(sessionID, worktree)
+	if err != nil {
+		t.Fatalf("injectCursorHooks() error = %v", err)
+	}
+	if len(extraArgs) != 0 {
+		t.Errorf("extraArgs length = %d, want 0", len(extraArgs))
+	}
+	if extraEnv != nil {
+		t.Errorf("extraEnv = %v, want nil", extraEnv)
+	}
+
+	hooksPath := filepath.Join(worktree, ".cursor", "hooks.json")
+	data, err := os.ReadFile(hooksPath)
+	if err != nil {
+		t.Fatalf("read cursor hooks: %v", err)
+	}
+
+	var parsed struct {
+		Version int `json:"version"`
+		Hooks   map[string][]struct {
+			Command string `json:"command"`
+		} `json:"hooks"`
+	}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("unmarshal cursor hooks: %v", err)
+	}
+
+	if parsed.Version != 1 {
+		t.Errorf("version = %d, want 1", parsed.Version)
+	}
+
+	expectedEvents := []string{"sessionStart", "preToolUse", "postToolUse", "stop"}
+	for _, event := range expectedEvents {
+		hooks, ok := parsed.Hooks[event]
+		if !ok {
+			t.Errorf("missing hook event %q", event)
+			continue
+		}
+		if len(hooks) == 0 {
+			t.Errorf("event %q has no hooks", event)
+		}
+	}
+
+	if len(parsed.Hooks) != len(expectedEvents) {
+		t.Errorf("hooks has %d events, want %d", len(parsed.Hooks), len(expectedEvents))
+	}
+}
+
+func TestInjectCursorHooksContent(t *testing.T) {
+	sm := newTestSessionManagerWithDataDir(t)
+	sessionID := "test-session-cursor-02"
+	worktree := t.TempDir()
+
+	_, _, err := sm.injectCursorHooks(sessionID, worktree)
+	if err != nil {
+		t.Fatalf("injectCursorHooks() error = %v", err)
+	}
+
+	hooksPath := filepath.Join(worktree, ".cursor", "hooks.json")
+	data, err := os.ReadFile(hooksPath)
+	if err != nil {
+		t.Fatalf("read cursor hooks: %v", err)
+	}
+
+	var parsed struct {
+		Hooks map[string][]struct {
+			Command string `json:"command"`
+		} `json:"hooks"`
+	}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("unmarshal cursor hooks: %v", err)
+	}
+
+	content := string(data)
+	if !strings.Contains(content, "report-status") {
+		t.Error("cursor hooks missing report-status command")
+	}
+	if !strings.Contains(content, "approve-request") {
+		t.Error("cursor hooks missing approve-request command")
+	}
+	if !strings.Contains(content, "check-inbox") {
+		t.Error("cursor hooks missing check-inbox command")
+	}
+}
+
+func TestInjectCursorHooksEmptyWorktree(t *testing.T) {
+	sm := newTestSessionManagerWithDataDir(t)
+
+	args, env, err := sm.injectCursorHooks("test-no-worktree", "")
+	if err != nil {
+		t.Fatalf("injectCursorHooks() error = %v", err)
+	}
+	if args != nil {
+		t.Errorf("expected nil args, got %v", args)
+	}
+	if env != nil {
+		t.Errorf("expected nil env, got %v", env)
+	}
 }
 
 func TestClaudeSettingsEscapeSingleQuotes(t *testing.T) {
