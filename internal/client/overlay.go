@@ -632,7 +632,7 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 
 			case "r":
-				if item, ok := m.list.SelectedItem().(sessionItem); ok && item.info.Status == "stopped" {
+				if _, ok := m.list.SelectedItem().(sessionItem); ok {
 					m.state = stateConfirmRestart
 				}
 				return m, nil
