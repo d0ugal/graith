@@ -239,23 +239,87 @@ func (sm *SessionManager) resolveMCPServers(agentName string) []config.MCPServer
 	return config.MergeMCPServers(global, overrides)
 }
 
+// injectCursorHooks generates a .cursor/hooks.json in the worktree for a
+// Cursor session. Returns no extra args or env — cursor reads hooks from the
+// project directory automatically.
+func (sm *SessionManager) injectCursorHooks(sessionID, worktreePath string) (extraArgs []string, extraEnv map[string]string, err error) {
+	if worktreePath == "" {
+		return nil, nil, nil
+	}
+
+	cursorDir := filepath.Join(worktreePath, ".cursor")
+	if err := os.MkdirAll(cursorDir, 0o700); err != nil {
+		return nil, nil, fmt.Errorf("create .cursor dir: %w", err)
+	}
+	hooksPath := filepath.Join(cursorDir, "hooks.json")
+
+	quoted := shellQuote(resolveGrBin())
+
+	type hookEntry struct {
+		Command string `json:"command"`
+	}
+	type hooksFile struct {
+		Version int                    `json:"version"`
+		Hooks   map[string][]hookEntry `json:"hooks"`
+	}
+
+	hooks := hooksFile{
+		Version: 1,
+		Hooks: map[string][]hookEntry{
+			"sessionStart": {
+				{Command: fmt.Sprintf("%s report-status --event SessionStart", quoted)},
+				{Command: fmt.Sprintf("%s check-inbox", quoted)},
+			},
+			"preToolUse": {
+				{Command: fmt.Sprintf("%s approve-request", quoted)},
+			},
+			"postToolUse": {
+				{Command: fmt.Sprintf("%s report-status --event PostToolUse", quoted)},
+			},
+			"stop": {
+				{Command: fmt.Sprintf("%s report-status --event Stop", quoted)},
+			},
+		},
+	}
+
+	data, err := json.MarshalIndent(hooks, "", "  ")
+	if err != nil {
+		return nil, nil, fmt.Errorf("marshal cursor hooks: %w", err)
+	}
+	if err := os.WriteFile(hooksPath, data, 0o600); err != nil {
+		return nil, nil, fmt.Errorf("write cursor hooks: %w", err)
+	}
+
+	sm.log.Info("injected cursor hooks", "session_id", sessionID, "hooks_path", hooksPath)
+	return nil, nil, nil
+}
+
 // injectHooks dispatches hook injection to the agent-specific implementation.
 // Returns nil for agents that don't support hooks.
-func (sm *SessionManager) injectHooks(agentName, sessionID string) (extraArgs []string, extraEnv map[string]string, err error) {
+func (sm *SessionManager) injectHooks(agentName, sessionID, worktreePath string) (extraArgs []string, extraEnv map[string]string, err error) {
 	switch agentName {
 	case "claude":
 		return sm.injectClaudeHooks(sessionID, sm.resolveMCPServers(agentName))
 	case "codex":
 		return sm.injectCodexHooks(sessionID)
+	case "cursor":
+		return sm.injectCursorHooks(sessionID, worktreePath)
 	default:
+		sm.log.Info("agent does not support hooks, skipping", "agent", agentName, "session_id", sessionID)
 		return nil, nil, nil
 	}
 }
 
 // cleanupHooks removes generated hook files for a session.
-func (sm *SessionManager) cleanupHooks(sessionID string) {
+// For cursor sessions, also removes .cursor/hooks.json from the worktree
+// since it's not in the data dir.
+func (sm *SessionManager) cleanupHooks(sessionID, agentName, worktreePath string) {
 	dir := sm.hookDir(sessionID)
 	if err := os.RemoveAll(dir); err != nil {
 		sm.log.Warn("failed to cleanup hooks", "session_id", sessionID, "err", err)
+	}
+	if agentName == "cursor" && worktreePath != "" {
+		hooksPath := filepath.Join(worktreePath, ".cursor", "hooks.json")
+		_ = os.Remove(hooksPath)
 	}
 }

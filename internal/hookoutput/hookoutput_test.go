@@ -17,6 +17,9 @@ func TestApproval(t *testing.T) {
 		{"codex", "allow", "", `{"decision":"allow"}`},
 		{"codex", "deny", "", `{"decision":"deny"}`},
 		{"codex", "block", "", `{"decision":"deny"}`},
+		{"cursor", "allow", "", `{"permission":"allow"}`},
+		{"cursor", "deny", "", `{"permission":"deny"}`},
+		{"cursor", "block", "", `{"permission":"deny"}`},
 		{"agy", "allow", "", `{"decision":"allow"}`},
 	}
 	for _, tt := range tests {

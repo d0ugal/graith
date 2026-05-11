@@ -79,6 +79,15 @@ command = "opencode"
 args = []
 resume_args = ["--session", "{agent_session_id}"]
 
+[agents.cursor]
+command = "agent"
+args = []
+resume_args = ["resume"]
+
+[agents.cursor.sandbox]
+read_dirs = ["~/.cursor"]
+write_dirs = ["~/.cursor"]
+
 [agents.agy]
 command = "agy"
 args = []
