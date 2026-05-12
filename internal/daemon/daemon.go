@@ -267,6 +267,15 @@ func repoHash(repoPath string) string {
 // Create starts a new agent session, either in a git worktree, in-place
 // in an existing repo, or as a standalone scratch session (when noRepo is true).
 func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, model, parentID string, noRepo bool, shareWorktree string, agentHooks bool, inPlace, allowConcurrent bool, rows, cols uint16) (SessionState, error) {
+	agent, ok := sm.cfg.Agents[agentName]
+	if !ok {
+		return SessionState{}, fmt.Errorf("unknown agent %q", agentName)
+	}
+
+	if err := validateModel(agent, model); err != nil {
+		return SessionState{}, err
+	}
+
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -278,15 +287,6 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 	}
 	if inPlace && baseBranch != "" {
 		return SessionState{}, fmt.Errorf("--in-place and --base are mutually exclusive (in-place sessions don't create branches)")
-	}
-
-	agent, ok := sm.cfg.Agents[agentName]
-	if !ok {
-		return SessionState{}, fmt.Errorf("unknown agent %q", agentName)
-	}
-
-	if err := validateModel(agent, model); err != nil {
-		return SessionState{}, err
 	}
 
 	id := generateID()
