@@ -7,9 +7,11 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"reflect"
 	"sync"
 	"time"
 
+	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/d0ugal/graith/internal/version"
 )
@@ -83,7 +85,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				sessions := sm.List()
 				infos := make([]protocol.SessionInfo, 0, len(sessions))
 				for _, s := range sessions {
-					infos = append(infos, toSessionInfo(s))
+					infos = append(infos, toSessionInfo(s, sm.cfg))
 				}
 				sendControl("session_list", protocol.SessionListMsg{Sessions: infos})
 
@@ -101,7 +103,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 				} else {
-					sendControl("created", toSessionInfo(sess))
+					sendControl("created", toSessionInfo(sess, sm.cfg))
 				}
 
 			case "fork":
@@ -114,7 +116,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 				} else {
-					sendControl("created", toSessionInfo(sess))
+					sendControl("created", toSessionInfo(sess, sm.cfg))
 				}
 
 			case "attach":
@@ -164,7 +166,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				_ = ptySess.Resize(clientRows, clientCols)
 
 				sess, _ := sm.Get(a.SessionID)
-				sendControl("attached", toSessionInfo(sess))
+				sendControl("attached", toSessionInfo(sess, sm.cfg))
 
 				ptySess.Attach(attachedDataWriter)
 
@@ -248,7 +250,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 				} else {
-					sendControl("resumed", toSessionInfo(sess))
+					sendControl("resumed", toSessionInfo(sess, sm.cfg))
 				}
 
 			case "restart":
@@ -261,7 +263,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 				} else {
-					sendControl("restarted", toSessionInfo(sess))
+					sendControl("restarted", toSessionInfo(sess, sm.cfg))
 				}
 
 			case "logs":
@@ -596,7 +598,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				}
 				fleet := sm.fleetSummary()
 				sendControl("status_response", protocol.StatusResponseMsg{
-					Session:     toSessionInfo(sess),
+					Session:     toSessionInfo(sess, sm.cfg),
 					UnreadCount: unread,
 					Fleet:       fleet,
 				})
@@ -756,7 +758,7 @@ func (w *frameDataWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func toSessionInfo(s SessionState) protocol.SessionInfo {
+func toSessionInfo(s SessionState, cfg *config.Config) protocol.SessionInfo {
 	info := protocol.SessionInfo{
 		ID:             s.ID,
 		ParentID:       s.ParentID,
@@ -781,6 +783,7 @@ func toSessionInfo(s SessionState) protocol.SessionInfo {
 		ToolName:       s.HookToolName,
 		CostUSD:        s.HookCostUSD,
 		ContextPercent: s.HookContextPercent,
+		ConfigStale:    isConfigStale(s, cfg),
 	}
 	if s.LastAttachedAt != nil {
 		info.LastAttachedAt = s.LastAttachedAt.Format(time.RFC3339)
@@ -796,4 +799,19 @@ func toSessionInfo(s SessionState) protocol.SessionInfo {
 		})
 	}
 	return info
+}
+
+func isConfigStale(s SessionState, cfg *config.Config) bool {
+	if s.CreationCfg == nil {
+		return false
+	}
+	agent, ok := cfg.Agents[s.Agent]
+	if !ok {
+		return true
+	}
+	if !reflect.DeepEqual(s.CreationCfg.Agent, agent) {
+		return true
+	}
+	currentSandbox := cfg.Sandbox.Merge(agent.Sandbox)
+	return !reflect.DeepEqual(s.CreationCfg.SandboxConfig, currentSandbox)
 }

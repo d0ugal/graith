@@ -34,6 +34,7 @@ var (
 	colorPurple  = lipgloss.Color("#7B61FF")
 	colorDim     = lipgloss.Color("#626262")
 	colorFaint   = lipgloss.Color("#444444")
+	colorYellow  = lipgloss.Color("#FFD75F")
 	colorPreview = lipgloss.Color("#555555")
 	colorPanel   = lipgloss.Color("#1a1a1a")
 )
@@ -270,6 +271,9 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 		indicatorColor = colorRed
 	}
 	styledIndicator := lipgloss.NewStyle().Foreground(indicatorColor).Render(indicator)
+	if si.info.ConfigStale {
+		styledIndicator += lipgloss.NewStyle().Foreground(colorYellow).Render("↻")
+	}
 
 	currentMark := "  "
 	if isCurrent {
@@ -788,6 +792,10 @@ func (m overlayModel) View() tea.View {
 		}
 		if len(line1) > 0 {
 			panelContent.WriteString(dim.Render(strings.Join(line1, "  ")))
+		}
+		if s.ConfigStale {
+			panelContent.WriteString("\n")
+			panelContent.WriteString(lipgloss.NewStyle().Foreground(colorYellow).Render("config stale — restart to apply changes"))
 		}
 
 		var line2 []string
