@@ -48,4 +48,15 @@ func TestValidateModel(t *testing.T) {
 			t.Fatalf("expected no error without validate_model, got: %v", err)
 		}
 	})
+
+	t.Run("command not found", func(t *testing.T) {
+		bad := config.Agent{ValidateModel: "nonexistent-binary-xyz --list"}
+		err := validateModel(bad, "some-model")
+		if err == nil {
+			t.Fatal("expected error for missing binary")
+		}
+		if !strings.Contains(err.Error(), "validate model") {
+			t.Fatalf("expected 'validate model' in error, got: %v", err)
+		}
+	})
 }
