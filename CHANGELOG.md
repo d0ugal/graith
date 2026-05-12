@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.27.0](https://github.com/d0ugal/graith/compare/v0.26.0...v0.27.0) (2026-06-13)
+
+
+### Features
+
+* show stale config indicator in session selector overlay ([37e1ffb](https://github.com/d0ugal/graith/commit/37e1ffb36aca200dc7e629f87893b9f67d0792ed))
+* validate --model flag against agent's supported models ([0702502](https://github.com/d0ugal/graith/commit/07025026619b1815bbf7708f689c676de12cfb07))
+
+
+### Bug Fixes
+
+* add json tags to Agent struct, fix stale indicator alignment ([9f2355b](https://github.com/d0ugal/graith/commit/9f2355bb86ebaed0cdad097521c3fb87d25a4a30))
+* align struct tags to satisfy tagalign linter ([f150eef](https://github.com/d0ugal/graith/commit/f150eefe1024be994cf4653b0b0b7633fe2d7d09))
+* move model validation before mutex, add exec timeout ([c393eec](https://github.com/d0ugal/graith/commit/c393eec768a387a104e638f47bc7038b877ab513))
+
 ## [0.26.0](https://github.com/d0ugal/graith/compare/v0.25.0...v0.26.0) (2026-06-13)
 
 
