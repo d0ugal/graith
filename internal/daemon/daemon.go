@@ -285,6 +285,10 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 		return SessionState{}, fmt.Errorf("unknown agent %q", agentName)
 	}
 
+	if err := validateModel(agent, model); err != nil {
+		return SessionState{}, err
+	}
+
 	id := generateID()
 
 	var repoRoot, repoName, worktreePath, branchName string
