@@ -1435,6 +1435,7 @@ func (sm *SessionManager) Diagnostics() protocol.DiagnosticsMsg {
 
 	var sessions []protocol.SessionDiagnostic
 	var sbDiag protocol.ScrollbackDiagnostic
+	var fleet protocol.FleetSummary
 
 	for id, s := range sm.state.Sessions {
 		sd := protocol.SessionDiagnostic{
@@ -1443,6 +1444,24 @@ func (sm *SessionManager) Diagnostics() protocol.DiagnosticsMsg {
 			Status:      string(s.Status),
 			AgentStatus: s.AgentStatus,
 			PID:         s.PID,
+		}
+
+		// Tally fleet summary from the same snapshot as the session list.
+		fleet.Total++
+		switch s.Status {
+		case StatusRunning:
+			switch s.AgentStatus {
+			case "approval":
+				fleet.Approval++
+			case "ready":
+				fleet.Ready++
+			default:
+				fleet.Active++
+			}
+		case StatusStopped:
+			fleet.Stopped++
+		case StatusErrored:
+			fleet.Errored++
 		}
 
 		if s.Status == StatusRunning && s.PID > 0 {
@@ -1492,7 +1511,7 @@ func (sm *SessionManager) Diagnostics() protocol.DiagnosticsMsg {
 	return protocol.DiagnosticsMsg{
 		DaemonPID:    os.Getpid(),
 		DaemonUptime: now.Sub(sm.startedAt).Truncate(time.Second).String(),
-		Fleet:        sm.fleetSummary(),
+		Fleet:        fleet,
 		Sessions:     sessions,
 		Scrollback:   sbDiag,
 		Messages:     msgDiag,
