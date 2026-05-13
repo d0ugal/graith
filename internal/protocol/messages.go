@@ -299,6 +299,44 @@ type StatusRequestMsg struct {
 	SessionID string `json:"session_id"`
 }
 
+// Diagnostics types (daemon -> client, in response to "diagnostics" message)
+
+type DiagnosticsMsg struct {
+	DaemonPID    int                  `json:"daemon_pid"`
+	DaemonUptime string               `json:"daemon_uptime"`
+	Fleet        FleetSummary         `json:"fleet"`
+	Sessions     []SessionDiagnostic  `json:"sessions"`
+	Scrollback   ScrollbackDiagnostic `json:"scrollback"`
+	Messages     MessagesDiagnostic   `json:"messages"`
+}
+
+type SessionDiagnostic struct {
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	Status          string `json:"status"`
+	AgentStatus     string `json:"agent_status,omitempty"`
+	PID             int    `json:"pid,omitempty"`
+	PIDAlive        bool   `json:"pid_alive"`
+	WorktreePath    string `json:"worktree_path,omitempty"`
+	WorktreeExists  bool   `json:"worktree_exists"`
+	ConfigStale     bool   `json:"config_stale"`
+	HookStale       bool   `json:"hook_stale"`
+	ScrollbackBytes int64  `json:"scrollback_bytes"`
+	ScrollbackMax   int64  `json:"scrollback_max"`
+	Saturated       bool   `json:"saturated"`
+}
+
+type ScrollbackDiagnostic struct {
+	TotalFiles     int   `json:"total_files"`
+	TotalBytes     int64 `json:"total_bytes"`
+	SaturatedCount int   `json:"saturated_count"`
+}
+
+type MessagesDiagnostic struct {
+	TotalStreams  int   `json:"total_streams"`
+	TotalMessages int64 `json:"total_messages"`
+}
+
 type FleetSummary struct {
 	Total    int `json:"total"`
 	Active   int `json:"active"`
