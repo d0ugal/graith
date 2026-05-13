@@ -93,8 +93,10 @@ gr delete auth-rewrite
 | `gr list` (`ls`) | List all sessions |
 | `gr attach [name]` (`a`) | Attach to a session |
 | `gr stop <name>` | Stop a running session without deleting it (keeps the worktree) |
+| `gr restart <name>` | Restart a stopped session |
 | `gr delete <name>` (`rm`) | Delete a session and its worktree |
 | `gr rename <old> <new>` | Rename a session |
+| `gr fork <source> <name>` | Fork a session (new worktree + agent conversation history) |
 | `gr info` | Show info for the current session (when inside a worktree) |
 | `gr logs <name>` (`l`) | Show a session's output without attaching |
 | `gr type <name> <text>` (`t`) | Type text into a session's stdin |
@@ -103,6 +105,7 @@ gr delete auth-rewrite
 | `gr approvals` | List sessions waiting for approval |
 | `gr doctor` (`doc`) | Health checks and diagnostics |
 | `gr daemon ...` (`d`) | Manage the daemon — see below |
+| `gr config ...` | Manage configuration (`show`, `diff`, `reset`) |
 | `gr mcp` | Run graith as an MCP tool server (stdio) |
 | `gr completion <shell>` | Generate a shell completion script |
 | `gr version` | Print version information |
@@ -121,9 +124,13 @@ gr new <name> [flags]
 | `--base <branch>` | Base branch to fork the worktree from (defaults to the repo default branch) |
 | `-C, --repo <path>` | Path to the git repo (defaults to the current directory) |
 | `--no-repo` | Create a session with no git repo or worktree |
+| `--in-place` | Run agent directly in the repo without creating a worktree |
+| `--allow-concurrent` | Allow multiple in-place sessions on the same repo |
+| `--share-worktree <session>` | Share another session's worktree (read-only) |
 | `--background` | Create the session without attaching to it |
 | `-p, --prompt <text>` | Send an initial prompt to the agent on startup |
 | `--prompt-file <path>` | Read the initial prompt from a file |
+| `-m, --model <name>` | Model for the agent to use (expands `{model}` in agent args) |
 
 ### `gr daemon`
 
@@ -377,9 +384,13 @@ These are substituted in `branch_prefix` and agent `args`/`resume_args`:
 
 | Variable | Expands to |
 |----------|-----------|
-| `{agent_session_id}` / `{id}` | the unique session ID |
+| `{agent_session_id}` | the agent session ID (used for `--session-id` / `--resume`) |
+| `{session_id}` | the unique session ID |
+| `{session_name}` | the session name |
 | `{username}` | `github_username` (or the system username) |
-| `{name}` | the session name |
+| `{worktree_path}` | absolute path to the session worktree |
+| `{model}` | the model passed via `--model` (empty if not set) |
+| `{fork_source_agent_session_id}` | agent session ID of the forked source (empty if not a fork) |
 
 ## Keybindings
 
@@ -426,8 +437,8 @@ Press the prefix (`ctrl+b`), then:
 When you create a session:
 
 1. Fetches latest from origin (when `fetch_on_create` is true)
-2. Creates a branch `{branch_prefix}/{name}-{id}` from the base branch
-3. Creates a worktree at `~/.local/share/graith/worktrees/{repo-name}/{repo-hash}/{id}/`
+2. Creates a branch `<branch_prefix>/<session-name>-<session-id>` from the base branch
+3. Creates a worktree at `~/.local/share/graith/worktrees/<repo-name>/<repo-hash>/<session-id>/`
 4. Starts the agent in that worktree
 
 When you stop a session, the agent process is killed but the worktree and branch are kept (resume restarts the agent in place). When you delete a session, the process is killed, the worktree is removed, and the branch is deleted.
