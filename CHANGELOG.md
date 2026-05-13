@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.27.3](https://github.com/d0ugal/graith/compare/v0.27.2...v0.27.3) (2026-05-13)
+
+
+### Bug Fixes
+
+* set DataDir and LogDir in test helper to prevent log file leaks ([03dba96](https://github.com/d0ugal/graith/commit/03dba96a32371fb645a9a98cc46cde21c481c278))
+
 ## [0.27.2](https://github.com/d0ugal/graith/compare/v0.27.1...v0.27.2) (2026-05-13)
 
 
