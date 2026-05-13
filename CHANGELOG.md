@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.28.0](https://github.com/d0ugal/graith/compare/v0.27.3...v0.28.0) (2026-05-13)
+
+
+### Features
+
+* enrich gr doctor with daemon diagnostics and structured output ([db1798e](https://github.com/d0ugal/graith/commit/db1798ebdea55a41f094baa3f3fadabb2b55cb12))
+
+
+### Bug Fixes
+
+* address review tribunal findings in gr doctor ([bc30441](https://github.com/d0ugal/graith/commit/bc30441c7b7653c29f187cb976002dba18b42ded))
+* address tribunal review findings in docs ([024e7a5](https://github.com/d0ugal/graith/commit/024e7a5b37b5a1b2bd3e96b790e914f1834ad6ba))
+* correct stale template vars, flags, and paths in docs ([e500768](https://github.com/d0ugal/graith/commit/e50076800a8940764055e4f54ca52d345ea100dc))
+
 ## [0.27.3](https://github.com/d0ugal/graith/compare/v0.27.2...v0.27.3) (2026-05-13)
 
 
