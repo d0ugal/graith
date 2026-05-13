@@ -223,12 +223,13 @@ func (dc *doctorContext) checkEnvironment() {
 		if safehouseCmd == "" {
 			safehouseCmd = "safehouse"
 		}
-		if runtime.GOOS != "darwin" {
+		switch {
+		case runtime.GOOS != "darwin":
 			dc.fail("environment", "Sandbox enabled but not running macOS")
-		} else if !sandbox.AvailableCommand(safehouseCmd) {
+		case !sandbox.AvailableCommand(safehouseCmd):
 			dc.fail("environment", "Sandbox enabled but %s not found in PATH", safehouseCmd)
 			dc.hint("Install: brew install eugene1g/tools/agent-safehouse")
-		} else {
+		default:
 			dc.pass("environment", "Sandbox enabled (safehouse available)")
 		}
 	} else {
@@ -244,7 +245,7 @@ func (dc *doctorContext) checkDaemon(daemonVersion string) *protocol.Diagnostics
 		return nil
 	}
 
-	// Check PID file validity
+	// Check PID file validity (but don't abort — the daemon may still be reachable)
 	if pidData, err := os.ReadFile(paths.PIDFile); err == nil {
 		var pid int
 		if _, err := fmt.Sscanf(strings.TrimSpace(string(pidData)), "%d", &pid); err == nil {
@@ -256,26 +257,57 @@ func (dc *doctorContext) checkDaemon(daemonVersion string) *protocol.Diagnostics
 				} else {
 					dc.hint("Use --autofix to remove stale PID file")
 				}
-				return nil
 			}
 		}
 	}
 
-	c, err := client.Connect(cfg, paths, cfgFile)
+	// Use a raw dial with deadline instead of client.Connect to avoid
+	// triggering auto-upgrade/restart as a side effect of diagnostics.
+	conn, err := net.DialTimeout("unix", paths.SocketPath, 2*time.Second)
 	if err != nil {
 		dc.fail("daemon", "Cannot connect to daemon: %v", err)
 		return nil
 	}
-	defer c.Close()
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(5 * time.Second))
 
-	if err := c.SendControl("diagnostics", struct{}{}); err != nil {
+	reader := protocol.NewFrameReader(conn)
+	writer := protocol.NewFrameWriter(conn)
+
+	hs := client.BuildHandshake(paths, 0, 0, "")
+	hs.ClientID = "doctor-diag"
+	hsData, _ := protocol.EncodeControl("handshake", hs)
+	if err := writer.WriteFrame(protocol.ChannelControl, hsData); err != nil {
+		dc.fail("daemon", "Failed to send handshake: %v", err)
+		return nil
+	}
+
+	frame, err := reader.ReadFrame()
+	if err != nil || frame.Channel != protocol.ChannelControl {
+		dc.fail("daemon", "Failed to read handshake response")
+		return nil
+	}
+
+	diagData, _ := protocol.EncodeControl("diagnostics", struct{}{})
+	if err := writer.WriteFrame(protocol.ChannelControl, diagData); err != nil {
 		dc.fail("daemon", "Failed to request diagnostics: %v", err)
 		return nil
 	}
 
-	resp, err := c.ReadControlResponse()
+	frame, err = reader.ReadFrame()
 	if err != nil {
-		dc.fail("daemon", "Failed to read diagnostics: %v", err)
+		dc.warn("daemon", "Daemon does not support diagnostics (upgrade daemon)")
+		dc.hint("Run: gr daemon restart")
+		return nil
+	}
+	if frame.Channel != protocol.ChannelControl {
+		dc.fail("daemon", "Unexpected response from daemon")
+		return nil
+	}
+
+	resp, err := protocol.DecodeControl(frame.Payload)
+	if err != nil {
+		dc.fail("daemon", "Failed to decode response: %v", err)
 		return nil
 	}
 
