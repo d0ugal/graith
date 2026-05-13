@@ -100,6 +100,43 @@ func TestScrollbackTailBytes(t *testing.T) {
 	})
 }
 
+func TestScrollbackStats(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "scroll.log")
+	sb, err := NewScrollback(path, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sb.Close()
+
+	written, maxSize, saturated := sb.Stats()
+	if written != 0 || maxSize != 100 || saturated {
+		t.Errorf("initial stats: written=%d, maxSize=%d, saturated=%v", written, maxSize, saturated)
+	}
+
+	sb.Write([]byte("hello"))
+	written, maxSize, saturated = sb.Stats()
+	if written != 5 || maxSize != 100 || saturated {
+		t.Errorf("after write: written=%d, maxSize=%d, saturated=%v", written, maxSize, saturated)
+	}
+}
+
+func TestScrollbackStatsSaturated(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "scroll.log")
+	sb, err := NewScrollback(path, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sb.Close()
+
+	sb.Write([]byte("0123456789"))
+	sb.Write([]byte("overflow"))
+
+	written, maxSize, saturated := sb.Stats()
+	if written != 10 || maxSize != 10 || !saturated {
+		t.Errorf("saturated stats: written=%d, maxSize=%d, saturated=%v", written, maxSize, saturated)
+	}
+}
+
 func TestScrollbackStopsAtMaxSize(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "scroll.log")
 	sb, err := NewScrollback(path, 10)

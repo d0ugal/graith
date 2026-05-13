@@ -612,6 +612,9 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				sm.HandleHookReport(sr)
 				sendControl("status_reported", struct{}{})
 
+			case "diagnostics":
+				sendControl("diagnostics", sm.Diagnostics())
+
 			case "mcp_connect":
 				var mc protocol.MCPConnectMsg
 				if err := protocol.DecodePayload(msg, &mc); err != nil {

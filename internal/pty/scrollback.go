@@ -143,6 +143,12 @@ func (s *Scrollback) TailBytes(maxBytes int64) ([]byte, error) {
 	return data, nil
 }
 
+func (s *Scrollback) Stats() (written, maxSize int64, saturated bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.written, s.maxSize, s.saturated
+}
+
 func (s *Scrollback) Close() error { return s.file.Close() }
 
 func (s *Scrollback) Remove() error {

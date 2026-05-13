@@ -57,6 +57,7 @@ type SessionManager struct {
 	upgradeCh        chan string
 	messages         *MsgStore
 	mcpManager       *MCPManager
+	startedAt        time.Time
 }
 
 // NewSessionManager creates a SessionManager with the given config and paths.
@@ -70,6 +71,7 @@ func NewSessionManager(cfg *config.Config, paths config.Paths, log *slog.Logger)
 		cfg:              cfg,
 		paths:            paths,
 		log:              log,
+		startedAt:        time.Now(),
 	}
 }
 
@@ -1423,6 +1425,78 @@ func (sm *SessionManager) fleetSummary() protocol.FleetSummary {
 		}
 	}
 	return f
+}
+
+// Diagnostics collects runtime health data for gr doctor.
+func (sm *SessionManager) Diagnostics() protocol.DiagnosticsMsg {
+	sm.mu.RLock()
+	cfg := sm.cfg
+	now := time.Now()
+
+	var sessions []protocol.SessionDiagnostic
+	var sbDiag protocol.ScrollbackDiagnostic
+
+	for id, s := range sm.state.Sessions {
+		sd := protocol.SessionDiagnostic{
+			ID:          id,
+			Name:        s.Name,
+			Status:      string(s.Status),
+			AgentStatus: s.AgentStatus,
+			PID:         s.PID,
+		}
+
+		if s.Status == StatusRunning && s.PID > 0 {
+			sd.PIDAlive = isProcessAlive(s.PID)
+		}
+
+		if s.WorktreePath != "" {
+			sd.WorktreePath = s.WorktreePath
+			if _, err := os.Stat(s.WorktreePath); err == nil {
+				sd.WorktreeExists = true
+			}
+		}
+
+		sd.ConfigStale = isConfigStale(*s, cfg)
+
+		if hr, ok := sm.hookReports[id]; ok && s.Status == StatusRunning {
+			sd.HookStale = now.After(hr.AuthoritativeUntil)
+		}
+
+		if ptySess, ok := sm.sessions[id]; ok {
+			written, maxSize, saturated := ptySess.Scrollback.Stats()
+			sd.ScrollbackBytes = written
+			sd.ScrollbackMax = maxSize
+			sd.Saturated = saturated
+
+			sbDiag.TotalFiles++
+			sbDiag.TotalBytes += written
+			if saturated {
+				sbDiag.SaturatedCount++
+			}
+		}
+
+		sessions = append(sessions, sd)
+	}
+	sm.mu.RUnlock()
+
+	var msgDiag protocol.MessagesDiagnostic
+	if sm.messages != nil {
+		if streams, err := sm.messages.ListStreams("", true); err == nil {
+			msgDiag.TotalStreams = len(streams)
+			for _, s := range streams {
+				msgDiag.TotalMessages += s.Total
+			}
+		}
+	}
+
+	return protocol.DiagnosticsMsg{
+		DaemonPID:    os.Getpid(),
+		DaemonUptime: now.Sub(sm.startedAt).Truncate(time.Second).String(),
+		Fleet:        sm.fleetSummary(),
+		Sessions:     sessions,
+		Scrollback:   sbDiag,
+		Messages:     msgDiag,
+	}
 }
 
 // Get returns a copy of a session state by ID.
