@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.29.0](https://github.com/d0ugal/graith/compare/v0.28.1...v0.29.0) (2026-05-15)
+
+
+### Features
+
+* detect orphaned worktrees and fix false-positive PID check in gr doctor ([aea7a44](https://github.com/d0ugal/graith/commit/aea7a442bc1aaa0025fd8dd245bd095fc415f924))
+* show parent-child tree hierarchy in session picker overlay ([d99a24c](https://github.com/d0ugal/graith/commit/d99a24c142fad8aee2113f0f32b57ea71efa8693))
+
+
+### Bug Fixes
+
+* address review tribunal findings in orphaned worktree detection ([0363573](https://github.com/d0ugal/graith/commit/03635730aad49ad30c5877e8a8c0fc9afe67d189))
+* render cycle members as roots in overlay tree ([18961d9](https://github.com/d0ugal/graith/commit/18961d9388e800113f3272e4fd4ce172c7fd82ac))
+* split gr type PTY writes so TUI frameworks treat Enter as submit ([f4c58cb](https://github.com/d0ugal/graith/commit/f4c58cb39b10795c82e47ae383e23b3564547bae))
+
 ## [0.28.1](https://github.com/d0ugal/graith/compare/v0.28.0...v0.28.1) (2026-05-15)
 
 
