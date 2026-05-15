@@ -40,7 +40,8 @@ var (
 )
 
 type sessionItem struct {
-	info protocol.SessionInfo
+	info       protocol.SessionInfo
+	treePrefix string
 }
 
 func (s sessionItem) Title() string       { return s.info.Name }
@@ -57,16 +58,17 @@ func (g groupHeader) Description() string { return "" }
 func (g groupHeader) FilterValue() string { return "" }
 
 type columnWidths struct {
-	name   int
-	status int
-	branch int
-	git    int
-	last   int
+	name       int
+	treeIndent int
+	status     int
+	branch     int
+	git        int
+	last       int
 }
 
 func (cw columnWidths) totalWidth() int {
-	// "  ★ ● " (6) + name + "  " + status + "  " + branch + "  " + git + "  " + last + margin(4)
-	return 6 + cw.name + 2 + cw.status + 2 + cw.branch + 2 + cw.git + 2 + cw.last + 4
+	// "  ★ ● " (6) + treeIndent + name + "  " + status + "  " + branch + "  " + git + "  " + last + margin(4)
+	return 6 + cw.treeIndent + cw.name + 2 + cw.status + 2 + cw.branch + 2 + cw.git + 2 + cw.last + 4
 }
 
 func pad(s string, width int) string {
@@ -282,7 +284,11 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 		currentMark = lipgloss.NewStyle().Foreground(colorGold).Render("★") + " "
 	}
 
-	name := pad(si.info.Name, d.cols.name)
+	treePrefixRendered := ""
+	if si.treePrefix != "" {
+		treePrefixRendered = dim.Render(si.treePrefix)
+	}
+	name := pad(si.info.Name, d.cols.treeIndent+d.cols.name-lipgloss.Width(si.treePrefix))
 
 	status := si.info.Status
 	if si.info.AgentStatus != "" && si.info.Status == "running" {
@@ -329,9 +335,9 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 		selPrefix = "> "
 	}
 
-	line := fmt.Sprintf("%s%s%s %s%s%s%s%s%s%s%s%s",
+	line := fmt.Sprintf("%s%s%s %s%s%s%s%s%s%s%s%s%s",
 		selPrefix, currentMark, styledIndicator,
-		name, sep, statusRendered, sep, branchRendered, sep, gitRendered, sep, lastRendered)
+		treePrefixRendered, name, sep, statusRendered, sep, branchRendered, sep, gitRendered, sep, lastRendered)
 
 	if selected {
 		line = lipgloss.NewStyle().Bold(true).Render(line)
@@ -409,25 +415,74 @@ func buildGroupedItems(sessions []protocol.SessionInfo) []list.Item {
 		groups[repo] = append(groups[repo], s)
 	}
 	sort.Strings(repoOrder)
-	for _, g := range groups {
-		SortSessions(g)
-	}
 
 	var items []list.Item
 	for _, repo := range repoOrder {
 		g := groups[repo]
 		items = append(items, groupHeader{name: repo, count: len(g)})
+
+		idSet := make(map[string]bool, len(g))
 		for _, s := range g {
-			items = append(items, sessionItem{info: s})
+			idSet[s.ID] = true
+		}
+
+		children := make(map[string][]protocol.SessionInfo)
+		var roots []protocol.SessionInfo
+		for _, s := range g {
+			if s.ParentID == "" || s.ParentID == s.ID || !idSet[s.ParentID] {
+				roots = append(roots, s)
+			} else {
+				children[s.ParentID] = append(children[s.ParentID], s)
+			}
+		}
+
+		SortSessions(roots)
+		for k := range children {
+			SortSessions(children[k])
+		}
+
+		visited := make(map[string]bool)
+		var walk func(s protocol.SessionInfo, prefix, childPrefix string)
+		walk = func(s protocol.SessionInfo, prefix, childPrefix string) {
+			if visited[s.ID] {
+				return
+			}
+			visited[s.ID] = true
+			items = append(items, sessionItem{info: s, treePrefix: prefix})
+			kids := children[s.ID]
+			for i, kid := range kids {
+				if i == len(kids)-1 {
+					walk(kid, childPrefix+"└── ", childPrefix+"    ")
+				} else {
+					walk(kid, childPrefix+"├── ", childPrefix+"│   ")
+				}
+			}
+		}
+
+		for _, root := range roots {
+			walk(root, "", "")
 		}
 	}
 	return items
 }
 
+func maxTreeIndentFromItems(items []list.Item) int {
+	maxIndent := 0
+	for _, item := range items {
+		if si, ok := item.(sessionItem); ok {
+			if w := lipgloss.Width(si.treePrefix); w > maxIndent {
+				maxIndent = w
+			}
+		}
+	}
+	return maxIndent
+}
+
 func newOverlayModel(sessions []protocol.SessionInfo, currentSessionID string, fetchPreview func(sessionID string) string, deleteSession func(sessionID string) error) overlayModel {
-	cols := computeColumnWidths(sessions, currentSessionID)
-	contentWidth := cols.totalWidth()
 	items := buildGroupedItems(sessions)
+	cols := computeColumnWidths(sessions, currentSessionID)
+	cols.treeIndent = maxTreeIndentFromItems(items)
+	contentWidth := cols.totalWidth()
 
 	delegate := compactDelegate{cols: cols, currentSessionID: currentSessionID}
 	l := list.New(items, delegate, contentWidth, len(items)+4)
@@ -517,9 +572,10 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		curIdx := m.list.Index()
-		m.cols = computeColumnWidths(newSessions, m.currentSessionID)
-		m.contentWidth = m.cols.totalWidth()
 		items := buildGroupedItems(newSessions)
+		m.cols = computeColumnWidths(newSessions, m.currentSessionID)
+		m.cols.treeIndent = maxTreeIndentFromItems(items)
+		m.contentWidth = m.cols.totalWidth()
 		m.list.SetItems(items)
 		m.list.SetDelegate(compactDelegate{cols: m.cols, currentSessionID: m.currentSessionID})
 		if curIdx >= len(items) {
@@ -751,9 +807,10 @@ func (m overlayModel) View() tea.View {
 	}
 
 	headerPrefix := "      "
+	nameColWidth := m.cols.treeIndent + m.cols.name
 	headerLine := fmt.Sprintf("%s%s  %s  %s  %s  %s",
 		headerPrefix,
-		pad("Session", m.cols.name),
+		pad("Session", nameColWidth),
 		pad("Status", m.cols.status),
 		pad("Branch", m.cols.branch),
 		pad("Git", m.cols.git),
@@ -762,7 +819,7 @@ func (m overlayModel) View() tea.View {
 	panelContent.WriteString("\n")
 	sepLine := fmt.Sprintf("%s%s  %s  %s  %s  %s",
 		headerPrefix,
-		strings.Repeat("─", m.cols.name),
+		strings.Repeat("─", nameColWidth),
 		strings.Repeat("─", m.cols.status),
 		strings.Repeat("─", m.cols.branch),
 		strings.Repeat("─", m.cols.git),
