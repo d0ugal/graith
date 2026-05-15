@@ -163,6 +163,127 @@ func TestBuildGroupedItems_SessionCount(t *testing.T) {
 	}
 }
 
+// --- buildGroupedItems tree ---
+
+func TestBuildGroupedItems_TreeStructure(t *testing.T) {
+	now := time.Now().Format(time.RFC3339)
+	sessions := []protocol.SessionInfo{
+		{ID: "root", Name: "root-session", RepoName: "repo", Status: "running", CreatedAt: now},
+		{ID: "child1", Name: "child-1", ParentID: "root", RepoName: "repo", Status: "running", CreatedAt: now},
+		{ID: "child2", Name: "child-2", ParentID: "root", RepoName: "repo", Status: "stopped", CreatedAt: now},
+		{ID: "standalone", Name: "standalone", RepoName: "repo", Status: "running", CreatedAt: now},
+	}
+	items := buildGroupedItems(sessions)
+
+	// header + root + child-1 + child-2 + standalone = 5
+	if len(items) != 5 {
+		t.Fatalf("expected 5 items, got %d", len(items))
+	}
+
+	// Root sessions should come first (running sorted alphabetically)
+	si0 := items[1].(sessionItem)
+	if si0.info.Name != "root-session" || si0.treePrefix != "" {
+		t.Errorf("items[1]: name=%q prefix=%q, want root-session with no prefix", si0.info.Name, si0.treePrefix)
+	}
+
+	si1 := items[2].(sessionItem)
+	if si1.info.Name != "child-1" || si1.treePrefix != "├── " {
+		t.Errorf("items[2]: name=%q prefix=%q, want child-1 with ├── prefix", si1.info.Name, si1.treePrefix)
+	}
+
+	si2 := items[3].(sessionItem)
+	if si2.info.Name != "child-2" || si2.treePrefix != "└── " {
+		t.Errorf("items[3]: name=%q prefix=%q, want child-2 with └── prefix", si2.info.Name, si2.treePrefix)
+	}
+
+	si3 := items[4].(sessionItem)
+	if si3.info.Name != "standalone" || si3.treePrefix != "" {
+		t.Errorf("items[4]: name=%q prefix=%q, want standalone with no prefix", si3.info.Name, si3.treePrefix)
+	}
+}
+
+func TestBuildGroupedItems_MultiLevelTree(t *testing.T) {
+	now := time.Now().Format(time.RFC3339)
+	sessions := []protocol.SessionInfo{
+		{ID: "root", Name: "root", RepoName: "repo", Status: "running", CreatedAt: now},
+		{ID: "child", Name: "child", ParentID: "root", RepoName: "repo", Status: "running", CreatedAt: now},
+		{ID: "grandchild", Name: "grandchild", ParentID: "child", RepoName: "repo", Status: "running", CreatedAt: now},
+	}
+	items := buildGroupedItems(sessions)
+
+	if len(items) != 4 {
+		t.Fatalf("expected 4 items (1 header + 3 sessions), got %d", len(items))
+	}
+
+	gc := items[3].(sessionItem)
+	if gc.info.Name != "grandchild" {
+		t.Fatalf("items[3] = %q, want grandchild", gc.info.Name)
+	}
+	wantPrefix := "    └── "
+	if gc.treePrefix != wantPrefix {
+		t.Errorf("grandchild prefix = %q, want %q", gc.treePrefix, wantPrefix)
+	}
+}
+
+func TestBuildGroupedItems_OrphanedChild(t *testing.T) {
+	now := time.Now().Format(time.RFC3339)
+	sessions := []protocol.SessionInfo{
+		{ID: "orphan", Name: "orphan", ParentID: "nonexistent", RepoName: "repo", Status: "running", CreatedAt: now},
+	}
+	items := buildGroupedItems(sessions)
+
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(items))
+	}
+	si := items[1].(sessionItem)
+	if si.treePrefix != "" {
+		t.Errorf("orphaned child should be a root with no prefix, got %q", si.treePrefix)
+	}
+}
+
+func TestBuildGroupedItems_ParentInDifferentRepo(t *testing.T) {
+	now := time.Now().Format(time.RFC3339)
+	sessions := []protocol.SessionInfo{
+		{ID: "parent", Name: "parent", RepoName: "repo-a", Status: "running", CreatedAt: now},
+		{ID: "child", Name: "child", ParentID: "parent", RepoName: "repo-b", Status: "running", CreatedAt: now},
+	}
+	items := buildGroupedItems(sessions)
+
+	// child should be a root in repo-b since parent is in repo-a
+	for _, item := range items {
+		if si, ok := item.(sessionItem); ok && si.info.Name == "child" {
+			if si.treePrefix != "" {
+				t.Errorf("child in different repo should be root, got prefix %q", si.treePrefix)
+			}
+			return
+		}
+	}
+	t.Fatal("child not found in items")
+}
+
+func TestMaxTreeIndentFromItems(t *testing.T) {
+	now := time.Now().Format(time.RFC3339)
+	sessions := []protocol.SessionInfo{
+		{ID: "root", Name: "root", RepoName: "repo", Status: "running", CreatedAt: now},
+		{ID: "child", Name: "child", ParentID: "root", RepoName: "repo", Status: "running", CreatedAt: now},
+		{ID: "grandchild", Name: "grandchild", ParentID: "child", RepoName: "repo", Status: "running", CreatedAt: now},
+	}
+	items := buildGroupedItems(sessions)
+	maxIndent := maxTreeIndentFromItems(items)
+	// Grandchild prefix is "    └── " = 8 visible chars
+	if maxIndent != 8 {
+		t.Errorf("maxTreeIndent = %d, want 8", maxIndent)
+	}
+}
+
+func TestMaxTreeIndentFromItems_NoTree(t *testing.T) {
+	items := buildGroupedItems(overlayTestSessions())
+	maxIndent := maxTreeIndentFromItems(items)
+	if maxIndent != 0 {
+		t.Errorf("maxTreeIndent with no parent-child = %d, want 0", maxIndent)
+	}
+}
+
 // --- sortSessions ---
 
 func TestSortSessions_CurrentNotBoosted(t *testing.T) {
