@@ -203,7 +203,32 @@ func (s *Session) waitLoop() {
 func (s *Session) WriteInput(data []byte) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
+	return s.writeInputLocked(data)
+}
 
+// typeInputDelay is the pause between writing text and the submit key in
+// WriteInputAndSubmit. TUI frameworks treat text+CR in a single read as a
+// paste (inserting a newline) rather than "type then press Enter". Separating
+// the writes lets the TUI drain the text before the CR arrives.
+const typeInputDelay = 50 * time.Millisecond
+
+// WriteInputAndSubmit writes text followed by a carriage return, with a brief
+// pause between the two so that TUI frameworks treat them as separate events.
+// The entire operation holds writeMu to prevent interleaving from other sources.
+func (s *Session) WriteInputAndSubmit(data []byte) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	if len(data) > 0 {
+		if err := s.writeInputLocked(data); err != nil {
+			return err
+		}
+		time.Sleep(typeInputDelay)
+	}
+	return s.writeInputLocked([]byte("\r"))
+}
+
+func (s *Session) writeInputLocked(data []byte) error {
 	s.mu.RLock()
 	exited := s.exited
 	s.mu.RUnlock()
