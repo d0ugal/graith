@@ -8,10 +8,11 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/d0ugal/graith/internal/client"
+	"github.com/d0ugal/graith/internal/daemon"
+	"github.com/d0ugal/graith/internal/git"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/d0ugal/graith/internal/sandbox"
 	"github.com/d0ugal/graith/internal/version"
@@ -321,8 +322,8 @@ func (dc *doctorContext) checkStalePID() {
 	if _, err := fmt.Sscanf(strings.TrimSpace(string(pidData)), "%d", &pid); err != nil {
 		return
 	}
-	if pid <= 0 || syscall.Kill(pid, 0) != nil {
-		dc.fail("daemon", "PID file points to dead process (PID %d)", pid)
+	if !daemon.IsGraithDaemon(pid) {
+		dc.fail("daemon", "PID file is stale (PID %d is not a graith daemon)", pid)
 		if doctorAutofix {
 			os.Remove(paths.PIDFile)
 			dc.hint("Removed stale PID file")
@@ -447,41 +448,99 @@ func (dc *doctorContext) checkStorage(diag *protocol.DiagnosticsMsg) {
 	orphanedWorktrees := dc.findOrphanedWorktrees(sessionIDs)
 	if len(orphanedWorktrees) > 0 {
 		var totalSize int64
+		dirtyCount := 0
 		for _, wt := range orphanedWorktrees {
 			totalSize += wt.size
+			if wt.hasDirtyFiles {
+				dirtyCount++
+			}
 		}
 		dc.warn("storage", "%d orphaned worktree dir(s) (%s)", len(orphanedWorktrees), formatBytes(totalSize))
 		for _, wt := range orphanedWorktrees {
-			dc.hint("%s (%s)", wt.path, formatBytes(wt.size))
+			extra := ""
+			if wt.hasDirtyFiles {
+				extra = " [has uncommitted changes]"
+			}
+			dc.hint("%s (%s)%s", wt.path, formatBytes(wt.size), extra)
 		}
 		if doctorAutofix {
 			removed := 0
+			skipped := 0
 			for _, wt := range orphanedWorktrees {
+				if wt.hasDirtyFiles {
+					skipped++
+					continue
+				}
+				var repoRoot string
+				if wt.isGitWorktree {
+					repoRoot, _ = git.RepoRootFromWorktree(wt.path)
+				}
 				if os.RemoveAll(wt.path) == nil {
 					removed++
+					if repoRoot != "" {
+						git.PruneWorktrees(repoRoot)
+					}
 				}
 			}
 			dc.hint("Removed %d orphaned worktree dir(s)", removed)
+			if skipped > 0 {
+				dc.hint("Skipped %d with uncommitted changes (inspect manually)", skipped)
+			}
 		} else {
-			dc.hint("Use --autofix to remove")
+			if dirtyCount > 0 {
+				dc.hint("Use --autofix to remove (%d with uncommitted changes will be skipped)", dirtyCount)
+			} else {
+				dc.hint("Use --autofix to remove")
+			}
 		}
 	}
 }
 
 type orphanedWorktree struct {
-	path string
-	size int64
+	path          string
+	size          int64
+	isGitWorktree bool
+	hasDirtyFiles bool
 }
+
+const orphanMinAge = 5 * time.Minute
 
 func (dc *doctorContext) findOrphanedWorktrees(sessionIDs map[string]bool) []orphanedWorktree {
 	var orphaned []orphanedWorktree
+	now := time.Now()
 
 	// Worktrees live at <DataDir>/worktrees/<repoName>/<repoHash>/<sessionID>
 	worktreesDir := filepath.Join(paths.DataDir, "worktrees")
 	repos, err := os.ReadDir(worktreesDir)
-	if err != nil {
-		return nil
+	if err == nil {
+		orphaned = append(orphaned, findOrphanedInWorktrees(repos, worktreesDir, sessionIDs, now)...)
 	}
+
+	// Scratch dirs live at <DataDir>/scratch/<sessionID>
+	scratchDir := filepath.Join(paths.DataDir, "scratch")
+	scratches, err := os.ReadDir(scratchDir)
+	if err == nil {
+		for _, s := range scratches {
+			if !s.IsDir() {
+				continue
+			}
+			if sessionIDs[s.Name()] {
+				continue
+			}
+			sDir := filepath.Join(scratchDir, s.Name())
+			if info, err := s.Info(); err == nil && now.Sub(info.ModTime()) < orphanMinAge {
+				continue
+			}
+			size, _ := dirSize(sDir)
+			orphaned = append(orphaned, orphanedWorktree{path: sDir, size: size})
+		}
+	}
+
+	return orphaned
+}
+
+func findOrphanedInWorktrees(repos []os.DirEntry, worktreesDir string, sessionIDs map[string]bool, now time.Time) []orphanedWorktree {
+	var orphaned []orphanedWorktree
 	for _, repo := range repos {
 		if !repo.IsDir() {
 			continue
@@ -504,31 +563,27 @@ func (dc *doctorContext) findOrphanedWorktrees(sessionIDs map[string]bool) []orp
 				if !sess.IsDir() {
 					continue
 				}
-				if !sessionIDs[sess.Name()] {
-					sessDir := filepath.Join(hashDir, sess.Name())
-					size, _ := dirSize(sessDir)
-					orphaned = append(orphaned, orphanedWorktree{path: sessDir, size: size})
+				if sessionIDs[sess.Name()] {
+					continue
 				}
+				sessDir := filepath.Join(hashDir, sess.Name())
+				if info, err := sess.Info(); err == nil && now.Sub(info.ModTime()) < orphanMinAge {
+					continue
+				}
+				size, _ := dirSize(sessDir)
+				wt := orphanedWorktree{path: sessDir, size: size}
+
+				if git.IsInsideGitRepo(sessDir) {
+					wt.isGitWorktree = true
+					if dirty, err := git.HasUncommittedChanges(sessDir); err == nil && dirty {
+						wt.hasDirtyFiles = true
+					}
+				}
+
+				orphaned = append(orphaned, wt)
 			}
 		}
 	}
-
-	// Scratch dirs live at <DataDir>/scratch/<sessionID>
-	scratchDir := filepath.Join(paths.DataDir, "scratch")
-	scratches, err := os.ReadDir(scratchDir)
-	if err == nil {
-		for _, s := range scratches {
-			if !s.IsDir() {
-				continue
-			}
-			if !sessionIDs[s.Name()] {
-				sDir := filepath.Join(scratchDir, s.Name())
-				size, _ := dirSize(sDir)
-				orphaned = append(orphaned, orphanedWorktree{path: sDir, size: size})
-			}
-		}
-	}
-
 	return orphaned
 }
 
