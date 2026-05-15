@@ -512,12 +512,14 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "session not found"})
 					continue
 				}
-				input := t.Input
-				if !t.NoNewline {
-					input += "\r"
+				var writeErr error
+				if t.NoNewline {
+					writeErr = pty.WriteInput([]byte(t.Input))
+				} else {
+					writeErr = pty.WriteInputAndSubmit([]byte(t.Input))
 				}
-				if err := pty.WriteInput([]byte(input)); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: "write failed: " + err.Error()})
+				if writeErr != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "write failed: " + writeErr.Error()})
 					continue
 				}
 				pty.Poke()
