@@ -409,6 +409,15 @@ func (s *MsgStore) Cleanup(maxAge time.Duration, maxPerStream int) (int64, error
 		SELECT 1 FROM messages WHERE messages.stream = acked_messages.stream AND messages.seq = acked_messages.seq
 	)`)
 
+	s.db.Exec(`DELETE FROM cursors WHERE NOT EXISTS (
+		SELECT 1 FROM messages WHERE messages.stream = cursors.stream
+	)`)
+
+	if maxAge > 0 {
+		cursorCutoff := time.Now().UTC().Add(-maxAge).Format(time.RFC3339Nano)
+		s.db.Exec("DELETE FROM cursors WHERE updated_at < ?", cursorCutoff)
+	}
+
 	return total, nil
 }
 
