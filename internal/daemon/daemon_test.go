@@ -2525,13 +2525,12 @@ func TestRunMessageCleanupLoopReadsConfig(t *testing.T) {
 			t.Fatalf("expected 1 message before config change, got %d", len(msgs))
 		}
 
-		// Update config to enable cleanup with max_per_stream=0 (effectively keep none by age).
-		sm.mu.Lock()
-		sm.cfg.Messages.MaxPerStream = 0
-		sm.cfg.Messages.MaxAge = "1ns"
-		sm.mu.Unlock()
+		// Swap config via applyConfig to match the real hot-reload path.
+		newCfg := *sm.cfg
+		newCfg.Messages.MaxPerStream = 0
+		newCfg.Messages.MaxAge = "1ns"
+		sm.applyConfig(&newCfg)
 
-		time.Sleep(2 * time.Millisecond)
 		sm.runMessageCleanupFromConfig()
 
 		msgs, err = ms.Read("test-stream", "", false, "")
