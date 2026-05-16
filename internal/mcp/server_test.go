@@ -322,6 +322,26 @@ func TestSubscribeReceivesMessage(t *testing.T) {
 	}
 }
 
+func TestCreateSessionDefaultAgent(t *testing.T) {
+	env := setup(t)
+	defer env.teardown()
+
+	env.srv.cfg.DefaultAgent = "echo"
+
+	ctx := context.Background()
+	_, created, err := env.srv.createSession(ctx, &gomcp.CallToolRequest{}, CreateSessionInput{
+		Name: "default-agent-session",
+		Repo: env.repo,
+		Base: "main",
+	})
+	if err != nil {
+		t.Fatalf("create session without agent: %v", err)
+	}
+	if created.Agent != "echo" {
+		t.Errorf("agent = %q, want %q (config default)", created.Agent, "echo")
+	}
+}
+
 func TestCreateSessionNoRepo(t *testing.T) {
 	env := setup(t)
 	defer env.teardown()
