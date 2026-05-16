@@ -1568,16 +1568,11 @@ func (sm *SessionManager) StopAll(ctx context.Context) {
 }
 
 func (sm *SessionManager) RunMessageCleanupLoop(ctx context.Context) {
-	maxAge := sm.cfg.Messages.MaxAgeDuration()
-	maxPerStream := sm.cfg.Messages.MaxPerStream
-	if maxAge == 0 && maxPerStream == 0 {
-		return
-	}
 	if sm.messages == nil {
 		return
 	}
 
-	sm.runMessageCleanup(maxAge, maxPerStream)
+	sm.runMessageCleanupFromConfig()
 
 	ticker := time.NewTicker(time.Hour)
 	defer ticker.Stop()
@@ -1586,9 +1581,20 @@ func (sm *SessionManager) RunMessageCleanupLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			sm.runMessageCleanup(maxAge, maxPerStream)
+			sm.runMessageCleanupFromConfig()
 		}
 	}
+}
+
+func (sm *SessionManager) runMessageCleanupFromConfig() {
+	sm.mu.RLock()
+	maxAge := sm.cfg.Messages.MaxAgeDuration()
+	maxPerStream := sm.cfg.Messages.MaxPerStream
+	sm.mu.RUnlock()
+	if maxAge == 0 && maxPerStream == 0 {
+		return
+	}
+	sm.runMessageCleanup(maxAge, maxPerStream)
 }
 
 func (sm *SessionManager) runMessageCleanup(maxAge time.Duration, maxPerStream int) {
