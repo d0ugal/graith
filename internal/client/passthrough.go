@@ -140,6 +140,17 @@ func clearHelpBar(w io.Writer) {
 	_, _ = w.Write([]byte("\x1b7\x1b[999B\r\x1b[2K\x1b8"))
 }
 
+type syncWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+func (sw *syncWriter) Write(p []byte) (int, error) {
+	sw.mu.Lock()
+	defer sw.mu.Unlock()
+	return sw.w.Write(p)
+}
+
 type PassthroughKeys struct {
 	Prefix      byte
 	NextSession byte
@@ -168,6 +179,8 @@ func (c *Client) RunPassthrough(ctx context.Context, opts PassthroughOpts) Passt
 		return ResultQuit
 	}
 	defer func() { _ = term.Restore(fd, oldState) }()
+
+	stdout := &syncWriter{w: os.Stdout}
 
 	var sb *statusBarState
 	if opts.StatusBar != nil && opts.Info != nil {
@@ -204,7 +217,7 @@ func (c *Client) RunPassthrough(ctx context.Context, opts PassthroughOpts) Passt
 					rows := uint16(h)
 					if sb != nil {
 						sb.updateSize(h, w)
-						sb.setup(os.Stdout)
+						sb.setup(stdout)
 						rows = uint16(h - 1)
 					}
 					_ = c.SendControl("resize", protocol.ResizeMsg{
@@ -216,7 +229,7 @@ func (c *Client) RunPassthrough(ctx context.Context, opts PassthroughOpts) Passt
 		}
 	}()
 
-	return c.runPassthroughLoop(ctx, opts, os.Stdin, os.Stdout, sb)
+	return c.runPassthroughLoop(ctx, opts, os.Stdin, stdout, sb)
 }
 
 type frameDemux struct {
