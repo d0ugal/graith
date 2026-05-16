@@ -2,9 +2,9 @@ package daemon
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"runtime"
-	"strings"
 )
 
 func (sm *SessionManager) onAgentStatusChange(sessionID, sessionName, oldStatus, newStatus string) {
@@ -58,12 +58,14 @@ func (sm *SessionManager) sendNotification(sessionName, status string) {
 	fmt.Print("\a")
 
 	if sm.cfg.Notifications.Command != "" {
-		cmd := sm.cfg.Notifications.Command
-		cmd = strings.ReplaceAll(cmd, "{name}", sessionName)
-		cmd = strings.ReplaceAll(cmd, "{status}", status)
-		cmd = strings.ReplaceAll(cmd, "{message}", message)
 		go func() {
-			if err := exec.Command("sh", "-c", cmd).Run(); err != nil {
+			cmd := exec.Command("sh", "-c", sm.cfg.Notifications.Command)
+			cmd.Env = append(os.Environ(),
+				"GRAITH_SESSION_NAME="+sessionName,
+				"GRAITH_STATUS="+status,
+				"GRAITH_MESSAGE="+message,
+			)
+			if err := cmd.Run(); err != nil {
 				sm.log.Error("custom notification command failed", "err", err)
 			}
 		}()
