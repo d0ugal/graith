@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.29.1](https://github.com/d0ugal/graith/compare/v0.29.0...v0.29.1) (2026-05-16)
+
+
+### Bug Fixes
+
+* address review tribunal findings in cursor cleanup ([5285409](https://github.com/d0ugal/graith/commit/5285409aecdc8eca0ff724fb2c096eb2b1b6b9b8))
+* clean up stale message cursors during cleanup ([b368601](https://github.com/d0ugal/graith/commit/b368601814e5f7cfac70644f26e9e75f3389a625)), closes [#254](https://github.com/d0ugal/graith/issues/254)
+* clear stale preview when filter yields no matching sessions ([1cee68e](https://github.com/d0ugal/graith/commit/1cee68e201ddd82990e96db84dd14281d78f679f))
+* fall back to default agent in MCP createSession ([9927a15](https://github.com/d0ugal/graith/commit/9927a15419c1e3f77058a419605a3e492491d6f1)), closes [#232](https://github.com/d0ugal/graith/issues/232)
+* make git tests hermetic against user signing config ([4dc5c7a](https://github.com/d0ugal/graith/commit/4dc5c7a00186d32b27dc6137a90a2b498ccf9407)), closes [#228](https://github.com/d0ugal/graith/issues/228)
+* migrate approvals_enabled to agent_hooks in state ([5e8d40b](https://github.com/d0ugal/graith/commit/5e8d40b931f4a561e9ab85d2c96981def3b9c498)), closes [#208](https://github.com/d0ugal/graith/issues/208)
+* re-read cleanup config each iteration to respect hot-reload ([b0057fe](https://github.com/d0ugal/graith/commit/b0057fe34f9237e280a918cdbbfc115a17601e4a))
+* refresh preview when overlay filter changes selection ([d393b27](https://github.com/d0ugal/graith/commit/d393b27c7b524b82568cfc85cfb14d03aebb7f25)), closes [#243](https://github.com/d0ugal/graith/issues/243)
+* suppress bogus stopped event when deleting running session ([aeba5be](https://github.com/d0ugal/graith/commit/aeba5be5de0561efd049246f1f3f1b129f42ed63)), closes [#225](https://github.com/d0ugal/graith/issues/225)
+* suppress non-zero exit status from shell subprocesses ([f645cf3](https://github.com/d0ugal/graith/commit/f645cf328507325a71d5b32e069b93572cf81763))
+* surface shell launch errors instead of silently reattaching ([e3bad27](https://github.com/d0ugal/graith/commit/e3bad27fc434dddf0c2cdf1c984a97c9c22fcb11)), closes [#240](https://github.com/d0ugal/graith/issues/240)
+* use applyConfig in cleanup test to match real hot-reload path ([051dc24](https://github.com/d0ugal/graith/commit/051dc24c3ecc9498cdffcf7d857fa8bf4db4cd69))
+
 ## [0.29.0](https://github.com/d0ugal/graith/compare/v0.28.1...v0.29.0) (2026-05-15)
 
 
