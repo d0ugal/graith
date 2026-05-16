@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/d0ugal/graith/internal/client"
+	"github.com/d0ugal/graith/internal/daemon"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/spf13/cobra"
 )
@@ -31,6 +32,9 @@ var newCmd = &cobra.Command{
 	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
+		if err := daemon.ValidateSessionName(name); err != nil {
+			return err
+		}
 
 		repoPath := newRepo
 		if repoPath == "" {
