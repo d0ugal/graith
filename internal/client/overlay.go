@@ -650,7 +650,7 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.list.CursorDown()
 					}
 				}
-				return m, cmd
+				return m, tea.Batch(cmd, m.fetchPreviewCmd())
 			}
 
 		case stateConfirmDelete:
