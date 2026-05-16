@@ -13,7 +13,7 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 )
 
-const CurrentStateVersion = 3
+const CurrentStateVersion = 4
 
 type SessionStatus string
 
@@ -60,6 +60,7 @@ type SessionState struct {
 	InPlace                bool                  `json:"in_place,omitempty"`
 	Includes               []IncludedRepoState   `json:"includes,omitempty"`
 	AgentHooks             bool                  `json:"agent_hooks,omitempty"`
+	ApprovalsEnabled       bool                  `json:"approvals_enabled,omitempty"` // deprecated: migrated to AgentHooks in v4
 	CreatedAt              time.Time             `json:"created_at"`
 	LastAttachedAt         *time.Time            `json:"last_attached_at,omitempty"`
 	CreationCfg            *CreationConfig       `json:"creation_config,omitempty"`
@@ -136,6 +137,7 @@ var migrations = map[int]func(*State) error{
 	0: migrateV0ToV1,
 	1: migrateV1ToV2,
 	2: migrateV2ToV3,
+	3: migrateV3ToV4,
 }
 
 func migrateState(state *State) error {
@@ -165,6 +167,17 @@ func migrateV1ToV2(_ *State) error {
 // migrateV2ToV3 is a no-op: v3 adds the optional creation_config field which
 // defaults to nil for existing sessions (shown as "unknown" rather than stale).
 func migrateV2ToV3(_ *State) error {
+	return nil
+}
+
+// migrateV3ToV4 transfers the renamed approvals_enabled field to agent_hooks.
+func migrateV3ToV4(state *State) error {
+	for _, s := range state.Sessions {
+		if s.ApprovalsEnabled {
+			s.AgentHooks = true
+			s.ApprovalsEnabled = false
+		}
+	}
 	return nil
 }
 
