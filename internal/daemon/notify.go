@@ -57,9 +57,10 @@ func (sm *SessionManager) sendNotification(sessionName, status string) {
 	// Terminal bell to daemon log (triggers terminal emulator notifications)
 	fmt.Print("\a")
 
-	if sm.cfg.Notifications.Command != "" {
+	command := sm.cfg.Notifications.Command
+	if command != "" {
 		go func() {
-			cmd := exec.Command("sh", "-c", sm.cfg.Notifications.Command)
+			cmd := exec.Command("sh", "-c", command)
 			cmd.Env = append(os.Environ(),
 				"GRAITH_SESSION_NAME="+sessionName,
 				"GRAITH_STATUS="+status,
