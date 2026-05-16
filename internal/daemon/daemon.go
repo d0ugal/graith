@@ -270,6 +270,10 @@ func repoHash(repoPath string) string {
 // Create starts a new agent session, either in a git worktree, in-place
 // in an existing repo, or as a standalone scratch session (when noRepo is true).
 func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, model, parentID string, noRepo bool, shareWorktree string, agentHooks bool, inPlace, allowConcurrent bool, rows, cols uint16) (SessionState, error) {
+	if err := ValidateSessionName(name); err != nil {
+		return SessionState{}, err
+	}
+
 	agent, ok := sm.cfg.Agents[agentName]
 	if !ok {
 		return SessionState{}, fmt.Errorf("unknown agent %q", agentName)
@@ -661,6 +665,10 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 // Fork creates a new session that branches from an existing session's git state
 // and uses the agent's fork_args to carry over the conversation history.
 func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) (SessionState, error) {
+	if err := ValidateSessionName(name); err != nil {
+		return SessionState{}, err
+	}
+
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -1447,6 +1455,10 @@ func (sm *SessionManager) Restart(id string, rows, cols uint16) (SessionState, e
 
 // Rename changes the display name of a session.
 func (sm *SessionManager) Rename(id, newName string) error {
+	if err := ValidateSessionName(newName); err != nil {
+		return err
+	}
+
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
