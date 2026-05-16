@@ -950,6 +950,10 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 		return *sessState, nil
 	}
 
+	if err := ValidateSessionName(sessState.Name); err != nil {
+		return SessionState{}, fmt.Errorf("session has unsafe name %q (created before validation was added): %w — use 'gr rename' to fix", sessState.Name, err)
+	}
+
 	agent, ok := sm.cfg.Agents[sessState.Agent]
 	if !ok {
 		return SessionState{}, fmt.Errorf("unknown agent %q", sessState.Agent)
