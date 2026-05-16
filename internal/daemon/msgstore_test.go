@@ -998,34 +998,32 @@ func TestCleanupRemovesStaleCursors(t *testing.T) {
 	oldTime := time.Now().UTC().Add(-48 * time.Hour).Format(time.RFC3339Nano)
 	newTime := time.Now().UTC().Format(time.RFC3339Nano)
 
-	// Insert old messages and cursors directly.
-	s.db.Exec(
-		`INSERT INTO messages (id, seq, stream, sender_id, sender_name, body, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		"msg_old1", 1, "old-stream", "s1", "a", "old message", oldTime,
-	)
+	// Publish a fresh message on the stream so it is NOT orphaned — this
+	// isolates the stale-cursor path from the orphan-cursor path.
+	s.Publish("the-stream", "s1", "a", "recent message", "", "")
+
+	// Insert a stale cursor on the same stream (old updated_at).
 	s.db.Exec(
 		`INSERT INTO cursors (subscriber, stream, ack_seq, updated_at)
 		 VALUES (?, ?, ?, ?)`,
-		"stale-reader", "old-stream", 1, oldTime,
+		"stale-reader", "the-stream", 1, oldTime,
 	)
 
-	// Insert a fresh message and cursor on a different stream.
-	s.Publish("fresh-stream", "s1", "a", "new message", "", "")
+	// Insert an active cursor on the same stream (recent updated_at).
 	s.db.Exec(
 		`INSERT INTO cursors (subscriber, stream, ack_seq, updated_at)
 		 VALUES (?, ?, ?, ?)`,
-		"active-reader", "fresh-stream", 1, newTime,
+		"active-reader", "the-stream", 1, newTime,
 	)
 
-	// Cleanup with a 24h max age — removes old messages and stale cursors.
+	// Cleanup with a 24h max age — the stream still has messages so only
+	// the age-based cursor check should remove the stale cursor.
 	_, err := s.Cleanup(24*time.Hour, 0)
 	if err != nil {
 		t.Fatalf("Cleanup: %v", err)
 	}
 
-	// The stale cursor should be gone (its stream's messages were deleted AND
-	// its updated_at is older than the cutoff).
+	// The stale cursor should be gone (updated_at is older than the cutoff).
 	var staleCursorCount int
 	s.db.QueryRow("SELECT COUNT(*) FROM cursors WHERE subscriber = ?", "stale-reader").Scan(&staleCursorCount)
 	if staleCursorCount != 0 {
