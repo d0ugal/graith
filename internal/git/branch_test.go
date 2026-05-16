@@ -69,6 +69,8 @@ func TestDiscoverDefaultBranchLocalOnly(t *testing.T) {
 }
 
 func TestDiscoverDefaultBranchLocalMaster(t *testing.T) {
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	dir := t.TempDir()
 	run := func(args ...string) {
 		cmd := exec.Command("git", args...)
