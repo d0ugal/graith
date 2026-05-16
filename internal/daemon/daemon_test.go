@@ -2579,3 +2579,69 @@ func TestRunMessageCleanupLoopReadsConfig(t *testing.T) {
 		}
 	})
 }
+
+func TestDeleteKeepsSessionOnTeardownFailure(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	sm.state.Sessions["fail1"] = &SessionState{
+		ID:           "fail1",
+		Name:         "leaky",
+		Agent:        "claude",
+		RepoPath:     "/nonexistent/repo",
+		WorktreePath: "/nonexistent/worktree",
+		Branch:       "graith/leaky-fail1",
+		Status:       StatusStopped,
+	}
+
+	err := sm.Delete("fail1")
+	if err == nil {
+		t.Fatal("expected error from failed git teardown")
+	}
+	if !strings.Contains(err.Error(), "git teardown failed") {
+		t.Errorf("error = %q, want mention of git teardown", err.Error())
+	}
+
+	if _, ok := sm.state.Sessions["fail1"]; !ok {
+		t.Error("session should be kept in state when teardown fails")
+	}
+}
+
+func TestDeleteWithChildrenKeepsFailedSessions(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	sm.state.Sessions["parent1"] = &SessionState{
+		ID:     "parent1",
+		Name:   "parent",
+		Agent:  "claude",
+		Status: StatusStopped,
+	}
+	sm.state.Sessions["child1"] = &SessionState{
+		ID:           "child1",
+		Name:         "child",
+		Agent:        "claude",
+		ParentID:     "parent1",
+		RepoPath:     "/nonexistent/repo",
+		WorktreePath: "/nonexistent/worktree",
+		Branch:       "graith/child-child1",
+		Status:       StatusStopped,
+	}
+
+	deleted, err := sm.DeleteWithChildren("parent1")
+	if err == nil {
+		t.Fatal("expected error from failed git teardown")
+	}
+
+	if _, ok := sm.state.Sessions["child1"]; !ok {
+		t.Error("child session should be kept in state when teardown fails")
+	}
+
+	found := false
+	for _, id := range deleted {
+		if id == "parent1" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("parent (no repo) should be in the deleted list")
+	}
+}
