@@ -214,6 +214,37 @@ func TestSandboxConfigPersistence(t *testing.T) {
 	}
 }
 
+func TestMigrateApprovalsEnabledToAgentHooks(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	data := []byte(`{"version":3,"sessions":{
+		"s1":{"id":"s1","name":"with-approvals","status":"running","approvals_enabled":true},
+		"s2":{"id":"s2","name":"without-approvals","status":"running"},
+		"s3":{"id":"s3","name":"already-migrated","status":"running","agent_hooks":true}
+	}}`)
+	if err := writeFileAtomic(path, data); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Version != CurrentStateVersion {
+		t.Errorf("version = %d, want %d", loaded.Version, CurrentStateVersion)
+	}
+	if s := loaded.Sessions["s1"]; !s.AgentHooks {
+		t.Error("s1: AgentHooks = false, want true (migrated from approvals_enabled)")
+	}
+	if s := loaded.Sessions["s1"]; s.ApprovalsEnabled {
+		t.Error("s1: ApprovalsEnabled should be cleared after migration")
+	}
+	if s := loaded.Sessions["s2"]; s.AgentHooks {
+		t.Error("s2: AgentHooks = true, want false (was never set)")
+	}
+	if s := loaded.Sessions["s3"]; !s.AgentHooks {
+		t.Error("s3: AgentHooks = false, want true (was already set)")
+	}
+}
+
 func TestSandboxConfigNilBackwardCompat(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
 	data := []byte(`{"version":1,"sessions":{"s1":{"id":"s1","name":"old","status":"stopped","sandboxed":true}}}`)
