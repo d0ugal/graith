@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.29.2](https://github.com/d0ugal/graith/compare/v0.29.1...v0.29.2) (2026-06-14)
+
+
+### Bug Fixes
+
+* address review findings for notification injection fix ([c192d2b](https://github.com/d0ugal/graith/commit/c192d2b97d3b81d5ce2299436dd01f36868582b2))
+* block resume and notifications for unsafe persisted session names ([0c92c82](https://github.com/d0ugal/graith/commit/0c92c82ee1845260f1eb005d300f58f66353720d))
+* buffer statusbar setup/teardown into single writes ([36936b6](https://github.com/d0ugal/graith/commit/36936b61de804917adc8ad31acc4332137c252db))
+* don't set parent when creating session via ctrl+b c ([8100e3b](https://github.com/d0ugal/graith/commit/8100e3b90f207def200a3ffe044ace3246ba9c1a))
+* prevent shell command injection in notification commands ([a1959ce](https://github.com/d0ugal/graith/commit/a1959ceff20a6180e583fa5f6e294a657425879f))
+* propagate git teardown errors on session delete ([ff80d23](https://github.com/d0ugal/graith/commit/ff80d2387e9eaa24351db2458b158cc5d9dcf296)), closes [#258](https://github.com/d0ugal/graith/issues/258)
+* send scrollback history before starting live forwarding on attach ([8047c93](https://github.com/d0ugal/graith/commit/8047c93fcae94f4da4575460f6f2b07d607e034e)), closes [#266](https://github.com/d0ugal/graith/issues/266)
+* serialize concurrent stdout writes in passthrough mode ([d68eb57](https://github.com/d0ugal/graith/commit/d68eb57baa734c4e321184b11ccf1683735894c5)), closes [#216](https://github.com/d0ugal/graith/issues/216)
+* use fmt.Fprintf in teardown to satisfy staticcheck QF1012 ([571b13f](https://github.com/d0ugal/graith/commit/571b13fb4f6d703b1a4c98e128bfc05dad8de9af))
+* validate session names to prevent injection across subsystems ([e543752](https://github.com/d0ugal/graith/commit/e54375263acac34a5b1fddbcde38b36f470c7111)), closes [#222](https://github.com/d0ugal/graith/issues/222)
+
 ## [0.29.1](https://github.com/d0ugal/graith/compare/v0.29.0...v0.29.1) (2026-06-14)
 
 
