@@ -767,11 +767,12 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 		return SessionState{}, fmt.Errorf("persist session state: %w", err)
 	}
 
+	result := cloneSessionState(sessState)
 	sm.mu.Unlock()
 
 	go sm.watchSession(id, ptySess)
 
-	return *sessState, nil
+	return result, nil
 }
 
 // Fork creates a new session that branches from an existing session's git state
@@ -880,17 +881,17 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 	fetchOnCreate := sm.cfg.FetchOnCreate
 
 	placeholder := &SessionState{
-		ID:             id,
-		ParentID:       sourceSessionID,
-		Name:           name,
-		RepoPath:       repoRoot,
-		RepoName:       repoName,
-		WorktreePath:   worktreePath,
-		Branch:         branchName,
-		BaseBranch:     baseBranch,
-		Agent:          agentName,
-		AgentSessionID: agentSessionID,
-		Model:          sourceModel,
+		ID:              id,
+		ParentID:        sourceSessionID,
+		Name:            name,
+		RepoPath:        repoRoot,
+		RepoName:        repoName,
+		WorktreePath:    worktreePath,
+		Branch:          branchName,
+		BaseBranch:      baseBranch,
+		Agent:           agentName,
+		AgentSessionID:  agentSessionID,
+		Model:           sourceModel,
 		AgentHooks:      sourceAgentHooks,
 		Status:          StatusCreating,
 		CreatedAt:       time.Now().UTC(),
@@ -1085,11 +1086,12 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 		return SessionState{}, fmt.Errorf("persist session state: %w", err)
 	}
 
+	result := cloneSessionState(sessState)
 	sm.mu.Unlock()
 
 	go sm.watchSession(id, ptySess)
 
-	return *sessState, nil
+	return result, nil
 }
 
 // watchSession waits for a PTY session to exit and updates state accordingly.
