@@ -22,6 +22,7 @@ const (
 	StatusStopped  SessionStatus = "stopped"
 	StatusErrored  SessionStatus = "errored"
 	StatusDeleting SessionStatus = "deleting"
+	StatusCreating SessionStatus = "creating"
 )
 
 // CreationConfig captures the agent and sandbox configuration at session
@@ -228,6 +229,11 @@ func syncDir(path string) error {
 
 func (s *State) Reconcile() {
 	for id, sess := range s.Sessions {
+		if sess.Status == StatusCreating {
+			slog.Info("session was mid-creation when daemon stopped, marking errored", "id", id)
+			sess.Status = StatusErrored
+			continue
+		}
 		if sess.Status == StatusRunning && sess.PID > 0 {
 			if !isProcessAlive(sess.PID) {
 				slog.Info("session process died, marking stopped", "id", id, "pid", sess.PID)
