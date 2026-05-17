@@ -36,10 +36,6 @@ const (
 
 var viewNames = []string{"All", "Needs Attention", "Active"}
 
-func (v viewMode) name() string {
-	return viewNames[v]
-}
-
 func (v viewMode) next() viewMode {
 	return (v + 1) % viewMode(len(viewNames))
 }
