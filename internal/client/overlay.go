@@ -622,6 +622,9 @@ func (m overlayModel) fetchPreviewCmd() tea.Cmd {
 
 func (m *overlayModel) rebuildForView() {
 	filtered := m.sessionsForView()
+	if m.filterInput.Value() != "" {
+		filtered = filterSessions(filtered, m.filterInput.Value())
+	}
 
 	var items []list.Item
 	if m.view == viewAll {
