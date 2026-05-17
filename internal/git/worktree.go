@@ -3,6 +3,7 @@ package git
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 )
 
@@ -75,11 +76,17 @@ func RepoRootFromWorktree(worktreePath string) (string, error) {
 
 func TeardownSession(repoPath, worktreePath, branchName string) error {
 	var errs []error
-	if err := RemoveWorktree(repoPath, worktreePath); err != nil {
-		errs = append(errs, fmt.Errorf("remove worktree: %w", err))
+	if _, err := os.Stat(worktreePath); err == nil {
+		if err := RemoveWorktree(repoPath, worktreePath); err != nil {
+			errs = append(errs, fmt.Errorf("remove worktree: %w", err))
+		}
+	} else {
+		_ = PruneWorktrees(repoPath)
 	}
-	if err := DeleteBranch(repoPath, branchName); err != nil {
-		errs = append(errs, fmt.Errorf("delete branch: %w", err))
+	if branchName != "" && RefExists(repoPath, branchName) {
+		if err := DeleteBranch(repoPath, branchName); err != nil {
+			errs = append(errs, fmt.Errorf("delete branch: %w", err))
+		}
 	}
 	return errors.Join(errs...)
 }
