@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/d0ugal/graith/internal/agent"
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/output"
 	"github.com/d0ugal/graith/internal/version"
@@ -13,6 +14,7 @@ import (
 var (
 	cfgFile    string
 	jsonOutput bool
+	agentMode  bool
 	cfg        *config.Config
 	paths      config.Paths
 	out        *output.Writer
@@ -37,6 +39,9 @@ var rootCmd = &cobra.Command{
 		if cfg.DataDir != "" {
 			paths = paths.WithDataDir(cfg.DataDir)
 		}
+		if !jsonOutput && (agentMode || agent.Detected()) {
+			jsonOutput = true
+		}
 		out = output.New(jsonOutput)
 		return nil
 	},
@@ -58,6 +63,9 @@ func executeWithArgs(args []string) error {
 			// Cobra skips persistent flag parsing for some errors (e.g.
 			// unknown subcommand). Parse them here so --json is respected.
 			rootCmd.PersistentFlags().Parse(args)
+			if !jsonOutput && (agentMode || agent.Detected()) {
+				jsonOutput = true
+			}
 			w = output.New(jsonOutput)
 		}
 		w.Error(err)
@@ -68,4 +76,5 @@ func executeWithArgs(args []string) error {
 func init() {
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file path")
 	rootCmd.PersistentFlags().BoolVar(&jsonOutput, "json", false, "JSON output")
+	rootCmd.PersistentFlags().BoolVar(&agentMode, "agent-mode", false, "force agent mode (auto-enables JSON output)")
 }
