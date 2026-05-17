@@ -534,10 +534,7 @@ func msgSendChildrenRun(args []string) error {
 				SessionID: child.ID,
 				Input:     hint,
 			})
-			typeResp, err := c.ReadControlResponse()
-			if err != nil || typeResp.Type == "error" {
-				// Child may be stopped — skip notification, message is delivered
-			}
+			c.ReadControlResponse() //nolint:errcheck // notification is best-effort
 		}
 	}
 
@@ -601,10 +598,7 @@ func msgSendParentRun(args []string) error {
 			SessionID: current.ParentID,
 			Input:     hint,
 		})
-		typeResp, err := c.ReadControlResponse()
-		if err != nil || typeResp.Type == "error" {
-			// Parent may be stopped — skip notification, message is delivered
-		}
+		c.ReadControlResponse() //nolint:errcheck // notification is best-effort
 	}
 
 	if jsonOutput {
