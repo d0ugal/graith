@@ -50,10 +50,15 @@ func TestExecuteJSONErrorFormat(t *testing.T) {
 func TestExecutePlainTextErrorFormat(t *testing.T) {
 	origOut := out
 	origJSON := jsonOutput
+	origAgentMode := agentMode
 	defer func() {
 		out = origOut
 		jsonOutput = origJSON
+		agentMode = origAgentMode
 	}()
+
+	t.Setenv("GR_AGENT_MODE", "0")
+	agentMode = false
 
 	r, w, err := os.Pipe()
 	if err != nil {
