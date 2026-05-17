@@ -2715,7 +2715,7 @@ func TestDeleteWithChildrenKeepsFailedSessions(t *testing.T) {
 		Status:       StatusStopped,
 	}
 
-	deleted, err := sm.DeleteWithChildren("parent1")
+	deleted, err := sm.DeleteWithChildren("parent1", false)
 	if err == nil {
 		t.Fatal("expected error from failed git teardown")
 	}
@@ -2760,7 +2760,7 @@ func TestDeleteWithChildrenIdempotent(t *testing.T) {
 		Status:       StatusStopped,
 	}
 
-	deleted, err := sm.DeleteWithChildren("parent1")
+	deleted, err := sm.DeleteWithChildren("parent1", false)
 	if err != nil {
 		t.Fatalf("expected idempotent delete to succeed: %v", err)
 	}

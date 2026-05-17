@@ -192,7 +192,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					continue
 				}
 				if d.Children {
-					deleted, err := sm.DeleteWithChildren(d.SessionID)
+					deleted, err := sm.DeleteWithChildren(d.SessionID, d.ExcludeRoot)
 					if err != nil {
 						sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 					} else {
@@ -217,12 +217,24 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid stop message"})
 					continue
 				}
-				if err := sm.Stop(s.SessionID); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+				if s.Children {
+					stopped, err := sm.StopWithChildren(s.SessionID, s.ExcludeRoot)
+					if err != nil {
+						sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+					} else {
+						sendControl("stopped", struct {
+							SessionID string   `json:"session_id"`
+							Stopped   []string `json:"stopped"`
+						}{s.SessionID, stopped})
+					}
 				} else {
-					sendControl("stopped", struct {
-						SessionID string `json:"session_id"`
-					}{s.SessionID})
+					if err := sm.Stop(s.SessionID); err != nil {
+						sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+					} else {
+						sendControl("stopped", struct {
+							SessionID string `json:"session_id"`
+						}{s.SessionID})
+					}
 				}
 
 			case "rename":
