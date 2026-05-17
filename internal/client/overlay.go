@@ -26,6 +26,78 @@ const (
 	stateConfirmRestart
 )
 
+type viewMode int
+
+const (
+	viewAll viewMode = iota
+	viewNeedsAttention
+	viewActive
+)
+
+var viewNames = []string{"All", "Needs Attention", "Active"}
+
+func (v viewMode) name() string {
+	return viewNames[v]
+}
+
+func (v viewMode) next() viewMode {
+	return (v + 1) % viewMode(len(viewNames))
+}
+
+func (v viewMode) prev() viewMode {
+	return (v + viewMode(len(viewNames)) - 1) % viewMode(len(viewNames))
+}
+
+func filterNeedsAttention(sessions []protocol.SessionInfo) []protocol.SessionInfo {
+	var result []protocol.SessionInfo
+	for _, s := range sessions {
+		switch {
+		case s.AgentStatus == "approval":
+			result = append(result, s)
+		case s.Status == "errored":
+			result = append(result, s)
+		case s.Status == "running" && s.AgentStatus == "ready":
+			result = append(result, s)
+		case s.Status == "stopped" && (s.Dirty || s.UnpushedCount > 0):
+			result = append(result, s)
+		}
+	}
+	sortByStatusAge(result)
+	return result
+}
+
+func filterActive(sessions []protocol.SessionInfo) []protocol.SessionInfo {
+	var result []protocol.SessionInfo
+	for _, s := range sessions {
+		if s.Status == "running" {
+			result = append(result, s)
+		}
+	}
+	sort.SliceStable(result, func(i, j int) bool {
+		ti, _ := time.Parse(time.RFC3339, result[i].CreatedAt)
+		tj, _ := time.Parse(time.RFC3339, result[j].CreatedAt)
+		return ti.After(tj)
+	})
+	return result
+}
+
+func sortByStatusAge(sessions []protocol.SessionInfo) {
+	sort.SliceStable(sessions, func(i, j int) bool {
+		ti, _ := time.Parse(time.RFC3339, sessions[i].StatusChangedAt)
+		tj, _ := time.Parse(time.RFC3339, sessions[j].StatusChangedAt)
+		if ti.IsZero() && tj.IsZero() {
+			return false
+		}
+		if ti.IsZero() {
+			return true
+		}
+		if tj.IsZero() {
+			return false
+		}
+		return ti.Before(tj)
+	})
+}
+
 var (
 	colorGreen   = lipgloss.Color("#00ff87")
 	colorRed     = lipgloss.Color("#ff5f5f")
