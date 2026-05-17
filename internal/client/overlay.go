@@ -689,16 +689,13 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		curIdx := m.list.Index()
-		items := buildGroupedItems(newSessions)
-		m.cols = computeColumnWidths(newSessions, m.currentSessionID)
-		m.cols.treeIndent = maxTreeIndentFromItems(items)
-		m.contentWidth = m.cols.totalWidth()
-		m.list.SetItems(items)
-		m.list.SetDelegate(compactDelegate{cols: m.cols, currentSessionID: m.currentSessionID})
-		if curIdx >= len(items) {
-			curIdx = len(items) - 1
+		m.rebuildForView()
+		if curIdx >= len(m.list.Items()) {
+			curIdx = len(m.list.Items()) - 1
 		}
-		m.list.Select(curIdx)
+		if curIdx >= 0 {
+			m.list.Select(curIdx)
+		}
 		if _, ok := m.list.SelectedItem().(groupHeader); ok {
 			m.list.CursorDown()
 			if _, ok := m.list.SelectedItem().(groupHeader); ok {
@@ -727,23 +724,7 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.state = stateList
 				m.filterInput.Blur()
 				m.filterInput.SetValue("")
-				items := buildGroupedItems(m.allSessions)
-				m.list.SetItems(items)
-				found := false
-				if m.currentSessionID != "" {
-					for i, item := range items {
-						if si, ok := item.(sessionItem); ok && si.info.ID == m.currentSessionID {
-							m.list.Select(i)
-							found = true
-							break
-						}
-					}
-				}
-				if !found {
-					if _, ok := m.list.SelectedItem().(groupHeader); ok {
-						m.list.CursorDown()
-					}
-				}
+				m.rebuildForView()
 				return m, m.fetchPreviewCmd()
 			case "enter":
 				m.state = stateList
@@ -752,8 +733,16 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			default:
 				var cmd tea.Cmd
 				m.filterInput, cmd = m.filterInput.Update(msg)
-				filtered := filterSessions(m.allSessions, m.filterInput.Value())
-				items := buildGroupedItems(filtered)
+				viewFiltered := m.sessionsForView()
+				filtered := filterSessions(viewFiltered, m.filterInput.Value())
+				var items []list.Item
+				if m.view == viewAll {
+					items = buildGroupedItems(filtered)
+				} else {
+					for _, s := range filtered {
+						items = append(items, sessionItem{info: s})
+					}
+				}
 				m.list.SetItems(items)
 				m.list.Select(0)
 				if len(items) > 0 {
