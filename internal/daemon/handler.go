@@ -805,6 +805,9 @@ func toSessionInfo(s SessionState, cfg *config.Config) protocol.SessionInfo {
 	if s.LastAttachedAt != nil {
 		info.LastAttachedAt = s.LastAttachedAt.Format(time.RFC3339)
 	}
+	if !s.StatusChangedAt.IsZero() {
+		info.StatusChangedAt = s.StatusChangedAt.Format(time.RFC3339)
+	}
 	for _, inc := range s.Includes {
 		info.Includes = append(info.Includes, protocol.IncludedRepoInfo{
 			RepoName:     inc.RepoName,
