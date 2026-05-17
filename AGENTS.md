@@ -40,6 +40,7 @@ Always run `gofmt -w` on files you modify. CI will fail on gofmt violations.
 ```
 cmd/graith/              Entry point (main.go)
 internal/
+  agent/                 Agent environment detection (auto-JSON)
   cli/                   Cobra command definitions (one file per command)
   client/                Client-side: connection, passthrough, overlay, shell
   config/                TOML config loading, defaults, XDG paths
@@ -67,7 +68,8 @@ Key files by area:
 | Client | `client/client.go` | Connection, handshake, scrollback preview (vt10x) |
 | CLI | `cli/attach.go` | Attach loop: passthrough ↔ overlay ↔ reconnect |
 | CLI | `cli/new.go` | Session creation with worktree setup |
-| CLI | `cli/msg.go` | `gr msg pub/sub/ack/topics` — inter-agent messaging |
+| CLI | `cli/msg.go` | `gr msg pub/sub/send/ack/topics` — inter-agent messaging |
+| Agent | `agent/agent.go` | Auto-detect agent environments, enable JSON output |
 | PTY | `pty/session.go` | PTY lifecycle, resize, I/O multiplexing |
 | PTY | `pty/scrollback.go` | Append-only scrollback file with tail reads |
 | Sandbox | `sandbox/sandbox.go` | Safehouse wrapping: command construction, availability check |
@@ -107,6 +109,24 @@ The daemon sets these in every agent process:
 - `GRAITH_WORKTREE_PATH` — absolute path to the session worktree
 
 These are used by `gr msg pub/sub` to identify the sender automatically.
+
+### Agent-mode detection
+
+When `gr` detects it's running inside an AI agent (via `GRAITH_SESSION_ID`,
+`CLAUDECODE`, `CURSOR_AGENT`, `GITHUB_COPILOT`, `AMAZON_Q`, or `OPENCODE`),
+it auto-enables `--json` output. Override with `GR_AGENT_MODE=0` to disable
+or `GR_AGENT_MODE=1` to force. The `--agent-mode` flag also forces it on.
+
+### Hierarchical session control
+
+- `gr stop --children` / `gr delete --children` — operate on all descendant
+  sessions. When run without a positional arg, auto-resolves from
+  `GRAITH_SESSION_ID` and excludes the calling session.
+- `gr msg send --children "body"` — send to all direct child sessions' inboxes.
+- `gr msg send --parent "body"` — send to the parent session's inbox.
+
+These flags make it easy for agents to manage their child sessions and
+communicate up/down the session tree without knowing session names.
 
 ## Configuration
 
