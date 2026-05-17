@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.30.0](https://github.com/d0ugal/graith/compare/v0.29.2...v0.30.0) (2026-05-17)
+
+
+### Features
+
+* add --children and --parent flags to gr msg send ([05daf7f](https://github.com/d0ugal/graith/commit/05daf7f36feedbb97b8a4f951a415078e101a083))
+* add --children flag to gr stop ([6c37525](https://github.com/d0ugal/graith/commit/6c37525e39e20cb8d723a560e02702c4cf13bd65))
+* add agent detection package ([0fa05c2](https://github.com/d0ugal/graith/commit/0fa05c262b2ec8a9809ce93b6da0c5832f5b48c9))
+* add Children/ExcludeRoot fields to StopMsg and DeleteMsg ([d40605d](https://github.com/d0ugal/graith/commit/d40605d24d6d40a01c8a368104724ab9886b45d2))
+* add StatusChangedAt field to session state ([e8d6aac](https://github.com/d0ugal/graith/commit/e8d6aacf7239bbfd76a1398425c7fb7a6b17522a))
+* add StopWithChildren to SessionManager ([c8bae5f](https://github.com/d0ugal/graith/commit/c8bae5f7329e5f48fe1df3f6ace05e2bca4419b8))
+* add view cycling to session overlay (left/right arrows) ([9455e93](https://github.com/d0ugal/graith/commit/9455e93d5f4d2fac90b1e49f27060c96bd160329))
+* add view mode types with filter and sort functions ([aa94868](https://github.com/d0ugal/graith/commit/aa94868c0f3f61a1a5048dad058c71cab06629ac))
+* auto-enable JSON output in agent environments ([4d03033](https://github.com/d0ugal/graith/commit/4d03033e78d55128a0c8e636141f9a82994419ca))
+* auto-resolve GRAITH_SESSION_ID for delete --children ([36ec09a](https://github.com/d0ugal/graith/commit/36ec09aa788e21fefc3e611d18ef056c7a125606))
+* expose StatusChangedAt in session info protocol ([2f01fc2](https://github.com/d0ugal/graith/commit/2f01fc23b6aab5c10c98a953283d40a3d53b5636))
+* filter and delete respect current view mode ([fcf6285](https://github.com/d0ugal/graith/commit/fcf62858050b390431902505bcc28d281fb3ee90))
+* handle stop-with-children and ExcludeRoot in handler ([cfa4793](https://github.com/d0ugal/graith/commit/cfa4793e386acff44f9cf3b3ddf04243175b1327))
+* track StatusChangedAt on agent status transitions ([391f607](https://github.com/d0ugal/graith/commit/391f607b234912f687d36d11464fd524b927ae7e))
+
+
+### Bug Fixes
+
+* address review findings for delete idempotency ([7e5301e](https://github.com/d0ugal/graith/commit/7e5301eaeb55449ce46600fdd724e2905d0a8c33))
+* address tribunal review findings ([c4b5fe8](https://github.com/d0ugal/graith/commit/c4b5fe8c29b401026d45c1f10e364ed9da1d78c7))
+* clone session state before unlock in Create and Fork ([0048395](https://github.com/d0ugal/graith/commit/0048395b3deee0cf2ae2f15b0d8fbd7eea2bd2f5))
+* handle StatusCreating in DeleteWithChildren ([7d90712](https://github.com/d0ugal/graith/commit/7d9071279eace8b84edabe369548c47f8843bf03))
+* make GR_AGENT_MODE=0 override agent detection at call time ([185f810](https://github.com/d0ugal/graith/commit/185f8100cbc37751b204710b6a34ae16762b8e9a))
+* make session delete idempotent and race-safe ([1ed3978](https://github.com/d0ugal/graith/commit/1ed397895c89cf8a48bebdeecc73becaa9fcd0db))
+* release daemon mutex during blocking Create/Fork/Resume operations ([a6e669a](https://github.com/d0ugal/graith/commit/a6e669aa84434f82b92a99a6e4552bf0be8ee72d)), closes [#218](https://github.com/d0ugal/graith/issues/218)
+* remove unused viewMode.name() method ([cdac1bf](https://github.com/d0ugal/graith/commit/cdac1bfcf6c5d7c4bedb450b594fe64bace4fb48))
+* set StatusChangedAt on Phase 1 session creation ([b18ddfe](https://github.com/d0ugal/graith/commit/b18ddfea91bcaee9664ff46b05035369c2b65c0f))
+* suppress SA9003 empty-branch lint in msg send notifications ([c9459db](https://github.com/d0ugal/graith/commit/c9459db2083b1487f40e0df9c8ed5cced2e9e847))
+
 ## [0.29.2](https://github.com/d0ugal/graith/compare/v0.29.1...v0.29.2) (2026-05-16)
 
 
