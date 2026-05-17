@@ -64,7 +64,7 @@ Key files by area:
 | Daemon | `daemon/state.go` | Persistent state (JSON file) |
 | Daemon | `daemon/msgstore.go` | Inter-agent pub/sub messaging (SQLite-backed) |
 | Client | `client/passthrough.go` | Raw PTY passthrough with prefix key handling |
-| Client | `client/overlay.go` | Session picker UI (bubbletea), preview rendering |
+| Client | `client/overlay.go` | Session picker UI (bubbletea), view modes (All/Needs Attention/Active), preview rendering |
 | Client | `client/client.go` | Connection, handshake, scrollback preview (vt10x) |
 | CLI | `cli/attach.go` | Attach loop: passthrough ↔ overlay ↔ reconnect |
 | CLI | `cli/new.go` | Session creation with worktree setup |
