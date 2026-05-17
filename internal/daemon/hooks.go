@@ -296,10 +296,10 @@ func (sm *SessionManager) injectCursorHooks(sessionID, worktreePath string) (ext
 
 // injectHooks dispatches hook injection to the agent-specific implementation.
 // Returns nil for agents that don't support hooks.
-func (sm *SessionManager) injectHooks(agentName, sessionID, worktreePath string) (extraArgs []string, extraEnv map[string]string, err error) {
+func (sm *SessionManager) injectHooks(agentName, sessionID, worktreePath string, mcpServers []config.MCPServerConfig) (extraArgs []string, extraEnv map[string]string, err error) {
 	switch agentName {
 	case "claude":
-		return sm.injectClaudeHooks(sessionID, sm.resolveMCPServers(agentName))
+		return sm.injectClaudeHooks(sessionID, mcpServers)
 	case "codex":
 		return sm.injectCodexHooks(sessionID)
 	case "cursor":
