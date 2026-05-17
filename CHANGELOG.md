@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.30.1](https://github.com/d0ugal/graith/compare/v0.30.0...v0.30.1) (2026-05-17)
+
+
+### Bug Fixes
+
+* address tribunal review findings for terminal reset ([df6464b](https://github.com/d0ugal/graith/commit/df6464bc210873c36f4e6bddfd5bc2a2e8330478))
+* reset terminal state on detach to clean up screen and mouse modes ([0991065](https://github.com/d0ugal/graith/commit/0991065c64b0f1446a3caa8315cd2315c0b2b3c3))
+
 ## [0.30.0](https://github.com/d0ugal/graith/compare/v0.29.2...v0.30.0) (2026-05-17)
 
 
