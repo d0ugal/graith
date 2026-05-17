@@ -217,8 +217,11 @@ func runAttachByID(c *client.Client, sessionID string) error {
 			}
 			if worktreePath == "" {
 				out.Print("Shell failed: session %s not found\n", sessionID)
-			} else if err := client.RunShellInWorktree(worktreePath); err != nil {
-				out.Print("Shell failed: %s\n", err)
+			} else {
+				resetTerminal()
+				if err := client.RunShellInWorktree(worktreePath); err != nil {
+					out.Print("Shell failed: %s\n", err)
+				}
 			}
 
 			nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
@@ -258,6 +261,7 @@ func runAttachByID(c *client.Client, sessionID string) error {
 			nc, attachResp, err := reconnectToSession(sessionID)
 			if err != nil {
 				out.Print("Could not reconnect: %s\n", err)
+				resetTerminal()
 				return nil
 			}
 			protocol.DecodePayload(attachResp, &info)
@@ -499,14 +503,18 @@ func runAttachByID(c *client.Client, sessionID string) error {
 
 // resetTerminal undoes terminal state that agents (Claude Code, etc.) may have
 // set during the session: alternate screen buffer, mouse tracking, bracketed
-// paste, Kitty keyboard protocol, hidden cursor, and scroll regions.
+// paste, Kitty keyboard protocol, hidden cursor, scroll regions, and text
+// attributes. Safe to call on any terminal — unsupported sequences are ignored.
 func resetTerminal() {
 	fmt.Print("" +
 		"\x1b[r" + // reset scroll region
 		"\x1b[?1049l" + // leave alternate screen buffer
 		"\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l" + // disable mouse tracking
+		"\x1b[?1004l" + // disable focus event reporting
 		"\x1b[?2004l" + // disable bracketed paste
+		"\x1b[?1l\x1b>" + // leave application cursor keys and keypad mode
 		"\x1b[<u" + // pop Kitty keyboard protocol
+		"\x1b[0m" + // reset text attributes (bold, color, etc.)
 		"\x1b[?25h" + // show cursor
 		"\x1b[2J\x1b[H", // clear screen, cursor home
 	)
