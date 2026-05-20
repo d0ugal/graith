@@ -5,27 +5,27 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/d0ugal/graith/internal/config"
 )
 
 func TestDetectPromptInjection(t *testing.T) {
 	tests := []struct {
-		command string
-		want    promptInjectionMethod
+		agentName string
+		want      promptInjectionMethod
 	}{
 		{"claude", promptInjectionAppendSystemPrompt},
-		{"/usr/local/bin/claude", promptInjectionAppendSystemPrompt},
-		{"agent", promptInjectionCursorRules},
-		{"/opt/homebrew/bin/agent", promptInjectionCursorRules},
+		{"cursor", promptInjectionCursorRules},
 		{"codex", promptInjectionNone},
 		{"opencode", promptInjectionNone},
 		{"agy", promptInjectionNone},
 		{"", promptInjectionNone},
 	}
 	for _, tt := range tests {
-		t.Run(tt.command, func(t *testing.T) {
-			got := detectPromptInjection(tt.command)
+		t.Run(tt.agentName, func(t *testing.T) {
+			got := detectPromptInjection(tt.agentName)
 			if got != tt.want {
-				t.Errorf("detectPromptInjection(%q) = %d, want %d", tt.command, got, tt.want)
+				t.Errorf("detectPromptInjection(%q) = %d, want %d", tt.agentName, got, tt.want)
 			}
 		})
 	}
@@ -51,7 +51,7 @@ func TestInjectPrompt_Claude(t *testing.T) {
 func TestInjectPrompt_Cursor(t *testing.T) {
 	dir := t.TempDir()
 	sm := &SessionManager{}
-	args, err := sm.injectPrompt("agent", dir)
+	args, err := sm.injectPrompt("cursor", dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func TestInjectPrompt_Unknown(t *testing.T) {
 
 func TestInjectPrompt_CursorEmptyWorktree(t *testing.T) {
 	sm := &SessionManager{}
-	args, err := sm.injectPrompt("agent", "")
+	args, err := sm.injectPrompt("cursor", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,15 +156,53 @@ func TestPromptInjectionEnabled(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Import cycle prevention: test the logic directly
-			enabled := true
-			if tt.val != nil {
-				enabled = *tt.val
-			}
-			if enabled != tt.want {
-				t.Errorf("got %v, want %v", enabled, tt.want)
+			agent := config.Agent{InjectPrompt: tt.val}
+			if got := agent.PromptInjectionEnabled(); got != tt.want {
+				t.Errorf("got %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestCleanupCursorRule_RemovesEmptyCursorDir(t *testing.T) {
+	dir := t.TempDir()
+
+	rulesDir := filepath.Join(dir, ".cursor", "rules")
+	if err := os.MkdirAll(rulesDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	rulePath := filepath.Join(rulesDir, "graith.mdc")
+	if err := os.WriteFile(rulePath, []byte("test"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cleanupCursorRule(dir)
+
+	cursorDir := filepath.Join(dir, ".cursor")
+	if _, err := os.Stat(cursorDir); !os.IsNotExist(err) {
+		t.Error("empty .cursor dir should be removed after cleanup")
+	}
+}
+
+func TestCleanupCursorRule_PreservesCursorDirWithOtherFiles(t *testing.T) {
+	dir := t.TempDir()
+
+	cursorDir := filepath.Join(dir, ".cursor")
+	rulesDir := filepath.Join(cursorDir, "rules")
+	if err := os.MkdirAll(rulesDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(rulesDir, "graith.mdc"), []byte("test"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cursorDir, "settings.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cleanupCursorRule(dir)
+
+	if _, err := os.Stat(cursorDir); err != nil {
+		t.Error(".cursor dir should be preserved when other files exist")
 	}
 }
 
