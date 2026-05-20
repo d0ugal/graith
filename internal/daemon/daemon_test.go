@@ -2776,3 +2776,90 @@ func TestDeleteWithChildrenIdempotent(t *testing.T) {
 		t.Error("child should be removed from state")
 	}
 }
+
+func createTestSession(sm *SessionManager, name string) string {
+	id := generateID()
+	sm.state.Sessions[id] = &SessionState{
+		ID:     id,
+		Name:   name,
+		Status: StatusRunning,
+	}
+	return id
+}
+
+func TestSetSummary(t *testing.T) {
+	sm := newTestSessionManager(t)
+	id := createTestSession(sm, "test-session")
+
+	if err := sm.SetSummary(id, "Exploring code", 0); err != nil {
+		t.Fatalf("SetSummary failed: %v", err)
+	}
+
+	s := sm.state.Sessions[id]
+	if s.SummaryText != "Exploring code" {
+		t.Errorf("SummaryText = %q, want %q", s.SummaryText, "Exploring code")
+	}
+	if s.SummarySetAt == nil {
+		t.Fatal("SummarySetAt should not be nil")
+	}
+	if s.SummaryTTL != 0 {
+		t.Errorf("SummaryTTL = %d, want 0", s.SummaryTTL)
+	}
+}
+
+func TestSetSummary_WithTTL(t *testing.T) {
+	sm := newTestSessionManager(t)
+	id := createTestSession(sm, "test-session")
+
+	if err := sm.SetSummary(id, "Waiting for CI", 600); err != nil {
+		t.Fatalf("SetSummary failed: %v", err)
+	}
+
+	s := sm.state.Sessions[id]
+	if s.SummaryTTL != 600 {
+		t.Errorf("SummaryTTL = %d, want 600", s.SummaryTTL)
+	}
+}
+
+func TestSetSummary_Clear(t *testing.T) {
+	sm := newTestSessionManager(t)
+	id := createTestSession(sm, "test-session")
+
+	sm.SetSummary(id, "Working", 0)
+	if err := sm.ClearSummary(id); err != nil {
+		t.Fatalf("ClearSummary failed: %v", err)
+	}
+
+	s := sm.state.Sessions[id]
+	if s.SummaryText != "" {
+		t.Errorf("SummaryText should be empty, got %q", s.SummaryText)
+	}
+	if s.SummarySetAt != nil {
+		t.Error("SummarySetAt should be nil")
+	}
+}
+
+func TestSetSummary_NotFound(t *testing.T) {
+	sm := newTestSessionManager(t)
+	if err := sm.SetSummary("nonexistent", "text", 0); err == nil {
+		t.Error("expected error for nonexistent session")
+	}
+}
+
+func TestSetSummary_Validation(t *testing.T) {
+	sm := newTestSessionManager(t)
+	id := createTestSession(sm, "test-session")
+
+	longText := strings.Repeat("a", 101)
+	if err := sm.SetSummary(id, longText, 0); err == nil {
+		t.Error("expected error for text exceeding 100 bytes")
+	}
+
+	if err := sm.SetSummary(id, "has\nnewline", 0); err != nil {
+		t.Fatalf("should succeed with control chars stripped: %v", err)
+	}
+	s := sm.state.Sessions[id]
+	if strings.Contains(s.SummaryText, "\n") {
+		t.Error("newline should have been stripped")
+	}
+}

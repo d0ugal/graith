@@ -280,6 +280,26 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					}{u.SessionID})
 				}
 
+			case "set_status":
+				var m protocol.SetStatusMsg
+				if err := protocol.DecodePayload(msg, &m); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid set_status message"})
+					continue
+				}
+				if m.Clear {
+					if err := sm.ClearSummary(m.SessionID); err != nil {
+						sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+					} else {
+						sendControl("status_set", protocol.StatusSetMsg{SessionID: m.SessionID})
+					}
+				} else {
+					if err := sm.SetSummary(m.SessionID, m.Text, m.TTLSeconds); err != nil {
+						sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+					} else {
+						sendControl("status_set", protocol.StatusSetMsg{SessionID: m.SessionID})
+					}
+				}
+
 			case "resume":
 				var r protocol.ResumeMsg
 				if err := protocol.DecodePayload(msg, &r); err != nil {
