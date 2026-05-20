@@ -103,6 +103,7 @@ gr delete auth-rewrite
 | `gr info` | Show info for the current session (when inside a worktree) |
 | `gr logs <name>` (`l`) | Show a session's output without attaching |
 | `gr type <name> <text>` (`t`) | Type text into a session's stdin |
+| `gr status [session] <text>` | Set a status summary visible in the session picker |
 | `gr msg ...` (`m`) | Inter-agent messaging — see below |
 | `gr dashboard` | Live-updating dashboard of all sessions |
 | `gr approvals` | List sessions waiting for approval |
@@ -188,6 +189,37 @@ gr msg send --children "rebase on main and re-run tests"
 
 # From a child session, message the parent
 gr msg send --parent "tests are green, ready for review"
+```
+
+## Status summaries
+
+Agents can report what they're doing with `gr status`. The summary appears in the session picker overlay (ctrl+b w) and in `gr list`.
+
+```bash
+# Set status (auto-detects session when inside one)
+gr status "Exploring code"
+gr status "Waiting for CI"
+gr status "Done"
+
+# Set with a custom TTL for long-running waits
+gr status --ttl 30m "Waiting for CI"
+
+# Clear explicitly
+gr status --clear
+
+# Set from outside the session
+gr status my-session "Reviewing PR"
+```
+
+Statuses auto-expire when the agent is actively producing output but hasn't updated the status (default 5 minutes). When idle, the status fades but remains visible — so "Done" on a stopped session stays put.
+
+The session picker also auto-derives a summary from hook reports (e.g. "Using Bash", "Using Edit") when no explicit status is set.
+
+Configure the default TTL in `config.toml`:
+
+```toml
+[status]
+ttl = "5m"    # default
 ```
 
 ## Driving sessions remotely
