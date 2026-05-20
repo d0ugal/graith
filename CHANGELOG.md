@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.31.0](https://github.com/d0ugal/graith/compare/v0.30.1...v0.31.0) (2026-05-20)
+
+
+### Features
+
+* add starred sessions concept ([78cad2d](https://github.com/d0ugal/graith/commit/78cad2d8fb02f0ae9317d33f7c61625333c0552b))
+
+
+### Bug Fixes
+
+* address tribunal review findings for starred sessions ([2ffb422](https://github.com/d0ugal/graith/commit/2ffb42288633a7e36ee9187917b33e0bc42d2211))
+* update github.com/charmbracelet/ultraviolet digest to 2399af7 ([648848d](https://github.com/d0ugal/graith/commit/648848d401b1b9f66b5e1851d2c79418430ed120))
+* update module modernc.org/libc to v1.73.4 ([2c44d21](https://github.com/d0ugal/graith/commit/2c44d217dd33ff3efebdc5fef38c6d1b55de987c))
+
 ## [0.30.1](https://github.com/d0ugal/graith/compare/v0.30.0...v0.30.1) (2026-05-17)
 
 
