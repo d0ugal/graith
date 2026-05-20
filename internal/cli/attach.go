@@ -54,7 +54,7 @@ func runAttach(cmd *cobra.Command, name string) error {
 	}
 
 	if name == "" {
-		result := client.RunOverlay(list.Sessions, "", previewFetcher(), deleteSession, paths.Profile)
+		result := client.RunOverlay(list.Sessions, "", previewFetcher(), deleteSession, toggleStar, paths.Profile)
 		if result == nil {
 			return nil
 		}
@@ -159,7 +159,7 @@ func runAttachByID(c *client.Client, sessionID string) error {
 			var list protocol.SessionListMsg
 			protocol.DecodePayload(listResp, &list)
 
-			overlayResult := client.RunOverlay(list.Sessions, sessionID, previewFetcher(), deleteSession, paths.Profile)
+			overlayResult := client.RunOverlay(list.Sessions, sessionID, previewFetcher(), deleteSession, toggleStar, paths.Profile)
 			if overlayResult == nil {
 				restoreScreen(sessionID)
 				nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
@@ -533,6 +533,29 @@ func previewFetcher() func(string) string {
 
 func freshClient() (*client.Client, error) {
 	return client.Connect(cfg, paths, cfgFile)
+}
+
+func toggleStar(sessionID string, star bool) error {
+	sc, err := freshClient()
+	if err != nil {
+		return err
+	}
+	defer sc.Close()
+	if star {
+		sc.SendControl("star", protocol.StarMsg{SessionID: sessionID})
+	} else {
+		sc.SendControl("unstar", protocol.UnstarMsg{SessionID: sessionID})
+	}
+	resp, err := sc.ReadControlResponse()
+	if err != nil {
+		return err
+	}
+	if resp.Type == "error" {
+		var e protocol.ErrorMsg
+		protocol.DecodePayload(resp, &e)
+		return fmt.Errorf("%s", e.Message)
+	}
+	return nil
 }
 
 func deleteSession(sessionID string) error {

@@ -1489,6 +1489,10 @@ func (sm *SessionManager) Delete(id string) error {
 		sm.mu.Unlock()
 		return fmt.Errorf("session %q not found", id)
 	}
+	if sessState.Starred {
+		sm.mu.Unlock()
+		return fmt.Errorf("session %q is starred; unstar it first to delete", id)
+	}
 	if sessState.Status == StatusDeleting {
 		sm.mu.Unlock()
 		return fmt.Errorf("session %q is already being deleted", id)
@@ -1635,6 +1639,10 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 	var creatingIDs []string
 	for _, did := range toDelete {
 		sess := sm.state.Sessions[did]
+		if sess.Starred {
+			sm.log.Info("skipping starred session in bulk delete", "session_id", did, "name", sess.Name)
+			continue
+		}
 		if sess.Status == StatusDeleting {
 			continue
 		}
@@ -1846,6 +1854,10 @@ func (sm *SessionManager) StopWithChildren(rootID string, excludeRoot bool) ([]s
 		if !ok {
 			continue
 		}
+		if sess.Starred {
+			sm.log.Info("skipping starred session in bulk stop", "session_id", id, "name", sess.Name)
+			continue
+		}
 		if sess.Status != StatusRunning {
 			continue
 		}
@@ -1889,6 +1901,30 @@ func (sm *SessionManager) Restart(id string, rows, cols uint16) (SessionState, e
 }
 
 // Rename changes the display name of a session.
+func (sm *SessionManager) Star(id string) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	s, ok := sm.state.Sessions[id]
+	if !ok {
+		return fmt.Errorf("session %q not found", id)
+	}
+	s.Starred = true
+	return sm.saveState()
+}
+
+func (sm *SessionManager) Unstar(id string) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	s, ok := sm.state.Sessions[id]
+	if !ok {
+		return fmt.Errorf("session %q not found", id)
+	}
+	s.Starred = false
+	return sm.saveState()
+}
+
 func (sm *SessionManager) Rename(id, newName string) error {
 	if err := ValidateSessionName(newName); err != nil {
 		return err
