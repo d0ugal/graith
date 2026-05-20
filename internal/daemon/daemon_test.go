@@ -384,7 +384,7 @@ func TestToSessionInfo(t *testing.T) {
 		HookContextPercent: &ctxPct,
 	}
 
-	info := toSessionInfo(sess, config.Default())
+	info := toSessionInfo(sess, config.Default(), nil)
 
 	if info.ID != sess.ID {
 		t.Errorf("ID = %q, want %q", info.ID, sess.ID)
@@ -442,7 +442,7 @@ func TestToSessionInfoNilExitCode(t *testing.T) {
 		CreatedAt: time.Now().UTC(),
 	}
 
-	info := toSessionInfo(sess, config.Default())
+	info := toSessionInfo(sess, config.Default(), nil)
 
 	if info.ExitCode != nil {
 		t.Errorf("ExitCode = %v, want nil", info.ExitCode)
@@ -1114,14 +1114,14 @@ func TestToSessionInfoSharedWorktree(t *testing.T) {
 		CreatedAt:      time.Now().UTC(),
 	}
 
-	info := toSessionInfo(sess, config.Default())
+	info := toSessionInfo(sess, config.Default(), nil)
 
 	if !info.SharedWorktree {
 		t.Error("SharedWorktree = false, want true")
 	}
 
 	sess.SharedWorktree = false
-	info = toSessionInfo(sess, config.Default())
+	info = toSessionInfo(sess, config.Default(), nil)
 	if info.SharedWorktree {
 		t.Error("SharedWorktree = true, want false")
 	}
@@ -2178,13 +2178,13 @@ func TestToSessionInfoInPlace(t *testing.T) {
 		Status:       StatusRunning,
 		CreatedAt:    time.Now().UTC(),
 	}
-	info := toSessionInfo(sess, config.Default())
+	info := toSessionInfo(sess, config.Default(), nil)
 	if !info.InPlace {
 		t.Error("InPlace = false in SessionInfo, want true")
 	}
 
 	sess.InPlace = false
-	info = toSessionInfo(sess, config.Default())
+	info = toSessionInfo(sess, config.Default(), nil)
 	if info.InPlace {
 		t.Error("InPlace = true in SessionInfo, want false")
 	}
@@ -2288,7 +2288,7 @@ func TestToSessionInfoIncludes(t *testing.T) {
 			},
 		},
 	}
-	info := toSessionInfo(sess, config.Default())
+	info := toSessionInfo(sess, config.Default(), nil)
 	if len(info.Includes) != 1 {
 		t.Fatalf("Includes length = %d, want 1", len(info.Includes))
 	}
@@ -2318,7 +2318,7 @@ func TestToSessionInfoNoIncludes(t *testing.T) {
 		Status:    StatusRunning,
 		CreatedAt: time.Now().UTC(),
 	}
-	info := toSessionInfo(sess, config.Default())
+	info := toSessionInfo(sess, config.Default(), nil)
 	if len(info.Includes) != 0 {
 		t.Errorf("Includes length = %d, want 0", len(info.Includes))
 	}
@@ -2447,7 +2447,7 @@ func TestToSessionInfoParentID(t *testing.T) {
 		Status:    StatusRunning,
 		CreatedAt: time.Now().UTC(),
 	}
-	info := toSessionInfo(sess, config.Default())
+	info := toSessionInfo(sess, config.Default(), nil)
 	if info.ParentID != "parent" {
 		t.Errorf("SessionInfo.ParentID = %q, want %q", info.ParentID, "parent")
 	}

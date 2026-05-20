@@ -2161,6 +2161,15 @@ func (sm *SessionManager) GetPTY(id string) (*grpty.Session, bool) {
 	return s, ok
 }
 
+func (sm *SessionManager) getHookReport(sessionID string) *hookReport {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	if hr, ok := sm.hookReports[sessionID]; ok {
+		return &hr
+	}
+	return nil
+}
+
 // StopAll gracefully terminates all running sessions.
 func (sm *SessionManager) StopAll(ctx context.Context) {
 	sm.mu.Lock()
@@ -2348,6 +2357,9 @@ func (sm *SessionManager) detectAgentStatuses() {
 			s.AgentStatus = status
 			s.GitDirty = dirty
 			s.GitUnpushed = unpushed
+			if lastOut := t.pty.LastOutputAt(); !lastOut.IsZero() {
+				s.LastOutputAt = &lastOut
+			}
 			for i := range s.Includes {
 				if i < len(t.includes) {
 					s.Includes[i].dirty = t.includes[i].dirty
