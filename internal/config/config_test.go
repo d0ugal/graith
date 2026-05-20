@@ -1309,3 +1309,46 @@ func TestAgySandboxPathsMergedWithGlobal(t *testing.T) {
 		t.Errorf("merged.ReadDirs = %v, want ~/.gemini included", merged.ReadDirs)
 	}
 }
+
+func TestAgentPromptInjectionEnabled(t *testing.T) {
+	t.Run("nil defaults to true", func(t *testing.T) {
+		a := Agent{}
+		if !a.PromptInjectionEnabled() {
+			t.Error("nil InjectPrompt should default to true")
+		}
+	})
+	t.Run("explicit true", func(t *testing.T) {
+		v := true
+		a := Agent{InjectPrompt: &v}
+		if !a.PromptInjectionEnabled() {
+			t.Error("explicit true should return true")
+		}
+	})
+	t.Run("explicit false", func(t *testing.T) {
+		v := false
+		a := Agent{InjectPrompt: &v}
+		if a.PromptInjectionEnabled() {
+			t.Error("explicit false should return false")
+		}
+	})
+}
+
+func TestLoadAgentInjectPrompt(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	toml := `
+[agents.claude]
+inject_prompt = false
+`
+	if err := os.WriteFile(cfgPath, []byte(toml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claude := cfg.Agents["claude"]
+	if claude.PromptInjectionEnabled() {
+		t.Error("inject_prompt = false should disable prompt injection")
+	}
+}
