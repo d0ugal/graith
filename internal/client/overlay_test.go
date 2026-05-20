@@ -1299,8 +1299,8 @@ func TestView_ShowsCurrentSessionMarker(t *testing.T) {
 	updated, _ := sendWindowSize(m, 150, 40)
 	view := asOverlay(updated).View().Content
 
-	if !strings.Contains(view, "★") {
-		t.Error("view should contain ★ marker for current session")
+	if !strings.Contains(view, "▸") {
+		t.Error("view should contain ▸ marker for current session")
 	}
 }
 
@@ -1776,8 +1776,8 @@ func TestCompactDelegate_RenderCurrentSession(t *testing.T) {
 		if si, ok := item.(sessionItem); ok && si.info.ID == "s1" {
 			var buf strings.Builder
 			d.Render(&buf, l, i, item)
-			if !strings.Contains(buf.String(), "★") {
-				t.Error("current session should have ★ marker")
+			if !strings.Contains(buf.String(), "▸") {
+				t.Error("current session should have ▸ marker")
 			}
 			return
 		}
@@ -1884,9 +1884,9 @@ func TestPad(t *testing.T) {
 func TestColumnWidths_TotalWidth(t *testing.T) {
 	cw := columnWidths{name: 10, status: 8, branch: 15, git: 5, last: 4}
 	got := cw.totalWidth()
-	// 6 + 10 + 2 + 8 + 2 + 15 + 2 + 5 + 2 + 4 + 4 = 60
-	if got != 60 {
-		t.Errorf("totalWidth() = %d, want 60", got)
+	// 7 + 10 + 2 + 8 + 2 + 15 + 2 + 5 + 2 + 4 + 4 = 61
+	if got != 61 {
+		t.Errorf("totalWidth() = %d, want 61", got)
 	}
 }
 
@@ -1982,14 +1982,18 @@ func TestViewModeCycling(t *testing.T) {
 		t.Errorf("NeedsAttention.next() = %d, want viewActive", v)
 	}
 	v = v.next()
+	if v != viewStarred {
+		t.Errorf("Active.next() = %d, want viewStarred", v)
+	}
+	v = v.next()
 	if v != viewAll {
-		t.Errorf("Active.next() = %d, want viewAll (wrap)", v)
+		t.Errorf("Starred.next() = %d, want viewAll (wrap)", v)
 	}
 
 	v = viewAll
 	v = v.prev()
-	if v != viewActive {
-		t.Errorf("All.prev() = %d, want viewActive (wrap)", v)
+	if v != viewStarred {
+		t.Errorf("All.prev() = %d, want viewStarred (wrap)", v)
 	}
 }
 
@@ -2017,8 +2021,14 @@ func TestOverlay_RightArrowCyclesView(t *testing.T) {
 
 	updated, _ = sendKey(updated, "right")
 	om = asOverlay(updated)
+	if om.view != viewStarred {
+		t.Errorf("after 3x right: view = %d, want viewStarred", om.view)
+	}
+
+	updated, _ = sendKey(updated, "right")
+	om = asOverlay(updated)
 	if om.view != viewAll {
-		t.Errorf("after 3x right: view = %d, want viewAll (wrap)", om.view)
+		t.Errorf("after 4x right: view = %d, want viewAll (wrap)", om.view)
 	}
 }
 
@@ -2029,8 +2039,8 @@ func TestOverlay_LeftArrowCyclesViewBackward(t *testing.T) {
 
 	updated, _ = sendKey(updated, "left")
 	om := asOverlay(updated)
-	if om.view != viewActive {
-		t.Errorf("after left from All: view = %d, want viewActive (wrap)", om.view)
+	if om.view != viewStarred {
+		t.Errorf("after left from All: view = %d, want viewStarred (wrap)", om.view)
 	}
 }
 
