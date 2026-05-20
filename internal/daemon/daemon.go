@@ -1611,9 +1611,14 @@ func (sm *SessionManager) Delete(id string) error {
 func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]string, error) {
 	sm.mu.Lock()
 
-	if _, ok := sm.state.Sessions[id]; !ok {
+	sess, ok := sm.state.Sessions[id]
+	if !ok {
 		sm.mu.Unlock()
 		return nil, fmt.Errorf("session %q not found", id)
+	}
+	if !excludeRoot && sess.Starred {
+		sm.mu.Unlock()
+		return nil, fmt.Errorf("session %q is starred; unstar it first to delete", id)
 	}
 
 	toDelete := sm.collectDescendants(id)
@@ -1909,6 +1914,9 @@ func (sm *SessionManager) Star(id string) error {
 	if !ok {
 		return fmt.Errorf("session %q not found", id)
 	}
+	if s.Status == StatusDeleting {
+		return fmt.Errorf("session %q is being deleted", id)
+	}
 	s.Starred = true
 	return sm.saveState()
 }
@@ -1920,6 +1928,9 @@ func (sm *SessionManager) Unstar(id string) error {
 	s, ok := sm.state.Sessions[id]
 	if !ok {
 		return fmt.Errorf("session %q not found", id)
+	}
+	if s.Status == StatusDeleting {
+		return fmt.Errorf("session %q is being deleted", id)
 	}
 	s.Starred = false
 	return sm.saveState()
