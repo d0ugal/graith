@@ -1112,6 +1112,9 @@ func (sm *SessionManager) watchSession(id string, sess *grpty.Session) {
 			s.StatusChangedAt = time.Now()
 			s.ExitCode = &exitCode
 			s.PID = 0
+			if lastOut := sess.LastOutputAt(); !lastOut.IsZero() {
+				s.LastOutputAt = &lastOut
+			}
 			if err := sm.saveState(); err != nil {
 				sm.log.Error("failed to save state after session exit", "id", id, "err", err)
 			}
