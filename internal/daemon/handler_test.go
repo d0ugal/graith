@@ -1666,6 +1666,8 @@ func TestNullPayloadRejected(t *testing.T) {
 		{"status_report", "invalid status_report"},
 		{"approval_request", "invalid approval_request"},
 		{"approval_respond", "invalid approval_respond"},
+		{"star", "invalid star message"},
+		{"unstar", "invalid unstar message"},
 	}
 
 	for _, tt := range types {
