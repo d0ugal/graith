@@ -434,34 +434,26 @@ func TestDisplayGit(t *testing.T) {
 	}
 }
 
-// --- displayLastActive ---
+// --- displayLastOutput ---
 
-func TestDisplayLastActive_CurrentSession(t *testing.T) {
-	s := protocol.SessionInfo{ID: "s1", CreatedAt: time.Now().Format(time.RFC3339)}
-	got := displayLastActive(s, "s1")
-	if got != "now" {
-		t.Errorf("current session should show 'now', got %q", got)
-	}
-}
-
-func TestDisplayLastActive_UsesLastAttached(t *testing.T) {
+func TestDisplayLastOutput_UsesLastOutputAt(t *testing.T) {
 	s := protocol.SessionInfo{
-		ID:             "s1",
-		CreatedAt:      time.Now().Add(-24 * time.Hour).Format(time.RFC3339),
-		LastAttachedAt: time.Now().Add(-5 * time.Minute).Format(time.RFC3339),
+		ID:           "s1",
+		CreatedAt:    time.Now().Add(-24 * time.Hour).Format(time.RFC3339),
+		LastOutputAt: time.Now().Add(-5 * time.Minute).Format(time.RFC3339),
 	}
-	got := displayLastActive(s, "other")
+	got := displayLastOutput(s)
 	if got != "5m" {
-		t.Errorf("should use LastAttachedAt, got %q", got)
+		t.Errorf("should use LastOutputAt, got %q", got)
 	}
 }
 
-func TestDisplayLastActive_FallsBackToCreated(t *testing.T) {
+func TestDisplayLastOutput_FallsBackToCreated(t *testing.T) {
 	s := protocol.SessionInfo{
 		ID:        "s1",
 		CreatedAt: time.Now().Add(-2 * time.Hour).Format(time.RFC3339),
 	}
-	got := displayLastActive(s, "other")
+	got := displayLastOutput(s)
 	if got != "2h" {
 		t.Errorf("should fall back to CreatedAt, got %q", got)
 	}
@@ -550,24 +542,24 @@ func TestComputeColumnWidths_MinimumWidths(t *testing.T) {
 	if cw.status < 6 {
 		t.Errorf("status should have minimum width 6, got %d", cw.status)
 	}
-	if cw.branch < 6 {
-		t.Errorf("branch should have minimum width 6, got %d", cw.branch)
+	if cw.summary < 7 {
+		t.Errorf("summary should have minimum width 7, got %d", cw.summary)
 	}
 }
 
-func TestComputeColumnWidths_BranchStripping(t *testing.T) {
+func TestComputeColumnWidths_SummaryWidth(t *testing.T) {
 	sessions := []protocol.SessionInfo{
 		{
-			ID:        "s1",
-			Name:      "x",
-			Branch:    "user/repo/short",
-			Status:    "running",
-			CreatedAt: time.Now().Format(time.RFC3339),
+			ID:          "s1",
+			Name:        "x",
+			Status:      "running",
+			SummaryText: "fixing the overlay bug",
+			CreatedAt:   time.Now().Format(time.RFC3339),
 		},
 	}
 	cw := computeColumnWidths(sessions, "")
-	if cw.branch < lipgloss.Width("short") {
-		t.Errorf("branch width %d should be at least width(%q)", cw.branch, "short")
+	if cw.summary < lipgloss.Width("fixing the overlay bug") {
+		t.Errorf("summary width %d should be at least width(%q)", cw.summary, "fixing the overlay bug")
 	}
 }
 
@@ -1258,7 +1250,7 @@ func TestView_ShowsColumnHeaders(t *testing.T) {
 	updated, _ := sendWindowSize(m, 150, 40)
 	view := asOverlay(updated).View().Content
 
-	for _, header := range []string{"Session", "Status", "Branch", "Git", "Last"} {
+	for _, header := range []string{"Session", "Status", "Summary", "Git", "Output"} {
 		if !strings.Contains(view, header) {
 			t.Errorf("view should contain column header %q", header)
 		}
@@ -1785,11 +1777,11 @@ func TestCompactDelegate_RenderCurrentSession(t *testing.T) {
 	t.Fatal("s1 not found in items")
 }
 
-func TestCompactDelegate_RenderBranchDash(t *testing.T) {
+func TestCompactDelegate_RenderSummary(t *testing.T) {
 	sessions := []protocol.SessionInfo{
 		{
 			ID: "s1", Name: "fix-overlay", RepoName: "repo",
-			Status: "running", Branch: "d0ugal/graith/fix-overlay",
+			Status: "running", SummaryText: "fixing the overlay",
 			CreatedAt: time.Now().Format(time.RFC3339),
 		},
 	}
@@ -1800,8 +1792,8 @@ func TestCompactDelegate_RenderBranchDash(t *testing.T) {
 
 	var buf strings.Builder
 	d.Render(&buf, l, 1, items[1])
-	if !strings.Contains(buf.String(), "—") {
-		t.Error("branch matching name should show —")
+	if !strings.Contains(buf.String(), "fixing the overlay") {
+		t.Error("render should show summary text")
 	}
 }
 
@@ -1882,7 +1874,7 @@ func TestPad(t *testing.T) {
 // --- columnWidths.totalWidth ---
 
 func TestColumnWidths_TotalWidth(t *testing.T) {
-	cw := columnWidths{name: 10, status: 8, branch: 15, git: 5, last: 4}
+	cw := columnWidths{name: 10, status: 8, summary: 15, git: 5, output: 4}
 	got := cw.totalWidth()
 	// 7 + 10 + 2 + 8 + 2 + 15 + 2 + 5 + 2 + 4 + 4 = 61
 	if got != 61 {
