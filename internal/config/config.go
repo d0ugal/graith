@@ -31,6 +31,7 @@ type Config struct {
 	Messages         Messages          `toml:"messages"`
 	Sandbox          SandboxConfig     `toml:"sandbox"`
 	Approvals        Approvals         `toml:"approvals"`
+	Status           StatusConfig      `toml:"status"`
 	MCPServers       []MCPServerConfig `toml:"mcp_servers"`
 	Agents           map[string]Agent  `toml:"agents"`
 }
@@ -111,6 +112,21 @@ type Approvals struct {
 	AutoPop bool   `toml:"auto_pop"`
 	Timeout string `toml:"timeout"`
 	Command string `toml:"command"`
+}
+
+type StatusConfig struct {
+	TTL string `toml:"ttl"`
+}
+
+func (s StatusConfig) TTLDuration() time.Duration {
+	if s.TTL == "" {
+		return 5 * time.Minute
+	}
+	d, err := ParseDurationWithDays(s.TTL)
+	if err != nil {
+		return 5 * time.Minute
+	}
+	return d
 }
 
 func (a Approvals) TimeoutDuration() time.Duration {
