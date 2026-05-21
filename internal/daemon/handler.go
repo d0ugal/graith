@@ -545,6 +545,10 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "document store not available"})
 					continue
 				}
+				if m.Repo == "" || m.Key == "" {
+					sendControl("error", protocol.ErrorMsg{Message: "repo and key are required"})
+					continue
+				}
 				repo := config.ResolvePath(m.Repo)
 				doc, err := sm.docStore.Get(repo, m.Key)
 				if err != nil {
@@ -579,6 +583,10 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "document store not available"})
 					continue
 				}
+				if m.Repo == "" {
+					sendControl("error", protocol.ErrorMsg{Message: "repo is required"})
+					continue
+				}
 				repo := config.ResolvePath(m.Repo)
 				docs, err := sm.docStore.List(repo, m.Prefix)
 				if err != nil {
@@ -607,6 +615,10 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				}
 				if sm.docStore == nil {
 					sendControl("error", protocol.ErrorMsg{Message: "document store not available"})
+					continue
+				}
+				if m.Repo == "" || m.Key == "" {
+					sendControl("error", protocol.ErrorMsg{Message: "repo and key are required"})
 					continue
 				}
 				repo := config.ResolvePath(m.Repo)

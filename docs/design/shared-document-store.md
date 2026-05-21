@@ -158,7 +158,8 @@ Repo resolution order for scoping:
 3. CWD's git root (`git rev-parse --show-toplevel`)
 
 Agent mode auto-detection applies: when `gr` detects it's running inside an agent session, it
-auto-enables JSON output, so `gr store get` and `gr store list` return structured JSON.
+auto-enables JSON output for `gr store list`. `gr store get` always outputs the raw document
+body regardless of mode, so it can be piped directly into files or other commands.
 
 #### Protocol Messages
 
