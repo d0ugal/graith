@@ -86,6 +86,10 @@ func (sm *SessionManager) SetMsgStore(ms *MsgStore) {
 	sm.messages = ms
 }
 
+func (sm *SessionManager) SetDocStore(ds *DocStore) {
+	sm.docStore = ds
+}
+
 func (sm *SessionManager) SetMCPManager(mm *MCPManager) {
 	sm.mcpManager = mm
 }
