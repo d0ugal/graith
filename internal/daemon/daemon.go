@@ -62,6 +62,7 @@ type SessionManager struct {
 	configFile       string
 	upgradeCh        chan string
 	messages         *MsgStore
+	docStore         *DocStore
 	mcpManager       *MCPManager
 	startedAt        time.Time
 }
@@ -2678,6 +2679,13 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 	}
 	defer func() { _ = msgStore.Close() }()
 	sm.messages = msgStore
+
+	docStore, err := NewDocStore(paths.DocStoreDB)
+	if err != nil {
+		return fmt.Errorf("open document store: %w", err)
+	}
+	defer func() { _ = docStore.Close() }()
+	sm.docStore = docStore
 
 	mcpMgr := NewMCPManager(cfg, []config.MCPServerConfig{graithMCPServer()}, paths.LogDir, log)
 	sm.mcpManager = mcpMgr
