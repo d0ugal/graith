@@ -205,6 +205,47 @@ the right choice when you want to provide context to one agent. Use
 
 Use `--ack` to mark messages as read.
 
+### Shared document store
+
+Sessions can persist documents that survive worktree deletion:
+
+```bash
+# Store a document (--type is required: md, json, text, or MIME type)
+gr store put design/api.md --type md --file ./api-design.md
+gr store put design/api.md --type md "# API Design\n\nEndpoints: ..."
+echo '{"score": 85}' | gr store put tribunal/2026-06-15 --type json
+
+# Retrieve a document (always outputs raw body)
+gr store get design/api.md
+
+# List documents (optional prefix filter)
+gr store list
+gr store list design/
+gr store ls tribunal/
+
+# Remove a document
+gr store rm design/api.md
+
+# Explicit repo scoping (when not in a session)
+gr store list --repo ~/Code/graith
+```
+
+Documents are scoped per-repo — sessions for `~/Code/graith` share one
+namespace, sessions for `~/Code/other` share another. Keys are
+slash-separated paths (e.g. `design/api.md`, `research/findings.json`).
+The repo path is canonicalized by the daemon, so different path spellings
+for the same repo resolve to the same namespace.
+
+Two content types cover the main use cases:
+- `text/markdown` (`--type md`) — design docs, research notes, plans
+- `application/json` (`--type json`) — tribunal reports, build results, metrics
+
+Use `gr store` for artifacts you want to keep but don't want to commit:
+design docs, research notes, build outputs, shared context between agents.
+For historical data (e.g. repeated tribunal runs), use timestamped keys
+like `tribunal/2026-06-15T14:30` and `gr store list tribunal/` to see
+the history.
+
 ### Typing into sessions remotely
 
 ```bash
