@@ -281,6 +281,15 @@ func repoHash(repoPath string) string {
 	return hex.EncodeToString(b)[:12]
 }
 
+func (sm *SessionManager) repoShareDir(repoRoot string) (string, error) {
+	repoName := filepath.Base(repoRoot)
+	dir := filepath.Join(sm.paths.ShareDir, repoName, repoHash(repoRoot))
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", fmt.Errorf("create share dir: %w", err)
+	}
+	return dir, nil
+}
+
 // Create starts a new agent session, either in a git worktree, in-place
 // in an existing repo, or as a standalone scratch session (when noRepo is true).
 //
@@ -646,6 +655,16 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 	if inPlace {
 		env["GRAITH_IN_PLACE"] = "true"
 	}
+	if repoRoot != "" {
+		shareDir, err := sm.repoShareDir(repoRoot)
+		if err != nil {
+			cleanupOnError()
+			rollbackState()
+			return SessionState{}, err
+		}
+		env["GRAITH_SHARE_PATH"] = shareDir
+		env["TMPDIR"] = shareDir
+	}
 	for _, inc := range includes {
 		env[config.IncludeEnvVarName(inc.RepoName)] = inc.WorktreePath
 	}
@@ -694,6 +713,9 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 			envKeys = append(envKeys, k)
 		}
 		opts := sm.sandboxOptsFromConfig(merged, id, worktreePath, envKeys, agentHooks)
+		if shareDir := env["GRAITH_SHARE_PATH"]; shareDir != "" {
+			opts.WriteDirs = append(opts.WriteDirs, shareDir)
+		}
 		if len(includes) > 0 {
 			opts.WriteDirs = append(opts.WriteDirs, sm.deriveSandboxIncludesWriteDirs(includes)...)
 		}
@@ -1004,6 +1026,16 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 	if sm.paths.Profile != "" {
 		env["GRAITH_PROFILE"] = sm.paths.Profile
 	}
+	if repoRoot != "" {
+		shareDir, err := sm.repoShareDir(repoRoot)
+		if err != nil {
+			forkCleanup()
+			rollbackState()
+			return SessionState{}, err
+		}
+		env["GRAITH_SHARE_PATH"] = shareDir
+		env["TMPDIR"] = shareDir
+	}
 	for _, inc := range forkIncludes {
 		env[config.IncludeEnvVarName(inc.RepoName)] = inc.WorktreePath
 	}
@@ -1046,6 +1078,9 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 			envKeys = append(envKeys, k)
 		}
 		opts := sm.sandboxOptsFromConfig(merged, id, worktreePath, envKeys, sourceAgentHooks)
+		if shareDir := env["GRAITH_SHARE_PATH"]; shareDir != "" {
+			opts.WriteDirs = append(opts.WriteDirs, shareDir)
+		}
 		if len(forkIncludes) > 0 {
 			opts.WriteDirs = append(opts.WriteDirs, sm.deriveSandboxIncludesWriteDirs(forkIncludes)...)
 		}
@@ -1315,6 +1350,7 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 	// Snapshot session fields for use outside the lock.
 	sessName := sessState.Name
 	sessAgent := sessState.Agent
+	sessRepoPath := sessState.RepoPath
 	sessWorktreePath := sessState.WorktreePath
 	sessAgentSessionID := sessState.AgentSessionID
 	sessModel := sessState.Model
@@ -1378,6 +1414,15 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 	if sessInPlace {
 		env["GRAITH_IN_PLACE"] = "true"
 	}
+	if sessRepoPath != "" {
+		shareDir, err := sm.repoShareDir(sessRepoPath)
+		if err != nil {
+			rollbackState()
+			return SessionState{}, err
+		}
+		env["GRAITH_SHARE_PATH"] = shareDir
+		env["TMPDIR"] = shareDir
+	}
 
 	for _, inc := range sessIncludes {
 		if !git.IsInsideGitRepo(inc.WorktreePath) {
@@ -1424,6 +1469,9 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 			envKeys = append(envKeys, k)
 		}
 		opts := sm.sandboxOptsFromConfig(merged, id, sessWorktreePath, envKeys, sessAgentHooks)
+		if shareDir := env["GRAITH_SHARE_PATH"]; shareDir != "" {
+			opts.WriteDirs = append(opts.WriteDirs, shareDir)
+		}
 		if len(sessIncludes) > 0 {
 			opts.WriteDirs = append(opts.WriteDirs, sm.deriveSandboxIncludesWriteDirs(sessIncludes)...)
 		}
@@ -2595,6 +2643,7 @@ func (sm *SessionManager) sandboxOptsFromConfig(merged config.SandboxConfig, ses
 		readDirs = append(readDirs, filepath.Dir(grBin))
 	}
 	readDirs = append(readDirs, sm.paths.RuntimeDir)
+	readDirs = append(readDirs, sm.paths.ShareDir)
 
 	return sandbox.WrapOpts{
 		WorktreeDir:      worktreePath,
