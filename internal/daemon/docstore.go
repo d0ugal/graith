@@ -112,9 +112,6 @@ func (s *DocStore) Put(repo, key, body, contentType, authorID, authorName string
 // Get retrieves a document by repo and key. Returns nil, nil when the document
 // does not exist.
 func (s *DocStore) Get(repo, key string) (*Document, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	var d Document
 	err := s.db.QueryRow(`
 		SELECT repo, key, body, content_type, author_id, author_name, created_at, updated_at
@@ -133,9 +130,6 @@ func (s *DocStore) Get(repo, key string) (*Document, error) {
 // List returns metadata (no body) for all documents in repo whose key starts
 // with prefix. An empty prefix returns all documents in the repo.
 func (s *DocStore) List(repo, prefix string) ([]Document, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	var (
 		rows *sql.Rows
 		err  error
@@ -147,21 +141,27 @@ func (s *DocStore) List(repo, prefix string) ([]Document, error) {
 			WHERE repo = ?
 			ORDER BY key ASC
 		`, repo)
-	} else {
-		end := prefixEnd(prefix)
+	} else if end := prefixEnd(prefix); end != "" {
 		rows, err = s.db.Query(`
 			SELECT repo, key, content_type, author_id, author_name, created_at, updated_at
 			FROM documents
 			WHERE repo = ? AND key >= ? AND key < ?
 			ORDER BY key ASC
 		`, repo, prefix, end)
+	} else {
+		rows, err = s.db.Query(`
+			SELECT repo, key, content_type, author_id, author_name, created_at, updated_at
+			FROM documents
+			WHERE repo = ? AND key >= ?
+			ORDER BY key ASC
+		`, repo, prefix)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("list documents: %w", err)
 	}
 	defer rows.Close()
 
-	var docs []Document
+	docs := []Document{}
 	for rows.Next() {
 		var d Document
 		if err := rows.Scan(&d.Repo, &d.Key, &d.ContentType, &d.AuthorID, &d.AuthorName, &d.CreatedAt, &d.UpdatedAt); err != nil {
@@ -197,7 +197,5 @@ func prefixEnd(prefix string) string {
 			return string(b[:i+1])
 		}
 	}
-	// All bytes were 0xff — no upper bound exists; return the maximum possible
-	// string for the type (not reachable in practice for normal key names).
-	return "\xff"
+	return ""
 }
