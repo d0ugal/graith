@@ -514,6 +514,108 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					}{streams})
 				}
 
+			case "store_put":
+				var m protocol.StorePutMsg
+				if err := protocol.DecodePayload(msg, &m); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid store_put message"})
+					continue
+				}
+				if sm.docStore == nil {
+					sendControl("error", protocol.ErrorMsg{Message: "document store not available"})
+					continue
+				}
+				if m.Repo == "" || m.Key == "" || m.ContentType == "" {
+					sendControl("error", protocol.ErrorMsg{Message: "repo, key, and content_type are required"})
+					continue
+				}
+				repo := config.ResolvePath(m.Repo)
+				if err := sm.docStore.Put(repo, m.Key, m.Body, m.ContentType, m.AuthorID, m.AuthorName); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+				} else {
+					sendControl("store_ok", struct{}{})
+				}
+
+			case "store_get":
+				var m protocol.StoreGetMsg
+				if err := protocol.DecodePayload(msg, &m); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid store_get message"})
+					continue
+				}
+				if sm.docStore == nil {
+					sendControl("error", protocol.ErrorMsg{Message: "document store not available"})
+					continue
+				}
+				repo := config.ResolvePath(m.Repo)
+				doc, err := sm.docStore.Get(repo, m.Key)
+				if err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+					continue
+				}
+				if doc == nil {
+					sendControl("store_get_response", protocol.StoreGetResponseMsg{Found: false})
+				} else {
+					sendControl("store_get_response", protocol.StoreGetResponseMsg{
+						Found: true,
+						Document: &protocol.StoreDocument{
+							Repo:        doc.Repo,
+							Key:         doc.Key,
+							Body:        doc.Body,
+							ContentType: doc.ContentType,
+							AuthorID:    doc.AuthorID,
+							AuthorName:  doc.AuthorName,
+							CreatedAt:   doc.CreatedAt,
+							UpdatedAt:   doc.UpdatedAt,
+						},
+					})
+				}
+
+			case "store_list":
+				var m protocol.StoreListMsg
+				if err := protocol.DecodePayload(msg, &m); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid store_list message"})
+					continue
+				}
+				if sm.docStore == nil {
+					sendControl("error", protocol.ErrorMsg{Message: "document store not available"})
+					continue
+				}
+				repo := config.ResolvePath(m.Repo)
+				docs, err := sm.docStore.List(repo, m.Prefix)
+				if err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+					continue
+				}
+				result := make([]protocol.StoreDocument, len(docs))
+				for i, d := range docs {
+					result[i] = protocol.StoreDocument{
+						Repo:        d.Repo,
+						Key:         d.Key,
+						ContentType: d.ContentType,
+						AuthorID:    d.AuthorID,
+						AuthorName:  d.AuthorName,
+						CreatedAt:   d.CreatedAt,
+						UpdatedAt:   d.UpdatedAt,
+					}
+				}
+				sendControl("store_list_response", protocol.StoreListResponseMsg{Documents: result})
+
+			case "store_delete":
+				var m protocol.StoreDeleteMsg
+				if err := protocol.DecodePayload(msg, &m); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid store_delete message"})
+					continue
+				}
+				if sm.docStore == nil {
+					sendControl("error", protocol.ErrorMsg{Message: "document store not available"})
+					continue
+				}
+				repo := config.ResolvePath(m.Repo)
+				if err := sm.docStore.Delete(repo, m.Key); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+				} else {
+					sendControl("store_ok", struct{}{})
+				}
+
 			case "approval_request":
 				var req protocol.ApprovalRequestMsg
 				if err := protocol.DecodePayload(msg, &req); err != nil {
