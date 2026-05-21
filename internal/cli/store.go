@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"text/tabwriter"
 
@@ -24,7 +25,11 @@ var storeCmd = &cobra.Command{
 // RepoPath (via GRAITH_SESSION_ID), or the CWD git root.
 func resolveRepoPath(c *client.Client) (string, error) {
 	if storeRepoFlag != "" {
-		return storeRepoFlag, nil
+		abs, err := filepath.Abs(storeRepoFlag)
+		if err != nil {
+			return storeRepoFlag, nil
+		}
+		return abs, nil
 	}
 
 	sessionID := os.Getenv("GRAITH_SESSION_ID")
@@ -112,14 +117,16 @@ var storePutCmd = &cobra.Command{
 
 		senderID, senderName := detectSender()
 
-		c.SendControl("store_put", protocol.StorePutMsg{
+		if err := c.SendControl("store_put", protocol.StorePutMsg{
 			Repo:        repo,
 			Key:         key,
 			Body:        body,
 			ContentType: contentType,
 			AuthorID:    senderID,
 			AuthorName:  senderName,
-		})
+		}); err != nil {
+			return err
+		}
 
 		resp, err := c.ReadControlResponse()
 		if err != nil {
@@ -162,10 +169,12 @@ var storeGetCmd = &cobra.Command{
 			return err
 		}
 
-		c.SendControl("store_get", protocol.StoreGetMsg{
+		if err := c.SendControl("store_get", protocol.StoreGetMsg{
 			Repo: repo,
 			Key:  key,
-		})
+		}); err != nil {
+			return err
+		}
 
 		resp, err := c.ReadControlResponse()
 		if err != nil {
@@ -185,7 +194,7 @@ var storeGetCmd = &cobra.Command{
 			return fmt.Errorf("document %q not found", key)
 		}
 
-		fmt.Println(result.Document.Body)
+		fmt.Print(result.Document.Body)
 		return nil
 	},
 }
@@ -193,9 +202,10 @@ var storeGetCmd = &cobra.Command{
 // --- gr store list ---
 
 var storeListCmd = &cobra.Command{
-	Use:   "list [prefix]",
-	Short: "List documents in the store",
-	Args:  cobra.MaximumNArgs(1),
+	Use:     "list [prefix]",
+	Aliases: []string{"ls"},
+	Short:   "List documents in the store",
+	Args:    cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		var prefix string
 		if len(args) > 0 {
@@ -213,10 +223,12 @@ var storeListCmd = &cobra.Command{
 			return err
 		}
 
-		c.SendControl("store_list", protocol.StoreListMsg{
+		if err := c.SendControl("store_list", protocol.StoreListMsg{
 			Repo:   repo,
 			Prefix: prefix,
-		})
+		}); err != nil {
+			return err
+		}
 
 		resp, err := c.ReadControlResponse()
 		if err != nil {
@@ -276,10 +288,12 @@ var storeRmCmd = &cobra.Command{
 			return err
 		}
 
-		c.SendControl("store_delete", protocol.StoreDeleteMsg{
+		if err := c.SendControl("store_delete", protocol.StoreDeleteMsg{
 			Repo: repo,
 			Key:  key,
-		})
+		}); err != nil {
+			return err
+		}
 
 		resp, err := c.ReadControlResponse()
 		if err != nil {
