@@ -7,9 +7,8 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/d0ugal/graith/internal/client"
 	"github.com/d0ugal/graith/internal/config"
-	"github.com/d0ugal/graith/internal/protocol"
+	"github.com/d0ugal/graith/internal/store"
 	"github.com/spf13/cobra"
 )
 
@@ -21,68 +20,63 @@ var storeCmd = &cobra.Command{
 	Short:   "Shared document store",
 }
 
-// resolveRepoPath resolves the repo path from: --repo flag, current session's
-// RepoPath (via GRAITH_SESSION_ID), or the CWD git root.
-func resolveRepoPath(c *client.Client) (string, error) {
+// resolveStoreRepoPath resolves the repo path from: --repo flag,
+// GRAITH_WORKTREE_PATH env var, or the CWD git root.
+func resolveStoreRepoPath() (string, error) {
 	if storeRepoFlag != "" {
 		return config.ResolvePath(storeRepoFlag), nil
 	}
 
-	sessionID := os.Getenv("GRAITH_SESSION_ID")
-	if sessionID != "" {
-		if err := c.SendControl("list", struct{}{}); err != nil {
-			return "", err
-		}
-		resp, err := c.ReadControlResponse()
-		if err != nil {
-			return "", err
-		}
-		var list protocol.SessionListMsg
-		if err := protocol.DecodePayload(resp, &list); err != nil {
-			return "", err
-		}
-		for _, s := range list.Sessions {
-			if s.ID == sessionID {
-				if s.RepoPath != "" {
-					return s.RepoPath, nil
-				}
-				break
-			}
+	if wtPath := os.Getenv("GRAITH_WORKTREE_PATH"); wtPath != "" {
+		cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+		cmd.Dir = wtPath
+		out, err := cmd.Output()
+		if err == nil {
+			return config.ResolvePath(strings.TrimSpace(string(out))), nil
 		}
 	}
 
-	out, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
+	gitOut, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
 	if err != nil {
 		return "", fmt.Errorf("could not detect repo path: use --repo or run from inside a git repository")
 	}
-	return strings.TrimSpace(string(out)), nil
+	return config.ResolvePath(strings.TrimSpace(string(gitOut))), nil
 }
 
-// expandContentType expands content type shorthands to MIME types.
-func expandContentType(ct string) (string, error) {
-	switch ct {
-	case "":
-		return "", fmt.Errorf("--type is required (md, json, text, or a MIME type)")
-	case "md", "markdown":
-		return "text/markdown", nil
-	case "json":
-		return "application/json", nil
-	case "text":
-		return "text/plain", nil
-	default:
-		if strings.Contains(ct, "/") {
-			return ct, nil
+// resolveCurrentRepo returns the current repo path or empty string on failure.
+func resolveCurrentRepo() string {
+	if wtPath := os.Getenv("GRAITH_WORKTREE_PATH"); wtPath != "" {
+		cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+		cmd.Dir = wtPath
+		out, err := cmd.Output()
+		if err == nil {
+			return config.ResolvePath(strings.TrimSpace(string(out)))
 		}
-		return "", fmt.Errorf("unknown content type shorthand %q (use md, json, text, or a MIME type)", ct)
 	}
+
+	gitOut, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
+	if err != nil {
+		return ""
+	}
+	return config.ResolvePath(strings.TrimSpace(string(gitOut)))
+}
+
+// checkWritePermission rejects writes when --repo targets a different repo
+// than the current one.
+func checkWritePermission(repo string) error {
+	current := resolveCurrentRepo()
+	if current == "" {
+		return nil
+	}
+	if storeRepoFlag != "" && repo != current {
+		return fmt.Errorf("cannot write to store for %s from repo %s", repo, current)
+	}
+	return nil
 }
 
 // --- gr store put ---
 
-var (
-	storePutContentType string
-	storePutFile        string
-)
+var storePutFile string
 
 var storePutCmd = &cobra.Command{
 	Use:   "put <key> [body]",
@@ -97,43 +91,21 @@ var storePutCmd = &cobra.Command{
 			return err
 		}
 
-		contentType, err := expandContentType(storePutContentType)
+		repo, err := resolveStoreRepoPath()
 		if err != nil {
 			return err
 		}
 
-		c, err := client.Connect(cfg, paths, cfgFile)
-		if err != nil {
-			return err
-		}
-		defer c.Close()
-
-		repo, err := resolveRepoPath(c)
-		if err != nil {
+		if err := checkWritePermission(repo); err != nil {
 			return err
 		}
 
-		senderID, senderName := detectSender()
-
-		if err := c.SendControl("store_put", protocol.StorePutMsg{
-			Repo:        repo,
-			Key:         key,
-			Body:        body,
-			ContentType: contentType,
-			AuthorID:    senderID,
-			AuthorName:  senderName,
-		}); err != nil {
+		storePath := store.StorePath(paths.DataDir, repo)
+		if err := store.Init(storePath); err != nil {
 			return err
 		}
-
-		resp, err := c.ReadControlResponse()
-		if err != nil {
+		if err := store.Put(storePath, key, body); err != nil {
 			return err
-		}
-		if resp.Type == "error" {
-			var e protocol.ErrorMsg
-			protocol.DecodePayload(resp, &e)
-			return fmt.Errorf("%s", e.Message)
 		}
 
 		if jsonOutput {
@@ -156,43 +128,18 @@ var storeGetCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		key := args[0]
 
-		c, err := client.Connect(cfg, paths, cfgFile)
-		if err != nil {
-			return err
-		}
-		defer c.Close()
-
-		repo, err := resolveRepoPath(c)
+		repo, err := resolveStoreRepoPath()
 		if err != nil {
 			return err
 		}
 
-		if err := c.SendControl("store_get", protocol.StoreGetMsg{
-			Repo: repo,
-			Key:  key,
-		}); err != nil {
-			return err
-		}
-
-		resp, err := c.ReadControlResponse()
+		storePath := store.StorePath(paths.DataDir, repo)
+		body, err := store.Get(storePath, key)
 		if err != nil {
-			return err
-		}
-		if resp.Type == "error" {
-			var e protocol.ErrorMsg
-			protocol.DecodePayload(resp, &e)
-			return fmt.Errorf("%s", e.Message)
-		}
-
-		var result protocol.StoreGetResponseMsg
-		if err := protocol.DecodePayload(resp, &result); err != nil {
-			return err
-		}
-		if !result.Found || result.Document == nil {
 			return fmt.Errorf("document %q not found", key)
 		}
 
-		fmt.Print(result.Document.Body)
+		fmt.Print(body)
 		return nil
 	},
 }
@@ -210,56 +157,30 @@ var storeListCmd = &cobra.Command{
 			prefix = args[0]
 		}
 
-		c, err := client.Connect(cfg, paths, cfgFile)
-		if err != nil {
-			return err
-		}
-		defer c.Close()
-
-		repo, err := resolveRepoPath(c)
+		repo, err := resolveStoreRepoPath()
 		if err != nil {
 			return err
 		}
 
-		if err := c.SendControl("store_list", protocol.StoreListMsg{
-			Repo:   repo,
-			Prefix: prefix,
-		}); err != nil {
-			return err
-		}
-
-		resp, err := c.ReadControlResponse()
+		storePath := store.StorePath(paths.DataDir, repo)
+		entries, err := store.List(storePath, prefix)
 		if err != nil {
-			return err
-		}
-		if resp.Type == "error" {
-			var e protocol.ErrorMsg
-			protocol.DecodePayload(resp, &e)
-			return fmt.Errorf("%s", e.Message)
-		}
-
-		var result protocol.StoreListResponseMsg
-		if err := protocol.DecodePayload(resp, &result); err != nil {
 			return err
 		}
 
 		if jsonOutput {
-			return out.JSON(result)
+			return out.JSON(entries)
 		}
 
-		if len(result.Documents) == 0 {
+		if len(entries) == 0 {
 			out.Print("No documents found\n")
 			return nil
 		}
 
 		tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "KEY\tTYPE\tAUTHOR\tUPDATED")
-		for _, doc := range result.Documents {
-			author := doc.AuthorName
-			if author == "" {
-				author = doc.AuthorID
-			}
-			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", doc.Key, doc.ContentType, author, doc.UpdatedAt)
+		fmt.Fprintln(tw, "KEY\tUPDATED")
+		for _, entry := range entries {
+			fmt.Fprintf(tw, "%s\t%s\n", entry.Key, entry.UpdatedAt.Format("2006-01-02 15:04:05"))
 		}
 		tw.Flush()
 		return nil
@@ -275,32 +196,18 @@ var storeRmCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		key := args[0]
 
-		c, err := client.Connect(cfg, paths, cfgFile)
-		if err != nil {
-			return err
-		}
-		defer c.Close()
-
-		repo, err := resolveRepoPath(c)
+		repo, err := resolveStoreRepoPath()
 		if err != nil {
 			return err
 		}
 
-		if err := c.SendControl("store_delete", protocol.StoreDeleteMsg{
-			Repo: repo,
-			Key:  key,
-		}); err != nil {
+		if err := checkWritePermission(repo); err != nil {
 			return err
 		}
 
-		resp, err := c.ReadControlResponse()
-		if err != nil {
+		storePath := store.StorePath(paths.DataDir, repo)
+		if err := store.Remove(storePath, key); err != nil {
 			return err
-		}
-		if resp.Type == "error" {
-			var e protocol.ErrorMsg
-			protocol.DecodePayload(resp, &e)
-			return fmt.Errorf("%s", e.Message)
 		}
 
 		if jsonOutput {
@@ -319,7 +226,6 @@ func init() {
 	storeCmd.PersistentFlags().StringVar(&storeRepoFlag, "repo", "", "repo path (default: auto-detect)")
 
 	storeCmd.AddCommand(storePutCmd)
-	storePutCmd.Flags().StringVar(&storePutContentType, "type", "", "content type (md, json, text, or MIME type)")
 	storePutCmd.Flags().StringVarP(&storePutFile, "file", "f", "", "read body from file")
 
 	storeCmd.AddCommand(storeGetCmd)
