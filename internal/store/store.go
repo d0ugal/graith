@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 )
 
 // Init initialises the document store at storePath. It creates the directory
@@ -82,6 +83,92 @@ func ValidateKey(key string) error {
 func StorePath(dataDir, repoRoot string) string {
 	repoName := filepath.Base(repoRoot)
 	return filepath.Join(dataDir, "store", repoName+"-"+repoHash(repoRoot))
+}
+
+// withLock acquires an exclusive flock on a lock file in storePath and runs fn.
+func withLock(storePath string, fn func() error) error {
+	lockPath := filepath.Join(storePath, "store.lock")
+	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return fmt.Errorf("open lock file: %w", err)
+	}
+	defer f.Close()
+
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		return fmt.Errorf("acquire store lock: %w", err)
+	}
+	defer syscall.Flock(int(f.Fd()), syscall.LOCK_UN) //nolint:errcheck
+
+	return fn()
+}
+
+// CommitMessage builds a commit message for a store operation.
+// The first line is "store: <action> <key>". If GRAITH_SESSION_ID is set,
+// trailers are appended after a blank line.
+func CommitMessage(action, key string) string {
+	first := "store: " + action + " " + key
+
+	sessionID := os.Getenv("GRAITH_SESSION_ID")
+	if sessionID == "" {
+		return first
+	}
+
+	var sb strings.Builder
+	sb.WriteString(first)
+	sb.WriteString("\n\n")
+
+	sessionName := os.Getenv("GRAITH_SESSION_NAME")
+	if sessionName != "" {
+		sb.WriteString("session: " + sessionName + " (" + sessionID + ")\n")
+	} else {
+		sb.WriteString("session: " + sessionID + "\n")
+	}
+
+	if agentType := os.Getenv("GRAITH_AGENT_TYPE"); agentType != "" {
+		sb.WriteString("agent: " + agentType + "\n")
+	}
+
+	// Trim trailing newline for a clean message.
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+// Put writes body to the store under key and commits it to the git history.
+func Put(storePath, key, body string) error {
+	if err := ValidateKey(key); err != nil {
+		return err
+	}
+
+	return withLock(storePath, func() error {
+		filePath := filepath.Join(storePath, key)
+		if err := os.MkdirAll(filepath.Dir(filePath), 0o700); err != nil {
+			return fmt.Errorf("create parent directories: %w", err)
+		}
+		if err := os.WriteFile(filePath, []byte(body), 0o600); err != nil {
+			return fmt.Errorf("write file: %w", err)
+		}
+		if err := git(storePath, "add", "--", key); err != nil {
+			return fmt.Errorf("git add: %w", err)
+		}
+		msg := CommitMessage("update", key)
+		if err := git(storePath, "commit", "-m", msg, "--", key); err != nil {
+			return fmt.Errorf("git commit: %w", err)
+		}
+		return nil
+	})
+}
+
+// Get retrieves the body stored under key.
+func Get(storePath, key string) (string, error) {
+	if err := ValidateKey(key); err != nil {
+		return "", err
+	}
+
+	filePath := filepath.Join(storePath, key)
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return "", fmt.Errorf("read file: %w", err)
+	}
+	return string(data), nil
 }
 
 // repoHash is copied from internal/daemon/daemon.go to produce a deterministic

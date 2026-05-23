@@ -2,7 +2,9 @@ package store_test
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/d0ugal/graith/internal/store"
@@ -126,6 +128,167 @@ func TestInit(t *testing.T) {
 	if err := store.Init(dir); err != nil {
 		t.Fatalf("Init (idempotent): %v", err)
 	}
+}
+
+func newTestStore(t *testing.T) string {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), "store")
+	if err := store.Init(dir); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	return dir
+}
+
+func TestPutGet(t *testing.T) {
+	dir := newTestStore(t)
+
+	const key = "design/api.md"
+	const body = "# API Design\n\nSome content here."
+
+	if err := store.Put(dir, key, body); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+
+	got, err := store.Get(dir, key)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got != body {
+		t.Errorf("Get returned %q, want %q", got, body)
+	}
+
+	// File should exist on disk
+	info, err := os.Stat(filepath.Join(dir, key))
+	if err != nil {
+		t.Fatalf("file not found on disk: %v", err)
+	}
+	if info.IsDir() {
+		t.Fatal("expected file, got directory")
+	}
+}
+
+func TestPutOverwrite(t *testing.T) {
+	dir := newTestStore(t)
+
+	const key = "notes/test.md"
+	const first = "first value"
+	const second = "second value"
+
+	if err := store.Put(dir, key, first); err != nil {
+		t.Fatalf("Put (first): %v", err)
+	}
+	if err := store.Put(dir, key, second); err != nil {
+		t.Fatalf("Put (second): %v", err)
+	}
+
+	got, err := store.Get(dir, key)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got != second {
+		t.Errorf("Get returned %q, want %q (second value)", got, second)
+	}
+}
+
+func TestGetNotFound(t *testing.T) {
+	dir := newTestStore(t)
+
+	_, err := store.Get(dir, "nonexistent/key.md")
+	if err == nil {
+		t.Error("Get on nonexistent key expected error, got nil")
+	}
+}
+
+func TestPutInvalidKey(t *testing.T) {
+	dir := newTestStore(t)
+
+	invalidKeys := []string{
+		"../escape",
+		"",
+	}
+	for _, key := range invalidKeys {
+		if err := store.Put(dir, key, "body"); err == nil {
+			t.Errorf("Put(%q) expected error for invalid key, got nil", key)
+		}
+	}
+}
+
+func TestPutCreatesGitCommit(t *testing.T) {
+	dir := newTestStore(t)
+
+	const key = "design/api.md"
+	if err := store.Put(dir, key, "content"); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+
+	// Check that a git commit was created with the right message.
+	cmd := exec.Command("git", "log", "--oneline", "-1")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git log: %v", err)
+	}
+	msg := string(out)
+	want := "store: update " + key
+	if !strings.Contains(msg, want) {
+		t.Errorf("git log output %q does not contain %q", msg, want)
+	}
+}
+
+func TestCommitMessage(t *testing.T) {
+	t.Run("without env vars", func(t *testing.T) {
+		t.Setenv("GRAITH_SESSION_ID", "")
+		t.Setenv("GRAITH_SESSION_NAME", "")
+		t.Setenv("GRAITH_AGENT_TYPE", "")
+
+		msg := store.CommitMessage("update", "design/api.md")
+		want := "store: update design/api.md"
+		if msg != want {
+			t.Errorf("CommitMessage = %q, want %q", msg, want)
+		}
+	})
+
+	t.Run("with session id and name", func(t *testing.T) {
+		t.Setenv("GRAITH_SESSION_ID", "abc123")
+		t.Setenv("GRAITH_SESSION_NAME", "fix-overlay")
+		t.Setenv("GRAITH_AGENT_TYPE", "")
+
+		msg := store.CommitMessage("update", "design/api.md")
+		if !strings.Contains(msg, "store: update design/api.md") {
+			t.Errorf("CommitMessage missing first line: %q", msg)
+		}
+		if !strings.Contains(msg, "session: fix-overlay (abc123)") {
+			t.Errorf("CommitMessage missing session trailer: %q", msg)
+		}
+	})
+
+	t.Run("with session id only", func(t *testing.T) {
+		t.Setenv("GRAITH_SESSION_ID", "abc123")
+		t.Setenv("GRAITH_SESSION_NAME", "")
+		t.Setenv("GRAITH_AGENT_TYPE", "")
+
+		msg := store.CommitMessage("update", "design/api.md")
+		if !strings.Contains(msg, "session: abc123") {
+			t.Errorf("CommitMessage missing session trailer: %q", msg)
+		}
+	})
+
+	t.Run("with all env vars", func(t *testing.T) {
+		t.Setenv("GRAITH_SESSION_ID", "abc123")
+		t.Setenv("GRAITH_SESSION_NAME", "fix-overlay")
+		t.Setenv("GRAITH_AGENT_TYPE", "claude")
+
+		msg := store.CommitMessage("update", "design/api.md")
+		if !strings.Contains(msg, "store: update design/api.md") {
+			t.Errorf("CommitMessage missing first line: %q", msg)
+		}
+		if !strings.Contains(msg, "session: fix-overlay (abc123)") {
+			t.Errorf("CommitMessage missing session trailer: %q", msg)
+		}
+		if !strings.Contains(msg, "agent: claude") {
+			t.Errorf("CommitMessage missing agent trailer: %q", msg)
+		}
+	})
 }
 
 func TestStorePath(t *testing.T) {
