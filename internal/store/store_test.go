@@ -562,14 +562,45 @@ func TestStorePath(t *testing.T) {
 	})
 
 	t.Run("known hash value", func(t *testing.T) {
-		// Compute expected hash for "/home/user/graith" manually by running
-		// the same algorithm and recording the output.
-		// We rely on the implementation being consistent with the algorithm
-		// by checking the same input always gives the same output.
 		p := store.StorePath("/data", "/home/user/graith")
 		p2 := store.StorePath("/data", "/home/user/graith")
 		if p != p2 {
 			t.Errorf("non-deterministic: %q vs %q", p, p2)
 		}
 	})
+}
+
+func TestListStores(t *testing.T) {
+	dataDir := t.TempDir()
+
+	// Create two stores
+	s1 := store.StorePath(dataDir, "/home/user/project-a")
+	s2 := store.StorePath(dataDir, "/home/user/project-b")
+	if err := store.Init(s1); err != nil {
+		t.Fatalf("Init s1: %v", err)
+	}
+	if err := store.Init(s2); err != nil {
+		t.Fatalf("Init s2: %v", err)
+	}
+	if err := store.Put(s1, "doc.md", "hello"); err != nil {
+		t.Fatalf("Put s1: %v", err)
+	}
+
+	stores, err := store.ListStores(dataDir)
+	if err != nil {
+		t.Fatalf("ListStores: %v", err)
+	}
+	if len(stores) != 2 {
+		t.Fatalf("ListStores returned %d stores, want 2", len(stores))
+	}
+
+	// Empty data dir
+	emptyDir := t.TempDir()
+	stores, err = store.ListStores(emptyDir)
+	if err != nil {
+		t.Fatalf("ListStores empty: %v", err)
+	}
+	if len(stores) != 0 {
+		t.Errorf("ListStores empty returned %d, want 0", len(stores))
+	}
 }
