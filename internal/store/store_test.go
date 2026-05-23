@@ -71,6 +71,10 @@ func TestValidateKey(t *testing.T) {
 			".git/hooks/pre-commit",
 			"foo/.git/bar",
 			".git",
+			".GIT/hooks/pre-commit",
+			".Git/config",
+			".GiT/objects",
+			"foo/.GIT/bar",
 		}
 		for _, key := range gitKeys {
 			if err := store.ValidateKey(key); err == nil {
@@ -93,8 +97,11 @@ func TestValidateKey(t *testing.T) {
 	})
 
 	t.Run("store.lock", func(t *testing.T) {
-		if err := store.ValidateKey("store.lock"); err == nil {
-			t.Error("ValidateKey(\"store.lock\") expected error, got nil")
+		lockKeys := []string{"store.lock", "STORE.LOCK", "Store.Lock"}
+		for _, key := range lockKeys {
+			if err := store.ValidateKey(key); err == nil {
+				t.Errorf("ValidateKey(%q) expected error, got nil", key)
+			}
 		}
 		// store.lock in a subdirectory is fine
 		if err := store.ValidateKey("sub/store.lock"); err != nil {
