@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.36.0](https://github.com/d0ugal/graith/compare/v0.35.0...v0.36.0) (2026-05-23)
+
+
+### Features
+
+* add gr store append command for line-oriented data ([d2b24df](https://github.com/d0ugal/graith/commit/d2b24df12cbe057f39a4924bcc651c0ed7654239))
+* add powerline-style status bar separators ([bb37bd4](https://github.com/d0ugal/graith/commit/bb37bd40de8d1d9130d7a528ec3add769a04514c))
+
+
+### Bug Fixes
+
+* case-insensitive .git and store.lock validation in store keys ([aec745c](https://github.com/d0ugal/graith/commit/aec745cde56a1fc14fefed88a055ac59fae31f2c))
+* init store dir at session creation for sandbox access ([#452](https://github.com/d0ugal/graith/issues/452)) ([f98533d](https://github.com/d0ugal/graith/commit/f98533df41e3dd4c6d40f0240c9ec37816a5e9b6))
+
 ## [0.35.0](https://github.com/d0ugal/graith/compare/v0.34.0...v0.35.0) (2026-05-23)
 
 
