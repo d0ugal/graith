@@ -111,8 +111,11 @@ A new package encapsulates all store logic, keeping CLI commands thin:
 
 - `StorePath(dataDir, repoRoot string) string` — resolves the store directory
   path: `<datadir>/store/<reponame>-<hash>/`
+- `ValidateKey(key string) error` — rejects empty keys, leading `/`,
+  `..` components, control characters, and keys starting with `-`
 - `Init(storePath string) error` — runs `git init` if the `.git` directory
-  doesn't exist
+  doesn't exist, sets local git config (`user.name=graith`,
+  `user.email=graith@localhost`, `core.autocrlf=false`)
 - `Put(storePath, key, body string) error` — writes file, creates parent
   dirs, `git add`, `git commit`
 - `Get(storePath, key string) (string, error)` — reads and returns file
@@ -156,10 +159,37 @@ find the session's RepoPath; the new version resolves the repo root from
 `GRAITH_WORKTREE_PATH` (always set in agent sessions) or CWD via
 `git rev-parse --show-toplevel`. The `expandContentType` function is removed.
 
+## Key validation
+
+Keys are validated before any filesystem operation. Rejected keys:
+
+- Empty keys
+- Keys with leading `/` (absolute paths)
+- Keys containing `..` components (path traversal)
+- Keys containing control characters or NUL bytes
+- Keys starting with `-` (would be interpreted as git flags)
+
+All git commands use `--` to separate flags from paths (e.g.
+`git add -- <key>`) as a defense-in-depth measure.
+
 ## Concurrent access
 
-Git handles concurrent access natively. If two agents write to different keys
-simultaneously, both commits succeed. If they write to the same key, one
-`git commit` will succeed and the other will see a dirty index — the worst
-case is a failed commit that the agent can retry. In practice, agents work on
-different keys so this is a non-issue.
+Git uses a single `index.lock` file per repo, so concurrent `git add` or
+`git commit` calls can conflict. The store uses a file lock (`flock`) on a
+`store.lock` file in the store root to serialize the `git add + git commit`
+sequence. This prevents index interleaving where one agent's commit
+accidentally includes another agent's staged file.
+
+If the lock cannot be acquired within a short timeout (e.g. 5 seconds), the
+operation fails with a clear error. In practice, agents work on different keys
+and store writes are fast, so contention is rare.
+
+## Error recovery
+
+If `Put` writes a file but the subsequent `git commit` fails (disk full, git
+error), the file exists on disk uncommitted. The store detects this on the
+next operation via `git status` and either re-commits or cleans up the
+uncommitted file. This keeps the store consistent with git history.
+
+Similarly, if `Remove` fails mid-operation, the next write operation cleans
+up any dirty state.
