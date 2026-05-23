@@ -23,6 +23,7 @@ type Config struct {
 	BranchPrefix     string            `toml:"branch_prefix"`
 	DataDir          string            `toml:"data_dir"`
 	FetchOnCreate    bool              `toml:"fetch_on_create"`
+	AgentPrompt      string            `toml:"agent_prompt"`
 	AllowedRepoPaths []string          `toml:"allowed_repo_paths"`
 	Repos            []RepoConfig      `toml:"repos"`
 	StatusBar        StatusBar         `toml:"status_bar"`
@@ -475,6 +476,10 @@ func Default() *Config {
 		panic("invalid embedded default config: " + err.Error())
 	}
 	return cfg
+}
+
+func DefaultAgentPrompt() string {
+	return Default().AgentPrompt
 }
 
 func DefaultTOML() []byte {
