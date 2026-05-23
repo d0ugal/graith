@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -21,19 +22,14 @@ var storeCmd = &cobra.Command{
 }
 
 // resolveStoreRepoPath resolves the repo path from: --repo flag,
-// GRAITH_WORKTREE_PATH env var, or the CWD git root.
+// GRAITH_REPO_PATH env var (canonical source repo), or the CWD git root.
 func resolveStoreRepoPath() (string, error) {
 	if storeRepoFlag != "" {
 		return config.ResolvePath(storeRepoFlag), nil
 	}
 
-	if wtPath := os.Getenv("GRAITH_WORKTREE_PATH"); wtPath != "" {
-		cmd := exec.Command("git", "rev-parse", "--show-toplevel")
-		cmd.Dir = wtPath
-		out, err := cmd.Output()
-		if err == nil {
-			return config.ResolvePath(strings.TrimSpace(string(out))), nil
-		}
+	if repoPath := os.Getenv("GRAITH_REPO_PATH"); repoPath != "" {
+		return config.ResolvePath(repoPath), nil
 	}
 
 	gitOut, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
@@ -45,13 +41,8 @@ func resolveStoreRepoPath() (string, error) {
 
 // resolveCurrentRepo returns the current repo path or empty string on failure.
 func resolveCurrentRepo() string {
-	if wtPath := os.Getenv("GRAITH_WORKTREE_PATH"); wtPath != "" {
-		cmd := exec.Command("git", "rev-parse", "--show-toplevel")
-		cmd.Dir = wtPath
-		out, err := cmd.Output()
-		if err == nil {
-			return config.ResolvePath(strings.TrimSpace(string(out)))
-		}
+	if repoPath := os.Getenv("GRAITH_REPO_PATH"); repoPath != "" {
+		return config.ResolvePath(repoPath)
 	}
 
 	gitOut, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
@@ -136,7 +127,10 @@ var storeGetCmd = &cobra.Command{
 		storePath := store.StorePath(paths.DataDir, repo)
 		body, err := store.Get(storePath, key)
 		if err != nil {
-			return fmt.Errorf("document %q not found", key)
+			if errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("document %q not found", key)
+			}
+			return fmt.Errorf("get %q: %w", key, err)
 		}
 
 		fmt.Print(body)

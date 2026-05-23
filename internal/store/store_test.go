@@ -43,14 +43,6 @@ func TestValidateKey(t *testing.T) {
 	})
 
 	t.Run("dotdot component", func(t *testing.T) {
-		keys := []string{
-			"..",
-			"../foo",
-			"foo/..",
-			"foo/../bar",
-			"foo/..bar", // this is fine — only exact ".." segment
-			"foo/bar..", // this is fine — only exact ".." segment
-		}
 		dotdotKeys := []string{
 			"..",
 			"../foo",
@@ -62,7 +54,6 @@ func TestValidateKey(t *testing.T) {
 				t.Errorf("ValidateKey(%q) expected error for dotdot component, got nil", key)
 			}
 		}
-		// These are NOT dotdot components and should be valid
 		okKeys := []string{
 			"foo/..bar",
 			"foo/bar..",
@@ -72,7 +63,63 @@ func TestValidateKey(t *testing.T) {
 				t.Errorf("ValidateKey(%q) unexpected error: %v", key, err)
 			}
 		}
-		_ = keys
+	})
+
+	t.Run("dot-git component", func(t *testing.T) {
+		gitKeys := []string{
+			".git/config",
+			".git/hooks/pre-commit",
+			"foo/.git/bar",
+			".git",
+		}
+		for _, key := range gitKeys {
+			if err := store.ValidateKey(key); err == nil {
+				t.Errorf("ValidateKey(%q) expected error for .git component, got nil", key)
+			}
+		}
+	})
+
+	t.Run("dot component", func(t *testing.T) {
+		dotKeys := []string{
+			".",
+			"./foo",
+			"foo/./bar",
+		}
+		for _, key := range dotKeys {
+			if err := store.ValidateKey(key); err == nil {
+				t.Errorf("ValidateKey(%q) expected error for dot component, got nil", key)
+			}
+		}
+	})
+
+	t.Run("store.lock", func(t *testing.T) {
+		if err := store.ValidateKey("store.lock"); err == nil {
+			t.Error("ValidateKey(\"store.lock\") expected error, got nil")
+		}
+		// store.lock in a subdirectory is fine
+		if err := store.ValidateKey("sub/store.lock"); err != nil {
+			t.Errorf("ValidateKey(\"sub/store.lock\") unexpected error: %v", err)
+		}
+	})
+
+	t.Run("glob and pathspec characters", func(t *testing.T) {
+		globKeys := []string{
+			"*.md",
+			"foo?bar",
+			"foo[0]",
+			":(glob)*",
+		}
+		for _, key := range globKeys {
+			if err := store.ValidateKey(key); err == nil {
+				t.Errorf("ValidateKey(%q) expected error for glob chars, got nil", key)
+			}
+		}
+	})
+
+	t.Run("backslash", func(t *testing.T) {
+		if err := store.ValidateKey("foo\\bar"); err == nil {
+			t.Error("ValidateKey(\"foo\\\\bar\") expected error, got nil")
+		}
 	})
 
 	t.Run("control characters", func(t *testing.T) {
@@ -187,6 +234,28 @@ func TestPutOverwrite(t *testing.T) {
 	}
 	if got != second {
 		t.Errorf("Get returned %q, want %q (second value)", got, second)
+	}
+}
+
+func TestPutIdenticalContent(t *testing.T) {
+	dir := newTestStore(t)
+
+	const key = "notes/same.md"
+	const body = "identical content"
+
+	if err := store.Put(dir, key, body); err != nil {
+		t.Fatalf("Put (first): %v", err)
+	}
+	if err := store.Put(dir, key, body); err != nil {
+		t.Fatalf("Put (identical): %v", err)
+	}
+
+	got, err := store.Get(dir, key)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got != body {
+		t.Errorf("Get returned %q, want %q", got, body)
 	}
 }
 
@@ -346,6 +415,22 @@ func TestList(t *testing.T) {
 	})
 }
 
+func TestListRejectsTraversal(t *testing.T) {
+	dir := newTestStore(t)
+
+	traversalPrefixes := []string{
+		"../../etc",
+		"../../../",
+		"..",
+	}
+	for _, prefix := range traversalPrefixes {
+		_, err := store.List(dir, prefix)
+		if err == nil {
+			t.Errorf("List(%q) expected error, got nil", prefix)
+		}
+	}
+}
+
 func TestListEmptyStore(t *testing.T) {
 	dir := newTestStore(t)
 
@@ -454,7 +539,7 @@ func TestStorePath(t *testing.T) {
 			t.Errorf("hash length = %d, want 12; hash = %q", len(hash), hash)
 		}
 		for _, c := range hash {
-			if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
 				t.Errorf("hash %q contains non-hex character %q", hash, c)
 			}
 		}
