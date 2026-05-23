@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.35.0](https://github.com/d0ugal/graith/compare/v0.34.0...v0.35.0) (2026-05-23)
+
+
+### Features
+
+* add store Init with git repo setup ([057661f](https://github.com/d0ugal/graith/commit/057661f69fde9b42313995f56d90ea35fb0f42f5))
+* add store List and Remove with empty parent cleanup ([f1cd2d1](https://github.com/d0ugal/graith/commit/f1cd2d16a38acc8eb45a3ef3297e7cdbca7c7adb))
+* add store package with key validation and path helpers ([b3e7e62](https://github.com/d0ugal/graith/commit/b3e7e621423ea7af10df976749d4e1180759ded5))
+* add store Put, Get, CommitMessage with file locking ([cf4ff7b](https://github.com/d0ugal/graith/commit/cf4ff7bba1d42ff98e72b0f9423f8552737bb346))
+* list all stores when no repo context is available ([bb4ab32](https://github.com/d0ugal/graith/commit/bb4ab322b7f6500e31968294c6d313b6263cc6f3))
+* make agent prompt configurable via config ([a2276fa](https://github.com/d0ugal/graith/commit/a2276fa408f133c946c620f7532e32597557520b))
+* rewrite store CLI to use flat files instead of daemon ([9c1a350](https://github.com/d0ugal/graith/commit/9c1a350a31c10f7cb28ca19b497e4387baf1e2b1))
+
+
+### Bug Fixes
+
+* address tribunal review findings for store refactor ([804580e](https://github.com/d0ugal/graith/commit/804580e9eece6255cc8c5fbc00d86e6e5d5f9c0b))
+* use switch for agent prompt check in doctor (gocritic) ([f7374f1](https://github.com/d0ugal/graith/commit/f7374f11b8a8fb937d9b4a79ac3ff95b9373d554))
+
 ## [0.34.0](https://github.com/d0ugal/graith/compare/v0.33.1...v0.34.0) (2026-05-21)
 
 
