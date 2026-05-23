@@ -51,11 +51,27 @@ gr msg sub --topic inbox --all --ack  # read and acknowledge inbox messages
 
 Note: ` + "`gr msg sub --wait`" + ` blocks until a message arrives. Use ` + "`--all`" + ` to read without blocking.
 
+## Document store
+
+Store and retrieve artifacts that persist across sessions using ` + "`gr store`" + `:
+
+` + "```" + `
+gr store put design/api.md --file ./api-design.md   # store a document
+gr store put notes/summary.md "# Summary\n\n..."     # store inline content
+gr store get design/api.md                           # retrieve a document
+gr store list                                        # list all documents
+gr store list design/                                # list by prefix
+gr store rm design/api.md                            # remove a document
+` + "```" + `
+
+Documents are plain files in a per-repo git directory — browsable, greppable, and version-tracked. Use the store for artifacts you want to keep but don` + "`" + `t want to commit: design docs, research notes, build outputs, shared context between agents.
+
 ## Environment
 
 - GRAITH_SESSION_ID — your session ID (set automatically)
 - GRAITH_SESSION_NAME — your session name
 - GRAITH_WORKTREE_PATH — absolute path to your session worktree
+- GRAITH_REPO_PATH — absolute path to the source repository
 
 Run ` + "`gr --help`" + ` for the full command list.`
 
