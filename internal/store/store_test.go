@@ -611,3 +611,108 @@ func TestListStores(t *testing.T) {
 		t.Errorf("ListStores empty returned %d, want 0", len(stores))
 	}
 }
+
+func TestAppendCreatesFile(t *testing.T) {
+	dir := newTestStore(t)
+
+	const key = "logs/test.jsonl"
+	const line1 = `{"run":1}`
+
+	if err := store.Append(dir, key, line1); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+
+	got, err := store.Get(dir, key)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got != line1+"\n" {
+		t.Errorf("Get returned %q, want %q", got, line1+"\n")
+	}
+}
+
+func TestAppendMultipleLines(t *testing.T) {
+	dir := newTestStore(t)
+
+	const key = "logs/multi.jsonl"
+
+	lines := []string{`{"run":1}`, `{"run":2}`, `{"run":3}`}
+	for _, line := range lines {
+		if err := store.Append(dir, key, line); err != nil {
+			t.Fatalf("Append %q: %v", line, err)
+		}
+	}
+
+	got, err := store.Get(dir, key)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+
+	want := strings.Join(lines, "\n") + "\n"
+	if got != want {
+		t.Errorf("Get returned %q, want %q", got, want)
+	}
+
+	// Each append should produce a git commit
+	cmd := exec.Command("git", "log", "--oneline")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git log: %v", err)
+	}
+	commitCount := len(strings.Split(strings.TrimSpace(string(out)), "\n"))
+	if commitCount != 3 {
+		t.Errorf("expected 3 commits, got %d: %s", commitCount, string(out))
+	}
+}
+
+func TestAppendPreservesTrailingNewline(t *testing.T) {
+	dir := newTestStore(t)
+
+	const key = "logs/newline.jsonl"
+
+	if err := store.Append(dir, key, "line1\n"); err != nil {
+		t.Fatalf("Append with newline: %v", err)
+	}
+	if err := store.Append(dir, key, "line2"); err != nil {
+		t.Fatalf("Append without newline: %v", err)
+	}
+
+	got, err := store.Get(dir, key)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got != "line1\nline2\n" {
+		t.Errorf("Get returned %q, want %q", got, "line1\nline2\n")
+	}
+}
+
+func TestAppendInvalidKey(t *testing.T) {
+	dir := newTestStore(t)
+	if err := store.Append(dir, "../escape", "data"); err == nil {
+		t.Error("Append with invalid key should fail")
+	}
+}
+
+func TestAppendCoexistsWithPut(t *testing.T) {
+	dir := newTestStore(t)
+
+	const key = "data/mixed.txt"
+
+	if err := store.Put(dir, key, "initial content"); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+
+	if err := store.Append(dir, key, "appended line"); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+
+	got, err := store.Get(dir, key)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	want := "initial contentappended line\n"
+	if got != want {
+		t.Errorf("Get returned %q, want %q", got, want)
+	}
+}

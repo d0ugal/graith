@@ -59,6 +59,7 @@ gr store get design/api.md                           # retrieve a document
 gr store list                                        # list all documents
 gr store list design/                                # list by prefix
 gr store rm design/api.md                            # remove a document
+gr store append logs/data.jsonl '{"key":"value"}'    # append a line (JSONL)
 ```
 
 Documents are plain files in a per-repo git directory — browsable, greppable, and version-tracked. Use the store for artifacts you want to keep but don't want to commit: design docs, research notes, build outputs, shared context between agents.

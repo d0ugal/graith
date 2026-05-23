@@ -187,6 +187,48 @@ func Put(storePath, key, body string) error {
 	})
 }
 
+// Append appends a line to the file at key and commits it to the git history.
+// A trailing newline is added if line does not already end with one.
+// The file is created if it does not exist.
+func Append(storePath, key, line string) error {
+	if err := ValidateKey(key); err != nil {
+		return err
+	}
+
+	return withLock(storePath, func() error {
+		filePath := filepath.Join(storePath, key)
+		if err := os.MkdirAll(filepath.Dir(filePath), 0o700); err != nil {
+			return fmt.Errorf("create parent directories: %w", err)
+		}
+		f, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+		if err != nil {
+			return fmt.Errorf("open file for append: %w", err)
+		}
+		if !strings.HasSuffix(line, "\n") {
+			line += "\n"
+		}
+		_, writeErr := f.WriteString(line)
+		closeErr := f.Close()
+		if writeErr != nil {
+			return fmt.Errorf("append to file: %w", writeErr)
+		}
+		if closeErr != nil {
+			return fmt.Errorf("close file: %w", closeErr)
+		}
+		if err := git(storePath, "add", "--", key); err != nil {
+			return fmt.Errorf("git add: %w", err)
+		}
+		if git(storePath, "diff", "--quiet", "--cached", "--", key) == nil {
+			return nil
+		}
+		msg := CommitMessage("append", key)
+		if err := git(storePath, "commit", "-m", msg, "--", key); err != nil {
+			return fmt.Errorf("git commit: %w", err)
+		}
+		return nil
+	})
+}
+
 // Get retrieves the body stored under key.
 func Get(storePath, key string) (string, error) {
 	if err := ValidateKey(key); err != nil {
