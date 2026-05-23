@@ -1,6 +1,8 @@
 package store_test
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/d0ugal/graith/internal/store"
@@ -102,6 +104,28 @@ func TestValidateKey(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestInit(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "store")
+
+	if err := store.Init(dir); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	// .git directory should exist
+	info, err := os.Stat(filepath.Join(dir, ".git"))
+	if err != nil {
+		t.Fatalf(".git not created: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatal(".git is not a directory")
+	}
+
+	// Calling Init again should be idempotent
+	if err := store.Init(dir); err != nil {
+		t.Fatalf("Init (idempotent): %v", err)
+	}
 }
 
 func TestStorePath(t *testing.T) {
