@@ -231,6 +231,10 @@ gr store list
 gr store list design/
 gr store ls tribunal/
 
+# Append a line to a document (creates if missing, adds newline)
+gr store append logs/builds.jsonl '{"status":"pass","ts":"2026-06-16"}'
+echo '{"run":2}' | gr store append logs/builds.jsonl
+
 # Remove a document
 gr store rm design/api.md
 
@@ -246,9 +250,8 @@ spellings for the same repo resolve to the same namespace.
 
 Use `gr store` for artifacts you want to keep but don't want to commit:
 design docs, research notes, build outputs, shared context between agents.
-For historical data (e.g. repeated tribunal runs), use timestamped keys
-like `tribunal/2026-06-15T14:30.json` and `gr store list tribunal/` to see
-the history.
+Use `gr store append` with `.jsonl` keys for log-style data (e.g. tribunal
+results, build history) where each entry is one JSON line.
 
 ### Typing into sessions remotely
 
