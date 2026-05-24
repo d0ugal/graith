@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.37.0](https://github.com/d0ugal/graith/compare/v0.36.0...v0.37.0) (2026-05-24)
+
+
+### Features
+
+* handle restart in picker overlay, add R for restart-all ([49b102e](https://github.com/d0ugal/graith/commit/49b102e780ab7bc39e4e3003531bcdeb68f070da))
+
+
+### Bug Fixes
+
+* skip non-existent sandbox dirs instead of failing session creation ([0ad7184](https://github.com/d0ugal/graith/commit/0ad7184cce96c94394a50d2c3908404f1bdb9abd))
+
 ## [0.36.0](https://github.com/d0ugal/graith/compare/v0.35.0...v0.36.0) (2026-05-23)
 
 
