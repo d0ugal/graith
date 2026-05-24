@@ -718,8 +718,8 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 	var mergedSandbox *config.SandboxConfig
 	if sandboxed {
 		merged := sandboxMerged
-		merged.ReadDirs = expandPaths(merged.ReadDirs)
-		merged.WriteDirs = expandPaths(merged.WriteDirs)
+		merged.ReadDirs = expandPaths(merged.ReadDirs, sm.log, "read")
+		merged.WriteDirs = expandPaths(merged.WriteDirs, sm.log, "write")
 		mergedSandbox = &merged
 		envKeys := []string{"GRAITH_SESSION_ID", "GRAITH_SESSION_NAME", "GRAITH_AGENT_TYPE", "GRAITH_WORKTREE_PATH", "TERM"}
 		for k := range agent.Env {
@@ -1098,8 +1098,8 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 	var mergedSandbox *config.SandboxConfig
 	if sandboxed {
 		merged := sandboxMerged
-		merged.ReadDirs = expandPaths(merged.ReadDirs)
-		merged.WriteDirs = expandPaths(merged.WriteDirs)
+		merged.ReadDirs = expandPaths(merged.ReadDirs, sm.log, "read")
+		merged.WriteDirs = expandPaths(merged.WriteDirs, sm.log, "write")
 		mergedSandbox = &merged
 		envKeys := []string{"GRAITH_SESSION_ID", "GRAITH_SESSION_NAME", "GRAITH_AGENT_TYPE", "GRAITH_WORKTREE_PATH", "TERM"}
 		for k := range agent.Env {
@@ -1503,8 +1503,8 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 	var mergedSandbox *config.SandboxConfig
 	if sandboxed {
 		merged := sandboxMerged
-		merged.ReadDirs = expandPaths(merged.ReadDirs)
-		merged.WriteDirs = expandPaths(merged.WriteDirs)
+		merged.ReadDirs = expandPaths(merged.ReadDirs, sm.log, "read")
+		merged.WriteDirs = expandPaths(merged.WriteDirs, sm.log, "write")
 		mergedSandbox = &merged
 		envKeys := []string{"GRAITH_SESSION_ID", "GRAITH_SESSION_NAME", "GRAITH_AGENT_TYPE", "GRAITH_WORKTREE_PATH", "TERM"}
 		for k := range agent.Env {
@@ -2677,8 +2677,8 @@ func (sm *SessionManager) resolveSandbox(agentName string) (bool, error) {
 }
 
 func (sm *SessionManager) sandboxOptsFromConfig(merged config.SandboxConfig, sessionID, worktreePath string, envKeys []string, agentHooks bool) sandbox.WrapOpts {
-	readDirs := expandPaths(merged.ReadDirs)
-	writeDirs := expandPaths(merged.WriteDirs)
+	readDirs := expandPaths(merged.ReadDirs, sm.log, "read")
+	writeDirs := expandPaths(merged.WriteDirs, sm.log, "write")
 
 	if agentHooks {
 		hd := sm.hookDir(sessionID)
@@ -2702,7 +2702,7 @@ func (sm *SessionManager) sandboxOptsFromConfig(merged config.SandboxConfig, ses
 	}
 }
 
-func expandPaths(paths []string) []string {
+func expandPaths(paths []string, log *slog.Logger, kind string) []string {
 	if len(paths) == 0 {
 		return nil
 	}
@@ -2714,6 +2714,10 @@ func expandPaths(paths []string) []string {
 				out = append(out, matches...)
 				continue
 			}
+		}
+		if _, err := os.Stat(expanded); err != nil {
+			log.Warn("sandbox: skipping non-existent directory", "kind", kind, "path", expanded)
+			continue
 		}
 		out = append(out, expanded)
 	}

@@ -205,8 +205,8 @@ func (m *MCPManager) startProcess(serverCfg config.MCPServerConfig, proxyID stri
 		if serverCfg.SandboxConfig != nil {
 			merged = merged.Merge(*serverCfg.SandboxConfig)
 		}
-		merged.ReadDirs = expandPaths(merged.ReadDirs)
-		merged.WriteDirs = expandPaths(merged.WriteDirs)
+		merged.ReadDirs = expandPaths(merged.ReadDirs, m.log, "read")
+		merged.WriteDirs = expandPaths(merged.WriteDirs, m.log, "write")
 
 		envKeys := make([]string, 0, len(serverCfg.Env)+1)
 		envKeys = append(envKeys, "PATH", "HOME", "TERM")
