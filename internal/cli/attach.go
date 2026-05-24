@@ -54,21 +54,9 @@ func runAttach(cmd *cobra.Command, name string) error {
 	}
 
 	if name == "" {
-		result := client.RunOverlay(list.Sessions, "", previewFetcher(), deleteSession, toggleStar, paths.Profile)
+		result := client.RunOverlay(list.Sessions, "", previewFetcher(), deleteSession, restartSession, toggleStar, paths.Profile)
 		if result == nil {
 			return nil
-		}
-		if result.Action == "restart" {
-			c.SendControl("restart", protocol.RestartMsg{SessionID: result.SessionID})
-			restartResp, err := c.ReadControlResponse()
-			if err != nil {
-				return err
-			}
-			if restartResp.Type == "error" {
-				var e protocol.ErrorMsg
-				protocol.DecodePayload(restartResp, &e)
-				return fmt.Errorf("restart failed: %s", e.Message)
-			}
 		}
 		return runAttachByID(c, result.SessionID)
 	}
@@ -159,7 +147,7 @@ func runAttachByID(c *client.Client, sessionID string) error {
 			var list protocol.SessionListMsg
 			protocol.DecodePayload(listResp, &list)
 
-			overlayResult := client.RunOverlay(list.Sessions, sessionID, previewFetcher(), deleteSession, toggleStar, paths.Profile)
+			overlayResult := client.RunOverlay(list.Sessions, sessionID, previewFetcher(), deleteSession, restartSession, toggleStar, paths.Profile)
 			if overlayResult == nil {
 				restoreScreen(sessionID)
 				nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
@@ -169,23 +157,6 @@ func runAttachByID(c *client.Client, sessionID string) error {
 				opts.Info = &info
 				c = nc
 				continue
-			}
-			if overlayResult.Action == "restart" {
-				nc.SendControl("restart", protocol.RestartMsg{SessionID: overlayResult.SessionID})
-				restartResp, _ := nc.ReadControlResponse()
-				if restartResp.Type == "error" {
-					var e protocol.ErrorMsg
-					protocol.DecodePayload(restartResp, &e)
-					out.Print("Restart failed: %s\n", e.Message)
-					restoreScreen(sessionID)
-					nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
-					attachResp, _ := nc.ReadControlResponse()
-					protocol.DecodePayload(attachResp, &info)
-					opts.SessionID = sessionID
-					opts.Info = &info
-					c = nc
-					continue
-				}
 			}
 			restoreScreen(overlayResult.SessionID)
 			nc.SendControl("attach", protocol.AttachMsg{SessionID: overlayResult.SessionID})
@@ -547,6 +518,25 @@ func toggleStar(sessionID string, star bool) error {
 		sc.SendControl("unstar", protocol.UnstarMsg{SessionID: sessionID})
 	}
 	resp, err := sc.ReadControlResponse()
+	if err != nil {
+		return err
+	}
+	if resp.Type == "error" {
+		var e protocol.ErrorMsg
+		protocol.DecodePayload(resp, &e)
+		return fmt.Errorf("%s", e.Message)
+	}
+	return nil
+}
+
+func restartSession(sessionID string) error {
+	rc, err := freshClient()
+	if err != nil {
+		return err
+	}
+	defer rc.Close()
+	rc.SendControl("restart", protocol.RestartMsg{SessionID: sessionID})
+	resp, err := rc.ReadControlResponse()
 	if err != nil {
 		return err
 	}
