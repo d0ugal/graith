@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.38.0](https://github.com/d0ugal/graith/compare/v0.37.0...v0.38.0) (2026-05-25)
+
+
+### Features
+
+* add --all/-a flag to gr store list for cross-repo listing ([f871459](https://github.com/d0ugal/graith/commit/f871459f1b0bc72ef2e9addec9f2ab99ae54b85d))
+
 ## [0.37.0](https://github.com/d0ugal/graith/compare/v0.36.0...v0.37.0) (2026-05-24)
 
 
