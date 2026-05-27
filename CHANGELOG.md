@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.39.0](https://github.com/d0ugal/graith/compare/v0.38.0...v0.39.0) (2026-05-27)
+
+
+### Features
+
+* rename share directory to tmp, GRAITH_SHARE_PATH to GRAITH_TMPDIR ([9308b14](https://github.com/d0ugal/graith/commit/9308b144285bc33d0912ff9db536edc84e65fef8))
+
+
+### Bug Fixes
+
+* update module github.com/pelletier/go-toml/v2 to v2.4.0 ([00f38b6](https://github.com/d0ugal/graith/commit/00f38b686a72cded93d2cf79e3d714f3c299b927))
+
 ## [0.38.0](https://github.com/d0ugal/graith/compare/v0.37.0...v0.38.0) (2026-05-25)
 
 
