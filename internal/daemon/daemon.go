@@ -277,11 +277,11 @@ func repoHash(repoPath string) string {
 	return hex.EncodeToString(b)[:12]
 }
 
-func (sm *SessionManager) repoShareDir(repoRoot string) (string, error) {
+func (sm *SessionManager) repoTmpDir(repoRoot string) (string, error) {
 	repoName := filepath.Base(repoRoot)
-	dir := filepath.Join(sm.paths.ShareDir, repoName, repoHash(repoRoot))
+	dir := filepath.Join(sm.paths.TmpDir, repoName, repoHash(repoRoot))
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", fmt.Errorf("create share dir: %w", err)
+		return "", fmt.Errorf("create tmp dir: %w", err)
 	}
 	return dir, nil
 }
@@ -664,15 +664,15 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 	}
 	var storeDir string
 	if repoRoot != "" {
-		shareDir, err := sm.repoShareDir(repoRoot)
+		tmpDir, err := sm.repoTmpDir(repoRoot)
 		if err != nil {
 			cleanupOnError()
 			rollbackState()
 			return SessionState{}, err
 		}
-		env["GRAITH_SHARE_PATH"] = shareDir
+		env["GRAITH_TMPDIR"] = tmpDir
 		if _, ok := env["TMPDIR"]; !ok {
-			env["TMPDIR"] = shareDir
+			env["TMPDIR"] = tmpDir
 		}
 		storeDir, err = sm.repoStoreDir(repoRoot)
 		if err != nil {
@@ -729,8 +729,8 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 			envKeys = append(envKeys, k)
 		}
 		opts := sm.sandboxOptsFromConfig(merged, id, worktreePath, envKeys, agentHooks)
-		if shareDir := env["GRAITH_SHARE_PATH"]; shareDir != "" {
-			opts.WriteDirs = append(opts.WriteDirs, shareDir)
+		if tmpDir := env["GRAITH_TMPDIR"]; tmpDir != "" {
+			opts.WriteDirs = append(opts.WriteDirs, tmpDir)
 		}
 		if storeDir != "" {
 			opts.WriteDirs = append(opts.WriteDirs, storeDir)
@@ -1050,15 +1050,15 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 	}
 	var forkStoreDir string
 	if repoRoot != "" {
-		shareDir, err := sm.repoShareDir(repoRoot)
+		tmpDir, err := sm.repoTmpDir(repoRoot)
 		if err != nil {
 			forkCleanup()
 			rollbackState()
 			return SessionState{}, err
 		}
-		env["GRAITH_SHARE_PATH"] = shareDir
+		env["GRAITH_TMPDIR"] = tmpDir
 		if _, ok := env["TMPDIR"]; !ok {
-			env["TMPDIR"] = shareDir
+			env["TMPDIR"] = tmpDir
 		}
 		forkStoreDir, err = sm.repoStoreDir(repoRoot)
 		if err != nil {
@@ -1109,8 +1109,8 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 			envKeys = append(envKeys, k)
 		}
 		opts := sm.sandboxOptsFromConfig(merged, id, worktreePath, envKeys, sourceAgentHooks)
-		if shareDir := env["GRAITH_SHARE_PATH"]; shareDir != "" {
-			opts.WriteDirs = append(opts.WriteDirs, shareDir)
+		if tmpDir := env["GRAITH_TMPDIR"]; tmpDir != "" {
+			opts.WriteDirs = append(opts.WriteDirs, tmpDir)
 		}
 		if forkStoreDir != "" {
 			opts.WriteDirs = append(opts.WriteDirs, forkStoreDir)
@@ -1453,14 +1453,14 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 	}
 	var resumeStoreDir string
 	if sessRepoPath != "" {
-		shareDir, err := sm.repoShareDir(sessRepoPath)
+		tmpDir, err := sm.repoTmpDir(sessRepoPath)
 		if err != nil {
 			rollbackState()
 			return SessionState{}, err
 		}
-		env["GRAITH_SHARE_PATH"] = shareDir
+		env["GRAITH_TMPDIR"] = tmpDir
 		if _, ok := env["TMPDIR"]; !ok {
-			env["TMPDIR"] = shareDir
+			env["TMPDIR"] = tmpDir
 		}
 		resumeStoreDir, err = sm.repoStoreDir(sessRepoPath)
 		if err != nil {
@@ -1514,8 +1514,8 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 			envKeys = append(envKeys, k)
 		}
 		opts := sm.sandboxOptsFromConfig(merged, id, sessWorktreePath, envKeys, sessAgentHooks)
-		if shareDir := env["GRAITH_SHARE_PATH"]; shareDir != "" {
-			opts.WriteDirs = append(opts.WriteDirs, shareDir)
+		if tmpDir := env["GRAITH_TMPDIR"]; tmpDir != "" {
+			opts.WriteDirs = append(opts.WriteDirs, tmpDir)
 		}
 		if resumeStoreDir != "" {
 			opts.WriteDirs = append(opts.WriteDirs, resumeStoreDir)

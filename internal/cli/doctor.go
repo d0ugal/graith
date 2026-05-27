@@ -454,7 +454,7 @@ func (dc *doctorContext) checkStorage(diag *protocol.DiagnosticsMsg) {
 	msg := diag.Messages
 	dc.pass("storage", "Messages: %d streams, %d messages", msg.TotalStreams, msg.TotalMessages)
 
-	dc.checkShareDir()
+	dc.checkTmpDir()
 
 	// Check for orphaned scrollback files
 	sessionIDs := make(map[string]bool, len(diag.Sessions))
@@ -553,11 +553,11 @@ func (dc *doctorContext) checkStorage(diag *protocol.DiagnosticsMsg) {
 	}
 }
 
-func (dc *doctorContext) checkShareDir() {
-	shareDir := paths.ShareDir
-	entries, err := os.ReadDir(shareDir)
+func (dc *doctorContext) checkTmpDir() {
+	tmpDir := paths.TmpDir
+	entries, err := os.ReadDir(tmpDir)
 	if err != nil {
-		dc.pass("storage", "Share dir: %s (empty)", shareDir)
+		dc.pass("storage", "Tmp dir: %s (empty)", tmpDir)
 		return
 	}
 
@@ -567,7 +567,7 @@ func (dc *doctorContext) checkShareDir() {
 		if !repo.IsDir() {
 			continue
 		}
-		repoDir := filepath.Join(shareDir, repo.Name())
+		repoDir := filepath.Join(tmpDir, repo.Name())
 		hashes, err := os.ReadDir(repoDir)
 		if err != nil {
 			continue
@@ -583,9 +583,9 @@ func (dc *doctorContext) checkShareDir() {
 	}
 
 	if repoCount == 0 {
-		dc.pass("storage", "Share dir: %s (empty)", shareDir)
+		dc.pass("storage", "Tmp dir: %s (empty)", tmpDir)
 	} else {
-		dc.pass("storage", "Share dir: %s (%d repo(s), %s)", shareDir, repoCount, formatBytes(totalSize))
+		dc.pass("storage", "Tmp dir: %s (%d repo(s), %s)", tmpDir, repoCount, formatBytes(totalSize))
 	}
 }
 
