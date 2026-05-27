@@ -27,7 +27,7 @@ data directory:
     └── 2026-06-15.md
 ```
 
-The `<reponame>-<hash>` naming follows the same pattern as the existing share
+The `<reponame>-<hash>` naming follows the same pattern as the existing tmp
 directory (using `repoHash`). On first write, the CLI runs `git init` if the
 directory doesn't exist yet.
 
