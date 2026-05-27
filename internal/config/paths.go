@@ -26,7 +26,7 @@ type Paths struct {
 	LogDir     string
 	DaemonLog  string
 	MessagesDB string
-	ShareDir   string
+	TmpDir     string
 }
 
 func ResolveProfile() (profile string, appName string, err error) {
@@ -78,7 +78,7 @@ func ResolvePaths() (Paths, error) {
 		LogDir:     filepath.Join(dataDir, "logs"),
 		DaemonLog:  filepath.Join(dataDir, "daemon.log"),
 		MessagesDB: filepath.Join(dataDir, "messages.sqlite"),
-		ShareDir:   filepath.Join(dataDir, "share"),
+		TmpDir:     filepath.Join(dataDir, "tmp"),
 	}, nil
 }
 
@@ -97,7 +97,7 @@ func (p Paths) WithDataDir(dataDir string) Paths {
 	p.LogDir = filepath.Join(dataDir, "logs")
 	p.DaemonLog = filepath.Join(dataDir, "daemon.log")
 	p.MessagesDB = filepath.Join(dataDir, "messages.sqlite")
-	p.ShareDir = filepath.Join(dataDir, "share")
+	p.TmpDir = filepath.Join(dataDir, "tmp")
 	if strings.HasPrefix(p.RuntimeDir, oldDataDir+string(filepath.Separator)) || p.RuntimeDir == oldDataDir {
 		rel, err := filepath.Rel(oldDataDir, p.RuntimeDir)
 		if err == nil {
@@ -111,7 +111,7 @@ func (p Paths) WithDataDir(dataDir string) Paths {
 }
 
 func (p Paths) EnsureDirs() error {
-	dirs := []string{filepath.Dir(p.ConfigFile), p.DataDir, p.RuntimeDir, p.LogDir, p.ShareDir}
+	dirs := []string{filepath.Dir(p.ConfigFile), p.DataDir, p.RuntimeDir, p.LogDir, p.TmpDir}
 	for _, dir := range dirs {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return fmt.Errorf("create directory %s: %w", dir, err)
