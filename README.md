@@ -518,6 +518,9 @@ The daemon sets these in every agent process:
 | `GRAITH_SESSION_NAME` | human-readable session name |
 | `GRAITH_AGENT_TYPE` | agent type (e.g. `claude`, `codex`) |
 | `GRAITH_WORKTREE_PATH` | absolute path to the worktree |
+| `GRAITH_REPO_PATH` | absolute path to the source repository (canonical) |
+| `GRAITH_TMPDIR` | per-repo temporary directory (persists across sessions) |
+| `TMPDIR` | set to `GRAITH_TMPDIR` so `mktemp` etc. use the per-repo tmp dir |
 
 `gr shell` additionally exports `GRAITH_WORKTREE`. `gr msg` reads `GRAITH_SESSION_ID`/`GRAITH_SESSION_NAME` to identify the sender automatically.
 
