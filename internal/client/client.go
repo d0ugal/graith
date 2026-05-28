@@ -106,7 +106,6 @@ func connect(cfg *config.Config, paths config.Paths, configFile string, autoUpgr
 				// ensures the new version actually runs.
 				if stopDaemonByPID(paths.PIDFile) {
 					waitForSocketGone(paths.SocketPath)
-					os.Remove(paths.SocketPath)
 				}
 				return connect(cfg, paths, configFile, false)
 			}
@@ -145,7 +144,11 @@ func probeDaemonVersion(sockPath string, paths config.Paths) string {
 
 func requestUpgrade(c *Client) bool {
 	execPath, _ := os.Executable()
-	if err := c.SendControl("upgrade", protocol.UpgradeMsg{ExecPath: execPath}); err != nil {
+	msg := protocol.UpgradeMsg{
+		ExecPath:      execPath,
+		ClientVersion: version.Version,
+	}
+	if err := c.SendControl("upgrade", msg); err != nil {
 		return false
 	}
 	// Connection drop is expected — the daemon exec'd itself.
