@@ -122,7 +122,7 @@ var newCmd = &cobra.Command{
 			return nil
 		}
 
-		return runAttachByID(c, info.ID)
+		return runAttachByID(c, info.ID, nil)
 	},
 }
 
