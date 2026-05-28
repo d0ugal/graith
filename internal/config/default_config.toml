@@ -64,6 +64,14 @@ gr store append logs/data.jsonl '{"key":"value"}'    # append a line (JSONL)
 
 Documents are plain files in a per-repo git directory — browsable, greppable, and version-tracked. Use the store for artifacts you want to keep but don't want to commit: design docs, research notes, build outputs, shared context between agents.
 
+Use `--shared` to access a global store that is not scoped to any repo:
+
+```
+gr store put --shared prompts/review.md "Review this code..."
+gr store get --shared prompts/review.md
+gr store ls --shared
+```
+
 ## Environment
 
 - GRAITH_SESSION_ID — your session ID (set automatically)
