@@ -681,6 +681,30 @@ func newOverlayModel(sessions []protocol.SessionInfo, currentSessionID string, f
 				break
 			}
 		}
+		if !cursorSet {
+			parentOf := make(map[string]string)
+			for _, s := range sessions {
+				if s.ParentID != "" && s.ParentID != s.ID {
+					parentOf[s.ID] = s.ParentID
+				}
+			}
+			seen := map[string]bool{currentSessionID: true}
+			cur := parentOf[currentSessionID]
+			for cur != "" && !seen[cur] {
+				seen[cur] = true
+				for i, item := range items {
+					if si, ok := item.(sessionItem); ok && si.info.ID == cur {
+						l.Select(i)
+						cursorSet = true
+						break
+					}
+				}
+				if cursorSet {
+					break
+				}
+				cur = parentOf[cur]
+			}
+		}
 	}
 	if !cursorSet {
 		if _, ok := l.SelectedItem().(groupHeader); ok {
