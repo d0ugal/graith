@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.40.0](https://github.com/d0ugal/graith/compare/v0.39.0...v0.40.0) (2026-05-28)
+
+
+### Features
+
+* add --shared store examples to agent prompt ([ac6b132](https://github.com/d0ugal/graith/commit/ac6b132fd8d627c775fa978fafd6a0eeab594117))
+* add shared store and repo column to store ls ([7f23c70](https://github.com/d0ugal/graith/commit/7f23c70f8b5d26cc066ce110889915d64bcda031))
+
+
+### Bug Fixes
+
+* address tribunal review findings for share→tmp rename ([3f854cd](https://github.com/d0ugal/graith/commit/3f854cd9c6cda28d4d6fb5ec1916f535d6c783b8))
+* address tribunal review findings for shared store ([b813f34](https://github.com/d0ugal/graith/commit/b813f345a984f81877f5b9f47bdeb62604843804))
+* error when --shared and --repo are both provided ([fa158bf](https://github.com/d0ugal/graith/commit/fa158bf39588ba9add7c8e237e80b8964aa12034))
+* prevent stale mcp-proxy and mcp server from killing daemon on restart ([eef656d](https://github.com/d0ugal/graith/commit/eef656dc4a0c40472c6ce6583a1be2faf903ec91))
+
 ## [0.39.0](https://github.com/d0ugal/graith/compare/v0.38.0...v0.39.0) (2026-05-27)
 
 
