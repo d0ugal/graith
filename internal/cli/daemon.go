@@ -15,7 +15,7 @@ import (
 
 func upgradeMsg() protocol.UpgradeMsg {
 	execPath, _ := os.Executable()
-	return protocol.UpgradeMsg{ExecPath: execPath}
+	return protocol.UpgradeMsg{ExecPath: execPath, ClientVersion: version.Version}
 }
 
 var (
