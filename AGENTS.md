@@ -240,18 +240,25 @@ gr store rm design/api.md
 
 # Explicit repo scoping (when not in a session)
 gr store list --repo ~/Code/graith
+
+# Shared store (not scoped to any repo)
+gr store put --shared prompts/review.md "Review this code..."
+gr store get --shared prompts/review.md
+gr store ls --shared
 ```
 
-Documents are scoped per-repo — sessions for `~/Code/graith` share one
-namespace, sessions for `~/Code/other` share another. Keys are
-slash-separated paths and should include a file extension (e.g. `.md`, `.json`)
-to indicate content type. The repo path is canonicalized, so different path
-spellings for the same repo resolve to the same namespace.
+Documents are scoped per-repo by default — sessions for `~/Code/graith` share
+one namespace, sessions for `~/Code/other` share another. Use `--shared` to
+access a global store that is not scoped to any repo. Keys are slash-separated
+paths and should include a file extension (e.g. `.md`, `.json`) to indicate
+content type. The repo path is canonicalized, so different path spellings for
+the same repo resolve to the same namespace.
 
 Use `gr store` for artifacts you want to keep but don't want to commit:
 design docs, research notes, build outputs, shared context between agents.
 Use `gr store append` with `.jsonl` keys for log-style data (e.g. tribunal
-results, build history) where each entry is one JSON line.
+results, build history) where each entry is one JSON line. Use `--shared` for
+artifacts that span repos (e.g. prompt templates, cross-project config).
 
 ### Typing into sessions remotely
 
