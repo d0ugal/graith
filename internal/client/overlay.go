@@ -612,8 +612,10 @@ func buildGroupedItems(sessions []protocol.SessionInfo, collapsed map[string]boo
 				var markVisited func(id string)
 				markVisited = func(id string) {
 					for _, kid := range children[id] {
-						visited[kid.ID] = true
-						markVisited(kid.ID)
+						if !visited[kid.ID] {
+							visited[kid.ID] = true
+							markVisited(kid.ID)
+						}
 					}
 				}
 				markVisited(s.ID)
@@ -760,6 +762,25 @@ func (m *overlayModel) selectSessionByID(id string) {
 			m.list.Select(i)
 			return
 		}
+	}
+	// ID not visible — walk up the parent chain to find a visible ancestor.
+	parentOf := make(map[string]string)
+	for _, s := range m.allSessions {
+		if s.ParentID != "" && s.ParentID != s.ID {
+			parentOf[s.ID] = s.ParentID
+		}
+	}
+	seen := map[string]bool{id: true}
+	cur := parentOf[id]
+	for cur != "" && !seen[cur] {
+		seen[cur] = true
+		for i, item := range m.list.Items() {
+			if si, ok := item.(sessionItem); ok && si.info.ID == cur {
+				m.list.Select(i)
+				return
+			}
+		}
+		cur = parentOf[cur]
 	}
 	if _, ok := m.list.SelectedItem().(groupHeader); ok {
 		m.list.CursorDown()
@@ -1032,6 +1053,9 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 
 			case "C":
+				if m.view != viewAll {
+					return m, nil
+				}
 				parents := m.parentsWithChildren()
 				if len(parents) == 0 {
 					return m, nil
@@ -1305,7 +1329,7 @@ func (m overlayModel) View() tea.View {
 
 	helpStyle := lipgloss.NewStyle().Foreground(colorFaint)
 	panelContent.WriteString("\n")
-	panelContent.WriteString(helpStyle.Render("enter attach  ◂▸ view  / filter  tab group  s star  x delete  r/R restart  q quit"))
+	panelContent.WriteString(helpStyle.Render("enter attach  ◂▸ view  / filter  tab group  s star  space fold  C fold-all  x delete  r/R restart  q quit"))
 
 	panel := lipgloss.NewStyle().
 		Width(panelWidth).
