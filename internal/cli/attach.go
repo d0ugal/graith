@@ -54,8 +54,8 @@ func runAttach(cmd *cobra.Command, name string) error {
 	}
 
 	if name == "" {
-		result := client.RunOverlay(list.Sessions, "", previewFetcher(), deleteSession, restartSession, toggleStar, paths.Profile)
-		if result == nil {
+		result := client.RunOverlay(list.Sessions, "", previewFetcher(), deleteSession, restartSession, toggleStar, paths.Profile, nil)
+		if result == nil || result.Action == "" {
 			return nil
 		}
 		return runAttachByID(c, result.SessionID)
@@ -113,6 +113,7 @@ func runAttachByID(c *client.Client, sessionID string) error {
 	}
 
 	prevSessionID := ""
+	var overlayCollapsed map[string]bool
 
 	opts := client.PassthroughOpts{
 		Keys:      keys,
@@ -147,8 +148,11 @@ func runAttachByID(c *client.Client, sessionID string) error {
 			var list protocol.SessionListMsg
 			protocol.DecodePayload(listResp, &list)
 
-			overlayResult := client.RunOverlay(list.Sessions, sessionID, previewFetcher(), deleteSession, restartSession, toggleStar, paths.Profile)
-			if overlayResult == nil {
+			overlayResult := client.RunOverlay(list.Sessions, sessionID, previewFetcher(), deleteSession, restartSession, toggleStar, paths.Profile, overlayCollapsed)
+			if overlayResult != nil {
+				overlayCollapsed = overlayResult.Collapsed
+			}
+			if overlayResult == nil || overlayResult.Action == "" {
 				restoreScreen(sessionID)
 				nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
 				attachResp, _ := nc.ReadControlResponse()
