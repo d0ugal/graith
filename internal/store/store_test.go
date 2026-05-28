@@ -577,6 +577,13 @@ func TestStorePath(t *testing.T) {
 	})
 }
 
+func TestSharedStorePath(t *testing.T) {
+	p := store.SharedStorePath("/data")
+	if p != "/data/store/shared" {
+		t.Errorf("SharedStorePath = %q, want /data/store/shared", p)
+	}
+}
+
 func TestListStores(t *testing.T) {
 	dataDir := t.TempDir()
 
