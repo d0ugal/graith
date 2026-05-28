@@ -42,6 +42,9 @@ func resolveStoreRepoPath() (string, error) {
 
 // resolveStorePath returns the store path and a display label ("shared" or the repo path).
 func resolveStorePath() (storePath string, label string, err error) {
+	if storeSharedFlag && storeRepoFlag != "" {
+		return "", "", fmt.Errorf("--shared and --repo are mutually exclusive")
+	}
 	if storeSharedFlag {
 		sp := store.SharedStorePath(paths.DataDir)
 		return sp, "shared", nil
