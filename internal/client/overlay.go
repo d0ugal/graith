@@ -387,7 +387,7 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 		treePrefixRendered = dim.Render(si.treePrefix)
 	}
 
-	collapseIndicator := ""
+	collapseIndicator := "  "
 	childSuffix := ""
 	if si.hasChildren {
 		if si.collapsed {
