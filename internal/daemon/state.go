@@ -68,6 +68,7 @@ type SessionState struct {
 	SystemKind             string                `json:"system_kind,omitempty"`
 	StopReason             string                `json:"stop_reason,omitempty"`
 	BackoffLevel           int                   `json:"backoff_level,omitempty"`
+	FreshStart             bool                  `json:"fresh_start,omitempty"`
 	LastStartedAt          time.Time             `json:"last_started_at,omitempty"`
 	SummaryText            string                `json:"summary_text,omitempty"`
 	SummarySetAt           *time.Time            `json:"summary_set_at,omitempty"`

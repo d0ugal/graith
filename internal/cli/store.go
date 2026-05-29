@@ -54,7 +54,7 @@ func resolveStorePath() (storePath string, label string, err error) {
 	if storeSharedFlag && storeRepoFlag != "" {
 		return "", "", fmt.Errorf("--shared and --repo are mutually exclusive")
 	}
-	if storeSharedFlag || (!storeSharedFlag && storeRepoFlag == "" && inGraithSessionWithNoRepo()) {
+	if storeSharedFlag || (storeRepoFlag == "" && inGraithSessionWithNoRepo()) {
 		sp := store.SharedStorePath(paths.DataDir)
 		return sp, "shared", nil
 	}
