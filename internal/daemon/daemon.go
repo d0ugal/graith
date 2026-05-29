@@ -52,20 +52,21 @@ type hookReport struct {
 
 // SessionManager orchestrates PTY sessions, state persistence, and git worktrees.
 type SessionManager struct {
-	mu               sync.RWMutex
-	state            *State
-	sessions         map[string]*grpty.Session
-	attachedClients  map[string]*attachedClient
-	hookReports      map[string]hookReport
-	pendingApprovals map[string]*pendingApproval
-	cfg              *config.Config
-	paths            config.Paths
-	log              *slog.Logger
-	configFile       string
-	upgradeCh        chan string
-	messages         *MsgStore
-	mcpManager       *MCPManager
-	startedAt        time.Time
+	mu                 sync.RWMutex
+	state              *State
+	sessions           map[string]*grpty.Session
+	attachedClients    map[string]*attachedClient
+	hookReports        map[string]hookReport
+	pendingApprovals   map[string]*pendingApproval
+	cfg                *config.Config
+	paths              config.Paths
+	log                *slog.Logger
+	configFile         string
+	upgradeCh          chan string
+	messages           *MsgStore
+	mcpManager         *MCPManager
+	startedAt          time.Time
+	orchestratorExitCh chan string
 }
 
 // NewSessionManager creates a SessionManager with the given config and paths.
@@ -871,6 +872,11 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 		return SessionState{}, fmt.Errorf("source session %q not found", sourceSessionID)
 	}
 
+	if IsSystemSession(source) {
+		sm.mu.Unlock()
+		return SessionState{}, fmt.Errorf("cannot fork system session %q", source.Name)
+	}
+
 	if source.RepoPath == "" {
 		sm.mu.Unlock()
 		return SessionState{}, fmt.Errorf("cannot fork session %q: source has no repo (fork requires a git repository)", source.Name)
@@ -1199,14 +1205,19 @@ func (sm *SessionManager) watchSession(id string, sess *grpty.Session) {
 	stale := sm.sessions[id] != sess
 	var name string
 	var deleted bool
+	var isOrchestrator bool
 	if !stale {
 		if s, ok := sm.state.Sessions[id]; ok {
 			name = s.Name
+			isOrchestrator = s.SystemKind == SystemKindOrchestrator
 			exitCode := sess.ExitCode()
 			s.Status = StatusStopped
 			s.StatusChangedAt = time.Now()
 			s.ExitCode = &exitCode
 			s.PID = 0
+			if s.StopReason == "" {
+				s.StopReason = StopReasonCrash
+			}
 			if lastOut := sess.LastOutputAt(); !lastOut.IsZero() {
 				s.LastOutputAt = &lastOut
 			}
@@ -1230,6 +1241,10 @@ func (sm *SessionManager) watchSession(id string, sess *grpty.Session) {
 
 	sm.log.Info("session exited", "id", id, "exit_code", sess.ExitCode())
 	sm.onAgentStatusChange(id, name, "running", "stopped")
+
+	if isOrchestrator {
+		sm.notifyOrchestratorExit(id)
+	}
 }
 
 // Resume restarts a stopped session using the agent's resume_args.
@@ -1396,6 +1411,7 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 	copy(sessIncludes, sessState.Includes)
 	sessInPlace := sessState.InPlace
 	sessSharedWorktree := sessState.SharedWorktree
+	sessSystemKind := sessState.SystemKind
 
 	sm.mu.Unlock()
 
@@ -1437,6 +1453,12 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 
 	logPath := filepath.Join(sm.paths.LogDir, id+".log")
 
+	isOrchestrator := sessSystemKind == SystemKindOrchestrator
+	ptyCWD := sessWorktreePath
+	if isOrchestrator {
+		ptyCWD = sm.orchestratorScratchDir()
+	}
+
 	env := make(map[string]string, len(agent.Env)+5)
 	for k, v := range agent.Env {
 		env[k] = v
@@ -1444,7 +1466,9 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 	env["GRAITH_SESSION_ID"] = id
 	env["GRAITH_SESSION_NAME"] = sessName
 	env["GRAITH_AGENT_TYPE"] = sessAgent
-	env["GRAITH_WORKTREE_PATH"] = sessWorktreePath
+	if !isOrchestrator {
+		env["GRAITH_WORKTREE_PATH"] = sessWorktreePath
+	}
 	if sessRepoPath != "" {
 		env["GRAITH_REPO_PATH"] = sessRepoPath
 	}
@@ -1455,7 +1479,15 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 		env["GRAITH_IN_PLACE"] = "true"
 	}
 	var resumeStoreDir string
-	if sessRepoPath != "" {
+	if isOrchestrator {
+		tmpDir := sm.orchestratorTmpDir()
+		if err := os.MkdirAll(tmpDir, 0o700); err != nil {
+			rollbackState()
+			return SessionState{}, fmt.Errorf("create orchestrator tmp dir: %w", err)
+		}
+		env["GRAITH_TMPDIR"] = tmpDir
+		env["TMPDIR"] = tmpDir
+	} else if sessRepoPath != "" {
 		tmpDir, err := sm.repoTmpDir(sessRepoPath)
 		if err != nil {
 			rollbackState()
@@ -1492,7 +1524,13 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 		}
 	}
 
-	if agent.PromptInjectionEnabled() {
+	if isOrchestrator {
+		sm.mu.RLock()
+		orchCfg := sm.cfg.Orchestrator
+		sm.mu.RUnlock()
+		promptArgs := sm.buildOrchestratorPrompt(sessAgent, orchCfg)
+		expandedArgs = append(expandedArgs, promptArgs...)
+	} else if agent.PromptInjectionEnabled() {
 		promptArgs, err := sm.injectPrompt(sessAgent, sessWorktreePath)
 		if err != nil {
 			sm.log.Warn("failed to inject prompt", "session_id", id, "err", err)
@@ -1509,14 +1547,17 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 		merged.ReadDirs = expandPaths(merged.ReadDirs, sm.log, "read")
 		merged.WriteDirs = expandPaths(merged.WriteDirs, sm.log, "write")
 		mergedSandbox = &merged
-		envKeys := []string{"GRAITH_SESSION_ID", "GRAITH_SESSION_NAME", "GRAITH_AGENT_TYPE", "GRAITH_WORKTREE_PATH", "TERM"}
+		envKeys := []string{"GRAITH_SESSION_ID", "GRAITH_SESSION_NAME", "GRAITH_AGENT_TYPE", "TERM"}
+		if !isOrchestrator {
+			envKeys = append(envKeys, "GRAITH_WORKTREE_PATH")
+		}
 		for k := range agent.Env {
 			envKeys = append(envKeys, k)
 		}
 		for k := range env {
 			envKeys = append(envKeys, k)
 		}
-		opts := sm.sandboxOptsFromConfig(merged, id, sessWorktreePath, envKeys, sessAgentHooks)
+		opts := sm.sandboxOptsFromConfig(merged, id, ptyCWD, envKeys, sessAgentHooks)
 		if tmpDir := env["GRAITH_TMPDIR"]; tmpDir != "" {
 			opts.WriteDirs = append(opts.WriteDirs, tmpDir)
 		}
@@ -1524,6 +1565,9 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 			opts.WriteDirs = append(opts.WriteDirs, resumeStoreDir)
 		}
 		opts.WriteDirs = append(opts.WriteDirs, store.SharedStorePath(sm.paths.DataDir))
+		if isOrchestrator {
+			opts.WriteDirs = append(opts.WriteDirs, sm.orchestratorScratchDir())
+		}
 		if len(sessIncludes) > 0 {
 			opts.WriteDirs = append(opts.WriteDirs, sm.deriveSandboxIncludesWriteDirs(sessIncludes)...)
 		}
@@ -1549,7 +1593,7 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 		ID:         id,
 		Command:    command,
 		Args:       finalArgs,
-		Dir:        sessWorktreePath,
+		Dir:        ptyCWD,
 		Env:        env,
 		Rows:       rows,
 		Cols:       cols,
@@ -1578,11 +1622,15 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 	sessState.PID = ptySess.Cmd.Process.Pid
 	sessState.AgentStatus = ""
 	sessState.IdleSince = nil
+	sessState.StopReason = ""
 	sessState.Sandboxed = sandboxed
 	sessState.SandboxConfig = mergedSandbox
 	sessState.CreationCfg = &CreationConfig{
 		Agent:         agent,
 		SandboxConfig: cfgSnapshot.Sandbox.Merge(agent.Sandbox),
+	}
+	if isOrchestrator {
+		sessState.LastStartedAt = time.Now()
 	}
 
 	sm.sessions[id] = ptySess
@@ -1623,6 +1671,10 @@ func (sm *SessionManager) Delete(id string) error {
 	if !ok {
 		sm.mu.Unlock()
 		return fmt.Errorf("session %q not found", id)
+	}
+	if IsSystemSession(sessState) {
+		sm.mu.Unlock()
+		return fmt.Errorf("session %q is a system session — disable it in config.toml instead of deleting", sessState.Name)
 	}
 	if sessState.Starred {
 		sm.mu.Unlock()
@@ -1779,6 +1831,10 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 	var creatingIDs []string
 	for _, did := range toDelete {
 		sess := sm.state.Sessions[did]
+		if IsSystemSession(sess) {
+			sm.log.Info("skipping system session in bulk delete", "session_id", did, "name", sess.Name)
+			continue
+		}
 		if sess.Starred {
 			sm.log.Info("skipping starred session in bulk delete", "session_id", did, "name", sess.Name)
 			continue
@@ -1937,8 +1993,16 @@ func (sm *SessionManager) collectDescendants(rootID string) []string {
 
 // Stop sends SIGTERM to a session's process without removing the session or worktree.
 func (sm *SessionManager) Stop(id string) error {
+	return sm.stopWithReason(id, StopReasonUser)
+}
+
+func (sm *SessionManager) stopWithReason(id, reason string) error {
 	sm.mu.Lock()
 	sessState, ok := sm.state.Sessions[id]
+	if ok {
+		sessState.StopReason = reason
+		_ = sm.saveState()
+	}
 	sm.mu.Unlock()
 	if !ok {
 		return fmt.Errorf("session %q not found", id)
@@ -2137,6 +2201,9 @@ func (sm *SessionManager) Rename(id, newName string) error {
 	if !ok {
 		return fmt.Errorf("session %q not found", id)
 	}
+	if IsSystemSession(s) {
+		return fmt.Errorf("cannot rename system session %q", s.Name)
+	}
 	s.Name = newName
 	return sm.saveState()
 }
@@ -2305,6 +2372,12 @@ func (sm *SessionManager) getHookReport(sessionID string) *hookReport {
 // StopAll gracefully terminates all running sessions.
 func (sm *SessionManager) StopAll(ctx context.Context) {
 	sm.mu.Lock()
+	for _, s := range sm.state.Sessions {
+		if s.Status == StatusRunning {
+			s.StopReason = StopReasonShutdown
+		}
+	}
+	_ = sm.saveState()
 	type snapshot struct {
 		id   string
 		sess *grpty.Session
@@ -2528,7 +2601,7 @@ func (sm *SessionManager) detectAgentStatuses() {
 			idleDur = time.Since(*idleSince)
 		}
 		sm.log.Info("auto-stopping idle session", "session", name, "id", id, "idle_duration", idleDur.Round(time.Second))
-		if err := sm.Stop(id); err != nil {
+		if err := sm.stopWithReason(id, StopReasonIdle); err != nil {
 			sm.log.Error("failed to auto-stop session", "id", id, "err", err)
 		}
 	}
@@ -2550,8 +2623,13 @@ func (sm *SessionManager) checkIdleSession(s *SessionState) bool {
 	}
 
 	if s.IdleSince != nil {
-		agentCfg := sm.cfg.Agents[s.Agent]
-		timeout := agentCfg.IdleTimeoutDuration()
+		var timeout time.Duration
+		if s.SystemKind == SystemKindOrchestrator {
+			timeout = sm.cfg.Orchestrator.IdleTimeoutDuration()
+		} else {
+			agentCfg := sm.cfg.Agents[s.Agent]
+			timeout = agentCfg.IdleTimeoutDuration()
+		}
 		if timeout > 0 && time.Since(*s.IdleSince) >= timeout {
 			return true
 		}
@@ -2865,6 +2943,10 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 	go sm.RunDetectionLoop(ctx)
 	go sm.RunMessageCleanupLoop(ctx)
 	go sm.RunGitPullLoop(ctx)
+
+	sm.orchestratorExitCh = make(chan string, 1)
+	go sm.orchestratorSupervisor(ctx, sm.orchestratorExitCh)
+	go sm.ensureOrchestrator(ctx)
 
 	if configFile == "" {
 		configFile = paths.ConfigFile

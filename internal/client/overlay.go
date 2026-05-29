@@ -532,10 +532,15 @@ func SortSessions(sessions []protocol.SessionInfo) {
 
 func buildGroupedItems(sessions []protocol.SessionInfo, collapsed map[string]bool) []list.Item {
 	groups := map[string][]protocol.SessionInfo{}
+	var systemSessions []protocol.SessionInfo
 	var repoOrder []string
 	seen := map[string]bool{}
 
 	for _, s := range sessions {
+		if s.SystemKind != "" {
+			systemSessions = append(systemSessions, s)
+			continue
+		}
 		repo := s.RepoName
 		if repo == "" {
 			repo = "(no repo)"
@@ -547,6 +552,11 @@ func buildGroupedItems(sessions []protocol.SessionInfo, collapsed map[string]boo
 		groups[repo] = append(groups[repo], s)
 	}
 	sort.Strings(repoOrder)
+
+	if len(systemSessions) > 0 {
+		repoOrder = append([]string{"System"}, repoOrder...)
+		groups["System"] = systemSessions
+	}
 
 	var items []list.Item
 	for _, repo := range repoOrder {

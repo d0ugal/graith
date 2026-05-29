@@ -113,6 +113,14 @@ rename_session = ","
 search = "/"
 scroll_mode = "["
 shell = "s"
+orchestrator_session = "o"
+
+[orchestrator]
+enabled = false
+agent = "claude"
+model = ""
+idle_timeout = "30m"
+prompt_file = ""
 
 # Agent definitions
 # Each agent needs at minimum: command, args

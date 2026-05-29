@@ -855,6 +855,7 @@ func toSessionInfo(s SessionState, cfg *config.Config, hr *hookReport) protocol.
 		ContextPercent: s.HookContextPercent,
 		ConfigStale:    isConfigStale(s, cfg),
 		Starred:        s.Starred,
+		SystemKind:     s.SystemKind,
 	}
 	if s.LastAttachedAt != nil {
 		info.LastAttachedAt = s.LastAttachedAt.Format(time.RFC3339)

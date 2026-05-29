@@ -18,24 +18,51 @@ import (
 var defaultConfigTOML []byte
 
 type Config struct {
-	DefaultAgent     string            `toml:"default_agent"`
-	GitHubUsername   string            `toml:"github_username"`
-	BranchPrefix     string            `toml:"branch_prefix"`
-	DataDir          string            `toml:"data_dir"`
-	FetchOnCreate    bool              `toml:"fetch_on_create"`
-	AgentPrompt      string            `toml:"agent_prompt"`
-	AllowedRepoPaths []string          `toml:"allowed_repo_paths"`
-	Repos            []RepoConfig      `toml:"repos"`
-	StatusBar        StatusBar         `toml:"status_bar"`
-	Keybindings      Keybindings       `toml:"keybindings"`
-	Notifications    Notifications     `toml:"notifications"`
-	Messages         Messages          `toml:"messages"`
-	Sandbox          SandboxConfig     `toml:"sandbox"`
-	Approvals        Approvals         `toml:"approvals"`
-	Status           StatusConfig      `toml:"status"`
-	GitPull          GitPullConfig     `toml:"git_pull"`
-	MCPServers       []MCPServerConfig `toml:"mcp_servers"`
-	Agents           map[string]Agent  `toml:"agents"`
+	DefaultAgent     string             `toml:"default_agent"`
+	GitHubUsername   string             `toml:"github_username"`
+	BranchPrefix     string             `toml:"branch_prefix"`
+	DataDir          string             `toml:"data_dir"`
+	FetchOnCreate    bool               `toml:"fetch_on_create"`
+	AgentPrompt      string             `toml:"agent_prompt"`
+	AllowedRepoPaths []string           `toml:"allowed_repo_paths"`
+	Repos            []RepoConfig       `toml:"repos"`
+	StatusBar        StatusBar          `toml:"status_bar"`
+	Keybindings      Keybindings        `toml:"keybindings"`
+	Notifications    Notifications      `toml:"notifications"`
+	Messages         Messages           `toml:"messages"`
+	Sandbox          SandboxConfig      `toml:"sandbox"`
+	Approvals        Approvals          `toml:"approvals"`
+	Status           StatusConfig       `toml:"status"`
+	GitPull          GitPullConfig      `toml:"git_pull"`
+	MCPServers       []MCPServerConfig  `toml:"mcp_servers"`
+	Orchestrator     OrchestratorConfig `toml:"orchestrator"`
+	Agents           map[string]Agent   `toml:"agents"`
+}
+
+type OrchestratorConfig struct {
+	Enabled     bool   `toml:"enabled"`
+	Agent       string `toml:"agent"`
+	Model       string `toml:"model"`
+	IdleTimeout string `toml:"idle_timeout"`
+	PromptFile  string `toml:"prompt_file"`
+}
+
+func (o OrchestratorConfig) IdleTimeoutDuration() time.Duration {
+	if o.IdleTimeout == "" {
+		return 30 * time.Minute
+	}
+	d, err := ParseDurationWithDays(o.IdleTimeout)
+	if err != nil {
+		return 30 * time.Minute
+	}
+	return d
+}
+
+func (o OrchestratorConfig) AgentName() string {
+	if o.Agent != "" {
+		return o.Agent
+	}
+	return "claude"
 }
 
 type GitPullConfig struct {
@@ -102,20 +129,21 @@ func ParseDurationWithDays(s string) (time.Duration, error) {
 }
 
 type Keybindings struct {
-	Prefix        string `toml:"prefix"`
-	NewSession    string `toml:"new_session"`
-	ForkSession   string `toml:"fork_session"`
-	DeleteSession string `toml:"delete_session"`
-	Detach        string `toml:"detach"`
-	SessionList   string `toml:"session_list"`
-	NextSession   string `toml:"next_session"`
-	PrevSession   string `toml:"prev_session"`
-	LastSession   string `toml:"last_session"`
-	ResumeSession string `toml:"resume_session"`
-	RenameSession string `toml:"rename_session"`
-	Search        string `toml:"search"`
-	ScrollMode    string `toml:"scroll_mode"`
-	Shell         string `toml:"shell"`
+	Prefix              string `toml:"prefix"`
+	NewSession          string `toml:"new_session"`
+	ForkSession         string `toml:"fork_session"`
+	DeleteSession       string `toml:"delete_session"`
+	Detach              string `toml:"detach"`
+	SessionList         string `toml:"session_list"`
+	NextSession         string `toml:"next_session"`
+	PrevSession         string `toml:"prev_session"`
+	LastSession         string `toml:"last_session"`
+	ResumeSession       string `toml:"resume_session"`
+	RenameSession       string `toml:"rename_session"`
+	Search              string `toml:"search"`
+	ScrollMode          string `toml:"scroll_mode"`
+	Shell               string `toml:"shell"`
+	OrchestratorSession string `toml:"orchestrator_session"`
 }
 
 type Notifications struct {

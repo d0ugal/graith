@@ -104,12 +104,13 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 
 	ctx := context.Background()
 	keys := client.PassthroughKeys{
-		Prefix:      parsePrefixKey(cfg.Keybindings.Prefix),
-		NextSession: parseKeyByte(cfg.Keybindings.NextSession),
-		PrevSession: parseKeyByte(cfg.Keybindings.PrevSession),
-		LastSession: parseKeyByte(cfg.Keybindings.LastSession),
-		NewSession:  parseKeyByte(cfg.Keybindings.NewSession),
-		ForkSession: parseKeyByte(cfg.Keybindings.ForkSession),
+		Prefix:              parsePrefixKey(cfg.Keybindings.Prefix),
+		NextSession:         parseKeyByte(cfg.Keybindings.NextSession),
+		PrevSession:         parseKeyByte(cfg.Keybindings.PrevSession),
+		LastSession:         parseKeyByte(cfg.Keybindings.LastSession),
+		NewSession:          parseKeyByte(cfg.Keybindings.NewSession),
+		ForkSession:         parseKeyByte(cfg.Keybindings.ForkSession),
+		OrchestratorSession: parseKeyByte(cfg.Keybindings.OrchestratorSession),
 	}
 
 	prevSessionID := ""
@@ -464,6 +465,102 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 			nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
 			attachResp, _ := nc.ReadControlResponse()
 			protocol.DecodePayload(attachResp, &info)
+			opts.SessionID = sessionID
+			opts.Info = &info
+			c = nc
+			continue
+
+		case client.ResultOrchestratorSession:
+			nc, err := freshClient()
+			if err != nil {
+				return err
+			}
+
+			nc.SendControl("list", struct{}{})
+			listResp, err := nc.ReadControlResponse()
+			if err != nil {
+				nc.Close()
+				return err
+			}
+			var list protocol.SessionListMsg
+			protocol.DecodePayload(listResp, &list)
+
+			var orchID string
+			for _, s := range list.Sessions {
+				if s.SystemKind == "orchestrator" {
+					orchID = s.ID
+					break
+				}
+			}
+
+			if orchID == "" {
+				out.Print("Orchestrator not enabled — set orchestrator.enabled = true in config.toml\n")
+				restoreScreen(sessionID)
+				nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+				attachResp, _ := nc.ReadControlResponse()
+				protocol.DecodePayload(attachResp, &info)
+				opts.SessionID = sessionID
+				opts.Info = &info
+				c = nc
+				continue
+			}
+
+			if orchID == sessionID {
+				if prevSessionID != "" {
+					sessionID, prevSessionID = prevSessionID, sessionID
+					nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+					attachResp, _ := nc.ReadControlResponse()
+					protocol.DecodePayload(attachResp, &info)
+					opts.SessionID = sessionID
+					opts.Info = &info
+					c = nc
+					continue
+				}
+				restoreScreen(sessionID)
+				nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+				attachResp, _ := nc.ReadControlResponse()
+				protocol.DecodePayload(attachResp, &info)
+				opts.SessionID = sessionID
+				opts.Info = &info
+				c = nc
+				continue
+			}
+
+			var orchStatus string
+			for _, s := range list.Sessions {
+				if s.ID == orchID {
+					orchStatus = s.Status
+					break
+				}
+			}
+			if orchStatus == "stopped" || orchStatus == "errored" {
+				nc.SendControl("resume", protocol.ResumeMsg{SessionID: orchID})
+				resumeResp, err := nc.ReadControlResponse()
+				if err != nil {
+					nc.Close()
+					return err
+				}
+				if resumeResp.Type == "error" {
+					var e protocol.ErrorMsg
+					protocol.DecodePayload(resumeResp, &e)
+					out.Print("Orchestrator resume failed: %s\n", e.Message)
+					restoreScreen(sessionID)
+					nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+					attachResp, _ := nc.ReadControlResponse()
+					protocol.DecodePayload(attachResp, &info)
+					opts.SessionID = sessionID
+					opts.Info = &info
+					c = nc
+					continue
+				}
+			}
+
+			restoreScreen(orchID)
+			nc.SendControl("attach", protocol.AttachMsg{SessionID: orchID})
+			attachResp, _ := nc.ReadControlResponse()
+			protocol.DecodePayload(attachResp, &info)
+			prevSessionID = sessionID
+			sessionID = orchID
 			opts.SessionID = sessionID
 			opts.Info = &info
 			c = nc
