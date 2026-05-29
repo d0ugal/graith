@@ -1417,6 +1417,7 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 	sessInPlace := sessState.InPlace
 	sessSharedWorktree := sessState.SharedWorktree
 	sessSystemKind := sessState.SystemKind
+	sessFreshStart := sessState.FreshStart
 
 	sm.mu.Unlock()
 
@@ -1437,7 +1438,6 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 		sm.mu.Unlock()
 	}
 
-	sessFreshStart := sessState.FreshStart
 	resumeArgs := agent.ResumeArgs
 	if len(resumeArgs) == 0 || sessFreshStart {
 		resumeArgs = agent.Args
@@ -1486,6 +1486,10 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 	}
 	var resumeStoreDir string
 	if isOrchestrator {
+		if err := os.MkdirAll(ptyCWD, 0o700); err != nil {
+			rollbackState()
+			return SessionState{}, fmt.Errorf("create orchestrator scratch dir: %w", err)
+		}
 		tmpDir := sm.orchestratorTmpDir()
 		if err := os.MkdirAll(tmpDir, 0o700); err != nil {
 			rollbackState()
@@ -2100,6 +2104,12 @@ func (sm *SessionManager) StopWithChildren(rootID string, excludeRoot bool) ([]s
 func (sm *SessionManager) Restart(id string, rows, cols uint16) (SessionState, error) {
 	ptySess, hasPTY := sm.GetPTY(id)
 	if hasPTY && !ptySess.Exited() {
+		sm.mu.Lock()
+		if s, ok := sm.state.Sessions[id]; ok {
+			s.StopReason = StopReasonUser
+		}
+		sm.mu.Unlock()
+
 		if err := ptySess.Kill(); err != nil {
 			return SessionState{}, fmt.Errorf("stop session: %w", err)
 		}

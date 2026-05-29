@@ -362,7 +362,7 @@ func (sm *SessionManager) handleOrchestratorExit(ctx context.Context, id string)
 	lastStarted := sess.LastStartedAt
 	sm.mu.RUnlock()
 
-	if stopReason == "user" || stopReason == "idle" || stopReason == "shutdown" {
+	if stopReason == StopReasonUser || stopReason == StopReasonIdle || stopReason == StopReasonShutdown {
 		sm.log.Info("orchestrator stopped, not auto-restarting", "id", id, "reason", stopReason)
 		return
 	}
@@ -409,7 +409,7 @@ func (sm *SessionManager) handleOrchestratorExit(ctx context.Context, id string)
 	currentReason := sess.StopReason
 	sm.mu.RUnlock()
 
-	if !enabled || hasLivePTY || currentReason == "user" || currentReason == "idle" || currentReason == "shutdown" {
+	if !enabled || hasLivePTY || currentReason == StopReasonUser || currentReason == StopReasonIdle || currentReason == StopReasonShutdown {
 		sm.log.Info("orchestrator restart preconditions not met, skipping", "id", id)
 		return
 	}
