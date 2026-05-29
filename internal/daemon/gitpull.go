@@ -12,6 +12,11 @@ import (
 	"github.com/d0ugal/graith/internal/git"
 )
 
+var gitNoPromptEnv = []string{
+	"GIT_TERMINAL_PROMPT=0",
+	"GIT_SSH_COMMAND=ssh -o BatchMode=yes",
+}
+
 func (sm *SessionManager) RunGitPullLoop(ctx context.Context) {
 	for {
 		sm.mu.RLock()
@@ -154,7 +159,7 @@ func (sm *SessionManager) pullIfClean(ctx context.Context, repoPath string) (boo
 
 	fetchCtx, fetchCancel := context.WithTimeout(ctx, gitFetchTimeout)
 	defer fetchCancel()
-	_, err = git.RunOutputContext(fetchCtx, repoPath, "-c", "core.hooksPath=/dev/null", "fetch", remote)
+	_, _, err = git.RunContextEnv(fetchCtx, repoPath, gitNoPromptEnv, "-c", "core.hooksPath=/dev/null", "fetch", "--", remote)
 	if err != nil {
 		return false, fmt.Errorf("fetching %s: %w", remote, err)
 	}
@@ -169,8 +174,14 @@ func (sm *SessionManager) pullIfClean(ctx context.Context, repoPath string) (boo
 		return false, nil
 	}
 
-	headRev, _ := git.RunOutputContext(ctx, repoPath, "rev-parse", "HEAD")
-	remoteRev, _ := git.RunOutputContext(ctx, repoPath, "rev-parse", mergeTarget)
+	headRev, err := git.RunOutputContext(ctx, repoPath, "rev-parse", "HEAD")
+	if err != nil {
+		return false, fmt.Errorf("rev-parse HEAD: %w", err)
+	}
+	remoteRev, err := git.RunOutputContext(ctx, repoPath, "rev-parse", mergeTarget)
+	if err != nil {
+		return false, fmt.Errorf("rev-parse %s: %w", mergeTarget, err)
+	}
 	if headRev == remoteRev {
 		sm.log.Debug("git-pull: already up-to-date", "repo", repoPath)
 		return false, nil
@@ -194,7 +205,14 @@ func (sm *SessionManager) pullIfClean(ctx context.Context, repoPath string) (boo
 		return false, nil
 	}
 
-	_, stderr, err := git.RunContext(ctx, repoPath, "-c", "core.hooksPath=/dev/null", "merge", "--ff-only", mergeTarget, "--quiet")
+	if sm.hasActiveSessionForRepo(repoPath) {
+		sm.log.Debug("git-pull: skipping repo with session created during fetch", "repo", repoPath)
+		return false, nil
+	}
+
+	mergeCtx, mergeCancel := context.WithTimeout(ctx, gitMergeTimeout)
+	defer mergeCancel()
+	_, stderr, err := git.RunContextEnv(mergeCtx, repoPath, gitNoPromptEnv, "-c", "core.hooksPath=/dev/null", "merge", "--ff-only", "--quiet", "--", mergeTarget)
 	if err != nil {
 		return false, fmt.Errorf("ff-only merge: %w (stderr: %s)", err, stderr)
 	}
@@ -212,8 +230,13 @@ func (sm *SessionManager) hasActiveSessionForRepo(repoPath string) bool {
 		if s.Status != StatusRunning && s.Status != StatusCreating {
 			continue
 		}
-		if s.RepoPath == repoPath {
+		if config.ResolvePath(s.RepoPath) == repoPath {
 			return true
+		}
+		for _, inc := range s.Includes {
+			if config.ResolvePath(inc.RepoPath) == repoPath {
+				return true
+			}
 		}
 	}
 	return false
