@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.42.0](https://github.com/d0ugal/graith/compare/v0.41.1...v0.42.0) (2026-05-29)
+
+
+### Features
+
+* add orchestrator session — daemon-managed singleton agent ([ca91630](https://github.com/d0ugal/graith/commit/ca91630ab6c795bf7ca7fd4d0ec858ff137842b1))
+* add periodic git pull for maintenance repos ([c518358](https://github.com/d0ugal/graith/commit/c51835819347b5563a043d4939eff7429884be2a))
+
+
+### Bug Fixes
+
+* address review tribunal findings for git-pull feature ([356b551](https://github.com/d0ugal/graith/commit/356b551ff760e8621a1577a9130e926374dad493))
+* address round 1 review findings ([07843ff](https://github.com/d0ugal/graith/commit/07843ff7744241b7bee145db1e70349d427f1af9))
+* address round 2 review findings ([2ff1b95](https://github.com/d0ugal/graith/commit/2ff1b9548c7cd5dd692036e91094ed5969376463))
+* address round 2 review findings for git-pull ([caba61b](https://github.com/d0ugal/graith/commit/caba61b7875478dd8c9aaa2c0439d40b83be727b))
+* align leaf node indentation with parent nodes in session picker ([bfaac3c](https://github.com/d0ugal/graith/commit/bfaac3c3bf1fa947879860d404cca4254ed213c4))
+* improve overlay height utilization and preserve preview beside panel ([04c777c](https://github.com/d0ugal/graith/commit/04c777cdc340f88054a04813f22d96dd864b53e7))
+* remove ineffectual assignments flagged by golangci-lint ([21dc8fd](https://github.com/d0ugal/graith/commit/21dc8fd00f182fb267316d8abb27532a4c4ad8d7))
+* resolve symlinks in active session check and fix lint ([83f7ac5](https://github.com/d0ugal/graith/commit/83f7ac599e3c5f12436cec055a4124d8d57cef38))
+
 ## [0.41.1](https://github.com/d0ugal/graith/compare/v0.41.0...v0.41.1) (2026-05-29)
 
 
