@@ -16,11 +16,26 @@ func validateModel(agent config.Agent, model string) error {
 	}
 
 	parts := strings.Fields(agent.ValidateModel)
+	if len(parts) == 0 {
+		return nil
+	}
+	bin, lookErr := exec.LookPath(parts[0])
+	if lookErr != nil {
+		return fmt.Errorf("validate model: cannot resolve %q: %w", parts[0], lookErr)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, parts[0], parts[1:]...).Output()
+	cmd := exec.CommandContext(ctx, bin, parts[1:]...)
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
 	if err != nil {
-		return fmt.Errorf("validate model: failed to run %q: %w", agent.ValidateModel, err)
+		msg := fmt.Sprintf("validate model: %s failed: %v", bin, err)
+		if s := strings.TrimSpace(stderr.String()); s != "" {
+			msg += "\n" + s
+		}
+		return fmt.Errorf("%s", msg)
 	}
 
 	var valid []string
@@ -29,13 +44,17 @@ func validateModel(agent config.Agent, model string) error {
 		if line == "" {
 			continue
 		}
-		id := line
-		if before, _, ok := strings.Cut(line, " - "); ok {
-			id = strings.TrimSpace(before)
+		before, _, ok := strings.Cut(line, " - ")
+		if !ok {
+			continue
 		}
-		if id != "" {
+		if id := strings.TrimSpace(before); id != "" {
 			valid = append(valid, id)
 		}
+	}
+
+	if len(valid) == 0 {
+		return fmt.Errorf("validate model: %s produced no recognized models", bin)
 	}
 
 	for _, v := range valid {
