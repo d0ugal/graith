@@ -159,9 +159,9 @@ func (sm *SessionManager) pullIfClean(ctx context.Context, repoPath string) (boo
 
 	fetchCtx, fetchCancel := context.WithTimeout(ctx, gitFetchTimeout)
 	defer fetchCancel()
-	_, _, err = git.RunContextEnv(fetchCtx, repoPath, gitNoPromptEnv, "-c", "core.hooksPath=/dev/null", "fetch", "--", remote)
+	_, fetchStderr, err := git.RunContextEnv(fetchCtx, repoPath, gitNoPromptEnv, "-c", "core.hooksPath=/dev/null", "fetch", "--", remote)
 	if err != nil {
-		return false, fmt.Errorf("fetching %s: %w", remote, err)
+		return false, fmt.Errorf("fetching %s: %w (stderr: %s)", remote, err, fetchStderr)
 	}
 
 	mergeTarget := upstreamRef
@@ -205,6 +205,17 @@ func (sm *SessionManager) pullIfClean(ctx context.Context, repoPath string) (boo
 		return false, nil
 	}
 
+	if hasInProgressOp(gitDir) {
+		sm.log.Debug("git-pull: skipping repo with git operation started during fetch", "repo", repoPath)
+		return false, nil
+	}
+
+	currentBranch, _, err := git.RunContext(ctx, repoPath, "symbolic-ref", "-q", "--short", "HEAD")
+	if err != nil || strings.TrimSpace(currentBranch) != branch {
+		sm.log.Debug("git-pull: skipping repo whose branch changed during fetch", "repo", repoPath)
+		return false, nil
+	}
+
 	if sm.hasActiveSessionForRepo(repoPath) {
 		sm.log.Debug("git-pull: skipping repo with session created during fetch", "repo", repoPath)
 		return false, nil
@@ -230,11 +241,11 @@ func (sm *SessionManager) hasActiveSessionForRepo(repoPath string) bool {
 		if s.Status != StatusRunning && s.Status != StatusCreating {
 			continue
 		}
-		if config.ResolvePath(s.RepoPath) == repoPath {
+		if s.RepoPath != "" && config.ResolvePath(s.RepoPath) == repoPath {
 			return true
 		}
 		for _, inc := range s.Includes {
-			if config.ResolvePath(inc.RepoPath) == repoPath {
+			if inc.RepoPath != "" && config.ResolvePath(inc.RepoPath) == repoPath {
 				return true
 			}
 		}
