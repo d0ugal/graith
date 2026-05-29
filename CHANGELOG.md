@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.41.1](https://github.com/d0ugal/graith/compare/v0.41.0...v0.41.1) (2026-06-17)
+
+
+### Bug Fixes
+
+* improve validate_model error reporting and output parsing ([a79271a](https://github.com/d0ugal/graith/commit/a79271a1472654c3faec2f7a29ff2575bc0ae0fc))
+
 ## [0.41.0](https://github.com/d0ugal/graith/compare/v0.40.0...v0.41.0) (2026-06-17)
 
 
