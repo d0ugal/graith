@@ -2610,6 +2610,12 @@ func (sm *SessionManager) applyConfig(newCfg *config.Config) {
 			sm.log.Info("config changed", "key", "agents", "action", "removed", "agent", name)
 		}
 	}
+	if old.GitPull.Enabled != newCfg.GitPull.Enabled {
+		sm.log.Info("config changed", "key", "git_pull.enabled", "old", old.GitPull.Enabled, "new", newCfg.GitPull.Enabled)
+	}
+	if old.GitPull.Interval != newCfg.GitPull.Interval {
+		sm.log.Info("config changed", "key", "git_pull.interval", "old", old.GitPull.Interval, "new", newCfg.GitPull.Interval)
+	}
 	if old.Sandbox.Enabled != newCfg.Sandbox.Enabled {
 		sm.log.Info("config changed", "key", "sandbox.enabled", "old", old.Sandbox.Enabled, "new", newCfg.Sandbox.Enabled)
 	}
@@ -2857,6 +2863,7 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 	go func() { _ = srv.Serve(ctx) }()
 	go sm.RunDetectionLoop(ctx)
 	go sm.RunMessageCleanupLoop(ctx)
+	go sm.RunGitPullLoop(ctx)
 
 	if configFile == "" {
 		configFile = paths.ConfigFile

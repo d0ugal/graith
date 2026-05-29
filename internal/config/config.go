@@ -33,8 +33,25 @@ type Config struct {
 	Sandbox          SandboxConfig     `toml:"sandbox"`
 	Approvals        Approvals         `toml:"approvals"`
 	Status           StatusConfig      `toml:"status"`
+	GitPull          GitPullConfig     `toml:"git_pull"`
 	MCPServers       []MCPServerConfig `toml:"mcp_servers"`
 	Agents           map[string]Agent  `toml:"agents"`
+}
+
+type GitPullConfig struct {
+	Enabled  bool   `toml:"enabled"`
+	Interval string `toml:"interval"`
+}
+
+func (g GitPullConfig) IntervalDuration() time.Duration {
+	if g.Interval == "" {
+		return time.Hour
+	}
+	d, err := ParseDurationWithDays(g.Interval)
+	if err != nil {
+		return time.Hour
+	}
+	return d
 }
 
 type RepoConfig struct {
@@ -356,6 +373,14 @@ func (c *Config) Validate() error {
 			if !s.Disabled && s.Command == "" && !globalNames[name] {
 				errs = append(errs, fmt.Errorf("agents.%s.mcp_servers: %q has no command (not overriding a global server)", agentName, name))
 			}
+		}
+	}
+	if c.GitPull.Interval != "" {
+		d, err := ParseDurationWithDays(c.GitPull.Interval)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("git_pull.interval %q: %w", c.GitPull.Interval, err))
+		} else if d < time.Minute {
+			errs = append(errs, fmt.Errorf("git_pull.interval %q: must be at least 1 minute", c.GitPull.Interval))
 		}
 	}
 	return errors.Join(errs...)

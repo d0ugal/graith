@@ -1372,3 +1372,58 @@ inject_prompt = false
 		t.Error("inject_prompt = false should disable prompt injection")
 	}
 }
+
+func TestGitPullConfig_IntervalDuration(t *testing.T) {
+	tests := []struct {
+		name     string
+		interval string
+		want     time.Duration
+	}{
+		{"default empty", "", time.Hour},
+		{"explicit 30m", "30m", 30 * time.Minute},
+		{"with days", "1d", 24 * time.Hour},
+		{"invalid falls back", "banana", time.Hour},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := GitPullConfig{Interval: tt.interval}
+			if got := g.IntervalDuration(); got != tt.want {
+				t.Errorf("IntervalDuration() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGitPullConfig_Validate(t *testing.T) {
+	t.Run("valid interval passes", func(t *testing.T) {
+		cfg := Default()
+		cfg.GitPull = GitPullConfig{Enabled: true, Interval: "1h"}
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("invalid interval rejected", func(t *testing.T) {
+		cfg := Default()
+		cfg.GitPull = GitPullConfig{Enabled: true, Interval: "banana"}
+		if err := cfg.Validate(); err == nil {
+			t.Error("expected error for invalid interval")
+		}
+	})
+
+	t.Run("interval under 1 minute rejected", func(t *testing.T) {
+		cfg := Default()
+		cfg.GitPull = GitPullConfig{Enabled: true, Interval: "30s"}
+		if err := cfg.Validate(); err == nil {
+			t.Error("expected error for sub-minute interval")
+		}
+	})
+
+	t.Run("empty interval passes validation", func(t *testing.T) {
+		cfg := Default()
+		cfg.GitPull = GitPullConfig{Enabled: true, Interval: ""}
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+}

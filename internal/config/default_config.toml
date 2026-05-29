@@ -82,6 +82,10 @@ gr store ls --shared
 Run `gr --help` for the full command list.\
 """
 
+[git_pull]
+enabled = false
+interval = "1h"
+
 [status_bar]
 enabled = true
 position = "bottom"
