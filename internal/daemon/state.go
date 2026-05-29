@@ -13,7 +13,7 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 )
 
-const CurrentStateVersion = 7
+const CurrentStateVersion = 8
 
 type SessionStatus string
 
@@ -65,6 +65,10 @@ type SessionState struct {
 	AgentHooks             bool                  `json:"agent_hooks,omitempty"`
 	ApprovalsEnabled       bool                  `json:"approvals_enabled,omitempty"` // deprecated: migrated to AgentHooks in v4
 	Starred                bool                  `json:"starred,omitempty"`
+	SystemKind             string                `json:"system_kind,omitempty"`
+	StopReason             string                `json:"stop_reason,omitempty"`
+	BackoffLevel           int                   `json:"backoff_level,omitempty"`
+	LastStartedAt          time.Time             `json:"last_started_at,omitempty"`
 	SummaryText            string                `json:"summary_text,omitempty"`
 	SummarySetAt           *time.Time            `json:"summary_set_at,omitempty"`
 	SummaryTTL             int                   `json:"summary_ttl,omitempty"`
@@ -149,6 +153,7 @@ var migrations = map[int]func(*State) error{
 	4: migrateV4ToV5,
 	5: migrateV5ToV6,
 	6: migrateV6ToV7,
+	7: migrateV7ToV8,
 }
 
 func migrateState(state *State) error {
@@ -213,6 +218,12 @@ func migrateV5ToV6(_ *State) error {
 // migrateV6ToV7 is a no-op: v7 adds optional summary/output fields which
 // default to zero values for existing sessions.
 func migrateV6ToV7(_ *State) error {
+	return nil
+}
+
+// migrateV7ToV8 is a no-op: v8 adds optional orchestrator fields (system_kind,
+// stop_reason, backoff_level, last_started_at) which default to zero values.
+func migrateV7ToV8(_ *State) error {
 	return nil
 }
 

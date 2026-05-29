@@ -229,6 +229,7 @@ type SessionInfo struct {
 	Includes        []IncludedRepoInfo `json:"includes,omitempty"`
 	ConfigStale     bool               `json:"config_stale,omitempty"`
 	Starred         bool               `json:"starred,omitempty"`
+	SystemKind      string             `json:"system_kind,omitempty"`
 	SummaryText     string             `json:"summary_text,omitempty"`
 	SummaryFaded    bool               `json:"summary_faded,omitempty"`
 	LastOutputAt    string             `json:"last_output_at,omitempty"`
