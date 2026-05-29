@@ -2,6 +2,7 @@ package git
 
 import (
 	"context"
+	"errors"
 	"os/exec"
 	"strings"
 )
@@ -9,7 +10,8 @@ import (
 func ListMaintenanceRepos(ctx context.Context) ([]string, error) {
 	stdout, _, err := RunContext(ctx, "", "config", "--global", "--get-all", "maintenance.repo")
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
 			return nil, nil
 		}
 		return nil, err
