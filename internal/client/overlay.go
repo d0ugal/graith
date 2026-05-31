@@ -25,6 +25,7 @@ const (
 	stateConfirmDelete
 	stateConfirmRestart
 	stateConfirmRestartAll
+	stateRestartingAll
 )
 
 type viewMode int
@@ -473,8 +474,9 @@ type restartResultMsg struct {
 	err       error
 }
 
-type restartAllResultMsg struct {
-	errors []error
+type restartOneResultMsg struct {
+	index int
+	err   error
 }
 
 type starResultMsg struct {
@@ -510,6 +512,10 @@ type overlayModel struct {
 	previewSessionID string
 	profile          string
 	collapsed        map[string]bool
+
+	restartQueue  []string
+	restartIdx    int
+	restartErrors []error
 }
 
 func (m *overlayModel) resizeList() {
@@ -517,7 +523,7 @@ func (m *overlayModel) resizeList() {
 		return
 	}
 	reserve := 10
-	if m.state == stateConfirmDelete || m.state == stateConfirmRestart || m.state == stateConfirmRestartAll {
+	if m.state == stateConfirmDelete || m.state == stateConfirmRestart || m.state == stateConfirmRestartAll || m.state == stateRestartingAll {
 		reserve = 14
 	}
 	panelWidth := min(m.contentWidth+4, m.width-4)
@@ -784,6 +790,18 @@ func (m overlayModel) refreshSessionsCmd() tea.Cmd {
 	}
 }
 
+func (m overlayModel) restartNextCmd() tea.Cmd {
+	if m.restartIdx >= len(m.restartQueue) {
+		return nil
+	}
+	sid := m.restartQueue[m.restartIdx]
+	idx := m.restartIdx
+	restartFn := m.restartSession
+	return func() tea.Msg {
+		return restartOneResultMsg{index: idx, err: restartFn(sid)}
+	}
+}
+
 func (m overlayModel) fetchPreviewCmd() tea.Cmd {
 	if m.fetchPreview == nil {
 		return nil
@@ -953,10 +971,23 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.resizeList()
 		return m, m.fetchPreviewCmd()
 
-	case restartAllResultMsg:
-		m.state = stateList
-		m.resizeList()
-		return m, m.fetchPreviewCmd()
+	case restartOneResultMsg:
+		if m.state != stateRestartingAll {
+			return m, nil
+		}
+		if msg.err != nil {
+			m.restartErrors = append(m.restartErrors, msg.err)
+		}
+		m.restartIdx = msg.index + 1
+		if m.restartIdx >= len(m.restartQueue) {
+			m.state = stateList
+			m.restartQueue = nil
+			m.restartIdx = 0
+			m.restartErrors = nil
+			m.resizeList()
+			return m, m.fetchPreviewCmd()
+		}
+		return m, m.restartNextCmd()
 
 	case refreshTickMsg:
 		if m.state != stateList && m.state != stateFilter {
@@ -1069,16 +1100,18 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch msg.String() {
 			case "y", "Y":
 				if m.restartSession != nil {
-					restartFn := m.restartSession
 					sessions := m.sessionsForView()
-					return m, func() tea.Msg {
-						var errs []error
-						for _, s := range sessions {
-							if err := restartFn(s.ID); err != nil {
-								errs = append(errs, err)
-							}
-						}
-						return restartAllResultMsg{errors: errs}
+					var queue []string
+					for _, s := range sessions {
+						queue = append(queue, s.ID)
+					}
+					if len(queue) > 0 {
+						m.restartQueue = queue
+						m.restartIdx = 0
+						m.restartErrors = nil
+						m.state = stateRestartingAll
+						m.resizeList()
+						return m, m.restartNextCmd()
 					}
 				}
 				m.state = stateList
@@ -1089,6 +1122,16 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.resizeList()
 				return m, nil
 			}
+
+		case stateRestartingAll:
+			if msg.String() == "esc" {
+				end := m.restartIdx + 1
+				if end > len(m.restartQueue) {
+					end = len(m.restartQueue)
+				}
+				m.restartQueue = m.restartQueue[:end]
+			}
+			return m, nil
 
 		case stateList:
 			switch msg.String() {
@@ -1428,6 +1471,17 @@ func (m overlayModel) View() tea.View {
 		panelContent.WriteString(lipgloss.NewStyle().
 			Foreground(colorGreen).
 			Render(fmt.Sprintf("Restart all %d sessions? [y/N]", count)))
+	case stateRestartingAll:
+		panelContent.WriteString("\n")
+		progress := min(m.restartIdx+1, len(m.restartQueue))
+		panelContent.WriteString(lipgloss.NewStyle().
+			Foreground(colorGreen).
+			Render(fmt.Sprintf("Restarting %d/%d sessions…", progress, len(m.restartQueue))))
+		if len(m.restartErrors) > 0 {
+			panelContent.WriteString(lipgloss.NewStyle().
+				Foreground(colorRed).
+				Render(fmt.Sprintf("  (%d failed)", len(m.restartErrors))))
+		}
 	}
 
 	helpStyle := lipgloss.NewStyle().Foreground(colorFaint)
