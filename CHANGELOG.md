@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.43.0](https://github.com/d0ugal/graith/compare/v0.42.0...v0.43.0) (2026-06-17)
+
+
+### Features
+
+* add configurable prompt field to orchestrator config ([2bf2d65](https://github.com/d0ugal/graith/commit/2bf2d659ebe02587f7ecab72838a5e6cf0cf3278))
+
 ## [0.42.0](https://github.com/d0ugal/graith/compare/v0.41.1...v0.42.0) (2026-06-17)
 
 
