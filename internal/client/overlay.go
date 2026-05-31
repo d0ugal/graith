@@ -483,6 +483,12 @@ type starResultMsg struct {
 	err       error
 }
 
+type refreshTickMsg struct{}
+
+type refreshSessionsMsg struct {
+	sessions []protocol.SessionInfo
+}
+
 type overlayModel struct {
 	list             list.Model
 	filterInput      textinput.Model
@@ -496,6 +502,7 @@ type overlayModel struct {
 	allSessions      []protocol.SessionInfo
 	view             viewMode
 	fetchPreview     func(sessionID string) string
+	refreshSessions  func() []protocol.SessionInfo
 	deleteSession    func(sessionID string) error
 	restartSession   func(sessionID string) error
 	toggleStar       func(sessionID string, star bool) error
@@ -758,7 +765,23 @@ func newOverlayModel(sessions []protocol.SessionInfo, currentSessionID string, f
 }
 
 func (m overlayModel) Init() tea.Cmd {
-	return m.fetchPreviewCmd()
+	return tea.Batch(m.fetchPreviewCmd(), m.refreshTickCmd())
+}
+
+func (m overlayModel) refreshTickCmd() tea.Cmd {
+	return tea.Tick(2*time.Second, func(time.Time) tea.Msg {
+		return refreshTickMsg{}
+	})
+}
+
+func (m overlayModel) refreshSessionsCmd() tea.Cmd {
+	if m.refreshSessions == nil {
+		return nil
+	}
+	fetch := m.refreshSessions
+	return func() tea.Msg {
+		return refreshSessionsMsg{sessions: fetch()}
+	}
 }
 
 func (m overlayModel) fetchPreviewCmd() tea.Cmd {
@@ -934,6 +957,28 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.state = stateList
 		m.resizeList()
 		return m, m.fetchPreviewCmd()
+
+	case refreshTickMsg:
+		if m.state != stateList && m.state != stateFilter {
+			return m, m.refreshTickCmd()
+		}
+		return m, m.refreshSessionsCmd()
+
+	case refreshSessionsMsg:
+		if msg.sessions == nil {
+			return m, m.refreshTickCmd()
+		}
+		curSID := ""
+		if item, ok := m.list.SelectedItem().(sessionItem); ok {
+			curSID = item.info.ID
+		}
+		m.allSessions = msg.sessions
+		m.rebuildForView()
+		m.resizeList()
+		if curSID != "" {
+			m.selectSessionByID(curSID)
+		}
+		return m, tea.Batch(m.fetchPreviewCmd(), m.refreshTickCmd())
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -1463,8 +1508,9 @@ func (m overlayModel) View() tea.View {
 // RunOverlay launches the bubbletea overlay listing sessions grouped by repo.
 // currentSessionID highlights the session the user was just attached to.
 // fetchPreview is called asynchronously to load scrollback for the selected session.
-func RunOverlay(sessions []protocol.SessionInfo, currentSessionID string, fetchPreview func(sessionID string) string, deleteSession func(sessionID string) error, restartSession func(sessionID string) error, toggleStar func(sessionID string, star bool) error, profile string, collapsed map[string]bool) *OverlayResult {
+func RunOverlay(sessions []protocol.SessionInfo, currentSessionID string, fetchPreview func(sessionID string) string, refreshSessions func() []protocol.SessionInfo, deleteSession func(sessionID string) error, restartSession func(sessionID string) error, toggleStar func(sessionID string, star bool) error, profile string, collapsed map[string]bool) *OverlayResult {
 	m := newOverlayModel(sessions, currentSessionID, fetchPreview, deleteSession, collapsed)
+	m.refreshSessions = refreshSessions
 	m.restartSession = restartSession
 	m.toggleStar = toggleStar
 	m.profile = profile
