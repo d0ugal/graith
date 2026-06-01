@@ -1532,14 +1532,48 @@ func TestUpdate_FilterEscReturnsToList(t *testing.T) {
 	}
 }
 
-func TestUpdate_FilterEnterReturnsToList(t *testing.T) {
+func TestUpdate_FilterEnterAttachesSession(t *testing.T) {
 	m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil)
 	updated, _ := sendKey(m, "/")
 
 	updated, _ = sendSpecialKey(asOverlay(updated), tea.KeyEnter)
 	om := asOverlay(updated)
+	if om.selected == nil {
+		t.Fatal("enter in filter should select the highlighted session")
+	}
+}
+
+func TestUpdate_FilterEnterAttachesCorrectFilteredSession(t *testing.T) {
+	m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil)
+	updated, _ := sendKey(m, "/")
+
+	for _, ch := range "feature" {
+		updated, _ = sendKey(asOverlay(updated), string(ch))
+	}
+	updated, _ = sendSpecialKey(asOverlay(updated), tea.KeyEnter)
+	om := asOverlay(updated)
+	if om.selected == nil {
+		t.Fatal("enter after filter should select a session")
+	}
+	if om.selected.ID != "s3" {
+		t.Errorf("selected session ID = %q, want %q", om.selected.ID, "s3")
+	}
+}
+
+func TestUpdate_FilterEnterNoMatchDoesNotAttach(t *testing.T) {
+	m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil)
+	updated, _ := sendKey(m, "/")
+
+	for _, ch := range "zzzzz" {
+		updated, _ = sendKey(asOverlay(updated), string(ch))
+	}
+	updated, _ = sendSpecialKey(asOverlay(updated), tea.KeyEnter)
+	om := asOverlay(updated)
+	if om.selected != nil {
+		t.Error("enter with no matches should not select anything")
+	}
 	if om.state != stateList {
-		t.Errorf("enter in filter should return to stateList, got %d", om.state)
+		t.Errorf("state = %d, want stateList after enter on no-match", om.state)
 	}
 }
 
