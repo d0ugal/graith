@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.45.0](https://github.com/d0ugal/graith/compare/v0.44.0...v0.45.0) (2026-06-01)
+
+
+### Features
+
+* add automatic lifecycle status updates to sessions ([1897356](https://github.com/d0ugal/graith/commit/189735662fd8dbeda71396d45074b42352f2eacc))
+* attach directly from overlay filter with single Enter ([b4374d7](https://github.com/d0ugal/graith/commit/b4374d797d873d6e65eae760c614fddf486e3fb8))
+
+
+### Bug Fixes
+
+* address all 14 tribunal findings in lifecycle status design doc ([e6f43c8](https://github.com/d0ugal/graith/commit/e6f43c8852576d3092e1fd622b2a5d22f5407a8f))
+* address golangci-lint findings in lifecycle code ([c8a1531](https://github.com/d0ugal/graith/commit/c8a15314556d5a1d6ee197677e0db09ecc50f9fe))
+* address round 2 review findings in lifecycle status design doc ([e697d78](https://github.com/d0ugal/graith/commit/e697d78340da3cc1f33d3bc9bb78510be07f5057))
+
 ## [0.44.0](https://github.com/d0ugal/graith/compare/v0.43.0...v0.44.0) (2026-06-01)
 
 
