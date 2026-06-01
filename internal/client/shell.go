@@ -21,7 +21,10 @@ func RunShellInWorktree(worktreePath string) error {
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	cmd.Env = append(os.Environ(), "GRAITH_WORKTREE="+worktreePath)
+	cmd.Env = append(os.Environ(),
+		"GRAITH_WORKTREE="+worktreePath,
+		"GRAITH_ATTACHED=1",
+	)
 
 	err := cmd.Run()
 	var exitErr *exec.ExitError
