@@ -247,6 +247,7 @@ func (sm *SessionManager) AdoptSessions(manifest *UpgradeManifest) error {
 			sm.log.Warn("failed to adopt session", "id", us.ID, "err", err)
 			sessState.Status = StatusStopped
 			sessState.StatusChangedAt = time.Now()
+			applyLifecycleSummaryLocked(sessState, "Lost during daemon upgrade")
 			continue
 		}
 
@@ -811,6 +812,12 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 
 	sm.sessions[id] = ptySess
 
+	if sessState.ParentID != "" {
+		if parent, ok := sm.state.Sessions[sessState.ParentID]; ok {
+			applyLifecycleSummaryLocked(sessState, "Created by "+parent.Name)
+		}
+	}
+
 	if err := sm.saveState(); err != nil {
 		delete(sm.state.Sessions, id)
 		delete(sm.sessions, id)
@@ -1177,6 +1184,10 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 
 	sm.sessions[id] = ptySess
 
+	if src, ok := sm.state.Sessions[sessState.ParentID]; ok {
+		applyLifecycleSummaryLocked(sessState, "Forked from "+src.Name)
+	}
+
 	if err := sm.saveState(); err != nil {
 		delete(sm.state.Sessions, id)
 		delete(sm.sessions, id)
@@ -1211,6 +1222,14 @@ func (sm *SessionManager) watchSession(id string, sess *grpty.Session) {
 		if s, ok := sm.state.Sessions[id]; ok {
 			name = s.Name
 			isOrchestrator = s.SystemKind == SystemKindOrchestrator
+
+			prevSummary := s.SummaryText
+			prevSetAt := s.SummarySetAt
+			prevTTL := sm.cfg.Status.TTLDuration()
+			if s.SummaryTTL > 0 {
+				prevTTL = time.Duration(s.SummaryTTL) * time.Second
+			}
+
 			exitCode := sess.ExitCode()
 			s.Status = StatusStopped
 			s.StatusChangedAt = time.Now()
@@ -1222,6 +1241,14 @@ func (sm *SessionManager) watchSession(id string, sess *grpty.Session) {
 			if lastOut := sess.LastOutputAt(); !lastOut.IsZero() {
 				s.LastOutputAt = &lastOut
 			}
+
+			// StopAll already wrote the shutdown summary — skip to avoid
+			// nested "(was: Stopped by shutdown (was: ...))" text.
+			if !(s.StopReason == StopReasonShutdown && s.SummaryText != "") {
+				text := formatStopSummary(s.StopReason, s.ExitCode, prevSummary, prevSetAt, prevTTL)
+				applyLifecycleSummaryLocked(s, text)
+			}
+
 			if err := sm.saveState(); err != nil {
 				sm.log.Error("failed to save state after session exit", "id", id, "err", err)
 			}
@@ -1253,6 +1280,10 @@ func (sm *SessionManager) watchSession(id string, sess *grpty.Session) {
 // Uses two-phase locking: the GitHub username discovery happens before the lock,
 // and the PTY spawn happens after releasing the lock to avoid blocking the daemon.
 func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, error) {
+	return sm.resumeWithSummary(id, rows, cols, "Resumed")
+}
+
+func (sm *SessionManager) resumeWithSummary(id string, rows, cols uint16, lifecycleSummary string) (SessionState, error) {
 	// --- Pre-lock: discover GitHub username ---
 	sm.mu.RLock()
 	sessSnap, snapOk := sm.state.Sessions[id]
@@ -1392,6 +1423,9 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 	prevSandboxConfig := sessState.SandboxConfig
 	prevCreationCfg := sessState.CreationCfg
 	prevIdleSince := sessState.IdleSince
+	prevSummaryText := sessState.SummaryText
+	prevSummarySetAt := sessState.SummarySetAt
+	prevSummaryTTL := sessState.SummaryTTL
 
 	// Mark as creating so concurrent operations see it's busy.
 	prevStatusChangedAt := sessState.StatusChangedAt
@@ -1433,6 +1467,9 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 			s.SandboxConfig = prevSandboxConfig
 			s.CreationCfg = prevCreationCfg
 			s.IdleSince = prevIdleSince
+			s.SummaryText = prevSummaryText
+			s.SummarySetAt = prevSummarySetAt
+			s.SummaryTTL = prevSummaryTTL
 			_ = sm.saveState()
 		}
 		sm.mu.Unlock()
@@ -1645,6 +1682,7 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 	}
 
 	sm.sessions[id] = ptySess
+	applyLifecycleSummaryLocked(sessState, lifecycleSummary)
 
 	if err := sm.saveState(); err != nil {
 		sessState.Status = prevStatus
@@ -1656,6 +1694,9 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 		sessState.SandboxConfig = prevSandboxConfig
 		sessState.CreationCfg = prevCreationCfg
 		sessState.IdleSince = prevIdleSince
+		sessState.SummaryText = prevSummaryText
+		sessState.SummarySetAt = prevSummarySetAt
+		sessState.SummaryTTL = prevSummaryTTL
 		delete(sm.sessions, id)
 		sm.mu.Unlock()
 		_ = ptySess.Kill()
@@ -2127,7 +2168,7 @@ func (sm *SessionManager) Restart(id string, rows, cols uint16) (SessionState, e
 		sm.mu.Unlock()
 	}
 
-	return sm.Resume(id, rows, cols)
+	return sm.resumeWithSummary(id, rows, cols, "Restarted")
 }
 
 // Rename changes the display name of a session.
@@ -2400,7 +2441,15 @@ func (sm *SessionManager) StopAll(ctx context.Context) {
 	sm.mu.Lock()
 	for _, s := range sm.state.Sessions {
 		if s.Status == StatusRunning {
+			prevSummary := s.SummaryText
+			prevSetAt := s.SummarySetAt
+			prevTTL := sm.cfg.Status.TTLDuration()
+			if s.SummaryTTL > 0 {
+				prevTTL = time.Duration(s.SummaryTTL) * time.Second
+			}
 			s.StopReason = StopReasonShutdown
+			text := formatStopSummary(StopReasonShutdown, nil, prevSummary, prevSetAt, prevTTL)
+			applyLifecycleSummaryLocked(s, text)
 		}
 	}
 	_ = sm.saveState()
