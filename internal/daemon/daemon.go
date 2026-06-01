@@ -1242,9 +1242,7 @@ func (sm *SessionManager) watchSession(id string, sess *grpty.Session) {
 				s.LastOutputAt = &lastOut
 			}
 
-			// StopAll already wrote the shutdown summary — skip to avoid
-			// nested "(was: Stopped by shutdown (was: ...))" text.
-			if !(s.StopReason == StopReasonShutdown && s.SummaryText != "") {
+			if s.StopReason != StopReasonShutdown || s.SummaryText == "" {
 				text := formatStopSummary(s.StopReason, s.ExitCode, prevSummary, prevSetAt, prevTTL)
 				applyLifecycleSummaryLocked(s, text)
 			}
