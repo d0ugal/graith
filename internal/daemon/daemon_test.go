@@ -536,6 +536,185 @@ func TestIsConfigStale(t *testing.T) {
 	})
 }
 
+func TestIsConfigStaleOrchestrator(t *testing.T) {
+	agent := config.Agent{
+		Command: "claude",
+		Args:    []string{"--model", "opus"},
+		Sandbox: config.SandboxConfig{Enabled: true, ReadDirs: []string{"/tmp"}},
+	}
+	cfg := &config.Config{
+		Agents:  map[string]config.Agent{"claude": agent},
+		Sandbox: config.SandboxConfig{Enabled: true},
+		Orchestrator: config.OrchestratorConfig{
+			Sandbox: config.OrchestratorSandboxConfig{
+				WriteDirs: []string{"~/.config/graith"},
+			},
+		},
+	}
+
+	t.Run("orchestrator uses three-layer merge", func(t *testing.T) {
+		sess := SessionState{
+			Agent:      "claude",
+			SystemKind: SystemKindOrchestrator,
+			CreationCfg: &CreationConfig{
+				Agent:         agent,
+				SandboxConfig: cfg.OrchestratorSandboxMerged("claude"),
+			},
+		}
+		if isConfigStale(sess, cfg) {
+			t.Error("expected not stale when orchestrator config matches")
+		}
+	})
+
+	t.Run("orchestrator stale when orchestrator sandbox changes", func(t *testing.T) {
+		sess := SessionState{
+			Agent:      "claude",
+			SystemKind: SystemKindOrchestrator,
+			CreationCfg: &CreationConfig{
+				Agent:         agent,
+				SandboxConfig: cfg.OrchestratorSandboxMerged("claude"),
+			},
+		}
+		changedCfg := &config.Config{
+			Agents:  map[string]config.Agent{"claude": agent},
+			Sandbox: config.SandboxConfig{Enabled: true},
+			Orchestrator: config.OrchestratorConfig{
+				Sandbox: config.OrchestratorSandboxConfig{
+					WriteDirs: []string{"~/.config/graith", "/extra"},
+				},
+			},
+		}
+		if !isConfigStale(sess, changedCfg) {
+			t.Error("expected stale when orchestrator sandbox dirs change")
+		}
+	})
+
+	t.Run("non-orchestrator unaffected by orchestrator sandbox", func(t *testing.T) {
+		sess := SessionState{
+			Agent: "claude",
+			CreationCfg: &CreationConfig{
+				Agent:         agent,
+				SandboxConfig: cfg.Sandbox.Merge(agent.Sandbox),
+			},
+		}
+		if isConfigStale(sess, cfg) {
+			t.Error("non-orchestrator session should not be stale from orchestrator sandbox")
+		}
+	})
+}
+
+func TestResolveSandboxIgnoresOrchestratorLayer(t *testing.T) {
+	t.Run("orchestrator sandbox dirs do not affect resolveSandbox", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := config.Default()
+		cfg.Sandbox = config.SandboxConfig{Enabled: true}
+		cfg.Agents["claude"] = config.Agent{
+			Command: "claude",
+			Sandbox: config.SandboxConfig{ReadDirs: []string{"/agent-dir"}},
+		}
+
+		smWithout := NewSessionManager(cfg, config.Paths{
+			StateFile: filepath.Join(tmpDir, "state1.json"),
+			DataDir:   tmpDir,
+			LogDir:    tmpDir,
+		}, slog.Default())
+
+		cfgWith := config.Default()
+		cfgWith.Sandbox = config.SandboxConfig{Enabled: true}
+		cfgWith.Agents["claude"] = config.Agent{
+			Command: "claude",
+			Sandbox: config.SandboxConfig{ReadDirs: []string{"/agent-dir"}},
+		}
+		cfgWith.Orchestrator = config.OrchestratorConfig{
+			Sandbox: config.OrchestratorSandboxConfig{
+				ReadDirs:  []string{"/orch-read"},
+				WriteDirs: []string{"/orch-write"},
+			},
+		}
+
+		smWith := NewSessionManager(cfgWith, config.Paths{
+			StateFile: filepath.Join(tmpDir, "state2.json"),
+			DataDir:   tmpDir,
+			LogDir:    tmpDir,
+		}, slog.Default())
+
+		resultWithout, errWithout := smWithout.resolveSandbox("claude")
+		resultWith, errWith := smWith.resolveSandbox("claude")
+
+		if errWithout != nil && errWith != nil {
+			if errWithout.Error() != errWith.Error() {
+				t.Errorf("resolveSandbox errors differ: without=%v, with=%v", errWithout, errWith)
+			}
+		} else if errWithout != errWith {
+			t.Errorf("resolveSandbox error presence differs: without=%v, with=%v", errWithout, errWith)
+		}
+		if resultWithout != resultWith {
+			t.Errorf("resolveSandbox result differs: without=%v, with=%v", resultWithout, resultWith)
+		}
+	})
+
+	t.Run("orchestrator sandbox cannot enable sandboxing", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := config.Default()
+		cfg.Sandbox = config.SandboxConfig{Enabled: false}
+		cfg.Agents["claude"] = config.Agent{Command: "claude"}
+		cfg.Orchestrator = config.OrchestratorConfig{
+			Sandbox: config.OrchestratorSandboxConfig{
+				WriteDirs: []string{"/orch-write"},
+			},
+		}
+
+		sm := NewSessionManager(cfg, config.Paths{
+			StateFile: filepath.Join(tmpDir, "state.json"),
+			DataDir:   tmpDir,
+			LogDir:    tmpDir,
+		}, slog.Default())
+
+		result, _ := sm.resolveSandbox("claude")
+		if result {
+			t.Error("orchestrator sandbox dirs should not enable sandboxing when global+agent has it disabled")
+		}
+	})
+}
+
+func TestIsConfigStaleOrchestratorGlobalChange(t *testing.T) {
+	agent := config.Agent{
+		Command: "claude",
+		Sandbox: config.SandboxConfig{ReadDirs: []string{"/agent"}},
+	}
+	cfg := &config.Config{
+		Agents:  map[string]config.Agent{"claude": agent},
+		Sandbox: config.SandboxConfig{Enabled: true, WriteDirs: []string{"/global"}},
+		Orchestrator: config.OrchestratorConfig{
+			Sandbox: config.OrchestratorSandboxConfig{
+				WriteDirs: []string{"/orch"},
+			},
+		},
+	}
+
+	sess := SessionState{
+		Agent:      "claude",
+		SystemKind: SystemKindOrchestrator,
+		CreationCfg: &CreationConfig{
+			Agent:         agent,
+			SandboxConfig: cfg.OrchestratorSandboxMerged("claude"),
+		},
+	}
+
+	changedCfg := &config.Config{
+		Agents:  map[string]config.Agent{"claude": agent},
+		Sandbox: config.SandboxConfig{Enabled: true, WriteDirs: []string{"/global", "/new-global"}},
+		Orchestrator: config.OrchestratorConfig{
+			Sandbox: config.OrchestratorSandboxConfig{
+				WriteDirs: []string{"/orch"},
+			},
+		},
+	}
+	if !isConfigStale(sess, changedCfg) {
+		t.Error("orchestrator should be stale when global sandbox changes")
+	}
+}
+
 func TestIdleTracking(t *testing.T) {
 	t.Run("idle since set when detached and ready", func(t *testing.T) {
 		sm := newTestSessionManager(t)

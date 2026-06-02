@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"syscall"
@@ -1410,8 +1411,9 @@ func (sm *SessionManager) resumeWithSummary(id string, rows, cols uint16, lifecy
 	}
 
 	sandboxMerged := sm.cfg.Sandbox.Merge(sm.cfg.Agents[sessState.Agent].Sandbox)
-	cfgSnapshot := sm.cfg
-
+	if sessState.SystemKind == SystemKindOrchestrator {
+		sandboxMerged = sm.cfg.OrchestratorSandboxMerged(sessState.Agent)
+	}
 	// Save previous state for rollback.
 	prevStatus := sessState.Status
 	prevExitCode := sessState.ExitCode
@@ -1672,7 +1674,7 @@ func (sm *SessionManager) resumeWithSummary(id string, rows, cols uint16, lifecy
 	sessState.SandboxConfig = mergedSandbox
 	sessState.CreationCfg = &CreationConfig{
 		Agent:         agent,
-		SandboxConfig: cfgSnapshot.Sandbox.Merge(agent.Sandbox),
+		SandboxConfig: sandboxMerged,
 	}
 	if isOrchestrator {
 		sessState.LastStartedAt = time.Now()
@@ -2796,6 +2798,30 @@ func (sm *SessionManager) applyConfig(newCfg *config.Config) {
 				return sm.findOrchestratorID()
 			}(); orchID != "" {
 				_ = sm.stopWithReason(orchID, StopReasonUser)
+			}
+		}
+	} else if newCfg.Orchestrator.Enabled {
+		oldSandbox := old.OrchestratorSandboxMerged(old.Orchestrator.AgentName())
+		newSandbox := newCfg.OrchestratorSandboxMerged(newCfg.Orchestrator.AgentName())
+		if !reflect.DeepEqual(oldSandbox, newSandbox) {
+			sm.log.Info("orchestrator effective sandbox changed, restarting",
+				"old_read", oldSandbox.ReadDirs, "new_read", newSandbox.ReadDirs,
+				"old_write", oldSandbox.WriteDirs, "new_write", newSandbox.WriteDirs)
+			if orchID := func() string {
+				sm.mu.RLock()
+				defer sm.mu.RUnlock()
+				return sm.findOrchestratorID()
+			}(); orchID != "" {
+				sm.mu.RLock()
+				_, hasLivePTY := sm.sessions[orchID]
+				sm.mu.RUnlock()
+				if hasLivePTY {
+					go func() {
+						if _, err := sm.Restart(orchID, 24, 80); err != nil {
+							sm.log.Error("orchestrator config-reload restart failed", "id", orchID, "err", err)
+						}
+					}()
+				}
 			}
 		}
 	}
