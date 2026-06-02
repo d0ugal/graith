@@ -105,7 +105,7 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 		return SessionState{}, fmt.Errorf("persist orchestrator state: %w", err)
 	}
 
-	sandboxMerged := sm.cfg.Sandbox.Merge(agent.Sandbox)
+	sandboxMerged := sm.cfg.OrchestratorSandboxMerged(agentName)
 	sm.mu.Unlock()
 
 	vars := config.TemplateVars{
@@ -197,7 +197,7 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 	sess.LastStartedAt = time.Now()
 	sess.CreationCfg = &CreationConfig{
 		Agent:         agent,
-		SandboxConfig: sm.cfg.Sandbox.Merge(agent.Sandbox),
+		SandboxConfig: sandboxMerged,
 	}
 
 	sm.sessions[id] = ptySess

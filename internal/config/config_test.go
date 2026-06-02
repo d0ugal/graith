@@ -1427,3 +1427,190 @@ func TestGitPullConfig_Validate(t *testing.T) {
 		}
 	})
 }
+
+func TestOrchestratorSandboxConfigParsing(t *testing.T) {
+	t.Run("absent section produces zero value", func(t *testing.T) {
+		dir := t.TempDir()
+		cfgPath := filepath.Join(dir, "config.toml")
+		os.WriteFile(cfgPath, []byte(`
+[orchestrator]
+enabled = true
+agent = "claude"
+`), 0o644)
+		cfg, err := Load(cfgPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Orchestrator.Sandbox.ReadDirs != nil {
+			t.Errorf("ReadDirs = %v, want nil", cfg.Orchestrator.Sandbox.ReadDirs)
+		}
+		if cfg.Orchestrator.Sandbox.WriteDirs != nil {
+			t.Errorf("WriteDirs = %v, want nil", cfg.Orchestrator.Sandbox.WriteDirs)
+		}
+	})
+
+	t.Run("empty section produces zero value", func(t *testing.T) {
+		dir := t.TempDir()
+		cfgPath := filepath.Join(dir, "config.toml")
+		os.WriteFile(cfgPath, []byte(`
+[orchestrator]
+enabled = true
+[orchestrator.sandbox]
+`), 0o644)
+		cfg, err := Load(cfgPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Orchestrator.Sandbox.ReadDirs != nil {
+			t.Errorf("ReadDirs = %v, want nil", cfg.Orchestrator.Sandbox.ReadDirs)
+		}
+	})
+
+	t.Run("populated section parsed correctly", func(t *testing.T) {
+		dir := t.TempDir()
+		cfgPath := filepath.Join(dir, "config.toml")
+		os.WriteFile(cfgPath, []byte(`
+[orchestrator]
+enabled = true
+[orchestrator.sandbox]
+read_dirs = ["~/docs"]
+write_dirs = ["~/.config/graith", "/tmp/extra"]
+`), 0o644)
+		cfg, err := Load(cfgPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(cfg.Orchestrator.Sandbox.ReadDirs) != 1 || cfg.Orchestrator.Sandbox.ReadDirs[0] != "~/docs" {
+			t.Errorf("ReadDirs = %v, want [~/docs]", cfg.Orchestrator.Sandbox.ReadDirs)
+		}
+		if len(cfg.Orchestrator.Sandbox.WriteDirs) != 2 {
+			t.Errorf("WriteDirs len = %d, want 2", len(cfg.Orchestrator.Sandbox.WriteDirs))
+		}
+	})
+}
+
+func TestOrchestratorSandboxIgnoresDangerousKeys(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	os.WriteFile(cfgPath, []byte(`
+[orchestrator]
+enabled = true
+agent = "claude"
+[orchestrator.sandbox]
+disabled = true
+enabled = true
+command = "evil"
+features = ["network"]
+write_dirs = ["~/.config/graith"]
+`), 0o644)
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Orchestrator.Sandbox.WriteDirs) != 1 {
+		t.Errorf("WriteDirs = %v, want [~/.config/graith]", cfg.Orchestrator.Sandbox.WriteDirs)
+	}
+	merged := cfg.OrchestratorSandboxMerged("claude")
+	baseline := cfg.Sandbox.Merge(cfg.Agents["claude"].Sandbox)
+	if merged.Command != baseline.Command {
+		t.Errorf("merged.Command = %q, want %q (dangerous key should not alter command)", merged.Command, baseline.Command)
+	}
+	if merged.Enabled != baseline.Enabled {
+		t.Errorf("merged.Enabled = %v, want %v (dangerous key should not alter enabled)", merged.Enabled, baseline.Enabled)
+	}
+	if !reflect.DeepEqual(merged.Features, baseline.Features) {
+		t.Errorf("merged.Features = %v, want %v (dangerous key should not add features)", merged.Features, baseline.Features)
+	}
+}
+
+func TestOrchestratorSandboxMerged(t *testing.T) {
+	cfg := &Config{
+		Sandbox: SandboxConfig{
+			Enabled:   true,
+			ReadDirs:  []string{"/global/read"},
+			WriteDirs: []string{"/global/write"},
+		},
+		Agents: map[string]Agent{
+			"claude": {
+				Sandbox: SandboxConfig{
+					ReadDirs:  []string{"/agent/read"},
+					WriteDirs: []string{"/agent/write"},
+				},
+			},
+		},
+		Orchestrator: OrchestratorConfig{
+			Sandbox: OrchestratorSandboxConfig{
+				ReadDirs:  []string{"/orch/read"},
+				WriteDirs: []string{"~/.config/graith"},
+			},
+		},
+	}
+
+	merged := cfg.OrchestratorSandboxMerged("claude")
+
+	wantRead := []string{"/global/read", "/agent/read", "/orch/read"}
+	if !reflect.DeepEqual(merged.ReadDirs, wantRead) {
+		t.Errorf("ReadDirs = %v, want %v", merged.ReadDirs, wantRead)
+	}
+
+	wantWrite := []string{"/global/write", "/agent/write", "~/.config/graith"}
+	if !reflect.DeepEqual(merged.WriteDirs, wantWrite) {
+		t.Errorf("WriteDirs = %v, want %v", merged.WriteDirs, wantWrite)
+	}
+
+	if !merged.Enabled {
+		t.Error("merged should be enabled")
+	}
+}
+
+func TestOrchestratorSandboxMergedDedup(t *testing.T) {
+	cfg := &Config{
+		Sandbox: SandboxConfig{
+			ReadDirs: []string{"/shared"},
+		},
+		Agents: map[string]Agent{
+			"claude": {
+				Sandbox: SandboxConfig{
+					ReadDirs: []string{"/shared"},
+				},
+			},
+		},
+		Orchestrator: OrchestratorConfig{
+			Sandbox: OrchestratorSandboxConfig{
+				ReadDirs: []string{"/shared", "/orch-only"},
+			},
+		},
+	}
+
+	merged := cfg.OrchestratorSandboxMerged("claude")
+	wantRead := []string{"/shared", "/orch-only"}
+	if !reflect.DeepEqual(merged.ReadDirs, wantRead) {
+		t.Errorf("ReadDirs = %v, want %v (should dedup)", merged.ReadDirs, wantRead)
+	}
+}
+
+func TestOrchestratorSandboxBackwardCompat(t *testing.T) {
+	cfg := &Config{
+		Sandbox: SandboxConfig{
+			Enabled:   true,
+			ReadDirs:  []string{"/global"},
+			WriteDirs: []string{"/global-w"},
+		},
+		Agents: map[string]Agent{
+			"claude": {
+				Sandbox: SandboxConfig{
+					ReadDirs:  []string{"/agent"},
+					WriteDirs: []string{"/agent-w"},
+				},
+			},
+		},
+		Orchestrator: OrchestratorConfig{},
+	}
+
+	twoLayer := cfg.Sandbox.Merge(cfg.Agents["claude"].Sandbox)
+	threeLayer := cfg.OrchestratorSandboxMerged("claude")
+
+	if !reflect.DeepEqual(twoLayer, threeLayer) {
+		t.Errorf("empty orchestrator sandbox should produce same result as two-layer merge\ntwo-layer: %+v\nthree-layer: %+v", twoLayer, threeLayer)
+	}
+}

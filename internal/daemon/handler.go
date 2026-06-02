@@ -923,5 +923,8 @@ func isConfigStale(s SessionState, cfg *config.Config) bool {
 		return true
 	}
 	currentSandbox := cfg.Sandbox.Merge(agent.Sandbox)
+	if s.SystemKind == SystemKindOrchestrator {
+		currentSandbox = cfg.OrchestratorSandboxMerged(s.Agent)
+	}
 	return !reflect.DeepEqual(s.CreationCfg.SandboxConfig, currentSandbox)
 }

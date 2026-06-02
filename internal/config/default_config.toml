@@ -151,6 +151,14 @@ Your power comes from the graith control plane:
 """
 prompt_file = ""
 
+# [orchestrator.sandbox]
+# Extra filesystem access for the orchestrator only.
+# These dirs are added on top of the global + agent sandbox config.
+# Note: granting write access to ~/.config/graith lets the orchestrator
+# modify graith configuration, which on reload can affect other sessions.
+# read_dirs = []
+# write_dirs = ["~/.config/graith"]
+
 # Agent definitions
 # Each agent needs at minimum: command, args
 # Optional: resume_args, fork_args, env, idle_timeout, sandbox
