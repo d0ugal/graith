@@ -774,6 +774,14 @@ func TestFilterSessions_SharedWorktreeExcludesGitTokens(t *testing.T) {
 	if len(branch) != 1 || branch[0].Name != "parent-session" {
 		t.Errorf("filtering by branch should return only parent, got %d sessions", len(branch))
 	}
+	for _, token := range []string{"modified", "clean", "unpushed"} {
+		result := filterSessions(sessions, token)
+		for _, s := range result {
+			if s.SharedWorktree {
+				t.Errorf("filtering %q should not return shared worktree session %q", token, s.Name)
+			}
+		}
+	}
 }
 
 func TestFilterSessions_NoMatch(t *testing.T) {
@@ -832,6 +840,9 @@ func TestComputeColumnWidths_SharedWorktreeUsesDash(t *testing.T) {
 	expectedMax := lipgloss.Width(displayGit(true, 10))
 	if cw.git >= expectedMax {
 		t.Errorf("shared worktree should not inflate git column width: got %d, parent would be %d", cw.git, expectedMax)
+	}
+	if cw.git != 3 {
+		t.Errorf("shared worktree git column width should be minimum (3), got %d", cw.git)
 	}
 }
 
@@ -2448,11 +2459,9 @@ func TestCompactDelegate_RenderSharedWorktreeShowsDash(t *testing.T) {
 	if !strings.Contains(line, "—") {
 		t.Error("shared worktree session should show '—' in git column")
 	}
-	if strings.Contains(line, "M") {
-		t.Error("shared worktree session should not show 'M' even when dirty")
-	}
-	if strings.Contains(line, "↑5") {
-		t.Error("shared worktree session should not show '↑5' even with unpushed commits")
+	gitVal := displayGit(true, 5)
+	if strings.Contains(line, gitVal) {
+		t.Errorf("shared worktree session should not show %q even when dirty+unpushed", gitVal)
 	}
 }
 
