@@ -57,7 +57,7 @@ func filterNeedsAttention(sessions []protocol.SessionInfo) []protocol.SessionInf
 			result = append(result, s)
 		case s.Status == "running" && s.AgentStatus == "ready":
 			result = append(result, s)
-		case s.Status == "stopped" && (s.Dirty || s.UnpushedCount > 0):
+		case s.Status == "stopped" && !s.SharedWorktree && (s.Dirty || s.UnpushedCount > 0):
 			result = append(result, s)
 		}
 	}
@@ -264,19 +264,21 @@ func buildMatchString(s protocol.SessionInfo) string {
 	parts := []string{
 		strings.ToLower(s.Name),
 		strings.ToLower(s.RepoName),
-		strings.ToLower(s.Branch),
 		strings.ToLower(s.Status),
 		strings.ToLower(s.AgentStatus),
 		strings.ToLower(s.Agent),
 		strings.ToLower(s.SummaryText),
 	}
-	if s.Dirty {
-		parts = append(parts, "dirty", "modified")
-	} else {
-		parts = append(parts, "clean")
-	}
-	if s.UnpushedCount > 0 {
-		parts = append(parts, "unpushed")
+	if !s.SharedWorktree {
+		parts = append(parts, strings.ToLower(s.Branch))
+		if s.Dirty {
+			parts = append(parts, "dirty", "modified")
+		} else {
+			parts = append(parts, "clean")
+		}
+		if s.UnpushedCount > 0 {
+			parts = append(parts, "unpushed")
+		}
 	}
 	return strings.Join(parts, " ")
 }
@@ -298,7 +300,10 @@ func computeColumnWidths(sessions []protocol.SessionInfo, currentSessionID strin
 		if n := lipgloss.Width(summary); n > cw.summary {
 			cw.summary = n
 		}
-		git := displayGit(s.Dirty, s.UnpushedCount)
+		git := "—"
+		if !s.SharedWorktree {
+			git = displayGit(s.Dirty, s.UnpushedCount)
+		}
 		if n := lipgloss.Width(git); n > cw.git {
 			cw.git = n
 		}
@@ -426,12 +431,16 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 		summaryRendered = dim.Render(summaryRendered)
 	}
 
-	gitVal := displayGit(si.info.Dirty, si.info.UnpushedCount)
 	var gitRendered string
-	if gitVal == "clean" {
-		gitRendered = dim.Render(pad(gitVal, d.cols.git))
+	if si.info.SharedWorktree {
+		gitRendered = dim.Render(pad("—", d.cols.git))
 	} else {
-		gitRendered = pad(gitVal, d.cols.git)
+		gitVal := displayGit(si.info.Dirty, si.info.UnpushedCount)
+		if gitVal == "clean" {
+			gitRendered = dim.Render(pad(gitVal, d.cols.git))
+		} else {
+			gitRendered = pad(gitVal, d.cols.git)
+		}
 	}
 
 	outputVal := displayLastOutput(si.info)
@@ -1397,17 +1406,19 @@ func (m overlayModel) View() tea.View {
 		panelContent.WriteString("\n")
 
 		var line1 []string
-		if s.Branch != "" {
-			branch := s.Branch
-			if p := strings.SplitN(branch, "/", 3); len(p) == 3 {
-				branch = p[2]
+		if !s.SharedWorktree {
+			if s.Branch != "" {
+				branch := s.Branch
+				if p := strings.SplitN(branch, "/", 3); len(p) == 3 {
+					branch = p[2]
+				}
+				line1 = append(line1, "branch: "+branch)
+			} else if s.InPlace {
+				line1 = append(line1, "mode: in-place")
 			}
-			line1 = append(line1, "branch: "+branch)
-		} else if s.InPlace {
-			line1 = append(line1, "mode: in-place")
-		}
-		if s.BaseBranch != "" {
-			line1 = append(line1, "base: "+s.BaseBranch)
+			if s.BaseBranch != "" {
+				line1 = append(line1, "base: "+s.BaseBranch)
+			}
 		}
 		if s.Agent != "" {
 			line1 = append(line1, "agent: "+s.Agent)
@@ -1440,7 +1451,7 @@ func (m overlayModel) View() tea.View {
 	case stateConfirmDelete:
 		if item, ok := m.list.SelectedItem().(sessionItem); ok {
 			s := item.info
-			if s.Dirty || s.UnpushedCount > 0 {
+			if !s.SharedWorktree && (s.Dirty || s.UnpushedCount > 0) {
 				warnStyle := lipgloss.NewStyle().Foreground(colorRed).Bold(true)
 				panelContent.WriteString("\n")
 				panelContent.WriteString(warnStyle.Render("⚠ Session has unsaved work:"))

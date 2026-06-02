@@ -750,6 +750,32 @@ func TestFilterSessions_GitTokens(t *testing.T) {
 	}
 }
 
+func TestFilterSessions_SharedWorktreeExcludesGitTokens(t *testing.T) {
+	sessions := []protocol.SessionInfo{
+		{
+			ID: "s1", Name: "parent-session", RepoName: "graith",
+			Branch: "feature-branch", Status: "running",
+			Dirty: true, UnpushedCount: 1,
+			CreatedAt: time.Now().Format(time.RFC3339),
+		},
+		{
+			ID: "s2", Name: "shared-reviewer", RepoName: "graith",
+			Branch: "feature-branch", Status: "running",
+			Dirty: true, UnpushedCount: 1,
+			SharedWorktree: true,
+			CreatedAt:      time.Now().Format(time.RFC3339),
+		},
+	}
+	dirty := filterSessions(sessions, "dirty")
+	if len(dirty) != 1 || dirty[0].Name != "parent-session" {
+		t.Errorf("filtering 'dirty' should return only parent, got %d sessions", len(dirty))
+	}
+	branch := filterSessions(sessions, "feature-branch")
+	if len(branch) != 1 || branch[0].Name != "parent-session" {
+		t.Errorf("filtering by branch should return only parent, got %d sessions", len(branch))
+	}
+}
+
 func TestFilterSessions_NoMatch(t *testing.T) {
 	sessions := overlayTestSessions()
 	filtered := filterSessions(sessions, "nonexistent")
@@ -790,6 +816,22 @@ func TestComputeColumnWidths_MinimumWidths(t *testing.T) {
 	}
 	if cw.summary < 7 {
 		t.Errorf("summary should have minimum width 7, got %d", cw.summary)
+	}
+}
+
+func TestComputeColumnWidths_SharedWorktreeUsesDash(t *testing.T) {
+	sessions := []protocol.SessionInfo{
+		{
+			ID: "s1", Name: "shared", Status: "running",
+			Dirty: true, UnpushedCount: 10,
+			SharedWorktree: true,
+			CreatedAt:      time.Now().Format(time.RFC3339),
+		},
+	}
+	cw := computeColumnWidths(sessions, "")
+	expectedMax := lipgloss.Width(displayGit(true, 10))
+	if cw.git >= expectedMax {
+		t.Errorf("shared worktree should not inflate git column width: got %d, parent would be %d", cw.git, expectedMax)
 	}
 }
 
@@ -1888,6 +1930,32 @@ func TestView_ShowsDetailLine(t *testing.T) {
 	}
 }
 
+func TestView_SharedWorktreeOmitsBranchAndBase(t *testing.T) {
+	sessions := []protocol.SessionInfo{
+		{
+			ID: "s1", Name: "shared-reviewer", RepoName: "graith",
+			Branch: "refs/heads/feature", BaseBranch: "main",
+			Agent: "claude", Status: "running",
+			WorktreePath:   "/tmp/test-worktree",
+			SharedWorktree: true,
+			CreatedAt:      time.Now().Format(time.RFC3339),
+		},
+	}
+	m := newOverlayModel(sessions, "", nil, nil, nil)
+	updated, _ := sendWindowSize(m, 150, 40)
+	view := asOverlay(updated).View().Content
+
+	if strings.Contains(view, "branch: feature") {
+		t.Error("shared worktree detail should not show branch")
+	}
+	if strings.Contains(view, "base: main") {
+		t.Error("shared worktree detail should not show base branch")
+	}
+	if !strings.Contains(view, "agent: claude") {
+		t.Error("shared worktree detail should still show agent")
+	}
+}
+
 func TestView_ShowsCurrentSessionMarker(t *testing.T) {
 	m := newOverlayModel(overlayTestSessions(), "s1", nil, nil, nil)
 	updated, _ := sendWindowSize(m, 150, 40)
@@ -2358,6 +2426,36 @@ func TestCompactDelegate_RenderGitStatus(t *testing.T) {
 	}
 }
 
+func TestCompactDelegate_RenderSharedWorktreeShowsDash(t *testing.T) {
+	sessions := []protocol.SessionInfo{
+		{
+			ID: "s1", Name: "shared-reviewer", RepoName: "graith",
+			Branch: "d0ugal/graith/feature", Agent: "claude",
+			Status: "running", AgentStatus: "active",
+			Dirty: true, UnpushedCount: 5,
+			SharedWorktree: true,
+			CreatedAt:      time.Now().Format(time.RFC3339),
+		},
+	}
+	cols := computeColumnWidths(sessions, "")
+	d := compactDelegate{cols: cols}
+	items := buildGroupedItems(sessions, nil)
+	l := list.New(items, d, 120, 10)
+
+	var buf strings.Builder
+	d.Render(&buf, l, 1, items[1])
+	line := buf.String()
+	if !strings.Contains(line, "—") {
+		t.Error("shared worktree session should show '—' in git column")
+	}
+	if strings.Contains(line, "M") {
+		t.Error("shared worktree session should not show 'M' even when dirty")
+	}
+	if strings.Contains(line, "↑5") {
+		t.Error("shared worktree session should not show '↑5' even with unpushed commits")
+	}
+}
+
 func TestCompactDelegate_RenderCurrentSession(t *testing.T) {
 	sessions := overlayTestSessions()
 	cols := computeColumnWidths(sessions, "s1")
@@ -2517,6 +2615,48 @@ func TestFilterNeedsAttention(t *testing.T) {
 		if !found {
 			t.Errorf("missing expected session %q in result %v", name, names)
 		}
+	}
+}
+
+func TestFilterNeedsAttention_ExcludesSharedWorktree(t *testing.T) {
+	sessions := []protocol.SessionInfo{
+		{ID: "s1", Name: "parent-dirty", Status: "stopped", Dirty: true},
+		{ID: "s2", Name: "shared-dirty", Status: "stopped", Dirty: true, SharedWorktree: true},
+		{ID: "s3", Name: "shared-unpushed", Status: "stopped", UnpushedCount: 3, SharedWorktree: true},
+	}
+	result := filterNeedsAttention(sessions)
+	if len(result) != 1 {
+		names := make([]string, len(result))
+		for i, s := range result {
+			names[i] = s.Name
+		}
+		t.Fatalf("got %d sessions %v, want 1 (only parent-dirty)", len(result), names)
+	}
+	if result[0].Name != "parent-dirty" {
+		t.Errorf("got %q, want parent-dirty", result[0].Name)
+	}
+}
+
+func TestView_SharedWorktreeDeleteNoUnsavedWarning(t *testing.T) {
+	sessions := []protocol.SessionInfo{
+		{
+			ID: "s1", Name: "shared-dirty", RepoName: "graith",
+			Status: "running", Agent: "claude",
+			Dirty: true, UnpushedCount: 3,
+			SharedWorktree: true,
+			CreatedAt:      time.Now().Format(time.RFC3339),
+		},
+	}
+	m := newOverlayModel(sessions, "", nil, nil, nil)
+	updated, _ := sendWindowSize(m, 120, 40)
+	updated, _ = sendKey(asOverlay(updated), "x")
+	view := asOverlay(updated).View().Content
+
+	if strings.Contains(view, "unsaved work") {
+		t.Error("shared worktree delete should not warn about unsaved work")
+	}
+	if strings.Contains(view, "Uncommitted changes") {
+		t.Error("shared worktree delete should not mention uncommitted changes")
 	}
 }
 
