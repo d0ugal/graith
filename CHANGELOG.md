@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.46.0](https://github.com/d0ugal/graith/compare/v0.45.0...v0.46.0) (2026-06-18)
+
+
+### Features
+
+* add configurable sandbox access for orchestrator sessions ([538c1a1](https://github.com/d0ugal/graith/commit/538c1a10fb3d8331699db18922df025de6ea8d81))
+* hide git info in overlay for shared worktree sessions ([f20737c](https://github.com/d0ugal/graith/commit/f20737cad6a04bb56657acb43a3b8582853ffd13))
+
+
+### Bug Fixes
+
+* address round 1 code review tribunal findings ([d59bcad](https://github.com/d0ugal/graith/commit/d59bcad214c07da3908ba34c5820932a7c67ebe4))
+* address round 1 tribunal findings on shared worktree design doc ([c20efcc](https://github.com/d0ugal/graith/commit/c20efcc99a8c3dc3c38e490593434ce792388a83))
+
 ## [0.45.0](https://github.com/d0ugal/graith/compare/v0.44.0...v0.45.0) (2026-06-18)
 
 
