@@ -640,7 +640,7 @@ func sessionRefresher() func() []protocol.SessionInfo {
 }
 
 func freshClient() (*client.Client, error) {
-	return client.Connect(cfg, paths, cfgFile)
+	return client.ConnectPassive(cfg, paths, cfgFile)
 }
 
 func toggleStar(sessionID string, star bool) error {
