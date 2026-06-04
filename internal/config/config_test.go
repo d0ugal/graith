@@ -1373,6 +1373,26 @@ inject_prompt = false
 	}
 }
 
+func TestLoadAgentPreTrustWorkspace(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	toml := `
+[agents.cursor]
+pre_trust_workspace = false
+`
+	if err := os.WriteFile(cfgPath, []byte(toml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cursor := cfg.Agents["cursor"]
+	if cursor.PreTrustWorkspaceEnabled() {
+		t.Error("pre_trust_workspace = false should disable pre-trust")
+	}
+}
+
 func TestGitPullConfig_IntervalDuration(t *testing.T) {
 	tests := []struct {
 		name     string

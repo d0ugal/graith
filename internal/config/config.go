@@ -204,21 +204,29 @@ type MCPServerConfig struct {
 }
 
 type Agent struct {
-	Command       string                     `json:"command"                  toml:"command"`
-	Args          []string                   `json:"args,omitempty"           toml:"args"`
-	ResumeArgs    []string                   `json:"resume_args,omitempty"    toml:"resume_args"`
-	ForkArgs      []string                   `json:"fork_args,omitempty"      toml:"fork_args"`
-	Env           map[string]string          `json:"env,omitempty"            toml:"env"`
-	IdleTimeout   string                     `json:"idle_timeout,omitempty"   toml:"idle_timeout"`
-	InjectPrompt  *bool                      `json:"inject_prompt,omitempty"  toml:"inject_prompt"`
-	Sandbox       SandboxConfig              `json:"sandbox"                  toml:"sandbox"`
-	MCPServers    map[string]MCPServerConfig `json:"mcp_servers,omitempty"    toml:"mcp_servers"`
-	ValidateModel string                     `json:"validate_model,omitempty" toml:"validate_model"`
+	Command           string                     `json:"command"                        toml:"command"`
+	Args              []string                   `json:"args,omitempty"                 toml:"args"`
+	ResumeArgs        []string                   `json:"resume_args,omitempty"          toml:"resume_args"`
+	ForkArgs          []string                   `json:"fork_args,omitempty"            toml:"fork_args"`
+	Env               map[string]string          `json:"env,omitempty"                  toml:"env"`
+	IdleTimeout       string                     `json:"idle_timeout,omitempty"         toml:"idle_timeout"`
+	InjectPrompt      *bool                      `json:"inject_prompt,omitempty"        toml:"inject_prompt"`
+	PreTrustWorkspace *bool                      `json:"pre_trust_workspace,omitempty"  toml:"pre_trust_workspace"`
+	Sandbox           SandboxConfig              `json:"sandbox"                        toml:"sandbox"`
+	MCPServers        map[string]MCPServerConfig `json:"mcp_servers,omitempty"          toml:"mcp_servers"`
+	ValidateModel     string                     `json:"validate_model,omitempty"       toml:"validate_model"`
 }
 
 func (a Agent) PromptInjectionEnabled() bool {
 	if a.InjectPrompt != nil {
 		return *a.InjectPrompt
+	}
+	return true
+}
+
+func (a Agent) PreTrustWorkspaceEnabled() bool {
+	if a.PreTrustWorkspace != nil {
+		return *a.PreTrustWorkspace
 	}
 	return true
 }
@@ -532,8 +540,14 @@ func mergeAgent(def, usr Agent) Agent {
 	if usr.InjectPrompt != nil {
 		def.InjectPrompt = usr.InjectPrompt
 	}
+	if usr.PreTrustWorkspace != nil {
+		def.PreTrustWorkspace = usr.PreTrustWorkspace
+	}
 	if usr.MCPServers != nil {
 		def.MCPServers = usr.MCPServers
+	}
+	if usr.ValidateModel != "" {
+		def.ValidateModel = usr.ValidateModel
 	}
 	return def
 }

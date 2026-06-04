@@ -162,6 +162,7 @@ func TestCleanupHooksNonexistent(t *testing.T) {
 }
 
 func TestCleanupCursorHooks(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	sm := newTestSessionManagerWithDataDir(t)
 	sessionID := "test-cursor-cleanup"
 	worktree := t.TempDir()
@@ -306,6 +307,7 @@ func TestCodexHookScriptContent(t *testing.T) {
 }
 
 func TestInjectHooksSupported(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	sm := newTestSessionManagerWithDataDir(t)
 
 	args, env, err := sm.injectHooks("claude", "test-supported-claude", "", nil)
@@ -667,6 +669,7 @@ func TestResolveMCPServers(t *testing.T) {
 }
 
 func TestInjectCursorHooks(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	sm := newTestSessionManagerWithDataDir(t)
 	sessionID := "test-session-cursor-01"
 	worktree := t.TempDir()
@@ -720,6 +723,7 @@ func TestInjectCursorHooks(t *testing.T) {
 }
 
 func TestInjectCursorHooksContent(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	sm := newTestSessionManagerWithDataDir(t)
 	sessionID := "test-session-cursor-02"
 	worktree := t.TempDir()
@@ -753,6 +757,90 @@ func TestInjectCursorHooksContent(t *testing.T) {
 	}
 	if !strings.Contains(content, "check-inbox") {
 		t.Error("cursor hooks missing check-inbox command")
+	}
+}
+
+func TestCursorProjectKey(t *testing.T) {
+	tests := []struct {
+		path string
+		want string
+	}{
+		{"/Users/dougalmatthews/Code/graith", "Users-dougalmatthews-Code-graith"},
+		{"/Users/dougalmatthews/.graith/worktrees/graith/af4385950142/7146d968", "Users-dougalmatthews-graith-worktrees-graith-af4385950142-7146d968"},
+		{"/Users/dougalmatthews/Library/Application Support/graith/worktrees/graith/e52613751b29/250dfbe5", "Users-dougalmatthews-Library-Application-Support-graith-worktrees-graith-e52613751b29-250dfbe5"},
+	}
+	for _, tt := range tests {
+		got := cursorProjectKey(tt.path)
+		if got != tt.want {
+			t.Errorf("cursorProjectKey(%q) = %q, want %q", tt.path, got, tt.want)
+		}
+	}
+}
+
+func TestPreTrustCursorWorkspace(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	worktree := "/fake/worktree/path"
+	if err := preTrustCursorWorkspace(worktree); err != nil {
+		t.Fatalf("preTrustCursorWorkspace() error = %v", err)
+	}
+
+	key := cursorProjectKey(worktree)
+	sentinel := filepath.Join(home, ".cursor", "projects", key, ".workspace-trusted")
+	data, err := os.ReadFile(sentinel)
+	if err != nil {
+		t.Fatalf("sentinel file not created: %v", err)
+	}
+
+	var trust struct {
+		TrustedAt     string `json:"trustedAt"`
+		WorkspacePath string `json:"workspacePath"`
+	}
+	if err := json.Unmarshal(data, &trust); err != nil {
+		t.Fatalf("sentinel is not valid JSON: %v", err)
+	}
+	if trust.WorkspacePath != worktree {
+		t.Errorf("workspacePath = %q, want %q", trust.WorkspacePath, worktree)
+	}
+	if trust.TrustedAt == "" {
+		t.Error("trustedAt is empty")
+	}
+}
+
+func TestPreTrustCursorWorkspaceDisabled(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	sm := newTestSessionManagerWithDataDir(t)
+	disabled := false
+	sm.cfg.Agents = map[string]config.Agent{
+		"cursor": {PreTrustWorkspace: &disabled},
+	}
+
+	worktree := t.TempDir()
+	_, _, err := sm.injectCursorHooks("test-no-trust", worktree)
+	if err != nil {
+		t.Fatalf("injectCursorHooks() error = %v", err)
+	}
+
+	key := cursorProjectKey(worktree)
+	sentinel := filepath.Join(home, ".cursor", "projects", key, ".workspace-trusted")
+	if _, err := os.Stat(sentinel); !os.IsNotExist(err) {
+		t.Errorf("sentinel file should not exist when pre_trust_workspace=false, err = %v", err)
+	}
+}
+
+func TestPreTrustCursorWorkspaceIdempotent(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	worktree := "/fake/worktree/path"
+	if err := preTrustCursorWorkspace(worktree); err != nil {
+		t.Fatalf("first call error = %v", err)
+	}
+	if err := preTrustCursorWorkspace(worktree); err != nil {
+		t.Fatalf("second call error = %v", err)
 	}
 }
 
