@@ -1251,11 +1251,20 @@ func (sm *SessionManager) watchSession(id string, sess *grpty.Session) {
 			if err := sm.saveState(); err != nil {
 				sm.log.Error("failed to save state after session exit", "id", id, "err", err)
 			}
+
+			delete(sm.sessions, id)
 		} else {
 			deleted = true
+			delete(sm.sessions, id)
 		}
 	}
 	sm.mu.Unlock()
+
+	// Always close the exited PTY's handles. The watcher owns the sess pointer
+	// it was passed, regardless of whether the map entry was replaced (stale)
+	// or removed (deleted). Double-close is safe: os.File.Close returns
+	// ErrClosed (ignored) and readDone is a closed channel (instant receive).
+	sess.Close()
 
 	if stale {
 		sm.log.Info("ignoring stale session exit", "id", id, "exit_code", sess.ExitCode())
