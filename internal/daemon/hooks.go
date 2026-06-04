@@ -228,12 +228,14 @@ func graithMCPServer() config.MCPServerConfig {
 	}
 }
 
-// resolveMCPServers returns the merged MCP server list for the given agent,
-// including auto-injected graith MCP server.
 func (sm *SessionManager) resolveMCPServers(agentName string) []config.MCPServerConfig {
-	global := append([]config.MCPServerConfig{graithMCPServer()}, sm.cfg.MCPServers...)
+	return sm.resolveMCPServersFromConfig(sm.cfg, agentName)
+}
+
+func (sm *SessionManager) resolveMCPServersFromConfig(cfg *config.Config, agentName string) []config.MCPServerConfig {
+	global := append([]config.MCPServerConfig{graithMCPServer()}, cfg.MCPServers...)
 	var overrides map[string]config.MCPServerConfig
-	if agent, ok := sm.cfg.Agents[agentName]; ok {
+	if agent, ok := cfg.Agents[agentName]; ok {
 		overrides = agent.MCPServers
 	}
 	return config.MergeMCPServers(global, overrides)

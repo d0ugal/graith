@@ -3382,3 +3382,76 @@ func TestReconcileWritesLifecycleSummaries(t *testing.T) {
 		}
 	})
 }
+
+// TestConcurrentConfigReadWrite verifies that concurrent config reads via
+// notify, approvals, and Config() do not race with applyConfig writes.
+// Run with -race to detect data races.
+func TestConcurrentConfigReadWrite(t *testing.T) {
+	dir := t.TempDir()
+	ms, err := NewMsgStore(filepath.Join(dir, "msg.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ms.Close()
+
+	sm := newTestSessionManager(t)
+	sm.messages = ms
+	sm.mu.Lock()
+	sm.state.Sessions["sess1"] = &SessionState{
+		ID: "sess1", Name: "test", Status: StatusRunning, Agent: "claude",
+	}
+	sm.mu.Unlock()
+
+	done := make(chan struct{})
+
+	// Writer: swap config repeatedly via applyConfig.
+	go func() {
+		defer func() { done <- struct{}{} }()
+		for i := 0; i < 200; i++ {
+			cfg := config.Default()
+			cfg.Notifications.Enabled = i%2 == 0
+			cfg.Notifications.OnApproval = true
+			cfg.Notifications.OnStopped = true
+			cfg.Notifications.Command = "true"
+			cfg.Approvals.Timeout = "1s"
+			sm.applyConfig(cfg)
+		}
+	}()
+
+	// Reader 1: onAgentStatusChange reads notification config.
+	go func() {
+		defer func() { done <- struct{}{} }()
+		for i := 0; i < 200; i++ {
+			sm.onAgentStatusChange("sess1", "test", "active", "approval")
+		}
+	}()
+
+	// Reader 2: Config() snapshots the config.
+	go func() {
+		defer func() { done <- struct{}{} }()
+		for i := 0; i < 200; i++ {
+			cfg := sm.Config()
+			_ = cfg.DefaultAgent
+			_ = cfg.Notifications.Enabled
+			_ = cfg.Approvals.TimeoutDuration()
+		}
+	}()
+
+	// Reader 3: SubmitApproval reads approvals config.
+	go func() {
+		defer func() { done <- struct{}{} }()
+		for i := 0; i < 50; i++ {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
+			sm.SubmitApproval(ctx, protocol.ApprovalRequestMsg{
+				RequestID: fmt.Sprintf("r-%d", i),
+				SessionID: "sess1",
+				ToolName:  "Bash",
+			})
+			cancel()
+		}
+	}()
+
+	for i := 0; i < 4; i++ {
+		<-done
+	}
+}

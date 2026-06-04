@@ -45,15 +45,16 @@ func (sm *SessionManager) findOrchestratorID() string {
 }
 
 func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState, error) {
-	orchCfg := sm.cfg.Orchestrator
+	cfgSnap := sm.Config()
+	orchCfg := cfgSnap.Orchestrator
 	agentName := orchCfg.AgentName()
 
-	agent, ok := sm.cfg.Agents[agentName]
+	agent, ok := cfgSnap.Agents[agentName]
 	if !ok {
 		return SessionState{}, fmt.Errorf("orchestrator agent %q not found in config", agentName)
 	}
 
-	sandboxed, err := sm.resolveSandbox(agentName)
+	sandboxed, err := sm.resolveSandboxFromConfig(cfgSnap, agentName)
 	if err != nil {
 		return SessionState{}, fmt.Errorf("orchestrator sandbox: %w", err)
 	}
@@ -105,7 +106,7 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 		return SessionState{}, fmt.Errorf("persist orchestrator state: %w", err)
 	}
 
-	sandboxMerged := sm.cfg.OrchestratorSandboxMerged(agentName)
+	sandboxMerged := cfgSnap.OrchestratorSandboxMerged(agentName)
 	sm.mu.Unlock()
 
 	vars := config.TemplateVars{
