@@ -2002,20 +2002,29 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 		deletedSet[cid] = true
 	}
 
-	for sweep := 0; sweep < 10; sweep++ {
+	const maxSweepRounds = 10
+	for sweep := 0; sweep < maxSweepRounds; sweep++ {
 		sm.mu.Lock()
 		var lateSnaps []snapshot
+		progress := false
 		for sid, sess := range sm.state.Sessions {
 			if deletedSet[sid] || sess.ParentID == "" || !deletedSet[sess.ParentID] {
 				continue
 			}
+			// Add to traversal set before skip checks so descendants of
+			// starred/system sessions are still reachable in later rounds.
+			deletedSet[sid] = true
 			if IsSystemSession(sess) || sess.Starred || sess.Status == StatusDeleting {
 				continue
 			}
-			deletedSet[sid] = true
+			progress = true
 			if sess.Status == StatusCreating {
 				delete(sm.state.Sessions, sid)
 				delete(sm.hookReports, sid)
+				if ac, ok := sm.attachedClients[sid]; ok {
+					delete(sm.attachedClients, sid)
+					_ = ac
+				}
 				creatingIDs = append(creatingIDs, sid)
 				continue
 			}
@@ -2044,7 +2053,7 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 			sess.StatusChangedAt = time.Now()
 			sess.PID = 0
 		}
-		if len(lateSnaps) == 0 {
+		if !progress {
 			sm.mu.Unlock()
 			break
 		}
@@ -2067,6 +2076,9 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 			}
 		}
 		snaps = append(snaps, lateSnaps...)
+		if sweep == maxSweepRounds-1 {
+			sm.log.Warn("sweep reached round cap, some descendants may remain", "cap", maxSweepRounds)
+		}
 	}
 
 	// Attempt teardowns, tracking which succeed.
@@ -2259,25 +2271,41 @@ func (sm *SessionManager) StopWithChildren(rootID string, excludeRoot bool) ([]s
 		stoppedSet[id] = true
 	}
 
-	for sweep := 0; sweep < 10; sweep++ {
+	const maxSweepRounds = 10
+	for sweep := 0; sweep < maxSweepRounds; sweep++ {
 		sm.mu.Lock()
 		var late []string
+		progress := false
 		for sid, sess := range sm.state.Sessions {
 			if stoppedSet[sid] || sess.ParentID == "" || !stoppedSet[sess.ParentID] {
 				continue
 			}
-			if sess.Starred || sess.Status != StatusRunning {
+			stoppedSet[sid] = true
+			if sess.Starred {
 				continue
 			}
-			stoppedSet[sid] = true
+			if sess.Status == StatusCreating {
+				// Remove placeholder so Phase 3 of Create detects the
+				// cancellation and cleans up the PTY/worktree.
+				delete(sm.state.Sessions, sid)
+				delete(sm.hookReports, sid)
+				progress = true
+				continue
+			}
+			if sess.Status != StatusRunning {
+				continue
+			}
+			progress = true
 			late = append(late, sid)
 			sess.StopReason = StopReasonUser
 		}
-		if len(late) == 0 {
+		if !progress {
 			sm.mu.Unlock()
 			break
 		}
-		sm.log.Info("sweep found late-arriving descendants to stop", "count", len(late), "round", sweep+1)
+		if len(late) > 0 {
+			sm.log.Info("sweep found late-arriving descendants to stop", "count", len(late), "round", sweep+1)
+		}
 		_ = sm.saveState()
 		sm.mu.Unlock()
 
@@ -2291,6 +2319,9 @@ func (sm *SessionManager) StopWithChildren(rootID string, excludeRoot bool) ([]s
 				continue
 			}
 			stopped = append(stopped, lid)
+		}
+		if sweep == maxSweepRounds-1 {
+			sm.log.Warn("stop sweep reached round cap, some descendants may remain", "cap", maxSweepRounds)
 		}
 	}
 
