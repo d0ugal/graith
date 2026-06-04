@@ -97,23 +97,6 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 
 	var info protocol.SessionInfo
 	protocol.DecodePayload(resp, &info)
-	if info.Status == "stopped" {
-		fmt.Print("Session is stopped. Resume? [Y/n] ")
-		var answer string
-		fmt.Scanln(&answer)
-		if answer == "" || answer == "y" || answer == "Y" || answer == "yes" {
-			c.SendControl("resume", protocol.ResumeMsg{SessionID: sessionID})
-			resumeResp, err := c.ReadControlResponse()
-			if err != nil {
-				return err
-			}
-			if resumeResp.Type == "error" {
-				var e protocol.ErrorMsg
-				protocol.DecodePayload(resumeResp, &e)
-				return fmt.Errorf("resume failed: %s", e.Message)
-			}
-		}
-	}
 
 	ctx := context.Background()
 	keys := client.PassthroughKeys{

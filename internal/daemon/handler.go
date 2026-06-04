@@ -142,8 +142,33 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 
 				ptySess, ok := sm.GetPTY(a.SessionID)
 				if !ok {
-					sendControl("error", protocol.ErrorMsg{Message: "session not found"})
-					continue
+					sess, exists := sm.Get(a.SessionID)
+					if !exists {
+						sendControl("error", protocol.ErrorMsg{Message: "session not found"})
+						continue
+					}
+					switch sess.Status {
+					case StatusStopped, StatusErrored:
+						log.Info("auto-resuming stopped session on attach", "session", a.SessionID, "status", sess.Status)
+						if _, err := sm.Resume(a.SessionID, clientRows, clientCols); err != nil {
+							sendControl("error", protocol.ErrorMsg{Message: fmt.Sprintf("auto-resume failed: %v", err)})
+							continue
+						}
+						ptySess, ok = sm.GetPTY(a.SessionID)
+						if !ok {
+							sendControl("error", protocol.ErrorMsg{Message: "session not found after resume"})
+							continue
+						}
+					case StatusCreating:
+						sendControl("error", protocol.ErrorMsg{Message: fmt.Sprintf("session %q is being created", a.SessionID)})
+						continue
+					case StatusDeleting:
+						sendControl("error", protocol.ErrorMsg{Message: fmt.Sprintf("session %q is being deleted", a.SessionID)})
+						continue
+					default:
+						sendControl("error", protocol.ErrorMsg{Message: "session not found"})
+						continue
+					}
 				}
 
 				attachedSessionID = a.SessionID
