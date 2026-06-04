@@ -149,7 +149,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					}
 					switch sess.Status {
 					case StatusStopped, StatusErrored:
-						log.Info("auto-resuming stopped session on attach", "session", a.SessionID, "status", sess.Status)
+						log.Info("auto-resuming session on attach", "session", a.SessionID, "status", sess.Status)
 						if _, err := sm.Resume(a.SessionID, clientRows, clientCols); err != nil {
 							sendControl("error", protocol.ErrorMsg{Message: fmt.Sprintf("auto-resume failed: %v", err)})
 							continue
