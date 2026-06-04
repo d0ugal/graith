@@ -20,8 +20,12 @@ type pendingApproval struct {
 // made, the context is cancelled (hook disconnect), or the configured timeout
 // elapses. If localmost is configured, it is tried first.
 func (sm *SessionManager) SubmitApproval(ctx context.Context, req protocol.ApprovalRequestMsg) protocol.ApprovalDecisionMsg {
-	if sm.cfg.Approvals.Mode == "localmost" {
-		if decision, ok := sm.tryLocalmost(req); ok {
+	sm.mu.RLock()
+	approvalsCfg := sm.cfg.Approvals
+	sm.mu.RUnlock()
+
+	if approvalsCfg.Mode == "localmost" {
+		if decision, ok := sm.tryLocalmost(req, approvalsCfg.Command); ok {
 			return decision
 		}
 	}
@@ -56,7 +60,7 @@ func (sm *SessionManager) SubmitApproval(ctx context.Context, req protocol.Appro
 	sm.log.Info("approval queued for user", "request_id", req.RequestID, "tool", req.ToolName, "session", info.SessionName)
 	sm.broadcastApprovalNotification()
 
-	timeout := sm.cfg.Approvals.TimeoutDuration()
+	timeout := approvalsCfg.TimeoutDuration()
 
 	select {
 	case decision := <-pa.ResponseCh:
@@ -153,8 +157,7 @@ type localmostResponse struct {
 	Reason   string `json:"reason,omitempty"`
 }
 
-func (sm *SessionManager) tryLocalmost(req protocol.ApprovalRequestMsg) (protocol.ApprovalDecisionMsg, bool) {
-	command := sm.cfg.Approvals.Command
+func (sm *SessionManager) tryLocalmost(req protocol.ApprovalRequestMsg, command string) (protocol.ApprovalDecisionMsg, bool) {
 	if command == "" {
 		command = "localmost"
 	}

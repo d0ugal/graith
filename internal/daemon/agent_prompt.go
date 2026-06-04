@@ -27,7 +27,7 @@ func detectPromptInjection(agentName string) promptInjectionMethod {
 }
 
 func (sm *SessionManager) injectPrompt(agentName, worktreePath string) (extraArgs []string, err error) {
-	prompt := sm.cfg.AgentPrompt
+	prompt := sm.Config().AgentPrompt
 	if prompt == "" {
 		return nil, nil
 	}

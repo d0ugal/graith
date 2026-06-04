@@ -68,7 +68,7 @@ func TestSendNotification_CommandUsesEnvVars(t *testing.T) {
 		log: slog.Default(),
 	}
 
-	sm.sendNotification("my-session", "approval")
+	sm.sendNotification("my-session", "approval", sm.cfg.Notifications.Command)
 
 	deadline := time.After(5 * time.Second)
 	for {
@@ -108,7 +108,7 @@ func TestSendNotification_CommandInjectionPrevented(t *testing.T) {
 	}
 
 	malicious := "$(touch " + markerFile + ")"
-	sm.sendNotification(malicious, "approval")
+	sm.sendNotification(malicious, "approval", sm.cfg.Notifications.Command)
 
 	time.Sleep(500 * time.Millisecond)
 
