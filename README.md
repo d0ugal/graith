@@ -184,7 +184,7 @@ gr msg send fix-auth-bug "the tests are green now, rebase on main"
 `pub`/`send` accept `--file` to read the body from a file, and `--thread`/`--reply-to` for threaded conversations. `sub` accepts `--thread` to filter to one thread.
 
 ```bash
-# From inside a session, message all direct child sessions
+# From inside a session, message all descendant sessions
 gr msg send --children "rebase on main and re-run tests"
 
 # From a child session, message the parent
