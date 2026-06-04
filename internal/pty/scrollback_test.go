@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
@@ -135,6 +136,56 @@ func TestScrollbackStatsSaturated(t *testing.T) {
 	if written != 10 || maxSize != 10 || !saturated {
 		t.Errorf("saturated stats: written=%d, maxSize=%d, saturated=%v", written, maxSize, saturated)
 	}
+}
+
+func TestScrollbackConcurrentReadersAndWriter(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "scroll.log")
+	sb, err := NewScrollback(path, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sb.Close()
+
+	sb.Write([]byte("seed\n"))
+
+	var wg sync.WaitGroup
+	wg.Add(4)
+
+	go func() {
+		defer wg.Done()
+		for range 200 {
+			sb.Write([]byte("data\n"))
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+		for range 200 {
+			if _, err := sb.Tail(5); err != nil {
+				t.Errorf("Tail error: %v", err)
+				return
+			}
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+		for range 200 {
+			if _, err := sb.TailBytes(64); err != nil {
+				t.Errorf("TailBytes error: %v", err)
+				return
+			}
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+		for range 200 {
+			sb.Stats()
+		}
+	}()
+
+	wg.Wait()
 }
 
 func TestScrollbackStopsAtMaxSize(t *testing.T) {
