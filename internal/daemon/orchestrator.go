@@ -159,7 +159,11 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 	opts.WriteDirs = append(opts.WriteDirs, store.SharedStorePath(sm.paths.DataDir))
 	opts.WriteDirs = append(opts.WriteDirs, scratchDir)
 
-	command, finalArgs := sandbox.Wrap(agent.Command, expandedArgs, opts)
+	command, finalArgs, wrapErr := sandbox.Wrap(agent.Command, expandedArgs, opts)
+	if wrapErr != nil {
+		sm.rollbackOrchestratorCreate(id)
+		return SessionState{}, fmt.Errorf("sandbox wrap: %w", wrapErr)
+	}
 	sm.log.Info("sandboxing orchestrator", "id", id,
 		"command", command, "read_dirs", opts.ReadDirs, "write_dirs", opts.WriteDirs,
 		"workdir", opts.WorktreeDir)

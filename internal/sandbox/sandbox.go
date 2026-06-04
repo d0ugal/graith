@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"fmt"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -15,10 +16,20 @@ type WrapOpts struct {
 	SafehouseCommand string
 }
 
-func Wrap(command string, args []string, opts WrapOpts) (string, []string) {
+func Wrap(command string, args []string, opts WrapOpts) (string, []string, error) {
 	safehouse := opts.SafehouseCommand
 	if safehouse == "" {
 		safehouse = "safehouse"
+	}
+
+	if err := validatePaths(opts.WorktreeDir); err != nil {
+		return "", nil, fmt.Errorf("workdir: %w", err)
+	}
+	if err := validatePaths(opts.ReadDirs...); err != nil {
+		return "", nil, fmt.Errorf("read dirs: %w", err)
+	}
+	if err := validatePaths(opts.WriteDirs...); err != nil {
+		return "", nil, fmt.Errorf("write dirs: %w", err)
 	}
 
 	var wrapped []string
@@ -44,7 +55,16 @@ func Wrap(command string, args []string, opts WrapOpts) (string, []string) {
 	wrapped = append(wrapped, "--", command)
 	wrapped = append(wrapped, args...)
 
-	return safehouse, wrapped
+	return safehouse, wrapped, nil
+}
+
+func validatePaths(paths ...string) error {
+	for _, p := range paths {
+		if strings.Contains(p, ":") {
+			return fmt.Errorf("path %q contains a colon, which conflicts with safehouse's colon-separated path format", p)
+		}
+	}
+	return nil
 }
 
 func Available() bool {
