@@ -27,6 +27,9 @@ var rootCmd = &cobra.Command{
 	SilenceErrors: true,
 	SilenceUsage:  true,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		if err := rejectConfigInsideSession(cmd); err != nil {
+			return err
+		}
 		var err error
 		cfg, err = config.LoadOrDefault(cfgFile)
 		if err != nil {
@@ -71,6 +74,22 @@ func executeWithArgs(args []string) error {
 		w.Error(err)
 	}
 	return err
+}
+
+// insideSession reports whether the current process is running inside a
+// graith-managed agent session. This is a client-side best-effort check
+// using environment variables set by the daemon; it is not a security
+// boundary on its own (the sandbox profile enforces the hard boundary).
+func insideSession() bool {
+	_, set := os.LookupEnv("GRAITH_SESSION_ID")
+	return set
+}
+
+func rejectConfigInsideSession(cmd *cobra.Command) error {
+	if cmd.Flags().Changed("config") && insideSession() {
+		return fmt.Errorf("--config is not allowed inside a graith session (sandbox policy)")
+	}
+	return nil
 }
 
 func init() {
