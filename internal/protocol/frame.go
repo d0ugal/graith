@@ -20,8 +20,7 @@ type Frame struct {
 }
 
 type FrameWriter struct {
-	w   io.Writer
-	hdr [headerSize]byte
+	w io.Writer
 }
 
 func NewFrameWriter(w io.Writer) *FrameWriter {
@@ -32,15 +31,12 @@ func (fw *FrameWriter) WriteFrame(channel byte, payload []byte) error {
 	if len(payload) > MaxPayload {
 		return fmt.Errorf("payload too large: %d bytes (max %d)", len(payload), MaxPayload)
 	}
-	fw.hdr[0] = channel
-	binary.BigEndian.PutUint32(fw.hdr[1:], uint32(len(payload)))
-	if _, err := fw.w.Write(fw.hdr[:]); err != nil {
-		return fmt.Errorf("write frame header: %w", err)
-	}
-	if len(payload) > 0 {
-		if _, err := fw.w.Write(payload); err != nil {
-			return fmt.Errorf("write frame payload: %w", err)
-		}
+	buf := make([]byte, headerSize+len(payload))
+	buf[0] = channel
+	binary.BigEndian.PutUint32(buf[1:headerSize], uint32(len(payload)))
+	copy(buf[headerSize:], payload)
+	if _, err := fw.w.Write(buf); err != nil {
+		return fmt.Errorf("write frame: %w", err)
 	}
 	return nil
 }
