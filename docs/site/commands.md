@@ -184,7 +184,7 @@ Send a message to a session's inbox. By default, also types a notification into 
 | `--thread <id>` | Thread ID to continue |
 | `--reply-to <stream>` | Stream for replies |
 | `-q, --quiet` | Don't type a notification into the session |
-| `--children` | Send to all direct child sessions |
+| `--children` | Send to all descendant sessions |
 | `--parent` | Send to the parent session |
 
 ### `gr msg sub`
