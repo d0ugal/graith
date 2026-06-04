@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"strings"
@@ -21,17 +22,18 @@ type Session struct {
 	Ptmx       *os.File
 	Scrollback *Scrollback
 
-	mu           sync.RWMutex
-	writeMu      sync.Mutex
-	writers      []io.Writer
-	screen       vt10x.Terminal
-	done         chan struct{}
-	readDone     chan struct{}
-	exitCode     int
-	exited       bool
-	adoptedPID   int
-	lastOutputAt time.Time
-	adoptedAt    time.Time
+	mu               sync.RWMutex
+	writeMu          sync.Mutex
+	writers          []io.Writer
+	screen           vt10x.Terminal
+	done             chan struct{}
+	readDone         chan struct{}
+	exitCode         int
+	exited           bool
+	adoptedPID       int
+	adoptedStartTime int64
+	lastOutputAt     time.Time
+	adoptedAt        time.Time
 }
 
 type SessionOpts struct {
@@ -103,15 +105,22 @@ func AdoptSession(opts AdoptOpts) (*Session, error) {
 		cols, rows = int(ws.Cols), int(ws.Rows)
 	}
 
+	startTime, stErr := processStartTime(opts.PID)
+	if stErr != nil {
+		slog.Warn("could not capture process start time for adopted session; PID reuse detection degraded",
+			"session", opts.ID, "pid", opts.PID, "error", stErr)
+	}
+
 	s := &Session{
-		ID:         opts.ID,
-		Ptmx:       ptmx,
-		Scrollback: sb,
-		screen:     vt10x.New(vt10x.WithSize(cols, rows)),
-		done:       make(chan struct{}),
-		readDone:   make(chan struct{}),
-		adoptedPID: opts.PID,
-		adoptedAt:  time.Now(),
+		ID:               opts.ID,
+		Ptmx:             ptmx,
+		Scrollback:       sb,
+		screen:           vt10x.New(vt10x.WithSize(cols, rows)),
+		done:             make(chan struct{}),
+		readDone:         make(chan struct{}),
+		adoptedPID:       opts.PID,
+		adoptedStartTime: startTime,
+		adoptedAt:        time.Now(),
 	}
 
 	if tail, err := sb.TailBytes(128 * 1024); err == nil && len(tail) > 0 {
@@ -124,22 +133,61 @@ func AdoptSession(opts AdoptOpts) (*Session, error) {
 	return s, nil
 }
 
+const adoptedPollTimeout = 24 * time.Hour
+
 func (s *Session) adoptedWaitLoop() {
 	exitCode := -1
 
-	proc, _ := os.FindProcess(s.adoptedPID)
-	ps, waitErr := proc.Wait()
-	if waitErr == nil {
-		exitCode = ps.ExitCode()
-	} else {
-		for {
-			time.Sleep(time.Second)
-			if syscall.Kill(s.adoptedPID, 0) != nil {
+	// proc.Wait only works when we're the parent (rare for adopted
+	// processes). Run it in the background so it doesn't block the poll
+	// loop that handles the common case.
+	waitDone := make(chan int, 1)
+	go func() {
+		proc, _ := os.FindProcess(s.adoptedPID)
+		if ps, err := proc.Wait(); err == nil {
+			waitDone <- ps.ExitCode()
+		}
+	}()
+
+	deadlineReached := false
+	deadline := time.After(adoptedPollTimeout)
+	poll := time.NewTicker(time.Second)
+	defer poll.Stop()
+
+	for {
+		select {
+		case code := <-waitDone:
+			exitCode = code
+			goto done
+		case <-deadline:
+			deadlineReached = true
+		case <-poll.C:
+		}
+		if err := syscall.Kill(s.adoptedPID, 0); err != nil {
+			break
+		}
+		if s.adoptedStartTime != 0 {
+			cur, err := processStartTime(s.adoptedPID)
+			if err != nil || cur != s.adoptedStartTime {
 				break
 			}
 		}
+		// Safety timeout only applies when we have no start time to
+		// compare — the start time check already handles PID reuse, so
+		// we don't need to force-exit live sessions.
+		if deadlineReached && s.adoptedStartTime == 0 {
+			slog.Warn("adopted wait loop deadline reached without start time identity",
+				"session", s.ID, "pid", s.adoptedPID)
+			break
+		}
 	}
 
+done:
+	select {
+	case code := <-waitDone:
+		exitCode = code
+	default:
+	}
 	<-s.readDone
 	s.mu.Lock()
 	s.exited = true
