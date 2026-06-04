@@ -197,6 +197,9 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 	sess.Status = StatusRunning
 	sess.StatusChangedAt = time.Now()
 	sess.PID = ptySess.Cmd.Process.Pid
+	if st, err := grpty.ProcessStartTime(sess.PID); err == nil {
+		sess.PIDStartTime = st
+	}
 	sess.Sandboxed = true
 	sess.SandboxConfig = mergedSandbox
 	sess.LastStartedAt = time.Now()

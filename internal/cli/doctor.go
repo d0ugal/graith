@@ -420,6 +420,16 @@ func (dc *doctorContext) checkSessions(diag *protocol.DiagnosticsMsg) {
 			dc.hint("Run: gr daemon restart")
 			issues++
 		}
+		if s.Status == "running" && s.PID > 0 && s.PIDAlive && s.HasPTY != nil && !*s.HasPTY {
+			dc.fail("sessions", "%q (%s): PID %d alive but not managed by daemon (orphaned after crash)", s.Name, s.ID, s.PID)
+			dc.hint("Run: gr stop %s  (kills orphaned process group)", s.Name)
+			issues++
+		}
+		if s.Status == "errored" && s.PID > 0 {
+			dc.warn("sessions", "%q (%s): errored with PID %d still recorded — may need manual cleanup", s.Name, s.ID, s.PID)
+			dc.hint("Run: kill -TERM -%d  (kills process group)", s.PID)
+			issues++
+		}
 		if s.WorktreePath != "" && !s.WorktreeExists {
 			dc.fail("sessions", "%q (%s): worktree path does not exist", s.Name, s.ID)
 			dc.hint("Run: gr delete %s", s.Name)

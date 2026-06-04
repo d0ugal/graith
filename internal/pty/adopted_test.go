@@ -22,7 +22,7 @@ func TestAdoptedWaitLoopExitsOnProcessDeath(t *testing.T) {
 	}
 	defer sb.Close()
 
-	startTime, _ := processStartTime(pid)
+	startTime, _ := ProcessStartTime(pid)
 
 	s := &Session{
 		ID:               "test-adopted",
@@ -69,7 +69,7 @@ func TestAdoptedWaitLoopExitsWhenPIDGone(t *testing.T) {
 	}
 	pid := cmd.Process.Pid
 
-	startTime, stErr := processStartTime(pid)
+	startTime, stErr := ProcessStartTime(pid)
 	if stErr != nil {
 		cmd.Process.Kill()
 		cmd.Wait()
@@ -120,7 +120,7 @@ func TestAdoptedWaitLoopStartTimeMismatchBreaks(t *testing.T) {
 	}()
 	pid := cmd.Process.Pid
 
-	_, stErr := processStartTime(pid)
+	_, stErr := ProcessStartTime(pid)
 	if stErr != nil {
 		t.Skipf("cannot get process start time: %v", stErr)
 	}
