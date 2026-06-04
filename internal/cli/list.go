@@ -210,7 +210,7 @@ func descendantsOf(sessions []protocol.SessionInfo, parentID string) []protocol.
 	}
 
 	var result []protocol.SessionInfo
-	seen := make(map[string]bool)
+	seen := map[string]bool{parentID: true}
 	var collect func(string)
 	collect = func(id string) {
 		for _, child := range children[id] {
