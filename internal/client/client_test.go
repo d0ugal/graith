@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -308,6 +309,68 @@ func TestConnectForApprovalClearsDeadline(t *testing.T) {
 	}
 	if env.Type != "ping" {
 		t.Errorf("expected ping, got %s", env.Type)
+	}
+}
+
+func startMockDaemonWithVersion(t *testing.T, ver string) (string, chan net.Conn) {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "gr")
+	if err != nil {
+		t.Fatalf("mkdtemp: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	socketPath := dir + "/s"
+	ln, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { ln.Close() })
+
+	serverReady := make(chan net.Conn, 1)
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		reader := protocol.NewFrameReader(conn)
+		writer := protocol.NewFrameWriter(conn)
+
+		if _, err := reader.ReadFrame(); err != nil {
+			conn.Close()
+			return
+		}
+		resp, _ := protocol.EncodeControl("handshake_ok", protocol.HandshakeOkMsg{
+			Version:       ver,
+			DaemonVersion: "dev",
+		})
+		_ = writer.WriteFrame(protocol.ChannelControl, resp)
+		serverReady <- conn
+	}()
+
+	return socketPath, serverReady
+}
+
+func TestConnectFastRejectsIncompatibleVersion(t *testing.T) {
+	socketPath, _ := startMockDaemonWithVersion(t, "999.0")
+
+	_, err := ConnectFast(config.Paths{SocketPath: socketPath})
+	if err == nil {
+		t.Fatal("expected error for incompatible protocol version")
+	}
+	if !strings.Contains(err.Error(), "protocol version mismatch") {
+		t.Errorf("error = %q, want it to mention protocol version mismatch", err)
+	}
+}
+
+func TestConnectForApprovalRejectsIncompatibleVersion(t *testing.T) {
+	socketPath, _ := startMockDaemonWithVersion(t, "999.0")
+
+	_, err := ConnectForApproval(config.Paths{SocketPath: socketPath}, 5*time.Minute)
+	if err == nil {
+		t.Fatal("expected error for incompatible protocol version")
+	}
+	if !strings.Contains(err.Error(), "protocol version mismatch") {
+		t.Errorf("error = %q, want it to mention protocol version mismatch", err)
 	}
 }
 
