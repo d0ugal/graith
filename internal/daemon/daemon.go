@@ -757,7 +757,16 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 			}
 			opts.WorktreeDir = scratchDir
 		}
-		command, finalArgs = sandbox.Wrap(agent.Command, expandedArgs, opts)
+		var wrapErr error
+		command, finalArgs, wrapErr = sandbox.Wrap(agent.Command, expandedArgs, opts)
+		if wrapErr != nil {
+			cleanupOnError()
+			if scratchDir != "" {
+				os.RemoveAll(scratchDir)
+			}
+			rollbackState()
+			return SessionState{}, fmt.Errorf("sandbox wrap: %w", wrapErr)
+		}
 		sm.log.Info("sandboxing session", "id", id, "agent", agentName,
 			"command", command, "read_dirs", opts.ReadDirs, "write_dirs", opts.WriteDirs,
 			"features", opts.Features, "workdir", opts.WorktreeDir)
@@ -1136,7 +1145,13 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 		if len(forkIncludes) > 0 {
 			opts.WriteDirs = append(opts.WriteDirs, sm.deriveSandboxIncludesWriteDirs(forkIncludes)...)
 		}
-		command, finalArgs = sandbox.Wrap(agent.Command, expandedArgs, opts)
+		var wrapErr error
+		command, finalArgs, wrapErr = sandbox.Wrap(agent.Command, expandedArgs, opts)
+		if wrapErr != nil {
+			forkCleanup()
+			rollbackState()
+			return SessionState{}, fmt.Errorf("sandbox wrap: %w", wrapErr)
+		}
 		sm.log.Info("sandboxing forked session", "id", id,
 			"command", command, "read_dirs", opts.ReadDirs, "write_dirs", opts.WriteDirs,
 			"features", opts.Features, "workdir", opts.WorktreeDir)
@@ -1639,7 +1654,12 @@ func (sm *SessionManager) resumeWithSummary(id string, rows, cols uint16, lifecy
 			}
 			opts.WorktreeDir = scratchDir
 		}
-		command, finalArgs = sandbox.Wrap(agent.Command, expandedArgs, opts)
+		var wrapErr error
+		command, finalArgs, wrapErr = sandbox.Wrap(agent.Command, expandedArgs, opts)
+		if wrapErr != nil {
+			rollbackState()
+			return SessionState{}, fmt.Errorf("sandbox wrap: %w", wrapErr)
+		}
 		sm.log.Info("sandboxing resumed session", "id", id,
 			"command", command, "read_dirs", opts.ReadDirs, "write_dirs", opts.WriteDirs,
 			"features", opts.Features, "workdir", opts.WorktreeDir)

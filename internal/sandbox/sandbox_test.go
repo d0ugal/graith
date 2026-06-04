@@ -10,7 +10,10 @@ func TestWrapBasic(t *testing.T) {
 		WorktreeDir: "/home/user/worktree",
 		EnvKeys:     []string{"GRAITH_SESSION_ID", "TERM"},
 	}
-	cmd, args := Wrap("claude", []string{"--session-id", "abc"}, opts)
+	cmd, args, err := Wrap("claude", []string{"--session-id", "abc"}, opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if cmd != "safehouse" {
 		t.Fatalf("cmd = %q, want safehouse", cmd)
@@ -37,7 +40,10 @@ func TestWrapWithFeatures(t *testing.T) {
 		Features:    []string{"ssh", "process-control"},
 		EnvKeys:     []string{"TERM"},
 	}
-	cmd, args := Wrap("codex", []string{}, opts)
+	cmd, args, err := Wrap("codex", []string{}, opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if cmd != "safehouse" {
 		t.Fatalf("cmd = %q, want safehouse", cmd)
@@ -64,7 +70,10 @@ func TestWrapWithReadDirs(t *testing.T) {
 		ReadDirs:    []string{"/home/user/Code", "/opt/shared"},
 		EnvKeys:     []string{"TERM"},
 	}
-	_, args := Wrap("claude", nil, opts)
+	_, args, err := Wrap("claude", nil, opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	found := false
 	for i, a := range args {
@@ -87,7 +96,10 @@ func TestWrapWithWriteDirs(t *testing.T) {
 		WriteDirs:   []string{"/tmp/extra"},
 		EnvKeys:     []string{"TERM"},
 	}
-	_, args := Wrap("claude", nil, opts)
+	_, args, err := Wrap("claude", nil, opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	found := false
 	for i, a := range args {
@@ -108,7 +120,10 @@ func TestWrapNoEnvKeys(t *testing.T) {
 	opts := WrapOpts{
 		WorktreeDir: "/tmp/wt",
 	}
-	_, args := Wrap("claude", nil, opts)
+	_, args, err := Wrap("claude", nil, opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	for _, a := range args {
 		if a == "--env-pass" {
@@ -122,7 +137,10 @@ func TestWrapCommandAndArgsAfterSeparator(t *testing.T) {
 		WorktreeDir: "/tmp/wt",
 		EnvKeys:     []string{"TERM"},
 	}
-	_, args := Wrap("codex", []string{"resume", "--last"}, opts)
+	_, args, err := Wrap("codex", []string{"resume", "--last"}, opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	sepIdx := -1
 	for i, a := range args {
@@ -146,7 +164,10 @@ func TestWrapCustomCommand(t *testing.T) {
 		SafehouseCommand: "/usr/local/bin/safehouse",
 		EnvKeys:          []string{"TERM"},
 	}
-	cmd, _ := Wrap("claude", nil, opts)
+	cmd, _, err := Wrap("claude", nil, opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if cmd != "/usr/local/bin/safehouse" {
 		t.Fatalf("cmd = %q, want /usr/local/bin/safehouse", cmd)
@@ -159,7 +180,10 @@ func TestWrapSharedWorktreeReadOnly(t *testing.T) {
 		ReadDirs:    []string{"/shared/worktree"},
 		EnvKeys:     []string{"TERM"},
 	}
-	_, args := Wrap("claude", nil, opts)
+	_, args, err := Wrap("claude", nil, opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	foundWorkdir := false
 	foundReadDirs := false
@@ -182,6 +206,54 @@ func TestWrapSharedWorktreeReadOnly(t *testing.T) {
 	}
 	if !foundReadDirs {
 		t.Error("--add-dirs-ro not found in args")
+	}
+}
+
+func TestWrapRejectsColonInWorkdir(t *testing.T) {
+	opts := WrapOpts{
+		WorktreeDir: "/tmp/path:with:colons",
+		EnvKeys:     []string{"TERM"},
+	}
+	_, _, err := Wrap("claude", nil, opts)
+	if err == nil {
+		t.Fatal("expected error for colon in workdir path")
+	}
+}
+
+func TestWrapRejectsColonInReadDirs(t *testing.T) {
+	opts := WrapOpts{
+		WorktreeDir: "/tmp/wt",
+		ReadDirs:    []string{"/good/path", "/bad:path"},
+		EnvKeys:     []string{"TERM"},
+	}
+	_, _, err := Wrap("claude", nil, opts)
+	if err == nil {
+		t.Fatal("expected error for colon in read dir path")
+	}
+}
+
+func TestWrapRejectsColonInWriteDirs(t *testing.T) {
+	opts := WrapOpts{
+		WorktreeDir: "/tmp/wt",
+		WriteDirs:   []string{"/path:colon"},
+		EnvKeys:     []string{"TERM"},
+	}
+	_, _, err := Wrap("claude", nil, opts)
+	if err == nil {
+		t.Fatal("expected error for colon in write dir path")
+	}
+}
+
+func TestWrapAcceptsPathsWithoutColons(t *testing.T) {
+	opts := WrapOpts{
+		WorktreeDir: "/tmp/wt",
+		ReadDirs:    []string{"/home/user/Code", "/opt/shared"},
+		WriteDirs:   []string{"/tmp/extra"},
+		EnvKeys:     []string{"TERM"},
+	}
+	_, _, err := Wrap("claude", nil, opts)
+	if err != nil {
+		t.Fatalf("unexpected error for valid paths: %v", err)
 	}
 }
 
