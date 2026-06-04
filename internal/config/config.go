@@ -204,17 +204,17 @@ type MCPServerConfig struct {
 }
 
 type Agent struct {
-	Command           string                     `json:"command"                        toml:"command"`
-	Args              []string                   `json:"args,omitempty"                 toml:"args"`
-	ResumeArgs        []string                   `json:"resume_args,omitempty"          toml:"resume_args"`
-	ForkArgs          []string                   `json:"fork_args,omitempty"            toml:"fork_args"`
-	Env               map[string]string          `json:"env,omitempty"                  toml:"env"`
-	IdleTimeout       string                     `json:"idle_timeout,omitempty"         toml:"idle_timeout"`
-	InjectPrompt      *bool                      `json:"inject_prompt,omitempty"        toml:"inject_prompt"`
-	PreTrustWorkspace *bool                      `json:"pre_trust_workspace,omitempty"  toml:"pre_trust_workspace"`
-	Sandbox           SandboxConfig              `json:"sandbox"                        toml:"sandbox"`
-	MCPServers        map[string]MCPServerConfig `json:"mcp_servers,omitempty"          toml:"mcp_servers"`
-	ValidateModel     string                     `json:"validate_model,omitempty"       toml:"validate_model"`
+	Command           string                     `json:"command"                       toml:"command"`
+	Args              []string                   `json:"args,omitempty"                toml:"args"`
+	ResumeArgs        []string                   `json:"resume_args,omitempty"         toml:"resume_args"`
+	ForkArgs          []string                   `json:"fork_args,omitempty"           toml:"fork_args"`
+	Env               map[string]string          `json:"env,omitempty"                 toml:"env"`
+	IdleTimeout       string                     `json:"idle_timeout,omitempty"        toml:"idle_timeout"`
+	InjectPrompt      *bool                      `json:"inject_prompt,omitempty"       toml:"inject_prompt"`
+	PreTrustWorkspace *bool                      `json:"pre_trust_workspace,omitempty" toml:"pre_trust_workspace"`
+	Sandbox           SandboxConfig              `json:"sandbox"                       toml:"sandbox"`
+	MCPServers        map[string]MCPServerConfig `json:"mcp_servers,omitempty"         toml:"mcp_servers"`
+	ValidateModel     string                     `json:"validate_model,omitempty"      toml:"validate_model"`
 }
 
 func (a Agent) PromptInjectionEnabled() bool {
