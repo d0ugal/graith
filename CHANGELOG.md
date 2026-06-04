@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.47.0](https://github.com/d0ugal/graith/compare/v0.46.0...v0.47.0) (2026-06-04)
+
+
+### Features
+
+* validate protocol version on handshake ([48a2ef9](https://github.com/d0ugal/graith/commit/48a2ef98c196307cc9564e241bb020d8f24344b2)), closes [#50](https://github.com/d0ugal/graith/issues/50)
+
+
+### Bug Fixes
+
+* block --config flag inside graith sessions to prevent sandbox bypass ([179252f](https://github.com/d0ugal/graith/commit/179252f84696ad6648a38f144869cd6a2bc78216)), closes [#331](https://github.com/d0ugal/graith/issues/331)
+* close PTY/log handles and remove stale map entries on session exit ([9e496f6](https://github.com/d0ugal/graith/commit/9e496f6c974f65f6f98e44bb88990fbb42f23817)), closes [#220](https://github.com/d0ugal/graith/issues/220)
+* eliminate torn frames from two-write pattern in FrameWriter ([ce7d81c](https://github.com/d0ugal/graith/commit/ce7d81cfbb40840c7fcbed145d42c882e9d39fbf)), closes [#212](https://github.com/d0ugal/graith/issues/212)
+* prevent adoptedWaitLoop from hanging on PID reuse ([6915970](https://github.com/d0ugal/graith/commit/6915970c60238371a419d27d2c93502adfc0b9e2)), closes [#253](https://github.com/d0ugal/graith/issues/253)
+* protect sm.cfg reads from data races with applyConfig ([aca2f3a](https://github.com/d0ugal/graith/commit/aca2f3a1fcb79849d047fc9bcaf6d69f72f010b1)), closes [#214](https://github.com/d0ugal/graith/issues/214)
+* reject paths containing colons in sandbox Wrap ([3be5672](https://github.com/d0ugal/graith/commit/3be56729a804f277010a3c1541313b32aa541a7a)), closes [#226](https://github.com/d0ugal/graith/issues/226)
+* replace single attachedWriter with writer slice for multi-subscriber support ([c780b3c](https://github.com/d0ugal/graith/commit/c780b3c8ad787e913edd8f82b606202989489f1f)), closes [#219](https://github.com/d0ugal/graith/issues/219)
+* stop sessions concurrently in StopAll and use fresh shutdown context ([8755dfc](https://github.com/d0ugal/graith/commit/8755dfcc844336191b7e72b4874f7293d5936d86)), closes [#229](https://github.com/d0ugal/graith/issues/229)
+* use lock-free reads in Scrollback for concurrent access ([363e7c2](https://github.com/d0ugal/graith/commit/363e7c2353c3fdef6f27363a44f236d2253a3396)), closes [#242](https://github.com/d0ugal/graith/issues/242)
+
 ## [0.46.0](https://github.com/d0ugal/graith/compare/v0.45.0...v0.46.0) (2026-06-02)
 
 
