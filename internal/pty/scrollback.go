@@ -9,8 +9,10 @@ import (
 	"sync"
 )
 
+// Scrollback is an append-only log file. path is immutable after construction,
+// so Tail/TailBytes read it lock-free via independent file descriptors.
 type Scrollback struct {
-	mu        sync.Mutex
+	mu        sync.RWMutex
 	file      *os.File
 	path      string
 	maxSize   int64
@@ -47,9 +49,6 @@ func (s *Scrollback) Write(data []byte) (int, error) {
 }
 
 func (s *Scrollback) Tail(lines int) ([]byte, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	f, err := os.Open(s.path)
 	if err != nil {
 		return nil, err
@@ -112,9 +111,6 @@ func (s *Scrollback) Tail(lines int) ([]byte, error) {
 
 // TailBytes returns up to maxBytes from the end of the scrollback file.
 func (s *Scrollback) TailBytes(maxBytes int64) ([]byte, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	f, err := os.Open(s.path)
 	if err != nil {
 		return nil, err
@@ -144,8 +140,8 @@ func (s *Scrollback) TailBytes(maxBytes int64) ([]byte, error) {
 }
 
 func (s *Scrollback) Stats() (written, maxSize int64, saturated bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.written, s.maxSize, s.saturated
 }
 
