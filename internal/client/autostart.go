@@ -46,10 +46,7 @@ func startDaemon(configFile string) error {
 	}
 	defer func() { _ = devNull.Close() }()
 
-	args := []string{"daemon", "start"}
-	if configFile != "" {
-		args = append(args, "--config", configFile)
-	}
+	args := daemonStartArgs(configFile)
 	cmd := exec.Command(self, args...)
 	cmd.Stdin = devNull
 	cmd.Stdout = devNull
@@ -57,4 +54,13 @@ func startDaemon(configFile string) error {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 
 	return cmd.Start()
+}
+
+func daemonStartArgs(configFile string) []string {
+	args := []string{"daemon", "start"}
+	_, inSession := os.LookupEnv("GRAITH_SESSION_ID")
+	if configFile != "" && !inSession {
+		args = append(args, "--config", configFile)
+	}
+	return args
 }
