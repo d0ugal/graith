@@ -13,7 +13,7 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 )
 
-const CurrentStateVersion = 8
+const CurrentStateVersion = 9
 
 type SessionStatus string
 
@@ -56,6 +56,7 @@ type SessionState struct {
 	HookContextPercent     *float64              `json:"-"`
 	ExitCode               *int                  `json:"exit_code,omitempty"`
 	PID                    int                   `json:"pid,omitempty"`
+	PIDStartTime           int64                 `json:"pid_start_time,omitempty"`
 	Sandboxed              bool                  `json:"sandboxed,omitempty"`
 	SandboxConfig          *config.SandboxConfig `json:"sandbox_config,omitempty"`
 	SharedWorktree         bool                  `json:"shared_worktree,omitempty"`
@@ -155,6 +156,7 @@ var migrations = map[int]func(*State) error{
 	5: migrateV5ToV6,
 	6: migrateV6ToV7,
 	7: migrateV7ToV8,
+	8: migrateV8ToV9,
 }
 
 func migrateState(state *State) error {
@@ -228,6 +230,12 @@ func migrateV7ToV8(_ *State) error {
 	return nil
 }
 
+// migrateV8ToV9 is a no-op: v9 adds the optional pid_start_time field which
+// defaults to 0 (unrecorded) for existing sessions.
+func migrateV8ToV9(_ *State) error {
+	return nil
+}
+
 func writeFileAtomic(path string, data []byte) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -287,6 +295,7 @@ func (s *State) Reconcile() {
 				sess.Status = StatusStopped
 				sess.StatusChangedAt = time.Now()
 				sess.PID = 0
+				sess.PIDStartTime = 0
 				applyLifecycleSummaryLocked(sess, "Lost during daemon restart")
 			}
 		}

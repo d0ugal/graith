@@ -261,6 +261,9 @@ func (sm *SessionManager) AdoptSessions(manifest *UpgradeManifest) error {
 			continue
 		}
 
+		if st, err := grpty.ProcessStartTime(us.PID); err == nil {
+			sessState.PIDStartTime = st
+		}
 		sm.sessions[us.ID] = ptySess
 		go sm.watchSession(us.ID, ptySess)
 		sm.log.Info("adopted session", "id", us.ID, "pid", us.PID)
@@ -825,6 +828,9 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 	sessState.Status = StatusRunning
 	sessState.StatusChangedAt = time.Now()
 	sessState.PID = ptySess.Cmd.Process.Pid
+	if st, err := grpty.ProcessStartTime(sessState.PID); err == nil {
+		sessState.PIDStartTime = st
+	}
 	sessState.CreationCfg = &CreationConfig{
 		Agent:         agent,
 		SandboxConfig: cfgSnapshot.Sandbox.Merge(agent.Sandbox),
@@ -1203,6 +1209,9 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 	sessState.Status = StatusRunning
 	sessState.StatusChangedAt = time.Now()
 	sessState.PID = ptySess.Cmd.Process.Pid
+	if st, err := grpty.ProcessStartTime(sessState.PID); err == nil {
+		sessState.PIDStartTime = st
+	}
 	sessState.CreationCfg = &CreationConfig{
 		Agent:         agent,
 		SandboxConfig: cfgSnapshot.Sandbox.Merge(agent.Sandbox),
@@ -1261,6 +1270,7 @@ func (sm *SessionManager) watchSession(id string, sess *grpty.Session) {
 			s.StatusChangedAt = time.Now()
 			s.ExitCode = &exitCode
 			s.PID = 0
+			s.PIDStartTime = 0
 			if s.StopReason == "" {
 				s.StopReason = StopReasonCrash
 			}
@@ -1706,6 +1716,9 @@ func (sm *SessionManager) resumeWithSummary(id string, rows, cols uint16, lifecy
 	sessState.StatusChangedAt = time.Now()
 	sessState.ExitCode = nil
 	sessState.PID = ptySess.Cmd.Process.Pid
+	if st, err := grpty.ProcessStartTime(sessState.PID); err == nil {
+		sessState.PIDStartTime = st
+	}
 	sessState.AgentStatus = ""
 	sessState.IdleSince = nil
 	sessState.StopReason = ""
@@ -1811,9 +1824,12 @@ func (sm *SessionManager) Delete(id string) error {
 		return nil
 	}
 
+	orphanPID := sessState.PID
+	orphanStartTime := sessState.PIDStartTime
 	sessState.Status = StatusDeleting
 	sessState.StatusChangedAt = time.Now()
 	sessState.PID = 0
+	sessState.PIDStartTime = 0
 	_ = sm.saveState()
 	sm.mu.Unlock()
 
@@ -1829,6 +1845,8 @@ func (sm *SessionManager) Delete(id string) error {
 			}
 		}
 		ptySess.Close()
+	} else if orphanPID > 0 {
+		sm.killVerifiedProcess(orphanPID, orphanStartTime)
 	}
 
 	// Attempt git teardown before removing the session from state.
@@ -1916,6 +1934,8 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 		includes     []IncludedRepoState
 		ptySess      *grpty.Session
 		client       *attachedClient
+		pid          int
+		pidStartTime int64
 	}
 
 	snaps := make([]snapshot, 0, len(toDelete))
@@ -1968,10 +1988,13 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 			s.client = ac
 			delete(sm.attachedClients, did)
 		}
+		s.pid = sess.PID
+		s.pidStartTime = sess.PIDStartTime
 		snaps = append(snaps, s)
 		sess.Status = StatusDeleting
 		sess.StatusChangedAt = time.Now()
 		sess.PID = 0
+		sess.PIDStartTime = 0
 	}
 	_ = sm.saveState()
 	sm.mu.Unlock()
@@ -1989,6 +2012,8 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 				}
 			}
 			s.ptySess.Close()
+		} else if s.pid > 0 {
+			sm.killVerifiedProcess(s.pid, s.pidStartTime)
 		}
 	}
 
@@ -2171,6 +2196,125 @@ func (sm *SessionManager) collectDescendants(rootID string) []string {
 	return result
 }
 
+// killProcessGroup sends SIGTERM to the process group led by pid, waits up to
+// 5 seconds for the group to exit, then sends SIGKILL if still alive.
+func killProcessGroup(pid int) error {
+	pgid := -pid
+	if err := syscall.Kill(pgid, syscall.SIGTERM); err != nil {
+		return fmt.Errorf("SIGTERM to pgid %d: %w", pgid, err)
+	}
+	deadline := time.After(5 * time.Second)
+	tick := time.NewTicker(100 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		select {
+		case <-deadline:
+			_ = syscall.Kill(pgid, syscall.SIGKILL)
+			return nil
+		case <-tick.C:
+			if err := syscall.Kill(pgid, 0); err != nil {
+				return nil
+			}
+		}
+	}
+}
+
+func (sm *SessionManager) killVerifiedProcess(pid int, startTime int64) (killed bool, err error) {
+	if pid <= 0 || !isProcessAlive(pid) {
+		return false, nil
+	}
+	if startTime == 0 {
+		return false, fmt.Errorf("no process identity recorded")
+	}
+	current, err := grpty.ProcessStartTime(pid)
+	if err != nil || current != startTime {
+		return false, fmt.Errorf("PID identity mismatch")
+	}
+	err = killProcessGroup(pid)
+	return err == nil, err
+}
+
+type orphanCandidate struct {
+	id           string
+	pid          int
+	pidStartTime int64
+}
+
+func (sm *SessionManager) cleanupOrphanedProcesses() {
+	sm.mu.Lock()
+	var candidates []orphanCandidate
+	for id, sess := range sm.state.Sessions {
+		if sess.Status != StatusRunning || sess.PID <= 0 {
+			continue
+		}
+		if !isProcessAlive(sess.PID) {
+			continue
+		}
+		if _, hasPTY := sm.sessions[id]; hasPTY {
+			continue
+		}
+		candidates = append(candidates, orphanCandidate{
+			id: id, pid: sess.PID, pidStartTime: sess.PIDStartTime,
+		})
+	}
+	sm.mu.Unlock()
+
+	for _, c := range candidates {
+		verified := c.pidStartTime != 0
+		if verified {
+			current, err := grpty.ProcessStartTime(c.pid)
+			if err != nil || current != c.pidStartTime {
+				verified = false
+			}
+		}
+
+		if verified {
+			sm.log.Warn("killing orphaned process group",
+				"id", c.id, "pid", c.pid)
+			err := killProcessGroup(c.pid)
+			sm.mu.Lock()
+			if sess := sm.state.Sessions[c.id]; sess != nil {
+				if err != nil {
+					sess.Status = StatusErrored
+					sess.StatusChangedAt = time.Now()
+					sess.StopReason = StopReasonCrash
+					applyLifecycleSummaryLocked(sess,
+						fmt.Sprintf("Orphaned process (PID %d) — kill failed: %v", c.pid, err))
+				} else {
+					sess.Status = StatusStopped
+					sess.StatusChangedAt = time.Now()
+					sess.PID = 0
+					sess.PIDStartTime = 0
+					sess.StopReason = StopReasonCrash
+					applyLifecycleSummaryLocked(sess,
+						"Orphaned by daemon crash — killed")
+				}
+			}
+			sm.mu.Unlock()
+		} else {
+			sm.mu.Lock()
+			if sess := sm.state.Sessions[c.id]; sess != nil {
+				sm.log.Warn("cannot verify orphaned process identity",
+					"id", c.id, "pid", c.pid,
+					"recorded_start_time", c.pidStartTime)
+				sess.Status = StatusErrored
+				sess.StatusChangedAt = time.Now()
+				sess.StopReason = StopReasonCrash
+				applyLifecycleSummaryLocked(sess, fmt.Sprintf(
+					"Orphaned process (PID %d) — identity unverified, manual cleanup needed",
+					c.pid))
+			}
+			sm.mu.Unlock()
+		}
+	}
+
+	if len(candidates) > 0 {
+		sm.mu.Lock()
+		_ = sm.saveState()
+		sm.mu.Unlock()
+	}
+}
+
 // Stop sends SIGTERM to a session's process without removing the session or worktree.
 func (sm *SessionManager) Stop(id string) error {
 	return sm.stopWithReason(id, StopReasonUser)
@@ -2196,14 +2340,43 @@ func (sm *SessionManager) stopWithReason(id, reason string) error {
 	sm.mu.Unlock()
 
 	ptySess, ok := sm.GetPTY(id)
-	if !ok {
-		return fmt.Errorf("session %q has no PTY", id)
+	if ok {
+		if err := ptySess.Kill(); err != nil {
+			return fmt.Errorf("send SIGTERM: %w", err)
+		}
+		return nil
 	}
 
-	if err := ptySess.Kill(); err != nil {
-		return fmt.Errorf("send SIGTERM: %w", err)
+	sm.mu.Lock()
+	pid := sessState.PID
+	startTime := sessState.PIDStartTime
+	sm.mu.Unlock()
+
+	killed, err := sm.killVerifiedProcess(pid, startTime)
+
+	sm.mu.Lock()
+	if s, ok := sm.state.Sessions[id]; ok {
+		if killed {
+			s.Status = StatusStopped
+			s.StatusChangedAt = time.Now()
+			s.PID = 0
+			s.PIDStartTime = 0
+			applyLifecycleSummaryLocked(s, "Orphaned process killed")
+		} else if err != nil {
+			s.Status = StatusErrored
+			s.StatusChangedAt = time.Now()
+			applyLifecycleSummaryLocked(s, fmt.Sprintf("Could not kill orphaned process (PID %d): %v", pid, err))
+		} else {
+			s.Status = StatusStopped
+			s.StatusChangedAt = time.Now()
+			s.PID = 0
+			s.PIDStartTime = 0
+			applyLifecycleSummaryLocked(s, "Process already exited")
+		}
+		_ = sm.saveState()
 	}
-	return nil
+	sm.mu.Unlock()
+	return err
 }
 
 func filterExcludeRoot(ids []string, rootID string) []string {
@@ -2252,17 +2425,44 @@ func (sm *SessionManager) StopWithChildren(rootID string, excludeRoot bool) ([]s
 			continue
 		}
 		sess.StopReason = StopReasonUser
+		pid := sess.PID
+		startTime := sess.PIDStartTime
 		_ = sm.saveState()
 		sm.mu.Unlock()
 		ptySess, ok := sm.GetPTY(id)
-		if !ok {
+		if ok {
+			if err := ptySess.Kill(); err != nil {
+				sm.log.Warn("stop child failed", "session_id", id, "error", err)
+				continue
+			}
+			stopped = append(stopped, id)
 			continue
 		}
-		if err := ptySess.Kill(); err != nil {
-			sm.log.Warn("stop child failed", "session_id", id, "error", err)
-			continue
+		killed, killErr := sm.killVerifiedProcess(pid, startTime)
+		sm.mu.Lock()
+		if s, ok := sm.state.Sessions[id]; ok {
+			if killed {
+				s.Status = StatusStopped
+				s.StatusChangedAt = time.Now()
+				s.PID = 0
+				s.PIDStartTime = 0
+				applyLifecycleSummaryLocked(s, "Orphaned process killed")
+				stopped = append(stopped, id)
+			} else if killErr != nil {
+				s.Status = StatusErrored
+				s.StatusChangedAt = time.Now()
+				applyLifecycleSummaryLocked(s, fmt.Sprintf("Could not kill orphaned process (PID %d): %v", pid, killErr))
+			} else {
+				s.Status = StatusStopped
+				s.StatusChangedAt = time.Now()
+				s.PID = 0
+				s.PIDStartTime = 0
+				applyLifecycleSummaryLocked(s, "Process already exited")
+				stopped = append(stopped, id)
+			}
+			_ = sm.saveState()
 		}
-		stopped = append(stopped, id)
+		sm.mu.Unlock()
 	}
 
 	// Sweep for sessions created between collectDescendants and the stop loop.
@@ -2351,9 +2551,34 @@ func (sm *SessionManager) Restart(id string, rows, cols uint16) (SessionState, e
 			s.StatusChangedAt = time.Now()
 			s.ExitCode = &exitCode
 			s.PID = 0
+			s.PIDStartTime = 0
 			sm.saveState()
 		}
 		sm.mu.Unlock()
+	} else if !hasPTY {
+		sm.mu.Lock()
+		sess, ok := sm.state.Sessions[id]
+		if ok && sess.Status == StatusRunning && sess.PID > 0 {
+			pid := sess.PID
+			startTime := sess.PIDStartTime
+			sm.mu.Unlock()
+
+			sm.killVerifiedProcess(pid, startTime)
+
+			sm.mu.Lock()
+			if s, ok := sm.state.Sessions[id]; ok && s.Status == StatusRunning {
+				s.Status = StatusStopped
+				s.StatusChangedAt = time.Now()
+				s.PID = 0
+				s.PIDStartTime = 0
+				s.StopReason = StopReasonUser
+				applyLifecycleSummaryLocked(s, "Orphaned process killed for restart")
+				sm.saveState()
+			}
+			sm.mu.Unlock()
+		} else {
+			sm.mu.Unlock()
+		}
 	}
 
 	return sm.resumeWithSummary(id, rows, cols, "Restarted")
@@ -2545,6 +2770,10 @@ func (sm *SessionManager) Diagnostics() protocol.DiagnosticsMsg {
 		if s.Status == StatusRunning && s.PID > 0 {
 			sd.PIDAlive = isProcessAlive(s.PID)
 		}
+
+		_, hasPTY := sm.sessions[id]
+		hasPTYVal := hasPTY
+		sd.HasPTY = &hasPTYVal
 
 		if s.WorktreePath != "" {
 			sd.WorktreePath = s.WorktreePath
@@ -3244,6 +3473,7 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 		if err := sm.LoadState(); err != nil {
 			log.Warn("failed to load state", "err", err)
 		}
+		sm.cleanupOrphanedProcesses()
 
 		logAttrs := []any{"socket", paths.SocketPath, "pid", os.Getpid()}
 		if paths.Profile != "" {

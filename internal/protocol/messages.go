@@ -359,6 +359,7 @@ type SessionDiagnostic struct {
 	AgentStatus     string `json:"agent_status,omitempty"`
 	PID             int    `json:"pid,omitempty"`
 	PIDAlive        bool   `json:"pid_alive"`
+	HasPTY          *bool  `json:"has_pty,omitempty"`
 	WorktreePath    string `json:"worktree_path,omitempty"`
 	WorktreeExists  bool   `json:"worktree_exists"`
 	ConfigStale     bool   `json:"config_stale"`
