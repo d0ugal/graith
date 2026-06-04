@@ -1462,6 +1462,7 @@ func (sm *SessionManager) resumeWithSummary(id string, rows, cols uint16, lifecy
 	prevStatus := sessState.Status
 	prevExitCode := sessState.ExitCode
 	prevPID := sessState.PID
+	prevPIDStartTime := sessState.PIDStartTime
 	prevAgentStatus := sessState.AgentStatus
 	prevSandboxed := sessState.Sandboxed
 	prevSandboxConfig := sessState.SandboxConfig
@@ -1506,6 +1507,7 @@ func (sm *SessionManager) resumeWithSummary(id string, rows, cols uint16, lifecy
 			s.Status = prevStatus
 			s.ExitCode = prevExitCode
 			s.PID = prevPID
+			s.PIDStartTime = prevPIDStartTime
 			s.AgentStatus = prevAgentStatus
 			s.Sandboxed = prevSandboxed
 			s.SandboxConfig = prevSandboxConfig
@@ -1846,7 +1848,9 @@ func (sm *SessionManager) Delete(id string) error {
 		}
 		ptySess.Close()
 	} else if orphanPID > 0 {
-		sm.killVerifiedProcess(orphanPID, orphanStartTime)
+		if _, err := sm.killVerifiedProcess(orphanPID, orphanStartTime); err != nil {
+			sm.log.Warn("failed to kill orphaned process during delete", "id", id, "pid", orphanPID, "err", err)
+		}
 	}
 
 	// Attempt git teardown before removing the session from state.
@@ -2013,7 +2017,9 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 			}
 			s.ptySess.Close()
 		} else if s.pid > 0 {
-			sm.killVerifiedProcess(s.pid, s.pidStartTime)
+			if _, err := sm.killVerifiedProcess(s.pid, s.pidStartTime); err != nil {
+				sm.log.Warn("failed to kill orphaned process during delete", "id", s.id, "pid", s.pid, "err", err)
+			}
 		}
 	}
 
@@ -2199,8 +2205,14 @@ func (sm *SessionManager) collectDescendants(rootID string) []string {
 // killProcessGroup sends SIGTERM to the process group led by pid, waits up to
 // 5 seconds for the group to exit, then sends SIGKILL if still alive.
 func killProcessGroup(pid int) error {
+	if pid <= 1 {
+		return fmt.Errorf("refusing to signal pid %d", pid)
+	}
 	pgid := -pid
 	if err := syscall.Kill(pgid, syscall.SIGTERM); err != nil {
+		if errors.Is(err, syscall.ESRCH) {
+			return nil
+		}
 		return fmt.Errorf("SIGTERM to pgid %d: %w", pgid, err)
 	}
 	deadline := time.After(5 * time.Second)
@@ -2224,11 +2236,17 @@ func (sm *SessionManager) killVerifiedProcess(pid int, startTime int64) (killed 
 		return false, nil
 	}
 	if startTime == 0 {
-		return false, fmt.Errorf("no process identity recorded")
+		return false, fmt.Errorf("no process identity recorded for PID %d", pid)
 	}
 	current, err := grpty.ProcessStartTime(pid)
-	if err != nil || current != startTime {
-		return false, fmt.Errorf("PID identity mismatch")
+	if err != nil {
+		if !isProcessAlive(pid) {
+			return false, nil
+		}
+		return false, fmt.Errorf("could not read process start time for PID %d: %w", pid, err)
+	}
+	if current != startTime {
+		return false, fmt.Errorf("PID %d identity mismatch (recorded=%d, current=%d)", pid, startTime, current)
 	}
 	err = killProcessGroup(pid)
 	return err == nil, err
@@ -2563,17 +2581,31 @@ func (sm *SessionManager) Restart(id string, rows, cols uint16) (SessionState, e
 			startTime := sess.PIDStartTime
 			sm.mu.Unlock()
 
-			sm.killVerifiedProcess(pid, startTime)
+			killed, killErr := sm.killVerifiedProcess(pid, startTime)
 
 			sm.mu.Lock()
 			if s, ok := sm.state.Sessions[id]; ok && s.Status == StatusRunning {
-				s.Status = StatusStopped
-				s.StatusChangedAt = time.Now()
-				s.PID = 0
-				s.PIDStartTime = 0
-				s.StopReason = StopReasonUser
-				applyLifecycleSummaryLocked(s, "Orphaned process killed for restart")
-				sm.saveState()
+				if killed || killErr == nil {
+					s.Status = StatusStopped
+					s.StatusChangedAt = time.Now()
+					s.PID = 0
+					s.PIDStartTime = 0
+					s.StopReason = StopReasonUser
+					if killed {
+						applyLifecycleSummaryLocked(s, "Orphaned process killed for restart")
+					} else {
+						applyLifecycleSummaryLocked(s, "Process already exited")
+					}
+					sm.saveState()
+				} else {
+					s.Status = StatusErrored
+					s.StatusChangedAt = time.Now()
+					applyLifecycleSummaryLocked(s,
+						fmt.Sprintf("Cannot restart: orphaned process (PID %d) — %v", pid, killErr))
+					sm.saveState()
+					sm.mu.Unlock()
+					return SessionState{}, fmt.Errorf("cannot restart: orphaned process (PID %d) could not be killed: %w", pid, killErr)
+				}
 			}
 			sm.mu.Unlock()
 		} else {
