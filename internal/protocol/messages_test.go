@@ -33,6 +33,29 @@ func TestEncodeDecodeControl(t *testing.T) {
 	}
 }
 
+func TestVersionCompatible(t *testing.T) {
+	tests := []struct {
+		name    string
+		version string
+		want    bool
+	}{
+		{"same version", Version, true},
+		{"same major different minor", "1.99", true},
+		{"different major", "2.0", false},
+		{"no dot", "1", false},
+		{"empty string", "", false},
+		{"major only with dot", "1.", true},
+		{"three part version", "1.2.3", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := VersionCompatible(tt.version); got != tt.want {
+				t.Errorf("VersionCompatible(%q) = %v, want %v", tt.version, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestSessionInfoRoundTrip(t *testing.T) {
 	session := SessionInfo{
 		ID: "a3f2b1c9", Name: "fix-auth-bug", RepoPath: "/home/user/repo",
