@@ -87,7 +87,7 @@ func runAttachByID(c *client.Client, sessionID string) error {
 	}
 
 	ctx := context.Background()
-	prefixByte := byte(0x02) // ctrl+b
+	prefixByte := parsePrefixKey(cfg.Keybindings.Prefix)
 
 	for {
 		result := c.RunPassthrough(ctx, prefixByte)
