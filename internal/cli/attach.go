@@ -136,6 +136,7 @@ func runAttachByID(c *client.Client, sessionID string) error {
 
 			overlayResult := client.RunOverlay(list.Sessions, previewFetcher())
 			if overlayResult == nil {
+				restoreScreen(sessionID)
 				nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
 				nc.ReadControlResponse()
 				c = nc
@@ -144,11 +145,13 @@ func runAttachByID(c *client.Client, sessionID string) error {
 			if overlayResult.Action == "delete" {
 				nc.SendControl("delete", protocol.DeleteMsg{SessionID: overlayResult.SessionID})
 				nc.ReadControlResponse()
+				restoreScreen(sessionID)
 				nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
 				nc.ReadControlResponse()
 				c = nc
 				continue
 			}
+			restoreScreen(overlayResult.SessionID)
 			nc.SendControl("attach", protocol.AttachMsg{SessionID: overlayResult.SessionID})
 			nc.ReadControlResponse()
 			sessionID = overlayResult.SessionID
@@ -238,6 +241,11 @@ func runAttachByID(c *client.Client, sessionID string) error {
 			return nil
 		}
 	}
+}
+
+func restoreScreen(sessionID string) {
+	snap := client.FetchScreenSnapshot(cfg, paths, cfgFile, sessionID)
+	client.WriteScreenRestore(snap)
 }
 
 func previewFetcher() func(string) string {
