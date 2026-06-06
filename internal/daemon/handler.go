@@ -139,11 +139,11 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				sess, _ := sm.Get(a.SessionID)
 				sendControl("attached", toSessionInfo(sess))
 
+				ptySess.Attach(attachedDataWriter)
+
 				if tail, err := ptySess.Scrollback.Tail(300); err == nil && len(tail) > 0 {
 					_ = writer.WriteFrame(protocol.ChannelData, tail)
 				}
-
-				ptySess.Attach(attachedDataWriter)
 
 			case "detach":
 				if attachedSessionID != "" {
@@ -356,6 +356,9 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 						}
 					}
 				}()
+				// The goroutine above owns the reader — returning prevents
+				// the outer loop from racing on ReadFrame.
+				return
 
 			case "msg_ack":
 				var m protocol.MsgAckMsg

@@ -302,9 +302,9 @@ func (sm *SessionManager) watchSession(id string, sess *grpty.Session) {
 	<-sess.Done()
 
 	sm.mu.Lock()
-	defer sm.mu.Unlock()
-
+	var name string
 	if s, ok := sm.state.Sessions[id]; ok {
+		name = s.Name
 		exitCode := sess.ExitCode()
 		s.Status = StatusStopped
 		s.ExitCode = &exitCode
@@ -313,8 +313,10 @@ func (sm *SessionManager) watchSession(id string, sess *grpty.Session) {
 			sm.log.Error("failed to save state after session exit", "id", id, "err", err)
 		}
 	}
+	sm.mu.Unlock()
 
 	sm.log.Info("session exited", "id", id, "exit_code", sess.ExitCode())
+	sm.onAgentStatusChange(id, name, "running", "stopped")
 }
 
 // Resume restarts a stopped session using the agent's resume_args.
@@ -415,7 +417,23 @@ func (sm *SessionManager) Delete(id string) error {
 		delete(sm.attachedClients, id)
 	}
 
-	if ptySess, ok := sm.sessions[id]; ok {
+	// Snapshot PTY session and remove from map under the lock so no concurrent
+	// access is possible, then release the lock before blocking waits.
+	ptySess, hasPTY := sm.sessions[id]
+	if hasPTY {
+		delete(sm.sessions, id)
+	}
+
+	repoPath := sessState.RepoPath
+	worktreePath := sessState.WorktreePath
+	branch := sessState.Branch
+
+	delete(sm.state.Sessions, id)
+	err := sm.saveState()
+	sm.mu.Unlock()
+
+	// Blocking operations outside the lock.
+	if hasPTY {
 		ptySess.Detach()
 		if !ptySess.Exited() {
 			_ = ptySess.Kill()
@@ -426,19 +444,14 @@ func (sm *SessionManager) Delete(id string) error {
 			}
 		}
 		ptySess.Close()
-		delete(sm.sessions, id)
 	}
 
-	if sessState.RepoPath != "" {
-		_ = git.TeardownSession(sessState.RepoPath, sessState.WorktreePath, sessState.Branch)
-	} else if sessState.WorktreePath != "" {
-		_ = os.RemoveAll(sessState.WorktreePath)
+	if repoPath != "" {
+		_ = git.TeardownSession(repoPath, worktreePath, branch)
+	} else if worktreePath != "" {
+		_ = os.RemoveAll(worktreePath)
 	}
 	_ = os.Remove(filepath.Join(sm.paths.LogDir, id+".log"))
-
-	delete(sm.state.Sessions, id)
-	err := sm.saveState()
-	sm.mu.Unlock()
 
 	if hasClient {
 		ac.kick()
@@ -537,21 +550,29 @@ func (sm *SessionManager) FindByName(name string) (SessionState, bool) {
 // StopAll gracefully terminates all running sessions.
 func (sm *SessionManager) StopAll(ctx context.Context) {
 	sm.mu.Lock()
-	defer sm.mu.Unlock()
-
+	type snapshot struct {
+		id   string
+		sess *grpty.Session
+	}
+	sessions := make([]snapshot, 0, len(sm.sessions))
 	for id, sess := range sm.sessions {
-		if !sess.Exited() {
-			sm.log.Info("stopping session", "id", id)
-			_ = sess.Kill()
+		sessions = append(sessions, snapshot{id, sess})
+	}
+	sm.mu.Unlock()
+
+	for _, s := range sessions {
+		if !s.sess.Exited() {
+			sm.log.Info("stopping session", "id", s.id)
+			_ = s.sess.Kill()
 		}
 	}
 
-	for id, sess := range sm.sessions {
+	for _, s := range sessions {
 		select {
-		case <-sess.Done():
+		case <-s.sess.Done():
 		case <-time.After(5 * time.Second):
-			sm.log.Warn("force killing session", "id", id)
-			_ = sess.ForceKill()
+			sm.log.Warn("force killing session", "id", s.id)
+			_ = s.sess.ForceKill()
 		}
 	}
 }
@@ -576,7 +597,9 @@ func (sm *SessionManager) detectAgentStatuses() {
 	sm.mu.RLock()
 	type target struct {
 		id           string
+		name         string
 		agent        string
+		prevStatus   string
 		pty          *grpty.Session
 		worktreePath string
 		baseBranch   string
@@ -589,7 +612,7 @@ func (sm *SessionManager) detectAgentStatuses() {
 		}
 		if ptySess, ok := sm.sessions[id]; ok {
 			targets = append(targets, target{
-				id: id, agent: s.Agent, pty: ptySess,
+				id: id, name: s.Name, agent: s.Agent, prevStatus: s.AgentStatus, pty: ptySess,
 				worktreePath: s.WorktreePath, baseBranch: s.BaseBranch, repoPath: s.RepoPath,
 			})
 		}
@@ -618,6 +641,10 @@ func (sm *SessionManager) detectAgentStatuses() {
 					unpushed = n
 				}
 			}
+		}
+
+		if status != t.prevStatus {
+			sm.onAgentStatusChange(t.id, t.name, t.prevStatus, status)
 		}
 
 		sm.mu.Lock()

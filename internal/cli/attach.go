@@ -109,8 +109,8 @@ func runAttachByID(c *client.Client, sessionID string) error {
 	ctx := context.Background()
 	keys := client.PassthroughKeys{
 		Prefix:      parsePrefixKey(cfg.Keybindings.Prefix),
-		NextSession: cfg.Keybindings.NextSession[0],
-		PrevSession: cfg.Keybindings.PrevSession[0],
+		NextSession: parseKeyByte(cfg.Keybindings.NextSession),
+		PrevSession: parseKeyByte(cfg.Keybindings.PrevSession),
 	}
 
 	for {

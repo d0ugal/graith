@@ -2,6 +2,13 @@ package cli
 
 import "strings"
 
+func parseKeyByte(s string) byte {
+	if len(s) == 0 {
+		return 0
+	}
+	return s[0]
+}
+
 func parsePrefixKey(s string) byte {
 	s = strings.TrimSpace(strings.ToLower(s))
 	if strings.HasPrefix(s, "ctrl+") && len(s) == 6 {

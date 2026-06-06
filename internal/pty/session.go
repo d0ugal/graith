@@ -229,6 +229,7 @@ func (s *Session) ForceKill() error {
 
 func (s *Session) Close() {
 	_ = s.Ptmx.Close()
+	<-s.readDone
 	_ = s.Scrollback.Close()
 }
 
