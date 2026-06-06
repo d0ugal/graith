@@ -13,7 +13,6 @@ func TestLoadConfig(t *testing.T) {
 default_agent = "claude"
 github_username = "d0ugal"
 branch_prefix = "{username}/graith"
-scrollback_limit = "100MB"
 fetch_on_create = true
 
 [keybindings]
