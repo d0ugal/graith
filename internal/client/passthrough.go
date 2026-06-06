@@ -2,10 +2,11 @@ package client
 
 import (
 	"context"
+	"io"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
-	"time"
 
 	"github.com/dougalmatthews/graith/internal/protocol"
 	"golang.org/x/term"
@@ -33,17 +34,12 @@ func (c *Client) RunPassthrough(ctx context.Context, prefixByte byte) Passthroug
 	signal.Notify(sigCh, syscall.SIGWINCH)
 	defer signal.Stop(sigCh)
 
-	innerCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	result := ResultQuit
-	readerDone := make(chan struct{})
-
-	// SIGWINCH handler
 	go func() {
+		ctx2, cancel := context.WithCancel(ctx)
+		defer cancel()
 		for {
 			select {
-			case <-innerCtx.Done():
+			case <-ctx2.Done():
 				return
 			case <-sigCh:
 				if w, h, err := term.GetSize(fd); err == nil {
@@ -56,33 +52,86 @@ func (c *Client) RunPassthrough(ctx context.Context, prefixByte byte) Passthroug
 		}
 	}()
 
-	// Read from daemon, write to stdout
+	return c.runPassthroughLoop(ctx, prefixByte, os.Stdin, os.Stdout)
+}
+
+// frameDemux reads frames from the connection and dispatches them to
+// channels. It provides exclusive read access — no other goroutine
+// should call ReadFrame while a demux is running.
+type frameDemux struct {
+	dataCh    chan []byte
+	controlCh chan protocol.Envelope
+	errCh     chan error
+	done      chan struct{}
+}
+
+func (c *Client) startDemux() *frameDemux {
+	d := &frameDemux{
+		dataCh:    make(chan []byte, 64),
+		controlCh: make(chan protocol.Envelope, 4),
+		errCh:     make(chan error, 1),
+		done:      make(chan struct{}),
+	}
 	go func() {
-		defer close(readerDone)
-		defer cancel()
+		defer close(d.done)
 		for {
 			frame, err := c.ReadFrame()
 			if err != nil {
-				if innerCtx.Err() == nil {
-					result = ResultDisconnected
+				select {
+				case d.errCh <- err:
+				default:
 				}
 				return
 			}
+			switch frame.Channel {
+			case protocol.ChannelData:
+				d.dataCh <- frame.Payload
+			case protocol.ChannelControl:
+				msg, _ := protocol.DecodeControl(frame.Payload)
+				d.controlCh <- msg
+			}
+		}
+	}()
+	return d
+}
+
+// drain stops the demux by setting a read deadline on the connection,
+// waits for the reader goroutine to exit, then clears the deadline.
+func (c *Client) drainDemux(d *frameDemux) {
+	c.conn.SetReadDeadline(shortDeadline())
+	<-d.done
+	c.conn.SetReadDeadline(noDeadline())
+}
+
+func (c *Client) runPassthroughLoop(ctx context.Context, prefixByte byte, stdin io.Reader, stdout io.Writer) PassthroughResult {
+	innerCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	result := ResultQuit
+	var resultOnce sync.Once
+	setResult := func(r PassthroughResult) {
+		resultOnce.Do(func() { result = r })
+	}
+
+	demux := c.startDemux()
+
+	// Read from daemon via demux, write to stdout
+	go func() {
+		defer cancel()
+		for {
 			select {
 			case <-innerCtx.Done():
 				return
-			default:
-			}
-
-			switch frame.Channel {
-			case protocol.ChannelData:
-				os.Stdout.Write(frame.Payload)
-			case protocol.ChannelControl:
-				msg, _ := protocol.DecodeControl(frame.Payload)
+			case data := <-demux.dataCh:
+				stdout.Write(data)
+			case msg := <-demux.controlCh:
 				if msg.Type == "detached" {
-					result = ResultDetached
+					setResult(ResultDetached)
 					return
 				}
+			case <-demux.errCh:
+				setResult(ResultDisconnected)
+				return
 			}
 		}
 	}()
@@ -93,7 +142,7 @@ func (c *Client) RunPassthrough(ctx context.Context, prefixByte byte) Passthroug
 		buf := make([]byte, 4096)
 		prefixSeen := false
 		for {
-			n, err := os.Stdin.Read(buf)
+			n, err := stdin.Read(buf)
 			if err != nil {
 				return
 			}
@@ -111,13 +160,13 @@ func (c *Client) RunPassthrough(ctx context.Context, prefixByte byte) Passthroug
 					case prefixByte:
 						c.SendData([]byte{prefixByte})
 					case 'd':
-						result = ResultDetached
+						setResult(ResultDetached)
 						return
 					case 'w', 0:
-						result = ResultOverlay
+						setResult(ResultOverlay)
 						return
 					case 's':
-						result = ResultShell
+						setResult(ResultShell)
 						return
 					default:
 						c.SendData([]byte{prefixByte, buf[i]})
@@ -141,12 +190,7 @@ func (c *Client) RunPassthrough(ctx context.Context, prefixByte byte) Passthroug
 	}()
 
 	<-innerCtx.Done()
-
-	// Ensure the reader goroutine is stopped before returning, so it
-	// can't race with subsequent ReadFrame/ReadControlResponse calls.
-	c.SetReadDeadline(time.Now())
-	<-readerDone
-	c.ClearReadDeadline()
+	c.drainDemux(demux)
 
 	return result
 }

@@ -77,13 +77,8 @@ func (c *Client) ReadFrame() (protocol.Frame, error) {
 	return c.reader.ReadFrame()
 }
 
-func (c *Client) SetReadDeadline(t time.Time) {
-	c.conn.SetReadDeadline(t)
-}
-
-func (c *Client) ClearReadDeadline() {
-	c.conn.SetReadDeadline(time.Time{})
-}
+func shortDeadline() time.Time { return time.Now().Add(time.Millisecond) }
+func noDeadline() time.Time    { return time.Time{} }
 
 func (c *Client) ReadControlResponse() (protocol.Envelope, error) {
 	frame, err := c.reader.ReadFrame()
