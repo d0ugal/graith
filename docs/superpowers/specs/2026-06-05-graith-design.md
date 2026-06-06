@@ -69,23 +69,30 @@ Session {
     repo_path:         string      // absolute path to the original git repo
     repo_name:         string      // derived from repo_path for display grouping
     worktree_path:     string      // ~/.local/share/graith/worktrees/<sha256-of-repo-path>/<id>/
-    branch:            string      // e.g. "d0ugal/graith/fix-auth-bug-a3f2b1"
+    branch:            string      // e.g. "d0ugal/graith/fix-auth-bug-a3f2b1c9"
     agent:             string      // agent key from config (e.g. "claude")
     agent_session_id:  string?     // the agent's own session/conversation ID
     status:            enum        // running | stopped | errored
     exit_code:         int?        // set when agent process exits
     pid:               int?        // agent process PID when running
     created_at:        timestamp
+    last_attached_at:  timestamp?  // updated on each attach, used for MRU ordering
     attached_client:   string?     // client ID, null if no client attached
 }
 ```
 
+### Session Names
+
+Session names must be globally unique. The random suffix on creation ensures this. The CLI resolves user input to session IDs: exact name match first, then prefix match, then substring. If ambiguous, show a picker. The protocol always uses `session_id`, never names — name resolution happens in the client.
+
 ### State Persistence
 
 - In-memory map of `id -> Session` in the daemon
-- Persisted to `~/.local/share/graith/state.json` on every mutation
+- Persisted to `~/.local/share/graith/state.json` on every mutation via atomic write (write to temp file, then rename)
+- PID file at `$XDG_RUNTIME_DIR/graith/graith.pid` prevents duplicate daemons
 - On daemon startup, reconcile state vs reality: check PIDs, verify worktree paths, update statuses
 - After daemon crash, PTYs are lost — sessions are marked "stopped", user can resume
+- If state file is corrupted (invalid JSON), daemon starts with empty state and logs a warning
 
 ### Scrollback
 
@@ -101,7 +108,13 @@ Session {
 2. Creates Unix socket at `$XDG_RUNTIME_DIR/graith/graith.sock` with `0700` permissions
 3. Loads and reconciles state from disk
 4. Stays alive indefinitely (even with zero sessions)
-5. Manually stopped with `gr daemon stop`
+5. Manually stopped with `gr daemon stop`:
+   - Warns if any sessions have unpushed work
+   - Sends SIGTERM to all running agent processes
+   - Waits up to 5 seconds for graceful shutdown, then SIGKILL
+   - Disconnects all attached clients with a `detached` reason of `"daemon_shutdown"`
+   - Removes socket and PID file
+   - Does NOT remove worktrees or branches (they persist for recovery)
 
 ### Session Operations
 
@@ -110,7 +123,7 @@ All mutating operations are serialized through a single goroutine (channel-based
 - **Create**: validate git repo → fetch origin → discover base branch → create branch → create worktree → allocate PTY → spawn agent → write state
 - **Delete**: confirm with client → kill agent (if alive) → remove worktree → remove branch → remove scrollback log → write state
 - **Rename**: update display name only (stable ID and worktree path unchanged) → write state
-- **Resume**: for stopped sessions, re-launch agent in the same worktree using resume args if agent_session_id is known
+- **Resume**: for stopped sessions, re-launch agent in the same worktree. Uses `resume_args` from config if defined (these may or may not use `{agent_session_id}` — e.g. codex uses `resume --last` which doesn't need it). Falls back to normal `command` + `args` if no `resume_args` configured.
 
 Create rolls back on any step failure — no partial state is ever persisted.
 
@@ -133,7 +146,7 @@ All protocol messages (create, delete, rename, attach, detach, resize) are logge
 ### Connection Flow
 
 1. Connect to daemon socket
-2. Handshake: `{ version, terminal_size, client_id }`
+2. Handshake: `{ version, terminal_size, client_id, cwd }` (cwd used for repo-aware session list ordering)
 3. Daemon checks version compatibility, rejects on mismatch
 4. If session specified → attach; otherwise → request session list, enter overlay mode
 
@@ -143,7 +156,7 @@ All protocol messages (create, delete, rename, attach, detach, resize) are logge
 - Terminal in raw mode
 - Input: stdin → prefix key scan → forward to daemon or enter overlay
 - Output: daemon data channel → stdout (direct byte forwarding)
-- Mouse scroll: intercepted for scrollback navigation
+- Mouse scroll: if the agent has enabled mouse reporting (e.g. TUI apps), wheel events pass through to the agent. Otherwise, graith intercepts them for scrollback navigation.
 - Zero rendering overhead
 
 **Overlay mode** (triggered by prefix key):
@@ -159,7 +172,7 @@ read byte from stdin
 │   ├─ Read next byte (with ~500ms timeout):
 │   │   ├─ prefix key again → send one prefix key to agent (escape hatch)
 │   │   ├─ known action key → execute action
-│   │   ├─ timeout → open overlay (prefix alone = session list)
+│   │   ├─ timeout → open overlay (prefix alone = session list, same as ctrl+b w)
 │   │   └─ unknown key → discard
 └─ Not prefix key → forward to daemon
 ```
@@ -184,12 +197,12 @@ Bracketed paste detection: when paste mode is active (ESC[200~ ... ESC[201~), pr
 - Channel `0x00` = control (JSON messages)
 - Channel `0x01` = data (raw PTY bytes)
 
-5 bytes overhead per frame. Single socket connection per client.
+5 bytes overhead per frame. Single socket connection per client — control and data are logical channels multiplexed over one connection via the channel byte in the frame header.
 
 ### Control Messages
 
 Client → Daemon:
-- `handshake` — version, client_id, terminal_size
+- `handshake` — version, client_id, terminal_size, cwd
 - `list` — request session list
 - `create` — name, agent, repo_path; base branch auto-discovered
 - `attach` — session_id
@@ -233,7 +246,7 @@ Per-client buffer of 1MB. If full, daemon disconnects the slow client with `deta
    - else check remote HEAD
    - else fail with error asking user to specify `--base`
 4. Generate session ID (short random hash)
-5. Create branch: `{username}/graith/{name}-{id}` (e.g. `d0ugal/graith/fix-auth-bug-a3f2b1`)
+5. Create branch: `{username}/graith/{name}-{id}` (e.g. `d0ugal/graith/fix-auth-bug-a3f2b1c9`)
 6. Create worktree at `~/.local/share/graith/worktrees/<sha256-of-repo-path>/<id>/`
 7. Launch agent process in the worktree
 
@@ -265,14 +278,14 @@ Overlay panel triggered by prefix key. Sessions grouped by repo:
 
 ```
  graith
-   fix-auth-bug-a3f2      ● running
-   add-tests-b1c9         ● running
+   fix-auth-bug-a3f2b1c9      ● running
+   add-tests-b1c9e4d2         ● running
 
  grafana
-   dashboard-perf-x8d2    ○ stopped
+   dashboard-perf-x8d2f3a7    ○ stopped
 
  alerting-service
-   fix-flaky-test-k4e1    ● running
+   fix-flaky-test-k4e17b2a    ● running
 ```
 
 Context-aware: if invoked from within a repo, that repo's group is highlighted/expanded by default.
@@ -290,7 +303,7 @@ Keybindings within the overlay:
 
 - **Disk-persisted** with configurable cap (default 100MB per session)
 - **Mouse scroll** works naturally: scroll up enters scrollback, scroll to bottom resumes live
-- **Search**: `ctrl+b /` opens incremental search with match highlighting, regex support
+- **Search**: `ctrl+b /` opens incremental search with match highlighting, regex support. Search operates on ANSI-stripped text for matching, but displays results with original formatting preserved.
 - **Keyboard navigation**: `ctrl+b [` enters scroll mode (arrows, page up/down, Home/End)
 - **External access**: log files at `~/.local/share/graith/logs/<id>.log` can be grepped directly
 
@@ -393,7 +406,7 @@ GLOBAL FLAGS:
 
 ### Behavior Details
 
-- `gr` (no args): auto-start daemon, show session list. Scoped to current repo if inside one.
+- `gr` (no args): auto-start daemon, show session list. Shows all repos but highlights/defaults to current repo if inside one.
 - `gr new`: must be inside a git repo. Auto-discovers base branch, fetches, creates worktree, launches agent, attaches.
 - `gr attach` (no name): most recently used session.
 - `gr attach fix-auth`: fuzzy match. If ambiguous, show picker.
