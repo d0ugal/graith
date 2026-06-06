@@ -180,6 +180,15 @@ type SessionUpdateMsg struct {
 	ExitCode  *int   `json:"exit_code,omitempty"`
 }
 
+type ScreenPreviewMsg struct {
+	SessionID string `json:"session_id"`
+}
+
+type ScreenPreviewResponseMsg struct {
+	SessionID string `json:"session_id"`
+	Preview   string `json:"preview"`
+}
+
 type ScreenSnapshotMsg struct {
 	SessionID string `json:"session_id"`
 }

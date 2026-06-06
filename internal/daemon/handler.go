@@ -417,6 +417,22 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					}
 				}
 
+			case "screen_preview":
+				var sp protocol.ScreenPreviewMsg
+				if err := protocol.DecodePayload(msg, &sp); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid screen_preview message"})
+					continue
+				}
+				ptySess, ok := sm.GetPTY(sp.SessionID)
+				if !ok {
+					sendControl("error", protocol.ErrorMsg{Message: "session not found"})
+					continue
+				}
+				sendControl("screen_preview_response", protocol.ScreenPreviewResponseMsg{
+					SessionID: sp.SessionID,
+					Preview:   ptySess.ScreenPreview(),
+				})
+
 			case "screen_snapshot":
 				var ss protocol.ScreenSnapshotMsg
 				if err := protocol.DecodePayload(msg, &ss); err != nil {
