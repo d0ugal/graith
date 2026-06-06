@@ -33,3 +33,5 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Used by the brews publisher to push the formula to d0ugal/homebrew-tap.
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
