@@ -267,7 +267,9 @@ func (sm *SessionManager) watchSession(id string, sess *grpty.Session) {
 		s.Status = StatusStopped
 		s.ExitCode = &exitCode
 		s.PID = 0
-		_ = sm.saveState()
+		if err := sm.saveState(); err != nil {
+			sm.log.Error("failed to save state after session exit", "id", id, "err", err)
+		}
 	}
 
 	sm.log.Info("session exited", "id", id, "exit_code", sess.ExitCode())

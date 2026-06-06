@@ -24,8 +24,12 @@ var listCmd = &cobra.Command{
 		}
 		defer c.Close()
 
-		c.Handshake()
-		c.ReadControlResponse()
+		if err := c.Handshake(); err != nil {
+			return err
+		}
+		if _, err := c.ReadControlResponse(); err != nil {
+			return err
+		}
 
 		c.SendControl("list", struct{}{})
 		resp, err := c.ReadControlResponse()
@@ -34,7 +38,9 @@ var listCmd = &cobra.Command{
 		}
 
 		var list protocol.SessionListMsg
-		protocol.DecodePayload(resp, &list)
+		if err := protocol.DecodePayload(resp, &list); err != nil {
+			return err
+		}
 
 		if listRepo != "" {
 			filtered := list.Sessions[:0]

@@ -46,7 +46,9 @@ func runAttach(cmd *cobra.Command, name string) error {
 	}
 
 	var list protocol.SessionListMsg
-	protocol.DecodePayload(resp, &list)
+	if err := protocol.DecodePayload(resp, &list); err != nil {
+		return err
+	}
 
 	if len(list.Sessions) == 0 {
 		out.Print("No sessions. Create one with: gr new <name>\n")
