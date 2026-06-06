@@ -186,19 +186,28 @@ func (s *MsgStore) Read(stream, subscriber string, onlyUnread bool, threadID str
 	return msgs, rows.Err()
 }
 
-func (s *MsgStore) Ack(stream, subscriber string) error {
+func (s *MsgStore) Ack(stream, subscriber string, upToSeq int64) error {
 	_, err := s.db.Exec(
 		`INSERT INTO cursors (subscriber, stream, ack_seq, updated_at)
-		 VALUES (?, ?, (SELECT COALESCE(MAX(seq), 0) FROM messages WHERE stream = ?), ?)
+		 VALUES (?, ?, ?, ?)
 		 ON CONFLICT(subscriber, stream) DO UPDATE SET
-		   ack_seq = excluded.ack_seq,
+		   ack_seq = MAX(cursors.ack_seq, excluded.ack_seq),
 		   updated_at = excluded.updated_at`,
-		subscriber, stream, stream, time.Now().UTC().Format(time.RFC3339Nano),
+		subscriber, stream, upToSeq, time.Now().UTC().Format(time.RFC3339Nano),
 	)
 	if err != nil {
 		return fmt.Errorf("ack: %w", err)
 	}
 	return nil
+}
+
+func (s *MsgStore) AckLatest(stream, subscriber string) error {
+	var maxSeq int64
+	err := s.db.QueryRow("SELECT COALESCE(MAX(seq), 0) FROM messages WHERE stream = ?", stream).Scan(&maxSeq)
+	if err != nil {
+		return fmt.Errorf("ack latest: %w", err)
+	}
+	return s.Ack(stream, subscriber, maxSeq)
 }
 
 func (s *MsgStore) ListStreams(subscriber string) ([]StreamInfo, error) {

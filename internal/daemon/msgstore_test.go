@@ -61,7 +61,7 @@ func TestReadUnackedOnly(t *testing.T) {
 	s.Publish("topic", "s1", "a", "msg1", "", "")
 	s.Publish("topic", "s1", "a", "msg2", "", "")
 
-	if err := s.Ack("topic", "reader1"); err != nil {
+	if err := s.AckLatest("topic", "reader1"); err != nil {
 		t.Fatalf("Ack: %v", err)
 	}
 
@@ -84,7 +84,7 @@ func TestReadAllIgnoresCursor(t *testing.T) {
 
 	s.Publish("topic", "s1", "a", "msg1", "", "")
 	s.Publish("topic", "s1", "a", "msg2", "", "")
-	s.Ack("topic", "reader1")
+	s.AckLatest("topic", "reader1")
 
 	msgs, err := s.Read("topic", "reader1", false, "")
 	if err != nil {
@@ -120,7 +120,7 @@ func TestListStreams(t *testing.T) {
 	s.Publish("alpha", "s1", "a", "m1", "", "")
 	s.Publish("alpha", "s1", "a", "m2", "", "")
 	s.Publish("beta", "s1", "a", "m3", "", "")
-	s.Ack("alpha", "reader1")
+	s.AckLatest("alpha", "reader1")
 
 	streams, err := s.ListStreams("reader1")
 	if err != nil {
