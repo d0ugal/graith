@@ -1,6 +1,7 @@
 package pty
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -34,5 +35,26 @@ func TestScrollbackTail(t *testing.T) {
 	}
 	if string(tail) != "line2\nline3\n" {
 		t.Errorf("tail = %q", tail)
+	}
+}
+
+func TestScrollbackTailLargeFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "scroll.log")
+	sb, err := NewScrollback(path, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sb.Close()
+
+	for i := range 2000 {
+		sb.Write([]byte(fmt.Sprintf("line %04d\n", i)))
+	}
+	tail, err := sb.Tail(3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "line 1997\nline 1998\nline 1999\n"
+	if string(tail) != want {
+		t.Errorf("tail = %q, want %q", tail, want)
 	}
 }
