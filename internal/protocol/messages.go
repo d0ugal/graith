@@ -58,18 +58,19 @@ type HandshakeMsg struct {
 }
 
 type CreateMsg struct {
-	Name            string `json:"name"`
-	ParentID        string `json:"parent_id,omitempty"`
-	Agent           string `json:"agent"`
-	RepoPath        string `json:"repo_path"`
-	Base            string `json:"base,omitempty"`
-	Prompt          string `json:"prompt,omitempty"`
-	Model           string `json:"model,omitempty"`
-	NoRepo          bool   `json:"no_repo,omitempty"`
-	ShareWorktree   string `json:"share_worktree,omitempty"`
-	AgentHooks      bool   `json:"agent_hooks,omitempty"`
-	InPlace         bool   `json:"in_place,omitempty"`
-	AllowConcurrent bool   `json:"allow_concurrent,omitempty"`
+	Name                string `json:"name"`
+	ParentID            string `json:"parent_id,omitempty"`
+	Agent               string `json:"agent"`
+	RepoPath            string `json:"repo_path"`
+	Base                string `json:"base,omitempty"`
+	Prompt              string `json:"prompt,omitempty"`
+	Model               string `json:"model,omitempty"`
+	NoRepo              bool   `json:"no_repo,omitempty"`
+	ShareWorktree       string `json:"share_worktree,omitempty"`
+	AgentHooks          bool   `json:"agent_hooks,omitempty"`
+	InPlace             bool   `json:"in_place,omitempty"`
+	AllowConcurrent     bool   `json:"allow_concurrent,omitempty"`
+	SkipModelValidation bool   `json:"skip_model_validation,omitempty"`
 }
 
 type ForkMsg struct {
