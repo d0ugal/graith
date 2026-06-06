@@ -106,6 +106,9 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch string, r
 	if username == "" {
 		username, _ = git.DiscoverGitHubUsername(repoRoot)
 	}
+	if username == "" {
+		username = "user"
+	}
 
 	branchPrefix, _ := config.Expand(sm.cfg.BranchPrefix, config.TemplateVars{Username: username})
 	branchName := fmt.Sprintf("%s/%s-%s", branchPrefix, name, id)
