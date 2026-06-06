@@ -317,9 +317,6 @@ func (m overlayModel) fetchPreviewCmd() tea.Cmd {
 		return nil
 	}
 	sid := item.info.ID
-	if sid == m.previewSessionID {
-		return nil
-	}
 	fetch := m.fetchPreview
 	return func() tea.Msg {
 		return previewMsg{sessionID: sid, content: fetch(sid)}
@@ -330,11 +327,12 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case previewMsg:
 		// Guard against stale fetches: only apply if the result
-		// matches the currently selected session. Don't cache empty
-		// results so the fetch retries on the next selection change.
-		if item, ok := m.list.SelectedItem().(sessionItem); ok && item.info.ID == msg.sessionID && strings.TrimSpace(msg.content) != "" {
-			m.previewSessionID = msg.sessionID
+		// matches the currently selected session.
+		if item, ok := m.list.SelectedItem().(sessionItem); ok && item.info.ID == msg.sessionID {
 			m.previewContent = msg.content
+			if strings.TrimSpace(msg.content) != "" {
+				m.previewSessionID = msg.sessionID
+			}
 		}
 		return m, nil
 
