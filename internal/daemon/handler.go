@@ -239,6 +239,92 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					}
 				}
 
+			case "msg_pub":
+				var m protocol.MsgPubMsg
+				if err := protocol.DecodePayload(msg, &m); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid msg_pub message"})
+					continue
+				}
+				published, err := sm.messages.Publish(m.Stream, m.SenderID, m.SenderName, m.Body, m.ThreadID, m.ReplyTo)
+				if err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+				} else {
+					sendControl("msg_published", published)
+				}
+
+			case "msg_sub":
+				var m protocol.MsgSubMsg
+				if err := protocol.DecodePayload(msg, &m); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid msg_sub message"})
+					continue
+				}
+				msgs, err := sm.messages.Read(m.Stream, m.Subscriber, m.OnlyUnread, m.ThreadID)
+				if err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+					continue
+				}
+				for _, msg := range msgs {
+					sendControl("msg_message", msg)
+				}
+				if m.Ack && m.Subscriber != "" && len(msgs) > 0 {
+					sm.messages.Ack(m.Stream, m.Subscriber)
+				}
+				if !m.Wait && !m.Follow {
+					sendControl("msg_done", struct{}{})
+					continue
+				}
+				if m.Wait && len(msgs) > 0 {
+					sendControl("msg_done", struct{}{})
+					continue
+				}
+				sub, unsub := sm.messages.Subscribe(m.Stream)
+				sendControl("msg_following", struct{}{})
+				func() {
+					defer unsub()
+					for {
+						select {
+						case tmsg := <-sub:
+							sendControl("msg_message", tmsg)
+							if m.Ack && m.Subscriber != "" {
+								sm.messages.Ack(m.Stream, m.Subscriber)
+							}
+							if m.Wait {
+								sendControl("msg_done", struct{}{})
+								return
+							}
+						case <-ctx.Done():
+							return
+						}
+					}
+				}()
+
+			case "msg_ack":
+				var m protocol.MsgAckMsg
+				if err := protocol.DecodePayload(msg, &m); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid msg_ack message"})
+					continue
+				}
+				if err := sm.messages.Ack(m.Stream, m.Subscriber); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+				} else {
+					sendControl("msg_acked", struct{}{})
+				}
+
+			case "msg_topics":
+				var m protocol.MsgTopicsMsg
+				if err := protocol.DecodePayload(msg, &m); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid msg_topics message"})
+					continue
+				}
+				streams, err := sm.messages.ListStreams(m.Subscriber)
+				if err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+				} else {
+					sendControl("msg_topics_list", struct {
+						Streams []StreamInfo `json:"streams"`
+					}{streams})
+				}
+
 			case "resize":
 				var r protocol.ResizeMsg
 				if err := protocol.DecodePayload(msg, &r); err != nil {

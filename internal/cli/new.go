@@ -15,6 +15,7 @@ var (
 	newBackground bool
 	newPrompt     string
 	newPromptFile string
+	newRepo       string
 )
 
 var newCmd = &cobra.Command{
@@ -24,7 +25,10 @@ var newCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 
-		cwd, _ := os.Getwd()
+		repoPath := newRepo
+		if repoPath == "" {
+			repoPath, _ = os.Getwd()
+		}
 		agent := newAgent
 		if agent == "" {
 			agent = cfg.DefaultAgent
@@ -48,7 +52,7 @@ var newCmd = &cobra.Command{
 		c.SendControl("create", protocol.CreateMsg{
 			Name:     name,
 			Agent:    agent,
-			RepoPath: cwd,
+			RepoPath: repoPath,
 			Base:     newBase,
 			Prompt:   prompt,
 		})
@@ -88,4 +92,5 @@ func init() {
 	newCmd.Flags().BoolVar(&newBackground, "background", false, "create without attaching")
 	newCmd.Flags().StringVarP(&newPrompt, "prompt", "p", "", "initial prompt for the agent")
 	newCmd.Flags().StringVar(&newPromptFile, "prompt-file", "", "read initial prompt from file")
+	newCmd.Flags().StringVarP(&newRepo, "repo", "C", "", "path to git repo (default: cwd)")
 }

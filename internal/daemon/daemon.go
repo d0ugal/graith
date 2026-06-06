@@ -35,6 +35,7 @@ type SessionManager struct {
 	log             *slog.Logger
 	configFile      string
 	upgradeCh       chan struct{}
+	messages        *MsgStore
 }
 
 // NewSessionManager creates a SessionManager with the given config and paths.
@@ -212,12 +213,20 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 
 	logPath := filepath.Join(sm.paths.LogDir, id+".log")
 
+	env := make(map[string]string, len(agent.Env)+3)
+	for k, v := range agent.Env {
+		env[k] = v
+	}
+	env["GRAITH_SESSION_ID"] = id
+	env["GRAITH_SESSION_NAME"] = name
+	env["GRAITH_WORKTREE_PATH"] = worktreePath
+
 	ptySess, err := grpty.NewSession(grpty.SessionOpts{
 		ID:         id,
 		Command:    agent.Command,
 		Args:       expandedArgs,
 		Dir:        worktreePath,
-		Env:        agent.Env,
+		Env:        env,
 		Rows:       rows,
 		Cols:       cols,
 		LogPath:    logPath,
@@ -444,6 +453,13 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 	sm := NewSessionManager(cfg, paths, log)
 	sm.configFile = configFile
 	sm.upgradeCh = make(chan struct{}, 1)
+
+	msgStore, err := NewMsgStore(paths.MessagesDB)
+	if err != nil {
+		return fmt.Errorf("open message store: %w", err)
+	}
+	defer msgStore.Close()
+	sm.messages = msgStore
 
 	var l net.Listener
 

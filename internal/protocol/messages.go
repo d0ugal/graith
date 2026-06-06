@@ -94,6 +94,34 @@ type ConfirmResponseMsg struct {
 	Confirmed bool   `json:"confirmed"`
 }
 
+type MsgPubMsg struct {
+	Stream     string `json:"stream"`
+	Body       string `json:"body"`
+	SenderID   string `json:"sender_id,omitempty"`
+	SenderName string `json:"sender_name,omitempty"`
+	ThreadID   string `json:"thread_id,omitempty"`
+	ReplyTo    string `json:"reply_to,omitempty"`
+}
+
+type MsgSubMsg struct {
+	Stream     string `json:"stream"`
+	Subscriber string `json:"subscriber"`
+	OnlyUnread bool   `json:"only_unread"`
+	ThreadID   string `json:"thread_id,omitempty"`
+	Wait       bool   `json:"wait"`
+	Follow     bool   `json:"follow"`
+	Ack        bool   `json:"ack"`
+}
+
+type MsgAckMsg struct {
+	Stream     string `json:"stream"`
+	Subscriber string `json:"subscriber"`
+}
+
+type MsgTopicsMsg struct {
+	Subscriber string `json:"subscriber"`
+}
+
 // Daemon -> Client
 type HandshakeOkMsg struct {
 	Version       string `json:"version"`
