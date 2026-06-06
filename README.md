@@ -2,7 +2,7 @@
 
 A terminal multiplexer for AI coding agent sessions. Manage multiple agents (Claude, Codex, OpenCode, Agy) running in isolated git worktrees, each in its own session that survives terminal closures.
 
-**gr** + **wraith** = **graith** — your invisible army of coding agents, haunting your codebase.
+**graith** (Scots) — *noun:* equipment, tools, gear for a specific trade. *verb:* to make ready, prepare, equip. Your agents, graithed and ready to work.
 
 ## Why
 
