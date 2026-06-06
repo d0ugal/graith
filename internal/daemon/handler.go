@@ -18,6 +18,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 	writer := protocol.NewFrameWriter(conn)
 
 	var attachedSessionID string
+	var clientRows, clientCols uint16 = 24, 80
 
 	sendControl := func(msgType string, payload any) {
 		data, err := protocol.EncodeControl(msgType, payload)
@@ -60,6 +61,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 			case "handshake":
 				var h protocol.HandshakeMsg
 				_ = protocol.DecodePayload(msg, &h)
+				clientCols = h.TerminalSize[0]
+				clientRows = h.TerminalSize[1]
 				sendControl("handshake_ok", protocol.HandshakeOkMsg{Version: protocolVersion})
 				log.Info("client connected", "client_id", h.ClientID, "cwd", h.Cwd)
 
@@ -78,7 +81,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				if agentName == "" {
 					agentName = sm.cfg.DefaultAgent
 				}
-				sess, err := sm.Create(c.Name, agentName, c.RepoPath, c.Base, 24, 80)
+				sess, err := sm.Create(c.Name, agentName, c.RepoPath, c.Base, c.Prompt, clientRows, clientCols)
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 				} else {

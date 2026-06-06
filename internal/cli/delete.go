@@ -13,7 +13,7 @@ var deleteCmd = &cobra.Command{
 	Short: "Delete a session",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		c, err := client.New(cfg, paths)
+		c, err := client.New(cfg, paths, cfgFile)
 		if err != nil {
 			return err
 		}

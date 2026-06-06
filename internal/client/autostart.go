@@ -10,12 +10,12 @@ import (
 	"time"
 )
 
-func EnsureDaemon(sockPath string) (net.Conn, error) {
+func EnsureDaemon(sockPath, configFile string) (net.Conn, error) {
 	if conn, err := net.DialTimeout("unix", sockPath, 500*time.Millisecond); err == nil {
 		return conn, nil
 	}
 
-	if err := startDaemon(); err != nil {
+	if err := startDaemon(configFile); err != nil {
 		return nil, fmt.Errorf("start daemon: %w", err)
 	}
 
@@ -34,7 +34,7 @@ func EnsureDaemon(sockPath string) (net.Conn, error) {
 	}
 }
 
-func startDaemon() error {
+func startDaemon(configFile string) error {
 	self, err := os.Executable()
 	if err != nil {
 		return err
@@ -46,7 +46,11 @@ func startDaemon() error {
 	}
 	defer devNull.Close()
 
-	cmd := exec.Command(self, "daemon", "start")
+	args := []string{"daemon", "start"}
+	if configFile != "" {
+		args = append(args, "--config", configFile)
+	}
+	cmd := exec.Command(self, args...)
 	cmd.Stdin = devNull
 	cmd.Stdout = devNull
 	cmd.Stderr = devNull

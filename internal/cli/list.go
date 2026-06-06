@@ -18,7 +18,7 @@ var listCmd = &cobra.Command{
 	Aliases: []string{"ls"},
 	Short:   "List all sessions",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		c, err := client.New(cfg, paths)
+		c, err := client.New(cfg, paths, cfgFile)
 		if err != nil {
 			return err
 		}

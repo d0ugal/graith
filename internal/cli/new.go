@@ -13,6 +13,7 @@ var (
 	newAgent      string
 	newBase       string
 	newBackground bool
+	newPrompt     string
 )
 
 var newCmd = &cobra.Command{
@@ -28,7 +29,7 @@ var newCmd = &cobra.Command{
 			agent = cfg.DefaultAgent
 		}
 
-		c, err := client.New(cfg, paths)
+		c, err := client.New(cfg, paths, cfgFile)
 		if err != nil {
 			return err
 		}
@@ -44,6 +45,7 @@ var newCmd = &cobra.Command{
 			Agent:    agent,
 			RepoPath: cwd,
 			Base:     newBase,
+			Prompt:   newPrompt,
 		})
 
 		resp, err := c.ReadControlResponse()
@@ -79,4 +81,5 @@ func init() {
 	newCmd.Flags().StringVar(&newAgent, "agent", "", "agent to use")
 	newCmd.Flags().StringVar(&newBase, "base", "", "base branch")
 	newCmd.Flags().BoolVar(&newBackground, "background", false, "create without attaching")
+	newCmd.Flags().StringVarP(&newPrompt, "prompt", "p", "", "initial prompt for the agent")
 }

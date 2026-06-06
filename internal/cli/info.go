@@ -16,7 +16,7 @@ var infoCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cwd, _ := os.Getwd()
 
-		c, err := client.New(cfg, paths)
+		c, err := client.New(cfg, paths, cfgFile)
 		if err != nil {
 			return err
 		}

@@ -27,7 +27,7 @@ func init() {
 }
 
 func runAttach(cmd *cobra.Command, name string) error {
-	c, err := client.New(cfg, paths)
+	c, err := client.New(cfg, paths, cfgFile)
 	if err != nil {
 		return err
 	}

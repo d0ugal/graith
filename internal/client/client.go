@@ -20,8 +20,8 @@ type Client struct {
 	paths  config.Paths
 }
 
-func New(cfg *config.Config, paths config.Paths) (*Client, error) {
-	conn, err := EnsureDaemon(paths.SocketPath)
+func New(cfg *config.Config, paths config.Paths, configFile string) (*Client, error) {
+	conn, err := EnsureDaemon(paths.SocketPath, configFile)
 	if err != nil {
 		return nil, err
 	}
