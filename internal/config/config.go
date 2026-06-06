@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -14,6 +15,7 @@ type Config struct {
 	BranchPrefix   string           `toml:"branch_prefix"`
 	FetchOnCreate  bool             `toml:"fetch_on_create"`
 	Keybindings    Keybindings      `toml:"keybindings"`
+	Notifications  Notifications    `toml:"notifications"`
 	Agents         map[string]Agent `toml:"agents"`
 }
 
@@ -30,6 +32,13 @@ type Keybindings struct {
 	Search        string `toml:"search"`
 	ScrollMode    string `toml:"scroll_mode"`
 	Shell         string `toml:"shell"`
+}
+
+type Notifications struct {
+	Enabled    bool   `toml:"enabled"`
+	OnApproval bool   `toml:"on_approval"`
+	OnStopped  bool   `toml:"on_stopped"`
+	Command    string `toml:"command"`
 }
 
 type Agent struct {
@@ -71,6 +80,10 @@ func Default() *Config {
 		DefaultAgent:  "claude",
 		BranchPrefix:  "{username}/graith",
 		FetchOnCreate: true,
+		Notifications: Notifications{
+			Enabled:    true,
+			OnApproval: true,
+		},
 		Keybindings: Keybindings{
 			Prefix: "ctrl+b", NewSession: "c", DeleteSession: "x",
 			Detach: "d", SessionList: "w", NextSession: "n",
@@ -86,14 +99,17 @@ func Default() *Config {
 	}
 }
 
-func LoadOrDefault(path string) *Config {
+func LoadOrDefault(path string) (*Config, error) {
 	if path == "" {
 		p := ResolvePaths()
 		path = p.ConfigFile
 	}
 	cfg, err := Load(path)
 	if err != nil {
-		return Default()
+		if errors.Is(err, os.ErrNotExist) {
+			return Default(), nil
+		}
+		return nil, err
 	}
-	return cfg
+	return cfg, nil
 }
