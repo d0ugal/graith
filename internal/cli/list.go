@@ -82,6 +82,9 @@ var listCmd = &cobra.Command{
 			if s.Status != "running" {
 				agentStatus = ""
 			}
+			if agentStatus == "approval" {
+				agentStatus = "⚠ approval"
+			}
 
 			age := ""
 			if t, err := time.Parse(time.RFC3339, s.CreatedAt); err == nil {

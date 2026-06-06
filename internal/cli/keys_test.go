@@ -2,6 +2,25 @@ package cli
 
 import "testing"
 
+func TestParseKeyByte(t *testing.T) {
+	tests := []struct {
+		input string
+		want  byte
+	}{
+		{"n", 'n'},
+		{"p", 'p'},
+		{"", 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := parseKeyByte(tt.input)
+			if got != tt.want {
+				t.Errorf("parseKeyByte(%q) = %#x, want %#x", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestParsePrefixKey(t *testing.T) {
 	tests := []struct {
 		input string
