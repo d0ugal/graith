@@ -31,6 +31,9 @@ func NewScrollback(path string, maxSize int64) (*Scrollback, error) {
 func (s *Scrollback) Write(data []byte) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.maxSize > 0 && s.written >= s.maxSize {
+		return len(data), nil
+	}
 	n, err := s.file.Write(data)
 	s.written += int64(n)
 	return n, err
