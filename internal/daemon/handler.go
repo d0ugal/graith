@@ -101,8 +101,6 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					continue
 				}
 
-				dataWriter := &frameDataWriter{writer: writer}
-				ptySess.Attach(dataWriter)
 				attachedSessionID = a.SessionID
 
 				now := time.Now().UTC()
@@ -114,6 +112,9 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 
 				sess, _ := sm.Get(a.SessionID)
 				sendControl("attached", toSessionInfo(sess))
+
+				dataWriter := &frameDataWriter{writer: writer}
+				ptySess.Attach(dataWriter)
 
 			case "detach":
 				if attachedSessionID != "" {

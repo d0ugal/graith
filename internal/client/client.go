@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"sync"
 
 	"github.com/dougalmatthews/graith/internal/config"
 	"github.com/dougalmatthews/graith/internal/protocol"
@@ -14,6 +15,7 @@ type Client struct {
 	conn   net.Conn
 	reader *protocol.FrameReader
 	writer *protocol.FrameWriter
+	wmu    sync.Mutex
 	cfg    *config.Config
 	paths  config.Paths
 }
@@ -59,10 +61,14 @@ func (c *Client) SendControl(msgType string, payload any) error {
 	if err != nil {
 		return err
 	}
+	c.wmu.Lock()
+	defer c.wmu.Unlock()
 	return c.writer.WriteFrame(protocol.ChannelControl, data)
 }
 
 func (c *Client) SendData(data []byte) error {
+	c.wmu.Lock()
+	defer c.wmu.Unlock()
 	return c.writer.WriteFrame(protocol.ChannelData, data)
 }
 
