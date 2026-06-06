@@ -58,3 +58,23 @@ func TestScrollbackTailLargeFile(t *testing.T) {
 		t.Errorf("tail = %q, want %q", tail, want)
 	}
 }
+
+func TestScrollbackStopsAtMaxSize(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "scroll.log")
+	sb, err := NewScrollback(path, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sb.Close()
+
+	sb.Write([]byte("0123456789"))
+	sb.Write([]byte("overflow"))
+
+	data, _ := os.ReadFile(path)
+	if string(data) != "0123456789" {
+		t.Errorf("expected only first 10 bytes, got %q", data)
+	}
+	if !sb.saturated {
+		t.Error("expected saturated=true after exceeding maxSize")
+	}
+}

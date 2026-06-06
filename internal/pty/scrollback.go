@@ -4,16 +4,18 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"sync"
 )
 
 type Scrollback struct {
-	mu      sync.Mutex
-	file    *os.File
-	path    string
-	maxSize int64
-	written int64
+	mu        sync.Mutex
+	file      *os.File
+	path      string
+	maxSize   int64
+	written   int64
+	saturated bool
 }
 
 func NewScrollback(path string, maxSize int64) (*Scrollback, error) {
@@ -33,6 +35,10 @@ func (s *Scrollback) Write(data []byte) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.maxSize > 0 && s.written >= s.maxSize {
+		if !s.saturated {
+			s.saturated = true
+			slog.Warn("scrollback full, further output will not be recorded", "path", s.path, "max_size", s.maxSize)
+		}
 		return len(data), nil
 	}
 	n, err := s.file.Write(data)
