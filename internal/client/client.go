@@ -4,15 +4,14 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"regexp"
+	"strings"
 	"sync"
 
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
+	"github.com/hinshun/vt10x"
 	"golang.org/x/term"
 )
-
-var ansiRe = regexp.MustCompile(`\x1b(?:\[[^@-~]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[^\[\]].?)|\r`)
 
 type Client struct {
 	conn   net.Conn
@@ -109,9 +108,10 @@ func (c *Client) ReadControlResponse() (protocol.Envelope, error) {
 }
 
 // FetchScrollbackPreview opens a throwaway connection to the daemon,
-// requests the last `lines` lines of scrollback for the given session,
-// and returns them as a string. Errors are silently swallowed (returns "").
-func FetchScrollbackPreview(cfg *config.Config, paths config.Paths, configFile string, sessionID string, lines int) string {
+// requests scrollback for the given session, processes it through a VT
+// emulator to get the rendered screen state, and returns it as a string.
+// Errors are silently swallowed (returns "").
+func FetchScrollbackPreview(cfg *config.Config, paths config.Paths, configFile string, sessionID string) string {
 	c, err := Connect(cfg, paths, configFile)
 	if err != nil {
 		return ""
@@ -120,14 +120,12 @@ func FetchScrollbackPreview(cfg *config.Config, paths config.Paths, configFile s
 
 	if err := c.SendControl("logs", protocol.LogsMsg{
 		SessionID: sessionID,
-		Lines:     lines,
+		Lines:     1000,
 		Follow:    false,
 	}); err != nil {
 		return ""
 	}
 
-	// First frame: ChannelData with scrollback bytes (may be skipped if empty).
-	// Last frame: ChannelControl with "logs_done".
 	var scrollback []byte
 	for {
 		frame, err := c.ReadFrame()
@@ -142,5 +140,25 @@ func FetchScrollbackPreview(cfg *config.Config, paths config.Paths, configFile s
 			break
 		}
 	}
-	return ansiRe.ReplaceAllString(string(scrollback), "")
+	if len(scrollback) == 0 {
+		return ""
+	}
+
+	cols, rows := 120, 40
+	if w, h, err := term.GetSize(int(os.Stdout.Fd())); err == nil {
+		cols, rows = w, h
+	}
+	vt := vt10x.New(vt10x.WithSize(cols, rows))
+	_, _ = vt.Write(scrollback)
+
+	var result strings.Builder
+	for y := 0; y < rows; y++ {
+		var line strings.Builder
+		for x := 0; x < cols; x++ {
+			line.WriteRune(vt.Cell(x, y).Char)
+		}
+		result.WriteString(strings.TrimRight(line.String(), " "))
+		result.WriteByte('\n')
+	}
+	return result.String()
 }
