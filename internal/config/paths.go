@@ -19,6 +19,7 @@ type Paths struct {
 	StateFile  string
 	LogDir     string
 	DaemonLog  string
+	MessagesDB string
 }
 
 func ResolvePaths() Paths {
@@ -35,6 +36,7 @@ func ResolvePaths() Paths {
 		StateFile:  filepath.Join(dataDir, "state.json"),
 		LogDir:     filepath.Join(dataDir, "logs"),
 		DaemonLog:  filepath.Join(dataDir, "daemon.log"),
+		MessagesDB: filepath.Join(dataDir, "messages.sqlite"),
 	}
 }
 
