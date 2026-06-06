@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+	"github.com/hinshun/vt10x"
 )
 
 type Session struct {
@@ -21,6 +22,7 @@ type Session struct {
 
 	mu             sync.RWMutex
 	attachedWriter io.Writer
+	screen         vt10x.Terminal
 	done           chan struct{}
 	readDone       chan struct{}
 	exitCode       int
@@ -62,7 +64,9 @@ func NewSession(opts SessionOpts) (*Session, error) {
 
 	s := &Session{
 		ID: opts.ID, Cmd: cmd, Ptmx: ptmx, Scrollback: sb,
-		done: make(chan struct{}), readDone: make(chan struct{}),
+		screen:   vt10x.New(vt10x.WithSize(int(opts.Cols), int(opts.Rows))),
+		done:     make(chan struct{}),
+		readDone: make(chan struct{}),
 	}
 
 	go s.readLoop()
@@ -94,6 +98,7 @@ func AdoptSession(opts AdoptOpts) (*Session, error) {
 		ID:         opts.ID,
 		Ptmx:       ptmx,
 		Scrollback: sb,
+		screen:     vt10x.New(vt10x.WithSize(80, 24)),
 		done:       make(chan struct{}),
 		readDone:   make(chan struct{}),
 		adoptedPID: opts.PID,
@@ -148,9 +153,10 @@ func (s *Session) readLoop() {
 		if n > 0 {
 			chunk := buf[:n]
 			_, _ = s.Scrollback.Write(chunk)
-			s.mu.RLock()
+			s.mu.Lock()
+			_, _ = s.screen.Write(chunk)
 			w := s.attachedWriter
-			s.mu.RUnlock()
+			s.mu.Unlock()
 			if w != nil {
 				w.Write(chunk)
 			}
@@ -185,6 +191,9 @@ func (s *Session) WriteInput(data []byte) error {
 }
 
 func (s *Session) Resize(rows, cols uint16) error {
+	s.mu.Lock()
+	s.screen.Resize(int(cols), int(rows))
+	s.mu.Unlock()
 	return pty.Setsize(s.Ptmx, &pty.Winsize{Rows: rows, Cols: cols})
 }
 
