@@ -134,6 +134,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				}
 				sm.mu.Unlock()
 
+				_ = ptySess.Resize(clientRows, clientCols)
+
 				sess, _ := sm.Get(a.SessionID)
 				sendControl("attached", toSessionInfo(sess))
 
