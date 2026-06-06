@@ -22,6 +22,9 @@ linters:
     - funlen
     - gocognit
     - goconst
+    - gochecknoinits
+    - gocyclo
+    - godoclint
     - godot
     - intrange
     - lll
@@ -39,5 +42,4 @@ linters:
     - wsl
 formatters:
   enable:
-    - gci
     - gofmt
