@@ -398,7 +398,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					continue
 				}
 				if !t.NoNewline {
-					_ = pty.WriteInput([]byte("\n"))
+					_ = pty.WriteInput([]byte("\r"))
 				}
 				sendControl("typed", struct {
 					SessionID string `json:"session_id"`
