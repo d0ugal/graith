@@ -1,0 +1,20 @@
+{
+  $schema: 'https://docs.renovatebot.com/renovate-schema.json',
+  extends: ['config:best-practices'],
+  automerge: true,
+  packageRules: [
+    { matchManagers: ['gomod'], enabled: true },
+    { matchManagers: ['gomod'], postUpdateOptions: ['gomodTidy'] },
+    { matchManagers: ['gomod'], commitMessagePrefix: 'fix:', commitMessageAction: 'update' },
+  ],
+  customManagers: [
+    {
+      customType: 'regex',
+      managerFilePatterns: ['/Makefile/'],
+      matchStrings: ['GOLANGCI_LINT_VERSION := (?<currentValue>v[\\d\\.]+)'],
+      depNameTemplate: 'golangci/golangci-lint',
+      datasourceTemplate: 'docker',
+      versioningTemplate: 'semver',
+    },
+  ],
+}

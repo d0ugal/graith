@@ -59,7 +59,7 @@ func Connect(cfg *config.Config, paths config.Paths, configFile string) (*Client
 }
 
 func (c *Client) Close() {
-	c.conn.Close()
+	_ = c.conn.Close()
 }
 
 func (c *Client) Handshake() error {

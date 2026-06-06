@@ -1,0 +1,47 @@
+version: "2"
+run:
+  timeout: 5m
+linters:
+  default: fast
+  enable:
+    - govet
+    - staticcheck
+    - ineffassign
+    - unused
+    - gocritic
+    - misspell
+  disable:
+    - cyclop
+    - depguard
+    - dupl
+    - errcheck
+    - err113
+    - exhaustruct
+    - forcetypeassert
+    - funcorder
+    - funlen
+    - gocognit
+    - goconst
+    - gochecknoinits
+    - gocyclo
+    - godoclint
+    - godot
+    - goprintffuncname
+    - intrange
+    - maintidx
+    - lll
+    - mnd
+    - nestif
+    - nlreturn
+    - noinlineerr
+    - paralleltest
+    - perfsprint
+    - revive
+    - tagliatelle
+    - testpackage
+    - usetesting
+    - varnamelen
+    - wsl
+formatters:
+  enable:
+    - gofmt

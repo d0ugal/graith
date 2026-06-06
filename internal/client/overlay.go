@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+
 	"github.com/d0ugal/graith/internal/protocol"
 )
 
@@ -92,9 +93,9 @@ type compactDelegate struct {
 	cols columnWidths
 }
 
-func (d compactDelegate) Height() int                          { return 1 }
-func (d compactDelegate) Spacing() int                         { return 0 }
-func (d compactDelegate) Update(tea.Msg, *list.Model) tea.Cmd  { return nil }
+func (d compactDelegate) Height() int                         { return 1 }
+func (d compactDelegate) Spacing() int                        { return 0 }
+func (d compactDelegate) Update(tea.Msg, *list.Model) tea.Cmd { return nil }
 
 func pad(s string, width int) string {
 	if n := width - len(s); n > 0 {
@@ -110,7 +111,7 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	if gh, ok := item.(groupHeader); ok {
 		style := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7B61FF"))
 		line := style.Render("▸ " + gh.name)
-		fmt.Fprint(w, line)
+		_, _ = fmt.Fprint(w, line)
 		return
 	}
 
@@ -190,7 +191,7 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 		line = line[:width]
 	}
 
-	fmt.Fprint(w, line)
+	_, _ = fmt.Fprint(w, line)
 }
 
 func shortDur(d time.Duration) string {

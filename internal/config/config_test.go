@@ -84,9 +84,9 @@ func TestDefaultConfig(t *testing.T) {
 
 func TestIdleTimeoutDuration(t *testing.T) {
 	tests := []struct {
-		name       string
-		agent      Agent
-		want       time.Duration
+		name  string
+		agent Agent
+		want  time.Duration
 	}{
 		{
 			name:  "explicit duration",

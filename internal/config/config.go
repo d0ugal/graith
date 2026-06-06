@@ -9,12 +9,12 @@ import (
 )
 
 type Config struct {
-	DefaultAgent    string           `toml:"default_agent"`
-	GitHubUsername  string           `toml:"github_username"`
-	BranchPrefix    string           `toml:"branch_prefix"`
-	FetchOnCreate   bool             `toml:"fetch_on_create"`
-	Keybindings     Keybindings      `toml:"keybindings"`
-	Agents          map[string]Agent `toml:"agents"`
+	DefaultAgent   string           `toml:"default_agent"`
+	GitHubUsername string           `toml:"github_username"`
+	BranchPrefix   string           `toml:"branch_prefix"`
+	FetchOnCreate  bool             `toml:"fetch_on_create"`
+	Keybindings    Keybindings      `toml:"keybindings"`
+	Agents         map[string]Agent `toml:"agents"`
 }
 
 type Keybindings struct {
@@ -33,11 +33,11 @@ type Keybindings struct {
 }
 
 type Agent struct {
-	Command    string            `toml:"command"`
-	Args       []string          `toml:"args"`
-	ResumeArgs []string          `toml:"resume_args"`
-	Env        map[string]string `toml:"env"`
-	IdleTimeout string           `toml:"idle_timeout"`
+	Command     string            `toml:"command"`
+	Args        []string          `toml:"args"`
+	ResumeArgs  []string          `toml:"resume_args"`
+	Env         map[string]string `toml:"env"`
+	IdleTimeout string            `toml:"idle_timeout"`
 }
 
 func (a Agent) IdleTimeoutDuration() time.Duration {
@@ -68,9 +68,9 @@ func Load(path string) (*Config, error) {
 
 func Default() *Config {
 	return &Config{
-		DefaultAgent:    "claude",
-		BranchPrefix:    "{username}/graith",
-		FetchOnCreate:   true,
+		DefaultAgent:  "claude",
+		BranchPrefix:  "{username}/graith",
+		FetchOnCreate: true,
 		Keybindings: Keybindings{
 			Prefix: "ctrl+b", NewSession: "c", DeleteSession: "x",
 			Detach: "d", SessionList: "w", NextSession: "n",

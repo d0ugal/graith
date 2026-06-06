@@ -697,7 +697,7 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 	if err != nil {
 		return fmt.Errorf("open daemon log: %w", err)
 	}
-	defer logFile.Close()
+	defer func() { _ = logFile.Close() }()
 	log := slog.New(slog.NewJSONHandler(logFile, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
 	sm := NewSessionManager(cfg, paths, log)
@@ -708,7 +708,7 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 	if err != nil {
 		return fmt.Errorf("open message store: %w", err)
 	}
-	defer msgStore.Close()
+	defer func() { _ = msgStore.Close() }()
 	sm.messages = msgStore
 
 	var l net.Listener
@@ -762,7 +762,7 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 		HandleConnection(ctx, conn, sm, log)
 	}, log)
 
-	go srv.Serve(ctx)
+	go func() { _ = srv.Serve(ctx) }()
 	go sm.RunDetectionLoop(ctx)
 
 	sigCh := make(chan os.Signal, 1)

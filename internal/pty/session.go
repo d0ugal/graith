@@ -28,14 +28,14 @@ type Session struct {
 }
 
 type SessionOpts struct {
-	ID          string
-	Command     string
-	Args        []string
-	Dir         string
-	Env         map[string]string
-	Rows, Cols  uint16
-	LogPath     string
-	MaxLogSize  int64
+	ID         string
+	Command    string
+	Args       []string
+	Dir        string
+	Env        map[string]string
+	Rows, Cols uint16
+	LogPath    string
+	MaxLogSize int64
 }
 
 func NewSession(opts SessionOpts) (*Session, error) {
@@ -143,7 +143,7 @@ func (s *Session) readLoop() {
 		n, err := s.Ptmx.Read(buf)
 		if n > 0 {
 			chunk := buf[:n]
-			s.Scrollback.Write(chunk)
+			_, _ = s.Scrollback.Write(chunk)
 			s.mu.RLock()
 			w := s.attachedWriter
 			s.mu.RUnlock()
@@ -192,7 +192,7 @@ func (s *Session) DetachWriter(w io.Writer) {
 	}
 	s.mu.Unlock()
 }
-func (s *Session) Done() <-chan struct{}  { return s.done }
+func (s *Session) Done() <-chan struct{} { return s.done }
 func (s *Session) Exited() bool          { s.mu.RLock(); defer s.mu.RUnlock(); return s.exited }
 func (s *Session) ExitCode() int         { s.mu.RLock(); defer s.mu.RUnlock(); return s.exitCode }
 
@@ -213,8 +213,8 @@ func (s *Session) ForceKill() error {
 }
 
 func (s *Session) Close() {
-	s.Ptmx.Close()
-	s.Scrollback.Close()
+	_ = s.Ptmx.Close()
+	_ = s.Scrollback.Close()
 }
 
 func buildEnv(extra map[string]string) []string {
