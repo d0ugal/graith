@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/pelletier/go-toml/v2"
 )
@@ -36,6 +37,21 @@ type Agent struct {
 	Args       []string          `toml:"args"`
 	ResumeArgs []string          `toml:"resume_args"`
 	Env        map[string]string `toml:"env"`
+	IdleTimeout string           `toml:"idle_timeout"`
+}
+
+func (a Agent) IdleTimeoutDuration() time.Duration {
+	if a.IdleTimeout == "" {
+		if len(a.ResumeArgs) > 0 {
+			return time.Hour
+		}
+		return 0
+	}
+	d, err := time.ParseDuration(a.IdleTimeout)
+	if err != nil {
+		return 0
+	}
+	return d
 }
 
 func Load(path string) (*Config, error) {

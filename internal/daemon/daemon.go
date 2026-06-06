@@ -596,6 +596,8 @@ func (sm *SessionManager) detectAgentStatuses() {
 	}
 	sm.mu.RUnlock()
 
+	var toAutoStop []string
+
 	for _, t := range targets {
 		tail, err := t.pty.Scrollback.Tail(20)
 		if err != nil || len(tail) == 0 {
@@ -623,9 +625,65 @@ func (sm *SessionManager) detectAgentStatuses() {
 			s.AgentStatus = status
 			s.GitDirty = dirty
 			s.GitUnpushed = unpushed
+
+			if sm.checkIdleSession(s) {
+				toAutoStop = append(toAutoStop, t.id)
+			}
 		}
 		sm.mu.Unlock()
 	}
+
+	for _, id := range toAutoStop {
+		sm.mu.RLock()
+		s, ok := sm.state.Sessions[id]
+		if !ok {
+			sm.mu.RUnlock()
+			continue
+		}
+		_, hasClient := sm.attachedClients[id]
+		stillIdle := !hasClient && s.AgentStatus == "ready"
+		name := s.Name
+		idleSince := s.IdleSince
+		sm.mu.RUnlock()
+
+		if !stillIdle {
+			continue
+		}
+
+		var idleDur time.Duration
+		if idleSince != nil {
+			idleDur = time.Since(*idleSince)
+		}
+		sm.log.Info("auto-stopping idle session", "session", name, "id", id, "idle_duration", idleDur.Round(time.Second))
+		if err := sm.Stop(id); err != nil {
+			sm.log.Error("failed to auto-stop session", "id", id, "err", err)
+		}
+	}
+}
+
+// checkIdleSession updates the idle tracking for a session and returns true if it
+// should be auto-stopped. Caller must hold sm.mu.
+func (sm *SessionManager) checkIdleSession(s *SessionState) bool {
+	_, hasClient := sm.attachedClients[s.ID]
+	isIdle := !hasClient && s.AgentStatus == "ready"
+
+	if isIdle {
+		if s.IdleSince == nil {
+			now := time.Now()
+			s.IdleSince = &now
+		}
+	} else {
+		s.IdleSince = nil
+	}
+
+	if s.IdleSince != nil {
+		agentCfg := sm.cfg.Agents[s.Agent]
+		timeout := agentCfg.IdleTimeoutDuration()
+		if timeout > 0 && time.Since(*s.IdleSince) >= timeout {
+			return true
+		}
+	}
+	return false
 }
 
 // Run starts the daemon: acquires PID file, listens on the Unix socket,
