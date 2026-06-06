@@ -382,6 +382,28 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					}{streams})
 				}
 
+			case "type":
+				var t protocol.TypeMsg
+				if err := protocol.DecodePayload(msg, &t); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid type message"})
+					continue
+				}
+				pty, ok := sm.GetPTY(t.SessionID)
+				if !ok {
+					sendControl("error", protocol.ErrorMsg{Message: "session not found"})
+					continue
+				}
+				if err := pty.WriteInput([]byte(t.Input)); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "write failed: " + err.Error()})
+					continue
+				}
+				if !t.NoNewline {
+					_ = pty.WriteInput([]byte("\n"))
+				}
+				sendControl("typed", struct {
+					SessionID string `json:"session_id"`
+				}{t.SessionID})
+
 			case "resize":
 				var r protocol.ResizeMsg
 				if err := protocol.DecodePayload(msg, &r); err != nil {
