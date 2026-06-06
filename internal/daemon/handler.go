@@ -239,7 +239,7 @@ func (w *frameDataWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func toSessionInfo(s *SessionState) protocol.SessionInfo {
+func toSessionInfo(s SessionState) protocol.SessionInfo {
 	return protocol.SessionInfo{
 		ID:             s.ID,
 		Name:           s.Name,
