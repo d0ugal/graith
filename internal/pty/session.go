@@ -22,6 +22,7 @@ type Session struct {
 	mu             sync.RWMutex
 	attachedWriter io.Writer
 	done           chan struct{}
+	readDone       chan struct{}
 	exitCode       int
 	exited         bool
 	adoptedPID     int
@@ -61,7 +62,7 @@ func NewSession(opts SessionOpts) (*Session, error) {
 
 	s := &Session{
 		ID: opts.ID, Cmd: cmd, Ptmx: ptmx, Scrollback: sb,
-		done: make(chan struct{}),
+		done: make(chan struct{}), readDone: make(chan struct{}),
 	}
 
 	go s.readLoop()
@@ -94,6 +95,7 @@ func AdoptSession(opts AdoptOpts) (*Session, error) {
 		Ptmx:       ptmx,
 		Scrollback: sb,
 		done:       make(chan struct{}),
+		readDone:   make(chan struct{}),
 		adoptedPID: opts.PID,
 	}
 
@@ -119,6 +121,7 @@ func (s *Session) adoptedWaitLoop() {
 		}
 	}
 
+	<-s.readDone
 	s.mu.Lock()
 	s.exited = true
 	s.exitCode = exitCode
@@ -138,6 +141,7 @@ func (s *Session) Fd() uintptr {
 }
 
 func (s *Session) readLoop() {
+	defer close(s.readDone)
 	buf := make([]byte, 32*1024)
 	for {
 		n, err := s.Ptmx.Read(buf)
@@ -159,6 +163,8 @@ func (s *Session) readLoop() {
 
 func (s *Session) waitLoop() {
 	err := s.Cmd.Wait()
+	// Wait for readLoop to drain remaining PTY output before signalling done.
+	<-s.readDone
 	s.mu.Lock()
 	s.exited = true
 	if err != nil {
