@@ -266,8 +266,12 @@ func (m overlayModel) fetchPreviewCmd() tea.Cmd {
 func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case previewMsg:
-		m.previewSessionID = msg.sessionID
-		m.previewContent = msg.content
+		// Guard against stale fetches: only apply if the result
+		// matches the currently selected session.
+		if item, ok := m.list.SelectedItem().(sessionItem); ok && item.info.ID == msg.sessionID {
+			m.previewSessionID = msg.sessionID
+			m.previewContent = msg.content
+		}
 		return m, nil
 
 	case tea.WindowSizeMsg:

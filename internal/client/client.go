@@ -4,12 +4,15 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"regexp"
 	"sync"
 
 	"github.com/dougalmatthews/graith/internal/config"
 	"github.com/dougalmatthews/graith/internal/protocol"
 	"golang.org/x/term"
 )
+
+var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b\[[\?]?[0-9;]*[hlm]`)
 
 type Client struct {
 	conn   net.Conn
@@ -139,5 +142,5 @@ func FetchScrollbackPreview(cfg *config.Config, paths config.Paths, configFile s
 			break
 		}
 	}
-	return string(scrollback)
+	return ansiRe.ReplaceAllString(string(scrollback), "")
 }
