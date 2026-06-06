@@ -104,3 +104,40 @@ func (c *Client) ReadControlResponse() (protocol.Envelope, error) {
 	}
 	return protocol.DecodeControl(frame.Payload)
 }
+
+// FetchScrollbackPreview opens a throwaway connection to the daemon,
+// requests the last `lines` lines of scrollback for the given session,
+// and returns them as a string. Errors are silently swallowed (returns "").
+func FetchScrollbackPreview(cfg *config.Config, paths config.Paths, configFile string, sessionID string, lines int) string {
+	c, err := Connect(cfg, paths, configFile)
+	if err != nil {
+		return ""
+	}
+	defer c.Close()
+
+	if err := c.SendControl("logs", protocol.LogsMsg{
+		SessionID: sessionID,
+		Lines:     lines,
+		Follow:    false,
+	}); err != nil {
+		return ""
+	}
+
+	// First frame: ChannelData with scrollback bytes (may be skipped if empty).
+	// Last frame: ChannelControl with "logs_done".
+	var scrollback []byte
+	for {
+		frame, err := c.ReadFrame()
+		if err != nil {
+			break
+		}
+		if frame.Channel == protocol.ChannelData {
+			scrollback = append(scrollback, frame.Payload...)
+			continue
+		}
+		if frame.Channel == protocol.ChannelControl {
+			break
+		}
+	}
+	return string(scrollback)
+}

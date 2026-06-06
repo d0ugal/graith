@@ -168,13 +168,21 @@ func shortDur(d time.Duration) string {
 	return fmt.Sprintf("%dd", int(d.Hours())/24)
 }
 
+type previewMsg struct {
+	sessionID string
+	content   string
+}
+
 type overlayModel struct {
-	list        list.Model
-	filterInput textinput.Model
-	state       overlayState
-	selected    *protocol.SessionInfo
-	width       int
-	height      int
+	list             list.Model
+	filterInput      textinput.Model
+	state            overlayState
+	selected         *protocol.SessionInfo
+	width            int
+	height           int
+	fetchPreview     func(sessionID string) string
+	previewContent   string
+	previewSessionID string
 }
 
 // OverlayResult holds the outcome of the overlay interaction.
@@ -211,7 +219,7 @@ func buildGroupedItems(sessions []protocol.SessionInfo) []list.Item {
 	return items
 }
 
-func newOverlayModel(sessions []protocol.SessionInfo) overlayModel {
+func newOverlayModel(sessions []protocol.SessionInfo, fetchPreview func(sessionID string) string) overlayModel {
 	items := buildGroupedItems(sessions)
 
 	l := list.New(items, compactDelegate{}, 80, 20)
@@ -226,22 +234,47 @@ func newOverlayModel(sessions []protocol.SessionInfo) overlayModel {
 	fi.CharLimit = 64
 
 	return overlayModel{
-		list:        l,
-		filterInput: fi,
-		state:       stateList,
+		list:         l,
+		filterInput:  fi,
+		state:        stateList,
+		fetchPreview: fetchPreview,
 	}
 }
 
 func (m overlayModel) Init() tea.Cmd {
-	return nil
+	return m.fetchPreviewCmd()
+}
+
+func (m overlayModel) fetchPreviewCmd() tea.Cmd {
+	if m.fetchPreview == nil {
+		return nil
+	}
+	item, ok := m.list.SelectedItem().(sessionItem)
+	if !ok {
+		return nil
+	}
+	sid := item.info.ID
+	if sid == m.previewSessionID {
+		return nil
+	}
+	fetch := m.fetchPreview
+	return func() tea.Msg {
+		return previewMsg{sessionID: sid, content: fetch(sid)}
+	}
 }
 
 func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case previewMsg:
+		m.previewSessionID = msg.sessionID
+		m.previewContent = msg.content
+		return m, nil
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.list.SetSize(msg.Width, msg.Height-3)
+		panelWidth := min(60, msg.Width-4)
+		m.list.SetSize(panelWidth-4, msg.Height-6)
 		return m, nil
 
 	case tea.KeyMsg:
@@ -251,7 +284,7 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "esc", "enter":
 				m.state = stateList
 				m.filterInput.Blur()
-				return m, nil
+				return m, m.fetchPreviewCmd()
 			default:
 				var cmd tea.Cmd
 				m.filterInput, cmd = m.filterInput.Update(msg)
@@ -298,14 +331,14 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if _, ok := m.list.SelectedItem().(groupHeader); ok {
 					m.list.CursorDown()
 				}
-				return m, nil
+				return m, m.fetchPreviewCmd()
 
 			case "k", "up":
 				m.list.CursorUp()
 				if _, ok := m.list.SelectedItem().(groupHeader); ok {
 					m.list.CursorUp()
 				}
-				return m, nil
+				return m, m.fetchPreviewCmd()
 			}
 		}
 	}
@@ -316,36 +349,110 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m overlayModel) View() string {
-	var b strings.Builder
-
-	if m.state == stateFilter {
-		b.WriteString("Filter: ")
-		b.WriteString(m.filterInput.View())
-		b.WriteString("\n\n")
+	w := m.width
+	h := m.height
+	if w == 0 || h == 0 {
+		return ""
 	}
 
-	b.WriteString(m.list.View())
+	// --- Build panel content ---
+	panelWidth := min(60, w-4)
+
+	var panelContent strings.Builder
+	if m.state == stateFilter {
+		panelContent.WriteString("Filter: ")
+		panelContent.WriteString(m.filterInput.View())
+		panelContent.WriteString("\n\n")
+	}
+
+	panelContent.WriteString(m.list.View())
 
 	if m.state == stateConfirmDelete {
 		if item, ok := m.list.SelectedItem().(sessionItem); ok {
-			b.WriteString("\n")
-			b.WriteString(lipgloss.NewStyle().
+			panelContent.WriteString("\n")
+			panelContent.WriteString(lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#ff5f5f")).
 				Render(fmt.Sprintf("Delete '%s'? [y/N]", item.info.Name)))
 		}
 	}
 
 	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#444444"))
-	b.WriteString("\n")
-	b.WriteString(helpStyle.Render("enter attach  x delete  / filter  q quit"))
+	panelContent.WriteString("\n")
+	panelContent.WriteString(helpStyle.Render("enter attach  x delete  / filter  q quit"))
 
-	return b.String()
+	panel := lipgloss.NewStyle().
+		Width(panelWidth).
+		Background(lipgloss.Color("#1a1a1a")).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#444444")).
+		Padding(0, 1).
+		Render(panelContent.String())
+
+	// --- Build background from preview scrollback ---
+	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#333333"))
+	bgLines := make([]string, h)
+	if m.previewContent != "" {
+		raw := strings.Split(m.previewContent, "\n")
+		start := 0
+		if len(raw) > h {
+			start = len(raw) - h
+		}
+		for i := 0; i < h; i++ {
+			idx := start + i
+			if idx < len(raw) {
+				line := raw[idx]
+				// Pad to full width so dim styling covers the whole line
+				if vis := lipgloss.Width(line); vis < w {
+					line += strings.Repeat(" ", w-vis)
+				} else if vis > w {
+					line = line[:w]
+				}
+				bgLines[i] = dimStyle.Render(line)
+			} else {
+				bgLines[i] = strings.Repeat(" ", w)
+			}
+		}
+	} else {
+		for i := range bgLines {
+			bgLines[i] = strings.Repeat(" ", w)
+		}
+	}
+
+	// --- Overlay panel on background ---
+	panelLines := strings.Split(panel, "\n")
+	panelH := len(panelLines)
+	panelRenderedW := 0
+	for _, pl := range panelLines {
+		if lw := lipgloss.Width(pl); lw > panelRenderedW {
+			panelRenderedW = lw
+		}
+	}
+
+	offsetY := (h - panelH) / 2
+	offsetX := (w - panelRenderedW) / 2
+	if offsetY < 0 {
+		offsetY = 0
+	}
+	if offsetX < 0 {
+		offsetX = 0
+	}
+
+	pad := strings.Repeat(" ", offsetX)
+	for i, pl := range panelLines {
+		row := offsetY + i
+		if row >= 0 && row < h {
+			bgLines[row] = pad + pl
+		}
+	}
+
+	return strings.Join(bgLines, "\n")
 }
 
 // RunOverlay launches the bubbletea overlay listing sessions grouped by repo.
-// It returns the user's chosen action or nil if dismissed.
-func RunOverlay(sessions []protocol.SessionInfo) *OverlayResult {
-	m := newOverlayModel(sessions)
+// fetchPreview is called asynchronously to load scrollback for the selected session.
+// It may be nil, in which case no preview is shown.
+func RunOverlay(sessions []protocol.SessionInfo, fetchPreview func(sessionID string) string) *OverlayResult {
+	m := newOverlayModel(sessions, fetchPreview)
 	p := tea.NewProgram(m, tea.WithAltScreen())
 
 	final, err := p.Run()
