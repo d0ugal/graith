@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dougalmatthews/graith/internal/client"
-	"github.com/dougalmatthews/graith/internal/protocol"
+	"github.com/d0ugal/graith/internal/client"
+	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/spf13/cobra"
 )
 
