@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"net"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,6 +13,29 @@ import (
 )
 
 var testKeys = PassthroughKeys{Prefix: 0x02, NextSession: 'n', PrevSession: 'p'}
+
+type lockedWriter struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (w *lockedWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.Write(p)
+}
+
+func (w *lockedWriter) Bytes() []byte {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return append([]byte(nil), w.buf.Bytes()...)
+}
+
+func (w *lockedWriter) String() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.String()
+}
 
 func newTestClient(conn net.Conn) *Client {
 	return &Client{
@@ -57,7 +81,7 @@ func TestPrefixKeyOverlay(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	stdinR, stdinW := io.Pipe()
-	stdout := &bytes.Buffer{}
+	stdout := &lockedWriter{}
 
 	go func() {
 		time.Sleep(50 * time.Millisecond)
@@ -93,7 +117,7 @@ func TestPrefixKeyOverlayKittyProtocol(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	stdinR, stdinW := io.Pipe()
-	stdout := &bytes.Buffer{}
+	stdout := &lockedWriter{}
 
 	go func() {
 		time.Sleep(50 * time.Millisecond)
@@ -128,7 +152,7 @@ func TestPrefixKeyDetach(t *testing.T) {
 	}()
 
 	stdinR, stdinW := io.Pipe()
-	stdout := &bytes.Buffer{}
+	stdout := &lockedWriter{}
 
 	go func() {
 		time.Sleep(50 * time.Millisecond)
@@ -160,7 +184,7 @@ func TestPrefixKeyDetachKittyProtocol(t *testing.T) {
 	}()
 
 	stdinR, stdinW := io.Pipe()
-	stdout := &bytes.Buffer{}
+	stdout := &lockedWriter{}
 
 	go func() {
 		time.Sleep(50 * time.Millisecond)
@@ -193,7 +217,7 @@ func TestPrefixKeyShell(t *testing.T) {
 	}()
 
 	stdinR, stdinW := io.Pipe()
-	stdout := &bytes.Buffer{}
+	stdout := &lockedWriter{}
 
 	go func() {
 		time.Sleep(50 * time.Millisecond)
@@ -214,7 +238,7 @@ func TestDisconnectDetection(t *testing.T) {
 	c := newTestClient(clientConn)
 
 	stdinR, _ := io.Pipe()
-	stdout := &bytes.Buffer{}
+	stdout := &lockedWriter{}
 
 	go func() {
 		time.Sleep(50 * time.Millisecond)
@@ -339,7 +363,7 @@ func TestNormalDataPassthrough(t *testing.T) {
 	}()
 
 	stdinR, stdinW := io.Pipe()
-	stdout := &bytes.Buffer{}
+	stdout := &lockedWriter{}
 
 	go func() {
 		time.Sleep(30 * time.Millisecond)
@@ -384,7 +408,7 @@ func TestDaemonDetachesClient(t *testing.T) {
 	}()
 
 	stdinR, _ := io.Pipe()
-	stdout := &bytes.Buffer{}
+	stdout := &lockedWriter{}
 
 	ctx := context.Background()
 	result := c.runPassthroughLoop(ctx, testKeys, stdinR, stdout)
@@ -415,7 +439,7 @@ func TestEscapeSequenceNotPrefixIsForwarded(t *testing.T) {
 	}()
 
 	stdinR, stdinW := io.Pipe()
-	stdout := &bytes.Buffer{}
+	stdout := &lockedWriter{}
 
 	go func() {
 		time.Sleep(30 * time.Millisecond)

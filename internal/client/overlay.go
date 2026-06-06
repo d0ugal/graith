@@ -110,7 +110,7 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	if gh, ok := item.(groupHeader); ok {
 		style := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7B61FF"))
 		line := style.Render("▸ " + gh.name)
-		fmt.Fprint(w, line)
+		_, _ = fmt.Fprint(w, line)
 		return
 	}
 
@@ -190,7 +190,7 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 		line = line[:width]
 	}
 
-	fmt.Fprint(w, line)
+	_, _ = fmt.Fprint(w, line)
 }
 
 func shortDur(d time.Duration) string {

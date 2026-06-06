@@ -43,11 +43,11 @@ func kittyCtrlSeq(prefixByte byte) []byte {
 func showHelpBar(w io.Writer) {
 	// Save cursor, move to last line, clear it, write help, restore cursor.
 	help := "\x1b[7m d detach  w sessions  n next  p prev  s shell  r restart \x1b[0m"
-	w.Write([]byte("\x1b7\x1b[999B\r\x1b[2K" + help + "\x1b8"))
+	_, _ = w.Write([]byte("\x1b7\x1b[999B\r\x1b[2K" + help + "\x1b8"))
 }
 
 func clearHelpBar(w io.Writer) {
-	w.Write([]byte("\x1b7\x1b[999B\r\x1b[2K\x1b8"))
+	_, _ = w.Write([]byte("\x1b7\x1b[999B\r\x1b[2K\x1b8"))
 }
 
 type PassthroughKeys struct {
@@ -62,7 +62,7 @@ func (c *Client) RunPassthrough(ctx context.Context, keys PassthroughKeys) Passt
 	if err != nil {
 		return ResultQuit
 	}
-	defer term.Restore(fd, oldState)
+	defer func() { _ = term.Restore(fd, oldState) }()
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGWINCH)
@@ -77,7 +77,7 @@ func (c *Client) RunPassthrough(ctx context.Context, keys PassthroughKeys) Passt
 				return
 			case <-sigCh:
 				if w, h, err := term.GetSize(fd); err == nil {
-					c.SendControl("resize", protocol.ResizeMsg{
+					_ = c.SendControl("resize", protocol.ResizeMsg{
 						Cols: uint16(w),
 						Rows: uint16(h),
 					})
@@ -135,7 +135,7 @@ func (c *Client) startDemux(ctx context.Context) *frameDemux {
 }
 
 func (c *Client) stopDemux(d *frameDemux) {
-	c.conn.Close()
+	_ = c.conn.Close()
 	<-d.done
 }
 
@@ -205,7 +205,7 @@ func (c *Client) runPassthroughLoop(ctx context.Context, keys PassthroughKeys, s
 					clearHelpBar(stdout)
 					switch input[i] {
 					case prefixByte:
-						c.SendData([]byte{prefixByte})
+						_ = c.SendData([]byte{prefixByte})
 					case 'd':
 						setResult(ResultDetached)
 						return
@@ -225,14 +225,14 @@ func (c *Client) runPassthroughLoop(ctx context.Context, keys PassthroughKeys, s
 						setResult(ResultRestart)
 						return
 					default:
-						c.SendData([]byte{prefixByte, input[i]})
+						_ = c.SendData([]byte{prefixByte, input[i]})
 					}
 					sendStart = i + 1
 					continue
 				}
 				if input[i] == prefixByte {
 					if i > sendStart {
-						c.SendData(input[sendStart:i])
+						_ = c.SendData(input[sendStart:i])
 					}
 					prefixSeen = true
 					showHelpBar(stdout)
@@ -241,7 +241,7 @@ func (c *Client) runPassthroughLoop(ctx context.Context, keys PassthroughKeys, s
 				}
 			}
 			if sendStart < n && !prefixSeen {
-				c.SendData(input[sendStart:n])
+				_ = c.SendData(input[sendStart:n])
 			}
 		}
 	}()

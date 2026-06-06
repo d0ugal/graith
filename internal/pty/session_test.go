@@ -3,9 +3,27 @@ package pty
 import (
 	"bytes"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
+
+type syncBuf struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (s *syncBuf) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.Write(p)
+}
+
+func (s *syncBuf) Bytes() []byte {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]byte(nil), s.buf.Bytes()...)
+}
 
 func TestSessionEcho(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "test.log")
@@ -49,7 +67,7 @@ func TestSessionAttachDetach(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	var buf bytes.Buffer
+	var buf syncBuf
 	s.Attach(&buf)
 	select {
 	case <-s.Done():
@@ -59,6 +77,6 @@ func TestSessionAttachDetach(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	s.Detach()
 	if !bytes.Contains(buf.Bytes(), []byte("attached output")) {
-		t.Errorf("attached output = %q", buf.String())
+		t.Errorf("attached output = %q", buf.Bytes())
 	}
 }

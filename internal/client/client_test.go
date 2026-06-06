@@ -11,7 +11,7 @@ import (
 
 func setupTestClient(t *testing.T) (*Client, net.Conn) {
 	clientConn, serverConn := net.Pipe()
-	t.Cleanup(func() { clientConn.Close(); serverConn.Close() })
+	t.Cleanup(func() { _ = clientConn.Close(); _ = serverConn.Close() })
 
 	c := &Client{
 		conn:   clientConn,

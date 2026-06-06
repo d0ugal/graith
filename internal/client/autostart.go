@@ -44,7 +44,7 @@ func startDaemon(configFile string) error {
 	if err != nil {
 		return err
 	}
-	defer devNull.Close()
+	defer func() { _ = devNull.Close() }()
 
 	args := []string{"daemon", "start"}
 	if configFile != "" {
