@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestLoadConfig(t *testing.T) {
@@ -79,5 +80,72 @@ func TestDefaultConfig(t *testing.T) {
 	}
 	if _, ok := cfg.Agents["claude"]; !ok {
 		t.Error("default config missing claude agent")
+	}
+}
+
+func TestIdleTimeoutDuration(t *testing.T) {
+	tests := []struct {
+		name       string
+		agent      Agent
+		want       time.Duration
+	}{
+		{
+			name:  "explicit duration",
+			agent: Agent{IdleTimeout: "30m"},
+			want:  30 * time.Minute,
+		},
+		{
+			name:  "explicit zero disables",
+			agent: Agent{IdleTimeout: "0", ResumeArgs: []string{"--resume"}},
+			want:  0,
+		},
+		{
+			name:  "default with resume args",
+			agent: Agent{ResumeArgs: []string{"--resume"}},
+			want:  time.Hour,
+		},
+		{
+			name:  "default without resume args",
+			agent: Agent{},
+			want:  0,
+		},
+		{
+			name:  "invalid duration",
+			agent: Agent{IdleTimeout: "bogus"},
+			want:  0,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.agent.IdleTimeoutDuration()
+			if got != tt.want {
+				t.Errorf("IdleTimeoutDuration() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadConfigIdleTimeout(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	toml := `
+[agents.claude]
+command = "claude"
+idle_timeout = "2h"
+
+[agents.codex]
+command = "codex"
+idle_timeout = "0"
+`
+	os.WriteFile(cfgPath, []byte(toml), 0o644)
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Agents["claude"].IdleTimeoutDuration(); got != 2*time.Hour {
+		t.Errorf("claude idle timeout = %v, want 2h", got)
+	}
+	if got := cfg.Agents["codex"].IdleTimeoutDuration(); got != 0 {
+		t.Errorf("codex idle timeout = %v, want 0", got)
 	}
 }
