@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dougalmatthews/graith/internal/protocol"
-	"github.com/dougalmatthews/graith/internal/version"
+	"github.com/d0ugal/graith/internal/protocol"
+	"github.com/d0ugal/graith/internal/version"
 )
 
 const protocolVersion = "1.0"

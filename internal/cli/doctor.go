@@ -6,8 +6,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/dougalmatthews/graith/internal/protocol"
-	"github.com/dougalmatthews/graith/internal/version"
+	"github.com/d0ugal/graith/internal/protocol"
+	"github.com/d0ugal/graith/internal/version"
 	"github.com/spf13/cobra"
 )
 

@@ -5,8 +5,8 @@ import (
 	"net"
 	"testing"
 
-	"github.com/dougalmatthews/graith/internal/config"
-	"github.com/dougalmatthews/graith/internal/protocol"
+	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/protocol"
 )
 
 func setupTestClient(t *testing.T) (*Client, net.Conn) {
