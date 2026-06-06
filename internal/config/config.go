@@ -11,7 +11,6 @@ type Config struct {
 	DefaultAgent    string           `toml:"default_agent"`
 	GitHubUsername  string           `toml:"github_username"`
 	BranchPrefix    string           `toml:"branch_prefix"`
-	ScrollbackLimit string           `toml:"scrollback_limit"`
 	FetchOnCreate   bool             `toml:"fetch_on_create"`
 	Keybindings     Keybindings      `toml:"keybindings"`
 	Agents          map[string]Agent `toml:"agents"`
@@ -55,7 +54,6 @@ func Default() *Config {
 	return &Config{
 		DefaultAgent:    "claude",
 		BranchPrefix:    "{username}/graith",
-		ScrollbackLimit: "100MB",
 		FetchOnCreate:   true,
 		Keybindings: Keybindings{
 			Prefix: "ctrl+b", NewSession: "c", DeleteSession: "x",

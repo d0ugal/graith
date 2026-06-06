@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dougalmatthews/graith/internal/config"
+	"github.com/d0ugal/graith/internal/config"
 )
 
 func newTestSessionManager(t *testing.T) *SessionManager {

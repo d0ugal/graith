@@ -1,9 +1,9 @@
 package cli
 
 import (
-	"github.com/dougalmatthews/graith/internal/config"
-	"github.com/dougalmatthews/graith/internal/output"
-	"github.com/dougalmatthews/graith/internal/version"
+	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/output"
+	"github.com/d0ugal/graith/internal/version"
 	"github.com/spf13/cobra"
 )
 

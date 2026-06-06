@@ -4,7 +4,7 @@ package main
 import (
 	"os"
 
-	"github.com/dougalmatthews/graith/internal/cli"
+	"github.com/d0ugal/graith/internal/cli"
 )
 
 func main() {

@@ -7,8 +7,8 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/dougalmatthews/graith/internal/client"
-	"github.com/dougalmatthews/graith/internal/protocol"
+	"github.com/d0ugal/graith/internal/client"
+	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/spf13/cobra"
 )
 
@@ -65,7 +65,7 @@ var listCmd = &cobra.Command{
 		now := time.Now()
 
 		tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "NAME\tREPO\tAGENT\tSTATUS\tAGENT\tBRANCH\tGIT\tAGE\tATTACHED")
+		fmt.Fprintln(tw, "NAME\tREPO\tAGENT\tSTATUS\tACTIVITY\tBRANCH\tGIT\tAGE\tATTACHED")
 		for _, s := range list.Sessions {
 			gitStatus := ""
 			if s.Dirty {

@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dougalmatthews/graith/internal/config"
-	"github.com/dougalmatthews/graith/internal/daemon"
-	"github.com/dougalmatthews/graith/internal/protocol"
+	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/daemon"
+	"github.com/d0ugal/graith/internal/protocol"
 )
 
 type testEnv struct {

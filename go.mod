@@ -1,4 +1,4 @@
-module github.com/dougalmatthews/graith
+module github.com/d0ugal/graith
 
 go 1.26.3
 
