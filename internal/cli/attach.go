@@ -107,10 +107,14 @@ func runAttachByID(c *client.Client, sessionID string) error {
 	}
 
 	ctx := context.Background()
-	prefixByte := parsePrefixKey(cfg.Keybindings.Prefix)
+	keys := client.PassthroughKeys{
+		Prefix:      parsePrefixKey(cfg.Keybindings.Prefix),
+		NextSession: cfg.Keybindings.NextSession[0],
+		PrevSession: cfg.Keybindings.PrevSession[0],
+	}
 
 	for {
-		result := c.RunPassthrough(ctx, prefixByte)
+		result := c.RunPassthrough(ctx, keys)
 		// RunPassthrough closes the connection — c is dead after this point.
 		// Every code path must either return or create a fresh client.
 
@@ -216,7 +220,10 @@ func runAttachByID(c *client.Client, sessionID string) error {
 				return err
 			}
 			var list protocol.SessionListMsg
-			protocol.DecodePayload(listResp, &list)
+			if err := protocol.DecodePayload(listResp, &list); err != nil {
+				nc.Close()
+				return err
+			}
 
 			ids := sortedSessionIDs(list.Sessions)
 			if next := adjacentSession(ids, sessionID, result == client.ResultNextSession); next != "" {

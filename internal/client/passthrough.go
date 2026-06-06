@@ -50,7 +50,13 @@ func clearHelpBar(w io.Writer) {
 	w.Write([]byte("\x1b7\x1b[999B\r\x1b[2K\x1b8"))
 }
 
-func (c *Client) RunPassthrough(ctx context.Context, prefixByte byte) PassthroughResult {
+type PassthroughKeys struct {
+	Prefix      byte
+	NextSession byte
+	PrevSession byte
+}
+
+func (c *Client) RunPassthrough(ctx context.Context, keys PassthroughKeys) PassthroughResult {
 	fd := int(os.Stdin.Fd())
 	oldState, err := term.MakeRaw(fd)
 	if err != nil {
@@ -80,7 +86,7 @@ func (c *Client) RunPassthrough(ctx context.Context, prefixByte byte) Passthroug
 		}
 	}()
 
-	return c.runPassthroughLoop(ctx, prefixByte, os.Stdin, os.Stdout)
+	return c.runPassthroughLoop(ctx, keys, os.Stdin, os.Stdout)
 }
 
 type frameDemux struct {
@@ -133,10 +139,11 @@ func (c *Client) stopDemux(d *frameDemux) {
 	<-d.done
 }
 
-func (c *Client) runPassthroughLoop(ctx context.Context, prefixByte byte, stdin io.Reader, stdout io.Writer) PassthroughResult {
+func (c *Client) runPassthroughLoop(ctx context.Context, keys PassthroughKeys, stdin io.Reader, stdout io.Writer) PassthroughResult {
 	innerCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	prefixByte := keys.Prefix
 	kittySeq := kittyCtrlSeq(prefixByte)
 
 	result := ResultQuit
@@ -208,10 +215,10 @@ func (c *Client) runPassthroughLoop(ctx context.Context, prefixByte byte, stdin 
 					case 's':
 						setResult(ResultShell)
 						return
-					case 'n':
+					case keys.NextSession:
 						setResult(ResultNextSession)
 						return
-					case 'p':
+					case keys.PrevSession:
 						setResult(ResultPrevSession)
 						return
 					case 'r':
