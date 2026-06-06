@@ -431,7 +431,7 @@ func (m overlayModel) View() string {
 
 	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#444444"))
 	panelContent.WriteString("\n")
-	panelContent.WriteString(helpStyle.Render("enter attach  x delete  / filter  q quit"))
+	panelContent.WriteString(helpStyle.Render("enter attach  n/p next/prev  x delete  / filter  q quit"))
 
 	panel := lipgloss.NewStyle().
 		Width(panelWidth).
