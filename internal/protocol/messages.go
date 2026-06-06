@@ -116,6 +116,8 @@ type SessionInfo struct {
 	Status         string `json:"status"`
 	ExitCode       *int   `json:"exit_code,omitempty"`
 	CreatedAt      string `json:"created_at"`
+	Dirty          bool   `json:"dirty,omitempty"`
+	UnpushedCount  int    `json:"unpushed_count,omitempty"`
 }
 
 type DetachedMsg struct {
