@@ -3,7 +3,6 @@ package cli
 import (
 	"context"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/dougalmatthews/graith/internal/client"
@@ -93,18 +92,13 @@ func runAttachByID(c *client.Client, sessionID string) error {
 
 	for {
 		result := c.RunPassthrough(ctx, prefixByte)
-		fmt.Fprintf(os.Stderr, "[DEBUG] passthrough result=%d\n", result)
 		switch result {
 		case client.ResultOverlay:
-			fmt.Fprintf(os.Stderr, "[DEBUG] sending detach\n")
 			c.SendControl("detach", struct{}{})
-			detachResp, detachErr := c.ReadControlResponse()
-			fmt.Fprintf(os.Stderr, "[DEBUG] detach resp type=%q err=%v\n", detachResp.Type, detachErr)
+			c.ReadControlResponse()
 
-			fmt.Fprintf(os.Stderr, "[DEBUG] sending list\n")
 			c.SendControl("list", struct{}{})
 			listResp, err := c.ReadControlResponse()
-			fmt.Fprintf(os.Stderr, "[DEBUG] list resp type=%q err=%v\n", listResp.Type, err)
 			if err != nil {
 				return err
 			}
