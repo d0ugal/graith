@@ -1,0 +1,68 @@
+package cli
+
+import (
+	"fmt"
+	"sort"
+	"text/tabwriter"
+
+	"github.com/dougalmatthews/graith/internal/client"
+	"github.com/dougalmatthews/graith/internal/protocol"
+	"github.com/spf13/cobra"
+)
+
+var listRepo string
+
+var listCmd = &cobra.Command{
+	Use:     "list",
+	Aliases: []string{"ls"},
+	Short:   "List all sessions",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c, err := client.New(cfg, paths)
+		if err != nil {
+			return err
+		}
+		defer c.Close()
+
+		c.Handshake()
+		c.ReadControlResponse()
+
+		c.SendControl("list", struct{}{})
+		resp, err := c.ReadControlResponse()
+		if err != nil {
+			return err
+		}
+
+		var list protocol.SessionListMsg
+		protocol.DecodePayload(resp, &list)
+
+		if jsonOutput {
+			return out.JSON(list)
+		}
+
+		if len(list.Sessions) == 0 {
+			out.Print("No sessions. Create one with: gr new <name>\n")
+			return nil
+		}
+
+		sort.Slice(list.Sessions, func(i, j int) bool {
+			if list.Sessions[i].RepoName != list.Sessions[j].RepoName {
+				return list.Sessions[i].RepoName < list.Sessions[j].RepoName
+			}
+			return list.Sessions[i].Name < list.Sessions[j].Name
+		})
+
+		tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
+		fmt.Fprintln(tw, "REPO\tNAME\tAGENT\tSTATUS\tID")
+		for _, s := range list.Sessions {
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", s.RepoName, s.Name, s.Agent, s.Status, s.ID)
+		}
+		tw.Flush()
+
+		return nil
+	},
+}
+
+func init() {
+	rootCmd.AddCommand(listCmd)
+	listCmd.Flags().StringVar(&listRepo, "repo", "", "filter by repo path")
+}
