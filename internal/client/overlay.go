@@ -12,7 +12,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-
+	"github.com/charmbracelet/x/ansi"
 	"github.com/d0ugal/graith/internal/protocol"
 )
 
@@ -188,7 +188,7 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	}
 
 	if width > 0 && lipgloss.Width(line) > width {
-		line = line[:width]
+		line = ansi.Truncate(line, width, "")
 	}
 
 	_, _ = fmt.Fprint(w, line)
@@ -464,7 +464,7 @@ func (m overlayModel) View() string {
 				if vis := lipgloss.Width(line); vis < w {
 					line += strings.Repeat(" ", w-vis)
 				} else if vis > w {
-					line = line[:w]
+					line = ansi.Truncate(line, w, "")
 				}
 				bgLines[i] = dimStyle.Render(line)
 			} else {
