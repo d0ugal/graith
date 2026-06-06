@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/dougalmatthews/graith/internal/protocol"
 	"golang.org/x/term"
@@ -36,6 +37,7 @@ func (c *Client) RunPassthrough(ctx context.Context, prefixByte byte) Passthroug
 	defer cancel()
 
 	result := ResultQuit
+	readerDone := make(chan struct{})
 
 	// SIGWINCH handler
 	go func() {
@@ -56,6 +58,7 @@ func (c *Client) RunPassthrough(ctx context.Context, prefixByte byte) Passthroug
 
 	// Read from daemon, write to stdout
 	go func() {
+		defer close(readerDone)
 		defer cancel()
 		for {
 			frame, err := c.ReadFrame()
@@ -104,8 +107,6 @@ func (c *Client) RunPassthrough(ctx context.Context, prefixByte byte) Passthroug
 			for i := 0; i < n; i++ {
 				if prefixSeen {
 					prefixSeen = false
-					// Flush anything before the prefix byte
-					// (already flushed when we set prefixSeen)
 					switch buf[i] {
 					case prefixByte:
 						c.SendData([]byte{prefixByte})
@@ -140,6 +141,12 @@ func (c *Client) RunPassthrough(ctx context.Context, prefixByte byte) Passthroug
 	}()
 
 	<-innerCtx.Done()
+
+	// Ensure the reader goroutine is stopped before returning, so it
+	// can't race with subsequent ReadFrame/ReadControlResponse calls.
+	c.SetReadDeadline(time.Now())
+	<-readerDone
+	c.ClearReadDeadline()
 
 	return result
 }

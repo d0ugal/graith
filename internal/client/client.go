@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/dougalmatthews/graith/internal/config"
 	"github.com/dougalmatthews/graith/internal/protocol"
@@ -74,6 +75,14 @@ func (c *Client) SendData(data []byte) error {
 
 func (c *Client) ReadFrame() (protocol.Frame, error) {
 	return c.reader.ReadFrame()
+}
+
+func (c *Client) SetReadDeadline(t time.Time) {
+	c.conn.SetReadDeadline(t)
+}
+
+func (c *Client) ClearReadDeadline() {
+	c.conn.SetReadDeadline(time.Time{})
 }
 
 func (c *Client) ReadControlResponse() (protocol.Envelope, error) {
