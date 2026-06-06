@@ -92,14 +92,20 @@ func runAttachByID(c *client.Client, sessionID string) error {
 
 	for {
 		result := c.RunPassthrough(ctx, prefixByte)
+		// RunPassthrough closes the connection — c is dead after this point.
+		// Every code path must either return or create a fresh client.
+
 		switch result {
 		case client.ResultOverlay:
-			c.SendControl("detach", struct{}{})
-			c.ReadControlResponse()
-
-			c.SendControl("list", struct{}{})
-			listResp, err := c.ReadControlResponse()
+			nc, err := freshClient()
 			if err != nil {
+				return err
+			}
+
+			nc.SendControl("list", struct{}{})
+			listResp, err := nc.ReadControlResponse()
+			if err != nil {
+				nc.Close()
 				return err
 			}
 			var list protocol.SessionListMsg
@@ -107,28 +113,33 @@ func runAttachByID(c *client.Client, sessionID string) error {
 
 			overlayResult := client.RunOverlay(list.Sessions)
 			if overlayResult == nil {
-				c.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
-				c.ReadControlResponse()
+				nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+				nc.ReadControlResponse()
+				c = nc
 				continue
 			}
 			if overlayResult.Action == "delete" {
-				c.SendControl("delete", protocol.DeleteMsg{SessionID: overlayResult.SessionID})
-				c.ReadControlResponse()
-				c.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
-				c.ReadControlResponse()
+				nc.SendControl("delete", protocol.DeleteMsg{SessionID: overlayResult.SessionID})
+				nc.ReadControlResponse()
+				nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+				nc.ReadControlResponse()
+				c = nc
 				continue
 			}
-			c.SendControl("attach", protocol.AttachMsg{SessionID: overlayResult.SessionID})
-			c.ReadControlResponse()
+			nc.SendControl("attach", protocol.AttachMsg{SessionID: overlayResult.SessionID})
+			nc.ReadControlResponse()
 			sessionID = overlayResult.SessionID
+			c = nc
 			continue
 
 		case client.ResultShell:
-			c.SendControl("detach", struct{}{})
-			c.ReadControlResponse()
+			nc, err := freshClient()
+			if err != nil {
+				return err
+			}
 
-			c.SendControl("list", struct{}{})
-			infoResp, _ := c.ReadControlResponse()
+			nc.SendControl("list", struct{}{})
+			infoResp, _ := nc.ReadControlResponse()
 			var infoList protocol.SessionListMsg
 			protocol.DecodePayload(infoResp, &infoList)
 			for _, s := range infoList.Sessions {
@@ -138,19 +149,19 @@ func runAttachByID(c *client.Client, sessionID string) error {
 				}
 			}
 
-			c.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
-			c.ReadControlResponse()
+			nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+			nc.ReadControlResponse()
+			c = nc
 			continue
 
 		case client.ResultDisconnected:
-			c.Close()
 			out.Print("Connection lost. Reconnecting...\n")
-			newClient, err := reconnectToSession(sessionID)
+			nc, err := reconnectToSession(sessionID)
 			if err != nil {
 				out.Print("Could not reconnect: %s\n", err)
 				return nil
 			}
-			c = newClient
+			c = nc
 			continue
 
 		case client.ResultDetached, client.ResultQuit:
@@ -159,20 +170,28 @@ func runAttachByID(c *client.Client, sessionID string) error {
 	}
 }
 
+func freshClient() (*client.Client, error) {
+	c, err := client.New(cfg, paths, cfgFile)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.Handshake(); err != nil {
+		c.Close()
+		return nil, err
+	}
+	if _, err := c.ReadControlResponse(); err != nil {
+		c.Close()
+		return nil, err
+	}
+	return c, nil
+}
+
 func reconnectToSession(sessionID string) (*client.Client, error) {
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		time.Sleep(250 * time.Millisecond)
-		c, err := client.New(cfg, paths, cfgFile)
+		c, err := freshClient()
 		if err != nil {
-			continue
-		}
-		if err := c.Handshake(); err != nil {
-			c.Close()
-			continue
-		}
-		if _, err := c.ReadControlResponse(); err != nil {
-			c.Close()
 			continue
 		}
 		c.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
