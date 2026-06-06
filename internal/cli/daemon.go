@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"net"
+	"os"
 	"time"
 
 	"github.com/dougalmatthews/graith/internal/client"
@@ -43,6 +44,15 @@ var daemonRestartCmd = &cobra.Command{
 	Short: "Stop and restart the daemon (sessions are preserved as stopped)",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		_ = daemon.StopDaemon(paths.PIDFile)
+
+		// Wait for the old socket to be cleaned up before starting a new daemon
+		for range 20 {
+			if _, err := os.Stat(paths.SocketPath); os.IsNotExist(err) {
+				break
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		os.Remove(paths.SocketPath)
 
 		conn, err := client.EnsureDaemon(paths.SocketPath, cfgFile)
 		if err != nil {
