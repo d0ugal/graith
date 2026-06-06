@@ -32,7 +32,7 @@ func setup(t *testing.T) *testEnv {
 
 	repo := filepath.Join(tmpDir, "repo")
 	os.MkdirAll(repo, 0o755)
-	gitRun(t, repo, "init")
+	gitRun(t, repo, "init", "-b", "main")
 	gitRun(t, repo, "commit", "--allow-empty", "-m", "init")
 
 	// Use /tmp for the socket to stay under macOS 104-byte path limit.
