@@ -417,6 +417,28 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					}
 				}
 
+			case "screen_snapshot":
+				var ss protocol.ScreenSnapshotMsg
+				if err := protocol.DecodePayload(msg, &ss); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid screen_snapshot message"})
+					continue
+				}
+				ptySess, ok := sm.GetPTY(ss.SessionID)
+				if !ok {
+					sendControl("error", protocol.ErrorMsg{Message: "session not found"})
+					continue
+				}
+				cap := ptySess.ScreenSnapshot()
+				sendControl("screen_snapshot_response", protocol.ScreenSnapshotResponseMsg{
+					SessionID:     ss.SessionID,
+					Frame:         cap.Frame,
+					CursorX:       cap.CursorX,
+					CursorY:       cap.CursorY,
+					CursorVisible: cap.CursorVisible,
+					Cols:          cap.Cols,
+					Rows:          cap.Rows,
+				})
+
 			case "upgrade":
 				select {
 				case sm.upgradeCh <- struct{}{}:
