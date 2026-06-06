@@ -635,10 +635,20 @@ func (sm *SessionManager) detectAgentStatuses() {
 
 	for _, id := range toAutoStop {
 		sm.mu.RLock()
-		s := sm.state.Sessions[id]
+		s, ok := sm.state.Sessions[id]
+		if !ok {
+			sm.mu.RUnlock()
+			continue
+		}
+		_, hasClient := sm.attachedClients[id]
+		stillIdle := !hasClient && s.AgentStatus == "ready"
 		name := s.Name
 		idleSince := s.IdleSince
 		sm.mu.RUnlock()
+
+		if !stillIdle {
+			continue
+		}
 
 		var idleDur time.Duration
 		if idleSince != nil {
