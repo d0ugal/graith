@@ -143,7 +143,7 @@ func (s *Session) readLoop() {
 		n, err := s.Ptmx.Read(buf)
 		if n > 0 {
 			chunk := buf[:n]
-			s.Scrollback.Write(chunk)
+			_, _ = s.Scrollback.Write(chunk)
 			s.mu.RLock()
 			w := s.attachedWriter
 			s.mu.RUnlock()
@@ -213,8 +213,8 @@ func (s *Session) ForceKill() error {
 }
 
 func (s *Session) Close() {
-	s.Ptmx.Close()
-	s.Scrollback.Close()
+	_ = s.Ptmx.Close()
+	_ = s.Scrollback.Close()
 }
 
 func buildEnv(extra map[string]string) []string {

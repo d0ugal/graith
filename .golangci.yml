@@ -37,6 +37,27 @@ linters:
     - usetesting
     - varnamelen
     - wsl
+  settings:
+    errcheck:
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - fmt.Sscanf
+        - (io.Closer).Close
+        - (*os.File).Close
+        - (net.Conn).Close
+        - (net.Listener).Close
+        - (io.Writer).Write
+        - os.Remove
+        - os.RemoveAll
+        - (*encoding/json.Encoder).Encode
+        - (*os.Process).Kill
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - errcheck
 formatters:
   enable:
     - gci
