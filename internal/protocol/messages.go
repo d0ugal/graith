@@ -59,6 +59,10 @@ type RenameMsg struct {
 	NewName   string `json:"new_name"`
 }
 
+type StopMsg struct {
+	SessionID string `json:"session_id"`
+}
+
 type ResumeMsg struct {
 	SessionID string `json:"session_id"`
 }
