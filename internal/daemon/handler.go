@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/dougalmatthews/graith/internal/protocol"
+	"github.com/dougalmatthews/graith/internal/version"
 )
 
 const protocolVersion = "1.0"
@@ -18,6 +19,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 	writer := protocol.NewFrameWriter(conn)
 
 	var attachedSessionID string
+	var attachedDataWriter *frameDataWriter
 	var clientRows, clientCols uint16 = 24, 80
 
 	sendControl := func(msgType string, payload any) {
@@ -42,8 +44,9 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				log.Debug("client read error", "err", err)
 			}
 			if attachedSessionID != "" {
+				sm.ClearAttachedClient(attachedSessionID, conn)
 				if pty, ok := sm.GetPTY(attachedSessionID); ok {
-					pty.Detach()
+					pty.DetachWriter(attachedDataWriter)
 				}
 			}
 			return
@@ -63,7 +66,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				_ = protocol.DecodePayload(msg, &h)
 				clientCols = h.TerminalSize[0]
 				clientRows = h.TerminalSize[1]
-				sendControl("handshake_ok", protocol.HandshakeOkMsg{Version: protocolVersion})
+				sendControl("handshake_ok", protocol.HandshakeOkMsg{Version: protocolVersion, DaemonVersion: version.Version})
 				log.Info("client connected", "client_id", h.ClientID, "cwd", h.Cwd)
 
 			case "list":
@@ -93,8 +96,9 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				_ = protocol.DecodePayload(msg, &a)
 
 				if attachedSessionID != "" {
+					sm.ClearAttachedClient(attachedSessionID, conn)
 					if pty, ok := sm.GetPTY(attachedSessionID); ok {
-						pty.Detach()
+						pty.DetachWriter(attachedDataWriter)
 					}
 				}
 
@@ -105,6 +109,15 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				}
 
 				attachedSessionID = a.SessionID
+				attachedDataWriter = &frameDataWriter{writer: writer}
+
+				ptySess.Attach(attachedDataWriter)
+
+				sm.KickAttachedClient(a.SessionID)
+				sm.SetAttachedClient(a.SessionID, conn, func() {
+					data, _ := protocol.EncodeControl("detached", protocol.DetachedMsg{Reason: "replaced"})
+					_ = writer.WriteFrame(protocol.ChannelControl, data)
+				})
 
 				now := time.Now().UTC()
 				sm.mu.Lock()
@@ -116,15 +129,14 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				sess, _ := sm.Get(a.SessionID)
 				sendControl("attached", toSessionInfo(sess))
 
-				dataWriter := &frameDataWriter{writer: writer}
-				ptySess.Attach(dataWriter)
-
 			case "detach":
 				if attachedSessionID != "" {
+					sm.ClearAttachedClient(attachedSessionID, conn)
 					if pty, ok := sm.GetPTY(attachedSessionID); ok {
-						pty.Detach()
+						pty.DetachWriter(attachedDataWriter)
 					}
 					attachedSessionID = ""
+					attachedDataWriter = nil
 				}
 				sendControl("detached", protocol.DetachedMsg{Reason: "user"})
 
@@ -159,6 +171,15 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 						_ = pty.Resize(r.Rows, r.Cols)
 					}
 				}
+
+			case "upgrade":
+				select {
+				case sm.upgradeCh <- struct{}{}:
+					sendControl("upgrading", struct{}{})
+				default:
+					sendControl("error", protocol.ErrorMsg{Message: "upgrade already in progress"})
+				}
+				return
 			}
 
 		case protocol.ChannelData:
