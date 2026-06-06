@@ -423,7 +423,7 @@ GLOBAL FLAGS:
 
 ## Known Risks
 
-1. **bubbletea + raw PTY mode switching** — the dual-mode client (passthrough vs overlay) is the riskiest technical bet. Must be validated with an early prototype that runs real agent CLIs (claude, codex) and tests: resize, mouse events, bracketed paste, alternate screen, escape sequences.
+1. **bubbletea + raw PTY mode switching** — the dual-mode client (passthrough vs overlay) is the riskiest technical bet. Must be validated with an early prototype that runs real agent CLIs (claude, codex) and tests: resize, mouse events, bracketed paste, alternate screen, escape sequences, image drag-drop, and rich paste.
 
 2. **Daemon crash kills all sessions** — acceptable for v1, documented clearly. State file enables recovery of metadata on restart. Agent resume support mitigates the impact.
 
