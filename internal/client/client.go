@@ -107,6 +107,29 @@ func (c *Client) ReadControlResponse() (protocol.Envelope, error) {
 	return protocol.DecodeControl(frame.Payload)
 }
 
+func FetchScreenSnapshot(cfg *config.Config, paths config.Paths, configFile string, sessionID string) *protocol.ScreenSnapshotResponseMsg {
+	c, err := Connect(cfg, paths, configFile)
+	if err != nil {
+		return nil
+	}
+	defer c.Close()
+
+	if err := c.SendControl("screen_snapshot", protocol.ScreenSnapshotMsg{SessionID: sessionID}); err != nil {
+		return nil
+	}
+
+	resp, err := c.ReadControlResponse()
+	if err != nil || resp.Type != "screen_snapshot_response" {
+		return nil
+	}
+
+	var snap protocol.ScreenSnapshotResponseMsg
+	if err := protocol.DecodePayload(resp, &snap); err != nil {
+		return nil
+	}
+	return &snap
+}
+
 // FetchScrollbackPreview opens a throwaway connection to the daemon,
 // requests scrollback for the given session, processes it through a VT
 // emulator to get the rendered screen state, and returns it as a string.
