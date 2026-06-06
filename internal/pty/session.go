@@ -28,14 +28,14 @@ type Session struct {
 }
 
 type SessionOpts struct {
-	ID          string
-	Command     string
-	Args        []string
-	Dir         string
-	Env         map[string]string
-	Rows, Cols  uint16
-	LogPath     string
-	MaxLogSize  int64
+	ID         string
+	Command    string
+	Args       []string
+	Dir        string
+	Env        map[string]string
+	Rows, Cols uint16
+	LogPath    string
+	MaxLogSize int64
 }
 
 func NewSession(opts SessionOpts) (*Session, error) {
@@ -192,7 +192,7 @@ func (s *Session) DetachWriter(w io.Writer) {
 	}
 	s.mu.Unlock()
 }
-func (s *Session) Done() <-chan struct{}  { return s.done }
+func (s *Session) Done() <-chan struct{} { return s.done }
 func (s *Session) Exited() bool          { s.mu.RLock(); defer s.mu.RUnlock(); return s.exited }
 func (s *Session) ExitCode() int         { s.mu.RLock(); defer s.mu.RUnlock(); return s.exitCode }
 

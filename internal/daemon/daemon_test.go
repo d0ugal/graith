@@ -238,11 +238,11 @@ func TestGetPTY(t *testing.T) {
 
 func TestFindByName(t *testing.T) {
 	tests := []struct {
-		name       string
-		sessions   map[string]*SessionState
-		query      string
-		wantFound  bool
-		wantID     string
+		name      string
+		sessions  map[string]*SessionState
+		query     string
+		wantFound bool
+		wantID    string
 	}{
 		{
 			name: "exact match",
@@ -272,10 +272,10 @@ func TestFindByName(t *testing.T) {
 			wantFound: false,
 		},
 		{
-			name:       "empty query on empty sessions",
-			sessions:   map[string]*SessionState{},
-			query:      "",
-			wantFound:  false,
+			name:      "empty query on empty sessions",
+			sessions:  map[string]*SessionState{},
+			query:     "",
+			wantFound: false,
 		},
 	}
 
