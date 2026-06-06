@@ -356,6 +356,9 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 						}
 					}
 				}()
+				// The goroutine above owns the reader — returning prevents
+				// the outer loop from racing on ReadFrame.
+				return
 
 			case "msg_ack":
 				var m protocol.MsgAckMsg
