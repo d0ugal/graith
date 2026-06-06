@@ -63,9 +63,9 @@ var listCmd = &cobra.Command{
 		})
 
 		tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "REPO\tNAME\tAGENT\tSTATUS\tID")
+		fmt.Fprintln(tw, "ID\tNAME\tREPO\tAGENT\tSTATUS")
 		for _, s := range list.Sessions {
-			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", s.RepoName, s.Name, s.Agent, s.Status, s.ID)
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", s.ID, s.Name, s.RepoName, s.Agent, s.Status)
 		}
 		tw.Flush()
 

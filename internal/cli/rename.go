@@ -9,7 +9,7 @@ import (
 )
 
 var renameCmd = &cobra.Command{
-	Use:   "rename <old> <new>",
+	Use:   "rename <name-or-id> <new-name>",
 	Short: "Rename a session",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {

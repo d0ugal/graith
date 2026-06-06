@@ -9,8 +9,8 @@ import (
 )
 
 var deleteCmd = &cobra.Command{
-	Use:   "delete <name>",
-	Short: "Delete a session",
+	Use:   "delete <name-or-id>",
+	Short: "Delete a session by name or ID",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		c, err := client.New(cfg, paths, cfgFile)
