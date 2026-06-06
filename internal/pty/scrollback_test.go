@@ -47,7 +47,7 @@ func TestScrollbackTailLargeFile(t *testing.T) {
 	defer sb.Close()
 
 	for i := range 2000 {
-		sb.Write([]byte(fmt.Sprintf("line %04d\n", i)))
+		fmt.Fprintf(sb, "line %04d\n", i)
 	}
 	tail, err := sb.Tail(3)
 	if err != nil {

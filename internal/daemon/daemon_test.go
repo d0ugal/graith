@@ -28,7 +28,7 @@ func TestGenerateID(t *testing.T) {
 	t.Run("hex characters", func(t *testing.T) {
 		id := generateID()
 		for _, c := range id {
-			if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
 				t.Errorf("generateID() contains non-hex char %q in %q", c, id)
 			}
 		}

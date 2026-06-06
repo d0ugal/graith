@@ -93,9 +93,9 @@ type compactDelegate struct {
 	cols columnWidths
 }
 
-func (d compactDelegate) Height() int                          { return 1 }
-func (d compactDelegate) Spacing() int                         { return 0 }
-func (d compactDelegate) Update(tea.Msg, *list.Model) tea.Cmd  { return nil }
+func (d compactDelegate) Height() int                         { return 1 }
+func (d compactDelegate) Spacing() int                        { return 0 }
+func (d compactDelegate) Update(tea.Msg, *list.Model) tea.Cmd { return nil }
 
 func pad(s string, width int) string {
 	if n := width - len(s); n > 0 {
