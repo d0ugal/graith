@@ -16,19 +16,21 @@ var infoCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cwd, _ := os.Getwd()
 
-		c, err := client.New(cfg, paths, cfgFile)
+		c, err := client.Connect(cfg, paths, cfgFile)
 		if err != nil {
 			return err
 		}
 		defer c.Close()
 
-		c.Handshake()
-		c.ReadControlResponse()
-
 		c.SendControl("list", struct{}{})
-		resp, _ := c.ReadControlResponse()
+		resp, err := c.ReadControlResponse()
+		if err != nil {
+			return err
+		}
 		var list protocol.SessionListMsg
-		protocol.DecodePayload(resp, &list)
+		if err := protocol.DecodePayload(resp, &list); err != nil {
+			return err
+		}
 
 		for _, s := range list.Sessions {
 			if strings.HasPrefix(cwd, s.WorktreePath) {

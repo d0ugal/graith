@@ -37,6 +37,24 @@ func New(cfg *config.Config, paths config.Paths, configFile string) (*Client, er
 	return c, nil
 }
 
+// Connect creates a new client, performs the handshake, and reads the
+// handshake response. On failure the connection is closed automatically.
+func Connect(cfg *config.Config, paths config.Paths, configFile string) (*Client, error) {
+	c, err := New(cfg, paths, configFile)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.Handshake(); err != nil {
+		c.Close()
+		return nil, err
+	}
+	if _, err := c.ReadControlResponse(); err != nil {
+		c.Close()
+		return nil, err
+	}
+	return c, nil
+}
+
 func (c *Client) Close() {
 	c.conn.Close()
 }

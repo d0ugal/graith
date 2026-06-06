@@ -28,16 +28,11 @@ func init() {
 }
 
 func runAttach(cmd *cobra.Command, name string) error {
-	c, err := client.New(cfg, paths, cfgFile)
+	c, err := client.Connect(cfg, paths, cfgFile)
 	if err != nil {
 		return err
 	}
 	defer c.Close()
-
-	if err := c.Handshake(); err != nil {
-		return err
-	}
-	c.ReadControlResponse()
 
 	c.SendControl("list", struct{}{})
 	resp, err := c.ReadControlResponse()
@@ -173,19 +168,7 @@ func runAttachByID(c *client.Client, sessionID string) error {
 }
 
 func freshClient() (*client.Client, error) {
-	c, err := client.New(cfg, paths, cfgFile)
-	if err != nil {
-		return nil, err
-	}
-	if err := c.Handshake(); err != nil {
-		c.Close()
-		return nil, err
-	}
-	if _, err := c.ReadControlResponse(); err != nil {
-		c.Close()
-		return nil, err
-	}
-	return c, nil
+	return client.Connect(cfg, paths, cfgFile)
 }
 
 func reconnectToSession(sessionID string) (*client.Client, error) {
