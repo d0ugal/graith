@@ -69,7 +69,11 @@ func DirtyFiles(dir string) ([]string, error) {
 }
 
 func UnpushedCommitSummaries(worktreePath, baseBranch string) ([]string, error) {
-	out, err := RunOutput(worktreePath, "log", "--oneline", "origin/"+baseBranch+"..HEAD")
+	baseRef := "origin/" + baseBranch
+	if !RefExists(worktreePath, baseRef) {
+		baseRef = baseBranch
+	}
+	out, err := RunOutput(worktreePath, "log", "--oneline", baseRef+"..HEAD")
 	if err != nil {
 		return nil, err
 	}

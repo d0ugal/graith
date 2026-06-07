@@ -34,11 +34,11 @@ var deleteCmd = &cobra.Command{
 		}
 
 		if !deleteForce && session.WorktreePath != "" {
-			needsConfirm, err := confirmDelete(session)
+			confirmed, err := confirmDelete(session)
 			if err != nil {
 				return err
 			}
-			if !needsConfirm {
+			if !confirmed {
 				return nil
 			}
 		}
@@ -78,20 +78,17 @@ func resolveSessionInfo(c *client.Client, nameOrID string) (*protocol.SessionInf
 }
 
 func confirmDelete(session *protocol.SessionInfo) (bool, error) {
-	var dirtyFiles []string
-	var unpushedCommits []string
+	dirtyFiles, dirtyErr := git.DirtyFiles(session.WorktreePath)
+	unpushedCommits, unpushedErr := git.UnpushedCommitSummaries(session.WorktreePath, session.BaseBranch)
 
-	if df, err := git.DirtyFiles(session.WorktreePath); err == nil {
-		dirtyFiles = df
-	}
-	if session.BaseBranch != "" {
-		if uc, err := git.UnpushedCommitSummaries(session.WorktreePath, session.BaseBranch); err == nil {
-			unpushedCommits = uc
-		}
-	}
+	gitFailed := dirtyErr != nil || (session.BaseBranch != "" && unpushedErr != nil)
 
-	if len(dirtyFiles) == 0 && len(unpushedCommits) == 0 {
+	if len(dirtyFiles) == 0 && len(unpushedCommits) == 0 && !gitFailed {
 		return true, nil
+	}
+
+	if out.IsJSON() {
+		return false, fmt.Errorf("session %q has uncommitted changes or unpushed commits; use --force to delete", session.Name)
 	}
 
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
@@ -114,6 +111,10 @@ func confirmDelete(session *protocol.SessionInfo) (bool, error) {
 			out.Print("    %s\n", c)
 		}
 		out.Print("\n")
+	}
+
+	if gitFailed {
+		out.Print("  Warning: could not fully check worktree status\n\n")
 	}
 
 	out.Print("Delete anyway? [y/N] ")
