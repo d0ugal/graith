@@ -8,6 +8,19 @@ on:
       - CHANGELOG.md
 
 jobs:
+  build:
+    name: Build
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: go build -v ./cmd/graith
+
   test:
     name: Test
     strategy:
@@ -19,7 +32,24 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-      - run: go test -v -race -count=1 ./...
+      - run: go test -v -race -count=1 -coverprofile=coverage.txt ./...
+      - uses: codecov/codecov-action@v5
+        if: matrix.os == 'ubuntu-latest'
+        with:
+          files: coverage.txt
+
+  integration:
+    name: Integration
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: go test -v -race -count=1 -tags=integration ./internal/integration/...
 
   lint:
     name: Lint
@@ -27,3 +57,14 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - run: make lint-only
+
+  govulncheck:
+    name: Vulnerability Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - run: govulncheck ./...
