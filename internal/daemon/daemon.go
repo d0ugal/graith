@@ -713,6 +713,54 @@ func (sm *SessionManager) checkIdleSession(s *SessionState) bool {
 	return false
 }
 
+// ReloadConfig loads the config from disk and swaps it in, logging what changed.
+func (sm *SessionManager) ReloadConfig() error {
+	cfg, err := config.LoadOrDefault(sm.configFile)
+	if err != nil {
+		return err
+	}
+	sm.applyConfig(cfg)
+	return nil
+}
+
+func (sm *SessionManager) applyConfig(newCfg *config.Config) {
+	sm.mu.Lock()
+	old := sm.cfg
+	sm.cfg = newCfg
+	sm.mu.Unlock()
+
+	if old.DefaultAgent != newCfg.DefaultAgent {
+		sm.log.Info("config changed", "key", "default_agent", "old", old.DefaultAgent, "new", newCfg.DefaultAgent)
+	}
+	if old.BranchPrefix != newCfg.BranchPrefix {
+		sm.log.Info("config changed", "key", "branch_prefix", "old", old.BranchPrefix, "new", newCfg.BranchPrefix)
+	}
+	if old.FetchOnCreate != newCfg.FetchOnCreate {
+		sm.log.Info("config changed", "key", "fetch_on_create", "old", old.FetchOnCreate, "new", newCfg.FetchOnCreate)
+	}
+	if old.GitHubUsername != newCfg.GitHubUsername {
+		sm.log.Info("config changed", "key", "github_username", "old", old.GitHubUsername, "new", newCfg.GitHubUsername)
+	}
+	if old.Keybindings != newCfg.Keybindings {
+		sm.log.Info("config changed", "key", "keybindings")
+	}
+	if old.Notifications != newCfg.Notifications {
+		sm.log.Info("config changed", "key", "notifications")
+	}
+	for name, agent := range newCfg.Agents {
+		if oldAgent, ok := old.Agents[name]; !ok {
+			sm.log.Info("config changed", "key", "agents", "action", "added", "agent", name)
+		} else if oldAgent.Command != agent.Command || oldAgent.IdleTimeout != agent.IdleTimeout {
+			sm.log.Info("config changed", "key", "agents", "action", "modified", "agent", name)
+		}
+	}
+	for name := range old.Agents {
+		if _, ok := newCfg.Agents[name]; !ok {
+			sm.log.Info("config changed", "key", "agents", "action", "removed", "agent", name)
+		}
+	}
+}
+
 // Run starts the daemon: acquires PID file, listens on the Unix socket,
 // serves connections, and blocks until SIGTERM/SIGINT or an upgrade signal.
 func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) error {
@@ -792,56 +840,74 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 	go func() { _ = srv.Serve(ctx) }()
 	go sm.RunDetectionLoop(ctx)
 
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
-
-	select {
-	case <-sigCh:
-		log.Info("shutting down")
-		cancel()
-		sm.StopAll(ctx)
-		srv.Shutdown()
-		os.Remove(paths.SocketPath)
-		ReleasePIDFile(paths.PIDFile)
-
-	case <-sm.upgradeCh:
-		log.Info("preparing upgrade")
-
-		unixL, ok := l.(*net.UnixListener)
-		if !ok {
-			log.Error("listener is not a unix listener, cannot upgrade")
-			return fmt.Errorf("upgrade failed: listener type mismatch")
-		}
-		listenerFile, err := unixL.File()
-		if err != nil {
-			log.Error("get listener fd", "err", err)
-			return fmt.Errorf("upgrade failed: %w", err)
-		}
-		listenerFd := listenerFile.Fd()
-
-		manifest, err := sm.PrepareUpgrade(listenerFd, configFile)
-		if err != nil {
-			listenerFile.Close()
-			log.Error("prepare upgrade", "err", err)
-			return fmt.Errorf("upgrade failed: %w", err)
-		}
-
-		manifestPath, err := WriteManifest(paths.RuntimeDir, manifest)
-		if err != nil {
-			listenerFile.Close()
-			log.Error("write manifest", "err", err)
-			return fmt.Errorf("upgrade failed: %w", err)
-		}
-
-		log.Info("exec-ing new binary", "manifest", manifestPath, "sessions", len(manifest.Sessions))
-
-		if err := ExecUpgrade(manifestPath, configFile); err != nil {
-			listenerFile.Close()
-			os.Remove(manifestPath)
-			log.Error("exec failed", "err", err)
-			return fmt.Errorf("upgrade exec failed: %w", err)
-		}
+	if configFile != "" {
+		w := config.NewWatcher(configFile, sm.applyConfig, log)
+		go func() {
+			if err := w.Run(ctx); err != nil && ctx.Err() == nil {
+				log.Error("config watcher stopped", "err", err)
+			}
+		}()
 	}
 
-	return nil
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
+
+	for {
+		select {
+		case sig := <-sigCh:
+			if sig == syscall.SIGHUP {
+				log.Info("received SIGHUP, reloading config")
+				if err := sm.ReloadConfig(); err != nil {
+					log.Error("config reload failed", "err", err)
+				}
+				continue
+			}
+			log.Info("shutting down")
+			cancel()
+			sm.StopAll(ctx)
+			srv.Shutdown()
+			os.Remove(paths.SocketPath)
+			ReleasePIDFile(paths.PIDFile)
+			return nil
+
+		case <-sm.upgradeCh:
+			log.Info("preparing upgrade")
+
+			unixL, ok := l.(*net.UnixListener)
+			if !ok {
+				log.Error("listener is not a unix listener, cannot upgrade")
+				return fmt.Errorf("upgrade failed: listener type mismatch")
+			}
+			listenerFile, err := unixL.File()
+			if err != nil {
+				log.Error("get listener fd", "err", err)
+				return fmt.Errorf("upgrade failed: %w", err)
+			}
+			listenerFd := listenerFile.Fd()
+
+			manifest, err := sm.PrepareUpgrade(listenerFd, configFile)
+			if err != nil {
+				listenerFile.Close()
+				log.Error("prepare upgrade", "err", err)
+				return fmt.Errorf("upgrade failed: %w", err)
+			}
+
+			manifestPath, err := WriteManifest(paths.RuntimeDir, manifest)
+			if err != nil {
+				listenerFile.Close()
+				log.Error("write manifest", "err", err)
+				return fmt.Errorf("upgrade failed: %w", err)
+			}
+
+			log.Info("exec-ing new binary", "manifest", manifestPath, "sessions", len(manifest.Sessions))
+
+			if err := ExecUpgrade(manifestPath, configFile); err != nil {
+				listenerFile.Close()
+				os.Remove(manifestPath)
+				log.Error("exec failed", "err", err)
+				return fmt.Errorf("upgrade exec failed: %w", err)
+			}
+			return nil
+		}
+	}
 }

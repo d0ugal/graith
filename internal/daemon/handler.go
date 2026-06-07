@@ -458,6 +458,13 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					Rows:          snap.Rows,
 				})
 
+			case "reload":
+				if err := sm.ReloadConfig(); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+				} else {
+					sendControl("reloaded", struct{}{})
+				}
+
 			case "upgrade":
 				select {
 				case sm.upgradeCh <- struct{}{}:
