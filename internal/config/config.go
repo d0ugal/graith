@@ -14,10 +14,16 @@ type Config struct {
 	GitHubUsername string           `toml:"github_username"`
 	BranchPrefix   string           `toml:"branch_prefix"`
 	FetchOnCreate  bool             `toml:"fetch_on_create"`
+	StatusBar      StatusBar        `toml:"status_bar"`
 	Keybindings    Keybindings      `toml:"keybindings"`
 	Notifications  Notifications    `toml:"notifications"`
 	Messages       Messages         `toml:"messages"`
 	Agents         map[string]Agent `toml:"agents"`
+}
+
+type StatusBar struct {
+	Enabled  bool   `toml:"enabled"`
+	Position string `toml:"position"`
 }
 
 type Messages struct {
@@ -107,6 +113,10 @@ func Default() *Config {
 		DefaultAgent:  "claude",
 		BranchPrefix:  "{username}/graith",
 		FetchOnCreate: true,
+		StatusBar: StatusBar{
+			Enabled:  true,
+			Position: "bottom",
+		},
 		Notifications: Notifications{
 			Enabled:    true,
 			OnApproval: true,
