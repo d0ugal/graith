@@ -86,7 +86,7 @@ func TestBuildGroupedItems_GroupsByRepo(t *testing.T) {
 	sessions := testSessions()
 	items := buildGroupedItems(sessions)
 
-	// Expect: groupHeader("graith"), session, session, groupHeader("other-repo"), session
+	// Expect: groupHeader("graith"), 2 sessions, groupHeader("other-repo"), 1 session
 	if len(items) != 5 {
 		t.Fatalf("expected 5 items (2 headers + 3 sessions), got %d", len(items))
 	}
