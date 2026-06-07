@@ -447,15 +447,15 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "session not found"})
 					continue
 				}
-				cap := ptySess.ScreenSnapshot()
+				snap := ptySess.ScreenSnapshot()
 				sendControl("screen_snapshot_response", protocol.ScreenSnapshotResponseMsg{
 					SessionID:     ss.SessionID,
-					Frame:         cap.Frame,
-					CursorX:       cap.CursorX,
-					CursorY:       cap.CursorY,
-					CursorVisible: cap.CursorVisible,
-					Cols:          cap.Cols,
-					Rows:          cap.Rows,
+					Frame:         snap.Frame,
+					CursorX:       snap.CursorX,
+					CursorY:       snap.CursorY,
+					CursorVisible: snap.CursorVisible,
+					Cols:          snap.Cols,
+					Rows:          snap.Rows,
 				})
 
 			case "upgrade":
