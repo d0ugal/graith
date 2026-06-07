@@ -437,6 +437,7 @@ func toSessionInfo(s SessionState) protocol.SessionInfo {
 		Agent:          s.Agent,
 		AgentSessionID: s.AgentSessionID,
 		Status:         string(s.Status),
+		AgentStatus:    s.AgentStatus,
 		ExitCode:       s.ExitCode,
 		CreatedAt:      s.CreatedAt.Format(time.RFC3339),
 	}
