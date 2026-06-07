@@ -119,6 +119,8 @@ var listCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(listCmd)
 	listCmd.Flags().StringVar(&listRepo, "repo", "", "filter by repo path")
+
+	listCmd.RegisterFlagCompletionFunc("repo", completeRepoPaths)
 }
 
 func shortDuration(d time.Duration) string {
