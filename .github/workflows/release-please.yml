@@ -17,25 +17,8 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.RELEASE_TOKEN }}
       - uses: googleapis/release-please-action@v5
-        id: release_please
         with:
           release-type: go
           path: .
           token: ${{ secrets.RELEASE_TOKEN }}
           target-branch: main
-      - name: Fetch new tag
-        if: steps.release_please.outputs.release_created == 'true'
-        run: git fetch --tags origin
-      - uses: actions/setup-go@v6
-        if: steps.release_please.outputs.release_created == 'true'
-        with:
-          go-version-file: go.mod
-      - uses: goreleaser/goreleaser-action@v6
-        if: steps.release_please.outputs.release_created == 'true'
-        with:
-          version: "~> v2"
-          args: release --clean
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Used by the brews publisher to push the formula to d0ugal/homebrew-tap.
-          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
