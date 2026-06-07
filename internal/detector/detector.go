@@ -1,6 +1,9 @@
 package detector
 
-import "strings"
+import (
+	"strings"
+	"time"
+)
 
 type AgentStatus string
 
@@ -172,6 +175,10 @@ func (d *Detector) IsReady(content string) bool {
 	lines := lastNonEmptyLines(content, 15)
 	recentLower := strings.ToLower(strings.Join(lines, "\n"))
 
+	if strings.Contains(recentLower, "how can i help") {
+		return true
+	}
+
 	checkLines := lines
 	if len(checkLines) > 5 {
 		checkLines = checkLines[len(checkLines)-5:]
@@ -187,9 +194,6 @@ func (d *Detector) IsReady(content string) bool {
 			if strings.Contains(recentLower, "continue?") {
 				return true
 			}
-			if strings.Contains(strings.Join(lines, "\n"), "How can I help") {
-				return true
-			}
 		}
 
 		if clean == ">" || clean == "❯" || clean == "> " || clean == "❯ " {
@@ -203,8 +207,18 @@ func (d *Detector) IsReady(content string) bool {
 	return false
 }
 
-// Detect returns the detected status based on terminal content.
-func (d *Detector) Detect(content string) AgentStatus {
+// RecentOutputThreshold is the duration within which PTY output implies the
+// agent is actively working. Used as a fallback when pattern matching cannot
+// determine the state.
+const RecentOutputThreshold = 3 * time.Second
+
+// OutputAgeUnknown signals that output timing is not available.
+const OutputAgeUnknown = time.Duration(-1)
+
+// Detect returns the detected status based on terminal content and how
+// recently the PTY produced output. Pass OutputAgeUnknown if timing is
+// not available.
+func (d *Detector) Detect(content string, outputAge time.Duration) AgentStatus {
 	if d.IsBusy(content) {
 		return StatusActive
 	}
@@ -213,6 +227,9 @@ func (d *Detector) Detect(content string) AgentStatus {
 	}
 	if d.IsReady(content) {
 		return StatusReady
+	}
+	if outputAge >= 0 && outputAge < RecentOutputThreshold {
+		return StatusActive
 	}
 	return StatusUnknown
 }
