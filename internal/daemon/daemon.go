@@ -51,6 +51,10 @@ func NewSessionManager(cfg *config.Config, paths config.Paths, log *slog.Logger)
 	}
 }
 
+func (sm *SessionManager) SetMsgStore(ms *MsgStore) {
+	sm.messages = ms
+}
+
 func (sm *SessionManager) KickAttachedClient(sessionID string) {
 	sm.mu.Lock()
 	ac, ok := sm.attachedClients[sessionID]
