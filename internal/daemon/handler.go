@@ -12,8 +12,6 @@ import (
 	"github.com/d0ugal/graith/internal/version"
 )
 
-const protocolVersion = "1.0"
-
 // HandleConnection processes the frame protocol for a single client connection.
 func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, log *slog.Logger) {
 	reader := protocol.NewFrameReader(conn)
@@ -70,7 +68,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				}
 				clientCols = h.TerminalSize[0]
 				clientRows = h.TerminalSize[1]
-				sendControl("handshake_ok", protocol.HandshakeOkMsg{Version: protocolVersion, DaemonVersion: version.Version})
+				sendControl("handshake_ok", protocol.HandshakeOkMsg{Version: protocol.Version, DaemonVersion: version.Version})
 				log.Info("client connected", "client_id", h.ClientID, "cwd", h.Cwd)
 
 			case "list":

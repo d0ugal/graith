@@ -5,6 +5,8 @@ import (
 	"fmt"
 )
 
+const Version = "1.0"
+
 type Envelope struct {
 	Type    string          `json:"type"`
 	Payload json.RawMessage `json:"payload,omitempty"`
@@ -85,22 +87,6 @@ type LogsMsg struct {
 	Follow    bool   `json:"follow"`
 }
 
-type ScrollbackMsg struct {
-	SessionID string `json:"session_id"`
-	Lines     int    `json:"lines"`
-}
-
-type SearchMsg struct {
-	SessionID string `json:"session_id"`
-	Query     string `json:"query"`
-	Direction string `json:"direction"`
-}
-
-type ConfirmResponseMsg struct {
-	ConfirmID string `json:"confirm_id"`
-	Confirmed bool   `json:"confirmed"`
-}
-
 type MsgPubMsg struct {
 	Stream     string `json:"stream"`
 	Body       string `json:"body"`
@@ -167,17 +153,6 @@ type DetachedMsg struct {
 
 type ErrorMsg struct {
 	Message string `json:"message"`
-}
-
-type ConfirmMsg struct {
-	ConfirmID string `json:"confirm_id"`
-	Prompt    string `json:"prompt"`
-}
-
-type SessionUpdateMsg struct {
-	SessionID string `json:"session_id"`
-	Status    string `json:"status"`
-	ExitCode  *int   `json:"exit_code,omitempty"`
 }
 
 type ScreenPreviewMsg struct {

@@ -4,7 +4,6 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -323,11 +322,6 @@ func (s *MsgStore) Cleanup(maxAge time.Duration, maxPerStream int) (int64, error
 
 func (s *MsgStore) Close() error {
 	return s.db.Close()
-}
-
-func (s *MsgStore) MessageToJSON(m Message) []byte {
-	data, _ := json.Marshal(m)
-	return data
 }
 
 func nullStr(s string) any {

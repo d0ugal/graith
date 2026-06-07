@@ -37,7 +37,7 @@ var doctorCmd = &cobra.Command{
 				writer := protocol.NewFrameWriter(conn)
 
 				hsData, _ := protocol.EncodeControl("handshake", protocol.HandshakeMsg{
-					Version:  "1.0",
+					Version:  protocol.Version,
 					ClientID: "doctor",
 				})
 				_ = writer.WriteFrame(protocol.ChannelControl, hsData)
