@@ -37,6 +37,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         with:
           files: coverage.txt
+          token: ${{ secrets.CODECOV_TOKEN }}
 
   integration:
     name: Integration
@@ -66,5 +67,5 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-      - run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - run: go install golang.org/x/vuln/cmd/govulncheck@v1.3.0
       - run: govulncheck ./...
