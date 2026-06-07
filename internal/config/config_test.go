@@ -124,6 +124,67 @@ func TestIdleTimeoutDuration(t *testing.T) {
 	}
 }
 
+func TestParseDurationWithDays(t *testing.T) {
+	tests := []struct {
+		input string
+		want  time.Duration
+	}{
+		{"30d", 30 * 24 * time.Hour},
+		{"7d", 7 * 24 * time.Hour},
+		{"1d", 24 * time.Hour},
+		{"24h", 24 * time.Hour},
+		{"30m", 30 * time.Minute},
+		{"", 0},
+		{"bogus", 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := ParseDurationWithDays(tt.input)
+			if got != tt.want {
+				t.Errorf("ParseDurationWithDays(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMessagesMaxAgeDuration(t *testing.T) {
+	m := Messages{MaxAge: "30d", MaxPerStream: 1000}
+	got := m.MaxAgeDuration()
+	want := 30 * 24 * time.Hour
+	if got != want {
+		t.Errorf("MaxAgeDuration() = %v, want %v", got, want)
+	}
+
+	empty := Messages{}
+	if empty.MaxAgeDuration() != 0 {
+		t.Errorf("empty MaxAgeDuration() = %v, want 0", empty.MaxAgeDuration())
+	}
+}
+
+func TestLoadConfigMessages(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	toml := `
+[messages]
+max_age = "7d"
+max_per_stream = 500
+`
+	os.WriteFile(cfgPath, []byte(toml), 0o644)
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Messages.MaxAge != "7d" {
+		t.Errorf("MaxAge = %q, want 7d", cfg.Messages.MaxAge)
+	}
+	if cfg.Messages.MaxPerStream != 500 {
+		t.Errorf("MaxPerStream = %d, want 500", cfg.Messages.MaxPerStream)
+	}
+	if got := cfg.Messages.MaxAgeDuration(); got != 7*24*time.Hour {
+		t.Errorf("MaxAgeDuration() = %v, want 168h", got)
+	}
+}
+
 func TestLoadConfigIdleTimeout(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.toml")

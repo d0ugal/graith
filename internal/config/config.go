@@ -16,7 +16,34 @@ type Config struct {
 	FetchOnCreate  bool             `toml:"fetch_on_create"`
 	Keybindings    Keybindings      `toml:"keybindings"`
 	Notifications  Notifications    `toml:"notifications"`
+	Messages       Messages         `toml:"messages"`
 	Agents         map[string]Agent `toml:"agents"`
+}
+
+type Messages struct {
+	MaxAge       string `toml:"max_age"`
+	MaxPerStream int    `toml:"max_per_stream"`
+}
+
+func (m Messages) MaxAgeDuration() time.Duration {
+	if m.MaxAge == "" {
+		return 0
+	}
+	return ParseDurationWithDays(m.MaxAge)
+}
+
+func ParseDurationWithDays(s string) time.Duration {
+	if len(s) > 1 && s[len(s)-1] == 'd' {
+		var days int
+		if _, err := fmt.Sscanf(s, "%dd", &days); err == nil {
+			return time.Duration(days) * 24 * time.Hour
+		}
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		return 0
+	}
+	return d
 }
 
 type Keybindings struct {

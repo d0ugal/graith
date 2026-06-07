@@ -74,6 +74,7 @@ func initSchema(db *sql.DB) error {
 		);
 		CREATE INDEX IF NOT EXISTS idx_messages_stream_seq ON messages(stream, seq);
 		CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(thread_id) WHERE thread_id IS NOT NULL;
+		CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);
 
 		CREATE TABLE IF NOT EXISTS cursors (
 			subscriber TEXT NOT NULL,
@@ -263,6 +264,61 @@ func (s *MsgStore) Subscribe(stream string) (chan Message, func()) {
 		}
 	}
 	return ch, unsub
+}
+
+func (s *MsgStore) Cleanup(maxAge time.Duration, maxPerStream int) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var total int64
+
+	if maxAge > 0 {
+		cutoff := time.Now().UTC().Add(-maxAge).Format(time.RFC3339Nano)
+		res, err := s.db.Exec("DELETE FROM messages WHERE created_at < ?", cutoff)
+		if err != nil {
+			return 0, fmt.Errorf("cleanup by age: %w", err)
+		}
+		n, _ := res.RowsAffected()
+		total += n
+	}
+
+	if maxPerStream > 0 {
+		rows, err := s.db.Query("SELECT stream, COUNT(*) as cnt FROM messages GROUP BY stream HAVING cnt > ?", maxPerStream)
+		if err != nil {
+			return total, fmt.Errorf("cleanup by count: list streams: %w", err)
+		}
+
+		type streamCount struct {
+			name  string
+			count int64
+		}
+		var streams []streamCount
+		for rows.Next() {
+			var sc streamCount
+			if err := rows.Scan(&sc.name, &sc.count); err != nil {
+				rows.Close()
+				return total, fmt.Errorf("cleanup by count: scan: %w", err)
+			}
+			streams = append(streams, sc)
+		}
+		rows.Close()
+
+		for _, sc := range streams {
+			res, err := s.db.Exec(
+				`DELETE FROM messages WHERE stream = ? AND id NOT IN (
+					SELECT id FROM messages WHERE stream = ? ORDER BY seq DESC LIMIT ?
+				)`,
+				sc.name, sc.name, maxPerStream,
+			)
+			if err != nil {
+				return total, fmt.Errorf("cleanup by count: delete from %s: %w", sc.name, err)
+			}
+			n, _ := res.RowsAffected()
+			total += n
+		}
+	}
+
+	return total, nil
 }
 
 func (s *MsgStore) Close() error {
