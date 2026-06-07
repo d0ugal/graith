@@ -130,7 +130,11 @@ var msgSendCmd = &cobra.Command{
 		}
 
 		if !msgSendQuiet {
-			hint := fmt.Sprintf("You have a new message. Read it with: gr msg sub --topic inbox:%s --all", sessionID)
+			sender := senderName
+			if sender == "" {
+				sender = senderID
+			}
+			hint := fmt.Sprintf("New message from %s. Read: gr msg sub --topic inbox:%s --all | Reply: gr msg send %s \"<reply>\"", sender, sessionID, sender)
 			c.SendControl("type", protocol.TypeMsg{
 				SessionID: sessionID,
 				Input:     hint,
