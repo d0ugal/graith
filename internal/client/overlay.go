@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
@@ -41,11 +42,66 @@ func (s sessionItem) Title() string {
 }
 
 func (s sessionItem) Description() string {
-	desc := fmt.Sprintf("%s  %s", s.info.Agent, s.info.Status)
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("#626262"))
+
+	var parts []string
+	parts = append(parts, s.info.Agent)
+
 	if s.info.AgentStatus != "" && s.info.Status == "running" {
-		desc += fmt.Sprintf("  [%s]", s.info.AgentStatus)
+		parts = append(parts, fmt.Sprintf("[%s]", s.info.AgentStatus))
+	} else {
+		parts = append(parts, s.info.Status)
 	}
-	return desc
+
+	if s.info.Branch != "" {
+		branch := s.info.Branch
+		// Strip common graith prefix (username/graith/...) to save space.
+		if p := strings.SplitN(branch, "/", 3); len(p) == 3 {
+			branch = p[2]
+		}
+		parts = append(parts, dim.Render(branch))
+	}
+
+	var gitParts []string
+	if s.info.Dirty {
+		gitParts = append(gitParts, "dirty")
+	}
+	if s.info.UnpushedCount > 0 {
+		gitParts = append(gitParts, fmt.Sprintf("%d ahead", s.info.UnpushedCount))
+	}
+	if len(gitParts) > 0 {
+		parts = append(parts, strings.Join(gitParts, ", "))
+	}
+
+	now := time.Now()
+	if t, err := time.Parse(time.RFC3339, s.info.CreatedAt); err == nil {
+		parts = append(parts, dim.Render(shortDur(now.Sub(t))))
+	}
+	if s.info.LastAttachedAt != "" {
+		if t, err := time.Parse(time.RFC3339, s.info.LastAttachedAt); err == nil {
+			parts = append(parts, dim.Render("attached "+shortDur(now.Sub(t))+" ago"))
+		}
+	}
+
+	return strings.Join(parts, "  ")
+}
+
+func shortDur(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	}
+	if d < 24*time.Hour {
+		h := int(d.Hours())
+		m := int(d.Minutes()) % 60
+		if m == 0 {
+			return fmt.Sprintf("%dh", h)
+		}
+		return fmt.Sprintf("%dh%dm", h, m)
+	}
+	return fmt.Sprintf("%dd", int(d.Hours())/24)
 }
 
 func (s sessionItem) FilterValue() string {
