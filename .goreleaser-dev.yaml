@@ -2,7 +2,7 @@ version: 2
 
 builds:
   - main: ./cmd/graith
-    binary: gr
+    binary: gr-dev
     ldflags:
       - -s -w
       - -X github.com/d0ugal/graith/internal/version.Version={{.Version}}
@@ -28,12 +28,13 @@ nightly:
   version_template: "{{ incpatch .Version }}-dev.{{ .ShortCommit }}"
 
 brews:
-  - repository:
+  - name: graith-dev
+    repository:
       owner: d0ugal
-      name: homebrew-graith-dev
+      name: homebrew-tap
       token: "{{ .Env.RELEASE_TOKEN }}"
     homepage: https://github.com/d0ugal/graith
     description: "Terminal session manager for AI coding agents (dev build)"
     license: MIT
     install: |
-      bin.install "gr"
+      bin.install "gr-dev"
