@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/d0ugal/graith/internal/protocol"
 )
@@ -123,7 +123,7 @@ func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.scrollToCursor()
 		return m, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch m.state {
 		case dashStateConfirmDelete:
 			switch msg.String() {
@@ -195,9 +195,9 @@ func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m DashboardModel) View() string {
+func (m DashboardModel) View() tea.View {
 	if m.width == 0 || m.height == 0 {
-		return ""
+		return tea.NewView("")
 	}
 
 	var b strings.Builder
@@ -301,7 +301,9 @@ func (m DashboardModel) View() string {
 	b.WriteString(helpStyle.Render("  enter/a attach  s stop  x delete  r resume  q quit"))
 	b.WriteString("\n")
 
-	return b.String()
+	v := tea.NewView(b.String())
+	v.AltScreen = true
+	return v
 }
 
 type dashCols struct {
@@ -496,7 +498,7 @@ func RunDashboard(sessions []protocol.SessionInfo, refresh func() []protocol.Ses
 		sortDashboardSessions(s)
 		return s
 	})
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	p := tea.NewProgram(m)
 
 	final, err := p.Run()
 	if err != nil {
