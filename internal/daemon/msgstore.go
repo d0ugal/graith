@@ -244,6 +244,21 @@ func (s *MsgStore) ListStreams(subscriber string) ([]StreamInfo, error) {
 	return streams, rows.Err()
 }
 
+func (s *MsgStore) TotalUnread(subscriber string) int {
+	var count int
+	err := s.db.QueryRow(`
+		SELECT COUNT(*) FROM messages m
+		WHERE m.seq > COALESCE(
+			(SELECT c.ack_seq FROM cursors c
+			 WHERE c.subscriber = ? AND c.stream = m.stream), 0
+		)
+	`, subscriber).Scan(&count)
+	if err != nil {
+		return 0
+	}
+	return count
+}
+
 func (s *MsgStore) Subscribe(stream string) (chan Message, func()) {
 	ch := make(chan Message, 64)
 
