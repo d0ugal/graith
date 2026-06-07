@@ -13,6 +13,7 @@ import (
 
 var attachCmd = &cobra.Command{
 	Use:               "attach [name-or-id]",
+	Aliases:           []string{"a"},
 	Short:             "Attach to a session",
 	Args:              cobra.MaximumNArgs(1),
 	ValidArgsFunction: completeSessionNames,

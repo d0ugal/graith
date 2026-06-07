@@ -14,8 +14,9 @@ import (
 var doctorAutofix bool
 
 var doctorCmd = &cobra.Command{
-	Use:   "doctor",
-	Short: "Health checks and diagnostics",
+	Use:     "doctor",
+	Aliases: []string{"doc"},
+	Short:   "Health checks and diagnostics",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ok := true
 
