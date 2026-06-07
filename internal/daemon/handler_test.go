@@ -115,7 +115,6 @@ func (h *testHarness) readControlMsgTimeout(t *testing.T, timeout time.Duration)
 	}
 	ch := make(chan result, 1)
 	go func() {
-		env := protocol.Envelope{}
 		for {
 			frame, err := h.reader.ReadFrame()
 			if err != nil {
@@ -123,7 +122,7 @@ func (h *testHarness) readControlMsgTimeout(t *testing.T, timeout time.Duration)
 				return
 			}
 			if frame.Channel == protocol.ChannelControl {
-				env, err = protocol.DecodeControl(frame.Payload)
+				env, err := protocol.DecodeControl(frame.Payload)
 				ch <- result{env: env, err: err}
 				return
 			}
