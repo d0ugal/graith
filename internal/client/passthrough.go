@@ -22,6 +22,7 @@ const (
 	ResultShell
 	ResultQuit
 	ResultDisconnected
+	ResultRestart
 )
 
 // kittyCtrlSeq returns the Kitty keyboard protocol escape sequence for
@@ -33,6 +34,18 @@ func kittyCtrlSeq(prefixByte byte) []byte {
 	}
 	codepoint := int(prefixByte) + 96
 	return []byte(fmt.Sprintf("\x1b[%d;5u", codepoint))
+}
+
+// showHelpBar renders a one-line help bar at the bottom of the screen using
+// ANSI save-cursor / restore-cursor so the agent's output isn't disturbed.
+func showHelpBar(w io.Writer) {
+	// Save cursor, move to last line, clear it, write help, restore cursor.
+	help := "\x1b[7m d detach  w sessions  s shell  r restart \x1b[0m"
+	w.Write([]byte("\x1b7\x1b[999B\r\x1b[2K" + help + "\x1b8"))
+}
+
+func clearHelpBar(w io.Writer) {
+	w.Write([]byte("\x1b7\x1b[999B\r\x1b[2K\x1b8"))
 }
 
 func (c *Client) RunPassthrough(ctx context.Context, prefixByte byte) PassthroughResult {
@@ -180,6 +193,7 @@ func (c *Client) runPassthroughLoop(ctx context.Context, prefixByte byte, stdin 
 			for i := 0; i < n; i++ {
 				if prefixSeen {
 					prefixSeen = false
+					clearHelpBar(stdout)
 					switch input[i] {
 					case prefixByte:
 						c.SendData([]byte{prefixByte})
@@ -192,6 +206,9 @@ func (c *Client) runPassthroughLoop(ctx context.Context, prefixByte byte, stdin 
 					case 's':
 						setResult(ResultShell)
 						return
+					case 'r':
+						setResult(ResultRestart)
+						return
 					default:
 						c.SendData([]byte{prefixByte, input[i]})
 					}
@@ -203,6 +220,7 @@ func (c *Client) runPassthroughLoop(ctx context.Context, prefixByte byte, stdin 
 						c.SendData(input[sendStart:i])
 					}
 					prefixSeen = true
+					showHelpBar(stdout)
 					sendStart = i + 1
 					continue
 				}

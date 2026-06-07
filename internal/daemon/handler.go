@@ -198,6 +198,19 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					}{r.SessionID, r.NewName})
 				}
 
+			case "resume":
+				var r protocol.ResumeMsg
+				if err := protocol.DecodePayload(msg, &r); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid resume message"})
+					continue
+				}
+				sess, err := sm.Resume(r.SessionID, clientRows, clientCols)
+				if err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+				} else {
+					sendControl("resumed", toSessionInfo(sess))
+				}
+
 			case "logs":
 				var l protocol.LogsMsg
 				if err := protocol.DecodePayload(msg, &l); err != nil {
