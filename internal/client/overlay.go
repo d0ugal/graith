@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/list"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/list"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/d0ugal/graith/internal/protocol"
 )
@@ -294,6 +294,7 @@ func newOverlayModel(sessions []protocol.SessionInfo, fetchPreview func(sessionI
 	fi := textinput.New()
 	fi.Placeholder = "filter..."
 	fi.CharLimit = 64
+	fi.SetWidth(contentWidth)
 
 	return overlayModel{
 		list:         l,
@@ -344,7 +345,7 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.list.SetSize(panelWidth-4, panelHeight)
 		return m, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch m.state {
 		case stateFilter:
 			switch msg.String() {
@@ -415,11 +416,11 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m overlayModel) View() string {
+func (m overlayModel) View() tea.View {
 	w := m.width
 	h := m.height
 	if w == 0 || h == 0 {
-		return ""
+		return tea.NewView("")
 	}
 
 	// --- Build panel content ---
@@ -516,7 +517,9 @@ func (m overlayModel) View() string {
 		}
 	}
 
-	return strings.Join(bgLines, "\n")
+	v := tea.NewView(strings.Join(bgLines, "\n"))
+	v.AltScreen = true
+	return v
 }
 
 // RunOverlay launches the bubbletea overlay listing sessions grouped by repo.
@@ -524,7 +527,7 @@ func (m overlayModel) View() string {
 // It may be nil, in which case no preview is shown.
 func RunOverlay(sessions []protocol.SessionInfo, fetchPreview func(sessionID string) string) *OverlayResult {
 	m := newOverlayModel(sessions, fetchPreview)
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	p := tea.NewProgram(m)
 
 	final, err := p.Run()
 	if err != nil {
