@@ -85,7 +85,7 @@ func computeColumnWidths(sessions []protocol.SessionInfo) columnWidths {
 			cw.git = n
 		}
 		if t, err := time.Parse(time.RFC3339, s.CreatedAt); err == nil {
-			if n := len(shortDur(now.Sub(t))); n > cw.age {
+			if n := len(ShortDuration(now.Sub(t))); n > cw.age {
 				cw.age = n
 			}
 		}
@@ -165,14 +165,14 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	now := time.Now()
 	age := ""
 	if t, err := time.Parse(time.RFC3339, si.info.CreatedAt); err == nil {
-		age = shortDur(now.Sub(t))
+		age = ShortDuration(now.Sub(t))
 	}
 	age = pad(age, d.cols.age)
 
 	attached := ""
 	if si.info.LastAttachedAt != "" {
 		if t, err := time.Parse(time.RFC3339, si.info.LastAttachedAt); err == nil {
-			attached = shortDur(now.Sub(t)) + " ago"
+			attached = ShortDuration(now.Sub(t)) + " ago"
 		}
 	}
 
@@ -199,7 +199,7 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	_, _ = fmt.Fprint(w, line)
 }
 
-func shortDur(d time.Duration) string {
+func ShortDuration(d time.Duration) string {
 	if d < time.Minute {
 		return fmt.Sprintf("%ds", int(d.Seconds()))
 	}

@@ -88,13 +88,13 @@ var listCmd = &cobra.Command{
 
 			age := ""
 			if t, err := time.Parse(time.RFC3339, s.CreatedAt); err == nil {
-				age = shortDuration(now.Sub(t))
+				age = client.ShortDuration(now.Sub(t))
 			}
 
 			attached := ""
 			if s.LastAttachedAt != "" {
 				if t, err := time.Parse(time.RFC3339, s.LastAttachedAt); err == nil {
-					attached = shortDuration(now.Sub(t)) + " ago"
+					attached = client.ShortDuration(now.Sub(t)) + " ago"
 				}
 			}
 
@@ -119,23 +119,4 @@ var listCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(listCmd)
 	listCmd.Flags().StringVar(&listRepo, "repo", "", "filter by repo path")
-}
-
-func shortDuration(d time.Duration) string {
-	if d < time.Minute {
-		return fmt.Sprintf("%ds", int(d.Seconds()))
-	}
-	if d < time.Hour {
-		return fmt.Sprintf("%dm", int(d.Minutes()))
-	}
-	if d < 24*time.Hour {
-		h := int(d.Hours())
-		m := int(d.Minutes()) % 60
-		if m == 0 {
-			return fmt.Sprintf("%dh", h)
-		}
-		return fmt.Sprintf("%dh%dm", h, m)
-	}
-	days := int(d.Hours()) / 24
-	return fmt.Sprintf("%dd", days)
 }

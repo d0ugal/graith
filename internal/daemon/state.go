@@ -40,7 +40,6 @@ type SessionState struct {
 	PID            int           `json:"pid,omitempty"`
 	CreatedAt      time.Time     `json:"created_at"`
 	LastAttachedAt *time.Time    `json:"last_attached_at,omitempty"`
-	AttachedClient string        `json:"attached_client,omitempty"`
 }
 
 type State struct {
