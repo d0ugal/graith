@@ -74,7 +74,8 @@ func (s *Scrollback) Tail(lines int) ([]byte, error) {
 	const chunkSize = 8192
 	count := 0
 	remaining := size
-	var buf []byte
+	// Chunks are collected in reverse file order (last chunk first).
+	var chunks [][]byte
 
 	for remaining > 0 {
 		readSize := min(int64(chunkSize), remaining)
@@ -85,19 +86,28 @@ func (s *Scrollback) Tail(lines int) ([]byte, error) {
 			return nil, err
 		}
 
-		buf = append(chunk, buf...)
+		chunks = append(chunks, chunk)
 
 		for i := len(chunk) - 1; i >= 0; i-- {
 			if chunk[i] == '\n' && remaining+int64(i) < size-1 {
 				count++
 				if count >= lines {
-					return bytes.Clone(buf[i+1:]), nil
+					parts := make([][]byte, 0, len(chunks))
+					parts = append(parts, chunk[i+1:])
+					for j := len(chunks) - 2; j >= 0; j-- {
+						parts = append(parts, chunks[j])
+					}
+					return bytes.Join(parts, nil), nil
 				}
 			}
 		}
 	}
 
-	return bytes.Clone(buf), nil
+	// Fewer than requested lines — reverse and return everything.
+	for left, right := 0, len(chunks)-1; left < right; left, right = left+1, right-1 {
+		chunks[left], chunks[right] = chunks[right], chunks[left]
+	}
+	return bytes.Join(chunks, nil), nil
 }
 
 func (s *Scrollback) Close() error { return s.file.Close() }
