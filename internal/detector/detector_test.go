@@ -1,6 +1,9 @@
 package detector
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestIsBusy_InterruptIndicators(t *testing.T) {
 	d := New("claude")
@@ -159,6 +162,28 @@ func TestIsReady_PromptCharacters(t *testing.T) {
 	}
 }
 
+func TestIsReady_HowCanIHelp(t *testing.T) {
+	tests := []struct {
+		name    string
+		tool    string
+		content string
+		want    bool
+	}{
+		{"claude", "claude", "How can I help you today?\n", true},
+		{"codex", "codex", "How can I help you today?\n", true},
+		{"agy", "agy", "How can I help?\n", true},
+		{"case insensitive", "claude", "how can i help you?\n", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := New(tt.tool)
+			if got := d.IsReady(tt.content); got != tt.want {
+				t.Errorf("IsReady() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestIsReady_Codex(t *testing.T) {
 	d := New("codex")
 
@@ -184,18 +209,92 @@ func TestDetect(t *testing.T) {
 	d := New("claude")
 
 	tests := []struct {
-		name    string
-		content string
-		want    AgentStatus
+		name      string
+		content   string
+		outputAge time.Duration
+		want      AgentStatus
 	}{
-		{"busy", "⠋ Working\nctrl+c to interrupt\n", StatusActive},
-		{"approval", "Do you trust the files in this folder?\n", StatusApproval},
-		{"ready", "output done\n❯\n", StatusReady},
-		{"unknown", "some random text\n", StatusUnknown},
+		{"busy", "⠋ Working\nctrl+c to interrupt\n", OutputAgeUnknown, StatusActive},
+		{"approval", "Do you trust the files in this folder?\n", OutputAgeUnknown, StatusApproval},
+		{"ready", "output done\n❯\n", OutputAgeUnknown, StatusReady},
+		{"unknown", "some random text\n", OutputAgeUnknown, StatusUnknown},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := d.Detect(tt.content); got != tt.want {
+			if got := d.Detect(tt.content, tt.outputAge); got != tt.want {
+				t.Errorf("Detect() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDetect_OutputRecency(t *testing.T) {
+	d := New("claude")
+
+	tests := []struct {
+		name      string
+		content   string
+		outputAge time.Duration
+		want      AgentStatus
+	}{
+		{
+			"recent output infers active",
+			"some random tool output filling the screen\n",
+			500 * time.Millisecond,
+			StatusActive,
+		},
+		{
+			"stale output stays unknown",
+			"some random tool output filling the screen\n",
+			5 * time.Second,
+			StatusUnknown,
+		},
+		{
+			"at threshold boundary stays unknown",
+			"some random tool output filling the screen\n",
+			RecentOutputThreshold,
+			StatusUnknown,
+		},
+		{
+			"just under threshold is active",
+			"some random tool output filling the screen\n",
+			RecentOutputThreshold - time.Millisecond,
+			StatusActive,
+		},
+		{
+			"ready pattern takes priority over recent output",
+			"output done\n❯\n",
+			100 * time.Millisecond,
+			StatusReady,
+		},
+		{
+			"approval pattern takes priority over recent output",
+			"Do you trust the files in this folder?\n",
+			100 * time.Millisecond,
+			StatusApproval,
+		},
+		{
+			"busy pattern with stale output still active",
+			"⠋ Working\nctrl+c to interrupt\n",
+			10 * time.Second,
+			StatusActive,
+		},
+		{
+			"unknown output age does not infer active",
+			"some random text\n",
+			OutputAgeUnknown,
+			StatusUnknown,
+		},
+		{
+			"zero output age is active",
+			"some random text\n",
+			0,
+			StatusActive,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := d.Detect(tt.content, tt.outputAge); got != tt.want {
 				t.Errorf("Detect() = %v, want %v", got, tt.want)
 			}
 		})
