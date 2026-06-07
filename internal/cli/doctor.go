@@ -74,6 +74,15 @@ var doctorCmd = &cobra.Command{
 		out.Print("  ✓ Runtime dir: %s\n", paths.RuntimeDir)
 		out.Print("  ✓ Daemon log: %s\n", paths.DaemonLog)
 
+		updateResult := version.CheckForUpdate(paths.DataDir)
+		if updateResult != nil {
+			out.Print("  ✗ Update available: %s → %s\n", updateResult.CurrentVersion, updateResult.LatestVersion)
+			out.Print("    → Run: brew upgrade graith\n")
+			ok = false
+		} else if version.Version != "dev" {
+			out.Print("  ✓ Up to date (%s)\n", version.Version)
+		}
+
 		if !ok {
 			return fmt.Errorf("issues found")
 		}

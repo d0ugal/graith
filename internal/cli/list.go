@@ -9,6 +9,7 @@ import (
 
 	"github.com/d0ugal/graith/internal/client"
 	"github.com/d0ugal/graith/internal/protocol"
+	"github.com/d0ugal/graith/internal/version"
 	"github.com/spf13/cobra"
 )
 
@@ -19,6 +20,11 @@ var listCmd = &cobra.Command{
 	Aliases: []string{"ls"},
 	Short:   "List all sessions",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		updateCh := make(chan *version.UpdateResult, 1)
+		go func() {
+			updateCh <- version.CheckForUpdate(paths.DataDir)
+		}()
+
 		c, err := client.Connect(cfg, paths, cfgFile)
 		if err != nil {
 			return err
@@ -111,6 +117,15 @@ var listCmd = &cobra.Command{
 				s.Name, s.RepoName, s.Agent, s.Status, agentStatus, branch, gitStatus, age, attached)
 		}
 		tw.Flush()
+
+		select {
+		case result := <-updateCh:
+			if result != nil {
+				fmt.Fprintf(cmd.OutOrStdout(), "\nUpdate available: %s → %s (brew upgrade graith)\n",
+					result.CurrentVersion, result.LatestVersion)
+			}
+		default:
+		}
 
 		return nil
 	},
