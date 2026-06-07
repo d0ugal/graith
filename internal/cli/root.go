@@ -32,7 +32,7 @@ var rootCmd = &cobra.Command{
 		return nil
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runAttach(cmd, "")
+		return cmd.Help()
 	},
 }
 

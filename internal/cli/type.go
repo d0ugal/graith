@@ -11,6 +11,7 @@ import (
 
 var typeCmd = &cobra.Command{
 	Use:               "type <name-or-id> <text>",
+	Aliases:           []string{"t"},
 	Short:             "Type text into a session's PTY stdin",
 	Args:              cobra.MinimumNArgs(2),
 	ValidArgsFunction: completeSessionNames,
