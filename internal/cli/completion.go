@@ -1,6 +1,12 @@
 package cli
 
 import (
+	"fmt"
+	"os"
+	"os/exec"
+	"sort"
+	"strings"
+
 	"github.com/d0ugal/graith/internal/client"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/spf13/cobra"
@@ -59,6 +65,100 @@ func completeSessionNames(cmd *cobra.Command, args []string, toComplete string) 
 	names := make([]string, 0, len(list.Sessions)*2)
 	for _, s := range list.Sessions {
 		names = append(names, s.Name, s.ID)
+	}
+	return names, cobra.ShellCompDirectiveNoFileComp
+}
+
+func completeAgentNames(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
+	if cfg == nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	names := make([]string, 0, len(cfg.Agents))
+	for name := range cfg.Agents {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names, cobra.ShellCompDirectiveNoFileComp
+}
+
+func completeRepoPaths(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
+	c, err := client.Connect(cfg, paths, cfgFile)
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveFilterDirs
+	}
+	defer c.Close()
+
+	c.SendControl("list", struct{}{})
+	resp, err := c.ReadControlResponse()
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveFilterDirs
+	}
+	var list protocol.SessionListMsg
+	if err := protocol.DecodePayload(resp, &list); err != nil {
+		return nil, cobra.ShellCompDirectiveFilterDirs
+	}
+
+	seen := make(map[string]bool)
+	var repos []string
+	for _, s := range list.Sessions {
+		if s.RepoPath != "" && !seen[s.RepoPath] {
+			seen[s.RepoPath] = true
+			repos = append(repos, fmt.Sprintf("%s\t%s", s.RepoPath, s.RepoName))
+		}
+	}
+	sort.Strings(repos)
+	return repos, cobra.ShellCompDirectiveFilterDirs
+}
+
+func completeBranchNames(cmd *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
+	repoPath, _ := cmd.Flags().GetString("repo")
+	if repoPath == "" {
+		repoPath, _ = os.Getwd()
+	}
+
+	out, err := exec.Command("git", "-C", repoPath, "for-each-ref", "--format=%(refname:short)", "refs/heads/").Output()
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+
+	var branches []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line != "" {
+			branches = append(branches, line)
+		}
+	}
+	return branches, cobra.ShellCompDirectiveNoFileComp
+}
+
+func completeTopicNames(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
+	c, err := client.Connect(cfg, paths, cfgFile)
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	defer c.Close()
+
+	senderID, _ := detectSender()
+	c.SendControl("msg_topics", protocol.MsgTopicsMsg{
+		Subscriber: senderID,
+	})
+
+	resp, err := c.ReadControlResponse()
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+
+	var topics struct {
+		Streams []struct {
+			Name string `json:"name"`
+		} `json:"streams"`
+	}
+	if err := protocol.DecodePayload(resp, &topics); err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+
+	names := make([]string, 0, len(topics.Streams))
+	for _, s := range topics.Streams {
+		names = append(names, s.Name)
 	}
 	return names, cobra.ShellCompDirectiveNoFileComp
 }

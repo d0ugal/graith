@@ -88,9 +88,10 @@ var (
 )
 
 var msgSendCmd = &cobra.Command{
-	Use:   "send <session-name-or-id> <body>",
-	Short: "Send a message to a session's inbox",
-	Args:  cobra.RangeArgs(1, 2),
+	Use:               "send <session-name-or-id> <body>",
+	Short:             "Send a message to a session's inbox",
+	Args:              cobra.RangeArgs(1, 2),
+	ValidArgsFunction: completeSessionNames,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		c, err := client.Connect(cfg, paths, cfgFile)
 		if err != nil {
@@ -341,6 +342,7 @@ func init() {
 	msgPubCmd.Flags().StringVarP(&msgPubFile, "file", "f", "", "read body from file")
 	msgPubCmd.Flags().StringVar(&msgPubThreadID, "thread", "", "thread ID to continue")
 	msgPubCmd.Flags().StringVar(&msgPubReplyTo, "reply-to", "", "stream for replies")
+	msgPubCmd.RegisterFlagCompletionFunc("topic", completeTopicNames)
 
 	msgCmd.AddCommand(msgSendCmd)
 	msgSendCmd.Flags().StringVarP(&msgSendFile, "file", "f", "", "read body from file")
@@ -355,9 +357,11 @@ func init() {
 	msgSubCmd.Flags().BoolVar(&msgSubAck, "ack", false, "acknowledge messages after reading")
 	msgSubCmd.Flags().BoolVarP(&msgSubAll, "all", "a", false, "show all messages, not just unread")
 	msgSubCmd.Flags().StringVar(&msgSubThreadID, "thread", "", "filter to a specific thread")
+	msgSubCmd.RegisterFlagCompletionFunc("topic", completeTopicNames)
 
 	msgCmd.AddCommand(msgAckCmd)
 	msgAckCmd.Flags().StringVarP(&msgAckStream, "topic", "t", "", "stream/topic name")
+	msgAckCmd.RegisterFlagCompletionFunc("topic", completeTopicNames)
 
 	msgCmd.AddCommand(msgTopicsCmd)
 }
