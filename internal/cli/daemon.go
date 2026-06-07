@@ -63,6 +63,33 @@ Use --force to do a clean stop/start, which kills running agent sessions.`,
 	},
 }
 
+var daemonReloadCmd = &cobra.Command{
+	Use:   "reload",
+	Short: "Reload config without restarting the daemon",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c, err := client.Connect(cfg, paths, cfgFile)
+		if err != nil {
+			return fmt.Errorf("connect to daemon: %w", err)
+		}
+		defer c.Close()
+
+		if err := c.SendControl("reload", struct{}{}); err != nil {
+			return err
+		}
+		resp, err := c.ReadControlResponse()
+		if err != nil {
+			return err
+		}
+		if resp.Type == "error" {
+			var e protocol.ErrorMsg
+			protocol.DecodePayload(resp, &e)
+			return fmt.Errorf("%s", e.Message)
+		}
+		out.Print("Config reloaded\n")
+		return nil
+	},
+}
+
 var daemonUpgradeCmd = &cobra.Command{
 	Use:   "upgrade",
 	Short: "Upgrade daemon binary without losing sessions",
@@ -136,6 +163,7 @@ func init() {
 	daemonCmd.AddCommand(daemonStartCmd)
 	daemonCmd.AddCommand(daemonStopCmd)
 	daemonCmd.AddCommand(daemonRestartCmd)
+	daemonCmd.AddCommand(daemonReloadCmd)
 	daemonCmd.AddCommand(daemonUpgradeCmd)
 
 	daemonStartCmd.Flags().StringVar(&adoptFrom, "adopt-from", "", "")
