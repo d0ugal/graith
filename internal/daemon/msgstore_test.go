@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -582,5 +583,142 @@ func TestThreadFilterWithUnreadCursor(t *testing.T) {
 	}
 	if msgs[0].Body != "thread reply" {
 		t.Errorf("body = %q", msgs[0].Body)
+	}
+}
+
+func TestCleanupByAge(t *testing.T) {
+	s := testStore(t)
+
+	// Insert messages with backdated timestamps directly
+	oldTime := time.Now().UTC().Add(-48 * time.Hour).Format(time.RFC3339Nano)
+	newTime := time.Now().UTC().Format(time.RFC3339Nano)
+
+	s.db.Exec(
+		`INSERT INTO messages (id, seq, stream, sender_id, sender_name, body, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		"msg_old1", 1, "topic", "s1", "a", "old message 1", oldTime,
+	)
+	s.db.Exec(
+		`INSERT INTO messages (id, seq, stream, sender_id, sender_name, body, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		"msg_old2", 2, "topic", "s1", "a", "old message 2", oldTime,
+	)
+	s.db.Exec(
+		`INSERT INTO messages (id, seq, stream, sender_id, sender_name, body, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		"msg_new1", 3, "topic", "s1", "a", "new message", newTime,
+	)
+
+	deleted, err := s.Cleanup(24*time.Hour, 0)
+	if err != nil {
+		t.Fatalf("Cleanup: %v", err)
+	}
+	if deleted != 2 {
+		t.Errorf("deleted = %d, want 2", deleted)
+	}
+
+	msgs, _ := s.Read("topic", "", false, "")
+	if len(msgs) != 1 {
+		t.Fatalf("got %d messages, want 1", len(msgs))
+	}
+	if msgs[0].Body != "new message" {
+		t.Errorf("body = %q, want 'new message'", msgs[0].Body)
+	}
+}
+
+func TestCleanupByMaxPerStream(t *testing.T) {
+	s := testStore(t)
+
+	for i := range 5 {
+		s.Publish("stream-a", "s1", "a", fmt.Sprintf("a-msg-%d", i+1), "", "")
+	}
+	for i := range 3 {
+		s.Publish("stream-b", "s1", "a", fmt.Sprintf("b-msg-%d", i+1), "", "")
+	}
+
+	deleted, err := s.Cleanup(0, 3)
+	if err != nil {
+		t.Fatalf("Cleanup: %v", err)
+	}
+	if deleted != 2 {
+		t.Errorf("deleted = %d, want 2", deleted)
+	}
+
+	msgsA, _ := s.Read("stream-a", "", false, "")
+	if len(msgsA) != 3 {
+		t.Fatalf("stream-a: got %d messages, want 3", len(msgsA))
+	}
+	if msgsA[0].Body != "a-msg-3" {
+		t.Errorf("stream-a first remaining = %q, want a-msg-3", msgsA[0].Body)
+	}
+
+	msgsB, _ := s.Read("stream-b", "", false, "")
+	if len(msgsB) != 3 {
+		t.Fatalf("stream-b: got %d messages, want 3", len(msgsB))
+	}
+}
+
+func TestCleanupBothPolicies(t *testing.T) {
+	s := testStore(t)
+
+	oldTime := time.Now().UTC().Add(-48 * time.Hour).Format(time.RFC3339Nano)
+
+	// 2 old messages + 3 new messages = 5 total in stream
+	s.db.Exec(
+		`INSERT INTO messages (id, seq, stream, sender_id, sender_name, body, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		"msg_old1", 1, "topic", "s1", "a", "old1", oldTime,
+	)
+	s.db.Exec(
+		`INSERT INTO messages (id, seq, stream, sender_id, sender_name, body, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		"msg_old2", 2, "topic", "s1", "a", "old2", oldTime,
+	)
+	for i := range 3 {
+		s.Publish("topic", "s1", "a", fmt.Sprintf("new%d", i+1), "", "")
+	}
+
+	deleted, err := s.Cleanup(24*time.Hour, 2)
+	if err != nil {
+		t.Fatalf("Cleanup: %v", err)
+	}
+	if deleted < 2 {
+		t.Errorf("deleted = %d, want at least 2", deleted)
+	}
+
+	msgs, _ := s.Read("topic", "", false, "")
+	if len(msgs) > 2 {
+		t.Errorf("got %d messages, want at most 2", len(msgs))
+	}
+}
+
+func TestCleanupNoConfig(t *testing.T) {
+	s := testStore(t)
+
+	s.Publish("topic", "s1", "a", "msg1", "", "")
+
+	deleted, err := s.Cleanup(0, 0)
+	if err != nil {
+		t.Fatalf("Cleanup: %v", err)
+	}
+	if deleted != 0 {
+		t.Errorf("deleted = %d, want 0", deleted)
+	}
+
+	msgs, _ := s.Read("topic", "", false, "")
+	if len(msgs) != 1 {
+		t.Fatalf("got %d messages, want 1", len(msgs))
+	}
+}
+
+func TestCleanupEmptyDB(t *testing.T) {
+	s := testStore(t)
+
+	deleted, err := s.Cleanup(24*time.Hour, 100)
+	if err != nil {
+		t.Fatalf("Cleanup: %v", err)
+	}
+	if deleted != 0 {
+		t.Errorf("deleted = %d, want 0", deleted)
 	}
 }
