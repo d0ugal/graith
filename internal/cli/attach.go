@@ -114,8 +114,19 @@ func runAttachByID(c *client.Client, sessionID string) error {
 		PrevSession: parseKeyByte(cfg.Keybindings.PrevSession),
 	}
 
+	opts := client.PassthroughOpts{
+		Keys:      keys,
+		SessionID: sessionID,
+		Info:      &info,
+	}
+	if cfg.StatusBar.Enabled {
+		opts.StatusBar = &client.StatusBarCfg{
+			Position: cfg.StatusBar.Position,
+		}
+	}
+
 	for {
-		result := c.RunPassthrough(ctx, keys)
+		result := c.RunPassthrough(ctx, opts)
 		// RunPassthrough closes the connection — c is dead after this point.
 		// Every code path must either return or create a fresh client.
 
@@ -139,7 +150,10 @@ func runAttachByID(c *client.Client, sessionID string) error {
 			if overlayResult == nil {
 				restoreScreen(sessionID)
 				nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
-				nc.ReadControlResponse()
+				attachResp, _ := nc.ReadControlResponse()
+				protocol.DecodePayload(attachResp, &info)
+				opts.SessionID = sessionID
+				opts.Info = &info
 				c = nc
 				continue
 			}
@@ -148,14 +162,20 @@ func runAttachByID(c *client.Client, sessionID string) error {
 				nc.ReadControlResponse()
 				restoreScreen(sessionID)
 				nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
-				nc.ReadControlResponse()
+				attachResp, _ := nc.ReadControlResponse()
+				protocol.DecodePayload(attachResp, &info)
+				opts.SessionID = sessionID
+				opts.Info = &info
 				c = nc
 				continue
 			}
 			restoreScreen(overlayResult.SessionID)
 			nc.SendControl("attach", protocol.AttachMsg{SessionID: overlayResult.SessionID})
-			nc.ReadControlResponse()
+			attachResp, _ := nc.ReadControlResponse()
+			protocol.DecodePayload(attachResp, &info)
 			sessionID = overlayResult.SessionID
+			opts.SessionID = sessionID
+			opts.Info = &info
 			c = nc
 			continue
 
@@ -177,7 +197,10 @@ func runAttachByID(c *client.Client, sessionID string) error {
 			}
 
 			nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
-			nc.ReadControlResponse()
+			attachResp, _ := nc.ReadControlResponse()
+			protocol.DecodePayload(attachResp, &info)
+			opts.SessionID = sessionID
+			opts.Info = &info
 			c = nc
 			continue
 
@@ -198,17 +221,23 @@ func runAttachByID(c *client.Client, sessionID string) error {
 				out.Print("Resume failed: %s\n", e.Message)
 			}
 			nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
-			nc.ReadControlResponse()
+			attachResp, _ := nc.ReadControlResponse()
+			protocol.DecodePayload(attachResp, &info)
+			opts.SessionID = sessionID
+			opts.Info = &info
 			c = nc
 			continue
 
 		case client.ResultDisconnected:
 			out.Print("Connection lost. Reconnecting...\n")
-			nc, err := reconnectToSession(sessionID)
+			nc, attachResp, err := reconnectToSession(sessionID)
 			if err != nil {
 				out.Print("Could not reconnect: %s\n", err)
 				return nil
 			}
+			protocol.DecodePayload(attachResp, &info)
+			opts.SessionID = sessionID
+			opts.Info = &info
 			c = nc
 			continue
 
@@ -234,7 +263,10 @@ func runAttachByID(c *client.Client, sessionID string) error {
 				sessionID = next
 			}
 			nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
-			nc.ReadControlResponse()
+			attachResp, _ := nc.ReadControlResponse()
+			protocol.DecodePayload(attachResp, &info)
+			opts.SessionID = sessionID
+			opts.Info = &info
 			c = nc
 			continue
 
@@ -291,7 +323,7 @@ func adjacentSession(ids []string, current string, forward bool) string {
 	return ""
 }
 
-func reconnectToSession(sessionID string) (*client.Client, error) {
+func reconnectToSession(sessionID string) (*client.Client, protocol.Envelope, error) {
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		time.Sleep(250 * time.Millisecond)
@@ -309,9 +341,9 @@ func reconnectToSession(sessionID string) (*client.Client, error) {
 			c.Close()
 			var e protocol.ErrorMsg
 			protocol.DecodePayload(resp, &e)
-			return nil, fmt.Errorf("session unavailable: %s", e.Message)
+			return nil, protocol.Envelope{}, fmt.Errorf("session unavailable: %s", e.Message)
 		}
-		return c, nil
+		return c, resp, nil
 	}
-	return nil, fmt.Errorf("timed out after 10s")
+	return nil, protocol.Envelope{}, fmt.Errorf("timed out after 10s")
 }
