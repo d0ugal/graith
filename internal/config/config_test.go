@@ -209,3 +209,105 @@ idle_timeout = "0"
 		t.Errorf("codex idle timeout = %v, want 0", got)
 	}
 }
+
+func TestLoadConfigSandbox(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	toml := `
+[sandbox]
+enabled = true
+features = ["ssh", "process-control"]
+read_dirs = ["~/Code"]
+
+[agents.claude]
+command = "claude"
+
+[agents.claude.sandbox]
+features = ["clipboard"]
+`
+	os.WriteFile(cfgPath, []byte(toml), 0o644)
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Sandbox.Enabled {
+		t.Error("Sandbox.Enabled = false, want true")
+	}
+	if len(cfg.Sandbox.Features) != 2 || cfg.Sandbox.Features[0] != "ssh" {
+		t.Errorf("Sandbox.Features = %v, want [ssh process-control]", cfg.Sandbox.Features)
+	}
+	if len(cfg.Sandbox.ReadDirs) != 1 || cfg.Sandbox.ReadDirs[0] != "~/Code" {
+		t.Errorf("Sandbox.ReadDirs = %v, want [~/Code]", cfg.Sandbox.ReadDirs)
+	}
+	claude := cfg.Agents["claude"]
+	if len(claude.Sandbox.Features) != 1 || claude.Sandbox.Features[0] != "clipboard" {
+		t.Errorf("claude.Sandbox.Features = %v, want [clipboard]", claude.Sandbox.Features)
+	}
+}
+
+func TestSandboxConfigMerge(t *testing.T) {
+	global := SandboxConfig{
+		Enabled:  true,
+		Features: []string{"ssh", "process-control"},
+		ReadDirs: []string{"~/Code"},
+	}
+	agent := SandboxConfig{
+		Features:  []string{"clipboard"},
+		WriteDirs: []string{"~/.claude"},
+	}
+
+	merged := global.Merge(agent)
+
+	if !merged.Enabled {
+		t.Error("merged.Enabled = false, want true")
+	}
+	wantFeatures := []string{"ssh", "process-control", "clipboard"}
+	if len(merged.Features) != 3 {
+		t.Fatalf("merged.Features = %v, want %v", merged.Features, wantFeatures)
+	}
+	for i, f := range wantFeatures {
+		if merged.Features[i] != f {
+			t.Errorf("merged.Features[%d] = %q, want %q", i, merged.Features[i], f)
+		}
+	}
+	if len(merged.ReadDirs) != 1 || merged.ReadDirs[0] != "~/Code" {
+		t.Errorf("merged.ReadDirs = %v, want [~/Code]", merged.ReadDirs)
+	}
+	if len(merged.WriteDirs) != 1 || merged.WriteDirs[0] != "~/.claude" {
+		t.Errorf("merged.WriteDirs = %v, want [~/.claude]", merged.WriteDirs)
+	}
+}
+
+func TestSandboxConfigMergeAgentDisabled(t *testing.T) {
+	global := SandboxConfig{Enabled: true}
+	disabled := true
+	agent := SandboxConfig{Disabled: &disabled}
+
+	merged := global.Merge(agent)
+
+	if merged.Enabled {
+		t.Error("merged.Enabled = true, want false (agent disabled)")
+	}
+}
+
+func TestSandboxConfigMergeDeduplicatesFeatures(t *testing.T) {
+	global := SandboxConfig{
+		Enabled:  true,
+		Features: []string{"ssh", "docker"},
+	}
+	agent := SandboxConfig{
+		Features: []string{"ssh", "clipboard"},
+	}
+
+	merged := global.Merge(agent)
+
+	want := []string{"ssh", "docker", "clipboard"}
+	if len(merged.Features) != 3 {
+		t.Fatalf("merged.Features = %v, want %v", merged.Features, want)
+	}
+	for i, f := range want {
+		if merged.Features[i] != f {
+			t.Errorf("merged.Features[%d] = %q, want %q", i, merged.Features[i], f)
+		}
+	}
+}
