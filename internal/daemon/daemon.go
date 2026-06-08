@@ -151,7 +151,7 @@ func repoHash(repoPath string) string {
 
 // Create starts a new agent session, either in a git worktree or as a
 // standalone scratch session (when noRepo is true).
-func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt string, noRepo bool, sandboxOverride *bool, rows, cols uint16) (SessionState, error) {
+func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt string, noRepo bool, rows, cols uint16) (SessionState, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -252,7 +252,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 	env["GRAITH_SESSION_NAME"] = name
 	env["GRAITH_WORKTREE_PATH"] = worktreePath
 
-	sandboxed := sm.resolveSandbox(agentName, sandboxOverride)
+	sandboxed := sm.resolveSandbox(agentName)
 	command := agent.Command
 	finalArgs := expandedArgs
 	if sandboxed {
@@ -992,11 +992,8 @@ func (sm *SessionManager) applyConfig(newCfg *config.Config) {
 	}
 }
 
-func (sm *SessionManager) resolveSandbox(agentName string, override *bool) bool {
+func (sm *SessionManager) resolveSandbox(agentName string) bool {
 	merged := sm.cfg.Sandbox.Merge(sm.cfg.Agents[agentName].Sandbox)
-	if override != nil {
-		return *override
-	}
 	if !merged.Enabled {
 		return false
 	}

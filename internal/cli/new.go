@@ -18,8 +18,6 @@ var (
 	newPromptFile string
 	newRepo       string
 	newNoRepo     bool
-	newSandbox    bool
-	newNoSandbox  bool
 )
 
 var newCmd = &cobra.Command{
@@ -56,16 +54,6 @@ var newCmd = &cobra.Command{
 		}
 		defer c.Close()
 
-		var sandboxOverride *bool
-		if newSandbox {
-			t := true
-			sandboxOverride = &t
-		}
-		if newNoSandbox {
-			f := false
-			sandboxOverride = &f
-		}
-
 		c.SendControl("create", protocol.CreateMsg{
 			Name:     name,
 			Agent:    agent,
@@ -73,7 +61,6 @@ var newCmd = &cobra.Command{
 			Base:     newBase,
 			Prompt:   prompt,
 			NoRepo:   newNoRepo,
-			Sandbox:  sandboxOverride,
 		})
 
 		resp, err := c.ReadControlResponse()
@@ -117,9 +104,6 @@ func init() {
 	newCmd.Flags().StringVar(&newPromptFile, "prompt-file", "", "read initial prompt from file")
 	newCmd.Flags().StringVarP(&newRepo, "repo", "C", "", "path to git repo (default: cwd)")
 	newCmd.Flags().BoolVar(&newNoRepo, "no-repo", false, "create session without a git repo or worktree")
-	newCmd.Flags().BoolVar(&newSandbox, "sandbox", false, "run agent inside safehouse sandbox")
-	newCmd.Flags().BoolVar(&newNoSandbox, "no-sandbox", false, "disable safehouse sandbox for this session")
-
 	newCmd.RegisterFlagCompletionFunc("agent", completeAgentNames)
 	newCmd.RegisterFlagCompletionFunc("repo", completeRepoPaths)
 	newCmd.RegisterFlagCompletionFunc("base", completeBranchNames)
