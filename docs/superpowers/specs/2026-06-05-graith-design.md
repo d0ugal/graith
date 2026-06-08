@@ -68,7 +68,7 @@ Session {
     name:              string      // user-facing display name, mutable via rename
     repo_path:         string      // absolute path to the original git repo
     repo_name:         string      // derived from repo_path for display grouping
-    worktree_path:     string      // ~/.local/share/graith/worktrees/<sha256-of-repo-path>/<id>/
+    worktree_path:     string      // ~/.local/share/graith/worktrees/<repo-name>/<repo-hash>/<id>/
     branch:            string      // e.g. "d0ugal/graith/fix-auth-bug-a3f2b1c9"
     agent:             string      // agent key from config (e.g. "claude")
     agent_session_id:  string?     // the agent's own session/conversation ID
@@ -254,7 +254,7 @@ Per-client buffer of 1MB. If full, daemon disconnects the slow client with `deta
    - else fail with error asking user to specify `--base`
 4. Generate session ID (short random hash)
 5. Create branch: `{username}/graith/{name}-{id}` (e.g. `d0ugal/graith/fix-auth-bug-a3f2b1c9`)
-6. Create worktree at `~/.local/share/graith/worktrees/<sha256-of-repo-path>/<id>/`
+6. Create worktree at `~/.local/share/graith/worktrees/<repo-name>/<repo-hash>/<id>/`
 7. Launch agent process in the worktree
 
 ### GitHub Username Discovery
