@@ -1058,6 +1058,41 @@ func expandPaths(paths []string) []string {
 	return out
 }
 
+// cleanupLegacyDaemon stops an old daemon that may be listening on the
+// pre-v0.11 socket path ($TMPDIR or /tmp). Without this, upgrading would
+// leave an orphaned daemon since the new CLI can't reach the old socket.
+func cleanupLegacyDaemon(log *slog.Logger) {
+	for _, dir := range config.LegacyRuntimeDirs() {
+		sock := filepath.Join(dir, "graith.sock")
+		pid := filepath.Join(dir, "graith.pid")
+
+		if _, err := os.Stat(sock); err != nil {
+			continue
+		}
+
+		conn, err := net.DialTimeout("unix", sock, 500*time.Millisecond)
+		if err != nil {
+			os.Remove(sock)
+			os.Remove(pid)
+			log.Info("removed stale legacy socket", "path", sock)
+			continue
+		}
+		conn.Close()
+
+		data, err := os.ReadFile(pid)
+		if err == nil {
+			var legacyPID int
+			if _, err := fmt.Sscanf(string(data), "%d", &legacyPID); err == nil && legacyPID > 0 {
+				log.Info("stopping legacy daemon", "pid", legacyPID, "socket", sock)
+				_ = syscall.Kill(legacyPID, syscall.SIGTERM)
+			}
+		}
+
+		os.Remove(sock)
+		os.Remove(pid)
+	}
+}
+
 // Run starts the daemon: acquires PID file, listens on the Unix socket,
 // serves connections, and blocks until SIGTERM/SIGINT or an upgrade signal.
 func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) error {
@@ -1108,6 +1143,8 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 
 		log.Info("daemon upgraded", "adopted_sessions", len(manifest.Sessions), "pid", os.Getpid())
 	} else {
+		cleanupLegacyDaemon(log)
+
 		if err := AcquirePIDFile(paths.PIDFile); err != nil {
 			return err
 		}
