@@ -124,8 +124,9 @@ func TestGenerateClaudeSettings(t *testing.T) {
 		if entries[0].Type != "command" {
 			t.Errorf("event %q type = %q, want %q", event, entries[0].Type, "command")
 		}
-		if !strings.Contains(entries[0].Command, hookScript) {
-			t.Errorf("event %q command = %q, does not contain hook script path %q", event, entries[0].Command, hookScript)
+		quotedPath := "'" + hookScript + "'"
+		if !strings.Contains(entries[0].Command, quotedPath) {
+			t.Errorf("event %q command = %q, does not contain quoted hook script path %q", event, entries[0].Command, quotedPath)
 		}
 		if !strings.Contains(entries[0].Command, "--event "+event) {
 			t.Errorf("event %q command = %q, does not contain --event %s", event, entries[0].Command, event)
