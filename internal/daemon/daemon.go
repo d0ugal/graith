@@ -17,6 +17,7 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/detector"
 	"github.com/d0ugal/graith/internal/git"
+	"github.com/d0ugal/graith/internal/protocol"
 	grpty "github.com/d0ugal/graith/internal/pty"
 )
 
@@ -506,6 +507,32 @@ func (sm *SessionManager) List() []SessionState {
 		list = append(list, *s)
 	}
 	return list
+}
+
+func (sm *SessionManager) fleetSummary() protocol.FleetSummary {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	var f protocol.FleetSummary
+	for _, s := range sm.state.Sessions {
+		f.Total++
+		switch s.Status {
+		case StatusRunning:
+			switch s.AgentStatus {
+			case "approval":
+				f.Approval++
+			case "ready":
+				f.Ready++
+			default:
+				f.Active++
+			}
+		case StatusStopped:
+			f.Stopped++
+		case StatusErrored:
+			f.Errored++
+		}
+	}
+	return f
 }
 
 // Get returns a copy of a session state by ID.

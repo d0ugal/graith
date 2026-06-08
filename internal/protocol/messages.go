@@ -183,7 +183,17 @@ type StatusRequestMsg struct {
 	SessionID string `json:"session_id"`
 }
 
+type FleetSummary struct {
+	Total    int `json:"total"`
+	Active   int `json:"active"`
+	Approval int `json:"approval"`
+	Ready    int `json:"ready"`
+	Errored  int `json:"errored"`
+	Stopped  int `json:"stopped"`
+}
+
 type StatusResponseMsg struct {
-	Session     SessionInfo `json:"session"`
-	UnreadCount int         `json:"unread_count"`
+	Session     SessionInfo  `json:"session"`
+	UnreadCount int          `json:"unread_count"`
+	Fleet       FleetSummary `json:"fleet"`
 }
