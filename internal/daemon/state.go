@@ -38,6 +38,7 @@ type SessionState struct {
 	GitUnpushed    int           `json:"-"`
 	ExitCode       *int          `json:"exit_code,omitempty"`
 	PID            int           `json:"pid,omitempty"`
+	Sandboxed      bool          `json:"sandboxed,omitempty"`
 	CreatedAt      time.Time     `json:"created_at"`
 	LastAttachedAt *time.Time    `json:"last_attached_at,omitempty"`
 }
