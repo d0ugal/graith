@@ -4,22 +4,25 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/pelletier/go-toml/v2"
 )
 
 type Config struct {
-	DefaultAgent   string           `toml:"default_agent"`
-	GitHubUsername string           `toml:"github_username"`
-	BranchPrefix   string           `toml:"branch_prefix"`
-	FetchOnCreate  bool             `toml:"fetch_on_create"`
-	StatusBar      StatusBar        `toml:"status_bar"`
-	Keybindings    Keybindings      `toml:"keybindings"`
-	Notifications  Notifications    `toml:"notifications"`
-	Messages       Messages         `toml:"messages"`
-	Sandbox        SandboxConfig    `toml:"sandbox"`
-	Agents         map[string]Agent `toml:"agents"`
+	DefaultAgent     string           `toml:"default_agent"`
+	GitHubUsername   string           `toml:"github_username"`
+	BranchPrefix     string           `toml:"branch_prefix"`
+	FetchOnCreate    bool             `toml:"fetch_on_create"`
+	AllowedRepoPaths []string         `toml:"allowed_repo_paths"`
+	StatusBar        StatusBar        `toml:"status_bar"`
+	Keybindings      Keybindings      `toml:"keybindings"`
+	Notifications    Notifications    `toml:"notifications"`
+	Messages         Messages         `toml:"messages"`
+	Sandbox          SandboxConfig    `toml:"sandbox"`
+	Agents           map[string]Agent `toml:"agents"`
 }
 
 type StatusBar struct {
@@ -145,6 +148,32 @@ func dedup(ss []string) []string {
 		out = append(out, s)
 	}
 	return out
+}
+
+func ExpandPath(p string) string {
+	if strings.HasPrefix(p, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			p = filepath.Join(home, p[2:])
+		}
+	}
+	if abs, err := filepath.Abs(p); err == nil {
+		p = abs
+	}
+	return filepath.Clean(p)
+}
+
+func (c *Config) RepoPathAllowed(repoPath string) bool {
+	if len(c.AllowedRepoPaths) == 0 {
+		return true
+	}
+	repoPath = ExpandPath(repoPath)
+	for _, allowed := range c.AllowedRepoPaths {
+		prefix := ExpandPath(allowed)
+		if repoPath == prefix || strings.HasPrefix(repoPath, prefix+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
 }
 
 func Load(path string) (*Config, error) {

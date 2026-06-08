@@ -170,6 +170,9 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 			return SessionState{}, fmt.Errorf("create scratch dir: %w", err)
 		}
 	} else {
+		if !sm.cfg.RepoPathAllowed(repoPath) {
+			return SessionState{}, fmt.Errorf("repo path %q is not under any allowed_repo_paths", repoPath)
+		}
 		if !git.IsInsideGitRepo(repoPath) {
 			return SessionState{}, fmt.Errorf("not inside a git repository: %s (use --no-repo for sessions without a repo)", repoPath)
 		}
