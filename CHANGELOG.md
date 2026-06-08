@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/d0ugal/graith/compare/v0.5.0...v0.5.1) (2026-06-08)
+
+
+### Bug Fixes
+
+* reset filter cursor and align next/prev session order with overlay ([62a382f](https://github.com/d0ugal/graith/commit/62a382f2921da37ebea9b1c0a5cc322f46066782))
+
 ## [0.5.0](https://github.com/d0ugal/graith/compare/v0.4.0...v0.5.0) (2026-06-08)
 
 
