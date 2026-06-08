@@ -19,6 +19,7 @@ import (
 	"github.com/d0ugal/graith/internal/git"
 	"github.com/d0ugal/graith/internal/protocol"
 	grpty "github.com/d0ugal/graith/internal/pty"
+	"github.com/d0ugal/graith/internal/sandbox"
 )
 
 type attachedClient struct {
@@ -150,7 +151,7 @@ func repoHash(repoPath string) string {
 
 // Create starts a new agent session, either in a git worktree or as a
 // standalone scratch session (when noRepo is true).
-func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt string, noRepo bool, rows, cols uint16) (SessionState, error) {
+func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt string, noRepo bool, sandboxOverride *bool, rows, cols uint16) (SessionState, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -251,10 +252,23 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 	env["GRAITH_SESSION_NAME"] = name
 	env["GRAITH_WORKTREE_PATH"] = worktreePath
 
+	sandboxed := sm.resolveSandbox(agentName, sandboxOverride)
+	command := agent.Command
+	finalArgs := expandedArgs
+	if sandboxed {
+		envKeys := []string{"GRAITH_SESSION_ID", "GRAITH_SESSION_NAME", "GRAITH_WORKTREE_PATH", "TERM"}
+		for k := range agent.Env {
+			envKeys = append(envKeys, k)
+		}
+		opts := sm.sandboxOpts(agentName, worktreePath, envKeys)
+		command, finalArgs = sandbox.Wrap(agent.Command, expandedArgs, opts)
+		sm.log.Info("sandboxing session", "id", id, "agent", agentName)
+	}
+
 	ptySess, err := grpty.NewSession(grpty.SessionOpts{
 		ID:         id,
-		Command:    agent.Command,
-		Args:       expandedArgs,
+		Command:    command,
+		Args:       finalArgs,
 		Dir:        worktreePath,
 		Env:        env,
 		Rows:       rows,
@@ -281,6 +295,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 		BaseBranch:     baseBranch,
 		Agent:          agentName,
 		AgentSessionID: agentSessionID,
+		Sandboxed:      sandboxed,
 		Status:         StatusRunning,
 		PID:            ptySess.Cmd.Process.Pid,
 		CreatedAt:      time.Now().UTC(),
@@ -374,10 +389,23 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 	env["GRAITH_SESSION_NAME"] = name
 	env["GRAITH_WORKTREE_PATH"] = worktreePath
 
+	sandboxed := source.Sandboxed
+	command := agent.Command
+	finalArgs := expandedArgs
+	if sandboxed {
+		envKeys := []string{"GRAITH_SESSION_ID", "GRAITH_SESSION_NAME", "GRAITH_WORKTREE_PATH", "TERM"}
+		for k := range agent.Env {
+			envKeys = append(envKeys, k)
+		}
+		opts := sm.sandboxOpts(agentName, worktreePath, envKeys)
+		command, finalArgs = sandbox.Wrap(agent.Command, expandedArgs, opts)
+		sm.log.Info("sandboxing forked session", "id", id)
+	}
+
 	ptySess, err := grpty.NewSession(grpty.SessionOpts{
 		ID:         id,
-		Command:    agent.Command,
-		Args:       expandedArgs,
+		Command:    command,
+		Args:       finalArgs,
 		Dir:        worktreePath,
 		Env:        env,
 		Rows:       rows,
@@ -400,6 +428,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 		BaseBranch:     baseBranch,
 		Agent:          agentName,
 		AgentSessionID: agentSessionID,
+		Sandboxed:      sandboxed,
 		Status:         StatusRunning,
 		PID:            ptySess.Cmd.Process.Pid,
 		CreatedAt:      time.Now().UTC(),
@@ -492,10 +521,22 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 	env["GRAITH_SESSION_NAME"] = sessState.Name
 	env["GRAITH_WORKTREE_PATH"] = sessState.WorktreePath
 
+	command := agent.Command
+	finalArgs := expandedArgs
+	if sessState.Sandboxed {
+		envKeys := []string{"GRAITH_SESSION_ID", "GRAITH_SESSION_NAME", "GRAITH_WORKTREE_PATH", "TERM"}
+		for k := range agent.Env {
+			envKeys = append(envKeys, k)
+		}
+		opts := sm.sandboxOpts(sessState.Agent, sessState.WorktreePath, envKeys)
+		command, finalArgs = sandbox.Wrap(agent.Command, expandedArgs, opts)
+		sm.log.Info("sandboxing resumed session", "id", id)
+	}
+
 	ptySess, err := grpty.NewSession(grpty.SessionOpts{
 		ID:         id,
-		Command:    agent.Command,
-		Args:       expandedArgs,
+		Command:    command,
+		Args:       finalArgs,
 		Dir:        sessState.WorktreePath,
 		Env:        env,
 		Rows:       rows,
@@ -948,6 +989,29 @@ func (sm *SessionManager) applyConfig(newCfg *config.Config) {
 		if _, ok := newCfg.Agents[name]; !ok {
 			sm.log.Info("config changed", "key", "agents", "action", "removed", "agent", name)
 		}
+	}
+}
+
+func (sm *SessionManager) resolveSandbox(agentName string, override *bool) bool {
+	merged := sm.cfg.Sandbox.Merge(sm.cfg.Agents[agentName].Sandbox)
+	if override != nil {
+		return *override
+	}
+	if !merged.Enabled {
+		return false
+	}
+	return sandbox.Available()
+}
+
+func (sm *SessionManager) sandboxOpts(agentName, worktreePath string, envKeys []string) sandbox.WrapOpts {
+	merged := sm.cfg.Sandbox.Merge(sm.cfg.Agents[agentName].Sandbox)
+	return sandbox.WrapOpts{
+		WorktreeDir:      worktreePath,
+		ReadDirs:         merged.ReadDirs,
+		WriteDirs:        merged.WriteDirs,
+		Features:         merged.Features,
+		EnvKeys:          envKeys,
+		SafehouseCommand: merged.Command,
 	}
 }
 
