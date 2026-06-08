@@ -122,10 +122,25 @@ type MsgTopicsMsg struct {
 
 // Client -> Daemon (hook reporting)
 type StatusReportMsg struct {
-	SessionID string `json:"session_id"`
-	Event     string `json:"event"`
-	Status    string `json:"status,omitempty"`
-	ToolName  string `json:"tool_name,omitempty"`
+	SessionID string         `json:"session_id"`
+	Event     string         `json:"event"`
+	Status    string         `json:"status,omitempty"`
+	ToolName  string         `json:"tool_name,omitempty"`
+	Model     string         `json:"model,omitempty"`
+	Usage     *UsageReport   `json:"usage,omitempty"`
+	Context   *ContextReport `json:"context,omitempty"`
+}
+
+type UsageReport struct {
+	InputTokens  *int64   `json:"input_tokens,omitempty"`
+	OutputTokens *int64   `json:"output_tokens,omitempty"`
+	CostUSD      *float64 `json:"cost_usd,omitempty"`
+}
+
+type ContextReport struct {
+	UsedTokens *int64   `json:"used_tokens,omitempty"`
+	MaxTokens  *int64   `json:"max_tokens,omitempty"`
+	Percent    *float64 `json:"percent,omitempty"`
 }
 
 // Daemon -> Client
@@ -157,9 +172,13 @@ type SessionInfo struct {
 	ExitCode       *int   `json:"exit_code,omitempty"`
 	CreatedAt      string `json:"created_at"`
 	LastAttachedAt string `json:"last_attached_at,omitempty"`
-	Dirty          bool   `json:"dirty,omitempty"`
-	UnpushedCount  int    `json:"unpushed_count,omitempty"`
-	Sandboxed      bool   `json:"sandboxed,omitempty"`
+	Dirty          bool     `json:"dirty,omitempty"`
+	UnpushedCount  int      `json:"unpushed_count,omitempty"`
+	Sandboxed      bool     `json:"sandboxed,omitempty"`
+	Model          string   `json:"model,omitempty"`
+	ToolName       string   `json:"tool_name,omitempty"`
+	CostUSD        *float64 `json:"cost_usd,omitempty"`
+	ContextPercent *float64 `json:"context_percent,omitempty"`
 }
 
 type DetachedMsg struct {
