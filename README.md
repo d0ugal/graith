@@ -12,16 +12,42 @@ When you're running multiple AI coding agents on different tasks, you need:
 - **Persistence** — sessions survive terminal closures; the daemon keeps everything alive
 - **Switching** — jump between agents with a tmux-style prefix key
 - **Visibility** — see all sessions at a glance, grouped by repo
+- **Coordination** — agents can message each other and you can drive them remotely
 
 graith is purpose-built for this. It owns the PTY, manages worktrees, and gets out of your way.
 
 ## Install
 
+The binary is called `gr`.
+
+### Homebrew
+
 ```bash
-go install github.com/dougalmatthews/graith/cmd/graith@latest
+brew install d0ugal/tap/graith
 ```
 
-The binary is called `gr`.
+### From a release
+
+Download a prebuilt binary for your platform from the [releases page](https://github.com/d0ugal/graith/releases), extract it, and put `gr` on your `$PATH`.
+
+### go install
+
+```bash
+go install github.com/d0ugal/graith/cmd/graith@latest
+```
+
+> `go install` names the binary after the package directory, so this produces a binary called `graith`. Rename it to `gr` (or symlink it) to match the rest of these docs:
+> ```bash
+> mv "$(go env GOPATH)/bin/graith" "$(go env GOPATH)/bin/gr"
+> ```
+
+### From source
+
+```bash
+git clone https://github.com/d0ugal/graith
+cd graith
+make build      # produces ./gr
+```
 
 ## Quick Start
 
@@ -32,6 +58,12 @@ gr new fix-auth-bug
 # Create with a specific agent
 gr new refactor-api --agent codex
 
+# Create with an initial prompt
+gr new fix-tests --prompt "the auth tests are flaky, find out why"
+
+# Create in the background without attaching
+gr new long-task --background
+
 # List all sessions
 gr list
 
@@ -39,63 +71,18 @@ gr list
 gr attach fix-auth-bug
 gr    # bare gr opens the session picker
 
-# Inside a session:
+# Inside a session (prefix is ctrl+b):
 #   ctrl+b w    → session picker overlay
 #   ctrl+b d    → detach
 #   ctrl+b s    → open shell in the worktree
-#   ctrl+b ctrl+b → send literal ctrl+b
+#   ctrl+b n/p  → next / previous session
+#   ctrl+b c    → create a new session
+#   ctrl+b ctrl+b → send a literal ctrl+b
 
 # Rename / delete
 gr rename fix-auth-bug auth-rewrite
 gr delete auth-rewrite
 ```
-
-## Architecture
-
-```
-┌──────────┐     Unix Socket      ┌──────────┐     PTY      ┌─────────┐
-│ gr (CLI) │ ◄──── frames ──────► │ graithd  │ ◄──────────► │ claude  │
-│  client  │   control + data     │  daemon   │              │ codex   │
-└──────────┘                      └──────────┘              │ opencode│
-                                       │                     └─────────┘
-                                  state.json
-                                  (persisted)
-```
-
-- **Daemon** (`graithd`) — owns PTYs, manages state, multiplexes connections
-- **Client** (`gr`) — stateless, connects over Unix socket, auto-starts daemon
-- **Protocol** — 5-byte framed multiplexing: `[channel:1][length:4][payload:N]`
-  - Channel 0x00: JSON control messages
-  - Channel 0x01: raw PTY data
-
-## Configuration
-
-Config lives at `~/.config/graith/config.toml` (or `$XDG_CONFIG_HOME/graith/config.toml`).
-
-```toml
-default_agent = "claude"
-github_username = "d0ugal"
-branch_prefix = "{username}/graith"
-fetch_on_create = true
-
-[keybindings]
-prefix = "ctrl+b"
-detach = "d"
-session_list = "w"
-shell = "s"
-
-[agents.claude]
-command = "claude"
-args = ["--session-id", "{agent_session_id}"]
-resume_args = ["--resume", "{agent_session_id}"]
-
-[agents.codex]
-command = "codex"
-args = []
-resume_args = ["resume", "--last"]
-```
-
-All fields are optional — sensible defaults are provided.
 
 ## Commands
 
@@ -103,38 +90,314 @@ All fields are optional — sensible defaults are provided.
 |---------|-------------|
 | `gr` | Attach (shows session picker if multiple) |
 | `gr new <name>` | Create a new agent session |
-| `gr list` | List all sessions |
-| `gr attach [name]` | Attach to a session |
-| `gr delete <name>` | Delete a session and its worktree |
+| `gr list` (`ls`) | List all sessions |
+| `gr attach [name]` (`a`) | Attach to a session |
+| `gr stop <name>` | Stop a running session without deleting it (keeps the worktree) |
+| `gr delete <name>` (`rm`) | Delete a session and its worktree |
 | `gr rename <old> <new>` | Rename a session |
 | `gr info` | Show info for the current session (when inside a worktree) |
-| `gr doctor` | Health checks and diagnostics |
-| `gr daemon start/stop` | Manage the daemon directly |
+| `gr logs <name>` (`l`) | Show a session's output without attaching |
+| `gr type <name> <text>` (`t`) | Type text into a session's stdin |
+| `gr msg ...` (`m`) | Inter-agent messaging — see below |
+| `gr dashboard` | Live-updating dashboard of all sessions |
+| `gr approvals` | List sessions waiting for approval |
+| `gr doctor` (`doc`) | Health checks and diagnostics |
+| `gr daemon ...` (`d`) | Manage the daemon — see below |
+| `gr mcp` | Run graith as an MCP tool server (stdio) |
+| `gr completion <shell>` | Generate a shell completion script |
+| `gr version` | Print version information |
 
-## Git Worktree Lifecycle
+Global flags: `--config <path>` to point at a non-default config file, and `--json` for machine-readable output on commands that support it.
+
+### `gr new`
+
+```bash
+gr new <name> [flags]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--agent <name>` | Agent to run (defaults to `default_agent` from config) |
+| `--base <branch>` | Base branch to fork the worktree from (defaults to the repo default branch) |
+| `-C, --repo <path>` | Path to the git repo (defaults to the current directory) |
+| `--no-repo` | Create a session with no git repo or worktree |
+| `--background` | Create the session without attaching to it |
+| `-p, --prompt <text>` | Send an initial prompt to the agent on startup |
+| `--prompt-file <path>` | Read the initial prompt from a file |
+
+### `gr daemon`
+
+The daemon auto-starts on the first command. Manage it explicitly with:
+
+| Command | Description |
+|---------|-------------|
+| `gr daemon start` | Start the daemon |
+| `gr daemon stop` | Stop the daemon |
+| `gr daemon restart` | Restart, preserving live sessions via exec (`--force` for a clean stop/start that kills sessions) |
+| `gr daemon reload` | Reload config without restarting |
+| `gr daemon upgrade` | Hot-upgrade the daemon binary without losing sessions |
+
+After rebuilding `gr`, run `gr daemon restart` (or `upgrade`) to pick up the new daemon binary.
+
+## Inter-agent messaging
+
+Sessions — and you — can communicate over a SQLite-backed pub/sub system. Each agent process gets `GRAITH_SESSION_ID`/`GRAITH_SESSION_NAME` set, so `gr msg` automatically knows who is sending.
+
+| Command | Description |
+|---------|-------------|
+| `gr msg pub -t <topic> <body>` | Publish a message to a stream |
+| `gr msg send <session> <body>` | Send a message to a specific session's inbox |
+| `gr msg sub -t <topic>` | Read messages from a stream |
+| `gr msg ack -t <topic>` | Acknowledge all messages in a stream |
+| `gr msg topics` | List streams with total/unread counts |
+
+```bash
+# Publish findings to a topic
+gr msg pub --topic code-review "Found a race condition in handler.go:245"
+
+# Read unread messages from a topic
+gr msg sub --topic code-review
+
+# Show all messages (not just unread)
+gr msg sub --topic code-review --all
+
+# Block until the next message arrives
+gr msg sub --topic code-review --wait
+
+# Follow a stream continuously, acking as you go
+gr msg sub --topic code-review --follow --ack
+
+# Message another session directly (types a notification into it unless --quiet)
+gr msg send fix-auth-bug "the tests are green now, rebase on main"
+```
+
+`pub`/`send` accept `--file` to read the body from a file, and `--thread`/`--reply-to` for threaded conversations. `sub` accepts `--thread` to filter to one thread.
+
+## Driving sessions remotely
+
+```bash
+# Type text into a running session (appends a newline by default)
+gr type fix-auth-bug "/help"
+gr type fix-auth-bug --no-newline "y"
+
+# Watch a session's output without attaching
+gr logs fix-auth-bug --follow
+gr logs fix-auth-bug --lines 500
+
+# See which sessions are blocked waiting for you to approve something
+gr approvals
+
+# A live TUI dashboard of every session (attach/stop/delete/resume inline)
+gr dashboard
+```
+
+## MCP server
+
+`gr mcp` runs graith as a [Model Context Protocol](https://modelcontextprotocol.io) server over stdio, exposing session management as tools: `list_sessions`, `session_status`, `create_session`, `publish_message`, `read_messages`, and `subscribe`. This lets an agent manage other graith sessions as part of its own tool set.
+
+## Shell completion
+
+```bash
+# bash
+source <(gr completion bash)
+
+# zsh
+gr completion zsh > "${fpath[1]}/_gr"
+
+# fish
+gr completion fish | source
+```
+
+`powershell` is also supported.
+
+## Architecture
+
+```
+┌──────────┐     Unix Socket      ┌──────────┐     PTY      ┌─────────┐
+│ gr (CLI) │ ◄──── frames ──────► │ graithd  │ ◄──────────► │ claude  │
+│  client  │   control + data     │  daemon  │              │ codex   │
+└──────────┘                      └──────────┘              │ opencode│
+                                       │                    └─────────┘
+                                  state.json
+                                  (persisted)
+```
+
+- **Daemon** (`graithd`) — owns PTYs, manages state, multiplexes connections
+- **Client** (`gr`) — stateless, connects over a Unix socket, auto-starts the daemon
+- **Protocol** — 5-byte framed multiplexing: `[channel:1][length:4][payload:N]`
+  - Channel `0x00`: JSON control messages, envelope `{"type":"...","payload":{...}}`
+  - Channel `0x01`: raw PTY data
+
+## Configuration
+
+Config lives at `~/.config/graith/config.toml` (or `$XDG_CONFIG_HOME/graith/config.toml`). All fields are optional — sensible defaults are provided. The block below shows every option at its default value.
+
+```toml
+default_agent   = "claude"              # agent used when --agent isn't given
+github_username = ""                    # used by {username} in branch_prefix
+branch_prefix   = "{username}/graith"   # template for new branch names
+fetch_on_create = true                  # fetch origin before creating a worktree
+
+[status_bar]
+enabled  = true                         # show a status bar while attached
+position = "bottom"
+
+[notifications]
+enabled     = true                      # desktop notifications
+on_approval = true                      # notify when a session needs approval
+on_stopped  = false                     # notify when a session stops
+command     = ""                        # custom notification command (optional)
+
+[messages]
+max_age        = ""                     # prune messages older than e.g. "7d" / "168h" (empty = keep)
+max_per_stream = 0                      # cap messages per stream (0 = unlimited)
+
+[keybindings]
+prefix         = "ctrl+b"               # prefix key
+new_session    = "c"                    # create a session
+delete_session = "x"                    # delete a session
+detach         = "d"                    # detach
+session_list   = "w"                    # open the session picker overlay
+next_session   = "n"                    # next session
+prev_session   = "p"                    # previous session
+resume_session = "R"                    # resume a stopped session
+rename_session = ","                    # rename
+search         = "/"                    # filter sessions
+scroll_mode    = "["                    # enter scroll mode
+shell          = "s"                    # open a shell in the worktree
+
+# Each agent is configured under [agents.<name>]. The four below ship by default.
+[agents.claude]
+command     = "claude"
+args        = ["--session-id", "{agent_session_id}"]
+resume_args = ["--resume", "{agent_session_id}"]
+# env         = { KEY = "value" }       # extra env for the agent process (optional)
+# idle_timeout = "1h"                   # stop after idle (defaults to 1h if resume_args set)
+
+[agents.codex]
+command     = "codex"
+args        = []
+resume_args = ["resume", "--last"]
+
+[agents.opencode]
+command     = "opencode"
+args        = []
+resume_args = ["--session", "{agent_session_id}"]
+
+[agents.agy]
+command     = "agy"
+args        = []
+resume_args = ["--conversation", "{agent_session_id}"]
+```
+
+### Template variables
+
+These are substituted in `branch_prefix` and agent `args`/`resume_args`:
+
+| Variable | Expands to |
+|----------|-----------|
+| `{agent_session_id}` / `{id}` | the unique session ID |
+| `{username}` | `github_username` (or the system username) |
+| `{name}` | the session name |
+
+## Keybindings
+
+### While attached (passthrough)
+
+Press the prefix (`ctrl+b`), then:
+
+| Key | Action |
+|-----|--------|
+| `w` | Open the session picker overlay |
+| `d` | Detach (leave the agent running) |
+| `s` | Open a shell in the worktree |
+| `c` | Create a new session |
+| `n` / `p` | Next / previous session |
+| `R` | Resume a stopped session |
+| `,` | Rename the session |
+| `x` | Delete the session |
+| `ctrl+b` | Send a literal prefix byte to the agent |
+
+### Session picker overlay
+
+| Key | Action |
+|-----|--------|
+| `enter` | Attach to the highlighted session |
+| `j` / `k` (or arrows) | Move the cursor |
+| `n` / `p` | Next / previous session |
+| `/` | Filter by name |
+| `x` then `y` | Delete (with confirmation) |
+| `q` / `esc` | Close the overlay |
+
+### Dashboard (`gr dashboard`)
+
+| Key | Action |
+|-----|--------|
+| `enter` / `a` | Attach to the highlighted session |
+| `j` / `k` (or arrows) | Move the cursor |
+| `s` | Stop the session (with confirmation) |
+| `x` / `d` | Delete the session (with confirmation) |
+| `r` | Resume a stopped session |
+| `q` / `ctrl+c` | Quit |
+
+## Git worktree lifecycle
 
 When you create a session:
 
-1. Fetches latest from origin (configurable)
-2. Creates a branch: `{username}/graith/{name}-{id}` from the default branch
+1. Fetches latest from origin (when `fetch_on_create` is true)
+2. Creates a branch `{branch_prefix}/{name}-{id}` from the base branch
 3. Creates a worktree at `~/.local/share/graith/worktrees/{repo-name}/{repo-hash}/{id}/`
 4. Starts the agent in that worktree
 
-When you delete a session:
+When you stop a session, the agent process is killed but the worktree and branch are kept (resume restarts the agent in place). When you delete a session, the process is killed, the worktree is removed, and the branch is deleted.
 
-1. Kills the agent process
-2. Removes the worktree
-3. Deletes the branch
+## Environment variables
+
+The daemon sets these in every agent process:
+
+| Variable | Value |
+|----------|-------|
+| `GRAITH_SESSION_ID` | unique session ID |
+| `GRAITH_SESSION_NAME` | human-readable session name |
+| `GRAITH_WORKTREE_PATH` | absolute path to the worktree |
+
+`gr shell` additionally exports `GRAITH_WORKTREE`. `gr msg` reads `GRAITH_SESSION_ID`/`GRAITH_SESSION_NAME` to identify the sender automatically.
+
+## File locations
+
+graith follows the XDG base directory spec:
+
+| Path | Contents |
+|------|----------|
+| `~/.config/graith/config.toml` | configuration |
+| `~/.local/share/graith/state.json` | persisted session state |
+| `~/.local/share/graith/messages.sqlite` | inter-agent message store |
+| `~/.local/share/graith/daemon.log` | daemon log (slog, JSON) |
+| `~/.local/share/graith/worktrees/<repo>/<hash>/<id>/` | session worktrees |
+| `$XDG_RUNTIME_DIR/graith/graith.sock` | Unix control socket |
+| `$XDG_RUNTIME_DIR/graith/graith.pid` | daemon PID file |
 
 ## Development
 
 ```bash
-# Build
-go build -o gr ./cmd/graith
+# Build (binary is ./gr)
+make build            # or: go build -o gr ./cmd/graith
 
 # Test
 go test ./...
+go test -race ./...   # CI runs the race detector
+
+# Lint (Docker-based golangci-lint)
+make lint             # run with --fix
+make lint-only        # check only
+make fmt              # format
 
 # Run
 ./gr doctor
 ```
+
+All packages live under `internal/` — there is no public API. See [`AGENTS.md`](AGENTS.md) for a package-by-package map and guidance on using graith to develop graith.
+
+## License
+
+MIT — see [`LICENSE`](LICENSE).
