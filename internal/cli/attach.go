@@ -258,7 +258,7 @@ func runAttachByID(c *client.Client, sessionID string) error {
 				return err
 			}
 
-			ids := sortedSessionIDs(list.Sessions)
+			ids := sortedSessionIDs(list.Sessions, sessionID)
 			if next := adjacentSession(ids, sessionID, result == client.ResultNextSession); next != "" {
 				sessionID = next
 			}
@@ -291,19 +291,33 @@ func freshClient() (*client.Client, error) {
 	return client.Connect(cfg, paths, cfgFile)
 }
 
-// sortedSessionIDs returns session IDs ordered by repo name then session name,
-// matching the overlay's display order.
-func sortedSessionIDs(sessions []protocol.SessionInfo) []string {
-	sort.SliceStable(sessions, func(i, j int) bool {
-		ri, rj := sessions[i].RepoName, sessions[j].RepoName
-		if ri != rj {
-			return ri < rj
+// sortedSessionIDs returns session IDs in the same order as the overlay:
+// grouped by repo (alphabetically), then within each group sorted by
+// current → running → recently attached → alphabetical.
+func sortedSessionIDs(sessions []protocol.SessionInfo, currentSessionID string) []string {
+	groups := map[string][]protocol.SessionInfo{}
+	var repoOrder []string
+	seen := map[string]bool{}
+	for _, s := range sessions {
+		repo := s.RepoName
+		if repo == "" {
+			repo = "(no repo)"
 		}
-		return sessions[i].Name < sessions[j].Name
-	})
-	ids := make([]string, len(sessions))
-	for i, s := range sessions {
-		ids[i] = s.ID
+		if !seen[repo] {
+			repoOrder = append(repoOrder, repo)
+			seen[repo] = true
+		}
+		groups[repo] = append(groups[repo], s)
+	}
+	sort.Strings(repoOrder)
+	for _, g := range groups {
+		client.SortSessions(g, currentSessionID)
+	}
+	var ids []string
+	for _, repo := range repoOrder {
+		for _, s := range groups[repo] {
+			ids = append(ids, s.ID)
+		}
 	}
 	return ids
 }
