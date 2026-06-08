@@ -811,11 +811,6 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 			case "upgrade":
 				var u protocol.UpgradeMsg
 				_ = protocol.DecodePayload(msg, &u)
-				if u.ClientVersion != "" && u.ClientVersion == version.Version {
-					log.Info("ignoring same-version upgrade request", "version", u.ClientVersion)
-					sendControl("error", protocol.ErrorMsg{Message: "already running " + version.Version})
-					return
-				}
 				select {
 				case sm.upgradeCh <- u.ExecPath:
 					sendControl("upgrading", struct{}{})
