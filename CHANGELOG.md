@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.6.1](https://github.com/d0ugal/graith/compare/v0.6.0...v0.6.1) (2026-06-08)
+
+
+### Bug Fixes
+
+* reduce unknown agent status after daemon restart ([9aac03e](https://github.com/d0ugal/graith/commit/9aac03e36ec9fdbd49b9e53b2e910853978869dc))
+* stop boosting current session to top of sort order ([e03ba68](https://github.com/d0ugal/graith/commit/e03ba680138244bf83e5da303b559bb53846b083))
+* use byte-bounded scrollback replay and event-based grace period ([009d39d](https://github.com/d0ugal/graith/commit/009d39d7204b761d677e335428ff0501f2536763))
+
 ## [0.6.0](https://github.com/d0ugal/graith/compare/v0.5.1...v0.6.0) (2026-06-08)
 
 
