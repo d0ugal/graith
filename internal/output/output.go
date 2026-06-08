@@ -17,6 +17,10 @@ func New(jsonMode bool) *Writer {
 	return &Writer{jsonMode: jsonMode, out: os.Stdout, errOut: os.Stderr}
 }
 
+func NewWithWriter(jsonMode bool, w io.Writer) *Writer {
+	return &Writer{jsonMode: jsonMode, out: w, errOut: os.Stderr}
+}
+
 func (w *Writer) Print(format string, args ...any) {
 	if !w.jsonMode {
 		fmt.Fprintf(w.out, format, args...)
