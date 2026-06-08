@@ -59,6 +59,47 @@ func TestScrollbackTailLargeFile(t *testing.T) {
 	}
 }
 
+func TestScrollbackTailBytes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "scroll.log")
+	sb, err := NewScrollback(path, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sb.Close()
+
+	sb.Write([]byte("abcdefghij"))
+
+	t.Run("returns all when maxBytes exceeds size", func(t *testing.T) {
+		tail, err := sb.TailBytes(100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(tail) != "abcdefghij" {
+			t.Errorf("tail = %q, want %q", tail, "abcdefghij")
+		}
+	})
+
+	t.Run("returns last N bytes", func(t *testing.T) {
+		tail, err := sb.TailBytes(5)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(tail) != "fghij" {
+			t.Errorf("tail = %q, want %q", tail, "fghij")
+		}
+	})
+
+	t.Run("zero maxBytes returns all", func(t *testing.T) {
+		tail, err := sb.TailBytes(0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(tail) != "abcdefghij" {
+			t.Errorf("tail = %q, want %q", tail, "abcdefghij")
+		}
+	})
+}
+
 func TestScrollbackStopsAtMaxSize(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "scroll.log")
 	sb, err := NewScrollback(path, 10)

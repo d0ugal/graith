@@ -311,7 +311,7 @@ func sortedSessionIDs(sessions []protocol.SessionInfo, currentSessionID string) 
 	}
 	sort.Strings(repoOrder)
 	for _, g := range groups {
-		client.SortSessions(g, currentSessionID)
+		client.SortSessions(g)
 	}
 	var ids []string
 	for _, repo := range repoOrder {

@@ -29,6 +29,7 @@ type Session struct {
 	exited         bool
 	adoptedPID     int
 	lastOutputAt   time.Time
+	adoptedAt      time.Time
 }
 
 type SessionOpts struct {
@@ -108,9 +109,10 @@ func AdoptSession(opts AdoptOpts) (*Session, error) {
 		done:       make(chan struct{}),
 		readDone:   make(chan struct{}),
 		adoptedPID: opts.PID,
+		adoptedAt:  time.Now(),
 	}
 
-	if tail, err := sb.Tail(1000); err == nil && len(tail) > 0 {
+	if tail, err := sb.TailBytes(128 * 1024); err == nil && len(tail) > 0 {
 		s.screen.Write(tail)
 	}
 
@@ -220,8 +222,16 @@ func (s *Session) DetachWriter(w io.Writer) {
 }
 func (s *Session) Done() <-chan struct{}   { return s.done }
 func (s *Session) LastOutputAt() time.Time { s.mu.RLock(); defer s.mu.RUnlock(); return s.lastOutputAt }
-func (s *Session) Exited() bool            { s.mu.RLock(); defer s.mu.RUnlock(); return s.exited }
-func (s *Session) ExitCode() int           { s.mu.RLock(); defer s.mu.RUnlock(); return s.exitCode }
+
+// RecentlyAdopted returns true if the session was adopted (daemon restart)
+// within the last duration and has not yet received fresh PTY output.
+func (s *Session) RecentlyAdopted(grace time.Duration) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return !s.adoptedAt.IsZero() && s.lastOutputAt.IsZero() && time.Since(s.adoptedAt) < grace
+}
+func (s *Session) Exited() bool  { s.mu.RLock(); defer s.mu.RUnlock(); return s.exited }
+func (s *Session) ExitCode() int { s.mu.RLock(); defer s.mu.RUnlock(); return s.exitCode }
 
 func (s *Session) Kill() error {
 	pid := s.ProcessPID()
