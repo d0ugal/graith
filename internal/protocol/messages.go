@@ -49,6 +49,11 @@ type CreateMsg struct {
 	NoRepo   bool   `json:"no_repo,omitempty"`
 }
 
+type ForkMsg struct {
+	Name            string `json:"name"`
+	SourceSessionID string `json:"source_session_id"`
+}
+
 type AttachMsg struct {
 	SessionID string `json:"session_id"`
 }
