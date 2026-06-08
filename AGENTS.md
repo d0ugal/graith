@@ -50,6 +50,7 @@ internal/
   output/                Structured output helpers
   protocol/              Wire protocol: framing, control messages, encoding
   pty/                   PTY session management, scrollback buffer
+  sandbox/               Safehouse sandbox wrapping for agent processes
   version/               Build-time version injection
 ```
 
@@ -70,6 +71,7 @@ Key files by area:
 | CLI | `cli/msg.go` | `gr msg pub/sub/ack/topics` — inter-agent messaging |
 | PTY | `pty/session.go` | PTY lifecycle, resize, I/O multiplexing |
 | PTY | `pty/scrollback.go` | Append-only scrollback file with tail reads |
+| Sandbox | `sandbox/sandbox.go` | Safehouse wrapping: command construction, availability check |
 
 ## Architecture patterns
 
@@ -88,6 +90,13 @@ intercepts the next keystroke for commands (d=detach, w=overlay, s=shell, etc).
 
 **State persistence**: `state.json` in the data dir. Loaded on daemon start,
 saved on mutations. Sessions survive daemon restarts.
+
+**Sandbox**: When enabled via config, agent processes are wrapped with
+`safehouse wrap` (macOS `sandbox-exec`). The sandbox is config-only — no CLI
+flags — so agents can't escape by spawning unsandboxed children. The daemon
+resolves the merged sandbox config (global + per-agent), expands `~` paths to
+absolute, and passes them as safehouse options. If safehouse is unavailable
+when sandbox is enabled, session creation fails closed.
 
 ## Environment variables
 
