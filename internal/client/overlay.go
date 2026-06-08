@@ -3,6 +3,7 @@ package client
 import (
 	"fmt"
 	"io"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -33,7 +34,8 @@ func (s sessionItem) Description() string { return "" }
 func (s sessionItem) FilterValue() string { return s.info.Name + " " + s.info.RepoName }
 
 type groupHeader struct {
-	name string
+	name  string
+	count int
 }
 
 func (g groupHeader) Title() string       { return g.name }
@@ -45,158 +47,66 @@ type columnWidths struct {
 	status int
 	branch int
 	git    int
-	age    int
+	last   int
 }
 
 func (cw columnWidths) totalWidth() int {
-	// "  ● " + name + "  " + status + "  " + branch + "  " + git + "  " + age + margin
-	return 4 + cw.name + 2 + cw.status + 2 + cw.branch + 2 + cw.git + 2 + cw.age + 4
+	// "  ★ ● " (6) + name + "  " + status + "  " + branch + "  " + git + "  " + last + margin(4)
+	return 6 + cw.name + 2 + cw.status + 2 + cw.branch + 2 + cw.git + 2 + cw.last + 4
 }
-
-func computeColumnWidths(sessions []protocol.SessionInfo) columnWidths {
-	var cw columnWidths
-	now := time.Now()
-	for _, s := range sessions {
-		if n := len(s.Name); n > cw.name {
-			cw.name = n
-		}
-		status := s.Status
-		if s.AgentStatus != "" && s.Status == "running" {
-			status = s.AgentStatus
-		}
-		if n := len(status); n > cw.status {
-			cw.status = n
-		}
-		branch := s.Branch
-		if p := strings.SplitN(branch, "/", 3); len(p) == 3 {
-			branch = p[2]
-		}
-		if n := len(branch); n > cw.branch {
-			cw.branch = n
-		}
-		var gp []string
-		if s.Dirty {
-			gp = append(gp, "dirty")
-		}
-		if s.UnpushedCount > 0 {
-			gp = append(gp, fmt.Sprintf("%d↑", s.UnpushedCount))
-		}
-		if n := len(strings.Join(gp, " ")); n > cw.git {
-			cw.git = n
-		}
-		if t, err := time.Parse(time.RFC3339, s.CreatedAt); err == nil {
-			if n := len(ShortDuration(now.Sub(t))); n > cw.age {
-				cw.age = n
-			}
-		}
-	}
-	return cw
-}
-
-// compactDelegate renders each item on a single line with aligned columns.
-type compactDelegate struct {
-	cols columnWidths
-}
-
-func (d compactDelegate) Height() int                         { return 1 }
-func (d compactDelegate) Spacing() int                        { return 0 }
-func (d compactDelegate) Update(tea.Msg, *list.Model) tea.Cmd { return nil }
 
 func pad(s string, width int) string {
-	if n := width - len(s); n > 0 {
+	if n := width - lipgloss.Width(s); n > 0 {
 		return s + strings.Repeat(" ", n)
 	}
 	return s
 }
 
-func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
-	selected := index == m.Index()
-	width := m.Width()
-
-	if gh, ok := item.(groupHeader); ok {
-		style := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7B61FF"))
-		line := style.Render("▸ " + gh.name)
-		_, _ = fmt.Fprint(w, line)
-		return
-	}
-
-	si, ok := item.(sessionItem)
-	if !ok {
-		return
-	}
-
-	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("#626262"))
-
-	indicator := "●"
-	indicatorColor := lipgloss.Color("#00ff87")
-	switch si.info.Status {
-	case "stopped":
-		indicator = "○"
-		indicatorColor = lipgloss.Color("#626262")
-	case "errored":
-		indicator = "✗"
-		indicatorColor = lipgloss.Color("#ff5f5f")
-	}
-	prefix := lipgloss.NewStyle().Foreground(indicatorColor).Render(indicator)
-
-	name := pad(si.info.Name, d.cols.name)
-
-	status := si.info.Status
-	if si.info.AgentStatus != "" && si.info.Status == "running" {
-		status = si.info.AgentStatus
-	}
-	status = pad(status, d.cols.status)
-
-	branch := si.info.Branch
+func displayBranch(branch, name string) string {
+	stripped := branch
 	if p := strings.SplitN(branch, "/", 3); len(p) == 3 {
-		branch = p[2]
+		stripped = p[2]
 	}
-	branch = pad(branch, d.cols.branch)
+	if stripped == name {
+		return "—"
+	}
+	return stripped
+}
 
-	var gitParts []string
-	if si.info.Dirty {
-		gitParts = append(gitParts, "dirty")
+func displayGit(dirty bool, unpushed int) string {
+	if !dirty && unpushed == 0 {
+		return "clean"
 	}
-	if si.info.UnpushedCount > 0 {
-		gitParts = append(gitParts, fmt.Sprintf("%d↑", si.info.UnpushedCount))
+	var parts []string
+	if dirty {
+		parts = append(parts, "M")
 	}
-	gitStr := pad(strings.Join(gitParts, " "), d.cols.git)
+	if unpushed > 0 {
+		parts = append(parts, fmt.Sprintf("↑%d", unpushed))
+	}
+	return strings.Join(parts, " ")
+}
 
-	now := time.Now()
-	age := ""
-	if t, err := time.Parse(time.RFC3339, si.info.CreatedAt); err == nil {
-		age = ShortDuration(now.Sub(t))
+func displayLastActive(s protocol.SessionInfo, currentSessionID string) string {
+	if s.ID == currentSessionID {
+		return "now"
 	}
-	age = pad(age, d.cols.age)
-
-	attached := ""
-	if si.info.LastAttachedAt != "" {
-		if t, err := time.Parse(time.RFC3339, si.info.LastAttachedAt); err == nil {
-			attached = ShortDuration(now.Sub(t)) + " ago"
-		}
+	ts := s.LastAttachedAt
+	if ts == "" {
+		ts = s.CreatedAt
 	}
-
-	sep := dim.Render("  ")
-	line := fmt.Sprintf("  %s %s%s%s%s%s%s%s%s%s",
-		prefix, name, sep, status, sep, dim.Render(branch), sep, gitStr, sep, dim.Render(age))
-	if attached != "" {
-		line += sep + dim.Render(attached)
+	if t, err := time.Parse(time.RFC3339, ts); err == nil {
+		return ShortDuration(time.Since(t))
 	}
+	return ""
+}
 
-	if selected {
-		line = fmt.Sprintf("> %s %s%s%s%s%s%s%s%s%s",
-			prefix, name, sep, status, sep, dim.Render(branch), sep, gitStr, sep, dim.Render(age))
-		if attached != "" {
-			line += sep + dim.Render(attached)
-		}
-		line = lipgloss.NewStyle().Bold(true).Render(line)
+func shortenPath(p string) string {
+	home, err := os.UserHomeDir()
+	if err == nil && strings.HasPrefix(p, home) {
+		return "~" + p[len(home):]
 	}
-
-	if width > 0 && lipgloss.Width(line) > width {
-		line = ansi.Truncate(line, width, "")
-	}
-
-	_, _ = fmt.Fprint(w, line)
+	return p
 }
 
 func ShortDuration(d time.Duration) string {
@@ -217,6 +127,183 @@ func ShortDuration(d time.Duration) string {
 	return fmt.Sprintf("%dd", int(d.Hours())/24)
 }
 
+func filterSessions(sessions []protocol.SessionInfo, query string) []protocol.SessionInfo {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return sessions
+	}
+	terms := strings.Fields(strings.ToLower(query))
+	var result []protocol.SessionInfo
+	for _, s := range sessions {
+		matchStr := buildMatchString(s)
+		allMatch := true
+		for _, term := range terms {
+			if !strings.Contains(matchStr, term) {
+				allMatch = false
+				break
+			}
+		}
+		if allMatch {
+			result = append(result, s)
+		}
+	}
+	return result
+}
+
+func buildMatchString(s protocol.SessionInfo) string {
+	parts := []string{
+		strings.ToLower(s.Name),
+		strings.ToLower(s.RepoName),
+		strings.ToLower(s.Branch),
+		strings.ToLower(s.Status),
+		strings.ToLower(s.AgentStatus),
+		strings.ToLower(s.Agent),
+	}
+	if s.Dirty {
+		parts = append(parts, "dirty", "modified")
+	} else {
+		parts = append(parts, "clean")
+	}
+	if s.UnpushedCount > 0 {
+		parts = append(parts, "unpushed")
+	}
+	return strings.Join(parts, " ")
+}
+
+func computeColumnWidths(sessions []protocol.SessionInfo, currentSessionID string) columnWidths {
+	var cw columnWidths
+	for _, s := range sessions {
+		if n := lipgloss.Width(s.Name); n > cw.name {
+			cw.name = n
+		}
+		status := s.Status
+		if s.AgentStatus != "" && s.Status == "running" {
+			status = s.AgentStatus
+		}
+		if n := lipgloss.Width(status); n > cw.status {
+			cw.status = n
+		}
+		branch := displayBranch(s.Branch, s.Name)
+		if n := lipgloss.Width(branch); n > cw.branch {
+			cw.branch = n
+		}
+		git := displayGit(s.Dirty, s.UnpushedCount)
+		if n := lipgloss.Width(git); n > cw.git {
+			cw.git = n
+		}
+		last := displayLastActive(s, currentSessionID)
+		if n := lipgloss.Width(last); n > cw.last {
+			cw.last = n
+		}
+	}
+	if cw.name < 7 {
+		cw.name = 7
+	}
+	if cw.status < 6 {
+		cw.status = 6
+	}
+	if cw.branch < 6 {
+		cw.branch = 6
+	}
+	if cw.git < 3 {
+		cw.git = 3
+	}
+	if cw.last < 4 {
+		cw.last = 4
+	}
+	return cw
+}
+
+// compactDelegate renders each item on a single line with aligned columns.
+type compactDelegate struct {
+	cols             columnWidths
+	currentSessionID string
+}
+
+func (d compactDelegate) Height() int                         { return 1 }
+func (d compactDelegate) Spacing() int                        { return 0 }
+func (d compactDelegate) Update(tea.Msg, *list.Model) tea.Cmd { return nil }
+
+func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
+	selected := index == m.Index()
+	width := m.Width()
+
+	if gh, ok := item.(groupHeader); ok {
+		style := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7B61FF"))
+		line := style.Render(fmt.Sprintf("▸ %s (%d)", gh.name, gh.count))
+		_, _ = fmt.Fprint(w, line)
+		return
+	}
+
+	si, ok := item.(sessionItem)
+	if !ok {
+		return
+	}
+
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("#626262"))
+	isCurrent := si.info.ID == d.currentSessionID
+
+	indicator := "●"
+	indicatorColor := lipgloss.Color("#00ff87")
+	switch si.info.Status {
+	case "stopped":
+		indicator = "○"
+		indicatorColor = lipgloss.Color("#626262")
+	case "errored":
+		indicator = "✗"
+		indicatorColor = lipgloss.Color("#ff5f5f")
+	}
+	styledIndicator := lipgloss.NewStyle().Foreground(indicatorColor).Render(indicator)
+
+	currentMark := "  "
+	if isCurrent {
+		currentMark = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFD700")).Render("★") + " "
+	}
+
+	name := pad(si.info.Name, d.cols.name)
+
+	status := si.info.Status
+	if si.info.AgentStatus != "" && si.info.Status == "running" {
+		status = si.info.AgentStatus
+	}
+	status = pad(status, d.cols.status)
+
+	branchVal := displayBranch(si.info.Branch, si.info.Name)
+	branchRendered := dim.Render(pad(branchVal, d.cols.branch))
+
+	gitVal := displayGit(si.info.Dirty, si.info.UnpushedCount)
+	var gitRendered string
+	if gitVal == "clean" {
+		gitRendered = dim.Render(pad(gitVal, d.cols.git))
+	} else {
+		gitRendered = pad(gitVal, d.cols.git)
+	}
+
+	last := displayLastActive(si.info, d.currentSessionID)
+	lastRendered := dim.Render(pad(last, d.cols.last))
+
+	sep := dim.Render("  ")
+
+	selPrefix := "  "
+	if selected {
+		selPrefix = "> "
+	}
+
+	line := fmt.Sprintf("%s%s%s %s%s%s%s%s%s%s%s%s",
+		selPrefix, currentMark, styledIndicator,
+		name, sep, status, sep, branchRendered, sep, gitRendered, sep, lastRendered)
+
+	if selected {
+		line = lipgloss.NewStyle().Bold(true).Render(line)
+	}
+
+	if width > 0 && lipgloss.Width(line) > width {
+		line = ansi.Truncate(line, width, "")
+	}
+
+	_, _ = fmt.Fprint(w, line)
+}
+
 type previewMsg struct {
 	sessionID string
 	content   string
@@ -230,6 +317,9 @@ type overlayModel struct {
 	width            int
 	height           int
 	contentWidth     int
+	cols             columnWidths
+	currentSessionID string
+	allSessions      []protocol.SessionInfo
 	fetchPreview     func(sessionID string) string
 	previewContent   string
 	previewSessionID string
@@ -241,7 +331,40 @@ type OverlayResult struct {
 	SessionID string
 }
 
-func buildGroupedItems(sessions []protocol.SessionInfo) []list.Item {
+func sortSessions(sessions []protocol.SessionInfo, currentSessionID string) {
+	sort.SliceStable(sessions, func(i, j int) bool {
+		si, sj := sessions[i], sessions[j]
+
+		if si.ID == currentSessionID && sj.ID != currentSessionID {
+			return true
+		}
+		if sj.ID == currentSessionID && si.ID != currentSessionID {
+			return false
+		}
+
+		ri := si.Status == "running"
+		rj := sj.Status == "running"
+		if ri != rj {
+			return ri
+		}
+
+		ti, _ := time.Parse(time.RFC3339, si.LastAttachedAt)
+		tj, _ := time.Parse(time.RFC3339, sj.LastAttachedAt)
+		if !ti.IsZero() && !tj.IsZero() && !ti.Equal(tj) {
+			return ti.After(tj)
+		}
+		if !ti.IsZero() && tj.IsZero() {
+			return true
+		}
+		if ti.IsZero() && !tj.IsZero() {
+			return false
+		}
+
+		return si.Name < sj.Name
+	})
+}
+
+func buildGroupedItems(sessions []protocol.SessionInfo, currentSessionID string) []list.Item {
 	groups := map[string][]protocol.SessionInfo{}
 	var repoOrder []string
 	seen := map[string]bool{}
@@ -258,37 +381,48 @@ func buildGroupedItems(sessions []protocol.SessionInfo) []list.Item {
 		groups[repo] = append(groups[repo], s)
 	}
 	sort.Strings(repoOrder)
-	for _, sessions := range groups {
-		sort.Slice(sessions, func(i, j int) bool {
-			return sessions[i].Name < sessions[j].Name
-		})
+	for _, g := range groups {
+		sortSessions(g, currentSessionID)
 	}
 
 	var items []list.Item
 	for _, repo := range repoOrder {
-		items = append(items, groupHeader{name: repo})
-		for _, s := range groups[repo] {
+		g := groups[repo]
+		items = append(items, groupHeader{name: repo, count: len(g)})
+		for _, s := range g {
 			items = append(items, sessionItem{info: s})
 		}
 	}
 	return items
 }
 
-func newOverlayModel(sessions []protocol.SessionInfo, fetchPreview func(sessionID string) string) overlayModel {
-	items := buildGroupedItems(sessions)
-	cols := computeColumnWidths(sessions)
+func newOverlayModel(sessions []protocol.SessionInfo, currentSessionID string, fetchPreview func(sessionID string) string) overlayModel {
+	cols := computeColumnWidths(sessions, currentSessionID)
 	contentWidth := cols.totalWidth()
+	items := buildGroupedItems(sessions, currentSessionID)
 
-	l := list.New(items, compactDelegate{cols: cols}, contentWidth, len(items)+2)
-	l.Title = "Sessions"
+	delegate := compactDelegate{cols: cols, currentSessionID: currentSessionID}
+	l := list.New(items, delegate, contentWidth, len(items)+4)
+	l.Title = ""
 	l.SetShowHelp(false)
 	l.SetShowStatusBar(false)
 	l.SetFilteringEnabled(false)
 	l.KeyMap.Quit = key.NewBinding(key.WithKeys())
 
-	// Skip past the initial group header so the cursor starts on the first session.
-	if _, ok := l.SelectedItem().(groupHeader); ok {
-		l.CursorDown()
+	cursorSet := false
+	if currentSessionID != "" {
+		for i, item := range items {
+			if si, ok := item.(sessionItem); ok && si.info.ID == currentSessionID {
+				l.Select(i)
+				cursorSet = true
+				break
+			}
+		}
+	}
+	if !cursorSet {
+		if _, ok := l.SelectedItem().(groupHeader); ok {
+			l.CursorDown()
+		}
 	}
 
 	fi := textinput.New()
@@ -297,11 +431,14 @@ func newOverlayModel(sessions []protocol.SessionInfo, fetchPreview func(sessionI
 	fi.SetWidth(contentWidth)
 
 	return overlayModel{
-		list:         l,
-		filterInput:  fi,
-		state:        stateList,
-		contentWidth: contentWidth,
-		fetchPreview: fetchPreview,
+		list:             l,
+		filterInput:      fi,
+		state:            stateList,
+		contentWidth:     contentWidth,
+		cols:             cols,
+		currentSessionID: currentSessionID,
+		allSessions:      sessions,
+		fetchPreview:     fetchPreview,
 	}
 }
 
@@ -327,8 +464,6 @@ func (m overlayModel) fetchPreviewCmd() tea.Cmd {
 func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case previewMsg:
-		// Guard against stale fetches: only apply if the result
-		// matches the currently selected session.
 		if item, ok := m.list.SelectedItem().(sessionItem); ok && item.info.ID == msg.sessionID {
 			m.previewContent = msg.content
 			if strings.TrimSpace(msg.content) != "" {
@@ -341,21 +476,54 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		panelWidth := min(m.contentWidth+4, msg.Width-4)
-		panelHeight := min(len(m.list.Items())+4, msg.Height-6)
-		m.list.SetSize(panelWidth-4, panelHeight)
+		listHeight := min(len(m.list.Items())+4, msg.Height-14)
+		if listHeight < 4 {
+			listHeight = 4
+		}
+		m.list.SetSize(panelWidth-4, listHeight)
 		return m, nil
 
 	case tea.KeyPressMsg:
 		switch m.state {
 		case stateFilter:
 			switch msg.String() {
-			case "esc", "enter":
+			case "esc":
+				m.state = stateList
+				m.filterInput.Blur()
+				m.filterInput.SetValue("")
+				items := buildGroupedItems(m.allSessions, m.currentSessionID)
+				m.list.SetItems(items)
+				found := false
+				if m.currentSessionID != "" {
+					for i, item := range items {
+						if si, ok := item.(sessionItem); ok && si.info.ID == m.currentSessionID {
+							m.list.Select(i)
+							found = true
+							break
+						}
+					}
+				}
+				if !found {
+					if _, ok := m.list.SelectedItem().(groupHeader); ok {
+						m.list.CursorDown()
+					}
+				}
+				return m, m.fetchPreviewCmd()
+			case "enter":
 				m.state = stateList
 				m.filterInput.Blur()
 				return m, m.fetchPreviewCmd()
 			default:
 				var cmd tea.Cmd
 				m.filterInput, cmd = m.filterInput.Update(msg)
+				filtered := filterSessions(m.allSessions, m.filterInput.Value())
+				items := buildGroupedItems(filtered, m.currentSessionID)
+				m.list.SetItems(items)
+				if len(items) > 0 {
+					if _, ok := m.list.SelectedItem().(groupHeader); ok {
+						m.list.CursorDown()
+					}
+				}
 				return m, cmd
 			}
 
@@ -407,6 +575,58 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.list.CursorUp()
 				}
 				return m, m.fetchPreviewCmd()
+
+			case "tab":
+				items := m.list.Items()
+				cur := m.list.Index()
+				for i := cur + 1; i < len(items); i++ {
+					if _, ok := items[i].(groupHeader); ok {
+						if i+1 < len(items) {
+							m.list.Select(i + 1)
+							return m, m.fetchPreviewCmd()
+						}
+					}
+				}
+				for i := 0; i <= cur; i++ {
+					if _, ok := items[i].(groupHeader); ok {
+						if i+1 < len(items) {
+							m.list.Select(i + 1)
+							return m, m.fetchPreviewCmd()
+						}
+					}
+				}
+				return m, nil
+
+			case "shift+tab":
+				items := m.list.Items()
+				cur := m.list.Index()
+				currentGroupHeader := -1
+				for i := cur; i >= 0; i-- {
+					if _, ok := items[i].(groupHeader); ok {
+						currentGroupHeader = i
+						break
+					}
+				}
+				prevGroupHeader := -1
+				for i := currentGroupHeader - 1; i >= 0; i-- {
+					if _, ok := items[i].(groupHeader); ok {
+						prevGroupHeader = i
+						break
+					}
+				}
+				if prevGroupHeader == -1 {
+					for i := len(items) - 1; i > cur; i-- {
+						if _, ok := items[i].(groupHeader); ok {
+							prevGroupHeader = i
+							break
+						}
+					}
+				}
+				if prevGroupHeader >= 0 && prevGroupHeader+1 < len(items) {
+					m.list.Select(prevGroupHeader + 1)
+					return m, m.fetchPreviewCmd()
+				}
+				return m, nil
 			}
 		}
 	}
@@ -423,17 +643,80 @@ func (m overlayModel) View() tea.View {
 		return tea.NewView("")
 	}
 
-	// --- Build panel content ---
 	panelWidth := min(m.contentWidth+4, w-4)
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("#626262"))
 
 	var panelContent strings.Builder
+
 	if m.state == stateFilter {
 		panelContent.WriteString("Filter: ")
 		panelContent.WriteString(m.filterInput.View())
-		panelContent.WriteString("\n\n")
+		panelContent.WriteString("\n")
+	} else {
+		titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7B61FF"))
+		panelContent.WriteString(titleStyle.Render("Sessions"))
+		panelContent.WriteString("\n")
 	}
 
+	headerPrefix := "      "
+	headerLine := fmt.Sprintf("%s%s  %s  %s  %s  %s",
+		headerPrefix,
+		pad("Session", m.cols.name),
+		pad("Status", m.cols.status),
+		pad("Branch", m.cols.branch),
+		pad("Git", m.cols.git),
+		"Last")
+	panelContent.WriteString(dim.Render(headerLine))
+	panelContent.WriteString("\n")
+	sepLine := fmt.Sprintf("%s%s  %s  %s  %s  %s",
+		headerPrefix,
+		strings.Repeat("─", m.cols.name),
+		strings.Repeat("─", m.cols.status),
+		strings.Repeat("─", m.cols.branch),
+		strings.Repeat("─", m.cols.git),
+		strings.Repeat("─", m.cols.last))
+	panelContent.WriteString(dim.Render(sepLine))
+	panelContent.WriteString("\n")
+
 	panelContent.WriteString(m.list.View())
+
+	if item, ok := m.list.SelectedItem().(sessionItem); ok {
+		s := item.info
+		panelContent.WriteString("\n")
+
+		var line1 []string
+		if s.Branch != "" {
+			branch := s.Branch
+			if p := strings.SplitN(branch, "/", 3); len(p) == 3 {
+				branch = p[2]
+			}
+			line1 = append(line1, "branch: "+branch)
+		}
+		if s.BaseBranch != "" {
+			line1 = append(line1, "base: "+s.BaseBranch)
+		}
+		if s.Agent != "" {
+			line1 = append(line1, "agent: "+s.Agent)
+		}
+		if len(line1) > 0 {
+			panelContent.WriteString(dim.Render(strings.Join(line1, "  ")))
+		}
+
+		var line2 []string
+		if s.WorktreePath != "" {
+			line2 = append(line2, shortenPath(s.WorktreePath))
+		}
+		if len(s.ID) >= 7 {
+			line2 = append(line2, "id: "+s.ID[:7])
+		}
+		if t, err := time.Parse(time.RFC3339, s.CreatedAt); err == nil {
+			line2 = append(line2, "created "+ShortDuration(time.Since(t))+" ago")
+		}
+		if len(line2) > 0 {
+			panelContent.WriteString("\n")
+			panelContent.WriteString(dim.Render(strings.Join(line2, "  ")))
+		}
+	}
 
 	if m.state == stateConfirmDelete {
 		if item, ok := m.list.SelectedItem().(sessionItem); ok {
@@ -446,7 +729,7 @@ func (m overlayModel) View() tea.View {
 
 	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#444444"))
 	panelContent.WriteString("\n")
-	panelContent.WriteString(helpStyle.Render("enter attach  n/p next/prev  x delete  / filter  q quit"))
+	panelContent.WriteString(helpStyle.Render("enter attach  / filter  tab group  x delete  q quit"))
 
 	panel := lipgloss.NewStyle().
 		Width(panelWidth).
@@ -469,7 +752,6 @@ func (m overlayModel) View() tea.View {
 			idx := start + i
 			if idx < len(raw) {
 				line := raw[idx]
-				// Pad to full width so dim styling covers the whole line
 				if vis := lipgloss.Width(line); vis < w {
 					line += strings.Repeat(" ", w-vis)
 				} else if vis > w {
@@ -523,10 +805,10 @@ func (m overlayModel) View() tea.View {
 }
 
 // RunOverlay launches the bubbletea overlay listing sessions grouped by repo.
+// currentSessionID highlights the session the user was just attached to.
 // fetchPreview is called asynchronously to load scrollback for the selected session.
-// It may be nil, in which case no preview is shown.
-func RunOverlay(sessions []protocol.SessionInfo, fetchPreview func(sessionID string) string) *OverlayResult {
-	m := newOverlayModel(sessions, fetchPreview)
+func RunOverlay(sessions []protocol.SessionInfo, currentSessionID string, fetchPreview func(sessionID string) string) *OverlayResult {
+	m := newOverlayModel(sessions, currentSessionID, fetchPreview)
 	p := tea.NewProgram(m)
 
 	final, err := p.Run()
