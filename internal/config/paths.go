@@ -44,10 +44,9 @@ func runtimeDirForGraith() string {
 	if d := xdg.RuntimeDir; d != "" {
 		return filepath.Join(d, appName)
 	}
-	if d := os.Getenv("TMPDIR"); d != "" {
-		return filepath.Join(d, fmt.Sprintf("graith-%d", os.Getuid()))
-	}
-	return filepath.Join("/tmp", fmt.Sprintf("graith-%d", os.Getuid()))
+	// Fall back to the data dir rather than /tmp or $TMPDIR so that the
+	// daemon socket is not inside paths that safehouse grants by default.
+	return filepath.Join(xdg.DataHome, appName, "run")
 }
 
 func (p Paths) EnsureDirs() error {
