@@ -355,16 +355,9 @@ type OverlayResult struct {
 	SessionID string
 }
 
-func SortSessions(sessions []protocol.SessionInfo, currentSessionID string) {
+func SortSessions(sessions []protocol.SessionInfo) {
 	sort.SliceStable(sessions, func(i, j int) bool {
 		si, sj := sessions[i], sessions[j]
-
-		if si.ID == currentSessionID && sj.ID != currentSessionID {
-			return true
-		}
-		if sj.ID == currentSessionID && si.ID != currentSessionID {
-			return false
-		}
 
 		ri := si.Status == "running"
 		rj := sj.Status == "running"
@@ -388,7 +381,7 @@ func SortSessions(sessions []protocol.SessionInfo, currentSessionID string) {
 	})
 }
 
-func buildGroupedItems(sessions []protocol.SessionInfo, currentSessionID string) []list.Item {
+func buildGroupedItems(sessions []protocol.SessionInfo) []list.Item {
 	groups := map[string][]protocol.SessionInfo{}
 	var repoOrder []string
 	seen := map[string]bool{}
@@ -406,7 +399,7 @@ func buildGroupedItems(sessions []protocol.SessionInfo, currentSessionID string)
 	}
 	sort.Strings(repoOrder)
 	for _, g := range groups {
-		SortSessions(g, currentSessionID)
+		SortSessions(g)
 	}
 
 	var items []list.Item
@@ -423,7 +416,7 @@ func buildGroupedItems(sessions []protocol.SessionInfo, currentSessionID string)
 func newOverlayModel(sessions []protocol.SessionInfo, currentSessionID string, fetchPreview func(sessionID string) string) overlayModel {
 	cols := computeColumnWidths(sessions, currentSessionID)
 	contentWidth := cols.totalWidth()
-	items := buildGroupedItems(sessions, currentSessionID)
+	items := buildGroupedItems(sessions)
 
 	delegate := compactDelegate{cols: cols, currentSessionID: currentSessionID}
 	l := list.New(items, delegate, contentWidth, len(items)+4)
@@ -515,7 +508,7 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.state = stateList
 				m.filterInput.Blur()
 				m.filterInput.SetValue("")
-				items := buildGroupedItems(m.allSessions, m.currentSessionID)
+				items := buildGroupedItems(m.allSessions)
 				m.list.SetItems(items)
 				found := false
 				if m.currentSessionID != "" {
@@ -541,7 +534,7 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				var cmd tea.Cmd
 				m.filterInput, cmd = m.filterInput.Update(msg)
 				filtered := filterSessions(m.allSessions, m.filterInput.Value())
-				items := buildGroupedItems(filtered, m.currentSessionID)
+				items := buildGroupedItems(filtered)
 				m.list.SetItems(items)
 				m.list.Select(0)
 				if len(items) > 0 {

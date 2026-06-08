@@ -91,7 +91,7 @@ func asOverlay(m tea.Model) overlayModel {
 
 func TestBuildGroupedItems_GroupsByRepo(t *testing.T) {
 	sessions := overlayTestSessions()
-	items := buildGroupedItems(sessions, "")
+	items := buildGroupedItems(sessions)
 
 	// With new sorting (running+recent first), the graith group has:
 	// fix-overlay (running, recently attached) then add-tests (stopped)
@@ -124,7 +124,7 @@ func TestBuildGroupedItems_EmptyRepoName(t *testing.T) {
 	sessions := []protocol.SessionInfo{
 		{ID: "s1", Name: "orphan", RepoName: "", Status: "running", CreatedAt: time.Now().Format(time.RFC3339)},
 	}
-	items := buildGroupedItems(sessions, "")
+	items := buildGroupedItems(sessions)
 	gh := items[0].(groupHeader)
 	if gh.name != "(no repo)" {
 		t.Errorf("empty repo should show as %q, got %q", "(no repo)", gh.name)
@@ -132,7 +132,7 @@ func TestBuildGroupedItems_EmptyRepoName(t *testing.T) {
 }
 
 func TestBuildGroupedItems_Empty(t *testing.T) {
-	items := buildGroupedItems(nil, "")
+	items := buildGroupedItems(nil)
 	if len(items) != 0 {
 		t.Errorf("expected 0 items for nil sessions, got %d", len(items))
 	}
@@ -143,7 +143,7 @@ func TestBuildGroupedItems_GroupsSorted(t *testing.T) {
 		{ID: "1", Name: "z", RepoName: "zzz", Status: "running", CreatedAt: time.Now().Format(time.RFC3339)},
 		{ID: "2", Name: "a", RepoName: "aaa", Status: "running", CreatedAt: time.Now().Format(time.RFC3339)},
 	}
-	items := buildGroupedItems(sessions, "")
+	items := buildGroupedItems(sessions)
 	gh1 := items[0].(groupHeader)
 	gh2 := items[2].(groupHeader)
 	if gh1.name != "aaa" || gh2.name != "zzz" {
@@ -153,7 +153,7 @@ func TestBuildGroupedItems_GroupsSorted(t *testing.T) {
 
 func TestBuildGroupedItems_SessionCount(t *testing.T) {
 	sessions := overlayTestSessions()
-	items := buildGroupedItems(sessions, "")
+	items := buildGroupedItems(sessions)
 	gh := items[0].(groupHeader)
 	if gh.count != 2 {
 		t.Errorf("graith group count = %d, want 2", gh.count)
@@ -166,14 +166,14 @@ func TestBuildGroupedItems_SessionCount(t *testing.T) {
 
 // --- sortSessions ---
 
-func TestSortSessions_CurrentFirst(t *testing.T) {
+func TestSortSessions_CurrentNotBoosted(t *testing.T) {
 	sessions := []protocol.SessionInfo{
 		{ID: "a", Name: "alpha", Status: "running", CreatedAt: time.Now().Format(time.RFC3339)},
 		{ID: "b", Name: "beta", Status: "running", CreatedAt: time.Now().Format(time.RFC3339)},
 	}
-	SortSessions(sessions, "b")
-	if sessions[0].ID != "b" {
-		t.Errorf("current session should be first, got %q", sessions[0].ID)
+	SortSessions(sessions)
+	if sessions[0].ID != "a" {
+		t.Errorf("current session should not be boosted, expected alpha first, got %q", sessions[0].ID)
 	}
 }
 
@@ -182,7 +182,7 @@ func TestSortSessions_RunningBeforeStopped(t *testing.T) {
 		{ID: "a", Name: "alpha", Status: "stopped", CreatedAt: time.Now().Format(time.RFC3339)},
 		{ID: "b", Name: "beta", Status: "running", CreatedAt: time.Now().Format(time.RFC3339)},
 	}
-	SortSessions(sessions, "")
+	SortSessions(sessions)
 	if sessions[0].ID != "b" {
 		t.Errorf("running session should be first, got %q", sessions[0].ID)
 	}
@@ -193,7 +193,7 @@ func TestSortSessions_RecentlyAttachedFirst(t *testing.T) {
 		{ID: "a", Name: "alpha", Status: "running", CreatedAt: time.Now().Format(time.RFC3339), LastAttachedAt: time.Now().Add(-1 * time.Hour).Format(time.RFC3339)},
 		{ID: "b", Name: "beta", Status: "running", CreatedAt: time.Now().Format(time.RFC3339), LastAttachedAt: time.Now().Add(-5 * time.Minute).Format(time.RFC3339)},
 	}
-	SortSessions(sessions, "")
+	SortSessions(sessions)
 	if sessions[0].ID != "b" {
 		t.Errorf("more recently attached should be first, got %q", sessions[0].ID)
 	}
@@ -1281,7 +1281,7 @@ func TestCompactDelegate_RenderSessionItem(t *testing.T) {
 	cols := computeColumnWidths(sessions, "")
 	d := compactDelegate{cols: cols}
 
-	items := buildGroupedItems(sessions, "")
+	items := buildGroupedItems(sessions)
 	l := list.New(items, d, 120, 10)
 	l.Select(1)
 
@@ -1296,7 +1296,7 @@ func TestCompactDelegate_RenderSessionItem(t *testing.T) {
 
 func TestCompactDelegate_RenderGroupHeader(t *testing.T) {
 	d := compactDelegate{}
-	items := buildGroupedItems(overlayTestSessions(), "")
+	items := buildGroupedItems(overlayTestSessions())
 	l := list.New(items, d, 120, 10)
 
 	var buf strings.Builder
@@ -1329,7 +1329,7 @@ func TestCompactDelegate_RenderStatusIndicators(t *testing.T) {
 			}
 			cols := computeColumnWidths(sessions, "")
 			d := compactDelegate{cols: cols}
-			items := buildGroupedItems(sessions, "")
+			items := buildGroupedItems(sessions)
 			l := list.New(items, d, 120, 10)
 
 			var buf strings.Builder
@@ -1351,7 +1351,7 @@ func TestCompactDelegate_RenderAgentStatusOverride(t *testing.T) {
 	}
 	cols := computeColumnWidths(sessions, "")
 	d := compactDelegate{cols: cols}
-	items := buildGroupedItems(sessions, "")
+	items := buildGroupedItems(sessions)
 	l := list.New(items, d, 120, 10)
 
 	var buf strings.Builder
@@ -1365,7 +1365,7 @@ func TestCompactDelegate_RenderGitStatus(t *testing.T) {
 	sessions := overlayTestSessionsWithGitStatus()
 	cols := computeColumnWidths(sessions, "")
 	d := compactDelegate{cols: cols}
-	items := buildGroupedItems(sessions, "")
+	items := buildGroupedItems(sessions)
 	l := list.New(items, d, 120, 10)
 
 	var buf strings.Builder
@@ -1384,7 +1384,7 @@ func TestCompactDelegate_RenderCurrentSession(t *testing.T) {
 	sessions := overlayTestSessions()
 	cols := computeColumnWidths(sessions, "s1")
 	d := compactDelegate{cols: cols, currentSessionID: "s1"}
-	items := buildGroupedItems(sessions, "s1")
+	items := buildGroupedItems(sessions)
 	l := list.New(items, d, 120, 10)
 
 	// Find s1's index
@@ -1411,7 +1411,7 @@ func TestCompactDelegate_RenderBranchDash(t *testing.T) {
 	}
 	cols := computeColumnWidths(sessions, "")
 	d := compactDelegate{cols: cols}
-	items := buildGroupedItems(sessions, "")
+	items := buildGroupedItems(sessions)
 	l := list.New(items, d, 120, 10)
 
 	var buf strings.Builder
@@ -1425,7 +1425,7 @@ func TestCompactDelegate_RenderSelectedVsUnselected(t *testing.T) {
 	sessions := overlayTestSessions()
 	cols := computeColumnWidths(sessions, "")
 	d := compactDelegate{cols: cols}
-	items := buildGroupedItems(sessions, "")
+	items := buildGroupedItems(sessions)
 	l := list.New(items, d, 120, 10)
 	l.Select(1)
 
@@ -1451,7 +1451,7 @@ func TestCompactDelegate_RenderTruncatesLongLine(t *testing.T) {
 	}
 	cols := computeColumnWidths(sessions, "")
 	d := compactDelegate{cols: cols}
-	items := buildGroupedItems(sessions, "")
+	items := buildGroupedItems(sessions)
 	narrowWidth := 40
 	l := list.New(items, d, narrowWidth, 10)
 
