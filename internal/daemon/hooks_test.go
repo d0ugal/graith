@@ -207,6 +207,122 @@ func TestResolveGrBin(t *testing.T) {
 	}
 }
 
+func TestInjectCodexHooks(t *testing.T) {
+	sm := newTestSessionManagerWithDataDir(t)
+	sessionID := "test-session-codex-01"
+
+	extraArgs, extraEnv, err := sm.injectCodexHooks(sessionID)
+	if err != nil {
+		t.Fatalf("injectCodexHooks() error = %v", err)
+	}
+
+	// Codex hooks use env vars, not extra args.
+	if len(extraArgs) != 0 {
+		t.Errorf("extraArgs length = %d, want 0", len(extraArgs))
+	}
+
+	// Verify GRAITH_BIN env is set.
+	grBin, ok := extraEnv["GRAITH_BIN"]
+	if !ok {
+		t.Fatal("extraEnv missing GRAITH_BIN")
+	}
+	if grBin == "" {
+		t.Error("GRAITH_BIN is empty")
+	}
+
+	// Verify CODEX_HOOKS_DIR env is set.
+	hooksDir, ok := extraEnv["CODEX_HOOKS_DIR"]
+	if !ok {
+		t.Fatal("extraEnv missing CODEX_HOOKS_DIR")
+	}
+	if hooksDir == "" {
+		t.Fatal("CODEX_HOOKS_DIR is empty")
+	}
+
+	// Verify the codex-hooks directory exists.
+	info, err := os.Stat(hooksDir)
+	if err != nil {
+		t.Fatalf("codex hooks dir does not exist: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatal("CODEX_HOOKS_DIR is not a directory")
+	}
+
+	// Verify all expected event scripts exist and are executable.
+	expectedScripts := []string{
+		"session-start",
+		"user-prompt-submit",
+		"pre-tool-use",
+		"post-tool-use",
+		"permission-request",
+		"stop",
+	}
+
+	entries, err := os.ReadDir(hooksDir)
+	if err != nil {
+		t.Fatalf("read codex hooks dir: %v", err)
+	}
+	if len(entries) != len(expectedScripts) {
+		t.Errorf("codex hooks dir has %d entries, want %d", len(entries), len(expectedScripts))
+	}
+
+	for _, name := range expectedScripts {
+		path := filepath.Join(hooksDir, name)
+		fi, err := os.Stat(path)
+		if err != nil {
+			t.Errorf("missing codex hook script %q: %v", name, err)
+			continue
+		}
+		perm := fi.Mode().Perm()
+		if perm&0o111 == 0 {
+			t.Errorf("codex hook script %q is not executable: mode = %v", name, perm)
+		}
+	}
+}
+
+func TestCodexHookScriptContent(t *testing.T) {
+	sm := newTestSessionManagerWithDataDir(t)
+	sessionID := "test-session-codex-02"
+
+	_, _, err := sm.injectCodexHooks(sessionID)
+	if err != nil {
+		t.Fatalf("injectCodexHooks() error = %v", err)
+	}
+
+	hooksDir := filepath.Join(sm.hookDir(sessionID), "codex-hooks")
+
+	// Map of filename to expected --event value.
+	events := map[string]string{
+		"session-start":      "SessionStart",
+		"user-prompt-submit": "UserPromptSubmit",
+		"pre-tool-use":       "PreToolUse",
+		"post-tool-use":      "PostToolUse",
+		"permission-request": "PermissionRequest",
+		"stop":               "Stop",
+	}
+
+	for filename, eventName := range events {
+		path := filepath.Join(hooksDir, filename)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Errorf("read codex hook %q: %v", filename, err)
+			continue
+		}
+		content := string(data)
+
+		if !strings.HasPrefix(content, "#!/bin/sh") {
+			t.Errorf("codex hook %q missing shebang", filename)
+		}
+		expectedFlag := "--event " + eventName
+		if !strings.Contains(content, expectedFlag) {
+			t.Errorf("codex hook %q does not contain %q; content = %q", filename, expectedFlag, content)
+		}
+		if !strings.Contains(content, "hook.sh") {
+			t.Errorf("codex hook %q does not reference hook.sh; content = %q", filename, content)
+		}
+	}
+}
+
 func TestHookDir(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 	dir := sm.hookDir("sess123")
