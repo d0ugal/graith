@@ -58,3 +58,15 @@ func (p Paths) EnsureDirs() error {
 	}
 	return nil
 }
+
+// LegacyRuntimeDirs returns paths where older versions stored the socket and
+// PID file (TMPDIR or /tmp fallbacks). Used during startup to detect and clean
+// up an orphaned daemon after the socket location changed.
+func LegacyRuntimeDirs() []string {
+	var dirs []string
+	if d := os.Getenv("TMPDIR"); d != "" {
+		dirs = append(dirs, filepath.Join(d, fmt.Sprintf("graith-%d", os.Getuid())))
+	}
+	dirs = append(dirs, filepath.Join("/tmp", fmt.Sprintf("graith-%d", os.Getuid())))
+	return dirs
+}
