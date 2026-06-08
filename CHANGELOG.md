@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.11.0](https://github.com/d0ugal/graith/compare/v0.10.0...v0.11.0) (2026-06-08)
+
+
+### Features
+
+* add allowed_repo_paths config to restrict session creation ([0c93144](https://github.com/d0ugal/graith/commit/0c93144918c75c18f54c7628725a0d3dd9e923b0))
+* add Codex lifecycle hook injection ([a1d0574](https://github.com/d0ugal/graith/commit/a1d0574a947fe01545f63c4f65f61ef7e24f6915))
+* add enrichment types to protocol ([10f874a](https://github.com/d0ugal/graith/commit/10f874aedc4fd7f35fddc6f26e47e042bc655b44))
+* add hook report ingestion and gr report-status command ([25fd792](https://github.com/d0ugal/graith/commit/25fd792f51bef2c165419c7a178283ddb05fc3c7))
+* add safehouse checks to gr doctor ([08f1301](https://github.com/d0ugal/graith/commit/08f13010170fa81eed9022575e8ec94f84badf4c))
+* add sandbox fields to state, protocol, and CLI ([6af6e99](https://github.com/d0ugal/graith/commit/6af6e99096cc260d69f8aeb18115e3ce687b2caf))
+* add sandbox package for safehouse command wrapping ([df46f8c](https://github.com/d0ugal/graith/commit/df46f8cd8dbeed51423929f1831266293c65171c))
+* add SandboxConfig to config schema with merge semantics ([ed9a47b](https://github.com/d0ugal/graith/commit/ed9a47b0aac3996611ecb5b32bd893a2ce2df082))
+* add StatusReportMsg to wire protocol ([3798290](https://github.com/d0ugal/graith/commit/3798290de35aeb1af1d9ad02613719810fa75818))
+* Claude hook injection and authority layer ([5955406](https://github.com/d0ugal/graith/commit/59554068dbed35d78ac2bd49da06fcdb31a0a628))
+* enrichment data pipeline — cost, tokens, model, tool in UI ([a5bc322](https://github.com/d0ugal/graith/commit/a5bc322272f4828718c1996023a483034a775fe6))
+* wire safehouse sandbox into Create, Resume, and Fork ([531aea4](https://github.com/d0ugal/graith/commit/531aea45b76c65ff7d1697033be4a9c3619880f0))
+
+
+### Bug Fixes
+
+* address 5 review findings from Codex ([1c90101](https://github.com/d0ugal/graith/commit/1c9010155b9c1188ec2c43ecc139aca51507b99f))
+* clean up legacy daemon on startup after socket path change ([b97aedd](https://github.com/d0ugal/graith/commit/b97aedd2eaac442aa2c4e66d49c3796b8cac0911))
+* expand ~ and relative paths in sandbox read/write dirs ([cfcf547](https://github.com/d0ugal/graith/commit/cfcf547bfa52440a32bbcc679da426c221008039))
+* fail closed when sandbox is enabled but safehouse unavailable ([4a59264](https://github.com/d0ugal/graith/commit/4a59264c49beda42dee6a31c2f7159b71a45da47))
+* honor per-agent sandbox enablement and custom command paths ([23cb5c4](https://github.com/d0ugal/graith/commit/23cb5c4364b86755b8af2ea07645fd755b171f9d))
+* lint — gofmt alignment and switch over if/else chains ([e8f4c64](https://github.com/d0ugal/graith/commit/e8f4c64f7bebd3c3b45e8dc9e7579e8fcae89978))
+* make sandbox config-only, remove CLI override flags ([be08310](https://github.com/d0ugal/graith/commit/be08310c0bfc8b751124a83f7d9799c7e514b966))
+* move daemon socket fallback out of /tmp ([b71c4e6](https://github.com/d0ugal/graith/commit/b71c4e621c3237ac7e866013d013bea7aa738cda))
+* update module golang.org/x/term to v0.44.0 ([3e19e7d](https://github.com/d0ugal/graith/commit/3e19e7d4ebf53ff43860fcf87de6eda1b3f0f48f))
+
 ## [0.10.0](https://github.com/d0ugal/graith/compare/v0.9.0...v0.10.0) (2026-06-08)
 
 
