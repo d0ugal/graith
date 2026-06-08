@@ -1039,12 +1039,23 @@ func (sm *SessionManager) sandboxOpts(agentName, worktreePath string, envKeys []
 	merged := sm.cfg.Sandbox.Merge(sm.cfg.Agents[agentName].Sandbox)
 	return sandbox.WrapOpts{
 		WorktreeDir:      worktreePath,
-		ReadDirs:         merged.ReadDirs,
-		WriteDirs:        merged.WriteDirs,
+		ReadDirs:         expandPaths(merged.ReadDirs),
+		WriteDirs:        expandPaths(merged.WriteDirs),
 		Features:         merged.Features,
 		EnvKeys:          envKeys,
 		SafehouseCommand: merged.Command,
 	}
+}
+
+func expandPaths(paths []string) []string {
+	if len(paths) == 0 {
+		return nil
+	}
+	out := make([]string, len(paths))
+	for i, p := range paths {
+		out[i] = config.ExpandPath(p)
+	}
+	return out
 }
 
 // Run starts the daemon: acquires PID file, listens on the Unix socket,
