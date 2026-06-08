@@ -120,6 +120,14 @@ type MsgTopicsMsg struct {
 	Subscriber string `json:"subscriber"`
 }
 
+// Client -> Daemon (hook reporting)
+type StatusReportMsg struct {
+	SessionID string `json:"session_id"`
+	Event     string `json:"event"`
+	Status    string `json:"status,omitempty"`
+	ToolName  string `json:"tool_name,omitempty"`
+}
+
 // Daemon -> Client
 type HandshakeOkMsg struct {
 	Version       string `json:"version"`
