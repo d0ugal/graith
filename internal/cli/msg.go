@@ -279,6 +279,8 @@ var msgAckCmd = &cobra.Command{
 
 // --- gr msg topics ---
 
+var msgTopicsSystem bool
+
 var msgTopicsCmd = &cobra.Command{
 	Use:   "topics",
 	Short: "List streams with message counts",
@@ -292,7 +294,8 @@ var msgTopicsCmd = &cobra.Command{
 		defer c.Close()
 
 		c.SendControl("msg_topics", protocol.MsgTopicsMsg{
-			Subscriber: senderID,
+			Subscriber:    senderID,
+			IncludeSystem: msgTopicsSystem,
 		})
 
 		resp, err := c.ReadControlResponse()
@@ -364,6 +367,7 @@ func init() {
 	msgAckCmd.RegisterFlagCompletionFunc("topic", completeTopicNames)
 
 	msgCmd.AddCommand(msgTopicsCmd)
+	msgTopicsCmd.Flags().BoolVar(&msgTopicsSystem, "system", false, "include _system.* streams")
 }
 
 func detectSender() (id, name string) {
