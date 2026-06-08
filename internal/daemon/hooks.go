@@ -114,6 +114,47 @@ func (sm *SessionManager) injectClaudeHooks(sessionID string) (extraArgs []strin
 	return extraArgs, extraEnv, nil
 }
 
+// injectCodexHooks generates per-event hook scripts for a Codex session and
+// returns extra env vars (including CODEX_HOOKS_DIR) to add to the agent launch.
+func (sm *SessionManager) injectCodexHooks(sessionID string) (extraArgs []string, extraEnv map[string]string, err error) {
+	hookScript, err := sm.generateHookScript(sessionID)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Generate per-event wrapper scripts in a codex-hooks subdirectory.
+	dir := sm.hookDir(sessionID)
+	events := map[string]string{
+		"session-start":      "SessionStart",
+		"user-prompt-submit": "UserPromptSubmit",
+		"pre-tool-use":       "PreToolUse",
+		"post-tool-use":      "PostToolUse",
+		"permission-request": "PermissionRequest",
+		"stop":               "Stop",
+	}
+
+	hooksDir := filepath.Join(dir, "codex-hooks")
+	if err := os.MkdirAll(hooksDir, 0o700); err != nil {
+		return nil, nil, fmt.Errorf("create codex hooks dir: %w", err)
+	}
+
+	for filename, eventName := range events {
+		script := fmt.Sprintf("#!/bin/sh\nexec %s --event %s\n", hookScript, eventName)
+		path := filepath.Join(hooksDir, filename)
+		if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+			return nil, nil, fmt.Errorf("write codex hook %s: %w", filename, err)
+		}
+	}
+
+	extraEnv = map[string]string{
+		"GRAITH_BIN":      resolveGrBin(),
+		"CODEX_HOOKS_DIR": hooksDir,
+	}
+
+	sm.log.Info("injected codex hooks", "session_id", sessionID, "hooks_dir", hooksDir)
+	return nil, extraEnv, nil // no extra args needed, just env
+}
+
 // cleanupHooks removes generated hook files for a session.
 func (sm *SessionManager) cleanupHooks(sessionID string) {
 	dir := sm.hookDir(sessionID)
