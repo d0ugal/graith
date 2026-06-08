@@ -132,7 +132,22 @@ func TestFormatStatusLineFleetSummary(t *testing.T) {
 	}
 }
 
-func TestFormatStatusLineFleetHiddenWhenSolo(t *testing.T) {
+func TestFormatStatusLineFleetHiddenWhenEmpty(t *testing.T) {
+	info := statusBarInfo{
+		name:        "my-session",
+		agent:       "claude",
+		status:      "running",
+		agentStatus: "active",
+		fleet:       protocol.FleetSummary{},
+	}
+
+	line := formatStatusLine(info, 120)
+	if strings.Contains(line, "0 active") || strings.Contains(line, "0 stopped") {
+		t.Errorf("fleet summary should be hidden when no sessions, got %q", line)
+	}
+}
+
+func TestFormatStatusLineFleetShownForSingleSession(t *testing.T) {
 	info := statusBarInfo{
 		name:        "my-session",
 		agent:       "claude",
@@ -142,8 +157,8 @@ func TestFormatStatusLineFleetHiddenWhenSolo(t *testing.T) {
 	}
 
 	line := formatStatusLine(info, 120)
-	if strings.Contains(line, "active") && strings.Contains(line, "1 active") {
-		t.Errorf("fleet summary should be hidden when only 1 session, got %q", line)
+	if !strings.Contains(line, "1 active") {
+		t.Errorf("fleet summary should show for single session, got %q", line)
 	}
 }
 

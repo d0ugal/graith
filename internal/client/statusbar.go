@@ -2,6 +2,7 @@ package client
 
 import (
 	"fmt"
+	"image/color"
 	"io"
 	"strings"
 	"sync"
@@ -37,49 +38,53 @@ func newStatusBarInfo(s protocol.SessionInfo, unreadCount int, fleet protocol.Fl
 	}
 }
 
-var (
-	barBg = lipgloss.Color("#1a1a1a")
+var barBg = lipgloss.Color("#303040")
 
-	barSession = lipgloss.NewStyle().Bold(true).Background(barBg)
-	barAgent   = lipgloss.NewStyle().Foreground(colorDim).Background(barBg)
-	barSep     = lipgloss.NewStyle().Foreground(colorFaint).Background(barBg)
-	barBranch  = lipgloss.NewStyle().Foreground(colorDim).Background(barBg)
-	barDirty   = lipgloss.NewStyle().Foreground(colorGold).Background(barBg)
-	barAhead   = lipgloss.NewStyle().Foreground(colorBlue).Background(barBg)
-	barUnread  = lipgloss.NewStyle().Foreground(colorGold).Background(barBg)
-	barFill    = lipgloss.NewStyle().Background(barBg)
+func barStyle(fg color.Color) lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(fg).Background(barBg)
+}
+
+func barBold(fg color.Color) lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(fg).Background(barBg).Bold(true)
+}
+
+var (
+	barFill = lipgloss.NewStyle().Background(barBg)
+	barSep  = barStyle(colorFaint)
+	barDim  = barStyle(colorDim)
 )
 
-func statusStyle(status string) lipgloss.Style {
-	base := lipgloss.NewStyle().Background(barBg)
+func statusColor(status string) color.Color {
 	switch status {
 	case "active", "running":
-		return base.Foreground(colorGreen)
+		return colorGreen
 	case "approval":
-		return base.Foreground(colorRed).Bold(true)
+		return colorRed
 	case "ready":
-		return base.Foreground(colorBlue)
+		return colorBlue
 	case "errored":
-		return base.Foreground(colorRed)
+		return colorRed
 	default:
-		return base.Foreground(colorDim)
+		return colorDim
 	}
 }
 
 func statusDot(status string) string {
+	c := statusColor(status)
 	switch status {
-	case "active", "running":
-		return statusStyle(status).Render("●")
 	case "approval":
-		return statusStyle(status).Render("⚠")
+		return barBold(c).Render("⚠")
 	case "errored":
-		return statusStyle(status).Render("✗")
-	case "ready":
-		return statusStyle(status).Render("●")
+		return barStyle(c).Render("✗")
+	case "stopped":
+		return barStyle(c).Render("○")
 	default:
-		return statusStyle(status).Render("○")
+		return barStyle(c).Render("●")
 	}
 }
+
+func sp() string  { return barFill.Render(" ") }
+func dsp() string { return barFill.Render("  ") }
 
 func formatStatusLine(info statusBarInfo, cols int) string {
 	status := info.status
@@ -87,60 +92,57 @@ func formatStatusLine(info statusBarInfo, cols int) string {
 		status = info.agentStatus
 	}
 
-	branch := info.branch
-	if p := strings.SplitN(branch, "/", 3); len(p) == 3 {
-		branch = p[2]
-	}
+	branch := displayBranch(info.branch, info.name)
 
 	sep := barSep.Render(" │ ")
 
-	// Left section: session identity
-	left := " " + statusDot(status) + " " +
-		barSession.Render(info.name) + "  " +
-		barAgent.Render(info.agent) + "  " +
-		statusStyle(status).Render(status)
+	// Left: dot + session name + agent + status
+	left := sp() + statusDot(status) + sp() +
+		barBold(lipgloss.Color("#e0e0e0")).Render(info.name) + dsp() +
+		barDim.Render(info.agent) + dsp() +
+		barStyle(statusColor(status)).Render(status)
 
-	// Middle section: git info
+	// Mid: git info (only if branch is meaningful)
 	var mid string
-	if branch != "" {
-		mid = sep + barBranch.Render(branch)
+	if branch != "" && branch != "—" {
+		mid = sep + barDim.Render(branch)
 		if info.dirty {
-			mid += " " + barDirty.Render("●")
+			mid += sp() + barStyle(colorGold).Render("●")
 		}
 		if info.unpushed > 0 {
-			mid += " " + barAhead.Render(fmt.Sprintf("↑%d", info.unpushed))
+			mid += sp() + barStyle(colorBlue).Render(fmt.Sprintf("↑%d", info.unpushed))
 		}
 	}
 
-	// Right section: fleet summary + unread (right-aligned)
-	right := formatFleetSection(info.fleet)
-	if info.unread > 0 {
-		right += sep + barUnread.Render(fmt.Sprintf("✉ %d", info.unread))
+	// Right: fleet + unread
+	var right string
+	fleet := formatFleetSection(info.fleet)
+	if fleet != "" {
+		right += sep + fleet
 	}
-	right += " "
+	if info.unread > 0 {
+		right += sep + barStyle(colorGold).Render(fmt.Sprintf("✉ %d", info.unread))
+	}
+	right += sp()
 
 	leftW := lipgloss.Width(left)
 	midW := lipgloss.Width(mid)
 	rightW := lipgloss.Width(right)
 
-	// Progressive degradation for narrow terminals
 	if leftW+midW+rightW > cols {
-		// Drop git info first
 		mid = ""
 		midW = 0
 	}
 	if leftW+rightW > cols {
-		// Drop fleet details, keep only approval count if any
 		right = formatFleetMinimal(info.fleet)
-		if info.unread > 0 {
-			right += sep + barUnread.Render(fmt.Sprintf("✉ %d", info.unread))
+		if right != "" {
+			right = sep + right
 		}
-		right += " "
+		right += sp()
 		rightW = lipgloss.Width(right)
 	}
 	if leftW+rightW > cols {
-		// Ultra-narrow: just session + status
-		right = " "
+		right = sp()
 		rightW = 1
 	}
 
@@ -157,46 +159,40 @@ func formatStatusLine(info statusBarInfo, cols int) string {
 }
 
 func formatFleetSection(fleet protocol.FleetSummary) string {
-	if fleet.Total <= 1 {
+	if fleet.Total == 0 {
 		return ""
 	}
 
-	sep := barSep.Render(" │ ")
 	var parts []string
 
-	// Approval always first and most prominent
 	if fleet.Approval > 0 {
-		parts = append(parts, statusStyle("approval").Render(fmt.Sprintf("⚠ %d approval", fleet.Approval)))
+		parts = append(parts, barBold(colorRed).Render(fmt.Sprintf("⚠ %d approval", fleet.Approval)))
 	}
 	if fleet.Errored > 0 {
-		parts = append(parts, statusStyle("errored").Render(fmt.Sprintf("✗ %d error", fleet.Errored)))
+		parts = append(parts, barStyle(colorRed).Render(fmt.Sprintf("✗ %d error", fleet.Errored)))
 	}
 	if fleet.Active > 0 {
-		parts = append(parts, statusStyle("active").Render(fmt.Sprintf("● %d active", fleet.Active)))
+		parts = append(parts, barStyle(colorGreen).Render(fmt.Sprintf("● %d active", fleet.Active)))
 	}
 	if fleet.Ready > 0 {
-		parts = append(parts, statusStyle("ready").Render(fmt.Sprintf("● %d ready", fleet.Ready)))
+		parts = append(parts, barStyle(colorBlue).Render(fmt.Sprintf("● %d ready", fleet.Ready)))
 	}
 	if fleet.Stopped > 0 {
-		parts = append(parts, statusStyle("stopped").Render(fmt.Sprintf("○ %d stopped", fleet.Stopped)))
+		parts = append(parts, barStyle(colorDim).Render(fmt.Sprintf("○ %d stopped", fleet.Stopped)))
 	}
 
 	if len(parts) == 0 {
 		return ""
 	}
-	return sep + strings.Join(parts, "  ")
+	return strings.Join(parts, dsp())
 }
 
 func formatFleetMinimal(fleet protocol.FleetSummary) string {
-	if fleet.Total <= 1 {
-		return ""
-	}
-	sep := barSep.Render(" │ ")
 	if fleet.Approval > 0 {
-		return sep + statusStyle("approval").Render(fmt.Sprintf("⚠ %d approval", fleet.Approval))
+		return barBold(colorRed).Render(fmt.Sprintf("⚠ %d approval", fleet.Approval))
 	}
 	if fleet.Errored > 0 {
-		return sep + statusStyle("errored").Render(fmt.Sprintf("✗ %d error", fleet.Errored))
+		return barStyle(colorRed).Render(fmt.Sprintf("✗ %d error", fleet.Errored))
 	}
 	return ""
 }
