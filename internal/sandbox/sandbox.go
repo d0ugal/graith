@@ -48,9 +48,13 @@ func Wrap(command string, args []string, opts WrapOpts) (string, []string) {
 }
 
 func Available() bool {
+	return AvailableCommand("safehouse")
+}
+
+func AvailableCommand(command string) bool {
 	if runtime.GOOS != "darwin" {
 		return false
 	}
-	_, err := exec.LookPath("safehouse")
+	_, err := exec.LookPath(command)
 	return err == nil
 }

@@ -111,7 +111,7 @@ type SandboxConfig struct {
 
 func (s SandboxConfig) Merge(agent SandboxConfig) SandboxConfig {
 	merged := SandboxConfig{
-		Enabled: s.Enabled,
+		Enabled: s.Enabled || agent.Enabled,
 		Command: s.Command,
 	}
 
