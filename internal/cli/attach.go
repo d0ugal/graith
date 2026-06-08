@@ -352,11 +352,9 @@ func runAttachByID(c *client.Client, sessionID string) error {
 			if err != nil {
 				return err
 			}
-			nc.SendControl("create", protocol.CreateMsg{
-				Name:     name,
-				Agent:    info.Agent,
-				RepoPath: info.RepoPath,
-				Base:     info.Branch,
+			nc.SendControl("fork", protocol.ForkMsg{
+				Name:            name,
+				SourceSessionID: sessionID,
 			})
 			createResp, err := nc.ReadControlResponse()
 			if err != nil {

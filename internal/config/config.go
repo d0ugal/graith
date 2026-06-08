@@ -79,6 +79,7 @@ type Agent struct {
 	Command     string            `toml:"command"`
 	Args        []string          `toml:"args"`
 	ResumeArgs  []string          `toml:"resume_args"`
+	ForkArgs    []string          `toml:"fork_args"`
 	Env         map[string]string `toml:"env"`
 	IdleTimeout string            `toml:"idle_timeout"`
 }
@@ -129,8 +130,18 @@ func Default() *Config {
 			RenameSession: ",", Search: "/", ScrollMode: "[", Shell: "s",
 		},
 		Agents: map[string]Agent{
-			"claude":   {Command: "claude", Args: []string{"--session-id", "{agent_session_id}"}, ResumeArgs: []string{"--resume", "{agent_session_id}"}},
-			"codex":    {Command: "codex", Args: []string{}, ResumeArgs: []string{"resume", "--last"}},
+			"claude": {
+				Command:    "claude",
+				Args:       []string{"--session-id", "{agent_session_id}"},
+				ResumeArgs: []string{"--resume", "{agent_session_id}"},
+				ForkArgs:   []string{"--session-id", "{agent_session_id}", "--fork-session", "{fork_source_agent_session_id}"},
+			},
+			"codex": {
+				Command:    "codex",
+				Args:       []string{},
+				ResumeArgs: []string{"resume", "--last"},
+				ForkArgs:   []string{"fork", "{fork_source_agent_session_id}"},
+			},
 			"opencode": {Command: "opencode", Args: []string{}, ResumeArgs: []string{"--session", "{agent_session_id}"}},
 			"agy":      {Command: "agy", Args: []string{}, ResumeArgs: []string{"--conversation", "{agent_session_id}"}},
 		},
