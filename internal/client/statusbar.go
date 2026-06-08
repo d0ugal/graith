@@ -2,7 +2,6 @@ package client
 
 import (
 	"fmt"
-	"image/color"
 	"io"
 	"strings"
 	"sync"
@@ -38,53 +37,51 @@ func newStatusBarInfo(s protocol.SessionInfo, unreadCount int, fleet protocol.Fl
 	}
 }
 
-var barBg = lipgloss.Color("#303040")
+// ANSI sequences — background is set once; only foreground/bold change within.
+const (
+	barBgOn  = "\x1b[0;48;2;48;48;64m"
+	barReset = "\x1b[0m"
 
-func barStyle(fg color.Color) lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(fg).Background(barBg)
-}
+	fgGreen  = "\x1b[38;2;0;255;135m"
+	fgRed    = "\x1b[38;2;255;95;95m"
+	fgBlue   = "\x1b[38;2;135;175;255m"
+	fgGold   = "\x1b[38;2;255;215;0m"
+	fgDim    = "\x1b[38;2;98;98;98m"
+	fgFaint  = "\x1b[38;2;68;68;68m"
+	fgBright = "\x1b[38;2;224;224;224m"
 
-func barBold(fg color.Color) lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(fg).Background(barBg).Bold(true)
-}
-
-var (
-	barFill = lipgloss.NewStyle().Background(barBg)
-	barSep  = barStyle(colorFaint)
-	barDim  = barStyle(colorDim)
+	boldOn  = "\x1b[1m"
+	boldOff = "\x1b[22m"
 )
 
-func statusColor(status string) color.Color {
+func fgForStatus(status string) string {
 	switch status {
 	case "active", "running":
-		return colorGreen
+		return fgGreen
 	case "approval":
-		return colorRed
+		return fgRed + boldOn
 	case "ready":
-		return colorBlue
+		return fgBlue
 	case "errored":
-		return colorRed
+		return fgRed
 	default:
-		return colorDim
+		return fgDim
 	}
 }
 
-func statusDot(status string) string {
-	c := statusColor(status)
+func dotForStatus(status string) string {
+	fg := fgForStatus(status)
 	switch status {
 	case "approval":
-		return barBold(c).Render("⚠")
+		return fg + "⚠" + boldOff
 	case "errored":
-		return barStyle(c).Render("✗")
+		return fg + "✗"
 	case "stopped":
-		return barStyle(c).Render("○")
+		return fg + "○"
 	default:
-		return barStyle(c).Render("●")
+		return fg + "●"
 	}
 }
-
-func sp() string  { return barFill.Render(" ") }
-func dsp() string { return barFill.Render("  ") }
 
 func formatStatusLine(info statusBarInfo, cols int) string {
 	status := info.status
@@ -93,24 +90,24 @@ func formatStatusLine(info statusBarInfo, cols int) string {
 	}
 
 	branch := displayBranch(info.branch, info.name)
+	sFg := fgForStatus(status)
+	sep := fgFaint + " │ "
 
-	sep := barSep.Render(" │ ")
+	// Left: dot + name + agent + status
+	left := " " + dotForStatus(status) +
+		" " + boldOn + fgBright + info.name + boldOff +
+		"  " + fgDim + info.agent +
+		"  " + sFg + status
 
-	// Left: dot + session name + agent + status
-	left := sp() + statusDot(status) + sp() +
-		barBold(lipgloss.Color("#e0e0e0")).Render(info.name) + dsp() +
-		barDim.Render(info.agent) + dsp() +
-		barStyle(statusColor(status)).Render(status)
-
-	// Mid: git info (only if branch is meaningful)
+	// Mid: git info
 	var mid string
 	if branch != "" && branch != "—" {
-		mid = sep + barDim.Render(branch)
+		mid = sep + fgDim + branch
 		if info.dirty {
-			mid += sp() + barStyle(colorGold).Render("●")
+			mid += " " + fgGold + "●"
 		}
 		if info.unpushed > 0 {
-			mid += sp() + barStyle(colorBlue).Render(fmt.Sprintf("↑%d", info.unpushed))
+			mid += " " + fgBlue + fmt.Sprintf("↑%d", info.unpushed)
 		}
 	}
 
@@ -121,13 +118,13 @@ func formatStatusLine(info statusBarInfo, cols int) string {
 		right += sep + fleet
 	}
 	if info.unread > 0 {
-		right += sep + barStyle(colorGold).Render(fmt.Sprintf("✉ %d", info.unread))
+		right += sep + fgGold + fmt.Sprintf("✉ %d", info.unread)
 	}
-	right += sp()
+	right += " "
 
-	leftW := lipgloss.Width(left)
-	midW := lipgloss.Width(mid)
-	rightW := lipgloss.Width(right)
+	leftW := visWidth(left)
+	midW := visWidth(mid)
+	rightW := visWidth(right)
 
 	if leftW+midW+rightW > cols {
 		mid = ""
@@ -138,24 +135,31 @@ func formatStatusLine(info statusBarInfo, cols int) string {
 		if right != "" {
 			right = sep + right
 		}
-		right += sp()
-		rightW = lipgloss.Width(right)
+		right += " "
+		rightW = visWidth(right)
 	}
 	if leftW+rightW > cols {
-		right = sp()
+		right = " "
 		rightW = 1
 	}
 
 	gap := max(cols-leftW-midW-rightW, 0)
 
-	line := left + mid + barFill.Render(strings.Repeat(" ", gap)) + right
-	if w := lipgloss.Width(line); w > cols {
+	// Wrap entire line in a single background — no gaps.
+	inner := left + mid + strings.Repeat(" ", gap) + right
+	line := barBgOn + inner + barReset
+
+	if w := visWidth(line); w > cols {
 		line = ansi.Truncate(line, cols, "")
-		if pad := cols - lipgloss.Width(line); pad > 0 {
-			line += barFill.Render(strings.Repeat(" ", pad))
+		if pad := cols - visWidth(line); pad > 0 {
+			line = line + barBgOn + strings.Repeat(" ", pad) + barReset
 		}
 	}
 	return line
+}
+
+func visWidth(s string) int {
+	return lipgloss.Width(s)
 }
 
 func formatFleetSection(fleet protocol.FleetSummary) string {
@@ -164,35 +168,34 @@ func formatFleetSection(fleet protocol.FleetSummary) string {
 	}
 
 	var parts []string
-
 	if fleet.Approval > 0 {
-		parts = append(parts, barBold(colorRed).Render(fmt.Sprintf("⚠ %d approval", fleet.Approval)))
+		parts = append(parts, fgRed+boldOn+fmt.Sprintf("⚠ %d approval", fleet.Approval)+boldOff)
 	}
 	if fleet.Errored > 0 {
-		parts = append(parts, barStyle(colorRed).Render(fmt.Sprintf("✗ %d error", fleet.Errored)))
+		parts = append(parts, fgRed+fmt.Sprintf("✗ %d error", fleet.Errored))
 	}
 	if fleet.Active > 0 {
-		parts = append(parts, barStyle(colorGreen).Render(fmt.Sprintf("● %d active", fleet.Active)))
+		parts = append(parts, fgGreen+fmt.Sprintf("● %d active", fleet.Active))
 	}
 	if fleet.Ready > 0 {
-		parts = append(parts, barStyle(colorBlue).Render(fmt.Sprintf("● %d ready", fleet.Ready)))
+		parts = append(parts, fgBlue+fmt.Sprintf("● %d ready", fleet.Ready))
 	}
 	if fleet.Stopped > 0 {
-		parts = append(parts, barStyle(colorDim).Render(fmt.Sprintf("○ %d stopped", fleet.Stopped)))
+		parts = append(parts, fgDim+fmt.Sprintf("○ %d stopped", fleet.Stopped))
 	}
 
 	if len(parts) == 0 {
 		return ""
 	}
-	return strings.Join(parts, dsp())
+	return strings.Join(parts, "  ")
 }
 
 func formatFleetMinimal(fleet protocol.FleetSummary) string {
 	if fleet.Approval > 0 {
-		return barBold(colorRed).Render(fmt.Sprintf("⚠ %d approval", fleet.Approval))
+		return fgRed + boldOn + fmt.Sprintf("⚠ %d approval", fleet.Approval) + boldOff
 	}
 	if fleet.Errored > 0 {
-		return barStyle(colorRed).Render(fmt.Sprintf("✗ %d error", fleet.Errored))
+		return fgRed + fmt.Sprintf("✗ %d error", fleet.Errored)
 	}
 	return ""
 }
