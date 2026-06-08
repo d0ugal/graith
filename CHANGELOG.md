@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.7.0](https://github.com/d0ugal/graith/compare/v0.6.1...v0.7.0) (2026-06-08)
+
+
+### Features
+
+* redesign status bar with colors and fleet summary ([3a7e3cf](https://github.com/d0ugal/graith/commit/3a7e3cf60ee4d0e966158497c99975e9f24a5e41))
+
+
+### Bug Fixes
+
+* update module golang.org/x/sync to v0.21.0 ([ad408f3](https://github.com/d0ugal/graith/commit/ad408f327b85721875a466fbb09eabb24d6e5c61))
+* update module golang.org/x/sys to v0.46.0 ([09e327f](https://github.com/d0ugal/graith/commit/09e327fdb93035d4d734f16508c2eeabfa414e36))
+
+## [0.6.1](https://github.com/d0ugal/graith/compare/v0.6.0...v0.6.1) (2026-06-08)
+
+
+### Bug Fixes
+
+* reduce unknown agent status after daemon restart ([9aac03e](https://github.com/d0ugal/graith/commit/9aac03e36ec9fdbd49b9e53b2e910853978869dc))
+* stop boosting current session to top of sort order ([e03ba68](https://github.com/d0ugal/graith/commit/e03ba680138244bf83e5da303b559bb53846b083))
+* use byte-bounded scrollback replay and event-based grace period ([009d39d](https://github.com/d0ugal/graith/commit/009d39d7204b761d677e335428ff0501f2536763))
+
 ## [0.6.0](https://github.com/d0ugal/graith/compare/v0.5.1...v0.6.0) (2026-06-08)
 
 

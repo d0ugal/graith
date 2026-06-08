@@ -17,6 +17,7 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/detector"
 	"github.com/d0ugal/graith/internal/git"
+	"github.com/d0ugal/graith/internal/protocol"
 	grpty "github.com/d0ugal/graith/internal/pty"
 )
 
@@ -508,6 +509,32 @@ func (sm *SessionManager) List() []SessionState {
 	return list
 }
 
+func (sm *SessionManager) fleetSummary() protocol.FleetSummary {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	var f protocol.FleetSummary
+	for _, s := range sm.state.Sessions {
+		f.Total++
+		switch s.Status {
+		case StatusRunning:
+			switch s.AgentStatus {
+			case "approval":
+				f.Approval++
+			case "ready":
+				f.Ready++
+			default:
+				f.Active++
+			}
+		case StatusStopped:
+			f.Stopped++
+		case StatusErrored:
+			f.Errored++
+		}
+	}
+	return f
+}
+
 // Get returns a copy of a session state by ID.
 func (sm *SessionManager) Get(id string) (SessionState, bool) {
 	sm.mu.RLock()
@@ -669,6 +696,10 @@ func (sm *SessionManager) detectAgentStatuses() {
 
 		d := detector.New(t.agent)
 		status := string(d.Detect(content, outputAge))
+
+		if status == string(detector.StatusUnknown) && t.prevStatus != "" && t.pty.RecentlyAdopted(60*time.Second) {
+			status = t.prevStatus
+		}
 
 		var dirty bool
 		var unpushed int

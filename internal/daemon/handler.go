@@ -478,9 +478,11 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				if sm.messages != nil {
 					unread = sm.messages.TotalUnread(sr.SessionID)
 				}
+				fleet := sm.fleetSummary()
 				sendControl("status_response", protocol.StatusResponseMsg{
 					Session:     toSessionInfo(sess),
 					UnreadCount: unread,
+					Fleet:       fleet,
 				})
 
 			case "upgrade":
