@@ -670,6 +670,10 @@ func (sm *SessionManager) detectAgentStatuses() {
 		d := detector.New(t.agent)
 		status := string(d.Detect(content, outputAge))
 
+		if status == string(detector.StatusUnknown) && t.prevStatus != "" && t.pty.RecentlyAdopted(5*time.Second) {
+			status = t.prevStatus
+		}
+
 		var dirty bool
 		var unpushed int
 		if t.worktreePath != "" && t.repoPath != "" {
