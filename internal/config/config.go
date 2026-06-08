@@ -55,6 +55,7 @@ func ParseDurationWithDays(s string) time.Duration {
 type Keybindings struct {
 	Prefix        string `toml:"prefix"`
 	NewSession    string `toml:"new_session"`
+	ForkSession   string `toml:"fork_session"`
 	DeleteSession string `toml:"delete_session"`
 	Detach        string `toml:"detach"`
 	SessionList   string `toml:"session_list"`
@@ -122,10 +123,10 @@ func Default() *Config {
 			OnApproval: true,
 		},
 		Keybindings: Keybindings{
-			Prefix: "ctrl+b", NewSession: "c", DeleteSession: "x",
-			Detach: "d", SessionList: "w", NextSession: "n",
-			PrevSession: "p", ResumeSession: "R", RenameSession: ",",
-			Search: "/", ScrollMode: "[", Shell: "s",
+			Prefix: "ctrl+b", NewSession: "n", ForkSession: "f",
+			DeleteSession: "x", Detach: "d", SessionList: "w",
+			NextSession: ")", PrevSession: "(", ResumeSession: "R",
+			RenameSession: ",", Search: "/", ScrollMode: "[", Shell: "s",
 		},
 		Agents: map[string]Agent{
 			"claude":   {Command: "claude", Args: []string{"--session-id", "{agent_session_id}"}, ResumeArgs: []string{"--resume", "{agent_session_id}"}},

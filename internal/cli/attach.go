@@ -112,6 +112,8 @@ func runAttachByID(c *client.Client, sessionID string) error {
 		Prefix:      parsePrefixKey(cfg.Keybindings.Prefix),
 		NextSession: parseKeyByte(cfg.Keybindings.NextSession),
 		PrevSession: parseKeyByte(cfg.Keybindings.PrevSession),
+		NewSession:  parseKeyByte(cfg.Keybindings.NewSession),
+		ForkSession: parseKeyByte(cfg.Keybindings.ForkSession),
 	}
 
 	opts := client.PassthroughOpts{
@@ -265,6 +267,128 @@ func runAttachByID(c *client.Client, sessionID string) error {
 			nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
 			attachResp, _ := nc.ReadControlResponse()
 			protocol.DecodePayload(attachResp, &info)
+			opts.SessionID = sessionID
+			opts.Info = &info
+			c = nc
+			continue
+
+		case client.ResultNewSession:
+			name := client.RunNameInput("New Session")
+			if name == "" {
+				nc, err := freshClient()
+				if err != nil {
+					return err
+				}
+				restoreScreen(sessionID)
+				nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+				attachResp, _ := nc.ReadControlResponse()
+				protocol.DecodePayload(attachResp, &info)
+				opts.SessionID = sessionID
+				opts.Info = &info
+				c = nc
+				continue
+			}
+			nc, err := freshClient()
+			if err != nil {
+				return err
+			}
+			nc.SendControl("create", protocol.CreateMsg{
+				Name:     name,
+				RepoPath: info.RepoPath,
+			})
+			createResp, err := nc.ReadControlResponse()
+			if err != nil {
+				nc.Close()
+				return err
+			}
+			if createResp.Type == "error" {
+				var e protocol.ErrorMsg
+				protocol.DecodePayload(createResp, &e)
+				out.Print("Create failed: %s\n", e.Message)
+				nc2, err := freshClient()
+				if err != nil {
+					nc.Close()
+					return err
+				}
+				nc.Close()
+				restoreScreen(sessionID)
+				nc2.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+				attachResp, _ := nc2.ReadControlResponse()
+				protocol.DecodePayload(attachResp, &info)
+				opts.SessionID = sessionID
+				opts.Info = &info
+				c = nc2
+				continue
+			}
+			var newInfo protocol.SessionInfo
+			protocol.DecodePayload(createResp, &newInfo)
+			restoreScreen(newInfo.ID)
+			nc.SendControl("attach", protocol.AttachMsg{SessionID: newInfo.ID})
+			attachResp, _ := nc.ReadControlResponse()
+			protocol.DecodePayload(attachResp, &info)
+			sessionID = newInfo.ID
+			opts.SessionID = sessionID
+			opts.Info = &info
+			c = nc
+			continue
+
+		case client.ResultForkSession:
+			name := client.RunNameInput("Fork Session")
+			if name == "" {
+				nc, err := freshClient()
+				if err != nil {
+					return err
+				}
+				restoreScreen(sessionID)
+				nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+				attachResp, _ := nc.ReadControlResponse()
+				protocol.DecodePayload(attachResp, &info)
+				opts.SessionID = sessionID
+				opts.Info = &info
+				c = nc
+				continue
+			}
+			nc, err := freshClient()
+			if err != nil {
+				return err
+			}
+			nc.SendControl("create", protocol.CreateMsg{
+				Name:     name,
+				Agent:    info.Agent,
+				RepoPath: info.RepoPath,
+				Base:     info.Branch,
+			})
+			createResp, err := nc.ReadControlResponse()
+			if err != nil {
+				nc.Close()
+				return err
+			}
+			if createResp.Type == "error" {
+				var e protocol.ErrorMsg
+				protocol.DecodePayload(createResp, &e)
+				out.Print("Fork failed: %s\n", e.Message)
+				nc2, err := freshClient()
+				if err != nil {
+					nc.Close()
+					return err
+				}
+				nc.Close()
+				restoreScreen(sessionID)
+				nc2.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+				attachResp, _ := nc2.ReadControlResponse()
+				protocol.DecodePayload(attachResp, &info)
+				opts.SessionID = sessionID
+				opts.Info = &info
+				c = nc2
+				continue
+			}
+			var newInfo protocol.SessionInfo
+			protocol.DecodePayload(createResp, &newInfo)
+			restoreScreen(newInfo.ID)
+			nc.SendControl("attach", protocol.AttachMsg{SessionID: newInfo.ID})
+			attachResp, _ := nc.ReadControlResponse()
+			protocol.DecodePayload(attachResp, &info)
+			sessionID = newInfo.ID
 			opts.SessionID = sessionID
 			opts.Info = &info
 			c = nc
