@@ -84,7 +84,7 @@ func (c *Client) RunPassthrough(ctx context.Context, opts PassthroughOpts) Passt
 		}
 		sb = &statusBarState{
 			sessionID: opts.SessionID,
-			info:      newStatusBarInfo(*opts.Info, 0),
+			info:      newStatusBarInfo(*opts.Info, 0, protocol.FleetSummary{}),
 			rows:      h,
 			cols:      w,
 			position:  opts.StatusBar.Position,
@@ -213,7 +213,7 @@ func (c *Client) runPassthroughLoop(ctx context.Context, keys PassthroughKeys, s
 					if sb != nil {
 						var resp protocol.StatusResponseMsg
 						if protocol.DecodePayload(msg, &resp) == nil {
-							sb.updateInfo(newStatusBarInfo(resp.Session, resp.UnreadCount))
+							sb.updateInfo(newStatusBarInfo(resp.Session, resp.UnreadCount, resp.Fleet))
 							sb.render(stdout)
 						}
 					}
