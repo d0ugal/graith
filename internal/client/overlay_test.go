@@ -171,7 +171,7 @@ func TestSortSessions_CurrentFirst(t *testing.T) {
 		{ID: "a", Name: "alpha", Status: "running", CreatedAt: time.Now().Format(time.RFC3339)},
 		{ID: "b", Name: "beta", Status: "running", CreatedAt: time.Now().Format(time.RFC3339)},
 	}
-	sortSessions(sessions, "b")
+	SortSessions(sessions, "b")
 	if sessions[0].ID != "b" {
 		t.Errorf("current session should be first, got %q", sessions[0].ID)
 	}
@@ -182,7 +182,7 @@ func TestSortSessions_RunningBeforeStopped(t *testing.T) {
 		{ID: "a", Name: "alpha", Status: "stopped", CreatedAt: time.Now().Format(time.RFC3339)},
 		{ID: "b", Name: "beta", Status: "running", CreatedAt: time.Now().Format(time.RFC3339)},
 	}
-	sortSessions(sessions, "")
+	SortSessions(sessions, "")
 	if sessions[0].ID != "b" {
 		t.Errorf("running session should be first, got %q", sessions[0].ID)
 	}
@@ -193,7 +193,7 @@ func TestSortSessions_RecentlyAttachedFirst(t *testing.T) {
 		{ID: "a", Name: "alpha", Status: "running", CreatedAt: time.Now().Format(time.RFC3339), LastAttachedAt: time.Now().Add(-1 * time.Hour).Format(time.RFC3339)},
 		{ID: "b", Name: "beta", Status: "running", CreatedAt: time.Now().Format(time.RFC3339), LastAttachedAt: time.Now().Add(-5 * time.Minute).Format(time.RFC3339)},
 	}
-	sortSessions(sessions, "")
+	SortSessions(sessions, "")
 	if sessions[0].ID != "b" {
 		t.Errorf("more recently attached should be first, got %q", sessions[0].ID)
 	}
@@ -853,6 +853,36 @@ func TestUpdate_FilterActuallyFilters(t *testing.T) {
 	}
 	if sessionCount != 1 {
 		t.Errorf("filtering for 'other' should show 1 session, got %d", sessionCount)
+	}
+}
+
+func TestUpdate_FilterResetsCursorToFirstSession(t *testing.T) {
+	sessions := overlayTestSessions()
+	// Start cursor on s3 (last session, in other-repo group)
+	m := newOverlayModel(sessions, "s3", nil)
+	initial := m.list.SelectedItem().(sessionItem)
+	if initial.info.ID != "s3" {
+		t.Fatalf("expected cursor on s3, got %q", initial.info.ID)
+	}
+
+	// Filter to only graith sessions — cursor was on index 4 (s3),
+	// but filtered list only has 3 items. Without reset, SelectedItem() is nil.
+	updated, _ := sendKey(m, "/")
+	for _, ch := range "graith" {
+		updated, _ = sendKey(asOverlay(updated), string(ch))
+	}
+	om := asOverlay(updated)
+
+	item := om.list.SelectedItem()
+	if item == nil {
+		t.Fatal("SelectedItem() should not be nil after filtering")
+	}
+	si, ok := item.(sessionItem)
+	if !ok {
+		t.Fatal("cursor should be on a sessionItem, not a groupHeader")
+	}
+	if si.info.RepoName != "graith" {
+		t.Errorf("cursor should be on a graith session, got repo %q", si.info.RepoName)
 	}
 }
 
