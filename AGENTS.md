@@ -149,10 +149,13 @@ cycle through sessions. `ctrl+b d` detaches without stopping the agent.
 
 ### Inter-agent messaging
 
-Sessions can communicate via the pub/sub messaging system:
+Sessions can communicate via direct messages or the pub/sub system:
 
 ```bash
-# From one session, publish findings
+# Send a message directly to a session's inbox (preferred for 1:1 comms)
+gr msg send fix-overlay "Found a race condition in handler.go:245"
+
+# Publish to a topic (for broadcast to multiple sessions)
 gr msg pub --topic code-review "Found a race condition in handler.go:245"
 
 # From another session, read messages
@@ -164,6 +167,10 @@ gr msg sub --topic code-review --wait
 # Follow a stream continuously
 gr msg sub --topic code-review --follow
 ```
+
+Use `gr msg send <session> <body>` to message a specific session — this is
+the right choice when you want to provide context to one agent. Use
+`gr msg pub --topic` for broadcasting to any session that subscribes.
 
 The `--subscriber` flag tracks read position per consumer. Use `--ack` to
 mark messages as read.
