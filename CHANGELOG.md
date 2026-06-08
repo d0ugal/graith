@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.10.0](https://github.com/d0ugal/graith/compare/v0.9.0...v0.10.0) (2026-06-08)
+
+
+### Features
+
+* fork sessions with agent conversation history ([c123ca2](https://github.com/d0ugal/graith/commit/c123ca29fe40545727032747cd334597dd1aa0ed))
+
+
+### Bug Fixes
+
+* send type input and newline as a single PTY write ([42d0172](https://github.com/d0ugal/graith/commit/42d017209f5918732caea74c6e5338c7a91a76ca)), closes [#151](https://github.com/d0ugal/graith/issues/151)
+
 ## [0.9.0](https://github.com/d0ugal/graith/compare/v0.8.0...v0.9.0) (2026-06-08)
 
 
