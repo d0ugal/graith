@@ -112,7 +112,7 @@ func AdoptSession(opts AdoptOpts) (*Session, error) {
 		adoptedAt:  time.Now(),
 	}
 
-	if tail, err := sb.Tail(16384); err == nil && len(tail) > 0 {
+	if tail, err := sb.TailBytes(128 * 1024); err == nil && len(tail) > 0 {
 		s.screen.Write(tail)
 	}
 
