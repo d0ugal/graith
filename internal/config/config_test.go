@@ -290,6 +290,20 @@ func TestSandboxConfigMergeAgentDisabled(t *testing.T) {
 	}
 }
 
+func TestSandboxConfigMergeAgentEnabled(t *testing.T) {
+	global := SandboxConfig{Enabled: false}
+	agent := SandboxConfig{Enabled: true, Features: []string{"ssh"}}
+
+	merged := global.Merge(agent)
+
+	if !merged.Enabled {
+		t.Error("merged.Enabled = false, want true (agent enabled)")
+	}
+	if len(merged.Features) != 1 || merged.Features[0] != "ssh" {
+		t.Errorf("merged.Features = %v, want [ssh]", merged.Features)
+	}
+}
+
 func TestSandboxConfigMergeDeduplicatesFeatures(t *testing.T) {
 	global := SandboxConfig{
 		Enabled:  true,

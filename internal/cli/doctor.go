@@ -87,11 +87,15 @@ var doctorCmd = &cobra.Command{
 		}
 
 		if cfg.Sandbox.Enabled {
+			safehouseCmd := cfg.Sandbox.Command
+			if safehouseCmd == "" {
+				safehouseCmd = "safehouse"
+			}
 			if runtime.GOOS != "darwin" {
 				out.Print("  ✗ Sandbox enabled but not running macOS (safehouse requires macOS)\n")
 				ok = false
-			} else if !sandbox.Available() {
-				out.Print("  ✗ Sandbox enabled but safehouse not found in PATH\n")
+			} else if !sandbox.AvailableCommand(safehouseCmd) {
+				out.Print("  ✗ Sandbox enabled but %s not found in PATH\n", safehouseCmd)
 				out.Print("    → Install: brew install eugene1g/tools/agent-safehouse\n")
 				ok = false
 			} else {

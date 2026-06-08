@@ -159,3 +159,17 @@ func TestAvailableOnlyOnDarwin(t *testing.T) {
 		t.Error("Available() should be false on non-darwin")
 	}
 }
+
+func TestAvailableCommandCustomBinary(t *testing.T) {
+	result := AvailableCommand("this-binary-does-not-exist-anywhere")
+	if result {
+		t.Error("AvailableCommand should be false for nonexistent binary")
+	}
+
+	if runtime.GOOS == "darwin" {
+		result = AvailableCommand("ls")
+		if !result {
+			t.Error("AvailableCommand('ls') should be true on darwin")
+		}
+	}
+}
