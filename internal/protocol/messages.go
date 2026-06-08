@@ -158,20 +158,20 @@ type SessionListMsg struct {
 }
 
 type SessionInfo struct {
-	ID             string `json:"id"`
-	Name           string `json:"name"`
-	RepoPath       string `json:"repo_path"`
-	RepoName       string `json:"repo_name"`
-	WorktreePath   string `json:"worktree_path"`
-	Branch         string `json:"branch"`
-	BaseBranch     string `json:"base_branch"`
-	Agent          string `json:"agent"`
-	AgentSessionID string `json:"agent_session_id,omitempty"`
-	Status         string `json:"status"`
-	AgentStatus    string `json:"agent_status,omitempty"`
-	ExitCode       *int   `json:"exit_code,omitempty"`
-	CreatedAt      string `json:"created_at"`
-	LastAttachedAt string `json:"last_attached_at,omitempty"`
+	ID             string   `json:"id"`
+	Name           string   `json:"name"`
+	RepoPath       string   `json:"repo_path"`
+	RepoName       string   `json:"repo_name"`
+	WorktreePath   string   `json:"worktree_path"`
+	Branch         string   `json:"branch"`
+	BaseBranch     string   `json:"base_branch"`
+	Agent          string   `json:"agent"`
+	AgentSessionID string   `json:"agent_session_id,omitempty"`
+	Status         string   `json:"status"`
+	AgentStatus    string   `json:"agent_status,omitempty"`
+	ExitCode       *int     `json:"exit_code,omitempty"`
+	CreatedAt      string   `json:"created_at"`
+	LastAttachedAt string   `json:"last_attached_at,omitempty"`
 	Dirty          bool     `json:"dirty,omitempty"`
 	UnpushedCount  int      `json:"unpushed_count,omitempty"`
 	Sandboxed      bool     `json:"sandboxed,omitempty"`
