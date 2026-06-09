@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.4](https://github.com/d0ugal/graith/compare/v0.12.3...v0.12.4) (2026-06-09)
+
+
+### Bug Fixes
+
+* restore n/p as next/prev session, use c for create ([0c43365](https://github.com/d0ugal/graith/commit/0c4336568de0798f31e9499178add6870c820cb5))
+
 ## [0.12.3](https://github.com/d0ugal/graith/compare/v0.12.2...v0.12.3) (2026-06-09)
 
 
