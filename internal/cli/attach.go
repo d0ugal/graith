@@ -63,6 +63,18 @@ func runAttach(cmd *cobra.Command, name string) error {
 			c.ReadControlResponse()
 			return nil
 		}
+		if result.Action == "restart" {
+			c.SendControl("resume", protocol.ResumeMsg{SessionID: result.SessionID})
+			resumeResp, err := c.ReadControlResponse()
+			if err != nil {
+				return err
+			}
+			if resumeResp.Type == "error" {
+				var e protocol.ErrorMsg
+				protocol.DecodePayload(resumeResp, &e)
+				return fmt.Errorf("restart failed: %s", e.Message)
+			}
+		}
 		return runAttachByID(c, result.SessionID)
 	}
 
@@ -112,9 +124,12 @@ func runAttachByID(c *client.Client, sessionID string) error {
 		Prefix:      parsePrefixKey(cfg.Keybindings.Prefix),
 		NextSession: parseKeyByte(cfg.Keybindings.NextSession),
 		PrevSession: parseKeyByte(cfg.Keybindings.PrevSession),
+		LastSession: parseKeyByte(cfg.Keybindings.LastSession),
 		NewSession:  parseKeyByte(cfg.Keybindings.NewSession),
 		ForkSession: parseKeyByte(cfg.Keybindings.ForkSession),
 	}
+
+	prevSessionID := ""
 
 	opts := client.PassthroughOpts{
 		Keys:      keys,
@@ -171,10 +186,28 @@ func runAttachByID(c *client.Client, sessionID string) error {
 				c = nc
 				continue
 			}
+			if overlayResult.Action == "restart" {
+				nc.SendControl("resume", protocol.ResumeMsg{SessionID: overlayResult.SessionID})
+				resumeResp, _ := nc.ReadControlResponse()
+				if resumeResp.Type == "error" {
+					var e protocol.ErrorMsg
+					protocol.DecodePayload(resumeResp, &e)
+					out.Print("Restart failed: %s\n", e.Message)
+					restoreScreen(sessionID)
+					nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+					attachResp, _ := nc.ReadControlResponse()
+					protocol.DecodePayload(attachResp, &info)
+					opts.SessionID = sessionID
+					opts.Info = &info
+					c = nc
+					continue
+				}
+			}
 			restoreScreen(overlayResult.SessionID)
 			nc.SendControl("attach", protocol.AttachMsg{SessionID: overlayResult.SessionID})
 			attachResp, _ := nc.ReadControlResponse()
 			protocol.DecodePayload(attachResp, &info)
+			prevSessionID = sessionID
 			sessionID = overlayResult.SessionID
 			opts.SessionID = sessionID
 			opts.Info = &info
@@ -243,6 +276,33 @@ func runAttachByID(c *client.Client, sessionID string) error {
 			c = nc
 			continue
 
+		case client.ResultLastSession:
+			if prevSessionID == "" {
+				nc, err := freshClient()
+				if err != nil {
+					return err
+				}
+				nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+				attachResp, _ := nc.ReadControlResponse()
+				protocol.DecodePayload(attachResp, &info)
+				opts.SessionID = sessionID
+				opts.Info = &info
+				c = nc
+				continue
+			}
+			nc, err := freshClient()
+			if err != nil {
+				return err
+			}
+			sessionID, prevSessionID = prevSessionID, sessionID
+			nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+			attachResp, _ := nc.ReadControlResponse()
+			protocol.DecodePayload(attachResp, &info)
+			opts.SessionID = sessionID
+			opts.Info = &info
+			c = nc
+			continue
+
 		case client.ResultNextSession, client.ResultPrevSession:
 			nc, err := freshClient()
 			if err != nil {
@@ -262,6 +322,7 @@ func runAttachByID(c *client.Client, sessionID string) error {
 
 			ids := sortedSessionIDs(list.Sessions, sessionID)
 			if next := adjacentSession(ids, sessionID, result == client.ResultNextSession); next != "" {
+				prevSessionID = sessionID
 				sessionID = next
 			}
 			nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
@@ -326,6 +387,7 @@ func runAttachByID(c *client.Client, sessionID string) error {
 			nc.SendControl("attach", protocol.AttachMsg{SessionID: newInfo.ID})
 			attachResp, _ := nc.ReadControlResponse()
 			protocol.DecodePayload(attachResp, &info)
+			prevSessionID = sessionID
 			sessionID = newInfo.ID
 			opts.SessionID = sessionID
 			opts.Info = &info
@@ -386,6 +448,7 @@ func runAttachByID(c *client.Client, sessionID string) error {
 			nc.SendControl("attach", protocol.AttachMsg{SessionID: newInfo.ID})
 			attachResp, _ := nc.ReadControlResponse()
 			protocol.DecodePayload(attachResp, &info)
+			prevSessionID = sessionID
 			sessionID = newInfo.ID
 			opts.SessionID = sessionID
 			opts.Info = &info

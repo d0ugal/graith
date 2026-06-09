@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/adrg/xdg"
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -65,6 +66,7 @@ type Keybindings struct {
 	SessionList   string `toml:"session_list"`
 	NextSession   string `toml:"next_session"`
 	PrevSession   string `toml:"prev_session"`
+	LastSession   string `toml:"last_session"`
 	ResumeSession string `toml:"resume_session"`
 	RenameSession string `toml:"rename_session"`
 	Search        string `toml:"search"`
@@ -204,7 +206,7 @@ func Default() *Config {
 		Keybindings: Keybindings{
 			Prefix: "ctrl+b", NewSession: "n", ForkSession: "f",
 			DeleteSession: "x", Detach: "d", SessionList: "w",
-			NextSession: ")", PrevSession: "(", ResumeSession: "R",
+			NextSession: ")", PrevSession: "(", LastSession: "l", ResumeSession: "R",
 			RenameSession: ",", Search: "/", ScrollMode: "[", Shell: "s",
 		},
 		Agents: map[string]Agent{
@@ -234,9 +236,25 @@ func LoadOrDefault(path string) (*Config, error) {
 	cfg, err := Load(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
+			if legacy := legacyConfigFile(); legacy != "" {
+				if lcfg, lerr := Load(legacy); lerr == nil {
+					return lcfg, nil
+				}
+			}
 			return Default(), nil
 		}
 		return nil, err
 	}
 	return cfg, nil
+}
+
+// legacyConfigFile returns the old macOS config path (~/Library/Application
+// Support/graith/config.toml) if it differs from the current path.
+func legacyConfigFile() string {
+	legacy := filepath.Join(xdg.ConfigHome, appName, "config.toml")
+	current := filepath.Join(configHome(), appName, "config.toml")
+	if legacy == current {
+		return ""
+	}
+	return legacy
 }
