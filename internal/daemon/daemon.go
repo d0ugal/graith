@@ -67,6 +67,7 @@ type SessionManager struct {
 	mcpManager         *MCPManager
 	startedAt          time.Time
 	orchestratorExitCh chan string
+	recentExits        []time.Time
 }
 
 // NewSessionManager creates a SessionManager with the given config and paths.
@@ -1279,14 +1280,20 @@ func (sm *SessionManager) watchSession(id string, sess *grpty.Session) {
 				s.LastOutputAt = &lastOut
 			}
 
+			if sig := sess.ExitSignal(); sig != 0 && s.StopReason == StopReasonCrash {
+				s.ExitSignal = sig.String()
+			}
+
 			if s.StopReason != StopReasonShutdown || s.SummaryText == "" {
-				text := formatStopSummary(s.StopReason, s.ExitCode, prevSummary, prevSetAt, prevTTL)
+				text := formatStopSummary(s.StopReason, s.ExitCode, s.ExitSignal, prevSummary, prevSetAt, prevTTL)
 				applyLifecycleSummaryLocked(s, text)
 			}
 
 			if err := sm.saveState(); err != nil {
 				sm.log.Error("failed to save state after session exit", "id", id, "err", err)
 			}
+
+			sm.recordExit()
 
 			delete(sm.sessions, id)
 		} else {
@@ -1311,11 +1318,49 @@ func (sm *SessionManager) watchSession(id string, sess *grpty.Session) {
 		return
 	}
 
-	sm.log.Info("session exited", "id", id, "exit_code", sess.ExitCode())
+	logAttrs := []any{
+		"id", id,
+		"name", name,
+		"exit_code", sess.ExitCode(),
+	}
+	if sig := sess.ExitSignal(); sig != 0 {
+		logAttrs = append(logAttrs, "signal", sig.String())
+	}
+	if rss := sess.PeakRSSBytes(); rss > 0 && sess.ExitCode() != 0 {
+		logAttrs = append(logAttrs, "peak_rss_mb", rss/(1024*1024))
+	}
+	sm.log.Info("session exited", logAttrs...)
+
 	sm.onAgentStatusChange(id, name, "running", "stopped")
 
 	if isOrchestrator {
 		sm.notifyOrchestratorExit(id)
+	}
+}
+
+const (
+	massExitWindow    = 2 * time.Second
+	massExitThreshold = 5
+)
+
+// recordExit tracks session exit times and logs a warning when many sessions
+// exit within a short window, which typically indicates an external signal
+// (e.g. macOS jetsam/memory pressure killing processes). Caller must hold sm.mu.
+func (sm *SessionManager) recordExit() {
+	now := time.Now()
+	cutoff := now.Add(-massExitWindow)
+
+	// Prune old entries.
+	start := 0
+	for start < len(sm.recentExits) && sm.recentExits[start].Before(cutoff) {
+		start++
+	}
+	sm.recentExits = append(sm.recentExits[start:], now)
+
+	if len(sm.recentExits) == massExitThreshold {
+		sm.log.Warn("mass session exit detected: likely external signal (e.g. OOM killer, jetsam)",
+			"count", len(sm.recentExits),
+			"window", massExitWindow.String())
 	}
 }
 
@@ -1462,6 +1507,7 @@ func (sm *SessionManager) resumeWithSummary(id string, rows, cols uint16, lifecy
 	// Save previous state for rollback.
 	prevStatus := sessState.Status
 	prevExitCode := sessState.ExitCode
+	prevExitSignal := sessState.ExitSignal
 	prevPID := sessState.PID
 	prevPIDStartTime := sessState.PIDStartTime
 	prevAgentStatus := sessState.AgentStatus
@@ -1507,6 +1553,7 @@ func (sm *SessionManager) resumeWithSummary(id string, rows, cols uint16, lifecy
 		if s, ok := sm.state.Sessions[id]; ok {
 			s.Status = prevStatus
 			s.ExitCode = prevExitCode
+			s.ExitSignal = prevExitSignal
 			s.PID = prevPID
 			s.PIDStartTime = prevPIDStartTime
 			s.AgentStatus = prevAgentStatus
@@ -1718,6 +1765,7 @@ func (sm *SessionManager) resumeWithSummary(id string, rows, cols uint16, lifecy
 	sessState.Status = StatusRunning
 	sessState.StatusChangedAt = time.Now()
 	sessState.ExitCode = nil
+	sessState.ExitSignal = ""
 	sessState.PID = ptySess.Cmd.Process.Pid
 	if st, err := grpty.ProcessStartTime(sessState.PID); err == nil {
 		sessState.PIDStartTime = st
@@ -1743,6 +1791,7 @@ func (sm *SessionManager) resumeWithSummary(id string, rows, cols uint16, lifecy
 		sessState.Status = prevStatus
 		sessState.StatusChangedAt = prevStatusChangedAt
 		sessState.ExitCode = prevExitCode
+		sessState.ExitSignal = prevExitSignal
 		sessState.PID = prevPID
 		sessState.PIDStartTime = prevPIDStartTime
 		sessState.AgentStatus = prevAgentStatus
@@ -2938,7 +2987,7 @@ func (sm *SessionManager) StopAll(ctx context.Context) {
 				prevTTL = time.Duration(s.SummaryTTL) * time.Second
 			}
 			s.StopReason = StopReasonShutdown
-			text := formatStopSummary(StopReasonShutdown, nil, prevSummary, prevSetAt, prevTTL)
+			text := formatStopSummary(StopReasonShutdown, nil, "", prevSummary, prevSetAt, prevTTL)
 			applyLifecycleSummaryLocked(s, text)
 		}
 	}

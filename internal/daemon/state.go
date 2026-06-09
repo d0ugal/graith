@@ -55,6 +55,7 @@ type SessionState struct {
 	HookCostUSD            *float64              `json:"-"`
 	HookContextPercent     *float64              `json:"-"`
 	ExitCode               *int                  `json:"exit_code,omitempty"`
+	ExitSignal             string                `json:"exit_signal,omitempty"`
 	PID                    int                   `json:"pid,omitempty"`
 	PIDStartTime           int64                 `json:"pid_start_time,omitempty"`
 	Sandboxed              bool                  `json:"sandboxed,omitempty"`

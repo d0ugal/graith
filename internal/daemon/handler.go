@@ -870,6 +870,7 @@ func toSessionInfo(s SessionState, cfg *config.Config, hr *hookReport) protocol.
 		Status:         string(s.Status),
 		AgentStatus:    s.AgentStatus,
 		ExitCode:       s.ExitCode,
+		ExitSignal:     s.ExitSignal,
 		CreatedAt:      s.CreatedAt.Format(time.RFC3339),
 		Dirty:          s.GitDirty,
 		UnpushedCount:  s.GitUnpushed,
