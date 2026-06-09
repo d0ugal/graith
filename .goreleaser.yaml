@@ -36,4 +36,4 @@ brews:
     install: |
       bin.install "gr"
     post_install: |
-      system bin/"gr", "daemon", "reload"
+      system bin/"gr", "daemon", "restart"
