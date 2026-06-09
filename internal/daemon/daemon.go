@@ -1234,9 +1234,11 @@ func (sm *SessionManager) sandboxOpts(agentName, sessionID, worktreePath string,
 	readDirs := expandPaths(merged.ReadDirs)
 	writeDirs := expandPaths(merged.WriteDirs)
 
-	// Hooks: the agent needs to read settings.json, execute `gr`, and
-	// connect to the daemon socket for report-status.
+	// The daemon injects hook scripts that call `gr report-status`.
+	// That needs: the hooks dir itself, the config dir (to find the
+	// socket path), and the runtime dir (to connect to it).
 	readDirs = append(readDirs, sm.hookDir(sessionID))
+	readDirs = append(readDirs, filepath.Dir(sm.paths.ConfigFile))
 	if grBin := resolveGrBin(); grBin != "gr" {
 		readDirs = append(readDirs, filepath.Dir(grBin))
 	}
