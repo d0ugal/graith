@@ -28,6 +28,7 @@ const (
 	ResultPrevSession
 	ResultNewSession
 	ResultForkSession
+	ResultLastSession
 )
 
 // kittyCtrlSeq returns the Kitty keyboard protocol escape sequence for
@@ -44,7 +45,7 @@ func kittyCtrlSeq(prefixByte byte) []byte {
 // showHelpBar renders a one-line help bar at the bottom of the screen using
 // ANSI save-cursor / restore-cursor so the agent's output isn't disturbed.
 func showHelpBar(w io.Writer) {
-	help := "\x1b[7m d detach  w sessions  n new  f fork  s shell  r restart \x1b[0m"
+	help := "\x1b[7m d detach  w sessions  l last  n new  f fork  s shell  r restart \x1b[0m"
 	_, _ = w.Write([]byte("\x1b7\x1b[999B\r\x1b[2K" + help + "\x1b8"))
 }
 
@@ -56,6 +57,7 @@ type PassthroughKeys struct {
 	Prefix      byte
 	NextSession byte
 	PrevSession byte
+	LastSession byte
 	NewSession  byte
 	ForkSession byte
 }
@@ -295,6 +297,9 @@ func (c *Client) runPassthroughLoop(ctx context.Context, keys PassthroughKeys, s
 						return
 					case 'r':
 						setResult(ResultRestart)
+						return
+					case keys.LastSession:
+						setResult(ResultLastSession)
 						return
 					case keys.NewSession:
 						setResult(ResultNewSession)
