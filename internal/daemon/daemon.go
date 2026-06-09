@@ -396,7 +396,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 		for k := range env {
 			envKeys = append(envKeys, k)
 		}
-		opts := sm.sandboxOpts(agentName, worktreePath, envKeys)
+		opts := sm.sandboxOpts(agentName, id, worktreePath, envKeys)
 		command, finalArgs = sandbox.Wrap(agent.Command, expandedArgs, opts)
 		sm.log.Info("sandboxing session", "id", id, "agent", agentName)
 	}
@@ -568,7 +568,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 		for k := range env {
 			envKeys = append(envKeys, k)
 		}
-		opts := sm.sandboxOpts(agentName, worktreePath, envKeys)
+		opts := sm.sandboxOpts(agentName, id, worktreePath, envKeys)
 		command, finalArgs = sandbox.Wrap(agent.Command, expandedArgs, opts)
 		sm.log.Info("sandboxing forked session", "id", id)
 	}
@@ -735,7 +735,7 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 		for k := range env {
 			envKeys = append(envKeys, k)
 		}
-		opts := sm.sandboxOpts(sessState.Agent, sessState.WorktreePath, envKeys)
+		opts := sm.sandboxOpts(sessState.Agent, id, sessState.WorktreePath, envKeys)
 		command, finalArgs = sandbox.Wrap(agent.Command, expandedArgs, opts)
 		sm.log.Info("sandboxing resumed session", "id", id)
 	}
@@ -1228,12 +1228,31 @@ func (sm *SessionManager) resolveSandbox(agentName string) (bool, error) {
 	return true, nil
 }
 
-func (sm *SessionManager) sandboxOpts(agentName, worktreePath string, envKeys []string) sandbox.WrapOpts {
+func (sm *SessionManager) sandboxOpts(agentName, sessionID, worktreePath string, envKeys []string) sandbox.WrapOpts {
 	merged := sm.cfg.Sandbox.Merge(sm.cfg.Agents[agentName].Sandbox)
+
+	readDirs := expandPaths(merged.ReadDirs)
+	writeDirs := expandPaths(merged.WriteDirs)
+
+	// The daemon injects hook files (settings.json, hook.sh) into the data
+	// dir. The agent process must be able to read and execute them.
+	readDirs = append(readDirs, sm.hookDir(sessionID))
+
+	// Agents need read/write access to their own config and data directories
+	// (e.g. ~/.claude, ~/.local/share/claude for Claude Code).
+	home, _ := os.UserHomeDir()
+	switch agentName {
+	case "claude":
+		readDirs = append(readDirs, filepath.Join(home, ".claude"))
+		writeDirs = append(writeDirs, filepath.Join(home, ".local", "share", "claude"))
+	case "codex":
+		readDirs = append(readDirs, filepath.Join(home, ".codex"))
+	}
+
 	return sandbox.WrapOpts{
 		WorktreeDir:      worktreePath,
-		ReadDirs:         expandPaths(merged.ReadDirs),
-		WriteDirs:        expandPaths(merged.WriteDirs),
+		ReadDirs:         readDirs,
+		WriteDirs:        writeDirs,
 		Features:         merged.Features,
 		EnvKeys:          envKeys,
 		SafehouseCommand: merged.Command,
