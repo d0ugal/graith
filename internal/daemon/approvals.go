@@ -49,6 +49,8 @@ func (sm *SessionManager) SubmitApproval(ctx context.Context, req protocol.Appro
 		ResponseCh: make(chan protocol.ApprovalDecisionMsg, 1),
 	}
 	sm.pendingApprovals[req.RequestID] = pa
+	sess.AgentStatus = "approval"
+	sess.HookToolName = req.ToolName
 	sm.mu.Unlock()
 
 	sm.log.Info("approval queued for user", "request_id", req.RequestID, "tool", req.ToolName, "session", info.SessionName)
@@ -80,6 +82,9 @@ func (sm *SessionManager) RespondToApproval(requestID, decision, reason string) 
 		return fmt.Errorf("approval request %q not found", requestID)
 	}
 	delete(sm.pendingApprovals, requestID)
+	if sess, ok := sm.state.Sessions[pa.Info.SessionID]; ok {
+		sess.AgentStatus = "active"
+	}
 	sm.mu.Unlock()
 
 	pa.ResponseCh <- protocol.ApprovalDecisionMsg{
@@ -94,7 +99,12 @@ func (sm *SessionManager) RespondToApproval(requestID, decision, reason string) 
 // cancelApproval removes a pending approval without delivering a decision.
 func (sm *SessionManager) cancelApproval(requestID string) {
 	sm.mu.Lock()
-	delete(sm.pendingApprovals, requestID)
+	if pa, ok := sm.pendingApprovals[requestID]; ok {
+		if sess, ok := sm.state.Sessions[pa.Info.SessionID]; ok {
+			sess.AgentStatus = "active"
+		}
+		delete(sm.pendingApprovals, requestID)
+	}
 	sm.mu.Unlock()
 	sm.broadcastApprovalNotification()
 }
