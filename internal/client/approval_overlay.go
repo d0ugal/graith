@@ -404,11 +404,12 @@ func wrapLines(s string, maxWidth int) []string {
 		words := strings.Fields(line)
 		current := ""
 		for _, word := range words {
-			if current == "" {
+			switch {
+			case current == "":
 				current = word
-			} else if len(current)+1+len(word) <= maxWidth {
+			case len(current)+1+len(word) <= maxWidth:
 				current += " " + word
-			} else {
+			default:
 				out = append(out, current)
 				current = word
 			}
