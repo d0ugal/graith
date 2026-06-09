@@ -153,6 +153,38 @@ func TestWrapCustomCommand(t *testing.T) {
 	}
 }
 
+func TestWrapSharedWorktreeReadOnly(t *testing.T) {
+	opts := WrapOpts{
+		WorktreeDir: "/tmp/scratch/abc123",
+		ReadDirs:    []string{"/shared/worktree"},
+		EnvKeys:     []string{"TERM"},
+	}
+	_, args := Wrap("claude", nil, opts)
+
+	foundWorkdir := false
+	foundReadDirs := false
+	for i, a := range args {
+		if a == "--workdir" && i+1 < len(args) {
+			if args[i+1] != "/tmp/scratch/abc123" {
+				t.Errorf("--workdir = %q, want /tmp/scratch/abc123", args[i+1])
+			}
+			foundWorkdir = true
+		}
+		if a == "--add-dirs-ro" && i+1 < len(args) {
+			if args[i+1] != "/shared/worktree" {
+				t.Errorf("--add-dirs-ro = %q, want /shared/worktree", args[i+1])
+			}
+			foundReadDirs = true
+		}
+	}
+	if !foundWorkdir {
+		t.Error("--workdir not found in args")
+	}
+	if !foundReadDirs {
+		t.Error("--add-dirs-ro not found in args")
+	}
+}
+
 func TestAvailableOnlyOnDarwin(t *testing.T) {
 	result := Available()
 	if runtime.GOOS != "darwin" && result {
