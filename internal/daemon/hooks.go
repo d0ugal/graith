@@ -64,16 +64,28 @@ func (sm *SessionManager) generateClaudeSettings(sessionID string, approvals boo
 		Hooks: make(map[string][]matcherGroup),
 	}
 	for _, event := range events {
-		command := fmt.Sprintf("%s report-status --event %s", grBin, event)
-		if event == "PreToolUse" {
-			command = fmt.Sprintf("%s approve-request", grBin)
+		var handlers []hookHandler
+
+		switch event {
+		case "PreToolUse":
+			handlers = []hookHandler{
+				{Type: "command", Command: fmt.Sprintf("%s approve-request", grBin)},
+			}
+		case "SessionStart":
+			handlers = []hookHandler{
+				{Type: "command", Command: fmt.Sprintf("%s report-status --event %s", grBin, event)},
+				{Type: "command", Command: fmt.Sprintf("%s check-inbox", grBin)},
+			}
+		default:
+			handlers = []hookHandler{
+				{Type: "command", Command: fmt.Sprintf("%s report-status --event %s", grBin, event)},
+			}
 		}
+
 		settings.Hooks[event] = []matcherGroup{
 			{
 				Matcher: "",
-				Hooks: []hookHandler{
-					{Type: "command", Command: command},
-				},
+				Hooks:   handlers,
 			},
 		}
 	}
@@ -125,9 +137,12 @@ func (sm *SessionManager) injectCodexHooks(sessionID string, approvals bool) (ex
 
 	for filename, eventName := range events {
 		var script string
-		if filename == "permission-request" {
+		switch filename {
+		case "permission-request":
 			script = fmt.Sprintf("#!/bin/sh\nexec '%s' approve-request\n", grBin)
-		} else {
+		case "session-start":
+			script = fmt.Sprintf("#!/bin/sh\n'%s' report-status --event %s\nexec '%s' check-inbox\n", grBin, eventName, grBin)
+		default:
 			script = fmt.Sprintf("#!/bin/sh\nexec '%s' report-status --event %s\n", grBin, eventName)
 		}
 		path := filepath.Join(hooksDir, filename)
