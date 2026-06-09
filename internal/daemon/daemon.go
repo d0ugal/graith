@@ -264,7 +264,8 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 	var repoRoot, repoName, worktreePath, branchName string
 	var sharedWorktree bool
 
-	if shareWorktree != "" {
+	switch {
+	case shareWorktree != "":
 		var source *SessionState
 		for _, s := range sm.state.Sessions {
 			if s.Name == shareWorktree || s.ID == shareWorktree {
@@ -283,12 +284,12 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 		repoName = source.RepoName
 		baseBranch = source.BaseBranch
 		sharedWorktree = true
-	} else if noRepo {
+	case noRepo:
 		worktreePath = filepath.Join(sm.paths.DataDir, "scratch", id)
 		if err := os.MkdirAll(worktreePath, 0o700); err != nil {
 			return SessionState{}, fmt.Errorf("create scratch dir: %w", err)
 		}
-	} else {
+	default:
 		if !sm.cfg.RepoPathAllowed(repoPath) {
 			return SessionState{}, fmt.Errorf("repo path %q is not under any allowed_repo_paths", repoPath)
 		}
@@ -849,12 +850,13 @@ func (sm *SessionManager) Delete(id string) error {
 		ptySess.Close()
 	}
 
-	if shared {
+	switch {
+	case shared:
 		scratchDir := filepath.Join(sm.paths.DataDir, "scratch", id)
 		_ = os.RemoveAll(scratchDir)
-	} else if repoPath != "" {
+	case repoPath != "":
 		_ = git.TeardownSession(repoPath, worktreePath, branch)
-	} else if worktreePath != "" {
+	case worktreePath != "":
 		_ = os.RemoveAll(worktreePath)
 	}
 	_ = os.Remove(filepath.Join(sm.paths.LogDir, id+".log"))
