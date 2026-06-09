@@ -1,7 +1,6 @@
 package client
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -41,6 +40,93 @@ func kittyCtrlSeq(prefixByte byte) []byte {
 	}
 	codepoint := int(prefixByte) + 96
 	return fmt.Appendf(nil, "\x1b[%d;5u", codepoint)
+}
+
+// parseKittyCSIu parses a Kitty keyboard protocol CSI u sequence at input[pos:].
+// Format: ESC [ codepoint [;modifiers[:event_type]] u
+// Returns codepoint, modifier value (1=none, 5=ctrl, …), event type
+// (0=unspecified press, 1=press, 2=repeat, 3=release), sequence byte length,
+// and whether parsing succeeded.
+func parseKittyCSIu(input []byte, pos int) (cp, mods, evType, seqLen int, ok bool) {
+	if pos+3 >= len(input) || input[pos] != '\x1b' || input[pos+1] != '[' {
+		return
+	}
+	i := pos + 2
+	numStart := i
+	for i < len(input) && input[i] >= '0' && input[i] <= '9' {
+		i++
+	}
+	if i == numStart || i >= len(input) {
+		return
+	}
+	for _, b := range input[numStart:i] {
+		cp = cp*10 + int(b-'0')
+	}
+	mods = 1
+	if input[i] == ';' {
+		i++
+		modStart := i
+		mods = 0
+		for i < len(input) && input[i] >= '0' && input[i] <= '9' {
+			i++
+		}
+		if i == modStart || i >= len(input) {
+			return
+		}
+		for _, b := range input[modStart:i] {
+			mods = mods*10 + int(b-'0')
+		}
+		if i < len(input) && input[i] == ':' {
+			i++
+			evStart := i
+			for i < len(input) && input[i] >= '0' && input[i] <= '9' {
+				i++
+			}
+			if i == evStart || i >= len(input) {
+				return
+			}
+			for _, b := range input[evStart:i] {
+				evType = evType*10 + int(b-'0')
+			}
+		}
+	}
+	if i >= len(input) || input[i] != 'u' {
+		return
+	}
+	seqLen = i - pos + 1
+	ok = true
+	return
+}
+
+// processKittyPrefix scans input for Kitty CSI u sequences matching the prefix
+// key (ctrl+letter). Press/repeat events are replaced with the raw prefix byte;
+// release events are removed entirely. Non-matching sequences are left as-is.
+func processKittyPrefix(input []byte, prefixByte byte) []byte {
+	prefixCP := int(prefixByte) + 96
+	var out []byte
+	copied := 0
+	for i := 0; i < len(input); i++ {
+		if input[i] != '\x1b' {
+			continue
+		}
+		cp, mods, evType, seqLen, ok := parseKittyCSIu(input, i)
+		if !ok || cp != prefixCP || mods != 5 {
+			continue
+		}
+		if out == nil {
+			out = make([]byte, 0, len(input))
+		}
+		out = append(out, input[copied:i]...)
+		if evType != 3 {
+			out = append(out, prefixByte)
+		}
+		i += seqLen - 1
+		copied = i + 1
+	}
+	if out == nil {
+		return input
+	}
+	return append(out, input[copied:]...)
 }
 
 // showHelpBar renders a one-line help bar at the bottom of the screen using
@@ -194,7 +280,7 @@ func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, s
 	}
 
 	prefixByte := keys.Prefix
-	kittySeq := kittyCtrlSeq(prefixByte)
+	hasKitty := kittyCtrlSeq(prefixByte) != nil
 
 	result := ResultQuit
 	var resultOnce sync.Once
@@ -278,21 +364,36 @@ func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, s
 			default:
 			}
 
-			// Replace Kitty keyboard protocol sequences with raw prefix byte
-			// so the scanning loop below can handle both traditional and
-			// modern terminal encodings uniformly.
+			// Replace Kitty keyboard protocol sequences for the prefix key
+			// with the raw prefix byte. Release events (event_type=3) are
+			// stripped entirely so they don't consume the prefixSeen state.
 			input := buf[:n]
-			if kittySeq != nil && bytes.Contains(input, kittySeq) {
-				input = bytes.ReplaceAll(input, kittySeq, []byte{prefixByte})
+			if hasKitty {
+				input = processKittyPrefix(input, prefixByte)
 				n = len(input)
 			}
 
 			sendStart := 0
 			for i := 0; i < n; i++ {
 				if prefixSeen {
+					key := input[i]
+					skip := 0
+
+					if key == '\x1b' {
+						if cp, _, evType, seqLen, ok := parseKittyCSIu(input, i); ok && cp > 0 && cp < 128 {
+							if evType == 3 {
+								i += seqLen - 1
+								sendStart = i + 1
+								continue
+							}
+							key = byte(cp)
+							skip = seqLen - 1
+						}
+					}
+
 					prefixSeen = false
 					clearHelpBar(stdout)
-					switch input[i] {
+					switch key {
 					case prefixByte:
 						_ = c.SendData([]byte{prefixByte})
 					case 'd':
@@ -326,8 +427,9 @@ func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, s
 						setResult(ResultForkSession)
 						return
 					default:
-						_ = c.SendData([]byte{prefixByte, input[i]})
+						_ = c.SendData([]byte{prefixByte, key})
 					}
+					i += skip
 					sendStart = i + 1
 					continue
 				}
