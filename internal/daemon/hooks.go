@@ -65,20 +65,29 @@ func (sm *SessionManager) generateClaudeSettings(sessionID, hookScript string) (
 		"Stop",
 	}
 
-	type hookEntry struct {
+	type hookHandler struct {
 		Type    string `json:"type"`
 		Command string `json:"command"`
 	}
+	type matcherGroup struct {
+		Matcher string        `json:"matcher"`
+		Hooks   []hookHandler `json:"hooks"`
+	}
 	type settingsFile struct {
-		Hooks map[string][]hookEntry `json:"hooks"`
+		Hooks map[string][]matcherGroup `json:"hooks"`
 	}
 
 	settings := settingsFile{
-		Hooks: make(map[string][]hookEntry),
+		Hooks: make(map[string][]matcherGroup),
 	}
 	for _, event := range events {
-		settings.Hooks[event] = []hookEntry{
-			{Type: "command", Command: fmt.Sprintf("'%s' --event %s", hookScript, event)},
+		settings.Hooks[event] = []matcherGroup{
+			{
+				Matcher: "",
+				Hooks: []hookHandler{
+					{Type: "command", Command: fmt.Sprintf("'%s' --event %s", hookScript, event)},
+				},
+			},
 		}
 	}
 
