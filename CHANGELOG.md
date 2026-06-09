@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.12.2](https://github.com/d0ugal/graith/compare/v0.12.1...v0.12.2) (2026-06-09)
+
+
+### Bug Fixes
+
+* include gr binary and socket paths in sandbox for hooks ([f946dfc](https://github.com/d0ugal/graith/commit/f946dfcaa7c52b0a83b121176f40b7ddd47c4839))
+* simplify hooks — call gr directly, drop shell script wrapper ([c4f17be](https://github.com/d0ugal/graith/commit/c4f17be74486adaa7ba4ea53874380a98bcbf40e))
+* use correct Claude Code hooks settings schema (matcher+hooks) ([07c1ada](https://github.com/d0ugal/graith/commit/07c1adaf7797464c8e71845dff0c412a68fd3939))
+
 ## [0.12.1](https://github.com/d0ugal/graith/compare/v0.12.0...v0.12.1) (2026-06-09)
 
 
