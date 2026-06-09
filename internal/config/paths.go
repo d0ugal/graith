@@ -22,8 +22,18 @@ type Paths struct {
 	MessagesDB string
 }
 
+func configHome() string {
+	if env := os.Getenv("XDG_CONFIG_HOME"); env != "" {
+		return env
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		return filepath.Join(home, ".config")
+	}
+	return xdg.ConfigHome
+}
+
 func ResolvePaths() Paths {
-	configFile := filepath.Join(xdg.ConfigHome, appName, "config.toml")
+	configFile := filepath.Join(configHome(), appName, "config.toml")
 	dataDir := filepath.Join(xdg.DataHome, appName)
 	runtimeDir := runtimeDirForGraith()
 
