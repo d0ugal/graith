@@ -24,7 +24,7 @@ func TestGenerateClaudeSettings(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 	sessionID := "test-session-02"
 
-	settingsPath, err := sm.generateClaudeSettings(sessionID)
+	settingsPath, err := sm.generateClaudeSettings(sessionID, true)
 	if err != nil {
 		t.Fatalf("generateClaudeSettings() error = %v", err)
 	}
@@ -96,11 +96,50 @@ func TestGenerateClaudeSettings(t *testing.T) {
 	}
 }
 
+func TestGenerateClaudeSettingsNoApprovals(t *testing.T) {
+	sm := newTestSessionManagerWithDataDir(t)
+	sessionID := "test-session-no-approvals"
+
+	settingsPath, err := sm.generateClaudeSettings(sessionID, false)
+	if err != nil {
+		t.Fatalf("generateClaudeSettings() error = %v", err)
+	}
+
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("read settings: %v", err)
+	}
+
+	var parsed struct {
+		Hooks map[string][]struct {
+			Matcher string `json:"matcher"`
+			Hooks   []struct {
+				Type    string `json:"type"`
+				Command string `json:"command"`
+			} `json:"hooks"`
+		} `json:"hooks"`
+	}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("unmarshal settings: %v", err)
+	}
+
+	if _, ok := parsed.Hooks["PreToolUse"]; ok {
+		t.Error("PreToolUse should not be present when approvals=false")
+	}
+
+	for event := range parsed.Hooks {
+		hook := parsed.Hooks[event][0].Hooks[0]
+		if strings.Contains(hook.Command, "approve-request") {
+			t.Errorf("event %q should not use approve-request when approvals=false", event)
+		}
+	}
+}
+
 func TestInjectClaudeHooks(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 	sessionID := "test-session-03"
 
-	extraArgs, extraEnv, err := sm.injectClaudeHooks(sessionID)
+	extraArgs, extraEnv, err := sm.injectClaudeHooks(sessionID, false)
 	if err != nil {
 		t.Fatalf("injectClaudeHooks() error = %v", err)
 	}
@@ -125,7 +164,7 @@ func TestCleanupHooks(t *testing.T) {
 	sessionID := "test-session-04"
 
 	// Generate settings so there's something to clean up.
-	_, err := sm.generateClaudeSettings(sessionID)
+	_, err := sm.generateClaudeSettings(sessionID, false)
 	if err != nil {
 		t.Fatalf("generateClaudeSettings() error = %v", err)
 	}
@@ -158,7 +197,7 @@ func TestInjectCodexHooks(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 	sessionID := "test-session-codex-01"
 
-	extraArgs, extraEnv, err := sm.injectCodexHooks(sessionID)
+	extraArgs, extraEnv, err := sm.injectCodexHooks(sessionID, false)
 	if err != nil {
 		t.Fatalf("injectCodexHooks() error = %v", err)
 	}
@@ -192,7 +231,6 @@ func TestInjectCodexHooks(t *testing.T) {
 		"user-prompt-submit",
 		"pre-tool-use",
 		"post-tool-use",
-		"permission-request",
 		"stop",
 	}
 
@@ -218,11 +256,26 @@ func TestInjectCodexHooks(t *testing.T) {
 	}
 }
 
+func TestInjectCodexHooksWithApprovals(t *testing.T) {
+	sm := newTestSessionManagerWithDataDir(t)
+	sessionID := "test-session-codex-approvals"
+
+	_, extraEnv, err := sm.injectCodexHooks(sessionID, true)
+	if err != nil {
+		t.Fatalf("injectCodexHooks() error = %v", err)
+	}
+
+	hooksDir := extraEnv["CODEX_HOOKS_DIR"]
+	if _, err := os.Stat(filepath.Join(hooksDir, "permission-request")); err != nil {
+		t.Error("permission-request hook should exist when approvals=true")
+	}
+}
+
 func TestCodexHookScriptContent(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 	sessionID := "test-session-codex-02"
 
-	_, _, err := sm.injectCodexHooks(sessionID)
+	_, _, err := sm.injectCodexHooks(sessionID, true)
 	if err != nil {
 		t.Fatalf("injectCodexHooks() error = %v", err)
 	}

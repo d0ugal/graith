@@ -43,7 +43,6 @@ var (
 	barSep = lipgloss.NewStyle().Foreground(colorFaint).Background(barBg)
 )
 
-
 func formatStatusLine(info statusBarInfo, cols int) string {
 	status := info.status
 	if info.agentStatus != "" && info.status == "running" {
@@ -86,13 +85,16 @@ func formatStatusLine(info statusBarInfo, cols int) string {
 
 	sep := sepStyle.Render(" │ ")
 
-	dot := stStyle(status).Render("●")
-	if status == "approval" {
+	var dot string
+	switch {
+	case status == "approval":
 		dot = stStyle(status).Render("⚠")
-	} else if status == "errored" {
+	case status == "errored":
 		dot = stStyle(status).Render("✗")
-	} else if status != "active" && status != "running" && status != "ready" {
+	case status != "active" && status != "running" && status != "ready":
 		dot = stStyle(status).Render("○")
+	default:
+		dot = stStyle(status).Render("●")
 	}
 
 	// Left section: session identity

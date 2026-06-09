@@ -253,7 +253,7 @@ func repoHash(repoPath string) string {
 
 // Create starts a new agent session, either in a git worktree or as a
 // standalone scratch session (when noRepo is true).
-func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt string, noRepo bool, shareWorktree string, rows, cols uint16) (SessionState, error) {
+func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt string, noRepo bool, shareWorktree string, approvals bool, rows, cols uint16) (SessionState, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -387,7 +387,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 
 	switch agentName {
 	case "claude":
-		hookArgs, hookEnv, err := sm.injectClaudeHooks(id)
+		hookArgs, hookEnv, err := sm.injectClaudeHooks(id, approvals)
 		if err != nil {
 			sm.log.Warn("failed to inject hooks", "session_id", id, "err", err)
 		} else {
@@ -397,7 +397,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 			}
 		}
 	case "codex":
-		hookArgs, hookEnv, err := sm.injectCodexHooks(id)
+		hookArgs, hookEnv, err := sm.injectCodexHooks(id, approvals)
 		if err != nil {
 			sm.log.Warn("failed to inject hooks", "session_id", id, "err", err)
 		} else {
@@ -458,20 +458,21 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 	}
 
 	sessState := &SessionState{
-		ID:             id,
-		Name:           name,
-		RepoPath:       repoRoot,
-		RepoName:       repoName,
-		WorktreePath:   worktreePath,
-		Branch:         branchName,
-		BaseBranch:     baseBranch,
-		Agent:          agentName,
-		AgentSessionID: agentSessionID,
-		Sandboxed:      sandboxed,
-		SharedWorktree: sharedWorktree,
-		Status:         StatusRunning,
-		PID:            ptySess.Cmd.Process.Pid,
-		CreatedAt:      time.Now().UTC(),
+		ID:               id,
+		Name:             name,
+		RepoPath:         repoRoot,
+		RepoName:         repoName,
+		WorktreePath:     worktreePath,
+		Branch:           branchName,
+		BaseBranch:       baseBranch,
+		Agent:            agentName,
+		AgentSessionID:   agentSessionID,
+		Sandboxed:        sandboxed,
+		SharedWorktree:   sharedWorktree,
+		ApprovalsEnabled: approvals,
+		Status:           StatusRunning,
+		PID:              ptySess.Cmd.Process.Pid,
+		CreatedAt:        time.Now().UTC(),
 	}
 
 	sm.state.Sessions[id] = sessState
@@ -564,7 +565,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 
 	switch agentName {
 	case "claude":
-		hookArgs, hookEnv, err := sm.injectClaudeHooks(id)
+		hookArgs, hookEnv, err := sm.injectClaudeHooks(id, source.ApprovalsEnabled)
 		if err != nil {
 			sm.log.Warn("failed to inject hooks", "session_id", id, "err", err)
 		} else {
@@ -574,7 +575,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 			}
 		}
 	case "codex":
-		hookArgs, hookEnv, err := sm.injectCodexHooks(id)
+		hookArgs, hookEnv, err := sm.injectCodexHooks(id, source.ApprovalsEnabled)
 		if err != nil {
 			sm.log.Warn("failed to inject hooks", "session_id", id, "err", err)
 		} else {
@@ -733,7 +734,7 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 
 	switch sessState.Agent {
 	case "claude":
-		hookArgs, hookEnv, err := sm.injectClaudeHooks(id)
+		hookArgs, hookEnv, err := sm.injectClaudeHooks(id, sessState.ApprovalsEnabled)
 		if err != nil {
 			sm.log.Warn("failed to inject hooks", "session_id", id, "err", err)
 		} else {
@@ -743,7 +744,7 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 			}
 		}
 	case "codex":
-		hookArgs, hookEnv, err := sm.injectCodexHooks(id)
+		hookArgs, hookEnv, err := sm.injectCodexHooks(id, sessState.ApprovalsEnabled)
 		if err != nil {
 			sm.log.Warn("failed to inject hooks", "session_id", id, "err", err)
 		} else {
