@@ -244,6 +244,14 @@ func formatToolSummary(toolName, toolInput string) string {
 		if fp, ok := parsed["file_path"].(string); ok {
 			return fmt.Sprintf("Read: %s", shortPath(fp))
 		}
+	case "Skill":
+		if skill, ok := parsed["skill"].(string); ok {
+			return fmt.Sprintf("Skill: %s", skill)
+		}
+	case "Agent":
+		if desc, ok := parsed["description"].(string); ok {
+			return fmt.Sprintf("Agent: %s", desc)
+		}
 	}
 	return toolName
 }
@@ -314,13 +322,36 @@ func formatToolDetail(a protocol.ApprovalInfo, maxWidth int) string {
 				b.WriteString("  " + lipgloss.NewStyle().Foreground(colorGreen).Render(line) + "\n")
 			}
 		}
-	default:
-		b.WriteString("\n")
-		pretty, err := json.MarshalIndent(parsed, "  ", "  ")
-		if err == nil {
-			for _, line := range wrapLines(string(pretty), maxWidth) {
+	case "Skill":
+		if skill, ok := parsed["skill"].(string); ok {
+			b.WriteString(label.Render("Skill  ") + "  " + code.Render(skill) + "\n")
+		}
+		if args, ok := parsed["args"].(string); ok && args != "" {
+			b.WriteString("\n")
+			for _, line := range wrapLines(args, maxWidth-2) {
 				b.WriteString("  " + code.Render(line) + "\n")
 			}
+		}
+	case "Agent":
+		if desc, ok := parsed["description"].(string); ok {
+			b.WriteString(label.Render("Desc   ") + "  " + code.Render(desc) + "\n")
+		}
+		if prompt, ok := parsed["prompt"].(string); ok {
+			short := truncateBlock(prompt, 5)
+			b.WriteString("\n")
+			for _, line := range wrapLines(short, maxWidth-2) {
+				b.WriteString("  " + code.Render(line) + "\n")
+			}
+		}
+	default:
+		b.WriteString("\n")
+		for key, val := range parsed {
+			valStr := fmt.Sprintf("%v", val)
+			if s, ok := val.(string); ok {
+				valStr = s
+			}
+			valStr = strings.ReplaceAll(valStr, "\n", " ")
+			b.WriteString("  " + dim.Render(key+":") + " " + code.Render(truncate(valStr, maxWidth-len(key)-4)) + "\n")
 		}
 	}
 
@@ -370,12 +401,24 @@ func wrapLines(s string, maxWidth int) []string {
 			out = append(out, line)
 			continue
 		}
-		for len(line) > maxWidth {
-			out = append(out, line[:maxWidth])
-			line = line[maxWidth:]
+		words := strings.Fields(line)
+		current := ""
+		for _, word := range words {
+			if current == "" {
+				current = word
+			} else if len(current)+1+len(word) <= maxWidth {
+				current += " " + word
+			} else {
+				out = append(out, current)
+				current = word
+			}
+			for len(current) > maxWidth {
+				out = append(out, current[:maxWidth])
+				current = current[maxWidth:]
+			}
 		}
-		if line != "" {
-			out = append(out, line)
+		if current != "" {
+			out = append(out, current)
 		}
 	}
 	return out
