@@ -253,7 +253,7 @@ func repoHash(repoPath string) string {
 
 // Create starts a new agent session, either in a git worktree or as a
 // standalone scratch session (when noRepo is true).
-func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt string, noRepo bool, rows, cols uint16) (SessionState, error) {
+func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt string, noRepo bool, shareWorktree string, rows, cols uint16) (SessionState, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -265,8 +265,28 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 	id := generateID()
 
 	var repoRoot, repoName, worktreePath, branchName string
+	var sharedWorktree bool
 
-	if noRepo {
+	if shareWorktree != "" {
+		var source *SessionState
+		for _, s := range sm.state.Sessions {
+			if s.Name == shareWorktree || s.ID == shareWorktree {
+				source = s
+				break
+			}
+		}
+		if source == nil {
+			return SessionState{}, fmt.Errorf("session %q not found for --share-worktree", shareWorktree)
+		}
+		if source.WorktreePath == "" {
+			return SessionState{}, fmt.Errorf("session %q has no worktree to share", shareWorktree)
+		}
+		worktreePath = source.WorktreePath
+		repoRoot = source.RepoPath
+		repoName = source.RepoName
+		baseBranch = source.BaseBranch
+		sharedWorktree = true
+	} else if noRepo {
 		worktreePath = filepath.Join(sm.paths.DataDir, "scratch", id)
 		if err := os.MkdirAll(worktreePath, 0o700); err != nil {
 			return SessionState{}, fmt.Errorf("create scratch dir: %w", err)
@@ -334,13 +354,20 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 		SessionID:      id,
 		WorktreePath:   worktreePath,
 	}
-	expandedArgs, err := config.ExpandSlice(agent.Args, vars)
-	if err != nil {
+	cleanupOnError := func() {
+		if sharedWorktree {
+			return
+		}
 		if noRepo {
 			os.RemoveAll(worktreePath)
 		} else {
 			_ = git.TeardownSession(repoRoot, worktreePath, branchName)
 		}
+	}
+
+	expandedArgs, err := config.ExpandSlice(agent.Args, vars)
+	if err != nil {
+		cleanupOnError()
 		return SessionState{}, fmt.Errorf("expand agent args: %w", err)
 	}
 	if prompt != "" {
@@ -382,15 +409,12 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 
 	sandboxed, err := sm.resolveSandbox(agentName)
 	if err != nil {
-		if noRepo {
-			os.RemoveAll(worktreePath)
-		} else {
-			_ = git.TeardownSession(repoRoot, worktreePath, branchName)
-		}
+		cleanupOnError()
 		return SessionState{}, err
 	}
 	command := agent.Command
 	finalArgs := expandedArgs
+	var scratchDir string
 	if sandboxed {
 		envKeys := []string{"GRAITH_SESSION_ID", "GRAITH_SESSION_NAME", "GRAITH_WORKTREE_PATH", "TERM"}
 		for k := range agent.Env {
@@ -400,6 +424,15 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 			envKeys = append(envKeys, k)
 		}
 		opts := sm.sandboxOpts(agentName, id, worktreePath, envKeys)
+		if sharedWorktree {
+			scratchDir = filepath.Join(sm.paths.DataDir, "scratch", id)
+			if err := os.MkdirAll(scratchDir, 0o700); err != nil {
+				cleanupOnError()
+				return SessionState{}, fmt.Errorf("create scratch dir: %w", err)
+			}
+			opts.ReadDirs = append(opts.ReadDirs, worktreePath)
+			opts.WorktreeDir = scratchDir
+		}
 		command, finalArgs = sandbox.Wrap(agent.Command, expandedArgs, opts)
 		sm.log.Info("sandboxing session", "id", id, "agent", agentName)
 	}
@@ -416,10 +449,9 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 		MaxLogSize: 100 * 1024 * 1024,
 	})
 	if err != nil {
-		if noRepo {
-			os.RemoveAll(worktreePath)
-		} else {
-			_ = git.TeardownSession(repoRoot, worktreePath, branchName)
+		cleanupOnError()
+		if scratchDir != "" {
+			os.RemoveAll(scratchDir)
 		}
 		return SessionState{}, fmt.Errorf("start pty session: %w", err)
 	}
@@ -435,6 +467,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 		Agent:          agentName,
 		AgentSessionID: agentSessionID,
 		Sandboxed:      sandboxed,
+		SharedWorktree: sharedWorktree,
 		Status:         StatusRunning,
 		PID:            ptySess.Cmd.Process.Pid,
 		CreatedAt:      time.Now().UTC(),
@@ -798,6 +831,7 @@ func (sm *SessionManager) Delete(id string) error {
 	repoPath := sessState.RepoPath
 	worktreePath := sessState.WorktreePath
 	branch := sessState.Branch
+	shared := sessState.SharedWorktree
 
 	delete(sm.state.Sessions, id)
 	delete(sm.hookReports, id)
@@ -818,7 +852,10 @@ func (sm *SessionManager) Delete(id string) error {
 		ptySess.Close()
 	}
 
-	if repoPath != "" {
+	if shared {
+		scratchDir := filepath.Join(sm.paths.DataDir, "scratch", id)
+		_ = os.RemoveAll(scratchDir)
+	} else if repoPath != "" {
 		_ = git.TeardownSession(repoPath, worktreePath, branch)
 	} else if worktreePath != "" {
 		_ = os.RemoveAll(worktreePath)
