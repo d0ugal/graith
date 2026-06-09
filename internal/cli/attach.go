@@ -141,6 +141,7 @@ func runAttachByID(c *client.Client, sessionID string) error {
 			Position: cfg.StatusBar.Position,
 		}
 	}
+	opts.AutoPopApproval = cfg.Approvals.AutoPop
 
 	for {
 		result := c.RunPassthrough(ctx, opts)
@@ -450,6 +451,51 @@ func runAttachByID(c *client.Client, sessionID string) error {
 			protocol.DecodePayload(attachResp, &info)
 			prevSessionID = sessionID
 			sessionID = newInfo.ID
+			opts.SessionID = sessionID
+			opts.Info = &info
+			c = nc
+			continue
+
+		case client.ResultApprovalOverlay:
+			nc, err := freshClient()
+			if err != nil {
+				return err
+			}
+
+			nc.SendControl("approval_list", struct{}{})
+			listResp, err := nc.ReadControlResponse()
+			if err != nil {
+				nc.Close()
+				return err
+			}
+			var notif protocol.ApprovalNotificationMsg
+			protocol.DecodePayload(listResp, &notif)
+
+			if len(notif.Pending) == 0 {
+				restoreScreen(sessionID)
+				nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+				attachResp, _ := nc.ReadControlResponse()
+				protocol.DecodePayload(attachResp, &info)
+				opts.SessionID = sessionID
+				opts.Info = &info
+				c = nc
+				continue
+			}
+
+			results := client.RunApprovalOverlay(notif.Pending)
+			for _, r := range results {
+				nc.SendControl("approval_respond", protocol.ApprovalRespondMsg{
+					RequestID: r.RequestID,
+					Decision:  r.Decision,
+					Reason:    r.Reason,
+				})
+				nc.ReadControlResponse()
+			}
+
+			restoreScreen(sessionID)
+			nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+			attachResp, _ := nc.ReadControlResponse()
+			protocol.DecodePayload(attachResp, &info)
 			opts.SessionID = sessionID
 			opts.Info = &info
 			c = nc
