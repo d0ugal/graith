@@ -47,9 +47,9 @@ func kittyCtrlSeq(prefixByte byte) []byte {
 // Returns codepoint, modifier value (1=none, 5=ctrl, …), event type
 // (0=unspecified press, 1=press, 2=repeat, 3=release), sequence byte length,
 // and whether parsing succeeded.
-func parseKittyCSIu(input []byte, pos int) (cp, mods, evType, seqLen int, ok bool) {
+func parseKittyCSIu(input []byte, pos int) (int, int, int, int, bool) {
 	if pos+3 >= len(input) || input[pos] != '\x1b' || input[pos+1] != '[' {
-		return
+		return 0, 0, 0, 0, false
 	}
 	i := pos + 2
 	numStart := i
@@ -57,12 +57,14 @@ func parseKittyCSIu(input []byte, pos int) (cp, mods, evType, seqLen int, ok boo
 		i++
 	}
 	if i == numStart || i >= len(input) {
-		return
+		return 0, 0, 0, 0, false
 	}
+	cp := 0
 	for _, b := range input[numStart:i] {
 		cp = cp*10 + int(b-'0')
 	}
-	mods = 1
+	mods := 1
+	evType := 0
 	if input[i] == ';' {
 		i++
 		modStart := i
@@ -71,7 +73,7 @@ func parseKittyCSIu(input []byte, pos int) (cp, mods, evType, seqLen int, ok boo
 			i++
 		}
 		if i == modStart || i >= len(input) {
-			return
+			return 0, 0, 0, 0, false
 		}
 		for _, b := range input[modStart:i] {
 			mods = mods*10 + int(b-'0')
@@ -83,7 +85,7 @@ func parseKittyCSIu(input []byte, pos int) (cp, mods, evType, seqLen int, ok boo
 				i++
 			}
 			if i == evStart || i >= len(input) {
-				return
+				return 0, 0, 0, 0, false
 			}
 			for _, b := range input[evStart:i] {
 				evType = evType*10 + int(b-'0')
@@ -91,11 +93,9 @@ func parseKittyCSIu(input []byte, pos int) (cp, mods, evType, seqLen int, ok boo
 		}
 	}
 	if i >= len(input) || input[i] != 'u' {
-		return
+		return 0, 0, 0, 0, false
 	}
-	seqLen = i - pos + 1
-	ok = true
-	return
+	return cp, mods, evType, i - pos + 1, true
 }
 
 // processKittyPrefix scans input for Kitty CSI u sequences matching the prefix
