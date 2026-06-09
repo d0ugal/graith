@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.0](https://github.com/d0ugal/graith/compare/v0.15.0...v0.16.0) (2026-06-09)
+
+
+### Features
+
+* add batch delete/stop with --repo, --stopped, --stale filters ([26b1d4e](https://github.com/d0ugal/graith/commit/26b1d4e8be9bea95039e696d7269fe6a7172fdd2))
+
 ## [0.15.0](https://github.com/d0ugal/graith/compare/v0.14.0...v0.15.0) (2026-06-09)
 
 
