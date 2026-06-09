@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.50.0](https://github.com/d0ugal/graith/compare/v0.49.0...v0.50.0) (2026-06-09)
+
+
+### Features
+
+* add `gr path` command to print session worktree path ([bbe1e9f](https://github.com/d0ugal/graith/commit/bbe1e9f95b155af0c1762ac263e5d8aa84a54776))
+
+
+### Bug Fixes
+
+* allow same-version daemon restart to preserve sessions ([51dcaae](https://github.com/d0ugal/graith/commit/51dcaae2197ddb21bc352f454e2172406e5487c9))
+
 ## [0.49.0](https://github.com/d0ugal/graith/compare/v0.48.0...v0.49.0) (2026-06-06)
 
 
