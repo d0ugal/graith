@@ -12,7 +12,9 @@ import (
 	"github.com/d0ugal/graith/internal/protocol"
 )
 
-var testKeys = PassthroughKeys{Prefix: 0x02, NextSession: 'n', PrevSession: 'p'}
+var testOpts = PassthroughOpts{
+	Keys: PassthroughKeys{Prefix: 0x02, NextSession: 'n', PrevSession: 'p'},
+}
 
 type lockedWriter struct {
 	mu  sync.Mutex
@@ -91,7 +93,7 @@ func TestPrefixKeyOverlay(t *testing.T) {
 	}()
 
 	ctx := context.Background()
-	result := c.runPassthroughLoop(ctx, testKeys, stdinR, stdout, nil)
+	result := c.runPassthroughLoop(ctx, testOpts, stdinR, stdout, nil)
 
 	if result != ResultOverlay {
 		t.Fatalf("expected ResultOverlay (%d), got %d", ResultOverlay, result)
@@ -128,7 +130,7 @@ func TestPrefixKeyOverlayKittyProtocol(t *testing.T) {
 	}()
 
 	ctx := context.Background()
-	result := c.runPassthroughLoop(ctx, testKeys, stdinR, stdout, nil)
+	result := c.runPassthroughLoop(ctx, testOpts, stdinR, stdout, nil)
 
 	if result != ResultOverlay {
 		t.Fatalf("expected ResultOverlay (%d), got %d", ResultOverlay, result)
@@ -160,7 +162,7 @@ func TestPrefixKeyDetach(t *testing.T) {
 	}()
 
 	ctx := context.Background()
-	result := c.runPassthroughLoop(ctx, testKeys, stdinR, stdout, nil)
+	result := c.runPassthroughLoop(ctx, testOpts, stdinR, stdout, nil)
 
 	if result != ResultDetached {
 		t.Fatalf("expected ResultDetached (%d), got %d", ResultDetached, result)
@@ -193,7 +195,7 @@ func TestPrefixKeyDetachKittyProtocol(t *testing.T) {
 	}()
 
 	ctx := context.Background()
-	result := c.runPassthroughLoop(ctx, testKeys, stdinR, stdout, nil)
+	result := c.runPassthroughLoop(ctx, testOpts, stdinR, stdout, nil)
 
 	if result != ResultDetached {
 		t.Fatalf("expected ResultDetached (%d), got %d", ResultDetached, result)
@@ -225,7 +227,7 @@ func TestPrefixKeyShell(t *testing.T) {
 	}()
 
 	ctx := context.Background()
-	result := c.runPassthroughLoop(ctx, testKeys, stdinR, stdout, nil)
+	result := c.runPassthroughLoop(ctx, testOpts, stdinR, stdout, nil)
 
 	if result != ResultShell {
 		t.Fatalf("expected ResultShell (%d), got %d", ResultShell, result)
@@ -246,7 +248,7 @@ func TestDisconnectDetection(t *testing.T) {
 	}()
 
 	ctx := context.Background()
-	result := c.runPassthroughLoop(ctx, testKeys, stdinR, stdout, nil)
+	result := c.runPassthroughLoop(ctx, testOpts, stdinR, stdout, nil)
 
 	if result != ResultDisconnected {
 		t.Fatalf("expected ResultDisconnected (%d), got %d", ResultDisconnected, result)
@@ -282,7 +284,7 @@ func TestOverlayUnderHeavyOutput(t *testing.T) {
 	ctx := context.Background()
 	done := make(chan PassthroughResult, 1)
 	go func() {
-		done <- c.runPassthroughLoop(ctx, testKeys, stdinR, stdout, nil)
+		done <- c.runPassthroughLoop(ctx, testOpts, stdinR, stdout, nil)
 	}()
 
 	select {
@@ -324,7 +326,7 @@ func TestOverlayUnderHeavyOutputKittyProtocol(t *testing.T) {
 	ctx := context.Background()
 	done := make(chan PassthroughResult, 1)
 	go func() {
-		done <- c.runPassthroughLoop(ctx, testKeys, stdinR, stdout, nil)
+		done <- c.runPassthroughLoop(ctx, testOpts, stdinR, stdout, nil)
 	}()
 
 	select {
@@ -373,7 +375,7 @@ func TestNormalDataPassthrough(t *testing.T) {
 	}()
 
 	ctx := context.Background()
-	result := c.runPassthroughLoop(ctx, testKeys, stdinR, stdout, nil)
+	result := c.runPassthroughLoop(ctx, testOpts, stdinR, stdout, nil)
 
 	if result != ResultDetached {
 		t.Fatalf("expected ResultDetached, got %d", result)
@@ -411,7 +413,7 @@ func TestDaemonDetachesClient(t *testing.T) {
 	stdout := &lockedWriter{}
 
 	ctx := context.Background()
-	result := c.runPassthroughLoop(ctx, testKeys, stdinR, stdout, nil)
+	result := c.runPassthroughLoop(ctx, testOpts, stdinR, stdout, nil)
 
 	if result != ResultDetached {
 		t.Fatalf("expected ResultDetached (%d), got %d", ResultDetached, result)
@@ -450,7 +452,7 @@ func TestEscapeSequenceNotPrefixIsForwarded(t *testing.T) {
 	}()
 
 	ctx := context.Background()
-	result := c.runPassthroughLoop(ctx, testKeys, stdinR, stdout, nil)
+	result := c.runPassthroughLoop(ctx, testOpts, stdinR, stdout, nil)
 
 	if result != ResultDetached {
 		t.Fatalf("expected ResultDetached, got %d", result)
