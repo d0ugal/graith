@@ -210,8 +210,8 @@ func (s *MsgStore) AckLatest(stream, subscriber string) error {
 	return s.Ack(stream, subscriber, maxSeq)
 }
 
-func (s *MsgStore) ListStreams(subscriber string) ([]StreamInfo, error) {
-	rows, err := s.db.Query(`
+func (s *MsgStore) ListStreams(subscriber string, includeSystem bool) ([]StreamInfo, error) {
+	q := `
 		SELECT
 			m.stream,
 			COUNT(*) as total,
@@ -224,10 +224,14 @@ func (s *MsgStore) ListStreams(subscriber string) ([]StreamInfo, error) {
 				), 0
 			) as unread,
 			MAX(m.created_at) as latest_at
-		FROM messages m
+		FROM messages m`
+	if !includeSystem {
+		q += ` WHERE m.stream NOT LIKE '_system.%'`
+	}
+	q += `
 		GROUP BY m.stream
-		ORDER BY latest_at DESC
-	`, subscriber)
+		ORDER BY latest_at DESC`
+	rows, err := s.db.Query(q, subscriber)
 	if err != nil {
 		return nil, fmt.Errorf("list streams: %w", err)
 	}
@@ -248,11 +252,12 @@ func (s *MsgStore) TotalUnread(subscriber string) int {
 	var count int
 	err := s.db.QueryRow(`
 		SELECT COUNT(*) FROM messages m
-		WHERE m.seq > COALESCE(
+		WHERE m.stream = 'inbox:' || ?
+		  AND m.seq > COALESCE(
 			(SELECT c.ack_seq FROM cursors c
 			 WHERE c.subscriber = ? AND c.stream = m.stream), 0
 		)
-	`, subscriber).Scan(&count)
+	`, subscriber, subscriber).Scan(&count)
 	if err != nil {
 		return 0
 	}

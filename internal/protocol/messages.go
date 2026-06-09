@@ -41,12 +41,18 @@ type HandshakeMsg struct {
 }
 
 type CreateMsg struct {
-	Name     string `json:"name"`
-	Agent    string `json:"agent"`
-	RepoPath string `json:"repo_path"`
-	Base     string `json:"base,omitempty"`
-	Prompt   string `json:"prompt,omitempty"`
-	NoRepo   bool   `json:"no_repo,omitempty"`
+	Name          string `json:"name"`
+	Agent         string `json:"agent"`
+	RepoPath      string `json:"repo_path"`
+	Base          string `json:"base,omitempty"`
+	Prompt        string `json:"prompt,omitempty"`
+	NoRepo        bool   `json:"no_repo,omitempty"`
+	ShareWorktree string `json:"share_worktree,omitempty"`
+}
+
+type ForkMsg struct {
+	Name            string `json:"name"`
+	SourceSessionID string `json:"source_session_id"`
 }
 
 type AttachMsg struct {
@@ -112,7 +118,31 @@ type MsgAckMsg struct {
 }
 
 type MsgTopicsMsg struct {
-	Subscriber string `json:"subscriber"`
+	Subscriber    string `json:"subscriber"`
+	IncludeSystem bool   `json:"include_system,omitempty"`
+}
+
+// Client -> Daemon (hook reporting)
+type StatusReportMsg struct {
+	SessionID string         `json:"session_id"`
+	Event     string         `json:"event"`
+	Status    string         `json:"status,omitempty"`
+	ToolName  string         `json:"tool_name,omitempty"`
+	Model     string         `json:"model,omitempty"`
+	Usage     *UsageReport   `json:"usage,omitempty"`
+	Context   *ContextReport `json:"context,omitempty"`
+}
+
+type UsageReport struct {
+	InputTokens  *int64   `json:"input_tokens,omitempty"`
+	OutputTokens *int64   `json:"output_tokens,omitempty"`
+	CostUSD      *float64 `json:"cost_usd,omitempty"`
+}
+
+type ContextReport struct {
+	UsedTokens *int64   `json:"used_tokens,omitempty"`
+	MaxTokens  *int64   `json:"max_tokens,omitempty"`
+	Percent    *float64 `json:"percent,omitempty"`
 }
 
 // Daemon -> Client
@@ -130,22 +160,28 @@ type SessionListMsg struct {
 }
 
 type SessionInfo struct {
-	ID             string `json:"id"`
-	Name           string `json:"name"`
-	RepoPath       string `json:"repo_path"`
-	RepoName       string `json:"repo_name"`
-	WorktreePath   string `json:"worktree_path"`
-	Branch         string `json:"branch"`
-	BaseBranch     string `json:"base_branch"`
-	Agent          string `json:"agent"`
-	AgentSessionID string `json:"agent_session_id,omitempty"`
-	Status         string `json:"status"`
-	AgentStatus    string `json:"agent_status,omitempty"`
-	ExitCode       *int   `json:"exit_code,omitempty"`
-	CreatedAt      string `json:"created_at"`
-	LastAttachedAt string `json:"last_attached_at,omitempty"`
-	Dirty          bool   `json:"dirty,omitempty"`
-	UnpushedCount  int    `json:"unpushed_count,omitempty"`
+	ID             string   `json:"id"`
+	Name           string   `json:"name"`
+	RepoPath       string   `json:"repo_path"`
+	RepoName       string   `json:"repo_name"`
+	WorktreePath   string   `json:"worktree_path"`
+	Branch         string   `json:"branch"`
+	BaseBranch     string   `json:"base_branch"`
+	Agent          string   `json:"agent"`
+	AgentSessionID string   `json:"agent_session_id,omitempty"`
+	Status         string   `json:"status"`
+	AgentStatus    string   `json:"agent_status,omitempty"`
+	ExitCode       *int     `json:"exit_code,omitempty"`
+	CreatedAt      string   `json:"created_at"`
+	LastAttachedAt string   `json:"last_attached_at,omitempty"`
+	Dirty          bool     `json:"dirty,omitempty"`
+	UnpushedCount  int      `json:"unpushed_count,omitempty"`
+	Sandboxed      bool     `json:"sandboxed,omitempty"`
+	SharedWorktree bool     `json:"shared_worktree,omitempty"`
+	Model          string   `json:"model,omitempty"`
+	ToolName       string   `json:"tool_name,omitempty"`
+	CostUSD        *float64 `json:"cost_usd,omitempty"`
+	ContextPercent *float64 `json:"context_percent,omitempty"`
 }
 
 type DetachedMsg struct {
@@ -163,6 +199,43 @@ type ScreenPreviewMsg struct {
 type ScreenPreviewResponseMsg struct {
 	SessionID string `json:"session_id"`
 	Preview   string `json:"preview"`
+}
+
+// Approval protocol messages
+
+// ApprovalRequestMsg is sent by the hook CLI (gr approve-request) to the daemon.
+// The handler blocks until a decision is made.
+type ApprovalRequestMsg struct {
+	RequestID string `json:"request_id"`
+	SessionID string `json:"session_id"`
+	ToolName  string `json:"tool_name"`
+	ToolInput string `json:"tool_input,omitempty"`
+}
+
+type ApprovalInfo struct {
+	RequestID   string `json:"request_id"`
+	SessionID   string `json:"session_id"`
+	SessionName string `json:"session_name"`
+	ToolName    string `json:"tool_name"`
+	ToolInput   string `json:"tool_input,omitempty"`
+	Agent       string `json:"agent"`
+	RepoName    string `json:"repo_name"`
+	RequestedAt string `json:"requested_at"`
+}
+
+type ApprovalNotificationMsg struct {
+	Pending []ApprovalInfo `json:"pending"`
+}
+
+type ApprovalRespondMsg struct {
+	RequestID string `json:"request_id"`
+	Decision  string `json:"decision"`
+	Reason    string `json:"reason,omitempty"`
+}
+
+type ApprovalDecisionMsg struct {
+	Decision string `json:"decision"`
+	Reason   string `json:"reason,omitempty"`
 }
 
 type ScreenSnapshotMsg struct {
@@ -183,7 +256,17 @@ type StatusRequestMsg struct {
 	SessionID string `json:"session_id"`
 }
 
+type FleetSummary struct {
+	Total    int `json:"total"`
+	Active   int `json:"active"`
+	Approval int `json:"approval"`
+	Ready    int `json:"ready"`
+	Errored  int `json:"errored"`
+	Stopped  int `json:"stopped"`
+}
+
 type StatusResponseMsg struct {
-	Session     SessionInfo `json:"session"`
-	UnreadCount int         `json:"unread_count"`
+	Session     SessionInfo  `json:"session"`
+	UnreadCount int          `json:"unread_count"`
+	Fleet       FleetSummary `json:"fleet"`
 }

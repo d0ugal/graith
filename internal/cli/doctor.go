@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"runtime"
 	"time"
 
 	"github.com/d0ugal/graith/internal/protocol"
+	"github.com/d0ugal/graith/internal/sandbox"
 	"github.com/d0ugal/graith/internal/version"
 	"github.com/spf13/cobra"
 )
@@ -52,7 +54,7 @@ var doctorCmd = &cobra.Command{
 
 					if hsOk.DaemonVersion != version.Version {
 						out.Print("  ✗ Version mismatch: CLI=%s, daemon=%s\n", version.Version, hsOk.DaemonVersion)
-						out.Print("    → Run: gr daemon upgrade\n")
+						out.Print("    → Run: gr daemon restart\n")
 						ok = false
 					}
 				} else {
@@ -82,6 +84,25 @@ var doctorCmd = &cobra.Command{
 			ok = false
 		} else if version.Version != "dev" {
 			out.Print("  ✓ Up to date (%s)\n", version.Version)
+		}
+
+		if cfg.Sandbox.Enabled {
+			safehouseCmd := cfg.Sandbox.Command
+			if safehouseCmd == "" {
+				safehouseCmd = "safehouse"
+			}
+			if runtime.GOOS != "darwin" {
+				out.Print("  ✗ Sandbox enabled but not running macOS (safehouse requires macOS)\n")
+				ok = false
+			} else if !sandbox.AvailableCommand(safehouseCmd) {
+				out.Print("  ✗ Sandbox enabled but %s not found in PATH\n", safehouseCmd)
+				out.Print("    → Install: brew install eugene1g/tools/agent-safehouse\n")
+				ok = false
+			} else {
+				out.Print("  ✓ Sandbox enabled (safehouse available)\n")
+			}
+		} else {
+			out.Print("  ○ Sandbox disabled\n")
 		}
 
 		if !ok {

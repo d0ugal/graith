@@ -4,21 +4,27 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/adrg/xdg"
 	"github.com/pelletier/go-toml/v2"
 )
 
 type Config struct {
-	DefaultAgent   string           `toml:"default_agent"`
-	GitHubUsername string           `toml:"github_username"`
-	BranchPrefix   string           `toml:"branch_prefix"`
-	FetchOnCreate  bool             `toml:"fetch_on_create"`
-	StatusBar      StatusBar        `toml:"status_bar"`
-	Keybindings    Keybindings      `toml:"keybindings"`
-	Notifications  Notifications    `toml:"notifications"`
-	Messages       Messages         `toml:"messages"`
-	Agents         map[string]Agent `toml:"agents"`
+	DefaultAgent     string           `toml:"default_agent"`
+	GitHubUsername   string           `toml:"github_username"`
+	BranchPrefix     string           `toml:"branch_prefix"`
+	FetchOnCreate    bool             `toml:"fetch_on_create"`
+	AllowedRepoPaths []string         `toml:"allowed_repo_paths"`
+	StatusBar        StatusBar        `toml:"status_bar"`
+	Keybindings      Keybindings      `toml:"keybindings"`
+	Notifications    Notifications    `toml:"notifications"`
+	Messages         Messages         `toml:"messages"`
+	Sandbox          SandboxConfig    `toml:"sandbox"`
+	Approvals        Approvals        `toml:"approvals"`
+	Agents           map[string]Agent `toml:"agents"`
 }
 
 type StatusBar struct {
@@ -55,11 +61,13 @@ func ParseDurationWithDays(s string) time.Duration {
 type Keybindings struct {
 	Prefix        string `toml:"prefix"`
 	NewSession    string `toml:"new_session"`
+	ForkSession   string `toml:"fork_session"`
 	DeleteSession string `toml:"delete_session"`
 	Detach        string `toml:"detach"`
 	SessionList   string `toml:"session_list"`
 	NextSession   string `toml:"next_session"`
 	PrevSession   string `toml:"prev_session"`
+	LastSession   string `toml:"last_session"`
 	ResumeSession string `toml:"resume_session"`
 	RenameSession string `toml:"rename_session"`
 	Search        string `toml:"search"`
@@ -74,12 +82,28 @@ type Notifications struct {
 	Command    string `toml:"command"`
 }
 
+type Approvals struct {
+	Mode    string `toml:"mode"`
+	AutoPop bool   `toml:"auto_pop"`
+	Timeout string `toml:"timeout"`
+	Command string `toml:"command"`
+}
+
+func (a Approvals) TimeoutDuration() time.Duration {
+	if a.Timeout == "" {
+		return 10 * time.Minute
+	}
+	return ParseDurationWithDays(a.Timeout)
+}
+
 type Agent struct {
 	Command     string            `toml:"command"`
 	Args        []string          `toml:"args"`
 	ResumeArgs  []string          `toml:"resume_args"`
+	ForkArgs    []string          `toml:"fork_args"`
 	Env         map[string]string `toml:"env"`
 	IdleTimeout string            `toml:"idle_timeout"`
+	Sandbox     SandboxConfig     `toml:"sandbox"`
 }
 
 func (a Agent) IdleTimeoutDuration() time.Duration {
@@ -94,6 +118,79 @@ func (a Agent) IdleTimeoutDuration() time.Duration {
 		return 0
 	}
 	return d
+}
+
+type SandboxConfig struct {
+	Enabled   bool     `toml:"enabled"`
+	Disabled  *bool    `toml:"disabled,omitempty"`
+	Command   string   `toml:"command"`
+	Features  []string `toml:"features"`
+	ReadDirs  []string `toml:"read_dirs"`
+	WriteDirs []string `toml:"write_dirs"`
+}
+
+func (s SandboxConfig) Merge(agent SandboxConfig) SandboxConfig {
+	merged := SandboxConfig{
+		Enabled: s.Enabled || agent.Enabled,
+		Command: s.Command,
+	}
+
+	if agent.Disabled != nil && *agent.Disabled {
+		merged.Enabled = false
+		return merged
+	}
+
+	merged.Features = dedup(append(s.Features, agent.Features...))
+	merged.ReadDirs = dedup(append(s.ReadDirs, agent.ReadDirs...))
+	merged.WriteDirs = dedup(append(s.WriteDirs, agent.WriteDirs...))
+
+	if agent.Command != "" {
+		merged.Command = agent.Command
+	}
+
+	return merged
+}
+
+func dedup(ss []string) []string {
+	if len(ss) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(ss))
+	out := make([]string, 0, len(ss))
+	for _, s := range ss {
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	return out
+}
+
+func ExpandPath(p string) string {
+	if strings.HasPrefix(p, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			p = filepath.Join(home, p[2:])
+		}
+	}
+	if abs, err := filepath.Abs(p); err == nil {
+		p = abs
+	}
+	return filepath.Clean(p)
+}
+
+func (c *Config) RepoPathAllowed(repoPath string) bool {
+	if len(c.AllowedRepoPaths) == 0 {
+		return true
+	}
+	repoPath = ExpandPath(repoPath)
+	for _, allowed := range c.AllowedRepoPaths {
+		prefix := ExpandPath(allowed)
+		if repoPath == prefix || strings.HasPrefix(repoPath, prefix+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
 }
 
 func Load(path string) (*Config, error) {
@@ -121,15 +218,29 @@ func Default() *Config {
 			Enabled:    true,
 			OnApproval: true,
 		},
+		Approvals: Approvals{
+			Mode:    "prompt",
+			Timeout: "10m",
+		},
 		Keybindings: Keybindings{
-			Prefix: "ctrl+b", NewSession: "c", DeleteSession: "x",
-			Detach: "d", SessionList: "w", NextSession: "n",
-			PrevSession: "p", ResumeSession: "R", RenameSession: ",",
-			Search: "/", ScrollMode: "[", Shell: "s",
+			Prefix: "ctrl+b", NewSession: "c", ForkSession: "f",
+			DeleteSession: "x", Detach: "d", SessionList: "w",
+			NextSession: "n", PrevSession: "p", LastSession: "l", ResumeSession: "R",
+			RenameSession: ",", Search: "/", ScrollMode: "[", Shell: "s",
 		},
 		Agents: map[string]Agent{
-			"claude":   {Command: "claude", Args: []string{"--session-id", "{agent_session_id}"}, ResumeArgs: []string{"--resume", "{agent_session_id}"}},
-			"codex":    {Command: "codex", Args: []string{}, ResumeArgs: []string{"resume", "--last"}},
+			"claude": {
+				Command:    "claude",
+				Args:       []string{"--session-id", "{agent_session_id}"},
+				ResumeArgs: []string{"--resume", "{agent_session_id}"},
+				ForkArgs:   []string{"--session-id", "{agent_session_id}", "--fork-session", "{fork_source_agent_session_id}"},
+			},
+			"codex": {
+				Command:    "codex",
+				Args:       []string{},
+				ResumeArgs: []string{"resume", "--last"},
+				ForkArgs:   []string{"fork", "{fork_source_agent_session_id}"},
+			},
 			"opencode": {Command: "opencode", Args: []string{}, ResumeArgs: []string{"--session", "{agent_session_id}"}},
 			"agy":      {Command: "agy", Args: []string{}, ResumeArgs: []string{"--conversation", "{agent_session_id}"}},
 		},
@@ -144,9 +255,25 @@ func LoadOrDefault(path string) (*Config, error) {
 	cfg, err := Load(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
+			if legacy := legacyConfigFile(); legacy != "" {
+				if lcfg, lerr := Load(legacy); lerr == nil {
+					return lcfg, nil
+				}
+			}
 			return Default(), nil
 		}
 		return nil, err
 	}
 	return cfg, nil
+}
+
+// legacyConfigFile returns the old macOS config path (~/Library/Application
+// Support/graith/config.toml) if it differs from the current path.
+func legacyConfigFile() string {
+	legacy := filepath.Join(xdg.ConfigHome, appName, "config.toml")
+	current := filepath.Join(configHome(), appName, "config.toml")
+	if legacy == current {
+		return ""
+	}
+	return legacy
 }

@@ -89,7 +89,20 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				if agentName == "" {
 					agentName = sm.cfg.DefaultAgent
 				}
-				sess, err := sm.Create(c.Name, agentName, c.RepoPath, c.Base, c.Prompt, c.NoRepo, clientRows, clientCols)
+				sess, err := sm.Create(c.Name, agentName, c.RepoPath, c.Base, c.Prompt, c.NoRepo, c.ShareWorktree, clientRows, clientCols)
+				if err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+				} else {
+					sendControl("created", toSessionInfo(sess))
+				}
+
+			case "fork":
+				var f protocol.ForkMsg
+				if err := protocol.DecodePayload(msg, &f); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid fork message"})
+					continue
+				}
+				sess, err := sm.Fork(f.Name, f.SourceSessionID, clientRows, clientCols)
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 				} else {
@@ -120,10 +133,13 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				attachedDataWriter = &frameDataWriter{writer: writer}
 
 				sm.KickAttachedClient(a.SessionID)
-				sm.SetAttachedClient(a.SessionID, conn, func() {
-					data, _ := protocol.EncodeControl("detached", protocol.DetachedMsg{Reason: "replaced"})
-					_ = writer.WriteFrame(protocol.ChannelControl, data)
-				})
+				sm.SetAttachedClient(a.SessionID, conn,
+					func() {
+						data, _ := protocol.EncodeControl("detached", protocol.DetachedMsg{Reason: "replaced"})
+						_ = writer.WriteFrame(protocol.ChannelControl, data)
+					},
+					sendControl,
+				)
 
 				now := time.Now().UTC()
 				sm.mu.Lock()
@@ -376,7 +392,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid msg_topics message"})
 					continue
 				}
-				streams, err := sm.messages.ListStreams(m.Subscriber)
+				streams, err := sm.messages.ListStreams(m.Subscriber, m.IncludeSystem)
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 				} else {
@@ -384,6 +400,52 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 						Streams []StreamInfo `json:"streams"`
 					}{streams})
 				}
+
+			case "approval_request":
+				var req protocol.ApprovalRequestMsg
+				if err := protocol.DecodePayload(msg, &req); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid approval_request"})
+					continue
+				}
+				// Monitor connection close so we can cancel if the hook dies.
+				connCtx, connCancel := context.WithCancel(ctx)
+				go func() {
+					for {
+						f, err := reader.ReadFrame()
+						if err != nil {
+							connCancel()
+							return
+						}
+						if f.Channel == protocol.ChannelControl {
+							ctrl, _ := protocol.DecodeControl(f.Payload)
+							if ctrl.Type == "detach" {
+								connCancel()
+								return
+							}
+						}
+					}
+				}()
+				decision := sm.SubmitApproval(connCtx, req)
+				sendControl("approval_decision", decision)
+				return
+
+			case "approval_respond":
+				var resp protocol.ApprovalRespondMsg
+				if err := protocol.DecodePayload(msg, &resp); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid approval_respond"})
+					continue
+				}
+				if err := sm.RespondToApproval(resp.RequestID, resp.Decision, resp.Reason); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+				} else {
+					sendControl("approval_responded", struct{}{})
+				}
+
+			case "approval_list":
+				pending := sm.PendingApprovals()
+				sendControl("approval_notification", protocol.ApprovalNotificationMsg{
+					Pending: pending,
+				})
 
 			case "type":
 				var t protocol.TypeMsg
@@ -396,12 +458,13 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "session not found"})
 					continue
 				}
-				if err := pty.WriteInput([]byte(t.Input)); err != nil {
+				input := t.Input
+				if !t.NoNewline {
+					input += "\r"
+				}
+				if err := pty.WriteInput([]byte(input)); err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: "write failed: " + err.Error()})
 					continue
-				}
-				if !t.NoNewline {
-					_ = pty.WriteInput([]byte("\r"))
 				}
 				sendControl("typed", struct {
 					SessionID string `json:"session_id"`
@@ -478,10 +541,21 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				if sm.messages != nil {
 					unread = sm.messages.TotalUnread(sr.SessionID)
 				}
+				fleet := sm.fleetSummary()
 				sendControl("status_response", protocol.StatusResponseMsg{
 					Session:     toSessionInfo(sess),
 					UnreadCount: unread,
+					Fleet:       fleet,
 				})
+
+			case "status_report":
+				var sr protocol.StatusReportMsg
+				if err := protocol.DecodePayload(msg, &sr); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid status_report"})
+					continue
+				}
+				sm.HandleHookReport(sr)
+				sendControl("status_reported", struct{}{})
 
 			case "upgrade":
 				select {
@@ -545,6 +619,12 @@ func toSessionInfo(s SessionState) protocol.SessionInfo {
 		CreatedAt:      s.CreatedAt.Format(time.RFC3339),
 		Dirty:          s.GitDirty,
 		UnpushedCount:  s.GitUnpushed,
+		Sandboxed:      s.Sandboxed,
+		SharedWorktree: s.SharedWorktree,
+		Model:          s.HookModel,
+		ToolName:       s.HookToolName,
+		CostUSD:        s.HookCostUSD,
+		ContextPercent: s.HookContextPercent,
 	}
 	if s.LastAttachedAt != nil {
 		info.LastAttachedAt = s.LastAttachedAt.Format(time.RFC3339)

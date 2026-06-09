@@ -17,42 +17,146 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/detector"
 	"github.com/d0ugal/graith/internal/git"
+	"github.com/d0ugal/graith/internal/protocol"
 	grpty "github.com/d0ugal/graith/internal/pty"
+	"github.com/d0ugal/graith/internal/sandbox"
 )
 
 type attachedClient struct {
-	conn net.Conn
-	kick func()
+	conn        net.Conn
+	kick        func()
+	sendControl func(msgType string, payload any)
+}
+
+// hookReport tracks the latest status report from an agent hook.
+// This is runtime-only and NOT persisted to state.json.
+type hookReport struct {
+	Status             string
+	Event              string
+	ToolName           string
+	Model              string
+	CostUSD            *float64
+	ContextPercent     *float64
+	ReportedAt         time.Time
+	AuthoritativeUntil time.Time
 }
 
 // SessionManager orchestrates PTY sessions, state persistence, and git worktrees.
 type SessionManager struct {
-	mu              sync.RWMutex
-	state           *State
-	sessions        map[string]*grpty.Session
-	attachedClients map[string]*attachedClient
-	cfg             *config.Config
-	paths           config.Paths
-	log             *slog.Logger
-	configFile      string
-	upgradeCh       chan struct{}
-	messages        *MsgStore
+	mu               sync.RWMutex
+	state            *State
+	sessions         map[string]*grpty.Session
+	attachedClients  map[string]*attachedClient
+	hookReports      map[string]hookReport
+	pendingApprovals map[string]*pendingApproval
+	cfg              *config.Config
+	paths            config.Paths
+	log              *slog.Logger
+	configFile       string
+	upgradeCh        chan struct{}
+	messages         *MsgStore
 }
 
 // NewSessionManager creates a SessionManager with the given config and paths.
 func NewSessionManager(cfg *config.Config, paths config.Paths, log *slog.Logger) *SessionManager {
 	return &SessionManager{
-		state:           NewState(),
-		sessions:        make(map[string]*grpty.Session),
-		attachedClients: make(map[string]*attachedClient),
-		cfg:             cfg,
-		paths:           paths,
-		log:             log,
+		state:            NewState(),
+		sessions:         make(map[string]*grpty.Session),
+		attachedClients:  make(map[string]*attachedClient),
+		hookReports:      make(map[string]hookReport),
+		pendingApprovals: make(map[string]*pendingApproval),
+		cfg:              cfg,
+		paths:            paths,
+		log:              log,
 	}
 }
 
 func (sm *SessionManager) SetMsgStore(ms *MsgStore) {
 	sm.messages = ms
+}
+
+// HandleHookReport processes a status report from an agent hook, updating the
+// in-memory hookReports map and the session's AgentStatus. This is the
+// authoritative source of agent status when hooks are active.
+func (sm *SessionManager) HandleHookReport(sr protocol.StatusReportMsg) {
+	var status string
+	var staleness time.Duration
+
+	switch sr.Event {
+	case "SessionStart":
+		status = "active"
+		staleness = 5 * time.Second
+	case "UserPromptSubmit", "PreToolUse", "PostToolUse":
+		status = "active"
+		staleness = 30 * time.Second
+	case "Notification", "PermissionRequest":
+		status = "approval"
+		staleness = 30 * time.Minute
+	case "Stop":
+		status = "ready"
+		staleness = 30 * time.Minute
+	default:
+		sm.log.Info("ignoring unknown hook event", "event", sr.Event, "session_id", sr.SessionID)
+		return
+	}
+
+	now := time.Now()
+	report := hookReport{
+		Status:             status,
+		Event:              sr.Event,
+		ToolName:           sr.ToolName,
+		Model:              sr.Model,
+		ReportedAt:         now,
+		AuthoritativeUntil: now.Add(staleness),
+	}
+
+	var oldStatus string
+	var name string
+	var changed bool
+
+	sm.mu.Lock()
+	sess, ok := sm.state.Sessions[sr.SessionID]
+	if !ok {
+		sm.mu.Unlock()
+		sm.log.Info("hook report for unknown session", "session_id", sr.SessionID)
+		return
+	}
+
+	// Accumulate usage data — keep the latest non-nil values from previous reports.
+	if sr.Usage != nil && sr.Usage.CostUSD != nil {
+		report.CostUSD = sr.Usage.CostUSD
+	} else if prev, ok := sm.hookReports[sr.SessionID]; ok && prev.CostUSD != nil {
+		report.CostUSD = prev.CostUSD
+	}
+	if sr.Context != nil && sr.Context.Percent != nil {
+		report.ContextPercent = sr.Context.Percent
+	} else if prev, ok := sm.hookReports[sr.SessionID]; ok && prev.ContextPercent != nil {
+		report.ContextPercent = prev.ContextPercent
+	}
+	if sr.Model != "" {
+		report.Model = sr.Model
+	} else if prev, ok := sm.hookReports[sr.SessionID]; ok && prev.Model != "" {
+		report.Model = prev.Model
+	}
+
+	oldStatus = sess.AgentStatus
+	name = sess.Name
+	sm.hookReports[sr.SessionID] = report
+	changed = oldStatus != status
+	sess.AgentStatus = status
+	sess.HookToolName = report.ToolName
+	sess.HookModel = report.Model
+	sess.HookCostUSD = report.CostUSD
+	sess.HookContextPercent = report.ContextPercent
+	sm.mu.Unlock()
+
+	sm.log.Info("hook report processed",
+		"session_id", sr.SessionID, "event", sr.Event,
+		"status", status, "tool_name", sr.ToolName)
+
+	if changed {
+		sm.onAgentStatusChange(sr.SessionID, name, oldStatus, status)
+	}
 }
 
 func (sm *SessionManager) KickAttachedClient(sessionID string) {
@@ -67,9 +171,9 @@ func (sm *SessionManager) KickAttachedClient(sessionID string) {
 	}
 }
 
-func (sm *SessionManager) SetAttachedClient(sessionID string, conn net.Conn, kick func()) {
+func (sm *SessionManager) SetAttachedClient(sessionID string, conn net.Conn, kick func(), sendCtrl func(string, any)) {
 	sm.mu.Lock()
-	sm.attachedClients[sessionID] = &attachedClient{conn: conn, kick: kick}
+	sm.attachedClients[sessionID] = &attachedClient{conn: conn, kick: kick, sendControl: sendCtrl}
 	sm.mu.Unlock()
 }
 
@@ -149,7 +253,7 @@ func repoHash(repoPath string) string {
 
 // Create starts a new agent session, either in a git worktree or as a
 // standalone scratch session (when noRepo is true).
-func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt string, noRepo bool, rows, cols uint16) (SessionState, error) {
+func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt string, noRepo bool, shareWorktree string, rows, cols uint16) (SessionState, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -161,13 +265,37 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 	id := generateID()
 
 	var repoRoot, repoName, worktreePath, branchName string
+	var sharedWorktree bool
 
-	if noRepo {
+	switch {
+	case shareWorktree != "":
+		var source *SessionState
+		for _, s := range sm.state.Sessions {
+			if s.Name == shareWorktree || s.ID == shareWorktree {
+				source = s
+				break
+			}
+		}
+		if source == nil {
+			return SessionState{}, fmt.Errorf("session %q not found for --share-worktree", shareWorktree)
+		}
+		if source.WorktreePath == "" {
+			return SessionState{}, fmt.Errorf("session %q has no worktree to share", shareWorktree)
+		}
+		worktreePath = source.WorktreePath
+		repoRoot = source.RepoPath
+		repoName = source.RepoName
+		baseBranch = source.BaseBranch
+		sharedWorktree = true
+	case noRepo:
 		worktreePath = filepath.Join(sm.paths.DataDir, "scratch", id)
 		if err := os.MkdirAll(worktreePath, 0o700); err != nil {
 			return SessionState{}, fmt.Errorf("create scratch dir: %w", err)
 		}
-	} else {
+	default:
+		if !sm.cfg.RepoPathAllowed(repoPath) {
+			return SessionState{}, fmt.Errorf("repo path %q is not under any allowed_repo_paths", repoPath)
+		}
 		if !git.IsInsideGitRepo(repoPath) {
 			return SessionState{}, fmt.Errorf("not inside a git repository: %s (use --no-repo for sessions without a repo)", repoPath)
 		}
@@ -227,13 +355,20 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 		SessionID:      id,
 		WorktreePath:   worktreePath,
 	}
-	expandedArgs, err := config.ExpandSlice(agent.Args, vars)
-	if err != nil {
+	cleanupOnError := func() {
+		if sharedWorktree {
+			return
+		}
 		if noRepo {
 			os.RemoveAll(worktreePath)
 		} else {
 			_ = git.TeardownSession(repoRoot, worktreePath, branchName)
 		}
+	}
+
+	expandedArgs, err := config.ExpandSlice(agent.Args, vars)
+	if err != nil {
+		cleanupOnError()
 		return SessionState{}, fmt.Errorf("expand agent args: %w", err)
 	}
 	if prompt != "" {
@@ -250,10 +385,63 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 	env["GRAITH_SESSION_NAME"] = name
 	env["GRAITH_WORKTREE_PATH"] = worktreePath
 
+	switch agentName {
+	case "claude":
+		hookArgs, hookEnv, err := sm.injectClaudeHooks(id)
+		if err != nil {
+			sm.log.Warn("failed to inject hooks", "session_id", id, "err", err)
+		} else {
+			expandedArgs = append(expandedArgs, hookArgs...)
+			for k, v := range hookEnv {
+				env[k] = v
+			}
+		}
+	case "codex":
+		hookArgs, hookEnv, err := sm.injectCodexHooks(id)
+		if err != nil {
+			sm.log.Warn("failed to inject hooks", "session_id", id, "err", err)
+		} else {
+			expandedArgs = append(expandedArgs, hookArgs...)
+			for k, v := range hookEnv {
+				env[k] = v
+			}
+		}
+	}
+
+	sandboxed, err := sm.resolveSandbox(agentName)
+	if err != nil {
+		cleanupOnError()
+		return SessionState{}, err
+	}
+	command := agent.Command
+	finalArgs := expandedArgs
+	var scratchDir string
+	if sandboxed {
+		envKeys := []string{"GRAITH_SESSION_ID", "GRAITH_SESSION_NAME", "GRAITH_WORKTREE_PATH", "TERM"}
+		for k := range agent.Env {
+			envKeys = append(envKeys, k)
+		}
+		for k := range env {
+			envKeys = append(envKeys, k)
+		}
+		opts := sm.sandboxOpts(agentName, id, worktreePath, envKeys)
+		if sharedWorktree {
+			scratchDir = filepath.Join(sm.paths.DataDir, "scratch", id)
+			if err := os.MkdirAll(scratchDir, 0o700); err != nil {
+				cleanupOnError()
+				return SessionState{}, fmt.Errorf("create scratch dir: %w", err)
+			}
+			opts.ReadDirs = append(opts.ReadDirs, worktreePath)
+			opts.WorktreeDir = scratchDir
+		}
+		command, finalArgs = sandbox.Wrap(agent.Command, expandedArgs, opts)
+		sm.log.Info("sandboxing session", "id", id, "agent", agentName)
+	}
+
 	ptySess, err := grpty.NewSession(grpty.SessionOpts{
 		ID:         id,
-		Command:    agent.Command,
-		Args:       expandedArgs,
+		Command:    command,
+		Args:       finalArgs,
 		Dir:        worktreePath,
 		Env:        env,
 		Rows:       rows,
@@ -262,10 +450,9 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 		MaxLogSize: 100 * 1024 * 1024,
 	})
 	if err != nil {
-		if noRepo {
-			os.RemoveAll(worktreePath)
-		} else {
-			_ = git.TeardownSession(repoRoot, worktreePath, branchName)
+		cleanupOnError()
+		if scratchDir != "" {
+			os.RemoveAll(scratchDir)
 		}
 		return SessionState{}, fmt.Errorf("start pty session: %w", err)
 	}
@@ -280,6 +467,176 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 		BaseBranch:     baseBranch,
 		Agent:          agentName,
 		AgentSessionID: agentSessionID,
+		Sandboxed:      sandboxed,
+		SharedWorktree: sharedWorktree,
+		Status:         StatusRunning,
+		PID:            ptySess.Cmd.Process.Pid,
+		CreatedAt:      time.Now().UTC(),
+	}
+
+	sm.state.Sessions[id] = sessState
+	sm.sessions[id] = ptySess
+
+	go sm.watchSession(id, ptySess)
+
+	if err := sm.saveState(); err != nil {
+		sm.log.Error("failed to save state", "err", err)
+	}
+
+	return *sessState, nil
+}
+
+// Fork creates a new session that branches from an existing session's git state
+// and uses the agent's fork_args to carry over the conversation history.
+func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) (SessionState, error) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	source, ok := sm.state.Sessions[sourceSessionID]
+	if !ok {
+		return SessionState{}, fmt.Errorf("source session %q not found", sourceSessionID)
+	}
+
+	agentName := source.Agent
+	agent, ok := sm.cfg.Agents[agentName]
+	if !ok {
+		return SessionState{}, fmt.Errorf("unknown agent %q", agentName)
+	}
+
+	id := generateID()
+
+	repoRoot := source.RepoPath
+	repoName := source.RepoName
+	baseBranch := source.Branch
+
+	username := sm.cfg.GitHubUsername
+	if username == "" && repoRoot != "" {
+		username, _ = git.DiscoverGitHubUsername(repoRoot)
+	}
+	if username == "" {
+		username = "user"
+	}
+
+	branchPrefix, _ := config.Expand(sm.cfg.BranchPrefix, config.TemplateVars{Username: username})
+	branchName := fmt.Sprintf("%s/%s-%s", branchPrefix, name, id)
+
+	worktreePath := filepath.Join(sm.paths.DataDir, "worktrees", repoName, repoHash(repoRoot), id)
+
+	if err := git.SetupSession(repoRoot, worktreePath, branchName, baseBranch, sm.cfg.FetchOnCreate); err != nil {
+		return SessionState{}, fmt.Errorf("setup git session: %w", err)
+	}
+
+	agentSessionID := ""
+	if agentName == "claude" {
+		b := make([]byte, 16)
+		_, _ = rand.Read(b)
+		agentSessionID = fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+	}
+
+	vars := config.TemplateVars{
+		Username:                 username,
+		AgentSessionID:           agentSessionID,
+		SessionName:              name,
+		SessionID:                id,
+		WorktreePath:             worktreePath,
+		ForkSourceAgentSessionID: source.AgentSessionID,
+	}
+
+	args := agent.ForkArgs
+	if len(args) == 0 {
+		args = agent.Args
+	}
+	expandedArgs, err := config.ExpandSlice(args, vars)
+	if err != nil {
+		_ = git.TeardownSession(repoRoot, worktreePath, branchName)
+		return SessionState{}, fmt.Errorf("expand fork args: %w", err)
+	}
+
+	logPath := filepath.Join(sm.paths.LogDir, id+".log")
+
+	env := make(map[string]string, len(agent.Env)+3)
+	for k, v := range agent.Env {
+		env[k] = v
+	}
+	env["GRAITH_SESSION_ID"] = id
+	env["GRAITH_SESSION_NAME"] = name
+	env["GRAITH_WORKTREE_PATH"] = worktreePath
+
+	switch agentName {
+	case "claude":
+		hookArgs, hookEnv, err := sm.injectClaudeHooks(id)
+		if err != nil {
+			sm.log.Warn("failed to inject hooks", "session_id", id, "err", err)
+		} else {
+			expandedArgs = append(expandedArgs, hookArgs...)
+			for k, v := range hookEnv {
+				env[k] = v
+			}
+		}
+	case "codex":
+		hookArgs, hookEnv, err := sm.injectCodexHooks(id)
+		if err != nil {
+			sm.log.Warn("failed to inject hooks", "session_id", id, "err", err)
+		} else {
+			expandedArgs = append(expandedArgs, hookArgs...)
+			for k, v := range hookEnv {
+				env[k] = v
+			}
+		}
+	}
+
+	sandboxed := source.Sandboxed
+	command := agent.Command
+	finalArgs := expandedArgs
+	if sandboxed {
+		merged := sm.cfg.Sandbox.Merge(sm.cfg.Agents[agentName].Sandbox)
+		cmd := merged.Command
+		if cmd == "" {
+			cmd = "safehouse"
+		}
+		if !sandbox.AvailableCommand(cmd) {
+			_ = git.TeardownSession(repoRoot, worktreePath, branchName)
+			return SessionState{}, fmt.Errorf("source session was sandboxed but %q is no longer available", cmd)
+		}
+		envKeys := []string{"GRAITH_SESSION_ID", "GRAITH_SESSION_NAME", "GRAITH_WORKTREE_PATH", "TERM"}
+		for k := range agent.Env {
+			envKeys = append(envKeys, k)
+		}
+		for k := range env {
+			envKeys = append(envKeys, k)
+		}
+		opts := sm.sandboxOpts(agentName, id, worktreePath, envKeys)
+		command, finalArgs = sandbox.Wrap(agent.Command, expandedArgs, opts)
+		sm.log.Info("sandboxing forked session", "id", id)
+	}
+
+	ptySess, err := grpty.NewSession(grpty.SessionOpts{
+		ID:         id,
+		Command:    command,
+		Args:       finalArgs,
+		Dir:        worktreePath,
+		Env:        env,
+		Rows:       rows,
+		Cols:       cols,
+		LogPath:    logPath,
+		MaxLogSize: 100 * 1024 * 1024,
+	})
+	if err != nil {
+		_ = git.TeardownSession(repoRoot, worktreePath, branchName)
+		return SessionState{}, fmt.Errorf("start pty session: %w", err)
+	}
+
+	sessState := &SessionState{
+		ID:             id,
+		Name:           name,
+		RepoPath:       repoRoot,
+		RepoName:       repoName,
+		WorktreePath:   worktreePath,
+		Branch:         branchName,
+		BaseBranch:     baseBranch,
+		Agent:          agentName,
+		AgentSessionID: agentSessionID,
+		Sandboxed:      sandboxed,
 		Status:         StatusRunning,
 		PID:            ptySess.Cmd.Process.Pid,
 		CreatedAt:      time.Now().UTC(),
@@ -332,6 +689,8 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 		return *sessState, nil
 	}
 
+	delete(sm.hookReports, id)
+
 	agent, ok := sm.cfg.Agents[sessState.Agent]
 	if !ok {
 		return SessionState{}, fmt.Errorf("unknown agent %q", sessState.Agent)
@@ -372,10 +731,56 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 	env["GRAITH_SESSION_NAME"] = sessState.Name
 	env["GRAITH_WORKTREE_PATH"] = sessState.WorktreePath
 
+	switch sessState.Agent {
+	case "claude":
+		hookArgs, hookEnv, err := sm.injectClaudeHooks(id)
+		if err != nil {
+			sm.log.Warn("failed to inject hooks", "session_id", id, "err", err)
+		} else {
+			expandedArgs = append(expandedArgs, hookArgs...)
+			for k, v := range hookEnv {
+				env[k] = v
+			}
+		}
+	case "codex":
+		hookArgs, hookEnv, err := sm.injectCodexHooks(id)
+		if err != nil {
+			sm.log.Warn("failed to inject hooks", "session_id", id, "err", err)
+		} else {
+			expandedArgs = append(expandedArgs, hookArgs...)
+			for k, v := range hookEnv {
+				env[k] = v
+			}
+		}
+	}
+
+	command := agent.Command
+	finalArgs := expandedArgs
+	if sessState.Sandboxed {
+		merged := sm.cfg.Sandbox.Merge(sm.cfg.Agents[sessState.Agent].Sandbox)
+		cmd := merged.Command
+		if cmd == "" {
+			cmd = "safehouse"
+		}
+		if !sandbox.AvailableCommand(cmd) {
+			return SessionState{}, fmt.Errorf("session was sandboxed but %q is no longer available — install safehouse or delete and recreate the session", cmd)
+		}
+		envKeys := []string{"GRAITH_SESSION_ID", "GRAITH_SESSION_NAME", "GRAITH_WORKTREE_PATH", "TERM"}
+		for k := range agent.Env {
+			envKeys = append(envKeys, k)
+		}
+		for k := range env {
+			envKeys = append(envKeys, k)
+		}
+		opts := sm.sandboxOpts(sessState.Agent, id, sessState.WorktreePath, envKeys)
+		command, finalArgs = sandbox.Wrap(agent.Command, expandedArgs, opts)
+		sm.log.Info("sandboxing resumed session", "id", id)
+	}
+
 	ptySess, err := grpty.NewSession(grpty.SessionOpts{
 		ID:         id,
-		Command:    agent.Command,
-		Args:       expandedArgs,
+		Command:    command,
+		Args:       finalArgs,
 		Dir:        sessState.WorktreePath,
 		Env:        env,
 		Rows:       rows,
@@ -427,8 +832,10 @@ func (sm *SessionManager) Delete(id string) error {
 	repoPath := sessState.RepoPath
 	worktreePath := sessState.WorktreePath
 	branch := sessState.Branch
+	shared := sessState.SharedWorktree
 
 	delete(sm.state.Sessions, id)
+	delete(sm.hookReports, id)
 	err := sm.saveState()
 	sm.mu.Unlock()
 
@@ -446,12 +853,17 @@ func (sm *SessionManager) Delete(id string) error {
 		ptySess.Close()
 	}
 
-	if repoPath != "" {
+	switch {
+	case shared:
+		scratchDir := filepath.Join(sm.paths.DataDir, "scratch", id)
+		_ = os.RemoveAll(scratchDir)
+	case repoPath != "":
 		_ = git.TeardownSession(repoPath, worktreePath, branch)
-	} else if worktreePath != "" {
+	case worktreePath != "":
 		_ = os.RemoveAll(worktreePath)
 	}
 	_ = os.Remove(filepath.Join(sm.paths.LogDir, id+".log"))
+	sm.cleanupHooks(id)
 
 	if hasClient {
 		ac.kick()
@@ -506,6 +918,32 @@ func (sm *SessionManager) List() []SessionState {
 		list = append(list, *s)
 	}
 	return list
+}
+
+func (sm *SessionManager) fleetSummary() protocol.FleetSummary {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	var f protocol.FleetSummary
+	for _, s := range sm.state.Sessions {
+		f.Total++
+		switch s.Status {
+		case StatusRunning:
+			switch s.AgentStatus {
+			case "approval":
+				f.Approval++
+			case "ready":
+				f.Ready++
+			default:
+				f.Active++
+			}
+		case StatusStopped:
+			f.Stopped++
+		case StatusErrored:
+			f.Errored++
+		}
+	}
+	return f
 }
 
 // Get returns a copy of a session state by ID.
@@ -657,18 +1095,34 @@ func (sm *SessionManager) detectAgentStatuses() {
 	var toAutoStop []string
 
 	for _, t := range targets {
-		content := t.pty.ScreenPreview()
-		if content == "" {
-			continue
-		}
+		var status string
 
-		outputAge := detector.OutputAgeUnknown
-		if lastOut := t.pty.LastOutputAt(); !lastOut.IsZero() {
-			outputAge = time.Since(lastOut)
-		}
+		// Check if we have an authoritative hook report for this session
+		sm.mu.RLock()
+		hr, hasHook := sm.hookReports[t.id]
+		sm.mu.RUnlock()
 
-		d := detector.New(t.agent)
-		status := string(d.Detect(content, outputAge))
+		if hasHook && time.Now().Before(hr.AuthoritativeUntil) {
+			status = hr.Status
+		} else {
+			// Fall back to PTY scraping
+			content := t.pty.ScreenPreview()
+			if content == "" {
+				continue
+			}
+
+			outputAge := detector.OutputAgeUnknown
+			if lastOut := t.pty.LastOutputAt(); !lastOut.IsZero() {
+				outputAge = time.Since(lastOut)
+			}
+
+			d := detector.New(t.agent)
+			status = string(d.Detect(content, outputAge))
+
+			if status == string(detector.StatusUnknown) && t.prevStatus != "" && t.pty.RecentlyAdopted(60*time.Second) {
+				status = t.prevStatus
+			}
+		}
 
 		var dirty bool
 		var unpushed int
@@ -801,6 +1255,104 @@ func (sm *SessionManager) applyConfig(newCfg *config.Config) {
 	}
 }
 
+func (sm *SessionManager) resolveSandbox(agentName string) (bool, error) {
+	merged := sm.cfg.Sandbox.Merge(sm.cfg.Agents[agentName].Sandbox)
+	if !merged.Enabled {
+		return false, nil
+	}
+	cmd := merged.Command
+	if cmd == "" {
+		cmd = "safehouse"
+	}
+	if !sandbox.AvailableCommand(cmd) {
+		return false, fmt.Errorf("sandbox enabled for agent %q but %q is not available — install safehouse or disable sandbox in config", agentName, cmd)
+	}
+	return true, nil
+}
+
+func (sm *SessionManager) sandboxOpts(agentName, sessionID, worktreePath string, envKeys []string) sandbox.WrapOpts {
+	merged := sm.cfg.Sandbox.Merge(sm.cfg.Agents[agentName].Sandbox)
+
+	readDirs := expandPaths(merged.ReadDirs)
+	writeDirs := expandPaths(merged.WriteDirs)
+
+	// The daemon injects hook scripts that call `gr report-status`.
+	// That needs: the hooks dir itself, the config dir (to find the
+	// socket path), and the runtime dir (to connect to it).
+	readDirs = append(readDirs, sm.hookDir(sessionID))
+	readDirs = append(readDirs, filepath.Dir(sm.paths.ConfigFile))
+	if grBin := resolveGrBin(); grBin != "gr" {
+		readDirs = append(readDirs, filepath.Dir(grBin))
+	}
+	readDirs = append(readDirs, sm.paths.RuntimeDir)
+
+	// Agents need read/write access to their own config and data directories
+	// (e.g. ~/.claude, ~/.local/share/claude for Claude Code).
+	home, _ := os.UserHomeDir()
+	switch agentName {
+	case "claude":
+		readDirs = append(readDirs, filepath.Join(home, ".claude"))
+		writeDirs = append(writeDirs, filepath.Join(home, ".local", "share", "claude"))
+	case "codex":
+		readDirs = append(readDirs, filepath.Join(home, ".codex"))
+	}
+
+	return sandbox.WrapOpts{
+		WorktreeDir:      worktreePath,
+		ReadDirs:         readDirs,
+		WriteDirs:        writeDirs,
+		Features:         merged.Features,
+		EnvKeys:          envKeys,
+		SafehouseCommand: merged.Command,
+	}
+}
+
+func expandPaths(paths []string) []string {
+	if len(paths) == 0 {
+		return nil
+	}
+	out := make([]string, len(paths))
+	for i, p := range paths {
+		out[i] = config.ExpandPath(p)
+	}
+	return out
+}
+
+// cleanupLegacyDaemon stops an old daemon that may be listening on the
+// pre-v0.11 socket path ($TMPDIR or /tmp). Without this, upgrading would
+// leave an orphaned daemon since the new CLI can't reach the old socket.
+func cleanupLegacyDaemon(log *slog.Logger) {
+	for _, dir := range config.LegacyRuntimeDirs() {
+		sock := filepath.Join(dir, "graith.sock")
+		pid := filepath.Join(dir, "graith.pid")
+
+		if _, err := os.Stat(sock); err != nil {
+			continue
+		}
+
+		conn, err := net.DialTimeout("unix", sock, 500*time.Millisecond)
+		if err != nil {
+			os.Remove(sock)
+			os.Remove(pid)
+			log.Info("removed stale legacy socket", "path", sock)
+			continue
+		}
+		conn.Close()
+
+		data, err := os.ReadFile(pid)
+		if err == nil {
+			var legacyPID int
+			if _, err := fmt.Sscanf(string(data), "%d", &legacyPID); err == nil && legacyPID > 0 {
+				log.Info("stopping legacy daemon", "pid", legacyPID, "socket", sock)
+				_ = syscall.Kill(legacyPID, syscall.SIGTERM)
+			}
+		}
+
+		os.Remove(sock)
+		os.Remove(pid)
+	}
+}
+
 // Run starts the daemon: acquires PID file, listens on the Unix socket,
 // serves connections, and blocks until SIGTERM/SIGINT or an upgrade signal.
 func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) error {
@@ -851,6 +1403,8 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 
 		log.Info("daemon upgraded", "adopted_sessions", len(manifest.Sessions), "pid", os.Getpid())
 	} else {
+		cleanupLegacyDaemon(log)
+
 		if err := AcquirePIDFile(paths.PIDFile); err != nil {
 			return err
 		}

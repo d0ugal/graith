@@ -11,13 +11,14 @@ import (
 )
 
 var (
-	newAgent      string
-	newBase       string
-	newBackground bool
-	newPrompt     string
-	newPromptFile string
-	newRepo       string
-	newNoRepo     bool
+	newAgent         string
+	newBase          string
+	newBackground    bool
+	newPrompt        string
+	newPromptFile    string
+	newRepo          string
+	newNoRepo        bool
+	newShareWorktree string
 )
 
 var newCmd = &cobra.Command{
@@ -55,12 +56,13 @@ var newCmd = &cobra.Command{
 		defer c.Close()
 
 		c.SendControl("create", protocol.CreateMsg{
-			Name:     name,
-			Agent:    agent,
-			RepoPath: repoPath,
-			Base:     newBase,
-			Prompt:   prompt,
-			NoRepo:   newNoRepo,
+			Name:          name,
+			Agent:         agent,
+			RepoPath:      repoPath,
+			Base:          newBase,
+			Prompt:        prompt,
+			NoRepo:        newNoRepo,
+			ShareWorktree: newShareWorktree,
 		})
 
 		resp, err := c.ReadControlResponse()
@@ -104,8 +106,9 @@ func init() {
 	newCmd.Flags().StringVar(&newPromptFile, "prompt-file", "", "read initial prompt from file")
 	newCmd.Flags().StringVarP(&newRepo, "repo", "C", "", "path to git repo (default: cwd)")
 	newCmd.Flags().BoolVar(&newNoRepo, "no-repo", false, "create session without a git repo or worktree")
-
+	newCmd.Flags().StringVar(&newShareWorktree, "share-worktree", "", "share another session's worktree (read-only)")
 	newCmd.RegisterFlagCompletionFunc("agent", completeAgentNames)
 	newCmd.RegisterFlagCompletionFunc("repo", completeRepoPaths)
 	newCmd.RegisterFlagCompletionFunc("base", completeBranchNames)
+	newCmd.RegisterFlagCompletionFunc("share-worktree", completeSessionNames)
 }

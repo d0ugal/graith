@@ -209,3 +209,176 @@ idle_timeout = "0"
 		t.Errorf("codex idle timeout = %v, want 0", got)
 	}
 }
+
+func TestLoadConfigSandbox(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	toml := `
+[sandbox]
+enabled = true
+features = ["ssh", "process-control"]
+read_dirs = ["~/Code"]
+
+[agents.claude]
+command = "claude"
+
+[agents.claude.sandbox]
+features = ["clipboard"]
+`
+	os.WriteFile(cfgPath, []byte(toml), 0o644)
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Sandbox.Enabled {
+		t.Error("Sandbox.Enabled = false, want true")
+	}
+	if len(cfg.Sandbox.Features) != 2 || cfg.Sandbox.Features[0] != "ssh" {
+		t.Errorf("Sandbox.Features = %v, want [ssh process-control]", cfg.Sandbox.Features)
+	}
+	if len(cfg.Sandbox.ReadDirs) != 1 || cfg.Sandbox.ReadDirs[0] != "~/Code" {
+		t.Errorf("Sandbox.ReadDirs = %v, want [~/Code]", cfg.Sandbox.ReadDirs)
+	}
+	claude := cfg.Agents["claude"]
+	if len(claude.Sandbox.Features) != 1 || claude.Sandbox.Features[0] != "clipboard" {
+		t.Errorf("claude.Sandbox.Features = %v, want [clipboard]", claude.Sandbox.Features)
+	}
+}
+
+func TestSandboxConfigMerge(t *testing.T) {
+	global := SandboxConfig{
+		Enabled:  true,
+		Features: []string{"ssh", "process-control"},
+		ReadDirs: []string{"~/Code"},
+	}
+	agent := SandboxConfig{
+		Features:  []string{"clipboard"},
+		WriteDirs: []string{"~/.claude"},
+	}
+
+	merged := global.Merge(agent)
+
+	if !merged.Enabled {
+		t.Error("merged.Enabled = false, want true")
+	}
+	wantFeatures := []string{"ssh", "process-control", "clipboard"}
+	if len(merged.Features) != 3 {
+		t.Fatalf("merged.Features = %v, want %v", merged.Features, wantFeatures)
+	}
+	for i, f := range wantFeatures {
+		if merged.Features[i] != f {
+			t.Errorf("merged.Features[%d] = %q, want %q", i, merged.Features[i], f)
+		}
+	}
+	if len(merged.ReadDirs) != 1 || merged.ReadDirs[0] != "~/Code" {
+		t.Errorf("merged.ReadDirs = %v, want [~/Code]", merged.ReadDirs)
+	}
+	if len(merged.WriteDirs) != 1 || merged.WriteDirs[0] != "~/.claude" {
+		t.Errorf("merged.WriteDirs = %v, want [~/.claude]", merged.WriteDirs)
+	}
+}
+
+func TestSandboxConfigMergeAgentDisabled(t *testing.T) {
+	global := SandboxConfig{Enabled: true}
+	disabled := true
+	agent := SandboxConfig{Disabled: &disabled}
+
+	merged := global.Merge(agent)
+
+	if merged.Enabled {
+		t.Error("merged.Enabled = true, want false (agent disabled)")
+	}
+}
+
+func TestSandboxConfigMergeAgentEnabled(t *testing.T) {
+	global := SandboxConfig{Enabled: false}
+	agent := SandboxConfig{Enabled: true, Features: []string{"ssh"}}
+
+	merged := global.Merge(agent)
+
+	if !merged.Enabled {
+		t.Error("merged.Enabled = false, want true (agent enabled)")
+	}
+	if len(merged.Features) != 1 || merged.Features[0] != "ssh" {
+		t.Errorf("merged.Features = %v, want [ssh]", merged.Features)
+	}
+}
+
+func TestExpandPath(t *testing.T) {
+	home, _ := os.UserHomeDir()
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"~/Code", filepath.Join(home, "Code")},
+		{"/absolute/path", "/absolute/path"},
+		{"~/", home},
+	}
+	for _, tt := range tests {
+		got := ExpandPath(tt.input)
+		if got != tt.want {
+			t.Errorf("ExpandPath(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestRepoPathAllowed(t *testing.T) {
+	home, _ := os.UserHomeDir()
+
+	t.Run("empty allows all", func(t *testing.T) {
+		cfg := &Config{}
+		if !cfg.RepoPathAllowed("/any/path") {
+			t.Error("empty AllowedRepoPaths should allow all")
+		}
+	})
+
+	t.Run("exact match", func(t *testing.T) {
+		cfg := &Config{AllowedRepoPaths: []string{"~/Code"}}
+		if !cfg.RepoPathAllowed(filepath.Join(home, "Code")) {
+			t.Error("exact match should be allowed")
+		}
+	})
+
+	t.Run("subdir allowed", func(t *testing.T) {
+		cfg := &Config{AllowedRepoPaths: []string{"~/Code"}}
+		if !cfg.RepoPathAllowed(filepath.Join(home, "Code/graith")) {
+			t.Error("subdir should be allowed")
+		}
+	})
+
+	t.Run("outside denied", func(t *testing.T) {
+		cfg := &Config{AllowedRepoPaths: []string{"~/Code"}}
+		if cfg.RepoPathAllowed("/tmp/evil-repo") {
+			t.Error("path outside allowed dirs should be denied")
+		}
+	})
+
+	t.Run("prefix trick denied", func(t *testing.T) {
+		cfg := &Config{AllowedRepoPaths: []string{"~/Code"}}
+		if cfg.RepoPathAllowed(filepath.Join(home, "Code-evil")) {
+			t.Error("prefix without separator should be denied")
+		}
+	})
+}
+
+func TestSandboxConfigMergeDeduplicatesFeatures(t *testing.T) {
+	global := SandboxConfig{
+		Enabled:  true,
+		Features: []string{"ssh", "docker"},
+	}
+	agent := SandboxConfig{
+		Features: []string{"ssh", "clipboard"},
+	}
+
+	merged := global.Merge(agent)
+
+	want := []string{"ssh", "docker", "clipboard"}
+	if len(merged.Features) != 3 {
+		t.Fatalf("merged.Features = %v, want %v", merged.Features, want)
+	}
+	for i, f := range want {
+		if merged.Features[i] != f {
+			t.Errorf("merged.Features[%d] = %q, want %q", i, merged.Features[i], f)
+		}
+	}
+}

@@ -35,3 +35,5 @@ brews:
     license: MIT
     install: |
       bin.install "gr"
+    post_install: |
+      system bin/"gr", "daemon", "restart"

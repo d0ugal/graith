@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/protocol"
 )
 
 func newTestSessionManager(t *testing.T) *SessionManager {
@@ -99,6 +100,9 @@ func TestNewSessionManager(t *testing.T) {
 	}
 	if sm.attachedClients == nil {
 		t.Fatal("attachedClients map is nil")
+	}
+	if sm.hookReports == nil {
+		t.Fatal("hookReports map is nil")
 	}
 	if sm.cfg != cfg {
 		t.Error("cfg not set correctly")
@@ -307,7 +311,7 @@ func TestKickAttachedClient(t *testing.T) {
 
 		kicked := false
 		mockConn := &net.UnixConn{}
-		sm.SetAttachedClient("sess1", mockConn, func() { kicked = true })
+		sm.SetAttachedClient("sess1", mockConn, func() { kicked = true }, nil)
 
 		sm.KickAttachedClient("sess1")
 
@@ -337,7 +341,7 @@ func TestSetAndClearAttachedClient(t *testing.T) {
 		sm := newTestSessionManager(t)
 
 		conn := &net.UnixConn{}
-		sm.SetAttachedClient("sess1", conn, func() {})
+		sm.SetAttachedClient("sess1", conn, func() {}, nil)
 
 		// Verify it was set
 		sm.mu.RLock()
@@ -363,7 +367,7 @@ func TestSetAndClearAttachedClient(t *testing.T) {
 
 		conn1 := &net.UnixConn{}
 		conn2 := &net.UnixConn{}
-		sm.SetAttachedClient("sess1", conn1, func() {})
+		sm.SetAttachedClient("sess1", conn1, func() {}, nil)
 
 		// Try to clear with a different conn
 		sm.ClearAttachedClient("sess1", conn2)
@@ -389,19 +393,25 @@ func TestSetAndClearAttachedClient(t *testing.T) {
 func TestToSessionInfo(t *testing.T) {
 	exitCode := 42
 	createdAt := time.Date(2025, 1, 15, 10, 30, 0, 0, time.UTC)
+	cost := 0.12
+	ctxPct := 55.5
 
 	sess := SessionState{
-		ID:             "abc123",
-		Name:           "fix-bug",
-		RepoPath:       "/home/user/repo",
-		RepoName:       "repo",
-		WorktreePath:   "/home/user/.local/share/graith/worktrees/abc123",
-		Branch:         "user/graith/fix-bug-abc123",
-		Agent:          "claude",
-		AgentSessionID: "session-id-123",
-		Status:         StatusStopped,
-		ExitCode:       &exitCode,
-		CreatedAt:      createdAt,
+		ID:                 "abc123",
+		Name:               "fix-bug",
+		RepoPath:           "/home/user/repo",
+		RepoName:           "repo",
+		WorktreePath:       "/home/user/.local/share/graith/worktrees/abc123",
+		Branch:             "user/graith/fix-bug-abc123",
+		Agent:              "claude",
+		AgentSessionID:     "session-id-123",
+		Status:             StatusStopped,
+		ExitCode:           &exitCode,
+		CreatedAt:          createdAt,
+		HookModel:          "claude-sonnet-4-5-20250514",
+		HookToolName:       "Bash",
+		HookCostUSD:        &cost,
+		HookContextPercent: &ctxPct,
 	}
 
 	info := toSessionInfo(sess)
@@ -439,6 +449,18 @@ func TestToSessionInfo(t *testing.T) {
 	wantCreatedAt := createdAt.Format(time.RFC3339)
 	if info.CreatedAt != wantCreatedAt {
 		t.Errorf("CreatedAt = %q, want %q", info.CreatedAt, wantCreatedAt)
+	}
+	if info.Model != "claude-sonnet-4-5-20250514" {
+		t.Errorf("Model = %q, want %q", info.Model, "claude-sonnet-4-5-20250514")
+	}
+	if info.ToolName != "Bash" {
+		t.Errorf("ToolName = %q, want %q", info.ToolName, "Bash")
+	}
+	if info.CostUSD == nil || *info.CostUSD != 0.12 {
+		t.Errorf("CostUSD = %v, want 0.12", info.CostUSD)
+	}
+	if info.ContextPercent == nil || *info.ContextPercent != 55.5 {
+		t.Errorf("ContextPercent = %v, want 55.5", info.ContextPercent)
 	}
 }
 
@@ -485,7 +507,7 @@ func TestIdleTracking(t *testing.T) {
 			Agent: "claude", AgentStatus: "ready", IdleSince: &now,
 		}
 		sm.state.Sessions["s1"] = s
-		sm.SetAttachedClient("s1", &net.UnixConn{}, func() {})
+		sm.SetAttachedClient("s1", &net.UnixConn{}, func() {}, nil)
 
 		sm.checkIdleSession(s)
 
@@ -592,6 +614,333 @@ func TestIdleTracking(t *testing.T) {
 	})
 }
 
+func TestHandleHookReport(t *testing.T) {
+	t.Run("active event", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.state.Sessions["sess1"] = &SessionState{
+			ID: "sess1", Name: "test", Status: StatusRunning,
+		}
+
+		sm.HandleHookReport(protocol.StatusReportMsg{
+			SessionID: "sess1",
+			Event:     "PreToolUse",
+			ToolName:  "Bash",
+		})
+
+		sm.mu.RLock()
+		report, ok := sm.hookReports["sess1"]
+		sm.mu.RUnlock()
+
+		if !ok {
+			t.Fatal("hookReport not found for sess1")
+		}
+		if report.Status != "active" {
+			t.Errorf("Status = %q, want %q", report.Status, "active")
+		}
+		if report.Event != "PreToolUse" {
+			t.Errorf("Event = %q, want %q", report.Event, "PreToolUse")
+		}
+		// AuthoritativeUntil should be ~30s in the future
+		untilDelta := time.Until(report.AuthoritativeUntil)
+		if untilDelta < 29*time.Second || untilDelta > 31*time.Second {
+			t.Errorf("AuthoritativeUntil delta = %v, want ~30s", untilDelta)
+		}
+	})
+
+	t.Run("approval event", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.state.Sessions["sess1"] = &SessionState{
+			ID: "sess1", Name: "test", Status: StatusRunning,
+		}
+
+		sm.HandleHookReport(protocol.StatusReportMsg{
+			SessionID: "sess1",
+			Event:     "Notification",
+		})
+
+		sm.mu.RLock()
+		report, ok := sm.hookReports["sess1"]
+		sm.mu.RUnlock()
+
+		if !ok {
+			t.Fatal("hookReport not found for sess1")
+		}
+		if report.Status != "approval" {
+			t.Errorf("Status = %q, want %q", report.Status, "approval")
+		}
+		// AuthoritativeUntil should be ~30 minutes in the future (sticky)
+		untilDelta := time.Until(report.AuthoritativeUntil)
+		if untilDelta < 29*time.Minute || untilDelta > 31*time.Minute {
+			t.Errorf("AuthoritativeUntil delta = %v, want ~30m", untilDelta)
+		}
+	})
+
+	t.Run("ready event", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.state.Sessions["sess1"] = &SessionState{
+			ID: "sess1", Name: "test", Status: StatusRunning,
+		}
+
+		sm.HandleHookReport(protocol.StatusReportMsg{
+			SessionID: "sess1",
+			Event:     "Stop",
+		})
+
+		sm.mu.RLock()
+		report, ok := sm.hookReports["sess1"]
+		sm.mu.RUnlock()
+
+		if !ok {
+			t.Fatal("hookReport not found for sess1")
+		}
+		if report.Status != "ready" {
+			t.Errorf("Status = %q, want %q", report.Status, "ready")
+		}
+	})
+
+	t.Run("unknown session", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+
+		// Should not panic
+		sm.HandleHookReport(protocol.StatusReportMsg{
+			SessionID: "nonexistent",
+			Event:     "PreToolUse",
+		})
+
+		sm.mu.RLock()
+		_, ok := sm.hookReports["nonexistent"]
+		sm.mu.RUnlock()
+
+		if ok {
+			t.Error("hookReport should not be created for unknown session")
+		}
+	})
+
+	t.Run("unknown event", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.state.Sessions["sess1"] = &SessionState{
+			ID: "sess1", Name: "test", Status: StatusRunning,
+		}
+
+		sm.HandleHookReport(protocol.StatusReportMsg{
+			SessionID: "sess1",
+			Event:     "SomeFutureEvent",
+		})
+
+		sm.mu.RLock()
+		_, ok := sm.hookReports["sess1"]
+		sm.mu.RUnlock()
+
+		if ok {
+			t.Error("hookReport should not be created for unknown event")
+		}
+	})
+
+	t.Run("status change updates AgentStatus", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.state.Sessions["sess1"] = &SessionState{
+			ID: "sess1", Name: "test", Status: StatusRunning,
+			AgentStatus: "active",
+		}
+
+		sm.HandleHookReport(protocol.StatusReportMsg{
+			SessionID: "sess1",
+			Event:     "Stop",
+		})
+
+		sm.mu.RLock()
+		sess := sm.state.Sessions["sess1"]
+		agentStatus := sess.AgentStatus
+		sm.mu.RUnlock()
+
+		if agentStatus != "ready" {
+			t.Errorf("AgentStatus = %q, want %q", agentStatus, "ready")
+		}
+	})
+
+	t.Run("tool name stored", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.state.Sessions["sess1"] = &SessionState{
+			ID: "sess1", Name: "test", Status: StatusRunning,
+		}
+
+		sm.HandleHookReport(protocol.StatusReportMsg{
+			SessionID: "sess1",
+			Event:     "PreToolUse",
+			ToolName:  "Bash",
+		})
+
+		sm.mu.RLock()
+		report, ok := sm.hookReports["sess1"]
+		sess := sm.state.Sessions["sess1"]
+		sm.mu.RUnlock()
+
+		if !ok {
+			t.Fatal("hookReport not found for sess1")
+		}
+		if report.ToolName != "Bash" {
+			t.Errorf("ToolName = %q, want %q", report.ToolName, "Bash")
+		}
+		if sess.HookToolName != "Bash" {
+			t.Errorf("sess.HookToolName = %q, want %q", sess.HookToolName, "Bash")
+		}
+	})
+
+	t.Run("enrichment data accumulated", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.state.Sessions["s1"] = &SessionState{
+			ID: "s1", Name: "test", Status: StatusRunning, Agent: "claude",
+		}
+
+		cost := 0.05
+		sm.HandleHookReport(protocol.StatusReportMsg{
+			SessionID: "s1",
+			Event:     "Stop",
+			Model:     "claude-sonnet-4-5-20250514",
+			Usage:     &protocol.UsageReport{CostUSD: &cost},
+		})
+
+		sm.mu.RLock()
+		hr := sm.hookReports["s1"]
+		sess := sm.state.Sessions["s1"]
+		sm.mu.RUnlock()
+
+		if hr.Model != "claude-sonnet-4-5-20250514" {
+			t.Errorf("Model = %q, want %q", hr.Model, "claude-sonnet-4-5-20250514")
+		}
+		if hr.CostUSD == nil || *hr.CostUSD != 0.05 {
+			t.Errorf("CostUSD = %v, want 0.05", hr.CostUSD)
+		}
+		if sess.HookModel != "claude-sonnet-4-5-20250514" {
+			t.Errorf("sess.HookModel = %q, want %q", sess.HookModel, "claude-sonnet-4-5-20250514")
+		}
+		if sess.HookCostUSD == nil || *sess.HookCostUSD != 0.05 {
+			t.Errorf("sess.HookCostUSD = %v, want 0.05", sess.HookCostUSD)
+		}
+
+		// Send another event without cost — cost should be preserved
+		sm.HandleHookReport(protocol.StatusReportMsg{
+			SessionID: "s1",
+			Event:     "PreToolUse",
+			ToolName:  "Bash",
+		})
+
+		sm.mu.RLock()
+		hr2 := sm.hookReports["s1"]
+		sess2 := sm.state.Sessions["s1"]
+		sm.mu.RUnlock()
+
+		if hr2.CostUSD == nil || *hr2.CostUSD != 0.05 {
+			t.Errorf("CostUSD should be preserved, got %v", hr2.CostUSD)
+		}
+		if hr2.Model != "claude-sonnet-4-5-20250514" {
+			t.Errorf("Model should be preserved, got %q", hr2.Model)
+		}
+		if sess2.HookCostUSD == nil || *sess2.HookCostUSD != 0.05 {
+			t.Errorf("sess.HookCostUSD should be preserved, got %v", sess2.HookCostUSD)
+		}
+		if sess2.HookModel != "claude-sonnet-4-5-20250514" {
+			t.Errorf("sess.HookModel should be preserved, got %q", sess2.HookModel)
+		}
+	})
+
+	t.Run("context percent accumulated", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.state.Sessions["s1"] = &SessionState{
+			ID: "s1", Name: "test", Status: StatusRunning, Agent: "claude",
+		}
+
+		pct := 42.5
+		sm.HandleHookReport(protocol.StatusReportMsg{
+			SessionID: "s1",
+			Event:     "PostToolUse",
+			Context:   &protocol.ContextReport{Percent: &pct},
+		})
+
+		sm.mu.RLock()
+		hr := sm.hookReports["s1"]
+		sess := sm.state.Sessions["s1"]
+		sm.mu.RUnlock()
+
+		if hr.ContextPercent == nil || *hr.ContextPercent != 42.5 {
+			t.Errorf("ContextPercent = %v, want 42.5", hr.ContextPercent)
+		}
+		if sess.HookContextPercent == nil || *sess.HookContextPercent != 42.5 {
+			t.Errorf("sess.HookContextPercent = %v, want 42.5", sess.HookContextPercent)
+		}
+
+		// Send another event without context — should be preserved
+		sm.HandleHookReport(protocol.StatusReportMsg{
+			SessionID: "s1",
+			Event:     "PreToolUse",
+			ToolName:  "Read",
+		})
+
+		sm.mu.RLock()
+		hr2 := sm.hookReports["s1"]
+		sm.mu.RUnlock()
+
+		if hr2.ContextPercent == nil || *hr2.ContextPercent != 42.5 {
+			t.Errorf("ContextPercent should be preserved, got %v", hr2.ContextPercent)
+		}
+	})
+}
+
+func TestDetectAgentStatusesHookAuthority(t *testing.T) {
+	// Test that a valid hook report takes precedence over scraping.
+	// We can't easily test the full detectAgentStatuses (needs real PTY),
+	// but we can test the hookReports lookup logic directly.
+
+	sm := newTestSessionManager(t)
+
+	t.Run("authoritative hook is trusted", func(t *testing.T) {
+		sm.mu.Lock()
+		sm.hookReports["s1"] = hookReport{
+			Status:             "approval",
+			Event:              "Notification",
+			ReportedAt:         time.Now(),
+			AuthoritativeUntil: time.Now().Add(30 * time.Minute),
+		}
+		sm.mu.Unlock()
+
+		sm.mu.RLock()
+		hr, ok := sm.hookReports["s1"]
+		sm.mu.RUnlock()
+
+		if !ok {
+			t.Fatal("hookReport not found")
+		}
+		if hr.Status != "approval" {
+			t.Errorf("Status = %q, want %q", hr.Status, "approval")
+		}
+		if !time.Now().Before(hr.AuthoritativeUntil) {
+			t.Error("hook should still be authoritative")
+		}
+	})
+
+	t.Run("expired hook falls through", func(t *testing.T) {
+		sm.mu.Lock()
+		sm.hookReports["s2"] = hookReport{
+			Status:             "active",
+			Event:              "PreToolUse",
+			ReportedAt:         time.Now().Add(-1 * time.Minute),
+			AuthoritativeUntil: time.Now().Add(-30 * time.Second),
+		}
+		sm.mu.Unlock()
+
+		sm.mu.RLock()
+		hr, ok := sm.hookReports["s2"]
+		sm.mu.RUnlock()
+
+		if !ok {
+			t.Fatal("hookReport not found")
+		}
+		if time.Now().Before(hr.AuthoritativeUntil) {
+			t.Error("hook should be expired")
+		}
+	})
+}
+
 func TestApplyConfig(t *testing.T) {
 	sm := newTestSessionManager(t)
 	oldCfg := sm.cfg
@@ -654,5 +1003,92 @@ func TestReloadConfigInvalidFile(t *testing.T) {
 	err := sm.ReloadConfig()
 	if err == nil {
 		t.Fatal("expected error for invalid config file")
+	}
+}
+
+func TestToSessionInfoSharedWorktree(t *testing.T) {
+	sess := SessionState{
+		ID:             "abc123",
+		Name:           "reviewer",
+		WorktreePath:   "/shared/path",
+		Agent:          "claude",
+		Status:         StatusRunning,
+		SharedWorktree: true,
+		CreatedAt:      time.Now().UTC(),
+	}
+
+	info := toSessionInfo(sess)
+
+	if !info.SharedWorktree {
+		t.Error("SharedWorktree = false, want true")
+	}
+
+	sess.SharedWorktree = false
+	info = toSessionInfo(sess)
+	if info.SharedWorktree {
+		t.Error("SharedWorktree = true, want false")
+	}
+}
+
+func TestDeleteSharedWorktreeSkipsGitTeardown(t *testing.T) {
+	tmpDir := t.TempDir()
+	sm := NewSessionManager(config.Default(), config.Paths{
+		StateFile: filepath.Join(tmpDir, "state.json"),
+		DataDir:   tmpDir,
+		LogDir:    tmpDir,
+	}, slog.Default())
+
+	scratchDir := filepath.Join(tmpDir, "scratch", "shared1")
+	if err := os.MkdirAll(scratchDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	sm.state.Sessions["shared1"] = &SessionState{
+		ID:             "shared1",
+		Name:           "reviewer",
+		RepoPath:       "/does/not/exist/repo",
+		WorktreePath:   "/does/not/exist/worktree",
+		Branch:         "some-branch",
+		SharedWorktree: true,
+		Status:         StatusStopped,
+	}
+
+	if err := sm.Delete("shared1"); err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+
+	if _, ok := sm.state.Sessions["shared1"]; ok {
+		t.Error("session should be removed from state after delete")
+	}
+
+	if _, err := os.Stat(scratchDir); !os.IsNotExist(err) {
+		t.Error("scratch dir should be cleaned up after delete")
+	}
+}
+
+func TestStateSaveLoadSharedWorktree(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	state := &State{
+		Sessions: map[string]*SessionState{
+			"s1": {
+				ID: "s1", Name: "reviewer", WorktreePath: "/shared/path",
+				Agent: "claude", Status: StatusRunning,
+				SharedWorktree: true, CreatedAt: time.Now().UTC(),
+			},
+		},
+	}
+	if err := SaveState(path, state); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, ok := loaded.Sessions["s1"]
+	if !ok {
+		t.Fatal("session not found after load")
+	}
+	if !s.SharedWorktree {
+		t.Error("SharedWorktree not preserved across save/load")
 	}
 }

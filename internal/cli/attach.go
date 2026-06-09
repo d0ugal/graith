@@ -54,7 +54,7 @@ func runAttach(cmd *cobra.Command, name string) error {
 	}
 
 	if name == "" {
-		result := client.RunOverlay(list.Sessions, previewFetcher())
+		result := client.RunOverlay(list.Sessions, "", previewFetcher())
 		if result == nil {
 			return nil
 		}
@@ -62,6 +62,18 @@ func runAttach(cmd *cobra.Command, name string) error {
 			c.SendControl("delete", protocol.DeleteMsg{SessionID: result.SessionID})
 			c.ReadControlResponse()
 			return nil
+		}
+		if result.Action == "restart" {
+			c.SendControl("resume", protocol.ResumeMsg{SessionID: result.SessionID})
+			resumeResp, err := c.ReadControlResponse()
+			if err != nil {
+				return err
+			}
+			if resumeResp.Type == "error" {
+				var e protocol.ErrorMsg
+				protocol.DecodePayload(resumeResp, &e)
+				return fmt.Errorf("restart failed: %s", e.Message)
+			}
 		}
 		return runAttachByID(c, result.SessionID)
 	}
@@ -112,7 +124,12 @@ func runAttachByID(c *client.Client, sessionID string) error {
 		Prefix:      parsePrefixKey(cfg.Keybindings.Prefix),
 		NextSession: parseKeyByte(cfg.Keybindings.NextSession),
 		PrevSession: parseKeyByte(cfg.Keybindings.PrevSession),
+		LastSession: parseKeyByte(cfg.Keybindings.LastSession),
+		NewSession:  parseKeyByte(cfg.Keybindings.NewSession),
+		ForkSession: parseKeyByte(cfg.Keybindings.ForkSession),
 	}
+
+	prevSessionID := ""
 
 	opts := client.PassthroughOpts{
 		Keys:      keys,
@@ -124,6 +141,7 @@ func runAttachByID(c *client.Client, sessionID string) error {
 			Position: cfg.StatusBar.Position,
 		}
 	}
+	opts.AutoPopApproval = cfg.Approvals.AutoPop
 
 	for {
 		result := c.RunPassthrough(ctx, opts)
@@ -146,7 +164,7 @@ func runAttachByID(c *client.Client, sessionID string) error {
 			var list protocol.SessionListMsg
 			protocol.DecodePayload(listResp, &list)
 
-			overlayResult := client.RunOverlay(list.Sessions, previewFetcher())
+			overlayResult := client.RunOverlay(list.Sessions, sessionID, previewFetcher())
 			if overlayResult == nil {
 				restoreScreen(sessionID)
 				nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
@@ -169,10 +187,28 @@ func runAttachByID(c *client.Client, sessionID string) error {
 				c = nc
 				continue
 			}
+			if overlayResult.Action == "restart" {
+				nc.SendControl("resume", protocol.ResumeMsg{SessionID: overlayResult.SessionID})
+				resumeResp, _ := nc.ReadControlResponse()
+				if resumeResp.Type == "error" {
+					var e protocol.ErrorMsg
+					protocol.DecodePayload(resumeResp, &e)
+					out.Print("Restart failed: %s\n", e.Message)
+					restoreScreen(sessionID)
+					nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+					attachResp, _ := nc.ReadControlResponse()
+					protocol.DecodePayload(attachResp, &info)
+					opts.SessionID = sessionID
+					opts.Info = &info
+					c = nc
+					continue
+				}
+			}
 			restoreScreen(overlayResult.SessionID)
 			nc.SendControl("attach", protocol.AttachMsg{SessionID: overlayResult.SessionID})
 			attachResp, _ := nc.ReadControlResponse()
 			protocol.DecodePayload(attachResp, &info)
+			prevSessionID = sessionID
 			sessionID = overlayResult.SessionID
 			opts.SessionID = sessionID
 			opts.Info = &info
@@ -241,6 +277,33 @@ func runAttachByID(c *client.Client, sessionID string) error {
 			c = nc
 			continue
 
+		case client.ResultLastSession:
+			if prevSessionID == "" {
+				nc, err := freshClient()
+				if err != nil {
+					return err
+				}
+				nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+				attachResp, _ := nc.ReadControlResponse()
+				protocol.DecodePayload(attachResp, &info)
+				opts.SessionID = sessionID
+				opts.Info = &info
+				c = nc
+				continue
+			}
+			nc, err := freshClient()
+			if err != nil {
+				return err
+			}
+			sessionID, prevSessionID = prevSessionID, sessionID
+			nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+			attachResp, _ := nc.ReadControlResponse()
+			protocol.DecodePayload(attachResp, &info)
+			opts.SessionID = sessionID
+			opts.Info = &info
+			c = nc
+			continue
+
 		case client.ResultNextSession, client.ResultPrevSession:
 			nc, err := freshClient()
 			if err != nil {
@@ -258,10 +321,178 @@ func runAttachByID(c *client.Client, sessionID string) error {
 				return err
 			}
 
-			ids := sortedSessionIDs(list.Sessions)
+			ids := sortedSessionIDs(list.Sessions, sessionID)
 			if next := adjacentSession(ids, sessionID, result == client.ResultNextSession); next != "" {
+				prevSessionID = sessionID
 				sessionID = next
 			}
+			nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+			attachResp, _ := nc.ReadControlResponse()
+			protocol.DecodePayload(attachResp, &info)
+			opts.SessionID = sessionID
+			opts.Info = &info
+			c = nc
+			continue
+
+		case client.ResultNewSession:
+			name := client.RunNameInput("New Session")
+			if name == "" {
+				nc, err := freshClient()
+				if err != nil {
+					return err
+				}
+				restoreScreen(sessionID)
+				nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+				attachResp, _ := nc.ReadControlResponse()
+				protocol.DecodePayload(attachResp, &info)
+				opts.SessionID = sessionID
+				opts.Info = &info
+				c = nc
+				continue
+			}
+			nc, err := freshClient()
+			if err != nil {
+				return err
+			}
+			nc.SendControl("create", protocol.CreateMsg{
+				Name:     name,
+				RepoPath: info.RepoPath,
+			})
+			createResp, err := nc.ReadControlResponse()
+			if err != nil {
+				nc.Close()
+				return err
+			}
+			if createResp.Type == "error" {
+				var e protocol.ErrorMsg
+				protocol.DecodePayload(createResp, &e)
+				out.Print("Create failed: %s\n", e.Message)
+				nc2, err := freshClient()
+				if err != nil {
+					nc.Close()
+					return err
+				}
+				nc.Close()
+				restoreScreen(sessionID)
+				nc2.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+				attachResp, _ := nc2.ReadControlResponse()
+				protocol.DecodePayload(attachResp, &info)
+				opts.SessionID = sessionID
+				opts.Info = &info
+				c = nc2
+				continue
+			}
+			var newInfo protocol.SessionInfo
+			protocol.DecodePayload(createResp, &newInfo)
+			restoreScreen(newInfo.ID)
+			nc.SendControl("attach", protocol.AttachMsg{SessionID: newInfo.ID})
+			attachResp, _ := nc.ReadControlResponse()
+			protocol.DecodePayload(attachResp, &info)
+			prevSessionID = sessionID
+			sessionID = newInfo.ID
+			opts.SessionID = sessionID
+			opts.Info = &info
+			c = nc
+			continue
+
+		case client.ResultForkSession:
+			name := client.RunNameInput("Fork Session")
+			if name == "" {
+				nc, err := freshClient()
+				if err != nil {
+					return err
+				}
+				restoreScreen(sessionID)
+				nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+				attachResp, _ := nc.ReadControlResponse()
+				protocol.DecodePayload(attachResp, &info)
+				opts.SessionID = sessionID
+				opts.Info = &info
+				c = nc
+				continue
+			}
+			nc, err := freshClient()
+			if err != nil {
+				return err
+			}
+			nc.SendControl("fork", protocol.ForkMsg{
+				Name:            name,
+				SourceSessionID: sessionID,
+			})
+			createResp, err := nc.ReadControlResponse()
+			if err != nil {
+				nc.Close()
+				return err
+			}
+			if createResp.Type == "error" {
+				var e protocol.ErrorMsg
+				protocol.DecodePayload(createResp, &e)
+				out.Print("Fork failed: %s\n", e.Message)
+				nc2, err := freshClient()
+				if err != nil {
+					nc.Close()
+					return err
+				}
+				nc.Close()
+				restoreScreen(sessionID)
+				nc2.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+				attachResp, _ := nc2.ReadControlResponse()
+				protocol.DecodePayload(attachResp, &info)
+				opts.SessionID = sessionID
+				opts.Info = &info
+				c = nc2
+				continue
+			}
+			var newInfo protocol.SessionInfo
+			protocol.DecodePayload(createResp, &newInfo)
+			restoreScreen(newInfo.ID)
+			nc.SendControl("attach", protocol.AttachMsg{SessionID: newInfo.ID})
+			attachResp, _ := nc.ReadControlResponse()
+			protocol.DecodePayload(attachResp, &info)
+			prevSessionID = sessionID
+			sessionID = newInfo.ID
+			opts.SessionID = sessionID
+			opts.Info = &info
+			c = nc
+			continue
+
+		case client.ResultApprovalOverlay:
+			nc, err := freshClient()
+			if err != nil {
+				return err
+			}
+
+			nc.SendControl("approval_list", struct{}{})
+			listResp, err := nc.ReadControlResponse()
+			if err != nil {
+				nc.Close()
+				return err
+			}
+			var notif protocol.ApprovalNotificationMsg
+			protocol.DecodePayload(listResp, &notif)
+
+			if len(notif.Pending) == 0 {
+				restoreScreen(sessionID)
+				nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+				attachResp, _ := nc.ReadControlResponse()
+				protocol.DecodePayload(attachResp, &info)
+				opts.SessionID = sessionID
+				opts.Info = &info
+				c = nc
+				continue
+			}
+
+			results := client.RunApprovalOverlay(notif.Pending)
+			for _, r := range results {
+				nc.SendControl("approval_respond", protocol.ApprovalRespondMsg{
+					RequestID: r.RequestID,
+					Decision:  r.Decision,
+					Reason:    r.Reason,
+				})
+				nc.ReadControlResponse()
+			}
+
+			restoreScreen(sessionID)
 			nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
 			attachResp, _ := nc.ReadControlResponse()
 			protocol.DecodePayload(attachResp, &info)
@@ -291,19 +522,33 @@ func freshClient() (*client.Client, error) {
 	return client.Connect(cfg, paths, cfgFile)
 }
 
-// sortedSessionIDs returns session IDs ordered by repo name then session name,
-// matching the overlay's display order.
-func sortedSessionIDs(sessions []protocol.SessionInfo) []string {
-	sort.SliceStable(sessions, func(i, j int) bool {
-		ri, rj := sessions[i].RepoName, sessions[j].RepoName
-		if ri != rj {
-			return ri < rj
+// sortedSessionIDs returns session IDs in the same order as the overlay:
+// grouped by repo (alphabetically), then within each group sorted by
+// current → running → recently attached → alphabetical.
+func sortedSessionIDs(sessions []protocol.SessionInfo, currentSessionID string) []string {
+	groups := map[string][]protocol.SessionInfo{}
+	var repoOrder []string
+	seen := map[string]bool{}
+	for _, s := range sessions {
+		repo := s.RepoName
+		if repo == "" {
+			repo = "(no repo)"
 		}
-		return sessions[i].Name < sessions[j].Name
-	})
-	ids := make([]string, len(sessions))
-	for i, s := range sessions {
-		ids[i] = s.ID
+		if !seen[repo] {
+			repoOrder = append(repoOrder, repo)
+			seen[repo] = true
+		}
+		groups[repo] = append(groups[repo], s)
+	}
+	sort.Strings(repoOrder)
+	for _, g := range groups {
+		client.SortSessions(g)
+	}
+	var ids []string
+	for _, repo := range repoOrder {
+		for _, s := range groups[repo] {
+			ids = append(ids, s.ID)
+		}
 	}
 	return ids
 }
