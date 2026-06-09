@@ -253,7 +253,7 @@ func repoHash(repoPath string) string {
 
 // Create starts a new agent session, either in a git worktree or as a
 // standalone scratch session (when noRepo is true).
-func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt string, noRepo bool, shareWorktree string, approvals bool, rows, cols uint16) (SessionState, error) {
+func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt string, noRepo bool, shareWorktree string, agentHooks bool, rows, cols uint16) (SessionState, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -385,25 +385,27 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 	env["GRAITH_SESSION_NAME"] = name
 	env["GRAITH_WORKTREE_PATH"] = worktreePath
 
-	switch agentName {
-	case "claude":
-		hookArgs, hookEnv, err := sm.injectClaudeHooks(id, approvals)
-		if err != nil {
-			sm.log.Warn("failed to inject hooks", "session_id", id, "err", err)
-		} else {
-			expandedArgs = append(expandedArgs, hookArgs...)
-			for k, v := range hookEnv {
-				env[k] = v
+	if agentHooks {
+		switch agentName {
+		case "claude":
+			hookArgs, hookEnv, err := sm.injectClaudeHooks(id)
+			if err != nil {
+				sm.log.Warn("failed to inject hooks", "session_id", id, "err", err)
+			} else {
+				expandedArgs = append(expandedArgs, hookArgs...)
+				for k, v := range hookEnv {
+					env[k] = v
+				}
 			}
-		}
-	case "codex":
-		hookArgs, hookEnv, err := sm.injectCodexHooks(id, approvals)
-		if err != nil {
-			sm.log.Warn("failed to inject hooks", "session_id", id, "err", err)
-		} else {
-			expandedArgs = append(expandedArgs, hookArgs...)
-			for k, v := range hookEnv {
-				env[k] = v
+		case "codex":
+			hookArgs, hookEnv, err := sm.injectCodexHooks(id)
+			if err != nil {
+				sm.log.Warn("failed to inject hooks", "session_id", id, "err", err)
+			} else {
+				expandedArgs = append(expandedArgs, hookArgs...)
+				for k, v := range hookEnv {
+					env[k] = v
+				}
 			}
 		}
 	}
@@ -458,21 +460,21 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 	}
 
 	sessState := &SessionState{
-		ID:               id,
-		Name:             name,
-		RepoPath:         repoRoot,
-		RepoName:         repoName,
-		WorktreePath:     worktreePath,
-		Branch:           branchName,
-		BaseBranch:       baseBranch,
-		Agent:            agentName,
-		AgentSessionID:   agentSessionID,
-		Sandboxed:        sandboxed,
-		SharedWorktree:   sharedWorktree,
-		ApprovalsEnabled: approvals,
-		Status:           StatusRunning,
-		PID:              ptySess.Cmd.Process.Pid,
-		CreatedAt:        time.Now().UTC(),
+		ID:             id,
+		Name:           name,
+		RepoPath:       repoRoot,
+		RepoName:       repoName,
+		WorktreePath:   worktreePath,
+		Branch:         branchName,
+		BaseBranch:     baseBranch,
+		Agent:          agentName,
+		AgentSessionID: agentSessionID,
+		Sandboxed:      sandboxed,
+		SharedWorktree: sharedWorktree,
+		AgentHooks:     agentHooks,
+		Status:         StatusRunning,
+		PID:            ptySess.Cmd.Process.Pid,
+		CreatedAt:      time.Now().UTC(),
 	}
 
 	sm.state.Sessions[id] = sessState
@@ -563,25 +565,27 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 	env["GRAITH_SESSION_NAME"] = name
 	env["GRAITH_WORKTREE_PATH"] = worktreePath
 
-	switch agentName {
-	case "claude":
-		hookArgs, hookEnv, err := sm.injectClaudeHooks(id, source.ApprovalsEnabled)
-		if err != nil {
-			sm.log.Warn("failed to inject hooks", "session_id", id, "err", err)
-		} else {
-			expandedArgs = append(expandedArgs, hookArgs...)
-			for k, v := range hookEnv {
-				env[k] = v
+	if source.AgentHooks {
+		switch agentName {
+		case "claude":
+			hookArgs, hookEnv, err := sm.injectClaudeHooks(id)
+			if err != nil {
+				sm.log.Warn("failed to inject hooks", "session_id", id, "err", err)
+			} else {
+				expandedArgs = append(expandedArgs, hookArgs...)
+				for k, v := range hookEnv {
+					env[k] = v
+				}
 			}
-		}
-	case "codex":
-		hookArgs, hookEnv, err := sm.injectCodexHooks(id, source.ApprovalsEnabled)
-		if err != nil {
-			sm.log.Warn("failed to inject hooks", "session_id", id, "err", err)
-		} else {
-			expandedArgs = append(expandedArgs, hookArgs...)
-			for k, v := range hookEnv {
-				env[k] = v
+		case "codex":
+			hookArgs, hookEnv, err := sm.injectCodexHooks(id)
+			if err != nil {
+				sm.log.Warn("failed to inject hooks", "session_id", id, "err", err)
+			} else {
+				expandedArgs = append(expandedArgs, hookArgs...)
+				for k, v := range hookEnv {
+					env[k] = v
+				}
 			}
 		}
 	}
@@ -732,25 +736,27 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 	env["GRAITH_SESSION_NAME"] = sessState.Name
 	env["GRAITH_WORKTREE_PATH"] = sessState.WorktreePath
 
-	switch sessState.Agent {
-	case "claude":
-		hookArgs, hookEnv, err := sm.injectClaudeHooks(id, sessState.ApprovalsEnabled)
-		if err != nil {
-			sm.log.Warn("failed to inject hooks", "session_id", id, "err", err)
-		} else {
-			expandedArgs = append(expandedArgs, hookArgs...)
-			for k, v := range hookEnv {
-				env[k] = v
+	if sessState.AgentHooks {
+		switch sessState.Agent {
+		case "claude":
+			hookArgs, hookEnv, err := sm.injectClaudeHooks(id)
+			if err != nil {
+				sm.log.Warn("failed to inject hooks", "session_id", id, "err", err)
+			} else {
+				expandedArgs = append(expandedArgs, hookArgs...)
+				for k, v := range hookEnv {
+					env[k] = v
+				}
 			}
-		}
-	case "codex":
-		hookArgs, hookEnv, err := sm.injectCodexHooks(id, sessState.ApprovalsEnabled)
-		if err != nil {
-			sm.log.Warn("failed to inject hooks", "session_id", id, "err", err)
-		} else {
-			expandedArgs = append(expandedArgs, hookArgs...)
-			for k, v := range hookEnv {
-				env[k] = v
+		case "codex":
+			hookArgs, hookEnv, err := sm.injectCodexHooks(id)
+			if err != nil {
+				sm.log.Warn("failed to inject hooks", "session_id", id, "err", err)
+			} else {
+				expandedArgs = append(expandedArgs, hookArgs...)
+				for k, v := range hookEnv {
+					env[k] = v
+				}
 			}
 		}
 	}

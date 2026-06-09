@@ -26,9 +26,9 @@ func resolveGrBin() string {
 
 // generateClaudeSettings writes a Claude Code settings JSON file that registers
 // hooks for all relevant lifecycle events. Returns the path to the settings file.
-// When approvals is true, PreToolUse uses the approve-request command; otherwise
-// PreToolUse is omitted entirely.
-func (sm *SessionManager) generateClaudeSettings(sessionID string, approvals bool) (string, error) {
+// All supported hooks are generated including PreToolUse (approve-request) and
+// SessionStart (check-inbox). Only called when agent hooks are enabled.
+func (sm *SessionManager) generateClaudeSettings(sessionID string) (string, error) {
 	dir := sm.hookDir(sessionID)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("create hook dir: %w", err)
@@ -40,12 +40,10 @@ func (sm *SessionManager) generateClaudeSettings(sessionID string, approvals boo
 	events := []string{
 		"SessionStart",
 		"UserPromptSubmit",
+		"PreToolUse",
 		"PostToolUse",
 		"Notification",
 		"Stop",
-	}
-	if approvals {
-		events = append(events, "PreToolUse")
 	}
 
 	type hookHandler struct {
@@ -102,8 +100,8 @@ func (sm *SessionManager) generateClaudeSettings(sessionID string, approvals boo
 
 // injectClaudeHooks generates hook files for a Claude session and returns
 // the extra args and env vars to add to the agent launch.
-func (sm *SessionManager) injectClaudeHooks(sessionID string, approvals bool) (extraArgs []string, extraEnv map[string]string, err error) {
-	settingsPath, err := sm.generateClaudeSettings(sessionID, approvals)
+func (sm *SessionManager) injectClaudeHooks(sessionID string) (extraArgs []string, extraEnv map[string]string, err error) {
+	settingsPath, err := sm.generateClaudeSettings(sessionID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -115,7 +113,7 @@ func (sm *SessionManager) injectClaudeHooks(sessionID string, approvals bool) (e
 
 // injectCodexHooks generates per-event hook scripts for a Codex session and
 // returns extra env vars (including CODEX_HOOKS_DIR) to add to the agent launch.
-func (sm *SessionManager) injectCodexHooks(sessionID string, approvals bool) (extraArgs []string, extraEnv map[string]string, err error) {
+func (sm *SessionManager) injectCodexHooks(sessionID string) (extraArgs []string, extraEnv map[string]string, err error) {
 	dir := sm.hookDir(sessionID)
 	grBin := resolveGrBin()
 
@@ -124,10 +122,8 @@ func (sm *SessionManager) injectCodexHooks(sessionID string, approvals bool) (ex
 		"user-prompt-submit": "UserPromptSubmit",
 		"pre-tool-use":       "PreToolUse",
 		"post-tool-use":      "PostToolUse",
+		"permission-request": "PermissionRequest",
 		"stop":               "Stop",
-	}
-	if approvals {
-		events["permission-request"] = "PermissionRequest"
 	}
 
 	hooksDir := filepath.Join(dir, "codex-hooks")
