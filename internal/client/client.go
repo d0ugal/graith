@@ -81,6 +81,30 @@ func ConnectFast(paths config.Paths) (*Client, error) {
 	return c, nil
 }
 
+// ConnectForApproval is like ConnectFast but with a long deadline suitable
+// for blocking on approval responses (up to 15 minutes).
+func ConnectForApproval(paths config.Paths) (*Client, error) {
+	conn, err := net.DialTimeout("unix", paths.SocketPath, 500*time.Millisecond)
+	if err != nil {
+		return nil, fmt.Errorf("daemon not reachable: %w", err)
+	}
+	conn.SetDeadline(time.Now().Add(15 * time.Minute))
+	c := &Client{
+		conn:   conn,
+		reader: protocol.NewFrameReader(conn),
+		writer: protocol.NewFrameWriter(conn),
+	}
+	if err := c.Handshake(); err != nil {
+		c.Close()
+		return nil, err
+	}
+	if _, err := c.ReadControlResponse(); err != nil {
+		c.Close()
+		return nil, err
+	}
+	return c, nil
+}
+
 func (c *Client) Close() {
 	_ = c.conn.Close()
 }
