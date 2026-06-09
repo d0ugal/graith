@@ -311,7 +311,7 @@ func TestKickAttachedClient(t *testing.T) {
 
 		kicked := false
 		mockConn := &net.UnixConn{}
-		sm.SetAttachedClient("sess1", mockConn, func() { kicked = true })
+		sm.SetAttachedClient("sess1", mockConn, func() { kicked = true }, nil)
 
 		sm.KickAttachedClient("sess1")
 
@@ -341,7 +341,7 @@ func TestSetAndClearAttachedClient(t *testing.T) {
 		sm := newTestSessionManager(t)
 
 		conn := &net.UnixConn{}
-		sm.SetAttachedClient("sess1", conn, func() {})
+		sm.SetAttachedClient("sess1", conn, func() {}, nil)
 
 		// Verify it was set
 		sm.mu.RLock()
@@ -367,7 +367,7 @@ func TestSetAndClearAttachedClient(t *testing.T) {
 
 		conn1 := &net.UnixConn{}
 		conn2 := &net.UnixConn{}
-		sm.SetAttachedClient("sess1", conn1, func() {})
+		sm.SetAttachedClient("sess1", conn1, func() {}, nil)
 
 		// Try to clear with a different conn
 		sm.ClearAttachedClient("sess1", conn2)
@@ -507,7 +507,7 @@ func TestIdleTracking(t *testing.T) {
 			Agent: "claude", AgentStatus: "ready", IdleSince: &now,
 		}
 		sm.state.Sessions["s1"] = s
-		sm.SetAttachedClient("s1", &net.UnixConn{}, func() {})
+		sm.SetAttachedClient("s1", &net.UnixConn{}, func() {}, nil)
 
 		sm.checkIdleSession(s)
 
