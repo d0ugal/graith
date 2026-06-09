@@ -252,12 +252,12 @@ func (s *MsgStore) TotalUnread(subscriber string) int {
 	var count int
 	err := s.db.QueryRow(`
 		SELECT COUNT(*) FROM messages m
-		WHERE m.stream NOT LIKE '_system.%'
+		WHERE m.stream = 'inbox:' || ?
 		  AND m.seq > COALESCE(
 			(SELECT c.ack_seq FROM cursors c
 			 WHERE c.subscriber = ? AND c.stream = m.stream), 0
 		)
-	`, subscriber).Scan(&count)
+	`, subscriber, subscriber).Scan(&count)
 	if err != nil {
 		return 0
 	}

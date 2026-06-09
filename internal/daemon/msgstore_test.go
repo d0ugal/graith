@@ -443,16 +443,28 @@ func TestListStreamsExcludesSystem(t *testing.T) {
 	}
 }
 
-func TestTotalUnreadExcludesSystem(t *testing.T) {
+func TestTotalUnreadCountsOnlyInbox(t *testing.T) {
 	s := testStore(t)
 
-	s.Publish("alpha", "s1", "a", "m1", "", "")
+	s.Publish("inbox:sess1", "other", "other", "direct message", "", "")
+	s.Publish("inbox:sess1", "other", "other", "another message", "", "")
+	s.Publish("alpha", "s1", "a", "broadcast", "", "")
 	s.Publish("_system.status", "s1", "a", "status change", "", "")
-	s.Publish("_system.status", "s1", "a", "another change", "", "")
+	s.Publish("inbox:sess2", "other", "other", "someone elses inbox", "", "")
 
-	count := s.TotalUnread("reader1")
+	count := s.TotalUnread("sess1")
+	if count != 2 {
+		t.Errorf("TotalUnread(sess1) = %d, want 2 (only inbox:sess1)", count)
+	}
+
+	count = s.TotalUnread("sess2")
 	if count != 1 {
-		t.Errorf("TotalUnread = %d, want 1 (system excluded)", count)
+		t.Errorf("TotalUnread(sess2) = %d, want 1 (only inbox:sess2)", count)
+	}
+
+	count = s.TotalUnread("nobody")
+	if count != 0 {
+		t.Errorf("TotalUnread(nobody) = %d, want 0 (no inbox)", count)
 	}
 }
 
