@@ -426,7 +426,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 		for k := range env {
 			envKeys = append(envKeys, k)
 		}
-		opts := sm.sandboxOpts(agentName, id, worktreePath, envKeys)
+		opts := sm.sandboxOpts(agentName, id, worktreePath, envKeys, agentHooks)
 		if sharedWorktree {
 			scratchDir = filepath.Join(sm.paths.DataDir, "scratch", id)
 			if err := os.MkdirAll(scratchDir, 0o700); err != nil {
@@ -610,7 +610,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 		for k := range env {
 			envKeys = append(envKeys, k)
 		}
-		opts := sm.sandboxOpts(agentName, id, worktreePath, envKeys)
+		opts := sm.sandboxOpts(agentName, id, worktreePath, envKeys, source.AgentHooks)
 		command, finalArgs = sandbox.Wrap(agent.Command, expandedArgs, opts)
 		sm.log.Info("sandboxing forked session", "id", id)
 	}
@@ -779,7 +779,7 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 		for k := range env {
 			envKeys = append(envKeys, k)
 		}
-		opts := sm.sandboxOpts(sessState.Agent, id, sessState.WorktreePath, envKeys)
+		opts := sm.sandboxOpts(sessState.Agent, id, sessState.WorktreePath, envKeys, sessState.AgentHooks)
 		command, finalArgs = sandbox.Wrap(agent.Command, expandedArgs, opts)
 		sm.log.Info("sandboxing resumed session", "id", id)
 	}
@@ -1277,7 +1277,7 @@ func (sm *SessionManager) resolveSandbox(agentName string) (bool, error) {
 	return true, nil
 }
 
-func (sm *SessionManager) sandboxOpts(agentName, sessionID, worktreePath string, envKeys []string) sandbox.WrapOpts {
+func (sm *SessionManager) sandboxOpts(agentName, sessionID, worktreePath string, envKeys []string, agentHooks bool) sandbox.WrapOpts {
 	merged := sm.cfg.Sandbox.Merge(sm.cfg.Agents[agentName].Sandbox)
 
 	readDirs := expandPaths(merged.ReadDirs)
@@ -1286,7 +1286,9 @@ func (sm *SessionManager) sandboxOpts(agentName, sessionID, worktreePath string,
 	// The daemon injects hook scripts that call `gr report-status`.
 	// That needs: the hooks dir itself, the config dir (to find the
 	// socket path), and the runtime dir (to connect to it).
-	readDirs = append(readDirs, sm.hookDir(sessionID))
+	if agentHooks {
+		readDirs = append(readDirs, sm.hookDir(sessionID))
+	}
 	readDirs = append(readDirs, filepath.Dir(sm.paths.ConfigFile))
 	if grBin := resolveGrBin(); grBin != "gr" {
 		readDirs = append(readDirs, filepath.Dir(grBin))
