@@ -294,9 +294,7 @@ func runAttachByID(c *client.Client, sessionID string) error {
 			if err != nil {
 				return err
 			}
-			oldSessionID := sessionID
-			sessionID = prevSessionID
-			prevSessionID = oldSessionID
+			sessionID, prevSessionID = prevSessionID, sessionID
 			nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
 			attachResp, _ := nc.ReadControlResponse()
 			protocol.DecodePayload(attachResp, &info)
