@@ -135,9 +135,8 @@ The daemon auto-starts on the first command. Manage it explicitly with:
 | `gr daemon stop` | Stop the daemon |
 | `gr daemon restart` | Restart, preserving live sessions via exec (`--force` for a clean stop/start that kills sessions) |
 | `gr daemon reload` | Reload config without restarting |
-| `gr daemon upgrade` | Hot-upgrade the daemon binary without losing sessions |
 
-After rebuilding `gr`, run `gr daemon restart` (or `upgrade`) to pick up the new daemon binary.
+After rebuilding `gr`, run `gr daemon restart` to pick up the new daemon binary.
 
 ## Inter-agent messaging
 
