@@ -133,10 +133,13 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				attachedDataWriter = &frameDataWriter{writer: writer}
 
 				sm.KickAttachedClient(a.SessionID)
-				sm.SetAttachedClient(a.SessionID, conn, func() {
-					data, _ := protocol.EncodeControl("detached", protocol.DetachedMsg{Reason: "replaced"})
-					_ = writer.WriteFrame(protocol.ChannelControl, data)
-				})
+				sm.SetAttachedClient(a.SessionID, conn,
+					func() {
+						data, _ := protocol.EncodeControl("detached", protocol.DetachedMsg{Reason: "replaced"})
+						_ = writer.WriteFrame(protocol.ChannelControl, data)
+					},
+					sendControl,
+				)
 
 				now := time.Now().UTC()
 				sm.mu.Lock()
@@ -397,6 +400,52 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 						Streams []StreamInfo `json:"streams"`
 					}{streams})
 				}
+
+			case "approval_request":
+				var req protocol.ApprovalRequestMsg
+				if err := protocol.DecodePayload(msg, &req); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid approval_request"})
+					continue
+				}
+				// Monitor connection close so we can cancel if the hook dies.
+				connCtx, connCancel := context.WithCancel(ctx)
+				go func() {
+					for {
+						f, err := reader.ReadFrame()
+						if err != nil {
+							connCancel()
+							return
+						}
+						if f.Channel == protocol.ChannelControl {
+							ctrl, _ := protocol.DecodeControl(f.Payload)
+							if ctrl.Type == "detach" {
+								connCancel()
+								return
+							}
+						}
+					}
+				}()
+				decision := sm.SubmitApproval(connCtx, req)
+				sendControl("approval_decision", decision)
+				return
+
+			case "approval_respond":
+				var resp protocol.ApprovalRespondMsg
+				if err := protocol.DecodePayload(msg, &resp); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid approval_respond"})
+					continue
+				}
+				if err := sm.RespondToApproval(resp.RequestID, resp.Decision, resp.Reason); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+				} else {
+					sendControl("approval_responded", struct{}{})
+				}
+
+			case "approval_list":
+				pending := sm.PendingApprovals()
+				sendControl("approval_notification", protocol.ApprovalNotificationMsg{
+					Pending: pending,
+				})
 
 			case "type":
 				var t protocol.TypeMsg
