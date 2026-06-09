@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.12.1](https://github.com/d0ugal/graith/compare/v0.12.0...v0.12.1) (2026-06-09)
+
+
+### Bug Fixes
+
+* auto-include agent config dirs in sandbox read/write paths ([543a47b](https://github.com/d0ugal/graith/commit/543a47b56a8b76b5af1872a2a2a290050bcd2bb8))
+* use daemon restart instead of reload in homebrew post_install ([bf7e5c8](https://github.com/d0ugal/graith/commit/bf7e5c8301d17808b55770cfb9d1203556572660))
+
 ## [0.12.0](https://github.com/d0ugal/graith/compare/v0.11.0...v0.12.0) (2026-06-09)
 
 
