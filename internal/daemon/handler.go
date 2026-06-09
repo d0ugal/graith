@@ -89,7 +89,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				if agentName == "" {
 					agentName = sm.cfg.DefaultAgent
 				}
-				sess, err := sm.Create(c.Name, agentName, c.RepoPath, c.Base, c.Prompt, c.NoRepo, c.ShareWorktree, clientRows, clientCols)
+				sess, err := sm.Create(c.Name, agentName, c.RepoPath, c.Base, c.Prompt, c.NoRepo, c.ShareWorktree, c.Approvals, clientRows, clientCols)
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 				} else {
@@ -407,6 +407,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid approval_request"})
 					continue
 				}
+				log.Info("approval request received", "request_id", req.RequestID, "session_id", req.SessionID, "tool", req.ToolName)
 				// Monitor connection close so we can cancel if the hook dies.
 				connCtx, connCancel := context.WithCancel(ctx)
 				go func() {
