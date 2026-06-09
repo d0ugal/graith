@@ -44,6 +44,7 @@ type SessionState struct {
 	PID                int           `json:"pid,omitempty"`
 	Sandboxed          bool          `json:"sandboxed,omitempty"`
 	SharedWorktree     bool          `json:"shared_worktree,omitempty"`
+	AgentHooks         bool          `json:"agent_hooks,omitempty"`
 	CreatedAt          time.Time     `json:"created_at"`
 	LastAttachedAt     *time.Time    `json:"last_attached_at,omitempty"`
 }

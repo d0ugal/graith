@@ -1,6 +1,7 @@
 package client
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -114,6 +115,8 @@ func (m approvalModel) View() tea.View {
 	}
 
 	dim := lipgloss.NewStyle().Foreground(colorDim)
+	panelWidth := min(80, w-4)
+	contentWidth := panelWidth - 4
 
 	var panelContent strings.Builder
 
@@ -125,24 +128,6 @@ func (m approvalModel) View() tea.View {
 		panelContent.WriteString(dim.Render("  No pending approvals"))
 		panelContent.WriteString("\n")
 	} else {
-		nameW := 0
-		toolW := 0
-		for _, a := range m.approvals {
-			if n := len(a.SessionName); n > nameW {
-				nameW = n
-			}
-			toolDisplay := formatToolDisplay(a.ToolName, a.ToolInput)
-			if n := len(toolDisplay); n > toolW {
-				toolW = n
-			}
-		}
-		if nameW < 7 {
-			nameW = 7
-		}
-		if toolW > 40 {
-			toolW = 40
-		}
-
 		for i, a := range m.approvals {
 			selected := i == m.cursor
 			prefix := "  "
@@ -150,23 +135,18 @@ func (m approvalModel) View() tea.View {
 				prefix = "> "
 			}
 
-			indicator := lipgloss.NewStyle().Foreground(colorRed).Bold(true).Render("⚠")
-			name := pad(a.SessionName, nameW)
-			toolDisplay := formatToolDisplay(a.ToolName, a.ToolInput)
-			if len(toolDisplay) > toolW {
-				toolDisplay = toolDisplay[:toolW-3] + "..."
-			}
-			tool := pad(toolDisplay, toolW)
-
 			age := ""
 			if t, err := time.Parse(time.RFC3339, a.RequestedAt); err == nil {
 				age = ShortDuration(time.Since(t))
 			}
 
-			sep := dim.Render("  ")
-			line := fmt.Sprintf("%s%s %s%s%s%s%s",
-				prefix, indicator, name, sep,
-				lipgloss.NewStyle().Foreground(colorBlue).Render(tool), sep,
+			toolSummary := formatToolSummary(a.ToolName, a.ToolInput)
+
+			line := fmt.Sprintf("%s%s  %s  %s  %s",
+				prefix,
+				lipgloss.NewStyle().Foreground(colorRed).Bold(true).Render("⚠"),
+				lipgloss.NewStyle().Bold(true).Render(a.SessionName),
+				lipgloss.NewStyle().Foreground(colorBlue).Render(toolSummary),
 				dim.Render(age))
 
 			if selected {
@@ -176,13 +156,16 @@ func (m approvalModel) View() tea.View {
 			panelContent.WriteString(line)
 			panelContent.WriteString("\n")
 		}
+
+		panelContent.WriteString("\n")
+		selected := m.approvals[m.cursor]
+		panelContent.WriteString(formatToolDetail(selected, contentWidth))
 	}
 
 	helpStyle := lipgloss.NewStyle().Foreground(colorFaint)
 	panelContent.WriteString("\n")
 	panelContent.WriteString(helpStyle.Render("y allow  n deny  a allow-all  q cancel"))
 
-	panelWidth := min(60, w-4)
 	panel := lipgloss.NewStyle().
 		Width(panelWidth).
 		Background(colorPanel).
@@ -231,16 +214,215 @@ func (m approvalModel) View() tea.View {
 	return v
 }
 
-func formatToolDisplay(toolName, toolInput string) string {
+func formatToolSummary(toolName, toolInput string) string {
 	if toolInput == "" {
 		return toolName
 	}
-	input := toolInput
-	if len(input) > 30 {
-		input = input[:30] + "..."
+	var parsed map[string]any
+	if json.Unmarshal([]byte(toolInput), &parsed) != nil {
+		return toolName
 	}
-	input = strings.ReplaceAll(input, "\n", " ")
-	return fmt.Sprintf("%s(%s)", toolName, input)
+
+	switch toolName {
+	case "Bash":
+		if cmd, ok := parsed["command"].(string); ok {
+			short := firstLine(cmd)
+			if len(short) > 50 {
+				short = short[:47] + "..."
+			}
+			return fmt.Sprintf("Bash: %s", short)
+		}
+	case "Write":
+		if fp, ok := parsed["file_path"].(string); ok {
+			return fmt.Sprintf("Write: %s", shortPath(fp))
+		}
+	case "Edit":
+		if fp, ok := parsed["file_path"].(string); ok {
+			return fmt.Sprintf("Edit: %s", shortPath(fp))
+		}
+	case "Read":
+		if fp, ok := parsed["file_path"].(string); ok {
+			return fmt.Sprintf("Read: %s", shortPath(fp))
+		}
+	case "Skill":
+		if skill, ok := parsed["skill"].(string); ok {
+			return fmt.Sprintf("Skill: %s", skill)
+		}
+	case "Agent":
+		if desc, ok := parsed["description"].(string); ok {
+			return fmt.Sprintf("Agent: %s", desc)
+		}
+	}
+	return toolName
+}
+
+func formatToolDetail(a protocol.ApprovalInfo, maxWidth int) string {
+	dim := lipgloss.NewStyle().Foreground(colorDim)
+	label := lipgloss.NewStyle().Foreground(colorBlue).Bold(true)
+	code := lipgloss.NewStyle().Foreground(lipgloss.Color("#d0d0d0"))
+
+	var b strings.Builder
+
+	b.WriteString(label.Render("Session") + "  " + a.SessionName)
+	if a.Agent != "" {
+		b.WriteString(dim.Render(" (" + a.Agent + ")"))
+	}
+	b.WriteString("\n")
+
+	b.WriteString(label.Render("Tool   ") + "  " + a.ToolName)
+	b.WriteString("\n")
+
+	if a.ToolInput == "" {
+		return b.String()
+	}
+
+	var parsed map[string]any
+	if json.Unmarshal([]byte(a.ToolInput), &parsed) != nil {
+		b.WriteString(label.Render("Input  ") + "  " + truncate(a.ToolInput, maxWidth))
+		b.WriteString("\n")
+		return b.String()
+	}
+
+	switch a.ToolName {
+	case "Bash":
+		if cmd, ok := parsed["command"].(string); ok {
+			b.WriteString("\n")
+			for _, line := range wrapLines(cmd, maxWidth) {
+				b.WriteString("  " + code.Render(line) + "\n")
+			}
+		}
+	case "Write":
+		if fp, ok := parsed["file_path"].(string); ok {
+			b.WriteString(label.Render("File   ") + "  " + fp + "\n")
+		}
+		if content, ok := parsed["content"].(string); ok {
+			b.WriteString("\n")
+			lines := strings.Split(content, "\n")
+			shown := min(10, len(lines))
+			for _, line := range lines[:shown] {
+				b.WriteString("  " + code.Render(truncate(line, maxWidth-2)) + "\n")
+			}
+			if len(lines) > shown {
+				b.WriteString(dim.Render(fmt.Sprintf("  ... +%d more lines", len(lines)-shown)) + "\n")
+			}
+		}
+	case "Edit":
+		if fp, ok := parsed["file_path"].(string); ok {
+			b.WriteString(label.Render("File   ") + "  " + fp + "\n")
+		}
+		if old, ok := parsed["old_string"].(string); ok {
+			b.WriteString("\n" + dim.Render("  old:") + "\n")
+			for _, line := range wrapLines(truncateBlock(old, 5), maxWidth-2) {
+				b.WriteString("  " + lipgloss.NewStyle().Foreground(colorRed).Render(line) + "\n")
+			}
+		}
+		if newS, ok := parsed["new_string"].(string); ok {
+			b.WriteString(dim.Render("  new:") + "\n")
+			for _, line := range wrapLines(truncateBlock(newS, 5), maxWidth-2) {
+				b.WriteString("  " + lipgloss.NewStyle().Foreground(colorGreen).Render(line) + "\n")
+			}
+		}
+	case "Skill":
+		if skill, ok := parsed["skill"].(string); ok {
+			b.WriteString(label.Render("Skill  ") + "  " + code.Render(skill) + "\n")
+		}
+		if args, ok := parsed["args"].(string); ok && args != "" {
+			b.WriteString("\n")
+			for _, line := range wrapLines(args, maxWidth-2) {
+				b.WriteString("  " + code.Render(line) + "\n")
+			}
+		}
+	case "Agent":
+		if desc, ok := parsed["description"].(string); ok {
+			b.WriteString(label.Render("Desc   ") + "  " + code.Render(desc) + "\n")
+		}
+		if prompt, ok := parsed["prompt"].(string); ok {
+			short := truncateBlock(prompt, 5)
+			b.WriteString("\n")
+			for _, line := range wrapLines(short, maxWidth-2) {
+				b.WriteString("  " + code.Render(line) + "\n")
+			}
+		}
+	default:
+		b.WriteString("\n")
+		for key, val := range parsed {
+			valStr := fmt.Sprintf("%v", val)
+			if s, ok := val.(string); ok {
+				valStr = s
+			}
+			valStr = strings.ReplaceAll(valStr, "\n", " ")
+			b.WriteString("  " + dim.Render(key+":") + " " + code.Render(truncate(valStr, maxWidth-len(key)-4)) + "\n")
+		}
+	}
+
+	return b.String()
+}
+
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[:i]
+	}
+	return s
+}
+
+func shortPath(fp string) string {
+	parts := strings.Split(fp, "/")
+	if len(parts) <= 3 {
+		return fp
+	}
+	return ".../" + strings.Join(parts[len(parts)-3:], "/")
+}
+
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	if maxLen < 4 {
+		return s[:maxLen]
+	}
+	return s[:maxLen-3] + "..."
+}
+
+func truncateBlock(s string, maxLines int) string {
+	lines := strings.Split(s, "\n")
+	if len(lines) <= maxLines {
+		return s
+	}
+	return strings.Join(lines[:maxLines], "\n") + fmt.Sprintf("\n... +%d more lines", len(lines)-maxLines)
+}
+
+func wrapLines(s string, maxWidth int) []string {
+	if maxWidth <= 0 {
+		maxWidth = 80
+	}
+	var out []string
+	for _, line := range strings.Split(s, "\n") {
+		if len(line) <= maxWidth {
+			out = append(out, line)
+			continue
+		}
+		words := strings.Fields(line)
+		current := ""
+		for _, word := range words {
+			switch {
+			case current == "":
+				current = word
+			case len(current)+1+len(word) <= maxWidth:
+				current += " " + word
+			default:
+				out = append(out, current)
+				current = word
+			}
+			for len(current) > maxWidth {
+				out = append(out, current[:maxWidth])
+				current = current[maxWidth:]
+			}
+		}
+		if current != "" {
+			out = append(out, current)
+		}
+	}
+	return out
 }
 
 // RunApprovalOverlay launches the bubbletea approval overlay listing pending

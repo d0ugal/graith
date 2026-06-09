@@ -16,8 +16,8 @@ import (
 )
 
 type approvalHookStdin struct {
-	ToolName string          `json:"tool_name"`
-	Input    json.RawMessage `json:"input"`
+	ToolName  string          `json:"tool_name"`
+	ToolInput json.RawMessage `json:"tool_input"`
 }
 
 var approveRequestCmd = &cobra.Command{
@@ -57,8 +57,8 @@ var approveRequestCmd = &cobra.Command{
 		requestID := generateApprovalID()
 
 		var toolInput string
-		if stdin.parsed && len(stdin.data.Input) > 0 {
-			toolInput = string(stdin.data.Input)
+		if stdin.parsed && len(stdin.data.ToolInput) > 0 {
+			toolInput = string(stdin.data.ToolInput)
 			if len(toolInput) > 500 {
 				toolInput = toolInput[:500] + "..."
 			}
@@ -94,10 +94,11 @@ var approveRequestCmd = &cobra.Command{
 		if resp.Type == "approval_decision" {
 			var decision protocol.ApprovalDecisionMsg
 			protocol.DecodePayload(resp, &decision)
-			out, _ := json.Marshal(map[string]string{
-				"decision": decision.Decision,
-				"reason":   decision.Reason,
-			})
+			result := map[string]string{"decision": decision.Decision}
+			if decision.Reason != "" {
+				result["reason"] = decision.Reason
+			}
+			out, _ := json.Marshal(result)
 			fmt.Println(string(out))
 		} else {
 			// Unexpected response — fail-open.

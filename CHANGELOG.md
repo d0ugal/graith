@@ -1,5 +1,47 @@
 # Changelog
 
+## [0.15.0](https://github.com/d0ugal/graith/compare/v0.14.0...v0.15.0) (2026-06-09)
+
+
+### Features
+
+* rename --approvals to --agent-hooks with all-or-nothing semantics ([811d1e7](https://github.com/d0ugal/graith/commit/811d1e7158f1fd7c6e1279dd14e436691d51a3ab))
+
+## [0.14.0](https://github.com/d0ugal/graith/compare/v0.13.0...v0.14.0) (2026-06-09)
+
+
+### Features
+
+* add logging to approval request handling ([dc2a20a](https://github.com/d0ugal/graith/commit/dc2a20a6e120ec6289b7393dc263982cf379d3a3))
+* improve approval overlay formatting ([575f925](https://github.com/d0ugal/graith/commit/575f9258056b6849139801531f63392998190350))
+* improved approval overlay with detail panel ([3c827ce](https://github.com/d0ugal/graith/commit/3c827cebe01b3f4835101775a70f1921d99e291f))
+* inject unread inbox messages on session start ([f775b3c](https://github.com/d0ugal/graith/commit/f775b3c818a83eec90ab9904d68386d411cb8341))
+* make approval hooks opt-in per session with --approvals flag ([99792c8](https://github.com/d0ugal/graith/commit/99792c8c8617fefd5f41728b6097b6a33172cbc2))
+* red status bar and approval status for pending approvals ([c290dd4](https://github.com/d0ugal/graith/commit/c290dd4ddd197e2f79702a22d6c5e42cdf5676c5))
+
+
+### Bug Fixes
+
+* handle Kitty keyboard protocol release events and encoded follow-up keys ([82207c6](https://github.com/d0ugal/graith/commit/82207c6581f3c6461b806f9b735c974dd8615fa6))
+* remove TODO comment that triggers godox lint ([31a82ba](https://github.com/d0ugal/graith/commit/31a82ba0ac569f8e04596a968b80546e5be882cb))
+* replace naked returns in parseKittyCSIu to satisfy nakedret lint ([20c5ef8](https://github.com/d0ugal/graith/commit/20c5ef8fd2f37c54641bb833ed5dbd60e053cd81))
+
+## [0.13.0](https://github.com/d0ugal/graith/compare/v0.12.5...v0.13.0) (2026-06-09)
+
+
+### Features
+
+* add --share-worktree flag for read-only worktree sharing ([964c569](https://github.com/d0ugal/graith/commit/964c56908e2999bc30e82b9a4762d6993bf74c53)), closes [#183](https://github.com/d0ugal/graith/issues/183)
+* add approval overlay UI and passthrough integration ([3084ce7](https://github.com/d0ugal/graith/commit/3084ce791d5d0ad124914f7d2eaa5a423016397d))
+* add cross-session approval system protocol, config, and daemon ([3dc1f64](https://github.com/d0ugal/graith/commit/3dc1f645234bb35c2c83c9690e220c368d906ff7))
+* add gr approve-request CLI and wire hooks ([3efd8e9](https://github.com/d0ugal/graith/commit/3efd8e94b9c03286632605e6fa7ecbdd3b2122ee))
+
+
+### Bug Fixes
+
+* resolve stale binary path during daemon upgrade ([a28263d](https://github.com/d0ugal/graith/commit/a28263d8c849a0eaea68eb882a4ab1d94e06d31a))
+* rewrite if-else chains to switch for gocritic lint ([fe7e5b8](https://github.com/d0ugal/graith/commit/fe7e5b8ddb99afe7565e84add93ee15c7b46a5c7))
+
 ## [0.12.5](https://github.com/d0ugal/graith/compare/v0.12.4...v0.12.5) (2026-06-09)
 
 

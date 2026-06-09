@@ -48,6 +48,7 @@ type CreateMsg struct {
 	Prompt        string `json:"prompt,omitempty"`
 	NoRepo        bool   `json:"no_repo,omitempty"`
 	ShareWorktree string `json:"share_worktree,omitempty"`
+	AgentHooks    bool   `json:"agent_hooks,omitempty"`
 }
 
 type ForkMsg struct {
