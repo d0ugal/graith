@@ -41,28 +41,34 @@ func TestFormatStopSummary(t *testing.T) {
 	exitCode := func(n int) *int { return &n }
 
 	tests := []struct {
-		name     string
-		reason   string
-		exitCode *int
-		prev     string
-		prevSet  *time.Time
-		ttl      time.Duration
-		expected string
+		name       string
+		reason     string
+		exitCode   *int
+		exitSignal string
+		prev       string
+		prevSet    *time.Time
+		ttl        time.Duration
+		expected   string
 	}{
-		{"user_no_prev", StopReasonUser, nil, "", nil, ttl, "Stopped"},
-		{"user_with_prev", StopReasonUser, nil, "Running tests", &fresh, ttl, "Stopped (was: Running tests)"},
-		{"user_stale_prev", StopReasonUser, nil, "Running tests", &stale, ttl, "Stopped"},
-		{"idle_with_prev", StopReasonIdle, nil, "Exploring code", &fresh, ttl, "Stopped after idle (was: Exploring code)"},
-		{"shutdown", StopReasonShutdown, nil, "Building", &fresh, ttl, "Stopped by shutdown (was: Building)"},
-		{"crash_nonzero", StopReasonCrash, exitCode(1), "Compiling", &fresh, ttl, "Crashed exit 1 (was: Compiling)"},
-		{"crash_zero", StopReasonCrash, exitCode(0), "Done", &fresh, ttl, "Exited (was: Done)"},
-		{"crash_no_code", StopReasonCrash, nil, "", nil, ttl, "Crashed"},
-		{"unknown_reason", "something", nil, "", nil, ttl, "Stopped"},
-		{"nil_prevSetAt", StopReasonUser, nil, "Running", nil, ttl, "Stopped"},
+		{"user_no_prev", StopReasonUser, nil, "", "", nil, ttl, "Stopped"},
+		{"user_with_prev", StopReasonUser, nil, "", "Running tests", &fresh, ttl, "Stopped (was: Running tests)"},
+		{"user_stale_prev", StopReasonUser, nil, "", "Running tests", &stale, ttl, "Stopped"},
+		{"idle_with_prev", StopReasonIdle, nil, "", "Exploring code", &fresh, ttl, "Stopped after idle (was: Exploring code)"},
+		{"shutdown", StopReasonShutdown, nil, "", "Building", &fresh, ttl, "Stopped by shutdown (was: Building)"},
+		{"crash_nonzero", StopReasonCrash, exitCode(1), "", "Compiling", &fresh, ttl, "Crashed exit 1 (was: Compiling)"},
+		{"crash_zero", StopReasonCrash, exitCode(0), "", "Done", &fresh, ttl, "Exited (was: Done)"},
+		{"crash_no_code", StopReasonCrash, nil, "", "", nil, ttl, "Crashed"},
+		{"unknown_reason", "something", nil, "", "", nil, ttl, "Stopped"},
+		{"nil_prevSetAt", StopReasonUser, nil, "", "Running", nil, ttl, "Stopped"},
+		{"crash_sigkill", StopReasonCrash, exitCode(-1), "killed", "", nil, ttl, "Killed by SIGKILL"},
+		{"crash_sigterm", StopReasonCrash, exitCode(-1), "terminated", "", nil, ttl, "Killed by SIGTERM"},
+		{"crash_sigabrt_darwin", StopReasonCrash, exitCode(-1), "abort trap", "", nil, ttl, "Killed by SIGABRT"},
+		{"crash_sigabrt_linux", StopReasonCrash, exitCode(-1), "aborted", "", nil, ttl, "Killed by SIGABRT"},
+		{"crash_sigkill_with_prev", StopReasonCrash, exitCode(-1), "killed", "Running tests", &fresh, ttl, "Killed by SIGKILL (was: Running tests)"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := formatStopSummary(tt.reason, tt.exitCode, tt.prev, tt.prevSet, tt.ttl)
+			got := formatStopSummary(tt.reason, tt.exitCode, tt.exitSignal, tt.prev, tt.prevSet, tt.ttl)
 			if got != tt.expected {
 				t.Errorf("got %q, want %q", got, tt.expected)
 			}
@@ -144,13 +150,34 @@ func TestFormatStopSummary_CustomTTL(t *testing.T) {
 	shortTTL := 5 * time.Minute
 	longTTL := 1 * time.Hour
 
-	got := formatStopSummary(StopReasonUser, nil, "Waiting for CI", &thirtyMinAgo, shortTTL)
+	got := formatStopSummary(StopReasonUser, nil, "", "Waiting for CI", &thirtyMinAgo, shortTTL)
 	if got != "Stopped" {
 		t.Errorf("with short TTL, got %q, want %q — prev should be stale", got, "Stopped")
 	}
 
-	got = formatStopSummary(StopReasonUser, nil, "Waiting for CI", &thirtyMinAgo, longTTL)
+	got = formatStopSummary(StopReasonUser, nil, "", "Waiting for CI", &thirtyMinAgo, longTTL)
 	if got != "Stopped (was: Waiting for CI)" {
 		t.Errorf("with long TTL, got %q, want %q — prev should be fresh", got, "Stopped (was: Waiting for CI)")
+	}
+}
+
+func TestFormatSignalSummary(t *testing.T) {
+	tests := []struct {
+		signal   string
+		expected string
+	}{
+		{"killed", "Killed by SIGKILL"},
+		{"terminated", "Killed by SIGTERM"},
+		{"abort trap", "Killed by SIGABRT"},
+		{"aborted", "Killed by SIGABRT"},
+		{"hangup", "Killed by hangup"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.signal, func(t *testing.T) {
+			got := formatSignalSummary(tt.signal)
+			if got != tt.expected {
+				t.Errorf("formatSignalSummary(%q) = %q, want %q", tt.signal, got, tt.expected)
+			}
+		})
 	}
 }

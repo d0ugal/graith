@@ -21,7 +21,7 @@ func applyLifecycleSummaryLocked(s *SessionState, text string) {
 	s.SummaryTTL = 0
 }
 
-func formatStopSummary(reason string, exitCode *int, prev string, prevSetAt *time.Time, ttl time.Duration) string {
+func formatStopSummary(reason string, exitCode *int, exitSignal string, prev string, prevSetAt *time.Time, ttl time.Duration) string {
 	var base string
 	switch reason {
 	case StopReasonUser:
@@ -34,6 +34,8 @@ func formatStopSummary(reason string, exitCode *int, prev string, prevSetAt *tim
 		switch {
 		case exitCode != nil && *exitCode == 0:
 			base = "Exited"
+		case exitSignal != "":
+			base = formatSignalSummary(exitSignal)
 		case exitCode != nil:
 			base = fmt.Sprintf("Crashed exit %d", *exitCode)
 		default:
@@ -47,6 +49,19 @@ func formatStopSummary(reason string, exitCode *int, prev string, prevSetAt *tim
 		return base
 	}
 	return truncateWithContext(base, prev, 100)
+}
+
+func formatSignalSummary(sig string) string {
+	switch sig {
+	case "killed":
+		return "Killed by SIGKILL"
+	case "terminated":
+		return "Killed by SIGTERM"
+	case "abort trap", "aborted":
+		return "Killed by SIGABRT"
+	default:
+		return fmt.Sprintf("Killed by %s", sig)
+	}
 }
 
 func truncateWithContext(base, prev string, maxBytes int) string {

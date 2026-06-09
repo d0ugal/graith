@@ -228,6 +228,7 @@ type SessionInfo struct {
 	Status          string             `json:"status"`
 	AgentStatus     string             `json:"agent_status,omitempty"`
 	ExitCode        *int               `json:"exit_code,omitempty"`
+	ExitSignal      string             `json:"exit_signal,omitempty"`
 	CreatedAt       string             `json:"created_at"`
 	LastAttachedAt  string             `json:"last_attached_at,omitempty"`
 	StatusChangedAt string             `json:"status_changed_at,omitempty"`
