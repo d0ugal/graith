@@ -60,11 +60,15 @@ func (sm *SessionManager) generateClaudeSettings(sessionID string) (string, erro
 		Hooks: make(map[string][]matcherGroup),
 	}
 	for _, event := range events {
+		command := fmt.Sprintf("%s report-status --event %s", grBin, event)
+		if event == "PreToolUse" {
+			command = fmt.Sprintf("%s approve-request", grBin)
+		}
 		settings.Hooks[event] = []matcherGroup{
 			{
 				Matcher: "",
 				Hooks: []hookHandler{
-					{Type: "command", Command: fmt.Sprintf("%s report-status --event %s", grBin, event)},
+					{Type: "command", Command: command},
 				},
 			},
 		}
@@ -114,7 +118,12 @@ func (sm *SessionManager) injectCodexHooks(sessionID string) (extraArgs []string
 	}
 
 	for filename, eventName := range events {
-		script := fmt.Sprintf("#!/bin/sh\nexec '%s' report-status --event %s\n", grBin, eventName)
+		var script string
+		if filename == "permission-request" {
+			script = fmt.Sprintf("#!/bin/sh\nexec '%s' approve-request\n", grBin)
+		} else {
+			script = fmt.Sprintf("#!/bin/sh\nexec '%s' report-status --event %s\n", grBin, eventName)
+		}
 		path := filepath.Join(hooksDir, filename)
 		if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 			return nil, nil, fmt.Errorf("write codex hook %s: %w", filename, err)

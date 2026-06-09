@@ -77,11 +77,17 @@ func TestGenerateClaudeSettings(t *testing.T) {
 		if hook.Type != "command" {
 			t.Errorf("event %q type = %q, want %q", event, hook.Type, "command")
 		}
-		if !strings.Contains(hook.Command, "report-status") {
-			t.Errorf("event %q command = %q, does not contain report-status", event, hook.Command)
-		}
-		if !strings.Contains(hook.Command, "--event "+event) {
-			t.Errorf("event %q command = %q, does not contain --event %s", event, hook.Command, event)
+		if event == "PreToolUse" {
+			if !strings.Contains(hook.Command, "approve-request") {
+				t.Errorf("event %q command = %q, does not contain approve-request", event, hook.Command)
+			}
+		} else {
+			if !strings.Contains(hook.Command, "report-status") {
+				t.Errorf("event %q command = %q, does not contain report-status", event, hook.Command)
+			}
+			if !strings.Contains(hook.Command, "--event "+event) {
+				t.Errorf("event %q command = %q, does not contain --event %s", event, hook.Command, event)
+			}
 		}
 	}
 
@@ -244,11 +250,17 @@ func TestCodexHookScriptContent(t *testing.T) {
 		if !strings.HasPrefix(content, "#!/bin/sh") {
 			t.Errorf("codex hook %q missing shebang", filename)
 		}
-		if !strings.Contains(content, "--event "+eventName) {
-			t.Errorf("codex hook %q does not contain --event %s; content = %q", filename, eventName, content)
-		}
-		if !strings.Contains(content, "report-status") {
-			t.Errorf("codex hook %q does not contain report-status; content = %q", filename, content)
+		if filename == "permission-request" {
+			if !strings.Contains(content, "approve-request") {
+				t.Errorf("codex hook %q does not contain approve-request; content = %q", filename, content)
+			}
+		} else {
+			if !strings.Contains(content, "--event "+eventName) {
+				t.Errorf("codex hook %q does not contain --event %s; content = %q", filename, eventName, content)
+			}
+			if !strings.Contains(content, "report-status") {
+				t.Errorf("codex hook %q does not contain report-status; content = %q", filename, content)
+			}
 		}
 	}
 }
