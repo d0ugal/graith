@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -146,11 +148,13 @@ func StopDaemon(pidFile string) error {
 		return err
 	}
 
-	var pid int
-	if _, err := fmt.Sscanf(string(data), "%d", &pid); err != nil {
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		os.Remove(pidFile)
 		return fmt.Errorf("invalid pid file: %w", err)
 	}
 	if pid <= 1 {
+		os.Remove(pidFile)
 		return fmt.Errorf("refusing to signal invalid pid %d", pid)
 	}
 

@@ -87,7 +87,7 @@ func stopDaemonByPID(pidFile string) {
 		return
 	}
 	var pid int
-	if _, err := fmt.Sscanf(string(data), "%d", &pid); err != nil || pid <= 0 {
+	if _, err := fmt.Sscanf(string(data), "%d", &pid); err != nil || pid <= 1 {
 		return
 	}
 	_ = syscall.Kill(pid, syscall.SIGTERM)
