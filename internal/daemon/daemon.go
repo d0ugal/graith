@@ -489,6 +489,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 			os.RemoveAll(scratchDir)
 		}
 		sm.cleanupHooks(id)
+		os.Remove(logPath)
 		return SessionState{}, fmt.Errorf("persist session state: %w", err)
 	}
 
@@ -660,6 +661,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 		ptySess.Close()
 		_ = git.TeardownSession(repoRoot, worktreePath, branchName)
 		sm.cleanupHooks(id)
+		os.Remove(logPath)
 		return SessionState{}, fmt.Errorf("persist session state: %w", err)
 	}
 
