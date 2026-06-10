@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.3](https://github.com/d0ugal/graith/compare/v0.16.2...v0.16.3) (2026-06-10)
+
+
+### Bug Fixes
+
+* auto-restart daemon on version mismatch after upgrades ([ad1312f](https://github.com/d0ugal/graith/commit/ad1312f16ed5058bd6f466e441d5c28addc0a7ba))
+
 ## [0.16.2](https://github.com/d0ugal/graith/compare/v0.16.1...v0.16.2) (2026-06-10)
 
 
