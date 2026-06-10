@@ -234,15 +234,22 @@ func Default() *Config {
 				Args:       []string{"--session-id", "{agent_session_id}"},
 				ResumeArgs: []string{"--resume", "{agent_session_id}"},
 				ForkArgs:   []string{"--session-id", "{agent_session_id}", "--fork-session", "{fork_source_agent_session_id}"},
+				Sandbox:    SandboxConfig{ReadDirs: []string{"~/.claude"}, WriteDirs: []string{"~/.local/share/claude"}},
 			},
 			"codex": {
 				Command:    "codex",
 				Args:       []string{},
 				ResumeArgs: []string{"resume", "--last"},
 				ForkArgs:   []string{"fork", "{fork_source_agent_session_id}"},
+				Sandbox:    SandboxConfig{ReadDirs: []string{"~/.codex"}},
 			},
 			"opencode": {Command: "opencode", Args: []string{}, ResumeArgs: []string{"--session", "{agent_session_id}"}},
-			"agy":      {Command: "agy", Args: []string{}, ResumeArgs: []string{"--conversation", "{agent_session_id}"}},
+			"agy": {
+				Command:    "agy",
+				Args:       []string{},
+				ResumeArgs: []string{"--conversation", "{agent_session_id}"},
+				Sandbox:    SandboxConfig{ReadDirs: []string{"~/.gemini"}, WriteDirs: []string{"~/.gemini"}},
+			},
 		},
 	}
 }
