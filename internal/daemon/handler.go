@@ -135,6 +135,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				sm.KickAttachedClient(a.SessionID)
 				sm.SetAttachedClient(a.SessionID, conn,
 					func() {
+						conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
 						data, _ := protocol.EncodeControl("detached", protocol.DetachedMsg{Reason: "replaced"})
 						_ = writer.WriteFrame(protocol.ChannelControl, data)
 						conn.Close()
@@ -572,7 +573,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 			}
 
 		case protocol.ChannelData:
-			if attachedSessionID != "" {
+			if attachedSessionID != "" && sm.IsAttachedClient(attachedSessionID, conn) {
 				if pty, ok := sm.GetPTY(attachedSessionID); ok {
 					_ = pty.WriteInput(frame.Payload)
 				}

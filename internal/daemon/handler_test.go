@@ -1437,6 +1437,79 @@ func TestKickedClientConnectionClosed(t *testing.T) {
 	<-done2
 }
 
+func TestKickedClientInputRejected(t *testing.T) {
+	h1 := newTestHarness(t)
+	h1.addPTYSession(t, "rej1", "reject-test")
+
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	// Client A attaches
+	h1.sendControl(t, "attach", protocol.AttachMsg{SessionID: "rej1"})
+	env := h1.readControlMsg(t)
+	if env.Type != "attached" {
+		t.Fatalf("expected attached, got %q", env.Type)
+	}
+
+	// Verify A is the attached client
+	if !h1.sm.IsAttachedClient("rej1", h1.serverConn) {
+		t.Fatal("client A should be the attached client")
+	}
+
+	// Drain client A reads in background so kick callback can write.
+	go func() {
+		for {
+			if _, err := h1.reader.ReadFrame(); err != nil {
+				return
+			}
+		}
+	}()
+
+	// Client B attaches, kicking client A.
+	clientB, serverB := net.Pipe()
+	ctxB, cancelB := context.WithCancel(context.Background())
+	doneB := make(chan struct{})
+	go func() { defer close(doneB); HandleConnection(ctxB, serverB, h1.sm, log) }()
+
+	writerB := protocol.NewFrameWriter(clientB)
+	readerB := protocol.NewFrameReader(clientB)
+
+	data, _ := protocol.EncodeControl("attach", protocol.AttachMsg{SessionID: "rej1"})
+	writerB.WriteFrame(protocol.ChannelControl, data)
+
+	for {
+		frame, err := readerB.ReadFrame()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if frame.Channel == protocol.ChannelControl {
+			env2, _ := protocol.DecodeControl(frame.Payload)
+			if env2.Type == "attached" {
+				break
+			}
+		}
+	}
+
+	// Wait for client A's handler to exit.
+	select {
+	case <-h1.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("client A handler did not exit after kick")
+	}
+
+	// Client A is no longer the attached client; B is.
+	if h1.sm.IsAttachedClient("rej1", h1.serverConn) {
+		t.Error("client A should no longer be the attached client")
+	}
+	if !h1.sm.IsAttachedClient("rej1", serverB) {
+		t.Error("client B should be the attached client")
+	}
+
+	cancelB()
+	clientB.Close()
+	serverB.Close()
+	<-doneB
+}
+
 func TestAttachSetsLastAttachedAt(t *testing.T) {
 	h := newTestHarness(t)
 	h.addPTYSession(t, "att-ts", "attach-timestamp")
