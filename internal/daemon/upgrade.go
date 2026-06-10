@@ -150,6 +150,9 @@ func StopDaemon(pidFile string) error {
 	if _, err := fmt.Sscanf(string(data), "%d", &pid); err != nil {
 		return fmt.Errorf("invalid pid file: %w", err)
 	}
+	if pid <= 1 {
+		return fmt.Errorf("refusing to signal invalid pid %d", pid)
+	}
 
 	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
 		os.Remove(pidFile)
