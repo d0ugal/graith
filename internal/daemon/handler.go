@@ -467,6 +467,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "write failed: " + err.Error()})
 					continue
 				}
+				pty.Poke()
 				sendControl("typed", struct {
 					SessionID string `json:"session_id"`
 				}{t.SessionID})

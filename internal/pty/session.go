@@ -21,6 +21,7 @@ type Session struct {
 	Scrollback *Scrollback
 
 	mu             sync.RWMutex
+	writeMu        sync.Mutex
 	attachedWriter io.Writer
 	screen         vt10x.Terminal
 	done           chan struct{}
@@ -199,8 +200,24 @@ func (s *Session) waitLoop() {
 }
 
 func (s *Session) WriteInput(data []byte) error {
-	_, err := s.Ptmx.Write(data)
-	return err
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	s.mu.RLock()
+	exited := s.exited
+	s.mu.RUnlock()
+	if exited {
+		return fmt.Errorf("session process has exited")
+	}
+
+	n, err := s.Ptmx.Write(data)
+	if err != nil {
+		return err
+	}
+	if n != len(data) {
+		return io.ErrShortWrite
+	}
+	return nil
 }
 
 func (s *Session) Resize(rows, cols uint16) error {
@@ -208,6 +225,16 @@ func (s *Session) Resize(rows, cols uint16) error {
 	s.screen.Resize(int(cols), int(rows))
 	s.mu.Unlock()
 	return pty.Setsize(s.Ptmx, &pty.Winsize{Rows: rows, Cols: cols})
+}
+
+// Poke sends SIGWINCH to the foreground process group by re-applying
+// the current terminal size. This interrupts blocked reads and forces
+// TUI frameworks to re-check stdin, ensuring recently written input
+// is consumed.
+func (s *Session) Poke() {
+	if ws, err := pty.GetsizeFull(s.Ptmx); err == nil {
+		_ = pty.Setsize(s.Ptmx, ws)
+	}
 }
 
 func (s *Session) Attach(w io.Writer) { s.mu.Lock(); s.attachedWriter = w; s.mu.Unlock() }

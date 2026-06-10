@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -597,6 +598,109 @@ func TestAttachKicksPreviousClient(t *testing.T) {
 	newAttach := readControl(t, r2)
 	if newAttach.Type != "attached" {
 		t.Fatalf("expected new client attached, got %s", newAttach.Type)
+	}
+}
+
+func TestTypeDeliversInput(t *testing.T) {
+	env := setup(t)
+	defer env.teardown()
+
+	r, w := env.connect(t)
+	handshake(t, r, w)
+
+	sendControl(t, w, "create", protocol.CreateMsg{
+		Name: "type-test", Agent: "echo", RepoPath: env.repo, Base: "main",
+	})
+	createResp := readControl(t, r)
+	if createResp.Type == "error" {
+		var e protocol.ErrorMsg
+		protocol.DecodePayload(createResp, &e)
+		t.Fatalf("create error: %s", e.Message)
+	}
+	var info protocol.SessionInfo
+	protocol.DecodePayload(createResp, &info)
+
+	// Wait for the echo agent ("echo 'ready'; exec cat") to start.
+	ptySess, ok := env.sm.GetPTY(info.ID)
+	if !ok {
+		t.Fatal("PTY session not found")
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if tail, err := ptySess.Scrollback.TailBytes(4096); err == nil {
+			if strings.Contains(string(tail), "ready") {
+				break
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	// Send type command — cat should echo the text back.
+	sendControl(t, w, "type", protocol.TypeMsg{
+		SessionID: info.ID,
+		Input:     "hello-from-type-test",
+	})
+	typeResp := readControl(t, r)
+	if typeResp.Type == "error" {
+		var e protocol.ErrorMsg
+		protocol.DecodePayload(typeResp, &e)
+		t.Fatalf("type error: %s", e.Message)
+	}
+	if typeResp.Type != "typed" {
+		t.Fatalf("expected typed, got %s", typeResp.Type)
+	}
+
+	// Verify the text appears in the scrollback (echoed by cat).
+	found := false
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if tail, err := ptySess.Scrollback.TailBytes(4096); err == nil {
+			if strings.Contains(string(tail), "hello-from-type-test") {
+				found = true
+				break
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !found {
+		t.Error("typed text not found in scrollback — input was not delivered to the session")
+	}
+}
+
+func TestTypeExitedSessionFails(t *testing.T) {
+	env := setup(t)
+	defer env.teardown()
+
+	r, w := env.connect(t)
+	handshake(t, r, w)
+
+	sendControl(t, w, "create", protocol.CreateMsg{
+		Name: "type-exited", Agent: "echo", RepoPath: env.repo, Base: "main",
+	})
+	createResp := readControl(t, r)
+	var info protocol.SessionInfo
+	protocol.DecodePayload(createResp, &info)
+
+	// Stop the session so the process exits.
+	sendControl(t, w, "stop", protocol.StopMsg{SessionID: info.ID})
+	stopResp := readControl(t, r)
+	if stopResp.Type == "error" {
+		var e protocol.ErrorMsg
+		protocol.DecodePayload(stopResp, &e)
+		t.Fatalf("stop error: %s", e.Message)
+	}
+
+	// Wait for the process to actually exit.
+	time.Sleep(500 * time.Millisecond)
+
+	// Type into the exited session — should get an error.
+	sendControl(t, w, "type", protocol.TypeMsg{
+		SessionID: info.ID,
+		Input:     "should-fail",
+	})
+	typeResp := readControl(t, r)
+	if typeResp.Type != "error" {
+		t.Errorf("expected error for type into exited session, got %s", typeResp.Type)
 	}
 }
 
