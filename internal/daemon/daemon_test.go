@@ -1607,6 +1607,21 @@ func TestResumeResetsIdleSince(t *testing.T) {
 		t.Fatalf("Resume() error = %v", err)
 	}
 
+	// Clean up the PTY session so its file handles are closed before
+	// t.TempDir() cleanup removes the working directory.
+	t.Cleanup(func() {
+		sm.mu.RLock()
+		ptySess := sm.sessions[id]
+		sm.mu.RUnlock()
+		if ptySess != nil {
+			select {
+			case <-ptySess.Done():
+			case <-time.After(5 * time.Second):
+			}
+			ptySess.Close()
+		}
+	})
+
 	if resumed.Status != StatusRunning {
 		t.Errorf("status = %q, want %q", resumed.Status, StatusRunning)
 	}
