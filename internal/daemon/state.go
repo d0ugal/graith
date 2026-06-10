@@ -47,6 +47,7 @@ type SessionState struct {
 	Sandboxed          bool                  `json:"sandboxed,omitempty"`
 	SandboxConfig      *config.SandboxConfig `json:"sandbox_config,omitempty"`
 	SharedWorktree     bool                  `json:"shared_worktree,omitempty"`
+	InPlace            bool                  `json:"in_place,omitempty"`
 	AgentHooks         bool                  `json:"agent_hooks,omitempty"`
 	CreatedAt          time.Time             `json:"created_at"`
 	LastAttachedAt     *time.Time            `json:"last_attached_at,omitempty"`

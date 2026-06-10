@@ -11,15 +11,17 @@ import (
 )
 
 var (
-	newAgent         string
-	newBase          string
-	newBackground    bool
-	newPrompt        string
-	newPromptFile    string
-	newRepo          string
-	newNoRepo        bool
-	newShareWorktree string
-	newAgentHooks    bool
+	newAgent           string
+	newBase            string
+	newBackground      bool
+	newPrompt          string
+	newPromptFile      string
+	newRepo            string
+	newNoRepo          bool
+	newShareWorktree   string
+	newAgentHooks      bool
+	newInPlace         bool
+	newAllowConcurrent bool
 )
 
 var newCmd = &cobra.Command{
@@ -41,6 +43,19 @@ var newCmd = &cobra.Command{
 			agent = cfg.DefaultAgent
 		}
 
+		if newAllowConcurrent && !newInPlace {
+			return fmt.Errorf("--allow-concurrent requires --in-place")
+		}
+		if newInPlace && newNoRepo {
+			return fmt.Errorf("--in-place and --no-repo are mutually exclusive")
+		}
+		if newInPlace && newShareWorktree != "" {
+			return fmt.Errorf("--in-place and --share-worktree are mutually exclusive")
+		}
+		if newInPlace && newBase != "" {
+			return fmt.Errorf("--in-place and --base are mutually exclusive (in-place sessions don't create branches)")
+		}
+
 		prompt := newPrompt
 		if newPromptFile != "" {
 			data, err := os.ReadFile(newPromptFile)
@@ -57,14 +72,16 @@ var newCmd = &cobra.Command{
 		defer c.Close()
 
 		c.SendControl("create", protocol.CreateMsg{
-			Name:          name,
-			Agent:         agent,
-			RepoPath:      repoPath,
-			Base:          newBase,
-			Prompt:        prompt,
-			NoRepo:        newNoRepo,
-			ShareWorktree: newShareWorktree,
-			AgentHooks:    newAgentHooks,
+			Name:            name,
+			Agent:           agent,
+			RepoPath:        repoPath,
+			Base:            newBase,
+			Prompt:          prompt,
+			NoRepo:          newNoRepo,
+			ShareWorktree:   newShareWorktree,
+			AgentHooks:      newAgentHooks,
+			InPlace:         newInPlace,
+			AllowConcurrent: newAllowConcurrent,
 		})
 
 		resp, err := c.ReadControlResponse()
@@ -111,6 +128,8 @@ func init() {
 	newCmd.Flags().StringVar(&newShareWorktree, "share-worktree", "", "share another session's worktree (read-only)")
 	// TODO: make --agent-hooks the default once hooks are well-tested
 	newCmd.Flags().BoolVar(&newAgentHooks, "agent-hooks", false, "enable agent lifecycle hooks (status, approvals, inbox)")
+	newCmd.Flags().BoolVar(&newInPlace, "in-place", false, "run agent directly in the repo without creating a worktree")
+	newCmd.Flags().BoolVar(&newAllowConcurrent, "allow-concurrent", false, "allow multiple in-place sessions on the same repo")
 	newCmd.RegisterFlagCompletionFunc("agent", completeAgentNames)
 	newCmd.RegisterFlagCompletionFunc("repo", completeRepoPaths)
 	newCmd.RegisterFlagCompletionFunc("base", completeBranchNames)

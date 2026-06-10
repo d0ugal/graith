@@ -655,6 +655,72 @@ func TestMergeAgent(t *testing.T) {
 	})
 }
 
+func TestLoadConfigRepos(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	toml := `
+[[repos]]
+path = "~/Code/devenv"
+
+[[repos]]
+path = "~/Code/scripts"
+allow_concurrent = true
+`
+	os.WriteFile(cfgPath, []byte(toml), 0o644)
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Repos) != 2 {
+		t.Fatalf("Repos = %d entries, want 2", len(cfg.Repos))
+	}
+	if cfg.Repos[0].Path != "~/Code/devenv" {
+		t.Errorf("Repos[0].Path = %q, want ~/Code/devenv", cfg.Repos[0].Path)
+	}
+	if cfg.Repos[0].AllowConcurrent {
+		t.Error("Repos[0].AllowConcurrent = true, want false (default)")
+	}
+	if !cfg.Repos[1].AllowConcurrent {
+		t.Error("Repos[1].AllowConcurrent = false, want true")
+	}
+}
+
+func TestFindRepo(t *testing.T) {
+	home, _ := os.UserHomeDir()
+
+	t.Run("exact match", func(t *testing.T) {
+		cfg := &Config{Repos: []RepoConfig{{Path: "~/Code/devenv"}}}
+		rc, ok := cfg.FindRepo(filepath.Join(home, "Code", "devenv"))
+		if !ok {
+			t.Fatal("expected to find repo")
+		}
+		if rc.Path != "~/Code/devenv" {
+			t.Errorf("Path = %q, want ~/Code/devenv", rc.Path)
+		}
+	})
+
+	t.Run("no match", func(t *testing.T) {
+		cfg := &Config{Repos: []RepoConfig{{Path: "~/Code/devenv"}}}
+		_, ok := cfg.FindRepo("/tmp/random")
+		if ok {
+			t.Error("expected no match for /tmp/random")
+		}
+	})
+
+	t.Run("symlink resolved", func(t *testing.T) {
+		actual := t.TempDir()
+		link := filepath.Join(t.TempDir(), "link")
+		if err := os.Symlink(actual, link); err != nil {
+			t.Skipf("symlinks not supported: %v", err)
+		}
+		cfg := &Config{Repos: []RepoConfig{{Path: actual}}}
+		_, ok := cfg.FindRepo(link)
+		if !ok {
+			t.Error("expected symlink to resolve and match")
+		}
+	})
+}
+
 func TestSandboxConfigMergeDeduplicatesFeatures(t *testing.T) {
 	global := SandboxConfig{
 		Enabled:  true,

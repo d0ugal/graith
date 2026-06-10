@@ -127,6 +127,8 @@ var listCmd = &cobra.Command{
 				if len(parts) == 3 {
 					branch = parts[2]
 				}
+			} else if s.InPlace {
+				branch = "(in-place)"
 			}
 
 			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
