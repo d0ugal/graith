@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.16.6](https://github.com/d0ugal/graith/compare/v0.16.5...v0.16.6) (2026-06-10)
+
+
+### Bug Fixes
+
+* clean up PTY session in TestResumeResetsIdleSince to avoid TempDir race ([44e91b2](https://github.com/d0ugal/graith/commit/44e91b2ac5b220b57aa3d46987f9e2b35ed30725))
+* clear IdleSince on Resume, make watchSession tests deterministic ([26af24b](https://github.com/d0ugal/graith/commit/26af24b75b5966aeee31a7a7402a16a26aa4324e))
+* prevent stale watchSession from corrupting resumed session state ([aa6e5f3](https://github.com/d0ugal/graith/commit/aa6e5f3a996f6c3b1711ec8dd4a37de3b35fc1ae))
+* restore exec upgrade for auto-restart to preserve sessions ([d4e3ea3](https://github.com/d0ugal/graith/commit/d4e3ea3700f90b6bd91c02199191c556fb30b22b))
+* satisfy SA2001 by reading state inside the lock barrier ([1620306](https://github.com/d0ugal/graith/commit/16203068fa04f97a03542f8fe3564d46bca0c157))
+* synchronous PTY cleanup in TestResumeResetsIdleSince ([0926259](https://github.com/d0ugal/graith/commit/092625946511a05737d89c6b7dc00696ddfc07a0))
+* use single tmpDir with LogDir set in TestResumeResetsIdleSince ([fb9ac6b](https://github.com/d0ugal/graith/commit/fb9ac6b243e16e45ad795517ac87bbbe87c14e3a))
+* verify daemon version after exec upgrade to catch stale restarts ([4432d73](https://github.com/d0ugal/graith/commit/4432d73447bbe4403eb3882a640f91372532459d))
+
 ## [0.16.5](https://github.com/d0ugal/graith/compare/v0.16.4...v0.16.5) (2026-06-10)
 
 
