@@ -167,10 +167,12 @@ func TestParseDurationWithDays(t *testing.T) {
 		{"7d12h", 7*24*time.Hour + 12*time.Hour},
 		{"1d30m", 24*time.Hour + 30*time.Minute},
 		{"2d1h30m", 2*24*time.Hour + 1*time.Hour + 30*time.Minute},
+		{"0d5h", 5 * time.Hour},
 		{"24h", 24 * time.Hour},
 		{"30m", 30 * time.Minute},
 		{"", 0},
 		{"bogus", 0},
+		{"d5h", 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
