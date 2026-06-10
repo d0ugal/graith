@@ -44,7 +44,7 @@ func newTestHarness(t *testing.T) *testHarness {
 
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	sm := NewSessionManager(cfg, paths, log)
-	sm.upgradeCh = make(chan struct{}, 1)
+	sm.upgradeCh = make(chan string, 1)
 
 	msgStore, err := NewMsgStore(paths.MessagesDB)
 	if err != nil {
@@ -784,7 +784,7 @@ func TestUpgradeAlreadyInProgress(t *testing.T) {
 	h := newTestHarness(t)
 
 	// Fill the channel so the next send hits default case
-	h.sm.upgradeCh <- struct{}{}
+	h.sm.upgradeCh <- ""
 
 	h.sendControl(t, "upgrade", struct{}{})
 
@@ -1220,7 +1220,7 @@ func TestContextCancellation(t *testing.T) {
 
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	sm := NewSessionManager(cfg, paths, log)
-	sm.upgradeCh = make(chan struct{}, 1)
+	sm.upgradeCh = make(chan string, 1)
 
 	msgStore, _ := NewMsgStore(paths.MessagesDB)
 	defer msgStore.Close()

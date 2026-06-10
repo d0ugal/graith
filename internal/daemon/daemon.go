@@ -53,7 +53,7 @@ type SessionManager struct {
 	paths            config.Paths
 	log              *slog.Logger
 	configFile       string
-	upgradeCh        chan struct{}
+	upgradeCh        chan string
 	messages         *MsgStore
 }
 
@@ -1378,7 +1378,7 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 
 	sm := NewSessionManager(cfg, paths, log)
 	sm.configFile = configFile
-	sm.upgradeCh = make(chan struct{}, 1)
+	sm.upgradeCh = make(chan string, 1)
 
 	msgStore, err := NewMsgStore(paths.MessagesDB)
 	if err != nil {
@@ -1474,8 +1474,8 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 			ReleasePIDFile(paths.PIDFile)
 			return nil
 
-		case <-sm.upgradeCh:
-			log.Info("preparing upgrade")
+		case clientExecPath := <-sm.upgradeCh:
+			log.Info("preparing upgrade", "client_exec_path", clientExecPath)
 
 			unixL, ok := l.(*net.UnixListener)
 			if !ok {
@@ -1505,7 +1505,7 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 
 			log.Info("exec-ing new binary", "manifest", manifestPath, "sessions", len(manifest.Sessions))
 
-			if err := ExecUpgrade(manifestPath, configFile); err != nil {
+			if err := ExecUpgrade(manifestPath, configFile, clientExecPath); err != nil {
 				listenerFile.Close()
 				os.Remove(manifestPath)
 				log.Error("exec failed", "err", err)
