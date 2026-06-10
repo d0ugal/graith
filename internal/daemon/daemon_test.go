@@ -145,7 +145,6 @@ func TestRename(t *testing.T) {
 			t.Fatal("expected error for nonexistent session")
 		}
 	})
-
 }
 
 func TestList(t *testing.T) {
