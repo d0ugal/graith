@@ -500,6 +500,10 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 		return SessionState{}, fmt.Errorf("source session %q not found", sourceSessionID)
 	}
 
+	if source.RepoPath == "" {
+		return SessionState{}, fmt.Errorf("cannot fork session %q: source has no repo (fork requires a git repository)", source.Name)
+	}
+
 	agentName := source.Agent
 	agent, ok := sm.cfg.Agents[agentName]
 	if !ok {
