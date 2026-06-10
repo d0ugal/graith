@@ -228,13 +228,13 @@ func (s *Session) Resize(rows, cols uint16) error {
 	return pty.Setsize(s.Ptmx, &pty.Winsize{Rows: rows, Cols: cols})
 }
 
-// Poke sends SIGWINCH to the foreground process group by re-applying
-// the current terminal size. This interrupts blocked reads and forces
-// TUI frameworks to re-check stdin, ensuring recently written input
-// is consumed.
+// Poke sends SIGWINCH to the session's process group. This interrupts
+// blocked reads and forces TUI frameworks to re-check stdin, ensuring
+// recently written input is consumed. The child process was started
+// with Setsid, so its PID equals its process group ID.
 func (s *Session) Poke() {
-	if ws, err := pty.GetsizeFull(s.Ptmx); err == nil {
-		_ = pty.Setsize(s.Ptmx, ws)
+	if pid := s.ProcessPID(); pid > 0 {
+		_ = syscall.Kill(-pid, syscall.SIGWINCH)
 	}
 }
 
