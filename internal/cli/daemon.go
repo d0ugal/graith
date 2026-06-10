@@ -143,13 +143,21 @@ func execUpgrade(successMsg string) error {
 }
 
 func restartClean() error {
-	_ = daemon.StopDaemon(paths.PIDFile)
+	if err := daemon.StopDaemon(paths.PIDFile); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
+	}
 
 	for range 20 {
 		if _, err := os.Stat(paths.SocketPath); os.IsNotExist(err) {
 			break
 		}
 		time.Sleep(100 * time.Millisecond)
+	}
+	if _, err := os.Stat(paths.SocketPath); err == nil {
+		if conn, err := net.DialTimeout("unix", paths.SocketPath, 500*time.Millisecond); err == nil {
+			conn.Close()
+			return fmt.Errorf("daemon is still running, cannot restart cleanly")
+		}
 	}
 	os.Remove(paths.SocketPath)
 
