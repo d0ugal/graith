@@ -966,6 +966,24 @@ func TestDetectAgentStatusesHookAuthority(t *testing.T) {
 	})
 }
 
+func TestForkNoRepoSession(t *testing.T) {
+	sm := newTestSessionManager(t)
+	sm.state.Sessions["norepo1"] = &SessionState{
+		ID:     "norepo1",
+		Name:   "scratch-session",
+		Agent:  "claude",
+		Status: StatusRunning,
+	}
+
+	_, err := sm.Fork("forked", "norepo1", 24, 80)
+	if err == nil {
+		t.Fatal("Fork() should fail for no-repo source session")
+	}
+	if !strings.Contains(err.Error(), "no repo") {
+		t.Errorf("Fork() error = %q, want error mentioning 'no repo'", err)
+	}
+}
+
 func TestApplyConfig(t *testing.T) {
 	sm := newTestSessionManager(t)
 	oldCfg := sm.cfg
