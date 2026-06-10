@@ -1451,6 +1451,24 @@ func TestResolveStoredSandboxConfig(t *testing.T) {
 		}
 	})
 
+	t.Run("fallback expands relative paths", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.cfg.Sandbox = config.SandboxConfig{
+			Enabled:  true,
+			ReadDirs: []string{"~/some-dir"},
+		}
+
+		sess := &SessionState{Agent: "claude", SandboxConfig: nil}
+
+		got := sm.resolveStoredSandboxConfig(sess)
+		if len(got.ReadDirs) != 1 {
+			t.Fatalf("ReadDirs = %v, want 1 element", got.ReadDirs)
+		}
+		if got.ReadDirs[0] == "~/some-dir" {
+			t.Error("ReadDirs should be expanded, got raw ~/some-dir")
+		}
+	})
+
 	t.Run("falls back merges global and agent config", func(t *testing.T) {
 		sm := newTestSessionManager(t)
 		sm.cfg.Sandbox = config.SandboxConfig{

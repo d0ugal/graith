@@ -435,6 +435,8 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 	var mergedSandbox *config.SandboxConfig
 	if sandboxed {
 		merged := sm.cfg.Sandbox.Merge(sm.cfg.Agents[agentName].Sandbox)
+		merged.ReadDirs = expandPaths(merged.ReadDirs)
+		merged.WriteDirs = expandPaths(merged.WriteDirs)
 		mergedSandbox = &merged
 		envKeys := []string{"GRAITH_SESSION_ID", "GRAITH_SESSION_NAME", "GRAITH_WORKTREE_PATH", "TERM"}
 		for k := range agent.Env {
@@ -1334,7 +1336,10 @@ func (sm *SessionManager) resolveStoredSandboxConfig(sess *SessionState) config.
 	if sess.SandboxConfig != nil {
 		return *sess.SandboxConfig
 	}
-	return sm.cfg.Sandbox.Merge(sm.cfg.Agents[sess.Agent].Sandbox)
+	merged := sm.cfg.Sandbox.Merge(sm.cfg.Agents[sess.Agent].Sandbox)
+	merged.ReadDirs = expandPaths(merged.ReadDirs)
+	merged.WriteDirs = expandPaths(merged.WriteDirs)
+	return merged
 }
 
 func (sm *SessionManager) sandboxOpts(agentName, sessionID, worktreePath string, envKeys []string, agentHooks bool) sandbox.WrapOpts {
