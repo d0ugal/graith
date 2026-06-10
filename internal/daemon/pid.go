@@ -6,7 +6,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"syscall"
 )
 
 var ErrDaemonRunning = errors.New("daemon already running")
@@ -38,9 +37,5 @@ func ReleasePIDFile(path string) {
 }
 
 func isPIDAlive(pid int) bool {
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	return proc.Signal(syscall.Signal(0)) == nil
+	return isProcessAlive(pid)
 }
