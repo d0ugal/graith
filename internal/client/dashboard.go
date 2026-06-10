@@ -32,14 +32,15 @@ type DashboardResult struct {
 }
 
 type DashboardModel struct {
-	sessions []protocol.SessionInfo
-	cursor   int
-	offset   int
-	width    int
-	height   int
-	state    dashboardState
-	result   *DashboardResult
-	refresh  func() []protocol.SessionInfo
+	sessions         []protocol.SessionInfo
+	cursor           int
+	offset           int
+	width            int
+	height           int
+	state            dashboardState
+	confirmSessionID string
+	result           *DashboardResult
+	refresh          func() []protocol.SessionInfo
 }
 
 func NewDashboardModel(sessions []protocol.SessionInfo, refresh func() []protocol.SessionInfo) DashboardModel {
@@ -114,6 +115,19 @@ func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
+		if m.confirmSessionID != "" {
+			found := false
+			for _, s := range m.sessions {
+				if s.ID == m.confirmSessionID {
+					found = true
+					break
+				}
+			}
+			if !found {
+				m.state = dashStateNormal
+				m.confirmSessionID = ""
+			}
+		}
 		m.scrollToCursor()
 		return m, nil
 
@@ -128,26 +142,30 @@ func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case dashStateConfirmDelete:
 			switch msg.String() {
 			case "y", "Y":
-				if s := m.selectedSession(); s != nil {
-					m.result = &DashboardResult{Action: "delete", SessionID: s.ID}
+				if m.confirmSessionID != "" {
+					m.result = &DashboardResult{Action: "delete", SessionID: m.confirmSessionID}
 					return m, tea.Quit
 				}
 				m.state = dashStateNormal
+				m.confirmSessionID = ""
 			default:
 				m.state = dashStateNormal
+				m.confirmSessionID = ""
 			}
 			return m, nil
 
 		case dashStateConfirmStop:
 			switch msg.String() {
 			case "y", "Y":
-				if s := m.selectedSession(); s != nil {
-					m.result = &DashboardResult{Action: "stop", SessionID: s.ID}
+				if m.confirmSessionID != "" {
+					m.result = &DashboardResult{Action: "stop", SessionID: m.confirmSessionID}
 					return m, tea.Quit
 				}
 				m.state = dashStateNormal
+				m.confirmSessionID = ""
 			default:
 				m.state = dashStateNormal
+				m.confirmSessionID = ""
 			}
 			return m, nil
 
@@ -176,11 +194,13 @@ func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "s":
 				if s := m.selectedSession(); s != nil && s.Status == "running" {
 					m.state = dashStateConfirmStop
+					m.confirmSessionID = s.ID
 				}
 				return m, nil
 			case "x", "d":
 				if s := m.selectedSession(); s != nil {
 					m.state = dashStateConfirmDelete
+					m.confirmSessionID = s.ID
 				}
 				return m, nil
 			case "r":
@@ -276,13 +296,13 @@ func (m DashboardModel) View() tea.View {
 	// Confirmation prompts
 	switch m.state {
 	case dashStateConfirmDelete:
-		if s := m.selectedSession(); s != nil {
+		if s := m.sessionByID(m.confirmSessionID); s != nil {
 			b.WriteString("\n")
 			b.WriteString(warningStyle.Render(fmt.Sprintf("  Delete '%s'? [y/N]", s.Name)))
 			b.WriteString("\n")
 		}
 	case dashStateConfirmStop:
-		if s := m.selectedSession(); s != nil {
+		if s := m.sessionByID(m.confirmSessionID); s != nil {
 			b.WriteString("\n")
 			b.WriteString(warningStyle.Render(fmt.Sprintf("  Stop '%s'? [y/N]", s.Name)))
 			b.WriteString("\n")
@@ -471,6 +491,15 @@ func (m DashboardModel) renderRow(s protocol.SessionInfo, cols dashCols, now tim
 func (m DashboardModel) selectedSession() *protocol.SessionInfo {
 	if m.cursor >= 0 && m.cursor < len(m.sessions) {
 		return &m.sessions[m.cursor]
+	}
+	return nil
+}
+
+func (m DashboardModel) sessionByID(id string) *protocol.SessionInfo {
+	for i, s := range m.sessions {
+		if s.ID == id {
+			return &m.sessions[i]
+		}
 	}
 	return nil
 }
