@@ -623,7 +623,8 @@ func TestAckMessagesDoesNotSkipOtherThreads(t *testing.T) {
 	s.Publish("topic", "s1", "a", "threadA reply", m1.ID, "")
 	s.Publish("topic", "s2", "b", "unthreaded msg", "", "")
 
-	// Ack only the thread-A messages (seq 1 and 3) using per-message ack.
+	// Thread filter returns only the reply (seq 3); the root message has no
+	// thread_id set. Ack only the reply using per-message ack.
 	threadMsgs, _ := s.Read("topic", "reader1", true, m1.ID)
 	if len(threadMsgs) != 1 {
 		t.Fatalf("thread msgs = %d, want 1", len(threadMsgs))
@@ -634,11 +635,10 @@ func TestAckMessagesDoesNotSkipOtherThreads(t *testing.T) {
 	}
 	s.AckMessages("topic", "reader1", seqs)
 
-	// Reading unread without thread filter should still return threadB and
-	// unthreaded messages — they must not have been silently acked.
+	// All other messages (root, threadB, unthreaded) must remain unread.
 	unread, _ := s.Read("topic", "reader1", true, "")
 	if len(unread) != 3 {
-		t.Fatalf("unread = %d, want 3 (threadA start + threadB + unthreaded)", len(unread))
+		t.Fatalf("unread = %d, want 3 (root + threadB + unthreaded)", len(unread))
 	}
 
 	// Reading unread for thread-A should return nothing (already acked).
