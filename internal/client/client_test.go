@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net"
 	"testing"
+	"time"
 
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
@@ -183,6 +184,28 @@ func TestReadControlResponseWithDataFrame(t *testing.T) {
 	want := "expected control frame, got channel 1"
 	if err.Error() != want {
 		t.Errorf("error = %q, want %q", err.Error(), want)
+	}
+}
+
+func TestApprovalDeadline(t *testing.T) {
+	tests := []struct {
+		name    string
+		timeout time.Duration
+		want    time.Duration
+	}{
+		{"normal 10m", 10 * time.Minute, 11 * time.Minute},
+		{"large 30m", 30 * time.Minute, 31 * time.Minute},
+		{"zero", 0, time.Minute},
+		{"negative clamped", -5 * time.Minute, time.Minute},
+		{"small negative", -30 * time.Second, time.Minute},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := approvalDeadline(tt.timeout)
+			if got != tt.want {
+				t.Errorf("approvalDeadline(%v) = %v, want %v", tt.timeout, got, tt.want)
+			}
+		})
 	}
 }
 
