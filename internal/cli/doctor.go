@@ -73,6 +73,9 @@ var doctorCmd = &cobra.Command{
 			out.Print("  ○ No config file (using defaults): %s\n", paths.ConfigFile)
 		}
 
+		if paths.Profile != "" {
+			out.Print("  ✓ Profile: %s\n", paths.Profile)
+		}
 		out.Print("  ✓ Data dir: %s\n", paths.DataDir)
 		out.Print("  ✓ Runtime dir: %s\n", paths.RuntimeDir)
 		out.Print("  ✓ Daemon log: %s\n", paths.DaemonLog)

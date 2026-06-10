@@ -360,6 +360,7 @@ type overlayModel struct {
 	deleteSession    func(sessionID string) error
 	previewContent   string
 	previewSessionID string
+	profile          string
 }
 
 // OverlayResult holds the outcome of the overlay interaction.
@@ -731,7 +732,12 @@ func (m overlayModel) View() tea.View {
 		panelContent.WriteString("\n")
 	} else {
 		titleStyle := lipgloss.NewStyle().Bold(true).Foreground(colorPurple)
-		panelContent.WriteString(titleStyle.Render("Sessions"))
+		title := titleStyle.Render("Sessions")
+		if m.profile != "" {
+			dimStyle := lipgloss.NewStyle().Foreground(colorDim)
+			title += " " + dimStyle.Render("["+m.profile+"]")
+		}
+		panelContent.WriteString(title)
 		panelContent.WriteString("\n")
 	}
 
@@ -910,8 +916,9 @@ func (m overlayModel) View() tea.View {
 // RunOverlay launches the bubbletea overlay listing sessions grouped by repo.
 // currentSessionID highlights the session the user was just attached to.
 // fetchPreview is called asynchronously to load scrollback for the selected session.
-func RunOverlay(sessions []protocol.SessionInfo, currentSessionID string, fetchPreview func(sessionID string) string, deleteSession func(sessionID string) error) *OverlayResult {
+func RunOverlay(sessions []protocol.SessionInfo, currentSessionID string, fetchPreview func(sessionID string) string, deleteSession func(sessionID string) error, profile string) *OverlayResult {
 	m := newOverlayModel(sessions, currentSessionID, fetchPreview, deleteSession)
+	m.profile = profile
 	p := tea.NewProgram(m)
 
 	final, err := p.Run()

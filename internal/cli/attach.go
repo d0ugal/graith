@@ -54,7 +54,7 @@ func runAttach(cmd *cobra.Command, name string) error {
 	}
 
 	if name == "" {
-		result := client.RunOverlay(list.Sessions, "", previewFetcher(), deleteSession)
+		result := client.RunOverlay(list.Sessions, "", previewFetcher(), deleteSession, paths.Profile)
 		if result == nil {
 			return nil
 		}
@@ -159,7 +159,7 @@ func runAttachByID(c *client.Client, sessionID string) error {
 			var list protocol.SessionListMsg
 			protocol.DecodePayload(listResp, &list)
 
-			overlayResult := client.RunOverlay(list.Sessions, sessionID, previewFetcher(), deleteSession)
+			overlayResult := client.RunOverlay(list.Sessions, sessionID, previewFetcher(), deleteSession, paths.Profile)
 			if overlayResult == nil {
 				restoreScreen(sessionID)
 				nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})

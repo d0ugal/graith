@@ -70,6 +70,10 @@ var listCmd = &cobra.Command{
 
 		now := time.Now()
 
+		if paths.Profile != "" {
+			fmt.Fprintf(cmd.OutOrStdout(), "Profile: %s\n\n", paths.Profile)
+		}
+
 		tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
 		fmt.Fprintln(tw, "NAME\tREPO\tAGENT\tSTATUS\tACTIVITY\tMODEL\tCOST\tBRANCH\tGIT\tAGE\tATTACHED")
 		for _, s := range list.Sessions {
