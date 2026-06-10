@@ -271,6 +271,9 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 	if inPlace && shareWorktree != "" {
 		return SessionState{}, fmt.Errorf("--in-place and --share-worktree are mutually exclusive")
 	}
+	if inPlace && baseBranch != "" {
+		return SessionState{}, fmt.Errorf("--in-place and --base are mutually exclusive (in-place sessions don't create branches)")
+	}
 
 	agent, ok := sm.cfg.Agents[agentName]
 	if !ok {
@@ -308,20 +311,6 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 			return SessionState{}, fmt.Errorf("create scratch dir: %w", err)
 		}
 	case inPlace:
-		rc, ok := sm.cfg.FindRepo(repoPath)
-		if !ok {
-			return SessionState{}, fmt.Errorf("repo path %q is not configured in [[repos]] — add it to config to use --in-place", repoPath)
-		}
-
-		if !allowConcurrent && !rc.AllowConcurrent {
-			resolvedPath := config.ResolvePath(repoPath)
-			for _, s := range sm.state.Sessions {
-				if s.InPlace && config.ResolvePath(s.WorktreePath) == resolvedPath && s.Status == StatusRunning {
-					return SessionState{}, fmt.Errorf("an in-place session %q is already running in %q — use --allow-concurrent to override", s.Name, repoPath)
-				}
-			}
-		}
-
 		if !git.IsInsideGitRepo(repoPath) {
 			return SessionState{}, fmt.Errorf("not inside a git repository: %s", repoPath)
 		}
@@ -330,6 +319,20 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 		repoRoot, err = git.RepoRootPath(repoPath)
 		if err != nil {
 			return SessionState{}, fmt.Errorf("find repo root: %w", err)
+		}
+
+		rc, ok := sm.cfg.FindRepo(repoRoot)
+		if !ok {
+			return SessionState{}, fmt.Errorf("repo root %q is not configured in [[repos]] — add it to config to use --in-place", repoRoot)
+		}
+
+		if !allowConcurrent && !rc.AllowConcurrent {
+			canonicalRoot := config.ResolvePath(repoRoot)
+			for _, s := range sm.state.Sessions {
+				if s.InPlace && config.ResolvePath(s.WorktreePath) == canonicalRoot && s.Status == StatusRunning {
+					return SessionState{}, fmt.Errorf("an in-place session %q is already running in %q — use --allow-concurrent to override", s.Name, repoRoot)
+				}
+			}
 		}
 
 		repoName = filepath.Base(repoRoot)
@@ -821,6 +824,16 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 	}
 
 	if sessState.InPlace {
+		if !git.IsInsideGitRepo(sessState.WorktreePath) {
+			return SessionState{}, fmt.Errorf("in-place repo path %q is no longer a git repository", sessState.WorktreePath)
+		}
+		currentRoot, err := git.RepoRootPath(sessState.WorktreePath)
+		if err != nil {
+			return SessionState{}, fmt.Errorf("resolve in-place repo root: %w", err)
+		}
+		if config.ResolvePath(currentRoot) != config.ResolvePath(sessState.WorktreePath) {
+			return SessionState{}, fmt.Errorf("in-place repo root changed: saved %q, current %q", sessState.WorktreePath, currentRoot)
+		}
 		rc, ok := sm.cfg.FindRepo(sessState.WorktreePath)
 		if !ok {
 			return SessionState{}, fmt.Errorf("repo path %q is no longer configured in [[repos]] — add it back to config to resume this in-place session", sessState.WorktreePath)
