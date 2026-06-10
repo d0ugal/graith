@@ -1,0 +1,94 @@
+# graith sample configuration
+# Copy to ~/.config/graith/config.toml and customize.
+# All fields are optional — defaults are shown below.
+
+# default_agent = "claude"
+# branch_prefix = "{username}/graith"
+# fetch_on_create = true
+# github_username = ""
+# allowed_repo_paths = []
+
+# [status_bar]
+# enabled = true
+# position = "bottom"
+
+# [keybindings]
+# prefix = "ctrl+b"
+# new_session = "c"
+# fork_session = "f"
+# delete_session = "x"
+# detach = "d"
+# session_list = "w"
+# next_session = "n"
+# prev_session = "p"
+# last_session = "l"
+# resume_session = "R"
+# rename_session = ","
+# search = "/"
+# scroll_mode = "["
+# shell = "s"
+
+# [notifications]
+# enabled = true
+# on_approval = true
+# on_stopped = false
+# command = ""
+
+# [approvals]
+# mode = "prompt"
+# auto_pop = false
+# timeout = "10m"
+# command = ""
+
+# [messages]
+# max_age = ""
+# max_per_stream = 0
+
+# --- Sandbox ---
+# When enabled, agent processes are wrapped with safehouse (macOS sandbox-exec).
+# Agent-specific sandbox sections are merged with the global sandbox config.
+
+# [sandbox]
+# enabled = false
+# command = "safehouse"
+# features = []
+# read_dirs = []
+# write_dirs = []
+
+# --- Agents ---
+# Each agent needs its config directory in sandbox read/write dirs when
+# sandboxing is enabled. These are NOT added automatically — configure them
+# in the per-agent [agents.<name>.sandbox] section.
+
+[agents.claude]
+command = "claude"
+args = ["--session-id", "{agent_session_id}"]
+resume_args = ["--resume", "{agent_session_id}"]
+fork_args = ["--session-id", "{agent_session_id}", "--fork-session", "{fork_source_agent_session_id}"]
+
+[agents.claude.sandbox]
+read_dirs = ["~/.claude"]
+write_dirs = ["~/.local/share/claude"]
+
+[agents.codex]
+command = "codex"
+args = []
+resume_args = ["resume", "--last"]
+fork_args = ["fork", "{fork_source_agent_session_id}"]
+
+[agents.codex.sandbox]
+read_dirs = ["~/.codex"]
+
+[agents.opencode]
+command = "opencode"
+args = []
+resume_args = ["--session", "{agent_session_id}"]
+
+[agents.agy]
+command = "agy"
+args = []
+resume_args = ["--conversation", "{agent_session_id}"]
+
+[agents.agy.sandbox]
+read_dirs = ["~/.gemini"]
+write_dirs = ["~/.gemini"]
