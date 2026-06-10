@@ -378,18 +378,6 @@ func SortSessions(sessions []protocol.SessionInfo) {
 			return ri
 		}
 
-		ti, _ := time.Parse(time.RFC3339, si.LastAttachedAt)
-		tj, _ := time.Parse(time.RFC3339, sj.LastAttachedAt)
-		if !ti.IsZero() && !tj.IsZero() && !ti.Equal(tj) {
-			return ti.After(tj)
-		}
-		if !ti.IsZero() && tj.IsZero() {
-			return true
-		}
-		if ti.IsZero() && !tj.IsZero() {
-			return false
-		}
-
 		return si.Name < sj.Name
 	})
 }
