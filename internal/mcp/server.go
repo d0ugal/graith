@@ -96,11 +96,11 @@ type SessionStatusInput struct {
 }
 
 type CreateSessionInput struct {
-	Name            string `json:"name"              jsonschema:"description=Human-readable session name"`
-	Agent           string `json:"agent,omitempty"   jsonschema:"description=Agent type (e.g. claude, codex, agy). Defaults to configured default."`
-	Repo            string `json:"repo,omitempty"    jsonschema:"description=Path to the git repository"`
-	Base            string `json:"base,omitempty"    jsonschema:"description=Base branch to create worktree from"`
-	Prompt          string `json:"prompt,omitempty"  jsonschema:"description=Initial prompt to send to the agent"`
+	Name            string `json:"name"                       jsonschema:"description=Human-readable session name"`
+	Agent           string `json:"agent,omitempty"            jsonschema:"description=Agent type (e.g. claude, codex, agy). Defaults to configured default."`
+	Repo            string `json:"repo,omitempty"             jsonschema:"description=Path to the git repository"`
+	Base            string `json:"base,omitempty"             jsonschema:"description=Base branch to create worktree from"`
+	Prompt          string `json:"prompt,omitempty"           jsonschema:"description=Initial prompt to send to the agent"`
 	NoRepo          bool   `json:"no_repo,omitempty"          jsonschema:"description=Create session without a git worktree"`
 	InPlace         bool   `json:"in_place,omitempty"         jsonschema:"description=Run agent directly in repo without creating a worktree"`
 	AllowConcurrent bool   `json:"allow_concurrent,omitempty" jsonschema:"description=Allow multiple in-place sessions on same repo"`
