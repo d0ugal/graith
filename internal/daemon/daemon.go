@@ -403,27 +403,14 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 	}
 
 	if agentHooks {
-		switch agentName {
-		case "claude":
-			hookArgs, hookEnv, err := sm.injectClaudeHooks(id)
-			if err != nil {
-				sm.log.Warn("failed to inject hooks", "session_id", id, "err", err)
-			} else {
-				expandedArgs = append(expandedArgs, hookArgs...)
-				for k, v := range hookEnv {
-					env[k] = v
-				}
-			}
-		case "codex":
-			hookArgs, hookEnv, err := sm.injectCodexHooks(id)
-			if err != nil {
-				sm.log.Warn("failed to inject hooks", "session_id", id, "err", err)
-			} else {
-				expandedArgs = append(expandedArgs, hookArgs...)
-				for k, v := range hookEnv {
-					env[k] = v
-				}
-			}
+		hookArgs, hookEnv, err := sm.injectHooks(agentName, id)
+		if err != nil {
+			cleanupOnError()
+			return SessionState{}, fmt.Errorf("inject agent hooks: %w", err)
+		}
+		expandedArgs = append(expandedArgs, hookArgs...)
+		for k, v := range hookEnv {
+			env[k] = v
 		}
 	}
 	command := agent.Command
@@ -577,27 +564,14 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 	env["GRAITH_WORKTREE_PATH"] = worktreePath
 
 	if source.AgentHooks {
-		switch agentName {
-		case "claude":
-			hookArgs, hookEnv, err := sm.injectClaudeHooks(id)
-			if err != nil {
-				sm.log.Warn("failed to inject hooks", "session_id", id, "err", err)
-			} else {
-				expandedArgs = append(expandedArgs, hookArgs...)
-				for k, v := range hookEnv {
-					env[k] = v
-				}
-			}
-		case "codex":
-			hookArgs, hookEnv, err := sm.injectCodexHooks(id)
-			if err != nil {
-				sm.log.Warn("failed to inject hooks", "session_id", id, "err", err)
-			} else {
-				expandedArgs = append(expandedArgs, hookArgs...)
-				for k, v := range hookEnv {
-					env[k] = v
-				}
-			}
+		hookArgs, hookEnv, err := sm.injectHooks(agentName, id)
+		if err != nil {
+			_ = git.TeardownSession(repoRoot, worktreePath, branchName)
+			return SessionState{}, fmt.Errorf("inject agent hooks: %w", err)
+		}
+		expandedArgs = append(expandedArgs, hookArgs...)
+		for k, v := range hookEnv {
+			env[k] = v
 		}
 	}
 
@@ -752,27 +726,13 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 	}
 
 	if sessState.AgentHooks {
-		switch sessState.Agent {
-		case "claude":
-			hookArgs, hookEnv, err := sm.injectClaudeHooks(id)
-			if err != nil {
-				sm.log.Warn("failed to inject hooks", "session_id", id, "err", err)
-			} else {
-				expandedArgs = append(expandedArgs, hookArgs...)
-				for k, v := range hookEnv {
-					env[k] = v
-				}
-			}
-		case "codex":
-			hookArgs, hookEnv, err := sm.injectCodexHooks(id)
-			if err != nil {
-				sm.log.Warn("failed to inject hooks", "session_id", id, "err", err)
-			} else {
-				expandedArgs = append(expandedArgs, hookArgs...)
-				for k, v := range hookEnv {
-					env[k] = v
-				}
-			}
+		hookArgs, hookEnv, err := sm.injectHooks(sessState.Agent, id)
+		if err != nil {
+			return SessionState{}, fmt.Errorf("inject agent hooks: %w", err)
+		}
+		expandedArgs = append(expandedArgs, hookArgs...)
+		for k, v := range hookEnv {
+			env[k] = v
 		}
 	}
 

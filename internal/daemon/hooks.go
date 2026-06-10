@@ -155,6 +155,19 @@ func (sm *SessionManager) injectCodexHooks(sessionID string) (extraArgs []string
 	return nil, extraEnv, nil
 }
 
+// injectHooks dispatches hook injection to the agent-specific implementation.
+// Returns an error if the agent type does not support hooks.
+func (sm *SessionManager) injectHooks(agentName, sessionID string) (extraArgs []string, extraEnv map[string]string, err error) {
+	switch agentName {
+	case "claude":
+		return sm.injectClaudeHooks(sessionID)
+	case "codex":
+		return sm.injectCodexHooks(sessionID)
+	default:
+		return nil, nil, fmt.Errorf("agent %q does not support hooks", agentName)
+	}
+}
+
 // cleanupHooks removes generated hook files for a session.
 func (sm *SessionManager) cleanupHooks(sessionID string) {
 	dir := sm.hookDir(sessionID)
