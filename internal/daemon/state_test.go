@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/d0ugal/graith/internal/config"
 )
 
 func TestStateSaveLoad(t *testing.T) {
@@ -162,5 +164,71 @@ func TestWriteFileAtomicNoTempLeftBehind(t *testing.T) {
 		if e.Name() != "test.json" {
 			t.Errorf("unexpected temp file left behind: %s", e.Name())
 		}
+	}
+}
+
+func TestSandboxConfigPersistence(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	sbx := &config.SandboxConfig{
+		Enabled:   true,
+		Command:   "safehouse",
+		Features:  []string{"net"},
+		ReadDirs:  []string{"/usr/share"},
+		WriteDirs: []string{"/tmp"},
+	}
+	state := &State{
+		Sessions: map[string]*SessionState{
+			"s1": {
+				ID: "s1", Name: "test", Agent: "claude",
+				Status: StatusRunning, Sandboxed: true,
+				SandboxConfig: sbx,
+				CreatedAt:     time.Now().UTC(),
+			},
+		},
+	}
+	if err := SaveState(path, state); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := loaded.Sessions["s1"]
+	if s.SandboxConfig == nil {
+		t.Fatal("SandboxConfig lost after save/load")
+	}
+	if !s.SandboxConfig.Enabled {
+		t.Error("SandboxConfig.Enabled = false, want true")
+	}
+	if s.SandboxConfig.Command != "safehouse" {
+		t.Errorf("SandboxConfig.Command = %q, want %q", s.SandboxConfig.Command, "safehouse")
+	}
+	if len(s.SandboxConfig.ReadDirs) != 1 || s.SandboxConfig.ReadDirs[0] != "/usr/share" {
+		t.Errorf("SandboxConfig.ReadDirs = %v, want [/usr/share]", s.SandboxConfig.ReadDirs)
+	}
+	if len(s.SandboxConfig.WriteDirs) != 1 || s.SandboxConfig.WriteDirs[0] != "/tmp" {
+		t.Errorf("SandboxConfig.WriteDirs = %v, want [/tmp]", s.SandboxConfig.WriteDirs)
+	}
+	if len(s.SandboxConfig.Features) != 1 || s.SandboxConfig.Features[0] != "net" {
+		t.Errorf("SandboxConfig.Features = %v, want [net]", s.SandboxConfig.Features)
+	}
+}
+
+func TestSandboxConfigNilBackwardCompat(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	data := []byte(`{"version":1,"sessions":{"s1":{"id":"s1","name":"old","status":"stopped","sandboxed":true}}}`)
+	if err := writeFileAtomic(path, data); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := loaded.Sessions["s1"]
+	if !s.Sandboxed {
+		t.Error("Sandboxed = false, want true")
+	}
+	if s.SandboxConfig != nil {
+		t.Error("SandboxConfig should be nil for pre-existing state without the field")
 	}
 }

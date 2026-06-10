@@ -432,7 +432,10 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 	command := agent.Command
 	finalArgs := expandedArgs
 	var scratchDir string
+	var mergedSandbox *config.SandboxConfig
 	if sandboxed {
+		merged := sm.cfg.Sandbox.Merge(sm.cfg.Agents[agentName].Sandbox)
+		mergedSandbox = &merged
 		envKeys := []string{"GRAITH_SESSION_ID", "GRAITH_SESSION_NAME", "GRAITH_WORKTREE_PATH", "TERM"}
 		for k := range agent.Env {
 			envKeys = append(envKeys, k)
@@ -440,7 +443,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 		for k := range env {
 			envKeys = append(envKeys, k)
 		}
-		opts := sm.sandboxOpts(agentName, id, worktreePath, envKeys, agentHooks)
+		opts := sm.sandboxOptsFromConfig(merged, id, worktreePath, envKeys, agentHooks)
 		if sharedWorktree {
 			scratchDir = filepath.Join(sm.paths.DataDir, "scratch", id)
 			if err := os.MkdirAll(scratchDir, 0o700); err != nil {
@@ -484,6 +487,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 		Agent:          agentName,
 		AgentSessionID: agentSessionID,
 		Sandboxed:      sandboxed,
+		SandboxConfig:  mergedSandbox,
 		SharedWorktree: sharedWorktree,
 		AgentHooks:     agentHooks,
 		Status:         StatusRunning,
@@ -613,8 +617,10 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 	sandboxed := source.Sandboxed
 	command := agent.Command
 	finalArgs := expandedArgs
+	var mergedSandbox *config.SandboxConfig
 	if sandboxed {
-		merged := sm.cfg.Sandbox.Merge(sm.cfg.Agents[agentName].Sandbox)
+		merged := sm.resolveStoredSandboxConfig(source)
+		mergedSandbox = &merged
 		cmd := merged.Command
 		if cmd == "" {
 			cmd = "safehouse"
@@ -631,7 +637,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 		for k := range env {
 			envKeys = append(envKeys, k)
 		}
-		opts := sm.sandboxOpts(agentName, id, worktreePath, envKeys, source.AgentHooks)
+		opts := sm.sandboxOptsFromConfig(merged, id, worktreePath, envKeys, source.AgentHooks)
 		command, finalArgs = sandbox.Wrap(agent.Command, expandedArgs, opts)
 		sm.log.Info("sandboxing forked session", "id", id)
 	}
@@ -665,6 +671,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 		AgentSessionID: agentSessionID,
 		AgentHooks:     source.AgentHooks,
 		Sandboxed:      sandboxed,
+		SandboxConfig:  mergedSandbox,
 		Status:         StatusRunning,
 		PID:            ptySess.Cmd.Process.Pid,
 		CreatedAt:      time.Now().UTC(),
@@ -782,7 +789,7 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 	command := agent.Command
 	finalArgs := expandedArgs
 	if sessState.Sandboxed {
-		merged := sm.cfg.Sandbox.Merge(sm.cfg.Agents[sessState.Agent].Sandbox)
+		merged := sm.resolveStoredSandboxConfig(sessState)
 		cmd := merged.Command
 		if cmd == "" {
 			cmd = "safehouse"
@@ -797,7 +804,7 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 		for k := range env {
 			envKeys = append(envKeys, k)
 		}
-		opts := sm.sandboxOpts(sessState.Agent, id, sessState.WorktreePath, envKeys, sessState.AgentHooks)
+		opts := sm.sandboxOptsFromConfig(merged, id, sessState.WorktreePath, envKeys, sessState.AgentHooks)
 		if sessState.SharedWorktree {
 			scratchDir := filepath.Join(sm.paths.DataDir, "scratch", id)
 			if err := os.MkdirAll(scratchDir, 0o700); err != nil {
@@ -1320,15 +1327,25 @@ func (sm *SessionManager) resolveSandbox(agentName string) (bool, error) {
 	return true, nil
 }
 
+// resolveStoredSandboxConfig returns the sandbox config persisted on the
+// session. For sessions created before this field was stored, it falls back
+// to re-merging from the current config.
+func (sm *SessionManager) resolveStoredSandboxConfig(sess *SessionState) config.SandboxConfig {
+	if sess.SandboxConfig != nil {
+		return *sess.SandboxConfig
+	}
+	return sm.cfg.Sandbox.Merge(sm.cfg.Agents[sess.Agent].Sandbox)
+}
+
 func (sm *SessionManager) sandboxOpts(agentName, sessionID, worktreePath string, envKeys []string, agentHooks bool) sandbox.WrapOpts {
 	merged := sm.cfg.Sandbox.Merge(sm.cfg.Agents[agentName].Sandbox)
+	return sm.sandboxOptsFromConfig(merged, sessionID, worktreePath, envKeys, agentHooks)
+}
 
+func (sm *SessionManager) sandboxOptsFromConfig(merged config.SandboxConfig, sessionID, worktreePath string, envKeys []string, agentHooks bool) sandbox.WrapOpts {
 	readDirs := expandPaths(merged.ReadDirs)
 	writeDirs := expandPaths(merged.WriteDirs)
 
-	// The daemon injects hook scripts that call `gr report-status`.
-	// That needs: the hooks dir itself, the config dir (to find the
-	// socket path), and the runtime dir (to connect to it).
 	if agentHooks {
 		readDirs = append(readDirs, sm.hookDir(sessionID))
 	}
