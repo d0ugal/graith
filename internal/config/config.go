@@ -188,14 +188,22 @@ func (c *Config) RepoPathAllowed(repoPath string) bool {
 	if len(c.AllowedRepoPaths) == 0 {
 		return true
 	}
-	repoPath = ExpandPath(repoPath)
+	repoPath = ResolvePath(repoPath)
 	for _, allowed := range c.AllowedRepoPaths {
-		prefix := ExpandPath(allowed)
+		prefix := ResolvePath(allowed)
 		if repoPath == prefix || strings.HasPrefix(repoPath, prefix+string(filepath.Separator)) {
 			return true
 		}
 	}
 	return false
+}
+
+func ResolvePath(p string) string {
+	p = ExpandPath(p)
+	if resolved, err := filepath.EvalSymlinks(p); err == nil {
+		p = resolved
+	}
+	return p
 }
 
 func Load(path string) (*Config, error) {

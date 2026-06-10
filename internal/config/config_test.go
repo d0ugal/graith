@@ -396,6 +396,35 @@ func TestRepoPathAllowed(t *testing.T) {
 			t.Error("prefix without separator should be denied")
 		}
 	})
+
+	t.Run("symlink to outside denied", func(t *testing.T) {
+		allowed := t.TempDir()
+		outside := t.TempDir()
+		link := filepath.Join(allowed, "escape")
+		if err := os.Symlink(outside, link); err != nil {
+			t.Skipf("symlinks not supported: %v", err)
+		}
+		cfg := &Config{AllowedRepoPaths: []string{allowed}}
+		if cfg.RepoPathAllowed(link) {
+			t.Error("symlink pointing outside allowed dirs should be denied")
+		}
+	})
+
+	t.Run("symlink within allowed dir permitted", func(t *testing.T) {
+		allowed := t.TempDir()
+		target := filepath.Join(allowed, "real")
+		if err := os.Mkdir(target, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		link := filepath.Join(allowed, "link")
+		if err := os.Symlink(target, link); err != nil {
+			t.Skipf("symlinks not supported: %v", err)
+		}
+		cfg := &Config{AllowedRepoPaths: []string{allowed}}
+		if !cfg.RepoPathAllowed(link) {
+			t.Error("symlink pointing within allowed dir should be permitted")
+		}
+	})
 }
 
 func TestLoadPartialAgentPreservesDefaults(t *testing.T) {
