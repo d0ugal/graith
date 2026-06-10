@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -102,5 +103,64 @@ func TestLoadStateCorrupted(t *testing.T) {
 	}
 	if len(state.Sessions) != 0 {
 		t.Error("expected empty state for corrupted file")
+	}
+}
+
+func TestWriteFileAtomicContent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "test.json")
+	want := []byte(`{"hello":"world"}`)
+	if err := writeFileAtomic(path, want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(want) {
+		t.Errorf("content = %q, want %q", got, want)
+	}
+}
+
+func TestWriteFileAtomicPreservesOldOnFailure(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.json")
+	original := []byte(`{"original":true}`)
+	if err := writeFileAtomic(path, original); err != nil {
+		t.Fatal(err)
+	}
+
+	// Writing to a read-only directory should fail, leaving the original intact.
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(dir, 0o700) })
+
+	err := writeFileAtomic(path, []byte(`{"new":true}`))
+	if err == nil {
+		t.Fatal("expected error writing to read-only dir")
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(original) {
+		t.Errorf("original file was corrupted: got %q", got)
+	}
+}
+
+func TestWriteFileAtomicNoTempLeftBehind(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.json")
+	if err := writeFileAtomic(path, []byte("data")); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.Name() != "test.json" {
+			t.Errorf("unexpected temp file left behind: %s", e.Name())
+		}
 	}
 }
