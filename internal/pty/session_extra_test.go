@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -80,6 +81,72 @@ func TestDetachWriterWhenNoneAttached(t *testing.T) {
 	s.mu.RUnlock()
 	if w != nil {
 		t.Error("expected attachedWriter to remain nil")
+	}
+}
+
+func envMap(env []string) map[string]string {
+	m := make(map[string]string, len(env))
+	for _, e := range env {
+		if k, v, ok := strings.Cut(e, "="); ok {
+			m[k] = v
+		}
+	}
+	return m
+}
+
+func TestBuildEnvSetsTERM(t *testing.T) {
+	env := envMap(buildEnv(nil))
+	if got := env["TERM"]; got != "xterm-256color" {
+		t.Errorf("TERM = %q, want xterm-256color", got)
+	}
+}
+
+func TestBuildEnvOverridesParent(t *testing.T) {
+	t.Setenv("TERM", "dumb")
+	t.Setenv("GRAITH_TEST_VAR", "parent")
+
+	env := envMap(buildEnv(map[string]string{
+		"GRAITH_TEST_VAR": "child",
+	}))
+
+	if got := env["TERM"]; got != "xterm-256color" {
+		t.Errorf("TERM = %q, want xterm-256color (should override parent)", got)
+	}
+	if got := env["GRAITH_TEST_VAR"]; got != "child" {
+		t.Errorf("GRAITH_TEST_VAR = %q, want child (should override parent)", got)
+	}
+}
+
+func TestBuildEnvExtraOverridesTERM(t *testing.T) {
+	env := envMap(buildEnv(map[string]string{
+		"TERM": "screen",
+	}))
+	if got := env["TERM"]; got != "screen" {
+		t.Errorf("TERM = %q, want screen (extra should override default)", got)
+	}
+}
+
+func TestBuildEnvPreservesParentVars(t *testing.T) {
+	t.Setenv("GRAITH_PASSTHROUGH", "keep-me")
+
+	env := envMap(buildEnv(nil))
+	if got := env["GRAITH_PASSTHROUGH"]; got != "keep-me" {
+		t.Errorf("GRAITH_PASSTHROUGH = %q, want keep-me (parent vars should be preserved)", got)
+	}
+}
+
+func TestBuildEnvNoDuplicateKeys(t *testing.T) {
+	t.Setenv("TERM", "dumb")
+
+	env := buildEnv(map[string]string{"TERM": "screen"})
+	count := 0
+	for _, e := range env {
+		if strings.HasPrefix(e, "TERM=") {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("found %d TERM entries, want exactly 1", count)
 	}
 }
 
