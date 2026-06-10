@@ -4,13 +4,18 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 
 	"github.com/adrg/xdg"
 )
 
-const appName = "graith"
+const baseAppName = "graith"
+
+var validProfile = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
 type Paths struct {
+	Profile    string
+	AppName    string
 	ConfigFile string
 	DataDir    string
 	RuntimeDir string
@@ -20,6 +25,23 @@ type Paths struct {
 	LogDir     string
 	DaemonLog  string
 	MessagesDB string
+}
+
+func ResolveProfile() (profile string, appName string, err error) {
+	profile = os.Getenv("GRAITH_PROFILE")
+	if profile == "" {
+		return "", baseAppName, nil
+	}
+	if profile == "default" {
+		return "", "", fmt.Errorf("invalid profile name %q: \"default\" is reserved", profile)
+	}
+	if len(profile) > 32 {
+		return "", "", fmt.Errorf("invalid profile name %q: must be at most 32 characters", profile)
+	}
+	if !validProfile.MatchString(profile) {
+		return "", "", fmt.Errorf("invalid profile name %q: must be lowercase alphanumeric with hyphens, no leading hyphen", profile)
+	}
+	return profile, baseAppName + "-" + profile, nil
 }
 
 func configHome() string {
@@ -32,12 +54,19 @@ func configHome() string {
 	return xdg.ConfigHome
 }
 
-func ResolvePaths() Paths {
+func ResolvePaths() (Paths, error) {
+	profile, appName, err := ResolveProfile()
+	if err != nil {
+		return Paths{}, err
+	}
+
 	configFile := filepath.Join(configHome(), appName, "config.toml")
 	dataDir := filepath.Join(xdg.DataHome, appName)
-	runtimeDir := runtimeDirForGraith()
+	runtimeDir := runtimeDirForApp(appName)
 
 	return Paths{
+		Profile:    profile,
+		AppName:    appName,
 		ConfigFile: configFile,
 		DataDir:    dataDir,
 		RuntimeDir: runtimeDir,
@@ -47,15 +76,13 @@ func ResolvePaths() Paths {
 		LogDir:     filepath.Join(dataDir, "logs"),
 		DaemonLog:  filepath.Join(dataDir, "daemon.log"),
 		MessagesDB: filepath.Join(dataDir, "messages.sqlite"),
-	}
+	}, nil
 }
 
-func runtimeDirForGraith() string {
+func runtimeDirForApp(appName string) string {
 	if d := xdg.RuntimeDir; d != "" {
 		return filepath.Join(d, appName)
 	}
-	// Fall back to the data dir rather than /tmp or $TMPDIR so that the
-	// daemon socket is not inside paths that safehouse grants by default.
 	return filepath.Join(xdg.DataHome, appName, "run")
 }
 
