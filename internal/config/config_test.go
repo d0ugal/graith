@@ -425,6 +425,39 @@ func TestRepoPathAllowed(t *testing.T) {
 			t.Error("symlink pointing within allowed dir should be permitted")
 		}
 	})
+
+	t.Run("intermediate symlink component to outside denied", func(t *testing.T) {
+		allowed := t.TempDir()
+		outside := t.TempDir()
+		outsideRepo := filepath.Join(outside, "repo")
+		if err := os.Mkdir(outsideRepo, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		link := filepath.Join(allowed, "escape")
+		if err := os.Symlink(outside, link); err != nil {
+			t.Skipf("symlinks not supported: %v", err)
+		}
+		cfg := &Config{AllowedRepoPaths: []string{allowed}}
+		if cfg.RepoPathAllowed(filepath.Join(link, "repo")) {
+			t.Error("path through symlink intermediate pointing outside should be denied")
+		}
+	})
+
+	t.Run("allowed path itself is a symlink", func(t *testing.T) {
+		real := t.TempDir()
+		repo := filepath.Join(real, "myrepo")
+		if err := os.Mkdir(repo, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		link := filepath.Join(t.TempDir(), "link-to-real")
+		if err := os.Symlink(real, link); err != nil {
+			t.Skipf("symlinks not supported: %v", err)
+		}
+		cfg := &Config{AllowedRepoPaths: []string{link}}
+		if !cfg.RepoPathAllowed(filepath.Join(real, "myrepo")) {
+			t.Error("repo under resolved allowed symlink should be permitted")
+		}
+	})
 }
 
 func TestLoadPartialAgentPreservesDefaults(t *testing.T) {
