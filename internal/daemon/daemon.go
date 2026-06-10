@@ -393,6 +393,9 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 	env["GRAITH_SESSION_ID"] = id
 	env["GRAITH_SESSION_NAME"] = name
 	env["GRAITH_WORKTREE_PATH"] = worktreePath
+	if sm.paths.Profile != "" {
+		env["GRAITH_PROFILE"] = sm.paths.Profile
+	}
 
 	sandboxed, err := sm.resolveSandbox(agentName)
 	if err != nil {
@@ -584,6 +587,9 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 	env["GRAITH_SESSION_ID"] = id
 	env["GRAITH_SESSION_NAME"] = name
 	env["GRAITH_WORKTREE_PATH"] = worktreePath
+	if sm.paths.Profile != "" {
+		env["GRAITH_PROFILE"] = sm.paths.Profile
+	}
 
 	if source.AgentHooks {
 		hookArgs, hookEnv, err := sm.injectHooks(agentName, id)
@@ -764,6 +770,9 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 	env["GRAITH_SESSION_ID"] = id
 	env["GRAITH_SESSION_NAME"] = sessState.Name
 	env["GRAITH_WORKTREE_PATH"] = sessState.WorktreePath
+	if sm.paths.Profile != "" {
+		env["GRAITH_PROFILE"] = sm.paths.Profile
+	}
 
 	if sessState.SharedWorktree && !sessState.Sandboxed {
 		return SessionState{}, fmt.Errorf("shared-worktree session %q was created without sandbox and cannot be resumed safely; delete and recreate with sandbox enabled", id)
@@ -1438,7 +1447,9 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 
 		log.Info("daemon upgraded", "adopted_sessions", len(manifest.Sessions), "pid", os.Getpid())
 	} else {
-		cleanupLegacyDaemon(log)
+		if paths.Profile == "" {
+			cleanupLegacyDaemon(log)
+		}
 
 		if err := AcquirePIDFile(paths.PIDFile); err != nil {
 			return err
@@ -1455,7 +1466,11 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 			log.Warn("failed to load state", "err", err)
 		}
 
-		log.Info("daemon started", "socket", paths.SocketPath, "pid", os.Getpid())
+		logAttrs := []any{"socket", paths.SocketPath, "pid", os.Getpid()}
+		if paths.Profile != "" {
+			logAttrs = append(logAttrs, "profile", paths.Profile)
+		}
+		log.Info("daemon started", logAttrs...)
 	}
 	defer l.Close()
 
