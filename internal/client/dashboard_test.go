@@ -320,3 +320,130 @@ func TestDashboardViewportScrolling(t *testing.T) {
 		t.Error("should show 'more above' indicator when scrolled down")
 	}
 }
+
+func TestDashboardDeleteConfirmTargetsOriginalSession(t *testing.T) {
+	sessions := dashboardTestSessions()
+	m := NewDashboardModel(sessions, nil)
+	m.width = 120
+	m.height = 40
+
+	dm := updateDash(m, "x")
+	if dm.state != dashStateConfirmDelete {
+		t.Fatalf("state = %d, want dashStateConfirmDelete", dm.state)
+	}
+	if dm.confirmSessionID != "s1" {
+		t.Fatalf("confirmSessionID = %q, want %q", dm.confirmSessionID, "s1")
+	}
+
+	// Simulate a refresh that reorders sessions (s1 removed, new session at index 0)
+	newSessions := []protocol.SessionInfo{
+		{
+			ID:        "s3",
+			Name:      "new-session",
+			RepoName:  "myrepo",
+			Agent:     "claude",
+			Status:    "running",
+			CreatedAt: sessions[0].CreatedAt,
+		},
+		sessions[1],
+	}
+	result, _ := dm.Update(refreshMsg{sessions: newSessions})
+	dm = result.(DashboardModel)
+
+	// s1 disappeared — confirmation should be cancelled
+	if dm.state != dashStateNormal {
+		t.Errorf("state = %d, want dashStateNormal (confirm cancelled)", dm.state)
+	}
+	if dm.confirmSessionID != "" {
+		t.Errorf("confirmSessionID = %q, want empty", dm.confirmSessionID)
+	}
+}
+
+func TestDashboardDeleteConfirmSurvivesRefreshWithTarget(t *testing.T) {
+	sessions := dashboardTestSessions()
+	m := NewDashboardModel(sessions, nil)
+	m.width = 120
+	m.height = 40
+
+	dm := updateDash(m, "x")
+	if dm.confirmSessionID != "s1" {
+		t.Fatalf("confirmSessionID = %q, want %q", dm.confirmSessionID, "s1")
+	}
+
+	// Refresh that keeps s1 but adds a new session before it
+	newSessions := []protocol.SessionInfo{
+		{
+			ID:        "s0",
+			Name:      "aaa-first",
+			RepoName:  "myrepo",
+			Agent:     "claude",
+			Status:    "running",
+			CreatedAt: sessions[0].CreatedAt,
+		},
+		sessions[0],
+		sessions[1],
+	}
+	result, _ := dm.Update(refreshMsg{sessions: newSessions})
+	dm = result.(DashboardModel)
+
+	// Confirmation should still be active targeting s1
+	if dm.state != dashStateConfirmDelete {
+		t.Fatalf("state = %d, want dashStateConfirmDelete", dm.state)
+	}
+
+	// Pressing y should delete s1, not whatever is at cursor index 0
+	dm = updateDash(dm, "y")
+	if dm.result == nil {
+		t.Fatal("expected result after y confirm")
+	}
+	if dm.result.Action != "delete" {
+		t.Errorf("action = %q, want %q", dm.result.Action, "delete")
+	}
+	if dm.result.SessionID != "s1" {
+		t.Errorf("session_id = %q, want %q (should target original session, not cursor)", dm.result.SessionID, "s1")
+	}
+}
+
+func TestDashboardStopConfirmTargetsOriginalSession(t *testing.T) {
+	sessions := dashboardTestSessions()
+	m := NewDashboardModel(sessions, nil)
+	m.width = 120
+	m.height = 40
+
+	dm := updateDash(m, "s")
+	if dm.state != dashStateConfirmStop {
+		t.Fatalf("state = %d, want dashStateConfirmStop", dm.state)
+	}
+	if dm.confirmSessionID != "s1" {
+		t.Fatalf("confirmSessionID = %q, want %q", dm.confirmSessionID, "s1")
+	}
+
+	// Refresh removes s1
+	result, _ := dm.Update(refreshMsg{sessions: []protocol.SessionInfo{sessions[1]}})
+	dm = result.(DashboardModel)
+
+	if dm.state != dashStateNormal {
+		t.Errorf("state = %d, want dashStateNormal (confirm cancelled)", dm.state)
+	}
+}
+
+func TestDashboardConfirmCancelClearsSessionID(t *testing.T) {
+	sessions := dashboardTestSessions()
+	m := NewDashboardModel(sessions, nil)
+	m.width = 120
+	m.height = 40
+
+	dm := updateDash(m, "x")
+	if dm.confirmSessionID != "s1" {
+		t.Fatalf("confirmSessionID = %q, want %q", dm.confirmSessionID, "s1")
+	}
+
+	// Press n to cancel
+	dm = updateDash(dm, "n")
+	if dm.state != dashStateNormal {
+		t.Errorf("state = %d, want dashStateNormal", dm.state)
+	}
+	if dm.confirmSessionID != "" {
+		t.Errorf("confirmSessionID = %q, want empty after cancel", dm.confirmSessionID)
+	}
+}
