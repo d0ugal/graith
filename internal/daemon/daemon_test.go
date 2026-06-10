@@ -1096,7 +1096,7 @@ func TestShareWorktreeRequiresSandbox(t *testing.T) {
 		Status:       StatusRunning,
 	}
 
-	_, err := sm.Create("reviewer", "claude", "", "", "", false, "source", false, 24, 80)
+	_, err := sm.Create("reviewer", "claude", "", "", "", false, "source", false, false, false, 24, 80)
 	if err == nil {
 		t.Fatal("expected error when --share-worktree used without sandbox, got nil")
 	}
@@ -1128,7 +1128,7 @@ func TestShareWorktreeRequiresSandboxPerAgent(t *testing.T) {
 		Status:       StatusRunning,
 	}
 
-	_, err := sm.Create("reviewer", "claude", "", "", "", false, "source", false, 24, 80)
+	_, err := sm.Create("reviewer", "claude", "", "", "", false, "source", false, false, false, 24, 80)
 	if err == nil {
 		t.Fatal("expected error when --share-worktree used with per-agent sandbox disabled, got nil")
 	}
@@ -1187,7 +1187,7 @@ func TestCreateRollsBackOnSaveStateFailure(t *testing.T) {
 		LogDir:    tmpDir,
 	}, slog.Default())
 
-	_, err := sm.Create("test-sess", "sleeper", "", "", "", true, "", false, 24, 80)
+	_, err := sm.Create("test-sess", "sleeper", "", "", "", true, "", false, false, false, 24, 80)
 	if err == nil {
 		t.Fatal("expected error when saveState fails, got nil")
 	}
@@ -1550,5 +1550,247 @@ func TestResumeResetsIdleSince(t *testing.T) {
 		sm.mu.Lock()
 		_ = sm.state.Sessions[id]
 		sm.mu.Unlock()
+	}
+}
+
+// --- In-place session tests ---
+
+func TestCreateInPlaceRejectsUnconfiguredRepo(t *testing.T) {
+	sm := newTestSessionManager(t)
+	_, err := sm.Create("test", "claude", "/tmp/fake-repo", "", "", false, "", false, true, false, 24, 80)
+	if err == nil {
+		t.Fatal("expected error for unconfigured repo")
+	}
+	if !strings.Contains(err.Error(), "not configured in [[repos]]") {
+		t.Errorf("error = %q, want mention of [[repos]]", err.Error())
+	}
+}
+
+func TestCreateInPlaceMutuallyExclusiveFlags(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	t.Run("in-place with no-repo", func(t *testing.T) {
+		_, err := sm.Create("test", "claude", "", "", "", true, "", false, true, false, 24, 80)
+		if err == nil {
+			t.Fatal("expected error for --in-place with --no-repo")
+		}
+		if !strings.Contains(err.Error(), "mutually exclusive") {
+			t.Errorf("error = %q, want mutually exclusive", err.Error())
+		}
+	})
+
+	t.Run("in-place with share-worktree", func(t *testing.T) {
+		_, err := sm.Create("test", "claude", "", "", "", false, "some-session", false, true, false, 24, 80)
+		if err == nil {
+			t.Fatal("expected error for --in-place with --share-worktree")
+		}
+		if !strings.Contains(err.Error(), "mutually exclusive") {
+			t.Errorf("error = %q, want mutually exclusive", err.Error())
+		}
+	})
+}
+
+func TestCreateInPlaceRejectsConcurrent(t *testing.T) {
+	sm := newTestSessionManager(t)
+	sm.cfg.Repos = []config.RepoConfig{{Path: "/tmp/fake-repo"}}
+
+	sm.state.Sessions["existing"] = &SessionState{
+		ID:           "existing",
+		Name:         "first",
+		WorktreePath: "/tmp/fake-repo",
+		InPlace:      true,
+		Status:       StatusRunning,
+	}
+
+	_, err := sm.Create("second", "claude", "/tmp/fake-repo", "", "", false, "", false, true, false, 24, 80)
+	if err == nil {
+		t.Fatal("expected error for concurrent in-place session")
+	}
+	if !strings.Contains(err.Error(), "already running") {
+		t.Errorf("error = %q, want mention of already running", err.Error())
+	}
+}
+
+func TestCreateInPlaceAllowConcurrentFlag(t *testing.T) {
+	sm := newTestSessionManager(t)
+	sm.cfg.Repos = []config.RepoConfig{{Path: "/tmp/fake-repo"}}
+
+	sm.state.Sessions["existing"] = &SessionState{
+		ID:           "existing",
+		Name:         "first",
+		WorktreePath: "/tmp/fake-repo",
+		InPlace:      true,
+		Status:       StatusRunning,
+	}
+
+	// With --allow-concurrent, should pass the concurrent check (will fail later on git check)
+	_, err := sm.Create("second", "claude", "/tmp/fake-repo", "", "", false, "", false, true, true, 24, 80)
+	if err != nil && strings.Contains(err.Error(), "already running") {
+		t.Fatalf("--allow-concurrent should bypass concurrent check, got: %v", err)
+	}
+}
+
+func TestCreateInPlaceConfigAllowConcurrent(t *testing.T) {
+	sm := newTestSessionManager(t)
+	sm.cfg.Repos = []config.RepoConfig{{Path: "/tmp/fake-repo", AllowConcurrent: true}}
+
+	sm.state.Sessions["existing"] = &SessionState{
+		ID:           "existing",
+		Name:         "first",
+		WorktreePath: "/tmp/fake-repo",
+		InPlace:      true,
+		Status:       StatusRunning,
+	}
+
+	// Config allow_concurrent should pass the concurrent check
+	_, err := sm.Create("second", "claude", "/tmp/fake-repo", "", "", false, "", false, true, false, 24, 80)
+	if err != nil && strings.Contains(err.Error(), "already running") {
+		t.Fatalf("config allow_concurrent should bypass concurrent check, got: %v", err)
+	}
+}
+
+func TestDeleteInPlaceLeavesState(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	sm.state.Sessions["inplace1"] = &SessionState{
+		ID:           "inplace1",
+		Name:         "my-inplace",
+		RepoPath:     "/tmp/my-repo",
+		WorktreePath: "/tmp/my-repo",
+		InPlace:      true,
+		Status:       StatusStopped,
+		CreatedAt:    time.Now().UTC(),
+	}
+
+	if err := sm.Delete("inplace1"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, ok := sm.state.Sessions["inplace1"]; ok {
+		t.Error("session should be removed from state after delete")
+	}
+}
+
+func TestForkInPlaceRejects(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	sm.state.Sessions["inplace1"] = &SessionState{
+		ID:           "inplace1",
+		Name:         "my-inplace",
+		RepoPath:     "/tmp/my-repo",
+		WorktreePath: "/tmp/my-repo",
+		Agent:        "claude",
+		InPlace:      true,
+		Status:       StatusRunning,
+	}
+
+	_, err := sm.Fork("forked", "inplace1", 24, 80)
+	if err == nil {
+		t.Fatal("expected error forking an in-place session")
+	}
+	if !strings.Contains(err.Error(), "in-place") {
+		t.Errorf("error = %q, want mention of in-place", err.Error())
+	}
+}
+
+func TestResumeInPlaceRejectsRemovedConfig(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	sm.state.Sessions["inplace1"] = &SessionState{
+		ID:           "inplace1",
+		Name:         "my-inplace",
+		RepoPath:     "/tmp/my-repo",
+		WorktreePath: "/tmp/my-repo",
+		Agent:        "claude",
+		InPlace:      true,
+		Status:       StatusStopped,
+	}
+
+	_, err := sm.Resume("inplace1", 24, 80)
+	if err == nil {
+		t.Fatal("expected error resuming in-place session after repo removed from config")
+	}
+	if !strings.Contains(err.Error(), "[[repos]]") {
+		t.Errorf("error = %q, want mention of [[repos]]", err.Error())
+	}
+}
+
+func TestResumeInPlaceRejectsConcurrentRunning(t *testing.T) {
+	sm := newTestSessionManager(t)
+	sm.cfg.Repos = []config.RepoConfig{{Path: "/tmp/my-repo"}}
+
+	sm.state.Sessions["inplace1"] = &SessionState{
+		ID:           "inplace1",
+		Name:         "first",
+		RepoPath:     "/tmp/my-repo",
+		WorktreePath: "/tmp/my-repo",
+		Agent:        "claude",
+		InPlace:      true,
+		Status:       StatusStopped,
+	}
+	sm.state.Sessions["inplace2"] = &SessionState{
+		ID:           "inplace2",
+		Name:         "second",
+		RepoPath:     "/tmp/my-repo",
+		WorktreePath: "/tmp/my-repo",
+		Agent:        "claude",
+		InPlace:      true,
+		Status:       StatusRunning,
+	}
+
+	_, err := sm.Resume("inplace1", 24, 80)
+	if err == nil {
+		t.Fatal("expected error: another in-place session is running in the same repo")
+	}
+	if !strings.Contains(err.Error(), "already running") {
+		t.Errorf("error = %q, want mention of already running", err.Error())
+	}
+}
+
+func TestStateSaveLoadInPlace(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+	state := &State{
+		Version: CurrentStateVersion,
+		Sessions: map[string]*SessionState{
+			"abc123": {
+				ID: "abc123", Name: "inplace-test", Agent: "claude",
+				WorktreePath: "/some/repo", InPlace: true,
+				Status: StatusRunning, CreatedAt: time.Now().UTC(),
+			},
+		},
+	}
+	if err := SaveState(path, state); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := loaded.Sessions["abc123"]
+	if !s.InPlace {
+		t.Error("InPlace not preserved across save/load")
+	}
+}
+
+func TestToSessionInfoInPlace(t *testing.T) {
+	sess := SessionState{
+		ID:           "abc",
+		Name:         "test",
+		Agent:        "claude",
+		WorktreePath: "/some/repo",
+		InPlace:      true,
+		Status:       StatusRunning,
+		CreatedAt:    time.Now().UTC(),
+	}
+	info := toSessionInfo(sess)
+	if !info.InPlace {
+		t.Error("InPlace = false in SessionInfo, want true")
+	}
+
+	sess.InPlace = false
+	info = toSessionInfo(sess)
+	if info.InPlace {
+		t.Error("InPlace = true in SessionInfo, want false")
 	}
 }
