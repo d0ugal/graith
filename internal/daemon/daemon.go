@@ -1400,7 +1400,7 @@ func cleanupLegacyDaemon(log *slog.Logger) {
 		data, err := os.ReadFile(pid)
 		if err == nil {
 			var legacyPID int
-			if _, err := fmt.Sscanf(string(data), "%d", &legacyPID); err == nil && legacyPID > 0 {
+			if _, err := fmt.Sscanf(string(data), "%d", &legacyPID); err == nil && IsGraithDaemon(legacyPID) {
 				log.Info("stopping legacy daemon", "pid", legacyPID, "socket", sock)
 				_ = syscall.Kill(legacyPID, syscall.SIGTERM)
 			}
