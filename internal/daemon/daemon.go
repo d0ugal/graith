@@ -1304,6 +1304,9 @@ func (sm *SessionManager) sandboxOpts(agentName, sessionID, worktreePath string,
 		writeDirs = append(writeDirs, filepath.Join(home, ".local", "share", "claude"))
 	case "codex":
 		readDirs = append(readDirs, filepath.Join(home, ".codex"))
+	case "agy":
+		readDirs = append(readDirs, filepath.Join(home, ".gemini"))
+		writeDirs = append(writeDirs, filepath.Join(home, ".gemini"))
 	}
 
 	return sandbox.WrapOpts{
