@@ -615,6 +615,96 @@ func TestThreadFilterWithUnreadCursor(t *testing.T) {
 	}
 }
 
+func TestAckMessagesDoesNotSkipOtherThreads(t *testing.T) {
+	s := testStore(t)
+
+	m1, _ := s.Publish("topic", "s1", "a", "threadA start", "", "")
+	s.Publish("topic", "s2", "b", "threadB msg", "", "")
+	s.Publish("topic", "s1", "a", "threadA reply", m1.ID, "")
+	s.Publish("topic", "s2", "b", "unthreaded msg", "", "")
+
+	// Ack only the thread-A messages (seq 1 and 3) using per-message ack.
+	threadMsgs, _ := s.Read("topic", "reader1", true, m1.ID)
+	if len(threadMsgs) != 1 {
+		t.Fatalf("thread msgs = %d, want 1", len(threadMsgs))
+	}
+	seqs := make([]int64, len(threadMsgs))
+	for i, m := range threadMsgs {
+		seqs[i] = m.Seq
+	}
+	s.AckMessages("topic", "reader1", seqs)
+
+	// Reading unread without thread filter should still return threadB and
+	// unthreaded messages — they must not have been silently acked.
+	unread, _ := s.Read("topic", "reader1", true, "")
+	if len(unread) != 3 {
+		t.Fatalf("unread = %d, want 3 (threadA start + threadB + unthreaded)", len(unread))
+	}
+
+	// Reading unread for thread-A should return nothing (already acked).
+	threadUnread, _ := s.Read("topic", "reader1", true, m1.ID)
+	if len(threadUnread) != 0 {
+		t.Fatalf("thread unread = %d, want 0", len(threadUnread))
+	}
+}
+
+func TestAckMessagesEmpty(t *testing.T) {
+	s := testStore(t)
+
+	err := s.AckMessages("topic", "reader1", nil)
+	if err != nil {
+		t.Fatalf("AckMessages(nil): %v", err)
+	}
+	err = s.AckMessages("topic", "reader1", []int64{})
+	if err != nil {
+		t.Fatalf("AckMessages([]): %v", err)
+	}
+}
+
+func TestAckMessagesCombinesWithCursor(t *testing.T) {
+	s := testStore(t)
+
+	s.Publish("topic", "s1", "a", "msg1", "", "")
+	s.Publish("topic", "s1", "a", "msg2", "", "")
+	s.Publish("topic", "s1", "a", "msg3", "", "")
+	s.Publish("topic", "s1", "a", "msg4", "", "")
+
+	// Advance cursor past seq 1.
+	s.Ack("topic", "reader1", 1)
+	// Individually ack seq 3.
+	s.AckMessages("topic", "reader1", []int64{3})
+
+	unread, _ := s.Read("topic", "reader1", true, "")
+	if len(unread) != 2 {
+		t.Fatalf("unread = %d, want 2 (msg2 and msg4)", len(unread))
+	}
+	if unread[0].Body != "msg2" {
+		t.Errorf("unread[0] = %q, want msg2", unread[0].Body)
+	}
+	if unread[1].Body != "msg4" {
+		t.Errorf("unread[1] = %q, want msg4", unread[1].Body)
+	}
+}
+
+func TestAckMessagesIdempotent(t *testing.T) {
+	s := testStore(t)
+
+	s.Publish("topic", "s1", "a", "msg1", "", "")
+
+	// Acking the same seq twice should not error.
+	if err := s.AckMessages("topic", "reader1", []int64{1}); err != nil {
+		t.Fatalf("first ack: %v", err)
+	}
+	if err := s.AckMessages("topic", "reader1", []int64{1}); err != nil {
+		t.Fatalf("second ack: %v", err)
+	}
+
+	unread, _ := s.Read("topic", "reader1", true, "")
+	if len(unread) != 0 {
+		t.Fatalf("unread = %d, want 0", len(unread))
+	}
+}
+
 func TestCleanupByAge(t *testing.T) {
 	s := testStore(t)
 

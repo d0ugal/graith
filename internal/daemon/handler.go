@@ -309,12 +309,16 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("msg_message", msg)
 				}
 
-				var lastDeliveredSeq int64
-				if len(msgs) > 0 {
-					lastDeliveredSeq = msgs[len(msgs)-1].Seq
-				}
-				if m.Ack && m.Subscriber != "" && lastDeliveredSeq > 0 {
-					sm.messages.Ack(m.Stream, m.Subscriber, lastDeliveredSeq)
+				if m.Ack && m.Subscriber != "" && len(msgs) > 0 {
+					if m.ThreadID != "" {
+						seqs := make([]int64, len(msgs))
+						for i, msg := range msgs {
+							seqs[i] = msg.Seq
+						}
+						sm.messages.AckMessages(m.Stream, m.Subscriber, seqs)
+					} else {
+						sm.messages.Ack(m.Stream, m.Subscriber, msgs[len(msgs)-1].Seq)
+					}
 				}
 
 				if !m.Wait && !m.Follow {
@@ -358,7 +362,11 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 							}
 							sendControl("msg_message", tmsg)
 							if m.Ack && m.Subscriber != "" {
-								sm.messages.Ack(m.Stream, m.Subscriber, tmsg.Seq)
+								if m.ThreadID != "" {
+									sm.messages.AckMessages(m.Stream, m.Subscriber, []int64{tmsg.Seq})
+								} else {
+									sm.messages.Ack(m.Stream, m.Subscriber, tmsg.Seq)
+								}
 							}
 							if m.Wait {
 								sendControl("msg_done", struct{}{})
