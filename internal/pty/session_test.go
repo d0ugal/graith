@@ -62,7 +62,7 @@ func TestSessionEcho(t *testing.T) {
 func TestSessionAttachDetach(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "test.log")
 	s, err := NewSession(SessionOpts{
-		ID: "test", Command: "sh", Args: []string{"-c", "sleep 0.1; echo attached output; sleep 0.1"},
+		ID: "test", Command: "sh", Args: []string{"-c", "read line; echo $line"},
 		Dir: t.TempDir(), Rows: 24, Cols: 80,
 		LogPath: logPath, MaxLogSize: 1024 * 1024,
 	})
@@ -72,12 +72,10 @@ func TestSessionAttachDetach(t *testing.T) {
 	defer s.Close()
 	var buf syncBuf
 	s.Attach(&buf)
-	select {
-	case <-s.Done():
-	case <-time.After(5 * time.Second):
-		t.Fatal("timeout")
+	if err := s.WriteInput([]byte("attached output\n")); err != nil {
+		t.Fatal(err)
 	}
-	deadline := time.After(2 * time.Second)
+	deadline := time.After(5 * time.Second)
 	for !bytes.Contains(buf.Bytes(), []byte("attached output")) {
 		select {
 		case <-deadline:
@@ -86,4 +84,9 @@ func TestSessionAttachDetach(t *testing.T) {
 		}
 	}
 	s.Detach()
+	select {
+	case <-s.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for process exit")
+	}
 }
