@@ -91,10 +91,19 @@ func ReadManifest(path string) (*UpgradeManifest, error) {
 	return &m, nil
 }
 
-func ExecUpgrade(manifestPath, configFile string) error {
-	execPath, err := resolveExecutable()
-	if err != nil {
-		return fmt.Errorf("resolve executable: %w", err)
+func ExecUpgrade(manifestPath, configFile, clientExecPath string) error {
+	execPath := clientExecPath
+	if execPath != "" {
+		if _, err := os.Stat(execPath); err != nil {
+			execPath = ""
+		}
+	}
+	if execPath == "" {
+		var err error
+		execPath, err = resolveExecutable()
+		if err != nil {
+			return fmt.Errorf("resolve executable: %w", err)
+		}
 	}
 
 	args := []string{execPath, "daemon", "start", "--adopt-from", manifestPath}

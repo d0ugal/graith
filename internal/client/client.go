@@ -10,6 +10,7 @@ import (
 
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
+	"github.com/d0ugal/graith/internal/version"
 	"golang.org/x/term"
 )
 
@@ -40,8 +41,14 @@ func New(cfg *config.Config, paths config.Paths, configFile string) (*Client, er
 }
 
 // Connect creates a new client, performs the handshake, and reads the
-// handshake response. On failure the connection is closed automatically.
+// handshake response. If the daemon is running a different version, it
+// automatically triggers a restart and reconnects. On failure the
+// connection is closed automatically.
 func Connect(cfg *config.Config, paths config.Paths, configFile string) (*Client, error) {
+	return connect(cfg, paths, configFile, true)
+}
+
+func connect(cfg *config.Config, paths config.Paths, configFile string, autoUpgrade bool) (*Client, error) {
 	c, err := New(cfg, paths, configFile)
 	if err != nil {
 		return nil, err
@@ -50,11 +57,49 @@ func Connect(cfg *config.Config, paths config.Paths, configFile string) (*Client
 		c.Close()
 		return nil, err
 	}
-	if _, err := c.ReadControlResponse(); err != nil {
+	resp, err := c.ReadControlResponse()
+	if err != nil {
 		c.Close()
 		return nil, err
 	}
+
+	if autoUpgrade && version.Version != "dev" {
+		var hsOk protocol.HandshakeOkMsg
+		if err := protocol.DecodePayload(resp, &hsOk); err == nil {
+			if hsOk.DaemonVersion != "" && hsOk.DaemonVersion != version.Version {
+				fmt.Fprintf(os.Stderr, "Daemon version mismatch (daemon=%s, cli=%s), restarting daemon...\n", hsOk.DaemonVersion, version.Version)
+				if requestUpgrade(c) {
+					c.Close()
+					if waitForDaemon(paths.SocketPath) {
+						return connect(cfg, paths, configFile, false)
+					}
+				}
+			}
+		}
+	}
+
 	return c, nil
+}
+
+func requestUpgrade(c *Client) bool {
+	execPath, _ := os.Executable()
+	if err := c.SendControl("upgrade", protocol.UpgradeMsg{ExecPath: execPath}); err != nil {
+		return false
+	}
+	// Connection drop is expected — the daemon exec'd itself.
+	c.ReadControlResponse()
+	return true
+}
+
+func waitForDaemon(sockPath string) bool {
+	for range 20 {
+		time.Sleep(250 * time.Millisecond)
+		if conn, err := net.DialTimeout("unix", sockPath, 500*time.Millisecond); err == nil {
+			conn.Close()
+			return true
+		}
+	}
+	return false
 }
 
 // ConnectFast is a fast-path connect for hooks. It dials the daemon socket
