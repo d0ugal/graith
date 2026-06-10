@@ -1370,6 +1370,18 @@ func (sm *SessionManager) applyConfig(newCfg *config.Config) {
 			sm.log.Info("config changed", "key", "agents", "action", "removed", "agent", name)
 		}
 	}
+	if old.Sandbox.Enabled != newCfg.Sandbox.Enabled {
+		sm.log.Info("config changed", "key", "sandbox.enabled", "old", old.Sandbox.Enabled, "new", newCfg.Sandbox.Enabled)
+	}
+	if fmt.Sprint(old.Sandbox.ReadDirs) != fmt.Sprint(newCfg.Sandbox.ReadDirs) {
+		sm.log.Info("config changed", "key", "sandbox.read_dirs", "old", old.Sandbox.ReadDirs, "new", newCfg.Sandbox.ReadDirs)
+	}
+	if fmt.Sprint(old.Sandbox.WriteDirs) != fmt.Sprint(newCfg.Sandbox.WriteDirs) {
+		sm.log.Info("config changed", "key", "sandbox.write_dirs", "old", old.Sandbox.WriteDirs, "new", newCfg.Sandbox.WriteDirs)
+	}
+	if fmt.Sprint(old.Sandbox.Features) != fmt.Sprint(newCfg.Sandbox.Features) {
+		sm.log.Info("config changed", "key", "sandbox.features", "old", old.Sandbox.Features, "new", newCfg.Sandbox.Features)
+	}
 }
 
 func (sm *SessionManager) resolveSandbox(agentName string) (bool, error) {
@@ -1568,14 +1580,15 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 	go sm.RunDetectionLoop(ctx)
 	go sm.RunMessageCleanupLoop(ctx)
 
-	if configFile != "" {
-		w := config.NewWatcher(configFile, sm.applyConfig, log)
-		go func() {
-			if err := w.Run(ctx); err != nil && ctx.Err() == nil {
-				log.Error("config watcher stopped", "err", err)
-			}
-		}()
+	if configFile == "" {
+		configFile = paths.ConfigFile
 	}
+	w := config.NewWatcher(configFile, sm.applyConfig, log)
+	go func() {
+		if err := w.Run(ctx); err != nil && ctx.Err() == nil {
+			log.Error("config watcher stopped", "err", err)
+		}
+	}()
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
