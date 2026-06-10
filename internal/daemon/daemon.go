@@ -853,6 +853,7 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 	sessState.ExitCode = nil
 	sessState.PID = ptySess.Cmd.Process.Pid
 	sessState.AgentStatus = ""
+	sessState.IdleSince = nil
 
 	sm.sessions[id] = ptySess
 
