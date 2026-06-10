@@ -30,11 +30,13 @@ var typeCmd = &cobra.Command{
 		noNewline, _ := cmd.Flags().GetBool("no-newline")
 		text := strings.Join(args[1:], " ")
 
-		c.SendControl("type", protocol.TypeMsg{
+		if err := c.SendControl("type", protocol.TypeMsg{
 			SessionID: sessionID,
 			Input:     text,
 			NoNewline: noNewline,
-		})
+		}); err != nil {
+			return err
+		}
 		resp, err := c.ReadControlResponse()
 		if err != nil {
 			return err
