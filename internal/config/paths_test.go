@@ -75,6 +75,7 @@ func TestResolveProfileValidation(t *testing.T) {
 		{"dot rejected", "foo.bar", true},
 		{"space rejected", "foo bar", true},
 		{"leading hyphen rejected", "-dev", true},
+		{"trailing hyphen rejected", "dev-", true},
 		{"reserved default", "default", true},
 		{"too long", "abcdefghijklmnopqrstuvwxyz1234567", true},
 		{"max length ok", "abcdefghijklmnopqrstuvwxyz123456", false},
