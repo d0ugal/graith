@@ -1372,6 +1372,7 @@ func (sm *SessionManager) sandboxOptsFromConfig(merged config.SandboxConfig, ses
 		WriteDirs:        writeDirs,
 		Features:         merged.Features,
 		EnvKeys:          envKeys,
+		AppendProfiles:   expandPaths(merged.AppendProfiles),
 		SafehouseCommand: merged.Command,
 	}
 }

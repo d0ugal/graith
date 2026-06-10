@@ -12,6 +12,7 @@ type WrapOpts struct {
 	WriteDirs        []string
 	Features         []string
 	EnvKeys          []string
+	AppendProfiles   []string
 	SafehouseCommand string
 }
 
@@ -39,6 +40,10 @@ func Wrap(command string, args []string, opts WrapOpts) (string, []string) {
 
 	if len(opts.EnvKeys) > 0 {
 		wrapped = append(wrapped, "--env-pass", strings.Join(opts.EnvKeys, ","))
+	}
+
+	for _, profile := range opts.AppendProfiles {
+		wrapped = append(wrapped, "--append-profile", profile)
 	}
 
 	wrapped = append(wrapped, "--", command)

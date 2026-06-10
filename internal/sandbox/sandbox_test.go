@@ -185,6 +185,53 @@ func TestWrapSharedWorktreeReadOnly(t *testing.T) {
 	}
 }
 
+func TestWrapWithAppendProfiles(t *testing.T) {
+	opts := WrapOpts{
+		WorktreeDir:    "/tmp/wt",
+		AppendProfiles: []string{"/etc/sandbox/custom.sb", "/home/user/extra.sb"},
+		EnvKeys:        []string{"TERM"},
+	}
+	_, args := Wrap("claude", nil, opts)
+
+	var profiles []string
+	for i, a := range args {
+		if a == "--append-profile" && i+1 < len(args) {
+			profiles = append(profiles, args[i+1])
+		}
+	}
+	if len(profiles) != 2 || profiles[0] != "/etc/sandbox/custom.sb" || profiles[1] != "/home/user/extra.sb" {
+		t.Errorf("append-profile args = %v, want [/etc/sandbox/custom.sb /home/user/extra.sb]", profiles)
+	}
+}
+
+func TestWrapAppendProfilesBeforeSeparator(t *testing.T) {
+	opts := WrapOpts{
+		WorktreeDir:    "/tmp/wt",
+		AppendProfiles: []string{"/custom.sb"},
+	}
+	_, args := Wrap("claude", []string{"--resume"}, opts)
+
+	sepIdx := -1
+	profileIdx := -1
+	for i, a := range args {
+		if a == "--" {
+			sepIdx = i
+		}
+		if a == "--append-profile" {
+			profileIdx = i
+		}
+	}
+	if sepIdx == -1 {
+		t.Fatal("separator -- not found")
+	}
+	if profileIdx == -1 {
+		t.Fatal("--append-profile not found")
+	}
+	if profileIdx >= sepIdx {
+		t.Error("--append-profile must appear before -- separator")
+	}
+}
+
 func TestAvailableOnlyOnDarwin(t *testing.T) {
 	result := Available()
 	if runtime.GOOS != "darwin" && result {

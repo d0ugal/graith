@@ -126,12 +126,13 @@ func (a Agent) IdleTimeoutDuration() time.Duration {
 }
 
 type SandboxConfig struct {
-	Enabled   bool     `json:"enabled"              toml:"enabled"`
-	Disabled  *bool    `json:"disabled,omitempty"   toml:"disabled,omitempty"`
-	Command   string   `json:"command,omitempty"    toml:"command"`
-	Features  []string `json:"features,omitempty"   toml:"features"`
-	ReadDirs  []string `json:"read_dirs,omitempty"  toml:"read_dirs"`
-	WriteDirs []string `json:"write_dirs,omitempty" toml:"write_dirs"`
+	Enabled        bool     `json:"enabled"                    toml:"enabled"`
+	Disabled       *bool    `json:"disabled,omitempty"         toml:"disabled,omitempty"`
+	Command        string   `json:"command,omitempty"          toml:"command"`
+	Features       []string `json:"features,omitempty"         toml:"features"`
+	ReadDirs       []string `json:"read_dirs,omitempty"        toml:"read_dirs"`
+	WriteDirs      []string `json:"write_dirs,omitempty"       toml:"write_dirs"`
+	AppendProfiles []string `json:"append_profiles,omitempty"  toml:"append_profiles"`
 }
 
 func (s SandboxConfig) Merge(agent SandboxConfig) SandboxConfig {
@@ -148,6 +149,7 @@ func (s SandboxConfig) Merge(agent SandboxConfig) SandboxConfig {
 	merged.Features = dedup(append(s.Features, agent.Features...))
 	merged.ReadDirs = dedup(append(s.ReadDirs, agent.ReadDirs...))
 	merged.WriteDirs = dedup(append(s.WriteDirs, agent.WriteDirs...))
+	merged.AppendProfiles = dedup(append(s.AppendProfiles, agent.AppendProfiles...))
 
 	if agent.Command != "" {
 		merged.Command = agent.Command
@@ -256,7 +258,8 @@ func mergeAgent(def, usr Agent) Agent {
 		def.IdleTimeout = usr.IdleTimeout
 	}
 	if usr.Sandbox.Enabled || usr.Sandbox.Disabled != nil || usr.Sandbox.Command != "" ||
-		usr.Sandbox.Features != nil || usr.Sandbox.ReadDirs != nil || usr.Sandbox.WriteDirs != nil {
+		usr.Sandbox.Features != nil || usr.Sandbox.ReadDirs != nil || usr.Sandbox.WriteDirs != nil ||
+		usr.Sandbox.AppendProfiles != nil {
 		def.Sandbox = usr.Sandbox
 	}
 	return def
