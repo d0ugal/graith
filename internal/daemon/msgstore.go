@@ -95,6 +95,9 @@ func initSchema(db *sql.DB) error {
 			stream  TEXT PRIMARY KEY,
 			max_seq INTEGER NOT NULL DEFAULT 0
 		);
+
+		INSERT OR IGNORE INTO stream_hwm (stream, max_seq)
+		SELECT stream, MAX(seq) FROM messages GROUP BY stream;
 	`)
 	if err != nil {
 		return fmt.Errorf("init messages schema: %w", err)
@@ -131,7 +134,7 @@ func (s *MsgStore) Publish(stream, senderID, senderName, body, threadID, replyTo
 
 	_, err = tx.Exec(
 		`INSERT INTO stream_hwm (stream, max_seq) VALUES (?, ?)
-		 ON CONFLICT(stream) DO UPDATE SET max_seq = excluded.max_seq`,
+		 ON CONFLICT(stream) DO UPDATE SET max_seq = MAX(stream_hwm.max_seq, excluded.max_seq)`,
 		stream, seq,
 	)
 	if err != nil {
