@@ -1615,30 +1615,30 @@ func TestResumeResetsIdleSince(t *testing.T) {
 		t.Fatalf("Resume() error = %v", err)
 	}
 
-	// Wait for the short-lived process to exit and close PTY file handles
-	// before t.TempDir() cleanup removes the directory.
-	t.Cleanup(func() {
-		sm.mu.RLock()
-		ptySess := sm.sessions[id]
-		sm.mu.RUnlock()
-		if ptySess != nil {
-			select {
-			case <-ptySess.Done():
-			case <-time.After(5 * time.Second):
-			}
-			ptySess.Close()
-		}
-	})
-
 	if resumed.Status != StatusRunning {
 		t.Errorf("status = %q, want %q", resumed.Status, StatusRunning)
 	}
 
 	sm.mu.RLock()
 	idleSince := sm.state.Sessions[id].IdleSince
+	ptySess := sm.sessions[id]
 	sm.mu.RUnlock()
 
 	if idleSince != nil {
 		t.Errorf("IdleSince = %v, want nil after Resume", idleSince)
+	}
+
+	// Wait for the process to exit, close PTY file handles, then
+	// lock/unlock sm.mu to ensure watchSession has finished writing
+	// state.json — all before t.TempDir() cleanup removes the directory.
+	if ptySess != nil {
+		select {
+		case <-ptySess.Done():
+		case <-time.After(5 * time.Second):
+			t.Fatal("timeout waiting for session to exit")
+		}
+		ptySess.Close()
+		sm.mu.Lock()
+		sm.mu.Unlock()
 	}
 }
