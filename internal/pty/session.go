@@ -263,11 +263,12 @@ func buildEnv(extra map[string]string) []string {
 		overrides[k] = v
 	}
 
-	env := make([]string, 0, len(overrides)+len(os.Environ()))
+	parent := os.Environ()
+	env := make([]string, 0, len(overrides)+len(parent))
 	for k, v := range overrides {
 		env = append(env, k+"="+v)
 	}
-	for _, e := range os.Environ() {
+	for _, e := range parent {
 		if k, _, ok := strings.Cut(e, "="); ok {
 			if _, overridden := overrides[k]; overridden {
 				continue
