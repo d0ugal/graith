@@ -1,7 +1,9 @@
 package daemon
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -91,5 +93,34 @@ func TestStopDaemonNonExistentPidFile(t *testing.T) {
 	want := "daemon not running (no pid file)"
 	if err.Error() != want {
 		t.Errorf("error = %q, want %q", err.Error(), want)
+	}
+}
+
+func TestStopDaemonInvalidPID(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		wantErr string
+	}{
+		{"pid zero", "0", "refusing to signal invalid pid 0"},
+		{"pid one", "1", "refusing to signal invalid pid 1"},
+		{"pid negative", "-1", "refusing to signal invalid pid -1"},
+		{"not a number", "notapid", "invalid pid file"},
+		{"empty file", "", "invalid pid file"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pidFile := filepath.Join(t.TempDir(), "daemon.pid")
+			if err := os.WriteFile(pidFile, []byte(tt.content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			err := StopDaemon(pidFile)
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("error = %q, want substring %q", err.Error(), tt.wantErr)
+			}
+		})
 	}
 }
