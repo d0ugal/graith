@@ -958,6 +958,9 @@ func TestForkNoRepoSession(t *testing.T) {
 	if !strings.Contains(err.Error(), "no repo") {
 		t.Errorf("Fork() error = %q, want error mentioning 'no repo'", err)
 	}
+	if len(sm.state.Sessions) != 1 {
+		t.Errorf("expected 1 session (source only), got %d", len(sm.state.Sessions))
+	}
 }
 
 func TestApplyConfig(t *testing.T) {
