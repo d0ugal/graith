@@ -9,6 +9,7 @@ import (
 	"github.com/d0ugal/graith/internal/client"
 	"github.com/d0ugal/graith/internal/daemon"
 	"github.com/d0ugal/graith/internal/protocol"
+	"github.com/d0ugal/graith/internal/version"
 	"github.com/spf13/cobra"
 )
 
@@ -125,21 +126,56 @@ func execUpgrade(successMsg string) error {
 			conn, err := net.DialTimeout("unix", paths.SocketPath, 500*time.Millisecond)
 			if err == nil {
 				conn.Close()
-				out.Print("%s\n", successMsg)
-				return nil
+				break
 			}
 		}
-		return fmt.Errorf("new daemon not responding after exec")
+	} else {
+		c.Close()
+		if resp.Type == "error" {
+			var e protocol.ErrorMsg
+			protocol.DecodePayload(resp, &e)
+			return fmt.Errorf("%s", e.Message)
+		}
+		// Got "upgrading" — give the daemon a moment to exec.
+		time.Sleep(500 * time.Millisecond)
 	}
 
-	c.Close()
-	if resp.Type == "error" {
-		var e protocol.ErrorMsg
-		protocol.DecodePayload(resp, &e)
-		return fmt.Errorf("%s", e.Message)
+	// Verify the daemon is running our version. Old daemons that don't
+	// understand ExecPath will exec back into the old binary.
+	if v := probeDaemonVersion(); v != "" && v != version.Version {
+		return fmt.Errorf("daemon exec'd into %s instead of %s", v, version.Version)
 	}
+
 	out.Print("%s\n", successMsg)
 	return nil
+}
+
+func probeDaemonVersion() string {
+	conn, err := net.DialTimeout("unix", paths.SocketPath, 500*time.Millisecond)
+	if err != nil {
+		return ""
+	}
+	defer conn.Close()
+
+	reader := protocol.NewFrameReader(conn)
+	writer := protocol.NewFrameWriter(conn)
+
+	hsData, _ := protocol.EncodeControl("handshake", protocol.HandshakeMsg{
+		Version:  protocol.Version,
+		ClientID: fmt.Sprintf("upgrade-check-%d", os.Getpid()),
+	})
+	_ = writer.WriteFrame(protocol.ChannelControl, hsData)
+
+	frame, err := reader.ReadFrame()
+	if err != nil || frame.Channel != protocol.ChannelControl {
+		return ""
+	}
+	env, _ := protocol.DecodeControl(frame.Payload)
+	var hsOk protocol.HandshakeOkMsg
+	if err := protocol.DecodePayload(env, &hsOk); err != nil {
+		return ""
+	}
+	return hsOk.DaemonVersion
 }
 
 func restartClean() error {
