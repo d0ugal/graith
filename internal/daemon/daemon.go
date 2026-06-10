@@ -363,6 +363,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 		WorktreePath:   worktreePath,
 	}
 	cleanupOnError := func() {
+		sm.cleanupHooks(id)
 		if sharedWorktree {
 			return
 		}
@@ -566,6 +567,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 	if source.AgentHooks {
 		hookArgs, hookEnv, err := sm.injectHooks(agentName, id)
 		if err != nil {
+			sm.cleanupHooks(id)
 			_ = git.TeardownSession(repoRoot, worktreePath, branchName)
 			return SessionState{}, fmt.Errorf("inject agent hooks: %w", err)
 		}
@@ -585,6 +587,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 			cmd = "safehouse"
 		}
 		if !sandbox.AvailableCommand(cmd) {
+			sm.cleanupHooks(id)
 			_ = git.TeardownSession(repoRoot, worktreePath, branchName)
 			return SessionState{}, fmt.Errorf("source session was sandboxed but %q is no longer available", cmd)
 		}
@@ -612,6 +615,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 		MaxLogSize: 100 * 1024 * 1024,
 	})
 	if err != nil {
+		sm.cleanupHooks(id)
 		_ = git.TeardownSession(repoRoot, worktreePath, branchName)
 		return SessionState{}, fmt.Errorf("start pty session: %w", err)
 	}
@@ -626,6 +630,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 		BaseBranch:     baseBranch,
 		Agent:          agentName,
 		AgentSessionID: agentSessionID,
+		AgentHooks:     source.AgentHooks,
 		Sandboxed:      sandboxed,
 		Status:         StatusRunning,
 		PID:            ptySess.Cmd.Process.Pid,
