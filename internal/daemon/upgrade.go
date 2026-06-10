@@ -15,6 +15,7 @@ import (
 type UpgradeManifest struct {
 	ListenerFd int              `json:"listener_fd"`
 	ConfigFile string           `json:"config_file"`
+	Profile    string           `json:"profile,omitempty"`
 	Sessions   []UpgradeSession `json:"sessions"`
 }
 
@@ -43,6 +44,7 @@ func (sm *SessionManager) PrepareUpgrade(listenerFd uintptr, configFile string) 
 	manifest := &UpgradeManifest{
 		ListenerFd: int(listenerFd),
 		ConfigFile: configFile,
+		Profile:    sm.paths.Profile,
 	}
 
 	if err := clearCloseOnExec(int(listenerFd)); err != nil {

@@ -65,6 +65,12 @@ func connect(cfg *config.Config, paths config.Paths, configFile string, autoUpgr
 		c.Close()
 		return nil, err
 	}
+	if resp.Type == "handshake_err" {
+		var hsErr protocol.HandshakeErrMsg
+		_ = protocol.DecodePayload(resp, &hsErr)
+		c.Close()
+		return nil, fmt.Errorf("handshake rejected: %s", hsErr.Reason)
+	}
 
 	if autoUpgrade && version.Version != "dev" {
 		var hsOk protocol.HandshakeOkMsg
@@ -76,7 +82,7 @@ func connect(cfg *config.Config, paths config.Paths, configFile string, autoUpgr
 				if requestUpgrade(c) {
 					c.Close()
 					if waitForDaemon(paths.SocketPath) {
-						if v := probeDaemonVersion(paths.SocketPath); v == version.Version {
+						if v := probeDaemonVersion(paths.SocketPath, paths); v == version.Version {
 							return connect(cfg, paths, configFile, false)
 						}
 						fmt.Fprintf(os.Stderr, "Exec upgrade did not produce correct version, falling back to clean restart...\n")
@@ -98,7 +104,7 @@ func connect(cfg *config.Config, paths config.Paths, configFile string, autoUpgr
 	return c, nil
 }
 
-func probeDaemonVersion(sockPath string) string {
+func probeDaemonVersion(sockPath string, paths config.Paths) string {
 	conn, err := net.DialTimeout("unix", sockPath, 500*time.Millisecond)
 	if err != nil {
 		return ""
@@ -108,10 +114,9 @@ func probeDaemonVersion(sockPath string) string {
 	reader := protocol.NewFrameReader(conn)
 	writer := protocol.NewFrameWriter(conn)
 
-	hsData, _ := protocol.EncodeControl("handshake", protocol.HandshakeMsg{
-		Version:  protocol.Version,
-		ClientID: fmt.Sprintf("upgrade-check-%d", os.Getpid()),
-	})
+	hs := BuildHandshake(paths, 0, 0, "")
+	hs.ClientID = fmt.Sprintf("upgrade-check-%d", os.Getpid())
+	hsData, _ := protocol.EncodeControl("handshake", hs)
 	_ = writer.WriteFrame(protocol.ChannelControl, hsData)
 
 	frame, err := reader.ReadFrame()
@@ -190,14 +195,22 @@ func ConnectFast(paths config.Paths) (*Client, error) {
 		conn:   conn,
 		reader: protocol.NewFrameReader(conn),
 		writer: protocol.NewFrameWriter(conn),
+		paths:  paths,
 	}
 	if err := c.Handshake(); err != nil {
 		c.Close()
 		return nil, err
 	}
-	if _, err := c.ReadControlResponse(); err != nil {
+	resp, err := c.ReadControlResponse()
+	if err != nil {
 		c.Close()
 		return nil, err
+	}
+	if resp.Type == "handshake_err" {
+		var hsErr protocol.HandshakeErrMsg
+		_ = protocol.DecodePayload(resp, &hsErr)
+		c.Close()
+		return nil, fmt.Errorf("handshake rejected: %s", hsErr.Reason)
 	}
 	return c, nil
 }
@@ -216,14 +229,22 @@ func ConnectForApproval(paths config.Paths, approvalTimeout time.Duration) (*Cli
 		conn:   conn,
 		reader: protocol.NewFrameReader(conn),
 		writer: protocol.NewFrameWriter(conn),
+		paths:  paths,
 	}
 	if err := c.Handshake(); err != nil {
 		c.Close()
 		return nil, err
 	}
-	if _, err := c.ReadControlResponse(); err != nil {
+	resp, err := c.ReadControlResponse()
+	if err != nil {
 		c.Close()
 		return nil, err
+	}
+	if resp.Type == "handshake_err" {
+		var hsErr protocol.HandshakeErrMsg
+		_ = protocol.DecodePayload(resp, &hsErr)
+		c.Close()
+		return nil, fmt.Errorf("handshake rejected: %s", hsErr.Reason)
 	}
 	return c, nil
 }
@@ -240,19 +261,27 @@ func (c *Client) Close() {
 	_ = c.conn.Close()
 }
 
-func (c *Client) Handshake() error {
-	cwd, _ := os.Getwd()
-	cols, rows := 80, 24
-	if w, h, err := term.GetSize(int(os.Stdout.Fd())); err == nil {
-		cols, rows = w, h
-	}
-
-	return c.SendControl("handshake", protocol.HandshakeMsg{
+// BuildHandshake constructs a HandshakeMsg with the given paths and terminal
+// dimensions. All code that needs to send a handshake should use this so the
+// Profile field is always populated.
+func BuildHandshake(paths config.Paths, cols, rows uint16, cwd string) protocol.HandshakeMsg {
+	return protocol.HandshakeMsg{
 		Version:      protocol.Version,
 		ClientID:     fmt.Sprintf("%d", os.Getpid()),
-		TerminalSize: [2]uint16{uint16(cols), uint16(rows)},
+		TerminalSize: [2]uint16{cols, rows},
 		Cwd:          cwd,
-	})
+		Profile:      paths.Profile,
+	}
+}
+
+func (c *Client) Handshake() error {
+	cwd, _ := os.Getwd()
+	cols, rows := uint16(80), uint16(24)
+	if w, h, err := term.GetSize(int(os.Stdout.Fd())); err == nil {
+		cols, rows = uint16(w), uint16(h)
+	}
+
+	return c.SendControl("handshake", BuildHandshake(c.paths, cols, rows, cwd))
 }
 
 func (c *Client) SendControl(msgType string, payload any) error {

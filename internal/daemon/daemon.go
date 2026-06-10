@@ -1473,6 +1473,10 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 		}
 		os.Remove(adoptFrom)
 
+		if manifest.Profile != paths.Profile {
+			return fmt.Errorf("profile mismatch: manifest has %q but daemon is %q", manifest.Profile, paths.Profile)
+		}
+
 		f := os.NewFile(uintptr(manifest.ListenerFd), "listener")
 		l, err = net.FileListener(f)
 		f.Close()

@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/d0ugal/graith/internal/client"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/d0ugal/graith/internal/sandbox"
 	"github.com/d0ugal/graith/internal/version"
@@ -38,10 +39,9 @@ var doctorCmd = &cobra.Command{
 				reader := protocol.NewFrameReader(conn)
 				writer := protocol.NewFrameWriter(conn)
 
-				hsData, _ := protocol.EncodeControl("handshake", protocol.HandshakeMsg{
-					Version:  protocol.Version,
-					ClientID: "doctor",
-				})
+				hs := client.BuildHandshake(paths, 0, 0, "")
+				hs.ClientID = "doctor"
+				hsData, _ := protocol.EncodeControl("handshake", hs)
 				_ = writer.WriteFrame(protocol.ChannelControl, hsData)
 
 				frame, err := reader.ReadFrame()
