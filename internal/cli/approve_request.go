@@ -69,7 +69,12 @@ var approveRequestCmd = &cobra.Command{
 			toolName = stdin.data.ToolName
 		}
 
-		c, err := client.ConnectForApproval(config.ResolvePaths(), cfg.Approvals.TimeoutDuration())
+		hookPaths, err := config.ResolvePaths()
+		if err != nil {
+			fmt.Println(`{"decision":"allow"}`)
+			return nil
+		}
+		c, err := client.ConnectForApproval(hookPaths, cfg.Approvals.TimeoutDuration())
 		if err != nil {
 			// Fail-open: daemon unreachable, allow the tool use.
 			fmt.Println(`{"decision":"allow"}`)

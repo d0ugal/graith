@@ -306,7 +306,10 @@ func Default() *Config {
 
 func LoadOrDefault(path string) (*Config, error) {
 	if path == "" {
-		p := ResolvePaths()
+		p, err := ResolvePaths()
+		if err != nil {
+			return nil, err
+		}
 		path = p.ConfigFile
 	}
 	cfg, err := Load(path)
@@ -327,8 +330,8 @@ func LoadOrDefault(path string) (*Config, error) {
 // legacyConfigFile returns the old macOS config path (~/Library/Application
 // Support/graith/config.toml) if it differs from the current path.
 func legacyConfigFile() string {
-	legacy := filepath.Join(xdg.ConfigHome, appName, "config.toml")
-	current := filepath.Join(configHome(), appName, "config.toml")
+	legacy := filepath.Join(xdg.ConfigHome, baseAppName, "config.toml")
+	current := filepath.Join(configHome(), baseAppName, "config.toml")
 	if legacy == current {
 		return ""
 	}

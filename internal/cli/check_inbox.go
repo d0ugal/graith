@@ -23,7 +23,11 @@ var checkInboxCmd = &cobra.Command{
 			return nil
 		}
 
-		c, err := client.ConnectFast(config.ResolvePaths())
+		hookPaths, err := config.ResolvePaths()
+		if err != nil {
+			return nil
+		}
+		c, err := client.ConnectFast(hookPaths)
 		if err != nil {
 			return nil
 		}

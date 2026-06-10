@@ -27,7 +27,10 @@ var rootCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("loading config: %w", err)
 		}
-		paths = config.ResolvePaths()
+		paths, err = config.ResolvePaths()
+		if err != nil {
+			return err
+		}
 		out = output.New(jsonOutput)
 		return nil
 	},
