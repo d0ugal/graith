@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.4](https://github.com/d0ugal/graith/compare/v0.16.3...v0.16.4) (2026-06-10)
+
+
+### Bug Fixes
+
+* use clean restart for auto-upgrade, prefer PATH in resolveExecutable ([4d2e52c](https://github.com/d0ugal/graith/commit/4d2e52ca7379ef3c610bb8cdc634cb76691279e5))
+
 ## [0.16.3](https://github.com/d0ugal/graith/compare/v0.16.2...v0.16.3) (2026-06-10)
 
 
