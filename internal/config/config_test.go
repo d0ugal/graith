@@ -361,6 +361,150 @@ func TestRepoPathAllowed(t *testing.T) {
 	})
 }
 
+func TestLoadPartialAgentPreservesDefaults(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	toml := `
+[agents.claude]
+command = "my-claude"
+`
+	os.WriteFile(cfgPath, []byte(toml), 0o644)
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	claude := cfg.Agents["claude"]
+	if claude.Command != "my-claude" {
+		t.Errorf("claude.Command = %q, want my-claude", claude.Command)
+	}
+	if len(claude.Args) != 2 || claude.Args[0] != "--session-id" {
+		t.Errorf("claude.Args = %v, want default args preserved", claude.Args)
+	}
+	if len(claude.ResumeArgs) != 2 || claude.ResumeArgs[0] != "--resume" {
+		t.Errorf("claude.ResumeArgs = %v, want default resume_args preserved", claude.ResumeArgs)
+	}
+
+	if _, ok := cfg.Agents["codex"]; !ok {
+		t.Error("codex agent lost — unmentioned defaults should be preserved")
+	}
+	if _, ok := cfg.Agents["opencode"]; !ok {
+		t.Error("opencode agent lost")
+	}
+	if _, ok := cfg.Agents["agy"]; !ok {
+		t.Error("agy agent lost")
+	}
+}
+
+func TestLoadAgentExplicitEmptyArgs(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	toml := `
+[agents.claude]
+command = "claude"
+args = []
+`
+	os.WriteFile(cfgPath, []byte(toml), 0o644)
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	claude := cfg.Agents["claude"]
+	if len(claude.Args) != 0 {
+		t.Errorf("claude.Args = %v, want [] (explicit empty should override default)", claude.Args)
+	}
+	if len(claude.ResumeArgs) != 2 {
+		t.Errorf("claude.ResumeArgs = %v, want default preserved when not specified", claude.ResumeArgs)
+	}
+}
+
+func TestLoadCustomAgentPreserved(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	toml := `
+[agents.custom]
+command = "my-agent"
+args = ["--flag"]
+`
+	os.WriteFile(cfgPath, []byte(toml), 0o644)
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	custom, ok := cfg.Agents["custom"]
+	if !ok {
+		t.Fatal("custom agent not found")
+	}
+	if custom.Command != "my-agent" {
+		t.Errorf("custom.Command = %q, want my-agent", custom.Command)
+	}
+	if len(custom.Args) != 1 || custom.Args[0] != "--flag" {
+		t.Errorf("custom.Args = %v, want [--flag]", custom.Args)
+	}
+
+	if _, ok := cfg.Agents["claude"]; !ok {
+		t.Error("default claude agent lost when adding custom agent")
+	}
+}
+
+func TestMergeAgent(t *testing.T) {
+	def := Agent{
+		Command:    "claude",
+		Args:       []string{"--session-id", "{agent_session_id}"},
+		ResumeArgs: []string{"--resume", "{agent_session_id}"},
+		ForkArgs:   []string{"--fork", "{fork_source_agent_session_id}"},
+	}
+
+	t.Run("override command only", func(t *testing.T) {
+		usr := Agent{Command: "my-claude"}
+		got := mergeAgent(def, usr)
+		if got.Command != "my-claude" {
+			t.Errorf("Command = %q, want my-claude", got.Command)
+		}
+		if len(got.Args) != 2 {
+			t.Errorf("Args = %v, want defaults preserved", got.Args)
+		}
+		if len(got.ResumeArgs) != 2 {
+			t.Errorf("ResumeArgs = %v, want defaults preserved", got.ResumeArgs)
+		}
+		if len(got.ForkArgs) != 2 {
+			t.Errorf("ForkArgs = %v, want defaults preserved", got.ForkArgs)
+		}
+	})
+
+	t.Run("override env", func(t *testing.T) {
+		usr := Agent{Env: map[string]string{"FOO": "bar"}}
+		got := mergeAgent(def, usr)
+		if got.Env["FOO"] != "bar" {
+			t.Errorf("Env = %v, want FOO=bar", got.Env)
+		}
+		if got.Command != "claude" {
+			t.Errorf("Command = %q, want claude", got.Command)
+		}
+	})
+
+	t.Run("override idle_timeout", func(t *testing.T) {
+		usr := Agent{IdleTimeout: "30m"}
+		got := mergeAgent(def, usr)
+		if got.IdleTimeout != "30m" {
+			t.Errorf("IdleTimeout = %q, want 30m", got.IdleTimeout)
+		}
+	})
+
+	t.Run("sandbox override", func(t *testing.T) {
+		usr := Agent{Sandbox: SandboxConfig{Enabled: true, Features: []string{"ssh"}}}
+		got := mergeAgent(def, usr)
+		if !got.Sandbox.Enabled {
+			t.Error("Sandbox.Enabled = false, want true")
+		}
+		if len(got.Sandbox.Features) != 1 || got.Sandbox.Features[0] != "ssh" {
+			t.Errorf("Sandbox.Features = %v, want [ssh]", got.Sandbox.Features)
+		}
+	})
+}
+
 func TestSandboxConfigMergeDeduplicatesFeatures(t *testing.T) {
 	global := SandboxConfig{
 		Enabled:  true,

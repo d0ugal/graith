@@ -199,10 +199,54 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("reading config: %w", err)
 	}
 	cfg := Default()
+	defaultAgents := cfg.Agents
 	if err := toml.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("parsing config %s: %w", path, err)
 	}
+	cfg.Agents = mergeAgents(defaultAgents, cfg.Agents)
 	return cfg, nil
+}
+
+func mergeAgents(defaults, user map[string]Agent) map[string]Agent {
+	merged := make(map[string]Agent, len(defaults)+len(user))
+	for name, def := range defaults {
+		merged[name] = def
+	}
+	for name, usr := range user {
+		def, hasDefault := merged[name]
+		if !hasDefault {
+			merged[name] = usr
+			continue
+		}
+		merged[name] = mergeAgent(def, usr)
+	}
+	return merged
+}
+
+func mergeAgent(def, usr Agent) Agent {
+	if usr.Command != "" {
+		def.Command = usr.Command
+	}
+	if usr.Args != nil {
+		def.Args = usr.Args
+	}
+	if usr.ResumeArgs != nil {
+		def.ResumeArgs = usr.ResumeArgs
+	}
+	if usr.ForkArgs != nil {
+		def.ForkArgs = usr.ForkArgs
+	}
+	if usr.Env != nil {
+		def.Env = usr.Env
+	}
+	if usr.IdleTimeout != "" {
+		def.IdleTimeout = usr.IdleTimeout
+	}
+	if usr.Sandbox.Enabled || usr.Sandbox.Disabled != nil || usr.Sandbox.Command != "" ||
+		usr.Sandbox.Features != nil || usr.Sandbox.ReadDirs != nil || usr.Sandbox.WriteDirs != nil {
+		def.Sandbox = usr.Sandbox
+	}
+	return def
 }
 
 func Default() *Config {
