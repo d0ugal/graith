@@ -188,14 +188,17 @@ func TestSortSessions_RunningBeforeStopped(t *testing.T) {
 	}
 }
 
-func TestSortSessions_RecentlyAttachedFirst(t *testing.T) {
+func TestSortSessions_AlphabeticalByName(t *testing.T) {
 	sessions := []protocol.SessionInfo{
-		{ID: "a", Name: "alpha", Status: "running", CreatedAt: time.Now().Format(time.RFC3339), LastAttachedAt: time.Now().Add(-1 * time.Hour).Format(time.RFC3339)},
 		{ID: "b", Name: "beta", Status: "running", CreatedAt: time.Now().Format(time.RFC3339), LastAttachedAt: time.Now().Add(-5 * time.Minute).Format(time.RFC3339)},
+		{ID: "a", Name: "alpha", Status: "running", CreatedAt: time.Now().Format(time.RFC3339), LastAttachedAt: time.Now().Add(-1 * time.Hour).Format(time.RFC3339)},
 	}
 	SortSessions(sessions)
-	if sessions[0].ID != "b" {
-		t.Errorf("more recently attached should be first, got %q", sessions[0].ID)
+	if sessions[0].ID != "a" {
+		t.Errorf("alphabetically first name should be first, got %q", sessions[0].Name)
+	}
+	if sessions[1].ID != "b" {
+		t.Errorf("alphabetically second name should be second, got %q", sessions[1].Name)
 	}
 }
 
