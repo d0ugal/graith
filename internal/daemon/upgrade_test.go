@@ -107,6 +107,8 @@ func TestStopDaemonInvalidPID(t *testing.T) {
 		{"pid negative", "-1", "refusing to signal invalid pid -1"},
 		{"not a number", "notapid", "invalid pid file"},
 		{"empty file", "", "invalid pid file"},
+		{"trailing garbage", "123abc", "invalid pid file"},
+		{"multiple numbers", "123 456", "invalid pid file"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -120,6 +122,9 @@ func TestStopDaemonInvalidPID(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), tt.wantErr) {
 				t.Errorf("error = %q, want substring %q", err.Error(), tt.wantErr)
+			}
+			if _, statErr := os.Stat(pidFile); !os.IsNotExist(statErr) {
+				t.Error("expected pid file to be removed after invalid content")
 			}
 		})
 	}
