@@ -385,6 +385,16 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 	env["GRAITH_SESSION_NAME"] = name
 	env["GRAITH_WORKTREE_PATH"] = worktreePath
 
+	sandboxed, err := sm.resolveSandbox(agentName)
+	if err != nil {
+		cleanupOnError()
+		return SessionState{}, err
+	}
+	if sharedWorktree && !sandboxed {
+		cleanupOnError()
+		return SessionState{}, fmt.Errorf("--share-worktree requires sandbox to be enabled so the shared worktree can be mounted read-only; set sandbox.enabled = true in config and ensure safehouse is installed (gr doctor)")
+	}
+
 	if agentHooks {
 		switch agentName {
 		case "claude":
@@ -408,16 +418,6 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 				}
 			}
 		}
-	}
-
-	sandboxed, err := sm.resolveSandbox(agentName)
-	if err != nil {
-		cleanupOnError()
-		return SessionState{}, err
-	}
-	if sharedWorktree && !sandboxed {
-		cleanupOnError()
-		return SessionState{}, fmt.Errorf("--share-worktree requires sandbox to enforce read-only access; enable sandbox in config or install safehouse")
 	}
 	command := agent.Command
 	finalArgs := expandedArgs
@@ -765,6 +765,10 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 		}
 	}
 
+	if sessState.SharedWorktree && !sessState.Sandboxed {
+		return SessionState{}, fmt.Errorf("shared-worktree session %q was created without sandbox and cannot be resumed safely; delete and recreate with sandbox enabled", id)
+	}
+
 	command := agent.Command
 	finalArgs := expandedArgs
 	if sessState.Sandboxed {
@@ -784,6 +788,14 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 			envKeys = append(envKeys, k)
 		}
 		opts := sm.sandboxOpts(sessState.Agent, id, sessState.WorktreePath, envKeys, sessState.AgentHooks)
+		if sessState.SharedWorktree {
+			scratchDir := filepath.Join(sm.paths.DataDir, "scratch", id)
+			if err := os.MkdirAll(scratchDir, 0o700); err != nil {
+				return SessionState{}, fmt.Errorf("create scratch dir for shared worktree resume: %w", err)
+			}
+			opts.ReadDirs = append(opts.ReadDirs, sessState.WorktreePath)
+			opts.WorktreeDir = scratchDir
+		}
 		command, finalArgs = sandbox.Wrap(agent.Command, expandedArgs, opts)
 		sm.log.Info("sandboxing resumed session", "id", id)
 	}
