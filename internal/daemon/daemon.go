@@ -479,18 +479,20 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 	sm.state.Sessions[id] = sessState
 	sm.sessions[id] = ptySess
 
-	go sm.watchSession(id, ptySess)
-
 	if err := sm.saveState(); err != nil {
 		delete(sm.state.Sessions, id)
 		delete(sm.sessions, id)
 		_ = ptySess.Kill()
+		ptySess.Close()
 		cleanupOnError()
 		if scratchDir != "" {
 			os.RemoveAll(scratchDir)
 		}
+		sm.cleanupHooks(id)
 		return SessionState{}, fmt.Errorf("persist session state: %w", err)
 	}
+
+	go sm.watchSession(id, ptySess)
 
 	return *sessState, nil
 }
@@ -651,15 +653,17 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 	sm.state.Sessions[id] = sessState
 	sm.sessions[id] = ptySess
 
-	go sm.watchSession(id, ptySess)
-
 	if err := sm.saveState(); err != nil {
 		delete(sm.state.Sessions, id)
 		delete(sm.sessions, id)
 		_ = ptySess.Kill()
+		ptySess.Close()
 		_ = git.TeardownSession(repoRoot, worktreePath, branchName)
+		sm.cleanupHooks(id)
 		return SessionState{}, fmt.Errorf("persist session state: %w", err)
 	}
+
+	go sm.watchSession(id, ptySess)
 
 	return *sessState, nil
 }
@@ -698,8 +702,6 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 	if sessState.Status == StatusRunning {
 		return *sessState, nil
 	}
-
-	delete(sm.hookReports, id)
 
 	agent, ok := sm.cfg.Agents[sessState.Agent]
 	if !ok {
@@ -813,7 +815,6 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 	sessState.AgentStatus = ""
 
 	sm.sessions[id] = ptySess
-	go sm.watchSession(id, ptySess)
 
 	if err := sm.saveState(); err != nil {
 		sessState.Status = prevStatus
@@ -822,8 +823,12 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 		sessState.AgentStatus = prevAgentStatus
 		delete(sm.sessions, id)
 		_ = ptySess.Kill()
+		ptySess.Close()
 		return SessionState{}, fmt.Errorf("persist session state: %w", err)
 	}
+
+	delete(sm.hookReports, id)
+	go sm.watchSession(id, ptySess)
 
 	return *sessState, nil
 }
