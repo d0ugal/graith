@@ -1079,6 +1079,87 @@ func TestView_ConfirmDeleteShowsPrompt(t *testing.T) {
 	}
 }
 
+func TestView_ConfirmDeleteShowsUnsavedWarning(t *testing.T) {
+	sessions := overlayTestSessionsWithGitStatus()
+	m := newOverlayModel(sessions, "", nil, nil)
+	updated, _ := sendWindowSize(m, 120, 40)
+	updated, _ = sendKey(asOverlay(updated), "x")
+	view := asOverlay(updated).View().Content
+
+	if !strings.Contains(view, "unsaved work") {
+		t.Error("delete confirmation for dirty session should warn about unsaved work")
+	}
+	if !strings.Contains(view, "Uncommitted changes") {
+		t.Error("delete confirmation should mention uncommitted changes")
+	}
+	if !strings.Contains(view, "3 unpushed commit(s)") {
+		t.Error("delete confirmation should mention unpushed commits")
+	}
+}
+
+func TestView_ConfirmDeleteNoWarningForCleanSession(t *testing.T) {
+	sessions := overlayTestSessions()
+	m := newOverlayModel(sessions, "", nil, nil)
+	updated, _ := sendWindowSize(m, 120, 40)
+	updated, _ = sendKey(asOverlay(updated), "x")
+	view := asOverlay(updated).View().Content
+
+	if strings.Contains(view, "unsaved work") {
+		t.Error("delete confirmation for clean session should not warn about unsaved work")
+	}
+	if !strings.Contains(view, "Delete") || !strings.Contains(view, "[y/N]") {
+		t.Error("delete confirmation should still show 'Delete ... [y/N]'")
+	}
+}
+
+func TestView_ConfirmDeleteDirtyOnly(t *testing.T) {
+	sessions := []protocol.SessionInfo{
+		{
+			ID:        "s1",
+			Name:      "dirty-only",
+			RepoName:  "graith",
+			Status:    "running",
+			Dirty:     true,
+			CreatedAt: time.Now().Format(time.RFC3339),
+		},
+	}
+	m := newOverlayModel(sessions, "", nil, nil)
+	updated, _ := sendWindowSize(m, 120, 40)
+	updated, _ = sendKey(asOverlay(updated), "x")
+	view := asOverlay(updated).View().Content
+
+	if !strings.Contains(view, "Uncommitted changes") {
+		t.Error("should warn about uncommitted changes")
+	}
+	if strings.Contains(view, "unpushed commit") {
+		t.Error("should not mention unpushed commits when there are none")
+	}
+}
+
+func TestView_ConfirmDeleteUnpushedOnly(t *testing.T) {
+	sessions := []protocol.SessionInfo{
+		{
+			ID:            "s1",
+			Name:          "unpushed-only",
+			RepoName:      "graith",
+			Status:        "running",
+			UnpushedCount: 5,
+			CreatedAt:     time.Now().Format(time.RFC3339),
+		},
+	}
+	m := newOverlayModel(sessions, "", nil, nil)
+	updated, _ := sendWindowSize(m, 120, 40)
+	updated, _ = sendKey(asOverlay(updated), "x")
+	view := asOverlay(updated).View().Content
+
+	if strings.Contains(view, "Uncommitted changes") {
+		t.Error("should not mention uncommitted changes when there are none")
+	}
+	if !strings.Contains(view, "5 unpushed commit(s)") {
+		t.Error("should warn about unpushed commits")
+	}
+}
+
 func TestView_FilterModeShowsInput(t *testing.T) {
 	m := newOverlayModel(overlayTestSessions(), "", nil, nil)
 	updated, _ := sendWindowSize(m, 120, 40)
