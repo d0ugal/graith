@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.18.1](https://github.com/d0ugal/graith/compare/v0.18.0...v0.18.1) (2026-06-10)
+
+
+### Bug Fixes
+
+* always watch config file for changes and log sandbox config diffs ([2a2307b](https://github.com/d0ugal/graith/commit/2a2307b7b708b7da22e39b333dba75b64d952336))
+* log full sandbox opts (read_dirs, write_dirs, features, workdir) on session create/fork/resume ([6ae9f0e](https://github.com/d0ugal/graith/commit/6ae9f0e7bd1f854068c6e39165b512f90ce6b72e))
+
 ## [0.18.0](https://github.com/d0ugal/graith/compare/v0.17.0...v0.18.0) (2026-06-10)
 
 
