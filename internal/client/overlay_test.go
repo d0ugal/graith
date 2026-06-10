@@ -93,9 +93,8 @@ func TestBuildGroupedItems_GroupsByRepo(t *testing.T) {
 	sessions := overlayTestSessions()
 	items := buildGroupedItems(sessions)
 
-	// With new sorting (running+recent first), the graith group has:
-	// fix-overlay (running, recently attached) then add-tests (stopped)
-	// Plus 2 group headers = 5 items total
+	// graith group: fix-overlay (running), add-tests (stopped) — sorted
+	// by running status then alphabetically. Plus 2 group headers = 5 items.
 	if len(items) != 5 {
 		t.Fatalf("expected 5 items (2 headers + 3 sessions), got %d", len(items))
 	}
