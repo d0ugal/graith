@@ -1362,6 +1362,81 @@ func TestMsgPubWithThread(t *testing.T) {
 	}
 }
 
+func TestKickedClientConnectionClosed(t *testing.T) {
+	h1 := newTestHarness(t)
+	h1.addPTYSession(t, "kick1", "kick-test")
+
+	// First client attaches
+	h1.sendControl(t, "attach", protocol.AttachMsg{SessionID: "kick1"})
+	env := h1.readControlMsg(t)
+	if env.Type != "attached" {
+		t.Fatalf("expected attached, got %q", env.Type)
+	}
+
+	// Read from h1 in background so the synchronous net.Pipe doesn't block
+	// the kick callback's WriteFrame.
+	h1ReadErr := make(chan error, 1)
+	go func() {
+		for {
+			_, err := h1.reader.ReadFrame()
+			if err != nil {
+				h1ReadErr <- err
+				return
+			}
+		}
+	}()
+
+	// Second client connects and attaches to the same session, kicking h1.
+	clientConn2, serverConn2 := net.Pipe()
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	done2 := make(chan struct{})
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	go func() {
+		defer close(done2)
+		HandleConnection(ctx2, serverConn2, h1.sm, log)
+	}()
+
+	writer2 := protocol.NewFrameWriter(clientConn2)
+	reader2 := protocol.NewFrameReader(clientConn2)
+
+	data, _ := protocol.EncodeControl("attach", protocol.AttachMsg{SessionID: "kick1"})
+	writer2.WriteFrame(protocol.ChannelControl, data)
+
+	for {
+		frame, err := reader2.ReadFrame()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if frame.Channel == protocol.ChannelControl {
+			env2, _ := protocol.DecodeControl(frame.Payload)
+			if env2.Type == "attached" {
+				break
+			}
+		}
+	}
+
+	// The kicked client's connection should be closed, causing its reader to
+	// return an error. This means the handler exits and stops accepting PTY input.
+	select {
+	case <-h1ReadErr:
+	case <-time.After(2 * time.Second):
+		t.Fatal("kicked client connection was not closed")
+	}
+
+	// The first client's handler should have exited.
+	select {
+	case <-h1.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("kicked client handler did not exit")
+	}
+
+	cancel2()
+	clientConn2.Close()
+	serverConn2.Close()
+	<-done2
+}
+
 func TestAttachSetsLastAttachedAt(t *testing.T) {
 	h := newTestHarness(t)
 	h.addPTYSession(t, "att-ts", "attach-timestamp")
