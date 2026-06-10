@@ -830,6 +830,82 @@ func TestCleanupNoConfig(t *testing.T) {
 	}
 }
 
+func TestCleanupPreservesHighWaterMark(t *testing.T) {
+	s := testStore(t)
+
+	s.Publish("topic", "s1", "a", "msg1", "", "")
+	s.Publish("topic", "s1", "a", "msg2", "", "")
+	s.Publish("topic", "s1", "a", "msg3", "", "")
+
+	s.Ack("topic", "reader1", 3)
+
+	oldTime := time.Now().UTC().Add(-48 * time.Hour).Format(time.RFC3339Nano)
+	s.db.Exec("UPDATE messages SET created_at = ? WHERE stream = ?", oldTime, "topic")
+
+	deleted, err := s.Cleanup(24*time.Hour, 0)
+	if err != nil {
+		t.Fatalf("Cleanup: %v", err)
+	}
+	if deleted != 3 {
+		t.Errorf("deleted = %d, want 3", deleted)
+	}
+
+	msgs, _ := s.Read("topic", "", false, "")
+	if len(msgs) != 0 {
+		t.Fatalf("got %d messages, want 0 (all cleaned up)", len(msgs))
+	}
+
+	msg4, err := s.Publish("topic", "s1", "a", "msg4", "", "")
+	if err != nil {
+		t.Fatalf("Publish after cleanup: %v", err)
+	}
+	if msg4.Seq <= 3 {
+		t.Errorf("seq after cleanup = %d, want > 3 (must continue past high-water mark)", msg4.Seq)
+	}
+
+	unread, _ := s.Read("topic", "reader1", true, "")
+	if len(unread) != 1 {
+		t.Fatalf("got %d unread, want 1 (subscriber must see post-cleanup message)", len(unread))
+	}
+	if unread[0].Body != "msg4" {
+		t.Errorf("body = %q, want msg4", unread[0].Body)
+	}
+}
+
+func TestCleanupByMaxPreservesHighWaterMark(t *testing.T) {
+	s := testStore(t)
+
+	for i := range 10 {
+		s.Publish("topic", "s1", "a", fmt.Sprintf("msg-%d", i+1), "", "")
+	}
+
+	s.Ack("topic", "reader1", 10)
+
+	deleted, err := s.Cleanup(0, 3)
+	if err != nil {
+		t.Fatalf("Cleanup: %v", err)
+	}
+	if deleted != 7 {
+		t.Errorf("deleted = %d, want 7", deleted)
+	}
+
+	msg, err := s.Publish("topic", "s1", "a", "after-cleanup", "", "")
+	if err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if msg.Seq != 11 {
+		t.Errorf("seq = %d, want 11", msg.Seq)
+	}
+
+	unread, _ := s.Read("topic", "reader1", true, "")
+	if len(unread) != 1 {
+		t.Fatalf("got %d unread, want 1", len(unread))
+	}
+	if unread[0].Body != "after-cleanup" {
+		t.Errorf("body = %q", unread[0].Body)
+	}
+}
+
 func TestCleanupEmptyDB(t *testing.T) {
 	s := testStore(t)
 
