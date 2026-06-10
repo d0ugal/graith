@@ -251,11 +251,26 @@ func repoHash(repoPath string) string {
 	return hex.EncodeToString(b)[:12]
 }
 
+// nameExists reports whether any session already uses the given name.
+// Caller must hold sm.mu.
+func (sm *SessionManager) nameExists(name string) bool {
+	for _, s := range sm.state.Sessions {
+		if s.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
 // Create starts a new agent session, either in a git worktree or as a
 // standalone scratch session (when noRepo is true).
 func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt string, noRepo bool, shareWorktree string, agentHooks bool, rows, cols uint16) (SessionState, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
+
+	if sm.nameExists(name) {
+		return SessionState{}, fmt.Errorf("session name %q already exists", name)
+	}
 
 	agent, ok := sm.cfg.Agents[agentName]
 	if !ok {
@@ -494,6 +509,10 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) (SessionState, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
+
+	if sm.nameExists(name) {
+		return SessionState{}, fmt.Errorf("session name %q already exists", name)
+	}
 
 	source, ok := sm.state.Sessions[sourceSessionID]
 	if !ok {
@@ -910,6 +929,9 @@ func (sm *SessionManager) Rename(id, newName string) error {
 	s, ok := sm.state.Sessions[id]
 	if !ok {
 		return fmt.Errorf("session %q not found", id)
+	}
+	if s.Name != newName && sm.nameExists(newName) {
+		return fmt.Errorf("session name %q already exists", newName)
 	}
 	s.Name = newName
 	return sm.saveState()

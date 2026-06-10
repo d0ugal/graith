@@ -115,6 +115,61 @@ func TestNewSessionManager(t *testing.T) {
 	}
 }
 
+func TestCreateDuplicateNameRejected(t *testing.T) {
+	sm := newTestSessionManager(t)
+	sm.state.Sessions["s1"] = &SessionState{ID: "s1", Name: "alpha"}
+
+	_, err := sm.Create("alpha", "claude", "/some/repo", "", "", true, "", false, 24, 80)
+	if err == nil {
+		t.Fatal("expected error when creating session with duplicate name")
+	}
+	if len(sm.state.Sessions) != 1 {
+		t.Error("no new session should have been added")
+	}
+}
+
+func TestForkDuplicateNameRejected(t *testing.T) {
+	sm := newTestSessionManager(t)
+	sm.state.Sessions["src"] = &SessionState{
+		ID: "src", Name: "source", Agent: "claude",
+		RepoPath: "/repo", WorktreePath: "/wt", Branch: "main",
+	}
+	sm.state.Sessions["other"] = &SessionState{ID: "other", Name: "taken"}
+
+	_, err := sm.Fork("taken", "src", 24, 80)
+	if err == nil {
+		t.Fatal("expected error when forking with duplicate name")
+	}
+	if len(sm.state.Sessions) != 2 {
+		t.Error("no new session should have been added")
+	}
+}
+
+func TestNameExists(t *testing.T) {
+	t.Run("empty state", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		if sm.nameExists("anything") {
+			t.Error("nameExists should return false on empty state")
+		}
+	})
+
+	t.Run("name exists", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.state.Sessions["s1"] = &SessionState{ID: "s1", Name: "fix-bug"}
+		if !sm.nameExists("fix-bug") {
+			t.Error("nameExists should return true for existing name")
+		}
+	})
+
+	t.Run("name does not exist", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.state.Sessions["s1"] = &SessionState{ID: "s1", Name: "fix-bug"}
+		if sm.nameExists("add-feature") {
+			t.Error("nameExists should return false for non-existing name")
+		}
+	})
+}
+
 func TestRename(t *testing.T) {
 	t.Run("happy path", func(t *testing.T) {
 		sm := newTestSessionManager(t)
@@ -141,6 +196,35 @@ func TestRename(t *testing.T) {
 		err := sm.Rename("nonexistent", "new-name")
 		if err == nil {
 			t.Fatal("expected error for nonexistent session")
+		}
+	})
+
+	t.Run("duplicate name rejected", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.state.Sessions["sess1"] = &SessionState{
+			ID: "sess1", Name: "alpha", Status: StatusRunning,
+		}
+		sm.state.Sessions["sess2"] = &SessionState{
+			ID: "sess2", Name: "beta", Status: StatusRunning,
+		}
+
+		err := sm.Rename("sess2", "alpha")
+		if err == nil {
+			t.Fatal("expected error when renaming to an existing name")
+		}
+		if sm.state.Sessions["sess2"].Name != "beta" {
+			t.Error("name should not have changed after duplicate rejection")
+		}
+	})
+
+	t.Run("rename to same name is allowed", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.state.Sessions["sess1"] = &SessionState{
+			ID: "sess1", Name: "alpha", Status: StatusRunning,
+		}
+
+		if err := sm.Rename("sess1", "alpha"); err != nil {
+			t.Fatalf("renaming to same name should succeed, got error: %v", err)
 		}
 	})
 }
