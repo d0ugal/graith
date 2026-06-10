@@ -283,6 +283,52 @@ func TestCodexHookScriptContent(t *testing.T) {
 	}
 }
 
+func TestInjectHooksSupported(t *testing.T) {
+	sm := newTestSessionManagerWithDataDir(t)
+
+	args, env, err := sm.injectHooks("claude", "test-supported-claude")
+	if err != nil {
+		t.Fatalf("injectHooks(claude) error = %v", err)
+	}
+	if len(args) == 0 {
+		t.Error("injectHooks(claude) returned no args")
+	}
+	if env != nil {
+		t.Errorf("injectHooks(claude) returned unexpected env: %v", env)
+	}
+
+	args, env, err = sm.injectHooks("codex", "test-supported-codex")
+	if err != nil {
+		t.Fatalf("injectHooks(codex) error = %v", err)
+	}
+	if len(args) != 0 {
+		t.Errorf("injectHooks(codex) returned unexpected args: %v", args)
+	}
+	if _, ok := env["CODEX_HOOKS_DIR"]; !ok {
+		t.Error("injectHooks(codex) missing CODEX_HOOKS_DIR")
+	}
+}
+
+func TestInjectHooksUnsupported(t *testing.T) {
+	sm := newTestSessionManagerWithDataDir(t)
+
+	for _, agent := range []string{"agy", "opencode", "custom-agent"} {
+		args, env, err := sm.injectHooks(agent, "test-unsupported")
+		if err == nil {
+			t.Errorf("injectHooks(%q) expected error, got nil", agent)
+		}
+		if !strings.Contains(err.Error(), "does not support hooks") {
+			t.Errorf("injectHooks(%q) error = %q, want 'does not support hooks'", agent, err)
+		}
+		if args != nil {
+			t.Errorf("injectHooks(%q) returned non-nil args: %v", agent, args)
+		}
+		if env != nil {
+			t.Errorf("injectHooks(%q) returned non-nil env: %v", agent, env)
+		}
+	}
+}
+
 func TestHookDir(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 	dir := sm.hookDir("sess123")
