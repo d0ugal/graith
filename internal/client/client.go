@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/d0ugal/graith/internal/config"
@@ -68,12 +69,11 @@ func connect(cfg *config.Config, paths config.Paths, configFile string, autoUpgr
 		if err := protocol.DecodePayload(resp, &hsOk); err == nil {
 			if hsOk.DaemonVersion != "" && hsOk.DaemonVersion != version.Version {
 				fmt.Fprintf(os.Stderr, "Daemon version mismatch (daemon=%s, cli=%s), restarting daemon...\n", hsOk.DaemonVersion, version.Version)
-				if requestUpgrade(c) {
-					c.Close()
-					if waitForDaemon(paths.SocketPath) {
-						return connect(cfg, paths, configFile, false)
-					}
-				}
+				c.Close()
+				stopDaemonByPID(paths.PIDFile)
+				waitForSocketGone(paths.SocketPath)
+				os.Remove(paths.SocketPath)
+				return connect(cfg, paths, configFile, false)
 			}
 		}
 	}
@@ -81,25 +81,31 @@ func connect(cfg *config.Config, paths config.Paths, configFile string, autoUpgr
 	return c, nil
 }
 
-func requestUpgrade(c *Client) bool {
-	execPath, _ := os.Executable()
-	if err := c.SendControl("upgrade", protocol.UpgradeMsg{ExecPath: execPath}); err != nil {
-		return false
+func stopDaemonByPID(pidFile string) {
+	data, err := os.ReadFile(pidFile)
+	if err != nil {
+		return
 	}
-	// Connection drop is expected — the daemon exec'd itself.
-	c.ReadControlResponse()
-	return true
+	var pid int
+	if _, err := fmt.Sscanf(string(data), "%d", &pid); err != nil || pid <= 0 {
+		return
+	}
+	_ = syscall.Kill(pid, syscall.SIGTERM)
+	for range 50 {
+		if syscall.Kill(pid, 0) != nil {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }
 
-func waitForDaemon(sockPath string) bool {
+func waitForSocketGone(sockPath string) {
 	for range 20 {
-		time.Sleep(250 * time.Millisecond)
-		if conn, err := net.DialTimeout("unix", sockPath, 500*time.Millisecond); err == nil {
-			conn.Close()
-			return true
+		if _, err := os.Stat(sockPath); os.IsNotExist(err) {
+			return
 		}
+		time.Sleep(100 * time.Millisecond)
 	}
-	return false
 }
 
 // ConnectFast is a fast-path connect for hooks. It dials the daemon socket
