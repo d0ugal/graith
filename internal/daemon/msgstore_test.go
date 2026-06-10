@@ -1,12 +1,15 @@
 package daemon
 
 import (
+	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
 	"testing"
 	"time"
+
+	_ "modernc.org/sqlite"
 )
 
 func testStore(t *testing.T) *MsgStore {
@@ -903,6 +906,77 @@ func TestCleanupByMaxPreservesHighWaterMark(t *testing.T) {
 	}
 	if unread[0].Body != "after-cleanup" {
 		t.Errorf("body = %q", unread[0].Body)
+	}
+}
+
+func TestCleanupAfterUpgradePreservesHWM(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.sqlite")
+
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(wal)&_pragma=busy_timeout(5000)")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	_, err = db.Exec(`
+		CREATE TABLE messages (
+			id TEXT PRIMARY KEY, seq INTEGER NOT NULL, stream TEXT NOT NULL,
+			sender_id TEXT NOT NULL, sender_name TEXT NOT NULL DEFAULT '',
+			body TEXT NOT NULL, thread_id TEXT, reply_to TEXT, created_at TEXT NOT NULL
+		);
+		CREATE INDEX idx_messages_stream_seq ON messages(stream, seq);
+		CREATE INDEX idx_messages_created_at ON messages(created_at);
+		CREATE TABLE cursors (
+			subscriber TEXT NOT NULL, stream TEXT NOT NULL,
+			ack_seq INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL,
+			PRIMARY KEY (subscriber, stream)
+		);
+	`)
+	if err != nil {
+		t.Fatalf("create pre-upgrade schema: %v", err)
+	}
+
+	oldTime := time.Now().UTC().Add(-48 * time.Hour).Format(time.RFC3339Nano)
+	for i := 1; i <= 5; i++ {
+		db.Exec(
+			`INSERT INTO messages (id, seq, stream, sender_id, sender_name, body, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			fmt.Sprintf("msg_%d", i), i, "topic", "s1", "a", fmt.Sprintf("old-%d", i), oldTime,
+		)
+	}
+	db.Exec(
+		`INSERT INTO cursors (subscriber, stream, ack_seq, updated_at) VALUES (?, ?, ?, ?)`,
+		"reader1", "topic", 5, oldTime,
+	)
+	db.Close()
+
+	s, err := NewMsgStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewMsgStore: %v", err)
+	}
+	defer s.Close()
+
+	deleted, err := s.Cleanup(24*time.Hour, 0)
+	if err != nil {
+		t.Fatalf("Cleanup: %v", err)
+	}
+	if deleted != 5 {
+		t.Errorf("deleted = %d, want 5", deleted)
+	}
+
+	msg, err := s.Publish("topic", "s1", "a", "post-upgrade", "", "")
+	if err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if msg.Seq <= 5 {
+		t.Errorf("seq = %d, want > 5 (must continue past pre-upgrade high-water mark)", msg.Seq)
+	}
+
+	unread, _ := s.Read("topic", "reader1", true, "")
+	if len(unread) != 1 {
+		t.Fatalf("got %d unread, want 1", len(unread))
+	}
+	if unread[0].Body != "post-upgrade" {
+		t.Errorf("body = %q, want post-upgrade", unread[0].Body)
 	}
 }
 
