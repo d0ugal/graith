@@ -42,7 +42,7 @@ func (sm *SessionManager) generateClaudeSettings(sessionID string) (string, erro
 	}
 	settingsPath := filepath.Join(dir, "settings.json")
 
-	grBin := resolveGrBin()
+	quoted := shellQuote(resolveGrBin())
 
 	events := []string{
 		"SessionStart",
@@ -74,16 +74,16 @@ func (sm *SessionManager) generateClaudeSettings(sessionID string) (string, erro
 		switch event {
 		case "PreToolUse":
 			handlers = []hookHandler{
-				{Type: "command", Command: fmt.Sprintf("%s approve-request", grBin)},
+				{Type: "command", Command: fmt.Sprintf("%s approve-request", quoted)},
 			}
 		case "SessionStart":
 			handlers = []hookHandler{
-				{Type: "command", Command: fmt.Sprintf("%s report-status --event %s", grBin, event)},
-				{Type: "command", Command: fmt.Sprintf("%s check-inbox", grBin)},
+				{Type: "command", Command: fmt.Sprintf("%s report-status --event %s", quoted, event)},
+				{Type: "command", Command: fmt.Sprintf("%s check-inbox", quoted)},
 			}
 		default:
 			handlers = []hookHandler{
-				{Type: "command", Command: fmt.Sprintf("%s report-status --event %s", grBin, event)},
+				{Type: "command", Command: fmt.Sprintf("%s report-status --event %s", quoted, event)},
 			}
 		}
 
