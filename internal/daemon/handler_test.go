@@ -1362,6 +1362,38 @@ func TestMsgPubWithThread(t *testing.T) {
 	}
 }
 
+func TestMsgPubUsesCurrentNameAfterRename(t *testing.T) {
+	h := newTestHarness(t)
+
+	h.sm.mu.Lock()
+	h.sm.state.Sessions["s1"] = &SessionState{
+		ID: "s1", Name: "old-name", Status: StatusRunning,
+		Agent: "claude", CreatedAt: time.Now().UTC(),
+	}
+	h.sm.mu.Unlock()
+
+	if err := h.sm.Rename("s1", "new-name"); err != nil {
+		t.Fatalf("Rename() error = %v", err)
+	}
+
+	h.sendControl(t, "msg_pub", protocol.MsgPubMsg{
+		Stream:     "test-topic",
+		SenderID:   "s1",
+		SenderName: "old-name",
+		Body:       "hello after rename",
+	})
+
+	env := h.readControlMsg(t)
+	if env.Type != "msg_published" {
+		t.Fatalf("expected msg_published, got %q", env.Type)
+	}
+	var msg Message
+	protocol.DecodePayload(env, &msg)
+	if msg.SenderName != "new-name" {
+		t.Errorf("sender_name = %q, want %q", msg.SenderName, "new-name")
+	}
+}
+
 func TestKickedClientConnectionClosed(t *testing.T) {
 	h1 := newTestHarness(t)
 	h1.addPTYSession(t, "kick1", "kick-test")
