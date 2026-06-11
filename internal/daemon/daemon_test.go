@@ -1866,3 +1866,223 @@ func TestToSessionInfoInPlace(t *testing.T) {
 		t.Error("InPlace = true in SessionInfo, want false")
 	}
 }
+
+func TestSingletonBlocksCreateWhenRunning(t *testing.T) {
+	sm := newTestSessionManager(t)
+	repoDir := initTempGitRepo(t)
+	sm.cfg.Repos = []config.RepoConfig{{Path: repoDir, Singleton: true}}
+
+	sm.state.Sessions["existing"] = &SessionState{
+		ID:       "existing",
+		Name:     "first",
+		RepoPath: repoDir,
+		Status:   StatusRunning,
+	}
+
+	_, err := sm.Create("second", "claude", repoDir, "main", "", false, "", false, false, false, 24, 80)
+	if err == nil {
+		t.Fatal("expected error for singleton repo with running session")
+	}
+	if !strings.Contains(err.Error(), "singleton") {
+		t.Errorf("error = %q, want mention of singleton", err.Error())
+	}
+}
+
+func TestSingletonAllowsCreateWhenStopped(t *testing.T) {
+	sm := newTestSessionManager(t)
+	repoDir := initTempGitRepo(t)
+	sm.cfg.Repos = []config.RepoConfig{{Path: repoDir, Singleton: true}}
+
+	sm.state.Sessions["existing"] = &SessionState{
+		ID:       "existing",
+		Name:     "first",
+		RepoPath: repoDir,
+		Status:   StatusStopped,
+	}
+
+	// Should pass the singleton check (may fail later on agent start, but that's fine)
+	_, err := sm.Create("second", "claude", repoDir, "main", "", false, "", false, false, false, 24, 80)
+	if err != nil && strings.Contains(err.Error(), "singleton") {
+		t.Fatalf("singleton should not block when existing session is stopped, got: %v", err)
+	}
+}
+
+func TestInPlaceRejectsRepoWithIncludes(t *testing.T) {
+	sm := newTestSessionManager(t)
+	repoDir := initTempGitRepo(t)
+	incDir := initTempGitRepo(t)
+	sm.cfg.Repos = []config.RepoConfig{{Path: repoDir, Includes: []string{incDir}}}
+
+	_, err := sm.Create("test", "claude", repoDir, "", "", false, "", false, true, false, 24, 80)
+	if err == nil {
+		t.Fatal("expected error for --in-place with includes configured")
+	}
+	if !strings.Contains(err.Error(), "includes configured") {
+		t.Errorf("error = %q, want mention of includes configured", err.Error())
+	}
+}
+
+func TestForkSingletonRejects(t *testing.T) {
+	sm := newTestSessionManager(t)
+	repoDir := initTempGitRepo(t)
+	sm.cfg.Repos = []config.RepoConfig{{Path: repoDir, Singleton: true}}
+
+	sm.state.Sessions["source"] = &SessionState{
+		ID:       "source",
+		Name:     "source-session",
+		RepoPath: repoDir,
+		RepoName: "repo",
+		Branch:   "test-branch",
+		Agent:    "claude",
+		Status:   StatusRunning,
+	}
+
+	_, err := sm.Fork("forked", "source", 24, 80)
+	if err == nil {
+		t.Fatal("expected error for fork of singleton session")
+	}
+	if !strings.Contains(err.Error(), "singleton") {
+		t.Errorf("error = %q, want mention of singleton", err.Error())
+	}
+}
+
+func TestToSessionInfoIncludes(t *testing.T) {
+	sess := SessionState{
+		ID:           "abc",
+		Name:         "test",
+		Agent:        "claude",
+		WorktreePath: "/session/dem-dev",
+		Status:       StatusRunning,
+		CreatedAt:    time.Now().UTC(),
+		Includes: []IncludedRepoState{
+			{
+				RepoPath:     "/home/user/Code/grafana",
+				RepoName:     "grafana",
+				WorktreePath: "/session/grafana",
+				Branch:       "user/graith/test/grafana",
+				BaseBranch:   "main",
+				dirty:        true,
+				unpushed:     3,
+			},
+		},
+	}
+	info := toSessionInfo(sess)
+	if len(info.Includes) != 1 {
+		t.Fatalf("Includes length = %d, want 1", len(info.Includes))
+	}
+	inc := info.Includes[0]
+	if inc.RepoName != "grafana" {
+		t.Errorf("RepoName = %q, want %q", inc.RepoName, "grafana")
+	}
+	if inc.WorktreePath != "/session/grafana" {
+		t.Errorf("WorktreePath = %q, want %q", inc.WorktreePath, "/session/grafana")
+	}
+	if inc.Branch != "user/graith/test/grafana" {
+		t.Errorf("Branch = %q, want %q", inc.Branch, "user/graith/test/grafana")
+	}
+	if !inc.Dirty {
+		t.Error("Dirty = false, want true")
+	}
+	if inc.Unpushed != 3 {
+		t.Errorf("Unpushed = %d, want 3", inc.Unpushed)
+	}
+}
+
+func TestToSessionInfoNoIncludes(t *testing.T) {
+	sess := SessionState{
+		ID:        "abc",
+		Name:      "test",
+		Agent:     "claude",
+		Status:    StatusRunning,
+		CreatedAt: time.Now().UTC(),
+	}
+	info := toSessionInfo(sess)
+	if len(info.Includes) != 0 {
+		t.Errorf("Includes length = %d, want 0", len(info.Includes))
+	}
+}
+
+func TestStateSaveLoadIncludes(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "state.json")
+	state := NewState()
+	state.Sessions["s1"] = &SessionState{
+		ID:           "s1",
+		Name:         "dem-dev-session",
+		RepoPath:     "/home/user/dem-dev",
+		RepoName:     "dem-dev",
+		WorktreePath: "/data/worktrees/dem-dev/hash/s1/dem-dev",
+		Branch:       "user/graith/s1",
+		Agent:        "claude",
+		Status:       StatusStopped,
+		CreatedAt:    time.Now().UTC(),
+		Includes: []IncludedRepoState{
+			{
+				RepoPath:     "/home/user/grafana",
+				RepoName:     "grafana",
+				WorktreePath: "/data/worktrees/dem-dev/hash/s1/grafana",
+				Branch:       "user/graith/s1/grafana",
+				BaseBranch:   "main",
+			},
+			{
+				RepoPath:     "/home/user/session-replay",
+				RepoName:     "session-replay",
+				WorktreePath: "/data/worktrees/dem-dev/hash/s1/session-replay",
+				Branch:       "user/graith/s1/session-replay",
+				BaseBranch:   "main",
+			},
+		},
+	}
+
+	if err := SaveState(statePath, state); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	loaded, err := LoadState(statePath)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	s := loaded.Sessions["s1"]
+	if s == nil {
+		t.Fatal("session s1 not found after load")
+	}
+	if len(s.Includes) != 2 {
+		t.Fatalf("Includes length = %d, want 2", len(s.Includes))
+	}
+	if s.Includes[0].RepoName != "grafana" {
+		t.Errorf("Includes[0].RepoName = %q, want %q", s.Includes[0].RepoName, "grafana")
+	}
+	if s.Includes[1].RepoName != "session-replay" {
+		t.Errorf("Includes[1].RepoName = %q, want %q", s.Includes[1].RepoName, "session-replay")
+	}
+	if s.Includes[0].WorktreePath != "/data/worktrees/dem-dev/hash/s1/grafana" {
+		t.Errorf("Includes[0].WorktreePath = %q", s.Includes[0].WorktreePath)
+	}
+}
+
+func TestResumeIncludesValidatesMissingWorktree(t *testing.T) {
+	sm := newTestSessionManager(t)
+	sm.state.Sessions["s1"] = &SessionState{
+		ID:           "s1",
+		Name:         "test",
+		Agent:        "claude",
+		RepoPath:     "/some/repo",
+		WorktreePath: "/some/worktree",
+		Status:       StatusStopped,
+		Includes: []IncludedRepoState{
+			{
+				RepoPath:     "/some/included",
+				RepoName:     "included",
+				WorktreePath: "/does/not/exist",
+				Branch:       "test-branch",
+				BaseBranch:   "main",
+			},
+		},
+	}
+
+	_, err := sm.Resume("s1", 24, 80)
+	if err == nil {
+		t.Fatal("expected error for missing included worktree")
+	}
+	if !strings.Contains(err.Error(), "no longer exists") {
+		t.Errorf("error = %q, want mention of no longer exists", err.Error())
+	}
+}
