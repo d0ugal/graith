@@ -469,11 +469,12 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 		if sharedWorktree || inPlace {
 			return
 		}
-		if noRepo {
+		switch {
+		case noRepo:
 			os.RemoveAll(worktreePath)
-		} else if len(includes) > 0 {
+		case len(includes) > 0:
 			sm.teardownIncludes(repoRoot, worktreePath, branchName, includes)
-		} else {
+		default:
 			_ = git.TeardownSession(repoRoot, worktreePath, branchName)
 		}
 	}
