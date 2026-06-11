@@ -138,8 +138,46 @@ func TestWithDataDir(t *testing.T) {
 	if override.ConfigFile != p.ConfigFile {
 		t.Errorf("ConfigFile changed: got %q, want %q", override.ConfigFile, p.ConfigFile)
 	}
-	if override.SocketPath != p.SocketPath {
-		t.Errorf("SocketPath changed: got %q, want %q", override.SocketPath, p.SocketPath)
+}
+
+func TestWithDataDirUpdatesRuntimeWhenUnderDataDir(t *testing.T) {
+	t.Setenv("GRAITH_PROFILE", "")
+	p, err := ResolvePaths()
+	if err != nil {
+		t.Fatalf("ResolvePaths() error: %v", err)
+	}
+
+	if !strings.HasPrefix(p.RuntimeDir, p.DataDir) {
+		t.Skip("RuntimeDir is not under DataDir on this system")
+	}
+
+	override := p.WithDataDir("/tmp/graith-test-data")
+
+	if !strings.HasPrefix(override.RuntimeDir, "/tmp/graith-test-data") {
+		t.Errorf("RuntimeDir = %q, want it under /tmp/graith-test-data", override.RuntimeDir)
+	}
+	if !strings.HasPrefix(override.SocketPath, override.RuntimeDir) {
+		t.Errorf("SocketPath = %q, want it under RuntimeDir %q", override.SocketPath, override.RuntimeDir)
+	}
+	if !strings.HasPrefix(override.PIDFile, override.RuntimeDir) {
+		t.Errorf("PIDFile = %q, want it under RuntimeDir %q", override.PIDFile, override.RuntimeDir)
+	}
+}
+
+func TestWithDataDirPreservesIndependentRuntime(t *testing.T) {
+	p := Paths{
+		DataDir:    "/old/data",
+		RuntimeDir: "/var/run/graith",
+		SocketPath: "/var/run/graith/graith.sock",
+		PIDFile:    "/var/run/graith/graith.pid",
+	}
+	override := p.WithDataDir("/new/data")
+
+	if override.RuntimeDir != "/var/run/graith" {
+		t.Errorf("RuntimeDir changed: got %q, want /var/run/graith", override.RuntimeDir)
+	}
+	if override.SocketPath != "/var/run/graith/graith.sock" {
+		t.Errorf("SocketPath changed: got %q", override.SocketPath)
 	}
 }
 
