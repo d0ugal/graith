@@ -36,7 +36,7 @@ Agents running inside graith have no access to MCP servers unless the user manua
 
 ### Non-Goals
 
-- **Hot-reloading MCP servers into running sessions.** MCP config is baked at session creation, same as sandbox config. Claude Code doesn't support mid-session MCP changes anyway.
+- **Hot-reloading MCP servers into running sessions.** Claude Code doesn't support mid-session MCP changes. However, MCP config is NOT persisted in session state (unlike sandbox config) — it is re-evaluated from current config on every resume. This means users can add an MCP server to config and existing sessions will pick it up on their next resume, which is safe because MCP servers are independently started by the agent on launch.
 - **Managing MCP server processes.** graith injects config telling agents how to launch MCP servers — it does not start or supervise MCP server processes itself.
 - **Supporting agents that lack MCP support.** Codex, Agy, and OpenCode do not currently support MCP. When they do, injection handlers will be added. Until then, MCP servers configured globally are silently skipped for unsupported agents.
 
@@ -118,13 +118,14 @@ args = ["@anthropic-ai/chrome-devtools-mcp@latest", "--browserUrl", "http://127.
 
 #### Auto-injection of graith MCP server
 
-graith's own MCP server (`gr mcp`) is always injected as the `graith` MCP server, even if not declared in config. This gives agents access to session management tools (list sessions, publish messages, read messages, etc.) without any user configuration.
+graith's own MCP server (`gr mcp`) is always injected as the `graith` MCP server, even if not declared in config. This gives agents access to session management tools (list sessions, publish messages, read messages, etc.) without any user configuration. The `GRAITH_SESSION_ID` and `GRAITH_SESSION_NAME` env vars set by the daemon are inherited by MCP child processes, so `gr mcp` automatically knows which session it belongs to.
 
-Users can disable this with:
+Users can disable auto-injection using the same override mechanism as any other MCP server:
 
 ```toml
-[mcp_servers_options]
-auto_inject_graith = false
+[[mcp_servers]]
+name = "graith"
+disabled = true
 ```
 
 #### Injection mechanism — Claude Code
@@ -149,24 +150,34 @@ auto_inject_graith = false
 
 Claude Code reads this via `--settings` and starts MCP servers as child processes. No new CLI flags or protocol changes needed.
 
-#### Injection mechanism — future agents
+#### Injection mechanism — other agents
 
-When other agents add MCP support, injection handlers are added to `injectHooks()` alongside the existing hook injection:
+Each agent has its own config format for MCP servers. graith writes the appropriate project-scoped config file in the session worktree before launching the agent:
 
-| Agent    | MCP support | Injection path |
-|----------|-------------|----------------|
-| Claude   | Yes (settings.json `mcpServers`) | Extend `generateClaudeSettings()` |
-| Codex    | Not yet | Future: likely env var or config file |
-| OpenCode | Not yet | Future: TBD |
-| Agy      | Not yet | Future: TBD |
+| Agent    | MCP support | Injection path | Config file |
+|----------|-------------|----------------|-------------|
+| Claude   | Yes | Extend `generateClaudeSettings()` — add `mcpServers` to settings.json | `hooks/<id>/settings.json` (via `--settings`) |
+| Codex    | Yes | Write `.codex/config.toml` in worktree root | `.codex/config.toml` with `[mcp_servers.X]` tables |
+| OpenCode | Yes | Write `opencode.json` in worktree root | `opencode.json` with `mcp` key; uses `type: "local"`, combines command+args into single `command` array, uses `environment` instead of `env` |
+| Agy      | Partial | Write `.agents/mcp_config.json` in worktree root | `.agents/mcp_config.json` with `mcpServers` key; known bug where project-local config may be ignored — fallback: override `$HOME` to a temp dir with `.gemini/config/mcp_config.json` |
 
-Unsupported agents silently skip MCP injection — no error, just a debug log.
+Agents without MCP support silently skip injection — no error, just a debug log. Each injection function handles the format translation from graith's canonical `MCPServerConfig` to the agent's native format.
 
 #### Sandbox interaction
 
 MCP servers launched by the agent run inside the agent's sandbox. For servers that need resources outside the sandbox (like Chrome DevTools connecting to an external Chrome), the user must ensure the necessary network access is allowed. Loopback (`127.0.0.1`) is allowed by default in graith's sandbox rules.
 
-MCP server binaries (e.g., `npx`, `node`) must be in paths readable by the sandbox. The sandbox's `read_dirs` should include paths where MCP server binaries live (e.g., `~/.npm`, `/opt/homebrew`).
+MCP server binaries (e.g., `npx`, `node`) must be in paths readable by the sandbox. The sandbox's `read_dirs` should include paths where MCP server binaries live (e.g., `~/.npm`, `/opt/homebrew`). Note that `npx` also needs **write access** to the npm cache (`~/.npm/_npx`) to download packages on first run. Users should either add `write_dirs = ["~/.npm"]` to their sandbox config, or install MCP servers globally (`npm install -g`) and reference the absolute binary path instead of `npx`.
+
+#### Settings merge behavior
+
+Claude Code's `--settings` flag provides project-level settings that merge with user/global settings. Graith-injected MCP servers are **additive** — they do not replace servers the user has configured in `~/.claude/settings.json`. If a name collision occurs (e.g., user has `graith` in their own settings AND graith auto-injects one), Claude Code's merge behavior determines which wins (project-level `--settings` takes precedence).
+
+#### Merge semantics
+
+Per-agent overrides use **full replacement** for `args` and `env`, consistent with `mergeAgent()` behavior for agent `Env` (config.go:365). If a per-agent override specifies `env`, it replaces the global MCP server's `env` entirely — it does not merge individual keys.
+
+Per-agent overrides that reference a name not in the global list are treated as **agent-specific MCP servers** — they are added to that agent's server list without requiring a global declaration.
 
 #### Chrome DevTools use case
 
@@ -214,10 +225,15 @@ TBD — to be filled after review and discussion.
 
 ### Implementation Notes
 
-- **Config struct:** Add `MCPServerConfig` struct and `MCPServers []MCPServerConfig` to `Config`. Add `MCPServers map[string]MCPServerOverride` to `Agent` for per-agent overrides.
-- **Merge logic:** Add `mergeMCPServers()` following the `SandboxConfig.Merge()` pattern — global list as base, per-agent overrides can disable or change args/env.
-- **Hook injection:** Extend `generateClaudeSettings()` to accept merged MCP server list and include `mcpServers` in the JSON output.
-- **gr binary path:** Use `resolveGrBin()` (already exists in hooks.go) for the auto-injected graith MCP server command path.
-- **Existing code to extend:** `hooks.go:generateClaudeSettings()`, `config.go:mergeAgent()`, `config.go:Config` struct, `default_config.toml`.
-- **No state changes:** No new fields in `SessionState`, no state migration needed.
+- **Config structs:** Add `MCPServerConfig` struct (`Name`, `Command`, `Args`, `Env`, `Disabled`) and `MCPServers []MCPServerConfig` to `Config`. Add `MCPServers map[string]MCPServerConfig` to `Agent` for per-agent overrides (map keyed by server name).
+- **Two-level merge:**
+  1. **Config load time** (`mergeAgent()` in config.go): Preserve user's per-agent `MCPServers` map, same as `Sandbox` and `Chrome` fields. No special merge logic needed here.
+  2. **Session creation time** (new `mergeMCPServers()` function): Takes global `[]MCPServerConfig` list + per-agent `map[string]MCPServerConfig` overrides. Iterates global list by name, applies overrides (replace `args`/`env`/`command`, honor `disabled`). Per-agent entries not in global list are added as agent-specific servers.
+- **Auto-injection:** Before merging, prepend a `graith` entry (using `resolveGrBin()`) to the global list. If the user has declared `name = "graith"` with `disabled = true` in the global list, the prepended entry is overridden.
+- **Signature changes:** `injectHooks(agentName, sessionID)` → `injectHooks(agentName, sessionID, mcpServers []MCPServerConfig)`. Cascades to `injectClaudeHooks` → `generateClaudeSettings`. The caller in daemon.go calls `mergeMCPServers()` and passes the result.
+- **Validation:** `Config.Validate()` should enforce: no duplicate `name` values in `[[mcp_servers]]`, `command` is required (non-empty) for non-disabled entries.
+- **Serialization:** Use `omitempty` on `Args` and `Env` fields to avoid emitting `null` in JSON output.
+- **Agent-specific injection functions:** Add `injectCodexMCPServers()` (write `.codex/config.toml`), `injectOpenCodeMCPServers()` (write `opencode.json`), `injectAgyMCPServers()` (write `.agents/mcp_config.json`). Each translates `MCPServerConfig` to the agent's native format.
+- **No state changes:** No new fields in `SessionState`, no state migration needed. MCP config is re-evaluated from current config on every create/resume.
 - **No protocol changes:** MCP injection happens entirely within the existing hook injection path.
+- **Existing code to extend:** `hooks.go`, `config.go`, `default_config.toml`.
