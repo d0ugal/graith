@@ -35,6 +35,30 @@ func SetupSession(repoPath, worktreePath, branchName, baseBranch string, fetch b
 	return nil
 }
 
+func WorktreeGitDirs(worktreePath string) (gitDir, commonDir string, err error) {
+	gitDir, err = RunOutput(worktreePath, "rev-parse", "--absolute-git-dir")
+	if err != nil {
+		return "", "", fmt.Errorf("resolve git dir: %w", err)
+	}
+	commonDir, err = RunOutput(worktreePath, "rev-parse", "--git-common-dir")
+	if err != nil {
+		return "", "", fmt.Errorf("resolve git common dir: %w", err)
+	}
+	return gitDir, commonDir, nil
+}
+
+func DiscoverDefaultBranchOrHEAD(repoPath string) (string, error) {
+	branch, err := DiscoverDefaultBranch(repoPath)
+	if err == nil {
+		return branch, nil
+	}
+	out, headErr := RunOutput(repoPath, "rev-parse", "--abbrev-ref", "HEAD")
+	if headErr != nil || out == "HEAD" {
+		return "", err
+	}
+	return out, nil
+}
+
 func TeardownSession(repoPath, worktreePath, branchName string) error {
 	var errs []error
 	if err := RemoveWorktree(repoPath, worktreePath); err != nil {

@@ -795,6 +795,76 @@ func TestDefaultMutationSafety(t *testing.T) {
 	}
 }
 
+func TestValidateIncludes(t *testing.T) {
+	t.Run("no includes is valid", func(t *testing.T) {
+		rc := RepoConfig{Path: "~/Code/foo"}
+		if err := rc.ValidateIncludes(); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("self-include rejected", func(t *testing.T) {
+		rc := RepoConfig{Path: "~/Code/foo", Includes: []string{"~/Code/foo"}}
+		if err := rc.ValidateIncludes(); err == nil {
+			t.Error("expected error for self-include")
+		}
+	})
+
+	t.Run("duplicate basename rejected", func(t *testing.T) {
+		rc := RepoConfig{Path: "~/Code/foo", Includes: []string{"~/Code/bar", "~/work/bar"}}
+		if err := rc.ValidateIncludes(); err == nil {
+			t.Error("expected error for duplicate basename")
+		}
+	})
+
+	t.Run("main repo basename collision rejected", func(t *testing.T) {
+		rc := RepoConfig{Path: "~/Code/bar", Includes: []string{"~/work/bar"}}
+		if err := rc.ValidateIncludes(); err == nil {
+			t.Error("expected error for main/include basename collision")
+		}
+	})
+
+	t.Run("env var collision rejected", func(t *testing.T) {
+		rc := RepoConfig{Path: "~/Code/main", Includes: []string{"~/Code/foo-bar", "~/Code/foo.bar"}}
+		if err := rc.ValidateIncludes(); err == nil {
+			t.Error("expected error for env var name collision")
+		}
+	})
+
+	t.Run("singleton plus allow_concurrent rejected", func(t *testing.T) {
+		rc := RepoConfig{Path: "~/Code/foo", Singleton: true, AllowConcurrent: true, Includes: []string{"~/Code/bar"}}
+		if err := rc.ValidateIncludes(); err == nil {
+			t.Error("expected error for singleton + allow_concurrent")
+		}
+	})
+
+	t.Run("valid includes pass", func(t *testing.T) {
+		rc := RepoConfig{Path: "~/Code/dem-dev", Includes: []string{"~/Code/grafana", "~/Code/session-replay-examples"}}
+		if err := rc.ValidateIncludes(); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+}
+
+func TestIncludeEnvVarName(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"grafana", "GRAITH_INCLUDE_GRAFANA_PATH"},
+		{"session-replay-examples", "GRAITH_INCLUDE_SESSION_REPLAY_EXAMPLES_PATH"},
+		{"faro.web.sdk", "GRAITH_INCLUDE_FARO_WEB_SDK_PATH"},
+		{"my repo", "GRAITH_INCLUDE_MYREPO_PATH"},
+		{"my@repo!", "GRAITH_INCLUDE_MYREPO_PATH"},
+	}
+	for _, tt := range tests {
+		got := IncludeEnvVarName(tt.input)
+		if got != tt.want {
+			t.Errorf("IncludeEnvVarName(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
 func TestSandboxConfigMergeDeduplicatesFeatures(t *testing.T) {
 	global := SandboxConfig{
 		Enabled:  true,
