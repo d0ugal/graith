@@ -52,6 +52,8 @@ type SessionState struct {
 	InPlace                bool                  `json:"in_place,omitempty"`
 	Includes               []IncludedRepoState   `json:"includes,omitempty"`
 	AgentHooks             bool                  `json:"agent_hooks,omitempty"`
+	ChromePID              int                   `json:"chrome_pid,omitempty"`
+	ChromePort             int                   `json:"chrome_port,omitempty"`
 	CreatedAt              time.Time             `json:"created_at"`
 	LastAttachedAt         *time.Time            `json:"last_attached_at,omitempty"`
 }
