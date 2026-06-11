@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -169,10 +170,18 @@ func MergeMCPServers(global []MCPServerConfig, overrides map[string]MCPServerCon
 	byName := make(map[string]MCPServerConfig, len(global))
 	var order []string
 	for _, s := range global {
+		if _, exists := byName[s.Name]; !exists {
+			order = append(order, s.Name)
+		}
 		byName[s.Name] = s
-		order = append(order, s.Name)
 	}
-	for name, ovr := range overrides {
+	names := make([]string, 0, len(overrides))
+	for name := range overrides {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		ovr := overrides[name]
 		if _, exists := byName[name]; exists {
 			if ovr.Disabled {
 				delete(byName, name)
@@ -197,7 +206,7 @@ func MergeMCPServers(global []MCPServerConfig, overrides map[string]MCPServerCon
 	}
 	var result []MCPServerConfig
 	for _, name := range order {
-		if s, ok := byName[name]; ok {
+		if s, ok := byName[name]; ok && !s.Disabled {
 			result = append(result, s)
 		}
 	}
@@ -307,6 +316,17 @@ func (c *Config) Validate() error {
 		}
 		if !s.Disabled && s.Command == "" {
 			errs = append(errs, fmt.Errorf("mcp_servers: %q has no command", s.Name))
+		}
+	}
+	globalNames := make(map[string]bool, len(c.MCPServers))
+	for _, s := range c.MCPServers {
+		globalNames[s.Name] = true
+	}
+	for agentName, agent := range c.Agents {
+		for name, s := range agent.MCPServers {
+			if !s.Disabled && s.Command == "" && !globalNames[name] {
+				errs = append(errs, fmt.Errorf("agents.%s.mcp_servers: %q has no command (not overriding a global server)", agentName, name))
+			}
 		}
 	}
 	return errors.Join(errs...)

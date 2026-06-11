@@ -530,20 +530,66 @@ func TestResolveMCPServers(t *testing.T) {
 		}
 	})
 
-	t.Run("can disable graith", func(t *testing.T) {
-		sm.cfg.MCPServers = nil
-		sm.cfg.Agents = map[string]config.Agent{
+	t.Run("can disable graith per-agent", func(t *testing.T) {
+		sm2 := newTestSessionManagerWithDataDir(t)
+		sm2.cfg.MCPServers = nil
+		sm2.cfg.Agents = map[string]config.Agent{
 			"claude": {
 				MCPServers: map[string]config.MCPServerConfig{
 					"graith": {Disabled: true},
 				},
 			},
 		}
-		servers := sm.resolveMCPServers("claude")
+		servers := sm2.resolveMCPServers("claude")
 		for _, s := range servers {
 			if s.Name == "graith" {
 				t.Error("graith should be disabled but was found")
 			}
+		}
+	})
+
+	t.Run("can disable graith globally", func(t *testing.T) {
+		sm2 := newTestSessionManagerWithDataDir(t)
+		sm2.cfg.MCPServers = []config.MCPServerConfig{
+			{Name: "graith", Disabled: true},
+		}
+		servers := sm2.resolveMCPServers("claude")
+		for _, s := range servers {
+			if s.Name == "graith" {
+				t.Error("graith should be disabled via global config but was found")
+			}
+		}
+	})
+
+	t.Run("global graith override uses user command", func(t *testing.T) {
+		sm2 := newTestSessionManagerWithDataDir(t)
+		sm2.cfg.MCPServers = []config.MCPServerConfig{
+			{Name: "graith", Command: "/custom/gr", Args: []string{"mcp", "--verbose"}},
+		}
+		servers := sm2.resolveMCPServers("claude")
+		var found bool
+		for _, s := range servers {
+			if s.Name == "graith" {
+				found = true
+				if s.Command != "/custom/gr" {
+					t.Errorf("graith command = %q, want /custom/gr", s.Command)
+				}
+				if len(s.Args) != 2 || s.Args[1] != "--verbose" {
+					t.Errorf("graith args = %v, want [mcp --verbose]", s.Args)
+				}
+			}
+		}
+		if !found {
+			t.Error("graith server not found")
+		}
+		count := 0
+		for _, s := range servers {
+			if s.Name == "graith" {
+				count++
+			}
+		}
+		if count != 1 {
+			t.Errorf("got %d graith entries, want exactly 1", count)
 		}
 	})
 }

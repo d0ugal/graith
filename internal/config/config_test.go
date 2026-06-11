@@ -1044,6 +1044,46 @@ func TestMergeMCPServers(t *testing.T) {
 		}
 	})
 
+	t.Run("duplicate global names deduplicates", func(t *testing.T) {
+		global := []MCPServerConfig{
+			{Name: "graith", Command: "gr", Args: []string{"mcp"}},
+			{Name: "graith", Disabled: true},
+		}
+		got := MergeMCPServers(global, nil)
+		if len(got) != 0 {
+			t.Errorf("got %d servers, want 0 (disabled wins)", len(got))
+		}
+	})
+
+	t.Run("duplicate global names last wins", func(t *testing.T) {
+		global := []MCPServerConfig{
+			{Name: "graith", Command: "auto-gr"},
+			{Name: "graith", Command: "user-gr", Args: []string{"mcp", "--verbose"}},
+		}
+		got := MergeMCPServers(global, nil)
+		if len(got) != 1 {
+			t.Fatalf("got %d servers, want 1", len(got))
+		}
+		if got[0].Command != "user-gr" {
+			t.Errorf("command = %q, want user-gr (last entry wins)", got[0].Command)
+		}
+	})
+
+	t.Run("global disabled filtered", func(t *testing.T) {
+		global := []MCPServerConfig{
+			{Name: "a", Command: "a"},
+			{Name: "b", Command: "b", Disabled: true},
+			{Name: "c", Command: "c"},
+		}
+		got := MergeMCPServers(global, nil)
+		if len(got) != 2 {
+			t.Fatalf("got %d servers, want 2", len(got))
+		}
+		if got[0].Name != "a" || got[1].Name != "c" {
+			t.Errorf("got [%s, %s], want [a, c]", got[0].Name, got[1].Name)
+		}
+	})
+
 	t.Run("preserves order", func(t *testing.T) {
 		global := []MCPServerConfig{
 			{Name: "a", Command: "a"},
@@ -1115,6 +1155,35 @@ func TestMCPServerValidation(t *testing.T) {
 		}
 		if err := cfg.Validate(); err != nil {
 			t.Errorf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("agent-specific addition without command", func(t *testing.T) {
+		cfg := Default()
+		cfg.Agents["claude"] = Agent{
+			Command: "claude",
+			MCPServers: map[string]MCPServerConfig{
+				"broken": {Args: []string{"--flag"}},
+			},
+		}
+		if err := cfg.Validate(); err == nil {
+			t.Error("expected error for agent-specific MCP server without command")
+		}
+	})
+
+	t.Run("agent override without command is ok", func(t *testing.T) {
+		cfg := Default()
+		cfg.MCPServers = []MCPServerConfig{
+			{Name: "chrome", Command: "npx"},
+		}
+		cfg.Agents["claude"] = Agent{
+			Command: "claude",
+			MCPServers: map[string]MCPServerConfig{
+				"chrome": {Args: []string{"--port", "9333"}},
+			},
+		}
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("unexpected error for agent override without command: %v", err)
 		}
 	})
 }
