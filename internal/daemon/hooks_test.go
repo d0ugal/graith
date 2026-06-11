@@ -337,3 +337,53 @@ func TestHookDir(t *testing.T) {
 		t.Errorf("hookDir() = %q, want %q", dir, expected)
 	}
 }
+
+func TestShellQuote(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"/usr/bin/gr", "'/usr/bin/gr'"},
+		{"/Users/o'malley/bin/gr", "'/Users/o'\\''malley/bin/gr'"},
+		{"it's a 'test'", "'it'\\''s a '\\''test'\\'''"},
+		{"simple", "'simple'"},
+		{"", "''"},
+		{"/path with spaces/gr", "'/path with spaces/gr'"},
+	}
+	for _, tt := range tests {
+		got := shellQuote(tt.input)
+		if got != tt.want {
+			t.Errorf("shellQuote(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestCodexHookScriptsEscapeSingleQuotes(t *testing.T) {
+	sm := newTestSessionManagerWithDataDir(t)
+	sessionID := "test-session-codex-quote"
+
+	_, _, err := sm.injectCodexHooks(sessionID)
+	if err != nil {
+		t.Fatalf("injectCodexHooks() error = %v", err)
+	}
+
+	hooksDir := filepath.Join(sm.hookDir(sessionID), "codex-hooks")
+
+	scripts := []string{"permission-request", "session-start", "stop"}
+	for _, name := range scripts {
+		path := filepath.Join(hooksDir, name)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Errorf("read codex hook %q: %v", name, err)
+			continue
+		}
+		content := string(data)
+		if strings.Contains(content, "''") && !strings.Contains(content, "'\\''") {
+			t.Errorf("codex hook %q has unescaped empty quotes but no escaped quotes", name)
+		}
+		// The binary path must be single-quoted (shellQuote wraps in quotes)
+		if !strings.Contains(content, "'") {
+			t.Errorf("codex hook %q does not contain single-quoted binary path", name)
+		}
+	}
+}
