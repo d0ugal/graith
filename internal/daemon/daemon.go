@@ -261,7 +261,7 @@ func repoHash(repoPath string) string {
 
 // Create starts a new agent session, either in a git worktree, in-place
 // in an existing repo, or as a standalone scratch session (when noRepo is true).
-func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt string, noRepo bool, shareWorktree string, agentHooks bool, inPlace, allowConcurrent bool, rows, cols uint16) (SessionState, error) {
+func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, parentID string, noRepo bool, shareWorktree string, agentHooks bool, inPlace, allowConcurrent bool, rows, cols uint16) (SessionState, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -596,6 +596,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 
 	sessState := &SessionState{
 		ID:                     id,
+		ParentID:               parentID,
 		Name:                   name,
 		RepoPath:               repoRoot,
 		RepoName:               repoName,
@@ -829,6 +830,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 
 	sessState := &SessionState{
 		ID:             id,
+		ParentID:       sourceSessionID,
 		Name:           name,
 		RepoPath:       repoRoot,
 		RepoName:       repoName,
@@ -1166,6 +1168,118 @@ func (sm *SessionManager) Delete(id string) error {
 	}
 
 	return err
+}
+
+// DeleteWithChildren deletes a session and all its transitive descendants.
+// Returns the list of deleted session IDs.
+func (sm *SessionManager) DeleteWithChildren(id string) ([]string, error) {
+	sm.mu.Lock()
+
+	if _, ok := sm.state.Sessions[id]; !ok {
+		sm.mu.Unlock()
+		return nil, fmt.Errorf("session %q not found", id)
+	}
+
+	toDelete := sm.collectDescendants(id)
+
+	type snapshot struct {
+		id           string
+		repoPath     string
+		worktreePath string
+		branch       string
+		shared       bool
+		inPlace      bool
+		ptySess      *grpty.Session
+		client       *attachedClient
+	}
+
+	snaps := make([]snapshot, 0, len(toDelete))
+	for _, did := range toDelete {
+		sess := sm.state.Sessions[did]
+		s := snapshot{
+			id:           did,
+			repoPath:     sess.RepoPath,
+			worktreePath: sess.WorktreePath,
+			branch:       sess.Branch,
+			shared:       sess.SharedWorktree,
+			inPlace:      sess.InPlace,
+		}
+		if pty, ok := sm.sessions[did]; ok {
+			s.ptySess = pty
+			delete(sm.sessions, did)
+		}
+		if ac, ok := sm.attachedClients[did]; ok {
+			s.client = ac
+			delete(sm.attachedClients, did)
+		}
+		delete(sm.state.Sessions, did)
+		delete(sm.hookReports, did)
+	}
+
+	err := sm.saveState()
+	sm.mu.Unlock()
+
+	for _, s := range snaps {
+		if s.ptySess != nil {
+			s.ptySess.Detach()
+			if !s.ptySess.Exited() {
+				_ = s.ptySess.Kill()
+				select {
+				case <-s.ptySess.Done():
+				case <-time.After(5 * time.Second):
+					_ = s.ptySess.ForceKill()
+				}
+			}
+			s.ptySess.Close()
+		}
+
+		switch {
+		case s.shared:
+			_ = os.RemoveAll(filepath.Join(sm.paths.DataDir, "scratch", s.id))
+		case s.inPlace:
+		case s.repoPath != "":
+			_ = git.TeardownSession(s.repoPath, s.worktreePath, s.branch)
+		case s.worktreePath != "":
+			_ = os.RemoveAll(s.worktreePath)
+		}
+		_ = os.Remove(filepath.Join(sm.paths.LogDir, s.id+".log"))
+		sm.cleanupHooks(s.id)
+
+		if s.client != nil {
+			s.client.kick()
+		}
+	}
+
+	if err != nil {
+		return toDelete, err
+	}
+	return toDelete, nil
+}
+
+// collectDescendants returns the target ID plus all transitive children, leaves first.
+func (sm *SessionManager) collectDescendants(rootID string) []string {
+	children := make(map[string][]string)
+	for id, sess := range sm.state.Sessions {
+		if sess.ParentID != "" {
+			children[sess.ParentID] = append(children[sess.ParentID], id)
+		}
+	}
+
+	var result []string
+	seen := make(map[string]bool)
+	var walk func(string)
+	walk = func(id string) {
+		if seen[id] {
+			return
+		}
+		seen[id] = true
+		for _, child := range children[id] {
+			walk(child)
+		}
+		result = append(result, id)
+	}
+	walk(rootID)
+	return result
 }
 
 // Stop sends SIGTERM to a session's process without removing the session or worktree.

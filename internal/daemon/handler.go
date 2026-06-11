@@ -96,7 +96,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				if agentName == "" {
 					agentName = sm.cfg.DefaultAgent
 				}
-				sess, err := sm.Create(c.Name, agentName, c.RepoPath, c.Base, c.Prompt, c.NoRepo, c.ShareWorktree, c.AgentHooks, c.InPlace, c.AllowConcurrent, clientRows, clientCols)
+				sess, err := sm.Create(c.Name, agentName, c.RepoPath, c.Base, c.Prompt, c.ParentID, c.NoRepo, c.ShareWorktree, c.AgentHooks, c.InPlace, c.AllowConcurrent, clientRows, clientCols)
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 				} else {
@@ -188,12 +188,24 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid delete message"})
 					continue
 				}
-				if err := sm.Delete(d.SessionID); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+				if d.Children {
+					deleted, err := sm.DeleteWithChildren(d.SessionID)
+					if err != nil {
+						sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+					} else {
+						sendControl("deleted", struct {
+							SessionID string   `json:"session_id"`
+							Deleted   []string `json:"deleted"`
+						}{d.SessionID, deleted})
+					}
 				} else {
-					sendControl("deleted", struct {
-						SessionID string `json:"session_id"`
-					}{d.SessionID})
+					if err := sm.Delete(d.SessionID); err != nil {
+						sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+					} else {
+						sendControl("deleted", struct {
+							SessionID string `json:"session_id"`
+						}{d.SessionID})
+					}
 				}
 
 			case "stop":
@@ -634,6 +646,7 @@ func (w *frameDataWriter) Write(p []byte) (int, error) {
 func toSessionInfo(s SessionState) protocol.SessionInfo {
 	info := protocol.SessionInfo{
 		ID:             s.ID,
+		ParentID:       s.ParentID,
 		Name:           s.Name,
 		RepoPath:       s.RepoPath,
 		RepoName:       s.RepoName,

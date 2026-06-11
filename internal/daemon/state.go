@@ -25,6 +25,7 @@ const (
 
 type SessionState struct {
 	ID                     string                `json:"id"`
+	ParentID               string                `json:"parent_id,omitempty"`
 	Name                   string                `json:"name"`
 	RepoPath               string                `json:"repo_path"`
 	RepoName               string                `json:"repo_name"`
@@ -147,8 +148,6 @@ func migrateV0ToV1(_ *State) error {
 	return nil
 }
 
-// migrateV1ToV2 is a no-op: v2 adds optional Includes and
-// SharedWorktreeSourceID fields with omitempty JSON tags.
 func migrateV1ToV2(_ *State) error {
 	return nil
 }
