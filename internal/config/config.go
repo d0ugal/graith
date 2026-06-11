@@ -125,11 +125,11 @@ func (a Approvals) TimeoutDuration() time.Duration {
 }
 
 type MCPServerConfig struct {
-	Name     string            `toml:"name"               json:"-"`
-	Command  string            `toml:"command"             json:"command"`
-	Args     []string          `toml:"args,omitempty"      json:"args,omitempty"`
-	Env      map[string]string `toml:"env,omitempty"       json:"env,omitempty"`
-	Disabled bool              `toml:"disabled,omitempty"  json:"-"`
+	Name     string            `json:"-"              toml:"name"`
+	Command  string            `json:"command"        toml:"command"`
+	Args     []string          `json:"args,omitempty" toml:"args,omitempty"`
+	Env      map[string]string `json:"env,omitempty"  toml:"env,omitempty"`
+	Disabled bool              `json:"-"              toml:"disabled,omitempty"`
 }
 
 type Agent struct {
@@ -307,11 +307,12 @@ func (c *Config) Validate() error {
 	}
 	seen := make(map[string]bool, len(c.MCPServers))
 	for _, s := range c.MCPServers {
-		if s.Name == "" {
+		switch {
+		case s.Name == "":
 			errs = append(errs, fmt.Errorf("mcp_servers: entry with empty name"))
-		} else if seen[s.Name] {
+		case seen[s.Name]:
 			errs = append(errs, fmt.Errorf("mcp_servers: duplicate name %q", s.Name))
-		} else {
+		default:
 			seen[s.Name] = true
 		}
 		if !s.Disabled && s.Command == "" {
