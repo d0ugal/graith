@@ -11,6 +11,7 @@ func TestMatchSession(t *testing.T) {
 		{Name: "foo", WorktreePath: "/tmp/graith/foo"},
 		{Name: "foobar", WorktreePath: "/tmp/graith/foobar"},
 		{Name: "nested", WorktreePath: "/tmp/graith/foo/nested"},
+		{Name: "slashed", WorktreePath: "/tmp/graith/slashed/"},
 	}
 
 	tests := []struct {
@@ -58,6 +59,21 @@ func TestMatchSession(t *testing.T) {
 			name:    "partial name no match",
 			cwd:     "/tmp/graith/fo",
 			wantNil: true,
+		},
+		{
+			name: "trailing slash on worktree",
+			cwd:  "/tmp/graith/foo/src",
+			want: "foo",
+		},
+		{
+			name: "trailing slash on cwd",
+			cwd:  "/tmp/graith/foo/",
+			want: "foo",
+		},
+		{
+			name: "trailing slash on worktree path",
+			cwd:  "/tmp/graith/slashed/sub",
+			want: "slashed",
 		},
 	}
 

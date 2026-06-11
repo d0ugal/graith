@@ -52,6 +52,7 @@ var infoCmd = &cobra.Command{
 }
 
 func matchSession(cwd string, sessions []protocol.SessionInfo) *protocol.SessionInfo {
+	cwd = filepath.Clean(cwd)
 	var best *protocol.SessionInfo
 	for i, s := range sessions {
 		wt := filepath.Clean(s.WorktreePath)
