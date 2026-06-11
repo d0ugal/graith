@@ -310,6 +310,11 @@ func TestStripANSI(t *testing.T) {
 		{"no escapes", "hello world", "hello world"},
 		{"CSI color", "\x1b[31mred\x1b[0m", "red"},
 		{"OSC title", "\x1b]0;title\x07text", "text"},
+		{"OSC ST terminator", "\x1b]0;title\x1b\\text", "text"},
+		{"OSC unterminated", "before\x1b]8;;https://example.com", "before"},
+		{"OSC unterminated mid text", "before\x1b]8;;url after", "before"},
+		{"OSC-8 hyperlink BEL", "\x1b]8;;https://example.com\x07link\x1b]8;;\x07", "link"},
+		{"OSC-8 hyperlink ST", "\x1b]8;;https://example.com\x1b\\link\x1b]8;;\x1b\\", "link"},
 		{"mixed", "\x1b[1mbold\x1b[0m and \x1b[32mgreen\x1b[0m", "bold and green"},
 	}
 	for _, tt := range tests {
