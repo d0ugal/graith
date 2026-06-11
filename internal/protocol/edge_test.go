@@ -88,6 +88,24 @@ func TestDecodePayloadInvalidJSON(t *testing.T) {
 	}
 }
 
+func TestDecodePayloadNullPayload(t *testing.T) {
+	env := Envelope{Type: "create", Payload: []byte("null")}
+	var target CreateMsg
+	err := DecodePayload(env, &target)
+	if err == nil {
+		t.Fatal("expected error for null payload")
+	}
+}
+
+func TestDecodePayloadEmptyPayload(t *testing.T) {
+	env := Envelope{Type: "create", Payload: nil}
+	var target CreateMsg
+	err := DecodePayload(env, &target)
+	if err == nil {
+		t.Fatal("expected error for empty payload")
+	}
+}
+
 func TestReadFrameShortHeader(t *testing.T) {
 	// Provide fewer than headerSize bytes to trigger an io read error.
 	buf := bytes.NewReader([]byte{0x01, 0x00})
