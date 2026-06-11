@@ -155,6 +155,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				if s, ok := sm.state.Sessions[a.SessionID]; ok {
 					s.LastAttachedAt = &now
 				}
+				_ = sm.saveState()
 				sm.mu.Unlock()
 
 				_ = ptySess.Resize(clientRows, clientCols)
