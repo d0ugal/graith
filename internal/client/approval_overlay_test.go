@@ -1,7 +1,10 @@
 package client
 
 import (
+	"fmt"
 	"testing"
+
+	"github.com/d0ugal/graith/internal/protocol"
 )
 
 func TestTruncate(t *testing.T) {
@@ -32,13 +35,47 @@ func TestTruncate(t *testing.T) {
 }
 
 func TestApprovalModelViewNarrowTerminal(t *testing.T) {
-	for _, width := range []int{0, 1, 2, 3, 4, 5, 8} {
-		m := approvalModel{width: width, height: 20}
-		defer func() {
-			if r := recover(); r != nil {
-				t.Fatalf("View() panicked at width=%d: %v", width, r)
+	approvals := []protocol.ApprovalInfo{
+		{
+			RequestID:   "1",
+			SessionName: "test-session",
+			ToolName:    "Bash",
+			ToolInput:   `{"command":"echo hello world"}`,
+			Agent:       "claude",
+		},
+		{
+			RequestID:   "2",
+			SessionName: "test-session",
+			ToolName:    "Write",
+			ToolInput:   `{"file_path":"/tmp/test.go","content":"package main\nfunc main() {}\n"}`,
+		},
+		{
+			RequestID:   "3",
+			SessionName: "test-session",
+			ToolName:    "Read",
+			ToolInput:   "not json at all",
+		},
+		{
+			RequestID:   "4",
+			SessionName: "test-session",
+			ToolName:    "CustomTool",
+			ToolInput:   `{"longkey":"some value","another":"data"}`,
+		},
+	}
+
+	for _, width := range []int{0, 1, 2, 3, 4, 5, 8, 20} {
+		t.Run(fmt.Sprintf("width_%d", width), func(t *testing.T) {
+			m := approvalModel{
+				approvals: approvals,
+				width:     width,
+				height:    40,
 			}
-		}()
-		m.View()
+			defer func() {
+				if r := recover(); r != nil {
+					t.Fatalf("View() panicked at width=%d: %v", width, r)
+				}
+			}()
+			m.View()
+		})
 	}
 }
