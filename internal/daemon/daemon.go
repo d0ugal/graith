@@ -1632,6 +1632,12 @@ func (sm *SessionManager) ReloadConfig() error {
 	if err != nil {
 		return err
 	}
+	sm.mu.RLock()
+	oldDataDir := sm.cfg.DataDir
+	sm.mu.RUnlock()
+	if cfg.DataDir != oldDataDir {
+		return fmt.Errorf("data_dir changed from %q to %q: run 'gr daemon restart' to apply", oldDataDir, cfg.DataDir)
+	}
 	sm.applyConfig(cfg)
 	return nil
 }
