@@ -1,6 +1,7 @@
 package config
 
 import (
+	_ "embed"
 	"errors"
 	"fmt"
 	"os"
@@ -11,6 +12,9 @@ import (
 	"github.com/adrg/xdg"
 	"github.com/pelletier/go-toml/v2"
 )
+
+//go:embed default_config.toml
+var defaultConfigTOML []byte
 
 type Config struct {
 	DefaultAgent     string           `toml:"default_agent"`
@@ -279,45 +283,17 @@ func mergeAgent(def, usr Agent) Agent {
 }
 
 func Default() *Config {
-	return &Config{
-		DefaultAgent:  "claude",
-		BranchPrefix:  "{username}/graith",
-		FetchOnCreate: true,
-		StatusBar: StatusBar{
-			Enabled:  true,
-			Position: "bottom",
-		},
-		Notifications: Notifications{
-			Enabled:    true,
-			OnApproval: true,
-		},
-		Approvals: Approvals{
-			Mode:    "prompt",
-			Timeout: "10m",
-		},
-		Keybindings: Keybindings{
-			Prefix: "ctrl+b", NewSession: "c", ForkSession: "f",
-			DeleteSession: "x", Detach: "d", SessionList: "w",
-			NextSession: "n", PrevSession: "p", LastSession: "l", ResumeSession: "R",
-			RenameSession: ",", Search: "/", ScrollMode: "[", Shell: "s",
-		},
-		Agents: map[string]Agent{
-			"claude": {
-				Command:    "claude",
-				Args:       []string{"--session-id", "{agent_session_id}"},
-				ResumeArgs: []string{"--resume", "{agent_session_id}"},
-				ForkArgs:   []string{"--resume", "{fork_source_agent_session_id}", "--fork-session", "--session-id", "{agent_session_id}"},
-			},
-			"codex": {
-				Command:    "codex",
-				Args:       []string{},
-				ResumeArgs: []string{"resume", "--last"},
-				ForkArgs:   []string{"fork", "{fork_source_agent_session_id}"},
-			},
-			"opencode": {Command: "opencode", Args: []string{}, ResumeArgs: []string{"--session", "{agent_session_id}"}},
-			"agy":      {Command: "agy", Args: []string{}, ResumeArgs: []string{"--conversation", "{agent_session_id}"}},
-		},
+	cfg := &Config{}
+	if err := toml.Unmarshal(defaultConfigTOML, cfg); err != nil {
+		panic("invalid embedded default config: " + err.Error())
 	}
+	return cfg
+}
+
+func DefaultTOML() []byte {
+	out := make([]byte, len(defaultConfigTOML))
+	copy(out, defaultConfigTOML)
+	return out
 }
 
 func LoadOrDefault(path string) (*Config, error) {

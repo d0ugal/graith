@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -719,6 +720,64 @@ func TestFindRepo(t *testing.T) {
 			t.Error("expected symlink to resolve and match")
 		}
 	})
+}
+
+func TestDefaultParsesEmbeddedTOML(t *testing.T) {
+	cfg := Default()
+	if cfg.DefaultAgent != "claude" {
+		t.Errorf("DefaultAgent = %q, want claude", cfg.DefaultAgent)
+	}
+	if cfg.BranchPrefix != "{username}/graith" {
+		t.Errorf("BranchPrefix = %q, want {username}/graith", cfg.BranchPrefix)
+	}
+	if !cfg.FetchOnCreate {
+		t.Error("FetchOnCreate = false, want true")
+	}
+
+	claude, ok := cfg.Agents["claude"]
+	if !ok {
+		t.Fatal("claude agent not found in defaults")
+	}
+	if claude.Command != "claude" {
+		t.Errorf("claude.Command = %q, want claude", claude.Command)
+	}
+	wantForkArgs := []string{"--resume", "{fork_source_agent_session_id}", "--fork-session", "--session-id", "{agent_session_id}"}
+	if !reflect.DeepEqual(claude.ForkArgs, wantForkArgs) {
+		t.Errorf("claude.ForkArgs = %v, want %v", claude.ForkArgs, wantForkArgs)
+	}
+
+	codex, ok := cfg.Agents["codex"]
+	if !ok {
+		t.Fatal("codex agent not found in defaults")
+	}
+	if codex.Command != "codex" {
+		t.Errorf("codex.Command = %q, want codex", codex.Command)
+	}
+
+	if _, ok := cfg.Agents["opencode"]; !ok {
+		t.Error("opencode agent not found in defaults")
+	}
+	if _, ok := cfg.Agents["agy"]; !ok {
+		t.Error("agy agent not found in defaults")
+	}
+}
+
+func TestDefaultTOMLDefensiveCopy(t *testing.T) {
+	a := DefaultTOML()
+	b := DefaultTOML()
+	a[0] = 0xFF
+	if b[0] == 0xFF {
+		t.Error("DefaultTOML() returns shared backing array, want independent copies")
+	}
+}
+
+func TestDefaultMutationSafety(t *testing.T) {
+	a := Default()
+	a.Agents["claude"] = Agent{Command: "mutated"}
+	b := Default()
+	if b.Agents["claude"].Command != "claude" {
+		t.Error("mutating Default() result affected subsequent Default() calls")
+	}
 }
 
 func TestSandboxConfigMergeDeduplicatesFeatures(t *testing.T) {
