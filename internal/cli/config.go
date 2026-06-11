@@ -56,9 +56,24 @@ var configResetCmd = &cobra.Command{
 			return fmt.Errorf("create config directory: %w", err)
 		}
 
-		tmp := target + ".tmp"
-		if err := os.WriteFile(tmp, config.DefaultTOML(), 0o600); err != nil {
+		f, err := os.CreateTemp(filepath.Dir(target), ".config-*.toml.tmp")
+		if err != nil {
+			return fmt.Errorf("create temp file: %w", err)
+		}
+		tmp := f.Name()
+		if _, err := f.Write(config.DefaultTOML()); err != nil {
+			f.Close()
+			os.Remove(tmp)
 			return fmt.Errorf("write config: %w", err)
+		}
+		if err := f.Chmod(0o600); err != nil {
+			f.Close()
+			os.Remove(tmp)
+			return fmt.Errorf("set config permissions: %w", err)
+		}
+		if err := f.Close(); err != nil {
+			os.Remove(tmp)
+			return fmt.Errorf("close temp file: %w", err)
 		}
 		if err := os.Rename(tmp, target); err != nil {
 			os.Remove(tmp)
