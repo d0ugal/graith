@@ -33,12 +33,7 @@ var checkInboxCmd = &cobra.Command{
 		}
 		defer c.Close()
 
-		c.SendControl("msg_sub", protocol.MsgSubMsg{
-			Stream:     "inbox:" + sessionID,
-			Subscriber: sessionID,
-			OnlyUnread: true,
-			Ack:        true,
-		})
+		c.SendControl("msg_sub", inboxSubMsg(sessionID))
 
 		var messages []inboxMessage
 		for {
@@ -105,6 +100,15 @@ type inboxMessage struct {
 	SenderID   string `json:"sender_id"`
 	Body       string `json:"body"`
 	CreatedAt  string `json:"created_at"`
+}
+
+func inboxSubMsg(sessionID string) protocol.MsgSubMsg {
+	return protocol.MsgSubMsg{
+		Stream:     "inbox:" + sessionID,
+		Subscriber: sessionID,
+		OnlyUnread: true,
+		Ack:        true,
+	}
 }
 
 func init() {
