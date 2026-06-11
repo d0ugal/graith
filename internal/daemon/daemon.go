@@ -580,7 +580,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 
 	repoRoot := source.RepoPath
 	repoName := source.RepoName
-	baseBranch := source.Branch
+	baseBranch := source.BaseBranch
 
 	username := sm.cfg.GitHubUsername
 	if username == "" && repoRoot != "" {
