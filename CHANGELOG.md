@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.21.0](https://github.com/d0ugal/graith/compare/v0.20.1...v0.21.0) (2026-06-11)
+
+
+### Features
+
+* add data_dir config option to override worktree base path ([e901617](https://github.com/d0ugal/graith/commit/e901617245b2e153e7e035f6fe3f6bfe4704b410)), closes [#355](https://github.com/d0ugal/graith/issues/355)
+
+
+### Bug Fixes
+
+* address review feedback for data_dir config ([344bcea](https://github.com/d0ugal/graith/commit/344bceab1aa4b6eec4830d31f487e55ab42a5597))
+
 ## [0.20.1](https://github.com/d0ugal/graith/compare/v0.20.0...v0.20.1) (2026-06-11)
 
 
