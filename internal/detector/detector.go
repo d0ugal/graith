@@ -277,16 +277,16 @@ func StripANSI(content string) string {
 				continue
 			}
 			if i+1 < len(content) && content[i+1] == ']' {
-				if bellPos := strings.Index(content[i:], "\x07"); bellPos != -1 {
+				bellPos := strings.Index(content[i:], "\x07")
+				stPos := strings.Index(content[i:], "\x1b\\")
+				switch {
+				case bellPos != -1 && (stPos == -1 || bellPos <= stPos):
 					i += bellPos + 1
-					continue
-				}
-				if stPos := strings.Index(content[i:], "\x1b\\"); stPos != -1 {
+				case stPos != -1:
 					i += stPos + 2
-					continue
+				default:
+					i = len(content)
 				}
-				// Unterminated OSC sequence — consume to end of string.
-				i = len(content)
 				continue
 			}
 			if i+1 < len(content) {
