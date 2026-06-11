@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/d0ugal/graith/internal/config"
 )
 
 // shellQuote wraps s in single quotes for use in shell scripts,
@@ -35,7 +37,7 @@ func resolveGrBin() string {
 // hooks for all relevant lifecycle events. Returns the path to the settings file.
 // All supported hooks are generated including PreToolUse (approve-request) and
 // SessionStart (check-inbox). Only called when agent hooks are enabled.
-func (sm *SessionManager) generateClaudeSettings(sessionID string) (string, error) {
+func (sm *SessionManager) generateClaudeSettings(sessionID string, mcpServers []config.MCPServerConfig) (string, error) {
 	dir := sm.hookDir(sessionID)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("create hook dir: %w", err)
@@ -62,7 +64,8 @@ func (sm *SessionManager) generateClaudeSettings(sessionID string) (string, erro
 		Hooks   []hookHandler `json:"hooks"`
 	}
 	type settingsFile struct {
-		Hooks map[string][]matcherGroup `json:"hooks"`
+		Hooks      map[string][]matcherGroup         `json:"hooks"`
+		MCPServers map[string]config.MCPServerConfig `json:"mcpServers,omitempty"`
 	}
 
 	settings := settingsFile{
@@ -95,6 +98,13 @@ func (sm *SessionManager) generateClaudeSettings(sessionID string) (string, erro
 		}
 	}
 
+	if len(mcpServers) > 0 {
+		settings.MCPServers = make(map[string]config.MCPServerConfig, len(mcpServers))
+		for _, s := range mcpServers {
+			settings.MCPServers[s.Name] = s
+		}
+	}
+
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return "", fmt.Errorf("marshal settings: %w", err)
@@ -107,14 +117,14 @@ func (sm *SessionManager) generateClaudeSettings(sessionID string) (string, erro
 
 // injectClaudeHooks generates hook files for a Claude session and returns
 // the extra args and env vars to add to the agent launch.
-func (sm *SessionManager) injectClaudeHooks(sessionID string) (extraArgs []string, extraEnv map[string]string, err error) {
-	settingsPath, err := sm.generateClaudeSettings(sessionID)
+func (sm *SessionManager) injectClaudeHooks(sessionID string, mcpServers []config.MCPServerConfig) (extraArgs []string, extraEnv map[string]string, err error) {
+	settingsPath, err := sm.generateClaudeSettings(sessionID, mcpServers)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	extraArgs = []string{"--settings", settingsPath}
-	sm.log.Info("injected claude hooks", "session_id", sessionID, "settings", settingsPath)
+	sm.log.Info("injected claude hooks", "session_id", sessionID, "settings", settingsPath, "mcp_servers", len(mcpServers))
 	return extraArgs, nil, nil
 }
 
@@ -163,12 +173,29 @@ func (sm *SessionManager) injectCodexHooks(sessionID string) (extraArgs []string
 	return nil, extraEnv, nil
 }
 
+// resolveMCPServers returns the merged MCP server list for the given agent,
+// including auto-injected graith MCP server.
+func (sm *SessionManager) resolveMCPServers(agentName string) []config.MCPServerConfig {
+	graithServer := config.MCPServerConfig{
+		Name:    "graith",
+		Command: resolveGrBin(),
+		Args:    []string{"mcp"},
+	}
+	global := append([]config.MCPServerConfig{graithServer}, sm.cfg.MCPServers...)
+	var overrides map[string]config.MCPServerConfig
+	if agent, ok := sm.cfg.Agents[agentName]; ok {
+		overrides = agent.MCPServers
+	}
+	return config.MergeMCPServers(global, overrides)
+}
+
 // injectHooks dispatches hook injection to the agent-specific implementation.
 // Returns an error if the agent type does not support hooks.
 func (sm *SessionManager) injectHooks(agentName, sessionID string) (extraArgs []string, extraEnv map[string]string, err error) {
+	mcpServers := sm.resolveMCPServers(agentName)
 	switch agentName {
 	case "claude":
-		return sm.injectClaudeHooks(sessionID)
+		return sm.injectClaudeHooks(sessionID, mcpServers)
 	case "codex":
 		return sm.injectCodexHooks(sessionID)
 	default:
