@@ -1765,6 +1765,11 @@ func TestForkUsesSourceBaseBranch(t *testing.T) {
 			_ = sess.Kill()
 			sess.Close()
 		}
+		if forked.WorktreePath != "" {
+			cmd := exec.Command("git", "worktree", "remove", "--force", forked.WorktreePath)
+			cmd.Dir = repoDir
+			_ = cmd.Run()
+		}
 	})
 
 	if forked.BaseBranch != "main" {
