@@ -1,5 +1,48 @@
 # Changelog
 
+## [0.19.0](https://github.com/d0ugal/graith/compare/v0.18.1...v0.19.0) (2026-06-11)
+
+
+### Features
+
+* add includes and singleton config, IncludedRepoState, git worktree helpers ([0172775](https://github.com/d0ugal/graith/commit/0172775919dd21974325b18945ce5a30e2c54ef0))
+* externalize config defaults and add gr config commands ([ddcb24a](https://github.com/d0ugal/graith/commit/ddcb24a64c91f342a1f57de3eb569d2d00222bdb))
+* implement multi-repo includes sessions ([164d195](https://github.com/d0ugal/graith/commit/164d19543dcef4fa9022ac2364593a5cb16a200a))
+
+
+### Bug Fixes
+
+* ack inbox messages in check-inbox hook to prevent duplicates [#277](https://github.com/d0ugal/graith/issues/277) ([9980053](https://github.com/d0ugal/graith/commit/99800531dd81a3004fb599a0b3bf4bda6243164d))
+* add default sandbox paths for agy/gemini agent [#207](https://github.com/d0ugal/graith/issues/207) ([a1da7d7](https://github.com/d0ugal/graith/commit/a1da7d75bc4780f042b2d2ce976eb06d154d2664))
+* add regression test for check-inbox ack at the CLI layer ([e6ac977](https://github.com/d0ugal/graith/commit/e6ac9779dfbe08fcb4eab2658c4c40d730fb2493))
+* address code review feedback for config commands ([9316ff0](https://github.com/d0ugal/graith/commit/9316ff03c4cbd3fb40ae48af0a4423ec7f0a649d))
+* address review tribunal findings for multi-repo includes ([68ab932](https://github.com/d0ugal/graith/commit/68ab9322d8db7a831d56a6b9eec52a80eecfe59b))
+* also clean cwd and add trailing-slash test cases ([2435289](https://github.com/d0ugal/graith/commit/2435289dfd0b69f891640c527cf26e066a41a3b8))
+* also shell-quote gr binary path in Claude hook commands ([ff145e0](https://github.com/d0ugal/graith/commit/ff145e07717848a11e11cc1e3777cd8fc7ce4eca))
+* clean up git worktree in TestForkUsesSourceBaseBranch ([404e44f](https://github.com/d0ugal/graith/commit/404e44f3989572ba52acfcfc58a254241ce1008e))
+* clear connection deadline after handshake in ConnectFast/ConnectForApproval ([dca858c](https://github.com/d0ugal/graith/commit/dca858cbf47b81b4d2b3df11789a6638c6274d5c)), closes [#224](https://github.com/d0ugal/graith/issues/224)
+* consume unterminated OSC sequences in StripANSI [#278](https://github.com/d0ugal/graith/issues/278) ([c6dbf18](https://github.com/d0ugal/graith/commit/c6dbf18e37974d0e10f6b6983e3b4071ebd75c36))
+* convert if-else chain to switch to satisfy gocritic linter ([f7d94fe](https://github.com/d0ugal/graith/commit/f7d94fe3e738210236051b3570f082e13354838c))
+* correct claude fork args to use --resume with --fork-session ([ca7fb77](https://github.com/d0ugal/graith/commit/ca7fb77c6935e49bfbeabd4493d4eaecda9cf446))
+* escape single quotes in gr binary path for codex hook scripts [#252](https://github.com/d0ugal/graith/issues/252) ([b173c37](https://github.com/d0ugal/graith/commit/b173c372693823100240c46051aec400fa695f5c))
+* exercise formatToolDetail paths in narrow terminal test ([8d3a66a](https://github.com/d0ugal/graith/commit/8d3a66a5ee6160b7456c6cb235ee49d8c2c48067))
+* include never-attached sessions in --stale filter [#262](https://github.com/d0ugal/graith/issues/262) ([bceb9cc](https://github.com/d0ugal/graith/commit/bceb9cc9d8c850778f14ca615544d370035da330))
+* log saveState error on attach instead of discarding it ([582ed1f](https://github.com/d0ugal/graith/commit/582ed1fb363b94dca4b3a433be33004f1ca789e8))
+* make initTempGitRepo deterministic with git init -b main ([fcac9d8](https://github.com/d0ugal/graith/commit/fcac9d8adb87d5387cd8d16ca034672183d0366b))
+* output errors as JSON when --json flag is set [#269](https://github.com/d0ugal/graith/issues/269) ([c836c2d](https://github.com/d0ugal/graith/commit/c836c2d6e6e4df32c417110dd2e9334ad4011cb7))
+* persist LastAttachedAt to disk on attach ([#279](https://github.com/d0ugal/graith/issues/279)) ([f7e2401](https://github.com/d0ugal/graith/commit/f7e2401e8863ebbc583183de0c59b6895efea414))
+* prevent panic in approval overlay on narrow terminals [#271](https://github.com/d0ugal/graith/issues/271) ([d4c0b32](https://github.com/d0ugal/graith/commit/d4c0b320f23ea8be94001ead3639e4eb7fbff93b))
+* reject negative durations in ParseDurationWithDays [#230](https://github.com/d0ugal/graith/issues/230) ([a137769](https://github.com/d0ugal/graith/commit/a137769c65b5e9487b10958016348e1460107848))
+* reject null/empty payloads in DecodePayload ([#268](https://github.com/d0ugal/graith/issues/268)) ([c6e8d49](https://github.com/d0ugal/graith/commit/c6e8d49eb4950f9c860814b0eed381869602d7b6))
+* resolve sender name from session state in msg_pub handler ([#270](https://github.com/d0ugal/graith/issues/270)) ([369c3e6](https://github.com/d0ugal/graith/commit/369c3e619963a33cdcca16af9a478d947d10c87e))
+* return error when both --prompt and --prompt-file are specified ([3df3a10](https://github.com/d0ugal/graith/commit/3df3a1043389ccdefd10b6bd8aa912a83afcd5e9)), closes [#234](https://github.com/d0ugal/graith/issues/234)
+* support local-only repos in session creation [#267](https://github.com/d0ugal/graith/issues/267) ([754b827](https://github.com/d0ugal/graith/commit/754b827f6b6ac56458554d74685a3ab588b6d6b1))
+* update module github.com/sahilm/fuzzy to v0.1.3 ([481bce3](https://github.com/d0ugal/graith/commit/481bce3376c2cbac8f7e7bd1230c393de5ff4050))
+* use CreateTemp for atomic config reset to guarantee 0600 permissions ([9b233a5](https://github.com/d0ugal/graith/commit/9b233a5a2128e7dd32f82d242d7bd02201bb6318))
+* use nearest OSC terminator instead of preferring BEL ([9ad5933](https://github.com/d0ugal/graith/commit/9ad5933ce209c62098c593702063b90c4daf1c9c))
+* use path-boundary matching in info command ([52f401c](https://github.com/d0ugal/graith/commit/52f401cfab9f78451538cdaedb5ed97c5dbb594b)), closes [#231](https://github.com/d0ugal/graith/issues/231)
+* use source.BaseBranch in fork instead of source.Branch [#255](https://github.com/d0ugal/graith/issues/255) ([9790752](https://github.com/d0ugal/graith/commit/97907527f6b645a4d0a1fcb86c8c5ab15b7e5650))
+
 ## [0.18.1](https://github.com/d0ugal/graith/compare/v0.18.0...v0.18.1) (2026-06-10)
 
 
