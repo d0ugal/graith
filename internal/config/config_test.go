@@ -146,6 +146,11 @@ func TestApprovalTimeoutDuration(t *testing.T) {
 			a:    Approvals{Timeout: "1d"},
 			want: 24 * time.Hour,
 		},
+		{
+			name: "negative falls back to default",
+			a:    Approvals{Timeout: "-7d"},
+			want: 10 * time.Minute,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -159,25 +164,35 @@ func TestApprovalTimeoutDuration(t *testing.T) {
 
 func TestParseDurationWithDays(t *testing.T) {
 	tests := []struct {
-		input string
-		want  time.Duration
+		input   string
+		want    time.Duration
+		wantErr bool
 	}{
-		{"30d", 30 * 24 * time.Hour},
-		{"7d", 7 * 24 * time.Hour},
-		{"1d", 24 * time.Hour},
-		{"7d12h", 7*24*time.Hour + 12*time.Hour},
-		{"1d30m", 24*time.Hour + 30*time.Minute},
-		{"2d1h30m", 2*24*time.Hour + 1*time.Hour + 30*time.Minute},
-		{"0d5h", 5 * time.Hour},
-		{"24h", 24 * time.Hour},
-		{"30m", 30 * time.Minute},
-		{"", 0},
-		{"bogus", 0},
-		{"d5h", 0},
+		{"30d", 30 * 24 * time.Hour, false},
+		{"7d", 7 * 24 * time.Hour, false},
+		{"1d", 24 * time.Hour, false},
+		{"7d12h", 7*24*time.Hour + 12*time.Hour, false},
+		{"1d30m", 24*time.Hour + 30*time.Minute, false},
+		{"2d1h30m", 2*24*time.Hour + 1*time.Hour + 30*time.Minute, false},
+		{"0d5h", 5 * time.Hour, false},
+		{"24h", 24 * time.Hour, false},
+		{"30m", 30 * time.Minute, false},
+		{"", 0, false},
+		{"bogus", 0, true},
+		{"d5h", 0, true},
+		{"-7d", 0, true},
+		{"-1d", 0, true},
+		{"-30m", 0, true},
+		{"-7d12h", 0, true},
+		{"1d-30h", 0, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			got := ParseDurationWithDays(tt.input)
+			got, err := ParseDurationWithDays(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ParseDurationWithDays(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+				return
+			}
 			if got != tt.want {
 				t.Errorf("ParseDurationWithDays(%q) = %v, want %v", tt.input, got, tt.want)
 			}

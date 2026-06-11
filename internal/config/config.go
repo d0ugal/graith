@@ -51,10 +51,11 @@ func (m Messages) MaxAgeDuration() time.Duration {
 	if m.MaxAge == "" {
 		return 0
 	}
-	return ParseDurationWithDays(m.MaxAge)
+	d, _ := ParseDurationWithDays(m.MaxAge)
+	return d
 }
 
-func ParseDurationWithDays(s string) time.Duration {
+func ParseDurationWithDays(s string) (time.Duration, error) {
 	var total time.Duration
 	if i := strings.Index(s, "d"); i > 0 {
 		var days int
@@ -63,14 +64,17 @@ func ParseDurationWithDays(s string) time.Duration {
 			s = s[i+1:]
 		}
 	}
-	if s == "" {
-		return total
+	if s != "" {
+		d, err := time.ParseDuration(s)
+		if err != nil {
+			return 0, fmt.Errorf("invalid duration: %w", err)
+		}
+		total += d
 	}
-	d, err := time.ParseDuration(s)
-	if err != nil {
-		return 0
+	if total < 0 {
+		return 0, fmt.Errorf("negative duration not allowed")
 	}
-	return total + d
+	return total, nil
 }
 
 type Keybindings struct {
@@ -108,7 +112,11 @@ func (a Approvals) TimeoutDuration() time.Duration {
 	if a.Timeout == "" {
 		return 10 * time.Minute
 	}
-	return ParseDurationWithDays(a.Timeout)
+	d, err := ParseDurationWithDays(a.Timeout)
+	if err != nil {
+		return 10 * time.Minute
+	}
+	return d
 }
 
 type Agent struct {
