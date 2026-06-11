@@ -56,6 +56,10 @@ var newCmd = &cobra.Command{
 			return fmt.Errorf("--in-place and --base are mutually exclusive (in-place sessions don't create branches)")
 		}
 
+		if newPrompt != "" && newPromptFile != "" {
+			return fmt.Errorf("--prompt and --prompt-file are mutually exclusive")
+		}
+
 		prompt := newPrompt
 		if newPromptFile != "" {
 			data, err := os.ReadFile(newPromptFile)
