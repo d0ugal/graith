@@ -67,10 +67,14 @@ func filterSessions(sessions []protocol.SessionInfo, bf *batchFlags) ([]protocol
 			continue
 		}
 		if bf.stale != "" {
-			if s.LastAttachedAt == "" {
+			ts := s.LastAttachedAt
+			if ts == "" {
+				ts = s.CreatedAt
+			}
+			if ts == "" {
 				continue
 			}
-			t, err := time.Parse(time.RFC3339, s.LastAttachedAt)
+			t, err := time.Parse(time.RFC3339, ts)
 			if err != nil {
 				continue
 			}
