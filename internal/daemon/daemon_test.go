@@ -1097,7 +1097,7 @@ func TestShareWorktreeRequiresSandbox(t *testing.T) {
 		Status:       StatusRunning,
 	}
 
-	_, err := sm.Create("reviewer", "claude", "", "", "", false, "source", false, false, false, 24, 80)
+	_, err := sm.Create("reviewer", "claude", "", "", "", "", false, "source", false, false, false, 24, 80)
 	if err == nil {
 		t.Fatal("expected error when --share-worktree used without sandbox, got nil")
 	}
@@ -1129,7 +1129,7 @@ func TestShareWorktreeRequiresSandboxPerAgent(t *testing.T) {
 		Status:       StatusRunning,
 	}
 
-	_, err := sm.Create("reviewer", "claude", "", "", "", false, "source", false, false, false, 24, 80)
+	_, err := sm.Create("reviewer", "claude", "", "", "", "", false, "source", false, false, false, 24, 80)
 	if err == nil {
 		t.Fatal("expected error when --share-worktree used with per-agent sandbox disabled, got nil")
 	}
@@ -1188,7 +1188,7 @@ func TestCreateRollsBackOnSaveStateFailure(t *testing.T) {
 		LogDir:    tmpDir,
 	}, slog.Default())
 
-	_, err := sm.Create("test-sess", "sleeper", "", "", "", true, "", false, false, false, 24, 80)
+	_, err := sm.Create("test-sess", "sleeper", "", "", "", "", true, "", false, false, false, 24, 80)
 	if err == nil {
 		t.Fatal("expected error when saveState fails, got nil")
 	}
@@ -1579,7 +1579,7 @@ func initTempGitRepo(t *testing.T) string {
 func TestCreateInPlaceRejectsUnconfiguredRepo(t *testing.T) {
 	sm := newTestSessionManager(t)
 	repoDir := initTempGitRepo(t)
-	_, err := sm.Create("test", "claude", repoDir, "", "", false, "", false, true, false, 24, 80)
+	_, err := sm.Create("test", "claude", repoDir, "", "", "", false, "", false, true, false, 24, 80)
 	if err == nil {
 		t.Fatal("expected error for unconfigured repo")
 	}
@@ -1592,7 +1592,7 @@ func TestCreateInPlaceMutuallyExclusiveFlags(t *testing.T) {
 	sm := newTestSessionManager(t)
 
 	t.Run("in-place with no-repo", func(t *testing.T) {
-		_, err := sm.Create("test", "claude", "", "", "", true, "", false, true, false, 24, 80)
+		_, err := sm.Create("test", "claude", "", "", "", "", true, "", false, true, false, 24, 80)
 		if err == nil {
 			t.Fatal("expected error for --in-place with --no-repo")
 		}
@@ -1602,7 +1602,7 @@ func TestCreateInPlaceMutuallyExclusiveFlags(t *testing.T) {
 	})
 
 	t.Run("in-place with share-worktree", func(t *testing.T) {
-		_, err := sm.Create("test", "claude", "", "", "", false, "some-session", false, true, false, 24, 80)
+		_, err := sm.Create("test", "claude", "", "", "", "", false, "some-session", false, true, false, 24, 80)
 		if err == nil {
 			t.Fatal("expected error for --in-place with --share-worktree")
 		}
@@ -1612,7 +1612,7 @@ func TestCreateInPlaceMutuallyExclusiveFlags(t *testing.T) {
 	})
 
 	t.Run("in-place with base", func(t *testing.T) {
-		_, err := sm.Create("test", "claude", "/tmp/whatever", "main", "", false, "", false, true, false, 24, 80)
+		_, err := sm.Create("test", "claude", "/tmp/whatever", "main", "", "", false, "", false, true, false, 24, 80)
 		if err == nil {
 			t.Fatal("expected error for --in-place with --base")
 		}
@@ -1635,7 +1635,7 @@ func TestCreateInPlaceRejectsConcurrent(t *testing.T) {
 		Status:       StatusRunning,
 	}
 
-	_, err := sm.Create("second", "claude", repoDir, "", "", false, "", false, true, false, 24, 80)
+	_, err := sm.Create("second", "claude", repoDir, "", "", "", false, "", false, true, false, 24, 80)
 	if err == nil {
 		t.Fatal("expected error for concurrent in-place session")
 	}
@@ -1658,7 +1658,7 @@ func TestCreateInPlaceAllowConcurrentFlag(t *testing.T) {
 	}
 
 	// With --allow-concurrent, should pass the concurrent check (will fail later on agent start)
-	_, err := sm.Create("second", "claude", repoDir, "", "", false, "", false, true, true, 24, 80)
+	_, err := sm.Create("second", "claude", repoDir, "", "", "", false, "", false, true, true, 24, 80)
 	if err != nil && strings.Contains(err.Error(), "already running") {
 		t.Fatalf("--allow-concurrent should bypass concurrent check, got: %v", err)
 	}
@@ -1678,7 +1678,7 @@ func TestCreateInPlaceConfigAllowConcurrent(t *testing.T) {
 	}
 
 	// Config allow_concurrent should pass the concurrent check
-	_, err := sm.Create("second", "claude", repoDir, "", "", false, "", false, true, false, 24, 80)
+	_, err := sm.Create("second", "claude", repoDir, "", "", "", false, "", false, true, false, 24, 80)
 	if err != nil && strings.Contains(err.Error(), "already running") {
 		t.Fatalf("config allow_concurrent should bypass concurrent check, got: %v", err)
 	}
@@ -1866,7 +1866,7 @@ func TestResumeInPlaceRejectsDeletedRepo(t *testing.T) {
 
 func TestCreateInPlaceBaseRejectedByDaemon(t *testing.T) {
 	sm := newTestSessionManager(t)
-	_, err := sm.Create("test", "claude", "/tmp/whatever", "main", "", false, "", false, true, false, 24, 80)
+	_, err := sm.Create("test", "claude", "/tmp/whatever", "main", "", "", false, "", false, true, false, 24, 80)
 	if err == nil {
 		t.Fatal("expected error for --in-place with --base")
 	}

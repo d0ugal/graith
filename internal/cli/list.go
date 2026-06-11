@@ -13,7 +13,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var listRepo string
+var (
+	listRepo     string
+	listTree     bool
+	listChildren string
+)
 
 var listCmd = &cobra.Command{
 	Use:     "list",
@@ -42,6 +46,14 @@ var listCmd = &cobra.Command{
 			return err
 		}
 
+		if listChildren != "" {
+			parent := findSession(list.Sessions, listChildren)
+			if parent == nil {
+				return fmt.Errorf("session %q not found", listChildren)
+			}
+			list.Sessions = descendantsOf(list.Sessions, parent.ID)
+		}
+
 		if listRepo != "" {
 			filtered := list.Sessions[:0]
 			for _, s := range list.Sessions {
@@ -65,76 +77,13 @@ var listCmd = &cobra.Command{
 			return nil
 		}
 
-		sort.Slice(list.Sessions, func(i, j int) bool {
-			if list.Sessions[i].RepoName != list.Sessions[j].RepoName {
-				return list.Sessions[i].RepoName < list.Sessions[j].RepoName
-			}
-			return list.Sessions[i].Name < list.Sessions[j].Name
-		})
-
 		now := time.Now()
 
-		tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "NAME\tREPO\tAGENT\tSTATUS\tACTIVITY\tMODEL\tCOST\tBRANCH\tGIT\tAGE\tATTACHED")
-		for _, s := range list.Sessions {
-			gitStatus := ""
-			if s.Dirty {
-				gitStatus = "dirty"
-			}
-			if s.UnpushedCount > 0 {
-				if gitStatus != "" {
-					gitStatus += ", "
-				}
-				gitStatus += fmt.Sprintf("%d ahead", s.UnpushedCount)
-			}
-
-			agentStatus := s.AgentStatus
-			if s.Status != "running" {
-				agentStatus = ""
-			}
-			if agentStatus == "approval" {
-				agentStatus = "⚠ approval"
-			} else if agentStatus == "active" && s.ToolName != "" {
-				agentStatus = fmt.Sprintf("active (%s)", s.ToolName)
-			}
-
-			model := ""
-			if s.Model != "" {
-				model = s.Model
-			}
-
-			cost := ""
-			if s.CostUSD != nil {
-				cost = fmt.Sprintf("$%.2f", *s.CostUSD)
-			}
-
-			age := ""
-			if t, err := time.Parse(time.RFC3339, s.CreatedAt); err == nil {
-				age = client.ShortDuration(now.Sub(t))
-			}
-
-			attached := ""
-			if s.LastAttachedAt != "" {
-				if t, err := time.Parse(time.RFC3339, s.LastAttachedAt); err == nil {
-					attached = client.ShortDuration(now.Sub(t)) + " ago"
-				}
-			}
-
-			branch := s.Branch
-			if branch != "" {
-				// Strip the common graith prefix to save space.
-				parts := strings.SplitN(branch, "/", 3)
-				if len(parts) == 3 {
-					branch = parts[2]
-				}
-			} else if s.InPlace {
-				branch = "(in-place)"
-			}
-
-			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				s.Name, s.RepoName, s.Agent, s.Status, agentStatus, model, cost, branch, gitStatus, age, attached)
+		if listTree {
+			printTree(cmd, list.Sessions, now)
+		} else {
+			printFlat(cmd, list.Sessions, now)
 		}
-		tw.Flush()
 
 		select {
 		case result := <-updateCh:
@@ -149,9 +98,187 @@ var listCmd = &cobra.Command{
 	},
 }
 
+func printFlat(cmd *cobra.Command, sessions []protocol.SessionInfo, now time.Time) {
+	sort.Slice(sessions, func(i, j int) bool {
+		if sessions[i].RepoName != sessions[j].RepoName {
+			return sessions[i].RepoName < sessions[j].RepoName
+		}
+		return sessions[i].Name < sessions[j].Name
+	})
+
+	tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "NAME\tREPO\tAGENT\tSTATUS\tACTIVITY\tMODEL\tCOST\tBRANCH\tGIT\tAGE\tATTACHED")
+	for _, s := range sessions {
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			s.Name, s.RepoName, s.Agent, s.Status,
+			formatAgentStatus(s), formatModel(s), formatCost(s),
+			formatBranch(s), formatGitStatus(s), formatAge(s, now), formatAttached(s, now))
+	}
+	tw.Flush()
+}
+
+func printTree(cmd *cobra.Command, sessions []protocol.SessionInfo, now time.Time) {
+	byID := make(map[string]protocol.SessionInfo, len(sessions))
+	children := make(map[string][]protocol.SessionInfo)
+	var roots []protocol.SessionInfo
+
+	for _, s := range sessions {
+		byID[s.ID] = s
+	}
+
+	for _, s := range sessions {
+		if s.ParentID == "" || byID[s.ParentID].ID == "" {
+			roots = append(roots, s)
+		} else {
+			children[s.ParentID] = append(children[s.ParentID], s)
+		}
+	}
+
+	sortSessions := func(ss []protocol.SessionInfo) {
+		sort.Slice(ss, func(i, j int) bool {
+			if ss[i].RepoName != ss[j].RepoName {
+				return ss[i].RepoName < ss[j].RepoName
+			}
+			return ss[i].Name < ss[j].Name
+		})
+	}
+	sortSessions(roots)
+	for k := range children {
+		sortSessions(children[k])
+	}
+
+	tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "NAME\tREPO\tAGENT\tSTATUS\tACTIVITY\tMODEL\tCOST\tBRANCH\tGIT\tAGE\tATTACHED")
+
+	var walk func(s protocol.SessionInfo, prefix, childPrefix string)
+	walk = func(s protocol.SessionInfo, prefix, childPrefix string) {
+		fmt.Fprintf(tw, "%s%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			prefix, s.Name, s.RepoName, s.Agent, s.Status,
+			formatAgentStatus(s), formatModel(s), formatCost(s),
+			formatBranch(s), formatGitStatus(s), formatAge(s, now), formatAttached(s, now))
+
+		kids := children[s.ID]
+		for i, kid := range kids {
+			if i == len(kids)-1 {
+				walk(kid, childPrefix+"`-- ", childPrefix+"    ")
+			} else {
+				walk(kid, childPrefix+"|-- ", childPrefix+"|   ")
+			}
+		}
+	}
+
+	for _, root := range roots {
+		walk(root, "", "")
+	}
+	tw.Flush()
+}
+
+func findSession(sessions []protocol.SessionInfo, nameOrID string) *protocol.SessionInfo {
+	for i, s := range sessions {
+		if s.Name == nameOrID || s.ID == nameOrID {
+			return &sessions[i]
+		}
+	}
+	return nil
+}
+
+func descendantsOf(sessions []protocol.SessionInfo, parentID string) []protocol.SessionInfo {
+	children := make(map[string][]protocol.SessionInfo)
+	for _, s := range sessions {
+		if s.ParentID != "" {
+			children[s.ParentID] = append(children[s.ParentID], s)
+		}
+	}
+
+	var result []protocol.SessionInfo
+	seen := make(map[string]bool)
+	var collect func(string)
+	collect = func(id string) {
+		for _, child := range children[id] {
+			if !seen[child.ID] {
+				seen[child.ID] = true
+				result = append(result, child)
+				collect(child.ID)
+			}
+		}
+	}
+	collect(parentID)
+	return result
+}
+
+func formatAgentStatus(s protocol.SessionInfo) string {
+	agentStatus := s.AgentStatus
+	if s.Status != "running" {
+		agentStatus = ""
+	}
+	if agentStatus == "approval" {
+		agentStatus = "⚠ approval"
+	} else if agentStatus == "active" && s.ToolName != "" {
+		agentStatus = fmt.Sprintf("active (%s)", s.ToolName)
+	}
+	return agentStatus
+}
+
+func formatModel(s protocol.SessionInfo) string {
+	return s.Model
+}
+
+func formatCost(s protocol.SessionInfo) string {
+	if s.CostUSD != nil {
+		return fmt.Sprintf("$%.2f", *s.CostUSD)
+	}
+	return ""
+}
+
+func formatBranch(s protocol.SessionInfo) string {
+	branch := s.Branch
+	if branch != "" {
+		parts := strings.SplitN(branch, "/", 3)
+		if len(parts) == 3 {
+			branch = parts[2]
+		}
+	} else if s.InPlace {
+		branch = "(in-place)"
+	}
+	return branch
+}
+
+func formatGitStatus(s protocol.SessionInfo) string {
+	gitStatus := ""
+	if s.Dirty {
+		gitStatus = "dirty"
+	}
+	if s.UnpushedCount > 0 {
+		if gitStatus != "" {
+			gitStatus += ", "
+		}
+		gitStatus += fmt.Sprintf("%d ahead", s.UnpushedCount)
+	}
+	return gitStatus
+}
+
+func formatAge(s protocol.SessionInfo, now time.Time) string {
+	if t, err := time.Parse(time.RFC3339, s.CreatedAt); err == nil {
+		return client.ShortDuration(now.Sub(t))
+	}
+	return ""
+}
+
+func formatAttached(s protocol.SessionInfo, now time.Time) string {
+	if s.LastAttachedAt != "" {
+		if t, err := time.Parse(time.RFC3339, s.LastAttachedAt); err == nil {
+			return client.ShortDuration(now.Sub(t)) + " ago"
+		}
+	}
+	return ""
+}
+
 func init() {
 	rootCmd.AddCommand(listCmd)
 	listCmd.Flags().StringVar(&listRepo, "repo", "", "filter by repo path")
+	listCmd.Flags().BoolVar(&listTree, "tree", false, "show parent-child hierarchy")
+	listCmd.Flags().StringVar(&listChildren, "children", "", "filter to descendants of a session")
 
 	listCmd.RegisterFlagCompletionFunc("repo", completeRepoPaths)
+	listCmd.RegisterFlagCompletionFunc("children", completeSessionNames)
 }
