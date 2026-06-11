@@ -204,12 +204,12 @@ func ExpandPath(p string) string {
 	return filepath.Clean(p)
 }
 
-func (rc RepoConfig) ValidateIncludes() error {
-	if len(rc.Includes) == 0 {
-		return nil
-	}
+func (rc RepoConfig) Validate() error {
 	if rc.Singleton && rc.AllowConcurrent {
 		return fmt.Errorf("repo %q: singleton and allow_concurrent cannot both be set", rc.Path)
+	}
+	if len(rc.Includes) == 0 {
+		return nil
 	}
 
 	mainBase := strings.ToLower(filepath.Base(ResolvePath(rc.Path)))
@@ -234,6 +234,16 @@ func (rc RepoConfig) ValidateIncludes() error {
 		envNames[envName] = inc
 	}
 	return nil
+}
+
+func (c *Config) Validate() error {
+	var errs []error
+	for _, r := range c.Repos {
+		if err := r.Validate(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func IncludeEnvVarName(repoBasename string) string {
@@ -291,6 +301,9 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("parsing config %s: %w", path, err)
 	}
 	cfg.Agents = mergeAgents(defaultAgents, cfg.Agents)
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("config validation: %w", err)
+	}
 	return cfg, nil
 }
 

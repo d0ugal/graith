@@ -505,6 +505,13 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 	for _, inc := range includes {
 		env[config.IncludeEnvVarName(inc.RepoName)] = inc.WorktreePath
 	}
+	if sharedWorktree {
+		if source, ok := sm.state.Sessions[sharedWorktreeSourceID]; ok {
+			for _, inc := range source.Includes {
+				env[config.IncludeEnvVarName(inc.RepoName)] = inc.WorktreePath
+			}
+		}
+	}
 
 	sandboxed, err := sm.resolveSandbox(agentName)
 	if err != nil {
@@ -985,8 +992,8 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 	}
 
 	for _, inc := range sessState.Includes {
-		if _, err := os.Stat(inc.WorktreePath); err != nil {
-			return SessionState{}, fmt.Errorf("included worktree %q (%s) no longer exists — delete and recreate the session", inc.WorktreePath, inc.RepoName)
+		if !git.IsInsideGitRepo(inc.WorktreePath) {
+			return SessionState{}, fmt.Errorf("included worktree %q (%s) is no longer a valid git repo — delete and recreate the session", inc.WorktreePath, inc.RepoName)
 		}
 		env[config.IncludeEnvVarName(inc.RepoName)] = inc.WorktreePath
 	}
@@ -1203,7 +1210,7 @@ func (sm *SessionManager) List() []SessionState {
 
 	list := make([]SessionState, 0, len(sm.state.Sessions))
 	for _, s := range sm.state.Sessions {
-		list = append(list, *s)
+		list = append(list, cloneSessionState(s))
 	}
 	return list
 }
@@ -1242,7 +1249,7 @@ func (sm *SessionManager) Get(id string) (SessionState, bool) {
 	if !ok {
 		return SessionState{}, false
 	}
-	return *s, ok
+	return cloneSessionState(s), ok
 }
 
 // GetPTY returns the live PTY session by ID.
@@ -1561,11 +1568,17 @@ func (sm *SessionManager) applyConfig(newCfg *config.Config) {
 func (sm *SessionManager) teardownIncludes(mainRepoPath, mainWorktreePath, mainBranch string, includes []IncludedRepoState) {
 	for i := len(includes) - 1; i >= 0; i-- {
 		inc := includes[i]
-		_ = git.TeardownSession(inc.RepoPath, inc.WorktreePath, inc.Branch)
+		if err := git.TeardownSession(inc.RepoPath, inc.WorktreePath, inc.Branch); err != nil {
+			sm.log.Warn("failed to teardown included worktree", "repo", inc.RepoName, "path", inc.WorktreePath, "err", err)
+		}
 	}
-	_ = git.TeardownSession(mainRepoPath, mainWorktreePath, mainBranch)
+	if err := git.TeardownSession(mainRepoPath, mainWorktreePath, mainBranch); err != nil {
+		sm.log.Warn("failed to teardown main worktree", "path", mainWorktreePath, "err", err)
+	}
 	if len(includes) > 0 {
-		_ = os.RemoveAll(filepath.Dir(mainWorktreePath))
+		if err := os.RemoveAll(filepath.Dir(mainWorktreePath)); err != nil {
+			sm.log.Warn("failed to remove session directory", "path", filepath.Dir(mainWorktreePath), "err", err)
+		}
 	}
 }
 

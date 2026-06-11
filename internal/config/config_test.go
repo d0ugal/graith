@@ -795,52 +795,59 @@ func TestDefaultMutationSafety(t *testing.T) {
 	}
 }
 
-func TestValidateIncludes(t *testing.T) {
+func TestValidate(t *testing.T) {
 	t.Run("no includes is valid", func(t *testing.T) {
 		rc := RepoConfig{Path: "~/Code/foo"}
-		if err := rc.ValidateIncludes(); err != nil {
+		if err := rc.Validate(); err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
 	})
 
 	t.Run("self-include rejected", func(t *testing.T) {
 		rc := RepoConfig{Path: "~/Code/foo", Includes: []string{"~/Code/foo"}}
-		if err := rc.ValidateIncludes(); err == nil {
+		if err := rc.Validate(); err == nil {
 			t.Error("expected error for self-include")
 		}
 	})
 
 	t.Run("duplicate basename rejected", func(t *testing.T) {
 		rc := RepoConfig{Path: "~/Code/foo", Includes: []string{"~/Code/bar", "~/work/bar"}}
-		if err := rc.ValidateIncludes(); err == nil {
+		if err := rc.Validate(); err == nil {
 			t.Error("expected error for duplicate basename")
 		}
 	})
 
 	t.Run("main repo basename collision rejected", func(t *testing.T) {
 		rc := RepoConfig{Path: "~/Code/bar", Includes: []string{"~/work/bar"}}
-		if err := rc.ValidateIncludes(); err == nil {
+		if err := rc.Validate(); err == nil {
 			t.Error("expected error for main/include basename collision")
 		}
 	})
 
 	t.Run("env var collision rejected", func(t *testing.T) {
 		rc := RepoConfig{Path: "~/Code/main", Includes: []string{"~/Code/foo-bar", "~/Code/foo.bar"}}
-		if err := rc.ValidateIncludes(); err == nil {
+		if err := rc.Validate(); err == nil {
 			t.Error("expected error for env var name collision")
 		}
 	})
 
-	t.Run("singleton plus allow_concurrent rejected", func(t *testing.T) {
+	t.Run("singleton plus allow_concurrent rejected with includes", func(t *testing.T) {
 		rc := RepoConfig{Path: "~/Code/foo", Singleton: true, AllowConcurrent: true, Includes: []string{"~/Code/bar"}}
-		if err := rc.ValidateIncludes(); err == nil {
+		if err := rc.Validate(); err == nil {
 			t.Error("expected error for singleton + allow_concurrent")
+		}
+	})
+
+	t.Run("singleton plus allow_concurrent rejected without includes", func(t *testing.T) {
+		rc := RepoConfig{Path: "~/Code/foo", Singleton: true, AllowConcurrent: true}
+		if err := rc.Validate(); err == nil {
+			t.Error("expected error for singleton + allow_concurrent without includes")
 		}
 	})
 
 	t.Run("valid includes pass", func(t *testing.T) {
 		rc := RepoConfig{Path: "~/Code/dem-dev", Includes: []string{"~/Code/grafana", "~/Code/session-replay-examples"}}
-		if err := rc.ValidateIncludes(); err != nil {
+		if err := rc.Validate(); err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
 	})
