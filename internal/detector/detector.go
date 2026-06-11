@@ -285,6 +285,9 @@ func StripANSI(content string) string {
 					i += stPos + 2
 					continue
 				}
+				// Unterminated OSC sequence — consume to end of string.
+				i = len(content)
+				continue
 			}
 			if i+1 < len(content) {
 				i += 2
