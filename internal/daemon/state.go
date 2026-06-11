@@ -13,7 +13,7 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 )
 
-const CurrentStateVersion = 1
+const CurrentStateVersion = 2
 
 type SessionStatus string
 
@@ -24,33 +24,43 @@ const (
 )
 
 type SessionState struct {
-	ID                 string                `json:"id"`
-	Name               string                `json:"name"`
-	RepoPath           string                `json:"repo_path"`
-	RepoName           string                `json:"repo_name"`
-	WorktreePath       string                `json:"worktree_path"`
-	Branch             string                `json:"branch"`
-	BaseBranch         string                `json:"base_branch"`
-	Agent              string                `json:"agent"`
-	AgentSessionID     string                `json:"agent_session_id,omitempty"`
-	Status             SessionStatus         `json:"status"`
-	AgentStatus        string                `json:"agent_status,omitempty"`
-	IdleSince          *time.Time            `json:"-"`
-	GitDirty           bool                  `json:"-"`
-	GitUnpushed        int                   `json:"-"`
-	HookModel          string                `json:"-"`
-	HookToolName       string                `json:"-"`
-	HookCostUSD        *float64              `json:"-"`
-	HookContextPercent *float64              `json:"-"`
-	ExitCode           *int                  `json:"exit_code,omitempty"`
-	PID                int                   `json:"pid,omitempty"`
-	Sandboxed          bool                  `json:"sandboxed,omitempty"`
-	SandboxConfig      *config.SandboxConfig `json:"sandbox_config,omitempty"`
-	SharedWorktree     bool                  `json:"shared_worktree,omitempty"`
-	InPlace            bool                  `json:"in_place,omitempty"`
-	AgentHooks         bool                  `json:"agent_hooks,omitempty"`
-	CreatedAt          time.Time             `json:"created_at"`
-	LastAttachedAt     *time.Time            `json:"last_attached_at,omitempty"`
+	ID                     string                `json:"id"`
+	Name                   string                `json:"name"`
+	RepoPath               string                `json:"repo_path"`
+	RepoName               string                `json:"repo_name"`
+	WorktreePath           string                `json:"worktree_path"`
+	Branch                 string                `json:"branch"`
+	BaseBranch             string                `json:"base_branch"`
+	Agent                  string                `json:"agent"`
+	AgentSessionID         string                `json:"agent_session_id,omitempty"`
+	Status                 SessionStatus         `json:"status"`
+	AgentStatus            string                `json:"agent_status,omitempty"`
+	IdleSince              *time.Time            `json:"-"`
+	GitDirty               bool                  `json:"-"`
+	GitUnpushed            int                   `json:"-"`
+	HookModel              string                `json:"-"`
+	HookToolName           string                `json:"-"`
+	HookCostUSD            *float64              `json:"-"`
+	HookContextPercent     *float64              `json:"-"`
+	ExitCode               *int                  `json:"exit_code,omitempty"`
+	PID                    int                   `json:"pid,omitempty"`
+	Sandboxed              bool                  `json:"sandboxed,omitempty"`
+	SandboxConfig          *config.SandboxConfig `json:"sandbox_config,omitempty"`
+	SharedWorktree         bool                  `json:"shared_worktree,omitempty"`
+	SharedWorktreeSourceID string                `json:"shared_worktree_source_id,omitempty"`
+	InPlace                bool                  `json:"in_place,omitempty"`
+	Includes               []IncludedRepoState   `json:"includes,omitempty"`
+	AgentHooks             bool                  `json:"agent_hooks,omitempty"`
+	CreatedAt              time.Time             `json:"created_at"`
+	LastAttachedAt         *time.Time            `json:"last_attached_at,omitempty"`
+}
+
+type IncludedRepoState struct {
+	RepoPath     string `json:"repo_path"`
+	RepoName     string `json:"repo_name"`
+	WorktreePath string `json:"worktree_path"`
+	Branch       string `json:"branch"`
+	BaseBranch   string `json:"base_branch"`
 }
 
 type State struct {
@@ -102,6 +112,7 @@ func SaveState(path string, state *State) error {
 
 var migrations = map[int]func(*State) error{
 	0: migrateV0ToV1,
+	1: migrateV1ToV2,
 }
 
 func migrateState(state *State) error {
@@ -121,6 +132,12 @@ func migrateState(state *State) error {
 // migrateV0ToV1 is a no-op: v0 and v1 share the same schema. Kept because
 // removing it would break the migration chain for any state file at version 0.
 func migrateV0ToV1(_ *State) error {
+	return nil
+}
+
+// migrateV1ToV2 is a no-op: v2 adds optional Includes and
+// SharedWorktreeSourceID fields with omitempty JSON tags.
+func migrateV1ToV2(_ *State) error {
 	return nil
 }
 
