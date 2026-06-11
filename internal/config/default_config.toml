@@ -59,11 +59,19 @@ args = ["--session-id", "{agent_session_id}"]
 resume_args = ["--resume", "{agent_session_id}"]
 fork_args = ["--resume", "{fork_source_agent_session_id}", "--fork-session", "--session-id", "{agent_session_id}"]
 
+[agents.claude.sandbox]
+read_dirs = ["~/.claude"]
+write_dirs = ["~/.claude"]
+
 [agents.codex]
 command = "codex"
 args = []
 resume_args = ["resume", "--last"]
 fork_args = ["fork", "{fork_source_agent_session_id}"]
+
+[agents.codex.sandbox]
+read_dirs = ["~/.codex"]
+write_dirs = ["~/.codex"]
 
 [agents.opencode]
 command = "opencode"
@@ -74,3 +82,7 @@ resume_args = ["--session", "{agent_session_id}"]
 command = "agy"
 args = []
 resume_args = ["--conversation", "{agent_session_id}"]
+
+[agents.agy.sandbox]
+read_dirs = ["~/.gemini"]
+write_dirs = ["~/.gemini"]

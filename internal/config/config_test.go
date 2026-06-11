@@ -816,3 +816,52 @@ func TestSandboxConfigMergeDeduplicatesFeatures(t *testing.T) {
 		}
 	}
 }
+
+func TestDefaultAgentSandboxPaths(t *testing.T) {
+	cfg := Default()
+
+	tests := []struct {
+		agent    string
+		wantRead []string
+	}{
+		{"claude", []string{"~/.claude"}},
+		{"codex", []string{"~/.codex"}},
+		{"agy", []string{"~/.gemini"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.agent, func(t *testing.T) {
+			agent, ok := cfg.Agents[tt.agent]
+			if !ok {
+				t.Fatalf("agent %q not found in defaults", tt.agent)
+			}
+			if !reflect.DeepEqual(agent.Sandbox.ReadDirs, tt.wantRead) {
+				t.Errorf("%s.Sandbox.ReadDirs = %v, want %v", tt.agent, agent.Sandbox.ReadDirs, tt.wantRead)
+			}
+		})
+	}
+}
+
+func TestAgySandboxPathsMergedWithGlobal(t *testing.T) {
+	global := SandboxConfig{
+		Enabled:  true,
+		ReadDirs: []string{"~/Code"},
+	}
+	cfg := Default()
+	agy := cfg.Agents["agy"]
+
+	merged := global.Merge(agy.Sandbox)
+
+	if !merged.Enabled {
+		t.Error("merged.Enabled = false, want true")
+	}
+	foundGemini := false
+	for _, d := range merged.ReadDirs {
+		if d == "~/.gemini" {
+			foundGemini = true
+		}
+	}
+	if !foundGemini {
+		t.Errorf("merged.ReadDirs = %v, want ~/.gemini included", merged.ReadDirs)
+	}
+}

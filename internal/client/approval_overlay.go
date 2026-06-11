@@ -115,8 +115,8 @@ func (m approvalModel) View() tea.View {
 	}
 
 	dim := lipgloss.NewStyle().Foreground(colorDim)
-	panelWidth := min(80, w-4)
-	contentWidth := panelWidth - 4
+	panelWidth := max(0, min(80, w-4))
+	contentWidth := max(0, panelWidth-4)
 
 	var panelContent strings.Builder
 
@@ -374,6 +374,9 @@ func shortPath(fp string) string {
 }
 
 func truncate(s string, maxLen int) string {
+	if maxLen <= 0 {
+		return ""
+	}
 	if len(s) <= maxLen {
 		return s
 	}
