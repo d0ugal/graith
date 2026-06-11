@@ -1570,6 +1570,66 @@ func TestAttachPersistsLastAttachedAt(t *testing.T) {
 	}
 }
 
+func TestNullPayloadRejected(t *testing.T) {
+	types := []struct {
+		msgType string
+		errText string
+	}{
+		{"create", "invalid create message"},
+		{"attach", "invalid attach message"},
+		{"delete", "invalid delete message"},
+		{"stop", "invalid stop message"},
+		{"rename", "invalid rename message"},
+		{"resume", "invalid resume message"},
+		{"logs", "invalid logs message"},
+		{"type", "invalid type message"},
+		{"msg_pub", "invalid msg_pub message"},
+		{"msg_sub", "invalid msg_sub message"},
+		{"msg_ack", "invalid msg_ack message"},
+		{"msg_topics", "invalid msg_topics message"},
+		{"fork", "invalid fork message"},
+		{"screen_preview", "invalid screen_preview message"},
+		{"screen_snapshot", "invalid screen_snapshot message"},
+		{"status", "invalid status message"},
+		{"status_report", "invalid status_report"},
+		{"approval_request", "invalid approval_request"},
+		{"approval_respond", "invalid approval_respond"},
+	}
+
+	for _, tt := range types {
+		t.Run(tt.msgType, func(t *testing.T) {
+			h := newTestHarness(t)
+
+			h.sendControl(t, "handshake", protocol.HandshakeMsg{
+				Version:      "1.0",
+				ClientID:     "test",
+				TerminalSize: [2]uint16{80, 24},
+				Cwd:          "/tmp",
+			})
+			env := h.readControlMsg(t)
+			if env.Type != "handshake_ok" {
+				t.Fatalf("handshake: got %q", env.Type)
+			}
+
+			nullEnvelope, _ := json.Marshal(protocol.Envelope{
+				Type:    tt.msgType,
+				Payload: json.RawMessage("null"),
+			})
+			h.writer.WriteFrame(protocol.ChannelControl, nullEnvelope)
+
+			env = h.readControlMsg(t)
+			if env.Type != "error" {
+				t.Fatalf("expected error for null %s payload, got %q", tt.msgType, env.Type)
+			}
+			var errMsg protocol.ErrorMsg
+			protocol.DecodePayload(env, &errMsg)
+			if errMsg.Message != tt.errText {
+				t.Errorf("error message = %q, want %q", errMsg.Message, tt.errText)
+			}
+		})
+	}
+}
+
 func TestAttachSwitchSession(t *testing.T) {
 	h := newTestHarness(t)
 	h.addPTYSession(t, "sw1", "session-one")
