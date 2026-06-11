@@ -56,9 +56,10 @@ type StartOpts struct {
 }
 
 type Instance struct {
-	cmd  *exec.Cmd
-	port int
-	dir  string
+	cmd     *exec.Cmd
+	port    int
+	dir     string
+	stopped bool
 }
 
 func Start(opts StartOpts) (*Instance, error) {
@@ -87,6 +88,7 @@ func Start(opts StartOpts) (*Instance, error) {
 
 	args := []string{
 		fmt.Sprintf("--remote-debugging-port=%d", port),
+		"--remote-debugging-address=127.0.0.1",
 		fmt.Sprintf("--user-data-dir=%s", dir),
 		"--headless=new",
 		"--no-first-run",
@@ -158,11 +160,21 @@ func (i *Instance) PID() int {
 	return i.cmd.Process.Pid
 }
 
+func (i *Instance) Dir() string {
+	return i.dir
+}
+
 func (i *Instance) Stop() error {
+	if i.stopped {
+		return nil
+	}
+	i.stopped = true
+
 	var errs []string
 
 	if i.cmd.Process != nil {
-		_ = i.cmd.Process.Signal(syscall.SIGTERM)
+		pgid := i.cmd.Process.Pid
+		_ = syscall.Kill(-pgid, syscall.SIGTERM)
 
 		done := make(chan struct{})
 		go func() {
@@ -173,7 +185,7 @@ func (i *Instance) Stop() error {
 		select {
 		case <-done:
 		case <-time.After(5 * time.Second):
-			_ = i.cmd.Process.Kill()
+			_ = syscall.Kill(-pgid, syscall.SIGKILL)
 			<-done
 		}
 	}
@@ -186,4 +198,15 @@ func (i *Instance) Stop() error {
 		return fmt.Errorf("%s", strings.Join(errs, "; "))
 	}
 	return nil
+}
+
+// StopByPID kills a Chrome process by PID and cleans up its user-data directory.
+// Used for recovering orphaned Chrome processes after daemon restart.
+func StopByPID(pid int, dir string) {
+	_ = syscall.Kill(-pid, syscall.SIGTERM)
+	time.Sleep(500 * time.Millisecond)
+	_ = syscall.Kill(-pid, syscall.SIGKILL)
+	if dir != "" {
+		_ = os.RemoveAll(dir)
+	}
 }
