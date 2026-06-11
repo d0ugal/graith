@@ -1,0 +1,76 @@
+# graith default configuration
+#
+# This file defines the built-in defaults. To create your own config:
+#   gr config reset
+#
+# To see what you've changed from defaults:
+#   gr config diff
+#
+# To see the effective merged config:
+#   gr config show
+#
+# Template variables available in agent args:
+#   {username}                      - GitHub username or "user"
+#   {agent_session_id}              - UUID for the agent session
+#   {session_name}                  - Human-readable session name
+#   {session_id}                    - Internal graith session ID
+#   {worktree_path}                 - Absolute path to the session worktree
+#   {fork_source_agent_session_id}  - Source session's agent ID (fork only)
+
+default_agent = "claude"
+branch_prefix = "{username}/graith"
+fetch_on_create = true
+
+[status_bar]
+enabled = true
+position = "bottom"
+
+[notifications]
+enabled = true
+on_approval = true
+
+[approvals]
+mode = "prompt"
+timeout = "10m"
+
+[keybindings]
+prefix = "ctrl+b"
+new_session = "c"
+fork_session = "f"
+delete_session = "x"
+detach = "d"
+session_list = "w"
+next_session = "n"
+prev_session = "p"
+last_session = "l"
+resume_session = "R"
+rename_session = ","
+search = "/"
+scroll_mode = "["
+shell = "s"
+
+# Agent definitions
+# Each agent needs at minimum: command, args
+# Optional: resume_args, fork_args, env, idle_timeout, sandbox
+
+[agents.claude]
+command = "claude"
+args = ["--session-id", "{agent_session_id}"]
+resume_args = ["--resume", "{agent_session_id}"]
+fork_args = ["--resume", "{fork_source_agent_session_id}", "--fork-session", "--session-id", "{agent_session_id}"]
+
+[agents.codex]
+command = "codex"
+args = []
+resume_args = ["resume", "--last"]
+fork_args = ["fork", "{fork_source_agent_session_id}"]
+
+[agents.opencode]
+command = "opencode"
+args = []
+resume_args = ["--session", "{agent_session_id}"]
+
+[agents.agy]
+command = "agy"
+args = []
+resume_args = ["--conversation", "{agent_session_id}"]
