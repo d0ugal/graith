@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.0](https://github.com/d0ugal/graith/compare/v0.19.0...v0.20.0) (2026-06-11)
+
+
+### Features
+
+* add parent/child relationships to sessions ([cff6ec1](https://github.com/d0ugal/graith/commit/cff6ec108deac43497a04d3af648c9e4018f763a))
+
 ## [0.19.0](https://github.com/d0ugal/graith/compare/v0.18.1...v0.19.0) (2026-06-11)
 
 
