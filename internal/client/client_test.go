@@ -3,6 +3,7 @@ package client
 import (
 	"encoding/json"
 	"net"
+	"os"
 	"testing"
 	"time"
 
@@ -206,6 +207,107 @@ func TestApprovalDeadline(t *testing.T) {
 				t.Errorf("approvalDeadline(%v) = %v, want %v", tt.timeout, got, tt.want)
 			}
 		})
+	}
+}
+
+// startMockDaemon creates a Unix socket listener that completes one handshake
+// and returns both the listener and the server-side connection for further use.
+func startMockDaemon(t *testing.T) (string, chan net.Conn) {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "gr")
+	if err != nil {
+		t.Fatalf("mkdtemp: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	socketPath := dir + "/s"
+	ln, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { ln.Close() })
+
+	serverReady := make(chan net.Conn, 1)
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		reader := protocol.NewFrameReader(conn)
+		writer := protocol.NewFrameWriter(conn)
+
+		if _, err := reader.ReadFrame(); err != nil {
+			conn.Close()
+			return
+		}
+		resp, _ := protocol.EncodeControl("handshake_ok", protocol.HandshakeOkMsg{
+			Version:       protocol.Version,
+			DaemonVersion: "dev",
+		})
+		_ = writer.WriteFrame(protocol.ChannelControl, resp)
+		serverReady <- conn
+	}()
+
+	return socketPath, serverReady
+}
+
+func TestConnectFastClearsDeadline(t *testing.T) {
+	socketPath, serverReady := startMockDaemon(t)
+
+	c, err := ConnectFast(config.Paths{SocketPath: socketPath})
+	if err != nil {
+		t.Fatalf("ConnectFast: %v", err)
+	}
+	defer c.Close()
+
+	serverConn := <-serverReady
+	defer serverConn.Close()
+
+	// Send a control message after 2.5s — past the original 2s handshake
+	// deadline. If the deadline was not cleared, this read will fail.
+	go func() {
+		time.Sleep(2500 * time.Millisecond)
+		resp, _ := protocol.EncodeControl("ping", struct{}{})
+		serverWriter := protocol.NewFrameWriter(serverConn)
+		_ = serverWriter.WriteFrame(protocol.ChannelControl, resp)
+	}()
+
+	env, err := c.ReadControlResponse()
+	if err != nil {
+		t.Fatalf("ReadControlResponse after deadline window: %v (deadline was not cleared)", err)
+	}
+	if env.Type != "ping" {
+		t.Errorf("expected ping, got %s", env.Type)
+	}
+}
+
+func TestConnectForApprovalClearsDeadline(t *testing.T) {
+	socketPath, serverReady := startMockDaemon(t)
+
+	c, err := ConnectForApproval(config.Paths{SocketPath: socketPath}, 5*time.Minute)
+	if err != nil {
+		t.Fatalf("ConnectForApproval: %v", err)
+	}
+	defer c.Close()
+
+	serverConn := <-serverReady
+	defer serverConn.Close()
+
+	// Same check: send after the ConnectFast deadline (2s) would have fired.
+	// ConnectForApproval uses a longer deadline, but if it wasn't cleared,
+	// the connection would still have a fixed expiry.
+	go func() {
+		time.Sleep(2500 * time.Millisecond)
+		resp, _ := protocol.EncodeControl("ping", struct{}{})
+		serverWriter := protocol.NewFrameWriter(serverConn)
+		_ = serverWriter.WriteFrame(protocol.ChannelControl, resp)
+	}()
+
+	env, err := c.ReadControlResponse()
+	if err != nil {
+		t.Fatalf("ReadControlResponse after deadline window: %v (deadline was not cleared)", err)
+	}
+	if env.Type != "ping" {
+		t.Errorf("expected ping, got %s", env.Type)
 	}
 }
 

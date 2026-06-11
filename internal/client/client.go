@@ -220,6 +220,7 @@ func ConnectFast(paths config.Paths) (*Client, error) {
 		c.Close()
 		return nil, fmt.Errorf("unexpected handshake response: %s", resp.Type)
 	}
+	conn.SetDeadline(time.Time{})
 	return c, nil
 }
 
@@ -258,6 +259,7 @@ func ConnectForApproval(paths config.Paths, approvalTimeout time.Duration) (*Cli
 		c.Close()
 		return nil, fmt.Errorf("unexpected handshake response: %s", resp.Type)
 	}
+	conn.SetDeadline(time.Time{})
 	return c, nil
 }
 
