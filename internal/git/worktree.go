@@ -16,7 +16,7 @@ func RemoveWorktree(repoPath, worktreePath string) error {
 }
 
 func SetupSession(repoPath, worktreePath, branchName, baseBranch string, fetch bool) error {
-	if fetch {
+	if fetch && HasRemote(repoPath, "origin") {
 		if err := FetchOrigin(repoPath); err != nil {
 			return fmt.Errorf("fetch: %w", err)
 		}
