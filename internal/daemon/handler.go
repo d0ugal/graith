@@ -651,5 +651,15 @@ func toSessionInfo(s SessionState) protocol.SessionInfo {
 	if s.LastAttachedAt != nil {
 		info.LastAttachedAt = s.LastAttachedAt.Format(time.RFC3339)
 	}
+	for _, inc := range s.Includes {
+		info.Includes = append(info.Includes, protocol.IncludedRepoInfo{
+			RepoName:     inc.RepoName,
+			WorktreePath: inc.WorktreePath,
+			Branch:       inc.Branch,
+			BaseBranch:   inc.BaseBranch,
+			Dirty:        inc.dirty,
+			Unpushed:     inc.unpushed,
+		})
+	}
 	return info
 }

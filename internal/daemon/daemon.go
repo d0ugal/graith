@@ -284,6 +284,8 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 
 	var repoRoot, repoName, worktreePath, branchName string
 	var sharedWorktree bool
+	var sharedWorktreeSourceID string
+	var includes []IncludedRepoState
 
 	switch {
 	case shareWorktree != "":
@@ -305,6 +307,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 		repoName = source.RepoName
 		baseBranch = source.BaseBranch
 		sharedWorktree = true
+		sharedWorktreeSourceID = source.ID
 	case noRepo:
 		worktreePath = filepath.Join(sm.paths.DataDir, "scratch", id)
 		if err := os.MkdirAll(worktreePath, 0o700); err != nil {
@@ -324,6 +327,10 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 		rc, ok := sm.cfg.FindRepo(repoRoot)
 		if !ok {
 			return SessionState{}, fmt.Errorf("repo root %q is not configured in [[repos]] — add it to config to use --in-place", repoRoot)
+		}
+
+		if len(rc.Includes) > 0 {
+			return SessionState{}, fmt.Errorf("repo %q has includes configured — drop --in-place to create an includes session with worktrees", repoRoot)
 		}
 
 		if !allowConcurrent && !rc.AllowConcurrent {
@@ -351,6 +358,17 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 			return SessionState{}, fmt.Errorf("find repo root: %w", err)
 		}
 
+		rc, _ := sm.cfg.FindRepo(repoRoot)
+
+		if rc.Singleton {
+			canonicalRoot := config.ResolvePath(repoRoot)
+			for _, s := range sm.state.Sessions {
+				if config.ResolvePath(s.RepoPath) == canonicalRoot && s.Status == StatusRunning {
+					return SessionState{}, fmt.Errorf("repo %q has singleton = true and session %q is already running — stop it first", repoRoot, s.Name)
+				}
+			}
+		}
+
 		if baseBranch == "" {
 			baseBranch, err = git.DiscoverDefaultBranch(repoRoot)
 			if err != nil {
@@ -371,10 +389,56 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 		branchPrefix, _ := config.Expand(sm.cfg.BranchPrefix, config.TemplateVars{Username: username})
 		branchName = fmt.Sprintf("%s/%s-%s", branchPrefix, name, id)
 
-		worktreePath = filepath.Join(sm.paths.DataDir, "worktrees", repoName, repoHash(repoRoot), id)
+		sessionDir := filepath.Join(sm.paths.DataDir, "worktrees", repoName, repoHash(repoRoot), id)
 
-		if err := git.SetupSession(repoRoot, worktreePath, branchName, baseBranch, sm.cfg.FetchOnCreate); err != nil {
-			return SessionState{}, fmt.Errorf("setup git session: %w", err)
+		if len(rc.Includes) > 0 {
+			worktreePath = filepath.Join(sessionDir, repoName)
+			if err := git.SetupSession(repoRoot, worktreePath, branchName, baseBranch, sm.cfg.FetchOnCreate); err != nil {
+				return SessionState{}, fmt.Errorf("setup main repo git session: %w", err)
+			}
+
+			for _, incPath := range rc.Includes {
+				resolved := config.ResolvePath(incPath)
+				if !sm.cfg.RepoPathAllowed(resolved) {
+					sm.teardownIncludes(repoRoot, worktreePath, branchName, includes)
+					return SessionState{}, fmt.Errorf("included repo %q is not under any allowed_repo_paths", incPath)
+				}
+				if !git.IsInsideGitRepo(resolved) {
+					sm.teardownIncludes(repoRoot, worktreePath, branchName, includes)
+					return SessionState{}, fmt.Errorf("included repo %q is not a git repository", incPath)
+				}
+				incRoot, err := git.RepoRootPath(resolved)
+				if err != nil {
+					sm.teardownIncludes(repoRoot, worktreePath, branchName, includes)
+					return SessionState{}, fmt.Errorf("find included repo root for %q: %w", incPath, err)
+				}
+				incName := filepath.Base(incRoot)
+				incBaseBranch, err := git.DiscoverDefaultBranchOrHEAD(incRoot)
+				if err != nil {
+					sm.teardownIncludes(repoRoot, worktreePath, branchName, includes)
+					return SessionState{}, fmt.Errorf("discover default branch for included repo %q: %w", incPath, err)
+				}
+				incBranch := fmt.Sprintf("%s/%s-%s/%s", branchPrefix, name, id, incName)
+				incWorktreePath := filepath.Join(sessionDir, incName)
+
+				if err := git.SetupSession(incRoot, incWorktreePath, incBranch, incBaseBranch, sm.cfg.FetchOnCreate); err != nil {
+					sm.teardownIncludes(repoRoot, worktreePath, branchName, includes)
+					return SessionState{}, fmt.Errorf("setup included repo %q: %w", incName, err)
+				}
+
+				includes = append(includes, IncludedRepoState{
+					RepoPath:     incRoot,
+					RepoName:     incName,
+					WorktreePath: incWorktreePath,
+					Branch:       incBranch,
+					BaseBranch:   incBaseBranch,
+				})
+			}
+		} else {
+			worktreePath = sessionDir
+			if err := git.SetupSession(repoRoot, worktreePath, branchName, baseBranch, sm.cfg.FetchOnCreate); err != nil {
+				return SessionState{}, fmt.Errorf("setup git session: %w", err)
+			}
 		}
 	}
 
@@ -407,6 +471,8 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 		}
 		if noRepo {
 			os.RemoveAll(worktreePath)
+		} else if len(includes) > 0 {
+			sm.teardownIncludes(repoRoot, worktreePath, branchName, includes)
 		} else {
 			_ = git.TeardownSession(repoRoot, worktreePath, branchName)
 		}
@@ -435,6 +501,9 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 	}
 	if inPlace {
 		env["GRAITH_IN_PLACE"] = "true"
+	}
+	for _, inc := range includes {
+		env[config.IncludeEnvVarName(inc.RepoName)] = inc.WorktreePath
 	}
 
 	sandboxed, err := sm.resolveSandbox(agentName)
@@ -475,6 +544,9 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 			envKeys = append(envKeys, k)
 		}
 		opts := sm.sandboxOptsFromConfig(merged, id, worktreePath, envKeys, agentHooks)
+		if len(includes) > 0 {
+			opts.WriteDirs = append(opts.WriteDirs, sm.deriveSandboxIncludesWriteDirs(includes)...)
+		}
 		if sharedWorktree {
 			scratchDir = filepath.Join(sm.paths.DataDir, "scratch", id)
 			if err := os.MkdirAll(scratchDir, 0o700); err != nil {
@@ -482,6 +554,11 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 				return SessionState{}, fmt.Errorf("create scratch dir: %w", err)
 			}
 			opts.ReadDirs = append(opts.ReadDirs, worktreePath)
+			if source, ok := sm.state.Sessions[sharedWorktreeSourceID]; ok {
+				for _, inc := range source.Includes {
+					opts.ReadDirs = append(opts.ReadDirs, inc.WorktreePath)
+				}
+			}
 			opts.WorktreeDir = scratchDir
 		}
 		command, finalArgs = sandbox.Wrap(agent.Command, expandedArgs, opts)
@@ -510,23 +587,25 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 	}
 
 	sessState := &SessionState{
-		ID:             id,
-		Name:           name,
-		RepoPath:       repoRoot,
-		RepoName:       repoName,
-		WorktreePath:   worktreePath,
-		Branch:         branchName,
-		BaseBranch:     baseBranch,
-		Agent:          agentName,
-		AgentSessionID: agentSessionID,
-		Sandboxed:      sandboxed,
-		SandboxConfig:  mergedSandbox,
-		SharedWorktree: sharedWorktree,
-		InPlace:        inPlace,
-		AgentHooks:     agentHooks,
-		Status:         StatusRunning,
-		PID:            ptySess.Cmd.Process.Pid,
-		CreatedAt:      time.Now().UTC(),
+		ID:                     id,
+		Name:                   name,
+		RepoPath:               repoRoot,
+		RepoName:               repoName,
+		WorktreePath:           worktreePath,
+		Branch:                 branchName,
+		BaseBranch:             baseBranch,
+		Agent:                  agentName,
+		AgentSessionID:         agentSessionID,
+		Sandboxed:              sandboxed,
+		SandboxConfig:          mergedSandbox,
+		SharedWorktree:         sharedWorktree,
+		SharedWorktreeSourceID: sharedWorktreeSourceID,
+		InPlace:                inPlace,
+		Includes:               includes,
+		AgentHooks:             agentHooks,
+		Status:                 StatusRunning,
+		PID:                    ptySess.Cmd.Process.Pid,
+		CreatedAt:              time.Now().UTC(),
 	}
 
 	sm.state.Sessions[id] = sessState
@@ -570,6 +649,10 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 		return SessionState{}, fmt.Errorf("cannot fork session %q: in-place sessions cannot be forked", source.Name)
 	}
 
+	if rc, ok := sm.cfg.FindRepo(source.RepoPath); ok && rc.Singleton {
+		return SessionState{}, fmt.Errorf("cannot fork session %q: repo %q has singleton = true — stop the source session first or remove the singleton constraint", source.Name, source.RepoPath)
+	}
+
 	agentName := source.Agent
 	agent, ok := sm.cfg.Agents[agentName]
 	if !ok {
@@ -593,10 +676,36 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 	branchPrefix, _ := config.Expand(sm.cfg.BranchPrefix, config.TemplateVars{Username: username})
 	branchName := fmt.Sprintf("%s/%s-%s", branchPrefix, name, id)
 
-	worktreePath := filepath.Join(sm.paths.DataDir, "worktrees", repoName, repoHash(repoRoot), id)
+	sessionDir := filepath.Join(sm.paths.DataDir, "worktrees", repoName, repoHash(repoRoot), id)
 
-	if err := git.SetupSession(repoRoot, worktreePath, branchName, baseBranch, sm.cfg.FetchOnCreate); err != nil {
-		return SessionState{}, fmt.Errorf("setup git session: %w", err)
+	var worktreePath string
+	var forkIncludes []IncludedRepoState
+
+	if len(source.Includes) > 0 {
+		worktreePath = filepath.Join(sessionDir, repoName)
+		if err := git.SetupSession(repoRoot, worktreePath, branchName, baseBranch, sm.cfg.FetchOnCreate); err != nil {
+			return SessionState{}, fmt.Errorf("setup main repo git session for fork: %w", err)
+		}
+		for _, srcInc := range source.Includes {
+			incBranch := fmt.Sprintf("%s/%s-%s/%s", branchPrefix, name, id, srcInc.RepoName)
+			incWorktreePath := filepath.Join(sessionDir, srcInc.RepoName)
+			if err := git.SetupSession(srcInc.RepoPath, incWorktreePath, incBranch, srcInc.Branch, sm.cfg.FetchOnCreate); err != nil {
+				sm.teardownIncludes(repoRoot, worktreePath, branchName, forkIncludes)
+				return SessionState{}, fmt.Errorf("setup included repo %q for fork: %w", srcInc.RepoName, err)
+			}
+			forkIncludes = append(forkIncludes, IncludedRepoState{
+				RepoPath:     srcInc.RepoPath,
+				RepoName:     srcInc.RepoName,
+				WorktreePath: incWorktreePath,
+				Branch:       incBranch,
+				BaseBranch:   srcInc.Branch,
+			})
+		}
+	} else {
+		worktreePath = sessionDir
+		if err := git.SetupSession(repoRoot, worktreePath, branchName, baseBranch, sm.cfg.FetchOnCreate); err != nil {
+			return SessionState{}, fmt.Errorf("setup git session: %w", err)
+		}
 	}
 
 	agentSessionID := ""
@@ -619,9 +728,18 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 	if len(args) == 0 {
 		args = agent.Args
 	}
+	forkCleanup := func() {
+		sm.cleanupHooks(id)
+		if len(forkIncludes) > 0 {
+			sm.teardownIncludes(repoRoot, worktreePath, branchName, forkIncludes)
+		} else {
+			_ = git.TeardownSession(repoRoot, worktreePath, branchName)
+		}
+	}
+
 	expandedArgs, err := config.ExpandSlice(args, vars)
 	if err != nil {
-		_ = git.TeardownSession(repoRoot, worktreePath, branchName)
+		forkCleanup()
 		return SessionState{}, fmt.Errorf("expand fork args: %w", err)
 	}
 
@@ -637,12 +755,14 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 	if sm.paths.Profile != "" {
 		env["GRAITH_PROFILE"] = sm.paths.Profile
 	}
+	for _, inc := range forkIncludes {
+		env[config.IncludeEnvVarName(inc.RepoName)] = inc.WorktreePath
+	}
 
 	if source.AgentHooks {
 		hookArgs, hookEnv, err := sm.injectHooks(agentName, id)
 		if err != nil {
-			sm.cleanupHooks(id)
-			_ = git.TeardownSession(repoRoot, worktreePath, branchName)
+			forkCleanup()
 			return SessionState{}, fmt.Errorf("inject agent hooks: %w", err)
 		}
 		expandedArgs = append(expandedArgs, hookArgs...)
@@ -663,8 +783,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 			cmd = "safehouse"
 		}
 		if !sandbox.AvailableCommand(cmd) {
-			sm.cleanupHooks(id)
-			_ = git.TeardownSession(repoRoot, worktreePath, branchName)
+			forkCleanup()
 			return SessionState{}, fmt.Errorf("source session was sandboxed but %q is no longer available", cmd)
 		}
 		envKeys := []string{"GRAITH_SESSION_ID", "GRAITH_SESSION_NAME", "GRAITH_WORKTREE_PATH", "TERM"}
@@ -675,6 +794,9 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 			envKeys = append(envKeys, k)
 		}
 		opts := sm.sandboxOptsFromConfig(merged, id, worktreePath, envKeys, source.AgentHooks)
+		if len(forkIncludes) > 0 {
+			opts.WriteDirs = append(opts.WriteDirs, sm.deriveSandboxIncludesWriteDirs(forkIncludes)...)
+		}
 		command, finalArgs = sandbox.Wrap(agent.Command, expandedArgs, opts)
 		sm.log.Info("sandboxing forked session", "id", id,
 			"command", command, "read_dirs", opts.ReadDirs, "write_dirs", opts.WriteDirs,
@@ -693,8 +815,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 		MaxLogSize: 100 * 1024 * 1024,
 	})
 	if err != nil {
-		sm.cleanupHooks(id)
-		_ = git.TeardownSession(repoRoot, worktreePath, branchName)
+		forkCleanup()
 		return SessionState{}, fmt.Errorf("start pty session: %w", err)
 	}
 
@@ -711,6 +832,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 		AgentHooks:     source.AgentHooks,
 		Sandboxed:      sandboxed,
 		SandboxConfig:  mergedSandbox,
+		Includes:       forkIncludes,
 		Status:         StatusRunning,
 		PID:            ptySess.Cmd.Process.Pid,
 		CreatedAt:      time.Now().UTC(),
@@ -724,8 +846,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 		delete(sm.sessions, id)
 		_ = ptySess.Kill()
 		ptySess.Close()
-		_ = git.TeardownSession(repoRoot, worktreePath, branchName)
-		sm.cleanupHooks(id)
+		forkCleanup()
 		os.Remove(logPath)
 		return SessionState{}, fmt.Errorf("persist session state: %w", err)
 	}
@@ -827,6 +948,17 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 		return SessionState{}, fmt.Errorf("shared-worktree session %q was created without sandbox and cannot be resumed safely; delete and recreate with sandbox enabled", id)
 	}
 
+	if sessState.RepoPath != "" {
+		if rc, ok := sm.cfg.FindRepo(sessState.RepoPath); ok && rc.Singleton {
+			canonicalRoot := config.ResolvePath(sessState.RepoPath)
+			for _, s := range sm.state.Sessions {
+				if s.ID != id && config.ResolvePath(s.RepoPath) == canonicalRoot && s.Status == StatusRunning {
+					return SessionState{}, fmt.Errorf("repo %q has singleton = true and session %q is already running — stop it first", sessState.RepoPath, s.Name)
+				}
+			}
+		}
+	}
+
 	if sessState.InPlace {
 		if !git.IsInsideGitRepo(sessState.WorktreePath) {
 			return SessionState{}, fmt.Errorf("in-place repo path %q is no longer a git repository", sessState.WorktreePath)
@@ -850,6 +982,13 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 			}
 		}
 		env["GRAITH_IN_PLACE"] = "true"
+	}
+
+	for _, inc := range sessState.Includes {
+		if _, err := os.Stat(inc.WorktreePath); err != nil {
+			return SessionState{}, fmt.Errorf("included worktree %q (%s) no longer exists — delete and recreate the session", inc.WorktreePath, inc.RepoName)
+		}
+		env[config.IncludeEnvVarName(inc.RepoName)] = inc.WorktreePath
 	}
 
 	if sessState.AgentHooks {
@@ -882,12 +1021,20 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 			envKeys = append(envKeys, k)
 		}
 		opts := sm.sandboxOptsFromConfig(merged, id, sessState.WorktreePath, envKeys, sessState.AgentHooks)
+		if len(sessState.Includes) > 0 {
+			opts.WriteDirs = append(opts.WriteDirs, sm.deriveSandboxIncludesWriteDirs(sessState.Includes)...)
+		}
 		if sessState.SharedWorktree {
 			scratchDir := filepath.Join(sm.paths.DataDir, "scratch", id)
 			if err := os.MkdirAll(scratchDir, 0o700); err != nil {
 				return SessionState{}, fmt.Errorf("create scratch dir for shared worktree resume: %w", err)
 			}
 			opts.ReadDirs = append(opts.ReadDirs, sessState.WorktreePath)
+			if source, ok := sm.state.Sessions[sessState.SharedWorktreeSourceID]; ok {
+				for _, inc := range source.Includes {
+					opts.ReadDirs = append(opts.ReadDirs, inc.WorktreePath)
+				}
+			}
 			opts.WorktreeDir = scratchDir
 		}
 		command, finalArgs = sandbox.Wrap(agent.Command, expandedArgs, opts)
@@ -968,6 +1115,8 @@ func (sm *SessionManager) Delete(id string) error {
 	branch := sessState.Branch
 	shared := sessState.SharedWorktree
 	inPlace := sessState.InPlace
+	sessionIncludes := make([]IncludedRepoState, len(sessState.Includes))
+	copy(sessionIncludes, sessState.Includes)
 
 	delete(sm.state.Sessions, id)
 	delete(sm.hookReports, id)
@@ -994,6 +1143,8 @@ func (sm *SessionManager) Delete(id string) error {
 		_ = os.RemoveAll(scratchDir)
 	case inPlace:
 		// In-place sessions: leave the repo completely untouched
+	case repoPath != "" && len(sessionIncludes) > 0:
+		sm.teardownIncludes(repoPath, worktreePath, branch, sessionIncludes)
 	case repoPath != "":
 		_ = git.TeardownSession(repoPath, worktreePath, branch)
 	case worktreePath != "":
@@ -1194,6 +1345,7 @@ func (sm *SessionManager) detectAgentStatuses() {
 		worktreePath string
 		baseBranch   string
 		repoPath     string
+		includes     []IncludedRepoState
 	}
 	var targets []target
 	for id, s := range sm.state.Sessions {
@@ -1201,9 +1353,12 @@ func (sm *SessionManager) detectAgentStatuses() {
 			continue
 		}
 		if ptySess, ok := sm.sessions[id]; ok {
+			inc := make([]IncludedRepoState, len(s.Includes))
+			copy(inc, s.Includes)
 			targets = append(targets, target{
 				id: id, name: s.Name, agent: s.Agent, prevStatus: s.AgentStatus, pty: ptySess,
 				worktreePath: s.WorktreePath, baseBranch: s.BaseBranch, repoPath: s.RepoPath,
+				includes: inc,
 			})
 		}
 	}
@@ -1253,6 +1408,19 @@ func (sm *SessionManager) detectAgentStatuses() {
 				}
 			}
 		}
+		for i := range t.includes {
+			inc := &t.includes[i]
+			if d, err := git.HasUncommittedChanges(inc.WorktreePath); err == nil {
+				inc.dirty = d
+				dirty = dirty || d
+			}
+			if inc.BaseBranch != "" {
+				if n, err := git.UnpushedCommitCount(inc.WorktreePath, inc.BaseBranch); err == nil {
+					inc.unpushed = n
+					unpushed += n
+				}
+			}
+		}
 
 		if status != t.prevStatus {
 			sm.onAgentStatusChange(t.id, t.name, t.prevStatus, status)
@@ -1263,6 +1431,12 @@ func (sm *SessionManager) detectAgentStatuses() {
 			s.AgentStatus = status
 			s.GitDirty = dirty
 			s.GitUnpushed = unpushed
+			for i := range s.Includes {
+				if i < len(t.includes) {
+					s.Includes[i].dirty = t.includes[i].dirty
+					s.Includes[i].unpushed = t.includes[i].unpushed
+				}
+			}
 
 			if sm.checkIdleSession(s) {
 				toAutoStop = append(toAutoStop, t.id)
@@ -1382,6 +1556,31 @@ func (sm *SessionManager) applyConfig(newCfg *config.Config) {
 	if fmt.Sprint(old.Sandbox.Features) != fmt.Sprint(newCfg.Sandbox.Features) {
 		sm.log.Info("config changed", "key", "sandbox.features", "old", old.Sandbox.Features, "new", newCfg.Sandbox.Features)
 	}
+}
+
+func (sm *SessionManager) teardownIncludes(mainRepoPath, mainWorktreePath, mainBranch string, includes []IncludedRepoState) {
+	for i := len(includes) - 1; i >= 0; i-- {
+		inc := includes[i]
+		_ = git.TeardownSession(inc.RepoPath, inc.WorktreePath, inc.Branch)
+	}
+	_ = git.TeardownSession(mainRepoPath, mainWorktreePath, mainBranch)
+	if len(includes) > 0 {
+		_ = os.RemoveAll(filepath.Dir(mainWorktreePath))
+	}
+}
+
+func (sm *SessionManager) deriveSandboxIncludesWriteDirs(includes []IncludedRepoState) []string {
+	var dirs []string
+	for _, inc := range includes {
+		dirs = append(dirs, inc.WorktreePath)
+		gitDir, commonDir, err := git.WorktreeGitDirs(inc.WorktreePath)
+		if err != nil {
+			sm.log.Warn("failed to resolve git dirs for included repo", "repo", inc.RepoName, "err", err)
+			continue
+		}
+		dirs = append(dirs, gitDir, commonDir)
+	}
+	return dirs
 }
 
 func (sm *SessionManager) resolveSandbox(agentName string) (bool, error) {
