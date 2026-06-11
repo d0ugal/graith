@@ -1189,6 +1189,7 @@ func (sm *SessionManager) DeleteWithChildren(id string) ([]string, error) {
 		branch       string
 		shared       bool
 		inPlace      bool
+		includes     []IncludedRepoState
 		ptySess      *grpty.Session
 		client       *attachedClient
 	}
@@ -1203,7 +1204,9 @@ func (sm *SessionManager) DeleteWithChildren(id string) ([]string, error) {
 			branch:       sess.Branch,
 			shared:       sess.SharedWorktree,
 			inPlace:      sess.InPlace,
+			includes:     make([]IncludedRepoState, len(sess.Includes)),
 		}
+		copy(s.includes, sess.Includes)
 		if pty, ok := sm.sessions[did]; ok {
 			s.ptySess = pty
 			delete(sm.sessions, did)
@@ -1212,6 +1215,7 @@ func (sm *SessionManager) DeleteWithChildren(id string) ([]string, error) {
 			s.client = ac
 			delete(sm.attachedClients, did)
 		}
+		snaps = append(snaps, s)
 		delete(sm.state.Sessions, did)
 		delete(sm.hookReports, did)
 	}
@@ -1237,6 +1241,8 @@ func (sm *SessionManager) DeleteWithChildren(id string) ([]string, error) {
 		case s.shared:
 			_ = os.RemoveAll(filepath.Join(sm.paths.DataDir, "scratch", s.id))
 		case s.inPlace:
+		case s.repoPath != "" && len(s.includes) > 0:
+			sm.teardownIncludes(s.repoPath, s.worktreePath, s.branch, s.includes)
 		case s.repoPath != "":
 			_ = git.TeardownSession(s.repoPath, s.worktreePath, s.branch)
 		case s.worktreePath != "":
