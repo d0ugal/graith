@@ -86,6 +86,16 @@ func runtimeDirForApp(appName string) string {
 	return filepath.Join(xdg.DataHome, appName, "run")
 }
 
+func (p Paths) WithDataDir(dataDir string) Paths {
+	dataDir = ExpandPath(dataDir)
+	p.DataDir = dataDir
+	p.StateFile = filepath.Join(dataDir, "state.json")
+	p.LogDir = filepath.Join(dataDir, "logs")
+	p.DaemonLog = filepath.Join(dataDir, "daemon.log")
+	p.MessagesDB = filepath.Join(dataDir, "messages.sqlite")
+	return p
+}
+
 func (p Paths) EnsureDirs() error {
 	dirs := []string{filepath.Dir(p.ConfigFile), p.DataDir, p.RuntimeDir, p.LogDir}
 	for _, dir := range dirs {
