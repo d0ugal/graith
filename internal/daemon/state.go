@@ -34,6 +34,7 @@ type SessionState struct {
 	BaseBranch             string                `json:"base_branch"`
 	Agent                  string                `json:"agent"`
 	AgentSessionID         string                `json:"agent_session_id,omitempty"`
+	Model                  string                `json:"model,omitempty"`
 	Status                 SessionStatus         `json:"status"`
 	AgentStatus            string                `json:"agent_status,omitempty"`
 	IdleSince              *time.Time            `json:"-"`

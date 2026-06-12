@@ -612,6 +612,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 		BaseBranch:             baseBranch,
 		Agent:                  agentName,
 		AgentSessionID:         agentSessionID,
+		Model:                  model,
 		Sandboxed:              sandboxed,
 		SandboxConfig:          mergedSandbox,
 		SharedWorktree:         sharedWorktree,
@@ -738,6 +739,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 		SessionID:                id,
 		WorktreePath:             worktreePath,
 		ForkSourceAgentSessionID: source.AgentSessionID,
+		Model:                    source.Model,
 	}
 
 	args := agent.ForkArgs
@@ -845,6 +847,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 		BaseBranch:     baseBranch,
 		Agent:          agentName,
 		AgentSessionID: agentSessionID,
+		Model:          source.Model,
 		AgentHooks:     source.AgentHooks,
 		Sandboxed:      sandboxed,
 		SandboxConfig:  mergedSandbox,
@@ -941,6 +944,7 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 		SessionName:    sessState.Name,
 		SessionID:      sessState.ID,
 		WorktreePath:   sessState.WorktreePath,
+		Model:          sessState.Model,
 	}
 	expandedArgs, err := config.ExpandSlice(args, vars)
 	if err != nil {
