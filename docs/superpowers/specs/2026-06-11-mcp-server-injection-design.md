@@ -148,19 +148,41 @@ graph TD
 
 #### Config format
 
-Same TOML format as Proposal 1 (already implemented):
+Same TOML format as Proposal 1, with one addition — an optional `sandbox` boolean:
 
 ```toml
 [[mcp_servers]]
 name = "chrome-devtools"
 command = "npx"
 args = ["@anthropic-ai/chrome-devtools-mcp@latest"]
+sandbox = false  # needs to launch Chrome, can't be sandboxed
 
 [[mcp_servers]]
 name = "graith"
 command = "gr"
 args = ["mcp"]
+# sandbox defaults to true — most MCP servers work fine sandboxed
 ```
+
+The `sandbox` field controls whether the daemon wraps the MCP server process with safehouse. When `true` (the default), the daemon uses the global sandbox config (features, read_dirs, write_dirs) as the base, plus any MCP-server-specific overrides. When `false`, the MCP server runs unsandboxed as a direct child of the daemon.
+
+Default is `true` because most MCP servers work fine in the sandbox — they typically just need network access and read access to a few paths. The user opts out per server for cases like Chrome DevTools where the MCP server needs to launch sub-processes that conflict with the sandbox.
+
+Example with sandbox enabled and server-specific overrides:
+
+```toml
+[[mcp_servers]]
+name = "filesystem-tools"
+command = "npx"
+args = ["@anthropic-ai/filesystem-mcp@latest"]
+sandbox = true
+
+[mcp_servers.sandbox_config]
+read_dirs = ["~/Documents"]
+write_dirs = ["~/Documents"]
+```
+
+The `sandbox_config` table is optional and follows the same schema as the global `[sandbox]` section. When present, it is merged with the global sandbox config (same merge semantics as agent sandbox — server-specific dirs are appended, server-specific features are appended). When absent, the global sandbox config is used as-is.
 
 Per-agent overrides:
 
@@ -170,7 +192,7 @@ Per-agent overrides:
 disabled = true
 ```
 
-No config format changes needed — the difference is entirely in how the daemon uses the config.
+No other config format changes needed — the difference is entirely in how the daemon uses the config.
 
 #### Auto-injection of graith MCP server
 
@@ -246,9 +268,21 @@ All agents get the same proxy binary — only the injection format differs.
 
 #### Sandbox interaction
 
-MCP servers run **outside the sandbox** as daemon child processes. This solves the core problem: Chrome DevTools MCP can launch Chrome, Playwright can launch browsers, etc. The only thing inside the sandbox is `gr mcp-proxy`, which needs read access to the Unix socket.
+MCP servers run as daemon child processes, **outside the agent sandbox** by default. This solves the core problem: Chrome DevTools MCP can launch Chrome, Playwright can launch browsers, etc. The only thing inside the agent sandbox is `gr mcp-proxy`, which needs read access to the Unix socket.
+
+However, MCP servers can optionally be sandboxed independently via `sandbox = true` in their config. This is useful for MCP servers that don't need elevated privileges — sandboxing them limits blast radius if the server is compromised or misbehaves. The daemon wraps the MCP server command with `safehouse wrap`, using the global sandbox config as the base plus any server-specific `sandbox_config` overrides.
 
 The sandbox config already grants access to the graith data dir (where the Unix socket lives), so no additional sandbox configuration is needed for the proxy.
+
+**Sandbox decision tree for MCP servers:**
+
+| Server needs | `sandbox` setting | Rationale |
+|---|---|---|
+| Typical MCP server (filesystem, search, etc.) | `true` (default) | Works fine sandboxed |
+| Network access to external services | `true` with features | Add `"network"` feature if needed |
+| Read/write to specific directories only | `true` with `sandbox_config` | Principle of least privilege |
+| Launch sub-processes (Chrome, browsers) | `false` | Sub-process sandbox re-init crashes |
+| Full system access (e.g., graith MCP) | `false` | Needs daemon state, Unix socket, etc. |
 
 #### Chrome DevTools use case
 
@@ -334,7 +368,7 @@ TBD — to be filled after review and discussion.
 - **MCP Manager** (`internal/daemon/mcpmanager.go`): New component in the daemon. Owns a map of `name → *MCPProcess`. Each `MCPProcess` holds the `exec.Cmd`, stdin/stdout pipes, and a health state (running, crashed, backoff). On daemon start, iterates config and starts all enabled servers. Exposes `Start(name)`, `Stop(name)`, `Restart(name)`, `Reload(newConfig)`.
 - **MCP Proxy protocol:** New message type `mcp_connect` on control channel (0x00). Daemon allocates a new channel ID (0x02+) for MCP traffic. Frames on MCP channels carry raw JSON-RPC bytes. The proxy reads stdin → writes to MCP channel, reads MCP channel → writes to stdout.
 - **`gr mcp-proxy` command** (`internal/cli/mcpproxy.go`): Connects to daemon Unix socket, sends `mcp_connect`, then enters a bidirectional copy loop between stdin/stdout and the MCP channel. ~50 lines of code.
-- **Config structs:** No changes — `MCPServerConfig` and `MergeMCPServers()` from Proposal 1 are reused.
+- **Config structs:** Extend `MCPServerConfig` with `Sandbox bool` and `SandboxConfig *SandboxConfig` fields. `MergeMCPServers()` from Proposal 1 is reused. The MCP Manager reads `Sandbox` to decide whether to wrap the command with safehouse, and merges `SandboxConfig` with the global sandbox config when present.
 - **Settings injection:** `generateClaudeSettings()` changes from injecting `{command: "npx", args: [...]}` to `{command: "gr", args: ["mcp-proxy", name]}`.
 - **Daemon state:** Add `MCPServers map[string]MCPServerStatus` to daemon's runtime state (not persisted — rebuilt from config on start). Exposed via `gr list --json` or a new `gr mcp list` command.
 - **Graceful shutdown:** Daemon's existing shutdown path extended to SIGTERM MCP server processes before exiting.
