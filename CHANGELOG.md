@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.51.0](https://github.com/d0ugal/graith/compare/v0.50.0...v0.51.0) (2026-06-12)
+
+
+### Features
+
+* improve crash diagnostics with signal detection, mass-exit warnings, and peak RSS ([b0e2e26](https://github.com/d0ugal/graith/commit/b0e2e267af2a6d12806da98a0ba9760c817cdaf8)), closes [#519](https://github.com/d0ugal/graith/issues/519)
+
+
+### Bug Fixes
+
+* only count crash exits toward mass-exit detection ([dea99de](https://github.com/d0ugal/graith/commit/dea99de5652cb482f24fc8fe7b8b9d611407c894))
+
 ## [0.50.0](https://github.com/d0ugal/graith/compare/v0.49.0...v0.50.0) (2026-06-09)
 
 
