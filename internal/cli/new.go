@@ -20,7 +20,6 @@ var (
 	newRepo            string
 	newNoRepo          bool
 	newShareWorktree   string
-	newAgentHooks      bool
 	newInPlace         bool
 	newAllowConcurrent bool
 )
@@ -86,7 +85,7 @@ var newCmd = &cobra.Command{
 			Model:           newModel,
 			NoRepo:          newNoRepo,
 			ShareWorktree:   newShareWorktree,
-			AgentHooks:      newAgentHooks,
+			AgentHooks:      true,
 			InPlace:         newInPlace,
 			AllowConcurrent: newAllowConcurrent,
 		})
@@ -134,7 +133,6 @@ func init() {
 	newCmd.Flags().StringVarP(&newRepo, "repo", "C", "", "path to git repo (default: cwd)")
 	newCmd.Flags().BoolVar(&newNoRepo, "no-repo", false, "create session without a git repo or worktree")
 	newCmd.Flags().StringVar(&newShareWorktree, "share-worktree", "", "share another session's worktree (read-only)")
-	newCmd.Flags().BoolVar(&newAgentHooks, "agent-hooks", true, "enable agent lifecycle hooks (status, approvals, inbox, MCP proxy)")
 	newCmd.Flags().BoolVar(&newInPlace, "in-place", false, "run agent directly in the repo without creating a worktree")
 	newCmd.Flags().BoolVar(&newAllowConcurrent, "allow-concurrent", false, "allow multiple in-place sessions on the same repo")
 	newCmd.RegisterFlagCompletionFunc("agent", completeAgentNames)

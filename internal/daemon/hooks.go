@@ -240,7 +240,7 @@ func (sm *SessionManager) resolveMCPServers(agentName string) []config.MCPServer
 }
 
 // injectHooks dispatches hook injection to the agent-specific implementation.
-// Returns an error if the agent type does not support hooks.
+// Returns nil for agents that don't support hooks.
 func (sm *SessionManager) injectHooks(agentName, sessionID string) (extraArgs []string, extraEnv map[string]string, err error) {
 	switch agentName {
 	case "claude":
@@ -248,7 +248,7 @@ func (sm *SessionManager) injectHooks(agentName, sessionID string) (extraArgs []
 	case "codex":
 		return sm.injectCodexHooks(sessionID)
 	default:
-		return nil, nil, fmt.Errorf("agent %q does not support hooks", agentName)
+		return nil, nil, nil
 	}
 }
 

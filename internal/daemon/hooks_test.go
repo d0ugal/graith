@@ -309,16 +309,13 @@ func TestInjectHooksSupported(t *testing.T) {
 	}
 }
 
-func TestInjectHooksUnsupported(t *testing.T) {
+func TestInjectHooksUnsupportedIsNoop(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 
 	for _, agent := range []string{"agy", "opencode", "custom-agent"} {
 		args, env, err := sm.injectHooks(agent, "test-unsupported")
-		if err == nil {
-			t.Errorf("injectHooks(%q) expected error, got nil", agent)
-		}
-		if !strings.Contains(err.Error(), "does not support hooks") {
-			t.Errorf("injectHooks(%q) error = %q, want 'does not support hooks'", agent, err)
+		if err != nil {
+			t.Errorf("injectHooks(%q) unexpected error: %v", agent, err)
 		}
 		if args != nil {
 			t.Errorf("injectHooks(%q) returned non-nil args: %v", agent, args)
