@@ -14,6 +14,7 @@ type TemplateVars struct {
 	SessionID                string
 	WorktreePath             string
 	ForkSourceAgentSessionID string
+	Model                    string
 }
 
 func (v TemplateVars) toMap() map[string]string {
@@ -24,6 +25,7 @@ func (v TemplateVars) toMap() map[string]string {
 		"session_id":                   v.SessionID,
 		"worktree_path":                v.WorktreePath,
 		"fork_source_agent_session_id": v.ForkSourceAgentSessionID,
+		"model":                        v.Model,
 	}
 }
 
