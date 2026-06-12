@@ -215,15 +215,23 @@ func (sm *SessionManager) injectCodexHooks(sessionID string) (extraArgs []string
 	return nil, extraEnv, nil
 }
 
-// resolveMCPServers returns the merged MCP server list for the given agent,
-// including auto-injected graith MCP server.
-func (sm *SessionManager) resolveMCPServers(agentName string) []config.MCPServerConfig {
-	graithServer := config.MCPServerConfig{
+// graithMCPServer returns the auto-injected graith MCP server config.
+// The graith server is unsandboxed because it needs to connect to the
+// daemon socket via client.Connect().
+func graithMCPServer() config.MCPServerConfig {
+	noSandbox := false
+	return config.MCPServerConfig{
 		Name:    "graith",
 		Command: resolveGrBin(),
 		Args:    []string{"mcp"},
+		Sandbox: &noSandbox,
 	}
-	global := append([]config.MCPServerConfig{graithServer}, sm.cfg.MCPServers...)
+}
+
+// resolveMCPServers returns the merged MCP server list for the given agent,
+// including auto-injected graith MCP server.
+func (sm *SessionManager) resolveMCPServers(agentName string) []config.MCPServerConfig {
+	global := append([]config.MCPServerConfig{graithMCPServer()}, sm.cfg.MCPServers...)
 	var overrides map[string]config.MCPServerConfig
 	if agent, ok := sm.cfg.Agents[agentName]; ok {
 		overrides = agent.MCPServers

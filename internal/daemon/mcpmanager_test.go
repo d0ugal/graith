@@ -16,7 +16,7 @@ func TestMCPManagerConnectDisconnect(t *testing.T) {
 			{Name: "echo", Command: "cat"},
 		},
 	}
-	mgr := NewMCPManager(cfg, logDir, slog.Default())
+	mgr := NewMCPManager(cfg, nil, logDir, slog.Default())
 	defer mgr.Shutdown()
 
 	proc, err := mgr.Connect("echo", "proxy-1")
@@ -44,7 +44,7 @@ func TestMCPManagerConnectDisconnect(t *testing.T) {
 func TestMCPManagerConnectUnknownServer(t *testing.T) {
 	logDir := t.TempDir()
 	cfg := &config.Config{}
-	mgr := NewMCPManager(cfg, logDir, slog.Default())
+	mgr := NewMCPManager(cfg, nil, logDir, slog.Default())
 	defer mgr.Shutdown()
 
 	_, err := mgr.Connect("nonexistent", "proxy-1")
@@ -60,7 +60,7 @@ func TestMCPManagerDuplicateProxy(t *testing.T) {
 			{Name: "echo", Command: "cat"},
 		},
 	}
-	mgr := NewMCPManager(cfg, logDir, slog.Default())
+	mgr := NewMCPManager(cfg, nil, logDir, slog.Default())
 	defer mgr.Shutdown()
 
 	_, err := mgr.Connect("echo", "proxy-1")
@@ -81,7 +81,7 @@ func TestMCPManagerReload(t *testing.T) {
 			{Name: "echo", Command: "cat"},
 		},
 	}
-	mgr := NewMCPManager(cfg, logDir, slog.Default())
+	mgr := NewMCPManager(cfg, nil, logDir, slog.Default())
 	defer mgr.Shutdown()
 
 	if !mgr.HasServer("echo") {
@@ -110,7 +110,7 @@ func TestMCPManagerReloadKillsProcesses(t *testing.T) {
 			{Name: "echo", Command: "cat"},
 		},
 	}
-	mgr := NewMCPManager(cfg, logDir, slog.Default())
+	mgr := NewMCPManager(cfg, nil, logDir, slog.Default())
 	defer mgr.Shutdown()
 
 	proc, err := mgr.Connect("echo", "proxy-1")
@@ -140,7 +140,7 @@ func TestMCPManagerStderrCapture(t *testing.T) {
 			{Name: "stderr-test", Command: "sh", Args: []string{"-c", "echo error >&2; sleep 0.1; cat"}},
 		},
 	}
-	mgr := NewMCPManager(cfg, logDir, slog.Default())
+	mgr := NewMCPManager(cfg, nil, logDir, slog.Default())
 	defer mgr.Shutdown()
 
 	proc, err := mgr.Connect("stderr-test", "proxy-1")
@@ -179,7 +179,7 @@ func TestMCPManagerHasServer(t *testing.T) {
 			{Name: "disabled", Command: "cat", Disabled: true},
 		},
 	}
-	mgr := NewMCPManager(cfg, logDir, slog.Default())
+	mgr := NewMCPManager(cfg, nil, logDir, slog.Default())
 	defer mgr.Shutdown()
 
 	if !mgr.HasServer("enabled") {
@@ -187,5 +187,43 @@ func TestMCPManagerHasServer(t *testing.T) {
 	}
 	if mgr.HasServer("disabled") {
 		t.Error("should not have 'disabled'")
+	}
+}
+
+func TestMCPManagerExtraServers(t *testing.T) {
+	logDir := t.TempDir()
+	cfg := &config.Config{
+		MCPServers: []config.MCPServerConfig{
+			{Name: "configured", Command: "cat"},
+		},
+	}
+	extra := []config.MCPServerConfig{
+		{Name: "injected", Command: "cat"},
+	}
+	mgr := NewMCPManager(cfg, extra, logDir, slog.Default())
+	defer mgr.Shutdown()
+
+	if !mgr.HasServer("configured") {
+		t.Error("should have 'configured' from config")
+	}
+	if !mgr.HasServer("injected") {
+		t.Error("should have 'injected' from extra servers")
+	}
+
+	// Extra servers should survive reload.
+	mgr.Reload(&config.Config{
+		MCPServers: []config.MCPServerConfig{
+			{Name: "newserver", Command: "cat"},
+		},
+	})
+
+	if !mgr.HasServer("injected") {
+		t.Error("should still have 'injected' after reload")
+	}
+	if !mgr.HasServer("newserver") {
+		t.Error("should have 'newserver' after reload")
+	}
+	if mgr.HasServer("configured") {
+		t.Error("should not have 'configured' after reload")
 	}
 }
