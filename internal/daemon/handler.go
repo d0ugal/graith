@@ -596,6 +596,75 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				sm.HandleHookReport(sr)
 				sendControl("status_reported", struct{}{})
 
+			case "mcp_connect":
+				var mc protocol.MCPConnectMsg
+				if err := protocol.DecodePayload(msg, &mc); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid mcp_connect"})
+					continue
+				}
+				if sm.mcpManager == nil {
+					sendControl("error", protocol.ErrorMsg{Message: "MCP manager not initialized"})
+					return
+				}
+				if !sm.mcpManager.HasServer(mc.Server) {
+					sendControl("error", protocol.ErrorMsg{Message: fmt.Sprintf("unknown MCP server %q", mc.Server)})
+					return
+				}
+				proxyID := fmt.Sprintf("%s-%s", mc.SessionID, mc.Server)
+				proc, err := sm.mcpManager.Connect(mc.Server, proxyID)
+				if err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+					return
+				}
+
+				channelID := byte(0x02)
+				sendControl("mcp_connect_ok", protocol.MCPConnectOkMsg{
+					Server:  mc.Server,
+					Channel: channelID,
+				})
+
+				// Bridge: proxy stdin (from frames) → MCP server stdin,
+				//         MCP server stdout → proxy (as frames).
+				bridgeDone := make(chan struct{})
+				go func() {
+					defer close(bridgeDone)
+					buf := make([]byte, 32*1024)
+					for {
+						n, err := proc.stdout.Read(buf)
+						if n > 0 {
+							if werr := writer.WriteFrame(channelID, buf[:n]); werr != nil {
+								return
+							}
+						}
+						if err != nil {
+							return
+						}
+					}
+				}()
+
+				// Read frames from proxy and write to MCP server stdin.
+				func() {
+					defer sm.mcpManager.Disconnect(proxyID)
+					for {
+						f, err := reader.ReadFrame()
+						if err != nil {
+							return
+						}
+						if f.Channel == channelID {
+							if _, err := proc.stdin.Write(f.Payload); err != nil {
+								return
+							}
+						} else if f.Channel == protocol.ChannelControl {
+							ctrl, _ := protocol.DecodeControl(f.Payload)
+							if ctrl.Type == "detach" {
+								return
+							}
+						}
+					}
+				}()
+				<-bridgeDone
+				return
+
 			case "upgrade":
 				var u protocol.UpgradeMsg
 				_ = protocol.DecodePayload(msg, &u)

@@ -56,6 +56,7 @@ type SessionManager struct {
 	configFile       string
 	upgradeCh        chan string
 	messages         *MsgStore
+	mcpManager       *MCPManager
 }
 
 // NewSessionManager creates a SessionManager with the given config and paths.
@@ -74,6 +75,10 @@ func NewSessionManager(cfg *config.Config, paths config.Paths, log *slog.Logger)
 
 func (sm *SessionManager) SetMsgStore(ms *MsgStore) {
 	sm.messages = ms
+}
+
+func (sm *SessionManager) SetMCPManager(mm *MCPManager) {
+	sm.mcpManager = mm
 }
 
 // HandleHookReport processes a status report from an agent hook, updating the
@@ -1696,6 +1701,10 @@ func (sm *SessionManager) applyConfig(newCfg *config.Config) {
 	if fmt.Sprint(old.Sandbox.Features) != fmt.Sprint(newCfg.Sandbox.Features) {
 		sm.log.Info("config changed", "key", "sandbox.features", "old", old.Sandbox.Features, "new", newCfg.Sandbox.Features)
 	}
+	if sm.mcpManager != nil {
+		sm.mcpManager.Reload(newCfg)
+		sm.log.Info("MCP manager config reloaded")
+	}
 }
 
 func (sm *SessionManager) teardownIncludes(mainRepoPath, mainWorktreePath, mainBranch string, includes []IncludedRepoState) {
@@ -1844,6 +1853,10 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 	}
 	defer func() { _ = msgStore.Close() }()
 	sm.messages = msgStore
+
+	mcpMgr := NewMCPManager(cfg, paths.LogDir, log)
+	sm.mcpManager = mcpMgr
+	defer mcpMgr.Shutdown()
 
 	var l net.Listener
 
