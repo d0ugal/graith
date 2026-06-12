@@ -51,6 +51,7 @@ type CreateMsg struct {
 	RepoPath        string `json:"repo_path"`
 	Base            string `json:"base,omitempty"`
 	Prompt          string `json:"prompt,omitempty"`
+	Model           string `json:"model,omitempty"`
 	NoRepo          bool   `json:"no_repo,omitempty"`
 	ShareWorktree   string `json:"share_worktree,omitempty"`
 	AgentHooks      bool   `json:"agent_hooks,omitempty"`
