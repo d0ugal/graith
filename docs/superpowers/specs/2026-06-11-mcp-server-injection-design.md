@@ -348,7 +348,7 @@ Proposal 1 is already shipped in v0.22.0. The migration to Proposal 2 is:
 
 ## Consensus
 
-TBD — to be filled after review and discussion.
+**Proposal 2: Daemon-managed MCP servers with proxy.** The daemon starts and supervises MCP server processes, proxies connections into agent sessions via `gr mcp-proxy`, and shares one MCP server process across all sessions. MCP servers are sandboxed by default (`sandbox = true`), with opt-out for servers that need to launch sub-processes (e.g., Chrome DevTools). Proposal 1 (config injection, shipped in v0.22.0) serves as the stepping stone.
 
 ## Other Notes
 
