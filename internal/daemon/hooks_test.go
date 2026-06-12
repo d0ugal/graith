@@ -24,7 +24,7 @@ func TestGenerateClaudeSettings(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 	sessionID := "test-session-02"
 
-	settingsPath, err := sm.generateClaudeSettings(sessionID, nil)
+	settingsPath, err := sm.generateClaudeSettings(sessionID)
 	if err != nil {
 		t.Fatalf("generateClaudeSettings() error = %v", err)
 	}
@@ -139,7 +139,7 @@ func TestCleanupHooks(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 	sessionID := "test-session-04"
 
-	_, err := sm.generateClaudeSettings(sessionID, nil)
+	_, err := sm.generateClaudeSettings(sessionID)
 	if err != nil {
 		t.Fatalf("generateClaudeSettings() error = %v", err)
 	}
@@ -398,7 +398,7 @@ func TestCodexHookScriptsEscapeSingleQuotes(t *testing.T) {
 	}
 }
 
-func TestGenerateClaudeSettingsWithMCPServers(t *testing.T) {
+func TestGenerateMCPConfig(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 	sessionID := "test-mcp-01"
 
@@ -407,21 +407,6 @@ func TestGenerateClaudeSettingsWithMCPServers(t *testing.T) {
 		{Name: "chrome", Command: "npx", Args: []string{"chrome-mcp"}, Env: map[string]string{"DISPLAY": ":0"}},
 	}
 
-	// settings.json should NOT contain mcpServers (they go in mcp.json now)
-	settingsPath, err := sm.generateClaudeSettings(sessionID, servers)
-	if err != nil {
-		t.Fatalf("generateClaudeSettings() error = %v", err)
-	}
-
-	settingsData, err := os.ReadFile(settingsPath)
-	if err != nil {
-		t.Fatalf("read settings: %v", err)
-	}
-	if strings.Contains(string(settingsData), "mcpServers") {
-		t.Error("settings.json should not contain mcpServers (they belong in mcp.json)")
-	}
-
-	// mcp.json should contain the proxy entries
 	mcpConfigPath, err := sm.generateMCPConfig(sessionID, servers)
 	if err != nil {
 		t.Fatalf("generateMCPConfig() error = %v", err)
@@ -471,11 +456,48 @@ func TestGenerateClaudeSettingsWithMCPServers(t *testing.T) {
 	}
 }
 
+func TestInjectClaudeHooksWithMCPServers(t *testing.T) {
+	sm := newTestSessionManagerWithDataDir(t)
+	sessionID := "test-mcp-inject"
+
+	servers := []config.MCPServerConfig{
+		{Name: "graith", Command: "/usr/bin/gr", Args: []string{"mcp"}},
+		{Name: "chrome", Command: "npx", Args: []string{"chrome-mcp"}},
+	}
+
+	args, env, err := sm.injectClaudeHooks(sessionID, servers)
+	if err != nil {
+		t.Fatalf("injectClaudeHooks() error = %v", err)
+	}
+	if env != nil {
+		t.Errorf("unexpected env: %v", env)
+	}
+
+	if len(args) != 4 {
+		t.Fatalf("args = %v, want 4 elements [--settings path --mcp-config path]", args)
+	}
+	if args[0] != "--settings" {
+		t.Errorf("args[0] = %q, want --settings", args[0])
+	}
+	if args[2] != "--mcp-config" {
+		t.Errorf("args[2] = %q, want --mcp-config", args[2])
+	}
+
+	mcpConfigPath := args[3]
+	data, err := os.ReadFile(mcpConfigPath)
+	if err != nil {
+		t.Fatalf("read mcp config at %q: %v", mcpConfigPath, err)
+	}
+	if !strings.Contains(string(data), "mcpServers") {
+		t.Error("mcp config file should contain mcpServers")
+	}
+}
+
 func TestGenerateClaudeSettingsNoMCPServers(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 	sessionID := "test-mcp-02"
 
-	settingsPath, err := sm.generateClaudeSettings(sessionID, nil)
+	settingsPath, err := sm.generateClaudeSettings(sessionID)
 	if err != nil {
 		t.Fatalf("generateClaudeSettings() error = %v", err)
 	}
@@ -623,7 +645,7 @@ func TestClaudeSettingsEscapeSingleQuotes(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 	sessionID := "test-session-claude-quote"
 
-	settingsPath, err := sm.generateClaudeSettings(sessionID, nil)
+	settingsPath, err := sm.generateClaudeSettings(sessionID)
 	if err != nil {
 		t.Fatalf("generateClaudeSettings() error = %v", err)
 	}
