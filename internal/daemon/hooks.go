@@ -64,8 +64,7 @@ func (sm *SessionManager) generateClaudeSettings(sessionID string, mcpServers []
 		Hooks   []hookHandler `json:"hooks"`
 	}
 	type settingsFile struct {
-		Hooks      map[string][]matcherGroup         `json:"hooks"`
-		MCPServers map[string]config.MCPServerConfig `json:"mcpServers,omitempty"`
+		Hooks map[string][]matcherGroup `json:"hooks"`
 	}
 
 	settings := settingsFile{
@@ -98,18 +97,6 @@ func (sm *SessionManager) generateClaudeSettings(sessionID string, mcpServers []
 		}
 	}
 
-	if len(mcpServers) > 0 {
-		grBin := resolveGrBin()
-		settings.MCPServers = make(map[string]config.MCPServerConfig, len(mcpServers))
-		for _, s := range mcpServers {
-			proxyArgs := []string{"mcp-proxy", s.Name}
-			settings.MCPServers[s.Name] = config.MCPServerConfig{
-				Command: grBin,
-				Args:    proxyArgs,
-			}
-		}
-	}
-
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return "", fmt.Errorf("marshal settings: %w", err)
@@ -118,6 +105,45 @@ func (sm *SessionManager) generateClaudeSettings(sessionID string, mcpServers []
 		return "", fmt.Errorf("write settings: %w", err)
 	}
 	return settingsPath, nil
+}
+
+// generateMCPConfig writes an MCP config JSON file (compatible with Claude
+// Code's --mcp-config flag) that maps each server to its gr mcp-proxy command.
+// Returns the path to the config file.
+func (sm *SessionManager) generateMCPConfig(sessionID string, mcpServers []config.MCPServerConfig) (string, error) {
+	dir := sm.hookDir(sessionID)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", fmt.Errorf("create hook dir: %w", err)
+	}
+	mcpConfigPath := filepath.Join(dir, "mcp.json")
+
+	grBin := resolveGrBin()
+	type mcpEntry struct {
+		Command string   `json:"command"`
+		Args    []string `json:"args"`
+	}
+	type mcpConfigFile struct {
+		MCPServers map[string]mcpEntry `json:"mcpServers"`
+	}
+
+	cfg := mcpConfigFile{
+		MCPServers: make(map[string]mcpEntry, len(mcpServers)),
+	}
+	for _, s := range mcpServers {
+		cfg.MCPServers[s.Name] = mcpEntry{
+			Command: grBin,
+			Args:    []string{"mcp-proxy", s.Name},
+		}
+	}
+
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("marshal mcp config: %w", err)
+	}
+	if err := os.WriteFile(mcpConfigPath, data, 0o600); err != nil {
+		return "", fmt.Errorf("write mcp config: %w", err)
+	}
+	return mcpConfigPath, nil
 }
 
 // injectClaudeHooks generates hook files for a Claude session and returns
@@ -129,6 +155,15 @@ func (sm *SessionManager) injectClaudeHooks(sessionID string, mcpServers []confi
 	}
 
 	extraArgs = []string{"--settings", settingsPath}
+
+	if len(mcpServers) > 0 {
+		mcpConfigPath, err := sm.generateMCPConfig(sessionID, mcpServers)
+		if err != nil {
+			return nil, nil, err
+		}
+		extraArgs = append(extraArgs, "--mcp-config", mcpConfigPath)
+	}
+
 	sm.log.Info("injected claude hooks", "session_id", sessionID, "settings", settingsPath, "mcp_servers", len(mcpServers))
 	return extraArgs, nil, nil
 }
