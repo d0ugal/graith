@@ -47,7 +47,9 @@ func NewMCPManager(cfg *config.Config, extraServers []config.MCPServerConfig, lo
 		}
 	}
 	for _, s := range cfg.MCPServers {
-		if !s.Disabled {
+		if s.Disabled {
+			delete(servers, s.Name)
+		} else {
 			servers[s.Name] = s
 		}
 	}
@@ -114,7 +116,9 @@ func (m *MCPManager) Reload(cfg *config.Config) {
 		}
 	}
 	for _, s := range cfg.MCPServers {
-		if !s.Disabled {
+		if s.Disabled {
+			delete(newServers, s.Name)
+		} else {
 			newServers[s.Name] = s
 		}
 	}
