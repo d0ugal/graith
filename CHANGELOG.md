@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.24.0](https://github.com/d0ugal/graith/compare/v0.23.1...v0.24.0) (2026-06-12)
+
+
+### Features
+
+* add --model flag to gr new ([7d95c6b](https://github.com/d0ugal/graith/commit/7d95c6b5147b53ba3a50d7602f595fd8e5290cc3)), closes [#367](https://github.com/d0ugal/graith/issues/367)
+
+
+### Bug Fixes
+
+* map hook decision values to agent-specific schemas ([414c8e3](https://github.com/d0ugal/graith/commit/414c8e3757e982798f893e91b0c68b2b201dc87b))
+* persist model in session state for resume/fork, add to MCP ([a5a140f](https://github.com/d0ugal/graith/commit/a5a140f9b6697d106e40aa80a7f89cdfa084bf4b))
+* show requested model in session info when hook model is empty ([26fccf1](https://github.com/d0ugal/graith/commit/26fccf1acb57adfa8a08054c9e6824774cd763e5))
+
 ## [0.23.1](https://github.com/d0ugal/graith/compare/v0.23.0...v0.23.1) (2026-06-12)
 
 
