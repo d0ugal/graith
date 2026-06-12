@@ -78,6 +78,7 @@ type SessionInfoOutput struct {
 	Branch         string `json:"branch,omitempty"`
 	Agent          string `json:"agent"`
 	AgentSessionID string `json:"agent_session_id,omitempty"`
+	Model          string `json:"model,omitempty"`
 	Status         string `json:"status"`
 	AgentStatus    string `json:"agent_status,omitempty"`
 	ExitCode       *int   `json:"exit_code,omitempty"`
@@ -449,6 +450,7 @@ func sessionInfoToOutput(si protocol.SessionInfo) SessionInfoOutput {
 		Branch:         si.Branch,
 		Agent:          si.Agent,
 		AgentSessionID: si.AgentSessionID,
+		Model:          si.Model,
 		Status:         si.Status,
 		AgentStatus:    si.AgentStatus,
 		ExitCode:       si.ExitCode,

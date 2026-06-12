@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"io"
@@ -763,7 +764,7 @@ func toSessionInfo(s SessionState) protocol.SessionInfo {
 		Sandboxed:      s.Sandboxed,
 		SharedWorktree: s.SharedWorktree,
 		InPlace:        s.InPlace,
-		Model:          s.HookModel,
+		Model:          cmp.Or(s.HookModel, s.Model),
 		ToolName:       s.HookToolName,
 		CostUSD:        s.HookCostUSD,
 		ContextPercent: s.HookContextPercent,
