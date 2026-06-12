@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.24.3](https://github.com/d0ugal/graith/compare/v0.24.2...v0.24.3) (2026-06-12)
+
+
+### Bug Fixes
+
+* allow user config to disable auto-injected MCP servers ([1942fa1](https://github.com/d0ugal/graith/commit/1942fa1cd2faad3a516214cf25725a73d351261c))
+* register auto-injected graith MCP server with MCPManager ([f5abc85](https://github.com/d0ugal/graith/commit/f5abc85418ad519250e3b8c505a13fcc225d50ff))
+
 ## [0.24.2](https://github.com/d0ugal/graith/compare/v0.24.1...v0.24.2) (2026-06-12)
 
 
