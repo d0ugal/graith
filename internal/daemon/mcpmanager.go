@@ -30,13 +30,22 @@ type MCPManager struct {
 	mu        sync.Mutex
 	servers   map[string]config.MCPServerConfig // server name -> config
 	processes map[string]*MCPProcess            // proxyID -> process
+	extraSvrs []config.MCPServerConfig          // auto-injected servers (e.g. graith)
 	logDir    string
 	globalSbx config.SandboxConfig
 	log       *slog.Logger
 }
 
-func NewMCPManager(cfg *config.Config, logDir string, log *slog.Logger) *MCPManager {
-	servers := make(map[string]config.MCPServerConfig, len(cfg.MCPServers))
+// NewMCPManager creates an MCPManager. extraServers are auto-injected servers
+// (like the graith MCP server) that aren't in the config file but must be
+// available for proxy connections.
+func NewMCPManager(cfg *config.Config, extraServers []config.MCPServerConfig, logDir string, log *slog.Logger) *MCPManager {
+	servers := make(map[string]config.MCPServerConfig, len(cfg.MCPServers)+len(extraServers))
+	for _, s := range extraServers {
+		if !s.Disabled {
+			servers[s.Name] = s
+		}
+	}
 	for _, s := range cfg.MCPServers {
 		if !s.Disabled {
 			servers[s.Name] = s
@@ -45,6 +54,7 @@ func NewMCPManager(cfg *config.Config, logDir string, log *slog.Logger) *MCPMana
 	return &MCPManager{
 		servers:   servers,
 		processes: make(map[string]*MCPProcess),
+		extraSvrs: extraServers,
 		logDir:    logDir,
 		globalSbx: cfg.Sandbox,
 		log:       log,
@@ -97,7 +107,12 @@ func (m *MCPManager) Disconnect(proxyID string) {
 func (m *MCPManager) Reload(cfg *config.Config) {
 	m.mu.Lock()
 
-	newServers := make(map[string]config.MCPServerConfig, len(cfg.MCPServers))
+	newServers := make(map[string]config.MCPServerConfig, len(cfg.MCPServers)+len(m.extraSvrs))
+	for _, s := range m.extraSvrs {
+		if !s.Disabled {
+			newServers[s.Name] = s
+		}
+	}
 	for _, s := range cfg.MCPServers {
 		if !s.Disabled {
 			newServers[s.Name] = s
