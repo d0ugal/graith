@@ -103,6 +103,36 @@ func TestMCPManagerReload(t *testing.T) {
 	}
 }
 
+func TestMCPManagerReloadKillsProcesses(t *testing.T) {
+	logDir := t.TempDir()
+	cfg := &config.Config{
+		MCPServers: []config.MCPServerConfig{
+			{Name: "echo", Command: "cat"},
+		},
+	}
+	mgr := NewMCPManager(cfg, logDir, slog.Default())
+	defer mgr.Shutdown()
+
+	proc, err := mgr.Connect("echo", "proxy-1")
+	if err != nil {
+		t.Fatalf("Connect() error = %v", err)
+	}
+
+	// Reload with a changed command — should kill the running process.
+	newCfg := &config.Config{
+		MCPServers: []config.MCPServerConfig{
+			{Name: "echo", Command: "cat", Args: []string{"-v"}},
+		},
+	}
+	mgr.Reload(newCfg)
+
+	select {
+	case <-proc.done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("process should be killed after reload with changed config")
+	}
+}
+
 func TestMCPManagerStderrCapture(t *testing.T) {
 	logDir := t.TempDir()
 	cfg := &config.Config{

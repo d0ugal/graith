@@ -606,6 +606,25 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "MCP manager not initialized"})
 					return
 				}
+
+				// Verify the requesting session's agent is allowed to use this server.
+				if mc.SessionID != "" {
+					if sess, ok := sm.Get(mc.SessionID); ok {
+						allowed := sm.resolveMCPServers(sess.Agent)
+						found := false
+						for _, s := range allowed {
+							if s.Name == mc.Server {
+								found = true
+								break
+							}
+						}
+						if !found {
+							sendControl("error", protocol.ErrorMsg{Message: fmt.Sprintf("MCP server %q is not enabled for agent %q", mc.Server, sess.Agent)})
+							return
+						}
+					}
+				}
+
 				if !sm.mcpManager.HasServer(mc.Server) {
 					sendControl("error", protocol.ErrorMsg{Message: fmt.Sprintf("unknown MCP server %q", mc.Server)})
 					return
@@ -617,7 +636,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					return
 				}
 
-				channelID := byte(0x02)
+				channelID := protocol.ChannelMCP
 				sendControl("mcp_connect_ok", protocol.MCPConnectOkMsg{
 					Server:  mc.Server,
 					Channel: channelID,
@@ -640,6 +659,16 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 							return
 						}
 					}
+				}()
+
+				// If the MCP server dies, force the connection closed so the
+				// read loop unblocks and the proxy can reconnect.
+				go func() {
+					select {
+					case <-bridgeDone:
+					case <-proc.done:
+					}
+					conn.Close()
 				}()
 
 				// Read frames from proxy and write to MCP server stdin.
