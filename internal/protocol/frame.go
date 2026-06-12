@@ -9,6 +9,7 @@ import (
 const (
 	ChannelControl = byte(0x00)
 	ChannelData    = byte(0x01)
+	ChannelMCP     = byte(0x02)
 	MaxPayload     = 4 * 1024 * 1024
 	headerSize     = 5
 )
