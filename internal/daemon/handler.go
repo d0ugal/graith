@@ -679,11 +679,12 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 						if err != nil {
 							return
 						}
-						if f.Channel == channelID {
+						switch f.Channel {
+						case channelID:
 							if _, err := proc.stdin.Write(f.Payload); err != nil {
 								return
 							}
-						} else if f.Channel == protocol.ChannelControl {
+						case protocol.ChannelControl:
 							ctrl, _ := protocol.DecodeControl(f.Payload)
 							if ctrl.Type == "detach" {
 								return
