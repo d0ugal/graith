@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.25.0](https://github.com/d0ugal/graith/compare/v0.24.3...v0.25.0) (2026-06-12)
+
+
+### Features
+
+* enable agent hooks by default on gr new ([66d10e3](https://github.com/d0ugal/graith/commit/66d10e37e30ea86e7287450463f2b4206a110034))
+
 ## [0.24.3](https://github.com/d0ugal/graith/compare/v0.24.2...v0.24.3) (2026-06-12)
 
 
