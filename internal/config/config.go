@@ -125,11 +125,13 @@ func (a Approvals) TimeoutDuration() time.Duration {
 }
 
 type MCPServerConfig struct {
-	Name     string            `json:"-"              toml:"name"`
-	Command  string            `json:"command"        toml:"command"`
-	Args     []string          `json:"args,omitempty" toml:"args,omitempty"`
-	Env      map[string]string `json:"env,omitempty"  toml:"env,omitempty"`
-	Disabled bool              `json:"-"              toml:"disabled,omitempty"`
+	Name          string            `json:"-"              toml:"name"`
+	Command       string            `json:"command"        toml:"command"`
+	Args          []string          `json:"args,omitempty" toml:"args,omitempty"`
+	Env           map[string]string `json:"env,omitempty"  toml:"env,omitempty"`
+	Disabled      bool              `json:"-"              toml:"disabled,omitempty"`
+	Sandbox       *bool             `json:"-"              toml:"sandbox,omitempty"`
+	SandboxConfig *SandboxConfig    `json:"-"              toml:"sandbox_config,omitempty"`
 }
 
 type Agent struct {
