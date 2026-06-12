@@ -24,7 +24,7 @@ func TestGenerateClaudeSettings(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 	sessionID := "test-session-02"
 
-	settingsPath, err := sm.generateClaudeSettings(sessionID)
+	settingsPath, err := sm.generateClaudeSettings(sessionID, nil)
 	if err != nil {
 		t.Fatalf("generateClaudeSettings() error = %v", err)
 	}
@@ -115,7 +115,7 @@ func TestInjectClaudeHooks(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 	sessionID := "test-session-03"
 
-	extraArgs, extraEnv, err := sm.injectClaudeHooks(sessionID)
+	extraArgs, extraEnv, err := sm.injectClaudeHooks(sessionID, nil)
 	if err != nil {
 		t.Fatalf("injectClaudeHooks() error = %v", err)
 	}
@@ -139,7 +139,7 @@ func TestCleanupHooks(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 	sessionID := "test-session-04"
 
-	_, err := sm.generateClaudeSettings(sessionID)
+	_, err := sm.generateClaudeSettings(sessionID, nil)
 	if err != nil {
 		t.Fatalf("generateClaudeSettings() error = %v", err)
 	}
@@ -398,6 +398,202 @@ func TestCodexHookScriptsEscapeSingleQuotes(t *testing.T) {
 	}
 }
 
+func TestGenerateClaudeSettingsWithMCPServers(t *testing.T) {
+	sm := newTestSessionManagerWithDataDir(t)
+	sessionID := "test-mcp-01"
+
+	servers := []config.MCPServerConfig{
+		{Name: "graith", Command: "/usr/bin/gr", Args: []string{"mcp"}},
+		{Name: "chrome", Command: "npx", Args: []string{"chrome-mcp"}, Env: map[string]string{"DISPLAY": ":0"}},
+	}
+
+	settingsPath, err := sm.generateClaudeSettings(sessionID, servers)
+	if err != nil {
+		t.Fatalf("generateClaudeSettings() error = %v", err)
+	}
+
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("read settings: %v", err)
+	}
+
+	var parsed struct {
+		Hooks      map[string]interface{}            `json:"hooks"`
+		MCPServers map[string]config.MCPServerConfig `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("unmarshal settings: %v", err)
+	}
+
+	if parsed.Hooks == nil {
+		t.Error("hooks should still be present")
+	}
+
+	if len(parsed.MCPServers) != 2 {
+		t.Fatalf("mcpServers has %d entries, want 2", len(parsed.MCPServers))
+	}
+
+	graith, ok := parsed.MCPServers["graith"]
+	if !ok {
+		t.Fatal("mcpServers missing graith")
+	}
+	if graith.Command != "/usr/bin/gr" {
+		t.Errorf("graith command = %q, want /usr/bin/gr", graith.Command)
+	}
+	if len(graith.Args) != 1 || graith.Args[0] != "mcp" {
+		t.Errorf("graith args = %v, want [mcp]", graith.Args)
+	}
+
+	chrome, ok := parsed.MCPServers["chrome"]
+	if !ok {
+		t.Fatal("mcpServers missing chrome")
+	}
+	if chrome.Command != "npx" {
+		t.Errorf("chrome command = %q, want npx", chrome.Command)
+	}
+	if chrome.Env["DISPLAY"] != ":0" {
+		t.Errorf("chrome env = %v, want DISPLAY=:0", chrome.Env)
+	}
+}
+
+func TestGenerateClaudeSettingsNoMCPServers(t *testing.T) {
+	sm := newTestSessionManagerWithDataDir(t)
+	sessionID := "test-mcp-02"
+
+	settingsPath, err := sm.generateClaudeSettings(sessionID, nil)
+	if err != nil {
+		t.Fatalf("generateClaudeSettings() error = %v", err)
+	}
+
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("read settings: %v", err)
+	}
+
+	if strings.Contains(string(data), "mcpServers") {
+		t.Error("settings should not contain mcpServers when none provided")
+	}
+}
+
+func TestResolveMCPServers(t *testing.T) {
+	sm := newTestSessionManagerWithDataDir(t)
+
+	t.Run("auto-injects graith", func(t *testing.T) {
+		servers := sm.resolveMCPServers("claude")
+		if len(servers) == 0 {
+			t.Fatal("expected at least graith server")
+		}
+		if servers[0].Name != "graith" {
+			t.Errorf("first server = %q, want graith", servers[0].Name)
+		}
+		if len(servers[0].Args) != 1 || servers[0].Args[0] != "mcp" {
+			t.Errorf("graith args = %v, want [mcp]", servers[0].Args)
+		}
+	})
+
+	t.Run("includes global servers", func(t *testing.T) {
+		sm.cfg.MCPServers = []config.MCPServerConfig{
+			{Name: "chrome", Command: "npx", Args: []string{"chrome-mcp"}},
+		}
+		servers := sm.resolveMCPServers("claude")
+		if len(servers) != 2 {
+			t.Fatalf("got %d servers, want 2 (graith + chrome)", len(servers))
+		}
+		if servers[1].Name != "chrome" {
+			t.Errorf("second server = %q, want chrome", servers[1].Name)
+		}
+	})
+
+	t.Run("applies per-agent overrides", func(t *testing.T) {
+		sm.cfg.MCPServers = []config.MCPServerConfig{
+			{Name: "chrome", Command: "npx", Args: []string{"chrome-mcp", "--port", "9222"}},
+		}
+		sm.cfg.Agents = map[string]config.Agent{
+			"claude": {
+				MCPServers: map[string]config.MCPServerConfig{
+					"chrome": {Args: []string{"chrome-mcp", "--port", "9333"}},
+				},
+			},
+		}
+		servers := sm.resolveMCPServers("claude")
+		found := false
+		for _, s := range servers {
+			if s.Name == "chrome" {
+				found = true
+				if s.Args[2] != "9333" {
+					t.Errorf("chrome args = %v, want port 9333", s.Args)
+				}
+			}
+		}
+		if !found {
+			t.Error("chrome server not found after merge")
+		}
+	})
+
+	t.Run("can disable graith per-agent", func(t *testing.T) {
+		sm2 := newTestSessionManagerWithDataDir(t)
+		sm2.cfg.MCPServers = nil
+		sm2.cfg.Agents = map[string]config.Agent{
+			"claude": {
+				MCPServers: map[string]config.MCPServerConfig{
+					"graith": {Disabled: true},
+				},
+			},
+		}
+		servers := sm2.resolveMCPServers("claude")
+		for _, s := range servers {
+			if s.Name == "graith" {
+				t.Error("graith should be disabled but was found")
+			}
+		}
+	})
+
+	t.Run("can disable graith globally", func(t *testing.T) {
+		sm2 := newTestSessionManagerWithDataDir(t)
+		sm2.cfg.MCPServers = []config.MCPServerConfig{
+			{Name: "graith", Disabled: true},
+		}
+		servers := sm2.resolveMCPServers("claude")
+		for _, s := range servers {
+			if s.Name == "graith" {
+				t.Error("graith should be disabled via global config but was found")
+			}
+		}
+	})
+
+	t.Run("global graith override uses user command", func(t *testing.T) {
+		sm2 := newTestSessionManagerWithDataDir(t)
+		sm2.cfg.MCPServers = []config.MCPServerConfig{
+			{Name: "graith", Command: "/custom/gr", Args: []string{"mcp", "--verbose"}},
+		}
+		servers := sm2.resolveMCPServers("claude")
+		var found bool
+		for _, s := range servers {
+			if s.Name == "graith" {
+				found = true
+				if s.Command != "/custom/gr" {
+					t.Errorf("graith command = %q, want /custom/gr", s.Command)
+				}
+				if len(s.Args) != 2 || s.Args[1] != "--verbose" {
+					t.Errorf("graith args = %v, want [mcp --verbose]", s.Args)
+				}
+			}
+		}
+		if !found {
+			t.Error("graith server not found")
+		}
+		count := 0
+		for _, s := range servers {
+			if s.Name == "graith" {
+				count++
+			}
+		}
+		if count != 1 {
+			t.Errorf("got %d graith entries, want exactly 1", count)
+		}
+	})
+}
+
 func TestClaudeSettingsEscapeSingleQuotes(t *testing.T) {
 	fakeDir := filepath.Join(t.TempDir(), "o'malley", "bin")
 	if err := os.MkdirAll(fakeDir, 0o755); err != nil {
@@ -412,7 +608,7 @@ func TestClaudeSettingsEscapeSingleQuotes(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 	sessionID := "test-session-claude-quote"
 
-	settingsPath, err := sm.generateClaudeSettings(sessionID)
+	settingsPath, err := sm.generateClaudeSettings(sessionID, nil)
 	if err != nil {
 		t.Fatalf("generateClaudeSettings() error = %v", err)
 	}

@@ -965,6 +965,305 @@ func TestDefaultAgentSandboxPaths(t *testing.T) {
 	}
 }
 
+func TestMergeMCPServers(t *testing.T) {
+	t.Run("no overrides", func(t *testing.T) {
+		global := []MCPServerConfig{
+			{Name: "graith", Command: "gr", Args: []string{"mcp"}},
+			{Name: "chrome", Command: "npx", Args: []string{"chrome-mcp"}},
+		}
+		got := MergeMCPServers(global, nil)
+		if len(got) != 2 {
+			t.Fatalf("got %d servers, want 2", len(got))
+		}
+		if got[0].Name != "graith" || got[1].Name != "chrome" {
+			t.Errorf("order = [%s, %s], want [graith, chrome]", got[0].Name, got[1].Name)
+		}
+	})
+
+	t.Run("override args", func(t *testing.T) {
+		global := []MCPServerConfig{
+			{Name: "chrome", Command: "npx", Args: []string{"chrome-mcp", "--port", "9222"}},
+		}
+		overrides := map[string]MCPServerConfig{
+			"chrome": {Args: []string{"chrome-mcp", "--port", "9333"}},
+		}
+		got := MergeMCPServers(global, overrides)
+		if len(got) != 1 {
+			t.Fatalf("got %d servers, want 1", len(got))
+		}
+		if got[0].Args[2] != "9333" {
+			t.Errorf("args = %v, want port 9333", got[0].Args)
+		}
+		if got[0].Command != "npx" {
+			t.Errorf("command = %q, want npx (preserved from global)", got[0].Command)
+		}
+	})
+
+	t.Run("disable server", func(t *testing.T) {
+		global := []MCPServerConfig{
+			{Name: "graith", Command: "gr"},
+			{Name: "chrome", Command: "npx"},
+		}
+		overrides := map[string]MCPServerConfig{
+			"graith": {Disabled: true},
+		}
+		got := MergeMCPServers(global, overrides)
+		if len(got) != 1 {
+			t.Fatalf("got %d servers, want 1", len(got))
+		}
+		if got[0].Name != "chrome" {
+			t.Errorf("remaining server = %q, want chrome", got[0].Name)
+		}
+	})
+
+	t.Run("agent-specific addition", func(t *testing.T) {
+		global := []MCPServerConfig{
+			{Name: "graith", Command: "gr"},
+		}
+		overrides := map[string]MCPServerConfig{
+			"custom": {Command: "my-tool", Args: []string{"serve"}},
+		}
+		got := MergeMCPServers(global, overrides)
+		if len(got) != 2 {
+			t.Fatalf("got %d servers, want 2", len(got))
+		}
+		if got[1].Name != "custom" {
+			t.Errorf("added server name = %q, want custom", got[1].Name)
+		}
+		if got[1].Command != "my-tool" {
+			t.Errorf("added server command = %q, want my-tool", got[1].Command)
+		}
+	})
+
+	t.Run("disabled addition is skipped", func(t *testing.T) {
+		got := MergeMCPServers(nil, map[string]MCPServerConfig{
+			"nope": {Disabled: true, Command: "nope"},
+		})
+		if len(got) != 0 {
+			t.Errorf("got %d servers, want 0", len(got))
+		}
+	})
+
+	t.Run("duplicate global names deduplicates", func(t *testing.T) {
+		global := []MCPServerConfig{
+			{Name: "graith", Command: "gr", Args: []string{"mcp"}},
+			{Name: "graith", Disabled: true},
+		}
+		got := MergeMCPServers(global, nil)
+		if len(got) != 0 {
+			t.Errorf("got %d servers, want 0 (disabled wins)", len(got))
+		}
+	})
+
+	t.Run("duplicate global names last wins", func(t *testing.T) {
+		global := []MCPServerConfig{
+			{Name: "graith", Command: "auto-gr"},
+			{Name: "graith", Command: "user-gr", Args: []string{"mcp", "--verbose"}},
+		}
+		got := MergeMCPServers(global, nil)
+		if len(got) != 1 {
+			t.Fatalf("got %d servers, want 1", len(got))
+		}
+		if got[0].Command != "user-gr" {
+			t.Errorf("command = %q, want user-gr (last entry wins)", got[0].Command)
+		}
+	})
+
+	t.Run("global disabled filtered", func(t *testing.T) {
+		global := []MCPServerConfig{
+			{Name: "a", Command: "a"},
+			{Name: "b", Command: "b", Disabled: true},
+			{Name: "c", Command: "c"},
+		}
+		got := MergeMCPServers(global, nil)
+		if len(got) != 2 {
+			t.Fatalf("got %d servers, want 2", len(got))
+		}
+		if got[0].Name != "a" || got[1].Name != "c" {
+			t.Errorf("got [%s, %s], want [a, c]", got[0].Name, got[1].Name)
+		}
+	})
+
+	t.Run("preserves order", func(t *testing.T) {
+		global := []MCPServerConfig{
+			{Name: "a", Command: "a"},
+			{Name: "b", Command: "b"},
+			{Name: "c", Command: "c"},
+		}
+		overrides := map[string]MCPServerConfig{
+			"b": {Command: "b2"},
+		}
+		got := MergeMCPServers(global, overrides)
+		if len(got) != 3 {
+			t.Fatalf("got %d servers, want 3", len(got))
+		}
+		if got[0].Name != "a" || got[1].Name != "b" || got[2].Name != "c" {
+			t.Errorf("order = [%s, %s, %s], want [a, b, c]", got[0].Name, got[1].Name, got[2].Name)
+		}
+		if got[1].Command != "b2" {
+			t.Errorf("b command = %q, want b2", got[1].Command)
+		}
+	})
+}
+
+func TestMCPServerValidation(t *testing.T) {
+	t.Run("valid config", func(t *testing.T) {
+		cfg := Default()
+		cfg.MCPServers = []MCPServerConfig{
+			{Name: "chrome", Command: "npx"},
+		}
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("duplicate name", func(t *testing.T) {
+		cfg := Default()
+		cfg.MCPServers = []MCPServerConfig{
+			{Name: "chrome", Command: "npx"},
+			{Name: "chrome", Command: "other"},
+		}
+		if err := cfg.Validate(); err == nil {
+			t.Error("expected error for duplicate MCP server name")
+		}
+	})
+
+	t.Run("empty name", func(t *testing.T) {
+		cfg := Default()
+		cfg.MCPServers = []MCPServerConfig{
+			{Name: "", Command: "npx"},
+		}
+		if err := cfg.Validate(); err == nil {
+			t.Error("expected error for empty MCP server name")
+		}
+	})
+
+	t.Run("empty command", func(t *testing.T) {
+		cfg := Default()
+		cfg.MCPServers = []MCPServerConfig{
+			{Name: "chrome", Command: ""},
+		}
+		if err := cfg.Validate(); err == nil {
+			t.Error("expected error for empty MCP server command")
+		}
+	})
+
+	t.Run("disabled with empty command is ok", func(t *testing.T) {
+		cfg := Default()
+		cfg.MCPServers = []MCPServerConfig{
+			{Name: "graith", Disabled: true},
+		}
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("agent-specific addition without command", func(t *testing.T) {
+		cfg := Default()
+		cfg.Agents["claude"] = Agent{
+			Command: "claude",
+			MCPServers: map[string]MCPServerConfig{
+				"broken": {Args: []string{"--flag"}},
+			},
+		}
+		if err := cfg.Validate(); err == nil {
+			t.Error("expected error for agent-specific MCP server without command")
+		}
+	})
+
+	t.Run("agent override without command is ok", func(t *testing.T) {
+		cfg := Default()
+		cfg.MCPServers = []MCPServerConfig{
+			{Name: "chrome", Command: "npx"},
+		}
+		cfg.Agents["claude"] = Agent{
+			Command: "claude",
+			MCPServers: map[string]MCPServerConfig{
+				"chrome": {Args: []string{"--port", "9333"}},
+			},
+		}
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("unexpected error for agent override without command: %v", err)
+		}
+	})
+}
+
+func TestLoadConfigMCPServers(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	toml := `
+[[mcp_servers]]
+name = "chrome"
+command = "npx"
+args = ["chrome-mcp", "--port", "9222"]
+
+[[mcp_servers]]
+name = "custom"
+command = "my-tool"
+
+[agents.claude.mcp_servers.chrome]
+args = ["chrome-mcp", "--port", "9333"]
+
+[agents.claude.mcp_servers.agent-only]
+command = "special"
+`
+	os.WriteFile(cfgPath, []byte(toml), 0o644)
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.MCPServers) != 2 {
+		t.Fatalf("MCPServers = %d, want 2", len(cfg.MCPServers))
+	}
+	if cfg.MCPServers[0].Name != "chrome" {
+		t.Errorf("MCPServers[0].Name = %q, want chrome", cfg.MCPServers[0].Name)
+	}
+	if cfg.MCPServers[0].Args[2] != "9222" {
+		t.Errorf("MCPServers[0].Args = %v, want port 9222", cfg.MCPServers[0].Args)
+	}
+
+	claude := cfg.Agents["claude"]
+	if len(claude.MCPServers) != 2 {
+		t.Fatalf("claude.MCPServers = %d entries, want 2", len(claude.MCPServers))
+	}
+	chromeOvr, ok := claude.MCPServers["chrome"]
+	if !ok {
+		t.Fatal("claude.MCPServers missing chrome override")
+	}
+	if chromeOvr.Args[2] != "9333" {
+		t.Errorf("claude chrome override args = %v, want port 9333", chromeOvr.Args)
+	}
+	agentOnly, ok := claude.MCPServers["agent-only"]
+	if !ok {
+		t.Fatal("claude.MCPServers missing agent-only")
+	}
+	if agentOnly.Command != "special" {
+		t.Errorf("agent-only command = %q, want special", agentOnly.Command)
+	}
+}
+
+func TestMergeAgentPreservesMCPServers(t *testing.T) {
+	def := Agent{
+		Command: "claude",
+		Args:    []string{"--session-id"},
+	}
+	usr := Agent{
+		MCPServers: map[string]MCPServerConfig{
+			"chrome": {Command: "npx"},
+		},
+	}
+	got := mergeAgent(def, usr)
+	if len(got.MCPServers) != 1 {
+		t.Fatalf("MCPServers = %d, want 1", len(got.MCPServers))
+	}
+	if got.MCPServers["chrome"].Command != "npx" {
+		t.Errorf("chrome command = %q, want npx", got.MCPServers["chrome"].Command)
+	}
+	if got.Command != "claude" {
+		t.Errorf("Command = %q, want claude (preserved)", got.Command)
+	}
+}
+
 func TestAgySandboxPathsMergedWithGlobal(t *testing.T) {
 	global := SandboxConfig{
 		Enabled:  true,
