@@ -407,26 +407,39 @@ func TestGenerateClaudeSettingsWithMCPServers(t *testing.T) {
 		{Name: "chrome", Command: "npx", Args: []string{"chrome-mcp"}, Env: map[string]string{"DISPLAY": ":0"}},
 	}
 
+	// settings.json should NOT contain mcpServers (they go in mcp.json now)
 	settingsPath, err := sm.generateClaudeSettings(sessionID, servers)
 	if err != nil {
 		t.Fatalf("generateClaudeSettings() error = %v", err)
 	}
 
-	data, err := os.ReadFile(settingsPath)
+	settingsData, err := os.ReadFile(settingsPath)
 	if err != nil {
 		t.Fatalf("read settings: %v", err)
 	}
+	if strings.Contains(string(settingsData), "mcpServers") {
+		t.Error("settings.json should not contain mcpServers (they belong in mcp.json)")
+	}
+
+	// mcp.json should contain the proxy entries
+	mcpConfigPath, err := sm.generateMCPConfig(sessionID, servers)
+	if err != nil {
+		t.Fatalf("generateMCPConfig() error = %v", err)
+	}
+
+	data, err := os.ReadFile(mcpConfigPath)
+	if err != nil {
+		t.Fatalf("read mcp config: %v", err)
+	}
 
 	var parsed struct {
-		Hooks      map[string]interface{}            `json:"hooks"`
-		MCPServers map[string]config.MCPServerConfig `json:"mcpServers"`
+		MCPServers map[string]struct {
+			Command string   `json:"command"`
+			Args    []string `json:"args"`
+		} `json:"mcpServers"`
 	}
 	if err := json.Unmarshal(data, &parsed); err != nil {
-		t.Fatalf("unmarshal settings: %v", err)
-	}
-
-	if parsed.Hooks == nil {
-		t.Error("hooks should still be present")
+		t.Fatalf("unmarshal mcp config: %v", err)
 	}
 
 	if len(parsed.MCPServers) != 2 {
