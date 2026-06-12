@@ -2,6 +2,7 @@
 title: "Design Doc: MCP Server Injection"
 authors: Dougal Matthews
 created: 2026-06-11
+updated: 2026-06-12
 status: Draft
 reviewers: (none yet)
 informed: (TBD)
@@ -16,7 +17,7 @@ graith manages AI coding agent sessions in isolated git worktrees. It already in
 The [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) is a standard for connecting AI agents to external tools. graith itself already runs as an MCP server (`gr mcp`) exposing session management tools. Claude Code supports MCP servers via its `settings.json` `mcpServers` key.
 
 - **Parent issue:** [d0ugal/graith#359](https://github.com/d0ugal/graith/issues/359)
-- **Motivating use case:** Chrome DevTools MCP crashes inside graith's macOS Seatbelt sandbox due to Chrome's inner sandbox re-init. The workaround is to run Chrome externally and point `chrome-devtools-mcp` at it via `--browserUrl`. This needs a general way to inject MCP server configs into agents.
+- **Motivating use case:** Chrome DevTools MCP crashes inside graith's macOS Seatbelt sandbox due to Chrome's inner sandbox re-init. The workaround is to run Chrome externally and point `chrome-devtools-mcp` at it via `--browserUrl`. This needs a general way to manage MCP servers and proxy them into agent sessions.
 
 ## Problem
 
@@ -25,20 +26,23 @@ Agents running inside graith have no access to MCP servers unless the user manua
 - **Sandbox conflicts:** MCP servers that launch sub-processes (Chrome, Playwright) crash inside the Seatbelt sandbox. Users must run these externally and manually wire up connection URLs.
 - **Per-agent configuration burden:** Each agent type has its own config format for MCP servers. Users must duplicate MCP server definitions across `~/.claude/settings.json`, Codex config, etc.
 - **No central management:** graith manages agent lifecycle but not their tool ecosystem. Adding a new MCP server to all sessions requires editing multiple agent configs manually.
+- **Resource waste:** Each agent session launches its own instance of every MCP server. Five sessions using chrome-devtools means five separate MCP server processes, five `npx` downloads, five Chrome connections.
 - **graith's own MCP server is invisible:** `gr mcp` exposes session management tools (list, create, publish messages), but agents don't know about it unless manually configured.
 
 ## Goals
 
-1. Users can declare MCP servers in graith's TOML config, and they are automatically injected into agent sessions at creation time.
-2. graith's own MCP server (`gr mcp`) is auto-injected into all supporting agents by default.
-3. MCP server config supports global and per-agent scoping, following the existing merge pattern used by `SandboxConfig`.
-4. The injection mechanism is agent-specific and extensible — Claude Code today, other agents when they add MCP support.
+1. Users declare MCP servers in graith's TOML config. The **daemon starts and supervises** these MCP server processes.
+2. MCP server processes are **shared across all agent sessions** that use them — one chrome-devtools-mcp process serves all sessions.
+3. The daemon **proxies MCP connections** into agent sessions via stdio, so agents see a local MCP server regardless of where the real process runs.
+4. MCP servers run **outside the agent sandbox**, solving the sandbox conflict problem entirely.
+5. graith's own MCP server (`gr mcp`) is auto-injected into all supporting agents by default.
+6. MCP server config supports global and per-agent scoping (enable/disable per agent).
+7. Config changes take effect on daemon reload — no need to recreate sessions.
 
 ### Non-Goals
 
-- **Hot-reloading MCP servers into running sessions.** Claude Code doesn't support mid-session MCP changes. However, MCP config is NOT persisted in session state (unlike sandbox config) — it is re-evaluated from current config on every resume. This means users can add an MCP server to config and existing sessions will pick it up on their next resume, which is safe because MCP servers are independently started by the agent on launch.
-- **Managing MCP server processes.** graith injects config telling agents how to launch MCP servers — it does not start or supervise MCP server processes itself.
-- **Supporting agents that lack MCP support.** Codex, Agy, and OpenCode do not currently support MCP. When they do, injection handlers will be added. Until then, MCP servers configured globally are silently skipped for unsupported agents.
+- **Running MCP servers on remote hosts.** The daemon manages local processes only. Network-based MCP proxying is out of scope.
+- **Supporting agents that lack MCP support.** Codex, Agy, and OpenCode do not currently support MCP. When they do, proxy injection handlers will be added. Until then, MCP servers configured globally are silently skipped for unsupported agents.
 
 ## Proposals
 
@@ -46,11 +50,11 @@ Agents running inside graith have no access to MCP servers unless the user manua
 
 Users continue to manually configure MCP servers in each agent's native config. Chrome DevTools MCP remains unusable inside sandboxed sessions without manual workarounds. graith's own MCP server stays invisible to agents.
 
-### Proposal 1: Config-driven MCP server injection
+### Proposal 1: Config injection only (implemented in v0.22.0)
 
-Declare MCP servers in graith's TOML config. At session creation, graith reads the merged config and injects matching servers into the agent's launch configuration.
+This was the initial implementation shipped in v0.22.0. Declare MCP servers in graith's TOML config; at session creation, inject the raw command/args into the agent's settings so the **agent launches MCP servers as its own child processes**.
 
-**Architecture diagram:**
+**How it works today:**
 
 ```mermaid
 graph TD
@@ -64,9 +68,9 @@ graph TD
         E[generateClaudeSettings<br/>adds mcpServers key]
         F[Skip silently]
     end
-    subgraph "Agent process"
+    subgraph "Agent process (sandboxed)"
         G[Claude Code reads<br/>settings.json]
-        H[MCP servers start<br/>as child processes]
+        H[MCP server starts<br/>as child process<br/>INSIDE sandbox]
     end
     A --> C
     B --> C
@@ -77,65 +81,137 @@ graph TD
     G --> H
 ```
 
+#### Limitations
+
+- **MCP servers run inside the sandbox** — Chrome DevTools MCP can't launch Chrome, Playwright can't launch browsers, etc.
+- **One MCP server per session** — five sessions = five chrome-devtools-mcp processes, five `npx` downloads.
+- **No hot-reload** — config changes require session restart to take effect.
+- **Agent manages MCP lifecycle** — if the MCP server crashes, only the agent can restart it. graith has no visibility.
+
+This proposal serves as the stepping stone to Proposal 2.
+
+### Proposal 2: Daemon-managed MCP servers with proxy (recommended)
+
+The daemon starts MCP server processes itself, outside any sandbox, and **proxies MCP connections** into agent sessions via stdio. One MCP server process is shared across all sessions that use it.
+
+**Architecture diagram:**
+
+```mermaid
+graph TD
+    subgraph "graith config (TOML)"
+        A["[[mcp_servers]]<br/>name, command, args, env"]
+        B["[agents.claude.mcp_servers.X]<br/>per-agent overrides"]
+    end
+    subgraph "Daemon (unsandboxed)"
+        C[MCP Manager]
+        D["MCP Server Process<br/>(chrome-devtools)"]
+        E["MCP Server Process<br/>(graith)"]
+        F[MCP Proxy]
+    end
+    subgraph "Session 1 (sandboxed)"
+        G1[Claude Code]
+        H1["stdio proxy<br/>(gr mcp-proxy chrome-devtools)"]
+    end
+    subgraph "Session 2 (sandboxed)"
+        G2[Claude Code]
+        H2["stdio proxy<br/>(gr mcp-proxy chrome-devtools)"]
+    end
+    A --> C
+    B --> C
+    C -->|starts & supervises| D
+    C -->|starts & supervises| E
+    G1 -->|stdio| H1
+    G2 -->|stdio| H2
+    H1 -->|"multiplexed<br/>over Unix socket"| F
+    H2 -->|"multiplexed<br/>over Unix socket"| F
+    F -->|stdio| D
+    F -->|stdio| E
+```
+
+#### How it works
+
+1. **Daemon reads config** and starts each declared MCP server as a child process, communicating via stdio (JSON-RPC, per the MCP spec).
+2. **MCP Manager** in the daemon supervises these processes — restarts on crash, stops on config removal, starts new ones on config addition.
+3. **Agent sessions get a proxy command** instead of the raw MCP server command. In Claude Code's settings.json:
+   ```json
+   {
+     "mcpServers": {
+       "chrome-devtools": {
+         "command": "/opt/homebrew/bin/gr",
+         "args": ["mcp-proxy", "chrome-devtools"]
+       }
+     }
+   }
+   ```
+4. **`gr mcp-proxy <name>`** is a lightweight stdio-to-Unix-socket bridge. Claude Code launches it as a child process (inside the sandbox). It connects to the daemon over the existing Unix socket and requests a multiplexed channel to the named MCP server. The daemon forwards JSON-RPC messages between the proxy and the real MCP server process.
+5. **Multiple sessions share one MCP server** — the daemon multiplexes. Each proxy gets an independent JSON-RPC session (MCP servers are stateless per-request for tool calls, so this is straightforward).
+
 #### Config format
 
-MCP servers are declared as an array of tables at the top level:
+Same TOML format as Proposal 1 (already implemented):
 
 ```toml
-# Automatically injected into all agents that support MCP
+[[mcp_servers]]
+name = "chrome-devtools"
+command = "npx"
+args = ["@anthropic-ai/chrome-devtools-mcp@latest"]
+
 [[mcp_servers]]
 name = "graith"
 command = "gr"
 args = ["mcp"]
-
-[[mcp_servers]]
-name = "chrome-devtools"
-command = "npx"
-args = ["@anthropic-ai/chrome-devtools-mcp@latest", "--browserUrl", "http://127.0.0.1:9222"]
-env = { DISPLAY = ":0" }
 ```
 
-Each entry maps directly to a Claude Code MCP server definition:
-
-| TOML field | Claude settings.json field | Required |
-|------------|---------------------------|----------|
-| `name`     | key in `mcpServers` map   | yes      |
-| `command`  | `command`                 | yes      |
-| `args`     | `args`                    | no       |
-| `env`      | `env`                     | no       |
-
-Per-agent overrides use the existing merge pattern:
+Per-agent overrides:
 
 ```toml
-# Disable chrome-devtools for codex (when codex adds MCP support)
+# Disable chrome-devtools for codex
 [agents.codex.mcp_servers.chrome-devtools]
 disabled = true
-
-# Override args for a specific agent
-[agents.claude.mcp_servers.chrome-devtools]
-args = ["@anthropic-ai/chrome-devtools-mcp@latest", "--browserUrl", "http://127.0.0.1:9333"]
 ```
+
+No config format changes needed — the difference is entirely in how the daemon uses the config.
 
 #### Auto-injection of graith MCP server
 
-graith's own MCP server (`gr mcp`) is always injected as the `graith` MCP server, even if not declared in config. This gives agents access to session management tools (list sessions, publish messages, read messages, etc.) without any user configuration. The `GRAITH_SESSION_ID` and `GRAITH_SESSION_NAME` env vars set by the daemon are inherited by MCP child processes, so `gr mcp` automatically knows which session it belongs to.
+graith's own MCP server (`gr mcp`) is always injected, even if not declared in config. Since the daemon manages the process, `gr mcp` runs with full access to the daemon's state — no need for the `GRAITH_SESSION_ID` env var hack. The proxy command carries the session context:
+
+```
+gr mcp-proxy graith --session <session-id>
+```
 
 Users can disable auto-injection per-agent or globally:
 
 ```toml
-# Disable for a specific agent
 [agents.claude.mcp_servers.graith]
-disabled = true
-
-# Or disable globally
-[[mcp_servers]]
-name = "graith"
 disabled = true
 ```
 
+#### Proxy protocol
+
+The proxy uses the existing graith Unix socket and framed binary protocol. A new control message type requests an MCP channel:
+
+```json
+{"type": "mcp_connect", "payload": {"server": "chrome-devtools", "session_id": "abc123"}}
+```
+
+The daemon responds with a channel ID. Subsequent frames on that channel carry raw JSON-RPC bytes between the proxy and the MCP server. The proxy's job is trivial: read stdin → frame and send to daemon → read frames from daemon → write to stdout.
+
+#### MCP server lifecycle
+
+| Event | Behavior |
+|-------|----------|
+| Daemon starts | Start all enabled MCP servers from config |
+| Config reload (`gr daemon reload`) | Start new servers, stop removed ones, restart changed ones |
+| MCP server crashes | Restart with exponential backoff (1s, 2s, 4s, ... max 60s) |
+| Daemon stops | Send SIGTERM to all MCP server processes, wait 5s, SIGKILL |
+| Session created | Inject `gr mcp-proxy <name>` for each enabled MCP server |
+| Session resumed | Same injection — proxy reconnects to daemon |
+| All sessions using a server deleted | Server keeps running (config-driven, not session-driven) |
+
 #### Injection mechanism — Claude Code
 
-`generateClaudeSettings()` in `hooks.go` already produces a `settings.json` with hooks. The change adds an `mcpServers` key to the same JSON:
+`generateClaudeSettings()` injects proxy commands instead of raw MCP server commands:
 
 ```json
 {
@@ -143,81 +219,98 @@ disabled = true
   "mcpServers": {
     "graith": {
       "command": "/opt/homebrew/bin/gr",
-      "args": ["mcp"]
+      "args": ["mcp-proxy", "graith", "--session", "abc123"]
     },
     "chrome-devtools": {
-      "command": "npx",
-      "args": ["@anthropic-ai/chrome-devtools-mcp@latest", "--browserUrl", "http://127.0.0.1:9222"]
+      "command": "/opt/homebrew/bin/gr",
+      "args": ["mcp-proxy", "chrome-devtools"]
     }
   }
 }
 ```
 
-Claude Code reads this via `--settings` and starts MCP servers as child processes. No new CLI flags or protocol changes needed.
+Claude Code launches `gr mcp-proxy` as a child process (inside the sandbox — it only needs access to the Unix socket). The proxy connects to the daemon, which forwards to the real MCP server running outside the sandbox.
 
 #### Injection mechanism — other agents
 
-Each agent has its own config format and injection path. Where possible, graith avoids writing to the worktree by using env vars or CLI flags. MCP config files are written to `~/.graith/mcp/` (one per agent type, not per session) and referenced by flag/env/symlink.
+Same proxy command, different injection format per agent:
 
-| Agent    | MCP support | Injection mechanism | Output location |
-|----------|-------------|---------------------|-----------------|
-| Claude   | Yes | `--settings` flag (existing path) | `hooks/<id>/settings.json` |
-| Codex    | Yes | `--profile graith` flag → TOML profile file | `~/.graith/mcp/codex-mcp.config.toml` |
-| OpenCode | Yes | `OPENCODE_CONFIG_CONTENT` env var (inline JSON) | None (env var) |
-| Agy      | Yes | `.gemini/settings.json` symlink in worktree → file in data dir | `~/.graith/mcp/gemini-settings.json` → symlinked as `.gemini/settings.json` in worktree |
+| Agent    | MCP support | Injection mechanism | Proxy command |
+|----------|-------------|---------------------|---------------|
+| Claude   | Yes | `--settings` flag | `gr mcp-proxy <name>` |
+| Codex    | Yes | `--profile graith` flag | `gr mcp-proxy <name>` |
+| Agy      | Yes | `.gemini/settings.json` | `gr mcp-proxy <name>` |
+| OpenCode | Yes | `OPENCODE_CONFIG_CONTENT` env var | `gr mcp-proxy <name>` |
 
-**Codex** supports `--profile <name>` which loads an additional TOML config layer on top of the user's base config. graith generates a profile file containing `[mcp_servers.X]` tables. This preserves the user's existing Codex config while layering MCP servers on top. The profile file maps fields directly: `command`, `args`, `env` are identical; `disabled` maps to `enabled = false`.
-
-**OpenCode** supports `OPENCODE_CONFIG_CONTENT` env var with inline JSON config, deep-merged with project/global configs. No files needed — the cleanest injection path. Format differences: `command` + `args` combine into a single `command` string array, `env` becomes `environment`, and each entry needs `"type": "local"`.
-
-**Agy (Gemini CLI)** reads `.gemini/settings.json` from the project root. The format is identical to Claude Code (`mcpServers` with `command`, `args`, `env`). graith writes the config to `~/.graith/mcp/gemini-settings.json` and symlinks it into the worktree as `.gemini/settings.json`. If the repo already has a `.gemini/settings.json`, graith reads and merges `mcpServers` into it. The symlink (or modified file) is added to `.git/info/exclude` to prevent dirty git state.
-
-Each injection function handles the format translation from graith's canonical `MCPServerConfig` to the agent's native format. Agents without MCP support silently skip injection — no error, just a debug log.
+All agents get the same proxy binary — only the injection format differs.
 
 #### Sandbox interaction
 
-MCP servers launched by the agent run inside the agent's sandbox. For servers that need resources outside the sandbox (like Chrome DevTools connecting to an external Chrome), the user must ensure the necessary network access is allowed. Loopback (`127.0.0.1`) is allowed by default in graith's sandbox rules.
+MCP servers run **outside the sandbox** as daemon child processes. This solves the core problem: Chrome DevTools MCP can launch Chrome, Playwright can launch browsers, etc. The only thing inside the sandbox is `gr mcp-proxy`, which needs read access to the Unix socket.
 
-MCP server binaries (e.g., `npx`, `node`) must be in paths readable by the sandbox. The sandbox's `read_dirs` should include paths where MCP server binaries live (e.g., `~/.npm`, `/opt/homebrew`). Note that `npx` also needs **write access** to the npm cache (`~/.npm/_npx`) to download packages on first run. Users should either add `write_dirs = ["~/.npm"]` to their sandbox config, or install MCP servers globally (`npm install -g`) and reference the absolute binary path instead of `npx`.
-
-#### Settings merge behavior
-
-Claude Code's `--settings` flag provides project-level settings that merge with user/global settings. Graith-injected MCP servers are **additive** — they do not replace servers the user has configured in `~/.claude/settings.json`. If a name collision occurs (e.g., user has `graith` in their own settings AND graith auto-injects one), Claude Code's merge behavior determines which wins (project-level `--settings` takes precedence).
-
-#### Merge semantics
-
-Per-agent overrides use **full replacement** for `args` and `env`, consistent with `mergeAgent()` behavior for agent `Env` (config.go:365). If a per-agent override specifies `env`, it replaces the global MCP server's `env` entirely — it does not merge individual keys.
-
-Per-agent overrides that reference a name not in the global list are treated as **agent-specific MCP servers** — they are added to that agent's server list without requiring a global declaration.
+The sandbox config already grants access to the graith data dir (where the Unix socket lives), so no additional sandbox configuration is needed for the proxy.
 
 #### Chrome DevTools use case
 
-With this feature, the Chrome DevTools workflow becomes:
+With daemon-managed MCP servers, the Chrome DevTools workflow becomes:
 
-1. User starts Chrome externally with `--remote-debugging-port=9222`
-2. User adds to graith config:
+1. User adds to graith config:
    ```toml
    [[mcp_servers]]
    name = "chrome-devtools"
    command = "npx"
-   args = ["@anthropic-ai/chrome-devtools-mcp@latest", "--browserUrl", "http://127.0.0.1:9222"]
+   args = ["@anthropic-ai/chrome-devtools-mcp@latest"]
    ```
-3. New sessions automatically get Chrome DevTools MCP — agents can navigate pages, take screenshots, run Lighthouse audits, etc.
-4. No custom Chrome lifecycle management in graith. No sandbox conflicts.
+2. Daemon starts chrome-devtools-mcp, which launches Chrome automatically (outside the sandbox).
+3. All sessions automatically get chrome-devtools via proxy — agents can navigate pages, take screenshots, run Lighthouse audits, etc.
+4. One Chrome instance, one MCP server process, shared across all sessions.
+5. No `--browserUrl` workaround needed. No sandbox conflicts.
+
+#### Hot-reload
+
+When the user changes MCP server config and runs `gr daemon reload` (or the daemon detects config changes):
+
+1. New servers are started immediately.
+2. Removed servers are stopped (existing proxy connections get an error, agents handle gracefully).
+3. Changed servers (command/args/env differ) are restarted. Existing proxy connections are terminated and agents reconnect via a new proxy.
+4. **No session restart needed** — the next time an agent calls an MCP tool, the proxy connects to the updated server.
+
+#### Multiplexing considerations
+
+MCP uses JSON-RPC over stdio. Each tool call is a request/response pair. The daemon needs to route responses back to the correct proxy (and thus the correct session).
+
+Options:
+- **Per-session MCP connections:** The daemon maintains one stdio connection to the MCP server per active proxy. Simple, but means N connections for N sessions. MCP servers are typically lightweight, so this is fine for small N.
+- **True multiplexing:** The daemon maintains one connection to the MCP server and routes JSON-RPC requests/responses by `id`. More efficient for large N, but requires tracking request IDs across sessions.
+
+**Recommendation:** Start with per-session connections (simpler), add true multiplexing if resource usage becomes a concern. Most users will have 2-10 concurrent sessions, not hundreds.
 
 #### Pros
 
-- Follows existing patterns — same merge logic as `SandboxConfig`, same settings.json injection path
-- Single source of truth for MCP servers across all agent types
-- graith MCP auto-injection means agents can manage sessions out of the box
-- Minimal code change — extends `generateClaudeSettings()` and adds a config struct
-- No new daemon state, protocol messages, or CLI commands
+- **Solves the sandbox problem** — MCP servers run outside the sandbox, no workarounds needed
+- **Resource efficient** — one MCP server process shared across all sessions
+- **Hot-reload** — config changes take effect without session recreation
+- **Daemon has visibility** — can monitor, restart, and report MCP server status
+- **Agent-agnostic** — same proxy command works for all agents
+- **Builds on Proposal 1** — config format is unchanged, only the injection mechanism changes
 
 #### Cons
 
-- Static at session creation — changing MCP config requires creating new sessions
-- Only works for Claude Code today (other agents silently skip)
-- MCP servers run as agent child processes, not managed by graith — if one crashes, the agent must handle it
+- **More complex** — daemon must manage MCP server processes and proxy connections
+- **New protocol messages** — `mcp_connect` and MCP channel framing
+- **New CLI command** — `gr mcp-proxy` (though it's simple)
+- **Latency** — one extra hop (proxy → daemon → MCP server) vs. direct stdio. Negligible for tool calls (tens of ms), but worth measuring.
+- **Single point of failure** — if the daemon crashes, all MCP connections drop. Mitigated by daemon's existing restart-and-recover design.
+
+## Migration path
+
+Proposal 1 is already shipped in v0.22.0. The migration to Proposal 2 is:
+
+1. **Config format:** No changes — same `[[mcp_servers]]` TOML format.
+2. **Injection:** `generateClaudeSettings()` switches from injecting raw commands to injecting `gr mcp-proxy` commands. Transparent to users.
+3. **Daemon:** Add MCP Manager (start/stop/restart MCP server processes) and proxy handler (new protocol message type, channel multiplexing).
+4. **CLI:** Add `gr mcp-proxy <name>` command — lightweight stdio bridge.
+5. **Existing sessions:** On next resume, they get the new proxy-based settings.json. The proxy command is resolved from the `gr` binary, which is already in the sandbox's read path.
 
 ## Consensus
 
@@ -230,22 +323,19 @@ TBD — to be filled after review and discussion.
 - [Model Context Protocol specification](https://modelcontextprotocol.io/)
 - [Claude Code settings.json documentation](https://docs.anthropic.com/en/docs/claude-code/settings)
 - [d0ugal/graith#359 — Feature: start Chrome with remote debugging](https://github.com/d0ugal/graith/issues/359)
+- [d0ugal/graith#363 — MCP servers run outside the sandbox](https://github.com/d0ugal/graith/issues/363)
 - [chrome-devtools-mcp](https://github.com/anthropics/chrome-devtools-mcp)
 - Existing hook injection: `internal/daemon/hooks.go`
 - Existing config merge: `internal/config/config.go` (`SandboxConfig.Merge()`)
+- Existing protocol: `internal/protocol/frame.go`, `internal/protocol/messages.go`
 
-### Implementation Notes
+### Implementation Notes (Proposal 2)
 
-- **Config structs:** Add `MCPServerConfig` struct (`Name`, `Command`, `Args`, `Env`, `Disabled`) and `MCPServers []MCPServerConfig` to `Config`. Add `MCPServers map[string]MCPServerConfig` to `Agent` for per-agent overrides (map keyed by server name).
-- **Two-level merge:**
-  1. **Config load time** (`mergeAgent()` in config.go): Preserve user's per-agent `MCPServers` map, same as `Sandbox` and `Chrome` fields. No special merge logic needed here.
-  2. **Session creation time** (new `mergeMCPServers()` function): Takes global `[]MCPServerConfig` list + per-agent `map[string]MCPServerConfig` overrides. Iterates global list by name, applies overrides (replace `args`/`env`/`command`, honor `disabled`). Per-agent entries not in global list are added as agent-specific servers.
-- **Auto-injection:** Before merging, prepend a `graith` entry (using `resolveGrBin()`) to the global list. If the user has declared `name = "graith"` with `disabled = true` in the global list, the prepended entry is overridden.
-- **MCP resolution:** `injectHooks` keeps its existing `(agentName, sessionID)` signature. MCP servers are resolved internally via `resolveMCPServers()` and passed to agent-specific injection functions. Callers don't need to know about MCP.
-- **Validation:** `Config.Validate()` enforces: no duplicate `name` values in `[[mcp_servers]]`, `command` is required (non-empty) for non-disabled entries (both global and per-agent additions that don't override a global server).
-- **Serialization:** Use `omitempty` on `Args` and `Env` fields to avoid emitting `null` in JSON output.
-- **Future agent-specific injection:** `injectCodexMCP()` (generate TOML profile file, return `--profile` in `extraArgs`), `injectOpenCodeMCP()` (generate JSON string, return `OPENCODE_CONFIG_CONTENT` in `extraEnv`), `injectAgyMCP()` (write JSON to data dir, symlink into worktree). Each translates `MCPServerConfig` to the agent's native format. These are future work — initial implementation supports Claude only, other agents silently skip MCP.
-- **MCP config file location:** Write to `~/.graith/mcp/` (one file per agent type). These are regenerated when config changes, not per-session. Claude is the exception — its `settings.json` is per-session (in hooks dir) because it bundles hooks + MCP together.
-- **No state changes:** No new fields in `SessionState`, no state migration needed. MCP config is re-evaluated from current config on every create/resume.
-- **No protocol changes:** MCP injection happens entirely within the existing hook/agent-config injection path.
-- **Existing code to extend:** `hooks.go`, `config.go`, `default_config.toml`.
+- **MCP Manager** (`internal/daemon/mcpmanager.go`): New component in the daemon. Owns a map of `name → *MCPProcess`. Each `MCPProcess` holds the `exec.Cmd`, stdin/stdout pipes, and a health state (running, crashed, backoff). On daemon start, iterates config and starts all enabled servers. Exposes `Start(name)`, `Stop(name)`, `Restart(name)`, `Reload(newConfig)`.
+- **MCP Proxy protocol:** New message type `mcp_connect` on control channel (0x00). Daemon allocates a new channel ID (0x02+) for MCP traffic. Frames on MCP channels carry raw JSON-RPC bytes. The proxy reads stdin → writes to MCP channel, reads MCP channel → writes to stdout.
+- **`gr mcp-proxy` command** (`internal/cli/mcpproxy.go`): Connects to daemon Unix socket, sends `mcp_connect`, then enters a bidirectional copy loop between stdin/stdout and the MCP channel. ~50 lines of code.
+- **Config structs:** No changes — `MCPServerConfig` and `MergeMCPServers()` from Proposal 1 are reused.
+- **Settings injection:** `generateClaudeSettings()` changes from injecting `{command: "npx", args: [...]}` to `{command: "gr", args: ["mcp-proxy", name]}`.
+- **Daemon state:** Add `MCPServers map[string]MCPServerStatus` to daemon's runtime state (not persisted — rebuilt from config on start). Exposed via `gr list --json` or a new `gr mcp list` command.
+- **Graceful shutdown:** Daemon's existing shutdown path extended to SIGTERM MCP server processes before exiting.
+- **Testing:** Integration tests spawn daemon with MCP config, verify proxy connects, send a JSON-RPC `initialize` request through the proxy, verify response.
