@@ -11,6 +11,7 @@ import (
 
 	"github.com/d0ugal/graith/internal/client"
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/hookoutput"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/spf13/cobra"
 )
@@ -29,6 +30,7 @@ var approveRequestCmd = &cobra.Command{
 		if sessionID == "" {
 			return nil
 		}
+		agent := os.Getenv("GRAITH_AGENT_TYPE")
 
 		// Parse hook stdin for tool details (non-blocking with timeout).
 		type stdinResult struct {
@@ -71,13 +73,12 @@ var approveRequestCmd = &cobra.Command{
 
 		hookPaths, err := config.ResolvePaths()
 		if err != nil {
-			fmt.Println(`{"decision":"allow"}`)
+			fmt.Println(hookoutput.AllowAll(agent))
 			return nil
 		}
 		c, err := client.ConnectForApproval(hookPaths, cfg.Approvals.TimeoutDuration())
 		if err != nil {
-			// Fail-open: daemon unreachable, allow the tool use.
-			fmt.Println(`{"decision":"allow"}`)
+			fmt.Println(hookoutput.AllowAll(agent))
 			return nil
 		}
 		defer c.Close()
@@ -91,23 +92,16 @@ var approveRequestCmd = &cobra.Command{
 
 		resp, err := c.ReadControlResponse()
 		if err != nil {
-			// Connection lost — fail-open.
-			fmt.Println(`{"decision":"allow"}`)
+			fmt.Println(hookoutput.AllowAll(agent))
 			return nil
 		}
 
 		if resp.Type == "approval_decision" {
 			var decision protocol.ApprovalDecisionMsg
 			protocol.DecodePayload(resp, &decision)
-			result := map[string]string{"decision": decision.Decision}
-			if decision.Reason != "" {
-				result["reason"] = decision.Reason
-			}
-			out, _ := json.Marshal(result)
-			fmt.Println(string(out))
+			fmt.Println(hookoutput.Approval(agent, decision.Decision, decision.Reason))
 		} else {
-			// Unexpected response — fail-open.
-			fmt.Println(`{"decision":"allow"}`)
+			fmt.Println(hookoutput.AllowAll(agent))
 		}
 
 		return nil

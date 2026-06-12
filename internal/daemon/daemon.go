@@ -501,6 +501,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 	}
 	env["GRAITH_SESSION_ID"] = id
 	env["GRAITH_SESSION_NAME"] = name
+	env["GRAITH_AGENT_TYPE"] = agentName
 	env["GRAITH_WORKTREE_PATH"] = worktreePath
 	if sm.paths.Profile != "" {
 		env["GRAITH_PROFILE"] = sm.paths.Profile
@@ -549,7 +550,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 		merged.ReadDirs = expandPaths(merged.ReadDirs)
 		merged.WriteDirs = expandPaths(merged.WriteDirs)
 		mergedSandbox = &merged
-		envKeys := []string{"GRAITH_SESSION_ID", "GRAITH_SESSION_NAME", "GRAITH_WORKTREE_PATH", "TERM"}
+		envKeys := []string{"GRAITH_SESSION_ID", "GRAITH_SESSION_NAME", "GRAITH_AGENT_TYPE", "GRAITH_WORKTREE_PATH", "TERM"}
 		for k := range agent.Env {
 			envKeys = append(envKeys, k)
 		}
@@ -765,6 +766,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 	}
 	env["GRAITH_SESSION_ID"] = id
 	env["GRAITH_SESSION_NAME"] = name
+	env["GRAITH_AGENT_TYPE"] = agentName
 	env["GRAITH_WORKTREE_PATH"] = worktreePath
 	if sm.paths.Profile != "" {
 		env["GRAITH_PROFILE"] = sm.paths.Profile
@@ -798,7 +800,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 		merged.ReadDirs = expandPaths(merged.ReadDirs)
 		merged.WriteDirs = expandPaths(merged.WriteDirs)
 		mergedSandbox = &merged
-		envKeys := []string{"GRAITH_SESSION_ID", "GRAITH_SESSION_NAME", "GRAITH_WORKTREE_PATH", "TERM"}
+		envKeys := []string{"GRAITH_SESSION_ID", "GRAITH_SESSION_NAME", "GRAITH_AGENT_TYPE", "GRAITH_WORKTREE_PATH", "TERM"}
 		for k := range agent.Env {
 			envKeys = append(envKeys, k)
 		}
@@ -952,6 +954,7 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 	}
 	env["GRAITH_SESSION_ID"] = id
 	env["GRAITH_SESSION_NAME"] = sessState.Name
+	env["GRAITH_AGENT_TYPE"] = sessState.Agent
 	env["GRAITH_WORKTREE_PATH"] = sessState.WorktreePath
 	if sm.paths.Profile != "" {
 		env["GRAITH_PROFILE"] = sm.paths.Profile
@@ -1028,7 +1031,7 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 		merged.ReadDirs = expandPaths(merged.ReadDirs)
 		merged.WriteDirs = expandPaths(merged.WriteDirs)
 		mergedSandbox = &merged
-		envKeys := []string{"GRAITH_SESSION_ID", "GRAITH_SESSION_NAME", "GRAITH_WORKTREE_PATH", "TERM"}
+		envKeys := []string{"GRAITH_SESSION_ID", "GRAITH_SESSION_NAME", "GRAITH_AGENT_TYPE", "GRAITH_WORKTREE_PATH", "TERM"}
 		for k := range agent.Env {
 			envKeys = append(envKeys, k)
 		}
