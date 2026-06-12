@@ -780,21 +780,19 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 		}
 	}
 
-	sandboxed := source.Sandboxed
+	sandboxed, err := sm.resolveSandbox(agentName)
+	if err != nil {
+		forkCleanup()
+		return SessionState{}, err
+	}
 	command := agent.Command
 	finalArgs := expandedArgs
 	var mergedSandbox *config.SandboxConfig
 	if sandboxed {
-		merged := sm.resolveStoredSandboxConfig(source)
+		merged := sm.cfg.Sandbox.Merge(sm.cfg.Agents[agentName].Sandbox)
+		merged.ReadDirs = expandPaths(merged.ReadDirs)
+		merged.WriteDirs = expandPaths(merged.WriteDirs)
 		mergedSandbox = &merged
-		cmd := merged.Command
-		if cmd == "" {
-			cmd = "safehouse"
-		}
-		if !sandbox.AvailableCommand(cmd) {
-			forkCleanup()
-			return SessionState{}, fmt.Errorf("source session was sandboxed but %q is no longer available", cmd)
-		}
 		envKeys := []string{"GRAITH_SESSION_ID", "GRAITH_SESSION_NAME", "GRAITH_WORKTREE_PATH", "TERM"}
 		for k := range agent.Env {
 			envKeys = append(envKeys, k)
@@ -954,8 +952,13 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 		env["GRAITH_PROFILE"] = sm.paths.Profile
 	}
 
-	if sessState.SharedWorktree && !sessState.Sandboxed {
-		return SessionState{}, fmt.Errorf("shared-worktree session %q was created without sandbox and cannot be resumed safely; delete and recreate with sandbox enabled", id)
+	sandboxed, err := sm.resolveSandbox(sessState.Agent)
+	if err != nil {
+		return SessionState{}, err
+	}
+
+	if sessState.SharedWorktree && !sandboxed {
+		return SessionState{}, fmt.Errorf("shared-worktree session %q requires sandbox but sandbox is not enabled in current config; enable sandbox to resume", id)
 	}
 
 	if sessState.RepoPath != "" {
@@ -1014,15 +1017,12 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 
 	command := agent.Command
 	finalArgs := expandedArgs
-	if sessState.Sandboxed {
-		merged := sm.resolveStoredSandboxConfig(sessState)
-		cmd := merged.Command
-		if cmd == "" {
-			cmd = "safehouse"
-		}
-		if !sandbox.AvailableCommand(cmd) {
-			return SessionState{}, fmt.Errorf("session was sandboxed but %q is no longer available — install safehouse or delete and recreate the session", cmd)
-		}
+	var mergedSandbox *config.SandboxConfig
+	if sandboxed {
+		merged := sm.cfg.Sandbox.Merge(sm.cfg.Agents[sessState.Agent].Sandbox)
+		merged.ReadDirs = expandPaths(merged.ReadDirs)
+		merged.WriteDirs = expandPaths(merged.WriteDirs)
+		mergedSandbox = &merged
 		envKeys := []string{"GRAITH_SESSION_ID", "GRAITH_SESSION_NAME", "GRAITH_WORKTREE_PATH", "TERM"}
 		for k := range agent.Env {
 			envKeys = append(envKeys, k)
@@ -1072,12 +1072,16 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 	prevExitCode := sessState.ExitCode
 	prevPID := sessState.PID
 	prevAgentStatus := sessState.AgentStatus
+	prevSandboxed := sessState.Sandboxed
+	prevSandboxConfig := sessState.SandboxConfig
 
 	sessState.Status = StatusRunning
 	sessState.ExitCode = nil
 	sessState.PID = ptySess.Cmd.Process.Pid
 	sessState.AgentStatus = ""
 	sessState.IdleSince = nil
+	sessState.Sandboxed = sandboxed
+	sessState.SandboxConfig = mergedSandbox
 
 	sm.sessions[id] = ptySess
 
@@ -1086,6 +1090,8 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 		sessState.ExitCode = prevExitCode
 		sessState.PID = prevPID
 		sessState.AgentStatus = prevAgentStatus
+		sessState.Sandboxed = prevSandboxed
+		sessState.SandboxConfig = prevSandboxConfig
 		delete(sm.sessions, id)
 		_ = ptySess.Kill()
 		ptySess.Close()
@@ -1736,19 +1742,6 @@ func (sm *SessionManager) resolveSandbox(agentName string) (bool, error) {
 		return false, fmt.Errorf("sandbox enabled for agent %q but %q is not available — install safehouse or disable sandbox in config", agentName, cmd)
 	}
 	return true, nil
-}
-
-// resolveStoredSandboxConfig returns the sandbox config persisted on the
-// session. For sessions created before this field was stored, it falls back
-// to re-merging from the current config.
-func (sm *SessionManager) resolveStoredSandboxConfig(sess *SessionState) config.SandboxConfig {
-	if sess.SandboxConfig != nil {
-		return *sess.SandboxConfig
-	}
-	merged := sm.cfg.Sandbox.Merge(sm.cfg.Agents[sess.Agent].Sandbox)
-	merged.ReadDirs = expandPaths(merged.ReadDirs)
-	merged.WriteDirs = expandPaths(merged.WriteDirs)
-	return merged
 }
 
 func (sm *SessionManager) sandboxOptsFromConfig(merged config.SandboxConfig, sessionID, worktreePath string, envKeys []string, agentHooks bool) sandbox.WrapOpts {
