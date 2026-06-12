@@ -1406,8 +1406,15 @@ func TestResumeRefreshesSandboxConfig(t *testing.T) {
 		}
 
 		ptySess, ok := sm.GetPTY("s1")
-		if ok && !ptySess.Exited() {
-			_ = ptySess.Kill()
+		if ok {
+			sm.mu.Lock()
+			delete(sm.sessions, "s1")
+			sm.mu.Unlock()
+			if !ptySess.Exited() {
+				_ = ptySess.Kill()
+			}
+			<-ptySess.Done()
+			ptySess.Close()
 		}
 	})
 
@@ -1456,8 +1463,15 @@ func TestResumeRefreshesSandboxConfig(t *testing.T) {
 		}
 
 		ptySess, ok := sm.GetPTY("s1")
-		if ok && !ptySess.Exited() {
-			_ = ptySess.Kill()
+		if ok {
+			sm.mu.Lock()
+			delete(sm.sessions, "s1")
+			sm.mu.Unlock()
+			if !ptySess.Exited() {
+				_ = ptySess.Kill()
+			}
+			<-ptySess.Done()
+			ptySess.Close()
 		}
 	})
 
