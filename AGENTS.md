@@ -19,9 +19,8 @@ go test ./...                  # unit tests
 go test -race ./...            # race detector (CI runs this)
 ```
 
-There is no `Makefile` on main — the CI workflow on the `setup-ci` branch uses
-`make lint-only` with a Docker-based golangci-lint. Locally, just use `go build`
-and `go test`.
+There is a `Makefile` with `build`, `test`, `lint`, `lint-only`, and `fmt` targets.
+`make build` produces `./gr`. You can also use `go build` and `go test` directly.
 
 The build path is `./cmd/graith`, not `./cmd/gr`.
 
@@ -104,6 +103,8 @@ The daemon sets these in every agent process:
 
 - `GRAITH_SESSION_ID` — unique session ID
 - `GRAITH_SESSION_NAME` — human-readable session name
+- `GRAITH_AGENT_TYPE` — agent type (e.g. `claude`, `codex`)
+- `GRAITH_WORKTREE_PATH` — absolute path to the session worktree
 
 These are used by `gr msg pub/sub` to identify the sender automatically.
 
@@ -113,7 +114,8 @@ TOML at `~/.config/graith/config.toml` (or `$XDG_CONFIG_HOME/graith/config.toml`
 All fields optional — `config.Default()` provides sensible defaults. See
 `internal/config/config.go` for the full struct.
 
-Template variables in agent args: `{agent_session_id}`, `{username}`, `{name}`, `{id}`.
+Template variables in agent args: `{agent_session_id}`, `{session_id}`, `{session_name}`,
+`{username}`, `{worktree_path}`, `{model}`, `{fork_source_agent_session_id}`.
 
 ## Testing
 
@@ -125,10 +127,10 @@ Template variables in agent args: `{agent_session_id}`, `{username}`, `{name}`, 
 ## Conventions
 
 - Commit messages: conventional commits (`feat:`, `fix:`, `chore:`, etc.)
-- No `Makefile` needed for basic development — `go build` and `go test` suffice
+- `make build` produces `./gr`; `go build` and `go test` also work directly
 - All packages are under `internal/` — no public API
 - Errors: return `fmt.Errorf(...)`, don't use `log.Fatal` in library code
-- The daemon logs to `~/.local/state/graith/daemon.log` (slog, JSON format)
+- The daemon logs to `~/.local/share/graith/daemon.log` (slog, JSON format)
 
 ## Using graith to work on graith
 
@@ -181,8 +183,7 @@ Use `gr msg send <session> <body>` to message a specific session — this is
 the right choice when you want to provide context to one agent. Use
 `gr msg pub --topic` for broadcasting to any session that subscribes.
 
-The `--subscriber` flag tracks read position per consumer. Use `--ack` to
-mark messages as read.
+Use `--ack` to mark messages as read.
 
 ### Typing into sessions remotely
 

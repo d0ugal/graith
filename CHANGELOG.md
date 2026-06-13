@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.27.3](https://github.com/d0ugal/graith/compare/v0.27.2...v0.27.3) (2026-06-13)
+
+
+### Bug Fixes
+
+* set DataDir and LogDir in test helper to prevent log file leaks ([03dba96](https://github.com/d0ugal/graith/commit/03dba96a32371fb645a9a98cc46cde21c481c278))
+
+## [0.27.2](https://github.com/d0ugal/graith/compare/v0.27.1...v0.27.2) (2026-06-13)
+
+
+### Bug Fixes
+
+* parse model IDs from validate_model output with descriptions ([01d835c](https://github.com/d0ugal/graith/commit/01d835cf8ba28468283953fd544722b13b3c830f))
+
 ## [0.27.1](https://github.com/d0ugal/graith/compare/v0.27.0...v0.27.1) (2026-06-13)
 
 
