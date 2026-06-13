@@ -1,9 +1,11 @@
 package daemon
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/d0ugal/graith/internal/config"
 )
@@ -14,7 +16,9 @@ func validateModel(agent config.Agent, model string) error {
 	}
 
 	parts := strings.Fields(agent.ValidateModel)
-	out, err := exec.Command(parts[0], parts[1:]...).Output()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, parts[0], parts[1:]...).Output()
 	if err != nil {
 		return fmt.Errorf("validate model: failed to run %q: %w", agent.ValidateModel, err)
 	}
