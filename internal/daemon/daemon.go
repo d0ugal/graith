@@ -471,7 +471,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 		Model:          model,
 	}
 	cleanupOnError := func() {
-		sm.cleanupHooks(id)
+		sm.cleanupHooks(id, agentName, worktreePath)
 		if sharedWorktree || inPlace {
 			return
 		}
@@ -532,7 +532,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 	}
 
 	if agentHooks {
-		hookArgs, hookEnv, err := sm.injectHooks(agentName, id)
+		hookArgs, hookEnv, err := sm.injectHooks(agentName, id, worktreePath)
 		if err != nil {
 			cleanupOnError()
 			return SessionState{}, fmt.Errorf("inject agent hooks: %w", err)
@@ -637,7 +637,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 		if scratchDir != "" {
 			os.RemoveAll(scratchDir)
 		}
-		sm.cleanupHooks(id)
+		sm.cleanupHooks(id, agentName, worktreePath)
 		os.Remove(logPath)
 		return SessionState{}, fmt.Errorf("persist session state: %w", err)
 	}
@@ -747,7 +747,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 		args = agent.Args
 	}
 	forkCleanup := func() {
-		sm.cleanupHooks(id)
+		sm.cleanupHooks(id, agentName, worktreePath)
 		if len(forkIncludes) > 0 {
 			sm.teardownIncludes(repoRoot, worktreePath, branchName, forkIncludes)
 		} else {
@@ -779,7 +779,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 	}
 
 	if source.AgentHooks {
-		hookArgs, hookEnv, err := sm.injectHooks(agentName, id)
+		hookArgs, hookEnv, err := sm.injectHooks(agentName, id, worktreePath)
 		if err != nil {
 			forkCleanup()
 			return SessionState{}, fmt.Errorf("inject agent hooks: %w", err)
@@ -1018,7 +1018,7 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 	}
 
 	if sessState.AgentHooks {
-		hookArgs, hookEnv, err := sm.injectHooks(sessState.Agent, id)
+		hookArgs, hookEnv, err := sm.injectHooks(sessState.Agent, id, sessState.WorktreePath)
 		if err != nil {
 			return SessionState{}, fmt.Errorf("inject agent hooks: %w", err)
 		}
@@ -1180,7 +1180,7 @@ func (sm *SessionManager) Delete(id string) error {
 		_ = os.RemoveAll(worktreePath)
 	}
 	_ = os.Remove(filepath.Join(sm.paths.LogDir, id+".log"))
-	sm.cleanupHooks(id)
+	sm.cleanupHooks(id, sessState.Agent, worktreePath)
 
 	if hasClient {
 		ac.kick()
@@ -1203,6 +1203,7 @@ func (sm *SessionManager) DeleteWithChildren(id string) ([]string, error) {
 
 	type snapshot struct {
 		id           string
+		agent        string
 		repoPath     string
 		worktreePath string
 		branch       string
@@ -1218,6 +1219,7 @@ func (sm *SessionManager) DeleteWithChildren(id string) ([]string, error) {
 		sess := sm.state.Sessions[did]
 		s := snapshot{
 			id:           did,
+			agent:        sess.Agent,
 			repoPath:     sess.RepoPath,
 			worktreePath: sess.WorktreePath,
 			branch:       sess.Branch,
@@ -1268,7 +1270,7 @@ func (sm *SessionManager) DeleteWithChildren(id string) ([]string, error) {
 			_ = os.RemoveAll(s.worktreePath)
 		}
 		_ = os.Remove(filepath.Join(sm.paths.LogDir, s.id+".log"))
-		sm.cleanupHooks(s.id)
+		sm.cleanupHooks(s.id, s.agent, s.worktreePath)
 
 		if s.client != nil {
 			s.client.kick()
