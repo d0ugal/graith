@@ -26,8 +26,15 @@ func validateModel(agent config.Agent, model string) error {
 	var valid []string
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		line = strings.TrimSpace(line)
-		if line != "" {
-			valid = append(valid, line)
+		if line == "" {
+			continue
+		}
+		id := line
+		if before, _, ok := strings.Cut(line, " - "); ok {
+			id = strings.TrimSpace(before)
+		}
+		if id != "" {
+			valid = append(valid, id)
 		}
 	}
 

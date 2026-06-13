@@ -1,6 +1,8 @@
 package daemon
 
 import (
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -33,6 +35,22 @@ func TestValidateModel(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "model-a") {
 			t.Fatalf("expected valid models listed in error, got: %v", err)
+		}
+	})
+
+	t.Run("model with description suffix", func(t *testing.T) {
+		script := filepath.Join(t.TempDir(), "list-models.sh")
+		os.WriteFile(script, []byte("#!/bin/sh\necho 'gemini-3.1-pro - Gemini 3.1 Pro (current)'\necho 'gpt-5.5-high - GPT-5.5 1M High'\necho 'grok-4.3 - Grok 4.3 1M'\n"), 0o755)
+		described := config.Agent{ValidateModel: script}
+		if err := validateModel(described, "gemini-3.1-pro"); err != nil {
+			t.Fatalf("expected no error, got: %v", err)
+		}
+		if err := validateModel(described, "grok-4.3"); err != nil {
+			t.Fatalf("expected no error, got: %v", err)
+		}
+		err := validateModel(described, "nonexistent")
+		if err == nil {
+			t.Fatal("expected error for invalid model")
 		}
 	})
 
