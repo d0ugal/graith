@@ -76,7 +76,10 @@ gr    # bare gr opens the session picker
 #   ctrl+b d    → detach
 #   ctrl+b s    → open shell in the worktree
 #   ctrl+b n/p  → next / previous session
+#   ctrl+b l    → last (most recently attached) session
 #   ctrl+b c    → create a new session
+#   ctrl+b f    → fork the current session
+#   ctrl+b r    → restart a stopped session
 #   ctrl+b ctrl+b → send a literal ctrl+b
 
 # Rename / delete
@@ -307,7 +310,7 @@ When empty (the default), any repo path is accepted.
 
 ## Configuration
 
-Config lives at `~/.config/graith/config.toml` (or `$XDG_CONFIG_HOME/graith/config.toml`). All fields are optional — sensible defaults are provided. The block below shows every option at its default value.
+Config lives at `~/.config/graith/config.toml` (or `$XDG_CONFIG_HOME/graith/config.toml`). All fields are optional — sensible defaults are provided. The block below shows common options at their default values. Run `gr config show` for the full effective config.
 
 ```toml
 default_agent   = "claude"              # agent used when --agent isn't given
@@ -333,6 +336,10 @@ on_approval = true                      # notify when a session needs approval
 on_stopped  = false                     # notify when a session stops
 command     = ""                        # custom notification command (optional)
 
+[approvals]
+mode    = "prompt"                      # "prompt" (ask the agent) or "notify" (just notify)
+timeout = "10m"                         # how long to wait for an approval decision
+
 [messages]
 max_age        = ""                     # prune messages older than e.g. "7d" / "168h" (empty = keep)
 max_per_stream = 0                      # cap messages per stream (0 = unlimited)
@@ -340,22 +347,25 @@ max_per_stream = 0                      # cap messages per stream (0 = unlimited
 [keybindings]
 prefix         = "ctrl+b"               # prefix key
 new_session    = "c"                    # create a session
+fork_session   = "f"                    # fork the current session
 delete_session = "x"                    # delete a session
 detach         = "d"                    # detach
 session_list   = "w"                    # open the session picker overlay
 next_session   = "n"                    # next session
 prev_session   = "p"                    # previous session
-resume_session = "R"                    # resume a stopped session
+last_session   = "l"                    # last (most recently attached) session
+resume_session = "R"                    # resume a stopped session (config; passthrough uses 'r')
 rename_session = ","                    # rename
 search         = "/"                    # filter sessions
 scroll_mode    = "["                    # enter scroll mode
 shell          = "s"                    # open a shell in the worktree
 
-# Each agent is configured under [agents.<name>]. The four below ship by default.
+# Each agent is configured under [agents.<name>]. The five below ship by default.
 [agents.claude]
 command     = "claude"
 args        = ["--session-id", "{agent_session_id}"]
 resume_args = ["--resume", "{agent_session_id}"]
+fork_args   = ["--resume", "{fork_source_agent_session_id}", "--fork-session", "--session-id", "{agent_session_id}"]
 # env         = { KEY = "value" }       # extra env for the agent process (optional)
 # idle_timeout = "1h"                   # stop after idle (defaults to 1h if resume_args set)
 # [agents.claude.sandbox]              # per-agent sandbox overrides (merged with global)
@@ -366,6 +376,12 @@ resume_args = ["--resume", "{agent_session_id}"]
 command     = "codex"
 args        = []
 resume_args = ["resume", "--last"]
+fork_args   = ["fork", "{fork_source_agent_session_id}"]
+
+[agents.cursor]
+command     = "agent"
+args        = []
+resume_args = ["resume"]
 
 [agents.opencode]
 command     = "opencode"
@@ -380,7 +396,7 @@ resume_args = ["--conversation", "{agent_session_id}"]
 
 ### Template variables
 
-These are substituted in `branch_prefix` and agent `args`/`resume_args`:
+These are substituted in agent `args`, `resume_args`, and `fork_args`. Only `{username}` is available in `branch_prefix`.
 
 | Variable | Expands to |
 |----------|-----------|
@@ -404,8 +420,11 @@ Press the prefix (`ctrl+b`), then:
 | `d` | Detach (leave the agent running) |
 | `s` | Open a shell in the worktree |
 | `c` | Create a new session |
+| `f` | Fork the current session |
 | `n` / `p` | Next / previous session |
-| `R` | Resume a stopped session |
+| `l` | Last (most recently attached) session |
+| `r` | Restart a stopped session |
+| `a` | Open the approvals overlay |
 | `,` | Rename the session |
 | `x` | Delete the session |
 | `ctrl+b` | Send a literal prefix byte to the agent |
@@ -451,6 +470,7 @@ The daemon sets these in every agent process:
 |----------|-------|
 | `GRAITH_SESSION_ID` | unique session ID |
 | `GRAITH_SESSION_NAME` | human-readable session name |
+| `GRAITH_AGENT_TYPE` | agent type (e.g. `claude`, `codex`) |
 | `GRAITH_WORKTREE_PATH` | absolute path to the worktree |
 
 `gr shell` additionally exports `GRAITH_WORKTREE`. `gr msg` reads `GRAITH_SESSION_ID`/`GRAITH_SESSION_NAME` to identify the sender automatically.
