@@ -92,6 +92,10 @@ type ResumeMsg struct {
 	SessionID string `json:"session_id"`
 }
 
+type RestartMsg struct {
+	SessionID string `json:"session_id"`
+}
+
 type UpgradeMsg struct {
 	ExecPath string `json:"exec_path,omitempty"`
 }
