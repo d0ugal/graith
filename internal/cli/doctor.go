@@ -8,10 +8,10 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/d0ugal/graith/internal/client"
-	"github.com/d0ugal/graith/internal/daemon"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/d0ugal/graith/internal/sandbox"
 	"github.com/d0ugal/graith/internal/version"
@@ -245,27 +245,12 @@ func (dc *doctorContext) checkDaemon(daemonVersion string) *protocol.Diagnostics
 		return nil
 	}
 
-	// Check PID file validity (but don't abort — the daemon may still be reachable)
-	if pidData, err := os.ReadFile(paths.PIDFile); err == nil {
-		var pid int
-		if _, err := fmt.Sscanf(strings.TrimSpace(string(pidData)), "%d", &pid); err == nil {
-			if !daemon.IsGraithDaemon(pid) {
-				dc.fail("daemon", "PID file points to non-graith process (PID %d)", pid)
-				if doctorAutofix {
-					os.Remove(paths.PIDFile)
-					dc.hint("Removed stale PID file")
-				} else {
-					dc.hint("Use --autofix to remove stale PID file")
-				}
-			}
-		}
-	}
-
 	// Use a raw dial with deadline instead of client.Connect to avoid
 	// triggering auto-upgrade/restart as a side effect of diagnostics.
 	conn, err := net.DialTimeout("unix", paths.SocketPath, 2*time.Second)
 	if err != nil {
 		dc.fail("daemon", "Cannot connect to daemon: %v", err)
+		dc.checkStalePID()
 		return nil
 	}
 	defer conn.Close()
@@ -325,6 +310,26 @@ func (dc *doctorContext) checkDaemon(daemonVersion string) *protocol.Diagnostics
 
 	dc.pass("daemon", "Running (PID %d, uptime %s)", diag.DaemonPID, diag.DaemonUptime)
 	return &diag
+}
+
+func (dc *doctorContext) checkStalePID() {
+	pidData, err := os.ReadFile(paths.PIDFile)
+	if err != nil {
+		return
+	}
+	var pid int
+	if _, err := fmt.Sscanf(strings.TrimSpace(string(pidData)), "%d", &pid); err != nil {
+		return
+	}
+	if pid <= 0 || syscall.Kill(pid, 0) != nil {
+		dc.fail("daemon", "PID file points to dead process (PID %d)", pid)
+		if doctorAutofix {
+			os.Remove(paths.PIDFile)
+			dc.hint("Removed stale PID file")
+		} else {
+			dc.hint("Use --autofix to remove stale PID file")
+		}
+	}
 }
 
 func (dc *doctorContext) checkSessions(diag *protocol.DiagnosticsMsg) {
@@ -437,6 +442,94 @@ func (dc *doctorContext) checkStorage(diag *protocol.DiagnosticsMsg) {
 			dc.hint("Use --autofix to remove")
 		}
 	}
+
+	// Check for orphaned worktree directories
+	orphanedWorktrees := dc.findOrphanedWorktrees(sessionIDs)
+	if len(orphanedWorktrees) > 0 {
+		var totalSize int64
+		for _, wt := range orphanedWorktrees {
+			totalSize += wt.size
+		}
+		dc.warn("storage", "%d orphaned worktree dir(s) (%s)", len(orphanedWorktrees), formatBytes(totalSize))
+		for _, wt := range orphanedWorktrees {
+			dc.hint("%s (%s)", wt.path, formatBytes(wt.size))
+		}
+		if doctorAutofix {
+			removed := 0
+			for _, wt := range orphanedWorktrees {
+				if os.RemoveAll(wt.path) == nil {
+					removed++
+				}
+			}
+			dc.hint("Removed %d orphaned worktree dir(s)", removed)
+		} else {
+			dc.hint("Use --autofix to remove")
+		}
+	}
+}
+
+type orphanedWorktree struct {
+	path string
+	size int64
+}
+
+func (dc *doctorContext) findOrphanedWorktrees(sessionIDs map[string]bool) []orphanedWorktree {
+	var orphaned []orphanedWorktree
+
+	// Worktrees live at <DataDir>/worktrees/<repoName>/<repoHash>/<sessionID>
+	worktreesDir := filepath.Join(paths.DataDir, "worktrees")
+	repos, err := os.ReadDir(worktreesDir)
+	if err != nil {
+		return nil
+	}
+	for _, repo := range repos {
+		if !repo.IsDir() {
+			continue
+		}
+		repoDir := filepath.Join(worktreesDir, repo.Name())
+		hashes, err := os.ReadDir(repoDir)
+		if err != nil {
+			continue
+		}
+		for _, hash := range hashes {
+			if !hash.IsDir() {
+				continue
+			}
+			hashDir := filepath.Join(repoDir, hash.Name())
+			sessions, err := os.ReadDir(hashDir)
+			if err != nil {
+				continue
+			}
+			for _, sess := range sessions {
+				if !sess.IsDir() {
+					continue
+				}
+				if !sessionIDs[sess.Name()] {
+					sessDir := filepath.Join(hashDir, sess.Name())
+					size, _ := dirSize(sessDir)
+					orphaned = append(orphaned, orphanedWorktree{path: sessDir, size: size})
+				}
+			}
+		}
+	}
+
+	// Scratch dirs live at <DataDir>/scratch/<sessionID>
+	scratchDir := filepath.Join(paths.DataDir, "scratch")
+	scratches, err := os.ReadDir(scratchDir)
+	if err == nil {
+		for _, s := range scratches {
+			if !s.IsDir() {
+				continue
+			}
+			if !sessionIDs[s.Name()] {
+				sDir := filepath.Join(scratchDir, s.Name())
+				size, _ := dirSize(sDir)
+				orphaned = append(orphaned, orphanedWorktree{path: sDir, size: size})
+			}
+		}
+	}
+
+	return orphaned
 }
 
 func formatBytes(b int64) string {
