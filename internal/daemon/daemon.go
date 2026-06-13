@@ -1810,7 +1810,10 @@ func (sm *SessionManager) sandboxOptsFromConfig(merged config.SandboxConfig, ses
 	writeDirs := expandPaths(merged.WriteDirs)
 
 	if agentHooks {
-		readDirs = append(readDirs, sm.hookDir(sessionID))
+		hd := sm.hookDir(sessionID)
+		if _, err := os.Stat(hd); err == nil {
+			readDirs = append(readDirs, hd)
+		}
 	}
 	readDirs = append(readDirs, filepath.Dir(sm.paths.ConfigFile))
 	if grBin := resolveGrBin(); grBin != "gr" {
