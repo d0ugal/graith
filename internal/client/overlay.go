@@ -271,9 +271,11 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 		indicatorColor = colorRed
 	}
 	styledIndicator := lipgloss.NewStyle().Foreground(indicatorColor).Render(indicator)
+	staleMarker := " "
 	if si.info.ConfigStale {
-		styledIndicator += lipgloss.NewStyle().Foreground(colorYellow).Render("↻")
+		staleMarker = lipgloss.NewStyle().Foreground(colorYellow).Render("↻")
 	}
+	styledIndicator += staleMarker
 
 	currentMark := "  "
 	if isCurrent {

@@ -502,6 +502,23 @@ func TestIsConfigStale(t *testing.T) {
 		}
 	})
 
+	t.Run("changed global sandbox is stale", func(t *testing.T) {
+		sess := SessionState{
+			Agent: "claude",
+			CreationCfg: &CreationConfig{
+				Agent:         agent,
+				SandboxConfig: cfg.Sandbox.Merge(agent.Sandbox),
+			},
+		}
+		changedCfg := &config.Config{
+			Agents:  map[string]config.Agent{"claude": agent},
+			Sandbox: config.SandboxConfig{Enabled: true, WriteDirs: []string{"/new"}},
+		}
+		if !isConfigStale(sess, changedCfg) {
+			t.Error("expected stale when global sandbox config differs")
+		}
+	})
+
 	t.Run("removed agent is stale", func(t *testing.T) {
 		sess := SessionState{
 			Agent: "codex",
