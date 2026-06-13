@@ -203,6 +203,7 @@ type SessionInfo struct {
 	CostUSD        *float64           `json:"cost_usd,omitempty"`
 	ContextPercent *float64           `json:"context_percent,omitempty"`
 	Includes       []IncludedRepoInfo `json:"includes,omitempty"`
+	ConfigStale    bool               `json:"config_stale,omitempty"`
 }
 
 type IncludedRepoInfo struct {

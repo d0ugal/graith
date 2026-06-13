@@ -623,6 +623,10 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 		Status:                 StatusRunning,
 		PID:                    ptySess.Cmd.Process.Pid,
 		CreatedAt:              time.Now().UTC(),
+		CreationCfg: &CreationConfig{
+			Agent:         agent,
+			SandboxConfig: sm.cfg.Sandbox.Merge(agent.Sandbox),
+		},
 	}
 
 	sm.state.Sessions[id] = sessState
@@ -855,6 +859,10 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 		Status:         StatusRunning,
 		PID:            ptySess.Cmd.Process.Pid,
 		CreatedAt:      time.Now().UTC(),
+		CreationCfg: &CreationConfig{
+			Agent:         agent,
+			SandboxConfig: sm.cfg.Sandbox.Merge(agent.Sandbox),
+		},
 	}
 
 	sm.state.Sessions[id] = sessState
@@ -1087,6 +1095,7 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 	prevAgentStatus := sessState.AgentStatus
 	prevSandboxed := sessState.Sandboxed
 	prevSandboxConfig := sessState.SandboxConfig
+	prevCreationCfg := sessState.CreationCfg
 
 	sessState.Status = StatusRunning
 	sessState.ExitCode = nil
@@ -1095,6 +1104,10 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 	sessState.IdleSince = nil
 	sessState.Sandboxed = sandboxed
 	sessState.SandboxConfig = mergedSandbox
+	sessState.CreationCfg = &CreationConfig{
+		Agent:         agent,
+		SandboxConfig: sm.cfg.Sandbox.Merge(agent.Sandbox),
+	}
 
 	sm.sessions[id] = ptySess
 
@@ -1105,6 +1118,7 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 		sessState.AgentStatus = prevAgentStatus
 		sessState.Sandboxed = prevSandboxed
 		sessState.SandboxConfig = prevSandboxConfig
+		sessState.CreationCfg = prevCreationCfg
 		delete(sm.sessions, id)
 		_ = ptySess.Kill()
 		ptySess.Close()

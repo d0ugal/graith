@@ -380,7 +380,7 @@ func TestToSessionInfo(t *testing.T) {
 		HookContextPercent: &ctxPct,
 	}
 
-	info := toSessionInfo(sess)
+	info := toSessionInfo(sess, config.Default())
 
 	if info.ID != sess.ID {
 		t.Errorf("ID = %q, want %q", info.ID, sess.ID)
@@ -438,11 +438,81 @@ func TestToSessionInfoNilExitCode(t *testing.T) {
 		CreatedAt: time.Now().UTC(),
 	}
 
-	info := toSessionInfo(sess)
+	info := toSessionInfo(sess, config.Default())
 
 	if info.ExitCode != nil {
 		t.Errorf("ExitCode = %v, want nil", info.ExitCode)
 	}
+}
+
+func TestIsConfigStale(t *testing.T) {
+	agent := config.Agent{
+		Command: "claude",
+		Args:    []string{"--model", "opus"},
+		Sandbox: config.SandboxConfig{Enabled: true, ReadDirs: []string{"/tmp"}},
+	}
+	cfg := &config.Config{
+		Agents:  map[string]config.Agent{"claude": agent},
+		Sandbox: config.SandboxConfig{Enabled: true},
+	}
+
+	t.Run("nil creation config is not stale", func(t *testing.T) {
+		sess := SessionState{Agent: "claude"}
+		if isConfigStale(sess, cfg) {
+			t.Error("expected not stale when CreationCfg is nil")
+		}
+	})
+
+	t.Run("matching config is not stale", func(t *testing.T) {
+		sess := SessionState{
+			Agent: "claude",
+			CreationCfg: &CreationConfig{
+				Agent:         agent,
+				SandboxConfig: cfg.Sandbox.Merge(agent.Sandbox),
+			},
+		}
+		if isConfigStale(sess, cfg) {
+			t.Error("expected not stale when config matches")
+		}
+	})
+
+	t.Run("changed agent args is stale", func(t *testing.T) {
+		sess := SessionState{
+			Agent: "claude",
+			CreationCfg: &CreationConfig{
+				Agent:         config.Agent{Command: "claude", Args: []string{"--model", "sonnet"}},
+				SandboxConfig: cfg.Sandbox.Merge(agent.Sandbox),
+			},
+		}
+		if !isConfigStale(sess, cfg) {
+			t.Error("expected stale when agent args differ")
+		}
+	})
+
+	t.Run("changed sandbox config is stale", func(t *testing.T) {
+		sess := SessionState{
+			Agent: "claude",
+			CreationCfg: &CreationConfig{
+				Agent:         agent,
+				SandboxConfig: config.SandboxConfig{Enabled: true, ReadDirs: []string{"/old"}},
+			},
+		}
+		if !isConfigStale(sess, cfg) {
+			t.Error("expected stale when sandbox config differs")
+		}
+	})
+
+	t.Run("removed agent is stale", func(t *testing.T) {
+		sess := SessionState{
+			Agent: "codex",
+			CreationCfg: &CreationConfig{
+				Agent: config.Agent{Command: "codex"},
+			},
+		}
+		if !isConfigStale(sess, cfg) {
+			t.Error("expected stale when agent no longer exists")
+		}
+	})
 }
 
 func TestIdleTracking(t *testing.T) {
@@ -1023,14 +1093,14 @@ func TestToSessionInfoSharedWorktree(t *testing.T) {
 		CreatedAt:      time.Now().UTC(),
 	}
 
-	info := toSessionInfo(sess)
+	info := toSessionInfo(sess, config.Default())
 
 	if !info.SharedWorktree {
 		t.Error("SharedWorktree = false, want true")
 	}
 
 	sess.SharedWorktree = false
-	info = toSessionInfo(sess)
+	info = toSessionInfo(sess, config.Default())
 	if info.SharedWorktree {
 		t.Error("SharedWorktree = true, want false")
 	}
@@ -2050,13 +2120,13 @@ func TestToSessionInfoInPlace(t *testing.T) {
 		Status:       StatusRunning,
 		CreatedAt:    time.Now().UTC(),
 	}
-	info := toSessionInfo(sess)
+	info := toSessionInfo(sess, config.Default())
 	if !info.InPlace {
 		t.Error("InPlace = false in SessionInfo, want true")
 	}
 
 	sess.InPlace = false
-	info = toSessionInfo(sess)
+	info = toSessionInfo(sess, config.Default())
 	if info.InPlace {
 		t.Error("InPlace = true in SessionInfo, want false")
 	}
@@ -2160,7 +2230,7 @@ func TestToSessionInfoIncludes(t *testing.T) {
 			},
 		},
 	}
-	info := toSessionInfo(sess)
+	info := toSessionInfo(sess, config.Default())
 	if len(info.Includes) != 1 {
 		t.Fatalf("Includes length = %d, want 1", len(info.Includes))
 	}
@@ -2190,7 +2260,7 @@ func TestToSessionInfoNoIncludes(t *testing.T) {
 		Status:    StatusRunning,
 		CreatedAt: time.Now().UTC(),
 	}
-	info := toSessionInfo(sess)
+	info := toSessionInfo(sess, config.Default())
 	if len(info.Includes) != 0 {
 		t.Errorf("Includes length = %d, want 0", len(info.Includes))
 	}
@@ -2319,7 +2389,7 @@ func TestToSessionInfoParentID(t *testing.T) {
 		Status:    StatusRunning,
 		CreatedAt: time.Now().UTC(),
 	}
-	info := toSessionInfo(sess)
+	info := toSessionInfo(sess, config.Default())
 	if info.ParentID != "parent" {
 		t.Errorf("SessionInfo.ParentID = %q, want %q", info.ParentID, "parent")
 	}
