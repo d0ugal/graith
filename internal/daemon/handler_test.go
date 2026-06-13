@@ -1727,3 +1727,71 @@ func TestAttachSwitchSession(t *testing.T) {
 		t.Errorf("attached to %q, want %q", info.ID, "sw2")
 	}
 }
+
+func TestDiagnostics(t *testing.T) {
+	h := newTestHarness(t)
+
+	h.sm.mu.Lock()
+	h.sm.state.Sessions["s1"] = &SessionState{
+		ID: "s1", Name: "diag-session", Status: StatusRunning,
+		Agent: "claude", CreatedAt: time.Now().UTC(),
+		WorktreePath: t.TempDir(),
+	}
+	h.sm.state.Sessions["s2"] = &SessionState{
+		ID: "s2", Name: "stopped-session", Status: StatusStopped,
+		Agent: "claude", CreatedAt: time.Now().UTC(),
+	}
+	h.sm.mu.Unlock()
+
+	h.sendControl(t, "diagnostics", struct{}{})
+
+	env := h.readControlMsg(t)
+	if env.Type != "diagnostics" {
+		t.Fatalf("expected diagnostics, got %q", env.Type)
+	}
+	var diag protocol.DiagnosticsMsg
+	if err := protocol.DecodePayload(env, &diag); err != nil {
+		t.Fatal(err)
+	}
+	if diag.DaemonPID == 0 {
+		t.Error("expected non-zero daemon PID")
+	}
+	if diag.DaemonUptime == "" {
+		t.Error("expected non-empty uptime")
+	}
+	if diag.Fleet.Total != 2 {
+		t.Errorf("fleet total = %d, want 2", diag.Fleet.Total)
+	}
+	if len(diag.Sessions) != 2 {
+		t.Errorf("session diagnostics = %d, want 2", len(diag.Sessions))
+	}
+
+	for _, sd := range diag.Sessions {
+		if sd.ID == "s1" {
+			if !sd.WorktreeExists {
+				t.Error("expected worktree to exist for s1")
+			}
+		}
+	}
+}
+
+func TestDiagnosticsEmpty(t *testing.T) {
+	h := newTestHarness(t)
+
+	h.sendControl(t, "diagnostics", struct{}{})
+
+	env := h.readControlMsg(t)
+	if env.Type != "diagnostics" {
+		t.Fatalf("expected diagnostics, got %q", env.Type)
+	}
+	var diag protocol.DiagnosticsMsg
+	if err := protocol.DecodePayload(env, &diag); err != nil {
+		t.Fatal(err)
+	}
+	if diag.Fleet.Total != 0 {
+		t.Errorf("fleet total = %d, want 0", diag.Fleet.Total)
+	}
+	if len(diag.Sessions) != 0 {
+		t.Errorf("session diagnostics = %d, want 0", len(diag.Sessions))
+	}
+}
