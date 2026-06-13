@@ -103,6 +103,8 @@ The daemon sets these in every agent process:
 
 - `GRAITH_SESSION_ID` — unique session ID
 - `GRAITH_SESSION_NAME` — human-readable session name
+- `GRAITH_AGENT_TYPE` — agent type (e.g. `claude`, `codex`)
+- `GRAITH_WORKTREE_PATH` — absolute path to the session worktree
 
 These are used by `gr msg pub/sub` to identify the sender automatically.
 
