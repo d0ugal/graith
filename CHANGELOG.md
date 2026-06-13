@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.26.0](https://github.com/d0ugal/graith/compare/v0.25.0...v0.26.0) (2026-06-13)
+
+
+### Features
+
+* allow restarting running sessions from session selector ([fd8ee3c](https://github.com/d0ugal/graith/commit/fd8ee3c898f9f6c3d679f0545d8a781528ea2431))
+* always enable agent hooks, remove --agent-hooks flag ([0af5f9d](https://github.com/d0ugal/graith/commit/0af5f9d449d028d2b8bb5845925244f7ef7ea0fa))
+
+
+### Bug Fixes
+
+* add saveState in Restart stop path, fix flaky MCP stderr test ([9c85bae](https://github.com/d0ugal/graith/commit/9c85bae1ba443604d383f2f13c214df4d0d56fe4))
+* don't block agents without hook support, add cursor hooks ([91a9dfd](https://github.com/d0ugal/graith/commit/91a9dfd79c284ad2341386fae3bebc0d3d5f28a4)), closes [#389](https://github.com/d0ugal/graith/issues/389)
+
 ## [0.25.0](https://github.com/d0ugal/graith/compare/v0.24.3...v0.25.0) (2026-06-12)
 
 
