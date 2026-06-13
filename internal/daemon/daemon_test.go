@@ -17,8 +17,11 @@ import (
 
 func newTestSessionManager(t *testing.T) *SessionManager {
 	t.Helper()
+	tmpDir := t.TempDir()
 	return NewSessionManager(config.Default(), config.Paths{
-		StateFile: filepath.Join(t.TempDir(), "state.json"),
+		StateFile: filepath.Join(tmpDir, "state.json"),
+		DataDir:   tmpDir,
+		LogDir:    tmpDir,
 	}, slog.Default())
 }
 
