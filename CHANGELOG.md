@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.27.1](https://github.com/d0ugal/graith/compare/v0.27.0...v0.27.1) (2026-06-13)
+
+
+### Bug Fixes
+
+* only add hooks dir to sandbox read_dirs when it exists ([8b5b714](https://github.com/d0ugal/graith/commit/8b5b714aceca193a03b7934e40280f6565c17d5c))
+
 ## [0.27.0](https://github.com/d0ugal/graith/compare/v0.26.0...v0.27.0) (2026-06-13)
 
 
