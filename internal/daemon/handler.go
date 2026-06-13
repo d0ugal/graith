@@ -251,6 +251,19 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("resumed", toSessionInfo(sess))
 				}
 
+			case "restart":
+				var r protocol.RestartMsg
+				if err := protocol.DecodePayload(msg, &r); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid restart message"})
+					continue
+				}
+				sess, err := sm.Restart(r.SessionID, clientRows, clientCols)
+				if err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+				} else {
+					sendControl("restarted", toSessionInfo(sess))
+				}
+
 			case "logs":
 				var l protocol.LogsMsg
 				if err := protocol.DecodePayload(msg, &l); err != nil {
