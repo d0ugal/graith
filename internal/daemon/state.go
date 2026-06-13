@@ -13,7 +13,7 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 )
 
-const CurrentStateVersion = 2
+const CurrentStateVersion = 3
 
 type SessionStatus string
 
@@ -22,6 +22,13 @@ const (
 	StatusStopped SessionStatus = "stopped"
 	StatusErrored SessionStatus = "errored"
 )
+
+// CreationConfig captures the agent and sandbox configuration at session
+// creation time so the overlay can detect when the live config has diverged.
+type CreationConfig struct {
+	Agent         config.Agent         `json:"agent"`
+	SandboxConfig config.SandboxConfig `json:"sandbox_config"`
+}
 
 type SessionState struct {
 	ID                     string                `json:"id"`
@@ -55,6 +62,7 @@ type SessionState struct {
 	AgentHooks             bool                  `json:"agent_hooks,omitempty"`
 	CreatedAt              time.Time             `json:"created_at"`
 	LastAttachedAt         *time.Time            `json:"last_attached_at,omitempty"`
+	CreationCfg            *CreationConfig       `json:"creation_config,omitempty"`
 }
 
 type IncludedRepoState struct {
@@ -127,6 +135,7 @@ func SaveState(path string, state *State) error {
 var migrations = map[int]func(*State) error{
 	0: migrateV0ToV1,
 	1: migrateV1ToV2,
+	2: migrateV2ToV3,
 }
 
 func migrateState(state *State) error {
@@ -150,6 +159,12 @@ func migrateV0ToV1(_ *State) error {
 }
 
 func migrateV1ToV2(_ *State) error {
+	return nil
+}
+
+// migrateV2ToV3 is a no-op: v3 adds the optional creation_config field which
+// defaults to nil for existing sessions (shown as "unknown" rather than stale).
+func migrateV2ToV3(_ *State) error {
 	return nil
 }
 
