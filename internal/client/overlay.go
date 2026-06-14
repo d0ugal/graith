@@ -650,6 +650,10 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.list.CursorDown()
 					}
 				}
+				if _, ok := m.list.SelectedItem().(sessionItem); !ok {
+					m.previewContent = ""
+					m.previewSessionID = ""
+				}
 				return m, tea.Batch(cmd, m.fetchPreviewCmd())
 			}
 
