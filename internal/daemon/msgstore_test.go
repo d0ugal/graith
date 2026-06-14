@@ -991,3 +991,81 @@ func TestCleanupEmptyDB(t *testing.T) {
 		t.Errorf("deleted = %d, want 0", deleted)
 	}
 }
+
+func TestCleanupRemovesStaleCursors(t *testing.T) {
+	s := testStore(t)
+
+	oldTime := time.Now().UTC().Add(-48 * time.Hour).Format(time.RFC3339Nano)
+	newTime := time.Now().UTC().Format(time.RFC3339Nano)
+
+	// Insert old messages and cursors directly.
+	s.db.Exec(
+		`INSERT INTO messages (id, seq, stream, sender_id, sender_name, body, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		"msg_old1", 1, "old-stream", "s1", "a", "old message", oldTime,
+	)
+	s.db.Exec(
+		`INSERT INTO cursors (subscriber, stream, ack_seq, updated_at)
+		 VALUES (?, ?, ?, ?)`,
+		"stale-reader", "old-stream", 1, oldTime,
+	)
+
+	// Insert a fresh message and cursor on a different stream.
+	s.Publish("fresh-stream", "s1", "a", "new message", "", "")
+	s.db.Exec(
+		`INSERT INTO cursors (subscriber, stream, ack_seq, updated_at)
+		 VALUES (?, ?, ?, ?)`,
+		"active-reader", "fresh-stream", 1, newTime,
+	)
+
+	// Cleanup with a 24h max age — removes old messages and stale cursors.
+	_, err := s.Cleanup(24*time.Hour, 0)
+	if err != nil {
+		t.Fatalf("Cleanup: %v", err)
+	}
+
+	// The stale cursor should be gone (its stream's messages were deleted AND
+	// its updated_at is older than the cutoff).
+	var staleCursorCount int
+	s.db.QueryRow("SELECT COUNT(*) FROM cursors WHERE subscriber = ?", "stale-reader").Scan(&staleCursorCount)
+	if staleCursorCount != 0 {
+		t.Errorf("stale cursor count = %d, want 0", staleCursorCount)
+	}
+
+	// The active cursor should remain.
+	var activeCursorCount int
+	s.db.QueryRow("SELECT COUNT(*) FROM cursors WHERE subscriber = ?", "active-reader").Scan(&activeCursorCount)
+	if activeCursorCount != 1 {
+		t.Errorf("active cursor count = %d, want 1", activeCursorCount)
+	}
+}
+
+func TestCleanupRemovesOrphanedCursors(t *testing.T) {
+	s := testStore(t)
+
+	// Create messages on two streams.
+	s.Publish("keep-stream", "s1", "a", "keep this", "", "")
+	s.Publish("remove-stream", "s1", "a", "remove this", "", "")
+
+	// Create cursors for both streams.
+	s.Ack("keep-stream", "reader1", 1)
+	s.Ack("remove-stream", "reader1", 1)
+
+	// Delete all messages from remove-stream manually (simulating age-based cleanup).
+	s.db.Exec("DELETE FROM messages WHERE stream = ?", "remove-stream")
+
+	// Run cleanup — the orphaned cursor for remove-stream should be removed.
+	s.Cleanup(0, 0)
+
+	var orphanedCount int
+	s.db.QueryRow("SELECT COUNT(*) FROM cursors WHERE stream = ?", "remove-stream").Scan(&orphanedCount)
+	if orphanedCount != 0 {
+		t.Errorf("orphaned cursor count = %d, want 0", orphanedCount)
+	}
+
+	var keptCount int
+	s.db.QueryRow("SELECT COUNT(*) FROM cursors WHERE stream = ?", "keep-stream").Scan(&keptCount)
+	if keptCount != 1 {
+		t.Errorf("kept cursor count = %d, want 1", keptCount)
+	}
+}
