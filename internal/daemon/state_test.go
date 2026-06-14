@@ -330,6 +330,36 @@ func TestStatusDeletingPersistence(t *testing.T) {
 	}
 }
 
+func TestLoadStateV4MigratesStatusChangedAt(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	createdAt := time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
+	data := []byte(`{"version":4,"sessions":{
+		"s1":{"id":"s1","name":"old-session","status":"running","created_at":"` + createdAt.Format(time.RFC3339Nano) + `"},
+		"s2":{"id":"s2","name":"no-created-at","status":"stopped"}
+	}}`)
+	if err := writeFileAtomic(path, data); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Version != CurrentStateVersion {
+		t.Errorf("version = %d, want %d", loaded.Version, CurrentStateVersion)
+	}
+	s1 := loaded.Sessions["s1"]
+	if s1.StatusChangedAt.IsZero() {
+		t.Error("s1: StatusChangedAt is zero, want backfilled from CreatedAt")
+	}
+	if !s1.StatusChangedAt.Equal(createdAt) {
+		t.Errorf("s1: StatusChangedAt = %v, want %v (CreatedAt)", s1.StatusChangedAt, createdAt)
+	}
+	s2 := loaded.Sessions["s2"]
+	if !s2.StatusChangedAt.IsZero() && !s2.StatusChangedAt.Equal(s2.CreatedAt) {
+		t.Errorf("s2: StatusChangedAt = %v, want zero or equal to CreatedAt (%v)", s2.StatusChangedAt, s2.CreatedAt)
+	}
+}
+
 func TestSandboxConfigNilBackwardCompat(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
 	data := []byte(`{"version":1,"sessions":{"s1":{"id":"s1","name":"old","status":"stopped","sandboxed":true}}}`)
