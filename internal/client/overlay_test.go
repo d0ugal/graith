@@ -1229,8 +1229,8 @@ func TestView_RendersSessionList(t *testing.T) {
 	om := asOverlay(updated)
 	view := om.View().Content
 
-	if !strings.Contains(view, "Sessions") {
-		t.Error("view should contain the title 'Sessions'")
+	if !strings.Contains(view, "All") {
+		t.Error("view should contain the view name 'All'")
 	}
 	for _, name := range []string{"add-tests", "fix-overlay", "feature-x"} {
 		if !strings.Contains(view, name) {
@@ -1990,5 +1990,126 @@ func TestViewModeCycling(t *testing.T) {
 	v = v.prev()
 	if v != viewActive {
 		t.Errorf("All.prev() = %d, want viewActive (wrap)", v)
+	}
+}
+
+func TestOverlay_RightArrowCyclesView(t *testing.T) {
+	m := newOverlayModel(overlayTestSessions(), "", nil, nil)
+	var updated tea.Model
+	updated, _ = sendWindowSize(m, 120, 40)
+
+	om := asOverlay(updated)
+	if om.view != viewAll {
+		t.Fatalf("initial view = %d, want viewAll", om.view)
+	}
+
+	updated, _ = sendKey(updated, "right")
+	om = asOverlay(updated)
+	if om.view != viewNeedsAttention {
+		t.Errorf("after right: view = %d, want viewNeedsAttention", om.view)
+	}
+
+	updated, _ = sendKey(updated, "right")
+	om = asOverlay(updated)
+	if om.view != viewActive {
+		t.Errorf("after 2x right: view = %d, want viewActive", om.view)
+	}
+
+	updated, _ = sendKey(updated, "right")
+	om = asOverlay(updated)
+	if om.view != viewAll {
+		t.Errorf("after 3x right: view = %d, want viewAll (wrap)", om.view)
+	}
+}
+
+func TestOverlay_LeftArrowCyclesViewBackward(t *testing.T) {
+	m := newOverlayModel(overlayTestSessions(), "", nil, nil)
+	var updated tea.Model
+	updated, _ = sendWindowSize(m, 120, 40)
+
+	updated, _ = sendKey(updated, "left")
+	om := asOverlay(updated)
+	if om.view != viewActive {
+		t.Errorf("after left from All: view = %d, want viewActive (wrap)", om.view)
+	}
+}
+
+func TestOverlay_NeedsAttentionFiltersCorrectly(t *testing.T) {
+	sessions := []protocol.SessionInfo{
+		{ID: "s1", Name: "working", RepoName: "repo", Status: "running", AgentStatus: "active",
+			CreatedAt: time.Now().Format(time.RFC3339)},
+		{ID: "s2", Name: "blocked", RepoName: "repo", Status: "running", AgentStatus: "approval",
+			CreatedAt:       time.Now().Format(time.RFC3339),
+			StatusChangedAt: time.Now().Add(-5 * time.Minute).Format(time.RFC3339)},
+		{ID: "s3", Name: "idle", RepoName: "repo", Status: "stopped",
+			CreatedAt: time.Now().Format(time.RFC3339)},
+	}
+	m := newOverlayModel(sessions, "", nil, nil)
+	var updated tea.Model
+	updated, _ = sendWindowSize(m, 120, 40)
+
+	updated, _ = sendKey(updated, "right")
+	om := asOverlay(updated)
+
+	sessionCount := 0
+	for _, item := range om.list.Items() {
+		if _, ok := item.(sessionItem); ok {
+			sessionCount++
+		}
+	}
+	if sessionCount != 1 {
+		t.Errorf("needs attention view has %d sessions, want 1", sessionCount)
+	}
+}
+
+func TestOverlay_ActiveViewShowsOnlyRunning(t *testing.T) {
+	sessions := []protocol.SessionInfo{
+		{ID: "s1", Name: "running1", RepoName: "repo", Status: "running", AgentStatus: "active",
+			CreatedAt: time.Now().Format(time.RFC3339)},
+		{ID: "s2", Name: "stopped1", RepoName: "repo", Status: "stopped",
+			CreatedAt: time.Now().Format(time.RFC3339)},
+		{ID: "s3", Name: "running2", RepoName: "repo", Status: "running", AgentStatus: "ready",
+			CreatedAt: time.Now().Add(-10 * time.Minute).Format(time.RFC3339)},
+	}
+	m := newOverlayModel(sessions, "", nil, nil)
+	var updated tea.Model
+	updated, _ = sendWindowSize(m, 120, 40)
+
+	updated, _ = sendKey(updated, "right")
+	updated, _ = sendKey(updated, "right")
+	om := asOverlay(updated)
+
+	sessionCount := 0
+	for _, item := range om.list.Items() {
+		if _, ok := item.(sessionItem); ok {
+			sessionCount++
+		}
+	}
+	if sessionCount != 2 {
+		t.Errorf("active view has %d sessions, want 2", sessionCount)
+	}
+}
+
+func TestOverlay_EmptyNeedsAttentionView(t *testing.T) {
+	sessions := []protocol.SessionInfo{
+		{ID: "s1", Name: "working", RepoName: "repo", Status: "running", AgentStatus: "active",
+			CreatedAt: time.Now().Format(time.RFC3339)},
+	}
+	m := newOverlayModel(sessions, "", nil, nil)
+	var updated tea.Model
+	updated, _ = sendWindowSize(m, 120, 40)
+
+	updated, _ = sendKey(updated, "right")
+	om := asOverlay(updated)
+	if om.view != viewNeedsAttention {
+		t.Fatalf("view = %d, want viewNeedsAttention", om.view)
+	}
+	if len(om.list.Items()) != 0 {
+		t.Errorf("expected empty list for needs attention view, got %d items", len(om.list.Items()))
+	}
+
+	view := om.View().Content
+	if !strings.Contains(view, "Nothing needs your attention") {
+		t.Error("expected empty state message in view output")
 	}
 }

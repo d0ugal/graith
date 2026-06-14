@@ -443,6 +443,7 @@ type overlayModel struct {
 	cols             columnWidths
 	currentSessionID string
 	allSessions      []protocol.SessionInfo
+	view             viewMode
 	fetchPreview     func(sessionID string) string
 	deleteSession    func(sessionID string) error
 	previewContent   string
@@ -623,6 +624,44 @@ func (m overlayModel) fetchPreviewCmd() tea.Cmd {
 	}
 }
 
+func (m *overlayModel) rebuildForView() {
+	filtered := m.sessionsForView()
+
+	var items []list.Item
+	if m.view == viewAll {
+		items = buildGroupedItems(filtered)
+	} else {
+		for _, s := range filtered {
+			items = append(items, sessionItem{info: s})
+		}
+	}
+
+	m.cols = computeColumnWidths(filtered, m.currentSessionID)
+	if m.view == viewAll {
+		m.cols.treeIndent = maxTreeIndentFromItems(items)
+	}
+	m.contentWidth = m.cols.totalWidth()
+	m.list.SetItems(items)
+	m.list.SetDelegate(compactDelegate{cols: m.cols, currentSessionID: m.currentSessionID})
+	m.list.Select(0)
+	if len(items) > 0 {
+		if _, ok := m.list.SelectedItem().(groupHeader); ok {
+			m.list.CursorDown()
+		}
+	}
+}
+
+func (m *overlayModel) sessionsForView() []protocol.SessionInfo {
+	switch m.view {
+	case viewNeedsAttention:
+		return filterNeedsAttention(m.allSessions)
+	case viewActive:
+		return filterActive(m.allSessions)
+	default:
+		return m.allSessions
+	}
+}
+
 func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case previewMsg:
@@ -763,6 +802,16 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "q", "esc":
 				return m, tea.Quit
 
+			case "left", "h":
+				m.view = m.view.prev()
+				m.rebuildForView()
+				return m, m.fetchPreviewCmd()
+
+			case "right", "l":
+				m.view = m.view.next()
+				m.rebuildForView()
+				return m, m.fetchPreviewCmd()
+
 			case "enter":
 				if item, ok := m.list.SelectedItem().(sessionItem); ok {
 					m.selected = &item.info
@@ -878,8 +927,18 @@ func (m overlayModel) View() tea.View {
 		panelContent.WriteString(m.filterInput.View())
 		panelContent.WriteString("\n")
 	} else {
-		titleStyle := lipgloss.NewStyle().Bold(true).Foreground(colorPurple)
-		title := titleStyle.Render("Sessions")
+		dimArrow := lipgloss.NewStyle().Foreground(colorDim)
+		activeViewStyle := lipgloss.NewStyle().Bold(true).Foreground(colorPurple)
+
+		var titleParts []string
+		for i, name := range viewNames {
+			if viewMode(i) == m.view {
+				titleParts = append(titleParts, activeViewStyle.Render(name))
+			} else {
+				titleParts = append(titleParts, dimArrow.Render(name))
+			}
+		}
+		title := dimArrow.Render("◂ ") + strings.Join(titleParts, dimArrow.Render(" │ ")) + dimArrow.Render(" ▸")
 		if m.profile != "" {
 			dimStyle := lipgloss.NewStyle().Foreground(colorDim)
 			title += " " + dimStyle.Render("["+m.profile+"]")
@@ -909,7 +968,21 @@ func (m overlayModel) View() tea.View {
 	panelContent.WriteString(dim.Render(sepLine))
 	panelContent.WriteString("\n")
 
-	panelContent.WriteString(m.list.View())
+	if len(m.list.Items()) == 0 && m.view != viewAll {
+		emptyStyle := lipgloss.NewStyle().Foreground(colorDim).Italic(true)
+		emptyMsg := ""
+		switch m.view {
+		case viewNeedsAttention:
+			emptyMsg = "Nothing needs your attention"
+		case viewActive:
+			emptyMsg = "No active sessions"
+		}
+		panelContent.WriteString("\n  ")
+		panelContent.WriteString(emptyStyle.Render(emptyMsg))
+		panelContent.WriteString("\n")
+	} else {
+		panelContent.WriteString(m.list.View())
+	}
 
 	if item, ok := m.list.SelectedItem().(sessionItem); ok {
 		s := item.info
@@ -992,7 +1065,7 @@ func (m overlayModel) View() tea.View {
 
 	helpStyle := lipgloss.NewStyle().Foreground(colorFaint)
 	panelContent.WriteString("\n")
-	panelContent.WriteString(helpStyle.Render("enter attach  / filter  tab group  x delete  r restart  q quit"))
+	panelContent.WriteString(helpStyle.Render("enter attach  ◂▸ view  / filter  tab group  x delete  r restart  q quit"))
 
 	panel := lipgloss.NewStyle().
 		Width(panelWidth).
