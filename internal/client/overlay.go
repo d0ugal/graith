@@ -462,6 +462,12 @@ func buildGroupedItems(sessions []protocol.SessionInfo) []list.Item {
 		for _, root := range roots {
 			walk(root, "", "")
 		}
+		// Render any cycle members that weren't reachable from roots.
+		for _, s := range g {
+			if !visited[s.ID] {
+				walk(s, "", "")
+			}
+		}
 	}
 	return items
 }
