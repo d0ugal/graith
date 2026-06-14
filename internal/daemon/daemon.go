@@ -938,6 +938,9 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 	if !ok {
 		return SessionState{}, fmt.Errorf("session %q not found", id)
 	}
+	if sessState.Status == StatusDeleting {
+		return SessionState{}, fmt.Errorf("session %q is being deleted", id)
+	}
 	if sessState.Status == StatusRunning {
 		return *sessState, nil
 	}
@@ -1178,11 +1181,9 @@ func (sm *SessionManager) Delete(id string) error {
 	sessionIncludes := make([]IncludedRepoState, len(sessState.Includes))
 	copy(sessionIncludes, sessState.Includes)
 
-	if sessState.Status == StatusRunning {
-		sessState.Status = StatusStopped
-		sessState.PID = 0
-		_ = sm.saveState()
-	}
+	sessState.Status = StatusDeleting
+	sessState.PID = 0
+	_ = sm.saveState()
 	sm.mu.Unlock()
 
 	// Blocking operations outside the lock.
@@ -1218,6 +1219,12 @@ func (sm *SessionManager) Delete(id string) error {
 	if teardownErr != nil {
 		sm.log.Error("git teardown failed, session kept for retry",
 			"session_id", id, "err", teardownErr)
+		sm.mu.Lock()
+		if s, ok := sm.state.Sessions[id]; ok {
+			s.Status = StatusStopped
+			_ = sm.saveState()
+		}
+		sm.mu.Unlock()
 		if hasClient {
 			ac.kick()
 		}
@@ -1290,10 +1297,8 @@ func (sm *SessionManager) DeleteWithChildren(id string) ([]string, error) {
 			delete(sm.attachedClients, did)
 		}
 		snaps = append(snaps, s)
-		if sess.Status == StatusRunning {
-			sess.Status = StatusStopped
-			sess.PID = 0
-		}
+		sess.Status = StatusDeleting
+		sess.PID = 0
 	}
 	_ = sm.saveState()
 	sm.mu.Unlock()
@@ -1339,7 +1344,7 @@ func (sm *SessionManager) DeleteWithChildren(id string) ([]string, error) {
 		}
 	}
 
-	// Remove only successfully torn-down sessions from state.
+	// Remove successfully torn-down sessions; revert failed ones to stopped.
 	sm.mu.Lock()
 	var deletedIDs []string
 	for _, s := range snaps {
@@ -1347,6 +1352,8 @@ func (sm *SessionManager) DeleteWithChildren(id string) ([]string, error) {
 			delete(sm.state.Sessions, s.id)
 			delete(sm.hookReports, s.id)
 			deletedIDs = append(deletedIDs, s.id)
+		} else if sess, ok := sm.state.Sessions[s.id]; ok {
+			sess.Status = StatusStopped
 		}
 	}
 	stateErr := sm.saveState()
