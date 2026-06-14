@@ -245,6 +245,51 @@ func TestMigrateApprovalsEnabledToAgentHooks(t *testing.T) {
 	}
 }
 
+func TestMigrateApprovalsEnabledBothFieldsSet(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	data := []byte(`{"version":3,"sessions":{
+		"both-true":{"id":"both-true","name":"both-true","status":"running","approvals_enabled":true,"agent_hooks":true},
+		"conflict":{"id":"conflict","name":"conflict","status":"running","approvals_enabled":true,"agent_hooks":false}
+	}}`)
+	if err := writeFileAtomic(path, data); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := loaded.Sessions["both-true"]; !s.AgentHooks || s.ApprovalsEnabled {
+		t.Errorf("both-true: AgentHooks=%v ApprovalsEnabled=%v, want true/false", s.AgentHooks, s.ApprovalsEnabled)
+	}
+	if s := loaded.Sessions["conflict"]; !s.AgentHooks || s.ApprovalsEnabled {
+		t.Errorf("conflict: AgentHooks=%v ApprovalsEnabled=%v, want true/false", s.AgentHooks, s.ApprovalsEnabled)
+	}
+}
+
+func TestMigrateApprovalsEnabledFromV1(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	data := []byte(`{"version":1,"sessions":{
+		"old":{"id":"old","name":"old-session","status":"running","approvals_enabled":true}
+	}}`)
+	if err := writeFileAtomic(path, data); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Version != CurrentStateVersion {
+		t.Errorf("version = %d, want %d", loaded.Version, CurrentStateVersion)
+	}
+	s := loaded.Sessions["old"]
+	if !s.AgentHooks {
+		t.Error("AgentHooks = false, want true (migrated from v1 approvals_enabled)")
+	}
+	if s.ApprovalsEnabled {
+		t.Error("ApprovalsEnabled should be cleared after migration")
+	}
+}
+
 func TestSandboxConfigNilBackwardCompat(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
 	data := []byte(`{"version":1,"sessions":{"s1":{"id":"s1","name":"old","status":"stopped","sandboxed":true}}}`)
