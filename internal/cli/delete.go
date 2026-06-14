@@ -23,16 +23,19 @@ var deleteCmd = &cobra.Command{
 	Aliases: []string{"rm"},
 	Short:   "Delete a session by name or ID",
 	Args: func(cmd *cobra.Command, args []string) error {
+		if deleteChildren && deleteBatch.active() {
+			return fmt.Errorf("--children cannot be combined with batch filters")
+		}
 		if deleteBatch.active() {
 			return cobra.NoArgs(cmd, args)
+		}
+		if deleteChildren {
+			return cobra.MaximumNArgs(1)(cmd, args)
 		}
 		return cobra.ExactArgs(1)(cmd, args)
 	},
 	ValidArgsFunction: completeSessionNames,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if deleteChildren && deleteBatch.active() {
-			return fmt.Errorf("--children cannot be combined with batch filters")
-		}
 		if deleteBatch.active() {
 			return deleteBatchRun(cmd)
 		}
@@ -43,22 +46,38 @@ var deleteCmd = &cobra.Command{
 		}
 		defer c.Close()
 
-		session, err := resolveSessionInfo(c, args[0])
-		if err != nil {
-			return err
-		}
+		var sessionID string
+		var excludeRoot bool
 
-		if !deleteBatch.force && session.WorktreePath != "" && !session.InPlace {
-			confirmed, err := confirmDelete(session)
+		if deleteChildren && len(args) == 0 {
+			sessionID = os.Getenv("GRAITH_SESSION_ID")
+			if sessionID == "" {
+				return fmt.Errorf("--children with no session arg requires GRAITH_SESSION_ID to be set")
+			}
+			excludeRoot = true
+		} else {
+			session, err := resolveSessionInfo(c, args[0])
 			if err != nil {
 				return err
 			}
-			if !confirmed {
-				return nil
+			sessionID = session.ID
+
+			if !deleteBatch.force && session.WorktreePath != "" && !session.InPlace {
+				confirmed, err := confirmDelete(session)
+				if err != nil {
+					return err
+				}
+				if !confirmed {
+					return nil
+				}
 			}
 		}
 
-		c.SendControl("delete", protocol.DeleteMsg{SessionID: session.ID, Children: deleteChildren})
+		c.SendControl("delete", protocol.DeleteMsg{
+			SessionID:   sessionID,
+			Children:    deleteChildren,
+			ExcludeRoot: excludeRoot,
+		})
 		resp, err := c.ReadControlResponse()
 		if err != nil {
 			return err
