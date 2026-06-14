@@ -2,7 +2,10 @@ package daemon
 
 import (
 	"log/slog"
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/d0ugal/graith/internal/config"
 )
@@ -49,6 +52,67 @@ func TestOnAgentStatusChange_SkipsNonApprovalWhenOnlyApprovalEnabled(t *testing.
 
 	// "active" transitions should not trigger notifications
 	sm.onAgentStatusChange("test-id", "test-session", "unknown", "active")
+}
+
+func TestSendNotification_CommandUsesEnvVars(t *testing.T) {
+	outFile := filepath.Join(t.TempDir(), "out.txt")
+
+	sm := &SessionManager{
+		cfg: &config.Config{
+			Notifications: config.Notifications{
+				Enabled:    true,
+				OnApproval: true,
+				Command:    "printf '%s|%s|%s' \"$GRAITH_SESSION_NAME\" \"$GRAITH_STATUS\" \"$GRAITH_MESSAGE\" > " + outFile,
+			},
+		},
+		log: slog.Default(),
+	}
+
+	sm.sendNotification("my-session", "approval")
+
+	deadline := time.After(5 * time.Second)
+	for {
+		data, err := os.ReadFile(outFile)
+		if err == nil && len(data) > 0 {
+			got := string(data)
+			want := "my-session|approval|my-session needs approval"
+			if got != want {
+				t.Errorf("got %q, want %q", got, want)
+			}
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for notification command output")
+		default:
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+}
+
+func TestSendNotification_CommandInjectionPrevented(t *testing.T) {
+	markerFile := filepath.Join(t.TempDir(), "pwned.txt")
+
+	sm := &SessionManager{
+		cfg: &config.Config{
+			Notifications: config.Notifications{
+				Enabled:    true,
+				OnApproval: true,
+				Command:    "true",
+			},
+		},
+		log: slog.Default(),
+	}
+
+	// A malicious session name that would create a file if shell-interpolated
+	malicious := "$(touch " + markerFile + ")"
+	sm.sendNotification(malicious, "approval")
+
+	time.Sleep(500 * time.Millisecond)
+
+	if _, err := os.Stat(markerFile); err == nil {
+		t.Fatal("command injection succeeded: malicious session name was executed as shell command")
+	}
 }
 
 func TestOnAgentStatusChange_PublishesToMessageStore(t *testing.T) {
