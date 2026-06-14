@@ -239,9 +239,14 @@ func (s *Server) createSession(_ context.Context, _ *gomcp.CallToolRequest, inpu
 	}
 	defer c.Close()
 
+	agent := input.Agent
+	if agent == "" {
+		agent = s.cfg.DefaultAgent
+	}
+
 	if err := c.SendControl("create", protocol.CreateMsg{
 		Name:            input.Name,
-		Agent:           input.Agent,
+		Agent:           agent,
 		RepoPath:        input.Repo,
 		Base:            input.Base,
 		Prompt:          input.Prompt,
