@@ -1609,11 +1609,27 @@ func (sm *SessionManager) DeleteWithChildren(id string) ([]string, error) {
 	}
 
 	snaps := make([]snapshot, 0, len(toDelete))
+	var creatingIDs []string
 	for _, did := range toDelete {
 		sess := sm.state.Sessions[did]
 		if sess.Status == StatusDeleting {
 			continue
 		}
+
+		if sess.Status == StatusCreating {
+			// Mid-creation: remove from state so Phase 3 detects the deletion.
+			delete(sm.state.Sessions, did)
+			delete(sm.hookReports, did)
+			if ac, ok := sm.attachedClients[did]; ok {
+				delete(sm.attachedClients, did)
+				creatingIDs = append(creatingIDs, did)
+				_ = ac // kick after unlock
+			} else {
+				creatingIDs = append(creatingIDs, did)
+			}
+			continue
+		}
+
 		s := snapshot{
 			id:           did,
 			agent:        sess.Agent,
@@ -1684,7 +1700,7 @@ func (sm *SessionManager) DeleteWithChildren(id string) ([]string, error) {
 
 	// Remove successfully torn-down sessions; revert failed ones to their prior status.
 	sm.mu.Lock()
-	var deletedIDs []string
+	deletedIDs := append([]string{}, creatingIDs...)
 	for _, s := range snaps {
 		if succeeded[s.id] {
 			delete(sm.state.Sessions, s.id)
