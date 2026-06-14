@@ -1,6 +1,7 @@
 package git
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -17,9 +18,9 @@ func RemoveWorktree(repoPath, worktreePath string) error {
 	return err
 }
 
-func SetupSession(repoPath, worktreePath, branchName, baseBranch string, fetch bool) error {
+func SetupSession(ctx context.Context, repoPath, worktreePath, branchName, baseBranch string, fetch bool) error {
 	if fetch && HasRemote(repoPath, "origin") {
-		if err := FetchOrigin(repoPath); err != nil {
+		if err := FetchOriginContext(ctx, repoPath); err != nil {
 			return fmt.Errorf("fetch: %w", err)
 		}
 	}
