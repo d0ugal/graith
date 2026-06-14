@@ -12,7 +12,14 @@ func init() {
 }
 
 // Detected returns true if the process is running inside an AI agent environment.
+// GR_AGENT_MODE=0/false/no always takes priority, even after init.
 func Detected() bool {
+	if v, ok := os.LookupEnv("GR_AGENT_MODE"); ok {
+		switch strings.ToLower(v) {
+		case "0", "false", "no":
+			return false
+		}
+	}
 	return agentDetected
 }
 
