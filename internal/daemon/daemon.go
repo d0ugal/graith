@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -1145,6 +1146,8 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 }
 
 // Delete stops a session, removes its worktree/branch, and deletes state.
+// Git teardown is attempted before removing the session from state; if teardown
+// fails the session is kept for retry and the error is returned.
 func (sm *SessionManager) Delete(id string) error {
 	sm.mu.Lock()
 
@@ -1171,12 +1174,15 @@ func (sm *SessionManager) Delete(id string) error {
 	branch := sessState.Branch
 	shared := sessState.SharedWorktree
 	inPlace := sessState.InPlace
+	agentName := sessState.Agent
 	sessionIncludes := make([]IncludedRepoState, len(sessState.Includes))
 	copy(sessionIncludes, sessState.Includes)
 
-	delete(sm.state.Sessions, id)
-	delete(sm.hookReports, id)
-	err := sm.saveState()
+	if sessState.Status == StatusRunning {
+		sessState.Status = StatusStopped
+		sessState.PID = 0
+		_ = sm.saveState()
+	}
 	sm.mu.Unlock()
 
 	// Blocking operations outside the lock.
@@ -1193,21 +1199,39 @@ func (sm *SessionManager) Delete(id string) error {
 		ptySess.Close()
 	}
 
+	// Attempt git teardown before removing the session from state.
+	var teardownErr error
 	switch {
 	case shared:
 		scratchDir := filepath.Join(sm.paths.DataDir, "scratch", id)
-		_ = os.RemoveAll(scratchDir)
+		teardownErr = os.RemoveAll(scratchDir)
 	case inPlace:
 		// In-place sessions: leave the repo completely untouched
 	case repoPath != "" && len(sessionIncludes) > 0:
-		sm.teardownIncludes(repoPath, worktreePath, branch, sessionIncludes)
+		teardownErr = sm.teardownIncludes(repoPath, worktreePath, branch, sessionIncludes)
 	case repoPath != "":
-		_ = git.TeardownSession(repoPath, worktreePath, branch)
+		teardownErr = git.TeardownSession(repoPath, worktreePath, branch)
 	case worktreePath != "":
-		_ = os.RemoveAll(worktreePath)
+		teardownErr = os.RemoveAll(worktreePath)
 	}
+
+	if teardownErr != nil {
+		sm.log.Error("git teardown failed, session kept for retry",
+			"session_id", id, "err", teardownErr)
+		if hasClient {
+			ac.kick()
+		}
+		return fmt.Errorf("git teardown failed (session kept for retry): %w", teardownErr)
+	}
+
+	sm.mu.Lock()
+	delete(sm.state.Sessions, id)
+	delete(sm.hookReports, id)
+	err := sm.saveState()
+	sm.mu.Unlock()
+
 	_ = os.Remove(filepath.Join(sm.paths.LogDir, id+".log"))
-	sm.cleanupHooks(id, sessState.Agent, worktreePath)
+	sm.cleanupHooks(id, agentName, worktreePath)
 
 	if hasClient {
 		ac.kick()
@@ -1217,7 +1241,9 @@ func (sm *SessionManager) Delete(id string) error {
 }
 
 // DeleteWithChildren deletes a session and all its transitive descendants.
-// Returns the list of deleted session IDs.
+// Git teardown is attempted before removing each session from state; sessions
+// whose teardown fails are kept for retry. Returns the list of deleted session
+// IDs and an error if any teardowns failed.
 func (sm *SessionManager) DeleteWithChildren(id string) ([]string, error) {
 	sm.mu.Lock()
 
@@ -1264,13 +1290,15 @@ func (sm *SessionManager) DeleteWithChildren(id string) ([]string, error) {
 			delete(sm.attachedClients, did)
 		}
 		snaps = append(snaps, s)
-		delete(sm.state.Sessions, did)
-		delete(sm.hookReports, did)
+		if sess.Status == StatusRunning {
+			sess.Status = StatusStopped
+			sess.PID = 0
+		}
 	}
-
-	err := sm.saveState()
+	_ = sm.saveState()
 	sm.mu.Unlock()
 
+	// Kill all PTY processes outside the lock.
 	for _, s := range snaps {
 		if s.ptySess != nil {
 			s.ptySess.Detach()
@@ -1284,30 +1312,64 @@ func (sm *SessionManager) DeleteWithChildren(id string) ([]string, error) {
 			}
 			s.ptySess.Close()
 		}
+	}
 
+	// Attempt teardowns, tracking which succeed.
+	var teardownErrs []error
+	succeeded := make(map[string]bool, len(snaps))
+	for _, s := range snaps {
+		var err error
 		switch {
 		case s.shared:
-			_ = os.RemoveAll(filepath.Join(sm.paths.DataDir, "scratch", s.id))
+			err = os.RemoveAll(filepath.Join(sm.paths.DataDir, "scratch", s.id))
 		case s.inPlace:
 		case s.repoPath != "" && len(s.includes) > 0:
-			sm.teardownIncludes(s.repoPath, s.worktreePath, s.branch, s.includes)
+			err = sm.teardownIncludes(s.repoPath, s.worktreePath, s.branch, s.includes)
 		case s.repoPath != "":
-			_ = git.TeardownSession(s.repoPath, s.worktreePath, s.branch)
+			err = git.TeardownSession(s.repoPath, s.worktreePath, s.branch)
 		case s.worktreePath != "":
-			_ = os.RemoveAll(s.worktreePath)
+			err = os.RemoveAll(s.worktreePath)
 		}
-		_ = os.Remove(filepath.Join(sm.paths.LogDir, s.id+".log"))
-		sm.cleanupHooks(s.id, s.agent, s.worktreePath)
+		if err != nil {
+			sm.log.Error("git teardown failed, session kept for retry",
+				"session_id", s.id, "err", err)
+			teardownErrs = append(teardownErrs, fmt.Errorf("session %s: %w", s.id, err))
+		} else {
+			succeeded[s.id] = true
+		}
+	}
 
+	// Remove only successfully torn-down sessions from state.
+	sm.mu.Lock()
+	var deletedIDs []string
+	for _, s := range snaps {
+		if succeeded[s.id] {
+			delete(sm.state.Sessions, s.id)
+			delete(sm.hookReports, s.id)
+			deletedIDs = append(deletedIDs, s.id)
+		}
+	}
+	stateErr := sm.saveState()
+	sm.mu.Unlock()
+
+	for _, s := range snaps {
+		if succeeded[s.id] {
+			_ = os.Remove(filepath.Join(sm.paths.LogDir, s.id+".log"))
+			sm.cleanupHooks(s.id, s.agent, s.worktreePath)
+		}
 		if s.client != nil {
 			s.client.kick()
 		}
 	}
 
-	if err != nil {
-		return toDelete, err
+	if stateErr != nil {
+		return deletedIDs, stateErr
 	}
-	return toDelete, nil
+	if len(teardownErrs) > 0 {
+		return deletedIDs, fmt.Errorf("git teardown failed for %d session(s) (kept for retry): %w",
+			len(teardownErrs), errors.Join(teardownErrs...))
+	}
+	return deletedIDs, nil
 }
 
 // collectDescendants returns the target ID plus all transitive children, leaves first.
@@ -1865,21 +1927,26 @@ func (sm *SessionManager) applyConfig(newCfg *config.Config) {
 	}
 }
 
-func (sm *SessionManager) teardownIncludes(mainRepoPath, mainWorktreePath, mainBranch string, includes []IncludedRepoState) {
+func (sm *SessionManager) teardownIncludes(mainRepoPath, mainWorktreePath, mainBranch string, includes []IncludedRepoState) error {
+	var errs []error
 	for i := len(includes) - 1; i >= 0; i-- {
 		inc := includes[i]
 		if err := git.TeardownSession(inc.RepoPath, inc.WorktreePath, inc.Branch); err != nil {
 			sm.log.Warn("failed to teardown included worktree", "repo", inc.RepoName, "path", inc.WorktreePath, "err", err)
+			errs = append(errs, err)
 		}
 	}
 	if err := git.TeardownSession(mainRepoPath, mainWorktreePath, mainBranch); err != nil {
 		sm.log.Warn("failed to teardown main worktree", "path", mainWorktreePath, "err", err)
+		errs = append(errs, err)
 	}
 	if len(includes) > 0 {
 		if err := os.RemoveAll(filepath.Dir(mainWorktreePath)); err != nil {
 			sm.log.Warn("failed to remove session directory", "path", filepath.Dir(mainWorktreePath), "err", err)
+			errs = append(errs, err)
 		}
 	}
+	return errors.Join(errs...)
 }
 
 func (sm *SessionManager) deriveSandboxIncludesWriteDirs(includes []IncludedRepoState) []string {
