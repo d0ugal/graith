@@ -1584,7 +1584,7 @@ func (sm *SessionManager) Delete(id string) error {
 // Git teardown is attempted before removing each session from state; sessions
 // whose teardown fails are kept for retry. Returns the list of deleted session
 // IDs and an error if any teardowns failed.
-func (sm *SessionManager) DeleteWithChildren(id string) ([]string, error) {
+func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]string, error) {
 	sm.mu.Lock()
 
 	if _, ok := sm.state.Sessions[id]; !ok {
@@ -1593,6 +1593,9 @@ func (sm *SessionManager) DeleteWithChildren(id string) ([]string, error) {
 	}
 
 	toDelete := sm.collectDescendants(id)
+	if excludeRoot {
+		toDelete = filterExcludeRoot(toDelete, id)
+	}
 
 	type snapshot struct {
 		id           string
