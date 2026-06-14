@@ -31,21 +31,27 @@ Exposes `agent.Detected() bool`.
 
 CLI changes in `root.go`:
 
-- Add `--agent` persistent bool flag (force-enables agent mode regardless of
-  env detection).
-- In `PersistentPreRunE`: if `agent.Detected()` or `--agent` flag is set, and
-  `--json` was not explicitly passed by the user, set `jsonOutput = true`.
-- The `--json` flag continues to work as before — `--agent` is additive.
+- Add `--agent-mode` persistent bool flag (force-enables agent mode regardless
+  of env detection). Named `--agent-mode` to avoid conflicting with
+  `gr new --agent <type>` which is already a string flag.
+- In `PersistentPreRunE`: if `agent.Detected()` or `--agent-mode` flag is set,
+  and `--json` was not explicitly passed by the user, set `jsonOutput = true`.
+- The `--json` flag continues to work as before — `--agent-mode` is additive.
+- In `executeWithArgs` error fallback (root.go:56): also check
+  `agent.Detected()` so that Cobra errors (unknown subcommand, arg validation)
+  are emitted as JSON when running inside an agent.
 
-Only JSON output changes. No color/style library changes needed — graith
-doesn't use one.
+JSON output also affects behavior: `gr new` and `gr fork` print JSON and
+exit without attaching when `jsonOutput` is true (existing behavior). This
+is desirable for agents — they create sessions programmatically and don't
+need interactive attachment. No change needed, but callers should be aware.
 
 ### Files to change
 
 | File | Change |
 |------|--------|
 | `internal/agent/agent.go` | New file. Detection logic + `Detected()` |
-| `internal/cli/root.go` | Add `--agent` flag, auto-enable JSON in `PersistentPreRunE` |
+| `internal/cli/root.go` | Add `--agent-mode` flag, auto-enable JSON in `PersistentPreRunE` and error fallback |
 
 ## Feature 2: `gr stop --children` + Env Auto-Resolve
 
@@ -60,20 +66,31 @@ session from `GRAITH_SESSION_ID` when no positional arg is given.
 
 #### Protocol
 
-Add `Children bool` field to `StopMsg`:
+Add `Children bool` and `ExcludeRoot bool` fields to `StopMsg`:
 
 ```go
 type StopMsg struct {
-    SessionID string `json:"session_id"`
-    Children  bool   `json:"children,omitempty"`
+    SessionID  string `json:"session_id"`
+    Children   bool   `json:"children,omitempty"`
+    ExcludeRoot bool  `json:"exclude_root,omitempty"`
 }
 ```
 
+Add `ExcludeRoot bool` to `DeleteMsg` as well, for consistency with the
+env auto-resolve behavior.
+
 #### Daemon
 
-Add `StopWithChildren(rootID string) ([]string, error)` to `SessionManager`.
-Reuses existing `collectDescendants()`. Sends SIGTERM to each descendant in
-leaf-first order. Returns the list of stopped session IDs.
+Add `StopWithChildren(rootID string, excludeRoot bool) ([]string, error)` to
+`SessionManager`. Reuses existing `collectDescendants()`. When `excludeRoot`
+is true, filters out `rootID` from the result before processing. Sends
+SIGTERM to each descendant in leaf-first order. **Skips already-stopped
+descendants** (do not error — log and continue). Returns the list of
+actually-stopped session IDs.
+
+Note: `collectDescendants()` (daemon.go:1375) includes the root ID in its
+result. The `excludeRoot` parameter handles this without changing the
+shared helper.
 
 #### Handler
 
@@ -84,10 +101,15 @@ Return `{"stopped": ["id1", "id2"]}` on success.
 
 - Add `--children` flag.
 - When `--children` is set and no positional arg: read `GRAITH_SESSION_ID`
-  from env. Stop children only (not self).
+  from env. Stop children only (not self) — sets `ExcludeRoot: true` in the
+  protocol message.
+- When `--children` is set with a positional arg: stop the named session and
+  its children (existing delete behavior) — `ExcludeRoot: false`.
 - Error if `--children` with no arg and `GRAITH_SESSION_ID` is not set.
-- Args validation: `cobra.MaximumNArgs(1)` when `--children`, otherwise
-  `cobra.ExactArgs(1)`.
+- `--children` cannot be combined with batch filters (`--repo`, `--stopped`,
+  `--stale`), matching existing delete behavior (delete.go:33).
+- Args validation: custom `Args` function — `NoArgs` when batch active,
+  `MaximumNArgs(1)` when `--children`, `ExactArgs(1)` otherwise.
 
 #### CLI (`delete.go`)
 
@@ -96,12 +118,14 @@ arg, read `GRAITH_SESSION_ID`. Delete children only (not self).
 
 ### Self-exclusion
 
-When auto-resolved from env (no positional arg), `--children` operates on
-descendants only — the calling session is never stopped/deleted. This prevents
-agents from killing their own process mid-command.
+When auto-resolved from env (no positional arg), `--children` sets
+`ExcludeRoot: true` in the protocol message — the calling session is never
+stopped/deleted. This prevents agents from killing their own process
+mid-command.
 
 When a positional arg is given, the named session IS included in the
-stop/delete (existing behavior for delete, new for stop).
+stop/delete (`ExcludeRoot: false` — existing behavior for delete, new for
+stop).
 
 ### Files to change
 
@@ -132,6 +156,9 @@ resolve targets automatically.
    pub/sub use case via `gr msg pub`).
 4. Send the message body to each child's inbox (`inbox:<childID>`).
 5. Type the notification hint into each child session (unless `--quiet`).
+   If a child is stopped, skip the notification for that child (message is
+   still delivered to the inbox stream — it will be readable when the
+   session resumes). Continue on notification failure.
 6. Error if no children found.
 
 #### `gr msg send --parent <body>`
@@ -153,18 +180,28 @@ In JSON mode, emit structured result:
 ```json
 {
   "sent_to": ["child-session-1", "child-session-2"],
-  "count": 2,
-  "stream": "inbox:..."
+  "count": 2
 }
 ```
 
+For single-target sends (positional arg or `--parent`), continue returning
+the daemon's `msg_published` payload directly (existing behavior).
+
+#### Mutual exclusion
+
+`--children`, `--parent`, and a positional session arg are mutually exclusive.
+Use `cmd.MarkFlagsMutuallyExclusive("children", "parent")` for the flag pair.
+Check for positional arg + flag conflict in `RunE`.
+
 #### Args validation
 
-With `--children` or `--parent`: `cobra.RangeArgs(0, 1)` — body is the only
-positional arg (session target is resolved from env).
+Custom `Args` function:
+- With `--children` or `--parent`: `MaximumNArgs(1)` — the one positional arg
+  is the body (session target is resolved from env).
+- Without either flag: existing `RangeArgs(1, 2)` — session as first arg.
 
-Without either flag: existing behavior — `cobra.RangeArgs(1, 2)` with session
-as first arg.
+Update `ValidArgsFunction` to suppress session name completion when
+`--children` or `--parent` is set.
 
 ### Files to change
 
