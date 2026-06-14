@@ -1019,27 +1019,32 @@ func TestUpdate_FilterActuallyFilters(t *testing.T) {
 }
 
 func TestUpdate_FilterTypingTriggersPreviewFetch(t *testing.T) {
-	var fetchedIDs []string
 	fetch := func(id string) string {
-		fetchedIDs = append(fetchedIDs, id)
 		return "preview for " + id
 	}
-	m := newOverlayModel(overlayTestSessions(), "", fetch, nil)
+	// Start on s3 (other-repo). Filtering to "graith" will change selection to s1.
+	m := newOverlayModel(overlayTestSessions(), "s3", fetch, nil)
+	initial := m.list.SelectedItem().(sessionItem)
+	if initial.info.ID != "s3" {
+		t.Fatalf("expected cursor on s3, got %q", initial.info.ID)
+	}
 
-	// Enter filter mode
+	// Enter filter mode and type "graith" to filter out s3
 	updated, _ := sendKey(m, "/")
-
-	// Type a character — this changes the filtered list and should trigger preview fetch
-	updated, cmd := sendKey(asOverlay(updated), "o")
+	var cmd tea.Cmd
+	for _, ch := range "graith" {
+		updated, cmd = sendKey(asOverlay(updated), string(ch))
+	}
 	if cmd == nil {
 		t.Fatal("typing in filter mode should return a command (including preview fetch)")
 	}
 
-	// The command should be a batch; execute it to find the previewMsg
 	om := asOverlay(updated)
 	selected := om.list.SelectedItem().(sessionItem)
+	if selected.info.ID == "s3" {
+		t.Fatal("filter should have changed selection away from s3")
+	}
 
-	// Run the batch — tea.Batch returns a func that returns a []tea.Msg via tea.BatchMsg
 	batchMsg := cmd()
 	batch, ok := batchMsg.(tea.BatchMsg)
 	if !ok {
@@ -1061,6 +1066,29 @@ func TestUpdate_FilterTypingTriggersPreviewFetch(t *testing.T) {
 	}
 	if !foundPreview {
 		t.Error("filter typing should trigger a preview fetch for the newly selected session")
+	}
+}
+
+func TestUpdate_FilterNoMatchClearsPreview(t *testing.T) {
+	fetch := func(id string) string {
+		return "preview for " + id
+	}
+	m := newOverlayModel(overlayTestSessions(), "", fetch, nil)
+	m.previewContent = "old preview"
+	m.previewSessionID = "s1"
+
+	// Enter filter mode and type a query that matches nothing
+	updated, _ := sendKey(m, "/")
+	for _, ch := range "zzzzz" {
+		updated, _ = sendKey(asOverlay(updated), string(ch))
+	}
+	om := asOverlay(updated)
+
+	if om.previewContent != "" {
+		t.Errorf("preview content should be cleared when no sessions match, got %q", om.previewContent)
+	}
+	if om.previewSessionID != "" {
+		t.Errorf("preview session ID should be cleared when no sessions match, got %q", om.previewSessionID)
 	}
 }
 
