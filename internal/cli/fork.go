@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/d0ugal/graith/internal/client"
+	"github.com/d0ugal/graith/internal/daemon"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/spf13/cobra"
 )
@@ -20,6 +21,9 @@ var forkCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		sourceName := args[0]
 		newName := args[1]
+		if err := daemon.ValidateSessionName(newName); err != nil {
+			return err
+		}
 
 		c, err := client.Connect(cfg, paths, cfgFile)
 		if err != nil {
