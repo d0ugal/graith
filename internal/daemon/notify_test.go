@@ -98,13 +98,15 @@ func TestSendNotification_CommandInjectionPrevented(t *testing.T) {
 			Notifications: config.Notifications{
 				Enabled:    true,
 				OnApproval: true,
-				Command:    "true",
+				// Use $GRAITH_SESSION_NAME so the value reaches the shell;
+				// under the old {name} interpolation a malicious name would
+				// have been executed as a subshell.
+				Command: "echo $GRAITH_SESSION_NAME > /dev/null",
 			},
 		},
 		log: slog.Default(),
 	}
 
-	// A malicious session name that would create a file if shell-interpolated
 	malicious := "$(touch " + markerFile + ")"
 	sm.sendNotification(malicious, "approval")
 
