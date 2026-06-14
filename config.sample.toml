@@ -32,6 +32,8 @@
 # enabled = true
 # on_approval = true
 # on_stopped = false
+# Custom command receives GRAITH_SESSION_NAME, GRAITH_STATUS, and
+# GRAITH_MESSAGE as environment variables.
 # command = ""
 
 # [approvals]
