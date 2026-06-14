@@ -266,13 +266,20 @@ func (sb *statusBarState) setup(w io.Writer) {
 	sb.mu.Lock()
 	region := sb.scrollRegion()
 	pos := sb.position
+	info := sb.info
+	info.pendingApprovals = sb.pendingApprovals
+	cols := sb.cols
+	row := sb.barRow()
 	sb.mu.Unlock()
 
-	w.Write([]byte(region))
+	line := formatStatusLine(info, cols)
+	var buf []byte
+	buf = append(buf, region...)
 	if pos == "top" {
-		w.Write([]byte("\x1b[2;1H"))
+		buf = append(buf, "\x1b[2;1H"...)
 	}
-	sb.render(w)
+	buf = append(buf, fmt.Sprintf("\x1b7\x1b[%d;1H%s\x1b8", row, line)...)
+	w.Write(buf)
 }
 
 func (sb *statusBarState) teardown(w io.Writer) {
@@ -280,8 +287,7 @@ func (sb *statusBarState) teardown(w io.Writer) {
 	row := sb.barRow()
 	sb.mu.Unlock()
 
-	fmt.Fprintf(w, "\x1b[%d;1H\x1b[2K", row)
-	w.Write([]byte("\x1b[r"))
+	w.Write([]byte(fmt.Sprintf("\x1b[%d;1H\x1b[2K\x1b[r", row)))
 }
 
 func (sb *statusBarState) updateInfo(info statusBarInfo) {
