@@ -192,8 +192,9 @@ type SessionInfo struct {
 	AgentStatus    string             `json:"agent_status,omitempty"`
 	ExitCode       *int               `json:"exit_code,omitempty"`
 	CreatedAt      string             `json:"created_at"`
-	LastAttachedAt string             `json:"last_attached_at,omitempty"`
-	Dirty          bool               `json:"dirty,omitempty"`
+	LastAttachedAt  string             `json:"last_attached_at,omitempty"`
+	StatusChangedAt string             `json:"status_changed_at,omitempty"`
+	Dirty           bool               `json:"dirty,omitempty"`
 	UnpushedCount  int                `json:"unpushed_count,omitempty"`
 	Sandboxed      bool               `json:"sandboxed,omitempty"`
 	SharedWorktree bool               `json:"shared_worktree,omitempty"`
