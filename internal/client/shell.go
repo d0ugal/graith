@@ -1,12 +1,15 @@
 package client
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 )
 
 // RunShellInWorktree spawns an interactive shell with its working directory
 // set to the given worktree path, and GRAITH_WORKTREE exported in the env.
+// A non-zero exit status from the shell is not treated as an error since
+// interactive shells commonly inherit the status of their last command.
 func RunShellInWorktree(worktreePath string) error {
 	shell := os.Getenv("SHELL")
 	if shell == "" {
@@ -20,5 +23,10 @@ func RunShellInWorktree(worktreePath string) error {
 	cmd.Stderr = os.Stderr
 	cmd.Env = append(os.Environ(), "GRAITH_WORKTREE="+worktreePath)
 
-	return cmd.Run()
+	err := cmd.Run()
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return nil
+	}
+	return err
 }
