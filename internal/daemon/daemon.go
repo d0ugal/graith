@@ -1171,6 +1171,7 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 		return SessionState{}, fmt.Errorf("session %q not found", id)
 	}
 	if sessState.Status == StatusDeleting {
+		sm.mu.Unlock()
 		return SessionState{}, fmt.Errorf("session %q is being deleted", id)
 	}
 	if sessState.Status == StatusRunning {
@@ -1184,6 +1185,7 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 	}
 
 	if err := ValidateSessionName(sessState.Name); err != nil {
+		sm.mu.Unlock()
 		return SessionState{}, fmt.Errorf("session has unsafe name %q (created before validation was added): %w — use 'gr rename' to fix", sessState.Name, err)
 	}
 
@@ -1274,9 +1276,12 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 	prevIdleSince := sessState.IdleSince
 
 	// Mark as creating so concurrent operations see it's busy.
+	prevStatusChangedAt := sessState.StatusChangedAt
 	sessState.Status = StatusCreating
+	sessState.StatusChangedAt = time.Now().UTC()
 	if err := sm.saveState(); err != nil {
 		sessState.Status = prevStatus
+		sessState.StatusChangedAt = prevStatusChangedAt
 		sm.mu.Unlock()
 		return SessionState{}, fmt.Errorf("persist session state: %w", err)
 	}
@@ -1449,6 +1454,7 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 
 	if err := sm.saveState(); err != nil {
 		sessState.Status = prevStatus
+		sessState.StatusChangedAt = prevStatusChangedAt
 		sessState.ExitCode = prevExitCode
 		sessState.PID = prevPID
 		sessState.AgentStatus = prevAgentStatus
@@ -1464,11 +1470,12 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 	}
 
 	delete(sm.hookReports, id)
+	result := cloneSessionState(sessState)
 	sm.mu.Unlock()
 
 	go sm.watchSession(id, ptySess)
 
-	return *sessState, nil
+	return result, nil
 }
 
 // Delete stops a session, removes its worktree/branch, and deletes state.

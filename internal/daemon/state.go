@@ -246,6 +246,7 @@ func (s *State) Reconcile() {
 		if sess.Status == StatusCreating {
 			slog.Info("session was mid-creation when daemon stopped, marking errored", "id", id)
 			sess.Status = StatusErrored
+			sess.StatusChangedAt = time.Now()
 			continue
 		}
 		if sess.Status == StatusRunning && sess.PID > 0 {
@@ -261,6 +262,7 @@ func (s *State) Reconcile() {
 		if sess.Status == StatusDeleting {
 			slog.Info("session stuck in deleting, reverting to stopped", "id", id)
 			sess.Status = StatusStopped
+			sess.StatusChangedAt = time.Now()
 		}
 	}
 }
