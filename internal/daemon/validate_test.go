@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -81,5 +82,54 @@ func TestValidateSessionName(t *testing.T) {
 		if !strings.Contains(err.Error(), tc.wantSub) {
 			t.Errorf("ValidateSessionName(%q) = %q, want error containing %q", tc.name, err.Error(), tc.wantSub)
 		}
+	}
+}
+
+func TestCreateRejectsUnsafeName(t *testing.T) {
+	sm := newTestSessionManager(t)
+	_, err := sm.Create("bad;name", "claude", "/tmp", "", "", "", "", true, "", false, false, false, 24, 80)
+	if err == nil {
+		t.Fatal("Create with unsafe name should fail")
+	}
+	if !strings.Contains(err.Error(), "invalid") {
+		t.Errorf("expected validation error, got: %v", err)
+	}
+	if len(sm.state.Sessions) != 0 {
+		t.Error("no session should be created for an invalid name")
+	}
+}
+
+func TestRenameRejectsUnsafeName(t *testing.T) {
+	sm := newTestSessionManager(t)
+	sm.state.Sessions["test-id"] = &SessionState{
+		ID:   "test-id",
+		Name: "good-name",
+	}
+	err := sm.Rename("test-id", "bad|name")
+	if err == nil {
+		t.Fatal("Rename with unsafe name should fail")
+	}
+	if sm.state.Sessions["test-id"].Name != "good-name" {
+		t.Error("name should not have changed")
+	}
+}
+
+func TestResumeRejectsUnsafePersistedName(t *testing.T) {
+	tmpDir := t.TempDir()
+	sm := newTestSessionManager(t)
+	sm.paths.LogDir = tmpDir
+	sm.state.Sessions["test-id"] = &SessionState{
+		ID:           "test-id",
+		Name:         "x; rm -rf /",
+		Status:       StatusStopped,
+		Agent:        "claude",
+		WorktreePath: filepath.Join(tmpDir, "wt"),
+	}
+	_, err := sm.Resume("test-id", 24, 80)
+	if err == nil {
+		t.Fatal("Resume with unsafe persisted name should fail")
+	}
+	if !strings.Contains(err.Error(), "unsafe name") {
+		t.Errorf("expected unsafe name error, got: %v", err)
 	}
 }

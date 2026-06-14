@@ -41,6 +41,10 @@ func (sm *SessionManager) onAgentStatusChange(sessionID, sessionName, oldStatus,
 }
 
 func (sm *SessionManager) sendNotification(sessionName, status string) {
+	if err := ValidateSessionName(sessionName); err != nil {
+		sm.log.Error("refusing to send notification for unsafe session name", "name", sessionName, "err", err)
+		return
+	}
 	title := "graith"
 	var message string
 	switch status {
