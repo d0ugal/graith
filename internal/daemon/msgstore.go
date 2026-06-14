@@ -358,10 +358,11 @@ func (s *MsgStore) Cleanup(maxAge time.Duration, maxPerStream int) (int64, error
 	defer s.mu.Unlock()
 
 	var total int64
+	var ageCutoff string
 
 	if maxAge > 0 {
-		cutoff := time.Now().UTC().Add(-maxAge).Format(time.RFC3339Nano)
-		res, err := s.db.Exec("DELETE FROM messages WHERE created_at < ?", cutoff)
+		ageCutoff = time.Now().UTC().Add(-maxAge).Format(time.RFC3339Nano)
+		res, err := s.db.Exec("DELETE FROM messages WHERE created_at < ?", ageCutoff)
 		if err != nil {
 			return 0, fmt.Errorf("cleanup by age: %w", err)
 		}
@@ -413,9 +414,8 @@ func (s *MsgStore) Cleanup(maxAge time.Duration, maxPerStream int) (int64, error
 		SELECT 1 FROM messages WHERE messages.stream = cursors.stream
 	)`)
 
-	if maxAge > 0 {
-		cursorCutoff := time.Now().UTC().Add(-maxAge).Format(time.RFC3339Nano)
-		s.db.Exec("DELETE FROM cursors WHERE updated_at < ?", cursorCutoff)
+	if ageCutoff != "" {
+		s.db.Exec("DELETE FROM cursors WHERE updated_at < ?", ageCutoff)
 	}
 
 	return total, nil
