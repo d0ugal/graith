@@ -1786,6 +1786,59 @@ func (sm *SessionManager) Stop(id string) error {
 	return nil
 }
 
+func filterExcludeRoot(ids []string, rootID string) []string {
+	result := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if id != rootID {
+			result = append(result, id)
+		}
+	}
+	return result
+}
+
+// StopWithChildren stops all descendants of rootID. If excludeRoot is true,
+// the root session itself is not stopped. Already-stopped sessions are skipped.
+// Returns the list of session IDs that were actually stopped.
+func (sm *SessionManager) StopWithChildren(rootID string, excludeRoot bool) ([]string, error) {
+	sm.mu.Lock()
+
+	if _, ok := sm.state.Sessions[rootID]; !ok {
+		sm.mu.Unlock()
+		return nil, fmt.Errorf("session %q not found", rootID)
+	}
+
+	toStop := sm.collectDescendants(rootID)
+	if excludeRoot {
+		toStop = filterExcludeRoot(toStop, rootID)
+	}
+
+	sm.mu.Unlock()
+
+	var stopped []string
+	for _, id := range toStop {
+		sm.mu.Lock()
+		sess, ok := sm.state.Sessions[id]
+		sm.mu.Unlock()
+		if !ok {
+			continue
+		}
+		if sess.Status != StatusRunning {
+			continue
+		}
+		ptySess, ok := sm.GetPTY(id)
+		if !ok {
+			continue
+		}
+		if err := ptySess.Kill(); err != nil {
+			sm.log.Warn("stop child failed", "session_id", id, "error", err)
+			continue
+		}
+		stopped = append(stopped, id)
+	}
+
+	return stopped, nil
+}
+
 // Restart stops a running session (or no-ops if already stopped) and resumes it,
 // picking up the current agent and sandbox configuration.
 func (sm *SessionManager) Restart(id string, rows, cols uint16) (SessionState, error) {
