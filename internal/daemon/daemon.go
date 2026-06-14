@@ -891,13 +891,14 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 
 // watchSession waits for a PTY session to exit and updates state accordingly.
 // If the session has been replaced (e.g. by Resume) or removed (e.g. by Delete),
-// the watcher is stale and skips the state update.
+// the watcher is stale and skips the state update and status event.
 func (sm *SessionManager) watchSession(id string, sess *grpty.Session) {
 	<-sess.Done()
 
 	sm.mu.Lock()
 	stale := sm.sessions[id] != sess
 	var name string
+	var deleted bool
 	if !stale {
 		if s, ok := sm.state.Sessions[id]; ok {
 			name = s.Name
@@ -908,12 +909,18 @@ func (sm *SessionManager) watchSession(id string, sess *grpty.Session) {
 			if err := sm.saveState(); err != nil {
 				sm.log.Error("failed to save state after session exit", "id", id, "err", err)
 			}
+		} else {
+			deleted = true
 		}
 	}
 	sm.mu.Unlock()
 
 	if stale {
 		sm.log.Info("ignoring stale session exit", "id", id, "exit_code", sess.ExitCode())
+		return
+	}
+	if deleted {
+		sm.log.Info("ignoring exit for deleted session", "id", id, "exit_code", sess.ExitCode())
 		return
 	}
 
