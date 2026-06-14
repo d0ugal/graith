@@ -491,9 +491,25 @@ func runAttachByID(c *client.Client, sessionID string) error {
 			continue
 
 		case client.ResultDetached, client.ResultQuit:
+			resetTerminal()
 			return nil
 		}
 	}
+}
+
+// resetTerminal undoes terminal state that agents (Claude Code, etc.) may have
+// set during the session: alternate screen buffer, mouse tracking, bracketed
+// paste, Kitty keyboard protocol, hidden cursor, and scroll regions.
+func resetTerminal() {
+	fmt.Print("" +
+		"\x1b[r" + // reset scroll region
+		"\x1b[?1049l" + // leave alternate screen buffer
+		"\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l" + // disable mouse tracking
+		"\x1b[?2004l" + // disable bracketed paste
+		"\x1b[<u" + // pop Kitty keyboard protocol
+		"\x1b[?25h" + // show cursor
+		"\x1b[2J\x1b[H", // clear screen, cursor home
+	)
 }
 
 func restoreScreen(sessionID string) {
