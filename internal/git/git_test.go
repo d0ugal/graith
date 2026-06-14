@@ -9,6 +9,8 @@ import (
 
 func setupTestRepo(t *testing.T) string {
 	t.Helper()
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	dir := t.TempDir()
 	run := func(args ...string) {
 		cmd := exec.Command("git", args...)
