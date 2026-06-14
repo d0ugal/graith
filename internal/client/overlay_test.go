@@ -2090,6 +2090,81 @@ func TestOverlay_ActiveViewShowsOnlyRunning(t *testing.T) {
 	}
 }
 
+func TestOverlay_FilterRespectsView(t *testing.T) {
+	sessions := []protocol.SessionInfo{
+		{ID: "s1", Name: "api-fix", RepoName: "repo", Status: "running", AgentStatus: "active",
+			CreatedAt: time.Now().Format(time.RFC3339)},
+		{ID: "s2", Name: "api-blocked", RepoName: "repo", Status: "running", AgentStatus: "approval",
+			CreatedAt:       time.Now().Format(time.RFC3339),
+			StatusChangedAt: time.Now().Format(time.RFC3339)},
+		{ID: "s3", Name: "ui-blocked", RepoName: "repo", Status: "running", AgentStatus: "approval",
+			CreatedAt:       time.Now().Format(time.RFC3339),
+			StatusChangedAt: time.Now().Format(time.RFC3339)},
+	}
+	var updated tea.Model
+	updated, _ = sendWindowSize(newOverlayModel(sessions, "", nil, nil), 120, 40)
+
+	// Switch to Needs Attention
+	updated, _ = sendKey(updated, "right")
+	om := asOverlay(updated)
+	if om.view != viewNeedsAttention {
+		t.Fatalf("view = %d, want viewNeedsAttention", om.view)
+	}
+
+	// Enter filter mode and type "api"
+	updated, _ = sendKey(updated, "/")
+	for _, ch := range "api" {
+		updated, _ = updated.Update(tea.KeyPressMsg{Code: ch, Text: string(ch)})
+	}
+
+	om = asOverlay(updated)
+	sessionCount := 0
+	for _, item := range om.list.Items() {
+		if _, ok := item.(sessionItem); ok {
+			sessionCount++
+		}
+	}
+	// Should only show api-blocked (api-fix is active, not needing attention)
+	if sessionCount != 1 {
+		t.Errorf("filtered needs-attention has %d sessions, want 1", sessionCount)
+	}
+}
+
+func TestOverlay_FilterEscRebuildsView(t *testing.T) {
+	sessions := []protocol.SessionInfo{
+		{ID: "s1", Name: "working", RepoName: "repo", Status: "running", AgentStatus: "active",
+			CreatedAt: time.Now().Format(time.RFC3339)},
+		{ID: "s2", Name: "blocked", RepoName: "repo", Status: "running", AgentStatus: "approval",
+			CreatedAt:       time.Now().Format(time.RFC3339),
+			StatusChangedAt: time.Now().Format(time.RFC3339)},
+	}
+	var updated tea.Model
+	updated, _ = sendWindowSize(newOverlayModel(sessions, "", nil, nil), 120, 40)
+
+	// Switch to Needs Attention
+	updated, _ = sendKey(updated, "right")
+
+	// Enter filter, type something, then cancel
+	updated, _ = sendKey(updated, "/")
+	updated, _ = updated.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
+	updated, _ = sendKey(updated, "esc")
+
+	om := asOverlay(updated)
+	// Should be back to the full needs-attention view, not the "all" view
+	if om.view != viewNeedsAttention {
+		t.Errorf("view = %d after filter cancel, want viewNeedsAttention", om.view)
+	}
+	sessionCount := 0
+	for _, item := range om.list.Items() {
+		if _, ok := item.(sessionItem); ok {
+			sessionCount++
+		}
+	}
+	if sessionCount != 1 {
+		t.Errorf("after filter cancel: %d sessions, want 1 (only blocked)", sessionCount)
+	}
+}
+
 func TestOverlay_EmptyNeedsAttentionView(t *testing.T) {
 	sessions := []protocol.SessionInfo{
 		{ID: "s1", Name: "working", RepoName: "repo", Status: "running", AgentStatus: "active",
