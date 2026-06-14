@@ -1716,6 +1716,43 @@ func TestWatchSessionCurrentUpdatesState(t *testing.T) {
 	}
 }
 
+func TestWatchSessionDeletedSkipsPublish(t *testing.T) {
+	dir := t.TempDir()
+	ms, err := NewMsgStore(filepath.Join(dir, "msg.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ms.Close()
+
+	sm := newTestSessionManager(t)
+	sm.messages = ms
+
+	id := "sess-watch-deleted"
+
+	sess := newTestPTYSession(t, "true")
+
+	select {
+	case <-sess.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for session to exit")
+	}
+
+	// Put the PTY in the sessions map (so the stale check passes)
+	// but do NOT put an entry in state.Sessions — simulating Delete
+	// having already removed the state entry before the PTY exited.
+	sm.sessions[id] = sess
+
+	sm.watchSession(id, sess)
+
+	msgs, err := ms.Read("_system.status", "", false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 0 {
+		t.Errorf("expected 0 status messages for deleted session, got %d: %v", len(msgs), msgs)
+	}
+}
+
 func TestResumeResetsIdleSince(t *testing.T) {
 	// Use os.MkdirTemp instead of t.TempDir — on macOS, writeFileAtomic's
 	// syncDir can leave a recently-closed directory fd that races with
