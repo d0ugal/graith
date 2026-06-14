@@ -158,6 +158,9 @@ func (sm *SessionManager) HandleHookReport(sr protocol.StatusReportMsg) {
 	sm.hookReports[sr.SessionID] = report
 	changed = oldStatus != status
 	sess.AgentStatus = status
+	if changed {
+		sess.StatusChangedAt = time.Now()
+	}
 	sess.HookToolName = report.ToolName
 	sess.HookModel = report.Model
 	sess.HookCostUSD = report.CostUSD
@@ -239,6 +242,7 @@ func (sm *SessionManager) AdoptSessions(manifest *UpgradeManifest) error {
 		if err != nil {
 			sm.log.Warn("failed to adopt session", "id", us.ID, "err", err)
 			sessState.Status = StatusStopped
+			sessState.StatusChangedAt = time.Now()
 			continue
 		}
 
@@ -738,6 +742,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 	sessState.SandboxConfig = mergedSandbox
 	sessState.Includes = includes
 	sessState.Status = StatusRunning
+	sessState.StatusChangedAt = time.Now()
 	sessState.PID = ptySess.Cmd.Process.Pid
 	sessState.CreationCfg = &CreationConfig{
 		Agent:         agent,
@@ -1058,6 +1063,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 	sessState.SandboxConfig = mergedSandbox
 	sessState.Includes = forkIncludes
 	sessState.Status = StatusRunning
+	sessState.StatusChangedAt = time.Now()
 	sessState.PID = ptySess.Cmd.Process.Pid
 	sessState.CreationCfg = &CreationConfig{
 		Agent:         agent,
@@ -1099,6 +1105,7 @@ func (sm *SessionManager) watchSession(id string, sess *grpty.Session) {
 			name = s.Name
 			exitCode := sess.ExitCode()
 			s.Status = StatusStopped
+			s.StatusChangedAt = time.Now()
 			s.ExitCode = &exitCode
 			s.PID = 0
 			if err := sm.saveState(); err != nil {
@@ -1422,6 +1429,7 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 
 	sessState = sm.state.Sessions[id]
 	sessState.Status = StatusRunning
+	sessState.StatusChangedAt = time.Now()
 	sessState.ExitCode = nil
 	sessState.PID = ptySess.Cmd.Process.Pid
 	sessState.AgentStatus = ""
@@ -1511,6 +1519,7 @@ func (sm *SessionManager) Delete(id string) error {
 	}
 
 	sessState.Status = StatusDeleting
+	sessState.StatusChangedAt = time.Now()
 	sessState.PID = 0
 	_ = sm.saveState()
 	sm.mu.Unlock()
@@ -1652,6 +1661,7 @@ func (sm *SessionManager) DeleteWithChildren(id string) ([]string, error) {
 		}
 		snaps = append(snaps, s)
 		sess.Status = StatusDeleting
+		sess.StatusChangedAt = time.Now()
 		sess.PID = 0
 	}
 	_ = sm.saveState()
@@ -1800,6 +1810,7 @@ func (sm *SessionManager) Restart(id string, rows, cols uint16) (SessionState, e
 		if s, ok := sm.state.Sessions[id]; ok && s.Status == StatusRunning {
 			exitCode := ptySess.ExitCode()
 			s.Status = StatusStopped
+			s.StatusChangedAt = time.Now()
 			s.ExitCode = &exitCode
 			s.PID = 0
 			sm.saveState()
@@ -2160,6 +2171,9 @@ func (sm *SessionManager) detectAgentStatuses() {
 
 		sm.mu.Lock()
 		if s, ok := sm.state.Sessions[t.id]; ok {
+			if status != s.AgentStatus {
+				s.StatusChangedAt = time.Now()
+			}
 			s.AgentStatus = status
 			s.GitDirty = dirty
 			s.GitUnpushed = unpushed
