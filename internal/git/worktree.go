@@ -80,8 +80,10 @@ func TeardownSession(repoPath, worktreePath, branchName string) error {
 		if err := RemoveWorktree(repoPath, worktreePath); err != nil {
 			errs = append(errs, fmt.Errorf("remove worktree: %w", err))
 		}
-	} else {
+	} else if errors.Is(err, os.ErrNotExist) {
 		_ = PruneWorktrees(repoPath)
+	} else {
+		errs = append(errs, fmt.Errorf("stat worktree: %w", err))
 	}
 	if branchName != "" && RefExists(repoPath, branchName) {
 		if err := DeleteBranch(repoPath, branchName); err != nil {

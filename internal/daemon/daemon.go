@@ -1171,6 +1171,10 @@ func (sm *SessionManager) Delete(id string) error {
 		sm.mu.Unlock()
 		return fmt.Errorf("session %q not found", id)
 	}
+	if sessState.Status == StatusDeleting {
+		sm.mu.Unlock()
+		return fmt.Errorf("session %q is already being deleted", id)
+	}
 
 	ac, hasClient := sm.attachedClients[id]
 	if hasClient {
@@ -1190,6 +1194,7 @@ func (sm *SessionManager) Delete(id string) error {
 	shared := sessState.SharedWorktree
 	inPlace := sessState.InPlace
 	agentName := sessState.Agent
+	prevStatus := sessState.Status
 	sessionIncludes := make([]IncludedRepoState, len(sessState.Includes))
 	copy(sessionIncludes, sessState.Includes)
 
@@ -1233,7 +1238,11 @@ func (sm *SessionManager) Delete(id string) error {
 			"session_id", id, "err", teardownErr)
 		sm.mu.Lock()
 		if s, ok := sm.state.Sessions[id]; ok {
-			s.Status = StatusStopped
+			if prevStatus == StatusRunning {
+				s.Status = StatusStopped
+			} else {
+				s.Status = prevStatus
+			}
 			_ = sm.saveState()
 		}
 		sm.mu.Unlock()
@@ -1281,6 +1290,7 @@ func (sm *SessionManager) DeleteWithChildren(id string) ([]string, error) {
 		branch       string
 		shared       bool
 		inPlace      bool
+		prevStatus   SessionStatus
 		includes     []IncludedRepoState
 		ptySess      *grpty.Session
 		client       *attachedClient
@@ -1289,6 +1299,9 @@ func (sm *SessionManager) DeleteWithChildren(id string) ([]string, error) {
 	snaps := make([]snapshot, 0, len(toDelete))
 	for _, did := range toDelete {
 		sess := sm.state.Sessions[did]
+		if sess.Status == StatusDeleting {
+			continue
+		}
 		s := snapshot{
 			id:           did,
 			agent:        sess.Agent,
@@ -1297,6 +1310,7 @@ func (sm *SessionManager) DeleteWithChildren(id string) ([]string, error) {
 			branch:       sess.Branch,
 			shared:       sess.SharedWorktree,
 			inPlace:      sess.InPlace,
+			prevStatus:   sess.Status,
 			includes:     make([]IncludedRepoState, len(sess.Includes)),
 		}
 		copy(s.includes, sess.Includes)
@@ -1356,7 +1370,7 @@ func (sm *SessionManager) DeleteWithChildren(id string) ([]string, error) {
 		}
 	}
 
-	// Remove successfully torn-down sessions; revert failed ones to stopped.
+	// Remove successfully torn-down sessions; revert failed ones to their prior status.
 	sm.mu.Lock()
 	var deletedIDs []string
 	for _, s := range snaps {
@@ -1365,7 +1379,11 @@ func (sm *SessionManager) DeleteWithChildren(id string) ([]string, error) {
 			delete(sm.hookReports, s.id)
 			deletedIDs = append(deletedIDs, s.id)
 		} else if sess, ok := sm.state.Sessions[s.id]; ok {
-			sess.Status = StatusStopped
+			if s.prevStatus == StatusRunning {
+				sess.Status = StatusStopped
+			} else {
+				sess.Status = s.prevStatus
+			}
 		}
 	}
 	stateErr := sm.saveState()
