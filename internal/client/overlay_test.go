@@ -1018,6 +1018,52 @@ func TestUpdate_FilterActuallyFilters(t *testing.T) {
 	}
 }
 
+func TestUpdate_FilterTypingTriggersPreviewFetch(t *testing.T) {
+	var fetchedIDs []string
+	fetch := func(id string) string {
+		fetchedIDs = append(fetchedIDs, id)
+		return "preview for " + id
+	}
+	m := newOverlayModel(overlayTestSessions(), "", fetch, nil)
+
+	// Enter filter mode
+	updated, _ := sendKey(m, "/")
+
+	// Type a character — this changes the filtered list and should trigger preview fetch
+	updated, cmd := sendKey(asOverlay(updated), "o")
+	if cmd == nil {
+		t.Fatal("typing in filter mode should return a command (including preview fetch)")
+	}
+
+	// The command should be a batch; execute it to find the previewMsg
+	om := asOverlay(updated)
+	selected := om.list.SelectedItem().(sessionItem)
+
+	// Run the batch — tea.Batch returns a func that returns a []tea.Msg via tea.BatchMsg
+	batchMsg := cmd()
+	batch, ok := batchMsg.(tea.BatchMsg)
+	if !ok {
+		t.Fatalf("expected tea.BatchMsg from filter typing, got %T", batchMsg)
+	}
+
+	foundPreview := false
+	for _, c := range batch {
+		if c == nil {
+			continue
+		}
+		msg := c()
+		if pm, ok := msg.(previewMsg); ok {
+			foundPreview = true
+			if pm.sessionID != selected.info.ID {
+				t.Errorf("preview fetch session = %q, want %q", pm.sessionID, selected.info.ID)
+			}
+		}
+	}
+	if !foundPreview {
+		t.Error("filter typing should trigger a preview fetch for the newly selected session")
+	}
+}
+
 func TestUpdate_FilterResetsCursorToFirstSession(t *testing.T) {
 	sessions := overlayTestSessions()
 	// Start cursor on s3 (last session, in other-repo group)
