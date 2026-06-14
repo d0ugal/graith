@@ -261,6 +261,45 @@ func TestBuildGroupedItems_ParentInDifferentRepo(t *testing.T) {
 	t.Fatal("child not found in items")
 }
 
+func TestBuildGroupedItems_CyclicParents(t *testing.T) {
+	now := time.Now().Format(time.RFC3339)
+	sessions := []protocol.SessionInfo{
+		{ID: "a", Name: "alpha", ParentID: "b", RepoName: "repo", Status: "running", CreatedAt: now},
+		{ID: "b", Name: "beta", ParentID: "a", RepoName: "repo", Status: "running", CreatedAt: now},
+	}
+	items := buildGroupedItems(sessions)
+
+	// Both should appear even though they form a cycle (neither is a natural root)
+	if len(items) != 3 {
+		t.Fatalf("expected 3 items (1 header + 2 sessions), got %d", len(items))
+	}
+	sessionCount := 0
+	for _, item := range items {
+		if _, ok := item.(sessionItem); ok {
+			sessionCount++
+		}
+	}
+	if sessionCount != 2 {
+		t.Errorf("expected 2 sessions rendered from cycle, got %d", sessionCount)
+	}
+}
+
+func TestBuildGroupedItems_SelfReference(t *testing.T) {
+	now := time.Now().Format(time.RFC3339)
+	sessions := []protocol.SessionInfo{
+		{ID: "self", Name: "self-ref", ParentID: "self", RepoName: "repo", Status: "running", CreatedAt: now},
+	}
+	items := buildGroupedItems(sessions)
+
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(items))
+	}
+	si := items[1].(sessionItem)
+	if si.treePrefix != "" {
+		t.Errorf("self-referencing session should be a root with no prefix, got %q", si.treePrefix)
+	}
+}
+
 func TestMaxTreeIndentFromItems(t *testing.T) {
 	now := time.Now().Format(time.RFC3339)
 	sessions := []protocol.SessionInfo{
