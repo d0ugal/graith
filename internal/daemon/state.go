@@ -13,7 +13,7 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 )
 
-const CurrentStateVersion = 4
+const CurrentStateVersion = 5
 
 type SessionStatus string
 
@@ -46,6 +46,7 @@ type SessionState struct {
 	Model                  string                `json:"model,omitempty"`
 	Status                 SessionStatus         `json:"status"`
 	AgentStatus            string                `json:"agent_status,omitempty"`
+	StatusChangedAt        time.Time             `json:"status_changed_at"`
 	IdleSince              *time.Time            `json:"-"`
 	GitDirty               bool                  `json:"-"`
 	GitUnpushed            int                   `json:"-"`
@@ -140,6 +141,7 @@ var migrations = map[int]func(*State) error{
 	1: migrateV1ToV2,
 	2: migrateV2ToV3,
 	3: migrateV3ToV4,
+	4: migrateV4ToV5,
 }
 
 func migrateState(state *State) error {
@@ -178,6 +180,18 @@ func migrateV3ToV4(state *State) error {
 		if s.ApprovalsEnabled {
 			s.AgentHooks = true
 			s.ApprovalsEnabled = false
+		}
+	}
+	return nil
+}
+
+// migrateV4ToV5 backfills StatusChangedAt from CreatedAt for existing sessions
+// that predate the field. This gives a conservative "last changed at" of session
+// creation, meaning these sessions will sort oldest in "Needs Attention" views.
+func migrateV4ToV5(state *State) error {
+	for _, s := range state.Sessions {
+		if s.StatusChangedAt.IsZero() {
+			s.StatusChangedAt = s.CreatedAt
 		}
 	}
 	return nil
