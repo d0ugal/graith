@@ -69,8 +69,9 @@ type AttachMsg struct {
 }
 
 type DeleteMsg struct {
-	SessionID string `json:"session_id"`
-	Children  bool   `json:"children,omitempty"`
+	SessionID   string `json:"session_id"`
+	Children    bool   `json:"children,omitempty"`
+	ExcludeRoot bool   `json:"exclude_root,omitempty"`
 }
 
 type RenameMsg struct {
@@ -79,7 +80,9 @@ type RenameMsg struct {
 }
 
 type StopMsg struct {
-	SessionID string `json:"session_id"`
+	SessionID   string `json:"session_id"`
+	Children    bool   `json:"children,omitempty"`
+	ExcludeRoot bool   `json:"exclude_root,omitempty"`
 }
 
 type TypeMsg struct {
