@@ -208,11 +208,17 @@ func runAttachByID(c *client.Client, sessionID string) error {
 			infoResp, _ := nc.ReadControlResponse()
 			var infoList protocol.SessionListMsg
 			protocol.DecodePayload(infoResp, &infoList)
+			var worktreePath string
 			for _, s := range infoList.Sessions {
 				if s.ID == sessionID {
-					client.RunShellInWorktree(s.WorktreePath)
+					worktreePath = s.WorktreePath
 					break
 				}
+			}
+			if worktreePath == "" {
+				out.Print("Shell failed: session %s not found\n", sessionID)
+			} else if err := client.RunShellInWorktree(worktreePath); err != nil {
+				out.Print("Shell failed: %s\n", err)
 			}
 
 			nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
