@@ -1889,3 +1889,106 @@ func TestColumnWidths_TotalWidth(t *testing.T) {
 		t.Errorf("totalWidth() = %d, want 60", got)
 	}
 }
+
+// --- filterNeedsAttention ---
+
+func TestFilterNeedsAttention(t *testing.T) {
+	sessions := []protocol.SessionInfo{
+		{ID: "s1", Name: "active-session", Status: "running", AgentStatus: "active"},
+		{ID: "s2", Name: "approval-session", Status: "running", AgentStatus: "approval"},
+		{ID: "s3", Name: "errored-session", Status: "errored"},
+		{ID: "s4", Name: "ready-session", Status: "running", AgentStatus: "ready"},
+		{ID: "s5", Name: "stopped-clean", Status: "stopped"},
+		{ID: "s6", Name: "stopped-dirty", Status: "stopped", Dirty: true},
+		{ID: "s7", Name: "stopped-unpushed", Status: "stopped", UnpushedCount: 2},
+	}
+	result := filterNeedsAttention(sessions)
+	names := make([]string, len(result))
+	for i, s := range result {
+		names[i] = s.Name
+	}
+	// Should include: approval, errored, ready (running+ready), stopped-dirty, stopped-unpushed
+	// Should exclude: active-session (working fine), stopped-clean (nothing to save)
+	if len(result) != 5 {
+		t.Fatalf("got %d sessions %v, want 5", len(result), names)
+	}
+	for _, name := range []string{"approval-session", "errored-session", "ready-session", "stopped-dirty", "stopped-unpushed"} {
+		found := false
+		for _, n := range names {
+			if n == name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("missing expected session %q in result %v", name, names)
+		}
+	}
+}
+
+// --- filterActive ---
+
+func TestFilterActive(t *testing.T) {
+	sessions := []protocol.SessionInfo{
+		{ID: "s1", Name: "active-session", Status: "running", AgentStatus: "active",
+			CreatedAt: time.Now().Add(-10 * time.Minute).Format(time.RFC3339)},
+		{ID: "s2", Name: "approval-session", Status: "running", AgentStatus: "approval",
+			CreatedAt: time.Now().Add(-5 * time.Minute).Format(time.RFC3339)},
+		{ID: "s3", Name: "stopped-session", Status: "stopped",
+			CreatedAt: time.Now().Format(time.RFC3339)},
+		{ID: "s4", Name: "unknown-running", Status: "running", AgentStatus: "unknown",
+			CreatedAt: time.Now().Add(-1 * time.Minute).Format(time.RFC3339)},
+	}
+	result := filterActive(sessions)
+	if len(result) != 3 {
+		names := make([]string, len(result))
+		for i, s := range result {
+			names[i] = s.Name
+		}
+		t.Fatalf("got %d sessions %v, want 3 (all running)", len(result), names)
+	}
+	// Should be sorted newest first
+	if result[0].Name != "unknown-running" {
+		t.Errorf("first session = %q, want unknown-running (newest)", result[0].Name)
+	}
+}
+
+// --- sortByStatusAge ---
+
+func TestSortByStatusAge(t *testing.T) {
+	now := time.Now()
+	sessions := []protocol.SessionInfo{
+		{ID: "s1", Name: "recent", StatusChangedAt: now.Add(-1 * time.Minute).Format(time.RFC3339)},
+		{ID: "s2", Name: "old", StatusChangedAt: now.Add(-1 * time.Hour).Format(time.RFC3339)},
+		{ID: "s3", Name: "medium", StatusChangedAt: now.Add(-10 * time.Minute).Format(time.RFC3339)},
+	}
+	sortByStatusAge(sessions)
+	if sessions[0].Name != "old" || sessions[1].Name != "medium" || sessions[2].Name != "recent" {
+		t.Errorf("got order [%s, %s, %s], want [old, medium, recent]",
+			sessions[0].Name, sessions[1].Name, sessions[2].Name)
+	}
+}
+
+// --- viewMode cycling ---
+
+func TestViewModeCycling(t *testing.T) {
+	v := viewAll
+	v = v.next()
+	if v != viewNeedsAttention {
+		t.Errorf("All.next() = %d, want viewNeedsAttention", v)
+	}
+	v = v.next()
+	if v != viewActive {
+		t.Errorf("NeedsAttention.next() = %d, want viewActive", v)
+	}
+	v = v.next()
+	if v != viewAll {
+		t.Errorf("Active.next() = %d, want viewAll (wrap)", v)
+	}
+
+	v = viewAll
+	v = v.prev()
+	if v != viewActive {
+		t.Errorf("All.prev() = %d, want viewActive (wrap)", v)
+	}
+}
