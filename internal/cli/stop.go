@@ -2,20 +2,30 @@ package cli
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/d0ugal/graith/internal/client"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/spf13/cobra"
 )
 
-var stopBatch batchFlags
+var (
+	stopBatch    batchFlags
+	stopChildren bool
+)
 
 var stopCmd = &cobra.Command{
 	Use:   "stop <name-or-id>",
 	Short: "Stop a running session without deleting it",
 	Args: func(cmd *cobra.Command, args []string) error {
+		if stopChildren && stopBatch.active() {
+			return fmt.Errorf("--children cannot be combined with batch filters")
+		}
 		if stopBatch.active() {
 			return cobra.NoArgs(cmd, args)
+		}
+		if stopChildren {
+			return cobra.MaximumNArgs(1)(cmd, args)
 		}
 		return cobra.ExactArgs(1)(cmd, args)
 	},
@@ -30,6 +40,10 @@ var stopCmd = &cobra.Command{
 			return err
 		}
 		defer c.Close()
+
+		if stopChildren {
+			return stopChildrenRun(c, args)
+		}
 
 		sessionID, err := resolveSession(c, args[0])
 		if err != nil {
@@ -50,6 +64,48 @@ var stopCmd = &cobra.Command{
 		out.Print("Session stopped (worktree preserved)\n")
 		return nil
 	},
+}
+
+func stopChildrenRun(c *client.Client, args []string) error {
+	var sessionID string
+	var excludeRoot bool
+
+	if len(args) == 1 {
+		var err error
+		sessionID, err = resolveSession(c, args[0])
+		if err != nil {
+			return err
+		}
+		excludeRoot = false
+	} else {
+		sessionID = os.Getenv("GRAITH_SESSION_ID")
+		if sessionID == "" {
+			return fmt.Errorf("--children with no session arg requires GRAITH_SESSION_ID to be set")
+		}
+		excludeRoot = true
+	}
+
+	c.SendControl("stop", protocol.StopMsg{
+		SessionID:   sessionID,
+		Children:    true,
+		ExcludeRoot: excludeRoot,
+	})
+	resp, err := c.ReadControlResponse()
+	if err != nil {
+		return err
+	}
+	if resp.Type == "error" {
+		var e protocol.ErrorMsg
+		protocol.DecodePayload(resp, &e)
+		return fmt.Errorf("%s", e.Message)
+	}
+
+	var result struct {
+		Stopped []string `json:"stopped"`
+	}
+	protocol.DecodePayload(resp, &result)
+	out.Print("Stopped %d sessions\n", len(result.Stopped))
+	return nil
 }
 
 func stopBatchRun(cmd *cobra.Command) error {
@@ -107,5 +163,6 @@ func stopBatchRun(cmd *cobra.Command) error {
 
 func init() {
 	addBatchFlags(stopCmd, &stopBatch)
+	stopCmd.Flags().BoolVar(&stopChildren, "children", false, "also stop all descendant sessions")
 	rootCmd.AddCommand(stopCmd)
 }
