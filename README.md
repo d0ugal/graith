@@ -95,9 +95,9 @@ gr delete auth-rewrite
 | `gr new <name>` | Create a new agent session |
 | `gr list` (`ls`) | List all sessions |
 | `gr attach [name]` (`a`) | Attach to a session |
-| `gr stop <name>` | Stop a running session without deleting it (keeps the worktree) |
+| `gr stop <name>` | Stop a running session (keeps the worktree); `--children` stops descendants |
 | `gr restart <name>` | Restart a stopped session |
-| `gr delete <name>` (`rm`) | Delete a session and its worktree |
+| `gr delete <name>` (`rm`) | Delete a session and its worktree; `--children` deletes descendants |
 | `gr rename <old> <new>` | Rename a session |
 | `gr fork <source> <name>` | Fork a session (new worktree + agent conversation history) |
 | `gr info` | Show info for the current session (when inside a worktree) |
@@ -113,7 +113,7 @@ gr delete auth-rewrite
 | `gr completion <shell>` | Generate a shell completion script |
 | `gr version` | Print version information |
 
-Global flags: `--config <path>` to point at a non-default config file, and `--json` for machine-readable output on commands that support it.
+Global flags: `--config <path>` to point at a non-default config file, `--json` for machine-readable output, and `--agent-mode` to force agent-friendly behavior (auto-enables `--json`). Agent mode is also auto-detected when running inside a graith session or other AI agent environment.
 
 ### `gr new`
 
@@ -155,7 +155,7 @@ Sessions — and you — can communicate over a SQLite-backed pub/sub system. Ea
 | Command | Description |
 |---------|-------------|
 | `gr msg pub -t <topic> <body>` | Publish a message to a stream |
-| `gr msg send <session> <body>` | Send a message to a specific session's inbox |
+| `gr msg send <session> <body>` | Send to a session's inbox; `--children`/`--parent` for tree comms |
 | `gr msg sub -t <topic>` | Read messages from a stream |
 | `gr msg ack -t <topic>` | Acknowledge all messages in a stream |
 | `gr msg topics` | List streams with total/unread counts |
@@ -181,6 +181,14 @@ gr msg send fix-auth-bug "the tests are green now, rebase on main"
 ```
 
 `pub`/`send` accept `--file` to read the body from a file, and `--thread`/`--reply-to` for threaded conversations. `sub` accepts `--thread` to filter to one thread.
+
+```bash
+# From inside a session, message all direct child sessions
+gr msg send --children "rebase on main and re-run tests"
+
+# From a child session, message the parent
+gr msg send --parent "tests are green, ready for review"
+```
 
 ## Driving sessions remotely
 
@@ -474,6 +482,8 @@ The daemon sets these in every agent process:
 | `GRAITH_WORKTREE_PATH` | absolute path to the worktree |
 
 `gr shell` additionally exports `GRAITH_WORKTREE`. `gr msg` reads `GRAITH_SESSION_ID`/`GRAITH_SESSION_NAME` to identify the sender automatically.
+
+Set `GR_AGENT_MODE=1` to force agent mode (auto-JSON) or `GR_AGENT_MODE=0` to disable auto-detection.
 
 ## File locations
 
