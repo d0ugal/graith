@@ -3,6 +3,7 @@ package git
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 )
 
 func CreateWorktree(repoPath, worktreePath, branchName string) error {
@@ -57,6 +58,19 @@ func DiscoverDefaultBranchOrHEAD(repoPath string) (string, error) {
 		return "", err
 	}
 	return out, nil
+}
+
+func PruneWorktrees(repoPath string) error {
+	_, err := RunOutput(repoPath, "worktree", "prune")
+	return err
+}
+
+func RepoRootFromWorktree(worktreePath string) (string, error) {
+	commonDir, err := RunOutput(worktreePath, "rev-parse", "--git-common-dir")
+	if err != nil {
+		return "", err
+	}
+	return filepath.Dir(commonDir), nil
 }
 
 func TeardownSession(repoPath, worktreePath, branchName string) error {
