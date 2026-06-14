@@ -502,6 +502,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 		AgentHooks:             agentHooks,
 		Status:                 StatusCreating,
 		CreatedAt:              time.Now().UTC(),
+		StatusChangedAt:        time.Now().UTC(),
 	}
 	sm.state.Sessions[id] = placeholder
 	if err := sm.saveState(); err != nil {
@@ -890,9 +891,10 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 		Agent:          agentName,
 		AgentSessionID: agentSessionID,
 		Model:          sourceModel,
-		AgentHooks:     sourceAgentHooks,
-		Status:         StatusCreating,
-		CreatedAt:      time.Now().UTC(),
+		AgentHooks:      sourceAgentHooks,
+		Status:          StatusCreating,
+		CreatedAt:       time.Now().UTC(),
+		StatusChangedAt: time.Now().UTC(),
 	}
 	sm.state.Sessions[id] = placeholder
 	if err := sm.saveState(); err != nil {
