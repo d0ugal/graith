@@ -287,7 +287,7 @@ func (sb *statusBarState) teardown(w io.Writer) {
 	row := sb.barRow()
 	sb.mu.Unlock()
 
-	w.Write([]byte(fmt.Sprintf("\x1b[%d;1H\x1b[2K\x1b[r", row)))
+	fmt.Fprintf(w, "\x1b[%d;1H\x1b[2K\x1b[r", row)
 }
 
 func (sb *statusBarState) updateInfo(info statusBarInfo) {
