@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"log/slog"
 	"net"
 	"os"
@@ -2469,4 +2470,76 @@ func TestStateVersionRejectsNewer(t *testing.T) {
 	if !strings.Contains(err.Error(), "newer than this binary") {
 		t.Errorf("unexpected error: %v", err)
 	}
+}
+
+func TestRunMessageCleanupLoopReadsConfig(t *testing.T) {
+	t.Run("does not exit when config starts at zero", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		ms, err := NewMsgStore(filepath.Join(t.TempDir(), "msg.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer ms.Close()
+		sm.SetMsgStore(ms)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		go func() {
+			sm.RunMessageCleanupLoop(ctx)
+			close(done)
+		}()
+
+		// Give the goroutine time to start — if the old code were still
+		// present it would have returned immediately.
+		time.Sleep(50 * time.Millisecond)
+
+		select {
+		case <-done:
+			t.Fatal("RunMessageCleanupLoop exited early when config values are zero")
+		default:
+		}
+		cancel()
+		<-done
+	})
+
+	t.Run("picks up config change", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		ms, err := NewMsgStore(filepath.Join(t.TempDir(), "msg.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer ms.Close()
+		sm.SetMsgStore(ms)
+
+		if _, err := ms.Publish("test-stream", "s1", "agent", "old msg", "", ""); err != nil {
+			t.Fatal(err)
+		}
+
+		// Config starts at zero — cleanup should be a no-op.
+		sm.runMessageCleanupFromConfig()
+		msgs, err := ms.Read("test-stream", "", false, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("expected 1 message before config change, got %d", len(msgs))
+		}
+
+		// Update config to enable cleanup with max_per_stream=0 (effectively keep none by age).
+		sm.mu.Lock()
+		sm.cfg.Messages.MaxPerStream = 0
+		sm.cfg.Messages.MaxAge = "1ns"
+		sm.mu.Unlock()
+
+		time.Sleep(2 * time.Millisecond)
+		sm.runMessageCleanupFromConfig()
+
+		msgs, err = ms.Read("test-stream", "", false, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 0 {
+			t.Fatalf("expected 0 messages after config change, got %d", len(msgs))
+		}
+	})
 }
