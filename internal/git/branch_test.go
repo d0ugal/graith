@@ -1,6 +1,7 @@
 package git
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -222,7 +223,7 @@ func TestSetupAndTeardownSession(t *testing.T) {
 			}
 
 			// SetupSession with fetch=false since we already fetched.
-			if err := SetupSession(dir, worktreePath, tt.branchName, "main", false); err != nil {
+			if err := SetupSession(context.Background(), dir, worktreePath, tt.branchName, "main", false); err != nil {
 				t.Fatalf("SetupSession: %v", err)
 			}
 
@@ -258,7 +259,7 @@ func TestTeardownSessionIdempotent(t *testing.T) {
 		worktreePath := filepath.Join(t.TempDir(), "session-wt")
 		branchName := "graith/idempotent-test"
 
-		if err := SetupSession(dir, worktreePath, branchName, "main", false); err != nil {
+		if err := SetupSession(context.Background(), dir, worktreePath, branchName, "main", false); err != nil {
 			t.Fatalf("SetupSession: %v", err)
 		}
 
@@ -280,7 +281,7 @@ func TestTeardownSessionIdempotent(t *testing.T) {
 		worktreePath := filepath.Join(t.TempDir(), "session-wt")
 		branchName := "graith/branch-gone-test"
 
-		if err := SetupSession(dir, worktreePath, branchName, "main", false); err != nil {
+		if err := SetupSession(context.Background(), dir, worktreePath, branchName, "main", false); err != nil {
 			t.Fatalf("SetupSession: %v", err)
 		}
 
@@ -319,7 +320,7 @@ func TestSetupSessionNoOrigin(t *testing.T) {
 	worktreePath := filepath.Join(t.TempDir(), "no-origin-wt")
 	branchName := "graith/no-origin-session"
 
-	if err := SetupSession(dir, worktreePath, branchName, "main", true); err != nil {
+	if err := SetupSession(context.Background(), dir, worktreePath, branchName, "main", true); err != nil {
 		t.Fatalf("SetupSession with fetch=true and no origin should succeed: %v", err)
 	}
 

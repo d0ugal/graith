@@ -2,6 +2,7 @@ package git
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -17,8 +18,26 @@ func Run(dir string, args ...string) (string, string, error) {
 	return strings.TrimSpace(stdout.String()), strings.TrimSpace(stderr.String()), err
 }
 
+func RunContext(ctx context.Context, dir string, args ...string) (string, string, error) {
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = dir
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	return strings.TrimSpace(stdout.String()), strings.TrimSpace(stderr.String()), err
+}
+
 func RunOutput(dir string, args ...string) (string, error) {
 	stdout, stderr, err := Run(dir, args...)
+	if err != nil {
+		return "", fmt.Errorf("git %s: %w\nstderr: %s", strings.Join(args, " "), err, stderr)
+	}
+	return stdout, nil
+}
+
+func RunOutputContext(ctx context.Context, dir string, args ...string) (string, error) {
+	stdout, stderr, err := RunContext(ctx, dir, args...)
 	if err != nil {
 		return "", fmt.Errorf("git %s: %w\nstderr: %s", strings.Join(args, " "), err, stderr)
 	}

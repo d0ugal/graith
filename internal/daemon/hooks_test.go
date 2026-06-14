@@ -308,7 +308,7 @@ func TestCodexHookScriptContent(t *testing.T) {
 func TestInjectHooksSupported(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 
-	args, env, err := sm.injectHooks("claude", "test-supported-claude", "")
+	args, env, err := sm.injectHooks("claude", "test-supported-claude", "", nil)
 	if err != nil {
 		t.Fatalf("injectHooks(claude) error = %v", err)
 	}
@@ -319,7 +319,7 @@ func TestInjectHooksSupported(t *testing.T) {
 		t.Errorf("injectHooks(claude) returned unexpected env: %v", env)
 	}
 
-	args, env, err = sm.injectHooks("codex", "test-supported-codex", "")
+	args, env, err = sm.injectHooks("codex", "test-supported-codex", "", nil)
 	if err != nil {
 		t.Fatalf("injectHooks(codex) error = %v", err)
 	}
@@ -331,7 +331,7 @@ func TestInjectHooksSupported(t *testing.T) {
 	}
 
 	worktree := t.TempDir()
-	args, env, err = sm.injectHooks("cursor", "test-supported-cursor", worktree)
+	args, env, err = sm.injectHooks("cursor", "test-supported-cursor", worktree, nil)
 	if err != nil {
 		t.Fatalf("injectHooks(cursor) error = %v", err)
 	}
@@ -351,7 +351,7 @@ func TestInjectHooksUnsupportedIsNoop(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 
 	for _, agent := range []string{"agy", "opencode", "custom-agent"} {
-		args, env, err := sm.injectHooks(agent, "test-unsupported", "")
+		args, env, err := sm.injectHooks(agent, "test-unsupported", "", nil)
 		if err != nil {
 			t.Errorf("injectHooks(%q) unexpected error: %v", agent, err)
 		}

@@ -1,6 +1,7 @@
 package git
 
 import (
+	"context"
 	"fmt"
 	"strings"
 )
@@ -38,5 +39,10 @@ func DeleteBranch(repoPath, branchName string) error {
 
 func FetchOrigin(repoPath string) error {
 	_, err := RunOutput(repoPath, "fetch", "origin")
+	return err
+}
+
+func FetchOriginContext(ctx context.Context, repoPath string) error {
+	_, err := RunOutputContext(ctx, repoPath, "fetch", "origin")
 	return err
 }

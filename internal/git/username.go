@@ -1,14 +1,15 @@
 package git
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"os/exec"
 	"strings"
 )
 
-func DiscoverGitHubUsername(repoPath string) (string, error) {
-	if u, err := ghCLIUsername(); err == nil && u != "" {
+func DiscoverGitHubUsername(ctx context.Context, repoPath string) (string, error) {
+	if u, err := ghCLIUsername(ctx); err == nil && u != "" {
 		return u, nil
 	}
 	if u, err := RunOutput(repoPath, "config", "github.user"); err == nil && u != "" {
@@ -22,11 +23,11 @@ func DiscoverGitHubUsername(repoPath string) (string, error) {
 	return "", fmt.Errorf("cannot determine GitHub username; set github_username in config")
 }
 
-func ghCLIUsername() (string, error) {
+func ghCLIUsername(ctx context.Context) (string, error) {
 	if _, err := exec.LookPath("gh"); err != nil {
 		return "", err
 	}
-	cmd := exec.Command("gh", "api", "user", "--jq", ".login")
+	cmd := exec.CommandContext(ctx, "gh", "api", "user", "--jq", ".login")
 	out, err := cmd.Output()
 	if err != nil {
 		return "", err
