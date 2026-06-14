@@ -11,7 +11,7 @@ When you're running multiple AI coding agents on different tasks, you need:
 - **Isolation** — each agent works in its own git worktree, on its own branch
 - **Persistence** — sessions survive terminal closures; the daemon keeps everything alive
 - **Switching** — jump between agents with a tmux-style prefix key
-- **Visibility** — see all sessions at a glance, grouped by repo
+- **Visibility** — see all sessions at a glance, with views for what needs attention
 - **Coordination** — agents can message each other and you can drive them remotely
 
 graith is purpose-built for this. It owns the PTY, manages worktrees, and gets out of your way.
@@ -435,10 +435,16 @@ Press the prefix (`ctrl+b`), then:
 |-----|--------|
 | `enter` | Attach to the highlighted session |
 | `j` / `k` (or arrows) | Move the cursor |
+| `h` / `l` (or left/right) | Cycle view: All → Needs Attention → Active |
 | `n` / `p` | Next / previous session |
 | `/` | Filter by name |
 | `x` then `y` | Delete (with confirmation) |
 | `q` / `esc` | Close the overlay |
+
+**Views:**
+- **All** — every session, grouped by repo (default)
+- **Needs Attention** — sessions waiting for approval, errored, idle, or stopped with uncommitted/unpushed changes, sorted by time in current state (oldest first)
+- **Active** — running sessions only, sorted newest first
 
 ### Dashboard (`gr dashboard`)
 
