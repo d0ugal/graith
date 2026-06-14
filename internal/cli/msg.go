@@ -85,14 +85,33 @@ var (
 	msgSendThreadID string
 	msgSendReplyTo  string
 	msgSendQuiet    bool
+	msgSendChildren bool
+	msgSendParent   bool
 )
 
 var msgSendCmd = &cobra.Command{
-	Use:               "send <session-name-or-id> <body>",
-	Short:             "Send a message to a session's inbox",
-	Args:              cobra.RangeArgs(1, 2),
-	ValidArgsFunction: completeSessionNames,
+	Use:   "send <session-name-or-id> <body>",
+	Short: "Send a message to a session's inbox",
+	Args: func(cmd *cobra.Command, args []string) error {
+		if msgSendChildren || msgSendParent {
+			return cobra.MaximumNArgs(1)(cmd, args)
+		}
+		return cobra.RangeArgs(1, 2)(cmd, args)
+	},
+	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		if msgSendChildren || msgSendParent {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+		return completeSessionNames(cmd, args, toComplete)
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if msgSendChildren {
+			return msgSendChildrenRun(args)
+		}
+		if msgSendParent {
+			return msgSendParentRun(args)
+		}
+
 		c, err := client.Connect(cfg, paths, cfgFile)
 		if err != nil {
 			return err
@@ -352,6 +371,9 @@ func init() {
 	msgSendCmd.Flags().StringVar(&msgSendThreadID, "thread", "", "thread ID to continue")
 	msgSendCmd.Flags().StringVar(&msgSendReplyTo, "reply-to", "", "stream for replies")
 	msgSendCmd.Flags().BoolVarP(&msgSendQuiet, "quiet", "q", false, "don't type a notification into the session")
+	msgSendCmd.Flags().BoolVar(&msgSendChildren, "children", false, "send to all direct child sessions")
+	msgSendCmd.Flags().BoolVar(&msgSendParent, "parent", false, "send to parent session")
+	msgSendCmd.MarkFlagsMutuallyExclusive("children", "parent")
 
 	msgCmd.AddCommand(msgSubCmd)
 	msgSubCmd.Flags().StringVarP(&msgSubStream, "topic", "t", "", "stream/topic name")
@@ -417,6 +439,179 @@ func resolveSession(c *client.Client, nameOrID string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("session %q not found", nameOrID)
+}
+
+func resolveCurrentSessionInfo(c *client.Client) (*protocol.SessionInfo, error) {
+	currentID := os.Getenv("GRAITH_SESSION_ID")
+	if currentID == "" {
+		return nil, fmt.Errorf("GRAITH_SESSION_ID is not set; run this from inside a graith session")
+	}
+
+	c.SendControl("list", struct{}{})
+	resp, err := c.ReadControlResponse()
+	if err != nil {
+		return nil, err
+	}
+	var list protocol.SessionListMsg
+	if err := protocol.DecodePayload(resp, &list); err != nil {
+		return nil, err
+	}
+	for i, s := range list.Sessions {
+		if s.ID == currentID {
+			return &list.Sessions[i], nil
+		}
+	}
+	return nil, fmt.Errorf("current session %q not found in daemon", currentID)
+}
+
+func msgSendChildrenRun(args []string) error {
+	body, err := resolveBody(args, msgSendFile)
+	if err != nil {
+		return err
+	}
+
+	senderID, senderName := detectSender()
+
+	c, err := client.Connect(cfg, paths, cfgFile)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	currentID := os.Getenv("GRAITH_SESSION_ID")
+	if currentID == "" {
+		return fmt.Errorf("--children requires GRAITH_SESSION_ID to be set")
+	}
+
+	c.SendControl("list", struct{}{})
+	resp, err := c.ReadControlResponse()
+	if err != nil {
+		return err
+	}
+	var list protocol.SessionListMsg
+	if err := protocol.DecodePayload(resp, &list); err != nil {
+		return err
+	}
+
+	var children []protocol.SessionInfo
+	for _, s := range list.Sessions {
+		if s.ParentID == currentID {
+			children = append(children, s)
+		}
+	}
+	if len(children) == 0 {
+		return fmt.Errorf("no child sessions found")
+	}
+
+	var sentTo []string
+	for _, child := range children {
+		c.SendControl("msg_pub", protocol.MsgPubMsg{
+			Stream:     "inbox:" + child.ID,
+			Body:       body,
+			SenderID:   senderID,
+			SenderName: senderName,
+			ThreadID:   msgSendThreadID,
+			ReplyTo:    msgSendReplyTo,
+		})
+		resp, err := c.ReadControlResponse()
+		if err != nil {
+			return err
+		}
+		if resp.Type == "error" {
+			var e protocol.ErrorMsg
+			protocol.DecodePayload(resp, &e)
+			return fmt.Errorf("sending to %s: %s", child.Name, e.Message)
+		}
+		sentTo = append(sentTo, child.Name)
+
+		if !msgSendQuiet {
+			sender := senderName
+			if sender == "" {
+				sender = senderID
+			}
+			hint := fmt.Sprintf("New message from %s. Read: gr msg sub --topic inbox:%s --all | Reply: gr msg send --parent \"<reply>\"", sender, child.ID)
+			c.SendControl("type", protocol.TypeMsg{
+				SessionID: child.ID,
+				Input:     hint,
+			})
+			typeResp, err := c.ReadControlResponse()
+			if err != nil || typeResp.Type == "error" {
+				// Child may be stopped — skip notification, message is delivered
+			}
+		}
+	}
+
+	if jsonOutput {
+		return out.JSON(struct {
+			SentTo []string `json:"sent_to"`
+			Count  int      `json:"count"`
+		}{sentTo, len(sentTo)})
+	}
+	out.Print("Sent to %d child sessions\n", len(sentTo))
+	return nil
+}
+
+func msgSendParentRun(args []string) error {
+	body, err := resolveBody(args, msgSendFile)
+	if err != nil {
+		return err
+	}
+
+	senderID, senderName := detectSender()
+
+	c, err := client.Connect(cfg, paths, cfgFile)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	current, err := resolveCurrentSessionInfo(c)
+	if err != nil {
+		return err
+	}
+	if current.ParentID == "" {
+		return fmt.Errorf("current session has no parent")
+	}
+
+	c.SendControl("msg_pub", protocol.MsgPubMsg{
+		Stream:     "inbox:" + current.ParentID,
+		Body:       body,
+		SenderID:   senderID,
+		SenderName: senderName,
+		ThreadID:   msgSendThreadID,
+		ReplyTo:    msgSendReplyTo,
+	})
+	resp, err := c.ReadControlResponse()
+	if err != nil {
+		return err
+	}
+	if resp.Type == "error" {
+		var e protocol.ErrorMsg
+		protocol.DecodePayload(resp, &e)
+		return fmt.Errorf("%s", e.Message)
+	}
+
+	if !msgSendQuiet {
+		sender := senderName
+		if sender == "" {
+			sender = senderID
+		}
+		hint := fmt.Sprintf("New message from %s. Read: gr msg sub --topic inbox:%s --all | Reply: gr msg send --children \"<reply>\"", sender, current.ParentID)
+		c.SendControl("type", protocol.TypeMsg{
+			SessionID: current.ParentID,
+			Input:     hint,
+		})
+		typeResp, err := c.ReadControlResponse()
+		if err != nil || typeResp.Type == "error" {
+			// Parent may be stopped — skip notification, message is delivered
+		}
+	}
+
+	if jsonOutput {
+		return out.JSON(json.RawMessage(resp.Payload))
+	}
+	out.Print("Sent to parent session\n")
+	return nil
 }
 
 func printMessage(payload json.RawMessage) {
