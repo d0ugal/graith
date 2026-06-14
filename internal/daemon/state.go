@@ -252,6 +252,7 @@ func (s *State) Reconcile() {
 			if !isProcessAlive(sess.PID) {
 				slog.Info("session process died, marking stopped", "id", id, "pid", sess.PID)
 				sess.Status = StatusStopped
+				sess.StatusChangedAt = time.Now()
 				sess.PID = 0
 			}
 		}
