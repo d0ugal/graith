@@ -290,6 +290,46 @@ func TestMigrateApprovalsEnabledFromV1(t *testing.T) {
 	}
 }
 
+func TestReconcileDeletingRevertedToStopped(t *testing.T) {
+	state := &State{
+		Sessions: map[string]*SessionState{
+			"deleting": {
+				ID: "deleting", Name: "stuck", Status: StatusDeleting,
+			},
+			"running": {
+				ID: "running", Name: "alive", Status: StatusRunning, PID: 99999999,
+			},
+		},
+	}
+	state.Reconcile()
+	if state.Sessions["deleting"].Status != StatusStopped {
+		t.Errorf("deleting session status = %q, want %q", state.Sessions["deleting"].Status, StatusStopped)
+	}
+}
+
+func TestStatusDeletingPersistence(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	state := &State{
+		Sessions: map[string]*SessionState{
+			"s1": {
+				ID: "s1", Name: "deleting-session", Status: StatusDeleting,
+				CreatedAt: time.Now().UTC(),
+			},
+		},
+	}
+	if err := SaveState(path, state); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := loaded.Sessions["s1"]
+	if s.Status != StatusDeleting {
+		t.Errorf("status = %q, want %q", s.Status, StatusDeleting)
+	}
+}
+
 func TestSandboxConfigNilBackwardCompat(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
 	data := []byte(`{"version":1,"sessions":{"s1":{"id":"s1","name":"old","status":"stopped","sandboxed":true}}}`)

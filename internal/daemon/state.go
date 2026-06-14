@@ -18,9 +18,10 @@ const CurrentStateVersion = 4
 type SessionStatus string
 
 const (
-	StatusRunning SessionStatus = "running"
-	StatusStopped SessionStatus = "stopped"
-	StatusErrored SessionStatus = "errored"
+	StatusRunning  SessionStatus = "running"
+	StatusStopped  SessionStatus = "stopped"
+	StatusErrored  SessionStatus = "errored"
+	StatusDeleting SessionStatus = "deleting"
 )
 
 // CreationConfig captures the agent and sandbox configuration at session
@@ -233,6 +234,12 @@ func (s *State) Reconcile() {
 				sess.Status = StatusStopped
 				sess.PID = 0
 			}
+		}
+		// A "deleting" status means the daemon crashed mid-delete. Revert to
+		// stopped so the user can retry.
+		if sess.Status == StatusDeleting {
+			slog.Info("session stuck in deleting, reverting to stopped", "id", id)
+			sess.Status = StatusStopped
 		}
 	}
 }

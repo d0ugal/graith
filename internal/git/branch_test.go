@@ -252,6 +252,68 @@ func TestSetupAndTeardownSession(t *testing.T) {
 	}
 }
 
+func TestTeardownSessionIdempotent(t *testing.T) {
+	t.Run("worktree already removed", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		worktreePath := filepath.Join(t.TempDir(), "session-wt")
+		branchName := "graith/idempotent-test"
+
+		if err := SetupSession(dir, worktreePath, branchName, "main", false); err != nil {
+			t.Fatalf("SetupSession: %v", err)
+		}
+
+		// Manually remove the worktree directory to simulate partial teardown.
+		os.RemoveAll(worktreePath)
+
+		// TeardownSession should succeed despite the missing worktree.
+		if err := TeardownSession(dir, worktreePath, branchName); err != nil {
+			t.Fatalf("TeardownSession with missing worktree should succeed: %v", err)
+		}
+
+		if RefExists(dir, branchName) {
+			t.Error("branch should be deleted after teardown")
+		}
+	})
+
+	t.Run("branch already deleted", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		worktreePath := filepath.Join(t.TempDir(), "session-wt")
+		branchName := "graith/branch-gone-test"
+
+		if err := SetupSession(dir, worktreePath, branchName, "main", false); err != nil {
+			t.Fatalf("SetupSession: %v", err)
+		}
+
+		// First teardown removes everything.
+		if err := TeardownSession(dir, worktreePath, branchName); err != nil {
+			t.Fatalf("first TeardownSession: %v", err)
+		}
+
+		// Second teardown should be a no-op, not an error.
+		if err := TeardownSession(dir, worktreePath, branchName); err != nil {
+			t.Fatalf("second TeardownSession (fully idempotent) should succeed: %v", err)
+		}
+	})
+
+	t.Run("worktree and branch both already gone", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		worktreePath := filepath.Join(t.TempDir(), "never-existed")
+
+		if err := TeardownSession(dir, worktreePath, "nonexistent-branch"); err != nil {
+			t.Fatalf("TeardownSession for never-created session should succeed: %v", err)
+		}
+	})
+
+	t.Run("empty branch name", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		worktreePath := filepath.Join(t.TempDir(), "no-branch")
+
+		if err := TeardownSession(dir, worktreePath, ""); err != nil {
+			t.Fatalf("TeardownSession with empty branch name should succeed: %v", err)
+		}
+	})
+}
+
 func TestSetupSessionNoOrigin(t *testing.T) {
 	dir := setupTestRepo(t)
 	worktreePath := filepath.Join(t.TempDir(), "no-origin-wt")

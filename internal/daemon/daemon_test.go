@@ -2580,15 +2580,75 @@ func TestRunMessageCleanupLoopReadsConfig(t *testing.T) {
 	})
 }
 
-func TestDeleteKeepsSessionOnTeardownFailure(t *testing.T) {
+func TestResumeRejectsDeletingSession(t *testing.T) {
 	sm := newTestSessionManager(t)
+	sm.state.Sessions["del1"] = &SessionState{
+		ID:           "del1",
+		Name:         "being-deleted",
+		Agent:        "claude",
+		Status:       StatusDeleting,
+		WorktreePath: "/tmp/whatever",
+	}
 
+	_, err := sm.Resume("del1", 24, 80)
+	if err == nil {
+		t.Fatal("expected error resuming a deleting session")
+	}
+	if !strings.Contains(err.Error(), "is being deleted") {
+		t.Errorf("error = %q, want mention of 'is being deleted'", err.Error())
+	}
+}
+
+func TestDeleteSetsDeletingStatus(t *testing.T) {
+	tmpDir := t.TempDir()
+	worktreeDir := filepath.Join(tmpDir, "existing-worktree")
+	if err := os.MkdirAll(worktreeDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	sm := newTestSessionManager(t)
+	sm.state.Sessions["s1"] = &SessionState{
+		ID:           "s1",
+		Name:         "test",
+		Agent:        "claude",
+		RepoPath:     "/nonexistent/repo",
+		WorktreePath: worktreeDir,
+		Branch:       "graith/test-s1",
+		Status:       StatusStopped,
+	}
+
+	// Delete will fail because worktree dir exists but repo path is invalid.
+	// The session should be reverted to stopped.
+	err := sm.Delete("s1")
+	if err == nil {
+		t.Fatal("expected error from failed git teardown")
+	}
+
+	sm.mu.RLock()
+	s, ok := sm.state.Sessions["s1"]
+	sm.mu.RUnlock()
+	if !ok {
+		t.Fatal("session should be kept for retry")
+	}
+	if s.Status != StatusStopped {
+		t.Errorf("status = %q after failed teardown, want %q (reverted from deleting)", s.Status, StatusStopped)
+	}
+}
+
+func TestDeleteKeepsSessionOnTeardownFailure(t *testing.T) {
+	tmpDir := t.TempDir()
+	worktreeDir := filepath.Join(tmpDir, "existing-worktree")
+	if err := os.MkdirAll(worktreeDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	sm := newTestSessionManager(t)
 	sm.state.Sessions["fail1"] = &SessionState{
 		ID:           "fail1",
 		Name:         "leaky",
 		Agent:        "claude",
 		RepoPath:     "/nonexistent/repo",
-		WorktreePath: "/nonexistent/worktree",
+		WorktreePath: worktreeDir,
 		Branch:       "graith/leaky-fail1",
 		Status:       StatusStopped,
 	}
@@ -2606,7 +2666,81 @@ func TestDeleteKeepsSessionOnTeardownFailure(t *testing.T) {
 	}
 }
 
+func TestDeleteSucceedsWhenWorktreeAlreadyGone(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	sm.state.Sessions["gone1"] = &SessionState{
+		ID:           "gone1",
+		Name:         "already-cleaned",
+		Agent:        "claude",
+		RepoPath:     "/nonexistent/repo",
+		WorktreePath: "/nonexistent/worktree",
+		Branch:       "graith/gone-gone1",
+		Status:       StatusStopped,
+	}
+
+	err := sm.Delete("gone1")
+	if err != nil {
+		t.Fatalf("Delete should succeed when worktree and branch are already gone: %v", err)
+	}
+
+	if _, ok := sm.state.Sessions["gone1"]; ok {
+		t.Error("session should be removed from state after successful idempotent delete")
+	}
+}
+
 func TestDeleteWithChildrenKeepsFailedSessions(t *testing.T) {
+	tmpDir := t.TempDir()
+	worktreeDir := filepath.Join(tmpDir, "existing-child-worktree")
+	if err := os.MkdirAll(worktreeDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	sm := newTestSessionManager(t)
+
+	sm.state.Sessions["parent1"] = &SessionState{
+		ID:     "parent1",
+		Name:   "parent",
+		Agent:  "claude",
+		Status: StatusStopped,
+	}
+	sm.state.Sessions["child1"] = &SessionState{
+		ID:           "child1",
+		Name:         "child",
+		Agent:        "claude",
+		ParentID:     "parent1",
+		RepoPath:     "/nonexistent/repo",
+		WorktreePath: worktreeDir,
+		Branch:       "graith/child-child1",
+		Status:       StatusStopped,
+	}
+
+	deleted, err := sm.DeleteWithChildren("parent1")
+	if err == nil {
+		t.Fatal("expected error from failed git teardown")
+	}
+
+	if _, ok := sm.state.Sessions["child1"]; !ok {
+		t.Error("child session should be kept in state when teardown fails")
+	}
+
+	// Child failed but should be reverted to stopped, not stuck in deleting.
+	if s := sm.state.Sessions["child1"]; s.Status != StatusStopped {
+		t.Errorf("child status = %q, want %q (reverted from deleting)", s.Status, StatusStopped)
+	}
+
+	found := false
+	for _, id := range deleted {
+		if id == "parent1" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("parent (no repo) should be in the deleted list")
+	}
+}
+
+func TestDeleteWithChildrenIdempotent(t *testing.T) {
 	sm := newTestSessionManager(t)
 
 	sm.state.Sessions["parent1"] = &SessionState{
@@ -2627,21 +2761,18 @@ func TestDeleteWithChildrenKeepsFailedSessions(t *testing.T) {
 	}
 
 	deleted, err := sm.DeleteWithChildren("parent1")
-	if err == nil {
-		t.Fatal("expected error from failed git teardown")
+	if err != nil {
+		t.Fatalf("expected idempotent delete to succeed: %v", err)
 	}
 
-	if _, ok := sm.state.Sessions["child1"]; !ok {
-		t.Error("child session should be kept in state when teardown fails")
+	if len(deleted) != 2 {
+		t.Errorf("expected 2 deleted sessions, got %d: %v", len(deleted), deleted)
 	}
 
-	found := false
-	for _, id := range deleted {
-		if id == "parent1" {
-			found = true
-		}
+	if _, ok := sm.state.Sessions["parent1"]; ok {
+		t.Error("parent should be removed from state")
 	}
-	if !found {
-		t.Error("parent (no repo) should be in the deleted list")
+	if _, ok := sm.state.Sessions["child1"]; ok {
+		t.Error("child should be removed from state")
 	}
 }
