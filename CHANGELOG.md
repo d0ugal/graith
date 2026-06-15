@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.32.0](https://github.com/d0ugal/graith/compare/v0.31.0...v0.32.0) (2026-06-15)
+
+
+### Features
+
+* add gr status CLI command ([521c63d](https://github.com/d0ugal/graith/commit/521c63d43d003716c1bdd140be77bd6f59be5ed3))
+* add set_status handler and SetSummary/ClearSummary methods ([929faae](https://github.com/d0ugal/graith/commit/929faaefcfb751565f08562682761ce091692abc))
+* add StatusConfig with TTL duration parsing ([e9f7245](https://github.com/d0ugal/graith/commit/e9f72452973666e57a729f595849873ee4790237))
+* add summary status fields to SessionInfo and SetStatusMsg ([bfc6ee1](https://github.com/d0ugal/graith/commit/bfc6ee1db6fc5325375667e4147c14a59f25fe61))
+* add summary status fields to SessionState (v7 migration) ([2f5d57e](https://github.com/d0ugal/graith/commit/2f5d57e886d77d32e9f47411148c66084addc5e0))
+* auto-inject graith prompt into agent sessions ([bf0c5ca](https://github.com/d0ugal/graith/commit/bf0c5caf7657240cb02ac3a6a09f43e77c21630a))
+* persist LastOutputAt on session exit ([cd25e8d](https://github.com/d0ugal/graith/commit/cd25e8d78c03c5010c9c0613a0c931588f5cac08))
+* replace Branch column with Summary, rename Last to Output ([de25b0f](https://github.com/d0ugal/graith/commit/de25b0fec1ac6fcb28e724d8b264c6476e192d59))
+* two-tier summary resolution in toSessionInfo with expiry logic ([c5425c2](https://github.com/d0ugal/graith/commit/c5425c26cf7e15eedb937345b15cd3fdc21b7c7f))
+
+
+### Bug Fixes
+
+* address tribunal review findings for agent prompt injection ([5616e61](https://github.com/d0ugal/graith/commit/5616e612235a4ab832e93687ed72c15f000fb7f3))
+* rewrite if-else chain as switch for gocritic lint ([b5da44e](https://github.com/d0ugal/graith/commit/b5da44eddb46781c9272e3f2cd6e020d1aee574f))
+
 ## [0.31.0](https://github.com/d0ugal/graith/compare/v0.30.1...v0.31.0) (2026-06-15)
 
 
