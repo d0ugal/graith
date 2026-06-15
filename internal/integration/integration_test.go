@@ -76,6 +76,13 @@ func setup(t *testing.T) *testEnv {
 	t.Cleanup(func() { msgStore.Close() })
 	sm.SetMsgStore(msgStore)
 
+	docStore, err := daemon.NewDocStore(filepath.Join(tmpDir, "docstore.db"))
+	if err != nil {
+		t.Fatalf("open doc store: %v", err)
+	}
+	t.Cleanup(func() { docStore.Close() })
+	sm.SetDocStore(docStore)
+
 	l, err := net.Listen("unix", socketPath)
 	if err != nil {
 		t.Fatalf("listen: %v", err)
@@ -801,5 +808,97 @@ func TestUnknownAgent(t *testing.T) {
 	resp := readControl(t, r)
 	if resp.Type != "error" {
 		t.Fatalf("expected error for unknown agent, got %s", resp.Type)
+	}
+}
+
+func TestDocStoreRoundTrip(t *testing.T) {
+	env := setup(t)
+	defer env.teardown()
+
+	r, w := env.connect(t)
+	handshake(t, r, w)
+
+	// Put a document.
+	sendControl(t, w, "store_put", protocol.StorePutMsg{
+		Repo:        "/test/repo",
+		Key:         "design/api.md",
+		Body:        "# API Design",
+		ContentType: "text/markdown",
+		AuthorID:    "test",
+		AuthorName:  "tester",
+	})
+	resp := readControl(t, r)
+	if resp.Type != "store_ok" {
+		t.Fatalf("store_put: expected store_ok, got %s", resp.Type)
+	}
+
+	// Get the document back.
+	sendControl(t, w, "store_get", protocol.StoreGetMsg{
+		Repo: "/test/repo",
+		Key:  "design/api.md",
+	})
+	resp = readControl(t, r)
+	if resp.Type != "store_get_response" {
+		t.Fatalf("store_get: expected store_get_response, got %s", resp.Type)
+	}
+	var getResp protocol.StoreGetResponseMsg
+	protocol.DecodePayload(resp, &getResp)
+	if !getResp.Found {
+		t.Fatal("store_get: expected found=true")
+	}
+	if getResp.Document == nil {
+		t.Fatal("store_get: expected non-nil document")
+	}
+	if getResp.Document.Body != "# API Design" {
+		t.Errorf("store_get: body = %q, want %q", getResp.Document.Body, "# API Design")
+	}
+	if getResp.Document.ContentType != "text/markdown" {
+		t.Errorf("store_get: content_type = %q, want %q", getResp.Document.ContentType, "text/markdown")
+	}
+
+	// List documents with prefix.
+	sendControl(t, w, "store_list", protocol.StoreListMsg{
+		Repo:   "/test/repo",
+		Prefix: "design/",
+	})
+	resp = readControl(t, r)
+	if resp.Type != "store_list_response" {
+		t.Fatalf("store_list: expected store_list_response, got %s", resp.Type)
+	}
+	var listResp protocol.StoreListResponseMsg
+	protocol.DecodePayload(resp, &listResp)
+	if len(listResp.Documents) != 1 {
+		t.Fatalf("store_list: expected 1 document, got %d", len(listResp.Documents))
+	}
+	if listResp.Documents[0].Key != "design/api.md" {
+		t.Errorf("store_list: key = %q, want %q", listResp.Documents[0].Key, "design/api.md")
+	}
+	if listResp.Documents[0].Body != "" {
+		t.Errorf("store_list: body should be empty (metadata only), got %q", listResp.Documents[0].Body)
+	}
+
+	// Delete the document.
+	sendControl(t, w, "store_delete", protocol.StoreDeleteMsg{
+		Repo: "/test/repo",
+		Key:  "design/api.md",
+	})
+	resp = readControl(t, r)
+	if resp.Type != "store_ok" {
+		t.Fatalf("store_delete: expected store_ok, got %s", resp.Type)
+	}
+
+	// Verify the document is gone.
+	sendControl(t, w, "store_get", protocol.StoreGetMsg{
+		Repo: "/test/repo",
+		Key:  "design/api.md",
+	})
+	resp = readControl(t, r)
+	if resp.Type != "store_get_response" {
+		t.Fatalf("store_get (after delete): expected store_get_response, got %s", resp.Type)
+	}
+	var getResp2 protocol.StoreGetResponseMsg
+	protocol.DecodePayload(resp, &getResp2)
+	if getResp2.Found {
+		t.Fatal("store_get (after delete): expected found=false")
 	}
 }
