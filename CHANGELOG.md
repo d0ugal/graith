@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.33.0](https://github.com/d0ugal/graith/compare/v0.32.0...v0.33.0) (2026-06-15)
+
+
+### Features
+
+* add DocStore SQLite backend for shared document storage ([c660e64](https://github.com/d0ugal/graith/commit/c660e642a74075bd795a5fe141220797a577750d))
+* add gr store put/get/list/rm CLI commands ([19c0443](https://github.com/d0ugal/graith/commit/19c0443a652c9e05e6ee408f3618c1b9824e0152))
+* add store protocol message types ([c9e5fac](https://github.com/d0ugal/graith/commit/c9e5fac07ca58b00dd30521086f38eb66213056e))
+* wire DocStore into daemon handler and startup ([bc91caa](https://github.com/d0ugal/graith/commit/bc91caacd8a0577aac76a724795f39b4d93ee7a7))
+
+
+### Bug Fixes
+
+* address code quality review for docstore ([c70e6d7](https://github.com/d0ugal/graith/commit/c70e6d71b5e8a651ca50e75a2afce79a4fdcd925))
+* address tribunal review findings for document store ([eb55e95](https://github.com/d0ugal/graith/commit/eb55e957cadae04cc34d38a69ae7b1bb103502de))
+
 ## [0.32.0](https://github.com/d0ugal/graith/compare/v0.31.0...v0.32.0) (2026-06-15)
 
 
