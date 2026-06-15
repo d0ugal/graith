@@ -1264,6 +1264,28 @@ func TestMergeAgentPreservesMCPServers(t *testing.T) {
 	}
 }
 
+func TestStatusConfig_TTLDuration(t *testing.T) {
+	tests := []struct {
+		name string
+		ttl  string
+		want time.Duration
+	}{
+		{"default empty", "", 5 * time.Minute},
+		{"explicit 10m", "10m", 10 * time.Minute},
+		{"with days", "1d", 24 * time.Hour},
+		{"30 seconds", "30s", 30 * time.Second},
+		{"invalid falls back", "banana", 5 * time.Minute},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sc := StatusConfig{TTL: tt.ttl}
+			if got := sc.TTLDuration(); got != tt.want {
+				t.Errorf("TTLDuration() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestAgySandboxPathsMergedWithGlobal(t *testing.T) {
 	global := SandboxConfig{
 		Enabled:  true,
