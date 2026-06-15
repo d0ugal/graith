@@ -460,6 +460,9 @@ func mergeAgent(def, usr Agent) Agent {
 		usr.Sandbox.Features != nil || usr.Sandbox.ReadDirs != nil || usr.Sandbox.WriteDirs != nil {
 		def.Sandbox = usr.Sandbox
 	}
+	if usr.InjectPrompt != nil {
+		def.InjectPrompt = usr.InjectPrompt
+	}
 	if usr.MCPServers != nil {
 		def.MCPServers = usr.MCPServers
 	}

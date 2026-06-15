@@ -664,7 +664,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 	}
 
 	if agent.PromptInjectionEnabled() {
-		promptArgs, err := sm.injectPrompt(agent.Command, worktreePath)
+		promptArgs, err := sm.injectPrompt(agentName, worktreePath)
 		if err != nil {
 			sm.log.Warn("failed to inject prompt", "session_id", id, "err", err)
 		} else {
@@ -1017,7 +1017,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 	}
 
 	if agent.PromptInjectionEnabled() {
-		promptArgs, err := sm.injectPrompt(agent.Command, worktreePath)
+		promptArgs, err := sm.injectPrompt(agentName, worktreePath)
 		if err != nil {
 			sm.log.Warn("failed to inject prompt", "session_id", id, "err", err)
 		} else {
@@ -1395,7 +1395,7 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 	}
 
 	if agent.PromptInjectionEnabled() {
-		promptArgs, err := sm.injectPrompt(agent.Command, sessWorktreePath)
+		promptArgs, err := sm.injectPrompt(sessAgent, sessWorktreePath)
 		if err != nil {
 			sm.log.Warn("failed to inject prompt", "session_id", id, "err", err)
 		} else {

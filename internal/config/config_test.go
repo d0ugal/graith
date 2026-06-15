@@ -715,6 +715,26 @@ func TestMergeAgent(t *testing.T) {
 			t.Errorf("Sandbox.Features = %v, want [ssh]", got.Sandbox.Features)
 		}
 	})
+
+	t.Run("override inject_prompt", func(t *testing.T) {
+		f := false
+		usr := Agent{InjectPrompt: &f}
+		got := mergeAgent(def, usr)
+		if got.InjectPrompt == nil || *got.InjectPrompt != false {
+			t.Errorf("InjectPrompt = %v, want false", got.InjectPrompt)
+		}
+	})
+
+	t.Run("nil inject_prompt preserves default", func(t *testing.T) {
+		tr := true
+		defWithPrompt := def
+		defWithPrompt.InjectPrompt = &tr
+		usr := Agent{Command: "my-claude"}
+		got := mergeAgent(defWithPrompt, usr)
+		if got.InjectPrompt == nil || *got.InjectPrompt != true {
+			t.Errorf("InjectPrompt = %v, want true (preserved from default)", got.InjectPrompt)
+		}
+	})
 }
 
 func TestLoadConfigRepos(t *testing.T) {
