@@ -663,7 +663,9 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 			return SessionState{}, err
 		}
 		env["GRAITH_SHARE_PATH"] = shareDir
-		env["TMPDIR"] = shareDir
+		if _, ok := env["TMPDIR"]; !ok {
+			env["TMPDIR"] = shareDir
+		}
 	}
 	for _, inc := range includes {
 		env[config.IncludeEnvVarName(inc.RepoName)] = inc.WorktreePath
@@ -1034,7 +1036,9 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 			return SessionState{}, err
 		}
 		env["GRAITH_SHARE_PATH"] = shareDir
-		env["TMPDIR"] = shareDir
+		if _, ok := env["TMPDIR"]; !ok {
+			env["TMPDIR"] = shareDir
+		}
 	}
 	for _, inc := range forkIncludes {
 		env[config.IncludeEnvVarName(inc.RepoName)] = inc.WorktreePath
@@ -1421,7 +1425,9 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 			return SessionState{}, err
 		}
 		env["GRAITH_SHARE_PATH"] = shareDir
-		env["TMPDIR"] = shareDir
+		if _, ok := env["TMPDIR"]; !ok {
+			env["TMPDIR"] = shareDir
+		}
 	}
 
 	for _, inc := range sessIncludes {
@@ -2643,7 +2649,6 @@ func (sm *SessionManager) sandboxOptsFromConfig(merged config.SandboxConfig, ses
 		readDirs = append(readDirs, filepath.Dir(grBin))
 	}
 	readDirs = append(readDirs, sm.paths.RuntimeDir)
-	readDirs = append(readDirs, sm.paths.ShareDir)
 
 	return sandbox.WrapOpts{
 		WorktreeDir:      worktreePath,
