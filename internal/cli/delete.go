@@ -245,7 +245,13 @@ func deleteBatchRun(cmd *cobra.Command) error {
 		}
 	}
 
+	var skipped []string
+	var deleted int
 	for _, s := range matched {
+		if s.Starred {
+			skipped = append(skipped, s.Name)
+			continue
+		}
 		c.SendControl("delete", protocol.DeleteMsg{SessionID: s.ID})
 		resp, err := c.ReadControlResponse()
 		if err != nil {
@@ -256,9 +262,13 @@ func deleteBatchRun(cmd *cobra.Command) error {
 			protocol.DecodePayload(resp, &e)
 			return fmt.Errorf("deleting %s: %s", s.Name, e.Message)
 		}
+		deleted++
 	}
 
-	out.Print("Deleted %d sessions\n", len(matched))
+	out.Print("Deleted %d sessions\n", deleted)
+	for _, name := range skipped {
+		out.Print("Skipped starred session: %s\n", name)
+	}
 	return nil
 }
 

@@ -144,7 +144,13 @@ func stopBatchRun(cmd *cobra.Command) error {
 		}
 	}
 
+	var skipped []string
+	var stopped int
 	for _, s := range matched {
+		if s.Starred {
+			skipped = append(skipped, s.Name)
+			continue
+		}
 		c.SendControl("stop", protocol.StopMsg{SessionID: s.ID})
 		resp, err := c.ReadControlResponse()
 		if err != nil {
@@ -155,9 +161,13 @@ func stopBatchRun(cmd *cobra.Command) error {
 			protocol.DecodePayload(resp, &e)
 			return fmt.Errorf("stopping %s: %s", s.Name, e.Message)
 		}
+		stopped++
 	}
 
-	out.Print("Stopped %d sessions\n", len(matched))
+	out.Print("Stopped %d sessions\n", stopped)
+	for _, name := range skipped {
+		out.Print("Skipped starred session: %s\n", name)
+	}
 	return nil
 }
 

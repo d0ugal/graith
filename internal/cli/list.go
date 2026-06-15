@@ -120,8 +120,12 @@ func printFlat(cmd *cobra.Command, sessions []protocol.SessionInfo, now time.Tim
 	tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "NAME\tREPO\tAGENT\tSTATUS\tACTIVITY\tMODEL\tCOST\tBRANCH\tGIT\tAGE\tATTACHED")
 	for _, s := range sessions {
+		name := s.Name
+		if s.Starred {
+			name = "★ " + name
+		}
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			s.Name, s.RepoName, s.Agent, s.Status,
+			name, s.RepoName, s.Agent, s.Status,
 			formatAgentStatus(s), formatModel(s), formatCost(s),
 			formatBranch(s), formatGitStatus(s), formatAge(s, now), formatAttached(s, now))
 	}
@@ -163,8 +167,12 @@ func printTree(cmd *cobra.Command, sessions []protocol.SessionInfo, now time.Tim
 
 	var walk func(s protocol.SessionInfo, prefix, childPrefix string)
 	walk = func(s protocol.SessionInfo, prefix, childPrefix string) {
+		name := s.Name
+		if s.Starred {
+			name = "★ " + name
+		}
 		fmt.Fprintf(tw, "%s%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			prefix, s.Name, s.RepoName, s.Agent, s.Status,
+			prefix, name, s.RepoName, s.Agent, s.Status,
 			formatAgentStatus(s), formatModel(s), formatCost(s),
 			formatBranch(s), formatGitStatus(s), formatAge(s, now), formatAttached(s, now))
 
