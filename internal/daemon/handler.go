@@ -85,7 +85,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				sessions := sm.List()
 				infos := make([]protocol.SessionInfo, 0, len(sessions))
 				for _, s := range sessions {
-					infos = append(infos, toSessionInfo(s, sm.cfg))
+					infos = append(infos, toSessionInfo(s, sm.cfg, sm.getHookReport(s.ID)))
 				}
 				sendControl("session_list", protocol.SessionListMsg{Sessions: infos})
 
@@ -103,7 +103,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 				} else {
-					sendControl("created", toSessionInfo(sess, sm.cfg))
+					sendControl("created", toSessionInfo(sess, sm.cfg, sm.getHookReport(sess.ID)))
 				}
 
 			case "fork":
@@ -116,7 +116,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 				} else {
-					sendControl("created", toSessionInfo(sess, sm.cfg))
+					sendControl("created", toSessionInfo(sess, sm.cfg, sm.getHookReport(sess.ID)))
 				}
 
 			case "attach":
@@ -166,7 +166,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				_ = ptySess.Resize(clientRows, clientCols)
 
 				sess, _ := sm.Get(a.SessionID)
-				sendControl("attached", toSessionInfo(sess, sm.cfg))
+				sendControl("attached", toSessionInfo(sess, sm.cfg, sm.getHookReport(sess.ID)))
 
 				if tail, err := ptySess.Scrollback.Tail(300); err == nil && len(tail) > 0 {
 					_ = writer.WriteFrame(protocol.ChannelData, tail)
@@ -310,7 +310,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 				} else {
-					sendControl("resumed", toSessionInfo(sess, sm.cfg))
+					sendControl("resumed", toSessionInfo(sess, sm.cfg, sm.getHookReport(sess.ID)))
 				}
 
 			case "restart":
@@ -323,7 +323,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 				} else {
-					sendControl("restarted", toSessionInfo(sess, sm.cfg))
+					sendControl("restarted", toSessionInfo(sess, sm.cfg, sm.getHookReport(sess.ID)))
 				}
 
 			case "logs":
@@ -660,7 +660,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				}
 				fleet := sm.fleetSummary()
 				sendControl("status_response", protocol.StatusResponseMsg{
-					Session:     toSessionInfo(sess, sm.cfg),
+					Session:     toSessionInfo(sess, sm.cfg, sm.getHookReport(sess.ID)),
 					UnreadCount: unread,
 					Fleet:       fleet,
 				})
@@ -823,7 +823,7 @@ func (w *frameDataWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func toSessionInfo(s SessionState, cfg *config.Config) protocol.SessionInfo {
+func toSessionInfo(s SessionState, cfg *config.Config, hr *hookReport) protocol.SessionInfo {
 	info := protocol.SessionInfo{
 		ID:             s.ID,
 		ParentID:       s.ParentID,
@@ -867,6 +867,40 @@ func toSessionInfo(s SessionState, cfg *config.Config) protocol.SessionInfo {
 			Unpushed:     inc.unpushed,
 		})
 	}
+
+	// Summary resolution
+	if s.SummaryText != "" && s.SummarySetAt != nil {
+		ttl := cfg.Status.TTLDuration()
+		if s.SummaryTTL > 0 {
+			ttl = time.Duration(s.SummaryTTL) * time.Second
+		}
+		age := time.Since(*s.SummarySetAt)
+
+		recentOutput := s.LastOutputAt != nil && time.Since(*s.LastOutputAt) < ttl
+		active := s.Status == StatusRunning && recentOutput
+
+		if age > ttl && active {
+			// Expired: agent is active but hasn't updated status — clear it
+		} else if age > ttl {
+			info.SummaryText = s.SummaryText
+			info.SummaryFaded = true
+		} else {
+			info.SummaryText = s.SummaryText
+		}
+	}
+
+	// Fallback to hook-derived status when explicit is absent/expired
+	if info.SummaryText == "" && hr != nil && hr.ToolName != "" && time.Now().Before(hr.AuthoritativeUntil) {
+		info.SummaryText = "Using " + hr.ToolName
+	}
+
+	// LastOutputAt — use runtime value, fall back to StatusChangedAt
+	if s.LastOutputAt != nil {
+		info.LastOutputAt = s.LastOutputAt.Format(time.RFC3339)
+	} else if !s.StatusChangedAt.IsZero() {
+		info.LastOutputAt = s.StatusChangedAt.Format(time.RFC3339)
+	}
+
 	return info
 }
 
