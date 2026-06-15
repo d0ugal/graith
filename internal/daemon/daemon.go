@@ -1939,6 +1939,60 @@ func (sm *SessionManager) Unstar(id string) error {
 	return sm.saveState()
 }
 
+func sanitizeSummaryText(text string) string {
+	var b strings.Builder
+	for _, r := range text {
+		if r >= 32 && r != 127 {
+			b.WriteRune(r)
+		}
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func (sm *SessionManager) SetSummary(sessionID, text string, ttlSeconds int) error {
+	text = sanitizeSummaryText(text)
+	if len(text) > 100 {
+		return fmt.Errorf("summary text exceeds 100 bytes")
+	}
+
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	s, ok := sm.state.Sessions[sessionID]
+	if !ok {
+		return fmt.Errorf("session %q not found", sessionID)
+	}
+
+	now := time.Now()
+	s.SummaryText = text
+	s.SummarySetAt = &now
+	s.SummaryTTL = ttlSeconds
+
+	if text == "" {
+		s.SummaryText = ""
+		s.SummarySetAt = nil
+		s.SummaryTTL = 0
+	}
+
+	return sm.saveState()
+}
+
+func (sm *SessionManager) ClearSummary(sessionID string) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	s, ok := sm.state.Sessions[sessionID]
+	if !ok {
+		return fmt.Errorf("session %q not found", sessionID)
+	}
+
+	s.SummaryText = ""
+	s.SummarySetAt = nil
+	s.SummaryTTL = 0
+
+	return sm.saveState()
+}
+
 func (sm *SessionManager) Rename(id, newName string) error {
 	if err := ValidateSessionName(newName); err != nil {
 		return err
