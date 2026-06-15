@@ -663,6 +663,15 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 		}
 	}
 
+	if agent.PromptInjectionEnabled() {
+		promptArgs, err := sm.injectPrompt(agent.Command, worktreePath)
+		if err != nil {
+			sm.log.Warn("failed to inject prompt", "session_id", id, "err", err)
+		} else {
+			expandedArgs = append(expandedArgs, promptArgs...)
+		}
+	}
+
 	command := agent.Command
 	finalArgs := expandedArgs
 	var scratchDir string
@@ -1004,6 +1013,15 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 		expandedArgs = append(expandedArgs, hookArgs...)
 		for k, v := range hookEnv {
 			env[k] = v
+		}
+	}
+
+	if agent.PromptInjectionEnabled() {
+		promptArgs, err := sm.injectPrompt(agent.Command, worktreePath)
+		if err != nil {
+			sm.log.Warn("failed to inject prompt", "session_id", id, "err", err)
+		} else {
+			expandedArgs = append(expandedArgs, promptArgs...)
 		}
 	}
 
@@ -1373,6 +1391,15 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 		expandedArgs = append(expandedArgs, hookArgs...)
 		for k, v := range hookEnv {
 			env[k] = v
+		}
+	}
+
+	if agent.PromptInjectionEnabled() {
+		promptArgs, err := sm.injectPrompt(agent.Command, sessWorktreePath)
+		if err != nil {
+			sm.log.Warn("failed to inject prompt", "session_id", id, "err", err)
+		} else {
+			expandedArgs = append(expandedArgs, promptArgs...)
 		}
 	}
 
