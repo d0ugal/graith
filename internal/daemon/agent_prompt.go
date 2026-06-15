@@ -15,12 +15,11 @@ const (
 	promptInjectionCursorRules                              // .cursor/rules/graith.mdc (Cursor)
 )
 
-func detectPromptInjection(command string) promptInjectionMethod {
-	base := filepath.Base(command)
-	switch base {
+func detectPromptInjection(agentName string) promptInjectionMethod {
+	switch agentName {
 	case "claude":
 		return promptInjectionAppendSystemPrompt
-	case "agent":
+	case "cursor":
 		return promptInjectionCursorRules
 	default:
 		return promptInjectionNone
@@ -43,21 +42,25 @@ gr status "Done"
 ## Inter-agent messaging
 
 ` + "```" + `
-gr msg send <session> "text"       # message another session directly
-gr msg pub --topic <topic> "text"  # broadcast to a topic
-gr msg sub --topic inbox:$GRAITH_SESSION_ID --wait  # wait for a direct message
+gr msg send <session> "text"          # message another session directly
+gr msg send --parent "text"           # message your parent session
+gr msg send --children "text"         # message all child sessions
+gr msg pub --topic <topic> "text"     # broadcast to a topic
+gr msg sub --topic inbox --all --ack  # read and acknowledge inbox messages
 ` + "```" + `
+
+Note: ` + "`gr msg sub --wait`" + ` blocks until a message arrives. Use ` + "`--all`" + ` to read without blocking.
 
 ## Environment
 
 - GRAITH_SESSION_ID — your session ID (set automatically)
 - GRAITH_SESSION_NAME — your session name
-- GRAITH_WORKTREE_PATH — your working directory
+- GRAITH_WORKTREE_PATH — absolute path to your session worktree
 
 Run ` + "`gr --help`" + ` for the full command list.`
 
-func (sm *SessionManager) injectPrompt(command, worktreePath string) (extraArgs []string, err error) {
-	method := detectPromptInjection(command)
+func (sm *SessionManager) injectPrompt(agentName, worktreePath string) (extraArgs []string, err error) {
+	method := detectPromptInjection(agentName)
 	switch method {
 	case promptInjectionAppendSystemPrompt:
 		return []string{"--append-system-prompt", graithPrompt}, nil
@@ -108,5 +111,11 @@ func cleanupCursorRule(worktreePath string) {
 	entries, err := os.ReadDir(rulesDir)
 	if err == nil && len(entries) == 0 {
 		_ = os.Remove(rulesDir)
+	}
+
+	cursorDir := filepath.Join(worktreePath, ".cursor")
+	entries, err = os.ReadDir(cursorDir)
+	if err == nil && len(entries) == 0 {
+		_ = os.Remove(cursorDir)
 	}
 }
