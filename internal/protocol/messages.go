@@ -87,6 +87,17 @@ type UnstarMsg struct {
 	SessionID string `json:"session_id"`
 }
 
+type SetStatusMsg struct {
+	SessionID  string `json:"session_id"`
+	Text       string `json:"text"`
+	TTLSeconds int    `json:"ttl_seconds,omitempty"`
+	Clear      bool   `json:"clear,omitempty"`
+}
+
+type StatusSetMsg struct {
+	SessionID string `json:"session_id"`
+}
+
 type StopMsg struct {
 	SessionID   string `json:"session_id"`
 	Children    bool   `json:"children,omitempty"`
@@ -217,6 +228,9 @@ type SessionInfo struct {
 	Includes        []IncludedRepoInfo `json:"includes,omitempty"`
 	ConfigStale     bool               `json:"config_stale,omitempty"`
 	Starred         bool               `json:"starred,omitempty"`
+	SummaryText     string             `json:"summary_text,omitempty"`
+	SummaryFaded    bool               `json:"summary_faded,omitempty"`
+	LastOutputAt    string             `json:"last_output_at,omitempty"`
 }
 
 type IncludedRepoInfo struct {
