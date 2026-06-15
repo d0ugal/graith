@@ -879,12 +879,13 @@ func toSessionInfo(s SessionState, cfg *config.Config, hr *hookReport) protocol.
 		recentOutput := s.LastOutputAt != nil && time.Since(*s.LastOutputAt) < ttl
 		active := s.Status == StatusRunning && recentOutput
 
-		if age > ttl && active {
+		switch {
+		case age > ttl && active:
 			// Expired: agent is active but hasn't updated status — clear it
-		} else if age > ttl {
+		case age > ttl:
 			info.SummaryText = s.SummaryText
 			info.SummaryFaded = true
-		} else {
+		default:
 			info.SummaryText = s.SummaryText
 		}
 	}
