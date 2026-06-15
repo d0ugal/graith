@@ -216,6 +216,32 @@ gr type fix-overlay "please review the changes"
 gr type fix-overlay --no-newline "y"
 ```
 
+### Status summaries
+
+**You should call `gr status` to keep the session picker informed of what
+you're doing.** This is visible to the user and other agents in the overlay
+(ctrl+b w). Update it at key milestones — when you start a new phase of work,
+when you're waiting on something, and when you're done.
+
+```bash
+# Set your current status (auto-detects session from GRAITH_SESSION_ID)
+gr status "Exploring code"
+gr status "Running tests"
+gr status "Waiting for CI"
+gr status "Reviewing PR"
+gr status "Done"
+
+# Override the TTL for long-running waits
+gr status --ttl 30m "Waiting for CI"
+
+# Clear when no longer relevant
+gr status --clear
+```
+
+The status auto-expires when the agent is actively producing output but hasn't
+updated it (default 5 minutes). When idle, it fades but persists — so "Done"
+on a stopped session stays visible.
+
 ### Monitoring sessions
 
 ```bash
