@@ -13,7 +13,7 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 )
 
-const CurrentStateVersion = 5
+const CurrentStateVersion = 6
 
 type SessionStatus string
 
@@ -64,6 +64,7 @@ type SessionState struct {
 	Includes               []IncludedRepoState   `json:"includes,omitempty"`
 	AgentHooks             bool                  `json:"agent_hooks,omitempty"`
 	ApprovalsEnabled       bool                  `json:"approvals_enabled,omitempty"` // deprecated: migrated to AgentHooks in v4
+	Starred                bool                  `json:"starred,omitempty"`
 	CreatedAt              time.Time             `json:"created_at"`
 	LastAttachedAt         *time.Time            `json:"last_attached_at,omitempty"`
 	CreationCfg            *CreationConfig       `json:"creation_config,omitempty"`
@@ -142,6 +143,7 @@ var migrations = map[int]func(*State) error{
 	2: migrateV2ToV3,
 	3: migrateV3ToV4,
 	4: migrateV4ToV5,
+	5: migrateV5ToV6,
 }
 
 func migrateState(state *State) error {
@@ -194,6 +196,12 @@ func migrateV4ToV5(state *State) error {
 			s.StatusChangedAt = s.CreatedAt
 		}
 	}
+	return nil
+}
+
+// migrateV5ToV6 is a no-op: v6 adds the optional starred field which
+// defaults to false for existing sessions.
+func migrateV5ToV6(_ *State) error {
 	return nil
 }
 

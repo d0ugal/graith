@@ -252,6 +252,34 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					}{r.SessionID, r.NewName})
 				}
 
+			case "star":
+				var s protocol.StarMsg
+				if err := protocol.DecodePayload(msg, &s); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid star message"})
+					continue
+				}
+				if err := sm.Star(s.SessionID); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+				} else {
+					sendControl("starred", struct {
+						SessionID string `json:"session_id"`
+					}{s.SessionID})
+				}
+
+			case "unstar":
+				var u protocol.UnstarMsg
+				if err := protocol.DecodePayload(msg, &u); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid unstar message"})
+					continue
+				}
+				if err := sm.Unstar(u.SessionID); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+				} else {
+					sendControl("unstarred", struct {
+						SessionID string `json:"session_id"`
+					}{u.SessionID})
+				}
+
 			case "resume":
 				var r protocol.ResumeMsg
 				if err := protocol.DecodePayload(msg, &r); err != nil {
@@ -801,6 +829,7 @@ func toSessionInfo(s SessionState, cfg *config.Config) protocol.SessionInfo {
 		CostUSD:        s.HookCostUSD,
 		ContextPercent: s.HookContextPercent,
 		ConfigStale:    isConfigStale(s, cfg),
+		Starred:        s.Starred,
 	}
 	if s.LastAttachedAt != nil {
 		info.LastAttachedAt = s.LastAttachedAt.Format(time.RFC3339)
