@@ -17,6 +17,7 @@ var (
 	listRepo     string
 	listTree     bool
 	listChildren string
+	listStarred  bool
 )
 
 var listCmd = &cobra.Command{
@@ -58,6 +59,16 @@ var listCmd = &cobra.Command{
 			filtered := list.Sessions[:0]
 			for _, s := range list.Sessions {
 				if s.RepoPath == listRepo || strings.HasSuffix(s.RepoPath, "/"+listRepo) || s.RepoName == listRepo {
+					filtered = append(filtered, s)
+				}
+			}
+			list.Sessions = filtered
+		}
+
+		if listStarred {
+			filtered := list.Sessions[:0]
+			for _, s := range list.Sessions {
+				if s.Starred {
 					filtered = append(filtered, s)
 				}
 			}
@@ -278,6 +289,7 @@ func init() {
 	listCmd.Flags().StringVar(&listRepo, "repo", "", "filter by repo path")
 	listCmd.Flags().BoolVar(&listTree, "tree", false, "show parent-child hierarchy")
 	listCmd.Flags().StringVar(&listChildren, "children", "", "filter to descendants of a session")
+	listCmd.Flags().BoolVar(&listStarred, "starred", false, "show only starred sessions")
 
 	listCmd.RegisterFlagCompletionFunc("repo", completeRepoPaths)
 	listCmd.RegisterFlagCompletionFunc("children", completeSessionNames)

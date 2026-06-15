@@ -32,9 +32,10 @@ const (
 	viewAll viewMode = iota
 	viewNeedsAttention
 	viewActive
+	viewStarred
 )
 
-var viewNames = []string{"All", "Needs Attention", "Active"}
+var viewNames = []string{"All", "Needs Attention", "Active", "Starred"}
 
 func (v viewMode) next() viewMode {
 	return (v + 1) % viewMode(len(viewNames))
@@ -74,6 +75,16 @@ func filterActive(sessions []protocol.SessionInfo) []protocol.SessionInfo {
 		tj, _ := time.Parse(time.RFC3339, result[j].CreatedAt)
 		return ti.After(tj)
 	})
+	return result
+}
+
+func filterStarred(sessions []protocol.SessionInfo) []protocol.SessionInfo {
+	var result []protocol.SessionInfo
+	for _, s := range sessions {
+		if s.Starred {
+			result = append(result, s)
+		}
+	}
 	return result
 }
 
@@ -135,8 +146,8 @@ type columnWidths struct {
 }
 
 func (cw columnWidths) totalWidth() int {
-	// "  ★ ● " (6) + treeIndent + name + "  " + status + "  " + branch + "  " + git + "  " + last + margin(4)
-	return 6 + cw.treeIndent + cw.name + 2 + cw.status + 2 + cw.branch + 2 + cw.git + 2 + cw.last + 4
+	// "  ★▸● " (7) + treeIndent + name + "  " + status + "  " + branch + "  " + git + "  " + last + margin(4)
+	return 7 + cw.treeIndent + cw.name + 2 + cw.status + 2 + cw.branch + 2 + cw.git + 2 + cw.last + 4
 }
 
 func pad(s string, width int) string {
@@ -347,9 +358,13 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	}
 	styledIndicator += staleMarker
 
-	currentMark := "  "
+	starredMark := " "
+	if si.info.Starred {
+		starredMark = lipgloss.NewStyle().Foreground(colorGold).Render("★")
+	}
+	currentMark := " "
 	if isCurrent {
-		currentMark = lipgloss.NewStyle().Foreground(colorGold).Render("★") + " "
+		currentMark = lipgloss.NewStyle().Foreground(colorGold).Render("▸")
 	}
 
 	treePrefixRendered := ""
@@ -403,8 +418,8 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 		selPrefix = "> "
 	}
 
-	line := fmt.Sprintf("%s%s%s %s%s%s%s%s%s%s%s%s%s",
-		selPrefix, currentMark, styledIndicator,
+	line := fmt.Sprintf("%s%s%s%s %s%s%s%s%s%s%s%s%s%s",
+		selPrefix, starredMark, currentMark, styledIndicator,
 		treePrefixRendered, name, sep, statusRendered, sep, branchRendered, sep, gitRendered, sep, lastRendered)
 
 	if selected {
@@ -428,6 +443,12 @@ type deleteResultMsg struct {
 	err       error
 }
 
+type starResultMsg struct {
+	sessionID string
+	starred   bool
+	err       error
+}
+
 type overlayModel struct {
 	list             list.Model
 	filterInput      textinput.Model
@@ -442,6 +463,7 @@ type overlayModel struct {
 	view             viewMode
 	fetchPreview     func(sessionID string) string
 	deleteSession    func(sessionID string) error
+	toggleStar       func(sessionID string, star bool) error
 	previewContent   string
 	previewSessionID string
 	profile          string
@@ -456,6 +478,10 @@ type OverlayResult struct {
 func SortSessions(sessions []protocol.SessionInfo) {
 	sort.SliceStable(sessions, func(i, j int) bool {
 		si, sj := sessions[i], sessions[j]
+
+		if si.Starred != sj.Starred {
+			return si.Starred
+		}
 
 		ri := si.Status == "running"
 		rj := sj.Status == "running"
@@ -656,6 +682,8 @@ func (m *overlayModel) sessionsForView() []protocol.SessionInfo {
 		return filterNeedsAttention(m.allSessions)
 	case viewActive:
 		return filterActive(m.allSessions)
+	case viewStarred:
+		return filterStarred(m.allSessions)
 	default:
 		return m.allSessions
 	}
@@ -671,6 +699,18 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
+
+	case starResultMsg:
+		if msg.err == nil {
+			for i, s := range m.allSessions {
+				if s.ID == msg.sessionID {
+					m.allSessions[i].Starred = msg.starred
+					break
+				}
+			}
+			m.rebuildForView()
+		}
+		return m, m.fetchPreviewCmd()
 
 	case deleteResultMsg:
 		if msg.err != nil {
@@ -818,6 +858,17 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 
+			case "s":
+				if item, ok := m.list.SelectedItem().(sessionItem); ok && m.toggleStar != nil {
+					sid := item.info.ID
+					newStarred := !item.info.Starred
+					toggleFn := m.toggleStar
+					return m, func() tea.Msg {
+						return starResultMsg{sessionID: sid, starred: newStarred, err: toggleFn(sid, newStarred)}
+					}
+				}
+				return m, nil
+
 			case "/":
 				m.filterInput.SetValue("")
 				m.filterInput.Focus()
@@ -935,7 +986,7 @@ func (m overlayModel) View() tea.View {
 		panelContent.WriteString("\n")
 	}
 
-	headerPrefix := "      "
+	headerPrefix := "       "
 	nameColWidth := m.cols.treeIndent + m.cols.name
 	headerLine := fmt.Sprintf("%s%s  %s  %s  %s  %s",
 		headerPrefix,
@@ -964,6 +1015,8 @@ func (m overlayModel) View() tea.View {
 			emptyMsg = "Nothing needs your attention"
 		case viewActive:
 			emptyMsg = "No active sessions"
+		case viewStarred:
+			emptyMsg = "No starred sessions"
 		}
 		panelContent.WriteString("\n  ")
 		panelContent.WriteString(emptyStyle.Render(emptyMsg))
@@ -1053,7 +1106,7 @@ func (m overlayModel) View() tea.View {
 
 	helpStyle := lipgloss.NewStyle().Foreground(colorFaint)
 	panelContent.WriteString("\n")
-	panelContent.WriteString(helpStyle.Render("enter attach  ◂▸ view  / filter  tab group  x delete  r restart  q quit"))
+	panelContent.WriteString(helpStyle.Render("enter attach  ◂▸ view  / filter  tab group  s star  x delete  r restart  q quit"))
 
 	panel := lipgloss.NewStyle().
 		Width(panelWidth).
@@ -1131,8 +1184,9 @@ func (m overlayModel) View() tea.View {
 // RunOverlay launches the bubbletea overlay listing sessions grouped by repo.
 // currentSessionID highlights the session the user was just attached to.
 // fetchPreview is called asynchronously to load scrollback for the selected session.
-func RunOverlay(sessions []protocol.SessionInfo, currentSessionID string, fetchPreview func(sessionID string) string, deleteSession func(sessionID string) error, profile string) *OverlayResult {
+func RunOverlay(sessions []protocol.SessionInfo, currentSessionID string, fetchPreview func(sessionID string) string, deleteSession func(sessionID string) error, toggleStar func(sessionID string, star bool) error, profile string) *OverlayResult {
 	m := newOverlayModel(sessions, currentSessionID, fetchPreview, deleteSession)
+	m.toggleStar = toggleStar
 	m.profile = profile
 	p := tea.NewProgram(m)
 

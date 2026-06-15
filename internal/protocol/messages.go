@@ -79,6 +79,14 @@ type RenameMsg struct {
 	NewName   string `json:"new_name"`
 }
 
+type StarMsg struct {
+	SessionID string `json:"session_id"`
+}
+
+type UnstarMsg struct {
+	SessionID string `json:"session_id"`
+}
+
 type StopMsg struct {
 	SessionID   string `json:"session_id"`
 	Children    bool   `json:"children,omitempty"`
@@ -208,6 +216,7 @@ type SessionInfo struct {
 	ContextPercent  *float64           `json:"context_percent,omitempty"`
 	Includes        []IncludedRepoInfo `json:"includes,omitempty"`
 	ConfigStale     bool               `json:"config_stale,omitempty"`
+	Starred         bool               `json:"starred,omitempty"`
 }
 
 type IncludedRepoInfo struct {
