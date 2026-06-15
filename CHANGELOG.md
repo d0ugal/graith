@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.34.0](https://github.com/d0ugal/graith/compare/v0.33.1...v0.34.0) (2026-06-15)
+
+
+### Features
+
+* add per-repo share directory with TMPDIR override ([803cd7b](https://github.com/d0ugal/graith/commit/803cd7b89c3c372b366412ad7e366b0cd3ea9cfd))
+
+
+### Bug Fixes
+
+* address tribunal review findings for share directory ([96226ee](https://github.com/d0ugal/graith/commit/96226eeb78438dc45b216f54e035b948977d67d5))
+
 ## [0.33.1](https://github.com/d0ugal/graith/compare/v0.33.0...v0.33.1) (2026-06-15)
 
 
