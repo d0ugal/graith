@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"text/tabwriter"
 
 	"github.com/d0ugal/graith/internal/client"
+	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/spf13/cobra"
 )
@@ -25,16 +25,14 @@ var storeCmd = &cobra.Command{
 // RepoPath (via GRAITH_SESSION_ID), or the CWD git root.
 func resolveRepoPath(c *client.Client) (string, error) {
 	if storeRepoFlag != "" {
-		abs, err := filepath.Abs(storeRepoFlag)
-		if err != nil {
-			return storeRepoFlag, nil
-		}
-		return abs, nil
+		return config.ResolvePath(storeRepoFlag), nil
 	}
 
 	sessionID := os.Getenv("GRAITH_SESSION_ID")
 	if sessionID != "" {
-		c.SendControl("list", struct{}{})
+		if err := c.SendControl("list", struct{}{}); err != nil {
+			return "", err
+		}
 		resp, err := c.ReadControlResponse()
 		if err != nil {
 			return "", err
