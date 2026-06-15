@@ -360,6 +360,31 @@ func TestLoadStateV4MigratesStatusChangedAt(t *testing.T) {
 	}
 }
 
+func TestMigrateV6ToV7(t *testing.T) {
+	state := &State{
+		Version: 6,
+		Sessions: map[string]*SessionState{
+			"s1": {
+				ID:   "s1",
+				Name: "test",
+			},
+		},
+	}
+	if err := migrateState(state); err != nil {
+		t.Fatalf("migration failed: %v", err)
+	}
+	if state.Version != 7 {
+		t.Errorf("expected version 7, got %d", state.Version)
+	}
+	s := state.Sessions["s1"]
+	if s.SummaryText != "" {
+		t.Errorf("expected empty SummaryText, got %q", s.SummaryText)
+	}
+	if s.SummarySetAt != nil {
+		t.Errorf("expected nil SummarySetAt")
+	}
+}
+
 func TestSandboxConfigNilBackwardCompat(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
 	data := []byte(`{"version":1,"sessions":{"s1":{"id":"s1","name":"old","status":"stopped","sandboxed":true}}}`)
