@@ -140,14 +140,14 @@ type columnWidths struct {
 	name       int
 	treeIndent int
 	status     int
-	branch     int
+	summary    int
 	git        int
-	last       int
+	output     int
 }
 
 func (cw columnWidths) totalWidth() int {
-	// "  ★▸● " (7) + treeIndent + name + "  " + status + "  " + branch + "  " + git + "  " + last + margin(4)
-	return 7 + cw.treeIndent + cw.name + 2 + cw.status + 2 + cw.branch + 2 + cw.git + 2 + cw.last + 4
+	// "  ★▸● " (7) + treeIndent + name + "  " + status + "  " + summary + "  " + git + "  " + output + margin(4)
+	return 7 + cw.treeIndent + cw.name + 2 + cw.status + 2 + cw.summary + 2 + cw.git + 2 + cw.output + 4
 }
 
 func pad(s string, width int) string {
@@ -182,11 +182,8 @@ func displayGit(dirty bool, unpushed int) string {
 	return strings.Join(parts, " ")
 }
 
-func displayLastActive(s protocol.SessionInfo, currentSessionID string) string {
-	if s.ID == currentSessionID {
-		return "now"
-	}
-	ts := s.LastAttachedAt
+func displayLastOutput(s protocol.SessionInfo) string {
+	ts := s.LastOutputAt
 	if ts == "" {
 		ts = s.CreatedAt
 	}
@@ -194,6 +191,19 @@ func displayLastActive(s protocol.SessionInfo, currentSessionID string) string {
 		return ShortDuration(time.Since(t))
 	}
 	return ""
+}
+
+const maxSummaryWidth = 40
+
+func displaySummary(s protocol.SessionInfo) string {
+	text := s.SummaryText
+	if text == "" {
+		return ""
+	}
+	if lipgloss.Width(text) > maxSummaryWidth {
+		text = text[:maxSummaryWidth-1] + "…"
+	}
+	return text
 }
 
 func shortenPath(p string) string {
@@ -253,6 +263,7 @@ func buildMatchString(s protocol.SessionInfo) string {
 		strings.ToLower(s.Status),
 		strings.ToLower(s.AgentStatus),
 		strings.ToLower(s.Agent),
+		strings.ToLower(s.SummaryText),
 	}
 	if s.Dirty {
 		parts = append(parts, "dirty", "modified")
@@ -274,24 +285,21 @@ func computeColumnWidths(sessions []protocol.SessionInfo, currentSessionID strin
 		status := s.Status
 		if s.AgentStatus != "" && s.Status == "running" {
 			status = s.AgentStatus
-			if status == "active" && s.ToolName != "" {
-				status = fmt.Sprintf("active(%s)", s.ToolName)
-			}
 		}
 		if n := lipgloss.Width(status); n > cw.status {
 			cw.status = n
 		}
-		branch := displayBranch(s.Branch, s.Name)
-		if n := lipgloss.Width(branch); n > cw.branch {
-			cw.branch = n
+		summary := displaySummary(s)
+		if n := lipgloss.Width(summary); n > cw.summary {
+			cw.summary = n
 		}
 		git := displayGit(s.Dirty, s.UnpushedCount)
 		if n := lipgloss.Width(git); n > cw.git {
 			cw.git = n
 		}
-		last := displayLastActive(s, currentSessionID)
-		if n := lipgloss.Width(last); n > cw.last {
-			cw.last = n
+		output := displayLastOutput(s)
+		if n := lipgloss.Width(output); n > cw.output {
+			cw.output = n
 		}
 	}
 	if cw.name < 7 {
@@ -300,14 +308,17 @@ func computeColumnWidths(sessions []protocol.SessionInfo, currentSessionID strin
 	if cw.status < 6 {
 		cw.status = 6
 	}
-	if cw.branch < 6 {
-		cw.branch = 6
+	if cw.summary < 7 {
+		cw.summary = 7
 	}
 	if cw.git < 3 {
 		cw.git = 3
 	}
-	if cw.last < 4 {
-		cw.last = 4
+	if cw.output < 6 {
+		cw.output = 6
+	}
+	if cw.summary > maxSummaryWidth {
+		cw.summary = maxSummaryWidth
 	}
 	return cw
 }
@@ -376,9 +387,6 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	status := si.info.Status
 	if si.info.AgentStatus != "" && si.info.Status == "running" {
 		status = si.info.AgentStatus
-		if status == "active" && si.info.ToolName != "" {
-			status = fmt.Sprintf("active(%s)", si.info.ToolName)
-		}
 	}
 	statusRendered := pad(status, d.cols.status)
 	switch status {
@@ -394,11 +402,11 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 		statusRendered = dim.Render(statusRendered)
 	}
 
-	branchVal := displayBranch(si.info.Branch, si.info.Name)
-	if branchVal == "" && si.info.InPlace {
-		branchVal = "(in-place)"
+	summaryVal := displaySummary(si.info)
+	summaryRendered := pad(summaryVal, d.cols.summary)
+	if si.info.SummaryFaded {
+		summaryRendered = dim.Render(summaryRendered)
 	}
-	branchRendered := dim.Render(pad(branchVal, d.cols.branch))
 
 	gitVal := displayGit(si.info.Dirty, si.info.UnpushedCount)
 	var gitRendered string
@@ -408,8 +416,8 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 		gitRendered = pad(gitVal, d.cols.git)
 	}
 
-	last := displayLastActive(si.info, d.currentSessionID)
-	lastRendered := dim.Render(pad(last, d.cols.last))
+	outputVal := displayLastOutput(si.info)
+	outputRendered := dim.Render(pad(outputVal, d.cols.output))
 
 	sep := dim.Render("  ")
 
@@ -420,7 +428,7 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 
 	line := fmt.Sprintf("%s%s%s%s %s%s%s%s%s%s%s%s%s%s",
 		selPrefix, starredMark, currentMark, styledIndicator,
-		treePrefixRendered, name, sep, statusRendered, sep, branchRendered, sep, gitRendered, sep, lastRendered)
+		treePrefixRendered, name, sep, statusRendered, sep, summaryRendered, sep, gitRendered, sep, outputRendered)
 
 	if selected {
 		line = lipgloss.NewStyle().Bold(true).Render(line)
@@ -992,18 +1000,18 @@ func (m overlayModel) View() tea.View {
 		headerPrefix,
 		pad("Session", nameColWidth),
 		pad("Status", m.cols.status),
-		pad("Branch", m.cols.branch),
+		pad("Summary", m.cols.summary),
 		pad("Git", m.cols.git),
-		"Last")
+		"Output")
 	panelContent.WriteString(dim.Render(headerLine))
 	panelContent.WriteString("\n")
 	sepLine := fmt.Sprintf("%s%s  %s  %s  %s  %s",
 		headerPrefix,
 		strings.Repeat("─", nameColWidth),
 		strings.Repeat("─", m.cols.status),
-		strings.Repeat("─", m.cols.branch),
+		strings.Repeat("─", m.cols.summary),
 		strings.Repeat("─", m.cols.git),
-		strings.Repeat("─", m.cols.last))
+		strings.Repeat("─", m.cols.output))
 	panelContent.WriteString(dim.Render(sepLine))
 	panelContent.WriteString("\n")
 
