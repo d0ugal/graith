@@ -311,8 +311,8 @@ func (sm *SessionManager) injectHooks(agentName, sessionID, worktreePath string,
 }
 
 // cleanupHooks removes generated hook files for a session.
-// For cursor sessions, also removes .cursor/hooks.json from the worktree
-// since it's not in the data dir.
+// For cursor sessions, also removes .cursor/hooks.json and the graith rule
+// from the worktree since they're not in the data dir.
 func (sm *SessionManager) cleanupHooks(sessionID, agentName, worktreePath string) {
 	dir := sm.hookDir(sessionID)
 	if err := os.RemoveAll(dir); err != nil {
@@ -322,4 +322,5 @@ func (sm *SessionManager) cleanupHooks(sessionID, agentName, worktreePath string
 		hooksPath := filepath.Join(worktreePath, ".cursor", "hooks.json")
 		_ = os.Remove(hooksPath)
 	}
+	cleanupCursorRule(worktreePath)
 }
