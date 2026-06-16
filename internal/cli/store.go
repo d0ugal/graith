@@ -140,6 +140,8 @@ var storeGetCmd = &cobra.Command{
 
 // --- gr store list ---
 
+var storeListAll bool
+
 var storeListCmd = &cobra.Command{
 	Use:     "list [prefix]",
 	Aliases: []string{"ls"},
@@ -149,6 +151,10 @@ var storeListCmd = &cobra.Command{
 		var prefix string
 		if len(args) > 0 {
 			prefix = args[0]
+		}
+
+		if storeListAll {
+			return listAllStores(prefix)
 		}
 
 		repo, err := resolveStoreRepoPath()
@@ -304,6 +310,7 @@ func init() {
 
 	storeCmd.AddCommand(storeGetCmd)
 	storeCmd.AddCommand(storeListCmd)
+	storeListCmd.Flags().BoolVarP(&storeListAll, "all", "a", false, "list documents across all repos")
 	storeCmd.AddCommand(storeRmCmd)
 
 	storeCmd.AddCommand(storeAppendCmd)
