@@ -16,6 +16,11 @@ import (
 	"github.com/d0ugal/graith/internal/version"
 )
 
+const (
+	typeIdleTimeout = 10 * time.Second
+	typeMaxWait     = 2 * time.Minute
+)
+
 // HandleConnection processes the frame protocol for a single client connection.
 func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, log *slog.Logger) {
 	reader := protocol.NewFrameReader(conn)
@@ -618,6 +623,14 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "session not found"})
 					continue
 				}
+
+				if sm.HasAttachedClient(t.SessionID) {
+					if !pty.WaitForUserIdle(typeIdleTimeout, typeMaxWait) {
+						log.Warn("gr type: max wait expired, injecting while user may still be active",
+							"session", t.SessionID)
+					}
+				}
+
 				var writeErr error
 				if t.NoNewline {
 					writeErr = pty.WriteInput([]byte(t.Input))
@@ -837,6 +850,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 		case protocol.ChannelData:
 			if attachedSessionID != "" && sm.IsAttachedClient(attachedSessionID, conn) {
 				if pty, ok := sm.GetPTY(attachedSessionID); ok {
+					pty.NotifyUserInput()
 					_ = pty.WriteInput(frame.Payload)
 				}
 			}
