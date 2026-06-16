@@ -153,7 +153,7 @@ var storeListCmd = &cobra.Command{
 
 		repo, err := resolveStoreRepoPath()
 		if err != nil {
-			return err
+			return listAllStores(prefix)
 		}
 
 		storePath := store.StorePath(paths.DataDir, repo)
@@ -179,6 +179,40 @@ var storeListCmd = &cobra.Command{
 		tw.Flush()
 		return nil
 	},
+}
+
+func listAllStores(prefix string) error {
+	stores, err := store.ListStores(paths.DataDir)
+	if err != nil {
+		return err
+	}
+
+	if len(stores) == 0 {
+		out.Print("No stores found\n")
+		return nil
+	}
+
+	for i := range stores {
+		entries, err := store.List(stores[i].Path, prefix)
+		if err != nil {
+			return err
+		}
+		stores[i].Entries = entries
+	}
+
+	if jsonOutput {
+		return out.JSON(stores)
+	}
+
+	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "STORE\tKEY\tUPDATED")
+	for _, s := range stores {
+		for _, entry := range s.Entries {
+			fmt.Fprintf(tw, "%s\t%s\t%s\n", s.Name, entry.Key, entry.UpdatedAt.Format("2006-01-02 15:04:05"))
+		}
+	}
+	tw.Flush()
+	return nil
 }
 
 // --- gr store rm ---
