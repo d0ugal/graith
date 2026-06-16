@@ -22,6 +22,7 @@ import (
 	"github.com/d0ugal/graith/internal/protocol"
 	grpty "github.com/d0ugal/graith/internal/pty"
 	"github.com/d0ugal/graith/internal/sandbox"
+	"github.com/d0ugal/graith/internal/store"
 )
 
 const (
@@ -281,6 +282,14 @@ func (sm *SessionManager) repoShareDir(repoRoot string) (string, error) {
 	dir := filepath.Join(sm.paths.ShareDir, repoName, repoHash(repoRoot))
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("create share dir: %w", err)
+	}
+	return dir, nil
+}
+
+func (sm *SessionManager) repoStoreDir(repoRoot string) (string, error) {
+	dir := store.StorePath(sm.paths.DataDir, repoRoot)
+	if err := store.Init(dir); err != nil {
+		return "", fmt.Errorf("init store: %w", err)
 	}
 	return dir, nil
 }
@@ -653,6 +662,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 	if inPlace {
 		env["GRAITH_IN_PLACE"] = "true"
 	}
+	var storeDir string
 	if repoRoot != "" {
 		shareDir, err := sm.repoShareDir(repoRoot)
 		if err != nil {
@@ -663,6 +673,12 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 		env["GRAITH_SHARE_PATH"] = shareDir
 		if _, ok := env["TMPDIR"]; !ok {
 			env["TMPDIR"] = shareDir
+		}
+		storeDir, err = sm.repoStoreDir(repoRoot)
+		if err != nil {
+			cleanupOnError()
+			rollbackState()
+			return SessionState{}, err
 		}
 	}
 	for _, inc := range includes {
@@ -715,6 +731,9 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 		opts := sm.sandboxOptsFromConfig(merged, id, worktreePath, envKeys, agentHooks)
 		if shareDir := env["GRAITH_SHARE_PATH"]; shareDir != "" {
 			opts.WriteDirs = append(opts.WriteDirs, shareDir)
+		}
+		if storeDir != "" {
+			opts.WriteDirs = append(opts.WriteDirs, storeDir)
 		}
 		if len(includes) > 0 {
 			opts.WriteDirs = append(opts.WriteDirs, sm.deriveSandboxIncludesWriteDirs(includes)...)
@@ -1029,6 +1048,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 	if sm.paths.Profile != "" {
 		env["GRAITH_PROFILE"] = sm.paths.Profile
 	}
+	var forkStoreDir string
 	if repoRoot != "" {
 		shareDir, err := sm.repoShareDir(repoRoot)
 		if err != nil {
@@ -1039,6 +1059,12 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 		env["GRAITH_SHARE_PATH"] = shareDir
 		if _, ok := env["TMPDIR"]; !ok {
 			env["TMPDIR"] = shareDir
+		}
+		forkStoreDir, err = sm.repoStoreDir(repoRoot)
+		if err != nil {
+			forkCleanup()
+			rollbackState()
+			return SessionState{}, err
 		}
 	}
 	for _, inc := range forkIncludes {
@@ -1085,6 +1111,9 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 		opts := sm.sandboxOptsFromConfig(merged, id, worktreePath, envKeys, sourceAgentHooks)
 		if shareDir := env["GRAITH_SHARE_PATH"]; shareDir != "" {
 			opts.WriteDirs = append(opts.WriteDirs, shareDir)
+		}
+		if forkStoreDir != "" {
+			opts.WriteDirs = append(opts.WriteDirs, forkStoreDir)
 		}
 		if len(forkIncludes) > 0 {
 			opts.WriteDirs = append(opts.WriteDirs, sm.deriveSandboxIncludesWriteDirs(forkIncludes)...)
@@ -1422,6 +1451,7 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 	if sessInPlace {
 		env["GRAITH_IN_PLACE"] = "true"
 	}
+	var resumeStoreDir string
 	if sessRepoPath != "" {
 		shareDir, err := sm.repoShareDir(sessRepoPath)
 		if err != nil {
@@ -1431,6 +1461,11 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 		env["GRAITH_SHARE_PATH"] = shareDir
 		if _, ok := env["TMPDIR"]; !ok {
 			env["TMPDIR"] = shareDir
+		}
+		resumeStoreDir, err = sm.repoStoreDir(sessRepoPath)
+		if err != nil {
+			rollbackState()
+			return SessionState{}, err
 		}
 	}
 
@@ -1481,6 +1516,9 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 		opts := sm.sandboxOptsFromConfig(merged, id, sessWorktreePath, envKeys, sessAgentHooks)
 		if shareDir := env["GRAITH_SHARE_PATH"]; shareDir != "" {
 			opts.WriteDirs = append(opts.WriteDirs, shareDir)
+		}
+		if resumeStoreDir != "" {
+			opts.WriteDirs = append(opts.WriteDirs, resumeStoreDir)
 		}
 		if len(sessIncludes) > 0 {
 			opts.WriteDirs = append(opts.WriteDirs, sm.deriveSandboxIncludesWriteDirs(sessIncludes)...)
