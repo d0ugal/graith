@@ -36,6 +36,8 @@ type Session struct {
 	adoptedPID       int
 	adoptedStartTime int64
 	lastOutputAt     time.Time
+	lastUserInputAt  time.Time
+	userInputCond    *sync.Cond
 	adoptedAt        time.Time
 }
 
@@ -77,6 +79,7 @@ func NewSession(opts SessionOpts) (*Session, error) {
 		done:     make(chan struct{}),
 		readDone: make(chan struct{}),
 	}
+	s.userInputCond = sync.NewCond(&sync.Mutex{})
 
 	go s.readLoop()
 	go s.waitLoop()
@@ -125,6 +128,7 @@ func AdoptSession(opts AdoptOpts) (*Session, error) {
 		adoptedStartTime: startTime,
 		adoptedAt:        time.Now(),
 	}
+	s.userInputCond = sync.NewCond(&sync.Mutex{})
 
 	if tail, err := sb.TailBytes(128 * 1024); err == nil && len(tail) > 0 {
 		s.screen.Write(tail)
@@ -196,6 +200,7 @@ done:
 	s.exited = true
 	s.exitCode = exitCode
 	s.mu.Unlock()
+	s.userInputCond.Broadcast()
 	close(s.done)
 }
 
@@ -257,6 +262,7 @@ func (s *Session) waitLoop() {
 		s.peakRSSBytes = extractPeakRSS(s.Cmd.ProcessState)
 	}
 	s.mu.Unlock()
+	s.userInputCond.Broadcast()
 	close(s.done)
 }
 
@@ -318,6 +324,54 @@ func (s *Session) writeInputLocked(data []byte) error {
 		return io.ErrShortWrite
 	}
 	return nil
+}
+
+// NotifyUserInput records that the attached user just typed something.
+// Call this from the passthrough data path, not from gr type.
+func (s *Session) NotifyUserInput() {
+	s.userInputCond.L.Lock()
+	s.lastUserInputAt = time.Now()
+	s.userInputCond.L.Unlock()
+	s.userInputCond.Broadcast()
+}
+
+// WaitForUserIdle blocks until at least idleTimeout has elapsed since the
+// last user keystroke, or until maxWait has elapsed (whichever comes first).
+// Returns true if the idle condition was met, false if maxWait expired.
+func (s *Session) WaitForUserIdle(idleTimeout, maxWait time.Duration) bool {
+	deadline := time.Now().Add(maxWait)
+	s.userInputCond.L.Lock()
+	defer s.userInputCond.L.Unlock()
+
+	for {
+		s.mu.RLock()
+		exited := s.exited
+		s.mu.RUnlock()
+		if exited {
+			return true
+		}
+		idle := time.Since(s.lastUserInputAt)
+		if idle >= idleTimeout {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+
+		// Wake up when the next idle-timeout window could be satisfied,
+		// or when new user input arrives (Broadcast from NotifyUserInput).
+		wakeIn := idleTimeout - idle
+		if dl := time.Until(deadline); dl < wakeIn {
+			wakeIn = dl
+		}
+		timer := time.AfterFunc(wakeIn, func() {
+			s.userInputCond.L.Lock()
+			s.userInputCond.Broadcast()
+			s.userInputCond.L.Unlock()
+		})
+		s.userInputCond.Wait()
+		timer.Stop()
+	}
 }
 
 func (s *Session) Resize(rows, cols uint16) error {
