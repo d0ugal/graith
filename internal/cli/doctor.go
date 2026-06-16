@@ -238,11 +238,12 @@ func (dc *doctorContext) checkEnvironment() {
 		dc.warn("environment", "Sandbox disabled")
 	}
 
-	if cfg.AgentPrompt == "" {
+	switch {
+	case cfg.AgentPrompt == "":
 		dc.warn("environment", "Agent prompt is empty (agents will not receive graith context)")
-	} else if cfg.AgentPrompt != config.DefaultAgentPrompt() {
+	case cfg.AgentPrompt != config.DefaultAgentPrompt():
 		dc.pass("environment", "Agent prompt: customized")
-	} else {
+	default:
 		dc.pass("environment", "Agent prompt: default")
 	}
 }
