@@ -8,7 +8,14 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 )
+
+// Entry represents a document in the store.
+type Entry struct {
+	Key       string    `json:"key"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
 
 // Init initialises the document store at storePath. It creates the directory
 // if it does not exist and sets up a bare git repository for versioning.
@@ -169,6 +176,87 @@ func Get(storePath, key string) (string, error) {
 		return "", fmt.Errorf("read file: %w", err)
 	}
 	return string(data), nil
+}
+
+// List returns all entries in the store, optionally filtered by prefix.
+// If the prefix directory does not exist, an empty slice is returned (not an error).
+// No locking is required for listing.
+func List(storePath, prefix string) ([]Entry, error) {
+	searchDir := storePath
+	if prefix != "" {
+		searchDir = filepath.Join(storePath, prefix)
+	}
+
+	if _, err := os.Stat(searchDir); os.IsNotExist(err) {
+		return []Entry{}, nil
+	}
+
+	var entries []Entry
+	err := filepath.Walk(searchDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		// Skip .git directories
+		if info.IsDir() && info.Name() == ".git" {
+			return filepath.SkipDir
+		}
+		// Skip directories and the lock file
+		if info.IsDir() {
+			return nil
+		}
+		if info.Name() == "store.lock" {
+			return nil
+		}
+
+		key, err := filepath.Rel(storePath, path)
+		if err != nil {
+			return fmt.Errorf("compute relative path: %w", err)
+		}
+		entries = append(entries, Entry{
+			Key:       key,
+			UpdatedAt: info.ModTime(),
+		})
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("walk store: %w", err)
+	}
+	return entries, nil
+}
+
+// Remove deletes the document at key from the store and commits the deletion.
+// Empty parent directories up to the store root are cleaned up after removal.
+func Remove(storePath, key string) error {
+	if err := ValidateKey(key); err != nil {
+		return err
+	}
+
+	filePath := filepath.Join(storePath, key)
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		return fmt.Errorf("document %q not found", key)
+	}
+
+	return withLock(storePath, func() error {
+		if err := git(storePath, "rm", "--", key); err != nil {
+			return fmt.Errorf("git rm: %w", err)
+		}
+		msg := CommitMessage("remove", key)
+		if err := git(storePath, "commit", "-m", msg); err != nil {
+			return fmt.Errorf("git commit: %w", err)
+		}
+
+		// Clean up empty parent directories up to the store root.
+		dir := filepath.Dir(filePath)
+		for dir != storePath {
+			entries, err := os.ReadDir(dir)
+			if err != nil || len(entries) > 0 {
+				break
+			}
+			os.Remove(dir) //nolint:errcheck
+			dir = filepath.Dir(dir)
+		}
+		return nil
+	})
 }
 
 // repoHash is copied from internal/daemon/daemon.go to produce a deterministic

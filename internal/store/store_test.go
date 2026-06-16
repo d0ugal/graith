@@ -291,6 +291,131 @@ func TestCommitMessage(t *testing.T) {
 	})
 }
 
+func TestList(t *testing.T) {
+	dir := newTestStore(t)
+
+	// Put 3 keys across 2 prefixes
+	if err := store.Put(dir, "alpha/one.md", "one"); err != nil {
+		t.Fatalf("Put alpha/one.md: %v", err)
+	}
+	if err := store.Put(dir, "alpha/two.md", "two"); err != nil {
+		t.Fatalf("Put alpha/two.md: %v", err)
+	}
+	if err := store.Put(dir, "beta/three.md", "three"); err != nil {
+		t.Fatalf("Put beta/three.md: %v", err)
+	}
+
+	t.Run("list all", func(t *testing.T) {
+		entries, err := store.List(dir, "")
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		if len(entries) != 3 {
+			t.Errorf("List returned %d entries, want 3", len(entries))
+		}
+		for _, e := range entries {
+			if e.UpdatedAt.IsZero() {
+				t.Errorf("entry %q has zero UpdatedAt", e.Key)
+			}
+		}
+	})
+
+	t.Run("list with prefix", func(t *testing.T) {
+		entries, err := store.List(dir, "alpha")
+		if err != nil {
+			t.Fatalf("List with prefix: %v", err)
+		}
+		if len(entries) != 2 {
+			t.Errorf("List(alpha) returned %d entries, want 2", len(entries))
+		}
+		for _, e := range entries {
+			if !strings.HasPrefix(e.Key, "alpha/") {
+				t.Errorf("entry %q does not have prefix alpha/", e.Key)
+			}
+		}
+	})
+
+	t.Run("list nonexistent prefix", func(t *testing.T) {
+		entries, err := store.List(dir, "nonexistent")
+		if err != nil {
+			t.Fatalf("List nonexistent prefix: %v", err)
+		}
+		if len(entries) != 0 {
+			t.Errorf("List(nonexistent) returned %d entries, want 0", len(entries))
+		}
+	})
+}
+
+func TestListEmptyStore(t *testing.T) {
+	dir := newTestStore(t)
+
+	entries, err := store.List(dir, "")
+	if err != nil {
+		t.Fatalf("List on empty store: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("List on empty store returned %d entries, want 0", len(entries))
+	}
+}
+
+func TestRemove(t *testing.T) {
+	dir := newTestStore(t)
+
+	if err := store.Put(dir, "docs/one.md", "one"); err != nil {
+		t.Fatalf("Put docs/one.md: %v", err)
+	}
+	if err := store.Put(dir, "docs/two.md", "two"); err != nil {
+		t.Fatalf("Put docs/two.md: %v", err)
+	}
+
+	if err := store.Remove(dir, "docs/one.md"); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+
+	// docs/one.md should be gone
+	if _, err := store.Get(dir, "docs/one.md"); err == nil {
+		t.Error("Get docs/one.md expected error after remove, got nil")
+	}
+
+	// docs/two.md should still exist
+	got, err := store.Get(dir, "docs/two.md")
+	if err != nil {
+		t.Fatalf("Get docs/two.md: %v", err)
+	}
+	if got != "two" {
+		t.Errorf("Get docs/two.md = %q, want %q", got, "two")
+	}
+}
+
+func TestRemoveCleansEmptyParents(t *testing.T) {
+	dir := newTestStore(t)
+
+	if err := store.Put(dir, "a/b/c/deep.md", "content"); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+
+	if err := store.Remove(dir, "a/b/c/deep.md"); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+
+	// The directory "a" should be gone since it's now empty
+	if _, err := os.Stat(filepath.Join(dir, "a")); !os.IsNotExist(err) {
+		t.Errorf("expected directory 'a' to be removed, stat err: %v", err)
+	}
+}
+
+func TestRemoveNonexistent(t *testing.T) {
+	dir := newTestStore(t)
+
+	err := store.Remove(dir, "does/not/exist.md")
+	if err == nil {
+		t.Error("Remove nonexistent key expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("Remove error %q should contain 'not found'", err.Error())
+	}
+}
+
 func TestStorePath(t *testing.T) {
 	t.Run("basic structure", func(t *testing.T) {
 		p := store.StorePath("/data", "/home/user/myrepo")
