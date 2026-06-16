@@ -51,6 +51,7 @@ internal/
   protocol/              Wire protocol: framing, control messages, encoding
   pty/                   PTY session management, scrollback buffer
   sandbox/               Safehouse sandbox wrapping for agent processes
+  store/                 Flat-file git-backed document store
   version/               Build-time version injection
 ```
 
@@ -73,6 +74,7 @@ Key files by area:
 | PTY | `pty/session.go` | PTY lifecycle, resize, I/O multiplexing |
 | PTY | `pty/scrollback.go` | Append-only scrollback file with tail reads |
 | Sandbox | `sandbox/sandbox.go` | Safehouse wrapping: command construction, availability check |
+| Store | `store/store.go` | Flat-file git-backed document store with key validation, git commits |
 
 ## Architecture patterns
 
@@ -209,13 +211,16 @@ Use `--ack` to mark messages as read.
 
 ### Shared document store
 
-Sessions can persist documents that survive worktree deletion:
+Sessions can persist documents that survive worktree deletion. Store operations
+go directly to flat files on disk (not through the daemon), so files are
+browsable in any IDE and git history is available via `git log` in the store
+directory.
 
 ```bash
-# Store a document (--type is required: md, json, text, or MIME type)
-gr store put design/api.md --type md --file ./api-design.md
-gr store put design/api.md --type md "# API Design\n\nEndpoints: ..."
-echo '{"score": 85}' | gr store put tribunal/2026-06-15 --type json
+# Store a document (key should include a file extension)
+gr store put design/api.md --file ./api-design.md
+gr store put design/api.md "# API Design\n\nEndpoints: ..."
+echo '{"score": 85}' | gr store put tribunal/2026-06-15.json
 
 # Retrieve a document (always outputs raw body)
 gr store get design/api.md
@@ -234,18 +239,14 @@ gr store list --repo ~/Code/graith
 
 Documents are scoped per-repo — sessions for `~/Code/graith` share one
 namespace, sessions for `~/Code/other` share another. Keys are
-slash-separated paths (e.g. `design/api.md`, `research/findings.json`).
-The repo path is canonicalized by the daemon, so different path spellings
-for the same repo resolve to the same namespace.
-
-Two content types cover the main use cases:
-- `text/markdown` (`--type md`) — design docs, research notes, plans
-- `application/json` (`--type json`) — tribunal reports, build results, metrics
+slash-separated paths and should include a file extension (e.g. `.md`, `.json`)
+to indicate content type. The repo path is canonicalized, so different path
+spellings for the same repo resolve to the same namespace.
 
 Use `gr store` for artifacts you want to keep but don't want to commit:
 design docs, research notes, build outputs, shared context between agents.
 For historical data (e.g. repeated tribunal runs), use timestamped keys
-like `tribunal/2026-06-15T14:30` and `gr store list tribunal/` to see
+like `tribunal/2026-06-15T14:30.json` and `gr store list tribunal/` to see
 the history.
 
 ### Typing into sessions remotely
