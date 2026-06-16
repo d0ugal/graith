@@ -215,6 +215,52 @@ func listAllStores(prefix string) error {
 	return nil
 }
 
+// --- gr store append ---
+
+var storeAppendFile string
+
+var storeAppendCmd = &cobra.Command{
+	Use:   "append <key> [line]",
+	Short: "Append a line to a document in the store",
+	Long:  "Append a line to a document, creating it if it doesn't exist. Useful for JSONL logs and other append-only data.",
+	Args:  cobra.RangeArgs(1, 2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		key := args[0]
+		bodyArgs := args[1:]
+
+		line, err := resolveBody(bodyArgs, storeAppendFile)
+		if err != nil {
+			return err
+		}
+
+		repo, err := resolveStoreRepoPath()
+		if err != nil {
+			return err
+		}
+
+		if err := checkWritePermission(repo); err != nil {
+			return err
+		}
+
+		storePath := store.StorePath(paths.DataDir, repo)
+		if err := store.Init(storePath); err != nil {
+			return err
+		}
+		if err := store.Append(storePath, key, line); err != nil {
+			return err
+		}
+
+		if jsonOutput {
+			return out.JSON(struct {
+				Key  string `json:"key"`
+				Repo string `json:"repo"`
+			}{key, repo})
+		}
+		out.Print("Appended to %s\n", key)
+		return nil
+	},
+}
+
 // --- gr store rm ---
 
 var storeRmCmd = &cobra.Command{
@@ -259,4 +305,7 @@ func init() {
 	storeCmd.AddCommand(storeGetCmd)
 	storeCmd.AddCommand(storeListCmd)
 	storeCmd.AddCommand(storeRmCmd)
+
+	storeCmd.AddCommand(storeAppendCmd)
+	storeAppendCmd.Flags().StringVarP(&storeAppendFile, "file", "f", "", "read line from file")
 }
