@@ -49,17 +49,22 @@ func Init(storePath string) error {
 func git(dir string, args ...string) error {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
-	return cmd.Run()
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 // ValidateKey returns an error if key is not a valid store key.
 //
 // A valid key must:
 //   - be non-empty
-//   - not start with '/'
-//   - not start with '-'
-//   - not contain any ".." path component
-//   - not contain control characters or NUL bytes
+//   - not start with '/' or '-'
+//   - not contain "..", ".git", or "." path components
+//   - not contain control characters, NUL bytes, or backslashes
+//   - not contain git pathspec characters (*, ?, [, :)
+//   - not be "store.lock"
 func ValidateKey(key string) error {
 	if key == "" {
 		return fmt.Errorf("store key must not be empty")
@@ -75,10 +80,25 @@ func ValidateKey(key string) error {
 			return fmt.Errorf("store key must not contain control characters")
 		}
 	}
+	if strings.ContainsAny(key, "*?[:") {
+		return fmt.Errorf("store key must not contain glob/pathspec characters")
+	}
+	if strings.Contains(key, "\\") {
+		return fmt.Errorf("store key must not contain backslashes")
+	}
 	for _, component := range strings.Split(key, "/") {
 		if component == ".." {
 			return fmt.Errorf("store key must not contain '..' path components")
 		}
+		if component == ".git" {
+			return fmt.Errorf("store key must not contain '.git' path components")
+		}
+		if component == "." {
+			return fmt.Errorf("store key must not contain '.' path components")
+		}
+	}
+	if key == "store.lock" {
+		return fmt.Errorf("store key must not be 'store.lock'")
 	}
 	return nil
 }
@@ -156,6 +176,9 @@ func Put(storePath, key, body string) error {
 		if err := git(storePath, "add", "--", key); err != nil {
 			return fmt.Errorf("git add: %w", err)
 		}
+		if git(storePath, "diff", "--quiet", "--cached", "--", key) == nil {
+			return nil
+		}
 		msg := CommitMessage("update", key)
 		if err := git(storePath, "commit", "-m", msg, "--", key); err != nil {
 			return fmt.Errorf("git commit: %w", err)
@@ -173,7 +196,7 @@ func Get(storePath, key string) (string, error) {
 	filePath := filepath.Join(storePath, key)
 	data, err := os.ReadFile(filePath)
 	if err != nil {
-		return "", fmt.Errorf("read file: %w", err)
+		return "", err
 	}
 	return string(data), nil
 }
@@ -184,6 +207,9 @@ func Get(storePath, key string) (string, error) {
 func List(storePath, prefix string) ([]Entry, error) {
 	searchDir := storePath
 	if prefix != "" {
+		if err := ValidateKey(strings.TrimSuffix(prefix, "/")); err != nil {
+			return nil, err
+		}
 		searchDir = filepath.Join(storePath, prefix)
 	}
 
@@ -192,25 +218,27 @@ func List(storePath, prefix string) ([]Entry, error) {
 	}
 
 	var entries []Entry
-	err := filepath.Walk(searchDir, func(path string, info os.FileInfo, err error) error {
+	err := filepath.WalkDir(searchDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		// Skip .git directories
-		if info.IsDir() && info.Name() == ".git" {
+		if d.IsDir() && d.Name() == ".git" {
 			return filepath.SkipDir
 		}
-		// Skip directories and the lock file
-		if info.IsDir() {
+		if d.IsDir() {
 			return nil
 		}
-		if info.Name() == "store.lock" {
+		if path == filepath.Join(storePath, "store.lock") {
 			return nil
 		}
 
 		key, err := filepath.Rel(storePath, path)
 		if err != nil {
 			return fmt.Errorf("compute relative path: %w", err)
+		}
+		info, err := d.Info()
+		if err != nil {
+			return fmt.Errorf("stat %s: %w", key, err)
 		}
 		entries = append(entries, Entry{
 			Key:       key,
@@ -231,21 +259,20 @@ func Remove(storePath, key string) error {
 		return err
 	}
 
-	filePath := filepath.Join(storePath, key)
-	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		return fmt.Errorf("document %q not found", key)
-	}
-
 	return withLock(storePath, func() error {
+		filePath := filepath.Join(storePath, key)
+		if _, err := os.Stat(filePath); os.IsNotExist(err) {
+			return fmt.Errorf("document %q not found", key)
+		}
+
 		if err := git(storePath, "rm", "--", key); err != nil {
 			return fmt.Errorf("git rm: %w", err)
 		}
 		msg := CommitMessage("remove", key)
-		if err := git(storePath, "commit", "-m", msg); err != nil {
+		if err := git(storePath, "commit", "-m", msg, "--", key); err != nil {
 			return fmt.Errorf("git commit: %w", err)
 		}
 
-		// Clean up empty parent directories up to the store root.
 		dir := filepath.Dir(filePath)
 		for dir != storePath {
 			entries, err := os.ReadDir(dir)

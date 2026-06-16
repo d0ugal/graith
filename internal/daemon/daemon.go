@@ -644,6 +644,9 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 	env["GRAITH_SESSION_NAME"] = name
 	env["GRAITH_AGENT_TYPE"] = agentName
 	env["GRAITH_WORKTREE_PATH"] = worktreePath
+	if repoRoot != "" {
+		env["GRAITH_REPO_PATH"] = repoRoot
+	}
 	if sm.paths.Profile != "" {
 		env["GRAITH_PROFILE"] = sm.paths.Profile
 	}
@@ -1020,6 +1023,9 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 	env["GRAITH_SESSION_NAME"] = name
 	env["GRAITH_AGENT_TYPE"] = agentName
 	env["GRAITH_WORKTREE_PATH"] = worktreePath
+	if repoRoot != "" {
+		env["GRAITH_REPO_PATH"] = repoRoot
+	}
 	if sm.paths.Profile != "" {
 		env["GRAITH_PROFILE"] = sm.paths.Profile
 	}
@@ -1407,6 +1413,9 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 	env["GRAITH_SESSION_NAME"] = sessName
 	env["GRAITH_AGENT_TYPE"] = sessAgent
 	env["GRAITH_WORKTREE_PATH"] = sessWorktreePath
+	if sessRepoPath != "" {
+		env["GRAITH_REPO_PATH"] = sessRepoPath
+	}
 	if sm.paths.Profile != "" {
 		env["GRAITH_PROFILE"] = sm.paths.Profile
 	}
