@@ -109,6 +109,7 @@ The daemon sets these in every agent process:
 - `GRAITH_SESSION_NAME` — human-readable session name
 - `GRAITH_AGENT_TYPE` — agent type (e.g. `claude`, `codex`)
 - `GRAITH_WORKTREE_PATH` — absolute path to the session worktree
+- `GRAITH_REPO_PATH` — absolute path to the source repository (canonical)
 - `GRAITH_SHARE_PATH` — shared directory for the repo (persists across sessions)
 - `TMPDIR` — set to `GRAITH_SHARE_PATH` so `mktemp` etc. land in the share dir
 
