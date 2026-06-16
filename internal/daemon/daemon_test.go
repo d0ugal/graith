@@ -1391,8 +1391,10 @@ func TestExpandPathsGlob(t *testing.T) {
 		}
 	}
 
+	log := slog.Default()
+
 	t.Run("expands globs", func(t *testing.T) {
-		got := expandPaths([]string{filepath.Join(dir, "*.pub")})
+		got := expandPaths([]string{filepath.Join(dir, "*.pub")}, log, "read")
 		if len(got) != 2 {
 			t.Fatalf("expandPaths glob = %v, want 2 matches", got)
 		}
@@ -1403,23 +1405,30 @@ func TestExpandPathsGlob(t *testing.T) {
 		}
 	})
 
-	t.Run("non-glob passed through", func(t *testing.T) {
-		got := expandPaths([]string{"/some/plain/path"})
-		if len(got) != 1 || got[0] != "/some/plain/path" {
-			t.Errorf("expandPaths plain = %v, want [/some/plain/path]", got)
+	t.Run("existing path kept", func(t *testing.T) {
+		got := expandPaths([]string{dir}, log, "read")
+		if len(got) != 1 || got[0] != dir {
+			t.Errorf("expandPaths existing = %v, want [%s]", got, dir)
 		}
 	})
 
-	t.Run("unmatched glob passed through", func(t *testing.T) {
+	t.Run("non-existent path skipped", func(t *testing.T) {
+		got := expandPaths([]string{"/some/nonexistent/path"}, log, "read")
+		if len(got) != 0 {
+			t.Errorf("expandPaths nonexistent = %v, want []", got)
+		}
+	})
+
+	t.Run("unmatched glob skipped", func(t *testing.T) {
 		pattern := filepath.Join(dir, "*.zzz")
-		got := expandPaths([]string{pattern})
-		if len(got) != 1 || got[0] != pattern {
-			t.Errorf("expandPaths no-match = %v, want [%s]", got, pattern)
+		got := expandPaths([]string{pattern}, log, "read")
+		if len(got) != 0 {
+			t.Errorf("expandPaths no-match = %v, want []", got)
 		}
 	})
 
 	t.Run("nil input", func(t *testing.T) {
-		got := expandPaths(nil)
+		got := expandPaths(nil, log, "read")
 		if got != nil {
 			t.Errorf("expandPaths(nil) = %v, want nil", got)
 		}
@@ -1429,10 +1438,14 @@ func TestExpandPathsGlob(t *testing.T) {
 func TestResumeRefreshesSandboxConfig(t *testing.T) {
 	t.Run("resume uses current config not stored config", func(t *testing.T) {
 		tmpDir := t.TempDir()
+		updatedDir := filepath.Join(tmpDir, "updated-dir")
+		if err := os.MkdirAll(updatedDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
 		cfg := config.Default()
 		cfg.Sandbox = config.SandboxConfig{
 			Enabled:  true,
-			ReadDirs: []string{"/updated-dir"},
+			ReadDirs: []string{updatedDir},
 		}
 		cfg.Agents["sleeper"] = config.Agent{
 			Command: "sleep",
@@ -1485,7 +1498,7 @@ func TestResumeRefreshesSandboxConfig(t *testing.T) {
 		}
 		found := false
 		for _, d := range s.SandboxConfig.ReadDirs {
-			if d == "/updated-dir" {
+			if d == updatedDir {
 				found = true
 			}
 			if d == "/old-creation-time-dir" {
@@ -1493,7 +1506,7 @@ func TestResumeRefreshesSandboxConfig(t *testing.T) {
 			}
 		}
 		if !found {
-			t.Errorf("SandboxConfig.ReadDirs = %v, want to contain /updated-dir", s.SandboxConfig.ReadDirs)
+			t.Errorf("SandboxConfig.ReadDirs = %v, want to contain %s", s.SandboxConfig.ReadDirs, updatedDir)
 		}
 
 		ptySess, ok := sm.GetPTY("s1")
