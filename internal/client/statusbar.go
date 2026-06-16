@@ -2,6 +2,7 @@ package client
 
 import (
 	"fmt"
+	"image/color"
 	"io"
 	"strings"
 	"sync"
@@ -38,134 +39,18 @@ func newStatusBarInfo(s protocol.SessionInfo, unreadCount int, fleet protocol.Fl
 	}
 }
 
-var (
-	barBg  = lipgloss.Color("#1a1a1a")
-	barSep = lipgloss.NewStyle().Foreground(colorFaint).Background(barBg)
+const (
+	plRight = ""
+	plLeft  = ""
 )
 
-func formatStatusLine(info statusBarInfo, cols int) string {
-	status := info.status
-	if info.agentStatus != "" && info.status == "running" {
-		status = info.agentStatus
-	}
+var (
+	barBg    = lipgloss.Color("#1a1a1a")
+	accentBg = lipgloss.Color("#44475a")
+)
 
-	branch := info.branch
-	if p := strings.SplitN(branch, "/", 3); len(p) == 3 {
-		branch = p[2]
-	}
-
-	bg := barBg
-	if info.pendingApprovals > 0 {
-		bg = lipgloss.Color("#5f0000")
-	}
-
-	session := lipgloss.NewStyle().Bold(true).Background(bg)
-	agent := lipgloss.NewStyle().Foreground(colorDim).Background(bg)
-	sepStyle := lipgloss.NewStyle().Foreground(colorFaint).Background(bg)
-	branchStyle := lipgloss.NewStyle().Foreground(colorDim).Background(bg)
-	dirtyStyle := lipgloss.NewStyle().Foreground(colorGold).Background(bg)
-	aheadStyle := lipgloss.NewStyle().Foreground(colorBlue).Background(bg)
-	unreadStyle := lipgloss.NewStyle().Foreground(colorGold).Background(bg)
-	fillStyle := lipgloss.NewStyle().Background(bg)
-	stStyle := func(s string) lipgloss.Style {
-		base := lipgloss.NewStyle().Background(bg)
-		switch s {
-		case "active", "running":
-			return base.Foreground(colorGreen)
-		case "approval":
-			return base.Foreground(colorRed).Bold(true)
-		case "ready":
-			return base.Foreground(colorBlue)
-		case "errored":
-			return base.Foreground(colorRed)
-		default:
-			return base.Foreground(colorDim)
-		}
-	}
-
-	sep := sepStyle.Render(" │ ")
-
-	var dot string
-	switch {
-	case status == "approval":
-		dot = stStyle(status).Render("⚠")
-	case status == "errored":
-		dot = stStyle(status).Render("✗")
-	case status != "active" && status != "running" && status != "ready":
-		dot = stStyle(status).Render("○")
-	default:
-		dot = stStyle(status).Render("●")
-	}
-
-	// Left section: session identity
-	left := " " + dot + " " +
-		session.Render(info.name) + "  " +
-		agent.Render(info.agent) + "  " +
-		stStyle(status).Render(status)
-
-	if info.pendingApprovals > 0 {
-		left += sep + lipgloss.NewStyle().Foreground(colorRed).Bold(true).Background(bg).
-			Render(fmt.Sprintf("⚠ %d pending", info.pendingApprovals))
-	}
-
-	// Middle section: git info
-	var mid string
-	if branch != "" {
-		mid = sep + branchStyle.Render(branch)
-		if info.dirty {
-			mid += " " + dirtyStyle.Render("●")
-		}
-		if info.unpushed > 0 {
-			mid += " " + aheadStyle.Render(fmt.Sprintf("↑%d", info.unpushed))
-		}
-	}
-
-	// Right section: fleet summary + unread (right-aligned)
-	right := formatFleetSection(info.fleet)
-	if info.unread > 0 {
-		right += sep + unreadStyle.Render(fmt.Sprintf("✉ %d", info.unread))
-	}
-	right += " "
-
-	leftW := lipgloss.Width(left)
-	midW := lipgloss.Width(mid)
-	rightW := lipgloss.Width(right)
-
-	// Progressive degradation for narrow terminals
-	if leftW+midW+rightW > cols {
-		// Drop git info first
-		mid = ""
-		midW = 0
-	}
-	if leftW+rightW > cols {
-		// Drop fleet details, keep only approval count if any
-		right = formatFleetMinimal(info.fleet)
-		if info.unread > 0 {
-			right += sep + unreadStyle.Render(fmt.Sprintf("✉ %d", info.unread))
-		}
-		right += " "
-		rightW = lipgloss.Width(right)
-	}
-	if leftW+rightW > cols {
-		// Ultra-narrow: just session + status
-		right = " "
-		rightW = 1
-	}
-
-	gap := max(cols-leftW-midW-rightW, 0)
-
-	line := left + mid + fillStyle.Render(strings.Repeat(" ", gap)) + right
-	if w := lipgloss.Width(line); w > cols {
-		line = ansi.Truncate(line, cols, "")
-		if pad := cols - lipgloss.Width(line); pad > 0 {
-			line += fillStyle.Render(strings.Repeat(" ", pad))
-		}
-	}
-	return line
-}
-
-func statusStyle(status string) lipgloss.Style {
-	base := lipgloss.NewStyle().Background(barBg)
+func styledStatus(status string, bg color.Color) lipgloss.Style {
+	base := lipgloss.NewStyle().Background(bg)
 	switch status {
 	case "active", "running":
 		return base.Foreground(colorGreen)
@@ -180,47 +65,159 @@ func statusStyle(status string) lipgloss.Style {
 	}
 }
 
-func formatFleetSection(fleet protocol.FleetSummary) string {
+func formatStatusLine(info statusBarInfo, cols int) string {
+	status := info.status
+	if info.agentStatus != "" && info.status == "running" {
+		status = info.agentStatus
+	}
+
+	branch := info.branch
+	if p := strings.SplitN(branch, "/", 3); len(p) == 3 {
+		branch = p[2]
+	}
+
+	accent := accentBg
+	fill := barBg
+	if info.pendingApprovals > 0 {
+		accent = lipgloss.Color("#8b0000")
+		fill = lipgloss.Color("#5f0000")
+	}
+
+	accentPad := lipgloss.NewStyle().Background(accent)
+	fillPad := lipgloss.NewStyle().Background(fill)
+	nameStyle := lipgloss.NewStyle().Bold(true).Background(accent)
+	agentStyle := lipgloss.NewStyle().Foreground(colorDim).Background(fill)
+	branchStyle := lipgloss.NewStyle().Foreground(colorDim).Background(fill)
+	dirtyStyle := lipgloss.NewStyle().Foreground(colorGold).Background(fill)
+	aheadStyle := lipgloss.NewStyle().Foreground(colorBlue).Background(fill)
+	fillSep := lipgloss.NewStyle().Foreground(colorFaint).Background(fill)
+	accentSep := lipgloss.NewStyle().Foreground(colorDim).Background(accent)
+	unreadStyle := lipgloss.NewStyle().Foreground(colorGold).Background(accent)
+
+	transAccentToFill := lipgloss.NewStyle().Foreground(accent).Background(fill).Render(plRight)
+	transFillToAccent := lipgloss.NewStyle().Foreground(accent).Background(fill).Render(plLeft)
+
+	var dot string
+	switch {
+	case status == "approval":
+		dot = styledStatus(status, accent).Render("⚠")
+	case status == "errored":
+		dot = styledStatus(status, accent).Render("✗")
+	case status != "active" && status != "running" && status != "ready":
+		dot = styledStatus(status, accent).Render("○")
+	default:
+		dot = styledStatus(status, accent).Render("●")
+	}
+
+	leftAccent := accentPad.Render(" ") + dot + accentPad.Render(" ") +
+		nameStyle.Render(info.name) + accentPad.Render(" ")
+
+	sep := fillSep.Render(" │ ")
+	leftContent := fillPad.Render(" ") + agentStyle.Render(info.agent) +
+		fillPad.Render("  ") + styledStatus(status, fill).Render(status)
+
+	if info.pendingApprovals > 0 {
+		leftContent += sep + lipgloss.NewStyle().Foreground(colorRed).Bold(true).Background(fill).
+			Render(fmt.Sprintf("⚠ %d pending", info.pendingApprovals))
+	}
+
+	var mid string
+	if branch != "" {
+		mid = sep + branchStyle.Render(branch)
+		if info.dirty {
+			mid += fillPad.Render(" ") + dirtyStyle.Render("●")
+		}
+		if info.unpushed > 0 {
+			mid += fillPad.Render(" ") + aheadStyle.Render(fmt.Sprintf("↑%d", info.unpushed))
+		}
+	}
+
+	appendUnread := func(body string) string {
+		if info.unread <= 0 {
+			return body
+		}
+		if body != "" {
+			body += accentSep.Render(" │ ")
+		}
+		return body + unreadStyle.Render(fmt.Sprintf("✉ %d", info.unread))
+	}
+
+	wrapRight := func(body string) (string, string, int) {
+		if body == "" {
+			return "", "", 0
+		}
+		section := accentPad.Render(" ") + body + accentPad.Render(" ")
+		return transFillToAccent, section, lipgloss.Width(transFillToAccent) + lipgloss.Width(section)
+	}
+
+	rightSep, rightSection, rightW := wrapRight(appendUnread(formatFleetSection(info.fleet, accent)))
+
+	left := leftAccent + transAccentToFill + leftContent
+	leftW := lipgloss.Width(left)
+	midW := lipgloss.Width(mid)
+
+	if leftW+midW+rightW > cols {
+		mid = ""
+		midW = 0
+	}
+	if leftW+rightW > cols {
+		rightSep, rightSection, rightW = wrapRight(appendUnread(formatFleetMinimal(info.fleet, accent)))
+	}
+	if leftW+rightW > cols {
+		rightSep, rightSection, rightW = "", "", 0
+	}
+
+	gap := max(cols-leftW-midW-rightW, 0)
+	line := left + mid + fillPad.Render(strings.Repeat(" ", gap)) + rightSep + rightSection
+
+	if w := lipgloss.Width(line); w > cols {
+		line = ansi.Truncate(line, cols, "")
+		if pad := cols - lipgloss.Width(line); pad > 0 {
+			line += fillPad.Render(strings.Repeat(" ", pad))
+		}
+	}
+	return line
+}
+
+func formatFleetSection(fleet protocol.FleetSummary, bg color.Color) string {
 	if fleet.Total <= 1 {
 		return ""
 	}
 
-	sep := barSep.Render(" │ ")
+	pad := lipgloss.NewStyle().Background(bg)
 	var parts []string
 
-	// Approval always first and most prominent
 	if fleet.Approval > 0 {
-		parts = append(parts, statusStyle("approval").Render(fmt.Sprintf("⚠ %d approval", fleet.Approval)))
+		parts = append(parts, styledStatus("approval", bg).Render(fmt.Sprintf("⚠ %d approval", fleet.Approval)))
 	}
 	if fleet.Errored > 0 {
-		parts = append(parts, statusStyle("errored").Render(fmt.Sprintf("✗ %d error", fleet.Errored)))
+		parts = append(parts, styledStatus("errored", bg).Render(fmt.Sprintf("✗ %d error", fleet.Errored)))
 	}
 	if fleet.Active > 0 {
-		parts = append(parts, statusStyle("active").Render(fmt.Sprintf("● %d active", fleet.Active)))
+		parts = append(parts, styledStatus("active", bg).Render(fmt.Sprintf("● %d active", fleet.Active)))
 	}
 	if fleet.Ready > 0 {
-		parts = append(parts, statusStyle("ready").Render(fmt.Sprintf("● %d ready", fleet.Ready)))
+		parts = append(parts, styledStatus("ready", bg).Render(fmt.Sprintf("● %d ready", fleet.Ready)))
 	}
 	if fleet.Stopped > 0 {
-		parts = append(parts, statusStyle("stopped").Render(fmt.Sprintf("○ %d stopped", fleet.Stopped)))
+		parts = append(parts, styledStatus("stopped", bg).Render(fmt.Sprintf("○ %d stopped", fleet.Stopped)))
 	}
 
 	if len(parts) == 0 {
 		return ""
 	}
-	return sep + strings.Join(parts, "  ")
+	return strings.Join(parts, pad.Render("  "))
 }
 
-func formatFleetMinimal(fleet protocol.FleetSummary) string {
+func formatFleetMinimal(fleet protocol.FleetSummary, bg color.Color) string {
 	if fleet.Total <= 1 {
 		return ""
 	}
-	sep := barSep.Render(" │ ")
 	if fleet.Approval > 0 {
-		return sep + statusStyle("approval").Render(fmt.Sprintf("⚠ %d approval", fleet.Approval))
+		return styledStatus("approval", bg).Render(fmt.Sprintf("⚠ %d approval", fleet.Approval))
 	}
 	if fleet.Errored > 0 {
-		return sep + statusStyle("errored").Render(fmt.Sprintf("✗ %d error", fleet.Errored))
+		return styledStatus("errored", bg).Render(fmt.Sprintf("✗ %d error", fleet.Errored))
 	}
 	return ""
 }
