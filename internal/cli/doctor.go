@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/d0ugal/graith/internal/client"
+	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/daemon"
 	"github.com/d0ugal/graith/internal/git"
 	"github.com/d0ugal/graith/internal/protocol"
@@ -235,6 +236,14 @@ func (dc *doctorContext) checkEnvironment() {
 		}
 	} else {
 		dc.warn("environment", "Sandbox disabled")
+	}
+
+	if cfg.AgentPrompt == "" {
+		dc.warn("environment", "Agent prompt is empty (agents will not receive graith context)")
+	} else if cfg.AgentPrompt != config.DefaultAgentPrompt() {
+		dc.pass("environment", "Agent prompt: customized")
+	} else {
+		dc.pass("environment", "Agent prompt: default")
 	}
 }
 

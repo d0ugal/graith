@@ -31,8 +31,12 @@ func TestDetectPromptInjection(t *testing.T) {
 	}
 }
 
+func testSessionManager() *SessionManager {
+	return &SessionManager{cfg: config.Default()}
+}
+
 func TestInjectPrompt_Claude(t *testing.T) {
-	sm := &SessionManager{}
+	sm := testSessionManager()
 	args, err := sm.injectPrompt("claude", "")
 	if err != nil {
 		t.Fatal(err)
@@ -50,7 +54,7 @@ func TestInjectPrompt_Claude(t *testing.T) {
 
 func TestInjectPrompt_Cursor(t *testing.T) {
 	dir := t.TempDir()
-	sm := &SessionManager{}
+	sm := testSessionManager()
 	args, err := sm.injectPrompt("cursor", dir)
 	if err != nil {
 		t.Fatal(err)
@@ -74,7 +78,7 @@ func TestInjectPrompt_Cursor(t *testing.T) {
 }
 
 func TestInjectPrompt_Unknown(t *testing.T) {
-	sm := &SessionManager{}
+	sm := testSessionManager()
 	args, err := sm.injectPrompt("codex", "")
 	if err != nil {
 		t.Fatal(err)
@@ -85,13 +89,24 @@ func TestInjectPrompt_Unknown(t *testing.T) {
 }
 
 func TestInjectPrompt_CursorEmptyWorktree(t *testing.T) {
-	sm := &SessionManager{}
+	sm := testSessionManager()
 	args, err := sm.injectPrompt("cursor", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(args) != 0 {
 		t.Errorf("expected no args, got %d", len(args))
+	}
+}
+
+func TestInjectPrompt_EmptyPrompt(t *testing.T) {
+	sm := &SessionManager{cfg: &config.Config{AgentPrompt: ""}}
+	args, err := sm.injectPrompt("claude", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(args) != 0 {
+		t.Errorf("expected no args for empty prompt, got %d", len(args))
 	}
 }
 
