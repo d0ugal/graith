@@ -286,6 +286,42 @@ func Remove(storePath, key string) error {
 	})
 }
 
+// StoreInfo describes a discovered store directory.
+type StoreInfo struct {
+	Name    string  `json:"name"`
+	Path    string  `json:"path"`
+	Entries []Entry `json:"entries,omitempty"`
+}
+
+// ListStores enumerates all store directories under dataDir/store/.
+// Each directory is named <reponame>-<hash>.
+func ListStores(dataDir string) ([]StoreInfo, error) {
+	storeRoot := filepath.Join(dataDir, "store")
+	dirs, err := os.ReadDir(storeRoot)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read store root: %w", err)
+	}
+
+	var stores []StoreInfo
+	for _, d := range dirs {
+		if !d.IsDir() {
+			continue
+		}
+		storePath := filepath.Join(storeRoot, d.Name())
+		if _, err := os.Stat(filepath.Join(storePath, ".git")); err != nil {
+			continue
+		}
+		stores = append(stores, StoreInfo{
+			Name: d.Name(),
+			Path: storePath,
+		})
+	}
+	return stores, nil
+}
+
 // repoHash is copied from internal/daemon/daemon.go to produce a deterministic
 // 12-character hex hash of an absolute repo path.
 func repoHash(repoPath string) string {
