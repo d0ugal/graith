@@ -90,14 +90,14 @@ func ValidateKey(key string) error {
 		if component == ".." {
 			return fmt.Errorf("store key must not contain '..' path components")
 		}
-		if component == ".git" {
+		if strings.EqualFold(component, ".git") {
 			return fmt.Errorf("store key must not contain '.git' path components")
 		}
 		if component == "." {
 			return fmt.Errorf("store key must not contain '.' path components")
 		}
 	}
-	if key == "store.lock" {
+	if strings.EqualFold(key, "store.lock") {
 		return fmt.Errorf("store key must not be 'store.lock'")
 	}
 	return nil
