@@ -882,6 +882,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 	if err := sm.saveState(); err != nil {
 		delete(sm.state.Sessions, id)
 		delete(sm.sessions, id)
+		delete(sm.tokenIndex, token)
 		sm.mu.Unlock()
 		_ = ptySess.Kill()
 		ptySess.Close()
@@ -1269,6 +1270,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 	if err := sm.saveState(); err != nil {
 		delete(sm.state.Sessions, id)
 		delete(sm.sessions, id)
+		delete(sm.tokenIndex, token)
 		sm.mu.Unlock()
 		_ = ptySess.Kill()
 		ptySess.Close()
@@ -2273,6 +2275,9 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 	deletedIDs := append([]string{}, creatingIDs...)
 	for _, s := range snaps {
 		if succeeded[s.id] {
+			if sess, ok := sm.state.Sessions[s.id]; ok && sess.Token != "" {
+				delete(sm.tokenIndex, sess.Token)
+			}
 			delete(sm.state.Sessions, s.id)
 			delete(sm.hookReports, s.id)
 			deletedIDs = append(deletedIDs, s.id)
