@@ -587,6 +587,19 @@ func (dc *doctorContext) checkTmpDir() {
 	} else {
 		dc.pass("storage", "Tmp dir: %s (%d repo(s), %s)", tmpDir, repoCount, formatBytes(totalSize))
 	}
+
+	legacyShareDir := filepath.Join(filepath.Dir(tmpDir), "share")
+	if info, err := os.Stat(legacyShareDir); err == nil && info.IsDir() {
+		size, _ := dirSize(legacyShareDir)
+		dc.warn("storage", "Legacy share dir exists: %s (%s)", legacyShareDir, formatBytes(size))
+		if doctorAutofix {
+			if os.RemoveAll(legacyShareDir) == nil {
+				dc.hint("Removed legacy share dir")
+			}
+		} else {
+			dc.hint("Renamed to tmp/ in v0.39.0. Use --autofix to remove")
+		}
+	}
 }
 
 type orphanedWorktree struct {
