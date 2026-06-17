@@ -35,7 +35,7 @@ var dashboardCmd = &cobra.Command{
 				if err != nil {
 					return err
 				}
-				err = runAttachByID(c, result.SessionID)
+				err = runAttachByID(c, result.SessionID, nil)
 				c.Close()
 				return err
 
