@@ -479,18 +479,21 @@ context. It cannot read arbitrary disk paths like
 #### Phase 2: Overlay Integration
 
 12. ~~Add `ScenarioID` to `SessionInfo` in protocol~~ (done)
-13. Group sessions by scenario in the session picker (new view mode alongside
-    repo/parent-tree grouping)
-14. Show aggregated scenario status in overlay
+13. ~~Group sessions by scenario in the session picker~~ (done — new
+    "Scenarios" view mode)
+14. ~~Show aggregated scenario status in overlay~~ (done — scenario group
+    headers show running/partial/stopped/errored status)
 
 #### Phase 3: Orchestrator Skill
 
-15. Write skill that teaches the orchestrator `gr scenario` commands
-16. Include coordination patterns (monitoring, failure handling, work
-    redistribution)
-17. Teach restart recovery: `gr scenario list` on boot to rediscover active
-    scenarios
-18. Document scenario file schema and manifest format in `AGENTS.md`
+15. ~~Write skill that teaches the orchestrator `gr scenario` commands~~ (done
+    — `~/.claude/skills/scenario-orchestrator/SKILL.md`)
+16. ~~Include coordination patterns~~ (done — fan-out/collect, progressive
+    refinement, staged pipeline, emergency stop)
+17. ~~Teach restart recovery~~ (done — `gr scenario list` + `gr scenario
+    resume` pattern documented in skill)
+18. ~~Document scenario file schema and manifest format in `AGENTS.md`~~ (done
+    — shared sessions, authorization, and manifest format documented)
 
 #### Open Questions
 
@@ -619,6 +622,43 @@ multi-repo rrweb orphan mutation fix scenario and have been addressed.
 
 13. **Redundant republish on empty resume** — `ResumeScenario` only calls
     `republishManifests` if at least one session was actually resumed.
+
+#### Authorization hardening (implemented — tribunal round 2)
+
+14. **Auth checks on scenario mutation endpoints** — `scenario_stop`,
+    `scenario_delete`, `scenario_resume`, and `scenario_add` now require the
+    caller to be the scenario's orchestrator or a descendant. Unauthenticated
+    (human CLI) callers are always permitted. New `checkScenarioOp` helper in
+    `auth.go`.
+
+15. **`scenario_start` requires authentication** — Unauthenticated connections
+    can no longer send `scenario_start`. Previously, an unauthenticated client
+    could supply any `CallerSessionID` and bypass the orchestrator check.
+
+16. **Shared sessions fail closed** — If `shared = true` is set but no running
+    session with that name exists, `StartScenario` now returns an error instead
+    of creating a new session that would be orphaned by stop/delete.
+
+17. **Snapshot all state under lock** — `StopScenario`, `DeleteScenario`, and
+    `ResumeScenario` now snapshot `SessionState.Status` under `RLock` instead
+    of reading it from the pointer after unlock. `StartScenario` snapshots
+    `SystemKind` for the orchestrator check.
+
+18. **Handle concurrent scenario deletion during create** — If `DeleteScenario`
+    runs while `StartScenario` is in its concurrent create phase, the function
+    now detects the nil scenario, rolls back all started sessions, and returns
+    an error instead of crashing with a nil pointer dereference.
+
+#### Overlay integration (implemented)
+
+19. **Scenario view mode in session picker** — A new "Scenarios" tab in the
+    overlay (ctrl+b w, then press right to cycle views) groups sessions by
+    scenario ID with aggregated status (running/partial/stopped/errored).
+    Sessions not in a scenario appear under "(no scenario)".
+
+20. **`ScenarioName` on `SessionInfo`** — Added `ScenarioName` to
+    `SessionState`, `SessionInfo`, and the protocol so the overlay can display
+    human-readable scenario names in group headers.
 
 #### Remaining items for future work
 
