@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/store"
@@ -177,6 +178,9 @@ var storeListCmd = &cobra.Command{
 
 		storePath, label, err := resolveStorePath()
 		if err != nil {
+			if storeSharedFlag || storeRepoFlag != "" {
+				return err
+			}
 			return listAllStores(prefix)
 		}
 
@@ -194,7 +198,7 @@ var storeListCmd = &cobra.Command{
 		if jsonOutput {
 			result := make([]entryWithRepo, len(entries))
 			for i, e := range entries {
-				result[i] = entryWithRepo{e.Key, label, e.UpdatedAt.Format("2006-01-02T15:04:05Z")}
+				result[i] = entryWithRepo{e.Key, label, e.UpdatedAt.Format(time.RFC3339)}
 			}
 			return out.JSON(result)
 		}
@@ -233,12 +237,24 @@ func listAllStores(prefix string) error {
 		stores[i].Entries = entries
 	}
 
+	type entryWithRepo struct {
+		Key       string `json:"key"`
+		Repo      string `json:"repo"`
+		UpdatedAt string `json:"updated_at"`
+	}
+
 	if jsonOutput {
-		return out.JSON(stores)
+		var result []entryWithRepo
+		for _, s := range stores {
+			for _, e := range s.Entries {
+				result = append(result, entryWithRepo{e.Key, s.Name, e.UpdatedAt.Format(time.RFC3339)})
+			}
+		}
+		return out.JSON(result)
 	}
 
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "STORE\tKEY\tUPDATED")
+	fmt.Fprintln(tw, "REPO\tKEY\tUPDATED")
 	for _, s := range stores {
 		for _, entry := range s.Entries {
 			fmt.Fprintf(tw, "%s\t%s\t%s\n", s.Name, entry.Key, entry.UpdatedAt.Format("2006-01-02 15:04:05"))
