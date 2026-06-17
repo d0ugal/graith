@@ -302,7 +302,7 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 
 	// --- Manifest phase: build and publish manifest to each session's inbox ---
 	for i, id := range sessionIDs {
-		manifest := sm.buildManifest(scenarioID, msg, sessionIDs, i)
+		manifest := sm.buildManifest(scenarioID, msg, scenario, sessionIDs, i)
 		manifestJSON, err := json.Marshal(manifest)
 		if err != nil {
 			sm.log.Error("failed to marshal scenario manifest", "session", id, "err", err)
@@ -318,7 +318,7 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 	}
 
 	// Persist manifest to shared store.
-	sm.persistManifest(scenarioID, msg, sessionIDs)
+	sm.persistManifest(scenarioID, msg, scenario, sessionIDs)
 
 	return scenario, nil
 }
@@ -352,7 +352,7 @@ type scenarioManifestOrch struct {
 	Name      string `json:"name"`
 }
 
-func (sm *SessionManager) buildManifest(scenarioID string, msg protocol.ScenarioStartMsg, sessionIDs []string, selfIndex int) scenarioManifest {
+func (sm *SessionManager) buildManifest(scenarioID string, msg protocol.ScenarioStartMsg, scenario *ScenarioState, sessionIDs []string, selfIndex int) scenarioManifest {
 	self := msg.Sessions[selfIndex]
 
 	var siblings []scenarioManifestSibling
@@ -364,7 +364,7 @@ func (sm *SessionManager) buildManifest(scenarioID string, msg protocol.Scenario
 			Name:      s.Name,
 			SessionID: sessionIDs[j],
 			Role:      s.Role,
-			Repo:      filepath.Base(s.Repo),
+			Repo:      scenario.Sessions[j].Repo,
 		})
 	}
 
@@ -387,7 +387,7 @@ func (sm *SessionManager) buildManifest(scenarioID string, msg protocol.Scenario
 	}
 }
 
-func (sm *SessionManager) persistManifest(scenarioID string, msg protocol.ScenarioStartMsg, sessionIDs []string) {
+func (sm *SessionManager) persistManifest(scenarioID string, msg protocol.ScenarioStartMsg, scenario *ScenarioState, sessionIDs []string) {
 	storeDir := store.SharedStorePath(sm.paths.DataDir)
 	if err := store.Init(storeDir); err != nil {
 		sm.log.Error("failed to init shared store for manifest", "err", err)
@@ -395,7 +395,7 @@ func (sm *SessionManager) persistManifest(scenarioID string, msg protocol.Scenar
 	}
 
 	for i := range msg.Sessions {
-		manifest := sm.buildManifest(scenarioID, msg, sessionIDs, i)
+		manifest := sm.buildManifest(scenarioID, msg, scenario, sessionIDs, i)
 		data, err := json.MarshalIndent(manifest, "", "  ")
 		if err != nil {
 			sm.log.Error("failed to marshal manifest for store", "err", err)
@@ -472,11 +472,13 @@ func (sm *SessionManager) DeleteScenario(name string) ([]string, error) {
 
 	// Delete each session.
 	var deleted []string
+	var deleteErrors []string
 	for _, id := range sessionIDs {
 		sm.mu.RLock()
 		_, ok := sm.state.Sessions[id]
 		sm.mu.RUnlock()
 		if !ok {
+			deleted = append(deleted, id)
 			continue
 		}
 		// Unstar before deleting (Delete refuses starred sessions).
@@ -488,17 +490,23 @@ func (sm *SessionManager) DeleteScenario(name string) ([]string, error) {
 
 		if err := sm.Delete(id); err != nil {
 			sm.log.Warn("failed to delete scenario session", "session", id, "err", err)
+			deleteErrors = append(deleteErrors, id)
 			continue
 		}
 		deleted = append(deleted, id)
 	}
 
-	// Remove scenario record.
+	// Only remove the scenario record if all sessions were cleaned up.
 	sm.mu.Lock()
-	delete(sm.state.Scenarios, scenarioID)
+	if len(deleteErrors) == 0 {
+		delete(sm.state.Scenarios, scenarioID)
+	}
 	_ = sm.saveState()
 	sm.mu.Unlock()
 
+	if len(deleteErrors) > 0 {
+		return deleted, fmt.Errorf("failed to delete %d session(s): %v — scenario record kept for retry", len(deleteErrors), deleteErrors)
+	}
 	return deleted, nil
 }
 

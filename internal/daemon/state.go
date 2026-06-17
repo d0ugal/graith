@@ -184,15 +184,15 @@ func SaveState(path string, state *State) error {
 }
 
 var migrations = map[int]func(*State) error{
-	0: migrateV0ToV1,
-	1: migrateV1ToV2,
-	2: migrateV2ToV3,
-	3: migrateV3ToV4,
-	4: migrateV4ToV5,
-	5: migrateV5ToV6,
-	6: migrateV6ToV7,
-	7: migrateV7ToV8,
-	8: migrateV8ToV9,
+	0:  migrateV0ToV1,
+	1:  migrateV1ToV2,
+	2:  migrateV2ToV3,
+	3:  migrateV3ToV4,
+	4:  migrateV4ToV5,
+	5:  migrateV5ToV6,
+	6:  migrateV6ToV7,
+	7:  migrateV7ToV8,
+	8:  migrateV8ToV9,
 	9:  migrateV9ToV10,
 	10: migrateV10ToV11,
 }
