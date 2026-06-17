@@ -373,8 +373,8 @@ func TestMigrateV6ToV7(t *testing.T) {
 	if err := migrateState(state); err != nil {
 		t.Fatalf("migration failed: %v", err)
 	}
-	if state.Version != 7 {
-		t.Errorf("expected version 7, got %d", state.Version)
+	if state.Version != CurrentStateVersion {
+		t.Errorf("expected version %d, got %d", CurrentStateVersion, state.Version)
 	}
 	s := state.Sessions["s1"]
 	if s.SummaryText != "" {

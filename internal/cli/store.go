@@ -36,9 +36,17 @@ func resolveStoreRepoPath() (string, error) {
 
 	gitOut, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
 	if err != nil {
-		return "", fmt.Errorf("could not detect repo path: use --repo or run from inside a git repository")
+		return "", fmt.Errorf("could not detect repo path: use --repo, --shared, or run from inside a git repository")
 	}
 	return config.ResolvePath(strings.TrimSpace(string(gitOut))), nil
+}
+
+// inGraithSessionWithNoRepo returns true if running inside a graith session
+// that has no repo context (e.g. the orchestrator).
+func inGraithSessionWithNoRepo() bool {
+	return os.Getenv("GRAITH_SESSION_ID") != "" &&
+		os.Getenv("GRAITH_REPO_PATH") == "" &&
+		resolveCurrentRepo() == ""
 }
 
 // resolveStorePath returns the store path and a display label ("shared" or the repo path).
@@ -46,7 +54,7 @@ func resolveStorePath() (storePath string, label string, err error) {
 	if storeSharedFlag && storeRepoFlag != "" {
 		return "", "", fmt.Errorf("--shared and --repo are mutually exclusive")
 	}
-	if storeSharedFlag {
+	if storeSharedFlag || (!storeSharedFlag && storeRepoFlag == "" && inGraithSessionWithNoRepo()) {
 		sp := store.SharedStorePath(paths.DataDir)
 		return sp, "shared", nil
 	}
