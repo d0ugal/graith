@@ -27,6 +27,7 @@ import (
 
 const (
 	gitFetchTimeout    = 2 * time.Minute
+	gitMergeTimeout    = 2 * time.Minute
 	gitUsernameTimeout = 15 * time.Second
 )
 
