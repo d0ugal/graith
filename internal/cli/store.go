@@ -14,6 +14,7 @@ import (
 )
 
 var storeRepoFlag string
+var storeSharedFlag bool
 
 var storeCmd = &cobra.Command{
 	Use:     "store",
@@ -37,6 +38,20 @@ func resolveStoreRepoPath() (string, error) {
 		return "", fmt.Errorf("could not detect repo path: use --repo or run from inside a git repository")
 	}
 	return config.ResolvePath(strings.TrimSpace(string(gitOut))), nil
+}
+
+// resolveStorePath returns the store path and a display label ("shared" or the repo path).
+func resolveStorePath() (storePath string, label string, err error) {
+	if storeSharedFlag {
+		sp := store.SharedStorePath(paths.DataDir)
+		return sp, "shared", nil
+	}
+	repo, err := resolveStoreRepoPath()
+	if err != nil {
+		return "", "", err
+	}
+	sp := store.StorePath(paths.DataDir, repo)
+	return sp, repo, nil
 }
 
 // resolveCurrentRepo returns the current repo path or empty string on failure.
@@ -82,16 +97,17 @@ var storePutCmd = &cobra.Command{
 			return err
 		}
 
-		repo, err := resolveStoreRepoPath()
+		storePath, label, err := resolveStorePath()
 		if err != nil {
 			return err
 		}
 
-		if err := checkWritePermission(repo); err != nil {
-			return err
+		if !storeSharedFlag {
+			if err := checkWritePermission(label); err != nil {
+				return err
+			}
 		}
 
-		storePath := store.StorePath(paths.DataDir, repo)
 		if err := store.Init(storePath); err != nil {
 			return err
 		}
@@ -103,7 +119,7 @@ var storePutCmd = &cobra.Command{
 			return out.JSON(struct {
 				Key  string `json:"key"`
 				Repo string `json:"repo"`
-			}{key, repo})
+			}{key, label})
 		}
 		out.Print("Stored %s\n", key)
 		return nil
@@ -119,12 +135,11 @@ var storeGetCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		key := args[0]
 
-		repo, err := resolveStoreRepoPath()
+		storePath, _, err := resolveStorePath()
 		if err != nil {
 			return err
 		}
 
-		storePath := store.StorePath(paths.DataDir, repo)
 		body, err := store.Get(storePath, key)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
@@ -157,19 +172,28 @@ var storeListCmd = &cobra.Command{
 			return listAllStores(prefix)
 		}
 
-		repo, err := resolveStoreRepoPath()
+		storePath, label, err := resolveStorePath()
 		if err != nil {
 			return listAllStores(prefix)
 		}
 
-		storePath := store.StorePath(paths.DataDir, repo)
 		entries, err := store.List(storePath, prefix)
 		if err != nil {
 			return err
 		}
 
+		type entryWithRepo struct {
+			Key       string `json:"key"`
+			Repo      string `json:"repo"`
+			UpdatedAt string `json:"updated_at"`
+		}
+
 		if jsonOutput {
-			return out.JSON(entries)
+			result := make([]entryWithRepo, len(entries))
+			for i, e := range entries {
+				result[i] = entryWithRepo{e.Key, label, e.UpdatedAt.Format("2006-01-02T15:04:05Z")}
+			}
+			return out.JSON(result)
 		}
 
 		if len(entries) == 0 {
@@ -178,9 +202,9 @@ var storeListCmd = &cobra.Command{
 		}
 
 		tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "KEY\tUPDATED")
+		fmt.Fprintln(tw, "REPO\tKEY\tUPDATED")
 		for _, entry := range entries {
-			fmt.Fprintf(tw, "%s\t%s\n", entry.Key, entry.UpdatedAt.Format("2006-01-02 15:04:05"))
+			fmt.Fprintf(tw, "%s\t%s\t%s\n", label, entry.Key, entry.UpdatedAt.Format("2006-01-02 15:04:05"))
 		}
 		tw.Flush()
 		return nil
@@ -239,16 +263,17 @@ var storeAppendCmd = &cobra.Command{
 			return err
 		}
 
-		repo, err := resolveStoreRepoPath()
+		storePath, label, err := resolveStorePath()
 		if err != nil {
 			return err
 		}
 
-		if err := checkWritePermission(repo); err != nil {
-			return err
+		if !storeSharedFlag {
+			if err := checkWritePermission(label); err != nil {
+				return err
+			}
 		}
 
-		storePath := store.StorePath(paths.DataDir, repo)
 		if err := store.Init(storePath); err != nil {
 			return err
 		}
@@ -260,7 +285,7 @@ var storeAppendCmd = &cobra.Command{
 			return out.JSON(struct {
 				Key  string `json:"key"`
 				Repo string `json:"repo"`
-			}{key, repo})
+			}{key, label})
 		}
 		out.Print("Appended to %s\n", key)
 		return nil
@@ -276,16 +301,17 @@ var storeRmCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		key := args[0]
 
-		repo, err := resolveStoreRepoPath()
+		storePath, label, err := resolveStorePath()
 		if err != nil {
 			return err
 		}
 
-		if err := checkWritePermission(repo); err != nil {
-			return err
+		if !storeSharedFlag {
+			if err := checkWritePermission(label); err != nil {
+				return err
+			}
 		}
 
-		storePath := store.StorePath(paths.DataDir, repo)
 		if err := store.Remove(storePath, key); err != nil {
 			return err
 		}
@@ -304,6 +330,7 @@ var storeRmCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(storeCmd)
 	storeCmd.PersistentFlags().StringVar(&storeRepoFlag, "repo", "", "repo path (default: auto-detect)")
+	storeCmd.PersistentFlags().BoolVar(&storeSharedFlag, "shared", false, "use the shared store (not scoped to any repo)")
 
 	storeCmd.AddCommand(storePutCmd)
 	storePutCmd.Flags().StringVarP(&storePutFile, "file", "f", "", "read body from file")
