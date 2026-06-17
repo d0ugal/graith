@@ -1070,8 +1070,7 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
-	switch msg := msg.(type) {
-	case tea.KeyPressMsg:
+	if msg, ok := msg.(tea.KeyPressMsg); ok {
 		switch m.state {
 		case stateFilter:
 			switch msg.String() {
