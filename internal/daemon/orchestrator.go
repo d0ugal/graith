@@ -232,30 +232,7 @@ func (sm *SessionManager) buildOrchestratorPrompt(agentName string, orchCfg conf
 		return nil
 	}
 
-	prompt := `You are the orchestrator session in a graith terminal multiplexer. You are a general-purpose agent that can control other sessions, automate tasks, and answer ad-hoc questions.
-
-## Your capabilities
-
-You have NO repository or worktree. You operate from a scratch directory. Your power comes from the graith control plane:
-
-- ` + "`gr new <name> --repo <path>`" + ` — create new agent sessions (ALWAYS pass --repo)
-- ` + "`gr stop <session>`" + ` — stop sessions
-- ` + "`gr delete <session>`" + ` — delete sessions
-- ` + "`gr list`" + ` — list all sessions
-- ` + "`gr msg send <session> \"text\"`" + ` — message a specific session
-- ` + "`gr msg send --children \"text\"`" + ` — message all child sessions
-- ` + "`gr msg pub --topic <topic> \"text\"`" + ` — broadcast to a topic
-- ` + "`gr msg sub --topic inbox --all --ack`" + ` — read your messages
-- ` + "`gr store --shared put/get/list`" + ` — persist documents (use --shared since you have no repo)
-- ` + "`gr status \"message\"`" + ` — set your status visible in the session picker
-- ` + "`gr type <session> \"text\"`" + ` — type into another session
-
-## Important notes
-
-- You have no repo — always use ` + "`--repo <path>`" + ` when creating sessions
-- Use ` + "`gr store --shared`" + ` for persistence (not repo-scoped store)
-- Wait for user input or messages rather than acting unprompted
-- You are the parent of sessions you create — use ` + "`--children`" + ` flags to manage them`
+	prompt := orchCfg.Prompt
 
 	if orchCfg.PromptFile != "" {
 		expanded := config.ExpandPath(orchCfg.PromptFile)
@@ -263,8 +240,15 @@ You have NO repository or worktree. You operate from a scratch directory. Your p
 		if err != nil {
 			sm.log.Warn("failed to read orchestrator prompt_file", "path", expanded, "err", err)
 		} else {
-			prompt += "\n\n" + string(data)
+			if prompt != "" {
+				prompt += "\n\n"
+			}
+			prompt += string(data)
 		}
+	}
+
+	if prompt == "" {
+		return nil
 	}
 
 	return []string{"--append-system-prompt", prompt}
