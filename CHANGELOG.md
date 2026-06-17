@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.41.0](https://github.com/d0ugal/graith/compare/v0.40.0...v0.41.0) (2026-06-17)
+
+
+### Features
+
+* add collapse/expand for child sessions in overlay picker ([09ee001](https://github.com/d0ugal/graith/commit/09ee001a8a57bae372ad01afc34a2ee7590a2cfd))
+
+
+### Bug Fixes
+
+* address tribunal review findings for collapse feature ([6c700a8](https://github.com/d0ugal/graith/commit/6c700a8c52d05413c62b0fd242b321ee12767994))
+* create shared store directory at startup ([0c1b358](https://github.com/d0ugal/graith/commit/0c1b35881e37b4ae44aaa1ff60df5766fec3a3c6))
+* cursor falls back to ancestor when currentSessionID is collapsed ([d511d21](https://github.com/d0ugal/graith/commit/d511d2189db9b7111b92b7e8e0908db04c11db21))
+* prevent upgrade storm and socket deletion race ([ed02f84](https://github.com/d0ugal/graith/commit/ed02f84c955d50e607a7233568eabe38faf3f50d))
+
 ## [0.40.0](https://github.com/d0ugal/graith/compare/v0.39.0...v0.40.0) (2026-06-17)
 
 
