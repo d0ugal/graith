@@ -2797,15 +2797,15 @@ func TestToSessionInfoIncludes(t *testing.T) {
 		ID:           "abc",
 		Name:         "test",
 		Agent:        "claude",
-		WorktreePath: "/session/dem-dev",
+		WorktreePath: "/session/mono-repo",
 		Status:       StatusRunning,
 		CreatedAt:    time.Now().UTC(),
 		Includes: []IncludedRepoState{
 			{
-				RepoPath:     "/home/user/Code/grafana",
-				RepoName:     "grafana",
-				WorktreePath: "/session/grafana",
-				Branch:       "user/graith/test/grafana",
+				RepoPath:     "/home/user/Code/frontend",
+				RepoName:     "frontend",
+				WorktreePath: "/session/frontend",
+				Branch:       "user/graith/test/frontend",
 				BaseBranch:   "main",
 				dirty:        true,
 				unpushed:     3,
@@ -2817,14 +2817,14 @@ func TestToSessionInfoIncludes(t *testing.T) {
 		t.Fatalf("Includes length = %d, want 1", len(info.Includes))
 	}
 	inc := info.Includes[0]
-	if inc.RepoName != "grafana" {
-		t.Errorf("RepoName = %q, want %q", inc.RepoName, "grafana")
+	if inc.RepoName != "frontend" {
+		t.Errorf("RepoName = %q, want %q", inc.RepoName, "frontend")
 	}
-	if inc.WorktreePath != "/session/grafana" {
-		t.Errorf("WorktreePath = %q, want %q", inc.WorktreePath, "/session/grafana")
+	if inc.WorktreePath != "/session/frontend" {
+		t.Errorf("WorktreePath = %q, want %q", inc.WorktreePath, "/session/frontend")
 	}
-	if inc.Branch != "user/graith/test/grafana" {
-		t.Errorf("Branch = %q, want %q", inc.Branch, "user/graith/test/grafana")
+	if inc.Branch != "user/graith/test/frontend" {
+		t.Errorf("Branch = %q, want %q", inc.Branch, "user/graith/test/frontend")
 	}
 	if !inc.Dirty {
 		t.Error("Dirty = false, want true")
@@ -2853,27 +2853,27 @@ func TestStateSaveLoadIncludes(t *testing.T) {
 	state := NewState()
 	state.Sessions["s1"] = &SessionState{
 		ID:           "s1",
-		Name:         "dem-dev-session",
-		RepoPath:     "/home/user/dem-dev",
-		RepoName:     "dem-dev",
-		WorktreePath: "/data/worktrees/dem-dev/hash/s1/dem-dev",
+		Name:         "mono-repo-session",
+		RepoPath:     "/home/user/mono-repo",
+		RepoName:     "mono-repo",
+		WorktreePath: "/data/worktrees/mono-repo/hash/s1/mono-repo",
 		Branch:       "user/graith/s1",
 		Agent:        "claude",
 		Status:       StatusStopped,
 		CreatedAt:    time.Now().UTC(),
 		Includes: []IncludedRepoState{
 			{
-				RepoPath:     "/home/user/grafana",
-				RepoName:     "grafana",
-				WorktreePath: "/data/worktrees/dem-dev/hash/s1/grafana",
-				Branch:       "user/graith/s1/grafana",
+				RepoPath:     "/home/user/frontend",
+				RepoName:     "frontend",
+				WorktreePath: "/data/worktrees/mono-repo/hash/s1/frontend",
+				Branch:       "user/graith/s1/frontend",
 				BaseBranch:   "main",
 			},
 			{
-				RepoPath:     "/home/user/session-replay",
-				RepoName:     "session-replay",
-				WorktreePath: "/data/worktrees/dem-dev/hash/s1/session-replay",
-				Branch:       "user/graith/s1/session-replay",
+				RepoPath:     "/home/user/shared-lib",
+				RepoName:     "shared-lib",
+				WorktreePath: "/data/worktrees/mono-repo/hash/s1/shared-lib",
+				Branch:       "user/graith/s1/shared-lib",
 				BaseBranch:   "main",
 			},
 		},
@@ -2893,13 +2893,13 @@ func TestStateSaveLoadIncludes(t *testing.T) {
 	if len(s.Includes) != 2 {
 		t.Fatalf("Includes length = %d, want 2", len(s.Includes))
 	}
-	if s.Includes[0].RepoName != "grafana" {
-		t.Errorf("Includes[0].RepoName = %q, want %q", s.Includes[0].RepoName, "grafana")
+	if s.Includes[0].RepoName != "frontend" {
+		t.Errorf("Includes[0].RepoName = %q, want %q", s.Includes[0].RepoName, "frontend")
 	}
-	if s.Includes[1].RepoName != "session-replay" {
-		t.Errorf("Includes[1].RepoName = %q, want %q", s.Includes[1].RepoName, "session-replay")
+	if s.Includes[1].RepoName != "shared-lib" {
+		t.Errorf("Includes[1].RepoName = %q, want %q", s.Includes[1].RepoName, "shared-lib")
 	}
-	if s.Includes[0].WorktreePath != "/data/worktrees/dem-dev/hash/s1/grafana" {
+	if s.Includes[0].WorktreePath != "/data/worktrees/mono-repo/hash/s1/frontend" {
 		t.Errorf("Includes[0].WorktreePath = %q", s.Includes[0].WorktreePath)
 	}
 }
