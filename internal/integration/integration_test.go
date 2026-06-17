@@ -741,6 +741,15 @@ func TestTypeWakesSleepingAgent(t *testing.T) {
 	if !found {
 		t.Error("sleeper agent did not read input — SIGWINCH poke failed to wake the process")
 	}
+
+	// Wait for the sleeper process to fully exit before teardown closes the
+	// message store, avoiding a race where the exit handler publishes a
+	// status change to a closed DB.
+	select {
+	case <-ptySess.Done():
+	case <-time.After(5 * time.Second):
+		t.Error("timed out waiting for sleeper to exit")
+	}
 }
 
 func TestTypeExitedSessionFails(t *testing.T) {
