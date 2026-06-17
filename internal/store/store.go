@@ -112,6 +112,12 @@ func StorePath(dataDir, repoRoot string) string {
 	return filepath.Join(dataDir, "store", repoName+"-"+repoHash(repoRoot))
 }
 
+// SharedStorePath returns the on-disk directory for the shared document store.
+// The shared store is not scoped to any repo.
+func SharedStorePath(dataDir string) string {
+	return filepath.Join(dataDir, "store", "shared")
+}
+
 // withLock acquires an exclusive flock on a lock file in storePath and runs fn.
 func withLock(storePath string, fn func() error) error {
 	lockPath := filepath.Join(storePath, "store.lock")
