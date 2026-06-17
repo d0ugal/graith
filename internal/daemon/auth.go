@@ -75,27 +75,10 @@ func (ac authContext) checkTarget(sm *SessionManager, targetID string, rule auth
 }
 
 // checkMsgPub validates msg_pub authorization. The sender_id is forced to the
-// authenticated session. For inbox streams, the target must be self, descendant,
-// or direct parent. Must be called with sm.mu at least RLocked.
-func (ac authContext) checkMsgPub(sm *SessionManager, stream string) error {
-	if !ac.authenticated {
-		return nil
-	}
-	targetID, isInbox := parseInboxStream(stream)
-	if !isInbox {
-		return nil
-	}
-	if targetID == ac.sessionID {
-		return nil
-	}
-	if sm.isDescendantOf(targetID, ac.sessionID) {
-		return nil
-	}
-	// Allow child→parent messaging.
-	if sess, ok := sm.state.Sessions[ac.sessionID]; ok && sess.ParentID == targetID {
-		return nil
-	}
-	return fmt.Errorf("not authorized: inbox target is not self, descendant, or parent")
+// authenticated session, so the recipient always knows who sent the message.
+// Any authenticated session may send to any inbox.
+func (ac authContext) checkMsgPub(_ *SessionManager, _ string) error {
+	return nil
 }
 
 // checkInboxRead validates msg_sub/msg_ack authorization. For inbox streams, the

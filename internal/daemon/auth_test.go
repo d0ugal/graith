@@ -223,14 +223,14 @@ func TestCheckMsgPub_InboxParentAllowed(t *testing.T) {
 	}
 }
 
-func TestCheckMsgPub_InboxUnrelatedRejected(t *testing.T) {
+func TestCheckMsgPub_InboxUnrelatedAllowed(t *testing.T) {
 	sm := newTestSMWithSessions(map[string]*SessionState{
 		"s1": {ID: "s1"},
 		"s2": {ID: "s2"},
 	})
 	auth := authContext{sessionID: "s1", authenticated: true}
-	if err := auth.checkMsgPub(sm, "inbox:s2"); err == nil {
-		t.Error("expected rejection for unrelated inbox")
+	if err := auth.checkMsgPub(sm, "inbox:s2"); err != nil {
+		t.Errorf("expected allowed for unrelated inbox, got: %v", err)
 	}
 }
 
