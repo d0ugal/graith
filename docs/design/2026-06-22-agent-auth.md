@@ -67,17 +67,17 @@ No changes to individual message types. The token is orthogonal to the message p
 
 #### Validation rules
 
-The core rule: **if a message claims a session identity (via any payload field), it must present a valid token — or be rejected.** The only exception is messages that don't reference any session (e.g. `handshake`, `list` with no filter).
+The core rule: **if a valid token is present, identity fields are forced from the token and the authorization matrix is enforced. If an invalid token is present, the request is rejected. If no token is present, the connection is treated as a human CLI with full access.**
 
 | Scenario | Token? | `GRAITH_SESSION_ID`? | Behavior |
 |----------|--------|---------------------|----------|
-| Human CLI (outside session) | No | No | Full access — no identity claim possible |
+| Human CLI (outside session) | No | No | Full access — treated as human operator |
 | Agent CLI (inside session) | Yes, valid | Yes | Validated per authorization matrix |
 | Agent CLI (inside session) | Yes, invalid | Yes | Rejected |
-| Agent CLI (token stripped) | No | Yes | Rejected — session identity claimed but unproven |
-| Agent CLI (both stripped) | No | No | Treated as human — but agent loses all session awareness |
+| Agent CLI (token stripped) | No | Yes | Treated as human — full access (see limitations) |
+| Agent CLI (both stripped) | No | No | Treated as human — agent loses all session awareness |
 
-The daemon enforces: **if a message references a `session_id`, `sender_id`, `subscriber`, or `inbox:<id>` stream, and no valid token is present, the request is rejected.** Tokenless connections may only use identity-free operations.
+The daemon cannot distinguish a human CLI from an agent that stripped its token at the protocol level. The `GRAITH_SESSION_ID` environment variable is client-side only and not transmitted in the protocol. This means **token-stripping is not rejected server-side** — an agent that unsets `GRAITH_TOKEN` gains human-level access. This is an accepted limitation: the sandbox prevents agents from unsetting environment variables in the initial process, and an agent that actively circumvents auth by spawning a child process with modified env is outside the casual-impersonation threat model. A future enhancement could add a `ClaimedSessionID` field to the envelope to close this gap.
 
 #### Authorization matrix
 
@@ -216,7 +216,7 @@ Human (no GRAITH_SESSION_ID):
 - Single validation point in the handler (after envelope decode, before dispatch)
 - Individual message types don't need modification
 - Natural fit with the existing protocol (messages already carry session_id in payload)
-- Closes the token-stripping bypass: identity claim without token is rejected
+- Prevents impersonation by cooperative agents: identity is forced from the token when present
 - Works identically for sandboxed and unsandboxed agents at the protocol level
 
 #### Cons
