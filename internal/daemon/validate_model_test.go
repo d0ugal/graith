@@ -10,14 +10,22 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 )
 
+func writeScript(t *testing.T, content string) string {
+	t.Helper()
+	script := filepath.Join(t.TempDir(), "list-models.sh")
+	if err := os.WriteFile(script, []byte(content), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return script
+}
+
 func TestValidateModel(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("test uses printf")
+		t.Skip("test uses shell scripts")
 	}
 
-	agent := config.Agent{
-		ValidateModel: "printf model-a\\nmodel-b\\nmodel-c\\n",
-	}
+	script := writeScript(t, "#!/bin/sh\necho 'model-a - Model A'\necho 'model-b - Model B'\necho 'model-c - Model C'\n")
+	agent := config.Agent{ValidateModel: script}
 
 	t.Run("valid model", func(t *testing.T) {
 		if err := validateModel(agent, "model-b"); err != nil {
@@ -39,8 +47,7 @@ func TestValidateModel(t *testing.T) {
 	})
 
 	t.Run("model with description suffix", func(t *testing.T) {
-		script := filepath.Join(t.TempDir(), "list-models.sh")
-		os.WriteFile(script, []byte("#!/bin/sh\necho 'gemini-3.1-pro - Gemini 3.1 Pro (current)'\necho 'gpt-5.5-high - GPT-5.5 1M High'\necho 'grok-4.3 - Grok 4.3 1M'\n"), 0o755)
+		script := writeScript(t, "#!/bin/sh\necho 'gemini-3.1-pro - Gemini 3.1 Pro (current)'\necho 'gpt-5.5-high - GPT-5.5 1M High'\necho 'grok-4.3 - Grok 4.3 1M'\n")
 		described := config.Agent{ValidateModel: script}
 		if err := validateModel(described, "gemini-3.1-pro"); err != nil {
 			t.Fatalf("expected no error, got: %v", err)
@@ -73,8 +80,37 @@ func TestValidateModel(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error for missing binary")
 		}
-		if !strings.Contains(err.Error(), "validate model") {
-			t.Fatalf("expected 'validate model' in error, got: %v", err)
+		if !strings.Contains(err.Error(), "cannot resolve") {
+			t.Fatalf("expected 'cannot resolve' in error, got: %v", err)
+		}
+	})
+
+	t.Run("skips header and footer lines", func(t *testing.T) {
+		script := writeScript(t, "#!/bin/sh\necho 'Available models'\necho ''\necho 'auto - Auto'\necho 'gpt-5.5-high - GPT-5.5 1M High'\necho ''\necho 'Tip: use --model <id> to switch.'\n")
+		a := config.Agent{ValidateModel: script}
+		if err := validateModel(a, "auto"); err != nil {
+			t.Fatalf("expected no error for valid model, got: %v", err)
+		}
+		if err := validateModel(a, "gpt-5.5-high"); err != nil {
+			t.Fatalf("expected no error for valid model, got: %v", err)
+		}
+		if err := validateModel(a, "Available models"); err == nil {
+			t.Fatal("expected error: header should not be treated as a model")
+		}
+		if err := validateModel(a, "Tip: use --model <id> to switch."); err == nil {
+			t.Fatal("expected error: footer should not be treated as a model")
+		}
+	})
+
+	t.Run("stderr included in error", func(t *testing.T) {
+		script := writeScript(t, "#!/bin/sh\necho 'something went wrong' >&2\nexit 1\n")
+		a := config.Agent{ValidateModel: script}
+		err := validateModel(a, "any")
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if !strings.Contains(err.Error(), "something went wrong") {
+			t.Fatalf("expected stderr in error, got: %v", err)
 		}
 	})
 }
