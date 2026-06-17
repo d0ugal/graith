@@ -6,8 +6,38 @@ import (
 	"sort"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/d0ugal/graith/internal/protocol"
 )
+
+func keyPress(s string) tea.KeyPressMsg {
+	switch s {
+	case "enter":
+		return tea.KeyPressMsg{Code: tea.KeyEnter}
+	case "tab":
+		return tea.KeyPressMsg{Code: tea.KeyTab}
+	case "shift+tab":
+		return tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift}
+	case "esc":
+		return tea.KeyPressMsg{Code: tea.KeyEscape}
+	case "up":
+		return tea.KeyPressMsg{Code: tea.KeyUp}
+	case "down":
+		return tea.KeyPressMsg{Code: tea.KeyDown}
+	case " ":
+		return tea.KeyPressMsg{Code: ' ', Text: " "}
+	default:
+		if len(s) == 1 {
+			return tea.KeyPressMsg{Code: rune(s[0]), Text: s}
+		}
+		return tea.KeyPressMsg{}
+	}
+}
+
+func updateModel(m createSessionModel, msg tea.Msg) createSessionModel {
+	result, _ := m.Update(msg)
+	return result.(createSessionModel)
+}
 
 func TestDiscoverRepos_AllowedPaths(t *testing.T) {
 	base := t.TempDir()
@@ -158,5 +188,184 @@ func TestCreateSessionModel_FilterSuggestions(t *testing.T) {
 
 	if len(m.filtered) != 2 {
 		t.Fatalf("expected 2 filtered repos, got %d", len(m.filtered))
+	}
+}
+
+func TestCreateSessionModel_TabMovesToRepo(t *testing.T) {
+	m := newCreateSessionModel("", nil)
+	m.nameInput.SetValue("my-session")
+
+	m = updateModel(m, keyPress("tab"))
+	if m.focus != createFieldRepo {
+		t.Errorf("expected focus on repo field after tab, got %d", m.focus)
+	}
+}
+
+func TestCreateSessionModel_ShiftTabMovesToName(t *testing.T) {
+	m := newCreateSessionModel("", nil)
+	m.nameInput.SetValue("my-session")
+	m = updateModel(m, keyPress("tab"))
+
+	m = updateModel(m, keyPress("shift+tab"))
+	if m.focus != createFieldName {
+		t.Errorf("expected focus on name field after shift+tab, got %d", m.focus)
+	}
+}
+
+func TestCreateSessionModel_EnterOnNameAdvancesToRepo(t *testing.T) {
+	m := newCreateSessionModel("", nil)
+	m.nameInput.SetValue("my-session")
+
+	m = updateModel(m, keyPress("enter"))
+	if m.focus != createFieldRepo {
+		t.Errorf("expected focus on repo field after enter on name, got %d", m.focus)
+	}
+}
+
+func TestCreateSessionModel_EnterOnEmptyNameStays(t *testing.T) {
+	m := newCreateSessionModel("", nil)
+
+	m = updateModel(m, keyPress("enter"))
+	if m.focus != createFieldName {
+		t.Errorf("expected focus to remain on name field when empty, got %d", m.focus)
+	}
+}
+
+func TestCreateSessionModel_EnterOnRepoSubmits(t *testing.T) {
+	m := newCreateSessionModel("/tmp/repo", nil)
+	m.nameInput.SetValue("my-session")
+	m = updateModel(m, keyPress("tab"))
+
+	m = updateModel(m, keyPress("enter"))
+	if !m.done {
+		t.Error("expected done=true after enter on repo with valid inputs")
+	}
+}
+
+func TestCreateSessionModel_EnterOnEmptyRepoDoesNotSubmit(t *testing.T) {
+	m := newCreateSessionModel("", nil)
+	m.nameInput.SetValue("my-session")
+	m = updateModel(m, keyPress("tab"))
+
+	m = updateModel(m, keyPress("enter"))
+	if m.done {
+		t.Error("expected done=false when repo is empty")
+	}
+}
+
+func TestCreateSessionModel_EscCancels(t *testing.T) {
+	m := newCreateSessionModel("", nil)
+	m.nameInput.SetValue("something")
+
+	_, cmd := m.Update(keyPress("esc"))
+	if cmd == nil {
+		t.Error("expected tea.Quit command on esc")
+	}
+}
+
+func TestCreateSessionModel_SpaceInsertsDashInName(t *testing.T) {
+	m := newCreateSessionModel("", nil)
+	m.nameInput.SetValue("my")
+
+	m = updateModel(m, keyPress(" "))
+	val := m.nameInput.Value()
+	if val != "my-" {
+		t.Errorf("expected 'my-' after space, got %q", val)
+	}
+}
+
+func TestCreateSessionModel_SpaceInRepoIsNormal(t *testing.T) {
+	m := newCreateSessionModel("", nil)
+	m.nameInput.SetValue("sess")
+	m = updateModel(m, keyPress("tab"))
+
+	m = updateModel(m, keyPress(" "))
+	val := m.repoInput.Value()
+	if val != " " {
+		t.Errorf("expected space in repo field, got %q", val)
+	}
+}
+
+func TestCreateSessionModel_DropdownNavigation(t *testing.T) {
+	repos := []RepoSuggestion{
+		{Name: "alpha", Path: "/alpha"},
+		{Name: "beta", Path: "/beta"},
+		{Name: "gamma", Path: "/gamma"},
+	}
+	m := newCreateSessionModel("", repos)
+	m.nameInput.SetValue("test")
+	m = updateModel(m, keyPress("tab"))
+
+	if !m.showDropdown {
+		t.Fatal("expected dropdown to be shown when repos available")
+	}
+	if m.dropdownIdx != -1 {
+		t.Errorf("expected dropdownIdx=-1 initially, got %d", m.dropdownIdx)
+	}
+
+	m = updateModel(m, keyPress("down"))
+	if m.dropdownIdx != 0 {
+		t.Errorf("expected dropdownIdx=0 after first down, got %d", m.dropdownIdx)
+	}
+
+	m = updateModel(m, keyPress("down"))
+	if m.dropdownIdx != 1 {
+		t.Errorf("expected dropdownIdx=1 after second down, got %d", m.dropdownIdx)
+	}
+
+	m = updateModel(m, keyPress("up"))
+	if m.dropdownIdx != 0 {
+		t.Errorf("expected dropdownIdx=0 after up, got %d", m.dropdownIdx)
+	}
+
+	m = updateModel(m, keyPress("up"))
+	if m.dropdownIdx != -1 {
+		t.Errorf("expected dropdownIdx=-1 after up past start, got %d", m.dropdownIdx)
+	}
+}
+
+func TestCreateSessionModel_DownClampedAtEnd(t *testing.T) {
+	repos := []RepoSuggestion{
+		{Name: "only", Path: "/only"},
+	}
+	m := newCreateSessionModel("", repos)
+	m.nameInput.SetValue("test")
+	m = updateModel(m, keyPress("tab"))
+
+	m = updateModel(m, keyPress("down"))
+	m = updateModel(m, keyPress("down"))
+	m = updateModel(m, keyPress("down"))
+	if m.dropdownIdx != 0 {
+		t.Errorf("expected dropdownIdx clamped at 0, got %d", m.dropdownIdx)
+	}
+}
+
+func TestCreateSessionModel_EnterSelectsDropdownItem(t *testing.T) {
+	repos := []RepoSuggestion{
+		{Name: "alpha", Path: "/path/to/alpha"},
+		{Name: "beta", Path: "/path/to/beta"},
+	}
+	m := newCreateSessionModel("", repos)
+	m.nameInput.SetValue("test")
+	m = updateModel(m, keyPress("tab"))
+	m = updateModel(m, keyPress("down"))
+
+	m = updateModel(m, keyPress("enter"))
+	if m.done {
+		t.Error("selecting a dropdown item should not submit the form")
+	}
+	if m.repoInput.Value() != "/path/to/alpha" {
+		t.Errorf("expected repo set to /path/to/alpha, got %q", m.repoInput.Value())
+	}
+	if m.showDropdown {
+		t.Error("expected dropdown closed after selection")
+	}
+}
+
+func TestCreateSessionModel_WindowSizeUpdates(t *testing.T) {
+	m := newCreateSessionModel("", nil)
+	m = updateModel(m, tea.WindowSizeMsg{Width: 120, Height: 40})
+	if m.width != 120 || m.height != 40 {
+		t.Errorf("expected 120x40, got %dx%d", m.width, m.height)
 	}
 }

@@ -1038,7 +1038,39 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.createModel.height = msg.Height
 		}
 		return m, nil
+	}
 
+	if m.state == stateCreate && m.createModel != nil {
+		updated, cmd := m.createModel.Update(msg)
+		cm, ok := updated.(createSessionModel)
+		if !ok {
+			m.createModel = nil
+			m.state = stateList
+			m.resizeList()
+			return m, m.fetchPreviewCmd()
+		}
+		m.createModel = &cm
+		if cm.done {
+			m.createName = strings.TrimSpace(cm.nameInput.Value())
+			m.createRepoPath = strings.TrimSpace(cm.repoInput.Value())
+			if m.createRepoPath != "" {
+				m.createRepoPath = expandPath(m.createRepoPath)
+			}
+			m.createDone = true
+			return m, tea.Quit
+		}
+		if keyMsg, isKey := msg.(tea.KeyPressMsg); isKey {
+			if keyMsg.String() == "esc" || keyMsg.String() == "ctrl+c" {
+				m.createModel = nil
+				m.state = stateList
+				m.resizeList()
+				return m, m.fetchPreviewCmd()
+			}
+		}
+		return m, cmd
+	}
+
+	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
 		switch m.state {
 		case stateFilter:
@@ -1157,31 +1189,6 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.restartQueue = m.restartQueue[:end]
 			}
-			return m, nil
-
-		case stateCreate:
-			if m.createModel != nil {
-				updated, cmd := m.createModel.Update(msg)
-				cm := updated.(createSessionModel)
-				m.createModel = &cm
-				if cm.done {
-					m.createName = strings.TrimSpace(cm.nameInput.Value())
-					m.createRepoPath = strings.TrimSpace(cm.repoInput.Value())
-					if m.createRepoPath != "" {
-						m.createRepoPath = expandPath(m.createRepoPath)
-					}
-					m.createDone = true
-					return m, tea.Quit
-				}
-				if msg.String() == "esc" || msg.String() == "ctrl+c" {
-					m.createModel = nil
-					m.state = stateList
-					m.resizeList()
-					return m, m.fetchPreviewCmd()
-				}
-				return m, cmd
-			}
-			m.state = stateList
 			return m, nil
 
 		case stateList:
