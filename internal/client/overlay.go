@@ -120,8 +120,11 @@ var (
 )
 
 type sessionItem struct {
-	info       protocol.SessionInfo
-	treePrefix string
+	info            protocol.SessionInfo
+	treePrefix      string
+	hasChildren     bool
+	collapsed       bool
+	descendantCount int
 }
 
 func (s sessionItem) Title() string       { return s.info.Name }
@@ -383,7 +386,20 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	if si.treePrefix != "" {
 		treePrefixRendered = dim.Render(si.treePrefix)
 	}
-	name := pad(si.info.Name, d.cols.treeIndent+d.cols.name-lipgloss.Width(si.treePrefix))
+
+	collapseIndicator := ""
+	childSuffix := ""
+	if si.hasChildren {
+		if si.collapsed {
+			collapseIndicator = dim.Render("▸ ")
+			childSuffix = dim.Render(fmt.Sprintf(" (%d)", si.descendantCount))
+		} else {
+			collapseIndicator = dim.Render("▾ ")
+		}
+	}
+	nameText := si.info.Name + childSuffix
+	nameWidth := d.cols.treeIndent + d.cols.name - lipgloss.Width(si.treePrefix) - lipgloss.Width(collapseIndicator)
+	name := collapseIndicator + pad(nameText, nameWidth)
 
 	status := si.info.Status
 	if si.info.AgentStatus != "" && si.info.Status == "running" {
@@ -486,12 +502,14 @@ type overlayModel struct {
 	previewContent   string
 	previewSessionID string
 	profile          string
+	collapsed        map[string]bool
 }
 
 // OverlayResult holds the outcome of the overlay interaction.
 type OverlayResult struct {
 	Action    string
 	SessionID string
+	Collapsed map[string]bool
 }
 
 func SortSessions(sessions []protocol.SessionInfo) {
@@ -512,7 +530,7 @@ func SortSessions(sessions []protocol.SessionInfo) {
 	})
 }
 
-func buildGroupedItems(sessions []protocol.SessionInfo) []list.Item {
+func buildGroupedItems(sessions []protocol.SessionInfo, collapsed map[string]bool) []list.Item {
 	groups := map[string][]protocol.SessionInfo{}
 	var repoOrder []string
 	seen := map[string]bool{}
@@ -555,6 +573,20 @@ func buildGroupedItems(sessions []protocol.SessionInfo) []list.Item {
 			SortSessions(children[k])
 		}
 
+		var countDescendants func(id string, seen map[string]bool) int
+		countDescendants = func(id string, seen map[string]bool) int {
+			kids := children[id]
+			n := 0
+			for _, kid := range kids {
+				if !seen[kid.ID] {
+					seen[kid.ID] = true
+					n++
+					n += countDescendants(kid.ID, seen)
+				}
+			}
+			return n
+		}
+
 		visited := make(map[string]bool)
 		var walk func(s protocol.SessionInfo, prefix, childPrefix string)
 		walk = func(s protocol.SessionInfo, prefix, childPrefix string) {
@@ -562,8 +594,31 @@ func buildGroupedItems(sessions []protocol.SessionInfo) []list.Item {
 				return
 			}
 			visited[s.ID] = true
-			items = append(items, sessionItem{info: s, treePrefix: prefix})
 			kids := children[s.ID]
+			hasKids := len(kids) > 0
+			isCollapsed := collapsed[s.ID] && hasKids
+			desc := 0
+			if hasKids {
+				desc = countDescendants(s.ID, map[string]bool{s.ID: true})
+			}
+			items = append(items, sessionItem{
+				info:            s,
+				treePrefix:      prefix,
+				hasChildren:     hasKids,
+				collapsed:       isCollapsed,
+				descendantCount: desc,
+			})
+			if isCollapsed {
+				var markVisited func(id string)
+				markVisited = func(id string) {
+					for _, kid := range children[id] {
+						visited[kid.ID] = true
+						markVisited(kid.ID)
+					}
+				}
+				markVisited(s.ID)
+				return
+			}
 			for i, kid := range kids {
 				if i == len(kids)-1 {
 					walk(kid, childPrefix+"└── ", childPrefix+"    ")
@@ -598,8 +653,11 @@ func maxTreeIndentFromItems(items []list.Item) int {
 	return maxIndent
 }
 
-func newOverlayModel(sessions []protocol.SessionInfo, currentSessionID string, fetchPreview func(sessionID string) string, deleteSession func(sessionID string) error) overlayModel {
-	items := buildGroupedItems(sessions)
+func newOverlayModel(sessions []protocol.SessionInfo, currentSessionID string, fetchPreview func(sessionID string) string, deleteSession func(sessionID string) error, collapsed map[string]bool) overlayModel {
+	if collapsed == nil {
+		collapsed = make(map[string]bool)
+	}
+	items := buildGroupedItems(sessions, collapsed)
 	cols := computeColumnWidths(sessions, currentSessionID)
 	cols.treeIndent = maxTreeIndentFromItems(items)
 	contentWidth := cols.totalWidth()
@@ -643,6 +701,7 @@ func newOverlayModel(sessions []protocol.SessionInfo, currentSessionID string, f
 		allSessions:      sessions,
 		fetchPreview:     fetchPreview,
 		deleteSession:    deleteSession,
+		collapsed:        collapsed,
 	}
 }
 
@@ -673,7 +732,7 @@ func (m *overlayModel) rebuildForView() {
 
 	var items []list.Item
 	if m.view == viewAll {
-		items = buildGroupedItems(filtered)
+		items = buildGroupedItems(filtered, m.collapsed)
 	} else {
 		for _, s := range filtered {
 			items = append(items, sessionItem{info: s})
@@ -693,6 +752,36 @@ func (m *overlayModel) rebuildForView() {
 			m.list.CursorDown()
 		}
 	}
+}
+
+func (m *overlayModel) selectSessionByID(id string) {
+	for i, item := range m.list.Items() {
+		if si, ok := item.(sessionItem); ok && si.info.ID == id {
+			m.list.Select(i)
+			return
+		}
+	}
+	if _, ok := m.list.SelectedItem().(groupHeader); ok {
+		m.list.CursorDown()
+	}
+}
+
+func (m *overlayModel) parentsWithChildren() []string {
+	childOf := make(map[string]bool)
+	idSet := make(map[string]bool)
+	for _, s := range m.allSessions {
+		idSet[s.ID] = true
+	}
+	for _, s := range m.allSessions {
+		if s.ParentID != "" && s.ParentID != s.ID && idSet[s.ParentID] {
+			childOf[s.ParentID] = true
+		}
+	}
+	var parents []string
+	for id := range childOf {
+		parents = append(parents, id)
+	}
+	return parents
 }
 
 func (m *overlayModel) sessionsForView() []protocol.SessionInfo {
@@ -803,7 +892,7 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				filtered := filterSessions(viewFiltered, m.filterInput.Value())
 				var items []list.Item
 				if m.view == viewAll {
-					items = buildGroupedItems(filtered)
+					items = buildGroupedItems(filtered, m.collapsed)
 				} else {
 					for _, s := range filtered {
 						items = append(items, sessionItem{info: s})
@@ -927,6 +1016,51 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 				return m, nil
+
+			case " ", "space":
+				if item, ok := m.list.SelectedItem().(sessionItem); ok && item.hasChildren {
+					sid := item.info.ID
+					if m.collapsed[sid] {
+						delete(m.collapsed, sid)
+					} else {
+						m.collapsed[sid] = true
+					}
+					m.rebuildForView()
+					m.selectSessionByID(sid)
+					return m, m.fetchPreviewCmd()
+				}
+				return m, nil
+
+			case "C":
+				parents := m.parentsWithChildren()
+				if len(parents) == 0 {
+					return m, nil
+				}
+				allCollapsed := true
+				for _, id := range parents {
+					if !m.collapsed[id] {
+						allCollapsed = false
+						break
+					}
+				}
+				curSID := ""
+				if item, ok := m.list.SelectedItem().(sessionItem); ok {
+					curSID = item.info.ID
+				}
+				if allCollapsed {
+					for _, id := range parents {
+						delete(m.collapsed, id)
+					}
+				} else {
+					for _, id := range parents {
+						m.collapsed[id] = true
+					}
+				}
+				m.rebuildForView()
+				if curSID != "" {
+					m.selectSessionByID(curSID)
+				}
+				return m, m.fetchPreviewCmd()
 
 			case "/":
 				m.filterInput.SetValue("")
@@ -1249,8 +1383,8 @@ func (m overlayModel) View() tea.View {
 // RunOverlay launches the bubbletea overlay listing sessions grouped by repo.
 // currentSessionID highlights the session the user was just attached to.
 // fetchPreview is called asynchronously to load scrollback for the selected session.
-func RunOverlay(sessions []protocol.SessionInfo, currentSessionID string, fetchPreview func(sessionID string) string, deleteSession func(sessionID string) error, restartSession func(sessionID string) error, toggleStar func(sessionID string, star bool) error, profile string) *OverlayResult {
-	m := newOverlayModel(sessions, currentSessionID, fetchPreview, deleteSession)
+func RunOverlay(sessions []protocol.SessionInfo, currentSessionID string, fetchPreview func(sessionID string) string, deleteSession func(sessionID string) error, restartSession func(sessionID string) error, toggleStar func(sessionID string, star bool) error, profile string, collapsed map[string]bool) *OverlayResult {
+	m := newOverlayModel(sessions, currentSessionID, fetchPreview, deleteSession, collapsed)
 	m.restartSession = restartSession
 	m.toggleStar = toggleStar
 	m.profile = profile
@@ -1265,16 +1399,19 @@ func RunOverlay(sessions []protocol.SessionInfo, currentSessionID string, fetchP
 	if !ok {
 		return nil
 	}
-	if result.selected != nil {
-		action := "attach"
-		if result.state == stateConfirmDelete {
-			action = "delete"
-		}
-		return &OverlayResult{
-			Action:    action,
-			SessionID: result.selected.ID,
-		}
+
+	overlayResult := &OverlayResult{
+		Collapsed: result.collapsed,
 	}
 
-	return nil
+	if result.selected != nil {
+		overlayResult.SessionID = result.selected.ID
+		overlayResult.Action = "attach"
+		if result.state == stateConfirmDelete {
+			overlayResult.Action = "delete"
+		}
+		return overlayResult
+	}
+
+	return overlayResult
 }
