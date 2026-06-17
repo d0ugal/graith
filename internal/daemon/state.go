@@ -16,7 +16,7 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 )
 
-const CurrentStateVersion = 10
+const CurrentStateVersion = 11
 
 type SessionStatus string
 
@@ -83,6 +83,9 @@ type SessionState struct {
 	LastAttachedAt         *time.Time            `json:"last_attached_at,omitempty"`
 	CreationCfg            *CreationConfig       `json:"creation_config,omitempty"`
 	Token                  string                `json:"token,omitempty"`
+	ScenarioID             string                `json:"scenario_id,omitempty"`
+	ScenarioRole           string                `json:"scenario_role,omitempty"`
+	ScenarioGoal           string                `json:"scenario_goal,omitempty"`
 }
 
 type IncludedRepoState struct {
@@ -105,13 +108,38 @@ func cloneSessionState(s *SessionState) SessionState {
 	return c
 }
 
+type ScenarioState struct {
+	ID             string            `json:"id"`
+	Name           string            `json:"name"`
+	OrchestratorID string            `json:"orchestrator_id"`
+	Goal           string            `json:"goal"`
+	SessionIDs     []string          `json:"session_ids"`
+	Sessions       []ScenarioSession `json:"sessions"`
+	CreatedAt      time.Time         `json:"created_at"`
+	SourceFileHash string            `json:"source_file_hash,omitempty"`
+}
+
+type ScenarioSession struct {
+	Name  string `json:"name"`
+	Role  string `json:"role"`
+	Task  string `json:"task"`
+	Repo  string `json:"repo"`
+	Agent string `json:"agent"`
+	Model string `json:"model,omitempty"`
+}
+
 type State struct {
-	Version  int                      `json:"version"`
-	Sessions map[string]*SessionState `json:"sessions"`
+	Version   int                       `json:"version"`
+	Sessions  map[string]*SessionState  `json:"sessions"`
+	Scenarios map[string]*ScenarioState `json:"scenarios,omitempty"`
 }
 
 func NewState() *State {
-	return &State{Version: CurrentStateVersion, Sessions: make(map[string]*SessionState)}
+	return &State{
+		Version:   CurrentStateVersion,
+		Sessions:  make(map[string]*SessionState),
+		Scenarios: make(map[string]*ScenarioState),
+	}
 }
 
 func LoadState(path string) (*State, error) {
@@ -129,6 +157,9 @@ func LoadState(path string) (*State, error) {
 	}
 	if state.Sessions == nil {
 		state.Sessions = make(map[string]*SessionState)
+	}
+	if state.Scenarios == nil {
+		state.Scenarios = make(map[string]*ScenarioState)
 	}
 
 	if state.Version > CurrentStateVersion {
@@ -162,7 +193,8 @@ var migrations = map[int]func(*State) error{
 	6: migrateV6ToV7,
 	7: migrateV7ToV8,
 	8: migrateV8ToV9,
-	9: migrateV9ToV10,
+	9:  migrateV9ToV10,
+	10: migrateV10ToV11,
 }
 
 func generateToken() (string, error) {
@@ -261,6 +293,15 @@ func migrateV9ToV10(state *State) error {
 			return fmt.Errorf("generate token for session %s: %w", id, err)
 		}
 		s.Token = token
+	}
+	return nil
+}
+
+// migrateV10ToV11 is a no-op: v11 adds optional scenario fields (scenario_id,
+// scenario_role, scenario_goal on SessionState) and the Scenarios map on State.
+func migrateV10ToV11(state *State) error {
+	if state.Scenarios == nil {
+		state.Scenarios = make(map[string]*ScenarioState)
 	}
 	return nil
 }

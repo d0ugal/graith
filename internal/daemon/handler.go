@@ -1021,6 +1021,69 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				<-bridgeDone
 				return
 
+			case "scenario_start":
+				var s protocol.ScenarioStartMsg
+				if err := protocol.DecodePayload(msg, &s); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid scenario_start message"})
+					continue
+				}
+				scenario, err := sm.StartScenario(s, clientRows, clientCols)
+				if err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+				} else {
+					record, _ := sm.ScenarioStatus(scenario.Name)
+					sendControl("scenario_started", record)
+				}
+
+			case "scenario_stop":
+				var s protocol.ScenarioStopMsg
+				if err := protocol.DecodePayload(msg, &s); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid scenario_stop message"})
+					continue
+				}
+				stopped, err := sm.StopScenario(s.Name)
+				if err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+				} else {
+					sendControl("scenario_stopped", struct {
+						Name    string   `json:"name"`
+						Stopped []string `json:"stopped"`
+					}{s.Name, stopped})
+				}
+
+			case "scenario_delete":
+				var s protocol.ScenarioDeleteMsg
+				if err := protocol.DecodePayload(msg, &s); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid scenario_delete message"})
+					continue
+				}
+				deleted, err := sm.DeleteScenario(s.Name)
+				if err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+				} else {
+					sendControl("scenario_deleted", struct {
+						Name    string   `json:"name"`
+						Deleted []string `json:"deleted"`
+					}{s.Name, deleted})
+				}
+
+			case "scenario_status":
+				var s protocol.ScenarioStatusMsg
+				if err := protocol.DecodePayload(msg, &s); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid scenario_status message"})
+					continue
+				}
+				record, err := sm.ScenarioStatus(s.Name)
+				if err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+				} else {
+					sendControl("scenario_status", protocol.ScenarioStatusResponse{Scenario: *record})
+				}
+
+			case "scenario_list":
+				records := sm.ListScenarios()
+				sendControl("scenario_list", protocol.ScenarioListResponse{Scenarios: records})
+
 			case "upgrade":
 				if auth.authenticated {
 					sendControl("error", protocol.ErrorMsg{Message: "operation not permitted for agent sessions"})
@@ -1102,6 +1165,7 @@ func toSessionInfo(s SessionState, cfg *config.Config, hr *hookReport) protocol.
 		ConfigStale:    isConfigStale(s, cfg),
 		Starred:        s.Starred,
 		SystemKind:     s.SystemKind,
+		ScenarioID:     s.ScenarioID,
 	}
 	if s.LastAttachedAt != nil {
 		info.LastAttachedAt = s.LastAttachedAt.Format(time.RFC3339)
