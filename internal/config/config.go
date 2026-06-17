@@ -44,6 +44,7 @@ type OrchestratorConfig struct {
 	Agent       string `toml:"agent"`
 	Model       string `toml:"model"`
 	IdleTimeout string `toml:"idle_timeout"`
+	Prompt      string `toml:"prompt"`
 	PromptFile  string `toml:"prompt_file"`
 }
 
