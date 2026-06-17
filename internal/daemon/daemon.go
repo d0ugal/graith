@@ -58,6 +58,7 @@ type SessionManager struct {
 	attachedClients    map[string]*attachedClient
 	hookReports        map[string]hookReport
 	pendingApprovals   map[string]*pendingApproval
+	tokenIndex         map[string]string // token → session ID (reverse lookup)
 	cfg                *config.Config
 	paths              config.Paths
 	log                *slog.Logger
@@ -78,6 +79,7 @@ func NewSessionManager(cfg *config.Config, paths config.Paths, log *slog.Logger)
 		attachedClients:    make(map[string]*attachedClient),
 		hookReports:        make(map[string]hookReport),
 		pendingApprovals:   make(map[string]*pendingApproval),
+		tokenIndex:         make(map[string]string),
 		orchestratorExitCh: make(chan string, 4),
 		cfg:                cfg,
 		paths:              paths,
@@ -238,7 +240,23 @@ func (sm *SessionManager) LoadState() error {
 	}
 	state.Reconcile()
 	sm.state = state
+	sm.rebuildTokenIndex()
 	return sm.saveState()
+}
+
+func (sm *SessionManager) rebuildTokenIndex() {
+	sm.tokenIndex = make(map[string]string, len(sm.state.Sessions))
+	for id, s := range sm.state.Sessions {
+		if s.Token != "" {
+			sm.tokenIndex[s.Token] = id
+		}
+	}
+}
+
+// SessionForToken returns the session ID that owns the given token, or empty
+// string if the token is not recognized. Must be called under at least RLock.
+func (sm *SessionManager) SessionForToken(token string) string {
+	return sm.tokenIndex[token]
 }
 
 func (sm *SessionManager) AdoptSessions(manifest *UpgradeManifest) error {
@@ -385,6 +403,11 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 	sm.mu.Lock()
 
 	id := generateID()
+	token, err := generateToken()
+	if err != nil {
+		sm.mu.Unlock()
+		return SessionState{}, fmt.Errorf("generate session token: %w", err)
+	}
 
 	var repoRoot, repoName, worktreePath, branchName string
 	var sharedWorktree bool
@@ -548,6 +571,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 		Status:                 StatusCreating,
 		CreatedAt:              time.Now().UTC(),
 		StatusChangedAt:        time.Now().UTC(),
+		Token:                  token,
 	}
 	sm.state.Sessions[id] = placeholder
 	if err := sm.saveState(); err != nil {
@@ -672,7 +696,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 
 	logPath := filepath.Join(sm.paths.LogDir, id+".log")
 
-	env := make(map[string]string, len(agent.Env)+5)
+	env := make(map[string]string, len(agent.Env)+6)
 	for k, v := range agent.Env {
 		env[k] = v
 	}
@@ -680,6 +704,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 	env["GRAITH_SESSION_NAME"] = name
 	env["GRAITH_AGENT_TYPE"] = agentName
 	env["GRAITH_WORKTREE_PATH"] = worktreePath
+	env["GRAITH_TOKEN"] = token
 	if repoRoot != "" {
 		env["GRAITH_REPO_PATH"] = repoRoot
 	}
@@ -846,6 +871,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 	}
 
 	sm.sessions[id] = ptySess
+	sm.tokenIndex[token] = id
 
 	if sessState.ParentID != "" {
 		if parent, ok := sm.state.Sessions[sessState.ParentID]; ok {
@@ -943,6 +969,11 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 	}
 
 	id := generateID()
+	token, err := generateToken()
+	if err != nil {
+		sm.mu.Unlock()
+		return SessionState{}, fmt.Errorf("generate session token: %w", err)
+	}
 
 	repoRoot := source.RepoPath
 	repoName := source.RepoName
@@ -1002,6 +1033,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 		Status:          StatusCreating,
 		CreatedAt:       time.Now().UTC(),
 		StatusChangedAt: time.Now().UTC(),
+		Token:           token,
 	}
 	sm.state.Sessions[id] = placeholder
 	if err := sm.saveState(); err != nil {
@@ -1085,7 +1117,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 
 	logPath := filepath.Join(sm.paths.LogDir, id+".log")
 
-	env := make(map[string]string, len(agent.Env)+5)
+	env := make(map[string]string, len(agent.Env)+6)
 	for k, v := range agent.Env {
 		env[k] = v
 	}
@@ -1093,6 +1125,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 	env["GRAITH_SESSION_NAME"] = name
 	env["GRAITH_AGENT_TYPE"] = agentName
 	env["GRAITH_WORKTREE_PATH"] = worktreePath
+	env["GRAITH_TOKEN"] = token
 	if repoRoot != "" {
 		env["GRAITH_REPO_PATH"] = repoRoot
 	}
@@ -1227,6 +1260,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 	}
 
 	sm.sessions[id] = ptySess
+	sm.tokenIndex[token] = id
 
 	if src, ok := sm.state.Sessions[sessState.ParentID]; ok {
 		applyLifecycleSummaryLocked(sessState, "Forked from "+src.Name)
@@ -1553,6 +1587,7 @@ func (sm *SessionManager) resumeWithSummary(id string, rows, cols uint16, lifecy
 	sessSharedWorktree := sessState.SharedWorktree
 	sessSystemKind := sessState.SystemKind
 	sessFreshStart := sessState.FreshStart
+	sessToken := sessState.Token
 
 	sm.mu.Unlock()
 
@@ -1605,13 +1640,16 @@ func (sm *SessionManager) resumeWithSummary(id string, rows, cols uint16, lifecy
 		ptyCWD = sm.orchestratorScratchDir()
 	}
 
-	env := make(map[string]string, len(agent.Env)+5)
+	env := make(map[string]string, len(agent.Env)+6)
 	for k, v := range agent.Env {
 		env[k] = v
 	}
 	env["GRAITH_SESSION_ID"] = id
 	env["GRAITH_SESSION_NAME"] = sessName
 	env["GRAITH_AGENT_TYPE"] = sessAgent
+	if sessToken != "" {
+		env["GRAITH_TOKEN"] = sessToken
+	}
 	if !isOrchestrator {
 		env["GRAITH_WORKTREE_PATH"] = sessWorktreePath
 	}
@@ -1870,6 +1908,7 @@ func (sm *SessionManager) Delete(id string) error {
 	inPlace := sessState.InPlace
 	agentName := sessState.Agent
 	prevStatus := sessState.Status
+	sessToken := sessState.Token
 	sessionIncludes := make([]IncludedRepoState, len(sessState.Includes))
 	copy(sessionIncludes, sessState.Includes)
 
@@ -1965,6 +2004,9 @@ func (sm *SessionManager) Delete(id string) error {
 	sm.mu.Lock()
 	delete(sm.state.Sessions, id)
 	delete(sm.hookReports, id)
+	if sessToken != "" {
+		delete(sm.tokenIndex, sessToken)
+	}
 	err := sm.saveState()
 	sm.mu.Unlock()
 
@@ -2958,6 +3000,7 @@ func (sm *SessionManager) Diagnostics() protocol.DiagnosticsMsg {
 		}
 
 		sd.ConfigStale = isConfigStale(*s, cfg)
+		sd.HasToken = s.Token != ""
 
 		if hr, ok := sm.hookReports[id]; ok && s.Status == StatusRunning {
 			sd.HookStale = now.After(hr.AuthoritativeUntil)

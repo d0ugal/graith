@@ -68,6 +68,14 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				continue
 			}
 
+			sm.mu.RLock()
+			auth, authErr := resolveAuth(sm, msg.Token)
+			sm.mu.RUnlock()
+			if authErr != nil {
+				sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
+				continue
+			}
+
 			switch msg.Type {
 			case "handshake":
 				var h protocol.HandshakeMsg
@@ -107,6 +115,9 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid create message"})
 					continue
 				}
+				if auth.authenticated {
+					c.ParentID = auth.sessionID
+				}
 				agentName := c.Agent
 				if agentName == "" {
 					agentName = sm.Config().DefaultAgent
@@ -124,6 +135,13 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid fork message"})
 					continue
 				}
+				sm.mu.RLock()
+				authErr := auth.checkTarget(sm, f.SourceSessionID, authSelfOrDescendant)
+				sm.mu.RUnlock()
+				if authErr != nil {
+					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
+					continue
+				}
 				sess, err := sm.Fork(f.Name, f.SourceSessionID, clientRows, clientCols)
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
@@ -135,6 +153,13 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				var a protocol.AttachMsg
 				if err := protocol.DecodePayload(msg, &a); err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: "invalid attach message"})
+					continue
+				}
+				sm.mu.RLock()
+				authErr := auth.checkTarget(sm, a.SessionID, authSelfOrDescendant)
+				sm.mu.RUnlock()
+				if authErr != nil {
+					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
 					continue
 				}
 
@@ -228,6 +253,13 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid delete message"})
 					continue
 				}
+				sm.mu.RLock()
+				authErr := auth.checkTarget(sm, d.SessionID, authSelfOrDescendant)
+				sm.mu.RUnlock()
+				if authErr != nil {
+					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
+					continue
+				}
 				if d.Children {
 					deleted, err := sm.DeleteWithChildren(d.SessionID, d.ExcludeRoot)
 					if err != nil {
@@ -254,6 +286,13 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid stop message"})
 					continue
 				}
+				sm.mu.RLock()
+				authErr := auth.checkTarget(sm, s.SessionID, authSelfOrDescendant)
+				sm.mu.RUnlock()
+				if authErr != nil {
+					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
+					continue
+				}
 				if s.Children {
 					stopped, err := sm.StopWithChildren(s.SessionID, s.ExcludeRoot)
 					if err != nil {
@@ -278,6 +317,13 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				var r protocol.RenameMsg
 				if err := protocol.DecodePayload(msg, &r); err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: "invalid rename message"})
+					continue
+				}
+				sm.mu.RLock()
+				authErr := auth.checkTarget(sm, r.SessionID, authSelfOrDescendant)
+				sm.mu.RUnlock()
+				if authErr != nil {
+					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
 					continue
 				}
 				if err := sm.Rename(r.SessionID, r.NewName); err != nil {
@@ -309,6 +355,13 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid star message"})
 					continue
 				}
+				sm.mu.RLock()
+				authErr := auth.checkTarget(sm, s.SessionID, authSelfOrDescendant)
+				sm.mu.RUnlock()
+				if authErr != nil {
+					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
+					continue
+				}
 				if err := sm.Star(s.SessionID); err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 				} else {
@@ -323,6 +376,13 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid unstar message"})
 					continue
 				}
+				sm.mu.RLock()
+				authErr := auth.checkTarget(sm, u.SessionID, authSelfOrDescendant)
+				sm.mu.RUnlock()
+				if authErr != nil {
+					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
+					continue
+				}
 				if err := sm.Unstar(u.SessionID); err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 				} else {
@@ -335,6 +395,16 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				var m protocol.SetStatusMsg
 				if err := protocol.DecodePayload(msg, &m); err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: "invalid set_status message"})
+					continue
+				}
+				if auth.authenticated {
+					m.SessionID = auth.sessionID
+				}
+				sm.mu.RLock()
+				authErr := auth.checkTarget(sm, m.SessionID, authSelfOnly)
+				sm.mu.RUnlock()
+				if authErr != nil {
+					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
 					continue
 				}
 				if m.Clear {
@@ -357,6 +427,13 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid resume message"})
 					continue
 				}
+				sm.mu.RLock()
+				authErr := auth.checkTarget(sm, r.SessionID, authSelfOrDescendant)
+				sm.mu.RUnlock()
+				if authErr != nil {
+					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
+					continue
+				}
 				sess, err := sm.Resume(r.SessionID, clientRows, clientCols)
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
@@ -370,6 +447,13 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid restart message"})
 					continue
 				}
+				sm.mu.RLock()
+				authErr := auth.checkTarget(sm, r.SessionID, authSelfOrDescendant)
+				sm.mu.RUnlock()
+				if authErr != nil {
+					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
+					continue
+				}
 				sess, err := sm.Restart(r.SessionID, clientRows, clientCols)
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
@@ -381,6 +465,13 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				var l protocol.LogsMsg
 				if err := protocol.DecodePayload(msg, &l); err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: "invalid logs message"})
+					continue
+				}
+				sm.mu.RLock()
+				authErr := auth.checkTarget(sm, l.SessionID, authSelfOrDescendant)
+				sm.mu.RUnlock()
+				if authErr != nil {
+					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
 					continue
 				}
 				ptySess, ok := sm.GetPTY(l.SessionID)
@@ -424,7 +515,19 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid msg_pub message"})
 					continue
 				}
-				if m.SenderID != "" {
+				if auth.authenticated {
+					m.SenderID = auth.sessionID
+					if sess, ok := sm.Get(auth.sessionID); ok {
+						m.SenderName = sess.Name
+					}
+					sm.mu.RLock()
+					authErr := auth.checkMsgPub(sm, m.Stream)
+					sm.mu.RUnlock()
+					if authErr != nil {
+						sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
+						continue
+					}
+				} else if m.SenderID != "" {
 					if sess, ok := sm.Get(m.SenderID); ok {
 						m.SenderName = sess.Name
 					}
@@ -441,6 +544,13 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				if err := protocol.DecodePayload(msg, &m); err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: "invalid msg_sub message"})
 					continue
+				}
+				if auth.authenticated {
+					m.Subscriber = auth.sessionID
+					if authErr := auth.checkInboxRead(m.Stream); authErr != nil {
+						sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
+						continue
+					}
 				}
 
 				// Subscribe before reading to avoid missing messages published
@@ -544,6 +654,13 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid msg_ack message"})
 					continue
 				}
+				if auth.authenticated {
+					m.Subscriber = auth.sessionID
+					if authErr := auth.checkInboxRead(m.Stream); authErr != nil {
+						sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
+						continue
+					}
+				}
 				if err := sm.messages.AckLatest(m.Stream, m.Subscriber); err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 				} else {
@@ -555,6 +672,9 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				if err := protocol.DecodePayload(msg, &m); err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: "invalid msg_topics message"})
 					continue
+				}
+				if auth.authenticated {
+					m.Subscriber = auth.sessionID
 				}
 				streams, err := sm.messages.ListStreams(m.Subscriber, m.IncludeSystem)
 				if err != nil {
@@ -569,6 +689,16 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				var req protocol.ApprovalRequestMsg
 				if err := protocol.DecodePayload(msg, &req); err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: "invalid approval_request"})
+					continue
+				}
+				if auth.authenticated {
+					req.SessionID = auth.sessionID
+				}
+				sm.mu.RLock()
+				authErr := auth.checkTarget(sm, req.SessionID, authSelfOnly)
+				sm.mu.RUnlock()
+				if authErr != nil {
+					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
 					continue
 				}
 				log.Info("approval request received", "request_id", req.RequestID, "session_id", req.SessionID, "tool", req.ToolName)
@@ -595,6 +725,10 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				return
 
 			case "approval_respond":
+				if auth.authenticated {
+					sendControl("error", protocol.ErrorMsg{Message: "operation not permitted for agent sessions"})
+					continue
+				}
 				var resp protocol.ApprovalRespondMsg
 				if err := protocol.DecodePayload(msg, &resp); err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: "invalid approval_respond"})
@@ -616,6 +750,13 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				var t protocol.TypeMsg
 				if err := protocol.DecodePayload(msg, &t); err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: "invalid type message"})
+					continue
+				}
+				sm.mu.RLock()
+				authErr := auth.checkTarget(sm, t.SessionID, authSelfOrDescendant)
+				sm.mu.RUnlock()
+				if authErr != nil {
+					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
 					continue
 				}
 				pty, ok := sm.GetPTY(t.SessionID)
@@ -663,6 +804,13 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid screen_preview message"})
 					continue
 				}
+				sm.mu.RLock()
+				authErr := auth.checkTarget(sm, sp.SessionID, authSelfOrDescendant)
+				sm.mu.RUnlock()
+				if authErr != nil {
+					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
+					continue
+				}
 				ptySess, ok := sm.GetPTY(sp.SessionID)
 				if !ok {
 					sendControl("error", protocol.ErrorMsg{Message: "session not found"})
@@ -677,6 +825,13 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				var ss protocol.ScreenSnapshotMsg
 				if err := protocol.DecodePayload(msg, &ss); err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: "invalid screen_snapshot message"})
+					continue
+				}
+				sm.mu.RLock()
+				authErr := auth.checkTarget(sm, ss.SessionID, authSelfOrDescendant)
+				sm.mu.RUnlock()
+				if authErr != nil {
+					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
 					continue
 				}
 				ptySess, ok := sm.GetPTY(ss.SessionID)
@@ -696,6 +851,10 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				})
 
 			case "reload":
+				if auth.authenticated {
+					sendControl("error", protocol.ErrorMsg{Message: "operation not permitted for agent sessions"})
+					continue
+				}
 				if err := sm.ReloadConfig(); err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 				} else {
@@ -706,6 +865,13 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				var sr protocol.StatusRequestMsg
 				if err := protocol.DecodePayload(msg, &sr); err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: "invalid status message"})
+					continue
+				}
+				sm.mu.RLock()
+				authErr := auth.checkTarget(sm, sr.SessionID, authSelfOrDescendant)
+				sm.mu.RUnlock()
+				if authErr != nil {
+					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
 					continue
 				}
 				sess, ok := sm.Get(sr.SessionID)
@@ -730,6 +896,16 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid status_report"})
 					continue
 				}
+				if auth.authenticated {
+					sr.SessionID = auth.sessionID
+				}
+				sm.mu.RLock()
+				authErr := auth.checkTarget(sm, sr.SessionID, authSelfOnly)
+				sm.mu.RUnlock()
+				if authErr != nil {
+					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
+					continue
+				}
 				sm.HandleHookReport(sr)
 				sendControl("status_reported", struct{}{})
 
@@ -740,6 +916,16 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				var mc protocol.MCPConnectMsg
 				if err := protocol.DecodePayload(msg, &mc); err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: "invalid mcp_connect"})
+					continue
+				}
+				if auth.authenticated {
+					mc.SessionID = auth.sessionID
+				}
+				sm.mu.RLock()
+				authErr := auth.checkTarget(sm, mc.SessionID, authSelfOnly)
+				sm.mu.RUnlock()
+				if authErr != nil {
+					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
 					continue
 				}
 				if sm.mcpManager == nil {
@@ -836,6 +1022,10 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				return
 
 			case "upgrade":
+				if auth.authenticated {
+					sendControl("error", protocol.ErrorMsg{Message: "operation not permitted for agent sessions"})
+					continue
+				}
 				var u protocol.UpgradeMsg
 				_ = protocol.DecodePayload(msg, &u)
 				select {
