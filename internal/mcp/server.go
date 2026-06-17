@@ -62,7 +62,7 @@ func (s *Server) Run(ctx context.Context) error {
 }
 
 func (s *Server) connect() (*client.Client, error) {
-	return client.Connect(s.cfg, s.paths, s.configFile)
+	return client.ConnectPassive(s.cfg, s.paths, s.configFile)
 }
 
 // Tool input/output types

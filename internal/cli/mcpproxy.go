@@ -92,7 +92,7 @@ func isPermanentError(err error) bool {
 }
 
 func mcpProxySession(serverName, sessionID string, stdinCh <-chan stdinChunk) error {
-	c, err := client.Connect(cfg, paths, cfgFile)
+	c, err := client.ConnectPassive(cfg, paths, cfgFile)
 	if err != nil {
 		return fmt.Errorf("connect to daemon: %w", err)
 	}
