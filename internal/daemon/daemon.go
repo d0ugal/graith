@@ -72,15 +72,16 @@ type SessionManager struct {
 // NewSessionManager creates a SessionManager with the given config and paths.
 func NewSessionManager(cfg *config.Config, paths config.Paths, log *slog.Logger) *SessionManager {
 	return &SessionManager{
-		state:            NewState(),
-		sessions:         make(map[string]*grpty.Session),
-		attachedClients:  make(map[string]*attachedClient),
-		hookReports:      make(map[string]hookReport),
-		pendingApprovals: make(map[string]*pendingApproval),
-		cfg:              cfg,
-		paths:            paths,
-		log:              log,
-		startedAt:        time.Now(),
+		state:              NewState(),
+		sessions:           make(map[string]*grpty.Session),
+		attachedClients:    make(map[string]*attachedClient),
+		hookReports:        make(map[string]hookReport),
+		pendingApprovals:   make(map[string]*pendingApproval),
+		orchestratorExitCh: make(chan string, 4),
+		cfg:                cfg,
+		paths:              paths,
+		log:                log,
+		startedAt:          time.Now(),
 	}
 }
 
@@ -1297,7 +1298,7 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 		return SessionState{}, fmt.Errorf("session %q is being created", id)
 	}
 
-	if err := ValidateSessionName(sessState.Name); err != nil {
+	if err := validateSessionName(sessState.Name, IsSystemSession(sessState)); err != nil {
 		sm.mu.Unlock()
 		return SessionState{}, fmt.Errorf("session has unsafe name %q (created before validation was added): %w — use 'gr rename' to fix", sessState.Name, err)
 	}
@@ -1317,6 +1318,10 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 	if sessState.SharedWorktree && !sandboxed {
 		sm.mu.Unlock()
 		return SessionState{}, fmt.Errorf("shared-worktree session %q requires sandbox but sandbox is not enabled in current config; enable sandbox to resume", id)
+	}
+	if sessState.SystemKind == SystemKindOrchestrator && !sandboxed {
+		sm.mu.Unlock()
+		return SessionState{}, fmt.Errorf("orchestrator requires sandbox but sandbox is not available — install safehouse and enable sandbox in config")
 	}
 
 	if sessState.RepoPath != "" {
@@ -1432,8 +1437,9 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 		sm.mu.Unlock()
 	}
 
+	sessFreshStart := sessState.FreshStart
 	resumeArgs := agent.ResumeArgs
-	if len(resumeArgs) == 0 {
+	if len(resumeArgs) == 0 || sessFreshStart {
 		resumeArgs = agent.Args
 	}
 
@@ -1631,6 +1637,7 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 	}
 	if isOrchestrator {
 		sessState.LastStartedAt = time.Now()
+		sessState.FreshStart = false
 	}
 
 	sm.sessions[id] = ptySess
@@ -1999,17 +2006,21 @@ func (sm *SessionManager) Stop(id string) error {
 func (sm *SessionManager) stopWithReason(id, reason string) error {
 	sm.mu.Lock()
 	sessState, ok := sm.state.Sessions[id]
+	var status SessionStatus
 	if ok {
-		sessState.StopReason = reason
-		_ = sm.saveState()
+		status = sessState.Status
 	}
-	sm.mu.Unlock()
 	if !ok {
+		sm.mu.Unlock()
 		return fmt.Errorf("session %q not found", id)
 	}
-	if sessState.Status != StatusRunning {
+	if status != StatusRunning {
+		sm.mu.Unlock()
 		return fmt.Errorf("session %q is not running", id)
 	}
+	sessState.StopReason = reason
+	_ = sm.saveState()
+	sm.mu.Unlock()
 
 	ptySess, ok := sm.GetPTY(id)
 	if !ok {
@@ -2054,17 +2065,22 @@ func (sm *SessionManager) StopWithChildren(rootID string, excludeRoot bool) ([]s
 	for _, id := range toStop {
 		sm.mu.Lock()
 		sess, ok := sm.state.Sessions[id]
-		sm.mu.Unlock()
 		if !ok {
+			sm.mu.Unlock()
 			continue
 		}
 		if sess.Starred {
+			sm.mu.Unlock()
 			sm.log.Info("skipping starred session in bulk stop", "session_id", id, "name", sess.Name)
 			continue
 		}
 		if sess.Status != StatusRunning {
+			sm.mu.Unlock()
 			continue
 		}
+		sess.StopReason = StopReasonUser
+		_ = sm.saveState()
+		sm.mu.Unlock()
 		ptySess, ok := sm.GetPTY(id)
 		if !ok {
 			continue
@@ -2711,6 +2727,21 @@ func (sm *SessionManager) applyConfig(newCfg *config.Config) {
 		sm.mcpManager.Reload(newCfg)
 		sm.log.Info("MCP manager config reloaded")
 	}
+
+	if old.Orchestrator.Enabled != newCfg.Orchestrator.Enabled {
+		sm.log.Info("config changed", "key", "orchestrator.enabled", "old", old.Orchestrator.Enabled, "new", newCfg.Orchestrator.Enabled)
+		if newCfg.Orchestrator.Enabled {
+			go sm.ensureOrchestrator(context.Background())
+		} else {
+			if orchID := func() string {
+				sm.mu.RLock()
+				defer sm.mu.RUnlock()
+				return sm.findOrchestratorID()
+			}(); orchID != "" {
+				_ = sm.stopWithReason(orchID, StopReasonUser)
+			}
+		}
+	}
 }
 
 func (sm *SessionManager) teardownIncludes(mainRepoPath, mainWorktreePath, mainBranch string, includes []IncludedRepoState) error {
@@ -2944,7 +2975,6 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 	go sm.RunMessageCleanupLoop(ctx)
 	go sm.RunGitPullLoop(ctx)
 
-	sm.orchestratorExitCh = make(chan string, 1)
 	go sm.orchestratorSupervisor(ctx, sm.orchestratorExitCh)
 	go sm.ensureOrchestrator(ctx)
 
