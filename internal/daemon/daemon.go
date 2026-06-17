@@ -735,6 +735,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 		if storeDir != "" {
 			opts.WriteDirs = append(opts.WriteDirs, storeDir)
 		}
+		opts.WriteDirs = append(opts.WriteDirs, store.SharedStorePath(sm.paths.DataDir))
 		if len(includes) > 0 {
 			opts.WriteDirs = append(opts.WriteDirs, sm.deriveSandboxIncludesWriteDirs(includes)...)
 		}
@@ -1115,6 +1116,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 		if forkStoreDir != "" {
 			opts.WriteDirs = append(opts.WriteDirs, forkStoreDir)
 		}
+		opts.WriteDirs = append(opts.WriteDirs, store.SharedStorePath(sm.paths.DataDir))
 		if len(forkIncludes) > 0 {
 			opts.WriteDirs = append(opts.WriteDirs, sm.deriveSandboxIncludesWriteDirs(forkIncludes)...)
 		}
@@ -1520,6 +1522,7 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 		if resumeStoreDir != "" {
 			opts.WriteDirs = append(opts.WriteDirs, resumeStoreDir)
 		}
+		opts.WriteDirs = append(opts.WriteDirs, store.SharedStorePath(sm.paths.DataDir))
 		if len(sessIncludes) > 0 {
 			opts.WriteDirs = append(opts.WriteDirs, sm.deriveSandboxIncludesWriteDirs(sessIncludes)...)
 		}
