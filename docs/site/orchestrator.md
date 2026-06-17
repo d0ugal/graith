@@ -29,6 +29,10 @@ The orchestrator runs in a scratch directory with no repo. It manages other sess
 
 ```bash
 gr new <name> --repo <path>       # create sessions (ALWAYS pass --repo)
+gr scenario start <file>          # start a declarative multi-session scenario
+gr scenario status <name>         # check scenario status
+gr scenario stop <name>           # stop all sessions in a scenario
+gr scenario delete <name>         # delete a scenario and its sessions
 gr stop <session>                 # stop sessions
 gr delete <session>               # delete sessions
 gr restart <session>              # restart sessions
@@ -41,6 +45,8 @@ gr store put --shared <key> <body> # persist documents (use --shared)
 gr status "message"               # set status visible in picker
 gr type <session> "text"          # type into another session
 ```
+
+For reproducible, multi-repo session fleets, use [scenarios](scenarios.md) — they define sessions declaratively in a TOML file and create them atomically with rollback on failure.
 
 ## Important constraints
 
