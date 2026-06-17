@@ -75,12 +75,13 @@ func (sm *SessionManager) runGitPullTick(ctx context.Context) {
 			return
 		}
 		pulled, err := sm.pullIfClean(ctx, repo)
-		if err != nil {
+		switch {
+		case err != nil:
 			sm.log.Warn("git-pull: error", "repo", repo, "err", err)
 			errored++
-		} else if pulled {
+		case pulled:
 			updated++
-		} else {
+		default:
 			skipped++
 		}
 	}
@@ -236,6 +237,8 @@ func (sm *SessionManager) pullIfClean(ctx context.Context, repoPath string) (boo
 func (sm *SessionManager) hasActiveSessionForRepo(repoPath string) bool {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
+
+	repoPath = config.ResolvePath(repoPath)
 
 	for _, s := range sm.state.Sessions {
 		if s.Status != StatusRunning && s.Status != StatusCreating {
