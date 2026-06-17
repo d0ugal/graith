@@ -110,8 +110,8 @@ The daemon sets these in every agent process:
 - `GRAITH_AGENT_TYPE` — agent type (e.g. `claude`, `codex`)
 - `GRAITH_WORKTREE_PATH` — absolute path to the session worktree
 - `GRAITH_REPO_PATH` — absolute path to the source repository (canonical)
-- `GRAITH_SHARE_PATH` — shared directory for the repo (persists across sessions)
-- `TMPDIR` — set to `GRAITH_SHARE_PATH` so `mktemp` etc. land in the share dir
+- `GRAITH_TMPDIR` — temporary directory for the repo (persists across sessions)
+- `TMPDIR` — set to `GRAITH_TMPDIR` so `mktemp` etc. land in the tmp dir
 
 These are used by `gr msg pub/sub` to identify the sender automatically.
 
