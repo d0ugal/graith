@@ -45,6 +45,7 @@ The wire protocol uses 5-byte framed multiplexing: `[channel:1][length:4][payloa
 - [Inter-Agent Messaging](messaging.md)
 - [Document Store](store.md)
 - [Sandbox](sandbox.md)
+- [Agent Authentication](auth.md)
 - [Orchestrator](orchestrator.md)
 - [MCP Server](mcp.md)
 - [Patterns and Recipes](patterns.md)
