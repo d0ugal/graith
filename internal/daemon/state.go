@@ -127,6 +127,7 @@ type ScenarioSession struct {
 	Repo     string `json:"repo"`
 	Agent    string `json:"agent"`
 	Model    string `json:"model,omitempty"`
+	Shared   bool   `json:"shared,omitempty"`
 }
 
 type State struct {
