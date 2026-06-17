@@ -3568,15 +3568,17 @@ func TestStopAllWritesShutdownSummary(t *testing.T) {
 func TestStopAllWaitsConcurrently(t *testing.T) {
 	sm := newTestSessionManager(t)
 
-	// Use processes that trap SIGTERM so each goroutine must hit the
-	// force-kill timeout. Sequential would be 3*5s=15s; concurrent ~5s.
+	// Use processes that trap SIGTERM and SIGHUP so each goroutine must hit
+	// the force-kill timeout. Sequential would be 3*5s=15s; concurrent ~5s.
+	// The loop ensures the shell keeps running even if sleep(1) doesn't
+	// inherit SIG_IGN on some platforms (observed on macOS CI).
 	const n = 3
 	for i := 0; i < n; i++ {
 		id := fmt.Sprintf("s%d", i)
 		sm.state.Sessions[id] = &SessionState{
 			ID: id, Name: id, Status: StatusRunning, Agent: "claude",
 		}
-		sess := newTestPTYSession(t, "sh", "-c", "trap '' TERM; sleep 30")
+		sess := newTestPTYSession(t, "sh", "-c", "trap '' TERM HUP; while :; do sleep 30 || true; done")
 		sm.sessions[id] = sess
 	}
 
