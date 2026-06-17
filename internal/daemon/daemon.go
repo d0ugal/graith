@@ -714,6 +714,11 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 	if inPlace {
 		env["GRAITH_IN_PLACE"] = "true"
 	}
+	for _, extra := range envExtra {
+		for k, v := range extra {
+			env[k] = v
+		}
+	}
 	var storeDir string
 	if repoRoot != "" {
 		tmpDir, err := sm.repoTmpDir(repoRoot)

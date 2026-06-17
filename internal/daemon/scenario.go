@@ -252,16 +252,40 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 
 	if startErr != nil {
 		// Rollback: stop and delete all already-started sessions.
+		var rollbackErrors []string
 		for _, id := range startedIDs {
-			_ = sm.Stop(id)
-			_ = sm.Delete(id)
+			if err := sm.Stop(id); err != nil {
+				sm.log.Warn("scenario rollback: stop failed", "session", id, "err", err)
+			}
+			if err := sm.Delete(id); err != nil {
+				sm.log.Warn("scenario rollback: delete failed", "session", id, "err", err)
+				rollbackErrors = append(rollbackErrors, id)
+			}
 		}
-		// Remove remaining placeholders.
 		sm.mu.Lock()
+		// Only remove state for sessions that were successfully cleaned up.
 		for _, id := range sessionIDs {
-			delete(sm.state.Sessions, id)
+			alreadyStarted := false
+			for _, sid := range startedIDs {
+				if id == sid {
+					alreadyStarted = true
+					break
+				}
+			}
+			failedCleanup := false
+			for _, fid := range rollbackErrors {
+				if id == fid {
+					failedCleanup = true
+					break
+				}
+			}
+			if !alreadyStarted || !failedCleanup {
+				delete(sm.state.Sessions, id)
+			}
 		}
-		delete(sm.state.Scenarios, scenarioID)
+		if len(rollbackErrors) == 0 {
+			delete(sm.state.Scenarios, scenarioID)
+		}
 		_ = sm.saveState()
 		sm.mu.Unlock()
 		return nil, startErr
