@@ -432,6 +432,7 @@ type ScenarioSessionInput struct {
 	Role       string `json:"role,omitempty"`
 	Task       string `json:"task,omitempty"`
 	AgentHooks bool   `json:"agent_hooks,omitempty"`
+	Shared     bool   `json:"shared,omitempty"`
 }
 
 type ScenarioStopMsg struct {
@@ -469,6 +470,7 @@ type ScenarioSessionInfo struct {
 	Agent     string `json:"agent,omitempty"`
 	Model     string `json:"model,omitempty"`
 	Status    string `json:"status,omitempty"`
+	Shared    bool   `json:"shared,omitempty"`
 }
 
 type ScenarioStatusResponse struct {

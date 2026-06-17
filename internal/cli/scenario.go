@@ -36,6 +36,7 @@ type scenarioFileSession struct {
 	Role       string `toml:"role"`
 	Task       string `toml:"task"`
 	AgentHooks *bool  `toml:"agent_hooks"`
+	Shared     bool   `toml:"shared"`
 }
 
 func scenariosDir() string {
@@ -110,6 +111,7 @@ func buildSessionInputs(sf *scenarioFile) ([]protocol.ScenarioSessionInput, erro
 			Role:       s.Role,
 			Task:       s.Task,
 			AgentHooks: s.AgentHooks == nil || *s.AgentHooks,
+			Shared:     s.Shared,
 		}
 	}
 	return sessions, nil
@@ -369,13 +371,17 @@ var scenarioStatusCmd = &cobra.Command{
 		out.Print("Goal: %s\n\n", sc.Goal)
 
 		tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-		fmt.Fprintf(tw, "NAME\tSESSION\tSTATUS\tAGENT\tROLE\tTASK DONE\n")
+		fmt.Fprintf(tw, "NAME\tSESSION\tSTATUS\tAGENT\tROLE\tTASK DONE\tSHARED\n")
 		for _, s := range sc.Sessions {
 			done := ""
 			if s.TaskDone {
 				done = "yes"
 			}
-			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", s.Name, s.SessionID, s.Status, s.Agent, s.Role, done)
+			shared := ""
+			if s.Shared {
+				shared = "yes"
+			}
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", s.Name, s.SessionID, s.Status, s.Agent, s.Role, done, shared)
 		}
 		tw.Flush()
 		return nil

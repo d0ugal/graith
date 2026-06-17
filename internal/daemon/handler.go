@@ -1027,6 +1027,9 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid scenario_start message"})
 					continue
 				}
+				if auth.authenticated {
+					s.CallerSessionID = auth.sessionID
+				}
 				scenario, err := sm.StartScenario(s, clientRows, clientCols)
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
