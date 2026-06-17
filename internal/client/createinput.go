@@ -61,7 +61,9 @@ func DiscoverRepos(allowedPaths []string, sessions []protocol.SessionInfo) []Rep
 		if s.RepoPath == "" || s.SystemKind != "" {
 			continue
 		}
-		addRepo(s.RepoPath)
+		if isGitRepo(expandPath(s.RepoPath)) {
+			addRepo(s.RepoPath)
+		}
 	}
 
 	sort.Slice(suggestions, func(i, j int) bool {
@@ -76,6 +78,11 @@ func isGitRepo(dir string) bool {
 }
 
 func expandPath(p string) string {
+	if p == "~" {
+		if home, err := os.UserHomeDir(); err == nil {
+			return home
+		}
+	}
 	if strings.HasPrefix(p, "~/") {
 		if home, err := os.UserHomeDir(); err == nil {
 			p = filepath.Join(home, p[2:])
@@ -152,8 +159,10 @@ func (m *createSessionModel) updateFiltered() {
 			}
 		}
 	}
-	if m.dropdownIdx >= len(m.filtered) {
-		m.dropdownIdx = max(0, len(m.filtered)-1)
+	if len(m.filtered) == 0 {
+		m.dropdownIdx = -1
+	} else if m.dropdownIdx >= len(m.filtered) {
+		m.dropdownIdx = len(m.filtered) - 1
 	}
 }
 
@@ -243,8 +252,9 @@ func (m createSessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case " ", "space":
 			if m.focus == createFieldName {
-				m.nameInput.SetValue(m.nameInput.Value() + "-")
-				return m, nil
+				var cmd tea.Cmd
+				m.nameInput, cmd = m.nameInput.Update(tea.KeyPressMsg{Code: '-', Text: "-"})
+				return m, cmd
 			}
 		}
 	}
@@ -287,7 +297,19 @@ func (m createSessionModel) View() tea.View {
 	if m.showDropdown && m.focus == createFieldRepo && len(m.filtered) > 0 {
 		content.WriteString("\n")
 		maxShow := min(8, len(m.filtered))
-		for i := 0; i < maxShow; i++ {
+		start := 0
+		if m.dropdownIdx >= maxShow {
+			start = m.dropdownIdx - maxShow + 1
+		}
+		end := start + maxShow
+		if end > len(m.filtered) {
+			end = len(m.filtered)
+			start = max(0, end-maxShow)
+		}
+		if start > 0 {
+			content.WriteString(fmt.Sprintf("\n  ↑ %d more", start))
+		}
+		for i := start; i < end; i++ {
 			r := m.filtered[i]
 			prefix := "  "
 			if i == m.dropdownIdx {
@@ -296,13 +318,13 @@ func (m createSessionModel) View() tea.View {
 			display := r.Name + "  " + dimStyle.Render(shortenPath(r.Path))
 			content.WriteString("\n" + prefix + display)
 		}
-		if remaining := len(m.filtered) - maxShow; remaining > 0 {
-			content.WriteString(fmt.Sprintf("\n  +%d more", remaining))
+		if remaining := len(m.filtered) - end; remaining > 0 {
+			content.WriteString(fmt.Sprintf("\n  ↓ %d more", remaining))
 		}
 	}
 
 	content.WriteString("\n\n")
-	content.WriteString(dimStyle.Render("tab next field  enter confirm  esc cancel"))
+	content.WriteString(dimStyle.Render("tab next field  ↑↓ suggestions  enter confirm  esc cancel"))
 
 	panel := lipgloss.NewStyle().
 		Background(colorPanel).

@@ -50,8 +50,9 @@ func (m nameInputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "esc", "ctrl+c":
 			return m, tea.Quit
 		case " ", "space":
-			m.input.SetValue(m.input.Value() + "-")
-			return m, nil
+			var cmd tea.Cmd
+			m.input, cmd = m.input.Update(tea.KeyPressMsg{Code: '-', Text: "-"})
+			return m, cmd
 		}
 	}
 	var cmd tea.Cmd
