@@ -772,7 +772,7 @@ func buildScenarioGroupedItems(sessions []protocol.SessionInfo, collapsed map[st
 			status = " (stopped)"
 		}
 
-		items = append(items, groupHeader{name: sid + status, count: len(g.sessions)})
+		items = append(items, groupHeader{name: g.name + status, count: len(g.sessions)})
 		for _, s := range g.sessions {
 			items = append(items, sessionItem{info: s})
 		}
@@ -1186,9 +1186,12 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				viewFiltered := m.sessionsForView()
 				filtered := filterSessions(viewFiltered, m.filterInput.Value())
 				var items []list.Item
-				if m.view == viewAll {
+				switch m.view {
+				case viewAll:
 					items = buildGroupedItems(filtered, m.collapsed)
-				} else {
+				case viewScenario:
+					items = buildScenarioGroupedItems(filtered, m.collapsed)
+				default:
 					for _, s := range filtered {
 						items = append(items, sessionItem{info: s})
 					}
