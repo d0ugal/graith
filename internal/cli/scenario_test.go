@@ -198,16 +198,10 @@ name = "test"`, "at least one [[sessions]] entry"},
 }
 
 func TestListAvailableScenarios(t *testing.T) {
-	tmpDir := t.TempDir()
-	scenarioDir := filepath.Join(tmpDir, "scenarios")
+	scenarioDir := filepath.Join(t.TempDir(), "scenarios")
 	if err := os.MkdirAll(scenarioDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-
-	// Save old paths, set up test paths.
-	oldPaths := paths
-	paths.ConfigFile = filepath.Join(tmpDir, "config.toml")
-	defer func() { paths = oldPaths }()
 
 	// Write a valid scenario file.
 	if err := os.WriteFile(filepath.Join(scenarioDir, "test.toml"), []byte(`
@@ -234,7 +228,7 @@ repo = "/tmp/repo"
 		t.Fatal(err)
 	}
 
-	available := listAvailableScenarios()
+	available := listAvailableScenariosIn(scenarioDir)
 	if len(available) != 1 {
 		t.Fatalf("expected 1 available scenario, got %d", len(available))
 	}
@@ -247,15 +241,10 @@ repo = "/tmp/repo"
 }
 
 func TestResolveScenarioSource(t *testing.T) {
-	tmpDir := t.TempDir()
-	scenarioDir := filepath.Join(tmpDir, "scenarios")
+	scenarioDir := filepath.Join(t.TempDir(), "scenarios")
 	if err := os.MkdirAll(scenarioDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-
-	oldPaths := paths
-	paths.ConfigFile = filepath.Join(tmpDir, "config.toml")
-	defer func() { paths = oldPaths }()
 
 	content := []byte("test content")
 	if err := os.WriteFile(filepath.Join(scenarioDir, "my-scenario.toml"), content, 0o644); err != nil {
@@ -263,7 +252,7 @@ func TestResolveScenarioSource(t *testing.T) {
 	}
 
 	// Resolve by name (without .toml).
-	data, err := resolveScenarioSource("my-scenario")
+	data, err := resolveScenarioSourceFrom("my-scenario", scenarioDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,7 +261,7 @@ func TestResolveScenarioSource(t *testing.T) {
 	}
 
 	// Resolve by name with .toml.
-	data, err = resolveScenarioSource("my-scenario.toml")
+	data, err = resolveScenarioSourceFrom("my-scenario.toml", scenarioDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -281,17 +270,17 @@ func TestResolveScenarioSource(t *testing.T) {
 	}
 
 	// Not found.
-	_, err = resolveScenarioSource("nonexistent")
+	_, err = resolveScenarioSourceFrom("nonexistent", scenarioDir)
 	if err == nil {
 		t.Fatal("expected error for nonexistent scenario")
 	}
 
 	// Direct file path.
-	directFile := filepath.Join(tmpDir, "direct.toml")
+	directFile := filepath.Join(scenarioDir, "..", "direct.toml")
 	if err := os.WriteFile(directFile, []byte("direct"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	data, err = resolveScenarioSource(directFile)
+	data, err = resolveScenarioSourceFrom(directFile, scenarioDir)
 	if err != nil {
 		t.Fatal(err)
 	}
