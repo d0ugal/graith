@@ -79,7 +79,7 @@ func TestEnsureDirs(t *testing.T) {
 		DataDir:    filepath.Join(tmpDir, "data"),
 		RuntimeDir: filepath.Join(tmpDir, "runtime"),
 		LogDir:     filepath.Join(tmpDir, "data", "logs"),
-		ShareDir:   filepath.Join(tmpDir, "data", "share"),
+		TmpDir:     filepath.Join(tmpDir, "data", "tmp"),
 	}
 	if err := p.EnsureDirs(); err != nil {
 		t.Fatalf("EnsureDirs() error: %v", err)
@@ -91,7 +91,7 @@ func TestEnsureDirs(t *testing.T) {
 		filepath.Join(tmpDir, "data"),
 		filepath.Join(tmpDir, "runtime"),
 		filepath.Join(tmpDir, "data", "logs"),
-		filepath.Join(tmpDir, "data", "share"),
+		filepath.Join(tmpDir, "data", "tmp"),
 	}
 	for _, dir := range expectedDirs {
 		info, err := os.Stat(dir)
@@ -112,7 +112,7 @@ func TestEnsureDirsIdempotent(t *testing.T) {
 		DataDir:    filepath.Join(tmpDir, "data"),
 		RuntimeDir: filepath.Join(tmpDir, "runtime"),
 		LogDir:     filepath.Join(tmpDir, "data", "logs"),
-		ShareDir:   filepath.Join(tmpDir, "data", "share"),
+		TmpDir:     filepath.Join(tmpDir, "data", "tmp"),
 	}
 	// Call twice to verify idempotency.
 	if err := p.EnsureDirs(); err != nil {
