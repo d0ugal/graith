@@ -1080,6 +1080,60 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("scenario_status", protocol.ScenarioStatusResponse{Scenario: *record})
 				}
 
+			case "scenario_resume":
+				var s protocol.ScenarioResumeMsg
+				if err := protocol.DecodePayload(msg, &s); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid scenario_resume message"})
+					continue
+				}
+				resumed, err := sm.ResumeScenario(s.Name, clientRows, clientCols)
+				if err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+				} else {
+					sendControl("scenario_resumed", struct {
+						Name    string   `json:"name"`
+						Resumed []string `json:"resumed"`
+					}{s.Name, resumed})
+				}
+
+			case "scenario_task_done":
+				var s protocol.ScenarioTaskDoneMsg
+				if err := protocol.DecodePayload(msg, &s); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid scenario_task_done message"})
+					continue
+				}
+				callerID := ""
+				if auth.authenticated {
+					callerID = auth.sessionID
+				}
+				if callerID == "" {
+					sendControl("error", protocol.ErrorMsg{Message: "scenario task-done requires an authenticated session"})
+					continue
+				}
+				if err := sm.ScenarioTaskDone(s.Name, callerID); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+				} else {
+					sendControl("scenario_task_done", struct {
+						Name string `json:"name"`
+					}{s.Name})
+				}
+
+			case "scenario_add":
+				var s protocol.ScenarioAddMsg
+				if err := protocol.DecodePayload(msg, &s); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid scenario_add message"})
+					continue
+				}
+				sess, err := sm.AddToScenario(s.Name, s.Session, clientRows, clientCols)
+				if err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+				} else {
+					sendControl("scenario_added", struct {
+						Name      string `json:"name"`
+						SessionID string `json:"session_id"`
+					}{s.Name, sess.ID})
+				}
+
 			case "scenario_list":
 				records := sm.ListScenarios()
 				sendControl("scenario_list", protocol.ScenarioListResponse{Scenarios: records})

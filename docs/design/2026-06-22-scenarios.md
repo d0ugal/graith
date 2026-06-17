@@ -500,15 +500,12 @@ context. It cannot read arbitrary disk paths like
 
 - Should scenarios support `includes` (multi-repo sessions)? The existing
   repo config `Includes` field could be exposed in the scenario file.
-  **Recommendation:** defer to Phase 2, add if needed.
+  **Resolution:** sessions inherit includes from repo config. Explicit TOML
+  `includes` field deferred to a future iteration.
 
-- Should `gr scenario resume` exist? Resuming a scenario means resuming all
-  stopped/errored sessions within it. The semantics are straightforward (call
-  `Resume` on each stopped session — scenario env vars are re-injected from
-  persisted state), but edge cases around deleted children and manifest
-  staleness need careful handling. **Recommendation:** defer from Phase 1,
-  add in Phase 2 once the core lifecycle is proven. Users can manually
-  `gr resume` individual sessions in the interim.
+- Should `gr scenario resume` exist? **Resolution:** Yes, implemented.
+  `gr scenario resume <name>` resumes all stopped/errored sessions and
+  re-publishes updated manifests to all members.
 
 - Can multiple scenarios run concurrently? The `ScenarioState` model supports
   this, but session name uniqueness across scenarios needs enforcement —
@@ -518,13 +515,10 @@ context. It cannot read arbitrary disk paths like
   the rest of graith. Reject `scenario start` if any declared session name
   collides with an existing session.
 
-- What happens when a child is restarted (new session ID)? The sibling
-  manifests become stale — they reference the old session ID. Options:
-  re-publish updated manifests to all siblings, or accept eventual consistency
-  where the orchestrator coordinates re-introduction via messages.
-  **Recommendation:** accept eventual consistency in v1. The orchestrator
-  skill handles re-introduction. The persistent manifest in `gr store` can be
-  updated by the orchestrator.
+- What happens when a child is restarted (new session ID)? **Resolution:**
+  Manifests are automatically re-published to all siblings on resume and when
+  new sessions are added. The persistent manifest in `gr store` is also
+  updated.
 
 - Should the "orchestrator" terminology be disambiguated? The codebase uses
   "orchestrator" for the system singleton (`SystemKindOrchestrator`), and this
@@ -537,76 +531,53 @@ context. It cannot read arbitrary disk paths like
 ### Real-World Feedback (Post-Implementation)
 
 The following gaps were identified during real-world orchestration of a
-multi-repo rrweb orphan mutation fix scenario. These inform Phase 2 scope.
+multi-repo rrweb orphan mutation fix scenario and have been addressed.
 
-#### Missing lifecycle operations
+#### Lifecycle operations (implemented)
 
-1. **`gr scenario resume <name>`** — When sessions crash or stop, restarting
-   them individually while maintaining scenario context is the most common
-   lifecycle operation. The env var re-injection on resume exists, but there is
-   no single command to restart all stopped sessions in a scenario. This should
-   be Phase 1 priority (not Phase 2 as originally deferred).
+1. **`gr scenario resume <name>`** — Resumes all stopped/errored sessions in a
+   scenario with one command. Env vars are re-injected on resume. Updated
+   manifests are re-published to all sessions after resume.
 
-2. **Task completion tracking** — Significant orchestrator effort was spent
-   tracking which sessions had completed their tasks. The scenario has `task`
-   per session but no way for a session to report completion back to the
-   scenario state. Even a simple `gr scenario task-done` that marks the
-   session's task as complete in `ScenarioState` would help. Aggregate status
-   could then show `3/5 tasks done`.
+2. **Task completion tracking** — `gr scenario task-done <name>` marks the
+   calling session's task as complete in `ScenarioState`. The `task_done` field
+   is visible in `gr scenario status` output and the manifest.
 
-#### Dynamic membership
+#### Dynamic membership (implemented)
 
-3. **Adding sessions to a running scenario** — During real orchestration, agents
-   were dynamically added as the work evolved (e.g. review agents, fix agents,
-   PR agents). A fixed TOML file captures only the starting topology. Options:
-   - `gr scenario add <name> --name <session> --repo <path> --role "..."`
-   - `gr new --scenario <name>` flag that tags new sessions into an existing
-     scenario
-   - Re-publish updated manifests to all siblings when membership changes
+3. **Adding sessions to a running scenario** —
+   `gr scenario add <name> --name <session> --repo <path> --role "..."` creates
+   a new session, tags it into the existing scenario, and re-publishes updated
+   manifests to all siblings (including the new member).
 
-4. **Manifest staleness on restart** — When a session restarts, it has no
-   knowledge of sessions added after the original scenario start. The persistent
-   manifest in `gr store` helps, but there is no mechanism for a restarted
-   session to re-read it. The `check-inbox` hook only fires on new messages —
-   the original manifest was already acknowledged. Options: re-publish on
-   resume, or add a hook that reads the store manifest on start.
+4. **Manifest re-publish on resume and membership changes** — Whenever a
+   session resumes (individually or via `gr scenario resume`) or a new session
+   is added, the daemon re-publishes updated manifests to all scenario members'
+   inboxes and persists them to the shared store. This eliminates staleness.
 
-#### Multi-repo includes
+#### Scenario file conventions (implemented)
 
-5. **`includes` support in scenario TOML** — The most complex real-world
-   sessions used multi-repo includes (e.g. rrweb, faro-web-sdk, grafana, and
-   session-replay-examples all in one worktree). The `gr new` flow already
-   supports this via repo config, but the scenario TOML has no way to express
-   it. At minimum, document that sessions inherit includes from repo config.
-   Consider `includes = ["faro-web-sdk", "rrweb"]` for Phase 2.
+5. **Canonical location:** `~/.config/graith/scenarios/` (next to
+   `config.toml`). Files in this directory can be started by name:
+   `gr scenario start tracing-pipeline` resolves to
+   `~/.config/graith/scenarios/tracing-pipeline.toml`. Direct paths and stdin
+   (`-`) still work.
 
-#### Scenario file conventions
+6. **`gr scenario list`** shows both running scenarios and available scenario
+   files from the scenarios directory with their goal descriptions.
 
-6. **Conventional locations for scenario files** — No standard location is
-   defined. Recommended convention:
-   - Repo-scoped: `.graith/scenarios/<name>.toml` (versionable, shareable)
-   - User-scoped: `~/.graith/scenarios/<name>.toml` (personal, cross-repo)
-   - The CLI could search these paths when given just a name:
-     `gr scenario start tracing-pipeline` looks for `tracing-pipeline.toml` in
-     `.graith/scenarios/` then `~/.graith/scenarios/` before treating the
-     argument as a raw file path.
+#### Parallel session creation (implemented)
 
-#### Implementation concerns from orchestration experience
+7. **Concurrent creation** — Sessions are now created concurrently using
+   goroutines instead of a sequential loop. All placeholders are removed first,
+   then all `Create` calls run in parallel, and results are collected. If any
+   fail, all successfully created sessions are rolled back.
 
-7. **Placeholder delete/recreate race** — The reserve phase creates placeholder
-   sessions, then deletes them before calling `Create` (which generates its own
-   ID). This race window where the session name is briefly available for
-   collision was confirmed by the review tribunal (6/8 judges). Fix: have
-   `Create` accept a pre-generated ID, or hold placeholders through the
-   `Create` call.
+#### Remaining items for future work
 
-8. **Sequential session creation** — Sessions are created in a `for` loop, not
-   concurrently. For a 5-session scenario, this takes 10-15 seconds (worktree
-   setup, PTY spawn). The design doc says "all sessions start concurrently" but
-   implementation is sequential. Phase 2: parallelize with a goroutine pool.
-
-#### Suggested TOML additions for Phase 2
-
-- `star = true` — Protect sessions from accidental deletion at creation time.
-- `includes = [...]` — Multi-repo worktree support per session.
-- Document that sessions inherit `includes` from repo config in Phase 1.
+- `includes` support in scenario TOML — Sessions currently inherit includes
+  from repo config. Explicit `includes = [...]` in the TOML could be added.
+- `star = true` in TOML — Protect sessions from accidental deletion at creation.
+- Placeholder ID stability — `Create` still generates its own session ID, so
+  the reserved placeholder ID changes during creation. A future change could
+  have `Create` accept a pre-generated ID to close this race window.

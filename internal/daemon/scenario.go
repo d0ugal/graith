@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/d0ugal/graith/internal/git"
@@ -181,76 +183,79 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 
 	sm.mu.Unlock()
 
-	// --- Start phase: create each session using the normal Create flow ---
-	var startedIDs []string
-	var startErr error
-
-	for i, s := range msg.Sessions {
-		id := sessionIDs[i]
-		agentName := s.Agent
-		if agentName == "" {
-			agentName = cfg.DefaultAgent
+	// --- Start phase: create each session concurrently ---
+	// Remove all placeholders first so Create can allocate its own IDs.
+	repoRoots := make([]string, len(msg.Sessions))
+	sm.mu.Lock()
+	for i, id := range sessionIDs {
+		if p, ok := sm.state.Sessions[id]; ok {
+			repoRoots[i] = p.RepoPath
 		}
-
-		// Remove the placeholder — Create will make its own.
-		sm.mu.Lock()
-		placeholder := sm.state.Sessions[id]
-		repoRoot := placeholder.RepoPath
 		delete(sm.state.Sessions, id)
-		_ = sm.saveState()
-		sm.mu.Unlock()
+	}
+	_ = sm.saveState()
+	sm.mu.Unlock()
 
-		scenarioEnv := map[string]string{
-			"GRAITH_SCENARIO":      scenarioID,
-			"GRAITH_SCENARIO_NAME": msg.Name,
-		}
-		if s.Role != "" {
-			scenarioEnv["GRAITH_SCENARIO_ROLE"] = s.Role
-		}
-		if msg.Goal != "" {
-			scenarioEnv["GRAITH_SCENARIO_GOAL"] = msg.Goal
-		}
-
-		agentHooks := s.AgentHooks
-
-		sess, err := sm.Create(
-			s.Name,
-			agentName,
-			repoRoot,
-			s.Base,
-			s.Task,
-			s.Model,
-			msg.CallerSessionID,
-			false,
-			"",
-			agentHooks,
-			false,
-			false,
-			false,
-			rows, cols,
-			scenarioEnv,
-		)
-		if err != nil {
-			startErr = fmt.Errorf("session %q: %w", s.Name, err)
-			break
-		}
-
-		// Update session with scenario metadata.
-		sm.mu.Lock()
-		if created, ok := sm.state.Sessions[sess.ID]; ok {
-			created.ScenarioID = scenarioID
-			created.ScenarioRole = s.Role
-			created.ScenarioGoal = msg.Goal
-		}
-		// Update scenario to track the real session ID (Create generates its own).
-		sessionIDs[i] = sess.ID
-		_ = sm.saveState()
-		sm.mu.Unlock()
-
-		startedIDs = append(startedIDs, sess.ID)
+	type createResult struct {
+		index int
+		sess  SessionState
+		err   error
 	}
 
-	if startErr != nil {
+	results := make([]createResult, len(msg.Sessions))
+	var wg sync.WaitGroup
+	for i, s := range msg.Sessions {
+		wg.Add(1)
+		go func(idx int, s protocol.ScenarioSessionInput) {
+			defer wg.Done()
+
+			agentName := s.Agent
+			if agentName == "" {
+				agentName = cfg.DefaultAgent
+			}
+
+			scenarioEnv := map[string]string{
+				"GRAITH_SCENARIO":      scenarioID,
+				"GRAITH_SCENARIO_NAME": msg.Name,
+			}
+			if s.Role != "" {
+				scenarioEnv["GRAITH_SCENARIO_ROLE"] = s.Role
+			}
+			if msg.Goal != "" {
+				scenarioEnv["GRAITH_SCENARIO_GOAL"] = msg.Goal
+			}
+
+			sess, err := sm.Create(
+				s.Name, agentName, repoRoots[idx], s.Base, s.Task, s.Model,
+				msg.CallerSessionID, false, "", s.AgentHooks,
+				false, false, false, rows, cols, scenarioEnv,
+			)
+			results[idx] = createResult{index: idx, sess: sess, err: err}
+		}(i, s)
+	}
+	wg.Wait()
+
+	var startedIDs []string
+	var startErrors []string
+	for i, r := range results {
+		if r.err != nil {
+			startErrors = append(startErrors, fmt.Sprintf("session %q: %v", msg.Sessions[i].Name, r.err))
+			continue
+		}
+		startedIDs = append(startedIDs, r.sess.ID)
+		sessionIDs[i] = r.sess.ID
+
+		sm.mu.Lock()
+		if created, ok := sm.state.Sessions[r.sess.ID]; ok {
+			created.ScenarioID = scenarioID
+			created.ScenarioRole = msg.Sessions[i].Role
+			created.ScenarioGoal = msg.Goal
+		}
+		_ = sm.saveState()
+		sm.mu.Unlock()
+	}
+
+	if len(startErrors) > 0 {
 		// Rollback: stop and delete all already-started sessions.
 		var rollbackErrors []string
 		for _, id := range startedIDs {
@@ -263,15 +268,7 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 			}
 		}
 		sm.mu.Lock()
-		// Only remove state for sessions that were successfully cleaned up.
 		for _, id := range sessionIDs {
-			alreadyStarted := false
-			for _, sid := range startedIDs {
-				if id == sid {
-					alreadyStarted = true
-					break
-				}
-			}
 			failedCleanup := false
 			for _, fid := range rollbackErrors {
 				if id == fid {
@@ -279,7 +276,7 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 					break
 				}
 			}
-			if !alreadyStarted || !failedCleanup {
+			if !failedCleanup {
 				delete(sm.state.Sessions, id)
 			}
 		}
@@ -288,7 +285,7 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 		}
 		_ = sm.saveState()
 		sm.mu.Unlock()
-		return nil, startErr
+		return nil, fmt.Errorf("failed to create %d session(s): %s", len(startErrors), strings.Join(startErrors, "; "))
 	}
 
 	// Update the scenario with final session IDs.
@@ -539,18 +536,242 @@ func (sm *SessionManager) ListScenarios() []protocol.ScenarioRecord {
 	return records
 }
 
+func (sm *SessionManager) ResumeScenario(name string, rows, cols uint16) ([]string, error) {
+	sm.mu.RLock()
+	var scenario *ScenarioState
+	for _, sc := range sm.state.Scenarios {
+		if sc.Name == name {
+			scenario = sc
+			break
+		}
+	}
+	if scenario == nil {
+		sm.mu.RUnlock()
+		return nil, fmt.Errorf("scenario %q not found", name)
+	}
+	sessionIDs := make([]string, len(scenario.SessionIDs))
+	copy(sessionIDs, scenario.SessionIDs)
+	scenarioID := scenario.ID
+	sm.mu.RUnlock()
+
+	var resumed []string
+	for _, id := range sessionIDs {
+		sm.mu.RLock()
+		sess, ok := sm.state.Sessions[id]
+		sm.mu.RUnlock()
+		if !ok {
+			continue
+		}
+		if sess.Status != StatusStopped && sess.Status != StatusErrored {
+			continue
+		}
+		if _, err := sm.Resume(id, rows, cols); err != nil {
+			sm.log.Warn("failed to resume scenario session", "session", id, "err", err)
+			continue
+		}
+		resumed = append(resumed, id)
+	}
+
+	sm.republishManifests(scenarioID)
+	return resumed, nil
+}
+
+func (sm *SessionManager) ScenarioTaskDone(scenarioName, sessionID string) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	var scenario *ScenarioState
+	for _, sc := range sm.state.Scenarios {
+		if sc.Name == scenarioName {
+			scenario = sc
+			break
+		}
+	}
+	if scenario == nil {
+		return fmt.Errorf("scenario %q not found", scenarioName)
+	}
+
+	idx := -1
+	for i, id := range scenario.SessionIDs {
+		if id == sessionID {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return fmt.Errorf("session %q is not part of scenario %q", sessionID, scenarioName)
+	}
+	scenario.Sessions[idx].TaskDone = true
+	return sm.saveState()
+}
+
+func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSessionInput, rows, cols uint16) (*SessionState, error) {
+	if err := ValidateSessionName(input.Name); err != nil {
+		return nil, err
+	}
+	if input.Repo == "" {
+		return nil, fmt.Errorf("repo is required")
+	}
+
+	cfg := sm.Config()
+	agentName := input.Agent
+	if agentName == "" {
+		agentName = cfg.DefaultAgent
+	}
+	if _, ok := cfg.Agents[agentName]; !ok {
+		return nil, fmt.Errorf("unknown agent %q", agentName)
+	}
+
+	repoRoot, err := git.RepoRootPath(input.Repo)
+	if err != nil {
+		return nil, fmt.Errorf("resolve repo root: %w", err)
+	}
+
+	sm.mu.Lock()
+	var scenario *ScenarioState
+	var scenarioID string
+	for id, sc := range sm.state.Scenarios {
+		if sc.Name == name {
+			scenario = sc
+			scenarioID = id
+			break
+		}
+	}
+	if scenario == nil {
+		sm.mu.Unlock()
+		return nil, fmt.Errorf("scenario %q not found", name)
+	}
+
+	for _, existing := range sm.state.Sessions {
+		if existing.Name == input.Name {
+			sm.mu.Unlock()
+			return nil, fmt.Errorf("session name %q already exists", input.Name)
+		}
+	}
+	sm.mu.Unlock()
+
+	scenarioEnv := map[string]string{
+		"GRAITH_SCENARIO":      scenarioID,
+		"GRAITH_SCENARIO_NAME": name,
+	}
+	if input.Role != "" {
+		scenarioEnv["GRAITH_SCENARIO_ROLE"] = input.Role
+	}
+	if scenario.Goal != "" {
+		scenarioEnv["GRAITH_SCENARIO_GOAL"] = scenario.Goal
+	}
+
+	agentHooks := input.AgentHooks
+
+	sess, err := sm.Create(
+		input.Name, agentName, repoRoot, input.Base, input.Task, input.Model,
+		scenario.OrchestratorID, false, "", agentHooks,
+		false, false, false, rows, cols, scenarioEnv,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("create session: %w", err)
+	}
+
+	sm.mu.Lock()
+	if created, ok := sm.state.Sessions[sess.ID]; ok {
+		created.ScenarioID = scenarioID
+		created.ScenarioRole = input.Role
+		created.ScenarioGoal = scenario.Goal
+	}
+
+	scenario.SessionIDs = append(scenario.SessionIDs, sess.ID)
+	scenario.Sessions = append(scenario.Sessions, ScenarioSession{
+		Name:  input.Name,
+		Role:  input.Role,
+		Task:  input.Task,
+		Repo:  filepath.Base(repoRoot),
+		Agent: agentName,
+		Model: input.Model,
+	})
+	_ = sm.saveState()
+	sm.mu.Unlock()
+
+	sm.republishManifests(scenarioID)
+	return &sess, nil
+}
+
+func (sm *SessionManager) republishManifests(scenarioID string) {
+	sm.mu.RLock()
+	scenario, ok := sm.state.Scenarios[scenarioID]
+	if !ok {
+		sm.mu.RUnlock()
+		return
+	}
+	sessionIDs := make([]string, len(scenario.SessionIDs))
+	copy(sessionIDs, scenario.SessionIDs)
+
+	sessions := make([]protocol.ScenarioSessionInput, len(scenario.Sessions))
+	for i, ss := range scenario.Sessions {
+		sessions[i] = protocol.ScenarioSessionInput{
+			Name:  ss.Name,
+			Repo:  ss.Repo,
+			Role:  ss.Role,
+			Task:  ss.Task,
+			Agent: ss.Agent,
+			Model: ss.Model,
+		}
+	}
+	msg := protocol.ScenarioStartMsg{
+		CallerSessionID: scenario.OrchestratorID,
+		Name:            scenario.Name,
+		Goal:            scenario.Goal,
+		Sessions:        sessions,
+	}
+	sm.mu.RUnlock()
+
+	for i, id := range sessionIDs {
+		manifest := sm.buildManifest(scenarioID, msg, scenario, sessionIDs, i)
+		manifestJSON, err := json.Marshal(manifest)
+		if err != nil {
+			sm.log.Error("failed to marshal manifest for republish", "session", id, "err", err)
+			continue
+		}
+		stream := "inbox:" + id
+		if sm.messages != nil {
+			_, err = sm.messages.Publish(stream, scenario.OrchestratorID, "orchestrator", string(manifestJSON), "", "")
+			if err != nil {
+				sm.log.Error("failed to republish manifest", "session", id, "err", err)
+			}
+		}
+	}
+
+	storeDir := store.SharedStorePath(sm.paths.DataDir)
+	if err := store.Init(storeDir); err != nil {
+		sm.log.Error("failed to init shared store for manifest republish", "err", err)
+		return
+	}
+	for i := range sessions {
+		manifest := sm.buildManifest(scenarioID, msg, scenario, sessionIDs, i)
+		data, err := json.MarshalIndent(manifest, "", "  ")
+		if err != nil {
+			sm.log.Error("failed to marshal manifest for store", "err", err)
+			continue
+		}
+		key := fmt.Sprintf("scenarios/%s/manifest-%s.json", scenarioID, sessions[i].Name)
+		if err := store.Put(storeDir, key, string(data)); err != nil {
+			sm.log.Error("failed to persist manifest", "key", key, "err", err)
+		}
+	}
+}
+
 func (sm *SessionManager) buildScenarioRecord(sc *ScenarioState) *protocol.ScenarioRecord {
 	sessions := make([]protocol.ScenarioSessionInfo, len(sc.Sessions))
 	var running, stopped, errored int
 
 	for i, ss := range sc.Sessions {
 		sessions[i] = protocol.ScenarioSessionInfo{
-			Name:  ss.Name,
-			Role:  ss.Role,
-			Task:  ss.Task,
-			Repo:  ss.Repo,
-			Agent: ss.Agent,
-			Model: ss.Model,
+			Name:     ss.Name,
+			Role:     ss.Role,
+			Task:     ss.Task,
+			TaskDone: ss.TaskDone,
+			Repo:     ss.Repo,
+			Agent:    ss.Agent,
+			Model:    ss.Model,
 		}
 		if i < len(sc.SessionIDs) {
 			sessions[i].SessionID = sc.SessionIDs[i]

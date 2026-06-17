@@ -2,6 +2,8 @@ package cli
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -132,5 +134,168 @@ repo = "/tmp/repo"
 	}
 	if !strings.Contains(err.Error(), "strict mode") {
 		t.Errorf("error = %q, want strict mode error", err.Error())
+	}
+}
+
+func TestParseScenarioFile(t *testing.T) {
+	data := []byte(`
+version = 1
+
+[scenario]
+name = "test"
+goal = "do things"
+
+[[sessions]]
+name = "a"
+repo = "/tmp/repo"
+`)
+	sf, err := parseScenarioFile(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sf.Scenario.Name != "test" {
+		t.Errorf("name = %q", sf.Scenario.Name)
+	}
+	if sf.Scenario.Goal != "do things" {
+		t.Errorf("goal = %q", sf.Scenario.Goal)
+	}
+}
+
+func TestParseScenarioFileErrors(t *testing.T) {
+	tests := []struct {
+		name    string
+		data    string
+		wantErr string
+	}{
+		{"bad version", `version = 2
+[scenario]
+name = "test"
+[[sessions]]
+name = "a"
+repo = "/tmp"`, "unsupported scenario version"},
+		{"no name", `version = 1
+[scenario]
+goal = "test"
+[[sessions]]
+name = "a"
+repo = "/tmp"`, "scenario.name is required"},
+		{"no sessions", `version = 1
+[scenario]
+name = "test"`, "at least one [[sessions]] entry"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := parseScenarioFile([]byte(tt.data))
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("error = %q, want to contain %q", err.Error(), tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestListAvailableScenarios(t *testing.T) {
+	tmpDir := t.TempDir()
+	scenarioDir := filepath.Join(tmpDir, "scenarios")
+	if err := os.MkdirAll(scenarioDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Save old paths, set up test paths.
+	oldPaths := paths
+	paths.ConfigFile = filepath.Join(tmpDir, "config.toml")
+	defer func() { paths = oldPaths }()
+
+	// Write a valid scenario file.
+	if err := os.WriteFile(filepath.Join(scenarioDir, "test.toml"), []byte(`
+version = 1
+
+[scenario]
+name = "test"
+goal = "Test goal"
+
+[[sessions]]
+name = "a"
+repo = "/tmp/repo"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Write an invalid file — should be skipped.
+	if err := os.WriteFile(filepath.Join(scenarioDir, "bad.toml"), []byte("invalid"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Write a non-TOML file — should be skipped.
+	if err := os.WriteFile(filepath.Join(scenarioDir, "readme.md"), []byte("# hi"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	available := listAvailableScenarios()
+	if len(available) != 1 {
+		t.Fatalf("expected 1 available scenario, got %d", len(available))
+	}
+	if available[0].Name != "test" {
+		t.Errorf("name = %q, want 'test'", available[0].Name)
+	}
+	if available[0].Goal != "Test goal" {
+		t.Errorf("goal = %q", available[0].Goal)
+	}
+}
+
+func TestResolveScenarioSource(t *testing.T) {
+	tmpDir := t.TempDir()
+	scenarioDir := filepath.Join(tmpDir, "scenarios")
+	if err := os.MkdirAll(scenarioDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	oldPaths := paths
+	paths.ConfigFile = filepath.Join(tmpDir, "config.toml")
+	defer func() { paths = oldPaths }()
+
+	content := []byte("test content")
+	if err := os.WriteFile(filepath.Join(scenarioDir, "my-scenario.toml"), content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Resolve by name (without .toml).
+	data, err := resolveScenarioSource("my-scenario")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "test content" {
+		t.Errorf("data = %q", data)
+	}
+
+	// Resolve by name with .toml.
+	data, err = resolveScenarioSource("my-scenario.toml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "test content" {
+		t.Errorf("data = %q", data)
+	}
+
+	// Not found.
+	_, err = resolveScenarioSource("nonexistent")
+	if err == nil {
+		t.Fatal("expected error for nonexistent scenario")
+	}
+
+	// Direct file path.
+	directFile := filepath.Join(tmpDir, "direct.toml")
+	if err := os.WriteFile(directFile, []byte("direct"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	data, err = resolveScenarioSource(directFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "direct" {
+		t.Errorf("data = %q", data)
 	}
 }
