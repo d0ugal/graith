@@ -104,6 +104,14 @@ resolves the merged sandbox config (global + per-agent), expands `~` paths to
 absolute, and passes them as safehouse options. If safehouse is unavailable
 when sandbox is enabled, session creation fails closed.
 
+**Scenarios**: Declarative multi-session orchestration. A TOML file defines
+sessions (name, repo, agent, role, task), and `gr scenario start` creates
+them atomically with two-phase rollback. Each session gets a manifest (via
+inbox message + shared store) describing itself, its siblings, and the
+orchestrator. The daemon tracks scenarios in `ScenarioState` alongside
+sessions. Only the orchestrator session (`SystemKind: orchestrator`) can
+start scenarios.
+
 ## Environment variables
 
 The daemon sets these in every agent process:
@@ -121,7 +129,8 @@ These are used by `gr msg pub/sub` to identify the sender automatically.
 `GRAITH_TOKEN` is used by the CLI to authenticate with the daemon — agents
 cannot impersonate other sessions when this token is present.
 
-For scenario sessions, these additional env vars are set on resume/restart:
+For scenario sessions, these additional env vars are set at creation and on
+resume/restart:
 
 - `GRAITH_SCENARIO` — scenario ID
 - `GRAITH_SCENARIO_NAME` — scenario display name
@@ -323,6 +332,119 @@ gr logs fix-overlay --follow
 # Check health
 gr doctor
 ```
+
+### Scenarios (multi-session orchestration)
+
+Scenarios let you define a fleet of related sessions in a TOML file and launch
+them as a coordinated group. Each session knows about the others and can
+communicate with them via messaging.
+
+**TOML file format:**
+
+```toml
+version = 1
+
+[scenario]
+name = "tracing-pipeline"
+goal = "Build end-to-end distributed tracing"
+
+[[sessions]]
+name = "backend"
+repo = "~/Code/my-backend"
+agent = "claude"
+model = "claude-opus-4-8"
+role = "Backend engineer"
+task = "Add tracing ingest endpoint"
+
+[[sessions]]
+name = "frontend"
+repo = "~/Code/my-frontend"
+agent = "cursor"
+model = "gemini-3.1-pro"
+role = "Frontend developer"
+task = "Add trace export UI"
+agent_hooks = false
+```
+
+**Fields per session:**
+
+| Field | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `name` | yes | — | Session name (lowercase alphanumeric + hyphens) |
+| `repo` | yes | — | Repository path (`~` expanded) |
+| `agent` | no | config default | Agent type (`claude`, `codex`, `cursor`, etc.) |
+| `model` | no | agent default | Model override (fills `{model}` in agent args) |
+| `base` | no | repo default | Base branch for the worktree |
+| `role` | no | — | Human-readable role description |
+| `task` | no | — | Task/prompt sent to the agent on start |
+| `agent_hooks` | no | `true` | Enable agent hooks (check-inbox, etc.) |
+
+Unknown fields are rejected — typos in field names produce a parse error.
+
+**CLI commands:**
+
+```bash
+# Start a scenario (only works from the orchestrator session)
+gr scenario start scenario.toml
+cat scenario.toml | gr scenario start -
+
+# Check status
+gr scenario status tracing-pipeline
+gr scenario list
+
+# Stop all sessions in a scenario
+gr scenario stop tracing-pipeline
+
+# Delete scenario and all its sessions/worktrees
+gr scenario delete tracing-pipeline
+```
+
+**How it works internally:**
+
+1. The CLI parses the TOML and sends a `scenario_start` control message
+2. The daemon validates inputs, reserves placeholders, then creates each
+   session using the normal `Create` flow with scenario env vars injected
+3. After all sessions start, the daemon publishes a manifest to each
+   session's inbox and persists it to the shared store at
+   `scenarios/<id>/manifest-<name>.json`
+4. If any session fails to create, already-started sessions are rolled back
+
+**Manifest:** Each session receives a JSON manifest describing the scenario:
+
+```json
+{
+  "version": 1,
+  "scenario_id": "sc-abc123",
+  "scenario_name": "tracing-pipeline",
+  "goal": "Build end-to-end distributed tracing",
+  "you": {
+    "name": "backend",
+    "session_id": "def456",
+    "role": "Backend engineer",
+    "task": "Add tracing ingest endpoint"
+  },
+  "siblings": [
+    {
+      "name": "frontend",
+      "session_id": "ghi789",
+      "role": "Frontend developer",
+      "repo": "my-frontend"
+    }
+  ],
+  "orchestrator": {
+    "session_id": "orch-001",
+    "name": "orchestrator"
+  }
+}
+```
+
+Sessions can use `gr msg send <sibling-name> "message"` to coordinate with
+siblings, and `gr msg send --parent "message"` to report back to the
+orchestrator.
+
+**Constraints:** Only the orchestrator session (system kind `orchestrator`)
+can start scenarios. Scenario names must be globally unique. Session names
+within a scenario must not collide with existing sessions.
 
 ### Daemon management
 
