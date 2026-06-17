@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.52.1](https://github.com/d0ugal/graith/compare/v0.52.0...v0.52.1) (2026-06-22)
+
+
+### Bug Fixes
+
+* allow direct messaging between any authenticated sessions ([02bbe8e](https://github.com/d0ugal/graith/commit/02bbe8ef420dadbfce8ddb768f8de4a899701fc0)), closes [#536](https://github.com/d0ugal/graith/issues/536)
+* make msg send notification best-effort for cross-tree targets ([81cf4c6](https://github.com/d0ugal/graith/commit/81cf4c64f3e6a5b074edf111faecb5edb32a0bd0))
+* make TestTypeWakesSleepingAgent reliable on macOS ([94fe0e6](https://github.com/d0ugal/graith/commit/94fe0e6afe573d429a24d1e0ad74f679a7135bbc))
+
 ## [0.52.0](https://github.com/d0ugal/graith/compare/v0.51.0...v0.52.0) (2026-06-22)
 
 
