@@ -283,48 +283,56 @@ func (sm *SessionManager) ensureOrchestrator(ctx context.Context) {
 
 	sm.mu.RLock()
 	orchID := sm.findOrchestratorID()
-	var orchState *SessionState
+	var orchStatus SessionStatus
+	var orchStopReason string
 	if orchID != "" {
-		orchState = sm.state.Sessions[orchID]
+		if s := sm.state.Sessions[orchID]; s != nil {
+			orchStatus = s.Status
+			orchStopReason = s.StopReason
+		}
 	}
 	_, hasLivePTY := sm.sessions[orchID]
 	sm.mu.RUnlock()
 
 	switch {
-	case orchID == "" || orchState == nil:
+	case orchID == "":
 		sm.log.Info("creating orchestrator session")
 		if _, err := sm.createOrchestrator(ctx); err != nil {
 			sm.log.Error("failed to create orchestrator", "err", err)
 		}
 
-	case orchState.Status == StatusRunning && hasLivePTY:
+	case orchStatus == StatusRunning && hasLivePTY:
 		sm.log.Info("orchestrator already running", "id", orchID)
 
-	case orchState.Status == StatusRunning && !hasLivePTY:
+	case orchStatus == StatusRunning && !hasLivePTY:
 		sm.log.Info("orchestrator marked running but no live PTY, recovering", "id", orchID)
 		sm.mu.Lock()
-		orchState.Status = StatusStopped
-		orchState.StatusChangedAt = time.Now()
-		orchState.StopReason = "crash"
-		orchState.PID = 0
+		if s := sm.state.Sessions[orchID]; s != nil {
+			s.Status = StatusStopped
+			s.StatusChangedAt = time.Now()
+			s.StopReason = StopReasonCrash
+			s.PID = 0
+		}
 		_ = sm.saveState()
 		sm.mu.Unlock()
 		if _, err := sm.Resume(orchID, 24, 80); err != nil {
 			sm.log.Error("failed to resume orchestrator after recovery", "id", orchID, "err", err)
 		}
 
-	case orchState.Status == StatusStopped && orchState.StopReason == "user":
+	case orchStatus == StatusStopped && orchStopReason == StopReasonUser:
 		sm.log.Info("orchestrator stopped by user, clearing stop reason on boot", "id", orchID)
 		sm.mu.Lock()
-		orchState.StopReason = ""
+		if s := sm.state.Sessions[orchID]; s != nil {
+			s.StopReason = ""
+		}
 		_ = sm.saveState()
 		sm.mu.Unlock()
 		if _, err := sm.Resume(orchID, 24, 80); err != nil {
 			sm.log.Error("failed to resume user-stopped orchestrator on boot", "id", orchID, "err", err)
 		}
 
-	case orchState.Status == StatusStopped || orchState.Status == StatusErrored:
-		sm.log.Info("resuming orchestrator", "id", orchID, "status", orchState.Status)
+	case orchStatus == StatusStopped || orchStatus == StatusErrored:
+		sm.log.Info("resuming orchestrator", "id", orchID, "status", orchStatus)
 		if _, err := sm.Resume(orchID, 24, 80); err != nil {
 			sm.log.Error("failed to resume orchestrator", "id", orchID, "err", err)
 		}
@@ -412,6 +420,7 @@ func (sm *SessionManager) handleOrchestratorExit(ctx context.Context, id string)
 			b := make([]byte, 16)
 			_, _ = rand.Read(b)
 			s.AgentSessionID = fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+			s.FreshStart = true
 			sm.log.Info("regenerating orchestrator agent session ID for fresh start", "id", id)
 		}
 		_ = sm.saveState()
@@ -430,6 +439,7 @@ func (sm *SessionManager) notifyOrchestratorExit(id string) {
 		select {
 		case sm.orchestratorExitCh <- id:
 		default:
+			sm.log.Warn("orchestrator exit notification dropped, supervisor busy", "id", id)
 		}
 	}
 }
