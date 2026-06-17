@@ -141,8 +141,6 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 		env["GRAITH_PROFILE"] = sm.paths.Profile
 	}
 
-	command := agent.Command
-	finalArgs := expandedArgs
 	merged := sandboxMerged
 	merged.ReadDirs = expandPaths(merged.ReadDirs, sm.log, "read")
 	merged.WriteDirs = expandPaths(merged.WriteDirs, sm.log, "write")
@@ -161,7 +159,7 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 	opts.WriteDirs = append(opts.WriteDirs, store.SharedStorePath(sm.paths.DataDir))
 	opts.WriteDirs = append(opts.WriteDirs, scratchDir)
 
-	command, finalArgs = sandbox.Wrap(agent.Command, expandedArgs, opts)
+	command, finalArgs := sandbox.Wrap(agent.Command, expandedArgs, opts)
 	sm.log.Info("sandboxing orchestrator", "id", id,
 		"command", command, "read_dirs", opts.ReadDirs, "write_dirs", opts.WriteDirs,
 		"workdir", opts.WorktreeDir)
