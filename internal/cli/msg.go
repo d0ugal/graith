@@ -160,15 +160,7 @@ var msgSendCmd = &cobra.Command{
 				SessionID: sessionID,
 				Input:     hint,
 			})
-			typeResp, err := c.ReadControlResponse()
-			if err != nil {
-				return fmt.Errorf("failed to notify session: %w", err)
-			}
-			if typeResp.Type == "error" {
-				var e protocol.ErrorMsg
-				protocol.DecodePayload(typeResp, &e)
-				return fmt.Errorf("failed to notify session: %s", e.Message)
-			}
+			c.ReadControlResponse() //nolint:errcheck // notification is best-effort
 		}
 
 		if jsonOutput {
