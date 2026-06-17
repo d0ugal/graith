@@ -505,6 +505,22 @@ type overlayModel struct {
 	collapsed        map[string]bool
 }
 
+func (m *overlayModel) resizeList() {
+	if m.width == 0 || m.height == 0 {
+		return
+	}
+	reserve := 10
+	if m.state == stateConfirmDelete || m.state == stateConfirmRestart || m.state == stateConfirmRestartAll {
+		reserve = 14
+	}
+	panelWidth := min(m.contentWidth+4, m.width-4)
+	listHeight := min(len(m.list.Items())+4, m.height-reserve)
+	if listHeight < 4 {
+		listHeight = 4
+	}
+	m.list.SetSize(panelWidth-4, listHeight)
+}
+
 // OverlayResult holds the outcome of the overlay interaction.
 type OverlayResult struct {
 	Action    string
@@ -868,6 +884,7 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case deleteResultMsg:
 		if msg.err != nil {
 			m.state = stateList
+			m.resizeList()
 			return m, nil
 		}
 		var newSessions []protocol.SessionInfo
@@ -895,25 +912,23 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.state = stateList
+		m.resizeList()
 		return m, m.fetchPreviewCmd()
 
 	case restartResultMsg:
 		m.state = stateList
+		m.resizeList()
 		return m, m.fetchPreviewCmd()
 
 	case restartAllResultMsg:
 		m.state = stateList
+		m.resizeList()
 		return m, m.fetchPreviewCmd()
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		panelWidth := min(m.contentWidth+4, msg.Width-4)
-		listHeight := min(len(m.list.Items())+4, msg.Height-14)
-		if listHeight < 4 {
-			listHeight = 4
-		}
-		m.list.SetSize(panelWidth-4, listHeight)
+		m.resizeList()
 		return m, nil
 
 	case tea.KeyPressMsg:
@@ -968,9 +983,11 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 				m.state = stateList
+				m.resizeList()
 				return m, nil
 			default:
 				m.state = stateList
+				m.resizeList()
 				return m, nil
 			}
 
@@ -985,9 +1002,11 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 				m.state = stateList
+				m.resizeList()
 				return m, nil
 			default:
 				m.state = stateList
+				m.resizeList()
 				return m, nil
 			}
 
@@ -1008,9 +1027,11 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 				m.state = stateList
+				m.resizeList()
 				return m, nil
 			default:
 				m.state = stateList
+				m.resizeList()
 				return m, nil
 			}
 
@@ -1038,17 +1059,20 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "x":
 				if _, ok := m.list.SelectedItem().(sessionItem); ok {
 					m.state = stateConfirmDelete
+					m.resizeList()
 				}
 				return m, nil
 
 			case "r":
 				if _, ok := m.list.SelectedItem().(sessionItem); ok {
 					m.state = stateConfirmRestart
+					m.resizeList()
 				}
 				return m, nil
 
 			case "R":
 				m.state = stateConfirmRestartAll
+				m.resizeList()
 				return m, nil
 
 			case "s":
@@ -1411,15 +1435,13 @@ func (m overlayModel) View() tea.View {
 		offsetX = 0
 	}
 
-	leftPad := strings.Repeat(" ", offsetX)
 	for i, pl := range panelLines {
 		row := offsetY + i
 		if row >= 0 && row < h {
-			line := leftPad + pl
-			if vis := lipgloss.Width(line); vis < w {
-				line += strings.Repeat(" ", w-vis)
-			}
-			bgLines[row] = line
+			bg := bgLines[row]
+			left := ansi.Truncate(bg, offsetX, "")
+			right := ansi.TruncateLeft(bg, offsetX+panelRenderedW, "")
+			bgLines[row] = left + pl + right
 		}
 	}
 
