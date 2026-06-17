@@ -70,6 +70,7 @@ Cycle with `h`/`l` or left/right arrow keys:
 
 | Key | Action |
 |-----|--------|
+| `n` | Create a new session (opens a form with name and repo fields) |
 | `x` | Delete session (prompts for confirmation with `y`) |
 | `s` | Star/unstar session |
 | `r` | Restart session (prompts for confirmation) |
