@@ -119,7 +119,8 @@ type RestartMsg struct {
 }
 
 type UpgradeMsg struct {
-	ExecPath string `json:"exec_path,omitempty"`
+	ExecPath      string `json:"exec_path,omitempty"`
+	ClientVersion string `json:"client_version,omitempty"`
 }
 
 type ResizeMsg struct {
