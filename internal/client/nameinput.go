@@ -49,6 +49,9 @@ func (m nameInputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "esc", "ctrl+c":
 			return m, tea.Quit
+		case " ", "space":
+			m.input.SetValue(m.input.Value() + "-")
+			return m, nil
 		}
 	}
 	var cmd tea.Cmd
