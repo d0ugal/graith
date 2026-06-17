@@ -73,8 +73,9 @@ func TestDiscoverRepos_AllowedPathIsRepo(t *testing.T) {
 	if len(repos) != 1 {
 		t.Fatalf("expected 1 repo, got %d", len(repos))
 	}
-	if repos[0].Path != base {
-		t.Errorf("expected path %s, got %s", base, repos[0].Path)
+	resolved, _ := filepath.EvalSymlinks(base)
+	if repos[0].Path != resolved {
+		t.Errorf("expected path %s, got %s", resolved, repos[0].Path)
 	}
 }
 
