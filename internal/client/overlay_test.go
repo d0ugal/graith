@@ -381,6 +381,29 @@ func TestBuildGroupedItems_CollapseChildButNotRoot(t *testing.T) {
 	}
 }
 
+func TestBuildGroupedItems_CollapsedCyclicParents(t *testing.T) {
+	now := time.Now().Format(time.RFC3339)
+	sessions := []protocol.SessionInfo{
+		{ID: "a", Name: "alpha", ParentID: "b", RepoName: "repo", Status: "running", CreatedAt: now},
+		{ID: "b", Name: "beta", ParentID: "a", RepoName: "repo", Status: "running", CreatedAt: now},
+	}
+	// Collapsing a cycle member must not stack overflow
+	collapsed := map[string]bool{"a": true}
+	items := buildGroupedItems(sessions, collapsed)
+
+	// In a cycle, a is b's parent and b is a's parent. Collapsing a
+	// hides b (its child). The key assertion: no stack overflow.
+	sessionCount := 0
+	for _, item := range items {
+		if _, ok := item.(sessionItem); ok {
+			sessionCount++
+		}
+	}
+	if sessionCount != 1 {
+		t.Errorf("expected 1 session (collapsed cycle hides the other), got %d", sessionCount)
+	}
+}
+
 func TestBuildGroupedItems_HasChildrenFlagOnParent(t *testing.T) {
 	now := time.Now().Format(time.RFC3339)
 	sessions := []protocol.SessionInfo{

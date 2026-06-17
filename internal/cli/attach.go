@@ -58,19 +58,19 @@ func runAttach(cmd *cobra.Command, name string) error {
 		if result == nil || result.Action == "" {
 			return nil
 		}
-		return runAttachByID(c, result.SessionID)
+		return runAttachByID(c, result.SessionID, result.Collapsed)
 	}
 
 	for _, s := range list.Sessions {
 		if s.Name == name || s.ID == name {
-			return runAttachByID(c, s.ID)
+			return runAttachByID(c, s.ID, nil)
 		}
 	}
 
 	return fmt.Errorf("session %q not found", name)
 }
 
-func runAttachByID(c *client.Client, sessionID string) error {
+func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[string]bool) error {
 	c.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
 	resp, err := c.ReadControlResponse()
 	if err != nil {
@@ -113,7 +113,7 @@ func runAttachByID(c *client.Client, sessionID string) error {
 	}
 
 	prevSessionID := ""
-	var overlayCollapsed map[string]bool
+	overlayCollapsed := initialCollapsed
 
 	opts := client.PassthroughOpts{
 		Keys:      keys,
