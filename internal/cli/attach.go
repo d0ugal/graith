@@ -63,9 +63,29 @@ func runAttach(cmd *cobra.Command, name string) error {
 	}
 
 	if name == "" {
-		result := client.RunOverlay(list.Sessions, "", previewFetcher(), sessionRefresher(), deleteSession, restartSession, toggleStar, paths.Profile, nil)
+		repos := client.DiscoverRepos(cfg.AllowedRepoPaths, list.Sessions)
+		result := client.RunOverlay(list.Sessions, "", previewFetcher(), sessionRefresher(), deleteSession, restartSession, toggleStar, paths.Profile, nil, repos)
 		if result == nil || result.Action == "" {
 			return nil
+		}
+		if result.Action == "create" {
+			c.SendControl("create", protocol.CreateMsg{
+				Name:     result.CreateName,
+				RepoPath: result.CreateRepoPath,
+			})
+			createResp, err := c.ReadControlResponse()
+			if err != nil {
+				return err
+			}
+			if createResp.Type == "error" {
+				var e protocol.ErrorMsg
+				protocol.DecodePayload(createResp, &e)
+				out.Print("Create failed: %s\n", e.Message)
+				return nil
+			}
+			var newInfo protocol.SessionInfo
+			protocol.DecodePayload(createResp, &newInfo)
+			return runAttachByID(c, newInfo.ID, result.Collapsed)
 		}
 		return runAttachByID(c, result.SessionID, result.Collapsed)
 	}
@@ -145,7 +165,8 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 			var list protocol.SessionListMsg
 			protocol.DecodePayload(listResp, &list)
 
-			overlayResult := client.RunOverlay(list.Sessions, sessionID, previewFetcher(), sessionRefresher(), deleteSession, restartSession, toggleStar, paths.Profile, overlayCollapsed)
+			repos := client.DiscoverRepos(cfg.AllowedRepoPaths, list.Sessions)
+			overlayResult := client.RunOverlay(list.Sessions, sessionID, previewFetcher(), sessionRefresher(), deleteSession, restartSession, toggleStar, paths.Profile, overlayCollapsed, repos)
 			if overlayResult != nil {
 				overlayCollapsed = overlayResult.Collapsed
 			}
@@ -154,6 +175,48 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 				nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
 				attachResp, _ := nc.ReadControlResponse()
 				protocol.DecodePayload(attachResp, &info)
+				opts.SessionID = sessionID
+				opts.Info = &info
+				c = nc
+				continue
+			}
+			if overlayResult.Action == "create" {
+				nc.SendControl("create", protocol.CreateMsg{
+					Name:     overlayResult.CreateName,
+					RepoPath: overlayResult.CreateRepoPath,
+				})
+				createResp, err := nc.ReadControlResponse()
+				if err != nil {
+					nc.Close()
+					return err
+				}
+				if createResp.Type == "error" {
+					var e protocol.ErrorMsg
+					protocol.DecodePayload(createResp, &e)
+					out.Print("Create failed: %s\n", e.Message)
+					nc2, err := freshClient()
+					if err != nil {
+						nc.Close()
+						return err
+					}
+					nc.Close()
+					restoreScreen(sessionID)
+					nc2.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+					attachResp, _ := nc2.ReadControlResponse()
+					protocol.DecodePayload(attachResp, &info)
+					opts.SessionID = sessionID
+					opts.Info = &info
+					c = nc2
+					continue
+				}
+				var newInfo protocol.SessionInfo
+				protocol.DecodePayload(createResp, &newInfo)
+				restoreScreen(newInfo.ID)
+				nc.SendControl("attach", protocol.AttachMsg{SessionID: newInfo.ID})
+				attachResp, _ := nc.ReadControlResponse()
+				protocol.DecodePayload(attachResp, &info)
+				prevSessionID = sessionID
+				sessionID = newInfo.ID
 				opts.SessionID = sessionID
 				opts.Info = &info
 				c = nc
@@ -300,12 +363,21 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 			continue
 
 		case client.ResultNewSession:
-			name := client.RunNameInput("New Session")
+			nc, err := freshClient()
+			if err != nil {
+				return err
+			}
+			nc.SendControl("list", struct{}{})
+			listResp, err := nc.ReadControlResponse()
+			if err != nil {
+				nc.Close()
+				return err
+			}
+			var newSessionList protocol.SessionListMsg
+			protocol.DecodePayload(listResp, &newSessionList)
+			repos := client.DiscoverRepos(cfg.AllowedRepoPaths, newSessionList.Sessions)
+			name, repoPath := client.RunCreateInput(info.RepoPath, repos)
 			if name == "" {
-				nc, err := freshClient()
-				if err != nil {
-					return err
-				}
 				restoreScreen(sessionID)
 				nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
 				attachResp, _ := nc.ReadControlResponse()
@@ -315,13 +387,9 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 				c = nc
 				continue
 			}
-			nc, err := freshClient()
-			if err != nil {
-				return err
-			}
 			nc.SendControl("create", protocol.CreateMsg{
 				Name:     name,
-				RepoPath: info.RepoPath,
+				RepoPath: repoPath,
 			})
 			createResp, err := nc.ReadControlResponse()
 			if err != nil {
