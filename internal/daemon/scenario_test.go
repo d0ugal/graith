@@ -401,6 +401,118 @@ func TestBuildManifest(t *testing.T) {
 	}
 }
 
+func TestScenarioTaskDone(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	sm.mu.Lock()
+	sm.state.Scenarios["sc-1"] = &ScenarioState{
+		ID:         "sc-1",
+		Name:       "test-scenario",
+		SessionIDs: []string{"s1", "s2"},
+		Sessions: []ScenarioSession{
+			{Name: "backend", Task: "build API"},
+			{Name: "frontend", Task: "build UI"},
+		},
+	}
+	sm.state.Sessions["s1"] = &SessionState{ID: "s1", Name: "backend", Status: StatusRunning, ScenarioID: "sc-1"}
+	sm.state.Sessions["s2"] = &SessionState{ID: "s2", Name: "frontend", Status: StatusRunning, ScenarioID: "sc-1"}
+	sm.mu.Unlock()
+
+	if err := sm.ScenarioTaskDone("test-scenario", "s1"); err != nil {
+		t.Fatal(err)
+	}
+
+	sm.mu.RLock()
+	sc := sm.state.Scenarios["sc-1"]
+	if !sc.Sessions[0].TaskDone {
+		t.Error("session 0 should be marked as task done")
+	}
+	if sc.Sessions[1].TaskDone {
+		t.Error("session 1 should not be marked as task done")
+	}
+	sm.mu.RUnlock()
+
+	if err := sm.ScenarioTaskDone("test-scenario", "nonexistent"); err == nil {
+		t.Error("expected error for nonexistent session")
+	}
+
+	if err := sm.ScenarioTaskDone("nonexistent-scenario", "s1"); err == nil {
+		t.Error("expected error for nonexistent scenario")
+	}
+}
+
+func TestScenarioTaskDoneInRecord(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	sm.mu.Lock()
+	sm.state.Scenarios["sc-1"] = &ScenarioState{
+		ID:         "sc-1",
+		Name:       "test-scenario",
+		SessionIDs: []string{"s1"},
+		Sessions: []ScenarioSession{
+			{Name: "backend", Task: "build API", TaskDone: true},
+		},
+	}
+	sm.state.Sessions["s1"] = &SessionState{ID: "s1", Name: "backend", Status: StatusRunning}
+	record := sm.buildScenarioRecord(sm.state.Scenarios["sc-1"])
+	sm.mu.Unlock()
+
+	if !record.Sessions[0].TaskDone {
+		t.Error("record should reflect task_done")
+	}
+}
+
+func TestResumeScenarioNotFound(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	_, err := sm.ResumeScenario("nonexistent", 24, 80)
+	if err == nil {
+		t.Fatal("expected error for nonexistent scenario")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("error = %q, want to contain 'not found'", err.Error())
+	}
+}
+
+func TestAddToScenarioNotFound(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	_, err := sm.AddToScenario("nonexistent", protocol.ScenarioSessionInput{
+		Name: "new-session",
+		Repo: "/tmp/repo",
+	}, 24, 80)
+	if err == nil {
+		t.Fatal("expected error for nonexistent scenario")
+	}
+}
+
+func TestAddToScenarioValidation(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	sm.mu.Lock()
+	sm.state.Scenarios["sc-1"] = &ScenarioState{
+		ID:   "sc-1",
+		Name: "test",
+	}
+	sm.mu.Unlock()
+
+	_, err := sm.AddToScenario("test", protocol.ScenarioSessionInput{
+		Name: "",
+		Repo: "/tmp",
+	}, 24, 80)
+	if err == nil {
+		t.Fatal("expected error for empty name")
+	}
+
+	_, err = sm.AddToScenario("test", protocol.ScenarioSessionInput{
+		Name: "valid",
+		Repo: "",
+	}, 24, 80)
+	if err == nil {
+		t.Fatal("expected error for empty repo")
+	}
+}
+
 func TestMigrateV10ToV11(t *testing.T) {
 	state := &State{
 		Version:  10,
