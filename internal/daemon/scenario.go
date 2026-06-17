@@ -37,15 +37,19 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 		return nil, fmt.Errorf("scenario must define at least one session")
 	}
 
-	// Validate caller is orchestrator.
+	// Validate caller is orchestrator (snapshot under lock).
 	sm.mu.RLock()
-	callerSess, callerOk := sm.state.Sessions[msg.CallerSessionID]
+	callerSess := sm.state.Sessions[msg.CallerSessionID]
+	var callerSystemKind string
+	if callerSess != nil {
+		callerSystemKind = callerSess.SystemKind
+	}
 	sm.mu.RUnlock()
 
-	if !callerOk {
+	if callerSess == nil {
 		return nil, fmt.Errorf("caller session %q not found", msg.CallerSessionID)
 	}
-	if callerSess.SystemKind != SystemKindOrchestrator {
+	if callerSystemKind != SystemKindOrchestrator {
 		return nil, fmt.Errorf("only the orchestrator session can start scenarios")
 	}
 
@@ -144,7 +148,7 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 			Shared: s.Shared,
 		}
 
-		// For shared sessions, try to reuse an existing running session.
+		// Shared sessions must reuse an existing running session.
 		if s.Shared {
 			for existID, existing := range sm.state.Sessions {
 				if existing.Name == s.Name && existing.Status == StatusRunning {
@@ -156,6 +160,8 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 			if sharedReused[i] {
 				continue
 			}
+			sm.mu.Unlock()
+			return nil, fmt.Errorf("shared session %q: no running session with that name exists", s.Name)
 		}
 
 		id := generateID()
@@ -174,6 +180,7 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 			CreatedAt:       now,
 			StatusChangedAt: now,
 			ScenarioID:      scenarioID,
+			ScenarioName:    msg.Name,
 			ScenarioRole:    s.Role,
 			ScenarioGoal:    msg.Goal,
 		}
@@ -282,6 +289,7 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 		sm.mu.Lock()
 		if created, ok := sm.state.Sessions[r.sess.ID]; ok {
 			created.ScenarioID = scenarioID
+			created.ScenarioName = msg.Name
 			created.ScenarioRole = msg.Sessions[i].Role
 			created.ScenarioGoal = msg.Goal
 		}
@@ -321,9 +329,17 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 	// Update the scenario with final session IDs.
 	sm.mu.Lock()
 	scenario = sm.state.Scenarios[scenarioID]
-	if scenario != nil {
-		scenario.SessionIDs = sessionIDs
+	if scenario == nil {
+		sm.mu.Unlock()
+		for _, id := range startedIDs {
+			if err := sm.stopWithReason(id, StopReasonUser); err != nil {
+				sm.log.Warn("scenario deleted during creation: stop failed", "session", id, "err", err)
+			}
+			_ = sm.Delete(id)
+		}
+		return nil, fmt.Errorf("scenario %q was deleted during session creation", msg.Name)
 	}
+	scenario.SessionIDs = sessionIDs
 	_ = sm.saveState()
 	sm.mu.Unlock()
 
@@ -473,9 +489,13 @@ func (sm *SessionManager) StopScenario(name string) ([]string, error) {
 			continue
 		}
 		sm.mu.RLock()
-		sess, ok := sm.state.Sessions[id]
+		sess := sm.state.Sessions[id]
+		var status SessionStatus
+		if sess != nil {
+			status = sess.Status
+		}
 		sm.mu.RUnlock()
-		if !ok || sess.Status != StatusRunning {
+		if sess == nil || status != StatusRunning {
 			continue
 		}
 		if err := sm.stopWithReason(id, StopReasonUser); err != nil {
@@ -518,9 +538,13 @@ func (sm *SessionManager) DeleteScenario(name string) ([]string, error) {
 			continue
 		}
 		sm.mu.RLock()
-		sess, ok := sm.state.Sessions[id]
+		sess := sm.state.Sessions[id]
+		var status SessionStatus
+		if sess != nil {
+			status = sess.Status
+		}
 		sm.mu.RUnlock()
-		if ok && sess.Status == StatusRunning {
+		if sess != nil && status == StatusRunning {
 			_ = sm.stopWithReason(id, StopReasonUser)
 		}
 	}
@@ -618,12 +642,16 @@ func (sm *SessionManager) ResumeScenario(name string, rows, cols uint16) ([]stri
 	var resumed []string
 	for _, id := range sessionIDs {
 		sm.mu.RLock()
-		sess, ok := sm.state.Sessions[id]
+		sess := sm.state.Sessions[id]
+		var status SessionStatus
+		if sess != nil {
+			status = sess.Status
+		}
 		sm.mu.RUnlock()
-		if !ok {
+		if sess == nil {
 			continue
 		}
-		if sess.Status != StatusStopped && sess.Status != StatusErrored {
+		if status != StatusStopped && status != StatusErrored {
 			continue
 		}
 		if _, err := sm.Resume(id, rows, cols); err != nil {
@@ -750,6 +778,7 @@ func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSess
 
 	if created, ok := sm.state.Sessions[sess.ID]; ok {
 		created.ScenarioID = scenarioID
+		created.ScenarioName = name
 		created.ScenarioRole = input.Role
 		created.ScenarioGoal = goal
 	}

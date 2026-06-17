@@ -1027,9 +1027,11 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid scenario_start message"})
 					continue
 				}
-				if auth.authenticated {
-					s.CallerSessionID = auth.sessionID
+				if !auth.authenticated {
+					sendControl("error", protocol.ErrorMsg{Message: "scenario_start requires authentication"})
+					continue
 				}
+				s.CallerSessionID = auth.sessionID
 				scenario, err := sm.StartScenario(s, clientRows, clientCols)
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
@@ -1044,6 +1046,13 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid scenario_stop message"})
 					continue
 				}
+				sm.mu.RLock()
+				if err := auth.checkScenarioOp(sm, s.Name); err != nil {
+					sm.mu.RUnlock()
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+					continue
+				}
+				sm.mu.RUnlock()
 				stopped, err := sm.StopScenario(s.Name)
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
@@ -1060,6 +1069,13 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid scenario_delete message"})
 					continue
 				}
+				sm.mu.RLock()
+				if err := auth.checkScenarioOp(sm, s.Name); err != nil {
+					sm.mu.RUnlock()
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+					continue
+				}
+				sm.mu.RUnlock()
 				deleted, err := sm.DeleteScenario(s.Name)
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
@@ -1089,6 +1105,13 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid scenario_resume message"})
 					continue
 				}
+				sm.mu.RLock()
+				if err := auth.checkScenarioOp(sm, s.Name); err != nil {
+					sm.mu.RUnlock()
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+					continue
+				}
+				sm.mu.RUnlock()
 				resumed, err := sm.ResumeScenario(s.Name, clientRows, clientCols)
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
@@ -1127,6 +1150,13 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid scenario_add message"})
 					continue
 				}
+				sm.mu.RLock()
+				if err := auth.checkScenarioOp(sm, s.Name); err != nil {
+					sm.mu.RUnlock()
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+					continue
+				}
+				sm.mu.RUnlock()
 				sess, err := sm.AddToScenario(s.Name, s.Session, clientRows, clientCols)
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
@@ -1223,6 +1253,7 @@ func toSessionInfo(s SessionState, cfg *config.Config, hr *hookReport) protocol.
 		Starred:        s.Starred,
 		SystemKind:     s.SystemKind,
 		ScenarioID:     s.ScenarioID,
+		ScenarioName:   s.ScenarioName,
 	}
 	if s.LastAttachedAt != nil {
 		info.LastAttachedAt = s.LastAttachedAt.Format(time.RFC3339)

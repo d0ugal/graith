@@ -261,6 +261,7 @@ type SessionInfo struct {
 	Starred         bool               `json:"starred,omitempty"`
 	SystemKind      string             `json:"system_kind,omitempty"`
 	ScenarioID      string             `json:"scenario_id,omitempty"`
+	ScenarioName    string             `json:"scenario_name,omitempty"`
 	SummaryText     string             `json:"summary_text,omitempty"`
 	SummaryFaded    bool               `json:"summary_faded,omitempty"`
 	LastOutputAt    string             `json:"last_output_at,omitempty"`

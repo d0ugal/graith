@@ -36,9 +36,10 @@ const (
 	viewNeedsAttention
 	viewActive
 	viewStarred
+	viewScenario
 )
 
-var viewNames = []string{"All", "Needs Attention", "Active", "Starred"}
+var viewNames = []string{"All", "Needs Attention", "Active", "Starred", "Scenarios"}
 
 func (v viewMode) next() viewMode {
 	return (v + 1) % viewMode(len(viewNames))
@@ -700,6 +701,94 @@ func buildGroupedItems(sessions []protocol.SessionInfo, collapsed map[string]boo
 	return items
 }
 
+func buildScenarioGroupedItems(sessions []protocol.SessionInfo, collapsed map[string]bool) []list.Item {
+	type scenarioGroup struct {
+		name     string
+		sessions []protocol.SessionInfo
+	}
+
+	scenarioMap := map[string]*scenarioGroup{}
+	var scenarioOrder []string
+	var ungrouped []protocol.SessionInfo
+
+	for _, s := range sessions {
+		sid := s.ScenarioID
+		if sid == "" {
+			ungrouped = append(ungrouped, s)
+			continue
+		}
+		if _, ok := scenarioMap[sid]; !ok {
+			scenarioOrder = append(scenarioOrder, sid)
+			scenarioMap[sid] = &scenarioGroup{sessions: nil}
+		}
+		scenarioMap[sid].sessions = append(scenarioMap[sid].sessions, s)
+	}
+
+	for _, sid := range scenarioOrder {
+		g := scenarioMap[sid]
+		if len(g.sessions) > 0 {
+			name := sid
+			for _, s := range g.sessions {
+				if s.ScenarioName != "" {
+					name = s.ScenarioName
+					break
+				}
+			}
+			g.name = name
+		}
+	}
+
+	var items []list.Item
+
+	for _, sid := range scenarioOrder {
+		g := scenarioMap[sid]
+		if g.name == "" {
+			continue
+		}
+		SortSessions(g.sessions)
+
+		running := 0
+		stopped := 0
+		errored := 0
+		for _, s := range g.sessions {
+			switch s.Status {
+			case "running":
+				running++
+			case "stopped":
+				stopped++
+			case "errored":
+				errored++
+			}
+		}
+		var status string
+		switch {
+		case errored > 0:
+			status = " (errored)"
+		case running > 0 && stopped > 0:
+			status = " (partial)"
+		case running == len(g.sessions):
+			status = " (running)"
+		case stopped == len(g.sessions):
+			status = " (stopped)"
+		}
+
+		items = append(items, groupHeader{name: sid + status, count: len(g.sessions)})
+		for _, s := range g.sessions {
+			items = append(items, sessionItem{info: s})
+		}
+	}
+
+	if len(ungrouped) > 0 {
+		SortSessions(ungrouped)
+		items = append(items, groupHeader{name: "(no scenario)", count: len(ungrouped)})
+		for _, s := range ungrouped {
+			items = append(items, sessionItem{info: s})
+		}
+	}
+
+	return items
+}
+
 func maxTreeIndentFromItems(items []list.Item) int {
 	maxIndent := 0
 	for _, item := range items {
@@ -842,16 +931,19 @@ func (m *overlayModel) rebuildForView() {
 	}
 
 	var items []list.Item
-	if m.view == viewAll {
+	switch m.view {
+	case viewAll:
 		items = buildGroupedItems(filtered, m.collapsed)
-	} else {
+	case viewScenario:
+		items = buildScenarioGroupedItems(filtered, m.collapsed)
+	default:
 		for _, s := range filtered {
 			items = append(items, sessionItem{info: s})
 		}
 	}
 
 	m.cols = computeColumnWidths(filtered, m.currentSessionID)
-	if m.view == viewAll {
+	if m.view == viewAll || m.view == viewScenario {
 		m.cols.treeIndent = maxTreeIndentFromItems(items)
 	}
 	m.contentWidth = m.cols.totalWidth()

@@ -84,6 +84,7 @@ type SessionState struct {
 	CreationCfg            *CreationConfig       `json:"creation_config,omitempty"`
 	Token                  string                `json:"token,omitempty"`
 	ScenarioID             string                `json:"scenario_id,omitempty"`
+	ScenarioName           string                `json:"scenario_name,omitempty"`
 	ScenarioRole           string                `json:"scenario_role,omitempty"`
 	ScenarioGoal           string                `json:"scenario_goal,omitempty"`
 }

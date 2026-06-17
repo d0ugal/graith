@@ -2729,14 +2729,18 @@ func TestViewModeCycling(t *testing.T) {
 		t.Errorf("Active.next() = %d, want viewStarred", v)
 	}
 	v = v.next()
+	if v != viewScenario {
+		t.Errorf("Starred.next() = %d, want viewScenario", v)
+	}
+	v = v.next()
 	if v != viewAll {
-		t.Errorf("Starred.next() = %d, want viewAll (wrap)", v)
+		t.Errorf("Scenario.next() = %d, want viewAll (wrap)", v)
 	}
 
 	v = viewAll
 	v = v.prev()
-	if v != viewStarred {
-		t.Errorf("All.prev() = %d, want viewStarred (wrap)", v)
+	if v != viewScenario {
+		t.Errorf("All.prev() = %d, want viewScenario (wrap)", v)
 	}
 }
 
@@ -2770,8 +2774,14 @@ func TestOverlay_RightArrowCyclesView(t *testing.T) {
 
 	updated, _ = sendKey(updated, "right")
 	om = asOverlay(updated)
+	if om.view != viewScenario {
+		t.Errorf("after 4x right: view = %d, want viewScenario", om.view)
+	}
+
+	updated, _ = sendKey(updated, "right")
+	om = asOverlay(updated)
 	if om.view != viewAll {
-		t.Errorf("after 4x right: view = %d, want viewAll (wrap)", om.view)
+		t.Errorf("after 5x right: view = %d, want viewAll (wrap)", om.view)
 	}
 }
 
@@ -2782,8 +2792,8 @@ func TestOverlay_LeftArrowCyclesViewBackward(t *testing.T) {
 
 	updated, _ = sendKey(updated, "left")
 	om := asOverlay(updated)
-	if om.view != viewStarred {
-		t.Errorf("after left from All: view = %d, want viewStarred (wrap)", om.view)
+	if om.view != viewScenario {
+		t.Errorf("after left from All: view = %d, want viewScenario (wrap)", om.view)
 	}
 }
 
