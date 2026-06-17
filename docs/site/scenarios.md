@@ -64,8 +64,14 @@ agent_hooks = false
 | `role` | no | — | Human-readable role description |
 | `task` | no | — | Task/prompt sent to the agent on start |
 | `agent_hooks` | no | `true` | Enable agent hooks (check-inbox, etc.) |
+| `shared` | no | `false` | Reuse an existing running session by name |
 
 Unknown fields are rejected — typos produce a parse error rather than being silently ignored.
+
+**Shared sessions:** Set `shared = true` to reference an existing running
+session instead of creating a new one. The named session must already be
+running. Shared sessions participate in the scenario (receive manifests, appear
+in status) but are never stopped or deleted by scenario lifecycle operations.
 
 ## CLI commands
 

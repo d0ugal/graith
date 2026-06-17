@@ -382,8 +382,16 @@ agent_hooks = false
 | `role` | no | — | Human-readable role description |
 | `task` | no | — | Task/prompt sent to the agent on start |
 | `agent_hooks` | no | `true` | Enable agent hooks (check-inbox, etc.) |
+| `shared` | no | `false` | Reuse an existing running session by name |
 
 Unknown fields are rejected — typos in field names produce a parse error.
+
+**Shared sessions:** A session with `shared = true` reuses an existing running
+session instead of creating a new one. The named session must already exist and
+be running — otherwise the scenario start fails. Shared sessions receive
+manifests and appear in `gr scenario status` but are never stopped or deleted
+by scenario lifecycle operations. This is useful for including the orchestrator
+itself or long-running service sessions in a scenario.
 
 **Scenario file location:** Place scenario TOML files in
 `~/.config/graith/scenarios/` (next to `config.toml`). Files in this
@@ -462,9 +470,17 @@ Sessions can use `gr msg send <sibling-name> "message"` to coordinate with
 siblings, and `gr msg send --parent "message"` to report back to the
 orchestrator.
 
+**Authorization:** `scenario_start` requires authentication and verifies the
+caller is the system orchestrator. `scenario_stop`, `scenario_delete`,
+`scenario_resume`, and `scenario_add` require the caller to be the scenario's
+orchestrator or a descendant. `scenario_status` and `scenario_list` are
+read-only and available to any session or the human CLI. Unauthenticated
+(human CLI) callers can manage scenarios without restriction.
+
 **Constraints:** Only the orchestrator session (system kind `orchestrator`)
 can start scenarios. Scenario names must be globally unique. Session names
-within a scenario must not collide with existing sessions.
+within a scenario must not collide with existing sessions (except shared
+sessions, which reuse existing sessions by name).
 
 ### Daemon management
 
