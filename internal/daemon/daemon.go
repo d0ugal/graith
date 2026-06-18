@@ -86,6 +86,15 @@ func NewSessionManager(cfg *config.Config, paths config.Paths, log *slog.Logger)
 	}
 }
 
+// Config returns a snapshot of the current config pointer, safe for use
+// outside the lock. The returned *Config must not be modified.
+func (sm *SessionManager) Config() *config.Config {
+	sm.mu.RLock()
+	cfg := sm.cfg
+	sm.mu.RUnlock()
+	return cfg
+}
+
 func (sm *SessionManager) SetMsgStore(ms *MsgStore) {
 	sm.messages = ms
 }
@@ -312,7 +321,8 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 		return SessionState{}, err
 	}
 
-	agent, ok := sm.cfg.Agents[agentName]
+	preLockCfg := sm.Config()
+	agent, ok := preLockCfg.Agents[agentName]
 	if !ok {
 		return SessionState{}, fmt.Errorf("unknown agent %q", agentName)
 	}
@@ -349,7 +359,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 		}
 	}
 
-	preUsername := sm.cfg.GitHubUsername
+	preUsername := preLockCfg.GitHubUsername
 	if preUsername == "" && preRepoRoot != "" && !inPlace {
 		ctx, cancel := context.WithTimeout(context.Background(), gitUsernameTimeout)
 		preUsername, _ = git.DiscoverGitHubUsername(ctx, preRepoRoot)
@@ -2867,7 +2877,11 @@ func (sm *SessionManager) deriveSandboxIncludesWriteDirs(includes []IncludedRepo
 }
 
 func (sm *SessionManager) resolveSandbox(agentName string) (bool, error) {
-	merged := sm.cfg.Sandbox.Merge(sm.cfg.Agents[agentName].Sandbox)
+	return sm.resolveSandboxFromConfig(sm.cfg, agentName)
+}
+
+func (sm *SessionManager) resolveSandboxFromConfig(cfg *config.Config, agentName string) (bool, error) {
+	merged := cfg.Sandbox.Merge(cfg.Agents[agentName].Sandbox)
 	if !merged.Enabled {
 		return false, nil
 	}

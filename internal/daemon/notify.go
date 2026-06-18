@@ -20,27 +20,31 @@ func (sm *SessionManager) onAgentStatusChange(sessionID, sessionName, oldStatus,
 		}
 	}
 
-	if !sm.cfg.Notifications.Enabled {
+	sm.mu.RLock()
+	notifCfg := sm.cfg.Notifications
+	sm.mu.RUnlock()
+
+	if !notifCfg.Enabled {
 		return
 	}
 
 	switch newStatus {
 	case "approval":
-		if !sm.cfg.Notifications.OnApproval {
+		if !notifCfg.OnApproval {
 			return
 		}
 	case "stopped":
-		if !sm.cfg.Notifications.OnStopped {
+		if !notifCfg.OnStopped {
 			return
 		}
 	default:
 		return
 	}
 
-	sm.sendNotification(sessionName, newStatus)
+	sm.sendNotification(sessionName, newStatus, notifCfg.Command)
 }
 
-func (sm *SessionManager) sendNotification(sessionName, status string) {
+func (sm *SessionManager) sendNotification(sessionName, status, command string) {
 	if err := ValidateSessionName(sessionName); err != nil {
 		sm.log.Error("refusing to send notification for unsafe session name", "name", sessionName, "err", err)
 		return
@@ -61,7 +65,6 @@ func (sm *SessionManager) sendNotification(sessionName, status string) {
 	// Terminal bell to daemon log (triggers terminal emulator notifications)
 	fmt.Print("\a")
 
-	command := sm.cfg.Notifications.Command
 	if command != "" {
 		go func() {
 			cmd := exec.Command("sh", "-c", command)
