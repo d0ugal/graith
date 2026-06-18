@@ -40,12 +40,18 @@ type Config struct {
 }
 
 type OrchestratorConfig struct {
-	Enabled     bool   `toml:"enabled"`
-	Agent       string `toml:"agent"`
-	Model       string `toml:"model"`
-	IdleTimeout string `toml:"idle_timeout"`
-	Prompt      string `toml:"prompt"`
-	PromptFile  string `toml:"prompt_file"`
+	Enabled     bool                      `toml:"enabled"`
+	Agent       string                    `toml:"agent"`
+	Model       string                    `toml:"model"`
+	IdleTimeout string                    `toml:"idle_timeout"`
+	Prompt      string                    `toml:"prompt"`
+	PromptFile  string                    `toml:"prompt_file"`
+	Sandbox     OrchestratorSandboxConfig `toml:"sandbox"`
+}
+
+type OrchestratorSandboxConfig struct {
+	ReadDirs  []string `toml:"read_dirs"`
+	WriteDirs []string `toml:"write_dirs"`
 }
 
 func (o OrchestratorConfig) IdleTimeoutDuration() time.Duration {
@@ -306,6 +312,14 @@ func (s SandboxConfig) Merge(agent SandboxConfig) SandboxConfig {
 		merged.Command = agent.Command
 	}
 
+	return merged
+}
+
+func (c *Config) OrchestratorSandboxMerged(agentName string) SandboxConfig {
+	merged := c.Sandbox.Merge(c.Agents[agentName].Sandbox)
+	orch := c.Orchestrator.Sandbox
+	merged.ReadDirs = dedup(append(merged.ReadDirs, orch.ReadDirs...))
+	merged.WriteDirs = dedup(append(merged.WriteDirs, orch.WriteDirs...))
 	return merged
 }
 
