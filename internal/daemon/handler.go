@@ -89,9 +89,10 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 
 			case "list":
 				sessions := sm.List()
+				cfg := sm.Config()
 				infos := make([]protocol.SessionInfo, 0, len(sessions))
 				for _, s := range sessions {
-					infos = append(infos, toSessionInfo(s, sm.cfg, sm.getHookReport(s.ID)))
+					infos = append(infos, toSessionInfo(s, cfg, sm.getHookReport(s.ID)))
 				}
 				sendControl("session_list", protocol.SessionListMsg{Sessions: infos})
 
@@ -103,13 +104,13 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				}
 				agentName := c.Agent
 				if agentName == "" {
-					agentName = sm.cfg.DefaultAgent
+					agentName = sm.Config().DefaultAgent
 				}
 				sess, err := sm.Create(c.Name, agentName, c.RepoPath, c.Base, c.Prompt, c.Model, c.ParentID, c.NoRepo, c.ShareWorktree, c.AgentHooks, c.InPlace, c.AllowConcurrent, clientRows, clientCols)
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 				} else {
-					sendControl("created", toSessionInfo(sess, sm.cfg, sm.getHookReport(sess.ID)))
+					sendControl("created", toSessionInfo(sess, sm.Config(), sm.getHookReport(sess.ID)))
 				}
 
 			case "fork":
@@ -122,7 +123,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 				} else {
-					sendControl("created", toSessionInfo(sess, sm.cfg, sm.getHookReport(sess.ID)))
+					sendControl("created", toSessionInfo(sess, sm.Config(), sm.getHookReport(sess.ID)))
 				}
 
 			case "attach":
@@ -172,7 +173,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				_ = ptySess.Resize(clientRows, clientCols)
 
 				sess, _ := sm.Get(a.SessionID)
-				sendControl("attached", toSessionInfo(sess, sm.cfg, sm.getHookReport(sess.ID)))
+				sendControl("attached", toSessionInfo(sess, sm.Config(), sm.getHookReport(sess.ID)))
 
 				if tail, err := ptySess.Scrollback.Tail(300); err == nil && len(tail) > 0 {
 					_ = writer.WriteFrame(protocol.ChannelData, tail)
@@ -316,7 +317,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 				} else {
-					sendControl("resumed", toSessionInfo(sess, sm.cfg, sm.getHookReport(sess.ID)))
+					sendControl("resumed", toSessionInfo(sess, sm.Config(), sm.getHookReport(sess.ID)))
 				}
 
 			case "restart":
@@ -329,7 +330,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 				} else {
-					sendControl("restarted", toSessionInfo(sess, sm.cfg, sm.getHookReport(sess.ID)))
+					sendControl("restarted", toSessionInfo(sess, sm.Config(), sm.getHookReport(sess.ID)))
 				}
 
 			case "logs":
@@ -666,7 +667,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				}
 				fleet := sm.fleetSummary()
 				sendControl("status_response", protocol.StatusResponseMsg{
-					Session:     toSessionInfo(sess, sm.cfg, sm.getHookReport(sess.ID)),
+					Session:     toSessionInfo(sess, sm.Config(), sm.getHookReport(sess.ID)),
 					UnreadCount: unread,
 					Fleet:       fleet,
 				})
@@ -697,7 +698,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				// Verify the requesting session's agent is allowed to use this server.
 				if mc.SessionID != "" {
 					if sess, ok := sm.Get(mc.SessionID); ok {
-						allowed := sm.resolveMCPServers(sess.Agent)
+						allowed := sm.resolveMCPServersFromConfig(sm.Config(), sess.Agent)
 						found := false
 						for _, s := range allowed {
 							if s.Name == mc.Server {
