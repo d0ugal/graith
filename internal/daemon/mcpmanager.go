@@ -222,7 +222,12 @@ func (m *MCPManager) startProcess(serverCfg config.MCPServerConfig, proxyID stri
 			EnvKeys:          envKeys,
 			SafehouseCommand: merged.Command,
 		}
-		command, args = sandbox.Wrap(serverCfg.Command, serverCfg.Args, opts)
+		var wrapErr error
+		command, args, wrapErr = sandbox.Wrap(serverCfg.Command, serverCfg.Args, opts)
+		if wrapErr != nil {
+			stderrFile.Close()
+			return nil, fmt.Errorf("sandbox wrap for MCP server %s: %w", serverCfg.Name, wrapErr)
+		}
 	}
 
 	cmd := exec.Command(command, args...)
