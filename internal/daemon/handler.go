@@ -551,7 +551,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("msg_published", published)
 					if !m.Quiet {
 						if targetID, isInbox := parseInboxStream(m.Stream); isInbox {
-							sm.notifyInbox(targetID, m.SenderID, m.SenderName)
+							go sm.notifyInbox(targetID, m.SenderID, m.SenderName)
 						}
 					}
 				}

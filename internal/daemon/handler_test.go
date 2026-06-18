@@ -919,9 +919,9 @@ func TestMsgPubInboxNotifiesTarget(t *testing.T) {
 		t.Fatalf("expected msg_published, got %q", env.Type)
 	}
 
-	// The daemon should have injected a notification into the target's PTY.
-	// Give the write a moment to propagate through the PTY.
-	time.Sleep(100 * time.Millisecond)
+	// The daemon injects the notification asynchronously. Give the goroutine
+	// and PTY write a moment to propagate.
+	time.Sleep(200 * time.Millisecond)
 	ptySess, ok := h.sm.GetPTY("target1")
 	if !ok {
 		t.Fatal("target PTY session not found")
@@ -933,6 +933,9 @@ func TestMsgPubInboxNotifiesTarget(t *testing.T) {
 	scrollback := string(tail)
 	if !strings.Contains(scrollback, "New message from Alice") {
 		t.Errorf("notification not found in scrollback; got:\n%s", scrollback)
+	}
+	if !strings.Contains(scrollback, "inbox:target1") {
+		t.Errorf("notification should reference the target's inbox stream; got:\n%s", scrollback)
 	}
 }
 
