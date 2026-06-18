@@ -21,17 +21,17 @@ type Session struct {
 	Ptmx       *os.File
 	Scrollback *Scrollback
 
-	mu             sync.RWMutex
-	writeMu        sync.Mutex
-	attachedWriter io.Writer
-	screen         vt10x.Terminal
-	done           chan struct{}
-	readDone       chan struct{}
-	exitCode       int
-	exited         bool
-	adoptedPID     int
-	lastOutputAt   time.Time
-	adoptedAt      time.Time
+	mu           sync.RWMutex
+	writeMu      sync.Mutex
+	writers      []io.Writer
+	screen       vt10x.Terminal
+	done         chan struct{}
+	readDone     chan struct{}
+	exitCode     int
+	exited       bool
+	adoptedPID   int
+	lastOutputAt time.Time
+	adoptedAt    time.Time
 }
 
 type SessionOpts struct {
@@ -170,10 +170,13 @@ func (s *Session) readLoop() {
 			s.mu.Lock()
 			_, _ = s.screen.Write(chunk)
 			s.lastOutputAt = time.Now()
-			w := s.attachedWriter
+			writers := make([]io.Writer, len(s.writers))
+			copy(writers, s.writers)
 			s.mu.Unlock()
-			if w != nil {
-				w.Write(chunk)
+			for _, w := range writers {
+				if w != nil {
+					_, _ = w.Write(chunk)
+				}
 			}
 		}
 		if err != nil {
@@ -263,13 +266,25 @@ func (s *Session) Poke() {
 	}
 }
 
-func (s *Session) Attach(w io.Writer) { s.mu.Lock(); s.attachedWriter = w; s.mu.Unlock() }
-func (s *Session) Detach()            { s.mu.Lock(); s.attachedWriter = nil; s.mu.Unlock() }
+func (s *Session) Attach(w io.Writer) {
+	s.mu.Lock()
+	s.writers = append(s.writers, w)
+	s.mu.Unlock()
+}
+
+func (s *Session) Detach() {
+	s.mu.Lock()
+	s.writers = nil
+	s.mu.Unlock()
+}
 
 func (s *Session) DetachWriter(w io.Writer) {
 	s.mu.Lock()
-	if s.attachedWriter == w {
-		s.attachedWriter = nil
+	for i, wr := range s.writers {
+		if wr == w {
+			s.writers = append(s.writers[:i], s.writers[i+1:]...)
+			break
+		}
 	}
 	s.mu.Unlock()
 }

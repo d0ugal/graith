@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestProcessPIDWithCmd(t *testing.T) {
@@ -49,10 +50,10 @@ func TestDetachWriterMatchingWriter(t *testing.T) {
 	s.DetachWriter(&writerA)
 
 	s.mu.RLock()
-	w := s.attachedWriter
+	n := len(s.writers)
 	s.mu.RUnlock()
-	if w != nil {
-		t.Error("expected attachedWriter to be nil after detaching matching writer")
+	if n != 0 {
+		t.Errorf("expected 0 writers after detaching matching writer, got %d", n)
 	}
 }
 
@@ -60,27 +61,120 @@ func TestDetachWriterNonMatchingWriter(t *testing.T) {
 	s := &Session{done: make(chan struct{})}
 	var writerA, writerB bytes.Buffer
 	s.Attach(&writerB)
-	s.DetachWriter(&writerA) // detach A, but B is attached
+	s.DetachWriter(&writerA)
 
 	s.mu.RLock()
-	w := s.attachedWriter
+	n := len(s.writers)
 	s.mu.RUnlock()
-	if w != &writerB {
-		t.Error("expected attachedWriter to remain as writerB after detaching non-matching writerA")
+	if n != 1 {
+		t.Errorf("expected 1 writer after detaching non-matching writerA, got %d", n)
 	}
 }
 
 func TestDetachWriterWhenNoneAttached(t *testing.T) {
 	s := &Session{done: make(chan struct{})}
 	var writerA bytes.Buffer
-	// No writer attached; DetachWriter should be a no-op without panic.
 	s.DetachWriter(&writerA)
 
 	s.mu.RLock()
-	w := s.attachedWriter
+	n := len(s.writers)
 	s.mu.RUnlock()
-	if w != nil {
-		t.Error("expected attachedWriter to remain nil")
+	if n != 0 {
+		t.Errorf("expected 0 writers, got %d", n)
+	}
+}
+
+func TestMultipleWriters(t *testing.T) {
+	s := &Session{done: make(chan struct{})}
+	var writerA, writerB bytes.Buffer
+	s.Attach(&writerA)
+	s.Attach(&writerB)
+
+	s.mu.RLock()
+	n := len(s.writers)
+	s.mu.RUnlock()
+	if n != 2 {
+		t.Errorf("expected 2 writers, got %d", n)
+	}
+
+	s.DetachWriter(&writerA)
+	s.mu.RLock()
+	n = len(s.writers)
+	s.mu.RUnlock()
+	if n != 1 {
+		t.Errorf("expected 1 writer after detaching writerA, got %d", n)
+	}
+}
+
+func TestDetachClearsAllWriters(t *testing.T) {
+	s := &Session{done: make(chan struct{})}
+	var writerA, writerB bytes.Buffer
+	s.Attach(&writerA)
+	s.Attach(&writerB)
+	s.Detach()
+
+	s.mu.RLock()
+	n := len(s.writers)
+	s.mu.RUnlock()
+	if n != 0 {
+		t.Errorf("expected 0 writers after Detach, got %d", n)
+	}
+}
+
+func TestMultiWriterFanOut(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "test.log")
+	s, err := NewSession(SessionOpts{
+		ID: "test", Command: "sh", Args: []string{"-c", "read a; echo $a; read b; echo $b; sleep 0.1"},
+		Dir: t.TempDir(), Rows: 24, Cols: 80,
+		LogPath: logPath, MaxLogSize: 1024 * 1024,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	var bufA, bufB syncBuf
+	s.Attach(&bufA)
+	s.Attach(&bufB)
+
+	if err := s.WriteInput([]byte("fanout test\n")); err != nil {
+		t.Fatal(err)
+	}
+
+	deadline := time.After(5 * time.Second)
+	for !bytes.Contains(bufA.Bytes(), []byte("fanout test")) || !bytes.Contains(bufB.Bytes(), []byte("fanout test")) {
+		select {
+		case <-deadline:
+			t.Fatalf("bufA = %q, bufB = %q; both should contain 'fanout test'", bufA.Bytes(), bufB.Bytes())
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+
+	s.DetachWriter(&bufA)
+	beforeA := len(bufA.Bytes())
+
+	if err := s.WriteInput([]byte("after detach\n")); err != nil {
+		t.Fatal(err)
+	}
+
+	deadline = time.After(5 * time.Second)
+	for !bytes.Contains(bufB.Bytes(), []byte("after detach")) {
+		select {
+		case <-deadline:
+			t.Fatalf("bufB = %q; should contain 'after detach'", bufB.Bytes())
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	if len(bufA.Bytes()) != beforeA {
+		t.Error("bufA received data after DetachWriter")
+	}
+
+	select {
+	case <-s.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for process exit")
 	}
 }
 
