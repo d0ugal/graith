@@ -537,11 +537,11 @@ func TestToSessionInfo(t *testing.T) {
 
 	sess := SessionState{
 		ID:             "abc123",
-		Name:           "fix-bug",
-		RepoPath:       "/home/user/repo",
-		RepoName:       "repo",
+		Name:           "braw",
+		RepoPath:       "/home/user/croft",
+		RepoName:       "croft",
 		WorktreePath:   "/home/user/.local/share/graith/worktrees/abc123",
-		Branch:         "user/graith/fix-bug-abc123",
+		Branch:         "user/graith/braw-abc123",
 		Agent:          "claude",
 		AgentSessionID: "session-id-123",
 		Model:          "claude-sonnet-4-5-20250514",
