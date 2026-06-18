@@ -1943,12 +1943,14 @@ func (sm *SessionManager) Delete(id string) error {
 	agentName := sessState.Agent
 	prevStatus := sessState.Status
 	sessToken := sessState.Token
+	parentID := sessState.ParentID
 	sessionIncludes := make([]IncludedRepoState, len(sessState.Includes))
 	copy(sessionIncludes, sessState.Includes)
 
 	if sessState.Status == StatusCreating {
 		// Session is mid-creation (Phase 2). Remove from state so Phase 3 detects
 		// the deletion and handles cleanup (worktree, PTY).
+		sm.reparentChildrenLocked(id, parentID)
 		delete(sm.state.Sessions, id)
 		delete(sm.hookReports, id)
 		_ = sm.saveState()
@@ -2036,6 +2038,7 @@ func (sm *SessionManager) Delete(id string) error {
 	}
 
 	sm.mu.Lock()
+	sm.reparentChildrenLocked(id, parentID)
 	delete(sm.state.Sessions, id)
 	delete(sm.hookReports, id)
 	if sessToken != "" {
@@ -2052,6 +2055,16 @@ func (sm *SessionManager) Delete(id string) error {
 	}
 
 	return err
+}
+
+// reparentChildrenLocked reassigns all direct children of the deleted session
+// to its parent. Must be called with sm.mu held.
+func (sm *SessionManager) reparentChildrenLocked(deletedID, newParentID string) {
+	for _, s := range sm.state.Sessions {
+		if s.ParentID == deletedID {
+			s.ParentID = newParentID
+		}
+	}
 }
 
 // DeleteWithChildren deletes a session and all its transitive descendants.
