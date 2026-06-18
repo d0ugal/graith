@@ -3633,6 +3633,103 @@ func TestRestartWithChildrenIncludeRoot(t *testing.T) {
 	}
 }
 
+func TestDeleteClearsChildParentID(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	sm.state.Sessions["parent"] = &SessionState{
+		ID:     "parent",
+		Name:   "parent",
+		Agent:  "claude",
+		Status: StatusStopped,
+	}
+	sm.state.Sessions["child1"] = &SessionState{
+		ID:       "child1",
+		Name:     "child-a",
+		Agent:    "claude",
+		ParentID: "parent",
+		Status:   StatusStopped,
+	}
+	sm.state.Sessions["child2"] = &SessionState{
+		ID:       "child2",
+		Name:     "child-b",
+		Agent:    "claude",
+		ParentID: "parent",
+		Status:   StatusStopped,
+	}
+	sm.state.Sessions["grandchild"] = &SessionState{
+		ID:       "grandchild",
+		Name:     "grandchild",
+		Agent:    "claude",
+		ParentID: "child1",
+		Status:   StatusStopped,
+	}
+
+	if err := sm.Delete("parent"); err != nil {
+		t.Fatalf("Delete failed: %v", err)
+	}
+
+	if _, ok := sm.state.Sessions["parent"]; ok {
+		t.Error("parent should be removed from state")
+	}
+	if sm.state.Sessions["child1"].ParentID != "" {
+		t.Errorf("child1 ParentID = %q, want empty", sm.state.Sessions["child1"].ParentID)
+	}
+	if sm.state.Sessions["child2"].ParentID != "" {
+		t.Errorf("child2 ParentID = %q, want empty", sm.state.Sessions["child2"].ParentID)
+	}
+	if sm.state.Sessions["grandchild"].ParentID != "child1" {
+		t.Errorf("grandchild ParentID = %q, want %q (should be unchanged)", sm.state.Sessions["grandchild"].ParentID, "child1")
+	}
+}
+
+func TestDeleteWithChildrenClearsOrphanedParentIDs(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	sm.state.Sessions["root"] = &SessionState{
+		ID:     "root",
+		Name:   "root",
+		Agent:  "claude",
+		Status: StatusStopped,
+	}
+	sm.state.Sessions["child"] = &SessionState{
+		ID:       "child",
+		Name:     "child",
+		Agent:    "claude",
+		ParentID: "root",
+		Status:   StatusStopped,
+	}
+	sm.state.Sessions["starred-child"] = &SessionState{
+		ID:       "starred-child",
+		Name:     "starred-child",
+		Agent:    "claude",
+		ParentID: "root",
+		Starred:  true,
+		Status:   StatusStopped,
+	}
+
+	deleted, err := sm.DeleteWithChildren("root", false)
+	if err != nil {
+		t.Fatalf("DeleteWithChildren failed: %v", err)
+	}
+
+	if _, ok := sm.state.Sessions["root"]; ok {
+		t.Error("root should be removed")
+	}
+	if _, ok := sm.state.Sessions["child"]; ok {
+		t.Error("child should be removed")
+	}
+
+	starredChild := sm.state.Sessions["starred-child"]
+	if starredChild == nil {
+		t.Fatal("starred-child should survive (starred)")
+	}
+	if starredChild.ParentID != "" {
+		t.Errorf("starred-child ParentID = %q, want empty (parent was deleted)", starredChild.ParentID)
+	}
+
+	_ = deleted
+}
+
 func createTestSession(sm *SessionManager, name string) string {
 	id := generateID()
 	sm.state.Sessions[id] = &SessionState{
