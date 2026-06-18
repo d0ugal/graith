@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.44.0](https://github.com/d0ugal/graith/compare/v0.43.0...v0.44.0) (2026-06-18)
+
+
+### Features
+
+* add auto-refresh to overlay session list ([a22d993](https://github.com/d0ugal/graith/commit/a22d99332fa34407f75832363abdb6746b00a9dc))
+* block nested graith sessions ([93d0149](https://github.com/d0ugal/graith/commit/93d01495557705002754cffc2a58c6f3bc087233))
+* stagger restart-all to keep overlay responsive ([95c1716](https://github.com/d0ugal/graith/commit/95c1716d4759fe40d1533c217b74d1be1c651b78))
+
 ## [0.43.0](https://github.com/d0ugal/graith/compare/v0.42.0...v0.43.0) (2026-06-17)
 
 
