@@ -454,11 +454,23 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
 					continue
 				}
-				sess, err := sm.Restart(r.SessionID, clientRows, clientCols)
-				if err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+				if r.Children {
+					restarted, err := sm.RestartWithChildren(r.SessionID, r.ExcludeRoot, clientRows, clientCols)
+					if err != nil {
+						sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+					} else {
+						sendControl("restarted", struct {
+							SessionID string   `json:"session_id"`
+							Restarted []string `json:"restarted"`
+						}{r.SessionID, restarted})
+					}
 				} else {
-					sendControl("restarted", toSessionInfo(sess, sm.Config(), sm.getHookReport(sess.ID)))
+					sess, err := sm.Restart(r.SessionID, clientRows, clientCols)
+					if err != nil {
+						sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+					} else {
+						sendControl("restarted", toSessionInfo(sess, sm.Config(), sm.getHookReport(sess.ID)))
+					}
 				}
 
 			case "logs":
