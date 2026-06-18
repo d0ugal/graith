@@ -6,9 +6,9 @@ import (
 )
 
 func FuzzDecodeControl(f *testing.F) {
-	f.Add([]byte(`{"type":"handshake","payload":{"version":"1.0","client_id":"c1","terminal_size":[80,24],"cwd":"/tmp"}}`))
+	f.Add([]byte(`{"type":"handshake","payload":{"version":"1.0","client_id":"brig","terminal_size":[80,24],"cwd":"/tmp"}}`))
 	f.Add([]byte(`{"type":"list"}`))
-	f.Add([]byte(`{"type":"create","payload":{"name":"test","agent":"claude","repo_path":"/repo"}}`))
+	f.Add([]byte(`{"type":"create","payload":{"name":"braw","agent":"claude","repo_path":"/croft"}}`))
 	f.Add([]byte(`{}`))
 	f.Add([]byte(`{"type":""}`))
 	f.Add([]byte(`{"type":"unknown","payload":null}`))
@@ -56,8 +56,8 @@ func FuzzReadFrame(f *testing.F) {
 	// Valid data channel frame
 	var dataFrame bytes.Buffer
 	dataFrame.WriteByte(ChannelData)
-	dataFrame.Write([]byte{0, 0, 0, 5})
-	dataFrame.Write([]byte("hello"))
+	dataFrame.Write([]byte{0, 0, 0, 7})
+	dataFrame.Write([]byte("blether"))
 	f.Add(dataFrame.Bytes())
 
 	// Empty payload frame
@@ -103,11 +103,11 @@ func FuzzReadFrame(f *testing.F) {
 }
 
 func FuzzDecodePayload(f *testing.F) {
-	f.Add([]byte(`handshake`), []byte(`{"version":"1.0","client_id":"c1","terminal_size":[80,24],"cwd":"/tmp"}`))
-	f.Add([]byte(`create`), []byte(`{"name":"test","agent":"claude"}`))
+	f.Add([]byte(`handshake`), []byte(`{"version":"1.0","client_id":"brig","terminal_size":[80,24],"cwd":"/tmp"}`))
+	f.Add([]byte(`create`), []byte(`{"name":"braw","agent":"claude"}`))
 	f.Add([]byte(`attach`), []byte(`{"session_id":"abc123"}`))
 	f.Add([]byte(`resize`), []byte(`{"cols":120,"rows":40}`))
-	f.Add([]byte(`type`), []byte(`{"session_id":"s1","input":"hello","no_newline":true}`))
+	f.Add([]byte(`type`), []byte(`{"session_id":"brig","input":"blether","no_newline":true}`))
 	f.Add([]byte(`bad`), []byte(`{not json`))
 	f.Add([]byte(`empty`), []byte(``))
 	f.Add([]byte(`null`), []byte(`null`))

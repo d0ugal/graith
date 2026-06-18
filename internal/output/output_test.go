@@ -12,21 +12,21 @@ func TestJSONOutput(t *testing.T) {
 	type data struct {
 		Name string `json:"name"`
 	}
-	w.JSON(data{Name: "test"})
+	w.JSON(data{Name: "braw"})
 	var got data
 	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
 		t.Fatalf("unmarshal: %v\nbuf: %s", err, buf.String())
 	}
-	if got.Name != "test" {
-		t.Errorf("Name = %q, want test", got.Name)
+	if got.Name != "braw" {
+		t.Errorf("Name = %q, want braw", got.Name)
 	}
 }
 
 func TestHumanOutput(t *testing.T) {
 	var buf bytes.Buffer
 	w := &Writer{jsonMode: false, out: &buf, errOut: &buf}
-	w.Print("hello %s\n", "world")
-	if buf.String() != "hello world\n" {
+	w.Print("hello %s\n", "bonnie")
+	if buf.String() != "hello bonnie\n" {
 		t.Errorf("output = %q", buf.String())
 	}
 }

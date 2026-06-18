@@ -115,7 +115,7 @@ func TestCreateSkipModelValidation(t *testing.T) {
 	}
 
 	t.Run("validation rejects unknown model by default", func(t *testing.T) {
-		_, err := sm.Create("test-reject", "claude", "", "", "", "model-z", "", true, "", false, false, false, false, 24, 80)
+		_, err := sm.Create("haar-reject", "claude", "", "", "", "model-z", "", true, "", false, false, false, false, 24, 80)
 		if err == nil {
 			t.Fatal("expected validation error for unknown model")
 		}
@@ -125,7 +125,7 @@ func TestCreateSkipModelValidation(t *testing.T) {
 	})
 
 	t.Run("skip flag bypasses validation", func(t *testing.T) {
-		_, err := sm.Create("test-skip", "claude", "", "", "", "model-z", "", true, "", false, false, false, true, 24, 80)
+		_, err := sm.Create("braw-skip", "claude", "", "", "", "model-z", "", true, "", false, false, false, true, 24, 80)
 		if err != nil && strings.Contains(err.Error(), "invalid model") {
 			t.Fatalf("--skip-model-validation should bypass model check, got: %v", err)
 		}
@@ -134,15 +134,15 @@ func TestCreateSkipModelValidation(t *testing.T) {
 
 func TestRenameRejectsUnsafeName(t *testing.T) {
 	sm := newTestSessionManager(t)
-	sm.state.Sessions["test-id"] = &SessionState{
-		ID:   "test-id",
-		Name: "good-name",
+	sm.state.Sessions["braw-id"] = &SessionState{
+		ID:   "braw-id",
+		Name: "bonnie-name",
 	}
-	err := sm.Rename("test-id", "bad|name")
+	err := sm.Rename("braw-id", "bad|name")
 	if err == nil {
 		t.Fatal("Rename with unsafe name should fail")
 	}
-	if sm.state.Sessions["test-id"].Name != "good-name" {
+	if sm.state.Sessions["braw-id"].Name != "bonnie-name" {
 		t.Error("name should not have changed")
 	}
 }
@@ -151,14 +151,14 @@ func TestResumeRejectsUnsafePersistedName(t *testing.T) {
 	tmpDir := t.TempDir()
 	sm := newTestSessionManager(t)
 	sm.paths.LogDir = tmpDir
-	sm.state.Sessions["test-id"] = &SessionState{
-		ID:           "test-id",
+	sm.state.Sessions["braw-id"] = &SessionState{
+		ID:           "braw-id",
 		Name:         "x; rm -rf /",
 		Status:       StatusStopped,
 		Agent:        "claude",
 		WorktreePath: filepath.Join(tmpDir, "wt"),
 	}
-	_, err := sm.Resume("test-id", 24, 80)
+	_, err := sm.Resume("braw-id", 24, 80)
 	if err == nil {
 		t.Fatal("Resume with unsafe persisted name should fail")
 	}

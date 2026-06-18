@@ -7,10 +7,10 @@ import (
 
 func TestWrapBasic(t *testing.T) {
 	opts := WrapOpts{
-		WorktreeDir: "/home/user/worktree",
+		WorktreeDir: "/hame/user/bothy",
 		EnvKeys:     []string{"GRAITH_SESSION_ID", "TERM"},
 	}
-	cmd, args, err := Wrap("claude", []string{"--session-id", "abc"}, opts)
+	cmd, args, err := Wrap("claude", []string{"--session-id", "braw"}, opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -20,9 +20,9 @@ func TestWrapBasic(t *testing.T) {
 	}
 
 	want := []string{
-		"--workdir", "/home/user/worktree",
+		"--workdir", "/hame/user/bothy",
 		"--env-pass", "GRAITH_SESSION_ID,TERM",
-		"--", "claude", "--session-id", "abc",
+		"--", "claude", "--session-id", "braw",
 	}
 	if len(args) != len(want) {
 		t.Fatalf("args = %v, want %v", args, want)
@@ -36,7 +36,7 @@ func TestWrapBasic(t *testing.T) {
 
 func TestWrapWithFeatures(t *testing.T) {
 	opts := WrapOpts{
-		WorktreeDir: "/tmp/wt",
+		WorktreeDir: "/tmp/bothy",
 		Features:    []string{"ssh", "process-control"},
 		EnvKeys:     []string{"TERM"},
 	}
@@ -66,8 +66,8 @@ func TestWrapWithFeatures(t *testing.T) {
 
 func TestWrapWithReadDirs(t *testing.T) {
 	opts := WrapOpts{
-		WorktreeDir: "/tmp/wt",
-		ReadDirs:    []string{"/home/user/Code", "/opt/shared"},
+		WorktreeDir: "/tmp/bothy",
+		ReadDirs:    []string{"/hame/user/glen", "/opt/wynd"},
 		EnvKeys:     []string{"TERM"},
 	}
 	_, args, err := Wrap("claude", nil, opts)
@@ -78,8 +78,8 @@ func TestWrapWithReadDirs(t *testing.T) {
 	found := false
 	for i, a := range args {
 		if a == "--add-dirs-ro" && i+1 < len(args) {
-			if args[i+1] != "/home/user/Code:/opt/shared" {
-				t.Errorf("--add-dirs-ro value = %q, want %q", args[i+1], "/home/user/Code:/opt/shared")
+			if args[i+1] != "/hame/user/glen:/opt/wynd" {
+				t.Errorf("--add-dirs-ro value = %q, want %q", args[i+1], "/hame/user/glen:/opt/wynd")
 			}
 			found = true
 			break
@@ -92,8 +92,8 @@ func TestWrapWithReadDirs(t *testing.T) {
 
 func TestWrapWithWriteDirs(t *testing.T) {
 	opts := WrapOpts{
-		WorktreeDir: "/tmp/wt",
-		WriteDirs:   []string{"/tmp/extra"},
+		WorktreeDir: "/tmp/bothy",
+		WriteDirs:   []string{"/tmp/croft"},
 		EnvKeys:     []string{"TERM"},
 	}
 	_, args, err := Wrap("claude", nil, opts)
@@ -104,8 +104,8 @@ func TestWrapWithWriteDirs(t *testing.T) {
 	found := false
 	for i, a := range args {
 		if a == "--add-dirs" && i+1 < len(args) {
-			if args[i+1] != "/tmp/extra" {
-				t.Errorf("--add-dirs value = %q, want %q", args[i+1], "/tmp/extra")
+			if args[i+1] != "/tmp/croft" {
+				t.Errorf("--add-dirs value = %q, want %q", args[i+1], "/tmp/croft")
 			}
 			found = true
 			break
@@ -118,7 +118,7 @@ func TestWrapWithWriteDirs(t *testing.T) {
 
 func TestWrapNoEnvKeys(t *testing.T) {
 	opts := WrapOpts{
-		WorktreeDir: "/tmp/wt",
+		WorktreeDir: "/tmp/bothy",
 	}
 	_, args, err := Wrap("claude", nil, opts)
 	if err != nil {
@@ -134,7 +134,7 @@ func TestWrapNoEnvKeys(t *testing.T) {
 
 func TestWrapCommandAndArgsAfterSeparator(t *testing.T) {
 	opts := WrapOpts{
-		WorktreeDir: "/tmp/wt",
+		WorktreeDir: "/tmp/bothy",
 		EnvKeys:     []string{"TERM"},
 	}
 	_, args, err := Wrap("codex", []string{"resume", "--last"}, opts)
@@ -160,7 +160,7 @@ func TestWrapCommandAndArgsAfterSeparator(t *testing.T) {
 
 func TestWrapCustomCommand(t *testing.T) {
 	opts := WrapOpts{
-		WorktreeDir:      "/tmp/wt",
+		WorktreeDir:      "/tmp/bothy",
 		SafehouseCommand: "/usr/local/bin/safehouse",
 		EnvKeys:          []string{"TERM"},
 	}
@@ -176,8 +176,8 @@ func TestWrapCustomCommand(t *testing.T) {
 
 func TestWrapSharedWorktreeReadOnly(t *testing.T) {
 	opts := WrapOpts{
-		WorktreeDir: "/tmp/scratch/abc123",
-		ReadDirs:    []string{"/shared/worktree"},
+		WorktreeDir: "/tmp/bothy/braw123",
+		ReadDirs:    []string{"/shared/glen"},
 		EnvKeys:     []string{"TERM"},
 	}
 	_, args, err := Wrap("claude", nil, opts)
@@ -189,14 +189,14 @@ func TestWrapSharedWorktreeReadOnly(t *testing.T) {
 	foundReadDirs := false
 	for i, a := range args {
 		if a == "--workdir" && i+1 < len(args) {
-			if args[i+1] != "/tmp/scratch/abc123" {
-				t.Errorf("--workdir = %q, want /tmp/scratch/abc123", args[i+1])
+			if args[i+1] != "/tmp/bothy/braw123" {
+				t.Errorf("--workdir = %q, want /tmp/bothy/braw123", args[i+1])
 			}
 			foundWorkdir = true
 		}
 		if a == "--add-dirs-ro" && i+1 < len(args) {
-			if args[i+1] != "/shared/worktree" {
-				t.Errorf("--add-dirs-ro = %q, want /shared/worktree", args[i+1])
+			if args[i+1] != "/shared/glen" {
+				t.Errorf("--add-dirs-ro = %q, want /shared/glen", args[i+1])
 			}
 			foundReadDirs = true
 		}
@@ -211,7 +211,7 @@ func TestWrapSharedWorktreeReadOnly(t *testing.T) {
 
 func TestWrapRejectsColonInWorkdir(t *testing.T) {
 	opts := WrapOpts{
-		WorktreeDir: "/tmp/path:with:colons",
+		WorktreeDir: "/tmp/thrawn:bothy:colons",
 		EnvKeys:     []string{"TERM"},
 	}
 	_, _, err := Wrap("claude", nil, opts)
@@ -222,8 +222,8 @@ func TestWrapRejectsColonInWorkdir(t *testing.T) {
 
 func TestWrapRejectsColonInReadDirs(t *testing.T) {
 	opts := WrapOpts{
-		WorktreeDir: "/tmp/wt",
-		ReadDirs:    []string{"/good/path", "/bad:path"},
+		WorktreeDir: "/tmp/bothy",
+		ReadDirs:    []string{"/bonnie/glen", "/thrawn:glen"},
 		EnvKeys:     []string{"TERM"},
 	}
 	_, _, err := Wrap("claude", nil, opts)
@@ -234,8 +234,8 @@ func TestWrapRejectsColonInReadDirs(t *testing.T) {
 
 func TestWrapRejectsColonInWriteDirs(t *testing.T) {
 	opts := WrapOpts{
-		WorktreeDir: "/tmp/wt",
-		WriteDirs:   []string{"/path:colon"},
+		WorktreeDir: "/tmp/bothy",
+		WriteDirs:   []string{"/thrawn:croft"},
 		EnvKeys:     []string{"TERM"},
 	}
 	_, _, err := Wrap("claude", nil, opts)
@@ -246,9 +246,9 @@ func TestWrapRejectsColonInWriteDirs(t *testing.T) {
 
 func TestWrapAcceptsPathsWithoutColons(t *testing.T) {
 	opts := WrapOpts{
-		WorktreeDir: "/tmp/wt",
-		ReadDirs:    []string{"/home/user/Code", "/opt/shared"},
-		WriteDirs:   []string{"/tmp/extra"},
+		WorktreeDir: "/tmp/bothy",
+		ReadDirs:    []string{"/hame/user/glen", "/opt/wynd"},
+		WriteDirs:   []string{"/tmp/croft"},
 		EnvKeys:     []string{"TERM"},
 	}
 	_, _, err := Wrap("claude", nil, opts)

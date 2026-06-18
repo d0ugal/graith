@@ -16,9 +16,9 @@ func overlayTestSessions() []protocol.SessionInfo {
 	return []protocol.SessionInfo{
 		{
 			ID:             "s1",
-			Name:           "fix-overlay",
+			Name:           "braw-fix",
 			RepoName:       "graith",
-			Branch:         "d0ugal/graith/fix-overlay",
+			Branch:         "d0ugal/graith/braw-fix",
 			Agent:          "claude",
 			Status:         "running",
 			CreatedAt:      time.Now().Add(-2 * time.Hour).Format(time.RFC3339),
@@ -26,17 +26,17 @@ func overlayTestSessions() []protocol.SessionInfo {
 		},
 		{
 			ID:        "s2",
-			Name:      "add-tests",
+			Name:      "canny-tests",
 			RepoName:  "graith",
-			Branch:    "d0ugal/graith/add-tests",
+			Branch:    "d0ugal/graith/canny-tests",
 			Agent:     "claude",
 			Status:    "stopped",
 			CreatedAt: time.Now().Add(-24 * time.Hour).Format(time.RFC3339),
 		},
 		{
 			ID:             "s3",
-			Name:           "feature-x",
-			RepoName:       "other-repo",
+			Name:           "bonnie-feature",
+			RepoName:       "croft",
 			Branch:         "main",
 			Agent:          "codex",
 			Status:         "running",
@@ -50,9 +50,9 @@ func overlayTestSessionsWithGitStatus() []protocol.SessionInfo {
 	return []protocol.SessionInfo{
 		{
 			ID:            "s1",
-			Name:          "dirty-session",
+			Name:          "thrawn-dirty",
 			RepoName:      "graith",
-			Branch:        "d0ugal/graith/dirty",
+			Branch:        "d0ugal/graith/thrawn-dirty",
 			Agent:         "claude",
 			Status:        "running",
 			AgentStatus:   "thinking",
@@ -93,8 +93,8 @@ func TestBuildGroupedItems_GroupsByRepo(t *testing.T) {
 	sessions := overlayTestSessions()
 	items := buildGroupedItems(sessions, nil)
 
-	// graith group: fix-overlay (running), add-tests (stopped) — sorted
-	// by running status then alphabetically. Plus 2 group headers = 5 items.
+	// croft group: bonnie-feature (running). graith group: braw-fix (running),
+	// canny-tests (stopped). Alphabetically croft < graith. Plus 2 group headers = 5 items.
 	if len(items) != 5 {
 		t.Fatalf("expected 5 items (2 headers + 3 sessions), got %d", len(items))
 	}
@@ -103,25 +103,25 @@ func TestBuildGroupedItems_GroupsByRepo(t *testing.T) {
 	if !ok {
 		t.Fatal("items[0] should be a groupHeader")
 	}
-	if gh1.name != "graith" {
-		t.Errorf("first group = %q, want %q", gh1.name, "graith")
+	if gh1.name != "croft" {
+		t.Errorf("first group = %q, want %q", gh1.name, "croft")
 	}
-	if gh1.count != 2 {
-		t.Errorf("first group count = %d, want 2", gh1.count)
+	if gh1.count != 1 {
+		t.Errorf("first group count = %d, want 1", gh1.count)
 	}
 
-	gh2, ok := items[3].(groupHeader)
+	gh2, ok := items[2].(groupHeader)
 	if !ok {
-		t.Fatal("items[3] should be a groupHeader")
+		t.Fatal("items[2] should be a groupHeader")
 	}
-	if gh2.name != "other-repo" {
-		t.Errorf("second group = %q, want %q", gh2.name, "other-repo")
+	if gh2.name != "graith" {
+		t.Errorf("second group = %q, want %q", gh2.name, "graith")
 	}
 }
 
 func TestBuildGroupedItems_EmptyRepoName(t *testing.T) {
 	sessions := []protocol.SessionInfo{
-		{ID: "s1", Name: "orphan", RepoName: "", Status: "running", CreatedAt: time.Now().Format(time.RFC3339)},
+		{ID: "s1", Name: "thrawn", RepoName: "", Status: "running", CreatedAt: time.Now().Format(time.RFC3339)},
 	}
 	items := buildGroupedItems(sessions, nil)
 	gh := items[0].(groupHeader)
@@ -154,12 +154,12 @@ func TestBuildGroupedItems_SessionCount(t *testing.T) {
 	sessions := overlayTestSessions()
 	items := buildGroupedItems(sessions, nil)
 	gh := items[0].(groupHeader)
-	if gh.count != 2 {
-		t.Errorf("graith group count = %d, want 2", gh.count)
+	if gh.count != 1 {
+		t.Errorf("croft group count = %d, want 1", gh.count)
 	}
-	gh2 := items[3].(groupHeader)
-	if gh2.count != 1 {
-		t.Errorf("other-repo group count = %d, want 1", gh2.count)
+	gh2 := items[2].(groupHeader)
+	if gh2.count != 2 {
+		t.Errorf("graith group count = %d, want 2", gh2.count)
 	}
 }
 
@@ -168,46 +168,46 @@ func TestBuildGroupedItems_SessionCount(t *testing.T) {
 func TestBuildGroupedItems_TreeStructure(t *testing.T) {
 	now := time.Now().Format(time.RFC3339)
 	sessions := []protocol.SessionInfo{
-		{ID: "root", Name: "root-session", RepoName: "repo", Status: "running", CreatedAt: now},
-		{ID: "child1", Name: "child-1", ParentID: "root", RepoName: "repo", Status: "running", CreatedAt: now},
-		{ID: "child2", Name: "child-2", ParentID: "root", RepoName: "repo", Status: "stopped", CreatedAt: now},
-		{ID: "standalone", Name: "standalone", RepoName: "repo", Status: "running", CreatedAt: now},
+		{ID: "root", Name: "ben-session", RepoName: "repo", Status: "running", CreatedAt: now},
+		{ID: "child1", Name: "bairn-1", ParentID: "root", RepoName: "repo", Status: "running", CreatedAt: now},
+		{ID: "child2", Name: "bairn-2", ParentID: "root", RepoName: "repo", Status: "stopped", CreatedAt: now},
+		{ID: "standalone", Name: "neep", RepoName: "repo", Status: "running", CreatedAt: now},
 	}
 	items := buildGroupedItems(sessions, nil)
 
-	// header + root + child-1 + child-2 + standalone = 5
+	// header + ben-session + bairn-1 + bairn-2 + neep = 5
 	if len(items) != 5 {
 		t.Fatalf("expected 5 items, got %d", len(items))
 	}
 
 	// Root sessions should come first (running sorted alphabetically)
 	si0 := items[1].(sessionItem)
-	if si0.info.Name != "root-session" || si0.treePrefix != "" {
-		t.Errorf("items[1]: name=%q prefix=%q, want root-session with no prefix", si0.info.Name, si0.treePrefix)
+	if si0.info.Name != "ben-session" || si0.treePrefix != "" {
+		t.Errorf("items[1]: name=%q prefix=%q, want ben-session with no prefix", si0.info.Name, si0.treePrefix)
 	}
 
 	si1 := items[2].(sessionItem)
-	if si1.info.Name != "child-1" || si1.treePrefix != "├── " {
-		t.Errorf("items[2]: name=%q prefix=%q, want child-1 with ├── prefix", si1.info.Name, si1.treePrefix)
+	if si1.info.Name != "bairn-1" || si1.treePrefix != "├── " {
+		t.Errorf("items[2]: name=%q prefix=%q, want bairn-1 with ├── prefix", si1.info.Name, si1.treePrefix)
 	}
 
 	si2 := items[3].(sessionItem)
-	if si2.info.Name != "child-2" || si2.treePrefix != "└── " {
-		t.Errorf("items[3]: name=%q prefix=%q, want child-2 with └── prefix", si2.info.Name, si2.treePrefix)
+	if si2.info.Name != "bairn-2" || si2.treePrefix != "└── " {
+		t.Errorf("items[3]: name=%q prefix=%q, want bairn-2 with └── prefix", si2.info.Name, si2.treePrefix)
 	}
 
 	si3 := items[4].(sessionItem)
-	if si3.info.Name != "standalone" || si3.treePrefix != "" {
-		t.Errorf("items[4]: name=%q prefix=%q, want standalone with no prefix", si3.info.Name, si3.treePrefix)
+	if si3.info.Name != "neep" || si3.treePrefix != "" {
+		t.Errorf("items[4]: name=%q prefix=%q, want neep with no prefix", si3.info.Name, si3.treePrefix)
 	}
 }
 
 func TestBuildGroupedItems_MultiLevelTree(t *testing.T) {
 	now := time.Now().Format(time.RFC3339)
 	sessions := []protocol.SessionInfo{
-		{ID: "root", Name: "root", RepoName: "repo", Status: "running", CreatedAt: now},
-		{ID: "child", Name: "child", ParentID: "root", RepoName: "repo", Status: "running", CreatedAt: now},
-		{ID: "grandchild", Name: "grandchild", ParentID: "child", RepoName: "repo", Status: "running", CreatedAt: now},
+		{ID: "root", Name: "ben", RepoName: "repo", Status: "running", CreatedAt: now},
+		{ID: "child", Name: "bairn", ParentID: "root", RepoName: "repo", Status: "running", CreatedAt: now},
+		{ID: "grandchild", Name: "wee-bairn", ParentID: "child", RepoName: "repo", Status: "running", CreatedAt: now},
 	}
 	items := buildGroupedItems(sessions, nil)
 
@@ -216,19 +216,19 @@ func TestBuildGroupedItems_MultiLevelTree(t *testing.T) {
 	}
 
 	gc := items[3].(sessionItem)
-	if gc.info.Name != "grandchild" {
-		t.Fatalf("items[3] = %q, want grandchild", gc.info.Name)
+	if gc.info.Name != "wee-bairn" {
+		t.Fatalf("items[3] = %q, want wee-bairn", gc.info.Name)
 	}
 	wantPrefix := "    └── "
 	if gc.treePrefix != wantPrefix {
-		t.Errorf("grandchild prefix = %q, want %q", gc.treePrefix, wantPrefix)
+		t.Errorf("wee-bairn prefix = %q, want %q", gc.treePrefix, wantPrefix)
 	}
 }
 
 func TestBuildGroupedItems_OrphanedChild(t *testing.T) {
 	now := time.Now().Format(time.RFC3339)
 	sessions := []protocol.SessionInfo{
-		{ID: "orphan", Name: "orphan", ParentID: "nonexistent", RepoName: "repo", Status: "running", CreatedAt: now},
+		{ID: "orphan", Name: "thrawn", ParentID: "nonexistent", RepoName: "repo", Status: "running", CreatedAt: now},
 	}
 	items := buildGroupedItems(sessions, nil)
 
@@ -244,28 +244,28 @@ func TestBuildGroupedItems_OrphanedChild(t *testing.T) {
 func TestBuildGroupedItems_ParentInDifferentRepo(t *testing.T) {
 	now := time.Now().Format(time.RFC3339)
 	sessions := []protocol.SessionInfo{
-		{ID: "parent", Name: "parent", RepoName: "repo-a", Status: "running", CreatedAt: now},
-		{ID: "child", Name: "child", ParentID: "parent", RepoName: "repo-b", Status: "running", CreatedAt: now},
+		{ID: "parent", Name: "ben", RepoName: "repo-a", Status: "running", CreatedAt: now},
+		{ID: "child", Name: "bairn", ParentID: "parent", RepoName: "repo-b", Status: "running", CreatedAt: now},
 	}
 	items := buildGroupedItems(sessions, nil)
 
-	// child should be a root in repo-b since parent is in repo-a
+	// bairn should be a root in repo-b since ben is in repo-a
 	for _, item := range items {
-		if si, ok := item.(sessionItem); ok && si.info.Name == "child" {
+		if si, ok := item.(sessionItem); ok && si.info.Name == "bairn" {
 			if si.treePrefix != "" {
-				t.Errorf("child in different repo should be root, got prefix %q", si.treePrefix)
+				t.Errorf("bairn in different repo should be root, got prefix %q", si.treePrefix)
 			}
 			return
 		}
 	}
-	t.Fatal("child not found in items")
+	t.Fatal("bairn not found in items")
 }
 
 func TestBuildGroupedItems_CyclicParents(t *testing.T) {
 	now := time.Now().Format(time.RFC3339)
 	sessions := []protocol.SessionInfo{
-		{ID: "a", Name: "alpha", ParentID: "b", RepoName: "repo", Status: "running", CreatedAt: now},
-		{ID: "b", Name: "beta", ParentID: "a", RepoName: "repo", Status: "running", CreatedAt: now},
+		{ID: "a", Name: "braw", ParentID: "b", RepoName: "repo", Status: "running", CreatedAt: now},
+		{ID: "b", Name: "canny", ParentID: "a", RepoName: "repo", Status: "running", CreatedAt: now},
 	}
 	items := buildGroupedItems(sessions, nil)
 
@@ -303,22 +303,22 @@ func TestBuildGroupedItems_SelfReference(t *testing.T) {
 func TestBuildGroupedItems_CollapsedParent(t *testing.T) {
 	now := time.Now().Format(time.RFC3339)
 	sessions := []protocol.SessionInfo{
-		{ID: "root", Name: "root-session", RepoName: "repo", Status: "running", CreatedAt: now},
-		{ID: "child1", Name: "child-1", ParentID: "root", RepoName: "repo", Status: "running", CreatedAt: now},
-		{ID: "child2", Name: "child-2", ParentID: "root", RepoName: "repo", Status: "stopped", CreatedAt: now},
-		{ID: "standalone", Name: "standalone", RepoName: "repo", Status: "running", CreatedAt: now},
+		{ID: "root", Name: "ben-session", RepoName: "repo", Status: "running", CreatedAt: now},
+		{ID: "child1", Name: "bairn-1", ParentID: "root", RepoName: "repo", Status: "running", CreatedAt: now},
+		{ID: "child2", Name: "bairn-2", ParentID: "root", RepoName: "repo", Status: "stopped", CreatedAt: now},
+		{ID: "standalone", Name: "neep", RepoName: "repo", Status: "running", CreatedAt: now},
 	}
 	collapsed := map[string]bool{"root": true}
 	items := buildGroupedItems(sessions, collapsed)
 
-	// header + root (collapsed) + standalone = 3; children hidden
+	// header + ben-session (collapsed) + neep = 3; children hidden
 	if len(items) != 3 {
 		t.Fatalf("expected 3 items, got %d", len(items))
 	}
 
 	si := items[1].(sessionItem)
-	if si.info.Name != "root-session" {
-		t.Errorf("items[1] = %q, want root-session", si.info.Name)
+	if si.info.Name != "ben-session" {
+		t.Errorf("items[1] = %q, want ben-session", si.info.Name)
 	}
 	if !si.collapsed {
 		t.Error("root should be marked collapsed")
@@ -331,19 +331,19 @@ func TestBuildGroupedItems_CollapsedParent(t *testing.T) {
 	}
 
 	si2 := items[2].(sessionItem)
-	if si2.info.Name != "standalone" {
-		t.Errorf("items[2] = %q, want standalone", si2.info.Name)
+	if si2.info.Name != "neep" {
+		t.Errorf("items[2] = %q, want neep", si2.info.Name)
 	}
 }
 
 func TestBuildGroupedItems_CollapsedNestedParent(t *testing.T) {
 	now := time.Now().Format(time.RFC3339)
 	sessions := []protocol.SessionInfo{
-		{ID: "root", Name: "root", RepoName: "repo", Status: "running", CreatedAt: now},
-		{ID: "child", Name: "child", ParentID: "root", RepoName: "repo", Status: "running", CreatedAt: now},
-		{ID: "grandchild", Name: "grandchild", ParentID: "child", RepoName: "repo", Status: "running", CreatedAt: now},
+		{ID: "root", Name: "ben", RepoName: "repo", Status: "running", CreatedAt: now},
+		{ID: "child", Name: "bairn", ParentID: "root", RepoName: "repo", Status: "running", CreatedAt: now},
+		{ID: "grandchild", Name: "wee-bairn", ParentID: "child", RepoName: "repo", Status: "running", CreatedAt: now},
 	}
-	// Collapse root — should hide both child and grandchild
+	// Collapse root — should hide both bairn and wee-bairn
 	collapsed := map[string]bool{"root": true}
 	items := buildGroupedItems(sessions, collapsed)
 
@@ -360,11 +360,11 @@ func TestBuildGroupedItems_CollapsedNestedParent(t *testing.T) {
 func TestBuildGroupedItems_CollapseChildButNotRoot(t *testing.T) {
 	now := time.Now().Format(time.RFC3339)
 	sessions := []protocol.SessionInfo{
-		{ID: "root", Name: "root", RepoName: "repo", Status: "running", CreatedAt: now},
-		{ID: "child", Name: "child", ParentID: "root", RepoName: "repo", Status: "running", CreatedAt: now},
-		{ID: "grandchild", Name: "grandchild", ParentID: "child", RepoName: "repo", Status: "running", CreatedAt: now},
+		{ID: "root", Name: "ben", RepoName: "repo", Status: "running", CreatedAt: now},
+		{ID: "child", Name: "bairn", ParentID: "root", RepoName: "repo", Status: "running", CreatedAt: now},
+		{ID: "grandchild", Name: "wee-bairn", ParentID: "child", RepoName: "repo", Status: "running", CreatedAt: now},
 	}
-	// Collapse child — root and child visible, grandchild hidden
+	// Collapse bairn — ben and bairn visible, wee-bairn hidden
 	collapsed := map[string]bool{"child": true}
 	items := buildGroupedItems(sessions, collapsed)
 
@@ -384,8 +384,8 @@ func TestBuildGroupedItems_CollapseChildButNotRoot(t *testing.T) {
 func TestBuildGroupedItems_CollapsedCyclicParents(t *testing.T) {
 	now := time.Now().Format(time.RFC3339)
 	sessions := []protocol.SessionInfo{
-		{ID: "a", Name: "alpha", ParentID: "b", RepoName: "repo", Status: "running", CreatedAt: now},
-		{ID: "b", Name: "beta", ParentID: "a", RepoName: "repo", Status: "running", CreatedAt: now},
+		{ID: "a", Name: "braw", ParentID: "b", RepoName: "repo", Status: "running", CreatedAt: now},
+		{ID: "b", Name: "canny", ParentID: "a", RepoName: "repo", Status: "running", CreatedAt: now},
 	}
 	// Collapsing a cycle member must not stack overflow
 	collapsed := map[string]bool{"a": true}
@@ -407,20 +407,20 @@ func TestBuildGroupedItems_CollapsedCyclicParents(t *testing.T) {
 func TestBuildGroupedItems_HasChildrenFlagOnParent(t *testing.T) {
 	now := time.Now().Format(time.RFC3339)
 	sessions := []protocol.SessionInfo{
-		{ID: "root", Name: "root", RepoName: "repo", Status: "running", CreatedAt: now},
-		{ID: "child", Name: "child", ParentID: "root", RepoName: "repo", Status: "running", CreatedAt: now},
-		{ID: "leaf", Name: "leaf", RepoName: "repo", Status: "running", CreatedAt: now},
+		{ID: "root", Name: "ben", RepoName: "repo", Status: "running", CreatedAt: now},
+		{ID: "child", Name: "bairn", ParentID: "root", RepoName: "repo", Status: "running", CreatedAt: now},
+		{ID: "leaf", Name: "neep", RepoName: "repo", Status: "running", CreatedAt: now},
 	}
 	items := buildGroupedItems(sessions, nil)
 
 	for _, item := range items {
 		if si, ok := item.(sessionItem); ok {
 			switch si.info.Name {
-			case "root":
+			case "ben":
 				if !si.hasChildren {
-					t.Error("root should have hasChildren=true")
+					t.Error("ben should have hasChildren=true")
 				}
-			case "child", "leaf":
+			case "bairn", "neep":
 				if si.hasChildren {
 					t.Errorf("%s should have hasChildren=false", si.info.Name)
 				}
@@ -432,9 +432,9 @@ func TestBuildGroupedItems_HasChildrenFlagOnParent(t *testing.T) {
 func TestOverlay_SpaceTogglesCollapse(t *testing.T) {
 	now := time.Now().Format(time.RFC3339)
 	sessions := []protocol.SessionInfo{
-		{ID: "root", Name: "root", RepoName: "repo", Status: "running", CreatedAt: now},
-		{ID: "child1", Name: "child-1", ParentID: "root", RepoName: "repo", Status: "running", CreatedAt: now},
-		{ID: "child2", Name: "child-2", ParentID: "root", RepoName: "repo", Status: "running", CreatedAt: now},
+		{ID: "root", Name: "ben", RepoName: "repo", Status: "running", CreatedAt: now},
+		{ID: "child1", Name: "bairn-1", ParentID: "root", RepoName: "repo", Status: "running", CreatedAt: now},
+		{ID: "child2", Name: "bairn-2", ParentID: "root", RepoName: "repo", Status: "running", CreatedAt: now},
 	}
 	m := newOverlayModel(sessions, "", nil, nil, nil)
 	m.width = 120
@@ -473,7 +473,7 @@ func TestOverlay_SpaceTogglesCollapse(t *testing.T) {
 func TestOverlay_SpaceOnLeafDoesNothing(t *testing.T) {
 	now := time.Now().Format(time.RFC3339)
 	sessions := []protocol.SessionInfo{
-		{ID: "leaf", Name: "leaf", RepoName: "repo", Status: "running", CreatedAt: now},
+		{ID: "leaf", Name: "neep", RepoName: "repo", Status: "running", CreatedAt: now},
 	}
 	m := newOverlayModel(sessions, "", nil, nil, nil)
 	m.width = 120
@@ -492,11 +492,11 @@ func TestOverlay_SpaceOnLeafDoesNothing(t *testing.T) {
 func TestOverlay_CollapseAllExpandAll(t *testing.T) {
 	now := time.Now().Format(time.RFC3339)
 	sessions := []protocol.SessionInfo{
-		{ID: "root1", Name: "root1", RepoName: "repo", Status: "running", CreatedAt: now},
-		{ID: "c1", Name: "child1", ParentID: "root1", RepoName: "repo", Status: "running", CreatedAt: now},
-		{ID: "root2", Name: "root2", RepoName: "repo", Status: "running", CreatedAt: now},
-		{ID: "c2", Name: "child2", ParentID: "root2", RepoName: "repo", Status: "running", CreatedAt: now},
-		{ID: "leaf", Name: "leaf", RepoName: "repo", Status: "running", CreatedAt: now},
+		{ID: "root1", Name: "ben-one", RepoName: "repo", Status: "running", CreatedAt: now},
+		{ID: "c1", Name: "bairn-one", ParentID: "root1", RepoName: "repo", Status: "running", CreatedAt: now},
+		{ID: "root2", Name: "ben-two", RepoName: "repo", Status: "running", CreatedAt: now},
+		{ID: "c2", Name: "bairn-two", ParentID: "root2", RepoName: "repo", Status: "running", CreatedAt: now},
+		{ID: "leaf", Name: "neep", RepoName: "repo", Status: "running", CreatedAt: now},
 	}
 	m := newOverlayModel(sessions, "", nil, nil, nil)
 	m.width = 120
@@ -530,8 +530,8 @@ func TestOverlay_CollapseAllExpandAll(t *testing.T) {
 func TestOverlay_CollapsedStatePersists(t *testing.T) {
 	now := time.Now().Format(time.RFC3339)
 	sessions := []protocol.SessionInfo{
-		{ID: "root", Name: "root", RepoName: "repo", Status: "running", CreatedAt: now},
-		{ID: "child", Name: "child", ParentID: "root", RepoName: "repo", Status: "running", CreatedAt: now},
+		{ID: "root", Name: "ben", RepoName: "repo", Status: "running", CreatedAt: now},
+		{ID: "child", Name: "bairn", ParentID: "root", RepoName: "repo", Status: "running", CreatedAt: now},
 	}
 	collapsed := map[string]bool{"root": true}
 	m := newOverlayModel(sessions, "", nil, nil, collapsed)
@@ -549,13 +549,13 @@ func TestOverlay_CollapsedStatePersists(t *testing.T) {
 func TestMaxTreeIndentFromItems(t *testing.T) {
 	now := time.Now().Format(time.RFC3339)
 	sessions := []protocol.SessionInfo{
-		{ID: "root", Name: "root", RepoName: "repo", Status: "running", CreatedAt: now},
-		{ID: "child", Name: "child", ParentID: "root", RepoName: "repo", Status: "running", CreatedAt: now},
-		{ID: "grandchild", Name: "grandchild", ParentID: "child", RepoName: "repo", Status: "running", CreatedAt: now},
+		{ID: "root", Name: "ben", RepoName: "repo", Status: "running", CreatedAt: now},
+		{ID: "child", Name: "bairn", ParentID: "root", RepoName: "repo", Status: "running", CreatedAt: now},
+		{ID: "grandchild", Name: "wee-bairn", ParentID: "child", RepoName: "repo", Status: "running", CreatedAt: now},
 	}
 	items := buildGroupedItems(sessions, nil)
 	maxIndent := maxTreeIndentFromItems(items)
-	// Grandchild prefix is "    └── " = 8 visible chars
+	// wee-bairn prefix is "    └── " = 8 visible chars
 	if maxIndent != 8 {
 		t.Errorf("maxTreeIndent = %d, want 8", maxIndent)
 	}
@@ -573,19 +573,19 @@ func TestMaxTreeIndentFromItems_NoTree(t *testing.T) {
 
 func TestSortSessions_CurrentNotBoosted(t *testing.T) {
 	sessions := []protocol.SessionInfo{
-		{ID: "a", Name: "alpha", Status: "running", CreatedAt: time.Now().Format(time.RFC3339)},
-		{ID: "b", Name: "beta", Status: "running", CreatedAt: time.Now().Format(time.RFC3339)},
+		{ID: "a", Name: "braw", Status: "running", CreatedAt: time.Now().Format(time.RFC3339)},
+		{ID: "b", Name: "canny", Status: "running", CreatedAt: time.Now().Format(time.RFC3339)},
 	}
 	SortSessions(sessions)
 	if sessions[0].ID != "a" {
-		t.Errorf("current session should not be boosted, expected alpha first, got %q", sessions[0].ID)
+		t.Errorf("current session should not be boosted, expected braw first, got %q", sessions[0].ID)
 	}
 }
 
 func TestSortSessions_RunningBeforeStopped(t *testing.T) {
 	sessions := []protocol.SessionInfo{
-		{ID: "a", Name: "alpha", Status: "stopped", CreatedAt: time.Now().Format(time.RFC3339)},
-		{ID: "b", Name: "beta", Status: "running", CreatedAt: time.Now().Format(time.RFC3339)},
+		{ID: "a", Name: "braw", Status: "stopped", CreatedAt: time.Now().Format(time.RFC3339)},
+		{ID: "b", Name: "canny", Status: "running", CreatedAt: time.Now().Format(time.RFC3339)},
 	}
 	SortSessions(sessions)
 	if sessions[0].ID != "b" {
@@ -595,8 +595,8 @@ func TestSortSessions_RunningBeforeStopped(t *testing.T) {
 
 func TestSortSessions_AlphabeticalByName(t *testing.T) {
 	sessions := []protocol.SessionInfo{
-		{ID: "b", Name: "beta", Status: "running", CreatedAt: time.Now().Format(time.RFC3339), LastAttachedAt: time.Now().Add(-5 * time.Minute).Format(time.RFC3339)},
-		{ID: "a", Name: "alpha", Status: "running", CreatedAt: time.Now().Format(time.RFC3339), LastAttachedAt: time.Now().Add(-1 * time.Hour).Format(time.RFC3339)},
+		{ID: "b", Name: "canny", Status: "running", CreatedAt: time.Now().Format(time.RFC3339), LastAttachedAt: time.Now().Add(-5 * time.Minute).Format(time.RFC3339)},
+		{ID: "a", Name: "braw", Status: "running", CreatedAt: time.Now().Format(time.RFC3339), LastAttachedAt: time.Now().Add(-1 * time.Hour).Format(time.RFC3339)},
 	}
 	SortSessions(sessions)
 	if sessions[0].ID != "a" {
@@ -637,23 +637,23 @@ func TestShortDuration(t *testing.T) {
 // --- displayBranch ---
 
 func TestDisplayBranch_MatchesName(t *testing.T) {
-	got := displayBranch("d0ugal/graith/fix-overlay", "fix-overlay")
+	got := displayBranch("d0ugal/graith/braw-fix", "braw-fix")
 	if got != "—" {
 		t.Errorf("branch matching name should return dash, got %q", got)
 	}
 }
 
 func TestDisplayBranch_Different(t *testing.T) {
-	got := displayBranch("main", "feature-x")
+	got := displayBranch("main", "bonnie-feature")
 	if got != "main" {
 		t.Errorf("non-matching branch should return as-is, got %q", got)
 	}
 }
 
 func TestDisplayBranch_StripPrefix(t *testing.T) {
-	got := displayBranch("user/repo/my-branch", "other-name")
-	if got != "my-branch" {
-		t.Errorf("should strip user/repo/ prefix, got %q", got)
+	got := displayBranch("user/croft/braw-branch", "neep-name")
+	if got != "braw-branch" {
+		t.Errorf("should strip user/croft/ prefix, got %q", got)
 	}
 }
 
@@ -729,8 +729,8 @@ func TestFilterSessions_MultiTerm(t *testing.T) {
 	if len(filtered) != 1 {
 		t.Errorf("expected 1 running graith session, got %d", len(filtered))
 	}
-	if filtered[0].Name != "fix-overlay" {
-		t.Errorf("expected fix-overlay, got %q", filtered[0].Name)
+	if filtered[0].Name != "braw-fix" {
+		t.Errorf("expected braw-fix, got %q", filtered[0].Name)
 	}
 }
 
@@ -753,13 +753,13 @@ func TestFilterSessions_GitTokens(t *testing.T) {
 func TestFilterSessions_SharedWorktreeExcludesGitTokens(t *testing.T) {
 	sessions := []protocol.SessionInfo{
 		{
-			ID: "s1", Name: "parent-session", RepoName: "graith",
+			ID: "s1", Name: "ben-session", RepoName: "graith",
 			Branch: "feature-branch", Status: "running",
 			Dirty: true, UnpushedCount: 1,
 			CreatedAt: time.Now().Format(time.RFC3339),
 		},
 		{
-			ID: "s2", Name: "shared-reviewer", RepoName: "graith",
+			ID: "s2", Name: "braw-reviewer", RepoName: "graith",
 			Branch: "feature-branch", Status: "running",
 			Dirty: true, UnpushedCount: 1,
 			SharedWorktree: true,
@@ -767,11 +767,11 @@ func TestFilterSessions_SharedWorktreeExcludesGitTokens(t *testing.T) {
 		},
 	}
 	dirty := filterSessions(sessions, "dirty")
-	if len(dirty) != 1 || dirty[0].Name != "parent-session" {
+	if len(dirty) != 1 || dirty[0].Name != "ben-session" {
 		t.Errorf("filtering 'dirty' should return only parent, got %d sessions", len(dirty))
 	}
 	branch := filterSessions(sessions, "feature-branch")
-	if len(branch) != 1 || branch[0].Name != "parent-session" {
+	if len(branch) != 1 || branch[0].Name != "ben-session" {
 		t.Errorf("filtering by branch should return only parent, got %d sessions", len(branch))
 	}
 	for _, token := range []string{"modified", "clean", "unpushed"} {
@@ -798,8 +798,8 @@ func TestComputeColumnWidths(t *testing.T) {
 	sessions := overlayTestSessionsWithGitStatus()
 	cw := computeColumnWidths(sessions, "")
 
-	if cw.name < lipgloss.Width("dirty-session") {
-		t.Errorf("name width %d < width(%q)", cw.name, "dirty-session")
+	if cw.name < lipgloss.Width("thrawn-dirty") {
+		t.Errorf("name width %d < width(%q)", cw.name, "thrawn-dirty")
 	}
 	if cw.status < lipgloss.Width("thinking") {
 		t.Errorf("status width %d < width(%q) (agent status should override running)", cw.status, "thinking")
@@ -852,23 +852,23 @@ func TestComputeColumnWidths_SummaryWidth(t *testing.T) {
 			ID:          "s1",
 			Name:        "x",
 			Status:      "running",
-			SummaryText: "fixing the overlay bug",
+			SummaryText: "fixing the bothy roof",
 			CreatedAt:   time.Now().Format(time.RFC3339),
 		},
 	}
 	cw := computeColumnWidths(sessions, "")
-	if cw.summary < lipgloss.Width("fixing the overlay bug") {
-		t.Errorf("summary width %d should be at least width(%q)", cw.summary, "fixing the overlay bug")
+	if cw.summary < lipgloss.Width("fixing the bothy roof") {
+		t.Errorf("summary width %d should be at least width(%q)", cw.summary, "fixing the bothy roof")
 	}
 }
 
 // --- sessionItem / groupHeader ---
 
 func TestSessionItemFilterValue(t *testing.T) {
-	si := sessionItem{info: protocol.SessionInfo{Name: "foo", RepoName: "bar"}}
+	si := sessionItem{info: protocol.SessionInfo{Name: "braw", RepoName: "croft"}}
 	got := si.FilterValue()
-	if got != "foo bar" {
-		t.Errorf("FilterValue() = %q, want %q", got, "foo bar")
+	if got != "braw croft" {
+		t.Errorf("FilterValue() = %q, want %q", got, "braw croft")
 	}
 }
 
@@ -883,7 +883,7 @@ func TestGroupHeaderFilterValue(t *testing.T) {
 
 func TestNewOverlayModel_CursorOnCurrentSession(t *testing.T) {
 	sessions := overlayTestSessions()
-	m := newOverlayModel(sessions, "s3", nil, nil, nil) // s3 = feature-x in other-repo
+	m := newOverlayModel(sessions, "s3", nil, nil, nil) // s3 = bonnie-feature in croft
 	item := m.list.SelectedItem()
 	si, ok := item.(sessionItem)
 	if !ok {
@@ -986,7 +986,7 @@ func TestUpdate_RefreshSessions_PreservesCursor(t *testing.T) {
 	m.width = 120
 	m.height = 40
 
-	// Navigate to s3 (feature-x in other-repo)
+	// Navigate to s3 (bonnie-feature in croft)
 	for {
 		item, ok := m.list.SelectedItem().(sessionItem)
 		if ok && item.info.ID == "s3" {
@@ -1456,18 +1456,17 @@ func TestUpdate_NavigationSkipsGroupHeaders(t *testing.T) {
 	sessions := overlayTestSessions()
 	m := newOverlayModel(sessions, "", nil, nil, nil)
 
-	// Navigate down through all items to reach other-repo group
+	// Navigate down through all items to reach graith group
+	// Start is on bonnie-feature (croft), j→braw-fix (graith, skips header)
 	updated, _ := sendKey(m, "j")
 	om := asOverlay(updated)
-	updated, _ = sendKey(om, "j")
-	om = asOverlay(updated)
 	item := om.list.SelectedItem()
 	si, ok := item.(sessionItem)
 	if !ok {
 		t.Fatalf("after navigating past group header, expected sessionItem, got %T", item)
 	}
-	if si.info.RepoName != "other-repo" {
-		t.Errorf("expected to land in other-repo group, got %q", si.info.RepoName)
+	if si.info.RepoName != "graith" {
+		t.Errorf("expected to land in graith group, got %q", si.info.RepoName)
 	}
 }
 
@@ -1475,17 +1474,16 @@ func TestUpdate_NavigationUpSkipsGroupHeaders(t *testing.T) {
 	sessions := overlayTestSessions()
 	m := newOverlayModel(sessions, "", nil, nil, nil)
 
-	// Navigate to the last item
+	// Navigate to a graith item (j from croft skips graith header)
 	updated, _ := sendKey(m, "j")
-	updated, _ = sendKey(asOverlay(updated), "j")
 	om := asOverlay(updated)
 	if si, ok := om.list.SelectedItem().(sessionItem); ok {
-		if si.info.RepoName != "other-repo" {
-			t.Fatalf("expected to be in other-repo, got %q", si.info.RepoName)
+		if si.info.RepoName != "graith" {
+			t.Fatalf("expected to be in graith, got %q", si.info.RepoName)
 		}
 	}
 
-	// Navigate up — should skip the "other-repo" header
+	// Navigate up — should skip the "graith" header back to croft
 	updated, _ = sendKey(om, "k")
 	om = asOverlay(updated)
 	item := om.list.SelectedItem()
@@ -1493,8 +1491,8 @@ func TestUpdate_NavigationUpSkipsGroupHeaders(t *testing.T) {
 	if !ok {
 		t.Fatalf("navigating up past group header, expected sessionItem, got %T", item)
 	}
-	if si.info.RepoName != "graith" {
-		t.Errorf("expected graith group, got %q", si.info.RepoName)
+	if si.info.RepoName != "croft" {
+		t.Errorf("expected croft group, got %q", si.info.RepoName)
 	}
 }
 
@@ -1535,33 +1533,33 @@ func TestUpdate_NavigationFetchesPreview(t *testing.T) {
 // --- Update: Tab navigation ---
 
 func TestUpdate_TabJumpsToNextGroup(t *testing.T) {
-	sessions := overlayTestSessions() // graith (2) + other-repo (1)
+	sessions := overlayTestSessions() // croft (1) + graith (2)
 	m := newOverlayModel(sessions, "", nil, nil, nil)
 
-	// Should start in graith group
+	// Should start in croft group (alphabetically first)
 	initial := m.list.SelectedItem().(sessionItem)
-	if initial.info.RepoName != "graith" {
-		t.Fatalf("expected to start in graith, got %q", initial.info.RepoName)
+	if initial.info.RepoName != "croft" {
+		t.Fatalf("expected to start in croft, got %q", initial.info.RepoName)
 	}
 
-	// Tab should jump to other-repo group
+	// Tab should jump to graith group
 	sized, _ := sendWindowSize(m, 120, 40)
 	updated, _ := sendSpecialKey(asOverlay(sized), tea.KeyTab)
 	om := asOverlay(updated)
 	after := om.list.SelectedItem().(sessionItem)
-	if after.info.RepoName != "other-repo" {
-		t.Errorf("tab should jump to other-repo, got %q", after.info.RepoName)
+	if after.info.RepoName != "graith" {
+		t.Errorf("tab should jump to graith, got %q", after.info.RepoName)
 	}
 }
 
 func TestUpdate_ShiftTabJumpsToPrevGroup(t *testing.T) {
 	sessions := overlayTestSessions()
-	// Start on the other-repo session (s3)
+	// Start on the croft session (s3)
 	m := newOverlayModel(sessions, "s3", nil, nil, nil)
 
 	initial := m.list.SelectedItem().(sessionItem)
-	if initial.info.RepoName != "other-repo" {
-		t.Fatalf("expected to start in other-repo, got %q", initial.info.RepoName)
+	if initial.info.RepoName != "croft" {
+		t.Fatalf("expected to start in croft, got %q", initial.info.RepoName)
 	}
 
 	updated, _ := sendShiftTab(m)
@@ -1600,7 +1598,7 @@ func TestUpdate_FilterEnterAttachesCorrectFilteredSession(t *testing.T) {
 	m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil)
 	updated, _ := sendKey(m, "/")
 
-	for _, ch := range "feature" {
+	for _, ch := range "bonnie" {
 		updated, _ = sendKey(asOverlay(updated), string(ch))
 	}
 	updated, _ = sendSpecialKey(asOverlay(updated), tea.KeyEnter)
@@ -1646,14 +1644,14 @@ func TestUpdate_FilterTypingUpdatesInput(t *testing.T) {
 func TestUpdate_FilterActuallyFilters(t *testing.T) {
 	m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil)
 
-	// Enter filter mode and type "other"
+	// Enter filter mode and type "croft"
 	updated, _ := sendKey(m, "/")
-	for _, ch := range "other" {
+	for _, ch := range "croft" {
 		updated, _ = sendKey(asOverlay(updated), string(ch))
 	}
 	om := asOverlay(updated)
 
-	// Should only show other-repo sessions
+	// Should only show croft sessions
 	sessionCount := 0
 	for _, item := range om.list.Items() {
 		if _, ok := item.(sessionItem); ok {
@@ -1661,7 +1659,7 @@ func TestUpdate_FilterActuallyFilters(t *testing.T) {
 		}
 	}
 	if sessionCount != 1 {
-		t.Errorf("filtering for 'other' should show 1 session, got %d", sessionCount)
+		t.Errorf("filtering for 'croft' should show 1 session, got %d", sessionCount)
 	}
 }
 
@@ -1669,7 +1667,7 @@ func TestUpdate_FilterTypingTriggersPreviewFetch(t *testing.T) {
 	fetch := func(id string) string {
 		return "preview for " + id
 	}
-	// Start on s3 (other-repo). Filtering to "graith" will change selection to s1.
+	// Start on s3 (croft). Filtering to "graith" will change selection to s1.
 	m := newOverlayModel(overlayTestSessions(), "s3", fetch, nil, nil)
 	initial := m.list.SelectedItem().(sessionItem)
 	if initial.info.ID != "s3" {
@@ -1741,7 +1739,7 @@ func TestUpdate_FilterNoMatchClearsPreview(t *testing.T) {
 
 func TestUpdate_FilterResetsCursorToFirstSession(t *testing.T) {
 	sessions := overlayTestSessions()
-	// Start cursor on s3 (last session, in other-repo group)
+	// Start cursor on s3 (last session, in croft group)
 	m := newOverlayModel(sessions, "s3", nil, nil, nil)
 	initial := m.list.SelectedItem().(sessionItem)
 	if initial.info.ID != "s3" {
@@ -1775,7 +1773,7 @@ func TestUpdate_FilterEscRestoresFullList(t *testing.T) {
 
 	// Filter
 	updated, _ := sendKey(m, "/")
-	for _, ch := range "other" {
+	for _, ch := range "croft" {
 		updated, _ = sendKey(asOverlay(updated), string(ch))
 	}
 
@@ -1879,7 +1877,7 @@ func TestView_RendersSessionList(t *testing.T) {
 	if !strings.Contains(view, "All") {
 		t.Error("view should contain the view name 'All'")
 	}
-	for _, name := range []string{"add-tests", "fix-overlay", "feature-x"} {
+	for _, name := range []string{"canny-tests", "braw-fix", "bonnie-feature"} {
 		if !strings.Contains(view, name) {
 			t.Errorf("view should contain session name %q", name)
 		}
@@ -1895,8 +1893,8 @@ func TestView_ShowsGroupHeaders(t *testing.T) {
 	if !strings.Contains(view, "graith") {
 		t.Error("view should contain group header 'graith'")
 	}
-	if !strings.Contains(view, "other-repo") {
-		t.Error("view should contain group header 'other-repo'")
+	if !strings.Contains(view, "croft") {
+		t.Error("view should contain group header 'croft'")
 	}
 }
 
@@ -1944,7 +1942,7 @@ func TestView_ShowsDetailLine(t *testing.T) {
 func TestView_SharedWorktreeOmitsBranchAndBase(t *testing.T) {
 	sessions := []protocol.SessionInfo{
 		{
-			ID: "s1", Name: "shared-reviewer", RepoName: "graith",
+			ID: "s1", Name: "braw-reviewer", RepoName: "graith",
 			Branch: "refs/heads/feature", BaseBranch: "main",
 			Agent: "claude", Status: "running",
 			WorktreePath:   "/tmp/test-worktree",
@@ -2025,7 +2023,7 @@ func TestView_ConfirmDeleteDirtyOnly(t *testing.T) {
 	sessions := []protocol.SessionInfo{
 		{
 			ID:        "s1",
-			Name:      "dirty-only",
+			Name:      "thrawn-only",
 			RepoName:  "graith",
 			Status:    "running",
 			Dirty:     true,
@@ -2049,7 +2047,7 @@ func TestView_ConfirmDeleteUnpushedSingular(t *testing.T) {
 	sessions := []protocol.SessionInfo{
 		{
 			ID:            "s1",
-			Name:          "one-commit",
+			Name:          "neep-commit",
 			RepoName:      "graith",
 			Status:        "running",
 			UnpushedCount: 1,
@@ -2083,7 +2081,7 @@ func TestView_ConfirmDeleteUnpushedOnly(t *testing.T) {
 	sessions := []protocol.SessionInfo{
 		{
 			ID:            "s1",
-			Name:          "unpushed-only",
+			Name:          "thrawn-unpushed",
 			RepoName:      "graith",
 			Status:        "running",
 			UnpushedCount: 5,
@@ -2159,7 +2157,7 @@ func TestView_PreviewBackground(t *testing.T) {
 
 func TestSingleSession(t *testing.T) {
 	sessions := []protocol.SessionInfo{
-		{ID: "s1", Name: "only-one", RepoName: "repo", Status: "running", CreatedAt: time.Now().Format(time.RFC3339)},
+		{ID: "s1", Name: "neep-one", RepoName: "repo", Status: "running", CreatedAt: time.Now().Format(time.RFC3339)},
 	}
 	m := newOverlayModel(sessions, "", nil, nil, nil)
 
@@ -2167,8 +2165,8 @@ func TestSingleSession(t *testing.T) {
 	if !ok {
 		t.Fatal("cursor should be on the session item")
 	}
-	if si.info.Name != "only-one" {
-		t.Errorf("selected = %q, want %q", si.info.Name, "only-one")
+	if si.info.Name != "neep-one" {
+		t.Errorf("selected = %q, want %q", si.info.Name, "neep-one")
 	}
 
 	updated, cmd := sendSpecialKey(m, tea.KeyEnter)
@@ -2359,13 +2357,13 @@ func TestCompactDelegate_RenderGroupHeader(t *testing.T) {
 	var buf strings.Builder
 	d.Render(&buf, l, 0, items[0])
 	line := buf.String()
-	if !strings.Contains(line, "graith") {
-		t.Errorf("group header render should contain %q, got %q", "graith", line)
+	if !strings.Contains(line, "croft") {
+		t.Errorf("group header render should contain %q, got %q", "croft", line)
 	}
 	if !strings.Contains(line, "▸") {
 		t.Error("group header should have ▸ prefix")
 	}
-	if !strings.Contains(line, "(2)") {
+	if !strings.Contains(line, "(1)") {
 		t.Error("group header should show session count")
 	}
 }
@@ -2440,7 +2438,7 @@ func TestCompactDelegate_RenderGitStatus(t *testing.T) {
 func TestCompactDelegate_RenderSharedWorktreeShowsDash(t *testing.T) {
 	sessions := []protocol.SessionInfo{
 		{
-			ID: "s1", Name: "shared-reviewer", RepoName: "graith",
+			ID: "s1", Name: "braw-reviewer", RepoName: "graith",
 			Branch: "d0ugal/graith/feature", Agent: "claude",
 			Status: "running", AgentStatus: "active",
 			Dirty: true, UnpushedCount: 5,
@@ -2489,8 +2487,8 @@ func TestCompactDelegate_RenderCurrentSession(t *testing.T) {
 func TestCompactDelegate_RenderSummary(t *testing.T) {
 	sessions := []protocol.SessionInfo{
 		{
-			ID: "s1", Name: "fix-overlay", RepoName: "repo",
-			Status: "running", SummaryText: "fixing the overlay",
+			ID: "s1", Name: "braw-fix", RepoName: "repo",
+			Status: "running", SummaryText: "fixing the bothy",
 			CreatedAt: time.Now().Format(time.RFC3339),
 		},
 	}
@@ -2501,7 +2499,7 @@ func TestCompactDelegate_RenderSummary(t *testing.T) {
 
 	var buf strings.Builder
 	d.Render(&buf, l, 1, items[1])
-	if !strings.Contains(buf.String(), "fixing the overlay") {
+	if !strings.Contains(buf.String(), "fixing the bothy") {
 		t.Error("render should show summary text")
 	}
 }
@@ -2529,7 +2527,7 @@ func TestCompactDelegate_RenderSelectedVsUnselected(t *testing.T) {
 func TestCompactDelegate_RenderTruncatesLongLine(t *testing.T) {
 	sessions := []protocol.SessionInfo{
 		{
-			ID: "s1", Name: "very-long-session-name-that-exceeds-width", RepoName: "repo",
+			ID: "s1", Name: "very-long-braw-session-name-that-exceeds-width", RepoName: "repo",
 			Status: "running", Branch: "feature/very-long-branch-name-here",
 			CreatedAt: time.Now().Format(time.RFC3339),
 		},
@@ -2595,25 +2593,25 @@ func TestColumnWidths_TotalWidth(t *testing.T) {
 
 func TestFilterNeedsAttention(t *testing.T) {
 	sessions := []protocol.SessionInfo{
-		{ID: "s1", Name: "active-session", Status: "running", AgentStatus: "active"},
-		{ID: "s2", Name: "approval-session", Status: "running", AgentStatus: "approval"},
-		{ID: "s3", Name: "errored-session", Status: "errored"},
-		{ID: "s4", Name: "ready-session", Status: "running", AgentStatus: "ready"},
-		{ID: "s5", Name: "stopped-clean", Status: "stopped"},
-		{ID: "s6", Name: "stopped-dirty", Status: "stopped", Dirty: true},
-		{ID: "s7", Name: "stopped-unpushed", Status: "stopped", UnpushedCount: 2},
+		{ID: "s1", Name: "braw-session", Status: "running", AgentStatus: "active"},
+		{ID: "s2", Name: "thrawn-approval", Status: "running", AgentStatus: "approval"},
+		{ID: "s3", Name: "thrawn-errored", Status: "errored"},
+		{ID: "s4", Name: "canny-ready", Status: "running", AgentStatus: "ready"},
+		{ID: "s5", Name: "neep-clean", Status: "stopped"},
+		{ID: "s6", Name: "thrawn-dirty", Status: "stopped", Dirty: true},
+		{ID: "s7", Name: "thrawn-unpushed", Status: "stopped", UnpushedCount: 2},
 	}
 	result := filterNeedsAttention(sessions)
 	names := make([]string, len(result))
 	for i, s := range result {
 		names[i] = s.Name
 	}
-	// Should include: approval, errored, ready (running+ready), stopped-dirty, stopped-unpushed
-	// Should exclude: active-session (working fine), stopped-clean (nothing to save)
+	// Should include: thrawn-approval, thrawn-errored, canny-ready (running+ready), thrawn-dirty, thrawn-unpushed
+	// Should exclude: braw-session (working fine), neep-clean (nothing to save)
 	if len(result) != 5 {
 		t.Fatalf("got %d sessions %v, want 5", len(result), names)
 	}
-	for _, name := range []string{"approval-session", "errored-session", "ready-session", "stopped-dirty", "stopped-unpushed"} {
+	for _, name := range []string{"thrawn-approval", "thrawn-errored", "canny-ready", "thrawn-dirty", "thrawn-unpushed"} {
 		found := false
 		for _, n := range names {
 			if n == name {
@@ -2629,9 +2627,9 @@ func TestFilterNeedsAttention(t *testing.T) {
 
 func TestFilterNeedsAttention_ExcludesSharedWorktree(t *testing.T) {
 	sessions := []protocol.SessionInfo{
-		{ID: "s1", Name: "parent-dirty", Status: "stopped", Dirty: true},
-		{ID: "s2", Name: "shared-dirty", Status: "stopped", Dirty: true, SharedWorktree: true},
-		{ID: "s3", Name: "shared-unpushed", Status: "stopped", UnpushedCount: 3, SharedWorktree: true},
+		{ID: "s1", Name: "ben-dirty", Status: "stopped", Dirty: true},
+		{ID: "s2", Name: "braw-shared-dirty", Status: "stopped", Dirty: true, SharedWorktree: true},
+		{ID: "s3", Name: "braw-shared-unpushed", Status: "stopped", UnpushedCount: 3, SharedWorktree: true},
 	}
 	result := filterNeedsAttention(sessions)
 	if len(result) != 1 {
@@ -2639,17 +2637,17 @@ func TestFilterNeedsAttention_ExcludesSharedWorktree(t *testing.T) {
 		for i, s := range result {
 			names[i] = s.Name
 		}
-		t.Fatalf("got %d sessions %v, want 1 (only parent-dirty)", len(result), names)
+		t.Fatalf("got %d sessions %v, want 1 (only ben-dirty)", len(result), names)
 	}
-	if result[0].Name != "parent-dirty" {
-		t.Errorf("got %q, want parent-dirty", result[0].Name)
+	if result[0].Name != "ben-dirty" {
+		t.Errorf("got %q, want ben-dirty", result[0].Name)
 	}
 }
 
 func TestView_SharedWorktreeDeleteNoUnsavedWarning(t *testing.T) {
 	sessions := []protocol.SessionInfo{
 		{
-			ID: "s1", Name: "shared-dirty", RepoName: "graith",
+			ID: "s1", Name: "braw-shared-dirty", RepoName: "graith",
 			Status: "running", Agent: "claude",
 			Dirty: true, UnpushedCount: 3,
 			SharedWorktree: true,
@@ -2673,13 +2671,13 @@ func TestView_SharedWorktreeDeleteNoUnsavedWarning(t *testing.T) {
 
 func TestFilterActive(t *testing.T) {
 	sessions := []protocol.SessionInfo{
-		{ID: "s1", Name: "active-session", Status: "running", AgentStatus: "active",
+		{ID: "s1", Name: "braw-session", Status: "running", AgentStatus: "active",
 			CreatedAt: time.Now().Add(-10 * time.Minute).Format(time.RFC3339)},
-		{ID: "s2", Name: "approval-session", Status: "running", AgentStatus: "approval",
+		{ID: "s2", Name: "thrawn-approval", Status: "running", AgentStatus: "approval",
 			CreatedAt: time.Now().Add(-5 * time.Minute).Format(time.RFC3339)},
-		{ID: "s3", Name: "stopped-session", Status: "stopped",
+		{ID: "s3", Name: "neep-stopped", Status: "stopped",
 			CreatedAt: time.Now().Format(time.RFC3339)},
-		{ID: "s4", Name: "unknown-running", Status: "running", AgentStatus: "unknown",
+		{ID: "s4", Name: "canny-running", Status: "running", AgentStatus: "unknown",
 			CreatedAt: time.Now().Add(-1 * time.Minute).Format(time.RFC3339)},
 	}
 	result := filterActive(sessions)
@@ -2691,8 +2689,8 @@ func TestFilterActive(t *testing.T) {
 		t.Fatalf("got %d sessions %v, want 3 (all running)", len(result), names)
 	}
 	// Should be sorted newest first
-	if result[0].Name != "unknown-running" {
-		t.Errorf("first session = %q, want unknown-running (newest)", result[0].Name)
+	if result[0].Name != "canny-running" {
+		t.Errorf("first session = %q, want canny-running (newest)", result[0].Name)
 	}
 }
 
@@ -2701,13 +2699,13 @@ func TestFilterActive(t *testing.T) {
 func TestSortByStatusAge(t *testing.T) {
 	now := time.Now()
 	sessions := []protocol.SessionInfo{
-		{ID: "s1", Name: "recent", StatusChangedAt: now.Add(-1 * time.Minute).Format(time.RFC3339)},
-		{ID: "s2", Name: "old", StatusChangedAt: now.Add(-1 * time.Hour).Format(time.RFC3339)},
-		{ID: "s3", Name: "medium", StatusChangedAt: now.Add(-10 * time.Minute).Format(time.RFC3339)},
+		{ID: "s1", Name: "braw-recent", StatusChangedAt: now.Add(-1 * time.Minute).Format(time.RFC3339)},
+		{ID: "s2", Name: "thrawn-old", StatusChangedAt: now.Add(-1 * time.Hour).Format(time.RFC3339)},
+		{ID: "s3", Name: "canny-medium", StatusChangedAt: now.Add(-10 * time.Minute).Format(time.RFC3339)},
 	}
 	sortByStatusAge(sessions)
-	if sessions[0].Name != "old" || sessions[1].Name != "medium" || sessions[2].Name != "recent" {
-		t.Errorf("got order [%s, %s, %s], want [old, medium, recent]",
+	if sessions[0].Name != "thrawn-old" || sessions[1].Name != "canny-medium" || sessions[2].Name != "braw-recent" {
+		t.Errorf("got order [%s, %s, %s], want [thrawn-old, canny-medium, braw-recent]",
 			sessions[0].Name, sessions[1].Name, sessions[2].Name)
 	}
 }
@@ -2799,12 +2797,12 @@ func TestOverlay_LeftArrowCyclesViewBackward(t *testing.T) {
 
 func TestOverlay_NeedsAttentionFiltersCorrectly(t *testing.T) {
 	sessions := []protocol.SessionInfo{
-		{ID: "s1", Name: "working", RepoName: "repo", Status: "running", AgentStatus: "active",
+		{ID: "s1", Name: "braw-working", RepoName: "repo", Status: "running", AgentStatus: "active",
 			CreatedAt: time.Now().Format(time.RFC3339)},
-		{ID: "s2", Name: "blocked", RepoName: "repo", Status: "running", AgentStatus: "approval",
+		{ID: "s2", Name: "thrawn-blocked", RepoName: "repo", Status: "running", AgentStatus: "approval",
 			CreatedAt:       time.Now().Format(time.RFC3339),
 			StatusChangedAt: time.Now().Add(-5 * time.Minute).Format(time.RFC3339)},
-		{ID: "s3", Name: "idle", RepoName: "repo", Status: "stopped",
+		{ID: "s3", Name: "neep-idle", RepoName: "repo", Status: "stopped",
 			CreatedAt: time.Now().Format(time.RFC3339)},
 	}
 	m := newOverlayModel(sessions, "", nil, nil, nil)
@@ -2827,11 +2825,11 @@ func TestOverlay_NeedsAttentionFiltersCorrectly(t *testing.T) {
 
 func TestOverlay_ActiveViewShowsOnlyRunning(t *testing.T) {
 	sessions := []protocol.SessionInfo{
-		{ID: "s1", Name: "running1", RepoName: "repo", Status: "running", AgentStatus: "active",
+		{ID: "s1", Name: "braw-running", RepoName: "repo", Status: "running", AgentStatus: "active",
 			CreatedAt: time.Now().Format(time.RFC3339)},
-		{ID: "s2", Name: "stopped1", RepoName: "repo", Status: "stopped",
+		{ID: "s2", Name: "neep-stopped", RepoName: "repo", Status: "stopped",
 			CreatedAt: time.Now().Format(time.RFC3339)},
-		{ID: "s3", Name: "running2", RepoName: "repo", Status: "running", AgentStatus: "ready",
+		{ID: "s3", Name: "canny-running", RepoName: "repo", Status: "running", AgentStatus: "ready",
 			CreatedAt: time.Now().Add(-10 * time.Minute).Format(time.RFC3339)},
 	}
 	m := newOverlayModel(sessions, "", nil, nil, nil)
@@ -2855,12 +2853,12 @@ func TestOverlay_ActiveViewShowsOnlyRunning(t *testing.T) {
 
 func TestOverlay_FilterRespectsView(t *testing.T) {
 	sessions := []protocol.SessionInfo{
-		{ID: "s1", Name: "api-fix", RepoName: "repo", Status: "running", AgentStatus: "active",
+		{ID: "s1", Name: "braw-api", RepoName: "repo", Status: "running", AgentStatus: "active",
 			CreatedAt: time.Now().Format(time.RFC3339)},
-		{ID: "s2", Name: "api-blocked", RepoName: "repo", Status: "running", AgentStatus: "approval",
+		{ID: "s2", Name: "thrawn-api", RepoName: "repo", Status: "running", AgentStatus: "approval",
 			CreatedAt:       time.Now().Format(time.RFC3339),
 			StatusChangedAt: time.Now().Format(time.RFC3339)},
-		{ID: "s3", Name: "ui-blocked", RepoName: "repo", Status: "running", AgentStatus: "approval",
+		{ID: "s3", Name: "thrawn-ui", RepoName: "repo", Status: "running", AgentStatus: "approval",
 			CreatedAt:       time.Now().Format(time.RFC3339),
 			StatusChangedAt: time.Now().Format(time.RFC3339)},
 	}
@@ -2887,7 +2885,7 @@ func TestOverlay_FilterRespectsView(t *testing.T) {
 			sessionCount++
 		}
 	}
-	// Should only show api-blocked (api-fix is active, not needing attention)
+	// Should only show thrawn-api (braw-api is active, not needing attention)
 	if sessionCount != 1 {
 		t.Errorf("filtered needs-attention has %d sessions, want 1", sessionCount)
 	}
@@ -2895,9 +2893,9 @@ func TestOverlay_FilterRespectsView(t *testing.T) {
 
 func TestOverlay_FilterEscRebuildsView(t *testing.T) {
 	sessions := []protocol.SessionInfo{
-		{ID: "s1", Name: "working", RepoName: "repo", Status: "running", AgentStatus: "active",
+		{ID: "s1", Name: "braw-working", RepoName: "repo", Status: "running", AgentStatus: "active",
 			CreatedAt: time.Now().Format(time.RFC3339)},
-		{ID: "s2", Name: "blocked", RepoName: "repo", Status: "running", AgentStatus: "approval",
+		{ID: "s2", Name: "thrawn-blocked", RepoName: "repo", Status: "running", AgentStatus: "approval",
 			CreatedAt:       time.Now().Format(time.RFC3339),
 			StatusChangedAt: time.Now().Format(time.RFC3339)},
 	}
@@ -2924,13 +2922,13 @@ func TestOverlay_FilterEscRebuildsView(t *testing.T) {
 		}
 	}
 	if sessionCount != 1 {
-		t.Errorf("after filter cancel: %d sessions, want 1 (only blocked)", sessionCount)
+		t.Errorf("after filter cancel: %d sessions, want 1 (only thrawn-blocked)", sessionCount)
 	}
 }
 
 func TestOverlay_EmptyNeedsAttentionView(t *testing.T) {
 	sessions := []protocol.SessionInfo{
-		{ID: "s1", Name: "working", RepoName: "repo", Status: "running", AgentStatus: "active",
+		{ID: "s1", Name: "braw-working", RepoName: "repo", Status: "running", AgentStatus: "active",
 			CreatedAt: time.Now().Format(time.RFC3339)},
 	}
 	m := newOverlayModel(sessions, "", nil, nil, nil)

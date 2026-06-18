@@ -15,7 +15,7 @@ func TestFrameRoundTrip(t *testing.T) {
 	if err := w.WriteFrame(ChannelControl, []byte(`{"type":"list"}`)); err != nil {
 		t.Fatal(err)
 	}
-	if err := w.WriteFrame(ChannelData, []byte("hello pty")); err != nil {
+	if err := w.WriteFrame(ChannelData, []byte("blether pty")); err != nil {
 		t.Fatal(err)
 	}
 	f1, err := r.ReadFrame()
@@ -29,7 +29,7 @@ func TestFrameRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if f2.Channel != ChannelData || string(f2.Payload) != "hello pty" {
+	if f2.Channel != ChannelData || string(f2.Payload) != "blether pty" {
 		t.Errorf("frame 2: channel=%d payload=%q", f2.Channel, f2.Payload)
 	}
 }

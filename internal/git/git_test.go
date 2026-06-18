@@ -16,17 +16,17 @@ func setupTestRepo(t *testing.T) string {
 		cmd := exec.Command("git", args...)
 		cmd.Dir = dir
 		cmd.Env = append(os.Environ(),
-			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
-			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
+			"GIT_AUTHOR_NAME=braw", "GIT_AUTHOR_EMAIL=braw@croft.local",
+			"GIT_COMMITTER_NAME=braw", "GIT_COMMITTER_EMAIL=braw@croft.local",
 		)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
 	}
 	run("init", "-b", "main")
-	os.WriteFile(filepath.Join(dir, "README.md"), []byte("test"), 0o644)
+	os.WriteFile(filepath.Join(dir, "README.md"), []byte("braw"), 0o644)
 	run("add", ".")
-	run("commit", "-m", "initial")
+	run("commit", "-m", "auld")
 	return dir
 }
 
@@ -56,7 +56,7 @@ func TestRefExists(t *testing.T) {
 	if !RefExists(dir, "main") {
 		t.Error("main branch should exist")
 	}
-	if RefExists(dir, "nonexistent-branch") {
+	if RefExists(dir, "glen-thrawn-nonexistent") {
 		t.Error("nonexistent branch should not exist")
 	}
 }
@@ -70,7 +70,7 @@ func TestHasUncommittedChanges(t *testing.T) {
 	if dirty {
 		t.Error("clean repo should not be dirty")
 	}
-	os.WriteFile(filepath.Join(dir, "new.txt"), []byte("change"), 0o644)
+	os.WriteFile(filepath.Join(dir, "neep.txt"), []byte("bonnie"), 0o644)
 	dirty, err = HasUncommittedChanges(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -101,8 +101,8 @@ func TestDirtyFiles(t *testing.T) {
 		t.Errorf("clean repo: got %d dirty files, want 0", len(files))
 	}
 
-	os.WriteFile(filepath.Join(dir, "new.txt"), []byte("new"), 0o644)
-	os.WriteFile(filepath.Join(dir, "README.md"), []byte("modified"), 0o644)
+	os.WriteFile(filepath.Join(dir, "neep.txt"), []byte("neep"), 0o644)
+	os.WriteFile(filepath.Join(dir, "README.md"), []byte("bonnie"), 0o644)
 
 	files, err = DirtyFiles(dir)
 	if err != nil {
@@ -158,21 +158,21 @@ func TestUnpushedCommitSummaries(t *testing.T) {
 		cmd := exec.Command("git", args...)
 		cmd.Dir = dir
 		cmd.Env = append(os.Environ(),
-			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
-			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
+			"GIT_AUTHOR_NAME=braw", "GIT_AUTHOR_EMAIL=braw@croft.local",
+			"GIT_COMMITTER_NAME=braw", "GIT_COMMITTER_EMAIL=braw@croft.local",
 		)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
 	}
 
-	run("checkout", "-b", "feature")
-	os.WriteFile(filepath.Join(dir, "a.txt"), []byte("a"), 0o644)
+	run("checkout", "-b", "glen-feature")
+	os.WriteFile(filepath.Join(dir, "neep-a.txt"), []byte("neep"), 0o644)
 	run("add", ".")
-	run("commit", "-m", "first feature commit")
-	os.WriteFile(filepath.Join(dir, "b.txt"), []byte("b"), 0o644)
+	run("commit", "-m", "braw glen commit")
+	os.WriteFile(filepath.Join(dir, "neep-b.txt"), []byte("neep"), 0o644)
 	run("add", ".")
-	run("commit", "-m", "second feature commit")
+	run("commit", "-m", "bonnie glen commit")
 
 	commits, err = UnpushedCommitSummaries(dir, "main")
 	if err != nil {
@@ -186,7 +186,7 @@ func TestUnpushedCommitSummaries(t *testing.T) {
 func TestUnpushedCommitSummariesNoRemote(t *testing.T) {
 	dir := setupTestRepo(t)
 
-	_, err := UnpushedCommitSummaries(dir, "nonexistent-branch")
+	_, err := UnpushedCommitSummaries(dir, "glen-thrawn-nonexistent")
 	if err == nil {
 		t.Error("expected error for nonexistent base branch")
 	}

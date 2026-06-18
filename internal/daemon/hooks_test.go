@@ -22,7 +22,7 @@ func newTestSessionManagerWithDataDir(t *testing.T) *SessionManager {
 
 func TestGenerateClaudeSettings(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
-	sessionID := "test-session-02"
+	sessionID := "kirk-braw-02"
 
 	settingsPath, err := sm.generateClaudeSettings(sessionID)
 	if err != nil {
@@ -113,7 +113,7 @@ func TestGenerateClaudeSettings(t *testing.T) {
 
 func TestInjectClaudeHooks(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
-	sessionID := "test-session-03"
+	sessionID := "kirk-braw-03"
 
 	extraArgs, extraEnv, err := sm.injectClaudeHooks(sessionID, nil)
 	if err != nil {
@@ -137,7 +137,7 @@ func TestInjectClaudeHooks(t *testing.T) {
 
 func TestCleanupHooks(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
-	sessionID := "test-session-04"
+	sessionID := "kirk-braw-04"
 
 	_, err := sm.generateClaudeSettings(sessionID)
 	if err != nil {
@@ -158,13 +158,13 @@ func TestCleanupHooks(t *testing.T) {
 
 func TestCleanupHooksNonexistent(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
-	sm.cleanupHooks("nonexistent-session", "claude", "")
+	sm.cleanupHooks("haar-session", "claude", "")
 }
 
 func TestCleanupCursorHooks(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	sm := newTestSessionManagerWithDataDir(t)
-	sessionID := "test-cursor-cleanup"
+	sessionID := "kirk-cursor"
 	worktree := t.TempDir()
 
 	_, _, err := sm.injectCursorHooks(sessionID, worktree)
@@ -193,7 +193,7 @@ func TestResolveGrBin(t *testing.T) {
 
 func TestInjectCodexHooks(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
-	sessionID := "test-session-codex-01"
+	sessionID := "kirk-codex-01"
 
 	extraArgs, extraEnv, err := sm.injectCodexHooks(sessionID)
 	if err != nil {
@@ -253,7 +253,7 @@ func TestInjectCodexHooks(t *testing.T) {
 
 func TestCodexHookScriptContent(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
-	sessionID := "test-session-codex-02"
+	sessionID := "kirk-codex-02"
 
 	_, _, err := sm.injectCodexHooks(sessionID)
 	if err != nil {
@@ -310,7 +310,7 @@ func TestInjectHooksSupported(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	sm := newTestSessionManagerWithDataDir(t)
 
-	args, env, err := sm.injectHooks("claude", "test-supported-claude", "", nil)
+	args, env, err := sm.injectHooks("claude", "kirk-claude", "", nil)
 	if err != nil {
 		t.Fatalf("injectHooks(claude) error = %v", err)
 	}
@@ -321,7 +321,7 @@ func TestInjectHooksSupported(t *testing.T) {
 		t.Errorf("injectHooks(claude) returned unexpected env: %v", env)
 	}
 
-	args, env, err = sm.injectHooks("codex", "test-supported-codex", "", nil)
+	args, env, err = sm.injectHooks("codex", "kirk-codex", "", nil)
 	if err != nil {
 		t.Fatalf("injectHooks(codex) error = %v", err)
 	}
@@ -333,7 +333,7 @@ func TestInjectHooksSupported(t *testing.T) {
 	}
 
 	worktree := t.TempDir()
-	args, env, err = sm.injectHooks("cursor", "test-supported-cursor", worktree, nil)
+	args, env, err = sm.injectHooks("cursor", "kirk-cursor-sup", worktree, nil)
 	if err != nil {
 		t.Fatalf("injectHooks(cursor) error = %v", err)
 	}
@@ -353,7 +353,7 @@ func TestInjectHooksUnsupportedIsNoop(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 
 	for _, agent := range []string{"agy", "opencode", "custom-agent"} {
-		args, env, err := sm.injectHooks(agent, "test-unsupported", "", nil)
+		args, env, err := sm.injectHooks(agent, "haar-unsupported", "", nil)
 		if err != nil {
 			t.Errorf("injectHooks(%q) unexpected error: %v", agent, err)
 		}
@@ -368,8 +368,8 @@ func TestInjectHooksUnsupportedIsNoop(t *testing.T) {
 
 func TestHookDir(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
-	dir := sm.hookDir("sess123")
-	expected := filepath.Join(sm.paths.DataDir, "hooks", "sess123")
+	dir := sm.hookDir("braw123")
+	expected := filepath.Join(sm.paths.DataDir, "hooks", "braw123")
 	if dir != expected {
 		t.Errorf("hookDir() = %q, want %q", dir, expected)
 	}
@@ -410,7 +410,7 @@ func TestCodexHookScriptsEscapeSingleQuotes(t *testing.T) {
 	t.Setenv("PATH", fakeDir+":"+os.Getenv("PATH"))
 
 	sm := newTestSessionManagerWithDataDir(t)
-	sessionID := "test-session-codex-quote"
+	sessionID := "kirk-codex-quote"
 
 	_, _, err := sm.injectCodexHooks(sessionID)
 	if err != nil {
@@ -437,7 +437,7 @@ func TestCodexHookScriptsEscapeSingleQuotes(t *testing.T) {
 
 func TestGenerateMCPConfig(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
-	sessionID := "test-mcp-01"
+	sessionID := "kirk-mcp-01"
 
 	servers := []config.MCPServerConfig{
 		{Name: "graith", Command: "/usr/bin/gr", Args: []string{"mcp"}},
@@ -495,7 +495,7 @@ func TestGenerateMCPConfig(t *testing.T) {
 
 func TestInjectClaudeHooksWithMCPServers(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
-	sessionID := "test-mcp-inject"
+	sessionID := "kirk-mcp-inject"
 
 	servers := []config.MCPServerConfig{
 		{Name: "graith", Command: "/usr/bin/gr", Args: []string{"mcp"}},
@@ -532,7 +532,7 @@ func TestInjectClaudeHooksWithMCPServers(t *testing.T) {
 
 func TestGenerateClaudeSettingsNoMCPServers(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
-	sessionID := "test-mcp-02"
+	sessionID := "kirk-mcp-02"
 
 	settingsPath, err := sm.generateClaudeSettings(sessionID)
 	if err != nil {
@@ -671,7 +671,7 @@ func TestResolveMCPServers(t *testing.T) {
 func TestInjectCursorHooks(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	sm := newTestSessionManagerWithDataDir(t)
-	sessionID := "test-session-cursor-01"
+	sessionID := "kirk-cursor-01"
 	worktree := t.TempDir()
 
 	extraArgs, extraEnv, err := sm.injectCursorHooks(sessionID, worktree)
@@ -725,7 +725,7 @@ func TestInjectCursorHooks(t *testing.T) {
 func TestInjectCursorHooksContent(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	sm := newTestSessionManagerWithDataDir(t)
-	sessionID := "test-session-cursor-02"
+	sessionID := "kirk-cursor-02"
 	worktree := t.TempDir()
 
 	_, _, err := sm.injectCursorHooks(sessionID, worktree)
@@ -819,7 +819,7 @@ func TestPreTrustCursorWorkspaceDisabled(t *testing.T) {
 	}
 
 	worktree := t.TempDir()
-	_, _, err := sm.injectCursorHooks("test-no-trust", worktree)
+	_, _, err := sm.injectCursorHooks("haar-no-trust", worktree)
 	if err != nil {
 		t.Fatalf("injectCursorHooks() error = %v", err)
 	}
@@ -847,7 +847,7 @@ func TestPreTrustCursorWorkspaceIdempotent(t *testing.T) {
 func TestInjectCursorHooksEmptyWorktree(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 
-	args, env, err := sm.injectCursorHooks("test-no-worktree", "")
+	args, env, err := sm.injectCursorHooks("haar-no-worktree", "")
 	if err != nil {
 		t.Fatalf("injectCursorHooks() error = %v", err)
 	}
@@ -871,7 +871,7 @@ func TestClaudeSettingsEscapeSingleQuotes(t *testing.T) {
 	t.Setenv("PATH", fakeDir+":"+os.Getenv("PATH"))
 
 	sm := newTestSessionManagerWithDataDir(t)
-	sessionID := "test-session-claude-quote"
+	sessionID := "kirk-claude-quote"
 
 	settingsPath, err := sm.generateClaudeSettings(sessionID)
 	if err != nil {

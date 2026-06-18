@@ -37,7 +37,7 @@ func TestLoadOrDefaultValidFile(t *testing.T) {
 	cfgPath := filepath.Join(dir, "config.toml")
 	toml := `
 default_agent = "codex"
-github_username = "testuser"
+github_username = "braw-user"
 `
 	os.WriteFile(cfgPath, []byte(toml), 0o644)
 	cfg, err := LoadOrDefault(cfgPath)
@@ -47,8 +47,8 @@ github_username = "testuser"
 	if cfg.DefaultAgent != "codex" {
 		t.Errorf("DefaultAgent = %q, want codex", cfg.DefaultAgent)
 	}
-	if cfg.GitHubUsername != "testuser" {
-		t.Errorf("GitHubUsername = %q, want testuser", cfg.GitHubUsername)
+	if cfg.GitHubUsername != "braw-user" {
+		t.Errorf("GitHubUsername = %q, want braw-user", cfg.GitHubUsername)
 	}
 }
 

@@ -6,7 +6,7 @@ func FuzzDetect(f *testing.F) {
 	f.Add("claude", "⠋ Working...\nctrl+c to interrupt\n")
 	f.Add("claude", "Do you trust the files in this folder?\n")
 	f.Add("claude", "output done\n❯\n")
-	f.Add("claude", "some random text\n")
+	f.Add("claude", "thrawn neep text\n")
 	f.Add("claude", "")
 	f.Add("codex", "codex>\n")
 	f.Add("codex", "How can I help you today?\n")
@@ -70,7 +70,7 @@ func FuzzDetect(f *testing.F) {
 }
 
 func FuzzStripANSI(f *testing.F) {
-	f.Add("hello world")
+	f.Add("braw bonnie glen")
 	f.Add("\x1b[31mred\x1b[0m")
 	f.Add("\x1b]0;title\x07text")
 	f.Add("\x1b[1mbold\x1b[0m and \x1b[32mgreen\x1b[0m")

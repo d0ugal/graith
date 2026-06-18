@@ -15,20 +15,20 @@ func TestScenarioFileParse(t *testing.T) {
 version = 1
 
 [scenario]
-name = "tracing-pipeline"
-goal = "Build the tracing pipeline"
+name = "strath-pipeline"
+goal = "Build the strath pipeline"
 
 [[sessions]]
-name = "backend"
-repo = "~/Code/my-backend"
+name = "bairn"
+repo = "~/Code/croft-backend"
 agent = "claude"
 model = "claude-opus-4-8"
 role = "Backend engineer"
 task = "Add tracing ingest"
 
 [[sessions]]
-name = "frontend"
-repo = "~/Code/my-frontend"
+name = "canny"
+repo = "~/Code/croft-frontend"
 role = "Frontend dev"
 task = "Add trace export"
 `
@@ -43,10 +43,10 @@ task = "Add trace export"
 	if sf.Version != 1 {
 		t.Errorf("version = %d, want 1", sf.Version)
 	}
-	if sf.Scenario.Name != "tracing-pipeline" {
+	if sf.Scenario.Name != "strath-pipeline" {
 		t.Errorf("name = %q", sf.Scenario.Name)
 	}
-	if sf.Scenario.Goal != "Build the tracing pipeline" {
+	if sf.Scenario.Goal != "Build the strath pipeline" {
 		t.Errorf("goal = %q", sf.Scenario.Goal)
 	}
 	if len(sf.Sessions) != 2 {
@@ -54,10 +54,10 @@ task = "Add trace export"
 	}
 
 	s0 := sf.Sessions[0]
-	if s0.Name != "backend" {
+	if s0.Name != "bairn" {
 		t.Errorf("session[0].name = %q", s0.Name)
 	}
-	if s0.Repo != "~/Code/my-backend" {
+	if s0.Repo != "~/Code/croft-backend" {
 		t.Errorf("session[0].repo = %q", s0.Repo)
 	}
 	if s0.Agent != "claude" {
@@ -84,15 +84,15 @@ func TestScenarioFileAgentHooksDefault(t *testing.T) {
 version = 1
 
 [scenario]
-name = "test"
+name = "kirk"
 
 [[sessions]]
-name = "a"
-repo = "/tmp/repo"
+name = "braw"
+repo = "/tmp/croft"
 
 [[sessions]]
-name = "b"
-repo = "/tmp/repo"
+name = "bonnie"
+repo = "/tmp/croft"
 agent_hooks = false
 `
 
@@ -117,12 +117,12 @@ func TestScenarioFileRejectsUnknownFields(t *testing.T) {
 version = 1
 
 [scenario]
-name = "test"
+name = "kirk"
 unknown_field = "oops"
 
 [[sessions]]
-name = "a"
-repo = "/tmp/repo"
+name = "braw"
+repo = "/tmp/croft"
 `
 
 	var sf scenarioFile
@@ -142,18 +142,18 @@ func TestParseScenarioFile(t *testing.T) {
 version = 1
 
 [scenario]
-name = "test"
+name = "kirk"
 goal = "do things"
 
 [[sessions]]
-name = "a"
-repo = "/tmp/repo"
+name = "braw"
+repo = "/tmp/croft"
 `)
 	sf, err := parseScenarioFile(data)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sf.Scenario.Name != "test" {
+	if sf.Scenario.Name != "kirk" {
 		t.Errorf("name = %q", sf.Scenario.Name)
 	}
 	if sf.Scenario.Goal != "do things" {
@@ -169,19 +169,19 @@ func TestParseScenarioFileErrors(t *testing.T) {
 	}{
 		{"bad version", `version = 2
 [scenario]
-name = "test"
+name = "kirk"
 [[sessions]]
-name = "a"
+name = "braw"
 repo = "/tmp"`, "unsupported scenario version"},
 		{"no name", `version = 1
 [scenario]
-goal = "test"
+goal = "kirk"
 [[sessions]]
-name = "a"
+name = "braw"
 repo = "/tmp"`, "scenario.name is required"},
 		{"no sessions", `version = 1
 [scenario]
-name = "test"`, "at least one [[sessions]] entry"},
+name = "kirk"`, "at least one [[sessions]] entry"},
 	}
 
 	for _, tt := range tests {
@@ -204,16 +204,16 @@ func TestListAvailableScenarios(t *testing.T) {
 	}
 
 	// Write a valid scenario file.
-	if err := os.WriteFile(filepath.Join(scenarioDir, "test.toml"), []byte(`
+	if err := os.WriteFile(filepath.Join(scenarioDir, "kirk.toml"), []byte(`
 version = 1
 
 [scenario]
-name = "test"
-goal = "Test goal"
+name = "kirk"
+goal = "Kirk goal"
 
 [[sessions]]
-name = "a"
-repo = "/tmp/repo"
+name = "braw"
+repo = "/tmp/croft"
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -232,10 +232,10 @@ repo = "/tmp/repo"
 	if len(available) != 1 {
 		t.Fatalf("expected 1 available scenario, got %d", len(available))
 	}
-	if available[0].Name != "test" {
-		t.Errorf("name = %q, want 'test'", available[0].Name)
+	if available[0].Name != "kirk" {
+		t.Errorf("name = %q, want 'kirk'", available[0].Name)
 	}
-	if available[0].Goal != "Test goal" {
+	if available[0].Goal != "Kirk goal" {
 		t.Errorf("goal = %q", available[0].Goal)
 	}
 }
@@ -247,12 +247,12 @@ func TestResolveScenarioSource(t *testing.T) {
 	}
 
 	content := []byte("test content")
-	if err := os.WriteFile(filepath.Join(scenarioDir, "my-scenario.toml"), content, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(scenarioDir, "strath.toml"), content, 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	// Resolve by name (without .toml).
-	data, err := resolveScenarioSourceFrom("my-scenario", scenarioDir)
+	data, err := resolveScenarioSourceFrom("strath", scenarioDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -261,7 +261,7 @@ func TestResolveScenarioSource(t *testing.T) {
 	}
 
 	// Resolve by name with .toml.
-	data, err = resolveScenarioSourceFrom("my-scenario.toml", scenarioDir)
+	data, err = resolveScenarioSourceFrom("strath.toml", scenarioDir)
 	if err != nil {
 		t.Fatal(err)
 	}

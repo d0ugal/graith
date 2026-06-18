@@ -127,10 +127,10 @@ func TestRename(t *testing.T) {
 	t.Run("happy path", func(t *testing.T) {
 		sm := newTestSessionManager(t)
 		sm.state.Sessions["sess1"] = &SessionState{
-			ID: "sess1", Name: "old-name", Status: StatusRunning,
+			ID: "sess1", Name: "auld-name", Status: StatusRunning,
 		}
 
-		if err := sm.Rename("sess1", "new-name"); err != nil {
+		if err := sm.Rename("sess1", "bonnie-name"); err != nil {
 			t.Fatalf("Rename() error = %v", err)
 		}
 
@@ -138,15 +138,15 @@ func TestRename(t *testing.T) {
 		if !ok {
 			t.Fatal("session not found after rename")
 		}
-		if s.Name != "new-name" {
-			t.Errorf("Name = %q, want %q", s.Name, "new-name")
+		if s.Name != "bonnie-name" {
+			t.Errorf("Name = %q, want %q", s.Name, "bonnie-name")
 		}
 	})
 
 	t.Run("not found", func(t *testing.T) {
 		sm := newTestSessionManager(t)
 
-		err := sm.Rename("nonexistent", "new-name")
+		err := sm.Rename("nonexistent", "bonnie-name")
 		if err == nil {
 			t.Fatal("expected error for nonexistent session")
 		}
@@ -159,58 +159,58 @@ func TestUpdate(t *testing.T) {
 	t.Run("rename via update", func(t *testing.T) {
 		sm := newTestSessionManager(t)
 		sm.state.Sessions["sess1"] = &SessionState{
-			ID: "sess1", Name: "old-name", Status: StatusRunning,
+			ID: "sess1", Name: "auld-name", Status: StatusRunning,
 		}
 
-		if err := sm.Update("sess1", strPtr("new-name"), nil); err != nil {
+		if err := sm.Update("sess1", strPtr("bonnie-name"), nil); err != nil {
 			t.Fatalf("Update() error = %v", err)
 		}
-		if sm.state.Sessions["sess1"].Name != "new-name" {
-			t.Errorf("Name = %q, want %q", sm.state.Sessions["sess1"].Name, "new-name")
+		if sm.state.Sessions["sess1"].Name != "bonnie-name" {
+			t.Errorf("Name = %q, want %q", sm.state.Sessions["sess1"].Name, "bonnie-name")
 		}
 	})
 
 	t.Run("orphan session", func(t *testing.T) {
 		sm := newTestSessionManager(t)
-		sm.state.Sessions["parent"] = &SessionState{
-			ID: "parent", Name: "parent", Status: StatusRunning,
+		sm.state.Sessions["ben"] = &SessionState{
+			ID: "ben", Name: "ben", Status: StatusRunning,
 		}
-		sm.state.Sessions["child"] = &SessionState{
-			ID: "child", Name: "child", ParentID: "parent", Status: StatusRunning,
+		sm.state.Sessions["bairn"] = &SessionState{
+			ID: "bairn", Name: "bairn", ParentID: "ben", Status: StatusRunning,
 		}
 
-		if err := sm.Update("child", nil, strPtr("")); err != nil {
+		if err := sm.Update("bairn", nil, strPtr("")); err != nil {
 			t.Fatalf("Update() error = %v", err)
 		}
-		if sm.state.Sessions["child"].ParentID != "" {
-			t.Errorf("ParentID = %q, want empty", sm.state.Sessions["child"].ParentID)
+		if sm.state.Sessions["bairn"].ParentID != "" {
+			t.Errorf("ParentID = %q, want empty", sm.state.Sessions["bairn"].ParentID)
 		}
 	})
 
 	t.Run("reparent session", func(t *testing.T) {
 		sm := newTestSessionManager(t)
 		sm.state.Sessions["p1"] = &SessionState{
-			ID: "p1", Name: "parent1", Status: StatusRunning,
+			ID: "p1", Name: "ben-one", Status: StatusRunning,
 		}
 		sm.state.Sessions["p2"] = &SessionState{
-			ID: "p2", Name: "parent2", Status: StatusRunning,
+			ID: "p2", Name: "ben-two", Status: StatusRunning,
 		}
-		sm.state.Sessions["child"] = &SessionState{
-			ID: "child", Name: "child", ParentID: "p1", Status: StatusRunning,
+		sm.state.Sessions["bairn"] = &SessionState{
+			ID: "bairn", Name: "bairn", ParentID: "p1", Status: StatusRunning,
 		}
 
-		if err := sm.Update("child", nil, strPtr("p2")); err != nil {
+		if err := sm.Update("bairn", nil, strPtr("p2")); err != nil {
 			t.Fatalf("Update() error = %v", err)
 		}
-		if sm.state.Sessions["child"].ParentID != "p2" {
-			t.Errorf("ParentID = %q, want %q", sm.state.Sessions["child"].ParentID, "p2")
+		if sm.state.Sessions["bairn"].ParentID != "p2" {
+			t.Errorf("ParentID = %q, want %q", sm.state.Sessions["bairn"].ParentID, "p2")
 		}
 	})
 
 	t.Run("self-parent rejected", func(t *testing.T) {
 		sm := newTestSessionManager(t)
 		sm.state.Sessions["sess1"] = &SessionState{
-			ID: "sess1", Name: "sess", Status: StatusRunning,
+			ID: "sess1", Name: "braw-sess", Status: StatusRunning,
 		}
 
 		err := sm.Update("sess1", nil, strPtr("sess1"))
@@ -222,16 +222,16 @@ func TestUpdate(t *testing.T) {
 	t.Run("cycle rejected", func(t *testing.T) {
 		sm := newTestSessionManager(t)
 		sm.state.Sessions["grandparent"] = &SessionState{
-			ID: "grandparent", Name: "gp", Status: StatusRunning,
+			ID: "grandparent", Name: "brae", Status: StatusRunning,
 		}
-		sm.state.Sessions["parent"] = &SessionState{
-			ID: "parent", Name: "parent", ParentID: "grandparent", Status: StatusRunning,
+		sm.state.Sessions["ben"] = &SessionState{
+			ID: "ben", Name: "ben", ParentID: "grandparent", Status: StatusRunning,
 		}
-		sm.state.Sessions["child"] = &SessionState{
-			ID: "child", Name: "child", ParentID: "parent", Status: StatusRunning,
+		sm.state.Sessions["bairn"] = &SessionState{
+			ID: "bairn", Name: "bairn", ParentID: "ben", Status: StatusRunning,
 		}
 
-		err := sm.Update("grandparent", nil, strPtr("child"))
+		err := sm.Update("grandparent", nil, strPtr("bairn"))
 		if err == nil {
 			t.Fatal("expected error for cycle")
 		}
@@ -240,7 +240,7 @@ func TestUpdate(t *testing.T) {
 	t.Run("nonexistent parent rejected", func(t *testing.T) {
 		sm := newTestSessionManager(t)
 		sm.state.Sessions["sess1"] = &SessionState{
-			ID: "sess1", Name: "sess", Status: StatusRunning,
+			ID: "sess1", Name: "braw-sess", Status: StatusRunning,
 		}
 
 		err := sm.Update("sess1", nil, strPtr("nonexistent"))
@@ -252,7 +252,7 @@ func TestUpdate(t *testing.T) {
 	t.Run("not found", func(t *testing.T) {
 		sm := newTestSessionManager(t)
 
-		err := sm.Update("nonexistent", strPtr("new-name"), nil)
+		err := sm.Update("nonexistent", strPtr("bonnie-name"), nil)
 		if err == nil {
 			t.Fatal("expected error for nonexistent session")
 		}
@@ -261,7 +261,7 @@ func TestUpdate(t *testing.T) {
 	t.Run("no changes is no-op", func(t *testing.T) {
 		sm := newTestSessionManager(t)
 		sm.state.Sessions["sess1"] = &SessionState{
-			ID: "sess1", Name: "sess", Status: StatusRunning,
+			ID: "sess1", Name: "braw-sess", Status: StatusRunning,
 		}
 
 		err := sm.Update("sess1", nil, nil)
@@ -277,7 +277,7 @@ func TestUpdate(t *testing.T) {
 			SystemKind: SystemKindOrchestrator,
 		}
 
-		err := sm.Update("sys", strPtr("new-name"), nil)
+		err := sm.Update("sys", strPtr("bonnie-name"), nil)
 		if err == nil {
 			t.Fatal("expected error for system session")
 		}
@@ -286,21 +286,21 @@ func TestUpdate(t *testing.T) {
 	t.Run("combined name and parent", func(t *testing.T) {
 		sm := newTestSessionManager(t)
 		sm.state.Sessions["p1"] = &SessionState{
-			ID: "p1", Name: "parent1", Status: StatusRunning,
+			ID: "p1", Name: "ben-one", Status: StatusRunning,
 		}
 		sm.state.Sessions["p2"] = &SessionState{
-			ID: "p2", Name: "parent2", Status: StatusRunning,
+			ID: "p2", Name: "ben-two", Status: StatusRunning,
 		}
-		sm.state.Sessions["child"] = &SessionState{
-			ID: "child", Name: "old-name", ParentID: "p1", Status: StatusRunning,
+		sm.state.Sessions["bairn"] = &SessionState{
+			ID: "bairn", Name: "auld-name", ParentID: "p1", Status: StatusRunning,
 		}
 
-		if err := sm.Update("child", strPtr("new-name"), strPtr("p2")); err != nil {
+		if err := sm.Update("bairn", strPtr("bonnie-name"), strPtr("p2")); err != nil {
 			t.Fatalf("Update() error = %v", err)
 		}
-		s := sm.state.Sessions["child"]
-		if s.Name != "new-name" {
-			t.Errorf("Name = %q, want %q", s.Name, "new-name")
+		s := sm.state.Sessions["bairn"]
+		if s.Name != "bonnie-name" {
+			t.Errorf("Name = %q, want %q", s.Name, "bonnie-name")
 		}
 		if s.ParentID != "p2" {
 			t.Errorf("ParentID = %q, want %q", s.ParentID, "p2")
@@ -310,15 +310,15 @@ func TestUpdate(t *testing.T) {
 	t.Run("failed parent does not mutate name", func(t *testing.T) {
 		sm := newTestSessionManager(t)
 		sm.state.Sessions["sess1"] = &SessionState{
-			ID: "sess1", Name: "old-name", Status: StatusRunning,
+			ID: "sess1", Name: "auld-name", Status: StatusRunning,
 		}
 
-		err := sm.Update("sess1", strPtr("new-name"), strPtr("nonexistent"))
+		err := sm.Update("sess1", strPtr("bonnie-name"), strPtr("nonexistent"))
 		if err == nil {
 			t.Fatal("expected error for nonexistent parent")
 		}
-		if sm.state.Sessions["sess1"].Name != "old-name" {
-			t.Errorf("Name = %q, want %q (should not have changed)", sm.state.Sessions["sess1"].Name, "old-name")
+		if sm.state.Sessions["sess1"].Name != "auld-name" {
+			t.Errorf("Name = %q, want %q (should not have changed)", sm.state.Sessions["sess1"].Name, "auld-name")
 		}
 	})
 }
@@ -371,15 +371,15 @@ func TestGet(t *testing.T) {
 	t.Run("found", func(t *testing.T) {
 		sm := newTestSessionManager(t)
 		sm.state.Sessions["abc"] = &SessionState{
-			ID: "abc", Name: "test-session", Status: StatusRunning,
+			ID: "abc", Name: "braw-session", Status: StatusRunning,
 		}
 
 		s, ok := sm.Get("abc")
 		if !ok {
 			t.Fatal("Get() returned not found for existing session")
 		}
-		if s.ID != "abc" || s.Name != "test-session" {
-			t.Errorf("Get() = %+v, want ID=abc, Name=test-session", s)
+		if s.ID != "abc" || s.Name != "braw-session" {
+			t.Errorf("Get() = %+v, want ID=abc, Name=braw-session", s)
 		}
 	})
 
@@ -423,7 +423,7 @@ func TestKickAttachedClient(t *testing.T) {
 	t.Run("kick existing client", func(t *testing.T) {
 		sm := newTestSessionManager(t)
 		sm.state.Sessions["sess1"] = &SessionState{
-			ID: "sess1", Name: "test", Status: StatusRunning,
+			ID: "sess1", Name: "braw", Status: StatusRunning,
 		}
 
 		kicked := false
@@ -608,7 +608,7 @@ func TestToSessionInfo(t *testing.T) {
 func TestToSessionInfoNilExitCode(t *testing.T) {
 	sess := SessionState{
 		ID:        "abc",
-		Name:      "test",
+		Name:      "braw",
 		Status:    StatusRunning,
 		CreatedAt: time.Now().UTC(),
 	}
@@ -890,7 +890,7 @@ func TestIdleTracking(t *testing.T) {
 	t.Run("idle since set when detached and ready", func(t *testing.T) {
 		sm := newTestSessionManager(t)
 		s := &SessionState{
-			ID: "s1", Name: "test", Status: StatusRunning,
+			ID: "s1", Name: "braw", Status: StatusRunning,
 			Agent: "claude", AgentStatus: "ready",
 		}
 		sm.state.Sessions["s1"] = s
@@ -910,7 +910,7 @@ func TestIdleTracking(t *testing.T) {
 		sm := newTestSessionManager(t)
 		now := time.Now()
 		s := &SessionState{
-			ID: "s1", Name: "test", Status: StatusRunning,
+			ID: "s1", Name: "braw", Status: StatusRunning,
 			Agent: "claude", AgentStatus: "ready", IdleSince: &now,
 		}
 		sm.state.Sessions["s1"] = s
@@ -927,7 +927,7 @@ func TestIdleTracking(t *testing.T) {
 		sm := newTestSessionManager(t)
 		now := time.Now()
 		s := &SessionState{
-			ID: "s1", Name: "test", Status: StatusRunning,
+			ID: "s1", Name: "braw", Status: StatusRunning,
 			Agent: "claude", AgentStatus: "active", IdleSince: &now,
 		}
 		sm.state.Sessions["s1"] = s
@@ -942,7 +942,7 @@ func TestIdleTracking(t *testing.T) {
 	t.Run("not re-set on subsequent checks", func(t *testing.T) {
 		sm := newTestSessionManager(t)
 		s := &SessionState{
-			ID: "s1", Name: "test", Status: StatusRunning,
+			ID: "s1", Name: "braw", Status: StatusRunning,
 			Agent: "claude", AgentStatus: "ready",
 		}
 		sm.state.Sessions["s1"] = s
@@ -967,7 +967,7 @@ func TestIdleTracking(t *testing.T) {
 		}
 		past := time.Now().Add(-200 * time.Millisecond)
 		s := &SessionState{
-			ID: "s1", Name: "test", Status: StatusRunning,
+			ID: "s1", Name: "braw", Status: StatusRunning,
 			Agent: "claude", AgentStatus: "ready", IdleSince: &past,
 		}
 		sm.state.Sessions["s1"] = s
@@ -988,7 +988,7 @@ func TestIdleTracking(t *testing.T) {
 		}
 		now := time.Now()
 		s := &SessionState{
-			ID: "s1", Name: "test", Status: StatusRunning,
+			ID: "s1", Name: "braw", Status: StatusRunning,
 			Agent: "claude", AgentStatus: "ready", IdleSince: &now,
 		}
 		sm.state.Sessions["s1"] = s
@@ -1008,7 +1008,7 @@ func TestIdleTracking(t *testing.T) {
 		}
 		past := time.Now().Add(-24 * time.Hour)
 		s := &SessionState{
-			ID: "s1", Name: "test", Status: StatusRunning,
+			ID: "s1", Name: "braw", Status: StatusRunning,
 			Agent: "codex", AgentStatus: "ready", IdleSince: &past,
 		}
 		sm.state.Sessions["s1"] = s
@@ -1025,7 +1025,7 @@ func TestHandleHookReport(t *testing.T) {
 	t.Run("active event", func(t *testing.T) {
 		sm := newTestSessionManager(t)
 		sm.state.Sessions["sess1"] = &SessionState{
-			ID: "sess1", Name: "test", Status: StatusRunning,
+			ID: "sess1", Name: "braw", Status: StatusRunning,
 		}
 
 		sm.HandleHookReport(protocol.StatusReportMsg{
@@ -1057,7 +1057,7 @@ func TestHandleHookReport(t *testing.T) {
 	t.Run("approval event", func(t *testing.T) {
 		sm := newTestSessionManager(t)
 		sm.state.Sessions["sess1"] = &SessionState{
-			ID: "sess1", Name: "test", Status: StatusRunning,
+			ID: "sess1", Name: "braw", Status: StatusRunning,
 		}
 
 		sm.HandleHookReport(protocol.StatusReportMsg{
@@ -1085,7 +1085,7 @@ func TestHandleHookReport(t *testing.T) {
 	t.Run("ready event", func(t *testing.T) {
 		sm := newTestSessionManager(t)
 		sm.state.Sessions["sess1"] = &SessionState{
-			ID: "sess1", Name: "test", Status: StatusRunning,
+			ID: "sess1", Name: "braw", Status: StatusRunning,
 		}
 
 		sm.HandleHookReport(protocol.StatusReportMsg{
@@ -1126,7 +1126,7 @@ func TestHandleHookReport(t *testing.T) {
 	t.Run("unknown event", func(t *testing.T) {
 		sm := newTestSessionManager(t)
 		sm.state.Sessions["sess1"] = &SessionState{
-			ID: "sess1", Name: "test", Status: StatusRunning,
+			ID: "sess1", Name: "braw", Status: StatusRunning,
 		}
 
 		sm.HandleHookReport(protocol.StatusReportMsg{
@@ -1146,7 +1146,7 @@ func TestHandleHookReport(t *testing.T) {
 	t.Run("status change updates AgentStatus", func(t *testing.T) {
 		sm := newTestSessionManager(t)
 		sm.state.Sessions["sess1"] = &SessionState{
-			ID: "sess1", Name: "test", Status: StatusRunning,
+			ID: "sess1", Name: "braw", Status: StatusRunning,
 			AgentStatus: "active",
 		}
 
@@ -1168,7 +1168,7 @@ func TestHandleHookReport(t *testing.T) {
 	t.Run("tool name stored", func(t *testing.T) {
 		sm := newTestSessionManager(t)
 		sm.state.Sessions["sess1"] = &SessionState{
-			ID: "sess1", Name: "test", Status: StatusRunning,
+			ID: "sess1", Name: "braw", Status: StatusRunning,
 		}
 
 		sm.HandleHookReport(protocol.StatusReportMsg{
@@ -1196,7 +1196,7 @@ func TestHandleHookReport(t *testing.T) {
 	t.Run("enrichment data accumulated", func(t *testing.T) {
 		sm := newTestSessionManager(t)
 		sm.state.Sessions["s1"] = &SessionState{
-			ID: "s1", Name: "test", Status: StatusRunning, Agent: "claude",
+			ID: "s1", Name: "braw", Status: StatusRunning, Agent: "claude",
 		}
 
 		cost := 0.05
@@ -1254,7 +1254,7 @@ func TestHandleHookReport(t *testing.T) {
 	t.Run("context percent accumulated", func(t *testing.T) {
 		sm := newTestSessionManager(t)
 		sm.state.Sessions["s1"] = &SessionState{
-			ID: "s1", Name: "test", Status: StatusRunning, Agent: "claude",
+			ID: "s1", Name: "braw", Status: StatusRunning, Agent: "claude",
 		}
 
 		pct := 42.5
@@ -1396,12 +1396,12 @@ func TestDetectAgentStatuses_SharedWorktreeSkipsGit(t *testing.T) {
 	defer normalPty.Kill()
 
 	sm.state.Sessions["shared1"] = &SessionState{
-		ID: "shared1", Name: "shared-test", Agent: "claude",
+		ID: "shared1", Name: "bothy-shared", Agent: "claude",
 		Status: StatusRunning, WorktreePath: repoDir, RepoPath: repoDir,
 		SharedWorktree: true,
 	}
 	sm.state.Sessions["normal1"] = &SessionState{
-		ID: "normal1", Name: "normal-test", Agent: "claude",
+		ID: "normal1", Name: "bothy-normal", Agent: "claude",
 		Status: StatusRunning, WorktreePath: repoDir, RepoPath: repoDir,
 	}
 	sm.sessions["shared1"] = sharedPty
@@ -1447,12 +1447,12 @@ func TestForkNoRepoSession(t *testing.T) {
 	sm := newTestSessionManager(t)
 	sm.state.Sessions["norepo1"] = &SessionState{
 		ID:     "norepo1",
-		Name:   "scratch-session",
+		Name:   "haar-session",
 		Agent:  "claude",
 		Status: StatusRunning,
 	}
 
-	_, err := sm.Fork("forked", "norepo1", 24, 80)
+	_, err := sm.Fork("braw-fork", "norepo1", 24, 80)
 	if err == nil {
 		t.Fatal("Fork() should fail for no-repo source session")
 	}
@@ -1551,7 +1551,7 @@ func TestReloadConfigInvalidFile(t *testing.T) {
 func TestToSessionInfoSharedWorktree(t *testing.T) {
 	sess := SessionState{
 		ID:             "abc123",
-		Name:           "reviewer",
+		Name:           "canny-reviewer",
 		WorktreePath:   "/shared/path",
 		Agent:          "claude",
 		Status:         StatusRunning,
@@ -1587,7 +1587,7 @@ func TestDeleteSharedWorktreeSkipsGitTeardown(t *testing.T) {
 
 	sm.state.Sessions["shared1"] = &SessionState{
 		ID:             "shared1",
-		Name:           "reviewer",
+		Name:           "canny-reviewer",
 		RepoPath:       "/does/not/exist/repo",
 		WorktreePath:   "/does/not/exist/worktree",
 		Branch:         "some-branch",
@@ -1613,7 +1613,7 @@ func TestStateSaveLoadSharedWorktree(t *testing.T) {
 	state := &State{
 		Sessions: map[string]*SessionState{
 			"s1": {
-				ID: "s1", Name: "reviewer", WorktreePath: "/shared/path",
+				ID: "s1", Name: "canny-reviewer", WorktreePath: "/shared/path",
 				Agent: "claude", Status: StatusRunning,
 				SharedWorktree: true, CreatedAt: time.Now().UTC(),
 			},
@@ -1646,13 +1646,13 @@ func TestShareWorktreeRequiresSandbox(t *testing.T) {
 
 	sm.state.Sessions["src1"] = &SessionState{
 		ID:           "src1",
-		Name:         "source",
+		Name:         "braw-source",
 		Agent:        "claude",
 		WorktreePath: "/tmp/fake-worktree",
 		Status:       StatusRunning,
 	}
 
-	_, err := sm.Create("reviewer", "claude", "", "", "", "", "", false, "source", false, false, false, false, 24, 80)
+	_, err := sm.Create("canny-reviewer", "claude", "", "", "", "", "", false, "braw-source", false, false, false, false, 24, 80)
 	if err == nil {
 		t.Fatal("expected error when --share-worktree used without sandbox, got nil")
 	}
@@ -1678,13 +1678,13 @@ func TestShareWorktreeRequiresSandboxPerAgent(t *testing.T) {
 
 	sm.state.Sessions["src1"] = &SessionState{
 		ID:           "src1",
-		Name:         "source",
+		Name:         "braw-source",
 		Agent:        "claude",
 		WorktreePath: "/tmp/fake-worktree",
 		Status:       StatusRunning,
 	}
 
-	_, err := sm.Create("reviewer", "claude", "", "", "", "", "", false, "source", false, false, false, false, 24, 80)
+	_, err := sm.Create("canny-reviewer", "claude", "", "", "", "", "", false, "braw-source", false, false, false, false, 24, 80)
 	if err == nil {
 		t.Fatal("expected error when --share-worktree used with per-agent sandbox disabled, got nil")
 	}
@@ -1704,7 +1704,7 @@ func TestResumeSharedWorktreeWithoutSandboxRejects(t *testing.T) {
 
 	sm.state.Sessions["legacy1"] = &SessionState{
 		ID:             "legacy1",
-		Name:           "legacy-reviewer",
+		Name:           "auld-reviewer",
 		Agent:          "claude",
 		WorktreePath:   "/tmp/fake-worktree",
 		SharedWorktree: true,
@@ -1743,7 +1743,7 @@ func TestCreateRollsBackOnSaveStateFailure(t *testing.T) {
 		LogDir:    tmpDir,
 	}, slog.Default())
 
-	_, err := sm.Create("test-sess", "sleeper", "", "", "", "", "", true, "", false, false, false, false, 24, 80)
+	_, err := sm.Create("braw-sess", "sleeper", "", "", "", "", "", true, "", false, false, false, false, 24, 80)
 	if err == nil {
 		t.Fatal("expected error when saveState fails, got nil")
 	}
@@ -1783,7 +1783,7 @@ func TestResumeRollsBackOnSaveStateFailure(t *testing.T) {
 	exitCode := 42
 	sm.state.Sessions["s1"] = &SessionState{
 		ID:           "s1",
-		Name:         "test",
+		Name:         "braw",
 		Agent:        "sleeper",
 		Status:       StatusStopped,
 		ExitCode:     &exitCode,
@@ -1906,7 +1906,7 @@ func TestResumeRefreshesSandboxConfig(t *testing.T) {
 
 		sm.state.Sessions["s1"] = &SessionState{
 			ID:           "s1",
-			Name:         "test",
+			Name:         "braw",
 			Agent:        "sleeper",
 			Status:       StatusStopped,
 			Sandboxed:    true,
@@ -1984,7 +1984,7 @@ func TestResumeRefreshesSandboxConfig(t *testing.T) {
 
 		sm.state.Sessions["s1"] = &SessionState{
 			ID:           "s1",
-			Name:         "test",
+			Name:         "braw",
 			Agent:        "sleeper",
 			Status:       StatusStopped,
 			Sandboxed:    true,
@@ -2047,7 +2047,7 @@ func TestResumeRefreshesSandboxConfig(t *testing.T) {
 		}
 		sm.state.Sessions["s1"] = &SessionState{
 			ID:            "s1",
-			Name:          "test",
+			Name:          "braw",
 			Agent:         "sleeper",
 			Status:        StatusStopped,
 			Sandboxed:     true,
@@ -2109,7 +2109,7 @@ func TestWatchSessionStaleAfterReplace(t *testing.T) {
 
 	id := "sess-watch"
 	sm.state.Sessions[id] = &SessionState{
-		ID: id, Name: "test", Status: StatusRunning, Agent: "claude",
+		ID: id, Name: "braw", Status: StatusRunning, Agent: "claude",
 	}
 
 	oldSess := newTestPTYSession(t, "true")
@@ -2144,7 +2144,7 @@ func TestWatchSessionCurrentUpdatesState(t *testing.T) {
 
 	id := "sess-watch-current"
 	sm.state.Sessions[id] = &SessionState{
-		ID: id, Name: "test", Status: StatusRunning, Agent: "claude",
+		ID: id, Name: "braw", Status: StatusRunning, Agent: "claude",
 	}
 
 	sess := newTestPTYSession(t, "true")
@@ -2183,7 +2183,7 @@ func TestWatchSessionClosesPTYHandles(t *testing.T) {
 
 	id := "sess-watch-close"
 	sm.state.Sessions[id] = &SessionState{
-		ID: id, Name: "test", Status: StatusRunning, Agent: "claude",
+		ID: id, Name: "braw", Status: StatusRunning, Agent: "claude",
 	}
 
 	sess := newTestPTYSession(t, "true")
@@ -2210,7 +2210,7 @@ func TestWatchSessionStaleClosesPTYHandles(t *testing.T) {
 
 	id := "sess-watch-stale-close"
 	sm.state.Sessions[id] = &SessionState{
-		ID: id, Name: "test", Status: StatusRunning, Agent: "claude",
+		ID: id, Name: "braw", Status: StatusRunning, Agent: "claude",
 	}
 
 	oldSess := newTestPTYSession(t, "true")
@@ -2311,7 +2311,7 @@ func TestResumeResetsIdleSince(t *testing.T) {
 	past := time.Now().Add(-10 * time.Minute)
 	id := "sess-idle"
 	sm.state.Sessions[id] = &SessionState{
-		ID: id, Name: "idle-test", Status: StatusStopped, Agent: "claude",
+		ID: id, Name: "bide-idle", Status: StatusStopped, Agent: "claude",
 		WorktreePath: tmpDir,
 		IdleSince:    &past,
 	}
@@ -2370,7 +2370,7 @@ func initTempGitRepo(t *testing.T) string {
 func TestCreateInPlaceRejectsUnconfiguredRepo(t *testing.T) {
 	sm := newTestSessionManager(t)
 	repoDir := initTempGitRepo(t)
-	_, err := sm.Create("test", "claude", repoDir, "", "", "", "", false, "", false, true, false, false, 24, 80)
+	_, err := sm.Create("braw", "claude", repoDir, "", "", "", "", false, "", false, true, false, false, 24, 80)
 	if err == nil {
 		t.Fatal("expected error for unconfigured repo")
 	}
@@ -2383,7 +2383,7 @@ func TestCreateInPlaceMutuallyExclusiveFlags(t *testing.T) {
 	sm := newTestSessionManager(t)
 
 	t.Run("in-place with no-repo", func(t *testing.T) {
-		_, err := sm.Create("test", "claude", "", "", "", "", "", true, "", false, true, false, false, 24, 80)
+		_, err := sm.Create("braw", "claude", "", "", "", "", "", true, "", false, true, false, false, 24, 80)
 		if err == nil {
 			t.Fatal("expected error for --in-place with --no-repo")
 		}
@@ -2393,7 +2393,7 @@ func TestCreateInPlaceMutuallyExclusiveFlags(t *testing.T) {
 	})
 
 	t.Run("in-place with share-worktree", func(t *testing.T) {
-		_, err := sm.Create("test", "claude", "", "", "", "", "", false, "some-session", false, true, false, false, 24, 80)
+		_, err := sm.Create("braw", "claude", "", "", "", "", "", false, "some-session", false, true, false, false, 24, 80)
 		if err == nil {
 			t.Fatal("expected error for --in-place with --share-worktree")
 		}
@@ -2403,7 +2403,7 @@ func TestCreateInPlaceMutuallyExclusiveFlags(t *testing.T) {
 	})
 
 	t.Run("in-place with base", func(t *testing.T) {
-		_, err := sm.Create("test", "claude", "/tmp/whatever", "main", "", "", "", false, "", false, true, false, false, 24, 80)
+		_, err := sm.Create("braw", "claude", "/tmp/whatever", "main", "", "", "", false, "", false, true, false, false, 24, 80)
 		if err == nil {
 			t.Fatal("expected error for --in-place with --base")
 		}
@@ -2418,15 +2418,15 @@ func TestCreateInPlaceRejectsConcurrent(t *testing.T) {
 	repoDir := initTempGitRepo(t)
 	sm.cfg.Repos = []config.RepoConfig{{Path: repoDir}}
 
-	sm.state.Sessions["existing"] = &SessionState{
-		ID:           "existing",
-		Name:         "first",
+	sm.state.Sessions["bide-session"] = &SessionState{
+		ID:           "bide-session",
+		Name:         "braw-one",
 		WorktreePath: repoDir,
 		InPlace:      true,
 		Status:       StatusRunning,
 	}
 
-	_, err := sm.Create("second", "claude", repoDir, "", "", "", "", false, "", false, true, false, false, 24, 80)
+	_, err := sm.Create("canny-two", "claude", repoDir, "", "", "", "", false, "", false, true, false, false, 24, 80)
 	if err == nil {
 		t.Fatal("expected error for concurrent in-place session")
 	}
@@ -2440,16 +2440,16 @@ func TestCreateInPlaceAllowConcurrentFlag(t *testing.T) {
 	repoDir := initTempGitRepo(t)
 	sm.cfg.Repos = []config.RepoConfig{{Path: repoDir}}
 
-	sm.state.Sessions["existing"] = &SessionState{
-		ID:           "existing",
-		Name:         "first",
+	sm.state.Sessions["bide-session"] = &SessionState{
+		ID:           "bide-session",
+		Name:         "braw-one",
 		WorktreePath: repoDir,
 		InPlace:      true,
 		Status:       StatusRunning,
 	}
 
 	// With --allow-concurrent, should pass the concurrent check (will fail later on agent start)
-	_, err := sm.Create("second", "claude", repoDir, "", "", "", "", false, "", false, true, true, false, 24, 80)
+	_, err := sm.Create("canny-two", "claude", repoDir, "", "", "", "", false, "", false, true, true, false, 24, 80)
 	if err != nil && strings.Contains(err.Error(), "already running") {
 		t.Fatalf("--allow-concurrent should bypass concurrent check, got: %v", err)
 	}
@@ -2460,16 +2460,16 @@ func TestCreateInPlaceConfigAllowConcurrent(t *testing.T) {
 	repoDir := initTempGitRepo(t)
 	sm.cfg.Repos = []config.RepoConfig{{Path: repoDir, AllowConcurrent: true}}
 
-	sm.state.Sessions["existing"] = &SessionState{
-		ID:           "existing",
-		Name:         "first",
+	sm.state.Sessions["bide-session"] = &SessionState{
+		ID:           "bide-session",
+		Name:         "braw-one",
 		WorktreePath: repoDir,
 		InPlace:      true,
 		Status:       StatusRunning,
 	}
 
 	// Config allow_concurrent should pass the concurrent check
-	_, err := sm.Create("second", "claude", repoDir, "", "", "", "", false, "", false, true, false, false, 24, 80)
+	_, err := sm.Create("canny-two", "claude", repoDir, "", "", "", "", false, "", false, true, false, false, 24, 80)
 	if err != nil && strings.Contains(err.Error(), "already running") {
 		t.Fatalf("config allow_concurrent should bypass concurrent check, got: %v", err)
 	}
@@ -2480,7 +2480,7 @@ func TestDeleteInPlaceLeavesState(t *testing.T) {
 
 	sm.state.Sessions["inplace1"] = &SessionState{
 		ID:           "inplace1",
-		Name:         "my-inplace",
+		Name:         "kirk-inplace",
 		RepoPath:     "/tmp/my-repo",
 		WorktreePath: "/tmp/my-repo",
 		InPlace:      true,
@@ -2502,7 +2502,7 @@ func TestForkInPlaceRejects(t *testing.T) {
 
 	sm.state.Sessions["inplace1"] = &SessionState{
 		ID:           "inplace1",
-		Name:         "my-inplace",
+		Name:         "kirk-inplace",
 		RepoPath:     "/tmp/my-repo",
 		WorktreePath: "/tmp/my-repo",
 		Agent:        "claude",
@@ -2510,7 +2510,7 @@ func TestForkInPlaceRejects(t *testing.T) {
 		Status:       StatusRunning,
 	}
 
-	_, err := sm.Fork("forked", "inplace1", 24, 80)
+	_, err := sm.Fork("braw-fork", "inplace1", 24, 80)
 	if err == nil {
 		t.Fatal("expected error forking an in-place session")
 	}
@@ -2538,18 +2538,18 @@ func TestForkUsesSourceBaseBranch(t *testing.T) {
 
 	sm.state.Sessions["src1"] = &SessionState{
 		ID:             "src1",
-		Name:           "source-session",
+		Name:           "braw-source-session",
 		RepoPath:       repoDir,
 		RepoName:       "testrepo",
 		WorktreePath:   repoDir,
 		Branch:         "feat/my-feature",
 		BaseBranch:     "main",
 		Agent:          "sleeper",
-		AgentSessionID: "test-agent-id",
+		AgentSessionID: "braw-agent-id",
 		Status:         StatusRunning,
 	}
 
-	forked, err := sm.Fork("forked", "src1", 24, 80)
+	forked, err := sm.Fork("braw-fork", "src1", 24, 80)
 	if err != nil {
 		t.Fatalf("Fork() unexpected error: %v", err)
 	}
@@ -2579,7 +2579,7 @@ func TestResumeInPlaceRejectsRemovedConfig(t *testing.T) {
 
 	sm.state.Sessions["inplace1"] = &SessionState{
 		ID:           "inplace1",
-		Name:         "my-inplace",
+		Name:         "kirk-inplace",
 		RepoPath:     repoDir,
 		WorktreePath: repoDir,
 		Agent:        "claude",
@@ -2603,7 +2603,7 @@ func TestResumeInPlaceRejectsConcurrentRunning(t *testing.T) {
 
 	sm.state.Sessions["inplace1"] = &SessionState{
 		ID:           "inplace1",
-		Name:         "first",
+		Name:         "braw-one",
 		RepoPath:     repoDir,
 		WorktreePath: repoDir,
 		Agent:        "claude",
@@ -2612,7 +2612,7 @@ func TestResumeInPlaceRejectsConcurrentRunning(t *testing.T) {
 	}
 	sm.state.Sessions["inplace2"] = &SessionState{
 		ID:           "inplace2",
-		Name:         "second",
+		Name:         "canny-two",
 		RepoPath:     repoDir,
 		WorktreePath: repoDir,
 		Agent:        "claude",
@@ -2636,7 +2636,7 @@ func TestResumeInPlaceRejectsDeletedRepo(t *testing.T) {
 
 	sm.state.Sessions["inplace1"] = &SessionState{
 		ID:           "inplace1",
-		Name:         "my-inplace",
+		Name:         "kirk-inplace",
 		RepoPath:     repoDir,
 		WorktreePath: repoDir,
 		Agent:        "claude",
@@ -2657,7 +2657,7 @@ func TestResumeInPlaceRejectsDeletedRepo(t *testing.T) {
 
 func TestCreateInPlaceBaseRejectedByDaemon(t *testing.T) {
 	sm := newTestSessionManager(t)
-	_, err := sm.Create("test", "claude", "/tmp/whatever", "main", "", "", "", false, "", false, true, false, false, 24, 80)
+	_, err := sm.Create("braw", "claude", "/tmp/whatever", "main", "", "", "", false, "", false, true, false, false, 24, 80)
 	if err == nil {
 		t.Fatal("expected error for --in-place with --base")
 	}
@@ -2695,7 +2695,7 @@ func TestStateSaveLoadInPlace(t *testing.T) {
 func TestToSessionInfoInPlace(t *testing.T) {
 	sess := SessionState{
 		ID:           "abc",
-		Name:         "test",
+		Name:         "braw",
 		Agent:        "claude",
 		WorktreePath: "/some/repo",
 		InPlace:      true,
@@ -2719,14 +2719,14 @@ func TestSingletonBlocksCreateWhenRunning(t *testing.T) {
 	repoDir := initTempGitRepo(t)
 	sm.cfg.Repos = []config.RepoConfig{{Path: repoDir, Singleton: true}}
 
-	sm.state.Sessions["existing"] = &SessionState{
-		ID:       "existing",
-		Name:     "first",
+	sm.state.Sessions["bide-session"] = &SessionState{
+		ID:       "bide-session",
+		Name:     "braw-one",
 		RepoPath: repoDir,
 		Status:   StatusRunning,
 	}
 
-	_, err := sm.Create("second", "claude", repoDir, "main", "", "", "", false, "", false, false, false, false, 24, 80)
+	_, err := sm.Create("canny-two", "claude", repoDir, "main", "", "", "", false, "", false, false, false, false, 24, 80)
 	if err == nil {
 		t.Fatal("expected error for singleton repo with running session")
 	}
@@ -2740,14 +2740,14 @@ func TestSingletonAllowsCreateWhenStopped(t *testing.T) {
 	repoDir := initTempGitRepo(t)
 	sm.cfg.Repos = []config.RepoConfig{{Path: repoDir, Singleton: true}}
 
-	sm.state.Sessions["existing"] = &SessionState{
-		ID:       "existing",
-		Name:     "first",
+	sm.state.Sessions["bide-session"] = &SessionState{
+		ID:       "bide-session",
+		Name:     "braw-one",
 		RepoPath: repoDir,
 		Status:   StatusStopped,
 	}
 
-	_, err := sm.Create("second", "claude", repoDir, "main", "", "", "", false, "", false, false, false, false, 24, 80)
+	_, err := sm.Create("canny-two", "claude", repoDir, "main", "", "", "", false, "", false, false, false, false, 24, 80)
 	if err != nil && strings.Contains(err.Error(), "singleton") {
 		t.Fatalf("singleton should not block when existing session is stopped, got: %v", err)
 	}
@@ -2759,7 +2759,7 @@ func TestInPlaceRejectsRepoWithIncludes(t *testing.T) {
 	incDir := initTempGitRepo(t)
 	sm.cfg.Repos = []config.RepoConfig{{Path: repoDir, Includes: []string{incDir}}}
 
-	_, err := sm.Create("test", "claude", repoDir, "", "", "", "", false, "", false, true, false, false, 24, 80)
+	_, err := sm.Create("braw", "claude", repoDir, "", "", "", "", false, "", false, true, false, false, 24, 80)
 	if err == nil {
 		t.Fatal("expected error for --in-place with includes configured")
 	}
@@ -2773,17 +2773,17 @@ func TestForkSingletonRejects(t *testing.T) {
 	repoDir := initTempGitRepo(t)
 	sm.cfg.Repos = []config.RepoConfig{{Path: repoDir, Singleton: true}}
 
-	sm.state.Sessions["source"] = &SessionState{
-		ID:       "source",
-		Name:     "source-session",
+	sm.state.Sessions["braw-source"] = &SessionState{
+		ID:       "braw-source",
+		Name:     "braw-source-session",
 		RepoPath: repoDir,
 		RepoName: "repo",
-		Branch:   "test-branch",
+		Branch:   "braw-branch",
 		Agent:    "claude",
 		Status:   StatusRunning,
 	}
 
-	_, err := sm.Fork("forked", "source", 24, 80)
+	_, err := sm.Fork("braw-fork", "braw-source", 24, 80)
 	if err == nil {
 		t.Fatal("expected error for fork of singleton session")
 	}
@@ -2795,7 +2795,7 @@ func TestForkSingletonRejects(t *testing.T) {
 func TestToSessionInfoIncludes(t *testing.T) {
 	sess := SessionState{
 		ID:           "abc",
-		Name:         "test",
+		Name:         "braw",
 		Agent:        "claude",
 		WorktreePath: "/session/mono-repo",
 		Status:       StatusRunning,
@@ -2837,7 +2837,7 @@ func TestToSessionInfoIncludes(t *testing.T) {
 func TestToSessionInfoNoIncludes(t *testing.T) {
 	sess := SessionState{
 		ID:        "abc",
-		Name:      "test",
+		Name:      "braw",
 		Agent:     "claude",
 		Status:    StatusRunning,
 		CreatedAt: time.Now().UTC(),
@@ -2908,7 +2908,7 @@ func TestResumeIncludesValidatesMissingWorktree(t *testing.T) {
 	sm := newTestSessionManager(t)
 	sm.state.Sessions["s1"] = &SessionState{
 		ID:           "s1",
-		Name:         "test",
+		Name:         "braw",
 		Agent:        "claude",
 		RepoPath:     "/some/repo",
 		WorktreePath: "/some/worktree",
@@ -2941,7 +2941,7 @@ func TestParentIDPersistence(t *testing.T) {
 			"child1": {
 				ID:           "child1",
 				ParentID:     "parent1",
-				Name:         "child",
+				Name:         "bairn",
 				Agent:        "claude",
 				WorktreePath: "/some/path",
 				Status:       StatusRunning,
@@ -2966,7 +2966,7 @@ func TestToSessionInfoParentID(t *testing.T) {
 	sess := SessionState{
 		ID:        "child",
 		ParentID:  "parent",
-		Name:      "test",
+		Name:      "braw",
 		Agent:     "claude",
 		Status:    StatusRunning,
 		CreatedAt: time.Now().UTC(),
@@ -2980,41 +2980,41 @@ func TestToSessionInfoParentID(t *testing.T) {
 func TestCollectDescendants(t *testing.T) {
 	sm := newTestSessionManager(t)
 	sm.state.Sessions = map[string]*SessionState{
-		"root":       {ID: "root", Name: "root"},
-		"child1":     {ID: "child1", ParentID: "root", Name: "child1"},
-		"child2":     {ID: "child2", ParentID: "root", Name: "child2"},
-		"grandchild": {ID: "grandchild", ParentID: "child1", Name: "grandchild"},
-		"unrelated":  {ID: "unrelated", Name: "unrelated"},
+		"ben":            {ID: "ben", Name: "ben"},
+		"bairn-one":      {ID: "bairn-one", ParentID: "ben", Name: "bairn-one"},
+		"bairn-two":      {ID: "bairn-two", ParentID: "ben", Name: "bairn-two"},
+		"wee-bairn":      {ID: "wee-bairn", ParentID: "bairn-one", Name: "wee-bairn"},
+		"thrawn-session": {ID: "thrawn-session", Name: "thrawn-session"},
 	}
 
-	result := sm.collectDescendants("root")
+	result := sm.collectDescendants("ben")
 
 	if len(result) != 4 {
-		t.Fatalf("expected 4 sessions (root + 3 descendants), got %d: %v", len(result), result)
+		t.Fatalf("expected 4 sessions (ben + 3 descendants), got %d: %v", len(result), result)
 	}
 
 	resultSet := make(map[string]bool)
 	for _, id := range result {
 		resultSet[id] = true
 	}
-	for _, expected := range []string{"root", "child1", "child2", "grandchild"} {
+	for _, expected := range []string{"ben", "bairn-one", "bairn-two", "wee-bairn"} {
 		if !resultSet[expected] {
 			t.Errorf("missing expected session %q in result", expected)
 		}
 	}
-	if resultSet["unrelated"] {
-		t.Error("unrelated session should not be in result")
+	if resultSet["thrawn-session"] {
+		t.Error("thrawn-session should not be in result")
 	}
 
 	indexOf := make(map[string]int)
 	for i, id := range result {
 		indexOf[id] = i
 	}
-	if indexOf["grandchild"] > indexOf["child1"] {
-		t.Error("grandchild should come before child1 (leaves first)")
+	if indexOf["wee-bairn"] > indexOf["bairn-one"] {
+		t.Error("wee-bairn should come before bairn-one (leaves first)")
 	}
-	if indexOf["child1"] > indexOf["root"] {
-		t.Error("child1 should come before root (leaves first)")
+	if indexOf["bairn-one"] > indexOf["ben"] {
+		t.Error("bairn-one should come before ben (leaves first)")
 	}
 }
 
@@ -3072,13 +3072,13 @@ func TestRunMessageCleanupLoopReadsConfig(t *testing.T) {
 		defer ms.Close()
 		sm.SetMsgStore(ms)
 
-		if _, err := ms.Publish("test-stream", "s1", "agent", "old msg", "", ""); err != nil {
+		if _, err := ms.Publish("blether", "s1", "agent", "old msg", "", ""); err != nil {
 			t.Fatal(err)
 		}
 
 		// Config starts at zero — cleanup should be a no-op.
 		sm.runMessageCleanupFromConfig()
-		msgs, err := ms.Read("test-stream", "", false, "")
+		msgs, err := ms.Read("blether", "", false, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -3094,7 +3094,7 @@ func TestRunMessageCleanupLoopReadsConfig(t *testing.T) {
 
 		sm.runMessageCleanupFromConfig()
 
-		msgs, err = ms.Read("test-stream", "", false, "")
+		msgs, err = ms.Read("blether", "", false, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -3108,7 +3108,7 @@ func TestResumeRejectsDeletingSession(t *testing.T) {
 	sm := newTestSessionManager(t)
 	sm.state.Sessions["del1"] = &SessionState{
 		ID:           "del1",
-		Name:         "being-deleted",
+		Name:         "dreich-deleting",
 		Agent:        "claude",
 		Status:       StatusDeleting,
 		WorktreePath: "/tmp/whatever",
@@ -3133,11 +3133,11 @@ func TestDeleteSetsDeletingStatus(t *testing.T) {
 	sm := newTestSessionManager(t)
 	sm.state.Sessions["s1"] = &SessionState{
 		ID:           "s1",
-		Name:         "test",
+		Name:         "braw",
 		Agent:        "claude",
 		RepoPath:     "/nonexistent/repo",
 		WorktreePath: worktreeDir,
-		Branch:       "graith/test-s1",
+		Branch:       "graith/braw-s1",
 		Status:       StatusStopped,
 	}
 
@@ -3169,7 +3169,7 @@ func TestDeleteKeepsSessionOnTeardownFailure(t *testing.T) {
 	sm := newTestSessionManager(t)
 	sm.state.Sessions["fail1"] = &SessionState{
 		ID:           "fail1",
-		Name:         "leaky",
+		Name:         "dreich-leaky",
 		Agent:        "claude",
 		RepoPath:     "/nonexistent/repo",
 		WorktreePath: worktreeDir,
@@ -3195,7 +3195,7 @@ func TestDeleteSucceedsWhenWorktreeAlreadyGone(t *testing.T) {
 
 	sm.state.Sessions["gone1"] = &SessionState{
 		ID:           "gone1",
-		Name:         "already-cleaned",
+		Name:         "haar-cleaned",
 		Agent:        "claude",
 		RepoPath:     "/nonexistent/repo",
 		WorktreePath: "/nonexistent/worktree",
@@ -3218,86 +3218,86 @@ func TestDeleteReparentsChildren(t *testing.T) {
 
 	sm.state.Sessions["grandparent"] = &SessionState{
 		ID:     "grandparent",
-		Name:   "grandparent",
+		Name:   "brae",
 		Agent:  "claude",
 		Status: StatusStopped,
 	}
-	sm.state.Sessions["parent"] = &SessionState{
-		ID:           "parent",
-		Name:         "parent",
+	sm.state.Sessions["ben"] = &SessionState{
+		ID:           "ben",
+		Name:         "ben",
 		Agent:        "claude",
 		RepoPath:     "/nonexistent/repo",
 		WorktreePath: "/nonexistent/worktree",
-		Branch:       "graith/parent-parent",
+		Branch:       "graith/ben-ben",
 		ParentID:     "grandparent",
 		Status:       StatusStopped,
 	}
-	sm.state.Sessions["child1"] = &SessionState{
-		ID:       "child1",
-		Name:     "child1",
+	sm.state.Sessions["bairn-one"] = &SessionState{
+		ID:       "bairn-one",
+		Name:     "bairn-one",
 		Agent:    "claude",
-		ParentID: "parent",
+		ParentID: "ben",
 		Status:   StatusStopped,
 	}
-	sm.state.Sessions["child2"] = &SessionState{
-		ID:       "child2",
-		Name:     "child2",
+	sm.state.Sessions["bairn-two"] = &SessionState{
+		ID:       "bairn-two",
+		Name:     "bairn-two",
 		Agent:    "claude",
-		ParentID: "parent",
+		ParentID: "ben",
 		Status:   StatusStopped,
 	}
-	sm.state.Sessions["unrelated"] = &SessionState{
-		ID:       "unrelated",
-		Name:     "unrelated",
+	sm.state.Sessions["thrawn-session"] = &SessionState{
+		ID:       "thrawn-session",
+		Name:     "thrawn-session",
 		Agent:    "claude",
 		ParentID: "grandparent",
 		Status:   StatusStopped,
 	}
 
-	err := sm.Delete("parent")
+	err := sm.Delete("ben")
 	if err != nil {
 		t.Fatalf("Delete failed: %v", err)
 	}
 
-	if _, ok := sm.state.Sessions["parent"]; ok {
+	if _, ok := sm.state.Sessions["ben"]; ok {
 		t.Error("deleted session should be removed from state")
 	}
 
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 
-	if sm.state.Sessions["child1"].ParentID != "grandparent" {
-		t.Errorf("child1.ParentID = %q, want %q", sm.state.Sessions["child1"].ParentID, "grandparent")
+	if sm.state.Sessions["bairn-one"].ParentID != "grandparent" {
+		t.Errorf("bairn-one.ParentID = %q, want %q", sm.state.Sessions["bairn-one"].ParentID, "grandparent")
 	}
-	if sm.state.Sessions["child2"].ParentID != "grandparent" {
-		t.Errorf("child2.ParentID = %q, want %q", sm.state.Sessions["child2"].ParentID, "grandparent")
+	if sm.state.Sessions["bairn-two"].ParentID != "grandparent" {
+		t.Errorf("bairn-two.ParentID = %q, want %q", sm.state.Sessions["bairn-two"].ParentID, "grandparent")
 	}
-	if sm.state.Sessions["unrelated"].ParentID != "grandparent" {
-		t.Errorf("unrelated.ParentID = %q, want %q (should be unchanged)", sm.state.Sessions["unrelated"].ParentID, "grandparent")
+	if sm.state.Sessions["thrawn-session"].ParentID != "grandparent" {
+		t.Errorf("thrawn-session.ParentID = %q, want %q (should be unchanged)", sm.state.Sessions["thrawn-session"].ParentID, "grandparent")
 	}
 }
 
 func TestDeleteReparentsChildrenToRoot(t *testing.T) {
 	sm := newTestSessionManager(t)
 
-	sm.state.Sessions["parent"] = &SessionState{
-		ID:           "parent",
-		Name:         "parent",
+	sm.state.Sessions["ben"] = &SessionState{
+		ID:           "ben",
+		Name:         "ben",
 		Agent:        "claude",
 		RepoPath:     "/nonexistent/repo",
 		WorktreePath: "/nonexistent/worktree",
-		Branch:       "graith/parent-parent",
+		Branch:       "graith/ben-ben",
 		Status:       StatusStopped,
 	}
-	sm.state.Sessions["child"] = &SessionState{
-		ID:       "child",
-		Name:     "child",
+	sm.state.Sessions["bairn"] = &SessionState{
+		ID:       "bairn",
+		Name:     "bairn",
 		Agent:    "claude",
-		ParentID: "parent",
+		ParentID: "ben",
 		Status:   StatusStopped,
 	}
 
-	err := sm.Delete("parent")
+	err := sm.Delete("ben")
 	if err != nil {
 		t.Fatalf("Delete failed: %v", err)
 	}
@@ -3305,8 +3305,8 @@ func TestDeleteReparentsChildrenToRoot(t *testing.T) {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 
-	if sm.state.Sessions["child"].ParentID != "" {
-		t.Errorf("child.ParentID = %q, want empty (top-level)", sm.state.Sessions["child"].ParentID)
+	if sm.state.Sessions["bairn"].ParentID != "" {
+		t.Errorf("bairn.ParentID = %q, want empty (top-level)", sm.state.Sessions["bairn"].ParentID)
 	}
 }
 
@@ -3321,18 +3321,18 @@ func TestDeleteWithChildrenKeepsFailedSessions(t *testing.T) {
 
 	sm.state.Sessions["parent1"] = &SessionState{
 		ID:     "parent1",
-		Name:   "parent",
+		Name:   "ben",
 		Agent:  "claude",
 		Status: StatusStopped,
 	}
 	sm.state.Sessions["child1"] = &SessionState{
 		ID:           "child1",
-		Name:         "child",
+		Name:         "bairn",
 		Agent:        "claude",
 		ParentID:     "parent1",
 		RepoPath:     "/nonexistent/repo",
 		WorktreePath: worktreeDir,
-		Branch:       "graith/child-child1",
+		Branch:       "graith/bairn-child1",
 		Status:       StatusStopped,
 	}
 
@@ -3366,18 +3366,18 @@ func TestDeleteWithChildrenIdempotent(t *testing.T) {
 
 	sm.state.Sessions["parent1"] = &SessionState{
 		ID:     "parent1",
-		Name:   "parent",
+		Name:   "ben",
 		Agent:  "claude",
 		Status: StatusStopped,
 	}
 	sm.state.Sessions["child1"] = &SessionState{
 		ID:           "child1",
-		Name:         "child",
+		Name:         "bairn",
 		Agent:        "claude",
 		ParentID:     "parent1",
 		RepoPath:     "/nonexistent/repo",
 		WorktreePath: "/nonexistent/worktree",
-		Branch:       "graith/child-child1",
+		Branch:       "graith/bairn-child1",
 		Status:       StatusStopped,
 	}
 
@@ -3403,20 +3403,20 @@ func TestDeleteWithChildrenGrandchildren(t *testing.T) {
 
 	sm.state.Sessions["parent1"] = &SessionState{
 		ID:     "parent1",
-		Name:   "parent",
+		Name:   "ben",
 		Agent:  "claude",
 		Status: StatusStopped,
 	}
 	sm.state.Sessions["child1"] = &SessionState{
 		ID:       "child1",
-		Name:     "child",
+		Name:     "bairn",
 		Agent:    "claude",
 		ParentID: "parent1",
 		Status:   StatusStopped,
 	}
 	sm.state.Sessions["grandchild1"] = &SessionState{
 		ID:       "grandchild1",
-		Name:     "grandchild",
+		Name:     "wee-bairn",
 		Agent:    "claude",
 		ParentID: "child1",
 		Status:   StatusStopped,
@@ -3443,20 +3443,20 @@ func TestDeleteWithChildrenExcludeRootGrandchildren(t *testing.T) {
 
 	sm.state.Sessions["parent1"] = &SessionState{
 		ID:     "parent1",
-		Name:   "parent",
+		Name:   "ben",
 		Agent:  "claude",
 		Status: StatusRunning,
 	}
 	sm.state.Sessions["child1"] = &SessionState{
 		ID:       "child1",
-		Name:     "child",
+		Name:     "bairn",
 		Agent:    "claude",
 		ParentID: "parent1",
 		Status:   StatusStopped,
 	}
 	sm.state.Sessions["grandchild1"] = &SessionState{
 		ID:       "grandchild1",
-		Name:     "grandchild",
+		Name:     "wee-bairn",
 		Agent:    "claude",
 		ParentID: "child1",
 		Status:   StatusStopped,
@@ -3495,7 +3495,7 @@ func TestRestartWithChildrenSkipsStarredAndTransient(t *testing.T) {
 
 	sm.state.Sessions["parent1"] = &SessionState{
 		ID:     "parent1",
-		Name:   "parent",
+		Name:   "ben",
 		Agent:  "claude",
 		Status: StatusStopped,
 	}
@@ -3544,13 +3544,13 @@ func TestRestartWithChildrenExcludeRoot(t *testing.T) {
 
 	sm.state.Sessions["parent1"] = &SessionState{
 		ID:     "parent1",
-		Name:   "parent",
+		Name:   "ben",
 		Agent:  "claude",
 		Status: StatusStopped,
 	}
 	sm.state.Sessions["child1"] = &SessionState{
 		ID:       "child1",
-		Name:     "child",
+		Name:     "bairn",
 		Agent:    "claude",
 		ParentID: "parent1",
 		Status:   StatusStopped,
@@ -3573,20 +3573,20 @@ func TestRestartWithChildrenGrandchildren(t *testing.T) {
 
 	sm.state.Sessions["root1"] = &SessionState{
 		ID:     "root1",
-		Name:   "root",
+		Name:   "ben",
 		Agent:  "claude",
 		Status: StatusStopped,
 	}
 	sm.state.Sessions["child1"] = &SessionState{
 		ID:       "child1",
-		Name:     "child",
+		Name:     "bairn",
 		Agent:    "claude",
 		ParentID: "root1",
 		Status:   StatusStopped,
 	}
 	sm.state.Sessions["grandchild1"] = &SessionState{
 		ID:       "grandchild1",
-		Name:     "grandchild",
+		Name:     "wee-bairn",
 		Agent:    "claude",
 		ParentID: "child1",
 		Status:   StatusStopped,
@@ -3609,13 +3609,13 @@ func TestRestartWithChildrenIncludeRoot(t *testing.T) {
 
 	sm.state.Sessions["parent1"] = &SessionState{
 		ID:     "parent1",
-		Name:   "parent",
+		Name:   "ben",
 		Agent:  "claude",
 		Status: StatusStopped,
 	}
 	sm.state.Sessions["child1"] = &SessionState{
 		ID:       "child1",
-		Name:     "child",
+		Name:     "bairn",
 		Agent:    "claude",
 		ParentID: "parent1",
 		Status:   StatusStopped,
@@ -3636,78 +3636,78 @@ func TestRestartWithChildrenIncludeRoot(t *testing.T) {
 func TestDeleteClearsChildParentID(t *testing.T) {
 	sm := newTestSessionManager(t)
 
-	sm.state.Sessions["parent"] = &SessionState{
-		ID:     "parent",
-		Name:   "parent",
+	sm.state.Sessions["ben"] = &SessionState{
+		ID:     "ben",
+		Name:   "ben",
 		Agent:  "claude",
 		Status: StatusStopped,
 	}
-	sm.state.Sessions["child1"] = &SessionState{
-		ID:       "child1",
-		Name:     "child-a",
+	sm.state.Sessions["bairn-one"] = &SessionState{
+		ID:       "bairn-one",
+		Name:     "bairn-a",
 		Agent:    "claude",
-		ParentID: "parent",
+		ParentID: "ben",
 		Status:   StatusStopped,
 	}
-	sm.state.Sessions["child2"] = &SessionState{
-		ID:       "child2",
-		Name:     "child-b",
+	sm.state.Sessions["bairn-two"] = &SessionState{
+		ID:       "bairn-two",
+		Name:     "bairn-b",
 		Agent:    "claude",
-		ParentID: "parent",
+		ParentID: "ben",
 		Status:   StatusStopped,
 	}
-	sm.state.Sessions["grandchild"] = &SessionState{
-		ID:       "grandchild",
-		Name:     "grandchild",
+	sm.state.Sessions["wee-bairn"] = &SessionState{
+		ID:       "wee-bairn",
+		Name:     "wee-bairn",
 		Agent:    "claude",
-		ParentID: "child1",
+		ParentID: "bairn-one",
 		Status:   StatusStopped,
 	}
 
-	if err := sm.Delete("parent"); err != nil {
+	if err := sm.Delete("ben"); err != nil {
 		t.Fatalf("Delete failed: %v", err)
 	}
 
-	if _, ok := sm.state.Sessions["parent"]; ok {
-		t.Error("parent should be removed from state")
+	if _, ok := sm.state.Sessions["ben"]; ok {
+		t.Error("ben should be removed from state")
 	}
-	if sm.state.Sessions["child1"].ParentID != "" {
-		t.Errorf("child1 ParentID = %q, want empty", sm.state.Sessions["child1"].ParentID)
+	if sm.state.Sessions["bairn-one"].ParentID != "" {
+		t.Errorf("bairn-one ParentID = %q, want empty", sm.state.Sessions["bairn-one"].ParentID)
 	}
-	if sm.state.Sessions["child2"].ParentID != "" {
-		t.Errorf("child2 ParentID = %q, want empty", sm.state.Sessions["child2"].ParentID)
+	if sm.state.Sessions["bairn-two"].ParentID != "" {
+		t.Errorf("bairn-two ParentID = %q, want empty", sm.state.Sessions["bairn-two"].ParentID)
 	}
-	if sm.state.Sessions["grandchild"].ParentID != "child1" {
-		t.Errorf("grandchild ParentID = %q, want %q (should be unchanged)", sm.state.Sessions["grandchild"].ParentID, "child1")
+	if sm.state.Sessions["wee-bairn"].ParentID != "bairn-one" {
+		t.Errorf("wee-bairn ParentID = %q, want %q (should be unchanged)", sm.state.Sessions["wee-bairn"].ParentID, "bairn-one")
 	}
 }
 
 func TestDeleteClearsChildParentIDWhenCreating(t *testing.T) {
 	sm := newTestSessionManager(t)
 
-	sm.state.Sessions["creating-parent"] = &SessionState{
-		ID:     "creating-parent",
-		Name:   "creating-parent",
+	sm.state.Sessions["creating-ben"] = &SessionState{
+		ID:     "creating-ben",
+		Name:   "creating-ben",
 		Agent:  "claude",
 		Status: StatusCreating,
 	}
-	sm.state.Sessions["child"] = &SessionState{
-		ID:       "child",
-		Name:     "child",
+	sm.state.Sessions["bairn"] = &SessionState{
+		ID:       "bairn",
+		Name:     "bairn",
 		Agent:    "claude",
-		ParentID: "creating-parent",
+		ParentID: "creating-ben",
 		Status:   StatusRunning,
 	}
 
-	if err := sm.Delete("creating-parent"); err != nil {
+	if err := sm.Delete("creating-ben"); err != nil {
 		t.Fatalf("Delete failed: %v", err)
 	}
 
-	if _, ok := sm.state.Sessions["creating-parent"]; ok {
-		t.Error("creating-parent should be removed from state")
+	if _, ok := sm.state.Sessions["creating-ben"]; ok {
+		t.Error("creating-ben should be removed from state")
 	}
-	if sm.state.Sessions["child"].ParentID != "" {
-		t.Errorf("child ParentID = %q, want empty", sm.state.Sessions["child"].ParentID)
+	if sm.state.Sessions["bairn"].ParentID != "" {
+		t.Errorf("bairn ParentID = %q, want empty", sm.state.Sessions["bairn"].ParentID)
 	}
 }
 
@@ -3716,13 +3716,13 @@ func TestDeleteWithChildrenClearsOrphanedParentIDs(t *testing.T) {
 
 	sm.state.Sessions["root"] = &SessionState{
 		ID:     "root",
-		Name:   "root",
+		Name:   "ben",
 		Agent:  "claude",
 		Status: StatusStopped,
 	}
-	sm.state.Sessions["child"] = &SessionState{
+	sm.state.Sessions["bairn"] = &SessionState{
 		ID:       "child",
-		Name:     "child",
+		Name:     "bairn",
 		Agent:    "claude",
 		ParentID: "root",
 		Status:   StatusStopped,
@@ -3744,7 +3744,7 @@ func TestDeleteWithChildrenClearsOrphanedParentIDs(t *testing.T) {
 	if _, ok := sm.state.Sessions["root"]; ok {
 		t.Error("root should be removed")
 	}
-	if _, ok := sm.state.Sessions["child"]; ok {
+	if _, ok := sm.state.Sessions["bairn"]; ok {
 		t.Error("child should be removed")
 	}
 
@@ -3771,7 +3771,7 @@ func createTestSession(sm *SessionManager, name string) string {
 
 func TestSetSummary(t *testing.T) {
 	sm := newTestSessionManager(t)
-	id := createTestSession(sm, "test-session")
+	id := createTestSession(sm, "braw-session")
 
 	if err := sm.SetSummary(id, "Exploring code", 0); err != nil {
 		t.Fatalf("SetSummary failed: %v", err)
@@ -3791,7 +3791,7 @@ func TestSetSummary(t *testing.T) {
 
 func TestSetSummary_WithTTL(t *testing.T) {
 	sm := newTestSessionManager(t)
-	id := createTestSession(sm, "test-session")
+	id := createTestSession(sm, "braw-session")
 
 	if err := sm.SetSummary(id, "Waiting for CI", 600); err != nil {
 		t.Fatalf("SetSummary failed: %v", err)
@@ -3805,7 +3805,7 @@ func TestSetSummary_WithTTL(t *testing.T) {
 
 func TestSetSummary_Clear(t *testing.T) {
 	sm := newTestSessionManager(t)
-	id := createTestSession(sm, "test-session")
+	id := createTestSession(sm, "braw-session")
 
 	sm.SetSummary(id, "Working", 0)
 	if err := sm.ClearSummary(id); err != nil {
@@ -3830,7 +3830,7 @@ func TestSetSummary_NotFound(t *testing.T) {
 
 func TestSetSummary_Validation(t *testing.T) {
 	sm := newTestSessionManager(t)
-	id := createTestSession(sm, "test-session")
+	id := createTestSession(sm, "braw-session")
 
 	longText := strings.Repeat("a", 101)
 	if err := sm.SetSummary(id, longText, 0); err == nil {
@@ -3852,7 +3852,7 @@ func TestWatchSessionWritesLifecycleSummary(t *testing.T) {
 	id := "sess-lifecycle"
 	now := time.Now()
 	sm.state.Sessions[id] = &SessionState{
-		ID: id, Name: "test", Status: StatusRunning, Agent: "claude",
+		ID: id, Name: "braw", Status: StatusRunning, Agent: "claude",
 		SummaryText:  "Running tests",
 		SummarySetAt: &now,
 		SummaryTTL:   0,
@@ -3884,7 +3884,7 @@ func TestWatchSessionSkipsWhenStopAllAlreadyWrote(t *testing.T) {
 	id := "sess-shutdown"
 	now := time.Now()
 	sm.state.Sessions[id] = &SessionState{
-		ID: id, Name: "test", Status: StatusRunning, Agent: "claude",
+		ID: id, Name: "braw", Status: StatusRunning, Agent: "claude",
 		SummaryText:  "Stopped by shutdown (was: Building)",
 		SummarySetAt: &now,
 		SummaryTTL:   0,
@@ -3916,12 +3916,12 @@ func TestStopAllWritesShutdownSummary(t *testing.T) {
 
 	now := time.Now()
 	sm.state.Sessions["s1"] = &SessionState{
-		ID: "s1", Name: "worker", Status: StatusRunning, Agent: "claude",
+		ID: "s1", Name: "braw-worker", Status: StatusRunning, Agent: "claude",
 		SummaryText:  "Running tests",
 		SummarySetAt: &now,
 	}
 	sm.state.Sessions["s2"] = &SessionState{
-		ID: "s2", Name: "idle", Status: StatusStopped, Agent: "claude",
+		ID: "s2", Name: "bide-idle", Status: StatusStopped, Agent: "claude",
 	}
 
 	sm.StopAll(context.Background())
@@ -3974,7 +3974,7 @@ func TestStopAllWaitsConcurrently(t *testing.T) {
 func TestReconcileWritesLifecycleSummaries(t *testing.T) {
 	t.Run("creating becomes errored", func(t *testing.T) {
 		state := &State{Sessions: map[string]*SessionState{
-			"c": {ID: "c", Name: "stuck-create", Status: StatusCreating},
+			"c": {ID: "c", Name: "thrawn-create", Status: StatusCreating},
 		}}
 		state.Reconcile()
 		if state.Sessions["c"].SummaryText != "Interrupted by daemon restart" {
@@ -3984,7 +3984,7 @@ func TestReconcileWritesLifecycleSummaries(t *testing.T) {
 
 	t.Run("dead running becomes stopped", func(t *testing.T) {
 		state := &State{Sessions: map[string]*SessionState{
-			"r": {ID: "r", Name: "orphan", Status: StatusRunning, PID: 99999999},
+			"r": {ID: "r", Name: "haar-orphan", Status: StatusRunning, PID: 99999999},
 		}}
 		state.Reconcile()
 		if state.Sessions["r"].SummaryText != "Lost during daemon restart" {
@@ -3994,7 +3994,7 @@ func TestReconcileWritesLifecycleSummaries(t *testing.T) {
 
 	t.Run("deleting becomes stopped", func(t *testing.T) {
 		state := &State{Sessions: map[string]*SessionState{
-			"d": {ID: "d", Name: "stuck-delete", Status: StatusDeleting},
+			"d": {ID: "d", Name: "thrawn-delete", Status: StatusDeleting},
 		}}
 		state.Reconcile()
 		if state.Sessions["d"].SummaryText != "Delete interrupted by restart" {
@@ -4028,7 +4028,7 @@ func TestConcurrentConfigReadWrite(t *testing.T) {
 	sm.messages = ms
 	sm.mu.Lock()
 	sm.state.Sessions["sess1"] = &SessionState{
-		ID: "sess1", Name: "test", Status: StatusRunning, Agent: "claude",
+		ID: "sess1", Name: "braw", Status: StatusRunning, Agent: "claude",
 	}
 	sm.mu.Unlock()
 
@@ -4052,7 +4052,7 @@ func TestConcurrentConfigReadWrite(t *testing.T) {
 	go func() {
 		defer func() { done <- struct{}{} }()
 		for i := 0; i < 200; i++ {
-			sm.onAgentStatusChange("sess1", "test", "active", "approval")
+			sm.onAgentStatusChange("sess1", "braw", "active", "approval")
 		}
 	}()
 

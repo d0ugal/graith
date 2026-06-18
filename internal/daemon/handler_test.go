@@ -281,12 +281,12 @@ func TestListSessions(t *testing.T) {
 	h := newTestHarness(t)
 
 	h.sm.mu.Lock()
-	h.sm.state.Sessions["s1"] = &SessionState{
-		ID: "s1", Name: "session-one", Status: StatusRunning,
+	h.sm.state.Sessions["braw1"] = &SessionState{
+		ID: "braw1", Name: "bonnie-lass", Status: StatusRunning,
 		Agent: "claude", CreatedAt: time.Now().UTC(),
 	}
-	h.sm.state.Sessions["s2"] = &SessionState{
-		ID: "s2", Name: "session-two", Status: StatusStopped,
+	h.sm.state.Sessions["canny1"] = &SessionState{
+		ID: "canny1", Name: "canny-lad", Status: StatusStopped,
 		Agent: "codex", CreatedAt: time.Now().UTC(),
 	}
 	h.sm.mu.Unlock()
@@ -322,9 +322,9 @@ func TestListSessionsEmpty(t *testing.T) {
 
 func TestDeleteSession(t *testing.T) {
 	h := newTestHarness(t)
-	h.addPTYSession(t, "del1", "to-delete")
+	h.addPTYSession(t, "fash1", "fash-away")
 
-	h.sendControl(t, "delete", protocol.DeleteMsg{SessionID: "del1"})
+	h.sendControl(t, "delete", protocol.DeleteMsg{SessionID: "fash1"})
 
 	env := h.readControlMsg(t)
 	if env.Type != "deleted" {
@@ -335,7 +335,7 @@ func TestDeleteSession(t *testing.T) {
 func TestDeleteSessionNotFound(t *testing.T) {
 	h := newTestHarness(t)
 
-	h.sendControl(t, "delete", protocol.DeleteMsg{SessionID: "nonexistent"})
+	h.sendControl(t, "delete", protocol.DeleteMsg{SessionID: "haar-mist"})
 
 	env := h.readControlMsg(t)
 	if env.Type != "error" {
@@ -357,9 +357,9 @@ func TestDeleteInvalidPayload(t *testing.T) {
 
 func TestStopSession(t *testing.T) {
 	h := newTestHarness(t)
-	h.addPTYSession(t, "stop1", "to-stop")
+	h.addPTYSession(t, "bide1", "bide-still")
 
-	h.sendControl(t, "stop", protocol.StopMsg{SessionID: "stop1"})
+	h.sendControl(t, "stop", protocol.StopMsg{SessionID: "bide1"})
 
 	env := h.readControlMsg(t)
 	if env.Type != "stopped" {
@@ -370,7 +370,7 @@ func TestStopSession(t *testing.T) {
 func TestStopSessionNotFound(t *testing.T) {
 	h := newTestHarness(t)
 
-	h.sendControl(t, "stop", protocol.StopMsg{SessionID: "nonexistent"})
+	h.sendControl(t, "stop", protocol.StopMsg{SessionID: "haar-mist"})
 
 	env := h.readControlMsg(t)
 	if env.Type != "error" {
@@ -394,13 +394,13 @@ func TestRenameSession(t *testing.T) {
 	h := newTestHarness(t)
 
 	h.sm.mu.Lock()
-	h.sm.state.Sessions["ren1"] = &SessionState{
-		ID: "ren1", Name: "old-name", Status: StatusRunning,
+	h.sm.state.Sessions["auld1"] = &SessionState{
+		ID: "auld1", Name: "auld-kirk", Status: StatusRunning,
 		Agent: "claude", CreatedAt: time.Now().UTC(),
 	}
 	h.sm.mu.Unlock()
 
-	h.sendControl(t, "rename", protocol.RenameMsg{SessionID: "ren1", NewName: "new-name"})
+	h.sendControl(t, "rename", protocol.RenameMsg{SessionID: "auld1", NewName: "bonnie-kirk"})
 
 	env := h.readControlMsg(t)
 	if env.Type != "renamed" {
@@ -408,17 +408,17 @@ func TestRenameSession(t *testing.T) {
 	}
 
 	h.sm.mu.RLock()
-	name := h.sm.state.Sessions["ren1"].Name
+	name := h.sm.state.Sessions["auld1"].Name
 	h.sm.mu.RUnlock()
-	if name != "new-name" {
-		t.Errorf("name = %q, want %q", name, "new-name")
+	if name != "bonnie-kirk" {
+		t.Errorf("name = %q, want %q", name, "bonnie-kirk")
 	}
 }
 
 func TestRenameSessionNotFound(t *testing.T) {
 	h := newTestHarness(t)
 
-	h.sendControl(t, "rename", protocol.RenameMsg{SessionID: "nope", NewName: "x"})
+	h.sendControl(t, "rename", protocol.RenameMsg{SessionID: "haar", NewName: "x"})
 
 	env := h.readControlMsg(t)
 	if env.Type != "error" {
@@ -453,7 +453,7 @@ func TestResumeInvalidPayload(t *testing.T) {
 func TestResumeSessionNotFound(t *testing.T) {
 	h := newTestHarness(t)
 
-	h.sendControl(t, "resume", protocol.ResumeMsg{SessionID: "nope"})
+	h.sendControl(t, "resume", protocol.ResumeMsg{SessionID: "haar"})
 
 	env := h.readControlMsg(t)
 	if env.Type != "error" {
@@ -475,7 +475,7 @@ func TestCreateInvalidPayload(t *testing.T) {
 
 func TestResizeWhileAttached(t *testing.T) {
 	h := newTestHarness(t)
-	h.addPTYSession(t, "rsz1", "resize-test")
+	h.addPTYSession(t, "braw-rsz", "braw-resize")
 
 	// Handshake + attach
 	h.sendControl(t, "handshake", protocol.HandshakeMsg{
@@ -484,7 +484,7 @@ func TestResizeWhileAttached(t *testing.T) {
 	})
 	h.readControlMsg(t) // handshake_ok
 
-	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "rsz1"})
+	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "braw-rsz"})
 	env := h.readControlMsg(t)
 	if env.Type != "attached" {
 		t.Fatalf("expected attached, got %q", env.Type)
@@ -517,9 +517,9 @@ func TestResizeWithoutAttach(t *testing.T) {
 
 func TestAttachAndDetach(t *testing.T) {
 	h := newTestHarness(t)
-	h.addPTYSession(t, "att1", "attach-test")
+	h.addPTYSession(t, "braw-att", "bonnie-attach")
 
-	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "att1"})
+	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "braw-att"})
 	env := h.readControlMsg(t)
 	if env.Type != "attached" {
 		t.Fatalf("expected attached, got %q", env.Type)
@@ -540,7 +540,7 @@ func TestAttachAndDetach(t *testing.T) {
 func TestAttachNotFound(t *testing.T) {
 	h := newTestHarness(t)
 
-	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "nope"})
+	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "haar"})
 
 	env := h.readControlMsg(t)
 	if env.Type != "error" {
@@ -573,9 +573,9 @@ func TestDetachWithoutAttach(t *testing.T) {
 
 func TestDataChannelForwarding(t *testing.T) {
 	h := newTestHarness(t)
-	h.addPTYSession(t, "data1", "data-test")
+	h.addPTYSession(t, "braw-data", "bonnie-data")
 
-	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "data1"})
+	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "braw-data"})
 	h.readControlMsg(t) // attached
 
 	// Send data on the data channel — should be forwarded to PTY input.
@@ -609,9 +609,9 @@ func TestDataChannelWithoutAttach(t *testing.T) {
 
 func TestLogsNonFollow(t *testing.T) {
 	h := newTestHarness(t)
-	h.addPTYSession(t, "log1", "logs-test")
+	h.addPTYSession(t, "braw-log", "bonnie-logs")
 
-	h.sendControl(t, "logs", protocol.LogsMsg{SessionID: "log1", Lines: 100})
+	h.sendControl(t, "logs", protocol.LogsMsg{SessionID: "braw-log", Lines: 100})
 
 	env := h.readControlMsg(t)
 	if env.Type != "logs_done" {
@@ -622,7 +622,7 @@ func TestLogsNonFollow(t *testing.T) {
 func TestLogsNotFound(t *testing.T) {
 	h := newTestHarness(t)
 
-	h.sendControl(t, "logs", protocol.LogsMsg{SessionID: "nope"})
+	h.sendControl(t, "logs", protocol.LogsMsg{SessionID: "haar"})
 
 	env := h.readControlMsg(t)
 	if env.Type != "error" {
@@ -644,10 +644,10 @@ func TestLogsInvalidPayload(t *testing.T) {
 
 func TestLogsDefaultLines(t *testing.T) {
 	h := newTestHarness(t)
-	h.addPTYSession(t, "logd", "logs-default")
+	h.addPTYSession(t, "neep-log", "neep-default")
 
 	// Lines=0 should default to 300 internally
-	h.sendControl(t, "logs", protocol.LogsMsg{SessionID: "logd", Lines: 0})
+	h.sendControl(t, "logs", protocol.LogsMsg{SessionID: "neep-log", Lines: 0})
 
 	env := h.readControlMsg(t)
 	if env.Type != "logs_done" {
@@ -657,9 +657,9 @@ func TestLogsDefaultLines(t *testing.T) {
 
 func TestLogsFollowThenDetach(t *testing.T) {
 	h := newTestHarness(t)
-	h.addPTYSession(t, "logf", "logs-follow")
+	h.addPTYSession(t, "braw-logf", "bonnie-follow")
 
-	h.sendControl(t, "logs", protocol.LogsMsg{SessionID: "logf", Follow: true})
+	h.sendControl(t, "logs", protocol.LogsMsg{SessionID: "braw-logf", Follow: true})
 
 	env := h.readControlMsg(t)
 	if env.Type != "logs_following" {
@@ -677,10 +677,10 @@ func TestLogsFollowThenDetach(t *testing.T) {
 
 func TestTypeMessage(t *testing.T) {
 	h := newTestHarness(t)
-	h.addPTYSession(t, "typ1", "type-test")
+	h.addPTYSession(t, "braw-typ", "bonnie-type")
 
 	h.sendControl(t, "type", protocol.TypeMsg{
-		SessionID: "typ1",
+		SessionID: "braw-typ",
 		Input:     "hello",
 	})
 
@@ -692,10 +692,10 @@ func TestTypeMessage(t *testing.T) {
 
 func TestTypeMessageNoNewline(t *testing.T) {
 	h := newTestHarness(t)
-	h.addPTYSession(t, "typ2", "type-nonl")
+	h.addPTYSession(t, "canny-typ", "canny-type")
 
 	h.sendControl(t, "type", protocol.TypeMsg{
-		SessionID: "typ2",
+		SessionID: "canny-typ",
 		Input:     "y",
 		NoNewline: true,
 	})
@@ -709,7 +709,7 @@ func TestTypeMessageNoNewline(t *testing.T) {
 func TestTypeSessionNotFound(t *testing.T) {
 	h := newTestHarness(t)
 
-	h.sendControl(t, "type", protocol.TypeMsg{SessionID: "nope", Input: "x"})
+	h.sendControl(t, "type", protocol.TypeMsg{SessionID: "haar", Input: "x"})
 
 	env := h.readControlMsg(t)
 	if env.Type != "error" {
@@ -731,9 +731,9 @@ func TestTypeInvalidPayload(t *testing.T) {
 
 func TestScreenPreview(t *testing.T) {
 	h := newTestHarness(t)
-	h.addPTYSession(t, "sp1", "preview-test")
+	h.addPTYSession(t, "braw-sp", "bonnie-preview")
 
-	h.sendControl(t, "screen_preview", protocol.ScreenPreviewMsg{SessionID: "sp1"})
+	h.sendControl(t, "screen_preview", protocol.ScreenPreviewMsg{SessionID: "braw-sp"})
 
 	env := h.readControlMsg(t)
 	if env.Type != "screen_preview_response" {
@@ -741,15 +741,15 @@ func TestScreenPreview(t *testing.T) {
 	}
 	var resp protocol.ScreenPreviewResponseMsg
 	protocol.DecodePayload(env, &resp)
-	if resp.SessionID != "sp1" {
-		t.Errorf("session_id = %q, want %q", resp.SessionID, "sp1")
+	if resp.SessionID != "braw-sp" {
+		t.Errorf("session_id = %q, want %q", resp.SessionID, "braw-sp")
 	}
 }
 
 func TestScreenPreviewNotFound(t *testing.T) {
 	h := newTestHarness(t)
 
-	h.sendControl(t, "screen_preview", protocol.ScreenPreviewMsg{SessionID: "nope"})
+	h.sendControl(t, "screen_preview", protocol.ScreenPreviewMsg{SessionID: "haar"})
 
 	env := h.readControlMsg(t)
 	if env.Type != "error" {
@@ -771,9 +771,9 @@ func TestScreenPreviewInvalidPayload(t *testing.T) {
 
 func TestScreenSnapshot(t *testing.T) {
 	h := newTestHarness(t)
-	h.addPTYSession(t, "ss1", "snapshot-test")
+	h.addPTYSession(t, "braw-ss", "bonnie-snapshot")
 
-	h.sendControl(t, "screen_snapshot", protocol.ScreenSnapshotMsg{SessionID: "ss1"})
+	h.sendControl(t, "screen_snapshot", protocol.ScreenSnapshotMsg{SessionID: "braw-ss"})
 
 	env := h.readControlMsg(t)
 	if env.Type != "screen_snapshot_response" {
@@ -781,8 +781,8 @@ func TestScreenSnapshot(t *testing.T) {
 	}
 	var resp protocol.ScreenSnapshotResponseMsg
 	protocol.DecodePayload(env, &resp)
-	if resp.SessionID != "ss1" {
-		t.Errorf("session_id = %q, want %q", resp.SessionID, "ss1")
+	if resp.SessionID != "braw-ss" {
+		t.Errorf("session_id = %q, want %q", resp.SessionID, "braw-ss")
 	}
 	if resp.Cols == 0 || resp.Rows == 0 {
 		t.Error("expected non-zero cols/rows")
@@ -792,7 +792,7 @@ func TestScreenSnapshot(t *testing.T) {
 func TestScreenSnapshotNotFound(t *testing.T) {
 	h := newTestHarness(t)
 
-	h.sendControl(t, "screen_snapshot", protocol.ScreenSnapshotMsg{SessionID: "nope"})
+	h.sendControl(t, "screen_snapshot", protocol.ScreenSnapshotMsg{SessionID: "haar"})
 
 	env := h.readControlMsg(t)
 	if env.Type != "error" {
@@ -883,10 +883,10 @@ func TestMsgPub(t *testing.T) {
 	h := newTestHarness(t)
 
 	h.sendControl(t, "msg_pub", protocol.MsgPubMsg{
-		Stream:     "test-topic",
-		SenderID:   "sender1",
-		SenderName: "Agent One",
-		Body:       "hello world",
+		Stream:     "blether-topic",
+		SenderID:   "braw-sender",
+		SenderName: "Bonnie Lass",
+		Body:       "braw day",
 	})
 
 	env := h.readControlMsg(t)
@@ -895,23 +895,23 @@ func TestMsgPub(t *testing.T) {
 	}
 	var msg Message
 	protocol.DecodePayload(env, &msg)
-	if msg.Body != "hello world" {
+	if msg.Body != "braw day" {
 		t.Errorf("body = %q", msg.Body)
 	}
-	if msg.Stream != "test-topic" {
+	if msg.Stream != "blether-topic" {
 		t.Errorf("stream = %q", msg.Stream)
 	}
 }
 
 func TestMsgPubInboxNotifiesTarget(t *testing.T) {
 	h := newTestHarness(t)
-	h.addPTYSession(t, "target1", "target-session")
+	h.addPTYSession(t, "bonnie-target", "bonnie-session")
 
 	h.sendControl(t, "msg_pub", protocol.MsgPubMsg{
-		Stream:     "inbox:target1",
-		SenderID:   "cross-tree-sender",
-		SenderName: "Alice",
-		Body:       "hello from another tree",
+		Stream:     "inbox:bonnie-target",
+		SenderID:   "glen-sender",
+		SenderName: "Ailsa",
+		Body:       "braw news frae anither tree",
 	})
 
 	env := h.readControlMsg(t)
@@ -922,7 +922,7 @@ func TestMsgPubInboxNotifiesTarget(t *testing.T) {
 	// The daemon injects the notification asynchronously. Give the goroutine
 	// and PTY write a moment to propagate.
 	time.Sleep(200 * time.Millisecond)
-	ptySess, ok := h.sm.GetPTY("target1")
+	ptySess, ok := h.sm.GetPTY("bonnie-target")
 	if !ok {
 		t.Fatal("target PTY session not found")
 	}
@@ -931,23 +931,23 @@ func TestMsgPubInboxNotifiesTarget(t *testing.T) {
 		t.Fatalf("scrollback tail: %v", err)
 	}
 	scrollback := string(tail)
-	if !strings.Contains(scrollback, "New message from Alice") {
+	if !strings.Contains(scrollback, "New message from Ailsa") {
 		t.Errorf("notification not found in scrollback; got:\n%s", scrollback)
 	}
-	if !strings.Contains(scrollback, "inbox:target1") {
+	if !strings.Contains(scrollback, "inbox:bonnie-target") {
 		t.Errorf("notification should reference the target's inbox stream; got:\n%s", scrollback)
 	}
 }
 
 func TestMsgPubInboxQuietSuppressesNotification(t *testing.T) {
 	h := newTestHarness(t)
-	h.addPTYSession(t, "quiet1", "quiet-session")
+	h.addPTYSession(t, "wheesht1", "wheesht-session")
 
 	h.sendControl(t, "msg_pub", protocol.MsgPubMsg{
-		Stream:     "inbox:quiet1",
+		Stream:     "inbox:wheesht1",
 		SenderID:   "sender",
-		SenderName: "Bob",
-		Body:       "silent message",
+		SenderName: "Hamish",
+		Body:       "wheesht message",
 		Quiet:      true,
 	})
 
@@ -957,7 +957,7 @@ func TestMsgPubInboxQuietSuppressesNotification(t *testing.T) {
 	}
 
 	time.Sleep(100 * time.Millisecond)
-	ptySess, ok := h.sm.GetPTY("quiet1")
+	ptySess, ok := h.sm.GetPTY("wheesht1")
 	if !ok {
 		t.Fatal("target PTY session not found")
 	}
@@ -965,7 +965,7 @@ func TestMsgPubInboxQuietSuppressesNotification(t *testing.T) {
 	if err != nil {
 		t.Fatalf("scrollback tail: %v", err)
 	}
-	if strings.Contains(string(tail), "New message from Bob") {
+	if strings.Contains(string(tail), "New message from Hamish") {
 		t.Error("notification should not appear when Quiet=true")
 	}
 }
@@ -986,11 +986,11 @@ func TestMsgSubReadAll(t *testing.T) {
 	h := newTestHarness(t)
 
 	// Publish a message first
-	h.sm.messages.Publish("topic1", "s1", "Agent", "msg1", "", "")
-	h.sm.messages.Publish("topic1", "s2", "Agent2", "msg2", "", "")
+	h.sm.messages.Publish("blether1", "braw1", "Braw", "neep1", "", "")
+	h.sm.messages.Publish("blether1", "canny1", "Canny", "neep2", "", "")
 
 	h.sendControl(t, "msg_sub", protocol.MsgSubMsg{
-		Stream: "topic1",
+		Stream: "blether1",
 	})
 
 	env := h.readControlMsg(t)
@@ -999,7 +999,7 @@ func TestMsgSubReadAll(t *testing.T) {
 	}
 	var m1 Message
 	protocol.DecodePayload(env, &m1)
-	if m1.Body != "msg1" {
+	if m1.Body != "neep1" {
 		t.Errorf("first message body = %q", m1.Body)
 	}
 
@@ -1017,11 +1017,11 @@ func TestMsgSubReadAll(t *testing.T) {
 func TestMsgSubWithAck(t *testing.T) {
 	h := newTestHarness(t)
 
-	h.sm.messages.Publish("ack-topic", "s1", "Agent", "msg1", "", "")
+	h.sm.messages.Publish("blether-ack", "braw1", "Braw", "neep1", "", "")
 
 	h.sendControl(t, "msg_sub", protocol.MsgSubMsg{
-		Stream:     "ack-topic",
-		Subscriber: "sub1",
+		Stream:     "blether-ack",
+		Subscriber: "kirk1",
 		Ack:        true,
 	})
 
@@ -1030,8 +1030,8 @@ func TestMsgSubWithAck(t *testing.T) {
 
 	// Subscribe again with only_unread — should get nothing
 	h.sendControl(t, "msg_sub", protocol.MsgSubMsg{
-		Stream:     "ack-topic",
-		Subscriber: "sub1",
+		Stream:     "blether-ack",
+		Subscriber: "kirk1",
 		OnlyUnread: true,
 	})
 
@@ -1044,13 +1044,13 @@ func TestMsgSubWithAck(t *testing.T) {
 func TestMsgSubOnlyUnreadWithAck(t *testing.T) {
 	h := newTestHarness(t)
 
-	h.sm.messages.Publish("inbox:sess1", "sender1", "Alice", "hello", "", "")
-	h.sm.messages.Publish("inbox:sess1", "sender2", "Bob", "world", "", "")
+	h.sm.messages.Publish("inbox:braw-sess", "braw-sender", "Ailsa", "braw-hello", "", "")
+	h.sm.messages.Publish("inbox:braw-sess", "canny-sender", "Hamish", "bonnie-world", "", "")
 
 	// First read: OnlyUnread + Ack (mimics check-inbox hook)
 	h.sendControl(t, "msg_sub", protocol.MsgSubMsg{
-		Stream:     "inbox:sess1",
-		Subscriber: "sess1",
+		Stream:     "inbox:braw-sess",
+		Subscriber: "braw-sess",
 		OnlyUnread: true,
 		Ack:        true,
 	})
@@ -1070,8 +1070,8 @@ func TestMsgSubOnlyUnreadWithAck(t *testing.T) {
 
 	// Second read: same subscriber, OnlyUnread — should see nothing
 	h.sendControl(t, "msg_sub", protocol.MsgSubMsg{
-		Stream:     "inbox:sess1",
-		Subscriber: "sess1",
+		Stream:     "inbox:braw-sess",
+		Subscriber: "braw-sess",
 		OnlyUnread: true,
 	})
 
@@ -1096,11 +1096,11 @@ func TestMsgSubInvalidPayload(t *testing.T) {
 func TestMsgSubWaitWithExistingMessages(t *testing.T) {
 	h := newTestHarness(t)
 
-	h.sm.messages.Publish("wait-topic", "s1", "Agent", "existing", "", "")
+	h.sm.messages.Publish("blether-wait", "braw1", "Braw", "bide-msg", "", "")
 
 	// --wait with existing messages should return immediately
 	h.sendControl(t, "msg_sub", protocol.MsgSubMsg{
-		Stream: "wait-topic",
+		Stream: "blether-wait",
 		Wait:   true,
 	})
 
@@ -1121,11 +1121,11 @@ func TestMsgSubWaitForNewMessage(t *testing.T) {
 	// --wait with no existing messages should block until a message arrives
 	go func() {
 		time.Sleep(50 * time.Millisecond)
-		h.sm.messages.Publish("wait-new", "s1", "Agent", "new-msg", "", "")
+		h.sm.messages.Publish("blether-new", "braw1", "Braw", "braw-new", "", "")
 	}()
 
 	h.sendControl(t, "msg_sub", protocol.MsgSubMsg{
-		Stream: "wait-new",
+		Stream: "blether-new",
 		Wait:   true,
 	})
 
@@ -1154,11 +1154,11 @@ func TestMsgSubWaitForNewMessage(t *testing.T) {
 func TestMsgAck(t *testing.T) {
 	h := newTestHarness(t)
 
-	h.sm.messages.Publish("ack-stream", "s1", "Agent", "msg1", "", "")
+	h.sm.messages.Publish("blether-ack-stream", "braw1", "Braw", "neep1", "", "")
 
 	h.sendControl(t, "msg_ack", protocol.MsgAckMsg{
-		Stream:     "ack-stream",
-		Subscriber: "sub1",
+		Stream:     "blether-ack-stream",
+		Subscriber: "kirk1",
 	})
 
 	env := h.readControlMsg(t)
@@ -1182,10 +1182,10 @@ func TestMsgAckInvalidPayload(t *testing.T) {
 func TestMsgTopics(t *testing.T) {
 	h := newTestHarness(t)
 
-	h.sm.messages.Publish("topicA", "s1", "Agent", "msg1", "", "")
-	h.sm.messages.Publish("topicB", "s2", "Agent2", "msg2", "", "")
+	h.sm.messages.Publish("blether-a", "braw1", "Braw", "neep1", "", "")
+	h.sm.messages.Publish("blether-b", "canny1", "Canny", "neep2", "", "")
 
-	h.sendControl(t, "msg_topics", protocol.MsgTopicsMsg{Subscriber: "sub1"})
+	h.sendControl(t, "msg_topics", protocol.MsgTopicsMsg{Subscriber: "kirk1"})
 
 	env := h.readControlMsg(t)
 	if env.Type != "msg_topics_list" {
@@ -1215,10 +1215,10 @@ func TestMsgTopicsInvalidPayload(t *testing.T) {
 
 func TestAttachReplacesExistingClient(t *testing.T) {
 	h1 := newTestHarness(t)
-	h1.addPTYSession(t, "repl1", "replace-test")
+	h1.addPTYSession(t, "braw-repl", "bonnie-replace")
 
 	// First client attaches
-	h1.sendControl(t, "attach", protocol.AttachMsg{SessionID: "repl1"})
+	h1.sendControl(t, "attach", protocol.AttachMsg{SessionID: "braw-repl"})
 	env := h1.readControlMsg(t)
 	if env.Type != "attached" {
 		t.Fatalf("expected attached, got %q", env.Type)
@@ -1257,7 +1257,7 @@ func TestAttachReplacesExistingClient(t *testing.T) {
 	writer2 := protocol.NewFrameWriter(clientConn2)
 	reader2 := protocol.NewFrameReader(clientConn2)
 
-	data, _ := protocol.EncodeControl("attach", protocol.AttachMsg{SessionID: "repl1"})
+	data, _ := protocol.EncodeControl("attach", protocol.AttachMsg{SessionID: "braw-repl"})
 	writer2.WriteFrame(protocol.ChannelControl, data)
 
 	// Read attached on second client
@@ -1294,7 +1294,7 @@ func TestAttachReplacesExistingClient(t *testing.T) {
 
 func TestConcurrentAttachDetach(t *testing.T) {
 	h := newTestHarness(t)
-	h.addPTYSession(t, "conc1", "concurrent-test")
+	h.addPTYSession(t, "braw-conc", "bonnie-conc")
 
 	var wg sync.WaitGroup
 	for i := 0; i < 5; i++ {
@@ -1314,7 +1314,7 @@ func TestConcurrentAttachDetach(t *testing.T) {
 			writer := protocol.NewFrameWriter(clientConn)
 			reader := protocol.NewFrameReader(clientConn)
 
-			data, _ := protocol.EncodeControl("attach", protocol.AttachMsg{SessionID: "conc1"})
+			data, _ := protocol.EncodeControl("attach", protocol.AttachMsg{SessionID: "braw-conc"})
 			writer.WriteFrame(protocol.ChannelControl, data)
 
 			// Read until we get an attached or detached response
@@ -1342,7 +1342,7 @@ func TestConcurrentAttachDetach(t *testing.T) {
 
 func TestConnectionCloseWhileAttached(t *testing.T) {
 	h := newTestHarness(t)
-	h.addPTYSession(t, "close1", "close-test")
+	h.addPTYSession(t, "braw-close", "bonnie-close")
 
 	clientConn, serverConn := net.Pipe()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1357,7 +1357,7 @@ func TestConnectionCloseWhileAttached(t *testing.T) {
 	writer := protocol.NewFrameWriter(clientConn)
 	reader := protocol.NewFrameReader(clientConn)
 
-	data, _ := protocol.EncodeControl("attach", protocol.AttachMsg{SessionID: "close1"})
+	data, _ := protocol.EncodeControl("attach", protocol.AttachMsg{SessionID: "braw-close"})
 	writer.WriteFrame(protocol.ChannelControl, data)
 
 	// Wait for attached
@@ -1576,10 +1576,10 @@ func TestMsgPubUsesCurrentNameAfterRename(t *testing.T) {
 
 func TestKickedClientConnectionClosed(t *testing.T) {
 	h1 := newTestHarness(t)
-	h1.addPTYSession(t, "kick1", "kick-test")
+	h1.addPTYSession(t, "scunner1", "scunner-kick")
 
 	// First client attaches
-	h1.sendControl(t, "attach", protocol.AttachMsg{SessionID: "kick1"})
+	h1.sendControl(t, "attach", protocol.AttachMsg{SessionID: "scunner1"})
 	env := h1.readControlMsg(t)
 	if env.Type != "attached" {
 		t.Fatalf("expected attached, got %q", env.Type)
@@ -1612,7 +1612,7 @@ func TestKickedClientConnectionClosed(t *testing.T) {
 	writer2 := protocol.NewFrameWriter(clientConn2)
 	reader2 := protocol.NewFrameReader(clientConn2)
 
-	data, _ := protocol.EncodeControl("attach", protocol.AttachMsg{SessionID: "kick1"})
+	data, _ := protocol.EncodeControl("attach", protocol.AttachMsg{SessionID: "scunner1"})
 	writer2.WriteFrame(protocol.ChannelControl, data)
 
 	for {
@@ -1651,19 +1651,19 @@ func TestKickedClientConnectionClosed(t *testing.T) {
 
 func TestKickedClientInputRejected(t *testing.T) {
 	h1 := newTestHarness(t)
-	h1.addPTYSession(t, "rej1", "reject-test")
+	h1.addPTYSession(t, "thrawn1", "thrawn-reject")
 
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	// Client A attaches
-	h1.sendControl(t, "attach", protocol.AttachMsg{SessionID: "rej1"})
+	h1.sendControl(t, "attach", protocol.AttachMsg{SessionID: "thrawn1"})
 	env := h1.readControlMsg(t)
 	if env.Type != "attached" {
 		t.Fatalf("expected attached, got %q", env.Type)
 	}
 
 	// Verify A is the attached client
-	if !h1.sm.IsAttachedClient("rej1", h1.serverConn) {
+	if !h1.sm.IsAttachedClient("thrawn1", h1.serverConn) {
 		t.Fatal("client A should be the attached client")
 	}
 
@@ -1685,7 +1685,7 @@ func TestKickedClientInputRejected(t *testing.T) {
 	writerB := protocol.NewFrameWriter(clientB)
 	readerB := protocol.NewFrameReader(clientB)
 
-	data, _ := protocol.EncodeControl("attach", protocol.AttachMsg{SessionID: "rej1"})
+	data, _ := protocol.EncodeControl("attach", protocol.AttachMsg{SessionID: "thrawn1"})
 	writerB.WriteFrame(protocol.ChannelControl, data)
 
 	for {
@@ -1709,10 +1709,10 @@ func TestKickedClientInputRejected(t *testing.T) {
 	}
 
 	// Client A is no longer the attached client; B is.
-	if h1.sm.IsAttachedClient("rej1", h1.serverConn) {
+	if h1.sm.IsAttachedClient("thrawn1", h1.serverConn) {
 		t.Error("client A should no longer be the attached client")
 	}
-	if !h1.sm.IsAttachedClient("rej1", serverB) {
+	if !h1.sm.IsAttachedClient("thrawn1", serverB) {
 		t.Error("client B should be the attached client")
 	}
 
@@ -1724,18 +1724,18 @@ func TestKickedClientInputRejected(t *testing.T) {
 
 func TestAttachSetsLastAttachedAt(t *testing.T) {
 	h := newTestHarness(t)
-	h.addPTYSession(t, "att-ts", "attach-timestamp")
+	h.addPTYSession(t, "braw-ts", "bonnie-timestamp")
 
 	before := time.Now().UTC()
 
-	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "att-ts"})
+	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "braw-ts"})
 	env := h.readControlMsg(t)
 	if env.Type != "attached" {
 		t.Fatalf("expected attached, got %q", env.Type)
 	}
 
 	h.sm.mu.RLock()
-	s := h.sm.state.Sessions["att-ts"]
+	s := h.sm.state.Sessions["braw-ts"]
 	lastAttached := s.LastAttachedAt
 	h.sm.mu.RUnlock()
 
@@ -1749,16 +1749,16 @@ func TestAttachSetsLastAttachedAt(t *testing.T) {
 
 func TestAttachPersistsLastAttachedAt(t *testing.T) {
 	h := newTestHarness(t)
-	h.addPTYSession(t, "persist-ts", "persist-timestamp")
+	h.addPTYSession(t, "bide-ts", "bide-timestamp")
 
-	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "persist-ts"})
+	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "bide-ts"})
 	env := h.readControlMsg(t)
 	if env.Type != "attached" {
 		t.Fatalf("expected attached, got %q", env.Type)
 	}
 
 	h.sm.mu.RLock()
-	inMemory := h.sm.state.Sessions["persist-ts"].LastAttachedAt
+	inMemory := h.sm.state.Sessions["bide-ts"].LastAttachedAt
 	h.sm.mu.RUnlock()
 
 	if inMemory == nil {
@@ -1770,7 +1770,7 @@ func TestAttachPersistsLastAttachedAt(t *testing.T) {
 		t.Fatalf("LoadState: %v", err)
 	}
 
-	s, ok := reloaded.Sessions["persist-ts"]
+	s, ok := reloaded.Sessions["bide-ts"]
 	if !ok {
 		t.Fatal("session not found in reloaded state")
 	}
@@ -1846,18 +1846,18 @@ func TestNullPayloadRejected(t *testing.T) {
 
 func TestAttachSwitchSession(t *testing.T) {
 	h := newTestHarness(t)
-	h.addPTYSession(t, "sw1", "session-one")
-	h.addPTYSession(t, "sw2", "session-two")
+	h.addPTYSession(t, "braw-sw1", "bonnie-one")
+	h.addPTYSession(t, "braw-sw2", "bonnie-two")
 
 	// Attach to first session
-	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "sw1"})
+	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "braw-sw1"})
 	env := h.readControlMsg(t)
 	if env.Type != "attached" {
 		t.Fatalf("expected attached, got %q", env.Type)
 	}
 
 	// Attach to second session (should detach from first)
-	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "sw2"})
+	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "braw-sw2"})
 	env = h.readControlMsg(t)
 	if env.Type != "attached" {
 		t.Fatalf("expected attached for second session, got %q", env.Type)
@@ -1865,8 +1865,8 @@ func TestAttachSwitchSession(t *testing.T) {
 
 	var info protocol.SessionInfo
 	protocol.DecodePayload(env, &info)
-	if info.ID != "sw2" {
-		t.Errorf("attached to %q, want %q", info.ID, "sw2")
+	if info.ID != "braw-sw2" {
+		t.Errorf("attached to %q, want %q", info.ID, "braw-sw2")
 	}
 }
 
@@ -1874,13 +1874,13 @@ func TestDiagnostics(t *testing.T) {
 	h := newTestHarness(t)
 
 	h.sm.mu.Lock()
-	h.sm.state.Sessions["s1"] = &SessionState{
-		ID: "s1", Name: "diag-session", Status: StatusRunning,
+	h.sm.state.Sessions["braw1"] = &SessionState{
+		ID: "braw1", Name: "ken-session", Status: StatusRunning,
 		Agent: "claude", CreatedAt: time.Now().UTC(),
 		WorktreePath: t.TempDir(),
 	}
-	h.sm.state.Sessions["s2"] = &SessionState{
-		ID: "s2", Name: "stopped-session", Status: StatusStopped,
+	h.sm.state.Sessions["canny1"] = &SessionState{
+		ID: "canny1", Name: "bide-session", Status: StatusStopped,
 		Agent: "claude", CreatedAt: time.Now().UTC(),
 	}
 	h.sm.mu.Unlock()
@@ -1909,9 +1909,9 @@ func TestDiagnostics(t *testing.T) {
 	}
 
 	for _, sd := range diag.Sessions {
-		if sd.ID == "s1" {
+		if sd.ID == "braw1" {
 			if !sd.WorktreeExists {
-				t.Error("expected worktree to exist for s1")
+				t.Error("expected worktree to exist for braw1")
 			}
 		}
 	}
