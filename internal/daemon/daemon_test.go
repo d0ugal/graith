@@ -3384,6 +3384,94 @@ func TestDeleteWithChildrenExcludeRootGrandchildren(t *testing.T) {
 	}
 }
 
+func TestRestartWithChildrenNotFound(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	_, err := sm.RestartWithChildren("nonexistent", false, 24, 80)
+	if err == nil {
+		t.Fatal("expected error for nonexistent session")
+	}
+}
+
+func TestRestartWithChildrenSkipsStarredAndTransient(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	sm.state.Sessions["parent1"] = &SessionState{
+		ID:     "parent1",
+		Name:   "parent",
+		Agent:  "claude",
+		Status: StatusStopped,
+	}
+	sm.state.Sessions["starred1"] = &SessionState{
+		ID:       "starred1",
+		Name:     "starred-child",
+		Agent:    "claude",
+		ParentID: "parent1",
+		Status:   StatusStopped,
+		Starred:  true,
+	}
+	sm.state.Sessions["deleting1"] = &SessionState{
+		ID:       "deleting1",
+		Name:     "deleting-child",
+		Agent:    "claude",
+		ParentID: "parent1",
+		Status:   StatusDeleting,
+	}
+	sm.state.Sessions["creating1"] = &SessionState{
+		ID:       "creating1",
+		Name:     "creating-child",
+		Agent:    "claude",
+		ParentID: "parent1",
+		Status:   StatusCreating,
+	}
+
+	restarted, err := sm.RestartWithChildren("parent1", true, 24, 80)
+	if err != nil {
+		t.Fatalf("RestartWithChildren failed: %v", err)
+	}
+
+	for _, id := range restarted {
+		if id == "starred1" {
+			t.Error("starred session should be skipped")
+		}
+		if id == "deleting1" {
+			t.Error("deleting session should be skipped")
+		}
+		if id == "creating1" {
+			t.Error("creating session should be skipped")
+		}
+	}
+}
+
+func TestRestartWithChildrenExcludeRoot(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	sm.state.Sessions["parent1"] = &SessionState{
+		ID:     "parent1",
+		Name:   "parent",
+		Agent:  "claude",
+		Status: StatusStopped,
+	}
+	sm.state.Sessions["child1"] = &SessionState{
+		ID:       "child1",
+		Name:     "child",
+		Agent:    "claude",
+		ParentID: "parent1",
+		Status:   StatusStopped,
+	}
+
+	restarted, err := sm.RestartWithChildren("parent1", true, 24, 80)
+	if err != nil {
+		t.Fatalf("RestartWithChildren failed: %v", err)
+	}
+
+	for _, id := range restarted {
+		if id == "parent1" {
+			t.Error("parent should be excluded when excludeRoot is true")
+		}
+	}
+}
+
 func createTestSession(sm *SessionManager, name string) string {
 	id := generateID()
 	sm.state.Sessions[id] = &SessionState{

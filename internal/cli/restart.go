@@ -2,18 +2,27 @@ package cli
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/d0ugal/graith/internal/client"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/spf13/cobra"
 )
 
-var restartBackground bool
+var (
+	restartBackground bool
+	restartChildren   bool
+)
 
 var restartCmd = &cobra.Command{
-	Use:               "restart <name-or-id>",
-	Short:             "Restart a stopped session",
-	Args:              cobra.ExactArgs(1),
+	Use:   "restart <name-or-id>",
+	Short: "Restart a stopped session",
+	Args: func(cmd *cobra.Command, args []string) error {
+		if restartChildren {
+			return cobra.MaximumNArgs(1)(cmd, args)
+		}
+		return cobra.ExactArgs(1)(cmd, args)
+	},
 	ValidArgsFunction: completeStoppedSessionNames,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		c, err := client.Connect(cfg, paths, cfgFile)
@@ -21,6 +30,10 @@ var restartCmd = &cobra.Command{
 			return err
 		}
 		defer c.Close()
+
+		if restartChildren {
+			return restartChildrenRun(c, args)
+		}
 
 		session, err := resolveSessionInfo(c, args[0])
 		if err != nil {
@@ -58,9 +71,57 @@ var restartCmd = &cobra.Command{
 	},
 }
 
+func restartChildrenRun(c *client.Client, args []string) error {
+	var sessionID string
+	var excludeRoot bool
+
+	if len(args) == 1 {
+		var err error
+		sessionID, err = resolveSession(c, args[0])
+		if err != nil {
+			return err
+		}
+		excludeRoot = false
+	} else {
+		sessionID = os.Getenv("GRAITH_SESSION_ID")
+		if sessionID == "" {
+			return fmt.Errorf("--children with no session arg requires GRAITH_SESSION_ID to be set")
+		}
+		excludeRoot = true
+	}
+
+	c.SendControl("restart", protocol.RestartMsg{
+		SessionID:   sessionID,
+		Children:    true,
+		ExcludeRoot: excludeRoot,
+	})
+	resp, err := c.ReadControlResponse()
+	if err != nil {
+		return err
+	}
+	if resp.Type == "error" {
+		var e protocol.ErrorMsg
+		protocol.DecodePayload(resp, &e)
+		return fmt.Errorf("%s", e.Message)
+	}
+
+	var result struct {
+		Restarted []string `json:"restarted"`
+	}
+	protocol.DecodePayload(resp, &result)
+
+	if jsonOutput {
+		return out.JSON(result)
+	}
+
+	out.Print("Restarted %d sessions\n", len(result.Restarted))
+	return nil
+}
+
 func init() {
 	rootCmd.AddCommand(restartCmd)
 	restartCmd.Flags().BoolVar(&restartBackground, "background", false, "restart without attaching")
+	restartCmd.Flags().BoolVar(&restartChildren, "children", false, "restart all descendant sessions")
 }
 
 func completeStoppedSessionNames(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
