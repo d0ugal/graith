@@ -2540,15 +2540,16 @@ func (sm *SessionManager) RunDetectionLoop(ctx context.Context) {
 func (sm *SessionManager) detectAgentStatuses() {
 	sm.mu.RLock()
 	type target struct {
-		id           string
-		name         string
-		agent        string
-		prevStatus   string
-		pty          *grpty.Session
-		worktreePath string
-		baseBranch   string
-		repoPath     string
-		includes     []IncludedRepoState
+		id             string
+		name           string
+		agent          string
+		prevStatus     string
+		pty            *grpty.Session
+		worktreePath   string
+		baseBranch     string
+		repoPath       string
+		includes       []IncludedRepoState
+		sharedWorktree bool
 	}
 	var targets []target
 	for id, s := range sm.state.Sessions {
@@ -2561,7 +2562,7 @@ func (sm *SessionManager) detectAgentStatuses() {
 			targets = append(targets, target{
 				id: id, name: s.Name, agent: s.Agent, prevStatus: s.AgentStatus, pty: ptySess,
 				worktreePath: s.WorktreePath, baseBranch: s.BaseBranch, repoPath: s.RepoPath,
-				includes: inc,
+				includes: inc, sharedWorktree: s.SharedWorktree,
 			})
 		}
 	}
@@ -2601,26 +2602,28 @@ func (sm *SessionManager) detectAgentStatuses() {
 
 		var dirty bool
 		var unpushed int
-		if t.worktreePath != "" && t.repoPath != "" {
-			if d, err := git.HasUncommittedChanges(t.worktreePath); err == nil {
-				dirty = d
-			}
-			if t.baseBranch != "" {
-				if n, err := git.UnpushedCommitCount(t.worktreePath, t.baseBranch); err == nil {
-					unpushed = n
+		if !t.sharedWorktree {
+			if t.worktreePath != "" && t.repoPath != "" {
+				if d, err := git.HasUncommittedChanges(t.worktreePath); err == nil {
+					dirty = d
+				}
+				if t.baseBranch != "" {
+					if n, err := git.UnpushedCommitCount(t.worktreePath, t.baseBranch); err == nil {
+						unpushed = n
+					}
 				}
 			}
-		}
-		for i := range t.includes {
-			inc := &t.includes[i]
-			if d, err := git.HasUncommittedChanges(inc.WorktreePath); err == nil {
-				inc.dirty = d
-				dirty = dirty || d
-			}
-			if inc.BaseBranch != "" {
-				if n, err := git.UnpushedCommitCount(inc.WorktreePath, inc.BaseBranch); err == nil {
-					inc.unpushed = n
-					unpushed += n
+			for i := range t.includes {
+				inc := &t.includes[i]
+				if d, err := git.HasUncommittedChanges(inc.WorktreePath); err == nil {
+					inc.dirty = d
+					dirty = dirty || d
+				}
+				if inc.BaseBranch != "" {
+					if n, err := git.UnpushedCommitCount(inc.WorktreePath, inc.BaseBranch); err == nil {
+						inc.unpushed = n
+						unpushed += n
+					}
 				}
 			}
 		}
