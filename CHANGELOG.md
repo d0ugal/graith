@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.53.0](https://github.com/d0ugal/graith/compare/v0.52.1...v0.53.0) (2026-06-18)
+
+
+### Features
+
+* add `gr restart --children` to restart all descendant sessions ([7e2733c](https://github.com/d0ugal/graith/commit/7e2733cb4cc22e8301e169b3a2918601bf0bce2b)), closes [#481](https://github.com/d0ugal/graith/issues/481)
+
+
+### Bug Fixes
+
+* address review tribunal findings for restart --children ([3b04d56](https://github.com/d0ugal/graith/commit/3b04d56b621bb855bbe13cf4d5303b0f3a7d9c58))
+* address tribunal findings — async notify and correct inbox stream ([577676b](https://github.com/d0ugal/graith/commit/577676bf21f8b4403f5ab4ecdc9a8c3970328460))
+* also clear ParentID in Delete's StatusCreating early-return path ([fc078d5](https://github.com/d0ugal/graith/commit/fc078d580299e9766df980bc90cbaad6191fbdbb))
+* clear dangling ParentID on children when a session is deleted ([81626d7](https://github.com/d0ugal/graith/commit/81626d79c6705d8cbe6a13091c19c1c7b9ccd5c4))
+* move inbox notification from client-side to daemon-side ([bf4a44f](https://github.com/d0ugal/graith/commit/bf4a44f2009087ff55be1be330fe16f987ba15f4))
+* re-read parentID under lock to prevent stale reparenting ([de3b7cd](https://github.com/d0ugal/graith/commit/de3b7cd0b23edac02757daa019f194fd72d5f487))
+* remove dead enrichment data code from hook stdin path ([eadd9eb](https://github.com/d0ugal/graith/commit/eadd9ebc27df5a73ed68d03b56d5b1955978bc8b)), closes [#534](https://github.com/d0ugal/graith/issues/534)
+* reparent children to grandparent when a session is deleted ([1e51ceb](https://github.com/d0ugal/graith/commit/1e51ceb63ff90cbe39809b70eee50e3cf934a079)), closes [#522](https://github.com/d0ugal/graith/issues/522)
+
 ## [0.52.1](https://github.com/d0ugal/graith/compare/v0.52.0...v0.52.1) (2026-06-17)
 
 
