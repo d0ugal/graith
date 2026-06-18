@@ -903,6 +903,70 @@ func TestMsgPub(t *testing.T) {
 	}
 }
 
+func TestMsgPubInboxNotifiesTarget(t *testing.T) {
+	h := newTestHarness(t)
+	h.addPTYSession(t, "target1", "target-session")
+
+	h.sendControl(t, "msg_pub", protocol.MsgPubMsg{
+		Stream:     "inbox:target1",
+		SenderID:   "cross-tree-sender",
+		SenderName: "Alice",
+		Body:       "hello from another tree",
+	})
+
+	env := h.readControlMsg(t)
+	if env.Type != "msg_published" {
+		t.Fatalf("expected msg_published, got %q", env.Type)
+	}
+
+	// The daemon should have injected a notification into the target's PTY.
+	// Give the write a moment to propagate through the PTY.
+	time.Sleep(100 * time.Millisecond)
+	ptySess, ok := h.sm.GetPTY("target1")
+	if !ok {
+		t.Fatal("target PTY session not found")
+	}
+	tail, err := ptySess.Scrollback.Tail(500)
+	if err != nil {
+		t.Fatalf("scrollback tail: %v", err)
+	}
+	scrollback := string(tail)
+	if !strings.Contains(scrollback, "New message from Alice") {
+		t.Errorf("notification not found in scrollback; got:\n%s", scrollback)
+	}
+}
+
+func TestMsgPubInboxQuietSuppressesNotification(t *testing.T) {
+	h := newTestHarness(t)
+	h.addPTYSession(t, "quiet1", "quiet-session")
+
+	h.sendControl(t, "msg_pub", protocol.MsgPubMsg{
+		Stream:     "inbox:quiet1",
+		SenderID:   "sender",
+		SenderName: "Bob",
+		Body:       "silent message",
+		Quiet:      true,
+	})
+
+	env := h.readControlMsg(t)
+	if env.Type != "msg_published" {
+		t.Fatalf("expected msg_published, got %q", env.Type)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+	ptySess, ok := h.sm.GetPTY("quiet1")
+	if !ok {
+		t.Fatal("target PTY session not found")
+	}
+	tail, err := ptySess.Scrollback.Tail(500)
+	if err != nil {
+		t.Fatalf("scrollback tail: %v", err)
+	}
+	if strings.Contains(string(tail), "New message from Bob") {
+		t.Error("notification should not appear when Quiet=true")
+	}
+}
+
 func TestMsgPubInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
