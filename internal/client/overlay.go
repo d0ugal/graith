@@ -1028,8 +1028,12 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.rebuildForView()
 				return m, m.fetchPreviewCmd()
 			case "enter":
-				m.state = stateList
 				m.filterInput.Blur()
+				if item, ok := m.list.SelectedItem().(sessionItem); ok {
+					m.selected = &item.info
+					return m, tea.Quit
+				}
+				m.state = stateList
 				return m, m.fetchPreviewCmd()
 			default:
 				var cmd tea.Cmd
