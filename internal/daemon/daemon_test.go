@@ -1993,6 +1993,7 @@ func TestWatchSessionCurrentUpdatesState(t *testing.T) {
 	sm.mu.RLock()
 	status := sm.state.Sessions[id].Status
 	exitCode := sm.state.Sessions[id].ExitCode
+	_, ptyStillInMap := sm.sessions[id]
 	sm.mu.RUnlock()
 
 	if status != StatusStopped {
@@ -2000,6 +2001,64 @@ func TestWatchSessionCurrentUpdatesState(t *testing.T) {
 	}
 	if exitCode == nil || *exitCode != 0 {
 		t.Errorf("exit code = %v, want 0", exitCode)
+	}
+	if ptyStillInMap {
+		t.Error("PTY session should be removed from sessions map after natural exit")
+	}
+}
+
+func TestWatchSessionClosesPTYHandles(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	id := "sess-watch-close"
+	sm.state.Sessions[id] = &SessionState{
+		ID: id, Name: "test", Status: StatusRunning, Agent: "claude",
+	}
+
+	sess := newTestPTYSession(t, "true")
+
+	select {
+	case <-sess.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for session to exit")
+	}
+
+	sm.sessions[id] = sess
+
+	sm.watchSession(id, sess)
+
+	// Verify the PTY master fd was closed by attempting a Stat on it.
+	// A closed *os.File returns os.ErrClosed (or similar) on Stat.
+	if _, err := sess.Ptmx.Stat(); err == nil {
+		t.Error("Ptmx fd should be closed after watchSession, but Stat succeeded")
+	}
+}
+
+func TestWatchSessionStaleClosesPTYHandles(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	id := "sess-watch-stale-close"
+	sm.state.Sessions[id] = &SessionState{
+		ID: id, Name: "test", Status: StatusRunning, Agent: "claude",
+	}
+
+	oldSess := newTestPTYSession(t, "true")
+	newSess := newTestPTYSession(t, "sleep", "100")
+
+	select {
+	case <-oldSess.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for old session to exit")
+	}
+
+	// Simulate Resume replacing the PTY while the old process was exiting.
+	sm.sessions[id] = newSess
+
+	sm.watchSession(id, oldSess)
+
+	// The old PTY's handles should still be closed even though the watcher was stale.
+	if _, err := oldSess.Ptmx.Stat(); err == nil {
+		t.Error("stale oldSess Ptmx fd should be closed after watchSession, but Stat succeeded")
 	}
 }
 
@@ -2037,6 +2096,13 @@ func TestWatchSessionDeletedSkipsPublish(t *testing.T) {
 	}
 	if len(msgs) != 0 {
 		t.Errorf("expected 0 status messages for deleted session, got %d: %v", len(msgs), msgs)
+	}
+
+	sm.mu.RLock()
+	_, ptyStillInMap := sm.sessions[id]
+	sm.mu.RUnlock()
+	if ptyStillInMap {
+		t.Error("PTY session should be removed from sessions map even for deleted sessions")
 	}
 }
 
