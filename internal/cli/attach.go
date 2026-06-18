@@ -54,7 +54,7 @@ func runAttach(cmd *cobra.Command, name string) error {
 	}
 
 	if name == "" {
-		result := client.RunOverlay(list.Sessions, "", previewFetcher(), deleteSession, restartSession, toggleStar, paths.Profile, nil)
+		result := client.RunOverlay(list.Sessions, "", previewFetcher(), sessionRefresher(), deleteSession, restartSession, toggleStar, paths.Profile, nil)
 		if result == nil || result.Action == "" {
 			return nil
 		}
@@ -149,7 +149,7 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 			var list protocol.SessionListMsg
 			protocol.DecodePayload(listResp, &list)
 
-			overlayResult := client.RunOverlay(list.Sessions, sessionID, previewFetcher(), deleteSession, restartSession, toggleStar, paths.Profile, overlayCollapsed)
+			overlayResult := client.RunOverlay(list.Sessions, sessionID, previewFetcher(), sessionRefresher(), deleteSession, restartSession, toggleStar, paths.Profile, overlayCollapsed)
 			if overlayResult != nil {
 				overlayCollapsed = overlayResult.Collapsed
 			}
@@ -600,6 +600,29 @@ func restoreScreen(sessionID string) {
 func previewFetcher() func(string) string {
 	return func(sessionID string) string {
 		return client.FetchScrollbackPreview(cfg, paths, cfgFile, sessionID)
+	}
+}
+
+func sessionRefresher() func() []protocol.SessionInfo {
+	return func() []protocol.SessionInfo {
+		c, err := freshClient()
+		if err != nil {
+			return nil
+		}
+		defer c.Close()
+		c.SendControl("list", struct{}{})
+		resp, err := c.ReadControlResponse()
+		if err != nil {
+			return nil
+		}
+		if resp.Type == "error" {
+			return nil
+		}
+		var list protocol.SessionListMsg
+		if err := protocol.DecodePayload(resp, &list); err != nil {
+			return nil
+		}
+		return list.Sessions
 	}
 }
 
