@@ -21,15 +21,6 @@ var (
 type hookStdin struct {
 	ToolName         string `json:"tool_name"`
 	NotificationType string `json:"notification_type"`
-	Model            struct {
-		DisplayName string `json:"display_name"`
-	} `json:"model"`
-	Cost struct {
-		TotalCostUSD float64 `json:"total_cost_usd"`
-	} `json:"cost"`
-	ContextWindow struct {
-		UsedPercentage float64 `json:"used_percentage"`
-	} `json:"context_window"`
 }
 
 var reportStatusCmd = &cobra.Command{
@@ -47,7 +38,7 @@ var reportStatusCmd = &cobra.Command{
 			return nil
 		}
 
-		// Try to parse stdin for enrichment data (non-blocking, channel-safe)
+		// Try to parse stdin for tool/notification metadata (non-blocking, channel-safe)
 		type stdinResult struct {
 			data   hookStdin
 			parsed bool
@@ -85,17 +76,6 @@ var reportStatusCmd = &cobra.Command{
 		if stdin.parsed {
 			if stdin.data.ToolName != "" && msg.ToolName == "" {
 				msg.ToolName = stdin.data.ToolName
-			}
-			if stdin.data.Model.DisplayName != "" {
-				msg.Model = stdin.data.Model.DisplayName
-			}
-			if stdin.data.Cost.TotalCostUSD > 0 {
-				cost := stdin.data.Cost.TotalCostUSD
-				msg.Usage = &protocol.UsageReport{CostUSD: &cost}
-			}
-			if stdin.data.ContextWindow.UsedPercentage > 0 {
-				pct := stdin.data.ContextWindow.UsedPercentage
-				msg.Context = &protocol.ContextReport{Percent: &pct}
 			}
 		}
 
