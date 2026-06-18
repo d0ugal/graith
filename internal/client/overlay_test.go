@@ -1058,6 +1058,179 @@ func TestUpdate_RefreshSessions_SelectedGone_FallsBack(t *testing.T) {
 	}
 }
 
+// --- Update: staggered restart-all ---
+
+func TestUpdate_RestartAll_Staggered(t *testing.T) {
+	sessions := overlayTestSessions()
+	var restarted []string
+	restartFn := func(id string) error {
+		restarted = append(restarted, id)
+		return nil
+	}
+
+	m := newOverlayModel(sessions, "", nil, nil, nil)
+	m.restartSession = restartFn
+	m.width = 120
+	m.height = 40
+
+	// Press R, then confirm with y
+	updated, _ := sendKey(m, "R")
+	om := asOverlay(updated)
+	if om.state != stateConfirmRestartAll {
+		t.Fatalf("state = %v, want stateConfirmRestartAll", om.state)
+	}
+
+	updated, cmd := sendKey(updated, "y")
+	om = asOverlay(updated)
+	if om.state != stateRestartingAll {
+		t.Fatalf("state = %v, want stateRestartingAll", om.state)
+	}
+	if len(om.restartQueue) == 0 {
+		t.Fatal("restartQueue should not be empty")
+	}
+
+	// Execute commands one at a time until done
+	for cmd != nil {
+		msg := cmd()
+		if msg == nil {
+			break
+		}
+		updated, cmd = updated.Update(msg)
+	}
+
+	om = asOverlay(updated)
+	if om.state != stateList {
+		t.Errorf("state = %v, want stateList after all restarts", om.state)
+	}
+	if len(restarted) != len(sessions) {
+		t.Errorf("restarted %d sessions, want %d", len(restarted), len(sessions))
+	}
+}
+
+func TestUpdate_RestartAll_ShowsProgress(t *testing.T) {
+	sessions := overlayTestSessions()
+	restartFn := func(id string) error { return nil }
+
+	m := newOverlayModel(sessions, "", nil, nil, nil)
+	m.restartSession = restartFn
+	m.width = 120
+	m.height = 40
+
+	// Confirm restart-all
+	updated, _ := sendKey(m, "R")
+	updated, cmd := sendKey(updated, "y")
+	om := asOverlay(updated)
+
+	if om.restartIdx != 0 {
+		t.Errorf("restartIdx = %d, want 0", om.restartIdx)
+	}
+
+	// Execute the first restart
+	if cmd != nil {
+		msg := cmd()
+		updated, _ = updated.Update(msg)
+		om = asOverlay(updated)
+		if om.restartIdx != 1 {
+			t.Errorf("restartIdx after first restart = %d, want 1", om.restartIdx)
+		}
+	}
+}
+
+func TestUpdate_RestartAll_HandlesErrors(t *testing.T) {
+	sessions := overlayTestSessions()
+	callCount := 0
+	restartFn := func(id string) error {
+		callCount++
+		if callCount == 2 {
+			return fmt.Errorf("restart failed")
+		}
+		return nil
+	}
+
+	m := newOverlayModel(sessions, "", nil, nil, nil)
+	m.restartSession = restartFn
+	m.width = 120
+	m.height = 40
+
+	// Confirm restart-all
+	updated, _ := sendKey(m, "R")
+	updated, cmd := sendKey(updated, "y")
+
+	// Run all restarts to completion
+	for cmd != nil {
+		msg := cmd()
+		if msg == nil {
+			break
+		}
+		updated, cmd = updated.Update(msg)
+	}
+
+	om := asOverlay(updated)
+	if om.state != stateList {
+		t.Errorf("state = %v, want stateList after all restarts", om.state)
+	}
+	// All sessions should be attempted even if one fails
+	if callCount != len(sessions) {
+		t.Errorf("restartFn called %d times, want %d", callCount, len(sessions))
+	}
+}
+
+func TestUpdate_RestartAll_EscCancelsRemaining(t *testing.T) {
+	sessions := overlayTestSessions()
+	var restarted []string
+	restartFn := func(id string) error {
+		restarted = append(restarted, id)
+		return nil
+	}
+
+	m := newOverlayModel(sessions, "", nil, nil, nil)
+	m.restartSession = restartFn
+	m.width = 120
+	m.height = 40
+
+	// Start restart-all
+	updated, _ := sendKey(m, "R")
+	updated, cmd := sendKey(updated, "y")
+	om := asOverlay(updated)
+	if om.state != stateRestartingAll {
+		t.Fatalf("state = %v, want stateRestartingAll", om.state)
+	}
+
+	// Execute first restart
+	msg := cmd()
+	updated, cmd = updated.Update(msg)
+	om = asOverlay(updated)
+	if len(restarted) != 1 {
+		t.Fatalf("restarted = %d, want 1 after first result", len(restarted))
+	}
+
+	// Press Esc to cancel remaining
+	updated, _ = sendSpecialKey(updated, tea.KeyEscape)
+	om = asOverlay(updated)
+	if om.state != stateRestartingAll {
+		t.Errorf("state = %v, want stateRestartingAll (waiting for in-flight)", om.state)
+	}
+
+	// Execute the in-flight second restart (was already dispatched)
+	if cmd != nil {
+		msg = cmd()
+		updated, _ = updated.Update(msg)
+	}
+
+	om = asOverlay(updated)
+	if om.state != stateList {
+		t.Errorf("state = %v, want stateList after in-flight completes", om.state)
+	}
+	// Should have restarted exactly 2 (first + in-flight at Esc), not all 3
+	if len(restarted) != 2 {
+		t.Errorf("restarted %d sessions, want 2 (first + in-flight)", len(restarted))
+	}
+	// Queue fields should be cleaned up
+	if om.restartQueue != nil {
+		t.Error("restartQueue should be nil after completion")
+	}
+}
+
 // --- Update: previewMsg ---
 
 func TestUpdate_PreviewMsg_Applied(t *testing.T) {
