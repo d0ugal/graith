@@ -12,7 +12,7 @@ func TestListMaintenanceRepos(t *testing.T) {
 	gitconfig := filepath.Join(tmpDir, "gitconfig")
 
 	t.Run("no maintenance repos", func(t *testing.T) {
-		if err := os.WriteFile(gitconfig, []byte("[user]\n\tname = test\n"), 0644); err != nil {
+		if err := os.WriteFile(gitconfig, []byte("[user]\n\tname = braw\n"), 0644); err != nil {
 			t.Fatal(err)
 		}
 		t.Setenv("GIT_CONFIG_GLOBAL", gitconfig)
@@ -26,7 +26,7 @@ func TestListMaintenanceRepos(t *testing.T) {
 	})
 
 	t.Run("multiple repos", func(t *testing.T) {
-		content := "[maintenance]\n\trepo = /foo/bar\n\trepo = /baz/qux\n"
+		content := "[maintenance]\n\trepo = /croft/braw\n\trepo = /croft/bonnie\n"
 		if err := os.WriteFile(gitconfig, []byte(content), 0644); err != nil {
 			t.Fatal(err)
 		}
@@ -38,13 +38,13 @@ func TestListMaintenanceRepos(t *testing.T) {
 		if len(repos) != 2 {
 			t.Fatalf("expected 2 repos, got %d: %v", len(repos), repos)
 		}
-		if repos[0] != "/foo/bar" || repos[1] != "/baz/qux" {
+		if repos[0] != "/croft/braw" || repos[1] != "/croft/bonnie" {
 			t.Fatalf("unexpected repos: %v", repos)
 		}
 	})
 
 	t.Run("duplicate entries returned as-is", func(t *testing.T) {
-		content := "[maintenance]\n\trepo = /same/path\n\trepo = /same/path\n"
+		content := "[maintenance]\n\trepo = /croft/glen\n\trepo = /croft/glen\n"
 		if err := os.WriteFile(gitconfig, []byte(content), 0644); err != nil {
 			t.Fatal(err)
 		}

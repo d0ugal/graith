@@ -234,8 +234,8 @@ func TestPullIfClean_ActiveSession(t *testing.T) {
 	advanceRemote(t, bareDir, cloneDir)
 
 	sm := newTestSM(t)
-	sm.state.Sessions["test-session"] = &SessionState{
-		ID:       "test-session",
+	sm.state.Sessions["braw-session"] = &SessionState{
+		ID:       "braw-session",
 		RepoPath: cloneDir,
 		Status:   StatusRunning,
 	}
@@ -254,8 +254,8 @@ func TestPullIfClean_ActiveSessionCreating(t *testing.T) {
 	advanceRemote(t, bareDir, cloneDir)
 
 	sm := newTestSM(t)
-	sm.state.Sessions["test-session"] = &SessionState{
-		ID:       "test-session",
+	sm.state.Sessions["braw-session"] = &SessionState{
+		ID:       "braw-session",
 		RepoPath: cloneDir,
 		Status:   StatusCreating,
 	}

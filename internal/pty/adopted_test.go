@@ -25,7 +25,7 @@ func TestAdoptedWaitLoopExitsOnProcessDeath(t *testing.T) {
 	startTime, _ := ProcessStartTime(pid)
 
 	s := &Session{
-		ID:               "test-adopted",
+		ID:               "braw-adopted",
 		Scrollback:       sb,
 		done:             make(chan struct{}),
 		readDone:         make(chan struct{}),
@@ -85,7 +85,7 @@ func TestAdoptedWaitLoopExitsWhenPIDGone(t *testing.T) {
 	// should exit immediately. This also covers the case where a new
 	// process reuses the PID but has a different start time.
 	s := &Session{
-		ID:               "test-reuse",
+		ID:               "auld-reuse",
 		Scrollback:       sb,
 		done:             make(chan struct{}),
 		readDone:         make(chan struct{}),
@@ -136,7 +136,7 @@ func TestAdoptedWaitLoopStartTimeMismatchBreaks(t *testing.T) {
 	// simulates PID reuse: the PID is alive (kill returns nil) but the
 	// start time differs, so the loop should detect the mismatch and exit.
 	s := &Session{
-		ID:               "test-mismatch",
+		ID:               "thrawn-mismatch",
 		Scrollback:       sb,
 		done:             make(chan struct{}),
 		readDone:         make(chan struct{}),

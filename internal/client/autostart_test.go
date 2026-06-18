@@ -6,7 +6,7 @@ import (
 )
 
 func TestDaemonStartArgsStripsConfigInsideSession(t *testing.T) {
-	t.Setenv("GRAITH_SESSION_ID", "test-session-123")
+	t.Setenv("GRAITH_SESSION_ID", "braw-session-123")
 
 	args := daemonStartArgs("/tmp/evil.toml")
 

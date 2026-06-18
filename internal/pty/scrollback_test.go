@@ -15,9 +15,9 @@ func TestScrollbackWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer sb.Close()
-	sb.Write([]byte("hello world"))
+	sb.Write([]byte("braw neep"))
 	data, _ := os.ReadFile(path)
-	if string(data) != "hello world" {
+	if string(data) != "braw neep" {
 		t.Errorf("log = %q", data)
 	}
 }
@@ -29,12 +29,12 @@ func TestScrollbackTail(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer sb.Close()
-	sb.Write([]byte("line1\nline2\nline3\n"))
+	sb.Write([]byte("glen\nwynd\nloch\n"))
 	tail, err := sb.Tail(2)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(tail) != "line2\nline3\n" {
+	if string(tail) != "wynd\nloch\n" {
 		t.Errorf("tail = %q", tail)
 	}
 }
@@ -68,15 +68,15 @@ func TestScrollbackTailBytes(t *testing.T) {
 	}
 	defer sb.Close()
 
-	sb.Write([]byte("abcdefghij"))
+	sb.Write([]byte("brawcannye"))
 
 	t.Run("returns all when maxBytes exceeds size", func(t *testing.T) {
 		tail, err := sb.TailBytes(100)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if string(tail) != "abcdefghij" {
-			t.Errorf("tail = %q, want %q", tail, "abcdefghij")
+		if string(tail) != "brawcannye" {
+			t.Errorf("tail = %q, want %q", tail, "brawcannye")
 		}
 	})
 
@@ -85,8 +85,8 @@ func TestScrollbackTailBytes(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if string(tail) != "fghij" {
-			t.Errorf("tail = %q, want %q", tail, "fghij")
+		if string(tail) != "annye" {
+			t.Errorf("tail = %q, want %q", tail, "annye")
 		}
 	})
 
@@ -95,8 +95,8 @@ func TestScrollbackTailBytes(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if string(tail) != "abcdefghij" {
-			t.Errorf("tail = %q, want %q", tail, "abcdefghij")
+		if string(tail) != "brawcannye" {
+			t.Errorf("tail = %q, want %q", tail, "brawcannye")
 		}
 	})
 }
@@ -114,7 +114,7 @@ func TestScrollbackStats(t *testing.T) {
 		t.Errorf("initial stats: written=%d, maxSize=%d, saturated=%v", written, maxSize, saturated)
 	}
 
-	sb.Write([]byte("hello"))
+	sb.Write([]byte("neep!"))
 	written, maxSize, saturated = sb.Stats()
 	if written != 5 || maxSize != 100 || saturated {
 		t.Errorf("after write: written=%d, maxSize=%d, saturated=%v", written, maxSize, saturated)
@@ -129,8 +129,8 @@ func TestScrollbackStatsSaturated(t *testing.T) {
 	}
 	defer sb.Close()
 
-	sb.Write([]byte("0123456789"))
-	sb.Write([]byte("overflow"))
+	sb.Write([]byte("bonnieloch"))
+	sb.Write([]byte("thrawn"))
 
 	written, maxSize, saturated := sb.Stats()
 	if written != 10 || maxSize != 10 || !saturated {
@@ -146,7 +146,7 @@ func TestScrollbackConcurrentReadersAndWriter(t *testing.T) {
 	}
 	defer sb.Close()
 
-	sb.Write([]byte("seed\n"))
+	sb.Write([]byte("braw\n"))
 
 	var wg sync.WaitGroup
 	wg.Add(4)
@@ -154,7 +154,7 @@ func TestScrollbackConcurrentReadersAndWriter(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for range 200 {
-			sb.Write([]byte("data\n"))
+			sb.Write([]byte("kirk\n"))
 		}
 	}()
 
@@ -196,11 +196,11 @@ func TestScrollbackStopsAtMaxSize(t *testing.T) {
 	}
 	defer sb.Close()
 
-	sb.Write([]byte("0123456789"))
-	sb.Write([]byte("overflow"))
+	sb.Write([]byte("bonnieloch"))
+	sb.Write([]byte("thrawn"))
 
 	data, _ := os.ReadFile(path)
-	if string(data) != "0123456789" {
+	if string(data) != "bonnieloch" {
 		t.Errorf("expected only first 10 bytes, got %q", data)
 	}
 	if !sb.saturated {

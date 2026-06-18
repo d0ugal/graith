@@ -10,11 +10,11 @@ import (
 
 func TestFormatStatusLine(t *testing.T) {
 	info := statusBarInfo{
-		name:        "my-session",
+		name:        "braw-session",
 		agent:       "claude",
 		status:      "running",
 		agentStatus: "active",
-		branch:      "d0ugal/graith/my-session-abc123",
+		branch:      "d0ugal/graith/braw-session-abc123",
 		dirty:       true,
 		unpushed:    3,
 		unread:      5,
@@ -25,7 +25,7 @@ func TestFormatStatusLine(t *testing.T) {
 	if lipgloss.Width(line) == 0 {
 		t.Fatal("expected non-empty status line")
 	}
-	if !strings.Contains(line, "my-session") {
+	if !strings.Contains(line, "braw-session") {
 		t.Errorf("expected line to contain session name, got %q", line)
 	}
 	if !strings.Contains(line, "claude") {
@@ -34,7 +34,7 @@ func TestFormatStatusLine(t *testing.T) {
 	if !strings.Contains(line, "active") {
 		t.Errorf("expected line to contain agent status, got %q", line)
 	}
-	if !strings.Contains(line, "my-session-abc123") {
+	if !strings.Contains(line, "braw-session-abc123") {
 		t.Errorf("expected line to contain short branch, got %q", line)
 	}
 	if strings.Contains(line, "d0ugal/graith/") {
@@ -44,13 +44,13 @@ func TestFormatStatusLine(t *testing.T) {
 
 func TestFormatStatusLineMinimal(t *testing.T) {
 	info := statusBarInfo{
-		name:   "test",
+		name:   "neep",
 		agent:  "codex",
 		status: "stopped",
 	}
 
 	line := formatStatusLine(info, 80)
-	if !strings.Contains(line, "test") {
+	if !strings.Contains(line, "neep") {
 		t.Errorf("expected session name, got %q", line)
 	}
 	if !strings.Contains(line, "stopped") {
@@ -60,7 +60,7 @@ func TestFormatStatusLineMinimal(t *testing.T) {
 
 func TestFormatStatusLineNarrowTerminal(t *testing.T) {
 	info := statusBarInfo{
-		name:        "a-very-long-session-name",
+		name:        "a-very-long-braw-session-name",
 		agent:       "claude",
 		status:      "running",
 		agentStatus: "active",
@@ -90,18 +90,18 @@ func TestFormatStatusLineExactWidth(t *testing.T) {
 
 func TestStatusBarInfoFromSession(t *testing.T) {
 	session := protocol.SessionInfo{
-		Name:          "test-session",
+		Name:          "braw-session",
 		Agent:         "claude",
 		Status:        "running",
 		AgentStatus:   "approval",
-		Branch:        "user/graith/test-abc",
+		Branch:        "user/graith/braw-abc",
 		Dirty:         true,
 		UnpushedCount: 2,
 	}
 	fleet := protocol.FleetSummary{Total: 3, Active: 1, Approval: 1, Stopped: 1}
 	info := newStatusBarInfo(session, 5, fleet)
-	if info.name != "test-session" {
-		t.Errorf("expected name test-session, got %s", info.name)
+	if info.name != "braw-session" {
+		t.Errorf("expected name braw-session, got %s", info.name)
 	}
 	if info.unread != 5 {
 		t.Errorf("expected unread 5, got %d", info.unread)
@@ -116,7 +116,7 @@ func TestStatusBarInfoFromSession(t *testing.T) {
 
 func TestFormatStatusLineFleetSummary(t *testing.T) {
 	info := statusBarInfo{
-		name:        "my-session",
+		name:        "braw-session",
 		agent:       "claude",
 		status:      "running",
 		agentStatus: "active",
@@ -134,7 +134,7 @@ func TestFormatStatusLineFleetSummary(t *testing.T) {
 
 func TestFormatStatusLineFleetHiddenWhenSolo(t *testing.T) {
 	info := statusBarInfo{
-		name:        "my-session",
+		name:        "braw-session",
 		agent:       "claude",
 		status:      "running",
 		agentStatus: "active",
@@ -149,7 +149,7 @@ func TestFormatStatusLineFleetHiddenWhenSolo(t *testing.T) {
 
 func TestFormatStatusLineApprovalProminence(t *testing.T) {
 	info := statusBarInfo{
-		name:        "my-session",
+		name:        "braw-session",
 		agent:       "claude",
 		status:      "running",
 		agentStatus: "active",

@@ -26,7 +26,7 @@ func TestNewPromptAndPromptFileMutuallyExclusive(t *testing.T) {
 	newPrompt = "inline prompt"
 	newPromptFile = promptFile
 
-	err := newCmd.RunE(newCmd, []string{"test-session"})
+	err := newCmd.RunE(newCmd, []string{"kirk"})
 	if err == nil {
 		t.Fatal("expected error when both --prompt and --prompt-file are set")
 	}

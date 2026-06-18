@@ -3,12 +3,12 @@ package config
 import "testing"
 
 func TestExpand(t *testing.T) {
-	vars := TemplateVars{Username: "d0ugal", AgentSessionID: "abc-123", SessionName: "fix-bug", SessionID: "a3f2b1c9", WorktreePath: "/tmp/worktree", Model: "claude-opus-4"}
+	vars := TemplateVars{Username: "braw-lad", AgentSessionID: "abc-123", SessionName: "braw-fix", SessionID: "a3f2b1c9", WorktreePath: "/tmp/bothy", Model: "claude-opus-4"}
 	tests := []struct{ input, want string }{
-		{"{username}/graith", "d0ugal/graith"},
+		{"{username}/graith", "braw-lad/graith"},
 		{"--session-id {agent_session_id}", "--session-id abc-123"},
 		{"no vars here", "no vars here"},
-		{"{session_name}-{session_id}", "fix-bug-a3f2b1c9"},
+		{"{session_name}-{session_id}", "braw-fix-a3f2b1c9"},
 		{"--model {model}", "--model claude-opus-4"},
 	}
 	for _, tt := range tests {
@@ -32,7 +32,7 @@ func TestExpandUnknownVar(t *testing.T) {
 }
 
 func TestExpandSlice(t *testing.T) {
-	vars := TemplateVars{Username: "d0ugal", AgentSessionID: "abc"}
+	vars := TemplateVars{Username: "braw-lad", AgentSessionID: "abc"}
 	got, err := ExpandSlice([]string{"--resume", "{agent_session_id}"}, vars)
 	if err != nil {
 		t.Fatal(err)

@@ -34,28 +34,28 @@ func TestResolvePaths(t *testing.T) {
 }
 
 func TestResolvePathsWithProfile(t *testing.T) {
-	t.Setenv("GRAITH_PROFILE", "dev")
+	t.Setenv("GRAITH_PROFILE", "braw")
 	p, err := ResolvePaths()
 	if err != nil {
 		t.Fatalf("ResolvePaths() error: %v", err)
 	}
-	if p.Profile != "dev" {
-		t.Errorf("Profile = %q, want dev", p.Profile)
+	if p.Profile != "braw" {
+		t.Errorf("Profile = %q, want braw", p.Profile)
 	}
-	if p.AppName != "graith-dev" {
-		t.Errorf("AppName = %q, want graith-dev", p.AppName)
+	if p.AppName != "graith-braw" {
+		t.Errorf("AppName = %q, want graith-braw", p.AppName)
 	}
-	if !strings.Contains(p.ConfigFile, "graith-dev") {
-		t.Errorf("ConfigFile = %q, want graith-dev in path", p.ConfigFile)
+	if !strings.Contains(p.ConfigFile, "graith-braw") {
+		t.Errorf("ConfigFile = %q, want graith-braw in path", p.ConfigFile)
 	}
-	if !strings.Contains(p.DataDir, "graith-dev") {
-		t.Errorf("DataDir = %q, want graith-dev in path", p.DataDir)
+	if !strings.Contains(p.DataDir, "graith-braw") {
+		t.Errorf("DataDir = %q, want graith-braw in path", p.DataDir)
 	}
-	if !strings.Contains(p.RuntimeDir, "graith-dev") {
-		t.Errorf("RuntimeDir = %q, want graith-dev in path", p.RuntimeDir)
+	if !strings.Contains(p.RuntimeDir, "graith-braw") {
+		t.Errorf("RuntimeDir = %q, want graith-braw in path", p.RuntimeDir)
 	}
-	if !strings.Contains(p.SocketPath, "graith-dev") {
-		t.Errorf("SocketPath = %q, want graith-dev in path", p.SocketPath)
+	if !strings.Contains(p.SocketPath, "graith-braw") {
+		t.Errorf("SocketPath = %q, want graith-braw in path", p.SocketPath)
 	}
 }
 
@@ -66,16 +66,16 @@ func TestResolveProfileValidation(t *testing.T) {
 		wantErr bool
 	}{
 		{"empty", "", false},
-		{"valid lowercase", "dev", false},
-		{"valid with numbers", "test123", false},
-		{"valid with hyphens", "my-profile", false},
-		{"uppercase rejected", "Dev", true},
-		{"mixed case rejected", "myProfile", true},
-		{"slash rejected", "foo/bar", true},
-		{"dot rejected", "foo.bar", true},
-		{"space rejected", "foo bar", true},
-		{"leading hyphen rejected", "-dev", true},
-		{"trailing hyphen rejected", "dev-", true},
+		{"valid lowercase", "braw", false},
+		{"valid with numbers", "kirk123", false},
+		{"valid with hyphens", "bonnie-profile", false},
+		{"uppercase rejected", "Braw", true},
+		{"mixed case rejected", "bonnieProfile", true},
+		{"slash rejected", "glen/kirk", true},
+		{"dot rejected", "glen.kirk", true},
+		{"space rejected", "glen kirk", true},
+		{"leading hyphen rejected", "-braw", true},
+		{"trailing hyphen rejected", "braw-", true},
 		{"reserved default", "default", true},
 		{"too long", "abcdefghijklmnopqrstuvwxyz1234567", true},
 		{"max length ok", "abcdefghijklmnopqrstuvwxyz123456", false},

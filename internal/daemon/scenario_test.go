@@ -14,7 +14,7 @@ func TestValidateScenarioName(t *testing.T) {
 		input   string
 		wantErr bool
 	}{
-		{"valid simple", "my-scenario", false},
+		{"valid simple", "strath-braw", false},
 		{"valid with numbers", "test123", false},
 		{"valid single char", "a", false},
 		{"empty", "", true},
@@ -39,14 +39,14 @@ func TestScenarioStateInState(t *testing.T) {
 	sm := newTestSessionManager(t)
 
 	sm.mu.Lock()
-	sm.state.Scenarios["sc-test"] = &ScenarioState{
-		ID:         "sc-test",
-		Name:       "my-scenario",
-		Goal:       "test goal",
-		SessionIDs: []string{"sess1", "sess2"},
+	sm.state.Scenarios["sc-kirk"] = &ScenarioState{
+		ID:         "sc-kirk",
+		Name:       "strath-braw",
+		Goal:       "kirk goal",
+		SessionIDs: []string{"braw1", "bonnie1"},
 		Sessions: []ScenarioSession{
-			{Name: "backend", Role: "backend dev", Repo: "my-backend"},
-			{Name: "frontend", Role: "frontend dev", Repo: "my-frontend"},
+			{Name: "braw-forge", Role: "braw-forge dev", Repo: "croft-forge"},
+			{Name: "bonnie-loom", Role: "bonnie-loom dev", Repo: "croft-loom"},
 		},
 	}
 	_ = sm.saveState()
@@ -60,12 +60,12 @@ func TestScenarioStateInState(t *testing.T) {
 	if len(state.Scenarios) != 1 {
 		t.Fatalf("expected 1 scenario, got %d", len(state.Scenarios))
 	}
-	sc := state.Scenarios["sc-test"]
-	if sc.Name != "my-scenario" {
-		t.Errorf("scenario name = %q, want %q", sc.Name, "my-scenario")
+	sc := state.Scenarios["sc-kirk"]
+	if sc.Name != "strath-braw" {
+		t.Errorf("scenario name = %q, want %q", sc.Name, "strath-braw")
 	}
-	if sc.Goal != "test goal" {
-		t.Errorf("scenario goal = %q, want %q", sc.Goal, "test goal")
+	if sc.Goal != "kirk goal" {
+		t.Errorf("scenario goal = %q, want %q", sc.Goal, "kirk goal")
 	}
 	if len(sc.Sessions) != 2 {
 		t.Errorf("scenario sessions = %d, want 2", len(sc.Sessions))
@@ -76,13 +76,13 @@ func TestScenarioFieldsOnSessionState(t *testing.T) {
 	sm := newTestSessionManager(t)
 
 	sm.mu.Lock()
-	sm.state.Sessions["sess1"] = &SessionState{
-		ID:           "sess1",
-		Name:         "backend",
+	sm.state.Sessions["braw1"] = &SessionState{
+		ID:           "braw1",
+		Name:         "braw-forge",
 		Status:       StatusRunning,
-		ScenarioID:   "sc-123",
-		ScenarioRole: "Backend engineer",
-		ScenarioGoal: "Build the thing",
+		ScenarioID:   "sc-glen",
+		ScenarioRole: "Braw forge engineer",
+		ScenarioGoal: "Build the braw thing",
 	}
 	_ = sm.saveState()
 	sm.mu.Unlock()
@@ -91,15 +91,15 @@ func TestScenarioFieldsOnSessionState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sess := state.Sessions["sess1"]
-	if sess.ScenarioID != "sc-123" {
-		t.Errorf("ScenarioID = %q, want %q", sess.ScenarioID, "sc-123")
+	sess := state.Sessions["braw1"]
+	if sess.ScenarioID != "sc-glen" {
+		t.Errorf("ScenarioID = %q, want %q", sess.ScenarioID, "sc-glen")
 	}
-	if sess.ScenarioRole != "Backend engineer" {
-		t.Errorf("ScenarioRole = %q, want %q", sess.ScenarioRole, "Backend engineer")
+	if sess.ScenarioRole != "Braw forge engineer" {
+		t.Errorf("ScenarioRole = %q, want %q", sess.ScenarioRole, "Braw forge engineer")
 	}
-	if sess.ScenarioGoal != "Build the thing" {
-		t.Errorf("ScenarioGoal = %q, want %q", sess.ScenarioGoal, "Build the thing")
+	if sess.ScenarioGoal != "Build the braw thing" {
+		t.Errorf("ScenarioGoal = %q, want %q", sess.ScenarioGoal, "Build the braw thing")
 	}
 }
 
@@ -107,20 +107,20 @@ func TestBuildScenarioRecord(t *testing.T) {
 	sm := newTestSessionManager(t)
 
 	sm.mu.Lock()
-	sm.state.Sessions["s1"] = &SessionState{ID: "s1", Name: "backend", Status: StatusRunning}
-	sm.state.Sessions["s2"] = &SessionState{ID: "s2", Name: "frontend", Status: StatusStopped}
-	sm.state.Scenarios["sc-1"] = &ScenarioState{
-		ID:         "sc-1",
-		Name:       "test-scenario",
-		Goal:       "test",
-		SessionIDs: []string{"s1", "s2"},
+	sm.state.Sessions["braw-s1"] = &SessionState{ID: "braw-s1", Name: "braw-forge", Status: StatusRunning}
+	sm.state.Sessions["bonnie-s2"] = &SessionState{ID: "bonnie-s2", Name: "bonnie-loom", Status: StatusStopped}
+	sm.state.Scenarios["sc-braw"] = &ScenarioState{
+		ID:         "sc-braw",
+		Name:       "strath-kirk",
+		Goal:       "kirk-goal",
+		SessionIDs: []string{"braw-s1", "bonnie-s2"},
 		Sessions: []ScenarioSession{
-			{Name: "backend", Role: "backend dev", Repo: "my-backend", Agent: "claude"},
-			{Name: "frontend", Role: "frontend dev", Repo: "my-frontend", Agent: "claude"},
+			{Name: "braw-forge", Role: "braw-forge dev", Repo: "croft-forge", Agent: "claude"},
+			{Name: "bonnie-loom", Role: "bonnie-loom dev", Repo: "croft-loom", Agent: "claude"},
 		},
 	}
 
-	record := sm.buildScenarioRecord(sm.state.Scenarios["sc-1"])
+	record := sm.buildScenarioRecord(sm.state.Scenarios["sc-braw"])
 	sm.mu.Unlock()
 
 	if record.Status != "partial" {
@@ -141,18 +141,18 @@ func TestBuildScenarioRecordAllRunning(t *testing.T) {
 	sm := newTestSessionManager(t)
 
 	sm.mu.Lock()
-	sm.state.Sessions["s1"] = &SessionState{ID: "s1", Name: "a", Status: StatusRunning}
-	sm.state.Sessions["s2"] = &SessionState{ID: "s2", Name: "b", Status: StatusRunning}
-	sm.state.Scenarios["sc-1"] = &ScenarioState{
-		ID:         "sc-1",
-		Name:       "test",
-		SessionIDs: []string{"s1", "s2"},
+	sm.state.Sessions["braw-s1"] = &SessionState{ID: "braw-s1", Name: "braw-a", Status: StatusRunning}
+	sm.state.Sessions["bonnie-s2"] = &SessionState{ID: "bonnie-s2", Name: "bonnie-b", Status: StatusRunning}
+	sm.state.Scenarios["sc-braw"] = &ScenarioState{
+		ID:         "sc-braw",
+		Name:       "strath-neep",
+		SessionIDs: []string{"braw-s1", "bonnie-s2"},
 		Sessions: []ScenarioSession{
-			{Name: "a"},
-			{Name: "b"},
+			{Name: "braw-a"},
+			{Name: "bonnie-b"},
 		},
 	}
-	record := sm.buildScenarioRecord(sm.state.Scenarios["sc-1"])
+	record := sm.buildScenarioRecord(sm.state.Scenarios["sc-braw"])
 	sm.mu.Unlock()
 
 	if record.Status != "running" {
@@ -164,18 +164,18 @@ func TestBuildScenarioRecordAllStopped(t *testing.T) {
 	sm := newTestSessionManager(t)
 
 	sm.mu.Lock()
-	sm.state.Sessions["s1"] = &SessionState{ID: "s1", Name: "a", Status: StatusStopped}
-	sm.state.Sessions["s2"] = &SessionState{ID: "s2", Name: "b", Status: StatusStopped}
-	sm.state.Scenarios["sc-1"] = &ScenarioState{
-		ID:         "sc-1",
-		Name:       "test",
-		SessionIDs: []string{"s1", "s2"},
+	sm.state.Sessions["braw-s1"] = &SessionState{ID: "braw-s1", Name: "braw-a", Status: StatusStopped}
+	sm.state.Sessions["bonnie-s2"] = &SessionState{ID: "bonnie-s2", Name: "bonnie-b", Status: StatusStopped}
+	sm.state.Scenarios["sc-braw"] = &ScenarioState{
+		ID:         "sc-braw",
+		Name:       "strath-neep",
+		SessionIDs: []string{"braw-s1", "bonnie-s2"},
 		Sessions: []ScenarioSession{
-			{Name: "a"},
-			{Name: "b"},
+			{Name: "braw-a"},
+			{Name: "bonnie-b"},
 		},
 	}
-	record := sm.buildScenarioRecord(sm.state.Scenarios["sc-1"])
+	record := sm.buildScenarioRecord(sm.state.Scenarios["sc-braw"])
 	sm.mu.Unlock()
 
 	if record.Status != "stopped" {
@@ -192,9 +192,9 @@ func TestListScenarios(t *testing.T) {
 	}
 
 	sm.mu.Lock()
-	sm.state.Scenarios["sc-1"] = &ScenarioState{
-		ID:   "sc-1",
-		Name: "test",
+	sm.state.Scenarios["sc-braw"] = &ScenarioState{
+		ID:   "sc-braw",
+		Name: "strath-neep",
 	}
 	sm.mu.Unlock()
 
@@ -202,8 +202,8 @@ func TestListScenarios(t *testing.T) {
 	if len(records) != 1 {
 		t.Fatalf("expected 1 scenario, got %d", len(records))
 	}
-	if records[0].Name != "test" {
-		t.Errorf("name = %q, want %q", records[0].Name, "test")
+	if records[0].Name != "strath-neep" {
+		t.Errorf("name = %q, want %q", records[0].Name, "strath-neep")
 	}
 }
 
@@ -211,19 +211,19 @@ func TestStartScenarioRequiresOrchestrator(t *testing.T) {
 	sm := newTestSessionManager(t)
 
 	sm.mu.Lock()
-	sm.state.Sessions["regular"] = &SessionState{
-		ID:     "regular",
-		Name:   "regular-session",
+	sm.state.Sessions["neep-reg"] = &SessionState{
+		ID:     "neep-reg",
+		Name:   "neep-session",
 		Status: StatusRunning,
 	}
 	sm.mu.Unlock()
 
 	_, err := sm.StartScenario(protocol.ScenarioStartMsg{
-		CallerSessionID: "regular",
-		Name:            "test-scenario",
-		Goal:            "test",
+		CallerSessionID: "neep-reg",
+		Name:            "strath-kirk",
+		Goal:            "kirk-goal",
 		Sessions: []protocol.ScenarioSessionInput{
-			{Name: "backend", Repo: "/tmp/repo"},
+			{Name: "braw-forge", Repo: "/glen/croft"},
 		},
 	}, 24, 80)
 	if err == nil {
@@ -238,10 +238,10 @@ func TestStartScenarioCallerNotFound(t *testing.T) {
 	sm := newTestSessionManager(t)
 
 	_, err := sm.StartScenario(protocol.ScenarioStartMsg{
-		CallerSessionID: "nonexistent",
-		Name:            "test",
+		CallerSessionID: "haar-caller",
+		Name:            "strath-neep",
 		Sessions: []protocol.ScenarioSessionInput{
-			{Name: "a", Repo: "/tmp/repo"},
+			{Name: "braw-a", Repo: "/glen/croft"},
 		},
 	}, 24, 80)
 	if err == nil {
@@ -253,9 +253,9 @@ func TestStartScenarioValidation(t *testing.T) {
 	sm := newTestSessionManager(t)
 
 	sm.mu.Lock()
-	sm.state.Sessions["orch"] = &SessionState{
-		ID:         "orch",
-		Name:       "orchestrator",
+	sm.state.Sessions["ben-orch"] = &SessionState{
+		ID:         "ben-orch",
+		Name:       "ben-session",
 		Status:     StatusRunning,
 		SystemKind: SystemKindOrchestrator,
 	}
@@ -269,26 +269,26 @@ func TestStartScenarioValidation(t *testing.T) {
 		{
 			name: "empty scenario name",
 			msg: protocol.ScenarioStartMsg{
-				CallerSessionID: "orch",
+				CallerSessionID: "ben-orch",
 				Name:            "",
-				Sessions:        []protocol.ScenarioSessionInput{{Name: "a", Repo: "/tmp"}},
+				Sessions:        []protocol.ScenarioSessionInput{{Name: "braw-a", Repo: "/glen"}},
 			},
 			wantErr: "scenario name must not be empty",
 		},
 		{
 			name: "invalid scenario name",
 			msg: protocol.ScenarioStartMsg{
-				CallerSessionID: "orch",
+				CallerSessionID: "ben-orch",
 				Name:            "Bad Name",
-				Sessions:        []protocol.ScenarioSessionInput{{Name: "a", Repo: "/tmp"}},
+				Sessions:        []protocol.ScenarioSessionInput{{Name: "braw-a", Repo: "/glen"}},
 			},
 			wantErr: "invalid",
 		},
 		{
 			name: "no sessions",
 			msg: protocol.ScenarioStartMsg{
-				CallerSessionID: "orch",
-				Name:            "test",
+				CallerSessionID: "ben-orch",
+				Name:            "strath-neep",
 				Sessions:        nil,
 			},
 			wantErr: "at least one session",
@@ -296,29 +296,29 @@ func TestStartScenarioValidation(t *testing.T) {
 		{
 			name: "session missing name",
 			msg: protocol.ScenarioStartMsg{
-				CallerSessionID: "orch",
-				Name:            "test",
-				Sessions:        []protocol.ScenarioSessionInput{{Repo: "/tmp"}},
+				CallerSessionID: "ben-orch",
+				Name:            "strath-neep",
+				Sessions:        []protocol.ScenarioSessionInput{{Repo: "/glen"}},
 			},
 			wantErr: "name is required",
 		},
 		{
 			name: "session missing repo",
 			msg: protocol.ScenarioStartMsg{
-				CallerSessionID: "orch",
-				Name:            "test",
-				Sessions:        []protocol.ScenarioSessionInput{{Name: "a"}},
+				CallerSessionID: "ben-orch",
+				Name:            "strath-neep",
+				Sessions:        []protocol.ScenarioSessionInput{{Name: "braw-a"}},
 			},
 			wantErr: "repo is required",
 		},
 		{
 			name: "duplicate session name",
 			msg: protocol.ScenarioStartMsg{
-				CallerSessionID: "orch",
-				Name:            "test",
+				CallerSessionID: "ben-orch",
+				Name:            "strath-neep",
 				Sessions: []protocol.ScenarioSessionInput{
-					{Name: "a", Repo: "/tmp"},
-					{Name: "a", Repo: "/tmp"},
+					{Name: "braw-a", Repo: "/glen"},
+					{Name: "braw-a", Repo: "/glen"},
 				},
 			},
 			wantErr: "duplicate session name",
@@ -342,41 +342,41 @@ func TestBuildManifest(t *testing.T) {
 	sm := newTestSessionManager(t)
 
 	msg := protocol.ScenarioStartMsg{
-		CallerSessionID: "orch-1",
-		Name:            "test-scenario",
-		Goal:            "Build things",
+		CallerSessionID: "ben-1",
+		Name:            "strath-kirk",
+		Goal:            "Build braw things",
 		Sessions: []protocol.ScenarioSessionInput{
-			{Name: "backend", Repo: "/home/user/Code/my-backend", Role: "Backend dev", Task: "Build API"},
-			{Name: "frontend", Repo: "/home/user/Code/my-frontend", Role: "Frontend dev", Task: "Build UI"},
+			{Name: "braw-forge", Repo: "/hame/glen/croft-forge", Role: "Braw forge dev", Task: "Build braw API"},
+			{Name: "bonnie-loom", Repo: "/hame/glen/croft-loom", Role: "Bonnie loom dev", Task: "Build bonnie UI"},
 		},
 	}
-	sessionIDs := []string{"s1", "s2"}
-	repos := []string{"my-backend", "my-frontend"}
+	sessionIDs := []string{"braw-s1", "bonnie-s2"}
+	repos := []string{"croft-forge", "croft-loom"}
 
-	m := sm.buildManifest("sc-123", msg, repos, sessionIDs, 0)
+	m := sm.buildManifest("sc-glen", msg, repos, sessionIDs, 0)
 
 	if m.Version != 1 {
 		t.Errorf("version = %d, want 1", m.Version)
 	}
-	if m.ScenarioID != "sc-123" {
+	if m.ScenarioID != "sc-glen" {
 		t.Errorf("scenario_id = %q", m.ScenarioID)
 	}
-	if m.You.Name != "backend" {
+	if m.You.Name != "braw-forge" {
 		t.Errorf("you.name = %q", m.You.Name)
 	}
-	if m.You.SessionID != "s1" {
+	if m.You.SessionID != "braw-s1" {
 		t.Errorf("you.session_id = %q", m.You.SessionID)
 	}
 	if len(m.Siblings) != 1 {
 		t.Fatalf("siblings = %d, want 1", len(m.Siblings))
 	}
-	if m.Siblings[0].Name != "frontend" {
+	if m.Siblings[0].Name != "bonnie-loom" {
 		t.Errorf("sibling.name = %q", m.Siblings[0].Name)
 	}
-	if m.Siblings[0].Repo != "my-frontend" {
-		t.Errorf("sibling.repo = %q, want %q", m.Siblings[0].Repo, "my-frontend")
+	if m.Siblings[0].Repo != "croft-loom" {
+		t.Errorf("sibling.repo = %q, want %q", m.Siblings[0].Repo, "croft-loom")
 	}
-	if m.Orchestrator.SessionID != "orch-1" {
+	if m.Orchestrator.SessionID != "ben-1" {
 		t.Errorf("orchestrator.session_id = %q", m.Orchestrator.SessionID)
 	}
 
@@ -389,7 +389,7 @@ func TestBuildManifest(t *testing.T) {
 	if err := json.Unmarshal(data, &parsed); err != nil {
 		t.Fatal(err)
 	}
-	if parsed.ScenarioName != "test-scenario" {
+	if parsed.ScenarioName != "strath-kirk" {
 		t.Errorf("after roundtrip: scenario_name = %q", parsed.ScenarioName)
 	}
 }
@@ -398,25 +398,25 @@ func TestScenarioTaskDone(t *testing.T) {
 	sm := newTestSessionManager(t)
 
 	sm.mu.Lock()
-	sm.state.Scenarios["sc-1"] = &ScenarioState{
-		ID:         "sc-1",
-		Name:       "test-scenario",
-		SessionIDs: []string{"s1", "s2"},
+	sm.state.Scenarios["sc-braw"] = &ScenarioState{
+		ID:         "sc-braw",
+		Name:       "strath-kirk",
+		SessionIDs: []string{"braw-s1", "bonnie-s2"},
 		Sessions: []ScenarioSession{
-			{Name: "backend", Task: "build API"},
-			{Name: "frontend", Task: "build UI"},
+			{Name: "braw-forge", Task: "forge braw API"},
+			{Name: "bonnie-loom", Task: "loom bonnie UI"},
 		},
 	}
-	sm.state.Sessions["s1"] = &SessionState{ID: "s1", Name: "backend", Status: StatusRunning, ScenarioID: "sc-1"}
-	sm.state.Sessions["s2"] = &SessionState{ID: "s2", Name: "frontend", Status: StatusRunning, ScenarioID: "sc-1"}
+	sm.state.Sessions["braw-s1"] = &SessionState{ID: "braw-s1", Name: "braw-forge", Status: StatusRunning, ScenarioID: "sc-braw"}
+	sm.state.Sessions["bonnie-s2"] = &SessionState{ID: "bonnie-s2", Name: "bonnie-loom", Status: StatusRunning, ScenarioID: "sc-braw"}
 	sm.mu.Unlock()
 
-	if err := sm.ScenarioTaskDone("test-scenario", "s1"); err != nil {
+	if err := sm.ScenarioTaskDone("strath-kirk", "braw-s1"); err != nil {
 		t.Fatal(err)
 	}
 
 	sm.mu.RLock()
-	sc := sm.state.Scenarios["sc-1"]
+	sc := sm.state.Scenarios["sc-braw"]
 	if !sc.Sessions[0].TaskDone {
 		t.Error("session 0 should be marked as task done")
 	}
@@ -425,11 +425,11 @@ func TestScenarioTaskDone(t *testing.T) {
 	}
 	sm.mu.RUnlock()
 
-	if err := sm.ScenarioTaskDone("test-scenario", "nonexistent"); err == nil {
+	if err := sm.ScenarioTaskDone("strath-kirk", "haar-glen"); err == nil {
 		t.Error("expected error for nonexistent session")
 	}
 
-	if err := sm.ScenarioTaskDone("nonexistent-scenario", "s1"); err == nil {
+	if err := sm.ScenarioTaskDone("haar-strath", "braw-s1"); err == nil {
 		t.Error("expected error for nonexistent scenario")
 	}
 }
@@ -438,16 +438,16 @@ func TestScenarioTaskDoneInRecord(t *testing.T) {
 	sm := newTestSessionManager(t)
 
 	sm.mu.Lock()
-	sm.state.Scenarios["sc-1"] = &ScenarioState{
-		ID:         "sc-1",
-		Name:       "test-scenario",
-		SessionIDs: []string{"s1"},
+	sm.state.Scenarios["sc-braw"] = &ScenarioState{
+		ID:         "sc-braw",
+		Name:       "strath-kirk",
+		SessionIDs: []string{"braw-s1"},
 		Sessions: []ScenarioSession{
-			{Name: "backend", Task: "build API", TaskDone: true},
+			{Name: "braw-forge", Task: "forge braw API", TaskDone: true},
 		},
 	}
-	sm.state.Sessions["s1"] = &SessionState{ID: "s1", Name: "backend", Status: StatusRunning}
-	record := sm.buildScenarioRecord(sm.state.Scenarios["sc-1"])
+	sm.state.Sessions["braw-s1"] = &SessionState{ID: "braw-s1", Name: "braw-forge", Status: StatusRunning}
+	record := sm.buildScenarioRecord(sm.state.Scenarios["sc-braw"])
 	sm.mu.Unlock()
 
 	if !record.Sessions[0].TaskDone {
@@ -458,7 +458,7 @@ func TestScenarioTaskDoneInRecord(t *testing.T) {
 func TestResumeScenarioNotFound(t *testing.T) {
 	sm := newTestSessionManager(t)
 
-	_, err := sm.ResumeScenario("nonexistent", 24, 80)
+	_, err := sm.ResumeScenario("haar-glen", 24, 80)
 	if err == nil {
 		t.Fatal("expected error for nonexistent scenario")
 	}
@@ -470,9 +470,9 @@ func TestResumeScenarioNotFound(t *testing.T) {
 func TestAddToScenarioNotFound(t *testing.T) {
 	sm := newTestSessionManager(t)
 
-	_, err := sm.AddToScenario("nonexistent", protocol.ScenarioSessionInput{
-		Name: "new-session",
-		Repo: "/tmp/repo",
+	_, err := sm.AddToScenario("haar-glen", protocol.ScenarioSessionInput{
+		Name: "braw-new",
+		Repo: "/glen/croft",
 	}, 24, 80)
 	if err == nil {
 		t.Fatal("expected error for nonexistent scenario")
@@ -483,22 +483,22 @@ func TestAddToScenarioValidation(t *testing.T) {
 	sm := newTestSessionManager(t)
 
 	sm.mu.Lock()
-	sm.state.Scenarios["sc-1"] = &ScenarioState{
-		ID:   "sc-1",
-		Name: "test",
+	sm.state.Scenarios["sc-braw"] = &ScenarioState{
+		ID:   "sc-braw",
+		Name: "strath-neep",
 	}
 	sm.mu.Unlock()
 
-	_, err := sm.AddToScenario("test", protocol.ScenarioSessionInput{
+	_, err := sm.AddToScenario("strath-neep", protocol.ScenarioSessionInput{
 		Name: "",
-		Repo: "/tmp",
+		Repo: "/glen",
 	}, 24, 80)
 	if err == nil {
 		t.Fatal("expected error for empty name")
 	}
 
-	_, err = sm.AddToScenario("test", protocol.ScenarioSessionInput{
-		Name: "valid",
+	_, err = sm.AddToScenario("strath-neep", protocol.ScenarioSessionInput{
+		Name: "bonnie-valid",
 		Repo: "",
 	}, 24, 80)
 	if err == nil {

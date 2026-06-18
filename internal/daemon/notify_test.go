@@ -22,7 +22,7 @@ func TestOnAgentStatusChange_NotifiesOnApproval(t *testing.T) {
 	}
 
 	// Should not panic with nil messages store
-	sm.onAgentStatusChange("test-id", "test-session", "active", "approval")
+	sm.onAgentStatusChange("braw-id", "bonnie-session", "active", "approval")
 }
 
 func TestOnAgentStatusChange_DisabledNotifications(t *testing.T) {
@@ -35,7 +35,7 @@ func TestOnAgentStatusChange_DisabledNotifications(t *testing.T) {
 		log: slog.Default(),
 	}
 
-	sm.onAgentStatusChange("test-id", "test-session", "active", "approval")
+	sm.onAgentStatusChange("braw-id", "bonnie-session", "active", "approval")
 }
 
 func TestOnAgentStatusChange_SkipsNonApprovalWhenOnlyApprovalEnabled(t *testing.T) {
@@ -51,7 +51,7 @@ func TestOnAgentStatusChange_SkipsNonApprovalWhenOnlyApprovalEnabled(t *testing.
 	}
 
 	// "active" transitions should not trigger notifications
-	sm.onAgentStatusChange("test-id", "test-session", "unknown", "active")
+	sm.onAgentStatusChange("braw-id", "bonnie-session", "unknown", "active")
 }
 
 func TestSendNotification_CommandUsesEnvVars(t *testing.T) {
@@ -68,14 +68,14 @@ func TestSendNotification_CommandUsesEnvVars(t *testing.T) {
 		log: slog.Default(),
 	}
 
-	sm.sendNotification("my-session", "approval", sm.cfg.Notifications.Command)
+	sm.sendNotification("braw-kirk", "approval", sm.cfg.Notifications.Command)
 
 	deadline := time.After(5 * time.Second)
 	for {
 		data, err := os.ReadFile(outFile)
 		if err == nil && len(data) > 0 {
 			got := string(data)
-			want := "my-session|approval|my-session needs approval"
+			want := "braw-kirk|approval|braw-kirk needs approval"
 			if got != want {
 				t.Errorf("got %q, want %q", got, want)
 			}
@@ -135,7 +135,7 @@ func TestOnAgentStatusChange_PublishesToMessageStore(t *testing.T) {
 		messages: ms,
 	}
 
-	sm.onAgentStatusChange("sess-1", "my-session", "active", "approval")
+	sm.onAgentStatusChange("braw-sess", "braw-kirk", "active", "approval")
 
 	msgs, err := ms.Read("_system.status", "", false, "")
 	if err != nil {
@@ -144,7 +144,7 @@ func TestOnAgentStatusChange_PublishesToMessageStore(t *testing.T) {
 	if len(msgs) != 1 {
 		t.Fatalf("expected 1 message, got %d", len(msgs))
 	}
-	if msgs[0].SenderName != "my-session" {
-		t.Errorf("expected sender_name 'my-session', got %q", msgs[0].SenderName)
+	if msgs[0].SenderName != "braw-kirk" {
+		t.Errorf("expected sender_name 'braw-kirk', got %q", msgs[0].SenderName)
 	}
 }

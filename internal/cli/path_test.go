@@ -15,18 +15,18 @@ func TestPrintPathPlain(t *testing.T) {
 	o := output.New(false)
 	session := &protocol.SessionInfo{
 		ID:           "abc123",
-		Name:         "worker",
-		WorktreePath: "/tmp/graith/worker",
+		Name:         "braw",
+		WorktreePath: "/tmp/graith/braw",
 	}
 
-	err := printPath(&buf, o, session, "worker")
+	err := printPath(&buf, o, session, "braw")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	got := buf.String()
-	if got != "/tmp/graith/worker" {
-		t.Errorf("got %q, want %q", got, "/tmp/graith/worker")
+	if got != "/tmp/graith/braw" {
+		t.Errorf("got %q, want %q", got, "/tmp/graith/braw")
 	}
 	if strings.HasSuffix(got, "\n") {
 		t.Error("plain output should not end with newline")
@@ -38,11 +38,11 @@ func TestPrintPathJSON(t *testing.T) {
 	o := output.NewWithWriter(true, &buf)
 	session := &protocol.SessionInfo{
 		ID:           "abc123",
-		Name:         "worker",
-		WorktreePath: "/tmp/graith/worker",
+		Name:         "braw",
+		WorktreePath: "/tmp/graith/braw",
 	}
 
-	err := printPath(&bytes.Buffer{}, o, session, "worker")
+	err := printPath(&bytes.Buffer{}, o, session, "braw")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -60,8 +60,8 @@ func TestPrintPathJSON(t *testing.T) {
 	if result["session_id"] != "abc123" {
 		t.Errorf("session_id = %q, want %q", result["session_id"], "abc123")
 	}
-	if result["worktree_path"] != "/tmp/graith/worker" {
-		t.Errorf("worktree_path = %q, want %q", result["worktree_path"], "/tmp/graith/worker")
+	if result["worktree_path"] != "/tmp/graith/braw" {
+		t.Errorf("worktree_path = %q, want %q", result["worktree_path"], "/tmp/graith/braw")
 	}
 }
 
@@ -70,10 +70,10 @@ func TestPrintPathEmptyWorktree(t *testing.T) {
 	o := output.New(false)
 	session := &protocol.SessionInfo{
 		ID:   "abc123",
-		Name: "worker",
+		Name: "braw",
 	}
 
-	err := printPath(&buf, o, session, "worker")
+	err := printPath(&buf, o, session, "braw")
 	if err == nil {
 		t.Fatal("expected error for empty worktree path")
 	}

@@ -7,8 +7,8 @@ import (
 
 func TestEncodeDecodeControl(t *testing.T) {
 	handshake := HandshakeMsg{
-		Version: "1.0", ClientID: "test-client",
-		TerminalSize: [2]uint16{80, 24}, Cwd: "/home/user/repo",
+		Version: "1.0", ClientID: "brig-client",
+		TerminalSize: [2]uint16{80, 24}, Cwd: "/home/user/croft",
 	}
 	data, err := EncodeControl("handshake", handshake)
 	if err != nil {
@@ -25,10 +25,10 @@ func TestEncodeDecodeControl(t *testing.T) {
 	if err := DecodePayload(msg, &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.ClientID != "test-client" {
+	if got.ClientID != "brig-client" {
 		t.Errorf("ClientID = %q", got.ClientID)
 	}
-	if got.Cwd != "/home/user/repo" {
+	if got.Cwd != "/home/user/croft" {
 		t.Errorf("Cwd = %q", got.Cwd)
 	}
 }
@@ -58,8 +58,8 @@ func TestVersionCompatible(t *testing.T) {
 
 func TestSessionInfoRoundTrip(t *testing.T) {
 	session := SessionInfo{
-		ID: "a3f2b1c9", Name: "fix-auth-bug", RepoPath: "/home/user/repo",
-		RepoName: "repo", Branch: "d0ugal/graith/fix-auth-bug-a3f2b1c9",
+		ID: "a3f2b1c9", Name: "braw-auth-fix", RepoPath: "/home/user/croft",
+		RepoName: "croft", Branch: "d0ugal/graith/braw-auth-fix-a3f2b1c9",
 		Agent: "claude", Status: "running",
 		CreatedAt: time.Now().UTC().Format(time.RFC3339),
 	}
@@ -70,7 +70,7 @@ func TestSessionInfoRoundTrip(t *testing.T) {
 	msg, _ := DecodeControl(data)
 	var got SessionInfo
 	DecodePayload(msg, &got)
-	if got.ID != "a3f2b1c9" || got.Name != "fix-auth-bug" {
+	if got.ID != "a3f2b1c9" || got.Name != "braw-auth-fix" {
 		t.Errorf("session = %+v", got)
 	}
 }
