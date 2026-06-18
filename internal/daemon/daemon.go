@@ -2436,7 +2436,10 @@ func (sm *SessionManager) getHookReport(sessionID string) *hookReport {
 	return nil
 }
 
-// StopAll gracefully terminates all running sessions.
+// StopAll gracefully terminates all running sessions concurrently.
+// Each session gets up to 5 seconds to exit after SIGTERM before being
+// force-killed. Sessions are waited on in parallel so the total wait
+// time is bounded by the slowest session, not the sum.
 func (sm *SessionManager) StopAll(ctx context.Context) {
 	sm.mu.Lock()
 	for _, s := range sm.state.Sessions {
@@ -2470,14 +2473,23 @@ func (sm *SessionManager) StopAll(ctx context.Context) {
 		}
 	}
 
+	var wg sync.WaitGroup
 	for _, s := range sessions {
-		select {
-		case <-s.sess.Done():
-		case <-time.After(5 * time.Second):
-			sm.log.Warn("force killing session", "id", s.id)
-			_ = s.sess.ForceKill()
-		}
+		wg.Add(1)
+		go func(id string, sess *grpty.Session) {
+			defer wg.Done()
+			select {
+			case <-sess.Done():
+			case <-ctx.Done():
+				sm.log.Warn("shutdown context expired, force killing session", "id", id)
+				_ = sess.ForceKill()
+			case <-time.After(5 * time.Second):
+				sm.log.Warn("force killing session", "id", id)
+				_ = sess.ForceKill()
+			}
+		}(s.id, s.sess)
 	}
+	wg.Wait()
 }
 
 func (sm *SessionManager) RunMessageCleanupLoop(ctx context.Context) {
@@ -3089,7 +3101,9 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 			}
 			log.Info("shutting down")
 			cancel()
-			sm.StopAll(ctx)
+			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			sm.StopAll(shutdownCtx)
+			shutdownCancel()
 			srv.Shutdown()
 			os.Remove(paths.SocketPath)
 			ReleasePIDFile(paths.PIDFile)

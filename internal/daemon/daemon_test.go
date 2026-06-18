@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net"
 	"os"
@@ -3242,6 +3243,35 @@ func TestStopAllWritesShutdownSummary(t *testing.T) {
 	s2 := sm.state.Sessions["s2"]
 	if s2.SummaryText != "" {
 		t.Errorf("s2 SummaryText = %q, want empty — stopped sessions should not get shutdown summary", s2.SummaryText)
+	}
+}
+
+func TestStopAllWaitsConcurrently(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	// Use processes that trap SIGTERM so each goroutine must hit the
+	// force-kill timeout. Sequential would be 3*5s=15s; concurrent ~5s.
+	const n = 3
+	for i := 0; i < n; i++ {
+		id := fmt.Sprintf("s%d", i)
+		sm.state.Sessions[id] = &SessionState{
+			ID: id, Name: id, Status: StatusRunning, Agent: "claude",
+		}
+		sess := newTestPTYSession(t, "sh", "-c", "trap '' TERM; sleep 30")
+		sm.sessions[id] = sess
+	}
+
+	start := time.Now()
+	sm.StopAll(context.Background())
+	elapsed := time.Since(start)
+
+	// Concurrent: ~5s (one round of force-kill timeouts).
+	// Sequential: ~15s (3 * 5s).
+	if elapsed > 8*time.Second {
+		t.Errorf("StopAll took %v, expected < 8s — sessions may be waited sequentially", elapsed)
+	}
+	if elapsed < 4*time.Second {
+		t.Errorf("StopAll took %v, expected >= 4s — force-kill timeout may not be working", elapsed)
 	}
 }
 
