@@ -19,6 +19,9 @@ var configCmd = &cobra.Command{
 	Use:   "config",
 	Short: "Manage graith configuration",
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		if err := rejectConfigInsideSession(cmd); err != nil {
+			return err
+		}
 		var err error
 		paths, err = config.ResolvePaths()
 		if err != nil {

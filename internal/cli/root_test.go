@@ -92,6 +92,90 @@ func TestExecutePlainTextErrorFormat(t *testing.T) {
 	}
 }
 
+func TestConfigFlagBlockedInsideSession(t *testing.T) {
+	origOut := out
+	origJSON := jsonOutput
+	defer func() {
+		out = origOut
+		jsonOutput = origJSON
+	}()
+
+	t.Setenv("GRAITH_SESSION_ID", "test-session-123")
+	t.Setenv("GR_AGENT_MODE", "0")
+
+	err := executeWithArgs([]string{"--config", "/tmp/evil.toml", "list"})
+	if err == nil {
+		t.Fatal("expected error when --config is used inside a session")
+	}
+	if !strings.Contains(err.Error(), "not allowed inside a graith session") {
+		t.Errorf("unexpected error message: %s", err.Error())
+	}
+}
+
+func TestConfigFlagAllowedOutsideSession(t *testing.T) {
+	origOut := out
+	origJSON := jsonOutput
+	defer func() {
+		out = origOut
+		jsonOutput = origJSON
+	}()
+
+	if v, ok := os.LookupEnv("GRAITH_SESSION_ID"); ok {
+		t.Cleanup(func() { os.Setenv("GRAITH_SESSION_ID", v) })
+	}
+	os.Unsetenv("GRAITH_SESSION_ID")
+	t.Setenv("GR_AGENT_MODE", "0")
+
+	// This will fail to connect to the daemon (expected), but should NOT
+	// fail with the "not allowed inside a session" error.
+	err := executeWithArgs([]string{"--config", "/tmp/nonexistent.toml", "list"})
+	if err != nil && strings.Contains(err.Error(), "not allowed inside a graith session") {
+		t.Error("--config should be allowed outside a graith session")
+	}
+}
+
+func TestConfigFlagBlockedForConfigSubcommand(t *testing.T) {
+	origOut := out
+	origJSON := jsonOutput
+	defer func() {
+		out = origOut
+		jsonOutput = origJSON
+	}()
+
+	t.Setenv("GRAITH_SESSION_ID", "test-session-123")
+	t.Setenv("GR_AGENT_MODE", "0")
+
+	err := executeWithArgs([]string{"--config", "/tmp/evil.toml", "config", "show"})
+	if err == nil {
+		t.Fatal("expected error when --config is used with config subcommand inside a session")
+	}
+	if !strings.Contains(err.Error(), "not allowed inside a graith session") {
+		t.Errorf("unexpected error message: %s", err.Error())
+	}
+}
+
+func TestConfigFlagBlockedWhenSetEmpty(t *testing.T) {
+	origOut := out
+	origJSON := jsonOutput
+	defer func() {
+		out = origOut
+		jsonOutput = origJSON
+	}()
+
+	t.Setenv("GRAITH_SESSION_ID", "")
+	t.Setenv("GR_AGENT_MODE", "0")
+
+	// GRAITH_SESSION_ID="" (set but empty) should still be treated as inside
+	// a session — prevents bypass via GRAITH_SESSION_ID= gr --config ...
+	err := executeWithArgs([]string{"--config", "/tmp/evil.toml", "list"})
+	if err == nil {
+		t.Fatal("expected error when --config is used with GRAITH_SESSION_ID set to empty")
+	}
+	if !strings.Contains(err.Error(), "not allowed inside a graith session") {
+		t.Errorf("unexpected error message: %s", err.Error())
+	}
+}
+
 func TestExecuteCobraSilencesOwnErrors(t *testing.T) {
 	origOut := out
 	origJSON := jsonOutput
