@@ -2038,6 +2038,13 @@ func (sm *SessionManager) Delete(id string) error {
 	}
 
 	sm.mu.Lock()
+	// Re-read parentID under the lock: a concurrent Delete of our parent may
+	// have updated sessState.ParentID while we were doing teardown without the
+	// lock held. Using the stale captured value would reparent children to a
+	// session that no longer exists.
+	if s, ok := sm.state.Sessions[id]; ok {
+		parentID = s.ParentID
+	}
 	sm.reparentChildrenLocked(id, parentID)
 	delete(sm.state.Sessions, id)
 	delete(sm.hookReports, id)
