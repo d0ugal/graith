@@ -889,23 +889,172 @@ func TestInit_WithFetchPreview(t *testing.T) {
 		t.Fatal("Init() should return a command when fetchPreview is set")
 	}
 	msg := cmd()
-	pm, ok := msg.(previewMsg)
+	batch, ok := msg.(tea.BatchMsg)
 	if !ok {
-		t.Fatalf("expected previewMsg, got %T", msg)
+		t.Fatalf("expected tea.BatchMsg, got %T", msg)
+	}
+	var foundPreview bool
+	for _, c := range batch {
+		if c == nil {
+			continue
+		}
+		if pm, ok := c().(previewMsg); ok {
+			foundPreview = true
+			if pm.content != "content" {
+				t.Errorf("preview content = %q, want %q", pm.content, "content")
+			}
+		}
+	}
+	if !foundPreview {
+		t.Fatal("expected a previewMsg in the batch")
 	}
 	if !called {
 		t.Error("fetchPreview should have been called")
-	}
-	if pm.content != "content" {
-		t.Errorf("preview content = %q, want %q", pm.content, "content")
 	}
 }
 
 func TestInit_WithoutFetchPreview(t *testing.T) {
 	m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil)
 	cmd := m.Init()
-	if cmd != nil {
-		t.Error("Init() should return nil when fetchPreview is nil")
+	if cmd == nil {
+		t.Fatal("Init() should return a command (refresh tick)")
+	}
+	msg := cmd()
+	if _, ok := msg.(previewMsg); ok {
+		t.Error("should not produce a previewMsg when fetchPreview is nil")
+	}
+}
+
+// --- Update: refreshSessionsMsg ---
+
+func TestUpdate_RefreshSessions_PreservesCursor(t *testing.T) {
+	sessions := overlayTestSessions()
+	m := newOverlayModel(sessions, "", noopFetchPreview, nil, nil)
+	m.width = 120
+	m.height = 40
+
+	// Navigate to s3 (feature-x in other-repo)
+	for {
+		item, ok := m.list.SelectedItem().(sessionItem)
+		if ok && item.info.ID == "s3" {
+			break
+		}
+		m.list.CursorDown()
+	}
+
+	// Refresh with reordered sessions (s3 now first)
+	reordered := []protocol.SessionInfo{sessions[2], sessions[0], sessions[1]}
+	updated, _ := m.Update(refreshSessionsMsg{sessions: reordered})
+	om := asOverlay(updated)
+
+	item, ok := om.list.SelectedItem().(sessionItem)
+	if !ok {
+		t.Fatal("expected sessionItem after refresh")
+	}
+	if item.info.ID != "s3" {
+		t.Errorf("selected session ID = %q, want %q", item.info.ID, "s3")
+	}
+}
+
+func TestUpdate_RefreshSessions_NilPreservesState(t *testing.T) {
+	sessions := overlayTestSessions()
+	m := newOverlayModel(sessions, "", nil, nil, nil)
+	m.width = 120
+	m.height = 40
+
+	updated, _ := m.Update(refreshSessionsMsg{sessions: nil})
+	om := asOverlay(updated)
+
+	if len(om.allSessions) != len(sessions) {
+		t.Errorf("allSessions length = %d, want %d (should preserve on nil)", len(om.allSessions), len(sessions))
+	}
+}
+
+func TestUpdate_RefreshSessions_UpdatesStatus(t *testing.T) {
+	sessions := overlayTestSessions()
+	m := newOverlayModel(sessions, "", nil, nil, nil)
+	m.width = 120
+	m.height = 40
+
+	// Change s1's status to stopped
+	changed := make([]protocol.SessionInfo, len(sessions))
+	copy(changed, sessions)
+	changed[0].Status = "stopped"
+
+	updated, _ := m.Update(refreshSessionsMsg{sessions: changed})
+	om := asOverlay(updated)
+
+	for _, s := range om.allSessions {
+		if s.ID == "s1" {
+			if s.Status != "stopped" {
+				t.Errorf("session s1 status = %q, want %q", s.Status, "stopped")
+			}
+			return
+		}
+	}
+	t.Error("session s1 not found after refresh")
+}
+
+func TestUpdate_RefreshSkippedDuringConfirmDelete(t *testing.T) {
+	sessions := overlayTestSessions()
+	m := newOverlayModel(sessions, "", nil, nil, nil)
+	m.width = 120
+	m.height = 40
+	m.state = stateConfirmDelete
+
+	updated, _ := m.Update(refreshTickMsg{})
+	om := asOverlay(updated)
+
+	if om.state != stateConfirmDelete {
+		t.Errorf("state = %v, want stateConfirmDelete", om.state)
+	}
+	if len(om.allSessions) != len(sessions) {
+		t.Errorf("allSessions changed during confirm state")
+	}
+}
+
+func TestUpdate_RefreshSkippedDuringConfirmRestart(t *testing.T) {
+	sessions := overlayTestSessions()
+	m := newOverlayModel(sessions, "", nil, nil, nil)
+	m.width = 120
+	m.height = 40
+	m.state = stateConfirmRestart
+
+	updated, _ := m.Update(refreshTickMsg{})
+	om := asOverlay(updated)
+
+	if om.state != stateConfirmRestart {
+		t.Errorf("state = %v, want stateConfirmRestart", om.state)
+	}
+}
+
+func TestUpdate_RefreshSessions_SelectedGone_FallsBack(t *testing.T) {
+	sessions := overlayTestSessions()
+	m := newOverlayModel(sessions, "", nil, nil, nil)
+	m.width = 120
+	m.height = 40
+
+	// Navigate to s2
+	for {
+		item, ok := m.list.SelectedItem().(sessionItem)
+		if ok && item.info.ID == "s2" {
+			break
+		}
+		m.list.CursorDown()
+	}
+
+	// Refresh without s2
+	remaining := []protocol.SessionInfo{sessions[0], sessions[2]}
+	updated, _ := m.Update(refreshSessionsMsg{sessions: remaining})
+	om := asOverlay(updated)
+
+	item, ok := om.list.SelectedItem().(sessionItem)
+	if !ok {
+		t.Fatal("expected a sessionItem to be selected after fallback")
+	}
+	// Should have fallen back to some other session, not panic
+	if item.info.ID == "s2" {
+		t.Error("should not still have s2 selected after it was removed")
 	}
 }
 
