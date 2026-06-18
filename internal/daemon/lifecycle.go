@@ -31,11 +31,12 @@ func formatStopSummary(reason string, exitCode *int, prev string, prevSetAt *tim
 	case StopReasonShutdown:
 		base = "Stopped by shutdown"
 	case StopReasonCrash:
-		if exitCode != nil && *exitCode == 0 {
+		switch {
+		case exitCode != nil && *exitCode == 0:
 			base = "Exited"
-		} else if exitCode != nil {
+		case exitCode != nil:
 			base = fmt.Sprintf("Crashed exit %d", *exitCode)
-		} else {
+		default:
 			base = "Crashed"
 		}
 	default:
