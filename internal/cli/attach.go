@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
 	"time"
 
@@ -30,7 +31,15 @@ func init() {
 	rootCmd.AddCommand(attachCmd)
 }
 
+func isInsideGraith() bool {
+	return os.Getenv("GRAITH_ATTACHED") != "" || os.Getenv("GRAITH_SESSION_ID") != ""
+}
+
 func runAttach(cmd *cobra.Command, name string) error {
+	if isInsideGraith() {
+		return fmt.Errorf("cannot attach from inside a graith session (nested sessions are not supported)")
+	}
+
 	c, err := client.Connect(cfg, paths, cfgFile)
 	if err != nil {
 		return err
@@ -71,6 +80,10 @@ func runAttach(cmd *cobra.Command, name string) error {
 }
 
 func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[string]bool) error {
+	if isInsideGraith() {
+		return fmt.Errorf("cannot attach from inside a graith session (nested sessions are not supported)")
+	}
+
 	c.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
 	resp, err := c.ReadControlResponse()
 	if err != nil {
