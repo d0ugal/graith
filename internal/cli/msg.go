@@ -138,6 +138,7 @@ var msgSendCmd = &cobra.Command{
 			SenderName: senderName,
 			ThreadID:   msgSendThreadID,
 			ReplyTo:    msgSendReplyTo,
+			Quiet:      msgSendQuiet,
 		})
 
 		resp, err := c.ReadControlResponse()
@@ -148,19 +149,6 @@ var msgSendCmd = &cobra.Command{
 			var e protocol.ErrorMsg
 			protocol.DecodePayload(resp, &e)
 			return fmt.Errorf("%s", e.Message)
-		}
-
-		if !msgSendQuiet {
-			sender := senderName
-			if sender == "" {
-				sender = senderID
-			}
-			hint := fmt.Sprintf("New message from %s. Read: gr msg sub --topic inbox:%s --all | Reply: gr msg send %s \"<reply>\"", sender, sessionID, sender)
-			c.SendControl("type", protocol.TypeMsg{
-				SessionID: sessionID,
-				Input:     hint,
-			})
-			c.ReadControlResponse() //nolint:errcheck // notification is best-effort
 		}
 
 		if jsonOutput {
@@ -499,6 +487,7 @@ func msgSendChildrenRun(args []string) error {
 			SenderName: senderName,
 			ThreadID:   msgSendThreadID,
 			ReplyTo:    msgSendReplyTo,
+			Quiet:      msgSendQuiet,
 		})
 		resp, err := c.ReadControlResponse()
 		if err != nil {
@@ -510,19 +499,6 @@ func msgSendChildrenRun(args []string) error {
 			return fmt.Errorf("sending to %s: %s", desc.Name, e.Message)
 		}
 		sentTo = append(sentTo, desc.Name)
-
-		if !msgSendQuiet {
-			sender := senderName
-			if sender == "" {
-				sender = senderID
-			}
-			hint := fmt.Sprintf("New message from %s. Read: gr msg sub --topic inbox:%s --all | Reply: gr msg send --parent \"<reply>\"", sender, desc.ID)
-			c.SendControl("type", protocol.TypeMsg{
-				SessionID: desc.ID,
-				Input:     hint,
-			})
-			c.ReadControlResponse() //nolint:errcheck // notification is best-effort
-		}
 	}
 
 	if jsonOutput {
@@ -564,6 +540,7 @@ func msgSendParentRun(args []string) error {
 		SenderName: senderName,
 		ThreadID:   msgSendThreadID,
 		ReplyTo:    msgSendReplyTo,
+		Quiet:      msgSendQuiet,
 	})
 	resp, err := c.ReadControlResponse()
 	if err != nil {
@@ -573,19 +550,6 @@ func msgSendParentRun(args []string) error {
 		var e protocol.ErrorMsg
 		protocol.DecodePayload(resp, &e)
 		return fmt.Errorf("%s", e.Message)
-	}
-
-	if !msgSendQuiet {
-		sender := senderName
-		if sender == "" {
-			sender = senderID
-		}
-		hint := fmt.Sprintf("New message from %s. Read: gr msg sub --topic inbox:%s --all | Reply: gr msg send --children \"<reply>\"", sender, current.ParentID)
-		c.SendControl("type", protocol.TypeMsg{
-			SessionID: current.ParentID,
-			Input:     hint,
-		})
-		c.ReadControlResponse() //nolint:errcheck // notification is best-effort
 	}
 
 	if jsonOutput {
