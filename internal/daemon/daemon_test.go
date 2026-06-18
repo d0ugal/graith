@@ -998,6 +998,101 @@ func TestDetectAgentStatusesHookAuthority(t *testing.T) {
 	})
 }
 
+func TestDetectAgentStatuses_SharedWorktreeSkipsGit(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	repoDir := t.TempDir()
+	runGit := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repoDir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
+			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %s: %v", args, out, err)
+		}
+	}
+	runGit("init", "-b", "main")
+	if err := os.WriteFile(filepath.Join(repoDir, "file.txt"), []byte("original"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit("add", "file.txt")
+	runGit("commit", "-m", "init")
+	if err := os.WriteFile(filepath.Join(repoDir, "file.txt"), []byte("modified"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	logDir := t.TempDir()
+	sharedPty, err := grpty.NewSession(grpty.SessionOpts{
+		ID: "shared1", Command: "sleep", Args: []string{"60"},
+		Dir: repoDir, Rows: 24, Cols: 80,
+		LogPath: filepath.Join(logDir, "shared.log"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sharedPty.Kill()
+
+	normalPty, err := grpty.NewSession(grpty.SessionOpts{
+		ID: "normal1", Command: "sleep", Args: []string{"60"},
+		Dir: repoDir, Rows: 24, Cols: 80,
+		LogPath: filepath.Join(logDir, "normal.log"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer normalPty.Kill()
+
+	sm.state.Sessions["shared1"] = &SessionState{
+		ID: "shared1", Name: "shared-test", Agent: "claude",
+		Status: StatusRunning, WorktreePath: repoDir, RepoPath: repoDir,
+		SharedWorktree: true,
+	}
+	sm.state.Sessions["normal1"] = &SessionState{
+		ID: "normal1", Name: "normal-test", Agent: "claude",
+		Status: StatusRunning, WorktreePath: repoDir, RepoPath: repoDir,
+	}
+	sm.sessions["shared1"] = sharedPty
+	sm.sessions["normal1"] = normalPty
+
+	sm.mu.Lock()
+	sm.hookReports["shared1"] = hookReport{
+		Status: "active", Event: "Notification",
+		ReportedAt: time.Now(), AuthoritativeUntil: time.Now().Add(5 * time.Minute),
+	}
+	sm.hookReports["normal1"] = hookReport{
+		Status: "active", Event: "Notification",
+		ReportedAt: time.Now(), AuthoritativeUntil: time.Now().Add(5 * time.Minute),
+	}
+	sm.mu.Unlock()
+
+	sm.detectAgentStatuses()
+
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	shared := sm.state.Sessions["shared1"]
+	normal := sm.state.Sessions["normal1"]
+
+	if shared.GitDirty {
+		t.Error("shared worktree session should have GitDirty=false (git ops skipped)")
+	}
+	if shared.GitUnpushed != 0 {
+		t.Errorf("shared worktree session GitUnpushed=%d, want 0", shared.GitUnpushed)
+	}
+	if normal.GitDirty != true {
+		t.Error("normal session should detect GitDirty=true from modified file")
+	}
+	if shared.AgentStatus != "active" {
+		t.Errorf("shared session AgentStatus=%q, want 'active'", shared.AgentStatus)
+	}
+	if normal.AgentStatus != "active" {
+		t.Errorf("normal session AgentStatus=%q, want 'active'", normal.AgentStatus)
+	}
+}
+
 func TestForkNoRepoSession(t *testing.T) {
 	sm := newTestSessionManager(t)
 	sm.state.Sessions["norepo1"] = &SessionState{
