@@ -84,32 +84,36 @@ func connect(cfg *config.Config, paths config.Paths, configFile string, autoUpgr
 		return nil, fmt.Errorf("unexpected handshake response: %s", resp.Type)
 	}
 
+	var hsOk protocol.HandshakeOkMsg
+	if err := protocol.DecodePayload(resp, &hsOk); err != nil {
+		c.Close()
+		return nil, fmt.Errorf("invalid handshake_ok payload: %w", err)
+	}
+
 	if autoUpgrade && version.Version != "dev" {
-		var hsOk protocol.HandshakeOkMsg
-		if err := protocol.DecodePayload(resp, &hsOk); err == nil {
-			if hsOk.DaemonVersion != "" && hsOk.DaemonVersion != version.Version {
-				fmt.Fprintf(os.Stderr, "Daemon version mismatch (daemon=%s, cli=%s), upgrading daemon...\n", hsOk.DaemonVersion, version.Version)
-				// Try exec upgrade first — it preserves sessions by
-				// passing PTY file descriptors to the new process.
-				if requestUpgrade(c) {
-					c.Close()
-					if waitForDaemon(paths.SocketPath) {
-						if v := probeDaemonVersion(paths.SocketPath, paths); v == version.Version {
-							return connect(cfg, paths, configFile, false)
-						}
-						fmt.Fprintf(os.Stderr, "Exec upgrade did not produce correct version, falling back to clean restart...\n")
+		if hsOk.DaemonVersion != "" && hsOk.DaemonVersion != version.Version {
+			fmt.Fprintf(os.Stderr, "Daemon version mismatch (daemon=%s, cli=%s), upgrading daemon...\n", hsOk.DaemonVersion, version.Version)
+			if requestUpgrade(c) {
+				c.Close()
+				if waitForDaemon(paths.SocketPath) {
+					if v := probeDaemonVersion(paths.SocketPath, paths); v == version.Version {
+						return connect(cfg, paths, configFile, false)
 					}
-				} else {
-					c.Close()
+					fmt.Fprintf(os.Stderr, "Exec upgrade did not produce correct version, falling back to clean restart...\n")
 				}
-				// Fall back: kill and restart. This loses sessions but
-				// ensures the new version actually runs.
-				if stopDaemonByPID(paths.PIDFile) {
-					waitForSocketGone(paths.SocketPath)
-				}
-				return connect(cfg, paths, configFile, false)
+			} else {
+				c.Close()
 			}
+			if stopDaemonByPID(paths.PIDFile) {
+				waitForSocketGone(paths.SocketPath)
+			}
+			return connect(cfg, paths, configFile, false)
 		}
+	}
+
+	if !protocol.VersionCompatible(hsOk.Version) {
+		c.Close()
+		return nil, fmt.Errorf("protocol version mismatch: server=%s, client=%s; try: gr daemon restart", hsOk.Version, protocol.Version)
 	}
 
 	return c, nil
@@ -231,6 +235,15 @@ func ConnectFast(paths config.Paths) (*Client, error) {
 		c.Close()
 		return nil, fmt.Errorf("unexpected handshake response: %s", resp.Type)
 	}
+	var hsOk protocol.HandshakeOkMsg
+	if err := protocol.DecodePayload(resp, &hsOk); err != nil {
+		c.Close()
+		return nil, fmt.Errorf("invalid handshake_ok payload: %w", err)
+	}
+	if !protocol.VersionCompatible(hsOk.Version) {
+		c.Close()
+		return nil, fmt.Errorf("protocol version mismatch: server=%s, client=%s; try: gr daemon restart", hsOk.Version, protocol.Version)
+	}
 	conn.SetDeadline(time.Time{})
 	return c, nil
 }
@@ -269,6 +282,15 @@ func ConnectForApproval(paths config.Paths, approvalTimeout time.Duration) (*Cli
 	if resp.Type != "handshake_ok" {
 		c.Close()
 		return nil, fmt.Errorf("unexpected handshake response: %s", resp.Type)
+	}
+	var hsOk protocol.HandshakeOkMsg
+	if err := protocol.DecodePayload(resp, &hsOk); err != nil {
+		c.Close()
+		return nil, fmt.Errorf("invalid handshake_ok payload: %w", err)
+	}
+	if !protocol.VersionCompatible(hsOk.Version) {
+		c.Close()
+		return nil, fmt.Errorf("protocol version mismatch: server=%s, client=%s; try: gr daemon restart", hsOk.Version, protocol.Version)
 	}
 	conn.SetDeadline(time.Time{})
 	return c, nil

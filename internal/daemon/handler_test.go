@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -196,6 +197,54 @@ func TestHandshake(t *testing.T) {
 	protocol.DecodePayload(env, &ok)
 	if ok.Version != protocol.Version {
 		t.Errorf("version = %q, want %q", ok.Version, protocol.Version)
+	}
+}
+
+func TestHandshakeVersionMismatch(t *testing.T) {
+	h := newTestHarness(t)
+
+	h.sendControl(t, "handshake", protocol.HandshakeMsg{
+		Version:      "999.0",
+		ClientID:     "test-client",
+		TerminalSize: [2]uint16{80, 24},
+		Cwd:          "/tmp",
+	})
+
+	env := h.readControlMsg(t)
+	if env.Type != "handshake_err" {
+		t.Fatalf("expected handshake_err, got %q", env.Type)
+	}
+	var errMsg protocol.HandshakeErrMsg
+	if err := protocol.DecodePayload(env, &errMsg); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(errMsg.Reason, "protocol version mismatch") {
+		t.Errorf("reason = %q, want it to mention protocol version mismatch", errMsg.Reason)
+	}
+	if !strings.Contains(errMsg.Reason, "999.0") || !strings.Contains(errMsg.Reason, protocol.Version) {
+		t.Errorf("reason = %q, want it to mention both versions", errMsg.Reason)
+	}
+
+	select {
+	case <-h.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler did not return after version mismatch")
+	}
+}
+
+func TestHandshakeCompatibleMinorVersion(t *testing.T) {
+	h := newTestHarness(t)
+
+	h.sendControl(t, "handshake", protocol.HandshakeMsg{
+		Version:      "1.99",
+		ClientID:     "test-client",
+		TerminalSize: [2]uint16{80, 24},
+		Cwd:          "/tmp",
+	})
+
+	env := h.readControlMsg(t)
+	if env.Type != "handshake_ok" {
+		t.Fatalf("expected handshake_ok for compatible minor version, got %q", env.Type)
 	}
 }
 

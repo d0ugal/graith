@@ -3,9 +3,22 @@ package protocol
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 const Version = "1.0"
+
+func VersionCompatible(v string) bool {
+	ourMajor, _, ok := strings.Cut(Version, ".")
+	if !ok {
+		return false
+	}
+	theirMajor, _, ok := strings.Cut(v, ".")
+	if !ok {
+		return false
+	}
+	return ourMajor == theirMajor
+}
 
 type Envelope struct {
 	Type    string          `json:"type"`

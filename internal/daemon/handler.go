@@ -70,6 +70,12 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid handshake"})
 					continue
 				}
+				if !protocol.VersionCompatible(h.Version) {
+					sendControl("handshake_err", protocol.HandshakeErrMsg{
+						Reason: fmt.Sprintf("protocol version mismatch: client=%s, server=%s; try upgrading the client and running: gr daemon restart", h.Version, protocol.Version),
+					})
+					return
+				}
 				if h.Profile != sm.paths.Profile {
 					sendControl("handshake_err", protocol.HandshakeErrMsg{
 						Reason: fmt.Sprintf("profile mismatch: client is %q but daemon is %q", h.Profile, sm.paths.Profile),
