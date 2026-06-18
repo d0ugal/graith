@@ -2876,3 +2876,139 @@ func TestSetSummary_Validation(t *testing.T) {
 		t.Error("newline should have been stripped")
 	}
 }
+
+func TestWatchSessionWritesLifecycleSummary(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	id := "sess-lifecycle"
+	now := time.Now()
+	sm.state.Sessions[id] = &SessionState{
+		ID: id, Name: "test", Status: StatusRunning, Agent: "claude",
+		SummaryText:  "Running tests",
+		SummarySetAt: &now,
+		SummaryTTL:   0,
+	}
+
+	sess := newTestPTYSession(t, "true")
+	select {
+	case <-sess.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for session to exit")
+	}
+
+	sm.sessions[id] = sess
+	sm.watchSession(id, sess)
+
+	sm.mu.RLock()
+	s := sm.state.Sessions[id]
+	summary := s.SummaryText
+	sm.mu.RUnlock()
+
+	if summary != "Exited (was: Running tests)" {
+		t.Errorf("SummaryText = %q, want %q", summary, "Exited (was: Running tests)")
+	}
+}
+
+func TestWatchSessionSkipsWhenStopAllAlreadyWrote(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	id := "sess-shutdown"
+	now := time.Now()
+	sm.state.Sessions[id] = &SessionState{
+		ID: id, Name: "test", Status: StatusRunning, Agent: "claude",
+		SummaryText:  "Stopped by shutdown (was: Building)",
+		SummarySetAt: &now,
+		SummaryTTL:   0,
+		StopReason:   StopReasonShutdown,
+	}
+
+	sess := newTestPTYSession(t, "true")
+	select {
+	case <-sess.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for session to exit")
+	}
+
+	sm.sessions[id] = sess
+	sm.watchSession(id, sess)
+
+	sm.mu.RLock()
+	summary := sm.state.Sessions[id].SummaryText
+	sm.mu.RUnlock()
+
+	if summary != "Stopped by shutdown (was: Building)" {
+		t.Errorf("SummaryText = %q, want %q — watchSession should not nest shutdown summaries",
+			summary, "Stopped by shutdown (was: Building)")
+	}
+}
+
+func TestStopAllWritesShutdownSummary(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	now := time.Now()
+	sm.state.Sessions["s1"] = &SessionState{
+		ID: "s1", Name: "worker", Status: StatusRunning, Agent: "claude",
+		SummaryText:  "Running tests",
+		SummarySetAt: &now,
+	}
+	sm.state.Sessions["s2"] = &SessionState{
+		ID: "s2", Name: "idle", Status: StatusStopped, Agent: "claude",
+	}
+
+	sm.StopAll(context.Background())
+
+	s1 := sm.state.Sessions["s1"]
+	if s1.SummaryText != "Stopped by shutdown (was: Running tests)" {
+		t.Errorf("s1 SummaryText = %q, want %q", s1.SummaryText, "Stopped by shutdown (was: Running tests)")
+	}
+	if s1.StopReason != StopReasonShutdown {
+		t.Errorf("s1 StopReason = %q, want %q", s1.StopReason, StopReasonShutdown)
+	}
+
+	s2 := sm.state.Sessions["s2"]
+	if s2.SummaryText != "" {
+		t.Errorf("s2 SummaryText = %q, want empty — stopped sessions should not get shutdown summary", s2.SummaryText)
+	}
+}
+
+func TestReconcileWritesLifecycleSummaries(t *testing.T) {
+	t.Run("creating becomes errored", func(t *testing.T) {
+		state := &State{Sessions: map[string]*SessionState{
+			"c": {ID: "c", Name: "stuck-create", Status: StatusCreating},
+		}}
+		state.Reconcile()
+		if state.Sessions["c"].SummaryText != "Interrupted by daemon restart" {
+			t.Errorf("SummaryText = %q, want %q", state.Sessions["c"].SummaryText, "Interrupted by daemon restart")
+		}
+	})
+
+	t.Run("dead running becomes stopped", func(t *testing.T) {
+		state := &State{Sessions: map[string]*SessionState{
+			"r": {ID: "r", Name: "orphan", Status: StatusRunning, PID: 99999999},
+		}}
+		state.Reconcile()
+		if state.Sessions["r"].SummaryText != "Lost during daemon restart" {
+			t.Errorf("SummaryText = %q, want %q", state.Sessions["r"].SummaryText, "Lost during daemon restart")
+		}
+	})
+
+	t.Run("deleting becomes stopped", func(t *testing.T) {
+		state := &State{Sessions: map[string]*SessionState{
+			"d": {ID: "d", Name: "stuck-delete", Status: StatusDeleting},
+		}}
+		state.Reconcile()
+		if state.Sessions["d"].SummaryText != "Delete interrupted by restart" {
+			t.Errorf("SummaryText = %q, want %q", state.Sessions["d"].SummaryText, "Delete interrupted by restart")
+		}
+	})
+
+	t.Run("skips system sessions", func(t *testing.T) {
+		state := &State{Sessions: map[string]*SessionState{
+			"o": {ID: "o", Name: "orch", Status: StatusCreating, SystemKind: SystemKindOrchestrator},
+		}}
+		state.Reconcile()
+		if state.Sessions["o"].SummaryText != "" {
+			t.Errorf("SummaryText = %q, want empty for system session", state.Sessions["o"].SummaryText)
+		}
+	})
+}

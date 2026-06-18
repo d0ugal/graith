@@ -278,6 +278,7 @@ func (s *State) Reconcile() {
 			slog.Info("session was mid-creation when daemon stopped, marking errored", "id", id)
 			sess.Status = StatusErrored
 			sess.StatusChangedAt = time.Now()
+			applyLifecycleSummaryLocked(sess, "Interrupted by daemon restart")
 			continue
 		}
 		if sess.Status == StatusRunning && sess.PID > 0 {
@@ -286,14 +287,14 @@ func (s *State) Reconcile() {
 				sess.Status = StatusStopped
 				sess.StatusChangedAt = time.Now()
 				sess.PID = 0
+				applyLifecycleSummaryLocked(sess, "Lost during daemon restart")
 			}
 		}
-		// A "deleting" status means the daemon crashed mid-delete. Revert to
-		// stopped so the user can retry.
 		if sess.Status == StatusDeleting {
 			slog.Info("session stuck in deleting, reverting to stopped", "id", id)
 			sess.Status = StatusStopped
 			sess.StatusChangedAt = time.Now()
+			applyLifecycleSummaryLocked(sess, "Delete interrupted by restart")
 		}
 	}
 }
