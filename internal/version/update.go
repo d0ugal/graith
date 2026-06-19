@@ -54,7 +54,7 @@ func CheckForUpdate(cacheDir string) *UpdateResult {
 }
 
 func buildResult(latest string) *UpdateResult {
-	if !isNewer(latest, Version) {
+	if !IsNewer(latest, Version) {
 		return nil
 	}
 	return &UpdateResult{
@@ -108,7 +108,7 @@ func fetchLatestVersion() (string, error) {
 	return release.TagName, nil
 }
 
-func isNewer(latest, current string) bool {
+func IsNewer(latest, current string) bool {
 	latestParts := parseVersion(latest)
 	currentParts := parseVersion(current)
 	if latestParts == nil || currentParts == nil {

@@ -91,7 +91,7 @@ func connect(cfg *config.Config, paths config.Paths, configFile string, autoUpgr
 	}
 
 	if autoUpgrade && version.Version != "dev" {
-		if hsOk.DaemonVersion != "" && hsOk.DaemonVersion != version.Version {
+		if hsOk.DaemonVersion != "" && hsOk.DaemonVersion != version.Version && version.IsNewer(version.Version, hsOk.DaemonVersion) {
 			fmt.Fprintf(os.Stderr, "Daemon version mismatch (daemon=%s, cli=%s), upgrading daemon...\n", hsOk.DaemonVersion, version.Version)
 			if requestUpgrade(c) {
 				c.Close()

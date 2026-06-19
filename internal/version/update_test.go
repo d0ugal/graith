@@ -63,9 +63,9 @@ func TestIsNewer(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		got := isNewer(tt.latest, tt.current)
+		got := IsNewer(tt.latest, tt.current)
 		if got != tt.want {
-			t.Errorf("isNewer(%q, %q) = %v, want %v", tt.latest, tt.current, got, tt.want)
+			t.Errorf("IsNewer(%q, %q) = %v, want %v", tt.latest, tt.current, got, tt.want)
 		}
 	}
 }
