@@ -12,17 +12,18 @@ import (
 )
 
 var (
-	newAgent           string
-	newBase            string
-	newBackground      bool
-	newPrompt          string
-	newPromptFile      string
-	newModel           string
-	newRepo            string
-	newNoRepo          bool
-	newShareWorktree   string
-	newInPlace         bool
-	newAllowConcurrent bool
+	newAgent               string
+	newBase                string
+	newBackground          bool
+	newPrompt              string
+	newPromptFile          string
+	newModel               string
+	newRepo                string
+	newNoRepo              bool
+	newShareWorktree       string
+	newInPlace             bool
+	newAllowConcurrent     bool
+	newSkipModelValidation bool
 )
 
 var newCmd = &cobra.Command{
@@ -80,18 +81,19 @@ var newCmd = &cobra.Command{
 		defer c.Close()
 
 		c.SendControl("create", protocol.CreateMsg{
-			Name:            name,
-			ParentID:        os.Getenv("GRAITH_SESSION_ID"),
-			Agent:           agent,
-			RepoPath:        repoPath,
-			Base:            newBase,
-			Prompt:          prompt,
-			Model:           newModel,
-			NoRepo:          newNoRepo,
-			ShareWorktree:   newShareWorktree,
-			AgentHooks:      true,
-			InPlace:         newInPlace,
-			AllowConcurrent: newAllowConcurrent,
+			Name:                name,
+			ParentID:            os.Getenv("GRAITH_SESSION_ID"),
+			Agent:               agent,
+			RepoPath:            repoPath,
+			Base:                newBase,
+			Prompt:              prompt,
+			Model:               newModel,
+			NoRepo:              newNoRepo,
+			ShareWorktree:       newShareWorktree,
+			AgentHooks:          true,
+			InPlace:             newInPlace,
+			AllowConcurrent:     newAllowConcurrent,
+			SkipModelValidation: newSkipModelValidation,
 		})
 
 		resp, err := c.ReadControlResponse()
@@ -139,6 +141,7 @@ func init() {
 	newCmd.Flags().StringVar(&newShareWorktree, "share-worktree", "", "share another session's worktree (read-only)")
 	newCmd.Flags().BoolVar(&newInPlace, "in-place", false, "run agent directly in the repo without creating a worktree")
 	newCmd.Flags().BoolVar(&newAllowConcurrent, "allow-concurrent", false, "allow multiple in-place sessions on the same repo")
+	newCmd.Flags().BoolVar(&newSkipModelValidation, "skip-model-validation", false, "skip validate_model check (use models not in the validation list)")
 	newCmd.RegisterFlagCompletionFunc("agent", completeAgentNames)
 	newCmd.RegisterFlagCompletionFunc("repo", completeRepoPaths)
 	newCmd.RegisterFlagCompletionFunc("base", completeBranchNames)

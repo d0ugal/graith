@@ -2,8 +2,11 @@ package daemon
 
 import (
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/d0ugal/graith/internal/config"
 )
 
 func TestValidateSessionName(t *testing.T) {
@@ -87,7 +90,7 @@ func TestValidateSessionName(t *testing.T) {
 
 func TestCreateRejectsUnsafeName(t *testing.T) {
 	sm := newTestSessionManager(t)
-	_, err := sm.Create("bad;name", "claude", "/tmp", "", "", "", "", true, "", false, false, false, 24, 80)
+	_, err := sm.Create("bad;name", "claude", "/tmp", "", "", "", "", true, "", false, false, false, false, 24, 80)
 	if err == nil {
 		t.Fatal("Create with unsafe name should fail")
 	}
@@ -97,6 +100,36 @@ func TestCreateRejectsUnsafeName(t *testing.T) {
 	if len(sm.state.Sessions) != 0 {
 		t.Error("no session should be created for an invalid name")
 	}
+}
+
+func TestCreateSkipModelValidation(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses shell scripts")
+	}
+
+	sm := newTestSessionManager(t)
+	script := writeScript(t, "#!/bin/sh\necho 'model-a - Model A'\necho 'model-b - Model B'\n")
+	sm.cfg.Agents["claude"] = config.Agent{
+		Command:       "true",
+		ValidateModel: script,
+	}
+
+	t.Run("validation rejects unknown model by default", func(t *testing.T) {
+		_, err := sm.Create("test-reject", "claude", "", "", "", "model-z", "", true, "", false, false, false, false, 24, 80)
+		if err == nil {
+			t.Fatal("expected validation error for unknown model")
+		}
+		if !strings.Contains(err.Error(), "invalid model") {
+			t.Fatalf("expected 'invalid model' error, got: %v", err)
+		}
+	})
+
+	t.Run("skip flag bypasses validation", func(t *testing.T) {
+		_, err := sm.Create("test-skip", "claude", "", "", "", "model-z", "", true, "", false, false, false, true, 24, 80)
+		if err != nil && strings.Contains(err.Error(), "invalid model") {
+			t.Fatalf("--skip-model-validation should bypass model check, got: %v", err)
+		}
+	})
 }
 
 func TestRenameRejectsUnsafeName(t *testing.T) {

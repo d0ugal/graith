@@ -318,7 +318,7 @@ func (sm *SessionManager) repoStoreDir(repoRoot string) (string, error) {
 //  1. Lock: validate, reserve session as StatusCreating, unlock
 //  2. Git setup and PTY spawn (no lock held)
 //  3. Lock: commit to StatusRunning, unlock
-func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, model, parentID string, noRepo bool, shareWorktree string, agentHooks bool, inPlace, allowConcurrent bool, rows, cols uint16) (SessionState, error) {
+func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, model, parentID string, noRepo bool, shareWorktree string, agentHooks bool, inPlace, allowConcurrent, skipModelValidation bool, rows, cols uint16) (SessionState, error) {
 	if err := ValidateSessionName(name); err != nil {
 		return SessionState{}, err
 	}
@@ -329,8 +329,10 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 		return SessionState{}, fmt.Errorf("unknown agent %q", agentName)
 	}
 
-	if err := validateModel(agent, model); err != nil {
-		return SessionState{}, err
+	if !skipModelValidation {
+		if err := validateModel(agent, model); err != nil {
+			return SessionState{}, err
+		}
 	}
 
 	// Early validation that doesn't require the lock.
