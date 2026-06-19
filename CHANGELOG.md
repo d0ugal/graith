@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.48.0](https://github.com/d0ugal/graith/compare/v0.47.0...v0.48.0) (2026-06-19)
+
+
+### Features
+
+* auto-resume stopped/errored sessions on attach ([a5667e2](https://github.com/d0ugal/graith/commit/a5667e255be332efdae9f7b59c8d3235ea3db07e))
+
+
+### Bug Fixes
+
+* address tribunal findings in sweep loops ([3dabfb1](https://github.com/d0ugal/graith/commit/3dabfb12577f44cece57ce477a62eae05ca908af))
+* align Agent struct tags for tagalign linter ([8ffa591](https://github.com/d0ugal/graith/commit/8ffa59192353ac655864b70f22ebf344ec5ced21))
+* make gr msg send --children recursive and deduplicate descendant walk ([7941766](https://github.com/d0ugal/graith/commit/7941766d0dc7ebf6804b971ea530ff0389a8b102)), closes [#506](https://github.com/d0ugal/graith/issues/506)
+* pre-trust cursor workspaces to prevent concurrent cli-config.json corruption ([1faec34](https://github.com/d0ugal/graith/commit/1faec341dd900684016031c638d8bb50e626ce03))
+* prevent stale attached client from killing upgraded daemon ([002a118](https://github.com/d0ugal/graith/commit/002a1183e1caef83dda6a6824d45b9dd9b81e310))
+* sweep for late-arriving descendants in DeleteWithChildren and StopWithChildren ([4ac322a](https://github.com/d0ugal/graith/commit/4ac322abb63e10ab7f8623d252fd162837533634))
+* use status-neutral log message for auto-resume on attach ([214ee8a](https://github.com/d0ugal/graith/commit/214ee8a32df75e81973e30f358409c4d4eea31b6))
+
 ## [0.47.0](https://github.com/d0ugal/graith/compare/v0.46.0...v0.47.0) (2026-06-19)
 
 
