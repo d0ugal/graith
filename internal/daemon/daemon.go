@@ -2315,17 +2315,18 @@ func (sm *SessionManager) stopWithReason(id, reason string) error {
 
 	sm.mu.Lock()
 	if s, ok := sm.state.Sessions[id]; ok {
-		if killed {
+		switch {
+		case killed:
 			s.Status = StatusStopped
 			s.StatusChangedAt = time.Now()
 			s.PID = 0
 			s.PIDStartTime = 0
 			applyLifecycleSummaryLocked(s, "Orphaned process killed")
-		} else if err != nil {
+		case err != nil:
 			s.Status = StatusErrored
 			s.StatusChangedAt = time.Now()
 			applyLifecycleSummaryLocked(s, fmt.Sprintf("Could not kill orphaned process (PID %d): %v", pid, err))
-		} else {
+		default:
 			s.Status = StatusStopped
 			s.StatusChangedAt = time.Now()
 			s.PID = 0
