@@ -7,15 +7,15 @@ import (
 
 func TestProcessStartTimeSelf(t *testing.T) {
 	pid := os.Getpid()
-	st, err := processStartTime(pid)
+	st, err := ProcessStartTime(pid)
 	if err != nil {
-		t.Fatalf("processStartTime(%d) error: %v", pid, err)
+		t.Fatalf("ProcessStartTime(%d) error: %v", pid, err)
 	}
 	if st == 0 {
-		t.Fatal("processStartTime returned 0 for current process")
+		t.Fatal("ProcessStartTime returned 0 for current process")
 	}
 
-	st2, err := processStartTime(pid)
+	st2, err := ProcessStartTime(pid)
 	if err != nil {
 		t.Fatalf("second call error: %v", err)
 	}
@@ -27,7 +27,7 @@ func TestProcessStartTimeSelf(t *testing.T) {
 func TestProcessStartTimeInvalidPID(t *testing.T) {
 	// PID 0 is the kernel; negative PIDs should also fail. Use a very high
 	// PID that is almost certainly not in use.
-	_, err := processStartTime(4_000_000)
+	_, err := ProcessStartTime(4_000_000)
 	if err == nil {
 		t.Error("expected error for non-existent PID, got nil")
 	}

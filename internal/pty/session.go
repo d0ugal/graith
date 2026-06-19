@@ -105,7 +105,7 @@ func AdoptSession(opts AdoptOpts) (*Session, error) {
 		cols, rows = int(ws.Cols), int(ws.Rows)
 	}
 
-	startTime, stErr := processStartTime(opts.PID)
+	startTime, stErr := ProcessStartTime(opts.PID)
 	if stErr != nil {
 		slog.Warn("could not capture process start time for adopted session; PID reuse detection degraded",
 			"session", opts.ID, "pid", opts.PID, "error", stErr)
@@ -167,7 +167,7 @@ func (s *Session) adoptedWaitLoop() {
 			break
 		}
 		if s.adoptedStartTime != 0 {
-			cur, err := processStartTime(s.adoptedPID)
+			cur, err := ProcessStartTime(s.adoptedPID)
 			if err != nil || cur != s.adoptedStartTime {
 				break
 			}

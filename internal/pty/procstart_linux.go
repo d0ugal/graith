@@ -7,10 +7,10 @@ import (
 	"strings"
 )
 
-// processStartTime returns a value that uniquely identifies the process with
+// ProcessStartTime returns a value that uniquely identifies the process with
 // the given PID (clock ticks since boot from /proc/[pid]/stat field 22). If
 // the PID is recycled, the new process will have a different start time.
-func processStartTime(pid int) (int64, error) {
+func ProcessStartTime(pid int) (int64, error) {
 	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
 	if err != nil {
 		return 0, err
