@@ -1743,6 +1743,7 @@ func (sm *SessionManager) resumeWithSummary(id string, rows, cols uint16, lifecy
 		sessState.StatusChangedAt = prevStatusChangedAt
 		sessState.ExitCode = prevExitCode
 		sessState.PID = prevPID
+		sessState.PIDStartTime = prevPIDStartTime
 		sessState.AgentStatus = prevAgentStatus
 		sessState.Sandboxed = prevSandboxed
 		sessState.SandboxConfig = prevSandboxConfig
@@ -1850,6 +1851,20 @@ func (sm *SessionManager) Delete(id string) error {
 	} else if orphanPID > 0 {
 		if _, err := sm.killVerifiedProcess(orphanPID, orphanStartTime); err != nil {
 			sm.log.Warn("failed to kill orphaned process during delete", "id", id, "pid", orphanPID, "err", err)
+			sm.mu.Lock()
+			if s, ok := sm.state.Sessions[id]; ok {
+				s.Status = StatusErrored
+				s.StatusChangedAt = time.Now()
+				s.PID = orphanPID
+				s.PIDStartTime = orphanStartTime
+				applyLifecycleSummaryLocked(s, fmt.Sprintf("Delete aborted: orphaned process (PID %d) could not be killed: %v", orphanPID, err))
+				_ = sm.saveState()
+			}
+			sm.mu.Unlock()
+			if hasClient {
+				ac.kick()
+			}
+			return fmt.Errorf("delete aborted: orphaned process (PID %d) could not be killed: %w", orphanPID, err)
 		}
 	}
 
@@ -2004,6 +2019,7 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 	sm.mu.Unlock()
 
 	// Kill all PTY processes outside the lock.
+	killFailed := make(map[string]bool)
 	for _, s := range snaps {
 		if s.ptySess != nil {
 			s.ptySess.Detach()
@@ -2019,6 +2035,17 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 		} else if s.pid > 0 {
 			if _, err := sm.killVerifiedProcess(s.pid, s.pidStartTime); err != nil {
 				sm.log.Warn("failed to kill orphaned process during delete", "id", s.id, "pid", s.pid, "err", err)
+				sm.mu.Lock()
+				if sess, ok := sm.state.Sessions[s.id]; ok {
+					sess.Status = StatusErrored
+					sess.StatusChangedAt = time.Now()
+					sess.PID = s.pid
+					sess.PIDStartTime = s.pidStartTime
+					applyLifecycleSummaryLocked(sess, fmt.Sprintf("Delete aborted: orphaned process (PID %d) could not be killed: %v", s.pid, err))
+				}
+				_ = sm.saveState()
+				sm.mu.Unlock()
+				killFailed[s.id] = true
 			}
 		}
 	}
@@ -2027,6 +2054,9 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 	var teardownErrs []error
 	succeeded := make(map[string]bool, len(snaps))
 	for _, s := range snaps {
+		if killFailed[s.id] {
+			continue
+		}
 		var err error
 		switch {
 		case s.shared:
