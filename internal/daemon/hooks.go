@@ -2,11 +2,14 @@ package daemon
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"time"
 
 	"github.com/d0ugal/graith/internal/config"
 )
@@ -241,12 +244,71 @@ func (sm *SessionManager) resolveMCPServersFromConfig(cfg *config.Config, agentN
 	return config.MergeMCPServers(global, overrides)
 }
 
+var nonAlnumRe = regexp.MustCompile(`[^a-zA-Z0-9]+`)
+
+// cursorProjectKey encodes an absolute path into the key cursor uses under
+// ~/.cursor/projects/. The encoding replaces runs of non-alphanumeric
+// characters with a single hyphen and trims leading/trailing hyphens.
+func cursorProjectKey(absPath string) string {
+	return strings.Trim(nonAlnumRe.ReplaceAllString(absPath, "-"), "-")
+}
+
+// preTrustCursorWorkspace creates the .workspace-trusted sentinel file that
+// cursor checks before showing the "Workspace Trust Required" prompt. Without
+// this, concurrent cursor sessions race to write ~/.cursor/cli-config.json
+// during the trust flow, causing ENOENT or JSON corruption crashes.
+//
+// The sentinel is written with the same JSON format cursor uses
+// (trustedAt + workspacePath). O_EXCL avoids overwriting files cursor
+// created itself.
+func preTrustCursorWorkspace(worktreePath string) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("get home dir: %w", err)
+	}
+	key := cursorProjectKey(worktreePath)
+	dir := filepath.Join(home, ".cursor", "projects", key)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create cursor project dir: %w", err)
+	}
+	sentinel := filepath.Join(dir, ".workspace-trusted")
+	f, err := os.OpenFile(sentinel, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o644)
+	if err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return nil
+		}
+		return fmt.Errorf("create workspace-trusted: %w", err)
+	}
+	defer f.Close()
+	trust := struct {
+		TrustedAt     string `json:"trustedAt"`
+		WorkspacePath string `json:"workspacePath"`
+	}{
+		TrustedAt:     time.Now().UTC().Format(time.RFC3339Nano),
+		WorkspacePath: worktreePath,
+	}
+	data, err := json.Marshal(trust)
+	if err != nil {
+		return fmt.Errorf("marshal workspace-trusted: %w", err)
+	}
+	if _, err := f.Write(data); err != nil {
+		return fmt.Errorf("write workspace-trusted: %w", err)
+	}
+	return nil
+}
+
 // injectCursorHooks generates a .cursor/hooks.json in the worktree for a
 // Cursor session. Returns no extra args or env — cursor reads hooks from the
 // project directory automatically.
 func (sm *SessionManager) injectCursorHooks(sessionID, worktreePath string) (extraArgs []string, extraEnv map[string]string, err error) {
 	if worktreePath == "" {
 		return nil, nil, nil
+	}
+
+	if agent, ok := sm.cfg.Agents["cursor"]; !ok || agent.PreTrustWorkspaceEnabled() {
+		if err := preTrustCursorWorkspace(worktreePath); err != nil {
+			sm.log.Warn("failed to pre-trust cursor workspace", "session_id", sessionID, "err", err)
+		}
 	}
 
 	cursorDir := filepath.Join(worktreePath, ".cursor")
