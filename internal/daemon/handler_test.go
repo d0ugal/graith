@@ -1846,3 +1846,206 @@ func TestDiagnosticsEmpty(t *testing.T) {
 		t.Errorf("session diagnostics = %d, want 0", len(diag.Sessions))
 	}
 }
+
+func newTestHarnessWithConfig(t *testing.T, cfg *config.Config) *testHarness {
+	t.Helper()
+	tmpDir := os.TempDir()
+	dir, err := os.MkdirTemp(tmpDir, t.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		for range 5 {
+			if err := os.RemoveAll(dir); err == nil {
+				return
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	})
+	paths := config.Paths{
+		StateFile:  filepath.Join(dir, "state.json"),
+		LogDir:     filepath.Join(dir, "logs"),
+		DataDir:    filepath.Join(dir, "data"),
+		MessagesDB: filepath.Join(dir, "messages.db"),
+	}
+	os.MkdirAll(paths.LogDir, 0o700)
+	os.MkdirAll(paths.DataDir, 0o700)
+
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	sm := NewSessionManager(cfg, paths, log)
+	sm.upgradeCh = make(chan string, 1)
+
+	msgStore, err := NewMsgStore(paths.MessagesDB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { msgStore.Close() })
+	sm.messages = msgStore
+
+	clientConn, serverConn := net.Pipe()
+	ctx, cancel := context.WithCancel(context.Background())
+
+	h := &testHarness{
+		sm:         sm,
+		conn:       clientConn,
+		serverConn: serverConn,
+		reader:     protocol.NewFrameReader(clientConn),
+		writer:     protocol.NewFrameWriter(clientConn),
+		cancel:     cancel,
+		done:       make(chan struct{}),
+	}
+
+	go func() {
+		defer close(h.done)
+		HandleConnection(ctx, serverConn, sm, log)
+	}()
+
+	t.Cleanup(func() {
+		cancel()
+		clientConn.Close()
+		serverConn.Close()
+		<-h.done
+	})
+
+	return h
+}
+
+func TestAttachAutoResumesStoppedSession(t *testing.T) {
+	cfg := config.Default()
+	cfg.Agents["test"] = config.Agent{
+		Command:    "sleep",
+		Args:       []string{"300"},
+		ResumeArgs: []string{"300"},
+	}
+
+	h := newTestHarnessWithConfig(t, cfg)
+	workDir := t.TempDir()
+
+	h.sm.mu.Lock()
+	h.sm.state.Sessions["s1"] = &SessionState{
+		ID:           "s1",
+		Name:         "stopped-test",
+		Agent:        "test",
+		Status:       StatusStopped,
+		WorktreePath: workDir,
+		CreatedAt:    time.Now().UTC(),
+	}
+	h.sm.mu.Unlock()
+
+	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "s1"})
+	env := h.readControlMsg(t)
+	if env.Type != "attached" {
+		t.Fatalf("expected attached after auto-resume, got %q", env.Type)
+	}
+
+	var info protocol.SessionInfo
+	protocol.DecodePayload(env, &info)
+	if info.Status != "running" {
+		t.Errorf("status = %q, want running", info.Status)
+	}
+
+	if ptySess, ok := h.sm.GetPTY("s1"); ok {
+		t.Cleanup(func() {
+			ptySess.Kill()
+			<-ptySess.Done()
+			ptySess.Close()
+		})
+	} else {
+		t.Error("expected PTY to exist after auto-resume attach")
+	}
+}
+
+func TestAttachAutoResumesErroredSession(t *testing.T) {
+	cfg := config.Default()
+	cfg.Agents["test"] = config.Agent{
+		Command:    "sleep",
+		Args:       []string{"300"},
+		ResumeArgs: []string{"300"},
+	}
+
+	h := newTestHarnessWithConfig(t, cfg)
+	workDir := t.TempDir()
+
+	h.sm.mu.Lock()
+	h.sm.state.Sessions["s1"] = &SessionState{
+		ID:           "s1",
+		Name:         "errored-test",
+		Agent:        "test",
+		Status:       StatusErrored,
+		WorktreePath: workDir,
+		CreatedAt:    time.Now().UTC(),
+	}
+	h.sm.mu.Unlock()
+
+	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "s1"})
+	env := h.readControlMsg(t)
+	if env.Type != "attached" {
+		t.Fatalf("expected attached after auto-resume, got %q", env.Type)
+	}
+
+	var info protocol.SessionInfo
+	protocol.DecodePayload(env, &info)
+	if info.Status != "running" {
+		t.Errorf("status = %q, want running", info.Status)
+	}
+
+	if ptySess, ok := h.sm.GetPTY("s1"); ok {
+		t.Cleanup(func() {
+			ptySess.Kill()
+			<-ptySess.Done()
+			ptySess.Close()
+		})
+	} else {
+		t.Error("expected PTY to exist after auto-resume attach")
+	}
+}
+
+func TestAttachCreatingSessionReturnsStatusError(t *testing.T) {
+	h := newTestHarness(t)
+
+	h.sm.mu.Lock()
+	h.sm.state.Sessions["s1"] = &SessionState{
+		ID:        "s1",
+		Name:      "creating-test",
+		Agent:     "claude",
+		Status:    StatusCreating,
+		CreatedAt: time.Now().UTC(),
+	}
+	h.sm.mu.Unlock()
+
+	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "s1"})
+	env := h.readControlMsg(t)
+	if env.Type != "error" {
+		t.Fatalf("expected error, got %q", env.Type)
+	}
+	var e protocol.ErrorMsg
+	protocol.DecodePayload(env, &e)
+	if !strings.Contains(e.Message, "being created") {
+		t.Errorf("error = %q, want it to mention 'being created'", e.Message)
+	}
+}
+
+func TestAttachDeletingSessionReturnsStatusError(t *testing.T) {
+	h := newTestHarness(t)
+
+	h.sm.mu.Lock()
+	h.sm.state.Sessions["s1"] = &SessionState{
+		ID:        "s1",
+		Name:      "deleting-test",
+		Agent:     "claude",
+		Status:    StatusDeleting,
+		CreatedAt: time.Now().UTC(),
+	}
+	h.sm.mu.Unlock()
+
+	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "s1"})
+	env := h.readControlMsg(t)
+	if env.Type != "error" {
+		t.Fatalf("expected error, got %q", env.Type)
+	}
+	var e protocol.ErrorMsg
+	protocol.DecodePayload(env, &e)
+	if !strings.Contains(e.Message, "being deleted") {
+		t.Errorf("error = %q, want it to mention 'being deleted'", e.Message)
+	}
+}
