@@ -2400,18 +2400,19 @@ func (sm *SessionManager) StopWithChildren(rootID string, excludeRoot bool) ([]s
 		killed, killErr := sm.killVerifiedProcess(pid, startTime)
 		sm.mu.Lock()
 		if s, ok := sm.state.Sessions[id]; ok {
-			if killed {
+			switch {
+			case killed:
 				s.Status = StatusStopped
 				s.StatusChangedAt = time.Now()
 				s.PID = 0
 				s.PIDStartTime = 0
 				applyLifecycleSummaryLocked(s, "Orphaned process killed")
 				stopped = append(stopped, id)
-			} else if killErr != nil {
+			case killErr != nil:
 				s.Status = StatusErrored
 				s.StatusChangedAt = time.Now()
 				applyLifecycleSummaryLocked(s, fmt.Sprintf("Could not kill orphaned process (PID %d): %v", pid, killErr))
-			} else {
+			default:
 				s.Status = StatusStopped
 				s.StatusChangedAt = time.Now()
 				s.PID = 0
@@ -2466,19 +2467,24 @@ func (sm *SessionManager) Restart(id string, rows, cols uint16) (SessionState, e
 
 			sm.mu.Lock()
 			if s, ok := sm.state.Sessions[id]; ok && s.Status == StatusRunning {
-				if killed || killErr == nil {
+				switch {
+				case killed:
 					s.Status = StatusStopped
 					s.StatusChangedAt = time.Now()
 					s.PID = 0
 					s.PIDStartTime = 0
 					s.StopReason = StopReasonUser
-					if killed {
-						applyLifecycleSummaryLocked(s, "Orphaned process killed for restart")
-					} else {
-						applyLifecycleSummaryLocked(s, "Process already exited")
-					}
+					applyLifecycleSummaryLocked(s, "Orphaned process killed for restart")
 					sm.saveState()
-				} else {
+				case killErr == nil:
+					s.Status = StatusStopped
+					s.StatusChangedAt = time.Now()
+					s.PID = 0
+					s.PIDStartTime = 0
+					s.StopReason = StopReasonUser
+					applyLifecycleSummaryLocked(s, "Process already exited")
+					sm.saveState()
+				default:
 					s.Status = StatusErrored
 					s.StatusChangedAt = time.Now()
 					applyLifecycleSummaryLocked(s,
