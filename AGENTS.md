@@ -127,7 +127,7 @@ or `GR_AGENT_MODE=1` to force. The `--agent-mode` flag also forces it on.
 - `gr stop --children` / `gr delete --children` — operate on all descendant
   sessions. When run without a positional arg, auto-resolves from
   `GRAITH_SESSION_ID` and excludes the calling session.
-- `gr msg send --children "body"` — send to all direct child sessions' inboxes.
+- `gr msg send --children "body"` — send to all descendant sessions' inboxes.
 - `gr msg send --parent "body"` — send to the parent session's inbox.
 
 These flags make it easy for agents to manage their child sessions and
