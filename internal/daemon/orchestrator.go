@@ -302,6 +302,7 @@ func (sm *SessionManager) ensureOrchestrator(ctx context.Context) {
 			s.StatusChangedAt = time.Now()
 			s.StopReason = StopReasonCrash
 			s.PID = 0
+			s.PIDStartTime = 0
 		}
 		_ = sm.saveState()
 		sm.mu.Unlock()
