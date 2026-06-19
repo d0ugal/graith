@@ -371,7 +371,7 @@ func init() {
 	msgSendCmd.Flags().StringVar(&msgSendThreadID, "thread", "", "thread ID to continue")
 	msgSendCmd.Flags().StringVar(&msgSendReplyTo, "reply-to", "", "stream for replies")
 	msgSendCmd.Flags().BoolVarP(&msgSendQuiet, "quiet", "q", false, "don't type a notification into the session")
-	msgSendCmd.Flags().BoolVar(&msgSendChildren, "children", false, "send to all direct child sessions")
+	msgSendCmd.Flags().BoolVar(&msgSendChildren, "children", false, "send to all descendant sessions")
 	msgSendCmd.Flags().BoolVar(&msgSendParent, "parent", false, "send to parent session")
 	msgSendCmd.MarkFlagsMutuallyExclusive("children", "parent")
 
@@ -493,20 +493,15 @@ func msgSendChildrenRun(args []string) error {
 		return err
 	}
 
-	var children []protocol.SessionInfo
-	for _, s := range list.Sessions {
-		if s.ParentID == currentID {
-			children = append(children, s)
-		}
-	}
-	if len(children) == 0 {
-		return fmt.Errorf("no child sessions found")
+	descendants := descendantsOf(list.Sessions, currentID)
+	if len(descendants) == 0 {
+		return fmt.Errorf("no descendant sessions found")
 	}
 
 	var sentTo []string
-	for _, child := range children {
+	for _, desc := range descendants {
 		c.SendControl("msg_pub", protocol.MsgPubMsg{
-			Stream:     "inbox:" + child.ID,
+			Stream:     "inbox:" + desc.ID,
 			Body:       body,
 			SenderID:   senderID,
 			SenderName: senderName,
@@ -520,18 +515,18 @@ func msgSendChildrenRun(args []string) error {
 		if resp.Type == "error" {
 			var e protocol.ErrorMsg
 			protocol.DecodePayload(resp, &e)
-			return fmt.Errorf("sending to %s: %s", child.Name, e.Message)
+			return fmt.Errorf("sending to %s: %s", desc.Name, e.Message)
 		}
-		sentTo = append(sentTo, child.Name)
+		sentTo = append(sentTo, desc.Name)
 
 		if !msgSendQuiet {
 			sender := senderName
 			if sender == "" {
 				sender = senderID
 			}
-			hint := fmt.Sprintf("New message from %s. Read: gr msg sub --topic inbox:%s --all | Reply: gr msg send --parent \"<reply>\"", sender, child.ID)
+			hint := fmt.Sprintf("New message from %s. Read: gr msg sub --topic inbox:%s --all | Reply: gr msg send --parent \"<reply>\"", sender, desc.ID)
 			c.SendControl("type", protocol.TypeMsg{
-				SessionID: child.ID,
+				SessionID: desc.ID,
 				Input:     hint,
 			})
 			c.ReadControlResponse() //nolint:errcheck // notification is best-effort
@@ -544,7 +539,7 @@ func msgSendChildrenRun(args []string) error {
 			Count  int      `json:"count"`
 		}{sentTo, len(sentTo)})
 	}
-	out.Print("Sent to %d child sessions\n", len(sentTo))
+	out.Print("Sent to %d descendant sessions\n", len(sentTo))
 	return nil
 }
 
