@@ -125,6 +125,8 @@ func (d *Detector) NeedsApproval(content string) bool {
 		"❯ No",
 		"❯ Allow",
 		"Do you trust the files in this folder?",
+		"Do you trust the contents of this directory?",
+		"Workspace Trust Required",
 		"Allow this MCP server",
 		"Run this command?",
 		"Execute this?",
