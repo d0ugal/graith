@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.49.0](https://github.com/d0ugal/graith/compare/v0.48.0...v0.49.0) (2026-06-19)
+
+
+### Features
+
+* add --skip-model-validation flag to gr new ([84dffbc](https://github.com/d0ugal/graith/commit/84dffbc597c62c3e04286f035a3a5b6f50bb2022))
+
+
+### Bug Fixes
+
+* stop auto-restarting orchestrator on sandbox config reload ([c053994](https://github.com/d0ugal/graith/commit/c0539948d7af2f3753850ce760446b01375da3c2))
+* use non-existent command in skip-validation test to avoid TempDir cleanup race ([2137ace](https://github.com/d0ugal/graith/commit/2137ace89b5477bb5417d1a732df948ffed3b3b7))
+
 ## [0.48.0](https://github.com/d0ugal/graith/compare/v0.47.0...v0.48.0) (2026-06-19)
 
 
