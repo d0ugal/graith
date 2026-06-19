@@ -103,7 +103,7 @@ gr list --tree                    # show hierarchy
 gr list --children my-session     # show descendants
 gr stop --children                # stop all children (from inside a session)
 gr delete --children              # delete all children
-gr msg send --children "rebase"   # message all direct children
+gr msg send --children "rebase"   # message all descendants
 gr msg send --parent "done"       # message the parent
 ```
 

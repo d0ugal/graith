@@ -41,7 +41,7 @@ gr msg send --children "rebase on main and re-run tests"
 gr msg send --parent "tests are green, ready for review"
 ```
 
-`--children` sends to all direct child sessions. `--parent` sends to the parent session. Both auto-detect the current session from `GRAITH_SESSION_ID`.
+`--children` sends to all descendant sessions. `--parent` sends to the parent session. Both auto-detect the current session from `GRAITH_SESSION_ID`.
 
 ## Subscribing
 
