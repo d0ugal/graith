@@ -1992,6 +1992,83 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 		}
 	}
 
+	// Sweep for sessions created between collectDescendants and PTY kills.
+	// Child agents may have spawned new sessions during that window.
+	deletedSet := make(map[string]bool, len(snaps)+len(creatingIDs))
+	for _, s := range snaps {
+		deletedSet[s.id] = true
+	}
+	for _, cid := range creatingIDs {
+		deletedSet[cid] = true
+	}
+
+	for sweep := 0; sweep < 10; sweep++ {
+		sm.mu.Lock()
+		var lateSnaps []snapshot
+		for sid, sess := range sm.state.Sessions {
+			if deletedSet[sid] || sess.ParentID == "" || !deletedSet[sess.ParentID] {
+				continue
+			}
+			if IsSystemSession(sess) || sess.Starred || sess.Status == StatusDeleting {
+				continue
+			}
+			deletedSet[sid] = true
+			if sess.Status == StatusCreating {
+				delete(sm.state.Sessions, sid)
+				delete(sm.hookReports, sid)
+				creatingIDs = append(creatingIDs, sid)
+				continue
+			}
+			ls := snapshot{
+				id:           sid,
+				agent:        sess.Agent,
+				repoPath:     sess.RepoPath,
+				worktreePath: sess.WorktreePath,
+				branch:       sess.Branch,
+				shared:       sess.SharedWorktree,
+				inPlace:      sess.InPlace,
+				prevStatus:   sess.Status,
+				includes:     make([]IncludedRepoState, len(sess.Includes)),
+			}
+			copy(ls.includes, sess.Includes)
+			if pty, ok := sm.sessions[sid]; ok {
+				ls.ptySess = pty
+				delete(sm.sessions, sid)
+			}
+			if ac, ok := sm.attachedClients[sid]; ok {
+				ls.client = ac
+				delete(sm.attachedClients, sid)
+			}
+			lateSnaps = append(lateSnaps, ls)
+			sess.Status = StatusDeleting
+			sess.StatusChangedAt = time.Now()
+			sess.PID = 0
+		}
+		if len(lateSnaps) == 0 {
+			sm.mu.Unlock()
+			break
+		}
+		sm.log.Info("sweep found late-arriving descendants", "count", len(lateSnaps), "round", sweep+1)
+		_ = sm.saveState()
+		sm.mu.Unlock()
+
+		for _, s := range lateSnaps {
+			if s.ptySess != nil {
+				s.ptySess.Detach()
+				if !s.ptySess.Exited() {
+					_ = s.ptySess.Kill()
+					select {
+					case <-s.ptySess.Done():
+					case <-time.After(5 * time.Second):
+						_ = s.ptySess.ForceKill()
+					}
+				}
+				s.ptySess.Close()
+			}
+		}
+		snaps = append(snaps, lateSnaps...)
+	}
+
 	// Attempt teardowns, tracking which succeed.
 	var teardownErrs []error
 	succeeded := make(map[string]bool, len(snaps))
@@ -2174,6 +2251,47 @@ func (sm *SessionManager) StopWithChildren(rootID string, excludeRoot bool) ([]s
 			continue
 		}
 		stopped = append(stopped, id)
+	}
+
+	// Sweep for sessions created between collectDescendants and the stop loop.
+	stoppedSet := make(map[string]bool, len(toStop))
+	for _, id := range toStop {
+		stoppedSet[id] = true
+	}
+
+	for sweep := 0; sweep < 10; sweep++ {
+		sm.mu.Lock()
+		var late []string
+		for sid, sess := range sm.state.Sessions {
+			if stoppedSet[sid] || sess.ParentID == "" || !stoppedSet[sess.ParentID] {
+				continue
+			}
+			if sess.Starred || sess.Status != StatusRunning {
+				continue
+			}
+			stoppedSet[sid] = true
+			late = append(late, sid)
+			sess.StopReason = StopReasonUser
+		}
+		if len(late) == 0 {
+			sm.mu.Unlock()
+			break
+		}
+		sm.log.Info("sweep found late-arriving descendants to stop", "count", len(late), "round", sweep+1)
+		_ = sm.saveState()
+		sm.mu.Unlock()
+
+		for _, lid := range late {
+			ptySess, ok := sm.GetPTY(lid)
+			if !ok {
+				continue
+			}
+			if err := ptySess.Kill(); err != nil {
+				sm.log.Warn("stop late child failed", "session_id", lid, "error", err)
+				continue
+			}
+			stopped = append(stopped, lid)
+		}
 	}
 
 	return stopped, nil

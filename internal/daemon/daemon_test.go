@@ -3131,6 +3131,89 @@ func TestDeleteWithChildrenIdempotent(t *testing.T) {
 	}
 }
 
+func TestDeleteWithChildrenGrandchildren(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	sm.state.Sessions["parent1"] = &SessionState{
+		ID:     "parent1",
+		Name:   "parent",
+		Agent:  "claude",
+		Status: StatusStopped,
+	}
+	sm.state.Sessions["child1"] = &SessionState{
+		ID:       "child1",
+		Name:     "child",
+		Agent:    "claude",
+		ParentID: "parent1",
+		Status:   StatusStopped,
+	}
+	sm.state.Sessions["grandchild1"] = &SessionState{
+		ID:       "grandchild1",
+		Name:     "grandchild",
+		Agent:    "claude",
+		ParentID: "child1",
+		Status:   StatusStopped,
+	}
+
+	deleted, err := sm.DeleteWithChildren("parent1", false)
+	if err != nil {
+		t.Fatalf("DeleteWithChildren failed: %v", err)
+	}
+
+	if len(deleted) != 3 {
+		t.Errorf("expected 3 deleted sessions, got %d: %v", len(deleted), deleted)
+	}
+
+	for _, id := range []string{"parent1", "child1", "grandchild1"} {
+		if _, ok := sm.state.Sessions[id]; ok {
+			t.Errorf("%s should be removed from state", id)
+		}
+	}
+}
+
+func TestDeleteWithChildrenExcludeRootGrandchildren(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	sm.state.Sessions["parent1"] = &SessionState{
+		ID:     "parent1",
+		Name:   "parent",
+		Agent:  "claude",
+		Status: StatusRunning,
+	}
+	sm.state.Sessions["child1"] = &SessionState{
+		ID:       "child1",
+		Name:     "child",
+		Agent:    "claude",
+		ParentID: "parent1",
+		Status:   StatusStopped,
+	}
+	sm.state.Sessions["grandchild1"] = &SessionState{
+		ID:       "grandchild1",
+		Name:     "grandchild",
+		Agent:    "claude",
+		ParentID: "child1",
+		Status:   StatusStopped,
+	}
+
+	deleted, err := sm.DeleteWithChildren("parent1", true)
+	if err != nil {
+		t.Fatalf("DeleteWithChildren failed: %v", err)
+	}
+
+	if len(deleted) != 2 {
+		t.Errorf("expected 2 deleted sessions, got %d: %v", len(deleted), deleted)
+	}
+
+	if _, ok := sm.state.Sessions["parent1"]; !ok {
+		t.Error("parent should NOT be removed from state (excludeRoot)")
+	}
+	for _, id := range []string{"child1", "grandchild1"} {
+		if _, ok := sm.state.Sessions[id]; ok {
+			t.Errorf("%s should be removed from state", id)
+		}
+	}
+}
+
 func createTestSession(sm *SessionManager, name string) string {
 	id := generateID()
 	sm.state.Sessions[id] = &SessionState{
