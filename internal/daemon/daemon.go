@@ -1293,7 +1293,9 @@ func (sm *SessionManager) watchSession(id string, sess *grpty.Session) {
 				sm.log.Error("failed to save state after session exit", "id", id, "err", err)
 			}
 
-			sm.recordExit()
+			if s.StopReason == StopReasonCrash {
+				sm.recordExit()
+			}
 
 			delete(sm.sessions, id)
 		} else {
