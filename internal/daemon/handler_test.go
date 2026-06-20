@@ -17,6 +17,7 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
 	grpty "github.com/d0ugal/graith/internal/pty"
+	"github.com/d0ugal/graith/internal/version"
 )
 
 // testHarness wraps a client connection to HandleConnection for testing.
@@ -826,6 +827,29 @@ func TestUpgrade(t *testing.T) {
 	case <-h.done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("handler did not return after upgrade")
+	}
+}
+
+func TestUpgradeSameVersion(t *testing.T) {
+	h := newTestHarness(t)
+
+	h.sendControl(t, "upgrade", protocol.UpgradeMsg{
+		ExecPath:      "/tmp/test-gr",
+		ClientVersion: version.Version,
+	})
+
+	env := h.readControlMsg(t)
+	if env.Type != "upgrading" {
+		t.Fatalf("expected upgrading for same-version request, got %q", env.Type)
+	}
+
+	select {
+	case path := <-h.sm.upgradeCh:
+		if path != "/tmp/test-gr" {
+			t.Errorf("upgradeCh received %q, want /tmp/test-gr", path)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("upgradeCh did not receive exec path")
 	}
 }
 
