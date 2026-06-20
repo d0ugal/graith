@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.53.1](https://github.com/d0ugal/graith/compare/v0.53.0...v0.53.1) (2026-06-20)
+
+
+### Bug Fixes
+
+* update module github.com/pelletier/go-toml/v2 to v2.4.1 ([ba4317b](https://github.com/d0ugal/graith/commit/ba4317b702c815ea29207316d6afe5c0f91f83b8))
+
 ## [0.53.0](https://github.com/d0ugal/graith/compare/v0.52.1...v0.53.0) (2026-06-18)
 
 
