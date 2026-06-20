@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -29,6 +30,8 @@ type Session struct {
 	done             chan struct{}
 	readDone         chan struct{}
 	exitCode         int
+	exitSignal       syscall.Signal
+	peakRSSBytes     int64
 	exited           bool
 	adoptedPID       int
 	adoptedStartTime int64
@@ -243,12 +246,32 @@ func (s *Session) waitLoop() {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
 			s.exitCode = exitErr.ExitCode()
+			if ws, ok := exitErr.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
+				s.exitSignal = ws.Signal()
+			}
+			s.peakRSSBytes = extractPeakRSS(exitErr.ProcessState)
 		} else {
 			s.exitCode = -1
 		}
+	} else if s.Cmd.ProcessState != nil {
+		s.peakRSSBytes = extractPeakRSS(s.Cmd.ProcessState)
 	}
 	s.mu.Unlock()
 	close(s.done)
+}
+
+func extractPeakRSS(ps *os.ProcessState) int64 {
+	if ps == nil {
+		return 0
+	}
+	if ru, ok := ps.SysUsage().(*syscall.Rusage); ok && ru != nil {
+		rss := ru.Maxrss
+		if runtime.GOOS != "darwin" {
+			rss *= 1024 // Linux reports KB; macOS already reports bytes.
+		}
+		return rss
+	}
+	return 0
 }
 
 func (s *Session) WriteInput(data []byte) error {
@@ -348,6 +371,12 @@ func (s *Session) RecentlyAdopted(grace time.Duration) bool {
 }
 func (s *Session) Exited() bool  { s.mu.RLock(); defer s.mu.RUnlock(); return s.exited }
 func (s *Session) ExitCode() int { s.mu.RLock(); defer s.mu.RUnlock(); return s.exitCode }
+func (s *Session) ExitSignal() syscall.Signal {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.exitSignal
+}
+func (s *Session) PeakRSSBytes() int64 { s.mu.RLock(); defer s.mu.RUnlock(); return s.peakRSSBytes }
 
 func (s *Session) Kill() error {
 	pid := s.ProcessPID()
