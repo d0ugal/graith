@@ -3538,3 +3538,74 @@ func TestConcurrentConfigReadWrite(t *testing.T) {
 		<-done
 	}
 }
+
+func TestRecordExit_MassExitDetection(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	// Record exits below threshold — no warning expected.
+	for i := 0; i < massExitThreshold-1; i++ {
+		sm.recordExit()
+	}
+	if len(sm.recentExits) != massExitThreshold-1 {
+		t.Errorf("recentExits = %d, want %d", len(sm.recentExits), massExitThreshold-1)
+	}
+
+	// One more should hit the threshold (warning is logged, not checked here).
+	sm.recordExit()
+	if len(sm.recentExits) != massExitThreshold {
+		t.Errorf("recentExits = %d, want %d", len(sm.recentExits), massExitThreshold)
+	}
+}
+
+func TestRecordExit_PrunesOldEntries(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	// Simulate old exits outside the window.
+	old := time.Now().Add(-5 * time.Second)
+	for i := 0; i < 3; i++ {
+		sm.recentExits = append(sm.recentExits, old)
+	}
+
+	sm.recordExit()
+
+	// Old entries should be pruned; only the new one remains.
+	if len(sm.recentExits) != 1 {
+		t.Errorf("recentExits = %d, want 1 (old entries should be pruned)", len(sm.recentExits))
+	}
+}
+
+func TestWatchSessionRecordsExitSignal(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	id := "test-signal"
+	sm.state.Sessions[id] = &SessionState{
+		ID:     id,
+		Name:   "signal-test",
+		Status: StatusRunning,
+	}
+
+	cmd := exec.Command("sh", "-c", "kill -TERM $$")
+	sess, err := grpty.NewSession(grpty.SessionOpts{
+		ID:      id,
+		Command: cmd.Path,
+		Args:    cmd.Args[1:],
+		Dir:     t.TempDir(),
+		Rows:    24,
+		Cols:    80,
+		LogPath: filepath.Join(t.TempDir(), "test.log"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sm.sessions[id] = sess
+
+	sm.watchSession(id, sess)
+
+	s := sm.state.Sessions[id]
+	if s.ExitSignal != "terminated" {
+		t.Errorf("ExitSignal = %q, want %q", s.ExitSignal, "terminated")
+	}
+	if s.Status != StatusStopped {
+		t.Errorf("Status = %q, want %q", s.Status, StatusStopped)
+	}
+}
