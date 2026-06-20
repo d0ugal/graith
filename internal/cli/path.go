@@ -2,8 +2,11 @@ package cli
 
 import (
 	"fmt"
+	"io"
 
 	"github.com/d0ugal/graith/internal/client"
+	"github.com/d0ugal/graith/internal/output"
+	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/spf13/cobra"
 )
 
@@ -25,21 +28,25 @@ var pathCmd = &cobra.Command{
 			return err
 		}
 
-		if session.WorktreePath == "" {
-			return fmt.Errorf("session %q has no worktree path", args[0])
-		}
-
-		if out.IsJSON() {
-			return out.JSON(map[string]string{
-				"session_id":    session.ID,
-				"name":          session.Name,
-				"worktree_path": session.WorktreePath,
-			})
-		}
-
-		fmt.Print(session.WorktreePath)
-		return nil
+		return printPath(cmd.OutOrStdout(), out, session, args[0])
 	},
+}
+
+func printPath(w io.Writer, o *output.Writer, session *protocol.SessionInfo, nameOrID string) error {
+	if session.WorktreePath == "" {
+		return fmt.Errorf("session %q has no worktree path", nameOrID)
+	}
+
+	if o.IsJSON() {
+		return o.JSON(map[string]string{
+			"session_id":    session.ID,
+			"name":          session.Name,
+			"worktree_path": session.WorktreePath,
+		})
+	}
+
+	fmt.Fprint(w, session.WorktreePath)
+	return nil
 }
 
 func init() {
