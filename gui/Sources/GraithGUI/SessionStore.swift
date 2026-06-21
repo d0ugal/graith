@@ -10,6 +10,7 @@ class SessionStore: ObservableObject {
     /// Which pane is focused: .primary (left) or .secondary (right)
     @Published var focusedPane: SplitPane = .primary
     @Published var error: String?
+    @Published var collapsedSessions: Set<String> = []
 
     enum SplitPane {
         case primary, secondary
@@ -58,6 +59,19 @@ class SessionStore: ObservableObject {
 
     func children(of parentID: String, in sessions: [Session]) -> [Session] {
         sessions.filter { $0.parentID == parentID }
+    }
+
+    func descendantCount(of sessionID: String, in sessions: [Session]) -> Int {
+        let kids = children(of: sessionID, in: sessions)
+        return kids.reduce(kids.count) { $0 + descendantCount(of: $1.id, in: sessions) }
+    }
+
+    func toggleCollapsed(_ sessionID: String) {
+        if collapsedSessions.contains(sessionID) {
+            collapsedSessions.remove(sessionID)
+        } else {
+            collapsedSessions.insert(sessionID)
+        }
     }
 
     func selectSession(_ session: Session) {

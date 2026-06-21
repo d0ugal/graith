@@ -162,11 +162,23 @@ struct SessionTreeNode: View {
         store.children(of: session.id, in: allSessions)
     }
 
+    var hasChildren: Bool { !children.isEmpty }
+    var isCollapsed: Bool { store.collapsedSessions.contains(session.id) }
+
     var body: some View {
         VStack(spacing: 0) {
-            SessionRow(session: session, depth: depth)
-            ForEach(children) { child in
-                SessionTreeNode(session: child, allSessions: allSessions, depth: depth + 1)
+            SessionRow(
+                session: session,
+                depth: depth,
+                hasChildren: hasChildren,
+                isCollapsed: isCollapsed,
+                descendantCount: hasChildren && isCollapsed
+                    ? store.descendantCount(of: session.id, in: allSessions) : 0
+            )
+            if !isCollapsed {
+                ForEach(children) { child in
+                    SessionTreeNode(session: child, allSessions: allSessions, depth: depth + 1)
+                }
             }
         }
     }
@@ -175,6 +187,9 @@ struct SessionTreeNode: View {
 struct SessionRow: View {
     let session: Session
     let depth: Int
+    var hasChildren: Bool = false
+    var isCollapsed: Bool = false
+    var descendantCount: Int = 0
     @EnvironmentObject var store: SessionStore
 
     var isSelected: Bool {
@@ -202,6 +217,24 @@ struct SessionRow: View {
                     }
                 }
                 .frame(width: CGFloat(depth) * 14)
+            }
+
+            // Collapse/expand indicator
+            if hasChildren {
+                Button(action: { store.toggleCollapsed(session.id) }) {
+                    HStack(spacing: 2) {
+                        Text(isCollapsed ? "▸" : "▾")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(Theme.overlay0)
+                        if isCollapsed {
+                            Text("\(descendantCount)")
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundStyle(Theme.overlay0)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                .frame(width: isCollapsed ? 28 : 14, alignment: .leading)
             }
 
             // Status dot with pulse for active agents
