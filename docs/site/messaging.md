@@ -64,8 +64,8 @@ gr msg sub --topic code-review --follow
 # Filter to a specific thread
 gr msg sub --topic code-review --thread abc123
 
-# Read inbox (use the full stream name inbox:<session-id>)
-gr msg sub --topic "inbox:$GRAITH_SESSION_ID" --all --ack
+# Read inbox
+gr msg inbox --all --ack
 ```
 
 ### Behavior

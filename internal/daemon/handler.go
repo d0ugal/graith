@@ -555,6 +555,23 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					}
 				}
 
+			case "msg_inbox":
+				var m protocol.MsgInboxMsg
+				if err := protocol.DecodePayload(msg, &m); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid msg_inbox message"})
+					continue
+				}
+				if !auth.authenticated {
+					sendControl("error", protocol.ErrorMsg{
+						Message: "msg_inbox requires an authenticated session — use gr msg sub --topic inbox:<id> for debugging",
+					})
+					continue
+				}
+				stream := "inbox:" + auth.sessionID
+				if sm.handleMsgStreamRead(ctx, sendControl, reader, stream, auth.sessionID, m.OnlyUnread, m.ThreadID, m.Wait, m.Follow, m.Ack) {
+					return
+				}
+
 			case "msg_sub":
 				var m protocol.MsgSubMsg
 				if err := protocol.DecodePayload(msg, &m); err != nil {
@@ -563,106 +580,16 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				}
 				if auth.authenticated {
 					m.Subscriber = auth.sessionID
-					if authErr := auth.checkInboxRead(m.Stream); authErr != nil {
-						sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
+					if _, isInbox := parseInboxStream(m.Stream); isInbox {
+						sendControl("error", protocol.ErrorMsg{
+							Message: "inbox streams cannot be read via msg_sub; use gr msg inbox instead",
+						})
 						continue
 					}
 				}
-
-				// Subscribe before reading to avoid missing messages published
-				// between Read and Subscribe.
-				var sub chan Message
-				var unsub func()
-				if m.Wait || m.Follow {
-					sub, unsub = sm.messages.Subscribe(m.Stream)
+				if sm.handleMsgStreamRead(ctx, sendControl, reader, m.Stream, m.Subscriber, m.OnlyUnread, m.ThreadID, m.Wait, m.Follow, m.Ack) {
+					return
 				}
-
-				msgs, err := sm.messages.Read(m.Stream, m.Subscriber, m.OnlyUnread, m.ThreadID)
-				if err != nil {
-					if unsub != nil {
-						unsub()
-					}
-					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-					continue
-				}
-				for _, msg := range msgs {
-					sendControl("msg_message", msg)
-				}
-
-				if m.Ack && m.Subscriber != "" && len(msgs) > 0 {
-					if m.ThreadID != "" {
-						seqs := make([]int64, len(msgs))
-						for i, msg := range msgs {
-							seqs[i] = msg.Seq
-						}
-						sm.messages.AckMessages(m.Stream, m.Subscriber, seqs)
-					} else {
-						sm.messages.Ack(m.Stream, m.Subscriber, msgs[len(msgs)-1].Seq)
-					}
-				}
-
-				if !m.Wait && !m.Follow {
-					if unsub != nil {
-						unsub()
-					}
-					sendControl("msg_done", struct{}{})
-					continue
-				}
-				if m.Wait && len(msgs) > 0 {
-					unsub()
-					sendControl("msg_done", struct{}{})
-					continue
-				}
-
-				sendControl("msg_following", struct{}{})
-				detachCh := make(chan struct{})
-				go func() {
-					for {
-						f, err := reader.ReadFrame()
-						if err != nil {
-							close(detachCh)
-							return
-						}
-						if f.Channel == protocol.ChannelControl {
-							ctrl, _ := protocol.DecodeControl(f.Payload)
-							if ctrl.Type == "detach" {
-								close(detachCh)
-								return
-							}
-						}
-					}
-				}()
-				func() {
-					defer unsub()
-					for {
-						select {
-						case tmsg := <-sub:
-							if m.ThreadID != "" && tmsg.ThreadID != m.ThreadID {
-								continue
-							}
-							sendControl("msg_message", tmsg)
-							if m.Ack && m.Subscriber != "" {
-								if m.ThreadID != "" {
-									sm.messages.AckMessages(m.Stream, m.Subscriber, []int64{tmsg.Seq})
-								} else {
-									sm.messages.Ack(m.Stream, m.Subscriber, tmsg.Seq)
-								}
-							}
-							if m.Wait {
-								sendControl("msg_done", struct{}{})
-								return
-							}
-						case <-detachCh:
-							sendControl("msg_done", struct{}{})
-							return
-						case <-ctx.Done():
-							return
-						}
-					}
-				}()
-				// The goroutine above owns the reader — returning prevents
-				// the outer loop from racing on ReadFrame.
-				return
 
 			case "msg_ack":
 				var m protocol.MsgAckMsg
@@ -672,8 +599,10 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				}
 				if auth.authenticated {
 					m.Subscriber = auth.sessionID
-					if authErr := auth.checkInboxRead(m.Stream); authErr != nil {
-						sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
+					if _, isInbox := parseInboxStream(m.Stream); isInbox {
+						sendControl("error", protocol.ErrorMsg{
+							Message: "inbox streams cannot be acked via msg_ack; use gr msg inbox --ack instead",
+						})
 						continue
 					}
 				}
@@ -696,6 +625,15 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 				} else {
+					if auth.authenticated {
+						filtered := streams[:0]
+						for _, s := range streams {
+							if _, isInbox := parseInboxStream(s.Name); !isInbox {
+								filtered = append(filtered, s)
+							}
+						}
+						streams = filtered
+					}
 					sendControl("msg_topics_list", struct {
 						Streams []StreamInfo `json:"streams"`
 					}{streams})

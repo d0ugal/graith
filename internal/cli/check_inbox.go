@@ -33,7 +33,10 @@ var checkInboxCmd = &cobra.Command{
 		}
 		defer c.Close()
 
-		c.SendControl("msg_sub", inboxSubMsg(sessionID))
+		c.SendControl("msg_inbox", protocol.MsgInboxMsg{
+			OnlyUnread: true,
+			Ack:        true,
+		})
 
 		var messages []inboxMessage
 		for {
@@ -81,8 +84,8 @@ var checkInboxCmd = &cobra.Command{
 		}
 
 		systemMsg := fmt.Sprintf(
-			"You have %d unread message(s) in your graith inbox. Read with: gr msg sub --topic inbox:%s --all\n\n%s",
-			len(messages), sessionID, previewStr,
+			"You have %d unread message(s) in your graith inbox. Read with: gr msg inbox --all\n\n%s",
+			len(messages), previewStr,
 		)
 
 		out, _ := json.Marshal(map[string]string{
@@ -100,15 +103,6 @@ type inboxMessage struct {
 	SenderID   string `json:"sender_id"`
 	Body       string `json:"body"`
 	CreatedAt  string `json:"created_at"`
-}
-
-func inboxSubMsg(sessionID string) protocol.MsgSubMsg {
-	return protocol.MsgSubMsg{
-		Stream:     "inbox:" + sessionID,
-		Subscriber: sessionID,
-		OnlyUnread: true,
-		Ack:        true,
-	}
 }
 
 func init() {

@@ -154,7 +154,7 @@ var msgSendCmd = &cobra.Command{
 		if jsonOutput {
 			return out.JSON(json.RawMessage(resp.Payload))
 		}
-		out.Print("Sent to inbox:%s\n", sessionID)
+		out.Print("Sent to %s\n", args[0])
 		return nil
 	},
 }
@@ -354,6 +354,13 @@ func init() {
 	msgSendCmd.Flags().BoolVar(&msgSendChildren, "children", false, "send to all descendant sessions")
 	msgSendCmd.Flags().BoolVar(&msgSendParent, "parent", false, "send to parent session")
 	msgSendCmd.MarkFlagsMutuallyExclusive("children", "parent")
+
+	msgCmd.AddCommand(msgInboxCmd)
+	msgInboxCmd.Flags().BoolVarP(&msgInboxWait, "wait", "w", false, "block until a message arrives")
+	msgInboxCmd.Flags().BoolVarP(&msgInboxFollow, "follow", "F", false, "stream new messages continuously")
+	msgInboxCmd.Flags().BoolVar(&msgInboxAck, "ack", false, "acknowledge messages after reading")
+	msgInboxCmd.Flags().BoolVarP(&msgInboxAll, "all", "a", false, "show all messages, not just unread")
+	msgInboxCmd.Flags().StringVar(&msgInboxThreadID, "thread", "", "filter to a specific thread")
 
 	msgCmd.AddCommand(msgSubCmd)
 	msgSubCmd.Flags().StringVarP(&msgSubStream, "topic", "t", "", "stream/topic name")

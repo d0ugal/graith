@@ -46,23 +46,88 @@ func (sm *SessionManager) onAgentStatusChange(sessionID, sessionName, oldStatus,
 }
 
 // notifyInbox injects a notification into the target session's PTY when a
-// message is published to its inbox. This runs daemon-side so it bypasses
-// the per-session auth check on the "type" command.
+// message is published to its inbox. If the session is stopped, it is
+// auto-resumed first — the resume flow's notifyUnreadInbox handles the
+// notification in that case. This runs daemon-side so it bypasses the
+// per-session auth check on the "type" command.
 func (sm *SessionManager) notifyInbox(targetID, senderID, senderName string) {
 	ptySess, ok := sm.GetPTY(targetID)
 	if !ok {
+		sm.resumeForInbox(targetID, senderID, senderName)
 		return
 	}
 	sender := senderName
 	if sender == "" {
 		sender = senderID
 	}
-	hint := fmt.Sprintf("New message from %s. Read: gr msg sub --topic inbox:%s --all --ack | Reply: gr msg send %s \"<reply>\"", sender, targetID, sender)
+	hint := fmt.Sprintf("New message from %s. Read: gr msg inbox --all --ack | Reply: gr msg send %s \"<reply>\"", sender, sender)
 	if sm.HasAttachedClient(targetID) {
 		ptySess.WaitForUserIdle(10*time.Second, 2*time.Minute)
 	}
 	if err := ptySess.WriteInputAndSubmit([]byte(hint)); err != nil {
 		sm.log.Debug("inbox notification write failed", "target", targetID, "err", err)
+	}
+	ptySess.Poke()
+}
+
+// resumeForInbox auto-resumes a stopped session when an inbox message arrives.
+// The resume flow calls notifyUnreadInbox which handles the PTY notification.
+func (sm *SessionManager) resumeForInbox(targetID, senderID, senderName string) {
+	sess, ok := sm.Get(targetID)
+	if !ok || sess.Status != StatusStopped {
+		return
+	}
+
+	sender := senderName
+	if sender == "" {
+		sender = senderID
+	}
+	summary := fmt.Sprintf("Resumed by inbox message from %s", sender)
+	sm.log.Info("auto-resuming stopped session on inbox message",
+		"session", sess.Name, "id", targetID, "sender", sender)
+
+	if _, err := sm.resumeWithSummary(targetID, 24, 80, summary); err != nil {
+		sm.log.Error("failed to auto-resume session for inbox",
+			"session", targetID, "err", err)
+	}
+}
+
+// notifyUnreadInbox checks for unread inbox messages and injects a PTY
+// notification if any exist. Always call as a goroutine — the idle-wait
+// can block for up to 2 minutes.
+func (sm *SessionManager) notifyUnreadInbox(sessionID string) {
+	if sm.messages == nil {
+		return
+	}
+
+	sm.mu.Lock()
+	last, ok := sm.lastInboxNotifyAt[sessionID]
+	if ok && time.Since(last) < 30*time.Second {
+		sm.mu.Unlock()
+		return
+	}
+	sm.lastInboxNotifyAt[sessionID] = time.Now()
+	sm.mu.Unlock()
+
+	ptySess, ok := sm.GetPTY(sessionID)
+	if !ok {
+		return
+	}
+
+	if sm.HasAttachedClient(sessionID) {
+		ptySess.WaitForUserIdle(10*time.Second, 2*time.Minute)
+	} else {
+		time.Sleep(5 * time.Second)
+	}
+
+	count := sm.messages.TotalUnread(sessionID)
+	if count == 0 {
+		return
+	}
+
+	hint := fmt.Sprintf("You have %d unread inbox message(s). Read: gr msg inbox --all --ack", count)
+	if err := ptySess.WriteInputAndSubmit([]byte(hint)); err != nil {
+		sm.log.Debug("unread inbox notification write failed", "session", sessionID, "err", err)
 	}
 	ptySess.Poke()
 }

@@ -66,6 +66,7 @@ type SessionManager struct {
 	startedAt          time.Time
 	orchestratorExitCh chan string
 	recentExits        []time.Time
+	lastInboxNotifyAt  map[string]time.Time
 }
 
 // NewSessionManager creates a SessionManager with the given config and paths.
@@ -78,6 +79,7 @@ func NewSessionManager(cfg *config.Config, paths config.Paths, log *slog.Logger)
 		pendingApprovals:   make(map[string]*pendingApproval),
 		tokenIndex:         make(map[string]string),
 		orchestratorExitCh: make(chan string, 4),
+		lastInboxNotifyAt:  make(map[string]time.Time),
 		cfg:                cfg,
 		paths:              paths,
 		log:                log,
@@ -237,8 +239,8 @@ func (sm *SessionManager) SessionForToken(token string) string {
 
 func (sm *SessionManager) AdoptSessions(manifest *UpgradeManifest) error {
 	sm.mu.Lock()
-	defer sm.mu.Unlock()
 
+	var adoptedIDs []string
 	for _, us := range manifest.Sessions {
 		sessState, ok := sm.state.Sessions[us.ID]
 		if !ok {
@@ -267,10 +269,18 @@ func (sm *SessionManager) AdoptSessions(manifest *UpgradeManifest) error {
 		}
 		sm.sessions[us.ID] = ptySess
 		go sm.watchSession(us.ID, ptySess)
+		adoptedIDs = append(adoptedIDs, us.ID)
 		sm.log.Info("adopted session", "id", us.ID, "pid", us.PID)
 	}
 
-	return sm.saveState()
+	err := sm.saveState()
+	sm.mu.Unlock()
+
+	for _, id := range adoptedIDs {
+		go sm.notifyUnreadInbox(id)
+	}
+
+	return err
 }
 
 func (sm *SessionManager) saveState() error {
@@ -1867,6 +1877,7 @@ func (sm *SessionManager) resumeWithSummary(id string, rows, cols uint16, lifecy
 	sm.mu.Unlock()
 
 	go sm.watchSession(id, ptySess)
+	go sm.notifyUnreadInbox(id)
 
 	if scenarioIDForRepublish != "" {
 		sm.republishManifests(scenarioIDForRepublish)

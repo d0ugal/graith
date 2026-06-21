@@ -225,7 +225,7 @@ gr msg send worker-1 "analyze auth.go for race conditions" --reply-to analysis-r
 gr msg sub --topic analysis-results --wait
 
 # Worker
-gr msg sub --topic "inbox:$GRAITH_SESSION_ID" --all --ack
+gr msg inbox --all --ack
 # ... does analysis ...
 gr msg pub --topic analysis-results "No race conditions found. Thread-safe."
 ```
@@ -245,7 +245,7 @@ gr msg send worker-2 "fix the API tests"
 gr msg send --parent "auth tests fixed, all passing"
 
 # Parent reads results
-gr msg sub --topic "inbox:$GRAITH_SESSION_ID" --all --ack
+gr msg inbox --all --ack
 ```
 
 ## In-place sessions
@@ -319,7 +319,7 @@ gr msg sub --topic challenge --wait --ack
 gr msg send devil "addressed issues 1-7, disagree on 8 because ..."
 
 # Devil reviews response
-gr msg sub --topic "inbox:$GRAITH_SESSION_ID" --wait --ack
+gr msg inbox --wait --ack
 ```
 
 ### Judge panel (tribunal)
@@ -472,7 +472,7 @@ gr status "managing 2 workers"
 gr msg send --parent "auth_test.go: all 12 tests passing"
 
 # Supervisor reads results
-gr msg sub --topic "inbox:$GRAITH_SESSION_ID" --all --ack
+gr msg inbox --all --ack
 gr msg send --children "rebase on main before pushing"
 ```
 
@@ -491,7 +491,7 @@ gr new reviewer --share-worktree implementer --background \
 gr msg send implementer "handler.go:45 -- missing error check on db.Query return"
 
 # Implementer reads feedback inline
-gr msg sub --topic "inbox:$GRAITH_SESSION_ID" --all --ack
+gr msg inbox --all --ack
 ```
 
 ### Composing patterns
