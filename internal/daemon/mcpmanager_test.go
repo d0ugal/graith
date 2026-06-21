@@ -233,3 +233,49 @@ func TestMCPManagerExtraServers(t *testing.T) {
 		t.Error("should not have 'injected' after user disables it")
 	}
 }
+
+func TestMCPManagerDeletedCwd(t *testing.T) {
+	// Simulate the daemon's cwd being a deleted worktree. The MCP server
+	// process must still start because startProcess sets cmd.Dir explicitly.
+	logDir := t.TempDir()
+	doomedDir := t.TempDir()
+
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(doomedDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(doomedDir); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(origDir)
+
+	cfg := &config.Config{
+		MCPServers: []config.MCPServerConfig{
+			{Name: "cwd-bothy", Command: "cat"},
+		},
+	}
+	mgr := NewMCPManager(cfg, nil, logDir, slog.Default())
+	defer mgr.Shutdown()
+
+	proc, err := mgr.Connect("cwd-bothy", "proxy-haar")
+	if err != nil {
+		t.Fatalf("Connect() error = %v", err)
+	}
+
+	select {
+	case <-proc.done:
+		t.Fatal("process should still be running despite deleted cwd")
+	case <-time.After(500 * time.Millisecond):
+	}
+
+	mgr.Disconnect("proxy-haar")
+
+	select {
+	case <-proc.done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("process should be done after disconnect")
+	}
+}
