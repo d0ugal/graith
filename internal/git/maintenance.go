@@ -3,6 +3,7 @@ package git
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -11,7 +12,7 @@ import (
 func ListMaintenanceRepos(ctx context.Context) ([]string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return nil, nil
+		return nil, fmt.Errorf("resolving home dir: %w", err)
 	}
 	stdout, _, err := RunContextEnv(ctx, home, []string{"HOME=" + home}, "config", "--global", "--get-all", "maintenance.repo")
 	if err != nil {
