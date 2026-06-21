@@ -43,7 +43,7 @@ gr msg send <session> "text"          # message another session directly
 gr msg send --parent "text"           # message your parent session
 gr msg send --children "text"         # message all child sessions
 gr msg pub --topic <topic> "text"     # broadcast to a topic
-gr msg sub --topic inbox --all --ack  # read and acknowledge inbox messages
+gr msg inbox --all --ack              # read and acknowledge inbox messages
 ```
 
 Note: `gr msg sub --wait` blocks until a message arrives. Use `--all` to read without blocking.

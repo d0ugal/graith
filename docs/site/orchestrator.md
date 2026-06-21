@@ -40,7 +40,7 @@ gr list                           # list all sessions with status
 gr msg send <session> "text"      # message a specific session
 gr msg send --children "text"     # message all child sessions
 gr msg pub --topic <topic> "text" # broadcast to a topic
-gr msg sub --topic "inbox:$GRAITH_SESSION_ID" --all --ack  # read inbox messages
+gr msg inbox --all --ack              # read inbox messages
 gr store put --shared <key> <body> # persist documents (use --shared)
 gr status "message"               # set status visible in picker
 gr type <session> "text"          # type into another session
@@ -75,7 +75,7 @@ Orchestrator runs:
 
 Orchestrator monitors:
   gr list
-  gr msg sub --topic "inbox:$GRAITH_SESSION_ID" --all --ack
+  gr msg inbox --all --ack
 
 Orchestrator coordinates:
   gr msg send auth-tests "middleware is done, you can start integration tests now"
