@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.54.1](https://github.com/d0ugal/graith/compare/v0.54.0...v0.54.1) (2026-06-21)
+
+
+### Bug Fixes
+
+* set explicit cwd for MCP server processes to survive worktree deletion ([ea16e11](https://github.com/d0ugal/graith/commit/ea16e1143c87de26b2cd767918e75f5c7117c4f5))
+
 ## [0.54.0](https://github.com/d0ugal/graith/compare/v0.53.1...v0.54.0) (2026-06-21)
 
 
