@@ -182,6 +182,7 @@ without stepping on each other's files.
 
 Press `ctrl+b w` to open the session picker, or use `ctrl+b n`/`ctrl+b p` to
 cycle through sessions. `ctrl+b d` detaches without stopping the agent.
+`ctrl+b c` opens a create-session form, or press `n` in the session picker.
 
 ### Inter-agent messaging
 
