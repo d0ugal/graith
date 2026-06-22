@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"bytes"
+	"strings"
 	"testing"
 
 	toml "github.com/pelletier/go-toml/v2"
@@ -30,7 +32,9 @@ task = "Add trace export"
 `
 
 	var sf scenarioFile
-	if err := toml.Unmarshal([]byte(input), &sf); err != nil {
+	dec := toml.NewDecoder(bytes.NewReader([]byte(input)))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&sf); err != nil {
 		t.Fatalf("parse error: %v", err)
 	}
 
@@ -91,7 +95,9 @@ agent_hooks = false
 `
 
 	var sf scenarioFile
-	if err := toml.Unmarshal([]byte(input), &sf); err != nil {
+	dec := toml.NewDecoder(bytes.NewReader([]byte(input)))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&sf); err != nil {
 		t.Fatal(err)
 	}
 
@@ -101,5 +107,30 @@ agent_hooks = false
 
 	if sf.Sessions[1].AgentHooks == nil || *sf.Sessions[1].AgentHooks {
 		t.Error("session[1].agent_hooks should be false")
+	}
+}
+
+func TestScenarioFileRejectsUnknownFields(t *testing.T) {
+	input := `
+version = 1
+
+[scenario]
+name = "test"
+unknown_field = "oops"
+
+[[sessions]]
+name = "a"
+repo = "/tmp/repo"
+`
+
+	var sf scenarioFile
+	dec := toml.NewDecoder(bytes.NewReader([]byte(input)))
+	dec.DisallowUnknownFields()
+	err := dec.Decode(&sf)
+	if err == nil {
+		t.Fatal("expected error for unknown TOML field")
+	}
+	if !strings.Contains(err.Error(), "strict mode") {
+		t.Errorf("error = %q, want strict mode error", err.Error())
 	}
 }
