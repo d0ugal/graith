@@ -102,8 +102,11 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 		}
 	}
 
-	// Check session name uniqueness against existing sessions.
+	// Check session name uniqueness against existing sessions (shared sessions may reuse).
 	for _, s := range msg.Sessions {
+		if s.Shared {
+			continue
+		}
 		for _, existing := range sm.state.Sessions {
 			if existing.Name == s.Name {
 				sm.mu.Unlock()
@@ -117,11 +120,9 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 
 	scenarioSessions := make([]ScenarioSession, len(msg.Sessions))
 	sessionIDs := make([]string, len(msg.Sessions))
+	sharedReused := make([]bool, len(msg.Sessions))
 
 	for i, s := range msg.Sessions {
-		id := generateID()
-		sessionIDs[i] = id
-
 		agentName := s.Agent
 		if agentName == "" {
 			agentName = cfg.DefaultAgent
@@ -134,13 +135,31 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 		}
 
 		scenarioSessions[i] = ScenarioSession{
-			Name:  s.Name,
-			Role:  s.Role,
-			Task:  s.Task,
-			Repo:  filepath.Base(repoRoot),
-			Agent: agentName,
-			Model: s.Model,
+			Name:   s.Name,
+			Role:   s.Role,
+			Task:   s.Task,
+			Repo:   filepath.Base(repoRoot),
+			Agent:  agentName,
+			Model:  s.Model,
+			Shared: s.Shared,
 		}
+
+		// For shared sessions, try to reuse an existing running session.
+		if s.Shared {
+			for existID, existing := range sm.state.Sessions {
+				if existing.Name == s.Name && existing.Status == StatusRunning {
+					sessionIDs[i] = existID
+					sharedReused[i] = true
+					break
+				}
+			}
+			if sharedReused[i] {
+				continue
+			}
+		}
+
+		id := generateID()
+		sessionIDs[i] = id
 
 		sm.state.Sessions[id] = &SessionState{
 			ID:              id,
@@ -173,8 +192,10 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 
 	if err := sm.saveState(); err != nil {
 		// Rollback: remove all placeholders and scenario.
-		for _, id := range sessionIDs {
-			delete(sm.state.Sessions, id)
+		for i, id := range sessionIDs {
+			if !sharedReused[i] {
+				delete(sm.state.Sessions, id)
+			}
 		}
 		delete(sm.state.Scenarios, scenarioID)
 		sm.mu.Unlock()
@@ -185,9 +206,16 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 
 	// --- Start phase: create each session concurrently ---
 	// Remove all placeholders first so Create can allocate its own IDs.
+	// Shared-reused sessions already have real IDs and don't need creation.
 	repoRoots := make([]string, len(msg.Sessions))
 	sm.mu.Lock()
 	for i, id := range sessionIDs {
+		if sharedReused[i] {
+			if p, ok := sm.state.Sessions[id]; ok {
+				repoRoots[i] = p.RepoPath
+			}
+			continue
+		}
 		if p, ok := sm.state.Sessions[id]; ok {
 			repoRoots[i] = p.RepoPath
 		}
@@ -205,6 +233,9 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 	results := make([]createResult, len(msg.Sessions))
 	var wg sync.WaitGroup
 	for i, s := range msg.Sessions {
+		if sharedReused[i] {
+			continue
+		}
 		wg.Add(1)
 		go func(idx int, s protocol.ScenarioSessionInput) {
 			defer wg.Done()
@@ -238,6 +269,9 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 	var startedIDs []string
 	var startErrors []string
 	for i, r := range results {
+		if sharedReused[i] {
+			continue
+		}
 		if r.err != nil {
 			startErrors = append(startErrors, fmt.Sprintf("session %q: %v", msg.Sessions[i].Name, r.err))
 			continue
@@ -256,6 +290,14 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 	}
 
 	if len(startErrors) > 0 {
+		// Update scenario with real session IDs so retry/cleanup can find them.
+		sm.mu.Lock()
+		if sc := sm.state.Scenarios[scenarioID]; sc != nil {
+			sc.SessionIDs = sessionIDs
+		}
+		_ = sm.saveState()
+		sm.mu.Unlock()
+
 		// Rollback: stop and delete all already-started sessions.
 		var rollbackErrors []string
 		for _, id := range startedIDs {
@@ -268,18 +310,6 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 			}
 		}
 		sm.mu.Lock()
-		for _, id := range sessionIDs {
-			failedCleanup := false
-			for _, fid := range rollbackErrors {
-				if id == fid {
-					failedCleanup = true
-					break
-				}
-			}
-			if !failedCleanup {
-				delete(sm.state.Sessions, id)
-			}
-		}
 		if len(rollbackErrors) == 0 {
 			delete(sm.state.Scenarios, scenarioID)
 		}
@@ -298,8 +328,12 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 	sm.mu.Unlock()
 
 	// --- Manifest phase: build and publish manifest to each session's inbox ---
+	repos := make([]string, len(scenarioSessions))
+	for i, ss := range scenarioSessions {
+		repos[i] = ss.Repo
+	}
 	for i, id := range sessionIDs {
-		manifest := sm.buildManifest(scenarioID, msg, scenario, sessionIDs, i)
+		manifest := sm.buildManifest(scenarioID, msg, repos, sessionIDs, i)
 		manifestJSON, err := json.Marshal(manifest)
 		if err != nil {
 			sm.log.Error("failed to marshal scenario manifest", "session", id, "err", err)
@@ -315,7 +349,7 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 	}
 
 	// Persist manifest to shared store.
-	sm.persistManifest(scenarioID, msg, scenario, sessionIDs)
+	sm.persistManifest(scenarioID, msg, repos, sessionIDs)
 
 	return scenario, nil
 }
@@ -349,7 +383,7 @@ type scenarioManifestOrch struct {
 	Name      string `json:"name"`
 }
 
-func (sm *SessionManager) buildManifest(scenarioID string, msg protocol.ScenarioStartMsg, scenario *ScenarioState, sessionIDs []string, selfIndex int) scenarioManifest {
+func (sm *SessionManager) buildManifest(scenarioID string, msg protocol.ScenarioStartMsg, repos []string, sessionIDs []string, selfIndex int) scenarioManifest {
 	self := msg.Sessions[selfIndex]
 
 	var siblings []scenarioManifestSibling
@@ -357,11 +391,15 @@ func (sm *SessionManager) buildManifest(scenarioID string, msg protocol.Scenario
 		if j == selfIndex {
 			continue
 		}
+		repo := ""
+		if j < len(repos) {
+			repo = repos[j]
+		}
 		siblings = append(siblings, scenarioManifestSibling{
 			Name:      s.Name,
 			SessionID: sessionIDs[j],
 			Role:      s.Role,
-			Repo:      scenario.Sessions[j].Repo,
+			Repo:      repo,
 		})
 	}
 
@@ -384,7 +422,7 @@ func (sm *SessionManager) buildManifest(scenarioID string, msg protocol.Scenario
 	}
 }
 
-func (sm *SessionManager) persistManifest(scenarioID string, msg protocol.ScenarioStartMsg, scenario *ScenarioState, sessionIDs []string) {
+func (sm *SessionManager) persistManifest(scenarioID string, msg protocol.ScenarioStartMsg, repos []string, sessionIDs []string) {
 	storeDir := store.SharedStorePath(sm.paths.DataDir)
 	if err := store.Init(storeDir); err != nil {
 		sm.log.Error("failed to init shared store for manifest", "err", err)
@@ -392,7 +430,7 @@ func (sm *SessionManager) persistManifest(scenarioID string, msg protocol.Scenar
 	}
 
 	for i := range msg.Sessions {
-		manifest := sm.buildManifest(scenarioID, msg, scenario, sessionIDs, i)
+		manifest := sm.buildManifest(scenarioID, msg, repos, sessionIDs, i)
 		data, err := json.MarshalIndent(manifest, "", "  ")
 		if err != nil {
 			sm.log.Error("failed to marshal manifest for store", "err", err)
@@ -409,10 +447,17 @@ func (sm *SessionManager) persistManifest(scenarioID string, msg protocol.Scenar
 func (sm *SessionManager) StopScenario(name string) ([]string, error) {
 	sm.mu.RLock()
 	var sessionIDs []string
+	var sharedSet map[int]bool
 	for _, sc := range sm.state.Scenarios {
 		if sc.Name == name {
 			sessionIDs = make([]string, len(sc.SessionIDs))
 			copy(sessionIDs, sc.SessionIDs)
+			sharedSet = make(map[int]bool, len(sc.Sessions))
+			for i, ss := range sc.Sessions {
+				if ss.Shared {
+					sharedSet[i] = true
+				}
+			}
 			break
 		}
 	}
@@ -423,7 +468,10 @@ func (sm *SessionManager) StopScenario(name string) ([]string, error) {
 	}
 
 	var stopped []string
-	for _, id := range sessionIDs {
+	for i, id := range sessionIDs {
+		if sharedSet[i] {
+			continue
+		}
 		sm.mu.RLock()
 		sess, ok := sm.state.Sessions[id]
 		sm.mu.RUnlock()
@@ -443,11 +491,18 @@ func (sm *SessionManager) DeleteScenario(name string) ([]string, error) {
 	sm.mu.RLock()
 	var sessionIDs []string
 	var scenarioID string
+	var sharedSet map[int]bool
 	for id, sc := range sm.state.Scenarios {
 		if sc.Name == name {
 			sessionIDs = make([]string, len(sc.SessionIDs))
 			copy(sessionIDs, sc.SessionIDs)
 			scenarioID = id
+			sharedSet = make(map[int]bool, len(sc.Sessions))
+			for i, ss := range sc.Sessions {
+				if ss.Shared {
+					sharedSet[i] = true
+				}
+			}
 			break
 		}
 	}
@@ -457,8 +512,11 @@ func (sm *SessionManager) DeleteScenario(name string) ([]string, error) {
 		return nil, fmt.Errorf("scenario %q not found", name)
 	}
 
-	// Stop running sessions first.
-	for _, id := range sessionIDs {
+	// Stop running sessions first (skip shared sessions).
+	for i, id := range sessionIDs {
+		if sharedSet[i] {
+			continue
+		}
 		sm.mu.RLock()
 		sess, ok := sm.state.Sessions[id]
 		sm.mu.RUnlock()
@@ -467,10 +525,13 @@ func (sm *SessionManager) DeleteScenario(name string) ([]string, error) {
 		}
 	}
 
-	// Delete each session.
+	// Delete each session (skip shared sessions).
 	var deleted []string
 	var deleteErrors []string
-	for _, id := range sessionIDs {
+	for i, id := range sessionIDs {
+		if sharedSet[i] {
+			continue
+		}
 		sm.mu.RLock()
 		_, ok := sm.state.Sessions[id]
 		sm.mu.RUnlock()
@@ -572,7 +633,9 @@ func (sm *SessionManager) ResumeScenario(name string, rows, cols uint16) ([]stri
 		resumed = append(resumed, id)
 	}
 
-	sm.republishManifests(scenarioID)
+	if len(resumed) > 0 {
+		sm.republishManifests(scenarioID)
+	}
 	return resumed, nil
 }
 
@@ -628,16 +691,18 @@ func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSess
 	}
 
 	sm.mu.Lock()
-	var scenario *ScenarioState
-	var scenarioID string
+	var scenarioID, orchestratorID, goal string
+	found := false
 	for id, sc := range sm.state.Scenarios {
 		if sc.Name == name {
-			scenario = sc
 			scenarioID = id
+			orchestratorID = sc.OrchestratorID
+			goal = sc.Goal
+			found = true
 			break
 		}
 	}
-	if scenario == nil {
+	if !found {
 		sm.mu.Unlock()
 		return nil, fmt.Errorf("scenario %q not found", name)
 	}
@@ -657,15 +722,15 @@ func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSess
 	if input.Role != "" {
 		scenarioEnv["GRAITH_SCENARIO_ROLE"] = input.Role
 	}
-	if scenario.Goal != "" {
-		scenarioEnv["GRAITH_SCENARIO_GOAL"] = scenario.Goal
+	if goal != "" {
+		scenarioEnv["GRAITH_SCENARIO_GOAL"] = goal
 	}
 
 	agentHooks := input.AgentHooks
 
 	sess, err := sm.Create(
 		input.Name, agentName, repoRoot, input.Base, input.Task, input.Model,
-		scenario.OrchestratorID, false, "", agentHooks,
+		orchestratorID, false, "", agentHooks,
 		false, false, false, rows, cols, scenarioEnv,
 	)
 	if err != nil {
@@ -673,10 +738,20 @@ func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSess
 	}
 
 	sm.mu.Lock()
+	scenario, stillExists := sm.state.Scenarios[scenarioID]
+	if !stillExists {
+		sm.mu.Unlock()
+		if stopErr := sm.Stop(sess.ID); stopErr != nil {
+			sm.log.Warn("failed to stop orphaned session after scenario deletion", "session", sess.ID, "err", stopErr)
+		}
+		_ = sm.Delete(sess.ID)
+		return nil, fmt.Errorf("scenario %q was deleted during session creation", name)
+	}
+
 	if created, ok := sm.state.Sessions[sess.ID]; ok {
 		created.ScenarioID = scenarioID
 		created.ScenarioRole = input.Role
-		created.ScenarioGoal = scenario.Goal
+		created.ScenarioGoal = goal
 	}
 
 	scenario.SessionIDs = append(scenario.SessionIDs, sess.ID)
@@ -705,8 +780,10 @@ func (sm *SessionManager) republishManifests(scenarioID string) {
 	sessionIDs := make([]string, len(scenario.SessionIDs))
 	copy(sessionIDs, scenario.SessionIDs)
 
+	repos := make([]string, len(scenario.Sessions))
 	sessions := make([]protocol.ScenarioSessionInput, len(scenario.Sessions))
 	for i, ss := range scenario.Sessions {
+		repos[i] = ss.Repo
 		sessions[i] = protocol.ScenarioSessionInput{
 			Name:  ss.Name,
 			Repo:  ss.Repo,
@@ -716,8 +793,9 @@ func (sm *SessionManager) republishManifests(scenarioID string) {
 			Model: ss.Model,
 		}
 	}
+	orchestratorID := scenario.OrchestratorID
 	msg := protocol.ScenarioStartMsg{
-		CallerSessionID: scenario.OrchestratorID,
+		CallerSessionID: orchestratorID,
 		Name:            scenario.Name,
 		Goal:            scenario.Goal,
 		Sessions:        sessions,
@@ -725,7 +803,7 @@ func (sm *SessionManager) republishManifests(scenarioID string) {
 	sm.mu.RUnlock()
 
 	for i, id := range sessionIDs {
-		manifest := sm.buildManifest(scenarioID, msg, scenario, sessionIDs, i)
+		manifest := sm.buildManifest(scenarioID, msg, repos, sessionIDs, i)
 		manifestJSON, err := json.Marshal(manifest)
 		if err != nil {
 			sm.log.Error("failed to marshal manifest for republish", "session", id, "err", err)
@@ -733,7 +811,7 @@ func (sm *SessionManager) republishManifests(scenarioID string) {
 		}
 		stream := "inbox:" + id
 		if sm.messages != nil {
-			_, err = sm.messages.Publish(stream, scenario.OrchestratorID, "orchestrator", string(manifestJSON), "", "")
+			_, err = sm.messages.Publish(stream, orchestratorID, "orchestrator", string(manifestJSON), "", "")
 			if err != nil {
 				sm.log.Error("failed to republish manifest", "session", id, "err", err)
 			}
@@ -746,7 +824,7 @@ func (sm *SessionManager) republishManifests(scenarioID string) {
 		return
 	}
 	for i := range sessions {
-		manifest := sm.buildManifest(scenarioID, msg, scenario, sessionIDs, i)
+		manifest := sm.buildManifest(scenarioID, msg, repos, sessionIDs, i)
 		data, err := json.MarshalIndent(manifest, "", "  ")
 		if err != nil {
 			sm.log.Error("failed to marshal manifest for store", "err", err)
@@ -772,6 +850,7 @@ func (sm *SessionManager) buildScenarioRecord(sc *ScenarioState) *protocol.Scena
 			Repo:     ss.Repo,
 			Agent:    ss.Agent,
 			Model:    ss.Model,
+			Shared:   ss.Shared,
 		}
 		if i < len(sc.SessionIDs) {
 			sessions[i].SessionID = sc.SessionIDs[i]

@@ -351,16 +351,9 @@ func TestBuildManifest(t *testing.T) {
 		},
 	}
 	sessionIDs := []string{"s1", "s2"}
-	scenario := &ScenarioState{
-		ID:   "sc-123",
-		Name: "test-scenario",
-		Sessions: []ScenarioSession{
-			{Name: "backend", Repo: "my-backend"},
-			{Name: "frontend", Repo: "my-frontend"},
-		},
-	}
+	repos := []string{"my-backend", "my-frontend"}
 
-	m := sm.buildManifest("sc-123", msg, scenario, sessionIDs, 0)
+	m := sm.buildManifest("sc-123", msg, repos, sessionIDs, 0)
 
 	if m.Version != 1 {
 		t.Errorf("version = %d, want 1", m.Version)
