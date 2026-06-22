@@ -57,7 +57,7 @@ func (sm *SessionManager) notifyInbox(targetID, senderID, senderName string) {
 	if sender == "" {
 		sender = senderID
 	}
-	hint := fmt.Sprintf("New message from %s. Read: gr msg sub --topic inbox --all --ack | Reply: gr msg send %s \"<reply>\"", sender, sender)
+	hint := fmt.Sprintf("New message from %s. Read: gr msg sub --topic inbox:%s --all --ack | Reply: gr msg send %s \"<reply>\"", sender, targetID, sender)
 	if sm.HasAttachedClient(targetID) {
 		ptySess.WaitForUserIdle(10*time.Second, 2*time.Minute)
 	}
