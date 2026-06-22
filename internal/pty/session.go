@@ -200,7 +200,9 @@ done:
 	s.exited = true
 	s.exitCode = exitCode
 	s.mu.Unlock()
-	s.userInputCond.Broadcast()
+	if s.userInputCond != nil {
+		s.userInputCond.Broadcast()
+	}
 	close(s.done)
 }
 
@@ -262,7 +264,9 @@ func (s *Session) waitLoop() {
 		s.peakRSSBytes = extractPeakRSS(s.Cmd.ProcessState)
 	}
 	s.mu.Unlock()
-	s.userInputCond.Broadcast()
+	if s.userInputCond != nil {
+		s.userInputCond.Broadcast()
+	}
 	close(s.done)
 }
 
