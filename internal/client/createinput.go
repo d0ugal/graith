@@ -307,7 +307,7 @@ func (m createSessionModel) View() tea.View {
 			start = max(0, end-maxShow)
 		}
 		if start > 0 {
-			content.WriteString(fmt.Sprintf("\n  ↑ %d more", start))
+			fmt.Fprintf(&content, "\n  ↑ %d more", start)
 		}
 		for i := start; i < end; i++ {
 			r := m.filtered[i]
@@ -319,7 +319,7 @@ func (m createSessionModel) View() tea.View {
 			content.WriteString("\n" + prefix + display)
 		}
 		if remaining := len(m.filtered) - end; remaining > 0 {
-			content.WriteString(fmt.Sprintf("\n  ↓ %d more", remaining))
+			fmt.Fprintf(&content, "\n  ↓ %d more", remaining)
 		}
 	}
 
