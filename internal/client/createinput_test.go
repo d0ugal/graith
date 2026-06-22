@@ -179,12 +179,12 @@ func TestNewCreateSessionModel_EmptyDefaultRepo(t *testing.T) {
 
 func TestCreateSessionModel_FilterSuggestions(t *testing.T) {
 	repos := []RepoSuggestion{
-		{Name: "graith", Path: "/home/user/Code/graith"},
-		{Name: "grafana", Path: "/home/user/Code/grafana"},
+		{Name: "my-app", Path: "/home/user/Code/my-app"},
+		{Name: "my-lib", Path: "/home/user/Code/my-lib"},
 		{Name: "other", Path: "/home/user/Code/other"},
 	}
 	m := newCreateSessionModel("", repos)
-	m.repoInput.SetValue("gra")
+	m.repoInput.SetValue("my-")
 	m.updateFiltered()
 
 	if len(m.filtered) != 2 {

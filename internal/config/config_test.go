@@ -912,7 +912,7 @@ func TestValidate(t *testing.T) {
 	})
 
 	t.Run("valid includes pass", func(t *testing.T) {
-		rc := RepoConfig{Path: "~/Code/dem-dev", Includes: []string{"~/Code/grafana", "~/Code/session-replay-examples"}}
+		rc := RepoConfig{Path: "~/Code/mono-repo", Includes: []string{"~/Code/frontend", "~/Code/shared-utils"}}
 		if err := rc.Validate(); err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
@@ -924,8 +924,8 @@ func TestIncludeEnvVarName(t *testing.T) {
 		input string
 		want  string
 	}{
-		{"grafana", "GRAITH_INCLUDE_GRAFANA_PATH"},
-		{"session-replay-examples", "GRAITH_INCLUDE_SESSION_REPLAY_EXAMPLES_PATH"},
+		{"frontend", "GRAITH_INCLUDE_FRONTEND_PATH"},
+		{"shared-utils", "GRAITH_INCLUDE_SHARED_UTILS_PATH"},
 		{"faro.web.sdk", "GRAITH_INCLUDE_FARO_WEB_SDK_PATH"},
 		{"my repo", "GRAITH_INCLUDE_MYREPO_PATH"},
 		{"my@repo!", "GRAITH_INCLUDE_MYREPO_PATH"},
