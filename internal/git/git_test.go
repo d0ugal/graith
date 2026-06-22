@@ -1,6 +1,7 @@
 package git
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -189,6 +190,88 @@ func TestUnpushedCommitSummariesNoRemote(t *testing.T) {
 	_, err := UnpushedCommitSummaries(dir, "nonexistent-branch")
 	if err == nil {
 		t.Error("expected error for nonexistent base branch")
+	}
+}
+
+func TestCurrentBranch(t *testing.T) {
+	dir := setupTestRepo(t)
+
+	branch, err := CurrentBranch(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if branch != "main" {
+		t.Errorf("got %q, want main", branch)
+	}
+
+	run := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
+			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run("checkout", "-b", "feature")
+
+	branch, err = CurrentBranch(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if branch != "feature" {
+		t.Errorf("got %q, want feature", branch)
+	}
+}
+
+func TestPullFFOnlyContext(t *testing.T) {
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+
+	run := func(dir string, args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
+			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v in %s: %v\n%s", args, dir, err, out)
+		}
+	}
+
+	// Create a bare "remote" repo with main as default branch.
+	bare := filepath.Join(t.TempDir(), "remote.git")
+	run(".", "init", "--bare", "-b", "main", bare)
+
+	// Clone it to get a working copy that simulates the source repo.
+	clone := filepath.Join(t.TempDir(), "clone")
+	run(".", "clone", bare, clone)
+	os.WriteFile(filepath.Join(clone, "file.txt"), []byte("v1"), 0o644)
+	run(clone, "add", ".")
+	run(clone, "commit", "-m", "initial")
+	run(clone, "push", "-u", "origin", "main")
+
+	// Make a second clone that will push a new commit.
+	other := filepath.Join(t.TempDir(), "other")
+	run(".", "clone", bare, other)
+	os.WriteFile(filepath.Join(other, "file.txt"), []byte("v2"), 0o644)
+	run(other, "add", ".")
+	run(other, "commit", "-m", "upstream change")
+	run(other, "push", "origin", "main")
+
+	// Pull in the original clone.
+	ctx := context.Background()
+	if err := PullFFOnlyContext(ctx, clone); err != nil {
+		t.Fatalf("pull ff-only failed: %v", err)
+	}
+
+	// Verify the file was updated.
+	data, _ := os.ReadFile(filepath.Join(clone, "file.txt"))
+	if string(data) != "v2" {
+		t.Errorf("file content = %q, want v2", data)
 	}
 }
 

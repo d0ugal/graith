@@ -130,3 +130,12 @@ func UnpushedCommitSummaries(worktreePath, baseBranch string) ([]string, error) 
 func RepoRootPath(dir string) (string, error) {
 	return RunOutput(dir, "rev-parse", "--show-toplevel")
 }
+
+func CurrentBranch(dir string) (string, error) {
+	return RunOutput(dir, "rev-parse", "--abbrev-ref", "HEAD")
+}
+
+func PullFFOnlyContext(ctx context.Context, dir string) error {
+	_, err := RunOutputContext(ctx, dir, "pull", "--ff-only")
+	return err
+}

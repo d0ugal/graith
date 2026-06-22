@@ -336,6 +336,40 @@ func (sm *SessionManager) repoStoreDir(repoRoot string) (string, error) {
 	return dir, nil
 }
 
+// autoPullRepo fast-forwards the source repo's default branch if it is
+// currently checked out, clean, and has no unpushed commits. This is
+// best-effort: failures are logged but never block session creation.
+func (sm *SessionManager) autoPullRepo(repoRoot, baseBranch string) {
+	if !git.HasRemote(repoRoot, "origin") {
+		return
+	}
+
+	currentBranch, err := git.CurrentBranch(repoRoot)
+	if err != nil || currentBranch != baseBranch {
+		return
+	}
+
+	dirty, err := git.HasUncommittedChanges(repoRoot)
+	if err != nil || dirty {
+		return
+	}
+
+	unpushed, err := git.UnpushedCommitCount(repoRoot, baseBranch)
+	if err != nil || unpushed > 0 {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), gitMergeTimeout)
+	defer cancel()
+
+	if err := git.PullFFOnlyContext(ctx, repoRoot); err != nil {
+		sm.log.Warn("auto-pull failed (continuing)", "repo", repoRoot, "err", err)
+		return
+	}
+
+	sm.log.Info("auto-pulled source repo", "repo", repoRoot, "branch", baseBranch)
+}
+
 // Create starts a new agent session, either in a git worktree, in-place
 // in an existing repo, or as a standalone scratch session (when noRepo is true).
 //
@@ -413,6 +447,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 	var sharedWorktree bool
 	var sharedWorktreeSourceID string
 	var fetchOnCreate bool
+	var pullOnCreate bool
 	var rcIncludes []string
 	var sourceIncludes []IncludedRepoState
 
@@ -517,6 +552,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 		}
 
 		fetchOnCreate = sm.cfg.FetchOnCreate
+		pullOnCreate = sm.cfg.PullOnCreate
 	}
 
 	agentSessionID := ""
@@ -608,6 +644,13 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 		delete(sm.state.Sessions, id)
 		_ = sm.saveState()
 		sm.mu.Unlock()
+	}
+
+	// Auto-pull: if the source repo is on its default branch with a clean
+	// working tree and no unpushed commits, fast-forward it before creating
+	// the worktree so the new session starts from the latest upstream code.
+	if pullOnCreate && repoRoot != "" && !sharedWorktree && !inPlace {
+		sm.autoPullRepo(repoRoot, baseBranch)
 	}
 
 	// Git worktree setup (default path only — includes fetch which can block).

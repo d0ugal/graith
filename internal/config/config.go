@@ -23,6 +23,7 @@ type Config struct {
 	BranchPrefix     string             `toml:"branch_prefix"`
 	DataDir          string             `toml:"data_dir"`
 	FetchOnCreate    bool               `toml:"fetch_on_create"`
+	PullOnCreate     bool               `toml:"pull_on_create"`
 	AgentPrompt      string             `toml:"agent_prompt"`
 	AllowedRepoPaths []string           `toml:"allowed_repo_paths"`
 	Repos            []RepoConfig       `toml:"repos"`

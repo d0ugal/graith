@@ -20,6 +20,7 @@
 default_agent = "claude"
 branch_prefix = "{username}/graith"
 fetch_on_create = true
+pull_on_create = true
 # data_dir = "~/.graith"  # Override data directory (default: XDG data home)
 
 agent_prompt = """\
