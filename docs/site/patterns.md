@@ -70,6 +70,50 @@ gr list --tree
 gr msg send --children "rebase on main before pushing"
 ```
 
+## Declarative multi-repo scenario
+
+When you have a known topology of sessions across multiple repos, use a scenario file instead of imperative `gr new` commands:
+
+```toml
+# integration-test.toml
+version = 1
+
+[scenario]
+name = "integration-tests"
+goal = "Build and test the integration between API and worker services"
+
+[[sessions]]
+name = "api"
+repo = "~/Code/api"
+role = "API developer"
+task = "Add the batch processing endpoint with OpenTelemetry tracing"
+
+[[sessions]]
+name = "worker"
+repo = "~/Code/worker"
+role = "Worker developer"
+task = "Add the batch consumer with retry logic and dead-letter queue"
+
+[[sessions]]
+name = "integration"
+repo = "~/Code/integration-tests"
+agent = "codex"
+role = "Test engineer"
+task = "Write integration tests for the batch processing pipeline"
+```
+
+From the orchestrator:
+
+```bash
+gr scenario start integration-test.toml
+gr scenario status integration-tests
+gr scenario stop integration-tests
+```
+
+Each session receives a manifest with the full scenario topology — who the siblings are, their roles, and how to message them. Sessions coordinate via `gr msg send <sibling-name> "message"`.
+
+Scenarios are reproducible — the same TOML file always creates the same fleet. See [Scenarios](scenarios.md) for the full reference.
+
 ## Background batch processing
 
 Create sessions in the background and check on them later:
