@@ -73,6 +73,7 @@ Key files by area:
 | Agent | `agent/agent.go` | Auto-detect agent environments, enable JSON output |
 | PTY | `pty/session.go` | PTY lifecycle, resize, I/O multiplexing |
 | PTY | `pty/scrollback.go` | Append-only scrollback file with tail reads |
+| Auth | `daemon/auth.go` | Per-session token auth: authorization rules, identity forcing, descendant checks |
 | Sandbox | `sandbox/sandbox.go` | Safehouse wrapping: command construction, availability check |
 | Store | `store/store.go` | Flat-file git-backed document store with key validation, git commits |
 
@@ -111,9 +112,12 @@ The daemon sets these in every agent process:
 - `GRAITH_WORKTREE_PATH` — absolute path to the session worktree
 - `GRAITH_REPO_PATH` — absolute path to the source repository (canonical)
 - `GRAITH_TMPDIR` — temporary directory for the repo (persists across sessions)
+- `GRAITH_TOKEN` — bearer token for session authentication (used automatically by `gr`)
 - `TMPDIR` — set to `GRAITH_TMPDIR` so `mktemp` etc. land in the tmp dir
 
 These are used by `gr msg pub/sub` to identify the sender automatically.
+`GRAITH_TOKEN` is used by the CLI to authenticate with the daemon — agents
+cannot impersonate other sessions when this token is present.
 
 ### Agent-mode detection
 
