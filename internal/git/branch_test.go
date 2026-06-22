@@ -77,17 +77,17 @@ func TestDiscoverDefaultBranchLocalMaster(t *testing.T) {
 		cmd := exec.Command("git", args...)
 		cmd.Dir = dir
 		cmd.Env = append(os.Environ(),
-			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
-			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
+			"GIT_AUTHOR_NAME=braw", "GIT_AUTHOR_EMAIL=braw@croft.local",
+			"GIT_COMMITTER_NAME=braw", "GIT_COMMITTER_EMAIL=braw@croft.local",
 		)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
 	}
 	run("init", "-b", "master")
-	os.WriteFile(filepath.Join(dir, "README.md"), []byte("test"), 0o644)
+	os.WriteFile(filepath.Join(dir, "README.md"), []byte("braw"), 0o644)
 	run("add", ".")
-	run("commit", "-m", "initial")
+	run("commit", "-m", "auld")
 
 	branch, err := DiscoverDefaultBranch(dir)
 	if err != nil {
@@ -104,8 +104,8 @@ func TestCreateBranch(t *testing.T) {
 		branchName string
 		fromRef    string
 	}{
-		{name: "from HEAD", branchName: "feature-1", fromRef: "HEAD"},
-		{name: "from main", branchName: "feature-2", fromRef: "main"},
+		{name: "from HEAD", branchName: "glen-braw", fromRef: "HEAD"},
+		{name: "from main", branchName: "glen-bonnie", fromRef: "main"},
 	}
 
 	for _, tt := range tests {
@@ -128,8 +128,8 @@ func TestDeleteBranch(t *testing.T) {
 		name       string
 		branchName string
 	}{
-		{name: "delete simple branch", branchName: "to-delete"},
-		{name: "delete hyphenated branch", branchName: "my-feature-branch"},
+		{name: "delete simple branch", branchName: "glen-auld"},
+		{name: "delete hyphenated branch", branchName: "glen-thrawn-neep"},
 	}
 
 	for _, tt := range tests {
@@ -155,8 +155,8 @@ func TestDeleteBranch(t *testing.T) {
 
 func TestCreateWorktree(t *testing.T) {
 	dir := setupTestRepo(t)
-	branchName := "wt-branch"
-	worktreePath := filepath.Join(t.TempDir(), "my-worktree")
+	branchName := "glen-bothy"
+	worktreePath := filepath.Join(t.TempDir(), "bothy-braw")
 
 	if err := CreateBranch(dir, branchName, "HEAD"); err != nil {
 		t.Fatalf("CreateBranch: %v", err)
@@ -177,8 +177,8 @@ func TestCreateWorktree(t *testing.T) {
 
 func TestRemoveWorktree(t *testing.T) {
 	dir := setupTestRepo(t)
-	branchName := "wt-remove-branch"
-	worktreePath := filepath.Join(t.TempDir(), "remove-worktree")
+	branchName := "glen-auld-remove"
+	worktreePath := filepath.Join(t.TempDir(), "bothy-auld")
 
 	if err := CreateBranch(dir, branchName, "HEAD"); err != nil {
 		t.Fatalf("CreateBranch: %v", err)
@@ -201,14 +201,14 @@ func TestSetupAndTeardownSession(t *testing.T) {
 		name       string
 		branchName string
 	}{
-		{name: "basic session lifecycle", branchName: "session-branch"},
-		{name: "session with slashes", branchName: "graith/test-session"},
+		{name: "basic session lifecycle", branchName: "glen-canny"},
+		{name: "session with slashes", branchName: "graith/glen-canny-session"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := setupTestRepo(t)
-			worktreePath := filepath.Join(t.TempDir(), "session-wt")
+			worktreePath := filepath.Join(t.TempDir(), "bothy-canny")
 
 			// Create a bare clone as origin so SetupSession can use origin/<base>.
 			bare := t.TempDir()
@@ -256,8 +256,8 @@ func TestSetupAndTeardownSession(t *testing.T) {
 func TestTeardownSessionIdempotent(t *testing.T) {
 	t.Run("worktree already removed", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		worktreePath := filepath.Join(t.TempDir(), "session-wt")
-		branchName := "graith/idempotent-test"
+		worktreePath := filepath.Join(t.TempDir(), "bothy-thrawn")
+		branchName := "graith/glen-thrawn-idempotent"
 
 		if err := SetupSession(context.Background(), dir, worktreePath, branchName, "main", false); err != nil {
 			t.Fatalf("SetupSession: %v", err)
@@ -278,8 +278,8 @@ func TestTeardownSessionIdempotent(t *testing.T) {
 
 	t.Run("branch already deleted", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		worktreePath := filepath.Join(t.TempDir(), "session-wt")
-		branchName := "graith/branch-gone-test"
+		worktreePath := filepath.Join(t.TempDir(), "bothy-auld-gone")
+		branchName := "graith/glen-auld-gone"
 
 		if err := SetupSession(context.Background(), dir, worktreePath, branchName, "main", false); err != nil {
 			t.Fatalf("SetupSession: %v", err)
@@ -298,16 +298,16 @@ func TestTeardownSessionIdempotent(t *testing.T) {
 
 	t.Run("worktree and branch both already gone", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		worktreePath := filepath.Join(t.TempDir(), "never-existed")
+		worktreePath := filepath.Join(t.TempDir(), "bothy-thrawn-never")
 
-		if err := TeardownSession(dir, worktreePath, "nonexistent-branch"); err != nil {
+		if err := TeardownSession(dir, worktreePath, "glen-thrawn-nonexistent"); err != nil {
 			t.Fatalf("TeardownSession for never-created session should succeed: %v", err)
 		}
 	})
 
 	t.Run("empty branch name", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		worktreePath := filepath.Join(t.TempDir(), "no-branch")
+		worktreePath := filepath.Join(t.TempDir(), "bothy-neep")
 
 		if err := TeardownSession(dir, worktreePath, ""); err != nil {
 			t.Fatalf("TeardownSession with empty branch name should succeed: %v", err)
@@ -317,8 +317,8 @@ func TestTeardownSessionIdempotent(t *testing.T) {
 
 func TestSetupSessionNoOrigin(t *testing.T) {
 	dir := setupTestRepo(t)
-	worktreePath := filepath.Join(t.TempDir(), "no-origin-wt")
-	branchName := "graith/no-origin-session"
+	worktreePath := filepath.Join(t.TempDir(), "bothy-croft")
+	branchName := "graith/glen-croft-session"
 
 	if err := SetupSession(context.Background(), dir, worktreePath, branchName, "main", true); err != nil {
 		t.Fatalf("SetupSession with fetch=true and no origin should succeed: %v", err)

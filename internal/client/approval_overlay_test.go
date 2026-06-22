@@ -38,26 +38,26 @@ func TestApprovalModelViewNarrowTerminal(t *testing.T) {
 	approvals := []protocol.ApprovalInfo{
 		{
 			RequestID:   "1",
-			SessionName: "test-session",
+			SessionName: "braw-session",
 			ToolName:    "Bash",
 			ToolInput:   `{"command":"echo hello world"}`,
 			Agent:       "claude",
 		},
 		{
 			RequestID:   "2",
-			SessionName: "test-session",
+			SessionName: "braw-session",
 			ToolName:    "Write",
 			ToolInput:   `{"file_path":"/tmp/test.go","content":"package main\nfunc main() {}\n"}`,
 		},
 		{
 			RequestID:   "3",
-			SessionName: "test-session",
+			SessionName: "braw-session",
 			ToolName:    "Read",
 			ToolInput:   "not json at all",
 		},
 		{
 			RequestID:   "4",
-			SessionName: "test-session",
+			SessionName: "braw-session",
 			ToolName:    "CustomTool",
 			ToolInput:   `{"longkey":"some value","another":"data"}`,
 		},

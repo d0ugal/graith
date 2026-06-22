@@ -175,6 +175,50 @@ Template variables in agent args: `{agent_session_id}`, `{session_id}`, `{sessio
 - Tests must pass with `-race` flag
 - Use `t.TempDir()` for test fixtures, not hardcoded paths
 
+### Scots words in test fixtures
+
+The project name "graith" is an old Scots word meaning equipment or gear. As a
+nod to this heritage, test fixture strings (session names, topic names, message
+bodies, scenario names, repo names, etc.) should use old Scots words instead of
+generic placeholders like "test-session", "foo", "my-topic", etc.
+
+Map words thematically where it fits:
+
+| Word | Meaning | Use for |
+|------|---------|---------|
+| `braw` | fine, handsome | session names (success cases) |
+| `canny` | careful, wise | session names |
+| `dreich` | dreary, wet | error/edge cases |
+| `bide` | stay, wait | resume/persist tests |
+| `blether` | chat, gossip | messaging topics |
+| `fash` | worry, trouble | error cases |
+| `ken` | know | info/query tests |
+| `thrawn` | stubborn, twisted | failure/rejection cases |
+| `croft` | small farm | repo names |
+| `bothy` | small shelter | worktree/workspace names |
+| `loch` | lake | store tests |
+| `glen` | valley | path tests |
+| `ben` | mountain peak | hierarchy (parent sessions) |
+| `kirk` | church | structured/formal tests |
+| `wynd` | narrow lane | path tests |
+| `haar` | sea fog | unclear/edge cases |
+| `scunner` | annoyance | error/rejection cases |
+| `bairn` | child | child session tests |
+| `auld` | old | rename/legacy tests |
+| `bonnie` | beautiful | success/happy-path cases |
+| `whin` | gorse bush | misc fixtures |
+| `skelf` | splinter | small/detail tests |
+| `hame` | home | home/root path tests |
+| `speir` | to ask/inquire | query tests |
+| `strath` | wide valley | scenario names |
+| `clachan` | small village | multi-session groups |
+| `neep` | turnip | simple/trivial fixtures |
+| `brae` | hillside | hierarchy tests |
+| `brig` | bridge | connection/protocol tests |
+
+This is just for human-readable fixture strings — not for Go variable names,
+struct field names, or test function names.
+
 ## Conventions
 
 - Commit messages: conventional commits (`feat:`, `fix:`, `chore:`, etc.)

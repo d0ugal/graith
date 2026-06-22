@@ -161,9 +161,9 @@ func TestDiscoverRepos_Sorted(t *testing.T) {
 }
 
 func TestNewCreateSessionModel_DefaultRepo(t *testing.T) {
-	m := newCreateSessionModel("/tmp/myrepo", nil)
-	if m.repoInput.Value() != "/tmp/myrepo" {
-		t.Errorf("expected default repo /tmp/myrepo, got %s", m.repoInput.Value())
+	m := newCreateSessionModel("/tmp/croft", nil)
+	if m.repoInput.Value() != "/tmp/croft" {
+		t.Errorf("expected default repo /tmp/croft, got %s", m.repoInput.Value())
 	}
 	if m.focus != createFieldName {
 		t.Errorf("expected initial focus on name field")
@@ -179,12 +179,12 @@ func TestNewCreateSessionModel_EmptyDefaultRepo(t *testing.T) {
 
 func TestCreateSessionModel_FilterSuggestions(t *testing.T) {
 	repos := []RepoSuggestion{
-		{Name: "my-app", Path: "/home/user/Code/my-app"},
-		{Name: "my-lib", Path: "/home/user/Code/my-lib"},
-		{Name: "other", Path: "/home/user/Code/other"},
+		{Name: "braw-app", Path: "/home/user/Code/braw-app"},
+		{Name: "braw-lib", Path: "/home/user/Code/braw-lib"},
+		{Name: "neep", Path: "/home/user/Code/neep"},
 	}
 	m := newCreateSessionModel("", repos)
-	m.repoInput.SetValue("my-")
+	m.repoInput.SetValue("braw-")
 	m.updateFiltered()
 
 	if len(m.filtered) != 2 {
@@ -194,7 +194,7 @@ func TestCreateSessionModel_FilterSuggestions(t *testing.T) {
 
 func TestCreateSessionModel_TabMovesToRepo(t *testing.T) {
 	m := newCreateSessionModel("", nil)
-	m.nameInput.SetValue("my-session")
+	m.nameInput.SetValue("braw-session")
 
 	m = updateModel(m, keyPress("tab"))
 	if m.focus != createFieldRepo {
@@ -204,7 +204,7 @@ func TestCreateSessionModel_TabMovesToRepo(t *testing.T) {
 
 func TestCreateSessionModel_ShiftTabMovesToName(t *testing.T) {
 	m := newCreateSessionModel("", nil)
-	m.nameInput.SetValue("my-session")
+	m.nameInput.SetValue("braw-session")
 	m = updateModel(m, keyPress("tab"))
 
 	m = updateModel(m, keyPress("shift+tab"))
@@ -215,7 +215,7 @@ func TestCreateSessionModel_ShiftTabMovesToName(t *testing.T) {
 
 func TestCreateSessionModel_EnterOnNameAdvancesToRepo(t *testing.T) {
 	m := newCreateSessionModel("", nil)
-	m.nameInput.SetValue("my-session")
+	m.nameInput.SetValue("braw-session")
 
 	m = updateModel(m, keyPress("enter"))
 	if m.focus != createFieldRepo {
@@ -234,7 +234,7 @@ func TestCreateSessionModel_EnterOnEmptyNameStays(t *testing.T) {
 
 func TestCreateSessionModel_EnterOnRepoSubmits(t *testing.T) {
 	m := newCreateSessionModel("/tmp/repo", nil)
-	m.nameInput.SetValue("my-session")
+	m.nameInput.SetValue("braw-session")
 	m = updateModel(m, keyPress("tab"))
 
 	m = updateModel(m, keyPress("enter"))
@@ -245,7 +245,7 @@ func TestCreateSessionModel_EnterOnRepoSubmits(t *testing.T) {
 
 func TestCreateSessionModel_EnterOnEmptyRepoDoesNotSubmit(t *testing.T) {
 	m := newCreateSessionModel("", nil)
-	m.nameInput.SetValue("my-session")
+	m.nameInput.SetValue("braw-session")
 	m = updateModel(m, keyPress("tab"))
 
 	m = updateModel(m, keyPress("enter"))
@@ -256,7 +256,7 @@ func TestCreateSessionModel_EnterOnEmptyRepoDoesNotSubmit(t *testing.T) {
 
 func TestCreateSessionModel_EscCancels(t *testing.T) {
 	m := newCreateSessionModel("", nil)
-	m.nameInput.SetValue("something")
+	m.nameInput.SetValue("braw")
 
 	_, cmd := m.Update(keyPress("esc"))
 	if cmd == nil {
@@ -266,18 +266,18 @@ func TestCreateSessionModel_EscCancels(t *testing.T) {
 
 func TestCreateSessionModel_SpaceInsertsDashInName(t *testing.T) {
 	m := newCreateSessionModel("", nil)
-	m.nameInput.SetValue("my")
+	m.nameInput.SetValue("braw")
 
 	m = updateModel(m, keyPress(" "))
 	val := m.nameInput.Value()
-	if val != "my-" {
-		t.Errorf("expected 'my-' after space, got %q", val)
+	if val != "braw-" {
+		t.Errorf("expected 'braw-' after space, got %q", val)
 	}
 }
 
 func TestCreateSessionModel_SpaceInRepoIsNormal(t *testing.T) {
 	m := newCreateSessionModel("", nil)
-	m.nameInput.SetValue("sess")
+	m.nameInput.SetValue("neep")
 	m = updateModel(m, keyPress("tab"))
 
 	m = updateModel(m, keyPress(" "))
@@ -289,12 +289,12 @@ func TestCreateSessionModel_SpaceInRepoIsNormal(t *testing.T) {
 
 func TestCreateSessionModel_DropdownNavigation(t *testing.T) {
 	repos := []RepoSuggestion{
-		{Name: "alpha", Path: "/alpha"},
-		{Name: "beta", Path: "/beta"},
-		{Name: "gamma", Path: "/gamma"},
+		{Name: "braw", Path: "/braw"},
+		{Name: "canny", Path: "/canny"},
+		{Name: "bonnie", Path: "/bonnie"},
 	}
 	m := newCreateSessionModel("", repos)
-	m.nameInput.SetValue("test")
+	m.nameInput.SetValue("neep")
 	m = updateModel(m, keyPress("tab"))
 
 	if !m.showDropdown {
@@ -327,10 +327,10 @@ func TestCreateSessionModel_DropdownNavigation(t *testing.T) {
 
 func TestCreateSessionModel_DownClampedAtEnd(t *testing.T) {
 	repos := []RepoSuggestion{
-		{Name: "only", Path: "/only"},
+		{Name: "neep", Path: "/neep"},
 	}
 	m := newCreateSessionModel("", repos)
-	m.nameInput.SetValue("test")
+	m.nameInput.SetValue("kirk")
 	m = updateModel(m, keyPress("tab"))
 
 	m = updateModel(m, keyPress("down"))
@@ -343,11 +343,11 @@ func TestCreateSessionModel_DownClampedAtEnd(t *testing.T) {
 
 func TestCreateSessionModel_EnterSelectsDropdownItem(t *testing.T) {
 	repos := []RepoSuggestion{
-		{Name: "alpha", Path: "/path/to/alpha"},
-		{Name: "beta", Path: "/path/to/beta"},
+		{Name: "braw", Path: "/path/to/braw"},
+		{Name: "canny", Path: "/path/to/canny"},
 	}
 	m := newCreateSessionModel("", repos)
-	m.nameInput.SetValue("test")
+	m.nameInput.SetValue("neep")
 	m = updateModel(m, keyPress("tab"))
 	m = updateModel(m, keyPress("down"))
 
@@ -355,8 +355,8 @@ func TestCreateSessionModel_EnterSelectsDropdownItem(t *testing.T) {
 	if m.done {
 		t.Error("selecting a dropdown item should not submit the form")
 	}
-	if m.repoInput.Value() != "/path/to/alpha" {
-		t.Errorf("expected repo set to /path/to/alpha, got %q", m.repoInput.Value())
+	if m.repoInput.Value() != "/path/to/braw" {
+		t.Errorf("expected repo set to /path/to/braw, got %q", m.repoInput.Value())
 	}
 	if m.showDropdown {
 		t.Error("expected dropdown closed after selection")

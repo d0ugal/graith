@@ -32,7 +32,7 @@ func TestDetect(t *testing.T) {
 		},
 		{
 			name: "GR_AGENT_MODE=0 disables even with other vars",
-			env:  map[string]string{"GR_AGENT_MODE": "0", "GRAITH_SESSION_ID": "abc"},
+			env:  map[string]string{"GR_AGENT_MODE": "0", "GRAITH_SESSION_ID": "canny-abc"},
 			want: false,
 		},
 		{
@@ -52,7 +52,7 @@ func TestDetect(t *testing.T) {
 		},
 		{
 			name: "GRAITH_SESSION_ID enables",
-			env:  map[string]string{"GRAITH_SESSION_ID": "sess-123"},
+			env:  map[string]string{"GRAITH_SESSION_ID": "canny-123"},
 			want: true,
 		},
 		{

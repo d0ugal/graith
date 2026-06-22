@@ -13,12 +13,12 @@ func TestSubmitApprovalTimeoutBlocksBeforeContextCancel(t *testing.T) {
 	sm.cfg.Approvals.Timeout = "100ms"
 
 	sm.mu.Lock()
-	sm.state.Sessions["sess1"] = &SessionState{Name: "test-session"}
+	sm.state.Sessions["braw1"] = &SessionState{Name: "bonnie-session"}
 	sm.mu.Unlock()
 
 	req := protocol.ApprovalRequestMsg{
-		RequestID: "req1",
-		SessionID: "sess1",
+		RequestID: "neep1",
+		SessionID: "braw1",
 		ToolName:  "Bash",
 	}
 
@@ -32,10 +32,10 @@ func TestSubmitApprovalTimeoutBlocksBeforeContextCancel(t *testing.T) {
 	}
 
 	sm.mu.RLock()
-	if _, exists := sm.pendingApprovals["req1"]; exists {
+	if _, exists := sm.pendingApprovals["neep1"]; exists {
 		t.Error("pending approval not cleaned up after timeout")
 	}
-	if sm.state.Sessions["sess1"].AgentStatus == "approval" {
+	if sm.state.Sessions["braw1"].AgentStatus == "approval" {
 		t.Error("session status not restored after timeout")
 	}
 	sm.mu.RUnlock()
@@ -46,14 +46,14 @@ func TestSubmitApprovalContextCancelAllows(t *testing.T) {
 	sm.cfg.Approvals.Timeout = "10s"
 
 	sm.mu.Lock()
-	sm.state.Sessions["sess1"] = &SessionState{Name: "test-session"}
+	sm.state.Sessions["braw1"] = &SessionState{Name: "bonnie-session"}
 	sm.mu.Unlock()
 
 	ctx, cancel := context.WithCancel(context.Background())
 
 	req := protocol.ApprovalRequestMsg{
-		RequestID: "req2",
-		SessionID: "sess1",
+		RequestID: "neep2",
+		SessionID: "braw1",
 		ToolName:  "Bash",
 	}
 
@@ -69,10 +69,10 @@ func TestSubmitApprovalContextCancelAllows(t *testing.T) {
 	}
 
 	sm.mu.RLock()
-	if _, exists := sm.pendingApprovals["req2"]; exists {
+	if _, exists := sm.pendingApprovals["neep2"]; exists {
 		t.Error("pending approval not cleaned up after context cancel")
 	}
-	if sm.state.Sessions["sess1"].AgentStatus == "approval" {
+	if sm.state.Sessions["braw1"].AgentStatus == "approval" {
 		t.Error("session status not restored after context cancel")
 	}
 	sm.mu.RUnlock()
@@ -83,18 +83,18 @@ func TestSubmitApprovalUserDecision(t *testing.T) {
 	sm.cfg.Approvals.Timeout = "10s"
 
 	sm.mu.Lock()
-	sm.state.Sessions["sess1"] = &SessionState{Name: "test-session"}
+	sm.state.Sessions["braw1"] = &SessionState{Name: "bonnie-session"}
 	sm.mu.Unlock()
 
 	req := protocol.ApprovalRequestMsg{
-		RequestID: "req3",
-		SessionID: "sess1",
+		RequestID: "neep3",
+		SessionID: "braw1",
 		ToolName:  "Bash",
 	}
 
 	go func() {
 		time.Sleep(50 * time.Millisecond)
-		sm.RespondToApproval("req3", "allow", "user approved")
+		sm.RespondToApproval("neep3", "allow", "user approved")
 	}()
 
 	decision := sm.SubmitApproval(context.Background(), req)
@@ -107,10 +107,10 @@ func TestSubmitApprovalUserDecision(t *testing.T) {
 	}
 
 	sm.mu.RLock()
-	if _, exists := sm.pendingApprovals["req3"]; exists {
+	if _, exists := sm.pendingApprovals["neep3"]; exists {
 		t.Error("pending approval not cleaned up after user decision")
 	}
-	if sm.state.Sessions["sess1"].AgentStatus == "approval" {
+	if sm.state.Sessions["braw1"].AgentStatus == "approval" {
 		t.Error("session status not restored after user decision")
 	}
 	sm.mu.RUnlock()
@@ -120,8 +120,8 @@ func TestSubmitApprovalMissingSessionAllows(t *testing.T) {
 	sm := newTestSessionManager(t)
 
 	req := protocol.ApprovalRequestMsg{
-		RequestID: "req4",
-		SessionID: "nonexistent",
+		RequestID: "neep4",
+		SessionID: "haar-mist",
 		ToolName:  "Bash",
 	}
 

@@ -13,9 +13,9 @@ func TestIsBusy_InterruptIndicators(t *testing.T) {
 		content string
 		want    bool
 	}{
-		{"ctrl+c indicator", "some output\n  ctrl+c to interrupt\n", true},
-		{"esc indicator", "some output\n  esc to interrupt\n", true},
-		{"no indicator", "some output\nhello world\n", false},
+		{"ctrl+c indicator", "braw neep output\n  ctrl+c to interrupt\n", true},
+		{"esc indicator", "braw neep output\n  esc to interrupt\n", true},
+		{"no indicator", "braw neep output\nken the croft\n", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -36,8 +36,8 @@ func TestIsBusy_Spinners(t *testing.T) {
 	}{
 		{"braille spinner", "⠋ Working...\n", true},
 		{"asterisk spinner", "✳ clauding...\n", true},
-		{"no spinner", "Hello world\n", false},
-		{"box drawing ignored", "│ some content\n", false},
+		{"no spinner", "Bonnie glen\n", false},
+		{"box drawing ignored", "│ braw croft\n", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -82,7 +82,7 @@ func TestNeedsApproval_PermissionPrompts(t *testing.T) {
 		{"trust prompt", "Do you trust the files in this folder?\n", true},
 		{"allow once", "Yes, allow once\n", true},
 		{"allow always", "Yes, allow always\n", true},
-		{"no prompt", "Hello world\n❯\n", false},
+		{"no prompt", "Bonnie glen\n❯\n", false},
 		{"MCP permission", "Allow this MCP server\n", true},
 		{"tell claude differently", "No, and tell Claude what to do differently\n", true},
 		{"arrow keys nav", "Use arrow keys to navigate\n", true},
@@ -217,7 +217,7 @@ func TestDetect(t *testing.T) {
 		{"busy", "⠋ Working\nctrl+c to interrupt\n", OutputAgeUnknown, StatusActive},
 		{"approval", "Do you trust the files in this folder?\n", OutputAgeUnknown, StatusApproval},
 		{"ready", "output done\n❯\n", OutputAgeUnknown, StatusReady},
-		{"unknown", "some random text\n", OutputAgeUnknown, StatusUnknown},
+		{"unknown", "thrawn neep text\n", OutputAgeUnknown, StatusUnknown},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -239,25 +239,25 @@ func TestDetect_OutputRecency(t *testing.T) {
 	}{
 		{
 			"recent output infers active",
-			"some random tool output filling the screen\n",
+			"thrawn croft output filling the screen\n",
 			500 * time.Millisecond,
 			StatusActive,
 		},
 		{
 			"stale output stays unknown",
-			"some random tool output filling the screen\n",
+			"thrawn croft output filling the screen\n",
 			5 * time.Second,
 			StatusUnknown,
 		},
 		{
 			"at threshold boundary stays unknown",
-			"some random tool output filling the screen\n",
+			"thrawn croft output filling the screen\n",
 			RecentOutputThreshold,
 			StatusUnknown,
 		},
 		{
 			"just under threshold is active",
-			"some random tool output filling the screen\n",
+			"thrawn croft output filling the screen\n",
 			RecentOutputThreshold - time.Millisecond,
 			StatusActive,
 		},
@@ -281,13 +281,13 @@ func TestDetect_OutputRecency(t *testing.T) {
 		},
 		{
 			"unknown output age does not infer active",
-			"some random text\n",
+			"thrawn neep text\n",
 			OutputAgeUnknown,
 			StatusUnknown,
 		},
 		{
 			"zero output age is active",
-			"some random text\n",
+			"thrawn neep text\n",
 			0,
 			StatusActive,
 		},
@@ -307,7 +307,7 @@ func TestStripANSI(t *testing.T) {
 		input string
 		want  string
 	}{
-		{"no escapes", "hello world", "hello world"},
+		{"no escapes", "braw bonnie glen", "braw bonnie glen"},
 		{"CSI color", "\x1b[31mred\x1b[0m", "red"},
 		{"OSC title", "\x1b]0;title\x07text", "text"},
 		{"OSC ST terminator", "\x1b]0;title\x1b\\text", "text"},
@@ -328,15 +328,15 @@ func TestStripANSI(t *testing.T) {
 }
 
 func TestLastNonEmptyLines(t *testing.T) {
-	content := "line1\n\nline2\n\nline3\n\n"
+	content := "auld\n\nbraw\n\ncanny\n\n"
 	lines := lastNonEmptyLines(content, 2)
 	if len(lines) != 2 {
 		t.Fatalf("expected 2 lines, got %d", len(lines))
 	}
-	if lines[0] != "line2" {
-		t.Errorf("lines[0] = %q, want %q", lines[0], "line2")
+	if lines[0] != "braw" {
+		t.Errorf("lines[0] = %q, want %q", lines[0], "braw")
 	}
-	if lines[1] != "line3" {
-		t.Errorf("lines[1] = %q, want %q", lines[1], "line3")
+	if lines[1] != "canny" {
+		t.Errorf("lines[1] = %q, want %q", lines[1], "canny")
 	}
 }

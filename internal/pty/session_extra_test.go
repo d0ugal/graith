@@ -124,7 +124,7 @@ func TestDetachClearsAllWriters(t *testing.T) {
 func TestMultiWriterFanOut(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "test.log")
 	s, err := NewSession(SessionOpts{
-		ID: "test", Command: "sh", Args: []string{"-c", "read a; echo $a; read b; echo $b; sleep 0.1"},
+		ID: "braw", Command: "sh", Args: []string{"-c", "read a; echo $a; read b; echo $b; sleep 0.1"},
 		Dir: t.TempDir(), Rows: 24, Cols: 80,
 		LogPath: logPath, MaxLogSize: 1024 * 1024,
 	})
@@ -137,15 +137,15 @@ func TestMultiWriterFanOut(t *testing.T) {
 	s.Attach(&bufA)
 	s.Attach(&bufB)
 
-	if err := s.WriteInput([]byte("fanout test\n")); err != nil {
+	if err := s.WriteInput([]byte("kirk fanout\n")); err != nil {
 		t.Fatal(err)
 	}
 
 	deadline := time.After(5 * time.Second)
-	for !bytes.Contains(bufA.Bytes(), []byte("fanout test")) || !bytes.Contains(bufB.Bytes(), []byte("fanout test")) {
+	for !bytes.Contains(bufA.Bytes(), []byte("kirk fanout")) || !bytes.Contains(bufB.Bytes(), []byte("kirk fanout")) {
 		select {
 		case <-deadline:
-			t.Fatalf("bufA = %q, bufB = %q; both should contain 'fanout test'", bufA.Bytes(), bufB.Bytes())
+			t.Fatalf("bufA = %q, bufB = %q; both should contain 'kirk fanout'", bufA.Bytes(), bufB.Bytes())
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
@@ -153,15 +153,15 @@ func TestMultiWriterFanOut(t *testing.T) {
 	s.DetachWriter(&bufA)
 	beforeA := len(bufA.Bytes())
 
-	if err := s.WriteInput([]byte("after detach\n")); err != nil {
+	if err := s.WriteInput([]byte("efter skelf\n")); err != nil {
 		t.Fatal(err)
 	}
 
 	deadline = time.After(5 * time.Second)
-	for !bytes.Contains(bufB.Bytes(), []byte("after detach")) {
+	for !bytes.Contains(bufB.Bytes(), []byte("efter skelf")) {
 		select {
 		case <-deadline:
-			t.Fatalf("bufB = %q; should contain 'after detach'", bufB.Bytes())
+			t.Fatalf("bufB = %q; should contain 'efter skelf'", bufB.Bytes())
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
@@ -197,17 +197,17 @@ func TestBuildEnvSetsTERM(t *testing.T) {
 
 func TestBuildEnvOverridesParent(t *testing.T) {
 	t.Setenv("TERM", "dumb")
-	t.Setenv("GRAITH_TEST_VAR", "parent")
+	t.Setenv("GRAITH_TEST_VAR", "auld")
 
 	env := envMap(buildEnv(map[string]string{
-		"GRAITH_TEST_VAR": "child",
+		"GRAITH_TEST_VAR": "braw",
 	}))
 
 	if got := env["TERM"]; got != "xterm-256color" {
 		t.Errorf("TERM = %q, want xterm-256color (should override parent)", got)
 	}
-	if got := env["GRAITH_TEST_VAR"]; got != "child" {
-		t.Errorf("GRAITH_TEST_VAR = %q, want child (should override parent)", got)
+	if got := env["GRAITH_TEST_VAR"]; got != "braw" {
+		t.Errorf("GRAITH_TEST_VAR = %q, want braw (should override auld)", got)
 	}
 }
 
@@ -221,21 +221,21 @@ func TestBuildEnvExtraOverridesTERM(t *testing.T) {
 }
 
 func TestBuildEnvPreservesParentVars(t *testing.T) {
-	t.Setenv("GRAITH_PASSTHROUGH", "keep-me")
+	t.Setenv("GRAITH_PASSTHROUGH", "bide-wi-me")
 
 	env := envMap(buildEnv(nil))
-	if got := env["GRAITH_PASSTHROUGH"]; got != "keep-me" {
-		t.Errorf("GRAITH_PASSTHROUGH = %q, want keep-me (parent vars should be preserved)", got)
+	if got := env["GRAITH_PASSTHROUGH"]; got != "bide-wi-me" {
+		t.Errorf("GRAITH_PASSTHROUGH = %q, want bide-wi-me (parent vars should be preserved)", got)
 	}
 }
 
 func TestBuildEnvNoDuplicateKeys(t *testing.T) {
 	t.Setenv("TERM", "dumb")
-	t.Setenv("GRAITH_SESSION_ID", "parent-id")
+	t.Setenv("GRAITH_SESSION_ID", "auld-id")
 
 	env := buildEnv(map[string]string{
 		"TERM":              "screen",
-		"GRAITH_SESSION_ID": "child-id",
+		"GRAITH_SESSION_ID": "braw-id",
 	})
 	for _, key := range []string{"TERM", "GRAITH_SESSION_ID"} {
 		count := 0
@@ -251,12 +251,12 @@ func TestBuildEnvNoDuplicateKeys(t *testing.T) {
 }
 
 func TestScrollbackRemove(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "remove-test.log")
+	path := filepath.Join(t.TempDir(), "auld-neep.log")
 	sb, err := NewScrollback(path, 1024)
 	if err != nil {
 		t.Fatal(err)
 	}
-	sb.Write([]byte("some data to be removed"))
+	sb.Write([]byte("auld neep tae be removed"))
 
 	// Verify the file exists before removal.
 	if _, err := os.Stat(path); os.IsNotExist(err) {

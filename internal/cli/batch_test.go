@@ -45,12 +45,12 @@ func TestFilterSessions(t *testing.T) {
 	old := now.Add(-48 * time.Hour).Format(time.RFC3339)
 
 	sessions := []protocol.SessionInfo{
-		{ID: "1", Name: "running-graith", RepoName: "graith", Status: "running", LastAttachedAt: recent},
-		{ID: "2", Name: "stopped-graith", RepoName: "graith", Status: "stopped", LastAttachedAt: old},
-		{ID: "3", Name: "running-other", RepoName: "other", Status: "running", LastAttachedAt: old},
-		{ID: "4", Name: "errored-graith", RepoName: "graith", Status: "errored", LastAttachedAt: old},
-		{ID: "5", Name: "never-attached", RepoName: "graith", Status: "stopped", LastAttachedAt: "", CreatedAt: old},
-		{ID: "6", Name: "never-attached-recent", RepoName: "graith", Status: "running", LastAttachedAt: "", CreatedAt: recent},
+		{ID: "1", Name: "running-croft", RepoName: "croft", Status: "running", LastAttachedAt: recent},
+		{ID: "2", Name: "stopped-croft", RepoName: "croft", Status: "stopped", LastAttachedAt: old},
+		{ID: "3", Name: "running-thrawn", RepoName: "thrawn", Status: "running", LastAttachedAt: old},
+		{ID: "4", Name: "errored-croft", RepoName: "croft", Status: "errored", LastAttachedAt: old},
+		{ID: "5", Name: "never-attached", RepoName: "croft", Status: "stopped", LastAttachedAt: "", CreatedAt: old},
+		{ID: "6", Name: "never-attached-recent", RepoName: "croft", Status: "running", LastAttachedAt: "", CreatedAt: recent},
 	}
 
 	tests := []struct {
@@ -60,7 +60,7 @@ func TestFilterSessions(t *testing.T) {
 	}{
 		{
 			name:    "repo filter",
-			flags:   batchFlags{repo: "graith"},
+			flags:   batchFlags{repo: "croft"},
 			wantIDs: []string{"1", "2", "4", "5", "6"},
 		},
 		{
@@ -75,12 +75,12 @@ func TestFilterSessions(t *testing.T) {
 		},
 		{
 			name:    "repo + stopped",
-			flags:   batchFlags{repo: "graith", stopped: true},
+			flags:   batchFlags{repo: "croft", stopped: true},
 			wantIDs: []string{"2", "4", "5"},
 		},
 		{
 			name:    "repo + stopped + stale",
-			flags:   batchFlags{repo: "graith", stopped: true, stale: "6h"},
+			flags:   batchFlags{repo: "croft", stopped: true, stale: "6h"},
 			wantIDs: []string{"2", "4", "5"},
 		},
 		{

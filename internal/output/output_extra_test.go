@@ -77,12 +77,12 @@ func TestErrorDoesNotWriteToStdout(t *testing.T) {
 func TestPrintDoesNotWriteToStderr(t *testing.T) {
 	var outBuf, errBuf bytes.Buffer
 	w := &Writer{jsonMode: false, out: &outBuf, errOut: &errBuf}
-	w.Print("hello %s", "world")
+	w.Print("hello %s", "bonnie")
 	if errBuf.Len() != 0 {
 		t.Errorf("Print() should not write to stderr, got %q", errBuf.String())
 	}
-	if outBuf.String() != "hello world" {
-		t.Errorf("Print() output = %q, want %q", outBuf.String(), "hello world")
+	if outBuf.String() != "hello bonnie" {
+		t.Errorf("Print() output = %q, want %q", outBuf.String(), "hello bonnie")
 	}
 }
 
@@ -92,7 +92,7 @@ func TestJSONOutputDoesNotWriteToStderr(t *testing.T) {
 	type data struct {
 		Key string `json:"key"`
 	}
-	if err := w.JSON(data{Key: "val"}); err != nil {
+	if err := w.JSON(data{Key: "neep"}); err != nil {
 		t.Fatal(err)
 	}
 	if errBuf.Len() != 0 {

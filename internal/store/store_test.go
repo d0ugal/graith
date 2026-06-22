@@ -13,11 +13,11 @@ import (
 func TestValidateKey(t *testing.T) {
 	t.Run("valid keys", func(t *testing.T) {
 		validKeys := []string{
-			"design/api.md",
-			"tribunal/2026-06-15",
-			"simple",
-			"a/b/c",
-			"research/findings.json",
+			"loch/api.md",
+			"kirk/2026-06-15",
+			"neep",
+			"glen/wynd/kirk",
+			"loch/findings.json",
 			"a",
 		}
 		for _, key := range validKeys {
@@ -55,8 +55,8 @@ func TestValidateKey(t *testing.T) {
 			}
 		}
 		okKeys := []string{
-			"foo/..bar",
-			"foo/bar..",
+			"glen/..braw",
+			"glen/braw..",
 		}
 		for _, key := range okKeys {
 			if err := store.ValidateKey(key); err != nil {
@@ -104,8 +104,8 @@ func TestValidateKey(t *testing.T) {
 			}
 		}
 		// store.lock in a subdirectory is fine
-		if err := store.ValidateKey("sub/store.lock"); err != nil {
-			t.Errorf("ValidateKey(\"sub/store.lock\") unexpected error: %v", err)
+		if err := store.ValidateKey("glen/store.lock"); err != nil {
+			t.Errorf("ValidateKey(\"glen/store.lock\") unexpected error: %v", err)
 		}
 	})
 
@@ -153,7 +153,7 @@ func TestValidateKey(t *testing.T) {
 			}
 		}
 		// dash in the middle or at end of component is fine
-		okKeys := []string{"foo-bar", "a/b-c/d"}
+		okKeys := []string{"glen-braw", "glen/wynd-kirk/loch"}
 		for _, key := range okKeys {
 			if err := store.ValidateKey(key); err != nil {
 				t.Errorf("ValidateKey(%q) unexpected error: %v", key, err)
@@ -196,8 +196,8 @@ func newTestStore(t *testing.T) string {
 func TestPutGet(t *testing.T) {
 	dir := newTestStore(t)
 
-	const key = "design/api.md"
-	const body = "# API Design\n\nSome content here."
+	const key = "loch/api.md"
+	const body = "# Loch Design\n\nBraw content here."
 
 	if err := store.Put(dir, key, body); err != nil {
 		t.Fatalf("Put: %v", err)
@@ -224,9 +224,9 @@ func TestPutGet(t *testing.T) {
 func TestPutOverwrite(t *testing.T) {
 	dir := newTestStore(t)
 
-	const key = "notes/test.md"
-	const first = "first value"
-	const second = "second value"
+	const key = "loch/neep.md"
+	const first = "auld value"
+	const second = "braw value"
 
 	if err := store.Put(dir, key, first); err != nil {
 		t.Fatalf("Put (first): %v", err)
@@ -240,15 +240,15 @@ func TestPutOverwrite(t *testing.T) {
 		t.Fatalf("Get: %v", err)
 	}
 	if got != second {
-		t.Errorf("Get returned %q, want %q (second value)", got, second)
+		t.Errorf("Get returned %q, want %q (braw value)", got, second)
 	}
 }
 
 func TestPutIdenticalContent(t *testing.T) {
 	dir := newTestStore(t)
 
-	const key = "notes/same.md"
-	const body = "identical content"
+	const key = "loch/same.md"
+	const body = "bide content"
 
 	if err := store.Put(dir, key, body); err != nil {
 		t.Fatalf("Put (first): %v", err)
@@ -269,7 +269,7 @@ func TestPutIdenticalContent(t *testing.T) {
 func TestGetNotFound(t *testing.T) {
 	dir := newTestStore(t)
 
-	_, err := store.Get(dir, "nonexistent/key.md")
+	_, err := store.Get(dir, "thrawn/lost.md")
 	if err == nil {
 		t.Error("Get on nonexistent key expected error, got nil")
 	}
@@ -283,7 +283,7 @@ func TestPutInvalidKey(t *testing.T) {
 		"",
 	}
 	for _, key := range invalidKeys {
-		if err := store.Put(dir, key, "body"); err == nil {
+		if err := store.Put(dir, key, "neep"); err == nil {
 			t.Errorf("Put(%q) expected error for invalid key, got nil", key)
 		}
 	}
@@ -292,8 +292,8 @@ func TestPutInvalidKey(t *testing.T) {
 func TestPutCreatesGitCommit(t *testing.T) {
 	dir := newTestStore(t)
 
-	const key = "design/api.md"
-	if err := store.Put(dir, key, "content"); err != nil {
+	const key = "loch/api.md"
+	if err := store.Put(dir, key, "bonnie"); err != nil {
 		t.Fatalf("Put: %v", err)
 	}
 
@@ -317,48 +317,48 @@ func TestCommitMessage(t *testing.T) {
 		t.Setenv("GRAITH_SESSION_NAME", "")
 		t.Setenv("GRAITH_AGENT_TYPE", "")
 
-		msg := store.CommitMessage("update", "design/api.md")
-		want := "store: update design/api.md"
+		msg := store.CommitMessage("update", "loch/api.md")
+		want := "store: update loch/api.md"
 		if msg != want {
 			t.Errorf("CommitMessage = %q, want %q", msg, want)
 		}
 	})
 
 	t.Run("with session id and name", func(t *testing.T) {
-		t.Setenv("GRAITH_SESSION_ID", "abc123")
-		t.Setenv("GRAITH_SESSION_NAME", "fix-overlay")
+		t.Setenv("GRAITH_SESSION_ID", "braw123")
+		t.Setenv("GRAITH_SESSION_NAME", "canny-overlay")
 		t.Setenv("GRAITH_AGENT_TYPE", "")
 
-		msg := store.CommitMessage("update", "design/api.md")
-		if !strings.Contains(msg, "store: update design/api.md") {
+		msg := store.CommitMessage("update", "loch/api.md")
+		if !strings.Contains(msg, "store: update loch/api.md") {
 			t.Errorf("CommitMessage missing first line: %q", msg)
 		}
-		if !strings.Contains(msg, "session: fix-overlay (abc123)") {
+		if !strings.Contains(msg, "session: canny-overlay (braw123)") {
 			t.Errorf("CommitMessage missing session trailer: %q", msg)
 		}
 	})
 
 	t.Run("with session id only", func(t *testing.T) {
-		t.Setenv("GRAITH_SESSION_ID", "abc123")
+		t.Setenv("GRAITH_SESSION_ID", "braw123")
 		t.Setenv("GRAITH_SESSION_NAME", "")
 		t.Setenv("GRAITH_AGENT_TYPE", "")
 
-		msg := store.CommitMessage("update", "design/api.md")
-		if !strings.Contains(msg, "session: abc123") {
+		msg := store.CommitMessage("update", "loch/api.md")
+		if !strings.Contains(msg, "session: braw123") {
 			t.Errorf("CommitMessage missing session trailer: %q", msg)
 		}
 	})
 
 	t.Run("with all env vars", func(t *testing.T) {
-		t.Setenv("GRAITH_SESSION_ID", "abc123")
-		t.Setenv("GRAITH_SESSION_NAME", "fix-overlay")
+		t.Setenv("GRAITH_SESSION_ID", "braw123")
+		t.Setenv("GRAITH_SESSION_NAME", "canny-overlay")
 		t.Setenv("GRAITH_AGENT_TYPE", "claude")
 
-		msg := store.CommitMessage("update", "design/api.md")
-		if !strings.Contains(msg, "store: update design/api.md") {
+		msg := store.CommitMessage("update", "loch/api.md")
+		if !strings.Contains(msg, "store: update loch/api.md") {
 			t.Errorf("CommitMessage missing first line: %q", msg)
 		}
-		if !strings.Contains(msg, "session: fix-overlay (abc123)") {
+		if !strings.Contains(msg, "session: canny-overlay (braw123)") {
 			t.Errorf("CommitMessage missing session trailer: %q", msg)
 		}
 		if !strings.Contains(msg, "agent: claude") {
@@ -371,14 +371,14 @@ func TestList(t *testing.T) {
 	dir := newTestStore(t)
 
 	// Put 3 keys across 2 prefixes
-	if err := store.Put(dir, "alpha/one.md", "one"); err != nil {
-		t.Fatalf("Put alpha/one.md: %v", err)
+	if err := store.Put(dir, "glen/ane.md", "ane"); err != nil {
+		t.Fatalf("Put glen/ane.md: %v", err)
 	}
-	if err := store.Put(dir, "alpha/two.md", "two"); err != nil {
-		t.Fatalf("Put alpha/two.md: %v", err)
+	if err := store.Put(dir, "glen/twa.md", "twa"); err != nil {
+		t.Fatalf("Put glen/twa.md: %v", err)
 	}
-	if err := store.Put(dir, "beta/three.md", "three"); err != nil {
-		t.Fatalf("Put beta/three.md: %v", err)
+	if err := store.Put(dir, "wynd/three.md", "three"); err != nil {
+		t.Fatalf("Put wynd/three.md: %v", err)
 	}
 
 	t.Run("list all", func(t *testing.T) {
@@ -397,27 +397,27 @@ func TestList(t *testing.T) {
 	})
 
 	t.Run("list with prefix", func(t *testing.T) {
-		entries, err := store.List(dir, "alpha")
+		entries, err := store.List(dir, "glen")
 		if err != nil {
 			t.Fatalf("List with prefix: %v", err)
 		}
 		if len(entries) != 2 {
-			t.Errorf("List(alpha) returned %d entries, want 2", len(entries))
+			t.Errorf("List(glen) returned %d entries, want 2", len(entries))
 		}
 		for _, e := range entries {
-			if !strings.HasPrefix(e.Key, "alpha/") {
-				t.Errorf("entry %q does not have prefix alpha/", e.Key)
+			if !strings.HasPrefix(e.Key, "glen/") {
+				t.Errorf("entry %q does not have prefix glen/", e.Key)
 			}
 		}
 	})
 
 	t.Run("list nonexistent prefix", func(t *testing.T) {
-		entries, err := store.List(dir, "nonexistent")
+		entries, err := store.List(dir, "thrawn")
 		if err != nil {
-			t.Fatalf("List nonexistent prefix: %v", err)
+			t.Fatalf("List thrawn prefix: %v", err)
 		}
 		if len(entries) != 0 {
-			t.Errorf("List(nonexistent) returned %d entries, want 0", len(entries))
+			t.Errorf("List(thrawn) returned %d entries, want 0", len(entries))
 		}
 	})
 }
@@ -453,53 +453,53 @@ func TestListEmptyStore(t *testing.T) {
 func TestRemove(t *testing.T) {
 	dir := newTestStore(t)
 
-	if err := store.Put(dir, "docs/one.md", "one"); err != nil {
-		t.Fatalf("Put docs/one.md: %v", err)
+	if err := store.Put(dir, "loch/ane.md", "ane"); err != nil {
+		t.Fatalf("Put loch/ane.md: %v", err)
 	}
-	if err := store.Put(dir, "docs/two.md", "two"); err != nil {
-		t.Fatalf("Put docs/two.md: %v", err)
+	if err := store.Put(dir, "loch/twa.md", "twa"); err != nil {
+		t.Fatalf("Put loch/twa.md: %v", err)
 	}
 
-	if err := store.Remove(dir, "docs/one.md"); err != nil {
+	if err := store.Remove(dir, "loch/ane.md"); err != nil {
 		t.Fatalf("Remove: %v", err)
 	}
 
-	// docs/one.md should be gone
-	if _, err := store.Get(dir, "docs/one.md"); err == nil {
-		t.Error("Get docs/one.md expected error after remove, got nil")
+	// loch/ane.md should be gone
+	if _, err := store.Get(dir, "loch/ane.md"); err == nil {
+		t.Error("Get loch/ane.md expected error after remove, got nil")
 	}
 
-	// docs/two.md should still exist
-	got, err := store.Get(dir, "docs/two.md")
+	// loch/twa.md should still exist
+	got, err := store.Get(dir, "loch/twa.md")
 	if err != nil {
-		t.Fatalf("Get docs/two.md: %v", err)
+		t.Fatalf("Get loch/twa.md: %v", err)
 	}
-	if got != "two" {
-		t.Errorf("Get docs/two.md = %q, want %q", got, "two")
+	if got != "twa" {
+		t.Errorf("Get loch/twa.md = %q, want %q", got, "twa")
 	}
 }
 
 func TestRemoveCleansEmptyParents(t *testing.T) {
 	dir := newTestStore(t)
 
-	if err := store.Put(dir, "a/b/c/deep.md", "content"); err != nil {
+	if err := store.Put(dir, "glen/wynd/kirk/deep.md", "bonnie"); err != nil {
 		t.Fatalf("Put: %v", err)
 	}
 
-	if err := store.Remove(dir, "a/b/c/deep.md"); err != nil {
+	if err := store.Remove(dir, "glen/wynd/kirk/deep.md"); err != nil {
 		t.Fatalf("Remove: %v", err)
 	}
 
-	// The directory "a" should be gone since it's now empty
-	if _, err := os.Stat(filepath.Join(dir, "a")); !os.IsNotExist(err) {
-		t.Errorf("expected directory 'a' to be removed, stat err: %v", err)
+	// The directory "glen" should be gone since it's now empty
+	if _, err := os.Stat(filepath.Join(dir, "glen")); !os.IsNotExist(err) {
+		t.Errorf("expected directory 'glen' to be removed, stat err: %v", err)
 	}
 }
 
 func TestRemoveNonexistent(t *testing.T) {
 	dir := newTestStore(t)
 
-	err := store.Remove(dir, "does/not/exist.md")
+	err := store.Remove(dir, "thrawn/nae/here.md")
 	if err == nil {
 		t.Error("Remove nonexistent key expected error, got nil")
 	}
@@ -510,27 +510,27 @@ func TestRemoveNonexistent(t *testing.T) {
 
 func TestStorePath(t *testing.T) {
 	t.Run("basic structure", func(t *testing.T) {
-		p := store.StorePath("/data", "/home/user/myrepo")
-		// Should be: /data/store/myrepo-<12hexchars>
+		p := store.StorePath("/glen", "/hame/user/croft")
+		// Should be: /glen/store/croft-<12hexchars>
 		if p == "" {
 			t.Fatal("StorePath returned empty string")
 		}
-		// Check it starts with /data/store/
-		const prefix = "/data/store/"
+		// Check it starts with /glen/store/
+		const prefix = "/glen/store/"
 		if len(p) < len(prefix) || p[:len(prefix)] != prefix {
 			t.Errorf("StorePath = %q, want prefix %q", p, prefix)
 		}
 	})
 
 	t.Run("repo name is base of path", func(t *testing.T) {
-		p := store.StorePath("/data", "/home/user/graith")
-		if len(p) < len("/data/store/graith-") || p[:len("/data/store/graith-")] != "/data/store/graith-" {
+		p := store.StorePath("/glen", "/hame/user/graith")
+		if len(p) < len("/glen/store/graith-") || p[:len("/glen/store/graith-")] != "/glen/store/graith-" {
 			t.Errorf("StorePath = %q, expected repo name 'graith' in path", p)
 		}
 	})
 
 	t.Run("hash is 12 hex characters", func(t *testing.T) {
-		p := store.StorePath("/data", "/home/user/myrepo")
+		p := store.StorePath("/glen", "/hame/user/croft")
 		// Extract the hash suffix after the last '-'
 		last := -1
 		for i, c := range p {
@@ -553,24 +553,24 @@ func TestStorePath(t *testing.T) {
 	})
 
 	t.Run("deterministic", func(t *testing.T) {
-		p1 := store.StorePath("/data", "/home/user/graith")
-		p2 := store.StorePath("/data", "/home/user/graith")
+		p1 := store.StorePath("/glen", "/hame/user/graith")
+		p2 := store.StorePath("/glen", "/hame/user/graith")
 		if p1 != p2 {
 			t.Errorf("StorePath not deterministic: %q != %q", p1, p2)
 		}
 	})
 
 	t.Run("different repos produce different paths", func(t *testing.T) {
-		p1 := store.StorePath("/data", "/home/user/graith")
-		p2 := store.StorePath("/data", "/home/user/other")
+		p1 := store.StorePath("/glen", "/hame/user/graith")
+		p2 := store.StorePath("/glen", "/hame/user/bothy")
 		if p1 == p2 {
 			t.Errorf("different repos produced same path: %q", p1)
 		}
 	})
 
 	t.Run("known hash value", func(t *testing.T) {
-		p := store.StorePath("/data", "/home/user/graith")
-		p2 := store.StorePath("/data", "/home/user/graith")
+		p := store.StorePath("/glen", "/hame/user/graith")
+		p2 := store.StorePath("/glen", "/hame/user/graith")
 		if p != p2 {
 			t.Errorf("non-deterministic: %q vs %q", p, p2)
 		}
@@ -578,9 +578,9 @@ func TestStorePath(t *testing.T) {
 }
 
 func TestSharedStorePath(t *testing.T) {
-	p := store.SharedStorePath("/data")
-	if p != "/data/store/shared" {
-		t.Errorf("SharedStorePath = %q, want /data/store/shared", p)
+	p := store.SharedStorePath("/glen")
+	if p != "/glen/store/shared" {
+		t.Errorf("SharedStorePath = %q, want /glen/store/shared", p)
 	}
 }
 
@@ -588,15 +588,15 @@ func TestListStores(t *testing.T) {
 	dataDir := t.TempDir()
 
 	// Create two stores
-	s1 := store.StorePath(dataDir, "/home/user/project-a")
-	s2 := store.StorePath(dataDir, "/home/user/project-b")
+	s1 := store.StorePath(dataDir, "/hame/user/croft-a")
+	s2 := store.StorePath(dataDir, "/hame/user/croft-b")
 	if err := store.Init(s1); err != nil {
 		t.Fatalf("Init s1: %v", err)
 	}
 	if err := store.Init(s2); err != nil {
 		t.Fatalf("Init s2: %v", err)
 	}
-	if err := store.Put(s1, "doc.md", "hello"); err != nil {
+	if err := store.Put(s1, "neep.md", "braw"); err != nil {
 		t.Fatalf("Put s1: %v", err)
 	}
 
@@ -622,7 +622,7 @@ func TestListStores(t *testing.T) {
 func TestAppendCreatesFile(t *testing.T) {
 	dir := newTestStore(t)
 
-	const key = "logs/test.jsonl"
+	const key = "loch/kirk.jsonl"
 	const line1 = `{"run":1}`
 
 	if err := store.Append(dir, key, line1); err != nil {
@@ -641,7 +641,7 @@ func TestAppendCreatesFile(t *testing.T) {
 func TestAppendMultipleLines(t *testing.T) {
 	dir := newTestStore(t)
 
-	const key = "logs/multi.jsonl"
+	const key = "loch/multi.jsonl"
 
 	lines := []string{`{"run":1}`, `{"run":2}`, `{"run":3}`}
 	for _, line := range lines {
@@ -676,7 +676,7 @@ func TestAppendMultipleLines(t *testing.T) {
 func TestAppendPreservesTrailingNewline(t *testing.T) {
 	dir := newTestStore(t)
 
-	const key = "logs/newline.jsonl"
+	const key = "loch/newline.jsonl"
 
 	if err := store.Append(dir, key, "line1\n"); err != nil {
 		t.Fatalf("Append with newline: %v", err)
@@ -696,7 +696,7 @@ func TestAppendPreservesTrailingNewline(t *testing.T) {
 
 func TestAppendInvalidKey(t *testing.T) {
 	dir := newTestStore(t)
-	if err := store.Append(dir, "../escape", "data"); err == nil {
+	if err := store.Append(dir, "../escape", "neep"); err == nil {
 		t.Error("Append with invalid key should fail")
 	}
 }
@@ -704,13 +704,13 @@ func TestAppendInvalidKey(t *testing.T) {
 func TestAppendCoexistsWithPut(t *testing.T) {
 	dir := newTestStore(t)
 
-	const key = "data/mixed.txt"
+	const key = "loch/mixed.txt"
 
-	if err := store.Put(dir, key, "initial content"); err != nil {
+	if err := store.Put(dir, key, "auld content"); err != nil {
 		t.Fatalf("Put: %v", err)
 	}
 
-	if err := store.Append(dir, key, "appended line"); err != nil {
+	if err := store.Append(dir, key, "braw line"); err != nil {
 		t.Fatalf("Append: %v", err)
 	}
 
@@ -718,7 +718,7 @@ func TestAppendCoexistsWithPut(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	want := "initial contentappended line\n"
+	want := "auld contentbraw line\n"
 	if got != want {
 		t.Errorf("Get returned %q, want %q", got, want)
 	}
