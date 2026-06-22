@@ -98,7 +98,7 @@ func (ac authContext) checkMsgPub(sm *SessionManager, stream string) error {
 	return fmt.Errorf("not authorized: inbox target is not self, descendant, or parent")
 }
 
-// checkMsgSub validates msg_sub/msg_ack authorization. For inbox streams, the
+// checkInboxRead validates msg_sub/msg_ack authorization. For inbox streams, the
 // authenticated session can only read its own inbox. Must be called with sm.mu
 // at least RLocked.
 func (ac authContext) checkInboxRead(stream string) error {

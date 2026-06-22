@@ -217,6 +217,7 @@ func ConnectFast(paths config.Paths) (*Client, error) {
 		reader: protocol.NewFrameReader(conn),
 		writer: protocol.NewFrameWriter(conn),
 		paths:  paths,
+		token:  os.Getenv("GRAITH_TOKEN"),
 	}
 	if err := c.Handshake(); err != nil {
 		c.Close()
@@ -265,6 +266,7 @@ func ConnectForApproval(paths config.Paths, approvalTimeout time.Duration) (*Cli
 		reader: protocol.NewFrameReader(conn),
 		writer: protocol.NewFrameWriter(conn),
 		paths:  paths,
+		token:  os.Getenv("GRAITH_TOKEN"),
 	}
 	if err := c.Handshake(); err != nil {
 		c.Close()
