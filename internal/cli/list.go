@@ -118,15 +118,15 @@ func printFlat(cmd *cobra.Command, sessions []protocol.SessionInfo, now time.Tim
 	})
 
 	tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "NAME\tREPO\tAGENT\tSTATUS\tACTIVITY\tMODEL\tCOST\tBRANCH\tGIT\tAGE\tATTACHED")
+	fmt.Fprintln(tw, "NAME\tREPO\tAGENT\tSTATUS\tACTIVITY\tMODEL\tBRANCH\tGIT\tAGE\tATTACHED")
 	for _, s := range sessions {
 		name := s.Name
 		if s.Starred {
 			name = "★ " + name
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			name, s.RepoName, s.Agent, s.Status,
-			formatAgentStatus(s), formatModel(s), formatCost(s),
+			formatAgentStatus(s), formatModel(s),
 			formatBranch(s), formatGitStatus(s), formatAge(s, now), formatAttached(s, now))
 	}
 	tw.Flush()
@@ -163,7 +163,7 @@ func printTree(cmd *cobra.Command, sessions []protocol.SessionInfo, now time.Tim
 	}
 
 	tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "NAME\tREPO\tAGENT\tSTATUS\tACTIVITY\tMODEL\tCOST\tBRANCH\tGIT\tAGE\tATTACHED")
+	fmt.Fprintln(tw, "NAME\tREPO\tAGENT\tSTATUS\tACTIVITY\tMODEL\tBRANCH\tGIT\tAGE\tATTACHED")
 
 	var walk func(s protocol.SessionInfo, prefix, childPrefix string)
 	walk = func(s protocol.SessionInfo, prefix, childPrefix string) {
@@ -171,9 +171,9 @@ func printTree(cmd *cobra.Command, sessions []protocol.SessionInfo, now time.Tim
 		if s.Starred {
 			name = "★ " + name
 		}
-		fmt.Fprintf(tw, "%s%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+		fmt.Fprintf(tw, "%s%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			prefix, name, s.RepoName, s.Agent, s.Status,
-			formatAgentStatus(s), formatModel(s), formatCost(s),
+			formatAgentStatus(s), formatModel(s),
 			formatBranch(s), formatGitStatus(s), formatAge(s, now), formatAttached(s, now))
 
 		kids := children[s.ID]
@@ -240,13 +240,6 @@ func formatAgentStatus(s protocol.SessionInfo) string {
 
 func formatModel(s protocol.SessionInfo) string {
 	return s.Model
-}
-
-func formatCost(s protocol.SessionInfo) string {
-	if s.CostUSD != nil {
-		return fmt.Sprintf("$%.2f", *s.CostUSD)
-	}
-	return ""
 }
 
 func formatBranch(s protocol.SessionInfo) string {

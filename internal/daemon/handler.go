@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"cmp"
 	"context"
 	"fmt"
 	"io"
@@ -1262,10 +1261,8 @@ func toSessionInfo(s SessionState, cfg *config.Config, hr *hookReport) protocol.
 		Sandboxed:      s.Sandboxed,
 		SharedWorktree: s.SharedWorktree,
 		InPlace:        s.InPlace,
-		Model:          cmp.Or(s.HookModel, s.Model),
+		Model:          s.Model,
 		ToolName:       s.HookToolName,
-		CostUSD:        s.HookCostUSD,
-		ContextPercent: s.HookContextPercent,
 		ConfigStale:    isConfigStale(s, cfg),
 		Starred:        s.Starred,
 		SystemKind:     s.SystemKind,

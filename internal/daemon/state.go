@@ -53,10 +53,7 @@ type SessionState struct {
 	IdleSince              *time.Time            `json:"-"`
 	GitDirty               bool                  `json:"-"`
 	GitUnpushed            int                   `json:"-"`
-	HookModel              string                `json:"-"`
 	HookToolName           string                `json:"-"`
-	HookCostUSD            *float64              `json:"-"`
-	HookContextPercent     *float64              `json:"-"`
 	ExitCode               *int                  `json:"exit_code,omitempty"`
 	ExitSignal             string                `json:"exit_signal,omitempty"`
 	PID                    int                   `json:"pid,omitempty"`
