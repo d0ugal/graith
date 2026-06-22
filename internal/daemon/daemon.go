@@ -43,9 +43,6 @@ type hookReport struct {
 	Status             string
 	Event              string
 	ToolName           string
-	Model              string
-	CostUSD            *float64
-	ContextPercent     *float64
 	ReportedAt         time.Time
 	AuthoritativeUntil time.Time
 }
@@ -135,7 +132,6 @@ func (sm *SessionManager) HandleHookReport(sr protocol.StatusReportMsg) {
 		Status:             status,
 		Event:              sr.Event,
 		ToolName:           sr.ToolName,
-		Model:              sr.Model,
 		ReportedAt:         now,
 		AuthoritativeUntil: now.Add(staleness),
 	}
@@ -152,23 +148,6 @@ func (sm *SessionManager) HandleHookReport(sr protocol.StatusReportMsg) {
 		return
 	}
 
-	// Accumulate usage data — keep the latest non-nil values from previous reports.
-	if sr.Usage != nil && sr.Usage.CostUSD != nil {
-		report.CostUSD = sr.Usage.CostUSD
-	} else if prev, ok := sm.hookReports[sr.SessionID]; ok && prev.CostUSD != nil {
-		report.CostUSD = prev.CostUSD
-	}
-	if sr.Context != nil && sr.Context.Percent != nil {
-		report.ContextPercent = sr.Context.Percent
-	} else if prev, ok := sm.hookReports[sr.SessionID]; ok && prev.ContextPercent != nil {
-		report.ContextPercent = prev.ContextPercent
-	}
-	if sr.Model != "" {
-		report.Model = sr.Model
-	} else if prev, ok := sm.hookReports[sr.SessionID]; ok && prev.Model != "" {
-		report.Model = prev.Model
-	}
-
 	oldStatus = sess.AgentStatus
 	name = sess.Name
 	sm.hookReports[sr.SessionID] = report
@@ -178,9 +157,6 @@ func (sm *SessionManager) HandleHookReport(sr protocol.StatusReportMsg) {
 		sess.StatusChangedAt = time.Now()
 	}
 	sess.HookToolName = report.ToolName
-	sess.HookModel = report.Model
-	sess.HookCostUSD = report.CostUSD
-	sess.HookContextPercent = report.ContextPercent
 	sm.mu.Unlock()
 
 	sm.log.Info("hook report processed",
