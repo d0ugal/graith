@@ -29,7 +29,7 @@ A multiline string injected into the agent's environment. For Claude, it is pass
 
 ### `allowed_repo_paths`
 
-When non-empty, the daemon rejects `--repo` / `-C` paths that are not under one of these prefixes. Paths support `~` expansion and are resolved to absolute paths before comparison.
+When non-empty, the daemon rejects `--repo` / `-C` paths that are not under one of these prefixes. Paths support `~` expansion and are resolved to absolute paths before comparison. These paths also feed the repo autocomplete in the create-session form (`ctrl+b c` or `n` in the overlay) — each path is scanned one level deep for git repositories.
 
 ```toml
 allowed_repo_paths = ["~/Code", "~/Work"]
