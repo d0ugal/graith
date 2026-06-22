@@ -2051,6 +2051,11 @@ func (sm *SessionManager) Delete(id string) error {
 	if sessToken != "" {
 		delete(sm.tokenIndex, sessToken)
 	}
+	for _, s := range sm.state.Sessions {
+		if s.ParentID == id {
+			s.ParentID = ""
+		}
+	}
 	err := sm.saveState()
 	sm.mu.Unlock()
 
@@ -2325,6 +2330,10 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 	// Remove successfully torn-down sessions; revert failed ones to their prior status.
 	sm.mu.Lock()
 	deletedIDs := append([]string{}, creatingIDs...)
+	removedSet := make(map[string]bool, len(creatingIDs))
+	for _, cid := range creatingIDs {
+		removedSet[cid] = true
+	}
 	for _, s := range snaps {
 		if succeeded[s.id] {
 			if sess, ok := sm.state.Sessions[s.id]; ok && sess.Token != "" {
@@ -2333,12 +2342,18 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 			delete(sm.state.Sessions, s.id)
 			delete(sm.hookReports, s.id)
 			deletedIDs = append(deletedIDs, s.id)
+			removedSet[s.id] = true
 		} else if sess, ok := sm.state.Sessions[s.id]; ok {
 			if s.prevStatus == StatusRunning {
 				sess.Status = StatusStopped
 			} else {
 				sess.Status = s.prevStatus
 			}
+		}
+	}
+	for _, s := range sm.state.Sessions {
+		if s.ParentID != "" && removedSet[s.ParentID] {
+			s.ParentID = ""
 		}
 	}
 	stateErr := sm.saveState()
