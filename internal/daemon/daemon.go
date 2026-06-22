@@ -1886,10 +1886,15 @@ func (sm *SessionManager) resumeWithSummary(id string, rows, cols uint16, lifecy
 	}
 
 	delete(sm.hookReports, id)
+	scenarioIDForRepublish := sessState.ScenarioID
 	result := cloneSessionState(sessState)
 	sm.mu.Unlock()
 
 	go sm.watchSession(id, ptySess)
+
+	if scenarioIDForRepublish != "" {
+		sm.republishManifests(scenarioIDForRepublish)
+	}
 
 	return result, nil
 }
