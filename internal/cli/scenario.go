@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -69,7 +70,9 @@ var scenarioStartCmd = &cobra.Command{
 		}
 
 		var sf scenarioFile
-		if err := toml.Unmarshal(data, &sf); err != nil {
+		dec := toml.NewDecoder(bytes.NewReader(data))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&sf); err != nil {
 			return fmt.Errorf("parse scenario TOML: %w", err)
 		}
 
