@@ -3682,6 +3682,35 @@ func TestDeleteClearsChildParentID(t *testing.T) {
 	}
 }
 
+func TestDeleteClearsChildParentIDWhenCreating(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	sm.state.Sessions["creating-parent"] = &SessionState{
+		ID:     "creating-parent",
+		Name:   "creating-parent",
+		Agent:  "claude",
+		Status: StatusCreating,
+	}
+	sm.state.Sessions["child"] = &SessionState{
+		ID:       "child",
+		Name:     "child",
+		Agent:    "claude",
+		ParentID: "creating-parent",
+		Status:   StatusRunning,
+	}
+
+	if err := sm.Delete("creating-parent"); err != nil {
+		t.Fatalf("Delete failed: %v", err)
+	}
+
+	if _, ok := sm.state.Sessions["creating-parent"]; ok {
+		t.Error("creating-parent should be removed from state")
+	}
+	if sm.state.Sessions["child"].ParentID != "" {
+		t.Errorf("child ParentID = %q, want empty", sm.state.Sessions["child"].ParentID)
+	}
+}
+
 func TestDeleteWithChildrenClearsOrphanedParentIDs(t *testing.T) {
 	sm := newTestSessionManager(t)
 
