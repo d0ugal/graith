@@ -3213,6 +3213,103 @@ func TestDeleteSucceedsWhenWorktreeAlreadyGone(t *testing.T) {
 	}
 }
 
+func TestDeleteReparentsChildren(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	sm.state.Sessions["grandparent"] = &SessionState{
+		ID:     "grandparent",
+		Name:   "grandparent",
+		Agent:  "claude",
+		Status: StatusStopped,
+	}
+	sm.state.Sessions["parent"] = &SessionState{
+		ID:           "parent",
+		Name:         "parent",
+		Agent:        "claude",
+		RepoPath:     "/nonexistent/repo",
+		WorktreePath: "/nonexistent/worktree",
+		Branch:       "graith/parent-parent",
+		ParentID:     "grandparent",
+		Status:       StatusStopped,
+	}
+	sm.state.Sessions["child1"] = &SessionState{
+		ID:       "child1",
+		Name:     "child1",
+		Agent:    "claude",
+		ParentID: "parent",
+		Status:   StatusStopped,
+	}
+	sm.state.Sessions["child2"] = &SessionState{
+		ID:       "child2",
+		Name:     "child2",
+		Agent:    "claude",
+		ParentID: "parent",
+		Status:   StatusStopped,
+	}
+	sm.state.Sessions["unrelated"] = &SessionState{
+		ID:       "unrelated",
+		Name:     "unrelated",
+		Agent:    "claude",
+		ParentID: "grandparent",
+		Status:   StatusStopped,
+	}
+
+	err := sm.Delete("parent")
+	if err != nil {
+		t.Fatalf("Delete failed: %v", err)
+	}
+
+	if _, ok := sm.state.Sessions["parent"]; ok {
+		t.Error("deleted session should be removed from state")
+	}
+
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	if sm.state.Sessions["child1"].ParentID != "grandparent" {
+		t.Errorf("child1.ParentID = %q, want %q", sm.state.Sessions["child1"].ParentID, "grandparent")
+	}
+	if sm.state.Sessions["child2"].ParentID != "grandparent" {
+		t.Errorf("child2.ParentID = %q, want %q", sm.state.Sessions["child2"].ParentID, "grandparent")
+	}
+	if sm.state.Sessions["unrelated"].ParentID != "grandparent" {
+		t.Errorf("unrelated.ParentID = %q, want %q (should be unchanged)", sm.state.Sessions["unrelated"].ParentID, "grandparent")
+	}
+}
+
+func TestDeleteReparentsChildrenToRoot(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	sm.state.Sessions["parent"] = &SessionState{
+		ID:           "parent",
+		Name:         "parent",
+		Agent:        "claude",
+		RepoPath:     "/nonexistent/repo",
+		WorktreePath: "/nonexistent/worktree",
+		Branch:       "graith/parent-parent",
+		Status:       StatusStopped,
+	}
+	sm.state.Sessions["child"] = &SessionState{
+		ID:       "child",
+		Name:     "child",
+		Agent:    "claude",
+		ParentID: "parent",
+		Status:   StatusStopped,
+	}
+
+	err := sm.Delete("parent")
+	if err != nil {
+		t.Fatalf("Delete failed: %v", err)
+	}
+
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	if sm.state.Sessions["child"].ParentID != "" {
+		t.Errorf("child.ParentID = %q, want empty (top-level)", sm.state.Sessions["child"].ParentID)
+	}
+}
+
 func TestDeleteWithChildrenKeepsFailedSessions(t *testing.T) {
 	tmpDir := t.TempDir()
 	worktreeDir := filepath.Join(tmpDir, "existing-child-worktree")
