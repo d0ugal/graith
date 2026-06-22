@@ -13,10 +13,10 @@ func TestStateSaveLoad(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
 	state := &State{
 		Sessions: map[string]*SessionState{
-			"abc123": {
-				ID: "abc123", Name: "fix-bug", RepoPath: "/home/user/repo",
-				RepoName: "repo", WorktreePath: "/home/user/.local/share/graith/worktrees/abc123",
-				Branch: "d0ugal/graith/fix-bug-abc123", BaseBranch: "main",
+			"braw123": {
+				ID: "braw123", Name: "bonnie-fix", RepoPath: "/hame/glen/croft",
+				RepoName: "croft", WorktreePath: "/hame/glen/.local/share/graith/worktrees/braw123",
+				Branch: "d0ugal/graith/bonnie-fix-braw123", BaseBranch: "main",
 				Agent: "claude", Status: StatusRunning, CreatedAt: time.Now().UTC(),
 			},
 		},
@@ -31,11 +31,11 @@ func TestStateSaveLoad(t *testing.T) {
 	if loaded.Version != CurrentStateVersion {
 		t.Errorf("version = %d, want %d", loaded.Version, CurrentStateVersion)
 	}
-	s, ok := loaded.Sessions["abc123"]
+	s, ok := loaded.Sessions["braw123"]
 	if !ok {
 		t.Fatal("session not found after load")
 	}
-	if s.Name != "fix-bug" || s.Agent != "claude" || s.Status != StatusRunning {
+	if s.Name != "bonnie-fix" || s.Agent != "claude" || s.Status != StatusRunning {
 		t.Errorf("session = %+v", s)
 	}
 }
@@ -43,7 +43,7 @@ func TestStateSaveLoad(t *testing.T) {
 func TestLoadStateV0Migration(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
 	// Write a v0 state file (no version field)
-	v0Data := []byte(`{"sessions":{"s1":{"id":"s1","name":"old-session","status":"running"}}}`)
+	v0Data := []byte(`{"sessions":{"braw1":{"id":"braw1","name":"auld-kirk","status":"running"}}}`)
 	if err := writeFileAtomic(path, v0Data); err != nil {
 		t.Fatal(err)
 	}
@@ -54,10 +54,10 @@ func TestLoadStateV0Migration(t *testing.T) {
 	if state.Version != CurrentStateVersion {
 		t.Errorf("version = %d, want %d after migration", state.Version, CurrentStateVersion)
 	}
-	if s, ok := state.Sessions["s1"]; !ok {
+	if s, ok := state.Sessions["braw1"]; !ok {
 		t.Fatal("session lost during migration")
-	} else if s.Name != "old-session" {
-		t.Errorf("name = %q, want %q", s.Name, "old-session")
+	} else if s.Name != "auld-kirk" {
+		t.Errorf("name = %q, want %q", s.Name, "auld-kirk")
 	}
 }
 
@@ -178,8 +178,8 @@ func TestSandboxConfigPersistence(t *testing.T) {
 	}
 	state := &State{
 		Sessions: map[string]*SessionState{
-			"s1": {
-				ID: "s1", Name: "test", Agent: "claude",
+			"braw1": {
+				ID: "braw1", Name: "kirk-sandbox", Agent: "claude",
 				Status: StatusRunning, Sandboxed: true,
 				SandboxConfig: sbx,
 				CreatedAt:     time.Now().UTC(),
@@ -193,7 +193,7 @@ func TestSandboxConfigPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := loaded.Sessions["s1"]
+	s := loaded.Sessions["braw1"]
 	if s.SandboxConfig == nil {
 		t.Fatal("SandboxConfig lost after save/load")
 	}
@@ -217,9 +217,9 @@ func TestSandboxConfigPersistence(t *testing.T) {
 func TestMigrateApprovalsEnabledToAgentHooks(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
 	data := []byte(`{"version":3,"sessions":{
-		"s1":{"id":"s1","name":"with-approvals","status":"running","approvals_enabled":true},
-		"s2":{"id":"s2","name":"without-approvals","status":"running"},
-		"s3":{"id":"s3","name":"already-migrated","status":"running","agent_hooks":true}
+		"braw1":{"id":"braw1","name":"braw-approvals","status":"running","approvals_enabled":true},
+		"canny1":{"id":"canny1","name":"neep-approvals","status":"running"},
+		"kirk1":{"id":"kirk1","name":"auld-migrated","status":"running","agent_hooks":true}
 	}}`)
 	if err := writeFileAtomic(path, data); err != nil {
 		t.Fatal(err)
@@ -231,25 +231,25 @@ func TestMigrateApprovalsEnabledToAgentHooks(t *testing.T) {
 	if loaded.Version != CurrentStateVersion {
 		t.Errorf("version = %d, want %d", loaded.Version, CurrentStateVersion)
 	}
-	if s := loaded.Sessions["s1"]; !s.AgentHooks {
-		t.Error("s1: AgentHooks = false, want true (migrated from approvals_enabled)")
+	if s := loaded.Sessions["braw1"]; !s.AgentHooks {
+		t.Error("braw1: AgentHooks = false, want true (migrated from approvals_enabled)")
 	}
-	if s := loaded.Sessions["s1"]; s.ApprovalsEnabled {
-		t.Error("s1: ApprovalsEnabled should be cleared after migration")
+	if s := loaded.Sessions["braw1"]; s.ApprovalsEnabled {
+		t.Error("braw1: ApprovalsEnabled should be cleared after migration")
 	}
-	if s := loaded.Sessions["s2"]; s.AgentHooks {
-		t.Error("s2: AgentHooks = true, want false (was never set)")
+	if s := loaded.Sessions["canny1"]; s.AgentHooks {
+		t.Error("canny1: AgentHooks = true, want false (was never set)")
 	}
-	if s := loaded.Sessions["s3"]; !s.AgentHooks {
-		t.Error("s3: AgentHooks = false, want true (was already set)")
+	if s := loaded.Sessions["kirk1"]; !s.AgentHooks {
+		t.Error("kirk1: AgentHooks = false, want true (was already set)")
 	}
 }
 
 func TestMigrateApprovalsEnabledBothFieldsSet(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
 	data := []byte(`{"version":3,"sessions":{
-		"both-true":{"id":"both-true","name":"both-true","status":"running","approvals_enabled":true,"agent_hooks":true},
-		"conflict":{"id":"conflict","name":"conflict","status":"running","approvals_enabled":true,"agent_hooks":false}
+		"braw-both":{"id":"braw-both","name":"braw-both","status":"running","approvals_enabled":true,"agent_hooks":true},
+		"thrawn-clash":{"id":"thrawn-clash","name":"thrawn-clash","status":"running","approvals_enabled":true,"agent_hooks":false}
 	}}`)
 	if err := writeFileAtomic(path, data); err != nil {
 		t.Fatal(err)
@@ -258,18 +258,18 @@ func TestMigrateApprovalsEnabledBothFieldsSet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s := loaded.Sessions["both-true"]; !s.AgentHooks || s.ApprovalsEnabled {
-		t.Errorf("both-true: AgentHooks=%v ApprovalsEnabled=%v, want true/false", s.AgentHooks, s.ApprovalsEnabled)
+	if s := loaded.Sessions["braw-both"]; !s.AgentHooks || s.ApprovalsEnabled {
+		t.Errorf("braw-both: AgentHooks=%v ApprovalsEnabled=%v, want true/false", s.AgentHooks, s.ApprovalsEnabled)
 	}
-	if s := loaded.Sessions["conflict"]; !s.AgentHooks || s.ApprovalsEnabled {
-		t.Errorf("conflict: AgentHooks=%v ApprovalsEnabled=%v, want true/false", s.AgentHooks, s.ApprovalsEnabled)
+	if s := loaded.Sessions["thrawn-clash"]; !s.AgentHooks || s.ApprovalsEnabled {
+		t.Errorf("thrawn-clash: AgentHooks=%v ApprovalsEnabled=%v, want true/false", s.AgentHooks, s.ApprovalsEnabled)
 	}
 }
 
 func TestMigrateApprovalsEnabledFromV1(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
 	data := []byte(`{"version":1,"sessions":{
-		"old":{"id":"old","name":"old-session","status":"running","approvals_enabled":true}
+		"auld1":{"id":"auld1","name":"auld-kirk","status":"running","approvals_enabled":true}
 	}}`)
 	if err := writeFileAtomic(path, data); err != nil {
 		t.Fatal(err)
@@ -281,7 +281,7 @@ func TestMigrateApprovalsEnabledFromV1(t *testing.T) {
 	if loaded.Version != CurrentStateVersion {
 		t.Errorf("version = %d, want %d", loaded.Version, CurrentStateVersion)
 	}
-	s := loaded.Sessions["old"]
+	s := loaded.Sessions["auld1"]
 	if !s.AgentHooks {
 		t.Error("AgentHooks = false, want true (migrated from v1 approvals_enabled)")
 	}
@@ -293,17 +293,17 @@ func TestMigrateApprovalsEnabledFromV1(t *testing.T) {
 func TestReconcileDeletingRevertedToStopped(t *testing.T) {
 	state := &State{
 		Sessions: map[string]*SessionState{
-			"deleting": {
-				ID: "deleting", Name: "stuck", Status: StatusDeleting,
+			"fash-del": {
+				ID: "fash-del", Name: "thrawn-stuck", Status: StatusDeleting,
 			},
-			"running": {
-				ID: "running", Name: "alive", Status: StatusRunning, PID: 99999999,
+			"braw-run": {
+				ID: "braw-run", Name: "bonnie-alive", Status: StatusRunning, PID: 99999999,
 			},
 		},
 	}
 	state.Reconcile()
-	if state.Sessions["deleting"].Status != StatusStopped {
-		t.Errorf("deleting session status = %q, want %q", state.Sessions["deleting"].Status, StatusStopped)
+	if state.Sessions["fash-del"].Status != StatusStopped {
+		t.Errorf("deleting session status = %q, want %q", state.Sessions["fash-del"].Status, StatusStopped)
 	}
 }
 
@@ -311,8 +311,8 @@ func TestStatusDeletingPersistence(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
 	state := &State{
 		Sessions: map[string]*SessionState{
-			"s1": {
-				ID: "s1", Name: "deleting-session", Status: StatusDeleting,
+			"braw1": {
+				ID: "braw1", Name: "fash-session", Status: StatusDeleting,
 				CreatedAt: time.Now().UTC(),
 			},
 		},
@@ -324,7 +324,7 @@ func TestStatusDeletingPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := loaded.Sessions["s1"]
+	s := loaded.Sessions["braw1"]
 	if s.Status != StatusDeleting {
 		t.Errorf("status = %q, want %q", s.Status, StatusDeleting)
 	}
@@ -334,8 +334,8 @@ func TestLoadStateV4MigratesStatusChangedAt(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
 	createdAt := time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
 	data := []byte(`{"version":4,"sessions":{
-		"s1":{"id":"s1","name":"old-session","status":"running","created_at":"` + createdAt.Format(time.RFC3339Nano) + `"},
-		"s2":{"id":"s2","name":"no-created-at","status":"stopped"}
+		"braw1":{"id":"braw1","name":"auld-kirk","status":"running","created_at":"` + createdAt.Format(time.RFC3339Nano) + `"},
+		"canny1":{"id":"canny1","name":"haar-session","status":"stopped"}
 	}}`)
 	if err := writeFileAtomic(path, data); err != nil {
 		t.Fatal(err)
@@ -347,16 +347,16 @@ func TestLoadStateV4MigratesStatusChangedAt(t *testing.T) {
 	if loaded.Version != CurrentStateVersion {
 		t.Errorf("version = %d, want %d", loaded.Version, CurrentStateVersion)
 	}
-	s1 := loaded.Sessions["s1"]
+	s1 := loaded.Sessions["braw1"]
 	if s1.StatusChangedAt.IsZero() {
-		t.Error("s1: StatusChangedAt is zero, want backfilled from CreatedAt")
+		t.Error("braw1: StatusChangedAt is zero, want backfilled from CreatedAt")
 	}
 	if !s1.StatusChangedAt.Equal(createdAt) {
-		t.Errorf("s1: StatusChangedAt = %v, want %v (CreatedAt)", s1.StatusChangedAt, createdAt)
+		t.Errorf("braw1: StatusChangedAt = %v, want %v (CreatedAt)", s1.StatusChangedAt, createdAt)
 	}
-	s2 := loaded.Sessions["s2"]
+	s2 := loaded.Sessions["canny1"]
 	if !s2.StatusChangedAt.IsZero() && !s2.StatusChangedAt.Equal(s2.CreatedAt) {
-		t.Errorf("s2: StatusChangedAt = %v, want zero or equal to CreatedAt (%v)", s2.StatusChangedAt, s2.CreatedAt)
+		t.Errorf("canny1: StatusChangedAt = %v, want zero or equal to CreatedAt (%v)", s2.StatusChangedAt, s2.CreatedAt)
 	}
 }
 
@@ -364,9 +364,9 @@ func TestMigrateV6ToV7(t *testing.T) {
 	state := &State{
 		Version: 6,
 		Sessions: map[string]*SessionState{
-			"s1": {
-				ID:   "s1",
-				Name: "test",
+			"braw1": {
+				ID:   "braw1",
+				Name: "neep-kirk",
 			},
 		},
 	}
@@ -376,7 +376,7 @@ func TestMigrateV6ToV7(t *testing.T) {
 	if state.Version != CurrentStateVersion {
 		t.Errorf("expected version %d, got %d", CurrentStateVersion, state.Version)
 	}
-	s := state.Sessions["s1"]
+	s := state.Sessions["braw1"]
 	if s.SummaryText != "" {
 		t.Errorf("expected empty SummaryText, got %q", s.SummaryText)
 	}
@@ -387,7 +387,7 @@ func TestMigrateV6ToV7(t *testing.T) {
 
 func TestSandboxConfigNilBackwardCompat(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
-	data := []byte(`{"version":1,"sessions":{"s1":{"id":"s1","name":"old","status":"stopped","sandboxed":true}}}`)
+	data := []byte(`{"version":1,"sessions":{"braw1":{"id":"braw1","name":"auld-kirk","status":"stopped","sandboxed":true}}}`)
 	if err := writeFileAtomic(path, data); err != nil {
 		t.Fatal(err)
 	}
@@ -395,7 +395,7 @@ func TestSandboxConfigNilBackwardCompat(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := loaded.Sessions["s1"]
+	s := loaded.Sessions["braw1"]
 	if !s.Sandboxed {
 		t.Error("Sandboxed = false, want true")
 	}

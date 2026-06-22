@@ -12,65 +12,65 @@ func TestParseGitHubUsername(t *testing.T) {
 		// SSH URLs
 		{
 			name:     "SSH with .git suffix",
-			url:      "git@github.com:user/repo.git",
-			wantUser: "user",
+			url:      "git@github.com:braw/croft.git",
+			wantUser: "braw",
 			wantOK:   true,
 		},
 		{
 			name:     "SSH without .git suffix",
-			url:      "git@github.com:orgname/project",
-			wantUser: "orgname",
+			url:      "git@github.com:canny/glen",
+			wantUser: "canny",
 			wantOK:   true,
 		},
 		{
 			name:     "SSH with nested path",
-			url:      "git@github.com:my-org/my-repo.git",
-			wantUser: "my-org",
+			url:      "git@github.com:bonnie-glen/auld-croft.git",
+			wantUser: "bonnie-glen",
 			wantOK:   true,
 		},
 
 		// HTTPS URLs
 		{
 			name:     "HTTPS with .git suffix",
-			url:      "https://github.com/user/repo.git",
-			wantUser: "user",
+			url:      "https://github.com/braw/croft.git",
+			wantUser: "braw",
 			wantOK:   true,
 		},
 		{
 			name:     "HTTPS without .git suffix",
-			url:      "https://github.com/user/repo",
-			wantUser: "user",
+			url:      "https://github.com/braw/croft",
+			wantUser: "braw",
 			wantOK:   true,
 		},
 		{
 			name:     "HTTPS with hyphenated user",
-			url:      "https://github.com/my-user/my-repo.git",
-			wantUser: "my-user",
+			url:      "https://github.com/bonnie-braw/auld-croft.git",
+			wantUser: "bonnie-braw",
 			wantOK:   true,
 		},
 		{
 			name:     "HTTP (no TLS)",
-			url:      "http://github.com/someone/repo.git",
-			wantUser: "someone",
+			url:      "http://github.com/canny/croft.git",
+			wantUser: "canny",
 			wantOK:   true,
 		},
 
 		// Non-GitHub URLs — should return empty
 		{
 			name:     "GitLab URL",
-			url:      "https://gitlab.com/user/repo.git",
+			url:      "https://gitlab.com/braw/croft.git",
 			wantUser: "",
 			wantOK:   false,
 		},
 		{
 			name:     "Bitbucket URL",
-			url:      "https://bitbucket.org/user/repo.git",
+			url:      "https://bitbucket.org/braw/croft.git",
 			wantUser: "",
 			wantOK:   false,
 		},
 		{
 			name:     "SSH non-GitHub",
-			url:      "git@gitlab.com:user/repo.git",
+			url:      "git@gitlab.com:braw/croft.git",
 			wantUser: "",
 			wantOK:   false,
 		},
@@ -84,7 +84,7 @@ func TestParseGitHubUsername(t *testing.T) {
 		},
 		{
 			name:     "just a word",
-			url:      "notaurl",
+			url:      "thrawn",
 			wantUser: "",
 			wantOK:   false,
 		},
@@ -96,13 +96,13 @@ func TestParseGitHubUsername(t *testing.T) {
 		},
 		{
 			name:     "GitHub URL with only user",
-			url:      "https://github.com/user",
+			url:      "https://github.com/braw",
 			wantUser: "",
 			wantOK:   false,
 		},
 		{
 			name:     "SSH with no slash in path",
-			url:      "git@github.com:justauser",
+			url:      "git@github.com:kenneep",
 			wantUser: "",
 			wantOK:   false,
 		},

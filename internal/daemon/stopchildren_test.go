@@ -8,33 +8,33 @@ func TestCollectDescendantsIncludesRoot(t *testing.T) {
 	sm := &SessionManager{
 		state: &State{
 			Sessions: map[string]*SessionState{
-				"root":       {ID: "root", Status: StatusRunning},
-				"child1":     {ID: "child1", ParentID: "root", Status: StatusRunning},
-				"child2":     {ID: "child2", ParentID: "root", Status: StatusStopped},
-				"grandchild": {ID: "grandchild", ParentID: "child1", Status: StatusRunning},
+				"brae":      {ID: "brae", Status: StatusRunning},
+				"bairn1":    {ID: "bairn1", ParentID: "brae", Status: StatusRunning},
+				"bairn2":    {ID: "bairn2", ParentID: "brae", Status: StatusStopped},
+				"wee-bairn": {ID: "wee-bairn", ParentID: "bairn1", Status: StatusRunning},
 			},
 		},
 	}
 
-	all := sm.collectDescendants("root")
+	all := sm.collectDescendants("brae")
 
 	found := make(map[string]bool)
 	for _, id := range all {
 		found[id] = true
 	}
-	if !found["root"] {
+	if !found["brae"] {
 		t.Error("collectDescendants should include root")
 	}
-	if !found["child1"] || !found["child2"] || !found["grandchild"] {
+	if !found["bairn1"] || !found["bairn2"] || !found["wee-bairn"] {
 		t.Error("collectDescendants should include all descendants")
 	}
 	rootIdx := -1
 	grandchildIdx := -1
 	for i, id := range all {
-		if id == "root" {
+		if id == "brae" {
 			rootIdx = i
 		}
-		if id == "grandchild" {
+		if id == "wee-bairn" {
 			grandchildIdx = i
 		}
 	}
@@ -44,12 +44,12 @@ func TestCollectDescendantsIncludesRoot(t *testing.T) {
 }
 
 func TestFilterExcludeRoot(t *testing.T) {
-	ids := []string{"grandchild", "child1", "child2", "root"}
+	ids := []string{"wee-bairn", "bairn1", "bairn2", "brae"}
 
-	filtered := filterExcludeRoot(ids, "root")
+	filtered := filterExcludeRoot(ids, "brae")
 
 	for _, id := range filtered {
-		if id == "root" {
+		if id == "brae" {
 			t.Error("filterExcludeRoot should remove root")
 		}
 	}

@@ -50,7 +50,7 @@ func TestDecodePayloadMismatchedType(t *testing.T) {
 	// Encode a HandshakeMsg, then try to decode into a CreateMsg.
 	data, err := EncodeControl("handshake", HandshakeMsg{
 		Version:      "1.0",
-		ClientID:     "test",
+		ClientID:     "brig",
 		TerminalSize: [2]uint16{80, 24},
 		Cwd:          "/tmp",
 	})

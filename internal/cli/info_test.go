@@ -8,10 +8,10 @@ import (
 
 func TestMatchSession(t *testing.T) {
 	sessions := []protocol.SessionInfo{
-		{Name: "foo", WorktreePath: "/tmp/graith/foo"},
-		{Name: "foobar", WorktreePath: "/tmp/graith/foobar"},
-		{Name: "nested", WorktreePath: "/tmp/graith/foo/nested"},
-		{Name: "slashed", WorktreePath: "/tmp/graith/slashed/"},
+		{Name: "braw", WorktreePath: "/tmp/graith/braw"},
+		{Name: "bonnie", WorktreePath: "/tmp/graith/bonnie"},
+		{Name: "glen", WorktreePath: "/tmp/graith/braw/glen"},
+		{Name: "wynd", WorktreePath: "/tmp/graith/wynd/"},
 	}
 
 	tests := []struct {
@@ -22,33 +22,33 @@ func TestMatchSession(t *testing.T) {
 	}{
 		{
 			name: "exact match",
-			cwd:  "/tmp/graith/foo",
-			want: "foo",
+			cwd:  "/tmp/graith/braw",
+			want: "braw",
 		},
 		{
 			name: "subdirectory match",
-			cwd:  "/tmp/graith/foo/src",
-			want: "foo",
+			cwd:  "/tmp/graith/braw/src",
+			want: "braw",
 		},
 		{
 			name: "prefix false positive rejected",
-			cwd:  "/tmp/graith/foobar",
-			want: "foobar",
+			cwd:  "/tmp/graith/bonnie",
+			want: "bonnie",
 		},
 		{
-			name: "foobar subdirectory does not match foo",
-			cwd:  "/tmp/graith/foobar/src",
-			want: "foobar",
+			name: "bonnie subdirectory does not match braw",
+			cwd:  "/tmp/graith/bonnie/src",
+			want: "bonnie",
 		},
 		{
 			name: "most specific match wins",
-			cwd:  "/tmp/graith/foo/nested/deep",
-			want: "nested",
+			cwd:  "/tmp/graith/braw/glen/deep",
+			want: "glen",
 		},
 		{
-			name: "exact match on nested",
-			cwd:  "/tmp/graith/foo/nested",
-			want: "nested",
+			name: "exact match on glen",
+			cwd:  "/tmp/graith/braw/glen",
+			want: "glen",
 		},
 		{
 			name:    "no match",
@@ -57,23 +57,23 @@ func TestMatchSession(t *testing.T) {
 		},
 		{
 			name:    "partial name no match",
-			cwd:     "/tmp/graith/fo",
+			cwd:     "/tmp/graith/br",
 			wantNil: true,
 		},
 		{
 			name: "trailing slash on worktree",
-			cwd:  "/tmp/graith/foo/src",
-			want: "foo",
+			cwd:  "/tmp/graith/braw/src",
+			want: "braw",
 		},
 		{
 			name: "trailing slash on cwd",
-			cwd:  "/tmp/graith/foo/",
-			want: "foo",
+			cwd:  "/tmp/graith/braw/",
+			want: "braw",
 		},
 		{
 			name: "trailing slash on worktree path",
-			cwd:  "/tmp/graith/slashed/sub",
-			want: "slashed",
+			cwd:  "/tmp/graith/wynd/sub",
+			want: "wynd",
 		},
 	}
 

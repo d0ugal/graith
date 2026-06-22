@@ -128,7 +128,7 @@ func TestCreateAndListSessions(t *testing.T) {
 	ctx := context.Background()
 
 	_, created, err := env.srv.createSession(ctx, &gomcp.CallToolRequest{}, CreateSessionInput{
-		Name:  "test-session",
+		Name:  "braw-session",
 		Agent: "echo",
 		Repo:  env.repo,
 		Base:  "main",
@@ -136,8 +136,8 @@ func TestCreateAndListSessions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
-	if created.Name != "test-session" {
-		t.Errorf("name = %q, want %q", created.Name, "test-session")
+	if created.Name != "braw-session" {
+		t.Errorf("name = %q, want %q", created.Name, "braw-session")
 	}
 	if created.Agent != "echo" {
 		t.Errorf("agent = %q, want %q", created.Agent, "echo")
@@ -156,8 +156,8 @@ func TestCreateAndListSessions(t *testing.T) {
 	if len(list.Sessions) != 1 {
 		t.Fatalf("expected 1 session, got %d", len(list.Sessions))
 	}
-	if list.Sessions[0].Name != "test-session" {
-		t.Errorf("listed name = %q, want %q", list.Sessions[0].Name, "test-session")
+	if list.Sessions[0].Name != "braw-session" {
+		t.Errorf("listed name = %q, want %q", list.Sessions[0].Name, "braw-session")
 	}
 }
 
@@ -168,7 +168,7 @@ func TestSessionStatus(t *testing.T) {
 	ctx := context.Background()
 
 	_, created, err := env.srv.createSession(ctx, &gomcp.CallToolRequest{}, CreateSessionInput{
-		Name:  "status-test",
+		Name:  "ken-session",
 		Agent: "echo",
 		Repo:  env.repo,
 		Base:  "main",
@@ -178,7 +178,7 @@ func TestSessionStatus(t *testing.T) {
 	}
 
 	_, status, err := env.srv.sessionStatus(ctx, &gomcp.CallToolRequest{}, SessionStatusInput{
-		Session: "status-test",
+		Session: "ken-session",
 	})
 	if err != nil {
 		t.Fatalf("session status by name: %v", err)
@@ -196,8 +196,8 @@ func TestSessionStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("session status by ID: %v", err)
 	}
-	if status.Name != "status-test" {
-		t.Errorf("name = %q, want %q", status.Name, "status-test")
+	if status.Name != "ken-session" {
+		t.Errorf("name = %q, want %q", status.Name, "ken-session")
 	}
 }
 
@@ -207,7 +207,7 @@ func TestSessionStatusNotFound(t *testing.T) {
 
 	ctx := context.Background()
 	_, _, err := env.srv.sessionStatus(ctx, &gomcp.CallToolRequest{}, SessionStatusInput{
-		Session: "nonexistent",
+		Session: "thrawn",
 	})
 	if err == nil {
 		t.Fatal("expected error for nonexistent session")
@@ -221,22 +221,22 @@ func TestPublishAndReadMessages(t *testing.T) {
 	ctx := context.Background()
 
 	_, pub, err := env.srv.publishMessage(ctx, &gomcp.CallToolRequest{}, PublishMessageInput{
-		Topic:  "test-topic",
+		Topic:  "blether",
 		Body:   "hello from MCP",
-		Sender: "test-agent",
+		Sender: "canny-agent",
 	})
 	if err != nil {
 		t.Fatalf("publish: %v", err)
 	}
-	if pub.Stream != "test-topic" {
-		t.Errorf("stream = %q, want %q", pub.Stream, "test-topic")
+	if pub.Stream != "blether" {
+		t.Errorf("stream = %q, want %q", pub.Stream, "blether")
 	}
 	if pub.ID == "" {
 		t.Error("expected non-empty message ID")
 	}
 
 	_, pub2, err := env.srv.publishMessage(ctx, &gomcp.CallToolRequest{}, PublishMessageInput{
-		Topic: "test-topic",
+		Topic: "blether",
 		Body:  "second message",
 	})
 	if err != nil {
@@ -247,7 +247,7 @@ func TestPublishAndReadMessages(t *testing.T) {
 	}
 
 	_, msgs, err := env.srv.readMessages(ctx, &gomcp.CallToolRequest{}, ReadMessagesInput{
-		Topic: "test-topic",
+		Topic: "blether",
 		All:   true,
 	})
 	if err != nil {
@@ -259,8 +259,8 @@ func TestPublishAndReadMessages(t *testing.T) {
 	if msgs.Messages[0].Body != "hello from MCP" {
 		t.Errorf("first body = %q, want %q", msgs.Messages[0].Body, "hello from MCP")
 	}
-	if msgs.Messages[0].SenderName != "test-agent" {
-		t.Errorf("sender = %q, want %q", msgs.Messages[0].SenderName, "test-agent")
+	if msgs.Messages[0].SenderName != "canny-agent" {
+		t.Errorf("sender = %q, want %q", msgs.Messages[0].SenderName, "canny-agent")
 	}
 	if msgs.Messages[1].Body != "second message" {
 		t.Errorf("second body = %q, want %q", msgs.Messages[1].Body, "second message")
@@ -273,7 +273,7 @@ func TestReadMessagesEmpty(t *testing.T) {
 
 	ctx := context.Background()
 	_, msgs, err := env.srv.readMessages(ctx, &gomcp.CallToolRequest{}, ReadMessagesInput{
-		Topic: "empty-topic",
+		Topic: "neep",
 		All:   true,
 	})
 	if err != nil {
@@ -294,7 +294,7 @@ func TestSubscribeReceivesMessage(t *testing.T) {
 	outCh := make(chan SubscribeOutput, 1)
 	go func() {
 		_, out, err := env.srv.subscribe(ctx, &gomcp.CallToolRequest{}, SubscribeInput{
-			Topic:      "sub-topic",
+			Topic:      "kirk",
 			Subscriber: "test-sub",
 		})
 		if err != nil {
@@ -305,7 +305,7 @@ func TestSubscribeReceivesMessage(t *testing.T) {
 	}()
 
 	_, _, err := env.srv.publishMessage(ctx, &gomcp.CallToolRequest{}, PublishMessageInput{
-		Topic: "sub-topic",
+		Topic: "kirk",
 		Body:  "subscribed message",
 	})
 	if err != nil {
@@ -330,7 +330,7 @@ func TestCreateSessionDefaultAgent(t *testing.T) {
 
 	ctx := context.Background()
 	_, created, err := env.srv.createSession(ctx, &gomcp.CallToolRequest{}, CreateSessionInput{
-		Name: "default-agent-session",
+		Name: "bonnie",
 		Repo: env.repo,
 		Base: "main",
 	})
@@ -348,15 +348,15 @@ func TestCreateSessionNoRepo(t *testing.T) {
 
 	ctx := context.Background()
 	_, created, err := env.srv.createSession(ctx, &gomcp.CallToolRequest{}, CreateSessionInput{
-		Name:   "no-repo-session",
+		Name:   "croft-session",
 		Agent:  "echo",
 		NoRepo: true,
 	})
 	if err != nil {
 		t.Fatalf("create no-repo session: %v", err)
 	}
-	if created.Name != "no-repo-session" {
-		t.Errorf("name = %q, want %q", created.Name, "no-repo-session")
+	if created.Name != "croft-session" {
+		t.Errorf("name = %q, want %q", created.Name, "croft-session")
 	}
 	if created.Branch != "" {
 		t.Errorf("branch = %q, want empty", created.Branch)
@@ -370,7 +370,7 @@ func TestPublishMessageWithThread(t *testing.T) {
 	ctx := context.Background()
 
 	_, pub, err := env.srv.publishMessage(ctx, &gomcp.CallToolRequest{}, PublishMessageInput{
-		Topic:    "threaded-topic",
+		Topic:    "kirk-blether",
 		Body:     "thread starter",
 		ThreadID: "thread-1",
 		ReplyTo:  "reply-topic",
@@ -383,7 +383,7 @@ func TestPublishMessageWithThread(t *testing.T) {
 	}
 
 	_, msgs, err := env.srv.readMessages(ctx, &gomcp.CallToolRequest{}, ReadMessagesInput{
-		Topic:    "threaded-topic",
+		Topic:    "kirk-blether",
 		All:      true,
 		ThreadID: "thread-1",
 	})

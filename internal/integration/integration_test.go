@@ -171,7 +171,7 @@ func TestCreateAndList(t *testing.T) {
 	handshake(t, r, w)
 
 	sendControl(t, w, "create", protocol.CreateMsg{
-		Name: "test-session", Agent: "echo", RepoPath: env.repo, Base: "main",
+		Name: "braw", Agent: "echo", RepoPath: env.repo, Base: "main",
 	})
 	resp := readControl(t, r)
 	if resp.Type == "error" {
@@ -185,8 +185,8 @@ func TestCreateAndList(t *testing.T) {
 
 	var info protocol.SessionInfo
 	protocol.DecodePayload(resp, &info)
-	if info.Name != "test-session" {
-		t.Errorf("name = %q, want %q", info.Name, "test-session")
+	if info.Name != "braw" {
+		t.Errorf("name = %q, want %q", info.Name, "braw")
 	}
 	if info.Agent != "echo" {
 		t.Errorf("agent = %q, want %q", info.Agent, "echo")
@@ -202,8 +202,8 @@ func TestCreateAndList(t *testing.T) {
 	if len(list.Sessions) != 1 {
 		t.Fatalf("expected 1 session, got %d", len(list.Sessions))
 	}
-	if list.Sessions[0].Name != "test-session" {
-		t.Errorf("list name = %q, want %q", list.Sessions[0].Name, "test-session")
+	if list.Sessions[0].Name != "braw" {
+		t.Errorf("list name = %q, want %q", list.Sessions[0].Name, "braw")
 	}
 }
 
@@ -215,7 +215,7 @@ func TestCreateNoRepo(t *testing.T) {
 	handshake(t, r, w)
 
 	sendControl(t, w, "create", protocol.CreateMsg{
-		Name: "scratch-session", Agent: "echo", NoRepo: true,
+		Name: "kirk", Agent: "echo", NoRepo: true,
 	})
 	resp := readControl(t, r)
 	if resp.Type == "error" {
@@ -226,8 +226,8 @@ func TestCreateNoRepo(t *testing.T) {
 
 	var info protocol.SessionInfo
 	protocol.DecodePayload(resp, &info)
-	if info.Name != "scratch-session" {
-		t.Errorf("name = %q, want %q", info.Name, "scratch-session")
+	if info.Name != "kirk" {
+		t.Errorf("name = %q, want %q", info.Name, "kirk")
 	}
 	if info.RepoName != "" {
 		t.Errorf("repo_name = %q, want empty", info.RepoName)
@@ -245,7 +245,7 @@ func TestCreateWithoutRepoFails(t *testing.T) {
 	handshake(t, r, w)
 
 	sendControl(t, w, "create", protocol.CreateMsg{
-		Name: "should-fail", Agent: "echo", RepoPath: env.tmpDir,
+		Name: "fash", Agent: "echo", RepoPath: env.tmpDir,
 	})
 	resp := readControl(t, r)
 	if resp.Type != "error" {
@@ -261,7 +261,7 @@ func TestStopAndResume(t *testing.T) {
 	handshake(t, r, w)
 
 	sendControl(t, w, "create", protocol.CreateMsg{
-		Name: "resume-test", Agent: "echo", RepoPath: env.repo, Base: "main",
+		Name: "bide", Agent: "echo", RepoPath: env.repo, Base: "main",
 	})
 	createResp := readControl(t, r)
 	var info protocol.SessionInfo
@@ -311,13 +311,13 @@ func TestRename(t *testing.T) {
 	handshake(t, r, w)
 
 	sendControl(t, w, "create", protocol.CreateMsg{
-		Name: "old-name", Agent: "echo", RepoPath: env.repo, Base: "main",
+		Name: "auld", Agent: "echo", RepoPath: env.repo, Base: "main",
 	})
 	createResp := readControl(t, r)
 	var info protocol.SessionInfo
 	protocol.DecodePayload(createResp, &info)
 
-	sendControl(t, w, "rename", protocol.RenameMsg{SessionID: info.ID, NewName: "new-name"})
+	sendControl(t, w, "rename", protocol.RenameMsg{SessionID: info.ID, NewName: "bonnie"})
 	renameResp := readControl(t, r)
 	if renameResp.Type == "error" {
 		var e protocol.ErrorMsg
@@ -333,8 +333,8 @@ func TestRename(t *testing.T) {
 	for _, s := range list.Sessions {
 		if s.ID == info.ID {
 			found = true
-			if s.Name != "new-name" {
-				t.Errorf("name = %q, want %q", s.Name, "new-name")
+			if s.Name != "bonnie" {
+				t.Errorf("name = %q, want %q", s.Name, "bonnie")
 			}
 		}
 	}
@@ -351,7 +351,7 @@ func TestDelete(t *testing.T) {
 	handshake(t, r, w)
 
 	sendControl(t, w, "create", protocol.CreateMsg{
-		Name: "to-delete", Agent: "echo", RepoPath: env.repo, Base: "main",
+		Name: "dreich", Agent: "echo", RepoPath: env.repo, Base: "main",
 	})
 	createResp := readControl(t, r)
 	var info protocol.SessionInfo
@@ -382,7 +382,7 @@ func TestDeleteNoRepoCleansScratchDir(t *testing.T) {
 	handshake(t, r, w)
 
 	sendControl(t, w, "create", protocol.CreateMsg{
-		Name: "scratch-delete", Agent: "echo", NoRepo: true,
+		Name: "skelf", Agent: "echo", NoRepo: true,
 	})
 	createResp := readControl(t, r)
 	var info protocol.SessionInfo
@@ -411,7 +411,7 @@ func TestMessaging(t *testing.T) {
 	handshake(t, r, w)
 
 	sendControl(t, w, "msg_pub", protocol.MsgPubMsg{
-		Stream: "test-topic", Body: "hello from test", SenderName: "test",
+		Stream: "blether", Body: "hello from test", SenderName: "test",
 	})
 	pubResp := readControl(t, r)
 	if pubResp.Type == "error" {
@@ -421,12 +421,12 @@ func TestMessaging(t *testing.T) {
 	}
 
 	sendControl(t, w, "msg_pub", protocol.MsgPubMsg{
-		Stream: "test-topic", Body: "second message", SenderName: "test",
+		Stream: "blether", Body: "second message", SenderName: "test",
 	})
 	readControl(t, r)
 
 	sendControl(t, w, "msg_sub", protocol.MsgSubMsg{
-		Stream: "test-topic",
+		Stream: "blether",
 	})
 	msg1 := readControl(t, r)
 	if msg1.Type != "msg_message" {
@@ -459,7 +459,7 @@ func TestMultipleSessions(t *testing.T) {
 
 	for i := range 3 {
 		sendControl(t, w, "create", protocol.CreateMsg{
-			Name: fmt.Sprintf("session-%c", rune('a'+i)), Agent: "echo",
+			Name: fmt.Sprintf("croft-%c", rune('a'+i)), Agent: "echo",
 			RepoPath: env.repo, Base: "main",
 		})
 		resp := readControl(t, r)
@@ -487,7 +487,7 @@ func TestResumeAlreadyRunning(t *testing.T) {
 	handshake(t, r, w)
 
 	sendControl(t, w, "create", protocol.CreateMsg{
-		Name: "running-resume", Agent: "echo", RepoPath: env.repo, Base: "main",
+		Name: "canny", Agent: "echo", RepoPath: env.repo, Base: "main",
 	})
 	createResp := readControl(t, r)
 	var info protocol.SessionInfo
@@ -541,7 +541,7 @@ func TestAttachAndDetach(t *testing.T) {
 	handshake(t, r, w)
 
 	sendControl(t, w, "create", protocol.CreateMsg{
-		Name: "attach-test", Agent: "echo", RepoPath: env.repo, Base: "main",
+		Name: "neep", Agent: "echo", RepoPath: env.repo, Base: "main",
 	})
 	createResp := readControl(t, r)
 	var info protocol.SessionInfo
@@ -573,7 +573,7 @@ func TestAttachKicksPreviousClient(t *testing.T) {
 	handshake(t, r1, w1)
 
 	sendControl(t, w1, "create", protocol.CreateMsg{
-		Name: "kick-test", Agent: "echo", RepoPath: env.repo, Base: "main",
+		Name: "whin", Agent: "echo", RepoPath: env.repo, Base: "main",
 	})
 	createResp := readControl(t, r1)
 	var info protocol.SessionInfo
@@ -613,7 +613,7 @@ func TestTypeDeliversInput(t *testing.T) {
 	handshake(t, r, w)
 
 	sendControl(t, w, "create", protocol.CreateMsg{
-		Name: "type-test", Agent: "echo", RepoPath: env.repo, Base: "main",
+		Name: "speir", Agent: "echo", RepoPath: env.repo, Base: "main",
 	})
 	createResp := readControl(t, r)
 	if createResp.Type == "error" {
@@ -647,7 +647,7 @@ func TestTypeDeliversInput(t *testing.T) {
 	// Send type command — cat should echo the text back.
 	sendControl(t, w, "type", protocol.TypeMsg{
 		SessionID: info.ID,
-		Input:     "hello-from-type-test",
+		Input:     "hello-from-speir",
 	})
 	typeResp := readControl(t, r)
 	if typeResp.Type == "error" {
@@ -664,7 +664,7 @@ func TestTypeDeliversInput(t *testing.T) {
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if tail, err := ptySess.Scrollback.TailBytes(4096); err == nil {
-			if strings.Contains(string(tail), "hello-from-type-test") {
+			if strings.Contains(string(tail), "hello-from-speir") {
 				found = true
 				break
 			}
@@ -686,7 +686,7 @@ func TestTypeWakesSleepingAgent(t *testing.T) {
 	// The "sleeper" agent only reads stdin inside a SIGWINCH trap handler.
 	// Without the Poke (SIGWINCH), typed input would never be consumed.
 	sendControl(t, w, "create", protocol.CreateMsg{
-		Name: "wake-test", Agent: "sleeper", NoRepo: true,
+		Name: "bothy", Agent: "sleeper", NoRepo: true,
 	})
 	createResp := readControl(t, r)
 	if createResp.Type == "error" {
@@ -718,7 +718,7 @@ func TestTypeWakesSleepingAgent(t *testing.T) {
 
 	sendControl(t, w, "type", protocol.TypeMsg{
 		SessionID: info.ID,
-		Input:     "wake-test-input",
+		Input:     "bothy-input",
 	})
 	typeResp := readControl(t, r)
 	if typeResp.Type != "typed" {
@@ -731,7 +731,7 @@ func TestTypeWakesSleepingAgent(t *testing.T) {
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if tail, err := ptySess.Scrollback.TailBytes(4096); err == nil {
-			if strings.Contains(string(tail), "got:wake-test-input") {
+			if strings.Contains(string(tail), "got:bothy-input") {
 				found = true
 				break
 			}
@@ -760,7 +760,7 @@ func TestTypeExitedSessionFails(t *testing.T) {
 	handshake(t, r, w)
 
 	sendControl(t, w, "create", protocol.CreateMsg{
-		Name: "type-exited", Agent: "echo", RepoPath: env.repo, Base: "main",
+		Name: "haar", Agent: "echo", RepoPath: env.repo, Base: "main",
 	})
 	createResp := readControl(t, r)
 	var info protocol.SessionInfo
@@ -789,7 +789,7 @@ func TestTypeExitedSessionFails(t *testing.T) {
 	// Type into the exited session — should get an error.
 	sendControl(t, w, "type", protocol.TypeMsg{
 		SessionID: info.ID,
-		Input:     "should-fail",
+		Input:     "fash",
 	})
 	typeResp := readControl(t, r)
 	if typeResp.Type != "error" {
@@ -805,7 +805,7 @@ func TestUnknownAgent(t *testing.T) {
 	handshake(t, r, w)
 
 	sendControl(t, w, "create", protocol.CreateMsg{
-		Name: "bad-agent", Agent: "nonexistent-agent", RepoPath: env.repo, Base: "main",
+		Name: "thrawn", Agent: "nonexistent-agent", RepoPath: env.repo, Base: "main",
 	})
 	resp := readControl(t, r)
 	if resp.Type != "error" {

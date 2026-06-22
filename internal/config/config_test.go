@@ -13,7 +13,7 @@ func TestLoadConfig(t *testing.T) {
 	cfgPath := filepath.Join(dir, "config.toml")
 	toml := `
 default_agent = "claude"
-github_username = "d0ugal"
+github_username = "braw-lad"
 branch_prefix = "{username}/graith"
 fetch_on_create = true
 
@@ -48,8 +48,8 @@ resume_args = ["resume", "--last"]
 	if cfg.DefaultAgent != "claude" {
 		t.Errorf("DefaultAgent = %q, want claude", cfg.DefaultAgent)
 	}
-	if cfg.GitHubUsername != "d0ugal" {
-		t.Errorf("GitHubUsername = %q, want d0ugal", cfg.GitHubUsername)
+	if cfg.GitHubUsername != "braw-lad" {
+		t.Errorf("GitHubUsername = %q, want braw-lad", cfg.GitHubUsername)
 	}
 	if cfg.Keybindings.Prefix != "ctrl+b" {
 		t.Errorf("Prefix = %q, want ctrl+b", cfg.Keybindings.Prefix)
@@ -447,14 +447,14 @@ func TestRepoPathAllowed(t *testing.T) {
 
 	t.Run("outside denied", func(t *testing.T) {
 		cfg := &Config{AllowedRepoPaths: []string{"~/Code"}}
-		if cfg.RepoPathAllowed("/tmp/evil-repo") {
+		if cfg.RepoPathAllowed("/tmp/thrawn-repo") {
 			t.Error("path outside allowed dirs should be denied")
 		}
 	})
 
 	t.Run("prefix trick denied", func(t *testing.T) {
 		cfg := &Config{AllowedRepoPaths: []string{"~/Code"}}
-		if cfg.RepoPathAllowed(filepath.Join(home, "Code-evil")) {
+		if cfg.RepoPathAllowed(filepath.Join(home, "Code-thrawn")) {
 			t.Error("prefix without separator should be denied")
 		}
 	})
@@ -507,7 +507,7 @@ func TestRepoPathAllowed(t *testing.T) {
 
 	t.Run("allowed path itself is a symlink", func(t *testing.T) {
 		actual := t.TempDir()
-		repo := filepath.Join(actual, "myrepo")
+		repo := filepath.Join(actual, "braw-croft")
 		if err := os.Mkdir(repo, 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -516,7 +516,7 @@ func TestRepoPathAllowed(t *testing.T) {
 			t.Skipf("symlinks not supported: %v", err)
 		}
 		cfg := &Config{AllowedRepoPaths: []string{link}}
-		if !cfg.RepoPathAllowed(filepath.Join(actual, "myrepo")) {
+		if !cfg.RepoPathAllowed(filepath.Join(actual, "braw-croft")) {
 			t.Error("repo under resolved allowed symlink should be permitted")
 		}
 	})
@@ -527,7 +527,7 @@ func TestLoadPartialAgentPreservesDefaults(t *testing.T) {
 	cfgPath := filepath.Join(dir, "config.toml")
 	toml := `
 [agents.claude]
-command = "my-claude"
+command = "auld-claude"
 `
 	os.WriteFile(cfgPath, []byte(toml), 0o644)
 	cfg, err := Load(cfgPath)
@@ -536,8 +536,8 @@ command = "my-claude"
 	}
 
 	claude := cfg.Agents["claude"]
-	if claude.Command != "my-claude" {
-		t.Errorf("claude.Command = %q, want my-claude", claude.Command)
+	if claude.Command != "auld-claude" {
+		t.Errorf("claude.Command = %q, want auld-claude", claude.Command)
 	}
 	if len(claude.Args) != 2 || claude.Args[0] != "--session-id" {
 		t.Errorf("claude.Args = %v, want default args preserved", claude.Args)
@@ -635,8 +635,8 @@ func TestLoadCustomAgentPreserved(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.toml")
 	toml := `
-[agents.custom]
-command = "my-agent"
+[agents.canny]
+command = "canny-agent"
 args = ["--flag"]
 `
 	os.WriteFile(cfgPath, []byte(toml), 0o644)
@@ -645,19 +645,19 @@ args = ["--flag"]
 		t.Fatal(err)
 	}
 
-	custom, ok := cfg.Agents["custom"]
+	canny, ok := cfg.Agents["canny"]
 	if !ok {
-		t.Fatal("custom agent not found")
+		t.Fatal("canny agent not found")
 	}
-	if custom.Command != "my-agent" {
-		t.Errorf("custom.Command = %q, want my-agent", custom.Command)
+	if canny.Command != "canny-agent" {
+		t.Errorf("canny.Command = %q, want canny-agent", canny.Command)
 	}
-	if len(custom.Args) != 1 || custom.Args[0] != "--flag" {
-		t.Errorf("custom.Args = %v, want [--flag]", custom.Args)
+	if len(canny.Args) != 1 || canny.Args[0] != "--flag" {
+		t.Errorf("canny.Args = %v, want [--flag]", canny.Args)
 	}
 
 	if _, ok := cfg.Agents["claude"]; !ok {
-		t.Error("default claude agent lost when adding custom agent")
+		t.Error("default claude agent lost when adding canny agent")
 	}
 }
 
@@ -670,10 +670,10 @@ func TestMergeAgent(t *testing.T) {
 	}
 
 	t.Run("override command only", func(t *testing.T) {
-		usr := Agent{Command: "my-claude"}
+		usr := Agent{Command: "auld-claude"}
 		got := mergeAgent(def, usr)
-		if got.Command != "my-claude" {
-			t.Errorf("Command = %q, want my-claude", got.Command)
+		if got.Command != "auld-claude" {
+			t.Errorf("Command = %q, want auld-claude", got.Command)
 		}
 		if len(got.Args) != 2 {
 			t.Errorf("Args = %v, want defaults preserved", got.Args)
@@ -687,10 +687,10 @@ func TestMergeAgent(t *testing.T) {
 	})
 
 	t.Run("override env", func(t *testing.T) {
-		usr := Agent{Env: map[string]string{"FOO": "bar"}}
+		usr := Agent{Env: map[string]string{"FOO": "neep"}}
 		got := mergeAgent(def, usr)
-		if got.Env["FOO"] != "bar" {
-			t.Errorf("Env = %v, want FOO=bar", got.Env)
+		if got.Env["FOO"] != "neep" {
+			t.Errorf("Env = %v, want FOO=neep", got.Env)
 		}
 		if got.Command != "claude" {
 			t.Errorf("Command = %q, want claude", got.Command)
@@ -729,7 +729,7 @@ func TestMergeAgent(t *testing.T) {
 		tr := true
 		defWithPrompt := def
 		defWithPrompt.InjectPrompt = &tr
-		usr := Agent{Command: "my-claude"}
+		usr := Agent{Command: "auld-claude"}
 		got := mergeAgent(defWithPrompt, usr)
 		if got.InjectPrompt == nil || *got.InjectPrompt != true {
 			t.Errorf("InjectPrompt = %v, want true (preserved from default)", got.InjectPrompt)
@@ -742,10 +742,10 @@ func TestLoadConfigRepos(t *testing.T) {
 	cfgPath := filepath.Join(dir, "config.toml")
 	toml := `
 [[repos]]
-path = "~/Code/devenv"
+path = "~/Code/croft"
 
 [[repos]]
-path = "~/Code/scripts"
+path = "~/Code/glen-scripts"
 allow_concurrent = true
 `
 	os.WriteFile(cfgPath, []byte(toml), 0o644)
@@ -756,8 +756,8 @@ allow_concurrent = true
 	if len(cfg.Repos) != 2 {
 		t.Fatalf("Repos = %d entries, want 2", len(cfg.Repos))
 	}
-	if cfg.Repos[0].Path != "~/Code/devenv" {
-		t.Errorf("Repos[0].Path = %q, want ~/Code/devenv", cfg.Repos[0].Path)
+	if cfg.Repos[0].Path != "~/Code/croft" {
+		t.Errorf("Repos[0].Path = %q, want ~/Code/croft", cfg.Repos[0].Path)
 	}
 	if cfg.Repos[0].AllowConcurrent {
 		t.Error("Repos[0].AllowConcurrent = true, want false (default)")
@@ -771,21 +771,21 @@ func TestFindRepo(t *testing.T) {
 	home, _ := os.UserHomeDir()
 
 	t.Run("exact match", func(t *testing.T) {
-		cfg := &Config{Repos: []RepoConfig{{Path: "~/Code/devenv"}}}
-		rc, ok := cfg.FindRepo(filepath.Join(home, "Code", "devenv"))
+		cfg := &Config{Repos: []RepoConfig{{Path: "~/Code/croft"}}}
+		rc, ok := cfg.FindRepo(filepath.Join(home, "Code", "croft"))
 		if !ok {
 			t.Fatal("expected to find repo")
 		}
-		if rc.Path != "~/Code/devenv" {
-			t.Errorf("Path = %q, want ~/Code/devenv", rc.Path)
+		if rc.Path != "~/Code/croft" {
+			t.Errorf("Path = %q, want ~/Code/croft", rc.Path)
 		}
 	})
 
 	t.Run("no match", func(t *testing.T) {
-		cfg := &Config{Repos: []RepoConfig{{Path: "~/Code/devenv"}}}
-		_, ok := cfg.FindRepo("/tmp/random")
+		cfg := &Config{Repos: []RepoConfig{{Path: "~/Code/croft"}}}
+		_, ok := cfg.FindRepo("/tmp/thrawn")
 		if ok {
-			t.Error("expected no match for /tmp/random")
+			t.Error("expected no match for /tmp/thrawn")
 		}
 	})
 
@@ -854,7 +854,7 @@ func TestDefaultTOMLDefensiveCopy(t *testing.T) {
 
 func TestDefaultMutationSafety(t *testing.T) {
 	a := Default()
-	a.Agents["claude"] = Agent{Command: "mutated"}
+	a.Agents["claude"] = Agent{Command: "thrawn"}
 	b := Default()
 	if b.Agents["claude"].Command != "claude" {
 		t.Error("mutating Default() result affected subsequent Default() calls")
@@ -863,56 +863,56 @@ func TestDefaultMutationSafety(t *testing.T) {
 
 func TestValidate(t *testing.T) {
 	t.Run("no includes is valid", func(t *testing.T) {
-		rc := RepoConfig{Path: "~/Code/foo"}
+		rc := RepoConfig{Path: "~/Code/braw-croft"}
 		if err := rc.Validate(); err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
 	})
 
 	t.Run("self-include rejected", func(t *testing.T) {
-		rc := RepoConfig{Path: "~/Code/foo", Includes: []string{"~/Code/foo"}}
+		rc := RepoConfig{Path: "~/Code/braw-croft", Includes: []string{"~/Code/braw-croft"}}
 		if err := rc.Validate(); err == nil {
 			t.Error("expected error for self-include")
 		}
 	})
 
 	t.Run("duplicate basename rejected", func(t *testing.T) {
-		rc := RepoConfig{Path: "~/Code/foo", Includes: []string{"~/Code/bar", "~/work/bar"}}
+		rc := RepoConfig{Path: "~/Code/braw-croft", Includes: []string{"~/Code/kirk", "~/work/kirk"}}
 		if err := rc.Validate(); err == nil {
 			t.Error("expected error for duplicate basename")
 		}
 	})
 
 	t.Run("main repo basename collision rejected", func(t *testing.T) {
-		rc := RepoConfig{Path: "~/Code/bar", Includes: []string{"~/work/bar"}}
+		rc := RepoConfig{Path: "~/Code/kirk", Includes: []string{"~/work/kirk"}}
 		if err := rc.Validate(); err == nil {
 			t.Error("expected error for main/include basename collision")
 		}
 	})
 
 	t.Run("env var collision rejected", func(t *testing.T) {
-		rc := RepoConfig{Path: "~/Code/main", Includes: []string{"~/Code/foo-bar", "~/Code/foo.bar"}}
+		rc := RepoConfig{Path: "~/Code/croft-main", Includes: []string{"~/Code/braw-kirk", "~/Code/braw.kirk"}}
 		if err := rc.Validate(); err == nil {
 			t.Error("expected error for env var name collision")
 		}
 	})
 
 	t.Run("singleton plus allow_concurrent rejected with includes", func(t *testing.T) {
-		rc := RepoConfig{Path: "~/Code/foo", Singleton: true, AllowConcurrent: true, Includes: []string{"~/Code/bar"}}
+		rc := RepoConfig{Path: "~/Code/braw-croft", Singleton: true, AllowConcurrent: true, Includes: []string{"~/Code/kirk"}}
 		if err := rc.Validate(); err == nil {
 			t.Error("expected error for singleton + allow_concurrent")
 		}
 	})
 
 	t.Run("singleton plus allow_concurrent rejected without includes", func(t *testing.T) {
-		rc := RepoConfig{Path: "~/Code/foo", Singleton: true, AllowConcurrent: true}
+		rc := RepoConfig{Path: "~/Code/braw-croft", Singleton: true, AllowConcurrent: true}
 		if err := rc.Validate(); err == nil {
 			t.Error("expected error for singleton + allow_concurrent without includes")
 		}
 	})
 
 	t.Run("valid includes pass", func(t *testing.T) {
-		rc := RepoConfig{Path: "~/Code/mono-repo", Includes: []string{"~/Code/frontend", "~/Code/shared-utils"}}
+		rc := RepoConfig{Path: "~/Code/croft-mono", Includes: []string{"~/Code/glen-frontend", "~/Code/glen-utils"}}
 		if err := rc.Validate(); err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
@@ -924,11 +924,11 @@ func TestIncludeEnvVarName(t *testing.T) {
 		input string
 		want  string
 	}{
-		{"frontend", "GRAITH_INCLUDE_FRONTEND_PATH"},
-		{"shared-utils", "GRAITH_INCLUDE_SHARED_UTILS_PATH"},
-		{"faro.web.sdk", "GRAITH_INCLUDE_FARO_WEB_SDK_PATH"},
-		{"my repo", "GRAITH_INCLUDE_MYREPO_PATH"},
-		{"my@repo!", "GRAITH_INCLUDE_MYREPO_PATH"},
+		{"glen-frontend", "GRAITH_INCLUDE_GLEN_FRONTEND_PATH"},
+		{"glen-utils", "GRAITH_INCLUDE_GLEN_UTILS_PATH"},
+		{"braw.web.sdk", "GRAITH_INCLUDE_BRAW_WEB_SDK_PATH"},
+		{"bonnie croft", "GRAITH_INCLUDE_BONNIECROFT_PATH"},
+		{"auld@kirk!", "GRAITH_INCLUDE_AULDKIRK_PATH"},
 	}
 	for _, tt := range tests {
 		got := IncludeEnvVarName(tt.input)
@@ -1041,23 +1041,23 @@ func TestMergeMCPServers(t *testing.T) {
 			{Name: "graith", Command: "gr"},
 		}
 		overrides := map[string]MCPServerConfig{
-			"custom": {Command: "my-tool", Args: []string{"serve"}},
+			"canny": {Command: "canny-tool", Args: []string{"serve"}},
 		}
 		got := MergeMCPServers(global, overrides)
 		if len(got) != 2 {
 			t.Fatalf("got %d servers, want 2", len(got))
 		}
-		if got[1].Name != "custom" {
-			t.Errorf("added server name = %q, want custom", got[1].Name)
+		if got[1].Name != "canny" {
+			t.Errorf("added server name = %q, want canny", got[1].Name)
 		}
-		if got[1].Command != "my-tool" {
-			t.Errorf("added server command = %q, want my-tool", got[1].Command)
+		if got[1].Command != "canny-tool" {
+			t.Errorf("added server command = %q, want canny-tool", got[1].Command)
 		}
 	})
 
 	t.Run("disabled addition is skipped", func(t *testing.T) {
 		got := MergeMCPServers(nil, map[string]MCPServerConfig{
-			"nope": {Disabled: true, Command: "nope"},
+			"thrawn-server": {Disabled: true, Command: "thrawn-cmd"},
 		})
 		if len(got) != 0 {
 			t.Errorf("got %d servers, want 0", len(got))
@@ -1077,15 +1077,15 @@ func TestMergeMCPServers(t *testing.T) {
 
 	t.Run("duplicate global names last wins", func(t *testing.T) {
 		global := []MCPServerConfig{
-			{Name: "graith", Command: "auto-gr"},
-			{Name: "graith", Command: "user-gr", Args: []string{"mcp", "--verbose"}},
+			{Name: "graith", Command: "auld-gr"},
+			{Name: "graith", Command: "braw-gr", Args: []string{"mcp", "--verbose"}},
 		}
 		got := MergeMCPServers(global, nil)
 		if len(got) != 1 {
 			t.Fatalf("got %d servers, want 1", len(got))
 		}
-		if got[0].Command != "user-gr" {
-			t.Errorf("command = %q, want user-gr (last entry wins)", got[0].Command)
+		if got[0].Command != "braw-gr" {
+			t.Errorf("command = %q, want braw-gr (last entry wins)", got[0].Command)
 		}
 	})
 
@@ -1183,7 +1183,7 @@ func TestMCPServerValidation(t *testing.T) {
 		cfg.Agents["claude"] = Agent{
 			Command: "claude",
 			MCPServers: map[string]MCPServerConfig{
-				"broken": {Args: []string{"--flag"}},
+				"thrawn": {Args: []string{"--flag"}},
 			},
 		}
 		if err := cfg.Validate(); err == nil {
@@ -1218,14 +1218,14 @@ command = "npx"
 args = ["chrome-mcp", "--port", "9222"]
 
 [[mcp_servers]]
-name = "custom"
-command = "my-tool"
+name = "canny"
+command = "canny-tool"
 
 [agents.claude.mcp_servers.chrome]
 args = ["chrome-mcp", "--port", "9333"]
 
 [agents.claude.mcp_servers.agent-only]
-command = "special"
+command = "bonnie"
 `
 	os.WriteFile(cfgPath, []byte(toml), 0o644)
 	cfg, err := Load(cfgPath)
@@ -1257,8 +1257,8 @@ command = "special"
 	if !ok {
 		t.Fatal("claude.MCPServers missing agent-only")
 	}
-	if agentOnly.Command != "special" {
-		t.Errorf("agent-only command = %q, want special", agentOnly.Command)
+	if agentOnly.Command != "bonnie" {
+		t.Errorf("agent-only command = %q, want bonnie", agentOnly.Command)
 	}
 }
 
@@ -1294,7 +1294,7 @@ func TestStatusConfig_TTLDuration(t *testing.T) {
 		{"explicit 10m", "10m", 10 * time.Minute},
 		{"with days", "1d", 24 * time.Hour},
 		{"30 seconds", "30s", 30 * time.Second},
-		{"invalid falls back", "banana", 5 * time.Minute},
+		{"invalid falls back", "thrawn", 5 * time.Minute},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1402,7 +1402,7 @@ func TestGitPullConfig_IntervalDuration(t *testing.T) {
 		{"default empty", "", time.Hour},
 		{"explicit 30m", "30m", 30 * time.Minute},
 		{"with days", "1d", 24 * time.Hour},
-		{"invalid falls back", "banana", time.Hour},
+		{"invalid falls back", "thrawn", time.Hour},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1425,7 +1425,7 @@ func TestGitPullConfig_Validate(t *testing.T) {
 
 	t.Run("invalid interval rejected", func(t *testing.T) {
 		cfg := Default()
-		cfg.GitPull = GitPullConfig{Enabled: true, Interval: "banana"}
+		cfg.GitPull = GitPullConfig{Enabled: true, Interval: "thrawn"}
 		if err := cfg.Validate(); err == nil {
 			t.Error("expected error for invalid interval")
 		}
@@ -1519,7 +1519,7 @@ agent = "claude"
 [orchestrator.sandbox]
 disabled = true
 enabled = true
-command = "evil"
+command = "thrawn"
 features = ["network"]
 write_dirs = ["~/.config/graith"]
 `), 0o644)
@@ -1547,20 +1547,20 @@ func TestOrchestratorSandboxMerged(t *testing.T) {
 	cfg := &Config{
 		Sandbox: SandboxConfig{
 			Enabled:   true,
-			ReadDirs:  []string{"/global/read"},
-			WriteDirs: []string{"/global/write"},
+			ReadDirs:  []string{"/glen/read"},
+			WriteDirs: []string{"/glen/write"},
 		},
 		Agents: map[string]Agent{
 			"claude": {
 				Sandbox: SandboxConfig{
-					ReadDirs:  []string{"/agent/read"},
-					WriteDirs: []string{"/agent/write"},
+					ReadDirs:  []string{"/croft/read"},
+					WriteDirs: []string{"/croft/write"},
 				},
 			},
 		},
 		Orchestrator: OrchestratorConfig{
 			Sandbox: OrchestratorSandboxConfig{
-				ReadDirs:  []string{"/orch/read"},
+				ReadDirs:  []string{"/kirk/read"},
 				WriteDirs: []string{"~/.config/graith"},
 			},
 		},
@@ -1568,12 +1568,12 @@ func TestOrchestratorSandboxMerged(t *testing.T) {
 
 	merged := cfg.OrchestratorSandboxMerged("claude")
 
-	wantRead := []string{"/global/read", "/agent/read", "/orch/read"}
+	wantRead := []string{"/glen/read", "/croft/read", "/kirk/read"}
 	if !reflect.DeepEqual(merged.ReadDirs, wantRead) {
 		t.Errorf("ReadDirs = %v, want %v", merged.ReadDirs, wantRead)
 	}
 
-	wantWrite := []string{"/global/write", "/agent/write", "~/.config/graith"}
+	wantWrite := []string{"/glen/write", "/croft/write", "~/.config/graith"}
 	if !reflect.DeepEqual(merged.WriteDirs, wantWrite) {
 		t.Errorf("WriteDirs = %v, want %v", merged.WriteDirs, wantWrite)
 	}
@@ -1586,24 +1586,24 @@ func TestOrchestratorSandboxMerged(t *testing.T) {
 func TestOrchestratorSandboxMergedDedup(t *testing.T) {
 	cfg := &Config{
 		Sandbox: SandboxConfig{
-			ReadDirs: []string{"/shared"},
+			ReadDirs: []string{"/glen"},
 		},
 		Agents: map[string]Agent{
 			"claude": {
 				Sandbox: SandboxConfig{
-					ReadDirs: []string{"/shared"},
+					ReadDirs: []string{"/glen"},
 				},
 			},
 		},
 		Orchestrator: OrchestratorConfig{
 			Sandbox: OrchestratorSandboxConfig{
-				ReadDirs: []string{"/shared", "/orch-only"},
+				ReadDirs: []string{"/glen", "/kirk-only"},
 			},
 		},
 	}
 
 	merged := cfg.OrchestratorSandboxMerged("claude")
-	wantRead := []string{"/shared", "/orch-only"}
+	wantRead := []string{"/glen", "/kirk-only"}
 	if !reflect.DeepEqual(merged.ReadDirs, wantRead) {
 		t.Errorf("ReadDirs = %v, want %v (should dedup)", merged.ReadDirs, wantRead)
 	}
@@ -1613,14 +1613,14 @@ func TestOrchestratorSandboxBackwardCompat(t *testing.T) {
 	cfg := &Config{
 		Sandbox: SandboxConfig{
 			Enabled:   true,
-			ReadDirs:  []string{"/global"},
-			WriteDirs: []string{"/global-w"},
+			ReadDirs:  []string{"/glen"},
+			WriteDirs: []string{"/glen-w"},
 		},
 		Agents: map[string]Agent{
 			"claude": {
 				Sandbox: SandboxConfig{
-					ReadDirs:  []string{"/agent"},
-					WriteDirs: []string{"/agent-w"},
+					ReadDirs:  []string{"/croft"},
+					WriteDirs: []string{"/croft-w"},
 				},
 			},
 		},

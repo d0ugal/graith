@@ -14,20 +14,20 @@ func dashboardTestSessions() []protocol.SessionInfo {
 	return []protocol.SessionInfo{
 		{
 			ID:        "s1",
-			Name:      "fix-bug",
-			RepoName:  "myrepo",
+			Name:      "braw-fix",
+			RepoName:  "croft",
 			Agent:     "claude",
 			Status:    "running",
-			Branch:    "graith/fix-bug/s1",
+			Branch:    "graith/braw-fix/s1",
 			CreatedAt: time.Now().Add(-30 * time.Minute).Format(time.RFC3339),
 		},
 		{
 			ID:        "s2",
-			Name:      "add-feature",
-			RepoName:  "myrepo",
+			Name:      "canny-feature",
+			RepoName:  "croft",
 			Agent:     "codex",
 			Status:    "stopped",
-			Branch:    "graith/add-feature/s2",
+			Branch:    "graith/canny-feature/s2",
 			CreatedAt: time.Now().Add(-2 * time.Hour).Format(time.RFC3339),
 		},
 	}
@@ -191,7 +191,7 @@ func TestDashboardViewRendersContent(t *testing.T) {
 		t.Error("view should not be empty")
 	}
 
-	checks := []string{"graith dashboard", "fix-bug", "add-feature", "attach", "stop", "delete", "resume", "quit"}
+	checks := []string{"graith dashboard", "braw-fix", "canny-feature", "attach", "stop", "delete", "resume", "quit"}
 	for _, check := range checks {
 		if !strings.Contains(view, check) {
 			t.Errorf("view should contain %q", check)
@@ -207,8 +207,8 @@ func TestDashboardRefresh(t *testing.T) {
 
 	newSessions := append(dashboardTestSessions(), protocol.SessionInfo{
 		ID:        "s3",
-		Name:      "new-work",
-		RepoName:  "myrepo",
+		Name:      "bonnie-work",
+		RepoName:  "croft",
 		Agent:     "claude",
 		Status:    "running",
 		CreatedAt: time.Now().Format(time.RFC3339),
@@ -283,8 +283,8 @@ func TestDashboardViewportScrolling(t *testing.T) {
 	for i := range 20 {
 		sessions = append(sessions, protocol.SessionInfo{
 			ID:        fmt.Sprintf("s%d", i),
-			Name:      fmt.Sprintf("session-%d", i),
-			RepoName:  "myrepo",
+			Name:      fmt.Sprintf("kirk-%d", i),
+			RepoName:  "croft",
 			Agent:     "claude",
 			Status:    "running",
 			CreatedAt: time.Now().Add(-time.Duration(i) * time.Minute).Format(time.RFC3339),
@@ -296,7 +296,7 @@ func TestDashboardViewportScrolling(t *testing.T) {
 	m.height = 15
 
 	view := m.View().Content
-	if !strings.Contains(view, "session-0") {
+	if !strings.Contains(view, "kirk-0") {
 		t.Error("first session should be visible initially")
 	}
 	if !strings.Contains(view, "more below") {
@@ -313,7 +313,7 @@ func TestDashboardViewportScrolling(t *testing.T) {
 	}
 
 	view = dm.View().Content
-	if !strings.Contains(view, "session-19") {
+	if !strings.Contains(view, "kirk-19") {
 		t.Error("last session should be visible after scrolling down")
 	}
 	if !strings.Contains(view, "more above") {
@@ -339,8 +339,8 @@ func TestDashboardDeleteConfirmTargetsOriginalSession(t *testing.T) {
 	newSessions := []protocol.SessionInfo{
 		{
 			ID:        "s3",
-			Name:      "new-session",
-			RepoName:  "myrepo",
+			Name:      "bonnie-session",
+			RepoName:  "croft",
 			Agent:     "claude",
 			Status:    "running",
 			CreatedAt: sessions[0].CreatedAt,
@@ -374,8 +374,8 @@ func TestDashboardDeleteConfirmSurvivesRefreshWithTarget(t *testing.T) {
 	newSessions := []protocol.SessionInfo{
 		{
 			ID:        "s0",
-			Name:      "aaa-first",
-			RepoName:  "myrepo",
+			Name:      "braw-first",
+			RepoName:  "croft",
 			Agent:     "claude",
 			Status:    "running",
 			CreatedAt: sessions[0].CreatedAt,
@@ -442,8 +442,8 @@ func TestDashboardStopConfirmSurvivesRefreshWithTarget(t *testing.T) {
 	newSessions := []protocol.SessionInfo{
 		{
 			ID:        "s0",
-			Name:      "aaa-first",
-			RepoName:  "myrepo",
+			Name:      "braw-first",
+			RepoName:  "croft",
 			Agent:     "claude",
 			Status:    "running",
 			CreatedAt: sessions[0].CreatedAt,

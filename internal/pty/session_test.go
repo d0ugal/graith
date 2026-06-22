@@ -31,7 +31,7 @@ func TestSessionEcho(t *testing.T) {
 	// for the master to read the output. On macOS, bare "echo" can exit
 	// before the master-side read drains the buffer, causing EIO and lost data.
 	s, err := NewSession(SessionOpts{
-		ID: "test", Command: "sh", Args: []string{"-c", "echo hello graith; sleep 0.1"},
+		ID: "braw", Command: "sh", Args: []string{"-c", "echo braw graith; sleep 0.1"},
 		Dir: t.TempDir(), Rows: 24, Cols: 80,
 		LogPath: logPath, MaxLogSize: 1024 * 1024,
 	})
@@ -54,15 +54,15 @@ func TestSessionEcho(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Contains(tail, []byte("hello graith")) {
-		t.Errorf("scrollback = %q, want to contain 'hello graith'", tail)
+	if !bytes.Contains(tail, []byte("braw graith")) {
+		t.Errorf("scrollback = %q, want to contain 'braw graith'", tail)
 	}
 }
 
 func TestSessionAttachDetach(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "test.log")
 	s, err := NewSession(SessionOpts{
-		ID: "test", Command: "sh", Args: []string{"-c", "read line; echo $line"},
+		ID: "braw", Command: "sh", Args: []string{"-c", "read line; echo $line"},
 		Dir: t.TempDir(), Rows: 24, Cols: 80,
 		LogPath: logPath, MaxLogSize: 1024 * 1024,
 	})
@@ -72,14 +72,14 @@ func TestSessionAttachDetach(t *testing.T) {
 	defer s.Close()
 	var buf syncBuf
 	s.Attach(&buf)
-	if err := s.WriteInput([]byte("attached output\n")); err != nil {
+	if err := s.WriteInput([]byte("bonnie output\n")); err != nil {
 		t.Fatal(err)
 	}
 	deadline := time.After(5 * time.Second)
-	for !bytes.Contains(buf.Bytes(), []byte("attached output")) {
+	for !bytes.Contains(buf.Bytes(), []byte("bonnie output")) {
 		select {
 		case <-deadline:
-			t.Fatalf("attached output = %q", buf.Bytes())
+			t.Fatalf("bonnie output = %q", buf.Bytes())
 		case <-time.After(10 * time.Millisecond):
 		}
 	}

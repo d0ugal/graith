@@ -35,25 +35,25 @@ func TestResolveAuth_NoToken(t *testing.T) {
 
 func TestResolveAuth_ValidToken(t *testing.T) {
 	sm := newTestSMWithSessions(map[string]*SessionState{
-		"s1": {ID: "s1", Token: "tok-aaa"},
+		"braw": {ID: "braw", Token: "tok-braw"},
 	})
-	auth, err := resolveAuth(sm, "tok-aaa")
+	auth, err := resolveAuth(sm, "tok-braw")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !auth.authenticated {
 		t.Error("expected authenticated")
 	}
-	if auth.sessionID != "s1" {
-		t.Errorf("session = %q, want s1", auth.sessionID)
+	if auth.sessionID != "braw" {
+		t.Errorf("session = %q, want braw", auth.sessionID)
 	}
 }
 
 func TestResolveAuth_InvalidToken(t *testing.T) {
 	sm := newTestSMWithSessions(map[string]*SessionState{
-		"s1": {ID: "s1", Token: "tok-aaa"},
+		"braw": {ID: "braw", Token: "tok-braw"},
 	})
-	_, err := resolveAuth(sm, "tok-bad")
+	_, err := resolveAuth(sm, "tok-thrawn")
 	if err == nil {
 		t.Fatal("expected error for invalid token")
 	}
@@ -61,7 +61,7 @@ func TestResolveAuth_InvalidToken(t *testing.T) {
 
 func TestCheckTarget_AlwaysAllowed(t *testing.T) {
 	sm := newTestSMWithSessions(nil)
-	auth := authContext{sessionID: "s1", authenticated: true}
+	auth := authContext{sessionID: "braw", authenticated: true}
 	if err := auth.checkTarget(sm, "any", authAlwaysAllowed); err != nil {
 		t.Errorf("expected allowed, got: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestCheckTarget_AlwaysAllowed(t *testing.T) {
 
 func TestCheckTarget_HumanOnly_RejectsAgent(t *testing.T) {
 	sm := newTestSMWithSessions(nil)
-	auth := authContext{sessionID: "s1", authenticated: true}
+	auth := authContext{sessionID: "braw", authenticated: true}
 	if err := auth.checkTarget(sm, "", authHumanOnly); err == nil {
 		t.Error("expected rejection for authenticated session")
 	}
@@ -85,77 +85,77 @@ func TestCheckTarget_HumanOnly_AllowsHuman(t *testing.T) {
 
 func TestCheckTarget_SelfOnly_AllowsSelf(t *testing.T) {
 	sm := newTestSMWithSessions(map[string]*SessionState{
-		"s1": {ID: "s1"},
+		"braw": {ID: "braw"},
 	})
-	auth := authContext{sessionID: "s1", authenticated: true}
-	if err := auth.checkTarget(sm, "s1", authSelfOnly); err != nil {
+	auth := authContext{sessionID: "braw", authenticated: true}
+	if err := auth.checkTarget(sm, "braw", authSelfOnly); err != nil {
 		t.Errorf("expected allowed for self, got: %v", err)
 	}
 }
 
 func TestCheckTarget_SelfOnly_RejectsOther(t *testing.T) {
 	sm := newTestSMWithSessions(map[string]*SessionState{
-		"s1": {ID: "s1"},
-		"s2": {ID: "s2"},
+		"braw":  {ID: "braw"},
+		"canny": {ID: "canny"},
 	})
-	auth := authContext{sessionID: "s1", authenticated: true}
-	if err := auth.checkTarget(sm, "s2", authSelfOnly); err == nil {
+	auth := authContext{sessionID: "braw", authenticated: true}
+	if err := auth.checkTarget(sm, "canny", authSelfOnly); err == nil {
 		t.Error("expected rejection for other session")
 	}
 }
 
 func TestCheckTarget_SelfOrDescendant_AllowsSelf(t *testing.T) {
 	sm := newTestSMWithSessions(map[string]*SessionState{
-		"s1": {ID: "s1"},
+		"braw": {ID: "braw"},
 	})
-	auth := authContext{sessionID: "s1", authenticated: true}
-	if err := auth.checkTarget(sm, "s1", authSelfOrDescendant); err != nil {
+	auth := authContext{sessionID: "braw", authenticated: true}
+	if err := auth.checkTarget(sm, "braw", authSelfOrDescendant); err != nil {
 		t.Errorf("expected allowed for self, got: %v", err)
 	}
 }
 
 func TestCheckTarget_SelfOrDescendant_AllowsChild(t *testing.T) {
 	sm := newTestSMWithSessions(map[string]*SessionState{
-		"parent": {ID: "parent"},
-		"child":  {ID: "child", ParentID: "parent"},
+		"ben":   {ID: "ben"},
+		"bairn": {ID: "bairn", ParentID: "ben"},
 	})
-	auth := authContext{sessionID: "parent", authenticated: true}
-	if err := auth.checkTarget(sm, "child", authSelfOrDescendant); err != nil {
+	auth := authContext{sessionID: "ben", authenticated: true}
+	if err := auth.checkTarget(sm, "bairn", authSelfOrDescendant); err != nil {
 		t.Errorf("expected allowed for child, got: %v", err)
 	}
 }
 
 func TestCheckTarget_SelfOrDescendant_AllowsGrandchild(t *testing.T) {
 	sm := newTestSMWithSessions(map[string]*SessionState{
-		"root":       {ID: "root"},
-		"child":      {ID: "child", ParentID: "root"},
-		"grandchild": {ID: "grandchild", ParentID: "child"},
+		"brae":      {ID: "brae"},
+		"bairn":     {ID: "bairn", ParentID: "brae"},
+		"wee-bairn": {ID: "wee-bairn", ParentID: "bairn"},
 	})
-	auth := authContext{sessionID: "root", authenticated: true}
-	if err := auth.checkTarget(sm, "grandchild", authSelfOrDescendant); err != nil {
+	auth := authContext{sessionID: "brae", authenticated: true}
+	if err := auth.checkTarget(sm, "wee-bairn", authSelfOrDescendant); err != nil {
 		t.Errorf("expected allowed for grandchild, got: %v", err)
 	}
 }
 
 func TestCheckTarget_SelfOrDescendant_RejectsSibling(t *testing.T) {
 	sm := newTestSMWithSessions(map[string]*SessionState{
-		"parent": {ID: "parent"},
-		"child1": {ID: "child1", ParentID: "parent"},
-		"child2": {ID: "child2", ParentID: "parent"},
+		"ben":    {ID: "ben"},
+		"bairn1": {ID: "bairn1", ParentID: "ben"},
+		"bairn2": {ID: "bairn2", ParentID: "ben"},
 	})
-	auth := authContext{sessionID: "child1", authenticated: true}
-	if err := auth.checkTarget(sm, "child2", authSelfOrDescendant); err == nil {
+	auth := authContext{sessionID: "bairn1", authenticated: true}
+	if err := auth.checkTarget(sm, "bairn2", authSelfOrDescendant); err == nil {
 		t.Error("expected rejection for sibling")
 	}
 }
 
 func TestCheckTarget_SelfOrDescendant_RejectsParent(t *testing.T) {
 	sm := newTestSMWithSessions(map[string]*SessionState{
-		"parent": {ID: "parent"},
-		"child":  {ID: "child", ParentID: "parent"},
+		"ben":   {ID: "ben"},
+		"bairn": {ID: "bairn", ParentID: "ben"},
 	})
-	auth := authContext{sessionID: "child", authenticated: true}
-	if err := auth.checkTarget(sm, "parent", authSelfOrDescendant); err == nil {
+	auth := authContext{sessionID: "bairn", authenticated: true}
+	if err := auth.checkTarget(sm, "ben", authSelfOrDescendant); err == nil {
 		t.Error("expected rejection for parent (not a descendant)")
 	}
 }
@@ -170,109 +170,109 @@ func TestCheckTarget_Unauthenticated_AllowsEmpty(t *testing.T) {
 
 func TestCheckTarget_Unauthenticated_AllowsWithTarget(t *testing.T) {
 	sm := newTestSMWithSessions(map[string]*SessionState{
-		"s1": {ID: "s1"},
+		"braw": {ID: "braw"},
 	})
 	auth := authContext{}
-	if err := auth.checkTarget(sm, "s1", authSelfOnly); err != nil {
+	if err := auth.checkTarget(sm, "braw", authSelfOnly); err != nil {
 		t.Errorf("expected allowed for unauthenticated (human) with target, got: %v", err)
 	}
-	if err := auth.checkTarget(sm, "s1", authSelfOrDescendant); err != nil {
+	if err := auth.checkTarget(sm, "braw", authSelfOrDescendant); err != nil {
 		t.Errorf("expected allowed for unauthenticated (human) with target (descendant rule), got: %v", err)
 	}
 }
 
 func TestCheckMsgPub_TopicAllowed(t *testing.T) {
 	sm := newTestSMWithSessions(map[string]*SessionState{
-		"s1": {ID: "s1"},
+		"braw": {ID: "braw"},
 	})
-	auth := authContext{sessionID: "s1", authenticated: true}
-	if err := auth.checkMsgPub(sm, "code-review"); err != nil {
+	auth := authContext{sessionID: "braw", authenticated: true}
+	if err := auth.checkMsgPub(sm, "blether-review"); err != nil {
 		t.Errorf("expected allowed for topic publish, got: %v", err)
 	}
 }
 
 func TestCheckMsgPub_InboxSelfAllowed(t *testing.T) {
 	sm := newTestSMWithSessions(map[string]*SessionState{
-		"s1": {ID: "s1"},
+		"braw": {ID: "braw"},
 	})
-	auth := authContext{sessionID: "s1", authenticated: true}
-	if err := auth.checkMsgPub(sm, "inbox:s1"); err != nil {
+	auth := authContext{sessionID: "braw", authenticated: true}
+	if err := auth.checkMsgPub(sm, "inbox:braw"); err != nil {
 		t.Errorf("expected allowed for own inbox, got: %v", err)
 	}
 }
 
 func TestCheckMsgPub_InboxChildAllowed(t *testing.T) {
 	sm := newTestSMWithSessions(map[string]*SessionState{
-		"parent": {ID: "parent"},
-		"child":  {ID: "child", ParentID: "parent"},
+		"ben":   {ID: "ben"},
+		"bairn": {ID: "bairn", ParentID: "ben"},
 	})
-	auth := authContext{sessionID: "parent", authenticated: true}
-	if err := auth.checkMsgPub(sm, "inbox:child"); err != nil {
+	auth := authContext{sessionID: "ben", authenticated: true}
+	if err := auth.checkMsgPub(sm, "inbox:bairn"); err != nil {
 		t.Errorf("expected allowed for child inbox, got: %v", err)
 	}
 }
 
 func TestCheckMsgPub_InboxParentAllowed(t *testing.T) {
 	sm := newTestSMWithSessions(map[string]*SessionState{
-		"parent": {ID: "parent"},
-		"child":  {ID: "child", ParentID: "parent"},
+		"ben":   {ID: "ben"},
+		"bairn": {ID: "bairn", ParentID: "ben"},
 	})
-	auth := authContext{sessionID: "child", authenticated: true}
-	if err := auth.checkMsgPub(sm, "inbox:parent"); err != nil {
+	auth := authContext{sessionID: "bairn", authenticated: true}
+	if err := auth.checkMsgPub(sm, "inbox:ben"); err != nil {
 		t.Errorf("expected allowed for parent inbox, got: %v", err)
 	}
 }
 
 func TestCheckMsgPub_InboxUnrelatedAllowed(t *testing.T) {
 	sm := newTestSMWithSessions(map[string]*SessionState{
-		"s1": {ID: "s1"},
-		"s2": {ID: "s2"},
+		"braw":  {ID: "braw"},
+		"canny": {ID: "canny"},
 	})
-	auth := authContext{sessionID: "s1", authenticated: true}
-	if err := auth.checkMsgPub(sm, "inbox:s2"); err != nil {
+	auth := authContext{sessionID: "braw", authenticated: true}
+	if err := auth.checkMsgPub(sm, "inbox:canny"); err != nil {
 		t.Errorf("expected allowed for unrelated inbox, got: %v", err)
 	}
 }
 
 func TestCheckInboxRead_OwnInboxAllowed(t *testing.T) {
-	auth := authContext{sessionID: "s1", authenticated: true}
-	if err := auth.checkInboxRead("inbox:s1"); err != nil {
+	auth := authContext{sessionID: "braw", authenticated: true}
+	if err := auth.checkInboxRead("inbox:braw"); err != nil {
 		t.Errorf("expected allowed for own inbox, got: %v", err)
 	}
 }
 
 func TestCheckInboxRead_OtherInboxRejected(t *testing.T) {
-	auth := authContext{sessionID: "s1", authenticated: true}
-	if err := auth.checkInboxRead("inbox:s2"); err == nil {
+	auth := authContext{sessionID: "braw", authenticated: true}
+	if err := auth.checkInboxRead("inbox:canny"); err == nil {
 		t.Error("expected rejection for other inbox read")
 	}
 }
 
 func TestCheckInboxRead_TopicAllowed(t *testing.T) {
-	auth := authContext{sessionID: "s1", authenticated: true}
-	if err := auth.checkInboxRead("code-review"); err != nil {
+	auth := authContext{sessionID: "braw", authenticated: true}
+	if err := auth.checkInboxRead("blether-review"); err != nil {
 		t.Errorf("expected allowed for topic read, got: %v", err)
 	}
 }
 
 func TestIsDescendantOf(t *testing.T) {
 	sm := newTestSMWithSessions(map[string]*SessionState{
-		"root":       {ID: "root"},
-		"child":      {ID: "child", ParentID: "root"},
-		"grandchild": {ID: "grandchild", ParentID: "child"},
-		"unrelated":  {ID: "unrelated"},
+		"brae":      {ID: "brae"},
+		"bairn":     {ID: "bairn", ParentID: "brae"},
+		"wee-bairn": {ID: "wee-bairn", ParentID: "bairn"},
+		"thrawn":    {ID: "thrawn"},
 	})
 
 	tests := []struct {
 		target, root string
 		want         bool
 	}{
-		{"root", "root", true},
-		{"child", "root", true},
-		{"grandchild", "root", true},
-		{"unrelated", "root", false},
-		{"root", "child", false},
-		{"unrelated", "child", false},
+		{"brae", "brae", true},
+		{"bairn", "brae", true},
+		{"wee-bairn", "brae", true},
+		{"thrawn", "brae", false},
+		{"brae", "bairn", false},
+		{"thrawn", "bairn", false},
 	}
 	for _, tt := range tests {
 		got := sm.isDescendantOf(tt.target, tt.root)
@@ -304,18 +304,18 @@ func TestMigrateV9ToV10(t *testing.T) {
 	state := &State{
 		Version: 9,
 		Sessions: map[string]*SessionState{
-			"s1": {ID: "s1"},
-			"s2": {ID: "s2", Token: "existing-token"},
+			"braw":  {ID: "braw"},
+			"canny": {ID: "canny", Token: "tok-auld"},
 		},
 	}
 	if err := migrateV9ToV10(state); err != nil {
 		t.Fatal(err)
 	}
-	if state.Sessions["s1"].Token == "" {
-		t.Error("s1 should have a token after migration")
+	if state.Sessions["braw"].Token == "" {
+		t.Error("braw should have a token after migration")
 	}
-	if state.Sessions["s2"].Token != "existing-token" {
-		t.Error("s2 should keep its existing token")
+	if state.Sessions["canny"].Token != "tok-auld" {
+		t.Error("canny should keep its existing token")
 	}
 }
 
@@ -323,20 +323,20 @@ func TestRebuildTokenIndex(t *testing.T) {
 	sm := &SessionManager{
 		state: &State{
 			Sessions: map[string]*SessionState{
-				"s1": {ID: "s1", Token: "tok-1"},
-				"s2": {ID: "s2", Token: "tok-2"},
-				"s3": {ID: "s3"},
+				"braw":  {ID: "braw", Token: "tok-neep1"},
+				"canny": {ID: "canny", Token: "tok-neep2"},
+				"kirk":  {ID: "kirk"},
 			},
 		},
 		tokenIndex: make(map[string]string),
 	}
 	sm.rebuildTokenIndex()
 
-	if sm.tokenIndex["tok-1"] != "s1" {
-		t.Errorf("tok-1 → %q, want s1", sm.tokenIndex["tok-1"])
+	if sm.tokenIndex["tok-neep1"] != "braw" {
+		t.Errorf("tok-neep1 → %q, want braw", sm.tokenIndex["tok-neep1"])
 	}
-	if sm.tokenIndex["tok-2"] != "s2" {
-		t.Errorf("tok-2 → %q, want s2", sm.tokenIndex["tok-2"])
+	if sm.tokenIndex["tok-neep2"] != "canny" {
+		t.Errorf("tok-neep2 → %q, want canny", sm.tokenIndex["tok-neep2"])
 	}
 	if len(sm.tokenIndex) != 2 {
 		t.Errorf("tokenIndex has %d entries, want 2", len(sm.tokenIndex))
@@ -349,9 +349,9 @@ func TestParseInboxStream(t *testing.T) {
 		wantID    string
 		wantInbox bool
 	}{
-		{"inbox:s1", "s1", true},
+		{"inbox:braw", "braw", true},
 		{"inbox:", "", true},
-		{"code-review", "", false},
+		{"blether-review", "", false},
 		{"inboxes", "", false},
 	}
 	for _, tt := range tests {
