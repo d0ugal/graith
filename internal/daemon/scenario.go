@@ -411,21 +411,22 @@ func (sm *SessionManager) persistManifest(scenarioID string, msg protocol.Scenar
 
 func (sm *SessionManager) StopScenario(name string) ([]string, error) {
 	sm.mu.RLock()
-	var scenario *ScenarioState
+	var sessionIDs []string
 	for _, sc := range sm.state.Scenarios {
 		if sc.Name == name {
-			scenario = sc
+			sessionIDs = make([]string, len(sc.SessionIDs))
+			copy(sessionIDs, sc.SessionIDs)
 			break
 		}
 	}
 	sm.mu.RUnlock()
 
-	if scenario == nil {
+	if sessionIDs == nil {
 		return nil, fmt.Errorf("scenario %q not found", name)
 	}
 
 	var stopped []string
-	for _, id := range scenario.SessionIDs {
+	for _, id := range sessionIDs {
 		sm.mu.RLock()
 		sess, ok := sm.state.Sessions[id]
 		sm.mu.RUnlock()
@@ -443,23 +444,24 @@ func (sm *SessionManager) StopScenario(name string) ([]string, error) {
 
 func (sm *SessionManager) DeleteScenario(name string) ([]string, error) {
 	sm.mu.RLock()
-	var scenario *ScenarioState
+	var sessionIDs []string
 	var scenarioID string
 	for id, sc := range sm.state.Scenarios {
 		if sc.Name == name {
-			scenario = sc
+			sessionIDs = make([]string, len(sc.SessionIDs))
+			copy(sessionIDs, sc.SessionIDs)
 			scenarioID = id
 			break
 		}
 	}
 	sm.mu.RUnlock()
 
-	if scenario == nil {
+	if sessionIDs == nil {
 		return nil, fmt.Errorf("scenario %q not found", name)
 	}
 
 	// Stop running sessions first.
-	for _, id := range scenario.SessionIDs {
+	for _, id := range sessionIDs {
 		sm.mu.RLock()
 		sess, ok := sm.state.Sessions[id]
 		sm.mu.RUnlock()
@@ -470,7 +472,7 @@ func (sm *SessionManager) DeleteScenario(name string) ([]string, error) {
 
 	// Delete each session.
 	var deleted []string
-	for _, id := range scenario.SessionIDs {
+	for _, id := range sessionIDs {
 		sm.mu.RLock()
 		_, ok := sm.state.Sessions[id]
 		sm.mu.RUnlock()
