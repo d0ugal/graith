@@ -170,6 +170,7 @@ type MsgPubMsg struct {
 	SenderName string `json:"sender_name,omitempty"`
 	ThreadID   string `json:"thread_id,omitempty"`
 	ReplyTo    string `json:"reply_to,omitempty"`
+	Quiet      bool   `json:"quiet,omitempty"`
 }
 
 type MsgSubMsg struct {

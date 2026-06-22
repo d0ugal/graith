@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"time"
 )
 
 func (sm *SessionManager) onAgentStatusChange(sessionID, sessionName, oldStatus, newStatus string) {
@@ -42,6 +43,28 @@ func (sm *SessionManager) onAgentStatusChange(sessionID, sessionName, oldStatus,
 	}
 
 	sm.sendNotification(sessionName, newStatus, notifCfg.Command)
+}
+
+// notifyInbox injects a notification into the target session's PTY when a
+// message is published to its inbox. This runs daemon-side so it bypasses
+// the per-session auth check on the "type" command.
+func (sm *SessionManager) notifyInbox(targetID, senderID, senderName string) {
+	ptySess, ok := sm.GetPTY(targetID)
+	if !ok {
+		return
+	}
+	sender := senderName
+	if sender == "" {
+		sender = senderID
+	}
+	hint := fmt.Sprintf("New message from %s. Read: gr msg sub --topic inbox --all --ack | Reply: gr msg send %s \"<reply>\"", sender, sender)
+	if sm.HasAttachedClient(targetID) {
+		ptySess.WaitForUserIdle(10*time.Second, 2*time.Minute)
+	}
+	if err := ptySess.WriteInputAndSubmit([]byte(hint)); err != nil {
+		sm.log.Debug("inbox notification write failed", "target", targetID, "err", err)
+	}
+	ptySess.Poke()
 }
 
 func (sm *SessionManager) sendNotification(sessionName, status, command string) {
