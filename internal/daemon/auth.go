@@ -122,6 +122,28 @@ func parseInboxStream(stream string) (string, bool) {
 	return strings.TrimPrefix(stream, "inbox:"), true
 }
 
+// checkScenarioOp validates that the caller is authorized to operate on a
+// scenario. Unauthenticated callers (human CLI) are always allowed. Authenticated
+// callers must be the scenario's orchestrator or a descendant of it.
+// Must be called with sm.mu at least RLocked.
+func (ac authContext) checkScenarioOp(sm *SessionManager, scenarioName string) error {
+	if !ac.authenticated {
+		return nil
+	}
+	for _, sc := range sm.state.Scenarios {
+		if sc.Name == scenarioName {
+			if ac.sessionID == sc.OrchestratorID {
+				return nil
+			}
+			if sm.isDescendantOf(ac.sessionID, sc.OrchestratorID) {
+				return nil
+			}
+			return fmt.Errorf("not authorized: only the scenario orchestrator or its descendants can manage scenario %q", scenarioName)
+		}
+	}
+	return fmt.Errorf("scenario %q not found", scenarioName)
+}
+
 // isDescendantOf checks whether targetID is a transitive descendant of rootID.
 // Must be called with sm.mu at least RLocked.
 func (sm *SessionManager) isDescendantOf(targetID, rootID string) bool {
