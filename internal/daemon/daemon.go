@@ -223,6 +223,13 @@ func (sm *SessionManager) IsAttachedClient(sessionID string, conn net.Conn) bool
 	return ok && ac.conn == conn
 }
 
+func (sm *SessionManager) HasAttachedClient(sessionID string) bool {
+	sm.mu.RLock()
+	_, ok := sm.attachedClients[sessionID]
+	sm.mu.RUnlock()
+	return ok
+}
+
 // LoadState reads persisted state from disk and reconciles dead processes.
 func (sm *SessionManager) LoadState() error {
 	state, err := LoadState(sm.paths.StateFile)
