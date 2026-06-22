@@ -43,6 +43,10 @@ func scenariosDir() string {
 }
 
 func resolveScenarioSource(source string) ([]byte, error) {
+	return resolveScenarioSourceFrom(source, scenariosDir())
+}
+
+func resolveScenarioSourceFrom(source, dir string) ([]byte, error) {
 	if source == "-" {
 		return io.ReadAll(os.Stdin)
 	}
@@ -55,12 +59,12 @@ func resolveScenarioSource(source string) ([]byte, error) {
 		return os.ReadFile(source)
 	}
 
-	// Try name-based lookup in ~/.config/graith/scenarios/.
+	// Try name-based lookup in the scenarios directory.
 	name := source
 	if !strings.HasSuffix(name, ".toml") {
 		name += ".toml"
 	}
-	candidate := filepath.Join(scenariosDir(), name)
+	candidate := filepath.Join(dir, name)
 	if data, err := os.ReadFile(candidate); err == nil {
 		return data, nil
 	}
@@ -118,7 +122,10 @@ type availableScenario struct {
 }
 
 func listAvailableScenarios() []availableScenario {
-	dir := scenariosDir()
+	return listAvailableScenariosIn(scenariosDir())
+}
+
+func listAvailableScenariosIn(dir string) []availableScenario {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil
