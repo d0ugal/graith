@@ -33,7 +33,7 @@ When an agent authenticates with a valid token, the daemon overrides identity fi
 ### Messaging rules
 
 - **Topic publish/subscribe**: any authenticated session can publish to or subscribe to topics
-- **Inbox publish**: an agent can publish to its own inbox, a descendant's inbox, or its direct parent's inbox
+- **Inbox publish**: any authenticated session can publish to any session's inbox
 - **Inbox read**: an agent can only read its own inbox
 
 ### Unauthenticated connections
