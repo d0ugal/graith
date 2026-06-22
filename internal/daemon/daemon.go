@@ -344,7 +344,7 @@ func (sm *SessionManager) repoStoreDir(repoRoot string) (string, error) {
 //  1. Lock: validate, reserve session as StatusCreating, unlock
 //  2. Git setup and PTY spawn (no lock held)
 //  3. Lock: commit to StatusRunning, unlock
-func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, model, parentID string, noRepo bool, shareWorktree string, agentHooks bool, inPlace, allowConcurrent, skipModelValidation bool, rows, cols uint16) (SessionState, error) {
+func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, model, parentID string, noRepo bool, shareWorktree string, agentHooks bool, inPlace, allowConcurrent, skipModelValidation bool, rows, cols uint16, envExtra ...map[string]string) (SessionState, error) {
 	if err := ValidateSessionName(name); err != nil {
 		return SessionState{}, err
 	}
@@ -739,6 +739,11 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 	if sharedWorktree {
 		for _, inc := range sourceIncludes {
 			env[config.IncludeEnvVarName(inc.RepoName)] = inc.WorktreePath
+		}
+	}
+	for _, extra := range envExtra {
+		for k, v := range extra {
+			env[k] = v
 		}
 	}
 
@@ -1590,6 +1595,9 @@ func (sm *SessionManager) resumeWithSummary(id string, rows, cols uint16, lifecy
 	sessSystemKind := sessState.SystemKind
 	sessFreshStart := sessState.FreshStart
 	sessToken := sessState.Token
+	sessScenarioID := sessState.ScenarioID
+	sessScenarioRole := sessState.ScenarioRole
+	sessScenarioGoal := sessState.ScenarioGoal
 
 	sm.mu.Unlock()
 
@@ -1663,6 +1671,20 @@ func (sm *SessionManager) resumeWithSummary(id string, rows, cols uint16, lifecy
 	}
 	if sessInPlace {
 		env["GRAITH_IN_PLACE"] = "true"
+	}
+	if sessScenarioID != "" {
+		env["GRAITH_SCENARIO"] = sessScenarioID
+		sm.mu.RLock()
+		if sc, ok := sm.state.Scenarios[sessScenarioID]; ok {
+			env["GRAITH_SCENARIO_NAME"] = sc.Name
+		}
+		sm.mu.RUnlock()
+	}
+	if sessScenarioRole != "" {
+		env["GRAITH_SCENARIO_ROLE"] = sessScenarioRole
+	}
+	if sessScenarioGoal != "" {
+		env["GRAITH_SCENARIO_GOAL"] = sessScenarioGoal
 	}
 	var resumeStoreDir string
 	if isOrchestrator {

@@ -76,6 +76,8 @@ Key files by area:
 | Auth | `daemon/auth.go` | Per-session token auth: authorization rules, identity forcing, descendant checks |
 | Sandbox | `sandbox/sandbox.go` | Safehouse wrapping: command construction, availability check |
 | Store | `store/store.go` | Flat-file git-backed document store with key validation, git commits |
+| Scenario | `daemon/scenario.go` | Scenario lifecycle: start, stop, delete, status, list |
+| Scenario | `cli/scenario.go` | `gr scenario start/stop/delete/status/list` commands |
 
 ## Architecture patterns
 
@@ -118,6 +120,13 @@ The daemon sets these in every agent process:
 These are used by `gr msg pub/sub` to identify the sender automatically.
 `GRAITH_TOKEN` is used by the CLI to authenticate with the daemon — agents
 cannot impersonate other sessions when this token is present.
+
+For scenario sessions, these additional env vars are set on resume/restart:
+
+- `GRAITH_SCENARIO` — scenario ID
+- `GRAITH_SCENARIO_NAME` — scenario display name
+- `GRAITH_SCENARIO_ROLE` — this session's role in the scenario
+- `GRAITH_SCENARIO_GOAL` — the overall scenario goal
 
 ### Agent-mode detection
 

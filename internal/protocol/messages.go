@@ -260,6 +260,7 @@ type SessionInfo struct {
 	ConfigStale     bool               `json:"config_stale,omitempty"`
 	Starred         bool               `json:"starred,omitempty"`
 	SystemKind      string             `json:"system_kind,omitempty"`
+	ScenarioID      string             `json:"scenario_id,omitempty"`
 	SummaryText     string             `json:"summary_text,omitempty"`
 	SummaryFaded    bool               `json:"summary_faded,omitempty"`
 	LastOutputAt    string             `json:"last_output_at,omitempty"`
@@ -411,4 +412,68 @@ type StatusResponseMsg struct {
 	Session     SessionInfo  `json:"session"`
 	UnreadCount int          `json:"unread_count"`
 	Fleet       FleetSummary `json:"fleet"`
+}
+
+// Scenario messages
+
+type ScenarioStartMsg struct {
+	CallerSessionID string                 `json:"caller_session_id"`
+	Name            string                 `json:"name"`
+	Goal            string                 `json:"goal"`
+	Sessions        []ScenarioSessionInput `json:"sessions"`
+}
+
+type ScenarioSessionInput struct {
+	Name       string `json:"name"`
+	Repo       string `json:"repo"`
+	Agent      string `json:"agent,omitempty"`
+	Model      string `json:"model,omitempty"`
+	Base       string `json:"base,omitempty"`
+	Role       string `json:"role,omitempty"`
+	Task       string `json:"task,omitempty"`
+	AgentHooks bool   `json:"agent_hooks,omitempty"`
+}
+
+type ScenarioStopMsg struct {
+	Name string `json:"name"`
+}
+
+type ScenarioDeleteMsg struct {
+	Name string `json:"name"`
+}
+
+type ScenarioStatusMsg struct {
+	Name string `json:"name"`
+}
+
+type ScenarioListMsg struct{}
+
+type ScenarioRecord struct {
+	ID             string                `json:"id"`
+	Name           string                `json:"name"`
+	OrchestratorID string                `json:"orchestrator_id"`
+	Goal           string                `json:"goal"`
+	Status         string                `json:"status"`
+	SessionIDs     []string              `json:"session_ids"`
+	Sessions       []ScenarioSessionInfo `json:"sessions"`
+	CreatedAt      string                `json:"created_at"`
+}
+
+type ScenarioSessionInfo struct {
+	Name      string `json:"name"`
+	SessionID string `json:"session_id"`
+	Role      string `json:"role,omitempty"`
+	Task      string `json:"task,omitempty"`
+	Repo      string `json:"repo,omitempty"`
+	Agent     string `json:"agent,omitempty"`
+	Model     string `json:"model,omitempty"`
+	Status    string `json:"status,omitempty"`
+}
+
+type ScenarioStatusResponse struct {
+	Scenario ScenarioRecord `json:"scenario"`
+}
+
+type ScenarioListResponse struct {
+	Scenarios []ScenarioRecord `json:"scenarios"`
 }
