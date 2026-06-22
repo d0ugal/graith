@@ -1953,6 +1953,11 @@ func (sm *SessionManager) Delete(id string) error {
 		sm.reparentChildrenLocked(id, parentID)
 		delete(sm.state.Sessions, id)
 		delete(sm.hookReports, id)
+		for _, s := range sm.state.Sessions {
+			if s.ParentID == id {
+				s.ParentID = ""
+			}
+		}
 		_ = sm.saveState()
 		sm.mu.Unlock()
 		if hasClient {
