@@ -2791,6 +2791,47 @@ func (sm *SessionManager) Restart(id string, rows, cols uint16) (SessionState, e
 	return sm.resumeWithSummary(id, rows, cols, "Restarted")
 }
 
+func (sm *SessionManager) RestartWithChildren(rootID string, excludeRoot bool, rows, cols uint16) ([]string, error) {
+	sm.mu.Lock()
+	if _, ok := sm.state.Sessions[rootID]; !ok {
+		sm.mu.Unlock()
+		return nil, fmt.Errorf("session %q not found", rootID)
+	}
+	toRestart := sm.collectDescendants(rootID)
+	if excludeRoot {
+		toRestart = filterExcludeRoot(toRestart, rootID)
+	}
+	sm.mu.Unlock()
+
+	var restarted []string
+	for _, id := range toRestart {
+		sm.mu.RLock()
+		sess, ok := sm.state.Sessions[id]
+		if !ok {
+			sm.mu.RUnlock()
+			continue
+		}
+		if sess.Starred {
+			sm.mu.RUnlock()
+			sm.log.Info("skipping starred session in bulk restart", "session_id", id, "name", sess.Name)
+			continue
+		}
+		if sess.Status == StatusDeleting || sess.Status == StatusCreating {
+			sm.mu.RUnlock()
+			continue
+		}
+		sm.mu.RUnlock()
+
+		if _, err := sm.Restart(id, rows, cols); err != nil {
+			sm.log.Warn("restart child failed", "session_id", id, "error", err)
+			continue
+		}
+		restarted = append(restarted, id)
+	}
+
+	return restarted, nil
+}
+
 // Rename changes the display name of a session.
 func (sm *SessionManager) Star(id string) error {
 	sm.mu.Lock()
