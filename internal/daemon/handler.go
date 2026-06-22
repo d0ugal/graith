@@ -434,11 +434,23 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
 					continue
 				}
-				sess, err := sm.Resume(r.SessionID, clientRows, clientCols)
-				if err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+				if r.Children {
+					resumed, err := sm.ResumeWithChildren(r.SessionID, r.ExcludeRoot, clientRows, clientCols)
+					if err != nil {
+						sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+					} else {
+						sendControl("resumed", struct {
+							SessionID string   `json:"session_id"`
+							Resumed   []string `json:"resumed"`
+						}{r.SessionID, resumed})
+					}
 				} else {
-					sendControl("resumed", toSessionInfo(sess, sm.Config(), sm.getHookReport(sess.ID)))
+					sess, err := sm.Resume(r.SessionID, clientRows, clientCols)
+					if err != nil {
+						sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+					} else {
+						sendControl("resumed", toSessionInfo(sess, sm.Config(), sm.getHookReport(sess.ID)))
+					}
 				}
 
 			case "restart":

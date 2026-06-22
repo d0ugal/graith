@@ -2716,6 +2716,59 @@ func (sm *SessionManager) StopWithChildren(rootID string, excludeRoot bool) ([]s
 	return stopped, nil
 }
 
+// ResumeWithChildren resumes all stopped descendants of rootID. If excludeRoot
+// is true, the root session itself is not resumed. Already-running sessions are
+// skipped. Returns the list of session IDs that were actually resumed.
+func (sm *SessionManager) ResumeWithChildren(rootID string, excludeRoot bool, rows, cols uint16) ([]string, error) {
+	sm.mu.Lock()
+
+	if _, ok := sm.state.Sessions[rootID]; !ok {
+		sm.mu.Unlock()
+		return nil, fmt.Errorf("session %q not found", rootID)
+	}
+
+	toResume := sm.collectDescendants(rootID)
+	if excludeRoot {
+		toResume = filterExcludeRoot(toResume, rootID)
+	}
+
+	// Reverse so we resume leaves-first → root-last (collectDescendants
+	// returns leaves first for deletion; for resume we want the same order
+	// but it doesn't matter much — just be consistent with the tree).
+	for i, j := 0, len(toResume)-1; i < j; i, j = i+1, j-1 {
+		toResume[i], toResume[j] = toResume[j], toResume[i]
+	}
+
+	sm.mu.Unlock()
+
+	var resumed []string
+	for _, id := range toResume {
+		sm.mu.RLock()
+		sess, ok := sm.state.Sessions[id]
+		if !ok {
+			sm.mu.RUnlock()
+			continue
+		}
+		status := sess.Status
+		sm.mu.RUnlock()
+
+		if status == StatusRunning {
+			continue
+		}
+		if status == StatusDeleting || status == StatusCreating {
+			continue
+		}
+
+		if _, err := sm.Resume(id, rows, cols); err != nil {
+			sm.log.Warn("resume child failed", "session_id", id, "error", err)
+			continue
+		}
+		resumed = append(resumed, id)
+	}
+
+	return resumed, nil
+}
+
 // Restart stops a running session (or no-ops if already stopped) and resumes it,
 // picking up the current agent and sandbox configuration.
 func (sm *SessionManager) Restart(id string, rows, cols uint16) (SessionState, error) {
