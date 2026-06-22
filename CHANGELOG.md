@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.52.0](https://github.com/d0ugal/graith/compare/v0.51.0...v0.52.0) (2026-06-22)
+
+
+### Features
+
+* add `gr update` command for session property mutations ([143893b](https://github.com/d0ugal/graith/commit/143893b513fc8ec1b4c05313c060f2dd5340e279))
+* add create-session form to overlay and ctrl+b c ([74d7c20](https://github.com/d0ugal/graith/commit/74d7c20bb06d8e81c182220bf3d98a7128e9f580))
+* add per-session token auth to prevent agent impersonation ([a527328](https://github.com/d0ugal/graith/commit/a52732868a802a660401b8faeec6b813f266916a))
+* add scenarios for declarative multi-session orchestration ([40583fe](https://github.com/d0ugal/graith/commit/40583feeaeba421dc6306392a42debdc76af9917))
+* idle-timeout for gr type when user is attached and typing ([8e0b1e4](https://github.com/d0ugal/graith/commit/8e0b1e43b45d39e319f2c07f308141b38188c25b))
+* implement scenario Phase 2 — resume, task-done, add, parallel creation ([48a3f00](https://github.com/d0ugal/graith/commit/48a3f0081134b9e2cb431dd00a101cf8dd0ba88b))
+
+
+### Bug Fixes
+
+* address final tribunal findings for scenarios ([3e94eaf](https://github.com/d0ugal/graith/commit/3e94eaf6e7d4b4cb1521769932d27d9424c745d1))
+* address review tribunal findings for agent auth ([1dd713d](https://github.com/d0ugal/graith/commit/1dd713d009587d1662a3d60af6eb475cb17c90ad))
+* address tribunal findings for scenarios feature ([9a3b4ce](https://github.com/d0ugal/graith/commit/9a3b4cec44d422f30ec9a30e56477ca4ca88004e))
+* address tribunal findings in idle-timeout implementation ([9abf8e6](https://github.com/d0ugal/graith/commit/9abf8e6aab82bff77ebd55008358abf35a09226b))
+* make TestStopAllWaitsConcurrently reliable on macOS ([ae7aacc](https://github.com/d0ugal/graith/commit/ae7aacc478672e8020b82e22bdbcaa0253ef34a2))
+* prevent data race on SessionIDs in StopScenario and DeleteScenario ([4d1b9d0](https://github.com/d0ugal/graith/commit/4d1b9d0bc2caf7aefb1a599a20e7109590d5cb36))
+* resolve data race in scenario CLI tests ([c6656b7](https://github.com/d0ugal/graith/commit/c6656b78f8b5af5730f528ee6031aa2f167bd575))
+* resolve golangci-lint warnings in overlay and createinput ([89dcd97](https://github.com/d0ugal/graith/commit/89dcd9785de986731c06c1b6644fb129cd7651be))
+* resolve symlinks in test path comparison for macOS CI ([8c07a06](https://github.com/d0ugal/graith/commit/8c07a0632e76724e8322938fc68f24f442043536))
+* resolve tribunal findings and add shared session support for scenarios ([9c99eff](https://github.com/d0ugal/graith/commit/9c99eff4d93972c1ad69ffc399f647c20760e928))
+* resolve tribunal R2 findings and add scenario overlay grouping ([ecfb99a](https://github.com/d0ugal/graith/commit/ecfb99af292b8f25e78720432b3f206702d5757a))
+* resolve tribunal R3 findings in overlay scenario view ([0cb8780](https://github.com/d0ugal/graith/commit/0cb87807d33f56a12bd88a8dcdf2f455773bca0a))
+* space-to-dash Text field, add form interaction tests, apply tribunal fixes ([0e6d511](https://github.com/d0ugal/graith/commit/0e6d511c26b8c5eb4dd65e57e6dc565404c7c839))
+* update github.com/charmbracelet/ultraviolet digest to f39628c ([bfe96a8](https://github.com/d0ugal/graith/commit/bfe96a85a25c15985861dc959e3a89a8ec120b11))
+* update module modernc.org/sqlite to v1.53.0 ([857a6d5](https://github.com/d0ugal/graith/commit/857a6d501917e8826cb1f182301d21ae388ac417))
+
 ## [0.51.0](https://github.com/d0ugal/graith/compare/v0.50.0...v0.51.0) (2026-06-20)
 
 
