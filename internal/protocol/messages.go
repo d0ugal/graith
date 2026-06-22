@@ -144,7 +144,9 @@ type ResumeMsg struct {
 }
 
 type RestartMsg struct {
-	SessionID string `json:"session_id"`
+	SessionID   string `json:"session_id"`
+	Children    bool   `json:"children,omitempty"`
+	ExcludeRoot bool   `json:"exclude_root,omitempty"`
 }
 
 type UpgradeMsg struct {
