@@ -12,7 +12,7 @@ require (
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/hinshun/vt10x v0.0.0-20220301184237-5011da428d02
 	github.com/modelcontextprotocol/go-sdk v1.6.1
-	github.com/pelletier/go-toml/v2 v2.4.0
+	github.com/pelletier/go-toml/v2 v2.4.1
 	github.com/pmezard/go-difflib v1.0.0
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/sys v0.46.0
