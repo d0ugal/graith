@@ -2732,9 +2732,8 @@ func (sm *SessionManager) ResumeWithChildren(rootID string, excludeRoot bool, ro
 		toResume = filterExcludeRoot(toResume, rootID)
 	}
 
-	// Reverse so we resume leaves-first → root-last (collectDescendants
-	// returns leaves first for deletion; for resume we want the same order
-	// but it doesn't matter much — just be consistent with the tree).
+	// collectDescendants returns leaves-first (postorder for safe deletion).
+	// Reverse to root-first so parents start before children.
 	for i, j := 0, len(toResume)-1; i < j; i, j = i+1, j-1 {
 		toResume[i], toResume[j] = toResume[j], toResume[i]
 	}

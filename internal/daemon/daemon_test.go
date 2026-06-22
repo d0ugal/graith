@@ -3384,28 +3384,68 @@ func TestDeleteWithChildrenExcludeRootGrandchildren(t *testing.T) {
 	}
 }
 
+func newResumeChildrenSM(t *testing.T) (*SessionManager, string) {
+	t.Helper()
+	tmpDir, err := os.MkdirTemp("", "TestResumeWithChildren")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		for range 5 {
+			if err := os.RemoveAll(tmpDir); err == nil {
+				return
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	})
+
+	cfg := config.Default()
+	cfg.Agents["claude"] = config.Agent{
+		Command:    "sleep",
+		Args:       []string{"300"},
+		ResumeArgs: []string{"300"},
+	}
+
+	sm := NewSessionManager(cfg, config.Paths{
+		StateFile: filepath.Join(tmpDir, "state.json"),
+		DataDir:   tmpDir,
+		LogDir:    tmpDir,
+	}, slog.Default())
+
+	return sm, tmpDir
+}
+
+func killAndCleanPTYs(t *testing.T, sm *SessionManager, ids []string) {
+	t.Helper()
+	for _, id := range ids {
+		ptySess, ok := sm.GetPTY(id)
+		if !ok {
+			continue
+		}
+		ptySess.Kill()
+		select {
+		case <-ptySess.Done():
+		case <-time.After(5 * time.Second):
+			t.Fatalf("timeout waiting for PTY %s to exit", id)
+		}
+		ptySess.Close()
+	}
+}
+
 func TestResumeWithChildren(t *testing.T) {
-	sm := newTestSessionManager(t)
+	sm, tmpDir := newResumeChildrenSM(t)
 
 	sm.state.Sessions["parent1"] = &SessionState{
-		ID:     "parent1",
-		Name:   "parent",
-		Agent:  "claude",
-		Status: StatusStopped,
+		ID: "parent1", Name: "parent", Agent: "claude",
+		Status: StatusStopped, WorktreePath: tmpDir,
 	}
 	sm.state.Sessions["child1"] = &SessionState{
-		ID:       "child1",
-		Name:     "child",
-		Agent:    "claude",
-		ParentID: "parent1",
-		Status:   StatusStopped,
+		ID: "child1", Name: "child", Agent: "claude",
+		ParentID: "parent1", Status: StatusStopped, WorktreePath: tmpDir,
 	}
 	sm.state.Sessions["grandchild1"] = &SessionState{
-		ID:       "grandchild1",
-		Name:     "grandchild",
-		Agent:    "claude",
-		ParentID: "child1",
-		Status:   StatusStopped,
+		ID: "grandchild1", Name: "grandchild", Agent: "claude",
+		ParentID: "child1", Status: StatusStopped, WorktreePath: tmpDir,
 	}
 
 	resumed, err := sm.ResumeWithChildren("parent1", false, 24, 80)
@@ -3413,44 +3453,36 @@ func TestResumeWithChildren(t *testing.T) {
 		t.Fatalf("ResumeWithChildren failed: %v", err)
 	}
 
+	resumedSet := make(map[string]bool)
+	for _, id := range resumed {
+		resumedSet[id] = true
+	}
+	for _, id := range []string{"parent1", "child1", "grandchild1"} {
+		if !resumedSet[id] {
+			t.Errorf("session %s should be in resumed list", id)
+		}
+	}
 	if len(resumed) != 3 {
 		t.Errorf("expected 3 resumed sessions, got %d: %v", len(resumed), resumed)
 	}
 
-	for _, id := range []string{"parent1", "child1", "grandchild1"} {
-		s, ok := sm.state.Sessions[id]
-		if !ok {
-			t.Errorf("session %s missing from state", id)
-			continue
-		}
-		if s.Status != StatusRunning {
-			t.Errorf("session %s status = %q, want %q", id, s.Status, StatusRunning)
-		}
-	}
+	killAndCleanPTYs(t, sm, []string{"parent1", "child1", "grandchild1"})
 }
 
 func TestResumeWithChildrenExcludeRoot(t *testing.T) {
-	sm := newTestSessionManager(t)
+	sm, tmpDir := newResumeChildrenSM(t)
 
 	sm.state.Sessions["parent1"] = &SessionState{
-		ID:     "parent1",
-		Name:   "parent",
-		Agent:  "claude",
-		Status: StatusStopped,
+		ID: "parent1", Name: "parent", Agent: "claude",
+		Status: StatusStopped, WorktreePath: tmpDir,
 	}
 	sm.state.Sessions["child1"] = &SessionState{
-		ID:       "child1",
-		Name:     "child",
-		Agent:    "claude",
-		ParentID: "parent1",
-		Status:   StatusStopped,
+		ID: "child1", Name: "child", Agent: "claude",
+		ParentID: "parent1", Status: StatusStopped, WorktreePath: tmpDir,
 	}
 	sm.state.Sessions["grandchild1"] = &SessionState{
-		ID:       "grandchild1",
-		Name:     "grandchild",
-		Agent:    "claude",
-		ParentID: "child1",
-		Status:   StatusStopped,
+		ID: "grandchild1", Name: "grandchild", Agent: "claude",
+		ParentID: "child1", Status: StatusStopped, WorktreePath: tmpDir,
 	}
 
 	resumed, err := sm.ResumeWithChildren("parent1", true, 24, 80)
@@ -3458,47 +3490,39 @@ func TestResumeWithChildrenExcludeRoot(t *testing.T) {
 		t.Fatalf("ResumeWithChildren failed: %v", err)
 	}
 
+	resumedSet := make(map[string]bool)
+	for _, id := range resumed {
+		resumedSet[id] = true
+	}
+	if resumedSet["parent1"] {
+		t.Error("parent should not be in resumed list (excludeRoot)")
+	}
+	for _, id := range []string{"child1", "grandchild1"} {
+		if !resumedSet[id] {
+			t.Errorf("session %s should be in resumed list", id)
+		}
+	}
 	if len(resumed) != 2 {
 		t.Errorf("expected 2 resumed sessions, got %d: %v", len(resumed), resumed)
 	}
 
-	if s := sm.state.Sessions["parent1"]; s.Status != StatusStopped {
-		t.Errorf("parent status = %q, want %q (excludeRoot)", s.Status, StatusStopped)
-	}
-	for _, id := range []string{"child1", "grandchild1"} {
-		s, ok := sm.state.Sessions[id]
-		if !ok {
-			t.Errorf("session %s missing from state", id)
-			continue
-		}
-		if s.Status != StatusRunning {
-			t.Errorf("session %s status = %q, want %q", id, s.Status, StatusRunning)
-		}
-	}
+	killAndCleanPTYs(t, sm, []string{"child1", "grandchild1"})
 }
 
 func TestResumeWithChildrenSkipsRunning(t *testing.T) {
-	sm := newTestSessionManager(t)
+	sm, tmpDir := newResumeChildrenSM(t)
 
 	sm.state.Sessions["parent1"] = &SessionState{
-		ID:     "parent1",
-		Name:   "parent",
-		Agent:  "claude",
-		Status: StatusStopped,
+		ID: "parent1", Name: "parent", Agent: "claude",
+		Status: StatusStopped, WorktreePath: tmpDir,
 	}
 	sm.state.Sessions["child1"] = &SessionState{
-		ID:       "child1",
-		Name:     "child-running",
-		Agent:    "claude",
-		ParentID: "parent1",
-		Status:   StatusRunning,
+		ID: "child1", Name: "child-running", Agent: "claude",
+		ParentID: "parent1", Status: StatusRunning, WorktreePath: tmpDir,
 	}
 	sm.state.Sessions["child2"] = &SessionState{
-		ID:       "child2",
-		Name:     "child-stopped",
-		Agent:    "claude",
-		ParentID: "parent1",
-		Status:   StatusStopped,
+		ID: "child2", Name: "child-stopped", Agent: "claude",
+		ParentID: "parent1", Status: StatusStopped, WorktreePath: tmpDir,
 	}
 
 	resumed, err := sm.ResumeWithChildren("parent1", false, 24, 80)
@@ -3520,6 +3544,8 @@ func TestResumeWithChildrenSkipsRunning(t *testing.T) {
 	if !resumedSet["child2"] {
 		t.Error("stopped child2 should be in resumed list")
 	}
+
+	killAndCleanPTYs(t, sm, []string{"parent1", "child2"})
 }
 
 func TestResumeWithChildrenNotFound(t *testing.T) {

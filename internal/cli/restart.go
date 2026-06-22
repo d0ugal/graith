@@ -17,7 +17,7 @@ var (
 var restartCmd = &cobra.Command{
 	Use:               "restart <name-or-id>",
 	Short:             "Restart a stopped session",
-	ValidArgsFunction: completeStoppedSessionNames,
+	ValidArgsFunction: completeRestartSessionNames,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if restartChildren {
 			return cobra.MaximumNArgs(1)(cmd, args)
@@ -124,9 +124,12 @@ func init() {
 	restartCmd.Flags().BoolVar(&restartChildren, "children", false, "restart all descendant sessions")
 }
 
-func completeStoppedSessionNames(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+func completeRestartSessionNames(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	if len(args) > 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	if restartChildren {
+		return completeSessionNames(cmd, args, toComplete)
 	}
 	c, err := client.Connect(cfg, paths, cfgFile)
 	if err != nil {
