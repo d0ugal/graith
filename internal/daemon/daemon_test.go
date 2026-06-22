@@ -3430,15 +3430,14 @@ func TestRestartWithChildrenSkipsStarredAndTransient(t *testing.T) {
 		t.Fatalf("RestartWithChildren failed: %v", err)
 	}
 
+	if len(restarted) != 0 {
+		t.Errorf("expected 0 restarted sessions (all should be skipped or fail), got %d: %v", len(restarted), restarted)
+	}
+
+	skippable := map[string]bool{"starred1": true, "deleting1": true, "creating1": true}
 	for _, id := range restarted {
-		if id == "starred1" {
-			t.Error("starred session should be skipped")
-		}
-		if id == "deleting1" {
-			t.Error("deleting session should be skipped")
-		}
-		if id == "creating1" {
-			t.Error("creating session should be skipped")
+		if skippable[id] {
+			t.Errorf("session %s should have been skipped", id)
 		}
 	}
 }
@@ -3468,6 +3467,71 @@ func TestRestartWithChildrenExcludeRoot(t *testing.T) {
 	for _, id := range restarted {
 		if id == "parent1" {
 			t.Error("parent should be excluded when excludeRoot is true")
+		}
+	}
+}
+
+func TestRestartWithChildrenGrandchildren(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	sm.state.Sessions["root1"] = &SessionState{
+		ID:     "root1",
+		Name:   "root",
+		Agent:  "claude",
+		Status: StatusStopped,
+	}
+	sm.state.Sessions["child1"] = &SessionState{
+		ID:       "child1",
+		Name:     "child",
+		Agent:    "claude",
+		ParentID: "root1",
+		Status:   StatusStopped,
+	}
+	sm.state.Sessions["grandchild1"] = &SessionState{
+		ID:       "grandchild1",
+		Name:     "grandchild",
+		Agent:    "claude",
+		ParentID: "child1",
+		Status:   StatusStopped,
+	}
+
+	restarted, err := sm.RestartWithChildren("root1", true, 24, 80)
+	if err != nil {
+		t.Fatalf("RestartWithChildren failed: %v", err)
+	}
+
+	for _, id := range restarted {
+		if id == "root1" {
+			t.Error("root should be excluded with excludeRoot=true")
+		}
+	}
+}
+
+func TestRestartWithChildrenIncludeRoot(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	sm.state.Sessions["parent1"] = &SessionState{
+		ID:     "parent1",
+		Name:   "parent",
+		Agent:  "claude",
+		Status: StatusStopped,
+	}
+	sm.state.Sessions["child1"] = &SessionState{
+		ID:       "child1",
+		Name:     "child",
+		Agent:    "claude",
+		ParentID: "parent1",
+		Status:   StatusStopped,
+	}
+
+	restarted, err := sm.RestartWithChildren("parent1", false, 24, 80)
+	if err != nil {
+		t.Fatalf("RestartWithChildren failed: %v", err)
+	}
+
+	for _, id := range restarted {
+		if id == "parent1" {
+			return
 		}
 	}
 }
