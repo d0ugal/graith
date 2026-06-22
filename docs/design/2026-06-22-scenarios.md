@@ -56,7 +56,6 @@ have the orchestrator manage the lifecycle.
 - Auto-retry or health monitoring of scenario sessions — the orchestrator
   agent handles this via existing primitives
 - GUI or web UI for scenario management
-- Dynamic membership (adding/removing sessions from a running scenario)
 - Nested scenarios (a scenario child starting its own scenario)
 
 ## Proposals
@@ -135,10 +134,10 @@ task = "Add a trace timeline overlay to the replay viewer that correlates with f
 ```
 
 Supported `[[sessions]]` fields: `name` (required), `repo` (required),
-`agent`, `model`, `base`, `role`, `task`, `agent_hooks`. All other `CreateMsg`
-fields (`in_place`, `share_worktree`, `no_repo`, `allow_concurrent`,
-`skip_model_validation`) are explicitly unsupported in v1 — the parser rejects
-unknown fields.
+`agent`, `model`, `base`, `role`, `task`, `agent_hooks`, `shared`. All other
+`CreateMsg` fields (`in_place`, `share_worktree`, `no_repo`,
+`allow_concurrent`, `skip_model_validation`) are explicitly unsupported in v1
+— the parser rejects unknown fields.
 
 Validation rules:
 - `version` must be `1` (forward compatibility)
@@ -305,12 +304,14 @@ type ScenarioState struct {
 }
 
 type ScenarioSession struct {
-    Name  string `json:"name"`
-    Role  string `json:"role"`
-    Task  string `json:"task"`
-    Repo  string `json:"repo"`
-    Agent string `json:"agent"`
-    Model string `json:"model,omitempty"`
+    Name     string `json:"name"`
+    Role     string `json:"role"`
+    Task     string `json:"task"`
+    TaskDone bool   `json:"task_done,omitempty"`
+    Repo     string `json:"repo"`
+    Agent    string `json:"agent"`
+    Model    string `json:"model,omitempty"`
+    Shared   bool   `json:"shared,omitempty"`
 }
 ```
 
@@ -331,18 +332,16 @@ corresponding `GRAITH_SCENARIO_*` env vars.
 
 The daemon handler validates the caller before processing `ScenarioStartMsg`:
 
-1. Look up the caller's session by the authenticated session ID (from token
-   auth on the envelope, or `GRAITH_SESSION_ID` until token auth ships).
-2. Verify `SessionState.SystemKind == SystemKindOrchestrator`.
-3. Reject with a clear error if the caller is not the system orchestrator.
+1. Look up the caller's session by the authenticated session ID (from the
+   token auth on the envelope — each session gets a unique `GRAITH_TOKEN`).
+2. Bind `CallerSessionID` from the authenticated token so agents cannot
+   spoof the orchestrator identity.
+3. Verify `SessionState.SystemKind == SystemKindOrchestrator`.
+4. Reject with a clear error if the caller is not the system orchestrator.
 
 `gr scenario stop`, `delete`, and `status` are available to any session or
 the human CLI — these are read/control operations, not creation. The
 orchestrator-only gate applies only to `start`.
-
-Until token auth ships, the `SystemKind` check provides defense against
-accidental misuse (child sessions don't have `SystemKindOrchestrator`) but
-not against deliberate spoofing.
 
 #### Files changed
 
@@ -352,7 +351,7 @@ not against deliberate spoofing.
 | `protocol/messages.go` | Add `ScenarioID` to `SessionInfo` |
 | `daemon/state.go` | Add `ScenarioState`, `ScenarioSession` types; add `ScenarioID`, `ScenarioRole`, `ScenarioGoal` to `SessionState`; state migration v9→v10 |
 | `daemon/handler.go` | Handle scenario message types with orchestrator auth check |
-| `daemon/daemon.go` | Add `StartScenario()`, `StopScenario()`, `DeleteScenario()` methods with two-phase creation and rollback |
+| `daemon/scenario.go` | `StartScenario()`, `StopScenario()`, `DeleteScenario()`, `ResumeScenario()`, `AddToScenario()`, `TaskDone()` with two-phase creation, rollback, shared session support, and concurrency-safe manifest publishing |
 | `cli/scenario.go` | New file: `gr scenario start/stop/delete/status/list` commands with TOML parsing and validation |
 | `client/overlay.go` | Group sessions by scenario in the picker |
 
@@ -426,10 +425,8 @@ skill as a fast follow.
 - Check-inbox hook: `internal/cli/check_inbox.go` — surfaces unread inbox
   messages to agents with hooks enabled
 - Template variables: `internal/config/template.go`
-- Token auth design (parallel effort): prevents session impersonation, relevant
-  for scenarios where agents shouldn't be able to spoof siblings. Until token
-  auth ships, the `SystemKind` check prevents accidental misuse but not
-  deliberate spoofing of scenario commands.
+- Token auth: `daemon/auth.go` — per-session bearer token authentication,
+  prevents agents from impersonating other sessions in scenario commands
 
 ### Security Considerations
 
@@ -440,9 +437,8 @@ skill as a fast follow.
   expansion.
 - Manifest exposes repo names (basenames) but not absolute paths — siblings
   cannot access each other's worktrees (sandbox isolates them).
-- Without token auth, `sender_id` on messages is self-reported from env vars
-  (`internal/cli/msg.go:395-402`). Scenario coordination should not depend on
-  verified sender identity until token auth lands.
+- Token auth ensures `sender_id` is verified by the daemon — agents cannot
+  impersonate siblings or the orchestrator when `GRAITH_TOKEN` is present.
 
 ### Sandbox and Orchestrator File Access
 
@@ -482,7 +478,7 @@ context. It cannot read arbitrary disk paths like
 
 #### Phase 2: Overlay Integration
 
-12. Add `ScenarioID` to `SessionInfo` in protocol
+12. ~~Add `ScenarioID` to `SessionInfo` in protocol~~ (done)
 13. Group sessions by scenario in the session picker (new view mode alongside
     repo/parent-tree grouping)
 14. Show aggregated scenario status in overlay
@@ -573,11 +569,64 @@ multi-repo rrweb orphan mutation fix scenario and have been addressed.
    then all `Create` calls run in parallel, and results are collected. If any
    fail, all successfully created sessions are rolled back.
 
+#### Shared sessions (implemented)
+
+8. **`shared = true` in scenario TOML** — A session with `shared = true`
+   reuses an existing running session by name instead of creating a new one.
+   This enables scenarios that reference sessions already running (e.g. the
+   orchestrator itself, or a long-running service session).
+
+   Semantics:
+   - Name uniqueness is not enforced for shared sessions — they must match an
+     existing running session
+   - If the named session doesn't exist or isn't running, the scenario start
+     fails
+   - Shared sessions are tagged into the scenario (receive manifests, appear
+     in `gr scenario status`) but are never stopped or deleted by scenario
+     lifecycle operations (`gr scenario stop`, `gr scenario delete`)
+   - The `shared` flag is tracked in `ScenarioSession.Shared` in state,
+     protocol messages, and CLI output
+
+   Example use case — an orchestrator scenario file that includes itself:
+
+   ```toml
+   [[sessions]]
+   name = "orchestrator"
+   repo = "~/Code/my-project"
+   shared = true
+   role = "Coordinator"
+   ```
+
+#### Concurrency safety fixes (implemented)
+
+9. **Data race in `republishManifests`** — The function now snapshots `repos`
+   and `orchestratorID` under `RLock`, then releases the lock before doing
+   I/O. The scenario pointer is never used after the lock is released.
+
+10. **Auth binding in `scenario_start` handler** — The handler now binds
+    `CallerSessionID` from the authenticated session token, preventing
+    agents from spoofing the orchestrator identity.
+
+11. **Stale pointer in `AddToScenario`** — Snapshots `scenarioID`,
+    `orchestratorID`, and `goal` as local strings under lock, then
+    re-fetches the scenario after session creation to handle concurrent
+    deletion gracefully.
+
+12. **Rollback placeholder IDs** — `StartScenario` now updates
+    `scenario.SessionIDs` with real session IDs as each session is created,
+    so rollback on partial failure deletes actual sessions (not stale
+    placeholder IDs).
+
+13. **Redundant republish on empty resume** — `ResumeScenario` only calls
+    `republishManifests` if at least one session was actually resumed.
+
 #### Remaining items for future work
 
 - `includes` support in scenario TOML — Sessions currently inherit includes
   from repo config. Explicit `includes = [...]` in the TOML could be added.
-- `star = true` in TOML — Protect sessions from accidental deletion at creation.
+- `star = true` in TOML — Protect sessions from accidental deletion at
+  creation. (`shared = true` already protects sessions from scenario
+  stop/delete, but `star` would protect from manual deletion too.)
 - Placeholder ID stability — `Create` still generates its own session ID, so
   the reserved placeholder ID changes during creation. A future change could
   have `Create` accept a pre-generated ID to close this race window.
