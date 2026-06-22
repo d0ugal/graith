@@ -446,6 +446,28 @@ func (dc *doctorContext) checkSessions(diag *protocol.DiagnosticsMsg) {
 		}
 	}
 
+	for _, s := range diag.Sessions {
+		if !s.HasToken {
+			dc.warn("sessions", "%q (%s): missing auth token — session may need restart to receive token", s.Name, s.ID)
+			dc.hint("Run: gr restart %s", s.Name)
+			issues++
+		}
+	}
+
+	if !cfg.Sandbox.Enabled {
+		running := 0
+		for _, s := range diag.Sessions {
+			if s.Status == "running" {
+				running++
+			}
+		}
+		if running > 1 {
+			dc.warn("sessions", "Sandbox is disabled with %d running sessions — agents can read state.json and impersonate other sessions", running)
+			dc.hint("Enable sandbox for session isolation: set sandbox.enabled = true in config")
+			issues++
+		}
+	}
+
 	if issues == 0 {
 		dc.pass("sessions", "No issues found")
 	}
