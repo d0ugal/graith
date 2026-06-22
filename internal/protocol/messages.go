@@ -464,6 +464,7 @@ type ScenarioSessionInfo struct {
 	SessionID string `json:"session_id"`
 	Role      string `json:"role,omitempty"`
 	Task      string `json:"task,omitempty"`
+	TaskDone  bool   `json:"task_done,omitempty"`
 	Repo      string `json:"repo,omitempty"`
 	Agent     string `json:"agent,omitempty"`
 	Model     string `json:"model,omitempty"`
@@ -476,4 +477,17 @@ type ScenarioStatusResponse struct {
 
 type ScenarioListResponse struct {
 	Scenarios []ScenarioRecord `json:"scenarios"`
+}
+
+type ScenarioResumeMsg struct {
+	Name string `json:"name"`
+}
+
+type ScenarioTaskDoneMsg struct {
+	Name string `json:"name"`
+}
+
+type ScenarioAddMsg struct {
+	Name    string               `json:"name"`
+	Session ScenarioSessionInput `json:"session"`
 }

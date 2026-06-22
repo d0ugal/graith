@@ -76,8 +76,8 @@ Key files by area:
 | Auth | `daemon/auth.go` | Per-session token auth: authorization rules, identity forcing, descendant checks |
 | Sandbox | `sandbox/sandbox.go` | Safehouse wrapping: command construction, availability check |
 | Store | `store/store.go` | Flat-file git-backed document store with key validation, git commits |
-| Scenario | `daemon/scenario.go` | Scenario lifecycle: start, stop, delete, status, list |
-| Scenario | `cli/scenario.go` | `gr scenario start/stop/delete/status/list` commands |
+| Scenario | `daemon/scenario.go` | Scenario lifecycle: start, stop, resume, delete, add, task-done, status, list |
+| Scenario | `cli/scenario.go` | `gr scenario start/stop/resume/delete/add/task-done/status/list` commands |
 
 ## Architecture patterns
 
@@ -106,11 +106,15 @@ when sandbox is enabled, session creation fails closed.
 
 **Scenarios**: Declarative multi-session orchestration. A TOML file defines
 sessions (name, repo, agent, role, task), and `gr scenario start` creates
-them atomically with two-phase rollback. Each session gets a manifest (via
+them concurrently with two-phase rollback. Each session gets a manifest (via
 inbox message + shared store) describing itself, its siblings, and the
 orchestrator. The daemon tracks scenarios in `ScenarioState` alongside
 sessions. Only the orchestrator session (`SystemKind: orchestrator`) can
-start scenarios.
+start scenarios. Scenarios support dynamic membership (`gr scenario add`),
+task completion tracking (`gr scenario task-done`), and bulk resume
+(`gr scenario resume`). Manifests are re-published whenever membership
+changes or sessions resume. Scenario TOML files live in
+`~/.config/graith/scenarios/` and can be started by name.
 
 ## Environment variables
 
@@ -381,12 +385,27 @@ agent_hooks = false
 
 Unknown fields are rejected — typos in field names produce a parse error.
 
+**Scenario file location:** Place scenario TOML files in
+`~/.config/graith/scenarios/` (next to `config.toml`). Files in this
+directory can be started by name: `gr scenario start tracing-pipeline`
+resolves to `~/.config/graith/scenarios/tracing-pipeline.toml`.
+
 **CLI commands:**
 
 ```bash
-# Start a scenario (only works from the orchestrator session)
-gr scenario start scenario.toml
+# Start a scenario by name or file path
+gr scenario start tracing-pipeline
+gr scenario start ./scenario.toml
 cat scenario.toml | gr scenario start -
+
+# Resume all stopped sessions in a scenario
+gr scenario resume tracing-pipeline
+
+# Add a session to a running scenario
+gr scenario add tracing-pipeline --name review --repo ~/Code/backend --role "Reviewer"
+
+# Mark this session's task as complete
+gr scenario task-done tracing-pipeline
 
 # Check status
 gr scenario status tracing-pipeline
@@ -402,12 +421,13 @@ gr scenario delete tracing-pipeline
 **How it works internally:**
 
 1. The CLI parses the TOML and sends a `scenario_start` control message
-2. The daemon validates inputs, reserves placeholders, then creates each
-   session using the normal `Create` flow with scenario env vars injected
+2. The daemon validates inputs, reserves placeholders, then creates all
+   sessions concurrently with scenario env vars injected
 3. After all sessions start, the daemon publishes a manifest to each
    session's inbox and persists it to the shared store at
    `scenarios/<id>/manifest-<name>.json`
 4. If any session fails to create, already-started sessions are rolled back
+5. Manifests are re-published when sessions resume or new sessions are added
 
 **Manifest:** Each session receives a JSON manifest describing the scenario:
 
