@@ -1,9 +1,12 @@
 package daemon
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -13,7 +16,7 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 )
 
-const CurrentStateVersion = 9
+const CurrentStateVersion = 10
 
 type SessionStatus string
 
@@ -79,6 +82,7 @@ type SessionState struct {
 	CreatedAt              time.Time             `json:"created_at"`
 	LastAttachedAt         *time.Time            `json:"last_attached_at,omitempty"`
 	CreationCfg            *CreationConfig       `json:"creation_config,omitempty"`
+	Token                  string                `json:"token,omitempty"`
 }
 
 type IncludedRepoState struct {
@@ -158,6 +162,15 @@ var migrations = map[int]func(*State) error{
 	6: migrateV6ToV7,
 	7: migrateV7ToV8,
 	8: migrateV8ToV9,
+	9: migrateV9ToV10,
+}
+
+func generateToken() (string, error) {
+	b := make([]byte, 32)
+	if _, err := io.ReadFull(rand.Reader, b); err != nil {
+		return "", fmt.Errorf("generate token: %w", err)
+	}
+	return hex.EncodeToString(b), nil
 }
 
 func migrateState(state *State) error {
@@ -234,6 +247,21 @@ func migrateV7ToV8(_ *State) error {
 // migrateV8ToV9 is a no-op: v9 adds the optional pid_start_time field which
 // defaults to 0 (unrecorded) for existing sessions.
 func migrateV8ToV9(_ *State) error {
+	return nil
+}
+
+// migrateV9ToV10 generates auth tokens for all existing sessions.
+func migrateV9ToV10(state *State) error {
+	for id, s := range state.Sessions {
+		if s.Token != "" {
+			continue
+		}
+		token, err := generateToken()
+		if err != nil {
+			return fmt.Errorf("generate token for session %s: %w", id, err)
+		}
+		s.Token = token
+	}
 	return nil
 }
 

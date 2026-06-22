@@ -23,6 +23,7 @@ func VersionCompatible(v string) bool {
 type Envelope struct {
 	Type    string          `json:"type"`
 	Payload json.RawMessage `json:"payload,omitempty"`
+	Token   string          `json:"token,omitempty"`
 }
 
 func EncodeControl(msgType string, payload any) ([]byte, error) {
@@ -31,6 +32,14 @@ func EncodeControl(msgType string, payload any) ([]byte, error) {
 		return nil, fmt.Errorf("marshal payload: %w", err)
 	}
 	return json.Marshal(Envelope{Type: msgType, Payload: p})
+}
+
+func EncodeControlWithToken(msgType string, payload any, token string) ([]byte, error) {
+	p, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal payload: %w", err)
+	}
+	return json.Marshal(Envelope{Type: msgType, Payload: p, Token: token})
 }
 
 func DecodeControl(raw []byte) (Envelope, error) {
@@ -375,6 +384,7 @@ type SessionDiagnostic struct {
 	ScrollbackBytes int64  `json:"scrollback_bytes"`
 	ScrollbackMax   int64  `json:"scrollback_max"`
 	Saturated       bool   `json:"saturated"`
+	HasToken        bool   `json:"has_token"`
 }
 
 type ScrollbackDiagnostic struct {

@@ -72,6 +72,10 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 	}
 
 	id := generateID()
+	token, err := generateToken()
+	if err != nil {
+		return SessionState{}, fmt.Errorf("generate orchestrator token: %w", err)
+	}
 	agentSessionID := ""
 	if agentName == "claude" {
 		b := make([]byte, 16)
@@ -98,6 +102,7 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 		CreatedAt:       now,
 		StatusChangedAt: now,
 		LastStartedAt:   now,
+		Token:           token,
 	}
 	sm.state.Sessions[id] = sessState
 	if err := sm.saveState(); err != nil {
@@ -136,6 +141,7 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 	env["GRAITH_SESSION_ID"] = id
 	env["GRAITH_SESSION_NAME"] = OrchestratorSessionName
 	env["GRAITH_AGENT_TYPE"] = agentName
+	env["GRAITH_TOKEN"] = token
 	env["GRAITH_TMPDIR"] = tmpDir
 	env["TMPDIR"] = tmpDir
 	if sm.paths.Profile != "" {
@@ -209,10 +215,12 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 	}
 
 	sm.sessions[id] = ptySess
+	sm.tokenIndex[token] = id
 
 	if err := sm.saveState(); err != nil {
 		delete(sm.state.Sessions, id)
 		delete(sm.sessions, id)
+		delete(sm.tokenIndex, token)
 		sm.mu.Unlock()
 		_ = ptySess.Kill()
 		ptySess.Close()

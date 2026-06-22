@@ -24,6 +24,7 @@ type Client struct {
 	wmu    sync.Mutex
 	cfg    *config.Config
 	paths  config.Paths
+	token  string
 }
 
 func New(cfg *config.Config, paths config.Paths, configFile string) (*Client, error) {
@@ -38,6 +39,7 @@ func New(cfg *config.Config, paths config.Paths, configFile string) (*Client, er
 		writer: protocol.NewFrameWriter(conn),
 		cfg:    cfg,
 		paths:  paths,
+		token:  os.Getenv("GRAITH_TOKEN"),
 	}
 
 	return c, nil
@@ -332,7 +334,13 @@ func (c *Client) Handshake() error {
 }
 
 func (c *Client) SendControl(msgType string, payload any) error {
-	data, err := protocol.EncodeControl(msgType, payload)
+	var data []byte
+	var err error
+	if c.token != "" {
+		data, err = protocol.EncodeControlWithToken(msgType, payload, c.token)
+	} else {
+		data, err = protocol.EncodeControl(msgType, payload)
+	}
 	if err != nil {
 		return err
 	}
