@@ -26,6 +26,7 @@ const (
 	stateConfirmRestart
 	stateConfirmRestartAll
 	stateRestartingAll
+	stateCreate
 )
 
 type viewMode int
@@ -525,6 +526,12 @@ type overlayModel struct {
 	restartQueue  []string
 	restartIdx    int
 	restartErrors []error
+
+	createModel     *createSessionModel
+	createName      string
+	createRepoPath  string
+	createDone      bool
+	repoSuggestions []RepoSuggestion
 }
 
 func (m *overlayModel) resizeList() {
@@ -545,9 +552,11 @@ func (m *overlayModel) resizeList() {
 
 // OverlayResult holds the outcome of the overlay interaction.
 type OverlayResult struct {
-	Action    string
-	SessionID string
-	Collapsed map[string]bool
+	Action         string
+	SessionID      string
+	CreateName     string
+	CreateRepoPath string
+	Collapsed      map[string]bool
 }
 
 func SortSessions(sessions []protocol.SessionInfo) {
@@ -1024,6 +1033,10 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.resizeList()
+		if m.state == stateCreate && m.createModel != nil {
+			m.createModel.width = msg.Width
+			m.createModel.height = msg.Height
+		}
 		return m, nil
 
 	case tea.KeyPressMsg:
@@ -1144,6 +1157,31 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.restartQueue = m.restartQueue[:end]
 			}
+			return m, nil
+
+		case stateCreate:
+			if m.createModel != nil {
+				updated, cmd := m.createModel.Update(msg)
+				cm := updated.(createSessionModel)
+				m.createModel = &cm
+				if cm.done {
+					m.createName = strings.TrimSpace(cm.nameInput.Value())
+					m.createRepoPath = strings.TrimSpace(cm.repoInput.Value())
+					if m.createRepoPath != "" {
+						m.createRepoPath = expandPath(m.createRepoPath)
+					}
+					m.createDone = true
+					return m, tea.Quit
+				}
+				if msg.String() == "esc" || msg.String() == "ctrl+c" {
+					m.createModel = nil
+					m.state = stateList
+					m.resizeList()
+					return m, m.fetchPreviewCmd()
+				}
+				return m, cmd
+			}
+			m.state = stateList
 			return m, nil
 
 		case stateList:
@@ -1316,6 +1354,25 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, m.fetchPreviewCmd()
 				}
 				return m, nil
+
+			case "n":
+				defaultRepo := ""
+				if item, ok := m.list.SelectedItem().(sessionItem); ok {
+					defaultRepo = item.info.RepoPath
+				} else if m.currentSessionID != "" {
+					for _, s := range m.allSessions {
+						if s.ID == m.currentSessionID {
+							defaultRepo = s.RepoPath
+							break
+						}
+					}
+				}
+				cm := newCreateSessionModel(defaultRepo, m.repoSuggestions)
+				cm.width = m.width
+				cm.height = m.height
+				m.createModel = &cm
+				m.state = stateCreate
+				return m, textinput.Blink
 			}
 		}
 	}
@@ -1330,6 +1387,13 @@ func (m overlayModel) View() tea.View {
 	h := m.height
 	if w == 0 || h == 0 {
 		return tea.NewView("")
+	}
+
+	if m.state == stateCreate && m.createModel != nil {
+		cm := *m.createModel
+		cm.width = w
+		cm.height = h
+		return cm.View()
 	}
 
 	panelWidth := min(m.contentWidth+4, w-4)
@@ -1501,7 +1565,7 @@ func (m overlayModel) View() tea.View {
 
 	helpStyle := lipgloss.NewStyle().Foreground(colorFaint)
 	panelContent.WriteString("\n")
-	panelContent.WriteString(helpStyle.Render("enter attach  ◂▸ view  / filter  tab group  s star  space fold  C fold-all  x delete  r/R restart  q quit"))
+	panelContent.WriteString(helpStyle.Render("enter attach  n new  ◂▸ view  / filter  tab group  s star  space fold  C fold-all  x delete  r/R restart  q quit"))
 
 	panel := lipgloss.NewStyle().
 		Width(panelWidth).
@@ -1577,12 +1641,13 @@ func (m overlayModel) View() tea.View {
 // RunOverlay launches the bubbletea overlay listing sessions grouped by repo.
 // currentSessionID highlights the session the user was just attached to.
 // fetchPreview is called asynchronously to load scrollback for the selected session.
-func RunOverlay(sessions []protocol.SessionInfo, currentSessionID string, fetchPreview func(sessionID string) string, refreshSessions func() []protocol.SessionInfo, deleteSession func(sessionID string) error, restartSession func(sessionID string) error, toggleStar func(sessionID string, star bool) error, profile string, collapsed map[string]bool) *OverlayResult {
+func RunOverlay(sessions []protocol.SessionInfo, currentSessionID string, fetchPreview func(sessionID string) string, refreshSessions func() []protocol.SessionInfo, deleteSession func(sessionID string) error, restartSession func(sessionID string) error, toggleStar func(sessionID string, star bool) error, profile string, collapsed map[string]bool, repoSuggestions []RepoSuggestion) *OverlayResult {
 	m := newOverlayModel(sessions, currentSessionID, fetchPreview, deleteSession, collapsed)
 	m.refreshSessions = refreshSessions
 	m.restartSession = restartSession
 	m.toggleStar = toggleStar
 	m.profile = profile
+	m.repoSuggestions = repoSuggestions
 	p := tea.NewProgram(m)
 
 	final, err := p.Run()
@@ -1597,6 +1662,13 @@ func RunOverlay(sessions []protocol.SessionInfo, currentSessionID string, fetchP
 
 	overlayResult := &OverlayResult{
 		Collapsed: result.collapsed,
+	}
+
+	if result.createDone {
+		overlayResult.Action = "create"
+		overlayResult.CreateName = result.createName
+		overlayResult.CreateRepoPath = result.createRepoPath
+		return overlayResult
 	}
 
 	if result.selected != nil {
