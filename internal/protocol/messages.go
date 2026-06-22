@@ -93,6 +93,12 @@ type RenameMsg struct {
 	NewName   string `json:"new_name"`
 }
 
+type UpdateMsg struct {
+	SessionID string  `json:"session_id"`
+	Name      *string `json:"name,omitempty"`
+	ParentID  *string `json:"parent_id,omitempty"`
+}
+
 type StarMsg struct {
 	SessionID string `json:"session_id"`
 }

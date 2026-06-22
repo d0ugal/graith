@@ -2809,6 +2809,53 @@ func (sm *SessionManager) Rename(id, newName string) error {
 	return sm.saveState()
 }
 
+func (sm *SessionManager) Update(id string, name *string, parentID *string) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	s, ok := sm.state.Sessions[id]
+	if !ok {
+		return fmt.Errorf("session %q not found", id)
+	}
+	if IsSystemSession(s) {
+		return fmt.Errorf("cannot update system session %q", s.Name)
+	}
+
+	if name != nil {
+		if err := ValidateSessionName(*name); err != nil {
+			return err
+		}
+	}
+
+	newParentValue := s.ParentID
+	if parentID != nil {
+		newParent := *parentID
+		if newParent == "" {
+			newParentValue = ""
+		} else {
+			if newParent == id {
+				return fmt.Errorf("cannot set session as its own parent")
+			}
+			if _, ok := sm.state.Sessions[newParent]; !ok {
+				return fmt.Errorf("parent session %q not found", newParent)
+			}
+			descendants := sm.collectDescendants(id)
+			for _, d := range descendants {
+				if d == newParent {
+					return fmt.Errorf("cannot set descendant %q as parent (would create cycle)", newParent)
+				}
+			}
+			newParentValue = newParent
+		}
+	}
+
+	if name != nil {
+		s.Name = *name
+	}
+	s.ParentID = newParentValue
+	return sm.saveState()
+}
+
 // List returns copies of all known session states.
 func (sm *SessionManager) List() []SessionState {
 	sm.mu.RLock()

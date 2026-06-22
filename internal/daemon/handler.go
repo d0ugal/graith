@@ -284,6 +284,20 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					}{r.SessionID, r.NewName})
 				}
 
+			case "update":
+				var u protocol.UpdateMsg
+				if err := protocol.DecodePayload(msg, &u); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid update message"})
+					continue
+				}
+				if err := sm.Update(u.SessionID, u.Name, u.ParentID); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+				} else {
+					sendControl("updated", struct {
+						SessionID string `json:"session_id"`
+					}{u.SessionID})
+				}
+
 			case "star":
 				var s protocol.StarMsg
 				if err := protocol.DecodePayload(msg, &s); err != nil {

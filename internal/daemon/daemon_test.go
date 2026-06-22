@@ -153,6 +153,176 @@ func TestRename(t *testing.T) {
 	})
 }
 
+func TestUpdate(t *testing.T) {
+	strPtr := func(s string) *string { return &s }
+
+	t.Run("rename via update", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.state.Sessions["sess1"] = &SessionState{
+			ID: "sess1", Name: "old-name", Status: StatusRunning,
+		}
+
+		if err := sm.Update("sess1", strPtr("new-name"), nil); err != nil {
+			t.Fatalf("Update() error = %v", err)
+		}
+		if sm.state.Sessions["sess1"].Name != "new-name" {
+			t.Errorf("Name = %q, want %q", sm.state.Sessions["sess1"].Name, "new-name")
+		}
+	})
+
+	t.Run("orphan session", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.state.Sessions["parent"] = &SessionState{
+			ID: "parent", Name: "parent", Status: StatusRunning,
+		}
+		sm.state.Sessions["child"] = &SessionState{
+			ID: "child", Name: "child", ParentID: "parent", Status: StatusRunning,
+		}
+
+		if err := sm.Update("child", nil, strPtr("")); err != nil {
+			t.Fatalf("Update() error = %v", err)
+		}
+		if sm.state.Sessions["child"].ParentID != "" {
+			t.Errorf("ParentID = %q, want empty", sm.state.Sessions["child"].ParentID)
+		}
+	})
+
+	t.Run("reparent session", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.state.Sessions["p1"] = &SessionState{
+			ID: "p1", Name: "parent1", Status: StatusRunning,
+		}
+		sm.state.Sessions["p2"] = &SessionState{
+			ID: "p2", Name: "parent2", Status: StatusRunning,
+		}
+		sm.state.Sessions["child"] = &SessionState{
+			ID: "child", Name: "child", ParentID: "p1", Status: StatusRunning,
+		}
+
+		if err := sm.Update("child", nil, strPtr("p2")); err != nil {
+			t.Fatalf("Update() error = %v", err)
+		}
+		if sm.state.Sessions["child"].ParentID != "p2" {
+			t.Errorf("ParentID = %q, want %q", sm.state.Sessions["child"].ParentID, "p2")
+		}
+	})
+
+	t.Run("self-parent rejected", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.state.Sessions["sess1"] = &SessionState{
+			ID: "sess1", Name: "sess", Status: StatusRunning,
+		}
+
+		err := sm.Update("sess1", nil, strPtr("sess1"))
+		if err == nil {
+			t.Fatal("expected error for self-parent")
+		}
+	})
+
+	t.Run("cycle rejected", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.state.Sessions["grandparent"] = &SessionState{
+			ID: "grandparent", Name: "gp", Status: StatusRunning,
+		}
+		sm.state.Sessions["parent"] = &SessionState{
+			ID: "parent", Name: "parent", ParentID: "grandparent", Status: StatusRunning,
+		}
+		sm.state.Sessions["child"] = &SessionState{
+			ID: "child", Name: "child", ParentID: "parent", Status: StatusRunning,
+		}
+
+		err := sm.Update("grandparent", nil, strPtr("child"))
+		if err == nil {
+			t.Fatal("expected error for cycle")
+		}
+	})
+
+	t.Run("nonexistent parent rejected", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.state.Sessions["sess1"] = &SessionState{
+			ID: "sess1", Name: "sess", Status: StatusRunning,
+		}
+
+		err := sm.Update("sess1", nil, strPtr("nonexistent"))
+		if err == nil {
+			t.Fatal("expected error for nonexistent parent")
+		}
+	})
+
+	t.Run("not found", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+
+		err := sm.Update("nonexistent", strPtr("new-name"), nil)
+		if err == nil {
+			t.Fatal("expected error for nonexistent session")
+		}
+	})
+
+	t.Run("no changes is no-op", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.state.Sessions["sess1"] = &SessionState{
+			ID: "sess1", Name: "sess", Status: StatusRunning,
+		}
+
+		err := sm.Update("sess1", nil, nil)
+		if err != nil {
+			t.Fatalf("Update() with no changes should succeed, got: %v", err)
+		}
+	})
+
+	t.Run("system session rejected", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.state.Sessions["sys"] = &SessionState{
+			ID: "sys", Name: "orchestrator", Status: StatusRunning,
+			SystemKind: SystemKindOrchestrator,
+		}
+
+		err := sm.Update("sys", strPtr("new-name"), nil)
+		if err == nil {
+			t.Fatal("expected error for system session")
+		}
+	})
+
+	t.Run("combined name and parent", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.state.Sessions["p1"] = &SessionState{
+			ID: "p1", Name: "parent1", Status: StatusRunning,
+		}
+		sm.state.Sessions["p2"] = &SessionState{
+			ID: "p2", Name: "parent2", Status: StatusRunning,
+		}
+		sm.state.Sessions["child"] = &SessionState{
+			ID: "child", Name: "old-name", ParentID: "p1", Status: StatusRunning,
+		}
+
+		if err := sm.Update("child", strPtr("new-name"), strPtr("p2")); err != nil {
+			t.Fatalf("Update() error = %v", err)
+		}
+		s := sm.state.Sessions["child"]
+		if s.Name != "new-name" {
+			t.Errorf("Name = %q, want %q", s.Name, "new-name")
+		}
+		if s.ParentID != "p2" {
+			t.Errorf("ParentID = %q, want %q", s.ParentID, "p2")
+		}
+	})
+
+	t.Run("failed parent does not mutate name", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.state.Sessions["sess1"] = &SessionState{
+			ID: "sess1", Name: "old-name", Status: StatusRunning,
+		}
+
+		err := sm.Update("sess1", strPtr("new-name"), strPtr("nonexistent"))
+		if err == nil {
+			t.Fatal("expected error for nonexistent parent")
+		}
+		if sm.state.Sessions["sess1"].Name != "old-name" {
+			t.Errorf("Name = %q, want %q (should not have changed)", sm.state.Sessions["sess1"].Name, "old-name")
+		}
+	})
+}
+
 func TestList(t *testing.T) {
 	tests := []struct {
 		name     string
