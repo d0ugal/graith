@@ -16,14 +16,14 @@ var (
 
 var restartCmd = &cobra.Command{
 	Use:   "restart <name-or-id>",
-	Short: "Restart a stopped session",
+	Short: "Restart a session (with --children, restarts all descendants)",
 	Args: func(cmd *cobra.Command, args []string) error {
 		if restartChildren {
 			return cobra.MaximumNArgs(1)(cmd, args)
 		}
 		return cobra.ExactArgs(1)(cmd, args)
 	},
-	ValidArgsFunction: completeStoppedSessionNames,
+	ValidArgsFunction: completeSessionNames,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		c, err := client.Connect(cfg, paths, cfgFile)
 		if err != nil {
@@ -122,33 +122,4 @@ func init() {
 	rootCmd.AddCommand(restartCmd)
 	restartCmd.Flags().BoolVar(&restartBackground, "background", false, "restart without attaching")
 	restartCmd.Flags().BoolVar(&restartChildren, "children", false, "restart all descendant sessions")
-}
-
-func completeStoppedSessionNames(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	if len(args) > 0 {
-		return nil, cobra.ShellCompDirectiveNoFileComp
-	}
-	c, err := client.Connect(cfg, paths, cfgFile)
-	if err != nil {
-		return nil, cobra.ShellCompDirectiveNoFileComp
-	}
-	defer c.Close()
-
-	c.SendControl("list", struct{}{})
-	resp, err := c.ReadControlResponse()
-	if err != nil {
-		return nil, cobra.ShellCompDirectiveNoFileComp
-	}
-	var list protocol.SessionListMsg
-	if err := protocol.DecodePayload(resp, &list); err != nil {
-		return nil, cobra.ShellCompDirectiveNoFileComp
-	}
-
-	var names []string
-	for _, s := range list.Sessions {
-		if s.Status == "stopped" {
-			names = append(names, s.Name, s.ID)
-		}
-	}
-	return names, cobra.ShellCompDirectiveNoFileComp
 }
