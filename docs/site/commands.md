@@ -261,6 +261,35 @@ All store subcommands accept:
 | `--repo <path>` | Repo path (default: auto-detect) |
 | `--shared` | Use the global store (not scoped to any repo) |
 
+## Scenarios
+
+See [Scenarios](scenarios.md) for full details.
+
+### `gr scenario start <file>`
+
+Start a scenario from a TOML file. Pass `-` to read from stdin. Only the orchestrator session can start scenarios.
+
+```bash
+gr scenario start tracing.toml
+cat tracing.toml | gr scenario start -
+```
+
+### `gr scenario status <name>`
+
+Show the status of each session in a scenario.
+
+### `gr scenario list`
+
+List all scenarios with their aggregate status.
+
+### `gr scenario stop <name>`
+
+Stop all running sessions in a scenario.
+
+### `gr scenario delete <name>`
+
+Delete a scenario and all its sessions, including worktrees and branches.
+
 ## Daemon management
 
 ### `gr daemon start`
