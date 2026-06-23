@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.54.0](https://github.com/d0ugal/graith/compare/v0.53.1...v0.54.0) (2026-06-23)
+
+
+### Features
+
+* add first-class inbox messaging with auto-resume ([296eccd](https://github.com/d0ugal/graith/commit/296eccdbf00160c99d09b2f7bec16e0ac5871c3c))
+
+
+### Bug Fixes
+
+* resolve HOME and CWD for daemon git-pull subprocess ([7df8b49](https://github.com/d0ugal/graith/commit/7df8b49236fe0530f3d72ef0f545c09f5e02a425)), closes [#551](https://github.com/d0ugal/graith/issues/551)
+* return error on UserHomeDir failure, use t.Chdir in test ([fc0f133](https://github.com/d0ugal/graith/commit/fc0f133cd40f56566f9bf690b13a069b21951b2e))
+
 ## [0.53.1](https://github.com/d0ugal/graith/compare/v0.53.0...v0.53.1) (2026-06-22)
 
 
