@@ -69,9 +69,7 @@ func TestListMaintenanceRepos(t *testing.T) {
 		if err := os.Mkdir(stale, 0755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.Chdir(stale); err != nil {
-			t.Fatal(err)
-		}
+		t.Chdir(stale)
 		if err := os.Remove(stale); err != nil {
 			t.Fatal(err)
 		}
