@@ -231,6 +231,7 @@ func (m *MCPManager) startProcess(serverCfg config.MCPServerConfig, proxyID stri
 	}
 
 	cmd := exec.Command(command, args...)
+	cmd.Dir = os.TempDir()
 	cmd.Stderr = stderrFile
 	if len(serverCfg.Env) > 0 {
 		cmd.Env = os.Environ()
