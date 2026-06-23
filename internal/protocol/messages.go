@@ -185,6 +185,14 @@ type MsgSubMsg struct {
 	Ack        bool   `json:"ack"`
 }
 
+type MsgInboxMsg struct {
+	OnlyUnread bool   `json:"only_unread"`
+	ThreadID   string `json:"thread_id,omitempty"`
+	Wait       bool   `json:"wait"`
+	Follow     bool   `json:"follow"`
+	Ack        bool   `json:"ack"`
+}
+
 type MsgAckMsg struct {
 	Stream     string `json:"stream"`
 	Subscriber string `json:"subscriber"`

@@ -81,23 +81,6 @@ func (ac authContext) checkMsgPub(_ *SessionManager, _ string) error {
 	return nil
 }
 
-// checkInboxRead validates msg_sub/msg_ack authorization. For inbox streams, the
-// authenticated session can only read its own inbox. Must be called with sm.mu
-// at least RLocked.
-func (ac authContext) checkInboxRead(stream string) error {
-	if !ac.authenticated {
-		return nil
-	}
-	targetID, isInbox := parseInboxStream(stream)
-	if !isInbox {
-		return nil
-	}
-	if targetID != ac.sessionID {
-		return fmt.Errorf("not authorized: can only read own inbox")
-	}
-	return nil
-}
-
 func parseInboxStream(stream string) (string, bool) {
 	if !strings.HasPrefix(stream, "inbox:") {
 		return "", false

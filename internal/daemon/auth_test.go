@@ -234,27 +234,6 @@ func TestCheckMsgPub_InboxUnrelatedAllowed(t *testing.T) {
 	}
 }
 
-func TestCheckInboxRead_OwnInboxAllowed(t *testing.T) {
-	auth := authContext{sessionID: "braw", authenticated: true}
-	if err := auth.checkInboxRead("inbox:braw"); err != nil {
-		t.Errorf("expected allowed for own inbox, got: %v", err)
-	}
-}
-
-func TestCheckInboxRead_OtherInboxRejected(t *testing.T) {
-	auth := authContext{sessionID: "braw", authenticated: true}
-	if err := auth.checkInboxRead("inbox:canny"); err == nil {
-		t.Error("expected rejection for other inbox read")
-	}
-}
-
-func TestCheckInboxRead_TopicAllowed(t *testing.T) {
-	auth := authContext{sessionID: "braw", authenticated: true}
-	if err := auth.checkInboxRead("blether-review"); err != nil {
-		t.Errorf("expected allowed for topic read, got: %v", err)
-	}
-}
-
 func TestIsDescendantOf(t *testing.T) {
 	sm := newTestSMWithSessions(map[string]*SessionState{
 		"brae":      {ID: "brae"},

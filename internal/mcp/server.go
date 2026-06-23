@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/d0ugal/graith/internal/client"
 	"github.com/d0ugal/graith/internal/config"
@@ -49,13 +50,18 @@ func (s *Server) Run(ctx context.Context) error {
 	}, s.publishMessage)
 
 	gomcp.AddTool(srv, &gomcp.Tool{
+		Name:        "read_inbox",
+		Description: "Read messages from this session's inbox. Uses GRAITH_TOKEN to identify the session automatically.",
+	}, s.readInbox)
+
+	gomcp.AddTool(srv, &gomcp.Tool{
 		Name:        "read_messages",
-		Description: "Read messages from a topic. Returns all or only unread messages.",
+		Description: "Read messages from a topic. Returns all or only unread messages. Cannot read inbox streams — use read_inbox instead.",
 	}, s.readMessages)
 
 	gomcp.AddTool(srv, &gomcp.Tool{
 		Name:        "subscribe",
-		Description: "Wait for the next message on a topic. Blocks until a message arrives.",
+		Description: "Wait for the next message on a topic. Blocks until a message arrives. Cannot subscribe to inbox streams — use read_inbox instead.",
 	}, s.subscribe)
 
 	return srv.Run(ctx, &gomcp.StdioTransport{})
@@ -165,6 +171,12 @@ type SubscribeInput struct {
 
 type SubscribeOutput struct {
 	Message MessageOutput `json:"message"`
+}
+
+type ReadInboxInput struct {
+	All      bool   `json:"all,omitempty"       jsonschema:"Read all messages instead of only unread"`
+	ThreadID string `json:"thread_id,omitempty" jsonschema:"Filter to a specific thread"`
+	Ack      bool   `json:"ack,omitempty"       jsonschema:"Acknowledge messages after reading"`
 }
 
 // Tool handlers
@@ -321,6 +333,10 @@ func (s *Server) publishMessage(_ context.Context, _ *gomcp.CallToolRequest, inp
 }
 
 func (s *Server) readMessages(_ context.Context, _ *gomcp.CallToolRequest, input ReadMessagesInput) (*gomcp.CallToolResult, ReadMessagesOutput, error) {
+	if strings.HasPrefix(input.Topic, "inbox:") {
+		return nil, ReadMessagesOutput{}, fmt.Errorf("cannot read inbox streams via read_messages — use the read_inbox tool instead")
+	}
+
 	c, err := s.connect()
 	if err != nil {
 		return nil, ReadMessagesOutput{}, fmt.Errorf("connect to daemon: %w", err)
@@ -377,6 +393,10 @@ func (s *Server) readMessages(_ context.Context, _ *gomcp.CallToolRequest, input
 }
 
 func (s *Server) subscribe(ctx context.Context, _ *gomcp.CallToolRequest, input SubscribeInput) (*gomcp.CallToolResult, SubscribeOutput, error) {
+	if strings.HasPrefix(input.Topic, "inbox:") {
+		return nil, SubscribeOutput{}, fmt.Errorf("cannot subscribe to inbox streams — use the read_inbox tool instead")
+	}
+
 	c, err := s.connect()
 	if err != nil {
 		return nil, SubscribeOutput{}, fmt.Errorf("connect to daemon: %w", err)
@@ -433,6 +453,53 @@ func (s *Server) subscribe(ctx context.Context, _ *gomcp.CallToolRequest, input 
 			// waiting for message, continue reading
 		case "error":
 			return nil, SubscribeOutput{}, decodeError(msg)
+		}
+	}
+}
+
+func (s *Server) readInbox(_ context.Context, _ *gomcp.CallToolRequest, input ReadInboxInput) (*gomcp.CallToolResult, ReadMessagesOutput, error) {
+	c, err := s.connect()
+	if err != nil {
+		return nil, ReadMessagesOutput{}, fmt.Errorf("connect to daemon: %w", err)
+	}
+	defer c.Close()
+
+	if err := c.SendControl("msg_inbox", protocol.MsgInboxMsg{
+		OnlyUnread: !input.All,
+		ThreadID:   input.ThreadID,
+		Ack:        input.Ack,
+	}); err != nil {
+		return nil, ReadMessagesOutput{}, fmt.Errorf("send msg_inbox: %w", err)
+	}
+
+	var messages []MessageOutput
+	for {
+		frame, err := c.ReadFrame()
+		if err != nil {
+			return nil, ReadMessagesOutput{}, fmt.Errorf("read frame: %w", err)
+		}
+		if frame.Channel != protocol.ChannelControl {
+			continue
+		}
+
+		msg, err := protocol.DecodeControl(frame.Payload)
+		if err != nil {
+			continue
+		}
+
+		switch msg.Type {
+		case "msg_message":
+			var m MessageOutput
+			if err := json.Unmarshal(msg.Payload, &m); err == nil {
+				messages = append(messages, m)
+			}
+		case "msg_done":
+			if messages == nil {
+				messages = []MessageOutput{}
+			}
+			return nil, ReadMessagesOutput{Messages: messages}, nil
+		case "error":
+			return nil, ReadMessagesOutput{}, decodeError(msg)
 		}
 	}
 }
