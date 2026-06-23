@@ -128,6 +128,18 @@ type sessionItem struct {
 	hasChildren     bool
 	collapsed       bool
 	descendantCount int
+	sessionIndex    int
+}
+
+func assignSessionIndices(items []list.Item) {
+	idx := 0
+	for i, item := range items {
+		if si, ok := item.(sessionItem); ok {
+			idx++
+			si.sessionIndex = idx
+			items[i] = si
+		}
+	}
 }
 
 func (s sessionItem) Title() string       { return s.info.Name }
@@ -153,8 +165,8 @@ type columnWidths struct {
 }
 
 func (cw columnWidths) totalWidth() int {
-	// "  ★▸● " (7) + treeIndent + name + "  " + status + "  " + summary + "  " + git + "  " + output + margin(4)
-	return 7 + cw.treeIndent + cw.name + 2 + cw.status + 2 + cw.summary + 2 + cw.git + 2 + cw.output + 4
+	// "  N ★▸● " (9) + treeIndent + name + "  " + status + "  " + summary + "  " + git + "  " + output + margin(4)
+	return 9 + cw.treeIndent + cw.name + 2 + cw.status + 2 + cw.summary + 2 + cw.git + 2 + cw.output + 4
 }
 
 func pad(s string, width int) string {
@@ -381,6 +393,16 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	}
 	styledIndicator += staleMarker
 
+	numberLabel := "  "
+	if si.sessionIndex >= 1 && si.sessionIndex <= 20 {
+		key := fmt.Sprintf("%d", si.sessionIndex%10)
+		if si.sessionIndex <= 10 {
+			numberLabel = dim.Render(key) + " "
+		} else {
+			numberLabel = lipgloss.NewStyle().Foreground(colorFaint).Render(key) + " "
+		}
+	}
+
 	starredMark := " "
 	if si.info.Starred {
 		starredMark = lipgloss.NewStyle().Foreground(colorGold).Render("★")
@@ -455,8 +477,8 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 		selPrefix = "> "
 	}
 
-	line := fmt.Sprintf("%s%s%s%s %s%s%s%s%s%s%s%s%s%s",
-		selPrefix, starredMark, currentMark, styledIndicator,
+	line := fmt.Sprintf("%s%s%s%s%s %s%s%s%s%s%s%s%s%s%s",
+		selPrefix, numberLabel, starredMark, currentMark, styledIndicator,
 		treePrefixRendered, name, sep, statusRendered, sep, summaryRendered, sep, gitRendered, sep, outputRendered)
 
 	if selected {
@@ -806,6 +828,7 @@ func newOverlayModel(sessions []protocol.SessionInfo, currentSessionID string, f
 		collapsed = make(map[string]bool)
 	}
 	items := buildGroupedItems(sessions, collapsed)
+	assignSessionIndices(items)
 	cols := computeColumnWidths(sessions, currentSessionID)
 	cols.treeIndent = maxTreeIndentFromItems(items)
 	contentWidth := cols.totalWidth()
@@ -941,6 +964,7 @@ func (m *overlayModel) rebuildForView() {
 			items = append(items, sessionItem{info: s})
 		}
 	}
+	assignSessionIndices(items)
 
 	m.cols = computeColumnWidths(filtered, m.currentSessionID)
 	if m.view == viewAll || m.view == viewScenario {
@@ -1196,6 +1220,7 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						items = append(items, sessionItem{info: s})
 					}
 				}
+				assignSessionIndices(items)
 				m.list.SetItems(items)
 				m.list.Select(0)
 				if len(items) > 0 {
@@ -1456,6 +1481,36 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 
+			case "1", "2", "3", "4", "5", "6", "7", "8", "9", "0":
+				target := int(msg.String()[0] - '0')
+				if target == 0 {
+					target = 10
+				}
+				for i, item := range m.list.Items() {
+					if si, ok := item.(sessionItem); ok && si.sessionIndex == target {
+						m.list.Select(i)
+						m.selected = &si.info
+						return m, tea.Quit
+					}
+				}
+				return m, nil
+
+			case "!", "@", "#", "$", "%", "^", "&", "*", "(", ")":
+				shiftMap := map[string]int{
+					"!": 11, "@": 12, "#": 13, "$": 14, "%": 15,
+					"^": 16, "&": 17, "*": 18, "(": 19, ")": 20,
+				}
+				if target, ok := shiftMap[msg.String()]; ok {
+					for i, item := range m.list.Items() {
+						if si, ok := item.(sessionItem); ok && si.sessionIndex == target {
+							m.list.Select(i)
+							m.selected = &si.info
+							return m, tea.Quit
+						}
+					}
+				}
+				return m, nil
+
 			case "n":
 				defaultRepo := ""
 				if item, ok := m.list.SelectedItem().(sessionItem); ok {
@@ -1527,7 +1582,7 @@ func (m overlayModel) View() tea.View {
 		panelContent.WriteString("\n")
 	}
 
-	headerPrefix := "       "
+	headerPrefix := "         "
 	nameColWidth := m.cols.treeIndent + m.cols.name
 	headerLine := fmt.Sprintf("%s%s  %s  %s  %s  %s",
 		headerPrefix,
@@ -1666,7 +1721,7 @@ func (m overlayModel) View() tea.View {
 
 	helpStyle := lipgloss.NewStyle().Foreground(colorFaint)
 	panelContent.WriteString("\n")
-	panelContent.WriteString(helpStyle.Render("enter attach  n new  ◂▸ view  / filter  tab group  s star  space fold  C fold-all  x delete  r/R restart  q quit"))
+	panelContent.WriteString(helpStyle.Render("1-0 jump  enter attach  n new  ◂▸ view  / filter  tab group  s star  space fold  C fold-all  x delete  r/R restart  q quit"))
 
 	panel := lipgloss.NewStyle().
 		Width(panelWidth).

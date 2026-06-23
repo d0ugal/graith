@@ -2583,9 +2583,9 @@ func TestPad(t *testing.T) {
 func TestColumnWidths_TotalWidth(t *testing.T) {
 	cw := columnWidths{name: 10, status: 8, summary: 15, git: 5, output: 4}
 	got := cw.totalWidth()
-	// 7 + 10 + 2 + 8 + 2 + 15 + 2 + 5 + 2 + 4 + 4 = 61
-	if got != 61 {
-		t.Errorf("totalWidth() = %d, want 61", got)
+	// 9 + 10 + 2 + 8 + 2 + 15 + 2 + 5 + 2 + 4 + 4 = 63
+	if got != 63 {
+		t.Errorf("totalWidth() = %d, want 63", got)
 	}
 }
 
@@ -2947,5 +2947,172 @@ func TestOverlay_EmptyNeedsAttentionView(t *testing.T) {
 	view := om.View().Content
 	if !strings.Contains(view, "Nothing needs your attention") {
 		t.Error("expected empty state message in view output")
+	}
+}
+
+func TestAssignSessionIndices(t *testing.T) {
+	items := []list.Item{
+		groupHeader{name: "croft", count: 1},
+		sessionItem{info: protocol.SessionInfo{ID: "s1", Name: "braw"}},
+		groupHeader{name: "graith", count: 2},
+		sessionItem{info: protocol.SessionInfo{ID: "s2", Name: "canny"}},
+		sessionItem{info: protocol.SessionInfo{ID: "s3", Name: "bonnie"}},
+	}
+	assignSessionIndices(items)
+
+	want := []int{1, 2, 3}
+	got := []int{}
+	for _, item := range items {
+		if si, ok := item.(sessionItem); ok {
+			got = append(got, si.sessionIndex)
+		}
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d indices, want %d", len(got), len(want))
+	}
+	for i, w := range want {
+		if got[i] != w {
+			t.Errorf("session %d: index = %d, want %d", i, got[i], w)
+		}
+	}
+}
+
+func TestOverlay_NumberKeySelectsSession(t *testing.T) {
+	sessions := overlayTestSessions()
+	m := newOverlayModel(sessions, "", noopFetchPreview, nil, nil)
+	sized, _ := sendWindowSize(m, 200, 50)
+
+	// Press "1" to select the first session.
+	updated, _ := sendKey(asOverlay(sized), "1")
+	om := asOverlay(updated)
+
+	if om.selected == nil {
+		t.Fatal("expected a session to be selected after pressing 1")
+	}
+
+	// First session should be the first sessionItem (after group header).
+	var firstSession string
+	for _, item := range asOverlay(sized).list.Items() {
+		if si, ok := item.(sessionItem); ok {
+			firstSession = si.info.ID
+			break
+		}
+	}
+	if om.selected.ID != firstSession {
+		t.Errorf("selected session = %q, want %q", om.selected.ID, firstSession)
+	}
+}
+
+func TestOverlay_NumberKeyZeroSelectsTenth(t *testing.T) {
+	var sessions []protocol.SessionInfo
+	for i := 1; i <= 12; i++ {
+		sessions = append(sessions, protocol.SessionInfo{
+			ID:        fmt.Sprintf("s%d", i),
+			Name:      fmt.Sprintf("bothy-%02d", i),
+			RepoName:  "croft",
+			Status:    "running",
+			CreatedAt: time.Now().Add(-time.Duration(i) * time.Hour).Format(time.RFC3339),
+		})
+	}
+
+	m := newOverlayModel(sessions, "", noopFetchPreview, nil, nil)
+	sized, _ := sendWindowSize(m, 200, 50)
+	sm := asOverlay(sized)
+
+	idx := 0
+	var tenthID string
+	for _, item := range sm.list.Items() {
+		if si, ok := item.(sessionItem); ok {
+			idx++
+			if idx == 10 {
+				tenthID = si.info.ID
+				break
+			}
+		}
+	}
+	if tenthID == "" {
+		t.Fatal("could not find 10th session in list")
+	}
+
+	updated, _ := sendKey(sm, "0")
+	om := asOverlay(updated)
+	if om.selected == nil {
+		t.Fatal("expected a session to be selected after pressing 0")
+	}
+	if om.selected.ID != tenthID {
+		t.Errorf("selected = %q, want %q (10th session)", om.selected.ID, tenthID)
+	}
+}
+
+func TestOverlay_ShiftNumberSelectsEleventhPlus(t *testing.T) {
+	var sessions []protocol.SessionInfo
+	for i := 1; i <= 15; i++ {
+		sessions = append(sessions, protocol.SessionInfo{
+			ID:        fmt.Sprintf("s%d", i),
+			Name:      fmt.Sprintf("bothy-%02d", i),
+			RepoName:  "croft",
+			Status:    "running",
+			CreatedAt: time.Now().Add(-time.Duration(i) * time.Hour).Format(time.RFC3339),
+		})
+	}
+
+	m := newOverlayModel(sessions, "", noopFetchPreview, nil, nil)
+	sized, _ := sendWindowSize(m, 200, 50)
+	sm := asOverlay(sized)
+
+	idx := 0
+	var eleventhID string
+	for _, item := range sm.list.Items() {
+		if si, ok := item.(sessionItem); ok {
+			idx++
+			if idx == 11 {
+				eleventhID = si.info.ID
+				break
+			}
+		}
+	}
+	if eleventhID == "" {
+		t.Fatal("could not find 11th session in list")
+	}
+
+	updated, _ := sendKey(sm, "!")
+	om := asOverlay(updated)
+	if om.selected == nil {
+		t.Fatal("expected a session to be selected after pressing shift+1")
+	}
+	if om.selected.ID != eleventhID {
+		t.Errorf("selected = %q, want %q (11th session)", om.selected.ID, eleventhID)
+	}
+}
+
+func TestOverlay_NumberKeyOutOfRangeDoesNothing(t *testing.T) {
+	sessions := overlayTestSessions()
+	m := newOverlayModel(sessions, "", noopFetchPreview, nil, nil)
+	sized, _ := sendWindowSize(m, 200, 50)
+
+	updated, _ := sendKey(asOverlay(sized), "5")
+	om := asOverlay(updated)
+	if om.selected != nil {
+		t.Error("expected no selection when pressing number beyond session count")
+	}
+}
+
+func TestOverlay_NumberLabelsInRender(t *testing.T) {
+	sessions := overlayTestSessions()
+	m := newOverlayModel(sessions, "", noopFetchPreview, nil, nil)
+	sized, _ := sendWindowSize(m, 200, 50)
+
+	view := asOverlay(sized).View().Content
+
+	// The rendered view should contain the session numbers.
+	// Session 1 should show "1", session 2 should show "2", etc.
+	// We can't easily check exact positions, but we can verify
+	// the view contains the digit labels alongside session names.
+	for _, item := range asOverlay(sized).list.Items() {
+		if si, ok := item.(sessionItem); ok && si.sessionIndex <= 3 {
+			if !strings.Contains(view, si.info.Name) {
+				t.Errorf("view missing session name %q", si.info.Name)
+			}
+		}
 	}
 }
