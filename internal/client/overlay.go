@@ -398,7 +398,6 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 		key := fmt.Sprintf("%d", si.sessionIndex%10)
 		numberLabel = dim.Render(key) + " "
 	} else if si.sessionIndex >= 11 && si.sessionIndex <= 20 {
-		// Show the actual shifted glyph so users know which key to press (US layout).
 		shiftGlyphs := "!@#$%^&*()"
 		numberLabel = dim.Render(string(shiftGlyphs[si.sessionIndex-11])) + " "
 	}
