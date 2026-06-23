@@ -106,9 +106,10 @@ Every control message type must have an explicit rule. The daemon derives the **
 | `screen_preview` | `session_id` | Self or descendant | Terminal contents are sensitive |
 | `screen_snapshot` | `session_id` | Self or descendant | Terminal contents are sensitive |
 | `msg_pub` | `sender_id`, `stream` | Sender forced to self; inbox targets: self, descendant, or direct parent | See messaging rules below |
-| `msg_sub` | `subscriber`, `stream` | Subscriber forced to self; inbox reads: own inbox only | |
-| `msg_ack` | `subscriber`, `stream` | Subscriber forced to self | |
-| `msg_topics` | `subscriber` | Subscriber forced to self | |
+| `msg_inbox` | none (derived from token) | Authenticated only; derives `inbox:<session-id>` from token | Preferred way for agents to read their own inbox |
+| `msg_sub` | `subscriber`, `stream` | Subscriber forced to self; inbox streams rejected for authenticated callers | Use `msg_inbox` for inbox reads |
+| `msg_ack` | `subscriber`, `stream` | Subscriber forced to self; inbox streams rejected for authenticated callers | |
+| `msg_topics` | `subscriber` | Subscriber forced to self; inbox streams filtered out for authenticated callers | |
 | `approval_request` | `session_id` | Self only | Hook path |
 | `approval_respond` | `request_id` | Human-only (reject if token present) | Agents must not approve other sessions' tool calls |
 | `approval_list` | none | Always allowed | Read-only |

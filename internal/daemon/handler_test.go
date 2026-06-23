@@ -934,8 +934,8 @@ func TestMsgPubInboxNotifiesTarget(t *testing.T) {
 	if !strings.Contains(scrollback, "New message from Ailsa") {
 		t.Errorf("notification not found in scrollback; got:\n%s", scrollback)
 	}
-	if !strings.Contains(scrollback, "inbox:bonnie-target") {
-		t.Errorf("notification should reference the target's inbox stream; got:\n%s", scrollback)
+	if !strings.Contains(scrollback, "gr msg inbox --all --ack") {
+		t.Errorf("notification should reference gr msg inbox command; got:\n%s", scrollback)
 	}
 }
 
@@ -2138,5 +2138,221 @@ func TestAttachDeletingSessionReturnsStatusError(t *testing.T) {
 	protocol.DecodePayload(env, &e)
 	if !strings.Contains(e.Message, "being deleted") {
 		t.Errorf("error = %q, want it to mention 'being deleted'", e.Message)
+	}
+}
+
+func TestResumeForInbox_SkipsNonStoppedSession(t *testing.T) {
+	h := newTestHarness(t)
+	h.addPTYSession(t, "braw-running", "braw-session")
+
+	h.sm.notifyInbox("braw-running", "sender", "Sender")
+
+	sess, ok := h.sm.Get("braw-running")
+	if !ok {
+		t.Fatal("session should still exist")
+	}
+	if sess.Status != StatusRunning {
+		t.Errorf("status = %q, want %q — running sessions should not be affected", sess.Status, StatusRunning)
+	}
+}
+
+func TestResumeForInbox_SkipsMissingSession(t *testing.T) {
+	h := newTestHarness(t)
+
+	// Should not panic when session doesn't exist
+	h.sm.resumeForInbox("nonexistent", "sender", "Sender")
+}
+
+func TestResumeForInbox_AttemptsResumeForStoppedSession(t *testing.T) {
+	h := newTestHarness(t)
+
+	h.sm.mu.Lock()
+	h.sm.state.Sessions["bide-stopped"] = &SessionState{
+		ID:     "bide-stopped",
+		Name:   "bide",
+		Agent:  "claude",
+		Status: StatusStopped,
+	}
+	h.sm.mu.Unlock()
+
+	h.sm.resumeForInbox("bide-stopped", "sender", "Sender")
+
+	sess, ok := h.sm.Get("bide-stopped")
+	if !ok {
+		t.Fatal("session should still exist")
+	}
+	// Resume may succeed or fail depending on agent binary availability.
+	// Either way it should not panic or leave the session in a bad state.
+	if sess.Status != StatusRunning && sess.Status != StatusStopped {
+		t.Errorf("status = %q, want running or stopped", sess.Status)
+	}
+}
+
+func (h *testHarness) sendControlWithToken(t *testing.T, msgType string, payload any, token string) {
+	t.Helper()
+	data, err := protocol.EncodeControlWithToken(msgType, payload, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.writer.WriteFrame(protocol.ChannelControl, data); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (h *testHarness) addAuthenticatedSession(t *testing.T, id, name, token string) {
+	t.Helper()
+	h.sm.mu.Lock()
+	h.sm.state.Sessions[id] = &SessionState{
+		ID:        id,
+		Name:      name,
+		Agent:     "claude",
+		Status:    StatusRunning,
+		Token:     token,
+		CreatedAt: time.Now().UTC(),
+	}
+	h.sm.tokenIndex[token] = id
+	h.sm.mu.Unlock()
+}
+
+func TestMsgInboxReadUnread(t *testing.T) {
+	h := newTestHarness(t)
+	h.addAuthenticatedSession(t, "bonnie-inbox", "bonnie", "tok-bonnie")
+
+	h.sm.messages.Publish("inbox:bonnie-inbox", "glen-sender", "Glen", "braw tidings", "", "")
+
+	h.sendControlWithToken(t, "msg_inbox", protocol.MsgInboxMsg{
+		OnlyUnread: true,
+	}, "tok-bonnie")
+
+	env := h.readControlMsg(t)
+	if env.Type != "msg_message" {
+		t.Fatalf("expected msg_message, got %q", env.Type)
+	}
+	var m Message
+	protocol.DecodePayload(env, &m)
+	if m.Body != "braw tidings" {
+		t.Errorf("body = %q, want %q", m.Body, "braw tidings")
+	}
+
+	env = h.readControlMsg(t)
+	if env.Type != "msg_done" {
+		t.Fatalf("expected msg_done, got %q", env.Type)
+	}
+}
+
+func TestMsgInboxRequiresAuth(t *testing.T) {
+	h := newTestHarness(t)
+
+	h.sendControl(t, "msg_inbox", protocol.MsgInboxMsg{})
+
+	env := h.readControlMsg(t)
+	if env.Type != "error" {
+		t.Fatalf("expected error, got %q", env.Type)
+	}
+	var e protocol.ErrorMsg
+	protocol.DecodePayload(env, &e)
+	if !strings.Contains(e.Message, "authenticated") {
+		t.Errorf("error = %q, want mention of 'authenticated'", e.Message)
+	}
+}
+
+func TestMsgInboxWithAck(t *testing.T) {
+	h := newTestHarness(t)
+	h.addAuthenticatedSession(t, "canny-inbox", "canny", "tok-canny")
+
+	h.sm.messages.Publish("inbox:canny-inbox", "sender", "Sender", "first blether", "", "")
+
+	h.sendControlWithToken(t, "msg_inbox", protocol.MsgInboxMsg{
+		OnlyUnread: true,
+		Ack:        true,
+	}, "tok-canny")
+
+	h.readControlMsg(t) // msg_message
+	h.readControlMsg(t) // msg_done
+
+	h.sendControlWithToken(t, "msg_inbox", protocol.MsgInboxMsg{
+		OnlyUnread: true,
+	}, "tok-canny")
+
+	env := h.readControlMsg(t)
+	if env.Type != "msg_done" {
+		t.Fatalf("expected msg_done (no unread after ack), got %q", env.Type)
+	}
+}
+
+func TestMsgSubRejectsInboxForAuthenticatedAgent(t *testing.T) {
+	h := newTestHarness(t)
+	h.addAuthenticatedSession(t, "thrawn-sub", "thrawn", "tok-thrawn")
+
+	h.sendControlWithToken(t, "msg_sub", protocol.MsgSubMsg{
+		Stream: "inbox:thrawn-sub",
+	}, "tok-thrawn")
+
+	env := h.readControlMsg(t)
+	if env.Type != "error" {
+		t.Fatalf("expected error, got %q", env.Type)
+	}
+	var e protocol.ErrorMsg
+	protocol.DecodePayload(env, &e)
+	if !strings.Contains(e.Message, "msg inbox") {
+		t.Errorf("error = %q, want mention of 'msg inbox'", e.Message)
+	}
+}
+
+func TestMsgAckRejectsInboxForAuthenticatedAgent(t *testing.T) {
+	h := newTestHarness(t)
+	h.addAuthenticatedSession(t, "fash-ack", "fash", "tok-fash")
+
+	h.sendControlWithToken(t, "msg_ack", protocol.MsgAckMsg{
+		Stream:     "inbox:fash-ack",
+		Subscriber: "fash-ack",
+	}, "tok-fash")
+
+	env := h.readControlMsg(t)
+	if env.Type != "error" {
+		t.Fatalf("expected error, got %q", env.Type)
+	}
+	var e protocol.ErrorMsg
+	protocol.DecodePayload(env, &e)
+	if !strings.Contains(e.Message, "msg inbox") {
+		t.Errorf("error = %q, want mention of 'msg inbox'", e.Message)
+	}
+}
+
+func TestMsgTopicsFiltersInboxForAuthenticatedAgent(t *testing.T) {
+	h := newTestHarness(t)
+	h.addAuthenticatedSession(t, "ken-topics", "ken", "tok-ken")
+
+	h.sm.messages.Publish("inbox:ken-topics", "sender", "Sender", "private", "", "")
+	h.sm.messages.Publish("blether-public", "sender", "Sender", "public", "", "")
+
+	h.sendControlWithToken(t, "msg_topics", protocol.MsgTopicsMsg{}, "tok-ken")
+
+	env := h.readControlMsg(t)
+	if env.Type != "msg_topics_list" {
+		t.Fatalf("expected msg_topics_list, got %q", env.Type)
+	}
+	var resp struct {
+		Streams []StreamInfo `json:"streams"`
+	}
+	protocol.DecodePayload(env, &resp)
+
+	for _, s := range resp.Streams {
+		if strings.HasPrefix(s.Name, "inbox:") {
+			t.Errorf("inbox stream %q should be filtered from topics for authenticated agents", s.Name)
+		}
+	}
+	found := false
+	for _, s := range resp.Streams {
+		if s.Name == "blether-public" {
+			found = true
+		}
+	}
+	if !found {
+		names := make([]string, len(resp.Streams))
+		for i, s := range resp.Streams {
+			names[i] = s.Name
+		}
+		t.Errorf("expected blether-public in topics, got %v", names)
 	}
 }

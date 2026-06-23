@@ -21,8 +21,9 @@ Tools exposed:
   session_status    Get status of a specific session
   create_session    Create a new session
   publish_message   Publish a message to a topic
-  read_messages     Read messages from a topic
-  subscribe         Wait for the next message on a topic`,
+  read_inbox        Read messages from this session's inbox
+  read_messages     Read messages from a topic (not inboxes)
+  subscribe         Wait for the next message on a topic (not inboxes)`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer cancel()

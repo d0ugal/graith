@@ -194,7 +194,7 @@ gr msg send frontend "API contract ready, see openapi.yaml"
 gr msg send --parent "backend work complete, ready for review"
 
 # Read your inbox (where the manifest was delivered)
-gr msg sub --topic "inbox:$GRAITH_SESSION_ID" --all --ack
+gr msg inbox --all --ack
 ```
 
 ## Constraints
