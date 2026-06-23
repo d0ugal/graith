@@ -57,4 +57,31 @@ func TestListMaintenanceRepos(t *testing.T) {
 			t.Fatalf("expected 2 repos (dedup happens at caller), got %d", len(repos))
 		}
 	})
+
+	t.Run("works with deleted cwd", func(t *testing.T) {
+		content := "[maintenance]\n\trepo = /croft/haar\n"
+		if err := os.WriteFile(gitconfig, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("GIT_CONFIG_GLOBAL", gitconfig)
+
+		stale := filepath.Join(t.TempDir(), "bothy")
+		if err := os.Mkdir(stale, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chdir(stale); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Remove(stale); err != nil {
+			t.Fatal(err)
+		}
+
+		repos, err := ListMaintenanceRepos(context.Background())
+		if err != nil {
+			t.Fatalf("should succeed even with stale cwd: %v", err)
+		}
+		if len(repos) != 1 || repos[0] != "/croft/haar" {
+			t.Fatalf("unexpected repos: %v", repos)
+		}
+	})
 }
