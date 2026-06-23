@@ -3,12 +3,17 @@ package git
 import (
 	"context"
 	"errors"
+	"os"
 	"os/exec"
 	"strings"
 )
 
 func ListMaintenanceRepos(ctx context.Context) ([]string, error) {
-	stdout, _, err := RunContext(ctx, "", "config", "--global", "--get-all", "maintenance.repo")
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, nil
+	}
+	stdout, _, err := RunContextEnv(ctx, home, []string{"HOME=" + home}, "config", "--global", "--get-all", "maintenance.repo")
 	if err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
