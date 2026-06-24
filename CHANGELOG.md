@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.56.0](https://github.com/d0ugal/graith/compare/v0.55.0...v0.56.0) (2026-06-24)
+
+
+### Features
+
+* add number key shortcuts to session select overlay ([8f24ab1](https://github.com/d0ugal/graith/commit/8f24ab1513edef284efa55b806d75adf13bd34da))
+* make overlay shortcut keys configurable via shortcut_keys setting ([496cbf4](https://github.com/d0ugal/graith/commit/496cbf4cdca207b31446eb7c2405b521dfe119bc))
+
 ## [0.55.0](https://github.com/d0ugal/graith/compare/v0.54.1...v0.55.0) (2026-06-24)
 
 
