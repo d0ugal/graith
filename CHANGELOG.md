@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.55.0](https://github.com/d0ugal/graith/compare/v0.54.1...v0.55.0) (2026-06-24)
+
+
+### Features
+
+* add number key shortcuts to session select overlay ([496b9b6](https://github.com/d0ugal/graith/commit/496b9b6813c808e520caec98493727bbff7dccd9))
+
+
+### Bug Fixes
+
+* improve number key labels and strengthen overlay tests ([c6c3db0](https://github.com/d0ugal/graith/commit/c6c3db01ef2774327362a360466aad123a03bcbc))
+* update module github.com/pelletier/go-toml/v2 to v2.4.2 ([0e82cc4](https://github.com/d0ugal/graith/commit/0e82cc41d46790be9f302193aac9199ed3a5d0d1))
+
 ## [0.54.1](https://github.com/d0ugal/graith/compare/v0.54.0...v0.54.1) (2026-06-23)
 
 
