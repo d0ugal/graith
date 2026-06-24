@@ -2473,9 +2473,10 @@ func TestUpdateAllowsOrchestratorReparent(t *testing.T) {
 	h.sm.state.Sessions["orch"].SystemKind = SystemKindOrchestrator
 	h.sm.mu.Unlock()
 
-	// orchestrator adopts two unrelated sessions — one under itself, one under
-	// the other unrelated session.
-	parent := "orch"
+	// The orchestrator grafts one unrelated session under another unrelated
+	// session — neither the target nor the new parent is the caller, so this
+	// only succeeds via the orchestrator's new-parent exemption.
+	parent := "scunner"
 	h.sendControlWithToken(t, "update", protocol.UpdateMsg{
 		SessionID: "thrawn",
 		ParentID:  &parent,
@@ -2486,8 +2487,112 @@ func TestUpdateAllowsOrchestratorReparent(t *testing.T) {
 		protocol.DecodePayload(env, &e)
 		t.Fatalf("expected updated, got %q (%s)", env.Type, e.Message)
 	}
-	if got := h.parentOf(t, "thrawn"); got != "orch" {
-		t.Errorf("thrawn ParentID = %q, want orch", got)
+	if got := h.parentOf(t, "thrawn"); got != "scunner" {
+		t.Errorf("thrawn ParentID = %q, want scunner", got)
+	}
+}
+
+// #568: clearing a parent removes the session from its ancestors' authority, so
+// a regular authenticated session must not be able to orphan itself (or a
+// descendant) to escape its parent's control.
+func TestUpdateRejectsSelfOrphan(t *testing.T) {
+	h := newTestHarness(t)
+	h.addAuthenticatedSession(t, "ben", "ben", "tok-ben")
+	h.addAuthenticatedSession(t, "bairn", "bairn", "tok-bairn")
+	h.setParent(t, "bairn", "ben")
+
+	// bairn tries to orphan itself out of ben's subtree.
+	empty := ""
+	h.sendControlWithToken(t, "update", protocol.UpdateMsg{
+		SessionID: "bairn",
+		ParentID:  &empty,
+	}, "tok-bairn")
+
+	env := h.readControlMsg(t)
+	if env.Type != "error" {
+		t.Fatalf("expected error, got %q", env.Type)
+	}
+	var e protocol.ErrorMsg
+	protocol.DecodePayload(env, &e)
+	if !strings.Contains(e.Message, "not authorized") {
+		t.Errorf("error = %q, want 'not authorized'", e.Message)
+	}
+	if got := h.parentOf(t, "bairn"); got != "ben" {
+		t.Errorf("bairn ParentID = %q, want unchanged (ben)", got)
+	}
+}
+
+// #568: the orchestrator may orphan any session.
+func TestUpdateAllowsOrchestratorOrphan(t *testing.T) {
+	h := newTestHarness(t)
+	h.addAuthenticatedSession(t, "orch", "orchestrator", "tok-orch")
+	h.addAuthenticatedSession(t, "bairn", "bairn", "tok-bairn")
+	h.addAuthenticatedSession(t, "ben", "ben", "tok-ben")
+	h.setParent(t, "bairn", "ben")
+	h.sm.mu.Lock()
+	h.sm.state.Sessions["orch"].SystemKind = SystemKindOrchestrator
+	h.sm.mu.Unlock()
+
+	empty := ""
+	h.sendControlWithToken(t, "update", protocol.UpdateMsg{
+		SessionID: "bairn",
+		ParentID:  &empty,
+	}, "tok-orch")
+	env := h.readControlMsg(t)
+	if env.Type != "updated" {
+		var e protocol.ErrorMsg
+		protocol.DecodePayload(env, &e)
+		t.Fatalf("expected updated, got %q (%s)", env.Type, e.Message)
+	}
+	if got := h.parentOf(t, "bairn"); got != "" {
+		t.Errorf("bairn ParentID = %q, want cleared", got)
+	}
+}
+
+// #568: the human CLI (unauthenticated) may orphan any session.
+func TestUpdateAllowsHumanOrphan(t *testing.T) {
+	h := newTestHarness(t)
+	h.addAuthenticatedSession(t, "bairn", "bairn", "tok-bairn")
+	h.addAuthenticatedSession(t, "ben", "ben", "tok-ben")
+	h.setParent(t, "bairn", "ben")
+
+	empty := ""
+	h.sendControl(t, "update", protocol.UpdateMsg{
+		SessionID: "bairn",
+		ParentID:  &empty,
+	})
+	env := h.readControlMsg(t)
+	if env.Type != "updated" {
+		var e protocol.ErrorMsg
+		protocol.DecodePayload(env, &e)
+		t.Fatalf("expected updated, got %q (%s)", env.Type, e.Message)
+	}
+	if got := h.parentOf(t, "bairn"); got != "" {
+		t.Errorf("bairn ParentID = %q, want cleared", got)
+	}
+}
+
+// #568: rename-only updates (no ParentID) are still gated by the target check —
+// a session cannot rename an unrelated session.
+func TestUpdateRejectsRenameOnlyUnrelated(t *testing.T) {
+	h := newTestHarness(t)
+	h.addAuthenticatedSession(t, "thrawn", "thrawn", "tok-thrawn")
+	h.addAuthenticatedSession(t, "scunner", "scunner", "tok-scunner")
+
+	newName := "bonnie"
+	h.sendControlWithToken(t, "update", protocol.UpdateMsg{
+		SessionID: "scunner",
+		Name:      &newName,
+	}, "tok-thrawn")
+
+	env := h.readControlMsg(t)
+	if env.Type != "error" {
+		t.Fatalf("expected error, got %q", env.Type)
+	}
+	var e protocol.ErrorMsg
+	protocol.DecodePayload(env, &e)
+	if !strings.Contains(e.Message, "not authorized") {
+		t.Errorf("error = %q, want 'not authorized'", e.Message)
 	}
 }
 
