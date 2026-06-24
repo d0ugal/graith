@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.56.1](https://github.com/d0ugal/graith/compare/v0.56.0...v0.56.1) (2026-06-24)
+
+
+### Bug Fixes
+
+* avoid data race in TestForkUsesSourceBaseBranch cleanup ([ed42343](https://github.com/d0ugal/graith/commit/ed42343a8dfbc2df617199f962b77535211f0474))
+* tolerate already-exited PTY in TestTypeExitedSessionFails ([4663534](https://github.com/d0ugal/graith/commit/4663534492b1cfccacd6869fbb99a26d56ac0182))
+
 ## [0.56.0](https://github.com/d0ugal/graith/compare/v0.55.0...v0.56.0) (2026-06-24)
 
 
