@@ -87,6 +87,12 @@ type ForkMsg struct {
 	SourceSessionID string `json:"source_session_id"`
 }
 
+type MigrateMsg struct {
+	SessionID string `json:"session_id"`
+	Agent     string `json:"agent"`
+	Model     string `json:"model,omitempty"`
+}
+
 type AttachMsg struct {
 	SessionID string `json:"session_id"`
 }
@@ -259,6 +265,7 @@ type SessionInfo struct {
 	SummaryText     string             `json:"summary_text,omitempty"`
 	SummaryFaded    bool               `json:"summary_faded,omitempty"`
 	LastOutputAt    string             `json:"last_output_at,omitempty"`
+	MigratedFrom    string             `json:"migrated_from,omitempty"`
 }
 
 type IncludedRepoInfo struct {
