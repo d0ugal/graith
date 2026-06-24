@@ -2356,3 +2356,160 @@ func TestMsgTopicsFiltersInboxForAuthenticatedAgent(t *testing.T) {
 		t.Errorf("expected blether-public in topics, got %v", names)
 	}
 }
+
+// setParent sets a session's ParentID under lock (test helper for #568 auth tests).
+func (h *testHarness) setParent(t *testing.T, id, parentID string) {
+	t.Helper()
+	h.sm.mu.Lock()
+	defer h.sm.mu.Unlock()
+	s, ok := h.sm.state.Sessions[id]
+	if !ok {
+		t.Fatalf("session %q not in state", id)
+	}
+	s.ParentID = parentID
+}
+
+func (h *testHarness) parentOf(t *testing.T, id string) string {
+	t.Helper()
+	h.sm.mu.RLock()
+	defer h.sm.mu.RUnlock()
+	s, ok := h.sm.state.Sessions[id]
+	if !ok {
+		t.Fatalf("session %q not in state", id)
+	}
+	return s.ParentID
+}
+
+// #568: an authenticated session must not be able to adopt an unrelated session
+// as its child via update — doing so would manufacture a descendant
+// relationship and bypass the descendant-based auth model.
+func TestUpdateRejectsUnauthorizedReparent(t *testing.T) {
+	h := newTestHarness(t)
+	h.addAuthenticatedSession(t, "thrawn", "thrawn", "tok-thrawn")
+	h.addAuthenticatedSession(t, "scunner", "scunner", "tok-scunner")
+
+	// thrawn tries to adopt the unrelated scunner as its own child.
+	parent := "thrawn"
+	h.sendControlWithToken(t, "update", protocol.UpdateMsg{
+		SessionID: "scunner",
+		ParentID:  &parent,
+	}, "tok-thrawn")
+
+	env := h.readControlMsg(t)
+	if env.Type != "error" {
+		t.Fatalf("expected error, got %q", env.Type)
+	}
+	var e protocol.ErrorMsg
+	protocol.DecodePayload(env, &e)
+	if !strings.Contains(e.Message, "not authorized") {
+		t.Errorf("error = %q, want 'not authorized'", e.Message)
+	}
+	if got := h.parentOf(t, "scunner"); got != "" {
+		t.Errorf("scunner ParentID = %q, want unchanged (empty)", got)
+	}
+}
+
+// #568: a session may rearrange sessions within its own subtree.
+func TestUpdateAllowsReparentingWithinOwnSubtree(t *testing.T) {
+	h := newTestHarness(t)
+	h.addAuthenticatedSession(t, "ben", "ben", "tok-ben")
+	h.addAuthenticatedSession(t, "bairn", "bairn", "tok-bairn")
+	h.addAuthenticatedSession(t, "wee-bairn", "wee-bairn", "tok-wee")
+	h.setParent(t, "bairn", "ben")
+	h.setParent(t, "wee-bairn", "ben")
+
+	// ben moves wee-bairn under bairn — both are within ben's subtree.
+	parent := "bairn"
+	h.sendControlWithToken(t, "update", protocol.UpdateMsg{
+		SessionID: "wee-bairn",
+		ParentID:  &parent,
+	}, "tok-ben")
+
+	env := h.readControlMsg(t)
+	if env.Type != "updated" {
+		var e protocol.ErrorMsg
+		protocol.DecodePayload(env, &e)
+		t.Fatalf("expected updated, got %q (%s)", env.Type, e.Message)
+	}
+	if got := h.parentOf(t, "wee-bairn"); got != "bairn" {
+		t.Errorf("wee-bairn ParentID = %q, want bairn", got)
+	}
+}
+
+// #568: a session must not be able to graft one of its own sessions under an
+// unrelated parent it has no authority over.
+func TestUpdateRejectsAdoptingUnrelatedParent(t *testing.T) {
+	h := newTestHarness(t)
+	h.addAuthenticatedSession(t, "ben", "ben", "tok-ben")
+	h.addAuthenticatedSession(t, "bairn", "bairn", "tok-bairn")
+	h.addAuthenticatedSession(t, "scunner", "scunner", "tok-scunner")
+	h.setParent(t, "bairn", "ben")
+
+	// ben owns bairn (target ok) but tries to set its parent to the unrelated
+	// scunner (new parent not authorized).
+	parent := "scunner"
+	h.sendControlWithToken(t, "update", protocol.UpdateMsg{
+		SessionID: "bairn",
+		ParentID:  &parent,
+	}, "tok-ben")
+
+	env := h.readControlMsg(t)
+	if env.Type != "error" {
+		t.Fatalf("expected error, got %q", env.Type)
+	}
+	if got := h.parentOf(t, "bairn"); got != "ben" {
+		t.Errorf("bairn ParentID = %q, want unchanged (ben)", got)
+	}
+}
+
+// #568: the orchestrator is the fleet control plane and may reparent any
+// session under any parent.
+func TestUpdateAllowsOrchestratorReparent(t *testing.T) {
+	h := newTestHarness(t)
+	h.addAuthenticatedSession(t, "orch", "orchestrator", "tok-orch")
+	h.addAuthenticatedSession(t, "thrawn", "thrawn", "tok-thrawn")
+	h.addAuthenticatedSession(t, "scunner", "scunner", "tok-scunner")
+	h.sm.mu.Lock()
+	h.sm.state.Sessions["orch"].SystemKind = SystemKindOrchestrator
+	h.sm.mu.Unlock()
+
+	// orchestrator adopts two unrelated sessions — one under itself, one under
+	// the other unrelated session.
+	parent := "orch"
+	h.sendControlWithToken(t, "update", protocol.UpdateMsg{
+		SessionID: "thrawn",
+		ParentID:  &parent,
+	}, "tok-orch")
+	env := h.readControlMsg(t)
+	if env.Type != "updated" {
+		var e protocol.ErrorMsg
+		protocol.DecodePayload(env, &e)
+		t.Fatalf("expected updated, got %q (%s)", env.Type, e.Message)
+	}
+	if got := h.parentOf(t, "thrawn"); got != "orch" {
+		t.Errorf("thrawn ParentID = %q, want orch", got)
+	}
+}
+
+// #568: the human CLI (unauthenticated connection) retains unrestricted access.
+func TestUpdateAllowsHumanReparent(t *testing.T) {
+	h := newTestHarness(t)
+	h.addAuthenticatedSession(t, "thrawn", "thrawn", "tok-thrawn")
+	h.addAuthenticatedSession(t, "scunner", "scunner", "tok-scunner")
+
+	// No token = human CLI.
+	parent := "scunner"
+	h.sendControl(t, "update", protocol.UpdateMsg{
+		SessionID: "thrawn",
+		ParentID:  &parent,
+	})
+	env := h.readControlMsg(t)
+	if env.Type != "updated" {
+		var e protocol.ErrorMsg
+		protocol.DecodePayload(env, &e)
+		t.Fatalf("expected updated, got %q (%s)", env.Type, e.Message)
+	}
+	if got := h.parentOf(t, "thrawn"); got != "scunner" {
+		t.Errorf("thrawn ParentID = %q, want scunner", got)
+	}
+}

@@ -340,6 +340,22 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid update message"})
 					continue
 				}
+				// Authorize the update. The caller must have authority over the
+				// target session, and — when adopting a new parent — over that
+				// parent too. This prevents a session from reparenting an
+				// unrelated session under itself to manufacture a descendant
+				// relationship and bypass the descendant-based auth model. The
+				// orchestrator (and the human CLI) are exempt via checkTarget.
+				sm.mu.RLock()
+				authErr := auth.checkTarget(sm, u.SessionID, authSelfOrDescendant)
+				if authErr == nil && u.ParentID != nil && *u.ParentID != "" {
+					authErr = auth.checkTarget(sm, *u.ParentID, authSelfOrDescendant)
+				}
+				sm.mu.RUnlock()
+				if authErr != nil {
+					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
+					continue
+				}
 				if err := sm.Update(u.SessionID, u.Name, u.ParentID); err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 				} else {
