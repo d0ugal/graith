@@ -344,12 +344,23 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				// target session, and — when adopting a new parent — over that
 				// parent too. This prevents a session from reparenting an
 				// unrelated session under itself to manufacture a descendant
-				// relationship and bypass the descendant-based auth model. The
-				// orchestrator (and the human CLI) are exempt via checkTarget.
+				// relationship and bypass the descendant-based auth model.
+				// Clearing the parent ("") removes the session from its
+				// ancestors' authority, so it is treated as a privileged
+				// reparent: only the orchestrator and the human CLI may orphan a
+				// session, otherwise a child could orphan itself to escape its
+				// parent's control. The orchestrator and human CLI are exempt
+				// from the target/new-parent checks via checkTarget.
 				sm.mu.RLock()
 				authErr := auth.checkTarget(sm, u.SessionID, authSelfOrDescendant)
-				if authErr == nil && u.ParentID != nil && *u.ParentID != "" {
-					authErr = auth.checkTarget(sm, *u.ParentID, authSelfOrDescendant)
+				if authErr == nil && u.ParentID != nil {
+					if *u.ParentID == "" {
+						if auth.authenticated && !auth.isOrchestrator(sm) {
+							authErr = fmt.Errorf("not authorized: only the orchestrator may orphan a session")
+						}
+					} else {
+						authErr = auth.checkTarget(sm, *u.ParentID, authSelfOrDescendant)
+					}
 				}
 				sm.mu.RUnlock()
 				if authErr != nil {
