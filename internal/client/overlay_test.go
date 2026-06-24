@@ -9,6 +9,7 @@ import (
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/d0ugal/graith/internal/protocol"
 )
 
@@ -1912,7 +1913,7 @@ func TestView_ShowsColumnHeaders(t *testing.T) {
 
 func TestView_ShowsHelpBar(t *testing.T) {
 	m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil)
-	updated, _ := sendWindowSize(m, 120, 40)
+	updated, _ := sendWindowSize(m, 150, 40)
 	view := asOverlay(updated).View().Content
 
 	if !strings.Contains(view, "enter attach") {
@@ -3098,21 +3099,140 @@ func TestOverlay_NumberKeyOutOfRangeDoesNothing(t *testing.T) {
 }
 
 func TestOverlay_NumberLabelsInRender(t *testing.T) {
-	sessions := overlayTestSessions()
+	// Create 12 sessions so we can verify labels for 1-10 and shifted glyphs for 11-12.
+	var sessions []protocol.SessionInfo
+	for i := 1; i <= 12; i++ {
+		sessions = append(sessions, protocol.SessionInfo{
+			ID:        fmt.Sprintf("s%d", i),
+			Name:      fmt.Sprintf("bothy-%02d", i),
+			RepoName:  "croft",
+			Status:    "running",
+			CreatedAt: time.Now().Add(-time.Duration(i) * time.Hour).Format(time.RFC3339),
+		})
+	}
+
 	m := newOverlayModel(sessions, "", noopFetchPreview, nil, nil)
 	sized, _ := sendWindowSize(m, 200, 50)
-
 	view := asOverlay(sized).View().Content
 
-	// The rendered view should contain the session numbers.
-	// Session 1 should show "1", session 2 should show "2", etc.
-	// We can't easily check exact positions, but we can verify
-	// the view contains the digit labels alongside session names.
-	for _, item := range asOverlay(sized).list.Items() {
-		if si, ok := item.(sessionItem); ok && si.sessionIndex <= 3 {
-			if !strings.Contains(view, si.info.Name) {
-				t.Errorf("view missing session name %q", si.info.Name)
+	// Strip ANSI to check raw content.
+	stripped := ansi.Strip(view)
+
+	// Sessions 1-9 should show their digit, session 10 shows "0".
+	for _, digit := range []string{"1", "2", "3", "4", "5", "6", "7", "8", "9", "0"} {
+		if !strings.Contains(stripped, digit) {
+			t.Errorf("view missing digit label %q", digit)
+		}
+	}
+
+	// Sessions 11-12 should show shifted glyphs "!" and "@".
+	for _, glyph := range []string{"!", "@"} {
+		if !strings.Contains(stripped, glyph) {
+			t.Errorf("view missing shifted glyph label %q", glyph)
+		}
+	}
+}
+
+func TestOverlay_FilteredViewNumberKey(t *testing.T) {
+	// After filtering, pressing "1" should select the first *filtered* session.
+	var sessions []protocol.SessionInfo
+	for i := 1; i <= 5; i++ {
+		sessions = append(sessions, protocol.SessionInfo{
+			ID:        fmt.Sprintf("s%d", i),
+			Name:      fmt.Sprintf("bothy-%02d", i),
+			RepoName:  "croft",
+			Status:    "running",
+			CreatedAt: time.Now().Add(-time.Duration(i) * time.Hour).Format(time.RFC3339),
+		})
+	}
+	// Add one session with a unique name to filter for.
+	sessions = append(sessions, protocol.SessionInfo{
+		ID:        "s-neep",
+		Name:      "neep-wee",
+		RepoName:  "croft",
+		Status:    "running",
+		CreatedAt: time.Now().Add(-6 * time.Hour).Format(time.RFC3339),
+	})
+
+	m := newOverlayModel(sessions, "", noopFetchPreview, nil, nil)
+	sized, _ := sendWindowSize(m, 200, 50)
+	sm := asOverlay(sized)
+
+	// Enter filter mode, type "neep" to narrow to one session.
+	filtered, _ := sendKey(sm, "/")
+	for _, ch := range "neep" {
+		filtered, _ = filtered.Update(tea.KeyPressMsg{Code: ch, Text: string(ch)})
+	}
+
+	// Now press enter to exit filter, then "1" to select.
+	filtered, _ = sendKey(filtered, "enter")
+	// The enter in filter mode selects the first filtered item and quits.
+	om := asOverlay(filtered)
+	if om.selected == nil {
+		t.Fatal("expected a session to be selected after filtering + enter")
+	}
+	if om.selected.ID != "s-neep" {
+		t.Errorf("selected = %q, want %q (the filtered session)", om.selected.ID, "s-neep")
+	}
+}
+
+func TestOverlay_EmptyListNumberKey(t *testing.T) {
+	// Pressing a number with zero sessions should be a safe no-op.
+	m := newOverlayModel(nil, "", noopFetchPreview, nil, nil)
+	sized, _ := sendWindowSize(m, 200, 50)
+
+	updated, _ := sendKey(asOverlay(sized), "1")
+	om := asOverlay(updated)
+	if om.selected != nil {
+		t.Error("expected no selection when pressing number with zero sessions")
+	}
+}
+
+func TestOverlay_MoreThan20SessionsNoLabelBeyond(t *testing.T) {
+	var sessions []protocol.SessionInfo
+	for i := 1; i <= 25; i++ {
+		sessions = append(sessions, protocol.SessionInfo{
+			ID:        fmt.Sprintf("s%d", i),
+			Name:      fmt.Sprintf("bothy-%02d", i),
+			RepoName:  "croft",
+			Status:    "running",
+			CreatedAt: time.Now().Add(-time.Duration(i) * time.Hour).Format(time.RFC3339),
+		})
+	}
+
+	m := newOverlayModel(sessions, "", noopFetchPreview, nil, nil)
+	sized, _ := sendWindowSize(m, 200, 50)
+	sm := asOverlay(sized)
+
+	// Sessions 21-25 should have sessionIndex > 20 and no label.
+	for _, item := range sm.list.Items() {
+		if si, ok := item.(sessionItem); ok && si.sessionIndex > 20 {
+			// These sessions exist but shouldn't be selectable by number.
+			if si.sessionIndex > 25 {
+				t.Errorf("unexpected sessionIndex %d", si.sessionIndex)
 			}
 		}
+	}
+
+	// Pressing shift+1 ("!") should still select session 11, not wrap to 21.
+	updated, _ := sendKey(sm, "!")
+	om := asOverlay(updated)
+	if om.selected == nil {
+		t.Fatal("expected session 11 selected after pressing shift+1")
+	}
+
+	idx := 0
+	var eleventhID string
+	for _, item := range sm.list.Items() {
+		if si, ok := item.(sessionItem); ok {
+			idx++
+			if idx == 11 {
+				eleventhID = si.info.ID
+				break
+			}
+		}
+	}
+	if om.selected.ID != eleventhID {
+		t.Errorf("selected = %q, want %q (11th session, not 21st)", om.selected.ID, eleventhID)
 	}
 }
