@@ -914,9 +914,13 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					return
 				}
 
-				// Verify the requesting session's agent is allowed to use this server.
+				// Verify the requesting session's agent is allowed to use this
+				// server, and gather its template vars for per-session isolation.
+				mcpVars := config.TemplateVars{SessionID: mc.SessionID}
 				if mc.SessionID != "" {
 					if sess, ok := sm.Get(mc.SessionID); ok {
+						mcpVars.SessionName = sess.Name
+						mcpVars.WorktreePath = sess.WorktreePath
 						allowed := sm.resolveMCPServersFromConfig(sm.Config(), sess.Agent)
 						found := false
 						for _, s := range allowed {
@@ -937,7 +941,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					return
 				}
 				proxyID := fmt.Sprintf("%s-%s", mc.SessionID, mc.Server)
-				proc, err := sm.mcpManager.Connect(mc.Server, proxyID)
+				proc, err := sm.mcpManager.Connect(mc.Server, proxyID, mcpVars)
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 					return
