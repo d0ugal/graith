@@ -65,8 +65,11 @@ func NewMCPManager(cfg *config.Config, extraServers []config.MCPServerConfig, lo
 
 // Connect starts a new MCP server process for the given proxy and returns
 // the process's stdin (for writing JSON-RPC) and stdout reader (for reading
-// JSON-RPC). The caller owns the I/O loop.
-func (m *MCPManager) Connect(serverName, proxyID string) (*MCPProcess, error) {
+// JSON-RPC). The caller owns the I/O loop. vars supplies the per-session
+// template values ({session_id}, {session_name}, {worktree_path}) expanded in
+// the server's args and env, giving each session an isolated process — e.g. a
+// per-session Chrome profile dir for chrome-devtools-mcp.
+func (m *MCPManager) Connect(serverName, proxyID string, vars config.TemplateVars) (*MCPProcess, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -79,7 +82,7 @@ func (m *MCPManager) Connect(serverName, proxyID string) (*MCPProcess, error) {
 		return nil, fmt.Errorf("proxy %q already connected", proxyID)
 	}
 
-	proc, err := m.startProcess(serverCfg, proxyID)
+	proc, err := m.startProcess(serverCfg, proxyID, vars)
 	if err != nil {
 		return nil, fmt.Errorf("start MCP server %q: %w", serverName, err)
 	}
@@ -128,7 +131,7 @@ func (m *MCPManager) Reload(cfg *config.Config) {
 	if !configChanged {
 		for name, newCfg := range newServers {
 			oldCfg, ok := m.servers[name]
-			if !ok || oldCfg.Command != newCfg.Command || !slicesEqual(oldCfg.Args, newCfg.Args) {
+			if !ok || oldCfg.Command != newCfg.Command || !slicesEqual(oldCfg.Args, newCfg.Args) || !mapsEqual(oldCfg.Env, newCfg.Env) {
 				configChanged = true
 				break
 			}
@@ -181,7 +184,7 @@ func (m *MCPManager) HasServer(name string) bool {
 	return ok
 }
 
-func (m *MCPManager) startProcess(serverCfg config.MCPServerConfig, proxyID string) (*MCPProcess, error) {
+func (m *MCPManager) startProcess(serverCfg config.MCPServerConfig, proxyID string, vars config.TemplateVars) (*MCPProcess, error) {
 	mcpLogDir := filepath.Join(m.logDir, "mcp")
 	if err := os.MkdirAll(mcpLogDir, 0o700); err != nil {
 		return nil, fmt.Errorf("create MCP log dir: %w", err)
@@ -193,8 +196,36 @@ func (m *MCPManager) startProcess(serverCfg config.MCPServerConfig, proxyID stri
 		return nil, fmt.Errorf("open stderr log: %w", err)
 	}
 
-	command := serverCfg.Command
-	args := serverCfg.Args
+	// Expand per-session template vars in command, args, and env so each
+	// session gets an isolated process (e.g. a unique Chrome profile dir).
+	// Fall back to proxyID when there's no session so {session_id} never
+	// collapses to a shared empty value.
+	if vars.SessionID == "" {
+		vars.SessionID = proxyID
+	}
+	command, err := config.Expand(serverCfg.Command, vars)
+	if err != nil {
+		stderrFile.Close()
+		return nil, fmt.Errorf("expand command for MCP server %s: %w", serverCfg.Name, err)
+	}
+	args, err := config.ExpandSlice(serverCfg.Args, vars)
+	if err != nil {
+		stderrFile.Close()
+		return nil, fmt.Errorf("expand args for MCP server %s: %w", serverCfg.Name, err)
+	}
+	serverEnv := serverCfg.Env
+	if len(serverEnv) > 0 {
+		expanded := make(map[string]string, len(serverEnv))
+		for k, v := range serverEnv {
+			ev, expErr := config.Expand(v, vars)
+			if expErr != nil {
+				stderrFile.Close()
+				return nil, fmt.Errorf("expand env %s for MCP server %s: %w", k, serverCfg.Name, expErr)
+			}
+			expanded[k] = ev
+		}
+		serverEnv = expanded
+	}
 
 	sbxEnabled := true
 	if serverCfg.Sandbox != nil {
@@ -208,9 +239,9 @@ func (m *MCPManager) startProcess(serverCfg config.MCPServerConfig, proxyID stri
 		merged.ReadDirs = expandPaths(merged.ReadDirs, m.log, "read")
 		merged.WriteDirs = expandPaths(merged.WriteDirs, m.log, "write")
 
-		envKeys := make([]string, 0, len(serverCfg.Env)+1)
+		envKeys := make([]string, 0, len(serverEnv)+1)
 		envKeys = append(envKeys, "PATH", "HOME", "TERM")
-		for k := range serverCfg.Env {
+		for k := range serverEnv {
 			envKeys = append(envKeys, k)
 		}
 
@@ -223,7 +254,7 @@ func (m *MCPManager) startProcess(serverCfg config.MCPServerConfig, proxyID stri
 			SafehouseCommand: merged.Command,
 		}
 		var wrapErr error
-		command, args, wrapErr = sandbox.Wrap(serverCfg.Command, serverCfg.Args, opts)
+		command, args, wrapErr = sandbox.Wrap(command, args, opts)
 		if wrapErr != nil {
 			stderrFile.Close()
 			return nil, fmt.Errorf("sandbox wrap for MCP server %s: %w", serverCfg.Name, wrapErr)
@@ -233,9 +264,9 @@ func (m *MCPManager) startProcess(serverCfg config.MCPServerConfig, proxyID stri
 	cmd := exec.Command(command, args...)
 	cmd.Dir = os.TempDir()
 	cmd.Stderr = stderrFile
-	if len(serverCfg.Env) > 0 {
+	if len(serverEnv) > 0 {
 		cmd.Env = os.Environ()
-		for k, v := range serverCfg.Env {
+		for k, v := range serverEnv {
 			cmd.Env = append(cmd.Env, k+"="+v)
 		}
 	}
@@ -282,6 +313,18 @@ func slicesEqual(a, b []string) bool {
 	}
 	for i := range a {
 		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func mapsEqual(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if bv, ok := b[k]; !ok || bv != v {
 			return false
 		}
 	}

@@ -168,6 +168,41 @@ All fields optional — `config.Default()` provides sensible defaults. See
 Template variables in agent args: `{agent_session_id}`, `{session_id}`, `{session_name}`,
 `{username}`, `{worktree_path}`, `{model}`, `{fork_source_agent_session_id}`.
 
+### MCP servers
+
+MCP servers are configured under `[[mcp_servers]]`. The daemon spawns one
+process per session+server (keyed by `<session_id>-<server>`), so each session
+gets its own server process. The `command`, `args`, and `env` values support
+per-session template expansion — `{session_id}`, `{session_name}`, and
+`{worktree_path}` — so a server can be given session-scoped resources. (Only
+these three vars are populated; other template names like `{username}` expand
+to empty.) When there's no session, `{session_id}` falls back to the proxy ID
+(`-<server>`) so it isn't empty; note this fallback is per-server, not unique
+per connection, and `{session_name}`/`{worktree_path}` still expand to empty in
+that case. Real agent sessions always have a session ID, so this only affects
+session-less proxies (e.g. the auto-injected `graith` server, which templates
+nothing). Literal `{name}` tokens are reserved as template syntax — an unknown
+name is a hard error.
+
+This matters for stateful servers like `chrome-devtools-mcp`, which otherwise
+default to a single shared Chrome profile and debug port — every session would
+control the same browser. Give each session its own profile:
+
+```toml
+[[mcp_servers]]
+name = "chrome-devtools"
+command = "npx"
+args = [
+  "chrome-devtools-mcp@latest",
+  "--isolated",
+  "--user-data-dir=/tmp/graith-chrome-{session_id}",
+]
+sandbox = false
+```
+
+`--isolated` launches a fresh browser with an ephemeral debug port per process,
+and the templated `--user-data-dir` keeps each session's profile separate.
+
 ## Testing
 
 - Unit tests live next to the code (`*_test.go`)
