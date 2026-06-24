@@ -160,6 +160,46 @@ func TestCheckTarget_SelfOrDescendant_RejectsParent(t *testing.T) {
 	}
 }
 
+func TestCheckTarget_SelfOrDescendant_AllowsOrchestrator(t *testing.T) {
+	sm := newTestSMWithSessions(map[string]*SessionState{
+		"orch":      {ID: "orch", SystemKind: SystemKindOrchestrator},
+		"thrawn":    {ID: "thrawn"},
+		"unrelated": {ID: "unrelated"},
+	})
+	auth := authContext{sessionID: "orch", authenticated: true}
+	if err := auth.checkTarget(sm, "thrawn", authSelfOrDescendant); err != nil {
+		t.Errorf("expected orchestrator allowed to target any session, got: %v", err)
+	}
+	if err := auth.checkTarget(sm, "unrelated", authSelfOrDescendant); err != nil {
+		t.Errorf("expected orchestrator allowed to target unrelated session, got: %v", err)
+	}
+}
+
+func TestCheckTarget_SelfOnly_AllowsOrchestrator(t *testing.T) {
+	sm := newTestSMWithSessions(map[string]*SessionState{
+		"orch":   {ID: "orch", SystemKind: SystemKindOrchestrator},
+		"thrawn": {ID: "thrawn"},
+	})
+	auth := authContext{sessionID: "orch", authenticated: true}
+	if err := auth.checkTarget(sm, "thrawn", authSelfOnly); err != nil {
+		t.Errorf("expected orchestrator allowed to target any session, got: %v", err)
+	}
+}
+
+func TestCheckTarget_SelfOrDescendant_NonOrchestratorStillRejected(t *testing.T) {
+	sm := newTestSMWithSessions(map[string]*SessionState{
+		"orch":   {ID: "orch", SystemKind: SystemKindOrchestrator},
+		"canny":  {ID: "canny"},
+		"thrawn": {ID: "thrawn"},
+	})
+	// A regular session must not gain elevated access just because an
+	// orchestrator exists in the fleet.
+	auth := authContext{sessionID: "canny", authenticated: true}
+	if err := auth.checkTarget(sm, "thrawn", authSelfOrDescendant); err == nil {
+		t.Error("expected non-orchestrator session to be rejected for unrelated target")
+	}
+}
+
 func TestCheckTarget_Unauthenticated_AllowsEmpty(t *testing.T) {
 	sm := newTestSMWithSessions(nil)
 	auth := authContext{}
