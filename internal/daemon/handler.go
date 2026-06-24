@@ -148,6 +148,26 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("created", toSessionInfo(sess, sm.Config(), sm.getHookReport(sess.ID)))
 				}
 
+			case "migrate":
+				var m protocol.MigrateMsg
+				if err := protocol.DecodePayload(msg, &m); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid migrate message"})
+					continue
+				}
+				sm.mu.RLock()
+				authErr := auth.checkTarget(sm, m.SessionID, authSelfOrDescendant)
+				sm.mu.RUnlock()
+				if authErr != nil {
+					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
+					continue
+				}
+				sess, err := sm.Migrate(m.SessionID, m.Agent, m.Model, clientRows, clientCols)
+				if err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+				} else {
+					sendControl("migrated", toSessionInfo(sess, sm.Config(), sm.getHookReport(sess.ID)))
+				}
+
 			case "attach":
 				var a protocol.AttachMsg
 				if err := protocol.DecodePayload(msg, &a); err != nil {
@@ -1139,6 +1159,9 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "upgrade already in progress"})
 				}
 				return
+
+			default:
+				sendControl("error", protocol.ErrorMsg{Message: "unsupported control message: " + msg.Type})
 			}
 
 		case protocol.ChannelData:
@@ -1206,6 +1229,9 @@ func toSessionInfo(s SessionState, cfg *config.Config, hr *hookReport) protocol.
 		SystemKind:     s.SystemKind,
 		ScenarioID:     s.ScenarioID,
 		ScenarioName:   s.ScenarioName,
+	}
+	if s.MigratedFrom != nil {
+		info.MigratedFrom = s.MigratedFrom.Agent
 	}
 	if s.LastAttachedAt != nil {
 		info.LastAttachedAt = s.LastAttachedAt.Format(time.RFC3339)

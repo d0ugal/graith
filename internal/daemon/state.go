@@ -16,7 +16,7 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 )
 
-const CurrentStateVersion = 11
+const CurrentStateVersion = 12
 
 type SessionStatus string
 
@@ -84,6 +84,17 @@ type SessionState struct {
 	ScenarioName           string                `json:"scenario_name,omitempty"`
 	ScenarioRole           string                `json:"scenario_role,omitempty"`
 	ScenarioGoal           string                `json:"scenario_goal,omitempty"`
+	MigratedFrom           *MigrationInfo        `json:"migrated_from,omitempty"`
+}
+
+// MigrationInfo records the agent a session was migrated from, so a failed
+// migration can be reverted and the user can migrate back later.
+type MigrationInfo struct {
+	Agent          string    `json:"agent"`
+	Model          string    `json:"model,omitempty"`
+	AgentSessionID string    `json:"agent_session_id,omitempty"`
+	RenderedPath   string    `json:"rendered_path,omitempty"`
+	At             time.Time `json:"at"`
 }
 
 type IncludedRepoState struct {
@@ -195,6 +206,7 @@ var migrations = map[int]func(*State) error{
 	8:  migrateV8ToV9,
 	9:  migrateV9ToV10,
 	10: migrateV10ToV11,
+	11: migrateV11ToV12,
 }
 
 func generateToken() (string, error) {
@@ -303,6 +315,12 @@ func migrateV10ToV11(state *State) error {
 	if state.Scenarios == nil {
 		state.Scenarios = make(map[string]*ScenarioState)
 	}
+	return nil
+}
+
+// migrateV11ToV12 is a no-op: v12 adds the optional migrated_from field which
+// unmarshals fine from older state. Kept to preserve the migration chain.
+func migrateV11ToV12(_ *State) error {
 	return nil
 }
 

@@ -1414,6 +1414,16 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 }
 
 func (sm *SessionManager) resumeWithSummary(id string, rows, cols uint16, lifecycleSummary string) (SessionState, error) {
+	return sm.resumeWithSummaryAndPrompt(id, rows, cols, lifecycleSummary, "")
+}
+
+// resumeWithSummaryAndPrompt starts (or restarts) a session's agent in its
+// existing worktree. When seedPrompt is non-empty it is appended as the agent's
+// positional opening prompt — used by Migrate to seed a freshly-swapped agent
+// with the rendered prior conversation. A seeded start is treated as a fresh
+// start (uses agent.Args, not resume_args) and clears FreshStart afterwards so
+// subsequent resumes use the new agent's native resume.
+func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint16, lifecycleSummary, seedPrompt string) (SessionState, error) {
 	// --- Pre-lock: discover GitHub username ---
 	sm.mu.RLock()
 	sessSnap, snapOk := sm.state.Sessions[id]
@@ -1742,6 +1752,12 @@ func (sm *SessionManager) resumeWithSummary(id string, rows, cols uint16, lifecy
 		}
 	}
 
+	// Migration seed prompt: appended last so it reaches the agent as its
+	// opening positional prompt (after any orchestrator/injected prompt).
+	if seedPrompt != "" {
+		expandedArgs = append(expandedArgs, seedPrompt)
+	}
+
 	command := agent.Command
 	finalArgs := expandedArgs
 	var mergedSandbox *config.SandboxConfig
@@ -1845,6 +1861,11 @@ func (sm *SessionManager) resumeWithSummary(id string, rows, cols uint16, lifecy
 		sessState.LastStartedAt = time.Now()
 		sessState.FreshStart = false
 	}
+	// A seeded (migration) start used agent.Args; clear FreshStart so future
+	// resumes use the new agent's native resume_args.
+	if seedPrompt != "" {
+		sessState.FreshStart = false
+	}
 
 	sm.sessions[id] = ptySess
 	applyLifecycleSummaryLocked(sessState, lifecycleSummary)
@@ -1909,6 +1930,9 @@ func (sm *SessionManager) Delete(id string) error {
 		sm.mu.Unlock()
 		return fmt.Errorf("session %q is already being deleted", id)
 	}
+
+	// Remove any staged migration context (full prior conversation) on delete.
+	defer sm.removeMigrationContext(sessState)
 
 	ac, hasClient := sm.attachedClients[id]
 	if hasClient {
