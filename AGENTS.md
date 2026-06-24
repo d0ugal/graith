@@ -174,9 +174,15 @@ MCP servers are configured under `[[mcp_servers]]`. The daemon spawns one
 process per session+server (keyed by `<session_id>-<server>`), so each session
 gets its own server process. The `command`, `args`, and `env` values support
 per-session template expansion — `{session_id}`, `{session_name}`, and
-`{worktree_path}` — so a server can be given session-scoped resources. When
-there's no session, `{session_id}` falls back to the proxy ID so it never
-collapses to a shared empty value.
+`{worktree_path}` — so a server can be given session-scoped resources. (Only
+these three vars are populated; other template names like `{username}` expand
+to empty.) When there's no session, `{session_id}` falls back to the proxy ID
+(`-<server>`) so it isn't empty; note this fallback is per-server, not unique
+per connection, and `{session_name}`/`{worktree_path}` still expand to empty in
+that case. Real agent sessions always have a session ID, so this only affects
+session-less proxies (e.g. the auto-injected `graith` server, which templates
+nothing). Literal `{name}` tokens are reserved as template syntax — an unknown
+name is a hard error.
 
 This matters for stateful servers like `chrome-devtools-mcp`, which otherwise
 default to a single shared Chrome profile and debug port — every session would

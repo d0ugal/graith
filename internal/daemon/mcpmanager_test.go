@@ -237,6 +237,100 @@ func TestMCPManagerEmptySessionFallsBackToProxyID(t *testing.T) {
 	}
 }
 
+func TestMCPManagerExpandsEnvValues(t *testing.T) {
+	logDir := t.TempDir()
+	outDir := t.TempDir()
+	// The process echoes an env var (expanded from {session_id}) to a file.
+	cfg := &config.Config{
+		MCPServers: []config.MCPServerConfig{
+			{
+				Name:    "tmpl",
+				Command: "sh",
+				Args:    []string{"-c", "echo \"$PROFILE\" > " + outDir + "/env.txt; cat"},
+				Env:     map[string]string{"PROFILE": "chrome-{session_id}"},
+				Sandbox: boolPtr(false),
+			},
+		},
+	}
+	mgr := NewMCPManager(cfg, nil, logDir, slog.Default())
+	defer mgr.Shutdown()
+
+	if _, err := mgr.Connect("tmpl", "proxy-canny", config.TemplateVars{SessionID: "bonnie-7"}); err != nil {
+		t.Fatalf("Connect() error = %v", err)
+	}
+
+	wantPath := outDir + "/env.txt"
+	var data []byte
+	for range 50 {
+		if d, err := os.ReadFile(wantPath); err == nil && len(d) > 0 {
+			data = d
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	mgr.Disconnect("proxy-canny")
+
+	if got := string(data); got != "chrome-bonnie-7\n" {
+		t.Errorf("expanded env = %q, want %q", got, "chrome-bonnie-7\n")
+	}
+}
+
+func TestMCPManagerExpandsCommand(t *testing.T) {
+	logDir := t.TempDir()
+	// {session_id} in the command name itself must expand. We symlink a known
+	// binary to a session-templated name and invoke it through the template.
+	binDir := t.TempDir()
+	if err := os.Symlink("/bin/echo", binDir+"/braw-x"); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	cfg := &config.Config{
+		MCPServers: []config.MCPServerConfig{
+			{Name: "tmpl", Command: binDir + "/braw-{session_id}", Args: []string{"ok"}, Sandbox: boolPtr(false)},
+		},
+	}
+	mgr := NewMCPManager(cfg, nil, logDir, slog.Default())
+	defer mgr.Shutdown()
+
+	// braw-x exists; braw-{session_id} with SessionID "x" resolves to it.
+	proc, err := mgr.Connect("tmpl", "proxy-1", config.TemplateVars{SessionID: "x"})
+	if err != nil {
+		t.Fatalf("Connect() with expanded command error = %v", err)
+	}
+	_ = proc
+	mgr.Disconnect("proxy-1")
+}
+
+func TestMCPManagerReloadDetectsEnvChange(t *testing.T) {
+	logDir := t.TempDir()
+	cfg := &config.Config{
+		MCPServers: []config.MCPServerConfig{
+			{Name: "echo", Command: "cat", Env: map[string]string{"K": "v1"}},
+		},
+	}
+	mgr := NewMCPManager(cfg, nil, logDir, slog.Default())
+	defer mgr.Shutdown()
+
+	proc, err := mgr.Connect("echo", "proxy-1", config.TemplateVars{})
+	if err != nil {
+		t.Fatalf("Connect() error = %v", err)
+	}
+
+	// Reload with only the env value changed — the running process must be
+	// killed so the proxy reconnects with the new env.
+	mgr.Reload(&config.Config{
+		MCPServers: []config.MCPServerConfig{
+			{Name: "echo", Command: "cat", Env: map[string]string{"K": "v2"}},
+		},
+	})
+
+	select {
+	case <-proc.done:
+		// killed as expected
+	case <-time.After(5 * time.Second):
+		t.Fatal("process should have been killed after env-only config change")
+	}
+}
+
 func TestMCPManagerUnknownTemplateVarFails(t *testing.T) {
 	logDir := t.TempDir()
 	cfg := &config.Config{
