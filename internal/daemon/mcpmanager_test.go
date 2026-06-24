@@ -19,7 +19,7 @@ func TestMCPManagerConnectDisconnect(t *testing.T) {
 	mgr := NewMCPManager(cfg, nil, logDir, slog.Default())
 	defer mgr.Shutdown()
 
-	proc, err := mgr.Connect("echo", "proxy-1")
+	proc, err := mgr.Connect("echo", "proxy-1", config.TemplateVars{})
 	if err != nil {
 		t.Fatalf("Connect() error = %v", err)
 	}
@@ -47,7 +47,7 @@ func TestMCPManagerConnectUnknownServer(t *testing.T) {
 	mgr := NewMCPManager(cfg, nil, logDir, slog.Default())
 	defer mgr.Shutdown()
 
-	_, err := mgr.Connect("nonexistent", "proxy-1")
+	_, err := mgr.Connect("nonexistent", "proxy-1", config.TemplateVars{})
 	if err == nil {
 		t.Fatal("expected error for unknown server")
 	}
@@ -63,12 +63,12 @@ func TestMCPManagerDuplicateProxy(t *testing.T) {
 	mgr := NewMCPManager(cfg, nil, logDir, slog.Default())
 	defer mgr.Shutdown()
 
-	_, err := mgr.Connect("echo", "proxy-1")
+	_, err := mgr.Connect("echo", "proxy-1", config.TemplateVars{})
 	if err != nil {
 		t.Fatalf("first Connect() error = %v", err)
 	}
 
-	_, err = mgr.Connect("echo", "proxy-1")
+	_, err = mgr.Connect("echo", "proxy-1", config.TemplateVars{})
 	if err == nil {
 		t.Fatal("expected error for duplicate proxy ID")
 	}
@@ -113,7 +113,7 @@ func TestMCPManagerReloadKillsProcesses(t *testing.T) {
 	mgr := NewMCPManager(cfg, nil, logDir, slog.Default())
 	defer mgr.Shutdown()
 
-	proc, err := mgr.Connect("echo", "proxy-1")
+	proc, err := mgr.Connect("echo", "proxy-1", config.TemplateVars{})
 	if err != nil {
 		t.Fatalf("Connect() error = %v", err)
 	}
@@ -143,7 +143,7 @@ func TestMCPManagerStderrCapture(t *testing.T) {
 	mgr := NewMCPManager(cfg, nil, logDir, slog.Default())
 	defer mgr.Shutdown()
 
-	proc, err := mgr.Connect("stderr-test", "proxy-1")
+	proc, err := mgr.Connect("stderr-test", "proxy-1", config.TemplateVars{})
 	if err != nil {
 		t.Fatalf("Connect() error = %v", err)
 	}
@@ -163,6 +163,92 @@ func TestMCPManagerStderrCapture(t *testing.T) {
 
 	if len(data) == 0 {
 		t.Fatal("stderr log should have content")
+	}
+}
+
+func TestMCPManagerExpandsTemplateVars(t *testing.T) {
+	logDir := t.TempDir()
+	outDir := t.TempDir()
+	// The command writes its expanded {session_id} to a file whose name also
+	// references {session_id}, so we verify expansion in args reaches argv.
+	cfg := &config.Config{
+		MCPServers: []config.MCPServerConfig{
+			{Name: "tmpl", Command: "sh", Args: []string{"-c", "echo {session_id} > " + outDir + "/{session_id}.txt; cat"}, Sandbox: boolPtr(false)},
+		},
+	}
+	mgr := NewMCPManager(cfg, nil, logDir, slog.Default())
+	defer mgr.Shutdown()
+
+	proc, err := mgr.Connect("tmpl", "proxy-braw", config.TemplateVars{SessionID: "bairn-42"})
+	if err != nil {
+		t.Fatalf("Connect() error = %v", err)
+	}
+	_ = proc
+
+	wantPath := outDir + "/bairn-42.txt"
+	var data []byte
+	for range 50 {
+		if d, err := os.ReadFile(wantPath); err == nil && len(d) > 0 {
+			data = d
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	mgr.Disconnect("proxy-braw")
+
+	if len(data) == 0 {
+		t.Fatalf("expected file %q with expanded session id", wantPath)
+	}
+	if got := string(data); got != "bairn-42\n" {
+		t.Errorf("expanded content = %q, want %q", got, "bairn-42\n")
+	}
+}
+
+func TestMCPManagerEmptySessionFallsBackToProxyID(t *testing.T) {
+	logDir := t.TempDir()
+	outDir := t.TempDir()
+	cfg := &config.Config{
+		MCPServers: []config.MCPServerConfig{
+			{Name: "tmpl", Command: "sh", Args: []string{"-c", "echo {session_id} > " + outDir + "/out.txt; cat"}, Sandbox: boolPtr(false)},
+		},
+	}
+	mgr := NewMCPManager(cfg, nil, logDir, slog.Default())
+	defer mgr.Shutdown()
+
+	// No SessionID: {session_id} must fall back to the proxyID so it never
+	// collapses to a shared empty value across sessions.
+	if _, err := mgr.Connect("tmpl", "proxy-haar", config.TemplateVars{}); err != nil {
+		t.Fatalf("Connect() error = %v", err)
+	}
+
+	wantPath := outDir + "/out.txt"
+	var data []byte
+	for range 50 {
+		if d, err := os.ReadFile(wantPath); err == nil && len(d) > 0 {
+			data = d
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	mgr.Disconnect("proxy-haar")
+
+	if got := string(data); got != "proxy-haar\n" {
+		t.Errorf("fallback content = %q, want %q", got, "proxy-haar\n")
+	}
+}
+
+func TestMCPManagerUnknownTemplateVarFails(t *testing.T) {
+	logDir := t.TempDir()
+	cfg := &config.Config{
+		MCPServers: []config.MCPServerConfig{
+			{Name: "thrawn", Command: "cat", Args: []string{"--dir={nonsense}"}},
+		},
+	}
+	mgr := NewMCPManager(cfg, nil, logDir, slog.Default())
+	defer mgr.Shutdown()
+
+	if _, err := mgr.Connect("thrawn", "proxy-1", config.TemplateVars{SessionID: "x"}); err == nil {
+		t.Fatal("expected error for unknown template variable")
 	}
 }
 
@@ -260,7 +346,7 @@ func TestMCPManagerDeletedCwd(t *testing.T) {
 	mgr := NewMCPManager(cfg, nil, logDir, slog.Default())
 	defer mgr.Shutdown()
 
-	proc, err := mgr.Connect("cwd-bothy", "proxy-haar")
+	proc, err := mgr.Connect("cwd-bothy", "proxy-haar", config.TemplateVars{})
 	if err != nil {
 		t.Fatalf("Connect() error = %v", err)
 	}
