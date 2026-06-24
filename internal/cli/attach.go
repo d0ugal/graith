@@ -64,7 +64,7 @@ func runAttach(cmd *cobra.Command, name string) error {
 
 	if name == "" {
 		repos := client.DiscoverRepos(cfg.AllowedRepoPaths, list.Sessions)
-		result := client.RunOverlay(list.Sessions, "", previewFetcher(), sessionRefresher(), deleteSession, restartSession, toggleStar, paths.Profile, nil, repos, cfg.Overlay.ShortcutKeys)
+		result := client.RunOverlay(list.Sessions, "", previewFetcher(), sessionRefresher(), deleteSession, restartSession, stopSession, toggleStar, paths.Profile, nil, repos, cfg.Overlay.ShortcutKeys)
 		if result == nil || result.Action == "" {
 			return nil
 		}
@@ -166,9 +166,16 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 			protocol.DecodePayload(listResp, &list)
 
 			repos := client.DiscoverRepos(cfg.AllowedRepoPaths, list.Sessions)
-			overlayResult := client.RunOverlay(list.Sessions, sessionID, previewFetcher(), sessionRefresher(), deleteSession, restartSession, toggleStar, paths.Profile, overlayCollapsed, repos, cfg.Overlay.ShortcutKeys)
+			overlayResult := client.RunOverlay(list.Sessions, sessionID, previewFetcher(), sessionRefresher(), deleteSession, restartSession, stopSession, toggleStar, paths.Profile, overlayCollapsed, repos, cfg.Overlay.ShortcutKeys)
 			if overlayResult != nil {
 				overlayCollapsed = overlayResult.Collapsed
+			}
+			if overlayResult != nil && overlayResult.Action == "stopped-current" {
+				// The user stopped the session they were attached to. Exit
+				// instead of reattaching, which would auto-resume it.
+				nc.Close()
+				resetTerminal()
+				return nil
 			}
 			if overlayResult == nil || overlayResult.Action == "" {
 				restoreScreen(sessionID)
@@ -725,6 +732,25 @@ func restartSession(sessionID string) error {
 	defer rc.Close()
 	rc.SendControl("restart", protocol.RestartMsg{SessionID: sessionID})
 	resp, err := rc.ReadControlResponse()
+	if err != nil {
+		return err
+	}
+	if resp.Type == "error" {
+		var e protocol.ErrorMsg
+		protocol.DecodePayload(resp, &e)
+		return fmt.Errorf("%s", e.Message)
+	}
+	return nil
+}
+
+func stopSession(sessionID string) error {
+	sc, err := freshClient()
+	if err != nil {
+		return err
+	}
+	defer sc.Close()
+	sc.SendControl("stop", protocol.StopMsg{SessionID: sessionID})
+	resp, err := sc.ReadControlResponse()
 	if err != nil {
 		return err
 	}

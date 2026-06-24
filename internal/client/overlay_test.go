@@ -1127,14 +1127,14 @@ func TestUpdate_RestartAll_Staggered(t *testing.T) {
 	m.width = 120
 	m.height = 40
 
-	// Press R, then confirm with y
+	// Press R to open the restart menu, then choose "all"
 	updated, _ := sendKey(m, "R")
 	om := asOverlay(updated)
-	if om.state != stateConfirmRestartAll {
-		t.Fatalf("state = %v, want stateConfirmRestartAll", om.state)
+	if om.state != stateRestartMenu {
+		t.Fatalf("state = %v, want stateRestartMenu", om.state)
 	}
 
-	updated, cmd := sendKey(updated, "y")
+	updated, cmd := sendKey(updated, "a")
 	om = asOverlay(updated)
 	if om.state != stateRestartingAll {
 		t.Fatalf("state = %v, want stateRestartingAll", om.state)
@@ -1170,9 +1170,9 @@ func TestUpdate_RestartAll_ShowsProgress(t *testing.T) {
 	m.width = 120
 	m.height = 40
 
-	// Confirm restart-all
+	// Open restart menu and choose "all"
 	updated, _ := sendKey(m, "R")
-	updated, cmd := sendKey(updated, "y")
+	updated, cmd := sendKey(updated, "a")
 	om := asOverlay(updated)
 
 	if om.restartIdx != 0 {
@@ -1206,9 +1206,9 @@ func TestUpdate_RestartAll_HandlesErrors(t *testing.T) {
 	m.width = 120
 	m.height = 40
 
-	// Confirm restart-all
+	// Open restart menu and choose "all"
 	updated, _ := sendKey(m, "R")
-	updated, cmd := sendKey(updated, "y")
+	updated, cmd := sendKey(updated, "a")
 
 	// Run all restarts to completion
 	for cmd != nil {
@@ -1244,7 +1244,7 @@ func TestUpdate_RestartAll_EscCancelsRemaining(t *testing.T) {
 
 	// Start restart-all
 	updated, _ := sendKey(m, "R")
-	updated, cmd := sendKey(updated, "y")
+	updated, cmd := sendKey(updated, "a")
 	om := asOverlay(updated)
 	if om.state != stateRestartingAll {
 		t.Fatalf("state = %v, want stateRestartingAll", om.state)
@@ -1282,6 +1282,372 @@ func TestUpdate_RestartAll_EscCancelsRemaining(t *testing.T) {
 	// Queue fields should be cleaned up
 	if om.restartQueue != nil {
 		t.Error("restartQueue should be nil after completion")
+	}
+}
+
+// --- Update: stop ---
+
+func TestUpdate_Stop_Confirm(t *testing.T) {
+	sessions := overlayTestSessions()
+	var stopped string
+	stopFn := func(id string) error {
+		stopped = id
+		return nil
+	}
+
+	m := newOverlayModel(sessions, "", nil, nil, nil, nil)
+	m.stopSession = stopFn
+	m.width = 120
+	m.height = 40
+	selected := m.list.SelectedItem().(sessionItem)
+
+	// Press S to confirm-stop, then y
+	updated, _ := sendKey(m, "S")
+	om := asOverlay(updated)
+	if om.state != stateConfirmStop {
+		t.Fatalf("state = %v, want stateConfirmStop", om.state)
+	}
+
+	updated, cmd := sendKey(updated, "y")
+	if cmd == nil {
+		t.Fatal("expected a command from stop confirmation")
+	}
+	updated, _ = updated.Update(cmd())
+	om = asOverlay(updated)
+
+	if stopped != selected.info.ID {
+		t.Errorf("stopSession called with %q, want %q", stopped, selected.info.ID)
+	}
+	if om.state != stateList {
+		t.Errorf("state = %v, want stateList after stop", om.state)
+	}
+	for _, s := range om.allSessions {
+		if s.ID == selected.info.ID && s.Status != "stopped" {
+			t.Errorf("session %q status = %q, want stopped", s.ID, s.Status)
+		}
+	}
+}
+
+func TestUpdate_Stop_Cancel(t *testing.T) {
+	called := false
+	stopFn := func(string) error {
+		called = true
+		return nil
+	}
+
+	m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil, nil)
+	m.stopSession = stopFn
+	m.width = 120
+	m.height = 40
+
+	updated, _ := sendKey(m, "S")
+	updated, _ = sendKey(updated, "n")
+	om := asOverlay(updated)
+	if om.state != stateList {
+		t.Errorf("state = %v, want stateList after cancel", om.state)
+	}
+	if called {
+		t.Error("stopSession should not be called when cancelled")
+	}
+}
+
+// --- Update: restart menu ---
+
+func TestUpdate_RestartMenu_Stopped(t *testing.T) {
+	sessions := overlayTestSessions() // s2 is stopped
+	var restarted []string
+	restartFn := func(id string) error {
+		restarted = append(restarted, id)
+		return nil
+	}
+
+	m := newOverlayModel(sessions, "", nil, nil, nil, nil)
+	m.restartSession = restartFn
+	m.width = 120
+	m.height = 40
+
+	updated, _ := sendKey(m, "R")
+	om := asOverlay(updated)
+	if om.state != stateRestartMenu {
+		t.Fatalf("state = %v, want stateRestartMenu", om.state)
+	}
+
+	updated, cmd := sendKey(updated, "s")
+	om = asOverlay(updated)
+	if len(om.restartQueue) != 1 || om.restartQueue[0] != "s2" {
+		t.Fatalf("restartQueue = %v, want [s2]", om.restartQueue)
+	}
+
+	for cmd != nil {
+		msg := cmd()
+		if msg == nil {
+			break
+		}
+		updated, cmd = updated.Update(msg)
+	}
+	if len(restarted) != 1 || restarted[0] != "s2" {
+		t.Errorf("restarted = %v, want [s2]", restarted)
+	}
+}
+
+func TestUpdate_RestartMenu_Outdated(t *testing.T) {
+	sessions := overlayTestSessions()
+	sessions[0].ConfigStale = true // s1 is stale
+	var restarted []string
+	restartFn := func(id string) error {
+		restarted = append(restarted, id)
+		return nil
+	}
+
+	m := newOverlayModel(sessions, "", nil, nil, nil, nil)
+	m.restartSession = restartFn
+	m.width = 120
+	m.height = 40
+
+	updated, _ := sendKey(m, "R")
+	updated, cmd := sendKey(updated, "o")
+	om := asOverlay(updated)
+	if len(om.restartQueue) != 1 || om.restartQueue[0] != "s1" {
+		t.Fatalf("restartQueue = %v, want [s1]", om.restartQueue)
+	}
+
+	for cmd != nil {
+		msg := cmd()
+		if msg == nil {
+			break
+		}
+		updated, cmd = updated.Update(msg)
+	}
+	if len(restarted) != 1 || restarted[0] != "s1" {
+		t.Errorf("restarted = %v, want [s1]", restarted)
+	}
+}
+
+func TestUpdate_RestartMenu_Cancel(t *testing.T) {
+	called := false
+	restartFn := func(string) error {
+		called = true
+		return nil
+	}
+
+	m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil, nil)
+	m.restartSession = restartFn
+	m.width = 120
+	m.height = 40
+
+	updated, _ := sendKey(m, "R")
+	updated, _ = sendSpecialKey(updated, tea.KeyEscape)
+	om := asOverlay(updated)
+	if om.state != stateList {
+		t.Errorf("state = %v, want stateList after cancel", om.state)
+	}
+	if called {
+		t.Error("restartSession should not be called when menu cancelled")
+	}
+}
+
+func TestUpdate_RestartMenu_All(t *testing.T) {
+	sessions := overlayTestSessions()
+	var restarted []string
+	restartFn := func(id string) error {
+		restarted = append(restarted, id)
+		return nil
+	}
+
+	m := newOverlayModel(sessions, "", nil, nil, nil, nil)
+	m.restartSession = restartFn
+	m.width = 120
+	m.height = 40
+
+	updated, _ := sendKey(m, "R")
+	updated, cmd := sendKey(updated, "a")
+	om := asOverlay(updated)
+	if len(om.restartQueue) != len(sessions) {
+		t.Fatalf("restartQueue = %v, want all %d sessions", om.restartQueue, len(sessions))
+	}
+
+	for cmd != nil {
+		msg := cmd()
+		if msg == nil {
+			break
+		}
+		updated, cmd = updated.Update(msg)
+	}
+	if len(restarted) != len(sessions) {
+		t.Errorf("restarted %d sessions, want %d", len(restarted), len(sessions))
+	}
+}
+
+func TestUpdate_RestartMenu_EmptyQueue(t *testing.T) {
+	// No session is ConfigStale, so "[o]utdated" should be a no-op.
+	called := false
+	restartFn := func(string) error {
+		called = true
+		return nil
+	}
+
+	m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil, nil)
+	m.restartSession = restartFn
+	m.width = 120
+	m.height = 40
+
+	updated, _ := sendKey(m, "R")
+	updated, cmd := sendKey(updated, "o")
+	om := asOverlay(updated)
+	if om.state != stateList {
+		t.Errorf("state = %v, want stateList for empty queue", om.state)
+	}
+	if len(om.restartQueue) != 0 {
+		t.Errorf("restartQueue = %v, want empty", om.restartQueue)
+	}
+	if cmd != nil {
+		if msg := cmd(); msg != nil {
+			updated.Update(msg)
+		}
+	}
+	if called {
+		t.Error("restartSession should not be called when no sessions match")
+	}
+}
+
+func TestUpdate_RestartMenu_RespectsFilter(t *testing.T) {
+	sessions := overlayTestSessions()
+	var restarted []string
+	restartFn := func(id string) error {
+		restarted = append(restarted, id)
+		return nil
+	}
+
+	m := newOverlayModel(sessions, "", nil, nil, nil, nil)
+	m.restartSession = restartFn
+	m.width = 120
+	m.height = 40
+	// Filter to just the "braw-fix" session (s1).
+	m.filterInput.SetValue("braw")
+	m.rebuildForView()
+
+	updated, _ := sendKey(m, "R")
+	updated, cmd := sendKey(updated, "a")
+	om := asOverlay(updated)
+	if len(om.restartQueue) != 1 || om.restartQueue[0] != "s1" {
+		t.Fatalf("restartQueue = %v, want [s1] (filter-scoped)", om.restartQueue)
+	}
+
+	for cmd != nil {
+		msg := cmd()
+		if msg == nil {
+			break
+		}
+		updated, cmd = updated.Update(msg)
+	}
+	if len(restarted) != 1 || restarted[0] != "s1" {
+		t.Errorf("restarted = %v, want [s1]", restarted)
+	}
+}
+
+func TestUpdate_Stop_Error(t *testing.T) {
+	sessions := overlayTestSessions()
+	stopFn := func(string) error {
+		return fmt.Errorf("stop failed")
+	}
+
+	m := newOverlayModel(sessions, "", nil, nil, nil, nil)
+	m.stopSession = stopFn
+	m.width = 120
+	m.height = 40
+	selected := m.list.SelectedItem().(sessionItem)
+	origStatus := selected.info.Status
+
+	updated, _ := sendKey(m, "S")
+	updated, cmd := sendKey(updated, "y")
+	updated, _ = updated.Update(cmd())
+	om := asOverlay(updated)
+
+	if om.state != stateList {
+		t.Errorf("state = %v, want stateList after failed stop", om.state)
+	}
+	for _, s := range om.allSessions {
+		if s.ID == selected.info.ID && s.Status != origStatus {
+			t.Errorf("session status = %q, want unchanged %q on stop failure", s.Status, origStatus)
+		}
+	}
+	if om.stoppedCurrent {
+		t.Error("stoppedCurrent should not be set when stop fails")
+	}
+}
+
+func TestUpdate_Stop_Current_SetsFlag(t *testing.T) {
+	sessions := overlayTestSessions()
+	stopFn := func(string) error { return nil }
+
+	// Attach context: current session is s1, and it is selected by default.
+	m := newOverlayModel(sessions, "s1", nil, nil, nil, nil)
+	m.stopSession = stopFn
+	m.width = 120
+	m.height = 40
+
+	updated, _ := sendKey(m, "S")
+	updated, cmd := sendKey(updated, "y")
+	updated, _ = updated.Update(cmd())
+	om := asOverlay(updated)
+
+	if !om.stoppedCurrent {
+		t.Error("stoppedCurrent should be set after stopping the current session")
+	}
+
+	// Restarting it (via the menu) clears the flag, since restart resumes it.
+	om.restartSession = func(string) error { return nil }
+	updated, _ = sendKey(om, "R")
+	updated, _ = sendKey(updated, "a")
+	om = asOverlay(updated)
+	if om.stoppedCurrent {
+		t.Error("stoppedCurrent should be cleared once the current session is restarted")
+	}
+}
+
+func TestUpdate_Stop_OnGroupHeader_NoOp(t *testing.T) {
+	// In the All view the first item is a group header; pressing S on it
+	// should not enter the confirm-stop state.
+	m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil, nil)
+	m.width = 120
+	m.height = 40
+	m.list.Select(0) // group header
+
+	if _, ok := m.list.SelectedItem().(groupHeader); !ok {
+		t.Skip("expected a group header at index 0")
+	}
+	updated, _ := sendKey(m, "S")
+	om := asOverlay(updated)
+	if om.state != stateList {
+		t.Errorf("state = %v, want stateList (S on group header is a no-op)", om.state)
+	}
+}
+
+func TestUpdate_Star_NotStop(t *testing.T) {
+	// Regression guard: lowercase s stars, it must not stop.
+	sessions := overlayTestSessions()
+	stopCalled := false
+	starCalled := false
+	m := newOverlayModel(sessions, "", nil, nil, nil, nil)
+	m.stopSession = func(string) error { stopCalled = true; return nil }
+	m.toggleStar = func(string, bool) error { starCalled = true; return nil }
+	m.width = 120
+	m.height = 40
+	m.selectSessionByID("s1")
+
+	updated, cmd := sendKey(m, "s")
+	om := asOverlay(updated)
+	if om.state != stateList {
+		t.Errorf("state = %v, want stateList (s should not open confirm-stop)", om.state)
+	}
+	if cmd != nil {
+		updated.Update(cmd())
+	}
+	if stopCalled {
+		t.Error("lowercase s must not call stopSession")
+	}
+	if !starCalled {
+		t.Error("lowercase s should toggle star")
 	}
 }
 

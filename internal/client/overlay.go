@@ -23,8 +23,9 @@ const (
 	stateList overlayState = iota
 	stateFilter
 	stateConfirmDelete
+	stateConfirmStop
 	stateConfirmRestart
-	stateConfirmRestartAll
+	stateRestartMenu
 	stateRestartingAll
 	stateCreate
 )
@@ -503,6 +504,11 @@ type restartResultMsg struct {
 	err       error
 }
 
+type stopResultMsg struct {
+	sessionID string
+	err       error
+}
+
 type restartOneResultMsg struct {
 	index int
 	err   error
@@ -536,6 +542,7 @@ type overlayModel struct {
 	refreshSessions  func() []protocol.SessionInfo
 	deleteSession    func(sessionID string) error
 	restartSession   func(sessionID string) error
+	stopSession      func(sessionID string) error
 	toggleStar       func(sessionID string, star bool) error
 	previewContent   string
 	previewSessionID string
@@ -546,6 +553,11 @@ type overlayModel struct {
 	restartQueue  []string
 	restartIdx    int
 	restartErrors []error
+
+	// stoppedCurrent is set when the user stops the session they are currently
+	// attached to. RunOverlay turns this into a distinct result action so the
+	// attach loop exits instead of reattaching (and auto-resuming) it.
+	stoppedCurrent bool
 
 	createModel     *createSessionModel
 	createName      string
@@ -559,7 +571,7 @@ func (m *overlayModel) resizeList() {
 		return
 	}
 	reserve := 10
-	if m.state == stateConfirmDelete || m.state == stateConfirmRestart || m.state == stateConfirmRestartAll || m.state == stateRestartingAll {
+	if m.state == stateConfirmDelete || m.state == stateConfirmStop || m.state == stateConfirmRestart || m.state == stateRestartMenu || m.state == stateRestartingAll {
 		reserve = 14
 	}
 	panelWidth := min(m.contentWidth+4, m.width-4)
@@ -918,6 +930,36 @@ func (m overlayModel) refreshSessionsCmd() tea.Cmd {
 	}
 }
 
+// beginRestartQueue builds a restart queue from the current view, keeping only
+// sessions for which match returns true, and starts processing it. If nothing
+// matches or restart is unavailable, it returns to the list.
+func (m overlayModel) beginRestartQueue(match func(protocol.SessionInfo) bool) (tea.Model, tea.Cmd) {
+	if m.restartSession != nil {
+		var queue []string
+		for _, s := range m.visibleSessions() {
+			if match(s) {
+				queue = append(queue, s.ID)
+				// Restarting the current session resumes it, so it should no
+				// longer count as "stopped on exit".
+				if s.ID == m.currentSessionID {
+					m.stoppedCurrent = false
+				}
+			}
+		}
+		if len(queue) > 0 {
+			m.restartQueue = queue
+			m.restartIdx = 0
+			m.restartErrors = nil
+			m.state = stateRestartingAll
+			m.resizeList()
+			return m, m.restartNextCmd()
+		}
+	}
+	m.state = stateList
+	m.resizeList()
+	return m, nil
+}
+
 func (m overlayModel) restartNextCmd() tea.Cmd {
 	if m.restartIdx >= len(m.restartQueue) {
 		return nil
@@ -1041,6 +1083,17 @@ func (m *overlayModel) sessionsForView() []protocol.SessionInfo {
 	}
 }
 
+// visibleSessions returns the sessions currently shown in the list: the view
+// filter plus any active text filter. Bulk actions (the restart menu) operate
+// on this set so they match what the user can see.
+func (m *overlayModel) visibleSessions() []protocol.SessionInfo {
+	sessions := m.sessionsForView()
+	if m.filterInput.Value() != "" {
+		sessions = filterSessions(sessions, m.filterInput.Value())
+	}
+	return sessions
+}
+
 func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case previewMsg:
@@ -1099,6 +1152,30 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.fetchPreviewCmd()
 
 	case restartResultMsg:
+		m.state = stateList
+		m.resizeList()
+		return m, m.fetchPreviewCmd()
+
+	case stopResultMsg:
+		if msg.err == nil {
+			for i, s := range m.allSessions {
+				if s.ID == msg.sessionID {
+					m.allSessions[i].Status = "stopped"
+					break
+				}
+			}
+			if msg.sessionID == m.currentSessionID {
+				m.stoppedCurrent = true
+			}
+			// Preserve the cursor on the session that was stopped rather than
+			// resetting to the top of the list.
+			curSID := msg.sessionID
+			if item, ok := m.list.SelectedItem().(sessionItem); ok {
+				curSID = item.info.ID
+			}
+			m.rebuildForView()
+			m.selectSessionByID(curSID)
+		}
 		m.state = stateList
 		m.resizeList()
 		return m, m.fetchPreviewCmd()
@@ -1252,6 +1329,25 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
+		case stateConfirmStop:
+			switch msg.String() {
+			case "y", "Y":
+				if item, ok := m.list.SelectedItem().(sessionItem); ok && m.stopSession != nil {
+					sid := item.info.ID
+					stopFn := m.stopSession
+					return m, func() tea.Msg {
+						return stopResultMsg{sessionID: sid, err: stopFn(sid)}
+					}
+				}
+				m.state = stateList
+				m.resizeList()
+				return m, nil
+			default:
+				m.state = stateList
+				m.resizeList()
+				return m, nil
+			}
+
 		case stateConfirmRestart:
 			switch msg.String() {
 			case "y", "Y":
@@ -1271,27 +1367,14 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
-		case stateConfirmRestartAll:
+		case stateRestartMenu:
 			switch msg.String() {
-			case "y", "Y":
-				if m.restartSession != nil {
-					sessions := m.sessionsForView()
-					var queue []string
-					for _, s := range sessions {
-						queue = append(queue, s.ID)
-					}
-					if len(queue) > 0 {
-						m.restartQueue = queue
-						m.restartIdx = 0
-						m.restartErrors = nil
-						m.state = stateRestartingAll
-						m.resizeList()
-						return m, m.restartNextCmd()
-					}
-				}
-				m.state = stateList
-				m.resizeList()
-				return m, nil
+			case "a", "A":
+				return m.beginRestartQueue(func(protocol.SessionInfo) bool { return true })
+			case "o", "O":
+				return m.beginRestartQueue(func(s protocol.SessionInfo) bool { return s.ConfigStale })
+			case "s", "S":
+				return m.beginRestartQueue(func(s protocol.SessionInfo) bool { return s.Status == "stopped" })
 			default:
 				m.state = stateList
 				m.resizeList()
@@ -1344,8 +1427,15 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 
 			case "R":
-				m.state = stateConfirmRestartAll
+				m.state = stateRestartMenu
 				m.resizeList()
+				return m, nil
+
+			case "S":
+				if _, ok := m.list.SelectedItem().(sessionItem); ok {
+					m.state = stateConfirmStop
+					m.resizeList()
+				}
 				return m, nil
 
 			case "s":
@@ -1678,6 +1768,13 @@ func (m overlayModel) View() tea.View {
 				Foreground(colorRed).
 				Render(fmt.Sprintf("Delete '%s'? [y/N]", s.Name)))
 		}
+	case stateConfirmStop:
+		if item, ok := m.list.SelectedItem().(sessionItem); ok {
+			panelContent.WriteString("\n")
+			panelContent.WriteString(lipgloss.NewStyle().
+				Foreground(colorYellow).
+				Render(fmt.Sprintf("Stop '%s'? [y/N]", item.info.Name)))
+		}
 	case stateConfirmRestart:
 		if item, ok := m.list.SelectedItem().(sessionItem); ok {
 			panelContent.WriteString("\n")
@@ -1685,12 +1782,22 @@ func (m overlayModel) View() tea.View {
 				Foreground(colorGreen).
 				Render(fmt.Sprintf("Restart '%s'? [y/N]", item.info.Name)))
 		}
-	case stateConfirmRestartAll:
-		count := len(m.sessionsForView())
+	case stateRestartMenu:
+		sessions := m.visibleSessions()
+		all := len(sessions)
+		outdated, stopped := 0, 0
+		for _, s := range sessions {
+			if s.ConfigStale {
+				outdated++
+			}
+			if s.Status == "stopped" {
+				stopped++
+			}
+		}
+		green := lipgloss.NewStyle().Foreground(colorGreen)
 		panelContent.WriteString("\n")
-		panelContent.WriteString(lipgloss.NewStyle().
-			Foreground(colorGreen).
-			Render(fmt.Sprintf("Restart all %d sessions? [y/N]", count)))
+		panelContent.WriteString(green.Render("Restart:"))
+		panelContent.WriteString(green.Render(fmt.Sprintf("  [a]ll (%d)   [o]utdated (%d)   [s]topped (%d)   esc cancel", all, outdated, stopped)))
 	case stateRestartingAll:
 		panelContent.WriteString("\n")
 		progress := min(m.restartIdx+1, len(m.restartQueue))
@@ -1704,16 +1811,21 @@ func (m overlayModel) View() tea.View {
 		}
 	}
 
-	helpStyle := lipgloss.NewStyle().Foreground(colorFaint)
-	panelContent.WriteString("\n")
-	helpParts := []string{}
-	if len(m.shortcutKeys) > 0 {
-		first := string(m.shortcutKeys[0])
-		last := string(m.shortcutKeys[len(m.shortcutKeys)-1])
-		helpParts = append(helpParts, first+"-"+last+" jump")
+	// The global key hints describe list-mode keys. While a confirm prompt or
+	// the restart menu is open those keys are remapped (e.g. S = "restart
+	// stopped" in the menu), so only show them in the list/filter states.
+	if m.state == stateList || m.state == stateFilter {
+		helpStyle := lipgloss.NewStyle().Foreground(colorFaint)
+		panelContent.WriteString("\n")
+		helpParts := []string{}
+		if len(m.shortcutKeys) > 0 {
+			first := string(m.shortcutKeys[0])
+			last := string(m.shortcutKeys[len(m.shortcutKeys)-1])
+			helpParts = append(helpParts, first+"-"+last+" jump")
+		}
+		helpParts = append(helpParts, "enter attach", "n new", "◂▸ view", "/ filter", "tab group", "s star", "space fold", "C fold-all", "x delete", "S stop", "r/R restart", "q quit")
+		panelContent.WriteString(helpStyle.Render(strings.Join(helpParts, "  ")))
 	}
-	helpParts = append(helpParts, "enter attach", "n new", "◂▸ view", "/ filter", "tab group", "s star", "space fold", "C fold-all", "x delete", "r/R restart", "q quit")
-	panelContent.WriteString(helpStyle.Render(strings.Join(helpParts, "  ")))
 
 	panel := lipgloss.NewStyle().
 		Width(panelWidth).
@@ -1789,10 +1901,11 @@ func (m overlayModel) View() tea.View {
 // RunOverlay launches the bubbletea overlay listing sessions grouped by repo.
 // currentSessionID highlights the session the user was just attached to.
 // fetchPreview is called asynchronously to load scrollback for the selected session.
-func RunOverlay(sessions []protocol.SessionInfo, currentSessionID string, fetchPreview func(sessionID string) string, refreshSessions func() []protocol.SessionInfo, deleteSession func(sessionID string) error, restartSession func(sessionID string) error, toggleStar func(sessionID string, star bool) error, profile string, collapsed map[string]bool, repoSuggestions []RepoSuggestion, shortcutKeys string) *OverlayResult {
+func RunOverlay(sessions []protocol.SessionInfo, currentSessionID string, fetchPreview func(sessionID string) string, refreshSessions func() []protocol.SessionInfo, deleteSession func(sessionID string) error, restartSession func(sessionID string) error, stopSession func(sessionID string) error, toggleStar func(sessionID string, star bool) error, profile string, collapsed map[string]bool, repoSuggestions []RepoSuggestion, shortcutKeys string) *OverlayResult {
 	m := newOverlayModel(sessions, currentSessionID, fetchPreview, deleteSession, collapsed, []rune(shortcutKeys))
 	m.refreshSessions = refreshSessions
 	m.restartSession = restartSession
+	m.stopSession = stopSession
 	m.toggleStar = toggleStar
 	m.profile = profile
 	m.repoSuggestions = repoSuggestions
@@ -1825,6 +1938,15 @@ func RunOverlay(sessions []protocol.SessionInfo, currentSessionID string, fetchP
 		if result.state == stateConfirmDelete {
 			overlayResult.Action = "delete"
 		}
+		return overlayResult
+	}
+
+	// The user stopped the session they were attached to and left the overlay
+	// without picking another. Signal the attach loop to exit rather than
+	// reattach (which would auto-resume the session it just stopped).
+	if result.stoppedCurrent {
+		overlayResult.Action = "stopped-current"
+		overlayResult.SessionID = result.currentSessionID
 		return overlayResult
 	}
 
