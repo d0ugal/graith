@@ -775,15 +775,16 @@ func TestTypeExitedSessionFails(t *testing.T) {
 		t.Fatalf("stop error: %s", e.Message)
 	}
 
-	// Wait for the process to actually exit.
-	ptySess, ok := env.sm.GetPTY(info.ID)
-	if !ok {
-		t.Fatal("PTY session not found")
-	}
-	select {
-	case <-ptySess.Done():
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for session to exit")
+	// Wait for the process to actually exit. The echo agent exits almost
+	// immediately, so the watcher may already have removed the PTY from the
+	// live session map — that just means it has already exited, so only wait
+	// on Done() while the PTY handle is still tracked.
+	if ptySess, ok := env.sm.GetPTY(info.ID); ok {
+		select {
+		case <-ptySess.Done():
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for session to exit")
+		}
 	}
 
 	// Type into the exited session — should get an error.
