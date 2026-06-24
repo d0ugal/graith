@@ -131,7 +131,7 @@ func (m *MCPManager) Reload(cfg *config.Config) {
 	if !configChanged {
 		for name, newCfg := range newServers {
 			oldCfg, ok := m.servers[name]
-			if !ok || oldCfg.Command != newCfg.Command || !slicesEqual(oldCfg.Args, newCfg.Args) {
+			if !ok || oldCfg.Command != newCfg.Command || !slicesEqual(oldCfg.Args, newCfg.Args) || !mapsEqual(oldCfg.Env, newCfg.Env) {
 				configChanged = true
 				break
 			}
@@ -313,6 +313,18 @@ func slicesEqual(a, b []string) bool {
 	}
 	for i := range a {
 		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func mapsEqual(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if bv, ok := b[k]; !ok || bv != v {
 			return false
 		}
 	}

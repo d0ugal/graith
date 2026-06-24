@@ -918,21 +918,27 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				// server, and gather its template vars for per-session isolation.
 				mcpVars := config.TemplateVars{SessionID: mc.SessionID}
 				if mc.SessionID != "" {
-					if sess, ok := sm.Get(mc.SessionID); ok {
-						mcpVars.SessionName = sess.Name
-						mcpVars.WorktreePath = sess.WorktreePath
-						allowed := sm.resolveMCPServersFromConfig(sm.Config(), sess.Agent)
-						found := false
-						for _, s := range allowed {
-							if s.Name == mc.Server {
-								found = true
-								break
-							}
+					sess, ok := sm.Get(mc.SessionID)
+					if !ok {
+						// A non-empty session ID that doesn't resolve is an
+						// error — don't spawn a process with partially populated
+						// (empty {session_name}/{worktree_path}) template vars.
+						sendControl("error", protocol.ErrorMsg{Message: fmt.Sprintf("session %q not found", mc.SessionID)})
+						return
+					}
+					mcpVars.SessionName = sess.Name
+					mcpVars.WorktreePath = sess.WorktreePath
+					allowed := sm.resolveMCPServersFromConfig(sm.Config(), sess.Agent)
+					found := false
+					for _, s := range allowed {
+						if s.Name == mc.Server {
+							found = true
+							break
 						}
-						if !found {
-							sendControl("error", protocol.ErrorMsg{Message: fmt.Sprintf("MCP server %q is not enabled for agent %q", mc.Server, sess.Agent)})
-							return
-						}
+					}
+					if !found {
+						sendControl("error", protocol.ErrorMsg{Message: fmt.Sprintf("MCP server %q is not enabled for agent %q", mc.Server, sess.Agent)})
+						return
 					}
 				}
 
