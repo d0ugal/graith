@@ -98,6 +98,9 @@ on_approval = true
 mode = "prompt"
 timeout = "10m"
 
+[overlay]
+shortcut_keys = "1234567890"
+
 [keybindings]
 prefix = "ctrl+b"
 new_session = "c"

@@ -351,6 +351,7 @@ func computeColumnWidths(sessions []protocol.SessionInfo, currentSessionID strin
 type compactDelegate struct {
 	cols             columnWidths
 	currentSessionID string
+	shortcutKeys     []rune
 }
 
 func (d compactDelegate) Height() int                         { return 1 }
@@ -394,12 +395,8 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	styledIndicator += staleMarker
 
 	numberLabel := "  "
-	if si.sessionIndex >= 1 && si.sessionIndex <= 10 {
-		key := fmt.Sprintf("%d", si.sessionIndex%10)
-		numberLabel = dim.Render(key) + " "
-	} else if si.sessionIndex >= 11 && si.sessionIndex <= 20 {
-		shiftGlyphs := "!@#$%^&*()"
-		numberLabel = dim.Render(string(shiftGlyphs[si.sessionIndex-11])) + " "
+	if si.sessionIndex >= 1 && si.sessionIndex <= len(d.shortcutKeys) {
+		numberLabel = dim.Render(string(d.shortcutKeys[si.sessionIndex-1])) + " "
 	}
 
 	starredMark := " "
@@ -544,6 +541,7 @@ type overlayModel struct {
 	previewSessionID string
 	profile          string
 	collapsed        map[string]bool
+	shortcutKeys     []rune
 
 	restartQueue  []string
 	restartIdx    int
@@ -822,7 +820,7 @@ func maxTreeIndentFromItems(items []list.Item) int {
 	return maxIndent
 }
 
-func newOverlayModel(sessions []protocol.SessionInfo, currentSessionID string, fetchPreview func(sessionID string) string, deleteSession func(sessionID string) error, collapsed map[string]bool) overlayModel {
+func newOverlayModel(sessions []protocol.SessionInfo, currentSessionID string, fetchPreview func(sessionID string) string, deleteSession func(sessionID string) error, collapsed map[string]bool, shortcutKeys []rune) overlayModel {
 	if collapsed == nil {
 		collapsed = make(map[string]bool)
 	}
@@ -832,7 +830,7 @@ func newOverlayModel(sessions []protocol.SessionInfo, currentSessionID string, f
 	cols.treeIndent = maxTreeIndentFromItems(items)
 	contentWidth := cols.totalWidth()
 
-	delegate := compactDelegate{cols: cols, currentSessionID: currentSessionID}
+	delegate := compactDelegate{cols: cols, currentSessionID: currentSessionID, shortcutKeys: shortcutKeys}
 	l := list.New(items, delegate, contentWidth, len(items)+4)
 	l.Title = ""
 	l.SetShowHelp(false)
@@ -896,6 +894,7 @@ func newOverlayModel(sessions []protocol.SessionInfo, currentSessionID string, f
 		fetchPreview:     fetchPreview,
 		deleteSession:    deleteSession,
 		collapsed:        collapsed,
+		shortcutKeys:     shortcutKeys,
 	}
 }
 
@@ -971,7 +970,7 @@ func (m *overlayModel) rebuildForView() {
 	}
 	m.contentWidth = m.cols.totalWidth()
 	m.list.SetItems(items)
-	m.list.SetDelegate(compactDelegate{cols: m.cols, currentSessionID: m.currentSessionID})
+	m.list.SetDelegate(compactDelegate{cols: m.cols, currentSessionID: m.currentSessionID, shortcutKeys: m.shortcutKeys})
 	m.list.Select(0)
 	if len(items) > 0 {
 		if _, ok := m.list.SelectedItem().(groupHeader); ok {
@@ -1480,38 +1479,6 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 
-			case "1", "2", "3", "4", "5", "6", "7", "8", "9", "0":
-				target := int(msg.String()[0] - '0')
-				if target == 0 {
-					target = 10
-				}
-				for i, item := range m.list.Items() {
-					if si, ok := item.(sessionItem); ok && si.sessionIndex == target {
-						m.list.Select(i)
-						m.selected = &si.info
-						return m, tea.Quit
-					}
-				}
-				return m, nil
-
-			case "!", "@", "#", "$", "%", "^", "&", "*", "(", ")":
-				// US keyboard layout: shift+1=!, shift+2=@, etc.
-				// Non-US layouts produce different symbols and won't match.
-				shiftMap := map[string]int{
-					"!": 11, "@": 12, "#": 13, "$": 14, "%": 15,
-					"^": 16, "&": 17, "*": 18, "(": 19, ")": 20,
-				}
-				if target, ok := shiftMap[msg.String()]; ok {
-					for i, item := range m.list.Items() {
-						if si, ok := item.(sessionItem); ok && si.sessionIndex == target {
-							m.list.Select(i)
-							m.selected = &si.info
-							return m, tea.Quit
-						}
-					}
-				}
-				return m, nil
-
 			case "n":
 				defaultRepo := ""
 				if item, ok := m.list.SelectedItem().(sessionItem); ok {
@@ -1530,6 +1497,23 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.createModel = &cm
 				m.state = stateCreate
 				return m, textinput.Blink
+
+			default:
+				if pressed := []rune(msg.String()); len(pressed) == 1 {
+					for idx, k := range m.shortcutKeys {
+						if pressed[0] == k {
+							target := idx + 1
+							for i, item := range m.list.Items() {
+								if si, ok := item.(sessionItem); ok && si.sessionIndex == target {
+									m.list.Select(i)
+									m.selected = &si.info
+									return m, tea.Quit
+								}
+							}
+							return m, nil
+						}
+					}
+				}
 			}
 		}
 	}
@@ -1722,7 +1706,14 @@ func (m overlayModel) View() tea.View {
 
 	helpStyle := lipgloss.NewStyle().Foreground(colorFaint)
 	panelContent.WriteString("\n")
-	panelContent.WriteString(helpStyle.Render("1-0 jump  enter attach  n new  ◂▸ view  / filter  tab group  s star  space fold  C fold-all  x delete  r/R restart  q quit"))
+	helpParts := []string{}
+	if len(m.shortcutKeys) > 0 {
+		first := string(m.shortcutKeys[0])
+		last := string(m.shortcutKeys[len(m.shortcutKeys)-1])
+		helpParts = append(helpParts, first+"-"+last+" jump")
+	}
+	helpParts = append(helpParts, "enter attach", "n new", "◂▸ view", "/ filter", "tab group", "s star", "space fold", "C fold-all", "x delete", "r/R restart", "q quit")
+	panelContent.WriteString(helpStyle.Render(strings.Join(helpParts, "  ")))
 
 	panel := lipgloss.NewStyle().
 		Width(panelWidth).
@@ -1798,8 +1789,8 @@ func (m overlayModel) View() tea.View {
 // RunOverlay launches the bubbletea overlay listing sessions grouped by repo.
 // currentSessionID highlights the session the user was just attached to.
 // fetchPreview is called asynchronously to load scrollback for the selected session.
-func RunOverlay(sessions []protocol.SessionInfo, currentSessionID string, fetchPreview func(sessionID string) string, refreshSessions func() []protocol.SessionInfo, deleteSession func(sessionID string) error, restartSession func(sessionID string) error, toggleStar func(sessionID string, star bool) error, profile string, collapsed map[string]bool, repoSuggestions []RepoSuggestion) *OverlayResult {
-	m := newOverlayModel(sessions, currentSessionID, fetchPreview, deleteSession, collapsed)
+func RunOverlay(sessions []protocol.SessionInfo, currentSessionID string, fetchPreview func(sessionID string) string, refreshSessions func() []protocol.SessionInfo, deleteSession func(sessionID string) error, restartSession func(sessionID string) error, toggleStar func(sessionID string, star bool) error, profile string, collapsed map[string]bool, repoSuggestions []RepoSuggestion, shortcutKeys string) *OverlayResult {
+	m := newOverlayModel(sessions, currentSessionID, fetchPreview, deleteSession, collapsed, []rune(shortcutKeys))
 	m.refreshSessions = refreshSessions
 	m.restartSession = restartSession
 	m.toggleStar = toggleStar

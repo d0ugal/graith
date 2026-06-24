@@ -64,7 +64,7 @@ func runAttach(cmd *cobra.Command, name string) error {
 
 	if name == "" {
 		repos := client.DiscoverRepos(cfg.AllowedRepoPaths, list.Sessions)
-		result := client.RunOverlay(list.Sessions, "", previewFetcher(), sessionRefresher(), deleteSession, restartSession, toggleStar, paths.Profile, nil, repos)
+		result := client.RunOverlay(list.Sessions, "", previewFetcher(), sessionRefresher(), deleteSession, restartSession, toggleStar, paths.Profile, nil, repos, cfg.Overlay.ShortcutKeys)
 		if result == nil || result.Action == "" {
 			return nil
 		}
@@ -166,7 +166,7 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 			protocol.DecodePayload(listResp, &list)
 
 			repos := client.DiscoverRepos(cfg.AllowedRepoPaths, list.Sessions)
-			overlayResult := client.RunOverlay(list.Sessions, sessionID, previewFetcher(), sessionRefresher(), deleteSession, restartSession, toggleStar, paths.Profile, overlayCollapsed, repos)
+			overlayResult := client.RunOverlay(list.Sessions, sessionID, previewFetcher(), sessionRefresher(), deleteSession, restartSession, toggleStar, paths.Profile, overlayCollapsed, repos, cfg.Overlay.ShortcutKeys)
 			if overlayResult != nil {
 				overlayCollapsed = overlayResult.Collapsed
 			}
