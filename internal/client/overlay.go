@@ -394,13 +394,13 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	styledIndicator += staleMarker
 
 	numberLabel := "  "
-	if si.sessionIndex >= 1 && si.sessionIndex <= 20 {
+	if si.sessionIndex >= 1 && si.sessionIndex <= 10 {
 		key := fmt.Sprintf("%d", si.sessionIndex%10)
-		if si.sessionIndex <= 10 {
-			numberLabel = dim.Render(key) + " "
-		} else {
-			numberLabel = lipgloss.NewStyle().Foreground(colorFaint).Render(key) + " "
-		}
+		numberLabel = dim.Render(key) + " "
+	} else if si.sessionIndex >= 11 && si.sessionIndex <= 20 {
+		// Show the actual shifted glyph so users know which key to press (US layout).
+		shiftGlyphs := "!@#$%^&*()"
+		numberLabel = dim.Render(string(shiftGlyphs[si.sessionIndex-11])) + " "
 	}
 
 	starredMark := " "
@@ -1496,6 +1496,8 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 
 			case "!", "@", "#", "$", "%", "^", "&", "*", "(", ")":
+				// US keyboard layout: shift+1=!, shift+2=@, etc.
+				// Non-US layouts produce different symbols and won't match.
 				shiftMap := map[string]int{
 					"!": 11, "@": 12, "#": 13, "$": 14, "%": 15,
 					"^": 16, "&": 17, "*": 18, "(": 19, ")": 20,
