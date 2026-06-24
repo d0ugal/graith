@@ -2445,7 +2445,10 @@ func TestForkUsesSourceBaseBranch(t *testing.T) {
 		t.Fatalf("Fork() unexpected error: %v", err)
 	}
 	t.Cleanup(func() {
-		if sess, ok := sm.sessions[forked.ID]; ok {
+		sm.mu.RLock()
+		sess, ok := sm.sessions[forked.ID]
+		sm.mu.RUnlock()
+		if ok {
 			_ = sess.Kill()
 			sess.Close()
 		}
