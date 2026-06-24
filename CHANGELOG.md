@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.57.0](https://github.com/d0ugal/graith/compare/v0.56.1...v0.57.0) (2026-06-24)
+
+
+### Features
+
+* **overlay:** add stop action and expand restart into a menu ([85f4c9d](https://github.com/d0ugal/graith/commit/85f4c9d2855fd9dbb699474fec5cf48aceb54f11))
+
+
+### Bug Fixes
+
+* address tribunal review of MCP isolation ([c806a6a](https://github.com/d0ugal/graith/commit/c806a6ae7e62d563053396f0779a518484410a9f))
+* authorize the update handler to prevent reparenting bypass ([264090c](https://github.com/d0ugal/graith/commit/264090c8187eae01588ba4b2e0ca38c71ab83d98)), closes [#568](https://github.com/d0ugal/graith/issues/568)
+* grant orchestrator elevated privileges to manage all sessions ([ac9f039](https://github.com/d0ugal/graith/commit/ac9f0392d1682de2b91b8ba2aed3b71ef37737b6)), closes [#566](https://github.com/d0ugal/graith/issues/566)
+* isolate per-session MCP processes via template expansion ([d6203a6](https://github.com/d0ugal/graith/commit/d6203a60902447af8356f98ac3a4d501cbe1a6bc)), closes [#571](https://github.com/d0ugal/graith/issues/571)
+* restrict parent-clearing to orchestrator and human CLI ([35f6edb](https://github.com/d0ugal/graith/commit/35f6edb497cdc3324ef79ebebe96508470030d71))
+
 ## [0.56.1](https://github.com/d0ugal/graith/compare/v0.56.0...v0.56.1) (2026-06-24)
 
 
