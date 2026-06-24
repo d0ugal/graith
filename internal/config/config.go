@@ -35,8 +35,13 @@ type Config struct {
 	Status           StatusConfig       `toml:"status"`
 	GitPull          GitPullConfig      `toml:"git_pull"`
 	MCPServers       []MCPServerConfig  `toml:"mcp_servers"`
+	Overlay          Overlay            `toml:"overlay"`
 	Orchestrator     OrchestratorConfig `toml:"orchestrator"`
 	Agents           map[string]Agent   `toml:"agents"`
+}
+
+type Overlay struct {
+	ShortcutKeys string `toml:"shortcut_keys"`
 }
 
 type OrchestratorConfig struct {
