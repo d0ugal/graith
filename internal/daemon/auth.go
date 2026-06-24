@@ -36,6 +36,18 @@ const (
 	authHumanOnly
 )
 
+// isOrchestrator reports whether the authenticated session is the system
+// orchestrator. The orchestrator is the fleet control plane and is granted
+// elevated privileges to manage any session regardless of parentage.
+// Must be called with sm.mu at least RLocked.
+func (ac authContext) isOrchestrator(sm *SessionManager) bool {
+	if !ac.authenticated {
+		return false
+	}
+	sess, ok := sm.state.Sessions[ac.sessionID]
+	return ok && sess.SystemKind == SystemKindOrchestrator
+}
+
 // checkTarget verifies that the authenticated session is authorized to act on
 // the target session, according to the given rule. Must be called with sm.mu
 // at least RLocked.
@@ -54,6 +66,10 @@ func (ac authContext) checkTarget(sm *SessionManager, targetID string, rule auth
 		if !ac.authenticated {
 			return nil
 		}
+		// The orchestrator is the fleet control plane and may target any session.
+		if ac.isOrchestrator(sm) {
+			return nil
+		}
 		if targetID != ac.sessionID {
 			return fmt.Errorf("not authorized: can only target own session")
 		}
@@ -61,6 +77,10 @@ func (ac authContext) checkTarget(sm *SessionManager, targetID string, rule auth
 
 	case authSelfOrDescendant:
 		if !ac.authenticated {
+			return nil
+		}
+		// The orchestrator is the fleet control plane and may target any session.
+		if ac.isOrchestrator(sm) {
 			return nil
 		}
 		if targetID == ac.sessionID {
