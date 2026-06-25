@@ -24,6 +24,10 @@ func keyPress(s string) tea.KeyPressMsg {
 		return tea.KeyPressMsg{Code: tea.KeyUp}
 	case "down":
 		return tea.KeyPressMsg{Code: tea.KeyDown}
+	case "left":
+		return tea.KeyPressMsg{Code: tea.KeyLeft}
+	case "right":
+		return tea.KeyPressMsg{Code: tea.KeyRight}
 	case " ":
 		return tea.KeyPressMsg{Code: ' ', Text: " "}
 	default:
@@ -161,7 +165,7 @@ func TestDiscoverRepos_Sorted(t *testing.T) {
 }
 
 func TestNewCreateSessionModel_DefaultRepo(t *testing.T) {
-	m := newCreateSessionModel("/tmp/croft", nil)
+	m := newCreateSessionModel("/tmp/croft", nil, nil, "")
 	if m.repoInput.Value() != "/tmp/croft" {
 		t.Errorf("expected default repo /tmp/croft, got %s", m.repoInput.Value())
 	}
@@ -171,7 +175,7 @@ func TestNewCreateSessionModel_DefaultRepo(t *testing.T) {
 }
 
 func TestNewCreateSessionModel_EmptyDefaultRepo(t *testing.T) {
-	m := newCreateSessionModel("", nil)
+	m := newCreateSessionModel("", nil, nil, "")
 	if m.repoInput.Value() != "" {
 		t.Errorf("expected empty repo, got %s", m.repoInput.Value())
 	}
@@ -183,7 +187,7 @@ func TestCreateSessionModel_FilterSuggestions(t *testing.T) {
 		{Name: "braw-lib", Path: "/home/user/Code/braw-lib"},
 		{Name: "neep", Path: "/home/user/Code/neep"},
 	}
-	m := newCreateSessionModel("", repos)
+	m := newCreateSessionModel("", repos, nil, "")
 	m.repoInput.SetValue("braw-")
 	m.updateFiltered()
 
@@ -193,7 +197,7 @@ func TestCreateSessionModel_FilterSuggestions(t *testing.T) {
 }
 
 func TestCreateSessionModel_TabMovesToRepo(t *testing.T) {
-	m := newCreateSessionModel("", nil)
+	m := newCreateSessionModel("", nil, nil, "")
 	m.nameInput.SetValue("braw-session")
 
 	m = updateModel(m, keyPress("tab"))
@@ -203,7 +207,7 @@ func TestCreateSessionModel_TabMovesToRepo(t *testing.T) {
 }
 
 func TestCreateSessionModel_ShiftTabMovesToName(t *testing.T) {
-	m := newCreateSessionModel("", nil)
+	m := newCreateSessionModel("", nil, nil, "")
 	m.nameInput.SetValue("braw-session")
 	m = updateModel(m, keyPress("tab"))
 
@@ -214,7 +218,7 @@ func TestCreateSessionModel_ShiftTabMovesToName(t *testing.T) {
 }
 
 func TestCreateSessionModel_EnterOnNameAdvancesToRepo(t *testing.T) {
-	m := newCreateSessionModel("", nil)
+	m := newCreateSessionModel("", nil, nil, "")
 	m.nameInput.SetValue("braw-session")
 
 	m = updateModel(m, keyPress("enter"))
@@ -224,7 +228,7 @@ func TestCreateSessionModel_EnterOnNameAdvancesToRepo(t *testing.T) {
 }
 
 func TestCreateSessionModel_EnterOnEmptyNameStays(t *testing.T) {
-	m := newCreateSessionModel("", nil)
+	m := newCreateSessionModel("", nil, nil, "")
 
 	m = updateModel(m, keyPress("enter"))
 	if m.focus != createFieldName {
@@ -233,7 +237,7 @@ func TestCreateSessionModel_EnterOnEmptyNameStays(t *testing.T) {
 }
 
 func TestCreateSessionModel_EnterOnRepoSubmits(t *testing.T) {
-	m := newCreateSessionModel("/tmp/repo", nil)
+	m := newCreateSessionModel("/tmp/repo", nil, nil, "")
 	m.nameInput.SetValue("braw-session")
 	m = updateModel(m, keyPress("tab"))
 
@@ -244,7 +248,7 @@ func TestCreateSessionModel_EnterOnRepoSubmits(t *testing.T) {
 }
 
 func TestCreateSessionModel_EnterOnEmptyRepoDoesNotSubmit(t *testing.T) {
-	m := newCreateSessionModel("", nil)
+	m := newCreateSessionModel("", nil, nil, "")
 	m.nameInput.SetValue("braw-session")
 	m = updateModel(m, keyPress("tab"))
 
@@ -252,10 +256,13 @@ func TestCreateSessionModel_EnterOnEmptyRepoDoesNotSubmit(t *testing.T) {
 	if m.done {
 		t.Error("expected done=false when repo is empty")
 	}
+	if m.focus != createFieldRepo {
+		t.Errorf("expected focus to remain on repo when empty, got %d", m.focus)
+	}
 }
 
 func TestCreateSessionModel_EscCancels(t *testing.T) {
-	m := newCreateSessionModel("", nil)
+	m := newCreateSessionModel("", nil, nil, "")
 	m.nameInput.SetValue("braw")
 
 	_, cmd := m.Update(keyPress("esc"))
@@ -265,7 +272,7 @@ func TestCreateSessionModel_EscCancels(t *testing.T) {
 }
 
 func TestCreateSessionModel_SpaceInsertsDashInName(t *testing.T) {
-	m := newCreateSessionModel("", nil)
+	m := newCreateSessionModel("", nil, nil, "")
 	m.nameInput.SetValue("braw")
 
 	m = updateModel(m, keyPress(" "))
@@ -276,7 +283,7 @@ func TestCreateSessionModel_SpaceInsertsDashInName(t *testing.T) {
 }
 
 func TestCreateSessionModel_SpaceInRepoIsNormal(t *testing.T) {
-	m := newCreateSessionModel("", nil)
+	m := newCreateSessionModel("", nil, nil, "")
 	m.nameInput.SetValue("neep")
 	m = updateModel(m, keyPress("tab"))
 
@@ -293,7 +300,7 @@ func TestCreateSessionModel_DropdownNavigation(t *testing.T) {
 		{Name: "canny", Path: "/canny"},
 		{Name: "bonnie", Path: "/bonnie"},
 	}
-	m := newCreateSessionModel("", repos)
+	m := newCreateSessionModel("", repos, nil, "")
 	m.nameInput.SetValue("neep")
 	m = updateModel(m, keyPress("tab"))
 
@@ -329,7 +336,7 @@ func TestCreateSessionModel_DownClampedAtEnd(t *testing.T) {
 	repos := []RepoSuggestion{
 		{Name: "neep", Path: "/neep"},
 	}
-	m := newCreateSessionModel("", repos)
+	m := newCreateSessionModel("", repos, nil, "")
 	m.nameInput.SetValue("kirk")
 	m = updateModel(m, keyPress("tab"))
 
@@ -346,7 +353,7 @@ func TestCreateSessionModel_EnterSelectsDropdownItem(t *testing.T) {
 		{Name: "braw", Path: "/path/to/braw"},
 		{Name: "canny", Path: "/path/to/canny"},
 	}
-	m := newCreateSessionModel("", repos)
+	m := newCreateSessionModel("", repos, nil, "")
 	m.nameInput.SetValue("neep")
 	m = updateModel(m, keyPress("tab"))
 	m = updateModel(m, keyPress("down"))
@@ -363,8 +370,172 @@ func TestCreateSessionModel_EnterSelectsDropdownItem(t *testing.T) {
 	}
 }
 
+func TestCreateSessionModel_DefaultAgentSelected(t *testing.T) {
+	agents := []string{"claude", "codex", "cursor"}
+	m := newCreateSessionModel("", nil, agents, "codex")
+	if m.selectedAgent() != "codex" {
+		t.Errorf("expected default agent codex selected, got %q", m.selectedAgent())
+	}
+}
+
+func TestCreateSessionModel_DefaultAgentMissingFallsBackToFirst(t *testing.T) {
+	agents := []string{"claude", "codex"}
+	m := newCreateSessionModel("", nil, agents, "thrawn")
+	if m.selectedAgent() != "claude" {
+		t.Errorf("expected fallback to first agent, got %q", m.selectedAgent())
+	}
+}
+
+func TestCreateSessionModel_TabReachesAgentField(t *testing.T) {
+	agents := []string{"claude", "codex"}
+	m := newCreateSessionModel("", nil, agents, "claude")
+	m.nameInput.SetValue("braw-session")
+
+	m = updateModel(m, keyPress("tab"))
+	if m.focus != createFieldRepo {
+		t.Fatalf("expected repo focus after first tab, got %d", m.focus)
+	}
+	m = updateModel(m, keyPress("tab"))
+	if m.focus != createFieldAgent {
+		t.Fatalf("expected agent focus after second tab, got %d", m.focus)
+	}
+}
+
+func TestCreateSessionModel_AgentCyclesWithArrows(t *testing.T) {
+	agents := []string{"claude", "codex", "cursor"}
+	m := newCreateSessionModel("", nil, agents, "claude")
+	m.nameInput.SetValue("braw-session")
+	m = updateModel(m, keyPress("tab"))
+	m = updateModel(m, keyPress("tab"))
+	if m.focus != createFieldAgent {
+		t.Fatalf("expected agent focus, got %d", m.focus)
+	}
+
+	m = updateModel(m, keyPress("right"))
+	if m.selectedAgent() != "codex" {
+		t.Errorf("expected codex after right, got %q", m.selectedAgent())
+	}
+	m = updateModel(m, keyPress("right"))
+	m = updateModel(m, keyPress("right"))
+	if m.selectedAgent() != "claude" {
+		t.Errorf("expected wrap to claude after three rights, got %q", m.selectedAgent())
+	}
+	m = updateModel(m, keyPress("left"))
+	if m.selectedAgent() != "cursor" {
+		t.Errorf("expected wrap to cursor after left from first, got %q", m.selectedAgent())
+	}
+}
+
+func TestCreateSessionModel_AgentCyclesWithUpDown(t *testing.T) {
+	agents := []string{"claude", "codex", "cursor"}
+	m := newCreateSessionModel("", nil, agents, "claude")
+	m.nameInput.SetValue("braw-session")
+	m = updateModel(m, keyPress("tab"))
+	m = updateModel(m, keyPress("tab"))
+	if m.focus != createFieldAgent {
+		t.Fatalf("expected agent focus, got %d", m.focus)
+	}
+
+	m = updateModel(m, keyPress("down"))
+	if m.selectedAgent() != "codex" {
+		t.Errorf("expected codex after down, got %q", m.selectedAgent())
+	}
+	m = updateModel(m, keyPress("up"))
+	if m.selectedAgent() != "claude" {
+		t.Errorf("expected claude after up, got %q", m.selectedAgent())
+	}
+	m = updateModel(m, keyPress("up"))
+	if m.selectedAgent() != "cursor" {
+		t.Errorf("expected wrap to cursor after up from first, got %q", m.selectedAgent())
+	}
+}
+
+func TestCreateSessionModel_ShiftTabFromAgentToRepo(t *testing.T) {
+	agents := []string{"claude", "codex"}
+	m := newCreateSessionModel("/tmp/repo", nil, agents, "claude")
+	m.nameInput.SetValue("braw-session")
+	m = updateModel(m, keyPress("tab"))   // name -> repo
+	m = updateModel(m, keyPress("enter")) // repo (non-empty) -> agent
+	if m.focus != createFieldAgent {
+		t.Fatalf("expected agent focus, got %d", m.focus)
+	}
+
+	m = updateModel(m, keyPress("shift+tab"))
+	if m.focus != createFieldRepo {
+		t.Errorf("expected shift+tab from agent to return to repo, got %d", m.focus)
+	}
+	m = updateModel(m, keyPress("shift+tab"))
+	if m.focus != createFieldName {
+		t.Errorf("expected shift+tab from repo to return to name, got %d", m.focus)
+	}
+}
+
+func TestCreateSessionModel_EnterOnRepoAdvancesToAgent(t *testing.T) {
+	agents := []string{"claude", "codex"}
+	m := newCreateSessionModel("/tmp/repo", nil, agents, "claude")
+	m.nameInput.SetValue("braw-session")
+	m = updateModel(m, keyPress("tab"))
+
+	m = updateModel(m, keyPress("enter"))
+	if m.done {
+		t.Error("enter on repo should advance to agent field, not submit, when agents exist")
+	}
+	if m.focus != createFieldAgent {
+		t.Errorf("expected focus on agent field, got %d", m.focus)
+	}
+}
+
+func TestCreateSessionModel_EnterOnAgentSubmits(t *testing.T) {
+	agents := []string{"claude", "codex"}
+	m := newCreateSessionModel("/tmp/repo", nil, agents, "claude")
+	m.nameInput.SetValue("braw-session")
+	m = updateModel(m, keyPress("tab"))
+	m = updateModel(m, keyPress("enter"))
+	m = updateModel(m, keyPress("right"))
+
+	m = updateModel(m, keyPress("enter"))
+	if !m.done {
+		t.Error("expected done=true after enter on agent field with valid inputs")
+	}
+	if m.selectedAgent() != "codex" {
+		t.Errorf("expected codex selected at submit, got %q", m.selectedAgent())
+	}
+}
+
+func TestCreateSessionModel_EnterOnEmptyRepoWithAgentsStaysOnRepo(t *testing.T) {
+	agents := []string{"claude", "codex"}
+	m := newCreateSessionModel("", nil, agents, "claude")
+	m.nameInput.SetValue("braw-session")
+	m = updateModel(m, keyPress("tab"))
+	if m.focus != createFieldRepo {
+		t.Fatalf("expected repo focus, got %d", m.focus)
+	}
+
+	m = updateModel(m, keyPress("enter"))
+	if m.done {
+		t.Error("enter on empty repo should not submit")
+	}
+	if m.focus != createFieldRepo {
+		t.Errorf("enter on empty repo should keep focus on repo, not advance to agent; got %d", m.focus)
+	}
+}
+
+func TestCreateSessionModel_NoAgentsEnterOnRepoSubmits(t *testing.T) {
+	m := newCreateSessionModel("/tmp/repo", nil, nil, "")
+	m.nameInput.SetValue("braw-session")
+	m = updateModel(m, keyPress("tab"))
+
+	m = updateModel(m, keyPress("enter"))
+	if !m.done {
+		t.Error("with no agents, enter on repo should submit directly")
+	}
+	if m.selectedAgent() != "" {
+		t.Errorf("expected empty agent when none configured, got %q", m.selectedAgent())
+	}
+}
+
 func TestCreateSessionModel_WindowSizeUpdates(t *testing.T) {
-	m := newCreateSessionModel("", nil)
+	m := newCreateSessionModel("", nil, nil, "")
 	m = updateModel(m, tea.WindowSizeMsg{Width: 120, Height: 40})
 	if m.width != 120 || m.height != 40 {
 		t.Errorf("expected 120x40, got %dx%d", m.width, m.height)

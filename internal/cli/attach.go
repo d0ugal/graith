@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/d0ugal/graith/internal/client"
+	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/spf13/cobra"
 )
@@ -33,6 +34,33 @@ func init() {
 
 func isInsideGraith() bool {
 	return os.Getenv("GRAITH_ATTACHED") != "" || os.Getenv("GRAITH_SESSION_ID") != ""
+}
+
+// agentChoices returns the configured agent names (sorted, with the default
+// first) and the default agent, for use by the interactive create form.
+func agentChoices() ([]string, string) {
+	return orderAgents(cfg.Agents, cfg.DefaultAgent), cfg.DefaultAgent
+}
+
+// orderAgents returns the agent names sorted alphabetically, with def hoisted to
+// the front when it is present in the map. A def that is empty or absent leaves
+// the list in plain sorted order.
+func orderAgents(agents map[string]config.Agent, def string) []string {
+	names := make([]string, 0, len(agents))
+	for name := range agents {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	if def != "" {
+		for i, n := range names {
+			if n == def {
+				names = append(names[:i], names[i+1:]...)
+				names = append([]string{def}, names...)
+				break
+			}
+		}
+	}
+	return names
 }
 
 func runAttach(cmd *cobra.Command, name string) error {
@@ -64,7 +92,8 @@ func runAttach(cmd *cobra.Command, name string) error {
 
 	if name == "" {
 		repos := client.DiscoverRepos(cfg.AllowedRepoPaths, list.Sessions)
-		result := client.RunOverlay(list.Sessions, "", previewFetcher(), sessionRefresher(), deleteSession, restartSession, stopSession, toggleStar, paths.Profile, nil, repos, cfg.Overlay.ShortcutKeys)
+		agents, defaultAgent := agentChoices()
+		result := client.RunOverlay(list.Sessions, "", previewFetcher(), sessionRefresher(), deleteSession, restartSession, stopSession, toggleStar, paths.Profile, nil, repos, cfg.Overlay.ShortcutKeys, agents, defaultAgent)
 		if result == nil || result.Action == "" {
 			return nil
 		}
@@ -72,6 +101,7 @@ func runAttach(cmd *cobra.Command, name string) error {
 			c.SendControl("create", protocol.CreateMsg{
 				Name:     result.CreateName,
 				RepoPath: result.CreateRepoPath,
+				Agent:    result.CreateAgent,
 			})
 			createResp, err := c.ReadControlResponse()
 			if err != nil {
@@ -166,7 +196,8 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 			protocol.DecodePayload(listResp, &list)
 
 			repos := client.DiscoverRepos(cfg.AllowedRepoPaths, list.Sessions)
-			overlayResult := client.RunOverlay(list.Sessions, sessionID, previewFetcher(), sessionRefresher(), deleteSession, restartSession, stopSession, toggleStar, paths.Profile, overlayCollapsed, repos, cfg.Overlay.ShortcutKeys)
+			agents, defaultAgent := agentChoices()
+			overlayResult := client.RunOverlay(list.Sessions, sessionID, previewFetcher(), sessionRefresher(), deleteSession, restartSession, stopSession, toggleStar, paths.Profile, overlayCollapsed, repos, cfg.Overlay.ShortcutKeys, agents, defaultAgent)
 			if overlayResult != nil {
 				overlayCollapsed = overlayResult.Collapsed
 			}
@@ -191,6 +222,7 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 				nc.SendControl("create", protocol.CreateMsg{
 					Name:     overlayResult.CreateName,
 					RepoPath: overlayResult.CreateRepoPath,
+					Agent:    overlayResult.CreateAgent,
 				})
 				createResp, err := nc.ReadControlResponse()
 				if err != nil {
@@ -383,7 +415,8 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 			var newSessionList protocol.SessionListMsg
 			protocol.DecodePayload(listResp, &newSessionList)
 			repos := client.DiscoverRepos(cfg.AllowedRepoPaths, newSessionList.Sessions)
-			name, repoPath := client.RunCreateInput(info.RepoPath, repos)
+			agents, defaultAgent := agentChoices()
+			name, repoPath, agent := client.RunCreateInput(info.RepoPath, repos, agents, defaultAgent)
 			if name == "" {
 				restoreScreen(sessionID)
 				nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
@@ -397,6 +430,7 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 			nc.SendControl("create", protocol.CreateMsg{
 				Name:     name,
 				RepoPath: repoPath,
+				Agent:    agent,
 			})
 			createResp, err := nc.ReadControlResponse()
 			if err != nil {

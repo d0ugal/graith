@@ -105,6 +105,7 @@ func resolveRepoPath(p string) string {
 const (
 	createFieldName = iota
 	createFieldRepo
+	createFieldAgent
 )
 
 type createSessionModel struct {
@@ -112,6 +113,8 @@ type createSessionModel struct {
 	repoInput textinput.Model
 	repos     []RepoSuggestion
 	filtered  []RepoSuggestion
+	agents    []string
+	agentIdx  int
 	focus     int
 	done      bool
 	width     int
@@ -121,7 +124,7 @@ type createSessionModel struct {
 	dropdownIdx  int
 }
 
-func newCreateSessionModel(defaultRepo string, repos []RepoSuggestion) createSessionModel {
+func newCreateSessionModel(defaultRepo string, repos []RepoSuggestion, agents []string, defaultAgent string) createSessionModel {
 	ni := textinput.New()
 	ni.Placeholder = "session-name"
 	ni.Focus()
@@ -136,14 +139,70 @@ func newCreateSessionModel(defaultRepo string, repos []RepoSuggestion) createSes
 		ri.SetValue(defaultRepo)
 	}
 
+	agentIdx := 0
+	for i, a := range agents {
+		if a == defaultAgent {
+			agentIdx = i
+			break
+		}
+	}
+
 	m := createSessionModel{
 		nameInput: ni,
 		repoInput: ri,
 		repos:     repos,
+		agents:    agents,
+		agentIdx:  agentIdx,
 		focus:     createFieldName,
 	}
 	m.updateFiltered()
 	return m
+}
+
+// lastField returns the index of the final focusable field. The agent field is
+// only present when there are agents to choose from.
+func (m createSessionModel) lastField() int {
+	if len(m.agents) == 0 {
+		return createFieldRepo
+	}
+	return createFieldAgent
+}
+
+// setFocus moves focus to the given field, updating text input focus and the
+// repo dropdown visibility accordingly. Returns the cursor blink command.
+func (m *createSessionModel) setFocus(f int) tea.Cmd {
+	m.focus = f
+	m.nameInput.Blur()
+	m.repoInput.Blur()
+	m.showDropdown = false
+	switch f {
+	case createFieldName:
+		m.nameInput.Focus()
+	case createFieldRepo:
+		m.repoInput.Focus()
+		m.showDropdown = len(m.filtered) > 0
+		m.dropdownIdx = -1
+	}
+	return textinput.Blink
+}
+
+// trySubmit marks the form done when the required fields are filled in.
+func (m *createSessionModel) trySubmit() tea.Cmd {
+	name := strings.TrimSpace(m.nameInput.Value())
+	repo := strings.TrimSpace(m.repoInput.Value())
+	if name == "" || repo == "" {
+		return nil
+	}
+	m.done = true
+	return tea.Quit
+}
+
+// selectedAgent returns the currently chosen agent name, or "" if none.
+func (m createSessionModel) selectedAgent() string {
+	if m.agentIdx < 0 || m.agentIdx >= len(m.agents) {
+		return ""
+	}
+	return m.agents[m.agentIdx]
 }
 
 func (m *createSessionModel) updateFiltered() {
@@ -183,39 +242,28 @@ func (m createSessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 
 		case "tab":
-			if m.focus == createFieldName {
-				m.nameInput.Blur()
-				m.repoInput.Focus()
-				m.focus = createFieldRepo
-				m.showDropdown = len(m.filtered) > 0
-				m.dropdownIdx = -1
-				return m, textinput.Blink
+			if m.focus < m.lastField() {
+				cmd := m.setFocus(m.focus + 1)
+				return m, cmd
 			}
 			return m, nil
 
 		case "shift+tab":
-			if m.focus == createFieldRepo {
-				m.repoInput.Blur()
-				m.nameInput.Focus()
-				m.focus = createFieldName
-				m.showDropdown = false
-				return m, textinput.Blink
+			if m.focus > createFieldName {
+				cmd := m.setFocus(m.focus - 1)
+				return m, cmd
 			}
 			return m, nil
 
 		case "enter":
-			if m.focus == createFieldName {
+			switch m.focus {
+			case createFieldName:
 				if strings.TrimSpace(m.nameInput.Value()) == "" {
 					return m, nil
 				}
-				m.nameInput.Blur()
-				m.repoInput.Focus()
-				m.focus = createFieldRepo
-				m.showDropdown = len(m.filtered) > 0
-				m.dropdownIdx = -1
-				return m, textinput.Blink
-			}
-			if m.focus == createFieldRepo {
+				cmd := m.setFocus(createFieldRepo)
+				return m, cmd
+			case createFieldRepo:
 				if m.showDropdown && m.dropdownIdx >= 0 && m.dropdownIdx < len(m.filtered) {
 					m.repoInput.SetValue(m.filtered[m.dropdownIdx].Path)
 					m.showDropdown = false
@@ -223,13 +271,21 @@ func (m createSessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.updateFiltered()
 					return m, nil
 				}
-				name := strings.TrimSpace(m.nameInput.Value())
-				repo := strings.TrimSpace(m.repoInput.Value())
-				if name == "" || repo == "" {
+				// Don't advance (or submit) on an empty repo — keep focus here so
+				// the blocking field stays visible, matching the name field's
+				// validate-before-advance behaviour.
+				if strings.TrimSpace(m.repoInput.Value()) == "" {
 					return m, nil
 				}
-				m.done = true
-				return m, tea.Quit
+				if len(m.agents) > 0 {
+					cmd := m.setFocus(createFieldAgent)
+					return m, cmd
+				}
+				cmd := m.trySubmit()
+				return m, cmd
+			case createFieldAgent:
+				cmd := m.trySubmit()
+				return m, cmd
 			}
 
 		case "down":
@@ -240,6 +296,10 @@ func (m createSessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
+			if m.focus == createFieldAgent && len(m.agents) > 0 {
+				m.agentIdx = (m.agentIdx + 1) % len(m.agents)
+				return m, nil
+			}
 
 		case "up":
 			if m.focus == createFieldRepo && m.showDropdown {
@@ -247,6 +307,28 @@ func (m createSessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.dropdownIdx < -1 {
 					m.dropdownIdx = -1
 				}
+				return m, nil
+			}
+			if m.focus == createFieldAgent && len(m.agents) > 0 {
+				m.agentIdx--
+				if m.agentIdx < 0 {
+					m.agentIdx = len(m.agents) - 1
+				}
+				return m, nil
+			}
+
+		case "left":
+			if m.focus == createFieldAgent && len(m.agents) > 0 {
+				m.agentIdx--
+				if m.agentIdx < 0 {
+					m.agentIdx = len(m.agents) - 1
+				}
+				return m, nil
+			}
+
+		case "right":
+			if m.focus == createFieldAgent && len(m.agents) > 0 {
+				m.agentIdx = (m.agentIdx + 1) % len(m.agents)
 				return m, nil
 			}
 
@@ -260,9 +342,10 @@ func (m createSessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	var cmd tea.Cmd
-	if m.focus == createFieldName {
+	switch m.focus {
+	case createFieldName:
 		m.nameInput, cmd = m.nameInput.Update(msg)
-	} else {
+	case createFieldRepo:
 		prevVal := m.repoInput.Value()
 		m.repoInput, cmd = m.repoInput.Update(msg)
 		if m.repoInput.Value() != prevVal {
@@ -323,8 +406,36 @@ func (m createSessionModel) View() tea.View {
 		}
 	}
 
+	if len(m.agents) > 0 {
+		selStyle := lipgloss.NewStyle().Bold(true).Foreground(colorGreen)
+		content.WriteString("\n\n")
+		content.WriteString(labelStyle.Render("Agent: "))
+		parts := make([]string, len(m.agents))
+		for i, a := range m.agents {
+			switch {
+			case i == m.agentIdx && m.focus == createFieldAgent:
+				parts[i] = selStyle.Render("‹ " + a + " ›")
+			case i == m.agentIdx:
+				parts[i] = selStyle.Render(a)
+			default:
+				parts[i] = dimStyle.Render(a)
+			}
+		}
+		content.WriteString(strings.Join(parts, "  "))
+	}
+
 	content.WriteString("\n\n")
-	content.WriteString(dimStyle.Render("tab next field  ↑↓ suggestions  enter confirm  esc cancel"))
+	var hint string
+	switch {
+	case m.focus == createFieldAgent:
+		// On the agent field both ↑↓ and ←→ cycle the selection.
+		hint = "tab next field  ↑↓ ←→ cycle agent  enter confirm  esc cancel"
+	case len(m.agents) > 0:
+		hint = "tab next field  ↑↓ suggestions  ←→ agent  enter confirm  esc cancel"
+	default:
+		hint = "tab next field  ↑↓ suggestions  enter confirm  esc cancel"
+	}
+	content.WriteString(dimStyle.Render(hint))
 
 	panel := lipgloss.NewStyle().
 		Background(colorPanel).
@@ -374,22 +485,22 @@ func (m createSessionModel) View() tea.View {
 }
 
 // RunCreateInput launches a bubbletea prompt for creating a session.
-// Returns (name, repoPath) or ("", "") on cancel.
-func RunCreateInput(defaultRepo string, repos []RepoSuggestion) (string, string) {
-	m := newCreateSessionModel(defaultRepo, repos)
+// Returns (name, repoPath, agent) or ("", "", "") on cancel.
+func RunCreateInput(defaultRepo string, repos []RepoSuggestion, agents []string, defaultAgent string) (string, string, string) {
+	m := newCreateSessionModel(defaultRepo, repos, agents, defaultAgent)
 	p := tea.NewProgram(m)
 	final, err := p.Run()
 	if err != nil {
-		return "", ""
+		return "", "", ""
 	}
 	result, ok := final.(createSessionModel)
 	if !ok || !result.done {
-		return "", ""
+		return "", "", ""
 	}
 	name := strings.TrimSpace(result.nameInput.Value())
 	repo := strings.TrimSpace(result.repoInput.Value())
 	if repo != "" {
 		repo = expandPath(repo)
 	}
-	return name, repo
+	return name, repo, result.selectedAgent()
 }

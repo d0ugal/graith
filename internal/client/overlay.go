@@ -562,8 +562,11 @@ type overlayModel struct {
 	createModel     *createSessionModel
 	createName      string
 	createRepoPath  string
+	createAgent     string
 	createDone      bool
 	repoSuggestions []RepoSuggestion
+	agents          []string
+	defaultAgent    string
 }
 
 func (m *overlayModel) resizeList() {
@@ -588,6 +591,7 @@ type OverlayResult struct {
 	SessionID      string
 	CreateName     string
 	CreateRepoPath string
+	CreateAgent    string
 	Collapsed      map[string]bool
 }
 
@@ -1247,6 +1251,7 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.createRepoPath != "" {
 				m.createRepoPath = expandPath(m.createRepoPath)
 			}
+			m.createAgent = cm.selectedAgent()
 			m.createDone = true
 			return m, tea.Quit
 		}
@@ -1581,7 +1586,7 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 					}
 				}
-				cm := newCreateSessionModel(defaultRepo, m.repoSuggestions)
+				cm := newCreateSessionModel(defaultRepo, m.repoSuggestions, m.agents, m.defaultAgent)
 				cm.width = m.width
 				cm.height = m.height
 				m.createModel = &cm
@@ -1901,7 +1906,7 @@ func (m overlayModel) View() tea.View {
 // RunOverlay launches the bubbletea overlay listing sessions grouped by repo.
 // currentSessionID highlights the session the user was just attached to.
 // fetchPreview is called asynchronously to load scrollback for the selected session.
-func RunOverlay(sessions []protocol.SessionInfo, currentSessionID string, fetchPreview func(sessionID string) string, refreshSessions func() []protocol.SessionInfo, deleteSession func(sessionID string) error, restartSession func(sessionID string) error, stopSession func(sessionID string) error, toggleStar func(sessionID string, star bool) error, profile string, collapsed map[string]bool, repoSuggestions []RepoSuggestion, shortcutKeys string) *OverlayResult {
+func RunOverlay(sessions []protocol.SessionInfo, currentSessionID string, fetchPreview func(sessionID string) string, refreshSessions func() []protocol.SessionInfo, deleteSession func(sessionID string) error, restartSession func(sessionID string) error, stopSession func(sessionID string) error, toggleStar func(sessionID string, star bool) error, profile string, collapsed map[string]bool, repoSuggestions []RepoSuggestion, shortcutKeys string, agents []string, defaultAgent string) *OverlayResult {
 	m := newOverlayModel(sessions, currentSessionID, fetchPreview, deleteSession, collapsed, []rune(shortcutKeys))
 	m.refreshSessions = refreshSessions
 	m.restartSession = restartSession
@@ -1909,6 +1914,8 @@ func RunOverlay(sessions []protocol.SessionInfo, currentSessionID string, fetchP
 	m.toggleStar = toggleStar
 	m.profile = profile
 	m.repoSuggestions = repoSuggestions
+	m.agents = agents
+	m.defaultAgent = defaultAgent
 	p := tea.NewProgram(m)
 
 	final, err := p.Run()
@@ -1929,6 +1936,7 @@ func RunOverlay(sessions []protocol.SessionInfo, currentSessionID string, fetchP
 		overlayResult.Action = "create"
 		overlayResult.CreateName = result.createName
 		overlayResult.CreateRepoPath = result.createRepoPath
+		overlayResult.CreateAgent = result.createAgent
 		return overlayResult
 	}
 
