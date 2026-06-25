@@ -123,6 +123,37 @@ func TestFetchChecksAggregate(t *testing.T) {
 	}
 }
 
+func TestFetchCommentsSlurpFlattensPages(t *testing.T) {
+	orig := ghRunner
+	defer func() { ghRunner = orig }()
+	// gh api --paginate --slurp wraps each page in an outer array.
+	ghRunner = func(ctx context.Context, dir string, args ...string) (string, error) {
+		return `[[{"id":1,"user":{"login":"ailsa"},"body":"a"}],[{"id":2,"user":{"login":"hamish"},"body":"b"}]]`, nil
+	}
+	comments, ok := fetchComments(context.Background(), "croft/loch", 1, "", "issues")
+	if !ok {
+		t.Fatal("expected ok=true")
+	}
+	if len(comments) != 2 || comments[0].ID != 1 || comments[1].ID != 2 {
+		t.Errorf("expected 2 flattened comments, got %+v", comments)
+	}
+}
+
+func TestFetchCommentsDegradedReportsNotOK(t *testing.T) {
+	orig := ghRunner
+	defer func() { ghRunner = orig }()
+	ghRunner = func(ctx context.Context, dir string, args ...string) (string, error) {
+		return "", context.DeadlineExceeded
+	}
+	comments, ok := fetchComments(context.Background(), "croft/loch", 1, "", "issues")
+	if ok {
+		t.Error("degraded fetch should report ok=false")
+	}
+	if comments != nil {
+		t.Errorf("degraded fetch should return nil, got %v", comments)
+	}
+}
+
 func TestResolvePRNoPR(t *testing.T) {
 	orig := ghRunner
 	defer func() { ghRunner = orig }()
