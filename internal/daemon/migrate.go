@@ -152,7 +152,6 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 
 	// --- start the target agent in the same worktree, seeded ---
 	seed := transcript.BuildSeedPrompt(srcAgent, contextPath)
-	startedAt := time.Now()
 	res, startErr := sm.resumeWithSummaryAndPrompt(id, rows, cols, "Migrated from "+srcAgent, seed)
 
 	// Post-start health check: a PTY that spawns but exits immediately (bad
@@ -199,10 +198,10 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 		return SessionState{}, fmt.Errorf("migrate to %q failed: %w (original %q agent restored)", targetAgent, startErr, srcAgent)
 	}
 
-	// --- best-effort native session-id capture (async, never blocks) ---
-	if scrapesID(targetAgent) {
-		go sm.captureNativeSessionID(id, targetAgent, worktreePath, "", startedAt, res.PID)
-	}
+	// Native session-id capture is handled inside resumeWithSummaryAndPrompt
+	// (called above), which uses the session's effective CODEX_HOME and the
+	// real post-spawn timestamp. A second capture here would be redundant and
+	// would scrape the daemon's default root instead.
 	return res, nil
 }
 
@@ -269,14 +268,20 @@ func scrapesID(agent string) bool {
 // falls back to its configured empty-id behaviour (Codex: `resume --last`;
 // others: fresh start).
 //
-// It never overwrites a non-empty id, and a generation check (expectedPID)
-// stops a stale goroutine from an earlier start clobbering a later one — both
-// matter now that capture runs on every Create/Fork/Resume, not just Migrate,
-// and that shared/in-place sessions can run concurrently in one cwd.
+// It never overwrites a non-empty id. A generation check ((expectedPID,
+// expectedPIDStartTime) vs the stored values) stops a stale goroutine from an
+// earlier start clobbering a later one — PID alone is insufficient because a
+// resume holds the *old* PID in state until the new one is committed (and PIDs
+// can be reused), so the start time disambiguates the generation.
+//
+// Concurrency note: the scrape itself refuses to guess when two sessions share
+// a cwd — scrapeSessionID returns no id if multiple distinct native ids match
+// the (since, cwd) window — so this never cross-assigns ids between concurrent
+// shared-worktree / in-place sessions; they fall back to a non-pinned resume.
 //
 // stateRoot is the agent's effective state root (e.g. CODEX_HOME from the
 // session's launch env); pass "" to fall back to the daemon's default.
-func (sm *SessionManager) captureNativeSessionID(id, agent, worktreePath, stateRoot string, since time.Time, expectedPID int) {
+func (sm *SessionManager) captureNativeSessionID(id, agent, worktreePath, stateRoot string, since time.Time, expectedPID int, expectedPIDStartTime int64) {
 	if !scrapesID(agent) {
 		return
 	}
@@ -293,7 +298,7 @@ func (sm *SessionManager) captureNativeSessionID(id, agent, worktreePath, stateR
 			// session gone or migrated away — nothing to record.
 		case s.AgentSessionID != "":
 			// already captured (or forced) — never clobber a good id.
-		case expectedPID != 0 && s.PID != expectedPID:
+		case expectedPID != 0 && (s.PID != expectedPID || (expectedPIDStartTime != 0 && s.PIDStartTime != expectedPIDStartTime)):
 			// a newer start replaced this process generation; its own capture
 			// goroutine owns the id now.
 		default:
@@ -308,14 +313,12 @@ func (sm *SessionManager) captureNativeSessionID(id, agent, worktreePath, stateR
 
 // scrapeSessionID reads the native session id for a single agent from its
 // on-disk state, matching only files created at/after `since` in worktreePath.
+// It returns no id when the match is ambiguous (multiple distinct ids in the
+// same cwd window), so callers never pin the wrong conversation.
 func scrapeSessionID(agent, worktreePath, stateRoot string, since time.Time) (string, bool) {
 	switch agent {
 	case "codex":
-		path, ok := transcript.LocateCodexSinceIn(stateRoot, worktreePath, since)
-		if !ok {
-			return "", false
-		}
-		return transcript.CodexRolloutID(path)
+		return transcript.CodexSessionIDSince(stateRoot, worktreePath, since)
 	default:
 		return "", false
 	}

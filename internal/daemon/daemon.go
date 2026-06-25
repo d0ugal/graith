@@ -902,7 +902,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 	// later resume is deterministic. Skipped when the id was forced (agentSessionID
 	// non-empty). Uses the session's effective state root (e.g. CODEX_HOME).
 	if scrapesID(agentName) && agentSessionID == "" {
-		go sm.captureNativeSessionID(id, agentName, worktreePath, env["CODEX_HOME"], startedAt, result.PID)
+		go sm.captureNativeSessionID(id, agentName, worktreePath, env["CODEX_HOME"], startedAt, result.PID, result.PIDStartTime)
 	}
 
 	return result, nil
@@ -1111,6 +1111,13 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 	if len(args) == 0 {
 		args = agent.Args
 	}
+	// Empty-source guard: if fork_args templates the source's native id but the
+	// source never captured one (e.g. a pre-feature or capture-timed-out Codex
+	// session), expanding would emit a literal empty arg (`codex fork ""`).
+	// Start a fresh conversation instead; capture below records the new id.
+	if argsNeedForkSourceID(args) && sourceAgentSessionID == "" {
+		args = agent.Args
+	}
 
 	expandedArgs, err := config.ExpandSlice(args, vars)
 	if err != nil {
@@ -1219,6 +1226,8 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 			"features", opts.Features, "workdir", opts.WorktreeDir)
 	}
 
+	// Pre-spawn time for native session-id capture (see Create).
+	startedAt := time.Now()
 	ptySess, err := grpty.NewSession(grpty.SessionOpts{
 		ID:         id,
 		Command:    command,
@@ -1286,6 +1295,13 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 	sm.mu.Unlock()
 
 	go sm.watchSession(id, ptySess)
+
+	// Capture the forked child's native id for self-minting agents (Codex): the
+	// fork mints a new conversation graith didn't choose, so read it from disk
+	// for deterministic later resume. Skipped when the id was forced (Claude).
+	if scrapesID(agentName) && agentSessionID == "" {
+		go sm.captureNativeSessionID(id, agentName, worktreePath, env["CODEX_HOME"], startedAt, result.PID, result.PIDStartTime)
+	}
 
 	return result, nil
 }
@@ -1423,6 +1439,17 @@ func argsNeedAgentID(args []string) bool {
 	return false
 }
 
+// argsNeedForkSourceID reports whether any arg contains the raw
+// {fork_source_agent_session_id} template token (checked before ExpandSlice).
+func argsNeedForkSourceID(args []string) bool {
+	for _, a := range args {
+		if strings.Contains(a, "{fork_source_agent_session_id}") {
+			return true
+		}
+	}
+	return false
+}
+
 // resolveResumeArgs picks the args for resuming a session and applies the
 // empty-id guard. resume_args are used unless absent or FreshStart, in which
 // case agent.Args (a fresh start) is used. When the chosen args template
@@ -1439,6 +1466,12 @@ func resolveResumeArgs(agent config.Agent, sessAgent, sessAgentSessionID string,
 	if !freshStart && sessAgentSessionID == "" && argsNeedAgentID(resumeArgs) {
 		if sessAgent == "codex" {
 			return []string{"resume", "--last"}, "no native id captured; codex resuming --last"
+		}
+		// Fresh start. Guard against agent.Args *also* templating the id (e.g. a
+		// future forced agent whose force was gated off) — returning it would
+		// re-introduce the empty `--session ""` arg. Drop to no args in that case.
+		if argsNeedAgentID(agent.Args) {
+			return nil, "no native id captured; starting fresh (dropped id-templated args)"
 		}
 		return agent.Args, "no native id captured; starting fresh"
 	}
@@ -1946,7 +1979,7 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	// to its empty-id behaviour; scrape the id now so the *next* resume is
 	// deterministic. Skipped when an id is already known.
 	if scrapesID(sessAgent) && sessAgentSessionID == "" {
-		go sm.captureNativeSessionID(id, sessAgent, sessWorktreePath, env["CODEX_HOME"], startedAt, result.PID)
+		go sm.captureNativeSessionID(id, sessAgent, sessWorktreePath, env["CODEX_HOME"], startedAt, result.PID, result.PIDStartTime)
 	}
 
 	if scenarioIDForRepublish != "" {
