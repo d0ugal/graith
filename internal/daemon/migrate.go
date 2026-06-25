@@ -139,7 +139,7 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 	s.Agent = targetAgent
 	s.Model = targetModel
 	s.FreshStart = true // force a fresh start (agent.Args + seed), not resume_args
-	if targetAgent == "claude" {
+	if forcesID(targetAgent) {
 		s.AgentSessionID = newAgentSessionID()
 	} else {
 		s.AgentSessionID = ""
@@ -199,9 +199,9 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 		return SessionState{}, fmt.Errorf("migrate to %q failed: %w (original %q agent restored)", targetAgent, startErr, srcAgent)
 	}
 
-	// --- best-effort Codex session-id capture (async, never blocks) ---
-	if targetAgent == "codex" {
-		go sm.captureCodexSessionID(id, worktreePath, startedAt)
+	// --- best-effort native session-id capture (async, never blocks) ---
+	if scrapesID(targetAgent) {
+		go sm.captureNativeSessionID(id, targetAgent, worktreePath, "", startedAt, res.PID)
 	}
 	return res, nil
 }
@@ -241,28 +241,82 @@ func newAgentSessionID() string {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
-// captureCodexSessionID polls for the rollout the freshly-started Codex agent
-// writes, and records its id so later resume/migrate-back is deterministic.
-// Best-effort: on timeout the id is left empty and Codex falls back to
-// resume --last.
-func (sm *SessionManager) captureCodexSessionID(id, worktreePath string, since time.Time) {
+// forcesID reports whether graith assigns the agent's native session id at
+// launch (the agent accepts a client-supplied id via its args). For these
+// agents graith mints the id with newAgentSessionID; for all others the id must
+// be captured from the agent's own on-disk state after start (captureNativeSessionID).
+//
+// Only Claude is forced today. OpenCode also has a --session flag, but forcing
+// it is gated on verifying it accepts a brand-new id in graith's UUID format at
+// first start (OpenCode's native ids are not UUIDs) — until then OpenCode falls
+// back to a fresh conversation via the empty-id guard rather than shipping a
+// broken `--session ""`.
+func forcesID(agent string) bool {
+	return agent == "claude"
+}
+
+// scrapesID reports whether graith can recover an agent's native session id by
+// reading its on-disk transcript after start. Only agents with a known,
+// reverse-engineered state layout are listed; others resume fresh until a
+// locator is added (e.g. Agy under ~/.gemini, Cursor under ~/.cursor/projects).
+func scrapesID(agent string) bool {
+	return agent == "codex"
+}
+
+// captureNativeSessionID polls for the native session id a freshly-started,
+// self-minting agent writes to disk and records it so later resume is
+// deterministic. Best-effort: on timeout the id is left empty and the agent
+// falls back to its configured empty-id behaviour (Codex: `resume --last`;
+// others: fresh start).
+//
+// It never overwrites a non-empty id, and a generation check (expectedPID)
+// stops a stale goroutine from an earlier start clobbering a later one — both
+// matter now that capture runs on every Create/Fork/Resume, not just Migrate,
+// and that shared/in-place sessions can run concurrently in one cwd.
+//
+// stateRoot is the agent's effective state root (e.g. CODEX_HOME from the
+// session's launch env); pass "" to fall back to the daemon's default.
+func (sm *SessionManager) captureNativeSessionID(id, agent, worktreePath, stateRoot string, since time.Time, expectedPID int) {
+	if !scrapesID(agent) {
+		return
+	}
 	for i := 0; i < 12; i++ {
 		time.Sleep(250 * time.Millisecond)
-		path, ok := transcript.LocateCodexSince(worktreePath, since)
-		if !ok {
-			continue
-		}
-		sid, ok := transcript.CodexRolloutID(path)
+		sid, ok := scrapeSessionID(agent, worktreePath, stateRoot, since)
 		if !ok || sid == "" {
 			continue
 		}
 		sm.mu.Lock()
-		if s, ok := sm.state.Sessions[id]; ok && s.Agent == "codex" {
+		s, exists := sm.state.Sessions[id]
+		switch {
+		case !exists || s.Agent != agent:
+			// session gone or migrated away — nothing to record.
+		case s.AgentSessionID != "":
+			// already captured (or forced) — never clobber a good id.
+		case expectedPID != 0 && s.PID != expectedPID:
+			// a newer start replaced this process generation; its own capture
+			// goroutine owns the id now.
+		default:
 			s.AgentSessionID = sid
 			_ = sm.saveState()
 		}
 		sm.mu.Unlock()
 		return
 	}
-	sm.log.Warn("codex session id capture timed out", "session_id", id)
+	sm.log.Warn("native session id capture timed out", "session_id", id, "agent", agent)
+}
+
+// scrapeSessionID reads the native session id for a single agent from its
+// on-disk state, matching only files created at/after `since` in worktreePath.
+func scrapeSessionID(agent, worktreePath, stateRoot string, since time.Time) (string, bool) {
+	switch agent {
+	case "codex":
+		path, ok := transcript.LocateCodexSinceIn(stateRoot, worktreePath, since)
+		if !ok {
+			return "", false
+		}
+		return transcript.CodexRolloutID(path)
+	default:
+		return "", false
+	}
 }

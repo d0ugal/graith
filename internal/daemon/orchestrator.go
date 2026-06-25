@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	"crypto/rand"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -77,10 +76,8 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 		return SessionState{}, fmt.Errorf("generate orchestrator token: %w", err)
 	}
 	agentSessionID := ""
-	if agentName == "claude" {
-		b := make([]byte, 16)
-		_, _ = rand.Read(b)
-		agentSessionID = fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+	if forcesID(agentName) {
+		agentSessionID = newAgentSessionID()
 	}
 
 	sm.mu.Lock()
@@ -415,10 +412,8 @@ func (sm *SessionManager) handleOrchestratorExit(ctx context.Context, id string)
 
 	if backoffLevel+1 >= orchestratorFreshStartThreshold {
 		sm.mu.Lock()
-		if s, ok := sm.state.Sessions[id]; ok && s.Agent == "claude" {
-			b := make([]byte, 16)
-			_, _ = rand.Read(b)
-			s.AgentSessionID = fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+		if s, ok := sm.state.Sessions[id]; ok && forcesID(s.Agent) {
+			s.AgentSessionID = newAgentSessionID()
 			s.FreshStart = true
 			sm.log.Info("regenerating orchestrator agent session ID for fresh start", "id", id)
 		}

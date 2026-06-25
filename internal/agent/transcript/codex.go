@@ -123,9 +123,21 @@ func findCodexRolloutByID(sessionsDir, id string) (string, bool) {
 // time avoids picking a stale rollout from a prior session in the same cwd
 // (a real hazard for in-place sessions and codex→codex migrations).
 func LocateCodexSince(worktreePath string, since time.Time) (string, bool) {
-	root, err := codexHome()
-	if err != nil {
-		return "", false
+	return LocateCodexSinceIn("", worktreePath, since)
+}
+
+// LocateCodexSinceIn is LocateCodexSince scoped to an explicit Codex state root
+// (CODEX_HOME). Pass "" to use the daemon's default root. This matters because
+// the daemon-side scrape runs in the daemon process, but CODEX_HOME can be set
+// per-session via the agent's launch env — reading the daemon's os.Getenv would
+// scan the wrong directory and silently miss the rollout.
+func LocateCodexSinceIn(root, worktreePath string, since time.Time) (string, bool) {
+	if root == "" {
+		var err error
+		root, err = codexHome()
+		if err != nil {
+			return "", false
+		}
 	}
 	sessionsDir := filepath.Join(root, "sessions")
 	want := canonPath(worktreePath)
