@@ -272,6 +272,37 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 			c = nc
 			continue
 
+		case client.ResultMessageOverlay:
+			nc, err := freshClient()
+			if err != nil {
+				return err
+			}
+			// Build a peer-id -> name map from the live session list so the
+			// rail can label conversations (sent messages carry only a peer id).
+			nc.SendControl("list", struct{}{})
+			msgListResp, err := nc.ReadControlResponse()
+			if err != nil {
+				nc.Close()
+				return err
+			}
+			var msgList protocol.SessionListMsg
+			protocol.DecodePayload(msgListResp, &msgList)
+			names := make(map[string]string, len(msgList.Sessions))
+			for _, s := range msgList.Sessions {
+				names[s.ID] = s.Name
+			}
+
+			client.RunMessageOverlay(sessionID, conversationFetcher(sessionID), names)
+
+			restoreScreen(sessionID)
+			nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+			attachResp, _ := nc.ReadControlResponse()
+			protocol.DecodePayload(attachResp, &info)
+			opts.SessionID = sessionID
+			opts.Info = &info
+			c = nc
+			continue
+
 		case client.ResultShell:
 			nc, err := freshClient()
 			if err != nil {
@@ -728,6 +759,16 @@ func sessionRefresher() func() []protocol.SessionInfo {
 			return nil
 		}
 		return list.Sessions
+	}
+}
+
+func conversationFetcher(sessionID string) func() []protocol.ConversationMessage {
+	return func() []protocol.ConversationMessage {
+		msgs, err := client.FetchConversation(cfg, paths, cfgFile, sessionID)
+		if err != nil {
+			return nil
+		}
+		return msgs
 	}
 }
 

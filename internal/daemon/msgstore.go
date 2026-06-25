@@ -74,6 +74,7 @@ func initSchema(db *sql.DB) error {
 		CREATE INDEX IF NOT EXISTS idx_messages_stream_seq ON messages(stream, seq);
 		CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(thread_id) WHERE thread_id IS NOT NULL;
 		CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);
+		CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages(sender_id);
 
 		CREATE TABLE IF NOT EXISTS cursors (
 			subscriber TEXT NOT NULL,
@@ -212,6 +213,63 @@ func (s *MsgStore) Read(stream, subscriber string, onlyUnread bool, threadID str
 		var m Message
 		if err := rows.Scan(&m.ID, &m.Seq, &m.Stream, &m.SenderID, &m.SenderName, &m.Body, &m.ThreadID, &m.ReplyTo, &m.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan message: %w", err)
+		}
+		msgs = append(msgs, m)
+	}
+	return msgs, rows.Err()
+}
+
+// Conversation returns every direct message involving `self`, both directions:
+// messages delivered to self's inbox (stream = "inbox:"+self) and messages self
+// sent to any peer's inbox (sender_id = self AND an inbox: stream other than
+// self's own). Topic messages are excluded — a "conversation" is direct
+// messages only. Results are ordered by created_at, with id as a deterministic
+// tie-breaker (seq is per-stream, so it is not a usable cross-stream order key).
+//
+// When limit > 0, the most recent `limit` messages are returned (still in
+// ascending order). The query reads inbox streams the caller may not own; the
+// daemon authorises the target via checkTarget before calling this, and the
+// sender_id filter ensures the outbound branch only returns messages the target
+// session actually authored.
+func (s *MsgStore) Conversation(self string, limit int) ([]Message, error) {
+	inbox := "inbox:" + self
+	// Inner query selects both directions; the OR de-duplicates a row that
+	// could match both branches (it cannot here, because the outbound branch
+	// excludes self's own inbox). GLOB is case-sensitive so it can use the
+	// stream index, unlike LIKE which SQLite treats case-insensitively.
+	inner := `
+		SELECT id, seq, stream, sender_id, sender_name, body,
+		       COALESCE(thread_id, ''), COALESCE(reply_to, ''), created_at
+		FROM messages
+		WHERE stream = ?
+		   OR (sender_id = ? AND stream GLOB 'inbox:*' AND stream <> ?)`
+	args := []any{inbox, self, inbox}
+
+	var q string
+	if limit > 0 {
+		// Take the most recent `limit` rows, then re-sort ascending so the
+		// client renders oldest-to-newest.
+		q = `SELECT * FROM (` + inner + `
+			ORDER BY created_at DESC, id DESC
+			LIMIT ?
+		) ORDER BY created_at ASC, id ASC`
+		args = append(args, limit)
+	} else {
+		q = inner + `
+		ORDER BY created_at ASC, id ASC`
+	}
+
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query conversation: %w", err)
+	}
+	defer rows.Close()
+
+	var msgs []Message
+	for rows.Next() {
+		var m Message
+		if err := rows.Scan(&m.ID, &m.Seq, &m.Stream, &m.SenderID, &m.SenderName, &m.Body, &m.ThreadID, &m.ReplyTo, &m.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan conversation message: %w", err)
 		}
 		msgs = append(msgs, m)
 	}
