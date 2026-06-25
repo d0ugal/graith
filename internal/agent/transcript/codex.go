@@ -172,6 +172,58 @@ func LocateCodexSinceIn(root, worktreePath string, since time.Time) (string, boo
 	return best, true
 }
 
+// CodexSessionIDSince returns the native session id of the Codex rollout for a
+// cwd created at/after `since`. Unlike LocateCodexSinceIn (newest-by-mtime), it
+// refuses to guess when the (since, cwd) window contains rollouts with two or
+// more DIFFERENT session ids — the concurrent shared-worktree / in-place case —
+// returning ("", false) so the caller falls back to a non-pinned resume rather
+// than cross-assigning another session's conversation. Pass root "" for the
+// daemon default.
+func CodexSessionIDSince(root, worktreePath string, since time.Time) (string, bool) {
+	if root == "" {
+		var err error
+		root, err = codexHome()
+		if err != nil {
+			return "", false
+		}
+	}
+	sessionsDir := filepath.Join(root, "sessions")
+	want := canonPath(worktreePath)
+
+	seen := make(map[string]struct{})
+	var found string
+	_ = filepath.WalkDir(sessionsDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		name := d.Name()
+		if !strings.HasPrefix(name, "rollout-") || !strings.HasSuffix(name, ".jsonl") {
+			return nil
+		}
+		info, statErr := d.Info()
+		if statErr != nil || info.ModTime().Before(since) {
+			return nil
+		}
+		cwd, ok := codexRolloutCwd(path)
+		if !ok || canonPath(cwd) != want {
+			return nil
+		}
+		id, ok := CodexRolloutID(path)
+		if !ok || id == "" {
+			return nil
+		}
+		if _, dup := seen[id]; !dup {
+			seen[id] = struct{}{}
+			found = id
+		}
+		return nil
+	})
+	if len(seen) != 1 {
+		return "", false // 0 = none yet, 2+ = ambiguous (concurrent same-cwd)
+	}
+	return found, true
+}
+
 type codexLine struct {
 	Type    string          `json:"type"`
 	Payload json.RawMessage `json:"payload"`

@@ -37,6 +37,11 @@ func TestResolveResumeArgs(t *testing.T) {
 		{"claude with id uses resume_args", claude, "claude", "bide-id", false, []string{"--resume", "{agent_session_id}"}, false},
 		{"freshStart uses agent.Args, no guard", codex, "codex", "", true, nil, false},
 		{"cursor no token, no guard", cursor, "cursor", "", false, []string{"resume"}, false},
+		{
+			"fresh fallback drops id-templated args",
+			config.Agent{Args: []string{"--session", "{agent_session_id}"}, ResumeArgs: []string{"--session", "{agent_session_id}"}},
+			"whin", "", false, nil, true,
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -139,14 +144,64 @@ func TestCaptureNativeSessionIDCodex(t *testing.T) {
 
 	sm.state.Sessions["bide"] = &SessionState{
 		ID: "bide", Name: "braw-bothy", Agent: "codex",
-		AgentSessionID: "", PID: 4242,
+		AgentSessionID: "", PID: 4242, PIDStartTime: 111,
 		Status: StatusRunning, WorktreePath: cwd,
 	}
 
-	sm.captureNativeSessionID("bide", "codex", cwd, root, since, 4242)
+	sm.captureNativeSessionID("bide", "codex", cwd, root, since, 4242, 111)
 
 	if got := sm.state.Sessions["bide"].AgentSessionID; got != "braw-native-id" {
 		t.Fatalf("AgentSessionID = %q; want braw-native-id", got)
+	}
+}
+
+func TestCaptureNativeSessionIDStartTimeMismatch(t *testing.T) {
+	sm := newMigrateTestManager(t)
+	root := t.TempDir()
+	cwd := t.TempDir()
+	writeCodexRollout(t, root, "skelf-id", cwd, time.Now())
+
+	// Same PID but a different start time = a recycled PID from a later start.
+	sm.state.Sessions["skelf"] = &SessionState{
+		ID: "skelf", Name: "skelf-bothy", Agent: "codex",
+		AgentSessionID: "", PID: 50, PIDStartTime: 999,
+		Status: StatusRunning, WorktreePath: cwd,
+	}
+
+	sm.captureNativeSessionID("skelf", "codex", cwd, root, time.Now().Add(-time.Minute), 50, 111)
+
+	if got := sm.state.Sessions["skelf"].AgentSessionID; got != "" {
+		t.Fatalf("AgentSessionID = %q; want empty (start-time mismatch must not write)", got)
+	}
+}
+
+func TestCodexSessionIDSinceAmbiguous(t *testing.T) {
+	root := t.TempDir()
+	cwd := t.TempDir()
+	since := time.Now().Add(-time.Minute)
+
+	// Single rollout → resolves.
+	writeCodexRollout(t, root, "lone-id", cwd, time.Now())
+	if id, ok := transcript.CodexSessionIDSince(root, cwd, since); !ok || id != "lone-id" {
+		t.Fatalf("CodexSessionIDSince = %q,%v; want lone-id,true", id, ok)
+	}
+
+	// A second rollout with a DIFFERENT id in the same cwd → ambiguous, refuse.
+	writeCodexRollout(t, root, "thrawn-id", cwd, time.Now())
+	if id, ok := transcript.CodexSessionIDSince(root, cwd, since); ok {
+		t.Fatalf("CodexSessionIDSince = %q,%v; want refusal on ambiguous same-cwd match", id, ok)
+	}
+}
+
+func TestArgsNeedForkSourceID(t *testing.T) {
+	if !argsNeedForkSourceID([]string{"fork", "{fork_source_agent_session_id}"}) {
+		t.Error("expected fork-source token to be detected")
+	}
+	if argsNeedForkSourceID([]string{"fork", "{agent_session_id}"}) {
+		t.Error("agent_session_id is not the fork-source token")
+	}
+	if argsNeedForkSourceID(nil) {
+		t.Error("empty args need no fork-source id")
 	}
 }
 
@@ -163,7 +218,7 @@ func TestCaptureNativeSessionIDNoOverwrite(t *testing.T) {
 		Status: StatusRunning, WorktreePath: cwd,
 	}
 
-	sm.captureNativeSessionID("bonnie", "codex", cwd, root, time.Now().Add(-time.Minute), 7)
+	sm.captureNativeSessionID("bonnie", "codex", cwd, root, time.Now().Add(-time.Minute), 7, 0)
 
 	if got := sm.state.Sessions["bonnie"].AgentSessionID; got != "kept-id" {
 		t.Fatalf("AgentSessionID = %q; want kept-id (must not overwrite)", got)
@@ -183,7 +238,7 @@ func TestCaptureNativeSessionIDGenerationMismatch(t *testing.T) {
 		Status: StatusRunning, WorktreePath: cwd,
 	}
 
-	sm.captureNativeSessionID("auld", "codex", cwd, root, time.Now().Add(-time.Minute), 111)
+	sm.captureNativeSessionID("auld", "codex", cwd, root, time.Now().Add(-time.Minute), 111, 0)
 
 	if got := sm.state.Sessions["auld"].AgentSessionID; got != "" {
 		t.Fatalf("AgentSessionID = %q; want empty (stale generation must not write)", got)
@@ -203,7 +258,7 @@ func TestCaptureNativeSessionIDNonScrapeAgent(t *testing.T) {
 		Status: StatusRunning, WorktreePath: cwd,
 	}
 
-	sm.captureNativeSessionID("neep", "claude", cwd, root, time.Now().Add(-time.Minute), 1)
+	sm.captureNativeSessionID("neep", "claude", cwd, root, time.Now().Add(-time.Minute), 1, 0)
 
 	if got := sm.state.Sessions["neep"].AgentSessionID; got != "" {
 		t.Fatalf("AgentSessionID = %q; want empty (claude is not scraped)", got)
