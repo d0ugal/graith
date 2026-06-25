@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.59.1](https://github.com/d0ugal/graith/compare/v0.59.0...v0.59.1) (2026-06-25)
+
+
+### Bug Fixes
+
+* **daemon:** wait for exit watchers in StopAll to fix test flakiness ([cb97b4d](https://github.com/d0ugal/graith/commit/cb97b4dafbe1584b700d249463f1fc1354251ddc))
+
 ## [0.59.0](https://github.com/d0ugal/graith/compare/v0.58.0...v0.59.0) (2026-06-25)
 
 
