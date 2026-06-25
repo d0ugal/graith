@@ -86,6 +86,19 @@ Run `gr --help` for the full command list.\
 enabled = false
 interval = "1h"
 
+[pr_watch]
+enabled = false
+notify_ci_failures = true
+notify_review_comments = false
+notify_review_decisions = false
+notify_pr_lifecycle = true
+notify_ci_recovery = false
+poll_pending = "30s"
+poll_terminal = "5m"
+poll_merged = "15m"
+max_notifications_per_pr = 10
+debounce = "2m"
+
 [status_bar]
 enabled = true
 position = "bottom"

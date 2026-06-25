@@ -45,6 +45,29 @@ func (sm *SessionManager) onAgentStatusChange(sessionID, sessionName, oldStatus,
 	sm.sendNotification(sessionName, newStatus, notifCfg.Command)
 }
 
+// daemonSenderID / daemonSenderName identify messages the daemon authors
+// itself (e.g. PR/CI notices), so an agent sees "New message from graith".
+const (
+	daemonSenderID   = "graith"
+	daemonSenderName = "graith"
+)
+
+// notifyFromDaemon publishes a daemon-authored message into a session's inbox
+// and then explicitly triggers notifyInbox (which auto-resumes a stopped
+// session). A bare MsgStore.Publish does NOT notify — only the handler send-path
+// and this helper wire Publish→notifyInbox. The full detail lives in the body;
+// the agent reads it via `gr msg inbox --all --ack`.
+func (sm *SessionManager) notifyFromDaemon(sessionID, body string) {
+	if sm.messages == nil {
+		return
+	}
+	if _, err := sm.messages.Publish("inbox:"+sessionID, daemonSenderID, daemonSenderName, body, "", ""); err != nil {
+		sm.log.Error("failed to publish daemon notification", "session", sessionID, "err", err)
+		return
+	}
+	go sm.notifyInbox(sessionID, daemonSenderID, daemonSenderName)
+}
+
 // notifyInbox injects a notification into the target session's PTY when a
 // message is published to its inbox. If the session is stopped, it is
 // auto-resumed first — the resume flow's notifyUnreadInbox handles the

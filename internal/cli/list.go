@@ -118,16 +118,16 @@ func printFlat(cmd *cobra.Command, sessions []protocol.SessionInfo, now time.Tim
 	})
 
 	tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "NAME\tREPO\tAGENT\tSTATUS\tACTIVITY\tMODEL\tBRANCH\tGIT\tAGE\tATTACHED")
+	fmt.Fprintln(tw, "NAME\tREPO\tAGENT\tSTATUS\tACTIVITY\tMODEL\tBRANCH\tGIT\tPR\tAGE\tATTACHED")
 	for _, s := range sessions {
 		name := s.Name
 		if s.Starred {
 			name = "★ " + name
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			name, s.RepoName, s.Agent, s.Status,
 			formatAgentStatus(s), formatModel(s),
-			formatBranch(s), formatGitStatus(s), formatAge(s, now), formatAttached(s, now))
+			formatBranch(s), formatGitStatus(s), formatPR(s), formatAge(s, now), formatAttached(s, now))
 	}
 	tw.Flush()
 }
@@ -163,7 +163,7 @@ func printTree(cmd *cobra.Command, sessions []protocol.SessionInfo, now time.Tim
 	}
 
 	tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "NAME\tREPO\tAGENT\tSTATUS\tACTIVITY\tMODEL\tBRANCH\tGIT\tAGE\tATTACHED")
+	fmt.Fprintln(tw, "NAME\tREPO\tAGENT\tSTATUS\tACTIVITY\tMODEL\tBRANCH\tGIT\tPR\tAGE\tATTACHED")
 
 	var walk func(s protocol.SessionInfo, prefix, childPrefix string)
 	walk = func(s protocol.SessionInfo, prefix, childPrefix string) {
@@ -171,10 +171,10 @@ func printTree(cmd *cobra.Command, sessions []protocol.SessionInfo, now time.Tim
 		if s.Starred {
 			name = "★ " + name
 		}
-		fmt.Fprintf(tw, "%s%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+		fmt.Fprintf(tw, "%s%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			prefix, name, s.RepoName, s.Agent, s.Status,
 			formatAgentStatus(s), formatModel(s),
-			formatBranch(s), formatGitStatus(s), formatAge(s, now), formatAttached(s, now))
+			formatBranch(s), formatGitStatus(s), formatPR(s), formatAge(s, now), formatAttached(s, now))
 
 		kids := children[s.ID]
 		for i, kid := range kids {
@@ -253,6 +253,25 @@ func formatBranch(s protocol.SessionInfo) string {
 		branch = "(in-place)"
 	}
 	return branch
+}
+
+func formatPR(s protocol.SessionInfo) string {
+	if s.PullRequest == nil {
+		return ""
+	}
+	pr := s.PullRequest
+	out := fmt.Sprintf("#%d %s", pr.Number, pr.State)
+	if s.CI != nil && s.CI.State != "" {
+		switch s.CI.State {
+		case "passing":
+			out += " CI:ok"
+		case "failing":
+			out += " CI:fail"
+		case "pending":
+			out += " CI:…"
+		}
+	}
+	return out
 }
 
 func formatGitStatus(s protocol.SessionInfo) string {

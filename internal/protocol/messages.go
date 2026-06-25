@@ -293,6 +293,22 @@ type SessionInfo struct {
 	SummaryFaded    bool               `json:"summary_faded,omitempty"`
 	LastOutputAt    string             `json:"last_output_at,omitempty"`
 	MigratedFrom    string             `json:"migrated_from,omitempty"`
+	PullRequest     *PRInfo            `json:"pull_request,omitempty"`
+	CI              *CIInfo            `json:"ci,omitempty"`
+}
+
+// PRInfo is the linked GitHub pull request for a session's branch.
+type PRInfo struct {
+	Number         int    `json:"number"`
+	State          string `json:"state"` // open | draft | merged | closed
+	URL            string `json:"url,omitempty"`
+	ReviewDecision string `json:"review_decision,omitempty"` // approved | changes_requested | review_required
+}
+
+// CIInfo is the aggregate CI status for a session's linked PR.
+type CIInfo struct {
+	State         string   `json:"state"` // passing | failing | pending
+	FailingChecks []string `json:"failing_checks,omitempty"`
 }
 
 type IncludedRepoInfo struct {

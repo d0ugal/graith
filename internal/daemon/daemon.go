@@ -67,6 +67,7 @@ type SessionManager struct {
 	orchestratorExitCh chan string
 	recentExits        []time.Time
 	lastInboxNotifyAt  map[string]time.Time
+	prWatch            *prWatchState
 }
 
 // NewSessionManager creates a SessionManager with the given config and paths.
@@ -80,6 +81,7 @@ func NewSessionManager(cfg *config.Config, paths config.Paths, log *slog.Logger)
 		tokenIndex:         make(map[string]string),
 		orchestratorExitCh: make(chan string, 4),
 		lastInboxNotifyAt:  make(map[string]time.Time),
+		prWatch:            newPRWatchState(),
 		cfg:                cfg,
 		paths:              paths,
 		log:                log,
@@ -3899,6 +3901,7 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 	go sm.RunDetectionLoop(ctx)
 	go sm.RunMessageCleanupLoop(ctx)
 	go sm.RunGitPullLoop(ctx)
+	go sm.RunPRWatchLoop(ctx)
 
 	go sm.orchestratorSupervisor(ctx, sm.orchestratorExitCh)
 	go sm.ensureOrchestrator(ctx)

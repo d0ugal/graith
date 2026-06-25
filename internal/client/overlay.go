@@ -1731,6 +1731,27 @@ func (m overlayModel) View() tea.View {
 			panelContent.WriteString(lipgloss.NewStyle().Foreground(colorYellow).Render("config stale — restart to apply changes"))
 		}
 
+		if s.PullRequest != nil {
+			pr := s.PullRequest
+			prLine := fmt.Sprintf("PR #%d %s", pr.Number, pr.State)
+			ciColor := dim
+			if s.CI != nil {
+				switch s.CI.State {
+				case "passing":
+					prLine += "  CI: passing"
+					ciColor = lipgloss.NewStyle().Foreground(colorGreen)
+				case "failing":
+					prLine += "  CI: failing"
+					ciColor = lipgloss.NewStyle().Foreground(colorRed)
+				case "pending":
+					prLine += "  CI: pending"
+					ciColor = lipgloss.NewStyle().Foreground(colorYellow)
+				}
+			}
+			panelContent.WriteString("\n")
+			panelContent.WriteString(ciColor.Render(prLine))
+		}
+
 		var line2 []string
 		if s.WorktreePath != "" {
 			line2 = append(line2, shortenPath(s.WorktreePath))
