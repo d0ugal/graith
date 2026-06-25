@@ -187,7 +187,11 @@ write_dirs = ["~/.claude"]
 [agents.codex]
 command = "codex"
 args = []
-resume_args = ["resume", "--last"]
+# Codex mints its own session id; graith captures it from the rollout on disk
+# after start (captureNativeSessionID). Resume pins to that id when known; when
+# it wasn't captured, the daemon's empty-id guard falls back to `resume --last`
+# (cwd-scoped, best-effort).
+resume_args = ["resume", "{agent_session_id}"]
 fork_args = ["fork", "{fork_source_agent_session_id}"]
 
 [agents.codex.sandbox]

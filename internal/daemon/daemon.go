@@ -506,10 +506,8 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 	}
 
 	agentSessionID := ""
-	if agentName == "claude" {
-		b := make([]byte, 16)
-		_, _ = rand.Read(b)
-		agentSessionID = fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+	if forcesID(agentName) {
+		agentSessionID = newAgentSessionID()
 	}
 
 	// Resolve sandbox under the lock (reads config, fast).
@@ -815,6 +813,9 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 			"features", opts.Features, "workdir", opts.WorktreeDir)
 	}
 
+	// Record the pre-spawn time so native session-id capture only matches
+	// transcript files this start creates (race-safe against stale rollouts).
+	startedAt := time.Now()
 	ptySess, err := grpty.NewSession(grpty.SessionOpts{
 		ID:         id,
 		Command:    command,
@@ -895,6 +896,14 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 	sm.mu.Unlock()
 
 	go sm.watchSession(id, ptySess)
+
+	// Best-effort native session-id capture for self-minting agents (Codex):
+	// graith didn't force the id, so read it from the agent's on-disk state so
+	// later resume is deterministic. Skipped when the id was forced (agentSessionID
+	// non-empty). Uses the session's effective state root (e.g. CODEX_HOME).
+	if scrapesID(agentName) && agentSessionID == "" {
+		go sm.captureNativeSessionID(id, agentName, worktreePath, env["CODEX_HOME"], startedAt, result.PID)
+	}
 
 	return result, nil
 }
@@ -994,10 +1003,8 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 	}
 
 	agentSessionID := ""
-	if agentName == "claude" {
-		b := make([]byte, 16)
-		_, _ = rand.Read(b)
-		agentSessionID = fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+	if forcesID(agentName) {
+		agentSessionID = newAgentSessionID()
 	}
 
 	sandboxed, err := sm.resolveSandbox(agentName)
@@ -1405,6 +1412,39 @@ func (sm *SessionManager) recordExit() {
 	}
 }
 
+// argsNeedAgentID reports whether any arg still contains the raw
+// {agent_session_id} template token (checked before ExpandSlice runs).
+func argsNeedAgentID(args []string) bool {
+	for _, a := range args {
+		if strings.Contains(a, "{agent_session_id}") {
+			return true
+		}
+	}
+	return false
+}
+
+// resolveResumeArgs picks the args for resuming a session and applies the
+// empty-id guard. resume_args are used unless absent or FreshStart, in which
+// case agent.Args (a fresh start) is used. When the chosen args template
+// {agent_session_id} but no native id was captured, expanding would emit a
+// literal empty arg (e.g. `opencode --session ""`), which misbehaves — so Codex
+// falls back to its cwd-scoped `resume --last` and other agents start fresh.
+// The check inspects the RAW args before expansion (the token is gone after
+// ExpandSlice). Returns the args plus an optional log note when a fallback fired.
+func resolveResumeArgs(agent config.Agent, sessAgent, sessAgentSessionID string, freshStart bool) ([]string, string) {
+	resumeArgs := agent.ResumeArgs
+	if len(resumeArgs) == 0 || freshStart {
+		resumeArgs = agent.Args
+	}
+	if !freshStart && sessAgentSessionID == "" && argsNeedAgentID(resumeArgs) {
+		if sessAgent == "codex" {
+			return []string{"resume", "--last"}, "no native id captured; codex resuming --last"
+		}
+		return agent.Args, "no native id captured; starting fresh"
+	}
+	return resumeArgs, ""
+}
+
 // Resume restarts a stopped session using the agent's resume_args.
 //
 // Uses two-phase locking: the GitHub username discovery happens before the lock,
@@ -1624,9 +1664,9 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 		sm.mu.Unlock()
 	}
 
-	resumeArgs := agent.ResumeArgs
-	if len(resumeArgs) == 0 || sessFreshStart {
-		resumeArgs = agent.Args
+	resumeArgs, resumeNote := resolveResumeArgs(agent, sessAgent, sessAgentSessionID, sessFreshStart)
+	if resumeNote != "" {
+		sm.log.Info(resumeNote, "session_id", id, "agent", sessAgent)
 	}
 
 	vars := config.TemplateVars{
@@ -1813,6 +1853,8 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 			"features", opts.Features, "workdir", opts.WorktreeDir)
 	}
 
+	// Pre-spawn time for native session-id capture (see Create).
+	startedAt := time.Now()
 	ptySess, err := grpty.NewSession(grpty.SessionOpts{
 		ID:         id,
 		Command:    command,
@@ -1899,6 +1941,13 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 
 	go sm.watchSession(id, ptySess)
 	go sm.notifyUnreadInbox(id)
+
+	// If a self-minting agent (Codex) had no captured id, this resume fell back
+	// to its empty-id behaviour; scrape the id now so the *next* resume is
+	// deterministic. Skipped when an id is already known.
+	if scrapesID(sessAgent) && sessAgentSessionID == "" {
+		go sm.captureNativeSessionID(id, sessAgent, sessWorktreePath, env["CODEX_HOME"], startedAt, result.PID)
+	}
 
 	if scenarioIDForRepublish != "" {
 		sm.republishManifests(scenarioIDForRepublish)
