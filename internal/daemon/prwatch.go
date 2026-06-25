@@ -44,7 +44,6 @@ type prWatchCursor struct {
 	failing             map[string]bool // failing check names already delivered
 	lastIssueCommentID  int64
 	lastReviewCommentID int64
-	lastReviewID        int64
 	notifyCount         int // per headRefOid (reset when head SHA changes)
 	primed              bool
 }
@@ -99,6 +98,8 @@ func (sm *SessionManager) runPRWatchTick(ctx context.Context, cfg *configPRWatch
 	targets := sm.prWatchTargets()
 	now := time.Now()
 
+	sm.prunePRWatchState()
+
 	polled := 0
 	for _, t := range targets {
 		if polled >= prWatchBatchCap {
@@ -116,15 +117,22 @@ func (sm *SessionManager) runPRWatchTick(ctx context.Context, cfg *configPRWatch
 	}
 }
 
-// prWatchTargets snapshots eligible sessions under RLock. Eligible = running or
-// stopped, has a repo, not shared-worktree, not in-place, with a resolvable
-// branch. Shared/in-place are excluded in v1 (their SessionState.Branch is empty
-// and ownership is ambiguous).
+// prWatchTargets returns eligible sessions with a resolved branch. Eligible =
+// running or stopped, has a repo, not shared-worktree, not in-place. Shared/
+// in-place are excluded in v1 (their SessionState.Branch is empty and ownership
+// is ambiguous).
+//
+// The raw session fields are snapshotted under RLock; the branch is then
+// resolved OFF-lock, because effectiveBranch may shell out to git
+// (symbolic-ref) when SessionState.Branch is empty — running a subprocess under
+// sm.mu could stall gr list.
 func (sm *SessionManager) prWatchTargets() []prWatchTarget {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
+	type raw struct {
+		id, name, branch, worktreePath string
+	}
+	var rawTargets []raw
 
-	var targets []prWatchTarget
+	sm.mu.RLock()
 	for id, s := range sm.state.Sessions {
 		if s.Status != StatusRunning && s.Status != StatusStopped {
 			continue
@@ -132,12 +140,20 @@ func (sm *SessionManager) prWatchTargets() []prWatchTarget {
 		if s.RepoPath == "" || s.SharedWorktree || s.InPlace {
 			continue
 		}
-		branch := effectiveBranch(s.Branch, s.WorktreePath)
+		rawTargets = append(rawTargets, raw{
+			id: id, name: s.Name, branch: s.Branch, worktreePath: s.WorktreePath,
+		})
+	}
+	sm.mu.RUnlock()
+
+	var targets []prWatchTarget
+	for _, r := range rawTargets {
+		branch := effectiveBranch(r.branch, r.worktreePath)
 		if branch == "" {
 			continue
 		}
 		targets = append(targets, prWatchTarget{
-			id: id, name: s.Name, branch: branch, worktreePath: s.WorktreePath,
+			id: r.id, name: r.name, branch: branch, worktreePath: r.worktreePath,
 		})
 	}
 	return targets
@@ -186,6 +202,40 @@ func pollIntervalFor(cfg *configPRWatch, prState, ciState string) time.Duration 
 	}
 }
 
+// prunePRWatchState drops per-session bookkeeping for sessions that no longer
+// exist, so the maps don't grow unbounded over a long-lived daemon.
+func (sm *SessionManager) prunePRWatchState() {
+	sm.mu.RLock()
+	live := make(map[string]bool, len(sm.state.Sessions))
+	for id := range sm.state.Sessions {
+		live[id] = true
+	}
+	sm.mu.RUnlock()
+
+	sm.prWatch.mu.Lock()
+	defer sm.prWatch.mu.Unlock()
+	for id := range sm.prWatch.cursors {
+		if !live[id] {
+			delete(sm.prWatch.cursors, id)
+		}
+	}
+	for id := range sm.prWatch.lastSent {
+		if !live[id] {
+			delete(sm.prWatch.lastSent, id)
+		}
+	}
+	for id := range sm.prWatch.nextPoll {
+		if !live[id] {
+			delete(sm.prWatch.nextPoll, id)
+		}
+	}
+	for id := range sm.prWatch.rateLog {
+		if !live[id] {
+			delete(sm.prWatch.rateLog, id)
+		}
+	}
+}
+
 func (sm *SessionManager) schedulePoll(id string, after time.Duration) {
 	sm.prWatch.mu.Lock()
 	sm.prWatch.nextPoll[id] = time.Now().Add(after)
@@ -218,13 +268,19 @@ func (sm *SessionManager) diffAndBuild(cfg *configPRWatch, t prWatchTarget, slug
 	// Prime-on-first-observation: establish a baseline without re-notifying old
 	// comments/state, but still surface a currently-failing CI so a restart
 	// doesn't strand a stopped agent on a red build.
+	//
+	// If the comment fetch degraded, defer priming the comment cursors AND defer
+	// marking primed — otherwise we'd baseline the comment cursors at 0 from a
+	// partial read and dump the whole backlog as "new" on the next poll. CI is
+	// fetched separately, so the currently-failing notify can still fire.
 	if !cur.primed {
-		cur.primed = true
 		cur.state = d.State
 		cur.reviewDecision = d.ReviewDecision
-		cur.lastIssueCommentID = maxCommentID(d.IssueComments)
-		cur.lastReviewCommentID = maxCommentID(d.ReviewComments)
-		cur.lastReviewID = maxReviewID(d.Reviews)
+		if d.CommentsOK {
+			cur.primed = true
+			cur.lastIssueCommentID = maxCommentID(d.IssueComments)
+			cur.lastReviewCommentID = maxCommentID(d.ReviewComments)
+		}
 		if d.CIState == "failing" && cfg.NotifyCIFailures {
 			if _, ok := sm.gate(cfg, t.id, cur); ok {
 				for _, name := range d.FailingChecks {
@@ -255,14 +311,23 @@ func (sm *SessionManager) diffAndBuild(cfg *configPRWatch, t prWatchTarget, slug
 			}
 		}
 	}
-	if d.CIState != "failing" {
-		// CI recovered or is pending — clear failing set so a later regression re-fires.
-		if cfg.NotifyCIRecovery && len(cur.failing) > 0 && d.CIState == "passing" {
+	switch d.CIState {
+	case "passing":
+		if cfg.NotifyCIRecovery && len(cur.failing) > 0 {
+			// Only clear the failing set once the recovery notice is actually
+			// delivered; if the gate rejects it (debounce/cap/rate-limit),
+			// keep cur.failing so recovery re-fires on a later poll (the
+			// cursor-advance-only-on-delivery invariant).
 			if _, ok := sm.gate(cfg, t.id, cur); ok {
 				out = append(out, fmt.Sprintf("CI is green again on PR #%d (%s).", d.Number, t.branch))
+				cur.failing = map[string]bool{}
 			}
+		} else {
+			cur.failing = map[string]bool{}
 		}
-		cur.failing = map[string]bool{}
+	case "pending":
+		// A re-run in progress: keep the prior failing set so we don't reclassify
+		// every check as "newly failing" if it goes red again.
 	}
 
 	// --- PR lifecycle (informational) ---
@@ -300,12 +365,11 @@ func (sm *SessionManager) diffAndBuild(cfg *configPRWatch, t prWatchTarget, slug
 				cur.lastReviewCommentID = maxInt64(cur.lastReviewCommentID, maxCommentID(d.ReviewComments))
 			}
 		}
-	} else {
+	} else if d.CommentsOK {
 		// Keep cursors current so flipping the gate on later doesn't dump history.
 		cur.lastIssueCommentID = maxInt64(cur.lastIssueCommentID, maxCommentID(d.IssueComments))
 		cur.lastReviewCommentID = maxInt64(cur.lastReviewCommentID, maxCommentID(d.ReviewComments))
 	}
-	cur.lastReviewID = maxInt64(cur.lastReviewID, maxReviewID(d.Reviews))
 
 	return out
 }
@@ -445,16 +509,6 @@ func maxCommentID(comments []ghComment) int64 {
 	for _, c := range comments {
 		if c.ID > m {
 			m = c.ID
-		}
-	}
-	return m
-}
-
-func maxReviewID(reviews []ghReview) int64 {
-	var m int64
-	for _, r := range reviews {
-		if r.ID > m {
-			m = r.ID
 		}
 	}
 	return m

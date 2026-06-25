@@ -3,6 +3,7 @@ package daemon
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/d0ugal/graith/internal/config"
 )
@@ -26,7 +27,7 @@ func TestDiffAndBuild_PrimeThenNoReNotify(t *testing.T) {
 	cfg := allOnConfig()
 	t1 := prWatchTarget{id: "bide", name: "bide", branch: "bide"}
 	d := prData{
-		Number: 7, State: "open", HeadRefOid: "sha1", CIState: "passing",
+		Number: 7, State: "open", HeadRefOid: "sha1", CIState: "passing", CommentsOK: true,
 		IssueComments: []ghComment{{ID: 100, User: ghUser{Login: "ailsa"}, Body: "old"}},
 	}
 	// First poll primes the baseline — existing comment must NOT notify.
@@ -44,7 +45,7 @@ func TestDiffAndBuild_PrimeNotifiesCurrentCIFailure(t *testing.T) {
 	sm := newPRWatchSM()
 	cfg := allOnConfig()
 	t1 := prWatchTarget{id: "haar", branch: "haar"}
-	d := prData{Number: 9, State: "open", HeadRefOid: "sha1", CIState: "failing", FailingChecks: []string{"build"}}
+	d := prData{Number: 9, State: "open", HeadRefOid: "sha1", CIState: "failing", FailingChecks: []string{"build"}, CommentsOK: true}
 	out := sm.diffAndBuild(cfg, t1, "croft/loch", d)
 	if len(out) != 1 || !strings.Contains(out[0], "CI failed") {
 		t.Fatalf("prime against failing CI should notify, got %v", out)
@@ -57,15 +58,15 @@ func TestDiffAndBuild_CITransitionAndDedup(t *testing.T) {
 	t1 := prWatchTarget{id: "thrawn", branch: "thrawn"}
 
 	// Prime: passing.
-	sm.diffAndBuild(cfg, t1, "croft/loch", prData{Number: 1, State: "open", HeadRefOid: "sha1", CIState: "passing"})
+	sm.diffAndBuild(cfg, t1, "croft/loch", prData{Number: 1, State: "open", HeadRefOid: "sha1", CIState: "passing", CommentsOK: true})
 
 	// Transition to failing → notify once.
-	out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{Number: 1, State: "open", HeadRefOid: "sha1", CIState: "failing", FailingChecks: []string{"build"}})
+	out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{Number: 1, State: "open", HeadRefOid: "sha1", CIState: "failing", FailingChecks: []string{"build"}, CommentsOK: true})
 	if len(out) != 1 {
 		t.Fatalf("pass→fail should notify once, got %v", out)
 	}
 	// Same failure again → debounced/dedup, no new notify.
-	out = sm.diffAndBuild(cfg, t1, "croft/loch", prData{Number: 1, State: "open", HeadRefOid: "sha1", CIState: "failing", FailingChecks: []string{"build"}})
+	out = sm.diffAndBuild(cfg, t1, "croft/loch", prData{Number: 1, State: "open", HeadRefOid: "sha1", CIState: "failing", FailingChecks: []string{"build"}, CommentsOK: true})
 	if len(out) != 0 {
 		t.Fatalf("repeat of same failure should not re-notify, got %v", out)
 	}
@@ -78,11 +79,11 @@ func TestDiffAndBuild_GatesCIvsComments(t *testing.T) {
 	t1 := prWatchTarget{id: "canny", branch: "canny"}
 
 	// Prime passing with no comments.
-	sm.diffAndBuild(cfg, t1, "croft/loch", prData{Number: 2, State: "open", HeadRefOid: "sha1", CIState: "passing"})
+	sm.diffAndBuild(cfg, t1, "croft/loch", prData{Number: 2, State: "open", HeadRefOid: "sha1", CIState: "passing", CommentsOK: true})
 
 	// New comment arrives but comments are gated off → no notify.
 	out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
-		Number: 2, State: "open", HeadRefOid: "sha1", CIState: "passing",
+		Number: 2, State: "open", HeadRefOid: "sha1", CIState: "passing", CommentsOK: true,
 		IssueComments: []ghComment{{ID: 500, User: ghUser{Login: "hamish"}, Body: "a nit"}},
 	})
 	if len(out) != 0 {
@@ -94,10 +95,10 @@ func TestDiffAndBuild_ReviewCommentAwarenessFraming(t *testing.T) {
 	sm := newPRWatchSM()
 	cfg := allOnConfig()
 	t1 := prWatchTarget{id: "wynd", branch: "wynd"}
-	sm.diffAndBuild(cfg, t1, "croft/loch", prData{Number: 3, State: "open", HeadRefOid: "sha1", CIState: "passing"})
+	sm.diffAndBuild(cfg, t1, "croft/loch", prData{Number: 3, State: "open", HeadRefOid: "sha1", CIState: "passing", CommentsOK: true})
 
 	out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
-		Number: 3, State: "open", HeadRefOid: "sha1", CIState: "passing",
+		Number: 3, State: "open", HeadRefOid: "sha1", CIState: "passing", CommentsOK: true,
 		ReviewComments: []ghComment{{ID: 9001, User: ghUser{Login: "coderabbitai[bot]"}, Body: "consider X", Path: "a.go", Line: 4}},
 	})
 	if len(out) != 1 {
@@ -136,6 +137,50 @@ func TestGateRateLimit(t *testing.T) {
 	}
 	if allowed != 5 {
 		t.Errorf("rate-limit should allow 5 per window, allowed %d", allowed)
+	}
+}
+
+func TestDiffAndBuild_PrimeDefersOnCommentFetchFailure(t *testing.T) {
+	// If the comment fetch degraded on the priming poll, we must NOT baseline the
+	// comment cursor at 0 and must not mark primed — otherwise the next good poll
+	// dumps the whole backlog as "new".
+	sm := newPRWatchSM()
+	cfg := allOnConfig()
+	t1 := prWatchTarget{id: "dreich", branch: "dreich"}
+	existing := []ghComment{{ID: 100, User: ghUser{Login: "ailsa"}, Body: "old"}}
+
+	if out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 5, State: "open", HeadRefOid: "sha1", CIState: "passing",
+		IssueComments: existing, CommentsOK: false,
+	}); len(out) != 0 {
+		t.Fatalf("degraded prime should not notify, got %v", out)
+	}
+	if out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 5, State: "open", HeadRefOid: "sha1", CIState: "passing",
+		IssueComments: existing, CommentsOK: true,
+	}); len(out) != 0 {
+		t.Fatalf("backlog must not be dumped after a degraded prime, got %v", out)
+	}
+}
+
+func TestPrunePRWatchState(t *testing.T) {
+	sm := newPRWatchSM()
+	sm.state = &State{Sessions: map[string]*SessionState{"braw": {ID: "braw"}}}
+	sm.prWatch.cursors["braw"] = &prWatchCursor{failing: map[string]bool{}}
+	sm.prWatch.cursors["thrawn"] = &prWatchCursor{failing: map[string]bool{}}
+	sm.prWatch.nextPoll["thrawn"] = time.Now()
+	sm.prWatch.lastSent["thrawn"] = time.Now()
+
+	sm.prunePRWatchState()
+
+	if _, ok := sm.prWatch.cursors["braw"]; !ok {
+		t.Error("live session cursor should be retained")
+	}
+	if _, ok := sm.prWatch.cursors["thrawn"]; ok {
+		t.Error("dead session cursor should be pruned")
+	}
+	if _, ok := sm.prWatch.nextPoll["thrawn"]; ok {
+		t.Error("dead session nextPoll should be pruned")
 	}
 }
 
