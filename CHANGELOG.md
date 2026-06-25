@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.59.0](https://github.com/d0ugal/graith/compare/v0.58.0...v0.59.0) (2026-06-25)
+
+
+### Features
+
+* add PR & CI awareness with agent notifications ([034a7fd](https://github.com/d0ugal/graith/commit/034a7fd5540ef28439dc91732bc6a756056f040f))
+* **overlay:** add message viewer overlay (ctrl+b m) ([77d954f](https://github.com/d0ugal/graith/commit/77d954f0d7b8698f7b40407b760b9de546b57735))
+* **resume:** capture native agent session id to resume conversations ([355b392](https://github.com/d0ugal/graith/commit/355b3929e3840483b8a640ffdb8099c2b955380d))
+
+
+### Bug Fixes
+
+* address ship-it review findings (claude) ([42d00c0](https://github.com/d0ugal/graith/commit/42d00c05d5a777f603ec17f1dd66929d1c47fe5c))
+* address ship-it review findings (codex) ([5da873c](https://github.com/d0ugal/graith/commit/5da873c873765a95895e09b144dcf18e44d2b031))
+* **overlay:** address message-overlay review findings ([ec4a44e](https://github.com/d0ugal/graith/commit/ec4a44e527a190829a6d59267467ba0bd0645a11))
+* **overlay:** avoid SELECT * in Conversation query (unqueryvet lint) ([28b9f92](https://github.com/d0ugal/graith/commit/28b9f929cec3e0c8c8586844614c5590cd7aae68))
+* **resume:** wire Fork capture, dedupe migrate, harden id capture ([265d77d](https://github.com/d0ugal/graith/commit/265d77dad2d8a1f2c57a8ca7b30d015556fba4ea))
+* satisfy gocritic appendAssign in pr-watch ([91053c4](https://github.com/d0ugal/graith/commit/91053c422f07e13f4d9f0a88a563fa2709b07b98))
+
 ## [0.58.0](https://github.com/d0ugal/graith/compare/v0.57.0...v0.58.0) (2026-06-25)
 
 
