@@ -97,6 +97,12 @@ func (e *testEnv) teardown() {
 		c.Close()
 	}
 	e.srv.Shutdown()
+	// Stop all sessions and wait for their exit watchers to finish. Without
+	// this, a watcher launched on session exit can still be writing state or
+	// publishing a status change when the t.Cleanup hooks close the message
+	// store and remove the temp dir, causing "database is closed" errors and
+	// "directory not empty" cleanup failures.
+	e.sm.StopAll(context.Background())
 }
 
 func (e *testEnv) connect(t *testing.T) (*protocol.FrameReader, *protocol.FrameWriter) {
