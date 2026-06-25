@@ -1256,6 +1256,8 @@ func toSessionInfo(s SessionState, cfg *config.Config, hr *hookReport) protocol.
 		CreatedAt:      s.CreatedAt.Format(time.RFC3339),
 		Dirty:          s.GitDirty,
 		UnpushedCount:  s.GitUnpushed,
+		PullRequest:    prInfo(s.PullRequest),
+		CI:             ciInfo(s.CI),
 		Sandboxed:      s.Sandboxed,
 		SharedWorktree: s.SharedWorktree,
 		InPlace:        s.InPlace,

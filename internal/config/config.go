@@ -34,6 +34,7 @@ type Config struct {
 	Approvals        Approvals          `toml:"approvals"`
 	Status           StatusConfig       `toml:"status"`
 	GitPull          GitPullConfig      `toml:"git_pull"`
+	PRWatch          PRWatchConfig      `toml:"pr_watch"`
 	MCPServers       []MCPServerConfig  `toml:"mcp_servers"`
 	Overlay          Overlay            `toml:"overlay"`
 	Orchestrator     OrchestratorConfig `toml:"orchestrator"`
@@ -91,6 +92,67 @@ func (g GitPullConfig) IntervalDuration() time.Duration {
 		return time.Hour
 	}
 	return d
+}
+
+// PRWatchConfig controls the PR & CI awareness loop, which resolves each
+// session's GitHub PR via the gh CLI, polls its CI checks and review comments,
+// and notifies the owning session's inbox on meaningful transitions.
+//
+// CI failures and review feedback are gated separately because they carry
+// different authority: a CI failure is a machine verdict (safe to act on,
+// default on); a review comment or decision is human intent that may not be
+// actionable (default off).
+type PRWatchConfig struct {
+	Enabled               bool   `toml:"enabled"`
+	NotifyCIFailures      bool   `toml:"notify_ci_failures"`
+	NotifyReviewComments  bool   `toml:"notify_review_comments"`
+	NotifyReviewDecisions bool   `toml:"notify_review_decisions"`
+	NotifyPRLifecycle     bool   `toml:"notify_pr_lifecycle"`
+	NotifyCIRecovery      bool   `toml:"notify_ci_recovery"`
+	PollPending           string `toml:"poll_pending"`
+	PollTerminal          string `toml:"poll_terminal"`
+	PollMerged            string `toml:"poll_merged"`
+	MaxNotificationsPerPR int    `toml:"max_notifications_per_pr"`
+	Debounce              string `toml:"debounce"`
+}
+
+func parseDurationOr(s string, fallback time.Duration) time.Duration {
+	if s == "" {
+		return fallback
+	}
+	d, err := ParseDurationWithDays(s)
+	if err != nil {
+		return fallback
+	}
+	return d
+}
+
+// PollPendingDuration is the poll interval while a PR has pending/in-progress checks.
+func (p PRWatchConfig) PollPendingDuration() time.Duration {
+	return parseDurationOr(p.PollPending, 30*time.Second)
+}
+
+// PollTerminalDuration is the poll interval once all checks are terminal (PR still open).
+func (p PRWatchConfig) PollTerminalDuration() time.Duration {
+	return parseDurationOr(p.PollTerminal, 5*time.Minute)
+}
+
+// PollMergedDuration is the sweep interval for merged/closed PRs.
+func (p PRWatchConfig) PollMergedDuration() time.Duration {
+	return parseDurationOr(p.PollMerged, 15*time.Minute)
+}
+
+// DebounceDuration is the minimum cooldown between notifications to one session.
+func (p PRWatchConfig) DebounceDuration() time.Duration {
+	return parseDurationOr(p.Debounce, 2*time.Minute)
+}
+
+// MaxNotifications returns the per-head-SHA notification cap, defaulting to 10.
+func (p PRWatchConfig) MaxNotifications() int {
+	if p.MaxNotificationsPerPR <= 0 {
+		return 10
+	}
+	return p.MaxNotificationsPerPR
 }
 
 type RepoConfig struct {

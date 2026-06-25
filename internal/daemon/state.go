@@ -53,6 +53,8 @@ type SessionState struct {
 	IdleSince              *time.Time            `json:"-"`
 	GitDirty               bool                  `json:"-"`
 	GitUnpushed            int                   `json:"-"`
+	PullRequest            PRStatus              `json:"-"`
+	CI                     CIStatus              `json:"-"`
 	HookToolName           string                `json:"-"`
 	ExitCode               *int                  `json:"exit_code,omitempty"`
 	ExitSignal             string                `json:"exit_signal,omitempty"`
@@ -108,11 +110,33 @@ type IncludedRepoState struct {
 	unpushed int  `json:"-"`
 }
 
+// PRStatus is the runtime-only linked-PR state for a session, derived by the
+// PR-watch loop. A zero Number means "no PR resolved". The PR-watch loop always
+// assigns a freshly-built value (never mutates in place), so reads from cloned
+// SessionState off-lock are race-free.
+type PRStatus struct {
+	Number         int
+	State          string // open | draft | merged | closed
+	URL            string
+	ReviewDecision string
+	HeadRefOid     string // head commit SHA — keys the per-SHA notify cap
+}
+
+// CIStatus is the runtime-only aggregate CI status for a session's linked PR.
+type CIStatus struct {
+	State         string // passing | failing | pending | "" (unknown)
+	FailingChecks []string
+}
+
 func cloneSessionState(s *SessionState) SessionState {
 	c := *s
 	if len(s.Includes) > 0 {
 		c.Includes = make([]IncludedRepoState, len(s.Includes))
 		copy(c.Includes, s.Includes)
+	}
+	if len(s.CI.FailingChecks) > 0 {
+		c.CI.FailingChecks = make([]string, len(s.CI.FailingChecks))
+		copy(c.CI.FailingChecks, s.CI.FailingChecks)
 	}
 	return c
 }
