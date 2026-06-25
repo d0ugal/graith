@@ -237,9 +237,10 @@ func (s *MsgStore) Conversation(self string, limit int) ([]Message, error) {
 	// could match both branches (it cannot here, because the outbound branch
 	// excludes self's own inbox). GLOB is case-sensitive so it can use the
 	// stream index, unlike LIKE which SQLite treats case-insensitively.
+	const cols = `id, seq, stream, sender_id, sender_name, body, thread_id, reply_to, created_at`
 	inner := `
 		SELECT id, seq, stream, sender_id, sender_name, body,
-		       COALESCE(thread_id, ''), COALESCE(reply_to, ''), created_at
+		       COALESCE(thread_id, '') AS thread_id, COALESCE(reply_to, '') AS reply_to, created_at
 		FROM messages
 		WHERE stream = ?
 		   OR (sender_id = ? AND stream GLOB 'inbox:*' AND stream <> ?)`
@@ -249,7 +250,7 @@ func (s *MsgStore) Conversation(self string, limit int) ([]Message, error) {
 	if limit > 0 {
 		// Take the most recent `limit` rows, then re-sort ascending so the
 		// client renders oldest-to-newest.
-		q = `SELECT * FROM (` + inner + `
+		q = `SELECT ` + cols + ` FROM (` + inner + `
 			ORDER BY created_at DESC, id DESC
 			LIMIT ?
 		) ORDER BY created_at ASC, id ASC`
