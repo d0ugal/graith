@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.58.0](https://github.com/d0ugal/graith/compare/v0.57.0...v0.58.0) (2026-06-25)
+
+
+### Features
+
+* add gr migrate for cross-agent conversation take-over ([dd9f1f4](https://github.com/d0ugal/graith/commit/dd9f1f458786cabccc8f6fa4d3f7574542ac3e75))
+* **overlay:** add agent-type selector to create-session form ([35b337d](https://github.com/d0ugal/graith/commit/35b337d246dabb6699c81ab7be32449f4c8702cc))
+
 ## [0.57.0](https://github.com/d0ugal/graith/compare/v0.56.1...v0.57.0) (2026-06-24)
 
 
