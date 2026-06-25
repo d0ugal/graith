@@ -86,6 +86,18 @@ Fork a session. Creates a new worktree (from the source session's branch), a new
 |------|-------------|
 | `--background` | Fork without attaching |
 
+### `gr migrate <name-or-id>`
+
+Migrate a session to a different agent **in place** — for example, switch from Claude to Codex during a provider outage without losing your work. The current agent's conversation is rendered to a neutral context file, the agent is stopped, and the target agent is started **in the same worktree** seeded with that history. The session keeps its id, name, worktree, and branch, so all code state (commits and uncommitted edits) carries over with no branching.
+
+This is a lossy reseed, not a native resume: reasoning/thinking and exact tool-call replay are not carried over, and the agent process is restarted (attached clients re-attach to the new agent). If the target agent fails to start, the original agent is restored. Claude and Codex are supported as migration *sources*; any configured agent can be a *target*.
+
+| Flag | Description |
+|------|-------------|
+| `--agent <name>` | Target agent to migrate to (required) |
+| `--model <model>` | Model for the target agent (default: the target's default) |
+| `--background` | Migrate without attaching |
+
 ### `gr rename <name-or-id> <new-name>`
 
 Rename a session.
