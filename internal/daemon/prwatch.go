@@ -423,8 +423,12 @@ func (sm *SessionManager) writePRState(id string, d prData) {
 		ReviewDecision: d.ReviewDecision,
 		HeadRefOid:     d.HeadRefOid,
 	}
-	failing := append([]string(nil), d.FailingChecks...)
-	s.CI = CIStatus{State: d.CIState, FailingChecks: failing}
+	// An empty CIState means the checks read degraded (timeout/parse error) — keep
+	// the last-known CI badge rather than flickering it off on a transient failure.
+	if d.CIState != "" {
+		failing := append([]string(nil), d.FailingChecks...)
+		s.CI = CIStatus{State: d.CIState, FailingChecks: failing}
+	}
 }
 
 func (sm *SessionManager) clearPRState(id string) {

@@ -501,6 +501,21 @@ func (c *Config) Validate() error {
 			errs = append(errs, fmt.Errorf("git_pull.interval %q: must be at least 1 minute", c.GitPull.Interval))
 		}
 	}
+	for _, f := range []struct {
+		name, val string
+	}{
+		{"pr_watch.poll_pending", c.PRWatch.PollPending},
+		{"pr_watch.poll_terminal", c.PRWatch.PollTerminal},
+		{"pr_watch.poll_merged", c.PRWatch.PollMerged},
+		{"pr_watch.debounce", c.PRWatch.Debounce},
+	} {
+		if f.val == "" {
+			continue
+		}
+		if _, err := ParseDurationWithDays(f.val); err != nil {
+			errs = append(errs, fmt.Errorf("%s %q: %w", f.name, f.val, err))
+		}
+	}
 	return errors.Join(errs...)
 }
 

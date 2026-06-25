@@ -259,16 +259,23 @@ func fetchComments(ctx context.Context, slug string, number int, worktreePath, s
 	defer cancel()
 
 	path := fmt.Sprintf("repos/%s/%s/%d/comments?per_page=100", slug, surface, number)
-	out, err := ghRunner(cctx, worktreePath, "api", "--paginate", path)
+	// --slurp wraps every page into one outer array ([[page1...],[page2...]]),
+	// so multi-page results parse. Without it, gh emits adjacent arrays that
+	// json.Unmarshal can't read past the first page.
+	out, err := ghRunner(cctx, worktreePath, "api", "--paginate", "--slurp", path)
 	if err != nil {
 		return nil, false
 	}
 	if out == "" {
 		return nil, true
 	}
-	var comments []ghComment
-	if err := json.Unmarshal([]byte(out), &comments); err != nil {
+	var pages [][]ghComment
+	if err := json.Unmarshal([]byte(out), &pages); err != nil {
 		return nil, false
+	}
+	var comments []ghComment
+	for _, p := range pages {
+		comments = append(comments, p...)
 	}
 	return comments, true
 }
