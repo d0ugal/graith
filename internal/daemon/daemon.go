@@ -68,6 +68,11 @@ type SessionManager struct {
 	recentExits        []time.Time
 	lastInboxNotifyAt  map[string]time.Time
 	prWatch            *prWatchState
+
+	// watchers tracks in-flight watchSession goroutines. StopAll waits on it so
+	// that post-exit state writes and status publishes complete before the
+	// daemon (or a test harness) closes the message store and removes data dirs.
+	watchers sync.WaitGroup
 }
 
 // NewSessionManager creates a SessionManager with the given config and paths.
@@ -270,7 +275,7 @@ func (sm *SessionManager) AdoptSessions(manifest *UpgradeManifest) error {
 			sessState.PIDStartTime = st
 		}
 		sm.sessions[us.ID] = ptySess
-		go sm.watchSession(us.ID, ptySess)
+		sm.startWatcher(us.ID, ptySess)
 		adoptedIDs = append(adoptedIDs, us.ID)
 		sm.log.Info("adopted session", "id", us.ID, "pid", us.PID)
 	}
@@ -897,7 +902,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 	result := cloneSessionState(sessState)
 	sm.mu.Unlock()
 
-	go sm.watchSession(id, ptySess)
+	sm.startWatcher(id, ptySess)
 
 	// Best-effort native session-id capture for self-minting agents (Codex):
 	// graith didn't force the id, so read it from the agent's on-disk state so
@@ -1296,7 +1301,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 	result := cloneSessionState(sessState)
 	sm.mu.Unlock()
 
-	go sm.watchSession(id, ptySess)
+	sm.startWatcher(id, ptySess)
 
 	// Capture the forked child's native id for self-minting agents (Codex): the
 	// fork mints a new conversation graith didn't choose, so read it from disk
@@ -1306,6 +1311,17 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 	}
 
 	return result, nil
+}
+
+// startWatcher launches watchSession in a tracked goroutine. The watcher is
+// registered with sm.watchers so StopAll can wait for its post-exit work
+// (state writes, status publish) to finish during shutdown.
+func (sm *SessionManager) startWatcher(id string, sess *grpty.Session) {
+	sm.watchers.Add(1)
+	go func() {
+		defer sm.watchers.Done()
+		sm.watchSession(id, sess)
+	}()
 }
 
 // watchSession waits for a PTY session to exit and updates state accordingly.
@@ -1974,7 +1990,7 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	result := cloneSessionState(sessState)
 	sm.mu.Unlock()
 
-	go sm.watchSession(id, ptySess)
+	sm.startWatcher(id, ptySess)
 	go sm.notifyUnreadInbox(id)
 
 	// If a self-minting agent (Codex) had no captured id, this resume fell back
@@ -3338,6 +3354,14 @@ func (sm *SessionManager) StopAll(ctx context.Context) {
 		}(s.id, s.sess)
 	}
 	wg.Wait()
+
+	// Wait for the exit watchers to finish their post-exit work (state writes
+	// and status publishes). Every killed session above has now exited, so the
+	// watchers can proceed and will not block. This guarantees no watcher is
+	// still writing state or publishing to the message store after StopAll
+	// returns, which matters when the caller then closes the message store or
+	// removes the data dir.
+	sm.watchers.Wait()
 }
 
 func (sm *SessionManager) RunMessageCleanupLoop(ctx context.Context) {
