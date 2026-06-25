@@ -79,6 +79,26 @@ Forking:
 
 Use forking to explore alternative approaches from the same git state.
 
+## Migrate to a different agent
+
+```bash
+gr migrate fix-auth-bug --agent codex
+```
+
+Migration swaps the agent on an existing session **in place** — most useful during a provider outage (e.g. the Claude API is down and you want to keep working in Codex). Unlike fork, it does **not** create a new worktree or branch: the session keeps its id, name, worktree, and branch.
+
+Migrating:
+
+1. Renders the current agent's conversation to a neutral Markdown context file (fail-fast: if the transcript is missing or empty, nothing is changed)
+2. Stops the current agent
+3. Switches the session's agent type (and model, via `--model`)
+4. Starts the target agent **in the same worktree**, seeded with the rendered context so it can continue the work
+5. Runs a short health check; if the target agent fails to start, the **original agent is restored**
+
+Because the worktree is retained, all code state — commits and uncommitted edits — carries over with no branching. The handoff is a lossy reseed, not a native resume: hidden reasoning/thinking and exact tool-call replay are not transferred, and the agent process restarts (attached clients re-attach to the new agent).
+
+Claude and Codex are supported as migration *sources* (the transcript formats graith can read); any configured agent can be a *target*. System sessions such as the orchestrator can be migrated too. The migration is soft-reversible — `gr list` records the agent it was migrated from, so you can `gr migrate ... --agent <original>` to hand the work back.
+
 ## Deletion
 
 ```bash
