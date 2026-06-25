@@ -440,3 +440,38 @@ func FetchScrollbackPreview(cfg *config.Config, paths config.Paths, configFile s
 	}
 	return preview.Preview
 }
+
+// FetchConversation retrieves the full direct-message conversation (both
+// directions) for sessionID via a one-shot passive connection. It is safe for
+// the human CLI: msg_conversation authorises with the self-or-descendant rule,
+// which permits unauthenticated callers.
+func FetchConversation(cfg *config.Config, paths config.Paths, configFile string, sessionID string) ([]protocol.ConversationMessage, error) {
+	c, err := ConnectPassive(cfg, paths, configFile)
+	if err != nil {
+		return nil, err
+	}
+	defer c.Close()
+
+	if err := c.SendControl("msg_conversation", protocol.MsgConversationMsg{SessionID: sessionID}); err != nil {
+		return nil, err
+	}
+
+	resp, err := c.ReadControlResponse()
+	if err != nil {
+		return nil, err
+	}
+	if resp.Type == "error" {
+		var e protocol.ErrorMsg
+		protocol.DecodePayload(resp, &e)
+		return nil, fmt.Errorf("%s", e.Message)
+	}
+	if resp.Type != "msg_conversation_list" {
+		return nil, fmt.Errorf("unexpected response %q", resp.Type)
+	}
+
+	var list protocol.MsgConversationListMsg
+	if err := protocol.DecodePayload(resp, &list); err != nil {
+		return nil, err
+	}
+	return list.Messages, nil
+}

@@ -209,6 +209,33 @@ type MsgTopicsMsg struct {
 	IncludeSystem bool   `json:"include_system,omitempty"`
 }
 
+// MsgConversationMsg requests the full direct-message conversation (both
+// directions) for SessionID. Authorisation uses the self-or-descendant rule, so
+// a human CLI, the session itself, an ancestor, or the orchestrator may read it.
+type MsgConversationMsg struct {
+	SessionID string `json:"session_id"`
+	Limit     int    `json:"limit,omitempty"`
+}
+
+// ConversationMessage is a single message in a conversation, mirroring the
+// daemon's stored message shape on the wire.
+type ConversationMessage struct {
+	ID         string `json:"id"`
+	Seq        int64  `json:"seq"`
+	Stream     string `json:"stream"`
+	SenderID   string `json:"sender_id"`
+	SenderName string `json:"sender_name,omitempty"`
+	Body       string `json:"body"`
+	ThreadID   string `json:"thread_id,omitempty"`
+	ReplyTo    string `json:"reply_to,omitempty"`
+	CreatedAt  string `json:"created_at"`
+}
+
+// MsgConversationListMsg is the daemon's response to msg_conversation.
+type MsgConversationListMsg struct {
+	Messages []ConversationMessage `json:"messages"`
+}
+
 // Client -> Daemon (hook reporting)
 type StatusReportMsg struct {
 	SessionID string `json:"session_id"`

@@ -686,6 +686,54 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					}{streams})
 				}
 
+			case "msg_conversation":
+				var m protocol.MsgConversationMsg
+				if err := protocol.DecodePayload(msg, &m); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid msg_conversation message"})
+					continue
+				}
+				// Authorise the target session. The self-or-descendant rule lets
+				// the human CLI (unauthenticated), the session itself, an ancestor
+				// agent, or the orchestrator read the conversation. The by-sender
+				// filter inside Conversation keeps the cross-inbox scan safe: an
+				// authenticated agent only ever sees messages it authored plus its
+				// own inbox.
+				sm.mu.RLock()
+				authErr := auth.checkTarget(sm, m.SessionID, authSelfOrDescendant)
+				sm.mu.RUnlock()
+				if authErr != nil {
+					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
+					continue
+				}
+				if sm.messages == nil {
+					sendControl("msg_conversation_list", protocol.MsgConversationListMsg{})
+					continue
+				}
+				limit := m.Limit
+				if limit <= 0 {
+					limit = 500
+				}
+				convo, err := sm.messages.Conversation(m.SessionID, limit)
+				if err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+					continue
+				}
+				out := make([]protocol.ConversationMessage, len(convo))
+				for i, cm := range convo {
+					out[i] = protocol.ConversationMessage{
+						ID:         cm.ID,
+						Seq:        cm.Seq,
+						Stream:     cm.Stream,
+						SenderID:   cm.SenderID,
+						SenderName: cm.SenderName,
+						Body:       cm.Body,
+						ThreadID:   cm.ThreadID,
+						ReplyTo:    cm.ReplyTo,
+						CreatedAt:  cm.CreatedAt,
+					}
+				}
+				sendControl("msg_conversation_list", protocol.MsgConversationListMsg{Messages: out})
+
 			case "approval_request":
 				var req protocol.ApprovalRequestMsg
 				if err := protocol.DecodePayload(msg, &req); err != nil {

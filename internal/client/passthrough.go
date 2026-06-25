@@ -30,6 +30,7 @@ const (
 	ResultLastSession
 	ResultApprovalOverlay
 	ResultOrchestratorSession
+	ResultMessageOverlay
 )
 
 // kittyCtrlSeq returns the Kitty keyboard protocol escape sequence for
@@ -133,7 +134,7 @@ func processKittyPrefix(input []byte, prefixByte byte) []byte {
 // showHelpBar renders a one-line help bar at the bottom of the screen using
 // ANSI save-cursor / restore-cursor so the agent's output isn't disturbed.
 func showHelpBar(w io.Writer) {
-	help := "\x1b[7m d detach  w sessions  a approvals  o orch  l last  n/p next/prev  c new  f fork  s shell  r restart \x1b[0m"
+	help := "\x1b[7m d detach  w sessions  m messages  a approvals  o orch  l last  n/p next/prev  c new  f fork  s shell  r restart \x1b[0m"
 	_, _ = w.Write([]byte("\x1b7\x1b[999B\r\x1b[2K" + help + "\x1b8"))
 }
 
@@ -416,6 +417,9 @@ func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, s
 						return
 					case 'w', 0:
 						setResult(ResultOverlay)
+						return
+					case 'm':
+						setResult(ResultMessageOverlay)
 						return
 					case 's':
 						setResult(ResultShell)
