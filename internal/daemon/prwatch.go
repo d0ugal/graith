@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -357,7 +358,7 @@ func (sm *SessionManager) diffAndBuild(cfg *configPRWatch, t prWatchTarget, slug
 	if cfg.NotifyReviewComments {
 		newIssue := commentsAfter(d.IssueComments, cur.lastIssueCommentID)
 		newReview := commentsAfter(d.ReviewComments, cur.lastReviewCommentID)
-		all := append(newIssue, newReview...)
+		all := slices.Concat(newIssue, newReview)
 		if len(all) > 0 {
 			if _, ok := sm.gate(cfg, t.id, cur); ok {
 				out = append(out, reviewCommentBody(t, d, all))
@@ -426,8 +427,7 @@ func (sm *SessionManager) writePRState(id string, d prData) {
 	// An empty CIState means the checks read degraded (timeout/parse error) — keep
 	// the last-known CI badge rather than flickering it off on a transient failure.
 	if d.CIState != "" {
-		failing := append([]string(nil), d.FailingChecks...)
-		s.CI = CIStatus{State: d.CIState, FailingChecks: failing}
+		s.CI = CIStatus{State: d.CIState, FailingChecks: slices.Clone(d.FailingChecks)}
 	}
 }
 
