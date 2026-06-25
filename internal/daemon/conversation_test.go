@@ -91,10 +91,14 @@ func TestConversationSelfMessageAppearsOnce(t *testing.T) {
 func TestConversationLimitReturnsMostRecent(t *testing.T) {
 	s := testStore(t)
 
-	bodies := []string{"one", "two", "three", "four", "five"}
-	for _, b := range bodies {
-		publishDM(t, s, "bairn", "ben", b)
-	}
+	// Interleave directions so the LIMIT selection exercises cross-stream
+	// ordering (sent lands in inbox:bairn, received in inbox:ben), not just a
+	// single stream.
+	publishDM(t, s, "bairn", "ben", "one")   // received
+	publishDM(t, s, "ben", "bairn", "two")   // sent
+	publishDM(t, s, "bairn", "ben", "three") // received
+	publishDM(t, s, "ben", "bairn", "four")  // sent
+	publishDM(t, s, "bairn", "ben", "five")  // received
 
 	convo, err := s.Conversation("ben", 3)
 	if err != nil {
@@ -103,12 +107,42 @@ func TestConversationLimitReturnsMostRecent(t *testing.T) {
 	if len(convo) != 3 {
 		t.Fatalf("got %d, want 3 (limit)", len(convo))
 	}
-	// Most recent 3, still in ascending order.
+	// Most recent 3, still in ascending order, spanning both directions.
 	want := []string{"three", "four", "five"}
 	for i, w := range want {
 		if convo[i].Body != w {
 			t.Errorf("convo[%d].Body = %q, want %q", i, convo[i].Body, w)
 		}
+	}
+}
+
+// TestConversationPeerPrefixCollision guards the GLOB + "stream <> inbox:self"
+// logic against a peer whose id is a prefix of, or shares a prefix with, self.
+func TestConversationPeerPrefixCollision(t *testing.T) {
+	s := testStore(t)
+
+	// self = "ben"; peers "ben2" and "benji" have inbox streams that share the
+	// "inbox:ben" prefix. A naive LIKE 'inbox:ben%' would wrongly include them.
+	publishDM(t, s, "ben2", "ben", "to ben")    // received by ben
+	publishDM(t, s, "ben", "ben2", "to ben2")   // sent by ben -> ben2
+	publishDM(t, s, "whin", "ben2", "not bens") // unrelated DM to ben2
+
+	convo, err := s.Conversation("ben", 0)
+	if err != nil {
+		t.Fatalf("Conversation: %v", err)
+	}
+	if len(convo) != 2 {
+		t.Fatalf("got %d, want 2 (the DM to ben + ben's DM to ben2)", len(convo))
+	}
+	bodies := map[string]bool{}
+	for _, m := range convo {
+		bodies[m.Body] = true
+	}
+	if !bodies["to ben"] || !bodies["to ben2"] {
+		t.Errorf("unexpected bodies: %+v", bodies)
+	}
+	if bodies["not bens"] {
+		t.Error("conversation leaked an unrelated third-party DM to ben2")
 	}
 }
 

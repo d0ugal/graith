@@ -8,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/d0ugal/graith/internal/protocol"
 )
 
@@ -31,24 +32,28 @@ type msgEntry struct {
 
 type msgFetchedMsg struct {
 	conversations []msgConversation
+	ok            bool // false if the fetch failed (keep the last good snapshot)
 }
 
 type msgTickMsg struct{}
 
 type messageOverlayModel struct {
 	selfID string
-	fetch  func() []protocol.ConversationMessage
-	names  map[string]string
+	// fetch returns the conversation messages and ok=false on a transient
+	// fetch error (so the model can keep the last good snapshot).
+	fetch func() ([]protocol.ConversationMessage, bool)
+	names map[string]string
 
 	conversations []msgConversation
 	cursor        int // selected conversation in the left rail
-	scroll        int // thread scroll offset (lines from top)
+	scroll        int // thread scroll: lines scrolled up from the bottom (0 = newest)
 	loaded        bool
+	fetching      bool // a fetch is in flight; don't stack another
 	width         int
 	height        int
 }
 
-func newMessageOverlayModel(selfID string, fetch func() []protocol.ConversationMessage, names map[string]string) messageOverlayModel {
+func newMessageOverlayModel(selfID string, fetch func() ([]protocol.ConversationMessage, bool), names map[string]string) messageOverlayModel {
 	return messageOverlayModel{
 		selfID: selfID,
 		fetch:  fetch,
@@ -72,9 +77,13 @@ func (m messageOverlayModel) fetchCmd() tea.Cmd {
 	names := m.names
 	return func() tea.Msg {
 		if fetch == nil {
-			return msgFetchedMsg{}
+			return msgFetchedMsg{ok: true}
 		}
-		return msgFetchedMsg{conversations: groupConversations(selfID, fetch(), names)}
+		msgs, ok := fetch()
+		if !ok {
+			return msgFetchedMsg{ok: false}
+		}
+		return msgFetchedMsg{conversations: groupConversations(selfID, msgs, names), ok: true}
 	}
 }
 
@@ -186,16 +195,30 @@ func (m messageOverlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case msgTickMsg:
+		// Don't stack fetches: if one is already in flight (e.g. a slow or
+		// stalled daemon), just reschedule the tick. This also means only one
+		// response is ever outstanding, so a late response can't overwrite a
+		// newer one.
+		if m.fetching {
+			return m, m.tickCmd()
+		}
+		m.fetching = true
 		return m, tea.Batch(m.fetchCmd(), m.tickCmd())
 
 	case msgFetchedMsg:
+		m.fetching = false
+		m.loaded = true
+		// On a transient fetch error, keep the last good snapshot rather than
+		// blanking the view to "No messages".
+		if !msg.ok {
+			return m, nil
+		}
 		// Preserve the selected peer across refreshes where possible.
 		var selectedPeer string
 		if m.cursor >= 0 && m.cursor < len(m.conversations) {
 			selectedPeer = m.conversations[m.cursor].peerID
 		}
 		m.conversations = msg.conversations
-		m.loaded = true
 		m.cursor = 0
 		for i, c := range m.conversations {
 			if c.peerID == selectedPeer {
@@ -224,16 +247,23 @@ func (m messageOverlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.scroll = 0
 			}
 			return m, nil
-		case "ctrl+d", "pgdown", " ":
+		case "ctrl+u", "pgup", "b":
+			// Scroll up toward older messages (increase offset-from-bottom).
 			m.scroll += 5
 			return m, nil
-		case "ctrl+u", "pgup", "b":
+		case "ctrl+d", "pgdown", " ":
+			// Scroll down toward newer messages (toward the pinned bottom).
 			m.scroll -= 5
 			if m.scroll < 0 {
 				m.scroll = 0
 			}
 			return m, nil
 		case "g":
+			// Jump to the top (oldest); renderThread clamps to the real max.
+			m.scroll = 1 << 30
+			return m, nil
+		case "G":
+			// Jump to the bottom (newest).
 			m.scroll = 0
 			return m, nil
 		}
@@ -252,26 +282,35 @@ func (m messageOverlayModel) View() tea.View {
 	help := lipgloss.NewStyle().Foreground(colorFaint)
 
 	title := titleStyle.Render("Messages")
-	helpLine := help.Render("↑/↓ conversation  PgUp/PgDn scroll  q close")
 
 	// Body area between title (1 line + blank) and help (blank + 1 line).
 	bodyH := max(1, h-4)
 
-	railW := 26
-	if w < 70 {
-		railW = max(16, w/3)
+	// Below a threshold there isn't room for two panes; fall back to a
+	// single-column thread view so the overlay stays usable (and exitable).
+	var body, helpLine string
+	if w < 36 {
+		helpLine = help.Render("↑/↓ peer  PgUp/Dn scroll  q close")
+		body = m.renderThread(max(1, w-1), bodyH)
+	} else {
+		helpLine = help.Render("↑/↓ conversation  PgUp older / PgDn newer  g/G top/bottom  q close")
+		railW := 26
+		if w < 70 {
+			railW = max(16, w/3)
+		}
+		// Reserve 3 columns for the thread pane's border + padding.
+		threadW := max(10, w-railW-3)
+
+		rail := m.renderRail(railW, bodyH)
+		thread := m.renderThread(threadW, bodyH)
+
+		railStyle := lipgloss.NewStyle().Width(railW).Height(bodyH)
+		threadStyle := lipgloss.NewStyle().Width(threadW).Height(bodyH).
+			BorderLeft(true).Border(lipgloss.NormalBorder(), false, false, false, true).
+			BorderForeground(colorFaint).PaddingLeft(1)
+
+		body = lipgloss.JoinHorizontal(lipgloss.Top, railStyle.Render(rail), threadStyle.Render(thread))
 	}
-	threadW := max(10, w-railW-3)
-
-	rail := m.renderRail(railW, bodyH)
-	thread := m.renderThread(threadW, bodyH)
-
-	railStyle := lipgloss.NewStyle().Width(railW).Height(bodyH)
-	threadStyle := lipgloss.NewStyle().Width(threadW).Height(bodyH).
-		BorderLeft(true).Border(lipgloss.NormalBorder(), false, false, false, true).
-		BorderForeground(colorFaint).PaddingLeft(1)
-
-	body := lipgloss.JoinHorizontal(lipgloss.Top, railStyle.Render(rail), threadStyle.Render(thread))
 
 	var b strings.Builder
 	b.WriteString(title)
@@ -295,21 +334,34 @@ func (m messageOverlayModel) renderRail(width, height int) string {
 		return dim.Render("No messages")
 	}
 
-	var lines []string
-	for i, c := range m.conversations {
-		if i >= height {
-			break
+	// Scroll the rail so the selected conversation stays visible when there
+	// are more peers than fit.
+	start := 0
+	if len(m.conversations) > height {
+		if m.cursor >= height {
+			start = m.cursor - height + 1
 		}
-		name := c.peerName
+		if start > len(m.conversations)-height {
+			start = len(m.conversations) - height
+		}
+		if start < 0 {
+			start = 0
+		}
+	}
+	end := min(len(m.conversations), start+height)
+
+	var lines []string
+	for i := start; i < end; i++ {
+		c := m.conversations[i]
 		prefix := "  "
 		style := lipgloss.NewStyle()
 		if i == m.cursor {
 			prefix = "> "
 			style = style.Bold(true).Foreground(colorPurple)
 		}
-		count := dim.Render(" (" + strconv.Itoa(len(c.messages)) + ")")
-		label := truncate(name, max(1, width-len(prefix)-5))
-		lines = append(lines, prefix+style.Render(label)+count)
+		countStr := " (" + strconv.Itoa(len(c.messages)) + ")"
+		label := truncate(c.peerName, max(1, width-len(prefix)-lipgloss.Width(countStr)))
+		lines = append(lines, prefix+style.Render(label)+dim.Render(countStr))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -348,7 +400,9 @@ func (m messageOverlayModel) renderThread(width, height int) string {
 			ts = "  " + dim.Render(relTime(e.createdAt))
 		}
 		lines = append(lines, hs.Render(header)+ts)
-		body := bodyStyle.Render(strings.TrimRight(e.body, "\n"))
+		// Message bodies are agent-controlled; strip ANSI/control sequences so
+		// a malicious or buggy agent can't spoof or corrupt the operator's view.
+		body := bodyStyle.Render(strings.TrimRight(sanitizeMessageBody(e.body), "\n"))
 		lines = append(lines, strings.Split(body, "\n")...)
 		lines = append(lines, "")
 	}
@@ -375,11 +429,29 @@ func relTime(t time.Time) string {
 	return ShortDuration(d) + " ago"
 }
 
+// sanitizeMessageBody removes ANSI escape sequences and stray control
+// characters from an (agent-controlled) message body, keeping only newlines and
+// tabs. This prevents a message from emitting terminal control sequences that
+// could spoof or corrupt the operator's overlay.
+func sanitizeMessageBody(s string) string {
+	s = ansi.Strip(s)
+	return strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\t' {
+			return r
+		}
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, s)
+}
+
 // RunMessageOverlay displays the chatroom-style message viewer for sessionID,
 // showing direct messages to and from that session grouped by peer. It is
-// read-only in v1 and refreshes every 2 seconds. Returns when the user closes
-// the overlay; the caller then reattaches.
-func RunMessageOverlay(sessionID string, fetch func() []protocol.ConversationMessage, names map[string]string) {
+// read-only in v1 and refreshes every 2 seconds. fetch returns the conversation
+// and ok=false on a transient error (so the last good snapshot is kept).
+// Returns when the user closes the overlay; the caller then reattaches.
+func RunMessageOverlay(sessionID string, fetch func() ([]protocol.ConversationMessage, bool), names map[string]string) {
 	m := newMessageOverlayModel(sessionID, fetch, names)
 	p := tea.NewProgram(m)
 	_, _ = p.Run()

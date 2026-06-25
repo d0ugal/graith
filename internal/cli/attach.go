@@ -762,13 +762,13 @@ func sessionRefresher() func() []protocol.SessionInfo {
 	}
 }
 
-func conversationFetcher(sessionID string) func() []protocol.ConversationMessage {
-	return func() []protocol.ConversationMessage {
+func conversationFetcher(sessionID string) func() ([]protocol.ConversationMessage, bool) {
+	return func() ([]protocol.ConversationMessage, bool) {
 		msgs, err := client.FetchConversation(cfg, paths, cfgFile, sessionID)
 		if err != nil {
-			return nil
+			return nil, false
 		}
-		return msgs
+		return msgs, true
 	}
 }
 

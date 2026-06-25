@@ -155,6 +155,12 @@ confirms it is the main pain point.
    > for stable (if not causally exact) ordering. A globally-monotonic column
    > would be needed for exact cross-stream order; out of scope for v1.
    >
+   > **Known limitation (both ship-review judges):** `time.RFC3339Nano` omits the
+   > fractional part at whole seconds, so a `…00Z` timestamp sorts *after* a
+   > `…00.5Z` one in the same second under lexical comparison. Probability with
+   > `time.Now()` is ~1e-9, so it's left as a documented limitation; a fixed-width
+   > (zero-padded-nanos) or integer timestamp column would close it.
+   >
    > **Pagination (both judges):** `Conversation` must take a `LIMIT`/since-cursor
    > and load most-recent-first — a long-lived parent can accumulate thousands of
    > messages, and re-loading all of them on every poll (below) is wasteful.

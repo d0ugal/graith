@@ -695,9 +695,9 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				// Authorise the target session. The self-or-descendant rule lets
 				// the human CLI (unauthenticated), the session itself, an ancestor
 				// agent, or the orchestrator read the conversation. The by-sender
-				// filter inside Conversation keeps the cross-inbox scan safe: an
-				// authenticated agent only ever sees messages it authored plus its
-				// own inbox.
+				// filter inside Conversation keeps the cross-inbox scan safe: for
+				// the target session, outbound results are limited to messages it
+				// authored, plus everything in its own inbox.
 				sm.mu.RLock()
 				authErr := auth.checkTarget(sm, m.SessionID, authSelfOrDescendant)
 				sm.mu.RUnlock()
@@ -709,9 +709,16 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("msg_conversation_list", protocol.MsgConversationListMsg{})
 					continue
 				}
+				// Clamp the limit: default unset/non-positive to a sensible page
+				// size, and cap large values so a client can't ask the daemon to
+				// sort an unbounded result set (local perf/DoS footgun).
+				const maxConversationLimit = 2000
 				limit := m.Limit
 				if limit <= 0 {
 					limit = 500
+				}
+				if limit > maxConversationLimit {
+					limit = maxConversationLimit
 				}
 				convo, err := sm.messages.Conversation(m.SessionID, limit)
 				if err != nil {
