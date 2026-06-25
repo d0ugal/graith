@@ -31,7 +31,10 @@ type prData struct {
 	FailingChecks  []string // human-readable "name" of each failing check
 	IssueComments  []ghComment
 	ReviewComments []ghComment
-	Reviews        []ghReview
+	// CommentsOK is false if any comment fetch degraded (timeout/error), so the
+	// caller does not prime comment cursors from a partial read (which would
+	// later dump the whole backlog as "new").
+	CommentsOK bool
 }
 
 type ghComment struct {
@@ -41,13 +44,6 @@ type ghComment struct {
 	Path    string `json:"path,omitempty"`
 	Line    int    `json:"line,omitempty"`
 	HTMLURL string `json:"html_url,omitempty"`
-}
-
-type ghReview struct {
-	ID    int64  `json:"id"`
-	User  ghUser `json:"user"`
-	Body  string `json:"body"`
-	State string `json:"state"` // APPROVED | CHANGES_REQUESTED | COMMENTED | ...
 }
 
 type ghUser struct {
@@ -162,12 +158,14 @@ func resolvePR(ctx context.Context, slug, branch, worktreePath string) (prData, 
 		HeadRefOid:     it.HeadRefOid,
 	}
 
-	// CI checks — only meaningful while the PR is open.
+	// CI checks + comments — only meaningful while the PR is open.
+	d.CommentsOK = true
 	if d.State == "open" || d.State == "draft" {
 		d.CIState, d.FailingChecks = fetchChecks(ctx, slug, it.Number, worktreePath)
-		d.IssueComments = fetchComments(ctx, slug, it.Number, worktreePath, "issues")
-		d.ReviewComments = fetchComments(ctx, slug, it.Number, worktreePath, "pulls")
-		d.Reviews = fetchReviews(ctx, slug, it.Number, worktreePath)
+		var issueOK, reviewOK bool
+		d.IssueComments, issueOK = fetchComments(ctx, slug, it.Number, worktreePath, "issues")
+		d.ReviewComments, reviewOK = fetchComments(ctx, slug, it.Number, worktreePath, "pulls")
+		d.CommentsOK = issueOK && reviewOK
 	}
 	return d, true, nil
 }
@@ -252,36 +250,25 @@ func ciBucket(c prCheck) string {
 	}
 }
 
-// fetchComments reads a paginated comment surface ("issues" or "pulls"). On any
-// error it returns nil — the loop degrades to "no new comments".
-func fetchComments(ctx context.Context, slug string, number int, worktreePath, surface string) []ghComment {
+// fetchComments reads a paginated comment surface ("issues" or "pulls"). The
+// bool is false if the fetch degraded (error or unparseable), so the caller can
+// avoid priming a cursor from a partial read. An empty-but-ok result is
+// (nil, true).
+func fetchComments(ctx context.Context, slug string, number int, worktreePath, surface string) ([]ghComment, bool) {
 	cctx, cancel := context.WithTimeout(ctx, ghTimeout)
 	defer cancel()
 
 	path := fmt.Sprintf("repos/%s/%s/%d/comments?per_page=100", slug, surface, number)
 	out, err := ghRunner(cctx, worktreePath, "api", "--paginate", path)
-	if err != nil || out == "" {
-		return nil
+	if err != nil {
+		return nil, false
+	}
+	if out == "" {
+		return nil, true
 	}
 	var comments []ghComment
 	if err := json.Unmarshal([]byte(out), &comments); err != nil {
-		return nil
+		return nil, false
 	}
-	return comments
-}
-
-func fetchReviews(ctx context.Context, slug string, number int, worktreePath string) []ghReview {
-	cctx, cancel := context.WithTimeout(ctx, ghTimeout)
-	defer cancel()
-
-	path := fmt.Sprintf("repos/%s/pulls/%d/reviews?per_page=100", slug, number)
-	out, err := ghRunner(cctx, worktreePath, "api", "--paginate", path)
-	if err != nil || out == "" {
-		return nil
-	}
-	var reviews []ghReview
-	if err := json.Unmarshal([]byte(out), &reviews); err != nil {
-		return nil
-	}
-	return reviews
+	return comments, true
 }
