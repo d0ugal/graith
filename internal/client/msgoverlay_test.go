@@ -214,6 +214,51 @@ func TestMessageOverlayPinKeepsExpanded(t *testing.T) {
 	}
 }
 
+// A message taller than the viewport can be scrolled through with the page
+// keys (space / PgDn), so its tail is reachable.
+func TestMessageOverlayLongMessageScroll(t *testing.T) {
+	var sb strings.Builder
+	for i := 0; i < 30; i++ {
+		sb.WriteString("line ")
+		sb.WriteString(strconv.Itoa(i))
+		sb.WriteString("\n")
+	}
+	m := newMessageOverlayModel("ben", nil, nil)
+	m.conversations = groupConversations("ben", []protocol.ConversationMessage{
+		{ID: "m0", Stream: "inbox:ben", SenderID: "bairn", Body: sb.String(), CreatedAt: "2026-06-25T10:00:00Z"},
+		{ID: "m1", Stream: "inbox:ben", SenderID: "bairn", Body: "short tail", CreatedAt: "2026-06-25T10:00:01Z"},
+	}, nil)
+	m.loaded = true
+	m.msgCursor = 0 // focus the long message
+	m.width, m.height = 80, 10
+
+	out := m.renderThread(78, 10)
+	if !strings.Contains(out, "line 0") {
+		t.Fatalf("top of long message should be visible initially:\n%s", out)
+	}
+	if strings.Contains(out, "line 29") {
+		t.Fatalf("tail should NOT be visible before scrolling:\n%s", out)
+	}
+	// Page down a few times; the tail should come into view.
+	for i := 0; i < 6; i++ {
+		mm, _ := m.Update(keyPress(" "))
+		m = mm.(messageOverlayModel)
+	}
+	if m.lineScroll == 0 {
+		t.Fatal("paging did not advance lineScroll")
+	}
+	out = m.renderThread(78, 10)
+	if !strings.Contains(out, "line 29") {
+		t.Errorf("after paging down, tail of long message should be reachable:\n%s", out)
+	}
+	// Moving the message cursor (down to the short message) resets the scroll.
+	mm, _ := m.Update(keyPress("j"))
+	m = mm.(messageOverlayModel)
+	if m.lineScroll != 0 {
+		t.Errorf("lineScroll = %d, want 0 after cursor move", m.lineScroll)
+	}
+}
+
 func TestMessageOverlayRenderShowsTimeAndDelta(t *testing.T) {
 	m := testModel(2)
 	out := m.renderThread(80, 20)
