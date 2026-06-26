@@ -48,6 +48,9 @@ type messageOverlayModel struct {
 	conversations []msgConversation
 	cursor        int // selected conversation in the left rail
 	msgCursor     int // selected message within the current thread
+	// lineScroll pages within the focused message when it's taller than the
+	// viewport; reset to 0 whenever the message cursor moves.
+	lineScroll int
 	// The focused message (msgCursor) is always shown expanded; every other
 	// message is collapsed to a single header line. pinned holds messages the
 	// user has explicitly kept open (via enter) so they stay expanded even when
@@ -221,28 +224,45 @@ func (m messageOverlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !msg.ok {
 			return m, nil
 		}
-		// Preserve the selected peer across refreshes where possible.
-		var selectedPeer string
+		// Preserve the selected peer and focused message across refreshes.
+		var selectedPeer, focusedMsgID string
 		if m.cursor >= 0 && m.cursor < len(m.conversations) {
 			selectedPeer = m.conversations[m.cursor].peerID
 		}
+		if e := m.currentEntry(); e != nil {
+			focusedMsgID = e.id
+		}
 		prevAtLast := m.msgCursor >= m.msgCount()-1
+		peerFound := false
 		m.conversations = msg.conversations
 		m.cursor = 0
 		for i, c := range m.conversations {
 			if c.peerID == selectedPeer {
 				m.cursor = i
+				peerFound = true
 				break
 			}
 		}
 		if m.cursor >= len(m.conversations) {
 			m.cursor = max(0, len(m.conversations)-1)
 		}
-		// If the user was viewing the latest message, keep them pinned to the
-		// newest as fresh messages arrive; otherwise just clamp.
-		if prevAtLast {
+		switch {
+		case peerFound && prevAtLast:
+			// Reader was at the tail: follow the newest message.
 			m.msgCursor = max(0, m.msgCount()-1)
-		} else if m.msgCursor >= m.msgCount() {
+		case peerFound && focusedMsgID != "":
+			// Re-find the focused message by id so inserts/removals before it
+			// don't shift the cursor onto a different message; fall back to
+			// clamping if it vanished.
+			m.msgCursor = max(0, min(m.msgCursor, m.msgCount()-1))
+			for i, e := range m.conversations[m.cursor].messages {
+				if e.id == focusedMsgID {
+					m.msgCursor = i
+					break
+				}
+			}
+		default:
+			// Peer vanished (or no prior focus): land on the newest message.
 			m.msgCursor = max(0, m.msgCount()-1)
 		}
 		return m, nil
@@ -256,29 +276,40 @@ func (m messageOverlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "j", "down", "ctrl+n":
 			if m.msgCursor < m.msgCount()-1 {
 				m.msgCursor++
+				m.lineScroll = 0
 			}
 			return m, nil
 		case "k", "up", "ctrl+p":
 			if m.msgCursor > 0 {
 				m.msgCursor--
+				m.lineScroll = 0
 			}
+			return m, nil
+		// Page within the focused message when it's taller than the viewport.
+		case "pgdown", "space", " ", "ctrl+d", "ctrl+f":
+			m.lineScroll += m.pageStep()
+			return m, nil
+		case "pgup", "ctrl+u", "ctrl+b":
+			m.lineScroll = max(0, m.lineScroll-m.pageStep())
 			return m, nil
 		// Horizontal: switch conversation in the rail.
 		case "l", "right", "tab":
 			if m.cursor < len(m.conversations)-1 {
 				m.cursor++
 				m.msgCursor = max(0, m.msgCountAt(m.cursor)-1)
+				m.lineScroll = 0
 			}
 			return m, nil
 		case "h", "left", "shift+tab":
 			if m.cursor > 0 {
 				m.cursor--
 				m.msgCursor = max(0, m.msgCountAt(m.cursor)-1)
+				m.lineScroll = 0
 			}
 			return m, nil
 		// Pin/unpin the focused message so it stays expanded even when not
 		// focused (the focused message is always expanded regardless).
-		case "enter", " ":
+		case "enter":
 			if e := m.currentEntry(); e != nil && e.id != "" {
 				m.pinned[e.id] = !m.pinned[e.id]
 			}
@@ -292,13 +323,21 @@ func (m messageOverlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "g", "home":
 			m.msgCursor = 0
+			m.lineScroll = 0
 			return m, nil
 		case "G", "end":
 			m.msgCursor = max(0, m.msgCount()-1)
+			m.lineScroll = 0
 			return m, nil
 		}
 	}
 	return m, nil
+}
+
+// pageStep is the number of lines a page key scrolls within a tall message —
+// roughly one viewport, leaving a line of overlap.
+func (m messageOverlayModel) pageStep() int {
+	return max(1, m.height-5)
 }
 
 // msgCount returns the number of messages in the selected conversation.
@@ -353,10 +392,10 @@ func (m messageOverlayModel) View() tea.View {
 	// single-column thread view so the overlay stays usable (and exitable).
 	var body, helpLine string
 	if w < 36 {
-		helpLine = help.Render("↑/↓ msg  ⏎ pin  ←/→ peer  q close")
+		helpLine = help.Render("↑/↓ msg  PgDn/Up scroll  ⏎ pin  q close")
 		body = m.renderThread(max(1, w-1), bodyH)
 	} else {
-		helpLine = help.Render("↑/↓ message (auto-expands)  ⏎ pin open  ←/→ conversation  q close")
+		helpLine = help.Render("↑/↓ message (auto-expands)  PgUp/Dn scroll long msg  ⏎ pin  O/C all  g/G first/last  ←/→ conversation  q close")
 		railW := 26
 		if w < 70 {
 			railW = max(16, w/3)
@@ -480,10 +519,16 @@ func (m messageOverlayModel) renderThread(width, height int) string {
 		header := markerStyle.Render(marker) + " " + hs.Render(who) + dim.Render(msgTimestamp(e.createdAt))
 		if !expanded {
 			// Show a one-line snippet so a collapsed thread is still scannable.
-			if snippet := strings.TrimSpace(firstLine(body)); snippet != "" {
-				header += "  " + dim.Render(truncate(snippet, max(8, width-lipgloss.Width(ansi.Strip(header))-4)))
+			// Budget by display width; skip if there's no room.
+			if budget := width - lipgloss.Width(header) - 2; budget > 0 {
+				if snippet := strings.TrimSpace(firstLine(body)); snippet != "" {
+					header += "  " + dim.Render(ansi.Truncate(snippet, budget, "…"))
+				}
 			}
 		}
+		// Bound the header to one physical row so renderThread's line counting
+		// stays in sync with what the terminal displays (no wrap desync).
+		header = ansi.Truncate(header, width, "…")
 
 		blockStart := len(lines)
 		lines = append(lines, header)
@@ -496,16 +541,23 @@ func (m messageOverlayModel) renderThread(width, height int) string {
 		}
 	}
 
-	// Scroll so the selected message's block is visible, preferring to show its
-	// top when it's taller than the viewport.
+	// Scroll so the selected message's block is visible.
 	total := len(lines)
 	start := 0
 	if total > height {
-		if selEnd > start+height {
-			start = selEnd - height
-		}
-		if selStart < start {
-			start = selStart
+		if selEnd-selStart > height {
+			// Focused block is taller than the viewport: anchor at its top and
+			// let lineScroll page down through it (clamped so its top can't
+			// scroll past the viewport bottom).
+			start = selStart + min(m.lineScroll, max(0, (selEnd-selStart)-height))
+		} else {
+			// Block fits: show it fully, scrolling up only as needed.
+			if selEnd > start+height {
+				start = selEnd - height
+			}
+			if selStart < start {
+				start = selStart
+			}
 		}
 		if start > total-height {
 			start = total - height
