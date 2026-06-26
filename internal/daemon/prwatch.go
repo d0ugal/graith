@@ -42,6 +42,7 @@ type prWatchCursor struct {
 	headRefOid          string
 	state               string
 	reviewDecision      string
+	mergeable           string          // last-seen MERGEABLE/CONFLICTING (UNKNOWN never stored)
 	failing             map[string]bool // failing check names already delivered
 	lastIssueCommentID  int64
 	lastReviewCommentID int64
@@ -277,17 +278,27 @@ func (sm *SessionManager) diffAndBuild(cfg *configPRWatch, t prWatchTarget, slug
 	if !cur.primed {
 		cur.state = d.State
 		cur.reviewDecision = d.ReviewDecision
+		if d.Mergeable == "MERGEABLE" || d.Mergeable == "CONFLICTING" {
+			cur.mergeable = d.Mergeable
+		}
 		if d.CommentsOK {
 			cur.primed = true
 			cur.lastIssueCommentID = maxCommentID(d.IssueComments)
 			cur.lastReviewCommentID = maxCommentID(d.ReviewComments)
 		}
+		// Surface currently-broken mechanical state (failing CI, conflict) so a
+		// restart doesn't strand a stopped agent on a red build. CI takes priority.
 		if d.CIState == "failing" && cfg.NotifyCIFailures {
 			if _, ok := sm.gate(cfg, t.id, cur); ok {
 				for _, name := range d.FailingChecks {
 					cur.failing[name] = true
 				}
 				return []string{ciFailureBody(t, slug, d)}
+			}
+		}
+		if d.Mergeable == "CONFLICTING" && cfg.NotifyMergeConflicts {
+			if _, ok := sm.gate(cfg, t.id, cur); ok {
+				return []string{conflictBody(t, d)}
 			}
 		}
 		return nil
@@ -329,6 +340,26 @@ func (sm *SessionManager) diffAndBuild(cfg *configPRWatch, t prWatchTarget, slug
 	case "pending":
 		// A re-run in progress: keep the prior failing set so we don't reclassify
 		// every check as "newly failing" if it goes red again.
+	}
+
+	// --- Merge conflicts (directive) ---
+	// A conflict is a machine verdict like a CI failure: mechanical and actionable
+	// (rebase onto base). GitHub computes mergeability asynchronously, so UNKNOWN
+	// means "not computed yet" — never notify or reset the cursor on UNKNOWN.
+	if d.State == "open" || d.State == "draft" {
+		switch d.Mergeable {
+		case "CONFLICTING":
+			if cfg.NotifyMergeConflicts && cur.mergeable != "CONFLICTING" {
+				if _, ok := sm.gate(cfg, t.id, cur); ok {
+					out = append(out, conflictBody(t, d))
+					cur.mergeable = "CONFLICTING"
+				}
+			} else if !cfg.NotifyMergeConflicts {
+				cur.mergeable = "CONFLICTING"
+			}
+		case "MERGEABLE":
+			cur.mergeable = "MERGEABLE"
+		}
 	}
 
 	// --- PR lifecycle (informational) ---
@@ -423,6 +454,7 @@ func (sm *SessionManager) writePRState(id string, d prData) {
 		URL:            d.URL,
 		ReviewDecision: d.ReviewDecision,
 		HeadRefOid:     d.HeadRefOid,
+		Mergeable:      d.Mergeable,
 	}
 	// An empty CIState means the checks read degraded (timeout/parse error) — keep
 	// the last-known CI badge rather than flickering it off on a transient failure.
@@ -454,6 +486,12 @@ func ciFailureBody(t prWatchTarget, slug string, d prData) string {
 	fmt.Fprintf(&b, "\nGet logs: `gh pr checks %d --repo %s` or `gh run view --log-failed`. "+
 		"Fix the failures and push; CI will re-run.", d.Number, slug)
 	return b.String()
+}
+
+func conflictBody(t prWatchTarget, d prData) string {
+	return fmt.Sprintf("PR #%d (%s) has merge conflicts with its base branch. "+
+		"Rebase or merge the base branch, resolve the conflicts, and push — the PR "+
+		"can't merge until it's conflict-free.", d.Number, t.branch)
 }
 
 func reviewDecisionBody(t prWatchTarget, d prData) string {
@@ -535,6 +573,7 @@ func prInfo(p PRStatus) *protocol.PRInfo {
 		State:          p.State,
 		URL:            p.URL,
 		ReviewDecision: p.ReviewDecision,
+		Conflicting:    p.Mergeable == "CONFLICTING",
 	}
 }
 

@@ -16,9 +16,66 @@ func allOnConfig() *config.PRWatchConfig {
 	return &config.PRWatchConfig{
 		Enabled:               true,
 		NotifyCIFailures:      true,
+		NotifyMergeConflicts:  true,
 		NotifyReviewComments:  true,
 		NotifyReviewDecisions: true,
 		NotifyPRLifecycle:     true,
+	}
+}
+
+func TestDiffAndBuild_MergeConflictTransition(t *testing.T) {
+	sm := newPRWatchSM()
+	cfg := allOnConfig()
+	t1 := prWatchTarget{id: "scunner", branch: "scunner"}
+
+	// Prime: mergeable, passing CI, no comments.
+	sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 4, State: "open", HeadRefOid: "sha1", CIState: "passing",
+		Mergeable: "MERGEABLE", CommentsOK: true,
+	})
+
+	// UNKNOWN must NOT notify (GitHub still computing) and must not reset the cursor.
+	if out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 4, State: "open", HeadRefOid: "sha1", CIState: "passing",
+		Mergeable: "UNKNOWN", CommentsOK: true,
+	}); len(out) != 0 {
+		t.Fatalf("UNKNOWN mergeability should not notify, got %v", out)
+	}
+
+	// MERGEABLE -> CONFLICTING notifies once, with directive framing.
+	out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 4, State: "open", HeadRefOid: "sha1", CIState: "passing",
+		Mergeable: "CONFLICTING", CommentsOK: true,
+	})
+	if len(out) != 1 || !strings.Contains(out[0], "merge conflicts") {
+		t.Fatalf("conflict transition should notify, got %v", out)
+	}
+	if !strings.Contains(out[0], "Rebase") {
+		t.Errorf("conflict notice should be directive (rebase), got: %s", out[0])
+	}
+
+	// Still conflicting -> no re-notify.
+	if out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 4, State: "open", HeadRefOid: "sha1", CIState: "passing",
+		Mergeable: "CONFLICTING", CommentsOK: true,
+	}); len(out) != 0 {
+		t.Fatalf("repeat conflict should not re-notify, got %v", out)
+	}
+}
+
+func TestDiffAndBuild_MergeConflictGatedOff(t *testing.T) {
+	sm := newPRWatchSM()
+	cfg := &config.PRWatchConfig{Enabled: true, NotifyMergeConflicts: false}
+	t1 := prWatchTarget{id: "thrawn", branch: "thrawn"}
+	sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 6, State: "open", HeadRefOid: "sha1", CIState: "passing",
+		Mergeable: "MERGEABLE", CommentsOK: true,
+	})
+	if out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 6, State: "open", HeadRefOid: "sha1", CIState: "passing",
+		Mergeable: "CONFLICTING", CommentsOK: true,
+	}); len(out) != 0 {
+		t.Fatalf("conflict with gate off should not notify, got %v", out)
 	}
 }
 

@@ -3602,3 +3602,37 @@ func TestOverlay_MoreThan20SessionsNoLabelBeyond(t *testing.T) {
 		t.Errorf("selected = %q, want %q (11th session, not 21st)", om.selected.ID, eleventhID)
 	}
 }
+
+func TestDisplayPR(t *testing.T) {
+	cases := []struct {
+		name string
+		info protocol.SessionInfo
+		want string
+	}{
+		{"no PR", protocol.SessionInfo{}, "—"},
+		{"merged", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 583, State: "merged"}}, "#583 merged"},
+		{"open passing", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 56, State: "open"}, CI: &protocol.CIInfo{State: "passing"}}, "#56 ✓"},
+		{"open failing", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 56, State: "open"}, CI: &protocol.CIInfo{State: "failing"}}, "#56 ✗"},
+		{"conflict beats CI", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 56, State: "open", Conflicting: true}, CI: &protocol.CIInfo{State: "passing"}}, "#56 ⚠"},
+		{"draft pending", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 9, State: "draft"}, CI: &protocol.CIInfo{State: "pending"}}, "#9d ·"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := displayPR(c.info); got != c.want {
+				t.Errorf("displayPR = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+func TestFormatPRSection(t *testing.T) {
+	// Conflicting PR must render a visible conflict marker in the status bar.
+	info := statusBarInfo{prNumber: 56, prState: "open", prConflicting: true}
+	if got := formatPRSection(info, barBg); !strings.Contains(got, "conflict") {
+		t.Errorf("status bar PR section should show conflict, got %q", got)
+	}
+	// No PR -> empty.
+	if got := formatPRSection(statusBarInfo{}, barBg); got != "" {
+		t.Errorf("no PR should render empty, got %q", got)
+	}
+}

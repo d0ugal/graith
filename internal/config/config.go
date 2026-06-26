@@ -105,6 +105,7 @@ func (g GitPullConfig) IntervalDuration() time.Duration {
 type PRWatchConfig struct {
 	Enabled               bool   `toml:"enabled"`
 	NotifyCIFailures      bool   `toml:"notify_ci_failures"`
+	NotifyMergeConflicts  bool   `toml:"notify_merge_conflicts"`
 	NotifyReviewComments  bool   `toml:"notify_review_comments"`
 	NotifyReviewDecisions bool   `toml:"notify_review_decisions"`
 	NotifyPRLifecycle     bool   `toml:"notify_pr_lifecycle"`

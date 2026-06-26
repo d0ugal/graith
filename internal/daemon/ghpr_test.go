@@ -154,6 +154,26 @@ func TestFetchCommentsDegradedReportsNotOK(t *testing.T) {
 	}
 }
 
+func TestResolvePRParsesMergeable(t *testing.T) {
+	orig := ghRunner
+	defer func() { ghRunner = orig }()
+	calls := 0
+	ghRunner = func(ctx context.Context, dir string, args ...string) (string, error) {
+		calls++
+		if calls == 1 { // gh pr list
+			return `[{"number":4,"state":"OPEN","isDraft":false,"url":"https://github.com/croft/loch/pull/4","headRefOid":"sha1","mergeable":"CONFLICTING"}]`, nil
+		}
+		return `[]`, nil // checks/comments
+	}
+	d, found, err := resolvePR(context.Background(), "croft/loch", "bide", "")
+	if err != nil || !found {
+		t.Fatalf("expected found PR, got found=%v err=%v", found, err)
+	}
+	if d.Mergeable != "CONFLICTING" {
+		t.Errorf("Mergeable = %q, want CONFLICTING", d.Mergeable)
+	}
+}
+
 func TestResolvePRNoPR(t *testing.T) {
 	orig := ghRunner
 	defer func() { ghRunner = orig }()

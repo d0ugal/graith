@@ -17,6 +17,9 @@ func TestPRWatchDefaults(t *testing.T) {
 	if !pw.NotifyCIFailures {
 		t.Error("notify_ci_failures should default true")
 	}
+	if !pw.NotifyMergeConflicts {
+		t.Error("notify_merge_conflicts should default true (directive)")
+	}
 	if pw.NotifyReviewComments {
 		t.Error("notify_review_comments should default false")
 	}

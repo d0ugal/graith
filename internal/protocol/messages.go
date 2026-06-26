@@ -303,6 +303,7 @@ type PRInfo struct {
 	State          string `json:"state"` // open | draft | merged | closed
 	URL            string `json:"url,omitempty"`
 	ReviewDecision string `json:"review_decision,omitempty"` // approved | changes_requested | review_required
+	Conflicting    bool   `json:"conflicting,omitempty"`     // PR has merge conflicts with base
 }
 
 // CIInfo is the aggregate CI status for a session's linked PR.

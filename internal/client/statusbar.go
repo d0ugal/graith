@@ -23,10 +23,14 @@ type statusBarInfo struct {
 	unread           int
 	fleet            protocol.FleetSummary
 	pendingApprovals int
+	prNumber         int
+	prState          string // open | draft | merged | closed
+	prConflicting    bool
+	ciState          string // passing | failing | pending
 }
 
 func newStatusBarInfo(s protocol.SessionInfo, unreadCount int, fleet protocol.FleetSummary) statusBarInfo {
-	return statusBarInfo{
+	info := statusBarInfo{
 		name:        s.Name,
 		agent:       s.Agent,
 		status:      s.Status,
@@ -37,6 +41,15 @@ func newStatusBarInfo(s protocol.SessionInfo, unreadCount int, fleet protocol.Fl
 		unread:      unreadCount,
 		fleet:       fleet,
 	}
+	if s.PullRequest != nil {
+		info.prNumber = s.PullRequest.Number
+		info.prState = s.PullRequest.State
+		info.prConflicting = s.PullRequest.Conflicting
+	}
+	if s.CI != nil {
+		info.ciState = s.CI.State
+	}
+	return info
 }
 
 const (
@@ -131,6 +144,9 @@ func formatStatusLine(info statusBarInfo, cols int) string {
 			mid += fillPad.Render(" ") + aheadStyle.Render(fmt.Sprintf("↑%d", info.unpushed))
 		}
 	}
+	if pr := formatPRSection(info, fill); pr != "" {
+		mid += sep + pr
+	}
 
 	appendUnread := func(body string) string {
 		if info.unread <= 0 {
@@ -177,6 +193,35 @@ func formatStatusLine(info statusBarInfo, cols int) string {
 		}
 	}
 	return line
+}
+
+// formatPRSection renders the linked-PR token for the status bar, e.g.
+// "PR#56 ✗" (CI failing) or "PR#56 ⚠conflict", colored by the worst signal.
+func formatPRSection(info statusBarInfo, bg color.Color) string {
+	if info.prNumber == 0 {
+		return ""
+	}
+	base := lipgloss.NewStyle().Background(bg)
+	label := fmt.Sprintf("PR#%d", info.prNumber)
+
+	switch info.prState {
+	case "merged":
+		return base.Foreground(colorDim).Render(label + " merged")
+	case "closed":
+		return base.Foreground(colorDim).Render(label + " closed")
+	}
+	if info.prConflicting {
+		return base.Foreground(colorRed).Bold(true).Render(label + " ⚠conflict")
+	}
+	switch info.ciState {
+	case "failing":
+		return base.Foreground(colorRed).Render(label + " ✗CI")
+	case "passing":
+		return base.Foreground(colorGreen).Render(label + " ✓")
+	case "pending":
+		return base.Foreground(colorYellow).Render(label + " ·CI")
+	}
+	return base.Foreground(colorBlue).Render(label)
 }
 
 func formatFleetSection(fleet protocol.FleetSummary, bg color.Color) string {
