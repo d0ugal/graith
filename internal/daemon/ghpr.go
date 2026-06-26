@@ -27,6 +27,7 @@ type prData struct {
 	URL            string
 	ReviewDecision string // approved | changes_requested | review_required | ""
 	HeadRefOid     string
+	Mergeable      string   // MERGEABLE | CONFLICTING | UNKNOWN (GitHub computes async)
 	CIState        string   // passing | failing | pending
 	FailingChecks  []string // human-readable "name" of each failing check
 	IssueComments  []ghComment
@@ -119,6 +120,7 @@ type prListItem struct {
 	URL            string `json:"url"`
 	ReviewDecision string `json:"reviewDecision"`
 	HeadRefOid     string `json:"headRefOid"`
+	Mergeable      string `json:"mergeable"` // MERGEABLE | CONFLICTING | UNKNOWN
 }
 
 // prCheck is the JSON shape of one `gh pr checks --json ...` item.
@@ -137,7 +139,7 @@ func resolvePR(ctx context.Context, slug, branch, worktreePath string) (prData, 
 
 	out, err := ghRunner(cctx, worktreePath,
 		"pr", "list", "--repo", slug, "--head", branch, "--state", "all",
-		"--json", "number,state,isDraft,url,reviewDecision,headRefOid", "--limit", "1")
+		"--json", "number,state,isDraft,url,reviewDecision,headRefOid,mergeable", "--limit", "1")
 	if err != nil {
 		return prData{}, false, fmt.Errorf("gh pr list: %w", err)
 	}
@@ -156,6 +158,7 @@ func resolvePR(ctx context.Context, slug, branch, worktreePath string) (prData, 
 		URL:            it.URL,
 		ReviewDecision: strings.ToLower(it.ReviewDecision),
 		HeadRefOid:     it.HeadRefOid,
+		Mergeable:      strings.ToUpper(it.Mergeable),
 	}
 
 	// CI checks + comments — only meaningful while the PR is open.

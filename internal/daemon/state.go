@@ -120,6 +120,7 @@ type PRStatus struct {
 	URL            string
 	ReviewDecision string
 	HeadRefOid     string // head commit SHA — keys the per-SHA notify cap
+	Mergeable      string // MERGEABLE | CONFLICTING | UNKNOWN
 }
 
 // CIStatus is the runtime-only aggregate CI status for a session's linked PR.

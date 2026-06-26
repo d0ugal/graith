@@ -261,6 +261,9 @@ func formatPR(s protocol.SessionInfo) string {
 	}
 	pr := s.PullRequest
 	out := fmt.Sprintf("#%d %s", pr.Number, pr.State)
+	if pr.Conflicting {
+		out += " conflict"
+	}
 	if s.CI != nil && s.CI.State != "" {
 		switch s.CI.State {
 		case "passing":

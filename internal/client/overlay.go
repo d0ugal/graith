@@ -2,6 +2,7 @@ package client
 
 import (
 	"fmt"
+	"image/color"
 	"io"
 	"os"
 	"sort"
@@ -162,6 +163,7 @@ type columnWidths struct {
 	status     int
 	summary    int
 	git        int
+	pr         int
 	output     int
 }
 
@@ -200,6 +202,63 @@ func displayGit(dirty bool, unpushed int) string {
 		parts = append(parts, fmt.Sprintf("↑%d", unpushed))
 	}
 	return strings.Join(parts, " ")
+}
+
+// displayPR is the compact per-row PR/CI token for the overlay list, e.g.
+// "#56 ✗" (CI failing), "#56 ⚠" (conflict), "#1615 ✓" (passing), "#583 merged".
+func displayPR(s protocol.SessionInfo) string {
+	if s.PullRequest == nil {
+		return "—"
+	}
+	pr := s.PullRequest
+	out := fmt.Sprintf("#%d", pr.Number)
+	switch pr.State {
+	case "merged":
+		return out + " merged"
+	case "closed":
+		return out + " closed"
+	case "draft":
+		out += "d"
+	}
+	if pr.Conflicting {
+		return out + " ⚠" // merge conflict — highest-priority signal
+	}
+	if s.CI != nil {
+		switch s.CI.State {
+		case "passing":
+			return out + " ✓"
+		case "failing":
+			return out + " ✗"
+		case "pending":
+			return out + " ·"
+		}
+	}
+	return out
+}
+
+// prColor returns the color for a PR token by its worst signal.
+func prColor(s protocol.SessionInfo) color.Color {
+	pr := s.PullRequest
+	if pr == nil {
+		return colorDim
+	}
+	if pr.Conflicting {
+		return colorRed
+	}
+	if s.CI != nil {
+		switch s.CI.State {
+		case "failing":
+			return colorRed
+		case "passing":
+			return colorGreen
+		case "pending":
+			return colorYellow
+		}
+	}
+	if pr.State == "merged" || pr.State == "closed" {
+		return colorDim
+	}
+	return colorBlue
 }
 
 func displayLastOutput(s protocol.SessionInfo) string {
@@ -322,6 +381,9 @@ func computeColumnWidths(sessions []protocol.SessionInfo, currentSessionID strin
 		if n := lipgloss.Width(git); n > cw.git {
 			cw.git = n
 		}
+		if n := lipgloss.Width(displayPR(s)); n > cw.pr {
+			cw.pr = n
+		}
 		output := displayLastOutput(s)
 		if n := lipgloss.Width(output); n > cw.output {
 			cw.output = n
@@ -338,6 +400,9 @@ func computeColumnWidths(sessions []protocol.SessionInfo, currentSessionID strin
 	}
 	if cw.git < 3 {
 		cw.git = 3
+	}
+	if cw.pr < 2 {
+		cw.pr = 2
 	}
 	if cw.output < 6 {
 		cw.output = 6
@@ -464,6 +529,13 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 		}
 	}
 
+	var prRendered string
+	if si.info.PullRequest == nil {
+		prRendered = dim.Render(pad("—", d.cols.pr))
+	} else {
+		prRendered = lipgloss.NewStyle().Foreground(prColor(si.info)).Render(pad(displayPR(si.info), d.cols.pr))
+	}
+
 	outputVal := displayLastOutput(si.info)
 	outputRendered := dim.Render(pad(outputVal, d.cols.output))
 
@@ -474,9 +546,9 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 		selPrefix = "> "
 	}
 
-	line := fmt.Sprintf("%s%s%s%s%s %s%s%s%s%s%s%s%s%s%s",
+	line := fmt.Sprintf("%s%s%s%s%s %s%s%s%s%s%s%s%s%s%s%s%s",
 		selPrefix, numberLabel, starredMark, currentMark, styledIndicator,
-		treePrefixRendered, name, sep, statusRendered, sep, summaryRendered, sep, gitRendered, sep, outputRendered)
+		treePrefixRendered, name, sep, statusRendered, sep, summaryRendered, sep, gitRendered, sep, prRendered, sep, outputRendered)
 
 	if selected {
 		line = lipgloss.NewStyle().Bold(true).Render(line)
@@ -1734,22 +1806,22 @@ func (m overlayModel) View() tea.View {
 		if s.PullRequest != nil {
 			pr := s.PullRequest
 			prLine := fmt.Sprintf("PR #%d %s", pr.Number, pr.State)
-			ciColor := dim
+			lineColor := lipgloss.NewStyle().Foreground(prColor(s))
+			if pr.Conflicting {
+				prLine += "  ⚠ merge conflict"
+			}
 			if s.CI != nil {
 				switch s.CI.State {
 				case "passing":
 					prLine += "  CI: passing"
-					ciColor = lipgloss.NewStyle().Foreground(colorGreen)
 				case "failing":
 					prLine += "  CI: failing"
-					ciColor = lipgloss.NewStyle().Foreground(colorRed)
 				case "pending":
 					prLine += "  CI: pending"
-					ciColor = lipgloss.NewStyle().Foreground(colorYellow)
 				}
 			}
 			panelContent.WriteString("\n")
-			panelContent.WriteString(ciColor.Render(prLine))
+			panelContent.WriteString(lineColor.Render(prLine))
 		}
 
 		var line2 []string

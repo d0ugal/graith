@@ -89,6 +89,7 @@ interval = "1h"
 [pr_watch]
 enabled = false
 notify_ci_failures = true
+notify_merge_conflicts = true
 notify_review_comments = false
 notify_review_decisions = false
 notify_pr_lifecycle = true
