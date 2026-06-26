@@ -23,6 +23,7 @@ type msgConversation struct {
 
 // msgEntry is a single rendered message in a thread.
 type msgEntry struct {
+	id        string // stable message id (for collapse state across refreshes)
 	sender    string // display name of the author
 	body      string
 	createdAt time.Time
@@ -46,11 +47,16 @@ type messageOverlayModel struct {
 
 	conversations []msgConversation
 	cursor        int // selected conversation in the left rail
-	scroll        int // thread scroll: lines scrolled up from the bottom (0 = newest)
-	loaded        bool
-	fetching      bool // a fetch is in flight; don't stack another
-	width         int
-	height        int
+	msgCursor     int // selected message within the current thread
+	// The focused message (msgCursor) is always shown expanded; every other
+	// message is collapsed to a single header line. pinned holds messages the
+	// user has explicitly kept open (via enter) so they stay expanded even when
+	// not focused — keyed by message id.
+	pinned   map[string]bool
+	loaded   bool
+	fetching bool // a fetch is in flight; don't stack another
+	width    int
+	height   int
 }
 
 func newMessageOverlayModel(selfID string, fetch func() ([]protocol.ConversationMessage, bool), names map[string]string) messageOverlayModel {
@@ -58,6 +64,7 @@ func newMessageOverlayModel(selfID string, fetch func() ([]protocol.Conversation
 		selfID: selfID,
 		fetch:  fetch,
 		names:  names,
+		pinned: map[string]bool{},
 	}
 }
 
@@ -129,6 +136,7 @@ func groupConversations(selfID string, msgs []protocol.ConversationMessage, name
 		}
 		created := parseMsgTime(cm.CreatedAt)
 		conv.messages = append(conv.messages, msgEntry{
+			id:        cm.ID,
 			sender:    sender,
 			body:      cm.Body,
 			createdAt: created,
@@ -218,6 +226,7 @@ func (m messageOverlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.cursor >= 0 && m.cursor < len(m.conversations) {
 			selectedPeer = m.conversations[m.cursor].peerID
 		}
+		prevAtLast := m.msgCursor >= m.msgCount()-1
 		m.conversations = msg.conversations
 		m.cursor = 0
 		for i, c := range m.conversations {
@@ -229,46 +238,100 @@ func (m messageOverlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.cursor >= len(m.conversations) {
 			m.cursor = max(0, len(m.conversations)-1)
 		}
+		// If the user was viewing the latest message, keep them pinned to the
+		// newest as fresh messages arrive; otherwise just clamp.
+		if prevAtLast {
+			m.msgCursor = max(0, m.msgCount()-1)
+		} else if m.msgCursor >= m.msgCount() {
+			m.msgCursor = max(0, m.msgCount()-1)
+		}
 		return m, nil
 
 	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "q", "esc", "ctrl+c":
 			return m, tea.Quit
-		case "j", "down":
+		// Vertical: move the message cursor within the current thread. The
+		// viewport follows it (this is the scroll).
+		case "j", "down", "ctrl+n":
+			if m.msgCursor < m.msgCount()-1 {
+				m.msgCursor++
+			}
+			return m, nil
+		case "k", "up", "ctrl+p":
+			if m.msgCursor > 0 {
+				m.msgCursor--
+			}
+			return m, nil
+		// Horizontal: switch conversation in the rail.
+		case "l", "right", "tab":
 			if m.cursor < len(m.conversations)-1 {
 				m.cursor++
-				m.scroll = 0
+				m.msgCursor = max(0, m.msgCountAt(m.cursor)-1)
 			}
 			return m, nil
-		case "k", "up":
+		case "h", "left", "shift+tab":
 			if m.cursor > 0 {
 				m.cursor--
-				m.scroll = 0
+				m.msgCursor = max(0, m.msgCountAt(m.cursor)-1)
 			}
 			return m, nil
-		case "ctrl+u", "pgup", "b":
-			// Scroll up toward older messages (increase offset-from-bottom).
-			m.scroll += 5
-			return m, nil
-		case "ctrl+d", "pgdown", " ":
-			// Scroll down toward newer messages (toward the pinned bottom).
-			m.scroll -= 5
-			if m.scroll < 0 {
-				m.scroll = 0
+		// Pin/unpin the focused message so it stays expanded even when not
+		// focused (the focused message is always expanded regardless).
+		case "enter", " ":
+			if e := m.currentEntry(); e != nil && e.id != "" {
+				m.pinned[e.id] = !m.pinned[e.id]
 			}
 			return m, nil
-		case "g":
-			// Jump to the top (oldest); renderThread clamps to the real max.
-			m.scroll = 1 << 30
+		// Pin-all / unpin-all in the current thread.
+		case "O":
+			m.setAllPinned(true)
 			return m, nil
-		case "G":
-			// Jump to the bottom (newest).
-			m.scroll = 0
+		case "C":
+			m.setAllPinned(false)
+			return m, nil
+		case "g", "home":
+			m.msgCursor = 0
+			return m, nil
+		case "G", "end":
+			m.msgCursor = max(0, m.msgCount()-1)
 			return m, nil
 		}
 	}
 	return m, nil
+}
+
+// msgCount returns the number of messages in the selected conversation.
+func (m messageOverlayModel) msgCount() int { return m.msgCountAt(m.cursor) }
+
+func (m messageOverlayModel) msgCountAt(conv int) int {
+	if conv < 0 || conv >= len(m.conversations) {
+		return 0
+	}
+	return len(m.conversations[conv].messages)
+}
+
+// currentEntry returns the message under the cursor, or nil.
+func (m messageOverlayModel) currentEntry() *msgEntry {
+	if m.cursor < 0 || m.cursor >= len(m.conversations) {
+		return nil
+	}
+	msgs := m.conversations[m.cursor].messages
+	if m.msgCursor < 0 || m.msgCursor >= len(msgs) {
+		return nil
+	}
+	return &msgs[m.msgCursor]
+}
+
+func (m messageOverlayModel) setAllPinned(v bool) {
+	if m.cursor < 0 || m.cursor >= len(m.conversations) {
+		return
+	}
+	for _, e := range m.conversations[m.cursor].messages {
+		if e.id != "" {
+			m.pinned[e.id] = v
+		}
+	}
 }
 
 func (m messageOverlayModel) View() tea.View {
@@ -290,10 +353,10 @@ func (m messageOverlayModel) View() tea.View {
 	// single-column thread view so the overlay stays usable (and exitable).
 	var body, helpLine string
 	if w < 36 {
-		helpLine = help.Render("↑/↓ peer  PgUp/Dn scroll  q close")
+		helpLine = help.Render("↑/↓ msg  ⏎ pin  ←/→ peer  q close")
 		body = m.renderThread(max(1, w-1), bodyH)
 	} else {
-		helpLine = help.Render("↑/↓ conversation  PgUp older / PgDn newer  g/G top/bottom  q close")
+		helpLine = help.Render("↑/↓ message (auto-expands)  ⏎ pin open  ←/→ conversation  q close")
 		railW := 26
 		if w < 70 {
 			railW = max(16, w/3)
@@ -380,45 +443,94 @@ func (m messageOverlayModel) renderThread(width, height int) string {
 	peerStyle := lipgloss.NewStyle().Foreground(colorBlue).Bold(true)
 	sysStyle := lipgloss.NewStyle().Foreground(colorDim).Italic(true)
 	bodyStyle := lipgloss.NewStyle().Width(width)
+	selStyle := lipgloss.NewStyle().Foreground(colorPurple).Bold(true)
 
+	// Build each message as a block of lines; collapsed messages are a single
+	// header line, expanded ones add the (sanitized) body. Track where the
+	// selected message's block starts/ends so we can scroll it into view.
 	var lines []string
-	for _, e := range conv.messages {
-		header := e.sender
+	selStart, selEnd := 0, 0
+	for i, e := range conv.messages {
+		// The focused message is always expanded; others only if pinned (or if
+		// they have no id to track collapse state).
+		expanded := i == m.msgCursor || e.id == "" || m.pinned[e.id]
+
+		marker := "▸"
+		if expanded {
+			marker = "▾"
+		}
+		who := e.sender
 		if e.outbound {
-			header = "me → " + conv.peerName
+			who = "me → " + conv.peerName
 		}
 		hs := peerStyle
 		switch {
 		case e.system:
 			hs = sysStyle
-			header = "⚙ " + header
+			who = "⚙ " + who
 		case e.outbound:
 			hs = meStyle
 		}
-		ts := ""
-		if !e.createdAt.IsZero() {
-			ts = "  " + dim.Render(relTime(e.createdAt))
+		markerStyle := dim
+		if i == m.msgCursor {
+			markerStyle = selStyle
 		}
-		lines = append(lines, hs.Render(header)+ts)
-		// Message bodies are agent-controlled; strip ANSI/control sequences so
-		// a malicious or buggy agent can't spoof or corrupt the operator's view.
-		body := bodyStyle.Render(strings.TrimRight(sanitizeMessageBody(e.body), "\n"))
-		lines = append(lines, strings.Split(body, "\n")...)
-		lines = append(lines, "")
+
+		body := strings.TrimRight(sanitizeMessageBody(e.body), "\n")
+		header := markerStyle.Render(marker) + " " + hs.Render(who) + dim.Render(msgTimestamp(e.createdAt))
+		if !expanded {
+			// Show a one-line snippet so a collapsed thread is still scannable.
+			if snippet := strings.TrimSpace(firstLine(body)); snippet != "" {
+				header += "  " + dim.Render(truncate(snippet, max(8, width-lipgloss.Width(ansi.Strip(header))-4)))
+			}
+		}
+
+		blockStart := len(lines)
+		lines = append(lines, header)
+		if expanded {
+			lines = append(lines, strings.Split(bodyStyle.Render(body), "\n")...)
+			lines = append(lines, "")
+		}
+		if i == m.msgCursor {
+			selStart, selEnd = blockStart, len(lines)
+		}
 	}
 
-	// Default scroll to the bottom (most recent) unless the user scrolled up.
+	// Scroll so the selected message's block is visible, preferring to show its
+	// top when it's taller than the viewport.
 	total := len(lines)
-	maxStart := max(0, total-height)
-	start := maxStart - m.scroll
-	if start < 0 {
-		start = 0
-	}
-	if start > maxStart {
-		start = maxStart
+	start := 0
+	if total > height {
+		if selEnd > start+height {
+			start = selEnd - height
+		}
+		if selStart < start {
+			start = selStart
+		}
+		if start > total-height {
+			start = total - height
+		}
+		if start < 0 {
+			start = 0
+		}
 	}
 	end := min(total, start+height)
 	return strings.Join(lines[start:end], "\n")
+}
+
+// msgTimestamp renders an absolute time plus a relative delta, e.g.
+// "  15:04 (3m ago)" — date is shown when the message isn't from today.
+func msgTimestamp(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	lt := t.Local()
+	now := time.Now()
+	layout := "15:04"
+	if lt.Year() != now.Year() || lt.YearDay() != now.YearDay() {
+		layout = "Jan 2 15:04"
+	}
+	return "  " + lt.Format(layout) + " (" + relTime(t) + ")"
 }
 
 func relTime(t time.Time) string {

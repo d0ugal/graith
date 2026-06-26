@@ -1,8 +1,12 @@
 package client
 
 import (
+	"strconv"
+	"strings"
 	"testing"
+	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/d0ugal/graith/internal/protocol"
 )
 
@@ -121,6 +125,114 @@ func TestGroupConversationsSortedByActivity(t *testing.T) {
 	}
 	if convs[0].peerID != "bonnie" {
 		t.Errorf("most recent conversation first: got %q, want bonnie", convs[0].peerID)
+	}
+}
+
+// testModel builds a loaded overlay model with one conversation of n messages.
+func testModel(n int) messageOverlayModel {
+	msgs := make([]protocol.ConversationMessage, n)
+	for i := 0; i < n; i++ {
+		// Two-line body: the first line shows as the collapsed snippet; the
+		// "detail N" line only renders when the message is expanded.
+		msgs[i] = protocol.ConversationMessage{
+			ID:        "m" + strconv.Itoa(i),
+			Stream:    "inbox:ben",
+			SenderID:  "bairn",
+			Body:      "summary " + strconv.Itoa(i) + "\ndetail " + strconv.Itoa(i),
+			CreatedAt: "2026-06-25T10:00:0" + strconv.Itoa(i) + "Z",
+		}
+	}
+	m := newMessageOverlayModel("ben", nil, nil)
+	m.conversations = groupConversations("ben", msgs, nil)
+	m.loaded = true
+	m.msgCursor = m.msgCount() - 1 // start on the most recent, as the UI does
+	m.width, m.height = 100, 24
+	return m
+}
+
+func TestMessageOverlayMessageNavigation(t *testing.T) {
+	m := testModel(4) // msgCursor starts at 3 (last)
+	if m.msgCursor != 3 {
+		t.Fatalf("initial msgCursor = %d, want 3", m.msgCursor)
+	}
+	// Up moves toward older messages; clamps at 0.
+	for i := 0; i < 10; i++ {
+		mm, _ := m.Update(keyPress("k"))
+		m = mm.(messageOverlayModel)
+	}
+	if m.msgCursor != 0 {
+		t.Errorf("after many ups, msgCursor = %d, want 0", m.msgCursor)
+	}
+	// Down clamps at last.
+	for i := 0; i < 10; i++ {
+		mm, _ := m.Update(keyPress("j"))
+		m = mm.(messageOverlayModel)
+	}
+	if m.msgCursor != 3 {
+		t.Errorf("after many downs, msgCursor = %d, want 3", m.msgCursor)
+	}
+}
+
+// The focused message is expanded (its body rendered); the others are collapsed
+// to a single header line.
+func TestMessageOverlayFocusedMessageExpanded(t *testing.T) {
+	m := testModel(3)
+	m.msgCursor = 1
+	out := m.renderThread(80, 40)
+	if !strings.Contains(out, "detail 1") {
+		t.Errorf("focused message body should be visible:\n%s", out)
+	}
+	if strings.Contains(out, "detail 0") || strings.Contains(out, "detail 2") {
+		t.Errorf("non-focused message bodies should be collapsed:\n%s", out)
+	}
+	// Moving the cursor expands a different message.
+	mm, _ := m.Update(keyPress("k")) // to index 0
+	m = mm.(messageOverlayModel)
+	out = m.renderThread(80, 40)
+	if !strings.Contains(out, "detail 0") {
+		t.Errorf("after moving up, message 0 should expand:\n%s", out)
+	}
+	if strings.Contains(out, "detail 1") {
+		t.Errorf("message 1 should collapse after moving away:\n%s", out)
+	}
+}
+
+// Enter pins a message so it stays expanded even after the cursor moves away.
+func TestMessageOverlayPinKeepsExpanded(t *testing.T) {
+	m := testModel(3)
+	m.msgCursor = 0
+	mm, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter}) // pin message 0
+	m = mm.(messageOverlayModel)
+	mm, _ = m.Update(keyPress("j")) // move to message 1
+	m = mm.(messageOverlayModel)
+	out := m.renderThread(80, 40)
+	if !strings.Contains(out, "detail 0") {
+		t.Errorf("pinned message 0 should stay expanded after moving away:\n%s", out)
+	}
+	if !strings.Contains(out, "detail 1") {
+		t.Errorf("focused message 1 should be expanded:\n%s", out)
+	}
+}
+
+func TestMessageOverlayRenderShowsTimeAndDelta(t *testing.T) {
+	m := testModel(2)
+	out := m.renderThread(80, 20)
+	// Render shows the relative delta ("ago") and a collapse marker.
+	if !strings.Contains(out, "ago") {
+		t.Errorf("thread render missing relative delta:\n%s", out)
+	}
+	if !strings.Contains(out, "▸") {
+		t.Errorf("non-focused messages should show the collapsed ▸ marker:\n%s", out)
+	}
+}
+
+func TestMsgTimestampTodayHasTimeAndDelta(t *testing.T) {
+	ts := msgTimestamp(time.Now().Add(-3 * time.Minute))
+	if !strings.Contains(ts, "ago") || !strings.Contains(ts, ":") {
+		t.Errorf("msgTimestamp = %q, want an absolute HH:MM and a delta", ts)
+	}
+	if msgTimestamp(time.Time{}) != "" {
+		t.Error("zero time should render empty")
 	}
 }
 
