@@ -260,6 +260,10 @@ func (sm *SessionManager) diffAndBuild(cfg *configPRWatch, t prWatchTarget, slug
 	}
 
 	// New PR or new head SHA resets the per-SHA notify cap and failing set.
+	// cur.mergeable is deliberately NOT reset here: unlike CI (which re-notifies
+	// per SHA), a still-conflicting PR after a push should not re-spam during an
+	// active rebase — and GitHub usually flips mergeability to UNKNOWN between
+	// pushes anyway, so a genuine re-conflict still transitions UNKNOWN→CONFLICTING.
 	if cur.number != d.Number || cur.headRefOid != d.HeadRefOid {
 		cur.number = d.Number
 		cur.headRefOid = d.HeadRefOid
@@ -278,8 +282,15 @@ func (sm *SessionManager) diffAndBuild(cfg *configPRWatch, t prWatchTarget, slug
 	if !cur.primed {
 		cur.state = d.State
 		cur.reviewDecision = d.ReviewDecision
-		if d.Mergeable == "MERGEABLE" || d.Mergeable == "CONFLICTING" {
-			cur.mergeable = d.Mergeable
+		// Baseline a resolved (MERGEABLE) state freely. Do NOT baseline
+		// CONFLICTING here unless conflict notifications are off — advancing the
+		// cursor to CONFLICTING before the conflict notice is delivered would let
+		// a same-poll CI notification (which returns early) or a rejected gate
+		// permanently mask the conflict (cursor-advance-only-on-delivery).
+		if d.Mergeable == "MERGEABLE" {
+			cur.mergeable = "MERGEABLE"
+		} else if d.Mergeable == "CONFLICTING" && !cfg.NotifyMergeConflicts {
+			cur.mergeable = "CONFLICTING"
 		}
 		if d.CommentsOK {
 			cur.primed = true
@@ -287,7 +298,9 @@ func (sm *SessionManager) diffAndBuild(cfg *configPRWatch, t prWatchTarget, slug
 			cur.lastReviewCommentID = maxCommentID(d.ReviewComments)
 		}
 		// Surface currently-broken mechanical state (failing CI, conflict) so a
-		// restart doesn't strand a stopped agent on a red build. CI takes priority.
+		// restart doesn't strand a stopped agent on a red build. CI takes priority;
+		// a deferred conflict still re-fires from the steady-state path next poll
+		// because cur.mergeable was left un-baselined above.
 		if d.CIState == "failing" && cfg.NotifyCIFailures {
 			if _, ok := sm.gate(cfg, t.id, cur); ok {
 				for _, name := range d.FailingChecks {
@@ -298,6 +311,7 @@ func (sm *SessionManager) diffAndBuild(cfg *configPRWatch, t prWatchTarget, slug
 		}
 		if d.Mergeable == "CONFLICTING" && cfg.NotifyMergeConflicts {
 			if _, ok := sm.gate(cfg, t.id, cur); ok {
+				cur.mergeable = "CONFLICTING" // advance only on delivery
 				return []string{conflictBody(t, d)}
 			}
 		}

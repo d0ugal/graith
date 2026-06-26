@@ -2948,11 +2948,11 @@ func TestPad(t *testing.T) {
 // --- columnWidths.totalWidth ---
 
 func TestColumnWidths_TotalWidth(t *testing.T) {
-	cw := columnWidths{name: 10, status: 8, summary: 15, git: 5, output: 4}
+	cw := columnWidths{name: 10, status: 8, summary: 15, git: 5, pr: 6, output: 4}
 	got := cw.totalWidth()
-	// 9 + 10 + 2 + 8 + 2 + 15 + 2 + 5 + 2 + 4 + 4 = 63
-	if got != 63 {
-		t.Errorf("totalWidth() = %d, want 63", got)
+	// 9 + 10 + 2 + 8 + 2 + 15 + 2 + 5 + 2 + 6 + 2 + 4 + 4 = 71
+	if got != 71 {
+		t.Errorf("totalWidth() = %d, want 71", got)
 	}
 }
 
@@ -3634,5 +3634,16 @@ func TestFormatPRSection(t *testing.T) {
 	// No PR -> empty.
 	if got := formatPRSection(statusBarInfo{}, barBg); got != "" {
 		t.Errorf("no PR should render empty, got %q", got)
+	}
+}
+
+func TestColumnWidths_TotalWidthIncludesPR(t *testing.T) {
+	// The PR separator is always present; widening cw.pr widens the total 1:1,
+	// proving the PR column is accounted for (the bug Claude/Codex caught).
+	a := columnWidths{name: 10, status: 6, summary: 7, git: 3, pr: 2, output: 6}
+	b := a
+	b.pr = 10
+	if b.totalWidth()-a.totalWidth() != 8 {
+		t.Errorf("totalWidth must grow by Δpr=8, got %d", b.totalWidth()-a.totalWidth())
 	}
 }

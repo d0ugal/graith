@@ -63,6 +63,36 @@ func TestDiffAndBuild_MergeConflictTransition(t *testing.T) {
 	}
 }
 
+func TestDiffAndBuild_PrimeConflictNotMaskedByCIFailure(t *testing.T) {
+	// On the priming poll a PR is BOTH failing CI and conflicting. CI takes
+	// priority and is delivered first; the conflict must NOT be permanently
+	// masked — it re-fires from the steady-state path on the next poll.
+	sm := newPRWatchSM()
+	cfg := allOnConfig()
+	cfg.Debounce = "0s" // so the deferred conflict isn't debounced within the test's instant
+	t1 := prWatchTarget{id: "bothy", branch: "bothy"}
+
+	out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 8, State: "open", HeadRefOid: "sha1",
+		CIState: "failing", FailingChecks: []string{"build"},
+		Mergeable: "CONFLICTING", CommentsOK: true,
+	})
+	if len(out) != 1 || !strings.Contains(out[0], "CI failed") {
+		t.Fatalf("prime should deliver the CI failure first, got %v", out)
+	}
+
+	// Next poll: CI still failing (already delivered, no re-notify), conflict
+	// must now surface since it was deferred, not lost.
+	out = sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 8, State: "open", HeadRefOid: "sha1",
+		CIState: "failing", FailingChecks: []string{"build"},
+		Mergeable: "CONFLICTING", CommentsOK: true,
+	})
+	if len(out) != 1 || !strings.Contains(out[0], "merge conflicts") {
+		t.Fatalf("deferred conflict should fire on the next poll, got %v", out)
+	}
+}
+
 func TestDiffAndBuild_MergeConflictGatedOff(t *testing.T) {
 	sm := newPRWatchSM()
 	cfg := &config.PRWatchConfig{Enabled: true, NotifyMergeConflicts: false}
