@@ -168,8 +168,8 @@ type columnWidths struct {
 }
 
 func (cw columnWidths) totalWidth() int {
-	// "  N ★▸● " (9) + treeIndent + name + "  " + status + "  " + summary + "  " + git + "  " + output + margin(4)
-	return 9 + cw.treeIndent + cw.name + 2 + cw.status + 2 + cw.summary + 2 + cw.git + 2 + cw.output + 4
+	// "  N ★▸● " (9) + treeIndent + name + "  " + status + "  " + summary + "  " + git + "  " + pr + "  " + output + margin(4)
+	return 9 + cw.treeIndent + cw.name + 2 + cw.status + 2 + cw.summary + 2 + cw.git + 2 + cw.pr + 2 + cw.output + 4
 }
 
 func pad(s string, width int) string {
@@ -1736,21 +1736,23 @@ func (m overlayModel) View() tea.View {
 
 	headerPrefix := "         "
 	nameColWidth := m.cols.treeIndent + m.cols.name
-	headerLine := fmt.Sprintf("%s%s  %s  %s  %s  %s",
+	headerLine := fmt.Sprintf("%s%s  %s  %s  %s  %s  %s",
 		headerPrefix,
 		pad("Session", nameColWidth),
 		pad("Status", m.cols.status),
 		pad("Summary", m.cols.summary),
 		pad("Git", m.cols.git),
+		pad("PR", m.cols.pr),
 		"Output")
 	panelContent.WriteString(dim.Render(headerLine))
 	panelContent.WriteString("\n")
-	sepLine := fmt.Sprintf("%s%s  %s  %s  %s  %s",
+	sepLine := fmt.Sprintf("%s%s  %s  %s  %s  %s  %s",
 		headerPrefix,
 		strings.Repeat("─", nameColWidth),
 		strings.Repeat("─", m.cols.status),
 		strings.Repeat("─", m.cols.summary),
 		strings.Repeat("─", m.cols.git),
+		strings.Repeat("─", m.cols.pr),
 		strings.Repeat("─", m.cols.output))
 	panelContent.WriteString(dim.Render(sepLine))
 	panelContent.WriteString("\n")
