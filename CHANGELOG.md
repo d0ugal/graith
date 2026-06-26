@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.60.0](https://github.com/d0ugal/graith/compare/v0.59.1...v0.60.0) (2026-06-26)
+
+
+### Features
+
+* **overlay:** collapsible messages with focus-to-expand + timestamps ([13e36ca](https://github.com/d0ugal/graith/commit/13e36ca35ba02d53d15c0cc2454659cf4e490c6a))
+* PR/CI in overlay column + status bar, and merge-conflict notifications ([7ad7794](https://github.com/d0ugal/graith/commit/7ad77948c3a6027cbe40e11c3e80c5ce2f5943d7))
+
+
+### Bug Fixes
+
+* address ship-it review findings (pr-ci-visibility) ([ffe5ac5](https://github.com/d0ugal/graith/commit/ffe5ac58f83dad033ee8d5640f4779912b29cc95))
+* **overlay:** address collapsible-messages review findings ([f620a92](https://github.com/d0ugal/graith/commit/f620a9242c681308f257d1d0d90257daa8d727db))
+
 ## [0.59.1](https://github.com/d0ugal/graith/compare/v0.59.0...v0.59.1) (2026-06-25)
 
 
