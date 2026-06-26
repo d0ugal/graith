@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.60.1](https://github.com/d0ugal/graith/compare/v0.60.0...v0.60.1) (2026-06-26)
+
+
+### Bug Fixes
+
+* update module modernc.org/libc to v1.73.5 ([a58bec5](https://github.com/d0ugal/graith/commit/a58bec567cda4dca360e8cec0f6fb00cceb6b735))
+
 ## [0.60.0](https://github.com/d0ugal/graith/compare/v0.59.1...v0.60.0) (2026-06-26)
 
 
