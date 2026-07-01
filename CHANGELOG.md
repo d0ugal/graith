@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.61.0](https://github.com/d0ugal/graith/compare/v0.60.1...v0.61.0) (2026-07-01)
+
+
+### Features
+
+* build .deb and .rpm packages via GoReleaser nfpm ([a4cb551](https://github.com/d0ugal/graith/commit/a4cb551a617224226869b9a82f180ae98172a536))
+* make binaries and packages reproducible ([488e356](https://github.com/d0ugal/graith/commit/488e3562835417831a1903e6f3836c298e26bff6))
+
+
+### Bug Fixes
+
+* update module modernc.org/libc to v1.73.5 ([e7d18fd](https://github.com/d0ugal/graith/commit/e7d18fda5ffdf1111ac3f1ada92f7049bb2bd1a7))
+* update module modernc.org/libc to v2 ([3d74720](https://github.com/d0ugal/graith/commit/3d747203492dcc9d21153da706e3c1ce15104a9e))
+
 ## [0.60.1](https://github.com/d0ugal/graith/compare/v0.60.0...v0.60.1) (2026-06-26)
 
 
