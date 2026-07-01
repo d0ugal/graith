@@ -17,14 +17,11 @@ graith manages multiple agents (Claude, Codex, OpenCode, Cursor, Agy) running in
 
 A long-lived daemon (`graithd`) owns PTY sessions and persists state. A stateless CLI client (`gr`) connects over a Unix socket using a framed binary protocol. Sessions survive terminal closures, daemon restarts, and SSH disconnections.
 
-```
-┌──────────┐     Unix Socket      ┌──────────┐     PTY      ┌─────────┐
-│ gr (CLI) │ <──── frames ──────> │ graithd  │ <──────────> │ claude  │
-│  client  │   control + data     │  daemon  │              │ codex   │
-└──────────┘                      └──────────┘              │ opencode│
-                                       │                    └─────────┘
-                                  state.json
-                                  (persisted)
+```mermaid
+graph LR
+    cli["gr (CLI)<br/>client"] <-->|"frames · control + data"| daemon["graithd<br/>daemon"]
+    daemon <-->|PTY| agents["claude<br/>codex<br/>opencode"]
+    daemon --> state[("state.json<br/>persisted")]
 ```
 
 The wire protocol uses 5-byte framed multiplexing: `[channel:1][length:4][payload:N]`. See [Architecture]({{< relref "architecture" >}}) for protocol details.
