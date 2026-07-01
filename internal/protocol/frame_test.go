@@ -47,7 +47,9 @@ func TestFrameEmptyPayload(t *testing.T) {
 	w := NewFrameWriter(&buf)
 	r := NewFrameReader(&buf)
 
-	w.WriteFrame(ChannelControl, []byte{})
+	if err := w.WriteFrame(ChannelControl, []byte{}); err != nil {
+		t.Fatalf("WriteFrame: %v", err)
+	}
 
 	f, err := r.ReadFrame()
 	if err != nil {
@@ -119,7 +121,8 @@ func TestWriteFrameAtomicity(t *testing.T) {
 	go func() {
 		wg.Wait()
 		close(writeErrs)
-		pw.Close()
+
+		_ = pw.Close()
 	}()
 
 	total := goroutines * framesPerGoroutine

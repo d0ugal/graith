@@ -28,7 +28,7 @@ func (w *Watcher) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer watcher.Close()
+	defer func() { _ = watcher.Close() }()
 
 	dir := filepath.Dir(w.path)
 	if err := watcher.Add(dir); err != nil {

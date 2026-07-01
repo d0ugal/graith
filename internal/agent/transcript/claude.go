@@ -86,7 +86,7 @@ func (claudeReader) read(path string) ([]Turn, int, error) {
 	if err != nil {
 		return nil, 0, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	byUUID := make(map[string]claudeRecord)
 

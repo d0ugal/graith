@@ -23,7 +23,7 @@ func NewWithWriter(jsonMode bool, w io.Writer) *Writer {
 
 func (w *Writer) Printf(format string, args ...any) {
 	if !w.jsonMode {
-		fmt.Fprintf(w.out, format, args...)
+		_, _ = fmt.Fprintf(w.out, format, args...)
 	}
 }
 
@@ -39,12 +39,13 @@ func (w *Writer) Error(err error) {
 		type jsonErr struct {
 			Error string `json:"error"`
 		}
-		json.NewEncoder(w.errOut).Encode(jsonErr{Error: err.Error()})
+
+		_ = json.NewEncoder(w.errOut).Encode(jsonErr{Error: err.Error()})
 
 		return
 	}
 
-	fmt.Fprintf(w.errOut, "error: %v\n", err)
+	_, _ = fmt.Fprintf(w.errOut, "error: %v\n", err)
 }
 
 func (w *Writer) IsJSON() bool {

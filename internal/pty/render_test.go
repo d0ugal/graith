@@ -9,7 +9,7 @@ import (
 
 func TestRenderFramePlainText(t *testing.T) {
 	vt := vt10x.New(vt10x.WithSize(10, 3))
-	vt.Write([]byte("braw!"))
+	_, _ = vt.Write([]byte("braw!"))
 
 	frame := renderFrame(vt)
 	if frame.Cols != 10 || frame.Rows != 3 {
@@ -27,7 +27,7 @@ func TestRenderFramePlainText(t *testing.T) {
 
 func TestRenderFrameColors(t *testing.T) {
 	vt := vt10x.New(vt10x.WithSize(20, 3))
-	vt.Write([]byte("\x1b[31mred\x1b[0m normal"))
+	_, _ = vt.Write([]byte("\x1b[31mred\x1b[0m normal"))
 
 	frame := renderFrame(vt)
 	if !strings.Contains(frame.Frame, ";31m") {
@@ -45,7 +45,7 @@ func TestRenderFrameColors(t *testing.T) {
 
 func TestRenderFrameBold(t *testing.T) {
 	vt := vt10x.New(vt10x.WithSize(20, 2))
-	vt.Write([]byte("\x1b[1mbold\x1b[0m"))
+	_, _ = vt.Write([]byte("\x1b[1mbold\x1b[0m"))
 
 	frame := renderFrame(vt)
 	if !strings.Contains(frame.Frame, ";1m") {
@@ -55,7 +55,7 @@ func TestRenderFrameBold(t *testing.T) {
 
 func TestRenderFrame256Color(t *testing.T) {
 	vt := vt10x.New(vt10x.WithSize(20, 2))
-	vt.Write([]byte("\x1b[38;5;208morange\x1b[0m"))
+	_, _ = vt.Write([]byte("\x1b[38;5;208morange\x1b[0m"))
 
 	frame := renderFrame(vt)
 	if !strings.Contains(frame.Frame, ";38;5;208m") {
@@ -65,7 +65,7 @@ func TestRenderFrame256Color(t *testing.T) {
 
 func TestRenderFrameCursorPosition(t *testing.T) {
 	vt := vt10x.New(vt10x.WithSize(20, 5))
-	vt.Write([]byte("line1\nline2"))
+	_, _ = vt.Write([]byte("line1\nline2"))
 
 	frame := renderFrame(vt)
 	if frame.CursorY < 1 {
@@ -75,7 +75,7 @@ func TestRenderFrameCursorPosition(t *testing.T) {
 
 func TestRenderFrameRows(t *testing.T) {
 	vt := vt10x.New(vt10x.WithSize(10, 4))
-	vt.Write([]byte("abc"))
+	_, _ = vt.Write([]byte("abc"))
 
 	frame := renderFrame(vt)
 
@@ -87,7 +87,7 @@ func TestRenderFrameRows(t *testing.T) {
 
 func TestRenderPreviewPlainText(t *testing.T) {
 	vt := vt10x.New(vt10x.WithSize(10, 3))
-	vt.Write([]byte("braw!"))
+	_, _ = vt.Write([]byte("braw!"))
 
 	preview := renderPreview(vt)
 	if !strings.Contains(preview, "braw!") {
@@ -101,7 +101,7 @@ func TestRenderPreviewPlainText(t *testing.T) {
 
 func TestRenderPreviewStripsColors(t *testing.T) {
 	vt := vt10x.New(vt10x.WithSize(20, 3))
-	vt.Write([]byte("\x1b[31mred text\x1b[0m"))
+	_, _ = vt.Write([]byte("\x1b[31mred text\x1b[0m"))
 
 	preview := renderPreview(vt)
 	if !strings.Contains(preview, "red text") {
@@ -115,7 +115,7 @@ func TestRenderPreviewStripsColors(t *testing.T) {
 
 func TestRenderPreviewTrimsTrailingSpaces(t *testing.T) {
 	vt := vt10x.New(vt10x.WithSize(20, 2))
-	vt.Write([]byte("hi"))
+	_, _ = vt.Write([]byte("hi"))
 
 	preview := renderPreview(vt)
 

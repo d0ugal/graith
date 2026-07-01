@@ -14,7 +14,9 @@ func TestJSONOutput(t *testing.T) {
 	type data struct {
 		Name string `json:"name"`
 	}
-	w.JSON(data{Name: "braw"})
+	if err := w.JSON(data{Name: "braw"}); err != nil {
+		t.Fatalf("JSON: %v", err)
+	}
 
 	var got data
 	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {

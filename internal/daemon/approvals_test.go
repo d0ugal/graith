@@ -103,7 +103,7 @@ func TestSubmitApprovalUserDecision(t *testing.T) {
 
 	go func() {
 		time.Sleep(50 * time.Millisecond)
-		sm.RespondToApproval("neep3", "allow", "user approved")
+		_ = sm.RespondToApproval("neep3", "allow", "user approved")
 	}()
 
 	decision := sm.SubmitApproval(context.Background(), req)

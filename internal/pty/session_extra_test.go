@@ -280,7 +280,7 @@ func TestScrollbackRemove(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sb.Write([]byte("auld neep tae be removed"))
+	_, _ = sb.Write([]byte("auld neep tae be removed"))
 
 	// Verify the file exists before removal.
 	if _, err := os.Stat(path); os.IsNotExist(err) {

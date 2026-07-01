@@ -23,7 +23,7 @@ func TestAdoptedWaitLoopExitsOnProcessDeath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer sb.Close()
+	defer func() { _ = sb.Close() }()
 
 	startTime, _ := ProcessStartTime(pid)
 
@@ -45,7 +45,7 @@ func TestAdoptedWaitLoopExitsOnProcessDeath(t *testing.T) {
 		t.Fatalf("kill: %v", err)
 	}
 
-	cmd.Wait()
+	_ = cmd.Wait()
 
 	select {
 	case <-s.done:
@@ -66,7 +66,7 @@ func TestAdoptedWaitLoopExitsWhenPIDGone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer sb.Close()
+	defer func() { _ = sb.Close() }()
 
 	// Start a short-lived process to get a real PID.
 	cmd := exec.Command("sleep", "60")
@@ -78,14 +78,15 @@ func TestAdoptedWaitLoopExitsWhenPIDGone(t *testing.T) {
 
 	startTime, stErr := ProcessStartTime(pid)
 	if stErr != nil {
-		cmd.Process.Kill()
-		cmd.Wait()
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+
 		t.Skipf("cannot get process start time: %v", stErr)
 	}
 
 	// Kill the original process.
-	cmd.Process.Kill()
-	cmd.Wait()
+	_ = cmd.Process.Kill()
+	_ = cmd.Wait()
 
 	// Simulate PID reuse: adoptedStartTime is from the original process,
 	// but the PID no longer exists (kill(pid,0) will fail), so the loop
@@ -123,8 +124,8 @@ func TestAdoptedWaitLoopStartTimeMismatchBreaks(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() {
-		cmd.Process.Kill()
-		cmd.Wait()
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
 	}()
 
 	pid := cmd.Process.Pid
@@ -140,7 +141,7 @@ func TestAdoptedWaitLoopStartTimeMismatchBreaks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer sb.Close()
+	defer func() { _ = sb.Close() }()
 
 	// Use a fake start time that doesn't match the real process. This
 	// simulates PID reuse: the PID is alive (kill returns nil) but the
