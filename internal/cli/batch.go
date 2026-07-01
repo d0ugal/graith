@@ -109,7 +109,7 @@ func runBatch(cmd *cobra.Command, bf *batchFlags, verb, pastTense, gerund, contr
 	}
 	defer c.Close()
 
-	c.SendControl("list", struct{}{})
+	_ = c.SendControl("list", struct{}{})
 
 	resp, err := c.ReadControlResponse()
 	if err != nil {
@@ -153,7 +153,7 @@ func runBatch(cmd *cobra.Command, bf *batchFlags, verb, pastTense, gerund, contr
 			continue
 		}
 
-		c.SendControl(controlType, payload(s.ID))
+		_ = c.SendControl(controlType, payload(s.ID))
 
 		resp, err := c.ReadControlResponse()
 		if err != nil {
@@ -162,7 +162,8 @@ func runBatch(cmd *cobra.Command, bf *batchFlags, verb, pastTense, gerund, contr
 
 		if resp.Type == "error" {
 			var e protocol.ErrorMsg
-			protocol.DecodePayload(resp, &e)
+
+			_ = protocol.DecodePayload(resp, &e)
 
 			return fmt.Errorf("%s %s: %s", gerund, s.Name, e.Message)
 		}
