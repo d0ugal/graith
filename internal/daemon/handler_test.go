@@ -2131,7 +2131,12 @@ func newTestHarnessWithConfig(t *testing.T, cfg *config.Config) *testHarness {
 	return h
 }
 
-func TestAttachAutoResumesStoppedSession(t *testing.T) {
+// assertAttachAutoResumes verifies that attaching to a session in the given
+// non-running status auto-resumes it: the daemon returns an "attached" message
+// with running status and a live PTY.
+func assertAttachAutoResumes(t *testing.T, name string, status SessionStatus) {
+	t.Helper()
+
 	cfg := config.Default()
 	cfg.Agents["test"] = config.Agent{
 		Command:    "sleep",
@@ -2145,9 +2150,9 @@ func TestAttachAutoResumesStoppedSession(t *testing.T) {
 	h.sm.mu.Lock()
 	h.sm.state.Sessions["s1"] = &SessionState{
 		ID:           "s1",
-		Name:         "stopped-test",
+		Name:         name,
 		Agent:        "test",
-		Status:       StatusStopped,
+		Status:       status,
 		WorktreePath: workDir,
 		CreatedAt:    time.Now().UTC(),
 	}
@@ -2178,51 +2183,12 @@ func TestAttachAutoResumesStoppedSession(t *testing.T) {
 	}
 }
 
+func TestAttachAutoResumesStoppedSession(t *testing.T) {
+	assertAttachAutoResumes(t, "stopped-test", StatusStopped)
+}
+
 func TestAttachAutoResumesErroredSession(t *testing.T) {
-	cfg := config.Default()
-	cfg.Agents["test"] = config.Agent{
-		Command:    "sleep",
-		Args:       []string{"300"},
-		ResumeArgs: []string{"300"},
-	}
-
-	h := newTestHarnessWithConfig(t, cfg)
-	workDir := t.TempDir()
-
-	h.sm.mu.Lock()
-	h.sm.state.Sessions["s1"] = &SessionState{
-		ID:           "s1",
-		Name:         "errored-test",
-		Agent:        "test",
-		Status:       StatusErrored,
-		WorktreePath: workDir,
-		CreatedAt:    time.Now().UTC(),
-	}
-	h.sm.mu.Unlock()
-
-	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "s1"})
-
-	env := h.readControlMsg(t)
-	if env.Type != "attached" {
-		t.Fatalf("expected attached after auto-resume, got %q", env.Type)
-	}
-
-	var info protocol.SessionInfo
-	protocol.DecodePayload(env, &info)
-
-	if info.Status != "running" {
-		t.Errorf("status = %q, want running", info.Status)
-	}
-
-	if ptySess, ok := h.sm.GetPTY("s1"); ok {
-		t.Cleanup(func() {
-			ptySess.Kill()
-			<-ptySess.Done()
-			ptySess.Close()
-		})
-	} else {
-		t.Error("expected PTY to exist after auto-resume attach")
-	}
+	assertAttachAutoResumes(t, "errored-test", StatusErrored)
 }
 
 func TestAttachCreatingSessionReturnsStatusError(t *testing.T) {

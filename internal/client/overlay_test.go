@@ -3674,9 +3674,14 @@ func TestOverlay_NumberKeySelectsSession(t *testing.T) {
 	}
 }
 
-func TestOverlay_NumberKeyZeroSelectsTenth(t *testing.T) {
+// assertNumberKeySelectsNth builds sessionCount running sessions, presses key,
+// and verifies the session at the 1-based targetIndex in the list becomes the
+// selection. keyDesc describes the keypress for failure messages.
+func assertNumberKeySelectsNth(t *testing.T, sessionCount, targetIndex int, key, keyDesc string) {
+	t.Helper()
+
 	var sessions []protocol.SessionInfo
-	for i := 1; i <= 12; i++ {
+	for i := 1; i <= sessionCount; i++ {
 		sessions = append(sessions, protocol.SessionInfo{
 			ID:        fmt.Sprintf("s%d", i),
 			Name:      fmt.Sprintf("bothy-%02d", i),
@@ -3692,78 +3697,40 @@ func TestOverlay_NumberKeyZeroSelectsTenth(t *testing.T) {
 
 	idx := 0
 
-	var tenthID string
+	var targetID string
 
 	for _, item := range sm.list.Items() {
 		if si, ok := item.(sessionItem); ok {
 			idx++
-			if idx == 10 {
-				tenthID = si.info.ID
+			if idx == targetIndex {
+				targetID = si.info.ID
 				break
 			}
 		}
 	}
 
-	if tenthID == "" {
-		t.Fatal("could not find 10th session in list")
+	if targetID == "" {
+		t.Fatalf("could not find session %d in list", targetIndex)
 	}
 
-	updated, _ := sendKey(sm, "0")
+	updated, _ := sendKey(sm, key)
 
 	om := asOverlay(updated)
 	if om.selected == nil {
-		t.Fatal("expected a session to be selected after pressing 0")
+		t.Fatalf("expected a session to be selected after pressing %s", keyDesc)
 	}
 
-	if om.selected.ID != tenthID {
-		t.Errorf("selected = %q, want %q (10th session)", om.selected.ID, tenthID)
+	if om.selected.ID != targetID {
+		t.Errorf("selected = %q, want %q (session %d)", om.selected.ID, targetID, targetIndex)
 	}
 }
 
+func TestOverlay_NumberKeyZeroSelectsTenth(t *testing.T) {
+	assertNumberKeySelectsNth(t, 12, 10, "0", "0")
+}
+
 func TestOverlay_ShiftNumberSelectsEleventhPlus(t *testing.T) {
-	var sessions []protocol.SessionInfo
-	for i := 1; i <= 15; i++ {
-		sessions = append(sessions, protocol.SessionInfo{
-			ID:        fmt.Sprintf("s%d", i),
-			Name:      fmt.Sprintf("bothy-%02d", i),
-			RepoName:  "croft",
-			Status:    "running",
-			CreatedAt: time.Now().Add(-time.Duration(i) * time.Hour).Format(time.RFC3339),
-		})
-	}
-
-	m := newOverlayModel(sessions, "", noopFetchPreview, nil, nil, []rune("1234567890!@#$%^&*()"))
-	sized, _ := sendWindowSize(m, 200, 50)
-	sm := asOverlay(sized)
-
-	idx := 0
-
-	var eleventhID string
-
-	for _, item := range sm.list.Items() {
-		if si, ok := item.(sessionItem); ok {
-			idx++
-			if idx == 11 {
-				eleventhID = si.info.ID
-				break
-			}
-		}
-	}
-
-	if eleventhID == "" {
-		t.Fatal("could not find 11th session in list")
-	}
-
-	updated, _ := sendKey(sm, "!")
-
-	om := asOverlay(updated)
-	if om.selected == nil {
-		t.Fatal("expected a session to be selected after pressing shift+1")
-	}
-
-	if om.selected.ID != eleventhID {
-		t.Errorf("selected = %q, want %q (11th session)", om.selected.ID, eleventhID)
-	}
+	assertNumberKeySelectsNth(t, 15, 11, "!", "shift+1")
 }
 
 func TestOverlay_NumberKeyOutOfRangeDoesNothing(t *testing.T) {
