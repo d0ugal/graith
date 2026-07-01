@@ -3,16 +3,20 @@ package agent
 import (
 	"os"
 	"strings"
+	"sync"
 )
 
-var agentDetected bool
-
-func init() {
-	agentDetected = detect(os.LookupEnv)
-}
+var (
+	agentDetectedOnce sync.Once
+	agentDetected     bool
+)
 
 // Detected returns true if the process is running inside an AI agent environment.
-// GR_AGENT_MODE=0/false/no always takes priority, even after init.
+// GR_AGENT_MODE=0/false/no always takes priority, even after the first call.
+//
+// The environment-based detection is computed once, lazily, on the first call
+// and cached — a CLI process's environment does not change at runtime, so this
+// matches the previous package-init behaviour without a package-level init.
 func Detected() bool {
 	if v, ok := os.LookupEnv("GR_AGENT_MODE"); ok {
 		switch strings.ToLower(v) {
@@ -20,6 +24,10 @@ func Detected() bool {
 			return false
 		}
 	}
+
+	agentDetectedOnce.Do(func() {
+		agentDetected = detect(os.LookupEnv)
+	})
 
 	return agentDetected
 }
