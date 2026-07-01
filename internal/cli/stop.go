@@ -131,7 +131,8 @@ func stopBatchRun(cmd *cobra.Command) error {
 		})
 }
 
-func init() {
+// registerStopCmd registers this command on rootCmd. Called from registerCommands.
+func registerStopCmd() {
 	addBatchFlags(stopCmd, &stopBatch)
 	stopCmd.Flags().BoolVar(&stopChildren, "children", false, "also stop all descendant sessions")
 	rootCmd.AddCommand(stopCmd)

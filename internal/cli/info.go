@@ -79,6 +79,7 @@ func matchSession(cwd string, sessions []protocol.SessionInfo) *protocol.Session
 	return best
 }
 
-func init() {
+// registerInfoCmd registers this command on rootCmd. Called from registerCommands.
+func registerInfoCmd() {
 	rootCmd.AddCommand(infoCmd)
 }

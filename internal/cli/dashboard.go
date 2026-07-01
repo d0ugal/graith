@@ -69,7 +69,8 @@ var dashboardCmd = &cobra.Command{
 	},
 }
 
-func init() {
+// registerDashboardCmd registers this command on rootCmd. Called from registerCommands.
+func registerDashboardCmd() {
 	rootCmd.AddCommand(dashboardCmd)
 }
 

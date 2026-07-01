@@ -132,7 +132,8 @@ func restartChildrenRun(c *client.Client, args []string) error {
 	return nil
 }
 
-func init() {
+// registerRestartCmd registers this command on rootCmd. Called from registerCommands.
+func registerRestartCmd() {
 	rootCmd.AddCommand(restartCmd)
 	restartCmd.Flags().BoolVar(&restartBackground, "background", false, "restart without attaching")
 	restartCmd.Flags().BoolVar(&restartChildren, "children", false, "restart all descendant sessions")

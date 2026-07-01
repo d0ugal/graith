@@ -81,7 +81,8 @@ var logsCmd = &cobra.Command{
 	},
 }
 
-func init() {
+// registerLogsCmd registers this command on rootCmd. Called from registerCommands.
+func registerLogsCmd() {
 	rootCmd.AddCommand(logsCmd)
 	logsCmd.Flags().BoolVarP(&logsFollow, "follow", "f", false, "follow output (like tail -f)")
 	logsCmd.Flags().IntVarP(&logsLines, "lines", "n", 300, "number of lines to show")

@@ -46,6 +46,7 @@ var renameCmd = &cobra.Command{
 	},
 }
 
-func init() {
+// registerRenameCmd registers this command on rootCmd. Called from registerCommands.
+func registerRenameCmd() {
 	rootCmd.AddCommand(renameCmd)
 }

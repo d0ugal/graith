@@ -136,7 +136,8 @@ var newCmd = &cobra.Command{
 	},
 }
 
-func init() {
+// registerNewCmd registers this command on rootCmd. Called from registerCommands.
+func registerNewCmd() {
 	rootCmd.AddCommand(newCmd)
 	newCmd.Flags().StringVar(&newAgent, "agent", "", "agent to use")
 	newCmd.Flags().StringVar(&newBase, "base", "", "base branch")

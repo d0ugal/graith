@@ -113,6 +113,7 @@ type inboxMessage struct {
 	CreatedAt  string `json:"created_at"`
 }
 
-func init() {
+// registerCheckInboxCmd registers this command on rootCmd. Called from registerCommands.
+func registerCheckInboxCmd() {
 	rootCmd.AddCommand(checkInboxCmd)
 }

@@ -363,7 +363,8 @@ var msgTopicsCmd = &cobra.Command{
 	},
 }
 
-func init() {
+// registerMsgCmd registers this command on rootCmd. Called from registerCommands.
+func registerMsgCmd() {
 	rootCmd.AddCommand(msgCmd)
 
 	msgCmd.AddCommand(msgPubCmd)

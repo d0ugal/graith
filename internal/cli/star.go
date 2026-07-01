@@ -82,7 +82,8 @@ var unstarCmd = &cobra.Command{
 	},
 }
 
-func init() {
+// registerStarCmd registers this command on rootCmd. Called from registerCommands.
+func registerStarCmd() {
 	rootCmd.AddCommand(starCmd)
 	rootCmd.AddCommand(unstarCmd)
 }

@@ -22,6 +22,7 @@ var versionCmd = &cobra.Command{
 	},
 }
 
-func init() {
+// registerVersionCmd registers this command on rootCmd. Called from registerCommands.
+func registerVersionCmd() {
 	rootCmd.AddCommand(versionCmd)
 }

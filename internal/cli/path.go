@@ -50,6 +50,7 @@ func printPath(w io.Writer, o *output.Writer, session *protocol.SessionInfo, nam
 	return nil
 }
 
-func init() {
+// registerPathCmd registers this command on rootCmd. Called from registerCommands.
+func registerPathCmd() {
 	rootCmd.AddCommand(pathCmd)
 }

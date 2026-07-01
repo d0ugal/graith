@@ -174,7 +174,8 @@ var configShowCmd = &cobra.Command{
 	},
 }
 
-func init() {
+// registerConfigCmd registers this command on rootCmd. Called from registerCommands.
+func registerConfigCmd() {
 	rootCmd.AddCommand(configCmd)
 	configCmd.AddCommand(configResetCmd)
 	configCmd.AddCommand(configDiffCmd)

@@ -339,7 +339,8 @@ func formatAttached(s protocol.SessionInfo, now time.Time) string {
 	return ""
 }
 
-func init() {
+// registerListCmd registers this command on rootCmd. Called from registerCommands.
+func registerListCmd() {
 	rootCmd.AddCommand(listCmd)
 	listCmd.Flags().StringVar(&listRepo, "repo", "", "filter by repo path")
 	listCmd.Flags().BoolVar(&listTree, "tree", false, "show parent-child hierarchy")

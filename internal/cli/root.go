@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"sync"
 
 	"github.com/d0ugal/graith/internal/agent"
 	"github.com/d0ugal/graith/internal/config"
@@ -65,6 +66,7 @@ func Execute() error {
 }
 
 func executeWithArgs(args []string) error {
+	registerCommands()
 	rootCmd.SetArgs(args)
 
 	err := rootCmd.Execute()
@@ -105,8 +107,48 @@ func rejectConfigInsideSession(cmd *cobra.Command) error {
 	return nil
 }
 
-func init() {
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file path")
-	rootCmd.PersistentFlags().BoolVar(&jsonOutput, "json", false, "JSON output")
-	rootCmd.PersistentFlags().BoolVar(&agentMode, "agent-mode", false, "force agent mode (auto-enables JSON output)")
+var registerOnce sync.Once
+
+// registerCommands wires every subcommand and persistent flag onto rootCmd.
+// It replaces the per-file init() functions with explicit, ordered
+// registration invoked from executeWithArgs. It is idempotent (guarded by a
+// sync.Once) so tests that call executeWithArgs repeatedly stay correct.
+func registerCommands() {
+	registerOnce.Do(func() {
+		rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file path")
+		rootCmd.PersistentFlags().BoolVar(&jsonOutput, "json", false, "JSON output")
+		rootCmd.PersistentFlags().BoolVar(&agentMode, "agent-mode", false, "force agent mode (auto-enables JSON output)")
+
+		registerApprovalsCmd()
+		registerApproveRequestCmd()
+		registerAttachCmd()
+		registerCheckInboxCmd()
+		registerCompletionCmd()
+		registerConfigCmd()
+		registerDaemonCmd()
+		registerDashboardCmd()
+		registerDeleteCmd()
+		registerDoctorCmd()
+		registerForkCmd()
+		registerInfoCmd()
+		registerListCmd()
+		registerLogsCmd()
+		registerMCPCmd()
+		registerMCPProxyCmd()
+		registerMigrateCmd()
+		registerMsgCmd()
+		registerNewCmd()
+		registerPathCmd()
+		registerRenameCmd()
+		registerReportStatusCmd()
+		registerRestartCmd()
+		registerScenarioCmd()
+		registerStarCmd()
+		registerStatusSummaryCmd()
+		registerStopCmd()
+		registerStoreCmd()
+		registerTypeCmd()
+		registerUpdateCmd()
+		registerVersionCmd()
+	})
 }

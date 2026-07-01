@@ -874,7 +874,8 @@ func truncateFileKeepTail(path string, keepBytes int64) error {
 	return os.WriteFile(path, tail, 0o600)
 }
 
-func init() {
+// registerDoctorCmd registers this command on rootCmd. Called from registerCommands.
+func registerDoctorCmd() {
 	rootCmd.AddCommand(doctorCmd)
 	doctorCmd.Flags().BoolVar(&doctorAutofix, "autofix", false, "auto-fix issues")
 }
