@@ -203,6 +203,7 @@ func (sm *SessionManager) pollSession(ctx context.Context, cfg *configPRWatch, t
 
 	notifications := sm.diffAndBuild(cfg, t, slug, d)
 	for _, body := range notifications {
+		//nolint:contextcheck // notifyFromDaemon spawns a detached goroutine that may auto-resume a stopped session; that work must outlive this poll iteration, so it deliberately does not inherit the poll ctx.
 		sm.notifyFromDaemon(t.id, body)
 	}
 

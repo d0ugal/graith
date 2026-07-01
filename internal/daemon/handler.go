@@ -139,6 +139,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					agentName = sm.Config().DefaultAgent
 				}
 
+				//nolint:contextcheck // session lifecycle is intentionally detached from the client connection: sessions must survive client disconnect (see architecture note), so Create uses its own bounded background timeouts rather than the request ctx.
 				sess, err := sm.Create(c.Name, agentName, c.RepoPath, c.Base, c.Prompt, c.Model, c.ParentID, c.NoRepo, c.ShareWorktree, c.AgentHooks, c.InPlace, c.AllowConcurrent, c.SkipModelValidation, clientRows, clientCols)
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
@@ -162,6 +163,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					continue
 				}
 
+				//nolint:contextcheck // session lifecycle is intentionally detached from the client connection: forked sessions must survive client disconnect, so Fork uses its own bounded background timeouts rather than the request ctx.
 				sess, err := sm.Fork(f.Name, f.SourceSessionID, clientRows, clientCols)
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
@@ -185,6 +187,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					continue
 				}
 
+				//nolint:contextcheck // session lifecycle is intentionally detached from the client connection: migration must survive client disconnect, so Migrate uses its own bounded background timeouts rather than the request ctx.
 				sess, err := sm.Migrate(m.SessionID, m.Agent, m.Model, clientRows, clientCols)
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
@@ -228,6 +231,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					case StatusStopped, StatusErrored:
 						log.Info("auto-resuming session on attach", "session", a.SessionID, "status", sess.Status)
 
+						//nolint:contextcheck // session lifecycle is intentionally detached from the client connection: resume must survive client disconnect, so Resume uses its own bounded background timeouts rather than the request ctx.
 						if _, err := sm.Resume(a.SessionID, clientRows, clientCols); err != nil {
 							sendControl("error", protocol.ErrorMsg{Message: fmt.Sprintf("auto-resume failed: %v", err)})
 							continue
@@ -493,6 +497,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					continue
 				}
 
+				//nolint:contextcheck // session lifecycle is intentionally detached from the client connection: resume must survive client disconnect, so Resume uses its own bounded background timeouts rather than the request ctx.
 				sess, err := sm.Resume(r.SessionID, clientRows, clientCols)
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
@@ -517,6 +522,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				}
 
 				if r.Children {
+					//nolint:contextcheck // session lifecycle is intentionally detached from the client connection: restart must survive client disconnect, so RestartWithChildren uses its own bounded background timeouts rather than the request ctx.
 					restarted, err := sm.RestartWithChildren(r.SessionID, r.ExcludeRoot, clientRows, clientCols)
 					if err != nil {
 						sendControl("error", protocol.ErrorMsg{Message: err.Error()})
@@ -527,6 +533,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 						}{r.SessionID, restarted})
 					}
 				} else {
+					//nolint:contextcheck // session lifecycle is intentionally detached from the client connection: restart must survive client disconnect, so Restart uses its own bounded background timeouts rather than the request ctx.
 					sess, err := sm.Restart(r.SessionID, clientRows, clientCols)
 					if err != nil {
 						sendControl("error", protocol.ErrorMsg{Message: err.Error()})
@@ -628,6 +635,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 
 					if !m.Quiet {
 						if targetID, isInbox := parseInboxStream(m.Stream); isInbox {
+							//nolint:contextcheck // launched as a detached goroutine that may auto-resume a stopped session; it must outlive this request, so it deliberately does not inherit the connection ctx.
 							go sm.notifyInbox(targetID, m.SenderID, m.SenderName)
 						}
 					}
@@ -987,6 +995,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					continue
 				}
 
+				//nolint:contextcheck // applyConfig may spawn a detached orchestrator goroutine (context.Background) that must outlive this reload request, so it deliberately does not inherit the connection ctx.
 				if err := sm.ReloadConfig(); err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 				} else {
@@ -1201,6 +1210,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 
 				s.CallerSessionID = auth.sessionID
 
+				//nolint:contextcheck // session lifecycle is intentionally detached from the client connection: scenario sessions must survive client disconnect, so StartScenario uses its own bounded background timeouts rather than the request ctx.
 				scenario, err := sm.StartScenario(s, clientRows, clientCols)
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
@@ -1297,6 +1307,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 
 				sm.mu.RUnlock()
 
+				//nolint:contextcheck // session lifecycle is intentionally detached from the client connection: resumed scenario sessions must survive client disconnect, so ResumeScenario uses its own bounded background timeouts rather than the request ctx.
 				resumed, err := sm.ResumeScenario(s.Name, clientRows, clientCols)
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
@@ -1350,6 +1361,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 
 				sm.mu.RUnlock()
 
+				//nolint:contextcheck // session lifecycle is intentionally detached from the client connection: the added session must survive client disconnect, so AddToScenario uses its own bounded background timeouts rather than the request ctx.
 				sess, err := sm.AddToScenario(s.Name, s.Session, clientRows, clientCols)
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})

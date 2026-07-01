@@ -25,7 +25,7 @@ func (sm *SessionManager) SubmitApproval(ctx context.Context, req protocol.Appro
 	sm.mu.RUnlock()
 
 	if approvalsCfg.Mode == "localmost" {
-		if decision, ok := sm.tryLocalmost(req, approvalsCfg.Command); ok {
+		if decision, ok := sm.tryLocalmost(ctx, req, approvalsCfg.Command); ok {
 			return decision
 		}
 	}
@@ -169,7 +169,7 @@ type localmostResponse struct {
 	Reason   string `json:"reason,omitempty"`
 }
 
-func (sm *SessionManager) tryLocalmost(req protocol.ApprovalRequestMsg, command string) (protocol.ApprovalDecisionMsg, bool) {
+func (sm *SessionManager) tryLocalmost(ctx context.Context, req protocol.ApprovalRequestMsg, command string) (protocol.ApprovalDecisionMsg, bool) {
 	if command == "" {
 		command = "localmost"
 	}
@@ -196,10 +196,10 @@ func (sm *SessionManager) tryLocalmost(req protocol.ApprovalRequestMsg, command 
 		return protocol.ApprovalDecisionMsg{}, false
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	cmdCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, command)
+	cmd := exec.CommandContext(cmdCtx, command)
 	cmd.Stdin = strings.NewReader(string(inputJSON))
 
 	out, err := cmd.Output()

@@ -2,6 +2,8 @@ package daemon
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -125,6 +127,56 @@ func TestSubmitApprovalUserDecision(t *testing.T) {
 	}
 
 	sm.mu.RUnlock()
+}
+
+// TestSubmitApprovalLocalmostCancelledByContext verifies the localmost
+// pre-check subprocess inherits the caller's context: cancelling the parent
+// ctx aborts the localmost command promptly rather than waiting out its own
+// 5s timeout, so SubmitApproval falls through and resolves on ctx cancel.
+func TestSubmitApprovalLocalmostCancelledByContext(t *testing.T) {
+	// A localmost command that blocks far longer than the test would tolerate
+	// if the context were not threaded into the subprocess.
+	script := filepath.Join(t.TempDir(), "localmost.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nexec sleep 30\n"), 0o755); err != nil {
+		t.Fatalf("write localmost script: %v", err)
+	}
+
+	sm := newTestSessionManager(t)
+	sm.cfg.Approvals.Timeout = "10s"
+	sm.cfg.Approvals.Mode = "localmost"
+	sm.cfg.Approvals.Command = script
+
+	sm.mu.Lock()
+	sm.state.Sessions["braw1"] = &SessionState{Name: "bonnie-session"}
+	sm.mu.Unlock()
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	req := protocol.ApprovalRequestMsg{
+		RequestID: "neep5",
+		SessionID: "braw1",
+		ToolName:  "Bash",
+	}
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
+
+	done := make(chan protocol.ApprovalDecisionMsg, 1)
+
+	go func() {
+		done <- sm.SubmitApproval(ctx, req)
+	}()
+
+	select {
+	case decision := <-done:
+		if decision.Decision != "allow" {
+			t.Errorf("expected allow after context cancel, got %q", decision.Decision)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("SubmitApproval did not return promptly; localmost subprocess likely ignored the cancelled context")
+	}
 }
 
 func TestSubmitApprovalMissingSessionAllows(t *testing.T) {
