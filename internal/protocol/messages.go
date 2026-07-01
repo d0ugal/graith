@@ -63,7 +63,7 @@ func DecodePayload(m Envelope, target any) error {
 	return json.Unmarshal(m.Payload, target)
 }
 
-// Client -> Daemon
+// HandshakeMsg is sent by the client to the daemon to open a connection.
 type HandshakeMsg struct {
 	Version      string    `json:"version"`
 	ClientID     string    `json:"client_id"`
@@ -242,7 +242,7 @@ type MsgConversationListMsg struct {
 	Messages []ConversationMessage `json:"messages"`
 }
 
-// Client -> Daemon (hook reporting)
+// StatusReportMsg is sent by the client to the daemon to report hook events.
 type StatusReportMsg struct {
 	SessionID string `json:"session_id"`
 	Event     string `json:"event"`
@@ -250,7 +250,7 @@ type StatusReportMsg struct {
 	ToolName  string `json:"tool_name,omitempty"`
 }
 
-// Daemon -> Client
+// HandshakeOkMsg is the daemon's response to a successful handshake.
 type HandshakeOkMsg struct {
 	Version       string `json:"version"`
 	DaemonVersion string `json:"daemon_version"`

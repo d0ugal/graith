@@ -3379,7 +3379,7 @@ func (sm *SessionManager) RestartWithChildren(rootID string, excludeRoot bool, r
 	return restarted, nil
 }
 
-// Rename changes the display name of a session.
+// Star marks a session as starred.
 func (sm *SessionManager) Star(id string) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()

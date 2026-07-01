@@ -1,4 +1,4 @@
-// internal/version/version.go
+// Package version holds build-time version information injected at link time.
 package version
 
 var (
