@@ -266,7 +266,7 @@ func runScenarioLifecycle(controlType string, payload any, resultKey string) (na
 	}
 	defer c.Close()
 
-	c.SendControl(controlType, payload)
+	_ = c.SendControl(controlType, payload)
 
 	resp, err := c.ReadControlResponse()
 	if err != nil {
@@ -275,7 +275,8 @@ func runScenarioLifecycle(controlType string, payload any, resultKey string) (na
 
 	if resp.Type == "error" {
 		var e protocol.ErrorMsg
-		protocol.DecodePayload(resp, &e)
+
+		_ = protocol.DecodePayload(resp, &e)
 
 		return nil, false, fmt.Errorf("%s", e.Message)
 	}
@@ -285,7 +286,8 @@ func runScenarioLifecycle(controlType string, payload any, resultKey string) (na
 	}
 
 	result := map[string][]string{}
-	protocol.DecodePayload(resp, &result)
+
+	_ = protocol.DecodePayload(resp, &result)
 
 	return result[resultKey], false, nil
 }
