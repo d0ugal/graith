@@ -1,0 +1,198 @@
+name: Docs Preview
+
+on:
+  pull_request:
+    paths:
+      - 'website/**'
+      - '.github/workflows/docs-preview.yml'
+
+# Screenshots are published to an orphan `screenshots` branch and linked
+# from a sticky PR comment. Same-repo PRs only (fork PRs get a read-only
+# token and cannot push the branch or comment).
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: docs-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  preview:
+    name: Screenshot changed pages
+    runs-on: ubuntu-latest
+    env:
+      HUGO_VERSION: 0.154.5
+      K6_IMAGE: grafana/k6:1.8.0-with-browser
+      BASE_URL: http://localhost:8080
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Install Hugo (extended) + Dart Sass
+        run: |
+          wget -O /tmp/hugo.deb \
+            "https://github.com/gohugoio/hugo/releases/download/v${HUGO_VERSION}/hugo_extended_${HUGO_VERSION}_linux-amd64.deb"
+          sudo dpkg -i /tmp/hugo.deb
+          sudo snap install dart-sass
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: website/go.mod
+
+      - name: Determine changed pages
+        id: changed
+        run: |
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.sha }}"
+          changed="$(git diff --name-only "$BASE" "$HEAD" -- website/ || true)"
+          echo "Changed under website/:"; echo "$changed"
+
+          # A change to theme/config/layout/assets affects every page.
+          global=0
+          if echo "$changed" | grep -qE '^website/(hugo\.toml|go\.(mod|sum)|layouts/|assets/|\.ci/)'; then
+            global=1
+          fi
+
+          emit() { # path -> {"url","name"}
+            local f="$1" base
+            base="${f#website/content/docs/}"; base="${base%.md}"
+            if [ "$base" = "_index" ]; then
+              echo '{"url":"/docs/","name":"docs-home"}'
+            else
+              echo "{\"url\":\"/docs/${base}/\",\"name\":\"${base}\"}"
+            fi
+          }
+
+          {
+            if [ "$global" = 1 ]; then
+              for f in website/content/docs/*.md; do emit "$f"; done
+            else
+              echo "$changed" | grep -E '^website/content/docs/.*\.md$' | while read -r f; do
+                [ -f "$f" ] && emit "$f"
+              done
+            fi
+          } | jq -s '.' > pages.json
+
+          count="$(jq 'length' pages.json)"
+          echo "global=$global"     >> "$GITHUB_OUTPUT"
+          echo "count=$count"       >> "$GITHUB_OUTPUT"
+          echo "Pages to screenshot ($count):"; cat pages.json
+
+      - name: Build site
+        if: steps.changed.outputs.count != '0'
+        working-directory: website
+        run: hugo --gc --minify --baseURL "${BASE_URL}/"
+
+      - name: Install fonts for faithful rendering
+        if: steps.changed.outputs.count != '0'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends fonts-dejavu-core fonts-noto-core
+
+      - name: Serve site
+        if: steps.changed.outputs.count != '0'
+        run: |
+          python3 -m http.server 8080 --directory website/public &
+          echo "SERVER_PID=$!" >> "$GITHUB_ENV"
+          for _ in $(seq 1 40); do
+            curl -sf "$BASE_URL/docs/" >/dev/null && break
+            sleep 0.5
+          done
+
+      - name: Screenshot with k6 (Chromium)
+        if: steps.changed.outputs.count != '0'
+        run: |
+          mkdir -p shots && chmod 777 shots
+          docker run --rm --network host \
+            -e K6_BROWSER_HEADLESS=true \
+            -e K6_BROWSER_ARGS=no-sandbox \
+            -e BASE_URL="$BASE_URL" \
+            -e PAGES="$(cat pages.json)" \
+            -v "$PWD/website/.ci/screenshot.js:/screenshot.js:ro" \
+            -v "$PWD/shots:/out" \
+            "$K6_IMAGE" run /screenshot.js
+          sudo chown -R "$(id -u):$(id -g)" shots
+          ls -la shots
+
+      - name: Publish screenshots and comment
+        if: steps.changed.outputs.count != '0'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const { owner, repo } = context.repo;
+            const pr = context.payload.pull_request.number;
+            const shortSha = context.sha.substring(0, 7);
+            const branch = 'screenshots';
+            const dir = `pr-${pr}/${shortSha}`;
+
+            const files = fs.readdirSync('shots').filter(f => f.endsWith('.png')).sort();
+            if (files.length === 0) { core.info('No screenshots produced.'); return; }
+
+            // Build a tree of blobs for the screenshots.
+            const tree = [];
+            for (const f of files) {
+              const content = fs.readFileSync(path.join('shots', f)).toString('base64');
+              const blob = await github.rest.git.createBlob({ owner, repo, content, encoding: 'base64' });
+              tree.push({ path: `${dir}/${f}`, mode: '100644', type: 'blob', sha: blob.data.sha });
+            }
+
+            // Find the current tip of the screenshots branch (if any) to chain onto.
+            let parents = [];
+            let baseTree;
+            try {
+              const ref = await github.rest.git.getRef({ owner, repo, ref: `heads/${branch}` });
+              parents = [ref.data.object.sha];
+              const c = await github.rest.git.getCommit({ owner, repo, commit_sha: ref.data.object.sha });
+              baseTree = c.data.tree.sha;
+            } catch (e) {
+              if (e.status !== 404) throw e; // branch doesn't exist yet -> orphan root commit
+            }
+
+            const treeObj = await github.rest.git.createTree({ owner, repo, tree, base_tree: baseTree });
+            const commit = await github.rest.git.createCommit({
+              owner, repo,
+              message: `docs preview: PR #${pr} @ ${shortSha}`,
+              tree: treeObj.data.sha,
+              parents,
+            });
+            try {
+              await github.rest.git.updateRef({ owner, repo, ref: `heads/${branch}`, sha: commit.data.sha });
+            } catch (e) {
+              await github.rest.git.createRef({ owner, repo, ref: `refs/heads/${branch}`, sha: commit.data.sha });
+            }
+
+            // Group desktop/mobile per page into a comment.
+            const raw = f => `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${dir}/${f}`;
+            const pages = {};
+            for (const f of files) {
+              const m = f.match(/^(.*)-(desktop|mobile)\.png$/);
+              if (!m) continue;
+              (pages[m[1]] ||= {})[m[2]] = f;
+            }
+            let body = `<!-- docs-preview -->\n### 📸 Docs preview\n\n`;
+            body += `Rendered ${Object.keys(pages).length} changed page(s) at commit \`${shortSha}\`.\n\n`;
+            for (const name of Object.keys(pages).sort()) {
+              const p = pages[name];
+              body += `<details><summary><b>${name}</b></summary>\n\n`;
+              body += `| Desktop | Mobile |\n|---|---|\n`;
+              const d = p.desktop ? `<img src="${raw(p.desktop)}" width="420">` : '—';
+              const mob = p.mobile ? `<img src="${raw(p.mobile)}" width="200">` : '—';
+              body += `| ${d} | ${mob} |\n\n</details>\n\n`;
+            }
+            body += `_Screenshots stored on the [\`${branch}\`](https://github.com/${owner}/${repo}/tree/${branch}/${dir}) branch._`;
+
+            // Upsert a single sticky comment.
+            const marker = '<!-- docs-preview -->';
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number: pr });
+            const existing = comments.find(c => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number: pr, body });
+            }
