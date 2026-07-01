@@ -75,8 +75,11 @@ jobs:
             if [ "$global" = 1 ]; then
               for f in website/content/docs/*.md; do emit "$f"; done
             else
-              echo "$changed" | grep -E '^website/content/docs/.*\.md$' | while read -r f; do
-                [ -f "$f" ] && emit "$f"
+              # `|| true` so a no-match grep doesn't abort the step under
+              # `set -o pipefail` (e.g. a website/** change that touches no
+              # doc page — the job should no-op, not fail).
+              { echo "$changed" | grep -E '^website/content/docs/.*\.md$' || true; } | while read -r f; do
+                [ -n "$f" ] && [ -f "$f" ] && emit "$f"
               done
             fi
           } | jq -s '.' > pages.json
