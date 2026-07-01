@@ -1,4 +1,11 @@
-# graith
+---
+weight: 10
+title: "graith"
+description: "A terminal multiplexer for AI coding agent sessions, each in an isolated git worktree."
+icon: "menu_book"
+toc: true
+draft: false
+---
 
 A terminal multiplexer for AI coding agent sessions.
 
@@ -20,7 +27,7 @@ A long-lived daemon (`graithd`) owns PTY sessions and persists state. A stateles
                                   (persisted)
 ```
 
-The wire protocol uses 5-byte framed multiplexing: `[channel:1][length:4][payload:N]`. See [Architecture](architecture.md) for protocol details.
+The wire protocol uses 5-byte framed multiplexing: `[channel:1][length:4][payload:N]`. See [Architecture]({{< relref "architecture" >}}) for protocol details.
 
 ## Core concepts
 
@@ -33,23 +40,3 @@ The wire protocol uses 5-byte framed multiplexing: `[channel:1][length:4][payloa
 **Messaging** enables inter-agent communication via a SQLite-backed pub/sub system. Sessions can publish to topics, send direct messages, and subscribe to streams.
 
 **The store** persists documents across sessions. It is a flat-file, git-backed key-value store scoped per-repo (or global with `--shared`).
-
-## Documentation
-
-- [Installation](installation.md)
-- [Getting Started](getting-started.md)
-- [CLI Reference](commands.md)
-- [Configuration](configuration.md)
-- [Keybindings](keybindings.md)
-- [Session Lifecycle](sessions.md)
-- [Inter-Agent Messaging](messaging.md)
-- [Document Store](store.md)
-- [Sandbox](sandbox.md)
-- [Agent Authentication](auth.md)
-- [Orchestrator](orchestrator.md)
-- [Scenarios](scenarios.md)
-- [MCP Server](mcp.md)
-- [Patterns and Recipes](patterns.md)
-- [Troubleshooting](troubleshooting.md)
-- [Architecture](architecture.md)
-- [Contributing](contributing.md)

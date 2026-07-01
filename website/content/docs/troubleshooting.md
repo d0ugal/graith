@@ -1,4 +1,11 @@
-# Troubleshooting
+---
+weight: 1600
+title: "Troubleshooting"
+description: "Diagnose and fix common problems."
+icon: "healing"
+toc: true
+draft: false
+---
 
 ## Diagnostics
 

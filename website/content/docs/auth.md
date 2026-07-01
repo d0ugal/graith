@@ -1,4 +1,11 @@
-# Agent Authentication
+---
+weight: 1000
+title: "Agent Authentication"
+description: "Authenticate coding agents."
+icon: "key"
+toc: true
+draft: false
+---
 
 graith uses per-session bearer tokens to prevent agent sessions from impersonating each other. Each session gets a unique token at creation time, and the daemon validates it on every control message.
 

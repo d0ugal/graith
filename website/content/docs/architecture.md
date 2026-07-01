@@ -1,4 +1,11 @@
-# Architecture
+---
+weight: 1500
+title: "Architecture"
+description: "How graith is built: daemon, client, and wire protocol."
+icon: "schema"
+toc: true
+draft: false
+---
 
 ## Overview
 

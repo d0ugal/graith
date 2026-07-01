@@ -1,4 +1,11 @@
-# Keybindings
+---
+weight: 500
+title: "Keybindings"
+description: "Keyboard shortcuts for the TUI."
+icon: "keyboard"
+toc: true
+draft: false
+---
 
 ## Passthrough mode
 

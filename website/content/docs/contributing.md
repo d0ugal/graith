@@ -1,4 +1,11 @@
-# Contributing
+---
+weight: 1700
+title: "Contributing"
+description: "Contribute to graith."
+icon: "handshake"
+toc: true
+draft: false
+---
 
 ## Build
 

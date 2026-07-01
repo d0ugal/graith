@@ -1,4 +1,11 @@
-# Inter-Agent Messaging
+---
+weight: 1200
+title: "Inter-Agent Messaging"
+description: "Send messages between running agents."
+icon: "forum"
+toc: true
+draft: false
+---
 
 graith includes a SQLite-backed messaging system that enables communication between sessions, between sessions and the user, and between agents in a hierarchy.
 

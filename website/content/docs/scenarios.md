@@ -1,4 +1,11 @@
-# Scenarios
+---
+weight: 1300
+title: "Scenarios"
+description: "End-to-end workflow scenarios."
+icon: "playlist_add_check"
+toc: true
+draft: false
+---
 
 Scenarios are declarative multi-session orchestration. A TOML file defines a group of related sessions — each with its own repo, agent, role, and task — and `gr scenario start` creates them atomically as a coordinated fleet.
 

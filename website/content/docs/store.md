@@ -1,4 +1,11 @@
-# Document Store
+---
+weight: 800
+title: "Document Store"
+description: "The shared document store agents read and write."
+icon: "database"
+toc: true
+draft: false
+---
 
 The document store persists artifacts across sessions. It is a flat-file, git-backed key-value store with per-repo scoping and an optional shared namespace.
 

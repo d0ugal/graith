@@ -1,4 +1,11 @@
-# Installation
+---
+weight: 200
+title: "Installation"
+description: "Install graith and the gr CLI."
+icon: "download"
+toc: true
+draft: false
+---
 
 The binary is called `gr`.
 

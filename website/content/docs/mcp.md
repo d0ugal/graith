@@ -1,4 +1,11 @@
-# MCP Server
+---
+weight: 900
+title: "MCP Server"
+description: "Expose graith to agents over the Model Context Protocol."
+icon: "cable"
+toc: true
+draft: false
+---
 
 graith can run as a [Model Context Protocol](https://modelcontextprotocol.io) server, exposing session management as tools that an AI agent can call.
 
