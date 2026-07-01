@@ -1,5 +1,15 @@
 version: 2
 
+before:
+  hooks:
+    # Completions are produced by the binary itself and are host-arch
+    # independent, so we generate them once (via `go run`) and reuse the same
+    # files for every packaged arch. See docs/design/2026-07-01-apt-yum-packaging-design.md.
+    - mkdir -p completions
+    - sh -c 'go run ./cmd/graith completion bash > completions/gr.bash'
+    - sh -c 'go run ./cmd/graith completion zsh  > completions/gr.zsh'
+    - sh -c 'go run ./cmd/graith completion fish > completions/gr.fish'
+
 builds:
   - main: ./cmd/graith
     binary: gr
@@ -16,6 +26,32 @@ builds:
 
 archives:
   - format: tar.gz
+
+nfpms:
+  - id: graith
+    package_name: graith
+    vendor: Dougal Matthews
+    homepage: https://github.com/d0ugal/graith
+    maintainer: Dougal Matthews <dougal@dougalmatthews.com>
+    description: Terminal session manager for AI coding agents
+    license: MIT
+    formats:
+      - deb
+      - rpm
+    # linux amd64 + arm64 come from the existing builds matrix; nfpm emits one
+    # package per (format, goarch). darwin builds are skipped automatically.
+    bindir: /usr/bin
+    contents:
+      - src: ./completions/gr.bash
+        dst: /usr/share/bash-completion/completions/gr
+      - src: ./completions/gr.zsh
+        dst: /usr/share/zsh/vendor-completions/_gr
+      - src: ./completions/gr.fish
+        dst: /usr/share/fish/vendor_completions.d/gr.fish
+      - src: ./LICENSE
+        dst: /usr/share/doc/graith/copyright
+      - src: ./README.md
+        dst: /usr/share/doc/graith/README.md
 
 checksum:
   name_template: checksums.txt
