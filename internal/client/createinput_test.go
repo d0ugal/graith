@@ -44,15 +44,31 @@ func updateModel(m createSessionModel, msg tea.Msg) createSessionModel {
 	return result.(createSessionModel)
 }
 
+func mkdirAll(t *testing.T, path string) {
+	t.Helper()
+
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", path, err)
+	}
+}
+
+func writeFile(t *testing.T, path string, data []byte, perm os.FileMode) {
+	t.Helper()
+
+	if err := os.WriteFile(path, data, perm); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
 func TestDiscoverRepos_AllowedPaths(t *testing.T) {
 	base := t.TempDir()
 
 	repo1 := filepath.Join(base, "repo1")
 	repo2 := filepath.Join(base, "repo2")
 	notARepo := filepath.Join(base, "not-a-repo")
-	os.MkdirAll(filepath.Join(repo1, ".git"), 0o755)
-	os.MkdirAll(filepath.Join(repo2, ".git"), 0o755)
-	os.MkdirAll(notARepo, 0o755)
+	mkdirAll(t, filepath.Join(repo1, ".git"))
+	mkdirAll(t, filepath.Join(repo2, ".git"))
+	mkdirAll(t, notARepo)
 
 	repos := DiscoverRepos([]string{base}, nil)
 
@@ -74,7 +90,7 @@ func TestDiscoverRepos_AllowedPaths(t *testing.T) {
 
 func TestDiscoverRepos_AllowedPathIsRepo(t *testing.T) {
 	base := t.TempDir()
-	os.MkdirAll(filepath.Join(base, ".git"), 0o755)
+	mkdirAll(t, filepath.Join(base, ".git"))
 
 	repos := DiscoverRepos([]string{base}, nil)
 	if len(repos) != 1 {
@@ -90,8 +106,8 @@ func TestDiscoverRepos_AllowedPathIsRepo(t *testing.T) {
 func TestDiscoverRepos_GitFile(t *testing.T) {
 	base := t.TempDir()
 	repo := filepath.Join(base, "worktree-repo")
-	os.MkdirAll(repo, 0o755)
-	os.WriteFile(filepath.Join(repo, ".git"), []byte("gitdir: /some/other/path"), 0o644)
+	mkdirAll(t, repo)
+	writeFile(t, filepath.Join(repo, ".git"), []byte("gitdir: /some/other/path"), 0o644)
 
 	repos := DiscoverRepos([]string{base}, nil)
 	if len(repos) != 1 {
@@ -106,7 +122,7 @@ func TestDiscoverRepos_GitFile(t *testing.T) {
 func TestDiscoverRepos_SessionDerived(t *testing.T) {
 	base := t.TempDir()
 	repo := filepath.Join(base, "session-repo")
-	os.MkdirAll(filepath.Join(repo, ".git"), 0o755)
+	mkdirAll(t, filepath.Join(repo, ".git"))
 
 	sessions := []protocol.SessionInfo{
 		{RepoPath: repo, SystemKind: ""},
@@ -128,7 +144,7 @@ func TestDiscoverRepos_SessionDerived(t *testing.T) {
 func TestDiscoverRepos_Dedup(t *testing.T) {
 	base := t.TempDir()
 	repo := filepath.Join(base, "myrepo")
-	os.MkdirAll(filepath.Join(repo, ".git"), 0o755)
+	mkdirAll(t, filepath.Join(repo, ".git"))
 
 	sessions := []protocol.SessionInfo{
 		{RepoPath: repo},
@@ -157,7 +173,7 @@ func TestDiscoverRepos_UnreadablePath(t *testing.T) {
 func TestDiscoverRepos_Sorted(t *testing.T) {
 	base := t.TempDir()
 	for _, name := range []string{"zebra", "alpha", "middle"} {
-		os.MkdirAll(filepath.Join(base, name, ".git"), 0o755)
+		mkdirAll(t, filepath.Join(base, name, ".git"))
 	}
 
 	repos := DiscoverRepos([]string{base}, nil)

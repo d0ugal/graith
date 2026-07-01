@@ -54,7 +54,7 @@ func completeSessionNames(cmd *cobra.Command, args []string, toComplete string) 
 	}
 	defer c.Close()
 
-	c.SendControl("list", struct{}{})
+	_ = c.SendControl("list", struct{}{})
 
 	resp, err := c.ReadControlResponse()
 	if err != nil {
@@ -96,7 +96,7 @@ func completeRepoPaths(_ *cobra.Command, _ []string, _ string) ([]string, cobra.
 	}
 	defer c.Close()
 
-	c.SendControl("list", struct{}{})
+	_ = c.SendControl("list", struct{}{})
 
 	resp, err := c.ReadControlResponse()
 	if err != nil {
@@ -164,7 +164,7 @@ func completeTopicNames(_ *cobra.Command, _ []string, _ string) ([]string, cobra
 	defer c.Close()
 
 	senderID, _ := detectSender()
-	c.SendControl("msg_topics", protocol.MsgTopicsMsg{
+	_ = c.SendControl("msg_topics", protocol.MsgTopicsMsg{
 		Subscriber: senderID,
 	})
 

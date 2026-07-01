@@ -49,7 +49,7 @@ func NewMsgStore(dbPath string) (*MsgStore, error) {
 	}
 
 	if err := initSchema(db); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, err
 	}
 
@@ -123,7 +123,7 @@ func (s *MsgStore) Publish(stream, senderID, senderName, body, threadID, replyTo
 	if err != nil {
 		return Message{}, fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	var seq int64
 
@@ -215,7 +215,7 @@ func (s *MsgStore) Read(stream, subscriber string, onlyUnread bool, threadID str
 	if err != nil {
 		return nil, fmt.Errorf("query messages: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var msgs []Message
 
@@ -278,7 +278,7 @@ func (s *MsgStore) Conversation(self string, limit int) ([]Message, error) {
 	if err != nil {
 		return nil, fmt.Errorf("query conversation: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var msgs []Message
 
@@ -319,7 +319,7 @@ func (s *MsgStore) AckMessages(stream, subscriber string, seqs []int64) error {
 	if err != nil {
 		return fmt.Errorf("ack messages: begin tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 
@@ -329,7 +329,7 @@ func (s *MsgStore) AckMessages(stream, subscriber string, seqs []int64) error {
 	if err != nil {
 		return fmt.Errorf("ack messages: prepare: %w", err)
 	}
-	defer stmt.Close()
+	defer func() { _ = stmt.Close() }()
 
 	for _, seq := range seqs {
 		if _, err := stmt.Exec(subscriber, stream, seq, now); err != nil {
@@ -383,7 +383,7 @@ func (s *MsgStore) ListStreams(subscriber string, includeSystem bool) ([]StreamI
 	if err != nil {
 		return nil, fmt.Errorf("list streams: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var streams []StreamInfo
 
@@ -481,14 +481,14 @@ func (s *MsgStore) Cleanup(maxAge time.Duration, maxPerStream int) (int64, error
 		for rows.Next() {
 			var sc streamCount
 			if err := rows.Scan(&sc.name, &sc.count); err != nil {
-				rows.Close()
+				_ = rows.Close()
 				return total, fmt.Errorf("cleanup by count: scan: %w", err)
 			}
 
 			streams = append(streams, sc)
 		}
 
-		rows.Close()
+		_ = rows.Close()
 
 		for _, sc := range streams {
 			res, err := s.db.Exec(
@@ -506,16 +506,16 @@ func (s *MsgStore) Cleanup(maxAge time.Duration, maxPerStream int) (int64, error
 		}
 	}
 
-	s.db.Exec(`DELETE FROM acked_messages WHERE NOT EXISTS (
+	_, _ = s.db.Exec(`DELETE FROM acked_messages WHERE NOT EXISTS (
 		SELECT 1 FROM messages WHERE messages.stream = acked_messages.stream AND messages.seq = acked_messages.seq
 	)`)
 
-	s.db.Exec(`DELETE FROM cursors WHERE NOT EXISTS (
+	_, _ = s.db.Exec(`DELETE FROM cursors WHERE NOT EXISTS (
 		SELECT 1 FROM messages WHERE messages.stream = cursors.stream
 	)`)
 
 	if ageCutoff != "" {
-		s.db.Exec("DELETE FROM cursors WHERE updated_at < ?", ageCutoff)
+		_, _ = s.db.Exec("DELETE FROM cursors WHERE updated_at < ?", ageCutoff)
 	}
 
 	return total, nil

@@ -49,9 +49,9 @@ func (sm *SessionManager) handleMsgStreamRead(
 				seqs[i] = msg.Seq
 			}
 
-			sm.messages.AckMessages(stream, subscriber, seqs)
+			_ = sm.messages.AckMessages(stream, subscriber, seqs)
 		} else {
-			sm.messages.Ack(stream, subscriber, msgs[len(msgs)-1].Seq)
+			_ = sm.messages.Ack(stream, subscriber, msgs[len(msgs)-1].Seq)
 		}
 	}
 
@@ -108,9 +108,9 @@ func (sm *SessionManager) handleMsgStreamRead(
 
 				if ack && subscriber != "" {
 					if threadID != "" {
-						sm.messages.AckMessages(stream, subscriber, []int64{tmsg.Seq})
+						_ = sm.messages.AckMessages(stream, subscriber, []int64{tmsg.Seq})
 					} else {
-						sm.messages.Ack(stream, subscriber, tmsg.Seq)
+						_ = sm.messages.Ack(stream, subscriber, tmsg.Seq)
 					}
 				}
 

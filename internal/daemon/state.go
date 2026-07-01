@@ -380,26 +380,26 @@ func writeFileAtomic(path string, data []byte) error {
 
 	tmpPath := tmp.Name()
 	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		os.Remove(tmpPath)
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
 
 		return fmt.Errorf("write temp: %w", err)
 	}
 
 	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		os.Remove(tmpPath)
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
 
 		return fmt.Errorf("sync temp: %w", err)
 	}
 
 	if err := tmp.Close(); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("close temp: %w", err)
 	}
 
 	if err := os.Rename(tmpPath, path); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("rename: %w", err)
 	}
 
@@ -417,7 +417,7 @@ func syncDir(path string) error {
 	}
 
 	err = d.Sync()
-	d.Close()
+	_ = d.Close()
 
 	return err
 }

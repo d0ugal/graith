@@ -155,7 +155,7 @@ func TestWriteFileAtomicPreservesOldOnFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	t.Cleanup(func() { os.Chmod(dir, 0o700) })
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
 
 	err := writeFileAtomic(path, []byte(`{"new":true}`))
 	if err == nil {

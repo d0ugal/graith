@@ -128,7 +128,7 @@ func TestOnAgentStatusChange_PublishesToMessageStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ms.Close()
+	defer func() { _ = ms.Close() }()
 
 	sm := &SessionManager{
 		cfg: &config.Config{

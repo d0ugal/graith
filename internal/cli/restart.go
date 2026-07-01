@@ -45,7 +45,7 @@ var restartCmd = &cobra.Command{
 			return fmt.Errorf("session %q is already running", session.Name)
 		}
 
-		c.SendControl("resume", protocol.ResumeMsg{SessionID: session.ID})
+		_ = c.SendControl("resume", protocol.ResumeMsg{SessionID: session.ID})
 
 		resp, err := c.ReadControlResponse()
 		if err != nil {
@@ -54,13 +54,15 @@ var restartCmd = &cobra.Command{
 
 		if resp.Type == "error" {
 			var e protocol.ErrorMsg
-			protocol.DecodePayload(resp, &e)
+
+			_ = protocol.DecodePayload(resp, &e)
 
 			return fmt.Errorf("%s", e.Message)
 		}
 
 		var info protocol.SessionInfo
-		protocol.DecodePayload(resp, &info)
+
+		_ = protocol.DecodePayload(resp, &info)
 
 		if jsonOutput {
 			return out.JSON(info)
@@ -100,7 +102,7 @@ func restartChildrenRun(c *client.Client, args []string) error {
 		excludeRoot = true
 	}
 
-	c.SendControl("restart", protocol.RestartMsg{
+	_ = c.SendControl("restart", protocol.RestartMsg{
 		SessionID:   sessionID,
 		Children:    true,
 		ExcludeRoot: excludeRoot,
@@ -113,7 +115,8 @@ func restartChildrenRun(c *client.Client, args []string) error {
 
 	if resp.Type == "error" {
 		var e protocol.ErrorMsg
-		protocol.DecodePayload(resp, &e)
+
+		_ = protocol.DecodePayload(resp, &e)
 
 		return fmt.Errorf("%s", e.Message)
 	}
@@ -121,7 +124,8 @@ func restartChildrenRun(c *client.Client, args []string) error {
 	var result struct {
 		Restarted []string `json:"restarted"`
 	}
-	protocol.DecodePayload(resp, &result)
+
+	_ = protocol.DecodePayload(resp, &result)
 
 	if jsonOutput {
 		return out.JSON(result)

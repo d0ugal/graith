@@ -45,7 +45,7 @@ func printPath(w io.Writer, o *output.Writer, session *protocol.SessionInfo, nam
 		})
 	}
 
-	fmt.Fprint(w, session.WorktreePath)
+	_, _ = fmt.Fprint(w, session.WorktreePath)
 
 	return nil
 }

@@ -31,7 +31,7 @@ var msgInboxCmd = &cobra.Command{
 		}
 		defer c.Close()
 
-		c.SendControl("msg_inbox", protocol.MsgInboxMsg{
+		_ = c.SendControl("msg_inbox", protocol.MsgInboxMsg{
 			OnlyUnread: !msgInboxAll,
 			ThreadID:   msgInboxThreadID,
 			Wait:       msgInboxWait,
@@ -45,7 +45,8 @@ var msgInboxCmd = &cobra.Command{
 			signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 			go func() {
 				<-sigCh
-				c.SendControl("detach", struct{}{})
+
+				_ = c.SendControl("detach", struct{}{})
 			}()
 		}
 
@@ -77,7 +78,8 @@ var msgInboxCmd = &cobra.Command{
 				// streaming mode active, keep reading
 			case "error":
 				var e protocol.ErrorMsg
-				protocol.DecodePayload(msg, &e)
+
+				_ = protocol.DecodePayload(msg, &e)
 
 				return fmt.Errorf("%s", e.Message)
 			}

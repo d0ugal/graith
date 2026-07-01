@@ -23,7 +23,7 @@ var infoCmd = &cobra.Command{
 		}
 		defer c.Close()
 
-		c.SendControl("list", struct{}{})
+		_ = c.SendControl("list", struct{}{})
 
 		resp, err := c.ReadControlResponse()
 		if err != nil {

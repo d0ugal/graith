@@ -64,7 +64,7 @@ Examples:
 			Clear:      statusSummaryClear,
 		}
 
-		c.SendControl("set_status", msg)
+		_ = c.SendControl("set_status", msg)
 
 		resp, err := c.ReadControlResponse()
 		if err != nil {
@@ -73,7 +73,8 @@ Examples:
 
 		if resp.Type == "error" {
 			var e protocol.ErrorMsg
-			protocol.DecodePayload(resp, &e)
+
+			_ = protocol.DecodePayload(resp, &e)
 
 			return fmt.Errorf("%s", e.Message)
 		}

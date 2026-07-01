@@ -217,7 +217,7 @@ The source can be:
 		}
 		defer c.Close()
 
-		c.SendControl("scenario_start", protocol.ScenarioStartMsg{
+		_ = c.SendControl("scenario_start", protocol.ScenarioStartMsg{
 			CallerSessionID: callerID,
 			Name:            sf.Scenario.Name,
 			Goal:            sf.Scenario.Goal,
@@ -231,13 +231,15 @@ The source can be:
 
 		if resp.Type == "error" {
 			var e protocol.ErrorMsg
-			protocol.DecodePayload(resp, &e)
+
+			_ = protocol.DecodePayload(resp, &e)
 
 			return fmt.Errorf("%s", e.Message)
 		}
 
 		var record protocol.ScenarioRecord
-		protocol.DecodePayload(resp, &record)
+
+		_ = protocol.DecodePayload(resp, &record)
 
 		if jsonOutput {
 			return out.JSON(record)
@@ -347,7 +349,7 @@ var scenarioStatusCmd = &cobra.Command{
 		}
 		defer c.Close()
 
-		c.SendControl("scenario_status", protocol.ScenarioStatusMsg{Name: args[0]})
+		_ = c.SendControl("scenario_status", protocol.ScenarioStatusMsg{Name: args[0]})
 
 		resp, err := c.ReadControlResponse()
 		if err != nil {
@@ -356,13 +358,15 @@ var scenarioStatusCmd = &cobra.Command{
 
 		if resp.Type == "error" {
 			var e protocol.ErrorMsg
-			protocol.DecodePayload(resp, &e)
+
+			_ = protocol.DecodePayload(resp, &e)
 
 			return fmt.Errorf("%s", e.Message)
 		}
 
 		var statusResp protocol.ScenarioStatusResponse
-		protocol.DecodePayload(resp, &statusResp)
+
+		_ = protocol.DecodePayload(resp, &statusResp)
 
 		if jsonOutput {
 			return out.JSON(statusResp)
@@ -373,7 +377,7 @@ var scenarioStatusCmd = &cobra.Command{
 		out.Printf("Goal: %s\n\n", sc.Goal)
 
 		tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-		fmt.Fprintf(tw, "NAME\tSESSION\tSTATUS\tAGENT\tROLE\tTASK DONE\tSHARED\n")
+		_, _ = fmt.Fprintf(tw, "NAME\tSESSION\tSTATUS\tAGENT\tROLE\tTASK DONE\tSHARED\n")
 
 		for _, s := range sc.Sessions {
 			done := ""
@@ -386,10 +390,10 @@ var scenarioStatusCmd = &cobra.Command{
 				shared = "yes"
 			}
 
-			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", s.Name, s.SessionID, s.Status, s.Agent, s.Role, done, shared)
+			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", s.Name, s.SessionID, s.Status, s.Agent, s.Role, done, shared)
 		}
 
-		tw.Flush()
+		_ = tw.Flush()
 
 		return nil
 	},
@@ -406,7 +410,7 @@ var scenarioTaskDoneCmd = &cobra.Command{
 		}
 		defer c.Close()
 
-		c.SendControl("scenario_task_done", protocol.ScenarioTaskDoneMsg{Name: args[0]})
+		_ = c.SendControl("scenario_task_done", protocol.ScenarioTaskDoneMsg{Name: args[0]})
 
 		resp, err := c.ReadControlResponse()
 		if err != nil {
@@ -415,7 +419,8 @@ var scenarioTaskDoneCmd = &cobra.Command{
 
 		if resp.Type == "error" {
 			var e protocol.ErrorMsg
-			protocol.DecodePayload(resp, &e)
+
+			_ = protocol.DecodePayload(resp, &e)
 
 			return fmt.Errorf("%s", e.Message)
 		}
@@ -459,7 +464,7 @@ var scenarioAddCmd = &cobra.Command{
 		}
 		defer c.Close()
 
-		c.SendControl("scenario_add", protocol.ScenarioAddMsg{
+		_ = c.SendControl("scenario_add", protocol.ScenarioAddMsg{
 			Name: args[0],
 			Session: protocol.ScenarioSessionInput{
 				Name:       name,
@@ -480,7 +485,8 @@ var scenarioAddCmd = &cobra.Command{
 
 		if resp.Type == "error" {
 			var e protocol.ErrorMsg
-			protocol.DecodePayload(resp, &e)
+
+			_ = protocol.DecodePayload(resp, &e)
 
 			return fmt.Errorf("%s", e.Message)
 		}
@@ -492,7 +498,8 @@ var scenarioAddCmd = &cobra.Command{
 		var result struct {
 			SessionID string `json:"session_id"`
 		}
-		protocol.DecodePayload(resp, &result)
+
+		_ = protocol.DecodePayload(resp, &result)
 		out.Printf("Added session %q to scenario %q (id: %s)\n", name, args[0], result.SessionID)
 
 		return nil
@@ -510,7 +517,7 @@ var scenarioListCmd = &cobra.Command{
 		}
 		defer c.Close()
 
-		c.SendControl("scenario_list", protocol.ScenarioListMsg{})
+		_ = c.SendControl("scenario_list", protocol.ScenarioListMsg{})
 
 		resp, err := c.ReadControlResponse()
 		if err != nil {
@@ -519,13 +526,15 @@ var scenarioListCmd = &cobra.Command{
 
 		if resp.Type == "error" {
 			var e protocol.ErrorMsg
-			protocol.DecodePayload(resp, &e)
+
+			_ = protocol.DecodePayload(resp, &e)
 
 			return fmt.Errorf("%s", e.Message)
 		}
 
 		var listResp protocol.ScenarioListResponse
-		protocol.DecodePayload(resp, &listResp)
+
+		_ = protocol.DecodePayload(resp, &listResp)
 
 		available := listAvailableScenarios()
 
@@ -540,7 +549,7 @@ var scenarioListCmd = &cobra.Command{
 			out.Printf("RUNNING SCENARIOS\n")
 
 			tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-			fmt.Fprintf(tw, "  NAME\tID\tSTATUS\tSESSIONS\tGOAL\n")
+			_, _ = fmt.Fprintf(tw, "  NAME\tID\tSTATUS\tSESSIONS\tGOAL\n")
 
 			for _, sc := range listResp.Scenarios {
 				goal := sc.Goal
@@ -548,10 +557,10 @@ var scenarioListCmd = &cobra.Command{
 					goal = goal[:57] + "..."
 				}
 
-				fmt.Fprintf(tw, "  %s\t%s\t%s\t%d\t%s\n", sc.Name, sc.ID, sc.Status, len(sc.Sessions), goal)
+				_, _ = fmt.Fprintf(tw, "  %s\t%s\t%s\t%d\t%s\n", sc.Name, sc.ID, sc.Status, len(sc.Sessions), goal)
 			}
 
-			tw.Flush()
+			_ = tw.Flush()
 		} else {
 			out.Printf("No running scenarios\n")
 		}
@@ -567,10 +576,10 @@ var scenarioListCmd = &cobra.Command{
 					goal = goal[:57] + "..."
 				}
 
-				fmt.Fprintf(tw, "  %s\t— %s\n", a.File, goal)
+				_, _ = fmt.Fprintf(tw, "  %s\t— %s\n", a.File, goal)
 			}
 
-			tw.Flush()
+			_ = tw.Flush()
 		}
 
 		return nil

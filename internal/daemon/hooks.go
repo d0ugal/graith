@@ -305,7 +305,7 @@ func preTrustCursorWorkspace(worktreePath string) error {
 
 		return fmt.Errorf("create workspace-trusted: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	trust := struct {
 		TrustedAt     string `json:"trustedAt"`

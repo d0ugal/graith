@@ -35,7 +35,7 @@ var logsCmd = &cobra.Command{
 			return err
 		}
 
-		c.SendControl("logs", protocol.LogsMsg{
+		_ = c.SendControl("logs", protocol.LogsMsg{
 			SessionID: sessionID,
 			Lines:     logsLines,
 			Follow:    logsFollow,
@@ -47,7 +47,8 @@ var logsCmd = &cobra.Command{
 			signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 			go func() {
 				<-sigCh
-				c.SendControl("detach", struct{}{})
+
+				_ = c.SendControl("detach", struct{}{})
 			}()
 		}
 
@@ -63,13 +64,14 @@ var logsCmd = &cobra.Command{
 
 			switch frame.Channel {
 			case protocol.ChannelData:
-				os.Stdout.Write(frame.Payload)
+				_, _ = os.Stdout.Write(frame.Payload)
 			case protocol.ChannelControl:
 				msg, _ := protocol.DecodeControl(frame.Payload)
 				if msg.Type == "logs_done" || msg.Type == "error" {
 					if msg.Type == "error" {
 						var e protocol.ErrorMsg
-						protocol.DecodePayload(msg, &e)
+
+						_ = protocol.DecodePayload(msg, &e)
 
 						return fmt.Errorf("%s", e.Message)
 					}

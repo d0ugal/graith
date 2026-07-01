@@ -36,7 +36,7 @@ func Listen(sockPath string) (net.Listener, error) {
 	}
 
 	if err := os.Chmod(sockPath, 0o700); err != nil {
-		l.Close()
+		_ = l.Close()
 		return nil, fmt.Errorf("chmod socket: %w", err)
 	}
 
@@ -62,7 +62,8 @@ func (s *Server) untrackConn(c net.Conn) {
 func (s *Server) Serve(ctx context.Context) error {
 	go func() {
 		<-ctx.Done()
-		s.listener.Close()
+
+		_ = s.listener.Close()
 	}()
 
 	for {
@@ -84,7 +85,7 @@ func (s *Server) Serve(ctx context.Context) error {
 		s.wg.Add(1)
 		go func(c net.Conn) {
 			defer s.wg.Done()
-			defer c.Close()
+			defer func() { _ = c.Close() }()
 			defer s.untrackConn(c)
 
 			s.handler(ctx, c)
@@ -93,14 +94,14 @@ func (s *Server) Serve(ctx context.Context) error {
 }
 
 func (s *Server) Shutdown() {
-	s.listener.Close()
+	_ = s.listener.Close()
 
 	// Give handlers a short window to finish gracefully.
 	deadline := time.Now().Add(5 * time.Second)
 
 	s.mu.Lock()
 	for c := range s.conns {
-		c.SetDeadline(deadline)
+		_ = c.SetDeadline(deadline)
 	}
 	s.mu.Unlock()
 
@@ -117,7 +118,7 @@ func (s *Server) Shutdown() {
 		// Force-close any remaining connections.
 		s.mu.Lock()
 		for c := range s.conns {
-			c.Close()
+			_ = c.Close()
 		}
 		s.mu.Unlock()
 		s.wg.Wait()

@@ -81,7 +81,7 @@ func fetchSessions() ([]protocol.SessionInfo, error) {
 	}
 	defer c.Close()
 
-	c.SendControl("list", struct{}{})
+	_ = c.SendControl("list", struct{}{})
 
 	resp, err := c.ReadControlResponse()
 	if err != nil {
@@ -103,7 +103,7 @@ func sendAction(msgType string, payload any) error {
 	}
 	defer c.Close()
 
-	c.SendControl(msgType, payload)
+	_ = c.SendControl(msgType, payload)
 
 	resp, err := c.ReadControlResponse()
 	if err != nil {
@@ -112,7 +112,8 @@ func sendAction(msgType string, payload any) error {
 
 	if resp.Type == "error" {
 		var e protocol.ErrorMsg
-		protocol.DecodePayload(resp, &e)
+
+		_ = protocol.DecodePayload(resp, &e)
 
 		return fmt.Errorf("%s", e.Message)
 	}

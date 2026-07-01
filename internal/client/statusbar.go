@@ -330,7 +330,7 @@ func (sb *statusBarState) render(w io.Writer) {
 
 	line := formatStatusLine(info, cols)
 	seq := fmt.Sprintf("\x1b7\x1b[%d;1H%s\x1b8", row, line)
-	w.Write([]byte(seq))
+	_, _ = w.Write([]byte(seq))
 }
 
 func (sb *statusBarState) setup(w io.Writer) {
@@ -353,7 +353,7 @@ func (sb *statusBarState) setup(w io.Writer) {
 	}
 
 	buf = append(buf, fmt.Sprintf("\x1b7\x1b[%d;1H%s\x1b8", row, line)...)
-	w.Write(buf)
+	_, _ = w.Write(buf)
 }
 
 func (sb *statusBarState) teardown(w io.Writer) {
@@ -361,7 +361,7 @@ func (sb *statusBarState) teardown(w io.Writer) {
 	row := sb.barRow()
 	sb.mu.Unlock()
 
-	fmt.Fprintf(w, "\x1b[%d;1H\x1b[2K\x1b[r", row)
+	_, _ = fmt.Fprintf(w, "\x1b[%d;1H\x1b[2K\x1b[r", row)
 }
 
 func (sb *statusBarState) updateInfo(info statusBarInfo) {

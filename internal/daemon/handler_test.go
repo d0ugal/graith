@@ -41,8 +41,8 @@ func newTestHarness(t *testing.T) *testHarness {
 		DataDir:    filepath.Join(tmpDir, "data"),
 		MessagesDB: filepath.Join(tmpDir, "messages.db"),
 	}
-	os.MkdirAll(paths.LogDir, 0o700)
-	os.MkdirAll(paths.DataDir, 0o700)
+	_ = os.MkdirAll(paths.LogDir, 0o700)
+	_ = os.MkdirAll(paths.DataDir, 0o700)
 
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	sm := NewSessionManager(cfg, paths, log)
@@ -53,7 +53,7 @@ func newTestHarness(t *testing.T) *testHarness {
 		t.Fatal(err)
 	}
 
-	t.Cleanup(func() { msgStore.Close() })
+	t.Cleanup(func() { _ = msgStore.Close() })
 
 	sm.messages = msgStore
 
@@ -78,8 +78,10 @@ func newTestHarness(t *testing.T) *testHarness {
 
 	t.Cleanup(func() {
 		cancel()
-		clientConn.Close()
-		serverConn.Close()
+
+		_ = clientConn.Close()
+		_ = serverConn.Close()
+
 		<-h.done
 	})
 
@@ -179,9 +181,9 @@ func (h *testHarness) addPTYSession(t *testing.T, id, name string) {
 
 	t.Cleanup(func() {
 		h.cancel()
-		h.conn.Close()
-		h.serverConn.Close()
-		sess.Kill()
+		_ = h.conn.Close()
+		_ = h.serverConn.Close()
+		_ = sess.Kill()
 		<-sess.Done()
 		sess.Close()
 	})
@@ -214,7 +216,8 @@ func TestHandshake(t *testing.T) {
 	}
 
 	var ok protocol.HandshakeOkMsg
-	protocol.DecodePayload(env, &ok)
+
+	_ = protocol.DecodePayload(env, &ok)
 
 	if ok.Version != protocol.Version {
 		t.Errorf("version = %q, want %q", ok.Version, protocol.Version)
@@ -276,7 +279,7 @@ func TestHandshakeInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
 	raw, _ := json.Marshal(protocol.Envelope{Type: "handshake", Payload: json.RawMessage(`{"bad":`)})
-	h.writer.WriteFrame(protocol.ChannelControl, raw)
+	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
 
 	env := h.readControlMsg(t)
 	if env.Type != "error" {
@@ -287,7 +290,7 @@ func TestHandshakeInvalidPayload(t *testing.T) {
 func TestMalformedControlMessage(t *testing.T) {
 	h := newTestHarness(t)
 
-	h.writer.WriteFrame(protocol.ChannelControl, []byte(`{not valid json`))
+	_ = h.writer.WriteFrame(protocol.ChannelControl, []byte(`{not valid json`))
 
 	env := h.readControlMsg(t)
 	if env.Type != "error" {
@@ -295,7 +298,8 @@ func TestMalformedControlMessage(t *testing.T) {
 	}
 
 	var errMsg protocol.ErrorMsg
-	protocol.DecodePayload(env, &errMsg)
+
+	_ = protocol.DecodePayload(env, &errMsg)
 
 	if errMsg.Message != "malformed message" {
 		t.Errorf("error message = %q", errMsg.Message)
@@ -324,7 +328,8 @@ func TestListSessions(t *testing.T) {
 	}
 
 	var list protocol.SessionListMsg
-	protocol.DecodePayload(env, &list)
+
+	_ = protocol.DecodePayload(env, &list)
 
 	if len(list.Sessions) != 2 {
 		t.Errorf("expected 2 sessions, got %d", len(list.Sessions))
@@ -342,7 +347,8 @@ func TestListSessionsEmpty(t *testing.T) {
 	}
 
 	var list protocol.SessionListMsg
-	protocol.DecodePayload(env, &list)
+
+	_ = protocol.DecodePayload(env, &list)
 
 	if len(list.Sessions) != 0 {
 		t.Errorf("expected 0 sessions, got %d", len(list.Sessions))
@@ -376,7 +382,7 @@ func TestDeleteInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
 	raw, _ := json.Marshal(protocol.Envelope{Type: "delete", Payload: json.RawMessage(`{bad`)})
-	h.writer.WriteFrame(protocol.ChannelControl, raw)
+	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
 
 	env := h.readControlMsg(t)
 	if env.Type != "error" {
@@ -411,7 +417,7 @@ func TestStopInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
 	raw, _ := json.Marshal(protocol.Envelope{Type: "stop", Payload: json.RawMessage(`{bad`)})
-	h.writer.WriteFrame(protocol.ChannelControl, raw)
+	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
 
 	env := h.readControlMsg(t)
 	if env.Type != "error" {
@@ -460,7 +466,7 @@ func TestRenameInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
 	raw, _ := json.Marshal(protocol.Envelope{Type: "rename", Payload: json.RawMessage(`{bad`)})
-	h.writer.WriteFrame(protocol.ChannelControl, raw)
+	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
 
 	env := h.readControlMsg(t)
 	if env.Type != "error" {
@@ -472,7 +478,7 @@ func TestResumeInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
 	raw, _ := json.Marshal(protocol.Envelope{Type: "resume", Payload: json.RawMessage(`{bad`)})
-	h.writer.WriteFrame(protocol.ChannelControl, raw)
+	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
 
 	env := h.readControlMsg(t)
 	if env.Type != "error" {
@@ -495,7 +501,7 @@ func TestCreateInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
 	raw, _ := json.Marshal(protocol.Envelope{Type: "create", Payload: json.RawMessage(`{bad`)})
-	h.writer.WriteFrame(protocol.ChannelControl, raw)
+	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
 
 	env := h.readControlMsg(t)
 	if env.Type != "error" {
@@ -567,7 +573,8 @@ func TestAttachAndDetach(t *testing.T) {
 	}
 
 	var detached protocol.DetachedMsg
-	protocol.DecodePayload(env, &detached)
+
+	_ = protocol.DecodePayload(env, &detached)
 
 	if detached.Reason != "user" {
 		t.Errorf("reason = %q, want %q", detached.Reason, "user")
@@ -589,7 +596,7 @@ func TestAttachInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
 	raw, _ := json.Marshal(protocol.Envelope{Type: "attach", Payload: json.RawMessage(`{bad`)})
-	h.writer.WriteFrame(protocol.ChannelControl, raw)
+	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
 
 	env := h.readControlMsg(t)
 	if env.Type != "error" {
@@ -673,7 +680,7 @@ func TestLogsInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
 	raw, _ := json.Marshal(protocol.Envelope{Type: "logs", Payload: json.RawMessage(`{bad`)})
-	h.writer.WriteFrame(protocol.ChannelControl, raw)
+	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
 
 	env := h.readControlMsg(t)
 	if env.Type != "error" {
@@ -760,7 +767,7 @@ func TestTypeInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
 	raw, _ := json.Marshal(protocol.Envelope{Type: "type", Payload: json.RawMessage(`{bad`)})
-	h.writer.WriteFrame(protocol.ChannelControl, raw)
+	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
 
 	env := h.readControlMsg(t)
 	if env.Type != "error" {
@@ -780,7 +787,8 @@ func TestScreenPreview(t *testing.T) {
 	}
 
 	var resp protocol.ScreenPreviewResponseMsg
-	protocol.DecodePayload(env, &resp)
+
+	_ = protocol.DecodePayload(env, &resp)
 
 	if resp.SessionID != "braw-sp" {
 		t.Errorf("session_id = %q, want %q", resp.SessionID, "braw-sp")
@@ -802,7 +810,7 @@ func TestScreenPreviewInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
 	raw, _ := json.Marshal(protocol.Envelope{Type: "screen_preview", Payload: json.RawMessage(`{bad`)})
-	h.writer.WriteFrame(protocol.ChannelControl, raw)
+	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
 
 	env := h.readControlMsg(t)
 	if env.Type != "error" {
@@ -822,7 +830,8 @@ func TestScreenSnapshot(t *testing.T) {
 	}
 
 	var resp protocol.ScreenSnapshotResponseMsg
-	protocol.DecodePayload(env, &resp)
+
+	_ = protocol.DecodePayload(env, &resp)
 
 	if resp.SessionID != "braw-ss" {
 		t.Errorf("session_id = %q, want %q", resp.SessionID, "braw-ss")
@@ -848,7 +857,7 @@ func TestScreenSnapshotInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
 	raw, _ := json.Marshal(protocol.Envelope{Type: "screen_snapshot", Payload: json.RawMessage(`{bad`)})
-	h.writer.WriteFrame(protocol.ChannelControl, raw)
+	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
 
 	env := h.readControlMsg(t)
 	if env.Type != "error" {
@@ -911,7 +920,8 @@ func TestUpgradeAlreadyInProgress(t *testing.T) {
 	}
 
 	var errMsg protocol.ErrorMsg
-	protocol.DecodePayload(env, &errMsg)
+
+	_ = protocol.DecodePayload(env, &errMsg)
 
 	if errMsg.Message != "upgrade already in progress" {
 		t.Errorf("error message = %q", errMsg.Message)
@@ -941,7 +951,8 @@ func TestMsgPub(t *testing.T) {
 	}
 
 	var msg Message
-	protocol.DecodePayload(env, &msg)
+
+	_ = protocol.DecodePayload(env, &msg)
 
 	if msg.Body != "braw day" {
 		t.Errorf("body = %q", msg.Body)
@@ -1030,7 +1041,7 @@ func TestMsgPubInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
 	raw, _ := json.Marshal(protocol.Envelope{Type: "msg_pub", Payload: json.RawMessage(`{bad`)})
-	h.writer.WriteFrame(protocol.ChannelControl, raw)
+	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
 
 	env := h.readControlMsg(t)
 	if env.Type != "error" {
@@ -1042,8 +1053,8 @@ func TestMsgSubReadAll(t *testing.T) {
 	h := newTestHarness(t)
 
 	// Publish a message first
-	h.sm.messages.Publish("blether1", "braw1", "Braw", "neep1", "", "")
-	h.sm.messages.Publish("blether1", "canny1", "Canny", "neep2", "", "")
+	_, _ = h.sm.messages.Publish("blether1", "braw1", "Braw", "neep1", "", "")
+	_, _ = h.sm.messages.Publish("blether1", "canny1", "Canny", "neep2", "", "")
 
 	h.sendControl(t, "msg_sub", protocol.MsgSubMsg{
 		Stream: "blether1",
@@ -1055,7 +1066,8 @@ func TestMsgSubReadAll(t *testing.T) {
 	}
 
 	var m1 Message
-	protocol.DecodePayload(env, &m1)
+
+	_ = protocol.DecodePayload(env, &m1)
 
 	if m1.Body != "neep1" {
 		t.Errorf("first message body = %q", m1.Body)
@@ -1075,7 +1087,7 @@ func TestMsgSubReadAll(t *testing.T) {
 func TestMsgSubWithAck(t *testing.T) {
 	h := newTestHarness(t)
 
-	h.sm.messages.Publish("blether-ack", "braw1", "Braw", "neep1", "", "")
+	_, _ = h.sm.messages.Publish("blether-ack", "braw1", "Braw", "neep1", "", "")
 
 	h.sendControl(t, "msg_sub", protocol.MsgSubMsg{
 		Stream:     "blether-ack",
@@ -1102,8 +1114,8 @@ func TestMsgSubWithAck(t *testing.T) {
 func TestMsgSubOnlyUnreadWithAck(t *testing.T) {
 	h := newTestHarness(t)
 
-	h.sm.messages.Publish("inbox:braw-sess", "braw-sender", "Ailsa", "braw-hello", "", "")
-	h.sm.messages.Publish("inbox:braw-sess", "canny-sender", "Hamish", "bonnie-world", "", "")
+	_, _ = h.sm.messages.Publish("inbox:braw-sess", "braw-sender", "Ailsa", "braw-hello", "", "")
+	_, _ = h.sm.messages.Publish("inbox:braw-sess", "canny-sender", "Hamish", "bonnie-world", "", "")
 
 	// First read: OnlyUnread + Ack (mimics check-inbox hook)
 	h.sendControl(t, "msg_sub", protocol.MsgSubMsg{
@@ -1145,7 +1157,7 @@ func TestMsgSubInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
 	raw, _ := json.Marshal(protocol.Envelope{Type: "msg_sub", Payload: json.RawMessage(`{bad`)})
-	h.writer.WriteFrame(protocol.ChannelControl, raw)
+	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
 
 	env := h.readControlMsg(t)
 	if env.Type != "error" {
@@ -1156,7 +1168,7 @@ func TestMsgSubInvalidPayload(t *testing.T) {
 func TestMsgSubWaitWithExistingMessages(t *testing.T) {
 	h := newTestHarness(t)
 
-	h.sm.messages.Publish("blether-wait", "braw1", "Braw", "bide-msg", "", "")
+	_, _ = h.sm.messages.Publish("blether-wait", "braw1", "Braw", "bide-msg", "", "")
 
 	// --wait with existing messages should return immediately
 	h.sendControl(t, "msg_sub", protocol.MsgSubMsg{
@@ -1181,7 +1193,8 @@ func TestMsgSubWaitForNewMessage(t *testing.T) {
 	// --wait with no existing messages should block until a message arrives
 	go func() {
 		time.Sleep(50 * time.Millisecond)
-		h.sm.messages.Publish("blether-new", "braw1", "Braw", "braw-new", "", "")
+
+		_, _ = h.sm.messages.Publish("blether-new", "braw1", "Braw", "braw-new", "", "")
 	}()
 
 	h.sendControl(t, "msg_sub", protocol.MsgSubMsg{
@@ -1216,7 +1229,7 @@ func TestMsgSubWaitForNewMessage(t *testing.T) {
 func TestMsgAck(t *testing.T) {
 	h := newTestHarness(t)
 
-	h.sm.messages.Publish("blether-ack-stream", "braw1", "Braw", "neep1", "", "")
+	_, _ = h.sm.messages.Publish("blether-ack-stream", "braw1", "Braw", "neep1", "", "")
 
 	h.sendControl(t, "msg_ack", protocol.MsgAckMsg{
 		Stream:     "blether-ack-stream",
@@ -1233,7 +1246,7 @@ func TestMsgAckInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
 	raw, _ := json.Marshal(protocol.Envelope{Type: "msg_ack", Payload: json.RawMessage(`{bad`)})
-	h.writer.WriteFrame(protocol.ChannelControl, raw)
+	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
 
 	env := h.readControlMsg(t)
 	if env.Type != "error" {
@@ -1244,8 +1257,8 @@ func TestMsgAckInvalidPayload(t *testing.T) {
 func TestMsgTopics(t *testing.T) {
 	h := newTestHarness(t)
 
-	h.sm.messages.Publish("blether-a", "braw1", "Braw", "neep1", "", "")
-	h.sm.messages.Publish("blether-b", "canny1", "Canny", "neep2", "", "")
+	_, _ = h.sm.messages.Publish("blether-a", "braw1", "Braw", "neep1", "", "")
+	_, _ = h.sm.messages.Publish("blether-b", "canny1", "Canny", "neep2", "", "")
 
 	h.sendControl(t, "msg_topics", protocol.MsgTopicsMsg{Subscriber: "kirk1"})
 
@@ -1257,7 +1270,8 @@ func TestMsgTopics(t *testing.T) {
 	var resp struct {
 		Streams []StreamInfo `json:"streams"`
 	}
-	protocol.DecodePayload(env, &resp)
+
+	_ = protocol.DecodePayload(env, &resp)
 
 	if len(resp.Streams) != 2 {
 		t.Errorf("expected 2 streams, got %d", len(resp.Streams))
@@ -1268,7 +1282,7 @@ func TestMsgTopicsInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
 	raw, _ := json.Marshal(protocol.Envelope{Type: "msg_topics", Payload: json.RawMessage(`{bad`)})
-	h.writer.WriteFrame(protocol.ChannelControl, raw)
+	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
 
 	env := h.readControlMsg(t)
 	if env.Type != "error" {
@@ -1325,7 +1339,7 @@ func TestAttachReplacesExistingClient(t *testing.T) {
 	reader2 := protocol.NewFrameReader(clientConn2)
 
 	data, _ := protocol.EncodeControl("attach", protocol.AttachMsg{SessionID: "braw-repl"})
-	writer2.WriteFrame(protocol.ChannelControl, data)
+	_ = writer2.WriteFrame(protocol.ChannelControl, data)
 
 	// Read attached on second client
 	for {
@@ -1346,7 +1360,8 @@ func TestAttachReplacesExistingClient(t *testing.T) {
 	select {
 	case env := <-detachedCh:
 		var detached protocol.DetachedMsg
-		protocol.DecodePayload(env, &detached)
+
+		_ = protocol.DecodePayload(env, &detached)
 
 		if detached.Reason != "replaced" {
 			t.Errorf("reason = %q, want %q", detached.Reason, "replaced")
@@ -1356,8 +1371,10 @@ func TestAttachReplacesExistingClient(t *testing.T) {
 	}
 
 	cancel2()
-	clientConn2.Close()
-	serverConn2.Close()
+
+	_ = clientConn2.Close()
+	_ = serverConn2.Close()
+
 	<-done2
 }
 
@@ -1386,7 +1403,7 @@ func TestConcurrentAttachDetach(t *testing.T) {
 			reader := protocol.NewFrameReader(clientConn)
 
 			data, _ := protocol.EncodeControl("attach", protocol.AttachMsg{SessionID: "braw-conc"})
-			writer.WriteFrame(protocol.ChannelControl, data)
+			_ = writer.WriteFrame(protocol.ChannelControl, data)
 
 			// Read until we get an attached or detached response
 			for {
@@ -1404,8 +1421,10 @@ func TestConcurrentAttachDetach(t *testing.T) {
 			}
 
 			cancel()
-			clientConn.Close()
-			serverConn.Close()
+
+			_ = clientConn.Close()
+			_ = serverConn.Close()
+
 			<-done
 		}()
 	}
@@ -1432,7 +1451,7 @@ func TestConnectionCloseWhileAttached(t *testing.T) {
 	reader := protocol.NewFrameReader(clientConn)
 
 	data, _ := protocol.EncodeControl("attach", protocol.AttachMsg{SessionID: "braw-close"})
-	writer.WriteFrame(protocol.ChannelControl, data)
+	_ = writer.WriteFrame(protocol.ChannelControl, data)
 
 	// Wait for attached
 	for {
@@ -1450,7 +1469,7 @@ func TestConnectionCloseWhileAttached(t *testing.T) {
 	}
 
 	// Close the connection abruptly
-	clientConn.Close()
+	_ = clientConn.Close()
 
 	// Handler should clean up and exit
 	select {
@@ -1460,7 +1479,8 @@ func TestConnectionCloseWhileAttached(t *testing.T) {
 	}
 
 	cancel()
-	serverConn.Close()
+
+	_ = serverConn.Close()
 }
 
 func TestContextCancellation(t *testing.T) {
@@ -1471,14 +1491,14 @@ func TestContextCancellation(t *testing.T) {
 		LogDir:     filepath.Join(tmpDir, "logs"),
 		MessagesDB: filepath.Join(tmpDir, "messages.db"),
 	}
-	os.MkdirAll(paths.LogDir, 0o700)
+	_ = os.MkdirAll(paths.LogDir, 0o700)
 
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	sm := NewSessionManager(cfg, paths, log)
 	sm.upgradeCh = make(chan string, 1)
 
 	msgStore, _ := NewMsgStore(paths.MessagesDB)
-	defer msgStore.Close()
+	defer func() { _ = msgStore.Close() }()
 
 	sm.messages = msgStore
 
@@ -1497,8 +1517,8 @@ func TestContextCancellation(t *testing.T) {
 
 	// The handler should eventually return. We also close the conn
 	// so ReadFrame unblocks.
-	clientConn.Close()
-	serverConn.Close()
+	_ = clientConn.Close()
+	_ = serverConn.Close()
 
 	select {
 	case <-done:
@@ -1541,7 +1561,7 @@ func TestSafeFrameWriterConcurrent(t *testing.T) {
 		go func() {
 			defer wg.Done()
 
-			safe.WriteFrame(protocol.ChannelData, []byte("concurrent"))
+			_ = safe.WriteFrame(protocol.ChannelData, []byte("concurrent"))
 		}()
 	}
 
@@ -1580,8 +1600,8 @@ func TestMsgSubFollowThreadFilter(t *testing.T) {
 	h := newTestHarness(t)
 
 	// Publish messages in different threads
-	h.sm.messages.Publish("thread-topic", "s1", "Agent", "thread-msg", "thread-1", "")
-	h.sm.messages.Publish("thread-topic", "s1", "Agent", "other-msg", "thread-2", "")
+	_, _ = h.sm.messages.Publish("thread-topic", "s1", "Agent", "thread-msg", "thread-1", "")
+	_, _ = h.sm.messages.Publish("thread-topic", "s1", "Agent", "other-msg", "thread-2", "")
 
 	h.sendControl(t, "msg_sub", protocol.MsgSubMsg{
 		Stream:   "thread-topic",
@@ -1594,7 +1614,8 @@ func TestMsgSubFollowThreadFilter(t *testing.T) {
 	}
 
 	var msg Message
-	protocol.DecodePayload(env, &msg)
+
+	_ = protocol.DecodePayload(env, &msg)
 
 	if msg.ThreadID != "thread-1" {
 		t.Errorf("thread_id = %q, want %q", msg.ThreadID, "thread-1")
@@ -1623,7 +1644,8 @@ func TestMsgPubWithThread(t *testing.T) {
 	}
 
 	var msg Message
-	protocol.DecodePayload(env, &msg)
+
+	_ = protocol.DecodePayload(env, &msg)
 
 	if msg.ThreadID != "thread-1" {
 		t.Errorf("thread_id = %q", msg.ThreadID)
@@ -1661,7 +1683,8 @@ func TestMsgPubUsesCurrentNameAfterRename(t *testing.T) {
 	}
 
 	var msg Message
-	protocol.DecodePayload(env, &msg)
+
+	_ = protocol.DecodePayload(env, &msg)
 
 	if msg.SenderName != "new-name" {
 		t.Errorf("sender_name = %q, want %q", msg.SenderName, "new-name")
@@ -1710,7 +1733,7 @@ func TestKickedClientConnectionClosed(t *testing.T) {
 	reader2 := protocol.NewFrameReader(clientConn2)
 
 	data, _ := protocol.EncodeControl("attach", protocol.AttachMsg{SessionID: "scunner1"})
-	writer2.WriteFrame(protocol.ChannelControl, data)
+	_ = writer2.WriteFrame(protocol.ChannelControl, data)
 
 	for {
 		frame, err := reader2.ReadFrame()
@@ -1742,8 +1765,10 @@ func TestKickedClientConnectionClosed(t *testing.T) {
 	}
 
 	cancel2()
-	clientConn2.Close()
-	serverConn2.Close()
+
+	_ = clientConn2.Close()
+	_ = serverConn2.Close()
+
 	<-done2
 }
 
@@ -1786,7 +1811,7 @@ func TestKickedClientInputRejected(t *testing.T) {
 	readerB := protocol.NewFrameReader(clientB)
 
 	data, _ := protocol.EncodeControl("attach", protocol.AttachMsg{SessionID: "thrawn1"})
-	writerB.WriteFrame(protocol.ChannelControl, data)
+	_ = writerB.WriteFrame(protocol.ChannelControl, data)
 
 	for {
 		frame, err := readerB.ReadFrame()
@@ -1819,8 +1844,10 @@ func TestKickedClientInputRejected(t *testing.T) {
 	}
 
 	cancelB()
-	clientB.Close()
-	serverB.Close()
+
+	_ = clientB.Close()
+	_ = serverB.Close()
+
 	<-doneB
 }
 
@@ -1938,7 +1965,7 @@ func TestNullPayloadRejected(t *testing.T) {
 				Type:    tt.msgType,
 				Payload: json.RawMessage("null"),
 			})
-			h.writer.WriteFrame(protocol.ChannelControl, nullEnvelope)
+			_ = h.writer.WriteFrame(protocol.ChannelControl, nullEnvelope)
 
 			env = h.readControlMsg(t)
 			if env.Type != "error" {
@@ -1946,7 +1973,8 @@ func TestNullPayloadRejected(t *testing.T) {
 			}
 
 			var errMsg protocol.ErrorMsg
-			protocol.DecodePayload(env, &errMsg)
+
+			_ = protocol.DecodePayload(env, &errMsg)
 
 			if errMsg.Message != tt.errText {
 				t.Errorf("error message = %q, want %q", errMsg.Message, tt.errText)
@@ -1977,7 +2005,8 @@ func TestAttachSwitchSession(t *testing.T) {
 	}
 
 	var info protocol.SessionInfo
-	protocol.DecodePayload(env, &info)
+
+	_ = protocol.DecodePayload(env, &info)
 
 	if info.ID != "braw-sw2" {
 		t.Errorf("attached to %q, want %q", info.ID, "braw-sw2")
@@ -2086,8 +2115,8 @@ func newTestHarnessWithConfig(t *testing.T, cfg *config.Config) *testHarness {
 		DataDir:    filepath.Join(dir, "data"),
 		MessagesDB: filepath.Join(dir, "messages.db"),
 	}
-	os.MkdirAll(paths.LogDir, 0o700)
-	os.MkdirAll(paths.DataDir, 0o700)
+	_ = os.MkdirAll(paths.LogDir, 0o700)
+	_ = os.MkdirAll(paths.DataDir, 0o700)
 
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	sm := NewSessionManager(cfg, paths, log)
@@ -2098,7 +2127,7 @@ func newTestHarnessWithConfig(t *testing.T, cfg *config.Config) *testHarness {
 		t.Fatal(err)
 	}
 
-	t.Cleanup(func() { msgStore.Close() })
+	t.Cleanup(func() { _ = msgStore.Close() })
 
 	sm.messages = msgStore
 
@@ -2123,8 +2152,10 @@ func newTestHarnessWithConfig(t *testing.T, cfg *config.Config) *testHarness {
 
 	t.Cleanup(func() {
 		cancel()
-		clientConn.Close()
-		serverConn.Close()
+
+		_ = clientConn.Close()
+		_ = serverConn.Close()
+
 		<-h.done
 	})
 
@@ -2166,7 +2197,8 @@ func assertAttachAutoResumes(t *testing.T, name string, status SessionStatus) {
 	}
 
 	var info protocol.SessionInfo
-	protocol.DecodePayload(env, &info)
+
+	_ = protocol.DecodePayload(env, &info)
 
 	if info.Status != "running" {
 		t.Errorf("status = %q, want running", info.Status)
@@ -2174,7 +2206,7 @@ func assertAttachAutoResumes(t *testing.T, name string, status SessionStatus) {
 
 	if ptySess, ok := h.sm.GetPTY("s1"); ok {
 		t.Cleanup(func() {
-			ptySess.Kill()
+			_ = ptySess.Kill()
 			<-ptySess.Done()
 			ptySess.Close()
 		})
@@ -2212,7 +2244,8 @@ func TestAttachCreatingSessionReturnsStatusError(t *testing.T) {
 	}
 
 	var e protocol.ErrorMsg
-	protocol.DecodePayload(env, &e)
+
+	_ = protocol.DecodePayload(env, &e)
 
 	if !strings.Contains(e.Message, "being created") {
 		t.Errorf("error = %q, want it to mention 'being created'", e.Message)
@@ -2240,7 +2273,8 @@ func TestAttachDeletingSessionReturnsStatusError(t *testing.T) {
 	}
 
 	var e protocol.ErrorMsg
-	protocol.DecodePayload(env, &e)
+
+	_ = protocol.DecodePayload(env, &e)
 
 	if !strings.Contains(e.Message, "being deleted") {
 		t.Errorf("error = %q, want it to mention 'being deleted'", e.Message)
@@ -2327,7 +2361,7 @@ func TestMsgInboxReadUnread(t *testing.T) {
 	h := newTestHarness(t)
 	h.addAuthenticatedSession(t, "bonnie-inbox", "bonnie", "tok-bonnie")
 
-	h.sm.messages.Publish("inbox:bonnie-inbox", "glen-sender", "Glen", "braw tidings", "", "")
+	_, _ = h.sm.messages.Publish("inbox:bonnie-inbox", "glen-sender", "Glen", "braw tidings", "", "")
 
 	h.sendControlWithToken(t, "msg_inbox", protocol.MsgInboxMsg{
 		OnlyUnread: true,
@@ -2339,7 +2373,8 @@ func TestMsgInboxReadUnread(t *testing.T) {
 	}
 
 	var m Message
-	protocol.DecodePayload(env, &m)
+
+	_ = protocol.DecodePayload(env, &m)
 
 	if m.Body != "braw tidings" {
 		t.Errorf("body = %q, want %q", m.Body, "braw tidings")
@@ -2362,7 +2397,8 @@ func TestMsgInboxRequiresAuth(t *testing.T) {
 	}
 
 	var e protocol.ErrorMsg
-	protocol.DecodePayload(env, &e)
+
+	_ = protocol.DecodePayload(env, &e)
 
 	if !strings.Contains(e.Message, "authenticated") {
 		t.Errorf("error = %q, want mention of 'authenticated'", e.Message)
@@ -2373,7 +2409,7 @@ func TestMsgInboxWithAck(t *testing.T) {
 	h := newTestHarness(t)
 	h.addAuthenticatedSession(t, "canny-inbox", "canny", "tok-canny")
 
-	h.sm.messages.Publish("inbox:canny-inbox", "sender", "Sender", "first blether", "", "")
+	_, _ = h.sm.messages.Publish("inbox:canny-inbox", "sender", "Sender", "first blether", "", "")
 
 	h.sendControlWithToken(t, "msg_inbox", protocol.MsgInboxMsg{
 		OnlyUnread: true,
@@ -2407,7 +2443,8 @@ func TestMsgSubRejectsInboxForAuthenticatedAgent(t *testing.T) {
 	}
 
 	var e protocol.ErrorMsg
-	protocol.DecodePayload(env, &e)
+
+	_ = protocol.DecodePayload(env, &e)
 
 	if !strings.Contains(e.Message, "msg inbox") {
 		t.Errorf("error = %q, want mention of 'msg inbox'", e.Message)
@@ -2429,7 +2466,8 @@ func TestMsgAckRejectsInboxForAuthenticatedAgent(t *testing.T) {
 	}
 
 	var e protocol.ErrorMsg
-	protocol.DecodePayload(env, &e)
+
+	_ = protocol.DecodePayload(env, &e)
 
 	if !strings.Contains(e.Message, "msg inbox") {
 		t.Errorf("error = %q, want mention of 'msg inbox'", e.Message)
@@ -2440,8 +2478,8 @@ func TestMsgTopicsFiltersInboxForAuthenticatedAgent(t *testing.T) {
 	h := newTestHarness(t)
 	h.addAuthenticatedSession(t, "ken-topics", "ken", "tok-ken")
 
-	h.sm.messages.Publish("inbox:ken-topics", "sender", "Sender", "private", "", "")
-	h.sm.messages.Publish("blether-public", "sender", "Sender", "public", "", "")
+	_, _ = h.sm.messages.Publish("inbox:ken-topics", "sender", "Sender", "private", "", "")
+	_, _ = h.sm.messages.Publish("blether-public", "sender", "Sender", "public", "", "")
 
 	h.sendControlWithToken(t, "msg_topics", protocol.MsgTopicsMsg{}, "tok-ken")
 
@@ -2453,7 +2491,8 @@ func TestMsgTopicsFiltersInboxForAuthenticatedAgent(t *testing.T) {
 	var resp struct {
 		Streams []StreamInfo `json:"streams"`
 	}
-	protocol.DecodePayload(env, &resp)
+
+	_ = protocol.DecodePayload(env, &resp)
 
 	for _, s := range resp.Streams {
 		if strings.HasPrefix(s.Name, "inbox:") {
@@ -2528,7 +2567,8 @@ func TestUpdateRejectsUnauthorizedReparent(t *testing.T) {
 	}
 
 	var e protocol.ErrorMsg
-	protocol.DecodePayload(env, &e)
+
+	_ = protocol.DecodePayload(env, &e)
 
 	if !strings.Contains(e.Message, "not authorized") {
 		t.Errorf("error = %q, want 'not authorized'", e.Message)
@@ -2558,7 +2598,8 @@ func TestUpdateAllowsReparentingWithinOwnSubtree(t *testing.T) {
 	env := h.readControlMsg(t)
 	if env.Type != "updated" {
 		var e protocol.ErrorMsg
-		protocol.DecodePayload(env, &e)
+
+		_ = protocol.DecodePayload(env, &e)
 		t.Fatalf("expected updated, got %q (%s)", env.Type, e.Message)
 	}
 
@@ -2617,7 +2658,8 @@ func TestUpdateAllowsOrchestratorReparent(t *testing.T) {
 	env := h.readControlMsg(t)
 	if env.Type != "updated" {
 		var e protocol.ErrorMsg
-		protocol.DecodePayload(env, &e)
+
+		_ = protocol.DecodePayload(env, &e)
 		t.Fatalf("expected updated, got %q (%s)", env.Type, e.Message)
 	}
 
@@ -2648,7 +2690,8 @@ func TestUpdateRejectsSelfOrphan(t *testing.T) {
 	}
 
 	var e protocol.ErrorMsg
-	protocol.DecodePayload(env, &e)
+
+	_ = protocol.DecodePayload(env, &e)
 
 	if !strings.Contains(e.Message, "not authorized") {
 		t.Errorf("error = %q, want 'not authorized'", e.Message)
@@ -2679,7 +2722,8 @@ func TestUpdateAllowsOrchestratorOrphan(t *testing.T) {
 	env := h.readControlMsg(t)
 	if env.Type != "updated" {
 		var e protocol.ErrorMsg
-		protocol.DecodePayload(env, &e)
+
+		_ = protocol.DecodePayload(env, &e)
 		t.Fatalf("expected updated, got %q (%s)", env.Type, e.Message)
 	}
 
@@ -2704,7 +2748,8 @@ func TestUpdateAllowsHumanOrphan(t *testing.T) {
 	env := h.readControlMsg(t)
 	if env.Type != "updated" {
 		var e protocol.ErrorMsg
-		protocol.DecodePayload(env, &e)
+
+		_ = protocol.DecodePayload(env, &e)
 		t.Fatalf("expected updated, got %q (%s)", env.Type, e.Message)
 	}
 
@@ -2732,7 +2777,8 @@ func TestUpdateRejectsRenameOnlyUnrelated(t *testing.T) {
 	}
 
 	var e protocol.ErrorMsg
-	protocol.DecodePayload(env, &e)
+
+	_ = protocol.DecodePayload(env, &e)
 
 	if !strings.Contains(e.Message, "not authorized") {
 		t.Errorf("error = %q, want 'not authorized'", e.Message)
@@ -2755,7 +2801,8 @@ func TestUpdateAllowsHumanReparent(t *testing.T) {
 	env := h.readControlMsg(t)
 	if env.Type != "updated" {
 		var e protocol.ErrorMsg
-		protocol.DecodePayload(env, &e)
+
+		_ = protocol.DecodePayload(env, &e)
 		t.Fatalf("expected updated, got %q (%s)", env.Type, e.Message)
 	}
 

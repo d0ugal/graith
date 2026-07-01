@@ -51,7 +51,8 @@ var configResetCmd = &cobra.Command{
 				fmt.Fprintf(os.Stderr, "This will overwrite your config at %s. Continue? [y/N] ", target)
 
 				var answer string
-				fmt.Scanln(&answer)
+
+				_, _ = fmt.Scanln(&answer)
 
 				if answer != "y" && answer != "Y" {
 					fmt.Fprintln(os.Stderr, "Aborted.")
@@ -71,26 +72,26 @@ var configResetCmd = &cobra.Command{
 
 		tmp := f.Name()
 		if _, err := f.Write(config.DefaultTOML()); err != nil {
-			f.Close()
-			os.Remove(tmp)
+			_ = f.Close()
+			_ = os.Remove(tmp)
 
 			return fmt.Errorf("write config: %w", err)
 		}
 
 		if err := f.Chmod(0o600); err != nil {
-			f.Close()
-			os.Remove(tmp)
+			_ = f.Close()
+			_ = os.Remove(tmp)
 
 			return fmt.Errorf("set config permissions: %w", err)
 		}
 
 		if err := f.Close(); err != nil {
-			os.Remove(tmp)
+			_ = os.Remove(tmp)
 			return fmt.Errorf("close temp file: %w", err)
 		}
 
 		if err := os.Rename(tmp, target); err != nil {
-			os.Remove(tmp)
+			_ = os.Remove(tmp)
 			return fmt.Errorf("rename config: %w", err)
 		}
 

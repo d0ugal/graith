@@ -32,7 +32,7 @@ var forkCmd = &cobra.Command{
 		}
 		defer c.Close()
 
-		c.SendControl("list", struct{}{})
+		_ = c.SendControl("list", struct{}{})
 
 		listResp, err := c.ReadControlResponse()
 		if err != nil {
@@ -57,7 +57,7 @@ var forkCmd = &cobra.Command{
 			return fmt.Errorf("session %q not found", sourceName)
 		}
 
-		c.SendControl("fork", protocol.ForkMsg{
+		_ = c.SendControl("fork", protocol.ForkMsg{
 			Name:            newName,
 			SourceSessionID: sourceID,
 		})
@@ -69,13 +69,15 @@ var forkCmd = &cobra.Command{
 
 		if resp.Type == "error" {
 			var e protocol.ErrorMsg
-			protocol.DecodePayload(resp, &e)
+
+			_ = protocol.DecodePayload(resp, &e)
 
 			return fmt.Errorf("%s", e.Message)
 		}
 
 		var info protocol.SessionInfo
-		protocol.DecodePayload(resp, &info)
+
+		_ = protocol.DecodePayload(resp, &info)
 
 		if jsonOutput {
 			return out.JSON(info)

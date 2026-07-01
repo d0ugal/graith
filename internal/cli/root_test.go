@@ -28,7 +28,7 @@ func TestExecuteJSONErrorFormat(t *testing.T) {
 
 	execErr := executeWithArgs([]string{"--json", "nonexistent-command"})
 
-	w.Close()
+	_ = w.Close()
 
 	os.Stderr = oldStderr
 
@@ -37,7 +37,8 @@ func TestExecuteJSONErrorFormat(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	io.Copy(&buf, r)
+
+	_, _ = io.Copy(&buf, r)
 
 	var jsonErr struct {
 		Error string `json:"error"`
@@ -76,7 +77,7 @@ func TestExecutePlainTextErrorFormat(t *testing.T) {
 
 	execErr := executeWithArgs([]string{"nonexistent-command"})
 
-	w.Close()
+	_ = w.Close()
 
 	os.Stderr = oldStderr
 
@@ -85,7 +86,8 @@ func TestExecutePlainTextErrorFormat(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	io.Copy(&buf, r)
+
+	_, _ = io.Copy(&buf, r)
 
 	got := buf.String()
 	if !strings.HasPrefix(got, "error: ") {
@@ -132,10 +134,11 @@ func TestConfigFlagAllowedOutsideSession(t *testing.T) {
 	}()
 
 	if v, ok := os.LookupEnv("GRAITH_SESSION_ID"); ok {
-		t.Cleanup(func() { os.Setenv("GRAITH_SESSION_ID", v) })
+		t.Cleanup(func() { _ = os.Setenv("GRAITH_SESSION_ID", v) })
 	}
 
-	os.Unsetenv("GRAITH_SESSION_ID")
+	_ = os.Unsetenv("GRAITH_SESSION_ID")
+
 	t.Setenv("GR_AGENT_MODE", "0")
 
 	// This will fail to connect to the daemon (expected), but should NOT
@@ -211,12 +214,13 @@ func TestExecuteCobraSilencesOwnErrors(t *testing.T) {
 
 	_ = executeWithArgs([]string{"nonexistent-command"})
 
-	w.Close()
+	_ = w.Close()
 
 	os.Stdout = oldStdout
 
 	var buf bytes.Buffer
-	io.Copy(&buf, r)
+
+	_, _ = io.Copy(&buf, r)
 
 	if strings.Contains(buf.String(), "Error:") {
 		t.Errorf("Cobra's default error message appeared on stdout: %s", buf.String())

@@ -53,7 +53,7 @@ var updateCmd = &cobra.Command{
 			}
 		}
 
-		c.SendControl("update", msg)
+		_ = c.SendControl("update", msg)
 
 		resp, err := c.ReadControlResponse()
 		if err != nil {
@@ -62,7 +62,8 @@ var updateCmd = &cobra.Command{
 
 		if resp.Type == "error" {
 			var e protocol.ErrorMsg
-			protocol.DecodePayload(resp, &e)
+
+			_ = protocol.DecodePayload(resp, &e)
 
 			return fmt.Errorf("%s", e.Message)
 		}

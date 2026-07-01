@@ -10,7 +10,7 @@ var versionCmd = &cobra.Command{
 	Short: "Print version information",
 	Run: func(cmd *cobra.Command, args []string) {
 		if jsonOutput {
-			out.JSON(struct {
+			_ = out.JSON(struct {
 				Version string `json:"version"`
 				Commit  string `json:"commit"`
 			}{version.Version, version.CommitSHA})

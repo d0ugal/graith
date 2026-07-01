@@ -217,13 +217,13 @@ func (m *MCPManager) startProcess(serverCfg config.MCPServerConfig, proxyID stri
 
 	command, err := config.Expand(serverCfg.Command, vars)
 	if err != nil {
-		stderrFile.Close()
+		_ = stderrFile.Close()
 		return nil, fmt.Errorf("expand command for MCP server %s: %w", serverCfg.Name, err)
 	}
 
 	args, err := config.ExpandSlice(serverCfg.Args, vars)
 	if err != nil {
-		stderrFile.Close()
+		_ = stderrFile.Close()
 		return nil, fmt.Errorf("expand args for MCP server %s: %w", serverCfg.Name, err)
 	}
 
@@ -233,7 +233,7 @@ func (m *MCPManager) startProcess(serverCfg config.MCPServerConfig, proxyID stri
 		for k, v := range serverEnv {
 			ev, expErr := config.Expand(v, vars)
 			if expErr != nil {
-				stderrFile.Close()
+				_ = stderrFile.Close()
 				return nil, fmt.Errorf("expand env %s for MCP server %s: %w", k, serverCfg.Name, expErr)
 			}
 
@@ -277,7 +277,7 @@ func (m *MCPManager) startProcess(serverCfg config.MCPServerConfig, proxyID stri
 
 		command, args, wrapErr = sandbox.Wrap(command, args, opts)
 		if wrapErr != nil {
-			stderrFile.Close()
+			_ = stderrFile.Close()
 			return nil, fmt.Errorf("sandbox wrap for MCP server %s: %w", serverCfg.Name, wrapErr)
 		}
 	}
@@ -295,21 +295,21 @@ func (m *MCPManager) startProcess(serverCfg config.MCPServerConfig, proxyID stri
 
 	stdinPipe, err := cmd.StdinPipe()
 	if err != nil {
-		stderrFile.Close()
+		_ = stderrFile.Close()
 		return nil, fmt.Errorf("stdin pipe: %w", err)
 	}
 
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
-		stdinPipe.Close()
-		stderrFile.Close()
+		_ = stdinPipe.Close()
+		_ = stderrFile.Close()
 
 		return nil, fmt.Errorf("stdout pipe: %w", err)
 	}
 
 	if err := cmd.Start(); err != nil {
-		stdinPipe.Close()
-		stderrFile.Close()
+		_ = stdinPipe.Close()
+		_ = stderrFile.Close()
 
 		return nil, fmt.Errorf("start process: %w", err)
 	}
@@ -323,8 +323,9 @@ func (m *MCPManager) startProcess(serverCfg config.MCPServerConfig, proxyID stri
 	}
 
 	go func() {
-		cmd.Wait()
-		stderrFile.Close()
+		_ = cmd.Wait()
+		_ = stderrFile.Close()
+
 		close(proc.done)
 	}()
 
@@ -360,15 +361,15 @@ func mapsEqual(a, b map[string]string) bool {
 }
 
 func (m *MCPManager) killProcess(proc *MCPProcess) {
-	proc.stdin.Close()
+	_ = proc.stdin.Close()
 
 	if proc.cmd.Process != nil {
-		proc.cmd.Process.Signal(os.Interrupt)
+		_ = proc.cmd.Process.Signal(os.Interrupt)
 
 		select {
 		case <-proc.done:
 		case <-time.After(5 * time.Second):
-			proc.cmd.Process.Kill()
+			_ = proc.cmd.Process.Kill()
 			<-proc.done
 		}
 	}

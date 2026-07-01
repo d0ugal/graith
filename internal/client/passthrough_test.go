@@ -69,7 +69,7 @@ func TestKittyCtrlSeq(t *testing.T) {
 
 func TestPrefixKeyOverlay(t *testing.T) {
 	clientConn, daemonConn := net.Pipe()
-	defer daemonConn.Close()
+	defer func() { _ = daemonConn.Close() }()
 
 	c := newTestClient(clientConn)
 
@@ -91,9 +91,12 @@ func TestPrefixKeyOverlay(t *testing.T) {
 
 	go func() {
 		time.Sleep(50 * time.Millisecond)
-		stdinW.Write([]byte{0x02}) // ctrl+b raw byte
+
+		_, _ = stdinW.Write([]byte{0x02}) // ctrl+b raw byte
+
 		time.Sleep(20 * time.Millisecond)
-		stdinW.Write([]byte{'w'})
+
+		_, _ = stdinW.Write([]byte{'w'})
 	}()
 
 	ctx := context.Background()
@@ -106,7 +109,7 @@ func TestPrefixKeyOverlay(t *testing.T) {
 
 func TestPrefixKeyOverlayKittyProtocol(t *testing.T) {
 	clientConn, daemonConn := net.Pipe()
-	defer daemonConn.Close()
+	defer func() { _ = daemonConn.Close() }()
 
 	c := newTestClient(clientConn)
 
@@ -129,9 +132,12 @@ func TestPrefixKeyOverlayKittyProtocol(t *testing.T) {
 	go func() {
 		time.Sleep(50 * time.Millisecond)
 		// Kitty keyboard protocol: ESC[98;5u = ctrl+b
-		stdinW.Write([]byte("\x1b[98;5u"))
+
+		_, _ = stdinW.Write([]byte("\x1b[98;5u"))
+
 		time.Sleep(20 * time.Millisecond)
-		stdinW.Write([]byte{'w'})
+
+		_, _ = stdinW.Write([]byte{'w'})
 	}()
 
 	ctx := context.Background()
@@ -144,7 +150,7 @@ func TestPrefixKeyOverlayKittyProtocol(t *testing.T) {
 
 func TestPrefixKeyDetach(t *testing.T) {
 	clientConn, daemonConn := net.Pipe()
-	defer daemonConn.Close()
+	defer func() { _ = daemonConn.Close() }()
 
 	c := newTestClient(clientConn)
 
@@ -164,7 +170,8 @@ func TestPrefixKeyDetach(t *testing.T) {
 
 	go func() {
 		time.Sleep(50 * time.Millisecond)
-		stdinW.Write([]byte{0x02, 'd'}) // ctrl+b d in one read
+
+		_, _ = stdinW.Write([]byte{0x02, 'd'}) // ctrl+b d in one read
 	}()
 
 	ctx := context.Background()
@@ -177,7 +184,7 @@ func TestPrefixKeyDetach(t *testing.T) {
 
 func TestPrefixKeyDetachKittyProtocol(t *testing.T) {
 	clientConn, daemonConn := net.Pipe()
-	defer daemonConn.Close()
+	defer func() { _ = daemonConn.Close() }()
 
 	c := newTestClient(clientConn)
 
@@ -198,7 +205,8 @@ func TestPrefixKeyDetachKittyProtocol(t *testing.T) {
 	go func() {
 		time.Sleep(50 * time.Millisecond)
 		// Kitty ctrl+b followed by 'd'
-		stdinW.Write(append([]byte("\x1b[98;5u"), 'd'))
+
+		_, _ = stdinW.Write(append([]byte("\x1b[98;5u"), 'd'))
 	}()
 
 	ctx := context.Background()
@@ -211,7 +219,7 @@ func TestPrefixKeyDetachKittyProtocol(t *testing.T) {
 
 func TestKittyReleaseEventConsumed(t *testing.T) {
 	clientConn, daemonConn := net.Pipe()
-	defer daemonConn.Close()
+	defer func() { _ = daemonConn.Close() }()
 
 	c := newTestClient(clientConn)
 
@@ -232,11 +240,16 @@ func TestKittyReleaseEventConsumed(t *testing.T) {
 	go func() {
 		time.Sleep(50 * time.Millisecond)
 		// Kitty ctrl+b press, then release event, then raw 'd'
-		stdinW.Write([]byte("\x1b[98;5:1u"))
+
+		_, _ = stdinW.Write([]byte("\x1b[98;5:1u"))
+
 		time.Sleep(10 * time.Millisecond)
-		stdinW.Write([]byte("\x1b[98;5:3u"))
+
+		_, _ = stdinW.Write([]byte("\x1b[98;5:3u"))
+
 		time.Sleep(10 * time.Millisecond)
-		stdinW.Write([]byte{'d'})
+
+		_, _ = stdinW.Write([]byte{'d'})
 	}()
 
 	ctx := context.Background()
@@ -249,7 +262,7 @@ func TestKittyReleaseEventConsumed(t *testing.T) {
 
 func TestKittyEncodedFollowUpKey(t *testing.T) {
 	clientConn, daemonConn := net.Pipe()
-	defer daemonConn.Close()
+	defer func() { _ = daemonConn.Close() }()
 
 	c := newTestClient(clientConn)
 
@@ -270,9 +283,12 @@ func TestKittyEncodedFollowUpKey(t *testing.T) {
 	go func() {
 		time.Sleep(50 * time.Millisecond)
 		// Kitty ctrl+b press, then Kitty-encoded 'w' (codepoint 119, no modifier)
-		stdinW.Write([]byte("\x1b[98;5u"))
+
+		_, _ = stdinW.Write([]byte("\x1b[98;5u"))
+
 		time.Sleep(10 * time.Millisecond)
-		stdinW.Write([]byte("\x1b[119u"))
+
+		_, _ = stdinW.Write([]byte("\x1b[119u"))
 	}()
 
 	ctx := context.Background()
@@ -285,7 +301,7 @@ func TestKittyEncodedFollowUpKey(t *testing.T) {
 
 func TestKittyReleaseBeforeFollowUpKey(t *testing.T) {
 	clientConn, daemonConn := net.Pipe()
-	defer daemonConn.Close()
+	defer func() { _ = daemonConn.Close() }()
 
 	c := newTestClient(clientConn)
 
@@ -306,9 +322,12 @@ func TestKittyReleaseBeforeFollowUpKey(t *testing.T) {
 	go func() {
 		time.Sleep(50 * time.Millisecond)
 		// Kitty ctrl+b press+release in one buffer, then Kitty 's' press
-		stdinW.Write(append([]byte("\x1b[98;5:1u"), []byte("\x1b[98;5:3u")...))
+
+		_, _ = stdinW.Write(append([]byte("\x1b[98;5:1u"), []byte("\x1b[98;5:3u")...))
+
 		time.Sleep(10 * time.Millisecond)
-		stdinW.Write([]byte("\x1b[115;1u"))
+
+		_, _ = stdinW.Write([]byte("\x1b[115;1u"))
 	}()
 
 	ctx := context.Background()
@@ -385,7 +404,7 @@ func TestProcessKittyPrefix(t *testing.T) {
 
 func TestPrefixKeyShell(t *testing.T) {
 	clientConn, daemonConn := net.Pipe()
-	defer daemonConn.Close()
+	defer func() { _ = daemonConn.Close() }()
 
 	c := newTestClient(clientConn)
 
@@ -405,7 +424,8 @@ func TestPrefixKeyShell(t *testing.T) {
 
 	go func() {
 		time.Sleep(50 * time.Millisecond)
-		stdinW.Write([]byte{0x02, 's'})
+
+		_, _ = stdinW.Write([]byte{0x02, 's'})
 	}()
 
 	ctx := context.Background()
@@ -426,7 +446,8 @@ func TestDisconnectDetection(t *testing.T) {
 
 	go func() {
 		time.Sleep(50 * time.Millisecond)
-		daemonConn.Close()
+
+		_ = daemonConn.Close()
 	}()
 
 	ctx := context.Background()
@@ -439,7 +460,7 @@ func TestDisconnectDetection(t *testing.T) {
 
 func TestOverlayUnderHeavyOutput(t *testing.T) {
 	clientConn, daemonConn := net.Pipe()
-	defer daemonConn.Close()
+	defer func() { _ = daemonConn.Close() }()
 
 	c := newTestClient(clientConn)
 
@@ -459,9 +480,12 @@ func TestOverlayUnderHeavyOutput(t *testing.T) {
 
 	go func() {
 		time.Sleep(100 * time.Millisecond)
-		stdinW.Write([]byte{0x02})
+
+		_, _ = stdinW.Write([]byte{0x02})
+
 		time.Sleep(10 * time.Millisecond)
-		stdinW.Write([]byte{'w'})
+
+		_, _ = stdinW.Write([]byte{'w'})
 	}()
 
 	ctx := context.Background()
@@ -483,7 +507,7 @@ func TestOverlayUnderHeavyOutput(t *testing.T) {
 
 func TestOverlayUnderHeavyOutputKittyProtocol(t *testing.T) {
 	clientConn, daemonConn := net.Pipe()
-	defer daemonConn.Close()
+	defer func() { _ = daemonConn.Close() }()
 
 	c := newTestClient(clientConn)
 
@@ -503,9 +527,12 @@ func TestOverlayUnderHeavyOutputKittyProtocol(t *testing.T) {
 
 	go func() {
 		time.Sleep(100 * time.Millisecond)
-		stdinW.Write([]byte("\x1b[98;5u"))
+
+		_, _ = stdinW.Write([]byte("\x1b[98;5u"))
+
 		time.Sleep(10 * time.Millisecond)
-		stdinW.Write([]byte{'w'})
+
+		_, _ = stdinW.Write([]byte{'w'})
 	}()
 
 	ctx := context.Background()
@@ -527,7 +554,7 @@ func TestOverlayUnderHeavyOutputKittyProtocol(t *testing.T) {
 
 func TestNormalDataPassthrough(t *testing.T) {
 	clientConn, daemonConn := net.Pipe()
-	defer daemonConn.Close()
+	defer func() { _ = daemonConn.Close() }()
 
 	c := newTestClient(clientConn)
 
@@ -549,7 +576,8 @@ func TestNormalDataPassthrough(t *testing.T) {
 
 	go func() {
 		writer := protocol.NewFrameWriter(daemonConn)
-		writer.WriteFrame(protocol.ChannelData, []byte("hello"))
+
+		_ = writer.WriteFrame(protocol.ChannelData, []byte("hello"))
 	}()
 
 	stdinR, stdinW := io.Pipe()
@@ -557,9 +585,12 @@ func TestNormalDataPassthrough(t *testing.T) {
 
 	go func() {
 		time.Sleep(30 * time.Millisecond)
-		stdinW.Write([]byte("abc"))
+
+		_, _ = stdinW.Write([]byte("abc"))
+
 		time.Sleep(30 * time.Millisecond)
-		stdinW.Write([]byte{0x02, 'd'})
+
+		_, _ = stdinW.Write([]byte{0x02, 'd'})
 	}()
 
 	ctx := context.Background()
@@ -585,17 +616,19 @@ func TestNormalDataPassthrough(t *testing.T) {
 
 func TestDaemonDetachesClient(t *testing.T) {
 	clientConn, daemonConn := net.Pipe()
-	defer daemonConn.Close()
+	defer func() { _ = daemonConn.Close() }()
 
 	c := newTestClient(clientConn)
 	writer := protocol.NewFrameWriter(daemonConn)
 
 	go func() {
-		writer.WriteFrame(protocol.ChannelData, []byte("hello"))
+		_ = writer.WriteFrame(protocol.ChannelData, []byte("hello"))
+
 		time.Sleep(50 * time.Millisecond)
 
 		data, _ := protocol.EncodeControl("detached", struct{ Reason string }{"replaced"})
-		writer.WriteFrame(protocol.ChannelControl, data)
+
+		_ = writer.WriteFrame(protocol.ChannelControl, data)
 	}()
 
 	stdinR, _ := io.Pipe()
@@ -611,7 +644,7 @@ func TestDaemonDetachesClient(t *testing.T) {
 
 func TestEscapeSequenceNotPrefixIsForwarded(t *testing.T) {
 	clientConn, daemonConn := net.Pipe()
-	defer daemonConn.Close()
+	defer func() { _ = daemonConn.Close() }()
 
 	c := newTestClient(clientConn)
 
@@ -637,9 +670,12 @@ func TestEscapeSequenceNotPrefixIsForwarded(t *testing.T) {
 	go func() {
 		time.Sleep(30 * time.Millisecond)
 		// Arrow key escape sequence — should NOT be treated as prefix
-		stdinW.Write([]byte("\x1b[A"))
+
+		_, _ = stdinW.Write([]byte("\x1b[A"))
+
 		time.Sleep(30 * time.Millisecond)
-		stdinW.Write([]byte{0x02, 'd'}) // then detach
+
+		_, _ = stdinW.Write([]byte{0x02, 'd'}) // then detach
 	}()
 
 	ctx := context.Background()

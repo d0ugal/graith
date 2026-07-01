@@ -34,7 +34,7 @@ var checkInboxCmd = &cobra.Command{
 		}
 		defer c.Close()
 
-		c.SendControl("msg_inbox", protocol.MsgInboxMsg{
+		_ = c.SendControl("msg_inbox", protocol.MsgInboxMsg{
 			OnlyUnread: true,
 			Ack:        true,
 		})

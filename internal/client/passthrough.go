@@ -369,7 +369,7 @@ func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, s
 			case <-innerCtx.Done():
 				return
 			case data := <-demux.dataCh:
-				stdout.Write(data)
+				_, _ = stdout.Write(data)
 			case msg := <-demux.controlCh:
 				switch msg.Type {
 				case "detached":

@@ -36,7 +36,7 @@ var listCmd = &cobra.Command{
 		}
 		defer c.Close()
 
-		c.SendControl("list", struct{}{})
+		_ = c.SendControl("list", struct{}{})
 
 		resp, err := c.ReadControlResponse()
 		if err != nil {
@@ -84,7 +84,7 @@ var listCmd = &cobra.Command{
 		}
 
 		if paths.Profile != "" {
-			fmt.Fprintf(cmd.OutOrStdout(), "Profile: %s\n\n", paths.Profile)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Profile: %s\n\n", paths.Profile)
 		}
 
 		if len(list.Sessions) == 0 {
@@ -103,7 +103,7 @@ var listCmd = &cobra.Command{
 		select {
 		case result := <-updateCh:
 			if result != nil {
-				fmt.Fprintf(cmd.OutOrStdout(), "\nUpdate available: %s → %s (brew upgrade graith)\n",
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "\nUpdate available: %s → %s (brew upgrade graith)\n",
 					result.CurrentVersion, result.LatestVersion)
 			}
 		default:
@@ -123,7 +123,7 @@ func printFlat(cmd *cobra.Command, sessions []protocol.SessionInfo, now time.Tim
 	})
 
 	tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "NAME\tREPO\tAGENT\tSTATUS\tACTIVITY\tMODEL\tBRANCH\tGIT\tPR\tAGE\tATTACHED")
+	_, _ = fmt.Fprintln(tw, "NAME\tREPO\tAGENT\tSTATUS\tACTIVITY\tMODEL\tBRANCH\tGIT\tPR\tAGE\tATTACHED")
 
 	for _, s := range sessions {
 		name := s.Name
@@ -131,13 +131,13 @@ func printFlat(cmd *cobra.Command, sessions []protocol.SessionInfo, now time.Tim
 			name = "★ " + name
 		}
 
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			name, s.RepoName, s.Agent, s.Status,
 			formatAgentStatus(s), formatModel(s),
 			formatBranch(s), formatGitStatus(s), formatPR(s), formatAge(s, now), formatAttached(s, now))
 	}
 
-	tw.Flush()
+	_ = tw.Flush()
 }
 
 func printTree(cmd *cobra.Command, sessions []protocol.SessionInfo, now time.Time) {
@@ -174,7 +174,7 @@ func printTree(cmd *cobra.Command, sessions []protocol.SessionInfo, now time.Tim
 	}
 
 	tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "NAME\tREPO\tAGENT\tSTATUS\tACTIVITY\tMODEL\tBRANCH\tGIT\tPR\tAGE\tATTACHED")
+	_, _ = fmt.Fprintln(tw, "NAME\tREPO\tAGENT\tSTATUS\tACTIVITY\tMODEL\tBRANCH\tGIT\tPR\tAGE\tATTACHED")
 
 	var walk func(s protocol.SessionInfo, prefix, childPrefix string)
 
@@ -184,7 +184,7 @@ func printTree(cmd *cobra.Command, sessions []protocol.SessionInfo, now time.Tim
 			name = "★ " + name
 		}
 
-		fmt.Fprintf(tw, "%s%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+		_, _ = fmt.Fprintf(tw, "%s%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			prefix, name, s.RepoName, s.Agent, s.Status,
 			formatAgentStatus(s), formatModel(s),
 			formatBranch(s), formatGitStatus(s), formatPR(s), formatAge(s, now), formatAttached(s, now))
@@ -203,7 +203,7 @@ func printTree(cmd *cobra.Command, sessions []protocol.SessionInfo, now time.Tim
 		walk(root, "", "")
 	}
 
-	tw.Flush()
+	_ = tw.Flush()
 }
 
 func findSession(sessions []protocol.SessionInfo, nameOrID string) *protocol.SessionInfo {
@@ -347,6 +347,6 @@ func registerListCmd() {
 	listCmd.Flags().StringVar(&listChildren, "children", "", "filter to descendants of a session")
 	listCmd.Flags().BoolVar(&listStarred, "starred", false, "show only starred sessions")
 
-	listCmd.RegisterFlagCompletionFunc("repo", completeRepoPaths)
-	listCmd.RegisterFlagCompletionFunc("children", completeSessionNames)
+	_ = listCmd.RegisterFlagCompletionFunc("repo", completeRepoPaths)
+	_ = listCmd.RegisterFlagCompletionFunc("children", completeSessionNames)
 }

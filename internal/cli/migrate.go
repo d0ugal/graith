@@ -40,7 +40,7 @@ var migrateCmd = &cobra.Command{
 			return err
 		}
 
-		c.SendControl("migrate", protocol.MigrateMsg{
+		_ = c.SendControl("migrate", protocol.MigrateMsg{
 			SessionID: sessionID,
 			Agent:     migrateAgent,
 			Model:     migrateModel,
@@ -53,13 +53,15 @@ var migrateCmd = &cobra.Command{
 
 		if resp.Type == "error" {
 			var e protocol.ErrorMsg
-			protocol.DecodePayload(resp, &e)
+
+			_ = protocol.DecodePayload(resp, &e)
 
 			return fmt.Errorf("%s", e.Message)
 		}
 
 		var info protocol.SessionInfo
-		protocol.DecodePayload(resp, &info)
+
+		_ = protocol.DecodePayload(resp, &info)
 
 		if jsonOutput {
 			return out.JSON(info)

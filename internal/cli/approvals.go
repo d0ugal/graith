@@ -21,7 +21,7 @@ var approvalsCmd = &cobra.Command{
 		}
 		defer c.Close()
 
-		c.SendControl("list", struct{}{})
+		_ = c.SendControl("list", struct{}{})
 
 		resp, err := c.ReadControlResponse()
 		if err != nil {
@@ -57,7 +57,7 @@ var approvalsCmd = &cobra.Command{
 		now := time.Now()
 
 		tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "NAME\tREPO\tAGENT\tAGE")
+		_, _ = fmt.Fprintln(tw, "NAME\tREPO\tAGENT\tAGE")
 
 		for _, s := range waiting {
 			age := ""
@@ -65,10 +65,10 @@ var approvalsCmd = &cobra.Command{
 				age = client.ShortDuration(now.Sub(t))
 			}
 
-			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", s.Name, s.RepoName, s.Agent, age)
+			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", s.Name, s.RepoName, s.Agent, age)
 		}
 
-		tw.Flush()
+		_ = tw.Flush()
 
 		return nil
 	},

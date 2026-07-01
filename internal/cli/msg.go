@@ -52,7 +52,7 @@ var msgPubCmd = &cobra.Command{
 		}
 		defer c.Close()
 
-		c.SendControl("msg_pub", protocol.MsgPubMsg{
+		_ = c.SendControl("msg_pub", protocol.MsgPubMsg{
 			Stream:     msgPubStream,
 			Body:       body,
 			SenderID:   senderID,
@@ -68,7 +68,8 @@ var msgPubCmd = &cobra.Command{
 
 		if resp.Type == "error" {
 			var e protocol.ErrorMsg
-			protocol.DecodePayload(resp, &e)
+
+			_ = protocol.DecodePayload(resp, &e)
 
 			return fmt.Errorf("%s", e.Message)
 		}
@@ -140,7 +141,7 @@ var msgSendCmd = &cobra.Command{
 
 		senderID, senderName := detectSender()
 
-		c.SendControl("msg_pub", protocol.MsgPubMsg{
+		_ = c.SendControl("msg_pub", protocol.MsgPubMsg{
 			Stream:     "inbox:" + sessionID,
 			Body:       body,
 			SenderID:   senderID,
@@ -157,7 +158,8 @@ var msgSendCmd = &cobra.Command{
 
 		if resp.Type == "error" {
 			var e protocol.ErrorMsg
-			protocol.DecodePayload(resp, &e)
+
+			_ = protocol.DecodePayload(resp, &e)
 
 			return fmt.Errorf("%s", e.Message)
 		}
@@ -199,7 +201,7 @@ var msgSubCmd = &cobra.Command{
 		}
 		defer c.Close()
 
-		c.SendControl("msg_sub", protocol.MsgSubMsg{
+		_ = c.SendControl("msg_sub", protocol.MsgSubMsg{
 			Stream:     msgSubStream,
 			Subscriber: senderID,
 			OnlyUnread: !msgSubAll,
@@ -215,7 +217,8 @@ var msgSubCmd = &cobra.Command{
 			signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 			go func() {
 				<-sigCh
-				c.SendControl("detach", struct{}{})
+
+				_ = c.SendControl("detach", struct{}{})
 			}()
 		}
 
@@ -247,7 +250,8 @@ var msgSubCmd = &cobra.Command{
 				// streaming mode active, keep reading
 			case "error":
 				var e protocol.ErrorMsg
-				protocol.DecodePayload(msg, &e)
+
+				_ = protocol.DecodePayload(msg, &e)
 
 				return fmt.Errorf("%s", e.Message)
 			}
@@ -275,7 +279,7 @@ var msgAckCmd = &cobra.Command{
 		}
 		defer c.Close()
 
-		c.SendControl("msg_ack", protocol.MsgAckMsg{
+		_ = c.SendControl("msg_ack", protocol.MsgAckMsg{
 			Stream:     msgAckStream,
 			Subscriber: senderID,
 		})
@@ -287,7 +291,8 @@ var msgAckCmd = &cobra.Command{
 
 		if resp.Type == "error" {
 			var e protocol.ErrorMsg
-			protocol.DecodePayload(resp, &e)
+
+			_ = protocol.DecodePayload(resp, &e)
 
 			return fmt.Errorf("%s", e.Message)
 		}
@@ -314,7 +319,7 @@ var msgTopicsCmd = &cobra.Command{
 		}
 		defer c.Close()
 
-		c.SendControl("msg_topics", protocol.MsgTopicsMsg{
+		_ = c.SendControl("msg_topics", protocol.MsgTopicsMsg{
 			Subscriber:    senderID,
 			IncludeSystem: msgTopicsSystem,
 		})
@@ -326,7 +331,8 @@ var msgTopicsCmd = &cobra.Command{
 
 		if resp.Type == "error" {
 			var e protocol.ErrorMsg
-			protocol.DecodePayload(resp, &e)
+
+			_ = protocol.DecodePayload(resp, &e)
 
 			return fmt.Errorf("%s", e.Message)
 		}
@@ -339,7 +345,8 @@ var msgTopicsCmd = &cobra.Command{
 				LatestAt string `json:"latest_at"`
 			} `json:"streams"`
 		}
-		protocol.DecodePayload(resp, &list)
+
+		_ = protocol.DecodePayload(resp, &list)
 
 		if jsonOutput {
 			return out.JSON(list)
@@ -351,13 +358,13 @@ var msgTopicsCmd = &cobra.Command{
 		}
 
 		tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "STREAM\tTOTAL\tUNREAD\tLATEST")
+		_, _ = fmt.Fprintln(tw, "STREAM\tTOTAL\tUNREAD\tLATEST")
 
 		for _, s := range list.Streams {
-			fmt.Fprintf(tw, "%s\t%d\t%d\t%s\n", s.Name, s.Total, s.Unread, s.LatestAt)
+			_, _ = fmt.Fprintf(tw, "%s\t%d\t%d\t%s\n", s.Name, s.Total, s.Unread, s.LatestAt)
 		}
 
-		tw.Flush()
+		_ = tw.Flush()
 
 		return nil
 	},
@@ -372,7 +379,7 @@ func registerMsgCmd() {
 	msgPubCmd.Flags().StringVarP(&msgPubFile, "file", "f", "", "read body from file")
 	msgPubCmd.Flags().StringVar(&msgPubThreadID, "thread", "", "thread ID to continue")
 	msgPubCmd.Flags().StringVar(&msgPubReplyTo, "reply-to", "", "stream for replies")
-	msgPubCmd.RegisterFlagCompletionFunc("topic", completeTopicNames)
+	_ = msgPubCmd.RegisterFlagCompletionFunc("topic", completeTopicNames)
 
 	msgCmd.AddCommand(msgSendCmd)
 	msgSendCmd.Flags().StringVarP(&msgSendFile, "file", "f", "", "read body from file")
@@ -397,11 +404,11 @@ func registerMsgCmd() {
 	msgSubCmd.Flags().BoolVar(&msgSubAck, "ack", false, "acknowledge messages after reading")
 	msgSubCmd.Flags().BoolVarP(&msgSubAll, "all", "a", false, "show all messages, not just unread")
 	msgSubCmd.Flags().StringVar(&msgSubThreadID, "thread", "", "filter to a specific thread")
-	msgSubCmd.RegisterFlagCompletionFunc("topic", completeTopicNames)
+	_ = msgSubCmd.RegisterFlagCompletionFunc("topic", completeTopicNames)
 
 	msgCmd.AddCommand(msgAckCmd)
 	msgAckCmd.Flags().StringVarP(&msgAckStream, "topic", "t", "", "stream/topic name")
-	msgAckCmd.RegisterFlagCompletionFunc("topic", completeTopicNames)
+	_ = msgAckCmd.RegisterFlagCompletionFunc("topic", completeTopicNames)
 
 	msgCmd.AddCommand(msgTopicsCmd)
 	msgTopicsCmd.Flags().BoolVar(&msgTopicsSystem, "system", false, "include _system.* streams")
@@ -446,7 +453,7 @@ func resolveBody(args []string, filePath string) (string, error) {
 }
 
 func resolveSession(c *client.Client, nameOrID string) (string, error) {
-	c.SendControl("list", struct{}{})
+	_ = c.SendControl("list", struct{}{})
 
 	resp, err := c.ReadControlResponse()
 	if err != nil {
@@ -473,7 +480,7 @@ func resolveCurrentSessionInfo(c *client.Client) (*protocol.SessionInfo, error) 
 		return nil, fmt.Errorf("GRAITH_SESSION_ID is not set; run this from inside a graith session")
 	}
 
-	c.SendControl("list", struct{}{})
+	_ = c.SendControl("list", struct{}{})
 
 	resp, err := c.ReadControlResponse()
 	if err != nil {
@@ -513,7 +520,7 @@ func msgSendChildrenRun(args []string) error {
 		return fmt.Errorf("--children requires GRAITH_SESSION_ID to be set")
 	}
 
-	c.SendControl("list", struct{}{})
+	_ = c.SendControl("list", struct{}{})
 
 	resp, err := c.ReadControlResponse()
 	if err != nil {
@@ -533,7 +540,7 @@ func msgSendChildrenRun(args []string) error {
 	var sentTo []string
 
 	for _, desc := range descendants {
-		c.SendControl("msg_pub", protocol.MsgPubMsg{
+		_ = c.SendControl("msg_pub", protocol.MsgPubMsg{
 			Stream:     "inbox:" + desc.ID,
 			Body:       body,
 			SenderID:   senderID,
@@ -550,7 +557,8 @@ func msgSendChildrenRun(args []string) error {
 
 		if resp.Type == "error" {
 			var e protocol.ErrorMsg
-			protocol.DecodePayload(resp, &e)
+
+			_ = protocol.DecodePayload(resp, &e)
 
 			return fmt.Errorf("sending to %s: %s", desc.Name, e.Message)
 		}
@@ -593,7 +601,7 @@ func msgSendParentRun(args []string) error {
 		return fmt.Errorf("current session has no parent")
 	}
 
-	c.SendControl("msg_pub", protocol.MsgPubMsg{
+	_ = c.SendControl("msg_pub", protocol.MsgPubMsg{
 		Stream:     "inbox:" + current.ParentID,
 		Body:       body,
 		SenderID:   senderID,
@@ -610,7 +618,8 @@ func msgSendParentRun(args []string) error {
 
 	if resp.Type == "error" {
 		var e protocol.ErrorMsg
-		protocol.DecodePayload(resp, &e)
+
+		_ = protocol.DecodePayload(resp, &e)
 
 		return fmt.Errorf("%s", e.Message)
 	}
@@ -634,7 +643,8 @@ func printMessage(payload json.RawMessage) {
 		CreatedAt  string `json:"created_at"`
 		ThreadID   string `json:"thread_id"`
 	}
-	json.Unmarshal(payload, &m)
+
+	_ = json.Unmarshal(payload, &m)
 
 	sender := m.SenderName
 	if sender == "" {

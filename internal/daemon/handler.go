@@ -260,12 +260,12 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				sm.KickAttachedClient(a.SessionID)
 				sm.SetAttachedClient(a.SessionID, conn,
 					func() {
-						conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
+						_ = conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
 
 						data, _ := protocol.EncodeControl("detached", protocol.DetachedMsg{Reason: "replaced"})
 						_ = writer.WriteFrame(protocol.ChannelControl, data)
 
-						conn.Close()
+						_ = conn.Close()
 					},
 					sendControl,
 				)
@@ -1166,7 +1166,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					case <-proc.done:
 					}
 
-					conn.Close()
+					_ = conn.Close()
 				}()
 
 				// Read frames from proxy and write to MCP server stdin.

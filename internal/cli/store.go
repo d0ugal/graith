@@ -232,13 +232,13 @@ var storeListCmd = &cobra.Command{
 		}
 
 		tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "REPO\tKEY\tUPDATED")
+		_, _ = fmt.Fprintln(tw, "REPO\tKEY\tUPDATED")
 
 		for _, entry := range entries {
-			fmt.Fprintf(tw, "%s\t%s\t%s\n", label, entry.Key, entry.UpdatedAt.Format("2006-01-02 15:04:05"))
+			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\n", label, entry.Key, entry.UpdatedAt.Format("2006-01-02 15:04:05"))
 		}
 
-		tw.Flush()
+		_ = tw.Flush()
 
 		return nil
 	},
@@ -283,15 +283,15 @@ func listAllStores(prefix string) error {
 	}
 
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "REPO\tKEY\tUPDATED")
+	_, _ = fmt.Fprintln(tw, "REPO\tKEY\tUPDATED")
 
 	for _, s := range stores {
 		for _, entry := range s.Entries {
-			fmt.Fprintf(tw, "%s\t%s\t%s\n", s.Name, entry.Key, entry.UpdatedAt.Format("2006-01-02 15:04:05"))
+			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\n", s.Name, entry.Key, entry.UpdatedAt.Format("2006-01-02 15:04:05"))
 		}
 	}
 
-	tw.Flush()
+	_ = tw.Flush()
 
 	return nil
 }
