@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.62.0](https://github.com/d0ugal/graith/compare/v0.61.0...v0.62.0) (2026-07-01)
+
+
+### Features
+
+* **ci:** publish signed apt/yum repo to graith-repo on release ([fb593f7](https://github.com/d0ugal/graith/commit/fb593f77b6132ebccea4f88aebe04fb81e7161af))
+
 ## [0.61.0](https://github.com/d0ugal/graith/compare/v0.60.1...v0.61.0) (2026-07-01)
 
 
