@@ -11,6 +11,13 @@ permissions:
 jobs:
   goreleaser:
     runs-on: ubuntu-latest
+    outputs:
+      # Whether the GPG signing key secret is configured. Secrets cannot be used
+      # directly in a job-level `if:`, so we surface a boolean output derived from
+      # the secret (mapped into an env var first) and gate the publish job on it.
+      # This keeps releases green even before the Phase 2 infra (the graith-repo
+      # repo + the GPG_* secrets) exists — the publish job is simply skipped.
+      has_gpg_key: ${{ steps.gpg_check.outputs.has_key }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
@@ -18,6 +25,17 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+      - id: gpg_check
+        name: Detect GPG signing key
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        run: |
+          if [ -n "${GPG_PRIVATE_KEY}" ]; then
+            echo "has_key=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_key=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::GPG_PRIVATE_KEY is not set; the apt/yum publish job will be skipped."
+          fi
       - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7
         with:
           version: "~> v2"
@@ -25,3 +43,188 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+      - name: Upload packages for publish job
+        # Only bother stashing artifacts when we're going to publish them.
+        if: steps.gpg_check.outputs.has_key == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-packages
+          path: |
+            dist/*.deb
+            dist/*.rpm
+          if-no-files-found: error
+          retention-days: 1
+
+  publish-repo:
+    needs: goreleaser
+    # Skipped cleanly when no signing key is configured, so a release with no
+    # Phase 2 infra provisioned still succeeds (it just doesn't publish a repo).
+    if: needs.goreleaser.outputs.has_gpg_key == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install repo tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            aptly createrepo-c gnupg rpm
+
+      - name: Download built packages
+        uses: actions/download-artifact@v5
+        with:
+          name: linux-packages
+          path: packages
+
+      - name: Check out the Pages repo (graith-repo)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          repository: d0ugal/graith-repo
+          # graith-repo is a separate repo; the default GITHUB_TOKEN can't push
+          # to it, so use a PAT with contents:write on graith-repo (same
+          # cross-repo pattern as the Homebrew tap).
+          token: ${{ secrets.RELEASE_TOKEN }}
+          ref: main
+          path: repo
+
+      - name: Import GPG signing key into a throwaway keyring
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          # Throwaway keyring in a scratch dir. The runner is ephemeral, so
+          # nothing persists after the job; keep it isolated regardless.
+          GNUPGHOME="$(mktemp -d)"
+          chmod 700 "$GNUPGHOME"
+          echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
+          export GNUPGHOME
+
+          # Allow non-interactive signing: loopback pinentry for gpg, and
+          # allow-preset-passphrase so rpm --addsign (which can't be fed a
+          # passphrase on a pipe) can sign via a preloaded agent cache.
+          {
+            echo "allow-loopback-pinentry"
+            echo "allow-preset-passphrase"
+            echo "max-cache-ttl 3600"
+          } >> "$GNUPGHOME/gpg-agent.conf"
+          gpgconf --kill gpg-agent || true
+
+          printf '%s' "$GPG_PRIVATE_KEY" | gpg --batch --import
+
+          # Discover the key id and export it for later steps.
+          KEY_ID="$(gpg --list-secret-keys --with-colons \
+            | awk -F: '/^sec:/ {print $5; exit}')"
+          if [ -z "$KEY_ID" ]; then
+            echo "Failed to import GPG key" >&2
+            exit 1
+          fi
+          echo "GPG_KEY_ID=$KEY_ID" >> "$GITHUB_ENV"
+
+      - name: Export public signing key (armored + dearmored) to /gpg
+        run: |
+          set -euo pipefail
+          mkdir -p repo/gpg
+          # ASCII-armored key (used by dnf's gpgkey= and for humans).
+          gpg --armor --export "$GPG_KEY_ID" > repo/gpg/graith.asc
+          # Dearmored binary keyring so apt's signed-by= can read it directly.
+          gpg --export "$GPG_KEY_ID" > repo/gpg/graith.gpg
+          # Conventionally-named keyring copy for /usr/share/keyrings.
+          cp repo/gpg/graith.gpg repo/gpg/graith-archive-keyring.gpg
+
+      - name: Sign the .rpm packages
+        env:
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+
+          # Preload the passphrase into gpg-agent so rpm --addsign (which offers
+          # no passphrase channel of its own) can sign non-interactively.
+          gpg --batch --pinentry-mode loopback --passphrase "$GPG_PASSPHRASE" \
+            --detach-sign -o /dev/null <<<"warmup" 2>/dev/null || true
+          KEYGRIP="$(gpg --with-keygrip --list-secret-keys --with-colons "$GPG_KEY_ID" \
+            | awk -F: '/^grp:/ {print $10; exit}')"
+          gpgconf --launch gpg-agent
+          PRESET=/usr/lib/gnupg/gpg-preset-passphrase
+          [ -x "$PRESET" ] || PRESET=/usr/libexec/gpg-preset-passphrase
+          "$PRESET" --preset --passphrase "$GPG_PASSPHRASE" "$KEYGRIP"
+
+          # rpm --addsign selects the key via %_gpg_name and drives gpg (which
+          # gets the passphrase from the primed agent, not from a pipe).
+          cat > "$HOME/.rpmmacros" <<EOF
+          %_signature gpg
+          %_gpg_name ${GPG_KEY_ID}
+          %__gpg /usr/bin/gpg
+          %_gpg_sign_cmd %{__gpg} gpg --no-verbose --no-armor --batch --pinentry-mode loopback --no-secmem-warning -u "%{_gpg_name}" -sbo %{__signature_filename} --digest-algo sha256 %{__plaintext_filename}
+          EOF
+
+          # Import our public key so rpm --checksig can verify the signature.
+          rpm --import repo/gpg/graith.asc
+          for rpm in packages/*.rpm; do
+            [ -e "$rpm" ] || continue
+            echo "Signing $rpm"
+            rpm --addsign "$rpm"
+            rpm --checksig "$rpm"
+          done
+
+      - name: Build yum/dnf repo (createrepo_c) and sign metadata
+        env:
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          RPM_ROOT=repo/rpm
+          mkdir -p "$RPM_ROOT"
+          cp packages/*.rpm "$RPM_ROOT"/
+          createrepo_c --update "$RPM_ROOT"
+          # Detached, armored signature over repomd.xml so dnf can verify the
+          # repo metadata (repo_gpgcheck).
+          printf '%s' "$GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback \
+            --passphrase-fd 0 --local-user "$GPG_KEY_ID" \
+            --detach-sign --armor --output "$RPM_ROOT/repodata/repomd.xml.asc" \
+            "$RPM_ROOT/repodata/repomd.xml"
+
+      - name: Build apt repo (aptly) and sign Release
+        env:
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+
+          # aptly keeps its own working DB + pool under a rootDir. Point it at a
+          # scratch dir, then publish into the checked-out Pages tree.
+          APTLY_ROOT="$(mktemp -d)"
+          cat > "$HOME/.aptly.conf" <<EOF
+          {
+            "rootDir": "${APTLY_ROOT}",
+            "architectures": ["amd64", "arm64"]
+          }
+          EOF
+
+          # A single "stable" suite for all Debian/Ubuntu releases (the binary is
+          # statically linked Go, so per-codename suites add no value).
+          aptly repo create -distribution=stable -component=main graith
+          aptly repo add graith packages/
+
+          # Publish, signing Release -> Release.gpg + InRelease with our key.
+          aptly publish repo \
+            -gpg-key="$GPG_KEY_ID" \
+            -passphrase="$GPG_PASSPHRASE" \
+            -batch \
+            graith
+
+          # aptly writes the published tree under <rootDir>/public. Mirror it into
+          # repo/deb (dists/ + pool/).
+          DEB_ROOT=repo/deb
+          rm -rf "$DEB_ROOT"
+          mkdir -p "$DEB_ROOT"
+          cp -a "${APTLY_ROOT}/public/." "$DEB_ROOT"/
+
+      - name: Commit and push the static repo tree
+        run: |
+          set -euo pipefail
+          cd repo
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No repo changes to publish."
+            exit 0
+          fi
+          git commit -m "chore: publish graith ${GITHUB_REF_NAME} apt/yum packages"
+          git push origin main
