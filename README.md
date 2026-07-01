@@ -30,6 +30,43 @@ The binary is called `gr`.
 brew install d0ugal/tap/graith
 ```
 
+### Debian / Ubuntu (apt)
+
+Add the signing key and repository once, then install with `apt-get`:
+
+```bash
+# add the signing key
+curl -fsSL https://d0ugal.github.io/graith-repo/gpg/graith.gpg \
+  | sudo tee /usr/share/keyrings/graith.gpg > /dev/null
+
+# add the repo (signed-by pins it to our key only)
+echo "deb [signed-by=/usr/share/keyrings/graith.gpg] \
+https://d0ugal.github.io/graith-repo/deb stable main" \
+  | sudo tee /etc/apt/sources.list.d/graith.list
+
+sudo apt-get update
+sudo apt-get install graith
+```
+
+`apt-get upgrade` then picks up new releases automatically.
+
+### Fedora / RHEL (dnf)
+
+```bash
+sudo tee /etc/yum.repos.d/graith.repo <<'EOF'
+[graith]
+name=graith
+baseurl=https://d0ugal.github.io/graith-repo/rpm
+enabled=1
+gpgcheck=1
+gpgkey=https://d0ugal.github.io/graith-repo/gpg/graith.asc
+EOF
+
+sudo dnf install graith
+```
+
+`dnf upgrade` picks up new releases.
+
 ### From a release
 
 Download a prebuilt binary for your platform from the [releases page](https://github.com/d0ugal/graith/releases), extract it, and put `gr` on your `$PATH`.
@@ -47,9 +84,6 @@ sudo dpkg -i graith_*_linux_amd64.deb
 # Fedora / RHEL
 sudo rpm -i graith_*_linux_amd64.rpm
 ```
-
-> A signed `apt`/`dnf` repository (so you can `apt-get install` / `dnf install`
-> and get automatic upgrades) is planned as a follow-up.
 
 ### go install
 
