@@ -138,10 +138,16 @@ before:
     - sh -c 'go run ./cmd/graith completion fish > completions/gr.fish'
 ```
 
-**No package name collision with `gr`.** The Debian archive already has a
-package literally named `gr` (a small unrelated tool). We name the package
-`graith` (matching the tap) and ship the binary as `gr`. This avoids any clash
-and matches how users already refer to the project.
+**Package naming.** We name the package `graith` (matching the tap) and ship
+the binary as `gr`. The `gr` name itself is unclaimed on Debian — there is no
+package named `gr` in the archive and no Debian package installs a `/usr/bin/gr`
+(or `/bin/gr`) binary (only unrelated `gr-*` GNU Radio packages such as `gr-gsm`
+and `gr-osmosdr` exist, none of which is `gr` or ships a `gr` binary). So a
+package named `gr` would not collide today. We still choose `graith` for
+branding and discoverability (it matches the project name, the module, and the
+Homebrew tap) and to avoid a cryptic two-letter package name that's hard to
+search for and easy to confuse with the unrelated `gr-*` family; shipping the
+binary as `gr` keeps the command users actually type unchanged.
 
 **Version metadata.** nfpm derives the package version from the tag the same way
 the archives do; the existing `ldflags` `-X ...version.Version={{.Version}}`
@@ -154,9 +160,9 @@ The realistic options and their trade-offs:
 | Option | Cost | Maintenance | Fits current setup | Notes |
 |--------|------|-------------|--------------------|-------|
 | **Self-hosted static repo on GitHub Pages** | Free | Low (fully in CI) | High — GitHub-native, mirrors the tap model | We generate signed apt/yum repo metadata in CI and publish to a `gh-pages` branch / a `d0ugal/apt` (+ `d0ugal/yum`) repo. |
-| Gemfury / Fury.io | Free tier, then paid | Very low (they host + sign) | Medium | GoReleaser has first-class `furies:` push support. Free tier has limits; vendor lock-in for the URL. |
-| Cloudsmith | Free OSS tier, else paid | Very low | Medium | Polished, supports many formats; OSS plan needs application/approval. |
-| packagecloud.io | Paid (OSS discount) | Very low | Medium | Mature; historically the "just works" option, but paid. |
+| Gemfury / Fury.io | Free tier, then paid | Very low (they host + sign) | Medium | GoReleaser has first-class Gemfury push support (the `gemfury:` block, a GoReleaser **Pro** feature). Free tier has limits; vendor lock-in for the URL. |
+| Cloudsmith | Free OSS tier, else paid | Very low | Medium | Polished, supports many formats. The open-source plan is self-serve (create the repo; eligibility is verified after the fact — no advance application/approval). |
+| packagecloud.io | Free tier + paid; OSS program | Very low | Medium | Mature; historically the "just works" option. Has a perpetual free tier (10 GB bandwidth / 2 GB storage) plus a request-based "free for open source" program; paid plans above that. |
 | Artifactory / self-run server | $$ / server ops | High | Low | Overkill; contradicts the "no servers" ethos. |
 
 **Recommendation: self-hosted static repo published to GitHub Pages.** It is
@@ -164,8 +170,10 @@ free, requires no third-party account, keeps everything inside the GitHub
 `d0ugal/*` org (consistent with `homebrew-tap`), and the whole flow lives in the
 release CI so day-to-day maintenance is zero. The trade-off is that we own the
 repo-metadata generation and signing (more moving parts in CI than a hosted
-service), and GitHub Pages has soft bandwidth/size limits — fine at graith's
-scale, revisit only if downloads grow large.
+service), and GitHub Pages has published limits — a 100 GB/month bandwidth soft
+limit and a 1 GB published-site size cap (plus the backing repo's 100 MiB
+per-file limit) — all comfortably fine at graith's scale, revisit only if
+downloads grow large.
 
 **Layout.** A dedicated repo `d0ugal/graith-repo` (or reuse the
 `homebrew-tap` org pattern with `d0ugal/apt` and `d0ugal/yum`) served via
@@ -239,6 +247,13 @@ sudo apt-get install graith
 
 `apt-get upgrade` then picks up new releases automatically.
 
+The served key at `/gpg/graith.gpg` should be a binary (dearmored) GPG keyring
+so `signed-by=` can read it directly; if we publish the key ASCII-armored (as
+the GPG-signing section assumes), either serve a `.asc` and dearmor on the
+client (`gpg --dearmor`) or publish a dearmored copy. By convention the local
+keyring file is often named `graith-archive-keyring.gpg`; the exact filename is
+cosmetic as long as the `signed-by=` path matches.
+
 **Fedora / RHEL:**
 
 ```bash
@@ -311,8 +326,10 @@ follow the one-time "add key + repo" step above.
   `reprepro` (simpler, ships in Debian). Both are viable in CI.
 - **Man page:** add `GenManTree` to the CLI and package a man page under
   `/usr/share/man/man1/gr.1`? Deferred to a follow-up unless wanted now.
-- **Package name:** confirm `graith` (recommended, matches the tap) vs. `gr`
-  (collides with an existing Debian package).
+- **Package name:** confirm `graith` (recommended, matches the tap) vs. `gr`.
+  `gr` is unclaimed on Debian (no `gr` package, no package shipping `/usr/bin/gr`),
+  so it wouldn't collide, but `graith` is preferred for branding/discoverability
+  and to avoid a cryptic two-letter name; either way the binary stays `gr`.
 - **Distro codename channels:** ship a single `stable` suite for all Debian/
   Ubuntu releases (simplest; the binary is statically linked Go so it doesn't
   matter) vs. per-codename suites. Recommend single `stable`.
@@ -336,5 +353,33 @@ follow the one-time "add key + repo" step above.
 - `.github/workflows/goreleaser.yml` — tag-triggered release, `RELEASE_TOKEN`
 - `internal/cli/completion.go` — `gr completion {bash,zsh,fish}`
 - `README.md` — `Install` section (Homebrew / `go install`)
-- nfpm docs: <https://nfpm.goreleaser.com/>
-- GoReleaser nfpm: <https://goreleaser.com/customization/nfpm/>
+
+External / authoritative:
+
+- GoReleaser nfpm integration (`nfpms:` block, `ids`, `formats`, `contents`):
+  <https://goreleaser.com/customization/nfpm/>
+- nfpm configuration reference: <https://nfpm.goreleaser.com/docs/configuration/>
+- GoReleaser global `before:` hooks: <https://goreleaser.com/customization/hooks/>
+- GoReleaser Gemfury publishing (`gemfury:` block, GoReleaser Pro):
+  <https://goreleaser.com/customization/gemfury/>
+- aptly (apt repo management/publish): <https://www.aptly.info/doc/overview/>
+- reprepro setup (Debian Wiki):
+  <https://wiki.debian.org/DebianRepository/SetupWithReprepro>
+- createrepo_c (yum/dnf `repodata/`):
+  <https://github.com/rpm-software-management/createrepo_c>
+- Debian SecureApt (`Release`/`Release.gpg`/`InRelease`):
+  <https://wiki.debian.org/SecureApt>
+- Debian third-party repo signing (`signed-by=` keyring, apt-key deprecated):
+  <https://wiki.debian.org/DebianRepository/UseThirdParty>
+- GPG-signing RPMs and yum repos (`rpm --addsign`, `repomd.xml.asc`):
+  <https://blog.packagecloud.io/how-to-gpg-sign-and-verify-rpm-packages-and-yum-repositories/>
+- dnf `.repo` configuration reference:
+  <https://dnf.readthedocs.io/en/latest/conf_ref.html>
+- GitHub Pages limits (bandwidth / size soft limits):
+  <https://docs.github.com/en/pages/getting-started-with-github-pages/github-pages-limits>
+- Gemfury pricing (free tier): <https://fury.co/pricing/>
+- Cloudsmith open-source hosting policy:
+  <https://docs.cloudsmith.com/resources/open-source-hosting-policy>
+- packagecloud pricing / OSS program: <https://packagecloud.io/pricing/>,
+  <https://blog.packagecloud.io/packagecloud-loves-oss/>
+- JFrog Artifactory (paid/self-hosted): <https://jfrog.com/artifactory/>
