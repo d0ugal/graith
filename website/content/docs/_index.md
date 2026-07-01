@@ -7,15 +7,15 @@ toc: true
 draft: false
 ---
 
-A terminal multiplexer for AI coding agent sessions.
+**Run a fleet of AI coding agents in parallel — each in its own git worktree, each in a session that outlives your terminal.**
 
-graith manages multiple agents (Claude, Codex, OpenCode, Cursor, Agy) running in isolated git worktrees, each in its own PTY session that survives terminal closures. The binary is called `gr`.
+graith is a terminal multiplexer built for AI coding agents (Claude, Codex, OpenCode, Cursor, Agy). Spin up an agent per task, keep each one isolated on its own branch, and switch between them with a tmux-style prefix key. The binary is called `gr`.
 
 **graith** (Scots) -- *noun:* equipment, tools, gear for a specific trade. *verb:* to make ready, prepare, equip.
 
 ## How it works
 
-A long-lived daemon (`graithd`) owns PTY sessions and persists state. A stateless CLI client (`gr`) connects over a Unix socket using a framed binary protocol. Sessions survive terminal closures, daemon restarts, and SSH disconnections.
+A long-lived daemon (`graithd`) owns the PTY sessions and persists state; a stateless CLI client (`gr`) connects over a Unix socket using a framed binary protocol. Because the daemon holds the sessions, they survive terminal closures, daemon restarts, and SSH disconnections.
 
 ```mermaid
 graph LR

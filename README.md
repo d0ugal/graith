@@ -1,6 +1,8 @@
 # graith
 
-A terminal multiplexer for AI coding agent sessions. Manage multiple agents (Claude, Codex, OpenCode, Agy) running in isolated git worktrees, each in its own session that survives terminal closures.
+**Run a fleet of AI coding agents in parallel — each in its own git worktree, each in a session that outlives your terminal.**
+
+graith is a terminal multiplexer built for AI coding agents (Claude, Codex, OpenCode, Cursor, Agy). Spin up an agent per task, let them work isolated and unattended, and jump between them with a tmux-style prefix key. A long-lived daemon owns the sessions, so closing your terminal — or losing your SSH connection — doesn't stop the work.
 
 **graith** (Scots) — *noun:* equipment, tools, gear for a specific trade. *verb:* to make ready, prepare, equip. Your agents, graithed and ready to work.
 
@@ -8,15 +10,15 @@ A terminal multiplexer for AI coding agent sessions. Manage multiple agents (Cla
 
 ## Why
 
-When you're running multiple AI coding agents on different tasks, you need:
+Running several agents at once shouldn't mean juggling terminal tabs and stepping on your own branches. graith gives you:
 
-- **Isolation** — each agent works in its own git worktree, on its own branch
-- **Persistence** — sessions survive terminal closures; the daemon keeps everything alive
-- **Switching** — jump between agents with a tmux-style prefix key
-- **Visibility** — see all sessions at a glance, with views for what needs attention
-- **Coordination** — agents can message each other and you can drive them remotely
+- **Isolation** — every agent gets its own git worktree and branch, so parallel work never collides
+- **Persistence** — a daemon owns the PTYs; sessions survive terminal closures, daemon restarts, and SSH drops
+- **Switching** — hop between agents instantly with a tmux-style prefix key
+- **Visibility** — see every session at a glance, with a "Needs Attention" view that surfaces what's blocked or waiting
+- **Coordination** — agents message each other over pub/sub, and you drive them remotely with `type`, `logs`, and a live dashboard
 
-graith is purpose-built for this. It owns the PTY, manages worktrees, and gets out of your way.
+It owns the PTY, manages the worktrees, and otherwise gets out of your way.
 
 ## Install
 
