@@ -1,4 +1,11 @@
-# CLI Reference
+---
+weight: 400
+title: "CLI Reference"
+description: "Complete gr command-line reference."
+icon: "terminal"
+toc: true
+draft: false
+---
 
 ## Global flags
 

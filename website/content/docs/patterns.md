@@ -1,4 +1,11 @@
-# Patterns and Recipes
+---
+weight: 1400
+title: "Patterns and Recipes"
+description: "Common patterns and recipes for daily use."
+icon: "auto_awesome"
+toc: true
+draft: false
+---
 
 Practical patterns for using graith's primitives together.
 

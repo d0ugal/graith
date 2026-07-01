@@ -1,4 +1,11 @@
-# Sandbox
+---
+weight: 1100
+title: "Sandbox"
+description: "Run agents in an isolated sandbox."
+icon: "shield"
+toc: true
+draft: false
+---
 
 graith can wrap agent processes with [safehouse](https://github.com/nicholasgasior/safehouse), a macOS kernel-level sandbox built on `sandbox-exec`. This confines agents to a deny-by-default policy that restricts file access, network, and system calls.
 

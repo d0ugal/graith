@@ -1,4 +1,11 @@
-# Configuration
+---
+weight: 300
+title: "Configuration"
+description: "Configure graith via config.toml."
+icon: "settings"
+toc: true
+draft: false
+---
 
 Configuration lives at `~/.config/graith/config.toml` (or `$XDG_CONFIG_HOME/graith/config.toml`). All fields are optional. Sensible defaults are provided.
 

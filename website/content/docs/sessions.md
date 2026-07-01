@@ -1,4 +1,11 @@
-# Session Lifecycle
+---
+weight: 600
+title: "Session Lifecycle"
+description: "How sessions are created, attached, detached, and destroyed."
+icon: "account_tree"
+toc: true
+draft: false
+---
 
 ## States
 

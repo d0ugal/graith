@@ -1,0 +1,7 @@
+# Hugo build output
+/public/
+# Editor helper Hugo generates with machine-specific module cache paths
+/assets/jsconfig.json
+# Hugo module/resource cache
+/resources/_gen/
+.hugo_build.lock

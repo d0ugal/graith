@@ -1,4 +1,11 @@
-# Getting Started
+---
+weight: 100
+title: "Getting Started"
+description: "Create your first session and learn the basics."
+icon: "rocket_launch"
+toc: true
+draft: false
+---
 
 ## First session
 

@@ -1,4 +1,11 @@
-# Orchestrator
+---
+weight: 700
+title: "Orchestrator"
+description: "Coordinate multiple agents with the orchestrator."
+icon: "hub"
+toc: true
+draft: false
+---
 
 The orchestrator is a special system session that coordinates other agent sessions. It has no repository or worktree of its own; its power comes from the graith control plane.
 
