@@ -4,6 +4,8 @@ A terminal multiplexer for AI coding agent sessions. Manage multiple agents (Cla
 
 **graith** (Scots) — *noun:* equipment, tools, gear for a specific trade. *verb:* to make ready, prepare, equip. Your agents, graithed and ready to work.
 
+📖 **[Documentation](https://d0ugal.github.io/graith/)** — full guide, CLI reference, configuration, and architecture.
+
 ## Why
 
 When you're running multiple AI coding agents on different tasks, you need:
