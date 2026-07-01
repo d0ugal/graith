@@ -98,6 +98,87 @@ func filterSessions(sessions []protocol.SessionInfo, bf *batchFlags) ([]protocol
 	return result, nil
 }
 
+// runBatch performs a batch operation (stop or delete) over the sessions that
+// match bf's filters. verb/pastTense/gerund provide the human-readable words
+// ("stop"/"stopped"/"stopping"), controlType is the control message name and
+// payload builds the per-session message to send. Starred sessions are skipped.
+func runBatch(cmd *cobra.Command, bf *batchFlags, verb, pastTense, gerund, controlType string, payload func(sessionID string) any) error {
+	c, err := client.Connect(cfg, paths, cfgFile)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	c.SendControl("list", struct{}{})
+
+	resp, err := c.ReadControlResponse()
+	if err != nil {
+		return err
+	}
+
+	var list protocol.SessionListMsg
+	if err := protocol.DecodePayload(resp, &list); err != nil {
+		return err
+	}
+
+	matched, err := filterSessions(list.Sessions, bf)
+	if err != nil {
+		return err
+	}
+
+	if len(matched) == 0 {
+		out.Printf("No sessions match the given filters\n")
+		return nil
+	}
+
+	if !bf.force {
+		confirmed, err := confirmBatch(cmd, verb, pastTense, matched)
+		if err != nil {
+			return err
+		}
+
+		if !confirmed {
+			return nil
+		}
+	}
+
+	var (
+		skipped []string
+		done    int
+	)
+
+	for _, s := range matched {
+		if s.Starred {
+			skipped = append(skipped, s.Name)
+			continue
+		}
+
+		c.SendControl(controlType, payload(s.ID))
+
+		resp, err := c.ReadControlResponse()
+		if err != nil {
+			return err
+		}
+
+		if resp.Type == "error" {
+			var e protocol.ErrorMsg
+			protocol.DecodePayload(resp, &e)
+
+			return fmt.Errorf("%s %s: %s", gerund, s.Name, e.Message)
+		}
+
+		done++
+	}
+
+	out.Printf("%s %d sessions\n", strings.ToUpper(pastTense[:1])+pastTense[1:], done)
+
+	for _, name := range skipped {
+		out.Printf("Skipped starred session: %s\n", name)
+	}
+
+	return nil
+}
+
 func confirmBatch(cmd *cobra.Command, verb string, pastTense string, sessions []protocol.SessionInfo) (bool, error) {
 	n := len(sessions)
 

@@ -310,34 +310,9 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					continue
 				}
 
-				sm.mu.RLock()
-				authErr := auth.checkTarget(sm, d.SessionID, authSelfOrDescendant)
-				sm.mu.RUnlock()
-
-				if authErr != nil {
-					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
-					continue
-				}
-
-				if d.Children {
-					deleted, err := sm.DeleteWithChildren(d.SessionID, d.ExcludeRoot)
-					if err != nil {
-						sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-					} else {
-						sendControl("deleted", struct {
-							SessionID string   `json:"session_id"`
-							Deleted   []string `json:"deleted"`
-						}{d.SessionID, deleted})
-					}
-				} else {
-					if err := sm.Delete(d.SessionID); err != nil {
-						sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-					} else {
-						sendControl("deleted", struct {
-							SessionID string `json:"session_id"`
-						}{d.SessionID})
-					}
-				}
+				handleSessionLifecycle(sm, auth, sendControl,
+					lifecycleRequest{SessionID: d.SessionID, Children: d.Children, ExcludeRoot: d.ExcludeRoot},
+					"deleted", "deleted", sm.DeleteWithChildren, sm.Delete)
 
 			case "stop":
 				var s protocol.StopMsg
@@ -346,34 +321,9 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					continue
 				}
 
-				sm.mu.RLock()
-				authErr := auth.checkTarget(sm, s.SessionID, authSelfOrDescendant)
-				sm.mu.RUnlock()
-
-				if authErr != nil {
-					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
-					continue
-				}
-
-				if s.Children {
-					stopped, err := sm.StopWithChildren(s.SessionID, s.ExcludeRoot)
-					if err != nil {
-						sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-					} else {
-						sendControl("stopped", struct {
-							SessionID string   `json:"session_id"`
-							Stopped   []string `json:"stopped"`
-						}{s.SessionID, stopped})
-					}
-				} else {
-					if err := sm.Stop(s.SessionID); err != nil {
-						sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-					} else {
-						sendControl("stopped", struct {
-							SessionID string `json:"session_id"`
-						}{s.SessionID})
-					}
-				}
+				handleSessionLifecycle(sm, auth, sendControl,
+					lifecycleRequest{SessionID: s.SessionID, Children: s.Children, ExcludeRoot: s.ExcludeRoot},
+					"stopped", "stopped", sm.StopWithChildren, sm.Stop)
 
 			case "rename":
 				var r protocol.RenameMsg
@@ -1443,6 +1393,58 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					_ = pty.WriteInput(frame.Payload)
 				}
 			}
+		}
+	}
+}
+
+// lifecycleRequest holds the fields shared by the stop and delete control
+// messages, both of which target a session (optionally with descendants).
+type lifecycleRequest struct {
+	SessionID   string
+	Children    bool
+	ExcludeRoot bool
+}
+
+// handleSessionLifecycle implements the shared stop/delete dispatch: authorize
+// the target, then run either the with-children batch operation or the single
+// operation and report the result. event is the success message type
+// ("stopped"/"deleted") and resultKey is the JSON field holding the affected
+// session names for the with-children response.
+func handleSessionLifecycle(
+	sm *SessionManager,
+	auth authContext,
+	sendControl func(string, any),
+	req lifecycleRequest,
+	event, resultKey string,
+	batchFn func(sessionID string, excludeRoot bool) ([]string, error),
+	singleFn func(sessionID string) error,
+) {
+	sm.mu.RLock()
+	authErr := auth.checkTarget(sm, req.SessionID, authSelfOrDescendant)
+	sm.mu.RUnlock()
+
+	if authErr != nil {
+		sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
+		return
+	}
+
+	if req.Children {
+		affected, err := batchFn(req.SessionID, req.ExcludeRoot)
+		if err != nil {
+			sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+		} else {
+			sendControl(event, map[string]any{
+				"session_id": req.SessionID,
+				resultKey:    affected,
+			})
+		}
+	} else {
+		if err := singleFn(req.SessionID); err != nil {
+			sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+		} else {
+			sendControl(event, map[string]any{
+				"session_id": req.SessionID,
+			})
 		}
 	}
 }
