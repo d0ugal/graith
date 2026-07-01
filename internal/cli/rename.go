@@ -40,7 +40,7 @@ var renameCmd = &cobra.Command{
 			return fmt.Errorf("%s", e.Message)
 		}
 
-		out.Print("Renamed to %s\n", args[1])
+		out.Printf("Renamed to %s\n", args[1])
 
 		return nil
 	},

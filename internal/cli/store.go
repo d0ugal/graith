@@ -143,7 +143,7 @@ var storePutCmd = &cobra.Command{
 			}{key, label})
 		}
 
-		out.Print("Stored %s\n", key)
+		out.Printf("Stored %s\n", key)
 
 		return nil
 	},
@@ -227,7 +227,7 @@ var storeListCmd = &cobra.Command{
 		}
 
 		if len(entries) == 0 {
-			out.Print("No documents found\n")
+			out.Printf("No documents found\n")
 			return nil
 		}
 
@@ -251,7 +251,7 @@ func listAllStores(prefix string) error {
 	}
 
 	if len(stores) == 0 {
-		out.Print("No stores found\n")
+		out.Printf("No stores found\n")
 		return nil
 	}
 
@@ -340,7 +340,7 @@ var storeAppendCmd = &cobra.Command{
 			}{key, label})
 		}
 
-		out.Print("Appended to %s\n", key)
+		out.Printf("Appended to %s\n", key)
 
 		return nil
 	},
@@ -377,7 +377,7 @@ var storeRmCmd = &cobra.Command{
 			}{key, true})
 		}
 
-		out.Print("Removed %s\n", key)
+		out.Printf("Removed %s\n", key)
 
 		return nil
 	},

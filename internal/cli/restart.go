@@ -66,7 +66,7 @@ var restartCmd = &cobra.Command{
 			return out.JSON(info)
 		}
 
-		out.Print("Session %s restarted\n", info.Name)
+		out.Printf("Session %s restarted\n", info.Name)
 
 		if restartBackground {
 			return nil
@@ -127,7 +127,7 @@ func restartChildrenRun(c *client.Client, args []string) error {
 		return out.JSON(result)
 	}
 
-	out.Print("Restarted %d sessions\n", len(result.Restarted))
+	out.Printf("Restarted %d sessions\n", len(result.Restarted))
 
 	return nil
 }

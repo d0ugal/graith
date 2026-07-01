@@ -126,7 +126,7 @@ var newCmd = &cobra.Command{
 			location = "(no repo)"
 		}
 
-		out.Print("Created session %s (%s) in %s\n", info.Name, info.ID, location)
+		out.Printf("Created session %s (%s) in %s\n", info.Name, info.ID, location)
 
 		if newBackground {
 			return nil

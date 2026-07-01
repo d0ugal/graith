@@ -81,7 +81,7 @@ var forkCmd = &cobra.Command{
 			return out.JSON(info)
 		}
 
-		out.Print("Forked session %s → %s (%s) in %s\n", sourceName, info.Name, info.ID, info.WorktreePath)
+		out.Printf("Forked session %s → %s (%s) in %s\n", sourceName, info.Name, info.ID, info.WorktreePath)
 
 		if forkBackground {
 			return nil

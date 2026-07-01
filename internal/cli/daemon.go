@@ -46,7 +46,7 @@ var daemonStopCmd = &cobra.Command{
 			return err
 		}
 
-		out.Print("Daemon stopped\n")
+		out.Printf("Daemon stopped\n")
 
 		return nil
 	},
@@ -66,7 +66,7 @@ Use --force to do a clean stop/start, which kills running agent sessions.`,
 
 		err := execUpgrade("Daemon restarted (sessions preserved)")
 		if err != nil {
-			out.Print("Preserve failed: %s\nFalling back to clean restart...\n", err)
+			out.Printf("Preserve failed: %s\nFalling back to clean restart...\n", err)
 			return restartClean()
 		}
 
@@ -86,7 +86,7 @@ var daemonReloadCmd = &cobra.Command{
 			}
 
 			conn.Close()
-			out.Print("Daemon started with current config\n")
+			out.Printf("Daemon started with current config\n")
 
 			return nil
 		}
@@ -108,7 +108,7 @@ var daemonReloadCmd = &cobra.Command{
 			return fmt.Errorf("%s", e.Message)
 		}
 
-		out.Print("Config reloaded\n")
+		out.Printf("Config reloaded\n")
 
 		return nil
 	},
@@ -162,7 +162,7 @@ func execUpgrade(successMsg string) error {
 		return fmt.Errorf("daemon exec'd into %s instead of %s", v, version.Version)
 	}
 
-	out.Print("%s\n", successMsg)
+	out.Printf("%s\n", successMsg)
 
 	return nil
 }
@@ -225,7 +225,7 @@ func restartClean() error {
 	}
 
 	conn.Close()
-	out.Print("Daemon restarted (sessions killed)\n")
+	out.Printf("Daemon restarted (sessions killed)\n")
 
 	return nil
 }

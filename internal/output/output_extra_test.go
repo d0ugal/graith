@@ -87,7 +87,7 @@ func TestPrintDoesNotWriteToStderr(t *testing.T) {
 	var outBuf, errBuf bytes.Buffer
 
 	w := &Writer{jsonMode: false, out: &outBuf, errOut: &errBuf}
-	w.Print("hello %s", "bonnie")
+	w.Printf("hello %s", "bonnie")
 
 	if errBuf.Len() != 0 {
 		t.Errorf("Print() should not write to stderr, got %q", errBuf.String())

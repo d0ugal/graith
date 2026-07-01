@@ -243,10 +243,10 @@ The source can be:
 			return out.JSON(record)
 		}
 
-		out.Print("Scenario %q started (id: %s)\n", record.Name, record.ID)
+		out.Printf("Scenario %q started (id: %s)\n", record.Name, record.ID)
 
 		for _, s := range record.Sessions {
-			out.Print("  %s (%s) — %s\n", s.Name, s.SessionID, s.Role)
+			out.Printf("  %s (%s) — %s\n", s.Name, s.SessionID, s.Role)
 		}
 
 		return nil
@@ -286,7 +286,7 @@ var scenarioStopCmd = &cobra.Command{
 			Stopped []string `json:"stopped"`
 		}
 		protocol.DecodePayload(resp, &result)
-		out.Print("Stopped %d sessions in scenario %q\n", len(result.Stopped), args[0])
+		out.Printf("Stopped %d sessions in scenario %q\n", len(result.Stopped), args[0])
 
 		return nil
 	},
@@ -325,7 +325,7 @@ var scenarioResumeCmd = &cobra.Command{
 			Resumed []string `json:"resumed"`
 		}
 		protocol.DecodePayload(resp, &result)
-		out.Print("Resumed %d sessions in scenario %q\n", len(result.Resumed), args[0])
+		out.Printf("Resumed %d sessions in scenario %q\n", len(result.Resumed), args[0])
 
 		return nil
 	},
@@ -364,7 +364,7 @@ var scenarioDeleteCmd = &cobra.Command{
 			Deleted []string `json:"deleted"`
 		}
 		protocol.DecodePayload(resp, &result)
-		out.Print("Deleted scenario %q (%d sessions removed)\n", args[0], len(result.Deleted))
+		out.Printf("Deleted scenario %q (%d sessions removed)\n", args[0], len(result.Deleted))
 
 		return nil
 	},
@@ -403,8 +403,8 @@ var scenarioStatusCmd = &cobra.Command{
 		}
 
 		sc := statusResp.Scenario
-		out.Print("Scenario: %s (%s) — %s\n", sc.Name, sc.ID, sc.Status)
-		out.Print("Goal: %s\n\n", sc.Goal)
+		out.Printf("Scenario: %s (%s) — %s\n", sc.Name, sc.ID, sc.Status)
+		out.Printf("Goal: %s\n\n", sc.Goal)
 
 		tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
 		fmt.Fprintf(tw, "NAME\tSESSION\tSTATUS\tAGENT\tROLE\tTASK DONE\tSHARED\n")
@@ -458,7 +458,7 @@ var scenarioTaskDoneCmd = &cobra.Command{
 			return out.JSON(resp.Payload)
 		}
 
-		out.Print("Task marked as done in scenario %q\n", args[0])
+		out.Printf("Task marked as done in scenario %q\n", args[0])
 
 		return nil
 	},
@@ -527,7 +527,7 @@ var scenarioAddCmd = &cobra.Command{
 			SessionID string `json:"session_id"`
 		}
 		protocol.DecodePayload(resp, &result)
-		out.Print("Added session %q to scenario %q (id: %s)\n", name, args[0], result.SessionID)
+		out.Printf("Added session %q to scenario %q (id: %s)\n", name, args[0], result.SessionID)
 
 		return nil
 	},
@@ -571,7 +571,7 @@ var scenarioListCmd = &cobra.Command{
 		}
 
 		if len(listResp.Scenarios) > 0 {
-			out.Print("RUNNING SCENARIOS\n")
+			out.Printf("RUNNING SCENARIOS\n")
 
 			tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
 			fmt.Fprintf(tw, "  NAME\tID\tSTATUS\tSESSIONS\tGOAL\n")
@@ -587,11 +587,11 @@ var scenarioListCmd = &cobra.Command{
 
 			tw.Flush()
 		} else {
-			out.Print("No running scenarios\n")
+			out.Printf("No running scenarios\n")
 		}
 
 		if len(available) > 0 {
-			out.Print("\nAVAILABLE SCENARIOS (%s)\n", scenariosDir())
+			out.Printf("\nAVAILABLE SCENARIOS (%s)\n", scenariosDir())
 
 			tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
 

@@ -46,7 +46,7 @@ var approvalsCmd = &cobra.Command{
 		}
 
 		if len(waiting) == 0 {
-			out.Print("No sessions waiting for approval.\n")
+			out.Printf("No sessions waiting for approval.\n")
 			return nil
 		}
 

@@ -104,9 +104,9 @@ var deleteCmd = &cobra.Command{
 				Deleted []string `json:"deleted"`
 			}
 			protocol.DecodePayload(resp, &result)
-			out.Print("Deleted %d sessions\n", len(result.Deleted))
+			out.Printf("Deleted %d sessions\n", len(result.Deleted))
 		} else {
-			out.Print("Session deleted\n")
+			out.Printf("Session deleted\n")
 		}
 
 		return nil
@@ -186,7 +186,7 @@ func confirmDelete(session *protocol.SessionInfo) (bool, error) {
 		return false, fmt.Errorf("session %q has uncommitted changes or unpushed commits; use --force to delete", session.Name)
 	}
 
-	out.Print("Session %q has unsaved work:\n\n", session.Name)
+	out.Printf("Session %q has unsaved work:\n\n", session.Name)
 
 	for _, r := range repos {
 		if len(r.dirtyFiles) == 0 && len(r.unpushedCommits) == 0 && !r.gitFailed {
@@ -194,33 +194,33 @@ func confirmDelete(session *protocol.SessionInfo) (bool, error) {
 		}
 
 		if len(repos) > 1 {
-			out.Print("  %s:\n", r.name)
+			out.Printf("  %s:\n", r.name)
 		}
 
 		if len(r.dirtyFiles) > 0 {
-			out.Print("    Dirty files:\n")
+			out.Printf("    Dirty files:\n")
 
 			for _, f := range r.dirtyFiles {
-				out.Print("      %s\n", f)
+				out.Printf("      %s\n", f)
 			}
 		}
 
 		if len(r.unpushedCommits) > 0 {
-			out.Print("    Unpushed commits:\n")
+			out.Printf("    Unpushed commits:\n")
 
 			for _, c := range r.unpushedCommits {
-				out.Print("      %s\n", c)
+				out.Printf("      %s\n", c)
 			}
 		}
 
 		if r.gitFailed {
-			out.Print("    Warning: could not fully check worktree status\n")
+			out.Printf("    Warning: could not fully check worktree status\n")
 		}
 
-		out.Print("\n")
+		out.Printf("\n")
 	}
 
-	out.Print("Delete anyway? [y/N] ")
+	out.Printf("Delete anyway? [y/N] ")
 
 	reader := bufio.NewReader(os.Stdin)
 
@@ -231,7 +231,7 @@ func confirmDelete(session *protocol.SessionInfo) (bool, error) {
 
 	answer = strings.TrimSpace(strings.ToLower(answer))
 	if answer != "y" && answer != "yes" {
-		out.Print("Aborted\n")
+		out.Printf("Aborted\n")
 		return false, nil
 	}
 
@@ -263,7 +263,7 @@ func deleteBatchRun(cmd *cobra.Command) error {
 	}
 
 	if len(matched) == 0 {
-		out.Print("No sessions match the given filters\n")
+		out.Printf("No sessions match the given filters\n")
 		return nil
 	}
 
@@ -306,10 +306,10 @@ func deleteBatchRun(cmd *cobra.Command) error {
 		deleted++
 	}
 
-	out.Print("Deleted %d sessions\n", deleted)
+	out.Printf("Deleted %d sessions\n", deleted)
 
 	for _, name := range skipped {
-		out.Print("Skipped starred session: %s\n", name)
+		out.Printf("Skipped starred session: %s\n", name)
 	}
 
 	return nil

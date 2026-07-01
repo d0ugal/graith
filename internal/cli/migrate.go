@@ -65,7 +65,7 @@ var migrateCmd = &cobra.Command{
 			return out.JSON(info)
 		}
 
-		out.Print("Migrated session %s → agent %s (%s)\n", info.Name, info.Agent, info.ID)
+		out.Printf("Migrated session %s → agent %s (%s)\n", info.Name, info.Agent, info.ID)
 
 		if migrateBackground {
 			return nil

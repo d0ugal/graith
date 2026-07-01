@@ -39,7 +39,7 @@ var starCmd = &cobra.Command{
 			return fmt.Errorf("%s", e.Message)
 		}
 
-		out.Print("Session starred\n")
+		out.Printf("Session starred\n")
 
 		return nil
 	},
@@ -76,7 +76,7 @@ var unstarCmd = &cobra.Command{
 			return fmt.Errorf("%s", e.Message)
 		}
 
-		out.Print("Session unstarred\n")
+		out.Printf("Session unstarred\n")
 
 		return nil
 	},

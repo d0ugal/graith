@@ -109,7 +109,7 @@ func confirmBatch(cmd *cobra.Command, verb string, pastTense string, sessions []
 		return false, fmt.Errorf("use --force to %s %d sessions", verb, n)
 	}
 
-	out.Print("The following %d sessions will be %s:\n\n", n, pastTense)
+	out.Printf("The following %d sessions will be %s:\n\n", n, pastTense)
 
 	now := time.Now()
 	tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
@@ -141,7 +141,7 @@ func confirmBatch(cmd *cobra.Command, verb string, pastTense string, sessions []
 	tw.Flush()
 
 	prompt := strings.ToUpper(verb[:1]) + verb[1:]
-	out.Print("\n%s %d sessions? [y/N] ", prompt, n)
+	out.Printf("\n%s %d sessions? [y/N] ", prompt, n)
 
 	reader := bufio.NewReader(os.Stdin)
 
@@ -152,7 +152,7 @@ func confirmBatch(cmd *cobra.Command, verb string, pastTense string, sessions []
 
 	answer = strings.TrimSpace(strings.ToLower(answer))
 	if answer != "y" && answer != "yes" {
-		out.Print("Aborted\n")
+		out.Printf("Aborted\n")
 		return false, nil
 	}
 

@@ -30,7 +30,7 @@ func TestHumanOutput(t *testing.T) {
 	var buf bytes.Buffer
 
 	w := &Writer{jsonMode: false, out: &buf, errOut: &buf}
-	w.Print("hello %s\n", "bonnie")
+	w.Printf("hello %s\n", "bonnie")
 
 	if buf.String() != "hello bonnie\n" {
 		t.Errorf("output = %q", buf.String())
@@ -41,7 +41,7 @@ func TestPrintSuppressedInJSONMode(t *testing.T) {
 	var buf bytes.Buffer
 
 	w := &Writer{jsonMode: true, out: &buf, errOut: &buf}
-	w.Print("should not appear")
+	w.Printf("should not appear")
 
 	if buf.Len() != 0 {
 		t.Errorf("Print should be suppressed in JSON mode, got %q", buf.String())
