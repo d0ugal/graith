@@ -11,7 +11,7 @@ The binary is called `gr`.
 
 ## Install
 
-{{< tabs tabTotal="5" >}}
+{{< tabs tabTotal="4" >}}
 {{% tab tabName="Homebrew" %}}
 
 ```bash
@@ -23,10 +23,7 @@ brew install d0ugal/tap/graith
 
 Download a binary for your platform from the [releases page](https://github.com/d0ugal/graith/releases), extract it, and place `gr` on your `$PATH`.
 
-{{% /tab %}}
-{{% tab tabName="Debian / Fedora" %}}
-
-Each release attaches `.deb` and `.rpm` packages for linux `amd64` and `arm64` (package name `graith`, binary `gr`, with shell completions). Download the file for your platform from the [releases page](https://github.com/d0ugal/graith/releases) and install it manually:
+On Debian/Ubuntu and Fedora/RHEL you can instead grab a prebuilt `.deb` or `.rpm` package (linux `amd64` and `arm64`; package name `graith`, binary `gr`, with shell completions), also from the [releases page](https://github.com/d0ugal/graith/releases), and install it manually:
 
 ```bash
 # Debian / Ubuntu
