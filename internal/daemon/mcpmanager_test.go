@@ -16,6 +16,7 @@ func TestMCPManagerConnectDisconnect(t *testing.T) {
 			{Name: "echo", Command: "cat"},
 		},
 	}
+
 	mgr := NewMCPManager(cfg, nil, logDir, slog.Default())
 	defer mgr.Shutdown()
 
@@ -44,6 +45,7 @@ func TestMCPManagerConnectDisconnect(t *testing.T) {
 func TestMCPManagerConnectUnknownServer(t *testing.T) {
 	logDir := t.TempDir()
 	cfg := &config.Config{}
+
 	mgr := NewMCPManager(cfg, nil, logDir, slog.Default())
 	defer mgr.Shutdown()
 
@@ -60,6 +62,7 @@ func TestMCPManagerDuplicateProxy(t *testing.T) {
 			{Name: "echo", Command: "cat"},
 		},
 	}
+
 	mgr := NewMCPManager(cfg, nil, logDir, slog.Default())
 	defer mgr.Shutdown()
 
@@ -81,6 +84,7 @@ func TestMCPManagerReload(t *testing.T) {
 			{Name: "echo", Command: "cat"},
 		},
 	}
+
 	mgr := NewMCPManager(cfg, nil, logDir, slog.Default())
 	defer mgr.Shutdown()
 
@@ -98,6 +102,7 @@ func TestMCPManagerReload(t *testing.T) {
 	if mgr.HasServer("echo") {
 		t.Error("should not have 'echo' after reload")
 	}
+
 	if !mgr.HasServer("newserver") {
 		t.Error("should have 'newserver' after reload")
 	}
@@ -110,6 +115,7 @@ func TestMCPManagerReloadKillsProcesses(t *testing.T) {
 			{Name: "echo", Command: "cat"},
 		},
 	}
+
 	mgr := NewMCPManager(cfg, nil, logDir, slog.Default())
 	defer mgr.Shutdown()
 
@@ -140,6 +146,7 @@ func TestMCPManagerStderrCapture(t *testing.T) {
 			{Name: "stderr-test", Command: "sh", Args: []string{"-c", "echo error >&2; sleep 0.1; cat"}},
 		},
 	}
+
 	mgr := NewMCPManager(cfg, nil, logDir, slog.Default())
 	defer mgr.Shutdown()
 
@@ -150,12 +157,15 @@ func TestMCPManagerStderrCapture(t *testing.T) {
 
 	_ = proc
 	logPath := logDir + "/mcp/stderr-test-proxy-1.log"
+
 	var data []byte
+
 	for range 50 {
 		if d, err := os.ReadFile(logPath); err == nil && len(d) > 0 {
 			data = d
 			break
 		}
+
 		time.Sleep(100 * time.Millisecond)
 	}
 
@@ -176,6 +186,7 @@ func TestMCPManagerExpandsTemplateVars(t *testing.T) {
 			{Name: "tmpl", Command: "sh", Args: []string{"-c", "echo {session_id} > " + outDir + "/{session_id}.txt; cat"}, Sandbox: boolPtr(false)},
 		},
 	}
+
 	mgr := NewMCPManager(cfg, nil, logDir, slog.Default())
 	defer mgr.Shutdown()
 
@@ -183,22 +194,28 @@ func TestMCPManagerExpandsTemplateVars(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Connect() error = %v", err)
 	}
+
 	_ = proc
 
 	wantPath := outDir + "/bairn-42.txt"
+
 	var data []byte
+
 	for range 50 {
 		if d, err := os.ReadFile(wantPath); err == nil && len(d) > 0 {
 			data = d
 			break
 		}
+
 		time.Sleep(20 * time.Millisecond)
 	}
+
 	mgr.Disconnect("proxy-braw")
 
 	if len(data) == 0 {
 		t.Fatalf("expected file %q with expanded session id", wantPath)
 	}
+
 	if got := string(data); got != "bairn-42\n" {
 		t.Errorf("expanded content = %q, want %q", got, "bairn-42\n")
 	}
@@ -212,6 +229,7 @@ func TestMCPManagerEmptySessionFallsBackToProxyID(t *testing.T) {
 			{Name: "tmpl", Command: "sh", Args: []string{"-c", "echo {session_id} > " + outDir + "/out.txt; cat"}, Sandbox: boolPtr(false)},
 		},
 	}
+
 	mgr := NewMCPManager(cfg, nil, logDir, slog.Default())
 	defer mgr.Shutdown()
 
@@ -222,14 +240,18 @@ func TestMCPManagerEmptySessionFallsBackToProxyID(t *testing.T) {
 	}
 
 	wantPath := outDir + "/out.txt"
+
 	var data []byte
+
 	for range 50 {
 		if d, err := os.ReadFile(wantPath); err == nil && len(d) > 0 {
 			data = d
 			break
 		}
+
 		time.Sleep(20 * time.Millisecond)
 	}
+
 	mgr.Disconnect("proxy-haar")
 
 	if got := string(data); got != "proxy-haar\n" {
@@ -252,6 +274,7 @@ func TestMCPManagerExpandsEnvValues(t *testing.T) {
 			},
 		},
 	}
+
 	mgr := NewMCPManager(cfg, nil, logDir, slog.Default())
 	defer mgr.Shutdown()
 
@@ -260,14 +283,18 @@ func TestMCPManagerExpandsEnvValues(t *testing.T) {
 	}
 
 	wantPath := outDir + "/env.txt"
+
 	var data []byte
+
 	for range 50 {
 		if d, err := os.ReadFile(wantPath); err == nil && len(d) > 0 {
 			data = d
 			break
 		}
+
 		time.Sleep(20 * time.Millisecond)
 	}
+
 	mgr.Disconnect("proxy-canny")
 
 	if got := string(data); got != "chrome-bonnie-7\n" {
@@ -283,11 +310,13 @@ func TestMCPManagerExpandsCommand(t *testing.T) {
 	if err := os.Symlink("/bin/echo", binDir+"/braw-x"); err != nil {
 		t.Skipf("symlink unavailable: %v", err)
 	}
+
 	cfg := &config.Config{
 		MCPServers: []config.MCPServerConfig{
 			{Name: "tmpl", Command: binDir + "/braw-{session_id}", Args: []string{"ok"}, Sandbox: boolPtr(false)},
 		},
 	}
+
 	mgr := NewMCPManager(cfg, nil, logDir, slog.Default())
 	defer mgr.Shutdown()
 
@@ -296,7 +325,9 @@ func TestMCPManagerExpandsCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Connect() with expanded command error = %v", err)
 	}
+
 	_ = proc
+
 	mgr.Disconnect("proxy-1")
 }
 
@@ -307,6 +338,7 @@ func TestMCPManagerReloadDetectsEnvChange(t *testing.T) {
 			{Name: "echo", Command: "cat", Env: map[string]string{"K": "v1"}},
 		},
 	}
+
 	mgr := NewMCPManager(cfg, nil, logDir, slog.Default())
 	defer mgr.Shutdown()
 
@@ -338,6 +370,7 @@ func TestMCPManagerUnknownTemplateVarFails(t *testing.T) {
 			{Name: "thrawn", Command: "cat", Args: []string{"--dir={nonsense}"}},
 		},
 	}
+
 	mgr := NewMCPManager(cfg, nil, logDir, slog.Default())
 	defer mgr.Shutdown()
 
@@ -354,12 +387,14 @@ func TestMCPManagerHasServer(t *testing.T) {
 			{Name: "disabled", Command: "cat", Disabled: true},
 		},
 	}
+
 	mgr := NewMCPManager(cfg, nil, logDir, slog.Default())
 	defer mgr.Shutdown()
 
 	if !mgr.HasServer("enabled") {
 		t.Error("should have 'enabled'")
 	}
+
 	if mgr.HasServer("disabled") {
 		t.Error("should not have 'disabled'")
 	}
@@ -375,12 +410,14 @@ func TestMCPManagerExtraServers(t *testing.T) {
 	extra := []config.MCPServerConfig{
 		{Name: "injected", Command: "cat"},
 	}
+
 	mgr := NewMCPManager(cfg, extra, logDir, slog.Default())
 	defer mgr.Shutdown()
 
 	if !mgr.HasServer("configured") {
 		t.Error("should have 'configured' from config")
 	}
+
 	if !mgr.HasServer("injected") {
 		t.Error("should have 'injected' from extra servers")
 	}
@@ -395,9 +432,11 @@ func TestMCPManagerExtraServers(t *testing.T) {
 	if !mgr.HasServer("injected") {
 		t.Error("should still have 'injected' after reload")
 	}
+
 	if !mgr.HasServer("newserver") {
 		t.Error("should have 'newserver' after reload")
 	}
+
 	if mgr.HasServer("configured") {
 		t.Error("should not have 'configured' after reload")
 	}
@@ -424,9 +463,11 @@ func TestMCPManagerDeletedCwd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if err := os.Chdir(doomedDir); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := os.RemoveAll(doomedDir); err != nil {
 		t.Fatal(err)
 	}
@@ -437,6 +478,7 @@ func TestMCPManagerDeletedCwd(t *testing.T) {
 			{Name: "cwd-bothy", Command: "cat"},
 		},
 	}
+
 	mgr := NewMCPManager(cfg, nil, logDir, slog.Default())
 	defer mgr.Shutdown()
 

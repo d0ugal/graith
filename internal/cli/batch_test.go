@@ -25,6 +25,7 @@ func TestParseStaleDuration(t *testing.T) {
 			if err != nil {
 				t.Fatalf("parseStaleDuration(%q) error: %v", tt.input, err)
 			}
+
 			if got != tt.want {
 				t.Errorf("parseStaleDuration(%q) = %v, want %v", tt.input, got, tt.want)
 			}
@@ -96,13 +97,16 @@ func TestFilterSessions(t *testing.T) {
 			if err != nil {
 				t.Fatalf("filterSessions error: %v", err)
 			}
+
 			gotIDs := make([]string, len(got))
 			for i, s := range got {
 				gotIDs[i] = s.ID
 			}
+
 			if len(gotIDs) != len(tt.wantIDs) {
 				t.Fatalf("got %v, want %v", gotIDs, tt.wantIDs)
 			}
+
 			for i := range gotIDs {
 				if gotIDs[i] != tt.wantIDs[i] {
 					t.Errorf("got[%d] = %s, want %s", i, gotIDs[i], tt.wantIDs[i])

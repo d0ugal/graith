@@ -20,10 +20,12 @@ func resolveAuth(sm *SessionManager, token string) (authContext, error) {
 	if token == "" {
 		return authContext{}, nil
 	}
+
 	sid := sm.SessionForToken(token)
 	if sid == "" {
 		return authContext{}, fmt.Errorf("invalid token")
 	}
+
 	return authContext{sessionID: sid, authenticated: true}, nil
 }
 
@@ -44,7 +46,9 @@ func (ac authContext) isOrchestrator(sm *SessionManager) bool {
 	if !ac.authenticated {
 		return false
 	}
+
 	sess, ok := sm.state.Sessions[ac.sessionID]
+
 	return ok && sess.SystemKind == SystemKindOrchestrator
 }
 
@@ -60,6 +64,7 @@ func (ac authContext) checkTarget(sm *SessionManager, targetID string, rule auth
 		if ac.authenticated {
 			return fmt.Errorf("operation not permitted for agent sessions")
 		}
+
 		return nil
 
 	case authSelfOnly:
@@ -70,9 +75,11 @@ func (ac authContext) checkTarget(sm *SessionManager, targetID string, rule auth
 		if ac.isOrchestrator(sm) {
 			return nil
 		}
+
 		if targetID != ac.sessionID {
 			return fmt.Errorf("not authorized: can only target own session")
 		}
+
 		return nil
 
 	case authSelfOrDescendant:
@@ -83,14 +90,18 @@ func (ac authContext) checkTarget(sm *SessionManager, targetID string, rule auth
 		if ac.isOrchestrator(sm) {
 			return nil
 		}
+
 		if targetID == ac.sessionID {
 			return nil
 		}
+
 		if sm.isDescendantOf(targetID, ac.sessionID) {
 			return nil
 		}
+
 		return fmt.Errorf("not authorized: target session is not self or descendant")
 	}
+
 	return fmt.Errorf("unknown auth rule")
 }
 
@@ -105,6 +116,7 @@ func parseInboxStream(stream string) (string, bool) {
 	if !strings.HasPrefix(stream, "inbox:") {
 		return "", false
 	}
+
 	return strings.TrimPrefix(stream, "inbox:"), true
 }
 
@@ -116,17 +128,21 @@ func (ac authContext) checkScenarioOp(sm *SessionManager, scenarioName string) e
 	if !ac.authenticated {
 		return nil
 	}
+
 	for _, sc := range sm.state.Scenarios {
 		if sc.Name == scenarioName {
 			if ac.sessionID == sc.OrchestratorID {
 				return nil
 			}
+
 			if sm.isDescendantOf(ac.sessionID, sc.OrchestratorID) {
 				return nil
 			}
+
 			return fmt.Errorf("not authorized: only the scenario orchestrator or its descendants can manage scenario %q", scenarioName)
 		}
 	}
+
 	return fmt.Errorf("scenario %q not found", scenarioName)
 }
 
@@ -134,19 +150,24 @@ func (ac authContext) checkScenarioOp(sm *SessionManager, scenarioName string) e
 // Must be called with sm.mu at least RLocked.
 func (sm *SessionManager) isDescendantOf(targetID, rootID string) bool {
 	visited := make(map[string]bool)
+
 	current := targetID
 	for {
 		if current == rootID {
 			return true
 		}
+
 		if visited[current] {
 			return false
 		}
+
 		visited[current] = true
+
 		sess, ok := sm.state.Sessions[current]
 		if !ok || sess.ParentID == "" {
 			return false
 		}
+
 		current = sess.ParentID
 	}
 }

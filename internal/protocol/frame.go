@@ -31,13 +31,16 @@ func (fw *FrameWriter) WriteFrame(channel byte, payload []byte) error {
 	if len(payload) > MaxPayload {
 		return fmt.Errorf("payload too large: %d bytes (max %d)", len(payload), MaxPayload)
 	}
+
 	buf := make([]byte, headerSize+len(payload))
 	buf[0] = channel
 	binary.BigEndian.PutUint32(buf[1:headerSize], uint32(len(payload)))
 	copy(buf[headerSize:], payload)
+
 	if _, err := fw.w.Write(buf); err != nil {
 		return fmt.Errorf("write frame: %w", err)
 	}
+
 	return nil
 }
 
@@ -54,16 +57,20 @@ func (fr *FrameReader) ReadFrame() (Frame, error) {
 	if _, err := io.ReadFull(fr.r, fr.hdr[:]); err != nil {
 		return Frame{}, err
 	}
+
 	channel := fr.hdr[0]
+
 	length := binary.BigEndian.Uint32(fr.hdr[1:])
 	if length > MaxPayload {
 		return Frame{}, fmt.Errorf("frame too large: %d bytes (max %d)", length, MaxPayload)
 	}
+
 	payload := make([]byte, length)
 	if length > 0 {
 		if _, err := io.ReadFull(fr.r, payload); err != nil {
 			return Frame{}, fmt.Errorf("read frame payload: %w", err)
 		}
 	}
+
 	return Frame{Channel: channel, Payload: payload}, nil
 }

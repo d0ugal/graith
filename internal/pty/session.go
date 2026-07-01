@@ -61,6 +61,7 @@ func NewSession(opts SessionOpts) (*Session, error) {
 	}
 
 	size := &pty.Winsize{Rows: opts.Rows, Cols: opts.Cols}
+
 	ptmx, err := pty.StartWithSize(cmd, size)
 	if err != nil {
 		return nil, fmt.Errorf("start pty: %w", err)
@@ -70,6 +71,7 @@ func NewSession(opts SessionOpts) (*Session, error) {
 	if err != nil {
 		ptmx.Close()
 		cmd.Process.Kill()
+
 		return nil, fmt.Errorf("scrollback: %w", err)
 	}
 
@@ -149,6 +151,7 @@ func (s *Session) adoptedWaitLoop() {
 	// processes). Run it in the background so it doesn't block the poll
 	// loop that handles the common case.
 	waitDone := make(chan int, 1)
+
 	go func() {
 		proc, _ := os.FindProcess(s.adoptedPID)
 		if ps, err := proc.Wait(); err == nil {
@@ -158,6 +161,7 @@ func (s *Session) adoptedWaitLoop() {
 
 	deadlineReached := false
 	deadline := time.After(adoptedPollTimeout)
+
 	poll := time.NewTicker(time.Second)
 	defer poll.Stop()
 
@@ -170,9 +174,11 @@ func (s *Session) adoptedWaitLoop() {
 			deadlineReached = true
 		case <-poll.C:
 		}
+
 		if err := syscall.Kill(s.adoptedPID, 0); err != nil {
 			break
 		}
+
 		if s.adoptedStartTime != 0 {
 			cur, err := ProcessStartTime(s.adoptedPID)
 			if err != nil || cur != s.adoptedStartTime {
@@ -185,6 +191,7 @@ func (s *Session) adoptedWaitLoop() {
 		if deadlineReached && s.adoptedStartTime == 0 {
 			slog.Warn("adopted wait loop deadline reached without start time identity",
 				"session", s.ID, "pid", s.adoptedPID)
+
 			break
 		}
 	}
@@ -195,14 +202,17 @@ done:
 		exitCode = code
 	default:
 	}
+
 	<-s.readDone
 	s.mu.Lock()
 	s.exited = true
 	s.exitCode = exitCode
 	s.mu.Unlock()
+
 	if s.userInputCond != nil {
 		s.userInputCond.Broadcast()
 	}
+
 	close(s.done)
 }
 
@@ -210,6 +220,7 @@ func (s *Session) ProcessPID() int {
 	if s.Cmd != nil && s.Cmd.Process != nil {
 		return s.Cmd.Process.Pid
 	}
+
 	return s.adoptedPID
 }
 
@@ -219,6 +230,7 @@ func (s *Session) Fd() uintptr {
 
 func (s *Session) readLoop() {
 	defer close(s.readDone)
+
 	buf := make([]byte, 32*1024)
 	for {
 		n, err := s.Ptmx.Read(buf)
@@ -231,12 +243,14 @@ func (s *Session) readLoop() {
 			writers := make([]io.Writer, len(s.writers))
 			copy(writers, s.writers)
 			s.mu.Unlock()
+
 			for _, w := range writers {
 				if w != nil {
 					_, _ = w.Write(chunk)
 				}
 			}
 		}
+
 		if err != nil {
 			return
 		}
@@ -248,6 +262,7 @@ func (s *Session) waitLoop() {
 	// Wait for readLoop to drain remaining PTY output before signalling done.
 	<-s.readDone
 	s.mu.Lock()
+
 	s.exited = true
 	if err != nil {
 		var exitErr *exec.ExitError
@@ -256,6 +271,7 @@ func (s *Session) waitLoop() {
 			if ws, ok := exitErr.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
 				s.exitSignal = ws.Signal()
 			}
+
 			s.peakRSSBytes = extractPeakRSS(exitErr.ProcessState)
 		} else {
 			s.exitCode = -1
@@ -264,9 +280,11 @@ func (s *Session) waitLoop() {
 		s.peakRSSBytes = extractPeakRSS(s.Cmd.ProcessState)
 	}
 	s.mu.Unlock()
+
 	if s.userInputCond != nil {
 		s.userInputCond.Broadcast()
 	}
+
 	close(s.done)
 }
 
@@ -274,19 +292,23 @@ func extractPeakRSS(ps *os.ProcessState) int64 {
 	if ps == nil {
 		return 0
 	}
+
 	if ru, ok := ps.SysUsage().(*syscall.Rusage); ok && ru != nil {
 		rss := ru.Maxrss
 		if runtime.GOOS != "darwin" {
 			rss *= 1024 // Linux reports KB; macOS already reports bytes.
 		}
+
 		return rss
 	}
+
 	return 0
 }
 
 func (s *Session) WriteInput(data []byte) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
+
 	return s.writeInputLocked(data)
 }
 
@@ -307,8 +329,10 @@ func (s *Session) WriteInputAndSubmit(data []byte) error {
 		if err := s.writeInputLocked(data); err != nil {
 			return err
 		}
+
 		time.Sleep(typeInputDelay)
 	}
+
 	return s.writeInputLocked([]byte("\r"))
 }
 
@@ -316,6 +340,7 @@ func (s *Session) writeInputLocked(data []byte) error {
 	s.mu.RLock()
 	exited := s.exited
 	s.mu.RUnlock()
+
 	if exited {
 		return fmt.Errorf("session process has exited")
 	}
@@ -324,9 +349,11 @@ func (s *Session) writeInputLocked(data []byte) error {
 	if err != nil {
 		return err
 	}
+
 	if n != len(data) {
 		return io.ErrShortWrite
 	}
+
 	return nil
 }
 
@@ -344,6 +371,7 @@ func (s *Session) NotifyUserInput() {
 // Returns true if the idle condition was met, false if maxWait expired.
 func (s *Session) WaitForUserIdle(idleTimeout, maxWait time.Duration) bool {
 	deadline := time.Now().Add(maxWait)
+
 	s.userInputCond.L.Lock()
 	defer s.userInputCond.L.Unlock()
 
@@ -351,13 +379,16 @@ func (s *Session) WaitForUserIdle(idleTimeout, maxWait time.Duration) bool {
 		s.mu.RLock()
 		exited := s.exited
 		s.mu.RUnlock()
+
 		if exited {
 			return true
 		}
+
 		idle := time.Since(s.lastUserInputAt)
 		if idle >= idleTimeout {
 			return true
 		}
+
 		if time.Now().After(deadline) {
 			return false
 		}
@@ -368,11 +399,13 @@ func (s *Session) WaitForUserIdle(idleTimeout, maxWait time.Duration) bool {
 		if dl := time.Until(deadline); dl < wakeIn {
 			wakeIn = dl
 		}
+
 		timer := time.AfterFunc(wakeIn, func() {
 			s.userInputCond.L.Lock()
 			s.userInputCond.Broadcast()
 			s.userInputCond.L.Unlock()
 		})
+
 		s.userInputCond.Wait()
 		timer.Stop()
 	}
@@ -382,6 +415,7 @@ func (s *Session) Resize(rows, cols uint16) error {
 	s.mu.Lock()
 	s.screen.Resize(int(cols), int(rows))
 	s.mu.Unlock()
+
 	return pty.Setsize(s.Ptmx, &pty.Winsize{Rows: rows, Cols: cols})
 }
 
@@ -425,6 +459,7 @@ func (s *Session) LastOutputAt() time.Time { s.mu.RLock(); defer s.mu.RUnlock();
 func (s *Session) RecentlyAdopted(grace time.Duration) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+
 	return !s.adoptedAt.IsZero() && s.lastOutputAt.IsZero() && time.Since(s.adoptedAt) < grace
 }
 func (s *Session) Exited() bool  { s.mu.RLock(); defer s.mu.RUnlock(); return s.exited }
@@ -432,6 +467,7 @@ func (s *Session) ExitCode() int { s.mu.RLock(); defer s.mu.RUnlock(); return s.
 func (s *Session) ExitSignal() syscall.Signal {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+
 	return s.exitSignal
 }
 func (s *Session) PeakRSSBytes() int64 { s.mu.RLock(); defer s.mu.RUnlock(); return s.peakRSSBytes }
@@ -441,6 +477,7 @@ func (s *Session) Kill() error {
 	if pid == 0 {
 		return nil
 	}
+
 	return syscall.Kill(-pid, syscall.SIGTERM)
 }
 
@@ -449,6 +486,7 @@ func (s *Session) ForceKill() error {
 	if pid == 0 {
 		return nil
 	}
+
 	return syscall.Kill(-pid, syscall.SIGKILL)
 }
 
@@ -460,23 +498,28 @@ func (s *Session) Close() {
 
 func buildEnv(extra map[string]string) []string {
 	overrides := make(map[string]string, len(extra)+1)
+
 	overrides["TERM"] = "xterm-256color"
 	for k, v := range extra {
 		overrides[k] = v
 	}
 
 	parent := os.Environ()
+
 	env := make([]string, 0, len(overrides)+len(parent))
 	for k, v := range overrides {
 		env = append(env, k+"="+v)
 	}
+
 	for _, e := range parent {
 		if k, _, ok := strings.Cut(e, "="); ok {
 			if _, overridden := overrides[k]; overridden {
 				continue
 			}
 		}
+
 		env = append(env, e)
 	}
+
 	return env
 }

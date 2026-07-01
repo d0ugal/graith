@@ -58,6 +58,7 @@ func tickCmd() tea.Cmd {
 
 func (m DashboardModel) doRefresh() tea.Cmd {
 	refresh := m.refresh
+
 	return func() tea.Msg {
 		return refreshMsg{sessions: refresh()}
 	}
@@ -75,10 +76,12 @@ func (m DashboardModel) visibleRows() int {
 	if m.state != dashStateNormal {
 		reserved += 2
 	}
+
 	rows := m.height - reserved
 	if rows < 1 {
 		rows = 1
 	}
+
 	return rows
 }
 
@@ -87,9 +90,11 @@ func (m *DashboardModel) scrollToCursor() {
 	if m.cursor < m.offset {
 		m.offset = m.cursor
 	}
+
 	if m.cursor >= m.offset+visible {
 		m.offset = m.cursor - visible + 1
 	}
+
 	if m.offset < 0 {
 		m.offset = 0
 	}
@@ -104,9 +109,11 @@ func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.sessions == nil {
 			return m, nil
 		}
+
 		selectedID := m.selectedSessionID()
 		m.sessions = msg.sessions
 		m.clampCursor()
+
 		if selectedID != "" {
 			for i, s := range m.sessions {
 				if s.ID == selectedID {
@@ -115,6 +122,7 @@ func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
+
 		if m.confirmSessionID != "" {
 			target := m.sessionByID(m.confirmSessionID)
 			if target == nil || (m.state == dashStateConfirmStop && target.Status != "running") {
@@ -122,13 +130,16 @@ func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.confirmSessionID = ""
 			}
 		}
+
 		m.scrollToCursor()
+
 		return m, nil
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
 		m.scrollToCursor()
+
 		return m, nil
 
 	case tea.KeyPressMsg:
@@ -140,12 +151,14 @@ func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.result = &DashboardResult{Action: "delete", SessionID: m.confirmSessionID}
 					return m, tea.Quit
 				}
+
 				m.state = dashStateNormal
 				m.confirmSessionID = ""
 			default:
 				m.state = dashStateNormal
 				m.confirmSessionID = ""
 			}
+
 			return m, nil
 
 		case dashStateConfirmStop:
@@ -155,12 +168,14 @@ func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.result = &DashboardResult{Action: "stop", SessionID: m.confirmSessionID}
 					return m, tea.Quit
 				}
+
 				m.state = dashStateNormal
 				m.confirmSessionID = ""
 			default:
 				m.state = dashStateNormal
 				m.confirmSessionID = ""
 			}
+
 			return m, nil
 
 		case dashStateNormal:
@@ -172,40 +187,47 @@ func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.cursor++
 					m.scrollToCursor()
 				}
+
 				return m, nil
 			case "k", "up":
 				if m.cursor > 0 {
 					m.cursor--
 					m.scrollToCursor()
 				}
+
 				return m, nil
 			case "enter", "a":
 				if s := m.selectedSession(); s != nil {
 					m.result = &DashboardResult{Action: "attach", SessionID: s.ID}
 					return m, tea.Quit
 				}
+
 				return m, nil
 			case "s":
 				if s := m.selectedSession(); s != nil && s.Status == "running" {
 					m.state = dashStateConfirmStop
 					m.confirmSessionID = s.ID
 				}
+
 				return m, nil
 			case "x", "d":
 				if s := m.selectedSession(); s != nil {
 					m.state = dashStateConfirmDelete
 					m.confirmSessionID = s.ID
 				}
+
 				return m, nil
 			case "r":
 				if s := m.selectedSession(); s != nil && s.Status == "stopped" {
 					m.result = &DashboardResult{Action: "resume", SessionID: s.ID}
 					return m, tea.Quit
 				}
+
 				return m, nil
 			}
 		}
 	}
+
 	return m, nil
 }
 
@@ -250,6 +272,7 @@ func (m DashboardModel) View() tea.View {
 		if m.width > 0 && lipgloss.Width(headerLine) > m.width {
 			headerLine = ansi.Truncate(headerLine, m.width, "")
 		}
+
 		b.WriteString(headerLine)
 		b.WriteString("\n")
 
@@ -261,10 +284,12 @@ func (m DashboardModel) View() tea.View {
 
 		// Session rows (viewport windowed)
 		visible := m.visibleRows()
+
 		end := m.offset + visible
 		if end > len(m.sessions) {
 			end = len(m.sessions)
 		}
+
 		now := time.Now()
 
 		if m.offset > 0 {
@@ -277,6 +302,7 @@ func (m DashboardModel) View() tea.View {
 			if m.width > 0 && lipgloss.Width(line) > m.width {
 				line = ansi.Truncate(line, m.width, "")
 			}
+
 			b.WriteString(line)
 			b.WriteString("\n")
 		}
@@ -305,6 +331,7 @@ func (m DashboardModel) View() tea.View {
 
 	// Fill remaining space
 	rendered := strings.Count(b.String(), "\n")
+
 	footerLines := 2
 	for i := rendered; i < m.height-footerLines-1; i++ {
 		b.WriteString("\n")
@@ -317,6 +344,7 @@ func (m DashboardModel) View() tea.View {
 
 	v := tea.NewView(b.String())
 	v.AltScreen = true
+
 	return v
 }
 
@@ -349,51 +377,65 @@ func (m DashboardModel) computeDashCols() dashCols {
 		attached: 8,
 	}
 	now := time.Now()
+
 	for _, s := range m.sessions {
 		if n := len(s.Name); n > dc.name {
 			dc.name = n
 		}
+
 		if n := len(s.RepoName); n > dc.repo {
 			dc.repo = n
 		}
+
 		if n := len(s.Agent); n > dc.agent {
 			dc.agent = n
 		}
+
 		if n := len(s.Status); n > dc.status {
 			dc.status = n
 		}
+
 		activity := s.AgentStatus
 		if s.Status != "running" {
 			activity = ""
 		}
+
 		if activity == "approval" {
 			activity = "⚠ approval"
 		}
+
 		if n := len(activity); n > dc.activity {
 			dc.activity = n
 		}
+
 		branch := s.Branch
 		if p := strings.SplitN(branch, "/", 3); len(p) == 3 {
 			branch = p[2]
 		}
+
 		if n := len(branch); n > dc.branch {
 			dc.branch = n
 		}
+
 		var gp []string
 		if s.Dirty {
 			gp = append(gp, "dirty")
 		}
+
 		if s.UnpushedCount > 0 {
 			gp = append(gp, fmt.Sprintf("%d↑", s.UnpushedCount))
 		}
+
 		if n := len(strings.Join(gp, " ")); n > dc.git {
 			dc.git = n
 		}
+
 		if t, err := time.Parse(time.RFC3339, s.CreatedAt); err == nil {
 			if n := len(ShortDuration(now.Sub(t))); n > dc.age {
 				dc.age = n
 			}
 		}
+
 		if s.LastAttachedAt != "" {
 			if t, err := time.Parse(time.RFC3339, s.LastAttachedAt); err == nil {
 				att := ShortDuration(now.Sub(t)) + " ago"
@@ -403,12 +445,14 @@ func (m DashboardModel) computeDashCols() dashCols {
 			}
 		}
 	}
+
 	return dc
 }
 
 func (m DashboardModel) renderRow(s protocol.SessionInfo, cols dashCols, now time.Time, selected bool, dimStyle, selectedStyle lipgloss.Style) string {
 	indicator := "●"
 	indicatorColor := lipgloss.Color("#00ff87")
+
 	switch s.Status {
 	case "stopped":
 		indicator = "○"
@@ -422,6 +466,7 @@ func (m DashboardModel) renderRow(s protocol.SessionInfo, cols dashCols, now tim
 	if s.Status != "running" {
 		activity = ""
 	}
+
 	if activity == "approval" {
 		activity = "⚠ approval"
 	}
@@ -435,9 +480,11 @@ func (m DashboardModel) renderRow(s protocol.SessionInfo, cols dashCols, now tim
 	if s.Dirty {
 		gitParts = append(gitParts, "dirty")
 	}
+
 	if s.UnpushedCount > 0 {
 		gitParts = append(gitParts, fmt.Sprintf("%d↑", s.UnpushedCount))
 	}
+
 	gitStr := strings.Join(gitParts, " ")
 
 	age := ""
@@ -446,6 +493,7 @@ func (m DashboardModel) renderRow(s protocol.SessionInfo, cols dashCols, now tim
 	}
 
 	attached := ""
+
 	if s.LastAttachedAt != "" {
 		if t, err := time.Parse(time.RFC3339, s.LastAttachedAt); err == nil {
 			attached = ShortDuration(now.Sub(t)) + " ago"
@@ -460,6 +508,7 @@ func (m DashboardModel) renderRow(s protocol.SessionInfo, cols dashCols, now tim
 	}
 
 	sep := dimStyle.Render("  ")
+
 	line := fmt.Sprintf("%s %s %s%s%s%s%s%s%s%s%s%s%s%s%s%s%s",
 		cursor, prefix,
 		pad(s.Name, cols.name), sep,
@@ -486,6 +535,7 @@ func (m DashboardModel) selectedSession() *protocol.SessionInfo {
 	if m.cursor >= 0 && m.cursor < len(m.sessions) {
 		return &m.sessions[m.cursor]
 	}
+
 	return nil
 }
 
@@ -495,6 +545,7 @@ func (m DashboardModel) sessionByID(id string) *protocol.SessionInfo {
 			return &m.sessions[i]
 		}
 	}
+
 	return nil
 }
 
@@ -502,6 +553,7 @@ func (m DashboardModel) selectedSessionID() string {
 	if s := m.selectedSession(); s != nil {
 		return s.ID
 	}
+
 	return ""
 }
 
@@ -509,6 +561,7 @@ func (m *DashboardModel) clampCursor() {
 	if m.cursor >= len(m.sessions) {
 		m.cursor = len(m.sessions) - 1
 	}
+
 	if m.cursor < 0 {
 		m.cursor = 0
 	}
@@ -519,6 +572,7 @@ func RunDashboard(sessions []protocol.SessionInfo, refresh func() []protocol.Ses
 	m := NewDashboardModel(sessions, func() []protocol.SessionInfo {
 		s := refresh()
 		sortDashboardSessions(s)
+
 		return s
 	})
 	p := tea.NewProgram(m)
@@ -532,6 +586,7 @@ func RunDashboard(sessions []protocol.SessionInfo, refresh func() []protocol.Ses
 	if !ok {
 		return nil
 	}
+
 	return result.result
 }
 
@@ -540,6 +595,7 @@ func sortDashboardSessions(sessions []protocol.SessionInfo) {
 		if sessions[i].RepoName != sessions[j].RepoName {
 			return sessions[i].RepoName < sessions[j].RepoName
 		}
+
 		return sessions[i].Name < sessions[j].Name
 	})
 }

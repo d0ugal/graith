@@ -64,10 +64,12 @@ func (o OrchestratorConfig) IdleTimeoutDuration() time.Duration {
 	if o.IdleTimeout == "" {
 		return 30 * time.Minute
 	}
+
 	d, err := ParseDurationWithDays(o.IdleTimeout)
 	if err != nil {
 		return 30 * time.Minute
 	}
+
 	return d
 }
 
@@ -75,6 +77,7 @@ func (o OrchestratorConfig) AgentName() string {
 	if o.Agent != "" {
 		return o.Agent
 	}
+
 	return "claude"
 }
 
@@ -87,10 +90,12 @@ func (g GitPullConfig) IntervalDuration() time.Duration {
 	if g.Interval == "" {
 		return time.Hour
 	}
+
 	d, err := ParseDurationWithDays(g.Interval)
 	if err != nil {
 		return time.Hour
 	}
+
 	return d
 }
 
@@ -121,10 +126,12 @@ func parseDurationOr(s string, fallback time.Duration) time.Duration {
 	if s == "" {
 		return fallback
 	}
+
 	d, err := ParseDurationWithDays(s)
 	if err != nil {
 		return fallback
 	}
+
 	return d
 }
 
@@ -153,6 +160,7 @@ func (p PRWatchConfig) MaxNotifications() int {
 	if p.MaxNotificationsPerPR <= 0 {
 		return 10
 	}
+
 	return p.MaxNotificationsPerPR
 }
 
@@ -177,12 +185,15 @@ func (m Messages) MaxAgeDuration() time.Duration {
 	if m.MaxAge == "" {
 		return 0
 	}
+
 	d, _ := ParseDurationWithDays(m.MaxAge)
+
 	return d
 }
 
 func ParseDurationWithDays(s string) (time.Duration, error) {
 	var total time.Duration
+
 	if i := strings.Index(s, "d"); i > 0 {
 		var days int
 		if _, err := fmt.Sscanf(s[:i+1], "%dd", &days); err == nil {
@@ -190,16 +201,20 @@ func ParseDurationWithDays(s string) (time.Duration, error) {
 			s = s[i+1:]
 		}
 	}
+
 	if s != "" {
 		d, err := time.ParseDuration(s)
 		if err != nil {
 			return 0, fmt.Errorf("invalid duration: %w", err)
 		}
+
 		total += d
 	}
+
 	if total < 0 {
 		return 0, fmt.Errorf("negative duration not allowed")
 	}
+
 	return total, nil
 }
 
@@ -243,10 +258,12 @@ func (s StatusConfig) TTLDuration() time.Duration {
 	if s.TTL == "" {
 		return 5 * time.Minute
 	}
+
 	d, err := ParseDurationWithDays(s.TTL)
 	if err != nil {
 		return 5 * time.Minute
 	}
+
 	return d
 }
 
@@ -254,10 +271,12 @@ func (a Approvals) TimeoutDuration() time.Duration {
 	if a.Timeout == "" {
 		return 10 * time.Minute
 	}
+
 	d, err := ParseDurationWithDays(a.Timeout)
 	if err != nil {
 		return 10 * time.Minute
 	}
+
 	return d
 }
 
@@ -289,6 +308,7 @@ func (a Agent) PromptInjectionEnabled() bool {
 	if a.InjectPrompt != nil {
 		return *a.InjectPrompt
 	}
+
 	return true
 }
 
@@ -296,6 +316,7 @@ func (a Agent) PreTrustWorkspaceEnabled() bool {
 	if a.PreTrustWorkspace != nil {
 		return *a.PreTrustWorkspace
 	}
+
 	return true
 }
 
@@ -304,12 +325,15 @@ func (a Agent) IdleTimeoutDuration() time.Duration {
 		if len(a.ResumeArgs) > 0 {
 			return time.Hour
 		}
+
 		return 0
 	}
+
 	d, err := time.ParseDuration(a.IdleTimeout)
 	if err != nil {
 		return 0
 	}
+
 	return d
 }
 
@@ -324,18 +348,24 @@ type SandboxConfig struct {
 
 func MergeMCPServers(global []MCPServerConfig, overrides map[string]MCPServerConfig) []MCPServerConfig {
 	byName := make(map[string]MCPServerConfig, len(global))
+
 	var order []string
+
 	for _, s := range global {
 		if _, exists := byName[s.Name]; !exists {
 			order = append(order, s.Name)
 		}
+
 		byName[s.Name] = s
 	}
+
 	names := make([]string, 0, len(overrides))
 	for name := range overrides {
 		names = append(names, name)
 	}
+
 	sort.Strings(names)
+
 	for _, name := range names {
 		ovr := overrides[name]
 		if _, exists := byName[name]; exists {
@@ -343,16 +373,20 @@ func MergeMCPServers(global []MCPServerConfig, overrides map[string]MCPServerCon
 				delete(byName, name)
 				continue
 			}
+
 			base := byName[name]
 			if ovr.Command != "" {
 				base.Command = ovr.Command
 			}
+
 			if ovr.Args != nil {
 				base.Args = ovr.Args
 			}
+
 			if ovr.Env != nil {
 				base.Env = ovr.Env
 			}
+
 			byName[name] = base
 		} else if !ovr.Disabled {
 			ovr.Name = name
@@ -360,12 +394,15 @@ func MergeMCPServers(global []MCPServerConfig, overrides map[string]MCPServerCon
 			order = append(order, name)
 		}
 	}
+
 	var result []MCPServerConfig
+
 	for _, name := range order {
 		if s, ok := byName[name]; ok && !s.Disabled {
 			result = append(result, s)
 		}
 	}
+
 	return result
 }
 
@@ -396,6 +433,7 @@ func (c *Config) OrchestratorSandboxMerged(agentName string) SandboxConfig {
 	orch := c.Orchestrator.Sandbox
 	merged.ReadDirs = dedup(append(merged.ReadDirs, orch.ReadDirs...))
 	merged.WriteDirs = dedup(append(merged.WriteDirs, orch.WriteDirs...))
+
 	return merged
 }
 
@@ -403,15 +441,19 @@ func dedup(ss []string) []string {
 	if len(ss) == 0 {
 		return nil
 	}
+
 	seen := make(map[string]struct{}, len(ss))
+
 	out := make([]string, 0, len(ss))
 	for _, s := range ss {
 		if _, ok := seen[s]; ok {
 			continue
 		}
+
 		seen[s] = struct{}{}
 		out = append(out, s)
 	}
+
 	return out
 }
 
@@ -421,9 +463,11 @@ func ExpandPath(p string) string {
 			p = filepath.Join(home, p[2:])
 		}
 	}
+
 	if abs, err := filepath.Abs(p); err == nil {
 		p = abs
 	}
+
 	return filepath.Clean(p)
 }
 
@@ -431,6 +475,7 @@ func (rc RepoConfig) Validate() error {
 	if rc.Singleton && rc.AllowConcurrent {
 		return fmt.Errorf("repo %q: singleton and allow_concurrent cannot both be set", rc.Path)
 	}
+
 	if len(rc.Includes) == 0 {
 		return nil
 	}
@@ -444,18 +489,22 @@ func (rc RepoConfig) Validate() error {
 		if resolved == ResolvePath(rc.Path) {
 			return fmt.Errorf("repo %q: cannot include itself", rc.Path)
 		}
+
 		base := strings.ToLower(filepath.Base(resolved))
 		if prev, ok := basenames[base]; ok {
 			return fmt.Errorf("repo %q: duplicate basename %q from %q and %q", rc.Path, base, prev, inc)
 		}
+
 		basenames[base] = inc
 
 		envName := IncludeEnvVarName(filepath.Base(resolved))
 		if prev, ok := envNames[envName]; ok {
 			return fmt.Errorf("repo %q: env var collision %s from %q and %q", rc.Path, envName, prev, inc)
 		}
+
 		envNames[envName] = inc
 	}
+
 	return nil
 }
 
@@ -464,11 +513,13 @@ func (c *Config) Validate() error {
 	if c.DataDir != "" && !filepath.IsAbs(c.DataDir) && !strings.HasPrefix(c.DataDir, "~/") {
 		errs = append(errs, fmt.Errorf("data_dir %q must be an absolute path or start with ~/", c.DataDir))
 	}
+
 	for _, r := range c.Repos {
 		if err := r.Validate(); err != nil {
 			errs = append(errs, err)
 		}
 	}
+
 	seen := make(map[string]bool, len(c.MCPServers))
 	for _, s := range c.MCPServers {
 		switch {
@@ -479,14 +530,17 @@ func (c *Config) Validate() error {
 		default:
 			seen[s.Name] = true
 		}
+
 		if !s.Disabled && s.Command == "" {
 			errs = append(errs, fmt.Errorf("mcp_servers: %q has no command", s.Name))
 		}
 	}
+
 	globalNames := make(map[string]bool, len(c.MCPServers))
 	for _, s := range c.MCPServers {
 		globalNames[s.Name] = true
 	}
+
 	for agentName, agent := range c.Agents {
 		for name, s := range agent.MCPServers {
 			if !s.Disabled && s.Command == "" && !globalNames[name] {
@@ -494,6 +548,7 @@ func (c *Config) Validate() error {
 			}
 		}
 	}
+
 	if c.GitPull.Interval != "" {
 		d, err := ParseDurationWithDays(c.GitPull.Interval)
 		if err != nil {
@@ -502,6 +557,7 @@ func (c *Config) Validate() error {
 			errs = append(errs, fmt.Errorf("git_pull.interval %q: must be at least 1 minute", c.GitPull.Interval))
 		}
 	}
+
 	for _, f := range []struct {
 		name, val string
 	}{
@@ -513,22 +569,27 @@ func (c *Config) Validate() error {
 		if f.val == "" {
 			continue
 		}
+
 		if _, err := ParseDurationWithDays(f.val); err != nil {
 			errs = append(errs, fmt.Errorf("%s %q: %w", f.name, f.val, err))
 		}
 	}
+
 	return errors.Join(errs...)
 }
 
 func IncludeEnvVarName(repoBasename string) string {
 	name := strings.ToUpper(repoBasename)
 	name = strings.NewReplacer("-", "_", ".", "_").Replace(name)
+
 	var clean []rune
+
 	for _, r := range name {
 		if (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' {
 			clean = append(clean, r)
 		}
 	}
+
 	return "GRAITH_INCLUDE_" + string(clean) + "_PATH"
 }
 
@@ -539,6 +600,7 @@ func (c *Config) FindRepo(repoPath string) (RepoConfig, bool) {
 			return r, true
 		}
 	}
+
 	return RepoConfig{}, false
 }
 
@@ -546,6 +608,7 @@ func (c *Config) RepoPathAllowed(repoPath string) bool {
 	if len(c.AllowedRepoPaths) == 0 {
 		return true
 	}
+
 	repoPath = ResolvePath(repoPath)
 	for _, allowed := range c.AllowedRepoPaths {
 		prefix := ResolvePath(allowed)
@@ -553,6 +616,7 @@ func (c *Config) RepoPathAllowed(repoPath string) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -561,6 +625,7 @@ func ResolvePath(p string) string {
 	if resolved, err := filepath.EvalSymlinks(p); err == nil {
 		p = resolved
 	}
+
 	return p
 }
 
@@ -569,15 +634,19 @@ func Load(path string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("reading config: %w", err)
 	}
+
 	cfg := Default()
+
 	defaultAgents := cfg.Agents
 	if err := toml.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("parsing config %s: %w", path, err)
 	}
+
 	cfg.Agents = mergeAgents(defaultAgents, cfg.Agents)
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("config validation: %w", err)
 	}
+
 	return cfg, nil
 }
 
@@ -586,14 +655,17 @@ func mergeAgents(defaults, user map[string]Agent) map[string]Agent {
 	for name, def := range defaults {
 		merged[name] = def
 	}
+
 	for name, usr := range user {
 		def, hasDefault := merged[name]
 		if !hasDefault {
 			merged[name] = usr
 			continue
 		}
+
 		merged[name] = mergeAgent(def, usr)
 	}
+
 	return merged
 }
 
@@ -601,37 +673,48 @@ func mergeAgent(def, usr Agent) Agent {
 	if usr.Command != "" {
 		def.Command = usr.Command
 	}
+
 	if usr.Args != nil {
 		def.Args = usr.Args
 	}
+
 	if usr.ResumeArgs != nil {
 		def.ResumeArgs = usr.ResumeArgs
 	}
+
 	if usr.ForkArgs != nil {
 		def.ForkArgs = usr.ForkArgs
 	}
+
 	if usr.Env != nil {
 		def.Env = usr.Env
 	}
+
 	if usr.IdleTimeout != "" {
 		def.IdleTimeout = usr.IdleTimeout
 	}
+
 	if usr.Sandbox.Enabled || usr.Sandbox.Disabled != nil || usr.Sandbox.Command != "" ||
 		usr.Sandbox.Features != nil || usr.Sandbox.ReadDirs != nil || usr.Sandbox.WriteDirs != nil {
 		def.Sandbox = usr.Sandbox
 	}
+
 	if usr.InjectPrompt != nil {
 		def.InjectPrompt = usr.InjectPrompt
 	}
+
 	if usr.PreTrustWorkspace != nil {
 		def.PreTrustWorkspace = usr.PreTrustWorkspace
 	}
+
 	if usr.MCPServers != nil {
 		def.MCPServers = usr.MCPServers
 	}
+
 	if usr.ValidateModel != "" {
 		def.ValidateModel = usr.ValidateModel
 	}
+
 	return def
 }
 
@@ -640,6 +723,7 @@ func Default() *Config {
 	if err := toml.Unmarshal(defaultConfigTOML, cfg); err != nil {
 		panic("invalid embedded default config: " + err.Error())
 	}
+
 	return cfg
 }
 
@@ -650,6 +734,7 @@ func DefaultAgentPrompt() string {
 func DefaultTOML() []byte {
 	out := make([]byte, len(defaultConfigTOML))
 	copy(out, defaultConfigTOML)
+
 	return out
 }
 
@@ -658,13 +743,16 @@ func LoadOrDefault(path string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	if path == "" {
 		p, err := ResolvePaths()
 		if err != nil {
 			return nil, err
 		}
+
 		path = p.ConfigFile
 	}
+
 	cfg, err := Load(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -675,10 +763,13 @@ func LoadOrDefault(path string) (*Config, error) {
 					}
 				}
 			}
+
 			return Default(), nil
 		}
+
 		return nil, err
 	}
+
 	return cfg, nil
 }
 
@@ -686,9 +777,11 @@ func LoadOrDefault(path string) (*Config, error) {
 // Support/graith/config.toml) if it differs from the current path.
 func legacyConfigFile() string {
 	legacy := filepath.Join(xdg.ConfigHome, baseAppName, "config.toml")
+
 	current := filepath.Join(configHome(), baseAppName, "config.toml")
 	if legacy == current {
 		return ""
 	}
+
 	return legacy
 }

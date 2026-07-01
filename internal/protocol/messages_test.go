@@ -10,24 +10,30 @@ func TestEncodeDecodeControl(t *testing.T) {
 		Version: "1.0", ClientID: "brig-client",
 		TerminalSize: [2]uint16{80, 24}, Cwd: "/home/user/croft",
 	}
+
 	data, err := EncodeControl("handshake", handshake)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	msg, err := DecodeControl(data)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if msg.Type != "handshake" {
 		t.Errorf("Type = %q, want handshake", msg.Type)
 	}
+
 	var got HandshakeMsg
 	if err := DecodePayload(msg, &got); err != nil {
 		t.Fatal(err)
 	}
+
 	if got.ClientID != "brig-client" {
 		t.Errorf("ClientID = %q", got.ClientID)
 	}
+
 	if got.Cwd != "/home/user/croft" {
 		t.Errorf("Cwd = %q", got.Cwd)
 	}
@@ -63,13 +69,17 @@ func TestSessionInfoRoundTrip(t *testing.T) {
 		Agent: "claude", Status: "running",
 		CreatedAt: time.Now().UTC().Format(time.RFC3339),
 	}
+
 	data, err := EncodeControl("session_update", session)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	msg, _ := DecodeControl(data)
+
 	var got SessionInfo
 	DecodePayload(msg, &got)
+
 	if got.ID != "a3f2b1c9" || got.Name != "braw-auth-fix" {
 		t.Errorf("session = %+v", got)
 	}

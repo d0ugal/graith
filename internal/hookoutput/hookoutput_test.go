@@ -36,6 +36,7 @@ func TestAllowAll(t *testing.T) {
 	if got := AllowAll("claude"); got != `{"decision":"approve"}` {
 		t.Errorf("AllowAll(claude) = %s, want approve", got)
 	}
+
 	if got := AllowAll("codex"); got != `{"decision":"allow"}` {
 		t.Errorf("AllowAll(codex) = %s, want allow", got)
 	}

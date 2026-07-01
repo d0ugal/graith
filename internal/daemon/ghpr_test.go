@@ -112,10 +112,12 @@ func TestFetchChecksAggregate(t *testing.T) {
 			ghRunner = func(ctx context.Context, dir string, args ...string) (string, error) {
 				return c.json, nil
 			}
+
 			state, fail := fetchChecks(context.Background(), "croft/loch", 1, "")
 			if state != c.wantState {
 				t.Errorf("state = %q, want %q", state, c.wantState)
 			}
+
 			if len(fail) != len(c.wantFail) {
 				t.Errorf("failing = %v, want %v", fail, c.wantFail)
 			}
@@ -130,10 +132,12 @@ func TestFetchCommentsSlurpFlattensPages(t *testing.T) {
 	ghRunner = func(ctx context.Context, dir string, args ...string) (string, error) {
 		return `[[{"id":1,"user":{"login":"ailsa"},"body":"a"}],[{"id":2,"user":{"login":"hamish"},"body":"b"}]]`, nil
 	}
+
 	comments, ok := fetchComments(context.Background(), "croft/loch", 1, "", "issues")
 	if !ok {
 		t.Fatal("expected ok=true")
 	}
+
 	if len(comments) != 2 || comments[0].ID != 1 || comments[1].ID != 2 {
 		t.Errorf("expected 2 flattened comments, got %+v", comments)
 	}
@@ -142,13 +146,16 @@ func TestFetchCommentsSlurpFlattensPages(t *testing.T) {
 func TestFetchCommentsDegradedReportsNotOK(t *testing.T) {
 	orig := ghRunner
 	defer func() { ghRunner = orig }()
+
 	ghRunner = func(ctx context.Context, dir string, args ...string) (string, error) {
 		return "", context.DeadlineExceeded
 	}
+
 	comments, ok := fetchComments(context.Background(), "croft/loch", 1, "", "issues")
 	if ok {
 		t.Error("degraded fetch should report ok=false")
 	}
+
 	if comments != nil {
 		t.Errorf("degraded fetch should return nil, got %v", comments)
 	}
@@ -157,18 +164,22 @@ func TestFetchCommentsDegradedReportsNotOK(t *testing.T) {
 func TestResolvePRParsesMergeable(t *testing.T) {
 	orig := ghRunner
 	defer func() { ghRunner = orig }()
+
 	calls := 0
 	ghRunner = func(ctx context.Context, dir string, args ...string) (string, error) {
 		calls++
 		if calls == 1 { // gh pr list
 			return `[{"number":4,"state":"OPEN","isDraft":false,"url":"https://github.com/croft/loch/pull/4","headRefOid":"sha1","mergeable":"CONFLICTING"}]`, nil
 		}
+
 		return `[]`, nil // checks/comments
 	}
+
 	d, found, err := resolvePR(context.Background(), "croft/loch", "bide", "")
 	if err != nil || !found {
 		t.Fatalf("expected found PR, got found=%v err=%v", found, err)
 	}
+
 	if d.Mergeable != "CONFLICTING" {
 		t.Errorf("Mergeable = %q, want CONFLICTING", d.Mergeable)
 	}
@@ -177,13 +188,16 @@ func TestResolvePRParsesMergeable(t *testing.T) {
 func TestResolvePRNoPR(t *testing.T) {
 	orig := ghRunner
 	defer func() { ghRunner = orig }()
+
 	ghRunner = func(ctx context.Context, dir string, args ...string) (string, error) {
 		return `[]`, nil
 	}
+
 	_, found, err := resolvePR(context.Background(), "croft/loch", "bide", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+
 	if found {
 		t.Error("expected found=false for empty pr list")
 	}

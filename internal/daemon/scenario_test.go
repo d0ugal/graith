@@ -57,16 +57,20 @@ func TestScenarioStateInState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if len(state.Scenarios) != 1 {
 		t.Fatalf("expected 1 scenario, got %d", len(state.Scenarios))
 	}
+
 	sc := state.Scenarios["sc-kirk"]
 	if sc.Name != "strath-braw" {
 		t.Errorf("scenario name = %q, want %q", sc.Name, "strath-braw")
 	}
+
 	if sc.Goal != "kirk goal" {
 		t.Errorf("scenario goal = %q, want %q", sc.Goal, "kirk goal")
 	}
+
 	if len(sc.Sessions) != 2 {
 		t.Errorf("scenario sessions = %d, want 2", len(sc.Sessions))
 	}
@@ -91,13 +95,16 @@ func TestScenarioFieldsOnSessionState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	sess := state.Sessions["braw1"]
 	if sess.ScenarioID != "sc-glen" {
 		t.Errorf("ScenarioID = %q, want %q", sess.ScenarioID, "sc-glen")
 	}
+
 	if sess.ScenarioRole != "Braw forge engineer" {
 		t.Errorf("ScenarioRole = %q, want %q", sess.ScenarioRole, "Braw forge engineer")
 	}
+
 	if sess.ScenarioGoal != "Build the braw thing" {
 		t.Errorf("ScenarioGoal = %q, want %q", sess.ScenarioGoal, "Build the braw thing")
 	}
@@ -126,12 +133,15 @@ func TestBuildScenarioRecord(t *testing.T) {
 	if record.Status != "partial" {
 		t.Errorf("status = %q, want %q", record.Status, "partial")
 	}
+
 	if len(record.Sessions) != 2 {
 		t.Fatalf("sessions = %d, want 2", len(record.Sessions))
 	}
+
 	if record.Sessions[0].Status != "running" {
 		t.Errorf("session[0].Status = %q, want %q", record.Sessions[0].Status, "running")
 	}
+
 	if record.Sessions[1].Status != "stopped" {
 		t.Errorf("session[1].Status = %q, want %q", record.Sessions[1].Status, "stopped")
 	}
@@ -202,6 +212,7 @@ func TestListScenarios(t *testing.T) {
 	if len(records) != 1 {
 		t.Fatalf("expected 1 scenario, got %d", len(records))
 	}
+
 	if records[0].Name != "strath-neep" {
 		t.Errorf("name = %q, want %q", records[0].Name, "strath-neep")
 	}
@@ -229,6 +240,7 @@ func TestStartScenarioRequiresOrchestrator(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for non-orchestrator caller")
 	}
+
 	if got := err.Error(); got != "only the orchestrator session can start scenarios" {
 		t.Errorf("error = %q, want orchestrator-only message", got)
 	}
@@ -331,6 +343,7 @@ func TestStartScenarioValidation(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected error")
 			}
+
 			if got := err.Error(); !strings.Contains(got, tt.wantErr) {
 				t.Errorf("error = %q, want to contain %q", got, tt.wantErr)
 			}
@@ -358,24 +371,31 @@ func TestBuildManifest(t *testing.T) {
 	if m.Version != 1 {
 		t.Errorf("version = %d, want 1", m.Version)
 	}
+
 	if m.ScenarioID != "sc-glen" {
 		t.Errorf("scenario_id = %q", m.ScenarioID)
 	}
+
 	if m.You.Name != "braw-forge" {
 		t.Errorf("you.name = %q", m.You.Name)
 	}
+
 	if m.You.SessionID != "braw-s1" {
 		t.Errorf("you.session_id = %q", m.You.SessionID)
 	}
+
 	if len(m.Siblings) != 1 {
 		t.Fatalf("siblings = %d, want 1", len(m.Siblings))
 	}
+
 	if m.Siblings[0].Name != "bonnie-loom" {
 		t.Errorf("sibling.name = %q", m.Siblings[0].Name)
 	}
+
 	if m.Siblings[0].Repo != "croft-loom" {
 		t.Errorf("sibling.repo = %q, want %q", m.Siblings[0].Repo, "croft-loom")
 	}
+
 	if m.Orchestrator.SessionID != "ben-1" {
 		t.Errorf("orchestrator.session_id = %q", m.Orchestrator.SessionID)
 	}
@@ -385,10 +405,12 @@ func TestBuildManifest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	var parsed scenarioManifest
 	if err := json.Unmarshal(data, &parsed); err != nil {
 		t.Fatal(err)
 	}
+
 	if parsed.ScenarioName != "strath-kirk" {
 		t.Errorf("after roundtrip: scenario_name = %q", parsed.ScenarioName)
 	}
@@ -416,13 +438,16 @@ func TestScenarioTaskDone(t *testing.T) {
 	}
 
 	sm.mu.RLock()
+
 	sc := sm.state.Scenarios["sc-braw"]
 	if !sc.Sessions[0].TaskDone {
 		t.Error("session 0 should be marked as task done")
 	}
+
 	if sc.Sessions[1].TaskDone {
 		t.Error("session 1 should not be marked as task done")
 	}
+
 	sm.mu.RUnlock()
 
 	if err := sm.ScenarioTaskDone("strath-kirk", "haar-glen"); err == nil {
@@ -462,6 +487,7 @@ func TestResumeScenarioNotFound(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for nonexistent scenario")
 	}
+
 	if !strings.Contains(err.Error(), "not found") {
 		t.Errorf("error = %q, want to contain 'not found'", err.Error())
 	}
@@ -515,9 +541,11 @@ func TestMigrateV10ToV11(t *testing.T) {
 	if err := migrateState(state); err != nil {
 		t.Fatal(err)
 	}
+
 	if state.Version != CurrentStateVersion {
 		t.Errorf("version = %d, want %d", state.Version, CurrentStateVersion)
 	}
+
 	if state.Scenarios == nil {
 		t.Error("Scenarios map should be initialized after migration")
 	}

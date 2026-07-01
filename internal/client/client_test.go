@@ -14,6 +14,7 @@ import (
 
 func setupTestClient(t *testing.T) (*Client, net.Conn) {
 	clientConn, serverConn := net.Pipe()
+
 	t.Cleanup(func() { _ = clientConn.Close(); _ = serverConn.Close() })
 
 	c := &Client{
@@ -23,6 +24,7 @@ func setupTestClient(t *testing.T) (*Client, net.Conn) {
 		cfg:    config.Default(),
 		paths:  config.Paths{},
 	}
+
 	return c, serverConn
 }
 
@@ -56,6 +58,7 @@ func TestSendControl(t *testing.T) {
 	if err := json.Unmarshal(frame.Payload, &env); err != nil {
 		t.Fatalf("unmarshal envelope: %v", err)
 	}
+
 	if env.Type != "hello" {
 		t.Errorf("envelope type = %q, want %q", env.Type, "hello")
 	}
@@ -64,6 +67,7 @@ func TestSendControl(t *testing.T) {
 	if err := json.Unmarshal(env.Payload, &got); err != nil {
 		t.Fatalf("unmarshal payload: %v", err)
 	}
+
 	if got.Greeting != "world" {
 		t.Errorf("payload greeting = %q, want %q", got.Greeting, "world")
 	}
@@ -121,6 +125,7 @@ func TestReadFrame(t *testing.T) {
 	if frame.Channel != protocol.ChannelData {
 		t.Errorf("channel = %d, want %d", frame.Channel, protocol.ChannelData)
 	}
+
 	if string(frame.Payload) != string(want) {
 		t.Errorf("payload = %q, want %q", frame.Payload, want)
 	}
@@ -160,6 +165,7 @@ func TestReadControlResponse(t *testing.T) {
 	if err := protocol.DecodePayload(env, &msg); err != nil {
 		t.Fatalf("DecodePayload: %v", err)
 	}
+
 	if msg.DaemonVersion != "0.1.0" {
 		t.Errorf("daemon_version = %q, want %q", msg.DaemonVersion, "0.1.0")
 	}
@@ -215,24 +221,31 @@ func TestApprovalDeadline(t *testing.T) {
 // and returns both the listener and the server-side connection for further use.
 func startMockDaemon(t *testing.T) (string, chan net.Conn) {
 	t.Helper()
+
 	dir, err := os.MkdirTemp("", "gr")
 	if err != nil {
 		t.Fatalf("mkdtemp: %v", err)
 	}
+
 	t.Cleanup(func() { os.RemoveAll(dir) })
+
 	socketPath := dir + "/s"
+
 	ln, err := net.Listen("unix", socketPath)
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
+
 	t.Cleanup(func() { ln.Close() })
 
 	serverReady := make(chan net.Conn, 1)
+
 	go func() {
 		conn, err := ln.Accept()
 		if err != nil {
 			return
 		}
+
 		reader := protocol.NewFrameReader(conn)
 		writer := protocol.NewFrameWriter(conn)
 
@@ -240,11 +253,13 @@ func startMockDaemon(t *testing.T) (string, chan net.Conn) {
 			conn.Close()
 			return
 		}
+
 		resp, _ := protocol.EncodeControl("handshake_ok", protocol.HandshakeOkMsg{
 			Version:       protocol.Version,
 			DaemonVersion: "dev",
 		})
 		_ = writer.WriteFrame(protocol.ChannelControl, resp)
+
 		serverReady <- conn
 	}()
 
@@ -267,6 +282,7 @@ func TestConnectFastClearsDeadline(t *testing.T) {
 	// deadline. If the deadline was not cleared, this read will fail.
 	go func() {
 		time.Sleep(2500 * time.Millisecond)
+
 		resp, _ := protocol.EncodeControl("ping", struct{}{})
 		serverWriter := protocol.NewFrameWriter(serverConn)
 		_ = serverWriter.WriteFrame(protocol.ChannelControl, resp)
@@ -276,6 +292,7 @@ func TestConnectFastClearsDeadline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadControlResponse after deadline window: %v (deadline was not cleared)", err)
 	}
+
 	if env.Type != "ping" {
 		t.Errorf("expected ping, got %s", env.Type)
 	}
@@ -298,6 +315,7 @@ func TestConnectForApprovalClearsDeadline(t *testing.T) {
 	// the connection would still have a fixed expiry.
 	go func() {
 		time.Sleep(2500 * time.Millisecond)
+
 		resp, _ := protocol.EncodeControl("ping", struct{}{})
 		serverWriter := protocol.NewFrameWriter(serverConn)
 		_ = serverWriter.WriteFrame(protocol.ChannelControl, resp)
@@ -307,6 +325,7 @@ func TestConnectForApprovalClearsDeadline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadControlResponse after deadline window: %v (deadline was not cleared)", err)
 	}
+
 	if env.Type != "ping" {
 		t.Errorf("expected ping, got %s", env.Type)
 	}
@@ -314,24 +333,31 @@ func TestConnectForApprovalClearsDeadline(t *testing.T) {
 
 func startMockDaemonWithVersion(t *testing.T, ver string) (string, chan net.Conn) {
 	t.Helper()
+
 	dir, err := os.MkdirTemp("", "gr")
 	if err != nil {
 		t.Fatalf("mkdtemp: %v", err)
 	}
+
 	t.Cleanup(func() { os.RemoveAll(dir) })
+
 	socketPath := dir + "/s"
+
 	ln, err := net.Listen("unix", socketPath)
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
+
 	t.Cleanup(func() { ln.Close() })
 
 	serverReady := make(chan net.Conn, 1)
+
 	go func() {
 		conn, err := ln.Accept()
 		if err != nil {
 			return
 		}
+
 		reader := protocol.NewFrameReader(conn)
 		writer := protocol.NewFrameWriter(conn)
 
@@ -339,11 +365,13 @@ func startMockDaemonWithVersion(t *testing.T, ver string) (string, chan net.Conn
 			conn.Close()
 			return
 		}
+
 		resp, _ := protocol.EncodeControl("handshake_ok", protocol.HandshakeOkMsg{
 			Version:       ver,
 			DaemonVersion: "dev",
 		})
 		_ = writer.WriteFrame(protocol.ChannelControl, resp)
+
 		serverReady <- conn
 	}()
 
@@ -357,6 +385,7 @@ func TestConnectFastRejectsIncompatibleVersion(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for incompatible protocol version")
 	}
+
 	if !strings.Contains(err.Error(), "protocol version mismatch") {
 		t.Errorf("error = %q, want it to mention protocol version mismatch", err)
 	}
@@ -369,6 +398,7 @@ func TestConnectForApprovalRejectsIncompatibleVersion(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for incompatible protocol version")
 	}
+
 	if !strings.Contains(err.Error(), "protocol version mismatch") {
 		t.Errorf("error = %q, want it to mention protocol version mismatch", err)
 	}
@@ -380,6 +410,7 @@ func TestClose(t *testing.T) {
 	c.Close()
 
 	buf := make([]byte, 1)
+
 	_, err := serverConn.Read(buf)
 	if err == nil {
 		t.Fatal("expected error reading from serverConn after client Close, got nil")

@@ -57,6 +57,7 @@ func buildResult(latest string) *UpdateResult {
 	if !IsNewer(latest, Version) {
 		return nil
 	}
+
 	return &UpdateResult{
 		LatestVersion:  latest,
 		CurrentVersion: Version,
@@ -68,10 +69,12 @@ func readUpdateCache(path string) (*UpdateCache, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	var info UpdateCache
 	if err := json.Unmarshal(data, &info); err != nil {
 		return nil, err
 	}
+
 	return &info, nil
 }
 
@@ -80,6 +83,7 @@ func writeUpdateCache(path string, info *UpdateCache) {
 	if err != nil {
 		return
 	}
+
 	_ = os.MkdirAll(filepath.Dir(path), 0o700)
 	_ = os.WriteFile(path, data, 0o600)
 }
@@ -110,35 +114,45 @@ func fetchLatestVersion() (string, error) {
 
 func IsNewer(latest, current string) bool {
 	latestParts := parseVersion(latest)
+
 	currentParts := parseVersion(current)
 	if latestParts == nil || currentParts == nil {
 		return false
 	}
+
 	for i := 0; i < 3; i++ {
 		if latestParts[i] > currentParts[i] {
 			return true
 		}
+
 		if latestParts[i] < currentParts[i] {
 			return false
 		}
 	}
+
 	return false
 }
 
 func parseVersion(v string) []int {
 	v = strings.TrimPrefix(v, "v")
+
 	parts := strings.SplitN(v, ".", 3)
 	if len(parts) != 3 {
 		return nil
 	}
+
 	result := make([]int, 3)
+
 	for i, p := range parts {
 		p, _, _ = strings.Cut(p, "-")
+
 		n, err := strconv.Atoi(p)
 		if err != nil {
 			return nil
 		}
+
 		result[i] = n
 	}
+
 	return result
 }

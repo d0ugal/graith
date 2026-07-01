@@ -15,9 +15,11 @@ func TestRenderFramePlainText(t *testing.T) {
 	if frame.Cols != 10 || frame.Rows != 3 {
 		t.Errorf("Size = (%d, %d), want (10, 3)", frame.Cols, frame.Rows)
 	}
+
 	if !strings.Contains(frame.Frame, "braw!") {
 		t.Errorf("Frame should contain 'braw!', got %q", frame.Frame)
 	}
+
 	if !strings.HasSuffix(frame.Frame, "\x1b[0m") {
 		t.Error("Frame should end with SGR reset")
 	}
@@ -31,9 +33,11 @@ func TestRenderFrameColors(t *testing.T) {
 	if !strings.Contains(frame.Frame, ";31m") {
 		t.Errorf("Frame should contain red FG SGR, got %q", frame.Frame)
 	}
+
 	if !strings.Contains(frame.Frame, "red") {
 		t.Errorf("Frame should contain 'red', got %q", frame.Frame)
 	}
+
 	if !strings.Contains(frame.Frame, "normal") {
 		t.Errorf("Frame should contain 'normal', got %q", frame.Frame)
 	}
@@ -74,6 +78,7 @@ func TestRenderFrameRows(t *testing.T) {
 	vt.Write([]byte("abc"))
 
 	frame := renderFrame(vt)
+
 	rows := strings.Split(frame.Frame, "\r\n")
 	if len(rows) != 4 {
 		t.Errorf("Expected 4 rows separated by \\r\\n, got %d", len(rows))
@@ -88,6 +93,7 @@ func TestRenderPreviewPlainText(t *testing.T) {
 	if !strings.Contains(preview, "braw!") {
 		t.Errorf("Preview should contain 'braw!', got %q", preview)
 	}
+
 	if strings.Contains(preview, "\x1b") {
 		t.Error("Preview should not contain escape sequences")
 	}
@@ -101,6 +107,7 @@ func TestRenderPreviewStripsColors(t *testing.T) {
 	if !strings.Contains(preview, "red text") {
 		t.Errorf("Preview should contain 'red text', got %q", preview)
 	}
+
 	if strings.Contains(preview, "\x1b") {
 		t.Error("Preview should not contain escape sequences")
 	}
@@ -111,6 +118,7 @@ func TestRenderPreviewTrimsTrailingSpaces(t *testing.T) {
 	vt.Write([]byte("hi"))
 
 	preview := renderPreview(vt)
+
 	lines := strings.Split(preview, "\n")
 	if strings.HasSuffix(lines[0], " ") {
 		t.Error("Preview lines should have trailing spaces trimmed")
@@ -119,6 +127,7 @@ func TestRenderPreviewTrimsTrailingSpaces(t *testing.T) {
 
 func TestScreenSnapshotUsesLock(t *testing.T) {
 	logPath := strings.Join([]string{t.TempDir(), "test.log"}, "/")
+
 	s, err := NewSession(SessionOpts{
 		ID: "braw", Command: "echo", Args: []string{"hi"},
 		Dir: t.TempDir(), Rows: 24, Cols: 80,
@@ -137,6 +146,7 @@ func TestScreenSnapshotUsesLock(t *testing.T) {
 
 func TestScreenPreviewUsesLock(t *testing.T) {
 	logPath := strings.Join([]string{t.TempDir(), "test.log"}, "/")
+
 	s, err := NewSession(SessionOpts{
 		ID: "braw", Command: "echo", Args: []string{"hi"},
 		Dir: t.TempDir(), Rows: 24, Cols: 80,

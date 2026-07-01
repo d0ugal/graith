@@ -25,18 +25,23 @@ func TestFormatStatusLine(t *testing.T) {
 	if lipgloss.Width(line) == 0 {
 		t.Fatal("expected non-empty status line")
 	}
+
 	if !strings.Contains(line, "braw-session") {
 		t.Errorf("expected line to contain session name, got %q", line)
 	}
+
 	if !strings.Contains(line, "claude") {
 		t.Errorf("expected line to contain agent, got %q", line)
 	}
+
 	if !strings.Contains(line, "active") {
 		t.Errorf("expected line to contain agent status, got %q", line)
 	}
+
 	if !strings.Contains(line, "braw-session-abc123") {
 		t.Errorf("expected line to contain short branch, got %q", line)
 	}
+
 	if strings.Contains(line, "d0ugal/graith/") {
 		t.Errorf("expected short branch, got full prefix in %q", line)
 	}
@@ -53,6 +58,7 @@ func TestFormatStatusLineMinimal(t *testing.T) {
 	if !strings.Contains(line, "neep") {
 		t.Errorf("expected session name, got %q", line)
 	}
+
 	if !strings.Contains(line, "stopped") {
 		t.Errorf("expected stopped status, got %q", line)
 	}
@@ -82,6 +88,7 @@ func TestFormatStatusLineExactWidth(t *testing.T) {
 		agent:  "a",
 		status: "ok",
 	}
+
 	line := formatStatusLine(info, 80)
 	if w := lipgloss.Width(line); w != 80 {
 		t.Errorf("expected visual width 80, got %d", w)
@@ -99,16 +106,20 @@ func TestStatusBarInfoFromSession(t *testing.T) {
 		UnpushedCount: 2,
 	}
 	fleet := protocol.FleetSummary{Total: 3, Active: 1, Approval: 1, Stopped: 1}
+
 	info := newStatusBarInfo(session, 5, fleet)
 	if info.name != "braw-session" {
 		t.Errorf("expected name braw-session, got %s", info.name)
 	}
+
 	if info.unread != 5 {
 		t.Errorf("expected unread 5, got %d", info.unread)
 	}
+
 	if info.agentStatus != "approval" {
 		t.Errorf("expected agentStatus approval, got %s", info.agentStatus)
 	}
+
 	if info.fleet.Total != 3 {
 		t.Errorf("expected fleet total 3, got %d", info.fleet.Total)
 	}
@@ -127,6 +138,7 @@ func TestFormatStatusLineFleetSummary(t *testing.T) {
 	if !strings.Contains(line, "2 approval") {
 		t.Errorf("expected line to contain approval count, got %q", line)
 	}
+
 	if !strings.Contains(line, "3 active") {
 		t.Errorf("expected line to contain active count, got %q", line)
 	}
@@ -164,6 +176,7 @@ func TestFormatStatusLineApprovalProminence(t *testing.T) {
 	if approvalIdx < 0 {
 		t.Fatal("expected approval in fleet summary")
 	}
+
 	if errorIdx < 0 {
 		t.Fatal("expected error in fleet summary")
 	}

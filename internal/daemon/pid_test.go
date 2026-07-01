@@ -17,6 +17,7 @@ func TestAcquirePIDFile(t *testing.T) {
 	defer ReleasePIDFile(path)
 
 	data, _ := os.ReadFile(path)
+
 	pid, _ := strconv.Atoi(strings.TrimSpace(string(data)))
 	if pid != os.Getpid() {
 		t.Errorf("pid = %d, want %d", pid, os.Getpid())
@@ -47,6 +48,7 @@ func TestIsPIDAlive(t *testing.T) {
 	if !isPIDAlive(os.Getpid()) {
 		t.Error("own PID should be alive")
 	}
+
 	if isPIDAlive(999999) {
 		t.Error("non-existent PID should not be alive")
 	}
@@ -56,6 +58,7 @@ func TestIsPIDAlivePID1(t *testing.T) {
 	if os.Getuid() == 0 {
 		t.Skip("skipping: running as root won't get EPERM")
 	}
+
 	if !isPIDAlive(1) {
 		t.Error("PID 1 should be alive (EPERM means alive)")
 	}

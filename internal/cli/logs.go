@@ -43,6 +43,7 @@ var logsCmd = &cobra.Command{
 
 		if logsFollow {
 			sigCh := make(chan os.Signal, 1)
+
 			signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 			go func() {
 				<-sigCh
@@ -56,8 +57,10 @@ var logsCmd = &cobra.Command{
 				if err == io.EOF {
 					return nil
 				}
+
 				return err
 			}
+
 			switch frame.Channel {
 			case protocol.ChannelData:
 				os.Stdout.Write(frame.Payload)
@@ -67,8 +70,10 @@ var logsCmd = &cobra.Command{
 					if msg.Type == "error" {
 						var e protocol.ErrorMsg
 						protocol.DecodePayload(msg, &e)
+
 						return fmt.Errorf("%s", e.Message)
 					}
+
 					return nil
 				}
 			}

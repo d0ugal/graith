@@ -43,6 +43,7 @@ var newCmd = &cobra.Command{
 		} else {
 			repoPath, _ = filepath.Abs(repoPath)
 		}
+
 		agent := newAgent
 		if agent == "" {
 			agent = cfg.DefaultAgent
@@ -51,12 +52,15 @@ var newCmd = &cobra.Command{
 		if newAllowConcurrent && !newInPlace {
 			return fmt.Errorf("--allow-concurrent requires --in-place")
 		}
+
 		if newInPlace && newNoRepo {
 			return fmt.Errorf("--in-place and --no-repo are mutually exclusive")
 		}
+
 		if newInPlace && newShareWorktree != "" {
 			return fmt.Errorf("--in-place and --share-worktree are mutually exclusive")
 		}
+
 		if newInPlace && newBase != "" {
 			return fmt.Errorf("--in-place and --base are mutually exclusive (in-place sessions don't create branches)")
 		}
@@ -66,11 +70,13 @@ var newCmd = &cobra.Command{
 		}
 
 		prompt := newPrompt
+
 		if newPromptFile != "" {
 			data, err := os.ReadFile(newPromptFile)
 			if err != nil {
 				return fmt.Errorf("read prompt file: %w", err)
 			}
+
 			prompt = string(data)
 		}
 
@@ -104,6 +110,7 @@ var newCmd = &cobra.Command{
 		if resp.Type == "error" {
 			var e protocol.ErrorMsg
 			protocol.DecodePayload(resp, &e)
+
 			return fmt.Errorf("%s", e.Message)
 		}
 
@@ -118,6 +125,7 @@ var newCmd = &cobra.Command{
 		if location == "" {
 			location = "(no repo)"
 		}
+
 		out.Print("Created session %s (%s) in %s\n", info.Name, info.ID, location)
 
 		if newBackground {

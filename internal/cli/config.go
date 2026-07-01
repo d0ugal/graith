@@ -5,12 +5,11 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/d0ugal/graith/internal/config"
 	"github.com/pelletier/go-toml/v2"
 	"github.com/pmezard/go-difflib/difflib"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
-
-	"github.com/d0ugal/graith/internal/config"
 )
 
 var configForceReset bool
@@ -22,11 +21,14 @@ var configCmd = &cobra.Command{
 		if err := rejectConfigInsideSession(cmd); err != nil {
 			return err
 		}
+
 		var err error
+
 		paths, err = config.ResolvePaths()
 		if err != nil {
 			return err
 		}
+
 		return nil
 	},
 }
@@ -45,9 +47,12 @@ var configResetCmd = &cobra.Command{
 				if !term.IsTerminal(int(os.Stdin.Fd())) {
 					return fmt.Errorf("config file exists at %s; use --force to overwrite in non-interactive mode", target)
 				}
+
 				fmt.Fprintf(os.Stderr, "This will overwrite your config at %s. Continue? [y/N] ", target)
+
 				var answer string
 				fmt.Scanln(&answer)
+
 				if answer != "y" && answer != "Y" {
 					fmt.Fprintln(os.Stderr, "Aborted.")
 					return nil
@@ -63,27 +68,34 @@ var configResetCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("create temp file: %w", err)
 		}
+
 		tmp := f.Name()
 		if _, err := f.Write(config.DefaultTOML()); err != nil {
 			f.Close()
 			os.Remove(tmp)
+
 			return fmt.Errorf("write config: %w", err)
 		}
+
 		if err := f.Chmod(0o600); err != nil {
 			f.Close()
 			os.Remove(tmp)
+
 			return fmt.Errorf("set config permissions: %w", err)
 		}
+
 		if err := f.Close(); err != nil {
 			os.Remove(tmp)
 			return fmt.Errorf("close temp file: %w", err)
 		}
+
 		if err := os.Rename(tmp, target); err != nil {
 			os.Remove(tmp)
 			return fmt.Errorf("rename config: %w", err)
 		}
 
 		fmt.Fprintf(os.Stderr, "Wrote default config to %s\n", target)
+
 		return nil
 	},
 }
@@ -101,12 +113,14 @@ var configDiffCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("parse config: %w", err)
 		}
+
 		defaultCfg := config.Default()
 
 		defaultBytes, err := toml.Marshal(defaultCfg)
 		if err != nil {
 			return fmt.Errorf("marshal defaults: %w", err)
 		}
+
 		userBytes, err := toml.Marshal(userCfg)
 		if err != nil {
 			return fmt.Errorf("marshal user config: %w", err)
@@ -119,14 +133,18 @@ var configDiffCmd = &cobra.Command{
 			ToFile:   target,
 			Context:  3,
 		}
+
 		text, err := difflib.GetUnifiedDiffString(diff)
 		if err != nil {
 			return fmt.Errorf("compute diff: %w", err)
 		}
+
 		if text == "" {
 			return nil
 		}
+
 		fmt.Print(text)
+
 		return nil
 	},
 }
@@ -149,7 +167,9 @@ var configShowCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("marshal config: %w", err)
 		}
+
 		fmt.Print(string(data))
+
 		return nil
 	},
 }

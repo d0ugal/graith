@@ -13,6 +13,7 @@ import (
 func TestProcessPIDWithCmd(t *testing.T) {
 	cmd := &exec.Cmd{}
 	cmd.Process = &os.Process{Pid: 99}
+
 	s := &Session{Cmd: cmd, done: make(chan struct{})}
 	if got := s.ProcessPID(); got != 99 {
 		t.Errorf("ProcessPID() = %d, want 99", got)
@@ -37,6 +38,7 @@ func TestProcessPIDCmdTakesPrecedence(t *testing.T) {
 	// When both Cmd.Process and adoptedPID are set, Cmd.Process.Pid wins.
 	cmd := &exec.Cmd{}
 	cmd.Process = &os.Process{Pid: 77}
+
 	s := &Session{Cmd: cmd, adoptedPID: 42, done: make(chan struct{})}
 	if got := s.ProcessPID(); got != 77 {
 		t.Errorf("ProcessPID() = %d, want 77 (Cmd should take precedence)", got)
@@ -45,6 +47,7 @@ func TestProcessPIDCmdTakesPrecedence(t *testing.T) {
 
 func TestDetachWriterMatchingWriter(t *testing.T) {
 	s := &Session{done: make(chan struct{})}
+
 	var writerA bytes.Buffer
 	s.Attach(&writerA)
 	s.DetachWriter(&writerA)
@@ -52,6 +55,7 @@ func TestDetachWriterMatchingWriter(t *testing.T) {
 	s.mu.RLock()
 	n := len(s.writers)
 	s.mu.RUnlock()
+
 	if n != 0 {
 		t.Errorf("expected 0 writers after detaching matching writer, got %d", n)
 	}
@@ -59,6 +63,7 @@ func TestDetachWriterMatchingWriter(t *testing.T) {
 
 func TestDetachWriterNonMatchingWriter(t *testing.T) {
 	s := &Session{done: make(chan struct{})}
+
 	var writerA, writerB bytes.Buffer
 	s.Attach(&writerB)
 	s.DetachWriter(&writerA)
@@ -66,6 +71,7 @@ func TestDetachWriterNonMatchingWriter(t *testing.T) {
 	s.mu.RLock()
 	n := len(s.writers)
 	s.mu.RUnlock()
+
 	if n != 1 {
 		t.Errorf("expected 1 writer after detaching non-matching writerA, got %d", n)
 	}
@@ -73,12 +79,14 @@ func TestDetachWriterNonMatchingWriter(t *testing.T) {
 
 func TestDetachWriterWhenNoneAttached(t *testing.T) {
 	s := &Session{done: make(chan struct{})}
+
 	var writerA bytes.Buffer
 	s.DetachWriter(&writerA)
 
 	s.mu.RLock()
 	n := len(s.writers)
 	s.mu.RUnlock()
+
 	if n != 0 {
 		t.Errorf("expected 0 writers, got %d", n)
 	}
@@ -86,6 +94,7 @@ func TestDetachWriterWhenNoneAttached(t *testing.T) {
 
 func TestMultipleWriters(t *testing.T) {
 	s := &Session{done: make(chan struct{})}
+
 	var writerA, writerB bytes.Buffer
 	s.Attach(&writerA)
 	s.Attach(&writerB)
@@ -93,6 +102,7 @@ func TestMultipleWriters(t *testing.T) {
 	s.mu.RLock()
 	n := len(s.writers)
 	s.mu.RUnlock()
+
 	if n != 2 {
 		t.Errorf("expected 2 writers, got %d", n)
 	}
@@ -101,6 +111,7 @@ func TestMultipleWriters(t *testing.T) {
 	s.mu.RLock()
 	n = len(s.writers)
 	s.mu.RUnlock()
+
 	if n != 1 {
 		t.Errorf("expected 1 writer after detaching writerA, got %d", n)
 	}
@@ -108,6 +119,7 @@ func TestMultipleWriters(t *testing.T) {
 
 func TestDetachClearsAllWriters(t *testing.T) {
 	s := &Session{done: make(chan struct{})}
+
 	var writerA, writerB bytes.Buffer
 	s.Attach(&writerA)
 	s.Attach(&writerB)
@@ -116,6 +128,7 @@ func TestDetachClearsAllWriters(t *testing.T) {
 	s.mu.RLock()
 	n := len(s.writers)
 	s.mu.RUnlock()
+
 	if n != 0 {
 		t.Errorf("expected 0 writers after Detach, got %d", n)
 	}
@@ -123,6 +136,7 @@ func TestDetachClearsAllWriters(t *testing.T) {
 
 func TestMultiWriterFanOut(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "test.log")
+
 	s, err := NewSession(SessionOpts{
 		ID: "braw", Command: "sh", Args: []string{"-c", "read a; echo $a; read b; echo $b; sleep 0.1"},
 		Dir: t.TempDir(), Rows: 24, Cols: 80,
@@ -142,6 +156,7 @@ func TestMultiWriterFanOut(t *testing.T) {
 	}
 
 	deadline := time.After(5 * time.Second)
+
 	for !bytes.Contains(bufA.Bytes(), []byte("kirk fanout")) || !bytes.Contains(bufB.Bytes(), []byte("kirk fanout")) {
 		select {
 		case <-deadline:
@@ -158,6 +173,7 @@ func TestMultiWriterFanOut(t *testing.T) {
 	}
 
 	deadline = time.After(5 * time.Second)
+
 	for !bytes.Contains(bufB.Bytes(), []byte("efter skelf")) {
 		select {
 		case <-deadline:
@@ -167,6 +183,7 @@ func TestMultiWriterFanOut(t *testing.T) {
 	}
 
 	time.Sleep(50 * time.Millisecond)
+
 	if len(bufA.Bytes()) != beforeA {
 		t.Error("bufA received data after DetachWriter")
 	}
@@ -185,6 +202,7 @@ func envMap(env []string) map[string]string {
 			m[k] = v
 		}
 	}
+
 	return m
 }
 
@@ -206,6 +224,7 @@ func TestBuildEnvOverridesParent(t *testing.T) {
 	if got := env["TERM"]; got != "xterm-256color" {
 		t.Errorf("TERM = %q, want xterm-256color (should override parent)", got)
 	}
+
 	if got := env["GRAITH_TEST_VAR"]; got != "braw" {
 		t.Errorf("GRAITH_TEST_VAR = %q, want braw (should override auld)", got)
 	}
@@ -237,13 +256,16 @@ func TestBuildEnvNoDuplicateKeys(t *testing.T) {
 		"TERM":              "screen",
 		"GRAITH_SESSION_ID": "braw-id",
 	})
+
 	for _, key := range []string{"TERM", "GRAITH_SESSION_ID"} {
 		count := 0
+
 		for _, e := range env {
 			if strings.HasPrefix(e, key+"=") {
 				count++
 			}
 		}
+
 		if count != 1 {
 			t.Errorf("found %d %s entries, want exactly 1", count, key)
 		}
@@ -252,10 +274,12 @@ func TestBuildEnvNoDuplicateKeys(t *testing.T) {
 
 func TestScrollbackRemove(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "auld-neep.log")
+
 	sb, err := NewScrollback(path, 1024)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	sb.Write([]byte("auld neep tae be removed"))
 
 	// Verify the file exists before removal.

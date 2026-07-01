@@ -84,11 +84,14 @@ func TestMatchSession(t *testing.T) {
 				if got != nil {
 					t.Errorf("matchSession(%q) = %q, want nil", tt.cwd, got.Name)
 				}
+
 				return
 			}
+
 			if got == nil {
 				t.Fatalf("matchSession(%q) = nil, want %q", tt.cwd, tt.want)
 			}
+
 			if got.Name != tt.want {
 				t.Errorf("matchSession(%q) = %q, want %q", tt.cwd, got.Name, tt.want)
 			}

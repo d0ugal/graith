@@ -55,14 +55,17 @@ func TestDescendantsOf(t *testing.T) {
 	for _, s := range desc {
 		ids[s.ID] = true
 	}
+
 	for _, expected := range []string{"bairn", "canny", "wee-bairn"} {
 		if !ids[expected] {
 			t.Errorf("missing descendant %q", expected)
 		}
 	}
+
 	if ids["ben"] {
 		t.Error("ben should not be in descendants")
 	}
+
 	if ids["thrawn"] {
 		t.Error("thrawn should not be in descendants")
 	}
@@ -90,6 +93,7 @@ func TestPrintTree(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
+
 	cmd := &cobra.Command{}
 	cmd.SetOut(&buf)
 
@@ -100,12 +104,15 @@ func TestPrintTree(t *testing.T) {
 	if !bytes.Contains([]byte(output), []byte("hame")) {
 		t.Error("missing root session 'hame'")
 	}
+
 	if !bytes.Contains([]byte(output), []byte("|-- bairn")) && !bytes.Contains([]byte(output), []byte("`-- bairn")) {
 		t.Error("missing tree-indented 'bairn'")
 	}
+
 	if !bytes.Contains([]byte(output), []byte("wee-bairn")) {
 		t.Error("missing grandchild 'wee-bairn'")
 	}
+
 	if !bytes.Contains([]byte(output), []byte("thrawn")) {
 		t.Error("missing root session 'thrawn'")
 	}
@@ -117,6 +124,7 @@ func TestPrintTreeOrphansAsRoots(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
+
 	cmd := &cobra.Command{}
 	cmd.SetOut(&buf)
 
@@ -126,6 +134,7 @@ func TestPrintTreeOrphansAsRoots(t *testing.T) {
 	if !bytes.Contains([]byte(output), []byte("auld-whin")) {
 		t.Error("orphan should render as root")
 	}
+
 	if bytes.Contains([]byte(output), []byte("|--")) || bytes.Contains([]byte(output), []byte("`--")) {
 		t.Error("orphan should not have tree indentation")
 	}

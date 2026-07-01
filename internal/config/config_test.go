@@ -41,26 +41,33 @@ args = []
 resume_args = ["resume", "--last"]
 `
 	os.WriteFile(cfgPath, []byte(toml), 0o644)
+
 	cfg, err := Load(cfgPath)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if cfg.DefaultAgent != "claude" {
 		t.Errorf("DefaultAgent = %q, want claude", cfg.DefaultAgent)
 	}
+
 	if cfg.GitHubUsername != "braw-lad" {
 		t.Errorf("GitHubUsername = %q, want braw-lad", cfg.GitHubUsername)
 	}
+
 	if cfg.Keybindings.Prefix != "ctrl+b" {
 		t.Errorf("Prefix = %q, want ctrl+b", cfg.Keybindings.Prefix)
 	}
+
 	claude, ok := cfg.Agents["claude"]
 	if !ok {
 		t.Fatal("missing claude agent")
 	}
+
 	if claude.Command != "claude" {
 		t.Errorf("claude command = %q", claude.Command)
 	}
+
 	if len(claude.Args) != 2 || claude.Args[0] != "--session-id" {
 		t.Errorf("claude args = %v", claude.Args)
 	}
@@ -72,10 +79,12 @@ func TestLoadConfigDataDir(t *testing.T) {
 	toml := `data_dir = "~/.graith"
 `
 	os.WriteFile(cfgPath, []byte(toml), 0o644)
+
 	cfg, err := Load(cfgPath)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if cfg.DataDir != "~/.graith" {
 		t.Errorf("DataDir = %q, want ~/.graith", cfg.DataDir)
 	}
@@ -104,6 +113,7 @@ func TestDataDirValidation(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := Default()
 			cfg.DataDir = tt.dataDir
+
 			err := cfg.Validate()
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
@@ -124,6 +134,7 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.DefaultAgent != "claude" {
 		t.Errorf("default agent = %q, want claude", cfg.DefaultAgent)
 	}
+
 	if _, ok := cfg.Agents["claude"]; !ok {
 		t.Error("default config missing claude agent")
 	}
@@ -239,6 +250,7 @@ func TestParseDurationWithDays(t *testing.T) {
 				t.Errorf("ParseDurationWithDays(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
 				return
 			}
+
 			if got != tt.want {
 				t.Errorf("ParseDurationWithDays(%q) = %v, want %v", tt.input, got, tt.want)
 			}
@@ -249,6 +261,7 @@ func TestParseDurationWithDays(t *testing.T) {
 func TestMessagesMaxAgeDuration(t *testing.T) {
 	m := Messages{MaxAge: "30d", MaxPerStream: 1000}
 	got := m.MaxAgeDuration()
+
 	want := 30 * 24 * time.Hour
 	if got != want {
 		t.Errorf("MaxAgeDuration() = %v, want %v", got, want)
@@ -269,16 +282,20 @@ max_age = "7d"
 max_per_stream = 500
 `
 	os.WriteFile(cfgPath, []byte(toml), 0o644)
+
 	cfg, err := Load(cfgPath)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if cfg.Messages.MaxAge != "7d" {
 		t.Errorf("MaxAge = %q, want 7d", cfg.Messages.MaxAge)
 	}
+
 	if cfg.Messages.MaxPerStream != 500 {
 		t.Errorf("MaxPerStream = %d, want 500", cfg.Messages.MaxPerStream)
 	}
+
 	if got := cfg.Messages.MaxAgeDuration(); got != 7*24*time.Hour {
 		t.Errorf("MaxAgeDuration() = %v, want 168h", got)
 	}
@@ -297,13 +314,16 @@ command = "codex"
 idle_timeout = "0"
 `
 	os.WriteFile(cfgPath, []byte(toml), 0o644)
+
 	cfg, err := Load(cfgPath)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if got := cfg.Agents["claude"].IdleTimeoutDuration(); got != 2*time.Hour {
 		t.Errorf("claude idle timeout = %v, want 2h", got)
 	}
+
 	if got := cfg.Agents["codex"].IdleTimeoutDuration(); got != 0 {
 		t.Errorf("codex idle timeout = %v, want 0", got)
 	}
@@ -325,19 +345,24 @@ command = "claude"
 features = ["clipboard"]
 `
 	os.WriteFile(cfgPath, []byte(toml), 0o644)
+
 	cfg, err := Load(cfgPath)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if !cfg.Sandbox.Enabled {
 		t.Error("Sandbox.Enabled = false, want true")
 	}
+
 	if len(cfg.Sandbox.Features) != 2 || cfg.Sandbox.Features[0] != "ssh" {
 		t.Errorf("Sandbox.Features = %v, want [ssh process-control]", cfg.Sandbox.Features)
 	}
+
 	if len(cfg.Sandbox.ReadDirs) != 1 || cfg.Sandbox.ReadDirs[0] != "~/Code" {
 		t.Errorf("Sandbox.ReadDirs = %v, want [~/Code]", cfg.Sandbox.ReadDirs)
 	}
+
 	claude := cfg.Agents["claude"]
 	if len(claude.Sandbox.Features) != 1 || claude.Sandbox.Features[0] != "clipboard" {
 		t.Errorf("claude.Sandbox.Features = %v, want [clipboard]", claude.Sandbox.Features)
@@ -360,18 +385,22 @@ func TestSandboxConfigMerge(t *testing.T) {
 	if !merged.Enabled {
 		t.Error("merged.Enabled = false, want true")
 	}
+
 	wantFeatures := []string{"ssh", "process-control", "clipboard"}
 	if len(merged.Features) != 3 {
 		t.Fatalf("merged.Features = %v, want %v", merged.Features, wantFeatures)
 	}
+
 	for i, f := range wantFeatures {
 		if merged.Features[i] != f {
 			t.Errorf("merged.Features[%d] = %q, want %q", i, merged.Features[i], f)
 		}
 	}
+
 	if len(merged.ReadDirs) != 1 || merged.ReadDirs[0] != "~/Code" {
 		t.Errorf("merged.ReadDirs = %v, want [~/Code]", merged.ReadDirs)
 	}
+
 	if len(merged.WriteDirs) != 1 || merged.WriteDirs[0] != "~/.claude" {
 		t.Errorf("merged.WriteDirs = %v, want [~/.claude]", merged.WriteDirs)
 	}
@@ -398,6 +427,7 @@ func TestSandboxConfigMergeAgentEnabled(t *testing.T) {
 	if !merged.Enabled {
 		t.Error("merged.Enabled = false, want true (agent enabled)")
 	}
+
 	if len(merged.Features) != 1 || merged.Features[0] != "ssh" {
 		t.Errorf("merged.Features = %v, want [ssh]", merged.Features)
 	}
@@ -405,6 +435,7 @@ func TestSandboxConfigMergeAgentEnabled(t *testing.T) {
 
 func TestExpandPath(t *testing.T) {
 	home, _ := os.UserHomeDir()
+
 	tests := []struct {
 		input string
 		want  string
@@ -462,10 +493,12 @@ func TestRepoPathAllowed(t *testing.T) {
 	t.Run("symlink to outside denied", func(t *testing.T) {
 		allowed := t.TempDir()
 		outside := t.TempDir()
+
 		link := filepath.Join(allowed, "escape")
 		if err := os.Symlink(outside, link); err != nil {
 			t.Skipf("symlinks not supported: %v", err)
 		}
+
 		cfg := &Config{AllowedRepoPaths: []string{allowed}}
 		if cfg.RepoPathAllowed(link) {
 			t.Error("symlink pointing outside allowed dirs should be denied")
@@ -474,14 +507,17 @@ func TestRepoPathAllowed(t *testing.T) {
 
 	t.Run("symlink within allowed dir permitted", func(t *testing.T) {
 		allowed := t.TempDir()
+
 		target := filepath.Join(allowed, "real")
 		if err := os.Mkdir(target, 0o755); err != nil {
 			t.Fatal(err)
 		}
+
 		link := filepath.Join(allowed, "link")
 		if err := os.Symlink(target, link); err != nil {
 			t.Skipf("symlinks not supported: %v", err)
 		}
+
 		cfg := &Config{AllowedRepoPaths: []string{allowed}}
 		if !cfg.RepoPathAllowed(link) {
 			t.Error("symlink pointing within allowed dir should be permitted")
@@ -491,14 +527,17 @@ func TestRepoPathAllowed(t *testing.T) {
 	t.Run("intermediate symlink component to outside denied", func(t *testing.T) {
 		allowed := t.TempDir()
 		outside := t.TempDir()
+
 		outsideRepo := filepath.Join(outside, "repo")
 		if err := os.Mkdir(outsideRepo, 0o755); err != nil {
 			t.Fatal(err)
 		}
+
 		link := filepath.Join(allowed, "escape")
 		if err := os.Symlink(outside, link); err != nil {
 			t.Skipf("symlinks not supported: %v", err)
 		}
+
 		cfg := &Config{AllowedRepoPaths: []string{allowed}}
 		if cfg.RepoPathAllowed(filepath.Join(link, "repo")) {
 			t.Error("path through symlink intermediate pointing outside should be denied")
@@ -507,14 +546,17 @@ func TestRepoPathAllowed(t *testing.T) {
 
 	t.Run("allowed path itself is a symlink", func(t *testing.T) {
 		actual := t.TempDir()
+
 		repo := filepath.Join(actual, "braw-croft")
 		if err := os.Mkdir(repo, 0o755); err != nil {
 			t.Fatal(err)
 		}
+
 		link := filepath.Join(t.TempDir(), "link-to-actual")
 		if err := os.Symlink(actual, link); err != nil {
 			t.Skipf("symlinks not supported: %v", err)
 		}
+
 		cfg := &Config{AllowedRepoPaths: []string{link}}
 		if !cfg.RepoPathAllowed(filepath.Join(actual, "braw-croft")) {
 			t.Error("repo under resolved allowed symlink should be permitted")
@@ -530,6 +572,7 @@ func TestLoadPartialAgentPreservesDefaults(t *testing.T) {
 command = "auld-claude"
 `
 	os.WriteFile(cfgPath, []byte(toml), 0o644)
+
 	cfg, err := Load(cfgPath)
 	if err != nil {
 		t.Fatal(err)
@@ -539,9 +582,11 @@ command = "auld-claude"
 	if claude.Command != "auld-claude" {
 		t.Errorf("claude.Command = %q, want auld-claude", claude.Command)
 	}
+
 	if len(claude.Args) != 2 || claude.Args[0] != "--session-id" {
 		t.Errorf("claude.Args = %v, want default args preserved", claude.Args)
 	}
+
 	if len(claude.ResumeArgs) != 2 || claude.ResumeArgs[0] != "--resume" {
 		t.Errorf("claude.ResumeArgs = %v, want default resume_args preserved", claude.ResumeArgs)
 	}
@@ -549,9 +594,11 @@ command = "auld-claude"
 	if _, ok := cfg.Agents["codex"]; !ok {
 		t.Error("codex agent lost — unmentioned defaults should be preserved")
 	}
+
 	if _, ok := cfg.Agents["opencode"]; !ok {
 		t.Error("opencode agent lost")
 	}
+
 	if _, ok := cfg.Agents["agy"]; !ok {
 		t.Error("agy agent lost")
 	}
@@ -566,6 +613,7 @@ command = "claude"
 args = []
 `
 	os.WriteFile(cfgPath, []byte(toml), 0o644)
+
 	cfg, err := Load(cfgPath)
 	if err != nil {
 		t.Fatal(err)
@@ -575,6 +623,7 @@ args = []
 	if len(claude.Args) != 0 {
 		t.Errorf("claude.Args = %v, want [] (explicit empty should override default)", claude.Args)
 	}
+
 	if len(claude.ResumeArgs) != 2 {
 		t.Errorf("claude.ResumeArgs = %v, want default preserved when not specified", claude.ResumeArgs)
 	}
@@ -589,6 +638,7 @@ resume_args = []
 fork_args = []
 `
 	os.WriteFile(cfgPath, []byte(toml), 0o644)
+
 	cfg, err := Load(cfgPath)
 	if err != nil {
 		t.Fatal(err)
@@ -598,12 +648,15 @@ fork_args = []
 	if len(claude.ResumeArgs) != 0 {
 		t.Errorf("claude.ResumeArgs = %v, want [] (explicit empty overrides default)", claude.ResumeArgs)
 	}
+
 	if len(claude.ForkArgs) != 0 {
 		t.Errorf("claude.ForkArgs = %v, want [] (explicit empty overrides default)", claude.ForkArgs)
 	}
+
 	if len(claude.Args) != 2 {
 		t.Errorf("claude.Args = %v, want default preserved when not specified", claude.Args)
 	}
+
 	if claude.Command != "claude" {
 		t.Errorf("claude.Command = %q, want default preserved", claude.Command)
 	}
@@ -617,6 +670,7 @@ func TestLoadExplicitEmptyEnv(t *testing.T) {
 env = {}
 `
 	os.WriteFile(cfgPath, []byte(toml), 0o644)
+
 	cfg, err := Load(cfgPath)
 	if err != nil {
 		t.Fatal(err)
@@ -626,6 +680,7 @@ env = {}
 	if claude.Env == nil {
 		t.Error("claude.Env = nil, want empty map (explicit empty should override)")
 	}
+
 	if len(claude.Args) != 2 {
 		t.Errorf("claude.Args = %v, want default preserved", claude.Args)
 	}
@@ -640,6 +695,7 @@ command = "canny-agent"
 args = ["--flag"]
 `
 	os.WriteFile(cfgPath, []byte(toml), 0o644)
+
 	cfg, err := Load(cfgPath)
 	if err != nil {
 		t.Fatal(err)
@@ -649,9 +705,11 @@ args = ["--flag"]
 	if !ok {
 		t.Fatal("canny agent not found")
 	}
+
 	if canny.Command != "canny-agent" {
 		t.Errorf("canny.Command = %q, want canny-agent", canny.Command)
 	}
+
 	if len(canny.Args) != 1 || canny.Args[0] != "--flag" {
 		t.Errorf("canny.Args = %v, want [--flag]", canny.Args)
 	}
@@ -671,16 +729,20 @@ func TestMergeAgent(t *testing.T) {
 
 	t.Run("override command only", func(t *testing.T) {
 		usr := Agent{Command: "auld-claude"}
+
 		got := mergeAgent(def, usr)
 		if got.Command != "auld-claude" {
 			t.Errorf("Command = %q, want auld-claude", got.Command)
 		}
+
 		if len(got.Args) != 2 {
 			t.Errorf("Args = %v, want defaults preserved", got.Args)
 		}
+
 		if len(got.ResumeArgs) != 2 {
 			t.Errorf("ResumeArgs = %v, want defaults preserved", got.ResumeArgs)
 		}
+
 		if len(got.ForkArgs) != 2 {
 			t.Errorf("ForkArgs = %v, want defaults preserved", got.ForkArgs)
 		}
@@ -688,10 +750,12 @@ func TestMergeAgent(t *testing.T) {
 
 	t.Run("override env", func(t *testing.T) {
 		usr := Agent{Env: map[string]string{"FOO": "neep"}}
+
 		got := mergeAgent(def, usr)
 		if got.Env["FOO"] != "neep" {
 			t.Errorf("Env = %v, want FOO=neep", got.Env)
 		}
+
 		if got.Command != "claude" {
 			t.Errorf("Command = %q, want claude", got.Command)
 		}
@@ -699,6 +763,7 @@ func TestMergeAgent(t *testing.T) {
 
 	t.Run("override idle_timeout", func(t *testing.T) {
 		usr := Agent{IdleTimeout: "30m"}
+
 		got := mergeAgent(def, usr)
 		if got.IdleTimeout != "30m" {
 			t.Errorf("IdleTimeout = %q, want 30m", got.IdleTimeout)
@@ -707,10 +772,12 @@ func TestMergeAgent(t *testing.T) {
 
 	t.Run("sandbox override", func(t *testing.T) {
 		usr := Agent{Sandbox: SandboxConfig{Enabled: true, Features: []string{"ssh"}}}
+
 		got := mergeAgent(def, usr)
 		if !got.Sandbox.Enabled {
 			t.Error("Sandbox.Enabled = false, want true")
 		}
+
 		if len(got.Sandbox.Features) != 1 || got.Sandbox.Features[0] != "ssh" {
 			t.Errorf("Sandbox.Features = %v, want [ssh]", got.Sandbox.Features)
 		}
@@ -719,6 +786,7 @@ func TestMergeAgent(t *testing.T) {
 	t.Run("override inject_prompt", func(t *testing.T) {
 		f := false
 		usr := Agent{InjectPrompt: &f}
+
 		got := mergeAgent(def, usr)
 		if got.InjectPrompt == nil || *got.InjectPrompt != false {
 			t.Errorf("InjectPrompt = %v, want false", got.InjectPrompt)
@@ -730,6 +798,7 @@ func TestMergeAgent(t *testing.T) {
 		defWithPrompt := def
 		defWithPrompt.InjectPrompt = &tr
 		usr := Agent{Command: "auld-claude"}
+
 		got := mergeAgent(defWithPrompt, usr)
 		if got.InjectPrompt == nil || *got.InjectPrompt != true {
 			t.Errorf("InjectPrompt = %v, want true (preserved from default)", got.InjectPrompt)
@@ -749,19 +818,24 @@ path = "~/Code/glen-scripts"
 allow_concurrent = true
 `
 	os.WriteFile(cfgPath, []byte(toml), 0o644)
+
 	cfg, err := Load(cfgPath)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if len(cfg.Repos) != 2 {
 		t.Fatalf("Repos = %d entries, want 2", len(cfg.Repos))
 	}
+
 	if cfg.Repos[0].Path != "~/Code/croft" {
 		t.Errorf("Repos[0].Path = %q, want ~/Code/croft", cfg.Repos[0].Path)
 	}
+
 	if cfg.Repos[0].AllowConcurrent {
 		t.Error("Repos[0].AllowConcurrent = true, want false (default)")
 	}
+
 	if !cfg.Repos[1].AllowConcurrent {
 		t.Error("Repos[1].AllowConcurrent = false, want true")
 	}
@@ -772,10 +846,12 @@ func TestFindRepo(t *testing.T) {
 
 	t.Run("exact match", func(t *testing.T) {
 		cfg := &Config{Repos: []RepoConfig{{Path: "~/Code/croft"}}}
+
 		rc, ok := cfg.FindRepo(filepath.Join(home, "Code", "croft"))
 		if !ok {
 			t.Fatal("expected to find repo")
 		}
+
 		if rc.Path != "~/Code/croft" {
 			t.Errorf("Path = %q, want ~/Code/croft", rc.Path)
 		}
@@ -783,6 +859,7 @@ func TestFindRepo(t *testing.T) {
 
 	t.Run("no match", func(t *testing.T) {
 		cfg := &Config{Repos: []RepoConfig{{Path: "~/Code/croft"}}}
+
 		_, ok := cfg.FindRepo("/tmp/thrawn")
 		if ok {
 			t.Error("expected no match for /tmp/thrawn")
@@ -791,11 +868,14 @@ func TestFindRepo(t *testing.T) {
 
 	t.Run("symlink resolved", func(t *testing.T) {
 		actual := t.TempDir()
+
 		link := filepath.Join(t.TempDir(), "link")
 		if err := os.Symlink(actual, link); err != nil {
 			t.Skipf("symlinks not supported: %v", err)
 		}
+
 		cfg := &Config{Repos: []RepoConfig{{Path: actual}}}
+
 		_, ok := cfg.FindRepo(link)
 		if !ok {
 			t.Error("expected symlink to resolve and match")
@@ -808,9 +888,11 @@ func TestDefaultParsesEmbeddedTOML(t *testing.T) {
 	if cfg.DefaultAgent != "claude" {
 		t.Errorf("DefaultAgent = %q, want claude", cfg.DefaultAgent)
 	}
+
 	if cfg.BranchPrefix != "{username}/graith" {
 		t.Errorf("BranchPrefix = %q, want {username}/graith", cfg.BranchPrefix)
 	}
+
 	if !cfg.FetchOnCreate {
 		t.Error("FetchOnCreate = false, want true")
 	}
@@ -819,9 +901,11 @@ func TestDefaultParsesEmbeddedTOML(t *testing.T) {
 	if !ok {
 		t.Fatal("claude agent not found in defaults")
 	}
+
 	if claude.Command != "claude" {
 		t.Errorf("claude.Command = %q, want claude", claude.Command)
 	}
+
 	wantForkArgs := []string{"--resume", "{fork_source_agent_session_id}", "--fork-session", "--session-id", "{agent_session_id}"}
 	if !reflect.DeepEqual(claude.ForkArgs, wantForkArgs) {
 		t.Errorf("claude.ForkArgs = %v, want %v", claude.ForkArgs, wantForkArgs)
@@ -831,6 +915,7 @@ func TestDefaultParsesEmbeddedTOML(t *testing.T) {
 	if !ok {
 		t.Fatal("codex agent not found in defaults")
 	}
+
 	if codex.Command != "codex" {
 		t.Errorf("codex.Command = %q, want codex", codex.Command)
 	}
@@ -838,6 +923,7 @@ func TestDefaultParsesEmbeddedTOML(t *testing.T) {
 	if _, ok := cfg.Agents["opencode"]; !ok {
 		t.Error("opencode agent not found in defaults")
 	}
+
 	if _, ok := cfg.Agents["agy"]; !ok {
 		t.Error("agy agent not found in defaults")
 	}
@@ -847,6 +933,7 @@ func TestDefaultTOMLDefensiveCopy(t *testing.T) {
 	a := DefaultTOML()
 	b := DefaultTOML()
 	a[0] = 0xFF
+
 	if b[0] == 0xFF {
 		t.Error("DefaultTOML() returns shared backing array, want independent copies")
 	}
@@ -855,6 +942,7 @@ func TestDefaultTOMLDefensiveCopy(t *testing.T) {
 func TestDefaultMutationSafety(t *testing.T) {
 	a := Default()
 	a.Agents["claude"] = Agent{Command: "thrawn"}
+
 	b := Default()
 	if b.Agents["claude"].Command != "claude" {
 		t.Error("mutating Default() result affected subsequent Default() calls")
@@ -953,6 +1041,7 @@ func TestSandboxConfigMergeDeduplicatesFeatures(t *testing.T) {
 	if len(merged.Features) != 3 {
 		t.Fatalf("merged.Features = %v, want %v", merged.Features, want)
 	}
+
 	for i, f := range want {
 		if merged.Features[i] != f {
 			t.Errorf("merged.Features[%d] = %q, want %q", i, merged.Features[i], f)
@@ -978,6 +1067,7 @@ func TestDefaultAgentSandboxPaths(t *testing.T) {
 			if !ok {
 				t.Fatalf("agent %q not found in defaults", tt.agent)
 			}
+
 			if !reflect.DeepEqual(agent.Sandbox.ReadDirs, tt.wantRead) {
 				t.Errorf("%s.Sandbox.ReadDirs = %v, want %v", tt.agent, agent.Sandbox.ReadDirs, tt.wantRead)
 			}
@@ -991,10 +1081,12 @@ func TestMergeMCPServers(t *testing.T) {
 			{Name: "graith", Command: "gr", Args: []string{"mcp"}},
 			{Name: "chrome", Command: "npx", Args: []string{"chrome-mcp"}},
 		}
+
 		got := MergeMCPServers(global, nil)
 		if len(got) != 2 {
 			t.Fatalf("got %d servers, want 2", len(got))
 		}
+
 		if got[0].Name != "graith" || got[1].Name != "chrome" {
 			t.Errorf("order = [%s, %s], want [graith, chrome]", got[0].Name, got[1].Name)
 		}
@@ -1007,13 +1099,16 @@ func TestMergeMCPServers(t *testing.T) {
 		overrides := map[string]MCPServerConfig{
 			"chrome": {Args: []string{"chrome-mcp", "--port", "9333"}},
 		}
+
 		got := MergeMCPServers(global, overrides)
 		if len(got) != 1 {
 			t.Fatalf("got %d servers, want 1", len(got))
 		}
+
 		if got[0].Args[2] != "9333" {
 			t.Errorf("args = %v, want port 9333", got[0].Args)
 		}
+
 		if got[0].Command != "npx" {
 			t.Errorf("command = %q, want npx (preserved from global)", got[0].Command)
 		}
@@ -1027,10 +1122,12 @@ func TestMergeMCPServers(t *testing.T) {
 		overrides := map[string]MCPServerConfig{
 			"graith": {Disabled: true},
 		}
+
 		got := MergeMCPServers(global, overrides)
 		if len(got) != 1 {
 			t.Fatalf("got %d servers, want 1", len(got))
 		}
+
 		if got[0].Name != "chrome" {
 			t.Errorf("remaining server = %q, want chrome", got[0].Name)
 		}
@@ -1043,13 +1140,16 @@ func TestMergeMCPServers(t *testing.T) {
 		overrides := map[string]MCPServerConfig{
 			"canny": {Command: "canny-tool", Args: []string{"serve"}},
 		}
+
 		got := MergeMCPServers(global, overrides)
 		if len(got) != 2 {
 			t.Fatalf("got %d servers, want 2", len(got))
 		}
+
 		if got[1].Name != "canny" {
 			t.Errorf("added server name = %q, want canny", got[1].Name)
 		}
+
 		if got[1].Command != "canny-tool" {
 			t.Errorf("added server command = %q, want canny-tool", got[1].Command)
 		}
@@ -1069,6 +1169,7 @@ func TestMergeMCPServers(t *testing.T) {
 			{Name: "graith", Command: "gr", Args: []string{"mcp"}},
 			{Name: "graith", Disabled: true},
 		}
+
 		got := MergeMCPServers(global, nil)
 		if len(got) != 0 {
 			t.Errorf("got %d servers, want 0 (disabled wins)", len(got))
@@ -1080,10 +1181,12 @@ func TestMergeMCPServers(t *testing.T) {
 			{Name: "graith", Command: "auld-gr"},
 			{Name: "graith", Command: "braw-gr", Args: []string{"mcp", "--verbose"}},
 		}
+
 		got := MergeMCPServers(global, nil)
 		if len(got) != 1 {
 			t.Fatalf("got %d servers, want 1", len(got))
 		}
+
 		if got[0].Command != "braw-gr" {
 			t.Errorf("command = %q, want braw-gr (last entry wins)", got[0].Command)
 		}
@@ -1095,10 +1198,12 @@ func TestMergeMCPServers(t *testing.T) {
 			{Name: "b", Command: "b", Disabled: true},
 			{Name: "c", Command: "c"},
 		}
+
 		got := MergeMCPServers(global, nil)
 		if len(got) != 2 {
 			t.Fatalf("got %d servers, want 2", len(got))
 		}
+
 		if got[0].Name != "a" || got[1].Name != "c" {
 			t.Errorf("got [%s, %s], want [a, c]", got[0].Name, got[1].Name)
 		}
@@ -1113,13 +1218,16 @@ func TestMergeMCPServers(t *testing.T) {
 		overrides := map[string]MCPServerConfig{
 			"b": {Command: "b2"},
 		}
+
 		got := MergeMCPServers(global, overrides)
 		if len(got) != 3 {
 			t.Fatalf("got %d servers, want 3", len(got))
 		}
+
 		if got[0].Name != "a" || got[1].Name != "b" || got[2].Name != "c" {
 			t.Errorf("order = [%s, %s, %s], want [a, b, c]", got[0].Name, got[1].Name, got[2].Name)
 		}
+
 		if got[1].Command != "b2" {
 			t.Errorf("b command = %q, want b2", got[1].Command)
 		}
@@ -1129,6 +1237,7 @@ func TestMergeMCPServers(t *testing.T) {
 func TestMCPServerValidation(t *testing.T) {
 	t.Run("valid config", func(t *testing.T) {
 		cfg := Default()
+
 		cfg.MCPServers = []MCPServerConfig{
 			{Name: "chrome", Command: "npx"},
 		}
@@ -1139,6 +1248,7 @@ func TestMCPServerValidation(t *testing.T) {
 
 	t.Run("duplicate name", func(t *testing.T) {
 		cfg := Default()
+
 		cfg.MCPServers = []MCPServerConfig{
 			{Name: "chrome", Command: "npx"},
 			{Name: "chrome", Command: "other"},
@@ -1150,6 +1260,7 @@ func TestMCPServerValidation(t *testing.T) {
 
 	t.Run("empty name", func(t *testing.T) {
 		cfg := Default()
+
 		cfg.MCPServers = []MCPServerConfig{
 			{Name: "", Command: "npx"},
 		}
@@ -1160,6 +1271,7 @@ func TestMCPServerValidation(t *testing.T) {
 
 	t.Run("empty command", func(t *testing.T) {
 		cfg := Default()
+
 		cfg.MCPServers = []MCPServerConfig{
 			{Name: "chrome", Command: ""},
 		}
@@ -1170,6 +1282,7 @@ func TestMCPServerValidation(t *testing.T) {
 
 	t.Run("disabled with empty command is ok", func(t *testing.T) {
 		cfg := Default()
+
 		cfg.MCPServers = []MCPServerConfig{
 			{Name: "graith", Disabled: true},
 		}
@@ -1180,6 +1293,7 @@ func TestMCPServerValidation(t *testing.T) {
 
 	t.Run("agent-specific addition without command", func(t *testing.T) {
 		cfg := Default()
+
 		cfg.Agents["claude"] = Agent{
 			Command: "claude",
 			MCPServers: map[string]MCPServerConfig{
@@ -1196,6 +1310,7 @@ func TestMCPServerValidation(t *testing.T) {
 		cfg.MCPServers = []MCPServerConfig{
 			{Name: "chrome", Command: "npx"},
 		}
+
 		cfg.Agents["claude"] = Agent{
 			Command: "claude",
 			MCPServers: map[string]MCPServerConfig{
@@ -1228,16 +1343,20 @@ args = ["chrome-mcp", "--port", "9333"]
 command = "bonnie"
 `
 	os.WriteFile(cfgPath, []byte(toml), 0o644)
+
 	cfg, err := Load(cfgPath)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if len(cfg.MCPServers) != 2 {
 		t.Fatalf("MCPServers = %d, want 2", len(cfg.MCPServers))
 	}
+
 	if cfg.MCPServers[0].Name != "chrome" {
 		t.Errorf("MCPServers[0].Name = %q, want chrome", cfg.MCPServers[0].Name)
 	}
+
 	if cfg.MCPServers[0].Args[2] != "9222" {
 		t.Errorf("MCPServers[0].Args = %v, want port 9222", cfg.MCPServers[0].Args)
 	}
@@ -1246,17 +1365,21 @@ command = "bonnie"
 	if len(claude.MCPServers) != 2 {
 		t.Fatalf("claude.MCPServers = %d entries, want 2", len(claude.MCPServers))
 	}
+
 	chromeOvr, ok := claude.MCPServers["chrome"]
 	if !ok {
 		t.Fatal("claude.MCPServers missing chrome override")
 	}
+
 	if chromeOvr.Args[2] != "9333" {
 		t.Errorf("claude chrome override args = %v, want port 9333", chromeOvr.Args)
 	}
+
 	agentOnly, ok := claude.MCPServers["agent-only"]
 	if !ok {
 		t.Fatal("claude.MCPServers missing agent-only")
 	}
+
 	if agentOnly.Command != "bonnie" {
 		t.Errorf("agent-only command = %q, want bonnie", agentOnly.Command)
 	}
@@ -1272,13 +1395,16 @@ func TestMergeAgentPreservesMCPServers(t *testing.T) {
 			"chrome": {Command: "npx"},
 		},
 	}
+
 	got := mergeAgent(def, usr)
 	if len(got.MCPServers) != 1 {
 		t.Fatalf("MCPServers = %d, want 1", len(got.MCPServers))
 	}
+
 	if got.MCPServers["chrome"].Command != "npx" {
 		t.Errorf("chrome command = %q, want npx", got.MCPServers["chrome"].Command)
 	}
+
 	if got.Command != "claude" {
 		t.Errorf("Command = %q, want claude (preserved)", got.Command)
 	}
@@ -1319,12 +1445,15 @@ func TestAgySandboxPathsMergedWithGlobal(t *testing.T) {
 	if !merged.Enabled {
 		t.Error("merged.Enabled = false, want true")
 	}
+
 	foundGemini := false
+
 	for _, d := range merged.ReadDirs {
 		if d == "~/.gemini" {
 			foundGemini = true
 		}
 	}
+
 	if !foundGemini {
 		t.Errorf("merged.ReadDirs = %v, want ~/.gemini included", merged.ReadDirs)
 	}
@@ -1339,6 +1468,7 @@ func TestAgentPromptInjectionEnabled(t *testing.T) {
 	})
 	t.Run("explicit true", func(t *testing.T) {
 		v := true
+
 		a := Agent{InjectPrompt: &v}
 		if !a.PromptInjectionEnabled() {
 			t.Error("explicit true should return true")
@@ -1346,6 +1476,7 @@ func TestAgentPromptInjectionEnabled(t *testing.T) {
 	})
 	t.Run("explicit false", func(t *testing.T) {
 		v := false
+
 		a := Agent{InjectPrompt: &v}
 		if a.PromptInjectionEnabled() {
 			t.Error("explicit false should return false")
@@ -1356,6 +1487,7 @@ func TestAgentPromptInjectionEnabled(t *testing.T) {
 func TestLoadAgentInjectPrompt(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.toml")
+
 	toml := `
 [agents.claude]
 inject_prompt = false
@@ -1363,10 +1495,12 @@ inject_prompt = false
 	if err := os.WriteFile(cfgPath, []byte(toml), 0o600); err != nil {
 		t.Fatal(err)
 	}
+
 	cfg, err := Load(cfgPath)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	claude := cfg.Agents["claude"]
 	if claude.PromptInjectionEnabled() {
 		t.Error("inject_prompt = false should disable prompt injection")
@@ -1376,6 +1510,7 @@ inject_prompt = false
 func TestLoadAgentPreTrustWorkspace(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.toml")
+
 	toml := `
 [agents.cursor]
 pre_trust_workspace = false
@@ -1383,10 +1518,12 @@ pre_trust_workspace = false
 	if err := os.WriteFile(cfgPath, []byte(toml), 0o600); err != nil {
 		t.Fatal(err)
 	}
+
 	cfg, err := Load(cfgPath)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	cursor := cfg.Agents["cursor"]
 	if cursor.PreTrustWorkspaceEnabled() {
 		t.Error("pre_trust_workspace = false should disable pre-trust")
@@ -1417,6 +1554,7 @@ func TestGitPullConfig_IntervalDuration(t *testing.T) {
 func TestGitPullConfig_Validate(t *testing.T) {
 	t.Run("valid interval passes", func(t *testing.T) {
 		cfg := Default()
+
 		cfg.GitPull = GitPullConfig{Enabled: true, Interval: "1h"}
 		if err := cfg.Validate(); err != nil {
 			t.Errorf("unexpected error: %v", err)
@@ -1425,6 +1563,7 @@ func TestGitPullConfig_Validate(t *testing.T) {
 
 	t.Run("invalid interval rejected", func(t *testing.T) {
 		cfg := Default()
+
 		cfg.GitPull = GitPullConfig{Enabled: true, Interval: "thrawn"}
 		if err := cfg.Validate(); err == nil {
 			t.Error("expected error for invalid interval")
@@ -1433,6 +1572,7 @@ func TestGitPullConfig_Validate(t *testing.T) {
 
 	t.Run("interval under 1 minute rejected", func(t *testing.T) {
 		cfg := Default()
+
 		cfg.GitPull = GitPullConfig{Enabled: true, Interval: "30s"}
 		if err := cfg.Validate(); err == nil {
 			t.Error("expected error for sub-minute interval")
@@ -1441,6 +1581,7 @@ func TestGitPullConfig_Validate(t *testing.T) {
 
 	t.Run("empty interval passes validation", func(t *testing.T) {
 		cfg := Default()
+
 		cfg.GitPull = GitPullConfig{Enabled: true, Interval: ""}
 		if err := cfg.Validate(); err != nil {
 			t.Errorf("unexpected error: %v", err)
@@ -1457,13 +1598,16 @@ func TestOrchestratorSandboxConfigParsing(t *testing.T) {
 enabled = true
 agent = "claude"
 `), 0o644)
+
 		cfg, err := Load(cfgPath)
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		if cfg.Orchestrator.Sandbox.ReadDirs != nil {
 			t.Errorf("ReadDirs = %v, want nil", cfg.Orchestrator.Sandbox.ReadDirs)
 		}
+
 		if cfg.Orchestrator.Sandbox.WriteDirs != nil {
 			t.Errorf("WriteDirs = %v, want nil", cfg.Orchestrator.Sandbox.WriteDirs)
 		}
@@ -1477,10 +1621,12 @@ agent = "claude"
 enabled = true
 [orchestrator.sandbox]
 `), 0o644)
+
 		cfg, err := Load(cfgPath)
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		if cfg.Orchestrator.Sandbox.ReadDirs != nil {
 			t.Errorf("ReadDirs = %v, want nil", cfg.Orchestrator.Sandbox.ReadDirs)
 		}
@@ -1496,13 +1642,16 @@ enabled = true
 read_dirs = ["~/docs"]
 write_dirs = ["~/.config/graith", "/tmp/extra"]
 `), 0o644)
+
 		cfg, err := Load(cfgPath)
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		if len(cfg.Orchestrator.Sandbox.ReadDirs) != 1 || cfg.Orchestrator.Sandbox.ReadDirs[0] != "~/docs" {
 			t.Errorf("ReadDirs = %v, want [~/docs]", cfg.Orchestrator.Sandbox.ReadDirs)
 		}
+
 		if len(cfg.Orchestrator.Sandbox.WriteDirs) != 2 {
 			t.Errorf("WriteDirs len = %d, want 2", len(cfg.Orchestrator.Sandbox.WriteDirs))
 		}
@@ -1523,21 +1672,27 @@ command = "thrawn"
 features = ["network"]
 write_dirs = ["~/.config/graith"]
 `), 0o644)
+
 	cfg, err := Load(cfgPath)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if len(cfg.Orchestrator.Sandbox.WriteDirs) != 1 {
 		t.Errorf("WriteDirs = %v, want [~/.config/graith]", cfg.Orchestrator.Sandbox.WriteDirs)
 	}
+
 	merged := cfg.OrchestratorSandboxMerged("claude")
+
 	baseline := cfg.Sandbox.Merge(cfg.Agents["claude"].Sandbox)
 	if merged.Command != baseline.Command {
 		t.Errorf("merged.Command = %q, want %q (dangerous key should not alter command)", merged.Command, baseline.Command)
 	}
+
 	if merged.Enabled != baseline.Enabled {
 		t.Errorf("merged.Enabled = %v, want %v (dangerous key should not alter enabled)", merged.Enabled, baseline.Enabled)
 	}
+
 	if !reflect.DeepEqual(merged.Features, baseline.Features) {
 		t.Errorf("merged.Features = %v, want %v (dangerous key should not add features)", merged.Features, baseline.Features)
 	}
@@ -1603,6 +1758,7 @@ func TestOrchestratorSandboxMergedDedup(t *testing.T) {
 	}
 
 	merged := cfg.OrchestratorSandboxMerged("claude")
+
 	wantRead := []string{"/glen", "/kirk-only"}
 	if !reflect.DeepEqual(merged.ReadDirs, wantRead) {
 		t.Errorf("ReadDirs = %v, want %v (should dedup)", merged.ReadDirs, wantRead)

@@ -15,6 +15,7 @@ func ProcessStartTime(pid int) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
+
 	s := string(data)
 	// Field 2 (comm) is parenthesized and may contain spaces; skip past it.
 	closeParen := strings.LastIndex(s, ")")
@@ -27,5 +28,6 @@ func ProcessStartTime(pid int) (int64, error) {
 	if len(fields) < 20 {
 		return 0, fmt.Errorf("too few fields in /proc/%d/stat", pid)
 	}
+
 	return strconv.ParseInt(fields[19], 10, 64)
 }

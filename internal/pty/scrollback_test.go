@@ -10,12 +10,15 @@ import (
 
 func TestScrollbackWrite(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "scroll.log")
+
 	sb, err := NewScrollback(path, 1024)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer sb.Close()
+
 	sb.Write([]byte("braw neep"))
+
 	data, _ := os.ReadFile(path)
 	if string(data) != "braw neep" {
 		t.Errorf("log = %q", data)
@@ -24,16 +27,20 @@ func TestScrollbackWrite(t *testing.T) {
 
 func TestScrollbackTail(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "scroll.log")
+
 	sb, err := NewScrollback(path, 1024)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer sb.Close()
+
 	sb.Write([]byte("glen\nwynd\nloch\n"))
+
 	tail, err := sb.Tail(2)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if string(tail) != "wynd\nloch\n" {
 		t.Errorf("tail = %q", tail)
 	}
@@ -41,6 +48,7 @@ func TestScrollbackTail(t *testing.T) {
 
 func TestScrollbackTailLargeFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "scroll.log")
+
 	sb, err := NewScrollback(path, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -50,10 +58,12 @@ func TestScrollbackTailLargeFile(t *testing.T) {
 	for i := range 2000 {
 		fmt.Fprintf(sb, "line %04d\n", i)
 	}
+
 	tail, err := sb.Tail(3)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	want := "line 1997\nline 1998\nline 1999\n"
 	if string(tail) != want {
 		t.Errorf("tail = %q, want %q", tail, want)
@@ -62,6 +72,7 @@ func TestScrollbackTailLargeFile(t *testing.T) {
 
 func TestScrollbackTailBytes(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "scroll.log")
+
 	sb, err := NewScrollback(path, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -75,6 +86,7 @@ func TestScrollbackTailBytes(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		if string(tail) != "brawcannye" {
 			t.Errorf("tail = %q, want %q", tail, "brawcannye")
 		}
@@ -85,6 +97,7 @@ func TestScrollbackTailBytes(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		if string(tail) != "annye" {
 			t.Errorf("tail = %q, want %q", tail, "annye")
 		}
@@ -95,6 +108,7 @@ func TestScrollbackTailBytes(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		if string(tail) != "brawcannye" {
 			t.Errorf("tail = %q, want %q", tail, "brawcannye")
 		}
@@ -103,6 +117,7 @@ func TestScrollbackTailBytes(t *testing.T) {
 
 func TestScrollbackStats(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "scroll.log")
+
 	sb, err := NewScrollback(path, 100)
 	if err != nil {
 		t.Fatal(err)
@@ -115,6 +130,7 @@ func TestScrollbackStats(t *testing.T) {
 	}
 
 	sb.Write([]byte("neep!"))
+
 	written, maxSize, saturated = sb.Stats()
 	if written != 5 || maxSize != 100 || saturated {
 		t.Errorf("after write: written=%d, maxSize=%d, saturated=%v", written, maxSize, saturated)
@@ -123,6 +139,7 @@ func TestScrollbackStats(t *testing.T) {
 
 func TestScrollbackStatsSaturated(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "scroll.log")
+
 	sb, err := NewScrollback(path, 10)
 	if err != nil {
 		t.Fatal(err)
@@ -140,6 +157,7 @@ func TestScrollbackStatsSaturated(t *testing.T) {
 
 func TestScrollbackConcurrentReadersAndWriter(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "scroll.log")
+
 	sb, err := NewScrollback(path, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -153,6 +171,7 @@ func TestScrollbackConcurrentReadersAndWriter(t *testing.T) {
 
 	go func() {
 		defer wg.Done()
+
 		for range 200 {
 			sb.Write([]byte("kirk\n"))
 		}
@@ -160,6 +179,7 @@ func TestScrollbackConcurrentReadersAndWriter(t *testing.T) {
 
 	go func() {
 		defer wg.Done()
+
 		for range 200 {
 			if _, err := sb.Tail(5); err != nil {
 				t.Errorf("Tail error: %v", err)
@@ -170,6 +190,7 @@ func TestScrollbackConcurrentReadersAndWriter(t *testing.T) {
 
 	go func() {
 		defer wg.Done()
+
 		for range 200 {
 			if _, err := sb.TailBytes(64); err != nil {
 				t.Errorf("TailBytes error: %v", err)
@@ -180,6 +201,7 @@ func TestScrollbackConcurrentReadersAndWriter(t *testing.T) {
 
 	go func() {
 		defer wg.Done()
+
 		for range 200 {
 			sb.Stats()
 		}
@@ -190,6 +212,7 @@ func TestScrollbackConcurrentReadersAndWriter(t *testing.T) {
 
 func TestScrollbackStopsAtMaxSize(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "scroll.log")
+
 	sb, err := NewScrollback(path, 10)
 	if err != nil {
 		t.Fatal(err)
@@ -203,6 +226,7 @@ func TestScrollbackStopsAtMaxSize(t *testing.T) {
 	if string(data) != "bonnieloch" {
 		t.Errorf("expected only first 10 bytes, got %q", data)
 	}
+
 	if !sb.saturated {
 		t.Error("expected saturated=true after exceeding maxSize")
 	}

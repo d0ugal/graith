@@ -21,12 +21,15 @@ var stopCmd = &cobra.Command{
 		if stopChildren && stopBatch.active() {
 			return fmt.Errorf("--children cannot be combined with batch filters")
 		}
+
 		if stopBatch.active() {
 			return cobra.NoArgs(cmd, args)
 		}
+
 		if stopChildren {
 			return cobra.MaximumNArgs(1)(cmd, args)
 		}
+
 		return cobra.ExactArgs(1)(cmd, args)
 	},
 	ValidArgsFunction: completeSessionNames,
@@ -51,37 +54,46 @@ var stopCmd = &cobra.Command{
 		}
 
 		c.SendControl("stop", protocol.StopMsg{SessionID: sessionID})
+
 		resp, err := c.ReadControlResponse()
 		if err != nil {
 			return err
 		}
+
 		if resp.Type == "error" {
 			var e protocol.ErrorMsg
 			protocol.DecodePayload(resp, &e)
+
 			return fmt.Errorf("%s", e.Message)
 		}
 
 		out.Print("Session stopped (worktree preserved)\n")
+
 		return nil
 	},
 }
 
 func stopChildrenRun(c *client.Client, args []string) error {
-	var sessionID string
-	var excludeRoot bool
+	var (
+		sessionID   string
+		excludeRoot bool
+	)
 
 	if len(args) == 1 {
 		var err error
+
 		sessionID, err = resolveSession(c, args[0])
 		if err != nil {
 			return err
 		}
+
 		excludeRoot = false
 	} else {
 		sessionID = os.Getenv("GRAITH_SESSION_ID")
 		if sessionID == "" {
 			return fmt.Errorf("--children with no session arg requires GRAITH_SESSION_ID to be set")
 		}
+
 		excludeRoot = true
 	}
 
@@ -90,13 +102,16 @@ func stopChildrenRun(c *client.Client, args []string) error {
 		Children:    true,
 		ExcludeRoot: excludeRoot,
 	})
+
 	resp, err := c.ReadControlResponse()
 	if err != nil {
 		return err
 	}
+
 	if resp.Type == "error" {
 		var e protocol.ErrorMsg
 		protocol.DecodePayload(resp, &e)
+
 		return fmt.Errorf("%s", e.Message)
 	}
 
@@ -105,6 +120,7 @@ func stopChildrenRun(c *client.Client, args []string) error {
 	}
 	protocol.DecodePayload(resp, &result)
 	out.Print("Stopped %d sessions\n", len(result.Stopped))
+
 	return nil
 }
 
@@ -116,10 +132,12 @@ func stopBatchRun(cmd *cobra.Command) error {
 	defer c.Close()
 
 	c.SendControl("list", struct{}{})
+
 	resp, err := c.ReadControlResponse()
 	if err != nil {
 		return err
 	}
+
 	var list protocol.SessionListMsg
 	if err := protocol.DecodePayload(resp, &list); err != nil {
 		return err
@@ -129,6 +147,7 @@ func stopBatchRun(cmd *cobra.Command) error {
 	if err != nil {
 		return err
 	}
+
 	if len(matched) == 0 {
 		out.Print("No sessions match the given filters\n")
 		return nil
@@ -139,35 +158,46 @@ func stopBatchRun(cmd *cobra.Command) error {
 		if err != nil {
 			return err
 		}
+
 		if !confirmed {
 			return nil
 		}
 	}
 
-	var skipped []string
-	var stopped int
+	var (
+		skipped []string
+		stopped int
+	)
+
 	for _, s := range matched {
 		if s.Starred {
 			skipped = append(skipped, s.Name)
 			continue
 		}
+
 		c.SendControl("stop", protocol.StopMsg{SessionID: s.ID})
+
 		resp, err := c.ReadControlResponse()
 		if err != nil {
 			return err
 		}
+
 		if resp.Type == "error" {
 			var e protocol.ErrorMsg
 			protocol.DecodePayload(resp, &e)
+
 			return fmt.Errorf("stopping %s: %s", s.Name, e.Message)
 		}
+
 		stopped++
 	}
 
 	out.Print("Stopped %d sessions\n", stopped)
+
 	for _, name := range skipped {
 		out.Print("Skipped starred session: %s\n", name)
 	}
+
 	return nil
 }
 

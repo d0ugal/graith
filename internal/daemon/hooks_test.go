@@ -14,6 +14,7 @@ import (
 func newTestSessionManagerWithDataDir(t *testing.T) *SessionManager {
 	t.Helper()
 	dir := t.TempDir()
+
 	return NewSessionManager(config.Default(), config.Paths{
 		StateFile: filepath.Join(dir, "state.json"),
 		DataDir:   dir,
@@ -62,18 +63,22 @@ func TestGenerateClaudeSettings(t *testing.T) {
 			t.Errorf("missing hook event %q", event)
 			continue
 		}
+
 		if len(matchers) != 1 {
 			t.Errorf("event %q has %d matcher groups, want 1", event, len(matchers))
 			continue
 		}
+
 		if matchers[0].Matcher != "" {
 			t.Errorf("event %q matcher = %q, want empty (match-all)", event, matchers[0].Matcher)
 		}
+
 		for _, hook := range matchers[0].Hooks {
 			if hook.Type != "command" {
 				t.Errorf("event %q type = %q, want %q", event, hook.Type, "command")
 			}
 		}
+
 		switch event {
 		case "PreToolUse":
 			if len(matchers[0].Hooks) != 1 {
@@ -88,6 +93,7 @@ func TestGenerateClaudeSettings(t *testing.T) {
 				if !strings.Contains(matchers[0].Hooks[0].Command, "report-status") {
 					t.Errorf("SessionStart hook[0] = %q, want report-status", matchers[0].Hooks[0].Command)
 				}
+
 				if !strings.Contains(matchers[0].Hooks[1].Command, "check-inbox") {
 					t.Errorf("SessionStart hook[1] = %q, want check-inbox", matchers[0].Hooks[1].Command)
 				}
@@ -99,6 +105,7 @@ func TestGenerateClaudeSettings(t *testing.T) {
 				if !strings.Contains(matchers[0].Hooks[0].Command, "report-status") {
 					t.Errorf("event %q command = %q, does not contain report-status", event, matchers[0].Hooks[0].Command)
 				}
+
 				if !strings.Contains(matchers[0].Hooks[0].Command, "--event "+event) {
 					t.Errorf("event %q command = %q, does not contain --event %s", event, matchers[0].Hooks[0].Command, event)
 				}
@@ -123,9 +130,11 @@ func TestInjectClaudeHooks(t *testing.T) {
 	if len(extraArgs) != 2 {
 		t.Fatalf("extraArgs length = %d, want 2", len(extraArgs))
 	}
+
 	if extraArgs[0] != "--settings" {
 		t.Errorf("extraArgs[0] = %q, want %q", extraArgs[0], "--settings")
 	}
+
 	if _, err := os.Stat(extraArgs[1]); err != nil {
 		t.Errorf("settings file does not exist: %v", err)
 	}
@@ -208,6 +217,7 @@ func TestInjectCodexHooks(t *testing.T) {
 	if !ok {
 		t.Fatal("extraEnv missing CODEX_HOOKS_DIR")
 	}
+
 	if hooksDir == "" {
 		t.Fatal("CODEX_HOOKS_DIR is empty")
 	}
@@ -216,6 +226,7 @@ func TestInjectCodexHooks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("codex hooks dir does not exist: %v", err)
 	}
+
 	if !info.IsDir() {
 		t.Fatal("CODEX_HOOKS_DIR is not a directory")
 	}
@@ -233,17 +244,20 @@ func TestInjectCodexHooks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read codex hooks dir: %v", err)
 	}
+
 	if len(entries) != len(expectedScripts) {
 		t.Errorf("codex hooks dir has %d entries, want %d", len(entries), len(expectedScripts))
 	}
 
 	for _, name := range expectedScripts {
 		path := filepath.Join(hooksDir, name)
+
 		fi, err := os.Stat(path)
 		if err != nil {
 			t.Errorf("missing codex hook script %q: %v", name, err)
 			continue
 		}
+
 		perm := fi.Mode().Perm()
 		if perm&0o111 == 0 {
 			t.Errorf("codex hook script %q is not executable: mode = %v", name, perm)
@@ -273,16 +287,19 @@ func TestCodexHookScriptContent(t *testing.T) {
 
 	for filename, eventName := range events {
 		path := filepath.Join(hooksDir, filename)
+
 		data, err := os.ReadFile(path)
 		if err != nil {
 			t.Errorf("read codex hook %q: %v", filename, err)
 			continue
 		}
+
 		content := string(data)
 
 		if !strings.HasPrefix(content, "#!/bin/sh") {
 			t.Errorf("codex hook %q missing shebang", filename)
 		}
+
 		switch filename {
 		case "permission-request":
 			if !strings.Contains(content, "approve-request") {
@@ -292,6 +309,7 @@ func TestCodexHookScriptContent(t *testing.T) {
 			if !strings.Contains(content, "report-status") {
 				t.Errorf("codex hook %q does not contain report-status; content = %q", filename, content)
 			}
+
 			if !strings.Contains(content, "check-inbox") {
 				t.Errorf("codex hook %q does not contain check-inbox; content = %q", filename, content)
 			}
@@ -299,6 +317,7 @@ func TestCodexHookScriptContent(t *testing.T) {
 			if !strings.Contains(content, "--event "+eventName) {
 				t.Errorf("codex hook %q does not contain --event %s; content = %q", filename, eventName, content)
 			}
+
 			if !strings.Contains(content, "report-status") {
 				t.Errorf("codex hook %q does not contain report-status; content = %q", filename, content)
 			}
@@ -314,9 +333,11 @@ func TestInjectHooksSupported(t *testing.T) {
 	if err != nil {
 		t.Fatalf("injectHooks(claude) error = %v", err)
 	}
+
 	if len(args) == 0 {
 		t.Error("injectHooks(claude) returned no args")
 	}
+
 	if env != nil {
 		t.Errorf("injectHooks(claude) returned unexpected env: %v", env)
 	}
@@ -325,24 +346,30 @@ func TestInjectHooksSupported(t *testing.T) {
 	if err != nil {
 		t.Fatalf("injectHooks(codex) error = %v", err)
 	}
+
 	if len(args) != 0 {
 		t.Errorf("injectHooks(codex) returned unexpected args: %v", args)
 	}
+
 	if _, ok := env["CODEX_HOOKS_DIR"]; !ok {
 		t.Error("injectHooks(codex) missing CODEX_HOOKS_DIR")
 	}
 
 	worktree := t.TempDir()
+
 	args, env, err = sm.injectHooks("cursor", "kirk-cursor-sup", worktree, nil)
 	if err != nil {
 		t.Fatalf("injectHooks(cursor) error = %v", err)
 	}
+
 	if len(args) != 0 {
 		t.Errorf("injectHooks(cursor) returned unexpected args: %v", args)
 	}
+
 	if env != nil {
 		t.Errorf("injectHooks(cursor) returned unexpected env: %v", env)
 	}
+
 	hooksPath := filepath.Join(worktree, ".cursor", "hooks.json")
 	if _, err := os.Stat(hooksPath); err != nil {
 		t.Errorf("cursor hooks.json not created: %v", err)
@@ -357,9 +384,11 @@ func TestInjectHooksUnsupportedIsNoop(t *testing.T) {
 		if err != nil {
 			t.Errorf("injectHooks(%q) unexpected error: %v", agent, err)
 		}
+
 		if args != nil {
 			t.Errorf("injectHooks(%q) returned non-nil args: %v", agent, args)
 		}
+
 		if env != nil {
 			t.Errorf("injectHooks(%q) returned non-nil env: %v", agent, env)
 		}
@@ -369,6 +398,7 @@ func TestInjectHooksUnsupportedIsNoop(t *testing.T) {
 func TestHookDir(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 	dir := sm.hookDir("braw123")
+
 	expected := filepath.Join(sm.paths.DataDir, "hooks", "braw123")
 	if dir != expected {
 		t.Errorf("hookDir() = %q, want %q", dir, expected)
@@ -401,6 +431,7 @@ func TestCodexHookScriptsEscapeSingleQuotes(t *testing.T) {
 	if err := os.MkdirAll(fakeDir, 0o755); err != nil {
 		t.Fatalf("create fake dir: %v", err)
 	}
+
 	fakeBin := filepath.Join(fakeDir, "gr")
 	if err := os.WriteFile(fakeBin, []byte("#!/bin/sh\necho ok\n"), 0o755); err != nil {
 		t.Fatalf("write fake binary: %v", err)
@@ -423,11 +454,13 @@ func TestCodexHookScriptsEscapeSingleQuotes(t *testing.T) {
 	scripts := []string{"permission-request", "session-start", "stop"}
 	for _, name := range scripts {
 		path := filepath.Join(hooksDir, name)
+
 		data, err := os.ReadFile(path)
 		if err != nil {
 			t.Errorf("read codex hook %q: %v", name, err)
 			continue
 		}
+
 		content := string(data)
 		if !strings.Contains(content, expectedQuoted) {
 			t.Errorf("codex hook %q does not contain properly escaped path %q; content = %q", name, expectedQuoted, content)
@@ -474,9 +507,11 @@ func TestGenerateMCPConfig(t *testing.T) {
 	if !ok {
 		t.Fatal("mcpServers missing graith")
 	}
+
 	if graith.Command != grBin {
 		t.Errorf("graith command = %q, want %q", graith.Command, grBin)
 	}
+
 	if len(graith.Args) != 2 || graith.Args[0] != "mcp-proxy" || graith.Args[1] != "graith" {
 		t.Errorf("graith args = %v, want [mcp-proxy graith]", graith.Args)
 	}
@@ -485,9 +520,11 @@ func TestGenerateMCPConfig(t *testing.T) {
 	if !ok {
 		t.Fatal("mcpServers missing chrome")
 	}
+
 	if chrome.Command != grBin {
 		t.Errorf("chrome command = %q, want %q", chrome.Command, grBin)
 	}
+
 	if len(chrome.Args) != 2 || chrome.Args[0] != "mcp-proxy" || chrome.Args[1] != "chrome" {
 		t.Errorf("chrome args = %v, want [mcp-proxy chrome]", chrome.Args)
 	}
@@ -506,6 +543,7 @@ func TestInjectClaudeHooksWithMCPServers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("injectClaudeHooks() error = %v", err)
 	}
+
 	if env != nil {
 		t.Errorf("unexpected env: %v", env)
 	}
@@ -513,18 +551,22 @@ func TestInjectClaudeHooksWithMCPServers(t *testing.T) {
 	if len(args) != 4 {
 		t.Fatalf("args = %v, want 4 elements [--settings path --mcp-config path]", args)
 	}
+
 	if args[0] != "--settings" {
 		t.Errorf("args[0] = %q, want --settings", args[0])
 	}
+
 	if args[2] != "--mcp-config" {
 		t.Errorf("args[2] = %q, want --mcp-config", args[2])
 	}
 
 	mcpConfigPath := args[3]
+
 	data, err := os.ReadFile(mcpConfigPath)
 	if err != nil {
 		t.Fatalf("read mcp config at %q: %v", mcpConfigPath, err)
 	}
+
 	if !strings.Contains(string(data), "mcpServers") {
 		t.Error("mcp config file should contain mcpServers")
 	}
@@ -557,9 +599,11 @@ func TestResolveMCPServers(t *testing.T) {
 		if len(servers) == 0 {
 			t.Fatal("expected at least graith server")
 		}
+
 		if servers[0].Name != "graith" {
 			t.Errorf("first server = %q, want graith", servers[0].Name)
 		}
+
 		if len(servers[0].Args) != 1 || servers[0].Args[0] != "mcp" {
 			t.Errorf("graith args = %v, want [mcp]", servers[0].Args)
 		}
@@ -569,10 +613,12 @@ func TestResolveMCPServers(t *testing.T) {
 		sm.cfg.MCPServers = []config.MCPServerConfig{
 			{Name: "chrome", Command: "npx", Args: []string{"chrome-mcp"}},
 		}
+
 		servers := sm.resolveMCPServers("claude")
 		if len(servers) != 2 {
 			t.Fatalf("got %d servers, want 2 (graith + chrome)", len(servers))
 		}
+
 		if servers[1].Name != "chrome" {
 			t.Errorf("second server = %q, want chrome", servers[1].Name)
 		}
@@ -591,14 +637,17 @@ func TestResolveMCPServers(t *testing.T) {
 		}
 		servers := sm.resolveMCPServers("claude")
 		found := false
+
 		for _, s := range servers {
 			if s.Name == "chrome" {
 				found = true
+
 				if s.Args[2] != "9333" {
 					t.Errorf("chrome args = %v, want port 9333", s.Args)
 				}
 			}
 		}
+
 		if !found {
 			t.Error("chrome server not found after merge")
 		}
@@ -614,6 +663,7 @@ func TestResolveMCPServers(t *testing.T) {
 				},
 			},
 		}
+
 		servers := sm2.resolveMCPServers("claude")
 		for _, s := range servers {
 			if s.Name == "graith" {
@@ -627,6 +677,7 @@ func TestResolveMCPServers(t *testing.T) {
 		sm2.cfg.MCPServers = []config.MCPServerConfig{
 			{Name: "graith", Disabled: true},
 		}
+
 		servers := sm2.resolveMCPServers("claude")
 		for _, s := range servers {
 			if s.Name == "graith" {
@@ -641,27 +692,35 @@ func TestResolveMCPServers(t *testing.T) {
 			{Name: "graith", Command: "/custom/gr", Args: []string{"mcp", "--verbose"}},
 		}
 		servers := sm2.resolveMCPServers("claude")
+
 		var found bool
+
 		for _, s := range servers {
 			if s.Name == "graith" {
 				found = true
+
 				if s.Command != "/custom/gr" {
 					t.Errorf("graith command = %q, want /custom/gr", s.Command)
 				}
+
 				if len(s.Args) != 2 || s.Args[1] != "--verbose" {
 					t.Errorf("graith args = %v, want [mcp --verbose]", s.Args)
 				}
 			}
 		}
+
 		if !found {
 			t.Error("graith server not found")
 		}
+
 		count := 0
+
 		for _, s := range servers {
 			if s.Name == "graith" {
 				count++
 			}
 		}
+
 		if count != 1 {
 			t.Errorf("got %d graith entries, want exactly 1", count)
 		}
@@ -678,14 +737,17 @@ func TestInjectCursorHooks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("injectCursorHooks() error = %v", err)
 	}
+
 	if len(extraArgs) != 0 {
 		t.Errorf("extraArgs length = %d, want 0", len(extraArgs))
 	}
+
 	if extraEnv != nil {
 		t.Errorf("extraEnv = %v, want nil", extraEnv)
 	}
 
 	hooksPath := filepath.Join(worktree, ".cursor", "hooks.json")
+
 	data, err := os.ReadFile(hooksPath)
 	if err != nil {
 		t.Fatalf("read cursor hooks: %v", err)
@@ -712,6 +774,7 @@ func TestInjectCursorHooks(t *testing.T) {
 			t.Errorf("missing hook event %q", event)
 			continue
 		}
+
 		if len(hooks) == 0 {
 			t.Errorf("event %q has no hooks", event)
 		}
@@ -734,6 +797,7 @@ func TestInjectCursorHooksContent(t *testing.T) {
 	}
 
 	hooksPath := filepath.Join(worktree, ".cursor", "hooks.json")
+
 	data, err := os.ReadFile(hooksPath)
 	if err != nil {
 		t.Fatalf("read cursor hooks: %v", err)
@@ -752,9 +816,11 @@ func TestInjectCursorHooksContent(t *testing.T) {
 	if !strings.Contains(content, "report-status") {
 		t.Error("cursor hooks missing report-status command")
 	}
+
 	if !strings.Contains(content, "approve-request") {
 		t.Error("cursor hooks missing approve-request command")
 	}
+
 	if !strings.Contains(content, "check-inbox") {
 		t.Error("cursor hooks missing check-inbox command")
 	}
@@ -788,6 +854,7 @@ func TestPreTrustCursorWorkspace(t *testing.T) {
 
 	key := cursorProjectKey(worktree)
 	sentinel := filepath.Join(home, ".cursor", "projects", key, ".workspace-trusted")
+
 	data, err := os.ReadFile(sentinel)
 	if err != nil {
 		t.Fatalf("sentinel file not created: %v", err)
@@ -800,9 +867,11 @@ func TestPreTrustCursorWorkspace(t *testing.T) {
 	if err := json.Unmarshal(data, &trust); err != nil {
 		t.Fatalf("sentinel is not valid JSON: %v", err)
 	}
+
 	if trust.WorkspacePath != worktree {
 		t.Errorf("workspacePath = %q, want %q", trust.WorkspacePath, worktree)
 	}
+
 	if trust.TrustedAt == "" {
 		t.Error("trustedAt is empty")
 	}
@@ -819,12 +888,14 @@ func TestPreTrustCursorWorkspaceDisabled(t *testing.T) {
 	}
 
 	worktree := t.TempDir()
+
 	_, _, err := sm.injectCursorHooks("haar-no-trust", worktree)
 	if err != nil {
 		t.Fatalf("injectCursorHooks() error = %v", err)
 	}
 
 	key := cursorProjectKey(worktree)
+
 	sentinel := filepath.Join(home, ".cursor", "projects", key, ".workspace-trusted")
 	if _, err := os.Stat(sentinel); !os.IsNotExist(err) {
 		t.Errorf("sentinel file should not exist when pre_trust_workspace=false, err = %v", err)
@@ -839,6 +910,7 @@ func TestPreTrustCursorWorkspaceIdempotent(t *testing.T) {
 	if err := preTrustCursorWorkspace(worktree); err != nil {
 		t.Fatalf("first call error = %v", err)
 	}
+
 	if err := preTrustCursorWorkspace(worktree); err != nil {
 		t.Fatalf("second call error = %v", err)
 	}
@@ -851,9 +923,11 @@ func TestInjectCursorHooksEmptyWorktree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("injectCursorHooks() error = %v", err)
 	}
+
 	if args != nil {
 		t.Errorf("expected nil args, got %v", args)
 	}
+
 	if env != nil {
 		t.Errorf("expected nil env, got %v", env)
 	}
@@ -864,10 +938,12 @@ func TestClaudeSettingsEscapeSingleQuotes(t *testing.T) {
 	if err := os.MkdirAll(fakeDir, 0o755); err != nil {
 		t.Fatalf("create fake dir: %v", err)
 	}
+
 	fakeBin := filepath.Join(fakeDir, "gr")
 	if err := os.WriteFile(fakeBin, []byte("#!/bin/sh\necho ok\n"), 0o755); err != nil {
 		t.Fatalf("write fake binary: %v", err)
 	}
+
 	t.Setenv("PATH", fakeDir+":"+os.Getenv("PATH"))
 
 	sm := newTestSessionManagerWithDataDir(t)
@@ -895,6 +971,7 @@ func TestClaudeSettingsEscapeSingleQuotes(t *testing.T) {
 	}
 
 	expectedQuoted := shellQuote(fakeBin)
+
 	for event, matchers := range parsed.Hooks {
 		for _, m := range matchers {
 			for _, h := range m.Hooks {

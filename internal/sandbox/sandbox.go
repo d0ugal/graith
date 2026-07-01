@@ -25,9 +25,11 @@ func Wrap(command string, args []string, opts WrapOpts) (string, []string, error
 	if err := validatePaths(opts.WorktreeDir); err != nil {
 		return "", nil, fmt.Errorf("workdir: %w", err)
 	}
+
 	if err := validatePaths(opts.ReadDirs...); err != nil {
 		return "", nil, fmt.Errorf("read dirs: %w", err)
 	}
+
 	if err := validatePaths(opts.WriteDirs...); err != nil {
 		return "", nil, fmt.Errorf("write dirs: %w", err)
 	}
@@ -64,6 +66,7 @@ func validatePaths(paths ...string) error {
 			return fmt.Errorf("path %q contains a colon, which conflicts with safehouse's colon-separated path format", p)
 		}
 	}
+
 	return nil
 }
 
@@ -75,6 +78,8 @@ func AvailableCommand(command string) bool {
 	if runtime.GOOS != "darwin" {
 		return false
 	}
+
 	_, err := exec.LookPath(command)
+
 	return err == nil
 }

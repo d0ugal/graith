@@ -15,10 +15,12 @@ func claudeConfigDir() (string, error) {
 	if d := os.Getenv("CLAUDE_CONFIG_DIR"); d != "" {
 		return d, nil
 	}
+
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
+
 	return filepath.Join(home, ".claude"), nil
 }
 
@@ -31,15 +33,19 @@ func locateClaude(agentSessionID string) (string, error) {
 	if agentSessionID == "" {
 		return "", fmt.Errorf("claude transcript lookup requires an agent session id")
 	}
+
 	root, err := claudeConfigDir()
 	if err != nil {
 		return "", err
 	}
+
 	pattern := filepath.Join(root, "projects", "*", agentSessionID+".jsonl")
+
 	matches, err := filepath.Glob(pattern)
 	if err != nil {
 		return "", fmt.Errorf("glob claude transcripts: %w", err)
 	}
+
 	if len(matches) == 0 {
 		return "", fmt.Errorf("no claude transcript found for session %s under %s (looked for %s)", agentSessionID, root, pattern)
 	}
@@ -83,28 +89,35 @@ func (claudeReader) read(path string) ([]Turn, int, error) {
 	defer f.Close()
 
 	byUUID := make(map[string]claudeRecord)
+
 	var order []string // uuids of user/assistant records in file order
+
 	dropped := 0
 
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+
 	for sc.Scan() {
 		line := bytes.TrimSpace(sc.Bytes())
 		if len(line) == 0 {
 			continue
 		}
+
 		var rec claudeRecord
 		if err := json.Unmarshal(line, &rec); err != nil {
 			dropped++ // partial trailing line / format drift
 			continue
 		}
+
 		if rec.UUID != "" {
 			byUUID[rec.UUID] = rec
 		}
+
 		if rec.Type == "user" || rec.Type == "assistant" {
 			order = append(order, rec.UUID)
 		}
 	}
+
 	if err := sc.Err(); err != nil {
 		// A long unterminated final line (live file) is tolerated as a drop.
 		dropped++
@@ -114,13 +127,16 @@ func (claudeReader) read(path string) ([]Turn, int, error) {
 	if leaf == "" {
 		return nil, dropped, nil
 	}
+
 	chain := walkChain(byUUID, leaf)
 
 	var turns []Turn
+
 	toolIdx := make(map[string]int) // tool_use_id -> index into turns
 	for _, rec := range chain {
 		appendClaudeTurns(rec, &turns, toolIdx)
 	}
+
 	return turns, dropped, nil
 }
 
@@ -132,6 +148,7 @@ func activeLeaf(byUUID map[string]claudeRecord, order []string) string {
 			return rec.UUID
 		}
 	}
+
 	return ""
 }
 
@@ -139,23 +156,29 @@ func activeLeaf(byUUID map[string]claudeRecord, order []string) string {
 // records in chronological (root-first) order.
 func walkChain(byUUID map[string]claudeRecord, leaf string) []claudeRecord {
 	var rev []claudeRecord
+
 	seen := make(map[string]bool)
+
 	cur := leaf
 	for cur != "" && !seen[cur] {
 		seen[cur] = true
+
 		rec, ok := byUUID[cur]
 		if !ok {
 			break
 		}
+
 		if rec.Type == "user" || rec.Type == "assistant" {
 			rev = append(rev, rec)
 		}
+
 		cur = rec.ParentUUID
 	}
 	// reverse
 	for i, j := 0, len(rev)-1; i < j; i, j = i+1, j-1 {
 		rev[i], rev[j] = rev[j], rev[i]
 	}
+
 	return rev
 }
 
@@ -164,6 +187,7 @@ func appendClaudeTurns(rec claudeRecord, turns *[]Turn, toolIdx map[string]int) 
 	if err := json.Unmarshal(rec.Message, &msg); err != nil {
 		return
 	}
+
 	role := RoleUser
 	if rec.Type == "assistant" {
 		role = RoleAssistant
@@ -175,6 +199,7 @@ func appendClaudeTurns(rec claudeRecord, turns *[]Turn, toolIdx map[string]int) 
 		if strings.TrimSpace(s) != "" {
 			*turns = append(*turns, Turn{Role: role, Text: s})
 		}
+
 		return
 	}
 
@@ -184,12 +209,14 @@ func appendClaudeTurns(rec claudeRecord, turns *[]Turn, toolIdx map[string]int) 
 	}
 
 	var text strings.Builder
+
 	flush := func() {
 		if text.Len() > 0 {
 			*turns = append(*turns, Turn{Role: role, Text: text.String()})
 			text.Reset()
 		}
 	}
+
 	for _, b := range blocks {
 		switch b.Type {
 		case "text":
@@ -197,12 +224,14 @@ func appendClaudeTurns(rec claudeRecord, turns *[]Turn, toolIdx map[string]int) 
 				if text.Len() > 0 {
 					text.WriteString("\n")
 				}
+
 				text.WriteString(b.Text)
 			}
 		case "thinking", "redacted_thinking":
 			// signed/opaque reasoning — not portable, dropped.
 		case "tool_use":
 			flush()
+
 			*turns = append(*turns, Turn{
 				Role: RoleTool,
 				Tool: &ToolCall{Name: b.Name, Args: compactJSON(b.Input)},
@@ -217,10 +246,12 @@ func appendClaudeTurns(rec claudeRecord, turns *[]Turn, toolIdx map[string]int) 
 				(*turns)[idx].Tool.Failed = b.IsError
 			} else if out != "" {
 				flush()
+
 				*turns = append(*turns, Turn{Role: RoleTool, Tool: &ToolCall{Name: "(result)", Output: out, Failed: b.IsError}})
 			}
 		}
 	}
+
 	flush()
 }
 
@@ -230,23 +261,29 @@ func blockContentToText(raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return ""
 	}
+
 	var s string
 	if err := json.Unmarshal(raw, &s); err == nil {
 		return s
 	}
+
 	var blocks []claudeBlock
 	if err := json.Unmarshal(raw, &blocks); err == nil {
 		var b strings.Builder
+
 		for _, blk := range blocks {
 			if blk.Text != "" {
 				if b.Len() > 0 {
 					b.WriteString("\n")
 				}
+
 				b.WriteString(blk.Text)
 			}
 		}
+
 		return b.String()
 	}
+
 	return string(raw)
 }
 
@@ -254,9 +291,11 @@ func compactJSON(raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return ""
 	}
+
 	var buf bytes.Buffer
 	if err := json.Compact(&buf, raw); err != nil {
 		return string(raw)
 	}
+
 	return buf.String()
 }

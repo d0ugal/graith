@@ -27,6 +27,7 @@ func Listen(sockPath string) (net.Listener, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("create socket dir: %w", err)
 	}
+
 	_ = os.Remove(sockPath)
 
 	l, err := net.Listen("unix", sockPath)
@@ -70,18 +71,22 @@ func (s *Server) Serve(ctx context.Context) error {
 			if errors.Is(err, net.ErrClosed) || ctx.Err() != nil {
 				return ctx.Err()
 			}
+
 			if s.log != nil {
 				s.log.Warn("accept error", "err", err)
 			}
+
 			continue
 		}
 
 		s.trackConn(conn)
+
 		s.wg.Add(1)
 		go func(c net.Conn) {
 			defer s.wg.Done()
 			defer c.Close()
 			defer s.untrackConn(c)
+
 			s.handler(ctx, c)
 		}(conn)
 	}
@@ -92,6 +97,7 @@ func (s *Server) Shutdown() {
 
 	// Give handlers a short window to finish gracefully.
 	deadline := time.Now().Add(5 * time.Second)
+
 	s.mu.Lock()
 	for c := range s.conns {
 		c.SetDeadline(deadline)
@@ -99,6 +105,7 @@ func (s *Server) Shutdown() {
 	s.mu.Unlock()
 
 	done := make(chan struct{})
+
 	go func() {
 		s.wg.Wait()
 		close(done)

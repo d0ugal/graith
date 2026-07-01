@@ -54,6 +54,7 @@ func TestValidateKey(t *testing.T) {
 				t.Errorf("ValidateKey(%q) expected error for dotdot component, got nil", key)
 			}
 		}
+
 		okKeys := []string{
 			"glen/..braw",
 			"glen/braw..",
@@ -174,6 +175,7 @@ func TestInit(t *testing.T) {
 	if err != nil {
 		t.Fatalf(".git not created: %v", err)
 	}
+
 	if !info.IsDir() {
 		t.Fatal(".git is not a directory")
 	}
@@ -186,18 +188,22 @@ func TestInit(t *testing.T) {
 
 func newTestStore(t *testing.T) string {
 	t.Helper()
+
 	dir := filepath.Join(t.TempDir(), "store")
 	if err := store.Init(dir); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
+
 	return dir
 }
 
 func TestPutGet(t *testing.T) {
 	dir := newTestStore(t)
 
-	const key = "loch/api.md"
-	const body = "# Loch Design\n\nBraw content here."
+	const (
+		key  = "loch/api.md"
+		body = "# Loch Design\n\nBraw content here."
+	)
 
 	if err := store.Put(dir, key, body); err != nil {
 		t.Fatalf("Put: %v", err)
@@ -207,6 +213,7 @@ func TestPutGet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
+
 	if got != body {
 		t.Errorf("Get returned %q, want %q", got, body)
 	}
@@ -216,6 +223,7 @@ func TestPutGet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("file not found on disk: %v", err)
 	}
+
 	if info.IsDir() {
 		t.Fatal("expected file, got directory")
 	}
@@ -224,13 +232,16 @@ func TestPutGet(t *testing.T) {
 func TestPutOverwrite(t *testing.T) {
 	dir := newTestStore(t)
 
-	const key = "loch/neep.md"
-	const first = "auld value"
-	const second = "braw value"
+	const (
+		key    = "loch/neep.md"
+		first  = "auld value"
+		second = "braw value"
+	)
 
 	if err := store.Put(dir, key, first); err != nil {
 		t.Fatalf("Put (first): %v", err)
 	}
+
 	if err := store.Put(dir, key, second); err != nil {
 		t.Fatalf("Put (second): %v", err)
 	}
@@ -239,6 +250,7 @@ func TestPutOverwrite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
+
 	if got != second {
 		t.Errorf("Get returned %q, want %q (braw value)", got, second)
 	}
@@ -247,12 +259,15 @@ func TestPutOverwrite(t *testing.T) {
 func TestPutIdenticalContent(t *testing.T) {
 	dir := newTestStore(t)
 
-	const key = "loch/same.md"
-	const body = "bide content"
+	const (
+		key  = "loch/same.md"
+		body = "bide content"
+	)
 
 	if err := store.Put(dir, key, body); err != nil {
 		t.Fatalf("Put (first): %v", err)
 	}
+
 	if err := store.Put(dir, key, body); err != nil {
 		t.Fatalf("Put (identical): %v", err)
 	}
@@ -261,6 +276,7 @@ func TestPutIdenticalContent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
+
 	if got != body {
 		t.Errorf("Get returned %q, want %q", got, body)
 	}
@@ -300,11 +316,14 @@ func TestPutCreatesGitCommit(t *testing.T) {
 	// Check that a git commit was created with the right message.
 	cmd := exec.Command("git", "log", "--oneline", "-1")
 	cmd.Dir = dir
+
 	out, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("git log: %v", err)
 	}
+
 	msg := string(out)
+
 	want := "store: update " + key
 	if !strings.Contains(msg, want) {
 		t.Errorf("git log output %q does not contain %q", msg, want)
@@ -318,6 +337,7 @@ func TestCommitMessage(t *testing.T) {
 		t.Setenv("GRAITH_AGENT_TYPE", "")
 
 		msg := store.CommitMessage("update", "loch/api.md")
+
 		want := "store: update loch/api.md"
 		if msg != want {
 			t.Errorf("CommitMessage = %q, want %q", msg, want)
@@ -333,6 +353,7 @@ func TestCommitMessage(t *testing.T) {
 		if !strings.Contains(msg, "store: update loch/api.md") {
 			t.Errorf("CommitMessage missing first line: %q", msg)
 		}
+
 		if !strings.Contains(msg, "session: canny-overlay (braw123)") {
 			t.Errorf("CommitMessage missing session trailer: %q", msg)
 		}
@@ -358,9 +379,11 @@ func TestCommitMessage(t *testing.T) {
 		if !strings.Contains(msg, "store: update loch/api.md") {
 			t.Errorf("CommitMessage missing first line: %q", msg)
 		}
+
 		if !strings.Contains(msg, "session: canny-overlay (braw123)") {
 			t.Errorf("CommitMessage missing session trailer: %q", msg)
 		}
+
 		if !strings.Contains(msg, "agent: claude") {
 			t.Errorf("CommitMessage missing agent trailer: %q", msg)
 		}
@@ -374,9 +397,11 @@ func TestList(t *testing.T) {
 	if err := store.Put(dir, "glen/ane.md", "ane"); err != nil {
 		t.Fatalf("Put glen/ane.md: %v", err)
 	}
+
 	if err := store.Put(dir, "glen/twa.md", "twa"); err != nil {
 		t.Fatalf("Put glen/twa.md: %v", err)
 	}
+
 	if err := store.Put(dir, "wynd/three.md", "three"); err != nil {
 		t.Fatalf("Put wynd/three.md: %v", err)
 	}
@@ -386,9 +411,11 @@ func TestList(t *testing.T) {
 		if err != nil {
 			t.Fatalf("List: %v", err)
 		}
+
 		if len(entries) != 3 {
 			t.Errorf("List returned %d entries, want 3", len(entries))
 		}
+
 		for _, e := range entries {
 			if e.UpdatedAt.IsZero() {
 				t.Errorf("entry %q has zero UpdatedAt", e.Key)
@@ -401,9 +428,11 @@ func TestList(t *testing.T) {
 		if err != nil {
 			t.Fatalf("List with prefix: %v", err)
 		}
+
 		if len(entries) != 2 {
 			t.Errorf("List(glen) returned %d entries, want 2", len(entries))
 		}
+
 		for _, e := range entries {
 			if !strings.HasPrefix(e.Key, "glen/") {
 				t.Errorf("entry %q does not have prefix glen/", e.Key)
@@ -416,6 +445,7 @@ func TestList(t *testing.T) {
 		if err != nil {
 			t.Fatalf("List thrawn prefix: %v", err)
 		}
+
 		if len(entries) != 0 {
 			t.Errorf("List(thrawn) returned %d entries, want 0", len(entries))
 		}
@@ -445,6 +475,7 @@ func TestListEmptyStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List on empty store: %v", err)
 	}
+
 	if len(entries) != 0 {
 		t.Errorf("List on empty store returned %d entries, want 0", len(entries))
 	}
@@ -456,6 +487,7 @@ func TestRemove(t *testing.T) {
 	if err := store.Put(dir, "loch/ane.md", "ane"); err != nil {
 		t.Fatalf("Put loch/ane.md: %v", err)
 	}
+
 	if err := store.Put(dir, "loch/twa.md", "twa"); err != nil {
 		t.Fatalf("Put loch/twa.md: %v", err)
 	}
@@ -474,6 +506,7 @@ func TestRemove(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get loch/twa.md: %v", err)
 	}
+
 	if got != "twa" {
 		t.Errorf("Get loch/twa.md = %q, want %q", got, "twa")
 	}
@@ -503,6 +536,7 @@ func TestRemoveNonexistent(t *testing.T) {
 	if err == nil {
 		t.Error("Remove nonexistent key expected error, got nil")
 	}
+
 	if !strings.Contains(err.Error(), "not found") {
 		t.Errorf("Remove error %q should contain 'not found'", err.Error())
 	}
@@ -533,18 +567,22 @@ func TestStorePath(t *testing.T) {
 		p := store.StorePath("/glen", "/hame/user/croft")
 		// Extract the hash suffix after the last '-'
 		last := -1
+
 		for i, c := range p {
 			if c == '-' {
 				last = i
 			}
 		}
+
 		if last == -1 {
 			t.Fatalf("StorePath = %q, no dash found", p)
 		}
+
 		hash := p[last+1:]
 		if len(hash) != 12 {
 			t.Errorf("hash length = %d, want 12; hash = %q", len(hash), hash)
 		}
+
 		for _, c := range hash {
 			if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
 				t.Errorf("hash %q contains non-hex character %q", hash, c)
@@ -554,6 +592,7 @@ func TestStorePath(t *testing.T) {
 
 	t.Run("deterministic", func(t *testing.T) {
 		p1 := store.StorePath("/glen", "/hame/user/graith")
+
 		p2 := store.StorePath("/glen", "/hame/user/graith")
 		if p1 != p2 {
 			t.Errorf("StorePath not deterministic: %q != %q", p1, p2)
@@ -562,6 +601,7 @@ func TestStorePath(t *testing.T) {
 
 	t.Run("different repos produce different paths", func(t *testing.T) {
 		p1 := store.StorePath("/glen", "/hame/user/graith")
+
 		p2 := store.StorePath("/glen", "/hame/user/bothy")
 		if p1 == p2 {
 			t.Errorf("different repos produced same path: %q", p1)
@@ -570,6 +610,7 @@ func TestStorePath(t *testing.T) {
 
 	t.Run("known hash value", func(t *testing.T) {
 		p := store.StorePath("/glen", "/hame/user/graith")
+
 		p2 := store.StorePath("/glen", "/hame/user/graith")
 		if p != p2 {
 			t.Errorf("non-deterministic: %q vs %q", p, p2)
@@ -590,12 +631,15 @@ func TestListStores(t *testing.T) {
 	// Create two stores
 	s1 := store.StorePath(dataDir, "/hame/user/croft-a")
 	s2 := store.StorePath(dataDir, "/hame/user/croft-b")
+
 	if err := store.Init(s1); err != nil {
 		t.Fatalf("Init s1: %v", err)
 	}
+
 	if err := store.Init(s2); err != nil {
 		t.Fatalf("Init s2: %v", err)
 	}
+
 	if err := store.Put(s1, "neep.md", "braw"); err != nil {
 		t.Fatalf("Put s1: %v", err)
 	}
@@ -604,16 +648,19 @@ func TestListStores(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListStores: %v", err)
 	}
+
 	if len(stores) != 2 {
 		t.Fatalf("ListStores returned %d stores, want 2", len(stores))
 	}
 
 	// Empty data dir
 	emptyDir := t.TempDir()
+
 	stores, err = store.ListStores(emptyDir)
 	if err != nil {
 		t.Fatalf("ListStores empty: %v", err)
 	}
+
 	if len(stores) != 0 {
 		t.Errorf("ListStores empty returned %d, want 0", len(stores))
 	}
@@ -622,8 +669,10 @@ func TestListStores(t *testing.T) {
 func TestAppendCreatesFile(t *testing.T) {
 	dir := newTestStore(t)
 
-	const key = "loch/kirk.jsonl"
-	const line1 = `{"run":1}`
+	const (
+		key   = "loch/kirk.jsonl"
+		line1 = `{"run":1}`
+	)
 
 	if err := store.Append(dir, key, line1); err != nil {
 		t.Fatalf("Append: %v", err)
@@ -633,6 +682,7 @@ func TestAppendCreatesFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
+
 	if got != line1+"\n" {
 		t.Errorf("Get returned %q, want %q", got, line1+"\n")
 	}
@@ -663,10 +713,12 @@ func TestAppendMultipleLines(t *testing.T) {
 	// Each append should produce a git commit
 	cmd := exec.Command("git", "log", "--oneline")
 	cmd.Dir = dir
+
 	out, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("git log: %v", err)
 	}
+
 	commitCount := len(strings.Split(strings.TrimSpace(string(out)), "\n"))
 	if commitCount != 3 {
 		t.Errorf("expected 3 commits, got %d: %s", commitCount, string(out))
@@ -681,6 +733,7 @@ func TestAppendPreservesTrailingNewline(t *testing.T) {
 	if err := store.Append(dir, key, "line1\n"); err != nil {
 		t.Fatalf("Append with newline: %v", err)
 	}
+
 	if err := store.Append(dir, key, "line2"); err != nil {
 		t.Fatalf("Append without newline: %v", err)
 	}
@@ -689,6 +742,7 @@ func TestAppendPreservesTrailingNewline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
+
 	if got != "line1\nline2\n" {
 		t.Errorf("Get returned %q, want %q", got, "line1\nline2\n")
 	}
@@ -718,6 +772,7 @@ func TestAppendCoexistsWithPut(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
+
 	want := "auld contentbraw line\n"
 	if got != want {
 		t.Errorf("Get returned %q, want %q", got, want)

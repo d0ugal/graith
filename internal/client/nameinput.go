@@ -38,6 +38,7 @@ func (m nameInputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+
 		return m, nil
 	case tea.KeyPressMsg:
 		switch msg.String() {
@@ -46,22 +47,29 @@ func (m nameInputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.done = true
 				return m, tea.Quit
 			}
+
 			return m, nil
 		case "esc", "ctrl+c":
 			return m, tea.Quit
 		case " ", "space":
 			var cmd tea.Cmd
+
 			m.input, cmd = m.input.Update(tea.KeyPressMsg{Code: '-', Text: "-"})
+
 			return m, cmd
 		}
 	}
+
 	var cmd tea.Cmd
+
 	m.input, cmd = m.input.Update(msg)
+
 	return m, cmd
 }
 
 func (m nameInputModel) View() tea.View {
 	w := m.width
+
 	h := m.height
 	if w == 0 || h == 0 {
 		return tea.NewView("")
@@ -86,6 +94,7 @@ func (m nameInputModel) View() tea.View {
 
 	panelLines := strings.Split(panel, "\n")
 	panelH := len(panelLines)
+
 	panelW := 0
 	for _, pl := range panelLines {
 		if lw := lipgloss.Width(pl); lw > panelW {
@@ -95,9 +104,11 @@ func (m nameInputModel) View() tea.View {
 
 	offsetY := (h - panelH) / 2
 	offsetX := (w - panelW) / 2
+
 	if offsetY < 0 {
 		offsetY = 0
 	}
+
 	if offsetX < 0 {
 		offsetX = 0
 	}
@@ -108,6 +119,7 @@ func (m nameInputModel) View() tea.View {
 	}
 
 	leftPad := strings.Repeat(" ", offsetX)
+
 	for i, pl := range panelLines {
 		row := offsetY + i
 		if row >= 0 && row < h {
@@ -115,12 +127,14 @@ func (m nameInputModel) View() tea.View {
 			if vis := lipgloss.Width(line); vis < w {
 				line += strings.Repeat(" ", w-vis)
 			}
+
 			bgLines[row] = line
 		}
 	}
 
 	v := tea.NewView(strings.Join(bgLines, "\n"))
 	v.AltScreen = true
+
 	return v
 }
 
@@ -129,13 +143,16 @@ func (m nameInputModel) View() tea.View {
 func RunNameInput(title string) string {
 	m := newNameInputModel(title)
 	p := tea.NewProgram(m)
+
 	final, err := p.Run()
 	if err != nil {
 		return ""
 	}
+
 	result, ok := final.(nameInputModel)
 	if !ok || !result.done {
 		return ""
 	}
+
 	return strings.TrimSpace(result.input.Value())
 }

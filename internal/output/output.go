@@ -30,6 +30,7 @@ func (w *Writer) Print(format string, args ...any) {
 func (w *Writer) JSON(v any) error {
 	enc := json.NewEncoder(w.out)
 	enc.SetIndent("", "  ")
+
 	return enc.Encode(v)
 }
 
@@ -39,8 +40,10 @@ func (w *Writer) Error(err error) {
 			Error string `json:"error"`
 		}
 		json.NewEncoder(w.errOut).Encode(jsonErr{Error: err.Error()})
+
 		return
 	}
+
 	fmt.Fprintf(w.errOut, "error: %v\n", err)
 }
 

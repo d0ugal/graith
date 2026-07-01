@@ -20,6 +20,7 @@ type RepoSuggestion struct {
 
 func DiscoverRepos(allowedPaths []string, sessions []protocol.SessionInfo) []RepoSuggestion {
 	seen := make(map[string]bool)
+
 	var suggestions []RepoSuggestion
 
 	addRepo := func(absPath string) {
@@ -27,6 +28,7 @@ func DiscoverRepos(allowedPaths []string, sessions []protocol.SessionInfo) []Rep
 		if resolved == "" || seen[resolved] {
 			return
 		}
+
 		seen[resolved] = true
 		suggestions = append(suggestions, RepoSuggestion{
 			Name: filepath.Base(resolved),
@@ -39,17 +41,21 @@ func DiscoverRepos(allowedPaths []string, sessions []protocol.SessionInfo) []Rep
 		if expanded == "" {
 			continue
 		}
+
 		if isGitRepo(expanded) {
 			addRepo(expanded)
 		}
+
 		entries, err := os.ReadDir(expanded)
 		if err != nil {
 			continue
 		}
+
 		for _, e := range entries {
 			if !e.IsDir() {
 				continue
 			}
+
 			child := filepath.Join(expanded, e.Name())
 			if isGitRepo(child) {
 				addRepo(child)
@@ -61,6 +67,7 @@ func DiscoverRepos(allowedPaths []string, sessions []protocol.SessionInfo) []Rep
 		if s.RepoPath == "" || s.SystemKind != "" {
 			continue
 		}
+
 		if isGitRepo(expandPath(s.RepoPath)) {
 			addRepo(s.RepoPath)
 		}
@@ -69,6 +76,7 @@ func DiscoverRepos(allowedPaths []string, sessions []protocol.SessionInfo) []Rep
 	sort.Slice(suggestions, func(i, j int) bool {
 		return strings.ToLower(suggestions[i].Name) < strings.ToLower(suggestions[j].Name)
 	})
+
 	return suggestions
 }
 
@@ -83,14 +91,17 @@ func expandPath(p string) string {
 			return home
 		}
 	}
+
 	if strings.HasPrefix(p, "~/") {
 		if home, err := os.UserHomeDir(); err == nil {
 			p = filepath.Join(home, p[2:])
 		}
 	}
+
 	if abs, err := filepath.Abs(p); err == nil {
 		p = abs
 	}
+
 	return filepath.Clean(p)
 }
 
@@ -99,6 +110,7 @@ func resolveRepoPath(p string) string {
 	if resolved, err := filepath.EvalSymlinks(p); err == nil {
 		p = resolved
 	}
+
 	return p
 }
 
@@ -135,11 +147,13 @@ func newCreateSessionModel(defaultRepo string, repos []RepoSuggestion, agents []
 	ri.Placeholder = "/path/to/repo"
 	ri.CharLimit = 256
 	ri.SetWidth(40)
+
 	if defaultRepo != "" {
 		ri.SetValue(defaultRepo)
 	}
 
 	agentIdx := 0
+
 	for i, a := range agents {
 		if a == defaultAgent {
 			agentIdx = i
@@ -156,6 +170,7 @@ func newCreateSessionModel(defaultRepo string, repos []RepoSuggestion, agents []
 		focus:     createFieldName,
 	}
 	m.updateFiltered()
+
 	return m
 }
 
@@ -165,6 +180,7 @@ func (m createSessionModel) lastField() int {
 	if len(m.agents) == 0 {
 		return createFieldRepo
 	}
+
 	return createFieldAgent
 }
 
@@ -175,6 +191,7 @@ func (m *createSessionModel) setFocus(f int) tea.Cmd {
 	m.nameInput.Blur()
 	m.repoInput.Blur()
 	m.showDropdown = false
+
 	switch f {
 	case createFieldName:
 		m.nameInput.Focus()
@@ -183,17 +200,21 @@ func (m *createSessionModel) setFocus(f int) tea.Cmd {
 		m.showDropdown = len(m.filtered) > 0
 		m.dropdownIdx = -1
 	}
+
 	return textinput.Blink
 }
 
 // trySubmit marks the form done when the required fields are filled in.
 func (m *createSessionModel) trySubmit() tea.Cmd {
 	name := strings.TrimSpace(m.nameInput.Value())
+
 	repo := strings.TrimSpace(m.repoInput.Value())
 	if name == "" || repo == "" {
 		return nil
 	}
+
 	m.done = true
+
 	return tea.Quit
 }
 
@@ -202,6 +223,7 @@ func (m createSessionModel) selectedAgent() string {
 	if m.agentIdx < 0 || m.agentIdx >= len(m.agents) {
 		return ""
 	}
+
 	return m.agents[m.agentIdx]
 }
 
@@ -218,6 +240,7 @@ func (m *createSessionModel) updateFiltered() {
 			}
 		}
 	}
+
 	if len(m.filtered) == 0 {
 		m.dropdownIdx = -1
 	} else if m.dropdownIdx >= len(m.filtered) {
@@ -234,6 +257,7 @@ func (m createSessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+
 		return m, nil
 
 	case tea.KeyPressMsg:
@@ -246,6 +270,7 @@ func (m createSessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmd := m.setFocus(m.focus + 1)
 				return m, cmd
 			}
+
 			return m, nil
 
 		case "shift+tab":
@@ -253,6 +278,7 @@ func (m createSessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmd := m.setFocus(m.focus - 1)
 				return m, cmd
 			}
+
 			return m, nil
 
 		case "enter":
@@ -261,7 +287,9 @@ func (m createSessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if strings.TrimSpace(m.nameInput.Value()) == "" {
 					return m, nil
 				}
+
 				cmd := m.setFocus(createFieldRepo)
+
 				return m, cmd
 			case createFieldRepo:
 				if m.showDropdown && m.dropdownIdx >= 0 && m.dropdownIdx < len(m.filtered) {
@@ -269,6 +297,7 @@ func (m createSessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.showDropdown = false
 					m.dropdownIdx = -1
 					m.updateFiltered()
+
 					return m, nil
 				}
 				// Don't advance (or submit) on an empty repo — keep focus here so
@@ -277,11 +306,14 @@ func (m createSessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if strings.TrimSpace(m.repoInput.Value()) == "" {
 					return m, nil
 				}
+
 				if len(m.agents) > 0 {
 					cmd := m.setFocus(createFieldAgent)
 					return m, cmd
 				}
+
 				cmd := m.trySubmit()
+
 				return m, cmd
 			case createFieldAgent:
 				cmd := m.trySubmit()
@@ -294,8 +326,10 @@ func (m createSessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.dropdownIdx >= len(m.filtered) {
 					m.dropdownIdx = len(m.filtered) - 1
 				}
+
 				return m, nil
 			}
+
 			if m.focus == createFieldAgent && len(m.agents) > 0 {
 				m.agentIdx = (m.agentIdx + 1) % len(m.agents)
 				return m, nil
@@ -307,13 +341,16 @@ func (m createSessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.dropdownIdx < -1 {
 					m.dropdownIdx = -1
 				}
+
 				return m, nil
 			}
+
 			if m.focus == createFieldAgent && len(m.agents) > 0 {
 				m.agentIdx--
 				if m.agentIdx < 0 {
 					m.agentIdx = len(m.agents) - 1
 				}
+
 				return m, nil
 			}
 
@@ -323,6 +360,7 @@ func (m createSessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.agentIdx < 0 {
 					m.agentIdx = len(m.agents) - 1
 				}
+
 				return m, nil
 			}
 
@@ -335,18 +373,22 @@ func (m createSessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case " ", "space":
 			if m.focus == createFieldName {
 				var cmd tea.Cmd
+
 				m.nameInput, cmd = m.nameInput.Update(tea.KeyPressMsg{Code: '-', Text: "-"})
+
 				return m, cmd
 			}
 		}
 	}
 
 	var cmd tea.Cmd
+
 	switch m.focus {
 	case createFieldName:
 		m.nameInput, cmd = m.nameInput.Update(msg)
 	case createFieldRepo:
 		prevVal := m.repoInput.Value()
+
 		m.repoInput, cmd = m.repoInput.Update(msg)
 		if m.repoInput.Value() != prevVal {
 			m.updateFiltered()
@@ -354,11 +396,13 @@ func (m createSessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.dropdownIdx = -1
 		}
 	}
+
 	return m, cmd
 }
 
 func (m createSessionModel) View() tea.View {
 	w := m.width
+
 	h := m.height
 	if w == 0 || h == 0 {
 		return tea.NewView("")
@@ -379,28 +423,36 @@ func (m createSessionModel) View() tea.View {
 
 	if m.showDropdown && m.focus == createFieldRepo && len(m.filtered) > 0 {
 		content.WriteString("\n")
+
 		maxShow := min(8, len(m.filtered))
+
 		start := 0
 		if m.dropdownIdx >= maxShow {
 			start = m.dropdownIdx - maxShow + 1
 		}
+
 		end := start + maxShow
 		if end > len(m.filtered) {
 			end = len(m.filtered)
 			start = max(0, end-maxShow)
 		}
+
 		if start > 0 {
 			fmt.Fprintf(&content, "\n  ↑ %d more", start)
 		}
+
 		for i := start; i < end; i++ {
 			r := m.filtered[i]
+
 			prefix := "  "
 			if i == m.dropdownIdx {
 				prefix = "▸ "
 			}
+
 			display := r.Name + "  " + dimStyle.Render(shortenPath(r.Path))
 			content.WriteString("\n" + prefix + display)
 		}
+
 		if remaining := len(m.filtered) - end; remaining > 0 {
 			fmt.Fprintf(&content, "\n  ↓ %d more", remaining)
 		}
@@ -408,8 +460,10 @@ func (m createSessionModel) View() tea.View {
 
 	if len(m.agents) > 0 {
 		selStyle := lipgloss.NewStyle().Bold(true).Foreground(colorGreen)
+
 		content.WriteString("\n\n")
 		content.WriteString(labelStyle.Render("Agent: "))
+
 		parts := make([]string, len(m.agents))
 		for i, a := range m.agents {
 			switch {
@@ -421,11 +475,14 @@ func (m createSessionModel) View() tea.View {
 				parts[i] = dimStyle.Render(a)
 			}
 		}
+
 		content.WriteString(strings.Join(parts, "  "))
 	}
 
 	content.WriteString("\n\n")
+
 	var hint string
+
 	switch {
 	case m.focus == createFieldAgent:
 		// On the agent field both ↑↓ and ←→ cycle the selection.
@@ -435,6 +492,7 @@ func (m createSessionModel) View() tea.View {
 	default:
 		hint = "tab next field  ↑↓ suggestions  enter confirm  esc cancel"
 	}
+
 	content.WriteString(dimStyle.Render(hint))
 
 	panel := lipgloss.NewStyle().
@@ -446,6 +504,7 @@ func (m createSessionModel) View() tea.View {
 
 	panelLines := strings.Split(panel, "\n")
 	panelH := len(panelLines)
+
 	panelW := 0
 	for _, pl := range panelLines {
 		if lw := lipgloss.Width(pl); lw > panelW {
@@ -455,9 +514,11 @@ func (m createSessionModel) View() tea.View {
 
 	offsetY := (h - panelH) / 2
 	offsetX := (w - panelW) / 2
+
 	if offsetY < 0 {
 		offsetY = 0
 	}
+
 	if offsetX < 0 {
 		offsetX = 0
 	}
@@ -468,6 +529,7 @@ func (m createSessionModel) View() tea.View {
 	}
 
 	leftPad := strings.Repeat(" ", offsetX)
+
 	for i, pl := range panelLines {
 		row := offsetY + i
 		if row >= 0 && row < h {
@@ -475,12 +537,14 @@ func (m createSessionModel) View() tea.View {
 			if vis := lipgloss.Width(line); vis < w {
 				line += strings.Repeat(" ", w-vis)
 			}
+
 			bgLines[row] = line
 		}
 	}
 
 	v := tea.NewView(strings.Join(bgLines, "\n"))
 	v.AltScreen = true
+
 	return v
 }
 
@@ -489,18 +553,23 @@ func (m createSessionModel) View() tea.View {
 func RunCreateInput(defaultRepo string, repos []RepoSuggestion, agents []string, defaultAgent string) (string, string, string) {
 	m := newCreateSessionModel(defaultRepo, repos, agents, defaultAgent)
 	p := tea.NewProgram(m)
+
 	final, err := p.Run()
 	if err != nil {
 		return "", "", ""
 	}
+
 	result, ok := final.(createSessionModel)
 	if !ok || !result.done {
 		return "", "", ""
 	}
+
 	name := strings.TrimSpace(result.nameInput.Value())
+
 	repo := strings.TrimSpace(result.repoInput.Value())
 	if repo != "" {
 		repo = expandPath(repo)
 	}
+
 	return name, repo, result.selectedAgent()
 }

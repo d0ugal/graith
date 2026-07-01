@@ -18,6 +18,7 @@ func AcquirePIDFile(path string) error {
 		if err == nil && isPIDAlive(pid) {
 			return fmt.Errorf("%w (pid %d)", ErrDaemonRunning, pid)
 		}
+
 		_ = os.Remove(path)
 	}
 
@@ -26,11 +27,13 @@ func AcquirePIDFile(path string) error {
 		if os.IsExist(err) {
 			return fmt.Errorf("%w: concurrent start detected", ErrDaemonRunning)
 		}
+
 		return fmt.Errorf("create pid file: %w", err)
 	}
 	defer f.Close()
 
 	_, err = fmt.Fprintf(f, "%d\n", os.Getpid())
+
 	return err
 }
 
@@ -46,13 +49,17 @@ func IsGraithDaemon(pid int) bool {
 	if pid <= 1 {
 		return false
 	}
+
 	if !isPIDAlive(pid) {
 		return false
 	}
+
 	out, err := exec.Command("/bin/ps", "-p", strconv.Itoa(pid), "-o", "comm=").Output()
 	if err != nil {
 		return false
 	}
+
 	base := filepath.Base(strings.TrimSpace(string(out)))
+
 	return base == "gr" || base == "graith"
 }

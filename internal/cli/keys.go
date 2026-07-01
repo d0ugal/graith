@@ -6,6 +6,7 @@ func parseKeyByte(s string) byte {
 	if len(s) == 0 {
 		return 0
 	}
+
 	return s[0]
 }
 
@@ -17,8 +18,10 @@ func parsePrefixKey(s string) byte {
 			return ch - 'a' + 1
 		}
 	}
+
 	if len(s) == 1 {
 		return s[0]
 	}
+
 	return 0x02 // default ctrl+b
 }

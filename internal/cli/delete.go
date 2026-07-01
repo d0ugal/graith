@@ -26,12 +26,15 @@ var deleteCmd = &cobra.Command{
 		if deleteChildren && deleteBatch.active() {
 			return fmt.Errorf("--children cannot be combined with batch filters")
 		}
+
 		if deleteBatch.active() {
 			return cobra.NoArgs(cmd, args)
 		}
+
 		if deleteChildren {
 			return cobra.MaximumNArgs(1)(cmd, args)
 		}
+
 		return cobra.ExactArgs(1)(cmd, args)
 	},
 	ValidArgsFunction: completeSessionNames,
@@ -46,20 +49,24 @@ var deleteCmd = &cobra.Command{
 		}
 		defer c.Close()
 
-		var sessionID string
-		var excludeRoot bool
+		var (
+			sessionID   string
+			excludeRoot bool
+		)
 
 		if deleteChildren && len(args) == 0 {
 			sessionID = os.Getenv("GRAITH_SESSION_ID")
 			if sessionID == "" {
 				return fmt.Errorf("--children with no session arg requires GRAITH_SESSION_ID to be set")
 			}
+
 			excludeRoot = true
 		} else {
 			session, err := resolveSessionInfo(c, args[0])
 			if err != nil {
 				return err
 			}
+
 			sessionID = session.ID
 
 			if !deleteBatch.force && session.WorktreePath != "" && !session.InPlace {
@@ -67,6 +74,7 @@ var deleteCmd = &cobra.Command{
 				if err != nil {
 					return err
 				}
+
 				if !confirmed {
 					return nil
 				}
@@ -78,13 +86,16 @@ var deleteCmd = &cobra.Command{
 			Children:    deleteChildren,
 			ExcludeRoot: excludeRoot,
 		})
+
 		resp, err := c.ReadControlResponse()
 		if err != nil {
 			return err
 		}
+
 		if resp.Type == "error" {
 			var e protocol.ErrorMsg
 			protocol.DecodePayload(resp, &e)
+
 			return fmt.Errorf("%s", e.Message)
 		}
 
@@ -97,25 +108,30 @@ var deleteCmd = &cobra.Command{
 		} else {
 			out.Print("Session deleted\n")
 		}
+
 		return nil
 	},
 }
 
 func resolveSessionInfo(c *client.Client, nameOrID string) (*protocol.SessionInfo, error) {
 	c.SendControl("list", struct{}{})
+
 	resp, err := c.ReadControlResponse()
 	if err != nil {
 		return nil, err
 	}
+
 	var list protocol.SessionListMsg
 	if err := protocol.DecodePayload(resp, &list); err != nil {
 		return nil, err
 	}
+
 	for _, s := range list.Sessions {
 		if s.Name == nameOrID || s.ID == nameOrID {
 			return &s, nil
 		}
 	}
+
 	return nil, fmt.Errorf("session %q not found", nameOrID)
 }
 
@@ -150,12 +166,14 @@ func confirmDelete(session *protocol.SessionInfo) (bool, error) {
 	}
 
 	hasWork := false
+
 	for _, r := range repos {
 		if len(r.dirtyFiles) > 0 || len(r.unpushedCommits) > 0 || r.gitFailed {
 			hasWork = true
 			break
 		}
 	}
+
 	if !hasWork {
 		return true, nil
 	}
@@ -174,38 +192,49 @@ func confirmDelete(session *protocol.SessionInfo) (bool, error) {
 		if len(r.dirtyFiles) == 0 && len(r.unpushedCommits) == 0 && !r.gitFailed {
 			continue
 		}
+
 		if len(repos) > 1 {
 			out.Print("  %s:\n", r.name)
 		}
+
 		if len(r.dirtyFiles) > 0 {
 			out.Print("    Dirty files:\n")
+
 			for _, f := range r.dirtyFiles {
 				out.Print("      %s\n", f)
 			}
 		}
+
 		if len(r.unpushedCommits) > 0 {
 			out.Print("    Unpushed commits:\n")
+
 			for _, c := range r.unpushedCommits {
 				out.Print("      %s\n", c)
 			}
 		}
+
 		if r.gitFailed {
 			out.Print("    Warning: could not fully check worktree status\n")
 		}
+
 		out.Print("\n")
 	}
 
 	out.Print("Delete anyway? [y/N] ")
+
 	reader := bufio.NewReader(os.Stdin)
+
 	answer, err := reader.ReadString('\n')
 	if err != nil {
 		return false, err
 	}
+
 	answer = strings.TrimSpace(strings.ToLower(answer))
 	if answer != "y" && answer != "yes" {
 		out.Print("Aborted\n")
 		return false, nil
 	}
+
 	return true, nil
 }
 
@@ -217,10 +246,12 @@ func deleteBatchRun(cmd *cobra.Command) error {
 	defer c.Close()
 
 	c.SendControl("list", struct{}{})
+
 	resp, err := c.ReadControlResponse()
 	if err != nil {
 		return err
 	}
+
 	var list protocol.SessionListMsg
 	if err := protocol.DecodePayload(resp, &list); err != nil {
 		return err
@@ -230,6 +261,7 @@ func deleteBatchRun(cmd *cobra.Command) error {
 	if err != nil {
 		return err
 	}
+
 	if len(matched) == 0 {
 		out.Print("No sessions match the given filters\n")
 		return nil
@@ -240,35 +272,46 @@ func deleteBatchRun(cmd *cobra.Command) error {
 		if err != nil {
 			return err
 		}
+
 		if !confirmed {
 			return nil
 		}
 	}
 
-	var skipped []string
-	var deleted int
+	var (
+		skipped []string
+		deleted int
+	)
+
 	for _, s := range matched {
 		if s.Starred {
 			skipped = append(skipped, s.Name)
 			continue
 		}
+
 		c.SendControl("delete", protocol.DeleteMsg{SessionID: s.ID})
+
 		resp, err := c.ReadControlResponse()
 		if err != nil {
 			return err
 		}
+
 		if resp.Type == "error" {
 			var e protocol.ErrorMsg
 			protocol.DecodePayload(resp, &e)
+
 			return fmt.Errorf("deleting %s: %s", s.Name, e.Message)
 		}
+
 		deleted++
 	}
 
 	out.Print("Deleted %d sessions\n", deleted)
+
 	for _, name := range skipped {
 		out.Print("Skipped starred session: %s\n", name)
 	}
+
 	return nil
 }
 

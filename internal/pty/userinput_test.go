@@ -9,6 +9,7 @@ import (
 func newIdleSession() *Session {
 	s := &Session{}
 	s.userInputCond = sync.NewCond(&sync.Mutex{})
+
 	return s
 }
 
@@ -22,6 +23,7 @@ func TestWaitForUserIdle_AlreadyIdle(t *testing.T) {
 	if !ok {
 		t.Fatal("expected idle=true when no user input has occurred")
 	}
+
 	if elapsed > 50*time.Millisecond {
 		t.Fatalf("should have returned immediately, took %v", elapsed)
 	}
@@ -40,6 +42,7 @@ func TestWaitForUserIdle_WaitsForIdle(t *testing.T) {
 	if !ok {
 		t.Fatal("expected idle=true")
 	}
+
 	if elapsed < 150*time.Millisecond {
 		t.Fatalf("returned too quickly (%v), should have waited ~200ms", elapsed)
 	}
@@ -78,6 +81,7 @@ func TestWaitForUserIdle_MaxWaitExpires(t *testing.T) {
 
 	// Keep typing faster than the idle timeout.
 	stop := make(chan struct{})
+
 	go func() {
 		for {
 			select {
@@ -88,6 +92,7 @@ func TestWaitForUserIdle_MaxWaitExpires(t *testing.T) {
 			}
 		}
 	}()
+
 	defer close(stop)
 
 	start := time.Now()
@@ -97,6 +102,7 @@ func TestWaitForUserIdle_MaxWaitExpires(t *testing.T) {
 	if ok {
 		t.Fatal("expected idle=false when user keeps typing")
 	}
+
 	if elapsed < 400*time.Millisecond || elapsed > 700*time.Millisecond {
 		t.Fatalf("expected maxWait ~500ms, got %v", elapsed)
 	}

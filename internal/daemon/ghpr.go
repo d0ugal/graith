@@ -57,8 +57,10 @@ var ghRunner = func(ctx context.Context, dir string, args ...string) (string, er
 	if dir != "" {
 		cmd.Dir = dir
 	}
+
 	cmd.Env = append(os.Environ(), "GH_PROMPT_DISABLED=1", "GH_NO_UPDATE_NOTIFIER=1")
 	out, err := cmd.Output()
+
 	return strings.TrimSpace(string(out)), err
 }
 
@@ -75,14 +77,17 @@ var githubRemoteRe = regexp.MustCompile(`github\.com[:/]+([^/]+)/(.+?)(?:\.git)?
 // that repo).
 func parseGitHubRemote(remoteURL string) (slug string, ok bool) {
 	remoteURL = strings.TrimSpace(remoteURL)
+
 	m := githubRemoteRe.FindStringSubmatch(remoteURL)
 	if m == nil {
 		return "", false
 	}
+
 	owner, repo := m[1], strings.TrimSuffix(m[2], ".git")
 	if owner == "" || repo == "" {
 		return "", false
 	}
+
 	return owner + "/" + repo, true
 }
 
@@ -92,6 +97,7 @@ func repoSlug(worktreePath string) (string, bool) {
 	if err != nil {
 		return "", false
 	}
+
 	return parseGitHubRemote(url)
 }
 
@@ -102,13 +108,16 @@ func effectiveBranch(branch, worktreePath string) string {
 	if branch != "" {
 		return branch
 	}
+
 	if worktreePath == "" {
 		return ""
 	}
+
 	head, err := git.RunOutput(worktreePath, "symbolic-ref", "--quiet", "--short", "HEAD")
 	if err != nil {
 		return ""
 	}
+
 	return strings.TrimSpace(head)
 }
 
@@ -143,13 +152,16 @@ func resolvePR(ctx context.Context, slug, branch, worktreePath string) (prData, 
 	if err != nil {
 		return prData{}, false, fmt.Errorf("gh pr list: %w", err)
 	}
+
 	var items []prListItem
 	if err := json.Unmarshal([]byte(out), &items); err != nil {
 		return prData{}, false, fmt.Errorf("parse pr list: %w", err)
 	}
+
 	if len(items) == 0 {
 		return prData{}, false, nil
 	}
+
 	it := items[0]
 
 	d := prData{
@@ -165,11 +177,14 @@ func resolvePR(ctx context.Context, slug, branch, worktreePath string) (prData, 
 	d.CommentsOK = true
 	if d.State == "open" || d.State == "draft" {
 		d.CIState, d.FailingChecks = fetchChecks(ctx, slug, it.Number, worktreePath)
+
 		var issueOK, reviewOK bool
+
 		d.IssueComments, issueOK = fetchComments(ctx, slug, it.Number, worktreePath, "issues")
 		d.ReviewComments, reviewOK = fetchComments(ctx, slug, it.Number, worktreePath, "pulls")
 		d.CommentsOK = issueOK && reviewOK
 	}
+
 	return d, true, nil
 }
 
@@ -183,6 +198,7 @@ func normalizePRState(state string, isDraft bool) string {
 		if isDraft {
 			return "draft"
 		}
+
 		return "open"
 	}
 }
@@ -205,14 +221,18 @@ func fetchChecks(ctx context.Context, slug string, number int, worktreePath stri
 			return "", nil
 		}
 	}
+
 	var checks []prCheck
 	if err := json.Unmarshal([]byte(out), &checks); err != nil {
 		return "", nil
 	}
+
 	if len(checks) == 0 {
 		return "", nil
 	}
+
 	anyPending := false
+
 	for _, c := range checks {
 		switch ciBucket(c) {
 		case "fail":
@@ -221,6 +241,7 @@ func fetchChecks(ctx context.Context, slug string, number int, worktreePath stri
 			anyPending = true
 		}
 	}
+
 	switch {
 	case len(failing) > 0:
 		return "failing", failing
@@ -243,6 +264,7 @@ func ciBucket(c prCheck) string {
 	case "pass", "skipping", "cancel":
 		return "pass"
 	}
+
 	switch strings.ToUpper(c.State) {
 	case "FAILURE", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE":
 		return "fail"
@@ -269,16 +291,20 @@ func fetchComments(ctx context.Context, slug string, number int, worktreePath, s
 	if err != nil {
 		return nil, false
 	}
+
 	if out == "" {
 		return nil, true
 	}
+
 	var pages [][]ghComment
 	if err := json.Unmarshal([]byte(out), &pages); err != nil {
 		return nil, false
 	}
+
 	var comments []ghComment
 	for _, p := range pages {
 		comments = append(comments, p...)
 	}
+
 	return comments, true
 }

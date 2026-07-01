@@ -31,16 +31,21 @@ func (v TemplateVars) toMap() map[string]string {
 
 func Expand(s string, vars TemplateVars) (string, error) {
 	lookup := vars.toMap()
+
 	var expandErr error
+
 	result := varPattern.ReplaceAllStringFunc(s, func(match string) string {
 		key := match[1 : len(match)-1]
+
 		val, ok := lookup[key]
 		if !ok {
 			expandErr = fmt.Errorf("unknown template variable %q in %q", key, s)
 			return match
 		}
+
 		return val
 	})
+
 	return result, expandErr
 }
 
@@ -51,7 +56,9 @@ func ExpandSlice(ss []string, vars TemplateVars) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
+
 		out[i] = expanded
 	}
+
 	return out, nil
 }

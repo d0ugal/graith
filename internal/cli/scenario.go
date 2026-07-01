@@ -51,6 +51,7 @@ func resolveScenarioSourceFrom(source, dir string) ([]byte, error) {
 	if source == "-" {
 		return io.ReadAll(os.Stdin)
 	}
+
 	if strings.HasPrefix(source, "store:") {
 		return nil, fmt.Errorf("store: prefix not yet implemented — use a file path or stdin (-)")
 	}
@@ -65,6 +66,7 @@ func resolveScenarioSourceFrom(source, dir string) ([]byte, error) {
 	if !strings.HasSuffix(name, ".toml") {
 		name += ".toml"
 	}
+
 	candidate := filepath.Join(dir, name)
 	if data, err := os.ReadFile(candidate); err == nil {
 		return data, nil
@@ -75,20 +77,26 @@ func resolveScenarioSourceFrom(source, dir string) ([]byte, error) {
 
 func parseScenarioFile(data []byte) (*scenarioFile, error) {
 	var sf scenarioFile
+
 	dec := toml.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
+
 	if err := dec.Decode(&sf); err != nil {
 		return nil, fmt.Errorf("parse scenario TOML: %w", err)
 	}
+
 	if sf.Version != 1 {
 		return nil, fmt.Errorf("unsupported scenario version %d (expected 1)", sf.Version)
 	}
+
 	if sf.Scenario.Name == "" {
 		return nil, fmt.Errorf("scenario.name is required")
 	}
+
 	if len(sf.Sessions) == 0 {
 		return nil, fmt.Errorf("at least one [[sessions]] entry is required")
 	}
+
 	return &sf, nil
 }
 
@@ -98,9 +106,11 @@ func buildSessionInputs(sf *scenarioFile) ([]protocol.ScenarioSessionInput, erro
 		if s.Name == "" {
 			return nil, fmt.Errorf("session %d: name is required", i)
 		}
+
 		if s.Repo == "" {
 			return nil, fmt.Errorf("session %q: repo is required", s.Name)
 		}
+
 		repo := config.ExpandPath(s.Repo)
 		sessions[i] = protocol.ScenarioSessionInput{
 			Name:       s.Name,
@@ -114,6 +124,7 @@ func buildSessionInputs(sf *scenarioFile) ([]protocol.ScenarioSessionInput, erro
 			Shared:     s.Shared,
 		}
 	}
+
 	return sessions, nil
 }
 
@@ -132,19 +143,24 @@ func listAvailableScenariosIn(dir string) []availableScenario {
 	if err != nil {
 		return nil
 	}
+
 	var result []availableScenario
+
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".toml") {
 			continue
 		}
+
 		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
 		if err != nil {
 			continue
 		}
+
 		sf, err := parseScenarioFile(data)
 		if err != nil {
 			continue
 		}
+
 		name := strings.TrimSuffix(e.Name(), ".toml")
 		result = append(result, availableScenario{
 			Name: name,
@@ -152,6 +168,7 @@ func listAvailableScenariosIn(dir string) []availableScenario {
 			File: e.Name(),
 		})
 	}
+
 	return result
 }
 
@@ -211,9 +228,11 @@ The source can be:
 		if err != nil {
 			return err
 		}
+
 		if resp.Type == "error" {
 			var e protocol.ErrorMsg
 			protocol.DecodePayload(resp, &e)
+
 			return fmt.Errorf("%s", e.Message)
 		}
 
@@ -225,9 +244,11 @@ The source can be:
 		}
 
 		out.Print("Scenario %q started (id: %s)\n", record.Name, record.ID)
+
 		for _, s := range record.Sessions {
 			out.Print("  %s (%s) — %s\n", s.Name, s.SessionID, s.Role)
 		}
+
 		return nil
 	},
 }
@@ -244,13 +265,16 @@ var scenarioStopCmd = &cobra.Command{
 		defer c.Close()
 
 		c.SendControl("scenario_stop", protocol.ScenarioStopMsg{Name: args[0]})
+
 		resp, err := c.ReadControlResponse()
 		if err != nil {
 			return err
 		}
+
 		if resp.Type == "error" {
 			var e protocol.ErrorMsg
 			protocol.DecodePayload(resp, &e)
+
 			return fmt.Errorf("%s", e.Message)
 		}
 
@@ -263,6 +287,7 @@ var scenarioStopCmd = &cobra.Command{
 		}
 		protocol.DecodePayload(resp, &result)
 		out.Print("Stopped %d sessions in scenario %q\n", len(result.Stopped), args[0])
+
 		return nil
 	},
 }
@@ -279,13 +304,16 @@ var scenarioResumeCmd = &cobra.Command{
 		defer c.Close()
 
 		c.SendControl("scenario_resume", protocol.ScenarioResumeMsg{Name: args[0]})
+
 		resp, err := c.ReadControlResponse()
 		if err != nil {
 			return err
 		}
+
 		if resp.Type == "error" {
 			var e protocol.ErrorMsg
 			protocol.DecodePayload(resp, &e)
+
 			return fmt.Errorf("%s", e.Message)
 		}
 
@@ -298,6 +326,7 @@ var scenarioResumeCmd = &cobra.Command{
 		}
 		protocol.DecodePayload(resp, &result)
 		out.Print("Resumed %d sessions in scenario %q\n", len(result.Resumed), args[0])
+
 		return nil
 	},
 }
@@ -314,13 +343,16 @@ var scenarioDeleteCmd = &cobra.Command{
 		defer c.Close()
 
 		c.SendControl("scenario_delete", protocol.ScenarioDeleteMsg{Name: args[0]})
+
 		resp, err := c.ReadControlResponse()
 		if err != nil {
 			return err
 		}
+
 		if resp.Type == "error" {
 			var e protocol.ErrorMsg
 			protocol.DecodePayload(resp, &e)
+
 			return fmt.Errorf("%s", e.Message)
 		}
 
@@ -333,6 +365,7 @@ var scenarioDeleteCmd = &cobra.Command{
 		}
 		protocol.DecodePayload(resp, &result)
 		out.Print("Deleted scenario %q (%d sessions removed)\n", args[0], len(result.Deleted))
+
 		return nil
 	},
 }
@@ -349,13 +382,16 @@ var scenarioStatusCmd = &cobra.Command{
 		defer c.Close()
 
 		c.SendControl("scenario_status", protocol.ScenarioStatusMsg{Name: args[0]})
+
 		resp, err := c.ReadControlResponse()
 		if err != nil {
 			return err
 		}
+
 		if resp.Type == "error" {
 			var e protocol.ErrorMsg
 			protocol.DecodePayload(resp, &e)
+
 			return fmt.Errorf("%s", e.Message)
 		}
 
@@ -372,18 +408,23 @@ var scenarioStatusCmd = &cobra.Command{
 
 		tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
 		fmt.Fprintf(tw, "NAME\tSESSION\tSTATUS\tAGENT\tROLE\tTASK DONE\tSHARED\n")
+
 		for _, s := range sc.Sessions {
 			done := ""
 			if s.TaskDone {
 				done = "yes"
 			}
+
 			shared := ""
 			if s.Shared {
 				shared = "yes"
 			}
+
 			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", s.Name, s.SessionID, s.Status, s.Agent, s.Role, done, shared)
 		}
+
 		tw.Flush()
+
 		return nil
 	},
 }
@@ -400,13 +441,16 @@ var scenarioTaskDoneCmd = &cobra.Command{
 		defer c.Close()
 
 		c.SendControl("scenario_task_done", protocol.ScenarioTaskDoneMsg{Name: args[0]})
+
 		resp, err := c.ReadControlResponse()
 		if err != nil {
 			return err
 		}
+
 		if resp.Type == "error" {
 			var e protocol.ErrorMsg
 			protocol.DecodePayload(resp, &e)
+
 			return fmt.Errorf("%s", e.Message)
 		}
 
@@ -415,6 +459,7 @@ var scenarioTaskDoneCmd = &cobra.Command{
 		}
 
 		out.Print("Task marked as done in scenario %q\n", args[0])
+
 		return nil
 	},
 }
@@ -435,6 +480,7 @@ var scenarioAddCmd = &cobra.Command{
 		if name == "" {
 			return fmt.Errorf("--name is required")
 		}
+
 		if repo == "" {
 			return fmt.Errorf("--repo is required")
 		}
@@ -465,9 +511,11 @@ var scenarioAddCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+
 		if resp.Type == "error" {
 			var e protocol.ErrorMsg
 			protocol.DecodePayload(resp, &e)
+
 			return fmt.Errorf("%s", e.Message)
 		}
 
@@ -480,6 +528,7 @@ var scenarioAddCmd = &cobra.Command{
 		}
 		protocol.DecodePayload(resp, &result)
 		out.Print("Added session %q to scenario %q (id: %s)\n", name, args[0], result.SessionID)
+
 		return nil
 	},
 }
@@ -496,13 +545,16 @@ var scenarioListCmd = &cobra.Command{
 		defer c.Close()
 
 		c.SendControl("scenario_list", protocol.ScenarioListMsg{})
+
 		resp, err := c.ReadControlResponse()
 		if err != nil {
 			return err
 		}
+
 		if resp.Type == "error" {
 			var e protocol.ErrorMsg
 			protocol.DecodePayload(resp, &e)
+
 			return fmt.Errorf("%s", e.Message)
 		}
 
@@ -520,15 +572,19 @@ var scenarioListCmd = &cobra.Command{
 
 		if len(listResp.Scenarios) > 0 {
 			out.Print("RUNNING SCENARIOS\n")
+
 			tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
 			fmt.Fprintf(tw, "  NAME\tID\tSTATUS\tSESSIONS\tGOAL\n")
+
 			for _, sc := range listResp.Scenarios {
 				goal := sc.Goal
 				if len(goal) > 60 {
 					goal = goal[:57] + "..."
 				}
+
 				fmt.Fprintf(tw, "  %s\t%s\t%s\t%d\t%s\n", sc.Name, sc.ID, sc.Status, len(sc.Sessions), goal)
 			}
+
 			tw.Flush()
 		} else {
 			out.Print("No running scenarios\n")
@@ -536,16 +592,21 @@ var scenarioListCmd = &cobra.Command{
 
 		if len(available) > 0 {
 			out.Print("\nAVAILABLE SCENARIOS (%s)\n", scenariosDir())
+
 			tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
+
 			for _, a := range available {
 				goal := a.Goal
 				if len(goal) > 60 {
 					goal = goal[:57] + "..."
 				}
+
 				fmt.Fprintf(tw, "  %s\t— %s\n", a.File, goal)
 			}
+
 			tw.Flush()
 		}
+
 		return nil
 	},
 }

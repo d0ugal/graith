@@ -20,6 +20,7 @@ import (
 func newTestSessionManager(t *testing.T) *SessionManager {
 	t.Helper()
 	tmpDir := t.TempDir()
+
 	return NewSessionManager(config.Default(), config.Paths{
 		StateFile: filepath.Join(tmpDir, "state.json"),
 		DataDir:   tmpDir,
@@ -46,11 +47,13 @@ func TestGenerateID(t *testing.T) {
 
 	t.Run("no collisions across 1000 calls", func(t *testing.T) {
 		seen := make(map[string]struct{}, 1000)
+
 		for range 1000 {
 			id := generateID()
 			if _, ok := seen[id]; ok {
 				t.Fatalf("collision detected: %s", id)
 			}
+
 			seen[id] = struct{}{}
 		}
 	})
@@ -59,6 +62,7 @@ func TestGenerateID(t *testing.T) {
 func TestRepoHash(t *testing.T) {
 	t.Run("deterministic", func(t *testing.T) {
 		h1 := repoHash("/home/user/repo")
+
 		h2 := repoHash("/home/user/repo")
 		if h1 != h2 {
 			t.Errorf("repoHash not deterministic: %q != %q", h1, h2)
@@ -80,11 +84,13 @@ func TestRepoHash(t *testing.T) {
 			"/var/src/code",
 		}
 		seen := make(map[string]string)
+
 		for _, input := range inputs {
 			h := repoHash(input)
 			if prev, ok := seen[h]; ok {
 				t.Errorf("collision: repoHash(%q) == repoHash(%q) == %q", input, prev, h)
 			}
+
 			seen[h] = input
 		}
 	})
@@ -100,24 +106,31 @@ func TestNewSessionManager(t *testing.T) {
 	if sm.state == nil {
 		t.Fatal("state is nil")
 	}
+
 	if sm.state.Sessions == nil {
 		t.Fatal("state.Sessions is nil")
 	}
+
 	if sm.sessions == nil {
 		t.Fatal("sessions map is nil")
 	}
+
 	if sm.attachedClients == nil {
 		t.Fatal("attachedClients map is nil")
 	}
+
 	if sm.hookReports == nil {
 		t.Fatal("hookReports map is nil")
 	}
+
 	if sm.cfg != cfg {
 		t.Error("cfg not set correctly")
 	}
+
 	if sm.paths != paths {
 		t.Error("paths not set correctly")
 	}
+
 	if sm.log != log {
 		t.Error("log not set correctly")
 	}
@@ -138,6 +151,7 @@ func TestRename(t *testing.T) {
 		if !ok {
 			t.Fatal("session not found after rename")
 		}
+
 		if s.Name != "bonnie-name" {
 			t.Errorf("Name = %q, want %q", s.Name, "bonnie-name")
 		}
@@ -165,6 +179,7 @@ func TestUpdate(t *testing.T) {
 		if err := sm.Update("sess1", strPtr("bonnie-name"), nil); err != nil {
 			t.Fatalf("Update() error = %v", err)
 		}
+
 		if sm.state.Sessions["sess1"].Name != "bonnie-name" {
 			t.Errorf("Name = %q, want %q", sm.state.Sessions["sess1"].Name, "bonnie-name")
 		}
@@ -182,6 +197,7 @@ func TestUpdate(t *testing.T) {
 		if err := sm.Update("bairn", nil, strPtr("")); err != nil {
 			t.Fatalf("Update() error = %v", err)
 		}
+
 		if sm.state.Sessions["bairn"].ParentID != "" {
 			t.Errorf("ParentID = %q, want empty", sm.state.Sessions["bairn"].ParentID)
 		}
@@ -202,6 +218,7 @@ func TestUpdate(t *testing.T) {
 		if err := sm.Update("bairn", nil, strPtr("p2")); err != nil {
 			t.Fatalf("Update() error = %v", err)
 		}
+
 		if sm.state.Sessions["bairn"].ParentID != "p2" {
 			t.Errorf("ParentID = %q, want %q", sm.state.Sessions["bairn"].ParentID, "p2")
 		}
@@ -298,10 +315,12 @@ func TestUpdate(t *testing.T) {
 		if err := sm.Update("bairn", strPtr("bonnie-name"), strPtr("p2")); err != nil {
 			t.Fatalf("Update() error = %v", err)
 		}
+
 		s := sm.state.Sessions["bairn"]
 		if s.Name != "bonnie-name" {
 			t.Errorf("Name = %q, want %q", s.Name, "bonnie-name")
 		}
+
 		if s.ParentID != "p2" {
 			t.Errorf("ParentID = %q, want %q", s.ParentID, "p2")
 		}
@@ -317,6 +336,7 @@ func TestUpdate(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error for nonexistent parent")
 		}
+
 		if sm.state.Sessions["sess1"].Name != "auld-name" {
 			t.Errorf("Name = %q, want %q (should not have changed)", sm.state.Sessions["sess1"].Name, "auld-name")
 		}
@@ -378,6 +398,7 @@ func TestGet(t *testing.T) {
 		if !ok {
 			t.Fatal("Get() returned not found for existing session")
 		}
+
 		if s.ID != "abc" || s.Name != "braw-session" {
 			t.Errorf("Get() = %+v, want ID=abc, Name=braw-session", s)
 		}
@@ -404,6 +425,7 @@ func TestGetPTY(t *testing.T) {
 		if !ok {
 			t.Fatal("GetPTY() returned not found for existing session")
 		}
+
 		if s != nil {
 			t.Errorf("GetPTY() = %v, want nil", s)
 		}
@@ -440,6 +462,7 @@ func TestKickAttachedClient(t *testing.T) {
 		sm.mu.RLock()
 		_, exists := sm.attachedClients["sess1"]
 		sm.mu.RUnlock()
+
 		if exists {
 			t.Error("attached client was not removed after kick")
 		}
@@ -464,6 +487,7 @@ func TestSetAndClearAttachedClient(t *testing.T) {
 		sm.mu.RLock()
 		_, exists := sm.attachedClients["sess1"]
 		sm.mu.RUnlock()
+
 		if !exists {
 			t.Fatal("attached client was not set")
 		}
@@ -474,6 +498,7 @@ func TestSetAndClearAttachedClient(t *testing.T) {
 		sm.mu.RLock()
 		_, exists = sm.attachedClients["sess1"]
 		sm.mu.RUnlock()
+
 		if exists {
 			t.Error("attached client was not cleared")
 		}
@@ -484,6 +509,7 @@ func TestSetAndClearAttachedClient(t *testing.T) {
 
 		conn1 := &net.UnixConn{}
 		conn2 := &net.UnixConn{}
+
 		sm.SetAttachedClient("sess1", conn1, func() {}, nil)
 
 		// Try to clear with a different conn
@@ -493,6 +519,7 @@ func TestSetAndClearAttachedClient(t *testing.T) {
 		sm.mu.RLock()
 		_, exists := sm.attachedClients["sess1"]
 		sm.mu.RUnlock()
+
 		if !exists {
 			t.Error("attached client was incorrectly removed when clearing with wrong conn")
 		}
@@ -517,9 +544,11 @@ func TestIsAttachedClient(t *testing.T) {
 	if !sm.IsAttachedClient("sess1", conn1) {
 		t.Error("expected true for matching conn")
 	}
+
 	if sm.IsAttachedClient("sess1", conn2) {
 		t.Error("expected false for different conn")
 	}
+
 	if sm.IsAttachedClient("nonexistent", conn1) {
 		t.Error("expected false for nonexistent session")
 	}
@@ -556,40 +585,52 @@ func TestToSessionInfo(t *testing.T) {
 	if info.ID != sess.ID {
 		t.Errorf("ID = %q, want %q", info.ID, sess.ID)
 	}
+
 	if info.Name != sess.Name {
 		t.Errorf("Name = %q, want %q", info.Name, sess.Name)
 	}
+
 	if info.RepoPath != sess.RepoPath {
 		t.Errorf("RepoPath = %q, want %q", info.RepoPath, sess.RepoPath)
 	}
+
 	if info.RepoName != sess.RepoName {
 		t.Errorf("RepoName = %q, want %q", info.RepoName, sess.RepoName)
 	}
+
 	if info.WorktreePath != sess.WorktreePath {
 		t.Errorf("WorktreePath = %q, want %q", info.WorktreePath, sess.WorktreePath)
 	}
+
 	if info.Branch != sess.Branch {
 		t.Errorf("Branch = %q, want %q", info.Branch, sess.Branch)
 	}
+
 	if info.Agent != sess.Agent {
 		t.Errorf("Agent = %q, want %q", info.Agent, sess.Agent)
 	}
+
 	if info.AgentSessionID != sess.AgentSessionID {
 		t.Errorf("AgentSessionID = %q, want %q", info.AgentSessionID, sess.AgentSessionID)
 	}
+
 	if info.Status != string(sess.Status) {
 		t.Errorf("Status = %q, want %q", info.Status, string(sess.Status))
 	}
+
 	if info.ExitCode == nil || *info.ExitCode != exitCode {
 		t.Errorf("ExitCode = %v, want %d", info.ExitCode, exitCode)
 	}
+
 	wantCreatedAt := createdAt.Format(time.RFC3339)
 	if info.CreatedAt != wantCreatedAt {
 		t.Errorf("CreatedAt = %q, want %q", info.CreatedAt, wantCreatedAt)
 	}
+
 	if info.Model != "claude-sonnet-4-5-20250514" {
 		t.Errorf("Model = %q, want %q", info.Model, "claude-sonnet-4-5-20250514")
 	}
+
 	if info.ToolName != "Bash" {
 		t.Errorf("ToolName = %q, want %q", info.ToolName, "Bash")
 	}
@@ -675,6 +716,7 @@ func TestIsConfigStale(t *testing.T) {
 				SandboxConfig: cfg.Sandbox.Merge(agent.Sandbox),
 			},
 		}
+
 		changedCfg := &config.Config{
 			Agents:  map[string]config.Agent{"claude": agent},
 			Sandbox: config.SandboxConfig{Enabled: true, WriteDirs: []string{"/new"}},
@@ -736,6 +778,7 @@ func TestIsConfigStaleOrchestrator(t *testing.T) {
 				SandboxConfig: cfg.OrchestratorSandboxMerged("claude"),
 			},
 		}
+
 		changedCfg := &config.Config{
 			Agents:  map[string]config.Agent{"claude": agent},
 			Sandbox: config.SandboxConfig{Enabled: true},
@@ -809,6 +852,7 @@ func TestResolveSandboxIgnoresOrchestratorLayer(t *testing.T) {
 		} else if errWithout != errWith {
 			t.Errorf("resolveSandbox error presence differs: without=%v, with=%v", errWithout, errWith)
 		}
+
 		if resultWithout != resultWith {
 			t.Errorf("resolveSandbox result differs: without=%v, with=%v", resultWithout, resultWith)
 		}
@@ -1031,9 +1075,11 @@ func TestHandleHookReport(t *testing.T) {
 		if !ok {
 			t.Fatal("hookReport not found for sess1")
 		}
+
 		if report.Status != "active" {
 			t.Errorf("Status = %q, want %q", report.Status, "active")
 		}
+
 		if report.Event != "PreToolUse" {
 			t.Errorf("Event = %q, want %q", report.Event, "PreToolUse")
 		}
@@ -1062,6 +1108,7 @@ func TestHandleHookReport(t *testing.T) {
 		if !ok {
 			t.Fatal("hookReport not found for sess1")
 		}
+
 		if report.Status != "approval" {
 			t.Errorf("Status = %q, want %q", report.Status, "approval")
 		}
@@ -1090,6 +1137,7 @@ func TestHandleHookReport(t *testing.T) {
 		if !ok {
 			t.Fatal("hookReport not found for sess1")
 		}
+
 		if report.Status != "ready" {
 			t.Errorf("Status = %q, want %q", report.Status, "ready")
 		}
@@ -1148,6 +1196,7 @@ func TestHandleHookReport(t *testing.T) {
 		sm.mu.RLock()
 		sess := sm.state.Sessions["sess1"]
 		agentStatus := sess.AgentStatus
+
 		sm.mu.RUnlock()
 
 		if agentStatus != "ready" {
@@ -1175,9 +1224,11 @@ func TestHandleHookReport(t *testing.T) {
 		if !ok {
 			t.Fatal("hookReport not found for sess1")
 		}
+
 		if report.ToolName != "Bash" {
 			t.Errorf("ToolName = %q, want %q", report.ToolName, "Bash")
 		}
+
 		if sess.HookToolName != "Bash" {
 			t.Errorf("sess.HookToolName = %q, want %q", sess.HookToolName, "Bash")
 		}
@@ -1188,7 +1239,6 @@ func TestDetectAgentStatusesHookAuthority(t *testing.T) {
 	// Test that a valid hook report takes precedence over scraping.
 	// We can't easily test the full detectAgentStatuses (needs real PTY),
 	// but we can test the hookReports lookup logic directly.
-
 	sm := newTestSessionManager(t)
 
 	t.Run("authoritative hook is trusted", func(t *testing.T) {
@@ -1208,9 +1258,11 @@ func TestDetectAgentStatusesHookAuthority(t *testing.T) {
 		if !ok {
 			t.Fatal("hookReport not found")
 		}
+
 		if hr.Status != "approval" {
 			t.Errorf("Status = %q, want %q", hr.Status, "approval")
 		}
+
 		if !time.Now().Before(hr.AuthoritativeUntil) {
 			t.Error("hook should still be authoritative")
 		}
@@ -1233,6 +1285,7 @@ func TestDetectAgentStatusesHookAuthority(t *testing.T) {
 		if !ok {
 			t.Fatal("hookReport not found")
 		}
+
 		if time.Now().Before(hr.AuthoritativeUntil) {
 			t.Error("hook should be expired")
 		}
@@ -1245,8 +1298,10 @@ func TestDetectAgentStatuses_SharedWorktreeSkipsGit(t *testing.T) {
 	repoDir := t.TempDir()
 	runGit := func(args ...string) {
 		t.Helper()
+
 		cmd := exec.Command("git", args...)
 		cmd.Dir = repoDir
+
 		cmd.Env = append(os.Environ(),
 			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
 			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
@@ -1256,16 +1311,20 @@ func TestDetectAgentStatuses_SharedWorktreeSkipsGit(t *testing.T) {
 		}
 	}
 	runGit("init", "-b", "main")
+
 	if err := os.WriteFile(filepath.Join(repoDir, "file.txt"), []byte("original"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+
 	runGit("add", "file.txt")
 	runGit("commit", "-m", "init")
+
 	if err := os.WriteFile(filepath.Join(repoDir, "file.txt"), []byte("modified"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	logDir := t.TempDir()
+
 	sharedPty, err := grpty.NewSession(grpty.SessionOpts{
 		ID: "shared1", Command: "sleep", Args: []string{"60"},
 		Dir: repoDir, Rows: 24, Cols: 80,
@@ -1320,15 +1379,19 @@ func TestDetectAgentStatuses_SharedWorktreeSkipsGit(t *testing.T) {
 	if shared.GitDirty {
 		t.Error("shared worktree session should have GitDirty=false (git ops skipped)")
 	}
+
 	if shared.GitUnpushed != 0 {
 		t.Errorf("shared worktree session GitUnpushed=%d, want 0", shared.GitUnpushed)
 	}
+
 	if normal.GitDirty != true {
 		t.Error("normal session should detect GitDirty=true from modified file")
 	}
+
 	if shared.AgentStatus != "active" {
 		t.Errorf("shared session AgentStatus=%q, want 'active'", shared.AgentStatus)
 	}
+
 	if normal.AgentStatus != "active" {
 		t.Errorf("normal session AgentStatus=%q, want 'active'", normal.AgentStatus)
 	}
@@ -1347,9 +1410,11 @@ func TestForkNoRepoSession(t *testing.T) {
 	if err == nil {
 		t.Fatal("Fork() should fail for no-repo source session")
 	}
+
 	if !strings.Contains(err.Error(), "no repo") {
 		t.Errorf("Fork() error = %q, want error mentioning 'no repo'", err)
 	}
+
 	if len(sm.state.Sessions) != 1 {
 		t.Errorf("expected 1 session (source only), got %d", len(sm.state.Sessions))
 	}
@@ -1371,12 +1436,15 @@ func TestApplyConfig(t *testing.T) {
 	if sm.cfg != newCfg {
 		t.Error("config was not swapped")
 	}
+
 	if sm.cfg == oldCfg {
 		t.Error("config still points to old config")
 	}
+
 	if sm.cfg.DefaultAgent != "codex" {
 		t.Errorf("DefaultAgent = %q, want %q", sm.cfg.DefaultAgent, "codex")
 	}
+
 	if _, ok := sm.cfg.Agents["newagent"]; !ok {
 		t.Error("new agent not present in config")
 	}
@@ -1384,6 +1452,7 @@ func TestApplyConfig(t *testing.T) {
 
 func TestReloadConfig(t *testing.T) {
 	dir := t.TempDir()
+
 	cfgPath := filepath.Join(dir, "config.toml")
 	if err := os.WriteFile(cfgPath, []byte("default_agent = \"codex\"\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -1406,6 +1475,7 @@ func TestReloadConfig(t *testing.T) {
 
 func TestReloadConfigRejectsDataDirChange(t *testing.T) {
 	dir := t.TempDir()
+
 	cfgPath := filepath.Join(dir, "config.toml")
 	if err := os.WriteFile(cfgPath, []byte("data_dir = \"/tmp/new-graith\"\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -1418,6 +1488,7 @@ func TestReloadConfigRejectsDataDirChange(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when data_dir changes")
 	}
+
 	if !strings.Contains(err.Error(), "data_dir changed") {
 		t.Errorf("error = %q, want it to mention data_dir changed", err)
 	}
@@ -1425,6 +1496,7 @@ func TestReloadConfigRejectsDataDirChange(t *testing.T) {
 
 func TestReloadConfigInvalidFile(t *testing.T) {
 	dir := t.TempDir()
+
 	cfgPath := filepath.Join(dir, "config.toml")
 	if err := os.WriteFile(cfgPath, []byte("{{invalid"), 0o600); err != nil {
 		t.Fatal(err)
@@ -1457,6 +1529,7 @@ func TestToSessionInfoSharedWorktree(t *testing.T) {
 	}
 
 	sess.SharedWorktree = false
+
 	info = toSessionInfo(sess, config.Default(), nil)
 	if info.SharedWorktree {
 		t.Error("SharedWorktree = true, want false")
@@ -1501,6 +1574,7 @@ func TestDeleteSharedWorktreeSkipsGitTeardown(t *testing.T) {
 
 func TestStateSaveLoadSharedWorktree(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
+
 	state := &State{
 		Sessions: map[string]*SessionState{
 			"s1": {
@@ -1513,14 +1587,17 @@ func TestStateSaveLoadSharedWorktree(t *testing.T) {
 	if err := SaveState(path, state); err != nil {
 		t.Fatal(err)
 	}
+
 	loaded, err := LoadState(path)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	s, ok := loaded.Sessions["s1"]
 	if !ok {
 		t.Fatal("session not found after load")
 	}
+
 	if !s.SharedWorktree {
 		t.Error("SharedWorktree not preserved across save/load")
 	}
@@ -1547,6 +1624,7 @@ func TestShareWorktreeRequiresSandbox(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when --share-worktree used without sandbox, got nil")
 	}
+
 	if !strings.Contains(err.Error(), "requires sandbox") {
 		t.Errorf("unexpected error message: %v", err)
 	}
@@ -1579,6 +1657,7 @@ func TestShareWorktreeRequiresSandboxPerAgent(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when --share-worktree used with per-agent sandbox disabled, got nil")
 	}
+
 	if !strings.Contains(err.Error(), "requires sandbox") {
 		t.Errorf("unexpected error message: %v", err)
 	}
@@ -1607,6 +1686,7 @@ func TestResumeSharedWorktreeWithoutSandboxRejects(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when resuming shared-worktree session without sandbox, got nil")
 	}
+
 	if !strings.Contains(err.Error(), "requires sandbox") {
 		t.Errorf("unexpected error message: %v", err)
 	}
@@ -1641,9 +1721,11 @@ func TestCreateRollsBackOnSaveStateFailure(t *testing.T) {
 
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
+
 	if len(sm.state.Sessions) != 0 {
 		t.Errorf("sessions not rolled back: got %d, want 0", len(sm.state.Sessions))
 	}
+
 	if len(sm.sessions) != 0 {
 		t.Errorf("PTY sessions not rolled back: got %d, want 0", len(sm.sessions))
 	}
@@ -1691,6 +1773,7 @@ func TestResumeRollsBackOnSaveStateFailure(t *testing.T) {
 	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+
 	sm.paths.StateFile = filepath.Join(blocker, "sub", "state.json")
 
 	_, err := sm.Resume("s1", 24, 80)
@@ -1705,15 +1788,19 @@ func TestResumeRollsBackOnSaveStateFailure(t *testing.T) {
 	if s.Status != StatusStopped {
 		t.Errorf("status not rolled back: got %q, want %q", s.Status, StatusStopped)
 	}
+
 	if s.ExitCode == nil || *s.ExitCode != 42 {
 		t.Errorf("exit code not rolled back: got %v, want 42", s.ExitCode)
 	}
+
 	if s.PID != 0 {
 		t.Errorf("PID not rolled back: got %d, want 0", s.PID)
 	}
+
 	if s.AgentStatus != "ready" {
 		t.Errorf("agent status not rolled back: got %q, want %q", s.AgentStatus, "ready")
 	}
+
 	if _, ok := sm.sessions["s1"]; ok {
 		t.Error("PTY session should be removed after rollback")
 	}
@@ -1734,6 +1821,7 @@ func TestExpandPathsGlob(t *testing.T) {
 		if len(got) != 2 {
 			t.Fatalf("expandPaths glob = %v, want 2 matches", got)
 		}
+
 		for _, p := range got {
 			if !strings.HasSuffix(p, ".pub") {
 				t.Errorf("unexpected match: %s", p)
@@ -1757,6 +1845,7 @@ func TestExpandPathsGlob(t *testing.T) {
 
 	t.Run("unmatched glob skipped", func(t *testing.T) {
 		pattern := filepath.Join(dir, "*.zzz")
+
 		got := expandPaths([]string{pattern}, log, "read")
 		if len(got) != 0 {
 			t.Errorf("expandPaths no-match = %v, want []", got)
@@ -1774,10 +1863,12 @@ func TestExpandPathsGlob(t *testing.T) {
 func TestResumeRefreshesSandboxConfig(t *testing.T) {
 	t.Run("resume uses current config not stored config", func(t *testing.T) {
 		tmpDir := t.TempDir()
+
 		updatedDir := filepath.Join(tmpDir, "updated-dir")
 		if err := os.MkdirAll(updatedDir, 0o755); err != nil {
 			t.Fatal(err)
 		}
+
 		cfg := config.Default()
 		cfg.Sandbox = config.SandboxConfig{
 			Enabled:  true,
@@ -1822,6 +1913,7 @@ func TestResumeRefreshesSandboxConfig(t *testing.T) {
 			if !strings.Contains(err.Error(), "not available") {
 				t.Fatalf("unexpected error: %v", err)
 			}
+
 			return
 		}
 
@@ -1832,15 +1924,19 @@ func TestResumeRefreshesSandboxConfig(t *testing.T) {
 		if s.SandboxConfig == nil {
 			t.Fatal("SandboxConfig should not be nil after resume")
 		}
+
 		found := false
+
 		for _, d := range s.SandboxConfig.ReadDirs {
 			if d == updatedDir {
 				found = true
 			}
+
 			if d == "/old-creation-time-dir" {
 				t.Error("SandboxConfig still contains old creation-time dir after resume")
 			}
 		}
+
 		if !found {
 			t.Errorf("SandboxConfig.ReadDirs = %v, want to contain %s", s.SandboxConfig.ReadDirs, updatedDir)
 		}
@@ -1850,9 +1946,11 @@ func TestResumeRefreshesSandboxConfig(t *testing.T) {
 			sm.mu.Lock()
 			delete(sm.sessions, "s1")
 			sm.mu.Unlock()
+
 			if !ptySess.Exited() {
 				_ = ptySess.Kill()
 			}
+
 			<-ptySess.Done()
 			ptySess.Close()
 		}
@@ -1898,6 +1996,7 @@ func TestResumeRefreshesSandboxConfig(t *testing.T) {
 		if sess.Sandboxed {
 			t.Error("session should not be sandboxed after resume with sandbox disabled in config")
 		}
+
 		if sess.SandboxConfig != nil {
 			t.Errorf("SandboxConfig should be nil when sandbox is disabled, got %+v", sess.SandboxConfig)
 		}
@@ -1907,9 +2006,11 @@ func TestResumeRefreshesSandboxConfig(t *testing.T) {
 			sm.mu.Lock()
 			delete(sm.sessions, "s1")
 			sm.mu.Unlock()
+
 			if !ptySess.Exited() {
 				_ = ptySess.Kill()
 			}
+
 			<-ptySess.Done()
 			ptySess.Close()
 		}
@@ -1955,6 +2056,7 @@ func TestResumeRefreshesSandboxConfig(t *testing.T) {
 		if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
 			t.Fatal(err)
 		}
+
 		sm.paths.StateFile = filepath.Join(blocker, "sub", "state.json")
 
 		_, err := sm.Resume("s1", 24, 80)
@@ -1969,6 +2071,7 @@ func TestResumeRefreshesSandboxConfig(t *testing.T) {
 		if !s.Sandboxed {
 			t.Error("Sandboxed should be rolled back to true")
 		}
+
 		if s.SandboxConfig != oldConfig {
 			t.Error("SandboxConfig should be rolled back to original pointer")
 		}
@@ -1977,6 +2080,7 @@ func TestResumeRefreshesSandboxConfig(t *testing.T) {
 
 func newTestPTYSession(t *testing.T, command string, args ...string) *grpty.Session {
 	t.Helper()
+
 	sess, err := grpty.NewSession(grpty.SessionOpts{
 		ID: "test", Command: command, Args: args,
 		Dir: t.TempDir(), Rows: 24, Cols: 80,
@@ -1986,12 +2090,15 @@ func newTestPTYSession(t *testing.T, command string, args ...string) *grpty.Sess
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	t.Cleanup(func() {
 		if !sess.Exited() {
 			_ = sess.Kill()
 		}
+
 		sess.Close()
 	})
+
 	return sess
 }
 
@@ -2061,9 +2168,11 @@ func TestWatchSessionCurrentUpdatesState(t *testing.T) {
 	if status != StatusStopped {
 		t.Errorf("status = %q, want %q", status, StatusStopped)
 	}
+
 	if exitCode == nil || *exitCode != 0 {
 		t.Errorf("exit code = %v, want 0", exitCode)
 	}
+
 	if ptyStillInMap {
 		t.Error("PTY session should be removed from sessions map after natural exit")
 	}
@@ -2126,6 +2235,7 @@ func TestWatchSessionStaleClosesPTYHandles(t *testing.T) {
 
 func TestWatchSessionDeletedSkipsPublish(t *testing.T) {
 	dir := t.TempDir()
+
 	ms, err := NewMsgStore(filepath.Join(dir, "msg.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -2156,6 +2266,7 @@ func TestWatchSessionDeletedSkipsPublish(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if len(msgs) != 0 {
 		t.Errorf("expected 0 status messages for deleted session, got %d: %v", len(msgs), msgs)
 	}
@@ -2163,6 +2274,7 @@ func TestWatchSessionDeletedSkipsPublish(t *testing.T) {
 	sm.mu.RLock()
 	_, ptyStillInMap := sm.sessions[id]
 	sm.mu.RUnlock()
+
 	if ptyStillInMap {
 		t.Error("PTY session should be removed from sessions map even for deleted sessions")
 	}
@@ -2181,6 +2293,7 @@ func TestResumeResetsIdleSince(t *testing.T) {
 			if err := os.RemoveAll(tmpDir); err == nil {
 				return
 			}
+
 			time.Sleep(50 * time.Millisecond)
 		}
 	}()
@@ -2231,6 +2344,7 @@ func TestResumeResetsIdleSince(t *testing.T) {
 		case <-time.After(5 * time.Second):
 			t.Fatal("timeout waiting for session to exit")
 		}
+
 		ptySess.Close()
 		sm.mu.Lock()
 		_ = sm.state.Sessions[id]
@@ -2245,9 +2359,12 @@ func initTempGitRepo(t *testing.T) string {
 	dir := t.TempDir()
 	run := func(args ...string) {
 		t.Helper()
+
 		cmd := exec.Command("git", args...)
 		cmd.Dir = dir
+
 		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test", "GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test")
+
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
@@ -2255,16 +2372,19 @@ func initTempGitRepo(t *testing.T) string {
 	}
 	run("init", "-b", "main")
 	run("commit", "--allow-empty", "-m", "init")
+
 	return dir
 }
 
 func TestCreateInPlaceRejectsUnconfiguredRepo(t *testing.T) {
 	sm := newTestSessionManager(t)
 	repoDir := initTempGitRepo(t)
+
 	_, err := sm.Create("braw", "claude", repoDir, "", "", "", "", false, "", false, true, false, false, 24, 80)
 	if err == nil {
 		t.Fatal("expected error for unconfigured repo")
 	}
+
 	if !strings.Contains(err.Error(), "not configured in [[repos]]") {
 		t.Errorf("error = %q, want mention of [[repos]]", err.Error())
 	}
@@ -2278,6 +2398,7 @@ func TestCreateInPlaceMutuallyExclusiveFlags(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error for --in-place with --no-repo")
 		}
+
 		if !strings.Contains(err.Error(), "mutually exclusive") {
 			t.Errorf("error = %q, want mutually exclusive", err.Error())
 		}
@@ -2288,6 +2409,7 @@ func TestCreateInPlaceMutuallyExclusiveFlags(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error for --in-place with --share-worktree")
 		}
+
 		if !strings.Contains(err.Error(), "mutually exclusive") {
 			t.Errorf("error = %q, want mutually exclusive", err.Error())
 		}
@@ -2298,6 +2420,7 @@ func TestCreateInPlaceMutuallyExclusiveFlags(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error for --in-place with --base")
 		}
+
 		if !strings.Contains(err.Error(), "mutually exclusive") {
 			t.Errorf("error = %q, want mutually exclusive", err.Error())
 		}
@@ -2321,6 +2444,7 @@ func TestCreateInPlaceRejectsConcurrent(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for concurrent in-place session")
 	}
+
 	if !strings.Contains(err.Error(), "already running") {
 		t.Errorf("error = %q, want mention of already running", err.Error())
 	}
@@ -2405,6 +2529,7 @@ func TestForkInPlaceRejects(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error forking an in-place session")
 	}
+
 	if !strings.Contains(err.Error(), "in-place") {
 		t.Errorf("error = %q, want mention of in-place", err.Error())
 	}
@@ -2444,14 +2569,17 @@ func TestForkUsesSourceBaseBranch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Fork() unexpected error: %v", err)
 	}
+
 	t.Cleanup(func() {
 		sm.mu.RLock()
 		sess, ok := sm.sessions[forked.ID]
 		sm.mu.RUnlock()
+
 		if ok {
 			_ = sess.Kill()
 			sess.Close()
 		}
+
 		if forked.WorktreePath != "" {
 			cmd := exec.Command("git", "worktree", "remove", "--force", forked.WorktreePath)
 			cmd.Dir = repoDir
@@ -2462,6 +2590,7 @@ func TestForkUsesSourceBaseBranch(t *testing.T) {
 	if forked.BaseBranch != "main" {
 		t.Errorf("Fork() BaseBranch = %q, want %q", forked.BaseBranch, "main")
 	}
+
 	if forked.BaseBranch == "feat/my-feature" {
 		t.Error("Fork() incorrectly used source Branch as BaseBranch")
 	}
@@ -2485,6 +2614,7 @@ func TestResumeInPlaceRejectsRemovedConfig(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error resuming in-place session after repo removed from config")
 	}
+
 	if !strings.Contains(err.Error(), "[[repos]]") {
 		t.Errorf("error = %q, want mention of [[repos]]", err.Error())
 	}
@@ -2518,6 +2648,7 @@ func TestResumeInPlaceRejectsConcurrentRunning(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error: another in-place session is running in the same repo")
 	}
+
 	if !strings.Contains(err.Error(), "already running") {
 		t.Errorf("error = %q, want mention of already running", err.Error())
 	}
@@ -2544,6 +2675,7 @@ func TestResumeInPlaceRejectsDeletedRepo(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error resuming after repo deleted")
 	}
+
 	if !strings.Contains(err.Error(), "no longer a git repository") {
 		t.Errorf("error = %q, want mention of no longer a git repository", err.Error())
 	}
@@ -2551,10 +2683,12 @@ func TestResumeInPlaceRejectsDeletedRepo(t *testing.T) {
 
 func TestCreateInPlaceBaseRejectedByDaemon(t *testing.T) {
 	sm := newTestSessionManager(t)
+
 	_, err := sm.Create("braw", "claude", "/tmp/whatever", "main", "", "", "", false, "", false, true, false, false, 24, 80)
 	if err == nil {
 		t.Fatal("expected error for --in-place with --base")
 	}
+
 	if !strings.Contains(err.Error(), "mutually exclusive") {
 		t.Errorf("error = %q, want mutually exclusive", err.Error())
 	}
@@ -2563,6 +2697,7 @@ func TestCreateInPlaceBaseRejectedByDaemon(t *testing.T) {
 func TestStateSaveLoadInPlace(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "state.json")
+
 	state := &State{
 		Version: CurrentStateVersion,
 		Sessions: map[string]*SessionState{
@@ -2576,10 +2711,12 @@ func TestStateSaveLoadInPlace(t *testing.T) {
 	if err := SaveState(path, state); err != nil {
 		t.Fatal(err)
 	}
+
 	loaded, err := LoadState(path)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	s := loaded.Sessions["abc123"]
 	if !s.InPlace {
 		t.Error("InPlace not preserved across save/load")
@@ -2596,12 +2733,14 @@ func TestToSessionInfoInPlace(t *testing.T) {
 		Status:       StatusRunning,
 		CreatedAt:    time.Now().UTC(),
 	}
+
 	info := toSessionInfo(sess, config.Default(), nil)
 	if !info.InPlace {
 		t.Error("InPlace = false in SessionInfo, want true")
 	}
 
 	sess.InPlace = false
+
 	info = toSessionInfo(sess, config.Default(), nil)
 	if info.InPlace {
 		t.Error("InPlace = true in SessionInfo, want false")
@@ -2624,6 +2763,7 @@ func TestSingletonBlocksCreateWhenRunning(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for singleton repo with running session")
 	}
+
 	if !strings.Contains(err.Error(), "singleton") {
 		t.Errorf("error = %q, want mention of singleton", err.Error())
 	}
@@ -2657,6 +2797,7 @@ func TestInPlaceRejectsRepoWithIncludes(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for --in-place with includes configured")
 	}
+
 	if !strings.Contains(err.Error(), "includes configured") {
 		t.Errorf("error = %q, want mention of includes configured", err.Error())
 	}
@@ -2681,6 +2822,7 @@ func TestForkSingletonRejects(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for fork of singleton session")
 	}
+
 	if !strings.Contains(err.Error(), "singleton") {
 		t.Errorf("error = %q, want mention of singleton", err.Error())
 	}
@@ -2706,23 +2848,29 @@ func TestToSessionInfoIncludes(t *testing.T) {
 			},
 		},
 	}
+
 	info := toSessionInfo(sess, config.Default(), nil)
 	if len(info.Includes) != 1 {
 		t.Fatalf("Includes length = %d, want 1", len(info.Includes))
 	}
+
 	inc := info.Includes[0]
 	if inc.RepoName != "frontend" {
 		t.Errorf("RepoName = %q, want %q", inc.RepoName, "frontend")
 	}
+
 	if inc.WorktreePath != "/session/frontend" {
 		t.Errorf("WorktreePath = %q, want %q", inc.WorktreePath, "/session/frontend")
 	}
+
 	if inc.Branch != "user/graith/test/frontend" {
 		t.Errorf("Branch = %q, want %q", inc.Branch, "user/graith/test/frontend")
 	}
+
 	if !inc.Dirty {
 		t.Error("Dirty = false, want true")
 	}
+
 	if inc.Unpushed != 3 {
 		t.Errorf("Unpushed = %d, want 3", inc.Unpushed)
 	}
@@ -2736,6 +2884,7 @@ func TestToSessionInfoNoIncludes(t *testing.T) {
 		Status:    StatusRunning,
 		CreatedAt: time.Now().UTC(),
 	}
+
 	info := toSessionInfo(sess, config.Default(), nil)
 	if len(info.Includes) != 0 {
 		t.Errorf("Includes length = %d, want 0", len(info.Includes))
@@ -2776,23 +2925,29 @@ func TestStateSaveLoadIncludes(t *testing.T) {
 	if err := SaveState(statePath, state); err != nil {
 		t.Fatalf("save: %v", err)
 	}
+
 	loaded, err := LoadState(statePath)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
+
 	s := loaded.Sessions["s1"]
 	if s == nil {
 		t.Fatal("session s1 not found after load")
 	}
+
 	if len(s.Includes) != 2 {
 		t.Fatalf("Includes length = %d, want 2", len(s.Includes))
 	}
+
 	if s.Includes[0].RepoName != "frontend" {
 		t.Errorf("Includes[0].RepoName = %q, want %q", s.Includes[0].RepoName, "frontend")
 	}
+
 	if s.Includes[1].RepoName != "shared-lib" {
 		t.Errorf("Includes[1].RepoName = %q, want %q", s.Includes[1].RepoName, "shared-lib")
 	}
+
 	if s.Includes[0].WorktreePath != "/data/worktrees/mono-repo/hash/s1/frontend" {
 		t.Errorf("Includes[0].WorktreePath = %q", s.Includes[0].WorktreePath)
 	}
@@ -2822,6 +2977,7 @@ func TestResumeIncludesValidatesMissingWorktree(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing included worktree")
 	}
+
 	if !strings.Contains(err.Error(), "no longer a valid git repo") {
 		t.Errorf("error = %q, want mention of no longer a valid git repo", err.Error())
 	}
@@ -2829,6 +2985,7 @@ func TestResumeIncludesValidatesMissingWorktree(t *testing.T) {
 
 func TestParentIDPersistence(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
+
 	state := &State{
 		Version: CurrentStateVersion,
 		Sessions: map[string]*SessionState{
@@ -2846,10 +3003,12 @@ func TestParentIDPersistence(t *testing.T) {
 	if err := SaveState(path, state); err != nil {
 		t.Fatal(err)
 	}
+
 	loaded, err := LoadState(path)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	s := loaded.Sessions["child1"]
 	if s.ParentID != "parent1" {
 		t.Errorf("ParentID = %q, want %q", s.ParentID, "parent1")
@@ -2865,6 +3024,7 @@ func TestToSessionInfoParentID(t *testing.T) {
 		Status:    StatusRunning,
 		CreatedAt: time.Now().UTC(),
 	}
+
 	info := toSessionInfo(sess, config.Default(), nil)
 	if info.ParentID != "parent" {
 		t.Errorf("SessionInfo.ParentID = %q, want %q", info.ParentID, "parent")
@@ -2891,11 +3051,13 @@ func TestCollectDescendants(t *testing.T) {
 	for _, id := range result {
 		resultSet[id] = true
 	}
+
 	for _, expected := range []string{"ben", "bairn-one", "bairn-two", "wee-bairn"} {
 		if !resultSet[expected] {
 			t.Errorf("missing expected session %q in result", expected)
 		}
 	}
+
 	if resultSet["thrawn-session"] {
 		t.Error("thrawn-session should not be in result")
 	}
@@ -2904,9 +3066,11 @@ func TestCollectDescendants(t *testing.T) {
 	for i, id := range result {
 		indexOf[id] = i
 	}
+
 	if indexOf["wee-bairn"] > indexOf["bairn-one"] {
 		t.Error("wee-bairn should come before bairn-one (leaves first)")
 	}
+
 	if indexOf["bairn-one"] > indexOf["ben"] {
 		t.Error("bairn-one should come before ben (leaves first)")
 	}
@@ -2914,14 +3078,17 @@ func TestCollectDescendants(t *testing.T) {
 
 func TestStateVersionRejectsNewer(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
+
 	data := []byte(`{"version":999,"sessions":{}}`)
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
+
 	_, err := LoadState(path)
 	if err == nil {
 		t.Fatal("expected error loading state with newer version")
 	}
+
 	if !strings.Contains(err.Error(), "newer than this binary") {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -2930,15 +3097,18 @@ func TestStateVersionRejectsNewer(t *testing.T) {
 func TestRunMessageCleanupLoopReadsConfig(t *testing.T) {
 	t.Run("does not exit when config starts at zero", func(t *testing.T) {
 		sm := newTestSessionManager(t)
+
 		ms, err := NewMsgStore(filepath.Join(t.TempDir(), "msg.db"))
 		if err != nil {
 			t.Fatal(err)
 		}
 		defer ms.Close()
+
 		sm.SetMsgStore(ms)
 
 		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan struct{})
+
 		go func() {
 			sm.RunMessageCleanupLoop(ctx)
 			close(done)
@@ -2953,17 +3123,20 @@ func TestRunMessageCleanupLoopReadsConfig(t *testing.T) {
 			t.Fatal("RunMessageCleanupLoop exited early when config values are zero")
 		default:
 		}
+
 		cancel()
 		<-done
 	})
 
 	t.Run("picks up config change", func(t *testing.T) {
 		sm := newTestSessionManager(t)
+
 		ms, err := NewMsgStore(filepath.Join(t.TempDir(), "msg.db"))
 		if err != nil {
 			t.Fatal(err)
 		}
 		defer ms.Close()
+
 		sm.SetMsgStore(ms)
 
 		if _, err := ms.Publish("blether", "s1", "agent", "old msg", "", ""); err != nil {
@@ -2972,10 +3145,12 @@ func TestRunMessageCleanupLoopReadsConfig(t *testing.T) {
 
 		// Config starts at zero — cleanup should be a no-op.
 		sm.runMessageCleanupFromConfig()
+
 		msgs, err := ms.Read("blether", "", false, "")
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		if len(msgs) != 1 {
 			t.Fatalf("expected 1 message before config change, got %d", len(msgs))
 		}
@@ -2992,6 +3167,7 @@ func TestRunMessageCleanupLoopReadsConfig(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		if len(msgs) != 0 {
 			t.Fatalf("expected 0 messages after config change, got %d", len(msgs))
 		}
@@ -3012,6 +3188,7 @@ func TestResumeRejectsDeletingSession(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error resuming a deleting session")
 	}
+
 	if !strings.Contains(err.Error(), "is being deleted") {
 		t.Errorf("error = %q, want mention of 'is being deleted'", err.Error())
 	}
@@ -3019,6 +3196,7 @@ func TestResumeRejectsDeletingSession(t *testing.T) {
 
 func TestDeleteSetsDeletingStatus(t *testing.T) {
 	tmpDir := t.TempDir()
+
 	worktreeDir := filepath.Join(tmpDir, "existing-worktree")
 	if err := os.MkdirAll(worktreeDir, 0o700); err != nil {
 		t.Fatal(err)
@@ -3045,9 +3223,11 @@ func TestDeleteSetsDeletingStatus(t *testing.T) {
 	sm.mu.RLock()
 	s, ok := sm.state.Sessions["s1"]
 	sm.mu.RUnlock()
+
 	if !ok {
 		t.Fatal("session should be kept for retry")
 	}
+
 	if s.Status != StatusStopped {
 		t.Errorf("status = %q after failed teardown, want %q (reverted from deleting)", s.Status, StatusStopped)
 	}
@@ -3055,6 +3235,7 @@ func TestDeleteSetsDeletingStatus(t *testing.T) {
 
 func TestDeleteKeepsSessionOnTeardownFailure(t *testing.T) {
 	tmpDir := t.TempDir()
+
 	worktreeDir := filepath.Join(tmpDir, "existing-worktree")
 	if err := os.MkdirAll(worktreeDir, 0o700); err != nil {
 		t.Fatal(err)
@@ -3075,6 +3256,7 @@ func TestDeleteKeepsSessionOnTeardownFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error from failed git teardown")
 	}
+
 	if !strings.Contains(err.Error(), "git teardown failed") {
 		t.Errorf("error = %q, want mention of git teardown", err.Error())
 	}
@@ -3163,9 +3345,11 @@ func TestDeleteReparentsChildren(t *testing.T) {
 	if sm.state.Sessions["bairn-one"].ParentID != "grandparent" {
 		t.Errorf("bairn-one.ParentID = %q, want %q", sm.state.Sessions["bairn-one"].ParentID, "grandparent")
 	}
+
 	if sm.state.Sessions["bairn-two"].ParentID != "grandparent" {
 		t.Errorf("bairn-two.ParentID = %q, want %q", sm.state.Sessions["bairn-two"].ParentID, "grandparent")
 	}
+
 	if sm.state.Sessions["thrawn-session"].ParentID != "grandparent" {
 		t.Errorf("thrawn-session.ParentID = %q, want %q (should be unchanged)", sm.state.Sessions["thrawn-session"].ParentID, "grandparent")
 	}
@@ -3206,6 +3390,7 @@ func TestDeleteReparentsChildrenToRoot(t *testing.T) {
 
 func TestDeleteWithChildrenKeepsFailedSessions(t *testing.T) {
 	tmpDir := t.TempDir()
+
 	worktreeDir := filepath.Join(tmpDir, "existing-child-worktree")
 	if err := os.MkdirAll(worktreeDir, 0o700); err != nil {
 		t.Fatal(err)
@@ -3245,11 +3430,13 @@ func TestDeleteWithChildrenKeepsFailedSessions(t *testing.T) {
 	}
 
 	found := false
+
 	for _, id := range deleted {
 		if id == "parent1" {
 			found = true
 		}
 	}
+
 	if !found {
 		t.Error("parent (no repo) should be in the deleted list")
 	}
@@ -3287,6 +3474,7 @@ func TestDeleteWithChildrenIdempotent(t *testing.T) {
 	if _, ok := sm.state.Sessions["parent1"]; ok {
 		t.Error("parent should be removed from state")
 	}
+
 	if _, ok := sm.state.Sessions["child1"]; ok {
 		t.Error("child should be removed from state")
 	}
@@ -3368,6 +3556,7 @@ func TestDeleteWithChildrenExcludeRootGrandchildren(t *testing.T) {
 	if _, ok := sm.state.Sessions["parent1"]; !ok {
 		t.Error("parent should NOT be removed from state (excludeRoot)")
 	}
+
 	for _, id := range []string{"child1", "grandchild1"} {
 		if _, ok := sm.state.Sessions[id]; ok {
 			t.Errorf("%s should be removed from state", id)
@@ -3565,12 +3754,15 @@ func TestDeleteClearsChildParentID(t *testing.T) {
 	if _, ok := sm.state.Sessions["ben"]; ok {
 		t.Error("ben should be removed from state")
 	}
+
 	if sm.state.Sessions["bairn-one"].ParentID != "" {
 		t.Errorf("bairn-one ParentID = %q, want empty", sm.state.Sessions["bairn-one"].ParentID)
 	}
+
 	if sm.state.Sessions["bairn-two"].ParentID != "" {
 		t.Errorf("bairn-two ParentID = %q, want empty", sm.state.Sessions["bairn-two"].ParentID)
 	}
+
 	if sm.state.Sessions["wee-bairn"].ParentID != "bairn-one" {
 		t.Errorf("wee-bairn ParentID = %q, want %q (should be unchanged)", sm.state.Sessions["wee-bairn"].ParentID, "bairn-one")
 	}
@@ -3600,6 +3792,7 @@ func TestDeleteClearsChildParentIDWhenCreating(t *testing.T) {
 	if _, ok := sm.state.Sessions["creating-ben"]; ok {
 		t.Error("creating-ben should be removed from state")
 	}
+
 	if sm.state.Sessions["bairn"].ParentID != "" {
 		t.Errorf("bairn ParentID = %q, want empty", sm.state.Sessions["bairn"].ParentID)
 	}
@@ -3638,6 +3831,7 @@ func TestDeleteWithChildrenClearsOrphanedParentIDs(t *testing.T) {
 	if _, ok := sm.state.Sessions["root"]; ok {
 		t.Error("root should be removed")
 	}
+
 	if _, ok := sm.state.Sessions["bairn"]; ok {
 		t.Error("child should be removed")
 	}
@@ -3646,6 +3840,7 @@ func TestDeleteWithChildrenClearsOrphanedParentIDs(t *testing.T) {
 	if starredChild == nil {
 		t.Fatal("starred-child should survive (starred)")
 	}
+
 	if starredChild.ParentID != "" {
 		t.Errorf("starred-child ParentID = %q, want empty (parent was deleted)", starredChild.ParentID)
 	}
@@ -3660,6 +3855,7 @@ func createTestSession(sm *SessionManager, name string) string {
 		Name:   name,
 		Status: StatusRunning,
 	}
+
 	return id
 }
 
@@ -3675,9 +3871,11 @@ func TestSetSummary(t *testing.T) {
 	if s.SummaryText != "Exploring code" {
 		t.Errorf("SummaryText = %q, want %q", s.SummaryText, "Exploring code")
 	}
+
 	if s.SummarySetAt == nil {
 		t.Fatal("SummarySetAt should not be nil")
 	}
+
 	if s.SummaryTTL != 0 {
 		t.Errorf("SummaryTTL = %d, want 0", s.SummaryTTL)
 	}
@@ -3702,6 +3900,7 @@ func TestSetSummary_Clear(t *testing.T) {
 	id := createTestSession(sm, "braw-session")
 
 	sm.SetSummary(id, "Working", 0)
+
 	if err := sm.ClearSummary(id); err != nil {
 		t.Fatalf("ClearSummary failed: %v", err)
 	}
@@ -3710,6 +3909,7 @@ func TestSetSummary_Clear(t *testing.T) {
 	if s.SummaryText != "" {
 		t.Errorf("SummaryText should be empty, got %q", s.SummaryText)
 	}
+
 	if s.SummarySetAt != nil {
 		t.Error("SummarySetAt should be nil")
 	}
@@ -3734,6 +3934,7 @@ func TestSetSummary_Validation(t *testing.T) {
 	if err := sm.SetSummary(id, "has\nnewline", 0); err != nil {
 		t.Fatalf("should succeed with control chars stripped: %v", err)
 	}
+
 	s := sm.state.Sessions[id]
 	if strings.Contains(s.SummaryText, "\n") {
 		t.Error("newline should have been stripped")
@@ -3765,6 +3966,7 @@ func TestWatchSessionWritesLifecycleSummary(t *testing.T) {
 	sm.mu.RLock()
 	s := sm.state.Sessions[id]
 	summary := s.SummaryText
+
 	sm.mu.RUnlock()
 
 	if summary != "Exited (was: Running tests)" {
@@ -3824,6 +4026,7 @@ func TestStopAllWritesShutdownSummary(t *testing.T) {
 	if s1.SummaryText != "Stopped by shutdown (was: Running tests)" {
 		t.Errorf("s1 SummaryText = %q, want %q", s1.SummaryText, "Stopped by shutdown (was: Running tests)")
 	}
+
 	if s1.StopReason != StopReasonShutdown {
 		t.Errorf("s1 StopReason = %q, want %q", s1.StopReason, StopReasonShutdown)
 	}
@@ -3852,7 +4055,9 @@ func TestStopAllWaitsConcurrently(t *testing.T) {
 	}
 
 	start := time.Now()
+
 	sm.StopAll(context.Background())
+
 	elapsed := time.Since(start)
 
 	// Concurrent: ~5s (one round of force-kill timeouts).
@@ -3860,6 +4065,7 @@ func TestStopAllWaitsConcurrently(t *testing.T) {
 	if elapsed > 8*time.Second {
 		t.Errorf("StopAll took %v, expected < 8s — sessions may be waited sequentially", elapsed)
 	}
+
 	if elapsed < 4*time.Second {
 		t.Errorf("StopAll took %v, expected >= 4s — force-kill timeout may not be working", elapsed)
 	}
@@ -3871,6 +4077,7 @@ func TestReconcileWritesLifecycleSummaries(t *testing.T) {
 			"c": {ID: "c", Name: "thrawn-create", Status: StatusCreating},
 		}}
 		state.Reconcile()
+
 		if state.Sessions["c"].SummaryText != "Interrupted by daemon restart" {
 			t.Errorf("SummaryText = %q, want %q", state.Sessions["c"].SummaryText, "Interrupted by daemon restart")
 		}
@@ -3881,6 +4088,7 @@ func TestReconcileWritesLifecycleSummaries(t *testing.T) {
 			"r": {ID: "r", Name: "haar-orphan", Status: StatusRunning, PID: 99999999},
 		}}
 		state.Reconcile()
+
 		if state.Sessions["r"].SummaryText != "Lost during daemon restart" {
 			t.Errorf("SummaryText = %q, want %q", state.Sessions["r"].SummaryText, "Lost during daemon restart")
 		}
@@ -3891,6 +4099,7 @@ func TestReconcileWritesLifecycleSummaries(t *testing.T) {
 			"d": {ID: "d", Name: "thrawn-delete", Status: StatusDeleting},
 		}}
 		state.Reconcile()
+
 		if state.Sessions["d"].SummaryText != "Delete interrupted by restart" {
 			t.Errorf("SummaryText = %q, want %q", state.Sessions["d"].SummaryText, "Delete interrupted by restart")
 		}
@@ -3901,6 +4110,7 @@ func TestReconcileWritesLifecycleSummaries(t *testing.T) {
 			"o": {ID: "o", Name: "orch", Status: StatusCreating, SystemKind: SystemKindOrchestrator},
 		}}
 		state.Reconcile()
+
 		if state.Sessions["o"].SummaryText != "" {
 			t.Errorf("SummaryText = %q, want empty for system session", state.Sessions["o"].SummaryText)
 		}
@@ -3912,6 +4122,7 @@ func TestReconcileWritesLifecycleSummaries(t *testing.T) {
 // Run with -race to detect data races.
 func TestConcurrentConfigReadWrite(t *testing.T) {
 	dir := t.TempDir()
+
 	ms, err := NewMsgStore(filepath.Join(dir, "msg.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -3931,6 +4142,7 @@ func TestConcurrentConfigReadWrite(t *testing.T) {
 	// Writer: swap config repeatedly via applyConfig.
 	go func() {
 		defer func() { done <- struct{}{} }()
+
 		for i := 0; i < 200; i++ {
 			cfg := config.Default()
 			cfg.Notifications.Enabled = i%2 == 0
@@ -3945,6 +4157,7 @@ func TestConcurrentConfigReadWrite(t *testing.T) {
 	// Reader 1: onAgentStatusChange reads notification config.
 	go func() {
 		defer func() { done <- struct{}{} }()
+
 		for i := 0; i < 200; i++ {
 			sm.onAgentStatusChange("sess1", "braw", "active", "approval")
 		}
@@ -3953,6 +4166,7 @@ func TestConcurrentConfigReadWrite(t *testing.T) {
 	// Reader 2: Config() snapshots the config.
 	go func() {
 		defer func() { done <- struct{}{} }()
+
 		for i := 0; i < 200; i++ {
 			cfg := sm.Config()
 			_ = cfg.DefaultAgent
@@ -3964,6 +4178,7 @@ func TestConcurrentConfigReadWrite(t *testing.T) {
 	// Reader 3: SubmitApproval reads approvals config.
 	go func() {
 		defer func() { done <- struct{}{} }()
+
 		for i := 0; i < 50; i++ {
 			ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
 			sm.SubmitApproval(ctx, protocol.ApprovalRequestMsg{
@@ -3987,12 +4202,14 @@ func TestRecordExit_MassExitDetection(t *testing.T) {
 	for i := 0; i < massExitThreshold-1; i++ {
 		sm.recordExit()
 	}
+
 	if len(sm.recentExits) != massExitThreshold-1 {
 		t.Errorf("recentExits = %d, want %d", len(sm.recentExits), massExitThreshold-1)
 	}
 
 	// One more should hit the threshold (warning is logged, not checked here).
 	sm.recordExit()
+
 	if len(sm.recentExits) != massExitThreshold {
 		t.Errorf("recentExits = %d, want %d", len(sm.recentExits), massExitThreshold)
 	}
@@ -4026,6 +4243,7 @@ func TestWatchSessionRecordsExitSignal(t *testing.T) {
 	}
 
 	cmd := exec.Command("sh", "-c", "kill -TERM $$")
+
 	sess, err := grpty.NewSession(grpty.SessionOpts{
 		ID:      id,
 		Command: cmd.Path,
@@ -4038,6 +4256,7 @@ func TestWatchSessionRecordsExitSignal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	sm.sessions[id] = sess
 
 	sm.watchSession(id, sess)
@@ -4046,6 +4265,7 @@ func TestWatchSessionRecordsExitSignal(t *testing.T) {
 	if s.ExitSignal != "terminated" {
 		t.Errorf("ExitSignal = %q, want %q", s.ExitSignal, "terminated")
 	}
+
 	if s.Status != StatusStopped {
 		t.Errorf("Status = %q, want %q", s.Status, StatusStopped)
 	}

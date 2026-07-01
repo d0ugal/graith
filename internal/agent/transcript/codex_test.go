@@ -24,6 +24,7 @@ func TestCodexReaderRolesAndToolPairing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
+
 	if dropped != 0 {
 		t.Errorf("dropped = %d, want 0", dropped)
 	}
@@ -43,13 +44,16 @@ func TestCodexReaderRolesAndToolPairing(t *testing.T) {
 	if len(turns) != len(want) {
 		t.Fatalf("got %d turns, want %d: %+v", len(turns), len(want), turns)
 	}
+
 	for i, w := range want {
 		if turns[i].Role != w.role {
 			t.Errorf("turn %d role = %s, want %s", i, turns[i].Role, w.role)
 		}
+
 		if w.text != "" && turns[i].Text != w.text {
 			t.Errorf("turn %d text = %q, want %q", i, turns[i].Text, w.text)
 		}
+
 		if w.tool != "" {
 			if turns[i].Tool == nil || turns[i].Tool.Name != w.tool {
 				t.Errorf("turn %d tool = %+v, want %s", i, turns[i].Tool, w.tool)
@@ -63,6 +67,7 @@ func TestCodexReaderRolesAndToolPairing(t *testing.T) {
 func TestLocateCodexByCwdNewest(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("CODEX_HOME", root)
+
 	day := filepath.Join(root, "sessions", "2026", "06", "24")
 	if err := os.MkdirAll(day, 0o755); err != nil {
 		t.Fatal(err)
@@ -72,15 +77,18 @@ func TestLocateCodexByCwdNewest(t *testing.T) {
 	older := filepath.Join(day, "rollout-100-aaaa.jsonl")
 	newer := filepath.Join(day, "rollout-200-bbbb.jsonl")
 	other := filepath.Join(day, "rollout-300-cccc.jsonl")
+
 	meta := func(c string) string {
 		return `{"timestamp":"t","type":"session_meta","payload":{"id":"x","cwd":"` + c + `"}}` + "\n"
 	}
 	if err := os.WriteFile(older, []byte(meta(cwd)), 0o600); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := os.WriteFile(newer, []byte(meta(cwd)), 0o600); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := os.WriteFile(other, []byte(meta("/somewhere/else")), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -91,6 +99,7 @@ func TestLocateCodexByCwdNewest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("locateCodex: %v", err)
 	}
+
 	if got != newer {
 		t.Errorf("located %q, want %q", got, newer)
 	}
@@ -101,6 +110,7 @@ func TestCodexRolloutID(t *testing.T) {
 		`{"type":"session_meta","payload":{"id":"rollout-id-7","cwd":"/x"}}`,
 		`{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}}`,
 	})
+
 	id, ok := CodexRolloutID(path)
 	if !ok || id != "rollout-id-7" {
 		t.Errorf("CodexRolloutID = %q, %v; want rollout-id-7, true", id, ok)

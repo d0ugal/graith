@@ -46,6 +46,7 @@ func NewMCPManager(cfg *config.Config, extraServers []config.MCPServerConfig, lo
 			servers[s.Name] = s
 		}
 	}
+
 	for _, s := range cfg.MCPServers {
 		if s.Disabled {
 			delete(servers, s.Name)
@@ -53,6 +54,7 @@ func NewMCPManager(cfg *config.Config, extraServers []config.MCPServerConfig, lo
 			servers[s.Name] = s
 		}
 	}
+
 	return &MCPManager{
 		servers:   servers,
 		processes: make(map[string]*MCPProcess),
@@ -89,12 +91,14 @@ func (m *MCPManager) Connect(serverName, proxyID string, vars config.TemplateVar
 
 	m.processes[proxyID] = proc
 	m.log.Info("MCP server started", "server", serverName, "proxy_id", proxyID, "pid", proc.cmd.Process.Pid)
+
 	return proc, nil
 }
 
 // Disconnect kills the MCP server process for the given proxy.
 func (m *MCPManager) Disconnect(proxyID string) {
 	m.mu.Lock()
+
 	proc, ok := m.processes[proxyID]
 	if ok {
 		delete(m.processes, proxyID)
@@ -118,6 +122,7 @@ func (m *MCPManager) Reload(cfg *config.Config) {
 			newServers[s.Name] = s
 		}
 	}
+
 	for _, s := range cfg.MCPServers {
 		if s.Disabled {
 			delete(newServers, s.Name)
@@ -127,6 +132,7 @@ func (m *MCPManager) Reload(cfg *config.Config) {
 	}
 
 	var toKill []string
+
 	configChanged := len(newServers) != len(m.servers)
 	if !configChanged {
 		for name, newCfg := range newServers {
@@ -163,10 +169,12 @@ func (m *MCPManager) Reload(cfg *config.Config) {
 // Shutdown kills all running MCP server processes.
 func (m *MCPManager) Shutdown() {
 	m.mu.Lock()
+
 	procs := make(map[string]*MCPProcess, len(m.processes))
 	for k, v := range m.processes {
 		procs[k] = v
 	}
+
 	m.processes = make(map[string]*MCPProcess)
 	m.mu.Unlock()
 
@@ -180,7 +188,9 @@ func (m *MCPManager) Shutdown() {
 func (m *MCPManager) HasServer(name string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	_, ok := m.servers[name]
+
 	return ok
 }
 
@@ -191,6 +201,7 @@ func (m *MCPManager) startProcess(serverCfg config.MCPServerConfig, proxyID stri
 	}
 
 	stderrPath := filepath.Join(mcpLogDir, fmt.Sprintf("%s-%s.log", serverCfg.Name, proxyID))
+
 	stderrFile, err := os.OpenFile(stderrPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("open stderr log: %w", err)
@@ -203,16 +214,19 @@ func (m *MCPManager) startProcess(serverCfg config.MCPServerConfig, proxyID stri
 	if vars.SessionID == "" {
 		vars.SessionID = proxyID
 	}
+
 	command, err := config.Expand(serverCfg.Command, vars)
 	if err != nil {
 		stderrFile.Close()
 		return nil, fmt.Errorf("expand command for MCP server %s: %w", serverCfg.Name, err)
 	}
+
 	args, err := config.ExpandSlice(serverCfg.Args, vars)
 	if err != nil {
 		stderrFile.Close()
 		return nil, fmt.Errorf("expand args for MCP server %s: %w", serverCfg.Name, err)
 	}
+
 	serverEnv := serverCfg.Env
 	if len(serverEnv) > 0 {
 		expanded := make(map[string]string, len(serverEnv))
@@ -222,8 +236,10 @@ func (m *MCPManager) startProcess(serverCfg config.MCPServerConfig, proxyID stri
 				stderrFile.Close()
 				return nil, fmt.Errorf("expand env %s for MCP server %s: %w", k, serverCfg.Name, expErr)
 			}
+
 			expanded[k] = ev
 		}
+
 		serverEnv = expanded
 	}
 
@@ -231,15 +247,18 @@ func (m *MCPManager) startProcess(serverCfg config.MCPServerConfig, proxyID stri
 	if serverCfg.Sandbox != nil {
 		sbxEnabled = *serverCfg.Sandbox
 	}
+
 	if sbxEnabled && sandbox.Available() {
 		merged := m.globalSbx
 		if serverCfg.SandboxConfig != nil {
 			merged = merged.Merge(*serverCfg.SandboxConfig)
 		}
+
 		merged.ReadDirs = expandPaths(merged.ReadDirs, m.log, "read")
 		merged.WriteDirs = expandPaths(merged.WriteDirs, m.log, "write")
 
 		envKeys := make([]string, 0, len(serverEnv)+1)
+
 		envKeys = append(envKeys, "PATH", "HOME", "TERM")
 		for k := range serverEnv {
 			envKeys = append(envKeys, k)
@@ -253,7 +272,9 @@ func (m *MCPManager) startProcess(serverCfg config.MCPServerConfig, proxyID stri
 			EnvKeys:          envKeys,
 			SafehouseCommand: merged.Command,
 		}
+
 		var wrapErr error
+
 		command, args, wrapErr = sandbox.Wrap(command, args, opts)
 		if wrapErr != nil {
 			stderrFile.Close()
@@ -263,6 +284,7 @@ func (m *MCPManager) startProcess(serverCfg config.MCPServerConfig, proxyID stri
 
 	cmd := exec.Command(command, args...)
 	cmd.Dir = os.TempDir()
+
 	cmd.Stderr = stderrFile
 	if len(serverEnv) > 0 {
 		cmd.Env = os.Environ()
@@ -281,12 +303,14 @@ func (m *MCPManager) startProcess(serverCfg config.MCPServerConfig, proxyID stri
 	if err != nil {
 		stdinPipe.Close()
 		stderrFile.Close()
+
 		return nil, fmt.Errorf("stdout pipe: %w", err)
 	}
 
 	if err := cmd.Start(); err != nil {
 		stdinPipe.Close()
 		stderrFile.Close()
+
 		return nil, fmt.Errorf("start process: %w", err)
 	}
 
@@ -311,11 +335,13 @@ func slicesEqual(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
 	}
+
 	for i := range a {
 		if a[i] != b[i] {
 			return false
 		}
 	}
+
 	return true
 }
 
@@ -323,11 +349,13 @@ func mapsEqual(a, b map[string]string) bool {
 	if len(a) != len(b) {
 		return false
 	}
+
 	for k, v := range a {
 		if bv, ok := b[k]; !ok || bv != v {
 			return false
 		}
 	}
+
 	return true
 }
 
@@ -336,6 +364,7 @@ func (m *MCPManager) killProcess(proc *MCPProcess) {
 
 	if proc.cmd.Process != nil {
 		proc.cmd.Process.Signal(os.Interrupt)
+
 		select {
 		case <-proc.done:
 		case <-time.After(5 * time.Second):

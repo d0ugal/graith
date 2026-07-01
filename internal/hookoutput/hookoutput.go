@@ -23,11 +23,13 @@ func Approval(agent, decision, reason string) string {
 			Reason:     reason,
 		}
 		out, _ := json.Marshal(resp)
+
 		return string(out)
 	default:
 		mapped := mapDecision(agent, decision)
 		resp := approvalResponse{Decision: mapped, Reason: reason}
 		out, _ := json.Marshal(resp)
+
 		return string(out)
 	}
 }
@@ -66,6 +68,7 @@ func codexDecision(d string) string {
 	if d == "block" {
 		return "deny"
 	}
+
 	return d
 }
 
@@ -74,5 +77,6 @@ func cursorDecision(d string) string {
 	if d == "block" {
 		return "deny"
 	}
+
 	return d
 }

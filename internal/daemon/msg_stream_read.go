@@ -19,8 +19,10 @@ func (sm *SessionManager) handleMsgStreamRead(
 ) bool {
 	// Subscribe before reading to avoid missing messages published
 	// between Read and Subscribe.
-	var sub chan Message
-	var unsub func()
+	var (
+		sub   chan Message
+		unsub func()
+	)
 	if wait || follow {
 		sub, unsub = sm.messages.Subscribe(stream)
 	}
@@ -30,9 +32,12 @@ func (sm *SessionManager) handleMsgStreamRead(
 		if unsub != nil {
 			unsub()
 		}
+
 		sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+
 		return false
 	}
+
 	for _, msg := range msgs {
 		sendControl("msg_message", msg)
 	}
@@ -43,6 +48,7 @@ func (sm *SessionManager) handleMsgStreamRead(
 			for i, msg := range msgs {
 				seqs[i] = msg.Seq
 			}
+
 			sm.messages.AckMessages(stream, subscriber, seqs)
 		} else {
 			sm.messages.Ack(stream, subscriber, msgs[len(msgs)-1].Seq)
@@ -53,17 +59,23 @@ func (sm *SessionManager) handleMsgStreamRead(
 		if unsub != nil {
 			unsub()
 		}
+
 		sendControl("msg_done", struct{}{})
+
 		return false
 	}
+
 	if wait && len(msgs) > 0 {
 		unsub()
 		sendControl("msg_done", struct{}{})
+
 		return false
 	}
 
 	sendControl("msg_following", struct{}{})
+
 	detachCh := make(chan struct{})
+
 	go func() {
 		for {
 			f, err := reader.ReadFrame()
@@ -71,6 +83,7 @@ func (sm *SessionManager) handleMsgStreamRead(
 				close(detachCh)
 				return
 			}
+
 			if f.Channel == protocol.ChannelControl {
 				ctrl, _ := protocol.DecodeControl(f.Payload)
 				if ctrl.Type == "detach" {
@@ -80,15 +93,19 @@ func (sm *SessionManager) handleMsgStreamRead(
 			}
 		}
 	}()
+
 	func() {
 		defer unsub()
+
 		for {
 			select {
 			case tmsg := <-sub:
 				if threadID != "" && tmsg.ThreadID != threadID {
 					continue
 				}
+
 				sendControl("msg_message", tmsg)
+
 				if ack && subscriber != "" {
 					if threadID != "" {
 						sm.messages.AckMessages(stream, subscriber, []int64{tmsg.Seq})
@@ -96,6 +113,7 @@ func (sm *SessionManager) handleMsgStreamRead(
 						sm.messages.Ack(stream, subscriber, tmsg.Seq)
 					}
 				}
+
 				if wait {
 					sendControl("msg_done", struct{}{})
 					return

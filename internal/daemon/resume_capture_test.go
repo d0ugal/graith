@@ -49,6 +49,7 @@ func TestResolveResumeArgs(t *testing.T) {
 			if !reflect.DeepEqual(got, tc.want) {
 				t.Errorf("args = %#v; want %#v", got, tc.want)
 			}
+
 			if (note != "") != tc.wantNote {
 				t.Errorf("note = %q; wantNote=%v", note, tc.wantNote)
 			}
@@ -60,18 +61,23 @@ func TestResolveResumeArgs(t *testing.T) {
 // cwd) under root's sessions dir, stamped with mtime, and returns its path.
 func writeCodexRollout(t *testing.T, root, id, cwd string, mtime time.Time) string {
 	t.Helper()
+
 	dir := filepath.Join(root, "sessions", "2026", "06", "25")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
+
 	path := filepath.Join(dir, "rollout-2026-06-25T00-00-00-"+id+".jsonl")
+
 	line := fmt.Sprintf(`{"type":"session_meta","payload":{"id":%q,"cwd":%q}}`+"\n", id, cwd)
 	if err := os.WriteFile(path, []byte(line), 0o644); err != nil {
 		t.Fatalf("write rollout: %v", err)
 	}
+
 	if err := os.Chtimes(path, mtime, mtime); err != nil {
 		t.Fatalf("chtimes: %v", err)
 	}
+
 	return path
 }
 
@@ -79,14 +85,17 @@ func TestForcesAndScrapesPredicates(t *testing.T) {
 	if !forcesID("claude") {
 		t.Error("claude should be forced")
 	}
+
 	for _, a := range []string{"codex", "opencode", "agy", "cursor", "haar"} {
 		if forcesID(a) {
 			t.Errorf("%q should not be forced (no client-supplied-id flag verified)", a)
 		}
 	}
+
 	if !scrapesID("codex") {
 		t.Error("codex should be scrapeable")
 	}
+
 	for _, a := range []string{"claude", "opencode", "agy", "cursor"} {
 		if scrapesID(a) {
 			t.Errorf("%q has no on-disk locator yet; should not scrape", a)
@@ -98,12 +107,15 @@ func TestArgsNeedAgentID(t *testing.T) {
 	if !argsNeedAgentID([]string{"--session", "{agent_session_id}"}) {
 		t.Error("expected token to be detected")
 	}
+
 	if !argsNeedAgentID([]string{"resume", "{agent_session_id}"}) {
 		t.Error("expected token to be detected (codex form)")
 	}
+
 	if argsNeedAgentID([]string{"resume", "--last"}) {
 		t.Error("no token present")
 	}
+
 	if argsNeedAgentID(nil) {
 		t.Error("empty args need no id")
 	}
@@ -182,12 +194,14 @@ func TestCodexSessionIDSinceAmbiguous(t *testing.T) {
 
 	// Single rollout → resolves.
 	writeCodexRollout(t, root, "lone-id", cwd, time.Now())
+
 	if id, ok := transcript.CodexSessionIDSince(root, cwd, since); !ok || id != "lone-id" {
 		t.Fatalf("CodexSessionIDSince = %q,%v; want lone-id,true", id, ok)
 	}
 
 	// A second rollout with a DIFFERENT id in the same cwd → ambiguous, refuse.
 	writeCodexRollout(t, root, "thrawn-id", cwd, time.Now())
+
 	if id, ok := transcript.CodexSessionIDSince(root, cwd, since); ok {
 		t.Fatalf("CodexSessionIDSince = %q,%v; want refusal on ambiguous same-cwd match", id, ok)
 	}
@@ -197,9 +211,11 @@ func TestArgsNeedForkSourceID(t *testing.T) {
 	if !argsNeedForkSourceID([]string{"fork", "{fork_source_agent_session_id}"}) {
 		t.Error("expected fork-source token to be detected")
 	}
+
 	if argsNeedForkSourceID([]string{"fork", "{agent_session_id}"}) {
 		t.Error("agent_session_id is not the fork-source token")
 	}
+
 	if argsNeedForkSourceID(nil) {
 		t.Error("empty args need no fork-source id")
 	}

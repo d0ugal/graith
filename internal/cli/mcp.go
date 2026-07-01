@@ -29,6 +29,7 @@ Tools exposed:
 		defer cancel()
 
 		srv := graithmcp.NewServer(cfg, paths, cfgFile)
+
 		return srv.Run(ctx)
 	},
 }

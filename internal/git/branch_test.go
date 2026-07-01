@@ -21,10 +21,12 @@ func TestRepoRootPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	gotResolved, err := filepath.EvalSymlinks(root)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if gotResolved != wantResolved {
 		t.Errorf("RepoRootPath = %q, want %q", gotResolved, wantResolved)
 	}
@@ -44,6 +46,7 @@ func TestDiscoverDefaultBranch(t *testing.T) {
 	if _, err := RunOutput(dir, "remote", "add", "origin", bare+"/repo.git"); err != nil {
 		t.Fatal(err)
 	}
+
 	if _, err := RunOutput(dir, "fetch", "origin"); err != nil {
 		t.Fatal(err)
 	}
@@ -52,6 +55,7 @@ func TestDiscoverDefaultBranch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DiscoverDefaultBranch: %v", err)
 	}
+
 	if branch != "main" {
 		t.Errorf("DiscoverDefaultBranch = %q, want %q", branch, "main")
 	}
@@ -64,6 +68,7 @@ func TestDiscoverDefaultBranchLocalOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DiscoverDefaultBranch (no origin): %v", err)
 	}
+
 	if branch != "main" {
 		t.Errorf("DiscoverDefaultBranch = %q, want %q", branch, "main")
 	}
@@ -76,6 +81,7 @@ func TestDiscoverDefaultBranchLocalMaster(t *testing.T) {
 	run := func(args ...string) {
 		cmd := exec.Command("git", args...)
 		cmd.Dir = dir
+
 		cmd.Env = append(os.Environ(),
 			"GIT_AUTHOR_NAME=braw", "GIT_AUTHOR_EMAIL=braw@croft.local",
 			"GIT_COMMITTER_NAME=braw", "GIT_COMMITTER_EMAIL=braw@croft.local",
@@ -93,6 +99,7 @@ func TestDiscoverDefaultBranchLocalMaster(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DiscoverDefaultBranch (local master): %v", err)
 	}
+
 	if branch != "master" {
 		t.Errorf("DiscoverDefaultBranch = %q, want %q", branch, "master")
 	}
@@ -139,6 +146,7 @@ func TestDeleteBranch(t *testing.T) {
 			if err := CreateBranch(dir, tt.branchName, "HEAD"); err != nil {
 				t.Fatalf("setup CreateBranch: %v", err)
 			}
+
 			if !RefExists(dir, tt.branchName) {
 				t.Fatal("branch should exist before delete")
 			}
@@ -146,6 +154,7 @@ func TestDeleteBranch(t *testing.T) {
 			if err := DeleteBranch(dir, tt.branchName); err != nil {
 				t.Fatalf("DeleteBranch: %v", err)
 			}
+
 			if RefExists(dir, tt.branchName) {
 				t.Errorf("branch %q should not exist after deletion", tt.branchName)
 			}
@@ -170,6 +179,7 @@ func TestCreateWorktree(t *testing.T) {
 	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
 		t.Fatal("worktree directory should exist after creation")
 	}
+
 	if !IsInsideGitRepo(worktreePath) {
 		t.Error("worktree should be inside a git repo")
 	}
@@ -183,6 +193,7 @@ func TestRemoveWorktree(t *testing.T) {
 	if err := CreateBranch(dir, branchName, "HEAD"); err != nil {
 		t.Fatalf("CreateBranch: %v", err)
 	}
+
 	if err := CreateWorktree(dir, worktreePath, branchName); err != nil {
 		t.Fatalf("CreateWorktree: %v", err)
 	}
@@ -215,9 +226,11 @@ func TestSetupAndTeardownSession(t *testing.T) {
 			if _, err := RunOutput(bare, "clone", "--bare", dir, bare+"/repo.git"); err != nil {
 				t.Fatal(err)
 			}
+
 			if _, err := RunOutput(dir, "remote", "add", "origin", bare+"/repo.git"); err != nil {
 				t.Fatal(err)
 			}
+
 			if _, err := RunOutput(dir, "fetch", "origin"); err != nil {
 				t.Fatal(err)
 			}
@@ -327,6 +340,7 @@ func TestSetupSessionNoOrigin(t *testing.T) {
 	if !RefExists(dir, branchName) {
 		t.Error("branch should exist after SetupSession")
 	}
+
 	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
 		t.Error("worktree directory should exist after SetupSession")
 	}

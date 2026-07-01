@@ -50,6 +50,7 @@ func TestDiffAndBuild_MergeConflictTransition(t *testing.T) {
 	if len(out) != 1 || !strings.Contains(out[0], "merge conflicts") {
 		t.Fatalf("conflict transition should notify, got %v", out)
 	}
+
 	if !strings.Contains(out[0], "Rebase") {
 		t.Errorf("conflict notice should be directive (rebase), got: %s", out[0])
 	}
@@ -101,6 +102,7 @@ func TestDiffAndBuild_MergeConflictGatedOff(t *testing.T) {
 		Number: 6, State: "open", HeadRefOid: "sha1", CIState: "passing",
 		Mergeable: "MERGEABLE", CommentsOK: true,
 	})
+
 	if out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
 		Number: 6, State: "open", HeadRefOid: "sha1", CIState: "passing",
 		Mergeable: "CONFLICTING", CommentsOK: true,
@@ -133,6 +135,7 @@ func TestDiffAndBuild_PrimeNotifiesCurrentCIFailure(t *testing.T) {
 	cfg := allOnConfig()
 	t1 := prWatchTarget{id: "haar", branch: "haar"}
 	d := prData{Number: 9, State: "open", HeadRefOid: "sha1", CIState: "failing", FailingChecks: []string{"build"}, CommentsOK: true}
+
 	out := sm.diffAndBuild(cfg, t1, "croft/loch", d)
 	if len(out) != 1 || !strings.Contains(out[0], "CI failed") {
 		t.Fatalf("prime against failing CI should notify, got %v", out)
@@ -196,6 +199,7 @@ func TestDiffAndBuild_ReviewCommentAwarenessFraming(t *testing.T) {
 	if strings.Contains(strings.ToLower(body), "fix the failures") {
 		t.Error("review-comment notice must not use CI's imperative framing")
 	}
+
 	if !strings.Contains(body, "Consider whether") {
 		t.Errorf("review-comment notice should use awareness framing, got: %s", body)
 	}
@@ -207,6 +211,7 @@ func TestCIFailureBodyIsDirective(t *testing.T) {
 	if !strings.Contains(body, "CI failed") || !strings.Contains(body, "Fix the failures") {
 		t.Errorf("CI body should be directive, got: %s", body)
 	}
+
 	if !strings.Contains(body, "build") || !strings.Contains(body, "lint") {
 		t.Errorf("CI body should list failing checks, got: %s", body)
 	}
@@ -217,11 +222,13 @@ func TestGateRateLimit(t *testing.T) {
 	cfg := &config.PRWatchConfig{Enabled: true, Debounce: "0s", MaxNotificationsPerPR: 100}
 	cur := &prWatchCursor{failing: map[string]bool{}}
 	allowed := 0
+
 	for i := 0; i < 10; i++ {
 		if _, ok := sm.gate(cfg, "fash", cur); ok {
 			allowed++
 		}
 	}
+
 	if allowed != 5 {
 		t.Errorf("rate-limit should allow 5 per window, allowed %d", allowed)
 	}
@@ -242,6 +249,7 @@ func TestDiffAndBuild_PrimeDefersOnCommentFetchFailure(t *testing.T) {
 	}); len(out) != 0 {
 		t.Fatalf("degraded prime should not notify, got %v", out)
 	}
+
 	if out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
 		Number: 5, State: "open", HeadRefOid: "sha1", CIState: "passing",
 		IssueComments: existing, CommentsOK: true,
@@ -263,9 +271,11 @@ func TestPrunePRWatchState(t *testing.T) {
 	if _, ok := sm.prWatch.cursors["braw"]; !ok {
 		t.Error("live session cursor should be retained")
 	}
+
 	if _, ok := sm.prWatch.cursors["thrawn"]; ok {
 		t.Error("dead session cursor should be pruned")
 	}
+
 	if _, ok := sm.prWatch.nextPoll["thrawn"]; ok {
 		t.Error("dead session nextPoll should be pruned")
 	}
@@ -276,11 +286,13 @@ func TestGatePerSHACap(t *testing.T) {
 	cfg := &config.PRWatchConfig{Enabled: true, Debounce: "0s", MaxNotificationsPerPR: 2}
 	cur := &prWatchCursor{failing: map[string]bool{}}
 	allowed := 0
+
 	for i := 0; i < 5; i++ {
 		if _, ok := sm.gate(cfg, "fash", cur); ok {
 			allowed++
 		}
 	}
+
 	if allowed != 2 {
 		t.Errorf("per-SHA cap should allow 2, allowed %d", allowed)
 	}

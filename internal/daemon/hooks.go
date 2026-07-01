@@ -30,9 +30,11 @@ func resolveGrBin() string {
 	if p, err := exec.LookPath("gr"); err == nil {
 		return p
 	}
+
 	if p, err := os.Executable(); err == nil {
 		return p
 	}
+
 	return "gr"
 }
 
@@ -45,6 +47,7 @@ func (sm *SessionManager) generateClaudeSettings(sessionID string) (string, erro
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("create hook dir: %w", err)
 	}
+
 	settingsPath := filepath.Join(dir, "settings.json")
 
 	quoted := shellQuote(resolveGrBin())
@@ -62,10 +65,12 @@ func (sm *SessionManager) generateClaudeSettings(sessionID string) (string, erro
 		Type    string `json:"type"`
 		Command string `json:"command"`
 	}
+
 	type matcherGroup struct {
 		Matcher string        `json:"matcher"`
 		Hooks   []hookHandler `json:"hooks"`
 	}
+
 	type settingsFile struct {
 		Hooks map[string][]matcherGroup `json:"hooks"`
 	}
@@ -73,6 +78,7 @@ func (sm *SessionManager) generateClaudeSettings(sessionID string) (string, erro
 	settings := settingsFile{
 		Hooks: make(map[string][]matcherGroup),
 	}
+
 	for _, event := range events {
 		var handlers []hookHandler
 
@@ -104,9 +110,11 @@ func (sm *SessionManager) generateClaudeSettings(sessionID string) (string, erro
 	if err != nil {
 		return "", fmt.Errorf("marshal settings: %w", err)
 	}
+
 	if err := os.WriteFile(settingsPath, data, 0o600); err != nil {
 		return "", fmt.Errorf("write settings: %w", err)
 	}
+
 	return settingsPath, nil
 }
 
@@ -118,13 +126,16 @@ func (sm *SessionManager) generateMCPConfig(sessionID string, mcpServers []confi
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("create hook dir: %w", err)
 	}
+
 	mcpConfigPath := filepath.Join(dir, "mcp.json")
 
 	grBin := resolveGrBin()
+
 	type mcpEntry struct {
 		Command string   `json:"command"`
 		Args    []string `json:"args"`
 	}
+
 	type mcpConfigFile struct {
 		MCPServers map[string]mcpEntry `json:"mcpServers"`
 	}
@@ -143,9 +154,11 @@ func (sm *SessionManager) generateMCPConfig(sessionID string, mcpServers []confi
 	if err != nil {
 		return "", fmt.Errorf("marshal mcp config: %w", err)
 	}
+
 	if err := os.WriteFile(mcpConfigPath, data, 0o600); err != nil {
 		return "", fmt.Errorf("write mcp config: %w", err)
 	}
+
 	return mcpConfigPath, nil
 }
 
@@ -164,6 +177,7 @@ func (sm *SessionManager) injectClaudeHooks(sessionID string, mcpServers []confi
 		if err != nil {
 			return nil, nil, err
 		}
+
 		extraArgs = append(extraArgs, "--mcp-config", mcpConfigPath)
 		sm.log.Info("injected claude hooks", "session_id", sessionID, "settings", settingsPath, "mcp_config", mcpConfigPath, "mcp_servers", len(mcpServers))
 	} else {
@@ -194,8 +208,10 @@ func (sm *SessionManager) injectCodexHooks(sessionID string) (extraArgs []string
 	}
 
 	quoted := shellQuote(grBin)
+
 	for filename, eventName := range events {
 		var script string
+
 		switch filename {
 		case "permission-request":
 			script = fmt.Sprintf("#!/bin/sh\nexec %s approve-request\n", quoted)
@@ -204,6 +220,7 @@ func (sm *SessionManager) injectCodexHooks(sessionID string) (extraArgs []string
 		default:
 			script = fmt.Sprintf("#!/bin/sh\nexec %s report-status --event %s\n", quoted, eventName)
 		}
+
 		path := filepath.Join(hooksDir, filename)
 		if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 			return nil, nil, fmt.Errorf("write codex hook %s: %w", filename, err)
@@ -215,6 +232,7 @@ func (sm *SessionManager) injectCodexHooks(sessionID string) (extraArgs []string
 	}
 
 	sm.log.Info("injected codex hooks", "session_id", sessionID, "hooks_dir", hooksDir)
+
 	return nil, extraEnv, nil
 }
 
@@ -223,6 +241,7 @@ func (sm *SessionManager) injectCodexHooks(sessionID string) (extraArgs []string
 // daemon socket via client.Connect().
 func graithMCPServer() config.MCPServerConfig {
 	sandboxed := false
+
 	return config.MCPServerConfig{
 		Name:    "graith",
 		Command: resolveGrBin(),
@@ -237,10 +256,12 @@ func (sm *SessionManager) resolveMCPServers(agentName string) []config.MCPServer
 
 func (sm *SessionManager) resolveMCPServersFromConfig(cfg *config.Config, agentName string) []config.MCPServerConfig {
 	global := append([]config.MCPServerConfig{graithMCPServer()}, cfg.MCPServers...)
+
 	var overrides map[string]config.MCPServerConfig
 	if agent, ok := cfg.Agents[agentName]; ok {
 		overrides = agent.MCPServers
 	}
+
 	return config.MergeMCPServers(global, overrides)
 }
 
@@ -266,20 +287,26 @@ func preTrustCursorWorkspace(worktreePath string) error {
 	if err != nil {
 		return fmt.Errorf("get home dir: %w", err)
 	}
+
 	key := cursorProjectKey(worktreePath)
+
 	dir := filepath.Join(home, ".cursor", "projects", key)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create cursor project dir: %w", err)
 	}
+
 	sentinel := filepath.Join(dir, ".workspace-trusted")
+
 	f, err := os.OpenFile(sentinel, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o644)
 	if err != nil {
 		if errors.Is(err, os.ErrExist) {
 			return nil
 		}
+
 		return fmt.Errorf("create workspace-trusted: %w", err)
 	}
 	defer f.Close()
+
 	trust := struct {
 		TrustedAt     string `json:"trustedAt"`
 		WorkspacePath string `json:"workspacePath"`
@@ -287,13 +314,16 @@ func preTrustCursorWorkspace(worktreePath string) error {
 		TrustedAt:     time.Now().UTC().Format(time.RFC3339Nano),
 		WorkspacePath: worktreePath,
 	}
+
 	data, err := json.Marshal(trust)
 	if err != nil {
 		return fmt.Errorf("marshal workspace-trusted: %w", err)
 	}
+
 	if _, err := f.Write(data); err != nil {
 		return fmt.Errorf("write workspace-trusted: %w", err)
 	}
+
 	return nil
 }
 
@@ -315,6 +345,7 @@ func (sm *SessionManager) injectCursorHooks(sessionID, worktreePath string) (ext
 	if err := os.MkdirAll(cursorDir, 0o700); err != nil {
 		return nil, nil, fmt.Errorf("create .cursor dir: %w", err)
 	}
+
 	hooksPath := filepath.Join(cursorDir, "hooks.json")
 
 	quoted := shellQuote(resolveGrBin())
@@ -322,6 +353,7 @@ func (sm *SessionManager) injectCursorHooks(sessionID, worktreePath string) (ext
 	type hookEntry struct {
 		Command string `json:"command"`
 	}
+
 	type hooksFile struct {
 		Version int                    `json:"version"`
 		Hooks   map[string][]hookEntry `json:"hooks"`
@@ -350,11 +382,13 @@ func (sm *SessionManager) injectCursorHooks(sessionID, worktreePath string) (ext
 	if err != nil {
 		return nil, nil, fmt.Errorf("marshal cursor hooks: %w", err)
 	}
+
 	if err := os.WriteFile(hooksPath, data, 0o600); err != nil {
 		return nil, nil, fmt.Errorf("write cursor hooks: %w", err)
 	}
 
 	sm.log.Info("injected cursor hooks", "session_id", sessionID, "hooks_path", hooksPath)
+
 	return nil, nil, nil
 }
 
@@ -382,9 +416,11 @@ func (sm *SessionManager) cleanupHooks(sessionID, agentName, worktreePath string
 	if err := os.RemoveAll(dir); err != nil {
 		sm.log.Warn("failed to cleanup hooks", "session_id", sessionID, "err", err)
 	}
+
 	if agentName == "cursor" && worktreePath != "" {
 		hooksPath := filepath.Join(worktreePath, ".cursor", "hooks.json")
 		_ = os.Remove(hooksPath)
 	}
+
 	cleanupCursorRule(worktreePath)
 }

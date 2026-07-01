@@ -37,16 +37,20 @@ func testSessionManager() *SessionManager {
 
 func TestInjectPrompt_Claude(t *testing.T) {
 	sm := testSessionManager()
+
 	args, err := sm.injectPrompt("claude", "")
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if len(args) != 2 {
 		t.Fatalf("expected 2 args, got %d", len(args))
 	}
+
 	if args[0] != "--append-system-prompt" {
 		t.Errorf("args[0] = %q, want --append-system-prompt", args[0])
 	}
+
 	if !strings.Contains(args[1], "gr status") {
 		t.Error("prompt should mention gr status")
 	}
@@ -55,23 +59,28 @@ func TestInjectPrompt_Claude(t *testing.T) {
 func TestInjectPrompt_Cursor(t *testing.T) {
 	dir := t.TempDir()
 	sm := testSessionManager()
+
 	args, err := sm.injectPrompt("cursor", dir)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if len(args) != 0 {
 		t.Errorf("expected no extra args for cursor, got %d", len(args))
 	}
 
 	rulePath := filepath.Join(dir, ".cursor", "rules", "graith.mdc")
+
 	data, err := os.ReadFile(rulePath)
 	if err != nil {
 		t.Fatalf("rule file not created: %v", err)
 	}
+
 	content := string(data)
 	if !strings.Contains(content, "alwaysApply: true") {
 		t.Error("rule should have alwaysApply: true frontmatter")
 	}
+
 	if !strings.Contains(content, "gr status") {
 		t.Error("rule should mention gr status")
 	}
@@ -79,10 +88,12 @@ func TestInjectPrompt_Cursor(t *testing.T) {
 
 func TestInjectPrompt_Unknown(t *testing.T) {
 	sm := testSessionManager()
+
 	args, err := sm.injectPrompt("codex", "")
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if len(args) != 0 {
 		t.Errorf("expected no args for unknown agent, got %d", len(args))
 	}
@@ -90,10 +101,12 @@ func TestInjectPrompt_Unknown(t *testing.T) {
 
 func TestInjectPrompt_CursorEmptyWorktree(t *testing.T) {
 	sm := testSessionManager()
+
 	args, err := sm.injectPrompt("cursor", "")
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if len(args) != 0 {
 		t.Errorf("expected no args, got %d", len(args))
 	}
@@ -101,10 +114,12 @@ func TestInjectPrompt_CursorEmptyWorktree(t *testing.T) {
 
 func TestInjectPrompt_EmptyPrompt(t *testing.T) {
 	sm := &SessionManager{cfg: &config.Config{AgentPrompt: ""}}
+
 	args, err := sm.injectPrompt("claude", "")
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if len(args) != 0 {
 		t.Errorf("expected no args for empty prompt, got %d", len(args))
 	}
@@ -117,6 +132,7 @@ func TestCleanupCursorRule(t *testing.T) {
 	if err := os.MkdirAll(rulesDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
+
 	rulePath := filepath.Join(rulesDir, "graith.mdc")
 	if err := os.WriteFile(rulePath, []byte("test"), 0o600); err != nil {
 		t.Fatal(err)
@@ -127,6 +143,7 @@ func TestCleanupCursorRule(t *testing.T) {
 	if _, err := os.Stat(rulePath); !os.IsNotExist(err) {
 		t.Error("rule file should be removed after cleanup")
 	}
+
 	if _, err := os.Stat(rulesDir); !os.IsNotExist(err) {
 		t.Error("empty rules dir should be removed after cleanup")
 	}
@@ -139,9 +156,11 @@ func TestCleanupCursorRule_PreservesOtherRules(t *testing.T) {
 	if err := os.MkdirAll(rulesDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := os.WriteFile(filepath.Join(rulesDir, "graith.mdc"), []byte("test"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := os.WriteFile(filepath.Join(rulesDir, "other.mdc"), []byte("keep"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -151,9 +170,11 @@ func TestCleanupCursorRule_PreservesOtherRules(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(rulesDir, "graith.mdc")); !os.IsNotExist(err) {
 		t.Error("graith.mdc should be removed")
 	}
+
 	if _, err := os.Stat(filepath.Join(rulesDir, "other.mdc")); err != nil {
 		t.Error("other.mdc should be preserved")
 	}
+
 	if _, err := os.Stat(rulesDir); err != nil {
 		t.Error("rules dir should be preserved when other files exist")
 	}
@@ -186,6 +207,7 @@ func TestCleanupCursorRule_RemovesEmptyCursorDir(t *testing.T) {
 	if err := os.MkdirAll(rulesDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
+
 	rulePath := filepath.Join(rulesDir, "graith.mdc")
 	if err := os.WriteFile(rulePath, []byte("test"), 0o600); err != nil {
 		t.Fatal(err)
@@ -203,13 +225,16 @@ func TestCleanupCursorRule_PreservesCursorDirWithOtherFiles(t *testing.T) {
 	dir := t.TempDir()
 
 	cursorDir := filepath.Join(dir, ".cursor")
+
 	rulesDir := filepath.Join(cursorDir, "rules")
 	if err := os.MkdirAll(rulesDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := os.WriteFile(filepath.Join(rulesDir, "graith.mdc"), []byte("test"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := os.WriteFile(filepath.Join(cursorDir, "settings.json"), []byte("{}"), 0o600); err != nil {
 		t.Fatal(err)
 	}

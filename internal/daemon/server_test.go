@@ -18,13 +18,16 @@ func TestServerAcceptsConnections(t *testing.T) {
 	}
 
 	var count atomic.Int32
+
 	handler := func(ctx context.Context, conn net.Conn) {
 		count.Add(1)
+
 		buf := make([]byte, 16)
 		conn.Read(buf)
 	}
 
 	srv := NewServer(l, handler, nil)
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -34,6 +37,7 @@ func TestServerAcceptsConnections(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	conn1.Write([]byte("hi"))
 	conn1.Close()
 
@@ -41,6 +45,7 @@ func TestServerAcceptsConnections(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	conn2.Write([]byte("hi"))
 	conn2.Close()
 

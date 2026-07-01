@@ -66,21 +66,28 @@ func connect(cfg *config.Config, paths config.Paths, configFile string, autoUpgr
 	if err != nil {
 		return nil, err
 	}
+
 	if err := c.Handshake(); err != nil {
 		c.Close()
 		return nil, err
 	}
+
 	resp, err := c.ReadControlResponse()
 	if err != nil {
 		c.Close()
 		return nil, err
 	}
+
 	if resp.Type == "handshake_err" {
 		var hsErr protocol.HandshakeErrMsg
+
 		_ = protocol.DecodePayload(resp, &hsErr)
+
 		c.Close()
+
 		return nil, fmt.Errorf("handshake rejected: %s", hsErr.Reason)
 	}
+
 	if resp.Type != "handshake_ok" {
 		c.Close()
 		return nil, fmt.Errorf("unexpected handshake response: %s", resp.Type)
@@ -95,20 +102,25 @@ func connect(cfg *config.Config, paths config.Paths, configFile string, autoUpgr
 	if autoUpgrade && version.Version != "dev" {
 		if hsOk.DaemonVersion != "" && hsOk.DaemonVersion != version.Version && version.IsNewer(version.Version, hsOk.DaemonVersion) {
 			fmt.Fprintf(os.Stderr, "Daemon version mismatch (daemon=%s, cli=%s), upgrading daemon...\n", hsOk.DaemonVersion, version.Version)
+
 			if requestUpgrade(c) {
 				c.Close()
+
 				if waitForDaemon(paths.SocketPath) {
 					if v := probeDaemonVersion(paths.SocketPath, paths); v == version.Version {
 						return connect(cfg, paths, configFile, false)
 					}
+
 					fmt.Fprintf(os.Stderr, "Exec upgrade did not produce correct version, falling back to clean restart...\n")
 				}
 			} else {
 				c.Close()
 			}
+
 			if stopDaemonByPID(paths.PIDFile) {
 				waitForSocketGone(paths.SocketPath)
 			}
+
 			return connect(cfg, paths, configFile, false)
 		}
 	}
@@ -140,16 +152,20 @@ func probeDaemonVersion(sockPath string, paths config.Paths) string {
 	if err != nil || frame.Channel != protocol.ChannelControl {
 		return ""
 	}
+
 	env, _ := protocol.DecodeControl(frame.Payload)
+
 	var hsOk protocol.HandshakeOkMsg
 	if err := protocol.DecodePayload(env, &hsOk); err != nil {
 		return ""
 	}
+
 	return hsOk.DaemonVersion
 }
 
 func requestUpgrade(c *Client) bool {
 	execPath, _ := os.Executable()
+
 	msg := protocol.UpgradeMsg{
 		ExecPath:      execPath,
 		ClientVersion: version.Version,
@@ -159,17 +175,20 @@ func requestUpgrade(c *Client) bool {
 	}
 	// Connection drop is expected — the daemon exec'd itself.
 	c.ReadControlResponse()
+
 	return true
 }
 
 func waitForDaemon(sockPath string) bool {
 	for range 20 {
 		time.Sleep(250 * time.Millisecond)
+
 		if conn, err := net.DialTimeout("unix", sockPath, 500*time.Millisecond); err == nil {
 			conn.Close()
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -178,20 +197,25 @@ func stopDaemonByPID(pidFile string) bool {
 	if err != nil {
 		return false
 	}
+
 	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
 	if err != nil || pid <= 1 {
 		return false
 	}
+
 	if !daemon.IsGraithDaemon(pid) {
 		return false
 	}
+
 	_ = syscall.Kill(pid, syscall.SIGTERM)
 	for range 50 {
 		if syscall.Kill(pid, 0) != nil {
 			return true
 		}
+
 		time.Sleep(100 * time.Millisecond)
 	}
+
 	return false
 }
 
@@ -200,6 +224,7 @@ func waitForSocketGone(sockPath string) {
 		if _, err := os.Stat(sockPath); os.IsNotExist(err) {
 			return
 		}
+
 		time.Sleep(100 * time.Millisecond)
 	}
 }
@@ -211,7 +236,9 @@ func ConnectFast(paths config.Paths) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("daemon not reachable: %w", err)
 	}
+
 	conn.SetDeadline(time.Now().Add(2 * time.Second))
+
 	c := &Client{
 		conn:   conn,
 		reader: protocol.NewFrameReader(conn),
@@ -223,31 +250,41 @@ func ConnectFast(paths config.Paths) (*Client, error) {
 		c.Close()
 		return nil, err
 	}
+
 	resp, err := c.ReadControlResponse()
 	if err != nil {
 		c.Close()
 		return nil, err
 	}
+
 	if resp.Type == "handshake_err" {
 		var hsErr protocol.HandshakeErrMsg
+
 		_ = protocol.DecodePayload(resp, &hsErr)
+
 		c.Close()
+
 		return nil, fmt.Errorf("handshake rejected: %s", hsErr.Reason)
 	}
+
 	if resp.Type != "handshake_ok" {
 		c.Close()
 		return nil, fmt.Errorf("unexpected handshake response: %s", resp.Type)
 	}
+
 	var hsOk protocol.HandshakeOkMsg
 	if err := protocol.DecodePayload(resp, &hsOk); err != nil {
 		c.Close()
 		return nil, fmt.Errorf("invalid handshake_ok payload: %w", err)
 	}
+
 	if !protocol.VersionCompatible(hsOk.Version) {
 		c.Close()
 		return nil, fmt.Errorf("protocol version mismatch: server=%s, client=%s; try: gr daemon restart", hsOk.Version, protocol.Version)
 	}
+
 	conn.SetDeadline(time.Time{})
+
 	return c, nil
 }
 
@@ -260,7 +297,9 @@ func ConnectForApproval(paths config.Paths, approvalTimeout time.Duration) (*Cli
 	if err != nil {
 		return nil, fmt.Errorf("daemon not reachable: %w", err)
 	}
+
 	conn.SetDeadline(time.Now().Add(approvalDeadline(approvalTimeout)))
+
 	c := &Client{
 		conn:   conn,
 		reader: protocol.NewFrameReader(conn),
@@ -272,31 +311,41 @@ func ConnectForApproval(paths config.Paths, approvalTimeout time.Duration) (*Cli
 		c.Close()
 		return nil, err
 	}
+
 	resp, err := c.ReadControlResponse()
 	if err != nil {
 		c.Close()
 		return nil, err
 	}
+
 	if resp.Type == "handshake_err" {
 		var hsErr protocol.HandshakeErrMsg
+
 		_ = protocol.DecodePayload(resp, &hsErr)
+
 		c.Close()
+
 		return nil, fmt.Errorf("handshake rejected: %s", hsErr.Reason)
 	}
+
 	if resp.Type != "handshake_ok" {
 		c.Close()
 		return nil, fmt.Errorf("unexpected handshake response: %s", resp.Type)
 	}
+
 	var hsOk protocol.HandshakeOkMsg
 	if err := protocol.DecodePayload(resp, &hsOk); err != nil {
 		c.Close()
 		return nil, fmt.Errorf("invalid handshake_ok payload: %w", err)
 	}
+
 	if !protocol.VersionCompatible(hsOk.Version) {
 		c.Close()
 		return nil, fmt.Errorf("protocol version mismatch: server=%s, client=%s; try: gr daemon restart", hsOk.Version, protocol.Version)
 	}
+
 	conn.SetDeadline(time.Time{})
+
 	return c, nil
 }
 
@@ -305,6 +354,7 @@ func approvalDeadline(approvalTimeout time.Duration) time.Duration {
 	if d < time.Minute {
 		d = time.Minute
 	}
+
 	return d
 }
 
@@ -327,6 +377,7 @@ func BuildHandshake(paths config.Paths, cols, rows uint16, cwd string) protocol.
 
 func (c *Client) Handshake() error {
 	cwd, _ := os.Getwd()
+
 	cols, rows := uint16(80), uint16(24)
 	if w, h, err := term.GetSize(int(os.Stdout.Fd())); err == nil {
 		cols, rows = uint16(w), uint16(h)
@@ -336,30 +387,37 @@ func (c *Client) Handshake() error {
 }
 
 func (c *Client) SendControl(msgType string, payload any) error {
-	var data []byte
-	var err error
+	var (
+		data []byte
+		err  error
+	)
 	if c.token != "" {
 		data, err = protocol.EncodeControlWithToken(msgType, payload, c.token)
 	} else {
 		data, err = protocol.EncodeControl(msgType, payload)
 	}
+
 	if err != nil {
 		return err
 	}
+
 	c.wmu.Lock()
 	defer c.wmu.Unlock()
+
 	return c.writer.WriteFrame(protocol.ChannelControl, data)
 }
 
 func (c *Client) SendData(data []byte) error {
 	c.wmu.Lock()
 	defer c.wmu.Unlock()
+
 	return c.writer.WriteFrame(protocol.ChannelData, data)
 }
 
 func (c *Client) SendFrame(channel byte, data []byte) error {
 	c.wmu.Lock()
 	defer c.wmu.Unlock()
+
 	return c.writer.WriteFrame(channel, data)
 }
 
@@ -372,9 +430,11 @@ func (c *Client) ReadControlResponse() (protocol.Envelope, error) {
 	if err != nil {
 		return protocol.Envelope{}, err
 	}
+
 	if frame.Channel != protocol.ChannelControl {
 		return protocol.Envelope{}, fmt.Errorf("expected control frame, got channel %d", frame.Channel)
 	}
+
 	return protocol.DecodeControl(frame.Payload)
 }
 
@@ -382,15 +442,18 @@ func WriteScreenRestore(snap *protocol.ScreenSnapshotResponseMsg) {
 	if snap == nil || snap.Frame == "" {
 		return
 	}
+
 	var buf strings.Builder
 	buf.WriteString("\x1b[?2026h")
 	buf.WriteString("\x1b[?25l")
 	buf.WriteString("\x1b[H")
 	buf.WriteString(snap.Frame)
 	fmt.Fprintf(&buf, "\x1b[%d;%dH", snap.CursorY+1, snap.CursorX+1)
+
 	if snap.CursorVisible {
 		buf.WriteString("\x1b[?25h")
 	}
+
 	buf.WriteString("\x1b[?2026l")
 	os.Stdout.WriteString(buf.String())
 }
@@ -415,6 +478,7 @@ func FetchScreenSnapshot(cfg *config.Config, paths config.Paths, configFile stri
 	if err := protocol.DecodePayload(resp, &snap); err != nil {
 		return nil
 	}
+
 	return &snap
 }
 
@@ -438,6 +502,7 @@ func FetchScrollbackPreview(cfg *config.Config, paths config.Paths, configFile s
 	if err := protocol.DecodePayload(resp, &preview); err != nil {
 		return ""
 	}
+
 	return preview.Preview
 }
 
@@ -460,11 +525,14 @@ func FetchConversation(cfg *config.Config, paths config.Paths, configFile string
 	if err != nil {
 		return nil, err
 	}
+
 	if resp.Type == "error" {
 		var e protocol.ErrorMsg
 		protocol.DecodePayload(resp, &e)
+
 		return nil, fmt.Errorf("%s", e.Message)
 	}
+
 	if resp.Type != "msg_conversation_list" {
 		return nil, fmt.Errorf("unexpected response %q", resp.Type)
 	}
@@ -473,5 +541,6 @@ func FetchConversation(cfg *config.Config, paths config.Paths, configFile string
 	if err := protocol.DecodePayload(resp, &list); err != nil {
 		return nil, err
 	}
+
 	return list.Messages, nil
 }

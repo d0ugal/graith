@@ -20,6 +20,7 @@ var forkCmd = &cobra.Command{
 	ValidArgsFunction: completeSessionNames,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		sourceName := args[0]
+
 		newName := args[1]
 		if err := daemon.ValidateSessionName(newName); err != nil {
 			return err
@@ -32,22 +33,26 @@ var forkCmd = &cobra.Command{
 		defer c.Close()
 
 		c.SendControl("list", struct{}{})
+
 		listResp, err := c.ReadControlResponse()
 		if err != nil {
 			return err
 		}
+
 		var list protocol.SessionListMsg
 		if err := protocol.DecodePayload(listResp, &list); err != nil {
 			return err
 		}
 
 		var sourceID string
+
 		for _, s := range list.Sessions {
 			if s.Name == sourceName || s.ID == sourceName {
 				sourceID = s.ID
 				break
 			}
 		}
+
 		if sourceID == "" {
 			return fmt.Errorf("session %q not found", sourceName)
 		}
@@ -61,9 +66,11 @@ var forkCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+
 		if resp.Type == "error" {
 			var e protocol.ErrorMsg
 			protocol.DecodePayload(resp, &e)
+
 			return fmt.Errorf("%s", e.Message)
 		}
 

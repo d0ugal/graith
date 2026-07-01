@@ -24,18 +24,21 @@ type lockedWriter struct {
 func (w *lockedWriter) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+
 	return w.buf.Write(p)
 }
 
 func (w *lockedWriter) Bytes() []byte {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+
 	return append([]byte(nil), w.buf.Bytes()...)
 }
 
 func (w *lockedWriter) String() string {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+
 	return w.buf.String()
 }
 
@@ -76,6 +79,7 @@ func TestPrefixKeyOverlay(t *testing.T) {
 			if err := writer.WriteFrame(protocol.ChannelData, []byte("output\n")); err != nil {
 				return
 			}
+
 			time.Sleep(10 * time.Millisecond)
 		}
 	}()
@@ -112,6 +116,7 @@ func TestPrefixKeyOverlayKittyProtocol(t *testing.T) {
 			if err := writer.WriteFrame(protocol.ChannelData, []byte("output\n")); err != nil {
 				return
 			}
+
 			time.Sleep(10 * time.Millisecond)
 		}
 	}()
@@ -149,6 +154,7 @@ func TestPrefixKeyDetach(t *testing.T) {
 			if err := writer.WriteFrame(protocol.ChannelData, []byte("x")); err != nil {
 				return
 			}
+
 			time.Sleep(10 * time.Millisecond)
 		}
 	}()
@@ -181,6 +187,7 @@ func TestPrefixKeyDetachKittyProtocol(t *testing.T) {
 			if err := writer.WriteFrame(protocol.ChannelData, []byte("x")); err != nil {
 				return
 			}
+
 			time.Sleep(10 * time.Millisecond)
 		}
 	}()
@@ -214,6 +221,7 @@ func TestKittyReleaseEventConsumed(t *testing.T) {
 			if err := writer.WriteFrame(protocol.ChannelData, []byte("x")); err != nil {
 				return
 			}
+
 			time.Sleep(10 * time.Millisecond)
 		}
 	}()
@@ -251,6 +259,7 @@ func TestKittyEncodedFollowUpKey(t *testing.T) {
 			if err := writer.WriteFrame(protocol.ChannelData, []byte("x")); err != nil {
 				return
 			}
+
 			time.Sleep(10 * time.Millisecond)
 		}
 	}()
@@ -286,6 +295,7 @@ func TestKittyReleaseBeforeFollowUpKey(t *testing.T) {
 			if err := writer.WriteFrame(protocol.ChannelData, []byte("x")); err != nil {
 				return
 			}
+
 			time.Sleep(10 * time.Millisecond)
 		}
 	}()
@@ -335,9 +345,11 @@ func TestParseKittyCSIu(t *testing.T) {
 			if ok != tt.wantOK {
 				t.Fatalf("ok = %v, want %v", ok, tt.wantOK)
 			}
+
 			if !ok {
 				return
 			}
+
 			if cp != tt.wantCP || mods != tt.wantMod || evType != tt.wantEv || seqLen != tt.wantLen {
 				t.Fatalf("got (%d, %d, %d, %d), want (%d, %d, %d, %d)",
 					cp, mods, evType, seqLen, tt.wantCP, tt.wantMod, tt.wantEv, tt.wantLen)
@@ -383,6 +395,7 @@ func TestPrefixKeyShell(t *testing.T) {
 			if err := writer.WriteFrame(protocol.ChannelData, []byte("x")); err != nil {
 				return
 			}
+
 			time.Sleep(10 * time.Millisecond)
 		}
 	}()
@@ -432,6 +445,7 @@ func TestOverlayUnderHeavyOutput(t *testing.T) {
 
 	go func() {
 		writer := protocol.NewFrameWriter(daemonConn)
+
 		chunk := bytes.Repeat([]byte("x"), 4096)
 		for {
 			if err := writer.WriteFrame(protocol.ChannelData, chunk); err != nil {
@@ -451,6 +465,7 @@ func TestOverlayUnderHeavyOutput(t *testing.T) {
 	}()
 
 	ctx := context.Background()
+
 	done := make(chan PassthroughResult, 1)
 	go func() {
 		done <- c.runPassthroughLoop(ctx, testOpts, stdinR, stdout, nil)
@@ -474,6 +489,7 @@ func TestOverlayUnderHeavyOutputKittyProtocol(t *testing.T) {
 
 	go func() {
 		writer := protocol.NewFrameWriter(daemonConn)
+
 		chunk := bytes.Repeat([]byte("x"), 4096)
 		for {
 			if err := writer.WriteFrame(protocol.ChannelData, chunk); err != nil {
@@ -493,6 +509,7 @@ func TestOverlayUnderHeavyOutputKittyProtocol(t *testing.T) {
 	}()
 
 	ctx := context.Background()
+
 	done := make(chan PassthroughResult, 1)
 	go func() {
 		done <- c.runPassthroughLoop(ctx, testOpts, stdinR, stdout, nil)
@@ -516,12 +533,14 @@ func TestNormalDataPassthrough(t *testing.T) {
 
 	daemonReader := protocol.NewFrameReader(daemonConn)
 	received := make(chan []byte, 10)
+
 	go func() {
 		for {
 			frame, err := daemonReader.ReadFrame()
 			if err != nil {
 				return
 			}
+
 			if frame.Channel == protocol.ChannelData {
 				received <- append([]byte{}, frame.Payload...)
 			}
@@ -574,6 +593,7 @@ func TestDaemonDetachesClient(t *testing.T) {
 	go func() {
 		writer.WriteFrame(protocol.ChannelData, []byte("hello"))
 		time.Sleep(50 * time.Millisecond)
+
 		data, _ := protocol.EncodeControl("detached", struct{ Reason string }{"replaced"})
 		writer.WriteFrame(protocol.ChannelControl, data)
 	}()
@@ -597,12 +617,14 @@ func TestEscapeSequenceNotPrefixIsForwarded(t *testing.T) {
 
 	daemonReader := protocol.NewFrameReader(daemonConn)
 	received := make(chan []byte, 10)
+
 	go func() {
 		for {
 			frame, err := daemonReader.ReadFrame()
 			if err != nil {
 				return
 			}
+
 			if frame.Channel == protocol.ChannelData {
 				received <- append([]byte{}, frame.Payload...)
 			}

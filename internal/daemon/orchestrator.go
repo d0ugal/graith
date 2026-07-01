@@ -40,6 +40,7 @@ func (sm *SessionManager) findOrchestratorID() string {
 			return id
 		}
 	}
+
 	return ""
 }
 
@@ -57,24 +58,29 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 	if err != nil {
 		return SessionState{}, fmt.Errorf("orchestrator sandbox: %w", err)
 	}
+
 	if !sandboxed {
 		return SessionState{}, fmt.Errorf("orchestrator requires sandbox but sandbox is not available — install safehouse and enable sandbox in config")
 	}
 
 	scratchDir := sm.orchestratorScratchDir()
 	tmpDir := sm.orchestratorTmpDir()
+
 	if err := os.MkdirAll(scratchDir, 0o700); err != nil {
 		return SessionState{}, fmt.Errorf("create orchestrator scratch dir: %w", err)
 	}
+
 	if err := os.MkdirAll(tmpDir, 0o700); err != nil {
 		return SessionState{}, fmt.Errorf("create orchestrator tmp dir: %w", err)
 	}
 
 	id := generateID()
+
 	token, err := generateToken()
 	if err != nil {
 		return SessionState{}, fmt.Errorf("generate orchestrator token: %w", err)
 	}
+
 	agentSessionID := ""
 	if forcesID(agentName) {
 		agentSessionID = newAgentSessionID()
@@ -101,10 +107,12 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 		LastStartedAt:   now,
 		Token:           token,
 	}
+
 	sm.state.Sessions[id] = sessState
 	if err := sm.saveState(); err != nil {
 		delete(sm.state.Sessions, id)
 		sm.mu.Unlock()
+
 		return SessionState{}, fmt.Errorf("persist orchestrator state: %w", err)
 	}
 
@@ -135,11 +143,13 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 	for k, v := range agent.Env {
 		env[k] = v
 	}
+
 	env["GRAITH_SESSION_ID"] = id
 	env["GRAITH_SESSION_NAME"] = OrchestratorSessionName
 	env["GRAITH_AGENT_TYPE"] = agentName
 	env["GRAITH_TOKEN"] = token
 	env["GRAITH_TMPDIR"] = tmpDir
+
 	env["TMPDIR"] = tmpDir
 	if sm.paths.Profile != "" {
 		env["GRAITH_PROFILE"] = sm.paths.Profile
@@ -154,6 +164,7 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 	for k := range agent.Env {
 		envKeys = append(envKeys, k)
 	}
+
 	for k := range env {
 		envKeys = append(envKeys, k)
 	}
@@ -168,6 +179,7 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 		sm.rollbackOrchestratorCreate(id)
 		return SessionState{}, fmt.Errorf("sandbox wrap: %w", wrapErr)
 	}
+
 	sm.log.Info("sandboxing orchestrator", "id", id,
 		"command", command, "read_dirs", opts.ReadDirs, "write_dirs", opts.WriteDirs,
 		"workdir", opts.WorktreeDir)
@@ -191,18 +203,22 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 	sm.mu.Lock()
 	if _, ok := sm.state.Sessions[id]; !ok {
 		sm.mu.Unlock()
+
 		_ = ptySess.Kill()
 		ptySess.Close()
+
 		return SessionState{}, fmt.Errorf("orchestrator session deleted during creation")
 	}
 
 	sess := sm.state.Sessions[id]
 	sess.Status = StatusRunning
 	sess.StatusChangedAt = time.Now()
+
 	sess.PID = ptySess.Cmd.Process.Pid
 	if st, err := grpty.ProcessStartTime(sess.PID); err == nil {
 		sess.PIDStartTime = st
 	}
+
 	sess.Sandboxed = true
 	sess.SandboxConfig = mergedSandbox
 	sess.LastStartedAt = time.Now()
@@ -219,8 +235,10 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 		delete(sm.sessions, id)
 		delete(sm.tokenIndex, token)
 		sm.mu.Unlock()
+
 		_ = ptySess.Kill()
 		ptySess.Close()
+
 		return SessionState{}, fmt.Errorf("persist orchestrator state: %w", err)
 	}
 
@@ -230,6 +248,7 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 	go sm.watchSession(id, ptySess)
 
 	sm.log.Info("orchestrator session created", "id", id)
+
 	return result, nil
 }
 
@@ -249,6 +268,7 @@ func (sm *SessionManager) buildOrchestratorPrompt(agentName string, orchCfg conf
 
 	if orchCfg.PromptFile != "" {
 		expanded := config.ExpandPath(orchCfg.PromptFile)
+
 		data, err := os.ReadFile(expanded)
 		if err != nil {
 			sm.log.Warn("failed to read orchestrator prompt_file", "path", expanded, "err", err)
@@ -256,6 +276,7 @@ func (sm *SessionManager) buildOrchestratorPrompt(agentName string, orchCfg conf
 			if prompt != "" {
 				prompt += "\n\n"
 			}
+
 			prompt += string(data)
 		}
 	}
@@ -278,20 +299,26 @@ func (sm *SessionManager) ensureOrchestrator(ctx context.Context) {
 
 	sm.mu.RLock()
 	orchID := sm.findOrchestratorID()
-	var orchStatus SessionStatus
-	var orchStopReason string
+
+	var (
+		orchStatus     SessionStatus
+		orchStopReason string
+	)
+
 	if orchID != "" {
 		if s := sm.state.Sessions[orchID]; s != nil {
 			orchStatus = s.Status
 			orchStopReason = s.StopReason
 		}
 	}
+
 	_, hasLivePTY := sm.sessions[orchID]
 	sm.mu.RUnlock()
 
 	switch {
 	case orchID == "":
 		sm.log.Info("creating orchestrator session")
+
 		if _, err := sm.createOrchestrator(ctx); err != nil {
 			sm.log.Error("failed to create orchestrator", "err", err)
 		}
@@ -309,8 +336,10 @@ func (sm *SessionManager) ensureOrchestrator(ctx context.Context) {
 			s.PID = 0
 			s.PIDStartTime = 0
 		}
+
 		_ = sm.saveState()
 		sm.mu.Unlock()
+
 		if _, err := sm.Resume(orchID, 24, 80); err != nil {
 			sm.log.Error("failed to resume orchestrator after recovery", "id", orchID, "err", err)
 		}
@@ -321,14 +350,17 @@ func (sm *SessionManager) ensureOrchestrator(ctx context.Context) {
 		if s := sm.state.Sessions[orchID]; s != nil {
 			s.StopReason = ""
 		}
+
 		_ = sm.saveState()
 		sm.mu.Unlock()
+
 		if _, err := sm.Resume(orchID, 24, 80); err != nil {
 			sm.log.Error("failed to resume user-stopped orchestrator on boot", "id", orchID, "err", err)
 		}
 
 	case orchStatus == StatusStopped || orchStatus == StatusErrored:
 		sm.log.Info("resuming orchestrator", "id", orchID, "status", orchStatus)
+
 		if _, err := sm.Resume(orchID, 24, 80); err != nil {
 			sm.log.Error("failed to resume orchestrator", "id", orchID, "err", err)
 		}
@@ -348,14 +380,17 @@ func (sm *SessionManager) orchestratorSupervisor(ctx context.Context, exitCh <-c
 
 func (sm *SessionManager) handleOrchestratorExit(ctx context.Context, id string) {
 	sm.mu.RLock()
+
 	sess, ok := sm.state.Sessions[id]
 	if !ok || sess.SystemKind != SystemKindOrchestrator {
 		sm.mu.RUnlock()
 		return
 	}
+
 	stopReason := sess.StopReason
 	backoffLevel := sess.BackoffLevel
 	lastStarted := sess.LastStartedAt
+
 	sm.mu.RUnlock()
 
 	if stopReason == StopReasonUser || stopReason == StopReasonIdle || stopReason == StopReasonShutdown {
@@ -368,8 +403,10 @@ func (sm *SessionManager) handleOrchestratorExit(ctx context.Context, id string)
 		if s, ok := sm.state.Sessions[id]; ok {
 			s.BackoffLevel = 0
 		}
+
 		_ = sm.saveState()
 		sm.mu.Unlock()
+
 		backoffLevel = 0
 	}
 
@@ -377,12 +414,14 @@ func (sm *SessionManager) handleOrchestratorExit(ctx context.Context, id string)
 	if delayIdx >= len(orchestratorBackoffDelays) {
 		delayIdx = len(orchestratorBackoffDelays) - 1
 	}
+
 	delay := orchestratorBackoffDelays[delayIdx]
 
 	sm.mu.Lock()
 	if s, ok := sm.state.Sessions[id]; ok {
 		s.BackoffLevel = backoffLevel + 1
 	}
+
 	_ = sm.saveState()
 	sm.mu.Unlock()
 
@@ -395,14 +434,17 @@ func (sm *SessionManager) handleOrchestratorExit(ctx context.Context, id string)
 	}
 
 	sm.mu.RLock()
+
 	sess, ok = sm.state.Sessions[id]
 	if !ok {
 		sm.mu.RUnlock()
 		return
 	}
+
 	enabled := sm.cfg.Orchestrator.Enabled
 	_, hasLivePTY := sm.sessions[id]
 	currentReason := sess.StopReason
+
 	sm.mu.RUnlock()
 
 	if !enabled || hasLivePTY || currentReason == StopReasonUser || currentReason == StopReasonIdle || currentReason == StopReasonShutdown {
@@ -415,8 +457,10 @@ func (sm *SessionManager) handleOrchestratorExit(ctx context.Context, id string)
 		if s, ok := sm.state.Sessions[id]; ok && forcesID(s.Agent) {
 			s.AgentSessionID = newAgentSessionID()
 			s.FreshStart = true
+
 			sm.log.Info("regenerating orchestrator agent session ID for fresh start", "id", id)
 		}
+
 		_ = sm.saveState()
 		sm.mu.Unlock()
 	}

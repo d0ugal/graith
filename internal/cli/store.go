@@ -38,6 +38,7 @@ func resolveStoreRepoPath() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("could not detect repo path: use --repo, --shared, or run from inside a git repository")
 	}
+
 	return config.ResolvePath(strings.TrimSpace(string(gitOut))), nil
 }
 
@@ -54,15 +55,19 @@ func resolveStorePath() (storePath string, label string, err error) {
 	if storeSharedFlag && storeRepoFlag != "" {
 		return "", "", fmt.Errorf("--shared and --repo are mutually exclusive")
 	}
+
 	if storeSharedFlag || (storeRepoFlag == "" && inGraithSessionWithNoRepo()) {
 		sp := store.SharedStorePath(paths.DataDir)
 		return sp, "shared", nil
 	}
+
 	repo, err := resolveStoreRepoPath()
 	if err != nil {
 		return "", "", err
 	}
+
 	sp := store.StorePath(paths.DataDir, repo)
+
 	return sp, repo, nil
 }
 
@@ -76,6 +81,7 @@ func resolveCurrentRepo() string {
 	if err != nil {
 		return ""
 	}
+
 	return config.ResolvePath(strings.TrimSpace(string(gitOut)))
 }
 
@@ -86,9 +92,11 @@ func checkWritePermission(repo string) error {
 	if current == "" {
 		return nil
 	}
+
 	if storeRepoFlag != "" && repo != current {
 		return fmt.Errorf("cannot write to store for %s from repo %s", repo, current)
 	}
+
 	return nil
 }
 
@@ -123,6 +131,7 @@ var storePutCmd = &cobra.Command{
 		if err := store.Init(storePath); err != nil {
 			return err
 		}
+
 		if err := store.Put(storePath, key, body); err != nil {
 			return err
 		}
@@ -133,7 +142,9 @@ var storePutCmd = &cobra.Command{
 				Repo string `json:"repo"`
 			}{key, label})
 		}
+
 		out.Print("Stored %s\n", key)
+
 		return nil
 	},
 }
@@ -157,10 +168,12 @@ var storeGetCmd = &cobra.Command{
 			if errors.Is(err, os.ErrNotExist) {
 				return fmt.Errorf("document %q not found", key)
 			}
+
 			return fmt.Errorf("get %q: %w", key, err)
 		}
 
 		fmt.Print(body)
+
 		return nil
 	},
 }
@@ -189,6 +202,7 @@ var storeListCmd = &cobra.Command{
 			if storeSharedFlag || storeRepoFlag != "" {
 				return err
 			}
+
 			return listAllStores(prefix)
 		}
 
@@ -208,6 +222,7 @@ var storeListCmd = &cobra.Command{
 			for i, e := range entries {
 				result[i] = entryWithRepo{e.Key, label, e.UpdatedAt.Format(time.RFC3339)}
 			}
+
 			return out.JSON(result)
 		}
 
@@ -218,10 +233,13 @@ var storeListCmd = &cobra.Command{
 
 		tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 		fmt.Fprintln(tw, "REPO\tKEY\tUPDATED")
+
 		for _, entry := range entries {
 			fmt.Fprintf(tw, "%s\t%s\t%s\n", label, entry.Key, entry.UpdatedAt.Format("2006-01-02 15:04:05"))
 		}
+
 		tw.Flush()
+
 		return nil
 	},
 }
@@ -242,6 +260,7 @@ func listAllStores(prefix string) error {
 		if err != nil {
 			return err
 		}
+
 		stores[i].Entries = entries
 	}
 
@@ -253,22 +272,27 @@ func listAllStores(prefix string) error {
 
 	if jsonOutput {
 		var result []entryWithRepo
+
 		for _, s := range stores {
 			for _, e := range s.Entries {
 				result = append(result, entryWithRepo{e.Key, s.Name, e.UpdatedAt.Format(time.RFC3339)})
 			}
 		}
+
 		return out.JSON(result)
 	}
 
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "REPO\tKEY\tUPDATED")
+
 	for _, s := range stores {
 		for _, entry := range s.Entries {
 			fmt.Fprintf(tw, "%s\t%s\t%s\n", s.Name, entry.Key, entry.UpdatedAt.Format("2006-01-02 15:04:05"))
 		}
 	}
+
 	tw.Flush()
+
 	return nil
 }
 
@@ -304,6 +328,7 @@ var storeAppendCmd = &cobra.Command{
 		if err := store.Init(storePath); err != nil {
 			return err
 		}
+
 		if err := store.Append(storePath, key, line); err != nil {
 			return err
 		}
@@ -314,7 +339,9 @@ var storeAppendCmd = &cobra.Command{
 				Repo string `json:"repo"`
 			}{key, label})
 		}
+
 		out.Print("Appended to %s\n", key)
+
 		return nil
 	},
 }
@@ -349,7 +376,9 @@ var storeRmCmd = &cobra.Command{
 				Deleted bool   `json:"deleted"`
 			}{key, true})
 		}
+
 		out.Print("Removed %s\n", key)
+
 		return nil
 	},
 }

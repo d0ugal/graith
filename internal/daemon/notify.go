@@ -15,6 +15,7 @@ func (sm *SessionManager) onAgentStatusChange(sessionID, sessionName, oldStatus,
 
 	if sm.messages != nil {
 		body := fmt.Sprintf("Session %q status changed: %s → %s", sessionName, oldStatus, newStatus)
+
 		_, err := sm.messages.Publish("_system.status", sessionID, sessionName, body, "", "")
 		if err != nil {
 			sm.log.Error("failed to publish status change", "err", err)
@@ -61,6 +62,7 @@ func (sm *SessionManager) notifyFromDaemon(sessionID, body string) {
 	if sm.messages == nil {
 		return
 	}
+
 	if _, err := sm.messages.Publish("inbox:"+sessionID, daemonSenderID, daemonSenderName, body, "", ""); err != nil {
 		sm.log.Error("failed to publish daemon notification", "session", sessionID, "err", err)
 		return
@@ -79,17 +81,22 @@ func (sm *SessionManager) notifyInbox(targetID, senderID, senderName string) {
 		sm.resumeForInbox(targetID, senderID, senderName)
 		return
 	}
+
 	sender := senderName
 	if sender == "" {
 		sender = senderID
 	}
+
 	hint := fmt.Sprintf("New message from %s. Read: gr msg inbox --all --ack | Reply: gr msg send %s \"<reply>\"", sender, sender)
+
 	if sm.HasAttachedClient(targetID) {
 		ptySess.WaitForUserIdle(10*time.Second, 2*time.Minute)
 	}
+
 	if err := ptySess.WriteInputAndSubmit([]byte(hint)); err != nil {
 		sm.log.Debug("inbox notification write failed", "target", targetID, "err", err)
 	}
+
 	ptySess.Poke()
 }
 
@@ -105,6 +112,7 @@ func (sm *SessionManager) resumeForInbox(targetID, senderID, senderName string) 
 	if sender == "" {
 		sender = senderID
 	}
+
 	summary := fmt.Sprintf("Resumed by inbox message from %s", sender)
 	sm.log.Info("auto-resuming stopped session on inbox message",
 		"session", sess.Name, "id", targetID, "sender", sender)
@@ -124,11 +132,13 @@ func (sm *SessionManager) notifyUnreadInbox(sessionID string) {
 	}
 
 	sm.mu.Lock()
+
 	last, ok := sm.lastInboxNotifyAt[sessionID]
 	if ok && time.Since(last) < 30*time.Second {
 		sm.mu.Unlock()
 		return
 	}
+
 	sm.lastInboxNotifyAt[sessionID] = time.Now()
 	sm.mu.Unlock()
 
@@ -152,6 +162,7 @@ func (sm *SessionManager) notifyUnreadInbox(sessionID string) {
 	if err := ptySess.WriteInputAndSubmit([]byte(hint)); err != nil {
 		sm.log.Debug("unread inbox notification write failed", "session", sessionID, "err", err)
 	}
+
 	ptySess.Poke()
 }
 
@@ -160,8 +171,11 @@ func (sm *SessionManager) sendNotification(sessionName, status, command string) 
 		sm.log.Error("refusing to send notification for unsafe session name", "name", sessionName, "err", err)
 		return
 	}
+
 	title := "graith"
+
 	var message string
+
 	switch status {
 	case "approval":
 		message = fmt.Sprintf("%s needs approval", sessionName)
@@ -179,6 +193,7 @@ func (sm *SessionManager) sendNotification(sessionName, status, command string) 
 	if command != "" {
 		go func() {
 			cmd := exec.Command("sh", "-c", command)
+
 			cmd.Env = append(os.Environ(),
 				"GRAITH_SESSION_NAME="+sessionName,
 				"GRAITH_STATUS="+status,
@@ -188,6 +203,7 @@ func (sm *SessionManager) sendNotification(sessionName, status, command string) 
 				sm.log.Error("custom notification command failed", "err", err)
 			}
 		}()
+
 		return
 	}
 

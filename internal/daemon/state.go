@@ -135,10 +135,12 @@ func cloneSessionState(s *SessionState) SessionState {
 		c.Includes = make([]IncludedRepoState, len(s.Includes))
 		copy(c.Includes, s.Includes)
 	}
+
 	if len(s.CI.FailingChecks) > 0 {
 		c.CI.FailingChecks = make([]string, len(s.CI.FailingChecks))
 		copy(c.CI.FailingChecks, s.CI.FailingChecks)
 	}
+
 	return c
 }
 
@@ -184,16 +186,20 @@ func LoadState(path string) (*State, error) {
 		if os.IsNotExist(err) {
 			return NewState(), nil
 		}
+
 		return nil, fmt.Errorf("read state: %w", err)
 	}
+
 	var state State
 	if err := json.Unmarshal(data, &state); err != nil {
 		slog.Warn("corrupted state file, starting fresh", "path", path, "err", err)
 		return NewState(), nil
 	}
+
 	if state.Sessions == nil {
 		state.Sessions = make(map[string]*SessionState)
 	}
+
 	if state.Scenarios == nil {
 		state.Scenarios = make(map[string]*ScenarioState)
 	}
@@ -212,10 +218,12 @@ func LoadState(path string) (*State, error) {
 
 func SaveState(path string, state *State) error {
 	state.Version = CurrentStateVersion
+
 	data, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal state: %w", err)
 	}
+
 	return writeFileAtomic(path, data)
 }
 
@@ -239,6 +247,7 @@ func generateToken() (string, error) {
 	if _, err := io.ReadFull(rand.Reader, b); err != nil {
 		return "", fmt.Errorf("generate token: %w", err)
 	}
+
 	return hex.EncodeToString(b), nil
 }
 
@@ -248,11 +257,14 @@ func migrateState(state *State) error {
 		if !ok {
 			return fmt.Errorf("no migration from version %d", state.Version)
 		}
+
 		if err := fn(state); err != nil {
 			return fmt.Errorf("migrate v%d→v%d: %w", state.Version, state.Version+1, err)
 		}
+
 		state.Version++
 	}
+
 	return nil
 }
 
@@ -280,6 +292,7 @@ func migrateV3ToV4(state *State) error {
 			s.ApprovalsEnabled = false
 		}
 	}
+
 	return nil
 }
 
@@ -292,6 +305,7 @@ func migrateV4ToV5(state *State) error {
 			s.StatusChangedAt = s.CreatedAt
 		}
 	}
+
 	return nil
 }
 
@@ -325,12 +339,15 @@ func migrateV9ToV10(state *State) error {
 		if s.Token != "" {
 			continue
 		}
+
 		token, err := generateToken()
 		if err != nil {
 			return fmt.Errorf("generate token for session %s: %w", id, err)
 		}
+
 		s.Token = token
 	}
+
 	return nil
 }
 
@@ -340,6 +357,7 @@ func migrateV10ToV11(state *State) error {
 	if state.Scenarios == nil {
 		state.Scenarios = make(map[string]*ScenarioState)
 	}
+
 	return nil
 }
 
@@ -354,32 +372,41 @@ func writeFileAtomic(path string, data []byte) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create dir: %w", err)
 	}
+
 	tmp, err := os.CreateTemp(dir, ".state-*.tmp")
 	if err != nil {
 		return fmt.Errorf("create temp: %w", err)
 	}
+
 	tmpPath := tmp.Name()
 	if _, err := tmp.Write(data); err != nil {
 		tmp.Close()
 		os.Remove(tmpPath)
+
 		return fmt.Errorf("write temp: %w", err)
 	}
+
 	if err := tmp.Sync(); err != nil {
 		tmp.Close()
 		os.Remove(tmpPath)
+
 		return fmt.Errorf("sync temp: %w", err)
 	}
+
 	if err := tmp.Close(); err != nil {
 		os.Remove(tmpPath)
 		return fmt.Errorf("close temp: %w", err)
 	}
+
 	if err := os.Rename(tmpPath, path); err != nil {
 		os.Remove(tmpPath)
 		return fmt.Errorf("rename: %w", err)
 	}
+
 	if err := syncDir(dir); err != nil {
 		return fmt.Errorf("sync dir: %w", err)
 	}
+
 	return nil
 }
 
@@ -388,8 +415,10 @@ func syncDir(path string) error {
 	if err != nil {
 		return err
 	}
+
 	err = d.Sync()
 	d.Close()
+
 	return err
 }
 
@@ -397,11 +426,14 @@ func (s *State) Reconcile() {
 	for id, sess := range s.Sessions {
 		if sess.Status == StatusCreating {
 			slog.Info("session was mid-creation when daemon stopped, marking errored", "id", id)
+
 			sess.Status = StatusErrored
 			sess.StatusChangedAt = time.Now()
 			applyLifecycleSummaryLocked(sess, "Interrupted by daemon restart")
+
 			continue
 		}
+
 		if sess.Status == StatusRunning && sess.PID > 0 {
 			if !isProcessAlive(sess.PID) {
 				slog.Info("session process died, marking stopped", "id", id, "pid", sess.PID)
@@ -412,8 +444,10 @@ func (s *State) Reconcile() {
 				applyLifecycleSummaryLocked(sess, "Lost during daemon restart")
 			}
 		}
+
 		if sess.Status == StatusDeleting {
 			slog.Info("session stuck in deleting, reverting to stopped", "id", id)
+
 			sess.Status = StatusStopped
 			sess.StatusChangedAt = time.Now()
 			applyLifecycleSummaryLocked(sess, "Delete interrupted by restart")
@@ -426,9 +460,11 @@ func isProcessAlive(pid int) bool {
 	if err != nil {
 		return false
 	}
+
 	err = proc.Signal(syscall.Signal(0))
 	if err == nil {
 		return true
 	}
+
 	return errors.Is(err, syscall.EPERM)
 }

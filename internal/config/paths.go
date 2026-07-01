@@ -34,15 +34,19 @@ func ResolveProfile() (profile string, appName string, err error) {
 	if profile == "" {
 		return "", baseAppName, nil
 	}
+
 	if profile == "default" {
 		return "", "", fmt.Errorf("invalid profile name %q: \"default\" is reserved", profile)
 	}
+
 	if len(profile) > 32 {
 		return "", "", fmt.Errorf("invalid profile name %q: must be at most 32 characters", profile)
 	}
+
 	if !validProfile.MatchString(profile) {
 		return "", "", fmt.Errorf("invalid profile name %q: must be lowercase alphanumeric with hyphens, no leading hyphen", profile)
 	}
+
 	return profile, baseAppName + "-" + profile, nil
 }
 
@@ -50,9 +54,11 @@ func configHome() string {
 	if env := os.Getenv("XDG_CONFIG_HOME"); env != "" {
 		return env
 	}
+
 	if home, err := os.UserHomeDir(); err == nil {
 		return filepath.Join(home, ".config")
 	}
+
 	return xdg.ConfigHome
 }
 
@@ -86,6 +92,7 @@ func runtimeDirForApp(appName string) string {
 	if d := xdg.RuntimeDir; d != "" {
 		return filepath.Join(d, appName)
 	}
+
 	return filepath.Join(xdg.DataHome, appName, "run")
 }
 
@@ -97,6 +104,7 @@ func (p Paths) WithDataDir(dataDir string) Paths {
 	p.LogDir = filepath.Join(dataDir, "logs")
 	p.DaemonLog = filepath.Join(dataDir, "daemon.log")
 	p.MessagesDB = filepath.Join(dataDir, "messages.sqlite")
+
 	p.TmpDir = filepath.Join(dataDir, "tmp")
 	if strings.HasPrefix(p.RuntimeDir, oldDataDir+string(filepath.Separator)) || p.RuntimeDir == oldDataDir {
 		rel, err := filepath.Rel(oldDataDir, p.RuntimeDir)
@@ -107,6 +115,7 @@ func (p Paths) WithDataDir(dataDir string) Paths {
 			p.PIDFile = filepath.Join(runtimeDir, "graith.pid")
 		}
 	}
+
 	return p
 }
 
@@ -117,6 +126,7 @@ func (p Paths) EnsureDirs() error {
 			return fmt.Errorf("create directory %s: %w", dir, err)
 		}
 	}
+
 	return nil
 }
 
@@ -128,6 +138,8 @@ func LegacyRuntimeDirs() []string {
 	if d := os.Getenv("TMPDIR"); d != "" {
 		dirs = append(dirs, filepath.Join(d, fmt.Sprintf("graith-%d", os.Getuid())))
 	}
+
 	dirs = append(dirs, filepath.Join("/tmp", fmt.Sprintf("graith-%d", os.Getuid())))
+
 	return dirs
 }

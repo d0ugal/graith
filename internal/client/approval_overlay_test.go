@@ -70,11 +70,13 @@ func TestApprovalModelViewNarrowTerminal(t *testing.T) {
 				width:     width,
 				height:    40,
 			}
+
 			defer func() {
 				if r := recover(); r != nil {
 					t.Fatalf("View() panicked at width=%d: %v", width, r)
 				}
 			}()
+
 			m.View()
 		})
 	}

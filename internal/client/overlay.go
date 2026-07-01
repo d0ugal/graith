@@ -53,6 +53,7 @@ func (v viewMode) prev() viewMode {
 
 func filterNeedsAttention(sessions []protocol.SessionInfo) []protocol.SessionInfo {
 	var result []protocol.SessionInfo
+
 	for _, s := range sessions {
 		switch {
 		case s.AgentStatus == "approval":
@@ -65,48 +66,60 @@ func filterNeedsAttention(sessions []protocol.SessionInfo) []protocol.SessionInf
 			result = append(result, s)
 		}
 	}
+
 	sortByStatusAge(result)
+
 	return result
 }
 
 func filterActive(sessions []protocol.SessionInfo) []protocol.SessionInfo {
 	var result []protocol.SessionInfo
+
 	for _, s := range sessions {
 		if s.Status == "running" {
 			result = append(result, s)
 		}
 	}
+
 	sort.SliceStable(result, func(i, j int) bool {
 		ti, _ := time.Parse(time.RFC3339, result[i].CreatedAt)
 		tj, _ := time.Parse(time.RFC3339, result[j].CreatedAt)
+
 		return ti.After(tj)
 	})
+
 	return result
 }
 
 func filterStarred(sessions []protocol.SessionInfo) []protocol.SessionInfo {
 	var result []protocol.SessionInfo
+
 	for _, s := range sessions {
 		if s.Starred {
 			result = append(result, s)
 		}
 	}
+
 	return result
 }
 
 func sortByStatusAge(sessions []protocol.SessionInfo) {
 	sort.SliceStable(sessions, func(i, j int) bool {
 		ti, _ := time.Parse(time.RFC3339, sessions[i].StatusChangedAt)
+
 		tj, _ := time.Parse(time.RFC3339, sessions[j].StatusChangedAt)
 		if ti.IsZero() && tj.IsZero() {
 			return false
 		}
+
 		if ti.IsZero() {
 			return true
 		}
+
 		if tj.IsZero() {
 			return false
 		}
+
 		return ti.Before(tj)
 	})
 }
@@ -135,6 +148,7 @@ type sessionItem struct {
 
 func assignSessionIndices(items []list.Item) {
 	idx := 0
+
 	for i, item := range items {
 		if si, ok := item.(sessionItem); ok {
 			idx++
@@ -176,6 +190,7 @@ func pad(s string, width int) string {
 	if n := width - lipgloss.Width(s); n > 0 {
 		return s + strings.Repeat(" ", n)
 	}
+
 	return s
 }
 
@@ -184,9 +199,11 @@ func displayBranch(branch, name string) string {
 	if p := strings.SplitN(branch, "/", 3); len(p) == 3 {
 		stripped = p[2]
 	}
+
 	if stripped == name {
 		return "—"
 	}
+
 	return stripped
 }
 
@@ -194,13 +211,16 @@ func displayGit(dirty bool, unpushed int) string {
 	if !dirty && unpushed == 0 {
 		return "clean"
 	}
+
 	var parts []string
 	if dirty {
 		parts = append(parts, "M")
 	}
+
 	if unpushed > 0 {
 		parts = append(parts, fmt.Sprintf("↑%d", unpushed))
 	}
+
 	return strings.Join(parts, " ")
 }
 
@@ -210,7 +230,9 @@ func displayPR(s protocol.SessionInfo) string {
 	if s.PullRequest == nil {
 		return "—"
 	}
+
 	pr := s.PullRequest
+
 	out := fmt.Sprintf("#%d", pr.Number)
 	switch pr.State {
 	case "merged":
@@ -220,9 +242,11 @@ func displayPR(s protocol.SessionInfo) string {
 	case "draft":
 		out += "d"
 	}
+
 	if pr.Conflicting {
 		return out + " ⚠" // merge conflict — highest-priority signal
 	}
+
 	if s.CI != nil {
 		switch s.CI.State {
 		case "passing":
@@ -233,6 +257,7 @@ func displayPR(s protocol.SessionInfo) string {
 			return out + " ·"
 		}
 	}
+
 	return out
 }
 
@@ -242,9 +267,11 @@ func prColor(s protocol.SessionInfo) color.Color {
 	if pr == nil {
 		return colorDim
 	}
+
 	if pr.Conflicting {
 		return colorRed
 	}
+
 	if s.CI != nil {
 		switch s.CI.State {
 		case "failing":
@@ -255,9 +282,11 @@ func prColor(s protocol.SessionInfo) color.Color {
 			return colorYellow
 		}
 	}
+
 	if pr.State == "merged" || pr.State == "closed" {
 		return colorDim
 	}
+
 	return colorBlue
 }
 
@@ -266,9 +295,11 @@ func displayLastOutput(s protocol.SessionInfo) string {
 	if ts == "" {
 		ts = s.CreatedAt
 	}
+
 	if t, err := time.Parse(time.RFC3339, ts); err == nil {
 		return ShortDuration(time.Since(t))
 	}
+
 	return ""
 }
 
@@ -279,9 +310,11 @@ func displaySummary(s protocol.SessionInfo) string {
 	if text == "" {
 		return ""
 	}
+
 	if lipgloss.Width(text) > maxSummaryWidth {
 		text = text[:maxSummaryWidth-1] + "…"
 	}
+
 	return text
 }
 
@@ -290,6 +323,7 @@ func shortenPath(p string) string {
 	if err == nil && strings.HasPrefix(p, home) {
 		return "~" + p[len(home):]
 	}
+
 	return p
 }
 
@@ -297,17 +331,22 @@ func ShortDuration(d time.Duration) string {
 	if d < time.Minute {
 		return fmt.Sprintf("%ds", int(d.Seconds()))
 	}
+
 	if d < time.Hour {
 		return fmt.Sprintf("%dm", int(d.Minutes()))
 	}
+
 	if d < 24*time.Hour {
 		h := int(d.Hours())
+
 		m := int(d.Minutes()) % 60
 		if m == 0 {
 			return fmt.Sprintf("%dh", h)
 		}
+
 		return fmt.Sprintf("%dh%dm", h, m)
 	}
+
 	return fmt.Sprintf("%dd", int(d.Hours())/24)
 }
 
@@ -316,21 +355,27 @@ func filterSessions(sessions []protocol.SessionInfo, query string) []protocol.Se
 	if query == "" {
 		return sessions
 	}
+
 	terms := strings.Fields(strings.ToLower(query))
+
 	var result []protocol.SessionInfo
+
 	for _, s := range sessions {
 		matchStr := buildMatchString(s)
 		allMatch := true
+
 		for _, term := range terms {
 			if !strings.Contains(matchStr, term) {
 				allMatch = false
 				break
 			}
 		}
+
 		if allMatch {
 			result = append(result, s)
 		}
 	}
+
 	return result
 }
 
@@ -350,10 +395,12 @@ func buildMatchString(s protocol.SessionInfo) string {
 		} else {
 			parts = append(parts, "clean")
 		}
+
 		if s.UnpushedCount > 0 {
 			parts = append(parts, "unpushed")
 		}
 	}
+
 	return strings.Join(parts, " ")
 }
 
@@ -363,53 +410,68 @@ func computeColumnWidths(sessions []protocol.SessionInfo, currentSessionID strin
 		if n := lipgloss.Width(s.Name); n > cw.name {
 			cw.name = n
 		}
+
 		status := s.Status
 		if s.AgentStatus != "" && s.Status == "running" {
 			status = s.AgentStatus
 		}
+
 		if n := lipgloss.Width(status); n > cw.status {
 			cw.status = n
 		}
+
 		summary := displaySummary(s)
 		if n := lipgloss.Width(summary); n > cw.summary {
 			cw.summary = n
 		}
+
 		git := "—"
 		if !s.SharedWorktree {
 			git = displayGit(s.Dirty, s.UnpushedCount)
 		}
+
 		if n := lipgloss.Width(git); n > cw.git {
 			cw.git = n
 		}
+
 		if n := lipgloss.Width(displayPR(s)); n > cw.pr {
 			cw.pr = n
 		}
+
 		output := displayLastOutput(s)
 		if n := lipgloss.Width(output); n > cw.output {
 			cw.output = n
 		}
 	}
+
 	if cw.name < 7 {
 		cw.name = 7
 	}
+
 	if cw.status < 6 {
 		cw.status = 6
 	}
+
 	if cw.summary < 7 {
 		cw.summary = 7
 	}
+
 	if cw.git < 3 {
 		cw.git = 3
 	}
+
 	if cw.pr < 2 {
 		cw.pr = 2
 	}
+
 	if cw.output < 6 {
 		cw.output = 6
 	}
+
 	if cw.summary > maxSummaryWidth {
 		cw.summary = maxSummaryWidth
 	}
+
 	return cw
 }
 
@@ -432,6 +494,7 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 		style := lipgloss.NewStyle().Bold(true).Foreground(colorPurple)
 		line := style.Render(fmt.Sprintf("▸ %s (%d)", gh.name, gh.count))
 		_, _ = fmt.Fprint(w, line)
+
 		return
 	}
 
@@ -445,6 +508,7 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 
 	indicator := "●"
 	indicatorColor := colorGreen
+
 	switch si.info.Status {
 	case "stopped":
 		indicator = "○"
@@ -453,11 +517,14 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 		indicator = "✗"
 		indicatorColor = colorRed
 	}
+
 	styledIndicator := lipgloss.NewStyle().Foreground(indicatorColor).Render(indicator)
+
 	staleMarker := " "
 	if si.info.ConfigStale {
 		staleMarker = lipgloss.NewStyle().Foreground(colorYellow).Render("↻")
 	}
+
 	styledIndicator += staleMarker
 
 	numberLabel := "  "
@@ -469,6 +536,7 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	if si.info.Starred {
 		starredMark = lipgloss.NewStyle().Foreground(colorGold).Render("★")
 	}
+
 	currentMark := " "
 	if isCurrent {
 		currentMark = lipgloss.NewStyle().Foreground(colorGold).Render("▸")
@@ -481,6 +549,7 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 
 	collapseIndicator := "  "
 	childSuffix := ""
+
 	if si.hasChildren {
 		if si.collapsed {
 			collapseIndicator = dim.Render("▸ ")
@@ -489,6 +558,7 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 			collapseIndicator = dim.Render("▾ ")
 		}
 	}
+
 	nameText := si.info.Name + childSuffix
 	nameWidth := d.cols.treeIndent + d.cols.name - lipgloss.Width(si.treePrefix) - lipgloss.Width(collapseIndicator)
 	name := collapseIndicator + pad(nameText, nameWidth)
@@ -497,6 +567,7 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	if si.info.AgentStatus != "" && si.info.Status == "running" {
 		status = si.info.AgentStatus
 	}
+
 	statusRendered := pad(status, d.cols.status)
 	switch status {
 	case "active", "running":
@@ -512,6 +583,7 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	}
 
 	summaryVal := displaySummary(si.info)
+
 	summaryRendered := pad(summaryVal, d.cols.summary)
 	if si.info.SummaryFaded {
 		summaryRendered = dim.Render(summaryRendered)
@@ -645,15 +717,19 @@ func (m *overlayModel) resizeList() {
 	if m.width == 0 || m.height == 0 {
 		return
 	}
+
 	reserve := 10
 	if m.state == stateConfirmDelete || m.state == stateConfirmStop || m.state == stateConfirmRestart || m.state == stateRestartMenu || m.state == stateRestartingAll {
 		reserve = 14
 	}
+
 	panelWidth := min(m.contentWidth+4, m.width-4)
+
 	listHeight := min(len(m.list.Items())+4, m.height-reserve)
 	if listHeight < 4 {
 		listHeight = 4
 	}
+
 	m.list.SetSize(panelWidth-4, listHeight)
 }
 
@@ -676,6 +752,7 @@ func SortSessions(sessions []protocol.SessionInfo) {
 		}
 
 		ri := si.Status == "running"
+
 		rj := sj.Status == "running"
 		if ri != rj {
 			return ri
@@ -687,8 +764,12 @@ func SortSessions(sessions []protocol.SessionInfo) {
 
 func buildGroupedItems(sessions []protocol.SessionInfo, collapsed map[string]bool) []list.Item {
 	groups := map[string][]protocol.SessionInfo{}
-	var systemSessions []protocol.SessionInfo
-	var repoOrder []string
+
+	var (
+		systemSessions []protocol.SessionInfo
+		repoOrder      []string
+	)
+
 	seen := map[string]bool{}
 
 	for _, s := range sessions {
@@ -696,16 +777,20 @@ func buildGroupedItems(sessions []protocol.SessionInfo, collapsed map[string]boo
 			systemSessions = append(systemSessions, s)
 			continue
 		}
+
 		repo := s.RepoName
 		if repo == "" {
 			repo = "(no repo)"
 		}
+
 		if !seen[repo] {
 			repoOrder = append(repoOrder, repo)
 			seen[repo] = true
 		}
+
 		groups[repo] = append(groups[repo], s)
 	}
+
 	sort.Strings(repoOrder)
 
 	if len(systemSessions) > 0 {
@@ -714,6 +799,7 @@ func buildGroupedItems(sessions []protocol.SessionInfo, collapsed map[string]boo
 	}
 
 	var items []list.Item
+
 	for _, repo := range repoOrder {
 		g := groups[repo]
 		items = append(items, groupHeader{name: repo, count: len(g)})
@@ -724,7 +810,9 @@ func buildGroupedItems(sessions []protocol.SessionInfo, collapsed map[string]boo
 		}
 
 		children := make(map[string][]protocol.SessionInfo)
+
 		var roots []protocol.SessionInfo
+
 		for _, s := range g {
 			if s.ParentID == "" || s.ParentID == s.ID || !idSet[s.ParentID] {
 				roots = append(roots, s)
@@ -734,14 +822,17 @@ func buildGroupedItems(sessions []protocol.SessionInfo, collapsed map[string]boo
 		}
 
 		SortSessions(roots)
+
 		for k := range children {
 			SortSessions(children[k])
 		}
 
 		var countDescendants func(id string, seen map[string]bool) int
+
 		countDescendants = func(id string, seen map[string]bool) int {
 			kids := children[id]
 			n := 0
+
 			for _, kid := range kids {
 				if !seen[kid.ID] {
 					seen[kid.ID] = true
@@ -749,23 +840,29 @@ func buildGroupedItems(sessions []protocol.SessionInfo, collapsed map[string]boo
 					n += countDescendants(kid.ID, seen)
 				}
 			}
+
 			return n
 		}
 
 		visited := make(map[string]bool)
+
 		var walk func(s protocol.SessionInfo, prefix, childPrefix string)
+
 		walk = func(s protocol.SessionInfo, prefix, childPrefix string) {
 			if visited[s.ID] {
 				return
 			}
+
 			visited[s.ID] = true
 			kids := children[s.ID]
 			hasKids := len(kids) > 0
 			isCollapsed := collapsed[s.ID] && hasKids
+
 			desc := 0
 			if hasKids {
 				desc = countDescendants(s.ID, map[string]bool{s.ID: true})
 			}
+
 			items = append(items, sessionItem{
 				info:            s,
 				treePrefix:      prefix,
@@ -775,6 +872,7 @@ func buildGroupedItems(sessions []protocol.SessionInfo, collapsed map[string]boo
 			})
 			if isCollapsed {
 				var markVisited func(id string)
+
 				markVisited = func(id string) {
 					for _, kid := range children[id] {
 						if !visited[kid.ID] {
@@ -784,8 +882,10 @@ func buildGroupedItems(sessions []protocol.SessionInfo, collapsed map[string]boo
 					}
 				}
 				markVisited(s.ID)
+
 				return
 			}
+
 			for i, kid := range kids {
 				if i == len(kids)-1 {
 					walk(kid, childPrefix+"└── ", childPrefix+"    ")
@@ -805,6 +905,7 @@ func buildGroupedItems(sessions []protocol.SessionInfo, collapsed map[string]boo
 			}
 		}
 	}
+
 	return items
 }
 
@@ -815,8 +916,11 @@ func buildScenarioGroupedItems(sessions []protocol.SessionInfo, collapsed map[st
 	}
 
 	scenarioMap := map[string]*scenarioGroup{}
-	var scenarioOrder []string
-	var ungrouped []protocol.SessionInfo
+
+	var (
+		scenarioOrder []string
+		ungrouped     []protocol.SessionInfo
+	)
 
 	for _, s := range sessions {
 		sid := s.ScenarioID
@@ -824,10 +928,12 @@ func buildScenarioGroupedItems(sessions []protocol.SessionInfo, collapsed map[st
 			ungrouped = append(ungrouped, s)
 			continue
 		}
+
 		if _, ok := scenarioMap[sid]; !ok {
 			scenarioOrder = append(scenarioOrder, sid)
 			scenarioMap[sid] = &scenarioGroup{sessions: nil}
 		}
+
 		scenarioMap[sid].sessions = append(scenarioMap[sid].sessions, s)
 	}
 
@@ -835,12 +941,14 @@ func buildScenarioGroupedItems(sessions []protocol.SessionInfo, collapsed map[st
 		g := scenarioMap[sid]
 		if len(g.sessions) > 0 {
 			name := sid
+
 			for _, s := range g.sessions {
 				if s.ScenarioName != "" {
 					name = s.ScenarioName
 					break
 				}
 			}
+
 			g.name = name
 		}
 	}
@@ -852,11 +960,13 @@ func buildScenarioGroupedItems(sessions []protocol.SessionInfo, collapsed map[st
 		if g.name == "" {
 			continue
 		}
+
 		SortSessions(g.sessions)
 
 		running := 0
 		stopped := 0
 		errored := 0
+
 		for _, s := range g.sessions {
 			switch s.Status {
 			case "running":
@@ -867,7 +977,9 @@ func buildScenarioGroupedItems(sessions []protocol.SessionInfo, collapsed map[st
 				errored++
 			}
 		}
+
 		var status string
+
 		switch {
 		case errored > 0:
 			status = " (errored)"
@@ -887,6 +999,7 @@ func buildScenarioGroupedItems(sessions []protocol.SessionInfo, collapsed map[st
 
 	if len(ungrouped) > 0 {
 		SortSessions(ungrouped)
+
 		items = append(items, groupHeader{name: "(no scenario)", count: len(ungrouped)})
 		for _, s := range ungrouped {
 			items = append(items, sessionItem{info: s})
@@ -898,6 +1011,7 @@ func buildScenarioGroupedItems(sessions []protocol.SessionInfo, collapsed map[st
 
 func maxTreeIndentFromItems(items []list.Item) int {
 	maxIndent := 0
+
 	for _, item := range items {
 		if si, ok := item.(sessionItem); ok {
 			if w := lipgloss.Width(si.treePrefix); w > maxIndent {
@@ -905,6 +1019,7 @@ func maxTreeIndentFromItems(items []list.Item) int {
 			}
 		}
 	}
+
 	return maxIndent
 }
 
@@ -912,8 +1027,10 @@ func newOverlayModel(sessions []protocol.SessionInfo, currentSessionID string, f
 	if collapsed == nil {
 		collapsed = make(map[string]bool)
 	}
+
 	items := buildGroupedItems(sessions, collapsed)
 	assignSessionIndices(items)
+
 	cols := computeColumnWidths(sessions, currentSessionID)
 	cols.treeIndent = maxTreeIndentFromItems(items)
 	contentWidth := cols.totalWidth()
@@ -927,39 +1044,51 @@ func newOverlayModel(sessions []protocol.SessionInfo, currentSessionID string, f
 	l.KeyMap.Quit = key.NewBinding(key.WithKeys())
 
 	cursorSet := false
+
 	if currentSessionID != "" {
 		for i, item := range items {
 			if si, ok := item.(sessionItem); ok && si.info.ID == currentSessionID {
 				l.Select(i)
+
 				cursorSet = true
+
 				break
 			}
 		}
+
 		if !cursorSet {
 			parentOf := make(map[string]string)
+
 			for _, s := range sessions {
 				if s.ParentID != "" && s.ParentID != s.ID {
 					parentOf[s.ID] = s.ParentID
 				}
 			}
+
 			seen := map[string]bool{currentSessionID: true}
+
 			cur := parentOf[currentSessionID]
 			for cur != "" && !seen[cur] {
 				seen[cur] = true
 				for i, item := range items {
 					if si, ok := item.(sessionItem); ok && si.info.ID == cur {
 						l.Select(i)
+
 						cursorSet = true
+
 						break
 					}
 				}
+
 				if cursorSet {
 					break
 				}
+
 				cur = parentOf[cur]
 			}
 		}
 	}
+
 	if !cursorSet {
 		if _, ok := l.SelectedItem().(groupHeader); ok {
 			l.CursorDown()
@@ -1000,7 +1129,9 @@ func (m overlayModel) refreshSessionsCmd() tea.Cmd {
 	if m.refreshSessions == nil {
 		return nil
 	}
+
 	fetch := m.refreshSessions
+
 	return func() tea.Msg {
 		return refreshSessionsMsg{sessions: fetch()}
 	}
@@ -1012,6 +1143,7 @@ func (m overlayModel) refreshSessionsCmd() tea.Cmd {
 func (m overlayModel) beginRestartQueue(match func(protocol.SessionInfo) bool) (tea.Model, tea.Cmd) {
 	if m.restartSession != nil {
 		var queue []string
+
 		for _, s := range m.visibleSessions() {
 			if match(s) {
 				queue = append(queue, s.ID)
@@ -1022,17 +1154,21 @@ func (m overlayModel) beginRestartQueue(match func(protocol.SessionInfo) bool) (
 				}
 			}
 		}
+
 		if len(queue) > 0 {
 			m.restartQueue = queue
 			m.restartIdx = 0
 			m.restartErrors = nil
 			m.state = stateRestartingAll
 			m.resizeList()
+
 			return m, m.restartNextCmd()
 		}
 	}
+
 	m.state = stateList
 	m.resizeList()
+
 	return m, nil
 }
 
@@ -1040,9 +1176,11 @@ func (m overlayModel) restartNextCmd() tea.Cmd {
 	if m.restartIdx >= len(m.restartQueue) {
 		return nil
 	}
+
 	sid := m.restartQueue[m.restartIdx]
 	idx := m.restartIdx
 	restartFn := m.restartSession
+
 	return func() tea.Msg {
 		return restartOneResultMsg{index: idx, err: restartFn(sid)}
 	}
@@ -1052,12 +1190,15 @@ func (m overlayModel) fetchPreviewCmd() tea.Cmd {
 	if m.fetchPreview == nil {
 		return nil
 	}
+
 	item, ok := m.list.SelectedItem().(sessionItem)
 	if !ok {
 		return nil
 	}
+
 	sid := item.info.ID
 	fetch := m.fetchPreview
+
 	return func() tea.Msg {
 		return previewMsg{sessionID: sid, content: fetch(sid)}
 	}
@@ -1070,6 +1211,7 @@ func (m *overlayModel) rebuildForView() {
 	}
 
 	var items []list.Item
+
 	switch m.view {
 	case viewAll:
 		items = buildGroupedItems(filtered, m.collapsed)
@@ -1080,16 +1222,19 @@ func (m *overlayModel) rebuildForView() {
 			items = append(items, sessionItem{info: s})
 		}
 	}
+
 	assignSessionIndices(items)
 
 	m.cols = computeColumnWidths(filtered, m.currentSessionID)
 	if m.view == viewAll || m.view == viewScenario {
 		m.cols.treeIndent = maxTreeIndentFromItems(items)
 	}
+
 	m.contentWidth = m.cols.totalWidth()
 	m.list.SetItems(items)
 	m.list.SetDelegate(compactDelegate{cols: m.cols, currentSessionID: m.currentSessionID, shortcutKeys: m.shortcutKeys})
 	m.list.Select(0)
+
 	if len(items) > 0 {
 		if _, ok := m.list.SelectedItem().(groupHeader); ok {
 			m.list.CursorDown()
@@ -1106,12 +1251,15 @@ func (m *overlayModel) selectSessionByID(id string) {
 	}
 	// ID not visible — walk up the parent chain to find a visible ancestor.
 	parentOf := make(map[string]string)
+
 	for _, s := range m.allSessions {
 		if s.ParentID != "" && s.ParentID != s.ID {
 			parentOf[s.ID] = s.ParentID
 		}
 	}
+
 	seen := map[string]bool{id: true}
+
 	cur := parentOf[id]
 	for cur != "" && !seen[cur] {
 		seen[cur] = true
@@ -1121,8 +1269,10 @@ func (m *overlayModel) selectSessionByID(id string) {
 				return
 			}
 		}
+
 		cur = parentOf[cur]
 	}
+
 	if _, ok := m.list.SelectedItem().(groupHeader); ok {
 		m.list.CursorDown()
 	}
@@ -1130,19 +1280,23 @@ func (m *overlayModel) selectSessionByID(id string) {
 
 func (m *overlayModel) parentsWithChildren() []string {
 	childOf := make(map[string]bool)
+
 	idSet := make(map[string]bool)
 	for _, s := range m.allSessions {
 		idSet[s.ID] = true
 	}
+
 	for _, s := range m.allSessions {
 		if s.ParentID != "" && s.ParentID != s.ID && idSet[s.ParentID] {
 			childOf[s.ParentID] = true
 		}
 	}
+
 	var parents []string
 	for id := range childOf {
 		parents = append(parents, id)
 	}
+
 	return parents
 }
 
@@ -1167,6 +1321,7 @@ func (m *overlayModel) visibleSessions() []protocol.SessionInfo {
 	if m.filterInput.Value() != "" {
 		sessions = filterSessions(sessions, m.filterInput.Value())
 	}
+
 	return sessions
 }
 
@@ -1179,6 +1334,7 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.previewSessionID = msg.sessionID
 			}
 		}
+
 		return m, nil
 
 	case starResultMsg:
@@ -1189,47 +1345,61 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					break
 				}
 			}
+
 			m.rebuildForView()
 		}
+
 		return m, m.fetchPreviewCmd()
 
 	case deleteResultMsg:
 		if msg.err != nil {
 			m.state = stateList
 			m.resizeList()
+
 			return m, nil
 		}
+
 		var newSessions []protocol.SessionInfo
+
 		for _, s := range m.allSessions {
 			if s.ID != msg.sessionID {
 				newSessions = append(newSessions, s)
 			}
 		}
+
 		m.allSessions = newSessions
 		if len(newSessions) == 0 {
 			return m, tea.Quit
 		}
+
 		curIdx := m.list.Index()
 		m.rebuildForView()
+
 		if curIdx >= len(m.list.Items()) {
 			curIdx = len(m.list.Items()) - 1
 		}
+
 		if curIdx >= 0 {
 			m.list.Select(curIdx)
 		}
+
 		if _, ok := m.list.SelectedItem().(groupHeader); ok {
 			m.list.CursorDown()
+
 			if _, ok := m.list.SelectedItem().(groupHeader); ok {
 				m.list.CursorUp()
 			}
 		}
+
 		m.state = stateList
 		m.resizeList()
+
 		return m, m.fetchPreviewCmd()
 
 	case restartResultMsg:
 		m.state = stateList
 		m.resizeList()
+
 		return m, m.fetchPreviewCmd()
 
 	case stopResultMsg:
@@ -1240,6 +1410,7 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					break
 				}
 			}
+
 			if msg.sessionID == m.currentSessionID {
 				m.stoppedCurrent = true
 			}
@@ -1249,20 +1420,25 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if item, ok := m.list.SelectedItem().(sessionItem); ok {
 				curSID = item.info.ID
 			}
+
 			m.rebuildForView()
 			m.selectSessionByID(curSID)
 		}
+
 		m.state = stateList
 		m.resizeList()
+
 		return m, m.fetchPreviewCmd()
 
 	case restartOneResultMsg:
 		if m.state != stateRestartingAll {
 			return m, nil
 		}
+
 		if msg.err != nil {
 			m.restartErrors = append(m.restartErrors, msg.err)
 		}
+
 		m.restartIdx = msg.index + 1
 		if m.restartIdx >= len(m.restartQueue) {
 			m.state = stateList
@@ -1270,71 +1446,89 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.restartIdx = 0
 			m.restartErrors = nil
 			m.resizeList()
+
 			return m, m.fetchPreviewCmd()
 		}
+
 		return m, m.restartNextCmd()
 
 	case refreshTickMsg:
 		if m.state != stateList && m.state != stateFilter {
 			return m, m.refreshTickCmd()
 		}
+
 		return m, m.refreshSessionsCmd()
 
 	case refreshSessionsMsg:
 		if msg.sessions == nil {
 			return m, m.refreshTickCmd()
 		}
+
 		curSID := ""
 		if item, ok := m.list.SelectedItem().(sessionItem); ok {
 			curSID = item.info.ID
 		}
+
 		m.allSessions = msg.sessions
 		m.rebuildForView()
 		m.resizeList()
+
 		if curSID != "" {
 			m.selectSessionByID(curSID)
 		}
+
 		return m, tea.Batch(m.fetchPreviewCmd(), m.refreshTickCmd())
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
 		m.resizeList()
+
 		if m.state == stateCreate && m.createModel != nil {
 			m.createModel.width = msg.Width
 			m.createModel.height = msg.Height
 		}
+
 		return m, nil
 	}
 
 	if m.state == stateCreate && m.createModel != nil {
 		updated, cmd := m.createModel.Update(msg)
+
 		cm, ok := updated.(createSessionModel)
 		if !ok {
 			m.createModel = nil
 			m.state = stateList
 			m.resizeList()
+
 			return m, m.fetchPreviewCmd()
 		}
+
 		m.createModel = &cm
 		if cm.done {
 			m.createName = strings.TrimSpace(cm.nameInput.Value())
+
 			m.createRepoPath = strings.TrimSpace(cm.repoInput.Value())
 			if m.createRepoPath != "" {
 				m.createRepoPath = expandPath(m.createRepoPath)
 			}
+
 			m.createAgent = cm.selectedAgent()
 			m.createDone = true
+
 			return m, tea.Quit
 		}
+
 		if keyMsg, isKey := msg.(tea.KeyPressMsg); isKey {
 			if keyMsg.String() == "esc" || keyMsg.String() == "ctrl+c" {
 				m.createModel = nil
 				m.state = stateList
 				m.resizeList()
+
 				return m, m.fetchPreviewCmd()
 			}
 		}
+
 		return m, cmd
 	}
 
@@ -1347,21 +1541,28 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.filterInput.Blur()
 				m.filterInput.SetValue("")
 				m.rebuildForView()
+
 				return m, m.fetchPreviewCmd()
 			case "enter":
 				m.filterInput.Blur()
+
 				if item, ok := m.list.SelectedItem().(sessionItem); ok {
 					m.selected = &item.info
 					return m, tea.Quit
 				}
+
 				m.state = stateList
+
 				return m, m.fetchPreviewCmd()
 			default:
 				var cmd tea.Cmd
+
 				m.filterInput, cmd = m.filterInput.Update(msg)
 				viewFiltered := m.sessionsForView()
 				filtered := filterSessions(viewFiltered, m.filterInput.Value())
+
 				var items []list.Item
+
 				switch m.view {
 				case viewAll:
 					items = buildGroupedItems(filtered, m.collapsed)
@@ -1372,18 +1573,22 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						items = append(items, sessionItem{info: s})
 					}
 				}
+
 				assignSessionIndices(items)
 				m.list.SetItems(items)
 				m.list.Select(0)
+
 				if len(items) > 0 {
 					if _, ok := m.list.SelectedItem().(groupHeader); ok {
 						m.list.CursorDown()
 					}
 				}
+
 				if _, ok := m.list.SelectedItem().(sessionItem); !ok {
 					m.previewContent = ""
 					m.previewSessionID = ""
 				}
+
 				return m, tea.Batch(cmd, m.fetchPreviewCmd())
 			}
 
@@ -1393,16 +1598,20 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if item, ok := m.list.SelectedItem().(sessionItem); ok && m.deleteSession != nil {
 					sid := item.info.ID
 					deleteFn := m.deleteSession
+
 					return m, func() tea.Msg {
 						return deleteResultMsg{sessionID: sid, err: deleteFn(sid)}
 					}
 				}
+
 				m.state = stateList
 				m.resizeList()
+
 				return m, nil
 			default:
 				m.state = stateList
 				m.resizeList()
+
 				return m, nil
 			}
 
@@ -1412,16 +1621,20 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if item, ok := m.list.SelectedItem().(sessionItem); ok && m.stopSession != nil {
 					sid := item.info.ID
 					stopFn := m.stopSession
+
 					return m, func() tea.Msg {
 						return stopResultMsg{sessionID: sid, err: stopFn(sid)}
 					}
 				}
+
 				m.state = stateList
 				m.resizeList()
+
 				return m, nil
 			default:
 				m.state = stateList
 				m.resizeList()
+
 				return m, nil
 			}
 
@@ -1431,16 +1644,20 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if item, ok := m.list.SelectedItem().(sessionItem); ok && m.restartSession != nil {
 					sid := item.info.ID
 					restartFn := m.restartSession
+
 					return m, func() tea.Msg {
 						return restartResultMsg{sessionID: sid, err: restartFn(sid)}
 					}
 				}
+
 				m.state = stateList
 				m.resizeList()
+
 				return m, nil
 			default:
 				m.state = stateList
 				m.resizeList()
+
 				return m, nil
 			}
 
@@ -1455,6 +1672,7 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			default:
 				m.state = stateList
 				m.resizeList()
+
 				return m, nil
 			}
 
@@ -1464,8 +1682,10 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if end > len(m.restartQueue) {
 					end = len(m.restartQueue)
 				}
+
 				m.restartQueue = m.restartQueue[:end]
 			}
+
 			return m, nil
 
 		case stateList:
@@ -1476,17 +1696,20 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "left", "h":
 				m.view = m.view.prev()
 				m.rebuildForView()
+
 				return m, m.fetchPreviewCmd()
 
 			case "right", "l":
 				m.view = m.view.next()
 				m.rebuildForView()
+
 				return m, m.fetchPreviewCmd()
 
 			case "enter":
 				if item, ok := m.list.SelectedItem().(sessionItem); ok {
 					m.selected = &item.info
 				}
+
 				return m, tea.Quit
 
 			case "x":
@@ -1494,6 +1717,7 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.state = stateConfirmDelete
 					m.resizeList()
 				}
+
 				return m, nil
 
 			case "r":
@@ -1501,11 +1725,13 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.state = stateConfirmRestart
 					m.resizeList()
 				}
+
 				return m, nil
 
 			case "R":
 				m.state = stateRestartMenu
 				m.resizeList()
+
 				return m, nil
 
 			case "S":
@@ -1513,6 +1739,7 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.state = stateConfirmStop
 					m.resizeList()
 				}
+
 				return m, nil
 
 			case "s":
@@ -1520,10 +1747,12 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					sid := item.info.ID
 					newStarred := !item.info.Starred
 					toggleFn := m.toggleStar
+
 					return m, func() tea.Msg {
 						return starResultMsg{sessionID: sid, starred: newStarred, err: toggleFn(sid, newStarred)}
 					}
 				}
+
 				return m, nil
 
 			case " ", "space":
@@ -1534,31 +1763,39 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					} else {
 						m.collapsed[sid] = true
 					}
+
 					m.rebuildForView()
 					m.selectSessionByID(sid)
+
 					return m, m.fetchPreviewCmd()
 				}
+
 				return m, nil
 
 			case "C":
 				if m.view != viewAll {
 					return m, nil
 				}
+
 				parents := m.parentsWithChildren()
 				if len(parents) == 0 {
 					return m, nil
 				}
+
 				allCollapsed := true
+
 				for _, id := range parents {
 					if !m.collapsed[id] {
 						allCollapsed = false
 						break
 					}
 				}
+
 				curSID := ""
 				if item, ok := m.list.SelectedItem().(sessionItem); ok {
 					curSID = item.info.ID
 				}
+
 				if allCollapsed {
 					for _, id := range parents {
 						delete(m.collapsed, id)
@@ -1568,34 +1805,43 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.collapsed[id] = true
 					}
 				}
+
 				m.rebuildForView()
+
 				if curSID != "" {
 					m.selectSessionByID(curSID)
 				}
+
 				return m, m.fetchPreviewCmd()
 
 			case "/":
 				m.filterInput.SetValue("")
 				m.filterInput.Focus()
 				m.state = stateFilter
+
 				return m, textinput.Blink
 
 			case "j", "down":
 				m.list.CursorDown()
+
 				if _, ok := m.list.SelectedItem().(groupHeader); ok {
 					m.list.CursorDown()
 				}
+
 				return m, m.fetchPreviewCmd()
 
 			case "k", "up":
 				m.list.CursorUp()
+
 				if _, ok := m.list.SelectedItem().(groupHeader); ok {
 					m.list.CursorUp()
 				}
+
 				return m, m.fetchPreviewCmd()
 
 			case "tab":
 				items := m.list.Items()
+
 				cur := m.list.Index()
 				for i := cur + 1; i < len(items); i++ {
 					if _, ok := items[i].(groupHeader); ok {
@@ -1605,6 +1851,7 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 					}
 				}
+
 				for i := 0; i <= cur; i++ {
 					if _, ok := items[i].(groupHeader); ok {
 						if i+1 < len(items) {
@@ -1613,25 +1860,30 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 					}
 				}
+
 				return m, nil
 
 			case "shift+tab":
 				items := m.list.Items()
 				cur := m.list.Index()
 				currentGroupHeader := -1
+
 				for i := cur; i >= 0; i-- {
 					if _, ok := items[i].(groupHeader); ok {
 						currentGroupHeader = i
 						break
 					}
 				}
+
 				prevGroupHeader := -1
+
 				for i := currentGroupHeader - 1; i >= 0; i-- {
 					if _, ok := items[i].(groupHeader); ok {
 						prevGroupHeader = i
 						break
 					}
 				}
+
 				if prevGroupHeader == -1 {
 					for i := len(items) - 1; i > cur; i-- {
 						if _, ok := items[i].(groupHeader); ok {
@@ -1640,10 +1892,12 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 					}
 				}
+
 				if prevGroupHeader >= 0 && prevGroupHeader+1 < len(items) {
 					m.list.Select(prevGroupHeader + 1)
 					return m, m.fetchPreviewCmd()
 				}
+
 				return m, nil
 
 			case "n":
@@ -1658,11 +1912,13 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 					}
 				}
+
 				cm := newCreateSessionModel(defaultRepo, m.repoSuggestions, m.agents, m.defaultAgent)
 				cm.width = m.width
 				cm.height = m.height
 				m.createModel = &cm
 				m.state = stateCreate
+
 				return m, textinput.Blink
 
 			default:
@@ -1674,9 +1930,11 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 								if si, ok := item.(sessionItem); ok && si.sessionIndex == target {
 									m.list.Select(i)
 									m.selected = &si.info
+
 									return m, tea.Quit
 								}
 							}
+
 							return m, nil
 						}
 					}
@@ -1686,12 +1944,15 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	var cmd tea.Cmd
+
 	m.list, cmd = m.list.Update(msg)
+
 	return m, cmd
 }
 
 func (m overlayModel) View() tea.View {
 	w := m.width
+
 	h := m.height
 	if w == 0 || h == 0 {
 		return tea.NewView("")
@@ -1701,6 +1962,7 @@ func (m overlayModel) View() tea.View {
 		cm := *m.createModel
 		cm.width = w
 		cm.height = h
+
 		return cm.View()
 	}
 
@@ -1718,6 +1980,7 @@ func (m overlayModel) View() tea.View {
 		activeViewStyle := lipgloss.NewStyle().Bold(true).Foreground(colorPurple)
 
 		var titleParts []string
+
 		for i, name := range viewNames {
 			if viewMode(i) == m.view {
 				titleParts = append(titleParts, activeViewStyle.Render(name))
@@ -1725,11 +1988,14 @@ func (m overlayModel) View() tea.View {
 				titleParts = append(titleParts, dimArrow.Render(name))
 			}
 		}
+
 		title := dimArrow.Render("◂ ") + strings.Join(titleParts, dimArrow.Render(" │ ")) + dimArrow.Render(" ▸")
+
 		if m.profile != "" {
 			dimStyle := lipgloss.NewStyle().Foreground(colorDim)
 			title += " " + dimStyle.Render("["+m.profile+"]")
 		}
+
 		panelContent.WriteString(title)
 		panelContent.WriteString("\n")
 	}
@@ -1746,6 +2012,7 @@ func (m overlayModel) View() tea.View {
 		"Output")
 	panelContent.WriteString(dim.Render(headerLine))
 	panelContent.WriteString("\n")
+
 	sepLine := fmt.Sprintf("%s%s  %s  %s  %s  %s  %s",
 		headerPrefix,
 		strings.Repeat("─", nameColWidth),
@@ -1760,6 +2027,7 @@ func (m overlayModel) View() tea.View {
 	if len(m.list.Items()) == 0 && m.view != viewAll {
 		emptyStyle := lipgloss.NewStyle().Foreground(colorDim).Italic(true)
 		emptyMsg := ""
+
 		switch m.view {
 		case viewNeedsAttention:
 			emptyMsg = "Nothing needs your attention"
@@ -1768,6 +2036,7 @@ func (m overlayModel) View() tea.View {
 		case viewStarred:
 			emptyMsg = "No starred sessions"
 		}
+
 		panelContent.WriteString("\n  ")
 		panelContent.WriteString(emptyStyle.Render(emptyMsg))
 		panelContent.WriteString("\n")
@@ -1777,29 +2046,36 @@ func (m overlayModel) View() tea.View {
 
 	if item, ok := m.list.SelectedItem().(sessionItem); ok {
 		s := item.info
+
 		panelContent.WriteString("\n")
 
 		var line1 []string
+
 		if !s.SharedWorktree {
 			if s.Branch != "" {
 				branch := s.Branch
 				if p := strings.SplitN(branch, "/", 3); len(p) == 3 {
 					branch = p[2]
 				}
+
 				line1 = append(line1, "branch: "+branch)
 			} else if s.InPlace {
 				line1 = append(line1, "mode: in-place")
 			}
+
 			if s.BaseBranch != "" {
 				line1 = append(line1, "base: "+s.BaseBranch)
 			}
 		}
+
 		if s.Agent != "" {
 			line1 = append(line1, "agent: "+s.Agent)
 		}
+
 		if len(line1) > 0 {
 			panelContent.WriteString(dim.Render(strings.Join(line1, "  ")))
 		}
+
 		if s.ConfigStale {
 			panelContent.WriteString("\n")
 			panelContent.WriteString(lipgloss.NewStyle().Foreground(colorYellow).Render("config stale — restart to apply changes"))
@@ -1809,9 +2085,11 @@ func (m overlayModel) View() tea.View {
 			pr := s.PullRequest
 			prLine := fmt.Sprintf("PR #%d %s", pr.Number, pr.State)
 			lineColor := lipgloss.NewStyle().Foreground(prColor(s))
+
 			if pr.Conflicting {
 				prLine += "  ⚠ merge conflict"
 			}
+
 			if s.CI != nil {
 				switch s.CI.State {
 				case "passing":
@@ -1822,6 +2100,7 @@ func (m overlayModel) View() tea.View {
 					prLine += "  CI: pending"
 				}
 			}
+
 			panelContent.WriteString("\n")
 			panelContent.WriteString(lineColor.Render(prLine))
 		}
@@ -1830,12 +2109,15 @@ func (m overlayModel) View() tea.View {
 		if s.WorktreePath != "" {
 			line2 = append(line2, shortenPath(s.WorktreePath))
 		}
+
 		if len(s.ID) >= 7 {
 			line2 = append(line2, "id: "+s.ID[:7])
 		}
+
 		if t, err := time.Parse(time.RFC3339, s.CreatedAt); err == nil {
 			line2 = append(line2, "created "+ShortDuration(time.Since(t))+" ago")
 		}
+
 		if len(line2) > 0 {
 			panelContent.WriteString("\n")
 			panelContent.WriteString(dim.Render(strings.Join(line2, "  ")))
@@ -1848,21 +2130,27 @@ func (m overlayModel) View() tea.View {
 			s := item.info
 			if !s.SharedWorktree && (s.Dirty || s.UnpushedCount > 0) {
 				warnStyle := lipgloss.NewStyle().Foreground(colorRed).Bold(true)
+
 				panelContent.WriteString("\n")
 				panelContent.WriteString(warnStyle.Render("⚠ Session has unsaved work:"))
+
 				if s.Dirty {
 					panelContent.WriteString("\n")
 					panelContent.WriteString(warnStyle.Render("  • Uncommitted changes"))
 				}
+
 				if s.UnpushedCount > 0 {
 					panelContent.WriteString("\n")
+
 					label := "commits"
 					if s.UnpushedCount == 1 {
 						label = "commit"
 					}
+
 					panelContent.WriteString(warnStyle.Render(fmt.Sprintf("  • %d unpushed %s", s.UnpushedCount, label)))
 				}
 			}
+
 			panelContent.WriteString("\n")
 			panelContent.WriteString(lipgloss.NewStyle().
 				Foreground(colorRed).
@@ -1886,24 +2174,30 @@ func (m overlayModel) View() tea.View {
 		sessions := m.visibleSessions()
 		all := len(sessions)
 		outdated, stopped := 0, 0
+
 		for _, s := range sessions {
 			if s.ConfigStale {
 				outdated++
 			}
+
 			if s.Status == "stopped" {
 				stopped++
 			}
 		}
+
 		green := lipgloss.NewStyle().Foreground(colorGreen)
+
 		panelContent.WriteString("\n")
 		panelContent.WriteString(green.Render("Restart:"))
 		panelContent.WriteString(green.Render(fmt.Sprintf("  [a]ll (%d)   [o]utdated (%d)   [s]topped (%d)   esc cancel", all, outdated, stopped)))
 	case stateRestartingAll:
 		panelContent.WriteString("\n")
+
 		progress := min(m.restartIdx+1, len(m.restartQueue))
 		panelContent.WriteString(lipgloss.NewStyle().
 			Foreground(colorGreen).
 			Render(fmt.Sprintf("Restarting %d/%d sessions…", progress, len(m.restartQueue))))
+
 		if len(m.restartErrors) > 0 {
 			panelContent.WriteString(lipgloss.NewStyle().
 				Foreground(colorRed).
@@ -1916,13 +2210,17 @@ func (m overlayModel) View() tea.View {
 	// stopped" in the menu), so only show them in the list/filter states.
 	if m.state == stateList || m.state == stateFilter {
 		helpStyle := lipgloss.NewStyle().Foreground(colorFaint)
+
 		panelContent.WriteString("\n")
+
 		helpParts := []string{}
+
 		if len(m.shortcutKeys) > 0 {
 			first := string(m.shortcutKeys[0])
 			last := string(m.shortcutKeys[len(m.shortcutKeys)-1])
 			helpParts = append(helpParts, first+"-"+last+" jump")
 		}
+
 		helpParts = append(helpParts, "enter attach", "n new", "◂▸ view", "/ filter", "tab group", "s star", "space fold", "C fold-all", "x delete", "S stop", "r/R restart", "q quit")
 		panelContent.WriteString(helpStyle.Render(strings.Join(helpParts, "  ")))
 	}
@@ -1938,12 +2236,15 @@ func (m overlayModel) View() tea.View {
 	// --- Build background from preview scrollback ---
 	dimStyle := lipgloss.NewStyle().Foreground(colorPreview)
 	bgLines := make([]string, h)
+
 	if m.previewContent != "" {
 		raw := strings.Split(m.previewContent, "\n")
+
 		start := 0
 		if len(raw) > h {
 			start = len(raw) - h
 		}
+
 		for i := 0; i < h; i++ {
 			idx := start + i
 			if idx < len(raw) {
@@ -1953,6 +2254,7 @@ func (m overlayModel) View() tea.View {
 				} else if vis > w {
 					line = ansi.Truncate(line, w, "")
 				}
+
 				bgLines[i] = dimStyle.Render(line)
 			} else {
 				bgLines[i] = strings.Repeat(" ", w)
@@ -1967,6 +2269,7 @@ func (m overlayModel) View() tea.View {
 	// --- Overlay panel on background ---
 	panelLines := strings.Split(panel, "\n")
 	panelH := len(panelLines)
+
 	panelRenderedW := 0
 	for _, pl := range panelLines {
 		if lw := lipgloss.Width(pl); lw > panelRenderedW {
@@ -1976,9 +2279,11 @@ func (m overlayModel) View() tea.View {
 
 	offsetY := (h - panelH) / 2
 	offsetX := (w - panelRenderedW) / 2
+
 	if offsetY < 0 {
 		offsetY = 0
 	}
+
 	if offsetX < 0 {
 		offsetX = 0
 	}
@@ -1995,6 +2300,7 @@ func (m overlayModel) View() tea.View {
 
 	v := tea.NewView(strings.Join(bgLines, "\n"))
 	v.AltScreen = true
+
 	return v
 }
 
@@ -2032,15 +2338,18 @@ func RunOverlay(sessions []protocol.SessionInfo, currentSessionID string, fetchP
 		overlayResult.CreateName = result.createName
 		overlayResult.CreateRepoPath = result.createRepoPath
 		overlayResult.CreateAgent = result.createAgent
+
 		return overlayResult
 	}
 
 	if result.selected != nil {
 		overlayResult.SessionID = result.selected.ID
+
 		overlayResult.Action = "attach"
 		if result.state == stateConfirmDelete {
 			overlayResult.Action = "delete"
 		}
+
 		return overlayResult
 	}
 
@@ -2050,6 +2359,7 @@ func RunOverlay(sessions []protocol.SessionInfo, currentSessionID string, fetchP
 	if result.stoppedCurrent {
 		overlayResult.Action = "stopped-current"
 		overlayResult.SessionID = result.currentSessionID
+
 		return overlayResult
 	}
 

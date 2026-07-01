@@ -43,15 +43,18 @@ func (w *Watcher) Run(ctx context.Context) error {
 			if debounce != nil {
 				debounce.Stop()
 			}
+
 			return ctx.Err()
 
 		case event, ok := <-watcher.Events:
 			if !ok {
 				return nil
 			}
+
 			if filepath.Clean(event.Name) != filepath.Clean(w.path) {
 				continue
 			}
+
 			if !event.Has(fsnotify.Write) && !event.Has(fsnotify.Create) {
 				continue
 			}
@@ -59,6 +62,7 @@ func (w *Watcher) Run(ctx context.Context) error {
 			if debounce != nil {
 				debounce.Stop()
 			}
+
 			debounce = time.AfterFunc(200*time.Millisecond, func() {
 				w.reload()
 			})
@@ -67,6 +71,7 @@ func (w *Watcher) Run(ctx context.Context) error {
 			if !ok {
 				return nil
 			}
+
 			w.log.Error("config watcher error", "err", err)
 		}
 	}
@@ -78,6 +83,7 @@ func (w *Watcher) reload() {
 		w.log.Error("failed to reload config", "err", err)
 		return
 	}
+
 	w.log.Info("config reloaded", "path", w.path)
 	w.onChange(cfg)
 }
