@@ -9,17 +9,22 @@ draft: false
 
 The binary is called `gr`.
 
-## Homebrew
+## Install
+
+{{< tabs tabTotal="4" >}}
+{{% tab tabName="Homebrew" %}}
 
 ```bash
 brew install d0ugal/tap/graith
 ```
 
-## Prebuilt binary
+{{% /tab %}}
+{{% tab tabName="Prebuilt binary" %}}
 
 Download a binary for your platform from the [releases page](https://github.com/d0ugal/graith/releases), extract it, and place `gr` on your `$PATH`.
 
-## go install
+{{% /tab %}}
+{{% tab tabName="go install" %}}
 
 ```bash
 go install github.com/d0ugal/graith/cmd/graith@latest
@@ -31,13 +36,17 @@ go install github.com/d0ugal/graith/cmd/graith@latest
 mv "$(go env GOPATH)/bin/graith" "$(go env GOPATH)/bin/gr"
 ```
 
-## From source
+{{% /tab %}}
+{{% tab tabName="From source" %}}
 
 ```bash
 git clone https://github.com/d0ugal/graith
 cd graith
 make build    # produces ./gr
 ```
+
+{{% /tab %}}
+{{< /tabs >}}
 
 ## Shell completion
 
@@ -64,4 +73,4 @@ gr version
 gr doctor      # health checks, verifies dependencies
 ```
 
-`gr doctor --autofix` will attempt to fix common issues (truncate oversized logs, clean stale PID files, remove orphaned worktrees).
+{{% alert context="info" text="`gr doctor --autofix` will attempt to fix common issues: truncate oversized logs, clean stale PID files, and remove orphaned worktrees." /%}}

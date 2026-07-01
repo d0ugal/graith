@@ -11,18 +11,11 @@ draft: false
 
 graith is a daemon/client system. A long-lived daemon (`graithd`) owns PTY sessions and persists state. A stateless CLI client (`gr`) connects over a Unix socket.
 
-```
-┌──────────┐     Unix Socket      ┌──────────┐     PTY      ┌─────────┐
-│ gr (CLI) │ <──── frames ──────> │ graithd  │ <──────────> │ agents  │
-│  client  │   control + data     │  daemon  │              └─────────┘
-└──────────┘                      └──────────┘
-                                       │
-                                  ┌────┴────┐
-                                  │ state   │  state.json
-                                  │ msgs    │  messages.sqlite
-                                  │ logs    │  scrollback files
-                                  │ store   │  flat-file git repos
-                                  └─────────┘
+```mermaid
+graph LR
+    cli["gr (CLI)<br/>client"] <-->|"frames · control + data"| daemon["graithd<br/>daemon"]
+    daemon <-->|PTY| agents["agents"]
+    daemon --> persist["state → state.json<br/>msgs → messages.sqlite<br/>logs → scrollback files<br/>store → flat-file git repos"]
 ```
 
 ## Wire protocol
