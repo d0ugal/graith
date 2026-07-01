@@ -2,6 +2,7 @@ name: Docs Preview
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, closed]
     paths:
       - 'website/**'
       - '.github/workflows/docs-preview.yml'
@@ -24,6 +25,7 @@ defaults:
 jobs:
   preview:
     name: Screenshot changed pages
+    if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     env:
       HUGO_VERSION: 0.154.5
@@ -125,7 +127,12 @@ jobs:
             const pr = context.payload.pull_request.number;
             const shortSha = context.sha.substring(0, 7);
             const branch = 'screenshots';
-            const dir = `pr-${pr}/${shortSha}`;
+            // Include run id + attempt so re-runs on the same commit get a
+            // fresh storage path — otherwise GitHub's image CDN (camo) can
+            // serve a stale, cached screenshot from the previous run.
+            const runId = context.runId;
+            const runAttempt = process.env.GITHUB_RUN_ATTEMPT || '1';
+            const dir = `pr-${pr}/${shortSha}-${runId}.${runAttempt}`;
 
             const files = fs.readdirSync('shots').filter(f => f.endsWith('.png')).sort();
             if (files.length === 0) { core.info('No screenshots produced.'); return; }
@@ -191,4 +198,68 @@ jobs:
               await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
             } else {
               await github.rest.issues.createComment({ owner, repo, issue_number: pr, body });
+            }
+
+  cleanup:
+    name: Clean up screenshots
+    if: github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Remove PR screenshots from the screenshots branch
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const pr = context.payload.pull_request.number;
+            const branch = 'screenshots';
+            const prefix = `pr-${pr}/`;
+
+            // Look up the tip of the screenshots branch. If the branch does
+            // not exist there is nothing to clean up.
+            let ref;
+            try {
+              ref = await github.rest.git.getRef({ owner, repo, ref: `heads/${branch}` });
+            } catch (e) {
+              if (e.status === 404) { core.info(`No ${branch} branch — nothing to clean up.`); return; }
+              throw e;
+            }
+
+            const commitSha = ref.data.object.sha;
+            const commit = await github.rest.git.getCommit({ owner, repo, commit_sha: commitSha });
+            const baseTreeSha = commit.data.tree.sha;
+
+            // Read the whole tree recursively and keep every blob that does
+            // not live under this PR's subtree.
+            const full = await github.rest.git.getTree({ owner, repo, tree_sha: baseTreeSha, recursive: 'true' });
+            if (full.data.truncated) {
+              core.warning('Screenshots tree was truncated; cleanup may be incomplete.');
+            }
+            const blobs = full.data.tree.filter(e => e.type === 'blob');
+            const kept = blobs.filter(e => !e.path.startsWith(prefix));
+
+            if (kept.length === blobs.length) {
+              core.info(`No screenshots found under ${prefix} — nothing to clean up.`);
+              return;
+            }
+
+            // Rebuild the tree from scratch (base_tree omitted) so removed
+            // paths disappear rather than lingering from the old tree.
+            const tree = kept.map(e => ({ path: e.path, mode: e.mode, type: e.type, sha: e.sha }));
+            const newTree = await github.rest.git.createTree({ owner, repo, tree });
+            const newCommit = await github.rest.git.createCommit({
+              owner, repo,
+              message: `docs preview: clean up PR #${pr}`,
+              tree: newTree.data.sha,
+              parents: [commitSha],
+            });
+            await github.rest.git.updateRef({ owner, repo, ref: `heads/${branch}`, sha: newCommit.data.sha });
+            core.info(`Removed ${blobs.length - kept.length} screenshot(s) for PR #${pr}.`);
+
+            // Update the sticky comment to note the previews were cleaned up.
+            const marker = '<!-- docs-preview -->';
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number: pr });
+            const existing = comments.find(c => c.body && c.body.includes(marker));
+            if (existing) {
+              const body = `${marker}\n### 📸 Docs preview\n\n_Preview screenshots for this PR were cleaned up after it was closed._`;
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
             }
