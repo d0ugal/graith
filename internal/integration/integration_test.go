@@ -34,7 +34,7 @@ func setup(t *testing.T) *testEnv {
 	tmpDir := t.TempDir()
 
 	repo := filepath.Join(tmpDir, "repo")
-	os.MkdirAll(repo, 0o755)
+	os.MkdirAll(repo, 0o750)
 	gitRun(t, repo, "init", "-b", "main")
 	gitRun(t, repo, "commit", "--allow-empty", "-m", "init")
 
@@ -50,8 +50,8 @@ func setup(t *testing.T) *testEnv {
 		RuntimeDir: tmpDir,
 		MessagesDB: filepath.Join(tmpDir, "messages.db"),
 	}
-	os.MkdirAll(paths.LogDir, 0o755)
-	os.MkdirAll(paths.DataDir, 0o755)
+	os.MkdirAll(paths.LogDir, 0o750)
+	os.MkdirAll(paths.DataDir, 0o750)
 
 	cfg := config.Default()
 	cfg.FetchOnCreate = false

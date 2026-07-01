@@ -34,7 +34,7 @@ func (fw *FrameWriter) WriteFrame(channel byte, payload []byte) error {
 
 	buf := make([]byte, headerSize+len(payload))
 	buf[0] = channel
-	binary.BigEndian.PutUint32(buf[1:headerSize], uint32(len(payload)))
+	binary.BigEndian.PutUint32(buf[1:headerSize], uint32(len(payload))) //nolint:gosec // G115: len(payload) is bounded by MaxPayload (4MiB) above
 	copy(buf[headerSize:], payload)
 
 	if _, err := fw.w.Write(buf); err != nil {

@@ -873,7 +873,7 @@ func truncateFileKeepTail(path string, keepBytes int64) error {
 
 	tail := data[int64(len(data))-keepBytes:]
 
-	return os.WriteFile(path, tail, 0o600)
+	return os.WriteFile(path, tail, 0o600) //nolint:gosec // G703: path is graith's own trusted DaemonLog path, not user-controlled
 }
 
 // registerDoctorCmd registers this command on rootCmd. Called from registerCommands.

@@ -222,7 +222,7 @@ func (sm *SessionManager) injectCodexHooks(sessionID string) (extraArgs []string
 		}
 
 		path := filepath.Join(hooksDir, filename)
-		if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		if err := os.WriteFile(path, []byte(script), 0o755); err != nil { //nolint:gosec // G306: script/binary must be executable
 			return nil, nil, fmt.Errorf("write codex hook %s: %w", filename, err)
 		}
 	}
@@ -291,13 +291,13 @@ func preTrustCursorWorkspace(worktreePath string) error {
 	key := cursorProjectKey(worktreePath)
 
 	dir := filepath.Join(home, ".cursor", "projects", key)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("create cursor project dir: %w", err)
 	}
 
 	sentinel := filepath.Join(dir, ".workspace-trusted")
 
-	f, err := os.OpenFile(sentinel, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o644)
+	f, err := os.OpenFile(sentinel, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o600)
 	if err != nil {
 		if errors.Is(err, os.ErrExist) {
 			return nil

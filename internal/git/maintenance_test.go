@@ -12,7 +12,7 @@ func TestListMaintenanceRepos(t *testing.T) {
 	gitconfig := filepath.Join(tmpDir, "gitconfig")
 
 	t.Run("no maintenance repos", func(t *testing.T) {
-		if err := os.WriteFile(gitconfig, []byte("[user]\n\tname = braw\n"), 0644); err != nil {
+		if err := os.WriteFile(gitconfig, []byte("[user]\n\tname = braw\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 
@@ -30,7 +30,7 @@ func TestListMaintenanceRepos(t *testing.T) {
 
 	t.Run("multiple repos", func(t *testing.T) {
 		content := "[maintenance]\n\trepo = /croft/braw\n\trepo = /croft/bonnie\n"
-		if err := os.WriteFile(gitconfig, []byte(content), 0644); err != nil {
+		if err := os.WriteFile(gitconfig, []byte(content), 0o600); err != nil {
 			t.Fatal(err)
 		}
 
@@ -52,7 +52,7 @@ func TestListMaintenanceRepos(t *testing.T) {
 
 	t.Run("duplicate entries returned as-is", func(t *testing.T) {
 		content := "[maintenance]\n\trepo = /croft/glen\n\trepo = /croft/glen\n"
-		if err := os.WriteFile(gitconfig, []byte(content), 0644); err != nil {
+		if err := os.WriteFile(gitconfig, []byte(content), 0o600); err != nil {
 			t.Fatal(err)
 		}
 
@@ -70,14 +70,14 @@ func TestListMaintenanceRepos(t *testing.T) {
 
 	t.Run("works with deleted cwd", func(t *testing.T) {
 		content := "[maintenance]\n\trepo = /croft/haar\n"
-		if err := os.WriteFile(gitconfig, []byte(content), 0644); err != nil {
+		if err := os.WriteFile(gitconfig, []byte(content), 0o600); err != nil {
 			t.Fatal(err)
 		}
 
 		t.Setenv("GIT_CONFIG_GLOBAL", gitconfig)
 
 		stale := filepath.Join(t.TempDir(), "bothy")
-		if err := os.Mkdir(stale, 0755); err != nil {
+		if err := os.Mkdir(stale, 0o750); err != nil {
 			t.Fatal(err)
 		}
 

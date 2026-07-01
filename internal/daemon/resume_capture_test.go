@@ -63,14 +63,14 @@ func writeCodexRollout(t *testing.T, root, id, cwd string, mtime time.Time) stri
 	t.Helper()
 
 	dir := filepath.Join(root, "sessions", "2026", "06", "25")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 
 	path := filepath.Join(dir, "rollout-2026-06-25T00-00-00-"+id+".jsonl")
 
 	line := fmt.Sprintf(`{"type":"session_meta","payload":{"id":%q,"cwd":%q}}`+"\n", id, cwd)
-	if err := os.WriteFile(path, []byte(line), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(line), 0o600); err != nil {
 		t.Fatalf("write rollout: %v", err)
 	}
 

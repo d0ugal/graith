@@ -14,7 +14,7 @@ func writeScript(t *testing.T, content string) string {
 	t.Helper()
 
 	script := filepath.Join(t.TempDir(), "list-models.sh")
-	if err := os.WriteFile(script, []byte(content), 0o755); err != nil {
+	if err := os.WriteFile(script, []byte(content), 0o755); err != nil { //nolint:gosec // G306: script/binary must be executable
 		t.Fatal(err)
 	}
 

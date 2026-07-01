@@ -218,7 +218,7 @@ name = "kirk"`, "at least one [[sessions]] entry"},
 
 func TestListAvailableScenarios(t *testing.T) {
 	scenarioDir := filepath.Join(t.TempDir(), "scenarios")
-	if err := os.MkdirAll(scenarioDir, 0o755); err != nil {
+	if err := os.MkdirAll(scenarioDir, 0o750); err != nil {
 		t.Fatal(err)
 	}
 
@@ -233,17 +233,17 @@ goal = "Kirk goal"
 [[sessions]]
 name = "braw"
 repo = "/tmp/croft"
-`), 0o644); err != nil {
+`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
 	// Write an invalid file — should be skipped.
-	if err := os.WriteFile(filepath.Join(scenarioDir, "bad.toml"), []byte("invalid"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(scenarioDir, "bad.toml"), []byte("invalid"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
 	// Write a non-TOML file — should be skipped.
-	if err := os.WriteFile(filepath.Join(scenarioDir, "readme.md"), []byte("# hi"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(scenarioDir, "readme.md"), []byte("# hi"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -263,12 +263,12 @@ repo = "/tmp/croft"
 
 func TestResolveScenarioSource(t *testing.T) {
 	scenarioDir := filepath.Join(t.TempDir(), "scenarios")
-	if err := os.MkdirAll(scenarioDir, 0o755); err != nil {
+	if err := os.MkdirAll(scenarioDir, 0o750); err != nil {
 		t.Fatal(err)
 	}
 
 	content := []byte("test content")
-	if err := os.WriteFile(filepath.Join(scenarioDir, "strath.toml"), content, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(scenarioDir, "strath.toml"), content, 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -300,7 +300,7 @@ func TestResolveScenarioSource(t *testing.T) {
 
 	// Direct file path.
 	directFile := filepath.Join(scenarioDir, "..", "direct.toml")
-	if err := os.WriteFile(directFile, []byte("direct"), 0o644); err != nil {
+	if err := os.WriteFile(directFile, []byte("direct"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 

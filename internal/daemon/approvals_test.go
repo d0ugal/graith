@@ -138,7 +138,7 @@ func TestSubmitApprovalLocalmostCancelledByContext(t *testing.T) {
 	// A localmost command that blocks far longer than the test would tolerate
 	// if the context were not threaded into the subprocess.
 	script := filepath.Join(t.TempDir(), "localmost.sh")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\nexec sleep 30\n"), 0o755); err != nil {
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nexec sleep 30\n"), 0o755); err != nil { //nolint:gosec // G306: script/binary must be executable
 		t.Fatalf("write localmost script: %v", err)
 	}
 

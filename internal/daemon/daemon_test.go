@@ -1312,14 +1312,14 @@ func TestDetectAgentStatuses_SharedWorktreeSkipsGit(t *testing.T) {
 	}
 	runGit("init", "-b", "main")
 
-	if err := os.WriteFile(filepath.Join(repoDir, "file.txt"), []byte("original"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(repoDir, "file.txt"), []byte("original"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
 	runGit("add", "file.txt")
 	runGit("commit", "-m", "init")
 
-	if err := os.WriteFile(filepath.Join(repoDir, "file.txt"), []byte("modified"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(repoDir, "file.txt"), []byte("modified"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1865,7 +1865,7 @@ func TestResumeRefreshesSandboxConfig(t *testing.T) {
 		tmpDir := t.TempDir()
 
 		updatedDir := filepath.Join(tmpDir, "updated-dir")
-		if err := os.MkdirAll(updatedDir, 0o755); err != nil {
+		if err := os.MkdirAll(updatedDir, 0o750); err != nil {
 			t.Fatal(err)
 		}
 

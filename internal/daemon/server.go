@@ -35,7 +35,7 @@ func Listen(sockPath string) (net.Listener, error) {
 		return nil, fmt.Errorf("listen: %w", err)
 	}
 
-	if err := os.Chmod(sockPath, 0o700); err != nil {
+	if err := os.Chmod(sockPath, 0o700); err != nil { //nolint:gosec // G302: 0700 restricts the control socket to the owner only
 		_ = l.Close()
 		return nil, fmt.Errorf("chmod socket: %w", err)
 	}

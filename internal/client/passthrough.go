@@ -249,16 +249,16 @@ func (c *Client) RunPassthrough(ctx context.Context, opts PassthroughOpts) Passt
 				return
 			case <-sigCh:
 				if w, h, err := term.GetSize(fd); err == nil {
-					rows := uint16(h)
+					rows := uint16(h) //nolint:gosec // G115: terminal height from term.GetSize is a small non-negative int
 					if sb != nil {
 						sb.updateSize(h, w)
 						sb.setup(stdout)
 
-						rows = uint16(h - 1)
+						rows = uint16(h - 1) //nolint:gosec // G115: terminal height from term.GetSize is a small non-negative int
 					}
 
 					_ = c.SendControl("resize", protocol.ResizeMsg{
-						Cols: uint16(w),
+						Cols: uint16(w), //nolint:gosec // G115: terminal width from term.GetSize is a small non-negative int
 						Rows: rows,
 					})
 				}

@@ -380,7 +380,7 @@ func (c *Client) Handshake() error {
 
 	cols, rows := uint16(80), uint16(24)
 	if w, h, err := term.GetSize(int(os.Stdout.Fd())); err == nil {
-		cols, rows = uint16(w), uint16(h)
+		cols, rows = uint16(w), uint16(h) //nolint:gosec // G115: terminal dimensions from term.GetSize are small non-negative ints
 	}
 
 	return c.SendControl("handshake", BuildHandshake(c.paths, cols, rows, cwd))

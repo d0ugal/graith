@@ -43,7 +43,7 @@ func TestLoadOrDefaultValidFile(t *testing.T) {
 default_agent = "codex"
 github_username = "braw-user"
 `
-	_ = os.WriteFile(cfgPath, []byte(toml), 0o644)
+	_ = os.WriteFile(cfgPath, []byte(toml), 0o600)
 
 	cfg, err := LoadOrDefault(cfgPath)
 	if err != nil {
@@ -62,7 +62,7 @@ github_username = "braw-user"
 func TestLoadOrDefaultMalformedTOML(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.toml")
-	_ = os.WriteFile(cfgPath, []byte("not valid [[[ toml"), 0o644)
+	_ = os.WriteFile(cfgPath, []byte("not valid [[[ toml"), 0o600)
 
 	_, err := LoadOrDefault(cfgPath)
 	if err == nil {

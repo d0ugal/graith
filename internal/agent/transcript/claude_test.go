@@ -99,7 +99,7 @@ func TestLocateClaudeBySessionIDGlob(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", root)
 	// The project dir name is irrelevant — locate globs by session id.
 	projDir := filepath.Join(root, "projects", "-Users-someone--graith-worktrees-glen")
-	if err := os.MkdirAll(projDir, 0o755); err != nil {
+	if err := os.MkdirAll(projDir, 0o750); err != nil {
 		t.Fatal(err)
 	}
 

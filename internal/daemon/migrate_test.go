@@ -82,7 +82,7 @@ func TestMigrateInPlaceSwap(t *testing.T) {
 	sid := "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 
 	projDir := filepath.Join(claudeRoot, "projects", "-some-proj")
-	if err := os.MkdirAll(projDir, 0o755); err != nil {
+	if err := os.MkdirAll(projDir, 0o750); err != nil {
 		t.Fatal(err)
 	}
 
@@ -169,7 +169,7 @@ func TestMigrateRestoresOnTargetFailure(t *testing.T) {
 	sid := "11111111-2222-3333-4444-555555555555"
 
 	projDir := filepath.Join(claudeRoot, "projects", "-p")
-	if err := os.MkdirAll(projDir, 0o755); err != nil {
+	if err := os.MkdirAll(projDir, 0o750); err != nil {
 		t.Fatal(err)
 	}
 

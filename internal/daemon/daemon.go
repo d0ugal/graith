@@ -324,12 +324,12 @@ func generateID() string {
 func repoHash(repoPath string) string {
 	h := uint64(0)
 	for _, c := range repoPath {
-		h = h*31 + uint64(c)
+		h = h*31 + uint64(c) //nolint:gosec // G115: c is a rune from range-over-string, always a non-negative code point
 	}
 
 	b := make([]byte, 8)
 	for i := 0; i < 8; i++ {
-		b[i] = byte(h >> (i * 8))
+		b[i] = byte(h >> (i * 8)) //nolint:gosec // G115: intentional low-byte truncation for a hash digest
 	}
 
 	return hex.EncodeToString(b)[:12]
