@@ -34,6 +34,25 @@ brew install d0ugal/tap/graith
 
 Download a prebuilt binary for your platform from the [releases page](https://github.com/d0ugal/graith/releases), extract it, and put `gr` on your `$PATH`.
 
+### Debian / Ubuntu (`.deb`) and Fedora / RHEL (`.rpm`)
+
+Each release also attaches `.deb` and `.rpm` packages for linux `amd64` and
+`arm64` (package name `graith`, binary `gr`, with shell completions installed).
+Download the file for your platform from the
+[releases page](https://github.com/d0ugal/graith/releases) and install it
+manually:
+
+```bash
+# Debian / Ubuntu
+sudo dpkg -i graith_*_linux_amd64.deb
+
+# Fedora / RHEL
+sudo rpm -i graith_*_linux_amd64.rpm
+```
+
+> A signed `apt`/`dnf` repository (so you can `apt-get install` / `dnf install`
+> and get automatic upgrades) is planned as a follow-up.
+
 ### go install
 
 ```bash
