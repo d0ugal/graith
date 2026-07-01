@@ -24,8 +24,22 @@ const VIEWPORTS = [
 async function shoot(page, url, name, vp) {
   await page.setViewportSize({ width: vp.width, height: vp.height });
   await page.goto(`${BASE}${url}`, { waitUntil: 'networkidle' });
-  // Wait for web fonts so code blocks / box-drawing glyphs render.
+  // Wait for web fonts to load.
   await page.evaluate(() => document.fonts && document.fonts.ready);
+  // Wait for any Mermaid diagrams to finish rendering to SVG.
+  await page.evaluate(() => {
+    const blocks = () => Array.from(document.querySelectorAll('.mermaid'));
+    if (blocks().length === 0) return true;
+    return new Promise((resolve) => {
+      const start = Date.now();
+      const check = () => {
+        const done = blocks().every((el) => el.querySelector('svg'));
+        if (done || Date.now() - start > 8000) resolve(true);
+        else setTimeout(check, 100);
+      };
+      check();
+    });
+  });
   await page.screenshot({ path: `/out/${name}-${vp.label}.png`, fullPage: true });
 }
 
