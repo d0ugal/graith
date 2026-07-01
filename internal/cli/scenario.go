@@ -253,40 +253,52 @@ The source can be:
 	},
 }
 
+// runScenarioLifecycle sends a scenario lifecycle control message (stop,
+// resume, delete) and returns the list of affected session names decoded from
+// the response's resultKey field. When --json is set it prints the raw payload
+// and returns handled=true so the caller skips its own formatting.
+func runScenarioLifecycle(controlType string, payload any, resultKey string) (names []string, handled bool, err error) {
+	c, err := client.Connect(cfg, paths, cfgFile)
+	if err != nil {
+		return nil, false, err
+	}
+	defer c.Close()
+
+	c.SendControl(controlType, payload)
+
+	resp, err := c.ReadControlResponse()
+	if err != nil {
+		return nil, false, err
+	}
+
+	if resp.Type == "error" {
+		var e protocol.ErrorMsg
+		protocol.DecodePayload(resp, &e)
+
+		return nil, false, fmt.Errorf("%s", e.Message)
+	}
+
+	if jsonOutput {
+		return nil, true, out.JSON(resp.Payload)
+	}
+
+	result := map[string][]string{}
+	protocol.DecodePayload(resp, &result)
+
+	return result[resultKey], false, nil
+}
+
 var scenarioStopCmd = &cobra.Command{
 	Use:   "stop <name>",
 	Short: "Stop all sessions in a scenario",
 	Args:  cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		c, err := client.Connect(cfg, paths, cfgFile)
-		if err != nil {
-			return err
-		}
-		defer c.Close()
-
-		c.SendControl("scenario_stop", protocol.ScenarioStopMsg{Name: args[0]})
-
-		resp, err := c.ReadControlResponse()
-		if err != nil {
+	RunE: func(_ *cobra.Command, args []string) error {
+		stopped, handled, err := runScenarioLifecycle("scenario_stop", protocol.ScenarioStopMsg{Name: args[0]}, "stopped")
+		if err != nil || handled {
 			return err
 		}
 
-		if resp.Type == "error" {
-			var e protocol.ErrorMsg
-			protocol.DecodePayload(resp, &e)
-
-			return fmt.Errorf("%s", e.Message)
-		}
-
-		if jsonOutput {
-			return out.JSON(resp.Payload)
-		}
-
-		var result struct {
-			Stopped []string `json:"stopped"`
-		}
-		protocol.DecodePayload(resp, &result)
-		out.Printf("Stopped %d sessions in scenario %q\n", len(result.Stopped), args[0])
+		out.Printf("Stopped %d sessions in scenario %q\n", len(stopped), args[0])
 
 		return nil
 	},
@@ -296,36 +308,13 @@ var scenarioResumeCmd = &cobra.Command{
 	Use:   "resume <name>",
 	Short: "Resume all stopped/errored sessions in a scenario",
 	Args:  cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		c, err := client.Connect(cfg, paths, cfgFile)
-		if err != nil {
-			return err
-		}
-		defer c.Close()
-
-		c.SendControl("scenario_resume", protocol.ScenarioResumeMsg{Name: args[0]})
-
-		resp, err := c.ReadControlResponse()
-		if err != nil {
+	RunE: func(_ *cobra.Command, args []string) error {
+		resumed, handled, err := runScenarioLifecycle("scenario_resume", protocol.ScenarioResumeMsg{Name: args[0]}, "resumed")
+		if err != nil || handled {
 			return err
 		}
 
-		if resp.Type == "error" {
-			var e protocol.ErrorMsg
-			protocol.DecodePayload(resp, &e)
-
-			return fmt.Errorf("%s", e.Message)
-		}
-
-		if jsonOutput {
-			return out.JSON(resp.Payload)
-		}
-
-		var result struct {
-			Resumed []string `json:"resumed"`
-		}
-		protocol.DecodePayload(resp, &result)
-		out.Printf("Resumed %d sessions in scenario %q\n", len(result.Resumed), args[0])
+		out.Printf("Resumed %d sessions in scenario %q\n", len(resumed), args[0])
 
 		return nil
 	},
@@ -335,36 +324,13 @@ var scenarioDeleteCmd = &cobra.Command{
 	Use:   "delete <name>",
 	Short: "Delete a scenario and all its sessions",
 	Args:  cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		c, err := client.Connect(cfg, paths, cfgFile)
-		if err != nil {
-			return err
-		}
-		defer c.Close()
-
-		c.SendControl("scenario_delete", protocol.ScenarioDeleteMsg{Name: args[0]})
-
-		resp, err := c.ReadControlResponse()
-		if err != nil {
+	RunE: func(_ *cobra.Command, args []string) error {
+		deleted, handled, err := runScenarioLifecycle("scenario_delete", protocol.ScenarioDeleteMsg{Name: args[0]}, "deleted")
+		if err != nil || handled {
 			return err
 		}
 
-		if resp.Type == "error" {
-			var e protocol.ErrorMsg
-			protocol.DecodePayload(resp, &e)
-
-			return fmt.Errorf("%s", e.Message)
-		}
-
-		if jsonOutput {
-			return out.JSON(resp.Payload)
-		}
-
-		var result struct {
-			Deleted []string `json:"deleted"`
-		}
-		protocol.DecodePayload(resp, &result)
-		out.Printf("Deleted scenario %q (%d sessions removed)\n", args[0], len(result.Deleted))
+		out.Printf("Deleted scenario %q (%d sessions removed)\n", args[0], len(deleted))
 
 		return nil
 	},
