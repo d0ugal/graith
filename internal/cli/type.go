@@ -50,7 +50,7 @@ var typeCmd = &cobra.Command{
 			return fmt.Errorf("%s", e.Message)
 		}
 
-		out.Print("Typed into session\n")
+		out.Printf("Typed into session\n")
 
 		return nil
 	},

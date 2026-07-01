@@ -77,7 +77,7 @@ var msgPubCmd = &cobra.Command{
 			return out.JSON(json.RawMessage(resp.Payload))
 		}
 
-		out.Print("Published to %s\n", msgPubStream)
+		out.Printf("Published to %s\n", msgPubStream)
 
 		return nil
 	},
@@ -166,7 +166,7 @@ var msgSendCmd = &cobra.Command{
 			return out.JSON(json.RawMessage(resp.Payload))
 		}
 
-		out.Print("Sent to %s\n", args[0])
+		out.Printf("Sent to %s\n", args[0])
 
 		return nil
 	},
@@ -292,7 +292,7 @@ var msgAckCmd = &cobra.Command{
 			return fmt.Errorf("%s", e.Message)
 		}
 
-		out.Print("Acknowledged messages in %s\n", msgAckStream)
+		out.Printf("Acknowledged messages in %s\n", msgAckStream)
 
 		return nil
 	},
@@ -346,7 +346,7 @@ var msgTopicsCmd = &cobra.Command{
 		}
 
 		if len(list.Streams) == 0 {
-			out.Print("No messages.\n")
+			out.Printf("No messages.\n")
 			return nil
 		}
 
@@ -564,7 +564,7 @@ func msgSendChildrenRun(args []string) error {
 		}{sentTo, len(sentTo)})
 	}
 
-	out.Print("Sent to %d descendant sessions\n", len(sentTo))
+	out.Printf("Sent to %d descendant sessions\n", len(sentTo))
 
 	return nil
 }
@@ -618,7 +618,7 @@ func msgSendParentRun(args []string) error {
 		return out.JSON(json.RawMessage(resp.Payload))
 	}
 
-	out.Print("Sent to parent session\n")
+	out.Printf("Sent to parent session\n")
 
 	return nil
 }

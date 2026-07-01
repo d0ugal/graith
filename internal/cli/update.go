@@ -68,14 +68,14 @@ var updateCmd = &cobra.Command{
 		}
 
 		if nameSet {
-			out.Print("Name updated to %s\n", nameFlag)
+			out.Printf("Name updated to %s\n", nameFlag)
 		}
 
 		if parentSet {
 			if parentFlag == "" {
-				out.Print("Parent removed\n")
+				out.Printf("Parent removed\n")
 			} else {
-				out.Print("Parent set to %s\n", parentFlag)
+				out.Printf("Parent set to %s\n", parentFlag)
 			}
 		}
 

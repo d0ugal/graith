@@ -92,7 +92,7 @@ func runAttach(cmd *cobra.Command, name string) error {
 	}
 
 	if len(list.Sessions) == 0 {
-		out.Print("No sessions. Create one with: gr new <name>\n")
+		out.Printf("No sessions. Create one with: gr new <name>\n")
 		return nil
 	}
 
@@ -120,7 +120,7 @@ func runAttach(cmd *cobra.Command, name string) error {
 			if createResp.Type == "error" {
 				var e protocol.ErrorMsg
 				protocol.DecodePayload(createResp, &e)
-				out.Print("Create failed: %s\n", e.Message)
+				out.Printf("Create failed: %s\n", e.Message)
 
 				return nil
 			}
@@ -261,7 +261,7 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 				if createResp.Type == "error" {
 					var e protocol.ErrorMsg
 					protocol.DecodePayload(createResp, &e)
-					out.Print("Create failed: %s\n", e.Message)
+					out.Printf("Create failed: %s\n", e.Message)
 
 					nc2, err := freshClient()
 					if err != nil {
@@ -369,12 +369,12 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 			}
 
 			if worktreePath == "" {
-				out.Print("Shell failed: session %s not found\n", sessionID)
+				out.Printf("Shell failed: session %s not found\n", sessionID)
 			} else {
 				resetTerminal()
 
 				if err := client.RunShellInWorktree(worktreePath); err != nil {
-					out.Print("Shell failed: %s\n", err)
+					out.Printf("Shell failed: %s\n", err)
 				}
 			}
 
@@ -405,7 +405,7 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 			if resumeResp.Type == "error" {
 				var e protocol.ErrorMsg
 				protocol.DecodePayload(resumeResp, &e)
-				out.Print("Resume failed: %s\n", e.Message)
+				out.Printf("Resume failed: %s\n", e.Message)
 			}
 
 			nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
@@ -419,11 +419,11 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 			continue
 
 		case client.ResultDisconnected:
-			out.Print("Connection lost. Reconnecting...\n")
+			out.Printf("Connection lost. Reconnecting...\n")
 
 			nc, attachResp, err := reconnectToSession(sessionID)
 			if err != nil {
-				out.Print("Could not reconnect: %s\n", err)
+				out.Printf("Could not reconnect: %s\n", err)
 				resetTerminal()
 
 				return nil
@@ -555,7 +555,7 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 			if createResp.Type == "error" {
 				var e protocol.ErrorMsg
 				protocol.DecodePayload(createResp, &e)
-				out.Print("Create failed: %s\n", e.Message)
+				out.Printf("Create failed: %s\n", e.Message)
 
 				nc2, err := freshClient()
 				if err != nil {
@@ -630,7 +630,7 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 			if createResp.Type == "error" {
 				var e protocol.ErrorMsg
 				protocol.DecodePayload(createResp, &e)
-				out.Print("Fork failed: %s\n", e.Message)
+				out.Printf("Fork failed: %s\n", e.Message)
 
 				nc2, err := freshClient()
 				if err != nil {
@@ -744,7 +744,7 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 			}
 
 			if orchID == "" {
-				out.Print("Orchestrator not enabled — set orchestrator.enabled = true in config.toml\n")
+				out.Printf("Orchestrator not enabled — set orchestrator.enabled = true in config.toml\n")
 				restoreScreen(sessionID)
 				nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
 				attachResp, _ := nc.ReadControlResponse()
@@ -804,7 +804,7 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 				if resumeResp.Type == "error" {
 					var e protocol.ErrorMsg
 					protocol.DecodePayload(resumeResp, &e)
-					out.Print("Orchestrator resume failed: %s\n", e.Message)
+					out.Printf("Orchestrator resume failed: %s\n", e.Message)
 					restoreScreen(sessionID)
 					nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
 					attachResp, _ := nc.ReadControlResponse()

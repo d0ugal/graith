@@ -67,7 +67,7 @@ var stopCmd = &cobra.Command{
 			return fmt.Errorf("%s", e.Message)
 		}
 
-		out.Print("Session stopped (worktree preserved)\n")
+		out.Printf("Session stopped (worktree preserved)\n")
 
 		return nil
 	},
@@ -119,7 +119,7 @@ func stopChildrenRun(c *client.Client, args []string) error {
 		Stopped []string `json:"stopped"`
 	}
 	protocol.DecodePayload(resp, &result)
-	out.Print("Stopped %d sessions\n", len(result.Stopped))
+	out.Printf("Stopped %d sessions\n", len(result.Stopped))
 
 	return nil
 }
@@ -149,7 +149,7 @@ func stopBatchRun(cmd *cobra.Command) error {
 	}
 
 	if len(matched) == 0 {
-		out.Print("No sessions match the given filters\n")
+		out.Printf("No sessions match the given filters\n")
 		return nil
 	}
 
@@ -192,10 +192,10 @@ func stopBatchRun(cmd *cobra.Command) error {
 		stopped++
 	}
 
-	out.Print("Stopped %d sessions\n", stopped)
+	out.Printf("Stopped %d sessions\n", stopped)
 
 	for _, name := range skipped {
-		out.Print("Skipped starred session: %s\n", name)
+		out.Printf("Skipped starred session: %s\n", name)
 	}
 
 	return nil

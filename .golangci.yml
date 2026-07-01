@@ -22,7 +22,6 @@ linters:
     - dupl  # TODO(re-enable): ~36 findings (near-duplicate command/handler blocks; needs refactor)
     - gosec  # TODO(re-enable): ~21 findings (G115 overflow, file perms, taint)
     - contextcheck  # TODO(re-enable): ~15 findings (context not threaded through handler/approval paths)
-    - goprintffuncname  # TODO(re-enable): ~5 findings (printf-style helper method rename)
     - gochecknoinits  # TODO(re-enable): ~3 findings (cobra-idiomatic init funcs)
     - cyclop  # Too strict
     - depguard  # Allow internal imports

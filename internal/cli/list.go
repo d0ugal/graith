@@ -88,7 +88,7 @@ var listCmd = &cobra.Command{
 		}
 
 		if len(list.Sessions) == 0 {
-			out.Print("No sessions. Create one with: gr new <name>\n")
+			out.Printf("No sessions. Create one with: gr new <name>\n")
 			return nil
 		}
 

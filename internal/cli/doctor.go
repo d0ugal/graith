@@ -45,32 +45,32 @@ func newDoctorContext() *doctorContext {
 	return &doctorContext{ok: true}
 }
 
-func (dc *doctorContext) pass(section, format string, args ...any) {
+func (dc *doctorContext) passf(section, format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
 	dc.checks = append(dc.checks, doctorCheck{Section: section, Level: "ok", Message: msg})
-	out.Print("  ✓ %s\n", msg)
+	out.Printf("  ✓ %s\n", msg)
 }
 
-func (dc *doctorContext) warn(section, format string, args ...any) {
+func (dc *doctorContext) warnf(section, format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
 	dc.checks = append(dc.checks, doctorCheck{Section: section, Level: "warn", Message: msg})
-	out.Print("  ○ %s\n", msg)
+	out.Printf("  ○ %s\n", msg)
 }
 
-func (dc *doctorContext) fail(section, format string, args ...any) {
+func (dc *doctorContext) failf(section, format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
 	dc.checks = append(dc.checks, doctorCheck{Section: section, Level: "fail", Message: msg})
-	out.Print("  ✗ %s\n", msg)
+	out.Printf("  ✗ %s\n", msg)
 
 	dc.ok = false
 }
 
-func (dc *doctorContext) hint(format string, args ...any) {
-	out.Print("    → "+format+"\n", args...)
+func (dc *doctorContext) hintf(format string, args ...any) {
+	out.Printf("    → "+format+"\n", args...)
 }
 
 func (dc *doctorContext) section(name string) {
-	out.Print("\n%s\n", name)
+	out.Printf("\n%s\n", name)
 }
 
 var doctorCmd = &cobra.Command{
@@ -81,7 +81,7 @@ var doctorCmd = &cobra.Command{
 		dc := newDoctorContext()
 		report := &doctorReport{CLIVersion: version.Version}
 
-		out.Print("Checking graith health...\n")
+		out.Printf("Checking graith health...\n")
 
 		daemonVersion := dc.checkVersion(report)
 		dc.checkEnvironment()
@@ -103,7 +103,7 @@ var doctorCmd = &cobra.Command{
 		}
 
 		if dc.ok {
-			out.Print("\nAll checks passed.\n")
+			out.Printf("\nAll checks passed.\n")
 		} else {
 			count := 0
 
@@ -113,7 +113,7 @@ var doctorCmd = &cobra.Command{
 				}
 			}
 
-			out.Print("\n%d issue(s) found.\n", count)
+			out.Printf("\n%d issue(s) found.\n", count)
 		}
 
 		if !dc.ok {
@@ -126,18 +126,18 @@ var doctorCmd = &cobra.Command{
 
 func (dc *doctorContext) checkVersion(report *doctorReport) string {
 	dc.section("Version")
-	dc.pass("version", "CLI version: %s (%s)", version.Version, version.CommitSHA)
+	dc.passf("version", "CLI version: %s (%s)", version.Version, version.CommitSHA)
 
 	var daemonVersion string
 
 	if _, err := os.Stat(paths.SocketPath); err == nil {
 		conn, err := net.DialTimeout("unix", paths.SocketPath, 500*time.Millisecond)
 		if err != nil {
-			dc.fail("version", "Socket exists but daemon not responding: %s", paths.SocketPath)
+			dc.failf("version", "Socket exists but daemon not responding: %s", paths.SocketPath)
 
 			if doctorAutofix {
 				os.Remove(paths.SocketPath)
-				dc.hint("Removed stale socket")
+				dc.hintf("Removed stale socket")
 			}
 		} else {
 			reader := protocol.NewFrameReader(conn)
@@ -158,10 +158,10 @@ func (dc *doctorContext) checkVersion(report *doctorReport) string {
 				daemonVersion = hsOk.DaemonVersion
 
 				if daemonVersion != "" && daemonVersion != version.Version {
-					dc.fail("version", "Version mismatch: CLI=%s, daemon=%s", version.Version, daemonVersion)
-					dc.hint("Run: gr daemon restart")
+					dc.failf("version", "Version mismatch: CLI=%s, daemon=%s", version.Version, daemonVersion)
+					dc.hintf("Run: gr daemon restart")
 				} else if daemonVersion != "" {
-					dc.pass("version", "Daemon version: %s", daemonVersion)
+					dc.passf("version", "Daemon version: %s", daemonVersion)
 				}
 			}
 
@@ -171,10 +171,10 @@ func (dc *doctorContext) checkVersion(report *doctorReport) string {
 
 	updateResult := version.CheckForUpdate(paths.DataDir)
 	if updateResult != nil {
-		dc.fail("version", "Update available: %s → %s", updateResult.CurrentVersion, updateResult.LatestVersion)
-		dc.hint("Run: brew upgrade graith")
+		dc.failf("version", "Update available: %s → %s", updateResult.CurrentVersion, updateResult.LatestVersion)
+		dc.hintf("Run: brew upgrade graith")
 	} else if version.Version != "dev" {
-		dc.pass("version", "Up to date (%s)", version.Version)
+		dc.passf("version", "Up to date (%s)", version.Version)
 	}
 
 	return daemonVersion
@@ -184,51 +184,51 @@ func (dc *doctorContext) checkEnvironment() {
 	dc.section("Environment")
 
 	if _, err := os.Stat(paths.ConfigFile); err == nil {
-		dc.pass("environment", "Config file: %s", paths.ConfigFile)
+		dc.passf("environment", "Config file: %s", paths.ConfigFile)
 	} else {
-		dc.warn("environment", "No config file (using defaults): %s", paths.ConfigFile)
-		dc.hint("Run: gr config reset")
+		dc.warnf("environment", "No config file (using defaults): %s", paths.ConfigFile)
+		dc.hintf("Run: gr config reset")
 	}
 
 	if dataDirSize, err := dirSize(paths.DataDir); err == nil {
-		dc.pass("environment", "Data dir: %s (%s)", paths.DataDir, formatBytes(dataDirSize))
+		dc.passf("environment", "Data dir: %s (%s)", paths.DataDir, formatBytes(dataDirSize))
 	} else {
-		dc.pass("environment", "Data dir: %s", paths.DataDir)
+		dc.passf("environment", "Data dir: %s", paths.DataDir)
 	}
 
 	if info, err := os.Stat(paths.DaemonLog); err == nil {
 		size := info.Size()
 		if size > 10*1024*1024 {
-			dc.warn("environment", "Daemon log: %s (%s)", paths.DaemonLog, formatBytes(size))
+			dc.warnf("environment", "Daemon log: %s (%s)", paths.DaemonLog, formatBytes(size))
 
 			if doctorAutofix {
 				if err := truncateFileKeepTail(paths.DaemonLog, 1024*1024); err == nil {
-					dc.hint("Truncated daemon log to ~1 MB")
+					dc.hintf("Truncated daemon log to ~1 MB")
 				}
 			} else {
-				dc.hint("Use --autofix to truncate")
+				dc.hintf("Use --autofix to truncate")
 			}
 		} else {
-			dc.pass("environment", "Daemon log: %s (%s)", paths.DaemonLog, formatBytes(size))
+			dc.passf("environment", "Daemon log: %s (%s)", paths.DaemonLog, formatBytes(size))
 		}
 	} else {
-		dc.pass("environment", "Daemon log: %s", paths.DaemonLog)
+		dc.passf("environment", "Daemon log: %s", paths.DaemonLog)
 	}
 
 	if info, err := os.Stat(paths.StateFile); err == nil {
-		dc.pass("environment", "State file: %s (%s)", paths.StateFile, formatBytes(info.Size()))
+		dc.passf("environment", "State file: %s (%s)", paths.StateFile, formatBytes(info.Size()))
 	} else {
-		dc.pass("environment", "State file: %s", paths.StateFile)
+		dc.passf("environment", "State file: %s", paths.StateFile)
 	}
 
 	if info, err := os.Stat(paths.MessagesDB); err == nil {
-		dc.pass("environment", "Messages DB: %s (%s)", paths.MessagesDB, formatBytes(info.Size()))
+		dc.passf("environment", "Messages DB: %s (%s)", paths.MessagesDB, formatBytes(info.Size()))
 	} else {
-		dc.pass("environment", "Messages DB: %s", paths.MessagesDB)
+		dc.passf("environment", "Messages DB: %s", paths.MessagesDB)
 	}
 
 	if paths.Profile != "" {
-		dc.pass("environment", "Profile: %s", paths.Profile)
+		dc.passf("environment", "Profile: %s", paths.Profile)
 	}
 
 	if cfg.Sandbox.Enabled {
@@ -239,26 +239,26 @@ func (dc *doctorContext) checkEnvironment() {
 
 		switch {
 		case runtime.GOOS != "darwin":
-			dc.fail("environment", "Sandbox enabled but not running macOS")
+			dc.failf("environment", "Sandbox enabled but not running macOS")
 		case !sandbox.AvailableCommand(safehouseCmd):
-			dc.fail("environment", "Sandbox enabled but %s not found in PATH", safehouseCmd)
-			dc.hint("Install: brew install eugene1g/tools/agent-safehouse")
+			dc.failf("environment", "Sandbox enabled but %s not found in PATH", safehouseCmd)
+			dc.hintf("Install: brew install eugene1g/tools/agent-safehouse")
 		default:
-			dc.pass("environment", "Sandbox enabled (safehouse available)")
+			dc.passf("environment", "Sandbox enabled (safehouse available)")
 		}
 
 		dc.checkSandboxPaths()
 	} else {
-		dc.warn("environment", "Sandbox disabled")
+		dc.warnf("environment", "Sandbox disabled")
 	}
 
 	switch {
 	case cfg.AgentPrompt == "":
-		dc.warn("environment", "Agent prompt is empty (agents will not receive graith context)")
+		dc.warnf("environment", "Agent prompt is empty (agents will not receive graith context)")
 	case cfg.AgentPrompt != config.DefaultAgentPrompt():
-		dc.pass("environment", "Agent prompt: customized")
+		dc.passf("environment", "Agent prompt: customized")
 	default:
-		dc.pass("environment", "Agent prompt: default")
+		dc.passf("environment", "Agent prompt: default")
 	}
 }
 
@@ -292,7 +292,7 @@ func (dc *doctorContext) checkSandboxPaths() {
 		}
 
 		if _, err := os.Stat(p); err != nil {
-			dc.warn("environment", "Sandbox read dir does not exist: %s (configured in: %s)", p, strings.Join(sources, ", "))
+			dc.warnf("environment", "Sandbox read dir does not exist: %s (configured in: %s)", p, strings.Join(sources, ", "))
 
 			missing++
 		}
@@ -304,14 +304,14 @@ func (dc *doctorContext) checkSandboxPaths() {
 		}
 
 		if _, err := os.Stat(p); err != nil {
-			dc.warn("environment", "Sandbox write dir does not exist: %s (configured in: %s)", p, strings.Join(sources, ", "))
+			dc.warnf("environment", "Sandbox write dir does not exist: %s (configured in: %s)", p, strings.Join(sources, ", "))
 
 			missing++
 		}
 	}
 
 	if missing == 0 && (len(allReadDirs) > 0 || len(allWriteDirs) > 0) {
-		dc.pass("environment", "All sandbox paths exist (%d read, %d write)", len(allReadDirs), len(allWriteDirs))
+		dc.passf("environment", "All sandbox paths exist (%d read, %d write)", len(allReadDirs), len(allWriteDirs))
 	}
 }
 
@@ -319,7 +319,7 @@ func (dc *doctorContext) checkDaemon(daemonVersion string) *protocol.Diagnostics
 	dc.section("Daemon")
 
 	if _, err := os.Stat(paths.SocketPath); err != nil {
-		dc.warn("daemon", "Not running (will auto-start on first command)")
+		dc.warnf("daemon", "Not running (will auto-start on first command)")
 		return nil
 	}
 
@@ -327,7 +327,7 @@ func (dc *doctorContext) checkDaemon(daemonVersion string) *protocol.Diagnostics
 	// triggering auto-upgrade/restart as a side effect of diagnostics.
 	conn, err := net.DialTimeout("unix", paths.SocketPath, 2*time.Second)
 	if err != nil {
-		dc.fail("daemon", "Cannot connect to daemon: %v", err)
+		dc.failf("daemon", "Cannot connect to daemon: %v", err)
 		dc.checkStalePID()
 
 		return nil
@@ -344,55 +344,55 @@ func (dc *doctorContext) checkDaemon(daemonVersion string) *protocol.Diagnostics
 
 	hsData, _ := protocol.EncodeControl("handshake", hs)
 	if err := writer.WriteFrame(protocol.ChannelControl, hsData); err != nil {
-		dc.fail("daemon", "Failed to send handshake: %v", err)
+		dc.failf("daemon", "Failed to send handshake: %v", err)
 		return nil
 	}
 
 	frame, err := reader.ReadFrame()
 	if err != nil || frame.Channel != protocol.ChannelControl {
-		dc.fail("daemon", "Failed to read handshake response")
+		dc.failf("daemon", "Failed to read handshake response")
 		return nil
 	}
 
 	diagData, _ := protocol.EncodeControl("diagnostics", struct{}{})
 	if err := writer.WriteFrame(protocol.ChannelControl, diagData); err != nil {
-		dc.fail("daemon", "Failed to request diagnostics: %v", err)
+		dc.failf("daemon", "Failed to request diagnostics: %v", err)
 		return nil
 	}
 
 	frame, err = reader.ReadFrame()
 	if err != nil {
-		dc.warn("daemon", "Daemon does not support diagnostics (upgrade daemon)")
-		dc.hint("Run: gr daemon restart")
+		dc.warnf("daemon", "Daemon does not support diagnostics (upgrade daemon)")
+		dc.hintf("Run: gr daemon restart")
 
 		return nil
 	}
 
 	if frame.Channel != protocol.ChannelControl {
-		dc.fail("daemon", "Unexpected response from daemon")
+		dc.failf("daemon", "Unexpected response from daemon")
 		return nil
 	}
 
 	resp, err := protocol.DecodeControl(frame.Payload)
 	if err != nil {
-		dc.fail("daemon", "Failed to decode response: %v", err)
+		dc.failf("daemon", "Failed to decode response: %v", err)
 		return nil
 	}
 
 	if resp.Type == "error" {
-		dc.warn("daemon", "Daemon does not support diagnostics (upgrade daemon)")
-		dc.hint("Run: gr daemon restart")
+		dc.warnf("daemon", "Daemon does not support diagnostics (upgrade daemon)")
+		dc.hintf("Run: gr daemon restart")
 
 		return nil
 	}
 
 	var diag protocol.DiagnosticsMsg
 	if err := protocol.DecodePayload(resp, &diag); err != nil {
-		dc.fail("daemon", "Failed to decode diagnostics: %v", err)
+		dc.failf("daemon", "Failed to decode diagnostics: %v", err)
 		return nil
 	}
 
-	dc.pass("daemon", "Running (PID %d, uptime %s)", diag.DaemonPID, diag.DaemonUptime)
+	dc.passf("daemon", "Running (PID %d, uptime %s)", diag.DaemonPID, diag.DaemonUptime)
 
 	return &diag
 }
@@ -409,13 +409,13 @@ func (dc *doctorContext) checkStalePID() {
 	}
 
 	if !daemon.IsGraithDaemon(pid) {
-		dc.fail("daemon", "PID file is stale (PID %d is not a graith daemon)", pid)
+		dc.failf("daemon", "PID file is stale (PID %d is not a graith daemon)", pid)
 
 		if doctorAutofix {
 			os.Remove(paths.PIDFile)
-			dc.hint("Removed stale PID file")
+			dc.hintf("Removed stale PID file")
 		} else {
-			dc.hint("Use --autofix to remove stale PID file")
+			dc.hintf("Use --autofix to remove stale PID file")
 		}
 	}
 }
@@ -455,42 +455,42 @@ func (dc *doctorContext) checkSessions(diag *protocol.DiagnosticsMsg) {
 
 	for _, s := range diag.Sessions {
 		if s.Status == "running" && s.PID > 0 && !s.PIDAlive {
-			dc.fail("sessions", "%q (%s): PID %d not alive but status is running", s.Name, s.ID, s.PID)
-			dc.hint("Run: gr daemon restart")
+			dc.failf("sessions", "%q (%s): PID %d not alive but status is running", s.Name, s.ID, s.PID)
+			dc.hintf("Run: gr daemon restart")
 
 			issues++
 		}
 
 		if s.Status == "running" && s.PID > 0 && s.PIDAlive && s.HasPTY != nil && !*s.HasPTY {
-			dc.fail("sessions", "%q (%s): PID %d alive but not managed by daemon (orphaned after crash)", s.Name, s.ID, s.PID)
-			dc.hint("Run: gr stop %s  (kills orphaned process group)", s.Name)
+			dc.failf("sessions", "%q (%s): PID %d alive but not managed by daemon (orphaned after crash)", s.Name, s.ID, s.PID)
+			dc.hintf("Run: gr stop %s  (kills orphaned process group)", s.Name)
 
 			issues++
 		}
 
 		if s.Status == "errored" && s.PID > 0 {
-			dc.warn("sessions", "%q (%s): errored with PID %d still recorded — may need manual cleanup", s.Name, s.ID, s.PID)
-			dc.hint("Run: kill -TERM -%d  (kills process group)", s.PID)
+			dc.warnf("sessions", "%q (%s): errored with PID %d still recorded — may need manual cleanup", s.Name, s.ID, s.PID)
+			dc.hintf("Run: kill -TERM -%d  (kills process group)", s.PID)
 
 			issues++
 		}
 
 		if s.WorktreePath != "" && !s.WorktreeExists {
-			dc.fail("sessions", "%q (%s): worktree path does not exist", s.Name, s.ID)
-			dc.hint("Run: gr delete %s", s.Name)
+			dc.failf("sessions", "%q (%s): worktree path does not exist", s.Name, s.ID)
+			dc.hintf("Run: gr delete %s", s.Name)
 
 			issues++
 		}
 
 		if s.ConfigStale {
-			dc.warn("sessions", "%q (%s): config has drifted since creation", s.Name, s.ID)
-			dc.hint("Restart session to pick up new config")
+			dc.warnf("sessions", "%q (%s): config has drifted since creation", s.Name, s.ID)
+			dc.hintf("Restart session to pick up new config")
 
 			issues++
 		}
 
 		if s.Saturated {
-			dc.warn("sessions", "%q (%s): scrollback saturated (%s)", s.Name, s.ID, formatBytes(s.ScrollbackMax))
+			dc.warnf("sessions", "%q (%s): scrollback saturated (%s)", s.Name, s.ID, formatBytes(s.ScrollbackMax))
 
 			issues++
 		}
@@ -498,8 +498,8 @@ func (dc *doctorContext) checkSessions(diag *protocol.DiagnosticsMsg) {
 
 	for _, s := range diag.Sessions {
 		if !s.HasToken {
-			dc.warn("sessions", "%q (%s): missing auth token — session may need restart to receive token", s.Name, s.ID)
-			dc.hint("Run: gr restart %s", s.Name)
+			dc.warnf("sessions", "%q (%s): missing auth token — session may need restart to receive token", s.Name, s.ID)
+			dc.hintf("Run: gr restart %s", s.Name)
 
 			issues++
 		}
@@ -515,15 +515,15 @@ func (dc *doctorContext) checkSessions(diag *protocol.DiagnosticsMsg) {
 		}
 
 		if running > 1 {
-			dc.warn("sessions", "Sandbox is disabled with %d running sessions — agents can read state.json and impersonate other sessions", running)
-			dc.hint("Enable sandbox for session isolation: set sandbox.enabled = true in config")
+			dc.warnf("sessions", "Sandbox is disabled with %d running sessions — agents can read state.json and impersonate other sessions", running)
+			dc.hintf("Enable sandbox for session isolation: set sandbox.enabled = true in config")
 
 			issues++
 		}
 	}
 
 	if issues == 0 {
-		dc.pass("sessions", "No issues found")
+		dc.passf("sessions", "No issues found")
 	}
 }
 
@@ -532,13 +532,13 @@ func (dc *doctorContext) checkStorage(diag *protocol.DiagnosticsMsg) {
 
 	sb := diag.Scrollback
 	if sb.SaturatedCount > 0 {
-		dc.warn("storage", "Scrollback: %d files, %s total (%d saturated)", sb.TotalFiles, formatBytes(sb.TotalBytes), sb.SaturatedCount)
+		dc.warnf("storage", "Scrollback: %d files, %s total (%d saturated)", sb.TotalFiles, formatBytes(sb.TotalBytes), sb.SaturatedCount)
 	} else {
-		dc.pass("storage", "Scrollback: %d files, %s total", sb.TotalFiles, formatBytes(sb.TotalBytes))
+		dc.passf("storage", "Scrollback: %d files, %s total", sb.TotalFiles, formatBytes(sb.TotalBytes))
 	}
 
 	msg := diag.Messages
-	dc.pass("storage", "Messages: %d streams, %d messages", msg.TotalStreams, msg.TotalMessages)
+	dc.passf("storage", "Messages: %d streams, %d messages", msg.TotalStreams, msg.TotalMessages)
 
 	dc.checkTmpDir()
 
@@ -572,7 +572,7 @@ func (dc *doctorContext) checkStorage(diag *protocol.DiagnosticsMsg) {
 	}
 
 	if orphanedCount > 0 {
-		dc.warn("storage", "%d orphaned scrollback file(s) (%s)", orphanedCount, formatBytes(orphanedBytes))
+		dc.warnf("storage", "%d orphaned scrollback file(s) (%s)", orphanedCount, formatBytes(orphanedBytes))
 
 		if doctorAutofix {
 			removed := 0
@@ -590,9 +590,9 @@ func (dc *doctorContext) checkStorage(diag *protocol.DiagnosticsMsg) {
 				}
 			}
 
-			dc.hint("Removed %d orphaned scrollback file(s)", removed)
+			dc.hintf("Removed %d orphaned scrollback file(s)", removed)
 		} else {
-			dc.hint("Use --autofix to remove")
+			dc.hintf("Use --autofix to remove")
 		}
 	}
 
@@ -610,7 +610,7 @@ func (dc *doctorContext) checkStorage(diag *protocol.DiagnosticsMsg) {
 			}
 		}
 
-		dc.warn("storage", "%d orphaned worktree dir(s) (%s)", len(orphanedWorktrees), formatBytes(totalSize))
+		dc.warnf("storage", "%d orphaned worktree dir(s) (%s)", len(orphanedWorktrees), formatBytes(totalSize))
 
 		for _, wt := range orphanedWorktrees {
 			extra := ""
@@ -618,7 +618,7 @@ func (dc *doctorContext) checkStorage(diag *protocol.DiagnosticsMsg) {
 				extra = " [has uncommitted changes]"
 			}
 
-			dc.hint("%s (%s)%s", wt.path, formatBytes(wt.size), extra)
+			dc.hintf("%s (%s)%s", wt.path, formatBytes(wt.size), extra)
 		}
 
 		if doctorAutofix {
@@ -645,16 +645,16 @@ func (dc *doctorContext) checkStorage(diag *protocol.DiagnosticsMsg) {
 				}
 			}
 
-			dc.hint("Removed %d orphaned worktree dir(s)", removed)
+			dc.hintf("Removed %d orphaned worktree dir(s)", removed)
 
 			if skipped > 0 {
-				dc.hint("Skipped %d with uncommitted changes (inspect manually)", skipped)
+				dc.hintf("Skipped %d with uncommitted changes (inspect manually)", skipped)
 			}
 		} else {
 			if dirtyCount > 0 {
-				dc.hint("Use --autofix to remove (%d with uncommitted changes will be skipped)", dirtyCount)
+				dc.hintf("Use --autofix to remove (%d with uncommitted changes will be skipped)", dirtyCount)
 			} else {
-				dc.hint("Use --autofix to remove")
+				dc.hintf("Use --autofix to remove")
 			}
 		}
 	}
@@ -665,7 +665,7 @@ func (dc *doctorContext) checkTmpDir() {
 
 	entries, err := os.ReadDir(tmpDir)
 	if err != nil {
-		dc.pass("storage", "Tmp dir: %s (empty)", tmpDir)
+		dc.passf("storage", "Tmp dir: %s (empty)", tmpDir)
 		return
 	}
 
@@ -698,22 +698,22 @@ func (dc *doctorContext) checkTmpDir() {
 	}
 
 	if repoCount == 0 {
-		dc.pass("storage", "Tmp dir: %s (empty)", tmpDir)
+		dc.passf("storage", "Tmp dir: %s (empty)", tmpDir)
 	} else {
-		dc.pass("storage", "Tmp dir: %s (%d repo(s), %s)", tmpDir, repoCount, formatBytes(totalSize))
+		dc.passf("storage", "Tmp dir: %s (%d repo(s), %s)", tmpDir, repoCount, formatBytes(totalSize))
 	}
 
 	legacyShareDir := filepath.Join(filepath.Dir(tmpDir), "share")
 	if info, err := os.Stat(legacyShareDir); err == nil && info.IsDir() {
 		size, _ := dirSize(legacyShareDir)
-		dc.warn("storage", "Legacy share dir exists: %s (%s)", legacyShareDir, formatBytes(size))
+		dc.warnf("storage", "Legacy share dir exists: %s (%s)", legacyShareDir, formatBytes(size))
 
 		if doctorAutofix {
 			if os.RemoveAll(legacyShareDir) == nil {
-				dc.hint("Removed legacy share dir")
+				dc.hintf("Removed legacy share dir")
 			}
 		} else {
-			dc.hint("Renamed to tmp/ in v0.39.0. Use --autofix to remove")
+			dc.hintf("Renamed to tmp/ in v0.39.0. Use --autofix to remove")
 		}
 	}
 }

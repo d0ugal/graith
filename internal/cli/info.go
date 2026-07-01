@@ -44,17 +44,17 @@ var infoCmd = &cobra.Command{
 			return out.JSON(*best)
 		}
 
-		out.Print("Session:   %s (%s)\n", best.Name, best.ID)
-		out.Print("Agent:     %s\n", best.Agent)
+		out.Printf("Session:   %s (%s)\n", best.Name, best.ID)
+		out.Printf("Agent:     %s\n", best.Agent)
 
 		if best.Model != "" {
-			out.Print("Model:     %s\n", best.Model)
+			out.Printf("Model:     %s\n", best.Model)
 		}
 
-		out.Print("Repo:      %s\n", best.RepoName)
-		out.Print("Branch:    %s\n", best.Branch)
-		out.Print("Worktree:  %s\n", best.WorktreePath)
-		out.Print("Status:    %s\n", best.Status)
+		out.Printf("Repo:      %s\n", best.RepoName)
+		out.Printf("Branch:    %s\n", best.Branch)
+		out.Printf("Worktree:  %s\n", best.WorktreePath)
+		out.Printf("Status:    %s\n", best.Status)
 
 		return nil
 	},

@@ -18,7 +18,7 @@ var versionCmd = &cobra.Command{
 			return
 		}
 
-		out.Print("graith %s (%s)\n", version.Version, version.CommitSHA)
+		out.Printf("graith %s (%s)\n", version.Version, version.CommitSHA)
 	},
 }
 

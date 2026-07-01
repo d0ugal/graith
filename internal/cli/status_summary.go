@@ -79,9 +79,9 @@ Examples:
 		}
 
 		if statusSummaryClear {
-			out.Print("Status cleared\n")
+			out.Printf("Status cleared\n")
 		} else {
-			out.Print("Status set\n")
+			out.Printf("Status set\n")
 		}
 
 		return nil
