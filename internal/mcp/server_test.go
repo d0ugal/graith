@@ -27,7 +27,7 @@ func setup(t *testing.T) *testEnv {
 	tmpDir := t.TempDir()
 
 	repo := filepath.Join(tmpDir, "repo")
-	if err := os.MkdirAll(repo, 0o755); err != nil {
+	if err := os.MkdirAll(repo, 0o750); err != nil {
 		t.Fatalf("mkdir repo: %v", err)
 	}
 
@@ -48,11 +48,11 @@ func setup(t *testing.T) *testEnv {
 		RuntimeDir: tmpDir,
 		MessagesDB: filepath.Join(tmpDir, "messages.db"),
 	}
-	if err := os.MkdirAll(paths.LogDir, 0o755); err != nil {
+	if err := os.MkdirAll(paths.LogDir, 0o750); err != nil {
 		t.Fatalf("mkdir log dir: %v", err)
 	}
 
-	if err := os.MkdirAll(paths.DataDir, 0o755); err != nil {
+	if err := os.MkdirAll(paths.DataDir, 0o750); err != nil {
 		t.Fatalf("mkdir data dir: %v", err)
 	}
 

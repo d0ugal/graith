@@ -428,12 +428,12 @@ func TestShellQuote(t *testing.T) {
 func TestCodexHookScriptsEscapeSingleQuotes(t *testing.T) {
 	// Create a fake gr binary in a directory whose name contains a single quote.
 	fakeDir := filepath.Join(t.TempDir(), "o'malley", "bin")
-	if err := os.MkdirAll(fakeDir, 0o755); err != nil {
+	if err := os.MkdirAll(fakeDir, 0o750); err != nil {
 		t.Fatalf("create fake dir: %v", err)
 	}
 
 	fakeBin := filepath.Join(fakeDir, "gr")
-	if err := os.WriteFile(fakeBin, []byte("#!/bin/sh\necho ok\n"), 0o755); err != nil {
+	if err := os.WriteFile(fakeBin, []byte("#!/bin/sh\necho ok\n"), 0o755); err != nil { //nolint:gosec // G306: script/binary must be executable
 		t.Fatalf("write fake binary: %v", err)
 	}
 
@@ -935,12 +935,12 @@ func TestInjectCursorHooksEmptyWorktree(t *testing.T) {
 
 func TestClaudeSettingsEscapeSingleQuotes(t *testing.T) {
 	fakeDir := filepath.Join(t.TempDir(), "o'malley", "bin")
-	if err := os.MkdirAll(fakeDir, 0o755); err != nil {
+	if err := os.MkdirAll(fakeDir, 0o750); err != nil {
 		t.Fatalf("create fake dir: %v", err)
 	}
 
 	fakeBin := filepath.Join(fakeDir, "gr")
-	if err := os.WriteFile(fakeBin, []byte("#!/bin/sh\necho ok\n"), 0o755); err != nil {
+	if err := os.WriteFile(fakeBin, []byte("#!/bin/sh\necho ok\n"), 0o755); err != nil { //nolint:gosec // G306: script/binary must be executable
 		t.Fatalf("write fake binary: %v", err)
 	}
 

@@ -40,7 +40,7 @@ command = "codex"
 args = []
 resume_args = ["resume", "--last"]
 `
-	_ = os.WriteFile(cfgPath, []byte(toml), 0o644)
+	_ = os.WriteFile(cfgPath, []byte(toml), 0o600)
 
 	cfg, err := Load(cfgPath)
 	if err != nil {
@@ -78,7 +78,7 @@ func TestLoadConfigDataDir(t *testing.T) {
 	cfgPath := filepath.Join(dir, "config.toml")
 	toml := `data_dir = "~/.graith"
 `
-	_ = os.WriteFile(cfgPath, []byte(toml), 0o644)
+	_ = os.WriteFile(cfgPath, []byte(toml), 0o600)
 
 	cfg, err := Load(cfgPath)
 	if err != nil {
@@ -281,7 +281,7 @@ func TestLoadConfigMessages(t *testing.T) {
 max_age = "7d"
 max_per_stream = 500
 `
-	_ = os.WriteFile(cfgPath, []byte(toml), 0o644)
+	_ = os.WriteFile(cfgPath, []byte(toml), 0o600)
 
 	cfg, err := Load(cfgPath)
 	if err != nil {
@@ -313,7 +313,7 @@ idle_timeout = "2h"
 command = "codex"
 idle_timeout = "0"
 `
-	_ = os.WriteFile(cfgPath, []byte(toml), 0o644)
+	_ = os.WriteFile(cfgPath, []byte(toml), 0o600)
 
 	cfg, err := Load(cfgPath)
 	if err != nil {
@@ -344,7 +344,7 @@ command = "claude"
 [agents.claude.sandbox]
 features = ["clipboard"]
 `
-	_ = os.WriteFile(cfgPath, []byte(toml), 0o644)
+	_ = os.WriteFile(cfgPath, []byte(toml), 0o600)
 
 	cfg, err := Load(cfgPath)
 	if err != nil {
@@ -509,7 +509,7 @@ func TestRepoPathAllowed(t *testing.T) {
 		allowed := t.TempDir()
 
 		target := filepath.Join(allowed, "real")
-		if err := os.Mkdir(target, 0o755); err != nil {
+		if err := os.Mkdir(target, 0o750); err != nil {
 			t.Fatal(err)
 		}
 
@@ -529,7 +529,7 @@ func TestRepoPathAllowed(t *testing.T) {
 		outside := t.TempDir()
 
 		outsideRepo := filepath.Join(outside, "repo")
-		if err := os.Mkdir(outsideRepo, 0o755); err != nil {
+		if err := os.Mkdir(outsideRepo, 0o750); err != nil {
 			t.Fatal(err)
 		}
 
@@ -548,7 +548,7 @@ func TestRepoPathAllowed(t *testing.T) {
 		actual := t.TempDir()
 
 		repo := filepath.Join(actual, "braw-croft")
-		if err := os.Mkdir(repo, 0o755); err != nil {
+		if err := os.Mkdir(repo, 0o750); err != nil {
 			t.Fatal(err)
 		}
 
@@ -571,7 +571,7 @@ func TestLoadPartialAgentPreservesDefaults(t *testing.T) {
 [agents.claude]
 command = "auld-claude"
 `
-	_ = os.WriteFile(cfgPath, []byte(toml), 0o644)
+	_ = os.WriteFile(cfgPath, []byte(toml), 0o600)
 
 	cfg, err := Load(cfgPath)
 	if err != nil {
@@ -612,7 +612,7 @@ func TestLoadAgentExplicitEmptyArgs(t *testing.T) {
 command = "claude"
 args = []
 `
-	_ = os.WriteFile(cfgPath, []byte(toml), 0o644)
+	_ = os.WriteFile(cfgPath, []byte(toml), 0o600)
 
 	cfg, err := Load(cfgPath)
 	if err != nil {
@@ -637,7 +637,7 @@ func TestLoadExplicitEmptyResumeAndForkArgs(t *testing.T) {
 resume_args = []
 fork_args = []
 `
-	_ = os.WriteFile(cfgPath, []byte(toml), 0o644)
+	_ = os.WriteFile(cfgPath, []byte(toml), 0o600)
 
 	cfg, err := Load(cfgPath)
 	if err != nil {
@@ -669,7 +669,7 @@ func TestLoadExplicitEmptyEnv(t *testing.T) {
 [agents.claude]
 env = {}
 `
-	_ = os.WriteFile(cfgPath, []byte(toml), 0o644)
+	_ = os.WriteFile(cfgPath, []byte(toml), 0o600)
 
 	cfg, err := Load(cfgPath)
 	if err != nil {
@@ -694,7 +694,7 @@ func TestLoadCustomAgentPreserved(t *testing.T) {
 command = "canny-agent"
 args = ["--flag"]
 `
-	_ = os.WriteFile(cfgPath, []byte(toml), 0o644)
+	_ = os.WriteFile(cfgPath, []byte(toml), 0o600)
 
 	cfg, err := Load(cfgPath)
 	if err != nil {
@@ -817,7 +817,7 @@ path = "~/Code/croft"
 path = "~/Code/glen-scripts"
 allow_concurrent = true
 `
-	_ = os.WriteFile(cfgPath, []byte(toml), 0o644)
+	_ = os.WriteFile(cfgPath, []byte(toml), 0o600)
 
 	cfg, err := Load(cfgPath)
 	if err != nil {
@@ -1342,7 +1342,7 @@ args = ["chrome-mcp", "--port", "9333"]
 [agents.claude.mcp_servers.agent-only]
 command = "bonnie"
 `
-	_ = os.WriteFile(cfgPath, []byte(toml), 0o644)
+	_ = os.WriteFile(cfgPath, []byte(toml), 0o600)
 
 	cfg, err := Load(cfgPath)
 	if err != nil {
@@ -1597,7 +1597,7 @@ func TestOrchestratorSandboxConfigParsing(t *testing.T) {
 [orchestrator]
 enabled = true
 agent = "claude"
-`), 0o644)
+`), 0o600)
 
 		cfg, err := Load(cfgPath)
 		if err != nil {
@@ -1620,7 +1620,7 @@ agent = "claude"
 [orchestrator]
 enabled = true
 [orchestrator.sandbox]
-`), 0o644)
+`), 0o600)
 
 		cfg, err := Load(cfgPath)
 		if err != nil {
@@ -1641,7 +1641,7 @@ enabled = true
 [orchestrator.sandbox]
 read_dirs = ["~/docs"]
 write_dirs = ["~/.config/graith", "/tmp/extra"]
-`), 0o644)
+`), 0o600)
 
 		cfg, err := Load(cfgPath)
 		if err != nil {
@@ -1671,7 +1671,7 @@ enabled = true
 command = "thrawn"
 features = ["network"]
 write_dirs = ["~/.config/graith"]
-`), 0o644)
+`), 0o600)
 
 	cfg, err := Load(cfgPath)
 	if err != nil {

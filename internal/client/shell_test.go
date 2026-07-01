@@ -28,7 +28,7 @@ func TestRunShellInWorktree_NonZeroExit(t *testing.T) {
 	dir := t.TempDir()
 	script := filepath.Join(dir, "fakeshell")
 
-	if err := os.WriteFile(script, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil { //nolint:gosec // G306: script/binary must be executable
 		t.Fatalf("write fakeshell: %v", err)
 	}
 
@@ -44,7 +44,7 @@ func TestRunShellInWorktree_Success(t *testing.T) {
 	dir := t.TempDir()
 	script := filepath.Join(dir, "fakeshell")
 
-	if err := os.WriteFile(script, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil { //nolint:gosec // G306: script/binary must be executable
 		t.Fatalf("write fakeshell: %v", err)
 	}
 

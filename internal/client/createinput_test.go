@@ -47,7 +47,7 @@ func updateModel(m createSessionModel, msg tea.Msg) createSessionModel {
 func mkdirAll(t *testing.T, path string) {
 	t.Helper()
 
-	if err := os.MkdirAll(path, 0o755); err != nil {
+	if err := os.MkdirAll(path, 0o750); err != nil {
 		t.Fatalf("mkdir %s: %v", path, err)
 	}
 }
@@ -107,7 +107,7 @@ func TestDiscoverRepos_GitFile(t *testing.T) {
 	base := t.TempDir()
 	repo := filepath.Join(base, "worktree-repo")
 	mkdirAll(t, repo)
-	writeFile(t, filepath.Join(repo, ".git"), []byte("gitdir: /some/other/path"), 0o644)
+	writeFile(t, filepath.Join(repo, ".git"), []byte("gitdir: /some/other/path"), 0o600)
 
 	repos := DiscoverRepos([]string{base}, nil)
 	if len(repos) != 1 {

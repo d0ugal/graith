@@ -16,7 +16,7 @@ func RunShellInWorktree(worktreePath string) error {
 		shell = "/bin/sh"
 	}
 
-	cmd := exec.Command(shell)
+	cmd := exec.Command(shell) //nolint:gosec // G702: intentionally spawns the user's own $SHELL from the trusted environment
 	cmd.Dir = worktreePath
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout

@@ -69,7 +69,7 @@ func TestLocateCodexByCwdNewest(t *testing.T) {
 	t.Setenv("CODEX_HOME", root)
 
 	day := filepath.Join(root, "sessions", "2026", "06", "24")
-	if err := os.MkdirAll(day, 0o755); err != nil {
+	if err := os.MkdirAll(day, 0o750); err != nil {
 		t.Fatal(err)
 	}
 

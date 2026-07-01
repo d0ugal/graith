@@ -44,7 +44,7 @@ func setupTestRepo(t *testing.T) (bareDir, cloneDir string) {
 
 	gitRun(t, "", "init", "--bare", "--initial-branch=main", bareDir)
 	gitRun(t, "", "clone", bareDir, cloneDir)
-	_ = os.WriteFile(filepath.Join(cloneDir, "file.txt"), []byte("initial"), 0644)
+	_ = os.WriteFile(filepath.Join(cloneDir, "file.txt"), []byte("initial"), 0o600)
 	gitRun(t, cloneDir, "add", ".")
 	gitRun(t, cloneDir, "commit", "-m", "initial")
 	gitRun(t, cloneDir, "push", "origin", "main")
@@ -58,7 +58,7 @@ func advanceRemote(t *testing.T, bareDir, cloneDir string) {
 	secondClone := filepath.Join(tmp, "second")
 
 	gitRun(t, "", "clone", bareDir, secondClone)
-	_ = os.WriteFile(filepath.Join(secondClone, "newfile.txt"), []byte("new content"), 0644)
+	_ = os.WriteFile(filepath.Join(secondClone, "newfile.txt"), []byte("new content"), 0o600)
 	gitRun(t, secondClone, "add", ".")
 	gitRun(t, secondClone, "commit", "-m", "advance remote")
 	gitRun(t, secondClone, "push", "origin", "main")
@@ -122,7 +122,7 @@ func TestPullIfClean_DirtyWorktree(t *testing.T) {
 	bareDir, cloneDir := setupTestRepo(t)
 	advanceRemote(t, bareDir, cloneDir)
 
-	_ = os.WriteFile(filepath.Join(cloneDir, "dirty.txt"), []byte("dirty"), 0644)
+	_ = os.WriteFile(filepath.Join(cloneDir, "dirty.txt"), []byte("dirty"), 0o600)
 
 	sm := newTestSM(t)
 
@@ -174,7 +174,7 @@ func TestPullIfClean_DetachedHead(t *testing.T) {
 func TestPullIfClean_LocalAhead(t *testing.T) {
 	_, cloneDir := setupTestRepo(t)
 
-	_ = os.WriteFile(filepath.Join(cloneDir, "local.txt"), []byte("local change"), 0644)
+	_ = os.WriteFile(filepath.Join(cloneDir, "local.txt"), []byte("local change"), 0o600)
 	gitRun(t, cloneDir, "add", ".")
 	gitRun(t, cloneDir, "commit", "-m", "local commit")
 
@@ -214,7 +214,7 @@ func TestPullIfClean_InProgressRebase(t *testing.T) {
 		gitDir = filepath.Join(cloneDir, gitDir)
 	}
 
-	_ = os.WriteFile(filepath.Join(gitDir, "REBASE_HEAD"), []byte("fake"), 0644)
+	_ = os.WriteFile(filepath.Join(gitDir, "REBASE_HEAD"), []byte("fake"), 0o600)
 
 	sm := newTestSM(t)
 
@@ -233,11 +233,11 @@ func TestPullIfClean_HooksDisabled(t *testing.T) {
 	advanceRemote(t, bareDir, cloneDir)
 
 	hooksDir := filepath.Join(cloneDir, ".git", "hooks")
-	_ = os.MkdirAll(hooksDir, 0755)
+	_ = os.MkdirAll(hooksDir, 0o750)
 
 	sentinel := filepath.Join(t.TempDir(), "hook-ran")
 	hookScript := "#!/bin/sh\ntouch " + sentinel + "\n"
-	_ = os.WriteFile(filepath.Join(hooksDir, "post-merge"), []byte(hookScript), 0755)
+	_ = os.WriteFile(filepath.Join(hooksDir, "post-merge"), []byte(hookScript), 0o755) //nolint:gosec // G306: script/binary must be executable
 
 	sm := newTestSM(t)
 
@@ -304,7 +304,7 @@ func TestHasInProgressOp(t *testing.T) {
 	}
 
 	for _, indicator := range []string{"MERGE_HEAD", "REBASE_HEAD", "CHERRY_PICK_HEAD", "BISECT_LOG", "REVERT_HEAD"} {
-		_ = os.WriteFile(filepath.Join(dir, indicator), []byte("x"), 0644)
+		_ = os.WriteFile(filepath.Join(dir, indicator), []byte("x"), 0o600)
 
 		if !hasInProgressOp(dir) {
 			t.Fatalf("expected in-progress op for %s", indicator)
@@ -314,7 +314,7 @@ func TestHasInProgressOp(t *testing.T) {
 	}
 
 	for _, indicator := range []string{"rebase-merge", "rebase-apply", "sequencer"} {
-		_ = os.MkdirAll(filepath.Join(dir, indicator), 0755)
+		_ = os.MkdirAll(filepath.Join(dir, indicator), 0o750)
 
 		if !hasInProgressOp(dir) {
 			t.Fatalf("expected in-progress op for %s", indicator)

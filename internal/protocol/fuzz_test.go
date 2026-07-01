@@ -52,7 +52,7 @@ func FuzzReadFrame(f *testing.F) {
 
 	var validFrame bytes.Buffer
 	validFrame.WriteByte(ChannelControl)
-	validFrame.Write([]byte{0, 0, 0, byte(len(validPayload))})
+	validFrame.Write([]byte{0, 0, 0, byte(len(validPayload))}) //nolint:gosec // G115: validPayload is a fixed 15-byte test literal
 	validFrame.Write(validPayload)
 	f.Add(validFrame.Bytes())
 
