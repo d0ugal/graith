@@ -13,6 +13,13 @@ before:
 builds:
   - main: ./cmd/graith
     binary: gr
+    # Reproducible builds: strip local paths, pure-Go static binary, and stamp
+    # object timestamps from the commit rather than wall-clock time.
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    mod_timestamp: "{{ .CommitTimestamp }}"
     ldflags:
       - -s -w
       - -X github.com/d0ugal/graith/internal/version.Version={{.Version}}
@@ -41,17 +48,34 @@ nfpms:
     # linux amd64 + arm64 come from the existing builds matrix; nfpm emits one
     # package per (format, goarch). darwin builds are skipped automatically.
     bindir: /usr/bin
+    # Reproducible packages: pin the package and its file times to the commit
+    # date rather than build time.
+    mtime: "{{ .CommitDate }}"
+    rpm:
+      # Otherwise nfpm records the (ephemeral) build machine's hostname in the
+      # RPM header, which varies per CI run and breaks byte-for-byte reproducibility.
+      buildhost: reproducible
     contents:
       - src: ./completions/gr.bash
         dst: /usr/share/bash-completion/completions/gr
+        file_info:
+          mtime: "{{ .CommitDate }}"
       - src: ./completions/gr.zsh
         dst: /usr/share/zsh/vendor-completions/_gr
+        file_info:
+          mtime: "{{ .CommitDate }}"
       - src: ./completions/gr.fish
         dst: /usr/share/fish/vendor_completions.d/gr.fish
+        file_info:
+          mtime: "{{ .CommitDate }}"
       - src: ./LICENSE
         dst: /usr/share/doc/graith/copyright
+        file_info:
+          mtime: "{{ .CommitDate }}"
       - src: ./README.md
         dst: /usr/share/doc/graith/README.md
+        file_info:
+          mtime: "{{ .CommitDate }}"
 
 checksum:
   name_template: checksums.txt
