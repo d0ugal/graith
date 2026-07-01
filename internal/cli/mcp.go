@@ -34,6 +34,7 @@ Tools exposed:
 	},
 }
 
-func init() {
+// registerMCPCmd registers this command on rootCmd. Called from registerCommands.
+func registerMCPCmd() {
 	rootCmd.AddCommand(mcpCmd)
 }

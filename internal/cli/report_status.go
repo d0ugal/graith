@@ -100,7 +100,8 @@ var reportStatusCmd = &cobra.Command{
 	},
 }
 
-func init() {
+// registerReportStatusCmd registers this command on rootCmd. Called from registerCommands.
+func registerReportStatusCmd() {
 	rootCmd.AddCommand(reportStatusCmd)
 	reportStatusCmd.Flags().StringVar(&reportEvent, "event", "", "hook event name")
 	reportStatusCmd.Flags().StringVar(&reportTool, "tool", "", "tool name")

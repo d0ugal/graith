@@ -91,7 +91,8 @@ var forkCmd = &cobra.Command{
 	},
 }
 
-func init() {
+// registerForkCmd registers this command on rootCmd. Called from registerCommands.
+func registerForkCmd() {
 	rootCmd.AddCommand(forkCmd)
 	forkCmd.Flags().BoolVar(&forkBackground, "background", false, "fork without attaching")
 }

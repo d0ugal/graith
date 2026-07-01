@@ -74,6 +74,7 @@ var approvalsCmd = &cobra.Command{
 	},
 }
 
-func init() {
+// registerApprovalsCmd registers this command on rootCmd. Called from registerCommands.
+func registerApprovalsCmd() {
 	rootCmd.AddCommand(approvalsCmd)
 }

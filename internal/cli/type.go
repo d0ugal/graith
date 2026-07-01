@@ -56,7 +56,8 @@ var typeCmd = &cobra.Command{
 	},
 }
 
-func init() {
+// registerTypeCmd registers this command on rootCmd. Called from registerCommands.
+func registerTypeCmd() {
 	typeCmd.Flags().Bool("no-newline", false, "Do not append a newline after the text")
 	rootCmd.AddCommand(typeCmd)
 }

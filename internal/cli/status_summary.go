@@ -141,7 +141,8 @@ func parseTTL(s string) (time.Duration, error) {
 	return d, nil
 }
 
-func init() {
+// registerStatusSummaryCmd registers this command on rootCmd. Called from registerCommands.
+func registerStatusSummaryCmd() {
 	statusSummaryCmd.Flags().BoolVar(&statusSummaryClear, "clear", false, "clear the status summary")
 	statusSummaryCmd.Flags().StringVar(&statusSummaryTTL, "ttl", "", "override TTL for this status update (e.g. 10m)")
 	rootCmd.AddCommand(statusSummaryCmd)

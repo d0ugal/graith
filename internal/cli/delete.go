@@ -315,7 +315,8 @@ func deleteBatchRun(cmd *cobra.Command) error {
 	return nil
 }
 
-func init() {
+// registerDeleteCmd registers this command on rootCmd. Called from registerCommands.
+func registerDeleteCmd() {
 	addBatchFlags(deleteCmd, &deleteBatch)
 	deleteCmd.Flags().BoolVar(&deleteChildren, "children", false, "also delete all descendant sessions")
 	rootCmd.AddCommand(deleteCmd)

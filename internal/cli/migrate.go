@@ -75,7 +75,8 @@ var migrateCmd = &cobra.Command{
 	},
 }
 
-func init() {
+// registerMigrateCmd registers this command on rootCmd. Called from registerCommands.
+func registerMigrateCmd() {
 	rootCmd.AddCommand(migrateCmd)
 	migrateCmd.Flags().StringVar(&migrateAgent, "agent", "", "target agent to migrate to (required)")
 	migrateCmd.Flags().StringVar(&migrateModel, "model", "", "model for the target agent (default: target's default)")

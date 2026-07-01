@@ -611,7 +611,8 @@ var scenarioListCmd = &cobra.Command{
 	},
 }
 
-func init() {
+// registerScenarioCmd registers this command on rootCmd. Called from registerCommands.
+func registerScenarioCmd() {
 	scenarioCmd.AddCommand(scenarioStartCmd)
 	scenarioCmd.AddCommand(scenarioStopCmd)
 	scenarioCmd.AddCommand(scenarioResumeCmd)

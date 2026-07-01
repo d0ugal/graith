@@ -83,7 +83,8 @@ var updateCmd = &cobra.Command{
 	},
 }
 
-func init() {
+// registerUpdateCmd registers this command on rootCmd. Called from registerCommands.
+func registerUpdateCmd() {
 	updateCmd.Flags().String("name", "", "new session name")
 	updateCmd.Flags().String("parent", "", "new parent session (empty string to orphan)")
 	rootCmd.AddCommand(updateCmd)

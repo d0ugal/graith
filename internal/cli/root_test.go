@@ -222,3 +222,45 @@ func TestExecuteCobraSilencesOwnErrors(t *testing.T) {
 		t.Errorf("Cobra's default error message appeared on stdout: %s", buf.String())
 	}
 }
+
+// TestRegisterCommandsIdempotent verifies that command registration (moved out
+// of per-file init() functions into registerCommands) wires subcommands onto
+// rootCmd and can be invoked repeatedly without duplicating them — the
+// sync.Once guard makes executeWithArgs safe to call more than once.
+func TestRegisterCommandsIdempotent(t *testing.T) {
+	registerCommands()
+	registerCommands()
+
+	want := []string{"new", "list", "msg", "scenario", "store", "daemon", "config"}
+	for _, name := range want {
+		found := false
+
+		for _, c := range rootCmd.Commands() {
+			if c.Name() == name {
+				found = true
+				break
+			}
+		}
+
+		if !found {
+			t.Errorf("subcommand %q not registered on rootCmd", name)
+		}
+	}
+
+	// Persistent flags added during registration must be present exactly once.
+	if rootCmd.PersistentFlags().Lookup("json") == nil {
+		t.Error("--json persistent flag not registered")
+	}
+
+	// No duplicate command names (a second registration must not re-add them).
+	seen := map[string]int{}
+	for _, c := range rootCmd.Commands() {
+		seen[c.Name()]++
+	}
+
+	for name, n := range seen {
+		if n > 1 {
+			t.Errorf("subcommand %q registered %d times, want 1", name, n)
+		}
+	}
+}

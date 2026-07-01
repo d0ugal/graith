@@ -206,6 +206,7 @@ func writeJSONRPCError(w io.Writer, id any, code int, message string) {
 	w.Write([]byte("\n"))
 }
 
-func init() {
+// registerMCPProxyCmd registers this command on rootCmd. Called from registerCommands.
+func registerMCPProxyCmd() {
 	rootCmd.AddCommand(mcpProxyCmd)
 }

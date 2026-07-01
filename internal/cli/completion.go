@@ -38,7 +38,8 @@ var completionCmd = &cobra.Command{
 	},
 }
 
-func init() {
+// registerCompletionCmd registers this command on rootCmd. Called from registerCommands.
+func registerCompletionCmd() {
 	rootCmd.AddCommand(completionCmd)
 }
 

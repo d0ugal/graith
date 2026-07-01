@@ -29,7 +29,8 @@ var attachCmd = &cobra.Command{
 	},
 }
 
-func init() {
+// registerAttachCmd registers this command on rootCmd. Called from registerCommands.
+func registerAttachCmd() {
 	rootCmd.AddCommand(attachCmd)
 }
 

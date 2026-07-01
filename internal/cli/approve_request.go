@@ -120,6 +120,7 @@ func generateApprovalID() string {
 	return hex.EncodeToString(b)
 }
 
-func init() {
+// registerApproveRequestCmd registers this command on rootCmd. Called from registerCommands.
+func registerApproveRequestCmd() {
 	rootCmd.AddCommand(approveRequestCmd)
 }

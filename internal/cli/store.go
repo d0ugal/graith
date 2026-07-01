@@ -383,7 +383,8 @@ var storeRmCmd = &cobra.Command{
 	},
 }
 
-func init() {
+// registerStoreCmd registers this command on rootCmd. Called from registerCommands.
+func registerStoreCmd() {
 	rootCmd.AddCommand(storeCmd)
 	storeCmd.PersistentFlags().StringVar(&storeRepoFlag, "repo", "", "repo path (default: auto-detect)")
 	storeCmd.PersistentFlags().BoolVar(&storeSharedFlag, "shared", false, "use the shared store (not scoped to any repo)")

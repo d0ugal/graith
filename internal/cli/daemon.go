@@ -230,7 +230,8 @@ func restartClean() error {
 	return nil
 }
 
-func init() {
+// registerDaemonCmd registers this command on rootCmd. Called from registerCommands.
+func registerDaemonCmd() {
 	rootCmd.AddCommand(daemonCmd)
 	daemonCmd.AddCommand(daemonStartCmd)
 	daemonCmd.AddCommand(daemonStopCmd)
