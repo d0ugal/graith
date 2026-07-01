@@ -340,6 +340,7 @@ func (sm *SessionManager) ensureOrchestrator(ctx context.Context) {
 		_ = sm.saveState()
 		sm.mu.Unlock()
 
+		//nolint:contextcheck // session lifecycle is intentionally detached from the daemon-boot ctx: the orchestrator session must persist, so Resume uses its own bounded background timeouts rather than this transient ctx.
 		if _, err := sm.Resume(orchID, 24, 80); err != nil {
 			sm.log.Error("failed to resume orchestrator after recovery", "id", orchID, "err", err)
 		}
@@ -354,6 +355,7 @@ func (sm *SessionManager) ensureOrchestrator(ctx context.Context) {
 		_ = sm.saveState()
 		sm.mu.Unlock()
 
+		//nolint:contextcheck // session lifecycle is intentionally detached from the daemon-boot ctx: the orchestrator session must persist, so Resume uses its own bounded background timeouts rather than this transient ctx.
 		if _, err := sm.Resume(orchID, 24, 80); err != nil {
 			sm.log.Error("failed to resume user-stopped orchestrator on boot", "id", orchID, "err", err)
 		}
@@ -361,6 +363,7 @@ func (sm *SessionManager) ensureOrchestrator(ctx context.Context) {
 	case orchStatus == StatusStopped || orchStatus == StatusErrored:
 		sm.log.Info("resuming orchestrator", "id", orchID, "status", orchStatus)
 
+		//nolint:contextcheck // session lifecycle is intentionally detached from the daemon-boot ctx: the orchestrator session must persist, so Resume uses its own bounded background timeouts rather than this transient ctx.
 		if _, err := sm.Resume(orchID, 24, 80); err != nil {
 			sm.log.Error("failed to resume orchestrator", "id", orchID, "err", err)
 		}
@@ -465,6 +468,7 @@ func (sm *SessionManager) handleOrchestratorExit(ctx context.Context, id string)
 		sm.mu.Unlock()
 	}
 
+	//nolint:contextcheck // session lifecycle is intentionally detached from the restart-scheduling ctx: the orchestrator session must persist, so Resume uses its own bounded background timeouts rather than this transient ctx.
 	if _, err := sm.Resume(id, 24, 80); err != nil {
 		sm.log.Error("failed to auto-restart orchestrator", "id", id, "err", err)
 	} else {
