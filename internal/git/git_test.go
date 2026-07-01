@@ -25,11 +25,19 @@ func setupTestRepo(t *testing.T) string {
 		}
 	}
 	run("init", "-b", "main")
-	os.WriteFile(filepath.Join(dir, "README.md"), []byte("braw"), 0o644)
+	writeFile(t, filepath.Join(dir, "README.md"), "braw")
 	run("add", ".")
 	run("commit", "-m", "auld")
 
 	return dir
+}
+
+func writeFile(t *testing.T, path, content string) {
+	t.Helper()
+
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
 }
 
 func TestRunOutput(t *testing.T) {
@@ -79,7 +87,7 @@ func TestHasUncommittedChanges(t *testing.T) {
 		t.Error("clean repo should not be dirty")
 	}
 
-	os.WriteFile(filepath.Join(dir, "neep.txt"), []byte("bonnie"), 0o644)
+	writeFile(t, filepath.Join(dir, "neep.txt"), "bonnie")
 
 	dirty, err = HasUncommittedChanges(dir)
 	if err != nil {
@@ -114,8 +122,8 @@ func TestDirtyFiles(t *testing.T) {
 		t.Errorf("clean repo: got %d dirty files, want 0", len(files))
 	}
 
-	os.WriteFile(filepath.Join(dir, "neep.txt"), []byte("neep"), 0o644)
-	os.WriteFile(filepath.Join(dir, "README.md"), []byte("bonnie"), 0o644)
+	writeFile(t, filepath.Join(dir, "neep.txt"), "neep")
+	writeFile(t, filepath.Join(dir, "README.md"), "bonnie")
 
 	files, err = DirtyFiles(dir)
 	if err != nil {
@@ -185,10 +193,10 @@ func TestUnpushedCommitSummaries(t *testing.T) {
 	}
 
 	run("checkout", "-b", "glen-feature")
-	os.WriteFile(filepath.Join(dir, "neep-a.txt"), []byte("neep"), 0o644)
+	writeFile(t, filepath.Join(dir, "neep-a.txt"), "neep")
 	run("add", ".")
 	run("commit", "-m", "braw glen commit")
-	os.WriteFile(filepath.Join(dir, "neep-b.txt"), []byte("neep"), 0o644)
+	writeFile(t, filepath.Join(dir, "neep-b.txt"), "neep")
 	run("add", ".")
 	run("commit", "-m", "bonnie glen commit")
 
@@ -199,6 +207,56 @@ func TestUnpushedCommitSummaries(t *testing.T) {
 
 	if len(commits) != 2 {
 		t.Errorf("got %d unpushed commits, want 2: %v", len(commits), commits)
+	}
+}
+
+func TestUnpushedCommitCount(t *testing.T) {
+	dir := setupTestRepo(t)
+
+	run := func(wd string, args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = wd
+
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=braw", "GIT_AUTHOR_EMAIL=braw@croft.local",
+			"GIT_COMMITTER_NAME=braw", "GIT_COMMITTER_EMAIL=braw@croft.local",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	// Create a bare "origin" and push main so origin/main exists.
+	origin := t.TempDir()
+	run(origin, "init", "--bare", "-b", "main")
+	run(dir, "remote", "add", "origin", origin)
+	run(dir, "push", "origin", "main")
+	run(dir, "fetch", "origin")
+
+	n, err := UnpushedCommitCount(dir, "main")
+	if err != nil {
+		t.Fatalf("UnpushedCommitCount: %v", err)
+	}
+
+	if n != 0 {
+		t.Errorf("fresh push: got %d unpushed commits, want 0", n)
+	}
+
+	// Add two local commits that have not been pushed.
+	writeFile(t, filepath.Join(dir, "neep-a.txt"), "neep")
+	run(dir, "add", ".")
+	run(dir, "commit", "-m", "braw local commit")
+	writeFile(t, filepath.Join(dir, "neep-b.txt"), "neep")
+	run(dir, "add", ".")
+	run(dir, "commit", "-m", "bonnie local commit")
+
+	n, err = UnpushedCommitCount(dir, "main")
+	if err != nil {
+		t.Fatalf("UnpushedCommitCount: %v", err)
+	}
+
+	if n != 2 {
+		t.Errorf("got %d unpushed commits, want 2", n)
 	}
 }
 

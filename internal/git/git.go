@@ -114,7 +114,9 @@ func UnpushedCommitCount(worktreePath, baseBranch string) (int, error) {
 	}
 
 	var n int
-	fmt.Sscanf(out, "%d", &n)
+	if _, err := fmt.Sscanf(out, "%d", &n); err != nil {
+		return 0, fmt.Errorf("parse commit count %q: %w", out, err)
+	}
 
 	return n, nil
 }

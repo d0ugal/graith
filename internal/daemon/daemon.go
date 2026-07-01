@@ -565,7 +565,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 	sandboxed, err := sm.resolveSandbox(agentName)
 	if err != nil {
 		if noRepo {
-			os.RemoveAll(worktreePath)
+			_ = os.RemoveAll(worktreePath)
 		}
 		sm.mu.Unlock()
 
@@ -616,7 +616,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 		delete(sm.state.Sessions, id)
 
 		if noRepo {
-			os.RemoveAll(worktreePath)
+			_ = os.RemoveAll(worktreePath)
 		}
 		sm.mu.Unlock()
 
@@ -639,9 +639,9 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 
 		switch {
 		case noRepo:
-			os.RemoveAll(worktreePath)
+			_ = os.RemoveAll(worktreePath)
 		case len(includes) > 0:
-			sm.teardownIncludes(repoRoot, worktreePath, branchName, includes)
+			_ = sm.teardownIncludes(repoRoot, worktreePath, branchName, includes)
 		case repoRoot != "":
 			_ = git.TeardownSession(repoRoot, worktreePath, branchName)
 		}
@@ -669,14 +669,14 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 			for _, incPath := range rcIncludes {
 				resolved := config.ResolvePath(incPath)
 				if !cfgSnapshot.RepoPathAllowed(resolved) {
-					sm.teardownIncludes(repoRoot, worktreePath, branchName, includes)
+					_ = sm.teardownIncludes(repoRoot, worktreePath, branchName, includes)
 					rollbackState()
 
 					return SessionState{}, fmt.Errorf("included repo %q is not under any allowed_repo_paths", incPath)
 				}
 
 				if !git.IsInsideGitRepo(resolved) {
-					sm.teardownIncludes(repoRoot, worktreePath, branchName, includes)
+					_ = sm.teardownIncludes(repoRoot, worktreePath, branchName, includes)
 					rollbackState()
 
 					return SessionState{}, fmt.Errorf("included repo %q is not a git repository", incPath)
@@ -959,10 +959,10 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 		cleanupOnError()
 
 		if scratchDir != "" {
-			os.RemoveAll(scratchDir)
+			_ = os.RemoveAll(scratchDir)
 		}
 
-		os.Remove(logPath)
+		_ = os.Remove(logPath)
 
 		return SessionState{}, fmt.Errorf("session was deleted during creation")
 	}
@@ -1004,11 +1004,11 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 		cleanupOnError()
 
 		if scratchDir != "" {
-			os.RemoveAll(scratchDir)
+			_ = os.RemoveAll(scratchDir)
 		}
 
 		sm.cleanupHooks(id, agentName, worktreePath)
-		os.Remove(logPath)
+		_ = os.Remove(logPath)
 
 		return SessionState{}, fmt.Errorf("persist session state: %w", err)
 	}
@@ -1415,7 +1415,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 		_ = ptySess.Kill()
 		ptySess.Close()
 		forkCleanup()
-		os.Remove(logPath)
+		_ = os.Remove(logPath)
 
 		return SessionState{}, fmt.Errorf("session was deleted during creation")
 	}
@@ -3277,7 +3277,7 @@ func (sm *SessionManager) Restart(id string, rows, cols uint16) (SessionState, e
 			s.PID = 0
 			s.PIDStartTime = 0
 
-			sm.saveState()
+			_ = sm.saveState()
 		}
 		sm.mu.Unlock()
 	} else if !hasPTY {
@@ -3301,7 +3301,7 @@ func (sm *SessionManager) Restart(id string, rows, cols uint16) (SessionState, e
 					s.PIDStartTime = 0
 					s.StopReason = StopReasonUser
 					applyLifecycleSummaryLocked(s, "Orphaned process killed for restart")
-					sm.saveState()
+					_ = sm.saveState()
 				case killErr == nil:
 					s.Status = StatusStopped
 					s.StatusChangedAt = time.Now()
@@ -3309,7 +3309,7 @@ func (sm *SessionManager) Restart(id string, rows, cols uint16) (SessionState, e
 					s.PIDStartTime = 0
 					s.StopReason = StopReasonUser
 					applyLifecycleSummaryLocked(s, "Process already exited")
-					sm.saveState()
+					_ = sm.saveState()
 				default:
 					s.Status = StatusErrored
 					s.StatusChangedAt = time.Now()
@@ -4307,14 +4307,14 @@ func cleanupLegacyDaemon(log *slog.Logger) {
 
 		conn, err := net.DialTimeout("unix", sock, 500*time.Millisecond)
 		if err != nil {
-			os.Remove(sock)
-			os.Remove(pid)
+			_ = os.Remove(sock)
+			_ = os.Remove(pid)
 			log.Info("removed stale legacy socket", "path", sock)
 
 			continue
 		}
 
-		conn.Close()
+		_ = conn.Close()
 
 		data, err := os.ReadFile(pid)
 		if err == nil {
@@ -4424,7 +4424,7 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 		log.Info("daemon started", logAttrs...)
 	}
 
-	defer l.Close()
+	defer func() { _ = l.Close() }()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -4504,7 +4504,7 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 
 			manifest, err := sm.PrepareUpgrade(listenerFd, configFile)
 			if err != nil {
-				listenerFile.Close()
+				_ = listenerFile.Close()
 				log.Error("prepare upgrade", "err", err)
 
 				return fmt.Errorf("upgrade failed: %w", err)

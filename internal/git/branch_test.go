@@ -91,7 +91,7 @@ func TestDiscoverDefaultBranchLocalMaster(t *testing.T) {
 		}
 	}
 	run("init", "-b", "master")
-	os.WriteFile(filepath.Join(dir, "README.md"), []byte("braw"), 0o644)
+	writeFile(t, filepath.Join(dir, "README.md"), "braw")
 	run("add", ".")
 	run("commit", "-m", "auld")
 
@@ -277,7 +277,9 @@ func TestTeardownSessionIdempotent(t *testing.T) {
 		}
 
 		// Manually remove the worktree directory to simulate partial teardown.
-		os.RemoveAll(worktreePath)
+		if err := os.RemoveAll(worktreePath); err != nil {
+			t.Fatalf("RemoveAll: %v", err)
+		}
 
 		// TeardownSession should succeed despite the missing worktree.
 		if err := TeardownSession(dir, worktreePath, branchName); err != nil {

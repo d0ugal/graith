@@ -9,6 +9,7 @@ linters:
   default: fast
   enable:
     - contextcheck
+    - errcheck
     - govet
     - staticcheck
     - ineffassign
@@ -19,7 +20,7 @@ linters:
     # Failing under the shared config on this repo; temporarily disabled so the
     # standardized config can land now. Each will be fixed and re-enabled in a
     # dedicated follow-up PR.
-    - errcheck  # TODO(re-enable): ~50 findings (unchecked defers/writes)
+    - dupl  # TODO(re-enable): ~36 findings (near-duplicate command/handler blocks; needs refactor)
     - gosec  # TODO(re-enable): ~21 findings (G115 overflow, file perms, taint)
     - cyclop  # Too strict
     - depguard  # Allow internal imports

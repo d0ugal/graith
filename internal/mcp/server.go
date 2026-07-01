@@ -434,7 +434,7 @@ func (s *Server) subscribe(ctx context.Context, _ *gomcp.CallToolRequest, input 
 	for {
 		select {
 		case <-ctx.Done():
-			c.SendControl("detach", struct{}{})
+			_ = c.SendControl("detach", struct{}{})
 			return nil, SubscribeOutput{}, ctx.Err()
 		default:
 		}
@@ -523,7 +523,8 @@ func (s *Server) readInbox(_ context.Context, _ *gomcp.CallToolRequest, input Re
 
 func decodeError(env protocol.Envelope) error {
 	var e protocol.ErrorMsg
-	protocol.DecodePayload(env, &e)
+
+	_ = protocol.DecodePayload(env, &e)
 
 	return fmt.Errorf("%s", e.Message)
 }

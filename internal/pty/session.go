@@ -69,8 +69,8 @@ func NewSession(opts SessionOpts) (*Session, error) {
 
 	sb, err := NewScrollback(opts.LogPath, opts.MaxLogSize)
 	if err != nil {
-		ptmx.Close()
-		cmd.Process.Kill()
+		_ = ptmx.Close()
+		_ = cmd.Process.Kill()
 
 		return nil, fmt.Errorf("scrollback: %w", err)
 	}
@@ -133,7 +133,7 @@ func AdoptSession(opts AdoptOpts) (*Session, error) {
 	s.userInputCond = sync.NewCond(&sync.Mutex{})
 
 	if tail, err := sb.TailBytes(128 * 1024); err == nil && len(tail) > 0 {
-		s.screen.Write(tail)
+		_, _ = s.screen.Write(tail)
 	}
 
 	go s.readLoop()

@@ -78,7 +78,9 @@ func TestSessionInfoRoundTrip(t *testing.T) {
 	msg, _ := DecodeControl(data)
 
 	var got SessionInfo
-	DecodePayload(msg, &got)
+	if err := DecodePayload(msg, &got); err != nil {
+		t.Fatalf("DecodePayload: %v", err)
+	}
 
 	if got.ID != "a3f2b1c9" || got.Name != "braw-auth-fix" {
 		t.Errorf("session = %+v", got)

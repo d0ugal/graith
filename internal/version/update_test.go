@@ -128,7 +128,10 @@ func TestCheckForUpdate_UsesCache(t *testing.T) {
 		CheckedAt:     time.Now(),
 	}
 	data, _ := json.Marshal(cache)
-	os.WriteFile(cachePath, data, 0o600)
+
+	if err := os.WriteFile(cachePath, data, 0o600); err != nil {
+		t.Fatalf("write cache: %v", err)
+	}
 
 	result := CheckForUpdate(dir)
 	if result == nil {
@@ -153,7 +156,10 @@ func TestCheckForUpdate_CacheUpToDate(t *testing.T) {
 		CheckedAt:     time.Now(),
 	}
 	data, _ := json.Marshal(cache)
-	os.WriteFile(cachePath, data, 0o600)
+
+	if err := os.WriteFile(cachePath, data, 0o600); err != nil {
+		t.Fatalf("write cache: %v", err)
+	}
 
 	result := CheckForUpdate(dir)
 	if result != nil {

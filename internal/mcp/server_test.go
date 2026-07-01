@@ -27,13 +27,16 @@ func setup(t *testing.T) *testEnv {
 	tmpDir := t.TempDir()
 
 	repo := filepath.Join(tmpDir, "repo")
-	os.MkdirAll(repo, 0o755)
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+
 	gitRun(t, repo, "init", "-b", "main")
 	gitRun(t, repo, "commit", "--allow-empty", "-m", "init")
 
 	socketDir, _ := os.MkdirTemp("/tmp", "graith-mcp-test-*")
 
-	t.Cleanup(func() { os.RemoveAll(socketDir) })
+	t.Cleanup(func() { _ = os.RemoveAll(socketDir) })
 
 	socketPath := filepath.Join(socketDir, "gr.sock")
 
@@ -45,8 +48,13 @@ func setup(t *testing.T) *testEnv {
 		RuntimeDir: tmpDir,
 		MessagesDB: filepath.Join(tmpDir, "messages.db"),
 	}
-	os.MkdirAll(paths.LogDir, 0o755)
-	os.MkdirAll(paths.DataDir, 0o755)
+	if err := os.MkdirAll(paths.LogDir, 0o755); err != nil {
+		t.Fatalf("mkdir log dir: %v", err)
+	}
+
+	if err := os.MkdirAll(paths.DataDir, 0o755); err != nil {
+		t.Fatalf("mkdir data dir: %v", err)
+	}
 
 	cfg := config.Default()
 	cfg.FetchOnCreate = false
@@ -64,7 +72,7 @@ func setup(t *testing.T) *testEnv {
 		t.Fatalf("open message store: %v", err)
 	}
 
-	t.Cleanup(func() { msgStore.Close() })
+	t.Cleanup(func() { _ = msgStore.Close() })
 	sm.SetMsgStore(msgStore)
 
 	l, err := net.Listen("unix", socketPath)
@@ -77,7 +85,7 @@ func setup(t *testing.T) *testEnv {
 	daemonSrv := daemon.NewServer(l, func(ctx context.Context, conn net.Conn) {
 		daemon.HandleConnection(ctx, conn, sm, log)
 	}, log)
-	go daemonSrv.Serve(ctx)
+	go func() { _ = daemonSrv.Serve(ctx) }()
 	go sm.RunDetectionLoop(ctx)
 
 	mcpSrv := NewServer(cfg, paths, "")
