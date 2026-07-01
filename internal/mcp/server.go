@@ -196,6 +196,7 @@ func (s *Server) listSessions(_ context.Context, _ *gomcp.CallToolRequest, _ Lis
 	if err != nil {
 		return nil, ListSessionsOutput{}, fmt.Errorf("read response: %w", err)
 	}
+
 	if resp.Type == "error" {
 		return nil, ListSessionsOutput{}, decodeError(resp)
 	}
@@ -209,6 +210,7 @@ func (s *Server) listSessions(_ context.Context, _ *gomcp.CallToolRequest, _ Lis
 	for i, si := range list.Sessions {
 		out.Sessions[i] = sessionInfoToOutput(si)
 	}
+
 	return nil, out, nil
 }
 
@@ -227,6 +229,7 @@ func (s *Server) sessionStatus(_ context.Context, _ *gomcp.CallToolRequest, inpu
 	if err != nil {
 		return nil, SessionInfoOutput{}, fmt.Errorf("read response: %w", err)
 	}
+
 	if resp.Type == "error" {
 		return nil, SessionInfoOutput{}, decodeError(resp)
 	}
@@ -241,6 +244,7 @@ func (s *Server) sessionStatus(_ context.Context, _ *gomcp.CallToolRequest, inpu
 			return nil, sessionInfoToOutput(si), nil
 		}
 	}
+
 	return nil, SessionInfoOutput{}, fmt.Errorf("session %q not found", input.Session)
 }
 
@@ -274,6 +278,7 @@ func (s *Server) createSession(_ context.Context, _ *gomcp.CallToolRequest, inpu
 	if err != nil {
 		return nil, CreateSessionOutput{}, fmt.Errorf("read response: %w", err)
 	}
+
 	if resp.Type == "error" {
 		return nil, CreateSessionOutput{}, decodeError(resp)
 	}
@@ -301,6 +306,7 @@ func (s *Server) publishMessage(_ context.Context, _ *gomcp.CallToolRequest, inp
 	defer c.Close()
 
 	senderID := "mcp"
+
 	senderName := input.Sender
 	if senderName == "" {
 		senderName = "mcp"
@@ -321,6 +327,7 @@ func (s *Server) publishMessage(_ context.Context, _ *gomcp.CallToolRequest, inp
 	if err != nil {
 		return nil, PublishMessageOutput{}, fmt.Errorf("read response: %w", err)
 	}
+
 	if resp.Type == "error" {
 		return nil, PublishMessageOutput{}, decodeError(resp)
 	}
@@ -329,6 +336,7 @@ func (s *Server) publishMessage(_ context.Context, _ *gomcp.CallToolRequest, inp
 	if err := protocol.DecodePayload(resp, &msg); err != nil {
 		return nil, PublishMessageOutput{}, fmt.Errorf("decode published message: %w", err)
 	}
+
 	return nil, msg, nil
 }
 
@@ -361,11 +369,13 @@ func (s *Server) readMessages(_ context.Context, _ *gomcp.CallToolRequest, input
 	}
 
 	var messages []MessageOutput
+
 	for {
 		frame, err := c.ReadFrame()
 		if err != nil {
 			return nil, ReadMessagesOutput{}, fmt.Errorf("read frame: %w", err)
 		}
+
 		if frame.Channel != protocol.ChannelControl {
 			continue
 		}
@@ -385,6 +395,7 @@ func (s *Server) readMessages(_ context.Context, _ *gomcp.CallToolRequest, input
 			if messages == nil {
 				messages = []MessageOutput{}
 			}
+
 			return nil, ReadMessagesOutput{Messages: messages}, nil
 		case "error":
 			return nil, ReadMessagesOutput{}, decodeError(msg)
@@ -432,6 +443,7 @@ func (s *Server) subscribe(ctx context.Context, _ *gomcp.CallToolRequest, input 
 		if err != nil {
 			return nil, SubscribeOutput{}, fmt.Errorf("read frame: %w", err)
 		}
+
 		if frame.Channel != protocol.ChannelControl {
 			continue
 		}
@@ -473,11 +485,13 @@ func (s *Server) readInbox(_ context.Context, _ *gomcp.CallToolRequest, input Re
 	}
 
 	var messages []MessageOutput
+
 	for {
 		frame, err := c.ReadFrame()
 		if err != nil {
 			return nil, ReadMessagesOutput{}, fmt.Errorf("read frame: %w", err)
 		}
+
 		if frame.Channel != protocol.ChannelControl {
 			continue
 		}
@@ -497,6 +511,7 @@ func (s *Server) readInbox(_ context.Context, _ *gomcp.CallToolRequest, input Re
 			if messages == nil {
 				messages = []MessageOutput{}
 			}
+
 			return nil, ReadMessagesOutput{Messages: messages}, nil
 		case "error":
 			return nil, ReadMessagesOutput{}, decodeError(msg)
@@ -509,6 +524,7 @@ func (s *Server) readInbox(_ context.Context, _ *gomcp.CallToolRequest, input Re
 func decodeError(env protocol.Envelope) error {
 	var e protocol.ErrorMsg
 	protocol.DecodePayload(env, &e)
+
 	return fmt.Errorf("%s", e.Message)
 }
 

@@ -133,6 +133,7 @@ func TestNeedsApproval_CodexContinue(t *testing.T) {
 	if codex.NeedsApproval(content) {
 		t.Error("Codex should not treat 'Continue?' as approval")
 	}
+
 	if !claude.NeedsApproval(content) {
 		t.Error("Claude should treat 'Continue?' as approval")
 	}
@@ -329,13 +330,16 @@ func TestStripANSI(t *testing.T) {
 
 func TestLastNonEmptyLines(t *testing.T) {
 	content := "auld\n\nbraw\n\ncanny\n\n"
+
 	lines := lastNonEmptyLines(content, 2)
 	if len(lines) != 2 {
 		t.Fatalf("expected 2 lines, got %d", len(lines))
 	}
+
 	if lines[0] != "braw" {
 		t.Errorf("lines[0] = %q, want %q", lines[0], "braw")
 	}
+
 	if lines[1] != "canny" {
 		t.Errorf("lines[1] = %q, want %q", lines[1], "canny")
 	}

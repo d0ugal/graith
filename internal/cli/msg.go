@@ -39,6 +39,7 @@ var msgPubCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+
 		if msgPubStream == "" {
 			return fmt.Errorf("--topic is required")
 		}
@@ -64,16 +65,20 @@ var msgPubCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+
 		if resp.Type == "error" {
 			var e protocol.ErrorMsg
 			protocol.DecodePayload(resp, &e)
+
 			return fmt.Errorf("%s", e.Message)
 		}
 
 		if jsonOutput {
 			return out.JSON(json.RawMessage(resp.Payload))
 		}
+
 		out.Print("Published to %s\n", msgPubStream)
+
 		return nil
 	},
 }
@@ -96,18 +101,21 @@ var msgSendCmd = &cobra.Command{
 		if msgSendChildren || msgSendParent {
 			return cobra.MaximumNArgs(1)(cmd, args)
 		}
+
 		return cobra.RangeArgs(1, 2)(cmd, args)
 	},
 	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		if msgSendChildren || msgSendParent {
 			return nil, cobra.ShellCompDirectiveNoFileComp
 		}
+
 		return completeSessionNames(cmd, args, toComplete)
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if msgSendChildren {
 			return msgSendChildrenRun(args)
 		}
+
 		if msgSendParent {
 			return msgSendParentRun(args)
 		}
@@ -124,6 +132,7 @@ var msgSendCmd = &cobra.Command{
 		}
 
 		bodyArgs := args[1:]
+
 		body, err := resolveBody(bodyArgs, msgSendFile)
 		if err != nil {
 			return err
@@ -145,16 +154,20 @@ var msgSendCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+
 		if resp.Type == "error" {
 			var e protocol.ErrorMsg
 			protocol.DecodePayload(resp, &e)
+
 			return fmt.Errorf("%s", e.Message)
 		}
 
 		if jsonOutput {
 			return out.JSON(json.RawMessage(resp.Payload))
 		}
+
 		out.Print("Sent to %s\n", args[0])
+
 		return nil
 	},
 }
@@ -198,6 +211,7 @@ var msgSubCmd = &cobra.Command{
 
 		if msgSubFollow || msgSubWait {
 			sigCh := make(chan os.Signal, 1)
+
 			signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 			go func() {
 				<-sigCh
@@ -211,11 +225,14 @@ var msgSubCmd = &cobra.Command{
 				if err == io.EOF {
 					return nil
 				}
+
 				return err
 			}
+
 			if frame.Channel != protocol.ChannelControl {
 				continue
 			}
+
 			msg, _ := protocol.DecodeControl(frame.Payload)
 			switch msg.Type {
 			case "msg_message":
@@ -231,6 +248,7 @@ var msgSubCmd = &cobra.Command{
 			case "error":
 				var e protocol.ErrorMsg
 				protocol.DecodePayload(msg, &e)
+
 				return fmt.Errorf("%s", e.Message)
 			}
 		}
@@ -266,12 +284,16 @@ var msgAckCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+
 		if resp.Type == "error" {
 			var e protocol.ErrorMsg
 			protocol.DecodePayload(resp, &e)
+
 			return fmt.Errorf("%s", e.Message)
 		}
+
 		out.Print("Acknowledged messages in %s\n", msgAckStream)
+
 		return nil
 	},
 }
@@ -301,9 +323,11 @@ var msgTopicsCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+
 		if resp.Type == "error" {
 			var e protocol.ErrorMsg
 			protocol.DecodePayload(resp, &e)
+
 			return fmt.Errorf("%s", e.Message)
 		}
 
@@ -328,10 +352,13 @@ var msgTopicsCmd = &cobra.Command{
 
 		tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 		fmt.Fprintln(tw, "STREAM\tTOTAL\tUNREAD\tLATEST")
+
 		for _, s := range list.Streams {
 			fmt.Fprintf(tw, "%s\t%d\t%d\t%s\n", s.Name, s.Total, s.Unread, s.LatestAt)
 		}
+
 		tw.Flush()
+
 		return nil
 	},
 }
@@ -382,9 +409,11 @@ func init() {
 func detectSender() (id, name string) {
 	id = os.Getenv("GRAITH_SESSION_ID")
 	name = os.Getenv("GRAITH_SESSION_NAME")
+
 	if id == "" {
 		id = fmt.Sprintf("pid:%d", os.Getpid())
 	}
+
 	return id, name
 }
 
@@ -394,37 +423,46 @@ func resolveBody(args []string, filePath string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("read body file: %w", err)
 		}
+
 		return string(data), nil
 	}
+
 	if len(args) > 0 {
 		return strings.Join(args, " "), nil
 	}
+
 	stat, _ := os.Stdin.Stat()
 	if (stat.Mode() & os.ModeCharDevice) == 0 {
 		data, err := io.ReadAll(os.Stdin)
 		if err != nil {
 			return "", fmt.Errorf("read stdin: %w", err)
 		}
+
 		return string(data), nil
 	}
+
 	return "", fmt.Errorf("message body required (as argument, --file, or stdin)")
 }
 
 func resolveSession(c *client.Client, nameOrID string) (string, error) {
 	c.SendControl("list", struct{}{})
+
 	resp, err := c.ReadControlResponse()
 	if err != nil {
 		return "", err
 	}
+
 	var list protocol.SessionListMsg
 	if err := protocol.DecodePayload(resp, &list); err != nil {
 		return "", err
 	}
+
 	for _, s := range list.Sessions {
 		if s.Name == nameOrID || s.ID == nameOrID {
 			return s.ID, nil
 		}
 	}
+
 	return "", fmt.Errorf("session %q not found", nameOrID)
 }
 
@@ -435,19 +473,23 @@ func resolveCurrentSessionInfo(c *client.Client) (*protocol.SessionInfo, error) 
 	}
 
 	c.SendControl("list", struct{}{})
+
 	resp, err := c.ReadControlResponse()
 	if err != nil {
 		return nil, err
 	}
+
 	var list protocol.SessionListMsg
 	if err := protocol.DecodePayload(resp, &list); err != nil {
 		return nil, err
 	}
+
 	for i, s := range list.Sessions {
 		if s.ID == currentID {
 			return &list.Sessions[i], nil
 		}
 	}
+
 	return nil, fmt.Errorf("current session %q not found in daemon", currentID)
 }
 
@@ -471,10 +513,12 @@ func msgSendChildrenRun(args []string) error {
 	}
 
 	c.SendControl("list", struct{}{})
+
 	resp, err := c.ReadControlResponse()
 	if err != nil {
 		return err
 	}
+
 	var list protocol.SessionListMsg
 	if err := protocol.DecodePayload(resp, &list); err != nil {
 		return err
@@ -486,6 +530,7 @@ func msgSendChildrenRun(args []string) error {
 	}
 
 	var sentTo []string
+
 	for _, desc := range descendants {
 		c.SendControl("msg_pub", protocol.MsgPubMsg{
 			Stream:     "inbox:" + desc.ID,
@@ -496,15 +541,19 @@ func msgSendChildrenRun(args []string) error {
 			ReplyTo:    msgSendReplyTo,
 			Quiet:      msgSendQuiet,
 		})
+
 		resp, err := c.ReadControlResponse()
 		if err != nil {
 			return err
 		}
+
 		if resp.Type == "error" {
 			var e protocol.ErrorMsg
 			protocol.DecodePayload(resp, &e)
+
 			return fmt.Errorf("sending to %s: %s", desc.Name, e.Message)
 		}
+
 		sentTo = append(sentTo, desc.Name)
 	}
 
@@ -514,7 +563,9 @@ func msgSendChildrenRun(args []string) error {
 			Count  int      `json:"count"`
 		}{sentTo, len(sentTo)})
 	}
+
 	out.Print("Sent to %d descendant sessions\n", len(sentTo))
+
 	return nil
 }
 
@@ -536,6 +587,7 @@ func msgSendParentRun(args []string) error {
 	if err != nil {
 		return err
 	}
+
 	if current.ParentID == "" {
 		return fmt.Errorf("current session has no parent")
 	}
@@ -549,20 +601,25 @@ func msgSendParentRun(args []string) error {
 		ReplyTo:    msgSendReplyTo,
 		Quiet:      msgSendQuiet,
 	})
+
 	resp, err := c.ReadControlResponse()
 	if err != nil {
 		return err
 	}
+
 	if resp.Type == "error" {
 		var e protocol.ErrorMsg
 		protocol.DecodePayload(resp, &e)
+
 		return fmt.Errorf("%s", e.Message)
 	}
 
 	if jsonOutput {
 		return out.JSON(json.RawMessage(resp.Payload))
 	}
+
 	out.Print("Sent to parent session\n")
+
 	return nil
 }
 

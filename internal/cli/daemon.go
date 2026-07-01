@@ -45,7 +45,9 @@ var daemonStopCmd = &cobra.Command{
 		if err := daemon.StopDaemon(paths.PIDFile); err != nil {
 			return err
 		}
+
 		out.Print("Daemon stopped\n")
+
 		return nil
 	},
 }
@@ -61,11 +63,13 @@ Use --force to do a clean stop/start, which kills running agent sessions.`,
 		if forceClean {
 			return restartClean()
 		}
+
 		err := execUpgrade("Daemon restarted (sessions preserved)")
 		if err != nil {
 			out.Print("Preserve failed: %s\nFalling back to clean restart...\n", err)
 			return restartClean()
 		}
+
 		return nil
 	},
 }
@@ -80,8 +84,10 @@ var daemonReloadCmd = &cobra.Command{
 			if startErr != nil {
 				return fmt.Errorf("start daemon: %w", startErr)
 			}
+
 			conn.Close()
 			out.Print("Daemon started with current config\n")
+
 			return nil
 		}
 		defer c.Close()
@@ -89,16 +95,21 @@ var daemonReloadCmd = &cobra.Command{
 		if err := c.SendControl("reload", struct{}{}); err != nil {
 			return err
 		}
+
 		resp, err := c.ReadControlResponse()
 		if err != nil {
 			return err
 		}
+
 		if resp.Type == "error" {
 			var e protocol.ErrorMsg
 			protocol.DecodePayload(resp, &e)
+
 			return fmt.Errorf("%s", e.Message)
 		}
+
 		out.Print("Config reloaded\n")
+
 		return nil
 	},
 }
@@ -113,9 +124,11 @@ func execUpgrade(successMsg string) error {
 		c.Close()
 		return err
 	}
+
 	c.ReadControlResponse()
 
 	c.SendControl("upgrade", upgradeMsg())
+
 	resp, err := c.ReadControlResponse()
 	if err != nil {
 		// Connection dropped — expected, the daemon exec'd itself
@@ -123,6 +136,7 @@ func execUpgrade(successMsg string) error {
 
 		for range 20 {
 			time.Sleep(250 * time.Millisecond)
+
 			conn, err := net.DialTimeout("unix", paths.SocketPath, 500*time.Millisecond)
 			if err == nil {
 				conn.Close()
@@ -131,9 +145,11 @@ func execUpgrade(successMsg string) error {
 		}
 	} else {
 		c.Close()
+
 		if resp.Type == "error" {
 			var e protocol.ErrorMsg
 			protocol.DecodePayload(resp, &e)
+
 			return fmt.Errorf("%s", e.Message)
 		}
 		// Got "upgrading" — give the daemon a moment to exec.
@@ -147,6 +163,7 @@ func execUpgrade(successMsg string) error {
 	}
 
 	out.Print("%s\n", successMsg)
+
 	return nil
 }
 
@@ -169,11 +186,14 @@ func probeDaemonVersion() string {
 	if err != nil || frame.Channel != protocol.ChannelControl {
 		return ""
 	}
+
 	env, _ := protocol.DecodeControl(frame.Payload)
+
 	var hsOk protocol.HandshakeOkMsg
 	if err := protocol.DecodePayload(env, &hsOk); err != nil {
 		return ""
 	}
+
 	return hsOk.DaemonVersion
 }
 
@@ -186,22 +206,27 @@ func restartClean() error {
 		if _, err := os.Stat(paths.SocketPath); os.IsNotExist(err) {
 			break
 		}
+
 		time.Sleep(100 * time.Millisecond)
 	}
+
 	if _, err := os.Stat(paths.SocketPath); err == nil {
 		if conn, err := net.DialTimeout("unix", paths.SocketPath, 500*time.Millisecond); err == nil {
 			conn.Close()
 			return fmt.Errorf("daemon is still running, cannot restart cleanly")
 		}
 	}
+
 	os.Remove(paths.SocketPath)
 
 	conn, err := client.EnsureDaemon(paths.SocketPath, cfgFile)
 	if err != nil {
 		return fmt.Errorf("restart daemon: %w", err)
 	}
+
 	conn.Close()
 	out.Print("Daemon restarted (sessions killed)\n")
+
 	return nil
 }
 

@@ -70,6 +70,7 @@ func (d *Detector) IsBusy(content string) bool {
 		if len(trimmed) > 0 && isBoxDrawing([]rune(trimmed)[0]) {
 			continue
 		}
+
 		for _, spinner := range spinnerChars {
 			if strings.Contains(line, spinner) {
 				return true
@@ -83,6 +84,7 @@ func (d *Detector) IsBusy(content string) bool {
 			if strings.HasPrefix(lineLower, word+"…") || strings.HasPrefix(lineLower, word+"...") {
 				return true
 			}
+
 			for _, spinner := range spinnerChars {
 				if strings.Contains(line, spinner+" "+word) {
 					return true
@@ -94,6 +96,7 @@ func (d *Detector) IsBusy(content string) bool {
 	if strings.Contains(recentLower, "thinking") && strings.Contains(recentLower, "tokens") {
 		return true
 	}
+
 	if strings.Contains(recentLower, "connecting") && strings.Contains(recentLower, "tokens") {
 		return true
 	}
@@ -157,6 +160,7 @@ func (d *Detector) NeedsApproval(content string) bool {
 		if d.tool == "codex" && pattern == "Continue?" {
 			continue
 		}
+
 		if strings.Contains(recent, pattern) {
 			return true
 		}
@@ -170,6 +174,7 @@ func (d *Detector) IsReady(content string) bool {
 	if d.IsBusy(content) {
 		return false
 	}
+
 	if d.NeedsApproval(content) {
 		return false
 	}
@@ -185,6 +190,7 @@ func (d *Detector) IsReady(content string) bool {
 	if len(checkLines) > 5 {
 		checkLines = checkLines[len(checkLines)-5:]
 	}
+
 	for _, line := range checkLines {
 		clean := strings.TrimSpace(StripANSI(line))
 		clean = strings.ReplaceAll(clean, " ", " ")
@@ -193,6 +199,7 @@ func (d *Detector) IsReady(content string) bool {
 			if strings.Contains(clean, "codex>") {
 				return true
 			}
+
 			if strings.Contains(recentLower, "continue?") {
 				return true
 			}
@@ -201,6 +208,7 @@ func (d *Detector) IsReady(content string) bool {
 		if clean == ">" || clean == "❯" || clean == "> " || clean == "❯ " {
 			return true
 		}
+
 		if strings.HasPrefix(clean, "❯ Try ") || strings.HasPrefix(clean, "> Try ") {
 			return true
 		}
@@ -224,15 +232,19 @@ func (d *Detector) Detect(content string, outputAge time.Duration) AgentStatus {
 	if d.IsBusy(content) {
 		return StatusActive
 	}
+
 	if d.NeedsApproval(content) {
 		return StatusApproval
 	}
+
 	if d.IsReady(content) {
 		return StatusReady
 	}
+
 	if outputAge >= 0 && outputAge < RecentOutputThreshold {
 		return StatusActive
 	}
+
 	return StatusUnknown
 }
 
@@ -244,12 +256,14 @@ func isBoxDrawing(r rune) bool {
 
 func lastNonEmptyLines(content string, n int) []string {
 	lines := strings.Split(content, "\n")
+
 	var result []string
 	for i := len(lines) - 1; i >= 0 && len(result) < n; i-- {
 		if strings.TrimSpace(lines[i]) != "" {
 			result = append([]string{lines[i]}, result...)
 		}
 	}
+
 	return result
 }
 
@@ -273,13 +287,18 @@ func StripANSI(content string) string {
 						j++
 						break
 					}
+
 					j++
 				}
+
 				i = j
+
 				continue
 			}
+
 			if i+1 < len(content) && content[i+1] == ']' {
 				bellPos := strings.Index(content[i:], "\x07")
+
 				stPos := strings.Index(content[i:], "\x1b\\")
 				switch {
 				case bellPos != -1 && (stPos == -1 || bellPos <= stPos):
@@ -289,13 +308,16 @@ func StripANSI(content string) string {
 				default:
 					i = len(content)
 				}
+
 				continue
 			}
+
 			if i+1 < len(content) {
 				i += 2
 				continue
 			}
 		}
+
 		if content[i] == '\x9B' {
 			j := i + 1
 			for j < len(content) {
@@ -304,11 +326,15 @@ func StripANSI(content string) string {
 					j++
 					break
 				}
+
 				j++
 			}
+
 			i = j
+
 			continue
 		}
+
 		b.WriteByte(content[i])
 		i++
 	}

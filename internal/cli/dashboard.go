@@ -23,6 +23,7 @@ var dashboardCmd = &cobra.Command{
 				if err != nil {
 					return nil
 				}
+
 				return s
 			})
 			if result == nil {
@@ -35,8 +36,10 @@ var dashboardCmd = &cobra.Command{
 				if err != nil {
 					return err
 				}
+
 				err = runAttachByID(c, result.SessionID, nil)
 				c.Close()
+
 				return err
 
 			case "delete":
@@ -78,6 +81,7 @@ func fetchSessions() ([]protocol.SessionInfo, error) {
 	defer c.Close()
 
 	c.SendControl("list", struct{}{})
+
 	resp, err := c.ReadControlResponse()
 	if err != nil {
 		return nil, err
@@ -87,6 +91,7 @@ func fetchSessions() ([]protocol.SessionInfo, error) {
 	if err := protocol.DecodePayload(resp, &list); err != nil {
 		return nil, err
 	}
+
 	return list.Sessions, nil
 }
 
@@ -98,14 +103,18 @@ func sendAction(msgType string, payload any) error {
 	defer c.Close()
 
 	c.SendControl(msgType, payload)
+
 	resp, err := c.ReadControlResponse()
 	if err != nil {
 		return err
 	}
+
 	if resp.Type == "error" {
 		var e protocol.ErrorMsg
 		protocol.DecodePayload(resp, &e)
+
 		return fmt.Errorf("%s", e.Message)
 	}
+
 	return nil
 }

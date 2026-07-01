@@ -7,10 +7,12 @@ import (
 
 func TestProcessStartTimeSelf(t *testing.T) {
 	pid := os.Getpid()
+
 	st, err := ProcessStartTime(pid)
 	if err != nil {
 		t.Fatalf("ProcessStartTime(%d) error: %v", pid, err)
 	}
+
 	if st == 0 {
 		t.Fatal("ProcessStartTime returned 0 for current process")
 	}
@@ -19,6 +21,7 @@ func TestProcessStartTimeSelf(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second call error: %v", err)
 	}
+
 	if st != st2 {
 		t.Errorf("start time changed between calls: %d vs %d", st, st2)
 	}

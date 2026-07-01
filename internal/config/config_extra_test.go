@@ -11,9 +11,11 @@ func TestLoadOrDefaultEmptyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadOrDefault(\"\") error: %v", err)
 	}
+
 	if cfg.DefaultAgent != "claude" {
 		t.Errorf("DefaultAgent = %q, want claude", cfg.DefaultAgent)
 	}
+
 	if _, ok := cfg.Agents["claude"]; !ok {
 		t.Error("expected claude agent in default config")
 	}
@@ -24,9 +26,11 @@ func TestLoadOrDefaultNonExistentPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadOrDefault(nonexistent) error: %v", err)
 	}
+
 	if cfg.DefaultAgent != "claude" {
 		t.Errorf("DefaultAgent = %q, want claude", cfg.DefaultAgent)
 	}
+
 	if cfg.Keybindings.Prefix != "ctrl+b" {
 		t.Errorf("Prefix = %q, want ctrl+b", cfg.Keybindings.Prefix)
 	}
@@ -40,13 +44,16 @@ default_agent = "codex"
 github_username = "braw-user"
 `
 	os.WriteFile(cfgPath, []byte(toml), 0o644)
+
 	cfg, err := LoadOrDefault(cfgPath)
 	if err != nil {
 		t.Fatalf("LoadOrDefault(valid) error: %v", err)
 	}
+
 	if cfg.DefaultAgent != "codex" {
 		t.Errorf("DefaultAgent = %q, want codex", cfg.DefaultAgent)
 	}
+
 	if cfg.GitHubUsername != "braw-user" {
 		t.Errorf("GitHubUsername = %q, want braw-user", cfg.GitHubUsername)
 	}
@@ -56,6 +63,7 @@ func TestLoadOrDefaultMalformedTOML(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.toml")
 	os.WriteFile(cfgPath, []byte("not valid [[[ toml"), 0o644)
+
 	_, err := LoadOrDefault(cfgPath)
 	if err == nil {
 		t.Fatal("expected error for malformed TOML, got nil")
@@ -66,6 +74,7 @@ func TestLoadOrDefaultPermissionDenied(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.toml")
 	os.WriteFile(cfgPath, []byte(`default_agent = "codex"`), 0o000)
+
 	_, err := LoadOrDefault(cfgPath)
 	if err == nil {
 		t.Fatal("expected error for unreadable config, got nil")
@@ -74,6 +83,7 @@ func TestLoadOrDefaultPermissionDenied(t *testing.T) {
 
 func TestEnsureDirs(t *testing.T) {
 	tmpDir := t.TempDir()
+
 	p := Paths{
 		ConfigFile: filepath.Join(tmpDir, "config", "config.toml"),
 		DataDir:    filepath.Join(tmpDir, "data"),
@@ -99,6 +109,7 @@ func TestEnsureDirs(t *testing.T) {
 			t.Errorf("directory %q does not exist: %v", dir, err)
 			continue
 		}
+
 		if !info.IsDir() {
 			t.Errorf("%q is not a directory", dir)
 		}
@@ -118,6 +129,7 @@ func TestEnsureDirsIdempotent(t *testing.T) {
 	if err := p.EnsureDirs(); err != nil {
 		t.Fatalf("first EnsureDirs() error: %v", err)
 	}
+
 	if err := p.EnsureDirs(); err != nil {
 		t.Fatalf("second EnsureDirs() error: %v", err)
 	}
@@ -125,16 +137,20 @@ func TestEnsureDirsIdempotent(t *testing.T) {
 
 func TestResolvePathsIndirectlyTestsRuntimeDir(t *testing.T) {
 	t.Setenv("GRAITH_PROFILE", "")
+
 	p, err := ResolvePaths()
 	if err != nil {
 		t.Fatalf("ResolvePaths() error: %v", err)
 	}
+
 	if p.RuntimeDir == "" {
 		t.Error("RuntimeDir should not be empty")
 	}
+
 	if p.SocketPath == "" {
 		t.Error("SocketPath should not be empty")
 	}
+
 	if p.PIDFile == "" {
 		t.Error("PIDFile should not be empty")
 	}

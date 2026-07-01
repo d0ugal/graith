@@ -30,22 +30,29 @@ var rootCmd = &cobra.Command{
 		if err := rejectConfigInsideSession(cmd); err != nil {
 			return err
 		}
+
 		var err error
+
 		cfg, err = config.LoadOrDefault(cfgFile)
 		if err != nil {
 			return fmt.Errorf("loading config: %w", err)
 		}
+
 		paths, err = config.ResolvePaths()
 		if err != nil {
 			return err
 		}
+
 		if cfg.DataDir != "" {
 			paths = paths.WithDataDir(cfg.DataDir)
 		}
+
 		if !jsonOutput && (agentMode || agent.Detected()) {
 			jsonOutput = true
 		}
+
 		out = output.New(jsonOutput)
+
 		return nil
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -59,6 +66,7 @@ func Execute() error {
 
 func executeWithArgs(args []string) error {
 	rootCmd.SetArgs(args)
+
 	err := rootCmd.Execute()
 	if err != nil {
 		w := out
@@ -66,13 +74,17 @@ func executeWithArgs(args []string) error {
 			// Cobra skips persistent flag parsing for some errors (e.g.
 			// unknown subcommand). Parse them here so --json is respected.
 			rootCmd.PersistentFlags().Parse(args)
+
 			if !jsonOutput && (agentMode || agent.Detected()) {
 				jsonOutput = true
 			}
+
 			w = output.New(jsonOutput)
 		}
+
 		w.Error(err)
 	}
+
 	return err
 }
 
@@ -89,6 +101,7 @@ func rejectConfigInsideSession(cmd *cobra.Command) error {
 	if cmd.Flags().Changed("config") && insideSession() {
 		return fmt.Errorf("--config is not allowed inside a graith session (sandbox policy)")
 	}
+
 	return nil
 }
 

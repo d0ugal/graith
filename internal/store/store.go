@@ -33,15 +33,19 @@ func Init(storePath string) error {
 	if err := git(storePath, "init", "--quiet"); err != nil {
 		return fmt.Errorf("git init: %w", err)
 	}
+
 	if err := git(storePath, "config", "user.name", "graith"); err != nil {
 		return fmt.Errorf("git config user.name: %w", err)
 	}
+
 	if err := git(storePath, "config", "user.email", "graith@localhost"); err != nil {
 		return fmt.Errorf("git config user.email: %w", err)
 	}
+
 	if err := git(storePath, "config", "core.autocrlf", "false"); err != nil {
 		return fmt.Errorf("git config core.autocrlf: %w", err)
 	}
+
 	return nil
 }
 
@@ -49,10 +53,12 @@ func Init(storePath string) error {
 func git(dir string, args ...string) error {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
+
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
 	}
+
 	return nil
 }
 
@@ -69,37 +75,47 @@ func ValidateKey(key string) error {
 	if key == "" {
 		return fmt.Errorf("store key must not be empty")
 	}
+
 	if key[0] == '/' {
 		return fmt.Errorf("store key must not start with '/'")
 	}
+
 	if key[0] == '-' {
 		return fmt.Errorf("store key must not start with '-'")
 	}
+
 	for _, c := range key {
 		if c < 0x20 || c == 0x7f {
 			return fmt.Errorf("store key must not contain control characters")
 		}
 	}
+
 	if strings.ContainsAny(key, "*?[:") {
 		return fmt.Errorf("store key must not contain glob/pathspec characters")
 	}
+
 	if strings.Contains(key, "\\") {
 		return fmt.Errorf("store key must not contain backslashes")
 	}
+
 	for _, component := range strings.Split(key, "/") {
 		if component == ".." {
 			return fmt.Errorf("store key must not contain '..' path components")
 		}
+
 		if strings.EqualFold(component, ".git") {
 			return fmt.Errorf("store key must not contain '.git' path components")
 		}
+
 		if component == "." {
 			return fmt.Errorf("store key must not contain '.' path components")
 		}
 	}
+
 	if strings.EqualFold(key, "store.lock") {
 		return fmt.Errorf("store key must not be 'store.lock'")
 	}
+
 	return nil
 }
 
@@ -121,6 +137,7 @@ func SharedStorePath(dataDir string) string {
 // withLock acquires an exclusive flock on a lock file in storePath and runs fn.
 func withLock(storePath string, fn func() error) error {
 	lockPath := filepath.Join(storePath, "store.lock")
+
 	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return fmt.Errorf("open lock file: %w", err)
@@ -176,19 +193,24 @@ func Put(storePath, key, body string) error {
 		if err := os.MkdirAll(filepath.Dir(filePath), 0o700); err != nil {
 			return fmt.Errorf("create parent directories: %w", err)
 		}
+
 		if err := os.WriteFile(filePath, []byte(body), 0o600); err != nil {
 			return fmt.Errorf("write file: %w", err)
 		}
+
 		if err := git(storePath, "add", "--", key); err != nil {
 			return fmt.Errorf("git add: %w", err)
 		}
+
 		if git(storePath, "diff", "--quiet", "--cached", "--", key) == nil {
 			return nil
 		}
+
 		msg := CommitMessage("update", key)
 		if err := git(storePath, "commit", "-m", msg, "--", key); err != nil {
 			return fmt.Errorf("git commit: %w", err)
 		}
+
 		return nil
 	})
 }
@@ -206,31 +228,40 @@ func Append(storePath, key, line string) error {
 		if err := os.MkdirAll(filepath.Dir(filePath), 0o700); err != nil {
 			return fmt.Errorf("create parent directories: %w", err)
 		}
+
 		f, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 		if err != nil {
 			return fmt.Errorf("open file for append: %w", err)
 		}
+
 		if !strings.HasSuffix(line, "\n") {
 			line += "\n"
 		}
+
 		_, writeErr := f.WriteString(line)
 		closeErr := f.Close()
+
 		if writeErr != nil {
 			return fmt.Errorf("append to file: %w", writeErr)
 		}
+
 		if closeErr != nil {
 			return fmt.Errorf("close file: %w", closeErr)
 		}
+
 		if err := git(storePath, "add", "--", key); err != nil {
 			return fmt.Errorf("git add: %w", err)
 		}
+
 		if git(storePath, "diff", "--quiet", "--cached", "--", key) == nil {
 			return nil
 		}
+
 		msg := CommitMessage("append", key)
 		if err := git(storePath, "commit", "-m", msg, "--", key); err != nil {
 			return fmt.Errorf("git commit: %w", err)
 		}
+
 		return nil
 	})
 }
@@ -242,10 +273,12 @@ func Get(storePath, key string) (string, error) {
 	}
 
 	filePath := filepath.Join(storePath, key)
+
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return "", err
 	}
+
 	return string(data), nil
 }
 
@@ -254,10 +287,12 @@ func Get(storePath, key string) (string, error) {
 // No locking is required for listing.
 func List(storePath, prefix string) ([]Entry, error) {
 	searchDir := storePath
+
 	if prefix != "" {
 		if err := ValidateKey(strings.TrimSuffix(prefix, "/")); err != nil {
 			return nil, err
 		}
+
 		searchDir = filepath.Join(storePath, prefix)
 	}
 
@@ -266,16 +301,20 @@ func List(storePath, prefix string) ([]Entry, error) {
 	}
 
 	var entries []Entry
+
 	err := filepath.WalkDir(searchDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
+
 		if d.IsDir() && d.Name() == ".git" {
 			return filepath.SkipDir
 		}
+
 		if d.IsDir() {
 			return nil
 		}
+
 		if path == filepath.Join(storePath, "store.lock") {
 			return nil
 		}
@@ -284,19 +323,23 @@ func List(storePath, prefix string) ([]Entry, error) {
 		if err != nil {
 			return fmt.Errorf("compute relative path: %w", err)
 		}
+
 		info, err := d.Info()
 		if err != nil {
 			return fmt.Errorf("stat %s: %w", key, err)
 		}
+
 		entries = append(entries, Entry{
 			Key:       key,
 			UpdatedAt: info.ModTime(),
 		})
+
 		return nil
 	})
 	if err != nil {
 		return nil, fmt.Errorf("walk store: %w", err)
 	}
+
 	return entries, nil
 }
 
@@ -316,6 +359,7 @@ func Remove(storePath, key string) error {
 		if err := git(storePath, "rm", "--", key); err != nil {
 			return fmt.Errorf("git rm: %w", err)
 		}
+
 		msg := CommitMessage("remove", key)
 		if err := git(storePath, "commit", "-m", msg, "--", key); err != nil {
 			return fmt.Errorf("git commit: %w", err)
@@ -327,9 +371,11 @@ func Remove(storePath, key string) error {
 			if err != nil || len(entries) > 0 {
 				break
 			}
+
 			os.Remove(dir) //nolint:errcheck
 			dir = filepath.Dir(dir)
 		}
+
 		return nil
 	})
 }
@@ -345,28 +391,34 @@ type StoreInfo struct {
 // Each directory is named <reponame>-<hash>.
 func ListStores(dataDir string) ([]StoreInfo, error) {
 	storeRoot := filepath.Join(dataDir, "store")
+
 	dirs, err := os.ReadDir(storeRoot)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
+
 		return nil, fmt.Errorf("read store root: %w", err)
 	}
 
 	var stores []StoreInfo
+
 	for _, d := range dirs {
 		if !d.IsDir() {
 			continue
 		}
+
 		storePath := filepath.Join(storeRoot, d.Name())
 		if _, err := os.Stat(filepath.Join(storePath, ".git")); err != nil {
 			continue
 		}
+
 		stores = append(stores, StoreInfo{
 			Name: d.Name(),
 			Path: storePath,
 		})
 	}
+
 	return stores, nil
 }
 
@@ -377,9 +429,11 @@ func repoHash(repoPath string) string {
 	for _, c := range repoPath {
 		h = h*31 + uint64(c)
 	}
+
 	b := make([]byte, 8)
 	for i := 0; i < 8; i++ {
 		b[i] = byte(h >> (i * 8))
 	}
+
 	return hex.EncodeToString(b)[:12]
 }

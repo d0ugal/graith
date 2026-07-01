@@ -26,6 +26,7 @@ func findConv(convs []msgConversation, peerID string) *msgConversation {
 			return &convs[i]
 		}
 	}
+
 	return nil
 }
 
@@ -41,19 +42,24 @@ func TestGroupConversationsDirections(t *testing.T) {
 	if len(convs) != 1 {
 		t.Fatalf("got %d conversations, want 1", len(convs))
 	}
+
 	c := convs[0]
 	if c.peerID != "bairn" {
 		t.Fatalf("peerID = %q, want bairn", c.peerID)
 	}
+
 	if c.peerName != "wee-bairn" {
 		t.Errorf("peerName = %q, want wee-bairn (from names map)", c.peerName)
 	}
+
 	if len(c.messages) != 2 {
 		t.Fatalf("got %d messages, want 2", len(c.messages))
 	}
+
 	if c.messages[0].outbound {
 		t.Error("received message marked outbound")
 	}
+
 	if !c.messages[1].outbound {
 		t.Error("sent message not marked outbound")
 	}
@@ -63,10 +69,12 @@ func TestGroupConversationsSelfMessage(t *testing.T) {
 	convs := groupConversations("kirk", []protocol.ConversationMessage{
 		cm("inbox:kirk", "kirk", "kirk", "note to self", "2026-06-25T10:00:00Z"),
 	}, nil)
+
 	c := findConv(convs, "kirk")
 	if c == nil {
 		t.Fatal("self-conversation not found")
 	}
+
 	if len(c.messages) != 1 || !c.messages[0].outbound {
 		t.Errorf("self-message should appear once as outbound, got %+v", c.messages)
 	}
@@ -79,10 +87,12 @@ func TestGroupConversationsNameFallback(t *testing.T) {
 		cm("inbox:bairn", "ben", "ben", "hi", "2026-06-25T10:00:00Z"),          // sent: peer=bairn, no name
 		cm("inbox:ben", "bairn", "wee-bairn", "hello", "2026-06-25T10:00:01Z"), // received: carries name
 	}, nil)
+
 	c := findConv(convs, "bairn")
 	if c == nil {
 		t.Fatal("conversation with bairn not found")
 	}
+
 	if c.peerName != "wee-bairn" {
 		t.Errorf("peerName = %q, want wee-bairn (from received sender_name)", c.peerName)
 	}
@@ -93,10 +103,12 @@ func TestGroupConversationsShortIDFallback(t *testing.T) {
 	convs := groupConversations("ben", []protocol.ConversationMessage{
 		cm("inbox:abcdef1234567890", "ben", "ben", "hi", "2026-06-25T10:00:00Z"),
 	}, nil)
+
 	c := findConv(convs, "abcdef1234567890")
 	if c == nil {
 		t.Fatal("conversation not found")
 	}
+
 	if c.peerName != "abcdef12" {
 		t.Errorf("peerName = %q, want short id abcdef12", c.peerName)
 	}
@@ -106,10 +118,12 @@ func TestGroupConversationsSystemClassification(t *testing.T) {
 	convs := groupConversations("ben", []protocol.ConversationMessage{
 		cm("inbox:ben", "orch-1", "orchestrator", "manifest", "2026-06-25T10:00:00Z"),
 	}, nil)
+
 	c := findConv(convs, "orch-1")
 	if c == nil || len(c.messages) != 1 {
 		t.Fatalf("conversation/messages missing: %+v", convs)
 	}
+
 	if !c.messages[0].system {
 		t.Error("orchestrator message not classified as system")
 	}
@@ -123,6 +137,7 @@ func TestGroupConversationsSortedByActivity(t *testing.T) {
 	if len(convs) != 2 {
 		t.Fatalf("got %d, want 2", len(convs))
 	}
+
 	if convs[0].peerID != "bonnie" {
 		t.Errorf("most recent conversation first: got %q, want bonnie", convs[0].peerID)
 	}
@@ -142,11 +157,13 @@ func testModel(n int) messageOverlayModel {
 			CreatedAt: "2026-06-25T10:00:0" + strconv.Itoa(i) + "Z",
 		}
 	}
+
 	m := newMessageOverlayModel("ben", nil, nil)
 	m.conversations = groupConversations("ben", msgs, nil)
 	m.loaded = true
 	m.msgCursor = m.msgCount() - 1 // start on the most recent, as the UI does
 	m.width, m.height = 100, 24
+
 	return m
 }
 
@@ -160,6 +177,7 @@ func TestMessageOverlayMessageNavigation(t *testing.T) {
 		mm, _ := m.Update(keyPress("k"))
 		m = mm.(messageOverlayModel)
 	}
+
 	if m.msgCursor != 0 {
 		t.Errorf("after many ups, msgCursor = %d, want 0", m.msgCursor)
 	}
@@ -168,6 +186,7 @@ func TestMessageOverlayMessageNavigation(t *testing.T) {
 		mm, _ := m.Update(keyPress("j"))
 		m = mm.(messageOverlayModel)
 	}
+
 	if m.msgCursor != 3 {
 		t.Errorf("after many downs, msgCursor = %d, want 3", m.msgCursor)
 	}
@@ -178,20 +197,24 @@ func TestMessageOverlayMessageNavigation(t *testing.T) {
 func TestMessageOverlayFocusedMessageExpanded(t *testing.T) {
 	m := testModel(3)
 	m.msgCursor = 1
+
 	out := m.renderThread(80, 40)
 	if !strings.Contains(out, "detail 1") {
 		t.Errorf("focused message body should be visible:\n%s", out)
 	}
+
 	if strings.Contains(out, "detail 0") || strings.Contains(out, "detail 2") {
 		t.Errorf("non-focused message bodies should be collapsed:\n%s", out)
 	}
 	// Moving the cursor expands a different message.
 	mm, _ := m.Update(keyPress("k")) // to index 0
 	m = mm.(messageOverlayModel)
+
 	out = m.renderThread(80, 40)
 	if !strings.Contains(out, "detail 0") {
 		t.Errorf("after moving up, message 0 should expand:\n%s", out)
 	}
+
 	if strings.Contains(out, "detail 1") {
 		t.Errorf("message 1 should collapse after moving away:\n%s", out)
 	}
@@ -205,10 +228,12 @@ func TestMessageOverlayPinKeepsExpanded(t *testing.T) {
 	m = mm.(messageOverlayModel)
 	mm, _ = m.Update(keyPress("j")) // move to message 1
 	m = mm.(messageOverlayModel)
+
 	out := m.renderThread(80, 40)
 	if !strings.Contains(out, "detail 0") {
 		t.Errorf("pinned message 0 should stay expanded after moving away:\n%s", out)
 	}
+
 	if !strings.Contains(out, "detail 1") {
 		t.Errorf("focused message 1 should be expanded:\n%s", out)
 	}
@@ -223,6 +248,7 @@ func TestMessageOverlayLongMessageScroll(t *testing.T) {
 		sb.WriteString(strconv.Itoa(i))
 		sb.WriteString("\n")
 	}
+
 	m := newMessageOverlayModel("ben", nil, nil)
 	m.conversations = groupConversations("ben", []protocol.ConversationMessage{
 		{ID: "m0", Stream: "inbox:ben", SenderID: "bairn", Body: sb.String(), CreatedAt: "2026-06-25T10:00:00Z"},
@@ -236,6 +262,7 @@ func TestMessageOverlayLongMessageScroll(t *testing.T) {
 	if !strings.Contains(out, "line 0") {
 		t.Fatalf("top of long message should be visible initially:\n%s", out)
 	}
+
 	if strings.Contains(out, "line 29") {
 		t.Fatalf("tail should NOT be visible before scrolling:\n%s", out)
 	}
@@ -244,15 +271,18 @@ func TestMessageOverlayLongMessageScroll(t *testing.T) {
 		mm, _ := m.Update(keyPress(" "))
 		m = mm.(messageOverlayModel)
 	}
+
 	if m.lineScroll == 0 {
 		t.Fatal("paging did not advance lineScroll")
 	}
+
 	out = m.renderThread(78, 10)
 	if !strings.Contains(out, "line 29") {
 		t.Errorf("after paging down, tail of long message should be reachable:\n%s", out)
 	}
 	// Moving the message cursor (down to the short message) resets the scroll.
 	mm, _ := m.Update(keyPress("j"))
+
 	m = mm.(messageOverlayModel)
 	if m.lineScroll != 0 {
 		t.Errorf("lineScroll = %d, want 0 after cursor move", m.lineScroll)
@@ -266,6 +296,7 @@ func TestMessageOverlayRenderShowsTimeAndDelta(t *testing.T) {
 	if !strings.Contains(out, "ago") {
 		t.Errorf("thread render missing relative delta:\n%s", out)
 	}
+
 	if !strings.Contains(out, "▸") {
 		t.Errorf("non-focused messages should show the collapsed ▸ marker:\n%s", out)
 	}
@@ -276,6 +307,7 @@ func TestMsgTimestampTodayHasTimeAndDelta(t *testing.T) {
 	if !strings.Contains(ts, "ago") || !strings.Contains(ts, ":") {
 		t.Errorf("msgTimestamp = %q, want an absolute HH:MM and a delta", ts)
 	}
+
 	if msgTimestamp(time.Time{}) != "" {
 		t.Error("zero time should render empty")
 	}

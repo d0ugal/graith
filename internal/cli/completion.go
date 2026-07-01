@@ -46,6 +46,7 @@ func completeSessionNames(cmd *cobra.Command, args []string, toComplete string) 
 	if len(args) > 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
+
 	c, err := client.Connect(cfg, paths, cfgFile)
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
@@ -53,10 +54,12 @@ func completeSessionNames(cmd *cobra.Command, args []string, toComplete string) 
 	defer c.Close()
 
 	c.SendControl("list", struct{}{})
+
 	resp, err := c.ReadControlResponse()
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
+
 	var list protocol.SessionListMsg
 	if err := protocol.DecodePayload(resp, &list); err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
@@ -66,6 +69,7 @@ func completeSessionNames(cmd *cobra.Command, args []string, toComplete string) 
 	for _, s := range list.Sessions {
 		names = append(names, s.Name, s.ID)
 	}
+
 	return names, cobra.ShellCompDirectiveNoFileComp
 }
 
@@ -73,11 +77,14 @@ func completeAgentNames(_ *cobra.Command, _ []string, _ string) ([]string, cobra
 	if cfg == nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
+
 	names := make([]string, 0, len(cfg.Agents))
 	for name := range cfg.Agents {
 		names = append(names, name)
 	}
+
 	sort.Strings(names)
+
 	return names, cobra.ShellCompDirectiveNoFileComp
 }
 
@@ -89,24 +96,30 @@ func completeRepoPaths(_ *cobra.Command, _ []string, _ string) ([]string, cobra.
 	defer c.Close()
 
 	c.SendControl("list", struct{}{})
+
 	resp, err := c.ReadControlResponse()
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveFilterDirs
 	}
+
 	var list protocol.SessionListMsg
 	if err := protocol.DecodePayload(resp, &list); err != nil {
 		return nil, cobra.ShellCompDirectiveFilterDirs
 	}
 
 	seen := make(map[string]bool)
+
 	var repos []string
+
 	for _, s := range list.Sessions {
 		if s.RepoPath != "" && !seen[s.RepoPath] {
 			seen[s.RepoPath] = true
 			repos = append(repos, fmt.Sprintf("%s\t%s", s.RepoPath, s.RepoName))
 		}
 	}
+
 	sort.Strings(repos)
+
 	return repos, cobra.ShellCompDirectiveFilterDirs
 }
 
@@ -122,18 +135,23 @@ func completeBranchNames(cmd *cobra.Command, _ []string, _ string) ([]string, co
 	}
 
 	seen := make(map[string]bool)
+
 	var branches []string
+
 	for _, line := range strings.Split(out, "\n") {
 		if line == "" {
 			continue
 		}
+
 		name := strings.TrimPrefix(line, "origin/")
 		if name == "HEAD" || seen[name] {
 			continue
 		}
+
 		seen[name] = true
 		branches = append(branches, name)
 	}
+
 	return branches, cobra.ShellCompDirectiveNoFileComp
 }
 
@@ -167,5 +185,6 @@ func completeTopicNames(_ *cobra.Command, _ []string, _ string) ([]string, cobra
 	for _, s := range topics.Streams {
 		names = append(names, s.Name)
 	}
+
 	return names, cobra.ShellCompDirectiveNoFileComp
 }

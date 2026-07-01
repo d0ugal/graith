@@ -9,13 +9,16 @@ import (
 
 func TestAdoptedWaitLoopExitsOnProcessDeath(t *testing.T) {
 	t.Parallel()
+
 	cmd := exec.Command("sleep", "60")
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
+
 	pid := cmd.Process.Pid
 
 	logPath := filepath.Join(t.TempDir(), "test.log")
+
 	sb, err := NewScrollback(logPath, 1024*1024)
 	if err != nil {
 		t.Fatal(err)
@@ -41,6 +44,7 @@ func TestAdoptedWaitLoopExitsOnProcessDeath(t *testing.T) {
 	if err := cmd.Process.Kill(); err != nil {
 		t.Fatalf("kill: %v", err)
 	}
+
 	cmd.Wait()
 
 	select {
@@ -48,6 +52,7 @@ func TestAdoptedWaitLoopExitsOnProcessDeath(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("adoptedWaitLoop did not exit after process was killed")
 	}
+
 	if !s.Exited() {
 		t.Error("expected session to be marked as exited")
 	}
@@ -56,6 +61,7 @@ func TestAdoptedWaitLoopExitsOnProcessDeath(t *testing.T) {
 func TestAdoptedWaitLoopExitsWhenPIDGone(t *testing.T) {
 	t.Parallel()
 	logPath := filepath.Join(t.TempDir(), "test.log")
+
 	sb, err := NewScrollback(logPath, 1024*1024)
 	if err != nil {
 		t.Fatal(err)
@@ -67,6 +73,7 @@ func TestAdoptedWaitLoopExitsWhenPIDGone(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
+
 	pid := cmd.Process.Pid
 
 	startTime, stErr := ProcessStartTime(pid)
@@ -101,6 +108,7 @@ func TestAdoptedWaitLoopExitsWhenPIDGone(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("adoptedWaitLoop did not exit when PID no longer exists")
 	}
+
 	if !s.Exited() {
 		t.Error("expected session to be marked as exited")
 	}
@@ -118,6 +126,7 @@ func TestAdoptedWaitLoopStartTimeMismatchBreaks(t *testing.T) {
 		cmd.Process.Kill()
 		cmd.Wait()
 	}()
+
 	pid := cmd.Process.Pid
 
 	_, stErr := ProcessStartTime(pid)
@@ -126,6 +135,7 @@ func TestAdoptedWaitLoopStartTimeMismatchBreaks(t *testing.T) {
 	}
 
 	logPath := filepath.Join(t.TempDir(), "test.log")
+
 	sb, err := NewScrollback(logPath, 1024*1024)
 	if err != nil {
 		t.Fatal(err)
@@ -152,6 +162,7 @@ func TestAdoptedWaitLoopStartTimeMismatchBreaks(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("adoptedWaitLoop did not exit on start time mismatch")
 	}
+
 	if !s.Exited() {
 		t.Error("expected session to be marked as exited")
 	}

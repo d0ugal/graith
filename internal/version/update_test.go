@@ -30,12 +30,15 @@ func TestParseVersion(t *testing.T) {
 			if got != nil {
 				t.Errorf("parseVersion(%q) = %v, want nil", tt.input, got)
 			}
+
 			continue
 		}
+
 		if got == nil {
 			t.Errorf("parseVersion(%q) = nil, want %v", tt.input, tt.want)
 			continue
 		}
+
 		for i := range tt.want {
 			if got[i] != tt.want[i] {
 				t.Errorf("parseVersion(%q)[%d] = %d, want %d", tt.input, i, got[i], tt.want[i])
@@ -80,9 +83,11 @@ func TestBuildResult(t *testing.T) {
 	if result == nil {
 		t.Fatal("expected non-nil result for newer version")
 	}
+
 	if result.LatestVersion != "v0.3.0" {
 		t.Errorf("LatestVersion = %q, want v0.3.0", result.LatestVersion)
 	}
+
 	if result.CurrentVersion != "v0.2.1" {
 		t.Errorf("CurrentVersion = %q, want v0.2.1", result.CurrentVersion)
 	}
@@ -103,6 +108,7 @@ func TestCheckForUpdate_SkipsDev(t *testing.T) {
 	defer func() { Version = origVersion }()
 
 	Version = "dev"
+
 	result := CheckForUpdate(t.TempDir())
 	if result != nil {
 		t.Errorf("expected nil result for dev version, got %+v", result)
@@ -128,6 +134,7 @@ func TestCheckForUpdate_UsesCache(t *testing.T) {
 	if result == nil {
 		t.Fatal("expected non-nil result from cache")
 	}
+
 	if result.LatestVersion != "v0.3.0" {
 		t.Errorf("LatestVersion = %q, want v0.3.0", result.LatestVersion)
 	}
@@ -169,9 +176,11 @@ func TestUpdateCache_ReadWrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if got.LatestVersion != info.LatestVersion {
 		t.Errorf("LatestVersion = %q, want %q", got.LatestVersion, info.LatestVersion)
 	}
+
 	if !got.CheckedAt.Equal(info.CheckedAt) {
 		t.Errorf("CheckedAt = %v, want %v", got.CheckedAt, info.CheckedAt)
 	}

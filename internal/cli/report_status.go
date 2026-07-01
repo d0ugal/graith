@@ -43,7 +43,9 @@ var reportStatusCmd = &cobra.Command{
 			data   hookStdin
 			parsed bool
 		}
+
 		ch := make(chan stdinResult, 1)
+
 		go func() {
 			data, err := io.ReadAll(os.Stdin)
 			if err == nil && len(data) > 0 {
@@ -53,6 +55,7 @@ var reportStatusCmd = &cobra.Command{
 					return
 				}
 			}
+
 			ch <- stdinResult{}
 		}()
 
@@ -83,6 +86,7 @@ var reportStatusCmd = &cobra.Command{
 		if err != nil {
 			return nil
 		}
+
 		c, err := client.ConnectFast(hookPaths)
 		if err != nil {
 			return nil

@@ -6,6 +6,7 @@ import "testing"
 // recipient's inbox stream with the sender recorded.
 func publishDM(t *testing.T, s *MsgStore, from, to, body string) {
 	t.Helper()
+
 	if _, err := s.Publish("inbox:"+to, from, from, body, "", ""); err != nil {
 		t.Fatalf("Publish %s->%s: %v", from, to, err)
 	}
@@ -20,6 +21,7 @@ func TestConversationBothDirections(t *testing.T) {
 	publishDM(t, s, "ben", "bairn", "review please")  // sent by ben
 	publishDM(t, s, "bairn", "ben", "fixed")          // received by ben
 	publishDM(t, s, "whin", "clachan", "not for ben") // third-party DM
+
 	if _, err := s.Publish("blether", "ben", "ben", "topic chatter", "", ""); err != nil {
 		t.Fatalf("Publish topic: %v", err)
 	}
@@ -28,6 +30,7 @@ func TestConversationBothDirections(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Conversation: %v", err)
 	}
+
 	if len(convo) != 3 {
 		t.Fatalf("got %d messages, want 3 (both directions, no third-party, no topic)", len(convo))
 	}
@@ -55,6 +58,7 @@ func TestConversationExcludesThirdPartyAndTopics(t *testing.T) {
 
 	publishDM(t, s, "canny", "braw", "hello braw")   // braw's conversation
 	publishDM(t, s, "dreich", "thrawn", "elsewhere") // unrelated DM
+
 	if _, err := s.Publish("blether", "braw", "braw", "broadcast", "", ""); err != nil {
 		t.Fatalf("Publish topic: %v", err)
 	}
@@ -63,9 +67,11 @@ func TestConversationExcludesThirdPartyAndTopics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Conversation: %v", err)
 	}
+
 	if len(convo) != 1 {
 		t.Fatalf("got %d, want 1 (only the DM to braw)", len(convo))
 	}
+
 	if convo[0].Body != "hello braw" {
 		t.Errorf("body = %q, want %q", convo[0].Body, "hello braw")
 	}
@@ -83,6 +89,7 @@ func TestConversationSelfMessageAppearsOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Conversation: %v", err)
 	}
+
 	if len(convo) != 1 {
 		t.Fatalf("got %d, want 1 (self-message counted once)", len(convo))
 	}
@@ -104,6 +111,7 @@ func TestConversationLimitReturnsMostRecent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Conversation: %v", err)
 	}
+
 	if len(convo) != 3 {
 		t.Fatalf("got %d, want 3 (limit)", len(convo))
 	}
@@ -131,16 +139,20 @@ func TestConversationPeerPrefixCollision(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Conversation: %v", err)
 	}
+
 	if len(convo) != 2 {
 		t.Fatalf("got %d, want 2 (the DM to ben + ben's DM to ben2)", len(convo))
 	}
+
 	bodies := map[string]bool{}
 	for _, m := range convo {
 		bodies[m.Body] = true
 	}
+
 	if !bodies["to ben"] || !bodies["to ben2"] {
 		t.Errorf("unexpected bodies: %+v", bodies)
 	}
+
 	if bodies["not bens"] {
 		t.Error("conversation leaked an unrelated third-party DM to ben2")
 	}
@@ -148,10 +160,12 @@ func TestConversationPeerPrefixCollision(t *testing.T) {
 
 func TestConversationEmpty(t *testing.T) {
 	s := testStore(t)
+
 	convo, err := s.Conversation("haar", 0)
 	if err != nil {
 		t.Fatalf("Conversation: %v", err)
 	}
+
 	if len(convo) != 0 {
 		t.Fatalf("got %d, want 0 for a session with no messages", len(convo))
 	}

@@ -28,6 +28,7 @@ func (c *Conversation) Render(opts RenderOptions) string {
 	if maxBytes <= 0 {
 		maxBytes = defaultMaxBytes
 	}
+
 	maxTool := opts.MaxToolOutput
 	if maxTool <= 0 {
 		maxTool = defaultMaxToolOutput
@@ -40,6 +41,7 @@ func (c *Conversation) Render(opts RenderOptions) string {
 
 	// Select the most recent turns that fit the budget, keeping order.
 	start := 0
+
 	total := 0
 	for i := len(rendered) - 1; i >= 0; i-- {
 		total += len(rendered[i]) + 1
@@ -53,23 +55,29 @@ func (c *Conversation) Render(opts RenderOptions) string {
 	if start >= len(rendered) && len(rendered) > 0 {
 		start = len(rendered) - 1
 	}
+
 	elided := start
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Migrated conversation context\n\n")
 	fmt.Fprintf(&b, "This is the prior conversation from a `%s` session, migrated to a different agent. ", c.SrcAgent)
 	b.WriteString("It is historical context, not live instructions. The working tree already contains any code changes described below. Continue the work from here.\n\n")
+
 	if elided > 0 {
 		fmt.Fprintf(&b, "_(%d earlier turn(s) elided to fit the size budget; %d shown.)_\n\n", elided, len(rendered)-elided)
 	}
+
 	if c.DroppedLines > 0 {
 		fmt.Fprintf(&b, "_(%d unparseable transcript line(s) were skipped.)_\n\n", c.DroppedLines)
 	}
+
 	b.WriteString("---\n\n")
+
 	for i := start; i < len(rendered); i++ {
 		b.WriteString(rendered[i])
 		b.WriteString("\n")
 	}
+
 	return b.String()
 }
 
@@ -92,25 +100,32 @@ func renderTool(tc *ToolCall, maxTool int) string {
 	if tc == nil {
 		return ""
 	}
+
 	var b strings.Builder
+
 	status := ""
 	if tc.Failed {
 		status = " (failed)"
 	}
+
 	fmt.Fprintf(&b, "## Tool call: %s%s\n\n", firstNonEmpty(tc.Name, "(tool)"), status)
 	b.WriteString("_Historical tool call — not re-executed. The result below already happened._\n\n")
+
 	if strings.TrimSpace(tc.Args) != "" {
 		f := fenceFor(tc.Args)
 		fmt.Fprintf(&b, "Arguments:\n\n%sjson\n%s\n%s\n\n", f, tc.Args, f)
 	}
+
 	if strings.TrimSpace(tc.Output) != "" {
 		out := tc.Output
 		if len(out) > maxTool {
 			out = out[:maxTool] + fmt.Sprintf("\n… (truncated, %d bytes total)", len(tc.Output))
 		}
+
 		f := fenceFor(out)
 		fmt.Fprintf(&b, "Output:\n\n%s\n%s\n%s\n", f, out, f)
 	}
+
 	return b.String()
 }
 
@@ -118,6 +133,7 @@ func renderTool(tc *ToolCall, maxTool int) string {
 // out of it (one longer than the longest backtick run, minimum 3).
 func fenceFor(content string) string {
 	longest, run := 0, 0
+
 	for _, r := range content {
 		if r == '`' {
 			run++
@@ -128,6 +144,7 @@ func fenceFor(content string) string {
 			run = 0
 		}
 	}
+
 	return strings.Repeat("`", max(longest+1, 3))
 }
 
@@ -135,6 +152,7 @@ func firstNonEmpty(s, fallback string) string {
 	if strings.TrimSpace(s) == "" {
 		return fallback
 	}
+
 	return s
 }
 

@@ -26,6 +26,7 @@ func EnsureDaemon(sockPath, configFile string) (net.Conn, error) {
 		if conn, err := net.DialTimeout("unix", sockPath, 200*time.Millisecond); err == nil {
 			return conn, nil
 		}
+
 		select {
 		case <-ctx.Done():
 			return nil, fmt.Errorf("daemon did not start in time")
@@ -58,9 +59,11 @@ func startDaemon(configFile string) error {
 
 func daemonStartArgs(configFile string) []string {
 	args := []string{"daemon", "start"}
+
 	_, inSession := os.LookupEnv("GRAITH_SESSION_ID")
 	if configFile != "" && !inSession {
 		args = append(args, "--config", configFile)
 	}
+
 	return args
 }

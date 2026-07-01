@@ -24,6 +24,7 @@ func newMigrateTestManager(t *testing.T) *SessionManager {
 	cfg.Sandbox.Enabled = false
 	cfg.Agents["claude"] = shAgent()
 	cfg.Agents["codex"] = shAgent()
+
 	return NewSessionManager(cfg, config.Paths{
 		StateFile: filepath.Join(tmpDir, "state.json"),
 		DataDir:   tmpDir,
@@ -43,9 +44,11 @@ func TestMigrateRejectsBadTargets(t *testing.T) {
 	if _, err := sm.Migrate("s1", "claude", "", 24, 80); err == nil {
 		t.Error("expected error migrating to the same agent")
 	}
+
 	if _, err := sm.Migrate("s1", "bogus-agent", "", 24, 80); err == nil {
 		t.Error("expected error for unknown target agent")
 	}
+
 	if _, err := sm.Migrate("missing", "codex", "", 24, 80); err == nil {
 		t.Error("expected error for missing session")
 	}
@@ -64,6 +67,7 @@ func TestMigrateInPlaceSwap(t *testing.T) {
 	if _, err := os.Stat("/bin/sh"); err != nil {
 		t.Skip("/bin/sh not available")
 	}
+
 	sm := newMigrateTestManager(t)
 	repo := initTempGitRepo(t)
 
@@ -74,11 +78,14 @@ func TestMigrateInPlaceSwap(t *testing.T) {
 	// Stage a Claude transcript at the globbed location.
 	claudeRoot := t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", claudeRoot)
+
 	sid := "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
 	projDir := filepath.Join(claudeRoot, "projects", "-some-proj")
 	if err := os.MkdirAll(projDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+
 	lines := `{"type":"user","uuid":"u1","parentUuid":"","message":{"role":"user","content":"fix the bothy"}}
 {"type":"assistant","uuid":"a1","parentUuid":"u1","message":{"role":"assistant","content":[{"type":"text","text":"done, braw"}]}}
 `
@@ -103,6 +110,7 @@ func TestMigrateInPlaceSwap(t *testing.T) {
 			_ = p.Kill()
 			<-p.Done()
 		}
+
 		time.Sleep(250 * time.Millisecond)
 	}()
 
@@ -117,21 +125,27 @@ func TestMigrateInPlaceSwap(t *testing.T) {
 	if s.Agent != "codex" {
 		t.Errorf("session agent = %q, want codex", s.Agent)
 	}
+
 	if s.AgentSessionID != "" {
 		t.Errorf("codex agent session id = %q, want empty (captured async)", s.AgentSessionID)
 	}
+
 	if s.WorktreePath != repo {
 		t.Errorf("worktree changed: %q, want %q (in-place migrate retains worktree)", s.WorktreePath, repo)
 	}
+
 	if s.MigratedFrom == nil || s.MigratedFrom.Agent != "claude" {
 		t.Fatalf("MigratedFrom = %+v, want agent claude", s.MigratedFrom)
 	}
+
 	if s.MigratedFrom.AgentSessionID != sid {
 		t.Errorf("MigratedFrom session id = %q, want %q", s.MigratedFrom.AgentSessionID, sid)
 	}
+
 	if _, err := os.Stat(s.MigratedFrom.RenderedPath); err != nil {
 		t.Errorf("rendered context file missing: %v", err)
 	}
+
 	if s.FreshStart {
 		t.Error("FreshStart should be cleared after a successful seeded start")
 	}
@@ -143,6 +157,7 @@ func TestMigrateRestoresOnTargetFailure(t *testing.T) {
 	if _, err := os.Stat("/bin/sh"); err != nil {
 		t.Skip("/bin/sh not available")
 	}
+
 	sm := newMigrateTestManager(t)
 	// Target codex exits immediately; source claude stays alive on restore.
 	sm.cfg.Agents["codex"] = config.Agent{Command: "/bin/sh", Args: []string{"-c", "true"}}
@@ -150,11 +165,14 @@ func TestMigrateRestoresOnTargetFailure(t *testing.T) {
 
 	claudeRoot := t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", claudeRoot)
+
 	sid := "11111111-2222-3333-4444-555555555555"
+
 	projDir := filepath.Join(claudeRoot, "projects", "-p")
 	if err := os.MkdirAll(projDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := os.WriteFile(filepath.Join(projDir, sid+".jsonl"), []byte(
 		`{"type":"user","uuid":"u1","parentUuid":"","message":{"role":"user","content":"bide a wee"}}`+"\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -172,8 +190,10 @@ func TestMigrateRestoresOnTargetFailure(t *testing.T) {
 			_ = p.Kill()
 			<-p.Done()
 		}
+
 		time.Sleep(250 * time.Millisecond)
 	}()
+
 	if err == nil {
 		t.Fatal("expected migrate to fail when target exits immediately")
 	}
@@ -181,15 +201,19 @@ func TestMigrateRestoresOnTargetFailure(t *testing.T) {
 	sm.mu.RLock()
 	s := sm.state.Sessions["m2"]
 	sm.mu.RUnlock()
+
 	if s.Agent != "claude" {
 		t.Errorf("agent = %q after failed migrate, want claude (restored)", s.Agent)
 	}
+
 	if s.AgentSessionID != sid {
 		t.Errorf("agent session id = %q, want restored %q", s.AgentSessionID, sid)
 	}
+
 	if s.MigratedFrom != nil {
 		t.Errorf("MigratedFrom = %+v, want nil after successful restore", s.MigratedFrom)
 	}
+
 	if s.Status != StatusRunning {
 		t.Errorf("status = %q, want running (original restored)", s.Status)
 	}
@@ -198,6 +222,7 @@ func TestMigrateRestoresOnTargetFailure(t *testing.T) {
 	if derr != nil {
 		t.Fatal(derr)
 	}
+
 	if _, statErr := os.Stat(filepath.Join(tmpDir, "migrate-m2")); statErr == nil {
 		t.Error("migration context dir should be removed after successful restore")
 	}

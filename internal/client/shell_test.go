@@ -8,6 +8,7 @@ import (
 
 func TestRunShellInWorktree_InvalidShell(t *testing.T) {
 	t.Setenv("SHELL", "/nonexistent/shell")
+
 	err := RunShellInWorktree(t.TempDir())
 	if err == nil {
 		t.Fatal("expected error for invalid shell, got nil")
@@ -16,6 +17,7 @@ func TestRunShellInWorktree_InvalidShell(t *testing.T) {
 
 func TestRunShellInWorktree_InvalidWorktree(t *testing.T) {
 	t.Setenv("SHELL", "/bin/sh")
+
 	err := RunShellInWorktree("/nonexistent/worktree/path")
 	if err == nil {
 		t.Fatal("expected error for invalid worktree path, got nil")

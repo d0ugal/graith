@@ -98,6 +98,7 @@ func TestDetect(t *testing.T) {
 				v, ok := tt.env[key]
 				return v, ok
 			}
+
 			got := detect(lookup)
 			if got != tt.want {
 				t.Errorf("detect() = %v, want %v", got, tt.want)

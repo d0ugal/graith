@@ -31,6 +31,7 @@ func (sm *SessionManager) SubmitApproval(ctx context.Context, req protocol.Appro
 	}
 
 	sm.mu.Lock()
+
 	sess, ok := sm.state.Sessions[req.SessionID]
 	if !ok {
 		sm.mu.Unlock()
@@ -67,6 +68,7 @@ func (sm *SessionManager) SubmitApproval(ctx context.Context, req protocol.Appro
 		return decision
 	case <-time.After(timeout):
 		sm.cancelApproval(req.RequestID)
+
 		return protocol.ApprovalDecisionMsg{
 			Decision: "block",
 			Reason:   "approval request timed out",
@@ -80,12 +82,15 @@ func (sm *SessionManager) SubmitApproval(ctx context.Context, req protocol.Appro
 // RespondToApproval delivers a user decision to a waiting approval request.
 func (sm *SessionManager) RespondToApproval(requestID, decision, reason string) error {
 	sm.mu.Lock()
+
 	pa, ok := sm.pendingApprovals[requestID]
 	if !ok {
 		sm.mu.Unlock()
 		return fmt.Errorf("approval request %q not found", requestID)
 	}
+
 	delete(sm.pendingApprovals, requestID)
+
 	if sess, ok := sm.state.Sessions[pa.Info.SessionID]; ok {
 		sess.AgentStatus = "active"
 	}
@@ -97,6 +102,7 @@ func (sm *SessionManager) RespondToApproval(requestID, decision, reason string) 
 	}
 
 	sm.broadcastApprovalNotification()
+
 	return nil
 }
 
@@ -107,6 +113,7 @@ func (sm *SessionManager) cancelApproval(requestID string) {
 		if sess, ok := sm.state.Sessions[pa.Info.SessionID]; ok {
 			sess.AgentStatus = "active"
 		}
+
 		delete(sm.pendingApprovals, requestID)
 	}
 	sm.mu.Unlock()
@@ -117,10 +124,12 @@ func (sm *SessionManager) cancelApproval(requestID string) {
 func (sm *SessionManager) PendingApprovals() []protocol.ApprovalInfo {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
+
 	infos := make([]protocol.ApprovalInfo, 0, len(sm.pendingApprovals))
 	for _, pa := range sm.pendingApprovals {
 		infos = append(infos, pa.Info)
 	}
+
 	return infos
 }
 
@@ -131,15 +140,18 @@ func (sm *SessionManager) broadcastApprovalNotification() {
 	msg := protocol.ApprovalNotificationMsg{Pending: pending}
 
 	sm.mu.RLock()
+
 	clients := make([]func(string, any), 0, len(sm.attachedClients))
 	for _, ac := range sm.attachedClients {
 		if ac.sendControl != nil {
 			clients = append(clients, ac.sendControl)
 		}
 	}
+
 	sm.mu.RUnlock()
 
 	sm.log.Info("broadcasting approval notification", "pending", len(pending), "clients", len(clients))
+
 	for _, send := range clients {
 		send("approval_notification", msg)
 	}
@@ -163,10 +175,12 @@ func (sm *SessionManager) tryLocalmost(req protocol.ApprovalRequestMsg, command 
 	}
 
 	sm.mu.RLock()
+
 	var sessionName string
 	if sess, ok := sm.state.Sessions[req.SessionID]; ok {
 		sessionName = sess.Name
 	}
+
 	sm.mu.RUnlock()
 
 	input := localmostRequest{
@@ -175,6 +189,7 @@ func (sm *SessionManager) tryLocalmost(req protocol.ApprovalRequestMsg, command 
 		SessionID:   req.SessionID,
 		SessionName: sessionName,
 	}
+
 	inputJSON, err := json.Marshal(input)
 	if err != nil {
 		sm.log.Error("localmost: marshal input", "err", err)
@@ -186,6 +201,7 @@ func (sm *SessionManager) tryLocalmost(req protocol.ApprovalRequestMsg, command 
 
 	cmd := exec.CommandContext(ctx, command)
 	cmd.Stdin = strings.NewReader(string(inputJSON))
+
 	out, err := cmd.Output()
 	if err != nil {
 		sm.log.Warn("localmost: command failed, deferring to user", "err", err)

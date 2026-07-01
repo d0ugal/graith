@@ -104,9 +104,11 @@ func TestBuildGroupedItems_GroupsByRepo(t *testing.T) {
 	if !ok {
 		t.Fatal("items[0] should be a groupHeader")
 	}
+
 	if gh1.name != "croft" {
 		t.Errorf("first group = %q, want %q", gh1.name, "croft")
 	}
+
 	if gh1.count != 1 {
 		t.Errorf("first group count = %d, want 1", gh1.count)
 	}
@@ -115,6 +117,7 @@ func TestBuildGroupedItems_GroupsByRepo(t *testing.T) {
 	if !ok {
 		t.Fatal("items[2] should be a groupHeader")
 	}
+
 	if gh2.name != "graith" {
 		t.Errorf("second group = %q, want %q", gh2.name, "graith")
 	}
@@ -125,6 +128,7 @@ func TestBuildGroupedItems_EmptyRepoName(t *testing.T) {
 		{ID: "s1", Name: "thrawn", RepoName: "", Status: "running", CreatedAt: time.Now().Format(time.RFC3339)},
 	}
 	items := buildGroupedItems(sessions, nil)
+
 	gh := items[0].(groupHeader)
 	if gh.name != "(no repo)" {
 		t.Errorf("empty repo should show as %q, got %q", "(no repo)", gh.name)
@@ -145,6 +149,7 @@ func TestBuildGroupedItems_GroupsSorted(t *testing.T) {
 	}
 	items := buildGroupedItems(sessions, nil)
 	gh1 := items[0].(groupHeader)
+
 	gh2 := items[2].(groupHeader)
 	if gh1.name != "aaa" || gh2.name != "zzz" {
 		t.Errorf("groups should be sorted alphabetically, got %q then %q", gh1.name, gh2.name)
@@ -154,10 +159,12 @@ func TestBuildGroupedItems_GroupsSorted(t *testing.T) {
 func TestBuildGroupedItems_SessionCount(t *testing.T) {
 	sessions := overlayTestSessions()
 	items := buildGroupedItems(sessions, nil)
+
 	gh := items[0].(groupHeader)
 	if gh.count != 1 {
 		t.Errorf("croft group count = %d, want 1", gh.count)
 	}
+
 	gh2 := items[2].(groupHeader)
 	if gh2.count != 2 {
 		t.Errorf("graith group count = %d, want 2", gh2.count)
@@ -220,6 +227,7 @@ func TestBuildGroupedItems_MultiLevelTree(t *testing.T) {
 	if gc.info.Name != "wee-bairn" {
 		t.Fatalf("items[3] = %q, want wee-bairn", gc.info.Name)
 	}
+
 	wantPrefix := "    └── "
 	if gc.treePrefix != wantPrefix {
 		t.Errorf("wee-bairn prefix = %q, want %q", gc.treePrefix, wantPrefix)
@@ -236,6 +244,7 @@ func TestBuildGroupedItems_OrphanedChild(t *testing.T) {
 	if len(items) != 2 {
 		t.Fatalf("expected 2 items, got %d", len(items))
 	}
+
 	si := items[1].(sessionItem)
 	if si.treePrefix != "" {
 		t.Errorf("orphaned child should be a root with no prefix, got %q", si.treePrefix)
@@ -256,9 +265,11 @@ func TestBuildGroupedItems_ParentInDifferentRepo(t *testing.T) {
 			if si.treePrefix != "" {
 				t.Errorf("bairn in different repo should be root, got prefix %q", si.treePrefix)
 			}
+
 			return
 		}
 	}
+
 	t.Fatal("bairn not found in items")
 }
 
@@ -274,12 +285,15 @@ func TestBuildGroupedItems_CyclicParents(t *testing.T) {
 	if len(items) != 3 {
 		t.Fatalf("expected 3 items (1 header + 2 sessions), got %d", len(items))
 	}
+
 	sessionCount := 0
+
 	for _, item := range items {
 		if _, ok := item.(sessionItem); ok {
 			sessionCount++
 		}
 	}
+
 	if sessionCount != 2 {
 		t.Errorf("expected 2 sessions rendered from cycle, got %d", sessionCount)
 	}
@@ -295,6 +309,7 @@ func TestBuildGroupedItems_SelfReference(t *testing.T) {
 	if len(items) != 2 {
 		t.Fatalf("expected 2 items, got %d", len(items))
 	}
+
 	si := items[1].(sessionItem)
 	if si.treePrefix != "" {
 		t.Errorf("self-referencing session should be a root with no prefix, got %q", si.treePrefix)
@@ -321,12 +336,15 @@ func TestBuildGroupedItems_CollapsedParent(t *testing.T) {
 	if si.info.Name != "ben-session" {
 		t.Errorf("items[1] = %q, want ben-session", si.info.Name)
 	}
+
 	if !si.collapsed {
 		t.Error("root should be marked collapsed")
 	}
+
 	if !si.hasChildren {
 		t.Error("root should be marked as having children")
 	}
+
 	if si.descendantCount != 2 {
 		t.Errorf("descendantCount = %d, want 2", si.descendantCount)
 	}
@@ -352,6 +370,7 @@ func TestBuildGroupedItems_CollapsedNestedParent(t *testing.T) {
 	if len(items) != 2 {
 		t.Fatalf("expected 2 items, got %d", len(items))
 	}
+
 	si := items[1].(sessionItem)
 	if si.descendantCount != 2 {
 		t.Errorf("descendantCount = %d, want 2", si.descendantCount)
@@ -373,10 +392,12 @@ func TestBuildGroupedItems_CollapseChildButNotRoot(t *testing.T) {
 	if len(items) != 3 {
 		t.Fatalf("expected 3 items, got %d", len(items))
 	}
+
 	child := items[2].(sessionItem)
 	if !child.collapsed {
 		t.Error("child should be marked collapsed")
 	}
+
 	if child.descendantCount != 1 {
 		t.Errorf("child descendantCount = %d, want 1", child.descendantCount)
 	}
@@ -395,11 +416,13 @@ func TestBuildGroupedItems_CollapsedCyclicParents(t *testing.T) {
 	// In a cycle, a is b's parent and b is a's parent. Collapsing a
 	// hides b (its child). The key assertion: no stack overflow.
 	sessionCount := 0
+
 	for _, item := range items {
 		if _, ok := item.(sessionItem); ok {
 			sessionCount++
 		}
 	}
+
 	if sessionCount != 1 {
 		t.Errorf("expected 1 session (collapsed cycle hides the other), got %d", sessionCount)
 	}
@@ -466,6 +489,7 @@ func TestOverlay_SpaceTogglesCollapse(t *testing.T) {
 	if m.collapsed["root"] {
 		t.Fatal("root should be expanded after second space")
 	}
+
 	if len(m.list.Items()) != 4 {
 		t.Errorf("expected 4 items after expand, got %d", len(m.list.Items()))
 	}
@@ -541,6 +565,7 @@ func TestOverlay_CollapsedStatePersists(t *testing.T) {
 	if len(m.list.Items()) != 2 {
 		t.Errorf("expected 2 items with pre-collapsed root, got %d", len(m.list.Items()))
 	}
+
 	si := m.list.Items()[1].(sessionItem)
 	if !si.collapsed {
 		t.Error("root should be marked collapsed from initial state")
@@ -564,6 +589,7 @@ func TestMaxTreeIndentFromItems(t *testing.T) {
 
 func TestMaxTreeIndentFromItems_NoTree(t *testing.T) {
 	items := buildGroupedItems(overlayTestSessions(), nil)
+
 	maxIndent := maxTreeIndentFromItems(items)
 	if maxIndent != 0 {
 		t.Errorf("maxTreeIndent with no parent-child = %d, want 0", maxIndent)
@@ -578,6 +604,7 @@ func TestSortSessions_CurrentNotBoosted(t *testing.T) {
 		{ID: "b", Name: "canny", Status: "running", CreatedAt: time.Now().Format(time.RFC3339)},
 	}
 	SortSessions(sessions)
+
 	if sessions[0].ID != "a" {
 		t.Errorf("current session should not be boosted, expected braw first, got %q", sessions[0].ID)
 	}
@@ -589,6 +616,7 @@ func TestSortSessions_RunningBeforeStopped(t *testing.T) {
 		{ID: "b", Name: "canny", Status: "running", CreatedAt: time.Now().Format(time.RFC3339)},
 	}
 	SortSessions(sessions)
+
 	if sessions[0].ID != "b" {
 		t.Errorf("running session should be first, got %q", sessions[0].ID)
 	}
@@ -600,9 +628,11 @@ func TestSortSessions_AlphabeticalByName(t *testing.T) {
 		{ID: "a", Name: "braw", Status: "running", CreatedAt: time.Now().Format(time.RFC3339), LastAttachedAt: time.Now().Add(-1 * time.Hour).Format(time.RFC3339)},
 	}
 	SortSessions(sessions)
+
 	if sessions[0].ID != "a" {
 		t.Errorf("alphabetically first name should be first, got %q", sessions[0].Name)
 	}
+
 	if sessions[1].ID != "b" {
 		t.Errorf("alphabetically second name should be second, got %q", sessions[1].Name)
 	}
@@ -689,6 +719,7 @@ func TestDisplayLastOutput_UsesLastOutputAt(t *testing.T) {
 		CreatedAt:    time.Now().Add(-24 * time.Hour).Format(time.RFC3339),
 		LastOutputAt: time.Now().Add(-5 * time.Minute).Format(time.RFC3339),
 	}
+
 	got := displayLastOutput(s)
 	if got != "5m" {
 		t.Errorf("should use LastOutputAt, got %q", got)
@@ -700,6 +731,7 @@ func TestDisplayLastOutput_FallsBackToCreated(t *testing.T) {
 		ID:        "s1",
 		CreatedAt: time.Now().Add(-2 * time.Hour).Format(time.RFC3339),
 	}
+
 	got := displayLastOutput(s)
 	if got != "2h" {
 		t.Errorf("should fall back to CreatedAt, got %q", got)
@@ -710,6 +742,7 @@ func TestDisplayLastOutput_FallsBackToCreated(t *testing.T) {
 
 func TestFilterSessions_EmptyQuery(t *testing.T) {
 	sessions := overlayTestSessions()
+
 	filtered := filterSessions(sessions, "")
 	if len(filtered) != len(sessions) {
 		t.Errorf("empty query should return all sessions, got %d", len(filtered))
@@ -718,6 +751,7 @@ func TestFilterSessions_EmptyQuery(t *testing.T) {
 
 func TestFilterSessions_SingleTerm(t *testing.T) {
 	sessions := overlayTestSessions()
+
 	filtered := filterSessions(sessions, "graith")
 	if len(filtered) != 2 {
 		t.Errorf("expected 2 graith sessions, got %d", len(filtered))
@@ -726,10 +760,12 @@ func TestFilterSessions_SingleTerm(t *testing.T) {
 
 func TestFilterSessions_MultiTerm(t *testing.T) {
 	sessions := overlayTestSessions()
+
 	filtered := filterSessions(sessions, "graith running")
 	if len(filtered) != 1 {
 		t.Errorf("expected 1 running graith session, got %d", len(filtered))
 	}
+
 	if filtered[0].Name != "braw-fix" {
 		t.Errorf("expected braw-fix, got %q", filtered[0].Name)
 	}
@@ -737,6 +773,7 @@ func TestFilterSessions_MultiTerm(t *testing.T) {
 
 func TestFilterSessions_CaseInsensitive(t *testing.T) {
 	sessions := overlayTestSessions()
+
 	filtered := filterSessions(sessions, "GRAITH")
 	if len(filtered) != 2 {
 		t.Errorf("filter should be case-insensitive, got %d results", len(filtered))
@@ -745,6 +782,7 @@ func TestFilterSessions_CaseInsensitive(t *testing.T) {
 
 func TestFilterSessions_GitTokens(t *testing.T) {
 	sessions := overlayTestSessionsWithGitStatus()
+
 	filtered := filterSessions(sessions, "dirty")
 	if len(filtered) != 1 {
 		t.Errorf("expected 1 dirty session, got %d", len(filtered))
@@ -767,14 +805,17 @@ func TestFilterSessions_SharedWorktreeExcludesGitTokens(t *testing.T) {
 			CreatedAt:      time.Now().Format(time.RFC3339),
 		},
 	}
+
 	dirty := filterSessions(sessions, "dirty")
 	if len(dirty) != 1 || dirty[0].Name != "ben-session" {
 		t.Errorf("filtering 'dirty' should return only parent, got %d sessions", len(dirty))
 	}
+
 	branch := filterSessions(sessions, "feature-branch")
 	if len(branch) != 1 || branch[0].Name != "ben-session" {
 		t.Errorf("filtering by branch should return only parent, got %d sessions", len(branch))
 	}
+
 	for _, token := range []string{"modified", "clean", "unpushed"} {
 		result := filterSessions(sessions, token)
 		for _, s := range result {
@@ -787,6 +828,7 @@ func TestFilterSessions_SharedWorktreeExcludesGitTokens(t *testing.T) {
 
 func TestFilterSessions_NoMatch(t *testing.T) {
 	sessions := overlayTestSessions()
+
 	filtered := filterSessions(sessions, "nonexistent")
 	if len(filtered) != 0 {
 		t.Errorf("expected 0 results, got %d", len(filtered))
@@ -802,6 +844,7 @@ func TestComputeColumnWidths(t *testing.T) {
 	if cw.name < lipgloss.Width("thrawn-dirty") {
 		t.Errorf("name width %d < width(%q)", cw.name, "thrawn-dirty")
 	}
+
 	if cw.status < lipgloss.Width("thinking") {
 		t.Errorf("status width %d < width(%q) (agent status should override running)", cw.status, "thinking")
 	}
@@ -816,13 +859,16 @@ func TestComputeColumnWidths_MinimumWidths(t *testing.T) {
 	sessions := []protocol.SessionInfo{
 		{ID: "s1", Name: "x", Status: "running", Branch: "m", CreatedAt: time.Now().Format(time.RFC3339)},
 	}
+
 	cw := computeColumnWidths(sessions, "")
 	if cw.name < 7 {
 		t.Errorf("name should have minimum width 7, got %d", cw.name)
 	}
+
 	if cw.status < 6 {
 		t.Errorf("status should have minimum width 6, got %d", cw.status)
 	}
+
 	if cw.summary < 7 {
 		t.Errorf("summary should have minimum width 7, got %d", cw.summary)
 	}
@@ -838,10 +884,12 @@ func TestComputeColumnWidths_SharedWorktreeUsesDash(t *testing.T) {
 		},
 	}
 	cw := computeColumnWidths(sessions, "")
+
 	expectedMax := lipgloss.Width(displayGit(true, 10))
 	if cw.git >= expectedMax {
 		t.Errorf("shared worktree should not inflate git column width: got %d, parent would be %d", cw.git, expectedMax)
 	}
+
 	if cw.git != 3 {
 		t.Errorf("shared worktree git column width should be minimum (3), got %d", cw.git)
 	}
@@ -857,6 +905,7 @@ func TestComputeColumnWidths_SummaryWidth(t *testing.T) {
 			CreatedAt:   time.Now().Format(time.RFC3339),
 		},
 	}
+
 	cw := computeColumnWidths(sessions, "")
 	if cw.summary < lipgloss.Width("fixing the bothy roof") {
 		t.Errorf("summary width %d should be at least width(%q)", cw.summary, "fixing the bothy roof")
@@ -867,6 +916,7 @@ func TestComputeColumnWidths_SummaryWidth(t *testing.T) {
 
 func TestSessionItemFilterValue(t *testing.T) {
 	si := sessionItem{info: protocol.SessionInfo{Name: "braw", RepoName: "croft"}}
+
 	got := si.FilterValue()
 	if got != "braw croft" {
 		t.Errorf("FilterValue() = %q, want %q", got, "braw croft")
@@ -886,10 +936,12 @@ func TestNewOverlayModel_CursorOnCurrentSession(t *testing.T) {
 	sessions := overlayTestSessions()
 	m := newOverlayModel(sessions, "s3", nil, nil, nil, nil) // s3 = bonnie-feature in croft
 	item := m.list.SelectedItem()
+
 	si, ok := item.(sessionItem)
 	if !ok {
 		t.Fatal("selected item should be a sessionItem")
 	}
+
 	if si.info.ID != "s3" {
 		t.Errorf("cursor should be on current session s3, got %q", si.info.ID)
 	}
@@ -898,10 +950,12 @@ func TestNewOverlayModel_CursorOnCurrentSession(t *testing.T) {
 func TestNewOverlayModel_CursorSkipsGroupHeader(t *testing.T) {
 	sessions := overlayTestSessions()
 	m := newOverlayModel(sessions, "", nil, nil, nil, nil)
+
 	item := m.list.SelectedItem()
 	if _, ok := item.(groupHeader); ok {
 		t.Error("cursor should skip the initial group header")
 	}
+
 	_, ok := item.(sessionItem)
 	if !ok {
 		t.Fatal("selected item should be a sessionItem")
@@ -913,9 +967,11 @@ func TestNewOverlayModel_InitialState(t *testing.T) {
 	if m.state != stateList {
 		t.Errorf("initial state = %d, want stateList(%d)", m.state, stateList)
 	}
+
 	if m.selected != nil {
 		t.Error("selected should be nil initially")
 	}
+
 	if m.previewContent != "" {
 		t.Error("preview content should be empty initially")
 	}
@@ -923,6 +979,7 @@ func TestNewOverlayModel_InitialState(t *testing.T) {
 
 func TestNewOverlayModel_StoresAllSessions(t *testing.T) {
 	sessions := overlayTestSessions()
+
 	m := newOverlayModel(sessions, "", nil, nil, nil, nil)
 	if len(m.allSessions) != len(sessions) {
 		t.Errorf("allSessions should store all %d sessions, got %d", len(sessions), len(m.allSessions))
@@ -938,30 +995,39 @@ func TestInit_WithFetchPreview(t *testing.T) {
 		return "content"
 	}
 	m := newOverlayModel(overlayTestSessions(), "", fetch, nil, nil, nil)
+
 	cmd := m.Init()
 	if cmd == nil {
 		t.Fatal("Init() should return a command when fetchPreview is set")
 	}
+
 	msg := cmd()
+
 	batch, ok := msg.(tea.BatchMsg)
 	if !ok {
 		t.Fatalf("expected tea.BatchMsg, got %T", msg)
 	}
+
 	var foundPreview bool
+
 	for _, c := range batch {
 		if c == nil {
 			continue
 		}
+
 		if pm, ok := c().(previewMsg); ok {
 			foundPreview = true
+
 			if pm.content != "content" {
 				t.Errorf("preview content = %q, want %q", pm.content, "content")
 			}
 		}
 	}
+
 	if !foundPreview {
 		t.Fatal("expected a previewMsg in the batch")
 	}
+
 	if !called {
 		t.Error("fetchPreview should have been called")
 	}
@@ -969,10 +1035,12 @@ func TestInit_WithFetchPreview(t *testing.T) {
 
 func TestInit_WithoutFetchPreview(t *testing.T) {
 	m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil, nil)
+
 	cmd := m.Init()
 	if cmd == nil {
 		t.Fatal("Init() should return a command (refresh tick)")
 	}
+
 	msg := cmd()
 	if _, ok := msg.(previewMsg); ok {
 		t.Error("should not produce a previewMsg when fetchPreview is nil")
@@ -993,6 +1061,7 @@ func TestUpdate_RefreshSessions_PreservesCursor(t *testing.T) {
 		if ok && item.info.ID == "s3" {
 			break
 		}
+
 		m.list.CursorDown()
 	}
 
@@ -1005,6 +1074,7 @@ func TestUpdate_RefreshSessions_PreservesCursor(t *testing.T) {
 	if !ok {
 		t.Fatal("expected sessionItem after refresh")
 	}
+
 	if item.info.ID != "s3" {
 		t.Errorf("selected session ID = %q, want %q", item.info.ID, "s3")
 	}
@@ -1043,9 +1113,11 @@ func TestUpdate_RefreshSessions_UpdatesStatus(t *testing.T) {
 			if s.Status != "stopped" {
 				t.Errorf("session s1 status = %q, want %q", s.Status, "stopped")
 			}
+
 			return
 		}
 	}
+
 	t.Error("session s1 not found after refresh")
 }
 
@@ -1062,6 +1134,7 @@ func TestUpdate_RefreshSkippedDuringConfirmDelete(t *testing.T) {
 	if om.state != stateConfirmDelete {
 		t.Errorf("state = %v, want stateConfirmDelete", om.state)
 	}
+
 	if len(om.allSessions) != len(sessions) {
 		t.Errorf("allSessions changed during confirm state")
 	}
@@ -1094,6 +1167,7 @@ func TestUpdate_RefreshSessions_SelectedGone_FallsBack(t *testing.T) {
 		if ok && item.info.ID == "s2" {
 			break
 		}
+
 		m.list.CursorDown()
 	}
 
@@ -1116,7 +1190,9 @@ func TestUpdate_RefreshSessions_SelectedGone_FallsBack(t *testing.T) {
 
 func TestUpdate_RestartAll_Staggered(t *testing.T) {
 	sessions := overlayTestSessions()
+
 	var restarted []string
+
 	restartFn := func(id string) error {
 		restarted = append(restarted, id)
 		return nil
@@ -1129,16 +1205,19 @@ func TestUpdate_RestartAll_Staggered(t *testing.T) {
 
 	// Press R to open the restart menu, then choose "all"
 	updated, _ := sendKey(m, "R")
+
 	om := asOverlay(updated)
 	if om.state != stateRestartMenu {
 		t.Fatalf("state = %v, want stateRestartMenu", om.state)
 	}
 
 	updated, cmd := sendKey(updated, "a")
+
 	om = asOverlay(updated)
 	if om.state != stateRestartingAll {
 		t.Fatalf("state = %v, want stateRestartingAll", om.state)
 	}
+
 	if len(om.restartQueue) == 0 {
 		t.Fatal("restartQueue should not be empty")
 	}
@@ -1149,6 +1228,7 @@ func TestUpdate_RestartAll_Staggered(t *testing.T) {
 		if msg == nil {
 			break
 		}
+
 		updated, cmd = updated.Update(msg)
 	}
 
@@ -1156,6 +1236,7 @@ func TestUpdate_RestartAll_Staggered(t *testing.T) {
 	if om.state != stateList {
 		t.Errorf("state = %v, want stateList after all restarts", om.state)
 	}
+
 	if len(restarted) != len(sessions) {
 		t.Errorf("restarted %d sessions, want %d", len(restarted), len(sessions))
 	}
@@ -1183,6 +1264,7 @@ func TestUpdate_RestartAll_ShowsProgress(t *testing.T) {
 	if cmd != nil {
 		msg := cmd()
 		updated, _ = updated.Update(msg)
+
 		om = asOverlay(updated)
 		if om.restartIdx != 1 {
 			t.Errorf("restartIdx after first restart = %d, want 1", om.restartIdx)
@@ -1198,6 +1280,7 @@ func TestUpdate_RestartAll_HandlesErrors(t *testing.T) {
 		if callCount == 2 {
 			return fmt.Errorf("restart failed")
 		}
+
 		return nil
 	}
 
@@ -1216,6 +1299,7 @@ func TestUpdate_RestartAll_HandlesErrors(t *testing.T) {
 		if msg == nil {
 			break
 		}
+
 		updated, cmd = updated.Update(msg)
 	}
 
@@ -1231,7 +1315,9 @@ func TestUpdate_RestartAll_HandlesErrors(t *testing.T) {
 
 func TestUpdate_RestartAll_EscCancelsRemaining(t *testing.T) {
 	sessions := overlayTestSessions()
+
 	var restarted []string
+
 	restartFn := func(id string) error {
 		restarted = append(restarted, id)
 		return nil
@@ -1245,6 +1331,7 @@ func TestUpdate_RestartAll_EscCancelsRemaining(t *testing.T) {
 	// Start restart-all
 	updated, _ := sendKey(m, "R")
 	updated, cmd := sendKey(updated, "a")
+
 	om := asOverlay(updated)
 	if om.state != stateRestartingAll {
 		t.Fatalf("state = %v, want stateRestartingAll", om.state)
@@ -1254,12 +1341,14 @@ func TestUpdate_RestartAll_EscCancelsRemaining(t *testing.T) {
 	msg := cmd()
 	updated, cmd = updated.Update(msg)
 	om = asOverlay(updated)
+
 	if len(restarted) != 1 {
 		t.Fatalf("restarted = %d, want 1 after first result", len(restarted))
 	}
 
 	// Press Esc to cancel remaining
 	updated, _ = sendSpecialKey(updated, tea.KeyEscape)
+
 	om = asOverlay(updated)
 	if om.state != stateRestartingAll {
 		t.Errorf("state = %v, want stateRestartingAll (waiting for in-flight)", om.state)
@@ -1289,7 +1378,9 @@ func TestUpdate_RestartAll_EscCancelsRemaining(t *testing.T) {
 
 func TestUpdate_Stop_Confirm(t *testing.T) {
 	sessions := overlayTestSessions()
+
 	var stopped string
+
 	stopFn := func(id string) error {
 		stopped = id
 		return nil
@@ -1303,6 +1394,7 @@ func TestUpdate_Stop_Confirm(t *testing.T) {
 
 	// Press S to confirm-stop, then y
 	updated, _ := sendKey(m, "S")
+
 	om := asOverlay(updated)
 	if om.state != stateConfirmStop {
 		t.Fatalf("state = %v, want stateConfirmStop", om.state)
@@ -1312,15 +1404,18 @@ func TestUpdate_Stop_Confirm(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected a command from stop confirmation")
 	}
+
 	updated, _ = updated.Update(cmd())
 	om = asOverlay(updated)
 
 	if stopped != selected.info.ID {
 		t.Errorf("stopSession called with %q, want %q", stopped, selected.info.ID)
 	}
+
 	if om.state != stateList {
 		t.Errorf("state = %v, want stateList after stop", om.state)
 	}
+
 	for _, s := range om.allSessions {
 		if s.ID == selected.info.ID && s.Status != "stopped" {
 			t.Errorf("session %q status = %q, want stopped", s.ID, s.Status)
@@ -1342,10 +1437,12 @@ func TestUpdate_Stop_Cancel(t *testing.T) {
 
 	updated, _ := sendKey(m, "S")
 	updated, _ = sendKey(updated, "n")
+
 	om := asOverlay(updated)
 	if om.state != stateList {
 		t.Errorf("state = %v, want stateList after cancel", om.state)
 	}
+
 	if called {
 		t.Error("stopSession should not be called when cancelled")
 	}
@@ -1355,7 +1452,9 @@ func TestUpdate_Stop_Cancel(t *testing.T) {
 
 func TestUpdate_RestartMenu_Stopped(t *testing.T) {
 	sessions := overlayTestSessions() // s2 is stopped
+
 	var restarted []string
+
 	restartFn := func(id string) error {
 		restarted = append(restarted, id)
 		return nil
@@ -1367,12 +1466,14 @@ func TestUpdate_RestartMenu_Stopped(t *testing.T) {
 	m.height = 40
 
 	updated, _ := sendKey(m, "R")
+
 	om := asOverlay(updated)
 	if om.state != stateRestartMenu {
 		t.Fatalf("state = %v, want stateRestartMenu", om.state)
 	}
 
 	updated, cmd := sendKey(updated, "s")
+
 	om = asOverlay(updated)
 	if len(om.restartQueue) != 1 || om.restartQueue[0] != "s2" {
 		t.Fatalf("restartQueue = %v, want [s2]", om.restartQueue)
@@ -1383,8 +1484,10 @@ func TestUpdate_RestartMenu_Stopped(t *testing.T) {
 		if msg == nil {
 			break
 		}
+
 		updated, cmd = updated.Update(msg)
 	}
+
 	if len(restarted) != 1 || restarted[0] != "s2" {
 		t.Errorf("restarted = %v, want [s2]", restarted)
 	}
@@ -1393,7 +1496,9 @@ func TestUpdate_RestartMenu_Stopped(t *testing.T) {
 func TestUpdate_RestartMenu_Outdated(t *testing.T) {
 	sessions := overlayTestSessions()
 	sessions[0].ConfigStale = true // s1 is stale
+
 	var restarted []string
+
 	restartFn := func(id string) error {
 		restarted = append(restarted, id)
 		return nil
@@ -1406,6 +1511,7 @@ func TestUpdate_RestartMenu_Outdated(t *testing.T) {
 
 	updated, _ := sendKey(m, "R")
 	updated, cmd := sendKey(updated, "o")
+
 	om := asOverlay(updated)
 	if len(om.restartQueue) != 1 || om.restartQueue[0] != "s1" {
 		t.Fatalf("restartQueue = %v, want [s1]", om.restartQueue)
@@ -1416,8 +1522,10 @@ func TestUpdate_RestartMenu_Outdated(t *testing.T) {
 		if msg == nil {
 			break
 		}
+
 		updated, cmd = updated.Update(msg)
 	}
+
 	if len(restarted) != 1 || restarted[0] != "s1" {
 		t.Errorf("restarted = %v, want [s1]", restarted)
 	}
@@ -1437,10 +1545,12 @@ func TestUpdate_RestartMenu_Cancel(t *testing.T) {
 
 	updated, _ := sendKey(m, "R")
 	updated, _ = sendSpecialKey(updated, tea.KeyEscape)
+
 	om := asOverlay(updated)
 	if om.state != stateList {
 		t.Errorf("state = %v, want stateList after cancel", om.state)
 	}
+
 	if called {
 		t.Error("restartSession should not be called when menu cancelled")
 	}
@@ -1448,7 +1558,9 @@ func TestUpdate_RestartMenu_Cancel(t *testing.T) {
 
 func TestUpdate_RestartMenu_All(t *testing.T) {
 	sessions := overlayTestSessions()
+
 	var restarted []string
+
 	restartFn := func(id string) error {
 		restarted = append(restarted, id)
 		return nil
@@ -1461,6 +1573,7 @@ func TestUpdate_RestartMenu_All(t *testing.T) {
 
 	updated, _ := sendKey(m, "R")
 	updated, cmd := sendKey(updated, "a")
+
 	om := asOverlay(updated)
 	if len(om.restartQueue) != len(sessions) {
 		t.Fatalf("restartQueue = %v, want all %d sessions", om.restartQueue, len(sessions))
@@ -1471,8 +1584,10 @@ func TestUpdate_RestartMenu_All(t *testing.T) {
 		if msg == nil {
 			break
 		}
+
 		updated, cmd = updated.Update(msg)
 	}
+
 	if len(restarted) != len(sessions) {
 		t.Errorf("restarted %d sessions, want %d", len(restarted), len(sessions))
 	}
@@ -1493,18 +1608,22 @@ func TestUpdate_RestartMenu_EmptyQueue(t *testing.T) {
 
 	updated, _ := sendKey(m, "R")
 	updated, cmd := sendKey(updated, "o")
+
 	om := asOverlay(updated)
 	if om.state != stateList {
 		t.Errorf("state = %v, want stateList for empty queue", om.state)
 	}
+
 	if len(om.restartQueue) != 0 {
 		t.Errorf("restartQueue = %v, want empty", om.restartQueue)
 	}
+
 	if cmd != nil {
 		if msg := cmd(); msg != nil {
 			updated.Update(msg)
 		}
 	}
+
 	if called {
 		t.Error("restartSession should not be called when no sessions match")
 	}
@@ -1512,7 +1631,9 @@ func TestUpdate_RestartMenu_EmptyQueue(t *testing.T) {
 
 func TestUpdate_RestartMenu_RespectsFilter(t *testing.T) {
 	sessions := overlayTestSessions()
+
 	var restarted []string
+
 	restartFn := func(id string) error {
 		restarted = append(restarted, id)
 		return nil
@@ -1528,6 +1649,7 @@ func TestUpdate_RestartMenu_RespectsFilter(t *testing.T) {
 
 	updated, _ := sendKey(m, "R")
 	updated, cmd := sendKey(updated, "a")
+
 	om := asOverlay(updated)
 	if len(om.restartQueue) != 1 || om.restartQueue[0] != "s1" {
 		t.Fatalf("restartQueue = %v, want [s1] (filter-scoped)", om.restartQueue)
@@ -1538,8 +1660,10 @@ func TestUpdate_RestartMenu_RespectsFilter(t *testing.T) {
 		if msg == nil {
 			break
 		}
+
 		updated, cmd = updated.Update(msg)
 	}
+
 	if len(restarted) != 1 || restarted[0] != "s1" {
 		t.Errorf("restarted = %v, want [s1]", restarted)
 	}
@@ -1566,11 +1690,13 @@ func TestUpdate_Stop_Error(t *testing.T) {
 	if om.state != stateList {
 		t.Errorf("state = %v, want stateList after failed stop", om.state)
 	}
+
 	for _, s := range om.allSessions {
 		if s.ID == selected.info.ID && s.Status != origStatus {
 			t.Errorf("session status = %q, want unchanged %q on stop failure", s.Status, origStatus)
 		}
 	}
+
 	if om.stoppedCurrent {
 		t.Error("stoppedCurrent should not be set when stop fails")
 	}
@@ -1599,6 +1725,7 @@ func TestUpdate_Stop_Current_SetsFlag(t *testing.T) {
 	om.restartSession = func(string) error { return nil }
 	updated, _ = sendKey(om, "R")
 	updated, _ = sendKey(updated, "a")
+
 	om = asOverlay(updated)
 	if om.stoppedCurrent {
 		t.Error("stoppedCurrent should be cleared once the current session is restarted")
@@ -1616,7 +1743,9 @@ func TestUpdate_Stop_OnGroupHeader_NoOp(t *testing.T) {
 	if _, ok := m.list.SelectedItem().(groupHeader); !ok {
 		t.Skip("expected a group header at index 0")
 	}
+
 	updated, _ := sendKey(m, "S")
+
 	om := asOverlay(updated)
 	if om.state != stateList {
 		t.Errorf("state = %v, want stateList (S on group header is a no-op)", om.state)
@@ -1636,16 +1765,20 @@ func TestUpdate_Star_NotStop(t *testing.T) {
 	m.selectSessionByID("s1")
 
 	updated, cmd := sendKey(m, "s")
+
 	om := asOverlay(updated)
 	if om.state != stateList {
 		t.Errorf("state = %v, want stateList (s should not open confirm-stop)", om.state)
 	}
+
 	if cmd != nil {
 		updated.Update(cmd())
 	}
+
 	if stopCalled {
 		t.Error("lowercase s must not call stopSession")
 	}
+
 	if !starCalled {
 		t.Error("lowercase s should toggle star")
 	}
@@ -1658,10 +1791,12 @@ func TestUpdate_PreviewMsg_Applied(t *testing.T) {
 	selected := m.list.SelectedItem().(sessionItem)
 
 	updated, _ := m.Update(previewMsg{sessionID: selected.info.ID, content: "hello"})
+
 	om := asOverlay(updated)
 	if om.previewContent != "hello" {
 		t.Errorf("preview content = %q, want %q", om.previewContent, "hello")
 	}
+
 	if om.previewSessionID != selected.info.ID {
 		t.Errorf("preview session ID = %q, want %q", om.previewSessionID, selected.info.ID)
 	}
@@ -1672,6 +1807,7 @@ func TestUpdate_PreviewMsg_StaleGuard(t *testing.T) {
 	m.previewContent = "old"
 
 	updated, _ := m.Update(previewMsg{sessionID: "nonexistent", content: "stale"})
+
 	om := asOverlay(updated)
 	if om.previewContent != "old" {
 		t.Errorf("stale preview should not be applied, got %q", om.previewContent)
@@ -1683,6 +1819,7 @@ func TestUpdate_PreviewMsg_EmptyContentSkipsSessionID(t *testing.T) {
 	selected := m.list.SelectedItem().(sessionItem)
 
 	updated, _ := m.Update(previewMsg{sessionID: selected.info.ID, content: "   \n  "})
+
 	om := asOverlay(updated)
 	if om.previewSessionID != "" {
 		t.Error("empty/whitespace preview should not set previewSessionID")
@@ -1695,6 +1832,7 @@ func TestUpdate_WindowSizeMsg(t *testing.T) {
 	m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil, nil)
 
 	updated, _ := sendWindowSize(m, 120, 40)
+
 	om := asOverlay(updated)
 	if om.width != 120 || om.height != 40 {
 		t.Errorf("size = %dx%d, want 120x40", om.width, om.height)
@@ -1705,6 +1843,7 @@ func TestUpdate_WindowSizeMsg_Small(t *testing.T) {
 	m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil, nil)
 
 	updated, _ := sendWindowSize(m, 20, 5)
+
 	om := asOverlay(updated)
 	if om.width != 20 || om.height != 5 {
 		t.Errorf("size = %dx%d, want 20x5", om.width, om.height)
@@ -1715,10 +1854,12 @@ func TestUpdate_WindowSizeMsg_Small(t *testing.T) {
 
 func TestUpdate_QuitQ(t *testing.T) {
 	m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil, nil)
+
 	_, cmd := sendKey(m, "q")
 	if cmd == nil {
 		t.Fatal("q should produce a command")
 	}
+
 	msg := cmd()
 	if _, ok := msg.(tea.QuitMsg); !ok {
 		t.Errorf("expected QuitMsg, got %T", msg)
@@ -1727,10 +1868,12 @@ func TestUpdate_QuitQ(t *testing.T) {
 
 func TestUpdate_QuitEsc(t *testing.T) {
 	m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil, nil)
+
 	_, cmd := sendSpecialKey(m, tea.KeyEscape)
 	if cmd == nil {
 		t.Fatal("esc should produce a command")
 	}
+
 	msg := cmd()
 	if _, ok := msg.(tea.QuitMsg); !ok {
 		t.Errorf("expected QuitMsg, got %T", msg)
@@ -1742,13 +1885,16 @@ func TestUpdate_EnterSelectsSession(t *testing.T) {
 	selected := m.list.SelectedItem().(sessionItem)
 
 	updated, cmd := sendSpecialKey(m, tea.KeyEnter)
+
 	om := asOverlay(updated)
 	if om.selected == nil {
 		t.Fatal("enter should select the current session")
 	}
+
 	if om.selected.ID != selected.info.ID {
 		t.Errorf("selected session ID = %q, want %q", om.selected.ID, selected.info.ID)
 	}
+
 	if cmd == nil {
 		t.Fatal("enter should produce a quit command")
 	}
@@ -1767,6 +1913,7 @@ func TestUpdate_EnterOnGroupHeader_NoSelection(t *testing.T) {
 	}
 
 	updated, _ := sendSpecialKey(m, tea.KeyEnter)
+
 	om := asOverlay(updated)
 	if om.selected != nil {
 		t.Error("enter on group header should not select anything")
@@ -1777,6 +1924,7 @@ func TestUpdate_XEntersDeleteConfirm(t *testing.T) {
 	m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil, nil)
 
 	updated, _ := sendKey(m, "x")
+
 	om := asOverlay(updated)
 	if om.state != stateConfirmDelete {
 		t.Errorf("state = %d, want stateConfirmDelete(%d)", om.state, stateConfirmDelete)
@@ -1787,10 +1935,12 @@ func TestUpdate_SlashEntersFilter(t *testing.T) {
 	m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil, nil)
 
 	updated, cmd := sendKey(m, "/")
+
 	om := asOverlay(updated)
 	if om.state != stateFilter {
 		t.Errorf("state = %d, want stateFilter(%d)", om.state, stateFilter)
 	}
+
 	if cmd == nil {
 		t.Error("entering filter mode should return a blink command")
 	}
@@ -1805,6 +1955,7 @@ func TestUpdate_JKNavigation(t *testing.T) {
 	// Move down
 	updated, _ := sendKey(m, "j")
 	om := asOverlay(updated)
+
 	after := om.list.SelectedItem().(sessionItem)
 	if after.info.ID == initial.info.ID {
 		t.Error("j should move cursor down to a different session")
@@ -1813,6 +1964,7 @@ func TestUpdate_JKNavigation(t *testing.T) {
 	// Move back up
 	updated, _ = sendKey(om, "k")
 	om = asOverlay(updated)
+
 	back := om.list.SelectedItem().(sessionItem)
 	if back.info.ID != initial.info.ID {
 		t.Error("k should move cursor back up")
@@ -1828,10 +1980,12 @@ func TestUpdate_NavigationSkipsGroupHeaders(t *testing.T) {
 	updated, _ := sendKey(m, "j")
 	om := asOverlay(updated)
 	item := om.list.SelectedItem()
+
 	si, ok := item.(sessionItem)
 	if !ok {
 		t.Fatalf("after navigating past group header, expected sessionItem, got %T", item)
 	}
+
 	if si.info.RepoName != "graith" {
 		t.Errorf("expected to land in graith group, got %q", si.info.RepoName)
 	}
@@ -1843,6 +1997,7 @@ func TestUpdate_NavigationUpSkipsGroupHeaders(t *testing.T) {
 
 	// Navigate to a graith item (j from croft skips graith header)
 	updated, _ := sendKey(m, "j")
+
 	om := asOverlay(updated)
 	if si, ok := om.list.SelectedItem().(sessionItem); ok {
 		if si.info.RepoName != "graith" {
@@ -1854,10 +2009,12 @@ func TestUpdate_NavigationUpSkipsGroupHeaders(t *testing.T) {
 	updated, _ = sendKey(om, "k")
 	om = asOverlay(updated)
 	item := om.list.SelectedItem()
+
 	si, ok := item.(sessionItem)
 	if !ok {
 		t.Fatalf("navigating up past group header, expected sessionItem, got %T", item)
 	}
+
 	if si.info.RepoName != "croft" {
 		t.Errorf("expected croft group, got %q", si.info.RepoName)
 	}
@@ -1869,6 +2026,7 @@ func TestUpdate_DownArrowNavigation(t *testing.T) {
 
 	updated, _ := sendSpecialKey(m, tea.KeyDown)
 	om := asOverlay(updated)
+
 	after := om.list.SelectedItem().(sessionItem)
 	if after.info.ID == initial.info.ID {
 		t.Error("down arrow should move cursor")
@@ -1887,11 +2045,14 @@ func TestUpdate_NavigationFetchesPreview(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("navigation should return a preview fetch command")
 	}
+
 	msg := cmd()
+
 	pm, ok := msg.(previewMsg)
 	if !ok {
 		t.Fatalf("expected previewMsg from navigation, got %T", msg)
 	}
+
 	if !fetched[pm.sessionID] {
 		t.Error("fetchPreview should have been called for the new selection")
 	}
@@ -1913,6 +2074,7 @@ func TestUpdate_TabJumpsToNextGroup(t *testing.T) {
 	sized, _ := sendWindowSize(m, 120, 40)
 	updated, _ := sendSpecialKey(asOverlay(sized), tea.KeyTab)
 	om := asOverlay(updated)
+
 	after := om.list.SelectedItem().(sessionItem)
 	if after.info.RepoName != "graith" {
 		t.Errorf("tab should jump to graith, got %q", after.info.RepoName)
@@ -1931,6 +2093,7 @@ func TestUpdate_ShiftTabJumpsToPrevGroup(t *testing.T) {
 
 	updated, _ := sendShiftTab(m)
 	om := asOverlay(updated)
+
 	after := om.list.SelectedItem().(sessionItem)
 	if after.info.RepoName != "graith" {
 		t.Errorf("shift+tab should jump to graith, got %q", after.info.RepoName)
@@ -1944,6 +2107,7 @@ func TestUpdate_FilterEscReturnsToList(t *testing.T) {
 	updated, _ := sendKey(m, "/")
 
 	updated, _ = sendSpecialKey(asOverlay(updated), tea.KeyEscape)
+
 	om := asOverlay(updated)
 	if om.state != stateList {
 		t.Errorf("esc in filter should return to stateList, got %d", om.state)
@@ -1955,6 +2119,7 @@ func TestUpdate_FilterEnterAttachesSession(t *testing.T) {
 	updated, _ := sendKey(m, "/")
 
 	updated, _ = sendSpecialKey(asOverlay(updated), tea.KeyEnter)
+
 	om := asOverlay(updated)
 	if om.selected == nil {
 		t.Fatal("enter in filter should select the highlighted session")
@@ -1968,11 +2133,14 @@ func TestUpdate_FilterEnterAttachesCorrectFilteredSession(t *testing.T) {
 	for _, ch := range "bonnie" {
 		updated, _ = sendKey(asOverlay(updated), string(ch))
 	}
+
 	updated, _ = sendSpecialKey(asOverlay(updated), tea.KeyEnter)
+
 	om := asOverlay(updated)
 	if om.selected == nil {
 		t.Fatal("enter after filter should select a session")
 	}
+
 	if om.selected.ID != "s3" {
 		t.Errorf("selected session ID = %q, want %q", om.selected.ID, "s3")
 	}
@@ -1985,11 +2153,14 @@ func TestUpdate_FilterEnterNoMatchDoesNotAttach(t *testing.T) {
 	for _, ch := range "zzzzz" {
 		updated, _ = sendKey(asOverlay(updated), string(ch))
 	}
+
 	updated, _ = sendSpecialKey(asOverlay(updated), tea.KeyEnter)
+
 	om := asOverlay(updated)
 	if om.selected != nil {
 		t.Error("enter with no matches should not select anything")
 	}
+
 	if om.state != stateList {
 		t.Errorf("state = %d, want stateList after enter on no-match", om.state)
 	}
@@ -2002,6 +2173,7 @@ func TestUpdate_FilterTypingUpdatesInput(t *testing.T) {
 	updated, _ = sendKey(asOverlay(updated), "f")
 	updated, _ = sendKey(asOverlay(updated), "i")
 	updated, _ = sendKey(asOverlay(updated), "x")
+
 	om := asOverlay(updated)
 	if om.filterInput.Value() != "fix" {
 		t.Errorf("filter input = %q, want %q", om.filterInput.Value(), "fix")
@@ -2016,15 +2188,18 @@ func TestUpdate_FilterActuallyFilters(t *testing.T) {
 	for _, ch := range "croft" {
 		updated, _ = sendKey(asOverlay(updated), string(ch))
 	}
+
 	om := asOverlay(updated)
 
 	// Should only show croft sessions
 	sessionCount := 0
+
 	for _, item := range om.list.Items() {
 		if _, ok := item.(sessionItem); ok {
 			sessionCount++
 		}
 	}
+
 	if sessionCount != 1 {
 		t.Errorf("filtering for 'croft' should show 1 session, got %d", sessionCount)
 	}
@@ -2036,6 +2211,7 @@ func TestUpdate_FilterTypingTriggersPreviewFetch(t *testing.T) {
 	}
 	// Start on s3 (croft). Filtering to "graith" will change selection to s1.
 	m := newOverlayModel(overlayTestSessions(), "s3", fetch, nil, nil, nil)
+
 	initial := m.list.SelectedItem().(sessionItem)
 	if initial.info.ID != "s3" {
 		t.Fatalf("expected cursor on s3, got %q", initial.info.ID)
@@ -2043,39 +2219,47 @@ func TestUpdate_FilterTypingTriggersPreviewFetch(t *testing.T) {
 
 	// Enter filter mode and type "graith" to filter out s3
 	updated, _ := sendKey(m, "/")
+
 	var cmd tea.Cmd
 	for _, ch := range "graith" {
 		updated, cmd = sendKey(asOverlay(updated), string(ch))
 	}
+
 	if cmd == nil {
 		t.Fatal("typing in filter mode should return a command (including preview fetch)")
 	}
 
 	om := asOverlay(updated)
+
 	selected := om.list.SelectedItem().(sessionItem)
 	if selected.info.ID == "s3" {
 		t.Fatal("filter should have changed selection away from s3")
 	}
 
 	batchMsg := cmd()
+
 	batch, ok := batchMsg.(tea.BatchMsg)
 	if !ok {
 		t.Fatalf("expected tea.BatchMsg from filter typing, got %T", batchMsg)
 	}
 
 	foundPreview := false
+
 	for _, c := range batch {
 		if c == nil {
 			continue
 		}
+
 		msg := c()
 		if pm, ok := msg.(previewMsg); ok {
 			foundPreview = true
+
 			if pm.sessionID != selected.info.ID {
 				t.Errorf("preview fetch session = %q, want %q", pm.sessionID, selected.info.ID)
 			}
 		}
 	}
+
 	if !foundPreview {
 		t.Error("filter typing should trigger a preview fetch for the newly selected session")
 	}
@@ -2094,11 +2278,13 @@ func TestUpdate_FilterNoMatchClearsPreview(t *testing.T) {
 	for _, ch := range "zzzzz" {
 		updated, _ = sendKey(asOverlay(updated), string(ch))
 	}
+
 	om := asOverlay(updated)
 
 	if om.previewContent != "" {
 		t.Errorf("preview content should be cleared when no sessions match, got %q", om.previewContent)
 	}
+
 	if om.previewSessionID != "" {
 		t.Errorf("preview session ID should be cleared when no sessions match, got %q", om.previewSessionID)
 	}
@@ -2108,6 +2294,7 @@ func TestUpdate_FilterResetsCursorToFirstSession(t *testing.T) {
 	sessions := overlayTestSessions()
 	// Start cursor on s3 (last session, in croft group)
 	m := newOverlayModel(sessions, "s3", nil, nil, nil, nil)
+
 	initial := m.list.SelectedItem().(sessionItem)
 	if initial.info.ID != "s3" {
 		t.Fatalf("expected cursor on s3, got %q", initial.info.ID)
@@ -2119,16 +2306,19 @@ func TestUpdate_FilterResetsCursorToFirstSession(t *testing.T) {
 	for _, ch := range "graith" {
 		updated, _ = sendKey(asOverlay(updated), string(ch))
 	}
+
 	om := asOverlay(updated)
 
 	item := om.list.SelectedItem()
 	if item == nil {
 		t.Fatal("SelectedItem() should not be nil after filtering")
 	}
+
 	si, ok := item.(sessionItem)
 	if !ok {
 		t.Fatal("cursor should be on a sessionItem, not a groupHeader")
 	}
+
 	if si.info.RepoName != "graith" {
 		t.Errorf("cursor should be on a graith session, got repo %q", si.info.RepoName)
 	}
@@ -2149,11 +2339,13 @@ func TestUpdate_FilterEscRestoresFullList(t *testing.T) {
 	om := asOverlay(updated)
 
 	sessionCount := 0
+
 	for _, item := range om.list.Items() {
 		if _, ok := item.(sessionItem); ok {
 			sessionCount++
 		}
 	}
+
 	if sessionCount != len(sessions) {
 		t.Errorf("esc should restore all %d sessions, got %d", len(sessions), sessionCount)
 	}
@@ -2174,14 +2366,18 @@ func TestUpdate_ConfirmDeleteY(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("y should produce a delete command")
 	}
+
 	msg := cmd()
+
 	drm, ok := msg.(deleteResultMsg)
 	if !ok {
 		t.Fatalf("expected deleteResultMsg, got %T", msg)
 	}
+
 	if drm.sessionID != selected.info.ID {
 		t.Errorf("deleted session = %q, want %q", drm.sessionID, selected.info.ID)
 	}
+
 	if deletedID != selected.info.ID {
 		t.Errorf("deleteSession called with %q, want %q", deletedID, selected.info.ID)
 	}
@@ -2192,6 +2388,7 @@ func TestUpdate_ConfirmDeleteUpperY(t *testing.T) {
 	m := newOverlayModel(overlayTestSessions(), "", nil, deleteFn, nil, nil)
 
 	updated, _ := sendKey(m, "x")
+
 	_, cmd := sendKey(asOverlay(updated), "Y")
 	if cmd == nil {
 		t.Fatal("Y should also produce a delete command")
@@ -2203,10 +2400,12 @@ func TestUpdate_ConfirmDeleteCancel(t *testing.T) {
 
 	updated, _ := sendKey(m, "x")
 	updated, _ = sendKey(asOverlay(updated), "n")
+
 	om := asOverlay(updated)
 	if om.state != stateList {
 		t.Errorf("cancelling delete should return to stateList, got %d", om.state)
 	}
+
 	if om.selected != nil {
 		t.Error("cancelling delete should not select a session")
 	}
@@ -2218,6 +2417,7 @@ func TestUpdate_ConfirmDeleteAnyKeyCancel(t *testing.T) {
 			m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil, nil)
 			updated, _ := sendKey(m, "x")
 			updated, _ = sendKey(asOverlay(updated), k)
+
 			om := asOverlay(updated)
 			if om.state != stateList {
 				t.Errorf("key %q in delete confirm should cancel, got state %d", k, om.state)
@@ -2244,6 +2444,7 @@ func TestView_RendersSessionList(t *testing.T) {
 	if !strings.Contains(view, "All") {
 		t.Error("view should contain the view name 'All'")
 	}
+
 	for _, name := range []string{"canny-tests", "braw-fix", "bonnie-feature"} {
 		if !strings.Contains(view, name) {
 			t.Errorf("view should contain session name %q", name)
@@ -2260,6 +2461,7 @@ func TestView_ShowsGroupHeaders(t *testing.T) {
 	if !strings.Contains(view, "graith") {
 		t.Error("view should contain group header 'graith'")
 	}
+
 	if !strings.Contains(view, "croft") {
 		t.Error("view should contain group header 'croft'")
 	}
@@ -2285,6 +2487,7 @@ func TestView_ShowsHelpBar(t *testing.T) {
 	if !strings.Contains(view, "enter attach") {
 		t.Error("view should contain help bar")
 	}
+
 	if !strings.Contains(view, "tab group") {
 		t.Error("help bar should mention tab group navigation")
 	}
@@ -2301,6 +2504,7 @@ func TestView_ShowsDetailLine(t *testing.T) {
 	if !strings.Contains(view, "agent: claude") {
 		t.Error("detail line should show agent type")
 	}
+
 	if !strings.Contains(view, "base: main") {
 		t.Error("detail line should show base branch")
 	}
@@ -2324,9 +2528,11 @@ func TestView_SharedWorktreeOmitsBranchAndBase(t *testing.T) {
 	if strings.Contains(view, "branch: feature") {
 		t.Error("shared worktree detail should not show branch")
 	}
+
 	if strings.Contains(view, "base: main") {
 		t.Error("shared worktree detail should not show base branch")
 	}
+
 	if !strings.Contains(view, "agent: claude") {
 		t.Error("shared worktree detail should still show agent")
 	}
@@ -2363,9 +2569,11 @@ func TestView_ConfirmDeleteShowsUnsavedWarning(t *testing.T) {
 	if !strings.Contains(view, "unsaved work") {
 		t.Error("delete confirmation for dirty session should warn about unsaved work")
 	}
+
 	if !strings.Contains(view, "Uncommitted changes") {
 		t.Error("delete confirmation should mention uncommitted changes")
 	}
+
 	if !strings.Contains(view, "3 unpushed commits") {
 		t.Error("delete confirmation should mention unpushed commits")
 	}
@@ -2381,6 +2589,7 @@ func TestView_ConfirmDeleteNoWarningForCleanSession(t *testing.T) {
 	if strings.Contains(view, "unsaved work") {
 		t.Error("delete confirmation for clean session should not warn about unsaved work")
 	}
+
 	if !strings.Contains(view, "Delete") || !strings.Contains(view, "[y/N]") {
 		t.Error("delete confirmation should still show 'Delete ... [y/N]'")
 	}
@@ -2405,6 +2614,7 @@ func TestView_ConfirmDeleteDirtyOnly(t *testing.T) {
 	if !strings.Contains(view, "Uncommitted changes") {
 		t.Error("should warn about uncommitted changes")
 	}
+
 	if strings.Contains(view, "unpushed commit") {
 		t.Error("should not mention unpushed commits when there are none")
 	}
@@ -2429,6 +2639,7 @@ func TestView_ConfirmDeleteUnpushedSingular(t *testing.T) {
 	if !strings.Contains(view, "1 unpushed commit") {
 		t.Error("should use singular 'commit' for count of 1")
 	}
+
 	if strings.Contains(view, "commits") {
 		t.Error("should not use plural 'commits' for count of 1")
 	}
@@ -2438,6 +2649,7 @@ func TestUpdate_ConfirmDeleteNilCallback(t *testing.T) {
 	m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil, nil)
 	updated, _ := sendKey(m, "x")
 	updated, _ = sendKey(asOverlay(updated), "y")
+
 	om := asOverlay(updated)
 	if om.state != stateList {
 		t.Errorf("confirming delete with nil callback should return to list, got state %d", om.state)
@@ -2463,6 +2675,7 @@ func TestView_ConfirmDeleteUnpushedOnly(t *testing.T) {
 	if strings.Contains(view, "Uncommitted changes") {
 		t.Error("should not mention uncommitted changes when there are none")
 	}
+
 	if !strings.Contains(view, "5 unpushed commits") {
 		t.Error("should warn about unpushed commits")
 	}
@@ -2481,6 +2694,7 @@ func TestView_FilterModeShowsInput(t *testing.T) {
 	// Verify list mode does NOT show filter prompt
 	m2 := newOverlayModel(overlayTestSessions(), "", nil, nil, nil, nil)
 	updated2, _ := sendWindowSize(m2, 120, 40)
+
 	listView := asOverlay(updated2).View().Content
 	if strings.Contains(listView, "Filter:") {
 		t.Error("list mode should not show filter prompt")
@@ -2514,6 +2728,7 @@ func TestView_PreviewBackground(t *testing.T) {
 
 	m2 := newOverlayModel(overlayTestSessions(), "", nil, nil, nil, nil)
 	updated2, _ := sendWindowSize(m2, 120, 40)
+
 	viewNoPreview := asOverlay(updated2).View().Content
 	if strings.Contains(viewNoPreview, "UNIQUE_PREVIEW_LINE_1") {
 		t.Error("view without preview should not contain preview text")
@@ -2532,15 +2747,18 @@ func TestSingleSession(t *testing.T) {
 	if !ok {
 		t.Fatal("cursor should be on the session item")
 	}
+
 	if si.info.Name != "neep-one" {
 		t.Errorf("selected = %q, want %q", si.info.Name, "neep-one")
 	}
 
 	updated, cmd := sendSpecialKey(m, tea.KeyEnter)
+
 	om := asOverlay(updated)
 	if om.selected == nil || om.selected.ID != "s1" {
 		t.Error("enter should select the single session")
 	}
+
 	if cmd == nil {
 		t.Fatal("should quit after selection")
 	}
@@ -2559,6 +2777,7 @@ func TestEmptySessionList(t *testing.T) {
 	}
 
 	updated, _ := sendWindowSize(m, 80, 24)
+
 	view := asOverlay(updated).View().Content
 	if view == "" {
 		t.Error("view should render something even with no sessions")
@@ -2567,6 +2786,7 @@ func TestEmptySessionList(t *testing.T) {
 
 func TestFetchPreviewCmd_NilFetchPreview(t *testing.T) {
 	m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil, nil)
+
 	cmd := m.fetchPreviewCmd()
 	if cmd != nil {
 		t.Error("fetchPreviewCmd should return nil when fetchPreview is nil")
@@ -2593,11 +2813,13 @@ func overlayResultFromModel(om overlayModel) *OverlayResult {
 		if om.state == stateConfirmDelete {
 			action = "delete"
 		}
+
 		return &OverlayResult{
 			Action:    action,
 			SessionID: om.selected.ID,
 		}
 	}
+
 	return nil
 }
 
@@ -2611,9 +2833,11 @@ func TestOverlayResult_Attach(t *testing.T) {
 	if result == nil {
 		t.Fatal("result should not be nil after enter")
 	}
+
 	if result.Action != "attach" {
 		t.Errorf("action = %q, want %q", result.Action, "attach")
 	}
+
 	if result.SessionID != selected.info.ID {
 		t.Errorf("session ID = %q, want %q", result.SessionID, selected.info.ID)
 	}
@@ -2630,6 +2854,7 @@ func TestOverlayResult_Delete_StaysOpen(t *testing.T) {
 	selected := m.list.SelectedItem().(sessionItem)
 
 	updated, _ := sendKey(m, "x")
+
 	om := asOverlay(updated)
 	if om.state != stateConfirmDelete {
 		t.Fatalf("state = %d, want stateConfirmDelete", om.state)
@@ -2637,30 +2862,37 @@ func TestOverlayResult_Delete_StaysOpen(t *testing.T) {
 
 	updated, cmd := sendKey(om, "y")
 	om = asOverlay(updated)
+
 	if cmd == nil {
 		t.Fatal("confirming delete should return a command")
 	}
 
 	msg := cmd()
+
 	drm, ok := msg.(deleteResultMsg)
 	if !ok {
 		t.Fatalf("expected deleteResultMsg, got %T", msg)
 	}
+
 	if drm.sessionID != selected.info.ID {
 		t.Errorf("deleted session = %q, want %q", drm.sessionID, selected.info.ID)
 	}
+
 	if deletedID != selected.info.ID {
 		t.Errorf("deleteSession called with %q, want %q", deletedID, selected.info.ID)
 	}
 
 	updated, _ = om.Update(drm)
+
 	om = asOverlay(updated)
 	if om.state != stateList {
 		t.Errorf("state after delete = %d, want stateList", om.state)
 	}
+
 	if len(om.allSessions) != len(sessions)-1 {
 		t.Errorf("sessions after delete = %d, want %d", len(om.allSessions), len(sessions)-1)
 	}
+
 	for _, s := range om.allSessions {
 		if s.ID == selected.info.ID {
 			t.Error("deleted session should not remain in allSessions")
@@ -2685,6 +2917,7 @@ func TestCompactDelegate_Dimensions(t *testing.T) {
 	if d.Height() != 1 {
 		t.Errorf("Height() = %d, want 1", d.Height())
 	}
+
 	if d.Spacing() != 0 {
 		t.Errorf("Spacing() = %d, want 0", d.Spacing())
 	}
@@ -2692,6 +2925,7 @@ func TestCompactDelegate_Dimensions(t *testing.T) {
 
 func TestCompactDelegate_Update(t *testing.T) {
 	d := compactDelegate{}
+
 	cmd := d.Update(nil, nil)
 	if cmd != nil {
 		t.Error("Update should always return nil")
@@ -2710,6 +2944,7 @@ func TestCompactDelegate_RenderSessionItem(t *testing.T) {
 	var buf strings.Builder
 	d.Render(&buf, l, 1, items[1])
 	line := buf.String()
+
 	si := items[1].(sessionItem)
 	if !strings.Contains(line, si.info.Name) {
 		t.Errorf("render should contain session name %q, got %q", si.info.Name, line)
@@ -2723,13 +2958,16 @@ func TestCompactDelegate_RenderGroupHeader(t *testing.T) {
 
 	var buf strings.Builder
 	d.Render(&buf, l, 0, items[0])
+
 	line := buf.String()
 	if !strings.Contains(line, "croft") {
 		t.Errorf("group header render should contain %q, got %q", "croft", line)
 	}
+
 	if !strings.Contains(line, "▸") {
 		t.Error("group header should have ▸ prefix")
 	}
+
 	if !strings.Contains(line, "(1)") {
 		t.Error("group header should show session count")
 	}
@@ -2756,6 +2994,7 @@ func TestCompactDelegate_RenderStatusIndicators(t *testing.T) {
 
 			var buf strings.Builder
 			d.Render(&buf, l, 1, items[1])
+
 			if !strings.Contains(buf.String(), tt.indicator) {
 				t.Errorf("status %q should render indicator %q", tt.status, tt.indicator)
 			}
@@ -2778,6 +3017,7 @@ func TestCompactDelegate_RenderAgentStatusOverride(t *testing.T) {
 
 	var buf strings.Builder
 	d.Render(&buf, l, 1, items[1])
+
 	if !strings.Contains(buf.String(), "thinking") {
 		t.Error("should show agent status 'thinking' instead of 'running'")
 	}
@@ -2797,6 +3037,7 @@ func TestCompactDelegate_RenderGitStatus(t *testing.T) {
 	if !strings.Contains(line, "M") {
 		t.Error("should show 'M' for dirty sessions")
 	}
+
 	if !strings.Contains(line, "↑3") {
 		t.Error("should show '↑3' for unpushed commits")
 	}
@@ -2820,10 +3061,12 @@ func TestCompactDelegate_RenderSharedWorktreeShowsDash(t *testing.T) {
 
 	var buf strings.Builder
 	d.Render(&buf, l, 1, items[1])
+
 	line := buf.String()
 	if !strings.Contains(line, "—") {
 		t.Error("shared worktree session should show '—' in git column")
 	}
+
 	gitVal := displayGit(true, 5)
 	if strings.Contains(line, gitVal) {
 		t.Errorf("shared worktree session should not show %q even when dirty+unpushed", gitVal)
@@ -2842,12 +3085,15 @@ func TestCompactDelegate_RenderCurrentSession(t *testing.T) {
 		if si, ok := item.(sessionItem); ok && si.info.ID == "s1" {
 			var buf strings.Builder
 			d.Render(&buf, l, i, item)
+
 			if !strings.Contains(buf.String(), "▸") {
 				t.Error("current session should have ▸ marker")
 			}
+
 			return
 		}
 	}
+
 	t.Fatal("s1 not found in items")
 }
 
@@ -2866,6 +3112,7 @@ func TestCompactDelegate_RenderSummary(t *testing.T) {
 
 	var buf strings.Builder
 	d.Render(&buf, l, 1, items[1])
+
 	if !strings.Contains(buf.String(), "fixing the bothy") {
 		t.Error("render should show summary text")
 	}
@@ -2886,6 +3133,7 @@ func TestCompactDelegate_RenderSelectedVsUnselected(t *testing.T) {
 	if !strings.Contains(selectedBuf.String(), ">") {
 		t.Error("selected item should contain '>'")
 	}
+
 	if strings.Contains(unselectedBuf.String(), ">") {
 		t.Error("unselected item should not contain '>'")
 	}
@@ -2909,14 +3157,17 @@ func TestCompactDelegate_RenderTruncatesLongLine(t *testing.T) {
 	d.Render(&narrowBuf, l, 1, items[1])
 
 	wideList := list.New(items, d, 200, 10)
+
 	var wideBuf strings.Builder
 	d.Render(&wideBuf, wideList, 1, items[1])
 
 	narrowVis := lipgloss.Width(narrowBuf.String())
+
 	wideVis := lipgloss.Width(wideBuf.String())
 	if narrowVis >= wideVis {
 		t.Errorf("narrow render (%d visible chars) should be shorter than wide render (%d visible chars)", narrowVis, wideVis)
 	}
+
 	if narrowVis > narrowWidth {
 		t.Errorf("truncated line visual width %d exceeds list width %d", narrowVis, narrowWidth)
 	}
@@ -2969,6 +3220,7 @@ func TestFilterNeedsAttention(t *testing.T) {
 		{ID: "s7", Name: "thrawn-unpushed", Status: "stopped", UnpushedCount: 2},
 	}
 	result := filterNeedsAttention(sessions)
+
 	names := make([]string, len(result))
 	for i, s := range result {
 		names[i] = s.Name
@@ -2978,14 +3230,17 @@ func TestFilterNeedsAttention(t *testing.T) {
 	if len(result) != 5 {
 		t.Fatalf("got %d sessions %v, want 5", len(result), names)
 	}
+
 	for _, name := range []string{"thrawn-approval", "thrawn-errored", "canny-ready", "thrawn-dirty", "thrawn-unpushed"} {
 		found := false
+
 		for _, n := range names {
 			if n == name {
 				found = true
 				break
 			}
 		}
+
 		if !found {
 			t.Errorf("missing expected session %q in result %v", name, names)
 		}
@@ -2998,14 +3253,17 @@ func TestFilterNeedsAttention_ExcludesSharedWorktree(t *testing.T) {
 		{ID: "s2", Name: "braw-shared-dirty", Status: "stopped", Dirty: true, SharedWorktree: true},
 		{ID: "s3", Name: "braw-shared-unpushed", Status: "stopped", UnpushedCount: 3, SharedWorktree: true},
 	}
+
 	result := filterNeedsAttention(sessions)
 	if len(result) != 1 {
 		names := make([]string, len(result))
 		for i, s := range result {
 			names[i] = s.Name
 		}
+
 		t.Fatalf("got %d sessions %v, want 1 (only ben-dirty)", len(result), names)
 	}
+
 	if result[0].Name != "ben-dirty" {
 		t.Errorf("got %q, want ben-dirty", result[0].Name)
 	}
@@ -3029,6 +3287,7 @@ func TestView_SharedWorktreeDeleteNoUnsavedWarning(t *testing.T) {
 	if strings.Contains(view, "unsaved work") {
 		t.Error("shared worktree delete should not warn about unsaved work")
 	}
+
 	if strings.Contains(view, "Uncommitted changes") {
 		t.Error("shared worktree delete should not mention uncommitted changes")
 	}
@@ -3047,12 +3306,14 @@ func TestFilterActive(t *testing.T) {
 		{ID: "s4", Name: "canny-running", Status: "running", AgentStatus: "unknown",
 			CreatedAt: time.Now().Add(-1 * time.Minute).Format(time.RFC3339)},
 	}
+
 	result := filterActive(sessions)
 	if len(result) != 3 {
 		names := make([]string, len(result))
 		for i, s := range result {
 			names[i] = s.Name
 		}
+
 		t.Fatalf("got %d sessions %v, want 3 (all running)", len(result), names)
 	}
 	// Should be sorted newest first
@@ -3071,6 +3332,7 @@ func TestSortByStatusAge(t *testing.T) {
 		{ID: "s3", Name: "canny-medium", StatusChangedAt: now.Add(-10 * time.Minute).Format(time.RFC3339)},
 	}
 	sortByStatusAge(sessions)
+
 	if sessions[0].Name != "thrawn-old" || sessions[1].Name != "canny-medium" || sessions[2].Name != "braw-recent" {
 		t.Errorf("got order [%s, %s, %s], want [thrawn-old, canny-medium, braw-recent]",
 			sessions[0].Name, sessions[1].Name, sessions[2].Name)
@@ -3081,28 +3343,34 @@ func TestSortByStatusAge(t *testing.T) {
 
 func TestViewModeCycling(t *testing.T) {
 	v := viewAll
+
 	v = v.next()
 	if v != viewNeedsAttention {
 		t.Errorf("All.next() = %d, want viewNeedsAttention", v)
 	}
+
 	v = v.next()
 	if v != viewActive {
 		t.Errorf("NeedsAttention.next() = %d, want viewActive", v)
 	}
+
 	v = v.next()
 	if v != viewStarred {
 		t.Errorf("Active.next() = %d, want viewStarred", v)
 	}
+
 	v = v.next()
 	if v != viewScenario {
 		t.Errorf("Starred.next() = %d, want viewScenario", v)
 	}
+
 	v = v.next()
 	if v != viewAll {
 		t.Errorf("Scenario.next() = %d, want viewAll (wrap)", v)
 	}
 
 	v = viewAll
+
 	v = v.prev()
 	if v != viewScenario {
 		t.Errorf("All.prev() = %d, want viewScenario (wrap)", v)
@@ -3111,7 +3379,9 @@ func TestViewModeCycling(t *testing.T) {
 
 func TestOverlay_RightArrowCyclesView(t *testing.T) {
 	m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil, nil)
+
 	var updated tea.Model
+
 	updated, _ = sendWindowSize(m, 120, 40)
 
 	om := asOverlay(updated)
@@ -3120,30 +3390,35 @@ func TestOverlay_RightArrowCyclesView(t *testing.T) {
 	}
 
 	updated, _ = sendKey(updated, "right")
+
 	om = asOverlay(updated)
 	if om.view != viewNeedsAttention {
 		t.Errorf("after right: view = %d, want viewNeedsAttention", om.view)
 	}
 
 	updated, _ = sendKey(updated, "right")
+
 	om = asOverlay(updated)
 	if om.view != viewActive {
 		t.Errorf("after 2x right: view = %d, want viewActive", om.view)
 	}
 
 	updated, _ = sendKey(updated, "right")
+
 	om = asOverlay(updated)
 	if om.view != viewStarred {
 		t.Errorf("after 3x right: view = %d, want viewStarred", om.view)
 	}
 
 	updated, _ = sendKey(updated, "right")
+
 	om = asOverlay(updated)
 	if om.view != viewScenario {
 		t.Errorf("after 4x right: view = %d, want viewScenario", om.view)
 	}
 
 	updated, _ = sendKey(updated, "right")
+
 	om = asOverlay(updated)
 	if om.view != viewAll {
 		t.Errorf("after 5x right: view = %d, want viewAll (wrap)", om.view)
@@ -3152,10 +3427,13 @@ func TestOverlay_RightArrowCyclesView(t *testing.T) {
 
 func TestOverlay_LeftArrowCyclesViewBackward(t *testing.T) {
 	m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil, nil)
+
 	var updated tea.Model
+
 	updated, _ = sendWindowSize(m, 120, 40)
 
 	updated, _ = sendKey(updated, "left")
+
 	om := asOverlay(updated)
 	if om.view != viewScenario {
 		t.Errorf("after left from All: view = %d, want viewScenario (wrap)", om.view)
@@ -3173,18 +3451,22 @@ func TestOverlay_NeedsAttentionFiltersCorrectly(t *testing.T) {
 			CreatedAt: time.Now().Format(time.RFC3339)},
 	}
 	m := newOverlayModel(sessions, "", nil, nil, nil, nil)
+
 	var updated tea.Model
+
 	updated, _ = sendWindowSize(m, 120, 40)
 
 	updated, _ = sendKey(updated, "right")
 	om := asOverlay(updated)
 
 	sessionCount := 0
+
 	for _, item := range om.list.Items() {
 		if _, ok := item.(sessionItem); ok {
 			sessionCount++
 		}
 	}
+
 	if sessionCount != 1 {
 		t.Errorf("needs attention view has %d sessions, want 1", sessionCount)
 	}
@@ -3200,7 +3482,9 @@ func TestOverlay_ActiveViewShowsOnlyRunning(t *testing.T) {
 			CreatedAt: time.Now().Add(-10 * time.Minute).Format(time.RFC3339)},
 	}
 	m := newOverlayModel(sessions, "", nil, nil, nil, nil)
+
 	var updated tea.Model
+
 	updated, _ = sendWindowSize(m, 120, 40)
 
 	updated, _ = sendKey(updated, "right")
@@ -3208,11 +3492,13 @@ func TestOverlay_ActiveViewShowsOnlyRunning(t *testing.T) {
 	om := asOverlay(updated)
 
 	sessionCount := 0
+
 	for _, item := range om.list.Items() {
 		if _, ok := item.(sessionItem); ok {
 			sessionCount++
 		}
 	}
+
 	if sessionCount != 2 {
 		t.Errorf("active view has %d sessions, want 2", sessionCount)
 	}
@@ -3229,11 +3515,14 @@ func TestOverlay_FilterRespectsView(t *testing.T) {
 			CreatedAt:       time.Now().Format(time.RFC3339),
 			StatusChangedAt: time.Now().Format(time.RFC3339)},
 	}
+
 	var updated tea.Model
+
 	updated, _ = sendWindowSize(newOverlayModel(sessions, "", nil, nil, nil, nil), 120, 40)
 
 	// Switch to Needs Attention
 	updated, _ = sendKey(updated, "right")
+
 	om := asOverlay(updated)
 	if om.view != viewNeedsAttention {
 		t.Fatalf("view = %d, want viewNeedsAttention", om.view)
@@ -3247,6 +3536,7 @@ func TestOverlay_FilterRespectsView(t *testing.T) {
 
 	om = asOverlay(updated)
 	sessionCount := 0
+
 	for _, item := range om.list.Items() {
 		if _, ok := item.(sessionItem); ok {
 			sessionCount++
@@ -3266,7 +3556,9 @@ func TestOverlay_FilterEscRebuildsView(t *testing.T) {
 			CreatedAt:       time.Now().Format(time.RFC3339),
 			StatusChangedAt: time.Now().Format(time.RFC3339)},
 	}
+
 	var updated tea.Model
+
 	updated, _ = sendWindowSize(newOverlayModel(sessions, "", nil, nil, nil, nil), 120, 40)
 
 	// Switch to Needs Attention
@@ -3282,12 +3574,15 @@ func TestOverlay_FilterEscRebuildsView(t *testing.T) {
 	if om.view != viewNeedsAttention {
 		t.Errorf("view = %d after filter cancel, want viewNeedsAttention", om.view)
 	}
+
 	sessionCount := 0
+
 	for _, item := range om.list.Items() {
 		if _, ok := item.(sessionItem); ok {
 			sessionCount++
 		}
 	}
+
 	if sessionCount != 1 {
 		t.Errorf("after filter cancel: %d sessions, want 1 (only thrawn-blocked)", sessionCount)
 	}
@@ -3299,14 +3594,18 @@ func TestOverlay_EmptyNeedsAttentionView(t *testing.T) {
 			CreatedAt: time.Now().Format(time.RFC3339)},
 	}
 	m := newOverlayModel(sessions, "", nil, nil, nil, nil)
+
 	var updated tea.Model
+
 	updated, _ = sendWindowSize(m, 120, 40)
 
 	updated, _ = sendKey(updated, "right")
+
 	om := asOverlay(updated)
 	if om.view != viewNeedsAttention {
 		t.Fatalf("view = %d, want viewNeedsAttention", om.view)
 	}
+
 	if len(om.list.Items()) != 0 {
 		t.Errorf("expected empty list for needs attention view, got %d items", len(om.list.Items()))
 	}
@@ -3329,14 +3628,17 @@ func TestAssignSessionIndices(t *testing.T) {
 
 	want := []int{1, 2, 3}
 	got := []int{}
+
 	for _, item := range items {
 		if si, ok := item.(sessionItem); ok {
 			got = append(got, si.sessionIndex)
 		}
 	}
+
 	if len(got) != len(want) {
 		t.Fatalf("got %d indices, want %d", len(got), len(want))
 	}
+
 	for i, w := range want {
 		if got[i] != w {
 			t.Errorf("session %d: index = %d, want %d", i, got[i], w)
@@ -3359,12 +3661,14 @@ func TestOverlay_NumberKeySelectsSession(t *testing.T) {
 
 	// First session should be the first sessionItem (after group header).
 	var firstSession string
+
 	for _, item := range asOverlay(sized).list.Items() {
 		if si, ok := item.(sessionItem); ok {
 			firstSession = si.info.ID
 			break
 		}
 	}
+
 	if om.selected.ID != firstSession {
 		t.Errorf("selected session = %q, want %q", om.selected.ID, firstSession)
 	}
@@ -3387,7 +3691,9 @@ func TestOverlay_NumberKeyZeroSelectsTenth(t *testing.T) {
 	sm := asOverlay(sized)
 
 	idx := 0
+
 	var tenthID string
+
 	for _, item := range sm.list.Items() {
 		if si, ok := item.(sessionItem); ok {
 			idx++
@@ -3397,15 +3703,18 @@ func TestOverlay_NumberKeyZeroSelectsTenth(t *testing.T) {
 			}
 		}
 	}
+
 	if tenthID == "" {
 		t.Fatal("could not find 10th session in list")
 	}
 
 	updated, _ := sendKey(sm, "0")
+
 	om := asOverlay(updated)
 	if om.selected == nil {
 		t.Fatal("expected a session to be selected after pressing 0")
 	}
+
 	if om.selected.ID != tenthID {
 		t.Errorf("selected = %q, want %q (10th session)", om.selected.ID, tenthID)
 	}
@@ -3428,7 +3737,9 @@ func TestOverlay_ShiftNumberSelectsEleventhPlus(t *testing.T) {
 	sm := asOverlay(sized)
 
 	idx := 0
+
 	var eleventhID string
+
 	for _, item := range sm.list.Items() {
 		if si, ok := item.(sessionItem); ok {
 			idx++
@@ -3438,15 +3749,18 @@ func TestOverlay_ShiftNumberSelectsEleventhPlus(t *testing.T) {
 			}
 		}
 	}
+
 	if eleventhID == "" {
 		t.Fatal("could not find 11th session in list")
 	}
 
 	updated, _ := sendKey(sm, "!")
+
 	om := asOverlay(updated)
 	if om.selected == nil {
 		t.Fatal("expected a session to be selected after pressing shift+1")
 	}
+
 	if om.selected.ID != eleventhID {
 		t.Errorf("selected = %q, want %q (11th session)", om.selected.ID, eleventhID)
 	}
@@ -3458,6 +3772,7 @@ func TestOverlay_NumberKeyOutOfRangeDoesNothing(t *testing.T) {
 	sized, _ := sendWindowSize(m, 200, 50)
 
 	updated, _ := sendKey(asOverlay(sized), "5")
+
 	om := asOverlay(updated)
 	if om.selected != nil {
 		t.Error("expected no selection when pressing number beyond session count")
@@ -3537,6 +3852,7 @@ func TestOverlay_FilteredViewNumberKey(t *testing.T) {
 	if om.selected == nil {
 		t.Fatal("expected a session to be selected after filtering + enter")
 	}
+
 	if om.selected.ID != "s-neep" {
 		t.Errorf("selected = %q, want %q (the filtered session)", om.selected.ID, "s-neep")
 	}
@@ -3548,6 +3864,7 @@ func TestOverlay_EmptyListNumberKey(t *testing.T) {
 	sized, _ := sendWindowSize(m, 200, 50)
 
 	updated, _ := sendKey(asOverlay(sized), "1")
+
 	om := asOverlay(updated)
 	if om.selected != nil {
 		t.Error("expected no selection when pressing number with zero sessions")
@@ -3582,13 +3899,16 @@ func TestOverlay_MoreThan20SessionsNoLabelBeyond(t *testing.T) {
 
 	// Pressing shift+1 ("!") should still select session 11, not wrap to 21.
 	updated, _ := sendKey(sm, "!")
+
 	om := asOverlay(updated)
 	if om.selected == nil {
 		t.Fatal("expected session 11 selected after pressing shift+1")
 	}
 
 	idx := 0
+
 	var eleventhID string
+
 	for _, item := range sm.list.Items() {
 		if si, ok := item.(sessionItem); ok {
 			idx++
@@ -3598,6 +3918,7 @@ func TestOverlay_MoreThan20SessionsNoLabelBeyond(t *testing.T) {
 			}
 		}
 	}
+
 	if om.selected.ID != eleventhID {
 		t.Errorf("selected = %q, want %q (11th session, not 21st)", om.selected.ID, eleventhID)
 	}
@@ -3642,6 +3963,7 @@ func TestColumnWidths_TotalWidthIncludesPR(t *testing.T) {
 	// proving the PR column is accounted for (the bug Claude/Codex caught).
 	a := columnWidths{name: 10, status: 6, summary: 7, git: 3, pr: 2, output: 6}
 	b := a
+
 	b.pr = 10
 	if b.totalWidth()-a.totalWidth() != 8 {
 		t.Errorf("totalWidth must grow by Δpr=8, got %d", b.totalWidth()-a.totalWidth())

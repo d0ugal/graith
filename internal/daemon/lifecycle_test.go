@@ -27,6 +27,7 @@ func TestTruncateToBytes(t *testing.T) {
 			if got != tt.expected {
 				t.Errorf("truncateToBytes(%q, %d) = %q, want %q", tt.input, tt.max, got, tt.expected)
 			}
+
 			if len(got) > tt.max {
 				t.Errorf("result %q exceeds max %d bytes", got, tt.max)
 			}
@@ -94,6 +95,7 @@ func TestTruncateWithContext(t *testing.T) {
 			if got != tt.expected {
 				t.Errorf("got %q, want %q", got, tt.expected)
 			}
+
 			if len(got) > tt.max {
 				t.Errorf("result %q exceeds max %d bytes", got, tt.max)
 			}
@@ -105,12 +107,15 @@ func TestApplyLifecycleSummaryLocked(t *testing.T) {
 	t.Run("sets fields", func(t *testing.T) {
 		s := &SessionState{}
 		applyLifecycleSummaryLocked(s, "Created by parent")
+
 		if s.SummaryText != "Created by parent" {
 			t.Errorf("SummaryText = %q, want %q", s.SummaryText, "Created by parent")
 		}
+
 		if s.SummarySetAt == nil {
 			t.Error("SummarySetAt should be set")
 		}
+
 		if s.SummaryTTL != 0 {
 			t.Errorf("SummaryTTL = %d, want 0", s.SummaryTTL)
 		}
@@ -119,9 +124,11 @@ func TestApplyLifecycleSummaryLocked(t *testing.T) {
 	t.Run("skips system sessions", func(t *testing.T) {
 		s := &SessionState{SystemKind: SystemKindOrchestrator}
 		applyLifecycleSummaryLocked(s, "Created by parent")
+
 		if s.SummaryText != "" {
 			t.Errorf("SummaryText = %q, should be empty for system session", s.SummaryText)
 		}
+
 		if s.SummarySetAt != nil {
 			t.Error("SummarySetAt should be nil for system session")
 		}
@@ -130,6 +137,7 @@ func TestApplyLifecycleSummaryLocked(t *testing.T) {
 	t.Run("sanitizes control chars", func(t *testing.T) {
 		s := &SessionState{}
 		applyLifecycleSummaryLocked(s, "Created\x00by\x01parent")
+
 		if s.SummaryText != "Createdbyparent" {
 			t.Errorf("SummaryText = %q, want %q", s.SummaryText, "Createdbyparent")
 		}
@@ -139,6 +147,7 @@ func TestApplyLifecycleSummaryLocked(t *testing.T) {
 		s := &SessionState{}
 		long := "Created by a session with a very long name that exceeds one hundred bytes when written out in full text format"
 		applyLifecycleSummaryLocked(s, long)
+
 		if len(s.SummaryText) > 100 {
 			t.Errorf("SummaryText length = %d, should be <= 100", len(s.SummaryText))
 		}

@@ -22,22 +22,28 @@ func TestCollectDescendantsIncludesRoot(t *testing.T) {
 	for _, id := range all {
 		found[id] = true
 	}
+
 	if !found["brae"] {
 		t.Error("collectDescendants should include root")
 	}
+
 	if !found["bairn1"] || !found["bairn2"] || !found["wee-bairn"] {
 		t.Error("collectDescendants should include all descendants")
 	}
+
 	rootIdx := -1
 	grandchildIdx := -1
+
 	for i, id := range all {
 		if id == "brae" {
 			rootIdx = i
 		}
+
 		if id == "wee-bairn" {
 			grandchildIdx = i
 		}
 	}
+
 	if grandchildIdx > rootIdx {
 		t.Error("grandchild should come before root (leaf-first)")
 	}
@@ -53,6 +59,7 @@ func TestFilterExcludeRoot(t *testing.T) {
 			t.Error("filterExcludeRoot should remove root")
 		}
 	}
+
 	if len(filtered) != 3 {
 		t.Errorf("expected 3 items, got %d", len(filtered))
 	}

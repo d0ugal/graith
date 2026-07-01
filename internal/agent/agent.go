@@ -20,6 +20,7 @@ func Detected() bool {
 			return false
 		}
 	}
+
 	return agentDetected
 }
 
@@ -49,5 +50,6 @@ func detect(lookupEnv func(string) (string, bool)) bool {
 			return true
 		}
 	}
+
 	return false
 }

@@ -19,6 +19,7 @@ func validateModel(agent config.Agent, model string) error {
 	if len(parts) == 0 {
 		return nil
 	}
+
 	bin, lookErr := exec.LookPath(parts[0])
 	if lookErr != nil {
 		return fmt.Errorf("validate model: cannot resolve %q: %w", parts[0], lookErr)
@@ -26,28 +27,36 @@ func validateModel(agent config.Agent, model string) error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+
 	cmd := exec.CommandContext(ctx, bin, parts[1:]...)
+
 	var stderr strings.Builder
+
 	cmd.Stderr = &stderr
+
 	out, err := cmd.Output()
 	if err != nil {
 		msg := fmt.Sprintf("validate model: %s failed: %v", bin, err)
 		if s := strings.TrimSpace(stderr.String()); s != "" {
 			msg += "\n" + s
 		}
+
 		return fmt.Errorf("%s", msg)
 	}
 
 	var valid []string
+
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
+
 		before, _, ok := strings.Cut(line, " - ")
 		if !ok {
 			continue
 		}
+
 		if id := strings.TrimSpace(before); id != "" {
 			valid = append(valid, id)
 		}

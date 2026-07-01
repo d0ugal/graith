@@ -71,16 +71,20 @@ func TestSendNotification_CommandUsesEnvVars(t *testing.T) {
 	sm.sendNotification("braw-kirk", "approval", sm.cfg.Notifications.Command)
 
 	deadline := time.After(5 * time.Second)
+
 	for {
 		data, err := os.ReadFile(outFile)
 		if err == nil && len(data) > 0 {
 			got := string(data)
+
 			want := "braw-kirk|approval|braw-kirk needs approval"
 			if got != want {
 				t.Errorf("got %q, want %q", got, want)
 			}
+
 			return
 		}
+
 		select {
 		case <-deadline:
 			t.Fatal("timed out waiting for notification command output")
@@ -119,6 +123,7 @@ func TestSendNotification_CommandInjectionPrevented(t *testing.T) {
 
 func TestOnAgentStatusChange_PublishesToMessageStore(t *testing.T) {
 	dir := t.TempDir()
+
 	ms, err := NewMsgStore(dir + "/test.db")
 	if err != nil {
 		t.Fatal(err)
@@ -141,9 +146,11 @@ func TestOnAgentStatusChange_PublishesToMessageStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if len(msgs) != 1 {
 		t.Fatalf("expected 1 message, got %d", len(msgs))
 	}
+
 	if msgs[0].SenderName != "braw-kirk" {
 		t.Errorf("expected sender_name 'braw-kirk', got %q", msgs[0].SenderName)
 	}

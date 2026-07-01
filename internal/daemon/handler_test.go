@@ -52,7 +52,9 @@ func newTestHarness(t *testing.T) *testHarness {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	t.Cleanup(func() { msgStore.Close() })
+
 	sm.messages = msgStore
 
 	clientConn, serverConn := net.Pipe()
@@ -70,6 +72,7 @@ func newTestHarness(t *testing.T) *testHarness {
 
 	go func() {
 		defer close(h.done)
+
 		HandleConnection(ctx, serverConn, sm, log)
 	}()
 
@@ -85,10 +88,12 @@ func newTestHarness(t *testing.T) *testHarness {
 
 func (h *testHarness) sendControl(t *testing.T, msgType string, payload any) {
 	t.Helper()
+
 	data, err := protocol.EncodeControl(msgType, payload)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if err := h.writer.WriteFrame(protocol.ChannelControl, data); err != nil {
 		t.Fatal(err)
 	}
@@ -96,16 +101,19 @@ func (h *testHarness) sendControl(t *testing.T, msgType string, payload any) {
 
 func (h *testHarness) readControlMsg(t *testing.T) protocol.Envelope {
 	t.Helper()
+
 	for {
 		frame, err := h.reader.ReadFrame()
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		if frame.Channel == protocol.ChannelControl {
 			env, err := protocol.DecodeControl(frame.Payload)
 			if err != nil {
 				t.Fatal(err)
 			}
+
 			return env
 		}
 	}
@@ -113,11 +121,14 @@ func (h *testHarness) readControlMsg(t *testing.T) protocol.Envelope {
 
 func (h *testHarness) readControlMsgTimeout(t *testing.T, timeout time.Duration) (protocol.Envelope, bool) {
 	t.Helper()
+
 	type result struct {
 		env protocol.Envelope
 		err error
 	}
+
 	ch := make(chan result, 1)
+
 	go func() {
 		for {
 			frame, err := h.reader.ReadFrame()
@@ -125,18 +136,22 @@ func (h *testHarness) readControlMsgTimeout(t *testing.T, timeout time.Duration)
 				ch <- result{err: err}
 				return
 			}
+
 			if frame.Channel == protocol.ChannelControl {
 				env, err := protocol.DecodeControl(frame.Payload)
 				ch <- result{env: env, err: err}
+
 				return
 			}
 		}
 	}()
+
 	select {
 	case r := <-ch:
 		if r.err != nil {
 			t.Fatal(r.err)
 		}
+
 		return r.env, true
 	case <-time.After(timeout):
 		return protocol.Envelope{}, false
@@ -146,7 +161,9 @@ func (h *testHarness) readControlMsgTimeout(t *testing.T, timeout time.Duration)
 // addFakeSession adds a session to state and creates a PTY running `sleep`.
 func (h *testHarness) addPTYSession(t *testing.T, id, name string) {
 	t.Helper()
+
 	logPath := filepath.Join(h.sm.paths.LogDir, id+".log")
+
 	sess, err := grpty.NewSession(grpty.SessionOpts{
 		ID:      id,
 		Command: "sleep",
@@ -159,6 +176,7 @@ func (h *testHarness) addPTYSession(t *testing.T, id, name string) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	t.Cleanup(func() {
 		h.cancel()
 		h.conn.Close()
@@ -194,8 +212,10 @@ func TestHandshake(t *testing.T) {
 	if env.Type != "handshake_ok" {
 		t.Fatalf("expected handshake_ok, got %q", env.Type)
 	}
+
 	var ok protocol.HandshakeOkMsg
 	protocol.DecodePayload(env, &ok)
+
 	if ok.Version != protocol.Version {
 		t.Errorf("version = %q, want %q", ok.Version, protocol.Version)
 	}
@@ -215,13 +235,16 @@ func TestHandshakeVersionMismatch(t *testing.T) {
 	if env.Type != "handshake_err" {
 		t.Fatalf("expected handshake_err, got %q", env.Type)
 	}
+
 	var errMsg protocol.HandshakeErrMsg
 	if err := protocol.DecodePayload(env, &errMsg); err != nil {
 		t.Fatal(err)
 	}
+
 	if !strings.Contains(errMsg.Reason, "protocol version mismatch") {
 		t.Errorf("reason = %q, want it to mention protocol version mismatch", errMsg.Reason)
 	}
+
 	if !strings.Contains(errMsg.Reason, "999.0") || !strings.Contains(errMsg.Reason, protocol.Version) {
 		t.Errorf("reason = %q, want it to mention both versions", errMsg.Reason)
 	}
@@ -270,8 +293,10 @@ func TestMalformedControlMessage(t *testing.T) {
 	if env.Type != "error" {
 		t.Fatalf("expected error, got %q", env.Type)
 	}
+
 	var errMsg protocol.ErrorMsg
 	protocol.DecodePayload(env, &errMsg)
+
 	if errMsg.Message != "malformed message" {
 		t.Errorf("error message = %q", errMsg.Message)
 	}
@@ -297,8 +322,10 @@ func TestListSessions(t *testing.T) {
 	if env.Type != "session_list" {
 		t.Fatalf("expected session_list, got %q", env.Type)
 	}
+
 	var list protocol.SessionListMsg
 	protocol.DecodePayload(env, &list)
+
 	if len(list.Sessions) != 2 {
 		t.Errorf("expected 2 sessions, got %d", len(list.Sessions))
 	}
@@ -313,8 +340,10 @@ func TestListSessionsEmpty(t *testing.T) {
 	if env.Type != "session_list" {
 		t.Fatalf("expected session_list, got %q", env.Type)
 	}
+
 	var list protocol.SessionListMsg
 	protocol.DecodePayload(env, &list)
+
 	if len(list.Sessions) != 0 {
 		t.Errorf("expected 0 sessions, got %d", len(list.Sessions))
 	}
@@ -410,6 +439,7 @@ func TestRenameSession(t *testing.T) {
 	h.sm.mu.RLock()
 	name := h.sm.state.Sessions["auld1"].Name
 	h.sm.mu.RUnlock()
+
 	if name != "bonnie-kirk" {
 		t.Errorf("name = %q, want %q", name, "bonnie-kirk")
 	}
@@ -485,6 +515,7 @@ func TestResizeWhileAttached(t *testing.T) {
 	h.readControlMsg(t) // handshake_ok
 
 	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "braw-rsz"})
+
 	env := h.readControlMsg(t)
 	if env.Type != "attached" {
 		t.Fatalf("expected attached, got %q", env.Type)
@@ -495,6 +526,7 @@ func TestResizeWhileAttached(t *testing.T) {
 	// Resize doesn't send a response, so we verify by sending another command
 	// and confirming the handler is still alive.
 	h.sendControl(t, "list", struct{}{})
+
 	env = h.readControlMsg(t)
 	if env.Type != "session_list" {
 		t.Fatalf("expected session_list, got %q", env.Type)
@@ -509,6 +541,7 @@ func TestResizeWithoutAttach(t *testing.T) {
 
 	// Confirm handler is still alive
 	h.sendControl(t, "list", struct{}{})
+
 	env := h.readControlMsg(t)
 	if env.Type != "session_list" {
 		t.Fatalf("expected session_list after no-op resize, got %q", env.Type)
@@ -520,18 +553,22 @@ func TestAttachAndDetach(t *testing.T) {
 	h.addPTYSession(t, "braw-att", "bonnie-attach")
 
 	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "braw-att"})
+
 	env := h.readControlMsg(t)
 	if env.Type != "attached" {
 		t.Fatalf("expected attached, got %q", env.Type)
 	}
 
 	h.sendControl(t, "detach", struct{}{})
+
 	env = h.readControlMsg(t)
 	if env.Type != "detached" {
 		t.Fatalf("expected detached, got %q", env.Type)
 	}
+
 	var detached protocol.DetachedMsg
 	protocol.DecodePayload(env, &detached)
+
 	if detached.Reason != "user" {
 		t.Errorf("reason = %q, want %q", detached.Reason, "user")
 	}
@@ -586,6 +623,7 @@ func TestDataChannelForwarding(t *testing.T) {
 
 	// Confirm handler is still processing
 	h.sendControl(t, "list", struct{}{})
+
 	env := h.readControlMsg(t)
 	if env.Type != "session_list" {
 		t.Fatalf("expected session_list, got %q", env.Type)
@@ -601,6 +639,7 @@ func TestDataChannelWithoutAttach(t *testing.T) {
 	}
 
 	h.sendControl(t, "list", struct{}{})
+
 	env := h.readControlMsg(t)
 	if env.Type != "session_list" {
 		t.Fatalf("expected session_list, got %q", env.Type)
@@ -739,8 +778,10 @@ func TestScreenPreview(t *testing.T) {
 	if env.Type != "screen_preview_response" {
 		t.Fatalf("expected screen_preview_response, got %q", env.Type)
 	}
+
 	var resp protocol.ScreenPreviewResponseMsg
 	protocol.DecodePayload(env, &resp)
+
 	if resp.SessionID != "braw-sp" {
 		t.Errorf("session_id = %q, want %q", resp.SessionID, "braw-sp")
 	}
@@ -779,11 +820,14 @@ func TestScreenSnapshot(t *testing.T) {
 	if env.Type != "screen_snapshot_response" {
 		t.Fatalf("expected screen_snapshot_response, got %q", env.Type)
 	}
+
 	var resp protocol.ScreenSnapshotResponseMsg
 	protocol.DecodePayload(env, &resp)
+
 	if resp.SessionID != "braw-ss" {
 		t.Errorf("session_id = %q, want %q", resp.SessionID, "braw-ss")
 	}
+
 	if resp.Cols == 0 || resp.Rows == 0 {
 		t.Error("expected non-zero cols/rows")
 	}
@@ -865,8 +909,10 @@ func TestUpgradeAlreadyInProgress(t *testing.T) {
 	if env.Type != "error" {
 		t.Fatalf("expected error, got %q", env.Type)
 	}
+
 	var errMsg protocol.ErrorMsg
 	protocol.DecodePayload(env, &errMsg)
+
 	if errMsg.Message != "upgrade already in progress" {
 		t.Errorf("error message = %q", errMsg.Message)
 	}
@@ -893,11 +939,14 @@ func TestMsgPub(t *testing.T) {
 	if env.Type != "msg_published" {
 		t.Fatalf("expected msg_published, got %q", env.Type)
 	}
+
 	var msg Message
 	protocol.DecodePayload(env, &msg)
+
 	if msg.Body != "braw day" {
 		t.Errorf("body = %q", msg.Body)
 	}
+
 	if msg.Stream != "blether-topic" {
 		t.Errorf("stream = %q", msg.Stream)
 	}
@@ -922,18 +971,22 @@ func TestMsgPubInboxNotifiesTarget(t *testing.T) {
 	// The daemon injects the notification asynchronously. Give the goroutine
 	// and PTY write a moment to propagate.
 	time.Sleep(200 * time.Millisecond)
+
 	ptySess, ok := h.sm.GetPTY("bonnie-target")
 	if !ok {
 		t.Fatal("target PTY session not found")
 	}
+
 	tail, err := ptySess.Scrollback.Tail(500)
 	if err != nil {
 		t.Fatalf("scrollback tail: %v", err)
 	}
+
 	scrollback := string(tail)
 	if !strings.Contains(scrollback, "New message from Ailsa") {
 		t.Errorf("notification not found in scrollback; got:\n%s", scrollback)
 	}
+
 	if !strings.Contains(scrollback, "gr msg inbox --all --ack") {
 		t.Errorf("notification should reference gr msg inbox command; got:\n%s", scrollback)
 	}
@@ -957,14 +1010,17 @@ func TestMsgPubInboxQuietSuppressesNotification(t *testing.T) {
 	}
 
 	time.Sleep(100 * time.Millisecond)
+
 	ptySess, ok := h.sm.GetPTY("wheesht1")
 	if !ok {
 		t.Fatal("target PTY session not found")
 	}
+
 	tail, err := ptySess.Scrollback.Tail(500)
 	if err != nil {
 		t.Fatalf("scrollback tail: %v", err)
 	}
+
 	if strings.Contains(string(tail), "New message from Hamish") {
 		t.Error("notification should not appear when Quiet=true")
 	}
@@ -997,8 +1053,10 @@ func TestMsgSubReadAll(t *testing.T) {
 	if env.Type != "msg_message" {
 		t.Fatalf("expected msg_message, got %q", env.Type)
 	}
+
 	var m1 Message
 	protocol.DecodePayload(env, &m1)
+
 	if m1.Body != "neep1" {
 		t.Errorf("first message body = %q", m1.Body)
 	}
@@ -1059,10 +1117,12 @@ func TestMsgSubOnlyUnreadWithAck(t *testing.T) {
 	if env.Type != "msg_message" {
 		t.Fatalf("first sub: expected msg_message, got %q", env.Type)
 	}
+
 	env = h.readControlMsg(t)
 	if env.Type != "msg_message" {
 		t.Fatalf("first sub: expected second msg_message, got %q", env.Type)
 	}
+
 	env = h.readControlMsg(t)
 	if env.Type != "msg_done" {
 		t.Fatalf("first sub: expected msg_done, got %q", env.Type)
@@ -1138,6 +1198,7 @@ func TestMsgSubWaitForNewMessage(t *testing.T) {
 	if !ok {
 		t.Fatal("timed out waiting for msg_message")
 	}
+
 	if env.Type != "msg_message" {
 		t.Fatalf("expected msg_message, got %q", env.Type)
 	}
@@ -1146,6 +1207,7 @@ func TestMsgSubWaitForNewMessage(t *testing.T) {
 	if !ok {
 		t.Fatal("timed out waiting for msg_done")
 	}
+
 	if env.Type != "msg_done" {
 		t.Fatalf("expected msg_done, got %q", env.Type)
 	}
@@ -1196,6 +1258,7 @@ func TestMsgTopics(t *testing.T) {
 		Streams []StreamInfo `json:"streams"`
 	}
 	protocol.DecodePayload(env, &resp)
+
 	if len(resp.Streams) != 2 {
 		t.Errorf("expected 2 streams, got %d", len(resp.Streams))
 	}
@@ -1219,6 +1282,7 @@ func TestAttachReplacesExistingClient(t *testing.T) {
 
 	// First client attaches
 	h1.sendControl(t, "attach", protocol.AttachMsg{SessionID: "braw-repl"})
+
 	env := h1.readControlMsg(t)
 	if env.Type != "attached" {
 		t.Fatalf("expected attached, got %q", env.Type)
@@ -1227,12 +1291,14 @@ func TestAttachReplacesExistingClient(t *testing.T) {
 	// Start reading from h1 in the background before second client attaches.
 	// net.Pipe is synchronous, so the kick write blocks until we read.
 	detachedCh := make(chan protocol.Envelope, 1)
+
 	go func() {
 		for {
 			frame, err := h1.reader.ReadFrame()
 			if err != nil {
 				return
 			}
+
 			if frame.Channel == protocol.ChannelControl {
 				env, _ := protocol.DecodeControl(frame.Payload)
 				if env.Type == "detached" {
@@ -1251,6 +1317,7 @@ func TestAttachReplacesExistingClient(t *testing.T) {
 
 	go func() {
 		defer close(done2)
+
 		HandleConnection(ctx2, serverConn2, h1.sm, log)
 	}()
 
@@ -1266,6 +1333,7 @@ func TestAttachReplacesExistingClient(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		if frame.Channel == protocol.ChannelControl {
 			env2, _ := protocol.DecodeControl(frame.Payload)
 			if env2.Type == "attached" {
@@ -1279,6 +1347,7 @@ func TestAttachReplacesExistingClient(t *testing.T) {
 	case env := <-detachedCh:
 		var detached protocol.DetachedMsg
 		protocol.DecodePayload(env, &detached)
+
 		if detached.Reason != "replaced" {
 			t.Errorf("reason = %q, want %q", detached.Reason, "replaced")
 		}
@@ -1301,6 +1370,7 @@ func TestConcurrentAttachDetach(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+
 			clientConn, serverConn := net.Pipe()
 			ctx, cancel := context.WithCancel(context.Background())
 			log := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -1308,6 +1378,7 @@ func TestConcurrentAttachDetach(t *testing.T) {
 			done := make(chan struct{})
 			go func() {
 				defer close(done)
+
 				HandleConnection(ctx, serverConn, h.sm, log)
 			}()
 
@@ -1323,6 +1394,7 @@ func TestConcurrentAttachDetach(t *testing.T) {
 				if err != nil {
 					break
 				}
+
 				if frame.Channel == protocol.ChannelControl {
 					env, _ := protocol.DecodeControl(frame.Payload)
 					if env.Type == "attached" || env.Type == "detached" {
@@ -1337,6 +1409,7 @@ func TestConcurrentAttachDetach(t *testing.T) {
 			<-done
 		}()
 	}
+
 	wg.Wait()
 }
 
@@ -1351,6 +1424,7 @@ func TestConnectionCloseWhileAttached(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
+
 		HandleConnection(ctx, serverConn, h.sm, log)
 	}()
 
@@ -1366,6 +1440,7 @@ func TestConnectionCloseWhileAttached(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		if frame.Channel == protocol.ChannelControl {
 			env, _ := protocol.DecodeControl(frame.Payload)
 			if env.Type == "attached" {
@@ -1404,6 +1479,7 @@ func TestContextCancellation(t *testing.T) {
 
 	msgStore, _ := NewMsgStore(paths.MessagesDB)
 	defer msgStore.Close()
+
 	sm.messages = msgStore
 
 	clientConn, serverConn := net.Pipe()
@@ -1412,6 +1488,7 @@ func TestContextCancellation(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
+
 		HandleConnection(ctx, serverConn, sm, log)
 	}()
 
@@ -1432,6 +1509,7 @@ func TestContextCancellation(t *testing.T) {
 
 func TestSafeFrameWriter(t *testing.T) {
 	var buf bytes.Buffer
+
 	inner := protocol.NewFrameWriter(&buf)
 	safe := &safeFrameWriter{writer: inner}
 
@@ -1440,10 +1518,12 @@ func TestSafeFrameWriter(t *testing.T) {
 	}
 
 	reader := protocol.NewFrameReader(&buf)
+
 	frame, err := reader.ReadFrame()
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if frame.Channel != protocol.ChannelData || string(frame.Payload) != "hello" {
 		t.Errorf("got channel=%d payload=%q", frame.Channel, frame.Payload)
 	}
@@ -1451,6 +1531,7 @@ func TestSafeFrameWriter(t *testing.T) {
 
 func TestSafeFrameWriterConcurrent(t *testing.T) {
 	var buf bytes.Buffer
+
 	inner := protocol.NewFrameWriter(&buf)
 	safe := &safeFrameWriter{writer: inner}
 
@@ -1459,14 +1540,17 @@ func TestSafeFrameWriterConcurrent(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+
 			safe.WriteFrame(protocol.ChannelData, []byte("concurrent"))
 		}()
 	}
+
 	wg.Wait()
 }
 
 func TestFrameDataWriter(t *testing.T) {
 	var buf bytes.Buffer
+
 	inner := protocol.NewFrameWriter(&buf)
 	safe := &safeFrameWriter{writer: inner}
 	fdw := &frameDataWriter{writer: safe}
@@ -1475,15 +1559,18 @@ func TestFrameDataWriter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if n != 9 {
 		t.Errorf("Write returned %d, want 9", n)
 	}
 
 	reader := protocol.NewFrameReader(&buf)
+
 	frame, err := reader.ReadFrame()
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if frame.Channel != protocol.ChannelData || string(frame.Payload) != "test data" {
 		t.Errorf("got channel=%d payload=%q", frame.Channel, frame.Payload)
 	}
@@ -1505,8 +1592,10 @@ func TestMsgSubFollowThreadFilter(t *testing.T) {
 	if env.Type != "msg_message" {
 		t.Fatalf("expected msg_message, got %q", env.Type)
 	}
+
 	var msg Message
 	protocol.DecodePayload(env, &msg)
+
 	if msg.ThreadID != "thread-1" {
 		t.Errorf("thread_id = %q, want %q", msg.ThreadID, "thread-1")
 	}
@@ -1532,11 +1621,14 @@ func TestMsgPubWithThread(t *testing.T) {
 	if env.Type != "msg_published" {
 		t.Fatalf("expected msg_published, got %q", env.Type)
 	}
+
 	var msg Message
 	protocol.DecodePayload(env, &msg)
+
 	if msg.ThreadID != "thread-1" {
 		t.Errorf("thread_id = %q", msg.ThreadID)
 	}
+
 	if msg.ReplyTo != "msg_abc" {
 		t.Errorf("reply_to = %q", msg.ReplyTo)
 	}
@@ -1567,8 +1659,10 @@ func TestMsgPubUsesCurrentNameAfterRename(t *testing.T) {
 	if env.Type != "msg_published" {
 		t.Fatalf("expected msg_published, got %q", env.Type)
 	}
+
 	var msg Message
 	protocol.DecodePayload(env, &msg)
+
 	if msg.SenderName != "new-name" {
 		t.Errorf("sender_name = %q, want %q", msg.SenderName, "new-name")
 	}
@@ -1580,6 +1674,7 @@ func TestKickedClientConnectionClosed(t *testing.T) {
 
 	// First client attaches
 	h1.sendControl(t, "attach", protocol.AttachMsg{SessionID: "scunner1"})
+
 	env := h1.readControlMsg(t)
 	if env.Type != "attached" {
 		t.Fatalf("expected attached, got %q", env.Type)
@@ -1588,6 +1683,7 @@ func TestKickedClientConnectionClosed(t *testing.T) {
 	// Read from h1 in background so the synchronous net.Pipe doesn't block
 	// the kick callback's WriteFrame.
 	h1ReadErr := make(chan error, 1)
+
 	go func() {
 		for {
 			_, err := h1.reader.ReadFrame()
@@ -1606,6 +1702,7 @@ func TestKickedClientConnectionClosed(t *testing.T) {
 
 	go func() {
 		defer close(done2)
+
 		HandleConnection(ctx2, serverConn2, h1.sm, log)
 	}()
 
@@ -1620,6 +1717,7 @@ func TestKickedClientConnectionClosed(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		if frame.Channel == protocol.ChannelControl {
 			env2, _ := protocol.DecodeControl(frame.Payload)
 			if env2.Type == "attached" {
@@ -1657,6 +1755,7 @@ func TestKickedClientInputRejected(t *testing.T) {
 
 	// Client A attaches
 	h1.sendControl(t, "attach", protocol.AttachMsg{SessionID: "thrawn1"})
+
 	env := h1.readControlMsg(t)
 	if env.Type != "attached" {
 		t.Fatalf("expected attached, got %q", env.Type)
@@ -1679,6 +1778,7 @@ func TestKickedClientInputRejected(t *testing.T) {
 	// Client B attaches, kicking client A.
 	clientB, serverB := net.Pipe()
 	ctxB, cancelB := context.WithCancel(context.Background())
+
 	doneB := make(chan struct{})
 	go func() { defer close(doneB); HandleConnection(ctxB, serverB, h1.sm, log) }()
 
@@ -1693,6 +1793,7 @@ func TestKickedClientInputRejected(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		if frame.Channel == protocol.ChannelControl {
 			env2, _ := protocol.DecodeControl(frame.Payload)
 			if env2.Type == "attached" {
@@ -1712,6 +1813,7 @@ func TestKickedClientInputRejected(t *testing.T) {
 	if h1.sm.IsAttachedClient("thrawn1", h1.serverConn) {
 		t.Error("client A should no longer be the attached client")
 	}
+
 	if !h1.sm.IsAttachedClient("thrawn1", serverB) {
 		t.Error("client B should be the attached client")
 	}
@@ -1729,6 +1831,7 @@ func TestAttachSetsLastAttachedAt(t *testing.T) {
 	before := time.Now().UTC()
 
 	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "braw-ts"})
+
 	env := h.readControlMsg(t)
 	if env.Type != "attached" {
 		t.Fatalf("expected attached, got %q", env.Type)
@@ -1737,11 +1840,13 @@ func TestAttachSetsLastAttachedAt(t *testing.T) {
 	h.sm.mu.RLock()
 	s := h.sm.state.Sessions["braw-ts"]
 	lastAttached := s.LastAttachedAt
+
 	h.sm.mu.RUnlock()
 
 	if lastAttached == nil {
 		t.Fatal("LastAttachedAt should be set after attach")
 	}
+
 	if lastAttached.Before(before) {
 		t.Error("LastAttachedAt is before the attach call")
 	}
@@ -1752,6 +1857,7 @@ func TestAttachPersistsLastAttachedAt(t *testing.T) {
 	h.addPTYSession(t, "bide-ts", "bide-timestamp")
 
 	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "bide-ts"})
+
 	env := h.readControlMsg(t)
 	if env.Type != "attached" {
 		t.Fatalf("expected attached, got %q", env.Type)
@@ -1774,9 +1880,11 @@ func TestAttachPersistsLastAttachedAt(t *testing.T) {
 	if !ok {
 		t.Fatal("session not found in reloaded state")
 	}
+
 	if s.LastAttachedAt == nil {
 		t.Fatal("LastAttachedAt not persisted to disk")
 	}
+
 	if !s.LastAttachedAt.Equal(*inMemory) {
 		t.Errorf("persisted LastAttachedAt %v != in-memory %v", s.LastAttachedAt, inMemory)
 	}
@@ -1820,6 +1928,7 @@ func TestNullPayloadRejected(t *testing.T) {
 				TerminalSize: [2]uint16{80, 24},
 				Cwd:          "/tmp",
 			})
+
 			env := h.readControlMsg(t)
 			if env.Type != "handshake_ok" {
 				t.Fatalf("handshake: got %q", env.Type)
@@ -1835,8 +1944,10 @@ func TestNullPayloadRejected(t *testing.T) {
 			if env.Type != "error" {
 				t.Fatalf("expected error for null %s payload, got %q", tt.msgType, env.Type)
 			}
+
 			var errMsg protocol.ErrorMsg
 			protocol.DecodePayload(env, &errMsg)
+
 			if errMsg.Message != tt.errText {
 				t.Errorf("error message = %q, want %q", errMsg.Message, tt.errText)
 			}
@@ -1851,6 +1962,7 @@ func TestAttachSwitchSession(t *testing.T) {
 
 	// Attach to first session
 	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "braw-sw1"})
+
 	env := h.readControlMsg(t)
 	if env.Type != "attached" {
 		t.Fatalf("expected attached, got %q", env.Type)
@@ -1858,6 +1970,7 @@ func TestAttachSwitchSession(t *testing.T) {
 
 	// Attach to second session (should detach from first)
 	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "braw-sw2"})
+
 	env = h.readControlMsg(t)
 	if env.Type != "attached" {
 		t.Fatalf("expected attached for second session, got %q", env.Type)
@@ -1865,6 +1978,7 @@ func TestAttachSwitchSession(t *testing.T) {
 
 	var info protocol.SessionInfo
 	protocol.DecodePayload(env, &info)
+
 	if info.ID != "braw-sw2" {
 		t.Errorf("attached to %q, want %q", info.ID, "braw-sw2")
 	}
@@ -1891,19 +2005,24 @@ func TestDiagnostics(t *testing.T) {
 	if env.Type != "diagnostics" {
 		t.Fatalf("expected diagnostics, got %q", env.Type)
 	}
+
 	var diag protocol.DiagnosticsMsg
 	if err := protocol.DecodePayload(env, &diag); err != nil {
 		t.Fatal(err)
 	}
+
 	if diag.DaemonPID == 0 {
 		t.Error("expected non-zero daemon PID")
 	}
+
 	if diag.DaemonUptime == "" {
 		t.Error("expected non-empty uptime")
 	}
+
 	if diag.Fleet.Total != 2 {
 		t.Errorf("fleet total = %d, want 2", diag.Fleet.Total)
 	}
+
 	if len(diag.Sessions) != 2 {
 		t.Errorf("session diagnostics = %d, want 2", len(diag.Sessions))
 	}
@@ -1926,13 +2045,16 @@ func TestDiagnosticsEmpty(t *testing.T) {
 	if env.Type != "diagnostics" {
 		t.Fatalf("expected diagnostics, got %q", env.Type)
 	}
+
 	var diag protocol.DiagnosticsMsg
 	if err := protocol.DecodePayload(env, &diag); err != nil {
 		t.Fatal(err)
 	}
+
 	if diag.Fleet.Total != 0 {
 		t.Errorf("fleet total = %d, want 0", diag.Fleet.Total)
 	}
+
 	if len(diag.Sessions) != 0 {
 		t.Errorf("session diagnostics = %d, want 0", len(diag.Sessions))
 	}
@@ -1940,19 +2062,24 @@ func TestDiagnosticsEmpty(t *testing.T) {
 
 func newTestHarnessWithConfig(t *testing.T, cfg *config.Config) *testHarness {
 	t.Helper()
+
 	tmpDir := os.TempDir()
+
 	dir, err := os.MkdirTemp(tmpDir, t.Name())
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	t.Cleanup(func() {
 		for range 5 {
 			if err := os.RemoveAll(dir); err == nil {
 				return
 			}
+
 			time.Sleep(50 * time.Millisecond)
 		}
 	})
+
 	paths := config.Paths{
 		StateFile:  filepath.Join(dir, "state.json"),
 		LogDir:     filepath.Join(dir, "logs"),
@@ -1970,7 +2097,9 @@ func newTestHarnessWithConfig(t *testing.T, cfg *config.Config) *testHarness {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	t.Cleanup(func() { msgStore.Close() })
+
 	sm.messages = msgStore
 
 	clientConn, serverConn := net.Pipe()
@@ -1988,6 +2117,7 @@ func newTestHarnessWithConfig(t *testing.T, cfg *config.Config) *testHarness {
 
 	go func() {
 		defer close(h.done)
+
 		HandleConnection(ctx, serverConn, sm, log)
 	}()
 
@@ -2024,6 +2154,7 @@ func TestAttachAutoResumesStoppedSession(t *testing.T) {
 	h.sm.mu.Unlock()
 
 	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "s1"})
+
 	env := h.readControlMsg(t)
 	if env.Type != "attached" {
 		t.Fatalf("expected attached after auto-resume, got %q", env.Type)
@@ -2031,6 +2162,7 @@ func TestAttachAutoResumesStoppedSession(t *testing.T) {
 
 	var info protocol.SessionInfo
 	protocol.DecodePayload(env, &info)
+
 	if info.Status != "running" {
 		t.Errorf("status = %q, want running", info.Status)
 	}
@@ -2069,6 +2201,7 @@ func TestAttachAutoResumesErroredSession(t *testing.T) {
 	h.sm.mu.Unlock()
 
 	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "s1"})
+
 	env := h.readControlMsg(t)
 	if env.Type != "attached" {
 		t.Fatalf("expected attached after auto-resume, got %q", env.Type)
@@ -2076,6 +2209,7 @@ func TestAttachAutoResumesErroredSession(t *testing.T) {
 
 	var info protocol.SessionInfo
 	protocol.DecodePayload(env, &info)
+
 	if info.Status != "running" {
 		t.Errorf("status = %q, want running", info.Status)
 	}
@@ -2105,12 +2239,15 @@ func TestAttachCreatingSessionReturnsStatusError(t *testing.T) {
 	h.sm.mu.Unlock()
 
 	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "s1"})
+
 	env := h.readControlMsg(t)
 	if env.Type != "error" {
 		t.Fatalf("expected error, got %q", env.Type)
 	}
+
 	var e protocol.ErrorMsg
 	protocol.DecodePayload(env, &e)
+
 	if !strings.Contains(e.Message, "being created") {
 		t.Errorf("error = %q, want it to mention 'being created'", e.Message)
 	}
@@ -2130,12 +2267,15 @@ func TestAttachDeletingSessionReturnsStatusError(t *testing.T) {
 	h.sm.mu.Unlock()
 
 	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "s1"})
+
 	env := h.readControlMsg(t)
 	if env.Type != "error" {
 		t.Fatalf("expected error, got %q", env.Type)
 	}
+
 	var e protocol.ErrorMsg
 	protocol.DecodePayload(env, &e)
+
 	if !strings.Contains(e.Message, "being deleted") {
 		t.Errorf("error = %q, want it to mention 'being deleted'", e.Message)
 	}
@@ -2151,6 +2291,7 @@ func TestResumeForInbox_SkipsNonStoppedSession(t *testing.T) {
 	if !ok {
 		t.Fatal("session should still exist")
 	}
+
 	if sess.Status != StatusRunning {
 		t.Errorf("status = %q, want %q — running sessions should not be affected", sess.Status, StatusRunning)
 	}
@@ -2190,10 +2331,12 @@ func TestResumeForInbox_AttemptsResumeForStoppedSession(t *testing.T) {
 
 func (h *testHarness) sendControlWithToken(t *testing.T, msgType string, payload any, token string) {
 	t.Helper()
+
 	data, err := protocol.EncodeControlWithToken(msgType, payload, token)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if err := h.writer.WriteFrame(protocol.ChannelControl, data); err != nil {
 		t.Fatal(err)
 	}
@@ -2228,8 +2371,10 @@ func TestMsgInboxReadUnread(t *testing.T) {
 	if env.Type != "msg_message" {
 		t.Fatalf("expected msg_message, got %q", env.Type)
 	}
+
 	var m Message
 	protocol.DecodePayload(env, &m)
+
 	if m.Body != "braw tidings" {
 		t.Errorf("body = %q, want %q", m.Body, "braw tidings")
 	}
@@ -2249,8 +2394,10 @@ func TestMsgInboxRequiresAuth(t *testing.T) {
 	if env.Type != "error" {
 		t.Fatalf("expected error, got %q", env.Type)
 	}
+
 	var e protocol.ErrorMsg
 	protocol.DecodePayload(env, &e)
+
 	if !strings.Contains(e.Message, "authenticated") {
 		t.Errorf("error = %q, want mention of 'authenticated'", e.Message)
 	}
@@ -2292,8 +2439,10 @@ func TestMsgSubRejectsInboxForAuthenticatedAgent(t *testing.T) {
 	if env.Type != "error" {
 		t.Fatalf("expected error, got %q", env.Type)
 	}
+
 	var e protocol.ErrorMsg
 	protocol.DecodePayload(env, &e)
+
 	if !strings.Contains(e.Message, "msg inbox") {
 		t.Errorf("error = %q, want mention of 'msg inbox'", e.Message)
 	}
@@ -2312,8 +2461,10 @@ func TestMsgAckRejectsInboxForAuthenticatedAgent(t *testing.T) {
 	if env.Type != "error" {
 		t.Fatalf("expected error, got %q", env.Type)
 	}
+
 	var e protocol.ErrorMsg
 	protocol.DecodePayload(env, &e)
+
 	if !strings.Contains(e.Message, "msg inbox") {
 		t.Errorf("error = %q, want mention of 'msg inbox'", e.Message)
 	}
@@ -2332,6 +2483,7 @@ func TestMsgTopicsFiltersInboxForAuthenticatedAgent(t *testing.T) {
 	if env.Type != "msg_topics_list" {
 		t.Fatalf("expected msg_topics_list, got %q", env.Type)
 	}
+
 	var resp struct {
 		Streams []StreamInfo `json:"streams"`
 	}
@@ -2342,17 +2494,21 @@ func TestMsgTopicsFiltersInboxForAuthenticatedAgent(t *testing.T) {
 			t.Errorf("inbox stream %q should be filtered from topics for authenticated agents", s.Name)
 		}
 	}
+
 	found := false
+
 	for _, s := range resp.Streams {
 		if s.Name == "blether-public" {
 			found = true
 		}
 	}
+
 	if !found {
 		names := make([]string, len(resp.Streams))
 		for i, s := range resp.Streams {
 			names[i] = s.Name
 		}
+
 		t.Errorf("expected blether-public in topics, got %v", names)
 	}
 }
@@ -2362,21 +2518,26 @@ func (h *testHarness) setParent(t *testing.T, id, parentID string) {
 	t.Helper()
 	h.sm.mu.Lock()
 	defer h.sm.mu.Unlock()
+
 	s, ok := h.sm.state.Sessions[id]
 	if !ok {
 		t.Fatalf("session %q not in state", id)
 	}
+
 	s.ParentID = parentID
 }
 
 func (h *testHarness) parentOf(t *testing.T, id string) string {
 	t.Helper()
+
 	h.sm.mu.RLock()
 	defer h.sm.mu.RUnlock()
+
 	s, ok := h.sm.state.Sessions[id]
 	if !ok {
 		t.Fatalf("session %q not in state", id)
 	}
+
 	return s.ParentID
 }
 
@@ -2399,11 +2560,14 @@ func TestUpdateRejectsUnauthorizedReparent(t *testing.T) {
 	if env.Type != "error" {
 		t.Fatalf("expected error, got %q", env.Type)
 	}
+
 	var e protocol.ErrorMsg
 	protocol.DecodePayload(env, &e)
+
 	if !strings.Contains(e.Message, "not authorized") {
 		t.Errorf("error = %q, want 'not authorized'", e.Message)
 	}
+
 	if got := h.parentOf(t, "scunner"); got != "" {
 		t.Errorf("scunner ParentID = %q, want unchanged (empty)", got)
 	}
@@ -2431,6 +2595,7 @@ func TestUpdateAllowsReparentingWithinOwnSubtree(t *testing.T) {
 		protocol.DecodePayload(env, &e)
 		t.Fatalf("expected updated, got %q (%s)", env.Type, e.Message)
 	}
+
 	if got := h.parentOf(t, "wee-bairn"); got != "bairn" {
 		t.Errorf("wee-bairn ParentID = %q, want bairn", got)
 	}
@@ -2457,6 +2622,7 @@ func TestUpdateRejectsAdoptingUnrelatedParent(t *testing.T) {
 	if env.Type != "error" {
 		t.Fatalf("expected error, got %q", env.Type)
 	}
+
 	if got := h.parentOf(t, "bairn"); got != "ben" {
 		t.Errorf("bairn ParentID = %q, want unchanged (ben)", got)
 	}
@@ -2481,12 +2647,14 @@ func TestUpdateAllowsOrchestratorReparent(t *testing.T) {
 		SessionID: "thrawn",
 		ParentID:  &parent,
 	}, "tok-orch")
+
 	env := h.readControlMsg(t)
 	if env.Type != "updated" {
 		var e protocol.ErrorMsg
 		protocol.DecodePayload(env, &e)
 		t.Fatalf("expected updated, got %q (%s)", env.Type, e.Message)
 	}
+
 	if got := h.parentOf(t, "thrawn"); got != "scunner" {
 		t.Errorf("thrawn ParentID = %q, want scunner", got)
 	}
@@ -2512,11 +2680,14 @@ func TestUpdateRejectsSelfOrphan(t *testing.T) {
 	if env.Type != "error" {
 		t.Fatalf("expected error, got %q", env.Type)
 	}
+
 	var e protocol.ErrorMsg
 	protocol.DecodePayload(env, &e)
+
 	if !strings.Contains(e.Message, "not authorized") {
 		t.Errorf("error = %q, want 'not authorized'", e.Message)
 	}
+
 	if got := h.parentOf(t, "bairn"); got != "ben" {
 		t.Errorf("bairn ParentID = %q, want unchanged (ben)", got)
 	}
@@ -2538,12 +2709,14 @@ func TestUpdateAllowsOrchestratorOrphan(t *testing.T) {
 		SessionID: "bairn",
 		ParentID:  &empty,
 	}, "tok-orch")
+
 	env := h.readControlMsg(t)
 	if env.Type != "updated" {
 		var e protocol.ErrorMsg
 		protocol.DecodePayload(env, &e)
 		t.Fatalf("expected updated, got %q (%s)", env.Type, e.Message)
 	}
+
 	if got := h.parentOf(t, "bairn"); got != "" {
 		t.Errorf("bairn ParentID = %q, want cleared", got)
 	}
@@ -2561,12 +2734,14 @@ func TestUpdateAllowsHumanOrphan(t *testing.T) {
 		SessionID: "bairn",
 		ParentID:  &empty,
 	})
+
 	env := h.readControlMsg(t)
 	if env.Type != "updated" {
 		var e protocol.ErrorMsg
 		protocol.DecodePayload(env, &e)
 		t.Fatalf("expected updated, got %q (%s)", env.Type, e.Message)
 	}
+
 	if got := h.parentOf(t, "bairn"); got != "" {
 		t.Errorf("bairn ParentID = %q, want cleared", got)
 	}
@@ -2589,8 +2764,10 @@ func TestUpdateRejectsRenameOnlyUnrelated(t *testing.T) {
 	if env.Type != "error" {
 		t.Fatalf("expected error, got %q", env.Type)
 	}
+
 	var e protocol.ErrorMsg
 	protocol.DecodePayload(env, &e)
+
 	if !strings.Contains(e.Message, "not authorized") {
 		t.Errorf("error = %q, want 'not authorized'", e.Message)
 	}
@@ -2608,12 +2785,14 @@ func TestUpdateAllowsHumanReparent(t *testing.T) {
 		SessionID: "thrawn",
 		ParentID:  &parent,
 	})
+
 	env := h.readControlMsg(t)
 	if env.Type != "updated" {
 		var e protocol.ErrorMsg
 		protocol.DecodePayload(env, &e)
 		t.Fatalf("expected updated, got %q (%s)", env.Type, e.Message)
 	}
+
 	if got := h.parentOf(t, "thrawn"); got != "scunner" {
 		t.Errorf("thrawn ParentID = %q, want scunner", got)
 	}

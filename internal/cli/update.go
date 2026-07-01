@@ -39,6 +39,7 @@ var updateCmd = &cobra.Command{
 		if nameSet {
 			msg.Name = &nameFlag
 		}
+
 		if parentSet {
 			if parentFlag == "" {
 				msg.ParentID = &parentFlag
@@ -47,24 +48,29 @@ var updateCmd = &cobra.Command{
 				if err != nil {
 					return fmt.Errorf("resolving parent: %w", err)
 				}
+
 				msg.ParentID = &parentSessionID
 			}
 		}
 
 		c.SendControl("update", msg)
+
 		resp, err := c.ReadControlResponse()
 		if err != nil {
 			return err
 		}
+
 		if resp.Type == "error" {
 			var e protocol.ErrorMsg
 			protocol.DecodePayload(resp, &e)
+
 			return fmt.Errorf("%s", e.Message)
 		}
 
 		if nameSet {
 			out.Print("Name updated to %s\n", nameFlag)
 		}
+
 		if parentSet {
 			if parentFlag == "" {
 				out.Print("Parent removed\n")
@@ -72,6 +78,7 @@ var updateCmd = &cobra.Command{
 				out.Print("Parent set to %s\n", parentFlag)
 			}
 		}
+
 		return nil
 	},
 }

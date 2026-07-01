@@ -29,12 +29,15 @@ func TestDescendantsOfDeepTree(t *testing.T) {
 			t.Errorf("missing expected descendant %q", expected)
 		}
 	}
+
 	if found["ben"] {
 		t.Error("ben should not be in descendants")
 	}
+
 	if found["thrawn"] {
 		t.Error("thrawn session should not be in descendants")
 	}
+
 	if len(descendants) != 5 {
 		t.Errorf("expected 5 descendants, got %d", len(descendants))
 	}
@@ -86,6 +89,7 @@ func TestDescendantsOfCycleBackToRoot(t *testing.T) {
 	if found["ben"] {
 		t.Error("ben should not appear in its own descendants (cycle guard)")
 	}
+
 	if !found["bairn"] || !found["wee-bairn"] || !found["whin"] {
 		t.Error("all reachable non-root descendants should be included")
 	}

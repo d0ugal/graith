@@ -34,10 +34,12 @@ func FuzzDecodeControl(f *testing.F) {
 		if err != nil {
 			return
 		}
+
 		env2, err := DecodeControl(reEncoded)
 		if err != nil {
 			t.Fatalf("round-trip decode failed: %v", err)
 		}
+
 		if env2.Type != env.Type {
 			t.Fatalf("round-trip type mismatch: %q vs %q", env2.Type, env.Type)
 		}
@@ -47,6 +49,7 @@ func FuzzDecodeControl(f *testing.F) {
 func FuzzReadFrame(f *testing.F) {
 	// Valid frame: channel=0x00, length=15, payload=`{"type":"list"}`
 	validPayload := []byte(`{"type":"list"}`)
+
 	var validFrame bytes.Buffer
 	validFrame.WriteByte(ChannelControl)
 	validFrame.Write([]byte{0, 0, 0, byte(len(validPayload))})
@@ -76,6 +79,7 @@ func FuzzReadFrame(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		reader := NewFrameReader(bytes.NewReader(data))
+
 		frame, err := reader.ReadFrame()
 		if err != nil {
 			return
@@ -83,19 +87,23 @@ func FuzzReadFrame(f *testing.F) {
 
 		// If we got a valid frame, verify round-trip.
 		var buf bytes.Buffer
+
 		writer := NewFrameWriter(&buf)
 		if err := writer.WriteFrame(frame.Channel, frame.Payload); err != nil {
 			return
 		}
 
 		reader2 := NewFrameReader(&buf)
+
 		frame2, err := reader2.ReadFrame()
 		if err != nil {
 			t.Fatalf("round-trip read failed: %v", err)
 		}
+
 		if frame2.Channel != frame.Channel {
 			t.Fatalf("round-trip channel mismatch: %d vs %d", frame2.Channel, frame.Channel)
 		}
+
 		if !bytes.Equal(frame2.Payload, frame.Payload) {
 			t.Fatalf("round-trip payload mismatch")
 		}
@@ -120,27 +128,35 @@ func FuzzDecodePayload(f *testing.F) {
 
 		// Try decoding into each known message type — none should panic.
 		var h HandshakeMsg
+
 		_ = DecodePayload(env, &h)
 
 		var c CreateMsg
+
 		_ = DecodePayload(env, &c)
 
 		var a AttachMsg
+
 		_ = DecodePayload(env, &a)
 
 		var r ResizeMsg
+
 		_ = DecodePayload(env, &r)
 
 		var l LogsMsg
+
 		_ = DecodePayload(env, &l)
 
 		var tm TypeMsg
+
 		_ = DecodePayload(env, &tm)
 
 		var mp MsgPubMsg
+
 		_ = DecodePayload(env, &mp)
 
 		var ms MsgSubMsg
+
 		_ = DecodePayload(env, &ms)
 	})
 }

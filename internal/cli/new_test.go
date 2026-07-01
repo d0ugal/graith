@@ -17,6 +17,7 @@ func TestNewPromptAndPromptFileMutuallyExclusive(t *testing.T) {
 
 	oldPrompt, oldPromptFile := newPrompt, newPromptFile
 	oldCfg := cfg
+
 	defer func() {
 		newPrompt, newPromptFile = oldPrompt, oldPromptFile
 		cfg = oldCfg
@@ -30,6 +31,7 @@ func TestNewPromptAndPromptFileMutuallyExclusive(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when both --prompt and --prompt-file are set")
 	}
+
 	if !strings.Contains(err.Error(), "mutually exclusive") {
 		t.Errorf("error = %q, want it to mention 'mutually exclusive'", err)
 	}

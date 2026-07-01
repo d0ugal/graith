@@ -37,6 +37,7 @@ var listCmd = &cobra.Command{
 		defer c.Close()
 
 		c.SendControl("list", struct{}{})
+
 		resp, err := c.ReadControlResponse()
 		if err != nil {
 			return err
@@ -52,6 +53,7 @@ var listCmd = &cobra.Command{
 			if parent == nil {
 				return fmt.Errorf("session %q not found", listChildren)
 			}
+
 			list.Sessions = descendantsOf(list.Sessions, parent.ID)
 		}
 
@@ -62,6 +64,7 @@ var listCmd = &cobra.Command{
 					filtered = append(filtered, s)
 				}
 			}
+
 			list.Sessions = filtered
 		}
 
@@ -72,6 +75,7 @@ var listCmd = &cobra.Command{
 					filtered = append(filtered, s)
 				}
 			}
+
 			list.Sessions = filtered
 		}
 
@@ -114,27 +118,32 @@ func printFlat(cmd *cobra.Command, sessions []protocol.SessionInfo, now time.Tim
 		if sessions[i].RepoName != sessions[j].RepoName {
 			return sessions[i].RepoName < sessions[j].RepoName
 		}
+
 		return sessions[i].Name < sessions[j].Name
 	})
 
 	tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "NAME\tREPO\tAGENT\tSTATUS\tACTIVITY\tMODEL\tBRANCH\tGIT\tPR\tAGE\tATTACHED")
+
 	for _, s := range sessions {
 		name := s.Name
 		if s.Starred {
 			name = "★ " + name
 		}
+
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			name, s.RepoName, s.Agent, s.Status,
 			formatAgentStatus(s), formatModel(s),
 			formatBranch(s), formatGitStatus(s), formatPR(s), formatAge(s, now), formatAttached(s, now))
 	}
+
 	tw.Flush()
 }
 
 func printTree(cmd *cobra.Command, sessions []protocol.SessionInfo, now time.Time) {
 	byID := make(map[string]protocol.SessionInfo, len(sessions))
 	children := make(map[string][]protocol.SessionInfo)
+
 	var roots []protocol.SessionInfo
 
 	for _, s := range sessions {
@@ -154,10 +163,12 @@ func printTree(cmd *cobra.Command, sessions []protocol.SessionInfo, now time.Tim
 			if ss[i].RepoName != ss[j].RepoName {
 				return ss[i].RepoName < ss[j].RepoName
 			}
+
 			return ss[i].Name < ss[j].Name
 		})
 	}
 	sortSessions(roots)
+
 	for k := range children {
 		sortSessions(children[k])
 	}
@@ -166,11 +177,13 @@ func printTree(cmd *cobra.Command, sessions []protocol.SessionInfo, now time.Tim
 	fmt.Fprintln(tw, "NAME\tREPO\tAGENT\tSTATUS\tACTIVITY\tMODEL\tBRANCH\tGIT\tPR\tAGE\tATTACHED")
 
 	var walk func(s protocol.SessionInfo, prefix, childPrefix string)
+
 	walk = func(s protocol.SessionInfo, prefix, childPrefix string) {
 		name := s.Name
 		if s.Starred {
 			name = "★ " + name
 		}
+
 		fmt.Fprintf(tw, "%s%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			prefix, name, s.RepoName, s.Agent, s.Status,
 			formatAgentStatus(s), formatModel(s),
@@ -189,6 +202,7 @@ func printTree(cmd *cobra.Command, sessions []protocol.SessionInfo, now time.Tim
 	for _, root := range roots {
 		walk(root, "", "")
 	}
+
 	tw.Flush()
 }
 
@@ -198,11 +212,13 @@ func findSession(sessions []protocol.SessionInfo, nameOrID string) *protocol.Ses
 			return &sessions[i]
 		}
 	}
+
 	return nil
 }
 
 func descendantsOf(sessions []protocol.SessionInfo, parentID string) []protocol.SessionInfo {
 	children := make(map[string][]protocol.SessionInfo)
+
 	for _, s := range sessions {
 		if s.ParentID != "" {
 			children[s.ParentID] = append(children[s.ParentID], s)
@@ -210,8 +226,11 @@ func descendantsOf(sessions []protocol.SessionInfo, parentID string) []protocol.
 	}
 
 	var result []protocol.SessionInfo
+
 	seen := map[string]bool{parentID: true}
+
 	var collect func(string)
+
 	collect = func(id string) {
 		for _, child := range children[id] {
 			if !seen[child.ID] {
@@ -222,6 +241,7 @@ func descendantsOf(sessions []protocol.SessionInfo, parentID string) []protocol.
 		}
 	}
 	collect(parentID)
+
 	return result
 }
 
@@ -230,11 +250,13 @@ func formatAgentStatus(s protocol.SessionInfo) string {
 	if s.Status != "running" {
 		agentStatus = ""
 	}
+
 	if agentStatus == "approval" {
 		agentStatus = "⚠ approval"
 	} else if agentStatus == "active" && s.ToolName != "" {
 		agentStatus = fmt.Sprintf("active (%s)", s.ToolName)
 	}
+
 	return agentStatus
 }
 
@@ -252,6 +274,7 @@ func formatBranch(s protocol.SessionInfo) string {
 	} else if s.InPlace {
 		branch = "(in-place)"
 	}
+
 	return branch
 }
 
@@ -259,11 +282,14 @@ func formatPR(s protocol.SessionInfo) string {
 	if s.PullRequest == nil {
 		return ""
 	}
+
 	pr := s.PullRequest
+
 	out := fmt.Sprintf("#%d %s", pr.Number, pr.State)
 	if pr.Conflicting {
 		out += " conflict"
 	}
+
 	if s.CI != nil && s.CI.State != "" {
 		switch s.CI.State {
 		case "passing":
@@ -274,6 +300,7 @@ func formatPR(s protocol.SessionInfo) string {
 			out += " CI:…"
 		}
 	}
+
 	return out
 }
 
@@ -282,12 +309,15 @@ func formatGitStatus(s protocol.SessionInfo) string {
 	if s.Dirty {
 		gitStatus = "dirty"
 	}
+
 	if s.UnpushedCount > 0 {
 		if gitStatus != "" {
 			gitStatus += ", "
 		}
+
 		gitStatus += fmt.Sprintf("%d ahead", s.UnpushedCount)
 	}
+
 	return gitStatus
 }
 
@@ -295,6 +325,7 @@ func formatAge(s protocol.SessionInfo, now time.Time) string {
 	if t, err := time.Parse(time.RFC3339, s.CreatedAt); err == nil {
 		return client.ShortDuration(now.Sub(t))
 	}
+
 	return ""
 }
 
@@ -304,6 +335,7 @@ func formatAttached(s protocol.SessionInfo, now time.Time) string {
 			return client.ShortDuration(now.Sub(t)) + " ago"
 		}
 	}
+
 	return ""
 }
 

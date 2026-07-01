@@ -31,14 +31,17 @@ var renameCmd = &cobra.Command{
 		}
 
 		c.SendControl("rename", protocol.RenameMsg{SessionID: sessionID, NewName: args[1]})
+
 		resp, _ := c.ReadControlResponse()
 		if resp.Type == "error" {
 			var e protocol.ErrorMsg
 			protocol.DecodePayload(resp, &e)
+
 			return fmt.Errorf("%s", e.Message)
 		}
 
 		out.Print("Renamed to %s\n", args[1])
+
 		return nil
 	},
 }

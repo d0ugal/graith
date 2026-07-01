@@ -25,26 +25,33 @@ func NewScrollback(path string, maxSize int64) (*Scrollback, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open scrollback: %w", err)
 	}
+
 	info, _ := f.Stat()
+
 	written := int64(0)
 	if info != nil {
 		written = info.Size()
 	}
+
 	return &Scrollback{file: f, path: path, maxSize: maxSize, written: written}, nil
 }
 
 func (s *Scrollback) Write(data []byte) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	if s.maxSize > 0 && s.written >= s.maxSize {
 		if !s.saturated {
 			s.saturated = true
 			slog.Warn("scrollback full, further output will not be recorded", "path", s.path, "max_size", s.maxSize)
 		}
+
 		return len(data), nil
 	}
+
 	n, err := s.file.Write(data)
 	s.written += int64(n)
+
 	return n, err
 }
 
@@ -59,6 +66,7 @@ func (s *Scrollback) Tail(lines int) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	size := info.Size()
 	if size == 0 {
 		return nil, nil
@@ -67,10 +75,12 @@ func (s *Scrollback) Tail(lines int) ([]byte, error) {
 	if lines <= 0 {
 		data := make([]byte, size)
 		_, err := io.ReadFull(f, data)
+
 		return data, err
 	}
 
 	const chunkSize = 8192
+
 	count := 0
 	remaining := size
 	// Chunks are collected in reverse file order (last chunk first).
@@ -92,10 +102,12 @@ func (s *Scrollback) Tail(lines int) ([]byte, error) {
 				count++
 				if count >= lines {
 					parts := make([][]byte, 0, len(chunks))
+
 					parts = append(parts, chunk[i+1:])
 					for j := len(chunks) - 2; j >= 0; j-- {
 						parts = append(parts, chunks[j])
 					}
+
 					return bytes.Join(parts, nil), nil
 				}
 			}
@@ -106,6 +118,7 @@ func (s *Scrollback) Tail(lines int) ([]byte, error) {
 	for left, right := 0, len(chunks)-1; left < right; left, right = left+1, right-1 {
 		chunks[left], chunks[right] = chunks[right], chunks[left]
 	}
+
 	return bytes.Join(chunks, nil), nil
 }
 
@@ -121,6 +134,7 @@ func (s *Scrollback) TailBytes(maxBytes int64) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	size := info.Size()
 	if size == 0 {
 		return nil, nil
@@ -132,16 +146,19 @@ func (s *Scrollback) TailBytes(maxBytes int64) ([]byte, error) {
 	}
 
 	data := make([]byte, readSize)
+
 	_, err = f.ReadAt(data, size-readSize)
 	if err != nil {
 		return nil, err
 	}
+
 	return data, nil
 }
 
 func (s *Scrollback) Stats() (written, maxSize int64, saturated bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+
 	return s.written, s.maxSize, s.saturated
 }
 

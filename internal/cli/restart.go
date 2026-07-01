@@ -21,6 +21,7 @@ var restartCmd = &cobra.Command{
 		if restartChildren {
 			return cobra.MaximumNArgs(1)(cmd, args)
 		}
+
 		return cobra.ExactArgs(1)(cmd, args)
 	},
 	ValidArgsFunction: completeSessionNames,
@@ -39,18 +40,22 @@ var restartCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+
 		if session.Status == "running" {
 			return fmt.Errorf("session %q is already running", session.Name)
 		}
 
 		c.SendControl("resume", protocol.ResumeMsg{SessionID: session.ID})
+
 		resp, err := c.ReadControlResponse()
 		if err != nil {
 			return err
 		}
+
 		if resp.Type == "error" {
 			var e protocol.ErrorMsg
 			protocol.DecodePayload(resp, &e)
+
 			return fmt.Errorf("%s", e.Message)
 		}
 
@@ -72,21 +77,26 @@ var restartCmd = &cobra.Command{
 }
 
 func restartChildrenRun(c *client.Client, args []string) error {
-	var sessionID string
-	var excludeRoot bool
+	var (
+		sessionID   string
+		excludeRoot bool
+	)
 
 	if len(args) == 1 {
 		var err error
+
 		sessionID, err = resolveSession(c, args[0])
 		if err != nil {
 			return err
 		}
+
 		excludeRoot = false
 	} else {
 		sessionID = os.Getenv("GRAITH_SESSION_ID")
 		if sessionID == "" {
 			return fmt.Errorf("--children with no session arg requires GRAITH_SESSION_ID to be set")
 		}
+
 		excludeRoot = true
 	}
 
@@ -95,13 +105,16 @@ func restartChildrenRun(c *client.Client, args []string) error {
 		Children:    true,
 		ExcludeRoot: excludeRoot,
 	})
+
 	resp, err := c.ReadControlResponse()
 	if err != nil {
 		return err
 	}
+
 	if resp.Type == "error" {
 		var e protocol.ErrorMsg
 		protocol.DecodePayload(resp, &e)
+
 		return fmt.Errorf("%s", e.Message)
 	}
 
@@ -115,6 +128,7 @@ func restartChildrenRun(c *client.Client, args []string) error {
 	}
 
 	out.Print("Restarted %d sessions\n", len(result.Restarted))
+
 	return nil
 }
 

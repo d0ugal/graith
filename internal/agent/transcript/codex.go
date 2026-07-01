@@ -17,10 +17,12 @@ func codexHome() (string, error) {
 	if d := os.Getenv("CODEX_HOME"); d != "" {
 		return d, nil
 	}
+
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
+
 	return filepath.Join(home, ".codex"), nil
 }
 
@@ -29,12 +31,15 @@ func canonPath(p string) string {
 	if p == "" {
 		return ""
 	}
+
 	if abs, err := filepath.Abs(p); err == nil {
 		p = abs
 	}
+
 	if resolved, err := filepath.EvalSymlinks(p); err == nil {
 		p = resolved
 	}
+
 	return filepath.Clean(p)
 }
 
@@ -48,6 +53,7 @@ func locateCodex(agentSessionID, worktreePath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+
 	sessionsDir := filepath.Join(root, "sessions")
 
 	// Prefer a deterministic lookup by the captured session id; fall back to the
@@ -60,61 +66,78 @@ func locateCodex(agentSessionID, worktreePath string) (string, error) {
 
 	want := canonPath(worktreePath)
 
-	var best string
-	var bestMod int64
+	var (
+		best    string
+		bestMod int64
+	)
+
 	err = filepath.WalkDir(sessionsDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil // skip unreadable subtrees
 		}
+
 		if d.IsDir() {
 			return nil
 		}
+
 		name := d.Name()
 		if !strings.HasPrefix(name, "rollout-") || !strings.HasSuffix(name, ".jsonl") {
 			return nil
 		}
+
 		cwd, ok := codexRolloutCwd(path)
 		if !ok || canonPath(cwd) != want {
 			return nil
 		}
+
 		info, statErr := d.Info()
 		if statErr != nil {
 			return nil
 		}
+
 		if mod := info.ModTime().UnixNano(); mod >= bestMod {
 			bestMod = mod
 			best = path
 		}
+
 		return nil
 	})
 	if err != nil {
 		return "", fmt.Errorf("scan codex sessions under %s: %w", sessionsDir, err)
 	}
+
 	if best == "" {
 		return "", fmt.Errorf("no codex rollout found for cwd %s under %s", worktreePath, sessionsDir)
 	}
+
 	return best, nil
 }
 
 // findCodexRolloutByID scans for a rollout whose session_meta.id matches.
 func findCodexRolloutByID(sessionsDir, id string) (string, bool) {
 	var found string
+
 	_ = filepath.WalkDir(sessionsDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || found != "" {
 			return nil
 		}
+
 		name := d.Name()
 		if !strings.HasPrefix(name, "rollout-") || !strings.HasSuffix(name, ".jsonl") {
 			return nil
 		}
+
 		if rid, ok := CodexRolloutID(path); ok && rid == id {
 			found = path
 		}
+
 		return nil
 	})
+
 	if found == "" {
 		return "", false
 	}
+
 	return found, true
 }
 
@@ -134,41 +157,53 @@ func LocateCodexSince(worktreePath string, since time.Time) (string, bool) {
 func LocateCodexSinceIn(root, worktreePath string, since time.Time) (string, bool) {
 	if root == "" {
 		var err error
+
 		root, err = codexHome()
 		if err != nil {
 			return "", false
 		}
 	}
+
 	sessionsDir := filepath.Join(root, "sessions")
 	want := canonPath(worktreePath)
 
-	var best string
-	var bestMod int64
+	var (
+		best    string
+		bestMod int64
+	)
+
 	_ = filepath.WalkDir(sessionsDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return nil
 		}
+
 		name := d.Name()
 		if !strings.HasPrefix(name, "rollout-") || !strings.HasSuffix(name, ".jsonl") {
 			return nil
 		}
+
 		info, statErr := d.Info()
 		if statErr != nil || info.ModTime().Before(since) {
 			return nil
 		}
+
 		cwd, ok := codexRolloutCwd(path)
 		if !ok || canonPath(cwd) != want {
 			return nil
 		}
+
 		if mod := info.ModTime().UnixNano(); mod >= bestMod {
 			bestMod = mod
 			best = path
 		}
+
 		return nil
 	})
+
 	if best == "" {
 		return "", false
 	}
+
 	return best, true
 }
 
@@ -182,45 +217,57 @@ func LocateCodexSinceIn(root, worktreePath string, since time.Time) (string, boo
 func CodexSessionIDSince(root, worktreePath string, since time.Time) (string, bool) {
 	if root == "" {
 		var err error
+
 		root, err = codexHome()
 		if err != nil {
 			return "", false
 		}
 	}
+
 	sessionsDir := filepath.Join(root, "sessions")
 	want := canonPath(worktreePath)
 
 	seen := make(map[string]struct{})
+
 	var found string
+
 	_ = filepath.WalkDir(sessionsDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return nil
 		}
+
 		name := d.Name()
 		if !strings.HasPrefix(name, "rollout-") || !strings.HasSuffix(name, ".jsonl") {
 			return nil
 		}
+
 		info, statErr := d.Info()
 		if statErr != nil || info.ModTime().Before(since) {
 			return nil
 		}
+
 		cwd, ok := codexRolloutCwd(path)
 		if !ok || canonPath(cwd) != want {
 			return nil
 		}
+
 		id, ok := CodexRolloutID(path)
 		if !ok || id == "" {
 			return nil
 		}
+
 		if _, dup := seen[id]; !dup {
 			seen[id] = struct{}{}
 			found = id
 		}
+
 		return nil
 	})
+
 	if len(seen) != 1 {
 		return "", false // 0 = none yet, 2+ = ambiguous (concurrent same-cwd)
 	}
+
 	return found, true
 }
 
@@ -256,13 +303,16 @@ func codexRolloutCwd(path string) (string, bool) {
 		return "", false
 	}
 	defer f.Close()
+
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+
 	for i := 0; sc.Scan() && i < 5; i++ { // session_meta is at the top
 		var line codexLine
 		if err := json.Unmarshal(bytes.TrimSpace(sc.Bytes()), &line); err != nil {
 			continue
 		}
+
 		if line.Type == "session_meta" {
 			var m codexSessionMeta
 			if err := json.Unmarshal(line.Payload, &m); err == nil {
@@ -270,6 +320,7 @@ func codexRolloutCwd(path string) (string, bool) {
 			}
 		}
 	}
+
 	return "", false
 }
 
@@ -281,13 +332,16 @@ func CodexRolloutID(path string) (string, bool) {
 		return "", false
 	}
 	defer f.Close()
+
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+
 	for i := 0; sc.Scan() && i < 5; i++ {
 		var line codexLine
 		if err := json.Unmarshal(bytes.TrimSpace(sc.Bytes()), &line); err != nil {
 			continue
 		}
+
 		if line.Type == "session_meta" {
 			var m codexSessionMeta
 			if err := json.Unmarshal(line.Payload, &m); err == nil && m.ID != "" {
@@ -295,6 +349,7 @@ func CodexRolloutID(path string) (string, bool) {
 			}
 		}
 	}
+
 	return "", false
 }
 
@@ -308,36 +363,44 @@ func (codexReader) read(path string) ([]Turn, int, error) {
 	defer f.Close()
 
 	var turns []Turn
+
 	toolIdx := make(map[string]int) // call_id -> index into turns
 	dropped := 0
 
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+
 	for sc.Scan() {
 		raw := bytes.TrimSpace(sc.Bytes())
 		if len(raw) == 0 {
 			continue
 		}
+
 		var line codexLine
 		if err := json.Unmarshal(raw, &line); err != nil {
 			dropped++
 			continue
 		}
+
 		if line.Type != "response_item" {
 			// session_meta, event_msg, token_count, turn_context, compacted,
 			// reasoning — not conversation content.
 			continue
 		}
+
 		var item codexResponseItem
 		if err := json.Unmarshal(line.Payload, &item); err != nil {
 			dropped++
 			continue
 		}
+
 		appendCodexTurn(item, &turns, toolIdx)
 	}
+
 	if err := sc.Err(); err != nil {
 		dropped++
 	}
+
 	return turns, dropped, nil
 }
 
@@ -348,7 +411,9 @@ func appendCodexTurn(item codexResponseItem, turns *[]Turn, toolIdx map[string]i
 		if strings.TrimSpace(text) == "" {
 			return
 		}
+
 		role := RoleUser
+
 		switch item.Role {
 		case "assistant":
 			role = RoleAssistant
@@ -359,6 +424,7 @@ func appendCodexTurn(item codexResponseItem, turns *[]Turn, toolIdx map[string]i
 		default:
 			role = RoleContext
 		}
+
 		*turns = append(*turns, Turn{Role: role, Text: text})
 	case "function_call", "custom_tool_call":
 		*turns = append(*turns, Turn{
@@ -383,24 +449,31 @@ func codexContentText(raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return ""
 	}
+
 	var s string
 	if err := json.Unmarshal(raw, &s); err == nil {
 		return s
 	}
+
 	var parts []codexContentPart
 	if err := json.Unmarshal(raw, &parts); err != nil {
 		return ""
 	}
+
 	var b strings.Builder
+
 	for _, p := range parts {
 		if p.Text == "" {
 			continue
 		}
+
 		if b.Len() > 0 {
 			b.WriteString("\n")
 		}
+
 		b.WriteString(p.Text)
 	}
+
 	return b.String()
 }
 
@@ -410,10 +483,12 @@ func codexOutputText(raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return ""
 	}
+
 	var s string
 	if err := json.Unmarshal(raw, &s); err == nil {
 		return s
 	}
+
 	var obj struct {
 		Content string `json:"content"`
 		Output  string `json:"output"`
@@ -422,7 +497,9 @@ func codexOutputText(raw json.RawMessage) string {
 		if obj.Content != "" {
 			return obj.Content
 		}
+
 		return obj.Output
 	}
+
 	return string(raw)
 }

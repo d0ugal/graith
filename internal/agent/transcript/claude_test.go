@@ -10,10 +10,12 @@ import (
 // writeLines writes newline-joined lines to a temp file and returns its path.
 func writeLines(t *testing.T, lines []string) string {
 	t.Helper()
+
 	path := filepath.Join(t.TempDir(), "transcript.jsonl")
 	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+
 	return path
 }
 
@@ -33,6 +35,7 @@ func TestClaudeReaderWalksChainAndPairsTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
+
 	if dropped != 1 {
 		t.Errorf("dropped = %d, want 1", dropped)
 	}
@@ -50,13 +53,16 @@ func TestClaudeReaderWalksChainAndPairsTools(t *testing.T) {
 	if len(turns) != len(want) {
 		t.Fatalf("got %d turns, want %d: %+v", len(turns), len(want), turns)
 	}
+
 	for i, w := range want {
 		if turns[i].Role != w.role {
 			t.Errorf("turn %d role = %s, want %s", i, turns[i].Role, w.role)
 		}
+
 		if w.text != "" && turns[i].Text != w.text {
 			t.Errorf("turn %d text = %q, want %q", i, turns[i].Text, w.text)
 		}
+
 		if w.tool != "" {
 			if turns[i].Tool == nil || turns[i].Tool.Name != w.tool {
 				t.Errorf("turn %d tool = %+v, want %s", i, turns[i].Tool, w.tool)
@@ -67,6 +73,7 @@ func TestClaudeReaderWalksChainAndPairsTools(t *testing.T) {
 	if turns[2].Tool.Output != "neeps\ntatties" {
 		t.Errorf("tool output = %q, want paired result", turns[2].Tool.Output)
 	}
+
 	for _, tr := range turns {
 		if strings.Contains(tr.Text, "sidechain") {
 			t.Error("sidechain turn leaked into chain")
@@ -76,10 +83,12 @@ func TestClaudeReaderWalksChainAndPairsTools(t *testing.T) {
 
 func TestClaudeReaderEmptyYieldsNoTurns(t *testing.T) {
 	path := writeLines(t, []string{`{"type":"summary","uuid":"s1"}`})
+
 	turns, _, err := claudeReader{}.read(path)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if len(turns) != 0 {
 		t.Errorf("got %d turns, want 0", len(turns))
 	}
@@ -93,7 +102,9 @@ func TestLocateClaudeBySessionIDGlob(t *testing.T) {
 	if err := os.MkdirAll(projDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+
 	sid := "abc123-de45-67f8-9012-3456789abcde"
+
 	want := filepath.Join(projDir, sid+".jsonl")
 	if err := os.WriteFile(want, []byte("{}\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -103,6 +114,7 @@ func TestLocateClaudeBySessionIDGlob(t *testing.T) {
 	if err != nil {
 		t.Fatalf("locateClaude: %v", err)
 	}
+
 	if got != want {
 		t.Errorf("located %q, want %q", got, want)
 	}

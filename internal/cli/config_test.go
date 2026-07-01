@@ -27,6 +27,7 @@ func TestConfigResetWritesValidTOML(t *testing.T) {
 	if err := toml.Unmarshal(data, &cfg); err != nil {
 		t.Fatalf("written config is not valid TOML: %v", err)
 	}
+
 	if cfg.DefaultAgent != "claude" {
 		t.Errorf("DefaultAgent = %q, want claude", cfg.DefaultAgent)
 	}
@@ -48,6 +49,7 @@ func TestConfigResetOverwritesMalformed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	var cfg config.Config
 	if err := toml.Unmarshal(data, &cfg); err != nil {
 		t.Fatalf("reset config is not valid TOML: %v", err)
@@ -66,6 +68,7 @@ func TestConfigResetFilePermissions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if perm := info.Mode().Perm(); perm != 0o600 {
 		t.Errorf("file permissions = %o, want 600", perm)
 	}
@@ -73,6 +76,7 @@ func TestConfigResetFilePermissions(t *testing.T) {
 
 func TestConfigDiffNoChanges(t *testing.T) {
 	defaultCfg := config.Default()
+
 	defaultBytes, err := toml.Marshal(defaultCfg)
 	if err != nil {
 		t.Fatal(err)
@@ -85,10 +89,12 @@ func TestConfigDiffNoChanges(t *testing.T) {
 		ToFile:   "user",
 		Context:  3,
 	}
+
 	text, err := difflib.GetUnifiedDiffString(diff)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if text != "" {
 		t.Errorf("expected empty diff for identical configs, got:\n%s", text)
 	}
@@ -103,6 +109,7 @@ func TestConfigDiffShowsChanges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	userBytes, err := toml.Marshal(userCfg)
 	if err != nil {
 		t.Fatal(err)
@@ -115,10 +122,12 @@ func TestConfigDiffShowsChanges(t *testing.T) {
 		ToFile:   "user",
 		Context:  3,
 	}
+
 	text, err := difflib.GetUnifiedDiffString(diff)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if text == "" {
 		t.Error("expected non-empty diff for changed config")
 	}
@@ -144,9 +153,11 @@ func TestConfigShowRoundTrips(t *testing.T) {
 	if err := toml.Unmarshal(data, &roundTripped); err != nil {
 		t.Fatalf("show output is not valid TOML: %v", err)
 	}
+
 	if roundTripped.DefaultAgent != "codex" {
 		t.Errorf("DefaultAgent = %q, want codex", roundTripped.DefaultAgent)
 	}
+
 	if roundTripped.Agents["claude"].Command != "claude" {
 		t.Error("claude agent not preserved through round-trip")
 	}
@@ -160,6 +171,7 @@ func TestConfigShowNoConfigFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if effectiveCfg.DefaultAgent != "claude" {
 		t.Errorf("DefaultAgent = %q, want claude (defaults)", effectiveCfg.DefaultAgent)
 	}

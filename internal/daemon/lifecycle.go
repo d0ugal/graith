@@ -13,6 +13,7 @@ func applyLifecycleSummaryLocked(s *SessionState, text string) {
 	if s.SystemKind != "" {
 		return
 	}
+
 	text = sanitizeSummaryText(text)
 	text = truncateToBytes(text, 100)
 	now := time.Now()
@@ -23,6 +24,7 @@ func applyLifecycleSummaryLocked(s *SessionState, text string) {
 
 func formatStopSummary(reason string, exitCode *int, exitSignal string, prev string, prevSetAt *time.Time, ttl time.Duration) string {
 	var base string
+
 	switch reason {
 	case StopReasonUser:
 		base = "Stopped"
@@ -48,6 +50,7 @@ func formatStopSummary(reason string, exitCode *int, exitSignal string, prev str
 	if prev == "" || prevSetAt == nil || time.Since(*prevSetAt) > ttl {
 		return base
 	}
+
 	return truncateWithContext(base, prev, 100)
 }
 
@@ -66,15 +69,19 @@ func formatSignalSummary(sig string) string {
 
 func truncateWithContext(base, prev string, maxBytes int) string {
 	suffix := " (was: " + prev + ")"
+
 	full := base + suffix
 	if len(full) <= maxBytes {
 		return full
 	}
+
 	overhead := len(base) + len(" (was: ...)")
+
 	avail := maxBytes - overhead
 	if avail <= 0 {
 		return base
 	}
+
 	return base + " (was: " + truncateToBytes(prev, avail) + "...)"
 }
 
@@ -91,7 +98,9 @@ func truncateToBytes(s string, maxBytes int) string {
 		if pos+size > maxBytes {
 			break
 		}
+
 		pos += size
 	}
+
 	return s[:pos]
 }

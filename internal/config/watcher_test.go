@@ -12,6 +12,7 @@ import (
 func TestWatcher(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.toml")
+
 	initial := `default_agent = "claude"` + "\n"
 	if err := os.WriteFile(cfgPath, []byte(initial), 0o600); err != nil {
 		t.Fatal(err)
@@ -50,6 +51,7 @@ func TestWatcher(t *testing.T) {
 func TestWatcherInvalidConfig(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.toml")
+
 	initial := `default_agent = "claude"` + "\n"
 	if err := os.WriteFile(cfgPath, []byte(initial), 0o600); err != nil {
 		t.Fatal(err)

@@ -30,6 +30,7 @@ func clearCloseOnExec(fd int) error {
 	if errno != 0 {
 		return errno
 	}
+
 	return nil
 }
 
@@ -55,6 +56,7 @@ func (sm *SessionManager) PrepareUpgrade(listenerFd uintptr, configFile string) 
 		if sess.Exited() {
 			continue
 		}
+
 		fd := int(sess.Fd())
 		if err := clearCloseOnExec(fd); err != nil {
 			sm.log.Warn("skipping session for upgrade", "id", id, "err", err)
@@ -76,10 +78,12 @@ func WriteManifest(dir string, m *UpgradeManifest) (string, error) {
 	if err != nil {
 		return "", err
 	}
+
 	path := filepath.Join(dir, "upgrade-manifest.json")
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return "", err
 	}
+
 	return path, nil
 }
 
@@ -88,10 +92,12 @@ func ReadManifest(path string) (*UpgradeManifest, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	var m UpgradeManifest
 	if err := json.Unmarshal(data, &m); err != nil {
 		return nil, err
 	}
+
 	return &m, nil
 }
 
@@ -102,8 +108,10 @@ func ExecUpgrade(manifestPath, configFile, clientExecPath string) error {
 			execPath = ""
 		}
 	}
+
 	if execPath == "" {
 		var err error
+
 		execPath, err = resolveExecutable()
 		if err != nil {
 			return fmt.Errorf("resolve executable: %w", err)
@@ -127,6 +135,7 @@ func resolveExecutable() (string, error) {
 	if execPath, err := os.Executable(); err == nil {
 		name = filepath.Base(execPath)
 	}
+
 	if lookPath, err := exec.LookPath(name); err == nil {
 		return lookPath, nil
 	}
@@ -135,9 +144,11 @@ func resolveExecutable() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("executable not in PATH and os.Executable failed: %w", err)
 	}
+
 	if _, err := os.Stat(execPath); err != nil {
 		return "", fmt.Errorf("executable not in PATH and original path gone: %w", err)
 	}
+
 	return execPath, nil
 }
 
@@ -147,6 +158,7 @@ func StopDaemon(pidFile string) error {
 		if os.IsNotExist(err) {
 			return fmt.Errorf("daemon not running (no pid file)")
 		}
+
 		return err
 	}
 
@@ -155,6 +167,7 @@ func StopDaemon(pidFile string) error {
 		os.Remove(pidFile)
 		return fmt.Errorf("invalid pid file: %w", err)
 	}
+
 	if pid <= 1 {
 		os.Remove(pidFile)
 		return fmt.Errorf("refusing to signal invalid pid %d", pid)
@@ -174,6 +187,7 @@ func StopDaemon(pidFile string) error {
 		if syscall.Kill(pid, 0) != nil {
 			return nil
 		}
+
 		time.Sleep(100 * time.Millisecond)
 	}
 

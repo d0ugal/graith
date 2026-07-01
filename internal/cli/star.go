@@ -26,17 +26,21 @@ var starCmd = &cobra.Command{
 		}
 
 		c.SendControl("star", protocol.StarMsg{SessionID: sessionID})
+
 		resp, err := c.ReadControlResponse()
 		if err != nil {
 			return err
 		}
+
 		if resp.Type == "error" {
 			var e protocol.ErrorMsg
 			protocol.DecodePayload(resp, &e)
+
 			return fmt.Errorf("%s", e.Message)
 		}
 
 		out.Print("Session starred\n")
+
 		return nil
 	},
 }
@@ -59,17 +63,21 @@ var unstarCmd = &cobra.Command{
 		}
 
 		c.SendControl("unstar", protocol.UnstarMsg{SessionID: sessionID})
+
 		resp, err := c.ReadControlResponse()
 		if err != nil {
 			return err
 		}
+
 		if resp.Type == "error" {
 			var e protocol.ErrorMsg
 			protocol.DecodePayload(resp, &e)
+
 			return fmt.Errorf("%s", e.Message)
 		}
 
 		out.Print("Session unstarred\n")
+
 		return nil
 	},
 }

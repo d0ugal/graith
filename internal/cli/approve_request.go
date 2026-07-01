@@ -30,6 +30,7 @@ var approveRequestCmd = &cobra.Command{
 		if sessionID == "" {
 			return nil
 		}
+
 		agent := os.Getenv("GRAITH_AGENT_TYPE")
 
 		// Parse hook stdin for tool details (non-blocking with timeout).
@@ -37,7 +38,9 @@ var approveRequestCmd = &cobra.Command{
 			data   approvalHookStdin
 			parsed bool
 		}
+
 		ch := make(chan stdinResult, 1)
+
 		go func() {
 			data, err := io.ReadAll(os.Stdin)
 			if err == nil && len(data) > 0 {
@@ -47,6 +50,7 @@ var approveRequestCmd = &cobra.Command{
 					return
 				}
 			}
+
 			ch <- stdinResult{}
 		}()
 
@@ -76,6 +80,7 @@ var approveRequestCmd = &cobra.Command{
 			fmt.Println(hookoutput.AllowAll(agent))
 			return nil
 		}
+
 		c, err := client.ConnectForApproval(hookPaths, cfg.Approvals.TimeoutDuration())
 		if err != nil {
 			fmt.Println(hookoutput.AllowAll(agent))
@@ -111,6 +116,7 @@ var approveRequestCmd = &cobra.Command{
 func generateApprovalID() string {
 	b := make([]byte, 8)
 	rand.Read(b)
+
 	return hex.EncodeToString(b)
 }
 

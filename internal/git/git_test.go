@@ -15,6 +15,7 @@ func setupTestRepo(t *testing.T) string {
 	run := func(args ...string) {
 		cmd := exec.Command("git", args...)
 		cmd.Dir = dir
+
 		cmd.Env = append(os.Environ(),
 			"GIT_AUTHOR_NAME=braw", "GIT_AUTHOR_EMAIL=braw@croft.local",
 			"GIT_COMMITTER_NAME=braw", "GIT_COMMITTER_EMAIL=braw@croft.local",
@@ -27,15 +28,18 @@ func setupTestRepo(t *testing.T) string {
 	os.WriteFile(filepath.Join(dir, "README.md"), []byte("braw"), 0o644)
 	run("add", ".")
 	run("commit", "-m", "auld")
+
 	return dir
 }
 
 func TestRunOutput(t *testing.T) {
 	dir := setupTestRepo(t)
+
 	out, err := RunOutput(dir, "rev-parse", "--is-inside-work-tree")
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if out != "true" {
 		t.Errorf("output = %q, want true", out)
 	}
@@ -46,6 +50,7 @@ func TestRunCheck(t *testing.T) {
 	if !RunCheck(dir, "rev-parse", "--is-inside-work-tree") {
 		t.Error("expected true for valid repo")
 	}
+
 	if RunCheck("/nonexistent", "status") {
 		t.Error("expected false for nonexistent dir")
 	}
@@ -56,6 +61,7 @@ func TestRefExists(t *testing.T) {
 	if !RefExists(dir, "main") {
 		t.Error("main branch should exist")
 	}
+
 	if RefExists(dir, "glen-thrawn-nonexistent") {
 		t.Error("nonexistent branch should not exist")
 	}
@@ -63,18 +69,23 @@ func TestRefExists(t *testing.T) {
 
 func TestHasUncommittedChanges(t *testing.T) {
 	dir := setupTestRepo(t)
+
 	dirty, err := HasUncommittedChanges(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if dirty {
 		t.Error("clean repo should not be dirty")
 	}
+
 	os.WriteFile(filepath.Join(dir, "neep.txt"), []byte("bonnie"), 0o644)
+
 	dirty, err = HasUncommittedChanges(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if !dirty {
 		t.Error("repo with new file should be dirty")
 	}
@@ -85,6 +96,7 @@ func TestIsInsideGitRepo(t *testing.T) {
 	if !IsInsideGitRepo(dir) {
 		t.Error("should detect git repo")
 	}
+
 	if IsInsideGitRepo(t.TempDir()) {
 		t.Error("should not detect non-repo as git repo")
 	}
@@ -97,6 +109,7 @@ func TestDirtyFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if len(files) != 0 {
 		t.Errorf("clean repo: got %d dirty files, want 0", len(files))
 	}
@@ -108,6 +121,7 @@ func TestDirtyFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if len(files) != 2 {
 		t.Errorf("got %d dirty files, want 2: %v", len(files), files)
 	}
@@ -124,6 +138,7 @@ func TestHasRemote(t *testing.T) {
 	if _, err := RunOutput(bare, "clone", "--bare", dir, bare+"/repo.git"); err != nil {
 		t.Fatal(err)
 	}
+
 	if _, err := RunOutput(dir, "remote", "add", "origin", bare+"/repo.git"); err != nil {
 		t.Fatal(err)
 	}
@@ -131,6 +146,7 @@ func TestHasRemote(t *testing.T) {
 	if !HasRemote(dir, "origin") {
 		t.Error("repo with origin should report HasRemote=true")
 	}
+
 	if HasRemote(dir, "upstream") {
 		t.Error("repo without upstream should report HasRemote=false")
 	}
@@ -150,6 +166,7 @@ func TestUnpushedCommitSummaries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if len(commits) != 0 {
 		t.Errorf("no extra commits: got %d, want 0", len(commits))
 	}
@@ -157,6 +174,7 @@ func TestUnpushedCommitSummaries(t *testing.T) {
 	run := func(args ...string) {
 		cmd := exec.Command("git", args...)
 		cmd.Dir = dir
+
 		cmd.Env = append(os.Environ(),
 			"GIT_AUTHOR_NAME=braw", "GIT_AUTHOR_EMAIL=braw@croft.local",
 			"GIT_COMMITTER_NAME=braw", "GIT_COMMITTER_EMAIL=braw@croft.local",
@@ -178,6 +196,7 @@ func TestUnpushedCommitSummaries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if len(commits) != 2 {
 		t.Errorf("got %d unpushed commits, want 2: %v", len(commits), commits)
 	}

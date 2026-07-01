@@ -13,17 +13,20 @@ func DiscoverDefaultBranch(repoPath string) (string, error) {
 		if err == nil && out != "origin/HEAD" {
 			return strings.TrimPrefix(out, "origin/"), nil
 		}
+
 		for _, branch := range []string{"main", "master"} {
 			if RefExists(repoPath, "origin/"+branch) {
 				return branch, nil
 			}
 		}
 	}
+
 	for _, branch := range []string{"main", "master"} {
 		if RefExists(repoPath, branch) {
 			return branch, nil
 		}
 	}
+
 	return "", fmt.Errorf("cannot determine default branch; use --base to specify one")
 }
 

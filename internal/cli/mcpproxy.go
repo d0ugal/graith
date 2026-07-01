@@ -34,6 +34,7 @@ type stdinChunk struct {
 
 func runMCPProxy(serverName, sessionID string) error {
 	const maxBackoff = 30 * time.Second
+
 	backoff := time.Second
 
 	// Single long-lived goroutine reading stdin. Shared across reconnect
@@ -47,8 +48,10 @@ func runMCPProxy(serverName, sessionID string) error {
 			if n > 0 {
 				cp := make([]byte, n)
 				copy(cp, buf[:n])
+
 				stdinCh <- stdinChunk{data: cp}
 			}
+
 			if err != nil {
 				stdinCh <- stdinChunk{err: err}
 				return
@@ -58,6 +61,7 @@ func runMCPProxy(serverName, sessionID string) error {
 
 	for {
 		start := time.Now()
+
 		err := mcpProxySession(serverName, sessionID, stdinCh)
 		if err == nil {
 			return nil
@@ -86,6 +90,7 @@ func runMCPProxy(serverName, sessionID string) error {
 
 func isPermanentError(err error) bool {
 	msg := err.Error()
+
 	return strings.Contains(msg, "unknown MCP server") ||
 		strings.Contains(msg, "MCP manager not initialized") ||
 		strings.Contains(msg, "is not enabled for agent")
@@ -114,6 +119,7 @@ func mcpProxySession(serverName, sessionID string, stdinCh <-chan stdinChunk) er
 		var e protocol.ErrorMsg
 		protocol.DecodePayload(resp, &e)
 		writeJSONRPCError(os.Stdout, nil, -32603, fmt.Sprintf("MCP server %q: %s", serverName, e.Message))
+
 		return fmt.Errorf("%s", e.Message)
 	}
 
@@ -140,6 +146,7 @@ func mcpProxySession(serverName, sessionID string, stdinCh <-chan stdinChunk) er
 				daemonDone <- err
 				return
 			}
+
 			switch frame.Channel {
 			case mcpChannel:
 				if _, werr := os.Stdout.Write(frame.Payload); werr != nil {
@@ -151,7 +158,9 @@ func mcpProxySession(serverName, sessionID string, stdinCh <-chan stdinChunk) er
 				if ctrl.Type == "error" {
 					var e protocol.ErrorMsg
 					protocol.DecodePayload(ctrl, &e)
+
 					daemonDone <- fmt.Errorf("server error: %s", e.Message)
+
 					return
 				}
 			}
@@ -166,8 +175,10 @@ func mcpProxySession(serverName, sessionID string, stdinCh <-chan stdinChunk) er
 				if chunk.err == io.EOF {
 					return nil
 				}
+
 				return chunk.err
 			}
+
 			if err := c.SendFrame(mcpChannel, chunk.data); err != nil {
 				return err
 			}
@@ -175,6 +186,7 @@ func mcpProxySession(serverName, sessionID string, stdinCh <-chan stdinChunk) er
 			if err == io.EOF {
 				return fmt.Errorf("daemon connection closed")
 			}
+
 			return err
 		}
 	}

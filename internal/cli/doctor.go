@@ -61,6 +61,7 @@ func (dc *doctorContext) fail(section, format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
 	dc.checks = append(dc.checks, doctorCheck{Section: section, Level: "fail", Message: msg})
 	out.Print("  ✗ %s\n", msg)
+
 	dc.ok = false
 }
 
@@ -84,10 +85,12 @@ var doctorCmd = &cobra.Command{
 
 		daemonVersion := dc.checkVersion(report)
 		dc.checkEnvironment()
+
 		diag := dc.checkDaemon(daemonVersion)
 		if diag != nil {
 			report.Diagnostics = diag
 			report.DaemonVersion = daemonVersion
+
 			dc.checkSessions(diag)
 			dc.checkStorage(diag)
 		}
@@ -103,17 +106,20 @@ var doctorCmd = &cobra.Command{
 			out.Print("\nAll checks passed.\n")
 		} else {
 			count := 0
+
 			for _, c := range dc.checks {
 				if c.Level == "fail" {
 					count++
 				}
 			}
+
 			out.Print("\n%d issue(s) found.\n", count)
 		}
 
 		if !dc.ok {
 			return fmt.Errorf("issues found")
 		}
+
 		return nil
 	},
 }
@@ -128,6 +134,7 @@ func (dc *doctorContext) checkVersion(report *doctorReport) string {
 		conn, err := net.DialTimeout("unix", paths.SocketPath, 500*time.Millisecond)
 		if err != nil {
 			dc.fail("version", "Socket exists but daemon not responding: %s", paths.SocketPath)
+
 			if doctorAutofix {
 				os.Remove(paths.SocketPath)
 				dc.hint("Removed stale socket")
@@ -144,7 +151,9 @@ func (dc *doctorContext) checkVersion(report *doctorReport) string {
 			frame, err := reader.ReadFrame()
 			if err == nil && frame.Channel == protocol.ChannelControl {
 				env, _ := protocol.DecodeControl(frame.Payload)
+
 				var hsOk protocol.HandshakeOkMsg
+
 				_ = protocol.DecodePayload(env, &hsOk)
 				daemonVersion = hsOk.DaemonVersion
 
@@ -155,6 +164,7 @@ func (dc *doctorContext) checkVersion(report *doctorReport) string {
 					dc.pass("version", "Daemon version: %s", daemonVersion)
 				}
 			}
+
 			conn.Close()
 		}
 	}
@@ -190,6 +200,7 @@ func (dc *doctorContext) checkEnvironment() {
 		size := info.Size()
 		if size > 10*1024*1024 {
 			dc.warn("environment", "Daemon log: %s (%s)", paths.DaemonLog, formatBytes(size))
+
 			if doctorAutofix {
 				if err := truncateFileKeepTail(paths.DaemonLog, 1024*1024); err == nil {
 					dc.hint("Truncated daemon log to ~1 MB")
@@ -225,6 +236,7 @@ func (dc *doctorContext) checkEnvironment() {
 		if safehouseCmd == "" {
 			safehouseCmd = "safehouse"
 		}
+
 		switch {
 		case runtime.GOOS != "darwin":
 			dc.fail("environment", "Sandbox enabled but not running macOS")
@@ -234,6 +246,7 @@ func (dc *doctorContext) checkEnvironment() {
 		default:
 			dc.pass("environment", "Sandbox enabled (safehouse available)")
 		}
+
 		dc.checkSandboxPaths()
 	} else {
 		dc.warn("environment", "Sandbox disabled")
@@ -256,34 +269,43 @@ func (dc *doctorContext) checkSandboxPaths() {
 	for _, p := range cfg.Sandbox.ReadDirs {
 		allReadDirs[config.ExpandPath(p)] = append(allReadDirs[config.ExpandPath(p)], "global")
 	}
+
 	for _, p := range cfg.Sandbox.WriteDirs {
 		allWriteDirs[config.ExpandPath(p)] = append(allWriteDirs[config.ExpandPath(p)], "global")
 	}
+
 	for name, agent := range cfg.Agents {
 		for _, p := range agent.Sandbox.ReadDirs {
 			allReadDirs[config.ExpandPath(p)] = append(allReadDirs[config.ExpandPath(p)], name)
 		}
+
 		for _, p := range agent.Sandbox.WriteDirs {
 			allWriteDirs[config.ExpandPath(p)] = append(allWriteDirs[config.ExpandPath(p)], name)
 		}
 	}
 
 	missing := 0
+
 	for p, sources := range allReadDirs {
 		if strings.ContainsAny(p, "*?[") {
 			continue
 		}
+
 		if _, err := os.Stat(p); err != nil {
 			dc.warn("environment", "Sandbox read dir does not exist: %s (configured in: %s)", p, strings.Join(sources, ", "))
+
 			missing++
 		}
 	}
+
 	for p, sources := range allWriteDirs {
 		if strings.ContainsAny(p, "*?[") {
 			continue
 		}
+
 		if _, err := os.Stat(p); err != nil {
 			dc.warn("environment", "Sandbox write dir does not exist: %s (configured in: %s)", p, strings.Join(sources, ", "))
+
 			missing++
 		}
 	}
@@ -307,9 +329,11 @@ func (dc *doctorContext) checkDaemon(daemonVersion string) *protocol.Diagnostics
 	if err != nil {
 		dc.fail("daemon", "Cannot connect to daemon: %v", err)
 		dc.checkStalePID()
+
 		return nil
 	}
 	defer conn.Close()
+
 	conn.SetDeadline(time.Now().Add(5 * time.Second))
 
 	reader := protocol.NewFrameReader(conn)
@@ -317,6 +341,7 @@ func (dc *doctorContext) checkDaemon(daemonVersion string) *protocol.Diagnostics
 
 	hs := client.BuildHandshake(paths, 0, 0, "")
 	hs.ClientID = "doctor-diag"
+
 	hsData, _ := protocol.EncodeControl("handshake", hs)
 	if err := writer.WriteFrame(protocol.ChannelControl, hsData); err != nil {
 		dc.fail("daemon", "Failed to send handshake: %v", err)
@@ -339,8 +364,10 @@ func (dc *doctorContext) checkDaemon(daemonVersion string) *protocol.Diagnostics
 	if err != nil {
 		dc.warn("daemon", "Daemon does not support diagnostics (upgrade daemon)")
 		dc.hint("Run: gr daemon restart")
+
 		return nil
 	}
+
 	if frame.Channel != protocol.ChannelControl {
 		dc.fail("daemon", "Unexpected response from daemon")
 		return nil
@@ -355,6 +382,7 @@ func (dc *doctorContext) checkDaemon(daemonVersion string) *protocol.Diagnostics
 	if resp.Type == "error" {
 		dc.warn("daemon", "Daemon does not support diagnostics (upgrade daemon)")
 		dc.hint("Run: gr daemon restart")
+
 		return nil
 	}
 
@@ -365,6 +393,7 @@ func (dc *doctorContext) checkDaemon(daemonVersion string) *protocol.Diagnostics
 	}
 
 	dc.pass("daemon", "Running (PID %d, uptime %s)", diag.DaemonPID, diag.DaemonUptime)
+
 	return &diag
 }
 
@@ -373,12 +402,15 @@ func (dc *doctorContext) checkStalePID() {
 	if err != nil {
 		return
 	}
+
 	var pid int
 	if _, err := fmt.Sscanf(strings.TrimSpace(string(pidData)), "%d", &pid); err != nil {
 		return
 	}
+
 	if !daemon.IsGraithDaemon(pid) {
 		dc.fail("daemon", "PID file is stale (PID %d is not a graith daemon)", pid)
+
 		if doctorAutofix {
 			os.Remove(paths.PIDFile)
 			dc.hint("Removed stale PID file")
@@ -390,19 +422,24 @@ func (dc *doctorContext) checkStalePID() {
 
 func (dc *doctorContext) checkSessions(diag *protocol.DiagnosticsMsg) {
 	f := diag.Fleet
+
 	parts := []string{}
 	if f.Active > 0 {
 		parts = append(parts, fmt.Sprintf("%d active", f.Active))
 	}
+
 	if f.Approval > 0 {
 		parts = append(parts, fmt.Sprintf("%d approval", f.Approval))
 	}
+
 	if f.Ready > 0 {
 		parts = append(parts, fmt.Sprintf("%d ready", f.Ready))
 	}
+
 	if f.Errored > 0 {
 		parts = append(parts, fmt.Sprintf("%d errored", f.Errored))
 	}
+
 	if f.Stopped > 0 {
 		parts = append(parts, fmt.Sprintf("%d stopped", f.Stopped))
 	}
@@ -411,37 +448,50 @@ func (dc *doctorContext) checkSessions(diag *protocol.DiagnosticsMsg) {
 	if len(parts) > 0 {
 		summary = ": " + strings.Join(parts, ", ")
 	}
+
 	dc.section(fmt.Sprintf("Sessions (%d total%s)", f.Total, summary))
 
 	issues := 0
+
 	for _, s := range diag.Sessions {
 		if s.Status == "running" && s.PID > 0 && !s.PIDAlive {
 			dc.fail("sessions", "%q (%s): PID %d not alive but status is running", s.Name, s.ID, s.PID)
 			dc.hint("Run: gr daemon restart")
+
 			issues++
 		}
+
 		if s.Status == "running" && s.PID > 0 && s.PIDAlive && s.HasPTY != nil && !*s.HasPTY {
 			dc.fail("sessions", "%q (%s): PID %d alive but not managed by daemon (orphaned after crash)", s.Name, s.ID, s.PID)
 			dc.hint("Run: gr stop %s  (kills orphaned process group)", s.Name)
+
 			issues++
 		}
+
 		if s.Status == "errored" && s.PID > 0 {
 			dc.warn("sessions", "%q (%s): errored with PID %d still recorded — may need manual cleanup", s.Name, s.ID, s.PID)
 			dc.hint("Run: kill -TERM -%d  (kills process group)", s.PID)
+
 			issues++
 		}
+
 		if s.WorktreePath != "" && !s.WorktreeExists {
 			dc.fail("sessions", "%q (%s): worktree path does not exist", s.Name, s.ID)
 			dc.hint("Run: gr delete %s", s.Name)
+
 			issues++
 		}
+
 		if s.ConfigStale {
 			dc.warn("sessions", "%q (%s): config has drifted since creation", s.Name, s.ID)
 			dc.hint("Restart session to pick up new config")
+
 			issues++
 		}
+
 		if s.Saturated {
 			dc.warn("sessions", "%q (%s): scrollback saturated (%s)", s.Name, s.ID, formatBytes(s.ScrollbackMax))
+
 			issues++
 		}
 	}
@@ -450,20 +500,24 @@ func (dc *doctorContext) checkSessions(diag *protocol.DiagnosticsMsg) {
 		if !s.HasToken {
 			dc.warn("sessions", "%q (%s): missing auth token — session may need restart to receive token", s.Name, s.ID)
 			dc.hint("Run: gr restart %s", s.Name)
+
 			issues++
 		}
 	}
 
 	if !cfg.Sandbox.Enabled {
 		running := 0
+
 		for _, s := range diag.Sessions {
 			if s.Status == "running" {
 				running++
 			}
 		}
+
 		if running > 1 {
 			dc.warn("sessions", "Sandbox is disabled with %d running sessions — agents can read state.json and impersonate other sessions", running)
 			dc.hint("Enable sandbox for session isolation: set sandbox.enabled = true in config")
+
 			issues++
 		}
 	}
@@ -494,17 +548,22 @@ func (dc *doctorContext) checkStorage(diag *protocol.DiagnosticsMsg) {
 		sessionIDs[s.ID] = true
 	}
 
-	var orphanedCount int
-	var orphanedBytes int64
+	var (
+		orphanedCount int
+		orphanedBytes int64
+	)
+
 	entries, err := os.ReadDir(paths.LogDir)
 	if err == nil {
 		for _, e := range entries {
 			if e.IsDir() || !strings.HasSuffix(e.Name(), ".log") {
 				continue
 			}
+
 			id := strings.TrimSuffix(e.Name(), ".log")
 			if !sessionIDs[id] {
 				orphanedCount++
+
 				if info, err := e.Info(); err == nil {
 					orphanedBytes += info.Size()
 				}
@@ -514,12 +573,15 @@ func (dc *doctorContext) checkStorage(diag *protocol.DiagnosticsMsg) {
 
 	if orphanedCount > 0 {
 		dc.warn("storage", "%d orphaned scrollback file(s) (%s)", orphanedCount, formatBytes(orphanedBytes))
+
 		if doctorAutofix {
 			removed := 0
+
 			for _, e := range entries {
 				if e.IsDir() || !strings.HasSuffix(e.Name(), ".log") {
 					continue
 				}
+
 				id := strings.TrimSuffix(e.Name(), ".log")
 				if !sessionIDs[id] {
 					if os.Remove(filepath.Join(paths.LogDir, e.Name())) == nil {
@@ -527,6 +589,7 @@ func (dc *doctorContext) checkStorage(diag *protocol.DiagnosticsMsg) {
 					}
 				}
 			}
+
 			dc.hint("Removed %d orphaned scrollback file(s)", removed)
 		} else {
 			dc.hint("Use --autofix to remove")
@@ -537,41 +600,53 @@ func (dc *doctorContext) checkStorage(diag *protocol.DiagnosticsMsg) {
 	orphanedWorktrees := dc.findOrphanedWorktrees(sessionIDs)
 	if len(orphanedWorktrees) > 0 {
 		var totalSize int64
+
 		dirtyCount := 0
+
 		for _, wt := range orphanedWorktrees {
 			totalSize += wt.size
 			if wt.hasDirtyFiles {
 				dirtyCount++
 			}
 		}
+
 		dc.warn("storage", "%d orphaned worktree dir(s) (%s)", len(orphanedWorktrees), formatBytes(totalSize))
+
 		for _, wt := range orphanedWorktrees {
 			extra := ""
 			if wt.hasDirtyFiles {
 				extra = " [has uncommitted changes]"
 			}
+
 			dc.hint("%s (%s)%s", wt.path, formatBytes(wt.size), extra)
 		}
+
 		if doctorAutofix {
 			removed := 0
 			skipped := 0
+
 			for _, wt := range orphanedWorktrees {
 				if wt.hasDirtyFiles {
 					skipped++
 					continue
 				}
+
 				var repoRoot string
 				if wt.isGitWorktree {
 					repoRoot, _ = git.RepoRootFromWorktree(wt.path)
 				}
+
 				if os.RemoveAll(wt.path) == nil {
 					removed++
+
 					if repoRoot != "" {
 						git.PruneWorktrees(repoRoot)
 					}
 				}
 			}
+
 			dc.hint("Removed %d orphaned worktree dir(s)", removed)
+
 			if skipped > 0 {
 				dc.hint("Skipped %d with uncommitted changes (inspect manually)", skipped)
 			}
@@ -587,27 +662,35 @@ func (dc *doctorContext) checkStorage(diag *protocol.DiagnosticsMsg) {
 
 func (dc *doctorContext) checkTmpDir() {
 	tmpDir := paths.TmpDir
+
 	entries, err := os.ReadDir(tmpDir)
 	if err != nil {
 		dc.pass("storage", "Tmp dir: %s (empty)", tmpDir)
 		return
 	}
 
-	var totalSize int64
-	var repoCount int
+	var (
+		totalSize int64
+		repoCount int
+	)
+
 	for _, repo := range entries {
 		if !repo.IsDir() {
 			continue
 		}
+
 		repoDir := filepath.Join(tmpDir, repo.Name())
+
 		hashes, err := os.ReadDir(repoDir)
 		if err != nil {
 			continue
 		}
+
 		for _, hash := range hashes {
 			if !hash.IsDir() {
 				continue
 			}
+
 			repoCount++
 			size, _ := dirSize(filepath.Join(repoDir, hash.Name()))
 			totalSize += size
@@ -624,6 +707,7 @@ func (dc *doctorContext) checkTmpDir() {
 	if info, err := os.Stat(legacyShareDir); err == nil && info.IsDir() {
 		size, _ := dirSize(legacyShareDir)
 		dc.warn("storage", "Legacy share dir exists: %s (%s)", legacyShareDir, formatBytes(size))
+
 		if doctorAutofix {
 			if os.RemoveAll(legacyShareDir) == nil {
 				dc.hint("Removed legacy share dir")
@@ -645,10 +729,12 @@ const orphanMinAge = 5 * time.Minute
 
 func (dc *doctorContext) findOrphanedWorktrees(sessionIDs map[string]bool) []orphanedWorktree {
 	var orphaned []orphanedWorktree
+
 	now := time.Now()
 
 	// Worktrees live at <DataDir>/worktrees/<repoName>/<repoHash>/<sessionID>
 	worktreesDir := filepath.Join(paths.DataDir, "worktrees")
+
 	repos, err := os.ReadDir(worktreesDir)
 	if err == nil {
 		orphaned = append(orphaned, findOrphanedInWorktrees(repos, worktreesDir, sessionIDs, now)...)
@@ -656,19 +742,23 @@ func (dc *doctorContext) findOrphanedWorktrees(sessionIDs map[string]bool) []orp
 
 	// Scratch dirs live at <DataDir>/scratch/<sessionID>
 	scratchDir := filepath.Join(paths.DataDir, "scratch")
+
 	scratches, err := os.ReadDir(scratchDir)
 	if err == nil {
 		for _, s := range scratches {
 			if !s.IsDir() {
 				continue
 			}
+
 			if sessionIDs[s.Name()] {
 				continue
 			}
+
 			sDir := filepath.Join(scratchDir, s.Name())
 			if info, err := s.Info(); err == nil && now.Sub(info.ModTime()) < orphanMinAge {
 				continue
 			}
+
 			size, _ := dirSize(sDir)
 			orphaned = append(orphaned, orphanedWorktree{path: sDir, size: size})
 		}
@@ -679,35 +769,45 @@ func (dc *doctorContext) findOrphanedWorktrees(sessionIDs map[string]bool) []orp
 
 func findOrphanedInWorktrees(repos []os.DirEntry, worktreesDir string, sessionIDs map[string]bool, now time.Time) []orphanedWorktree {
 	var orphaned []orphanedWorktree
+
 	for _, repo := range repos {
 		if !repo.IsDir() {
 			continue
 		}
+
 		repoDir := filepath.Join(worktreesDir, repo.Name())
+
 		hashes, err := os.ReadDir(repoDir)
 		if err != nil {
 			continue
 		}
+
 		for _, hash := range hashes {
 			if !hash.IsDir() {
 				continue
 			}
+
 			hashDir := filepath.Join(repoDir, hash.Name())
+
 			sessions, err := os.ReadDir(hashDir)
 			if err != nil {
 				continue
 			}
+
 			for _, sess := range sessions {
 				if !sess.IsDir() {
 					continue
 				}
+
 				if sessionIDs[sess.Name()] {
 					continue
 				}
+
 				sessDir := filepath.Join(hashDir, sess.Name())
 				if info, err := sess.Info(); err == nil && now.Sub(info.ModTime()) < orphanMinAge {
 					continue
 				}
+
 				size, _ := dirSize(sessDir)
 				wt := orphanedWorktree{path: sessDir, size: size}
 
@@ -722,6 +822,7 @@ func findOrphanedInWorktrees(repos []os.DirEntry, worktreesDir string, sessionID
 			}
 		}
 	}
+
 	return orphaned
 }
 
@@ -740,17 +841,21 @@ func formatBytes(b int64) string {
 
 func dirSize(path string) (int64, error) {
 	var total int64
+
 	err := filepath.WalkDir(path, func(_ string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
+
 		if !d.IsDir() {
 			if info, err := d.Info(); err == nil {
 				total += info.Size()
 			}
 		}
+
 		return nil
 	})
+
 	return total, err
 }
 
@@ -759,10 +864,13 @@ func truncateFileKeepTail(path string, keepBytes int64) error {
 	if err != nil {
 		return err
 	}
+
 	if int64(len(data)) <= keepBytes {
 		return nil
 	}
+
 	tail := data[int64(len(data))-keepBytes:]
+
 	return os.WriteFile(path, tail, 0o600)
 }
 

@@ -84,12 +84,15 @@ func TestDashboardAttach(t *testing.T) {
 	if dm.result == nil {
 		t.Fatal("expected result after enter")
 	}
+
 	if dm.result.Action != "attach" {
 		t.Errorf("action = %q, want %q", dm.result.Action, "attach")
 	}
+
 	if dm.result.SessionID != "s1" {
 		t.Errorf("session_id = %q, want %q", dm.result.SessionID, "s1")
 	}
+
 	if cmd == nil {
 		t.Error("expected tea.Quit cmd")
 	}
@@ -112,13 +115,16 @@ func TestDashboardDeleteConfirm(t *testing.T) {
 	}
 
 	dm = updateDash(dm, "x")
+
 	dm = updateDash(dm, "y")
 	if dm.result == nil {
 		t.Fatal("expected result after y confirm")
 	}
+
 	if dm.result.Action != "delete" {
 		t.Errorf("action = %q, want %q", dm.result.Action, "delete")
 	}
+
 	if dm.result.SessionID != "s1" {
 		t.Errorf("session_id = %q, want %q", dm.result.SessionID, "s1")
 	}
@@ -139,6 +145,7 @@ func TestDashboardStopConfirm(t *testing.T) {
 	if dm.result == nil {
 		t.Fatal("expected result after y confirm")
 	}
+
 	if dm.result.Action != "stop" {
 		t.Errorf("action = %q, want %q", dm.result.Action, "stop")
 	}
@@ -175,6 +182,7 @@ func TestDashboardResumeOnlyStopped(t *testing.T) {
 	if dm.result == nil {
 		t.Fatal("expected result after resume")
 	}
+
 	if dm.result.Action != "resume" {
 		t.Errorf("action = %q, want %q", dm.result.Action, "resume")
 	}
@@ -215,6 +223,7 @@ func TestDashboardRefresh(t *testing.T) {
 	})
 
 	result, _ := m.Update(refreshMsg{sessions: newSessions})
+
 	dm := result.(DashboardModel)
 	if len(dm.sessions) != 3 {
 		t.Errorf("sessions count = %d, want 3", len(dm.sessions))
@@ -228,6 +237,7 @@ func TestDashboardRefreshNilPreservesState(t *testing.T) {
 	m.height = 40
 
 	result, _ := m.Update(refreshMsg{sessions: nil})
+
 	dm := result.(DashboardModel)
 	if len(dm.sessions) != 2 {
 		t.Errorf("sessions count = %d, want 2 (preserved on nil refresh)", len(dm.sessions))
@@ -257,10 +267,12 @@ func TestDashboardCursorPreservedOnRefresh(t *testing.T) {
 	}
 
 	result, _ := dm.Update(refreshMsg{sessions: dashboardTestSessions()})
+
 	dm = result.(DashboardModel)
 	if dm.cursor != 1 {
 		t.Errorf("cursor after refresh = %d, want 1 (preserved)", dm.cursor)
 	}
+
 	if dm.selectedSessionID() != "s2" {
 		t.Errorf("selected session = %q, want %q", dm.selectedSessionID(), "s2")
 	}
@@ -299,6 +311,7 @@ func TestDashboardViewportScrolling(t *testing.T) {
 	if !strings.Contains(view, "kirk-0") {
 		t.Error("first session should be visible initially")
 	}
+
 	if !strings.Contains(view, "more below") {
 		t.Error("should show 'more below' indicator when sessions overflow")
 	}
@@ -308,6 +321,7 @@ func TestDashboardViewportScrolling(t *testing.T) {
 	for range 19 {
 		dm = updateDash(dm, "j")
 	}
+
 	if dm.cursor != 19 {
 		t.Fatalf("cursor = %d, want 19", dm.cursor)
 	}
@@ -316,6 +330,7 @@ func TestDashboardViewportScrolling(t *testing.T) {
 	if !strings.Contains(view, "kirk-19") {
 		t.Error("last session should be visible after scrolling down")
 	}
+
 	if !strings.Contains(view, "more above") {
 		t.Error("should show 'more above' indicator when scrolled down")
 	}
@@ -331,6 +346,7 @@ func TestDashboardDeleteConfirmTargetsOriginalSession(t *testing.T) {
 	if dm.state != dashStateConfirmDelete {
 		t.Fatalf("state = %d, want dashStateConfirmDelete", dm.state)
 	}
+
 	if dm.confirmSessionID != "s1" {
 		t.Fatalf("confirmSessionID = %q, want %q", dm.confirmSessionID, "s1")
 	}
@@ -354,6 +370,7 @@ func TestDashboardDeleteConfirmTargetsOriginalSession(t *testing.T) {
 	if dm.state != dashStateNormal {
 		t.Errorf("state = %d, want dashStateNormal (confirm cancelled)", dm.state)
 	}
+
 	if dm.confirmSessionID != "" {
 		t.Errorf("confirmSessionID = %q, want empty", dm.confirmSessionID)
 	}
@@ -396,9 +413,11 @@ func TestDashboardDeleteConfirmSurvivesRefreshWithTarget(t *testing.T) {
 	if dm.result == nil {
 		t.Fatal("expected result after y confirm")
 	}
+
 	if dm.result.Action != "delete" {
 		t.Errorf("action = %q, want %q", dm.result.Action, "delete")
 	}
+
 	if dm.result.SessionID != "s1" {
 		t.Errorf("session_id = %q, want %q (should target original session, not cursor)", dm.result.SessionID, "s1")
 	}
@@ -414,6 +433,7 @@ func TestDashboardStopConfirmTargetsOriginalSession(t *testing.T) {
 	if dm.state != dashStateConfirmStop {
 		t.Fatalf("state = %d, want dashStateConfirmStop", dm.state)
 	}
+
 	if dm.confirmSessionID != "s1" {
 		t.Fatalf("confirmSessionID = %q, want %q", dm.confirmSessionID, "s1")
 	}
@@ -462,9 +482,11 @@ func TestDashboardStopConfirmSurvivesRefreshWithTarget(t *testing.T) {
 	if dm.result == nil {
 		t.Fatal("expected result after y confirm")
 	}
+
 	if dm.result.Action != "stop" {
 		t.Errorf("action = %q, want %q", dm.result.Action, "stop")
 	}
+
 	if dm.result.SessionID != "s1" {
 		t.Errorf("session_id = %q, want %q (should target original session)", dm.result.SessionID, "s1")
 	}
@@ -492,6 +514,7 @@ func TestDashboardStopConfirmCancelledWhenTargetStops(t *testing.T) {
 	if dm.state != dashStateNormal {
 		t.Errorf("state = %d, want dashStateNormal (stop cancelled because target stopped)", dm.state)
 	}
+
 	if dm.confirmSessionID != "" {
 		t.Errorf("confirmSessionID = %q, want empty", dm.confirmSessionID)
 	}
@@ -513,6 +536,7 @@ func TestDashboardConfirmCancelClearsSessionID(t *testing.T) {
 	if dm.state != dashStateNormal {
 		t.Errorf("state = %d, want dashStateNormal", dm.state)
 	}
+
 	if dm.confirmSessionID != "" {
 		t.Errorf("confirmSessionID = %q, want empty after cancel", dm.confirmSessionID)
 	}

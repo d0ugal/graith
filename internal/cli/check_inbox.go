@@ -27,6 +27,7 @@ var checkInboxCmd = &cobra.Command{
 		if err != nil {
 			return nil
 		}
+
 		c, err := client.ConnectFast(hookPaths)
 		if err != nil {
 			return nil
@@ -39,17 +40,21 @@ var checkInboxCmd = &cobra.Command{
 		})
 
 		var messages []inboxMessage
+
 		for {
 			frame, err := c.ReadFrame()
 			if err != nil {
 				if err == io.EOF {
 					break
 				}
+
 				return nil
 			}
+
 			if frame.Channel != protocol.ChannelControl {
 				continue
 			}
+
 			msg, _ := protocol.DecodeControl(frame.Payload)
 			switch msg.Type {
 			case "msg_message":
@@ -63,6 +68,7 @@ var checkInboxCmd = &cobra.Command{
 				return nil
 			}
 		}
+
 	done:
 
 		if len(messages) == 0 {
@@ -70,11 +76,13 @@ var checkInboxCmd = &cobra.Command{
 		}
 
 		var preview strings.Builder
+
 		for _, m := range messages {
 			sender := m.SenderName
 			if sender == "" {
 				sender = m.SenderID
 			}
+
 			fmt.Fprintf(&preview, "From %s: %s\n", sender, m.Body)
 		}
 

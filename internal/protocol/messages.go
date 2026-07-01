@@ -13,10 +13,12 @@ func VersionCompatible(v string) bool {
 	if !ok {
 		return false
 	}
+
 	theirMajor, _, ok := strings.Cut(v, ".")
 	if !ok {
 		return false
 	}
+
 	return ourMajor == theirMajor
 }
 
@@ -31,6 +33,7 @@ func EncodeControl(msgType string, payload any) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("marshal payload: %w", err)
 	}
+
 	return json.Marshal(Envelope{Type: msgType, Payload: p})
 }
 
@@ -39,6 +42,7 @@ func EncodeControlWithToken(msgType string, payload any, token string) ([]byte, 
 	if err != nil {
 		return nil, fmt.Errorf("marshal payload: %w", err)
 	}
+
 	return json.Marshal(Envelope{Type: msgType, Payload: p, Token: token})
 }
 
@@ -47,6 +51,7 @@ func DecodeControl(raw []byte) (Envelope, error) {
 	if err := json.Unmarshal(raw, &m); err != nil {
 		return Envelope{}, fmt.Errorf("decode control: %w", err)
 	}
+
 	return m, nil
 }
 
@@ -54,6 +59,7 @@ func DecodePayload(m Envelope, target any) error {
 	if len(m.Payload) == 0 || string(m.Payload) == "null" {
 		return fmt.Errorf("decode payload: missing or null payload")
 	}
+
 	return json.Unmarshal(m.Payload, target)
 }
 

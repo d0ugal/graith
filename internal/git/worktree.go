@@ -24,17 +24,21 @@ func SetupSession(ctx context.Context, repoPath, worktreePath, branchName, baseB
 			return fmt.Errorf("fetch: %w", err)
 		}
 	}
+
 	startRef := "origin/" + baseBranch
 	if !RefExists(repoPath, startRef) {
 		startRef = baseBranch
 	}
+
 	if err := CreateBranch(repoPath, branchName, startRef); err != nil {
 		return fmt.Errorf("create branch: %w", err)
 	}
+
 	if err := CreateWorktree(repoPath, worktreePath, branchName); err != nil {
 		_ = DeleteBranch(repoPath, branchName)
 		return fmt.Errorf("create worktree: %w", err)
 	}
+
 	return nil
 }
 
@@ -43,10 +47,12 @@ func WorktreeGitDirs(worktreePath string) (gitDir, commonDir string, err error) 
 	if err != nil {
 		return "", "", fmt.Errorf("resolve git dir: %w", err)
 	}
+
 	commonDir, err = RunOutput(worktreePath, "rev-parse", "--git-common-dir")
 	if err != nil {
 		return "", "", fmt.Errorf("resolve git common dir: %w", err)
 	}
+
 	return gitDir, commonDir, nil
 }
 
@@ -55,10 +61,12 @@ func DiscoverDefaultBranchOrHEAD(repoPath string) (string, error) {
 	if err == nil {
 		return branch, nil
 	}
+
 	out, headErr := RunOutput(repoPath, "rev-parse", "--abbrev-ref", "HEAD")
 	if headErr != nil || out == "HEAD" {
 		return "", err
 	}
+
 	return out, nil
 }
 
@@ -72,11 +80,13 @@ func RepoRootFromWorktree(worktreePath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+
 	return filepath.Dir(commonDir), nil
 }
 
 func TeardownSession(repoPath, worktreePath, branchName string) error {
 	var errs []error
+
 	if _, err := os.Stat(worktreePath); err == nil {
 		if err := RemoveWorktree(repoPath, worktreePath); err != nil {
 			errs = append(errs, fmt.Errorf("remove worktree: %w", err))
@@ -86,10 +96,12 @@ func TeardownSession(repoPath, worktreePath, branchName string) error {
 	} else {
 		errs = append(errs, fmt.Errorf("stat worktree: %w", err))
 	}
+
 	if branchName != "" && RefExists(repoPath, branchName) {
 		if err := DeleteBranch(repoPath, branchName); err != nil {
 			errs = append(errs, fmt.Errorf("delete branch: %w", err))
 		}
 	}
+
 	return errors.Join(errs...)
 }

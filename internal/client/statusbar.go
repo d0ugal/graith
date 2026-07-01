@@ -46,9 +46,11 @@ func newStatusBarInfo(s protocol.SessionInfo, unreadCount int, fleet protocol.Fl
 		info.prState = s.PullRequest.State
 		info.prConflicting = s.PullRequest.Conflicting
 	}
+
 	if s.CI != nil {
 		info.ciState = s.CI.State
 	}
+
 	return info
 }
 
@@ -64,6 +66,7 @@ var (
 
 func styledStatus(status string, bg color.Color) lipgloss.Style {
 	base := lipgloss.NewStyle().Background(bg)
+
 	switch status {
 	case "active", "running":
 		return base.Foreground(colorGreen)
@@ -91,6 +94,7 @@ func formatStatusLine(info statusBarInfo, cols int) string {
 
 	accent := accentBg
 	fill := barBg
+
 	if info.pendingApprovals > 0 {
 		accent = lipgloss.Color("#8b0000")
 		fill = lipgloss.Color("#5f0000")
@@ -111,6 +115,7 @@ func formatStatusLine(info statusBarInfo, cols int) string {
 	transFillToAccent := lipgloss.NewStyle().Foreground(accent).Background(fill).Render(plLeft)
 
 	var dot string
+
 	switch {
 	case status == "approval":
 		dot = styledStatus(status, accent).Render("⚠")
@@ -140,10 +145,12 @@ func formatStatusLine(info statusBarInfo, cols int) string {
 		if info.dirty {
 			mid += fillPad.Render(" ") + dirtyStyle.Render("●")
 		}
+
 		if info.unpushed > 0 {
 			mid += fillPad.Render(" ") + aheadStyle.Render(fmt.Sprintf("↑%d", info.unpushed))
 		}
 	}
+
 	if pr := formatPRSection(info, fill); pr != "" {
 		mid += sep + pr
 	}
@@ -152,9 +159,11 @@ func formatStatusLine(info statusBarInfo, cols int) string {
 		if info.unread <= 0 {
 			return body
 		}
+
 		if body != "" {
 			body += accentSep.Render(" │ ")
 		}
+
 		return body + unreadStyle.Render(fmt.Sprintf("✉ %d", info.unread))
 	}
 
@@ -162,7 +171,9 @@ func formatStatusLine(info statusBarInfo, cols int) string {
 		if body == "" {
 			return "", "", 0
 		}
+
 		section := accentPad.Render(" ") + body + accentPad.Render(" ")
+
 		return transFillToAccent, section, lipgloss.Width(transFillToAccent) + lipgloss.Width(section)
 	}
 
@@ -176,9 +187,11 @@ func formatStatusLine(info statusBarInfo, cols int) string {
 		mid = ""
 		midW = 0
 	}
+
 	if leftW+rightW > cols {
 		rightSep, rightSection, rightW = wrapRight(appendUnread(formatFleetMinimal(info.fleet, accent)))
 	}
+
 	if leftW+rightW > cols {
 		rightSep, rightSection, rightW = "", "", 0
 	}
@@ -192,6 +205,7 @@ func formatStatusLine(info statusBarInfo, cols int) string {
 			line += fillPad.Render(strings.Repeat(" ", pad))
 		}
 	}
+
 	return line
 }
 
@@ -201,6 +215,7 @@ func formatPRSection(info statusBarInfo, bg color.Color) string {
 	if info.prNumber == 0 {
 		return ""
 	}
+
 	base := lipgloss.NewStyle().Background(bg)
 	label := fmt.Sprintf("PR#%d", info.prNumber)
 
@@ -210,9 +225,11 @@ func formatPRSection(info statusBarInfo, bg color.Color) string {
 	case "closed":
 		return base.Foreground(colorDim).Render(label + " closed")
 	}
+
 	if info.prConflicting {
 		return base.Foreground(colorRed).Bold(true).Render(label + " ⚠conflict")
 	}
+
 	switch info.ciState {
 	case "failing":
 		return base.Foreground(colorRed).Render(label + " ✗CI")
@@ -221,6 +238,7 @@ func formatPRSection(info statusBarInfo, bg color.Color) string {
 	case "pending":
 		return base.Foreground(colorYellow).Render(label + " ·CI")
 	}
+
 	return base.Foreground(colorBlue).Render(label)
 }
 
@@ -230,20 +248,25 @@ func formatFleetSection(fleet protocol.FleetSummary, bg color.Color) string {
 	}
 
 	pad := lipgloss.NewStyle().Background(bg)
+
 	var parts []string
 
 	if fleet.Approval > 0 {
 		parts = append(parts, styledStatus("approval", bg).Render(fmt.Sprintf("⚠ %d approval", fleet.Approval)))
 	}
+
 	if fleet.Errored > 0 {
 		parts = append(parts, styledStatus("errored", bg).Render(fmt.Sprintf("✗ %d error", fleet.Errored)))
 	}
+
 	if fleet.Active > 0 {
 		parts = append(parts, styledStatus("active", bg).Render(fmt.Sprintf("● %d active", fleet.Active)))
 	}
+
 	if fleet.Ready > 0 {
 		parts = append(parts, styledStatus("ready", bg).Render(fmt.Sprintf("● %d ready", fleet.Ready)))
 	}
+
 	if fleet.Stopped > 0 {
 		parts = append(parts, styledStatus("stopped", bg).Render(fmt.Sprintf("○ %d stopped", fleet.Stopped)))
 	}
@@ -251,6 +274,7 @@ func formatFleetSection(fleet protocol.FleetSummary, bg color.Color) string {
 	if len(parts) == 0 {
 		return ""
 	}
+
 	return strings.Join(parts, pad.Render("  "))
 }
 
@@ -258,12 +282,15 @@ func formatFleetMinimal(fleet protocol.FleetSummary, bg color.Color) string {
 	if fleet.Total <= 1 {
 		return ""
 	}
+
 	if fleet.Approval > 0 {
 		return styledStatus("approval", bg).Render(fmt.Sprintf("⚠ %d approval", fleet.Approval))
 	}
+
 	if fleet.Errored > 0 {
 		return styledStatus("errored", bg).Render(fmt.Sprintf("✗ %d error", fleet.Errored))
 	}
+
 	return ""
 }
 
@@ -281,6 +308,7 @@ func (sb *statusBarState) barRow() int {
 	if sb.position == "top" {
 		return 1
 	}
+
 	return sb.rows
 }
 
@@ -288,6 +316,7 @@ func (sb *statusBarState) scrollRegion() string {
 	if sb.position == "top" {
 		return fmt.Sprintf("\x1b[2;%dr", sb.rows)
 	}
+
 	return fmt.Sprintf("\x1b[1;%dr", sb.rows-1)
 }
 
@@ -315,11 +344,14 @@ func (sb *statusBarState) setup(w io.Writer) {
 	sb.mu.Unlock()
 
 	line := formatStatusLine(info, cols)
+
 	var buf []byte
+
 	buf = append(buf, region...)
 	if pos == "top" {
 		buf = append(buf, "\x1b[2;1H"...)
 	}
+
 	buf = append(buf, fmt.Sprintf("\x1b7\x1b[%d;1H%s\x1b8", row, line)...)
 	w.Write(buf)
 }

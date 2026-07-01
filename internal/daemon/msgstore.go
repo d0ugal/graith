@@ -42,6 +42,7 @@ func NewMsgStore(dbPath string) (*MsgStore, error) {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
 		return nil, fmt.Errorf("create messages db dir: %w", err)
 	}
+
 	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(wal)&_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, fmt.Errorf("open messages db: %w", err)
@@ -103,12 +104,14 @@ func initSchema(db *sql.DB) error {
 	if err != nil {
 		return fmt.Errorf("init messages schema: %w", err)
 	}
+
 	return nil
 }
 
 func generateMsgID() string {
 	b := make([]byte, 8)
 	_, _ = rand.Read(b)
+
 	return "msg_" + hex.EncodeToString(b)
 }
 
@@ -123,6 +126,7 @@ func (s *MsgStore) Publish(stream, senderID, senderName, body, threadID, replyTo
 	defer tx.Rollback()
 
 	var seq int64
+
 	err = tx.QueryRow(`
 		SELECT MAX(next) + 1 FROM (
 			SELECT COALESCE(MAX(seq), 0) AS next FROM messages WHERE stream = ?
@@ -185,18 +189,23 @@ func (s *MsgStore) Publish(stream, senderID, senderName, body, threadID, replyTo
 
 func (s *MsgStore) Read(stream, subscriber string, onlyUnread bool, threadID string) ([]Message, error) {
 	var args []any
+
 	q := "SELECT id, seq, stream, sender_id, sender_name, body, COALESCE(thread_id, ''), COALESCE(reply_to, ''), created_at FROM messages WHERE stream = ?"
+
 	args = append(args, stream)
 
 	if onlyUnread && subscriber != "" {
 		q += " AND seq > COALESCE((SELECT ack_seq FROM cursors WHERE subscriber = ? AND stream = ?), 0)"
+
 		args = append(args, subscriber, stream)
 		q += " AND seq NOT IN (SELECT seq FROM acked_messages WHERE subscriber = ? AND stream = ?)"
+
 		args = append(args, subscriber, stream)
 	}
 
 	if threadID != "" {
 		q += " AND thread_id = ?"
+
 		args = append(args, threadID)
 	}
 
@@ -209,13 +218,16 @@ func (s *MsgStore) Read(stream, subscriber string, onlyUnread bool, threadID str
 	defer rows.Close()
 
 	var msgs []Message
+
 	for rows.Next() {
 		var m Message
 		if err := rows.Scan(&m.ID, &m.Seq, &m.Stream, &m.SenderID, &m.SenderName, &m.Body, &m.ThreadID, &m.ReplyTo, &m.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan message: %w", err)
 		}
+
 		msgs = append(msgs, m)
 	}
+
 	return msgs, rows.Err()
 }
 
@@ -238,6 +250,7 @@ func (s *MsgStore) Conversation(self string, limit int) ([]Message, error) {
 	// excludes self's own inbox). GLOB is case-sensitive so it can use the
 	// stream index, unlike LIKE which SQLite treats case-insensitively.
 	const cols = `id, seq, stream, sender_id, sender_name, body, thread_id, reply_to, created_at`
+
 	inner := `
 		SELECT id, seq, stream, sender_id, sender_name, body,
 		       COALESCE(thread_id, '') AS thread_id, COALESCE(reply_to, '') AS reply_to, created_at
@@ -254,6 +267,7 @@ func (s *MsgStore) Conversation(self string, limit int) ([]Message, error) {
 			ORDER BY created_at DESC, id DESC
 			LIMIT ?
 		) ORDER BY created_at ASC, id ASC`
+
 		args = append(args, limit)
 	} else {
 		q = inner + `
@@ -267,13 +281,16 @@ func (s *MsgStore) Conversation(self string, limit int) ([]Message, error) {
 	defer rows.Close()
 
 	var msgs []Message
+
 	for rows.Next() {
 		var m Message
 		if err := rows.Scan(&m.ID, &m.Seq, &m.Stream, &m.SenderID, &m.SenderName, &m.Body, &m.ThreadID, &m.ReplyTo, &m.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan conversation message: %w", err)
 		}
+
 		msgs = append(msgs, m)
 	}
+
 	return msgs, rows.Err()
 }
 
@@ -289,6 +306,7 @@ func (s *MsgStore) Ack(stream, subscriber string, upToSeq int64) error {
 	if err != nil {
 		return fmt.Errorf("ack: %w", err)
 	}
+
 	return nil
 }
 
@@ -296,6 +314,7 @@ func (s *MsgStore) AckMessages(stream, subscriber string, seqs []int64) error {
 	if len(seqs) == 0 {
 		return nil
 	}
+
 	tx, err := s.db.Begin()
 	if err != nil {
 		return fmt.Errorf("ack messages: begin tx: %w", err)
@@ -303,6 +322,7 @@ func (s *MsgStore) AckMessages(stream, subscriber string, seqs []int64) error {
 	defer tx.Rollback()
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
+
 	stmt, err := tx.Prepare(
 		`INSERT OR IGNORE INTO acked_messages (subscriber, stream, seq, acked_at)
 		 VALUES (?, ?, ?, ?)`)
@@ -316,11 +336,13 @@ func (s *MsgStore) AckMessages(stream, subscriber string, seqs []int64) error {
 			return fmt.Errorf("ack messages: insert seq %d: %w", seq, err)
 		}
 	}
+
 	return tx.Commit()
 }
 
 func (s *MsgStore) AckLatest(stream, subscriber string) error {
 	var maxSeq int64
+
 	err := s.db.QueryRow(`
 		SELECT MAX(s) FROM (
 			SELECT COALESCE(MAX(seq), 0) AS s FROM messages WHERE stream = ?
@@ -330,6 +352,7 @@ func (s *MsgStore) AckLatest(stream, subscriber string) error {
 	if err != nil {
 		return fmt.Errorf("ack latest: %w", err)
 	}
+
 	return s.Ack(stream, subscriber, maxSeq)
 }
 
@@ -351,9 +374,11 @@ func (s *MsgStore) ListStreams(subscriber string, includeSystem bool) ([]StreamI
 	if !includeSystem {
 		q += ` WHERE m.stream NOT LIKE '_system.%'`
 	}
+
 	q += `
 		GROUP BY m.stream
 		ORDER BY latest_at DESC`
+
 	rows, err := s.db.Query(q, subscriber, subscriber)
 	if err != nil {
 		return nil, fmt.Errorf("list streams: %w", err)
@@ -361,18 +386,22 @@ func (s *MsgStore) ListStreams(subscriber string, includeSystem bool) ([]StreamI
 	defer rows.Close()
 
 	var streams []StreamInfo
+
 	for rows.Next() {
 		var si StreamInfo
 		if err := rows.Scan(&si.Name, &si.Total, &si.Unread, &si.LatestAt); err != nil {
 			return nil, fmt.Errorf("scan stream info: %w", err)
 		}
+
 		streams = append(streams, si)
 	}
+
 	return streams, rows.Err()
 }
 
 func (s *MsgStore) TotalUnread(subscriber string) int {
 	var count int
+
 	err := s.db.QueryRow(`
 		SELECT COUNT(*) FROM messages m
 		WHERE m.stream = 'inbox:' || ?
@@ -388,6 +417,7 @@ func (s *MsgStore) TotalUnread(subscriber string) int {
 	if err != nil {
 		return 0
 	}
+
 	return count
 }
 
@@ -401,6 +431,7 @@ func (s *MsgStore) Subscribe(stream string) (chan Message, func()) {
 	unsub := func() {
 		s.mu.Lock()
 		defer s.mu.Unlock()
+
 		subs := s.subs[stream]
 		for i, sub := range subs {
 			if sub == ch {
@@ -409,6 +440,7 @@ func (s *MsgStore) Subscribe(stream string) (chan Message, func()) {
 			}
 		}
 	}
+
 	return ch, unsub
 }
 
@@ -416,15 +448,19 @@ func (s *MsgStore) Cleanup(maxAge time.Duration, maxPerStream int) (int64, error
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	var total int64
-	var ageCutoff string
+	var (
+		total     int64
+		ageCutoff string
+	)
 
 	if maxAge > 0 {
 		ageCutoff = time.Now().UTC().Add(-maxAge).Format(time.RFC3339Nano)
+
 		res, err := s.db.Exec("DELETE FROM messages WHERE created_at < ?", ageCutoff)
 		if err != nil {
 			return 0, fmt.Errorf("cleanup by age: %w", err)
 		}
+
 		n, _ := res.RowsAffected()
 		total += n
 	}
@@ -439,15 +475,19 @@ func (s *MsgStore) Cleanup(maxAge time.Duration, maxPerStream int) (int64, error
 			name  string
 			count int64
 		}
+
 		var streams []streamCount
+
 		for rows.Next() {
 			var sc streamCount
 			if err := rows.Scan(&sc.name, &sc.count); err != nil {
 				rows.Close()
 				return total, fmt.Errorf("cleanup by count: scan: %w", err)
 			}
+
 			streams = append(streams, sc)
 		}
+
 		rows.Close()
 
 		for _, sc := range streams {
@@ -460,6 +500,7 @@ func (s *MsgStore) Cleanup(maxAge time.Duration, maxPerStream int) (int64, error
 			if err != nil {
 				return total, fmt.Errorf("cleanup by count: delete from %s: %w", sc.name, err)
 			}
+
 			n, _ := res.RowsAffected()
 			total += n
 		}
@@ -488,5 +529,6 @@ func nullStr(s string) any {
 	if s == "" {
 		return nil
 	}
+
 	return s
 }

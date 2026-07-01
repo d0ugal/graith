@@ -34,8 +34,10 @@ task = "Add trace export"
 `
 
 	var sf scenarioFile
+
 	dec := toml.NewDecoder(bytes.NewReader([]byte(input)))
 	dec.DisallowUnknownFields()
+
 	if err := dec.Decode(&sf); err != nil {
 		t.Fatalf("parse error: %v", err)
 	}
@@ -43,12 +45,15 @@ task = "Add trace export"
 	if sf.Version != 1 {
 		t.Errorf("version = %d, want 1", sf.Version)
 	}
+
 	if sf.Scenario.Name != "strath-pipeline" {
 		t.Errorf("name = %q", sf.Scenario.Name)
 	}
+
 	if sf.Scenario.Goal != "Build the strath pipeline" {
 		t.Errorf("goal = %q", sf.Scenario.Goal)
 	}
+
 	if len(sf.Sessions) != 2 {
 		t.Fatalf("sessions = %d, want 2", len(sf.Sessions))
 	}
@@ -57,18 +62,23 @@ task = "Add trace export"
 	if s0.Name != "bairn" {
 		t.Errorf("session[0].name = %q", s0.Name)
 	}
+
 	if s0.Repo != "~/Code/croft-backend" {
 		t.Errorf("session[0].repo = %q", s0.Repo)
 	}
+
 	if s0.Agent != "claude" {
 		t.Errorf("session[0].agent = %q", s0.Agent)
 	}
+
 	if s0.Model != "claude-opus-4-8" {
 		t.Errorf("session[0].model = %q", s0.Model)
 	}
+
 	if s0.Role != "Backend engineer" {
 		t.Errorf("session[0].role = %q", s0.Role)
 	}
+
 	if s0.Task != "Add tracing ingest" {
 		t.Errorf("session[0].task = %q", s0.Task)
 	}
@@ -97,8 +107,10 @@ agent_hooks = false
 `
 
 	var sf scenarioFile
+
 	dec := toml.NewDecoder(bytes.NewReader([]byte(input)))
 	dec.DisallowUnknownFields()
+
 	if err := dec.Decode(&sf); err != nil {
 		t.Fatal(err)
 	}
@@ -126,12 +138,15 @@ repo = "/tmp/croft"
 `
 
 	var sf scenarioFile
+
 	dec := toml.NewDecoder(bytes.NewReader([]byte(input)))
 	dec.DisallowUnknownFields()
+
 	err := dec.Decode(&sf)
 	if err == nil {
 		t.Fatal("expected error for unknown TOML field")
 	}
+
 	if !strings.Contains(err.Error(), "strict mode") {
 		t.Errorf("error = %q, want strict mode error", err.Error())
 	}
@@ -149,13 +164,16 @@ goal = "do things"
 name = "braw"
 repo = "/tmp/croft"
 `)
+
 	sf, err := parseScenarioFile(data)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if sf.Scenario.Name != "kirk" {
 		t.Errorf("name = %q", sf.Scenario.Name)
 	}
+
 	if sf.Scenario.Goal != "do things" {
 		t.Errorf("goal = %q", sf.Scenario.Goal)
 	}
@@ -190,6 +208,7 @@ name = "kirk"`, "at least one [[sessions]] entry"},
 			if err == nil {
 				t.Fatal("expected error")
 			}
+
 			if !strings.Contains(err.Error(), tt.wantErr) {
 				t.Errorf("error = %q, want to contain %q", err.Error(), tt.wantErr)
 			}
@@ -232,9 +251,11 @@ repo = "/tmp/croft"
 	if len(available) != 1 {
 		t.Fatalf("expected 1 available scenario, got %d", len(available))
 	}
+
 	if available[0].Name != "kirk" {
 		t.Errorf("name = %q, want 'kirk'", available[0].Name)
 	}
+
 	if available[0].Goal != "Kirk goal" {
 		t.Errorf("goal = %q", available[0].Goal)
 	}
@@ -256,6 +277,7 @@ func TestResolveScenarioSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if string(data) != "test content" {
 		t.Errorf("data = %q", data)
 	}
@@ -265,6 +287,7 @@ func TestResolveScenarioSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if string(data) != "test content" {
 		t.Errorf("data = %q", data)
 	}
@@ -280,10 +303,12 @@ func TestResolveScenarioSource(t *testing.T) {
 	if err := os.WriteFile(directFile, []byte("direct"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+
 	data, err = resolveScenarioSourceFrom(directFile, scenarioDir)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if string(data) != "direct" {
 		t.Errorf("data = %q", data)
 	}

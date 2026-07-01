@@ -25,9 +25,11 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 	reader := protocol.NewFrameReader(conn)
 	writer := &safeFrameWriter{writer: protocol.NewFrameWriter(conn)}
 
-	var attachedSessionID string
-	var attachedDataWriter *frameDataWriter
-	var clientRows, clientCols uint16 = 24, 80
+	var (
+		attachedSessionID      string
+		attachedDataWriter     *frameDataWriter
+		clientRows, clientCols uint16 = 24, 80
+	)
 
 	sendControl := func(msgType string, payload any) {
 		data, err := protocol.EncodeControl(msgType, payload)
@@ -35,6 +37,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 			log.Error("encode control", "err", err)
 			return
 		}
+
 		_ = writer.WriteFrame(protocol.ChannelControl, data)
 	}
 
@@ -50,12 +53,15 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 			if err != io.EOF {
 				log.Debug("client read error", "err", err)
 			}
+
 			if attachedSessionID != "" {
 				sm.ClearAttachedClient(attachedSessionID, conn)
+
 				if pty, ok := sm.GetPTY(attachedSessionID); ok {
 					pty.DetachWriter(attachedDataWriter)
 				}
 			}
+
 			return
 		}
 
@@ -70,6 +76,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 			sm.mu.RLock()
 			auth, authErr := resolveAuth(sm, msg.Token)
 			sm.mu.RUnlock()
+
 			if authErr != nil {
 				sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
 				continue
@@ -82,30 +89,38 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid handshake"})
 					continue
 				}
+
 				if !protocol.VersionCompatible(h.Version) {
 					sendControl("handshake_err", protocol.HandshakeErrMsg{
 						Reason: fmt.Sprintf("protocol version mismatch: client=%s, server=%s; try upgrading the client and running: gr daemon restart", h.Version, protocol.Version),
 					})
+
 					return
 				}
+
 				if h.Profile != sm.paths.Profile {
 					sendControl("handshake_err", protocol.HandshakeErrMsg{
 						Reason: fmt.Sprintf("profile mismatch: client is %q but daemon is %q", h.Profile, sm.paths.Profile),
 					})
+
 					return
 				}
+
 				clientCols = h.TerminalSize[0]
 				clientRows = h.TerminalSize[1]
+
 				sendControl("handshake_ok", protocol.HandshakeOkMsg{Version: protocol.Version, DaemonVersion: version.Version})
 				log.Info("client connected", "client_id", h.ClientID, "cwd", h.Cwd)
 
 			case "list":
 				sessions := sm.List()
 				cfg := sm.Config()
+
 				infos := make([]protocol.SessionInfo, 0, len(sessions))
 				for _, s := range sessions {
 					infos = append(infos, toSessionInfo(s, cfg, sm.getHookReport(s.ID)))
 				}
+
 				sendControl("session_list", protocol.SessionListMsg{Sessions: infos})
 
 			case "create":
@@ -114,13 +129,16 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid create message"})
 					continue
 				}
+
 				if auth.authenticated {
 					c.ParentID = auth.sessionID
 				}
+
 				agentName := c.Agent
 				if agentName == "" {
 					agentName = sm.Config().DefaultAgent
 				}
+
 				sess, err := sm.Create(c.Name, agentName, c.RepoPath, c.Base, c.Prompt, c.Model, c.ParentID, c.NoRepo, c.ShareWorktree, c.AgentHooks, c.InPlace, c.AllowConcurrent, c.SkipModelValidation, clientRows, clientCols)
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
@@ -134,13 +152,16 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid fork message"})
 					continue
 				}
+
 				sm.mu.RLock()
 				authErr := auth.checkTarget(sm, f.SourceSessionID, authSelfOrDescendant)
 				sm.mu.RUnlock()
+
 				if authErr != nil {
 					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
 					continue
 				}
+
 				sess, err := sm.Fork(f.Name, f.SourceSessionID, clientRows, clientCols)
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
@@ -154,13 +175,16 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid migrate message"})
 					continue
 				}
+
 				sm.mu.RLock()
 				authErr := auth.checkTarget(sm, m.SessionID, authSelfOrDescendant)
 				sm.mu.RUnlock()
+
 				if authErr != nil {
 					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
 					continue
 				}
+
 				sess, err := sm.Migrate(m.SessionID, m.Agent, m.Model, clientRows, clientCols)
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
@@ -174,9 +198,11 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid attach message"})
 					continue
 				}
+
 				sm.mu.RLock()
 				authErr := auth.checkTarget(sm, a.SessionID, authSelfOrDescendant)
 				sm.mu.RUnlock()
+
 				if authErr != nil {
 					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
 					continue
@@ -184,6 +210,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 
 				if attachedSessionID != "" {
 					sm.ClearAttachedClient(attachedSessionID, conn)
+
 					if pty, ok := sm.GetPTY(attachedSessionID); ok {
 						pty.DetachWriter(attachedDataWriter)
 					}
@@ -196,13 +223,16 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 						sendControl("error", protocol.ErrorMsg{Message: "session not found"})
 						continue
 					}
+
 					switch sess.Status {
 					case StatusStopped, StatusErrored:
 						log.Info("auto-resuming session on attach", "session", a.SessionID, "status", sess.Status)
+
 						if _, err := sm.Resume(a.SessionID, clientRows, clientCols); err != nil {
 							sendControl("error", protocol.ErrorMsg{Message: fmt.Sprintf("auto-resume failed: %v", err)})
 							continue
 						}
+
 						ptySess, ok = sm.GetPTY(a.SessionID)
 						if !ok {
 							sendControl("error", protocol.ErrorMsg{Message: "session not found after resume"})
@@ -227,18 +257,22 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				sm.SetAttachedClient(a.SessionID, conn,
 					func() {
 						conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
+
 						data, _ := protocol.EncodeControl("detached", protocol.DetachedMsg{Reason: "replaced"})
 						_ = writer.WriteFrame(protocol.ChannelControl, data)
+
 						conn.Close()
 					},
 					sendControl,
 				)
 
 				now := time.Now().UTC()
+
 				sm.mu.Lock()
 				if s, ok := sm.state.Sessions[a.SessionID]; ok {
 					s.LastAttachedAt = &now
 				}
+
 				if err := sm.saveState(); err != nil {
 					log.Error("failed to save state after attach", "session", a.SessionID, "err", err)
 				}
@@ -258,12 +292,15 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 			case "detach":
 				if attachedSessionID != "" {
 					sm.ClearAttachedClient(attachedSessionID, conn)
+
 					if pty, ok := sm.GetPTY(attachedSessionID); ok {
 						pty.DetachWriter(attachedDataWriter)
 					}
+
 					attachedSessionID = ""
 					attachedDataWriter = nil
 				}
+
 				sendControl("detached", protocol.DetachedMsg{Reason: "user"})
 
 			case "delete":
@@ -272,13 +309,16 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid delete message"})
 					continue
 				}
+
 				sm.mu.RLock()
 				authErr := auth.checkTarget(sm, d.SessionID, authSelfOrDescendant)
 				sm.mu.RUnlock()
+
 				if authErr != nil {
 					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
 					continue
 				}
+
 				if d.Children {
 					deleted, err := sm.DeleteWithChildren(d.SessionID, d.ExcludeRoot)
 					if err != nil {
@@ -305,13 +345,16 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid stop message"})
 					continue
 				}
+
 				sm.mu.RLock()
 				authErr := auth.checkTarget(sm, s.SessionID, authSelfOrDescendant)
 				sm.mu.RUnlock()
+
 				if authErr != nil {
 					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
 					continue
 				}
+
 				if s.Children {
 					stopped, err := sm.StopWithChildren(s.SessionID, s.ExcludeRoot)
 					if err != nil {
@@ -338,13 +381,16 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid rename message"})
 					continue
 				}
+
 				sm.mu.RLock()
 				authErr := auth.checkTarget(sm, r.SessionID, authSelfOrDescendant)
 				sm.mu.RUnlock()
+
 				if authErr != nil {
 					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
 					continue
 				}
+
 				if err := sm.Rename(r.SessionID, r.NewName); err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 				} else {
@@ -372,6 +418,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				// parent's control. The orchestrator and human CLI are exempt
 				// from the target/new-parent checks via checkTarget.
 				sm.mu.RLock()
+
 				authErr := auth.checkTarget(sm, u.SessionID, authSelfOrDescendant)
 				if authErr == nil && u.ParentID != nil {
 					if *u.ParentID == "" {
@@ -382,11 +429,14 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 						authErr = auth.checkTarget(sm, *u.ParentID, authSelfOrDescendant)
 					}
 				}
+
 				sm.mu.RUnlock()
+
 				if authErr != nil {
 					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
 					continue
 				}
+
 				if err := sm.Update(u.SessionID, u.Name, u.ParentID); err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 				} else {
@@ -401,13 +451,16 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid star message"})
 					continue
 				}
+
 				sm.mu.RLock()
 				authErr := auth.checkTarget(sm, s.SessionID, authSelfOrDescendant)
 				sm.mu.RUnlock()
+
 				if authErr != nil {
 					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
 					continue
 				}
+
 				if err := sm.Star(s.SessionID); err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 				} else {
@@ -422,13 +475,16 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid unstar message"})
 					continue
 				}
+
 				sm.mu.RLock()
 				authErr := auth.checkTarget(sm, u.SessionID, authSelfOrDescendant)
 				sm.mu.RUnlock()
+
 				if authErr != nil {
 					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
 					continue
 				}
+
 				if err := sm.Unstar(u.SessionID); err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 				} else {
@@ -443,16 +499,20 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid set_status message"})
 					continue
 				}
+
 				if auth.authenticated {
 					m.SessionID = auth.sessionID
 				}
+
 				sm.mu.RLock()
 				authErr := auth.checkTarget(sm, m.SessionID, authSelfOnly)
 				sm.mu.RUnlock()
+
 				if authErr != nil {
 					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
 					continue
 				}
+
 				if m.Clear {
 					if err := sm.ClearSummary(m.SessionID); err != nil {
 						sendControl("error", protocol.ErrorMsg{Message: err.Error()})
@@ -473,13 +533,16 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid resume message"})
 					continue
 				}
+
 				sm.mu.RLock()
 				authErr := auth.checkTarget(sm, r.SessionID, authSelfOrDescendant)
 				sm.mu.RUnlock()
+
 				if authErr != nil {
 					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
 					continue
 				}
+
 				sess, err := sm.Resume(r.SessionID, clientRows, clientCols)
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
@@ -493,13 +556,16 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid restart message"})
 					continue
 				}
+
 				sm.mu.RLock()
 				authErr := auth.checkTarget(sm, r.SessionID, authSelfOrDescendant)
 				sm.mu.RUnlock()
+
 				if authErr != nil {
 					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
 					continue
 				}
+
 				if r.Children {
 					restarted, err := sm.RestartWithChildren(r.SessionID, r.ExcludeRoot, clientRows, clientCols)
 					if err != nil {
@@ -525,43 +591,53 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid logs message"})
 					continue
 				}
+
 				sm.mu.RLock()
 				authErr := auth.checkTarget(sm, l.SessionID, authSelfOrDescendant)
 				sm.mu.RUnlock()
+
 				if authErr != nil {
 					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
 					continue
 				}
+
 				ptySess, ok := sm.GetPTY(l.SessionID)
 				if !ok {
 					sendControl("error", protocol.ErrorMsg{Message: "session not found"})
 					continue
 				}
+
 				lines := l.Lines
 				if lines == 0 {
 					lines = 300
 				}
+
 				if tail, err := ptySess.Scrollback.Tail(lines); err == nil && len(tail) > 0 {
 					_ = writer.WriteFrame(protocol.ChannelData, tail)
 				}
+
 				if !l.Follow {
 					sendControl("logs_done", struct{}{})
 					continue
 				}
+
 				logsWriter := &frameDataWriter{writer: writer}
 				ptySess.Attach(logsWriter)
 				sendControl("logs_following", struct{}{})
+
 				for {
 					f, err := reader.ReadFrame()
 					if err != nil {
 						ptySess.DetachWriter(logsWriter)
 						return
 					}
+
 					if f.Channel == protocol.ChannelControl {
 						ctrl, _ := protocol.DecodeControl(f.Payload)
 						if ctrl.Type == "detach" {
 							ptySess.DetachWriter(logsWriter)
 							sendControl("logs_done", struct{}{})
+
 							break
 						}
 					}
@@ -573,14 +649,17 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid msg_pub message"})
 					continue
 				}
+
 				if auth.authenticated {
 					m.SenderID = auth.sessionID
 					if sess, ok := sm.Get(auth.sessionID); ok {
 						m.SenderName = sess.Name
 					}
+
 					sm.mu.RLock()
 					authErr := auth.checkMsgPub(sm, m.Stream)
 					sm.mu.RUnlock()
+
 					if authErr != nil {
 						sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
 						continue
@@ -590,11 +669,13 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 						m.SenderName = sess.Name
 					}
 				}
+
 				published, err := sm.messages.Publish(m.Stream, m.SenderID, m.SenderName, m.Body, m.ThreadID, m.ReplyTo)
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 				} else {
 					sendControl("msg_published", published)
+
 					if !m.Quiet {
 						if targetID, isInbox := parseInboxStream(m.Stream); isInbox {
 							go sm.notifyInbox(targetID, m.SenderID, m.SenderName)
@@ -608,12 +689,15 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid msg_inbox message"})
 					continue
 				}
+
 				if !auth.authenticated {
 					sendControl("error", protocol.ErrorMsg{
 						Message: "msg_inbox requires an authenticated session — use gr msg sub --topic inbox:<id> for debugging",
 					})
+
 					continue
 				}
+
 				stream := "inbox:" + auth.sessionID
 				if sm.handleMsgStreamRead(ctx, sendControl, reader, stream, auth.sessionID, m.OnlyUnread, m.ThreadID, m.Wait, m.Follow, m.Ack) {
 					return
@@ -625,15 +709,18 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid msg_sub message"})
 					continue
 				}
+
 				if auth.authenticated {
 					m.Subscriber = auth.sessionID
 					if _, isInbox := parseInboxStream(m.Stream); isInbox {
 						sendControl("error", protocol.ErrorMsg{
 							Message: "inbox streams cannot be read via msg_sub; use gr msg inbox instead",
 						})
+
 						continue
 					}
 				}
+
 				if sm.handleMsgStreamRead(ctx, sendControl, reader, m.Stream, m.Subscriber, m.OnlyUnread, m.ThreadID, m.Wait, m.Follow, m.Ack) {
 					return
 				}
@@ -644,15 +731,18 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid msg_ack message"})
 					continue
 				}
+
 				if auth.authenticated {
 					m.Subscriber = auth.sessionID
 					if _, isInbox := parseInboxStream(m.Stream); isInbox {
 						sendControl("error", protocol.ErrorMsg{
 							Message: "inbox streams cannot be acked via msg_ack; use gr msg inbox --ack instead",
 						})
+
 						continue
 					}
 				}
+
 				if err := sm.messages.AckLatest(m.Stream, m.Subscriber); err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 				} else {
@@ -665,9 +755,11 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid msg_topics message"})
 					continue
 				}
+
 				if auth.authenticated {
 					m.Subscriber = auth.sessionID
 				}
+
 				streams, err := sm.messages.ListStreams(m.Subscriber, m.IncludeSystem)
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
@@ -679,8 +771,10 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 								filtered = append(filtered, s)
 							}
 						}
+
 						streams = filtered
 					}
+
 					sendControl("msg_topics_list", struct {
 						Streams []StreamInfo `json:"streams"`
 					}{streams})
@@ -701,10 +795,12 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				sm.mu.RLock()
 				authErr := auth.checkTarget(sm, m.SessionID, authSelfOrDescendant)
 				sm.mu.RUnlock()
+
 				if authErr != nil {
 					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
 					continue
 				}
+
 				if sm.messages == nil {
 					sendControl("msg_conversation_list", protocol.MsgConversationListMsg{})
 					continue
@@ -713,18 +809,22 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				// size, and cap large values so a client can't ask the daemon to
 				// sort an unbounded result set (local perf/DoS footgun).
 				const maxConversationLimit = 2000
+
 				limit := m.Limit
 				if limit <= 0 {
 					limit = 500
 				}
+
 				if limit > maxConversationLimit {
 					limit = maxConversationLimit
 				}
+
 				convo, err := sm.messages.Conversation(m.SessionID, limit)
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 					continue
 				}
+
 				out := make([]protocol.ConversationMessage, len(convo))
 				for i, cm := range convo {
 					out[i] = protocol.ConversationMessage{
@@ -739,6 +839,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 						CreatedAt:  cm.CreatedAt,
 					}
 				}
+
 				sendControl("msg_conversation_list", protocol.MsgConversationListMsg{Messages: out})
 
 			case "approval_request":
@@ -747,19 +848,24 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid approval_request"})
 					continue
 				}
+
 				if auth.authenticated {
 					req.SessionID = auth.sessionID
 				}
+
 				sm.mu.RLock()
 				authErr := auth.checkTarget(sm, req.SessionID, authSelfOnly)
 				sm.mu.RUnlock()
+
 				if authErr != nil {
 					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
 					continue
 				}
+
 				log.Info("approval request received", "request_id", req.RequestID, "session_id", req.SessionID, "tool", req.ToolName)
 				// Monitor connection close so we can cancel if the hook dies.
 				connCtx, connCancel := context.WithCancel(ctx)
+
 				go func() {
 					for {
 						f, err := reader.ReadFrame()
@@ -767,6 +873,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 							connCancel()
 							return
 						}
+
 						if f.Channel == protocol.ChannelControl {
 							ctrl, _ := protocol.DecodeControl(f.Payload)
 							if ctrl.Type == "detach" {
@@ -776,8 +883,10 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 						}
 					}
 				}()
+
 				decision := sm.SubmitApproval(connCtx, req)
 				sendControl("approval_decision", decision)
+
 				return
 
 			case "approval_respond":
@@ -785,11 +894,13 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "operation not permitted for agent sessions"})
 					continue
 				}
+
 				var resp protocol.ApprovalRespondMsg
 				if err := protocol.DecodePayload(msg, &resp); err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: "invalid approval_respond"})
 					continue
 				}
+
 				if err := sm.RespondToApproval(resp.RequestID, resp.Decision, resp.Reason); err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 				} else {
@@ -808,13 +919,16 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid type message"})
 					continue
 				}
+
 				sm.mu.RLock()
 				authErr := auth.checkTarget(sm, t.SessionID, authSelfOrDescendant)
 				sm.mu.RUnlock()
+
 				if authErr != nil {
 					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
 					continue
 				}
+
 				pty, ok := sm.GetPTY(t.SessionID)
 				if !ok {
 					sendControl("error", protocol.ErrorMsg{Message: "session not found"})
@@ -834,10 +948,12 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				} else {
 					writeErr = pty.WriteInputAndSubmit([]byte(t.Input))
 				}
+
 				if writeErr != nil {
 					sendControl("error", protocol.ErrorMsg{Message: "write failed: " + writeErr.Error()})
 					continue
 				}
+
 				pty.Poke()
 				sendControl("typed", struct {
 					SessionID string `json:"session_id"`
@@ -848,6 +964,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				if err := protocol.DecodePayload(msg, &r); err != nil {
 					continue
 				}
+
 				if attachedSessionID != "" {
 					if pty, ok := sm.GetPTY(attachedSessionID); ok {
 						_ = pty.Resize(r.Rows, r.Cols)
@@ -860,18 +977,22 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid screen_preview message"})
 					continue
 				}
+
 				sm.mu.RLock()
 				authErr := auth.checkTarget(sm, sp.SessionID, authSelfOrDescendant)
 				sm.mu.RUnlock()
+
 				if authErr != nil {
 					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
 					continue
 				}
+
 				ptySess, ok := sm.GetPTY(sp.SessionID)
 				if !ok {
 					sendControl("error", protocol.ErrorMsg{Message: "session not found"})
 					continue
 				}
+
 				sendControl("screen_preview_response", protocol.ScreenPreviewResponseMsg{
 					SessionID: sp.SessionID,
 					Preview:   ptySess.ScreenPreview(),
@@ -883,18 +1004,22 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid screen_snapshot message"})
 					continue
 				}
+
 				sm.mu.RLock()
 				authErr := auth.checkTarget(sm, ss.SessionID, authSelfOrDescendant)
 				sm.mu.RUnlock()
+
 				if authErr != nil {
 					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
 					continue
 				}
+
 				ptySess, ok := sm.GetPTY(ss.SessionID)
 				if !ok {
 					sendControl("error", protocol.ErrorMsg{Message: "session not found"})
 					continue
 				}
+
 				snap := ptySess.ScreenSnapshot()
 				sendControl("screen_snapshot_response", protocol.ScreenSnapshotResponseMsg{
 					SessionID:     ss.SessionID,
@@ -911,6 +1036,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "operation not permitted for agent sessions"})
 					continue
 				}
+
 				if err := sm.ReloadConfig(); err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 				} else {
@@ -923,22 +1049,27 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid status message"})
 					continue
 				}
+
 				sm.mu.RLock()
 				authErr := auth.checkTarget(sm, sr.SessionID, authSelfOrDescendant)
 				sm.mu.RUnlock()
+
 				if authErr != nil {
 					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
 					continue
 				}
+
 				sess, ok := sm.Get(sr.SessionID)
 				if !ok {
 					sendControl("error", protocol.ErrorMsg{Message: "session not found"})
 					continue
 				}
+
 				unread := 0
 				if sm.messages != nil {
 					unread = sm.messages.TotalUnread(sr.SessionID)
 				}
+
 				fleet := sm.fleetSummary()
 				sendControl("status_response", protocol.StatusResponseMsg{
 					Session:     toSessionInfo(sess, sm.Config(), sm.getHookReport(sess.ID)),
@@ -952,16 +1083,20 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid status_report"})
 					continue
 				}
+
 				if auth.authenticated {
 					sr.SessionID = auth.sessionID
 				}
+
 				sm.mu.RLock()
 				authErr := auth.checkTarget(sm, sr.SessionID, authSelfOnly)
 				sm.mu.RUnlock()
+
 				if authErr != nil {
 					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
 					continue
 				}
+
 				sm.HandleHookReport(sr)
 				sendControl("status_reported", struct{}{})
 
@@ -974,16 +1109,20 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid mcp_connect"})
 					continue
 				}
+
 				if auth.authenticated {
 					mc.SessionID = auth.sessionID
 				}
+
 				sm.mu.RLock()
 				authErr := auth.checkTarget(sm, mc.SessionID, authSelfOnly)
 				sm.mu.RUnlock()
+
 				if authErr != nil {
 					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
 					continue
 				}
+
 				if sm.mcpManager == nil {
 					sendControl("error", protocol.ErrorMsg{Message: "MCP manager not initialized"})
 					return
@@ -1001,16 +1140,19 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 						sendControl("error", protocol.ErrorMsg{Message: fmt.Sprintf("session %q not found", mc.SessionID)})
 						return
 					}
+
 					mcpVars.SessionName = sess.Name
 					mcpVars.WorktreePath = sess.WorktreePath
 					allowed := sm.resolveMCPServersFromConfig(sm.Config(), sess.Agent)
 					found := false
+
 					for _, s := range allowed {
 						if s.Name == mc.Server {
 							found = true
 							break
 						}
 					}
+
 					if !found {
 						sendControl("error", protocol.ErrorMsg{Message: fmt.Sprintf("MCP server %q is not enabled for agent %q", mc.Server, sess.Agent)})
 						return
@@ -1021,7 +1163,9 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: fmt.Sprintf("unknown MCP server %q", mc.Server)})
 					return
 				}
+
 				proxyID := fmt.Sprintf("%s-%s", mc.SessionID, mc.Server)
+
 				proc, err := sm.mcpManager.Connect(mc.Server, proxyID, mcpVars)
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
@@ -1039,6 +1183,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				bridgeDone := make(chan struct{})
 				go func() {
 					defer close(bridgeDone)
+
 					buf := make([]byte, 32*1024)
 					for {
 						n, err := proc.stdout.Read(buf)
@@ -1047,6 +1192,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 								return
 							}
 						}
+
 						if err != nil {
 							return
 						}
@@ -1060,17 +1206,20 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					case <-bridgeDone:
 					case <-proc.done:
 					}
+
 					conn.Close()
 				}()
 
 				// Read frames from proxy and write to MCP server stdin.
 				func() {
 					defer sm.mcpManager.Disconnect(proxyID)
+
 					for {
 						f, err := reader.ReadFrame()
 						if err != nil {
 							return
 						}
+
 						switch f.Channel {
 						case channelID:
 							if _, err := proc.stdin.Write(f.Payload); err != nil {
@@ -1085,6 +1234,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					}
 				}()
 				<-bridgeDone
+
 				return
 
 			case "scenario_start":
@@ -1093,11 +1243,14 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid scenario_start message"})
 					continue
 				}
+
 				if !auth.authenticated {
 					sendControl("error", protocol.ErrorMsg{Message: "scenario_start requires authentication"})
 					continue
 				}
+
 				s.CallerSessionID = auth.sessionID
+
 				scenario, err := sm.StartScenario(s, clientRows, clientCols)
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
@@ -1112,13 +1265,18 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid scenario_stop message"})
 					continue
 				}
+
 				sm.mu.RLock()
+
 				if err := auth.checkScenarioOp(sm, s.Name); err != nil {
 					sm.mu.RUnlock()
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+
 					continue
 				}
+
 				sm.mu.RUnlock()
+
 				stopped, err := sm.StopScenario(s.Name)
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
@@ -1135,13 +1293,18 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid scenario_delete message"})
 					continue
 				}
+
 				sm.mu.RLock()
+
 				if err := auth.checkScenarioOp(sm, s.Name); err != nil {
 					sm.mu.RUnlock()
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+
 					continue
 				}
+
 				sm.mu.RUnlock()
+
 				deleted, err := sm.DeleteScenario(s.Name)
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
@@ -1158,6 +1321,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid scenario_status message"})
 					continue
 				}
+
 				record, err := sm.ScenarioStatus(s.Name)
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
@@ -1171,13 +1335,18 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid scenario_resume message"})
 					continue
 				}
+
 				sm.mu.RLock()
+
 				if err := auth.checkScenarioOp(sm, s.Name); err != nil {
 					sm.mu.RUnlock()
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+
 					continue
 				}
+
 				sm.mu.RUnlock()
+
 				resumed, err := sm.ResumeScenario(s.Name, clientRows, clientCols)
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
@@ -1194,14 +1363,17 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid scenario_task_done message"})
 					continue
 				}
+
 				callerID := ""
 				if auth.authenticated {
 					callerID = auth.sessionID
 				}
+
 				if callerID == "" {
 					sendControl("error", protocol.ErrorMsg{Message: "scenario task-done requires an authenticated session"})
 					continue
 				}
+
 				if err := sm.ScenarioTaskDone(s.Name, callerID); err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 				} else {
@@ -1216,13 +1388,18 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "invalid scenario_add message"})
 					continue
 				}
+
 				sm.mu.RLock()
+
 				if err := auth.checkScenarioOp(sm, s.Name); err != nil {
 					sm.mu.RUnlock()
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+
 					continue
 				}
+
 				sm.mu.RUnlock()
+
 				sess, err := sm.AddToScenario(s.Name, s.Session, clientRows, clientCols)
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
@@ -1242,7 +1419,9 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					sendControl("error", protocol.ErrorMsg{Message: "operation not permitted for agent sessions"})
 					continue
 				}
+
 				var u protocol.UpgradeMsg
+
 				_ = protocol.DecodePayload(msg, &u)
 				select {
 				case sm.upgradeCh <- u.ExecPath:
@@ -1250,6 +1429,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				default:
 					sendControl("error", protocol.ErrorMsg{Message: "upgrade already in progress"})
 				}
+
 				return
 
 			default:
@@ -1277,6 +1457,7 @@ type safeFrameWriter struct {
 func (w *safeFrameWriter) WriteFrame(channel byte, payload []byte) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+
 	return w.writer.WriteFrame(channel, payload)
 }
 
@@ -1289,6 +1470,7 @@ func (w *frameDataWriter) Write(p []byte) (int, error) {
 	if err := w.writer.WriteFrame(protocol.ChannelData, p); err != nil {
 		return 0, err
 	}
+
 	return len(p), nil
 }
 
@@ -1327,12 +1509,15 @@ func toSessionInfo(s SessionState, cfg *config.Config, hr *hookReport) protocol.
 	if s.MigratedFrom != nil {
 		info.MigratedFrom = s.MigratedFrom.Agent
 	}
+
 	if s.LastAttachedAt != nil {
 		info.LastAttachedAt = s.LastAttachedAt.Format(time.RFC3339)
 	}
+
 	if !s.StatusChangedAt.IsZero() {
 		info.StatusChangedAt = s.StatusChangedAt.Format(time.RFC3339)
 	}
+
 	for _, inc := range s.Includes {
 		info.Includes = append(info.Includes, protocol.IncludedRepoInfo{
 			RepoName:     inc.RepoName,
@@ -1350,6 +1535,7 @@ func toSessionInfo(s SessionState, cfg *config.Config, hr *hookReport) protocol.
 		if s.SummaryTTL > 0 {
 			ttl = time.Duration(s.SummaryTTL) * time.Second
 		}
+
 		age := time.Since(*s.SummarySetAt)
 
 		recentOutput := s.LastOutputAt != nil && time.Since(*s.LastOutputAt) < ttl
@@ -1385,16 +1571,20 @@ func isConfigStale(s SessionState, cfg *config.Config) bool {
 	if s.CreationCfg == nil {
 		return false
 	}
+
 	agent, ok := cfg.Agents[s.Agent]
 	if !ok {
 		return true
 	}
+
 	if !reflect.DeepEqual(s.CreationCfg.Agent, agent) {
 		return true
 	}
+
 	currentSandbox := cfg.Sandbox.Merge(agent.Sandbox)
 	if s.SystemKind == SystemKindOrchestrator {
 		currentSandbox = cfg.OrchestratorSandboxMerged(s.Agent)
 	}
+
 	return !reflect.DeepEqual(s.CreationCfg.SandboxConfig, currentSandbox)
 }

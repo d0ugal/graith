@@ -85,14 +85,17 @@ func (m messageOverlayModel) fetchCmd() tea.Cmd {
 	fetch := m.fetch
 	selfID := m.selfID
 	names := m.names
+
 	return func() tea.Msg {
 		if fetch == nil {
 			return msgFetchedMsg{ok: true}
 		}
+
 		msgs, ok := fetch()
 		if !ok {
 			return msgFetchedMsg{ok: false}
 		}
+
 		return msgFetchedMsg{conversations: groupConversations(selfID, msgs, names), ok: true}
 	}
 }
@@ -107,7 +110,9 @@ func groupConversations(selfID string, msgs []protocol.ConversationMessage, name
 
 	for _, cm := range msgs {
 		var peerID string
+
 		outbound := false
+
 		if cm.Stream == selfInbox {
 			// Received by self; peer is the sender.
 			peerID = cm.SenderID
@@ -137,7 +142,9 @@ func groupConversations(selfID string, msgs []protocol.ConversationMessage, name
 		if sender == "" {
 			sender = shortID(cm.SenderID)
 		}
+
 		created := parseMsgTime(cm.CreatedAt)
+
 		conv.messages = append(conv.messages, msgEntry{
 			id:        cm.ID,
 			sender:    sender,
@@ -159,6 +166,7 @@ func groupConversations(selfID string, msgs []protocol.ConversationMessage, name
 	sort.SliceStable(convs, func(i, j int) bool {
 		return convs[i].lastAt.After(convs[j].lastAt)
 	})
+
 	return convs
 }
 
@@ -168,9 +176,11 @@ func resolvePeerName(peerID string, cm protocol.ConversationMessage, names map[s
 	if n, ok := names[peerID]; ok && n != "" {
 		return n
 	}
+
 	if cm.SenderID == peerID && cm.SenderName != "" {
 		return cm.SenderName
 	}
+
 	return shortID(peerID)
 }
 
@@ -182,9 +192,11 @@ func shortID(id string) string {
 	if id == "" {
 		return "(unknown)"
 	}
+
 	if len(id) > 8 {
 		return id[:8]
 	}
+
 	return id
 }
 
@@ -192,9 +204,11 @@ func parseMsgTime(s string) time.Time {
 	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
 		return t
 	}
+
 	if t, err := time.Parse(time.RFC3339, s); err == nil {
 		return t
 	}
+
 	return time.Time{}
 }
 
@@ -203,6 +217,7 @@ func (m messageOverlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+
 		return m, nil
 
 	case msgTickMsg:
@@ -213,7 +228,9 @@ func (m messageOverlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.fetching {
 			return m, m.tickCmd()
 		}
+
 		m.fetching = true
+
 		return m, tea.Batch(m.fetchCmd(), m.tickCmd())
 
 	case msgFetchedMsg:
@@ -229,23 +246,29 @@ func (m messageOverlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.cursor >= 0 && m.cursor < len(m.conversations) {
 			selectedPeer = m.conversations[m.cursor].peerID
 		}
+
 		if e := m.currentEntry(); e != nil {
 			focusedMsgID = e.id
 		}
+
 		prevAtLast := m.msgCursor >= m.msgCount()-1
 		peerFound := false
 		m.conversations = msg.conversations
+
 		m.cursor = 0
 		for i, c := range m.conversations {
 			if c.peerID == selectedPeer {
 				m.cursor = i
 				peerFound = true
+
 				break
 			}
 		}
+
 		if m.cursor >= len(m.conversations) {
 			m.cursor = max(0, len(m.conversations)-1)
 		}
+
 		switch {
 		case peerFound && prevAtLast:
 			// Reader was at the tail: follow the newest message.
@@ -265,6 +288,7 @@ func (m messageOverlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Peer vanished (or no prior focus): land on the newest message.
 			m.msgCursor = max(0, m.msgCount()-1)
 		}
+
 		return m, nil
 
 	case tea.KeyPressMsg:
@@ -278,12 +302,14 @@ func (m messageOverlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.msgCursor++
 				m.lineScroll = 0
 			}
+
 			return m, nil
 		case "k", "up", "ctrl+p":
 			if m.msgCursor > 0 {
 				m.msgCursor--
 				m.lineScroll = 0
 			}
+
 			return m, nil
 		// Page within the focused message when it's taller than the viewport.
 		case "pgdown", "space", " ", "ctrl+d", "ctrl+f":
@@ -299,6 +325,7 @@ func (m messageOverlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.msgCursor = max(0, m.msgCountAt(m.cursor)-1)
 				m.lineScroll = 0
 			}
+
 			return m, nil
 		case "h", "left", "shift+tab":
 			if m.cursor > 0 {
@@ -306,6 +333,7 @@ func (m messageOverlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.msgCursor = max(0, m.msgCountAt(m.cursor)-1)
 				m.lineScroll = 0
 			}
+
 			return m, nil
 		// Pin/unpin the focused message so it stays expanded even when not
 		// focused (the focused message is always expanded regardless).
@@ -313,6 +341,7 @@ func (m messageOverlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if e := m.currentEntry(); e != nil && e.id != "" {
 				m.pinned[e.id] = !m.pinned[e.id]
 			}
+
 			return m, nil
 		// Pin-all / unpin-all in the current thread.
 		case "O":
@@ -324,13 +353,16 @@ func (m messageOverlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "g", "home":
 			m.msgCursor = 0
 			m.lineScroll = 0
+
 			return m, nil
 		case "G", "end":
 			m.msgCursor = max(0, m.msgCount()-1)
 			m.lineScroll = 0
+
 			return m, nil
 		}
 	}
+
 	return m, nil
 }
 
@@ -347,6 +379,7 @@ func (m messageOverlayModel) msgCountAt(conv int) int {
 	if conv < 0 || conv >= len(m.conversations) {
 		return 0
 	}
+
 	return len(m.conversations[conv].messages)
 }
 
@@ -355,10 +388,12 @@ func (m messageOverlayModel) currentEntry() *msgEntry {
 	if m.cursor < 0 || m.cursor >= len(m.conversations) {
 		return nil
 	}
+
 	msgs := m.conversations[m.cursor].messages
 	if m.msgCursor < 0 || m.msgCursor >= len(msgs) {
 		return nil
 	}
+
 	return &msgs[m.msgCursor]
 }
 
@@ -366,6 +401,7 @@ func (m messageOverlayModel) setAllPinned(v bool) {
 	if m.cursor < 0 || m.cursor >= len(m.conversations) {
 		return
 	}
+
 	for _, e := range m.conversations[m.cursor].messages {
 		if e.id != "" {
 			m.pinned[e.id] = v
@@ -396,6 +432,7 @@ func (m messageOverlayModel) View() tea.View {
 		body = m.renderThread(max(1, w-1), bodyH)
 	} else {
 		helpLine = help.Render("↑/↓ message (auto-expands)  PgUp/Dn scroll long msg  ⏎ pin  O/C all  g/G first/last  ←/→ conversation  q close")
+
 		railW := 26
 		if w < 70 {
 			railW = max(16, w/3)
@@ -416,10 +453,12 @@ func (m messageOverlayModel) View() tea.View {
 
 	var b strings.Builder
 	b.WriteString(title)
+
 	if !m.loaded {
 		b.WriteString("  ")
 		b.WriteString(dim.Render("loading…"))
 	}
+
 	b.WriteString("\n\n")
 	b.WriteString(body)
 	b.WriteString("\n")
@@ -427,6 +466,7 @@ func (m messageOverlayModel) View() tea.View {
 
 	v := tea.NewView(b.String())
 	v.AltScreen = true
+
 	return v
 }
 
@@ -439,43 +479,54 @@ func (m messageOverlayModel) renderRail(width, height int) string {
 	// Scroll the rail so the selected conversation stays visible when there
 	// are more peers than fit.
 	start := 0
+
 	if len(m.conversations) > height {
 		if m.cursor >= height {
 			start = m.cursor - height + 1
 		}
+
 		if start > len(m.conversations)-height {
 			start = len(m.conversations) - height
 		}
+
 		if start < 0 {
 			start = 0
 		}
 	}
+
 	end := min(len(m.conversations), start+height)
 
 	var lines []string
+
 	for i := start; i < end; i++ {
 		c := m.conversations[i]
 		prefix := "  "
 		style := lipgloss.NewStyle()
+
 		if i == m.cursor {
 			prefix = "> "
 			style = style.Bold(true).Foreground(colorPurple)
 		}
+
 		countStr := " (" + strconv.Itoa(len(c.messages)) + ")"
 		label := truncate(c.peerName, max(1, width-len(prefix)-lipgloss.Width(countStr)))
 		lines = append(lines, prefix+style.Render(label)+dim.Render(countStr))
 	}
+
 	return strings.Join(lines, "\n")
 }
 
 func (m messageOverlayModel) renderThread(width, height int) string {
 	dim := lipgloss.NewStyle().Foreground(colorDim)
+
 	if m.cursor < 0 || m.cursor >= len(m.conversations) {
 		if m.loaded {
 			return dim.Render("Select a conversation")
 		}
+
 		return ""
 	}
+
 	conv := m.conversations[m.cursor]
 
 	meStyle := lipgloss.NewStyle().Foreground(colorGreen).Bold(true)
@@ -488,7 +539,9 @@ func (m messageOverlayModel) renderThread(width, height int) string {
 	// header line, expanded ones add the (sanitized) body. Track where the
 	// selected message's block starts/ends so we can scroll it into view.
 	var lines []string
+
 	selStart, selEnd := 0, 0
+
 	for i, e := range conv.messages {
 		// The focused message is always expanded; others only if pinned (or if
 		// they have no id to track collapse state).
@@ -498,11 +551,14 @@ func (m messageOverlayModel) renderThread(width, height int) string {
 		if expanded {
 			marker = "▾"
 		}
+
 		who := e.sender
 		if e.outbound {
 			who = "me → " + conv.peerName
 		}
+
 		hs := peerStyle
+
 		switch {
 		case e.system:
 			hs = sysStyle
@@ -510,12 +566,14 @@ func (m messageOverlayModel) renderThread(width, height int) string {
 		case e.outbound:
 			hs = meStyle
 		}
+
 		markerStyle := dim
 		if i == m.msgCursor {
 			markerStyle = selStyle
 		}
 
 		body := strings.TrimRight(sanitizeMessageBody(e.body), "\n")
+
 		header := markerStyle.Render(marker) + " " + hs.Render(who) + dim.Render(msgTimestamp(e.createdAt))
 		if !expanded {
 			// Show a one-line snippet so a collapsed thread is still scannable.
@@ -531,11 +589,13 @@ func (m messageOverlayModel) renderThread(width, height int) string {
 		header = ansi.Truncate(header, width, "…")
 
 		blockStart := len(lines)
+
 		lines = append(lines, header)
 		if expanded {
 			lines = append(lines, strings.Split(bodyStyle.Render(body), "\n")...)
 			lines = append(lines, "")
 		}
+
 		if i == m.msgCursor {
 			selStart, selEnd = blockStart, len(lines)
 		}
@@ -544,6 +604,7 @@ func (m messageOverlayModel) renderThread(width, height int) string {
 	// Scroll so the selected message's block is visible.
 	total := len(lines)
 	start := 0
+
 	if total > height {
 		if selEnd-selStart > height {
 			// Focused block is taller than the viewport: anchor at its top and
@@ -555,18 +616,23 @@ func (m messageOverlayModel) renderThread(width, height int) string {
 			if selEnd > start+height {
 				start = selEnd - height
 			}
+
 			if selStart < start {
 				start = selStart
 			}
 		}
+
 		if start > total-height {
 			start = total - height
 		}
+
 		if start < 0 {
 			start = 0
 		}
 	}
+
 	end := min(total, start+height)
+
 	return strings.Join(lines[start:end], "\n")
 }
 
@@ -576,12 +642,15 @@ func msgTimestamp(t time.Time) string {
 	if t.IsZero() {
 		return ""
 	}
+
 	lt := t.Local()
 	now := time.Now()
+
 	layout := "15:04"
 	if lt.Year() != now.Year() || lt.YearDay() != now.YearDay() {
 		layout = "Jan 2 15:04"
 	}
+
 	return "  " + lt.Format(layout) + " (" + relTime(t) + ")"
 }
 
@@ -590,6 +659,7 @@ func relTime(t time.Time) string {
 	if d < 0 {
 		d = 0
 	}
+
 	return ShortDuration(d) + " ago"
 }
 
@@ -599,13 +669,16 @@ func relTime(t time.Time) string {
 // could spoof or corrupt the operator's overlay.
 func sanitizeMessageBody(s string) string {
 	s = ansi.Strip(s)
+
 	return strings.Map(func(r rune) rune {
 		if r == '\n' || r == '\t' {
 			return r
 		}
+
 		if r < 0x20 || r == 0x7f {
 			return -1
 		}
+
 		return r
 	}, s)
 }

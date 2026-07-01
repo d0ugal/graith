@@ -14,8 +14,10 @@ var versionCmd = &cobra.Command{
 				Version string `json:"version"`
 				Commit  string `json:"commit"`
 			}{version.Version, version.CommitSHA})
+
 			return
 		}
+
 		out.Print("graith %s (%s)\n", version.Version, version.CommitSHA)
 	},
 }

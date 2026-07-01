@@ -82,6 +82,7 @@ func TestValidateSessionName(t *testing.T) {
 			t.Errorf("ValidateSessionName(%q) = nil, want error containing %q", tc.name, tc.wantSub)
 			continue
 		}
+
 		if !strings.Contains(err.Error(), tc.wantSub) {
 			t.Errorf("ValidateSessionName(%q) = %q, want error containing %q", tc.name, err.Error(), tc.wantSub)
 		}
@@ -90,13 +91,16 @@ func TestValidateSessionName(t *testing.T) {
 
 func TestCreateRejectsUnsafeName(t *testing.T) {
 	sm := newTestSessionManager(t)
+
 	_, err := sm.Create("bad;name", "claude", "/tmp", "", "", "", "", true, "", false, false, false, false, 24, 80)
 	if err == nil {
 		t.Fatal("Create with unsafe name should fail")
 	}
+
 	if !strings.Contains(err.Error(), "invalid") {
 		t.Errorf("expected validation error, got: %v", err)
 	}
+
 	if len(sm.state.Sessions) != 0 {
 		t.Error("no session should be created for an invalid name")
 	}
@@ -119,6 +123,7 @@ func TestCreateSkipModelValidation(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected validation error for unknown model")
 		}
+
 		if !strings.Contains(err.Error(), "invalid model") {
 			t.Fatalf("expected 'invalid model' error, got: %v", err)
 		}
@@ -138,10 +143,12 @@ func TestRenameRejectsUnsafeName(t *testing.T) {
 		ID:   "braw-id",
 		Name: "bonnie-name",
 	}
+
 	err := sm.Rename("braw-id", "bad|name")
 	if err == nil {
 		t.Fatal("Rename with unsafe name should fail")
 	}
+
 	if sm.state.Sessions["braw-id"].Name != "bonnie-name" {
 		t.Error("name should not have changed")
 	}
@@ -158,10 +165,12 @@ func TestResumeRejectsUnsafePersistedName(t *testing.T) {
 		Agent:        "claude",
 		WorktreePath: filepath.Join(tmpDir, "wt"),
 	}
+
 	_, err := sm.Resume("braw-id", 24, 80)
 	if err == nil {
 		t.Fatal("Resume with unsafe persisted name should fail")
 	}
+
 	if !strings.Contains(err.Error(), "unsafe name") {
 		t.Errorf("expected unsafe name error, got: %v", err)
 	}

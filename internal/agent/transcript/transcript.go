@@ -99,21 +99,26 @@ func Read(agent, agentSessionID, worktreePath string) (*Conversation, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	path, err := locate(agent, agentSessionID, worktreePath)
 	if err != nil {
 		return nil, err
 	}
+
 	turns, dropped, err := r.read(path)
 	if err != nil {
 		return nil, fmt.Errorf("read %s transcript %s: %w", agent, path, err)
 	}
+
 	turns = pairToolOutputs(turns)
 	if len(turns) == 0 {
 		return nil, ErrNoTurns
 	}
+
 	for i := range turns {
 		turns[i].SrcAgent = agent
 	}
+
 	return &Conversation{SrcAgent: agent, Turns: turns, DroppedLines: dropped}, nil
 }
 

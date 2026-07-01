@@ -100,6 +100,7 @@ func (sm *SessionManager) Config() *config.Config {
 	sm.mu.RLock()
 	cfg := sm.cfg
 	sm.mu.RUnlock()
+
 	return cfg
 }
 
@@ -115,8 +116,10 @@ func (sm *SessionManager) SetMCPManager(mm *MCPManager) {
 // in-memory hookReports map and the session's AgentStatus. This is the
 // authoritative source of agent status when hooks are active.
 func (sm *SessionManager) HandleHookReport(sr protocol.StatusReportMsg) {
-	var status string
-	var staleness time.Duration
+	var (
+		status    string
+		staleness time.Duration
+	)
 
 	switch sr.Event {
 	case "SessionStart":
@@ -145,15 +148,19 @@ func (sm *SessionManager) HandleHookReport(sr protocol.StatusReportMsg) {
 		AuthoritativeUntil: now.Add(staleness),
 	}
 
-	var oldStatus string
-	var name string
-	var changed bool
+	var (
+		oldStatus string
+		name      string
+		changed   bool
+	)
 
 	sm.mu.Lock()
+
 	sess, ok := sm.state.Sessions[sr.SessionID]
 	if !ok {
 		sm.mu.Unlock()
 		sm.log.Info("hook report for unknown session", "session_id", sr.SessionID)
+
 		return
 	}
 
@@ -161,10 +168,12 @@ func (sm *SessionManager) HandleHookReport(sr protocol.StatusReportMsg) {
 	name = sess.Name
 	sm.hookReports[sr.SessionID] = report
 	changed = oldStatus != status
+
 	sess.AgentStatus = status
 	if changed {
 		sess.StatusChangedAt = time.Now()
 	}
+
 	sess.HookToolName = report.ToolName
 	sm.mu.Unlock()
 
@@ -179,11 +188,13 @@ func (sm *SessionManager) HandleHookReport(sr protocol.StatusReportMsg) {
 
 func (sm *SessionManager) KickAttachedClient(sessionID string) {
 	sm.mu.Lock()
+
 	ac, ok := sm.attachedClients[sessionID]
 	if ok {
 		delete(sm.attachedClients, sessionID)
 	}
 	sm.mu.Unlock()
+
 	if ok {
 		ac.kick()
 	}
@@ -207,6 +218,7 @@ func (sm *SessionManager) IsAttachedClient(sessionID string, conn net.Conn) bool
 	sm.mu.RLock()
 	ac, ok := sm.attachedClients[sessionID]
 	sm.mu.RUnlock()
+
 	return ok && ac.conn == conn
 }
 
@@ -214,6 +226,7 @@ func (sm *SessionManager) HasAttachedClient(sessionID string) bool {
 	sm.mu.RLock()
 	_, ok := sm.attachedClients[sessionID]
 	sm.mu.RUnlock()
+
 	return ok
 }
 
@@ -223,9 +236,11 @@ func (sm *SessionManager) LoadState() error {
 	if err != nil {
 		return err
 	}
+
 	state.Reconcile()
 	sm.state = state
 	sm.rebuildTokenIndex()
+
 	return sm.saveState()
 }
 
@@ -248,6 +263,7 @@ func (sm *SessionManager) AdoptSessions(manifest *UpgradeManifest) error {
 	sm.mu.Lock()
 
 	var adoptedIDs []string
+
 	for _, us := range manifest.Sessions {
 		sessState, ok := sm.state.Sessions[us.ID]
 		if !ok {
@@ -256,6 +272,7 @@ func (sm *SessionManager) AdoptSessions(manifest *UpgradeManifest) error {
 		}
 
 		logPath := filepath.Join(sm.paths.LogDir, us.ID+".log")
+
 		ptySess, err := grpty.AdoptSession(grpty.AdoptOpts{
 			ID:         us.ID,
 			Fd:         uintptr(us.Fd),
@@ -265,15 +282,18 @@ func (sm *SessionManager) AdoptSessions(manifest *UpgradeManifest) error {
 		})
 		if err != nil {
 			sm.log.Warn("failed to adopt session", "id", us.ID, "err", err)
+
 			sessState.Status = StatusStopped
 			sessState.StatusChangedAt = time.Now()
 			applyLifecycleSummaryLocked(sessState, "Lost during daemon upgrade")
+
 			continue
 		}
 
 		if st, err := grpty.ProcessStartTime(us.PID); err == nil {
 			sessState.PIDStartTime = st
 		}
+
 		sm.sessions[us.ID] = ptySess
 		sm.startWatcher(us.ID, ptySess)
 		adoptedIDs = append(adoptedIDs, us.ID)
@@ -297,6 +317,7 @@ func (sm *SessionManager) saveState() error {
 func generateID() string {
 	b := make([]byte, 4)
 	_, _ = rand.Read(b)
+
 	return hex.EncodeToString(b)
 }
 
@@ -305,19 +326,23 @@ func repoHash(repoPath string) string {
 	for _, c := range repoPath {
 		h = h*31 + uint64(c)
 	}
+
 	b := make([]byte, 8)
 	for i := 0; i < 8; i++ {
 		b[i] = byte(h >> (i * 8))
 	}
+
 	return hex.EncodeToString(b)[:12]
 }
 
 func (sm *SessionManager) repoTmpDir(repoRoot string) (string, error) {
 	repoName := filepath.Base(repoRoot)
+
 	dir := filepath.Join(sm.paths.TmpDir, repoName, repoHash(repoRoot))
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("create tmp dir: %w", err)
 	}
+
 	return dir, nil
 }
 
@@ -326,6 +351,7 @@ func (sm *SessionManager) repoStoreDir(repoRoot string) (string, error) {
 	if err := store.Init(dir); err != nil {
 		return "", fmt.Errorf("init store: %w", err)
 	}
+
 	return dir, nil
 }
 
@@ -343,6 +369,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 	}
 
 	preLockCfg := sm.Config()
+
 	agent, ok := preLockCfg.Agents[agentName]
 	if !ok {
 		return SessionState{}, fmt.Errorf("unknown agent %q", agentName)
@@ -358,9 +385,11 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 	if inPlace && noRepo {
 		return SessionState{}, fmt.Errorf("--in-place and --no-repo are mutually exclusive")
 	}
+
 	if inPlace && shareWorktree != "" {
 		return SessionState{}, fmt.Errorf("--in-place and --share-worktree are mutually exclusive")
 	}
+
 	if inPlace && baseBranch != "" {
 		return SessionState{}, fmt.Errorf("--in-place and --base are mutually exclusive (in-place sessions don't create branches)")
 	}
@@ -368,14 +397,18 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 	// --- Pre-lock: resolve repo root and discover GitHub username ---
 	// These can involve network calls (gh api) and must not hold the mutex.
 	var preRepoRoot string
+
 	if !noRepo && shareWorktree == "" && repoPath != "" {
 		if !git.IsInsideGitRepo(repoPath) {
 			if inPlace {
 				return SessionState{}, fmt.Errorf("not inside a git repository: %s", repoPath)
 			}
+
 			return SessionState{}, fmt.Errorf("not inside a git repository: %s (use --no-repo for sessions without a repo)", repoPath)
 		}
+
 		var err error
+
 		preRepoRoot, err = git.RepoRootPath(repoPath)
 		if err != nil {
 			return SessionState{}, fmt.Errorf("find repo root: %w", err)
@@ -386,8 +419,10 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 	if preUsername == "" && preRepoRoot != "" && !inPlace {
 		ctx, cancel := context.WithTimeout(context.Background(), gitUsernameTimeout)
 		preUsername, _ = git.DiscoverGitHubUsername(ctx, preRepoRoot)
+
 		cancel()
 	}
+
 	if preUsername == "" {
 		preUsername = "user"
 	}
@@ -396,36 +431,43 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 	sm.mu.Lock()
 
 	id := generateID()
+
 	token, err := generateToken()
 	if err != nil {
 		sm.mu.Unlock()
 		return SessionState{}, fmt.Errorf("generate session token: %w", err)
 	}
 
-	var repoRoot, repoName, worktreePath, branchName string
-	var sharedWorktree bool
-	var sharedWorktreeSourceID string
-	var fetchOnCreate bool
-	var rcIncludes []string
-	var sourceIncludes []IncludedRepoState
+	var (
+		repoRoot, repoName, worktreePath, branchName string
+		sharedWorktree                               bool
+		sharedWorktreeSourceID                       string
+		fetchOnCreate                                bool
+		rcIncludes                                   []string
+		sourceIncludes                               []IncludedRepoState
+	)
 
 	switch {
 	case shareWorktree != "":
 		var source *SessionState
+
 		for _, s := range sm.state.Sessions {
 			if s.Name == shareWorktree || s.ID == shareWorktree {
 				source = s
 				break
 			}
 		}
+
 		if source == nil {
 			sm.mu.Unlock()
 			return SessionState{}, fmt.Errorf("session %q not found for --share-worktree", shareWorktree)
 		}
+
 		if source.WorktreePath == "" {
 			sm.mu.Unlock()
 			return SessionState{}, fmt.Errorf("session %q has no worktree to share", shareWorktree)
 		}
+
 		worktreePath = source.WorktreePath
 		repoRoot = source.RepoPath
 		repoName = source.RepoName
@@ -468,6 +510,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 		worktreePath = repoRoot
 	default:
 		repoRoot = preRepoRoot
+
 		if !sm.cfg.RepoPathAllowed(repoPath) {
 			sm.mu.Unlock()
 			return SessionState{}, fmt.Errorf("repo path %q is not under any allowed_repo_paths", repoPath)
@@ -487,6 +530,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 
 		if baseBranch == "" {
 			var err error
+
 			baseBranch, err = git.DiscoverDefaultBranch(repoRoot)
 			if err != nil {
 				sm.mu.Unlock()
@@ -524,8 +568,10 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 			os.RemoveAll(worktreePath)
 		}
 		sm.mu.Unlock()
+
 		return SessionState{}, err
 	}
+
 	if sharedWorktree && !sandboxed {
 		sm.mu.Unlock()
 		return SessionState{}, fmt.Errorf("--share-worktree requires sandbox to be enabled so the shared worktree can be mounted read-only; set sandbox.enabled = true in config and ensure safehouse is installed (gr doctor)")
@@ -564,13 +610,16 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 		StatusChangedAt:        time.Now().UTC(),
 		Token:                  token,
 	}
+
 	sm.state.Sessions[id] = placeholder
 	if err := sm.saveState(); err != nil {
 		delete(sm.state.Sessions, id)
+
 		if noRepo {
 			os.RemoveAll(worktreePath)
 		}
 		sm.mu.Unlock()
+
 		return SessionState{}, fmt.Errorf("persist session state: %w", err)
 	}
 
@@ -580,11 +629,14 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 	// Git setup, hook injection, sandbox wrapping, PTY spawn.
 
 	var includes []IncludedRepoState
+
 	cleanupOnError := func() {
 		sm.cleanupHooks(id, agentName, worktreePath)
+
 		if sharedWorktree || inPlace {
 			return
 		}
+
 		switch {
 		case noRepo:
 			os.RemoveAll(worktreePath)
@@ -619,26 +671,35 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 				if !cfgSnapshot.RepoPathAllowed(resolved) {
 					sm.teardownIncludes(repoRoot, worktreePath, branchName, includes)
 					rollbackState()
+
 					return SessionState{}, fmt.Errorf("included repo %q is not under any allowed_repo_paths", incPath)
 				}
+
 				if !git.IsInsideGitRepo(resolved) {
 					sm.teardownIncludes(repoRoot, worktreePath, branchName, includes)
 					rollbackState()
+
 					return SessionState{}, fmt.Errorf("included repo %q is not a git repository", incPath)
 				}
+
 				incRoot, err := git.RepoRootPath(resolved)
 				if err != nil {
 					sm.teardownIncludes(repoRoot, worktreePath, branchName, includes)
 					rollbackState()
+
 					return SessionState{}, fmt.Errorf("find included repo root for %q: %w", incPath, err)
 				}
+
 				incName := filepath.Base(incRoot)
+
 				incBaseBranch, err := git.DiscoverDefaultBranchOrHEAD(incRoot)
 				if err != nil {
 					sm.teardownIncludes(repoRoot, worktreePath, branchName, includes)
 					rollbackState()
+
 					return SessionState{}, fmt.Errorf("discover default branch for included repo %q: %w", incPath, err)
 				}
+
 				incBranch := fmt.Sprintf("%s/%s-%s/%s", branchPrefix, name, id, incName)
 				sessionDir := filepath.Dir(worktreePath)
 				incWorktreePath := filepath.Join(sessionDir, incName)
@@ -646,6 +707,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 				if err := git.SetupSession(gitCtx, incRoot, incWorktreePath, incBranch, incBaseBranch, fetchOnCreate); err != nil {
 					sm.teardownIncludes(repoRoot, worktreePath, branchName, includes)
 					rollbackState()
+
 					return SessionState{}, fmt.Errorf("setup included repo %q: %w", incName, err)
 				}
 
@@ -679,8 +741,10 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 	if err != nil {
 		cleanupOnError()
 		rollbackState()
+
 		return SessionState{}, fmt.Errorf("expand agent args: %w", err)
 	}
+
 	if prompt != "" {
 		expandedArgs = append(expandedArgs, prompt)
 	}
@@ -691,52 +755,66 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 	for k, v := range agent.Env {
 		env[k] = v
 	}
+
 	env["GRAITH_SESSION_ID"] = id
 	env["GRAITH_SESSION_NAME"] = name
 	env["GRAITH_AGENT_TYPE"] = agentName
 	env["GRAITH_WORKTREE_PATH"] = worktreePath
+
 	env["GRAITH_TOKEN"] = token
 	if repoRoot != "" {
 		env["GRAITH_REPO_PATH"] = repoRoot
 	}
+
 	if sm.paths.Profile != "" {
 		env["GRAITH_PROFILE"] = sm.paths.Profile
 	}
+
 	if inPlace {
 		env["GRAITH_IN_PLACE"] = "true"
 	}
+
 	for _, extra := range envExtra {
 		for k, v := range extra {
 			env[k] = v
 		}
 	}
+
 	var storeDir string
+
 	if repoRoot != "" {
 		tmpDir, err := sm.repoTmpDir(repoRoot)
 		if err != nil {
 			cleanupOnError()
 			rollbackState()
+
 			return SessionState{}, err
 		}
+
 		env["GRAITH_TMPDIR"] = tmpDir
 		if _, ok := env["TMPDIR"]; !ok {
 			env["TMPDIR"] = tmpDir
 		}
+
 		storeDir, err = sm.repoStoreDir(repoRoot)
 		if err != nil {
 			cleanupOnError()
 			rollbackState()
+
 			return SessionState{}, err
 		}
 	}
+
 	for _, inc := range includes {
 		env[config.IncludeEnvVarName(inc.RepoName)] = inc.WorktreePath
 	}
+
 	if sharedWorktree {
 		for _, inc := range sourceIncludes {
 			env[config.IncludeEnvVarName(inc.RepoName)] = inc.WorktreePath
 		}
 	}
+
 	for _, extra := range envExtra {
 		for k, v := range extra {
 			env[k] = v
@@ -748,9 +826,12 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 		if err != nil {
 			cleanupOnError()
 			rollbackState()
+
 			return SessionState{}, fmt.Errorf("inject agent hooks: %w", err)
 		}
+
 		expandedArgs = append(expandedArgs, hookArgs...)
+
 		for k, v := range hookEnv {
 			env[k] = v
 		}
@@ -767,54 +848,73 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 
 	command := agent.Command
 	finalArgs := expandedArgs
-	var scratchDir string
-	var mergedSandbox *config.SandboxConfig
+
+	var (
+		scratchDir    string
+		mergedSandbox *config.SandboxConfig
+	)
+
 	if sandboxed {
 		merged := sandboxMerged
 		merged.ReadDirs = expandPaths(merged.ReadDirs, sm.log, "read")
 		merged.WriteDirs = expandPaths(merged.WriteDirs, sm.log, "write")
 		mergedSandbox = &merged
+
 		envKeys := []string{"GRAITH_SESSION_ID", "GRAITH_SESSION_NAME", "GRAITH_AGENT_TYPE", "GRAITH_WORKTREE_PATH", "TERM"}
 		for k := range agent.Env {
 			envKeys = append(envKeys, k)
 		}
+
 		for k := range env {
 			envKeys = append(envKeys, k)
 		}
+
 		opts := sm.sandboxOptsFromConfig(merged, id, worktreePath, envKeys, agentHooks)
 		if tmpDir := env["GRAITH_TMPDIR"]; tmpDir != "" {
 			opts.WriteDirs = append(opts.WriteDirs, tmpDir)
 		}
+
 		if storeDir != "" {
 			opts.WriteDirs = append(opts.WriteDirs, storeDir)
 		}
+
 		opts.WriteDirs = append(opts.WriteDirs, store.SharedStorePath(sm.paths.DataDir))
 		if len(includes) > 0 {
 			opts.WriteDirs = append(opts.WriteDirs, sm.deriveSandboxIncludesWriteDirs(includes)...)
 		}
+
 		if sharedWorktree {
 			scratchDir = filepath.Join(sm.paths.DataDir, "scratch", id)
 			if err := os.MkdirAll(scratchDir, 0o700); err != nil {
 				cleanupOnError()
 				rollbackState()
+
 				return SessionState{}, fmt.Errorf("create scratch dir: %w", err)
 			}
+
 			opts.ReadDirs = append(opts.ReadDirs, worktreePath)
 			for _, inc := range sourceIncludes {
 				opts.ReadDirs = append(opts.ReadDirs, inc.WorktreePath)
 			}
+
 			opts.WorktreeDir = scratchDir
 		}
+
 		var wrapErr error
+
 		command, finalArgs, wrapErr = sandbox.Wrap(agent.Command, expandedArgs, opts)
 		if wrapErr != nil {
 			cleanupOnError()
+
 			if scratchDir != "" {
 				os.RemoveAll(scratchDir)
 			}
+
 			rollbackState()
+
 			return SessionState{}, fmt.Errorf("sandbox wrap: %w", wrapErr)
 		}
+
 		sm.log.Info("sandboxing session", "id", id, "agent", agentName,
 			"command", command, "read_dirs", opts.ReadDirs, "write_dirs", opts.WriteDirs,
 			"features", opts.Features, "workdir", opts.WorktreeDir)
@@ -823,6 +923,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 	// Record the pre-spawn time so native session-id capture only matches
 	// transcript files this start creates (race-safe against stale rollouts).
 	startedAt := time.Now()
+
 	ptySess, err := grpty.NewSession(grpty.SessionOpts{
 		ID:         id,
 		Command:    command,
@@ -836,10 +937,13 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 	})
 	if err != nil {
 		cleanupOnError()
+
 		if scratchDir != "" {
 			os.RemoveAll(scratchDir)
 		}
+
 		rollbackState()
+
 		return SessionState{}, fmt.Errorf("start pty session: %w", err)
 	}
 
@@ -849,13 +953,17 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 	// Check the session wasn't deleted while we were setting up.
 	if _, ok := sm.state.Sessions[id]; !ok {
 		sm.mu.Unlock()
+
 		_ = ptySess.Kill()
 		ptySess.Close()
 		cleanupOnError()
+
 		if scratchDir != "" {
 			os.RemoveAll(scratchDir)
 		}
+
 		os.Remove(logPath)
+
 		return SessionState{}, fmt.Errorf("session was deleted during creation")
 	}
 
@@ -865,10 +973,12 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 	sessState.Includes = includes
 	sessState.Status = StatusRunning
 	sessState.StatusChangedAt = time.Now()
+
 	sessState.PID = ptySess.Cmd.Process.Pid
 	if st, err := grpty.ProcessStartTime(sessState.PID); err == nil {
 		sessState.PIDStartTime = st
 	}
+
 	sessState.CreationCfg = &CreationConfig{
 		Agent:         agent,
 		SandboxConfig: cfgSnapshot.Sandbox.Merge(agent.Sandbox),
@@ -888,14 +998,18 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 		delete(sm.sessions, id)
 		delete(sm.tokenIndex, token)
 		sm.mu.Unlock()
+
 		_ = ptySess.Kill()
 		ptySess.Close()
 		cleanupOnError()
+
 		if scratchDir != "" {
 			os.RemoveAll(scratchDir)
 		}
+
 		sm.cleanupHooks(id, agentName, worktreePath)
 		os.Remove(logPath)
+
 		return SessionState{}, fmt.Errorf("persist session state: %w", err)
 	}
 
@@ -929,18 +1043,22 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 	sm.mu.RLock()
 	cfgSnapshot := sm.cfg
 	source, sourceOk := sm.state.Sessions[sourceSessionID]
+
 	var sourceRepoPath string
 	if sourceOk {
 		sourceRepoPath = source.RepoPath
 	}
+
 	sm.mu.RUnlock()
 
 	preUsername := cfgSnapshot.GitHubUsername
 	if preUsername == "" && sourceRepoPath != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), gitUsernameTimeout)
 		preUsername, _ = git.DiscoverGitHubUsername(ctx, sourceRepoPath)
+
 		cancel()
 	}
+
 	if preUsername == "" {
 		preUsername = "user"
 	}
@@ -975,6 +1093,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 	}
 
 	agentName := source.Agent
+
 	agent, ok := sm.cfg.Agents[agentName]
 	if !ok {
 		sm.mu.Unlock()
@@ -982,6 +1101,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 	}
 
 	id := generateID()
+
 	token, err := generateToken()
 	if err != nil {
 		sm.mu.Unlock()
@@ -1046,10 +1166,12 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 		StatusChangedAt: time.Now().UTC(),
 		Token:           token,
 	}
+
 	sm.state.Sessions[id] = placeholder
 	if err := sm.saveState(); err != nil {
 		delete(sm.state.Sessions, id)
 		sm.mu.Unlock()
+
 		return SessionState{}, fmt.Errorf("persist session state: %w", err)
 	}
 
@@ -1060,6 +1182,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 
 	forkCleanup := func() {
 		sm.cleanupHooks(id, agentName, worktreePath)
+
 		if len(forkIncludes) > 0 {
 			sm.teardownIncludes(repoRoot, worktreePath, branchName, forkIncludes)
 		} else {
@@ -1081,14 +1204,18 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 			rollbackState()
 			return SessionState{}, fmt.Errorf("setup main repo git session for fork: %w", err)
 		}
+
 		for _, srcInc := range sourceForkIncludes {
 			incBranch := fmt.Sprintf("%s/%s-%s/%s", branchPrefix, name, id, srcInc.RepoName)
+
 			incWorktreePath := filepath.Join(sessionDir, srcInc.RepoName)
 			if err := git.SetupSession(gitCtx, srcInc.RepoPath, incWorktreePath, incBranch, srcInc.Branch, fetchOnCreate); err != nil {
 				sm.teardownIncludes(repoRoot, worktreePath, branchName, forkIncludes)
 				rollbackState()
+
 				return SessionState{}, fmt.Errorf("setup included repo %q for fork: %w", srcInc.RepoName, err)
 			}
+
 			forkIncludes = append(forkIncludes, IncludedRepoState{
 				RepoPath:     srcInc.RepoPath,
 				RepoName:     srcInc.RepoName,
@@ -1130,6 +1257,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 	if err != nil {
 		forkCleanup()
 		rollbackState()
+
 		return SessionState{}, fmt.Errorf("expand fork args: %w", err)
 	}
 
@@ -1139,36 +1267,46 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 	for k, v := range agent.Env {
 		env[k] = v
 	}
+
 	env["GRAITH_SESSION_ID"] = id
 	env["GRAITH_SESSION_NAME"] = name
 	env["GRAITH_AGENT_TYPE"] = agentName
 	env["GRAITH_WORKTREE_PATH"] = worktreePath
+
 	env["GRAITH_TOKEN"] = token
 	if repoRoot != "" {
 		env["GRAITH_REPO_PATH"] = repoRoot
 	}
+
 	if sm.paths.Profile != "" {
 		env["GRAITH_PROFILE"] = sm.paths.Profile
 	}
+
 	var forkStoreDir string
+
 	if repoRoot != "" {
 		tmpDir, err := sm.repoTmpDir(repoRoot)
 		if err != nil {
 			forkCleanup()
 			rollbackState()
+
 			return SessionState{}, err
 		}
+
 		env["GRAITH_TMPDIR"] = tmpDir
 		if _, ok := env["TMPDIR"]; !ok {
 			env["TMPDIR"] = tmpDir
 		}
+
 		forkStoreDir, err = sm.repoStoreDir(repoRoot)
 		if err != nil {
 			forkCleanup()
 			rollbackState()
+
 			return SessionState{}, err
 		}
 	}
+
 	for _, inc := range forkIncludes {
 		env[config.IncludeEnvVarName(inc.RepoName)] = inc.WorktreePath
 	}
@@ -1178,9 +1316,12 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 		if err != nil {
 			forkCleanup()
 			rollbackState()
+
 			return SessionState{}, fmt.Errorf("inject agent hooks: %w", err)
 		}
+
 		expandedArgs = append(expandedArgs, hookArgs...)
+
 		for k, v := range hookEnv {
 			env[k] = v
 		}
@@ -1197,37 +1338,48 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 
 	command := agent.Command
 	finalArgs := expandedArgs
+
 	var mergedSandbox *config.SandboxConfig
+
 	if sandboxed {
 		merged := sandboxMerged
 		merged.ReadDirs = expandPaths(merged.ReadDirs, sm.log, "read")
 		merged.WriteDirs = expandPaths(merged.WriteDirs, sm.log, "write")
 		mergedSandbox = &merged
+
 		envKeys := []string{"GRAITH_SESSION_ID", "GRAITH_SESSION_NAME", "GRAITH_AGENT_TYPE", "GRAITH_WORKTREE_PATH", "TERM"}
 		for k := range agent.Env {
 			envKeys = append(envKeys, k)
 		}
+
 		for k := range env {
 			envKeys = append(envKeys, k)
 		}
+
 		opts := sm.sandboxOptsFromConfig(merged, id, worktreePath, envKeys, sourceAgentHooks)
 		if tmpDir := env["GRAITH_TMPDIR"]; tmpDir != "" {
 			opts.WriteDirs = append(opts.WriteDirs, tmpDir)
 		}
+
 		if forkStoreDir != "" {
 			opts.WriteDirs = append(opts.WriteDirs, forkStoreDir)
 		}
+
 		opts.WriteDirs = append(opts.WriteDirs, store.SharedStorePath(sm.paths.DataDir))
 		if len(forkIncludes) > 0 {
 			opts.WriteDirs = append(opts.WriteDirs, sm.deriveSandboxIncludesWriteDirs(forkIncludes)...)
 		}
+
 		var wrapErr error
+
 		command, finalArgs, wrapErr = sandbox.Wrap(agent.Command, expandedArgs, opts)
 		if wrapErr != nil {
 			forkCleanup()
 			rollbackState()
+
 			return SessionState{}, fmt.Errorf("sandbox wrap: %w", wrapErr)
 		}
+
 		sm.log.Info("sandboxing forked session", "id", id,
 			"command", command, "read_dirs", opts.ReadDirs, "write_dirs", opts.WriteDirs,
 			"features", opts.Features, "workdir", opts.WorktreeDir)
@@ -1235,6 +1387,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 
 	// Pre-spawn time for native session-id capture (see Create).
 	startedAt := time.Now()
+
 	ptySess, err := grpty.NewSession(grpty.SessionOpts{
 		ID:         id,
 		Command:    command,
@@ -1249,6 +1402,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 	if err != nil {
 		forkCleanup()
 		rollbackState()
+
 		return SessionState{}, fmt.Errorf("start pty session: %w", err)
 	}
 
@@ -1257,10 +1411,12 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 
 	if _, ok := sm.state.Sessions[id]; !ok {
 		sm.mu.Unlock()
+
 		_ = ptySess.Kill()
 		ptySess.Close()
 		forkCleanup()
 		os.Remove(logPath)
+
 		return SessionState{}, fmt.Errorf("session was deleted during creation")
 	}
 
@@ -1270,10 +1426,12 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 	sessState.Includes = forkIncludes
 	sessState.Status = StatusRunning
 	sessState.StatusChangedAt = time.Now()
+
 	sessState.PID = ptySess.Cmd.Process.Pid
 	if st, err := grpty.ProcessStartTime(sessState.PID); err == nil {
 		sessState.PIDStartTime = st
 	}
+
 	sessState.CreationCfg = &CreationConfig{
 		Agent:         agent,
 		SandboxConfig: cfgSnapshot.Sandbox.Merge(agent.Sandbox),
@@ -1291,10 +1449,12 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 		delete(sm.sessions, id)
 		delete(sm.tokenIndex, token)
 		sm.mu.Unlock()
+
 		_ = ptySess.Kill()
 		ptySess.Close()
 		forkCleanup()
 		os.Remove(logPath)
+
 		return SessionState{}, fmt.Errorf("persist session state: %w", err)
 	}
 
@@ -1320,6 +1480,7 @@ func (sm *SessionManager) startWatcher(id string, sess *grpty.Session) {
 	sm.watchers.Add(1)
 	go func() {
 		defer sm.watchers.Done()
+
 		sm.watchSession(id, sess)
 	}()
 }
@@ -1332,9 +1493,13 @@ func (sm *SessionManager) watchSession(id string, sess *grpty.Session) {
 
 	sm.mu.Lock()
 	stale := sm.sessions[id] != sess
-	var name string
-	var deleted bool
-	var isOrchestrator bool
+
+	var (
+		name           string
+		deleted        bool
+		isOrchestrator bool
+	)
+
 	if !stale {
 		if s, ok := sm.state.Sessions[id]; ok {
 			name = s.Name
@@ -1342,6 +1507,7 @@ func (sm *SessionManager) watchSession(id string, sess *grpty.Session) {
 
 			prevSummary := s.SummaryText
 			prevSetAt := s.SummarySetAt
+
 			prevTTL := sm.cfg.Status.TTLDuration()
 			if s.SummaryTTL > 0 {
 				prevTTL = time.Duration(s.SummaryTTL) * time.Second
@@ -1352,10 +1518,12 @@ func (sm *SessionManager) watchSession(id string, sess *grpty.Session) {
 			s.StatusChangedAt = time.Now()
 			s.ExitCode = &exitCode
 			s.PID = 0
+
 			s.PIDStartTime = 0
 			if s.StopReason == "" {
 				s.StopReason = StopReasonCrash
 			}
+
 			if lastOut := sess.LastOutputAt(); !lastOut.IsZero() {
 				s.LastOutputAt = &lastOut
 			}
@@ -1380,6 +1548,7 @@ func (sm *SessionManager) watchSession(id string, sess *grpty.Session) {
 			delete(sm.sessions, id)
 		} else {
 			deleted = true
+
 			delete(sm.sessions, id)
 		}
 	}
@@ -1395,6 +1564,7 @@ func (sm *SessionManager) watchSession(id string, sess *grpty.Session) {
 		sm.log.Info("ignoring stale session exit", "id", id, "exit_code", sess.ExitCode())
 		return
 	}
+
 	if deleted {
 		sm.log.Info("ignoring exit for deleted session", "id", id, "exit_code", sess.ExitCode())
 		return
@@ -1408,9 +1578,11 @@ func (sm *SessionManager) watchSession(id string, sess *grpty.Session) {
 	if sig := sess.ExitSignal(); sig != 0 {
 		logAttrs = append(logAttrs, "signal", sig.String())
 	}
+
 	if rss := sess.PeakRSSBytes(); rss > 0 && sess.ExitCode() != 0 {
 		logAttrs = append(logAttrs, "peak_rss_mb", rss/(1024*1024))
 	}
+
 	sm.log.Info("session exited", logAttrs...)
 
 	sm.onAgentStatusChange(id, name, "running", "stopped")
@@ -1437,6 +1609,7 @@ func (sm *SessionManager) recordExit() {
 	for start < len(sm.recentExits) && sm.recentExits[start].Before(cutoff) {
 		start++
 	}
+
 	sm.recentExits = append(sm.recentExits[start:], now)
 
 	if len(sm.recentExits) == massExitThreshold {
@@ -1454,6 +1627,7 @@ func argsNeedAgentID(args []string) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -1465,6 +1639,7 @@ func argsNeedForkSourceID(args []string) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -1481,6 +1656,7 @@ func resolveResumeArgs(agent config.Agent, sessAgent, sessAgentSessionID string,
 	if len(resumeArgs) == 0 || freshStart {
 		resumeArgs = agent.Args
 	}
+
 	if !freshStart && sessAgentSessionID == "" && argsNeedAgentID(resumeArgs) {
 		if sessAgent == "codex" {
 			return []string{"resume", "--last"}, "no native id captured; codex resuming --last"
@@ -1491,8 +1667,10 @@ func resolveResumeArgs(agent config.Agent, sessAgent, sessAgentSessionID string,
 		if argsNeedAgentID(agent.Args) {
 			return nil, "no native id captured; starting fresh (dropped id-templated args)"
 		}
+
 		return agent.Args, "no native id captured; starting fresh"
 	}
+
 	return resumeArgs, ""
 }
 
@@ -1518,12 +1696,17 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	// --- Pre-lock: discover GitHub username ---
 	sm.mu.RLock()
 	sessSnap, snapOk := sm.state.Sessions[id]
-	var snapRepoPath string
-	var snapAgent string
+
+	var (
+		snapRepoPath string
+		snapAgent    string
+	)
+
 	if snapOk {
 		snapRepoPath = sessSnap.RepoPath
 		snapAgent = sessSnap.Agent
 	}
+
 	cfgUsername := sm.cfg.GitHubUsername
 	sm.mu.RUnlock()
 
@@ -1531,11 +1714,14 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	if preUsername == "" && snapRepoPath != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), gitUsernameTimeout)
 		preUsername, _ = git.DiscoverGitHubUsername(ctx, snapRepoPath)
+
 		cancel()
 	}
+
 	if preUsername == "" {
 		preUsername = "user"
 	}
+
 	_ = snapAgent // used only to decide whether to discover username
 
 	// --- Phase 1: Lock, validate, prepare, mark creating ---
@@ -1546,15 +1732,19 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 		sm.mu.Unlock()
 		return SessionState{}, fmt.Errorf("session %q not found", id)
 	}
+
 	if sessState.Status == StatusDeleting {
 		sm.mu.Unlock()
 		return SessionState{}, fmt.Errorf("session %q is being deleted", id)
 	}
+
 	if sessState.Status == StatusRunning {
 		result := *sessState
 		sm.mu.Unlock()
+
 		return result, nil
 	}
+
 	if sessState.Status == StatusCreating {
 		sm.mu.Unlock()
 		return SessionState{}, fmt.Errorf("session %q is being created", id)
@@ -1581,6 +1771,7 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 		sm.mu.Unlock()
 		return SessionState{}, fmt.Errorf("shared-worktree session %q requires sandbox but sandbox is not enabled in current config; enable sandbox to resume", id)
 	}
+
 	if sessState.SystemKind == SystemKindOrchestrator && !sandboxed {
 		sm.mu.Unlock()
 		return SessionState{}, fmt.Errorf("orchestrator requires sandbox but sandbox is not available — install safehouse and enable sandbox in config")
@@ -1603,20 +1794,24 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 			sm.mu.Unlock()
 			return SessionState{}, fmt.Errorf("in-place repo path %q is no longer a git repository", sessState.WorktreePath)
 		}
+
 		currentRoot, err := git.RepoRootPath(sessState.WorktreePath)
 		if err != nil {
 			sm.mu.Unlock()
 			return SessionState{}, fmt.Errorf("resolve in-place repo root: %w", err)
 		}
+
 		if config.ResolvePath(currentRoot) != config.ResolvePath(sessState.WorktreePath) {
 			sm.mu.Unlock()
 			return SessionState{}, fmt.Errorf("in-place repo root changed: saved %q, current %q", sessState.WorktreePath, currentRoot)
 		}
+
 		rc, ok := sm.cfg.FindRepo(sessState.WorktreePath)
 		if !ok {
 			sm.mu.Unlock()
 			return SessionState{}, fmt.Errorf("repo path %q is no longer configured in [[repos]] — add it back to config to resume this in-place session", sessState.WorktreePath)
 		}
+
 		if !rc.AllowConcurrent {
 			for _, s := range sm.state.Sessions {
 				if s.ID != id && s.InPlace && config.ResolvePath(s.WorktreePath) == config.ResolvePath(sessState.WorktreePath) && (s.Status == StatusRunning || s.Status == StatusCreating) {
@@ -1635,6 +1830,7 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 
 	// Snapshot shared worktree source includes under lock.
 	var sharedSourceIncludes []IncludedRepoState
+
 	if sessState.SharedWorktree {
 		if source, ok := sm.state.Sessions[sessState.SharedWorktreeSourceID]; ok {
 			sharedSourceIncludes = make([]IncludedRepoState, len(source.Includes))
@@ -1664,11 +1860,13 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	// Mark as creating so concurrent operations see it's busy.
 	prevStatusChangedAt := sessState.StatusChangedAt
 	sessState.Status = StatusCreating
+
 	sessState.StatusChangedAt = time.Now().UTC()
 	if err := sm.saveState(); err != nil {
 		sessState.Status = prevStatus
 		sessState.StatusChangedAt = prevStatusChangedAt
 		sm.mu.Unlock()
+
 		return SessionState{}, fmt.Errorf("persist session state: %w", err)
 	}
 
@@ -1728,6 +1926,7 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 		WorktreePath:   sessWorktreePath,
 		Model:          sessModel,
 	}
+
 	expandedArgs, err := config.ExpandSlice(resumeArgs, vars)
 	if err != nil {
 		rollbackState()
@@ -1737,6 +1936,7 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	logPath := filepath.Join(sm.paths.LogDir, id+".log")
 
 	isOrchestrator := sessSystemKind == SystemKindOrchestrator
+
 	ptyCWD := sessWorktreePath
 	if isOrchestrator {
 		ptyCWD = sm.orchestratorScratchDir()
@@ -1746,49 +1946,65 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	for k, v := range agent.Env {
 		env[k] = v
 	}
+
 	env["GRAITH_SESSION_ID"] = id
 	env["GRAITH_SESSION_NAME"] = sessName
+
 	env["GRAITH_AGENT_TYPE"] = sessAgent
 	if sessToken != "" {
 		env["GRAITH_TOKEN"] = sessToken
 	}
+
 	if !isOrchestrator {
 		env["GRAITH_WORKTREE_PATH"] = sessWorktreePath
 	}
+
 	if sessRepoPath != "" {
 		env["GRAITH_REPO_PATH"] = sessRepoPath
 	}
+
 	if sm.paths.Profile != "" {
 		env["GRAITH_PROFILE"] = sm.paths.Profile
 	}
+
 	if sessInPlace {
 		env["GRAITH_IN_PLACE"] = "true"
 	}
+
 	if sessScenarioID != "" {
 		env["GRAITH_SCENARIO"] = sessScenarioID
+
 		sm.mu.RLock()
+
 		if sc, ok := sm.state.Scenarios[sessScenarioID]; ok {
 			env["GRAITH_SCENARIO_NAME"] = sc.Name
 		}
+
 		sm.mu.RUnlock()
 	}
+
 	if sessScenarioRole != "" {
 		env["GRAITH_SCENARIO_ROLE"] = sessScenarioRole
 	}
+
 	if sessScenarioGoal != "" {
 		env["GRAITH_SCENARIO_GOAL"] = sessScenarioGoal
 	}
+
 	var resumeStoreDir string
+
 	if isOrchestrator {
 		if err := os.MkdirAll(ptyCWD, 0o700); err != nil {
 			rollbackState()
 			return SessionState{}, fmt.Errorf("create orchestrator scratch dir: %w", err)
 		}
+
 		tmpDir := sm.orchestratorTmpDir()
 		if err := os.MkdirAll(tmpDir, 0o700); err != nil {
 			rollbackState()
 			return SessionState{}, fmt.Errorf("create orchestrator tmp dir: %w", err)
 		}
+
 		env["GRAITH_TMPDIR"] = tmpDir
 		env["TMPDIR"] = tmpDir
 	} else if sessRepoPath != "" {
@@ -1797,10 +2013,12 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 			rollbackState()
 			return SessionState{}, err
 		}
+
 		env["GRAITH_TMPDIR"] = tmpDir
 		if _, ok := env["TMPDIR"]; !ok {
 			env["TMPDIR"] = tmpDir
 		}
+
 		resumeStoreDir, err = sm.repoStoreDir(sessRepoPath)
 		if err != nil {
 			rollbackState()
@@ -1813,6 +2031,7 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 			rollbackState()
 			return SessionState{}, fmt.Errorf("included worktree %q (%s) is no longer a valid git repo — delete and recreate the session", inc.WorktreePath, inc.RepoName)
 		}
+
 		env[config.IncludeEnvVarName(inc.RepoName)] = inc.WorktreePath
 	}
 
@@ -1822,7 +2041,9 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 			rollbackState()
 			return SessionState{}, fmt.Errorf("inject agent hooks: %w", err)
 		}
+
 		expandedArgs = append(expandedArgs, hookArgs...)
+
 		for k, v := range hookEnv {
 			env[k] = v
 		}
@@ -1851,54 +2072,69 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 
 	command := agent.Command
 	finalArgs := expandedArgs
+
 	var mergedSandbox *config.SandboxConfig
+
 	if sandboxed {
 		merged := sandboxMerged
 		merged.ReadDirs = expandPaths(merged.ReadDirs, sm.log, "read")
 		merged.WriteDirs = expandPaths(merged.WriteDirs, sm.log, "write")
 		mergedSandbox = &merged
+
 		envKeys := []string{"GRAITH_SESSION_ID", "GRAITH_SESSION_NAME", "GRAITH_AGENT_TYPE", "TERM"}
 		if !isOrchestrator {
 			envKeys = append(envKeys, "GRAITH_WORKTREE_PATH")
 		}
+
 		for k := range agent.Env {
 			envKeys = append(envKeys, k)
 		}
+
 		for k := range env {
 			envKeys = append(envKeys, k)
 		}
+
 		opts := sm.sandboxOptsFromConfig(merged, id, ptyCWD, envKeys, sessAgentHooks)
 		if tmpDir := env["GRAITH_TMPDIR"]; tmpDir != "" {
 			opts.WriteDirs = append(opts.WriteDirs, tmpDir)
 		}
+
 		if resumeStoreDir != "" {
 			opts.WriteDirs = append(opts.WriteDirs, resumeStoreDir)
 		}
+
 		opts.WriteDirs = append(opts.WriteDirs, store.SharedStorePath(sm.paths.DataDir))
 		if isOrchestrator {
 			opts.WriteDirs = append(opts.WriteDirs, sm.orchestratorScratchDir())
 		}
+
 		if len(sessIncludes) > 0 {
 			opts.WriteDirs = append(opts.WriteDirs, sm.deriveSandboxIncludesWriteDirs(sessIncludes)...)
 		}
+
 		if sessSharedWorktree {
 			scratchDir := filepath.Join(sm.paths.DataDir, "scratch", id)
 			if err := os.MkdirAll(scratchDir, 0o700); err != nil {
 				rollbackState()
 				return SessionState{}, fmt.Errorf("create scratch dir for shared worktree resume: %w", err)
 			}
+
 			opts.ReadDirs = append(opts.ReadDirs, sessWorktreePath)
 			for _, inc := range sharedSourceIncludes {
 				opts.ReadDirs = append(opts.ReadDirs, inc.WorktreePath)
 			}
+
 			opts.WorktreeDir = scratchDir
 		}
+
 		var wrapErr error
+
 		command, finalArgs, wrapErr = sandbox.Wrap(agent.Command, expandedArgs, opts)
 		if wrapErr != nil {
 			rollbackState()
 			return SessionState{}, fmt.Errorf("sandbox wrap: %w", wrapErr)
 		}
+
 		sm.log.Info("sandboxing resumed session", "id", id,
 			"command", command, "read_dirs", opts.ReadDirs, "write_dirs", opts.WriteDirs,
 			"features", opts.Features, "workdir", opts.WorktreeDir)
@@ -1906,6 +2142,7 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 
 	// Pre-spawn time for native session-id capture (see Create).
 	startedAt := time.Now()
+
 	ptySess, err := grpty.NewSession(grpty.SessionOpts{
 		ID:         id,
 		Command:    command,
@@ -1927,8 +2164,10 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 
 	if _, ok := sm.state.Sessions[id]; !ok {
 		sm.mu.Unlock()
+
 		_ = ptySess.Kill()
 		ptySess.Close()
+
 		return SessionState{}, fmt.Errorf("session was deleted during resume")
 	}
 
@@ -1937,15 +2176,18 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	sessState.StatusChangedAt = time.Now()
 	sessState.ExitCode = nil
 	sessState.ExitSignal = ""
+
 	sessState.PID = ptySess.Cmd.Process.Pid
 	if st, err := grpty.ProcessStartTime(sessState.PID); err == nil {
 		sessState.PIDStartTime = st
 	}
+
 	sessState.AgentStatus = ""
 	sessState.IdleSince = nil
 	sessState.StopReason = ""
 	sessState.Sandboxed = sandboxed
 	sessState.SandboxConfig = mergedSandbox
+
 	sessState.CreationCfg = &CreationConfig{
 		Agent:         agent,
 		SandboxConfig: sandboxMerged,
@@ -1961,6 +2203,7 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	}
 
 	sm.sessions[id] = ptySess
+
 	applyLifecycleSummaryLocked(sessState, lifecycleSummary)
 
 	if err := sm.saveState(); err != nil {
@@ -1978,14 +2221,18 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 		sessState.SummaryText = prevSummaryText
 		sessState.SummarySetAt = prevSummarySetAt
 		sessState.SummaryTTL = prevSummaryTTL
+
 		delete(sm.sessions, id)
 		sm.mu.Unlock()
+
 		_ = ptySess.Kill()
 		ptySess.Close()
+
 		return SessionState{}, fmt.Errorf("persist session state: %w", err)
 	}
 
 	delete(sm.hookReports, id)
+
 	scenarioIDForRepublish := sessState.ScenarioID
 	result := cloneSessionState(sessState)
 	sm.mu.Unlock()
@@ -2018,14 +2265,17 @@ func (sm *SessionManager) Delete(id string) error {
 		sm.mu.Unlock()
 		return fmt.Errorf("session %q not found", id)
 	}
+
 	if IsSystemSession(sessState) {
 		sm.mu.Unlock()
 		return fmt.Errorf("session %q is a system session — disable it in config.toml instead of deleting", sessState.Name)
 	}
+
 	if sessState.Starred {
 		sm.mu.Unlock()
 		return fmt.Errorf("session %q is starred; unstar it first to delete", id)
 	}
+
 	if sessState.Status == StatusDeleting {
 		sm.mu.Unlock()
 		return fmt.Errorf("session %q is already being deleted", id)
@@ -2064,16 +2314,20 @@ func (sm *SessionManager) Delete(id string) error {
 		sm.reparentChildrenLocked(id, parentID)
 		delete(sm.state.Sessions, id)
 		delete(sm.hookReports, id)
+
 		for _, s := range sm.state.Sessions {
 			if s.ParentID == id {
 				s.ParentID = ""
 			}
 		}
+
 		_ = sm.saveState()
 		sm.mu.Unlock()
+
 		if hasClient {
 			ac.kick()
 		}
+
 		return nil
 	}
 
@@ -2089,6 +2343,7 @@ func (sm *SessionManager) Delete(id string) error {
 	// Blocking operations outside the lock.
 	if hasPTY {
 		ptySess.Detach()
+
 		if !ptySess.Exited() {
 			_ = ptySess.Kill()
 			select {
@@ -2097,6 +2352,7 @@ func (sm *SessionManager) Delete(id string) error {
 				_ = ptySess.ForceKill()
 			}
 		}
+
 		ptySess.Close()
 	} else if orphanPID > 0 {
 		if _, err := sm.killVerifiedProcess(orphanPID, orphanStartTime); err != nil {
@@ -2108,18 +2364,22 @@ func (sm *SessionManager) Delete(id string) error {
 				s.PID = orphanPID
 				s.PIDStartTime = orphanStartTime
 				applyLifecycleSummaryLocked(s, fmt.Sprintf("Delete aborted: orphaned process (PID %d) could not be killed: %v", orphanPID, err))
+
 				_ = sm.saveState()
 			}
 			sm.mu.Unlock()
+
 			if hasClient {
 				ac.kick()
 			}
+
 			return fmt.Errorf("delete aborted: orphaned process (PID %d) could not be killed: %w", orphanPID, err)
 		}
 	}
 
 	// Attempt git teardown before removing the session from state.
 	var teardownErr error
+
 	switch {
 	case shared:
 		scratchDir := filepath.Join(sm.paths.DataDir, "scratch", id)
@@ -2144,12 +2404,15 @@ func (sm *SessionManager) Delete(id string) error {
 			} else {
 				s.Status = prevStatus
 			}
+
 			_ = sm.saveState()
 		}
 		sm.mu.Unlock()
+
 		if hasClient {
 			ac.kick()
 		}
+
 		return fmt.Errorf("git teardown failed (session kept for retry): %w", teardownErr)
 	}
 
@@ -2161,17 +2424,21 @@ func (sm *SessionManager) Delete(id string) error {
 	if s, ok := sm.state.Sessions[id]; ok {
 		parentID = s.ParentID
 	}
+
 	sm.reparentChildrenLocked(id, parentID)
 	delete(sm.state.Sessions, id)
 	delete(sm.hookReports, id)
+
 	if sessToken != "" {
 		delete(sm.tokenIndex, sessToken)
 	}
+
 	for _, s := range sm.state.Sessions {
 		if s.ParentID == id {
 			s.ParentID = ""
 		}
 	}
+
 	err := sm.saveState()
 	sm.mu.Unlock()
 
@@ -2207,6 +2474,7 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 		sm.mu.Unlock()
 		return nil, fmt.Errorf("session %q not found", id)
 	}
+
 	if !excludeRoot && sess.Starred {
 		sm.mu.Unlock()
 		return nil, fmt.Errorf("session %q is starred; unstar it first to delete", id)
@@ -2234,17 +2502,21 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 	}
 
 	snaps := make([]snapshot, 0, len(toDelete))
+
 	var creatingIDs []string
+
 	for _, did := range toDelete {
 		sess := sm.state.Sessions[did]
 		if IsSystemSession(sess) {
 			sm.log.Info("skipping system session in bulk delete", "session_id", did, "name", sess.Name)
 			continue
 		}
+
 		if sess.Starred {
 			sm.log.Info("skipping starred session in bulk delete", "session_id", did, "name", sess.Name)
 			continue
 		}
+
 		if sess.Status == StatusDeleting {
 			continue
 		}
@@ -2253,6 +2525,7 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 			// Mid-creation: remove from state so Phase 3 detects the deletion.
 			delete(sm.state.Sessions, did)
 			delete(sm.hookReports, did)
+
 			if ac, ok := sm.attachedClients[did]; ok {
 				delete(sm.attachedClients, did)
 				creatingIDs = append(creatingIDs, did)
@@ -2260,6 +2533,7 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 			} else {
 				creatingIDs = append(creatingIDs, did)
 			}
+
 			continue
 		}
 
@@ -2275,14 +2549,19 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 			includes:     make([]IncludedRepoState, len(sess.Includes)),
 		}
 		copy(s.includes, sess.Includes)
+
 		if pty, ok := sm.sessions[did]; ok {
 			s.ptySess = pty
+
 			delete(sm.sessions, did)
 		}
+
 		if ac, ok := sm.attachedClients[did]; ok {
 			s.client = ac
+
 			delete(sm.attachedClients, did)
 		}
+
 		s.pid = sess.PID
 		s.pidStartTime = sess.PIDStartTime
 		snaps = append(snaps, s)
@@ -2291,14 +2570,17 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 		sess.PID = 0
 		sess.PIDStartTime = 0
 	}
+
 	_ = sm.saveState()
 	sm.mu.Unlock()
 
 	// Kill all PTY processes outside the lock.
 	killFailed := make(map[string]bool)
+
 	for _, s := range snaps {
 		if s.ptySess != nil {
 			s.ptySess.Detach()
+
 			if !s.ptySess.Exited() {
 				_ = s.ptySess.Kill()
 				select {
@@ -2307,6 +2589,7 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 					_ = s.ptySess.ForceKill()
 				}
 			}
+
 			s.ptySess.Close()
 		} else if s.pid > 0 {
 			if _, err := sm.killVerifiedProcess(s.pid, s.pidStartTime); err != nil {
@@ -2319,8 +2602,10 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 					sess.PIDStartTime = s.pidStartTime
 					applyLifecycleSummaryLocked(sess, fmt.Sprintf("Delete aborted: orphaned process (PID %d) could not be killed: %v", s.pid, err))
 				}
+
 				_ = sm.saveState()
 				sm.mu.Unlock()
+
 				killFailed[s.id] = true
 			}
 		}
@@ -2332,6 +2617,7 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 	for _, s := range snaps {
 		deletedSet[s.id] = true
 	}
+
 	for _, cid := range creatingIDs {
 		deletedSet[cid] = true
 	}
@@ -2339,8 +2625,11 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 	const maxSweepRounds = 10
 	for sweep := 0; sweep < maxSweepRounds; sweep++ {
 		sm.mu.Lock()
+
 		var lateSnaps []snapshot
+
 		progress := false
+
 		for sid, sess := range sm.state.Sessions {
 			if deletedSet[sid] || sess.ParentID == "" || !deletedSet[sess.ParentID] {
 				continue
@@ -2348,20 +2637,28 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 			// Add to traversal set before skip checks so descendants of
 			// starred/system sessions are still reachable in later rounds.
 			deletedSet[sid] = true
+
 			if IsSystemSession(sess) || sess.Starred || sess.Status == StatusDeleting {
 				continue
 			}
+
 			progress = true
+
 			if sess.Status == StatusCreating {
 				delete(sm.state.Sessions, sid)
 				delete(sm.hookReports, sid)
+
 				if ac, ok := sm.attachedClients[sid]; ok {
 					delete(sm.attachedClients, sid)
+
 					_ = ac
 				}
+
 				creatingIDs = append(creatingIDs, sid)
+
 				continue
 			}
+
 			ls := snapshot{
 				id:           sid,
 				agent:        sess.Agent,
@@ -2374,23 +2671,30 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 				includes:     make([]IncludedRepoState, len(sess.Includes)),
 			}
 			copy(ls.includes, sess.Includes)
+
 			if pty, ok := sm.sessions[sid]; ok {
 				ls.ptySess = pty
+
 				delete(sm.sessions, sid)
 			}
+
 			if ac, ok := sm.attachedClients[sid]; ok {
 				ls.client = ac
+
 				delete(sm.attachedClients, sid)
 			}
+
 			lateSnaps = append(lateSnaps, ls)
 			sess.Status = StatusDeleting
 			sess.StatusChangedAt = time.Now()
 			sess.PID = 0
 		}
+
 		if !progress {
 			sm.mu.Unlock()
 			break
 		}
+
 		sm.log.Info("sweep found late-arriving descendants", "count", len(lateSnaps), "round", sweep+1)
 		_ = sm.saveState()
 		sm.mu.Unlock()
@@ -2398,6 +2702,7 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 		for _, s := range lateSnaps {
 			if s.ptySess != nil {
 				s.ptySess.Detach()
+
 				if !s.ptySess.Exited() {
 					_ = s.ptySess.Kill()
 					select {
@@ -2406,10 +2711,13 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 						_ = s.ptySess.ForceKill()
 					}
 				}
+
 				s.ptySess.Close()
 			}
 		}
+
 		snaps = append(snaps, lateSnaps...)
+
 		if sweep == maxSweepRounds-1 {
 			sm.log.Warn("sweep reached round cap, some descendants may remain", "cap", maxSweepRounds)
 		}
@@ -2417,12 +2725,15 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 
 	// Attempt teardowns, tracking which succeed.
 	var teardownErrs []error
+
 	succeeded := make(map[string]bool, len(snaps))
 	for _, s := range snaps {
 		if killFailed[s.id] {
 			continue
 		}
+
 		var err error
+
 		switch {
 		case s.shared:
 			err = os.RemoveAll(filepath.Join(sm.paths.DataDir, "scratch", s.id))
@@ -2434,6 +2745,7 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 		case s.worktreePath != "":
 			err = os.RemoveAll(s.worktreePath)
 		}
+
 		if err != nil {
 			sm.log.Error("git teardown failed, session kept for retry",
 				"session_id", s.id, "err", err)
@@ -2445,16 +2757,20 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 
 	// Remove successfully torn-down sessions; revert failed ones to their prior status.
 	sm.mu.Lock()
+
 	deletedIDs := append([]string{}, creatingIDs...)
+
 	removedSet := make(map[string]bool, len(creatingIDs))
 	for _, cid := range creatingIDs {
 		removedSet[cid] = true
 	}
+
 	for _, s := range snaps {
 		if succeeded[s.id] {
 			if sess, ok := sm.state.Sessions[s.id]; ok && sess.Token != "" {
 				delete(sm.tokenIndex, sess.Token)
 			}
+
 			delete(sm.state.Sessions, s.id)
 			delete(sm.hookReports, s.id)
 			deletedIDs = append(deletedIDs, s.id)
@@ -2467,11 +2783,13 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 			}
 		}
 	}
+
 	for _, s := range sm.state.Sessions {
 		if s.ParentID != "" && removedSet[s.ParentID] {
 			s.ParentID = ""
 		}
 	}
+
 	stateErr := sm.saveState()
 	sm.mu.Unlock()
 
@@ -2480,6 +2798,7 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 			_ = os.Remove(filepath.Join(sm.paths.LogDir, s.id+".log"))
 			sm.cleanupHooks(s.id, s.agent, s.worktreePath)
 		}
+
 		if s.client != nil {
 			s.client.kick()
 		}
@@ -2488,16 +2807,19 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 	if stateErr != nil {
 		return deletedIDs, stateErr
 	}
+
 	if len(teardownErrs) > 0 {
 		return deletedIDs, fmt.Errorf("git teardown failed for %d session(s) (kept for retry): %w",
 			len(teardownErrs), errors.Join(teardownErrs...))
 	}
+
 	return deletedIDs, nil
 }
 
 // collectDescendants returns the target ID plus all transitive children, leaves first.
 func (sm *SessionManager) collectDescendants(rootID string) []string {
 	children := make(map[string][]string)
+
 	for id, sess := range sm.state.Sessions {
 		if sess.ParentID != "" {
 			children[sess.ParentID] = append(children[sess.ParentID], id)
@@ -2505,19 +2827,25 @@ func (sm *SessionManager) collectDescendants(rootID string) []string {
 	}
 
 	var result []string
+
 	seen := make(map[string]bool)
+
 	var walk func(string)
+
 	walk = func(id string) {
 		if seen[id] {
 			return
 		}
+
 		seen[id] = true
 		for _, child := range children[id] {
 			walk(child)
 		}
+
 		result = append(result, id)
 	}
 	walk(rootID)
+
 	return result
 }
 
@@ -2527,16 +2855,21 @@ func killProcessGroup(pid int) error {
 	if pid <= 1 {
 		return fmt.Errorf("refusing to signal pid %d", pid)
 	}
+
 	pgid := -pid
 	if err := syscall.Kill(pgid, syscall.SIGTERM); err != nil {
 		if errors.Is(err, syscall.ESRCH) {
 			return nil
 		}
+
 		return fmt.Errorf("SIGTERM to pgid %d: %w", pgid, err)
 	}
+
 	deadline := time.After(5 * time.Second)
+
 	tick := time.NewTicker(100 * time.Millisecond)
 	defer tick.Stop()
+
 	for {
 		select {
 		case <-deadline:
@@ -2554,20 +2887,26 @@ func (sm *SessionManager) killVerifiedProcess(pid int, startTime int64) (killed 
 	if pid <= 0 || !isProcessAlive(pid) {
 		return false, nil
 	}
+
 	if startTime == 0 {
 		return false, fmt.Errorf("no process identity recorded for PID %d", pid)
 	}
+
 	current, err := grpty.ProcessStartTime(pid)
 	if err != nil {
 		if !isProcessAlive(pid) {
 			return false, nil
 		}
+
 		return false, fmt.Errorf("could not read process start time for PID %d: %w", pid, err)
 	}
+
 	if current != startTime {
 		return false, fmt.Errorf("PID %d identity mismatch (recorded=%d, current=%d)", pid, startTime, current)
 	}
+
 	err = killProcessGroup(pid)
+
 	return err == nil, err
 }
 
@@ -2579,17 +2918,22 @@ type orphanCandidate struct {
 
 func (sm *SessionManager) cleanupOrphanedProcesses() {
 	sm.mu.Lock()
+
 	var candidates []orphanCandidate
+
 	for id, sess := range sm.state.Sessions {
 		if sess.Status != StatusRunning || sess.PID <= 0 {
 			continue
 		}
+
 		if !isProcessAlive(sess.PID) {
 			continue
 		}
+
 		if _, hasPTY := sm.sessions[id]; hasPTY {
 			continue
 		}
+
 		candidates = append(candidates, orphanCandidate{
 			id: id, pid: sess.PID, pidStartTime: sess.PIDStartTime,
 		})
@@ -2609,6 +2953,7 @@ func (sm *SessionManager) cleanupOrphanedProcesses() {
 			sm.log.Warn("killing orphaned process group",
 				"id", c.id, "pid", c.pid)
 			err := killProcessGroup(c.pid)
+
 			sm.mu.Lock()
 			if sess := sm.state.Sessions[c.id]; sess != nil {
 				if err != nil {
@@ -2634,6 +2979,7 @@ func (sm *SessionManager) cleanupOrphanedProcesses() {
 				sm.log.Warn("cannot verify orphaned process identity",
 					"id", c.id, "pid", c.pid,
 					"recorded_start_time", c.pidStartTime)
+
 				sess.Status = StatusErrored
 				sess.StatusChangedAt = time.Now()
 				sess.StopReason = StopReasonCrash
@@ -2660,18 +3006,22 @@ func (sm *SessionManager) Stop(id string) error {
 func (sm *SessionManager) stopWithReason(id, reason string) error {
 	sm.mu.Lock()
 	sessState, ok := sm.state.Sessions[id]
+
 	var status SessionStatus
 	if ok {
 		status = sessState.Status
 	}
+
 	if !ok {
 		sm.mu.Unlock()
 		return fmt.Errorf("session %q not found", id)
 	}
+
 	if status != StatusRunning {
 		sm.mu.Unlock()
 		return fmt.Errorf("session %q is not running", id)
 	}
+
 	sessState.StopReason = reason
 	_ = sm.saveState()
 	sm.mu.Unlock()
@@ -2681,6 +3031,7 @@ func (sm *SessionManager) stopWithReason(id, reason string) error {
 		if err := ptySess.Kill(); err != nil {
 			return fmt.Errorf("send SIGTERM: %w", err)
 		}
+
 		return nil
 	}
 
@@ -2711,9 +3062,11 @@ func (sm *SessionManager) stopWithReason(id, reason string) error {
 			s.PIDStartTime = 0
 			applyLifecycleSummaryLocked(s, "Process already exited")
 		}
+
 		_ = sm.saveState()
 	}
 	sm.mu.Unlock()
+
 	return err
 }
 
@@ -2724,6 +3077,7 @@ func filterExcludeRoot(ids []string, rootID string) []string {
 			result = append(result, id)
 		}
 	}
+
 	return result
 }
 
@@ -2746,36 +3100,46 @@ func (sm *SessionManager) StopWithChildren(rootID string, excludeRoot bool) ([]s
 	sm.mu.Unlock()
 
 	var stopped []string
+
 	for _, id := range toStop {
 		sm.mu.Lock()
+
 		sess, ok := sm.state.Sessions[id]
 		if !ok {
 			sm.mu.Unlock()
 			continue
 		}
+
 		if sess.Starred {
 			sm.mu.Unlock()
 			sm.log.Info("skipping starred session in bulk stop", "session_id", id, "name", sess.Name)
+
 			continue
 		}
+
 		if sess.Status != StatusRunning {
 			sm.mu.Unlock()
 			continue
 		}
+
 		sess.StopReason = StopReasonUser
 		pid := sess.PID
 		startTime := sess.PIDStartTime
 		_ = sm.saveState()
 		sm.mu.Unlock()
+
 		ptySess, ok := sm.GetPTY(id)
 		if ok {
 			if err := ptySess.Kill(); err != nil {
 				sm.log.Warn("stop child failed", "session_id", id, "error", err)
 				continue
 			}
+
 			stopped = append(stopped, id)
+
 			continue
 		}
+
 		killed, killErr := sm.killVerifiedProcess(pid, startTime)
 		sm.mu.Lock()
 		if s, ok := sm.state.Sessions[id]; ok {
@@ -2786,6 +3150,7 @@ func (sm *SessionManager) StopWithChildren(rootID string, excludeRoot bool) ([]s
 				s.PID = 0
 				s.PIDStartTime = 0
 				applyLifecycleSummaryLocked(s, "Orphaned process killed")
+
 				stopped = append(stopped, id)
 			case killErr != nil:
 				s.Status = StatusErrored
@@ -2797,8 +3162,10 @@ func (sm *SessionManager) StopWithChildren(rootID string, excludeRoot bool) ([]s
 				s.PID = 0
 				s.PIDStartTime = 0
 				applyLifecycleSummaryLocked(s, "Process already exited")
+
 				stopped = append(stopped, id)
 			}
+
 			_ = sm.saveState()
 		}
 		sm.mu.Unlock()
@@ -2813,38 +3180,52 @@ func (sm *SessionManager) StopWithChildren(rootID string, excludeRoot bool) ([]s
 	const maxSweepRounds = 10
 	for sweep := 0; sweep < maxSweepRounds; sweep++ {
 		sm.mu.Lock()
+
 		var late []string
+
 		progress := false
+
 		for sid, sess := range sm.state.Sessions {
 			if stoppedSet[sid] || sess.ParentID == "" || !stoppedSet[sess.ParentID] {
 				continue
 			}
+
 			stoppedSet[sid] = true
+
 			if sess.Starred {
 				continue
 			}
+
 			if sess.Status == StatusCreating {
 				// Remove placeholder so Phase 3 of Create detects the
 				// cancellation and cleans up the PTY/worktree.
 				delete(sm.state.Sessions, sid)
 				delete(sm.hookReports, sid)
+
 				progress = true
+
 				continue
 			}
+
 			if sess.Status != StatusRunning {
 				continue
 			}
+
 			progress = true
+
 			late = append(late, sid)
 			sess.StopReason = StopReasonUser
 		}
+
 		if !progress {
 			sm.mu.Unlock()
 			break
 		}
+
 		if len(late) > 0 {
 			sm.log.Info("sweep found late-arriving descendants to stop", "count", len(late), "round", sweep+1)
 		}
+
 		_ = sm.saveState()
 		sm.mu.Unlock()
 
@@ -2853,12 +3234,15 @@ func (sm *SessionManager) StopWithChildren(rootID string, excludeRoot bool) ([]s
 			if !ok {
 				continue
 			}
+
 			if err := ptySess.Kill(); err != nil {
 				sm.log.Warn("stop late child failed", "session_id", lid, "error", err)
 				continue
 			}
+
 			stopped = append(stopped, lid)
 		}
+
 		if sweep == maxSweepRounds-1 {
 			sm.log.Warn("stop sweep reached round cap, some descendants may remain", "cap", maxSweepRounds)
 		}
@@ -2881,6 +3265,7 @@ func (sm *SessionManager) Restart(id string, rows, cols uint16) (SessionState, e
 		if err := ptySess.Kill(); err != nil {
 			return SessionState{}, fmt.Errorf("stop session: %w", err)
 		}
+
 		<-ptySess.Done()
 
 		sm.mu.Lock()
@@ -2891,11 +3276,13 @@ func (sm *SessionManager) Restart(id string, rows, cols uint16) (SessionState, e
 			s.ExitCode = &exitCode
 			s.PID = 0
 			s.PIDStartTime = 0
+
 			sm.saveState()
 		}
 		sm.mu.Unlock()
 	} else if !hasPTY {
 		sm.mu.Lock()
+
 		sess, ok := sm.state.Sessions[id]
 		if ok && sess.Status == StatusRunning && sess.PID > 0 {
 			pid := sess.PID
@@ -2930,6 +3317,7 @@ func (sm *SessionManager) Restart(id string, rows, cols uint16) (SessionState, e
 						fmt.Sprintf("Cannot restart: orphaned process (PID %d) — %v", pid, killErr))
 					sm.saveState()
 					sm.mu.Unlock()
+
 					return SessionState{}, fmt.Errorf("cannot restart: orphaned process (PID %d) could not be killed: %w", pid, killErr)
 				}
 			}
@@ -2948,6 +3336,7 @@ func (sm *SessionManager) RestartWithChildren(rootID string, excludeRoot bool, r
 		sm.mu.Unlock()
 		return nil, fmt.Errorf("session %q not found", rootID)
 	}
+
 	toRestart := sm.collectDescendants(rootID)
 	if excludeRoot {
 		toRestart = filterExcludeRoot(toRestart, rootID)
@@ -2955,28 +3344,35 @@ func (sm *SessionManager) RestartWithChildren(rootID string, excludeRoot bool, r
 	sm.mu.Unlock()
 
 	var restarted []string
+
 	for _, id := range toRestart {
 		sm.mu.RLock()
+
 		sess, ok := sm.state.Sessions[id]
 		if !ok {
 			sm.mu.RUnlock()
 			continue
 		}
+
 		if sess.Starred {
 			sm.mu.RUnlock()
 			sm.log.Info("skipping starred session in bulk restart", "session_id", id, "name", sess.Name)
+
 			continue
 		}
+
 		if sess.Status == StatusDeleting || sess.Status == StatusCreating {
 			sm.mu.RUnlock()
 			continue
 		}
+
 		sm.mu.RUnlock()
 
 		if _, err := sm.Restart(id, rows, cols); err != nil {
 			sm.log.Warn("restart child failed", "session_id", id, "error", err)
 			continue
 		}
+
 		restarted = append(restarted, id)
 	}
 
@@ -2992,10 +3388,13 @@ func (sm *SessionManager) Star(id string) error {
 	if !ok {
 		return fmt.Errorf("session %q not found", id)
 	}
+
 	if s.Status == StatusDeleting {
 		return fmt.Errorf("session %q is being deleted", id)
 	}
+
 	s.Starred = true
+
 	return sm.saveState()
 }
 
@@ -3007,20 +3406,25 @@ func (sm *SessionManager) Unstar(id string) error {
 	if !ok {
 		return fmt.Errorf("session %q not found", id)
 	}
+
 	if s.Status == StatusDeleting {
 		return fmt.Errorf("session %q is being deleted", id)
 	}
+
 	s.Starred = false
+
 	return sm.saveState()
 }
 
 func sanitizeSummaryText(text string) string {
 	var b strings.Builder
+
 	for _, r := range text {
 		if r >= 32 && r != 127 {
 			b.WriteRune(r)
 		}
 	}
+
 	return strings.TrimSpace(b.String())
 }
 
@@ -3080,10 +3484,13 @@ func (sm *SessionManager) Rename(id, newName string) error {
 	if !ok {
 		return fmt.Errorf("session %q not found", id)
 	}
+
 	if IsSystemSession(s) {
 		return fmt.Errorf("cannot rename system session %q", s.Name)
 	}
+
 	s.Name = newName
+
 	return sm.saveState()
 }
 
@@ -3095,6 +3502,7 @@ func (sm *SessionManager) Update(id string, name *string, parentID *string) erro
 	if !ok {
 		return fmt.Errorf("session %q not found", id)
 	}
+
 	if IsSystemSession(s) {
 		return fmt.Errorf("cannot update system session %q", s.Name)
 	}
@@ -3106,6 +3514,7 @@ func (sm *SessionManager) Update(id string, name *string, parentID *string) erro
 	}
 
 	newParentValue := s.ParentID
+
 	if parentID != nil {
 		newParent := *parentID
 		if newParent == "" {
@@ -3114,15 +3523,18 @@ func (sm *SessionManager) Update(id string, name *string, parentID *string) erro
 			if newParent == id {
 				return fmt.Errorf("cannot set session as its own parent")
 			}
+
 			if _, ok := sm.state.Sessions[newParent]; !ok {
 				return fmt.Errorf("parent session %q not found", newParent)
 			}
+
 			descendants := sm.collectDescendants(id)
 			for _, d := range descendants {
 				if d == newParent {
 					return fmt.Errorf("cannot set descendant %q as parent (would create cycle)", newParent)
 				}
 			}
+
 			newParentValue = newParent
 		}
 	}
@@ -3130,7 +3542,9 @@ func (sm *SessionManager) Update(id string, name *string, parentID *string) erro
 	if name != nil {
 		s.Name = *name
 	}
+
 	s.ParentID = newParentValue
+
 	return sm.saveState()
 }
 
@@ -3143,6 +3557,7 @@ func (sm *SessionManager) List() []SessionState {
 	for _, s := range sm.state.Sessions {
 		list = append(list, cloneSessionState(s))
 	}
+
 	return list
 }
 
@@ -3153,6 +3568,7 @@ func (sm *SessionManager) fleetSummary() protocol.FleetSummary {
 	var f protocol.FleetSummary
 	for _, s := range sm.state.Sessions {
 		f.Total++
+
 		switch s.Status {
 		case StatusRunning:
 			switch s.AgentStatus {
@@ -3171,6 +3587,7 @@ func (sm *SessionManager) fleetSummary() protocol.FleetSummary {
 			f.Errored++
 		}
 	}
+
 	return f
 }
 
@@ -3180,9 +3597,11 @@ func (sm *SessionManager) Diagnostics() protocol.DiagnosticsMsg {
 	cfg := sm.cfg
 	now := time.Now()
 
-	var sessions []protocol.SessionDiagnostic
-	var sbDiag protocol.ScrollbackDiagnostic
-	var fleet protocol.FleetSummary
+	var (
+		sessions []protocol.SessionDiagnostic
+		sbDiag   protocol.ScrollbackDiagnostic
+		fleet    protocol.FleetSummary
+	)
 
 	for id, s := range sm.state.Sessions {
 		sd := protocol.SessionDiagnostic{
@@ -3195,6 +3614,7 @@ func (sm *SessionManager) Diagnostics() protocol.DiagnosticsMsg {
 
 		// Tally fleet summary from the same snapshot as the session list.
 		fleet.Total++
+
 		switch s.Status {
 		case StatusRunning:
 			switch s.AgentStatus {
@@ -3242,6 +3662,7 @@ func (sm *SessionManager) Diagnostics() protocol.DiagnosticsMsg {
 			sd.Saturated = saturated
 
 			sbDiag.TotalFiles++
+
 			sbDiag.TotalBytes += written
 			if saturated {
 				sbDiag.SaturatedCount++
@@ -3250,9 +3671,11 @@ func (sm *SessionManager) Diagnostics() protocol.DiagnosticsMsg {
 
 		sessions = append(sessions, sd)
 	}
+
 	sm.mu.RUnlock()
 
 	var msgDiag protocol.MessagesDiagnostic
+
 	if sm.messages != nil {
 		if streams, err := sm.messages.ListStreams("", true); err == nil {
 			msgDiag.TotalStreams = len(streams)
@@ -3276,10 +3699,12 @@ func (sm *SessionManager) Diagnostics() protocol.DiagnosticsMsg {
 func (sm *SessionManager) Get(id string) (SessionState, bool) {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
+
 	s, ok := sm.state.Sessions[id]
 	if !ok {
 		return SessionState{}, false
 	}
+
 	return cloneSessionState(s), ok
 }
 
@@ -3287,16 +3712,20 @@ func (sm *SessionManager) Get(id string) (SessionState, bool) {
 func (sm *SessionManager) GetPTY(id string) (*grpty.Session, bool) {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
+
 	s, ok := sm.sessions[id]
+
 	return s, ok
 }
 
 func (sm *SessionManager) getHookReport(sessionID string) *hookReport {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
+
 	if hr, ok := sm.hookReports[sessionID]; ok {
 		return &hr
 	}
+
 	return nil
 }
 
@@ -3310,20 +3739,25 @@ func (sm *SessionManager) StopAll(ctx context.Context) {
 		if s.Status == StatusRunning {
 			prevSummary := s.SummaryText
 			prevSetAt := s.SummarySetAt
+
 			prevTTL := sm.cfg.Status.TTLDuration()
 			if s.SummaryTTL > 0 {
 				prevTTL = time.Duration(s.SummaryTTL) * time.Second
 			}
+
 			s.StopReason = StopReasonShutdown
 			text := formatStopSummary(StopReasonShutdown, nil, "", prevSummary, prevSetAt, prevTTL)
 			applyLifecycleSummaryLocked(s, text)
 		}
 	}
+
 	_ = sm.saveState()
+
 	type snapshot struct {
 		id   string
 		sess *grpty.Session
 	}
+
 	sessions := make([]snapshot, 0, len(sm.sessions))
 	for id, sess := range sm.sessions {
 		sessions = append(sessions, snapshot{id, sess})
@@ -3342,17 +3776,21 @@ func (sm *SessionManager) StopAll(ctx context.Context) {
 		wg.Add(1)
 		go func(id string, sess *grpty.Session) {
 			defer wg.Done()
+
 			select {
 			case <-sess.Done():
 			case <-ctx.Done():
 				sm.log.Warn("shutdown context expired, force killing session", "id", id)
+
 				_ = sess.ForceKill()
 			case <-time.After(5 * time.Second):
 				sm.log.Warn("force killing session", "id", id)
+
 				_ = sess.ForceKill()
 			}
 		}(s.id, s.sess)
 	}
+
 	wg.Wait()
 
 	// Wait for the exit watchers to finish their post-exit work (state writes
@@ -3373,6 +3811,7 @@ func (sm *SessionManager) RunMessageCleanupLoop(ctx context.Context) {
 
 	ticker := time.NewTicker(time.Hour)
 	defer ticker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -3388,9 +3827,11 @@ func (sm *SessionManager) runMessageCleanupFromConfig() {
 	maxAge := sm.cfg.Messages.MaxAgeDuration()
 	maxPerStream := sm.cfg.Messages.MaxPerStream
 	sm.mu.RUnlock()
+
 	if maxAge == 0 && maxPerStream == 0 {
 		return
 	}
+
 	sm.runMessageCleanup(maxAge, maxPerStream)
 }
 
@@ -3400,6 +3841,7 @@ func (sm *SessionManager) runMessageCleanup(maxAge time.Duration, maxPerStream i
 		sm.log.Error("message cleanup failed", "err", err)
 		return
 	}
+
 	if deleted > 0 {
 		sm.log.Info("message cleanup", "deleted", deleted)
 	}
@@ -3423,6 +3865,7 @@ func (sm *SessionManager) RunDetectionLoop(ctx context.Context) {
 
 func (sm *SessionManager) detectAgentStatuses() {
 	sm.mu.RLock()
+
 	type target struct {
 		id             string
 		name           string
@@ -3435,11 +3878,14 @@ func (sm *SessionManager) detectAgentStatuses() {
 		includes       []IncludedRepoState
 		sharedWorktree bool
 	}
+
 	var targets []target
+
 	for id, s := range sm.state.Sessions {
 		if s.Status != StatusRunning {
 			continue
 		}
+
 		if ptySess, ok := sm.sessions[id]; ok {
 			inc := make([]IncludedRepoState, len(s.Includes))
 			copy(inc, s.Includes)
@@ -3450,6 +3896,7 @@ func (sm *SessionManager) detectAgentStatuses() {
 			})
 		}
 	}
+
 	sm.mu.RUnlock()
 
 	var toAutoStop []string
@@ -3484,25 +3931,31 @@ func (sm *SessionManager) detectAgentStatuses() {
 			}
 		}
 
-		var dirty bool
-		var unpushed int
+		var (
+			dirty    bool
+			unpushed int
+		)
+
 		if !t.sharedWorktree {
 			if t.worktreePath != "" && t.repoPath != "" {
 				if d, err := git.HasUncommittedChanges(t.worktreePath); err == nil {
 					dirty = d
 				}
+
 				if t.baseBranch != "" {
 					if n, err := git.UnpushedCommitCount(t.worktreePath, t.baseBranch); err == nil {
 						unpushed = n
 					}
 				}
 			}
+
 			for i := range t.includes {
 				inc := &t.includes[i]
 				if d, err := git.HasUncommittedChanges(inc.WorktreePath); err == nil {
 					inc.dirty = d
 					dirty = dirty || d
 				}
+
 				if inc.BaseBranch != "" {
 					if n, err := git.UnpushedCommitCount(inc.WorktreePath, inc.BaseBranch); err == nil {
 						inc.unpushed = n
@@ -3521,12 +3974,15 @@ func (sm *SessionManager) detectAgentStatuses() {
 			if status != s.AgentStatus {
 				s.StatusChangedAt = time.Now()
 			}
+
 			s.AgentStatus = status
 			s.GitDirty = dirty
+
 			s.GitUnpushed = unpushed
 			if lastOut := t.pty.LastOutputAt(); !lastOut.IsZero() {
 				s.LastOutputAt = &lastOut
 			}
+
 			for i := range s.Includes {
 				if i < len(t.includes) {
 					s.Includes[i].dirty = t.includes[i].dirty
@@ -3543,15 +3999,18 @@ func (sm *SessionManager) detectAgentStatuses() {
 
 	for _, id := range toAutoStop {
 		sm.mu.RLock()
+
 		s, ok := sm.state.Sessions[id]
 		if !ok {
 			sm.mu.RUnlock()
 			continue
 		}
+
 		_, hasClient := sm.attachedClients[id]
 		stillIdle := !hasClient && s.AgentStatus == "ready"
 		name := s.Name
 		idleSince := s.IdleSince
+
 		sm.mu.RUnlock()
 
 		if !stillIdle {
@@ -3562,7 +4021,9 @@ func (sm *SessionManager) detectAgentStatuses() {
 		if idleSince != nil {
 			idleDur = time.Since(*idleSince)
 		}
+
 		sm.log.Info("auto-stopping idle session", "session", name, "id", id, "idle_duration", idleDur.Round(time.Second))
+
 		if err := sm.stopWithReason(id, StopReasonIdle); err != nil {
 			sm.log.Error("failed to auto-stop session", "id", id, "err", err)
 		}
@@ -3592,10 +4053,12 @@ func (sm *SessionManager) checkIdleSession(s *SessionState) bool {
 			agentCfg := sm.cfg.Agents[s.Agent]
 			timeout = agentCfg.IdleTimeoutDuration()
 		}
+
 		if timeout > 0 && time.Since(*s.IdleSince) >= timeout {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -3605,13 +4068,17 @@ func (sm *SessionManager) ReloadConfig() error {
 	if err != nil {
 		return err
 	}
+
 	sm.mu.RLock()
 	oldDataDir := sm.cfg.DataDir
 	sm.mu.RUnlock()
+
 	if cfg.DataDir != oldDataDir {
 		return fmt.Errorf("data_dir changed from %q to %q: run 'gr daemon restart' to apply", oldDataDir, cfg.DataDir)
 	}
+
 	sm.applyConfig(cfg)
+
 	return nil
 }
 
@@ -3624,21 +4091,27 @@ func (sm *SessionManager) applyConfig(newCfg *config.Config) {
 	if old.DefaultAgent != newCfg.DefaultAgent {
 		sm.log.Info("config changed", "key", "default_agent", "old", old.DefaultAgent, "new", newCfg.DefaultAgent)
 	}
+
 	if old.BranchPrefix != newCfg.BranchPrefix {
 		sm.log.Info("config changed", "key", "branch_prefix", "old", old.BranchPrefix, "new", newCfg.BranchPrefix)
 	}
+
 	if old.FetchOnCreate != newCfg.FetchOnCreate {
 		sm.log.Info("config changed", "key", "fetch_on_create", "old", old.FetchOnCreate, "new", newCfg.FetchOnCreate)
 	}
+
 	if old.GitHubUsername != newCfg.GitHubUsername {
 		sm.log.Info("config changed", "key", "github_username", "old", old.GitHubUsername, "new", newCfg.GitHubUsername)
 	}
+
 	if old.Keybindings != newCfg.Keybindings {
 		sm.log.Info("config changed", "key", "keybindings")
 	}
+
 	if old.Notifications != newCfg.Notifications {
 		sm.log.Info("config changed", "key", "notifications")
 	}
+
 	for name, agent := range newCfg.Agents {
 		if oldAgent, ok := old.Agents[name]; !ok {
 			sm.log.Info("config changed", "key", "agents", "action", "added", "agent", name)
@@ -3646,29 +4119,37 @@ func (sm *SessionManager) applyConfig(newCfg *config.Config) {
 			sm.log.Info("config changed", "key", "agents", "action", "modified", "agent", name)
 		}
 	}
+
 	for name := range old.Agents {
 		if _, ok := newCfg.Agents[name]; !ok {
 			sm.log.Info("config changed", "key", "agents", "action", "removed", "agent", name)
 		}
 	}
+
 	if old.GitPull.Enabled != newCfg.GitPull.Enabled {
 		sm.log.Info("config changed", "key", "git_pull.enabled", "old", old.GitPull.Enabled, "new", newCfg.GitPull.Enabled)
 	}
+
 	if old.GitPull.Interval != newCfg.GitPull.Interval {
 		sm.log.Info("config changed", "key", "git_pull.interval", "old", old.GitPull.Interval, "new", newCfg.GitPull.Interval)
 	}
+
 	if old.Sandbox.Enabled != newCfg.Sandbox.Enabled {
 		sm.log.Info("config changed", "key", "sandbox.enabled", "old", old.Sandbox.Enabled, "new", newCfg.Sandbox.Enabled)
 	}
+
 	if fmt.Sprint(old.Sandbox.ReadDirs) != fmt.Sprint(newCfg.Sandbox.ReadDirs) {
 		sm.log.Info("config changed", "key", "sandbox.read_dirs", "old", old.Sandbox.ReadDirs, "new", newCfg.Sandbox.ReadDirs)
 	}
+
 	if fmt.Sprint(old.Sandbox.WriteDirs) != fmt.Sprint(newCfg.Sandbox.WriteDirs) {
 		sm.log.Info("config changed", "key", "sandbox.write_dirs", "old", old.Sandbox.WriteDirs, "new", newCfg.Sandbox.WriteDirs)
 	}
+
 	if fmt.Sprint(old.Sandbox.Features) != fmt.Sprint(newCfg.Sandbox.Features) {
 		sm.log.Info("config changed", "key", "sandbox.features", "old", old.Sandbox.Features, "new", newCfg.Sandbox.Features)
 	}
+
 	if sm.mcpManager != nil {
 		sm.mcpManager.Reload(newCfg)
 		sm.log.Info("MCP manager config reloaded")
@@ -3676,12 +4157,14 @@ func (sm *SessionManager) applyConfig(newCfg *config.Config) {
 
 	if old.Orchestrator.Enabled != newCfg.Orchestrator.Enabled {
 		sm.log.Info("config changed", "key", "orchestrator.enabled", "old", old.Orchestrator.Enabled, "new", newCfg.Orchestrator.Enabled)
+
 		if newCfg.Orchestrator.Enabled {
 			go sm.ensureOrchestrator(context.Background())
 		} else {
 			if orchID := func() string {
 				sm.mu.RLock()
 				defer sm.mu.RUnlock()
+
 				return sm.findOrchestratorID()
 			}(); orchID != "" {
 				_ = sm.stopWithReason(orchID, StopReasonUser)
@@ -3692,6 +4175,7 @@ func (sm *SessionManager) applyConfig(newCfg *config.Config) {
 
 func (sm *SessionManager) teardownIncludes(mainRepoPath, mainWorktreePath, mainBranch string, includes []IncludedRepoState) error {
 	var errs []error
+
 	for i := len(includes) - 1; i >= 0; i-- {
 		inc := includes[i]
 		if err := git.TeardownSession(inc.RepoPath, inc.WorktreePath, inc.Branch); err != nil {
@@ -3699,16 +4183,19 @@ func (sm *SessionManager) teardownIncludes(mainRepoPath, mainWorktreePath, mainB
 			errs = append(errs, err)
 		}
 	}
+
 	if err := git.TeardownSession(mainRepoPath, mainWorktreePath, mainBranch); err != nil {
 		sm.log.Warn("failed to teardown main worktree", "path", mainWorktreePath, "err", err)
 		errs = append(errs, err)
 	}
+
 	if len(includes) > 0 {
 		if err := os.RemoveAll(filepath.Dir(mainWorktreePath)); err != nil {
 			sm.log.Warn("failed to remove session directory", "path", filepath.Dir(mainWorktreePath), "err", err)
 			errs = append(errs, err)
 		}
 	}
+
 	return errors.Join(errs...)
 }
 
@@ -3716,13 +4203,16 @@ func (sm *SessionManager) deriveSandboxIncludesWriteDirs(includes []IncludedRepo
 	var dirs []string
 	for _, inc := range includes {
 		dirs = append(dirs, inc.WorktreePath)
+
 		gitDir, commonDir, err := git.WorktreeGitDirs(inc.WorktreePath)
 		if err != nil {
 			sm.log.Warn("failed to resolve git dirs for included repo", "repo", inc.RepoName, "err", err)
 			continue
 		}
+
 		dirs = append(dirs, gitDir, commonDir)
 	}
+
 	return dirs
 }
 
@@ -3735,13 +4225,16 @@ func (sm *SessionManager) resolveSandboxFromConfig(cfg *config.Config, agentName
 	if !merged.Enabled {
 		return false, nil
 	}
+
 	cmd := merged.Command
 	if cmd == "" {
 		cmd = "safehouse"
 	}
+
 	if !sandbox.AvailableCommand(cmd) {
 		return false, fmt.Errorf("sandbox enabled for agent %q but %q is not available — install safehouse or disable sandbox in config", agentName, cmd)
 	}
+
 	return true, nil
 }
 
@@ -3755,10 +4248,12 @@ func (sm *SessionManager) sandboxOptsFromConfig(merged config.SandboxConfig, ses
 			readDirs = append(readDirs, hd)
 		}
 	}
+
 	readDirs = append(readDirs, filepath.Dir(sm.paths.ConfigFile))
 	if grBin := resolveGrBin(); grBin != "gr" {
 		readDirs = append(readDirs, filepath.Dir(grBin))
 	}
+
 	readDirs = append(readDirs, sm.paths.RuntimeDir)
 
 	return sandbox.WrapOpts{
@@ -3775,7 +4270,9 @@ func expandPaths(paths []string, log *slog.Logger, kind string) []string {
 	if len(paths) == 0 {
 		return nil
 	}
+
 	var out []string
+
 	for _, p := range paths {
 		expanded := config.ExpandPath(p)
 		if strings.ContainsAny(expanded, "*?[") {
@@ -3784,12 +4281,15 @@ func expandPaths(paths []string, log *slog.Logger, kind string) []string {
 				continue
 			}
 		}
+
 		if _, err := os.Stat(expanded); err != nil {
 			log.Warn("sandbox: skipping non-existent directory", "kind", kind, "path", expanded)
 			continue
 		}
+
 		out = append(out, expanded)
 	}
+
 	return out
 }
 
@@ -3810,8 +4310,10 @@ func cleanupLegacyDaemon(log *slog.Logger) {
 			os.Remove(sock)
 			os.Remove(pid)
 			log.Info("removed stale legacy socket", "path", sock)
+
 			continue
 		}
+
 		conn.Close()
 
 		data, err := os.ReadFile(pid)
@@ -3840,6 +4342,7 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 		return fmt.Errorf("open daemon log: %w", err)
 	}
 	defer func() { _ = logFile.Close() }()
+
 	log := slog.New(slog.NewJSONHandler(logFile, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
 	sm := NewSessionManager(cfg, paths, log)
@@ -3851,9 +4354,11 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 		return fmt.Errorf("open message store: %w", err)
 	}
 	defer func() { _ = msgStore.Close() }()
+
 	sm.messages = msgStore
 
 	mcpMgr := NewMCPManager(cfg, []config.MCPServerConfig{graithMCPServer()}, paths.LogDir, log)
+
 	sm.mcpManager = mcpMgr
 	defer mcpMgr.Shutdown()
 
@@ -3864,6 +4369,7 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 		if err != nil {
 			return fmt.Errorf("read upgrade manifest: %w", err)
 		}
+
 		os.Remove(adoptFrom)
 
 		if manifest.Profile != paths.Profile {
@@ -3873,6 +4379,7 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 		f := os.NewFile(uintptr(manifest.ListenerFd), "listener")
 		l, err = net.FileListener(f)
 		f.Close()
+
 		if err != nil {
 			return fmt.Errorf("adopt listener from fd %d: %w", manifest.ListenerFd, err)
 		}
@@ -3880,6 +4387,7 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 		if err := sm.LoadState(); err != nil {
 			log.Warn("failed to load state", "err", err)
 		}
+
 		if err := sm.AdoptSessions(manifest); err != nil {
 			log.Warn("failed to adopt sessions", "err", err)
 		}
@@ -3895,6 +4403,7 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 		}
 
 		var listenErr error
+
 		l, listenErr = Listen(paths.SocketPath)
 		if listenErr != nil {
 			ReleasePIDFile(paths.PIDFile)
@@ -3904,14 +4413,17 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 		if err := sm.LoadState(); err != nil {
 			log.Warn("failed to load state", "err", err)
 		}
+
 		sm.cleanupOrphanedProcesses()
 
 		logAttrs := []any{"socket", paths.SocketPath, "pid", os.Getpid()}
 		if paths.Profile != "" {
 			logAttrs = append(logAttrs, "profile", paths.Profile)
 		}
+
 		log.Info("daemon started", logAttrs...)
 	}
+
 	defer l.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -3933,6 +4445,7 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 	if configFile == "" {
 		configFile = paths.ConfigFile
 	}
+
 	w := config.NewWatcher(configFile, sm.applyConfig, log)
 	go func() {
 		if err := w.Run(ctx); err != nil && ctx.Err() == nil {
@@ -3948,19 +4461,24 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 		case sig := <-sigCh:
 			if sig == syscall.SIGHUP {
 				log.Info("received SIGHUP, reloading config")
+
 				if err := sm.ReloadConfig(); err != nil {
 					log.Error("config reload failed", "err", err)
 				}
+
 				continue
 			}
+
 			log.Info("shutting down")
 			cancel()
+
 			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 			sm.StopAll(shutdownCtx)
 			shutdownCancel()
 			srv.Shutdown()
 			os.Remove(paths.SocketPath)
 			ReleasePIDFile(paths.PIDFile)
+
 			return nil
 
 		case clientExecPath := <-sm.upgradeCh:
@@ -3975,17 +4493,20 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 				log.Error("listener is not a unix listener, cannot upgrade")
 				return fmt.Errorf("upgrade failed: listener type mismatch")
 			}
+
 			listenerFile, err := unixL.File()
 			if err != nil {
 				log.Error("get listener fd", "err", err)
 				return fmt.Errorf("upgrade failed: %w", err)
 			}
+
 			listenerFd := listenerFile.Fd()
 
 			manifest, err := sm.PrepareUpgrade(listenerFd, configFile)
 			if err != nil {
 				listenerFile.Close()
 				log.Error("prepare upgrade", "err", err)
+
 				return fmt.Errorf("upgrade failed: %w", err)
 			}
 
@@ -3993,6 +4514,7 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 			if err != nil {
 				listenerFile.Close()
 				log.Error("write manifest", "err", err)
+
 				return fmt.Errorf("upgrade failed: %w", err)
 			}
 
@@ -4002,8 +4524,10 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 				listenerFile.Close()
 				os.Remove(manifestPath)
 				log.Error("exec failed", "err", err)
+
 				return fmt.Errorf("upgrade exec failed: %w", err)
 			}
+
 			return nil
 		}
 	}

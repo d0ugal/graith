@@ -41,6 +41,7 @@ var msgInboxCmd = &cobra.Command{
 
 		if msgInboxFollow || msgInboxWait {
 			sigCh := make(chan os.Signal, 1)
+
 			signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 			go func() {
 				<-sigCh
@@ -54,11 +55,14 @@ var msgInboxCmd = &cobra.Command{
 				if err == io.EOF {
 					return nil
 				}
+
 				return err
 			}
+
 			if frame.Channel != protocol.ChannelControl {
 				continue
 			}
+
 			msg, _ := protocol.DecodeControl(frame.Payload)
 			switch msg.Type {
 			case "msg_message":
@@ -74,6 +78,7 @@ var msgInboxCmd = &cobra.Command{
 			case "error":
 				var e protocol.ErrorMsg
 				protocol.DecodePayload(msg, &e)
+
 				return fmt.Errorf("%s", e.Message)
 			}
 		}

@@ -43,11 +43,13 @@ Examples:
 		}
 
 		var ttlSeconds int
+
 		if statusSummaryTTL != "" {
 			d, err := parseTTL(statusSummaryTTL)
 			if err != nil {
 				return err
 			}
+
 			ttlSeconds = int(d.Seconds())
 		}
 
@@ -63,13 +65,16 @@ Examples:
 		}
 
 		c.SendControl("set_status", msg)
+
 		resp, err := c.ReadControlResponse()
 		if err != nil {
 			return err
 		}
+
 		if resp.Type == "error" {
 			var e protocol.ErrorMsg
 			protocol.DecodePayload(resp, &e)
+
 			return fmt.Errorf("%s", e.Message)
 		}
 
@@ -78,6 +83,7 @@ Examples:
 		} else {
 			out.Print("Status set\n")
 		}
+
 		return nil
 	},
 }
@@ -89,13 +95,16 @@ func resolveStatusArgs(c *client.Client, args []string) (sessionID, text string,
 		if len(args) == 0 && envID != "" {
 			return envID, "", nil
 		}
+
 		if len(args) == 1 {
 			id, err := resolveSession(c, args[0])
 			return id, "", err
 		}
+
 		if envID == "" {
 			return "", "", fmt.Errorf("session name required when not running inside a graith session")
 		}
+
 		return envID, "", nil
 	}
 
@@ -115,6 +124,7 @@ func resolveStatusArgs(c *client.Client, args []string) (sessionID, text string,
 	if err != nil {
 		return "", "", err
 	}
+
 	return id, strings.Join(args[1:], " "), nil
 }
 
@@ -123,9 +133,11 @@ func parseTTL(s string) (time.Duration, error) {
 	if err != nil {
 		return 0, fmt.Errorf("invalid TTL %q: %w", s, err)
 	}
+
 	if d <= 0 {
 		return 0, fmt.Errorf("TTL must be positive")
 	}
+
 	return d, nil
 }
 

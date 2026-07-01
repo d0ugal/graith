@@ -12,6 +12,7 @@ import (
 func TestExecuteJSONErrorFormat(t *testing.T) {
 	origOut := out
 	origJSON := jsonOutput
+
 	defer func() {
 		out = origOut
 		jsonOutput = origJSON
@@ -21,12 +22,14 @@ func TestExecuteJSONErrorFormat(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	oldStderr := os.Stderr
 	os.Stderr = w
 
 	execErr := executeWithArgs([]string{"--json", "nonexistent-command"})
 
 	w.Close()
+
 	os.Stderr = oldStderr
 
 	if execErr == nil {
@@ -42,6 +45,7 @@ func TestExecuteJSONErrorFormat(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &jsonErr); err != nil {
 		t.Fatalf("stderr is not valid JSON: %v\noutput: %s", err, buf.String())
 	}
+
 	if jsonErr.Error == "" {
 		t.Error("JSON error message is empty")
 	}
@@ -51,6 +55,7 @@ func TestExecutePlainTextErrorFormat(t *testing.T) {
 	origOut := out
 	origJSON := jsonOutput
 	origAgentMode := agentMode
+
 	defer func() {
 		out = origOut
 		jsonOutput = origJSON
@@ -58,18 +63,21 @@ func TestExecutePlainTextErrorFormat(t *testing.T) {
 	}()
 
 	t.Setenv("GR_AGENT_MODE", "0")
+
 	agentMode = false
 
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	oldStderr := os.Stderr
 	os.Stderr = w
 
 	execErr := executeWithArgs([]string{"nonexistent-command"})
 
 	w.Close()
+
 	os.Stderr = oldStderr
 
 	if execErr == nil {
@@ -95,6 +103,7 @@ func TestExecutePlainTextErrorFormat(t *testing.T) {
 func TestConfigFlagBlockedInsideSession(t *testing.T) {
 	origOut := out
 	origJSON := jsonOutput
+
 	defer func() {
 		out = origOut
 		jsonOutput = origJSON
@@ -107,6 +116,7 @@ func TestConfigFlagBlockedInsideSession(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when --config is used inside a session")
 	}
+
 	if !strings.Contains(err.Error(), "not allowed inside a graith session") {
 		t.Errorf("unexpected error message: %s", err.Error())
 	}
@@ -115,6 +125,7 @@ func TestConfigFlagBlockedInsideSession(t *testing.T) {
 func TestConfigFlagAllowedOutsideSession(t *testing.T) {
 	origOut := out
 	origJSON := jsonOutput
+
 	defer func() {
 		out = origOut
 		jsonOutput = origJSON
@@ -123,6 +134,7 @@ func TestConfigFlagAllowedOutsideSession(t *testing.T) {
 	if v, ok := os.LookupEnv("GRAITH_SESSION_ID"); ok {
 		t.Cleanup(func() { os.Setenv("GRAITH_SESSION_ID", v) })
 	}
+
 	os.Unsetenv("GRAITH_SESSION_ID")
 	t.Setenv("GR_AGENT_MODE", "0")
 
@@ -137,6 +149,7 @@ func TestConfigFlagAllowedOutsideSession(t *testing.T) {
 func TestConfigFlagBlockedForConfigSubcommand(t *testing.T) {
 	origOut := out
 	origJSON := jsonOutput
+
 	defer func() {
 		out = origOut
 		jsonOutput = origJSON
@@ -149,6 +162,7 @@ func TestConfigFlagBlockedForConfigSubcommand(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when --config is used with config subcommand inside a session")
 	}
+
 	if !strings.Contains(err.Error(), "not allowed inside a graith session") {
 		t.Errorf("unexpected error message: %s", err.Error())
 	}
@@ -157,6 +171,7 @@ func TestConfigFlagBlockedForConfigSubcommand(t *testing.T) {
 func TestConfigFlagBlockedWhenSetEmpty(t *testing.T) {
 	origOut := out
 	origJSON := jsonOutput
+
 	defer func() {
 		out = origOut
 		jsonOutput = origJSON
@@ -171,6 +186,7 @@ func TestConfigFlagBlockedWhenSetEmpty(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when --config is used with GRAITH_SESSION_ID set to empty")
 	}
+
 	if !strings.Contains(err.Error(), "not allowed inside a graith session") {
 		t.Errorf("unexpected error message: %s", err.Error())
 	}
@@ -179,6 +195,7 @@ func TestConfigFlagBlockedWhenSetEmpty(t *testing.T) {
 func TestExecuteCobraSilencesOwnErrors(t *testing.T) {
 	origOut := out
 	origJSON := jsonOutput
+
 	defer func() {
 		out = origOut
 		jsonOutput = origJSON
@@ -188,12 +205,14 @@ func TestExecuteCobraSilencesOwnErrors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	oldStdout := os.Stdout
 	os.Stdout = w
 
 	_ = executeWithArgs([]string{"nonexistent-command"})
 
 	w.Close()
+
 	os.Stdout = oldStdout
 
 	var buf bytes.Buffer

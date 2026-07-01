@@ -22,6 +22,7 @@ var approvalsCmd = &cobra.Command{
 		defer c.Close()
 
 		c.SendControl("list", struct{}{})
+
 		resp, err := c.ReadControlResponse()
 		if err != nil {
 			return err
@@ -33,6 +34,7 @@ var approvalsCmd = &cobra.Command{
 		}
 
 		var waiting []protocol.SessionInfo
+
 		for _, s := range list.Sessions {
 			if s.Status == "running" && s.AgentStatus == "approval" {
 				waiting = append(waiting, s)
@@ -56,13 +58,16 @@ var approvalsCmd = &cobra.Command{
 
 		tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
 		fmt.Fprintln(tw, "NAME\tREPO\tAGENT\tAGE")
+
 		for _, s := range waiting {
 			age := ""
 			if t, err := time.Parse(time.RFC3339, s.CreatedAt); err == nil {
 				age = client.ShortDuration(now.Sub(t))
 			}
+
 			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", s.Name, s.RepoName, s.Agent, age)
 		}
+
 		tw.Flush()
 
 		return nil
