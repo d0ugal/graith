@@ -471,6 +471,7 @@ func TestMCPManagerDeletedCwd(t *testing.T) {
 	if err := os.RemoveAll(doomedDir); err != nil {
 		t.Fatal(err)
 	}
+
 	defer os.Chdir(origDir)
 
 	cfg := &config.Config{
