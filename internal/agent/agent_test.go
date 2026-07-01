@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"sync"
 	"testing"
 )
 
@@ -104,5 +105,28 @@ func TestDetect(t *testing.T) {
 				t.Errorf("detect() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestDetectedLazyOverride verifies the public Detected() entry point, which
+// (after the removal of the package-init) resolves the environment lazily via
+// sync.Once. The GR_AGENT_MODE=0/false/no override must always win, even after
+// the cached value has been computed.
+func TestDetectedLazyOverride(t *testing.T) {
+	// Reset the cache so this test controls the one-time detection.
+	agentDetectedOnce = sync.Once{}
+	agentDetected = false
+
+	t.Setenv("CLAUDECODE", "1")
+
+	if !Detected() {
+		t.Fatalf("Detected() = false, want true when CLAUDECODE is set")
+	}
+
+	// The override must beat the now-cached agentDetected=true value.
+	t.Setenv("GR_AGENT_MODE", "0")
+
+	if Detected() {
+		t.Fatalf("Detected() = true, want false when GR_AGENT_MODE=0 overrides")
 	}
 }
