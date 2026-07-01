@@ -40,7 +40,7 @@ command = "codex"
 args = []
 resume_args = ["resume", "--last"]
 `
-	os.WriteFile(cfgPath, []byte(toml), 0o644)
+	_ = os.WriteFile(cfgPath, []byte(toml), 0o644)
 
 	cfg, err := Load(cfgPath)
 	if err != nil {
@@ -78,7 +78,7 @@ func TestLoadConfigDataDir(t *testing.T) {
 	cfgPath := filepath.Join(dir, "config.toml")
 	toml := `data_dir = "~/.graith"
 `
-	os.WriteFile(cfgPath, []byte(toml), 0o644)
+	_ = os.WriteFile(cfgPath, []byte(toml), 0o644)
 
 	cfg, err := Load(cfgPath)
 	if err != nil {
@@ -281,7 +281,7 @@ func TestLoadConfigMessages(t *testing.T) {
 max_age = "7d"
 max_per_stream = 500
 `
-	os.WriteFile(cfgPath, []byte(toml), 0o644)
+	_ = os.WriteFile(cfgPath, []byte(toml), 0o644)
 
 	cfg, err := Load(cfgPath)
 	if err != nil {
@@ -313,7 +313,7 @@ idle_timeout = "2h"
 command = "codex"
 idle_timeout = "0"
 `
-	os.WriteFile(cfgPath, []byte(toml), 0o644)
+	_ = os.WriteFile(cfgPath, []byte(toml), 0o644)
 
 	cfg, err := Load(cfgPath)
 	if err != nil {
@@ -344,7 +344,7 @@ command = "claude"
 [agents.claude.sandbox]
 features = ["clipboard"]
 `
-	os.WriteFile(cfgPath, []byte(toml), 0o644)
+	_ = os.WriteFile(cfgPath, []byte(toml), 0o644)
 
 	cfg, err := Load(cfgPath)
 	if err != nil {
@@ -571,7 +571,7 @@ func TestLoadPartialAgentPreservesDefaults(t *testing.T) {
 [agents.claude]
 command = "auld-claude"
 `
-	os.WriteFile(cfgPath, []byte(toml), 0o644)
+	_ = os.WriteFile(cfgPath, []byte(toml), 0o644)
 
 	cfg, err := Load(cfgPath)
 	if err != nil {
@@ -612,7 +612,7 @@ func TestLoadAgentExplicitEmptyArgs(t *testing.T) {
 command = "claude"
 args = []
 `
-	os.WriteFile(cfgPath, []byte(toml), 0o644)
+	_ = os.WriteFile(cfgPath, []byte(toml), 0o644)
 
 	cfg, err := Load(cfgPath)
 	if err != nil {
@@ -637,7 +637,7 @@ func TestLoadExplicitEmptyResumeAndForkArgs(t *testing.T) {
 resume_args = []
 fork_args = []
 `
-	os.WriteFile(cfgPath, []byte(toml), 0o644)
+	_ = os.WriteFile(cfgPath, []byte(toml), 0o644)
 
 	cfg, err := Load(cfgPath)
 	if err != nil {
@@ -669,7 +669,7 @@ func TestLoadExplicitEmptyEnv(t *testing.T) {
 [agents.claude]
 env = {}
 `
-	os.WriteFile(cfgPath, []byte(toml), 0o644)
+	_ = os.WriteFile(cfgPath, []byte(toml), 0o644)
 
 	cfg, err := Load(cfgPath)
 	if err != nil {
@@ -694,7 +694,7 @@ func TestLoadCustomAgentPreserved(t *testing.T) {
 command = "canny-agent"
 args = ["--flag"]
 `
-	os.WriteFile(cfgPath, []byte(toml), 0o644)
+	_ = os.WriteFile(cfgPath, []byte(toml), 0o644)
 
 	cfg, err := Load(cfgPath)
 	if err != nil {
@@ -817,7 +817,7 @@ path = "~/Code/croft"
 path = "~/Code/glen-scripts"
 allow_concurrent = true
 `
-	os.WriteFile(cfgPath, []byte(toml), 0o644)
+	_ = os.WriteFile(cfgPath, []byte(toml), 0o644)
 
 	cfg, err := Load(cfgPath)
 	if err != nil {
@@ -1342,7 +1342,7 @@ args = ["chrome-mcp", "--port", "9333"]
 [agents.claude.mcp_servers.agent-only]
 command = "bonnie"
 `
-	os.WriteFile(cfgPath, []byte(toml), 0o644)
+	_ = os.WriteFile(cfgPath, []byte(toml), 0o644)
 
 	cfg, err := Load(cfgPath)
 	if err != nil {
@@ -1593,7 +1593,7 @@ func TestOrchestratorSandboxConfigParsing(t *testing.T) {
 	t.Run("absent section produces zero value", func(t *testing.T) {
 		dir := t.TempDir()
 		cfgPath := filepath.Join(dir, "config.toml")
-		os.WriteFile(cfgPath, []byte(`
+		_ = os.WriteFile(cfgPath, []byte(`
 [orchestrator]
 enabled = true
 agent = "claude"
@@ -1616,7 +1616,7 @@ agent = "claude"
 	t.Run("empty section produces zero value", func(t *testing.T) {
 		dir := t.TempDir()
 		cfgPath := filepath.Join(dir, "config.toml")
-		os.WriteFile(cfgPath, []byte(`
+		_ = os.WriteFile(cfgPath, []byte(`
 [orchestrator]
 enabled = true
 [orchestrator.sandbox]
@@ -1635,7 +1635,7 @@ enabled = true
 	t.Run("populated section parsed correctly", func(t *testing.T) {
 		dir := t.TempDir()
 		cfgPath := filepath.Join(dir, "config.toml")
-		os.WriteFile(cfgPath, []byte(`
+		_ = os.WriteFile(cfgPath, []byte(`
 [orchestrator]
 enabled = true
 [orchestrator.sandbox]
@@ -1661,7 +1661,7 @@ write_dirs = ["~/.config/graith", "/tmp/extra"]
 func TestOrchestratorSandboxIgnoresDangerousKeys(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.toml")
-	os.WriteFile(cfgPath, []byte(`
+	_ = os.WriteFile(cfgPath, []byte(`
 [orchestrator]
 enabled = true
 agent = "claude"

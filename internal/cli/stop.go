@@ -53,7 +53,7 @@ var stopCmd = &cobra.Command{
 			return err
 		}
 
-		c.SendControl("stop", protocol.StopMsg{SessionID: sessionID})
+		_ = c.SendControl("stop", protocol.StopMsg{SessionID: sessionID})
 
 		resp, err := c.ReadControlResponse()
 		if err != nil {
@@ -62,7 +62,8 @@ var stopCmd = &cobra.Command{
 
 		if resp.Type == "error" {
 			var e protocol.ErrorMsg
-			protocol.DecodePayload(resp, &e)
+
+			_ = protocol.DecodePayload(resp, &e)
 
 			return fmt.Errorf("%s", e.Message)
 		}
@@ -97,7 +98,7 @@ func stopChildrenRun(c *client.Client, args []string) error {
 		excludeRoot = true
 	}
 
-	c.SendControl("stop", protocol.StopMsg{
+	_ = c.SendControl("stop", protocol.StopMsg{
 		SessionID:   sessionID,
 		Children:    true,
 		ExcludeRoot: excludeRoot,
@@ -110,7 +111,8 @@ func stopChildrenRun(c *client.Client, args []string) error {
 
 	if resp.Type == "error" {
 		var e protocol.ErrorMsg
-		protocol.DecodePayload(resp, &e)
+
+		_ = protocol.DecodePayload(resp, &e)
 
 		return fmt.Errorf("%s", e.Message)
 	}
@@ -118,7 +120,8 @@ func stopChildrenRun(c *client.Client, args []string) error {
 	var result struct {
 		Stopped []string `json:"stopped"`
 	}
-	protocol.DecodePayload(resp, &result)
+
+	_ = protocol.DecodePayload(resp, &result)
 	out.Printf("Stopped %d sessions\n", len(result.Stopped))
 
 	return nil

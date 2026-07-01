@@ -43,7 +43,7 @@ func TestLoadOrDefaultValidFile(t *testing.T) {
 default_agent = "codex"
 github_username = "braw-user"
 `
-	os.WriteFile(cfgPath, []byte(toml), 0o644)
+	_ = os.WriteFile(cfgPath, []byte(toml), 0o644)
 
 	cfg, err := LoadOrDefault(cfgPath)
 	if err != nil {
@@ -62,7 +62,7 @@ github_username = "braw-user"
 func TestLoadOrDefaultMalformedTOML(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.toml")
-	os.WriteFile(cfgPath, []byte("not valid [[[ toml"), 0o644)
+	_ = os.WriteFile(cfgPath, []byte("not valid [[[ toml"), 0o644)
 
 	_, err := LoadOrDefault(cfgPath)
 	if err == nil {
@@ -73,7 +73,7 @@ func TestLoadOrDefaultMalformedTOML(t *testing.T) {
 func TestLoadOrDefaultPermissionDenied(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.toml")
-	os.WriteFile(cfgPath, []byte(`default_agent = "codex"`), 0o000)
+	_ = os.WriteFile(cfgPath, []byte(`default_agent = "codex"`), 0o000)
 
 	_, err := LoadOrDefault(cfgPath)
 	if err == nil {

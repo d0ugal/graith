@@ -75,7 +75,7 @@ func executeWithArgs(args []string) error {
 		if w == nil {
 			// Cobra skips persistent flag parsing for some errors (e.g.
 			// unknown subcommand). Parse them here so --json is respected.
-			rootCmd.PersistentFlags().Parse(args)
+			_ = rootCmd.PersistentFlags().Parse(args)
 
 			if !jsonOutput && (agentMode || agent.Detected()) {
 				jsonOutput = true

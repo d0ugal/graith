@@ -136,7 +136,8 @@ func (dc *doctorContext) checkVersion(report *doctorReport) string {
 			dc.failf("version", "Socket exists but daemon not responding: %s", paths.SocketPath)
 
 			if doctorAutofix {
-				os.Remove(paths.SocketPath)
+				_ = os.Remove(paths.SocketPath)
+
 				dc.hintf("Removed stale socket")
 			}
 		} else {
@@ -165,7 +166,7 @@ func (dc *doctorContext) checkVersion(report *doctorReport) string {
 				}
 			}
 
-			conn.Close()
+			_ = conn.Close()
 		}
 	}
 
@@ -332,9 +333,9 @@ func (dc *doctorContext) checkDaemon(daemonVersion string) *protocol.Diagnostics
 
 		return nil
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
-	conn.SetDeadline(time.Now().Add(5 * time.Second))
+	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
 
 	reader := protocol.NewFrameReader(conn)
 	writer := protocol.NewFrameWriter(conn)
@@ -412,7 +413,8 @@ func (dc *doctorContext) checkStalePID() {
 		dc.failf("daemon", "PID file is stale (PID %d is not a graith daemon)", pid)
 
 		if doctorAutofix {
-			os.Remove(paths.PIDFile)
+			_ = os.Remove(paths.PIDFile)
+
 			dc.hintf("Removed stale PID file")
 		} else {
 			dc.hintf("Use --autofix to remove stale PID file")
@@ -640,7 +642,7 @@ func (dc *doctorContext) checkStorage(diag *protocol.DiagnosticsMsg) {
 					removed++
 
 					if repoRoot != "" {
-						git.PruneWorktrees(repoRoot)
+						_ = git.PruneWorktrees(repoRoot)
 					}
 				}
 			}

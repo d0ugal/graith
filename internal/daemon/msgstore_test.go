@@ -21,7 +21,7 @@ func testStore(t *testing.T) *MsgStore {
 		t.Fatalf("NewMsgStore: %v", err)
 	}
 
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() { _ = s.Close() })
 
 	return s
 }
@@ -72,14 +72,14 @@ func TestPublishAndRead(t *testing.T) {
 func TestReadUnackedOnly(t *testing.T) {
 	s := testStore(t)
 
-	s.Publish("blether", "braw1", "neep", "neep1", "", "")
-	s.Publish("blether", "braw1", "neep", "neep2", "", "")
+	_, _ = s.Publish("blether", "braw1", "neep", "neep1", "", "")
+	_, _ = s.Publish("blether", "braw1", "neep", "neep2", "", "")
 
 	if err := s.AckLatest("blether", "kirk-reader1"); err != nil {
 		t.Fatalf("Ack: %v", err)
 	}
 
-	s.Publish("blether", "braw1", "neep", "neep3", "", "")
+	_, _ = s.Publish("blether", "braw1", "neep", "neep3", "", "")
 
 	msgs, err := s.Read("blether", "kirk-reader1", true, "")
 	if err != nil {
@@ -98,9 +98,9 @@ func TestReadUnackedOnly(t *testing.T) {
 func TestReadAllIgnoresCursor(t *testing.T) {
 	s := testStore(t)
 
-	s.Publish("blether", "braw1", "neep", "neep1", "", "")
-	s.Publish("blether", "braw1", "neep", "neep2", "", "")
-	s.AckLatest("blether", "kirk-reader1")
+	_, _ = s.Publish("blether", "braw1", "neep", "neep1", "", "")
+	_, _ = s.Publish("blether", "braw1", "neep", "neep2", "", "")
+	_ = s.AckLatest("blether", "kirk-reader1")
 
 	msgs, err := s.Read("blether", "kirk-reader1", false, "")
 	if err != nil {
@@ -116,8 +116,8 @@ func TestThreadFiltering(t *testing.T) {
 	s := testStore(t)
 
 	msg1, _ := s.Publish("blether", "braw1", "neep", "kirk-start", "", "")
-	s.Publish("blether", "braw1", "neep", "thrawn", "", "")
-	s.Publish("blether", "canny1", "whin", "kirk-reply", msg1.ID, "")
+	_, _ = s.Publish("blether", "braw1", "neep", "thrawn", "", "")
+	_, _ = s.Publish("blether", "canny1", "whin", "kirk-reply", msg1.ID, "")
 
 	msgs, err := s.Read("blether", "", false, msg1.ID)
 	if err != nil {
@@ -136,10 +136,10 @@ func TestThreadFiltering(t *testing.T) {
 func TestListStreams(t *testing.T) {
 	s := testStore(t)
 
-	s.Publish("braw-stream", "braw1", "neep", "wee-neep1", "", "")
-	s.Publish("braw-stream", "braw1", "neep", "wee-neep2", "", "")
-	s.Publish("canny-stream", "braw1", "neep", "wee-neep3", "", "")
-	s.AckLatest("braw-stream", "kirk-reader1")
+	_, _ = s.Publish("braw-stream", "braw1", "neep", "wee-neep1", "", "")
+	_, _ = s.Publish("braw-stream", "braw1", "neep", "wee-neep2", "", "")
+	_, _ = s.Publish("canny-stream", "braw1", "neep", "wee-neep3", "", "")
+	_ = s.AckLatest("braw-stream", "kirk-reader1")
 
 	streams, err := s.ListStreams("kirk-reader1", true)
 	if err != nil {
@@ -180,7 +180,7 @@ func TestSubscribeReceivesPublished(t *testing.T) {
 	ch, unsub := s.Subscribe("kirk-events")
 	defer unsub()
 
-	s.Publish("kirk-events", "braw1", "neep", "kirk-event1", "", "")
+	_, _ = s.Publish("kirk-events", "braw1", "neep", "kirk-event1", "", "")
 
 	select {
 	case msg := <-ch:
@@ -198,7 +198,7 @@ func TestSubscribeDoesNotReceiveOtherStreams(t *testing.T) {
 	ch, unsub := s.Subscribe("blether-braw")
 	defer unsub()
 
-	s.Publish("blether-canny", "braw1", "neep", "thrawn stream", "", "")
+	_, _ = s.Publish("blether-canny", "braw1", "neep", "thrawn stream", "", "")
 
 	select {
 	case msg := <-ch:
@@ -213,7 +213,7 @@ func TestUnsubscribeStopsDelivery(t *testing.T) {
 	ch, unsub := s.Subscribe("kirk-events")
 	unsub()
 
-	s.Publish("kirk-events", "braw1", "neep", "efter unsub", "", "")
+	_, _ = s.Publish("kirk-events", "braw1", "neep", "efter unsub", "", "")
 
 	select {
 	case msg := <-ch:
@@ -251,14 +251,14 @@ func TestReopenDB(t *testing.T) {
 		t.Fatalf("NewMsgStore: %v", err)
 	}
 
-	s1.Publish("blether", "braw1", "neep", "bide-msg", "", "")
-	s1.Close()
+	_, _ = s1.Publish("blether", "braw1", "neep", "bide-msg", "", "")
+	_ = s1.Close()
 
 	s2, err := NewMsgStore(dbPath)
 	if err != nil {
 		t.Fatalf("NewMsgStore (reopen): %v", err)
 	}
-	defer s2.Close()
+	defer func() { _ = s2.Close() }()
 
 	msgs, err := s2.Read("blether", "", false, "")
 	if err != nil {
@@ -288,7 +288,7 @@ func TestDBFileCreated(t *testing.T) {
 		t.Fatalf("NewMsgStore: %v", err)
 	}
 
-	s.Close()
+	_ = s.Close()
 
 	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
 		t.Error("database file was not created")
@@ -298,11 +298,11 @@ func TestDBFileCreated(t *testing.T) {
 func TestAckSpecificSeq(t *testing.T) {
 	s := testStore(t)
 
-	s.Publish("blether", "braw1", "neep", "neep1", "", "")
-	s.Publish("blether", "braw1", "neep", "neep2", "", "")
-	s.Publish("blether", "braw1", "neep", "neep3", "", "")
+	_, _ = s.Publish("blether", "braw1", "neep", "neep1", "", "")
+	_, _ = s.Publish("blether", "braw1", "neep", "neep2", "", "")
+	_, _ = s.Publish("blether", "braw1", "neep", "neep3", "", "")
 
-	s.Ack("blether", "kirk-reader1", 2)
+	_ = s.Ack("blether", "kirk-reader1", 2)
 
 	msgs, err := s.Read("blether", "kirk-reader1", true, "")
 	if err != nil {
@@ -321,12 +321,12 @@ func TestAckSpecificSeq(t *testing.T) {
 func TestAckDoesNotGoBackwards(t *testing.T) {
 	s := testStore(t)
 
-	s.Publish("blether", "braw1", "neep", "neep1", "", "")
-	s.Publish("blether", "braw1", "neep", "neep2", "", "")
-	s.Publish("blether", "braw1", "neep", "neep3", "", "")
+	_, _ = s.Publish("blether", "braw1", "neep", "neep1", "", "")
+	_, _ = s.Publish("blether", "braw1", "neep", "neep2", "", "")
+	_, _ = s.Publish("blether", "braw1", "neep", "neep3", "", "")
 
-	s.Ack("blether", "kirk-reader1", 3)
-	s.Ack("blether", "kirk-reader1", 1)
+	_ = s.Ack("blether", "kirk-reader1", 3)
+	_ = s.Ack("blether", "kirk-reader1", 1)
 
 	msgs, err := s.Read("blether", "kirk-reader1", true, "")
 	if err != nil {
@@ -341,12 +341,12 @@ func TestAckDoesNotGoBackwards(t *testing.T) {
 func TestIndependentCursorsPerSubscriber(t *testing.T) {
 	s := testStore(t)
 
-	s.Publish("blether", "braw1", "neep", "neep1", "", "")
-	s.Publish("blether", "braw1", "neep", "neep2", "", "")
-	s.Publish("blether", "braw1", "neep", "neep3", "", "")
+	_, _ = s.Publish("blether", "braw1", "neep", "neep1", "", "")
+	_, _ = s.Publish("blether", "braw1", "neep", "neep2", "", "")
+	_, _ = s.Publish("blether", "braw1", "neep", "neep3", "", "")
 
-	s.Ack("blether", "kirk-reader-a", 2)
-	s.Ack("blether", "kirk-reader-b", 1)
+	_ = s.Ack("blether", "kirk-reader-a", 2)
+	_ = s.Ack("blether", "kirk-reader-b", 1)
 
 	msgsA, _ := s.Read("blether", "kirk-reader-a", true, "")
 	msgsB, _ := s.Read("blether", "kirk-reader-b", true, "")
@@ -433,7 +433,7 @@ func TestPublishStoresAllFields(t *testing.T) {
 func TestPublishEmptyThreadAndReplyStoreAsEmpty(t *testing.T) {
 	s := testStore(t)
 
-	s.Publish("blether", "braw1", "neep", "neep message", "", "")
+	_, _ = s.Publish("blether", "braw1", "neep", "neep message", "", "")
 
 	msgs, _ := s.Read("blether", "", false, "")
 	if msgs[0].ThreadID != "" {
@@ -461,8 +461,8 @@ func TestListStreamsEmpty(t *testing.T) {
 func TestListStreamsExcludesSystem(t *testing.T) {
 	s := testStore(t)
 
-	s.Publish("braw-stream", "braw1", "neep", "wee-neep1", "", "")
-	s.Publish("_system.status", "braw1", "neep", "braw change", "", "")
+	_, _ = s.Publish("braw-stream", "braw1", "neep", "wee-neep1", "", "")
+	_, _ = s.Publish("_system.status", "braw1", "neep", "braw change", "", "")
 
 	streams, err := s.ListStreams("", false)
 	if err != nil {
@@ -490,11 +490,11 @@ func TestListStreamsExcludesSystem(t *testing.T) {
 func TestTotalUnreadCountsOnlyInbox(t *testing.T) {
 	s := testStore(t)
 
-	s.Publish("inbox:braw-sess", "whin", "whin", "braw message", "", "")
-	s.Publish("inbox:braw-sess", "whin", "whin", "bonnie message", "", "")
-	s.Publish("braw-stream", "braw1", "neep", "braw-cast", "", "")
-	s.Publish("_system.status", "braw1", "neep", "braw change", "", "")
-	s.Publish("inbox:canny-sess", "whin", "whin", "whin inbox", "", "")
+	_, _ = s.Publish("inbox:braw-sess", "whin", "whin", "braw message", "", "")
+	_, _ = s.Publish("inbox:braw-sess", "whin", "whin", "bonnie message", "", "")
+	_, _ = s.Publish("braw-stream", "braw1", "neep", "braw-cast", "", "")
+	_, _ = s.Publish("_system.status", "braw1", "neep", "braw change", "", "")
+	_, _ = s.Publish("inbox:canny-sess", "whin", "whin", "whin inbox", "", "")
 
 	count := s.TotalUnread("braw-sess")
 	if count != 2 {
@@ -515,8 +515,8 @@ func TestTotalUnreadCountsOnlyInbox(t *testing.T) {
 func TestListStreamsNoSubscriber(t *testing.T) {
 	s := testStore(t)
 
-	s.Publish("braw-stream", "braw1", "neep", "wee-neep1", "", "")
-	s.Publish("canny-stream", "braw1", "neep", "wee-neep2", "", "")
+	_, _ = s.Publish("braw-stream", "braw1", "neep", "wee-neep1", "", "")
+	_, _ = s.Publish("canny-stream", "braw1", "neep", "wee-neep2", "", "")
 
 	streams, err := s.ListStreams("", true)
 	if err != nil {
@@ -541,12 +541,12 @@ func TestListStreamsNoSubscriber(t *testing.T) {
 func TestAckLatest(t *testing.T) {
 	s := testStore(t)
 
-	s.Publish("blether", "braw1", "neep", "neep1", "", "")
-	s.Publish("blether", "braw1", "neep", "neep2", "", "")
+	_, _ = s.Publish("blether", "braw1", "neep", "neep1", "", "")
+	_, _ = s.Publish("blether", "braw1", "neep", "neep2", "", "")
 
-	s.AckLatest("blether", "kirk-reader1")
+	_ = s.AckLatest("blether", "kirk-reader1")
 
-	s.Publish("blether", "braw1", "neep", "neep3", "", "")
+	_, _ = s.Publish("blether", "braw1", "neep", "neep3", "", "")
 
 	msgs, _ := s.Read("blether", "kirk-reader1", true, "")
 	if len(msgs) != 1 {
@@ -612,7 +612,7 @@ func TestMultipleSubscribersOnSameStream(t *testing.T) {
 	ch2, unsub2 := s.Subscribe("kirk-events")
 	defer unsub2()
 
-	s.Publish("kirk-events", "braw1", "neep", "braw-cast", "", "")
+	_, _ = s.Publish("kirk-events", "braw1", "neep", "braw-cast", "", "")
 
 	for _, ch := range []chan Message{ch1, ch2} {
 		select {
@@ -631,15 +631,15 @@ func TestCursorsSurviveReopen(t *testing.T) {
 	dbPath := filepath.Join(dir, "test.sqlite")
 
 	s1, _ := NewMsgStore(dbPath)
-	s1.Publish("blether", "braw1", "neep", "neep1", "", "")
-	s1.Publish("blether", "braw1", "neep", "neep2", "", "")
-	s1.Ack("blether", "kirk-reader1", 1)
-	s1.Close()
+	_, _ = s1.Publish("blether", "braw1", "neep", "neep1", "", "")
+	_, _ = s1.Publish("blether", "braw1", "neep", "neep2", "", "")
+	_ = s1.Ack("blether", "kirk-reader1", 1)
+	_ = s1.Close()
 
 	s2, _ := NewMsgStore(dbPath)
-	defer s2.Close()
+	defer func() { _ = s2.Close() }()
 
-	s2.Publish("blether", "braw1", "neep", "neep3", "", "")
+	_, _ = s2.Publish("blether", "braw1", "neep", "neep3", "", "")
 
 	msgs, _ := s2.Read("blether", "kirk-reader1", true, "")
 	if len(msgs) != 2 {
@@ -655,11 +655,11 @@ func TestThreadFilterWithUnreadCursor(t *testing.T) {
 	s := testStore(t)
 
 	m1, _ := s.Publish("blether", "braw1", "neep", "kirk-begin", "", "")
-	s.Publish("blether", "braw1", "neep", "thrawn-1", "", "")
-	s.Publish("blether", "canny1", "whin", "kirk-reply", m1.ID, "")
-	s.Publish("blether", "braw1", "neep", "thrawn-2", "", "")
+	_, _ = s.Publish("blether", "braw1", "neep", "thrawn-1", "", "")
+	_, _ = s.Publish("blether", "canny1", "whin", "kirk-reply", m1.ID, "")
+	_, _ = s.Publish("blether", "braw1", "neep", "thrawn-2", "", "")
 
-	s.Ack("blether", "kirk-reader1", 2)
+	_ = s.Ack("blether", "kirk-reader1", 2)
 
 	msgs, _ := s.Read("blether", "kirk-reader1", true, m1.ID)
 	if len(msgs) != 1 {
@@ -675,9 +675,9 @@ func TestAckMessagesDoesNotSkipOtherThreads(t *testing.T) {
 	s := testStore(t)
 
 	m1, _ := s.Publish("blether", "braw1", "neep", "kirk-a-start", "", "")
-	s.Publish("blether", "canny1", "whin", "kirk-b-msg", "", "")
-	s.Publish("blether", "braw1", "neep", "kirk-a-reply", m1.ID, "")
-	s.Publish("blether", "canny1", "whin", "haar-msg", "", "")
+	_, _ = s.Publish("blether", "canny1", "whin", "kirk-b-msg", "", "")
+	_, _ = s.Publish("blether", "braw1", "neep", "kirk-a-reply", m1.ID, "")
+	_, _ = s.Publish("blether", "canny1", "whin", "haar-msg", "", "")
 
 	// Thread filter returns only the reply (seq 3); the root message has no
 	// thread_id set. Ack only the reply using per-message ack.
@@ -691,7 +691,7 @@ func TestAckMessagesDoesNotSkipOtherThreads(t *testing.T) {
 		seqs[i] = m.Seq
 	}
 
-	s.AckMessages("blether", "kirk-reader1", seqs)
+	_ = s.AckMessages("blether", "kirk-reader1", seqs)
 
 	// All other messages (root, threadB, unthreaded) must remain unread.
 	unread, _ := s.Read("blether", "kirk-reader1", true, "")
@@ -723,15 +723,15 @@ func TestAckMessagesEmpty(t *testing.T) {
 func TestAckMessagesCombinesWithCursor(t *testing.T) {
 	s := testStore(t)
 
-	s.Publish("blether", "braw1", "neep", "neep1", "", "")
-	s.Publish("blether", "braw1", "neep", "neep2", "", "")
-	s.Publish("blether", "braw1", "neep", "neep3", "", "")
-	s.Publish("blether", "braw1", "neep", "neep4", "", "")
+	_, _ = s.Publish("blether", "braw1", "neep", "neep1", "", "")
+	_, _ = s.Publish("blether", "braw1", "neep", "neep2", "", "")
+	_, _ = s.Publish("blether", "braw1", "neep", "neep3", "", "")
+	_, _ = s.Publish("blether", "braw1", "neep", "neep4", "", "")
 
 	// Advance cursor past seq 1.
-	s.Ack("blether", "kirk-reader1", 1)
+	_ = s.Ack("blether", "kirk-reader1", 1)
 	// Individually ack seq 3.
-	s.AckMessages("blether", "kirk-reader1", []int64{3})
+	_ = s.AckMessages("blether", "kirk-reader1", []int64{3})
 
 	unread, _ := s.Read("blether", "kirk-reader1", true, "")
 	if len(unread) != 2 {
@@ -750,7 +750,7 @@ func TestAckMessagesCombinesWithCursor(t *testing.T) {
 func TestAckMessagesIdempotent(t *testing.T) {
 	s := testStore(t)
 
-	s.Publish("blether", "braw1", "neep", "neep1", "", "")
+	_, _ = s.Publish("blether", "braw1", "neep", "neep1", "", "")
 
 	// Acking the same seq twice should not error.
 	if err := s.AckMessages("blether", "kirk-reader1", []int64{1}); err != nil {
@@ -774,17 +774,17 @@ func TestCleanupByAge(t *testing.T) {
 	oldTime := time.Now().UTC().Add(-48 * time.Hour).Format(time.RFC3339Nano)
 	newTime := time.Now().UTC().Format(time.RFC3339Nano)
 
-	s.db.Exec(
+	_, _ = s.db.Exec(
 		`INSERT INTO messages (id, seq, stream, sender_id, sender_name, body, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		"msg_old1", 1, "blether", "braw1", "neep", "auld neep 1", oldTime,
 	)
-	s.db.Exec(
+	_, _ = s.db.Exec(
 		`INSERT INTO messages (id, seq, stream, sender_id, sender_name, body, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		"msg_old2", 2, "blether", "braw1", "neep", "auld neep 2", oldTime,
 	)
-	s.db.Exec(
+	_, _ = s.db.Exec(
 		`INSERT INTO messages (id, seq, stream, sender_id, sender_name, body, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		"msg_new1", 3, "blether", "braw1", "neep", "braw neep", newTime,
@@ -813,11 +813,11 @@ func TestCleanupByMaxPerStream(t *testing.T) {
 	s := testStore(t)
 
 	for i := range 5 {
-		s.Publish("blether-braw", "braw1", "neep", fmt.Sprintf("a-msg-%d", i+1), "", "")
+		_, _ = s.Publish("blether-braw", "braw1", "neep", fmt.Sprintf("a-msg-%d", i+1), "", "")
 	}
 
 	for i := range 3 {
-		s.Publish("blether-canny", "braw1", "neep", fmt.Sprintf("b-msg-%d", i+1), "", "")
+		_, _ = s.Publish("blether-canny", "braw1", "neep", fmt.Sprintf("b-msg-%d", i+1), "", "")
 	}
 
 	deleted, err := s.Cleanup(0, 3)
@@ -850,19 +850,19 @@ func TestCleanupBothPolicies(t *testing.T) {
 	oldTime := time.Now().UTC().Add(-48 * time.Hour).Format(time.RFC3339Nano)
 
 	// 2 old messages + 3 new messages = 5 total in stream
-	s.db.Exec(
+	_, _ = s.db.Exec(
 		`INSERT INTO messages (id, seq, stream, sender_id, sender_name, body, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		"msg_old1", 1, "blether", "braw1", "neep", "old1", oldTime,
 	)
-	s.db.Exec(
+	_, _ = s.db.Exec(
 		`INSERT INTO messages (id, seq, stream, sender_id, sender_name, body, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		"msg_old2", 2, "blether", "braw1", "neep", "old2", oldTime,
 	)
 
 	for i := range 3 {
-		s.Publish("blether", "braw1", "neep", fmt.Sprintf("new%d", i+1), "", "")
+		_, _ = s.Publish("blether", "braw1", "neep", fmt.Sprintf("new%d", i+1), "", "")
 	}
 
 	deleted, err := s.Cleanup(24*time.Hour, 2)
@@ -883,7 +883,7 @@ func TestCleanupBothPolicies(t *testing.T) {
 func TestCleanupNoConfig(t *testing.T) {
 	s := testStore(t)
 
-	s.Publish("blether", "braw1", "neep", "neep1", "", "")
+	_, _ = s.Publish("blether", "braw1", "neep", "neep1", "", "")
 
 	deleted, err := s.Cleanup(0, 0)
 	if err != nil {
@@ -903,14 +903,14 @@ func TestCleanupNoConfig(t *testing.T) {
 func TestCleanupPreservesHighWaterMark(t *testing.T) {
 	s := testStore(t)
 
-	s.Publish("blether", "braw1", "neep", "neep1", "", "")
-	s.Publish("blether", "braw1", "neep", "neep2", "", "")
-	s.Publish("blether", "braw1", "neep", "neep3", "", "")
+	_, _ = s.Publish("blether", "braw1", "neep", "neep1", "", "")
+	_, _ = s.Publish("blether", "braw1", "neep", "neep2", "", "")
+	_, _ = s.Publish("blether", "braw1", "neep", "neep3", "", "")
 
-	s.Ack("blether", "kirk-reader1", 3)
+	_ = s.Ack("blether", "kirk-reader1", 3)
 
 	oldTime := time.Now().UTC().Add(-48 * time.Hour).Format(time.RFC3339Nano)
-	s.db.Exec("UPDATE messages SET created_at = ? WHERE stream = ?", oldTime, "blether")
+	_, _ = s.db.Exec("UPDATE messages SET created_at = ? WHERE stream = ?", oldTime, "blether")
 
 	deleted, err := s.Cleanup(24*time.Hour, 0)
 	if err != nil {
@@ -949,10 +949,10 @@ func TestCleanupByMaxPreservesHighWaterMark(t *testing.T) {
 	s := testStore(t)
 
 	for i := range 10 {
-		s.Publish("blether", "braw1", "neep", fmt.Sprintf("msg-%d", i+1), "", "")
+		_, _ = s.Publish("blether", "braw1", "neep", fmt.Sprintf("msg-%d", i+1), "", "")
 	}
 
-	s.Ack("blether", "kirk-reader1", 10)
+	_ = s.Ack("blether", "kirk-reader1", 10)
 
 	deleted, err := s.Cleanup(0, 3)
 	if err != nil {
@@ -1011,24 +1011,24 @@ func TestCleanupAfterUpgradePreservesHWM(t *testing.T) {
 
 	oldTime := time.Now().UTC().Add(-48 * time.Hour).Format(time.RFC3339Nano)
 	for i := 1; i <= 5; i++ {
-		db.Exec(
+		_, _ = db.Exec(
 			`INSERT INTO messages (id, seq, stream, sender_id, sender_name, body, created_at)
 			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 			fmt.Sprintf("msg_%d", i), i, "blether", "braw1", "neep", fmt.Sprintf("old-%d", i), oldTime,
 		)
 	}
 
-	db.Exec(
+	_, _ = db.Exec(
 		`INSERT INTO cursors (subscriber, stream, ack_seq, updated_at) VALUES (?, ?, ?, ?)`,
 		"kirk-reader1", "blether", 5, oldTime,
 	)
-	db.Close()
+	_ = db.Close()
 
 	s, err := NewMsgStore(dbPath)
 	if err != nil {
 		t.Fatalf("NewMsgStore: %v", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	deleted, err := s.Cleanup(24*time.Hour, 0)
 	if err != nil {
@@ -1079,17 +1079,17 @@ func TestCleanupRemovesStaleCursors(t *testing.T) {
 
 	// Publish a fresh message on the stream so it is NOT orphaned — this
 	// isolates the stale-cursor path from the orphan-cursor path.
-	s.Publish("bonnie-stream", "braw1", "neep", "bonnie-recent", "", "")
+	_, _ = s.Publish("bonnie-stream", "braw1", "neep", "bonnie-recent", "", "")
 
 	// Insert a stale cursor on the same stream (old updated_at).
-	s.db.Exec(
+	_, _ = s.db.Exec(
 		`INSERT INTO cursors (subscriber, stream, ack_seq, updated_at)
 		 VALUES (?, ?, ?, ?)`,
 		"auld-reader", "bonnie-stream", 1, oldTime,
 	)
 
 	// Insert an active cursor on the same stream (recent updated_at).
-	s.db.Exec(
+	_, _ = s.db.Exec(
 		`INSERT INTO cursors (subscriber, stream, ack_seq, updated_at)
 		 VALUES (?, ?, ?, ?)`,
 		"braw-reader", "bonnie-stream", 1, newTime,
@@ -1104,7 +1104,8 @@ func TestCleanupRemovesStaleCursors(t *testing.T) {
 
 	// The stale cursor should be gone (updated_at is older than the cutoff).
 	var staleCursorCount int
-	s.db.QueryRow("SELECT COUNT(*) FROM cursors WHERE subscriber = ?", "auld-reader").Scan(&staleCursorCount)
+
+	_ = s.db.QueryRow("SELECT COUNT(*) FROM cursors WHERE subscriber = ?", "auld-reader").Scan(&staleCursorCount)
 
 	if staleCursorCount != 0 {
 		t.Errorf("stale cursor count = %d, want 0", staleCursorCount)
@@ -1112,7 +1113,8 @@ func TestCleanupRemovesStaleCursors(t *testing.T) {
 
 	// The active cursor should remain.
 	var activeCursorCount int
-	s.db.QueryRow("SELECT COUNT(*) FROM cursors WHERE subscriber = ?", "braw-reader").Scan(&activeCursorCount)
+
+	_ = s.db.QueryRow("SELECT COUNT(*) FROM cursors WHERE subscriber = ?", "braw-reader").Scan(&activeCursorCount)
 
 	if activeCursorCount != 1 {
 		t.Errorf("active cursor count = %d, want 1", activeCursorCount)
@@ -1123,28 +1125,30 @@ func TestCleanupRemovesOrphanedCursors(t *testing.T) {
 	s := testStore(t)
 
 	// Create messages on two streams.
-	s.Publish("keep-stream", "s1", "a", "keep this", "", "")
-	s.Publish("remove-stream", "s1", "a", "remove this", "", "")
+	_, _ = s.Publish("keep-stream", "s1", "a", "keep this", "", "")
+	_, _ = s.Publish("remove-stream", "s1", "a", "remove this", "", "")
 
 	// Create cursors for both streams.
-	s.Ack("keep-stream", "reader1", 1)
-	s.Ack("remove-stream", "reader1", 1)
+	_ = s.Ack("keep-stream", "reader1", 1)
+	_ = s.Ack("remove-stream", "reader1", 1)
 
 	// Delete all messages from remove-stream manually (simulating age-based cleanup).
-	s.db.Exec("DELETE FROM messages WHERE stream = ?", "remove-stream")
+	_, _ = s.db.Exec("DELETE FROM messages WHERE stream = ?", "remove-stream")
 
 	// Run cleanup — the orphaned cursor for remove-stream should be removed.
-	s.Cleanup(0, 0)
+	_, _ = s.Cleanup(0, 0)
 
 	var orphanedCount int
-	s.db.QueryRow("SELECT COUNT(*) FROM cursors WHERE stream = ?", "remove-stream").Scan(&orphanedCount)
+
+	_ = s.db.QueryRow("SELECT COUNT(*) FROM cursors WHERE stream = ?", "remove-stream").Scan(&orphanedCount)
 
 	if orphanedCount != 0 {
 		t.Errorf("orphaned cursor count = %d, want 0", orphanedCount)
 	}
 
 	var keptCount int
-	s.db.QueryRow("SELECT COUNT(*) FROM cursors WHERE stream = ?", "keep-stream").Scan(&keptCount)
+
+	_ = s.db.QueryRow("SELECT COUNT(*) FROM cursors WHERE stream = ?", "keep-stream").Scan(&keptCount)
 
 	if keptCount != 1 {
 		t.Errorf("kept cursor count = %d, want 1", keptCount)

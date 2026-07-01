@@ -1333,7 +1333,7 @@ func TestDetectAgentStatuses_SharedWorktreeSkipsGit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer sharedPty.Kill()
+	defer func() { _ = sharedPty.Kill() }()
 
 	normalPty, err := grpty.NewSession(grpty.SessionOpts{
 		ID: "normal1", Command: "sleep", Args: []string{"60"},
@@ -1343,7 +1343,7 @@ func TestDetectAgentStatuses_SharedWorktreeSkipsGit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer normalPty.Kill()
+	defer func() { _ = normalPty.Kill() }()
 
 	sm.state.Sessions["shared1"] = &SessionState{
 		ID: "shared1", Name: "bothy-shared", Agent: "claude",
@@ -2240,7 +2240,7 @@ func TestWatchSessionDeletedSkipsPublish(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ms.Close()
+	defer func() { _ = ms.Close() }()
 
 	sm := newTestSessionManager(t)
 	sm.messages = ms
@@ -2669,7 +2669,7 @@ func TestResumeInPlaceRejectsDeletedRepo(t *testing.T) {
 		Status:       StatusStopped,
 	}
 
-	os.RemoveAll(repoDir)
+	_ = os.RemoveAll(repoDir)
 
 	_, err := sm.Resume("inplace1", 24, 80)
 	if err == nil {
@@ -3102,7 +3102,7 @@ func TestRunMessageCleanupLoopReadsConfig(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer ms.Close()
+		defer func() { _ = ms.Close() }()
 
 		sm.SetMsgStore(ms)
 
@@ -3135,7 +3135,7 @@ func TestRunMessageCleanupLoopReadsConfig(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer ms.Close()
+		defer func() { _ = ms.Close() }()
 
 		sm.SetMsgStore(ms)
 
@@ -3899,7 +3899,7 @@ func TestSetSummary_Clear(t *testing.T) {
 	sm := newTestSessionManager(t)
 	id := createTestSession(sm, "braw-session")
 
-	sm.SetSummary(id, "Working", 0)
+	_ = sm.SetSummary(id, "Working", 0)
 
 	if err := sm.ClearSummary(id); err != nil {
 		t.Fatalf("ClearSummary failed: %v", err)
@@ -4127,7 +4127,7 @@ func TestConcurrentConfigReadWrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ms.Close()
+	defer func() { _ = ms.Close() }()
 
 	sm := newTestSessionManager(t)
 	sm.messages = ms

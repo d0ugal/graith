@@ -227,7 +227,7 @@ func startMockDaemon(t *testing.T) (string, chan net.Conn) {
 		t.Fatalf("mkdtemp: %v", err)
 	}
 
-	t.Cleanup(func() { os.RemoveAll(dir) })
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 
 	socketPath := dir + "/s"
 
@@ -236,7 +236,7 @@ func startMockDaemon(t *testing.T) (string, chan net.Conn) {
 		t.Fatalf("listen: %v", err)
 	}
 
-	t.Cleanup(func() { ln.Close() })
+	t.Cleanup(func() { _ = ln.Close() })
 
 	serverReady := make(chan net.Conn, 1)
 
@@ -250,7 +250,7 @@ func startMockDaemon(t *testing.T) (string, chan net.Conn) {
 		writer := protocol.NewFrameWriter(conn)
 
 		if _, err := reader.ReadFrame(); err != nil {
-			conn.Close()
+			_ = conn.Close()
 			return
 		}
 
@@ -276,7 +276,7 @@ func TestConnectFastClearsDeadline(t *testing.T) {
 	defer c.Close()
 
 	serverConn := <-serverReady
-	defer serverConn.Close()
+	defer func() { _ = serverConn.Close() }()
 
 	// Send a control message after 2.5s — past the original 2s handshake
 	// deadline. If the deadline was not cleared, this read will fail.
@@ -308,7 +308,7 @@ func TestConnectForApprovalClearsDeadline(t *testing.T) {
 	defer c.Close()
 
 	serverConn := <-serverReady
-	defer serverConn.Close()
+	defer func() { _ = serverConn.Close() }()
 
 	// Same check: send after the ConnectFast deadline (2s) would have fired.
 	// ConnectForApproval uses a longer deadline, but if it wasn't cleared,
@@ -339,7 +339,7 @@ func startMockDaemonWithVersion(t *testing.T, ver string) (string, chan net.Conn
 		t.Fatalf("mkdtemp: %v", err)
 	}
 
-	t.Cleanup(func() { os.RemoveAll(dir) })
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 
 	socketPath := dir + "/s"
 
@@ -348,7 +348,7 @@ func startMockDaemonWithVersion(t *testing.T, ver string) (string, chan net.Conn
 		t.Fatalf("listen: %v", err)
 	}
 
-	t.Cleanup(func() { ln.Close() })
+	t.Cleanup(func() { _ = ln.Close() })
 
 	serverReady := make(chan net.Conn, 1)
 
@@ -362,7 +362,7 @@ func startMockDaemonWithVersion(t *testing.T, ver string) (string, chan net.Conn
 		writer := protocol.NewFrameWriter(conn)
 
 		if _, err := reader.ReadFrame(); err != nil {
-			conn.Close()
+			_ = conn.Close()
 			return
 		}
 

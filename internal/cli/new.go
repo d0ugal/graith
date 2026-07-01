@@ -86,7 +86,7 @@ var newCmd = &cobra.Command{
 		}
 		defer c.Close()
 
-		c.SendControl("create", protocol.CreateMsg{
+		_ = c.SendControl("create", protocol.CreateMsg{
 			Name:                name,
 			ParentID:            os.Getenv("GRAITH_SESSION_ID"),
 			Agent:               agent,
@@ -109,13 +109,15 @@ var newCmd = &cobra.Command{
 
 		if resp.Type == "error" {
 			var e protocol.ErrorMsg
-			protocol.DecodePayload(resp, &e)
+
+			_ = protocol.DecodePayload(resp, &e)
 
 			return fmt.Errorf("%s", e.Message)
 		}
 
 		var info protocol.SessionInfo
-		protocol.DecodePayload(resp, &info)
+
+		_ = protocol.DecodePayload(resp, &info)
 
 		if jsonOutput {
 			return out.JSON(info)
@@ -151,8 +153,8 @@ func registerNewCmd() {
 	newCmd.Flags().BoolVar(&newInPlace, "in-place", false, "run agent directly in the repo without creating a worktree")
 	newCmd.Flags().BoolVar(&newAllowConcurrent, "allow-concurrent", false, "allow multiple in-place sessions on the same repo")
 	newCmd.Flags().BoolVar(&newSkipModelValidation, "skip-model-validation", false, "skip validate_model check (use models not in the validation list)")
-	newCmd.RegisterFlagCompletionFunc("agent", completeAgentNames)
-	newCmd.RegisterFlagCompletionFunc("repo", completeRepoPaths)
-	newCmd.RegisterFlagCompletionFunc("base", completeBranchNames)
-	newCmd.RegisterFlagCompletionFunc("share-worktree", completeSessionNames)
+	_ = newCmd.RegisterFlagCompletionFunc("agent", completeAgentNames)
+	_ = newCmd.RegisterFlagCompletionFunc("repo", completeRepoPaths)
+	_ = newCmd.RegisterFlagCompletionFunc("base", completeBranchNames)
+	_ = newCmd.RegisterFlagCompletionFunc("share-worktree", completeSessionNames)
 }

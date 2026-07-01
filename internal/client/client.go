@@ -138,7 +138,7 @@ func probeDaemonVersion(sockPath string, paths config.Paths) string {
 	if err != nil {
 		return ""
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	reader := protocol.NewFrameReader(conn)
 	writer := protocol.NewFrameWriter(conn)
@@ -174,7 +174,7 @@ func requestUpgrade(c *Client) bool {
 		return false
 	}
 	// Connection drop is expected — the daemon exec'd itself.
-	c.ReadControlResponse()
+	_, _ = c.ReadControlResponse()
 
 	return true
 }
@@ -184,7 +184,7 @@ func waitForDaemon(sockPath string) bool {
 		time.Sleep(250 * time.Millisecond)
 
 		if conn, err := net.DialTimeout("unix", sockPath, 500*time.Millisecond); err == nil {
-			conn.Close()
+			_ = conn.Close()
 			return true
 		}
 	}
@@ -237,7 +237,7 @@ func ConnectFast(paths config.Paths) (*Client, error) {
 		return nil, fmt.Errorf("daemon not reachable: %w", err)
 	}
 
-	conn.SetDeadline(time.Now().Add(2 * time.Second))
+	_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
 
 	c := &Client{
 		conn:   conn,
@@ -283,7 +283,7 @@ func ConnectFast(paths config.Paths) (*Client, error) {
 		return nil, fmt.Errorf("protocol version mismatch: server=%s, client=%s; try: gr daemon restart", hsOk.Version, protocol.Version)
 	}
 
-	conn.SetDeadline(time.Time{})
+	_ = conn.SetDeadline(time.Time{})
 
 	return c, nil
 }
@@ -298,7 +298,7 @@ func ConnectForApproval(paths config.Paths, approvalTimeout time.Duration) (*Cli
 		return nil, fmt.Errorf("daemon not reachable: %w", err)
 	}
 
-	conn.SetDeadline(time.Now().Add(approvalDeadline(approvalTimeout)))
+	_ = conn.SetDeadline(time.Now().Add(approvalDeadline(approvalTimeout)))
 
 	c := &Client{
 		conn:   conn,
@@ -344,7 +344,7 @@ func ConnectForApproval(paths config.Paths, approvalTimeout time.Duration) (*Cli
 		return nil, fmt.Errorf("protocol version mismatch: server=%s, client=%s; try: gr daemon restart", hsOk.Version, protocol.Version)
 	}
 
-	conn.SetDeadline(time.Time{})
+	_ = conn.SetDeadline(time.Time{})
 
 	return c, nil
 }
@@ -455,7 +455,7 @@ func WriteScreenRestore(snap *protocol.ScreenSnapshotResponseMsg) {
 	}
 
 	buf.WriteString("\x1b[?2026l")
-	os.Stdout.WriteString(buf.String())
+	_, _ = os.Stdout.WriteString(buf.String())
 }
 
 func FetchScreenSnapshot(cfg *config.Config, paths config.Paths, configFile string, sessionID string) *protocol.ScreenSnapshotResponseMsg {
@@ -528,7 +528,8 @@ func FetchConversation(cfg *config.Config, paths config.Paths, configFile string
 
 	if resp.Type == "error" {
 		var e protocol.ErrorMsg
-		protocol.DecodePayload(resp, &e)
+
+		_ = protocol.DecodePayload(resp, &e)
 
 		return nil, fmt.Errorf("%s", e.Message)
 	}

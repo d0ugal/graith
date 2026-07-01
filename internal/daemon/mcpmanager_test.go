@@ -472,7 +472,7 @@ func TestMCPManagerDeletedCwd(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	defer os.Chdir(origDir)
+	defer func() { _ = os.Chdir(origDir) }()
 
 	cfg := &config.Config{
 		MCPServers: []config.MCPServerConfig{

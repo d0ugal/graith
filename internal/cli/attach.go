@@ -80,7 +80,7 @@ func runAttach(cmd *cobra.Command, name string) error {
 	}
 	defer c.Close()
 
-	c.SendControl("list", struct{}{})
+	_ = c.SendControl("list", struct{}{})
 
 	resp, err := c.ReadControlResponse()
 	if err != nil {
@@ -107,7 +107,7 @@ func runAttach(cmd *cobra.Command, name string) error {
 		}
 
 		if result.Action == "create" {
-			c.SendControl("create", protocol.CreateMsg{
+			_ = c.SendControl("create", protocol.CreateMsg{
 				Name:     result.CreateName,
 				RepoPath: result.CreateRepoPath,
 				Agent:    result.CreateAgent,
@@ -120,14 +120,16 @@ func runAttach(cmd *cobra.Command, name string) error {
 
 			if createResp.Type == "error" {
 				var e protocol.ErrorMsg
-				protocol.DecodePayload(createResp, &e)
+
+				_ = protocol.DecodePayload(createResp, &e)
 				out.Printf("Create failed: %s\n", e.Message)
 
 				return nil
 			}
 
 			var newInfo protocol.SessionInfo
-			protocol.DecodePayload(createResp, &newInfo)
+
+			_ = protocol.DecodePayload(createResp, &newInfo)
 
 			return runAttachByID(c, newInfo.ID, result.Collapsed)
 		}
@@ -149,7 +151,7 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 		return fmt.Errorf("cannot attach from inside a graith session (nested sessions are not supported)")
 	}
 
-	c.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+	_ = c.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
 
 	resp, err := c.ReadControlResponse()
 	if err != nil {
@@ -158,13 +160,15 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 
 	if resp.Type == "error" {
 		var e protocol.ErrorMsg
-		protocol.DecodePayload(resp, &e)
+
+		_ = protocol.DecodePayload(resp, &e)
 
 		return fmt.Errorf("%s", e.Message)
 	}
 
 	var info protocol.SessionInfo
-	protocol.DecodePayload(resp, &info)
+
+	_ = protocol.DecodePayload(resp, &info)
 
 	ctx := context.Background()
 	keys := client.PassthroughKeys{
@@ -205,7 +209,7 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 				return err
 			}
 
-			nc.SendControl("list", struct{}{})
+			_ = nc.SendControl("list", struct{}{})
 
 			listResp, err := nc.ReadControlResponse()
 			if err != nil {
@@ -214,7 +218,8 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 			}
 
 			var list protocol.SessionListMsg
-			protocol.DecodePayload(listResp, &list)
+
+			_ = protocol.DecodePayload(listResp, &list)
 
 			repos := client.DiscoverRepos(cfg.AllowedRepoPaths, list.Sessions)
 			agents, defaultAgent := agentChoices()
@@ -235,9 +240,9 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 
 			if overlayResult == nil || overlayResult.Action == "" {
 				restoreScreen(sessionID)
-				nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+				_ = nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
 				attachResp, _ := nc.ReadControlResponse()
-				protocol.DecodePayload(attachResp, &info)
+				_ = protocol.DecodePayload(attachResp, &info)
 
 				opts.SessionID = sessionID
 				opts.Info = &info
@@ -247,7 +252,7 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 			}
 
 			if overlayResult.Action == "create" {
-				nc.SendControl("create", protocol.CreateMsg{
+				_ = nc.SendControl("create", protocol.CreateMsg{
 					Name:     overlayResult.CreateName,
 					RepoPath: overlayResult.CreateRepoPath,
 					Agent:    overlayResult.CreateAgent,
@@ -261,7 +266,8 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 
 				if createResp.Type == "error" {
 					var e protocol.ErrorMsg
-					protocol.DecodePayload(createResp, &e)
+
+					_ = protocol.DecodePayload(createResp, &e)
 					out.Printf("Create failed: %s\n", e.Message)
 
 					nc2, err := freshClient()
@@ -272,9 +278,9 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 
 					nc.Close()
 					restoreScreen(sessionID)
-					nc2.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+					_ = nc2.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
 					attachResp, _ := nc2.ReadControlResponse()
-					protocol.DecodePayload(attachResp, &info)
+					_ = protocol.DecodePayload(attachResp, &info)
 
 					opts.SessionID = sessionID
 					opts.Info = &info
@@ -284,11 +290,12 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 				}
 
 				var newInfo protocol.SessionInfo
-				protocol.DecodePayload(createResp, &newInfo)
+
+				_ = protocol.DecodePayload(createResp, &newInfo)
 				restoreScreen(newInfo.ID)
-				nc.SendControl("attach", protocol.AttachMsg{SessionID: newInfo.ID})
+				_ = nc.SendControl("attach", protocol.AttachMsg{SessionID: newInfo.ID})
 				attachResp, _ := nc.ReadControlResponse()
-				protocol.DecodePayload(attachResp, &info)
+				_ = protocol.DecodePayload(attachResp, &info)
 
 				prevSessionID = sessionID
 				sessionID = newInfo.ID
@@ -300,9 +307,9 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 			}
 
 			restoreScreen(overlayResult.SessionID)
-			nc.SendControl("attach", protocol.AttachMsg{SessionID: overlayResult.SessionID})
+			_ = nc.SendControl("attach", protocol.AttachMsg{SessionID: overlayResult.SessionID})
 			attachResp, _ := nc.ReadControlResponse()
-			protocol.DecodePayload(attachResp, &info)
+			_ = protocol.DecodePayload(attachResp, &info)
 
 			prevSessionID = sessionID
 			sessionID = overlayResult.SessionID
@@ -319,7 +326,7 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 			}
 			// Build a peer-id -> name map from the live session list so the
 			// rail can label conversations (sent messages carry only a peer id).
-			nc.SendControl("list", struct{}{})
+			_ = nc.SendControl("list", struct{}{})
 
 			msgListResp, err := nc.ReadControlResponse()
 			if err != nil {
@@ -328,7 +335,8 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 			}
 
 			var msgList protocol.SessionListMsg
-			protocol.DecodePayload(msgListResp, &msgList)
+
+			_ = protocol.DecodePayload(msgListResp, &msgList)
 
 			names := make(map[string]string, len(msgList.Sessions))
 			for _, s := range msgList.Sessions {
@@ -338,9 +346,9 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 			client.RunMessageOverlay(sessionID, conversationFetcher(sessionID), names)
 
 			restoreScreen(sessionID)
-			nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+			_ = nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
 			attachResp, _ := nc.ReadControlResponse()
-			protocol.DecodePayload(attachResp, &info)
+			_ = protocol.DecodePayload(attachResp, &info)
 
 			opts.SessionID = sessionID
 			opts.Info = &info
@@ -354,11 +362,12 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 				return err
 			}
 
-			nc.SendControl("list", struct{}{})
+			_ = nc.SendControl("list", struct{}{})
 			infoResp, _ := nc.ReadControlResponse()
 
 			var infoList protocol.SessionListMsg
-			protocol.DecodePayload(infoResp, &infoList)
+
+			_ = protocol.DecodePayload(infoResp, &infoList)
 
 			var worktreePath string
 
@@ -379,9 +388,9 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 				}
 			}
 
-			nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+			_ = nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
 			attachResp, _ := nc.ReadControlResponse()
-			protocol.DecodePayload(attachResp, &info)
+			_ = protocol.DecodePayload(attachResp, &info)
 
 			opts.SessionID = sessionID
 			opts.Info = &info
@@ -395,7 +404,7 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 				return err
 			}
 
-			nc.SendControl("resume", protocol.ResumeMsg{SessionID: sessionID})
+			_ = nc.SendControl("resume", protocol.ResumeMsg{SessionID: sessionID})
 
 			resumeResp, err := nc.ReadControlResponse()
 			if err != nil {
@@ -405,13 +414,14 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 
 			if resumeResp.Type == "error" {
 				var e protocol.ErrorMsg
-				protocol.DecodePayload(resumeResp, &e)
+
+				_ = protocol.DecodePayload(resumeResp, &e)
 				out.Printf("Resume failed: %s\n", e.Message)
 			}
 
-			nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+			_ = nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
 			attachResp, _ := nc.ReadControlResponse()
-			protocol.DecodePayload(attachResp, &info)
+			_ = protocol.DecodePayload(attachResp, &info)
 
 			opts.SessionID = sessionID
 			opts.Info = &info
@@ -430,7 +440,7 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 				return nil
 			}
 
-			protocol.DecodePayload(attachResp, &info)
+			_ = protocol.DecodePayload(attachResp, &info)
 
 			opts.SessionID = sessionID
 			opts.Info = &info
@@ -445,9 +455,9 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 					return err
 				}
 
-				nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+				_ = nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
 				attachResp, _ := nc.ReadControlResponse()
-				protocol.DecodePayload(attachResp, &info)
+				_ = protocol.DecodePayload(attachResp, &info)
 
 				opts.SessionID = sessionID
 				opts.Info = &info
@@ -462,9 +472,9 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 			}
 
 			sessionID, prevSessionID = prevSessionID, sessionID
-			nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+			_ = nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
 			attachResp, _ := nc.ReadControlResponse()
-			protocol.DecodePayload(attachResp, &info)
+			_ = protocol.DecodePayload(attachResp, &info)
 
 			opts.SessionID = sessionID
 			opts.Info = &info
@@ -478,7 +488,7 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 				return err
 			}
 
-			nc.SendControl("list", struct{}{})
+			_ = nc.SendControl("list", struct{}{})
 
 			listResp, err := nc.ReadControlResponse()
 			if err != nil {
@@ -498,9 +508,9 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 				sessionID = next
 			}
 
-			nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+			_ = nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
 			attachResp, _ := nc.ReadControlResponse()
-			protocol.DecodePayload(attachResp, &info)
+			_ = protocol.DecodePayload(attachResp, &info)
 
 			opts.SessionID = sessionID
 			opts.Info = &info
@@ -514,7 +524,7 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 				return err
 			}
 
-			nc.SendControl("list", struct{}{})
+			_ = nc.SendControl("list", struct{}{})
 
 			listResp, err := nc.ReadControlResponse()
 			if err != nil {
@@ -523,16 +533,17 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 			}
 
 			var newSessionList protocol.SessionListMsg
-			protocol.DecodePayload(listResp, &newSessionList)
+
+			_ = protocol.DecodePayload(listResp, &newSessionList)
 			repos := client.DiscoverRepos(cfg.AllowedRepoPaths, newSessionList.Sessions)
 			agents, defaultAgent := agentChoices()
 
 			name, repoPath, agent := client.RunCreateInput(info.RepoPath, repos, agents, defaultAgent)
 			if name == "" {
 				restoreScreen(sessionID)
-				nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+				_ = nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
 				attachResp, _ := nc.ReadControlResponse()
-				protocol.DecodePayload(attachResp, &info)
+				_ = protocol.DecodePayload(attachResp, &info)
 
 				opts.SessionID = sessionID
 				opts.Info = &info
@@ -541,7 +552,7 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 				continue
 			}
 
-			nc.SendControl("create", protocol.CreateMsg{
+			_ = nc.SendControl("create", protocol.CreateMsg{
 				Name:     name,
 				RepoPath: repoPath,
 				Agent:    agent,
@@ -555,7 +566,8 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 
 			if createResp.Type == "error" {
 				var e protocol.ErrorMsg
-				protocol.DecodePayload(createResp, &e)
+
+				_ = protocol.DecodePayload(createResp, &e)
 				out.Printf("Create failed: %s\n", e.Message)
 
 				nc2, err := freshClient()
@@ -566,9 +578,9 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 
 				nc.Close()
 				restoreScreen(sessionID)
-				nc2.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+				_ = nc2.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
 				attachResp, _ := nc2.ReadControlResponse()
-				protocol.DecodePayload(attachResp, &info)
+				_ = protocol.DecodePayload(attachResp, &info)
 
 				opts.SessionID = sessionID
 				opts.Info = &info
@@ -578,11 +590,12 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 			}
 
 			var newInfo protocol.SessionInfo
-			protocol.DecodePayload(createResp, &newInfo)
+
+			_ = protocol.DecodePayload(createResp, &newInfo)
 			restoreScreen(newInfo.ID)
-			nc.SendControl("attach", protocol.AttachMsg{SessionID: newInfo.ID})
+			_ = nc.SendControl("attach", protocol.AttachMsg{SessionID: newInfo.ID})
 			attachResp, _ := nc.ReadControlResponse()
-			protocol.DecodePayload(attachResp, &info)
+			_ = protocol.DecodePayload(attachResp, &info)
 
 			prevSessionID = sessionID
 			sessionID = newInfo.ID
@@ -601,9 +614,9 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 				}
 
 				restoreScreen(sessionID)
-				nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+				_ = nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
 				attachResp, _ := nc.ReadControlResponse()
-				protocol.DecodePayload(attachResp, &info)
+				_ = protocol.DecodePayload(attachResp, &info)
 
 				opts.SessionID = sessionID
 				opts.Info = &info
@@ -617,7 +630,7 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 				return err
 			}
 
-			nc.SendControl("fork", protocol.ForkMsg{
+			_ = nc.SendControl("fork", protocol.ForkMsg{
 				Name:            name,
 				SourceSessionID: sessionID,
 			})
@@ -630,7 +643,8 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 
 			if createResp.Type == "error" {
 				var e protocol.ErrorMsg
-				protocol.DecodePayload(createResp, &e)
+
+				_ = protocol.DecodePayload(createResp, &e)
 				out.Printf("Fork failed: %s\n", e.Message)
 
 				nc2, err := freshClient()
@@ -641,9 +655,9 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 
 				nc.Close()
 				restoreScreen(sessionID)
-				nc2.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+				_ = nc2.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
 				attachResp, _ := nc2.ReadControlResponse()
-				protocol.DecodePayload(attachResp, &info)
+				_ = protocol.DecodePayload(attachResp, &info)
 
 				opts.SessionID = sessionID
 				opts.Info = &info
@@ -653,11 +667,12 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 			}
 
 			var newInfo protocol.SessionInfo
-			protocol.DecodePayload(createResp, &newInfo)
+
+			_ = protocol.DecodePayload(createResp, &newInfo)
 			restoreScreen(newInfo.ID)
-			nc.SendControl("attach", protocol.AttachMsg{SessionID: newInfo.ID})
+			_ = nc.SendControl("attach", protocol.AttachMsg{SessionID: newInfo.ID})
 			attachResp, _ := nc.ReadControlResponse()
-			protocol.DecodePayload(attachResp, &info)
+			_ = protocol.DecodePayload(attachResp, &info)
 
 			prevSessionID = sessionID
 			sessionID = newInfo.ID
@@ -673,7 +688,7 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 				return err
 			}
 
-			nc.SendControl("approval_list", struct{}{})
+			_ = nc.SendControl("approval_list", struct{}{})
 
 			listResp, err := nc.ReadControlResponse()
 			if err != nil {
@@ -682,13 +697,14 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 			}
 
 			var notif protocol.ApprovalNotificationMsg
-			protocol.DecodePayload(listResp, &notif)
+
+			_ = protocol.DecodePayload(listResp, &notif)
 
 			if len(notif.Pending) == 0 {
 				restoreScreen(sessionID)
-				nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+				_ = nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
 				attachResp, _ := nc.ReadControlResponse()
-				protocol.DecodePayload(attachResp, &info)
+				_ = protocol.DecodePayload(attachResp, &info)
 
 				opts.SessionID = sessionID
 				opts.Info = &info
@@ -699,18 +715,18 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 
 			results := client.RunApprovalOverlay(notif.Pending)
 			for _, r := range results {
-				nc.SendControl("approval_respond", protocol.ApprovalRespondMsg{
+				_ = nc.SendControl("approval_respond", protocol.ApprovalRespondMsg{
 					RequestID: r.RequestID,
 					Decision:  r.Decision,
 					Reason:    r.Reason,
 				})
-				nc.ReadControlResponse()
+				_, _ = nc.ReadControlResponse()
 			}
 
 			restoreScreen(sessionID)
-			nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+			_ = nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
 			attachResp, _ := nc.ReadControlResponse()
-			protocol.DecodePayload(attachResp, &info)
+			_ = protocol.DecodePayload(attachResp, &info)
 
 			opts.SessionID = sessionID
 			opts.Info = &info
@@ -724,7 +740,7 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 				return err
 			}
 
-			nc.SendControl("list", struct{}{})
+			_ = nc.SendControl("list", struct{}{})
 
 			listResp, err := nc.ReadControlResponse()
 			if err != nil {
@@ -733,7 +749,8 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 			}
 
 			var list protocol.SessionListMsg
-			protocol.DecodePayload(listResp, &list)
+
+			_ = protocol.DecodePayload(listResp, &list)
 
 			var orchID string
 
@@ -747,9 +764,9 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 			if orchID == "" {
 				out.Printf("Orchestrator not enabled — set orchestrator.enabled = true in config.toml\n")
 				restoreScreen(sessionID)
-				nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+				_ = nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
 				attachResp, _ := nc.ReadControlResponse()
-				protocol.DecodePayload(attachResp, &info)
+				_ = protocol.DecodePayload(attachResp, &info)
 
 				opts.SessionID = sessionID
 				opts.Info = &info
@@ -761,9 +778,9 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 			if orchID == sessionID {
 				if prevSessionID != "" {
 					sessionID, prevSessionID = prevSessionID, sessionID
-					nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+					_ = nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
 					attachResp, _ := nc.ReadControlResponse()
-					protocol.DecodePayload(attachResp, &info)
+					_ = protocol.DecodePayload(attachResp, &info)
 
 					opts.SessionID = sessionID
 					opts.Info = &info
@@ -773,9 +790,9 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 				}
 
 				restoreScreen(sessionID)
-				nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+				_ = nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
 				attachResp, _ := nc.ReadControlResponse()
-				protocol.DecodePayload(attachResp, &info)
+				_ = protocol.DecodePayload(attachResp, &info)
 
 				opts.SessionID = sessionID
 				opts.Info = &info
@@ -794,7 +811,7 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 			}
 
 			if orchStatus == "stopped" || orchStatus == "errored" {
-				nc.SendControl("resume", protocol.ResumeMsg{SessionID: orchID})
+				_ = nc.SendControl("resume", protocol.ResumeMsg{SessionID: orchID})
 
 				resumeResp, err := nc.ReadControlResponse()
 				if err != nil {
@@ -804,12 +821,13 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 
 				if resumeResp.Type == "error" {
 					var e protocol.ErrorMsg
-					protocol.DecodePayload(resumeResp, &e)
+
+					_ = protocol.DecodePayload(resumeResp, &e)
 					out.Printf("Orchestrator resume failed: %s\n", e.Message)
 					restoreScreen(sessionID)
-					nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+					_ = nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
 					attachResp, _ := nc.ReadControlResponse()
-					protocol.DecodePayload(attachResp, &info)
+					_ = protocol.DecodePayload(attachResp, &info)
 
 					opts.SessionID = sessionID
 					opts.Info = &info
@@ -820,9 +838,9 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 			}
 
 			restoreScreen(orchID)
-			nc.SendControl("attach", protocol.AttachMsg{SessionID: orchID})
+			_ = nc.SendControl("attach", protocol.AttachMsg{SessionID: orchID})
 			attachResp, _ := nc.ReadControlResponse()
-			protocol.DecodePayload(attachResp, &info)
+			_ = protocol.DecodePayload(attachResp, &info)
 
 			prevSessionID = sessionID
 			sessionID = orchID
@@ -877,7 +895,7 @@ func sessionRefresher() func() []protocol.SessionInfo {
 		}
 		defer c.Close()
 
-		c.SendControl("list", struct{}{})
+		_ = c.SendControl("list", struct{}{})
 
 		resp, err := c.ReadControlResponse()
 		if err != nil {
@@ -920,9 +938,9 @@ func toggleStar(sessionID string, star bool) error {
 	defer sc.Close()
 
 	if star {
-		sc.SendControl("star", protocol.StarMsg{SessionID: sessionID})
+		_ = sc.SendControl("star", protocol.StarMsg{SessionID: sessionID})
 	} else {
-		sc.SendControl("unstar", protocol.UnstarMsg{SessionID: sessionID})
+		_ = sc.SendControl("unstar", protocol.UnstarMsg{SessionID: sessionID})
 	}
 
 	resp, err := sc.ReadControlResponse()
@@ -932,7 +950,8 @@ func toggleStar(sessionID string, star bool) error {
 
 	if resp.Type == "error" {
 		var e protocol.ErrorMsg
-		protocol.DecodePayload(resp, &e)
+
+		_ = protocol.DecodePayload(resp, &e)
 
 		return fmt.Errorf("%s", e.Message)
 	}
@@ -947,7 +966,7 @@ func restartSession(sessionID string) error {
 	}
 	defer rc.Close()
 
-	rc.SendControl("restart", protocol.RestartMsg{SessionID: sessionID})
+	_ = rc.SendControl("restart", protocol.RestartMsg{SessionID: sessionID})
 
 	resp, err := rc.ReadControlResponse()
 	if err != nil {
@@ -956,7 +975,8 @@ func restartSession(sessionID string) error {
 
 	if resp.Type == "error" {
 		var e protocol.ErrorMsg
-		protocol.DecodePayload(resp, &e)
+
+		_ = protocol.DecodePayload(resp, &e)
 
 		return fmt.Errorf("%s", e.Message)
 	}
@@ -971,7 +991,7 @@ func stopSession(sessionID string) error {
 	}
 	defer sc.Close()
 
-	sc.SendControl("stop", protocol.StopMsg{SessionID: sessionID})
+	_ = sc.SendControl("stop", protocol.StopMsg{SessionID: sessionID})
 
 	resp, err := sc.ReadControlResponse()
 	if err != nil {
@@ -980,7 +1000,8 @@ func stopSession(sessionID string) error {
 
 	if resp.Type == "error" {
 		var e protocol.ErrorMsg
-		protocol.DecodePayload(resp, &e)
+
+		_ = protocol.DecodePayload(resp, &e)
 
 		return fmt.Errorf("%s", e.Message)
 	}
@@ -995,7 +1016,7 @@ func deleteSession(sessionID string) error {
 	}
 	defer dc.Close()
 
-	dc.SendControl("delete", protocol.DeleteMsg{SessionID: sessionID})
+	_ = dc.SendControl("delete", protocol.DeleteMsg{SessionID: sessionID})
 
 	resp, err := dc.ReadControlResponse()
 	if err != nil {
@@ -1004,7 +1025,8 @@ func deleteSession(sessionID string) error {
 
 	if resp.Type == "error" {
 		var e protocol.ErrorMsg
-		protocol.DecodePayload(resp, &e)
+
+		_ = protocol.DecodePayload(resp, &e)
 
 		return fmt.Errorf("%s", e.Message)
 	}
@@ -1081,7 +1103,7 @@ func reconnectToSession(sessionID string) (*client.Client, protocol.Envelope, er
 			continue
 		}
 
-		c.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+		_ = c.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
 
 		resp, err := c.ReadControlResponse()
 		if err != nil {
@@ -1093,7 +1115,8 @@ func reconnectToSession(sessionID string) (*client.Client, protocol.Envelope, er
 			c.Close()
 
 			var e protocol.ErrorMsg
-			protocol.DecodePayload(resp, &e)
+
+			_ = protocol.DecodePayload(resp, &e)
 
 			return nil, protocol.Envelope{}, fmt.Errorf("session unavailable: %s", e.Message)
 		}

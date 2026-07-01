@@ -670,6 +670,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 				resolved := config.ResolvePath(incPath)
 				if !cfgSnapshot.RepoPathAllowed(resolved) {
 					_ = sm.teardownIncludes(repoRoot, worktreePath, branchName, includes)
+
 					rollbackState()
 
 					return SessionState{}, fmt.Errorf("included repo %q is not under any allowed_repo_paths", incPath)
@@ -677,6 +678,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 
 				if !git.IsInsideGitRepo(resolved) {
 					_ = sm.teardownIncludes(repoRoot, worktreePath, branchName, includes)
+
 					rollbackState()
 
 					return SessionState{}, fmt.Errorf("included repo %q is not a git repository", incPath)
@@ -684,7 +686,8 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 
 				incRoot, err := git.RepoRootPath(resolved)
 				if err != nil {
-					sm.teardownIncludes(repoRoot, worktreePath, branchName, includes)
+					_ = sm.teardownIncludes(repoRoot, worktreePath, branchName, includes)
+
 					rollbackState()
 
 					return SessionState{}, fmt.Errorf("find included repo root for %q: %w", incPath, err)
@@ -694,7 +697,8 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 
 				incBaseBranch, err := git.DiscoverDefaultBranchOrHEAD(incRoot)
 				if err != nil {
-					sm.teardownIncludes(repoRoot, worktreePath, branchName, includes)
+					_ = sm.teardownIncludes(repoRoot, worktreePath, branchName, includes)
+
 					rollbackState()
 
 					return SessionState{}, fmt.Errorf("discover default branch for included repo %q: %w", incPath, err)
@@ -705,7 +709,8 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 				incWorktreePath := filepath.Join(sessionDir, incName)
 
 				if err := git.SetupSession(gitCtx, incRoot, incWorktreePath, incBranch, incBaseBranch, fetchOnCreate); err != nil {
-					sm.teardownIncludes(repoRoot, worktreePath, branchName, includes)
+					_ = sm.teardownIncludes(repoRoot, worktreePath, branchName, includes)
+
 					rollbackState()
 
 					return SessionState{}, fmt.Errorf("setup included repo %q: %w", incName, err)
@@ -907,7 +912,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 			cleanupOnError()
 
 			if scratchDir != "" {
-				os.RemoveAll(scratchDir)
+				_ = os.RemoveAll(scratchDir)
 			}
 
 			rollbackState()
@@ -939,7 +944,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 		cleanupOnError()
 
 		if scratchDir != "" {
-			os.RemoveAll(scratchDir)
+			_ = os.RemoveAll(scratchDir)
 		}
 
 		rollbackState()
@@ -1008,6 +1013,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 		}
 
 		sm.cleanupHooks(id, agentName, worktreePath)
+
 		_ = os.Remove(logPath)
 
 		return SessionState{}, fmt.Errorf("persist session state: %w", err)
@@ -1184,7 +1190,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 		sm.cleanupHooks(id, agentName, worktreePath)
 
 		if len(forkIncludes) > 0 {
-			sm.teardownIncludes(repoRoot, worktreePath, branchName, forkIncludes)
+			_ = sm.teardownIncludes(repoRoot, worktreePath, branchName, forkIncludes)
 		} else {
 			_ = git.TeardownSession(repoRoot, worktreePath, branchName)
 		}
@@ -1210,7 +1216,8 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 
 			incWorktreePath := filepath.Join(sessionDir, srcInc.RepoName)
 			if err := git.SetupSession(gitCtx, srcInc.RepoPath, incWorktreePath, incBranch, srcInc.Branch, fetchOnCreate); err != nil {
-				sm.teardownIncludes(repoRoot, worktreePath, branchName, forkIncludes)
+				_ = sm.teardownIncludes(repoRoot, worktreePath, branchName, forkIncludes)
+
 				rollbackState()
 
 				return SessionState{}, fmt.Errorf("setup included repo %q for fork: %w", srcInc.RepoName, err)
@@ -1415,6 +1422,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 		_ = ptySess.Kill()
 		ptySess.Close()
 		forkCleanup()
+
 		_ = os.Remove(logPath)
 
 		return SessionState{}, fmt.Errorf("session was deleted during creation")
@@ -1453,7 +1461,8 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 		_ = ptySess.Kill()
 		ptySess.Close()
 		forkCleanup()
-		os.Remove(logPath)
+
+		_ = os.Remove(logPath)
 
 		return SessionState{}, fmt.Errorf("persist session state: %w", err)
 	}
@@ -3301,6 +3310,7 @@ func (sm *SessionManager) Restart(id string, rows, cols uint16) (SessionState, e
 					s.PIDStartTime = 0
 					s.StopReason = StopReasonUser
 					applyLifecycleSummaryLocked(s, "Orphaned process killed for restart")
+
 					_ = sm.saveState()
 				case killErr == nil:
 					s.Status = StatusStopped
@@ -3309,13 +3319,15 @@ func (sm *SessionManager) Restart(id string, rows, cols uint16) (SessionState, e
 					s.PIDStartTime = 0
 					s.StopReason = StopReasonUser
 					applyLifecycleSummaryLocked(s, "Process already exited")
+
 					_ = sm.saveState()
 				default:
 					s.Status = StatusErrored
 					s.StatusChangedAt = time.Now()
 					applyLifecycleSummaryLocked(s,
 						fmt.Sprintf("Cannot restart: orphaned process (PID %d) — %v", pid, killErr))
-					sm.saveState()
+
+					_ = sm.saveState()
 					sm.mu.Unlock()
 
 					return SessionState{}, fmt.Errorf("cannot restart: orphaned process (PID %d) could not be killed: %w", pid, killErr)
@@ -4309,6 +4321,7 @@ func cleanupLegacyDaemon(log *slog.Logger) {
 		if err != nil {
 			_ = os.Remove(sock)
 			_ = os.Remove(pid)
+
 			log.Info("removed stale legacy socket", "path", sock)
 
 			continue
@@ -4325,8 +4338,8 @@ func cleanupLegacyDaemon(log *slog.Logger) {
 			}
 		}
 
-		os.Remove(sock)
-		os.Remove(pid)
+		_ = os.Remove(sock)
+		_ = os.Remove(pid)
 	}
 }
 
@@ -4370,7 +4383,7 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 			return fmt.Errorf("read upgrade manifest: %w", err)
 		}
 
-		os.Remove(adoptFrom)
+		_ = os.Remove(adoptFrom)
 
 		if manifest.Profile != paths.Profile {
 			return fmt.Errorf("profile mismatch: manifest has %q but daemon is %q", manifest.Profile, paths.Profile)
@@ -4378,7 +4391,7 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 
 		f := os.NewFile(uintptr(manifest.ListenerFd), "listener")
 		l, err = net.FileListener(f)
-		f.Close()
+		_ = f.Close()
 
 		if err != nil {
 			return fmt.Errorf("adopt listener from fd %d: %w", manifest.ListenerFd, err)
@@ -4476,7 +4489,8 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 			sm.StopAll(shutdownCtx)
 			shutdownCancel()
 			srv.Shutdown()
-			os.Remove(paths.SocketPath)
+
+			_ = os.Remove(paths.SocketPath)
 			ReleasePIDFile(paths.PIDFile)
 
 			return nil
@@ -4505,6 +4519,7 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 			manifest, err := sm.PrepareUpgrade(listenerFd, configFile)
 			if err != nil {
 				_ = listenerFile.Close()
+
 				log.Error("prepare upgrade", "err", err)
 
 				return fmt.Errorf("upgrade failed: %w", err)
@@ -4512,7 +4527,8 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 
 			manifestPath, err := WriteManifest(paths.RuntimeDir, manifest)
 			if err != nil {
-				listenerFile.Close()
+				_ = listenerFile.Close()
+
 				log.Error("write manifest", "err", err)
 
 				return fmt.Errorf("upgrade failed: %w", err)
@@ -4521,8 +4537,9 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 			log.Info("exec-ing new binary", "manifest", manifestPath, "sessions", len(manifest.Sessions))
 
 			if err := ExecUpgrade(manifestPath, configFile, clientExecPath); err != nil {
-				listenerFile.Close()
-				os.Remove(manifestPath)
+				_ = listenerFile.Close()
+				_ = os.Remove(manifestPath)
+
 				log.Error("exec failed", "err", err)
 
 				return fmt.Errorf("upgrade exec failed: %w", err)

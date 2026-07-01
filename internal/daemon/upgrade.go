@@ -164,22 +164,22 @@ func StopDaemon(pidFile string) error {
 
 	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
 	if err != nil {
-		os.Remove(pidFile)
+		_ = os.Remove(pidFile)
 		return fmt.Errorf("invalid pid file: %w", err)
 	}
 
 	if pid <= 1 {
-		os.Remove(pidFile)
+		_ = os.Remove(pidFile)
 		return fmt.Errorf("refusing to signal invalid pid %d", pid)
 	}
 
 	if !IsGraithDaemon(pid) {
-		os.Remove(pidFile)
+		_ = os.Remove(pidFile)
 		return fmt.Errorf("pid %d is not a graith daemon, removing stale pid file", pid)
 	}
 
 	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
-		os.Remove(pidFile)
+		_ = os.Remove(pidFile)
 		return fmt.Errorf("send SIGTERM to pid %d: %w", pid, err)
 	}
 

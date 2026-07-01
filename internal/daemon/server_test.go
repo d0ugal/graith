@@ -23,7 +23,7 @@ func TestServerAcceptsConnections(t *testing.T) {
 		count.Add(1)
 
 		buf := make([]byte, 16)
-		conn.Read(buf)
+		_, _ = conn.Read(buf)
 	}
 
 	srv := NewServer(l, handler, nil)
@@ -31,23 +31,23 @@ func TestServerAcceptsConnections(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go srv.Serve(ctx)
+	go func() { _ = srv.Serve(ctx) }()
 
 	conn1, err := net.Dial("unix", sockPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	conn1.Write([]byte("hi"))
-	conn1.Close()
+	_, _ = conn1.Write([]byte("hi"))
+	_ = conn1.Close()
 
 	conn2, err := net.Dial("unix", sockPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	conn2.Write([]byte("hi"))
-	conn2.Close()
+	_, _ = conn2.Write([]byte("hi"))
+	_ = conn2.Close()
 
 	time.Sleep(100 * time.Millisecond)
 	srv.Shutdown()

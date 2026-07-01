@@ -26,7 +26,7 @@ func TestAcquirePIDFile(t *testing.T) {
 
 func TestAcquirePIDFileStale(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "test.pid")
-	os.WriteFile(path, []byte("999999\n"), 0o600)
+	_ = os.WriteFile(path, []byte("999999\n"), 0o600)
 
 	if err := AcquirePIDFile(path); err != nil {
 		t.Fatalf("should succeed with stale PID: %v", err)
@@ -36,7 +36,7 @@ func TestAcquirePIDFileStale(t *testing.T) {
 
 func TestAcquirePIDFileLive(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "test.pid")
-	os.WriteFile(path, []byte(strconv.Itoa(os.Getpid())+"\n"), 0o600)
+	_ = os.WriteFile(path, []byte(strconv.Itoa(os.Getpid())+"\n"), 0o600)
 
 	err := AcquirePIDFile(path)
 	if err == nil {

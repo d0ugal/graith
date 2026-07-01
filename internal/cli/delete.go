@@ -81,7 +81,7 @@ var deleteCmd = &cobra.Command{
 			}
 		}
 
-		c.SendControl("delete", protocol.DeleteMsg{
+		_ = c.SendControl("delete", protocol.DeleteMsg{
 			SessionID:   sessionID,
 			Children:    deleteChildren,
 			ExcludeRoot: excludeRoot,
@@ -94,7 +94,8 @@ var deleteCmd = &cobra.Command{
 
 		if resp.Type == "error" {
 			var e protocol.ErrorMsg
-			protocol.DecodePayload(resp, &e)
+
+			_ = protocol.DecodePayload(resp, &e)
 
 			return fmt.Errorf("%s", e.Message)
 		}
@@ -103,7 +104,8 @@ var deleteCmd = &cobra.Command{
 			var result struct {
 				Deleted []string `json:"deleted"`
 			}
-			protocol.DecodePayload(resp, &result)
+
+			_ = protocol.DecodePayload(resp, &result)
 			out.Printf("Deleted %d sessions\n", len(result.Deleted))
 		} else {
 			out.Printf("Session deleted\n")
@@ -114,7 +116,7 @@ var deleteCmd = &cobra.Command{
 }
 
 func resolveSessionInfo(c *client.Client, nameOrID string) (*protocol.SessionInfo, error) {
-	c.SendControl("list", struct{}{})
+	_ = c.SendControl("list", struct{}{})
 
 	resp, err := c.ReadControlResponse()
 	if err != nil {

@@ -27,7 +27,11 @@ func TestRunShellInWorktree_InvalidWorktree(t *testing.T) {
 func TestRunShellInWorktree_NonZeroExit(t *testing.T) {
 	dir := t.TempDir()
 	script := filepath.Join(dir, "fakeshell")
-	os.WriteFile(script, []byte("#!/bin/sh\nexit 1\n"), 0o755)
+
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatalf("write fakeshell: %v", err)
+	}
+
 	t.Setenv("SHELL", script)
 
 	err := RunShellInWorktree(dir)
@@ -39,7 +43,11 @@ func TestRunShellInWorktree_NonZeroExit(t *testing.T) {
 func TestRunShellInWorktree_Success(t *testing.T) {
 	dir := t.TempDir()
 	script := filepath.Join(dir, "fakeshell")
-	os.WriteFile(script, []byte("#!/bin/sh\nexit 0\n"), 0o755)
+
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write fakeshell: %v", err)
+	}
+
 	t.Setenv("SHELL", script)
 
 	err := RunShellInWorktree(dir)

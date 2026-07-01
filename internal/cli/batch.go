@@ -194,7 +194,7 @@ func confirmBatch(cmd *cobra.Command, verb string, pastTense string, sessions []
 
 	now := time.Now()
 	tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "NAME\tAGENT\tREPO\tSTATUS\tLAST ATTACHED\tDIRTY\tUNPUSHED")
+	_, _ = fmt.Fprintln(tw, "NAME\tAGENT\tREPO\tSTATUS\tLAST ATTACHED\tDIRTY\tUNPUSHED")
 
 	for _, s := range sessions {
 		lastAttached := "never"
@@ -215,11 +215,11 @@ func confirmBatch(cmd *cobra.Command, verb string, pastTense string, sessions []
 			unpushed = fmt.Sprintf("%d commits", s.UnpushedCount)
 		}
 
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			s.Name, s.Agent, s.RepoName, s.Status, lastAttached, dirty, unpushed)
 	}
 
-	tw.Flush()
+	_ = tw.Flush()
 
 	prompt := strings.ToUpper(verb[:1]) + verb[1:]
 	out.Printf("\n%s %d sessions? [y/N] ", prompt, n)

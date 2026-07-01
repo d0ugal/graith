@@ -137,7 +137,7 @@ func TestConfigShowRoundTrips(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "config.toml")
 
-	os.WriteFile(target, []byte(`default_agent = "codex"`+"\n"), 0o644)
+	_ = os.WriteFile(target, []byte(`default_agent = "codex"`+"\n"), 0o644)
 
 	effectiveCfg, err := config.LoadOrDefault(target)
 	if err != nil {

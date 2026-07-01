@@ -30,7 +30,7 @@ func AcquirePIDFile(path string) error {
 
 		return fmt.Errorf("create pid file: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	_, err = fmt.Fprintf(f, "%d\n", os.Getpid())
 

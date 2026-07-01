@@ -85,7 +85,8 @@ var daemonReloadCmd = &cobra.Command{
 				return fmt.Errorf("start daemon: %w", startErr)
 			}
 
-			conn.Close()
+			_ = conn.Close()
+
 			out.Printf("Daemon started with current config\n")
 
 			return nil
@@ -103,7 +104,8 @@ var daemonReloadCmd = &cobra.Command{
 
 		if resp.Type == "error" {
 			var e protocol.ErrorMsg
-			protocol.DecodePayload(resp, &e)
+
+			_ = protocol.DecodePayload(resp, &e)
 
 			return fmt.Errorf("%s", e.Message)
 		}
@@ -125,9 +127,9 @@ func execUpgrade(successMsg string) error {
 		return err
 	}
 
-	c.ReadControlResponse()
+	_, _ = c.ReadControlResponse()
 
-	c.SendControl("upgrade", upgradeMsg())
+	_ = c.SendControl("upgrade", upgradeMsg())
 
 	resp, err := c.ReadControlResponse()
 	if err != nil {
@@ -139,7 +141,7 @@ func execUpgrade(successMsg string) error {
 
 			conn, err := net.DialTimeout("unix", paths.SocketPath, 500*time.Millisecond)
 			if err == nil {
-				conn.Close()
+				_ = conn.Close()
 				break
 			}
 		}
@@ -148,7 +150,8 @@ func execUpgrade(successMsg string) error {
 
 		if resp.Type == "error" {
 			var e protocol.ErrorMsg
-			protocol.DecodePayload(resp, &e)
+
+			_ = protocol.DecodePayload(resp, &e)
 
 			return fmt.Errorf("%s", e.Message)
 		}
@@ -172,7 +175,7 @@ func probeDaemonVersion() string {
 	if err != nil {
 		return ""
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	reader := protocol.NewFrameReader(conn)
 	writer := protocol.NewFrameWriter(conn)
@@ -212,19 +215,20 @@ func restartClean() error {
 
 	if _, err := os.Stat(paths.SocketPath); err == nil {
 		if conn, err := net.DialTimeout("unix", paths.SocketPath, 500*time.Millisecond); err == nil {
-			conn.Close()
+			_ = conn.Close()
 			return fmt.Errorf("daemon is still running, cannot restart cleanly")
 		}
 	}
 
-	os.Remove(paths.SocketPath)
+	_ = os.Remove(paths.SocketPath)
 
 	conn, err := client.EnsureDaemon(paths.SocketPath, cfgFile)
 	if err != nil {
 		return fmt.Errorf("restart daemon: %w", err)
 	}
 
-	conn.Close()
+	_ = conn.Close()
+
 	out.Printf("Daemon restarted (sessions killed)\n")
 
 	return nil
@@ -238,7 +242,7 @@ func registerDaemonCmd() {
 	daemonCmd.AddCommand(daemonRestartCmd)
 	daemonCmd.AddCommand(daemonReloadCmd)
 	daemonStartCmd.Flags().StringVar(&adoptFrom, "adopt-from", "", "")
-	daemonStartCmd.Flags().MarkHidden("adopt-from")
+	_ = daemonStartCmd.Flags().MarkHidden("adopt-from")
 
 	daemonRestartCmd.Flags().BoolVar(&forceClean, "force", false, "Kill sessions and do a clean stop/start")
 }

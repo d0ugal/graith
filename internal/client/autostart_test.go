@@ -23,10 +23,10 @@ func TestDaemonStartArgsStripsConfigInsideSession(t *testing.T) {
 
 func TestDaemonStartArgsAllowsConfigOutsideSession(t *testing.T) {
 	if v, ok := os.LookupEnv("GRAITH_SESSION_ID"); ok {
-		t.Cleanup(func() { os.Setenv("GRAITH_SESSION_ID", v) })
+		t.Cleanup(func() { _ = os.Setenv("GRAITH_SESSION_ID", v) })
 	}
 
-	os.Unsetenv("GRAITH_SESSION_ID")
+	_ = os.Unsetenv("GRAITH_SESSION_ID")
 
 	args := daemonStartArgs("/home/user/custom.toml")
 

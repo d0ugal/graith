@@ -30,12 +30,13 @@ var renameCmd = &cobra.Command{
 			return err
 		}
 
-		c.SendControl("rename", protocol.RenameMsg{SessionID: sessionID, NewName: args[1]})
+		_ = c.SendControl("rename", protocol.RenameMsg{SessionID: sessionID, NewName: args[1]})
 
 		resp, _ := c.ReadControlResponse()
 		if resp.Type == "error" {
 			var e protocol.ErrorMsg
-			protocol.DecodePayload(resp, &e)
+
+			_ = protocol.DecodePayload(resp, &e)
 
 			return fmt.Errorf("%s", e.Message)
 		}

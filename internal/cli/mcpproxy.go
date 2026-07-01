@@ -117,7 +117,8 @@ func mcpProxySession(serverName, sessionID string, stdinCh <-chan stdinChunk) er
 
 	if resp.Type == "error" {
 		var e protocol.ErrorMsg
-		protocol.DecodePayload(resp, &e)
+
+		_ = protocol.DecodePayload(resp, &e)
 		writeJSONRPCError(os.Stdout, nil, -32603, fmt.Sprintf("MCP server %q: %s", serverName, e.Message))
 
 		return fmt.Errorf("%s", e.Message)
@@ -157,7 +158,8 @@ func mcpProxySession(serverName, sessionID string, stdinCh <-chan stdinChunk) er
 				ctrl, _ := protocol.DecodeControl(frame.Payload)
 				if ctrl.Type == "error" {
 					var e protocol.ErrorMsg
-					protocol.DecodePayload(ctrl, &e)
+
+					_ = protocol.DecodePayload(ctrl, &e)
 
 					daemonDone <- fmt.Errorf("server error: %s", e.Message)
 
@@ -202,8 +204,8 @@ func writeJSONRPCError(w io.Writer, id any, code int, message string) {
 		},
 	}
 	data, _ := json.Marshal(resp)
-	w.Write(data)
-	w.Write([]byte("\n"))
+	_, _ = w.Write(data)
+	_, _ = w.Write([]byte("\n"))
 }
 
 // registerMCPProxyCmd registers this command on rootCmd. Called from registerCommands.

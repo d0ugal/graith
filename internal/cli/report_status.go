@@ -93,8 +93,8 @@ var reportStatusCmd = &cobra.Command{
 		}
 		defer c.Close()
 
-		c.SendControl("status_report", msg)
-		c.ReadControlResponse()
+		_ = c.SendControl("status_report", msg)
+		_, _ = c.ReadControlResponse()
 
 		return nil
 	},

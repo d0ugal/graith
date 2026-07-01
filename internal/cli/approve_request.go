@@ -88,7 +88,7 @@ var approveRequestCmd = &cobra.Command{
 		}
 		defer c.Close()
 
-		c.SendControl("approval_request", protocol.ApprovalRequestMsg{
+		_ = c.SendControl("approval_request", protocol.ApprovalRequestMsg{
 			RequestID: requestID,
 			SessionID: sessionID,
 			ToolName:  toolName,
@@ -103,7 +103,8 @@ var approveRequestCmd = &cobra.Command{
 
 		if resp.Type == "approval_decision" {
 			var decision protocol.ApprovalDecisionMsg
-			protocol.DecodePayload(resp, &decision)
+
+			_ = protocol.DecodePayload(resp, &decision)
 			fmt.Println(hookoutput.Approval(agent, decision.Decision, decision.Reason))
 		} else {
 			fmt.Println(hookoutput.AllowAll(agent))
