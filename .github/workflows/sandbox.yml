@@ -55,6 +55,9 @@ jobs:
   linux-nono:
     name: Linux (nono / Landlock)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      attestations: read # verify nono's build provenance (gh attestation verify)
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
@@ -63,30 +66,36 @@ jobs:
           go-version-file: go.mod
 
       - name: Install nono
-        # Pinned install (no `curl | sudo sh`): download a specific nono release
-        # tarball, verify its published SHA256 before use, then install the
-        # binary to a user-local dir on PATH (no root). The version is pinned to
-        # MinNonoVersion in internal/sandbox/nono.go — keep them in lockstep.
+        # Pinned, provenance-verified install (no `curl | sudo sh`, no root).
+        # The tarball is verified by nono's GitHub build-provenance attestation
+        # (`gh attestation verify`), which binds it via Sigstore to the
+        # nolabs-ai/nono release workflow. This is version-independent, so
+        # Renovate can bump NONO_VERSION with no per-version checksum to update
+        # (see the nono customManager in renovate.json5) and a tampered or
+        # unattested artifact fails closed.
+        #
+        # NONO_VERSION is the version CI *tests against* (Renovate keeps it on
+        # the latest release); it is decoupled from MinNonoVersion in
+        # internal/sandbox/nono.go, which is the support floor bumped by hand.
         env:
+          GH_TOKEN: ${{ github.token }}
           NONO_VERSION: "0.66.0"
-          # sha256 of nono-v${NONO_VERSION}-x86_64-unknown-linux-gnu.tar.gz from
-          # the release's SHA256SUMS.txt (ubuntu-latest is x86_64):
-          # https://github.com/nolabs-ai/nono/releases/download/v0.66.0/SHA256SUMS.txt
-          NONO_SHA256: "db16ef2cb768aace1834822b8f553ec2df1922ed110e3beb3f4ac7197ebae5a1"
         run: |
           set -euo pipefail
           tarball="nono-v${NONO_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
           url="https://github.com/nolabs-ai/nono/releases/download/v${NONO_VERSION}/${tarball}"
           tmp="$(mktemp -d)"
           curl -fsSL --proto '=https' --tlsv1.2 "$url" -o "$tmp/$tarball"
-          echo "${NONO_SHA256}  $tmp/$tarball" | sha256sum -c -
+          # Fail closed: only proceed if the artifact's build provenance verifies
+          # against nolabs-ai/nono (proves nono's own CI produced it).
+          gh attestation verify "$tmp/$tarball" --repo nolabs-ai/nono
           dest="$HOME/.local/bin"
           mkdir -p "$dest"
           tar -xzf "$tmp/$tarball" -C "$dest" nono
           chmod +x "$dest/nono"
           echo "$dest" >> "$GITHUB_PATH"
           rm -rf "$tmp"
-          echo "nono installed at: $dest/nono"
+          echo "nono ${NONO_VERSION} installed at: $dest/nono (provenance-verified)"
 
       - name: Report Landlock enforcement level on this runner
         run: |

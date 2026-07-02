@@ -16,5 +16,17 @@
       datasourceTemplate: 'docker',
       versioningTemplate: 'semver',
     },
+    {
+      // Keep the nono version CI tests against on the latest release. The
+      // sandbox workflow verifies the download by build-provenance attestation
+      // (version-independent), so only this version string needs bumping.
+      customType: 'regex',
+      managerFilePatterns: ['/^\\.github/workflows/sandbox\\.yml$/'],
+      matchStrings: ['NONO_VERSION:\\s*"(?<currentValue>[\\d.]+)"'],
+      depNameTemplate: 'nolabs-ai/nono',
+      datasourceTemplate: 'github-releases',
+      extractVersionTemplate: '^v(?<version>.+)$',
+      versioningTemplate: 'semver',
+    },
   ],
 }
