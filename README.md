@@ -386,6 +386,19 @@ The sandbox **fails closed**: if enabled but the backend can't enforce (no backe
 
 `features` map differently per backend. Under **nono**: `ssh` grants the `$SSH_AUTH_SOCK` agent socket (socket only; raw `~/.ssh` keys are not granted in v1); `process-control` is a **no-op** (nono's default already permits same-sandbox signals, whereas it gates under safehouse); any unmapped feature (e.g. `clipboard`) is **warned and ignored**, not silently dropped.
 
+### Debugging denials: `gr sandbox why`
+
+`gr sandbox why` explains whether a given access would be allowed or denied under your configured policy, without launching an agent. It builds the nono profile graith would generate and asks nono's policy oracle:
+
+```bash
+gr sandbox why --path ~/.ssh/id_rsa --op read     # denied (deny_credentials)
+gr sandbox why --path ~/Code/shared --op write    # denied if read-only read_dir
+gr sandbox why --host github.com --port 443        # network reachability
+gr sandbox why --agent codex --path /etc/hosts --op read   # merged per-agent policy
+```
+
+`--op` is `read`, `write`, or `readwrite`; add `--json` for machine-readable output. This targets the **`nono` backend only** (the sole backend with a policy oracle).
+
 ### Per-agent overrides
 
 Each agent can extend or disable the global sandbox config:
