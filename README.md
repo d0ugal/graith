@@ -71,9 +71,9 @@ sudo dnf install graith
 
 Download a prebuilt binary for your platform from the [releases page](https://github.com/d0ugal/graith/releases), extract it, and put `gr` on your `$PATH`.
 
-On Debian/Ubuntu and Fedora/RHEL you can instead grab a prebuilt `.deb` or
-`.rpm` package for linux `amd64` or `arm64` (package name `graith`, binary `gr`,
-with shell completions installed) from the same
+On Debian/Ubuntu, Fedora/RHEL and Alpine you can instead grab a prebuilt
+`.deb`, `.rpm` or `.apk` package for linux `amd64` or `arm64` (package name
+`graith`, binary `gr`, with shell completions installed) from the same
 [releases page](https://github.com/d0ugal/graith/releases) and install it
 manually:
 
@@ -83,6 +83,9 @@ sudo dpkg -i graith_*_linux_amd64.deb
 
 # Fedora / RHEL
 sudo rpm -i graith_*_linux_amd64.rpm
+
+# Alpine
+sudo apk add --allow-untrusted graith_*_linux_amd64.apk
 ```
 
 ### go install
