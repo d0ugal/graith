@@ -100,7 +100,7 @@ jobs:
           sed -i 's/^          //' /tmp/graith-dev.rb
 
           # Push to tap repo
-          cd $(mktemp -d)
+          cd "$(mktemp -d)"
           git clone "https://x-access-token:${RELEASE_TOKEN}@github.com/d0ugal/homebrew-tap.git" .
           cp /tmp/graith-dev.rb graith-dev.rb
           git config user.name "github-actions[bot]"

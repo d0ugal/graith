@@ -42,6 +42,9 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           fetch-depth: 0
+          # Screenshots are pushed via github-script (its own GITHUB_TOKEN),
+          # not the checkout's persisted credentials.
+          persist-credentials: false
 
       - name: Install Hugo (extended) + Dart Sass
         run: |
@@ -56,9 +59,16 @@ jobs:
 
       - name: Determine changed pages
         id: changed
+        # Pass the PR/context values via env rather than interpolating
+        # `${{ ... }}` straight into the shell body — they never touch the
+        # script as code, only as data (defends against template injection if
+        # a future field here is attacker-influenced).
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.sha }}
         run: |
-          BASE="${{ github.event.pull_request.base.sha }}"
-          HEAD="${{ github.sha }}"
+          BASE="$BASE_SHA"
+          HEAD="$HEAD_SHA"
           changed="$(git diff --name-only "$BASE" "$HEAD" -- website/ || true)"
           echo "Changed under website/:"; echo "$changed"
 
