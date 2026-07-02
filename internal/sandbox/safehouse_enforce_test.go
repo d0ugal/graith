@@ -36,7 +36,7 @@ import (
 func mustEnforceSafehouse(t *testing.T) {
 	t.Helper()
 
-	av := safehouseBackend{}.Availability("")
+	av := safehouseBackend{}.Availability("", Requirements{})
 	if !av.CanEnforce {
 		t.Skipf("safehouse cannot enforce here (%s); skipping enforcement test", av.Detail)
 	}
