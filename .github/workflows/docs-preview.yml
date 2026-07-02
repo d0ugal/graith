@@ -15,8 +15,7 @@ on:
 # from a sticky PR comment. Same-repo PRs only (fork PRs get a read-only
 # token and cannot push the branch or comment).
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 concurrency:
   group: docs-preview-${{ github.event.pull_request.number || github.event_name }}
@@ -31,6 +30,10 @@ jobs:
     name: Screenshot changed pages
     if: github.event_name == 'pull_request' && github.event.action != 'closed'
     runs-on: ubuntu-latest
+    # Pushes screenshots to the orphan branch and upserts the sticky PR comment.
+    permissions:
+      contents: write
+      pull-requests: write
     env:
       HUGO_VERSION: 0.154.5
       K6_IMAGE: grafana/k6:1.8.0-with-browser
@@ -47,7 +50,7 @@ jobs:
           sudo dpkg -i /tmp/hugo.deb
           sudo snap install dart-sass
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: website/go.mod
 
@@ -214,6 +217,10 @@ jobs:
     name: Clean up screenshots
     if: github.event.action == 'closed'
     runs-on: ubuntu-latest
+    # Rewrites the screenshots branch and updates the sticky PR comment.
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
       - name: Remove PR screenshots from the screenshots branch
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
@@ -278,6 +285,9 @@ jobs:
     name: Prune stale screenshots
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
+    # Rewrites the screenshots branch only (no PR comment on the schedule run).
+    permissions:
+      contents: write
     steps:
       - name: Remove screenshot dirs older than 30 days
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0

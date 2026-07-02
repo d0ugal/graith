@@ -6,7 +6,7 @@ on:
       - "v*"
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   # How many distinct releases (per format + arch) to keep in the apt/yum repo.
@@ -18,6 +18,9 @@ env:
 jobs:
   goreleaser:
     runs-on: ubuntu-latest
+    # Creates the GitHub Release + uploads artifacts to this repo.
+    permissions:
+      contents: write
     outputs:
       # Whether the GPG signing key secret is configured. Secrets cannot be used
       # directly in a job-level `if:`, so we surface a boolean output derived from
@@ -29,7 +32,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: go.mod
       - id: gpg_check
