@@ -11,11 +11,19 @@
 // Run with:  go test -tags safehouse_enforce ./internal/sandbox/... -v
 //
 // safehouse has no `why`/`validate` oracle (unlike nono), so this asserts the
-// same filesystem boundary the nono test does purely by real sandboxed exec,
-// judged by exit status / errno — never by string-matching advisory output:
+// filesystem boundary purely by real sandboxed exec, judged by exit status /
+// errno — never by string-matching advisory output:
 //   - a NO-ACCESS read is denied
 //   - a READ-ONLY read is allowed
 //   - a WRITE-DIR write is allowed
+//
+// IMPORTANT: safehouse's policy is PATH-scoped, not content-based — unlike
+// nono's default profile it has no `deny_credentials`-style rule, so a file is
+// denied only because its path is outside every grant. It also (like nono with
+// /tmp) implicitly allows the system temp dir so the agent can function, which
+// means a "secret" placed under t.TempDir() (macOS $TMPDIR, /var/folders/...)
+// is readable. The no-access fixture therefore lives OUTSIDE any temp dir, in a
+// freshly created dir under $HOME, which safehouse does not grant.
 package sandbox
 
 import (
@@ -37,29 +45,43 @@ func mustEnforceSafehouse(t *testing.T) {
 func TestSafehouseEnforcesFilesystemBoundary(t *testing.T) {
 	mustEnforceSafehouse(t)
 
-	// Fixtures: a read-write worktree, a granted read-only dir, a granted
-	// write dir, and a secret dir that is NEVER granted (no-access).
+	// Granted fixtures live under t.TempDir(): a read-write worktree, a granted
+	// read-only dir, and a granted write dir.
 	root := t.TempDir()
 	worktree := filepath.Join(root, "bothy")
 	readOnly := filepath.Join(root, "glen")
 	writeDir := filepath.Join(root, "croft")
-	secretDir := filepath.Join(root, "hame", ".ssh")
 
-	for _, d := range []string{worktree, readOnly, writeDir, secretDir} {
+	for _, d := range []string{worktree, readOnly, writeDir} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	// A file the agent is allowed to READ (inside the read-only grant).
-	readable := filepath.Join(readOnly, "canny.txt")
-	if err := os.WriteFile(readable, []byte("bonnie-braw"), 0o600); err != nil {
+	// The NO-ACCESS secret must live OUTSIDE the temp tree — safehouse
+	// implicitly allows the system temp dir, so a secret under t.TempDir()
+	// would be readable. Put it in a fresh dir under $HOME, which is not
+	// granted, and clean it up.
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("resolve home: %v", err)
+	}
+
+	secretDir, err := os.MkdirTemp(home, "graith-noaccess-*")
+	if err != nil {
+		t.Fatalf("create no-access dir under home: %v", err)
+	}
+
+	t.Cleanup(func() { _ = os.RemoveAll(secretDir) })
+
+	secret := filepath.Join(secretDir, "id_rsa")
+	if err := os.WriteFile(secret, []byte("PRIVATE-KEY-thrawn"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	// A secret the agent must NOT be able to read (ungranted).
-	secret := filepath.Join(secretDir, "id_rsa")
-	if err := os.WriteFile(secret, []byte("PRIVATE-KEY-thrawn"), 0o600); err != nil {
+	// A file the agent IS allowed to read (inside the read-only grant).
+	readable := filepath.Join(readOnly, "canny.txt")
+	if err := os.WriteFile(readable, []byte("bonnie-braw"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
