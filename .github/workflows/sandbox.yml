@@ -114,10 +114,10 @@ jobs:
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: nono standalone enforcement smoke test
-        # Fail-soft during bring-up: we want the findings in the log/summary
-        # even if the runner cannot enforce. Flip to a hard gate once the
-        # Landlock-on-runner answer is confirmed (see workflow header).
-        continue-on-error: true
+        # Hard gate. Bring-up is over: `ubuntu-latest` is confirmed Landlock
+        # FullyEnforced (see the enforcement-probe step above), so a deny/allow
+        # boundary that no longer holds is a real regression and must fail red.
+        # The final `[ "$fail" -eq 0 ]` is now the step's honest exit status.
         run: |
           set -uo pipefail
 
