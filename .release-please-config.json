@@ -11,6 +11,12 @@
         {"type": "feat", "section": "Features"},
         {"type": "fix", "section": "Bug Fixes"},
         {"type": "perf", "section": "Performance Improvements"},
+        {"type": "revert", "section": "Reverts"},
+        {"type": "docs", "section": "Documentation"},
+        {"type": "refactor", "section": "Code Refactoring"},
+        {"type": "test", "section": "Tests"},
+        {"type": "ci", "section": "Continuous Integration"},
+        {"type": "build", "section": "Build System"},
         {"type": "chore", "section": "Dependencies"},
         {"type": "deps", "section": "Dependencies"}
       ]
