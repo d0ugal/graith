@@ -133,6 +133,7 @@ func registerCommands() {
 		registerInfoCmd()
 		registerListCmd()
 		registerLogsCmd()
+		registerManCmd()
 		registerMCPCmd()
 		registerMCPProxyCmd()
 		registerMigrateCmd()
