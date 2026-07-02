@@ -52,8 +52,14 @@ nfpms:
     formats:
       - deb
       - rpm
+      - apk
     # linux amd64 + arm64 come from the existing builds matrix; nfpm emits one
     # package per (format, goarch). darwin builds are skipped automatically.
+    # apk files attach to the GitHub Release like deb/rpm; users can install them
+    # directly with `apk add --allow-untrusted graith_*.apk`. Standing up a signed
+    # Alpine *repository* (abuild signing key + APKINDEX + repo layout) is a
+    # follow-up needing infra, mirroring how the apt/yum repo was provisioned. See
+    # docs/design/2026-07-01-apt-yum-packaging-design.md.
     bindir: /usr/bin
     # Reproducible packages: pin the package and its file times to the commit
     # date rather than build time.
@@ -109,3 +115,38 @@ brews:
     caveats: |
       To restart the graith daemon after upgrading:
         gr daemon restart
+
+aurs:
+  - name: graith-bin
+    homepage: https://github.com/d0ugal/graith
+    description: Terminal session manager for AI coding agents
+    license: MIT
+    # GUARD: this whole block is disabled until the AUR infra is provisioned, so a
+    # release stays green before the AUR account + package + AUR_KEY secret exist.
+    # Same idea as the GPG-guarded publish job in goreleaser.yml. The workflow sets
+    # AUR_KEY (empty when the secret is unset); `index .Env "AUR_KEY"` tolerates a
+    # missing key, and when empty we disable the block so the SSH push never runs
+    # and the `private_key` template below is never evaluated.
+    #
+    # To actually publish, an operator must provision (see PR description):
+    #   1. an AUR account with an SSH public key registered,
+    #   2. a registered AUR package named `graith-bin` (git_url below),
+    #   3. an AUR_KEY repo/org secret holding that account's SSH private key.
+    disable: '{{ if eq (index .Env "AUR_KEY") "" }}true{{ else }}false{{ end }}'
+    # The SSH private key GoReleaser uses to commit to the AUR git repo. Only read
+    # when the block is enabled (i.e. AUR_KEY is non-empty).
+    private_key: "{{ .Env.AUR_KEY }}"
+    # AUR clone URL for the registered package. `-bin` suffix is the AUR convention
+    # for packages that install a prebuilt binary rather than building from source.
+    git_url: "ssh://aur@aur.archlinux.org/graith-bin.git"
+    maintainers:
+      - "Dougal Matthews <dougal@dougalmatthews.com>"
+    package: |-
+      # bin
+      install -Dm755 "./gr" "${pkgdir}/usr/bin/gr"
+      # license
+      install -Dm644 "./LICENSE" "${pkgdir}/usr/share/licenses/graith/LICENSE"
+      # completions
+      install -Dm644 "./completions/gr.bash" "${pkgdir}/usr/share/bash-completion/completions/gr"
+      install -Dm644 "./completions/gr.zsh" "${pkgdir}/usr/share/zsh/site-functions/_gr"
+      install -Dm644 "./completions/gr.fish" "${pkgdir}/usr/share/fish/vendor_completions.d/gr.fish"
