@@ -241,39 +241,20 @@ jobs:
           go-version-file: go.mod
 
       - name: Install safehouse (Homebrew)
-        # graith cites two different taps for safehouse and they disagree:
-        #   - README.md:               brew install nicholasgasior/tools/safehouse
-        #   - internal/cli/doctor.go:  brew install eugene1g/tools/agent-safehouse
-        # We try each in turn and use whichever actually installs a `safehouse`
-        # binary onto PATH. The mismatch is flagged in the PR body/report so it
-        # can be reconciled in the source.
+        # Tap eugene1g/safehouse (repo eugene1g/homebrew-safehouse), formula
+        # agent-safehouse, which installs the `safehouse` binary.
+        # Upstream: https://github.com/eugene1g/agent-safehouse
         run: |
           set -uo pipefail
-          installed=""
-          for spec in \
-            "nicholasgasior/tools/safehouse" \
-            "eugene1g/tools/agent-safehouse"; do
-            echo "--- trying: brew install ${spec} ---"
-            if brew install "${spec}"; then
-              if command -v safehouse >/dev/null 2>&1; then
-                installed="${spec}"
-                break
-              fi
-              echo "brew install ${spec} succeeded but no 'safehouse' on PATH"
-            fi
-          done
+          brew install eugene1g/safehouse/agent-safehouse
           {
             echo "## safehouse install (macOS)"
             echo
-            if [ -n "${installed}" ]; then
-              echo "Installed from tap: \`${installed}\`"
+            if command -v safehouse >/dev/null 2>&1; then
+              echo "Installed \`safehouse\` from tap \`eugene1g/safehouse\` (formula \`agent-safehouse\`)."
             else
-              echo "No tap produced a \`safehouse\` binary on PATH."
+              echo "brew install succeeded but no \`safehouse\` on PATH."
             fi
-            echo
-            echo "Tap inconsistency in graith source (flag for reconciliation):"
-            echo "- README.md → \`nicholasgasior/tools/safehouse\`"
-            echo "- internal/cli/doctor.go → \`eugene1g/tools/agent-safehouse\`"
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Check safehouse availability
