@@ -43,6 +43,11 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          # AUR publishing is guarded in .goreleaser.yaml: the aurs block disables
+          # itself when AUR_KEY is empty. Pass the secret through unconditionally
+          # (empty when unset) so `.Env.AUR_KEY` always resolves and releases stay
+          # green before the AUR infra (account + package + AUR_KEY secret) exists.
+          AUR_KEY: ${{ secrets.AUR_KEY }}
       - name: Upload packages for publish job
         # Only bother stashing artifacts when we're going to publish them.
         if: steps.gpg_check.outputs.has_key == 'true'
