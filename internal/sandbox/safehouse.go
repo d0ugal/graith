@@ -65,16 +65,30 @@ func (safehouseBackend) Wrap(command string, args []string, opts WrapOpts) (stri
 		return "", nil, fmt.Errorf("write dirs: %w", err)
 	}
 
+	if err := validateSafehousePaths(opts.ReadFiles...); err != nil {
+		return "", nil, fmt.Errorf("read files: %w", err)
+	}
+
+	if err := validateSafehousePaths(opts.WriteFiles...); err != nil {
+		return "", nil, fmt.Errorf("write files: %w", err)
+	}
+
+	// safehouse has no file-vs-directory distinction in its flags; Seatbelt path
+	// rules apply to files too. Fold file grants into the matching path list so
+	// read_files/write_files behave consistently across backends.
+	readPaths := append(append([]string{}, opts.ReadDirs...), opts.ReadFiles...)
+	writePaths := append(append([]string{}, opts.WriteDirs...), opts.WriteFiles...)
+
 	var wrapped []string
 
 	wrapped = append(wrapped, "--workdir", opts.WorktreeDir)
 
-	if len(opts.ReadDirs) > 0 {
-		wrapped = append(wrapped, "--add-dirs-ro", strings.Join(opts.ReadDirs, ":"))
+	if len(readPaths) > 0 {
+		wrapped = append(wrapped, "--add-dirs-ro", strings.Join(readPaths, ":"))
 	}
 
-	if len(opts.WriteDirs) > 0 {
-		wrapped = append(wrapped, "--add-dirs", strings.Join(opts.WriteDirs, ":"))
+	if len(writePaths) > 0 {
+		wrapped = append(wrapped, "--add-dirs", strings.Join(writePaths, ":"))
 	}
 
 	if len(opts.Features) > 0 {

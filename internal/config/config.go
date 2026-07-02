@@ -56,8 +56,10 @@ type OrchestratorConfig struct {
 }
 
 type OrchestratorSandboxConfig struct {
-	ReadDirs  []string `toml:"read_dirs"`
-	WriteDirs []string `toml:"write_dirs"`
+	ReadDirs   []string `toml:"read_dirs"`
+	WriteDirs  []string `toml:"write_dirs"`
+	ReadFiles  []string `toml:"read_files"`
+	WriteFiles []string `toml:"write_files"`
 }
 
 func (o OrchestratorConfig) IdleTimeoutDuration() time.Duration {
@@ -349,6 +351,18 @@ type SandboxConfig struct {
 	Features  []string `json:"features,omitempty"   toml:"features"`
 	ReadDirs  []string `json:"read_dirs,omitempty"  toml:"read_dirs"`
 	WriteDirs []string `json:"write_dirs,omitempty" toml:"write_dirs"`
+	// ReadFiles / WriteFiles grant access to individual files rather than whole
+	// directories. They exist for paths that can't be expressed as a directory
+	// grant without over-sharing — most importantly single files that live
+	// directly in $HOME (e.g. an agent's ~/.claude.json login file), where
+	// granting the parent directory would expose unrelated secrets (.env, ssh
+	// keys, tfvars). ReadFiles is read-only; WriteFiles is read+write, mirroring
+	// the read_dirs / write_dirs convention (where "write" means read+write, not
+	// nono's write-only mode). They map to the nono profile's
+	// filesystem.read_file / filesystem.allow_file; the safehouse backend folds
+	// them into its read-only / read-write path lists.
+	ReadFiles  []string `json:"read_files,omitempty"  toml:"read_files"`
+	WriteFiles []string `json:"write_files,omitempty" toml:"write_files"`
 	// SignalMode controls whether the sandboxed process may signal other
 	// processes. It maps to nono's security.signal_mode ("isolated",
 	// "allow_same_sandbox", "allow_all"). Empty inherits nono's base-profile
@@ -461,6 +475,8 @@ func (s SandboxConfig) Merge(agent SandboxConfig) SandboxConfig {
 	merged.Features = dedup(append(s.Features, agent.Features...))
 	merged.ReadDirs = dedup(append(s.ReadDirs, agent.ReadDirs...))
 	merged.WriteDirs = dedup(append(s.WriteDirs, agent.WriteDirs...))
+	merged.ReadFiles = dedup(append(s.ReadFiles, agent.ReadFiles...))
+	merged.WriteFiles = dedup(append(s.WriteFiles, agent.WriteFiles...))
 
 	if agent.Backend != "" {
 		merged.Backend = agent.Backend
@@ -510,6 +526,8 @@ func (c *Config) OrchestratorSandboxMerged(agentName string) SandboxConfig {
 	orch := c.Orchestrator.Sandbox
 	merged.ReadDirs = dedup(append(merged.ReadDirs, orch.ReadDirs...))
 	merged.WriteDirs = dedup(append(merged.WriteDirs, orch.WriteDirs...))
+	merged.ReadFiles = dedup(append(merged.ReadFiles, orch.ReadFiles...))
+	merged.WriteFiles = dedup(append(merged.WriteFiles, orch.WriteFiles...))
 
 	return merged
 }
@@ -784,6 +802,7 @@ func mergeAgent(def, usr Agent) Agent {
 	if usr.Sandbox.Enabled || usr.Sandbox.Disabled != nil || usr.Sandbox.Backend != "" ||
 		usr.Sandbox.Command != "" || usr.Sandbox.Features != nil ||
 		usr.Sandbox.ReadDirs != nil || usr.Sandbox.WriteDirs != nil ||
+		usr.Sandbox.ReadFiles != nil || usr.Sandbox.WriteFiles != nil ||
 		usr.Sandbox.SignalMode != "" || usr.Sandbox.Network != nil {
 		def.Sandbox = usr.Sandbox
 	}

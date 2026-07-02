@@ -371,13 +371,15 @@ features = ["clipboard"]
 
 func TestSandboxConfigMerge(t *testing.T) {
 	global := SandboxConfig{
-		Enabled:  true,
-		Features: []string{"ssh", "process-control"},
-		ReadDirs: []string{"~/Code"},
+		Enabled:   true,
+		Features:  []string{"ssh", "process-control"},
+		ReadDirs:  []string{"~/Code"},
+		ReadFiles: []string{"~/.gitconfig"},
 	}
 	agent := SandboxConfig{
-		Features:  []string{"clipboard"},
-		WriteDirs: []string{"~/.claude"},
+		Features:   []string{"clipboard"},
+		WriteDirs:  []string{"~/.claude"},
+		WriteFiles: []string{"~/.claude.json"},
 	}
 
 	merged := global.Merge(agent)
@@ -403,6 +405,14 @@ func TestSandboxConfigMerge(t *testing.T) {
 
 	if len(merged.WriteDirs) != 1 || merged.WriteDirs[0] != "~/.claude" {
 		t.Errorf("merged.WriteDirs = %v, want [~/.claude]", merged.WriteDirs)
+	}
+
+	if len(merged.ReadFiles) != 1 || merged.ReadFiles[0] != "~/.gitconfig" {
+		t.Errorf("merged.ReadFiles = %v, want [~/.gitconfig]", merged.ReadFiles)
+	}
+
+	if len(merged.WriteFiles) != 1 || merged.WriteFiles[0] != "~/.claude.json" {
+		t.Errorf("merged.WriteFiles = %v, want [~/.claude.json]", merged.WriteFiles)
 	}
 }
 

@@ -4159,6 +4159,14 @@ func (sm *SessionManager) applyConfig(newCfg *config.Config) {
 		sm.log.Info("config changed", "key", "sandbox.write_dirs", "old", old.Sandbox.WriteDirs, "new", newCfg.Sandbox.WriteDirs)
 	}
 
+	if fmt.Sprint(old.Sandbox.ReadFiles) != fmt.Sprint(newCfg.Sandbox.ReadFiles) {
+		sm.log.Info("config changed", "key", "sandbox.read_files", "old", old.Sandbox.ReadFiles, "new", newCfg.Sandbox.ReadFiles)
+	}
+
+	if fmt.Sprint(old.Sandbox.WriteFiles) != fmt.Sprint(newCfg.Sandbox.WriteFiles) {
+		sm.log.Info("config changed", "key", "sandbox.write_files", "old", old.Sandbox.WriteFiles, "new", newCfg.Sandbox.WriteFiles)
+	}
+
 	if fmt.Sprint(old.Sandbox.Features) != fmt.Sprint(newCfg.Sandbox.Features) {
 		sm.log.Info("config changed", "key", "sandbox.features", "old", old.Sandbox.Features, "new", newCfg.Sandbox.Features)
 	}
@@ -4270,6 +4278,8 @@ func (sm *SessionManager) resolveSandboxFromConfig(cfg *config.Config, agentName
 func (sm *SessionManager) sandboxOptsFromConfig(merged config.SandboxConfig, sessionID, worktreePath, agentCommand string, envKeys []string, agentHooks bool) sandbox.WrapOpts {
 	readDirs := expandPaths(merged.ReadDirs, sm.log, "read")
 	writeDirs := expandPaths(merged.WriteDirs, sm.log, "write")
+	readFiles := expandPaths(merged.ReadFiles, sm.log, "read")
+	writeFiles := expandPaths(merged.WriteFiles, sm.log, "write")
 
 	if agentHooks {
 		hd := sm.hookDir(sessionID)
@@ -4307,6 +4317,8 @@ func (sm *SessionManager) sandboxOptsFromConfig(merged config.SandboxConfig, ses
 		WorktreeDir:    worktreePath,
 		ReadDirs:       readDirs,
 		WriteDirs:      writeDirs,
+		ReadFiles:      readFiles,
+		WriteFiles:     writeFiles,
 		Features:       merged.Features,
 		EnvKeys:        envKeys,
 		SignalMode:     merged.SignalMode,
@@ -4383,7 +4395,7 @@ func expandPaths(paths []string, log *slog.Logger, kind string) []string {
 		}
 
 		if _, err := os.Stat(expanded); err != nil {
-			log.Warn("sandbox: skipping non-existent directory", "kind", kind, "path", expanded)
+			log.Warn("sandbox: skipping non-existent path", "kind", kind, "path", expanded)
 			continue
 		}
 

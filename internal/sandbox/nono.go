@@ -60,7 +60,13 @@ type nonoProfileFS struct {
 	// Write is deliberately unused: nono's filesystem.write is WRITE-ONLY (no
 	// read-back, no delete), which breaks agents that read files they wrote.
 	// graith maps both write_dirs and the worktree to Allow (read+write).
-	Write      []string `json:"write,omitempty"`
+	Write []string `json:"write,omitempty"`
+	// ReadFile / AllowFile grant single files (not directories). ReadFile is
+	// read-only; AllowFile is read+write (like Allow, NOT the write-only Write).
+	// graith maps read_files -> ReadFile and write_files -> AllowFile. These let
+	// a caller grant e.g. ~/.claude.json without exposing all of $HOME.
+	ReadFile   []string `json:"read_file,omitempty"`
+	AllowFile  []string `json:"allow_file,omitempty"`
 	UnixSocket []string `json:"unix_socket,omitempty"`
 	// Deny re-denies read-only paths that fall under a nono default-writable
 	// prefix (/tmp, $TMPDIR), so a "read-only" read_dir there isn't silently
@@ -140,6 +146,8 @@ func isWithinAny(path string, prefixes []string) bool {
 //   - worktree            -> filesystem.allow (read+write recursive) + workdir rw
 //   - write_dirs          -> filesystem.allow (read+write recursive)
 //   - read_dirs           -> filesystem.read  (read-only recursive)
+//   - write_files         -> filesystem.allow_file (read+write single file)
+//   - read_files          -> filesystem.read_file  (read-only single file)
 //   - EnvKeys             -> environment.allow_vars (env allowlist; the env-leak
 //     fix). Always emitted, even when EnvKeys is empty: an absent block makes
 //     nono inherit ALL of the daemon's env (fail-open), so an empty allowlist
@@ -186,6 +194,24 @@ func buildNonoProfile(name string, opts WrapOpts, sshAuthSock string) (nonoProfi
 		if underDefaultWritable(rd) && !isWithinAny(rd, opts.WriteDirs) && !isWithin(rd, opts.WorktreeDir) {
 			p.Filesystem.Deny = append(p.Filesystem.Deny, rd)
 			warnings = append(warnings, fmt.Sprintf("read-only path %q is under a nono default-writable dir (/tmp or $TMPDIR); re-denied to keep it read-only", rd))
+		}
+	}
+
+	// write_files map to allow_file = read+write single file. Like write_dirs,
+	// NEVER to nono's filesystem.write_file (write-only). An explicit allow_file
+	// also punches through the "extends: default" deny_credentials group, which
+	// is exactly what a login file like ~/.claude.json needs.
+	p.Filesystem.AllowFile = append(p.Filesystem.AllowFile, opts.WriteFiles...)
+
+	// read_files map to read_file = read-only single file, with the same
+	// /tmp/$TMPDIR re-deny guard as read_dirs (a read-only file under a
+	// default-writable prefix would otherwise be silently writable).
+	for _, rf := range opts.ReadFiles {
+		p.Filesystem.ReadFile = append(p.Filesystem.ReadFile, rf)
+
+		if underDefaultWritable(rf) && !isWithinAny(rf, opts.WriteDirs) && !isWithin(rf, opts.WorktreeDir) {
+			p.Filesystem.Deny = append(p.Filesystem.Deny, rf)
+			warnings = append(warnings, fmt.Sprintf("read-only file %q is under a nono default-writable dir (/tmp or $TMPDIR); re-denied to keep it read-only", rf))
 		}
 	}
 

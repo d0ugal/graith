@@ -299,53 +299,53 @@ func (dc *doctorContext) checkSandboxBackend() {
 func (dc *doctorContext) checkSandboxPaths() {
 	allReadDirs := make(map[string][]string)
 	allWriteDirs := make(map[string][]string)
+	allReadFiles := make(map[string][]string)
+	allWriteFiles := make(map[string][]string)
 
-	for _, p := range cfg.Sandbox.ReadDirs {
-		allReadDirs[config.ExpandPath(p)] = append(allReadDirs[config.ExpandPath(p)], "global")
+	add := func(m map[string][]string, paths []string, source string) {
+		for _, p := range paths {
+			exp := config.ExpandPath(p)
+			m[exp] = append(m[exp], source)
+		}
 	}
 
-	for _, p := range cfg.Sandbox.WriteDirs {
-		allWriteDirs[config.ExpandPath(p)] = append(allWriteDirs[config.ExpandPath(p)], "global")
-	}
+	add(allReadDirs, cfg.Sandbox.ReadDirs, "global")
+	add(allWriteDirs, cfg.Sandbox.WriteDirs, "global")
+	add(allReadFiles, cfg.Sandbox.ReadFiles, "global")
+	add(allWriteFiles, cfg.Sandbox.WriteFiles, "global")
 
 	for name, agent := range cfg.Agents {
-		for _, p := range agent.Sandbox.ReadDirs {
-			allReadDirs[config.ExpandPath(p)] = append(allReadDirs[config.ExpandPath(p)], name)
-		}
-
-		for _, p := range agent.Sandbox.WriteDirs {
-			allWriteDirs[config.ExpandPath(p)] = append(allWriteDirs[config.ExpandPath(p)], name)
-		}
+		add(allReadDirs, agent.Sandbox.ReadDirs, name)
+		add(allWriteDirs, agent.Sandbox.WriteDirs, name)
+		add(allReadFiles, agent.Sandbox.ReadFiles, name)
+		add(allWriteFiles, agent.Sandbox.WriteFiles, name)
 	}
 
 	missing := 0
 
-	for p, sources := range allReadDirs {
-		if strings.ContainsAny(p, "*?[") {
-			continue
-		}
+	check := func(m map[string][]string, kind string) {
+		for p, sources := range m {
+			if strings.ContainsAny(p, "*?[") {
+				continue
+			}
 
-		if _, err := os.Stat(p); err != nil {
-			dc.warnf("environment", "Sandbox read dir does not exist: %s (configured in: %s)", p, strings.Join(sources, ", "))
+			if _, err := os.Stat(p); err != nil {
+				dc.warnf("environment", "Sandbox %s does not exist: %s (configured in: %s)", kind, p, strings.Join(sources, ", "))
 
-			missing++
-		}
-	}
-
-	for p, sources := range allWriteDirs {
-		if strings.ContainsAny(p, "*?[") {
-			continue
-		}
-
-		if _, err := os.Stat(p); err != nil {
-			dc.warnf("environment", "Sandbox write dir does not exist: %s (configured in: %s)", p, strings.Join(sources, ", "))
-
-			missing++
+				missing++
+			}
 		}
 	}
 
-	if missing == 0 && (len(allReadDirs) > 0 || len(allWriteDirs) > 0) {
-		dc.passf("environment", "All sandbox paths exist (%d read, %d write)", len(allReadDirs), len(allWriteDirs))
+	check(allReadDirs, "read dir")
+	check(allWriteDirs, "write dir")
+	check(allReadFiles, "read file")
+	check(allWriteFiles, "write file")
+
+	total := len(allReadDirs) + len(allWriteDirs) + len(allReadFiles) + len(allWriteFiles)
+	if missing == 0 && total > 0 {
+		dc.passf("environment", "All sandbox paths exist (%d read dir, %d write dir, %d read file, %d write file)",
+			len(allReadDirs), len(allWriteDirs), len(allReadFiles), len(allWriteFiles))
 	}
 }
 
