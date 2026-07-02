@@ -159,6 +159,23 @@ Run health checks and diagnostics. Checks daemon status, safehouse availability,
 |------|-------------|
 | `--autofix` | Automatically fix issues |
 
+### `gr sandbox why`
+
+Explain whether the configured sandbox would allow or deny a filesystem or network access, without launching an agent. Builds the nono profile graith would generate from config and queries nono's policy oracle. Requires the `nono` backend.
+
+| Flag | Description |
+|------|-------------|
+| `--path <p>` | Filesystem path to check (use with `--op`) |
+| `--op <read\|write\|readwrite>` | Operation for `--path` |
+| `--host <h>` | Network host to check (e.g. `github.com`) |
+| `--port <n>` | Network port for `--host` (default 443) |
+| `--agent <name>` | Resolve the merged (global + per-agent) policy for this agent |
+
+```bash
+gr sandbox why --path ~/.ssh/id_rsa --op read
+gr sandbox why --host github.com --port 443
+```
+
 ## Remote interaction
 
 ### `gr type <name-or-id> <text>` (alias: `t`)

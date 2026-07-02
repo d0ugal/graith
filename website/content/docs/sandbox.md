@@ -153,6 +153,40 @@ graith never silently runs unsandboxed. The rules:
 - A **fail** if the sandbox is enabled with no backend selected.
 - Existence of every configured `read_dirs`/`write_dirs` path.
 
+## Debugging denials with `gr sandbox why`
+
+When an agent hits a confusing "permission denied", `gr sandbox why` explains
+whether a given access *would* be allowed or denied under your configured
+policy — without launching an agent or changing anything. It builds the exact
+nono profile graith would generate from your config and asks nono's policy
+oracle (`nono why`), then renders the decision.
+
+```bash
+# Would the agent be able to read your SSH key? (no — deny_credentials)
+gr sandbox why --path ~/.ssh/id_rsa --op read
+
+# Is a write into a read-only read_dir allowed? (no — read grant only)
+gr sandbox why --path ~/Code/shared --op write
+
+# Would an outbound connection to github.com:443 be allowed?
+gr sandbox why --host github.com --port 443
+
+# Resolve the *merged* policy for a specific agent (global + per-agent)
+gr sandbox why --agent codex --path /etc/hosts --op read
+```
+
+`--op` is one of `read`, `write`, or `readwrite`. Add `--json` for a
+machine-readable decision (`allowed`, `status`, `reason`, `details`, `source`,
+`suggested_flag`). The command **only targets the `nono` backend** — it is the
+only backend with a policy oracle; on a `safehouse` config it returns an error.
+
+The answer reflects graith's generated profile (including the `/tmp`/`$TMPDIR`
+re-deny and the `environment.allow_vars` allowlist), so it is a faithful preview
+of what a real session would enforce. Note that querying a `read_dir` located
+directly under `/tmp` surfaces nono's Landlock deny-overlap error (a read-only
+grant there is re-denied, which nono refuses to combine with its broad `/tmp`
+allow) — a reason to keep sandbox dirs outside `/tmp`.
+
 ## Configuration
 
 ### Global sandbox

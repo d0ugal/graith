@@ -589,9 +589,11 @@ Rules (each gets a fixture in §C1/testing):
    `signal_mode: isolated`), give `clipboard` meaning if a product decision lands
    and nono grows a capability, add the graith `network` config field →
    `network.block`/`allow_domain`, and the ABI-v4 fail-closed rule for network.
-3. **Phase 3 — credential injection (with #596).** Co-design graith credential
-   handling with nono `--credential` proxy injection. Consider `nono-go`
-   `QueryContext` for a `gr why`-style command.
+3. **Phase 3 — introspection now; credential injection with #596.** Ship the
+   `gr why`-style command (`gr sandbox why`) against nono's oracle now (it is
+   buildable and needs nothing from #596). Co-design graith credential handling
+   with nono `--credential` proxy injection as a follow-up gated on #596. See
+   the **Phase 3 outcome** section below for the split.
 
 ### Testing
 
@@ -675,3 +677,102 @@ v0.66.0 / `nono-go` @ `875bc26`):
 - Networking (network profiles, L7 allowlist, WSL2 caveats): <https://nono.sh/docs/cli/features/networking>
 - WSL2 feature matrix / degraded proxy: <https://nono.sh/docs/cli/internals/wsl2>
 - Credential injection (`--credential`, proxy + env): <https://nono.sh/docs/cli/features/credential-injection>
+
+## Phase 3 outcome (introspection shipped; credentials co-design deferred)
+
+Phase 3 splits cleanly into a piece that is buildable today with zero
+dependency on #596, and a piece that must be co-designed with #596 and is
+therefore deferred. Verified against the installed nono **v0.66.0** on Linux.
+
+### Implemented: `gr sandbox why`
+
+A client-side introspection command that explains an allow/deny decision under
+graith's *configured* sandbox policy, without launching an agent:
+
+```
+gr sandbox why --path ~/.ssh/id_rsa --op read      # denied (deny_credentials)
+gr sandbox why --path ~/Code/shared --op write     # denied on a read-only read_dir
+gr sandbox why --host github.com --port 443         # network reachability
+gr sandbox why --agent codex --path /etc/hosts --op read   # merged per-agent policy
+```
+
+How it works, and why it is faithful:
+
+- It reuses the **same profile emitter** as the run path
+  (`sandbox.buildNonoProfile`, exposed via `sandbox.BuildQueryProfile`), writes
+  a temp profile, and calls `nono why --json -p <profile> ...`. Because `nono
+  why -p <path>` evaluates against the passed profile (confirmed: decisions
+  report `"source": "profile"`), the answer reflects graith's *generated* policy
+  — including the `environment.allow_vars` allowlist, the worktree/`write_dirs`
+  → `filesystem.allow` mapping, and the `/tmp`/`$TMPDIR` re-deny — not nono's
+  bare defaults.
+- `nono why --json` exits 0 for both allow and deny and emits a stable JSON
+  object (`status` ∈ {allowed, denied}, plus `reason`/`details`/`source`/
+  `policy_source`/`suggested_flag`). graith treats a non-JSON stdout (e.g. an
+  argv error on stderr) as a hard error so a nono CLI shift surfaces loudly
+  rather than silently misreporting — the same runtime-coupling mitigation as
+  the run path (§C2).
+- The command **only targets the `nono` backend** (safehouse has no policy
+  oracle) and returns a clear error on a `safehouse` or unset backend.
+- It is read-only and shells out to `nono` (Option A, §3). **`nono-go`'s
+  `QueryContext` was evaluated and not adopted:** it would reintroduce cgo and
+  break the clean cross-compile/GoReleaser matrix for no functional gain over
+  the `nono why` oracle, which already answers filesystem *and* network queries
+  against a profile. The doc's original "nono-go becomes attractive for
+  introspection" note (§3) does not hold in practice for v0.66.0.
+
+Genuine finding surfaced while testing: querying a `read_dir` located directly
+under `/tmp` triggers nono's *Landlock deny-overlap* refusal (the read-only
+grant there is re-denied by graith's profile, and nono refuses to combine a
+`deny` with its broad `/tmp` allow). The command surfaces nono's error verbatim
+rather than swallowing it; documented as a reason to keep sandbox dirs outside
+`/tmp`. This does not affect the run path (which passes the same deny set) — it
+is specific to the `why` evaluation, and the honest surfacing is the right
+behaviour.
+
+Code: `internal/sandbox/why.go` (`WhyQuery`, `WhyResult`, `WhyForProfile`,
+`BuildQueryProfile`), `internal/cli/sandbox.go` (`gr sandbox why`). Tests beside
+both (`why_test.go`, `sandbox_test.go`) use the runner seam so they pass with
+`-race` without nono installed.
+
+### Deferred (blocked on #596): credential injection via nono's proxy
+
+nono **does** ship the primitives: `nono run --credential <service>` injects
+credentials via a reverse proxy so the raw token never enters the sandbox
+(the proxy attaches auth headers / sets `ANTHROPIC_BASE_URL` etc.), with
+`--allow-endpoint <service:method:/path>` for per-endpoint scoping, plus
+`--env-credential` / `--env-credential-map` for keystore-sourced env vars. This
+is not fabricated — it is present in `nono run --help` on v0.66.0.
+
+It is **not implemented in this phase**, and deliberately so:
+
+- **graith has no credential model to map onto it yet.** #596 ("local-first
+  credential broker") is **open and unresolved** — its own open questions
+  (proxy interception vs an explicit `gr cred get` tool; storage backend —
+  OS keychain / encrypted file / external vault; per-repo vs per-profile
+  scoping) are exactly the decisions that determine how a nono `--credential`
+  mapping should look. Wiring nono credential injection before #596 lands would
+  hard-code answers to those questions and would likely fight #596's own design
+  over the same base-URL env vars (`ANTHROPIC_BASE_URL`, etc.). Per the project
+  rule, we do **not** invent a credential surface to ship a feature.
+- **The two must be co-designed.** The recommended shape (to be ratified in a
+  #596 design, not here):
+  - graith's broker (from #596) owns the secret store, per-session/-repo
+    allow-lists, and OAuth refresh — the daemon-side concerns #596 describes.
+  - The **nono backend is one *delivery mechanism*** for that broker on Linux/
+    macOS: for a sandboxed `nono` session, graith maps a resolved credential
+    grant to `nono run --credential <service>` (+ `--allow-endpoint` from the
+    per-session allow-list) so the proxy injection and the sandbox share one
+    process (`nono run`, already chosen in §3 partly for this reason).
+  - This needs **new config surface** (a `[[credentials]]`/broker block) and a
+    `SandboxConfig`/`WrapOpts` field carrying the resolved services — neither of
+    which exists, and both of which are #596's call, not a nono-backend detail.
+  - Non-nono/`safehouse` sessions would use whatever env/proxy mechanism #596
+    settles on; the mapping must not assume nono.
+
+**Concretely blocked on #596:** the credential model (config schema, storage,
+scoping, refresh) and the env-var ownership decision. **Unblocked once #596
+lands:** a mechanical mapping from resolved grants to `nono run --credential` /
+`--allow-endpoint` in the nono backend, plus `WrapOpts` plumbing — small and
+non-speculative at that point. Until then, credential injection stays a
+**non-goal** (as stated in this doc's Non-Goals and Open Questions §(b)).
