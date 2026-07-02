@@ -38,10 +38,13 @@ name: Sandbox
 #                        this is a fail-closed condition once the backend ships.
 
 on:
+  # No path filter: both enforcement jobs are REQUIRED status checks in branch
+  # protection, so they must run and report on every PR. A required check that
+  # is skipped on some PRs (via path filtering) leaves those PRs "waiting" for a
+  # status that never arrives, which — with enforce_admins — blocks all merges.
+  # The jobs are fast and self-contained (they don't depend on the PR's diff),
+  # so running them everywhere is cheap and keeps auto-merge honest.
   pull_request:
-    paths:
-      - internal/sandbox/**
-      - .github/workflows/sandbox.yml
   workflow_dispatch:
 
 permissions:
