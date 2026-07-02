@@ -50,7 +50,7 @@ internal/
   output/                Structured output helpers
   protocol/              Wire protocol: framing, control messages, encoding
   pty/                   PTY session management, scrollback buffer
-  sandbox/               Safehouse sandbox wrapping for agent processes
+  sandbox/               Pluggable OS sandbox backends (safehouse, nono)
   store/                 Flat-file git-backed document store
   version/               Build-time version injection
 ```
@@ -74,7 +74,7 @@ Key files by area:
 | PTY | `pty/session.go` | PTY lifecycle, resize, I/O multiplexing |
 | PTY | `pty/scrollback.go` | Append-only scrollback file with tail reads |
 | Auth | `daemon/auth.go` | Per-session token auth: authorization rules, identity forcing, descendant checks |
-| Sandbox | `sandbox/sandbox.go` | Safehouse wrapping: command construction, availability check |
+| Sandbox | `sandbox/sandbox.go`, `sandbox/safehouse.go`, `sandbox/nono.go` | Pluggable backends: Wrap dispatch, per-backend command/profile construction, availability |
 | Store | `store/store.go` | Flat-file git-backed document store with key validation, git commits |
 | Scenario | `daemon/scenario.go` | Scenario lifecycle: start, stop, resume, delete, add, task-done, status, list |
 | Scenario | `cli/scenario.go` | `gr scenario start/stop/resume/delete/add/task-done/status/list` commands |
@@ -97,12 +97,23 @@ intercepts the next keystroke for commands (d=detach, w=overlay, s=shell, etc).
 **State persistence**: `state.json` in the data dir. Loaded on daemon start,
 saved on mutations. Sessions survive daemon restarts.
 
-**Sandbox**: When enabled via config, agent processes are wrapped with
-`safehouse wrap` (macOS `sandbox-exec`). The sandbox is config-only — no CLI
-flags — so agents can't escape by spawning unsandboxed children. The daemon
-resolves the merged sandbox config (global + per-agent), expands `~` paths to
-absolute, and passes them as safehouse options. If safehouse is unavailable
-when sandbox is enabled, session creation fails closed.
+**Sandbox**: When enabled via config, agent processes are wrapped in an OS
+sandbox by a pluggable backend selected with `[sandbox] backend`
+(`safehouse` = macOS `sandbox-exec`; `nono` = Landlock+seccomp on Linux /
+Seatbelt on macOS). `backend` is **required** when the sandbox is enabled —
+there is no default; an unset backend fails closed. The sandbox is config-only —
+no CLI flags — so agents can't escape by spawning unsandboxed children
+(restrictions are kernel-inherited). The daemon resolves the merged sandbox
+config (global + per-agent), expands `~`/globs to absolute paths, and either
+builds a `safehouse wrap` command or generates a per-session nono JSON profile
+(`nono run --profile`). The nono profile maps write_dirs + worktree to
+`filesystem.allow` (read+write, not the write-only `filesystem.write`), the env
+allowlist to `environment.allow_vars` (incl. PATH/HOME/GRAITH_*), grants read on
+the agent binary dir, and re-denies read-only paths under `/tmp`/`$TMPDIR`
+(writable by default under nono). `process-control` gates under safehouse but is
+a no-op under nono. If the selected backend can't enforce (missing binary,
+kernel too old, nono below the version pin), session creation fails closed. See
+`docs/design/2026-07-02-nono-sandbox-design.md`.
 
 **Scenarios**: Declarative multi-session orchestration. A TOML file defines
 sessions (name, repo, agent, role, task), and `gr scenario start` creates

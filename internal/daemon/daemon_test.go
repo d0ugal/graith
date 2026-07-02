@@ -1872,6 +1872,7 @@ func TestResumeRefreshesSandboxConfig(t *testing.T) {
 		cfg := config.Default()
 		cfg.Sandbox = config.SandboxConfig{
 			Enabled:  true,
+			Backend:  "nono",
 			ReadDirs: []string{updatedDir},
 		}
 		cfg.Agents["sleeper"] = config.Agent{
@@ -1904,13 +1905,14 @@ func TestResumeRefreshesSandboxConfig(t *testing.T) {
 		}
 
 		_, err := sm.Resume("s1", 24, 80)
-		// Resume will fail because safehouse isn't installed, but if it gets
-		// far enough to update the session state, we can check the config.
-		// On macOS without safehouse, resolveSandbox returns an error.
+		// Resume fails closed when the configured backend can't enforce on this
+		// host (no nono binary / kernel too old). That's expected on many CI
+		// hosts; the test only cares that the OLD stored config dir is not
+		// reused. Accept any backend-unavailability error and return.
 		if err != nil {
-			// Check that the error is about safehouse availability, not about
-			// using the old config.
-			if !strings.Contains(err.Error(), "not available") {
+			if !strings.Contains(err.Error(), "cannot enforce") &&
+				!strings.Contains(err.Error(), "not available") &&
+				!strings.Contains(err.Error(), "not found in PATH") {
 				t.Fatalf("unexpected error: %v", err)
 			}
 

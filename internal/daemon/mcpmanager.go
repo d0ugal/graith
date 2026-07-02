@@ -248,10 +248,23 @@ func (m *MCPManager) startProcess(serverCfg config.MCPServerConfig, proxyID stri
 		sbxEnabled = *serverCfg.Sandbox
 	}
 
-	if sbxEnabled && sandbox.Available() {
+	if sbxEnabled && m.globalSbx.Enabled {
 		merged := m.globalSbx
 		if serverCfg.SandboxConfig != nil {
 			merged = merged.Merge(*serverCfg.SandboxConfig)
+		}
+
+		// Honour the configured backend (not just safehouse). Fail closed if it
+		// cannot enforce, matching the session sandbox semantics.
+		avail, err := sandbox.CheckAvailability(merged.Backend, merged.Command)
+		if err != nil {
+			_ = stderrFile.Close()
+			return nil, fmt.Errorf("sandbox for MCP server %s: %w", serverCfg.Name, err)
+		}
+
+		if !avail.CanEnforce {
+			_ = stderrFile.Close()
+			return nil, fmt.Errorf("sandbox enabled for MCP server %s with backend %q but it cannot enforce: %s", serverCfg.Name, merged.Backend, avail.Detail)
 		}
 
 		merged.ReadDirs = expandPaths(merged.ReadDirs, m.log, "read")
@@ -265,12 +278,14 @@ func (m *MCPManager) startProcess(serverCfg config.MCPServerConfig, proxyID stri
 		}
 
 		opts := sandbox.WrapOpts{
-			WorktreeDir:      os.TempDir(),
-			ReadDirs:         merged.ReadDirs,
-			WriteDirs:        merged.WriteDirs,
-			Features:         merged.Features,
-			EnvKeys:          envKeys,
-			SafehouseCommand: merged.Command,
+			Backend:        merged.Backend,
+			WorktreeDir:    os.TempDir(),
+			ReadDirs:       merged.ReadDirs,
+			WriteDirs:      merged.WriteDirs,
+			Features:       merged.Features,
+			EnvKeys:        envKeys,
+			BackendCommand: merged.Command,
+			// No session ID here; nono writes a temp profile (empty ProfilePath).
 		}
 
 		var wrapErr error
