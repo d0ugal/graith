@@ -8,6 +8,13 @@ on:
 permissions:
   contents: write
 
+env:
+  # How many distinct releases (per format + arch) to keep in the apt/yum repo.
+  # Older versions are pruned before metadata is regenerated so the published
+  # tree stays well under GitHub Pages' 1 GB site cap. Each release adds ~4
+  # packages (deb+rpm x amd64+arm64); bump this if you want a longer tail.
+  RETAIN_RELEASES: "5"
+
 jobs:
   goreleaser:
     runs-on: ubuntu-latest
@@ -164,15 +171,80 @@ jobs:
             rpm --checksig "$rpm"
           done
 
+      - name: Write the retention/prune helper
+        run: |
+          set -euo pipefail
+          # A tiny, self-contained pruner sourced by the rpm and apt build steps.
+          # It keeps only the newest RETAIN_RELEASES distinct semver versions of
+          # graith per architecture in a directory, deleting older packages.
+          # Package filenames follow nfpm's convention:
+          #   graith_<semver>_linux_<arch>.<ext>   (arch is amd64 / arm64)
+          cat > /tmp/prune.sh <<'PRUNE'
+          # prune_dir <dir> <ext> <keep_n>
+          prune_dir() {
+            dir="$1"; ext="$2"; keep="$3"
+
+            # No-op safely when the dir is missing or holds no matching packages.
+            [ -d "$dir" ] || { echo "prune: $dir does not exist, nothing to do"; return 0; }
+
+            # Discover the set of architectures present from the filenames.
+            archs="$(
+              for f in "$dir"/graith_*_linux_*."$ext"; do
+                [ -e "$f" ] || continue
+                base="${f##*/}"
+                arch="${base##*_linux_}"; arch="${arch%.$ext}"
+                printf '%s\n' "$arch"
+              done | sort -u
+            )"
+            [ -n "$archs" ] || { echo "prune: no graith_*_linux_*.$ext in $dir, nothing to do"; return 0; }
+
+            for arch in $archs; do
+              # Distinct versions for this arch, newest first (semver-aware sort).
+              versions="$(
+                for f in "$dir"/graith_*_linux_"$arch"."$ext"; do
+                  [ -e "$f" ] || continue
+                  base="${f##*/}"
+                  ver="${base#graith_}"; ver="${ver%%_linux_*}"
+                  printf '%s\n' "$ver"
+                done | sort -u -V -r
+              )"
+
+              total="$(printf '%s\n' "$versions" | grep -c .)"
+              echo "prune: $arch/$ext has $total version(s); keeping newest $keep"
+              [ "$total" -le "$keep" ] && continue
+
+              # Everything past the first <keep> distinct versions gets dropped.
+              drop="$(printf '%s\n' "$versions" | tail -n +"$((keep + 1))")"
+              for ver in $drop; do
+                victim="$dir/graith_${ver}_linux_${arch}.$ext"
+                if [ -e "$victim" ]; then
+                  echo "prune: removing $victim"
+                  rm -f "$victim"
+                fi
+              done
+            done
+          }
+          PRUNE
+          echo "Wrote /tmp/prune.sh (RETAIN_RELEASES=${RETAIN_RELEASES})"
+
       - name: Build yum/dnf repo (createrepo_c) and sign metadata
         env:
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
         run: |
           set -euo pipefail
+          # shellcheck source=/dev/null
+          . /tmp/prune.sh
           RPM_ROOT=repo/rpm
           mkdir -p "$RPM_ROOT"
+          # Add the freshly built rpms alongside the ones already published, then
+          # prune to the newest RETAIN_RELEASES versions per arch BEFORE building
+          # metadata, so repomd.xml only references the versions we keep.
           cp packages/*.rpm "$RPM_ROOT"/
-          createrepo_c --update "$RPM_ROOT"
+          prune_dir "$RPM_ROOT" rpm "$RETAIN_RELEASES"
+          # --update alone leaves stale entries for deleted rpms in place; a full
+          # (non-incremental) createrepo_c regen guarantees the metadata reflects
+          # exactly the surviving packages.
+          createrepo_c "$RPM_ROOT"
           # Detached, armored signature over repomd.xml so dnf can verify the
           # repo metadata (repo_gpgcheck).
           printf '%s' "$GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback \
@@ -185,6 +257,8 @@ jobs:
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
         run: |
           set -euo pipefail
+          # shellcheck source=/dev/null
+          . /tmp/prune.sh
 
           # aptly keeps its own working DB + pool under a rootDir. Point it at a
           # scratch dir, then publish into the checked-out Pages tree.
@@ -196,10 +270,23 @@ jobs:
           }
           EOF
 
+          # aptly builds each publish from scratch, so we must re-add the debs we
+          # want to keep. Stage the already-published pool alongside the freshly
+          # built debs, prune to the newest RETAIN_RELEASES versions per arch, and
+          # feed only the survivors to aptly. Without seeding from the existing
+          # pool, apt would silently drop every prior release each run.
+          STAGE="$(mktemp -d)"
+          OLD_POOL="repo/deb/pool/main/g/graith"
+          if [ -d "$OLD_POOL" ]; then
+            find "$OLD_POOL" -maxdepth 1 -name 'graith_*_linux_*.deb' -exec cp -n {} "$STAGE"/ \;
+          fi
+          cp packages/*.deb "$STAGE"/
+          prune_dir "$STAGE" deb "$RETAIN_RELEASES"
+
           # A single "stable" suite for all Debian/Ubuntu releases (the binary is
           # statically linked Go, so per-codename suites add no value).
           aptly repo create -distribution=stable -component=main graith
-          aptly repo add graith packages/
+          aptly repo add graith "$STAGE"/
 
           # Publish, signing Release -> Release.gpg + InRelease with our key.
           aptly publish repo \
