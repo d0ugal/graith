@@ -99,9 +99,13 @@ denies file access by default, allows the worktree (read-write) plus
   and would break agents that read files they just wrote.
 - `read_dirs` → `filesystem.read` (read-only)
 - the env allowlist → `environment.allow_vars`, including `PATH`, `HOME`, and
-  graith's injected `GRAITH_*` vars plus your configured keys. When the allowlist
-  is non-empty nono scrubs every other variable, so host secrets don't leak into
-  the agent (this mirrors safehouse's env allowlist).
+  graith's injected `GRAITH_*` vars plus your configured keys. This block is
+  **always emitted** for the nono backend, even when the allowlist is empty:
+  nono scrubs the environment down to exactly the allowlist, so any variable not
+  listed (including host secrets) is stripped and does not leak into the agent
+  (this mirrors safehouse's env allowlist). Env is scrubbed by default — the
+  environment fails closed. Omitting the block would make nono inherit the
+  daemon's entire environment, so graith never omits it.
 - the **agent binary's directory** → `filesystem.read`. nono does not auto-grant
   the launched command's location (only system paths like `/usr/bin`), so graith
   resolves the agent command via `$PATH` and grants read on its directory.

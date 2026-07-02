@@ -67,6 +67,11 @@ type nonoProfileFS struct {
 }
 
 type nonoProfileEnv struct {
+	// AllowVars is nono's env allowlist. It has NO omitempty and buildNonoProfile
+	// always populates it (empty slice, not nil) so the marshalled profile always
+	// carries "allow_vars": []. An absent block makes nono inherit the daemon's
+	// entire environment (fail-open credential leak); an explicit empty allowlist
+	// scrubs all env (fail-closed).
 	AllowVars []string `json:"allow_vars"`
 }
 
@@ -117,7 +122,10 @@ func isWithinAny(path string, prefixes []string) bool {
 //   - worktree            -> filesystem.allow (read+write recursive) + workdir rw
 //   - write_dirs          -> filesystem.allow (read+write recursive)
 //   - read_dirs           -> filesystem.read  (read-only recursive)
-//   - EnvKeys             -> environment.allow_vars (env allowlist; the env-leak fix)
+//   - EnvKeys             -> environment.allow_vars (env allowlist; the env-leak
+//     fix). Always emitted, even when EnvKeys is empty: an absent block makes
+//     nono inherit ALL of the daemon's env (fail-open), so an empty allowlist
+//     (scrub everything) is the fail-closed default.
 //   - feature "ssh"       -> filesystem.unix_socket [$SSH_AUTH_SOCK] (agent socket only)
 //   - feature "process-control" -> no-op under nono (default signal_mode already
 //     permits same-sandbox signals; see design doc §C5)
@@ -174,9 +182,18 @@ func buildNonoProfile(name string, opts WrapOpts, sshAuthSock string) (nonoProfi
 		}
 	}
 
-	if len(opts.EnvKeys) > 0 {
-		p.Environment = &nonoProfileEnv{AllowVars: opts.EnvKeys}
+	// Always emit environment.allow_vars for the nono backend, even when the
+	// allowlist is empty. Under nono an ABSENT environment block means the
+	// sandboxed process inherits the daemon's ENTIRE environment (a
+	// credential-leak fail-open). An empty allow_vars scrubs all env instead —
+	// the safe, fail-closed direction. The security boundary must not depend on
+	// a caller always populating EnvKeys.
+	allowVars := opts.EnvKeys
+	if allowVars == nil {
+		allowVars = []string{}
 	}
+
+	p.Environment = &nonoProfileEnv{AllowVars: allowVars}
 
 	return p, warnings
 }
