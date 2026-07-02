@@ -1,0 +1,61 @@
+name: Workflow Lint
+
+# Static analysis of the GitHub Actions workflows themselves: actionlint
+# (YAML + shellcheck of `run:` blocks) and zizmor (Actions SAST — template
+# injection, over-broad permissions, unpinned actions, dangerous triggers).
+# This is the regression gate for the supply-chain hardening in #697.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/**'
+      - '.github/zizmor.yml'
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+      - '.github/zizmor.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  actionlint:
+    name: actionlint
+    runs-on: ubuntu-latest
+    env:
+      ACTIONLINT_VERSION: 1.7.12
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - name: Install actionlint
+        run: |
+          set -euo pipefail
+          url="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL "$url" -o /tmp/actionlint.tar.gz
+          tar -xzf /tmp/actionlint.tar.gz -C /tmp actionlint
+          sudo install -m 0755 /tmp/actionlint /usr/local/bin/actionlint
+          actionlint --version
+      - name: Run actionlint
+        # shellcheck is preinstalled on ubuntu runners; actionlint shells out
+        # to it to lint the scripts inside `run:` blocks.
+        run: actionlint -color
+
+  zizmor:
+    name: zizmor
+    runs-on: ubuntu-latest
+    env:
+      ZIZMOR_VERSION: 1.26.1
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+      - name: Run zizmor
+        # --min-confidence=medium keeps the gate honest without blocking on
+        # zizmor's low-confidence heuristics (e.g. artipacked on checkouts
+        # that must persist credentials to push, cache-poisoning on
+        # release-triggered setup-go). Real issues (template injection,
+        # dangerous triggers, over-broad permissions) surface at medium+.
+        run: uvx "zizmor==${ZIZMOR_VERSION}" --min-confidence=medium .github/workflows/
