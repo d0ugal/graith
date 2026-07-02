@@ -25,7 +25,7 @@ import (
 func mustEnforce(t *testing.T) {
 	t.Helper()
 
-	av := nonoBackend{}.Availability("")
+	av := nonoBackend{}.Availability("", Requirements{})
 	if !av.CanEnforce {
 		t.Skipf("nono cannot enforce here (%s); skipping enforcement test", av.Detail)
 	}
