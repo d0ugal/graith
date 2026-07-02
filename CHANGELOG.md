@@ -1,5 +1,58 @@
 # Changelog
 
+## [0.64.0](https://github.com/d0ugal/graith/compare/v0.63.0...v0.64.0) (2026-07-02)
+
+
+### ⚠ BREAKING CHANGES
+
+* **sandbox:** `[sandbox] backend` is now required when the sandbox is enabled — there is no implicit default. Existing sandbox users must add `backend = "safehouse"` (macOS) or `backend = "nono"` (Linux/macOS) to their config; enabling the sandbox without a backend fails closed with an actionable error. Renames WrapOpts.SafehouseCommand to WrapOpts.BackendCommand.
+
+### Features
+
+* **sandbox:** add `gr sandbox why` to explain allow/deny decisions ([f4114d9](https://github.com/d0ugal/graith/commit/f4114d9d42739d310dd305f5b0b87b857d73a220))
+* **sandbox:** add cross-platform nono backend; require explicit backend ([2841359](https://github.com/d0ugal/graith/commit/28413595e755f1b66de454d3167c96d25c755245))
+* **sandbox:** add nono network policy, signal_mode, ABI-v4 fail-closed ([e2159d5](https://github.com/d0ugal/graith/commit/e2159d57fde4652b414ff75eb040eb53e99f9f0e))
+
+
+### Bug Fixes
+
+* **sandbox:** always emit nono env allowlist so env fails closed ([333c30d](https://github.com/d0ugal/graith/commit/333c30db82aa5c621a3bb98ecec2136b59a2be30)), closes [#694](https://github.com/d0ugal/graith/issues/694)
+* update module github.com/cpuguy83/go-md2man/v2 to v2.0.7 ([2bc2d7b](https://github.com/d0ugal/graith/commit/2bc2d7b615cbd00c9ac90f43df28ae556bd51047))
+
+
+### Documentation
+
+* nono cross-platform sandbox backend design ([#632](https://github.com/d0ugal/graith/issues/632)) ([6dd8b26](https://github.com/d0ugal/graith/commit/6dd8b260e1ba916d40b8a4e597aa740fdcfc9b52))
+* regenerate CHANGELOG with corrected tags and valid SHAs ([380c5da](https://github.com/d0ugal/graith/commit/380c5daba05571ca2fc7737c70b56282d6efa5f1))
+* **sandbox:** document `gr sandbox why` and the Phase 3 outcome ([14de414](https://github.com/d0ugal/graith/commit/14de414a01921177198a5f7351d035e73aaec1f3))
+
+
+### Tests
+
+* **sandbox:** add macOS safehouse enforcement-test parity ([0024541](https://github.com/d0ugal/graith/commit/002454179999cc666e2184b509e2617ca65e0b4e))
+* **sandbox:** fix build-tagged enforce tests for Requirements arg ([5a3fbc3](https://github.com/d0ugal/graith/commit/5a3fbc3489a52cfc95e91dc34461a15b12f5412e))
+* **sandbox:** fix safehouse enforcement test — no-access fixture outside $TMPDIR ([4da587a](https://github.com/d0ugal/graith/commit/4da587a7fccd36f1da51031ae66f1899376df9c1))
+
+
+### Continuous Integration
+
+* add actionlint + zizmor workflow SAST gate ([607f53f](https://github.com/d0ugal/graith/commit/607f53f03d712f4f23ac81b4daac6ee1a8f1716e)), closes [#697](https://github.com/d0ugal/graith/issues/697)
+* add Dependency Review and CodeQL (Go) scanning ([e49f263](https://github.com/d0ugal/graith/commit/e49f26332a570dc75d59799d069a2dfa4678d1b7)), closes [#697](https://github.com/d0ugal/graith/issues/697)
+* add OpenSSF Scorecard workflow ([2eebac8](https://github.com/d0ugal/graith/commit/2eebac8be4c9b8580bd1e4c09d74613b018b8688)), closes [#697](https://github.com/d0ugal/graith/issues/697)
+* add sandbox backend bring-up workflow ([a96fd34](https://github.com/d0ugal/graith/commit/a96fd34ec9a06e94ff13ee53b9d440236fea445c))
+* add TruffleHog + Gitleaks secret scanning ([ec533a5](https://github.com/d0ugal/graith/commit/ec533a57f58d7499ef3f8dcedba54c1e68829a88)), closes [#697](https://github.com/d0ugal/graith/issues/697)
+* drop useless cat in dev-release (shellcheck SC2002) ([e88b160](https://github.com/d0ugal/graith/commit/e88b16089da150680f82740458b9fc72f2ce88b5)), closes [#697](https://github.com/d0ugal/graith/issues/697)
+* fix nono smoke-test profile to nono v0.66.0 schema ([8e343bc](https://github.com/d0ugal/graith/commit/8e343bc7fdc356afa4dccccf5a40202e34899a10))
+* least-privilege permissions and SHA-pin remaining actions ([5e8644b](https://github.com/d0ugal/graith/commit/5e8644b1e120d436d339a02238e5e061223c0ea5)), closes [#697](https://github.com/d0ugal/graith/issues/697)
+* run CI on every PR so required checks report on CHANGELOG-only PRs ([1b77903](https://github.com/d0ugal/graith/commit/1b779030916c5bdd8e119b063d435ea2985f5460))
+* run release-please in manifest mode so pre-1.0 breaking stays minor ([3036b25](https://github.com/d0ugal/graith/commit/3036b25d86a3f513169911b67f1951f27ba6cda1))
+* **sandbox:** hard-gate the nono enforcement smoke test ([7e8a2ad](https://github.com/d0ugal/graith/commit/7e8a2ad0019408e09753c16e113e57a97359b259))
+* **sandbox:** install safehouse from the correct eugene1g/safehouse tap ([85f9d01](https://github.com/d0ugal/graith/commit/85f9d01b3b637ddc59c0ffd01c8ebd518e1c7877))
+* **sandbox:** pin nono install instead of piping curl to sudo sh ([0fa84fa](https://github.com/d0ugal/graith/commit/0fa84fa178d0fb6aa8fb05334d8dd852357e3ad2)), closes [#695](https://github.com/d0ugal/graith/issues/695)
+* **sandbox:** run enforcement jobs on every PR (prep for required checks) ([272d11c](https://github.com/d0ugal/graith/commit/272d11cc7145e438ebab2a97d8194db70c7221af))
+* **sandbox:** verify nono by build provenance and track it with Renovate ([cdc6c22](https://github.com/d0ugal/graith/commit/cdc6c2244be09af5c4c81dd7c2dd50cc9043e32e))
+* surface ci/test/docs/refactor/build changes in release notes ([e217a5e](https://github.com/d0ugal/graith/commit/e217a5e408820b997baa19aa14806dd1c13a4d61))
+
 ## [0.63.0](https://github.com/d0ugal/graith/compare/v0.62.0...v0.63.0) (2026-07-02)
 
 
