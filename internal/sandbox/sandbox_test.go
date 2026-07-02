@@ -313,10 +313,38 @@ func TestBuildNonoProfileEnvAllowlist(t *testing.T) {
 	}
 }
 
-func TestBuildNonoProfileNoEnvKeysOmitsEnv(t *testing.T) {
+func TestBuildNonoProfileNoEnvKeysScrubsEnv(t *testing.T) {
+	// With no EnvKeys the nono backend must still emit environment.allow_vars,
+	// as an EMPTY allowlist. Omitting the block would make nono inherit the
+	// daemon's entire environment (fail-open credential leak); an empty
+	// allowlist scrubs all env instead (fail-closed). See issue #694.
 	p, _ := buildNonoProfile("graith-neep", WrapOpts{Backend: BackendNono}, "")
-	if p.Environment != nil {
-		t.Errorf("environment should be omitted when EnvKeys empty, got %+v", p.Environment)
+	if p.Environment == nil {
+		t.Fatal("environment section missing with empty EnvKeys; env would leak (inherit-all)")
+	}
+
+	if len(p.Environment.AllowVars) != 0 {
+		t.Errorf("allow_vars = %v, want empty allowlist (scrub all env)", p.Environment.AllowVars)
+	}
+}
+
+func TestBuildNonoProfileEmptyEnvScrubsNotInherits(t *testing.T) {
+	// Prove the emitted profile scrubs env rather than inheriting it: the
+	// marshalled JSON must carry an explicit "allow_vars": [] so nono clears
+	// the environment. A missing allow_vars (null / absent) would inherit all.
+	p, _ := buildNonoProfile("graith-neep", WrapOpts{Backend: BackendNono}, "")
+
+	data, err := json.Marshal(p)
+	if err != nil {
+		t.Fatalf("marshal profile: %v", err)
+	}
+
+	if !strings.Contains(string(data), `"allow_vars":[]`) {
+		t.Errorf("profile JSON should contain empty allow_vars (scrub all env), got: %s", data)
+	}
+
+	if strings.Contains(string(data), `"allow_vars":null`) {
+		t.Errorf("allow_vars must not be null (would inherit all env): %s", data)
 	}
 }
 

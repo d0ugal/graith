@@ -531,7 +531,13 @@ Rules (each gets a fixture in §C1/testing):
 >   prefixes are re-denied via `filesystem.deny` (nono's `system_write_linux`
 >   grants write there by default).
 > - **env allowlist** includes `PATH`/`HOME`/`GRAITH_*` (nono scrubs everything
->   else once `allow_vars` is non-empty).
+>   else). The `environment.allow_vars` block is **always emitted for the nono
+>   backend, even when the allowlist is empty** — env is scrubbed by default
+>   (fail closed). Omitting the block makes nono inherit the daemon's *entire*
+>   environment (fail-open credential leak), so graith emits an explicit
+>   (possibly empty) allowlist rather than relying on callers to populate
+>   `EnvKeys`. An empty allowlist scrubs all env; the daemon's `ensureEnvKeys`
+>   guard supplies the minimum viable set (`PATH`/`HOME`) on top.
 > - **Agent binary directory** is granted `filesystem.read` (nono does not
 >   auto-grant the launched command's location).
 
