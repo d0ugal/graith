@@ -184,6 +184,32 @@ prompt_file = ""
 # read_dirs = []
 # write_dirs = ["~/.config/graith"]
 
+# [sandbox]
+# OS-level sandbox for agent processes. Disabled by default. When enabled a
+# `backend` MUST be chosen — there is no default; an unset backend fails closed.
+#   backend = "safehouse"  # macOS Seatbelt (sandbox-exec)
+#   backend = "nono"       # Landlock+seccomp on Linux, Seatbelt on macOS
+# enabled = true
+# backend = "nono"
+# read_dirs  = ["~/Code/shared"]
+# write_dirs = ["~/.cache/agent"]
+# features   = ["ssh"]      # ssh -> $SSH_AUTH_SOCK; process-control -> signals
+#
+# signal_mode (nono only): whether the sandboxed process may signal others.
+# One of "isolated", "allow_same_sandbox" (nono default), "allow_all". Set to
+# "isolated" to make the `process-control` feature actually gate signalling
+# under nono (safehouse ignores this field).
+# signal_mode = "isolated"
+#
+# [sandbox.network]  (nono only)
+# Optional egress policy. Requires Landlock ABI v4 (kernel 6.7+) on Linux; a
+# requested policy on an older kernel fails closed. safehouse has no network
+# primitive and fails closed if a network policy is set.
+#   block = true                          # deny all outbound
+#   allow_domains = ["github.com", "https://api.anthropic.com/**"]  # proxy allowlist
+# block = false
+# allow_domains = []
+
 # Agent definitions
 # Each agent needs at minimum: command, args
 # Optional: resume_args, fork_args, env, idle_timeout, sandbox

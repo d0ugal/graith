@@ -166,9 +166,9 @@ untrusted code.
 - **Not adopting nono's registry / profile-authoring workflow as a user-facing
   surface.** graith generates an ephemeral profile from its own config; users
   configure the sandbox through graith's TOML.
-- **Not adding a network policy field to graith's config in this doc.** The
-  proposal describes where a future `network` allowlist plugs in; adding the
-  surface is deferred.
+- **Not adding a network policy field to graith's config in *Phase 1*.** The
+  proposal describes where the `network` allowlist plugs in; the surface was
+  added in **Phase 2** (implemented — see §6 and the phased rollout).
 - **No changes to the protocol schema** beyond one new persisted `Backend`
   field on `SandboxConfig`, the doctor output, and one new config key.
 - **Cross-backend feature parity is a stated non-goal for v1** where nono's
@@ -410,17 +410,28 @@ nono `landlock`, `profiles-groups`, `seatbelt` docs):
 
 ### 6. Network
 
-graith has no network policy field today; safehouse takes none. nono is
+graith had no network policy field in Phase 1; safehouse takes none. nono is
 **network-allowed by default** and offers `--block-net`,
 `--network-profile <minimal|developer|claude-code|...>`, and `--allow-domain`
 (L7 proxy allowlist; proxy mode needs `nono run`, another reason we use `run`).
-When graith grows a network config the mapping is direct (`block=true` →
-`network.block` / `--block-net`; `allow_domains` → `network.allow_domain`).
 
-**v1 emits no network policy — matching safehouse — so v1 provides *no egress
-protection*** (see threat model). A compromised agent with network access can
-exfiltrate anything it can read. Egress confinement and credential-leak-via-
-network are Phase 2/3, tied to #596.
+**Phase 2 (implemented).** graith grows a `[sandbox.network]` config block
+(`block: bool`, `allow_domains: []string`). The mapping onto the generated nono
+profile is direct and was **verified against nono v0.66.0's profile schema
+(`nono profile schema` / `nono profile validate`)**:
+
+- `block = true`  → `network.block: true`
+- `allow_domains` → `network.allow_domain: [...]` (plain hostnames or URL globs)
+
+An empty/absent policy emits no `network` section, so nono's allow-by-default
+still holds (matching Phase-1 behaviour byte-for-byte for users who don't set
+one). A network policy raises the enforcement floor: filtering egress needs
+Landlock ABI v4 (kernel 6.7+), so a requested policy on a `PartiallyEnforced`
+kernel **fails closed** (§B2), and because safehouse has no network primitive a
+network policy with `backend = "safehouse"` also fails closed.
+
+Credential-leak-via-network and credential injection (nono `--credential`)
+remain Phase 3, tied to #596.
 
 ### 7. `gr doctor` detection
 
@@ -465,7 +476,9 @@ maps each condition as follows:
 | `nono` binary absent | **Hard error** (session create fails), install hint. |
 | `nono` version below pin | **Hard error**; the profile schema / flags may not match, so we refuse rather than risk a mis-shaped policy. |
 | Landlock `NotEnforced` (kernel < 5.13/5.14 or Landlock disabled) | **Hard error.** This is the key rule: a mere warning here = fail-open. Same posture as safehouse on non-macOS. |
-| Landlock `PartiallyEnforced` — FS enforced, but ABI < v4 (no TCP filtering) | v1 emits no network policy, so **run** (FS confinement holds). doctor notes the degraded state. **If/when a network policy is set** and the ABI can't enforce it, that becomes a **hard error** (don't pretend to block egress). |
+| Landlock `PartiallyEnforced` — FS enforced, but ABI < v4 (no TCP filtering), **no network policy** | **Run** (FS confinement holds). doctor notes the degraded state. |
+| Landlock `PartiallyEnforced` and **a network policy is set** (Phase 2) | **Hard error** — the ABI can't filter egress; don't pretend to block it. |
+| A network policy is set with `backend = "safehouse"` (Phase 2) | **Hard error** — safehouse has no network primitive; use `nono`. |
 | macOS, Seatbelt unavailable (shouldn't happen) | **Hard error.** |
 | Feature has no faithful nono mapping (e.g. `clipboard`) | **Warn and run** — the *feature* is dropped, but the core FS/env sandbox still holds; this is a capability gap, not an enforcement failure. |
 
@@ -518,9 +531,14 @@ Rules (each gets a fixture in §C1/testing):
 >   This supersedes the "platform-aware default" recommendation in (a) below —
 >   there is no implicit default at all. (Breaking pre-1.0 change; migration note
 >   in README/docs: add `backend = "safehouse"` to keep prior behaviour.)
-> - **`process-control` is a no-op under nono** (nono's default `signal_mode`
->   already permits same-sandbox signals). It still gates under safehouse. We do
->   **not** set `signal_mode: isolated`. Documented as a cross-backend divergence.
+> - **`process-control` is a no-op under nono by default** (nono's default
+>   `signal_mode` already permits same-sandbox signals). It still gates under
+>   safehouse. **Phase 2 update:** graith now exposes `[sandbox] signal_mode`
+>   (`isolated` | `allow_same_sandbox` | `allow_all`) → `security.signal_mode`,
+>   so a user can opt into `isolated` to make `process-control` actually gate
+>   signalling under nono. When `signal_mode` is unset, the no-op behaviour is
+>   unchanged, and graith emits a hint (not a silent drop) telling the user how
+>   to gate signalling. Documented cross-backend divergence.
 > - **`ssh` = agent socket only** (`filesystem.unix_socket` for `$SSH_AUTH_SOCK`);
 >   the `ssh-keys` (`~/.ssh` read) token is deferred.
 > - **Old-kernel `NotEnforced` is a hard error** (never a warning) — the
@@ -591,10 +609,19 @@ Rules (each gets a fixture in §C1/testing):
    (binary + version pin + Landlock enforcement state). Unit-test profile
    generation + backend selection + argv/edge-case fixtures; **add ≥1 enforcement
    test** (§C1).
-2. **Phase 2 — richer features + network.** `security.*` tightening (optional
-   `signal_mode: isolated`), give `clipboard` meaning if a product decision lands
-   and nono grows a capability, add the graith `network` config field →
-   `network.block`/`allow_domain`, and the ABI-v4 fail-closed rule for network.
+2. **Phase 2 — richer features + network. ✅ Implemented (#632).** Added the
+   graith `[sandbox.network]` config field (`block` / `allow_domains`) →
+   nono profile `network.block` / `network.allow_domain`; the ABI-v4 fail-closed
+   rule (a network policy on a kernel below Landlock v4, or on `safehouse` which
+   has no network primitive, fails closed); and optional `signal_mode`
+   (`isolated` | `allow_same_sandbox` | `allow_all`) → `security.signal_mode`,
+   which makes `process-control` gate signalling under nono (Phase 1 left it a
+   no-op). `clipboard` remains a warned no-op: verified against nono v0.66.0's
+   profile schema, nono has **no** clipboard capability and graith defines no
+   clipboard semantics, so giving it meaning stays deferred to a future product
+   decision + upstream capability. All emitted profile fields
+   (`network.block`, `network.allow_domain`, `security.signal_mode`) were
+   verified against `nono profile validate` on v0.66.0.
 3. **Phase 3 — introspection now; credential injection with #596.** Ship the
    `gr why`-style command (`gr sandbox why`) against nono's oracle now (it is
    buildable and needs nothing from #596). Co-design graith credential handling

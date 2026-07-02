@@ -374,12 +374,18 @@ func TestBuildNonoProfileSSHWithoutSocketWarns(t *testing.T) {
 	}
 }
 
-func TestBuildNonoProfileProcessControlIsNoOp(t *testing.T) {
+func TestBuildNonoProfileProcessControlWarnsWithoutSignalMode(t *testing.T) {
 	opts := WrapOpts{Backend: BackendNono, WorktreeDir: "/tmp/bothy", Features: []string{"process-control"}}
 
 	p, warnings := buildNonoProfile("graith-bothy", opts, "")
-	if len(warnings) != 0 {
-		t.Errorf("process-control should not warn (it is an accepted no-op): %v", warnings)
+	// process-control alone is a no-op under nono, but graith surfaces a hint
+	// (don't silently drop) telling the user to set signal_mode = "isolated".
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "signal_mode") {
+		t.Errorf("process-control without signal_mode should warn to set signal_mode, got %v", warnings)
+	}
+
+	if p.Security != nil {
+		t.Errorf("process-control without signal_mode should not emit security section, got %+v", p.Security)
 	}
 
 	if len(p.Filesystem.UnixSocket) != 0 {
@@ -468,7 +474,7 @@ func TestNonoWrapWritesReadableProfile(t *testing.T) {
 func TestNonoAvailabilityBinaryAbsent(t *testing.T) {
 	look := func(string) (string, error) { return "", os.ErrNotExist }
 
-	av := nonoAvailability("", look, nil, nil)
+	av := nonoAvailability("", Requirements{}, look, nil, nil)
 	if av.CanEnforce {
 		t.Error("CanEnforce should be false when nono binary is absent")
 	}
@@ -478,7 +484,7 @@ func TestNonoAvailabilityBelowVersionPin(t *testing.T) {
 	look := func(string) (string, error) { return "/usr/bin/nono", nil }
 	ver := func(string) (string, error) { return "nono 0.1.0", nil }
 
-	av := nonoAvailability("", look, ver, func() landlockInfo { return landlockInfo{kind: landlockFull} })
+	av := nonoAvailability("", Requirements{}, look, ver, func() landlockInfo { return landlockInfo{kind: landlockFull} })
 	if av.CanEnforce {
 		t.Errorf("CanEnforce should be false below the version pin; detail=%q", av.Detail)
 	}
@@ -491,7 +497,7 @@ func TestNonoAvailabilityNotEnforcedIsHardFail(t *testing.T) {
 		return landlockInfo{kind: landlockNotEnforced, detail: "kernel 5.4 has no Landlock"}
 	}
 
-	av := nonoAvailability("", look, ver, ll)
+	av := nonoAvailability("", Requirements{}, look, ver, ll)
 	if av.CanEnforce {
 		t.Error("Landlock NotEnforced with sandbox enabled must be a hard fail (fail-open regression otherwise)")
 	}
@@ -502,7 +508,7 @@ func TestNonoAvailabilityPartialRunsDegraded(t *testing.T) {
 	ver := func(string) (string, error) { return "nono " + MinNonoVersion, nil }
 	ll := func() landlockInfo { return landlockInfo{kind: landlockPartial, detail: "no net filtering"} }
 
-	av := nonoAvailability("", look, ver, ll)
+	av := nonoAvailability("", Requirements{}, look, ver, ll)
 	if !av.CanEnforce {
 		t.Error("Partial Landlock (FS but no net ABI) should still enforce for FS-only v1")
 	}
@@ -517,7 +523,7 @@ func TestNonoAvailabilityFullEnforces(t *testing.T) {
 	ver := func(string) (string, error) { return "nono 1.2.3", nil }
 	ll := func() landlockInfo { return landlockInfo{kind: landlockFull} }
 
-	av := nonoAvailability("", look, ver, ll)
+	av := nonoAvailability("", Requirements{}, look, ver, ll)
 	if !av.CanEnforce || av.Degraded {
 		t.Errorf("Full Landlock should enforce and not be degraded, got %+v", av)
 	}
@@ -661,5 +667,225 @@ func TestIsWithin(t *testing.T) {
 
 	if isWithin("/hame/glen", "") {
 		t.Error("nothing is within an empty prefix")
+	}
+}
+
+// --- Phase 2: signal_mode (process-control tightening) -----------------------
+
+func TestBuildNonoProfileSignalModeIsolated(t *testing.T) {
+	opts := WrapOpts{
+		Backend:     BackendNono,
+		WorktreeDir: "/tmp/bothy",
+		Features:    []string{"process-control"},
+		SignalMode:  "isolated",
+	}
+
+	p, warnings := buildNonoProfile("graith-bothy", opts, "")
+	if p.Security == nil || p.Security.SignalMode != "isolated" {
+		t.Fatalf("signal_mode should be emitted as security.signal_mode=isolated, got %+v", p.Security)
+	}
+
+	// With signal_mode set, process-control is meaningful, so no hint fires.
+	for _, w := range warnings {
+		if strings.Contains(w, "process-control") {
+			t.Errorf("process-control should not warn when signal_mode is set: %q", w)
+		}
+	}
+}
+
+func TestBuildNonoProfileNoSignalModeOmitsSecurity(t *testing.T) {
+	opts := WrapOpts{Backend: BackendNono, WorktreeDir: "/tmp/bothy"}
+
+	p, _ := buildNonoProfile("graith-canny", opts, "")
+	if p.Security != nil {
+		t.Errorf("no signal_mode should omit the security section, got %+v", p.Security)
+	}
+}
+
+func TestBuildNonoProfileSignalModeSerialisesInSecurity(t *testing.T) {
+	opts := WrapOpts{Backend: BackendNono, WorktreeDir: "/tmp/bothy", SignalMode: "isolated"}
+
+	p, _ := buildNonoProfile("graith-kirk", opts, "")
+
+	data, err := json.Marshal(p)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	sec, ok := got["security"].(map[string]any)
+	if !ok {
+		t.Fatalf("security section missing from JSON: %s", data)
+	}
+
+	if sec["signal_mode"] != "isolated" {
+		t.Errorf("security.signal_mode = %v, want isolated", sec["signal_mode"])
+	}
+}
+
+// --- Phase 2: network egress policy ------------------------------------------
+
+func TestBuildNonoProfileNetworkBlock(t *testing.T) {
+	opts := WrapOpts{
+		Backend:     BackendNono,
+		WorktreeDir: "/tmp/bothy",
+		Network:     &NetworkPolicy{Block: true},
+	}
+
+	p, _ := buildNonoProfile("graith-thrawn", opts, "")
+	if p.Network == nil || !p.Network.Block {
+		t.Fatalf("network.block should be true, got %+v", p.Network)
+	}
+
+	if len(p.Network.AllowDomain) != 0 {
+		t.Errorf("no allow_domain expected, got %v", p.Network.AllowDomain)
+	}
+}
+
+func TestBuildNonoProfileNetworkAllowDomains(t *testing.T) {
+	opts := WrapOpts{
+		Backend:     BackendNono,
+		WorktreeDir: "/tmp/bothy",
+		Network:     &NetworkPolicy{AllowDomains: []string{"kirk.example", "https://glen.example/**"}},
+	}
+
+	p, _ := buildNonoProfile("graith-glen", opts, "")
+	if p.Network == nil {
+		t.Fatal("network section should be emitted")
+	}
+
+	if !slices.Equal(p.Network.AllowDomain, []string{"kirk.example", "https://glen.example/**"}) {
+		t.Errorf("allow_domain mismatch, got %v", p.Network.AllowDomain)
+	}
+}
+
+func TestBuildNonoProfileNoNetworkOmitsSection(t *testing.T) {
+	// A nil / empty network policy must leave nono's allow-by-default posture
+	// untouched (no network section emitted) — matches pre-Phase-2 behaviour.
+	for _, np := range []*NetworkPolicy{nil, {}, {AllowDomains: nil}} {
+		opts := WrapOpts{Backend: BackendNono, WorktreeDir: "/tmp/bothy", Network: np}
+
+		p, _ := buildNonoProfile("graith-neep", opts, "")
+		if p.Network != nil {
+			t.Errorf("empty network policy %+v should omit the network section, got %+v", np, p.Network)
+		}
+	}
+}
+
+func TestBuildNonoProfileNetworkSerialises(t *testing.T) {
+	opts := WrapOpts{
+		Backend:     BackendNono,
+		WorktreeDir: "/tmp/bothy",
+		Network:     &NetworkPolicy{Block: true, AllowDomains: []string{"kirk.example"}},
+	}
+
+	p, _ := buildNonoProfile("graith-brig", opts, "")
+
+	data, err := json.Marshal(p)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	net, ok := got["network"].(map[string]any)
+	if !ok {
+		t.Fatalf("network section missing from JSON: %s", data)
+	}
+
+	if net["block"] != true {
+		t.Errorf("network.block = %v, want true", net["block"])
+	}
+
+	dom, ok := net["allow_domain"].([]any)
+	if !ok || len(dom) != 1 || dom[0] != "kirk.example" {
+		t.Errorf("network.allow_domain = %v, want [kirk.example]", net["allow_domain"])
+	}
+}
+
+// --- Phase 2: ABI-v4 network fail-closed (§B2) -------------------------------
+
+func TestNonoAvailabilityPartialWithNetworkFailsClosed(t *testing.T) {
+	look := func(string) (string, error) { return "/usr/bin/nono", nil }
+	ver := func(string) (string, error) { return "nono " + MinNonoVersion, nil }
+	ll := func() landlockInfo {
+		return landlockInfo{kind: landlockPartial, detail: "kernel 5.15: no network filtering"}
+	}
+
+	// FS-only request on a partial kernel: runs degraded.
+	if av := nonoAvailability("", Requirements{Network: false}, look, ver, ll); !av.CanEnforce || !av.Degraded {
+		t.Errorf("partial + no network should run degraded, got %+v", av)
+	}
+
+	// Network request on the same partial kernel: must fail closed (ABI v4).
+	av := nonoAvailability("", Requirements{Network: true}, look, ver, ll)
+	if av.CanEnforce {
+		t.Errorf("partial Landlock + network policy must fail closed (needs ABI v4), got %+v", av)
+	}
+
+	if !strings.Contains(av.Detail, "ABI v4") {
+		t.Errorf("fail-closed detail should mention ABI v4, got %q", av.Detail)
+	}
+}
+
+func TestNonoAvailabilityFullWithNetworkEnforces(t *testing.T) {
+	look := func(string) (string, error) { return "/usr/bin/nono", nil }
+	ver := func(string) (string, error) { return "nono " + MinNonoVersion, nil }
+	ll := func() landlockInfo { return landlockInfo{kind: landlockFull} }
+
+	av := nonoAvailability("", Requirements{Network: true}, look, ver, ll)
+	if !av.CanEnforce || av.Degraded {
+		t.Errorf("full Landlock should enforce a network policy without degradation, got %+v", av)
+	}
+}
+
+func TestNonoAvailabilityMacOSWithNetworkEnforces(t *testing.T) {
+	look := func(string) (string, error) { return "/usr/local/bin/nono", nil }
+	ver := func(string) (string, error) { return "nono " + MinNonoVersion, nil }
+	// landlockNotApplicable is the macOS (Seatbelt) case; network filtering is
+	// handled by nono's proxy there, so a network policy is enforceable.
+	ll := func() landlockInfo { return landlockInfo{kind: landlockNotApplicable} }
+
+	av := nonoAvailability("", Requirements{Network: true}, look, ver, ll)
+	if !av.CanEnforce {
+		t.Errorf("macOS nono should enforce a network policy, got %+v", av)
+	}
+}
+
+// --- Phase 2: safehouse rejects a network policy (fail-closed) ---------------
+
+func TestSafehouseFailsClosedOnNetworkPolicy(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("safehouse only enforces on darwin; network gate tested via nono path elsewhere")
+	}
+
+	av := safehouseBackend{}.Availability("", Requirements{Network: true})
+	if av.CanEnforce {
+		t.Errorf("safehouse has no network primitive; a network policy must fail closed, got %+v", av)
+	}
+}
+
+func TestNetworkPolicyIsSet(t *testing.T) {
+	cases := []struct {
+		name string
+		np   *NetworkPolicy
+		want bool
+	}{
+		{"nil", nil, false},
+		{"empty", &NetworkPolicy{}, false},
+		{"block", &NetworkPolicy{Block: true}, true},
+		{"domains", &NetworkPolicy{AllowDomains: []string{"kirk.example"}}, true},
+	}
+	for _, tc := range cases {
+		if got := tc.np.IsSet(); got != tc.want {
+			t.Errorf("%s: IsSet()=%v want %v", tc.name, got, tc.want)
+		}
 	}
 }

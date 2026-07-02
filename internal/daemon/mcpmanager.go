@@ -256,7 +256,9 @@ func (m *MCPManager) startProcess(serverCfg config.MCPServerConfig, proxyID stri
 
 		// Honour the configured backend (not just safehouse). Fail closed if it
 		// cannot enforce, matching the session sandbox semantics.
-		avail, err := sandbox.CheckAvailability(merged.Backend, merged.Command)
+		req := sandbox.Requirements{Network: merged.Network.IsSet()}
+
+		avail, err := sandbox.CheckAvailability(merged.Backend, merged.Command, req)
 		if err != nil {
 			_ = stderrFile.Close()
 			return nil, fmt.Errorf("sandbox for MCP server %s: %w", serverCfg.Name, err)
@@ -284,6 +286,8 @@ func (m *MCPManager) startProcess(serverCfg config.MCPServerConfig, proxyID stri
 			WriteDirs:      merged.WriteDirs,
 			Features:       merged.Features,
 			EnvKeys:        envKeys,
+			SignalMode:     merged.SignalMode,
+			Network:        networkPolicy(merged.Network),
 			BackendCommand: merged.Command,
 			// No session ID here; nono writes a temp profile (empty ProfilePath).
 		}

@@ -32,6 +32,17 @@ type WrapOpts struct {
 	Features    []string
 	EnvKeys     []string
 
+	// SignalMode maps to nono's security.signal_mode ("isolated",
+	// "allow_same_sandbox", "allow_all"). Empty inherits nono's default. The
+	// safehouse backend ignores it.
+	SignalMode string
+
+	// Network is the optional egress policy. Nil means no network restriction
+	// (nono is allow-by-default). When set, the nono backend emits a
+	// network.block / network.allow_domain section; the safehouse backend has
+	// no network primitive and warns that it cannot enforce it.
+	Network *NetworkPolicy
+
 	// BackendCommand overrides the backend binary name/path. Empty means the
 	// backend's own default ("safehouse" / "nono"). Formerly SafehouseCommand.
 	BackendCommand string
@@ -43,13 +54,40 @@ type WrapOpts struct {
 	ProfilePath string
 }
 
+// NetworkPolicy is the resolved egress policy passed to a backend. It mirrors
+// config.SandboxNetworkConfig. Nil ⇒ no restriction. It maps onto nono
+// v0.66.0's profile network section (network.block / network.allow_domain).
+type NetworkPolicy struct {
+	// Block denies all outbound network (nono network.block = true).
+	Block bool
+	// AllowDomains is the L7 proxy allowlist (nono network.allow_domain).
+	AllowDomains []string
+}
+
+// IsSet reports whether any egress restriction is requested.
+func (n *NetworkPolicy) IsSet() bool {
+	return n != nil && (n.Block || len(n.AllowDomains) > 0)
+}
+
+// Requirements describes the enforcement controls a resolved policy needs, so
+// Availability can fail closed when the host cannot enforce one of them. Today
+// only network filtering raises the floor beyond base filesystem enforcement
+// (it needs Landlock ABI v4 / kernel 6.7+ on Linux).
+type Requirements struct {
+	// Network is true when a network policy is requested. On Linux this
+	// requires Landlock ABI v4; a host that only supports filesystem
+	// enforcement must fail closed rather than pretend to block egress.
+	Network bool
+}
+
 // Backend turns a resolved sandbox policy into a wrapped command.
 type Backend interface {
 	// Name is the config value that selects this backend.
 	Name() string
-	// Availability reports whether this backend can enforce on this host now.
-	// command overrides the backend binary; empty uses the backend default.
-	Availability(command string) Availability
+	// Availability reports whether this backend can enforce on this host now,
+	// given the controls the policy requires. command overrides the backend
+	// binary; empty uses the backend default.
+	Availability(command string, req Requirements) Availability
 	// Wrap returns the command and args to exec so the child runs sandboxed.
 	Wrap(command string, args []string, opts WrapOpts) (string, []string, error)
 }
@@ -92,25 +130,26 @@ func Wrap(command string, args []string, opts WrapOpts) (string, []string, error
 	return be.Wrap(command, args, opts)
 }
 
-// CheckAvailability reports whether the named backend can enforce on this host.
-// command overrides the backend binary; empty uses the backend default.
-func CheckAvailability(backend, command string) (Availability, error) {
+// CheckAvailability reports whether the named backend can enforce on this host,
+// given the controls req requires (e.g. network filtering). command overrides
+// the backend binary; empty uses the backend default.
+func CheckAvailability(backend, command string, req Requirements) (Availability, error) {
 	be, err := backendByName(backend)
 	if err != nil {
 		return Availability{}, err
 	}
 
-	return be.Availability(command), nil
+	return be.Availability(command, req), nil
 }
 
 // Available reports whether the default (safehouse) backend can enforce.
 // Retained for callers that predate pluggable backends.
 func Available() bool {
-	return safehouseBackend{}.Availability("").CanEnforce
+	return safehouseBackend{}.Availability("", Requirements{}).CanEnforce
 }
 
 // AvailableCommand reports whether the safehouse backend can enforce with the
 // given binary name. Retained for backward compatibility.
 func AvailableCommand(command string) bool {
-	return safehouseBackend{}.Availability(command).CanEnforce
+	return safehouseBackend{}.Availability(command, Requirements{}).CanEnforce
 }

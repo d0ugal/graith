@@ -260,7 +260,9 @@ func (dc *doctorContext) checkSandboxBackend() {
 		return
 	}
 
-	avail, err := sandbox.CheckAvailability(backend, cfg.Sandbox.Command)
+	req := sandbox.Requirements{Network: cfg.Sandbox.Network.IsSet()}
+
+	avail, err := sandbox.CheckAvailability(backend, cfg.Sandbox.Command, req)
 	if err != nil {
 		dc.failf("environment", "Sandbox backend invalid: %v", err)
 
@@ -282,6 +284,15 @@ func (dc *doctorContext) checkSandboxBackend() {
 		dc.warnf("environment", "Sandbox enabled (backend %q, degraded): %s", backend, avail.Detail)
 	default:
 		dc.passf("environment", "Sandbox enabled (backend %q available): %s", backend, avail.Detail)
+	}
+
+	if cfg.Sandbox.Network.IsSet() {
+		switch {
+		case cfg.Sandbox.Network.Block:
+			dc.passf("environment", "Sandbox network policy: outbound blocked (network.block)")
+		case len(cfg.Sandbox.Network.AllowDomains) > 0:
+			dc.passf("environment", "Sandbox network policy: proxy allowlist of %d domain(s)", len(cfg.Sandbox.Network.AllowDomains))
+		}
 	}
 }
 

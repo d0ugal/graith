@@ -143,7 +143,9 @@ graith never silently runs unsandboxed. The rules:
 | Backend binary not on `$PATH` | **Hard error** (with an install hint). |
 | nono version below the required minimum | **Hard error** (profile schema may not match). |
 | Linux kernel too old for Landlock (`NotEnforced`) | **Hard error** — a warning here would be a fail-open regression. |
-| Landlock present but no network-filtering ABI (`PartiallyEnforced`) | **Runs** — filesystem confinement holds (v1 emits no network policy). `gr doctor` notes the degraded state. |
+| Landlock present but no network-filtering ABI (`PartiallyEnforced`), **no** network policy set | **Runs** — filesystem confinement holds. `gr doctor` notes the degraded state. |
+| Landlock present but no network-filtering ABI (`PartiallyEnforced`), **network policy set** | **Hard error** — filtering egress needs Landlock ABI v4 (kernel 6.7+); graith refuses rather than pretend to block. |
+| Network policy set with `backend = "safehouse"` | **Hard error** — safehouse has no network primitive; use `nono`. |
 | safehouse selected on non-macOS | **Hard error.** |
 
 ## `gr doctor` checks
@@ -197,12 +199,17 @@ allow) — a reason to keep sandbox dirs outside `/tmp`.
 
 ```toml
 [sandbox]
-enabled    = false            # wrap all agents in the sandbox
-backend    = "nono"           # REQUIRED when enabled: "safehouse" | "nono"
-command    = "nono"           # path/name of the backend binary (default: backend name)
-features   = ["ssh"]          # feature gates (see caveats below)
-read_dirs  = ["~/Code"]       # additional read-only paths
-write_dirs = []               # additional read-write paths
+enabled     = false           # wrap all agents in the sandbox
+backend     = "nono"          # REQUIRED when enabled: "safehouse" | "nono"
+command     = "nono"          # path/name of the backend binary (default: backend name)
+features    = ["ssh"]         # feature gates (see caveats below)
+read_dirs   = ["~/Code"]      # additional read-only paths
+write_dirs  = []              # additional read-write paths
+signal_mode = "isolated"      # nono only: "isolated" | "allow_same_sandbox" | "allow_all"
+
+[sandbox.network]             # nono only; needs Landlock ABI v4 (kernel 6.7+)
+block = true                  # deny all outbound network
+# allow_domains = ["github.com", "https://api.anthropic.com/**"]  # OR a proxy allowlist
 ```
 
 ### Per-agent overrides
@@ -222,7 +229,8 @@ disabled = true               # force-disable for this agent
 ### Merge behavior
 
 - `features`, `read_dirs`, and `write_dirs` are merged (global + agent, deduplicated)
-- `backend` and `command` are overridable per-agent (agent takes precedence)
+- `backend`, `command`, and `signal_mode` are overridable per-agent (agent takes precedence)
+- `network` is overridable per-agent — an agent's `[agents.*.sandbox.network]` replaces the global policy wholesale (not merged element-wise)
 - `disabled = true` on an agent overrides `enabled = true` on the global config
 - `enabled = true` on an agent enables sandboxing even if the global config has `enabled = false`
 
@@ -233,8 +241,30 @@ disabled = true               # force-disable for this agent
 | Feature | safehouse | nono |
 |---------|-----------|------|
 | `ssh` | grants `SSH_AUTH_SOCK` access | grants the `$SSH_AUTH_SOCK` Unix socket (agent socket only; raw `~/.ssh` key access is not granted in v1). Warns if `SSH_AUTH_SOCK` is unset. |
-| `process-control` | allows signal sending | **no-op** — nono's default already permits same-sandbox signals. This is a documented cross-backend divergence: the feature gates behavior under safehouse but not under nono. |
+| `process-control` | allows signal sending | **no-op on its own** — nono's default already permits same-sandbox signals. Set `signal_mode = "isolated"` (below) to make it actually gate signalling under nono. Documented cross-backend divergence. |
 | anything else (e.g. `clipboard`) | passed to safehouse | **not mapped** — nono has no equivalent; graith warns and ignores it rather than silently dropping it. |
+
+### `signal_mode` (nono only)
+
+`signal_mode` maps to nono's `security.signal_mode` and controls whether the
+sandboxed process may signal other processes: `isolated` (no signalling outside
+the sandbox), `allow_same_sandbox` (nono's default), or `allow_all`. Setting it
+to `isolated` is what makes the `process-control` feature meaningful under nono.
+Leaving it unset inherits nono's base default. `safehouse` ignores it.
+
+### Network egress (nono only)
+
+By default agents keep unrestricted outbound network. `[sandbox.network]` adds an
+egress policy, mapped onto nono's profile `network` section:
+
+- `block = true` → `network.block`: deny all outbound access.
+- `allow_domains = [...]` → `network.allow_domain`: nono runs its L7 filtering
+  proxy and only these hosts / URL globs are reachable.
+
+Network filtering requires **Landlock ABI v4 (Linux kernel 6.7+)**. A network
+policy on an older kernel fails closed (see the fail-closed table). `safehouse`
+has no network primitive, so a network policy with `backend = "safehouse"` also
+fails closed — use `nono` for egress control.
 
 ## Path restrictions
 
@@ -290,15 +320,19 @@ sandbox = false    # run this MCP server outside the sandbox
 
 ## Network egress
 
-Neither backend restricts outbound network in v1 (safehouse's gates are coarse;
-graith emits no nono network policy yet). A compromised agent with network
-access can still exfiltrate data it can read. Egress allowlisting via nono's L7
-proxy is planned for a later phase.
+By default neither backend restricts outbound network. Under `nono` you can add
+an egress policy with `[sandbox.network]` (`block` / `allow_domains`) — see the
+[Network egress](#network-egress-nono-only) section above. Without a policy, a
+compromised agent with network access can still exfiltrate data it can read, so
+set an egress policy for untrusted workloads. `safehouse` cannot filter egress.
+Credential injection (nono's `--credential` proxy) is a later phase.
 
 ## Limitations
 
-- `safehouse`: macOS only; requires safehouse installed separately.
+- `safehouse`: macOS only; requires safehouse installed separately; cannot
+  filter network egress.
 - `nono`: requires the nono binary installed separately; Linux needs kernel
-  5.13+ (Landlock). Network filtering and credential injection are not wired up
-  yet.
-- `process-control` is a no-op under nono (see feature caveats).
+  5.13+ (Landlock) for filesystem enforcement and **6.7+ (Landlock ABI v4)** for
+  network filtering. Credential injection is not wired up yet.
+- `process-control` is a no-op under nono unless `signal_mode = "isolated"` is
+  set (see feature caveats).

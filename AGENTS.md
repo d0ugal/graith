@@ -111,9 +111,14 @@ builds a `safehouse wrap` command or generates a per-session nono JSON profile
 `filesystem.allow` (read+write, not the write-only `filesystem.write`), the env
 allowlist to `environment.allow_vars` (incl. PATH/HOME/GRAITH_*), grants read on
 the agent binary dir, and re-denies read-only paths under `/tmp`/`$TMPDIR`
-(writable by default under nono). `process-control` gates under safehouse but is
-a no-op under nono. If the selected backend can't enforce (missing binary,
-kernel too old, nono below the version pin), session creation fails closed. See
+(writable by default under nono). An optional `[sandbox.network]` block
+(`block` / `allow_domains`) maps to the profile's `network.block` /
+`network.allow_domain`, and `[sandbox] signal_mode` maps to
+`security.signal_mode`. `process-control` gates under safehouse but is a no-op
+under nono unless `signal_mode = "isolated"` is set. If the selected backend
+can't enforce (missing binary, kernel too old, nono below the version pin, or a
+network policy requested on a kernel below Landlock ABI v4 / on safehouse),
+session creation fails closed. See
 `docs/design/2026-07-02-nono-sandbox-design.md`.
 
 **Scenarios**: Declarative multi-session orchestration. A TOML file defines

@@ -109,6 +109,48 @@ func TestAgentBackendOverridesGlobal(t *testing.T) {
 	}
 }
 
+// TestSandboxOptsCarryNetworkAndSignalMode: Phase-2 fields must reach WrapOpts
+// so the nono backend can emit the network / security.signal_mode sections.
+func TestSandboxOptsCarryNetworkAndSignalMode(t *testing.T) {
+	cfg := config.Default()
+	cfg.Sandbox = config.SandboxConfig{
+		Enabled:    true,
+		Backend:    "nono",
+		SignalMode: "isolated",
+		Network:    &config.SandboxNetworkConfig{Block: true, AllowDomains: []string{"kirk.example"}},
+	}
+
+	sm := newSandboxTestManager(t, cfg)
+
+	opts := sm.sandboxOptsFromConfig(cfg.Sandbox, "braw123", "/tmp/bothy", "claude", []string{"TERM"}, false)
+
+	if opts.SignalMode != "isolated" {
+		t.Errorf("opts.SignalMode = %q, want isolated", opts.SignalMode)
+	}
+
+	if opts.Network == nil || !opts.Network.Block {
+		t.Fatalf("opts.Network should carry block=true, got %+v", opts.Network)
+	}
+
+	if len(opts.Network.AllowDomains) != 1 || opts.Network.AllowDomains[0] != "kirk.example" {
+		t.Errorf("opts.Network.AllowDomains = %v, want [kirk.example]", opts.Network.AllowDomains)
+	}
+}
+
+// TestSandboxOptsEmptyNetworkIsNil: an unset network policy must yield a nil
+// WrapOpts.Network so the backend leaves nono's allow-by-default untouched.
+func TestSandboxOptsEmptyNetworkIsNil(t *testing.T) {
+	cfg := config.Default()
+	cfg.Sandbox = config.SandboxConfig{Enabled: true, Backend: "nono"}
+
+	sm := newSandboxTestManager(t, cfg)
+
+	opts := sm.sandboxOptsFromConfig(cfg.Sandbox, "canny123", "/tmp/bothy", "claude", nil, false)
+	if opts.Network != nil {
+		t.Errorf("opts.Network should be nil when no policy is set, got %+v", opts.Network)
+	}
+}
+
 // TestSandboxOptsInjectsPathAndHome: nono's env allowlist scrubs everything not
 // listed, so PATH and HOME must be added to EnvKeys or the agent breaks.
 func TestSandboxOptsInjectsPathAndHome(t *testing.T) {
