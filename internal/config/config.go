@@ -349,6 +349,39 @@ type SandboxConfig struct {
 	Features  []string `json:"features,omitempty"   toml:"features"`
 	ReadDirs  []string `json:"read_dirs,omitempty"  toml:"read_dirs"`
 	WriteDirs []string `json:"write_dirs,omitempty" toml:"write_dirs"`
+	// SignalMode controls whether the sandboxed process may signal other
+	// processes. It maps to nono's security.signal_mode ("isolated",
+	// "allow_same_sandbox", "allow_all"). Empty inherits nono's base-profile
+	// default (allow_same_sandbox). safehouse ignores it. Setting "isolated"
+	// makes graith's `process-control` semantics meaningful under nono (Phase 1
+	// left it a no-op). See the nono sandbox design doc §C5.
+	SignalMode string `json:"signal_mode,omitempty" toml:"signal_mode"`
+	// Network is an optional egress policy. It maps to the nono profile's
+	// network section (network.block / network.allow_domain). safehouse has no
+	// network primitive and only warns. A network policy also raises the
+	// enforcement floor: nono needs Landlock ABI v4 (kernel 6.7+) to filter
+	// network, so a requested policy on an older kernel fails closed.
+	Network *SandboxNetworkConfig `json:"network,omitempty" toml:"network"`
+}
+
+// SandboxNetworkConfig is graith's egress policy. It maps directly onto nono
+// v0.66.0's profile network section: Block -> network.block, AllowDomains ->
+// network.allow_domain (an L7 proxy allowlist; a plain hostname allows the
+// host, a URL glob restricts to matching endpoints).
+type SandboxNetworkConfig struct {
+	// Block denies all outbound network access (nono is network-allowed by
+	// default). Maps to network.block = true.
+	Block bool `json:"block,omitempty" toml:"block"`
+	// AllowDomains is the proxy allowlist. Maps to network.allow_domain. When
+	// set, nono runs its L7 filtering proxy and only these domains are
+	// reachable. Entries are plain hostnames or URL globs.
+	AllowDomains []string `json:"allow_domains,omitempty" toml:"allow_domains"`
+}
+
+// IsSet reports whether this network policy requests any egress restriction.
+// A nil or empty config requests nothing (matches nono's allow-by-default).
+func (n *SandboxNetworkConfig) IsSet() bool {
+	return n != nil && (n.Block || len(n.AllowDomains) > 0)
 }
 
 func MergeMCPServers(global []MCPServerConfig, overrides map[string]MCPServerConfig) []MCPServerConfig {
@@ -413,9 +446,11 @@ func MergeMCPServers(global []MCPServerConfig, overrides map[string]MCPServerCon
 
 func (s SandboxConfig) Merge(agent SandboxConfig) SandboxConfig {
 	merged := SandboxConfig{
-		Enabled: s.Enabled || agent.Enabled,
-		Backend: s.Backend,
-		Command: s.Command,
+		Enabled:    s.Enabled || agent.Enabled,
+		Backend:    s.Backend,
+		Command:    s.Command,
+		SignalMode: s.SignalMode,
+		Network:    s.Network,
 	}
 
 	if agent.Disabled != nil && *agent.Disabled {
@@ -435,7 +470,39 @@ func (s SandboxConfig) Merge(agent SandboxConfig) SandboxConfig {
 		merged.Command = agent.Command
 	}
 
+	if agent.SignalMode != "" {
+		merged.SignalMode = agent.SignalMode
+	}
+
+	// An agent-level network policy overrides the global one wholesale (like
+	// Backend/Command), rather than being merged element-wise. A network policy
+	// is a single coherent posture; interleaving global+agent domains would be
+	// surprising.
+	if agent.Network != nil {
+		merged.Network = agent.Network
+	}
+
 	return merged
+}
+
+// SandboxSignalModes are the accepted values for [sandbox] signal_mode. They
+// mirror nono v0.66.0's security.signal_mode enum. Empty is also valid (inherit
+// nono's base-profile default).
+var SandboxSignalModes = []string{"isolated", "allow_same_sandbox", "allow_all"}
+
+// validateSignalMode rejects an unknown signal_mode value. Empty is allowed.
+func (s SandboxConfig) validateSignalMode(where string) error {
+	if s.SignalMode == "" {
+		return nil
+	}
+
+	for _, m := range SandboxSignalModes {
+		if s.SignalMode == m {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("%s.signal_mode %q is invalid (want one of %s)", where, s.SignalMode, strings.Join(SandboxSignalModes, ", "))
 }
 
 func (c *Config) OrchestratorSandboxMerged(agentName string) SandboxConfig {
@@ -526,6 +593,16 @@ func (c *Config) Validate() error {
 
 	for _, r := range c.Repos {
 		if err := r.Validate(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+
+	if err := c.Sandbox.validateSignalMode("sandbox"); err != nil {
+		errs = append(errs, err)
+	}
+
+	for agentName, agent := range c.Agents {
+		if err := agent.Sandbox.validateSignalMode("agents." + agentName + ".sandbox"); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -706,7 +783,8 @@ func mergeAgent(def, usr Agent) Agent {
 
 	if usr.Sandbox.Enabled || usr.Sandbox.Disabled != nil || usr.Sandbox.Backend != "" ||
 		usr.Sandbox.Command != "" || usr.Sandbox.Features != nil ||
-		usr.Sandbox.ReadDirs != nil || usr.Sandbox.WriteDirs != nil {
+		usr.Sandbox.ReadDirs != nil || usr.Sandbox.WriteDirs != nil ||
+		usr.Sandbox.SignalMode != "" || usr.Sandbox.Network != nil {
 		def.Sandbox = usr.Sandbox
 	}
 

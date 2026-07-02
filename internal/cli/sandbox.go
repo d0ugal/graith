@@ -96,7 +96,9 @@ func runSandboxWhy() error {
 
 	// Confirm nono can be reached before building a profile, so the error is
 	// about the backend, not a stray decision.
-	avail, err := sandbox.CheckAvailability(merged.Backend, merged.Command)
+	req := sandbox.Requirements{Network: merged.Network.IsSet()}
+
+	avail, err := sandbox.CheckAvailability(merged.Backend, merged.Command, req)
 	if err != nil {
 		return err
 	}
@@ -131,14 +133,24 @@ func runSandboxWhy() error {
 func whyWrapOpts(merged config.SandboxConfig) sandbox.WrapOpts {
 	envKeys := ensureWhyEnvKeys(nil, "PATH", "HOME")
 
-	return sandbox.WrapOpts{
+	opts := sandbox.WrapOpts{
 		Backend:        merged.Backend,
 		ReadDirs:       expandWhyPaths(merged.ReadDirs),
 		WriteDirs:      expandWhyPaths(merged.WriteDirs),
 		Features:       merged.Features,
 		EnvKeys:        envKeys,
+		SignalMode:     merged.SignalMode,
 		BackendCommand: merged.Command,
 	}
+
+	if merged.Network.IsSet() {
+		opts.Network = &sandbox.NetworkPolicy{
+			Block:        merged.Network.Block,
+			AllowDomains: merged.Network.AllowDomains,
+		}
+	}
+
+	return opts
 }
 
 // expandWhyPaths mirrors the daemon's expandPaths: ~-expand, make absolute,

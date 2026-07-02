@@ -14,7 +14,7 @@ type safehouseBackend struct{}
 
 func (safehouseBackend) Name() string { return BackendSafehouse }
 
-func (safehouseBackend) Availability(command string) Availability {
+func (safehouseBackend) Availability(command string, req Requirements) Availability {
 	if command == "" {
 		command = BackendSafehouse
 	}
@@ -30,6 +30,17 @@ func (safehouseBackend) Availability(command string) Availability {
 		return Availability{
 			CanEnforce: false,
 			Detail:     fmt.Sprintf("safehouse binary %q not found in PATH", command),
+		}
+	}
+
+	// safehouse has no network-egress primitive in graith's mapping. A
+	// requested network policy would silently not be enforced, which is a
+	// fail-open. Fail closed instead (design doc §6/§B2): use backend "nono"
+	// for network filtering.
+	if req.Network {
+		return Availability{
+			CanEnforce: false,
+			Detail:     "safehouse cannot enforce a network policy; use backend \"nono\" for network filtering",
 		}
 	}
 

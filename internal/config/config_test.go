@@ -406,6 +406,78 @@ func TestSandboxConfigMerge(t *testing.T) {
 	}
 }
 
+func TestSandboxConfigMergeNetworkAndSignalMode(t *testing.T) {
+	// Global network + signal_mode inherit when the agent sets neither.
+	global := SandboxConfig{
+		Enabled:    true,
+		SignalMode: "isolated",
+		Network:    &SandboxNetworkConfig{Block: true},
+	}
+	merged := global.Merge(SandboxConfig{})
+
+	if merged.SignalMode != "isolated" {
+		t.Errorf("signal_mode should inherit from global, got %q", merged.SignalMode)
+	}
+
+	if !merged.Network.IsSet() || !merged.Network.Block {
+		t.Errorf("network should inherit from global, got %+v", merged.Network)
+	}
+
+	// Agent overrides both wholesale.
+	agent := SandboxConfig{
+		SignalMode: "allow_all",
+		Network:    &SandboxNetworkConfig{AllowDomains: []string{"kirk.example"}},
+	}
+	merged = global.Merge(agent)
+
+	if merged.SignalMode != "allow_all" {
+		t.Errorf("agent signal_mode should win, got %q", merged.SignalMode)
+	}
+
+	if merged.Network.Block {
+		t.Error("agent network policy should replace global wholesale (block should be false)")
+	}
+
+	if len(merged.Network.AllowDomains) != 1 || merged.Network.AllowDomains[0] != "kirk.example" {
+		t.Errorf("agent allow_domains should win, got %v", merged.Network.AllowDomains)
+	}
+}
+
+func TestSandboxSignalModeValidation(t *testing.T) {
+	valid := &Config{Sandbox: SandboxConfig{SignalMode: "isolated"}}
+	if err := valid.Validate(); err != nil {
+		t.Errorf("isolated is a valid signal_mode: %v", err)
+	}
+
+	empty := &Config{Sandbox: SandboxConfig{}}
+	if err := empty.Validate(); err != nil {
+		t.Errorf("empty signal_mode should be valid: %v", err)
+	}
+
+	bad := &Config{Sandbox: SandboxConfig{SignalMode: "thrawn"}}
+	if err := bad.Validate(); err == nil {
+		t.Error("an unknown signal_mode should be rejected by Validate")
+	}
+}
+
+func TestNetworkConfigIsSet(t *testing.T) {
+	if (*SandboxNetworkConfig)(nil).IsSet() {
+		t.Error("nil network config should not be set")
+	}
+
+	if (&SandboxNetworkConfig{}).IsSet() {
+		t.Error("empty network config should not be set")
+	}
+
+	if !(&SandboxNetworkConfig{Block: true}).IsSet() {
+		t.Error("block=true should be set")
+	}
+
+	if !(&SandboxNetworkConfig{AllowDomains: []string{"kirk.example"}}).IsSet() {
+		t.Error("allow_domains should be set")
+	}
+}
+
 func TestSandboxConfigMergeAgentDisabled(t *testing.T) {
 	global := SandboxConfig{Enabled: true}
 	disabled := true

@@ -4247,7 +4247,9 @@ func (sm *SessionManager) resolveSandboxFromConfig(cfg *config.Config, agentName
 			agentName, sandbox.BackendSafehouse, sandbox.BackendNono)
 	}
 
-	avail, err := sandbox.CheckAvailability(merged.Backend, merged.Command)
+	req := sandbox.Requirements{Network: merged.Network.IsSet()}
+
+	avail, err := sandbox.CheckAvailability(merged.Backend, merged.Command, req)
 	if err != nil {
 		return false, fmt.Errorf("sandbox enabled for agent %q: %w", agentName, err)
 	}
@@ -4307,8 +4309,24 @@ func (sm *SessionManager) sandboxOptsFromConfig(merged config.SandboxConfig, ses
 		WriteDirs:      writeDirs,
 		Features:       merged.Features,
 		EnvKeys:        envKeys,
+		SignalMode:     merged.SignalMode,
+		Network:        networkPolicy(merged.Network),
 		BackendCommand: merged.Command,
 		ProfilePath:    profilePath,
+	}
+}
+
+// networkPolicy converts a config network policy into the sandbox package's
+// resolved NetworkPolicy. Nil (or an empty policy) yields nil so the backend
+// leaves nono's allow-by-default posture untouched.
+func networkPolicy(n *config.SandboxNetworkConfig) *sandbox.NetworkPolicy {
+	if !n.IsSet() {
+		return nil
+	}
+
+	return &sandbox.NetworkPolicy{
+		Block:        n.Block,
+		AllowDomains: n.AllowDomains,
 	}
 }
 

@@ -380,11 +380,38 @@ When `sandbox.enabled = true`, the daemon resolves the merged policy, expands `~
 
 **nono** generates a per-session JSON profile and runs `nono run --profile <file> -- <agent>`. The profile `extends: "default"` (inheriting nono's audited credential/shell-history deny groups), maps the worktree and `write_dirs` to `filesystem.allow` (read+write — never nono's write-only `filesystem.write`), `read_dirs` to read-only, grants read on the agent binary's directory (nono does not auto-grant it), and maps the **environment to an allowlist** (`environment.allow_vars`, including `PATH`/`HOME`/`GRAITH_*`) so host secrets aren't leaked — nono otherwise inherits all env. Read-only paths that fall under nono's default-writable `/tmp`/`$TMPDIR` are re-denied so the read-only guarantee holds.
 
-The sandbox **fails closed**: if enabled but the backend can't enforce (no backend chosen, binary missing, nono below the minimum version, or a Linux kernel too old for Landlock), session creation is refused. A Linux kernel with Landlock filesystem support but no network-filtering ABI runs in a *degraded* mode (filesystem confinement still holds). `gr doctor` reports all of this.
+The sandbox **fails closed**: if enabled but the backend can't enforce (no backend chosen, binary missing, nono below the minimum version, or a Linux kernel too old for Landlock), session creation is refused. A Linux kernel with Landlock filesystem support but no network-filtering ABI runs in a *degraded* mode (filesystem confinement still holds, but see network below). `gr doctor` reports all of this.
+
+### Network (nono only)
+
+By default agents keep unrestricted outbound network (matching nono's default). You can add an egress policy under `[sandbox.network]`, mapped onto nono's profile `network` section:
+
+```toml
+[sandbox.network]
+block = true                                # deny all outbound network
+# or, instead of blocking everything, restrict to an allowlist:
+allow_domains = ["github.com", "https://api.anthropic.com/**"]
+```
+
+- `block = true` → `network.block` (no outbound access at all).
+- `allow_domains` → `network.allow_domain` (nono runs its L7 filtering proxy and only these hosts/URL globs are reachable). A plain hostname allows the whole host; a URL glob restricts to matching endpoints.
+
+Network filtering needs **Landlock ABI v4 (Linux kernel 6.7+)**. If a network policy is requested on a kernel that can only do filesystem enforcement, the sandbox **fails closed** — graith refuses rather than pretend to block egress. `safehouse` has no network primitive, so setting a network policy with `backend = "safehouse"` also fails closed (use `nono` for network filtering). A network policy can be set globally or per-agent (an agent's `[sandbox.network]` replaces the global one wholesale).
 
 ### Feature gate caveats
 
-`features` map differently per backend. Under **nono**: `ssh` grants the `$SSH_AUTH_SOCK` agent socket (socket only; raw `~/.ssh` keys are not granted in v1); `process-control` is a **no-op** (nono's default already permits same-sandbox signals, whereas it gates under safehouse); any unmapped feature (e.g. `clipboard`) is **warned and ignored**, not silently dropped.
+`features` map differently per backend. Under **nono**: `ssh` grants the `$SSH_AUTH_SOCK` agent socket (socket only; raw `~/.ssh` keys are not granted); `process-control` is a **no-op on its own** (nono's default already permits same-sandbox signals, whereas it gates under safehouse) — set `signal_mode = "isolated"` (below) to make it actually gate signalling under nono; any unmapped feature (e.g. `clipboard`) is **warned and ignored**, not silently dropped. nono has no clipboard capability and graith defines no clipboard semantics, so `clipboard` stays a warned no-op.
+
+### Process isolation: `signal_mode` (nono only)
+
+`signal_mode` controls whether the sandboxed process may signal other processes. It maps to nono's `security.signal_mode`:
+
+```toml
+[sandbox]
+signal_mode = "isolated"                    # "isolated" | "allow_same_sandbox" (nono default) | "allow_all"
+```
+
+Setting `signal_mode = "isolated"` makes graith's `process-control` feature meaningful under nono (the process can no longer signal anything outside its own sandbox). Leaving it unset inherits nono's base-profile default (`allow_same_sandbox`). `safehouse` ignores this field.
 
 ### Debugging denials: `gr sandbox why`
 
@@ -416,7 +443,7 @@ write_dirs = ["~/.claude"]             # agent-specific write access
 disabled = true                         # opt this agent out of sandboxing
 ```
 
-`backend`, `command`, `features`, and directories all merge (global + agent), with the agent's `backend`/`command` taking precedence. Setting `disabled = true` on an agent overrides `enabled = true` on the global config.
+`backend`, `command`, `features`, `signal_mode`, `network`, and directories all merge (global + agent), with the agent's `backend`/`command`/`signal_mode`/`network` taking precedence (an agent's `network` block replaces the global one wholesale). Setting `disabled = true` on an agent overrides `enabled = true` on the global config.
 
 ### Path restrictions
 
@@ -446,6 +473,11 @@ enabled    = false                      # wrap agents in an OS sandbox
 # features = ["ssh", "process-control"] # feature gates (mapping differs per backend; see the Sandbox section)
 # read_dirs  = []                       # additional read-only paths for sandboxed agents
 # write_dirs = []                       # additional read-write paths for sandboxed agents
+# signal_mode = "isolated"              # nono only: "isolated" | "allow_same_sandbox" | "allow_all"
+
+# [sandbox.network]                     # nono only; needs Landlock ABI v4 (kernel 6.7+)
+# block = true                          # deny all outbound network
+# allow_domains = ["github.com"]        # OR restrict to a proxy allowlist (host or URL glob)
 
 [status_bar]
 enabled  = true                         # show a status bar while attached

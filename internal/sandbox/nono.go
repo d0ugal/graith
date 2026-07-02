@@ -29,19 +29,21 @@ type nonoBackend struct{}
 
 func (nonoBackend) Name() string { return BackendNono }
 
-func (nonoBackend) Availability(command string) Availability {
-	return nonoAvailability(command, lookNono, nonoVersionOutput, landlockState)
+func (nonoBackend) Availability(command string, req Requirements) Availability {
+	return nonoAvailability(command, req, lookNono, nonoVersionOutput, landlockState)
 }
 
 // nonoProfile is the subset of nono's profile schema graith generates. Fields
 // map onto nono v0.66.0's documented profile format. Empty slices/maps are
 // omitted so the emitted profile stays minimal.
 type nonoProfile struct {
-	Extends     string             `json:"extends"`
-	Meta        nonoProfileMeta    `json:"meta"`
-	Workdir     nonoProfileWorkdir `json:"workdir"`
-	Filesystem  nonoProfileFS      `json:"filesystem"`
-	Environment *nonoProfileEnv    `json:"environment,omitempty"`
+	Extends     string              `json:"extends"`
+	Meta        nonoProfileMeta     `json:"meta"`
+	Workdir     nonoProfileWorkdir  `json:"workdir"`
+	Filesystem  nonoProfileFS       `json:"filesystem"`
+	Environment *nonoProfileEnv     `json:"environment,omitempty"`
+	Security    *nonoProfileSec     `json:"security,omitempty"`
+	Network     *nonoProfileNetwork `json:"network,omitempty"`
 }
 
 type nonoProfileMeta struct {
@@ -73,6 +75,22 @@ type nonoProfileEnv struct {
 	// entire environment (fail-open credential leak); an explicit empty allowlist
 	// scrubs all env (fail-closed).
 	AllowVars []string `json:"allow_vars"`
+}
+
+// nonoProfileSec maps to nono's profile "security" section. Only signal_mode is
+// emitted by graith today (verified against nono v0.66.0's profile schema:
+// security.signal_mode ∈ {isolated, allow_same_sandbox, allow_all}).
+type nonoProfileSec struct {
+	SignalMode string `json:"signal_mode,omitempty"`
+}
+
+// nonoProfileNetwork maps to nono's profile "network" section. Verified against
+// nono v0.66.0's profile schema: network.block (bool) and network.allow_domain
+// ([]string). Empty allow_domain is omitted so an unrestricted block still
+// validates.
+type nonoProfileNetwork struct {
+	Block       bool     `json:"block,omitempty"`
+	AllowDomain []string `json:"allow_domain,omitempty"`
 }
 
 // defaultWritablePrefixes are paths nono grants write to by default on Linux
@@ -118,7 +136,7 @@ func isWithinAny(path string, prefixes []string) bool {
 
 // buildNonoProfile compiles a resolved graith policy into a nono profile.
 //
-// Mapping (Phase 1):
+// Mapping:
 //   - worktree            -> filesystem.allow (read+write recursive) + workdir rw
 //   - write_dirs          -> filesystem.allow (read+write recursive)
 //   - read_dirs           -> filesystem.read  (read-only recursive)
@@ -127,9 +145,17 @@ func isWithinAny(path string, prefixes []string) bool {
 //     nono inherit ALL of the daemon's env (fail-open), so an empty allowlist
 //     (scrub everything) is the fail-closed default.
 //   - feature "ssh"       -> filesystem.unix_socket [$SSH_AUTH_SOCK] (agent socket only)
-//   - feature "process-control" -> no-op under nono (default signal_mode already
-//     permits same-sandbox signals; see design doc §C5)
+//   - feature "process-control" -> no-op unless SignalMode is set; see below
+//   - SignalMode          -> security.signal_mode (Phase 2: opt-in isolation)
+//   - Network             -> network.block / network.allow_domain (Phase 2 egress)
 //   - any other feature   -> warned (returned in warnings), not silently dropped
+//
+// process-control / SignalMode (design doc §C5, Phase 2): nono's default
+// signal_mode (allow_same_sandbox) already permits same-sandbox signals, so
+// "process-control" alone is a no-op under nono. Setting SignalMode =
+// "isolated" makes it meaningful: the sandboxed process can no longer signal
+// any other process. graith emits security.signal_mode only when SignalMode is
+// non-empty, leaving nono's base default otherwise.
 //
 // "extends": "default" pulls in nono's audited deny groups (deny_credentials,
 // deny_shell_history, ...) and base system paths, so graith need not enumerate
@@ -174,9 +200,14 @@ func buildNonoProfile(name string, opts WrapOpts, sshAuthSock string) (nonoProfi
 
 			p.Filesystem.UnixSocket = append(p.Filesystem.UnixSocket, sshAuthSock)
 		case "process-control":
-			// No-op under nono: its default signal_mode already permits
-			// same-sandbox signals. This gates under safehouse but not nono
-			// (documented cross-backend divergence, design doc §C5).
+			// No-op on its own under nono: the default signal_mode already
+			// permits same-sandbox signals. To actually gate signalling, set
+			// [sandbox] signal_mode = "isolated" (handled below). This still
+			// gates under safehouse. Documented cross-backend divergence
+			// (design doc §C5).
+			if opts.SignalMode == "" {
+				warnings = append(warnings, "feature \"process-control\" is a no-op under nono without [sandbox] signal_mode = \"isolated\"; set it to gate signalling")
+			}
 		default:
 			warnings = append(warnings, fmt.Sprintf("feature %q has no nono mapping and was ignored", f))
 		}
@@ -194,6 +225,25 @@ func buildNonoProfile(name string, opts WrapOpts, sshAuthSock string) (nonoProfi
 	}
 
 	p.Environment = &nonoProfileEnv{AllowVars: allowVars}
+
+	// security.signal_mode: opt-in process-control tightening (Phase 2). Only
+	// emitted when set, so nono's base default (allow_same_sandbox) applies
+	// otherwise.
+	if opts.SignalMode != "" {
+		p.Security = &nonoProfileSec{SignalMode: opts.SignalMode}
+	}
+
+	// network.block / network.allow_domain (Phase 2 egress). Only emitted when
+	// a policy is requested; otherwise nono's allow-by-default holds (matching
+	// pre-Phase-2 behaviour). The daemon fail-closes when a network policy is
+	// requested on a host whose Landlock ABI cannot filter network (§B2), so by
+	// the time we reach here the host can enforce it.
+	if opts.Network.IsSet() {
+		p.Network = &nonoProfileNetwork{
+			Block:       opts.Network.Block,
+			AllowDomain: opts.Network.AllowDomains,
+		}
+	}
 
 	return p, warnings
 }
@@ -419,11 +469,15 @@ func versionAtLeast(aMaj, aMin, aPat int, minVer string) bool {
 
 // nonoAvailability applies the design doc's fail-closed matrix (§B2):
 //   - binary absent / version below pin / Landlock NotEnforced -> CanEnforce=false
-//   - Landlock Partial (FS but no net ABI) -> CanEnforce=true, Degraded=true
-//     (v1 emits no network policy, so FS confinement is sufficient)
+//   - Landlock Partial (FS but no net-filtering ABI):
+//   - no network policy requested -> CanEnforce=true, Degraded=true
+//     (FS confinement is sufficient)
+//   - network policy requested   -> CanEnforce=false (ABI-v4 fail-closed:
+//     don't pretend to block egress on a kernel that can't filter network)
 //   - macOS / Landlock Full -> CanEnforce=true
 func nonoAvailability(
 	command string,
+	req Requirements,
 	look func(string) (string, error),
 	versionOut func(string) (string, error),
 	llState func() landlockInfo,
@@ -459,6 +513,17 @@ func nonoAvailability(
 	case landlockNotEnforced:
 		return Availability{CanEnforce: false, Detail: ll.detail}
 	case landlockPartial:
+		// FS enforced but no network-filtering ABI (Landlock < v4, kernel
+		// < 6.7). If a network policy is requested we must fail closed rather
+		// than silently not block egress (§B2 ABI-v4 rule). Otherwise FS
+		// confinement is sufficient; run degraded.
+		if req.Network {
+			return Availability{
+				CanEnforce: false,
+				Detail:     ll.detail + "; a network policy needs Landlock ABI v4 (kernel 6.7+)",
+			}
+		}
+
 		return Availability{CanEnforce: true, Degraded: true, Detail: ll.detail}
 	case landlockFull, landlockNotApplicable:
 		return Availability{CanEnforce: true, Detail: ll.detail}
