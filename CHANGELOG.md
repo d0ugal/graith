@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.63.0](https://github.com/d0ugal/graith/compare/v0.62.0...v0.63.0) (2026-07-02)
+
+
+### Features
+
+* add hidden gr man command to generate man pages ([ef3c37e](https://github.com/d0ugal/graith/commit/ef3c37e18fc2505e7dc7d3151b89e5b8e7760307))
+* build and release-attach apk (Alpine) packages ([1d946af](https://github.com/d0ugal/graith/commit/1d946af150deb8f2e3054bf6dfa029154f140196))
+* **ci:** prune old package versions from the apt/yum repo on release ([eecdd61](https://github.com/d0ugal/graith/commit/eecdd61a5cb19c1e7bd46a1d233b96a396810d45))
+* scaffold guarded AUR (Arch) publishing ([8a014a4](https://github.com/d0ugal/graith/commit/8a014a462a52829a9d5fae225557f90a2aea3da0))
+
 ## [0.62.0](https://github.com/d0ugal/graith/compare/v0.61.0...v0.62.0) (2026-07-01)
 
 
