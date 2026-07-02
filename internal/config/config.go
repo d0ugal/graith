@@ -338,8 +338,13 @@ func (a Agent) IdleTimeoutDuration() time.Duration {
 }
 
 type SandboxConfig struct {
-	Enabled   bool     `json:"enabled"              toml:"enabled"`
-	Disabled  *bool    `json:"disabled,omitempty"   toml:"disabled,omitempty"`
+	Enabled  bool  `json:"enabled"            toml:"enabled"`
+	Disabled *bool `json:"disabled,omitempty" toml:"disabled,omitempty"`
+	// Backend selects the sandbox backend: "safehouse" (macOS only) or "nono"
+	// (Linux + macOS). It has NO default — when the sandbox is enabled and
+	// Backend is unset the daemon fails closed with an actionable error. This
+	// is a deliberate pre-1.0 behaviour change (see the nono sandbox design doc).
+	Backend   string   `json:"backend,omitempty"    toml:"backend"`
 	Command   string   `json:"command,omitempty"    toml:"command"`
 	Features  []string `json:"features,omitempty"   toml:"features"`
 	ReadDirs  []string `json:"read_dirs,omitempty"  toml:"read_dirs"`
@@ -409,6 +414,7 @@ func MergeMCPServers(global []MCPServerConfig, overrides map[string]MCPServerCon
 func (s SandboxConfig) Merge(agent SandboxConfig) SandboxConfig {
 	merged := SandboxConfig{
 		Enabled: s.Enabled || agent.Enabled,
+		Backend: s.Backend,
 		Command: s.Command,
 	}
 
@@ -420,6 +426,10 @@ func (s SandboxConfig) Merge(agent SandboxConfig) SandboxConfig {
 	merged.Features = dedup(append(s.Features, agent.Features...))
 	merged.ReadDirs = dedup(append(s.ReadDirs, agent.ReadDirs...))
 	merged.WriteDirs = dedup(append(s.WriteDirs, agent.WriteDirs...))
+
+	if agent.Backend != "" {
+		merged.Backend = agent.Backend
+	}
 
 	if agent.Command != "" {
 		merged.Command = agent.Command
@@ -694,8 +704,9 @@ func mergeAgent(def, usr Agent) Agent {
 		def.IdleTimeout = usr.IdleTimeout
 	}
 
-	if usr.Sandbox.Enabled || usr.Sandbox.Disabled != nil || usr.Sandbox.Command != "" ||
-		usr.Sandbox.Features != nil || usr.Sandbox.ReadDirs != nil || usr.Sandbox.WriteDirs != nil {
+	if usr.Sandbox.Enabled || usr.Sandbox.Disabled != nil || usr.Sandbox.Backend != "" ||
+		usr.Sandbox.Command != "" || usr.Sandbox.Features != nil ||
+		usr.Sandbox.ReadDirs != nil || usr.Sandbox.WriteDirs != nil {
 		def.Sandbox = usr.Sandbox
 	}
 

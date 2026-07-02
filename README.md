@@ -335,24 +335,34 @@ gr completion fish | source
   - Channel `0x00`: JSON control messages, envelope `{"type":"...","payload":{...}}`
   - Channel `0x01`: raw PTY data
 
-## Sandbox (macOS)
+## Sandbox
 
-graith can wrap agent processes with [safehouse](https://github.com/nicholasgasior/safehouse), a macOS kernel-level sandbox. This lets you run agents with their "skip permissions" flags (e.g. `--dangerously-skip-permissions` for Claude, `--dangerously-bypass-approvals-and-sandbox` for Codex) while confining them to a deny-by-default sandbox that restricts file access, network, and system calls.
+graith can wrap agent processes in a deny-by-default OS sandbox. This lets you run agents with their "skip permissions" flags (e.g. `--dangerously-skip-permissions` for Claude, `--dangerously-bypass-approvals-and-sandbox` for Codex) while confining them at the kernel level. Two backends are available:
 
-Sandboxing is **config-only** — there are no CLI flags to enable or disable it. This prevents a sandboxed agent from spawning a child agent that escapes the sandbox.
+| Backend | Platforms | Primitive |
+|---------|-----------|-----------|
+| `safehouse` | macOS only | `sandbox-exec` / Seatbelt ([safehouse](https://github.com/eugene1g/agent-safehouse)) |
+| `nono` | **Linux + macOS** | [nono](https://github.com/nolabs-ai/nono): Landlock + seccomp on Linux, Seatbelt on macOS |
+
+Sandboxing is **config-only** — there are no CLI flags to enable or disable it. This prevents a sandboxed agent from spawning a child agent that escapes the sandbox (Landlock/Seatbelt restrictions are inherited by descendants).
+
+> **Migration (pre-1.0 breaking change):** `backend` is now **required** when `sandbox.enabled = true` — there is no default. To keep existing behaviour, **add `backend = "safehouse"`** to your `[sandbox]` block. On Linux, use `backend = "nono"`. Enabling the sandbox without a backend fails closed with an actionable error; `gr doctor` flags it.
 
 ### Setup
 
-1. Install safehouse: `brew install nicholasgasior/tools/safehouse`
-2. Verify: `gr doctor` (checks for safehouse on `$PATH`)
-3. Add to your config:
+**safehouse (macOS):** `brew install eugene1g/safehouse/agent-safehouse`
+
+**nono (Linux/macOS):** `brew install nono` (or `curl -fsSL https://nono.sh/install.sh | sh`). nono needs Linux kernel 5.13+ for Landlock (practical floor 5.14+); on macOS it uses Seatbelt. graith enforces a minimum nono version.
+
+Verify with `gr doctor`, then configure:
 
 ```toml
 allowed_repo_paths = ["~/Code"]         # restrict which repos the daemon will create sessions in
 
 [sandbox]
-enabled  = true                         # wrap all agents with safehouse
-features = ["ssh", "process-control"]   # safehouse feature gates to enable
+enabled  = true
+backend  = "nono"                       # REQUIRED: "safehouse" (macOS) or "nono" (Linux/macOS)
+features = ["ssh"]                      # feature gates (see caveats below)
 read_dirs  = ["~/Code"]                 # additional read-only paths
 write_dirs = []                         # additional read-write paths
 
@@ -360,22 +370,21 @@ write_dirs = []                         # additional read-write paths
 command     = "claude"
 args        = ["--dangerously-skip-permissions", "--session-id", "{agent_session_id}"]
 resume_args = ["--dangerously-skip-permissions", "--resume", "{agent_session_id}"]
-
-[agents.codex]
-command     = "codex"
-args        = ["--dangerously-bypass-approvals-and-sandbox"]
-resume_args = ["resume", "--last", "--dangerously-bypass-approvals-and-sandbox"]
 ```
 
 ### How it works
 
-When `sandbox.enabled = true`, the daemon wraps the agent command with `safehouse wrap`. The agent process runs inside a macOS `sandbox-exec` policy that:
+When `sandbox.enabled = true`, the daemon resolves the merged policy, expands `~`/globs, and wraps the agent with the selected backend.
 
-- **Denies all file access by default**, then allows the session worktree (read-write), plus any paths in `read_dirs`/`write_dirs`
-- **Strips the environment** (`/usr/bin/env -i`) and re-adds only what the agent needs
-- **Gates capabilities** behind `features` — e.g. `ssh` grants `SSH_AUTH_SOCK` access, `process-control` allows signal sending
+**safehouse** runs `safehouse wrap` (macOS `sandbox-exec`): denies file access by default, allows the worktree + `read_dirs`/`write_dirs`, strips the environment to an allowlist, and gates `features`.
 
-The sandbox **fails closed**: if `sandbox.enabled = true` but safehouse isn't installed, session creation is refused with an error. `gr doctor` checks this proactively.
+**nono** generates a per-session JSON profile and runs `nono run --profile <file> -- <agent>`. The profile `extends: "default"` (inheriting nono's audited credential/shell-history deny groups), maps the worktree and `write_dirs` to `filesystem.allow` (read+write — never nono's write-only `filesystem.write`), `read_dirs` to read-only, grants read on the agent binary's directory (nono does not auto-grant it), and maps the **environment to an allowlist** (`environment.allow_vars`, including `PATH`/`HOME`/`GRAITH_*`) so host secrets aren't leaked — nono otherwise inherits all env. Read-only paths that fall under nono's default-writable `/tmp`/`$TMPDIR` are re-denied so the read-only guarantee holds.
+
+The sandbox **fails closed**: if enabled but the backend can't enforce (no backend chosen, binary missing, nono below the minimum version, or a Linux kernel too old for Landlock), session creation is refused. A Linux kernel with Landlock filesystem support but no network-filtering ABI runs in a *degraded* mode (filesystem confinement still holds). `gr doctor` reports all of this.
+
+### Feature gate caveats
+
+`features` map differently per backend. Under **nono**: `ssh` grants the `$SSH_AUTH_SOCK` agent socket (socket only; raw `~/.ssh` keys are not granted in v1); `process-control` is a **no-op** (nono's default already permits same-sandbox signals, whereas it gates under safehouse); any unmapped feature (e.g. `clipboard`) is **warned and ignored**, not silently dropped.
 
 ### Per-agent overrides
 
@@ -384,17 +393,17 @@ Each agent can extend or disable the global sandbox config:
 ```toml
 [sandbox]
 enabled  = true
+backend  = "nono"
 features = ["ssh"]
 
 [agents.claude.sandbox]
-features = ["clipboard"]                # merged with global: ["ssh", "clipboard"]
 write_dirs = ["~/.claude"]             # agent-specific write access
 
 [agents.codex.sandbox]
 disabled = true                         # opt this agent out of sandboxing
 ```
 
-Features and directories are merged (global + agent). Setting `disabled = true` on an agent overrides `enabled = true` on the global config.
+`backend`, `command`, `features`, and directories all merge (global + agent), with the agent's `backend`/`command` taking precedence. Setting `disabled = true` on an agent overrides `enabled = true` on the global config.
 
 ### Path restrictions
 
@@ -418,9 +427,10 @@ fetch_on_create = true                  # fetch origin before creating a worktre
 # allowed_repo_paths = ["~/Code"]       # restrict which repos the daemon allows (empty = any)
 
 [sandbox]
-enabled    = false                      # wrap agents with safehouse (macOS only)
-# command  = "safehouse"               # path to safehouse binary (default: "safehouse")
-# features = ["ssh", "process-control"] # safehouse feature gates
+enabled    = false                      # wrap agents in an OS sandbox
+# backend  = "nono"                     # REQUIRED when enabled: "safehouse" (macOS) | "nono" (Linux/macOS)
+# command  = "nono"                     # path to the backend binary (default: the backend name)
+# features = ["ssh", "process-control"] # feature gates (mapping differs per backend; see the Sandbox section)
 # read_dirs  = []                       # additional read-only paths for sandboxed agents
 # write_dirs = []                       # additional read-write paths for sandboxed agents
 

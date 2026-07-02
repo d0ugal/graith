@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -874,7 +875,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 			envKeys = append(envKeys, k)
 		}
 
-		opts := sm.sandboxOptsFromConfig(merged, id, worktreePath, envKeys, agentHooks)
+		opts := sm.sandboxOptsFromConfig(merged, id, worktreePath, agent.Command, envKeys, agentHooks)
 		if tmpDir := env["GRAITH_TMPDIR"]; tmpDir != "" {
 			opts.WriteDirs = append(opts.WriteDirs, tmpDir)
 		}
@@ -1363,7 +1364,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 			envKeys = append(envKeys, k)
 		}
 
-		opts := sm.sandboxOptsFromConfig(merged, id, worktreePath, envKeys, sourceAgentHooks)
+		opts := sm.sandboxOptsFromConfig(merged, id, worktreePath, agent.Command, envKeys, sourceAgentHooks)
 		if tmpDir := env["GRAITH_TMPDIR"]; tmpDir != "" {
 			opts.WriteDirs = append(opts.WriteDirs, tmpDir)
 		}
@@ -2103,7 +2104,7 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 			envKeys = append(envKeys, k)
 		}
 
-		opts := sm.sandboxOptsFromConfig(merged, id, ptyCWD, envKeys, sessAgentHooks)
+		opts := sm.sandboxOptsFromConfig(merged, id, ptyCWD, agent.Command, envKeys, sessAgentHooks)
 		if tmpDir := env["GRAITH_TMPDIR"]; tmpDir != "" {
 			opts.WriteDirs = append(opts.WriteDirs, tmpDir)
 		}
@@ -4238,19 +4239,33 @@ func (sm *SessionManager) resolveSandboxFromConfig(cfg *config.Config, agentName
 		return false, nil
 	}
 
-	cmd := merged.Command
-	if cmd == "" {
-		cmd = "safehouse"
+	// Backend must be chosen explicitly — there is no default. Fail closed with
+	// an actionable error rather than silently picking one.
+	if merged.Backend == "" {
+		return false, fmt.Errorf(
+			"sandbox enabled for agent %q but no backend selected — set [sandbox] backend = %q (macOS) or %q (Linux/macOS) in config",
+			agentName, sandbox.BackendSafehouse, sandbox.BackendNono)
 	}
 
-	if !sandbox.AvailableCommand(cmd) {
-		return false, fmt.Errorf("sandbox enabled for agent %q but %q is not available — install safehouse or disable sandbox in config", agentName, cmd)
+	avail, err := sandbox.CheckAvailability(merged.Backend, merged.Command)
+	if err != nil {
+		return false, fmt.Errorf("sandbox enabled for agent %q: %w", agentName, err)
+	}
+
+	if !avail.CanEnforce {
+		return false, fmt.Errorf(
+			"sandbox enabled for agent %q with backend %q but it cannot enforce: %s",
+			agentName, merged.Backend, avail.Detail)
+	}
+
+	if avail.Degraded {
+		sm.log.Warn("sandbox enforcement degraded", "agent", agentName, "backend", merged.Backend, "detail", avail.Detail)
 	}
 
 	return true, nil
 }
 
-func (sm *SessionManager) sandboxOptsFromConfig(merged config.SandboxConfig, sessionID, worktreePath string, envKeys []string, agentHooks bool) sandbox.WrapOpts {
+func (sm *SessionManager) sandboxOptsFromConfig(merged config.SandboxConfig, sessionID, worktreePath, agentCommand string, envKeys []string, agentHooks bool) sandbox.WrapOpts {
 	readDirs := expandPaths(merged.ReadDirs, sm.log, "read")
 	writeDirs := expandPaths(merged.WriteDirs, sm.log, "write")
 
@@ -4268,14 +4283,69 @@ func (sm *SessionManager) sandboxOptsFromConfig(merged config.SandboxConfig, ses
 
 	readDirs = append(readDirs, sm.paths.RuntimeDir)
 
-	return sandbox.WrapOpts{
-		WorktreeDir:      worktreePath,
-		ReadDirs:         readDirs,
-		WriteDirs:        writeDirs,
-		Features:         merged.Features,
-		EnvKeys:          envKeys,
-		SafehouseCommand: merged.Command,
+	// nono does not auto-grant the launched command's location (only system
+	// paths like /usr/bin). Grant read on the agent binary's directory so the
+	// sandboxed process can exec it. safehouse is unaffected by the extra dir.
+	if dir := agentBinaryDir(agentCommand); dir != "" {
+		readDirs = append(readDirs, dir)
 	}
+
+	// Under nono, a non-empty env allowlist scrubs everything else, so the vars
+	// the agent needs to function (PATH, HOME) must be present. safehouse
+	// re-adds these itself; including them in EnvKeys is harmless there.
+	envKeys = ensureEnvKeys(envKeys, "PATH", "HOME")
+
+	// The nono backend writes a per-session profile under RuntimeDir, which is
+	// already granted read access above, so the profile is readable inside the
+	// sandbox and lives for the process lifetime (incl. resume).
+	profilePath := filepath.Join(sm.paths.RuntimeDir, "nono", sessionID+".json")
+
+	return sandbox.WrapOpts{
+		Backend:        merged.Backend,
+		WorktreeDir:    worktreePath,
+		ReadDirs:       readDirs,
+		WriteDirs:      writeDirs,
+		Features:       merged.Features,
+		EnvKeys:        envKeys,
+		BackendCommand: merged.Command,
+		ProfilePath:    profilePath,
+	}
+}
+
+// agentBinaryDir resolves the directory containing the agent command so it can
+// be granted read access in the sandbox. It resolves bare command names via
+// PATH; returns "" if it cannot be resolved (e.g. a shell builtin).
+func agentBinaryDir(command string) string {
+	if command == "" {
+		return ""
+	}
+
+	if strings.ContainsRune(command, filepath.Separator) {
+		return filepath.Dir(command)
+	}
+
+	if resolved, err := exec.LookPath(command); err == nil {
+		return filepath.Dir(resolved)
+	}
+
+	return ""
+}
+
+// ensureEnvKeys appends any of want not already present in keys.
+func ensureEnvKeys(keys []string, want ...string) []string {
+	have := make(map[string]struct{}, len(keys))
+	for _, k := range keys {
+		have[k] = struct{}{}
+	}
+
+	for _, w := range want {
+		if _, ok := have[w]; !ok {
+			keys = append(keys, w)
+			have[w] = struct{}{}
+		}
+	}
+
+	return keys
 }
 
 func expandPaths(paths []string, log *slog.Logger, kind string) []string {

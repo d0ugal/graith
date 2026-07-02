@@ -6,7 +6,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
@@ -233,21 +232,7 @@ func (dc *doctorContext) checkEnvironment() {
 	}
 
 	if cfg.Sandbox.Enabled {
-		safehouseCmd := cfg.Sandbox.Command
-		if safehouseCmd == "" {
-			safehouseCmd = "safehouse"
-		}
-
-		switch {
-		case runtime.GOOS != "darwin":
-			dc.failf("environment", "Sandbox enabled but not running macOS")
-		case !sandbox.AvailableCommand(safehouseCmd):
-			dc.failf("environment", "Sandbox enabled but %s not found in PATH", safehouseCmd)
-			dc.hintf("Install: brew install eugene1g/tools/agent-safehouse")
-		default:
-			dc.passf("environment", "Sandbox enabled (safehouse available)")
-		}
-
+		dc.checkSandboxBackend()
 		dc.checkSandboxPaths()
 	} else {
 		dc.warnf("environment", "Sandbox disabled")
@@ -260,6 +245,43 @@ func (dc *doctorContext) checkEnvironment() {
 		dc.passf("environment", "Agent prompt: customized")
 	default:
 		dc.passf("environment", "Agent prompt: default")
+	}
+}
+
+// checkSandboxBackend reports whether the configured sandbox backend can
+// enforce on this host. Backend must be chosen explicitly — an unset backend
+// with the sandbox enabled is a fail (matches the daemon's fail-closed rule).
+func (dc *doctorContext) checkSandboxBackend() {
+	backend := cfg.Sandbox.Backend
+	if backend == "" {
+		dc.failf("environment", "Sandbox enabled but no backend selected")
+		dc.hintf("Set [sandbox] backend = %q (macOS) or %q (Linux/macOS)", sandbox.BackendSafehouse, sandbox.BackendNono)
+
+		return
+	}
+
+	avail, err := sandbox.CheckAvailability(backend, cfg.Sandbox.Command)
+	if err != nil {
+		dc.failf("environment", "Sandbox backend invalid: %v", err)
+
+		return
+	}
+
+	switch {
+	case !avail.CanEnforce:
+		dc.failf("environment", "Sandbox enabled (backend %q) but cannot enforce: %s", backend, avail.Detail)
+
+		switch backend {
+		case sandbox.BackendSafehouse:
+			dc.hintf("Install: brew install eugene1g/safehouse/agent-safehouse")
+		case sandbox.BackendNono:
+			dc.hintf("Install: brew install nono  (or: curl -fsSL https://nono.sh/install.sh | sh)")
+			dc.hintf("nono requires Linux kernel 5.13+ (Landlock) or macOS; minimum nono version %s", sandbox.MinNonoVersion)
+		}
+	case avail.Degraded:
+		dc.warnf("environment", "Sandbox enabled (backend %q, degraded): %s", backend, avail.Detail)
+	default:
+		dc.passf("environment", "Sandbox enabled (backend %q available): %s", backend, avail.Detail)
 	}
 }
 

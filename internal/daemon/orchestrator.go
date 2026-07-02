@@ -169,7 +169,7 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 		envKeys = append(envKeys, k)
 	}
 
-	opts := sm.sandboxOptsFromConfig(merged, id, scratchDir, envKeys, false)
+	opts := sm.sandboxOptsFromConfig(merged, id, scratchDir, agent.Command, envKeys, false)
 	opts.WriteDirs = append(opts.WriteDirs, tmpDir)
 	opts.WriteDirs = append(opts.WriteDirs, store.SharedStorePath(sm.paths.DataDir))
 	opts.WriteDirs = append(opts.WriteDirs, scratchDir)

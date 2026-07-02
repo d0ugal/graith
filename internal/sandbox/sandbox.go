@@ -1,85 +1,116 @@
+// Package sandbox wraps agent processes in an OS-level sandbox. It supports
+// pluggable backends: "safehouse" (macOS Seatbelt, the original backend) and
+// "nono" (cross-platform: Landlock+seccomp on Linux, Seatbelt on macOS).
+//
+// The daemon resolves a merged sandbox policy and calls Wrap, which dispatches
+// to the configured backend. A backend turns (command, args) plus the policy
+// in WrapOpts into the actual command line to exec. Availability reports
+// whether a backend can enforce on the current host, so the daemon can fail
+// closed when the sandbox is enabled but cannot be enforced.
 package sandbox
 
-import (
-	"fmt"
-	"os/exec"
-	"runtime"
-	"strings"
+import "fmt"
+
+// Backend identifiers used in config (`[sandbox] backend = "..."`).
+const (
+	BackendSafehouse = "safehouse"
+	BackendNono      = "nono"
 )
 
+// WrapOpts is the resolved, expanded sandbox policy for a single process.
+// Paths are already `~`- and glob-expanded and made absolute by the daemon
+// before they reach a backend.
 type WrapOpts struct {
-	WorktreeDir      string
-	ReadDirs         []string
-	WriteDirs        []string
-	Features         []string
-	EnvKeys          []string
-	SafehouseCommand string
+	// Backend selects the sandbox backend. Empty is invalid at the daemon
+	// layer (backend must be chosen explicitly); Wrap defaults it to safehouse
+	// for backward compatibility of the low-level helper.
+	Backend string
+
+	WorktreeDir string
+	ReadDirs    []string
+	WriteDirs   []string
+	Features    []string
+	EnvKeys     []string
+
+	// BackendCommand overrides the backend binary name/path. Empty means the
+	// backend's own default ("safehouse" / "nono"). Formerly SafehouseCommand.
+	BackendCommand string
+
+	// ProfilePath, for the nono backend, is where the generated per-session
+	// profile is written. The daemon points it under RuntimeDir so it is
+	// readable inside the sandbox and survives for the process lifetime and
+	// resume. Empty means the backend writes to an os.CreateTemp file.
+	ProfilePath string
 }
 
+// Backend turns a resolved sandbox policy into a wrapped command.
+type Backend interface {
+	// Name is the config value that selects this backend.
+	Name() string
+	// Availability reports whether this backend can enforce on this host now.
+	// command overrides the backend binary; empty uses the backend default.
+	Availability(command string) Availability
+	// Wrap returns the command and args to exec so the child runs sandboxed.
+	Wrap(command string, args []string, opts WrapOpts) (string, []string, error)
+}
+
+// Availability describes whether a backend can enforce a sandbox right now,
+// and if so whether enforcement is degraded (some requested controls are
+// unavailable but core filesystem confinement still holds).
+type Availability struct {
+	// CanEnforce is false when the backend cannot enforce at all (binary
+	// missing, wrong OS, kernel too old, version below the pin). The daemon
+	// must fail closed in that case.
+	CanEnforce bool
+	// Degraded is true when enforcement works but some controls are missing
+	// (e.g. Landlock present but no network-filtering ABI). Filesystem
+	// confinement still holds; the daemon runs but should surface the state.
+	Degraded bool
+	// Detail is a human-readable explanation for logs / doctor / errors.
+	Detail string
+}
+
+func backendByName(name string) (Backend, error) {
+	switch name {
+	case "", BackendSafehouse:
+		return safehouseBackend{}, nil
+	case BackendNono:
+		return nonoBackend{}, nil
+	default:
+		return nil, fmt.Errorf("unknown sandbox backend %q (want %q or %q)", name, BackendSafehouse, BackendNono)
+	}
+}
+
+// Wrap dispatches to the configured backend and returns the command+args to
+// exec. An empty opts.Backend defaults to safehouse for backward compatibility.
 func Wrap(command string, args []string, opts WrapOpts) (string, []string, error) {
-	safehouse := opts.SafehouseCommand
-	if safehouse == "" {
-		safehouse = "safehouse"
+	be, err := backendByName(opts.Backend)
+	if err != nil {
+		return "", nil, err
 	}
 
-	if err := validatePaths(opts.WorktreeDir); err != nil {
-		return "", nil, fmt.Errorf("workdir: %w", err)
-	}
-
-	if err := validatePaths(opts.ReadDirs...); err != nil {
-		return "", nil, fmt.Errorf("read dirs: %w", err)
-	}
-
-	if err := validatePaths(opts.WriteDirs...); err != nil {
-		return "", nil, fmt.Errorf("write dirs: %w", err)
-	}
-
-	var wrapped []string
-
-	wrapped = append(wrapped, "--workdir", opts.WorktreeDir)
-
-	if len(opts.ReadDirs) > 0 {
-		wrapped = append(wrapped, "--add-dirs-ro", strings.Join(opts.ReadDirs, ":"))
-	}
-
-	if len(opts.WriteDirs) > 0 {
-		wrapped = append(wrapped, "--add-dirs", strings.Join(opts.WriteDirs, ":"))
-	}
-
-	if len(opts.Features) > 0 {
-		wrapped = append(wrapped, "--enable", strings.Join(opts.Features, ","))
-	}
-
-	if len(opts.EnvKeys) > 0 {
-		wrapped = append(wrapped, "--env-pass", strings.Join(opts.EnvKeys, ","))
-	}
-
-	wrapped = append(wrapped, "--", command)
-	wrapped = append(wrapped, args...)
-
-	return safehouse, wrapped, nil
+	return be.Wrap(command, args, opts)
 }
 
-func validatePaths(paths ...string) error {
-	for _, p := range paths {
-		if strings.Contains(p, ":") {
-			return fmt.Errorf("path %q contains a colon, which conflicts with safehouse's colon-separated path format", p)
-		}
+// CheckAvailability reports whether the named backend can enforce on this host.
+// command overrides the backend binary; empty uses the backend default.
+func CheckAvailability(backend, command string) (Availability, error) {
+	be, err := backendByName(backend)
+	if err != nil {
+		return Availability{}, err
 	}
 
-	return nil
+	return be.Availability(command), nil
 }
 
+// Available reports whether the default (safehouse) backend can enforce.
+// Retained for callers that predate pluggable backends.
 func Available() bool {
-	return AvailableCommand("safehouse")
+	return safehouseBackend{}.Availability("").CanEnforce
 }
 
+// AvailableCommand reports whether the safehouse backend can enforce with the
+// given binary name. Retained for backward compatibility.
 func AvailableCommand(command string) bool {
-	if runtime.GOOS != "darwin" {
-		return false
-	}
-
-	_, err := exec.LookPath(command)
-
-	return err == nil
+	return safehouseBackend{}.Availability(command).CanEnforce
 }

@@ -510,6 +510,31 @@ Rules (each gets a fixture in §C1/testing):
 
 ### Open questions
 
+> **Resolved for Phase 1 (implemented).** Maintainer decisions and
+> validation-driven refinements now baked into the code:
+>
+> - **No default backend.** `backend` is *required* when the sandbox is enabled;
+>   an unset backend fails closed with an actionable error naming both options.
+>   This supersedes the "platform-aware default" recommendation in (a) below —
+>   there is no implicit default at all. (Breaking pre-1.0 change; migration note
+>   in README/docs: add `backend = "safehouse"` to keep prior behaviour.)
+> - **`process-control` is a no-op under nono** (nono's default `signal_mode`
+>   already permits same-sandbox signals). It still gates under safehouse. We do
+>   **not** set `signal_mode: isolated`. Documented as a cross-backend divergence.
+> - **`ssh` = agent socket only** (`filesystem.unix_socket` for `$SSH_AUTH_SOCK`);
+>   the `ssh-keys` (`~/.ssh` read) token is deferred.
+> - **Old-kernel `NotEnforced` is a hard error** (never a warning) — the
+>   fail-open guard is enforced.
+> - **Verb mapping:** `write_dirs` + worktree → `filesystem.allow` (read+write),
+>   never nono's write-only `filesystem.write`.
+> - **`/tmp`/`$TMPDIR` default-writable leak:** read-only paths under those
+>   prefixes are re-denied via `filesystem.deny` (nono's `system_write_linux`
+>   grants write there by default).
+> - **env allowlist** includes `PATH`/`HOME`/`GRAITH_*` (nono scrubs everything
+>   else once `allow_vars` is non-empty).
+> - **Agent binary directory** is granted `filesystem.read` (nono does not
+>   auto-grant the launched command's location).
+
 **(a) Must decide before Phase 1 lands:**
 
 - **Default backend on Linux (§C6).** Static `safehouse` default (a Linux user
