@@ -1,0 +1,297 @@
+name: Sandbox
+
+# Sandbox backend bring-up CI. This installs the per-OS sandbox backends
+# (nono on Linux via Landlock+seccomp, safehouse on macOS via Seatbelt),
+# probes and REPORTS the enforcement level available on the GitHub-hosted
+# runners, and runs a standalone enforcement smoke test to prove the runner
+# can actually enforce a deny-by-default policy.
+#
+# Design intent (bring-up phase): this workflow REPORTS the enforcement level
+# rather than hard-failing. We are learning what the GitHub-hosted runners
+# actually support. The key open question this answers, visible directly in
+# the PR checks, is:
+#
+#   Does GitHub's `ubuntu-latest` runner have Landlock available and
+#   FullyEnforced?
+#
+# The smoke test is allowed to fail-soft during bring-up (continue-on-error)
+# so a NotEnforced/PartiallyEnforced runner still surfaces its findings in the
+# job log and step summary instead of just going red with no signal.
+#
+# FALLBACK OPTIONS if `ubuntu-latest` turns out NOT to be Landlock
+# FullyEnforced (documented here so the answer + remedy live together):
+#   1. Larger GitHub-hosted runner (e.g. `ubuntu-latest-4-cores`) — a newer
+#      kernel image may expose a higher Landlock ABI.
+#      https://docs.github.com/actions/using-github-hosted-runners/about-larger-runners
+#   2. Self-hosted runner on a known-good kernel (>= 5.14, ideally 6.7+ for
+#      Landlock ABI v4 network filtering) — this is what the local harness
+#      (kernel 6.12) already provides.
+#   3. Accept `PartiallyEnforced` as the CI gate: assert FS confinement holds
+#      (reads/writes are denied) even if network-layer filtering is absent.
+#      graith v1 emits no network policy, so FS-only enforcement is sufficient
+#      for the current backend and the enforcement smoke test.
+#
+# nono enforcement classes (from nono's Landlock internals docs):
+#   FullyEnforced      — Landlock FS control active (kernel >= 5.14 in practice).
+#   PartiallyEnforced  — FS enforced but ABI < v4, no TCP/network filtering.
+#   NotEnforced        — kernel < 5.13/5.14 or Landlock disabled. For graith
+#                        this is a fail-closed condition once the backend ships.
+
+on:
+  pull_request:
+    paths:
+      - internal/sandbox/**
+      - .github/workflows/sandbox.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Linux / nono — the important one. Answers the Landlock-on-GH-runner
+  # question and proves the runner can enforce a deny-by-default policy.
+  # ---------------------------------------------------------------------------
+  linux-nono:
+    name: Linux (nono / Landlock)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Install nono
+        run: |
+          set -euo pipefail
+          # GitHub-hosted runners have passwordless sudo.
+          curl -fsSL https://nono.sh/install.sh | sudo sh
+          echo "nono installed at: $(command -v nono || echo '<not on PATH>')"
+
+      - name: Report Landlock enforcement level on this runner
+        run: |
+          set -uo pipefail
+          {
+            echo "## Landlock enforcement probe (\`ubuntu-latest\`)"
+            echo
+            echo "This step answers: does GitHub's \`ubuntu-latest\` runner"
+            echo "actually have Landlock available / FullyEnforced?"
+            echo
+            echo '```'
+            echo "kernel:        $(uname -r)"
+            echo -n "LSMs enabled:  "
+            if [ -r /sys/kernel/security/lsm ]; then
+              cat /sys/kernel/security/lsm
+            else
+              echo "<'/sys/kernel/security/lsm' not readable>"
+            fi
+            echo -n "landlock in lsm list: "
+            if [ -r /sys/kernel/security/lsm ] && grep -q landlock /sys/kernel/security/lsm; then
+              echo "YES"
+            else
+              echo "NO"
+            fi
+            echo
+            echo "--- nono --version ---"
+            nono --version 2>&1 || echo "<nono --version failed>"
+            echo
+            echo "--- nono setup (enforcement report) ---"
+            # nono exposes its enforcement classification via `setup`/`why`.
+            # Neither is guaranteed to exist in every nono release, so probe
+            # both and never let a missing subcommand fail the report step.
+            nono setup 2>&1 || echo "<nono setup unavailable in this version>"
+            echo
+            echo "--- nono why (per-op explanation, best-effort) ---"
+            nono why 2>&1 | head -40 || echo "<nono why unavailable in this version>"
+            echo '```'
+            echo
+            echo "**Interpretation:** if the LSM list contains \`landlock\` and"
+            echo "nono reports \`FullyEnforced\`, the runner can enforce graith's"
+            echo "filesystem policy. \`PartiallyEnforced\` = FS-only (fine for v1)."
+            echo "\`NotEnforced\` = fail-closed once the backend ships (see the"
+            echo "fallback options in the workflow header)."
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: nono standalone enforcement smoke test
+        # Fail-soft during bring-up: we want the findings in the log/summary
+        # even if the runner cannot enforce. Flip to a hard gate once the
+        # Landlock-on-runner answer is confirmed (see workflow header).
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+
+          # Fixture layout mirrors the local harness spec
+          # (/tmp/sandbox-harness-spec.md): three distinct dirs, outside each
+          # other — a read-only secret dir and a no-access secret dir.
+          scratch="$(mktemp -d)"
+          trap 'rm -rf "$scratch"' EXIT
+
+          mkdir -p "$scratch/READONLY" "$scratch/NOACCESS" "$scratch/WRITABLE"
+          echo "readonly-secret"  > "$scratch/READONLY/secret-readonly.txt"
+          echo "noaccess-secret"  > "$scratch/NOACCESS/secret-noaccess.txt"
+
+          # Hand-authored nono profile: allow read-only access to READONLY and
+          # read-write to WRITABLE. NOACCESS is deliberately absent, so it must
+          # be denied. "extends: default" pulls in nono's audited deny groups.
+          profile="$scratch/profile.json"
+          cat > "$profile" <<EOF
+          {
+            "extends": "default",
+            "filesystem": {
+              "read": ["$scratch/READONLY"],
+              "read_write": ["$scratch/WRITABLE"]
+            }
+          }
+          EOF
+          echo "profile:"; cat "$profile"; echo
+
+          # Helper: run a command under nono and report DENIED vs ALLOWED based
+          # on the real exit status, not just "did it print something".
+          run_sandboxed() {
+            nono run --profile "$profile" -- "$@"
+          }
+
+          pass=0
+          fail=0
+          note() { printf '%-8s %-9s %s\n' "$1" "$2" "$3"; }
+
+          echo "=== enforcement assertions ==="
+
+          # 1. Read the no-access secret -> EXPECT DENIED.
+          if run_sandboxed cat "$scratch/NOACCESS/secret-noaccess.txt" >/dev/null 2>&1; then
+            note "FAIL" "ALLOWED" "read NOACCESS secret (expected DENIED)"; fail=$((fail+1))
+          else
+            note "ok" "DENIED" "read NOACCESS secret"; pass=$((pass+1))
+          fi
+
+          # 2. Read the read-only secret -> EXPECT ALLOWED.
+          if run_sandboxed cat "$scratch/READONLY/secret-readonly.txt" >/dev/null 2>&1; then
+            note "ok" "ALLOWED" "read READONLY secret"; pass=$((pass+1))
+          else
+            note "FAIL" "DENIED" "read READONLY secret (expected ALLOWED)"; fail=$((fail+1))
+          fi
+
+          # 3. Write into the writable dir -> EXPECT ALLOWED.
+          if run_sandboxed sh -c "echo out > '$scratch/WRITABLE/out.txt'" >/dev/null 2>&1; then
+            note "ok" "ALLOWED" "write WRITABLE/out.txt"; pass=$((pass+1))
+          else
+            note "FAIL" "DENIED" "write WRITABLE/out.txt (expected ALLOWED)"; fail=$((fail+1))
+          fi
+
+          echo
+          echo "smoke test: $pass allowed-as-expected, $fail unexpected"
+          {
+            echo "### nono enforcement smoke test"
+            echo
+            echo "- passed (behaved as expected): **$pass**"
+            echo "- failed (unexpected outcome):  **$fail**"
+            if [ "$fail" -ne 0 ]; then
+              echo
+              echo "> One or more assertions did not hold. During bring-up this is"
+              echo "> reported, not fatal — it tells us this runner cannot fully"
+              echo "> enforce. See the fallback options in the workflow header."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # Report the outcome without hard-failing the job (continue-on-error
+          # already set; keep the real code so the step's own status is honest).
+          [ "$fail" -eq 0 ]
+
+      - name: graith tagged enforcement tests (nono)
+        # TODO(phase-1): activate once the nono sandbox backend + its
+        # build-tagged enforcement test land on main. Phase 1's enforcement
+        # test uses the build tag `nono_enforce` (Linux-only) and is invoked as:
+        #     go test -tags nono_enforce ./internal/sandbox/ -run TestNonoEnforces
+        # The test itself skips cleanly if nono cannot enforce on the host, so
+        # once it exists this step needs no continue-on-error. Until it lands we
+        # detect its absence and no-op so this workflow never breaks.
+        run: |
+          set -uo pipefail
+          tag="nono_enforce"
+          if grep -rqs -- "//go:build ${tag}" internal/sandbox/ 2>/dev/null; then
+            echo "Found ${tag} build-tagged tests — running enforcement suite."
+            go test -tags "${tag}" ./internal/sandbox/... -run TestNonoEnforces -v
+          else
+            echo "::notice title=Phase 1 not merged::No '${tag}' build-tagged tests found in internal/sandbox/; skipping (no-op). Activate once Phase 1 lands."
+            echo "SKIPPED: graith '${tag}' enforcement tests not present yet." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  # ---------------------------------------------------------------------------
+  # macOS / safehouse — Seatbelt is always present; check the binary installs
+  # and add the same gracefully-gated enforcement-test step.
+  # ---------------------------------------------------------------------------
+  macos-safehouse:
+    name: macOS (safehouse / Seatbelt)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Install safehouse (Homebrew)
+        # graith cites two different taps for safehouse and they disagree:
+        #   - README.md:               brew install nicholasgasior/tools/safehouse
+        #   - internal/cli/doctor.go:  brew install eugene1g/tools/agent-safehouse
+        # We try each in turn and use whichever actually installs a `safehouse`
+        # binary onto PATH. The mismatch is flagged in the PR body/report so it
+        # can be reconciled in the source.
+        run: |
+          set -uo pipefail
+          installed=""
+          for spec in \
+            "nicholasgasior/tools/safehouse" \
+            "eugene1g/tools/agent-safehouse"; do
+            echo "--- trying: brew install ${spec} ---"
+            if brew install "${spec}"; then
+              if command -v safehouse >/dev/null 2>&1; then
+                installed="${spec}"
+                break
+              fi
+              echo "brew install ${spec} succeeded but no 'safehouse' on PATH"
+            fi
+          done
+          {
+            echo "## safehouse install (macOS)"
+            echo
+            if [ -n "${installed}" ]; then
+              echo "Installed from tap: \`${installed}\`"
+            else
+              echo "No tap produced a \`safehouse\` binary on PATH."
+            fi
+            echo
+            echo "Tap inconsistency in graith source (flag for reconciliation):"
+            echo "- README.md → \`nicholasgasior/tools/safehouse\`"
+            echo "- internal/cli/doctor.go → \`eugene1g/tools/agent-safehouse\`"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Check safehouse availability
+        run: |
+          set -uo pipefail
+          echo -n "sw_vers: "; sw_vers 2>/dev/null || true
+          if command -v safehouse >/dev/null 2>&1; then
+            echo "safehouse found at: $(command -v safehouse)"
+            safehouse --version 2>&1 || echo "<safehouse --version failed>"
+            echo "Seatbelt (macOS sandbox-exec) is always present on macOS runners."
+          else
+            echo "::warning title=safehouse unavailable::No 'safehouse' binary on PATH; enforcement tests will skip."
+          fi
+
+      - name: graith tagged enforcement tests (safehouse)
+        # TODO(phase-1): activate once the safehouse-path enforcement test lands.
+        # Gated identically to the Linux step: detect the build-tagged test and
+        # no-op if absent so this workflow never breaks before Phase 1 merges.
+        # The macOS/safehouse enforcement tag is expected to mirror the nono one
+        # (e.g. `safehouse_enforce`); adjust below when Phase 1 fixes the name.
+        run: |
+          set -uo pipefail
+          tag="safehouse_enforce"
+          if grep -rqs -- "//go:build ${tag}" internal/sandbox/ 2>/dev/null; then
+            echo "Found ${tag} build-tagged tests — running enforcement suite."
+            go test -tags "${tag}" ./internal/sandbox/... -v
+          else
+            echo "::notice title=Phase 1 not merged::No '${tag}' build-tagged tests found in internal/sandbox/; skipping (no-op). Activate once Phase 1 lands."
+            echo "SKIPPED: graith '${tag}' enforcement tests not present yet." >> "$GITHUB_STEP_SUMMARY"
+          fi
