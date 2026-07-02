@@ -3,9 +3,12 @@ name: CI
 on:
   push:
     branches: [main, 'release-please--branches--main']
+  # No paths-ignore: Lint / Test (ubuntu) / Test (macos) are REQUIRED status
+  # checks, so this workflow must run and report on every PR. Skipping it for
+  # CHANGELOG-only PRs (e.g. the changelog-regeneration PR) leaves those
+  # required contexts permanently "expected" and blocks the PR — with
+  # enforce_admins, unmergeably. The jobs are cheap; run them everywhere.
   pull_request:
-    paths-ignore:
-      - CHANGELOG.md
 
 permissions:
   contents: read
