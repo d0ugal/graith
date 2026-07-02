@@ -49,7 +49,7 @@ jobs:
         env:
           RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
-          VERSION=$(cat dist/metadata.json | jq -r '.[0].tag' | sed 's/^v//')
+          VERSION=$(jq -r '.[0].tag' dist/metadata.json | sed 's/^v//')
           DARWIN_AMD64_SHA=$(sha256sum dist/graith-dev_darwin_amd64.tar.gz | cut -d' ' -f1)
           DARWIN_ARM64_SHA=$(sha256sum dist/graith-dev_darwin_arm64.tar.gz | cut -d' ' -f1)
           LINUX_AMD64_SHA=$(sha256sum dist/graith-dev_linux_amd64.tar.gz | cut -d' ' -f1)
