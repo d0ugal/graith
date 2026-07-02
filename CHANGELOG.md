@@ -123,1226 +123,1226 @@
 
 ### Features
 
-* add number key shortcuts to session select overlay ([9abac73](https://github.com/d0ugal/graith/commit/9abac736932c0015c23ad352f2babaa7664cf8d9))
+* add number key shortcuts to session select overlay ([2deaa74](https://github.com/d0ugal/graith/commit/2deaa74f4ad849526b939d93f09bcf36e0ee5ebe))
 
 
 ### Bug Fixes
 
-* improve number key labels and strengthen overlay tests ([9a5e959](https://github.com/d0ugal/graith/commit/9a5e9591d17dd906611057dc5f7b23a03e0879f1))
-* update module github.com/pelletier/go-toml/v2 to v2.4.2 ([f1ac9f3](https://github.com/d0ugal/graith/commit/f1ac9f3dbdfbcdce438cd3aee808b384e8990416))
+* improve number key labels and strengthen overlay tests ([6e27823](https://github.com/d0ugal/graith/commit/6e27823ce0551f7ce33f7545bc4fc91fb384f86d))
+* update module github.com/pelletier/go-toml/v2 to v2.4.2 ([635c7dd](https://github.com/d0ugal/graith/commit/635c7dd1a3f5efae11eb54c02eeaf24c696e51ad))
 
 ## [0.54.1](https://github.com/d0ugal/graith/compare/v0.54.0...v0.54.1) (2026-06-21)
 
 
 ### Bug Fixes
 
-* set explicit cwd for MCP server processes to survive worktree deletion ([ea16e11](https://github.com/d0ugal/graith/commit/ea16e1143c87de26b2cd767918e75f5c7117c4f5))
+* set explicit cwd for MCP server processes to survive worktree deletion ([6670fb5](https://github.com/d0ugal/graith/commit/6670fb58cfda0bcfeb9edd2f1ac763ae3bad4d27))
 
 ## [0.54.0](https://github.com/d0ugal/graith/compare/v0.53.1...v0.54.0) (2026-06-21)
 
 
 ### Features
 
-* add first-class inbox messaging with auto-resume ([296eccd](https://github.com/d0ugal/graith/commit/296eccdbf00160c99d09b2f7bec16e0ac5871c3c))
+* add first-class inbox messaging with auto-resume ([da10ebe](https://github.com/d0ugal/graith/commit/da10ebed2bc07cfd23316331e0f3328a5f5ff09a))
 
 
 ### Bug Fixes
 
-* resolve HOME and CWD for daemon git-pull subprocess ([7df8b49](https://github.com/d0ugal/graith/commit/7df8b49236fe0530f3d72ef0f545c09f5e02a425)), closes [#551](https://github.com/d0ugal/graith/issues/551)
-* return error on UserHomeDir failure, use t.Chdir in test ([fc0f133](https://github.com/d0ugal/graith/commit/fc0f133cd40f56566f9bf690b13a069b21951b2e))
+* resolve HOME and CWD for daemon git-pull subprocess ([169aa16](https://github.com/d0ugal/graith/commit/169aa163649e0b12c79d85345e3bf35ce336b4c7)), closes [#551](https://github.com/d0ugal/graith/issues/551)
+* return error on UserHomeDir failure, use t.Chdir in test ([514f351](https://github.com/d0ugal/graith/commit/514f3515eff83a8e9baa9af9632efa536f9c3100))
 
 ## [0.53.1](https://github.com/d0ugal/graith/compare/v0.53.0...v0.53.1) (2026-06-20)
 
 
 ### Bug Fixes
 
-* update module github.com/pelletier/go-toml/v2 to v2.4.1 ([ba4317b](https://github.com/d0ugal/graith/commit/ba4317b702c815ea29207316d6afe5c0f91f83b8))
+* update module github.com/pelletier/go-toml/v2 to v2.4.1 ([1c3474f](https://github.com/d0ugal/graith/commit/1c3474faa6304749dfb1246f58f9b116a7d17937))
 
 ## [0.53.0](https://github.com/d0ugal/graith/compare/v0.52.1...v0.53.0) (2026-06-18)
 
 
 ### Features
 
-* add `gr restart --children` to restart all descendant sessions ([7e2733c](https://github.com/d0ugal/graith/commit/7e2733cb4cc22e8301e169b3a2918601bf0bce2b)), closes [#481](https://github.com/d0ugal/graith/issues/481)
+* add `gr restart --children` to restart all descendant sessions ([6e4d381](https://github.com/d0ugal/graith/commit/6e4d381c9d622c4d936e02882b532b3bf9821635)), closes [#481](https://github.com/d0ugal/graith/issues/481)
 
 
 ### Bug Fixes
 
-* address review tribunal findings for restart --children ([3b04d56](https://github.com/d0ugal/graith/commit/3b04d56b621bb855bbe13cf4d5303b0f3a7d9c58))
-* address tribunal findings — async notify and correct inbox stream ([577676b](https://github.com/d0ugal/graith/commit/577676bf21f8b4403f5ab4ecdc9a8c3970328460))
-* also clear ParentID in Delete's StatusCreating early-return path ([fc078d5](https://github.com/d0ugal/graith/commit/fc078d580299e9766df980bc90cbaad6191fbdbb))
-* clear dangling ParentID on children when a session is deleted ([81626d7](https://github.com/d0ugal/graith/commit/81626d79c6705d8cbe6a13091c19c1c7b9ccd5c4))
-* move inbox notification from client-side to daemon-side ([bf4a44f](https://github.com/d0ugal/graith/commit/bf4a44f2009087ff55be1be330fe16f987ba15f4))
-* re-read parentID under lock to prevent stale reparenting ([de3b7cd](https://github.com/d0ugal/graith/commit/de3b7cd0b23edac02757daa019f194fd72d5f487))
-* remove dead enrichment data code from hook stdin path ([eadd9eb](https://github.com/d0ugal/graith/commit/eadd9ebc27df5a73ed68d03b56d5b1955978bc8b)), closes [#534](https://github.com/d0ugal/graith/issues/534)
-* reparent children to grandparent when a session is deleted ([1e51ceb](https://github.com/d0ugal/graith/commit/1e51ceb63ff90cbe39809b70eee50e3cf934a079)), closes [#522](https://github.com/d0ugal/graith/issues/522)
+* address review tribunal findings for restart --children ([fd1544c](https://github.com/d0ugal/graith/commit/fd1544c9e5ac64b2b2eda76699c6863b06083538))
+* address tribunal findings — async notify and correct inbox stream ([cfd5871](https://github.com/d0ugal/graith/commit/cfd58711b8547e04b52d08000b7f899f47cc74ab))
+* also clear ParentID in Delete's StatusCreating early-return path ([91ffbc0](https://github.com/d0ugal/graith/commit/91ffbc049d88203256effa2c246c198597c14433))
+* clear dangling ParentID on children when a session is deleted ([4597add](https://github.com/d0ugal/graith/commit/4597add859646346e2bf9eedf008abbdf9b83b4e))
+* move inbox notification from client-side to daemon-side ([8fdba44](https://github.com/d0ugal/graith/commit/8fdba4414f205dbd3d390e14d2af1ff970cbda49))
+* re-read parentID under lock to prevent stale reparenting ([b4afe08](https://github.com/d0ugal/graith/commit/b4afe0840780189d1f4da52833b42023a651f53d))
+* remove dead enrichment data code from hook stdin path ([8d16591](https://github.com/d0ugal/graith/commit/8d1659179e02807e93fbf1d30ae171cdea1503fb)), closes [#534](https://github.com/d0ugal/graith/issues/534)
+* reparent children to grandparent when a session is deleted ([9de9006](https://github.com/d0ugal/graith/commit/9de90061ef6cbc1dea6b6714eb5849a7f3b7f263)), closes [#522](https://github.com/d0ugal/graith/issues/522)
 
 ## [0.52.1](https://github.com/d0ugal/graith/compare/v0.52.0...v0.52.1) (2026-06-17)
 
 
 ### Bug Fixes
 
-* allow direct messaging between any authenticated sessions ([02bbe8e](https://github.com/d0ugal/graith/commit/02bbe8ef420dadbfce8ddb768f8de4a899701fc0)), closes [#536](https://github.com/d0ugal/graith/issues/536)
-* make msg send notification best-effort for cross-tree targets ([81cf4c6](https://github.com/d0ugal/graith/commit/81cf4c64f3e6a5b074edf111faecb5edb32a0bd0))
-* make TestTypeWakesSleepingAgent reliable on macOS ([94fe0e6](https://github.com/d0ugal/graith/commit/94fe0e6afe573d429a24d1e0ad74f679a7135bbc))
+* allow direct messaging between any authenticated sessions ([6242727](https://github.com/d0ugal/graith/commit/624272727c78b638d697b45869ddcf8efbc0a4c5)), closes [#536](https://github.com/d0ugal/graith/issues/536)
+* make msg send notification best-effort for cross-tree targets ([3446a20](https://github.com/d0ugal/graith/commit/3446a20c8bd317568852d9b5470d063f2b203721))
+* make TestTypeWakesSleepingAgent reliable on macOS ([563a8ee](https://github.com/d0ugal/graith/commit/563a8eea49c4cdb2f1e78b93bfa4a86d06bfbb14))
 
 ## [0.52.0](https://github.com/d0ugal/graith/compare/v0.51.0...v0.52.0) (2026-06-17)
 
 
 ### Features
 
-* add `gr update` command for session property mutations ([143893b](https://github.com/d0ugal/graith/commit/143893b513fc8ec1b4c05313c060f2dd5340e279))
-* add create-session form to overlay and ctrl+b c ([74d7c20](https://github.com/d0ugal/graith/commit/74d7c20bb06d8e81c182220bf3d98a7128e9f580))
-* add per-session token auth to prevent agent impersonation ([a527328](https://github.com/d0ugal/graith/commit/a52732868a802a660401b8faeec6b813f266916a))
-* add scenarios for declarative multi-session orchestration ([40583fe](https://github.com/d0ugal/graith/commit/40583feeaeba421dc6306392a42debdc76af9917))
-* idle-timeout for gr type when user is attached and typing ([8e0b1e4](https://github.com/d0ugal/graith/commit/8e0b1e43b45d39e319f2c07f308141b38188c25b))
-* implement scenario Phase 2 — resume, task-done, add, parallel creation ([48a3f00](https://github.com/d0ugal/graith/commit/48a3f0081134b9e2cb431dd00a101cf8dd0ba88b))
+* add `gr update` command for session property mutations ([e161631](https://github.com/d0ugal/graith/commit/e161631bfa1895b84242fa8b89f9def78ae113e5))
+* add create-session form to overlay and ctrl+b c ([e521853](https://github.com/d0ugal/graith/commit/e5218538a1f1fef390e565ab43c64bf23730d5a4))
+* add per-session token auth to prevent agent impersonation ([a9c9a6b](https://github.com/d0ugal/graith/commit/a9c9a6b598c33845d5a01deead741807e0c61778))
+* add scenarios for declarative multi-session orchestration ([778b9a0](https://github.com/d0ugal/graith/commit/778b9a0dcccb26f2962c92025614f5a23a8dfd11))
+* idle-timeout for gr type when user is attached and typing ([b3d9dee](https://github.com/d0ugal/graith/commit/b3d9dee06ca57093fc26bb5af58338bbfb4524af))
+* implement scenario Phase 2 — resume, task-done, add, parallel creation ([2c72497](https://github.com/d0ugal/graith/commit/2c72497a6dd73d25c301b9c66f1cccf37bb9ffb4))
 
 
 ### Bug Fixes
 
-* address final tribunal findings for scenarios ([3e94eaf](https://github.com/d0ugal/graith/commit/3e94eaf6e7d4b4cb1521769932d27d9424c745d1))
-* address review tribunal findings for agent auth ([1dd713d](https://github.com/d0ugal/graith/commit/1dd713d009587d1662a3d60af6eb475cb17c90ad))
-* address tribunal findings for scenarios feature ([9a3b4ce](https://github.com/d0ugal/graith/commit/9a3b4cec44d422f30ec9a30e56477ca4ca88004e))
-* address tribunal findings in idle-timeout implementation ([9abf8e6](https://github.com/d0ugal/graith/commit/9abf8e6aab82bff77ebd55008358abf35a09226b))
-* make TestStopAllWaitsConcurrently reliable on macOS ([ae7aacc](https://github.com/d0ugal/graith/commit/ae7aacc478672e8020b82e22bdbcaa0253ef34a2))
-* prevent data race on SessionIDs in StopScenario and DeleteScenario ([4d1b9d0](https://github.com/d0ugal/graith/commit/4d1b9d0bc2caf7aefb1a599a20e7109590d5cb36))
-* resolve data race in scenario CLI tests ([c6656b7](https://github.com/d0ugal/graith/commit/c6656b78f8b5af5730f528ee6031aa2f167bd575))
-* resolve golangci-lint warnings in overlay and createinput ([89dcd97](https://github.com/d0ugal/graith/commit/89dcd9785de986731c06c1b6644fb129cd7651be))
-* resolve symlinks in test path comparison for macOS CI ([8c07a06](https://github.com/d0ugal/graith/commit/8c07a0632e76724e8322938fc68f24f442043536))
-* resolve tribunal findings and add shared session support for scenarios ([9c99eff](https://github.com/d0ugal/graith/commit/9c99eff4d93972c1ad69ffc399f647c20760e928))
-* resolve tribunal R2 findings and add scenario overlay grouping ([ecfb99a](https://github.com/d0ugal/graith/commit/ecfb99af292b8f25e78720432b3f206702d5757a))
-* resolve tribunal R3 findings in overlay scenario view ([0cb8780](https://github.com/d0ugal/graith/commit/0cb87807d33f56a12bd88a8dcdf2f455773bca0a))
-* space-to-dash Text field, add form interaction tests, apply tribunal fixes ([0e6d511](https://github.com/d0ugal/graith/commit/0e6d511c26b8c5eb4dd65e57e6dc565404c7c839))
-* update github.com/charmbracelet/ultraviolet digest to f39628c ([bfe96a8](https://github.com/d0ugal/graith/commit/bfe96a85a25c15985861dc959e3a89a8ec120b11))
-* update module modernc.org/sqlite to v1.53.0 ([857a6d5](https://github.com/d0ugal/graith/commit/857a6d501917e8826cb1f182301d21ae388ac417))
+* address final tribunal findings for scenarios ([661e331](https://github.com/d0ugal/graith/commit/661e331db8dc3fc16755d1e2ad2dbae525f5ae56))
+* address review tribunal findings for agent auth ([a5c92c6](https://github.com/d0ugal/graith/commit/a5c92c63cc6b8693a3e6884912ff7c839b2d47b4))
+* address tribunal findings for scenarios feature ([ebd91a4](https://github.com/d0ugal/graith/commit/ebd91a4dc1ad6b8333ebca6150aca4b9d9794063))
+* address tribunal findings in idle-timeout implementation ([91634c9](https://github.com/d0ugal/graith/commit/91634c9d37ee4bcf654ff9089be5e7a7e4a3573f))
+* make TestStopAllWaitsConcurrently reliable on macOS ([4411b30](https://github.com/d0ugal/graith/commit/4411b30882ce3eaf309bfa3232ba10f7784c908f))
+* prevent data race on SessionIDs in StopScenario and DeleteScenario ([207198a](https://github.com/d0ugal/graith/commit/207198a3af8ccf2c0320dec27ebb3d7a85fd2090))
+* resolve data race in scenario CLI tests ([7b9d782](https://github.com/d0ugal/graith/commit/7b9d78236e067ef86b63a8cbd9a3d54a97e44e88))
+* resolve golangci-lint warnings in overlay and createinput ([33b0bd6](https://github.com/d0ugal/graith/commit/33b0bd6c188220f80507ce2b11fd079ae5f1609d))
+* resolve symlinks in test path comparison for macOS CI ([d3ec1be](https://github.com/d0ugal/graith/commit/d3ec1beabe9ea43f052a67e48377760d572bb070))
+* resolve tribunal findings and add shared session support for scenarios ([d6f6b01](https://github.com/d0ugal/graith/commit/d6f6b01552c72286445395fd874d512257cc5347))
+* resolve tribunal R2 findings and add scenario overlay grouping ([a215f1f](https://github.com/d0ugal/graith/commit/a215f1fd6f73d7914a9b780194bd7883d9c5fc8f))
+* resolve tribunal R3 findings in overlay scenario view ([99b1dfd](https://github.com/d0ugal/graith/commit/99b1dfdc48a0bb83eba621ca6f47e8ac4c94783d))
+* space-to-dash Text field, add form interaction tests, apply tribunal fixes ([508d965](https://github.com/d0ugal/graith/commit/508d965923d9c82ec148ec02040c07241e67c70d))
+* update github.com/charmbracelet/ultraviolet digest to f39628c ([0d2ec53](https://github.com/d0ugal/graith/commit/0d2ec533342f4e17ba8e0f40598d27c6889ccfa8))
+* update module modernc.org/sqlite to v1.53.0 ([0608cb9](https://github.com/d0ugal/graith/commit/0608cb9df23bf3ebc514b2f9b923d675554b1393))
 
 ## [0.51.0](https://github.com/d0ugal/graith/compare/v0.50.0...v0.51.0) (2026-06-12)
 
 
 ### Features
 
-* improve crash diagnostics with signal detection, mass-exit warnings, and peak RSS ([b0e2e26](https://github.com/d0ugal/graith/commit/b0e2e267af2a6d12806da98a0ba9760c817cdaf8)), closes [#519](https://github.com/d0ugal/graith/issues/519)
+* improve crash diagnostics with signal detection, mass-exit warnings, and peak RSS ([dc70074](https://github.com/d0ugal/graith/commit/dc7007448c27395726d612588b4c225e42b7c9f0)), closes [#519](https://github.com/d0ugal/graith/issues/519)
 
 
 ### Bug Fixes
 
-* only count crash exits toward mass-exit detection ([dea99de](https://github.com/d0ugal/graith/commit/dea99de5652cb482f24fc8fe7b8b9d611407c894))
+* only count crash exits toward mass-exit detection ([ab29b3a](https://github.com/d0ugal/graith/commit/ab29b3ae1e1155f86776942a64d5f430ee0c67fd))
 
 ## [0.50.0](https://github.com/d0ugal/graith/compare/v0.49.0...v0.50.0) (2026-06-09)
 
 
 ### Features
 
-* add `gr path` command to print session worktree path ([bbe1e9f](https://github.com/d0ugal/graith/commit/bbe1e9f95b155af0c1762ac263e5d8aa84a54776))
+* add `gr path` command to print session worktree path ([44ba0c0](https://github.com/d0ugal/graith/commit/44ba0c0adb1085c86f7284a20a3f94de76a97c5c))
 
 
 ### Bug Fixes
 
-* allow same-version daemon restart to preserve sessions ([51dcaae](https://github.com/d0ugal/graith/commit/51dcaae2197ddb21bc352f454e2172406e5487c9))
+* allow same-version daemon restart to preserve sessions ([6008655](https://github.com/d0ugal/graith/commit/6008655ae7d5b67a0978ceedda695a17c9661bd6))
 
 ## [0.49.0](https://github.com/d0ugal/graith/compare/v0.48.0...v0.49.0) (2026-06-06)
 
 
 ### Features
 
-* add --skip-model-validation flag to gr new ([84dffbc](https://github.com/d0ugal/graith/commit/84dffbc597c62c3e04286f035a3a5b6f50bb2022))
+* add --skip-model-validation flag to gr new ([dafa8e0](https://github.com/d0ugal/graith/commit/dafa8e01c1d6c709ca3b706bf37a0e6c1835a240))
 
 
 ### Bug Fixes
 
-* stop auto-restarting orchestrator on sandbox config reload ([c053994](https://github.com/d0ugal/graith/commit/c0539948d7af2f3753850ce760446b01375da3c2))
-* use non-existent command in skip-validation test to avoid TempDir cleanup race ([2137ace](https://github.com/d0ugal/graith/commit/2137ace89b5477bb5417d1a732df948ffed3b3b7))
+* stop auto-restarting orchestrator on sandbox config reload ([f935015](https://github.com/d0ugal/graith/commit/f93501529c5b593ced2b6e2e9b77ec94b02c470c))
+* use non-existent command in skip-validation test to avoid TempDir cleanup race ([d1168b7](https://github.com/d0ugal/graith/commit/d1168b73d4722c3b91e95d187ea00eb62e8ce9e2))
 
 ## [0.48.0](https://github.com/d0ugal/graith/compare/v0.47.0...v0.48.0) (2026-06-04)
 
 
 ### Features
 
-* auto-resume stopped/errored sessions on attach ([a5667e2](https://github.com/d0ugal/graith/commit/a5667e255be332efdae9f7b59c8d3235ea3db07e))
+* auto-resume stopped/errored sessions on attach ([81f2094](https://github.com/d0ugal/graith/commit/81f2094fec71b833a92d9585773ba33359b291b3))
 
 
 ### Bug Fixes
 
-* address tribunal findings in sweep loops ([3dabfb1](https://github.com/d0ugal/graith/commit/3dabfb12577f44cece57ce477a62eae05ca908af))
-* align Agent struct tags for tagalign linter ([8ffa591](https://github.com/d0ugal/graith/commit/8ffa59192353ac655864b70f22ebf344ec5ced21))
-* make gr msg send --children recursive and deduplicate descendant walk ([7941766](https://github.com/d0ugal/graith/commit/7941766d0dc7ebf6804b971ea530ff0389a8b102)), closes [#506](https://github.com/d0ugal/graith/issues/506)
-* pre-trust cursor workspaces to prevent concurrent cli-config.json corruption ([1faec34](https://github.com/d0ugal/graith/commit/1faec341dd900684016031c638d8bb50e626ce03))
-* prevent stale attached client from killing upgraded daemon ([002a118](https://github.com/d0ugal/graith/commit/002a1183e1caef83dda6a6824d45b9dd9b81e310))
-* sweep for late-arriving descendants in DeleteWithChildren and StopWithChildren ([4ac322a](https://github.com/d0ugal/graith/commit/4ac322abb63e10ab7f8623d252fd162837533634))
-* use status-neutral log message for auto-resume on attach ([214ee8a](https://github.com/d0ugal/graith/commit/214ee8a32df75e81973e30f358409c4d4eea31b6))
+* address tribunal findings in sweep loops ([e068d2b](https://github.com/d0ugal/graith/commit/e068d2b9399bad9274466809ab9e589ad1eb8011))
+* align Agent struct tags for tagalign linter ([617edd1](https://github.com/d0ugal/graith/commit/617edd154ef3474c7975064f27b0724959ce7c07))
+* make gr msg send --children recursive and deduplicate descendant walk ([d41e433](https://github.com/d0ugal/graith/commit/d41e433b9d4f1291dc0e5a1ff3848013e6e1c5b9)), closes [#506](https://github.com/d0ugal/graith/issues/506)
+* pre-trust cursor workspaces to prevent concurrent cli-config.json corruption ([70a9e30](https://github.com/d0ugal/graith/commit/70a9e302706d895aad95bcc2f16763a67f2fc1a2))
+* prevent stale attached client from killing upgraded daemon ([645a94b](https://github.com/d0ugal/graith/commit/645a94b6d3716adcfa469b4b47e4b30c9a7241d9))
+* sweep for late-arriving descendants in DeleteWithChildren and StopWithChildren ([543e758](https://github.com/d0ugal/graith/commit/543e7581efbe8c418ae6cafd0a189e7ae1137973))
+* use status-neutral log message for auto-resume on attach ([685972e](https://github.com/d0ugal/graith/commit/685972e52122545b1f2bb0c1d1b429b350ae9ea8))
 
 ## [0.47.0](https://github.com/d0ugal/graith/compare/v0.46.0...v0.47.0) (2026-06-04)
 
 
 ### Features
 
-* validate protocol version on handshake ([48a2ef9](https://github.com/d0ugal/graith/commit/48a2ef98c196307cc9564e241bb020d8f24344b2)), closes [#50](https://github.com/d0ugal/graith/issues/50)
+* validate protocol version on handshake ([a203719](https://github.com/d0ugal/graith/commit/a203719f5c4bbbaf89267401f095017b9bae9a0b)), closes [#50](https://github.com/d0ugal/graith/issues/50)
 
 
 ### Bug Fixes
 
-* block --config flag inside graith sessions to prevent sandbox bypass ([179252f](https://github.com/d0ugal/graith/commit/179252f84696ad6648a38f144869cd6a2bc78216)), closes [#331](https://github.com/d0ugal/graith/issues/331)
-* close PTY/log handles and remove stale map entries on session exit ([9e496f6](https://github.com/d0ugal/graith/commit/9e496f6c974f65f6f98e44bb88990fbb42f23817)), closes [#220](https://github.com/d0ugal/graith/issues/220)
-* eliminate torn frames from two-write pattern in FrameWriter ([ce7d81c](https://github.com/d0ugal/graith/commit/ce7d81cfbb40840c7fcbed145d42c882e9d39fbf)), closes [#212](https://github.com/d0ugal/graith/issues/212)
-* prevent adoptedWaitLoop from hanging on PID reuse ([6915970](https://github.com/d0ugal/graith/commit/6915970c60238371a419d27d2c93502adfc0b9e2)), closes [#253](https://github.com/d0ugal/graith/issues/253)
-* protect sm.cfg reads from data races with applyConfig ([aca2f3a](https://github.com/d0ugal/graith/commit/aca2f3a1fcb79849d047fc9bcaf6d69f72f010b1)), closes [#214](https://github.com/d0ugal/graith/issues/214)
-* reject paths containing colons in sandbox Wrap ([3be5672](https://github.com/d0ugal/graith/commit/3be56729a804f277010a3c1541313b32aa541a7a)), closes [#226](https://github.com/d0ugal/graith/issues/226)
-* replace single attachedWriter with writer slice for multi-subscriber support ([c780b3c](https://github.com/d0ugal/graith/commit/c780b3c8ad787e913edd8f82b606202989489f1f)), closes [#219](https://github.com/d0ugal/graith/issues/219)
-* stop sessions concurrently in StopAll and use fresh shutdown context ([8755dfc](https://github.com/d0ugal/graith/commit/8755dfcc844336191b7e72b4874f7293d5936d86)), closes [#229](https://github.com/d0ugal/graith/issues/229)
-* use lock-free reads in Scrollback for concurrent access ([363e7c2](https://github.com/d0ugal/graith/commit/363e7c2353c3fdef6f27363a44f236d2253a3396)), closes [#242](https://github.com/d0ugal/graith/issues/242)
+* block --config flag inside graith sessions to prevent sandbox bypass ([c4d4b37](https://github.com/d0ugal/graith/commit/c4d4b3752eb02e9822193e91c2c1ecb0d5c61c02)), closes [#331](https://github.com/d0ugal/graith/issues/331)
+* close PTY/log handles and remove stale map entries on session exit ([d4832f0](https://github.com/d0ugal/graith/commit/d4832f0c899339b0fe668333accf12fa009f8da8)), closes [#220](https://github.com/d0ugal/graith/issues/220)
+* eliminate torn frames from two-write pattern in FrameWriter ([1c002c4](https://github.com/d0ugal/graith/commit/1c002c48590ac7bd87024deffb59faf0ba1e3c22)), closes [#212](https://github.com/d0ugal/graith/issues/212)
+* prevent adoptedWaitLoop from hanging on PID reuse ([4de8791](https://github.com/d0ugal/graith/commit/4de879145689c9d6ba0ccc6b0eee50237ede4ceb)), closes [#253](https://github.com/d0ugal/graith/issues/253)
+* protect sm.cfg reads from data races with applyConfig ([3183d62](https://github.com/d0ugal/graith/commit/3183d627136b297d6b4f0e819fd9d5ceca451981)), closes [#214](https://github.com/d0ugal/graith/issues/214)
+* reject paths containing colons in sandbox Wrap ([f273677](https://github.com/d0ugal/graith/commit/f2736772d68199582b58ddb064a15e503876b1d2)), closes [#226](https://github.com/d0ugal/graith/issues/226)
+* replace single attachedWriter with writer slice for multi-subscriber support ([54cb4a8](https://github.com/d0ugal/graith/commit/54cb4a88e6f7a8b2246b4a9920983953ab716fbf)), closes [#219](https://github.com/d0ugal/graith/issues/219)
+* stop sessions concurrently in StopAll and use fresh shutdown context ([cf86abe](https://github.com/d0ugal/graith/commit/cf86abee4ad0240deffdd69e58325b05e1d57a4a)), closes [#229](https://github.com/d0ugal/graith/issues/229)
+* use lock-free reads in Scrollback for concurrent access ([11579d3](https://github.com/d0ugal/graith/commit/11579d364934d8ad0f3fb1b25dff79895fc37a97)), closes [#242](https://github.com/d0ugal/graith/issues/242)
 
 ## [0.46.0](https://github.com/d0ugal/graith/compare/v0.45.0...v0.46.0) (2026-06-02)
 
 
 ### Features
 
-* add configurable sandbox access for orchestrator sessions ([538c1a1](https://github.com/d0ugal/graith/commit/538c1a10fb3d8331699db18922df025de6ea8d81))
-* hide git info in overlay for shared worktree sessions ([f20737c](https://github.com/d0ugal/graith/commit/f20737cad6a04bb56657acb43a3b8582853ffd13))
+* add configurable sandbox access for orchestrator sessions ([4a14e73](https://github.com/d0ugal/graith/commit/4a14e73d098c4bc48b58c9b47448e510a6f9456f))
+* hide git info in overlay for shared worktree sessions ([5c79df5](https://github.com/d0ugal/graith/commit/5c79df52e05407e92127754efab8e6f541a08b46))
 
 
 ### Bug Fixes
 
-* address round 1 code review tribunal findings ([d59bcad](https://github.com/d0ugal/graith/commit/d59bcad214c07da3908ba34c5820932a7c67ebe4))
-* address round 1 tribunal findings on shared worktree design doc ([c20efcc](https://github.com/d0ugal/graith/commit/c20efcc99a8c3dc3c38e490593434ce792388a83))
+* address round 1 code review tribunal findings ([c643a52](https://github.com/d0ugal/graith/commit/c643a5273f5bcb4ed6369c5c595a7c5231244779))
+* address round 1 tribunal findings on shared worktree design doc ([f35087e](https://github.com/d0ugal/graith/commit/f35087eda515cbcc8f8f816848194d0cb012f6ee))
 
 ## [0.45.0](https://github.com/d0ugal/graith/compare/v0.44.0...v0.45.0) (2026-06-01)
 
 
 ### Features
 
-* add automatic lifecycle status updates to sessions ([1897356](https://github.com/d0ugal/graith/commit/189735662fd8dbeda71396d45074b42352f2eacc))
-* attach directly from overlay filter with single Enter ([b4374d7](https://github.com/d0ugal/graith/commit/b4374d797d873d6e65eae760c614fddf486e3fb8))
+* add automatic lifecycle status updates to sessions ([ba8922d](https://github.com/d0ugal/graith/commit/ba8922d7e7c03d8c6d4f574c089c6a8ffc0062d8))
+* attach directly from overlay filter with single Enter ([be350dc](https://github.com/d0ugal/graith/commit/be350dc9940b5111bdcf61eec2c677193426a9f9))
 
 
 ### Bug Fixes
 
-* address all 14 tribunal findings in lifecycle status design doc ([e6f43c8](https://github.com/d0ugal/graith/commit/e6f43c8852576d3092e1fd622b2a5d22f5407a8f))
-* address golangci-lint findings in lifecycle code ([c8a1531](https://github.com/d0ugal/graith/commit/c8a15314556d5a1d6ee197677e0db09ecc50f9fe))
-* address round 2 review findings in lifecycle status design doc ([e697d78](https://github.com/d0ugal/graith/commit/e697d78340da3cc1f33d3bc9bb78510be07f5057))
+* address all 14 tribunal findings in lifecycle status design doc ([3d8a84c](https://github.com/d0ugal/graith/commit/3d8a84c110c09e07667913a7574764a3bf58614b))
+* address golangci-lint findings in lifecycle code ([d69fd8f](https://github.com/d0ugal/graith/commit/d69fd8f462dde8c4d2bd91f5d0e9db2b1aeba43e))
+* address round 2 review findings in lifecycle status design doc ([b7f05b1](https://github.com/d0ugal/graith/commit/b7f05b126bcbb2dee049a521c8c7a6d7dd540c2c))
 
 ## [0.44.0](https://github.com/d0ugal/graith/compare/v0.43.0...v0.44.0) (2026-06-01)
 
 
 ### Features
 
-* add auto-refresh to overlay session list ([a22d993](https://github.com/d0ugal/graith/commit/a22d99332fa34407f75832363abdb6746b00a9dc))
-* block nested graith sessions ([93d0149](https://github.com/d0ugal/graith/commit/93d01495557705002754cffc2a58c6f3bc087233))
-* stagger restart-all to keep overlay responsive ([95c1716](https://github.com/d0ugal/graith/commit/95c1716d4759fe40d1533c217b74d1be1c651b78))
+* add auto-refresh to overlay session list ([de35087](https://github.com/d0ugal/graith/commit/de350879c25d6b6f99d13a01e66212ef993250fd))
+* block nested graith sessions ([5b497df](https://github.com/d0ugal/graith/commit/5b497dfaff1389d7cf46a97aa450de51f68ff56c))
+* stagger restart-all to keep overlay responsive ([6504bb0](https://github.com/d0ugal/graith/commit/6504bb0105eff423fbd0f374043a36cff41057a6))
 
 ## [0.43.0](https://github.com/d0ugal/graith/compare/v0.42.0...v0.43.0) (2026-05-31)
 
 
 ### Features
 
-* add configurable prompt field to orchestrator config ([2bf2d65](https://github.com/d0ugal/graith/commit/2bf2d659ebe02587f7ecab72838a5e6cf0cf3278))
+* add configurable prompt field to orchestrator config ([54aaae4](https://github.com/d0ugal/graith/commit/54aaae4068a3425c8899ec7efd338b001ca6ea30))
 
 ## [0.42.0](https://github.com/d0ugal/graith/compare/v0.41.1...v0.42.0) (2026-05-29)
 
 
 ### Features
 
-* add orchestrator session — daemon-managed singleton agent ([ca91630](https://github.com/d0ugal/graith/commit/ca91630ab6c795bf7ca7fd4d0ec858ff137842b1))
-* add periodic git pull for maintenance repos ([c518358](https://github.com/d0ugal/graith/commit/c51835819347b5563a043d4939eff7429884be2a))
+* add orchestrator session — daemon-managed singleton agent ([ee32d90](https://github.com/d0ugal/graith/commit/ee32d90138bd3cebe2406f67e7127bf5816df66d))
+* add periodic git pull for maintenance repos ([4516cce](https://github.com/d0ugal/graith/commit/4516cce42200267c14fac82f28de78ec63fd344e))
 
 
 ### Bug Fixes
 
-* address review tribunal findings for git-pull feature ([356b551](https://github.com/d0ugal/graith/commit/356b551ff760e8621a1577a9130e926374dad493))
-* address round 1 review findings ([07843ff](https://github.com/d0ugal/graith/commit/07843ff7744241b7bee145db1e70349d427f1af9))
-* address round 2 review findings ([2ff1b95](https://github.com/d0ugal/graith/commit/2ff1b9548c7cd5dd692036e91094ed5969376463))
-* address round 2 review findings for git-pull ([caba61b](https://github.com/d0ugal/graith/commit/caba61b7875478dd8c9aaa2c0439d40b83be727b))
-* align leaf node indentation with parent nodes in session picker ([bfaac3c](https://github.com/d0ugal/graith/commit/bfaac3c3bf1fa947879860d404cca4254ed213c4))
-* improve overlay height utilization and preserve preview beside panel ([04c777c](https://github.com/d0ugal/graith/commit/04c777cdc340f88054a04813f22d96dd864b53e7))
-* remove ineffectual assignments flagged by golangci-lint ([21dc8fd](https://github.com/d0ugal/graith/commit/21dc8fd00f182fb267316d8abb27532a4c4ad8d7))
-* resolve symlinks in active session check and fix lint ([83f7ac5](https://github.com/d0ugal/graith/commit/83f7ac599e3c5f12436cec055a4124d8d57cef38))
+* address review tribunal findings for git-pull feature ([a8343dc](https://github.com/d0ugal/graith/commit/a8343dc4d81da4f605b25c0f08fd8ba8a5308bd9))
+* address round 1 review findings ([e1559d4](https://github.com/d0ugal/graith/commit/e1559d48c3af70f590bcff2cffebdb604783bad5))
+* address round 2 review findings ([05d139d](https://github.com/d0ugal/graith/commit/05d139d4794819ddbd5c3105ab68ea05b8f4f1b3))
+* address round 2 review findings for git-pull ([9f14c95](https://github.com/d0ugal/graith/commit/9f14c95a01dc71e57254cbd83a46f19f8e0f1523))
+* align leaf node indentation with parent nodes in session picker ([0ab8306](https://github.com/d0ugal/graith/commit/0ab830666e99d2acaf3673950fb18ed8ebcd621c))
+* improve overlay height utilization and preserve preview beside panel ([724faba](https://github.com/d0ugal/graith/commit/724faba61f086f1d587f7c4d58ab381c651f7c27))
+* remove ineffectual assignments flagged by golangci-lint ([f9acc89](https://github.com/d0ugal/graith/commit/f9acc897a19c98da86f836b75df17c0f59edfb65))
+* resolve symlinks in active session check and fix lint ([4fa98de](https://github.com/d0ugal/graith/commit/4fa98de44891cd06795cc4141f1703d7a0a1b677))
 
 ## [0.41.1](https://github.com/d0ugal/graith/compare/v0.41.0...v0.41.1) (2026-05-29)
 
 
 ### Bug Fixes
 
-* improve validate_model error reporting and output parsing ([a79271a](https://github.com/d0ugal/graith/commit/a79271a1472654c3faec2f7a29ff2575bc0ae0fc))
+* improve validate_model error reporting and output parsing ([bd04d45](https://github.com/d0ugal/graith/commit/bd04d4531de80b887eb8dd0e7c0092aa55a6d0b4))
 
 ## [0.41.0](https://github.com/d0ugal/graith/compare/v0.40.0...v0.41.0) (2026-05-28)
 
 
 ### Features
 
-* add collapse/expand for child sessions in overlay picker ([09ee001](https://github.com/d0ugal/graith/commit/09ee001a8a57bae372ad01afc34a2ee7590a2cfd))
+* add collapse/expand for child sessions in overlay picker ([b755dfc](https://github.com/d0ugal/graith/commit/b755dfc935936eab94269285c21da664ed2fbc8e))
 
 
 ### Bug Fixes
 
-* address tribunal review findings for collapse feature ([6c700a8](https://github.com/d0ugal/graith/commit/6c700a8c52d05413c62b0fd242b321ee12767994))
-* create shared store directory at startup ([0c1b358](https://github.com/d0ugal/graith/commit/0c1b35881e37b4ae44aaa1ff60df5766fec3a3c6))
-* cursor falls back to ancestor when currentSessionID is collapsed ([d511d21](https://github.com/d0ugal/graith/commit/d511d2189db9b7111b92b7e8e0908db04c11db21))
-* prevent upgrade storm and socket deletion race ([ed02f84](https://github.com/d0ugal/graith/commit/ed02f84c955d50e607a7233568eabe38faf3f50d))
+* address tribunal review findings for collapse feature ([ca0f572](https://github.com/d0ugal/graith/commit/ca0f572ac058d5a4eb575e1e60b11416a302f2c6))
+* create shared store directory at startup ([e0db5b4](https://github.com/d0ugal/graith/commit/e0db5b4fb9f2b8ee56aa913b342e2392fa5afc87))
+* cursor falls back to ancestor when currentSessionID is collapsed ([8639190](https://github.com/d0ugal/graith/commit/8639190a5755ae2682ab1c014c3fbbf38b851c46))
+* prevent upgrade storm and socket deletion race ([6db6749](https://github.com/d0ugal/graith/commit/6db67495036edc420fa69a04c7a508fe1dd79cef))
 
 ## [0.40.0](https://github.com/d0ugal/graith/compare/v0.39.0...v0.40.0) (2026-05-28)
 
 
 ### Features
 
-* add --shared store examples to agent prompt ([ac6b132](https://github.com/d0ugal/graith/commit/ac6b132fd8d627c775fa978fafd6a0eeab594117))
-* add shared store and repo column to store ls ([7f23c70](https://github.com/d0ugal/graith/commit/7f23c70f8b5d26cc066ce110889915d64bcda031))
+* add --shared store examples to agent prompt ([252adff](https://github.com/d0ugal/graith/commit/252adffe5c2b59a565a27659c3fcca3f777f2f57))
+* add shared store and repo column to store ls ([eeb7548](https://github.com/d0ugal/graith/commit/eeb7548b8573c62f5dc3a9b93fefc184b1fb7aeb))
 
 
 ### Bug Fixes
 
-* address tribunal review findings for share→tmp rename ([3f854cd](https://github.com/d0ugal/graith/commit/3f854cd9c6cda28d4d6fb5ec1916f535d6c783b8))
-* address tribunal review findings for shared store ([b813f34](https://github.com/d0ugal/graith/commit/b813f345a984f81877f5b9f47bdeb62604843804))
-* error when --shared and --repo are both provided ([fa158bf](https://github.com/d0ugal/graith/commit/fa158bf39588ba9add7c8e237e80b8964aa12034))
-* prevent stale mcp-proxy and mcp server from killing daemon on restart ([eef656d](https://github.com/d0ugal/graith/commit/eef656dc4a0c40472c6ce6583a1be2faf903ec91))
+* address tribunal review findings for share→tmp rename ([e71aa54](https://github.com/d0ugal/graith/commit/e71aa54dab00d27895d51eb09515bc9e0fc07988))
+* address tribunal review findings for shared store ([a2b7bc5](https://github.com/d0ugal/graith/commit/a2b7bc57edd2845e040489d15fe522f9598262d2))
+* error when --shared and --repo are both provided ([769fe70](https://github.com/d0ugal/graith/commit/769fe7038272653b3a2aa8344aa141d5340a5161))
+* prevent stale mcp-proxy and mcp server from killing daemon on restart ([89b50c2](https://github.com/d0ugal/graith/commit/89b50c2be739fef8f527c733286afa90ce765fa7))
 
 ## [0.39.0](https://github.com/d0ugal/graith/compare/v0.38.0...v0.39.0) (2026-05-27)
 
 
 ### Features
 
-* rename share directory to tmp, GRAITH_SHARE_PATH to GRAITH_TMPDIR ([9308b14](https://github.com/d0ugal/graith/commit/9308b144285bc33d0912ff9db536edc84e65fef8))
+* rename share directory to tmp, GRAITH_SHARE_PATH to GRAITH_TMPDIR ([41ce4b6](https://github.com/d0ugal/graith/commit/41ce4b6b247d5fd596a468888a9bd7b8010700d8))
 
 
 ### Bug Fixes
 
-* update module github.com/pelletier/go-toml/v2 to v2.4.0 ([00f38b6](https://github.com/d0ugal/graith/commit/00f38b686a72cded93d2cf79e3d714f3c299b927))
+* update module github.com/pelletier/go-toml/v2 to v2.4.0 ([05992f0](https://github.com/d0ugal/graith/commit/05992f0bf2783d7b666414094b3f22d07518ac1b))
 
 ## [0.38.0](https://github.com/d0ugal/graith/compare/v0.37.0...v0.38.0) (2026-05-25)
 
 
 ### Features
 
-* add --all/-a flag to gr store list for cross-repo listing ([f871459](https://github.com/d0ugal/graith/commit/f871459f1b0bc72ef2e9addec9f2ab99ae54b85d))
+* add --all/-a flag to gr store list for cross-repo listing ([b229b3f](https://github.com/d0ugal/graith/commit/b229b3f0d668771029f251164275e7d2896c6adc))
 
 ## [0.37.0](https://github.com/d0ugal/graith/compare/v0.36.0...v0.37.0) (2026-05-24)
 
 
 ### Features
 
-* handle restart in picker overlay, add R for restart-all ([49b102e](https://github.com/d0ugal/graith/commit/49b102e780ab7bc39e4e3003531bcdeb68f070da))
+* handle restart in picker overlay, add R for restart-all ([d42672c](https://github.com/d0ugal/graith/commit/d42672cc75fade345fc8bd0f52e0fa1ea88ab030))
 
 
 ### Bug Fixes
 
-* skip non-existent sandbox dirs instead of failing session creation ([0ad7184](https://github.com/d0ugal/graith/commit/0ad7184cce96c94394a50d2c3908404f1bdb9abd))
+* skip non-existent sandbox dirs instead of failing session creation ([69cb1a6](https://github.com/d0ugal/graith/commit/69cb1a69314881ed0a2aaa9728238da46b7611f6))
 
 ## [0.36.0](https://github.com/d0ugal/graith/compare/v0.35.0...v0.36.0) (2026-05-23)
 
 
 ### Features
 
-* add gr store append command for line-oriented data ([d2b24df](https://github.com/d0ugal/graith/commit/d2b24df12cbe057f39a4924bcc651c0ed7654239))
-* add powerline-style status bar separators ([bb37bd4](https://github.com/d0ugal/graith/commit/bb37bd40de8d1d9130d7a528ec3add769a04514c))
+* add gr store append command for line-oriented data ([5044149](https://github.com/d0ugal/graith/commit/504414914791037315f70a5390bc040be891bd4d))
+* add powerline-style status bar separators ([6574661](https://github.com/d0ugal/graith/commit/657466100dce03b88b2328b335a0482af82b1472))
 
 
 ### Bug Fixes
 
-* case-insensitive .git and store.lock validation in store keys ([aec745c](https://github.com/d0ugal/graith/commit/aec745cde56a1fc14fefed88a055ac59fae31f2c))
-* init store dir at session creation for sandbox access ([#452](https://github.com/d0ugal/graith/issues/452)) ([f98533d](https://github.com/d0ugal/graith/commit/f98533df41e3dd4c6d40f0240c9ec37816a5e9b6))
+* case-insensitive .git and store.lock validation in store keys ([cadf891](https://github.com/d0ugal/graith/commit/cadf891974f8cb8b1106e485507b347a701d600a))
+* init store dir at session creation for sandbox access ([#452](https://github.com/d0ugal/graith/issues/452)) ([2d1ed93](https://github.com/d0ugal/graith/commit/2d1ed93c6c8e587313cfe8c0abcda46c39f02960))
 
 ## [0.35.0](https://github.com/d0ugal/graith/compare/v0.34.0...v0.35.0) (2026-05-23)
 
 
 ### Features
 
-* add store Init with git repo setup ([057661f](https://github.com/d0ugal/graith/commit/057661f69fde9b42313995f56d90ea35fb0f42f5))
-* add store List and Remove with empty parent cleanup ([f1cd2d1](https://github.com/d0ugal/graith/commit/f1cd2d16a38acc8eb45a3ef3297e7cdbca7c7adb))
-* add store package with key validation and path helpers ([b3e7e62](https://github.com/d0ugal/graith/commit/b3e7e621423ea7af10df976749d4e1180759ded5))
-* add store Put, Get, CommitMessage with file locking ([cf4ff7b](https://github.com/d0ugal/graith/commit/cf4ff7bba1d42ff98e72b0f9423f8552737bb346))
-* list all stores when no repo context is available ([bb4ab32](https://github.com/d0ugal/graith/commit/bb4ab322b7f6500e31968294c6d313b6263cc6f3))
-* make agent prompt configurable via config ([a2276fa](https://github.com/d0ugal/graith/commit/a2276fa408f133c946c620f7532e32597557520b))
-* rewrite store CLI to use flat files instead of daemon ([9c1a350](https://github.com/d0ugal/graith/commit/9c1a350a31c10f7cb28ca19b497e4387baf1e2b1))
+* add store Init with git repo setup ([8192ea6](https://github.com/d0ugal/graith/commit/8192ea6fcc3ac90bf0c514baf6f4e14a009345c6))
+* add store List and Remove with empty parent cleanup ([e6894c0](https://github.com/d0ugal/graith/commit/e6894c0ec3b03b3453a5205356eab2e92da869ae))
+* add store package with key validation and path helpers ([9cd4ea1](https://github.com/d0ugal/graith/commit/9cd4ea1f599000924cabef555632950dcc77fb15))
+* add store Put, Get, CommitMessage with file locking ([7626baa](https://github.com/d0ugal/graith/commit/7626baa5f72150a439ecdf47fecfa5d25db9deba))
+* list all stores when no repo context is available ([7923204](https://github.com/d0ugal/graith/commit/79232046dfe7954a0ec12e1385c132a654403770))
+* make agent prompt configurable via config ([af3bf0f](https://github.com/d0ugal/graith/commit/af3bf0f697b7c6829a2f5f1896b43354936a3465))
+* rewrite store CLI to use flat files instead of daemon ([37cb732](https://github.com/d0ugal/graith/commit/37cb73214f836db2e376ebba1a5288339af1ccee))
 
 
 ### Bug Fixes
 
-* address tribunal review findings for store refactor ([804580e](https://github.com/d0ugal/graith/commit/804580e9eece6255cc8c5fbc00d86e6e5d5f9c0b))
-* use switch for agent prompt check in doctor (gocritic) ([f7374f1](https://github.com/d0ugal/graith/commit/f7374f11b8a8fb937d9b4a79ac3ff95b9373d554))
+* address tribunal review findings for store refactor ([2d73b7b](https://github.com/d0ugal/graith/commit/2d73b7b7d7102c40eb410a49723009084bd99a77))
+* use switch for agent prompt check in doctor (gocritic) ([0245fcb](https://github.com/d0ugal/graith/commit/0245fcb02835de8d5f2b3f82cc67708d67bf1e92))
 
 ## [0.34.0](https://github.com/d0ugal/graith/compare/v0.33.1...v0.34.0) (2026-05-21)
 
 
 ### Features
 
-* add per-repo share directory with TMPDIR override ([803cd7b](https://github.com/d0ugal/graith/commit/803cd7b89c3c372b366412ad7e366b0cd3ea9cfd))
+* add per-repo share directory with TMPDIR override ([4fcb37b](https://github.com/d0ugal/graith/commit/4fcb37be6394c141ddd52e181a6092615e9dd4d5))
 
 
 ### Bug Fixes
 
-* address tribunal review findings for share directory ([96226ee](https://github.com/d0ugal/graith/commit/96226eeb78438dc45b216f54e035b948977d67d5))
+* address tribunal review findings for share directory ([d4f4c83](https://github.com/d0ugal/graith/commit/d4f4c83783ef25ccd61771ae58a70b4665867e82))
 
 ## [0.33.1](https://github.com/d0ugal/graith/compare/v0.33.0...v0.33.1) (2026-05-21)
 
 
 ### Bug Fixes
 
-* use config.ResolvePath for store --repo flag and check SendControl error ([cb62688](https://github.com/d0ugal/graith/commit/cb626882c574f6754b37e73d22e1c8b294fa4282))
+* use config.ResolvePath for store --repo flag and check SendControl error ([5e4e556](https://github.com/d0ugal/graith/commit/5e4e5565add37d6cd64c143f3b1c1e98b9a2a98f))
 
 ## [0.33.0](https://github.com/d0ugal/graith/compare/v0.32.0...v0.33.0) (2026-05-21)
 
 
 ### Features
 
-* add DocStore SQLite backend for shared document storage ([c660e64](https://github.com/d0ugal/graith/commit/c660e642a74075bd795a5fe141220797a577750d))
-* add gr store put/get/list/rm CLI commands ([19c0443](https://github.com/d0ugal/graith/commit/19c0443a652c9e05e6ee408f3618c1b9824e0152))
-* add store protocol message types ([c9e5fac](https://github.com/d0ugal/graith/commit/c9e5fac07ca58b00dd30521086f38eb66213056e))
-* wire DocStore into daemon handler and startup ([bc91caa](https://github.com/d0ugal/graith/commit/bc91caacd8a0577aac76a724795f39b4d93ee7a7))
+* add DocStore SQLite backend for shared document storage ([a105eec](https://github.com/d0ugal/graith/commit/a105eecdd6a115a0ad393dc1a604c387eed0f053))
+* add gr store put/get/list/rm CLI commands ([750bfbd](https://github.com/d0ugal/graith/commit/750bfbd6dc9f34c40d0df7b3aca5117d6e7864dd))
+* add store protocol message types ([124b089](https://github.com/d0ugal/graith/commit/124b089e4adb8d008463bbf18d55c2c89da45ee5))
+* wire DocStore into daemon handler and startup ([3f65627](https://github.com/d0ugal/graith/commit/3f656274846a3369a1d698d595ee50541134a584))
 
 
 ### Bug Fixes
 
-* address code quality review for docstore ([c70e6d7](https://github.com/d0ugal/graith/commit/c70e6d71b5e8a651ca50e75a2afce79a4fdcd925))
-* address tribunal review findings for document store ([eb55e95](https://github.com/d0ugal/graith/commit/eb55e957cadae04cc34d38a69ae7b1bb103502de))
+* address code quality review for docstore ([60d02d9](https://github.com/d0ugal/graith/commit/60d02d959b04ac7114d09677bebc939cff2543b5))
+* address tribunal review findings for document store ([16af6b0](https://github.com/d0ugal/graith/commit/16af6b040b5099423cfb5d90e92fd36fa379ac9d))
 
 ## [0.32.0](https://github.com/d0ugal/graith/compare/v0.31.0...v0.32.0) (2026-05-21)
 
 
 ### Features
 
-* add gr status CLI command ([521c63d](https://github.com/d0ugal/graith/commit/521c63d43d003716c1bdd140be77bd6f59be5ed3))
-* add set_status handler and SetSummary/ClearSummary methods ([929faae](https://github.com/d0ugal/graith/commit/929faaefcfb751565f08562682761ce091692abc))
-* add StatusConfig with TTL duration parsing ([e9f7245](https://github.com/d0ugal/graith/commit/e9f72452973666e57a729f595849873ee4790237))
-* add summary status fields to SessionInfo and SetStatusMsg ([bfc6ee1](https://github.com/d0ugal/graith/commit/bfc6ee1db6fc5325375667e4147c14a59f25fe61))
-* add summary status fields to SessionState (v7 migration) ([2f5d57e](https://github.com/d0ugal/graith/commit/2f5d57e886d77d32e9f47411148c66084addc5e0))
-* auto-inject graith prompt into agent sessions ([bf0c5ca](https://github.com/d0ugal/graith/commit/bf0c5caf7657240cb02ac3a6a09f43e77c21630a))
-* persist LastOutputAt on session exit ([cd25e8d](https://github.com/d0ugal/graith/commit/cd25e8d78c03c5010c9c0613a0c931588f5cac08))
-* replace Branch column with Summary, rename Last to Output ([de25b0f](https://github.com/d0ugal/graith/commit/de25b0fec1ac6fcb28e724d8b264c6476e192d59))
-* two-tier summary resolution in toSessionInfo with expiry logic ([c5425c2](https://github.com/d0ugal/graith/commit/c5425c26cf7e15eedb937345b15cd3fdc21b7c7f))
+* add gr status CLI command ([32337e6](https://github.com/d0ugal/graith/commit/32337e63bc74170f5604f803be846143bee2001a))
+* add set_status handler and SetSummary/ClearSummary methods ([fee8e1d](https://github.com/d0ugal/graith/commit/fee8e1d53926943169763a349dbdf523bfcbb0b2))
+* add StatusConfig with TTL duration parsing ([1dd772f](https://github.com/d0ugal/graith/commit/1dd772f270963c94ea1405f8e74b72e687657583))
+* add summary status fields to SessionInfo and SetStatusMsg ([25ba2be](https://github.com/d0ugal/graith/commit/25ba2bea46f5dba20aeb2dea408fb6b32f85215b))
+* add summary status fields to SessionState (v7 migration) ([b05751c](https://github.com/d0ugal/graith/commit/b05751cc08c294627e01aec0d3a7af92d9110f63))
+* auto-inject graith prompt into agent sessions ([ceacd83](https://github.com/d0ugal/graith/commit/ceacd83fc4e49e4bfefd507b5b4130573baaa372))
+* persist LastOutputAt on session exit ([91b8911](https://github.com/d0ugal/graith/commit/91b89113e8917594b9576ef2ed1365119f116e78))
+* replace Branch column with Summary, rename Last to Output ([5b1e62d](https://github.com/d0ugal/graith/commit/5b1e62dddc3dd75b678ede63c07b2a09993aed10))
+* two-tier summary resolution in toSessionInfo with expiry logic ([432e03f](https://github.com/d0ugal/graith/commit/432e03f042081b0f0c05c723c54c78c0ee9e06ea))
 
 
 ### Bug Fixes
 
-* address tribunal review findings for agent prompt injection ([5616e61](https://github.com/d0ugal/graith/commit/5616e612235a4ab832e93687ed72c15f000fb7f3))
-* rewrite if-else chain as switch for gocritic lint ([b5da44e](https://github.com/d0ugal/graith/commit/b5da44eddb46781c9272e3f2cd6e020d1aee574f))
+* address tribunal review findings for agent prompt injection ([dff6951](https://github.com/d0ugal/graith/commit/dff695185f722865e6d3c1d428901dd689e615ae))
+* rewrite if-else chain as switch for gocritic lint ([7eb35ee](https://github.com/d0ugal/graith/commit/7eb35ee962e3759841a6fb304528e187c9426882))
 
 ## [0.31.0](https://github.com/d0ugal/graith/compare/v0.30.1...v0.31.0) (2026-05-20)
 
 
 ### Features
 
-* add starred sessions concept ([78cad2d](https://github.com/d0ugal/graith/commit/78cad2d8fb02f0ae9317d33f7c61625333c0552b))
+* add starred sessions concept ([0d9093d](https://github.com/d0ugal/graith/commit/0d9093d9eedcaca39b69af364b1f183e708deca8))
 
 
 ### Bug Fixes
 
-* address tribunal review findings for starred sessions ([2ffb422](https://github.com/d0ugal/graith/commit/2ffb42288633a7e36ee9187917b33e0bc42d2211))
-* update github.com/charmbracelet/ultraviolet digest to 2399af7 ([648848d](https://github.com/d0ugal/graith/commit/648848d401b1b9f66b5e1851d2c79418430ed120))
-* update module modernc.org/libc to v1.73.4 ([2c44d21](https://github.com/d0ugal/graith/commit/2c44d217dd33ff3efebdc5fef38c6d1b55de987c))
+* address tribunal review findings for starred sessions ([8bf97d3](https://github.com/d0ugal/graith/commit/8bf97d3f9a43c8eb9eabdf85e27caaa6d4b336df))
+* update github.com/charmbracelet/ultraviolet digest to 2399af7 ([9668e1c](https://github.com/d0ugal/graith/commit/9668e1c2fffb1cbc75f38c78c4ae7d2fb0135230))
+* update module modernc.org/libc to v1.73.4 ([d6d261f](https://github.com/d0ugal/graith/commit/d6d261fc9e31df8a7a7ce3429555e7b4e929336a))
 
 ## [0.30.1](https://github.com/d0ugal/graith/compare/v0.30.0...v0.30.1) (2026-05-17)
 
 
 ### Bug Fixes
 
-* address tribunal review findings for terminal reset ([df6464b](https://github.com/d0ugal/graith/commit/df6464bc210873c36f4e6bddfd5bc2a2e8330478))
-* reset terminal state on detach to clean up screen and mouse modes ([0991065](https://github.com/d0ugal/graith/commit/0991065c64b0f1446a3caa8315cd2315c0b2b3c3))
+* address tribunal review findings for terminal reset ([1faf0ca](https://github.com/d0ugal/graith/commit/1faf0ca7463fd782ac19341aacc2d813804b2e1e))
+* reset terminal state on detach to clean up screen and mouse modes ([d80e7b4](https://github.com/d0ugal/graith/commit/d80e7b453cb34582205d67526ae32bd31718d6f6))
 
 ## [0.30.0](https://github.com/d0ugal/graith/compare/v0.29.2...v0.30.0) (2026-05-17)
 
 
 ### Features
 
-* add --children and --parent flags to gr msg send ([05daf7f](https://github.com/d0ugal/graith/commit/05daf7f36feedbb97b8a4f951a415078e101a083))
-* add --children flag to gr stop ([6c37525](https://github.com/d0ugal/graith/commit/6c37525e39e20cb8d723a560e02702c4cf13bd65))
-* add agent detection package ([0fa05c2](https://github.com/d0ugal/graith/commit/0fa05c262b2ec8a9809ce93b6da0c5832f5b48c9))
-* add Children/ExcludeRoot fields to StopMsg and DeleteMsg ([d40605d](https://github.com/d0ugal/graith/commit/d40605d24d6d40a01c8a368104724ab9886b45d2))
-* add StatusChangedAt field to session state ([e8d6aac](https://github.com/d0ugal/graith/commit/e8d6aacf7239bbfd76a1398425c7fb7a6b17522a))
-* add StopWithChildren to SessionManager ([c8bae5f](https://github.com/d0ugal/graith/commit/c8bae5f7329e5f48fe1df3f6ace05e2bca4419b8))
-* add view cycling to session overlay (left/right arrows) ([9455e93](https://github.com/d0ugal/graith/commit/9455e93d5f4d2fac90b1e49f27060c96bd160329))
-* add view mode types with filter and sort functions ([aa94868](https://github.com/d0ugal/graith/commit/aa94868c0f3f61a1a5048dad058c71cab06629ac))
-* auto-enable JSON output in agent environments ([4d03033](https://github.com/d0ugal/graith/commit/4d03033e78d55128a0c8e636141f9a82994419ca))
-* auto-resolve GRAITH_SESSION_ID for delete --children ([36ec09a](https://github.com/d0ugal/graith/commit/36ec09aa788e21fefc3e611d18ef056c7a125606))
-* expose StatusChangedAt in session info protocol ([2f01fc2](https://github.com/d0ugal/graith/commit/2f01fc23b6aab5c10c98a953283d40a3d53b5636))
-* filter and delete respect current view mode ([fcf6285](https://github.com/d0ugal/graith/commit/fcf62858050b390431902505bcc28d281fb3ee90))
-* handle stop-with-children and ExcludeRoot in handler ([cfa4793](https://github.com/d0ugal/graith/commit/cfa4793e386acff44f9cf3b3ddf04243175b1327))
-* track StatusChangedAt on agent status transitions ([391f607](https://github.com/d0ugal/graith/commit/391f607b234912f687d36d11464fd524b927ae7e))
+* add --children and --parent flags to gr msg send ([337207c](https://github.com/d0ugal/graith/commit/337207c6e11d8ff35171029f4a4a085663c8cdef))
+* add --children flag to gr stop ([ad1fad1](https://github.com/d0ugal/graith/commit/ad1fad126a0d9fa0919eec2c497382e098e577cc))
+* add agent detection package ([590cf7b](https://github.com/d0ugal/graith/commit/590cf7b7958c99acd07a88d73ee19d39e1307587))
+* add Children/ExcludeRoot fields to StopMsg and DeleteMsg ([3e3fec4](https://github.com/d0ugal/graith/commit/3e3fec4e3e0755d08a8ddfb0852f03ed60fe936b))
+* add StatusChangedAt field to session state ([af2a0e0](https://github.com/d0ugal/graith/commit/af2a0e04efe7b7e265043db521140ad4c314016b))
+* add StopWithChildren to SessionManager ([73b7133](https://github.com/d0ugal/graith/commit/73b7133a41781a12dc8b5636aeb6d67daf2170f2))
+* add view cycling to session overlay (left/right arrows) ([08b0321](https://github.com/d0ugal/graith/commit/08b03213b216cf071a7a029b878608569b2e3e4d))
+* add view mode types with filter and sort functions ([daa08e9](https://github.com/d0ugal/graith/commit/daa08e9a8d657442ad2ac4dd0be804f6b55dbf14))
+* auto-enable JSON output in agent environments ([a7b734f](https://github.com/d0ugal/graith/commit/a7b734fcd28062961354b3265004bb9692a27802))
+* auto-resolve GRAITH_SESSION_ID for delete --children ([e9d920b](https://github.com/d0ugal/graith/commit/e9d920bbcb961e43f1204a71d90f02f68d41871f))
+* expose StatusChangedAt in session info protocol ([a664fe4](https://github.com/d0ugal/graith/commit/a664fe43b3906b176fbd57d9c006d82df2adc350))
+* filter and delete respect current view mode ([9f86366](https://github.com/d0ugal/graith/commit/9f863663129c6aedbb623d94836bfece2d3c6a21))
+* handle stop-with-children and ExcludeRoot in handler ([9d61694](https://github.com/d0ugal/graith/commit/9d616949ab8f9dd595f6386724397b39fd14216e))
+* track StatusChangedAt on agent status transitions ([ca96fac](https://github.com/d0ugal/graith/commit/ca96fac835a5f7d1ad09155c92c784c540e83ee4))
 
 
 ### Bug Fixes
 
-* address review findings for delete idempotency ([7e5301e](https://github.com/d0ugal/graith/commit/7e5301eaeb55449ce46600fdd724e2905d0a8c33))
-* address tribunal review findings ([c4b5fe8](https://github.com/d0ugal/graith/commit/c4b5fe8c29b401026d45c1f10e364ed9da1d78c7))
-* clone session state before unlock in Create and Fork ([0048395](https://github.com/d0ugal/graith/commit/0048395b3deee0cf2ae2f15b0d8fbd7eea2bd2f5))
-* handle StatusCreating in DeleteWithChildren ([7d90712](https://github.com/d0ugal/graith/commit/7d9071279eace8b84edabe369548c47f8843bf03))
-* make GR_AGENT_MODE=0 override agent detection at call time ([185f810](https://github.com/d0ugal/graith/commit/185f8100cbc37751b204710b6a34ae16762b8e9a))
-* make session delete idempotent and race-safe ([1ed3978](https://github.com/d0ugal/graith/commit/1ed397895c89cf8a48bebdeecc73becaa9fcd0db))
-* release daemon mutex during blocking Create/Fork/Resume operations ([a6e669a](https://github.com/d0ugal/graith/commit/a6e669aa84434f82b92a99a6e4552bf0be8ee72d)), closes [#218](https://github.com/d0ugal/graith/issues/218)
-* remove unused viewMode.name() method ([cdac1bf](https://github.com/d0ugal/graith/commit/cdac1bfcf6c5d7c4bedb450b594fe64bace4fb48))
-* set StatusChangedAt on Phase 1 session creation ([b18ddfe](https://github.com/d0ugal/graith/commit/b18ddfea91bcaee9664ff46b05035369c2b65c0f))
-* suppress SA9003 empty-branch lint in msg send notifications ([c9459db](https://github.com/d0ugal/graith/commit/c9459db2083b1487f40e0df9c8ed5cced2e9e847))
+* address review findings for delete idempotency ([f58b89a](https://github.com/d0ugal/graith/commit/f58b89a65c71e23660785d4308225daa6b3cf0c9))
+* address tribunal review findings ([60b9f55](https://github.com/d0ugal/graith/commit/60b9f55aa776cb13ee26b0eed7b664fb2df39b7b))
+* clone session state before unlock in Create and Fork ([807f8e1](https://github.com/d0ugal/graith/commit/807f8e104046fe108bc99f50ff72f9230c0a7266))
+* handle StatusCreating in DeleteWithChildren ([ffddda0](https://github.com/d0ugal/graith/commit/ffddda0257f78fb46598296c17ba5877d78dc6fa))
+* make GR_AGENT_MODE=0 override agent detection at call time ([69e5bd8](https://github.com/d0ugal/graith/commit/69e5bd8f448963393ffa588163176949fcc1bbf3))
+* make session delete idempotent and race-safe ([b4594ab](https://github.com/d0ugal/graith/commit/b4594ab4326a3b8e23d899913e1c521ced78ae60))
+* release daemon mutex during blocking Create/Fork/Resume operations ([985f786](https://github.com/d0ugal/graith/commit/985f786b94543482d7f3e800f9f7b9ff713535ae)), closes [#218](https://github.com/d0ugal/graith/issues/218)
+* remove unused viewMode.name() method ([e026a1b](https://github.com/d0ugal/graith/commit/e026a1be2fc25a013656c0b95c79841b8904a8e7))
+* set StatusChangedAt on Phase 1 session creation ([c2ca024](https://github.com/d0ugal/graith/commit/c2ca0249419267190fbbc56667db60b5c64ce83f))
+* suppress SA9003 empty-branch lint in msg send notifications ([3a65f85](https://github.com/d0ugal/graith/commit/3a65f85911d7108c2dfed56aa71fb9091d66048d))
 
 ## [0.29.2](https://github.com/d0ugal/graith/compare/v0.29.1...v0.29.2) (2026-05-16)
 
 
 ### Bug Fixes
 
-* address review findings for notification injection fix ([c192d2b](https://github.com/d0ugal/graith/commit/c192d2b97d3b81d5ce2299436dd01f36868582b2))
-* block resume and notifications for unsafe persisted session names ([0c92c82](https://github.com/d0ugal/graith/commit/0c92c82ee1845260f1eb005d300f58f66353720d))
-* buffer statusbar setup/teardown into single writes ([36936b6](https://github.com/d0ugal/graith/commit/36936b61de804917adc8ad31acc4332137c252db))
-* don't set parent when creating session via ctrl+b c ([8100e3b](https://github.com/d0ugal/graith/commit/8100e3b90f207def200a3ffe044ace3246ba9c1a))
-* prevent shell command injection in notification commands ([a1959ce](https://github.com/d0ugal/graith/commit/a1959ceff20a6180e583fa5f6e294a657425879f))
-* propagate git teardown errors on session delete ([ff80d23](https://github.com/d0ugal/graith/commit/ff80d2387e9eaa24351db2458b158cc5d9dcf296)), closes [#258](https://github.com/d0ugal/graith/issues/258)
-* send scrollback history before starting live forwarding on attach ([8047c93](https://github.com/d0ugal/graith/commit/8047c93fcae94f4da4575460f6f2b07d607e034e)), closes [#266](https://github.com/d0ugal/graith/issues/266)
-* serialize concurrent stdout writes in passthrough mode ([d68eb57](https://github.com/d0ugal/graith/commit/d68eb57baa734c4e321184b11ccf1683735894c5)), closes [#216](https://github.com/d0ugal/graith/issues/216)
-* use fmt.Fprintf in teardown to satisfy staticcheck QF1012 ([571b13f](https://github.com/d0ugal/graith/commit/571b13fb4f6d703b1a4c98e128bfc05dad8de9af))
-* validate session names to prevent injection across subsystems ([e543752](https://github.com/d0ugal/graith/commit/e54375263acac34a5b1fddbcde38b36f470c7111)), closes [#222](https://github.com/d0ugal/graith/issues/222)
+* address review findings for notification injection fix ([e56e213](https://github.com/d0ugal/graith/commit/e56e213a65dd86f4b15badfeab18b0015c244750))
+* block resume and notifications for unsafe persisted session names ([655becf](https://github.com/d0ugal/graith/commit/655becfb1ac7eb933008dcff734dcfa7d8670200))
+* buffer statusbar setup/teardown into single writes ([dd4ed16](https://github.com/d0ugal/graith/commit/dd4ed167f11c5b5f70eea82edd60adeaa6e3857d))
+* don't set parent when creating session via ctrl+b c ([eb5b913](https://github.com/d0ugal/graith/commit/eb5b9136adceb48e7ba781447d30cafb138a1bdf))
+* prevent shell command injection in notification commands ([f441122](https://github.com/d0ugal/graith/commit/f44112277eb4da4cc1ef91a394eb095648c9c644))
+* propagate git teardown errors on session delete ([a92ef18](https://github.com/d0ugal/graith/commit/a92ef188960a9342cbe0fa6ec760c74bfc30ad9b)), closes [#258](https://github.com/d0ugal/graith/issues/258)
+* send scrollback history before starting live forwarding on attach ([384b5f4](https://github.com/d0ugal/graith/commit/384b5f4fba77fe2f8cb62b069dd54befb141b7f8)), closes [#266](https://github.com/d0ugal/graith/issues/266)
+* serialize concurrent stdout writes in passthrough mode ([1a7bf57](https://github.com/d0ugal/graith/commit/1a7bf577fbf93b6852a0520b04fb991f24671100)), closes [#216](https://github.com/d0ugal/graith/issues/216)
+* use fmt.Fprintf in teardown to satisfy staticcheck QF1012 ([d747aed](https://github.com/d0ugal/graith/commit/d747aede2961ada1ddd12a7cc80360670e669098))
+* validate session names to prevent injection across subsystems ([bc64c1c](https://github.com/d0ugal/graith/commit/bc64c1c8c563ce9cd516bddfe71ae2c78a41afef)), closes [#222](https://github.com/d0ugal/graith/issues/222)
 
 ## [0.29.1](https://github.com/d0ugal/graith/compare/v0.29.0...v0.29.1) (2026-05-16)
 
 
 ### Bug Fixes
 
-* address review tribunal findings in cursor cleanup ([5285409](https://github.com/d0ugal/graith/commit/5285409aecdc8eca0ff724fb2c096eb2b1b6b9b8))
-* clean up stale message cursors during cleanup ([b368601](https://github.com/d0ugal/graith/commit/b368601814e5f7cfac70644f26e9e75f3389a625)), closes [#254](https://github.com/d0ugal/graith/issues/254)
-* clear stale preview when filter yields no matching sessions ([1cee68e](https://github.com/d0ugal/graith/commit/1cee68e201ddd82990e96db84dd14281d78f679f))
-* fall back to default agent in MCP createSession ([9927a15](https://github.com/d0ugal/graith/commit/9927a15419c1e3f77058a419605a3e492491d6f1)), closes [#232](https://github.com/d0ugal/graith/issues/232)
-* make git tests hermetic against user signing config ([4dc5c7a](https://github.com/d0ugal/graith/commit/4dc5c7a00186d32b27dc6137a90a2b498ccf9407)), closes [#228](https://github.com/d0ugal/graith/issues/228)
-* migrate approvals_enabled to agent_hooks in state ([5e8d40b](https://github.com/d0ugal/graith/commit/5e8d40b931f4a561e9ab85d2c96981def3b9c498)), closes [#208](https://github.com/d0ugal/graith/issues/208)
-* re-read cleanup config each iteration to respect hot-reload ([b0057fe](https://github.com/d0ugal/graith/commit/b0057fe34f9237e280a918cdbbfc115a17601e4a))
-* refresh preview when overlay filter changes selection ([d393b27](https://github.com/d0ugal/graith/commit/d393b27c7b524b82568cfc85cfb14d03aebb7f25)), closes [#243](https://github.com/d0ugal/graith/issues/243)
-* suppress bogus stopped event when deleting running session ([aeba5be](https://github.com/d0ugal/graith/commit/aeba5be5de0561efd049246f1f3f1b129f42ed63)), closes [#225](https://github.com/d0ugal/graith/issues/225)
-* suppress non-zero exit status from shell subprocesses ([f645cf3](https://github.com/d0ugal/graith/commit/f645cf328507325a71d5b32e069b93572cf81763))
-* surface shell launch errors instead of silently reattaching ([e3bad27](https://github.com/d0ugal/graith/commit/e3bad27fc434dddf0c2cdf1c984a97c9c22fcb11)), closes [#240](https://github.com/d0ugal/graith/issues/240)
-* use applyConfig in cleanup test to match real hot-reload path ([051dc24](https://github.com/d0ugal/graith/commit/051dc24c3ecc9498cdffcf7d857fa8bf4db4cd69))
+* address review tribunal findings in cursor cleanup ([10f8899](https://github.com/d0ugal/graith/commit/10f88997e20395a67a6626ceb9867e7477ff5e9b))
+* clean up stale message cursors during cleanup ([34561c3](https://github.com/d0ugal/graith/commit/34561c333f102231fc0f61c8ba334549ef1a3686)), closes [#254](https://github.com/d0ugal/graith/issues/254)
+* clear stale preview when filter yields no matching sessions ([57cf4b5](https://github.com/d0ugal/graith/commit/57cf4b5f290a81e1e222bab228396eecf8f8b821))
+* fall back to default agent in MCP createSession ([d52859b](https://github.com/d0ugal/graith/commit/d52859b09416a28741dad09a30e08411a06f332c)), closes [#232](https://github.com/d0ugal/graith/issues/232)
+* make git tests hermetic against user signing config ([d58fb8d](https://github.com/d0ugal/graith/commit/d58fb8d8cddfdb1afff687bb1cbbf21c99d43bbc)), closes [#228](https://github.com/d0ugal/graith/issues/228)
+* migrate approvals_enabled to agent_hooks in state ([f41a057](https://github.com/d0ugal/graith/commit/f41a057f9c00dcb261855d1f28410f6904b5f51d)), closes [#208](https://github.com/d0ugal/graith/issues/208)
+* re-read cleanup config each iteration to respect hot-reload ([9ea5a92](https://github.com/d0ugal/graith/commit/9ea5a92ec1548915d16d5c1b4464fe3db29d23b6))
+* refresh preview when overlay filter changes selection ([bd7b226](https://github.com/d0ugal/graith/commit/bd7b2264ad699099988096cabaedb863d513ae2d)), closes [#243](https://github.com/d0ugal/graith/issues/243)
+* suppress bogus stopped event when deleting running session ([505ad05](https://github.com/d0ugal/graith/commit/505ad05b4595e1799161b595bb9ba19742a7713c)), closes [#225](https://github.com/d0ugal/graith/issues/225)
+* suppress non-zero exit status from shell subprocesses ([027f5a8](https://github.com/d0ugal/graith/commit/027f5a875b4799b78705dfef72de64bee2642285))
+* surface shell launch errors instead of silently reattaching ([e9ee02b](https://github.com/d0ugal/graith/commit/e9ee02b3b93f69e52dd4222fbe145d4d1ebd5aed)), closes [#240](https://github.com/d0ugal/graith/issues/240)
+* use applyConfig in cleanup test to match real hot-reload path ([69f3cac](https://github.com/d0ugal/graith/commit/69f3cacf374e0b0c876ac08129459c614eb7b56a))
 
 ## [0.29.0](https://github.com/d0ugal/graith/compare/v0.28.1...v0.29.0) (2026-05-15)
 
 
 ### Features
 
-* detect orphaned worktrees and fix false-positive PID check in gr doctor ([aea7a44](https://github.com/d0ugal/graith/commit/aea7a442bc1aaa0025fd8dd245bd095fc415f924))
-* show parent-child tree hierarchy in session picker overlay ([d99a24c](https://github.com/d0ugal/graith/commit/d99a24c142fad8aee2113f0f32b57ea71efa8693))
+* detect orphaned worktrees and fix false-positive PID check in gr doctor ([4d45c1c](https://github.com/d0ugal/graith/commit/4d45c1c46c22fd1be9871049a4b9fc4fe8449b7d))
+* show parent-child tree hierarchy in session picker overlay ([8e1dcbf](https://github.com/d0ugal/graith/commit/8e1dcbf6179b30232ba18f8c50375cb5f37c826d))
 
 
 ### Bug Fixes
 
-* address review tribunal findings in orphaned worktree detection ([0363573](https://github.com/d0ugal/graith/commit/03635730aad49ad30c5877e8a8c0fc9afe67d189))
-* render cycle members as roots in overlay tree ([18961d9](https://github.com/d0ugal/graith/commit/18961d9388e800113f3272e4fd4ce172c7fd82ac))
-* split gr type PTY writes so TUI frameworks treat Enter as submit ([f4c58cb](https://github.com/d0ugal/graith/commit/f4c58cb39b10795c82e47ae383e23b3564547bae))
+* address review tribunal findings in orphaned worktree detection ([af268c1](https://github.com/d0ugal/graith/commit/af268c135c67dee55d8bc67b2023665083352bbf))
+* render cycle members as roots in overlay tree ([39d8880](https://github.com/d0ugal/graith/commit/39d88801fb993c98f30f78a4da19de19c210db36))
+* split gr type PTY writes so TUI frameworks treat Enter as submit ([b9345c8](https://github.com/d0ugal/graith/commit/b9345c814222b325f6dd4718e810dee43cc35018))
 
 ## [0.28.1](https://github.com/d0ugal/graith/compare/v0.28.0...v0.28.1) (2026-05-15)
 
 
 ### Bug Fixes
 
-* update module modernc.org/libc to v1.73.2 ([cf0111a](https://github.com/d0ugal/graith/commit/cf0111a767e55344557be2288ca1746eee13be34))
-* update module modernc.org/libc to v1.73.3 ([c431670](https://github.com/d0ugal/graith/commit/c4316701ecfe20909824a2715016bcb864813f61))
+* update module modernc.org/libc to v1.73.2 ([dd1fc14](https://github.com/d0ugal/graith/commit/dd1fc1425d99e271129e39133b415a3cad092763))
+* update module modernc.org/libc to v1.73.3 ([ccf778b](https://github.com/d0ugal/graith/commit/ccf778b8a0eb2f0031c482ce04618355134f46e8))
 
 ## [0.28.0](https://github.com/d0ugal/graith/compare/v0.27.3...v0.28.0) (2026-05-13)
 
 
 ### Features
 
-* enrich gr doctor with daemon diagnostics and structured output ([db1798e](https://github.com/d0ugal/graith/commit/db1798ebdea55a41f094baa3f3fadabb2b55cb12))
+* enrich gr doctor with daemon diagnostics and structured output ([85edfee](https://github.com/d0ugal/graith/commit/85edfeea6e80f83238cf2e3a2a6187b1ef5c050c))
 
 
 ### Bug Fixes
 
-* address review tribunal findings in gr doctor ([bc30441](https://github.com/d0ugal/graith/commit/bc30441c7b7653c29f187cb976002dba18b42ded))
-* address tribunal review findings in docs ([024e7a5](https://github.com/d0ugal/graith/commit/024e7a5b37b5a1b2bd3e96b790e914f1834ad6ba))
-* correct stale template vars, flags, and paths in docs ([e500768](https://github.com/d0ugal/graith/commit/e50076800a8940764055e4f54ca52d345ea100dc))
+* address review tribunal findings in gr doctor ([d658037](https://github.com/d0ugal/graith/commit/d658037e102055916f91a042c5e878832c2f44e3))
+* address tribunal review findings in docs ([1dfe728](https://github.com/d0ugal/graith/commit/1dfe728c0f91eea71dbd8990cf9ff078b6ff2e6a))
+* correct stale template vars, flags, and paths in docs ([505c101](https://github.com/d0ugal/graith/commit/505c101f1d808cf69fc5364f88732263c970c5c3))
 
 ## [0.27.3](https://github.com/d0ugal/graith/compare/v0.27.2...v0.27.3) (2026-05-13)
 
 
 ### Bug Fixes
 
-* set DataDir and LogDir in test helper to prevent log file leaks ([03dba96](https://github.com/d0ugal/graith/commit/03dba96a32371fb645a9a98cc46cde21c481c278))
+* set DataDir and LogDir in test helper to prevent log file leaks ([6b501e6](https://github.com/d0ugal/graith/commit/6b501e62e8698476dc422692f2fc5a7544028b9f))
 
 ## [0.27.2](https://github.com/d0ugal/graith/compare/v0.27.1...v0.27.2) (2026-05-13)
 
 
 ### Bug Fixes
 
-* parse model IDs from validate_model output with descriptions ([01d835c](https://github.com/d0ugal/graith/commit/01d835cf8ba28468283953fd544722b13b3c830f))
+* parse model IDs from validate_model output with descriptions ([57b62f2](https://github.com/d0ugal/graith/commit/57b62f263bd63aa849888fd54c3709814ee71d96))
 
 ## [0.27.1](https://github.com/d0ugal/graith/compare/v0.27.0...v0.27.1) (2026-05-13)
 
 
 ### Bug Fixes
 
-* only add hooks dir to sandbox read_dirs when it exists ([8b5b714](https://github.com/d0ugal/graith/commit/8b5b714aceca193a03b7934e40280f6565c17d5c))
+* only add hooks dir to sandbox read_dirs when it exists ([b08a750](https://github.com/d0ugal/graith/commit/b08a7502b66eef01cd5c37bff90f3303a55765ba))
 
 ## [0.27.0](https://github.com/d0ugal/graith/compare/v0.26.0...v0.27.0) (2026-05-12)
 
 
 ### Features
 
-* show stale config indicator in session selector overlay ([37e1ffb](https://github.com/d0ugal/graith/commit/37e1ffb36aca200dc7e629f87893b9f67d0792ed))
-* validate --model flag against agent's supported models ([0702502](https://github.com/d0ugal/graith/commit/07025026619b1815bbf7708f689c676de12cfb07))
+* show stale config indicator in session selector overlay ([e2c1169](https://github.com/d0ugal/graith/commit/e2c1169eafe5591506c45e4cbcb78165974a592e))
+* validate --model flag against agent's supported models ([170c79b](https://github.com/d0ugal/graith/commit/170c79b45eaf02638bb648c182decffdc5f1d94a))
 
 
 ### Bug Fixes
 
-* add json tags to Agent struct, fix stale indicator alignment ([9f2355b](https://github.com/d0ugal/graith/commit/9f2355bb86ebaed0cdad097521c3fb87d25a4a30))
-* align struct tags to satisfy tagalign linter ([f150eef](https://github.com/d0ugal/graith/commit/f150eefe1024be994cf4653b0b0b7633fe2d7d09))
-* move model validation before mutex, add exec timeout ([c393eec](https://github.com/d0ugal/graith/commit/c393eec768a387a104e638f47bc7038b877ab513))
+* add json tags to Agent struct, fix stale indicator alignment ([f37b79d](https://github.com/d0ugal/graith/commit/f37b79d8e95a77ead70c3ecfb9edcbff213c810f))
+* align struct tags to satisfy tagalign linter ([4994787](https://github.com/d0ugal/graith/commit/499478750d8bf56f4d255ce65c6888599ac4aacc))
+* move model validation before mutex, add exec timeout ([386e0b6](https://github.com/d0ugal/graith/commit/386e0b6be60f68ebed5882134ea4ffa0c25ce16e))
 
 ## [0.26.0](https://github.com/d0ugal/graith/compare/v0.25.0...v0.26.0) (2026-05-11)
 
 
 ### Features
 
-* allow restarting running sessions from session selector ([fd8ee3c](https://github.com/d0ugal/graith/commit/fd8ee3c898f9f6c3d679f0545d8a781528ea2431))
-* always enable agent hooks, remove --agent-hooks flag ([0af5f9d](https://github.com/d0ugal/graith/commit/0af5f9d449d028d2b8bb5845925244f7ef7ea0fa))
+* allow restarting running sessions from session selector ([e717ffa](https://github.com/d0ugal/graith/commit/e717ffa2f370cf38b42bd90247375d3ac08b6c2a))
+* always enable agent hooks, remove --agent-hooks flag ([3f0907d](https://github.com/d0ugal/graith/commit/3f0907d8c3d4cd02a62e3a3bec6d654156484c8f))
 
 
 ### Bug Fixes
 
-* add saveState in Restart stop path, fix flaky MCP stderr test ([9c85bae](https://github.com/d0ugal/graith/commit/9c85bae1ba443604d383f2f13c214df4d0d56fe4))
-* don't block agents without hook support, add cursor hooks ([91a9dfd](https://github.com/d0ugal/graith/commit/91a9dfd79c284ad2341386fae3bebc0d3d5f28a4)), closes [#389](https://github.com/d0ugal/graith/issues/389)
+* add saveState in Restart stop path, fix flaky MCP stderr test ([d23348a](https://github.com/d0ugal/graith/commit/d23348a7fd29d70fbe7ac5a97e04b49af679860f))
+* don't block agents without hook support, add cursor hooks ([75e9fb0](https://github.com/d0ugal/graith/commit/75e9fb005b214ffcd0b7a9436e0dd3474d329255)), closes [#389](https://github.com/d0ugal/graith/issues/389)
 
 ## [0.25.0](https://github.com/d0ugal/graith/compare/v0.24.3...v0.25.0) (2026-05-09)
 
 
 ### Features
 
-* enable agent hooks by default on gr new ([66d10e3](https://github.com/d0ugal/graith/commit/66d10e37e30ea86e7287450463f2b4206a110034))
+* enable agent hooks by default on gr new ([7951698](https://github.com/d0ugal/graith/commit/7951698af08443ae5702b740b77345d9c4444273))
 
 ## [0.24.3](https://github.com/d0ugal/graith/compare/v0.24.2...v0.24.3) (2026-05-09)
 
 
 ### Bug Fixes
 
-* allow user config to disable auto-injected MCP servers ([1942fa1](https://github.com/d0ugal/graith/commit/1942fa1cd2faad3a516214cf25725a73d351261c))
-* register auto-injected graith MCP server with MCPManager ([f5abc85](https://github.com/d0ugal/graith/commit/f5abc85418ad519250e3b8c505a13fcc225d50ff))
+* allow user config to disable auto-injected MCP servers ([4a211a3](https://github.com/d0ugal/graith/commit/4a211a3a699512b0dbe7bd0a79c65e65f13a1af0))
+* register auto-injected graith MCP server with MCPManager ([3b8a29c](https://github.com/d0ugal/graith/commit/3b8a29cd0cf539c666164c671027582aa9209b8a))
 
 ## [0.24.2](https://github.com/d0ugal/graith/compare/v0.24.1...v0.24.2) (2026-05-09)
 
 
 ### Bug Fixes
 
-* replace post_install with caveats in Homebrew formula ([5088de7](https://github.com/d0ugal/graith/commit/5088de72b29c346eddbfb287909092fa80e59610))
-* update module charm.land/lipgloss/v2 to v2.0.4 ([e5c771d](https://github.com/d0ugal/graith/commit/e5c771dc5991adff0065a353f6919fef8b4521d1))
+* replace post_install with caveats in Homebrew formula ([3cbbf6c](https://github.com/d0ugal/graith/commit/3cbbf6c006dd15044c4adf720f4095a851288d8a))
+* update module charm.land/lipgloss/v2 to v2.0.4 ([bfd52c4](https://github.com/d0ugal/graith/commit/bfd52c4d68f1b5ef8b656043f3f3f7bf5d6d2831))
 
 ## [0.24.1](https://github.com/d0ugal/graith/compare/v0.24.0...v0.24.1) (2026-05-08)
 
 
 ### Bug Fixes
 
-* clean up unused param, add mcp_config to log, add integration test ([724178f](https://github.com/d0ugal/graith/commit/724178f702c941ade0fdc78e5541f59724376233))
-* use --mcp-config instead of --settings for Claude Code MCP servers ([02bf1ac](https://github.com/d0ugal/graith/commit/02bf1aca4045ee24e53054f326feb4d9c15c89e4))
+* clean up unused param, add mcp_config to log, add integration test ([35b9a1e](https://github.com/d0ugal/graith/commit/35b9a1e850798168093ffc3d8fdcdb15dbcfcaf0))
+* use --mcp-config instead of --settings for Claude Code MCP servers ([d3e00de](https://github.com/d0ugal/graith/commit/d3e00debba571dbeed98e82b38b6136e458f8be6))
 
 ## [0.24.0](https://github.com/d0ugal/graith/compare/v0.23.1...v0.24.0) (2026-05-08)
 
 
 ### Features
 
-* add --model flag to gr new ([7d95c6b](https://github.com/d0ugal/graith/commit/7d95c6b5147b53ba3a50d7602f595fd8e5290cc3)), closes [#367](https://github.com/d0ugal/graith/issues/367)
+* add --model flag to gr new ([e1c8487](https://github.com/d0ugal/graith/commit/e1c848744101f529d7b63c13f649d4cde6741560)), closes [#367](https://github.com/d0ugal/graith/issues/367)
 
 
 ### Bug Fixes
 
-* map hook decision values to agent-specific schemas ([414c8e3](https://github.com/d0ugal/graith/commit/414c8e3757e982798f893e91b0c68b2b201dc87b))
-* persist model in session state for resume/fork, add to MCP ([a5a140f](https://github.com/d0ugal/graith/commit/a5a140f9b6697d106e40aa80a7f89cdfa084bf4b))
-* show requested model in session info when hook model is empty ([26fccf1](https://github.com/d0ugal/graith/commit/26fccf1acb57adfa8a08054c9e6824774cd763e5))
+* map hook decision values to agent-specific schemas ([79269df](https://github.com/d0ugal/graith/commit/79269dfb852ae5395f9287dfc12a040e87d611bb))
+* persist model in session state for resume/fork, add to MCP ([f28df0e](https://github.com/d0ugal/graith/commit/f28df0e0713701a3125067ebcf3123ecfea0937a))
+* show requested model in session info when hook model is empty ([d7e5bed](https://github.com/d0ugal/graith/commit/d7e5bedbd852a83f63b5f77ebefd93a91cd3097c))
 
 ## [0.23.1](https://github.com/d0ugal/graith/compare/v0.23.0...v0.23.1) (2026-05-07)
 
 
 ### Bug Fixes
 
-* strip description= prefix from jsonschema struct tags ([927f3b8](https://github.com/d0ugal/graith/commit/927f3b8f362f56157e5ce05062c81de240767ac6))
-* update module modernc.org/libc to v1.73.1 ([83688ce](https://github.com/d0ugal/graith/commit/83688ce0ee8f1b321c95dc753f8cda752ae3b419))
+* strip description= prefix from jsonschema struct tags ([f0633a5](https://github.com/d0ugal/graith/commit/f0633a50bcbbe632d64586758b071d1a4a2822cb))
+* update module modernc.org/libc to v1.73.1 ([03a11dc](https://github.com/d0ugal/graith/commit/03a11dc3352c15644816268f0da340611f06a972))
 
 ## [0.23.0](https://github.com/d0ugal/graith/compare/v0.22.0...v0.23.0) (2026-05-07)
 
 
 ### Features
 
-* implement daemon-managed MCP proxy (Proposal 2) ([ba0950b](https://github.com/d0ugal/graith/commit/ba0950b345e21ab12a0459e65b4394da74566fe7))
+* implement daemon-managed MCP proxy (Proposal 2) ([e1adc92](https://github.com/d0ugal/graith/commit/e1adc9200bce151ea8bb998b4944a39575cff845))
 
 
 ### Bug Fixes
 
-* address lint issues in MCPServerConfig ([4cd87dc](https://github.com/d0ugal/graith/commit/4cd87dc358322eec9a789c12e411b843e6c29326))
-* address review tribunal findings for MCP injection ([cbb71e5](https://github.com/d0ugal/graith/commit/cbb71e5c2ecbdb74cd6dafd9d2423f26fb67ff59))
-* eliminate stdout write race between PTY data and status bar ticker ([6ce1072](https://github.com/d0ugal/graith/commit/6ce10729c307beff4844856012b7b4b7e3eac018))
+* address lint issues in MCPServerConfig ([7fdb520](https://github.com/d0ugal/graith/commit/7fdb5207320d68f582baf3087041d92e257d28e2))
+* address review tribunal findings for MCP injection ([f01d1f3](https://github.com/d0ugal/graith/commit/f01d1f3ccd134e3d05c5f2118c7383b40dc2f3c3))
+* eliminate stdout write race between PTY data and status bar ticker ([8cde424](https://github.com/d0ugal/graith/commit/8cde4249135de6fabdd90c3d66938e4301585f9c))
 
 ## [0.22.0](https://github.com/d0ugal/graith/compare/v0.21.0...v0.22.0) (2026-05-07)
 
 
 ### Features
 
-* add MCP server injection for agent sessions ([95ecd5e](https://github.com/d0ugal/graith/commit/95ecd5eb39e79102e3bf666b2eb39e65ede3f4ff))
-* refresh sandbox config from current settings on resume and fork ([b983a2f](https://github.com/d0ugal/graith/commit/b983a2f0febc304004992e29f854cb8d380830ff)), closes [#361](https://github.com/d0ugal/graith/issues/361)
-* start Chrome with remote debugging for sandboxed agents ([cd9038d](https://github.com/d0ugal/graith/commit/cd9038d6132e13b5b3fedd6e96f0940a1b3fd9d2)), closes [#359](https://github.com/d0ugal/graith/issues/359)
+* add MCP server injection for agent sessions ([5d5d321](https://github.com/d0ugal/graith/commit/5d5d321122646cee05b1f9d57f8904bad516a8d2))
+* refresh sandbox config from current settings on resume and fork ([ff614e0](https://github.com/d0ugal/graith/commit/ff614e0cd946fabfbdf04a56ce486f0dba17df80)), closes [#361](https://github.com/d0ugal/graith/issues/361)
+* start Chrome with remote debugging for sandboxed agents ([33a8d34](https://github.com/d0ugal/graith/commit/33a8d34ffa8b18c9988996baa8a5a49e6763c8a8)), closes [#359](https://github.com/d0ugal/graith/issues/359)
 
 
 ### Bug Fixes
 
-* address lint issues in MCPServerConfig ([c54ed3b](https://github.com/d0ugal/graith/commit/c54ed3b28e0cd5ea183d26e2c72f856ee35cfa5c))
-* address review tribunal findings for Chrome remote debugging ([57ee712](https://github.com/d0ugal/graith/commit/57ee7128d8c72ce77bba124f135f037f99965f55))
-* address review tribunal findings for MCP injection ([773dd55](https://github.com/d0ugal/graith/commit/773dd55b198a211fb56a4eaad06613eda73da7d0))
-* clean up leaked process in sandbox resume test ([ac928dc](https://github.com/d0ugal/graith/commit/ac928dcc9a1868c917d117b190f71b24285b9274))
-* wait for PTY exit in sandbox resume tests to prevent TempDir cleanup race ([6a32d24](https://github.com/d0ugal/graith/commit/6a32d24e5f6b5b9e0908050fb9af5579f4764cbc))
+* address lint issues in MCPServerConfig ([d318c10](https://github.com/d0ugal/graith/commit/d318c10176ff7e8166cf2f54bc0c15d19af83dab))
+* address review tribunal findings for Chrome remote debugging ([570828f](https://github.com/d0ugal/graith/commit/570828f59077b348efb47246509d0792a49bc3a8))
+* address review tribunal findings for MCP injection ([eb31c07](https://github.com/d0ugal/graith/commit/eb31c07efd323eb0b4a0a99c8d13b135a6bdd79d))
+* clean up leaked process in sandbox resume test ([cd50907](https://github.com/d0ugal/graith/commit/cd50907b984a1fe6574df3e74e12f09a136c1bf9))
+* wait for PTY exit in sandbox resume tests to prevent TempDir cleanup race ([19a1ab6](https://github.com/d0ugal/graith/commit/19a1ab666c5901c5b871eab75937407353923010))
 
 
 ### Reverts
 
-* remove Chrome-specific code in favor of MCP injection ([710a082](https://github.com/d0ugal/graith/commit/710a082b4bf7cdb2d0ac0e1813322d816effd99b))
+* remove Chrome-specific code in favor of MCP injection ([f3bb77f](https://github.com/d0ugal/graith/commit/f3bb77f56e5728d50a7c57fbe537f4e24c9dd163))
 
 ## [0.21.0](https://github.com/d0ugal/graith/compare/v0.20.1...v0.21.0) (2026-05-04)
 
 
 ### Features
 
-* add data_dir config option to override worktree base path ([e901617](https://github.com/d0ugal/graith/commit/e901617245b2e153e7e035f6fe3f6bfe4704b410)), closes [#355](https://github.com/d0ugal/graith/issues/355)
+* add data_dir config option to override worktree base path ([e2f123a](https://github.com/d0ugal/graith/commit/e2f123aef7bdb2ada4cfd0bf7bfdbc05e8bcfbe6)), closes [#355](https://github.com/d0ugal/graith/issues/355)
 
 
 ### Bug Fixes
 
-* address review feedback for data_dir config ([344bcea](https://github.com/d0ugal/graith/commit/344bceab1aa4b6eec4830d31f487e55ab42a5597))
+* address review feedback for data_dir config ([555e417](https://github.com/d0ugal/graith/commit/555e417dcda4d4e24828676d02e43b09cac7c83e))
 
 ## [0.20.1](https://github.com/d0ugal/graith/compare/v0.20.0...v0.20.1) (2026-05-04)
 
 
 ### Bug Fixes
 
-* populate snapshots in DeleteWithChildren so cleanup actually runs ([e1e2baf](https://github.com/d0ugal/graith/commit/e1e2baf98f488a3709cf7aeb5673e88802328d3c))
+* populate snapshots in DeleteWithChildren so cleanup actually runs ([5021633](https://github.com/d0ugal/graith/commit/5021633a2c1bb28448a73fdb99bef9508291c615))
 
 ## [0.20.0](https://github.com/d0ugal/graith/compare/v0.19.0...v0.20.0) (2026-05-04)
 
 
 ### Features
 
-* add parent/child relationships to sessions ([cff6ec1](https://github.com/d0ugal/graith/commit/cff6ec108deac43497a04d3af648c9e4018f763a))
+* add parent/child relationships to sessions ([26ac5ea](https://github.com/d0ugal/graith/commit/26ac5eab0efbc1763310b5771647b9181a45f6da))
 
 ## [0.19.0](https://github.com/d0ugal/graith/compare/v0.18.1...v0.19.0) (2026-05-04)
 
 
 ### Features
 
-* add includes and singleton config, IncludedRepoState, git worktree helpers ([0172775](https://github.com/d0ugal/graith/commit/0172775919dd21974325b18945ce5a30e2c54ef0))
-* externalize config defaults and add gr config commands ([ddcb24a](https://github.com/d0ugal/graith/commit/ddcb24a64c91f342a1f57de3eb569d2d00222bdb))
-* implement multi-repo includes sessions ([164d195](https://github.com/d0ugal/graith/commit/164d19543dcef4fa9022ac2364593a5cb16a200a))
+* add includes and singleton config, IncludedRepoState, git worktree helpers ([3ef3b35](https://github.com/d0ugal/graith/commit/3ef3b35d2b75e20e9c782bbff76cde190562398e))
+* externalize config defaults and add gr config commands ([23d0584](https://github.com/d0ugal/graith/commit/23d0584aa36dbf50d6ca76936f4da786cf538dee))
+* implement multi-repo includes sessions ([1103eed](https://github.com/d0ugal/graith/commit/1103eeda6d4d9e21dfd98f30854bcb56cf727bd6))
 
 
 ### Bug Fixes
 
-* ack inbox messages in check-inbox hook to prevent duplicates [#277](https://github.com/d0ugal/graith/issues/277) ([9980053](https://github.com/d0ugal/graith/commit/99800531dd81a3004fb599a0b3bf4bda6243164d))
-* add default sandbox paths for agy/gemini agent [#207](https://github.com/d0ugal/graith/issues/207) ([a1da7d7](https://github.com/d0ugal/graith/commit/a1da7d75bc4780f042b2d2ce976eb06d154d2664))
-* add regression test for check-inbox ack at the CLI layer ([e6ac977](https://github.com/d0ugal/graith/commit/e6ac9779dfbe08fcb4eab2658c4c40d730fb2493))
-* address code review feedback for config commands ([9316ff0](https://github.com/d0ugal/graith/commit/9316ff03c4cbd3fb40ae48af0a4423ec7f0a649d))
-* address review tribunal findings for multi-repo includes ([68ab932](https://github.com/d0ugal/graith/commit/68ab9322d8db7a831d56a6b9eec52a80eecfe59b))
-* also clean cwd and add trailing-slash test cases ([2435289](https://github.com/d0ugal/graith/commit/2435289dfd0b69f891640c527cf26e066a41a3b8))
-* also shell-quote gr binary path in Claude hook commands ([ff145e0](https://github.com/d0ugal/graith/commit/ff145e07717848a11e11cc1e3777cd8fc7ce4eca))
-* clean up git worktree in TestForkUsesSourceBaseBranch ([404e44f](https://github.com/d0ugal/graith/commit/404e44f3989572ba52acfcfc58a254241ce1008e))
-* clear connection deadline after handshake in ConnectFast/ConnectForApproval ([dca858c](https://github.com/d0ugal/graith/commit/dca858cbf47b81b4d2b3df11789a6638c6274d5c)), closes [#224](https://github.com/d0ugal/graith/issues/224)
-* consume unterminated OSC sequences in StripANSI [#278](https://github.com/d0ugal/graith/issues/278) ([c6dbf18](https://github.com/d0ugal/graith/commit/c6dbf18e37974d0e10f6b6983e3b4071ebd75c36))
-* convert if-else chain to switch to satisfy gocritic linter ([f7d94fe](https://github.com/d0ugal/graith/commit/f7d94fe3e738210236051b3570f082e13354838c))
-* correct claude fork args to use --resume with --fork-session ([ca7fb77](https://github.com/d0ugal/graith/commit/ca7fb77c6935e49bfbeabd4493d4eaecda9cf446))
-* escape single quotes in gr binary path for codex hook scripts [#252](https://github.com/d0ugal/graith/issues/252) ([b173c37](https://github.com/d0ugal/graith/commit/b173c372693823100240c46051aec400fa695f5c))
-* exercise formatToolDetail paths in narrow terminal test ([8d3a66a](https://github.com/d0ugal/graith/commit/8d3a66a5ee6160b7456c6cb235ee49d8c2c48067))
-* include never-attached sessions in --stale filter [#262](https://github.com/d0ugal/graith/issues/262) ([bceb9cc](https://github.com/d0ugal/graith/commit/bceb9cc9d8c850778f14ca615544d370035da330))
-* log saveState error on attach instead of discarding it ([582ed1f](https://github.com/d0ugal/graith/commit/582ed1fb363b94dca4b3a433be33004f1ca789e8))
-* make initTempGitRepo deterministic with git init -b main ([fcac9d8](https://github.com/d0ugal/graith/commit/fcac9d8adb87d5387cd8d16ca034672183d0366b))
-* output errors as JSON when --json flag is set [#269](https://github.com/d0ugal/graith/issues/269) ([c836c2d](https://github.com/d0ugal/graith/commit/c836c2d6e6e4df32c417110dd2e9334ad4011cb7))
-* persist LastAttachedAt to disk on attach ([#279](https://github.com/d0ugal/graith/issues/279)) ([f7e2401](https://github.com/d0ugal/graith/commit/f7e2401e8863ebbc583183de0c59b6895efea414))
-* prevent panic in approval overlay on narrow terminals [#271](https://github.com/d0ugal/graith/issues/271) ([d4c0b32](https://github.com/d0ugal/graith/commit/d4c0b320f23ea8be94001ead3639e4eb7fbff93b))
-* reject negative durations in ParseDurationWithDays [#230](https://github.com/d0ugal/graith/issues/230) ([a137769](https://github.com/d0ugal/graith/commit/a137769c65b5e9487b10958016348e1460107848))
-* reject null/empty payloads in DecodePayload ([#268](https://github.com/d0ugal/graith/issues/268)) ([c6e8d49](https://github.com/d0ugal/graith/commit/c6e8d49eb4950f9c860814b0eed381869602d7b6))
-* resolve sender name from session state in msg_pub handler ([#270](https://github.com/d0ugal/graith/issues/270)) ([369c3e6](https://github.com/d0ugal/graith/commit/369c3e619963a33cdcca16af9a478d947d10c87e))
-* return error when both --prompt and --prompt-file are specified ([3df3a10](https://github.com/d0ugal/graith/commit/3df3a1043389ccdefd10b6bd8aa912a83afcd5e9)), closes [#234](https://github.com/d0ugal/graith/issues/234)
-* support local-only repos in session creation [#267](https://github.com/d0ugal/graith/issues/267) ([754b827](https://github.com/d0ugal/graith/commit/754b827f6b6ac56458554d74685a3ab588b6d6b1))
-* update module github.com/sahilm/fuzzy to v0.1.3 ([481bce3](https://github.com/d0ugal/graith/commit/481bce3376c2cbac8f7e7bd1230c393de5ff4050))
-* use CreateTemp for atomic config reset to guarantee 0600 permissions ([9b233a5](https://github.com/d0ugal/graith/commit/9b233a5a2128e7dd32f82d242d7bd02201bb6318))
-* use nearest OSC terminator instead of preferring BEL ([9ad5933](https://github.com/d0ugal/graith/commit/9ad5933ce209c62098c593702063b90c4daf1c9c))
-* use path-boundary matching in info command ([52f401c](https://github.com/d0ugal/graith/commit/52f401cfab9f78451538cdaedb5ed97c5dbb594b)), closes [#231](https://github.com/d0ugal/graith/issues/231)
-* use source.BaseBranch in fork instead of source.Branch [#255](https://github.com/d0ugal/graith/issues/255) ([9790752](https://github.com/d0ugal/graith/commit/97907527f6b645a4d0a1fcb86c8c5ab15b7e5650))
+* ack inbox messages in check-inbox hook to prevent duplicates [#277](https://github.com/d0ugal/graith/issues/277) ([e5dc0a6](https://github.com/d0ugal/graith/commit/e5dc0a6acc2bd8ee8ede1857ce703a6c3e195a6f))
+* add default sandbox paths for agy/gemini agent [#207](https://github.com/d0ugal/graith/issues/207) ([b361ec7](https://github.com/d0ugal/graith/commit/b361ec7f1533584f3322a82bd27fe75ab7abf850))
+* add regression test for check-inbox ack at the CLI layer ([57c8f03](https://github.com/d0ugal/graith/commit/57c8f034679acd2a317a2ee7c962fc3b6543bc4f))
+* address code review feedback for config commands ([da73ce4](https://github.com/d0ugal/graith/commit/da73ce40fbcd596e1fad6181216db353772c2d27))
+* address review tribunal findings for multi-repo includes ([40570ce](https://github.com/d0ugal/graith/commit/40570ce21538c28bca589ae467a3efcf703d74ac))
+* also clean cwd and add trailing-slash test cases ([4e5e502](https://github.com/d0ugal/graith/commit/4e5e502c9bed128549583b3e9049c843f09a1471))
+* also shell-quote gr binary path in Claude hook commands ([e453432](https://github.com/d0ugal/graith/commit/e4534325ade2f99aaa442ea48ef5cb0178134c9a))
+* clean up git worktree in TestForkUsesSourceBaseBranch ([67555cc](https://github.com/d0ugal/graith/commit/67555cc45be27078c09dcc305c50020522a0742c))
+* clear connection deadline after handshake in ConnectFast/ConnectForApproval ([bee5e57](https://github.com/d0ugal/graith/commit/bee5e57aaaaafc2b68167228fafc98d9124ba5c1)), closes [#224](https://github.com/d0ugal/graith/issues/224)
+* consume unterminated OSC sequences in StripANSI [#278](https://github.com/d0ugal/graith/issues/278) ([463703e](https://github.com/d0ugal/graith/commit/463703e9b8328e3c8f44b1344bfb5ae1e7765c9a))
+* convert if-else chain to switch to satisfy gocritic linter ([fecfc13](https://github.com/d0ugal/graith/commit/fecfc13da1488e67b479207958832272d97a2148))
+* correct claude fork args to use --resume with --fork-session ([1775067](https://github.com/d0ugal/graith/commit/17750672732a3c23d608688423b7fe72d774da35))
+* escape single quotes in gr binary path for codex hook scripts [#252](https://github.com/d0ugal/graith/issues/252) ([8d5242f](https://github.com/d0ugal/graith/commit/8d5242f93a6d96c3770e0d9c4c97e960f27dc3a5))
+* exercise formatToolDetail paths in narrow terminal test ([dea3e71](https://github.com/d0ugal/graith/commit/dea3e71c7a2e5e65da0da6032f37970c751b6b88))
+* include never-attached sessions in --stale filter [#262](https://github.com/d0ugal/graith/issues/262) ([fc79d55](https://github.com/d0ugal/graith/commit/fc79d5529e7049490e6be1b13a5e23ef8c5a1b69))
+* log saveState error on attach instead of discarding it ([1f96553](https://github.com/d0ugal/graith/commit/1f965531cf5c5a4fb715e3f70be15b07a65df4d7))
+* make initTempGitRepo deterministic with git init -b main ([c4611a9](https://github.com/d0ugal/graith/commit/c4611a930841652e16cb34d5740c856843be2d87))
+* output errors as JSON when --json flag is set [#269](https://github.com/d0ugal/graith/issues/269) ([f6c1694](https://github.com/d0ugal/graith/commit/f6c16945d3070021730e7a4d692e5aca13ee32be))
+* persist LastAttachedAt to disk on attach ([#279](https://github.com/d0ugal/graith/issues/279)) ([8872015](https://github.com/d0ugal/graith/commit/8872015503d9e2fe027433992049006cce1fc0ca))
+* prevent panic in approval overlay on narrow terminals [#271](https://github.com/d0ugal/graith/issues/271) ([db6d08c](https://github.com/d0ugal/graith/commit/db6d08ca2365c38b44d8682ddfde57ab4772068e))
+* reject negative durations in ParseDurationWithDays [#230](https://github.com/d0ugal/graith/issues/230) ([881dd3e](https://github.com/d0ugal/graith/commit/881dd3e77d0a532ae2677e47030e17df03be7d3e))
+* reject null/empty payloads in DecodePayload ([#268](https://github.com/d0ugal/graith/issues/268)) ([aa213a4](https://github.com/d0ugal/graith/commit/aa213a4390cf03e96006e4a52a241be375e8a867))
+* resolve sender name from session state in msg_pub handler ([#270](https://github.com/d0ugal/graith/issues/270)) ([9c7c0e3](https://github.com/d0ugal/graith/commit/9c7c0e3aa131cd44bda06cb1b020a64887233425))
+* return error when both --prompt and --prompt-file are specified ([b29c778](https://github.com/d0ugal/graith/commit/b29c77886bababba6d29806ba14e9e7ac787b924)), closes [#234](https://github.com/d0ugal/graith/issues/234)
+* support local-only repos in session creation [#267](https://github.com/d0ugal/graith/issues/267) ([bc3c744](https://github.com/d0ugal/graith/commit/bc3c7443d9af3ba5e20ef2f5b23946bd7c64a6fa))
+* update module github.com/sahilm/fuzzy to v0.1.3 ([94c9ef1](https://github.com/d0ugal/graith/commit/94c9ef12db0e0c2959d2af6141d480d76646993d))
+* use CreateTemp for atomic config reset to guarantee 0600 permissions ([482636d](https://github.com/d0ugal/graith/commit/482636d942339bead17c341fe183aab12da313c5))
+* use nearest OSC terminator instead of preferring BEL ([cd332a8](https://github.com/d0ugal/graith/commit/cd332a84ae1d910ce105020dc147a4784120864c))
+* use path-boundary matching in info command ([1118a50](https://github.com/d0ugal/graith/commit/1118a504435e3d528becee02a5e1c855bf3c6446)), closes [#231](https://github.com/d0ugal/graith/issues/231)
+* use source.BaseBranch in fork instead of source.Branch [#255](https://github.com/d0ugal/graith/issues/255) ([0f67f1c](https://github.com/d0ugal/graith/commit/0f67f1cd3d4823e89b31067b33fa484fbc44ad45))
 
 ## [0.18.1](https://github.com/d0ugal/graith/compare/v0.18.0...v0.18.1) (2026-05-01)
 
 
 ### Bug Fixes
 
-* always watch config file for changes and log sandbox config diffs ([2a2307b](https://github.com/d0ugal/graith/commit/2a2307b7b708b7da22e39b333dba75b64d952336))
-* log full sandbox opts (read_dirs, write_dirs, features, workdir) on session create/fork/resume ([6ae9f0e](https://github.com/d0ugal/graith/commit/6ae9f0e7bd1f854068c6e39165b512f90ce6b72e))
+* always watch config file for changes and log sandbox config diffs ([a4fdd7a](https://github.com/d0ugal/graith/commit/a4fdd7afcdfbfb26e0cb6695442f3ae10429a72a))
+* log full sandbox opts (read_dirs, write_dirs, features, workdir) on session create/fork/resume ([725f12c](https://github.com/d0ugal/graith/commit/725f12c68522e15fa7d44c9e808c198ff3e1da79))
 
 ## [0.18.0](https://github.com/d0ugal/graith/compare/v0.17.0...v0.18.0) (2026-05-01)
 
 
 ### Features
 
-* add GRAITH_PROFILE support to config layer ([fb01feb](https://github.com/d0ugal/graith/commit/fb01feba6fa232a3d9abe5164be444fb387b2e4f))
-* add in-place sessions for repos without remotes ([39fd832](https://github.com/d0ugal/graith/commit/39fd8327b6e816b2bbd28f11d7608ad15c4237de))
-* add profile to handshake protocol with shared builder and mismatch rejection ([530f3b2](https://github.com/d0ugal/graith/commit/530f3b24ffe2df5d5bf73f9e15de359212bfeba7))
-* propagate GRAITH_PROFILE to agent env and guard legacy cleanup ([e6de49b](https://github.com/d0ugal/graith/commit/e6de49b64c42430272911b09cf33c2ce94700ad1))
-* show profile indicator in overlay, list, and doctor for non-default profiles ([b6fdd2f](https://github.com/d0ugal/graith/commit/b6fdd2fa58067c66b7c0749a3db6a46c033eedb0))
+* add GRAITH_PROFILE support to config layer ([f06095a](https://github.com/d0ugal/graith/commit/f06095ac615edee31843bfbf9b045268c27bb7db))
+* add in-place sessions for repos without remotes ([d4ac9f2](https://github.com/d0ugal/graith/commit/d4ac9f280ad3679d04bc4eb532073025c5d86bd5))
+* add profile to handshake protocol with shared builder and mismatch rejection ([aa5f60a](https://github.com/d0ugal/graith/commit/aa5f60a727bc3064f736b02523c6ac34a6e1c812))
+* propagate GRAITH_PROFILE to agent env and guard legacy cleanup ([cce201f](https://github.com/d0ugal/graith/commit/cce201f42ab6276e9deec5d6da7525165ccb09e1))
+* show profile indicator in overlay, list, and doctor for non-default profiles ([ca309e7](https://github.com/d0ugal/graith/commit/ca309e7cc59697a0ae17cf0fa2c73882974bbac3))
 
 
 ### Bug Fixes
 
-* address Codex review findings for GRAITH_PROFILE ([0779e71](https://github.com/d0ugal/graith/commit/0779e710654752ac7a9eabd5e6232cdfe21ecf51))
-* address Codex review findings for in-place sessions ([1de9965](https://github.com/d0ugal/graith/commit/1de9965a6ccbe4c46ca6bf87cb992f024be5ad5c))
-* align struct tags in MCP CreateSessionInput to satisfy tagalign linter ([3f6cdc9](https://github.com/d0ugal/graith/commit/3f6cdc9b8074add0c54039a909a015dfafbc237f))
-* resolve profile independently of --config path in LoadOrDefault ([3628989](https://github.com/d0ugal/graith/commit/3628989481065f4efdd5f57dffbe7fbfc52f20e0))
+* address Codex review findings for GRAITH_PROFILE ([558d4bf](https://github.com/d0ugal/graith/commit/558d4bfd79a17904787cc004fc7089cb5e8b757a))
+* address Codex review findings for in-place sessions ([ddafeba](https://github.com/d0ugal/graith/commit/ddafebab6c9cd12a25a3cf59a6b69c690277269c))
+* align struct tags in MCP CreateSessionInput to satisfy tagalign linter ([bf22bc3](https://github.com/d0ugal/graith/commit/bf22bc3f6a6ab9e658535531a1dfaf73e2ae92b7))
+* resolve profile independently of --config path in LoadOrDefault ([a56195f](https://github.com/d0ugal/graith/commit/a56195f0fbfdd136ff25c5bde26e6b94e055d89b))
 
 ## [0.17.0](https://github.com/d0ugal/graith/compare/v0.16.7...v0.17.0) (2026-04-30)
 
 
 ### Features
 
-* expand globs in sandbox read_dirs and write_dirs ([74ce38b](https://github.com/d0ugal/graith/commit/74ce38bfcd298f2ed39057d1dcb229a794e68553))
+* expand globs in sandbox read_dirs and write_dirs ([89a14c6](https://github.com/d0ugal/graith/commit/89a14c6ba86a5b79a153b5873aca9f310163cd07))
 
 
 ### Bug Fixes
 
-* allow duplicate session names ([78ddf87](https://github.com/d0ugal/graith/commit/78ddf870de488e07044446c21c7f7f61398a0338))
-* remove trailing newline in TestRename to pass whitespace linter ([b4e3a82](https://github.com/d0ugal/graith/commit/b4e3a82bb888f7a7e0df7c7b7c2888bd0b8a986e))
+* allow duplicate session names ([9e3f3dc](https://github.com/d0ugal/graith/commit/9e3f3dc8fb9e5063194f166079f4080c0f7efaf1))
+* remove trailing newline in TestRename to pass whitespace linter ([4a48c14](https://github.com/d0ugal/graith/commit/4a48c1439e1d83bb34c992c039fe21c3eee83106))
 
 ## [0.16.7](https://github.com/d0ugal/graith/compare/v0.16.6...v0.16.7) (2026-04-30)
 
 
 ### Bug Fixes
 
-* use os.MkdirTemp with retry cleanup in TestResumeResetsIdleSince ([27cd1c4](https://github.com/d0ugal/graith/commit/27cd1c489e58038ebaee63ef75a281aa4f32775a))
+* use os.MkdirTemp with retry cleanup in TestResumeResetsIdleSince ([f0e427a](https://github.com/d0ugal/graith/commit/f0e427a270cbf0c41729fdfd72f91badad3782f4))
 
 ## [0.16.6](https://github.com/d0ugal/graith/compare/v0.16.5...v0.16.6) (2026-04-30)
 
 
 ### Bug Fixes
 
-* clean up PTY session in TestResumeResetsIdleSince to avoid TempDir race ([44e91b2](https://github.com/d0ugal/graith/commit/44e91b2ac5b220b57aa3d46987f9e2b35ed30725))
-* clear IdleSince on Resume, make watchSession tests deterministic ([26af24b](https://github.com/d0ugal/graith/commit/26af24b75b5966aeee31a7a7402a16a26aa4324e))
-* prevent stale watchSession from corrupting resumed session state ([aa6e5f3](https://github.com/d0ugal/graith/commit/aa6e5f3a996f6c3b1711ec8dd4a37de3b35fc1ae))
-* restore exec upgrade for auto-restart to preserve sessions ([d4e3ea3](https://github.com/d0ugal/graith/commit/d4e3ea3700f90b6bd91c02199191c556fb30b22b))
-* satisfy SA2001 by reading state inside the lock barrier ([1620306](https://github.com/d0ugal/graith/commit/16203068fa04f97a03542f8fe3564d46bca0c157))
-* synchronous PTY cleanup in TestResumeResetsIdleSince ([0926259](https://github.com/d0ugal/graith/commit/092625946511a05737d89c6b7dc00696ddfc07a0))
-* use single tmpDir with LogDir set in TestResumeResetsIdleSince ([fb9ac6b](https://github.com/d0ugal/graith/commit/fb9ac6b243e16e45ad795517ac87bbbe87c14e3a))
-* verify daemon version after exec upgrade to catch stale restarts ([4432d73](https://github.com/d0ugal/graith/commit/4432d73447bbe4403eb3882a640f91372532459d))
+* clean up PTY session in TestResumeResetsIdleSince to avoid TempDir race ([6f9685c](https://github.com/d0ugal/graith/commit/6f9685c2ea617c76e985b1a85601179ff08fed38))
+* clear IdleSince on Resume, make watchSession tests deterministic ([a1252d2](https://github.com/d0ugal/graith/commit/a1252d25c1f000c49aee28011fabb29a0ce0e06d))
+* prevent stale watchSession from corrupting resumed session state ([736b84e](https://github.com/d0ugal/graith/commit/736b84ecc16e54a4236f7d8e579cf0c8ad615a3f))
+* restore exec upgrade for auto-restart to preserve sessions ([8abc3a1](https://github.com/d0ugal/graith/commit/8abc3a10b9b72c54d5c27a215f217706cdb5fbc2))
+* satisfy SA2001 by reading state inside the lock barrier ([647a5cd](https://github.com/d0ugal/graith/commit/647a5cd65961b98eea7161e69fa0b0463b5517b2))
+* synchronous PTY cleanup in TestResumeResetsIdleSince ([4d77d2b](https://github.com/d0ugal/graith/commit/4d77d2b0a72b97fd11c7b62e13897804f1eb5942))
+* use single tmpDir with LogDir set in TestResumeResetsIdleSince ([94f3510](https://github.com/d0ugal/graith/commit/94f3510d57f8b07d5da8004b6aac0a316d05ed42))
+* verify daemon version after exec upgrade to catch stale restarts ([16b0290](https://github.com/d0ugal/graith/commit/16b0290e363ea61fafced7b6ca79f7eb7bf62911))
 
 ## [0.16.5](https://github.com/d0ugal/graith/compare/v0.16.4...v0.16.5) (2026-04-30)
 
 
 ### Bug Fixes
 
-* address code review feedback on overlay delete safety ([63d8578](https://github.com/d0ugal/graith/commit/63d85787d3e83cc6ceb5d41fabc47062c6a2f179))
-* address review feedback — snapshot os.Environ, harden dupe test ([511cc41](https://github.com/d0ugal/graith/commit/511cc41e55725f430699516b7a3acb376d4c42e6))
-* align struct tags and remove unused sandboxOpts method ([217c591](https://github.com/d0ugal/graith/commit/217c59144cf894abdc8bb71b280f204f6417a6ce))
-* backfill stream_hwm on upgrade, use monotonic upsert ([e9d509d](https://github.com/d0ugal/graith/commit/e9d509d96aa677293fa7f2cdab6df000d2a6da93))
-* bind dashboard delete/stop confirmation to session ID, not cursor index ([4d4c8b3](https://github.com/d0ugal/graith/commit/4d4c8b30cf89088449d5b8d9992c39800fd8ec55)), closes [#237](https://github.com/d0ugal/graith/issues/237)
-* cancel stop confirmation when target session stops during refresh ([3688e1e](https://github.com/d0ugal/graith/commit/3688e1e7eb8986595699aa66ea33c223ba20f071))
-* clamp approval deadline and improve API per code review ([f288247](https://github.com/d0ugal/graith/commit/f2882473cea02f4852b7f334243e18140df87fd3))
-* clean up log file on Create/Fork rollback ([5362de2](https://github.com/d0ugal/graith/commit/5362de2cb053132b8e25bcc9e49706d4bdd91950))
-* close connection when kicking replaced attach client ([9668f4b](https://github.com/d0ugal/graith/commit/9668f4bb13b765387514885e96714a19f78a3eab)), closes [#264](https://github.com/d0ugal/graith/issues/264)
-* eliminate watchSession race and fd leak in saveState rollback ([1dc88eb](https://github.com/d0ugal/graith/commit/1dc88ebb39f8bef5ef9308071d170cd4c2298c6a))
-* ensure buildEnv overrides take effect over parent environment ([53b216c](https://github.com/d0ugal/graith/commit/53b216c236962c8c8afa00a35fa7f0b62c58effe)), closes [#265](https://github.com/d0ugal/graith/issues/265)
-* error when --agent-hooks used with unsupported agent type ([f00b479](https://github.com/d0ugal/graith/commit/f00b479368918ad9fe2d667acb4ff0a7484be908)), closes [#274](https://github.com/d0ugal/graith/issues/274)
-* fsync temp file before rename in writeFileAtomic ([79c7795](https://github.com/d0ugal/graith/commit/79c7795ba02b8a76db3f484290f4eab7ab0de47c))
-* gate ChannelData on IsAttachedClient to reject input immediately ([e385e40](https://github.com/d0ugal/graith/commit/e385e4013243f58ab3efc2597d7b0d08b26bf6ae))
-* grant agy sandbox access to ~/.gemini ([c998cf0](https://github.com/d0ugal/graith/commit/c998cf08cb56a0cf5f91dd79545288ccae6ee7cc))
-* guard socket cleanup on confirmed daemon stop ([e99e423](https://github.com/d0ugal/graith/commit/e99e423b5f479026ff412e2c3fc63053adb0cef2))
-* harden Resume path for shared worktree sessions ([9114132](https://github.com/d0ugal/graith/commit/911413209b555672e76f309f679beee43a05e2b1))
-* keep overlay open after deleting a session ([9cb4d51](https://github.com/d0ugal/graith/commit/9cb4d514d6e8c66aa1b3a652454d72d25343c009))
-* merge user agent configs with defaults instead of replacing ([2c7a77a](https://github.com/d0ugal/graith/commit/2c7a77a0a19788173daec2416dff441b3e9154a5)), closes [#256](https://github.com/d0ugal/graith/issues/256)
-* move Resume shared-worktree guard before hook injection ([0bb3c63](https://github.com/d0ugal/graith/commit/0bb3c639ea15fd48790785264dd4b3a2decde38b))
-* normalize sandbox paths before persisting to prevent cwd-dependent drift ([738498d](https://github.com/d0ugal/graith/commit/738498dbfc53c673cd92bb4f18ebc1d2fa28f389))
-* parse mixed day+time durations like 7d12h in ParseDurationWithDays ([7f5af39](https://github.com/d0ugal/graith/commit/7f5af3960dfd6fba5016227112473b25a2c7f9f8)), closes [#280](https://github.com/d0ugal/graith/issues/280)
-* persist AgentHooks on fork, clean up hook files on error ([cd7d20b](https://github.com/d0ugal/graith/commit/cd7d20b36870f0ed993a700ebb6c5df293778675))
-* persist sandbox config at session creation to prevent resume/fork drift ([f574080](https://github.com/d0ugal/graith/commit/f574080a1ac3f5bf49df8c1f8eea23e72e0df089)), closes [#276](https://github.com/d0ugal/graith/issues/276)
-* preserve stream high-water mark across message cleanup ([b24a0ee](https://github.com/d0ugal/graith/commit/b24a0eedbf4696a30a0fa37a71389084aa14b8bd)), closes [#275](https://github.com/d0ugal/graith/issues/275)
-* prune orphaned acked_messages rows during cleanup ([e97b447](https://github.com/d0ugal/graith/commit/e97b44702f6fe172610228118532cacb343a7da7))
-* reject --share-worktree when sandbox is disabled ([a4e6ffe](https://github.com/d0ugal/graith/commit/a4e6ffef8f8759326afa3f4a4aee349485867878)), closes [#245](https://github.com/d0ugal/graith/issues/245)
-* reject duplicate session names in Create, Fork, and Rename ([7290180](https://github.com/d0ugal/graith/commit/729018084c812a699cefd8cf5019dcaa02702467)), closes [#273](https://github.com/d0ugal/graith/issues/273)
-* reject fork of no-repo sessions ([5b2e943](https://github.com/d0ugal/graith/commit/5b2e94354fedda41fe3860b65f69571bf8c8d31e)), closes [#246](https://github.com/d0ugal/graith/issues/246)
-* rename variable to avoid shadowing predeclared 'real' ([2530502](https://github.com/d0ugal/graith/commit/253050284ce9e1368d5cdb209a43f745ee7183e8))
-* resolve symlinks in RepoPathAllowed and validate PIDs before signaling ([a2f4fc0](https://github.com/d0ugal/graith/commit/a2f4fc0bfab6f0492a3dcb7c5c2d738d2ece54da)), closes [#248](https://github.com/d0ugal/graith/issues/248)
-* return error and roll back state when saveState fails after session creation ([ab2d1a5](https://github.com/d0ugal/graith/commit/ab2d1a566913584dfc929f693e3b3f73e6684597)), closes [#247](https://github.com/d0ugal/graith/issues/247)
-* send SIGWINCH after type input to wake agent process ([4bedbcd](https://github.com/d0ugal/graith/commit/4bedbcdf15f2c4c5a6617e07a179c749f86be487)), closes [#309](https://github.com/d0ugal/graith/issues/309)
-* show unsaved work warnings in overlay delete confirmation ([e35c0f8](https://github.com/d0ugal/graith/commit/e35c0f8908e41e8f54b0d5c76bc7ccc5f686e6d1))
-* sort overlay session picker alphabetically by name ([399d15d](https://github.com/d0ugal/graith/commit/399d15d8f01389b847796c5f2ec7cdad77ff6f73)), closes [#310](https://github.com/d0ugal/graith/issues/310)
-* stricter PID parsing, cleanup stale files, align client guard ([bd9d732](https://github.com/d0ugal/graith/commit/bd9d732e51e66eedd41f17b8b2c74bc585e08f00))
-* sync parent directory after rename, wrap close error ([81183cc](https://github.com/d0ugal/graith/commit/81183cc005f6f3e104fe3b4800a97d1b87328c19))
-* thread-filtered --ack no longer marks other threads as read ([5e2671e](https://github.com/d0ugal/graith/commit/5e2671ea5d994f4e6a6022a811bd4495af8ce2ca)), closes [#259](https://github.com/d0ugal/graith/issues/259)
-* treat EPERM as alive in isPIDAlive to prevent duplicate daemons ([b6526e0](https://github.com/d0ugal/graith/commit/b6526e06a43d2b1f74103963ca73dad2c8b27b63)), closes [#250](https://github.com/d0ugal/graith/issues/250)
-* update stale comments referencing old time-based sort order ([5445051](https://github.com/d0ugal/graith/commit/5445051bf82dcdaef83721b8361f04a833588fa1))
-* use configured approval timeout for hook connection deadline ([3668999](https://github.com/d0ugal/graith/commit/36689997b511317bd709e0376966b569a8a97657)), closes [#244](https://github.com/d0ugal/graith/issues/244)
-* use direct SIGWINCH signal instead of same-size Setsize in Poke ([e3a44ec](https://github.com/d0ugal/graith/commit/e3a44ec9216f1037d5a9557c6f03c070a379da18))
-* use exact basename match in IsGraithDaemon, add symlink edge case tests ([ff1627b](https://github.com/d0ugal/graith/commit/ff1627b180b9edcb46f30547424e13bfa9ea0e09))
-* use strict PID parsing in client's stopDaemonByPID ([297d2e7](https://github.com/d0ugal/graith/commit/297d2e7a1c241d71235bfe6af3227535341ffbb0))
-* validate PID before signaling in StopDaemon ([50fbf32](https://github.com/d0ugal/graith/commit/50fbf32471c9788d025ff8a2d2daf2b0369e4402)), closes [#236](https://github.com/d0ugal/graith/issues/236)
+* address code review feedback on overlay delete safety ([462c80d](https://github.com/d0ugal/graith/commit/462c80dad00dbce27cf78eeb1444c472a46c32c7))
+* address review feedback — snapshot os.Environ, harden dupe test ([7db10dd](https://github.com/d0ugal/graith/commit/7db10dda2b690c6b4598d51a1475826675894576))
+* align struct tags and remove unused sandboxOpts method ([794d84b](https://github.com/d0ugal/graith/commit/794d84b65da7e8d109de8d006df07628cd53e18f))
+* backfill stream_hwm on upgrade, use monotonic upsert ([c18d585](https://github.com/d0ugal/graith/commit/c18d585ba6bfa9cfee8244c200db5c9c5ad82852))
+* bind dashboard delete/stop confirmation to session ID, not cursor index ([986143c](https://github.com/d0ugal/graith/commit/986143c1b22d246c81a4372e6af63e1aba53abcb)), closes [#237](https://github.com/d0ugal/graith/issues/237)
+* cancel stop confirmation when target session stops during refresh ([6c454dd](https://github.com/d0ugal/graith/commit/6c454dd9f61d33380e4c7d8e590cce30f814fd50))
+* clamp approval deadline and improve API per code review ([b228252](https://github.com/d0ugal/graith/commit/b228252bf78b9c33a20008f7fdfd91173c38c5a0))
+* clean up log file on Create/Fork rollback ([9ae7052](https://github.com/d0ugal/graith/commit/9ae70527c593fe29f516df813657ce17cb139f77))
+* close connection when kicking replaced attach client ([708ce58](https://github.com/d0ugal/graith/commit/708ce586704d24cc7445da4ab1cd0bf72d3c01aa)), closes [#264](https://github.com/d0ugal/graith/issues/264)
+* eliminate watchSession race and fd leak in saveState rollback ([d12d879](https://github.com/d0ugal/graith/commit/d12d8791d8559bf8a3effb76b3994c3b381134e1))
+* ensure buildEnv overrides take effect over parent environment ([d52e8df](https://github.com/d0ugal/graith/commit/d52e8dfcf23701827f165ef798367137c9a4df82)), closes [#265](https://github.com/d0ugal/graith/issues/265)
+* error when --agent-hooks used with unsupported agent type ([7f1c6a1](https://github.com/d0ugal/graith/commit/7f1c6a15c506f11b94700f8e668b3f411a4b77e9)), closes [#274](https://github.com/d0ugal/graith/issues/274)
+* fsync temp file before rename in writeFileAtomic ([1c5c16c](https://github.com/d0ugal/graith/commit/1c5c16ca80e9cc97dd1fd964febf95cc3931e377))
+* gate ChannelData on IsAttachedClient to reject input immediately ([e479c07](https://github.com/d0ugal/graith/commit/e479c07150d7e6632f64799ed7357b62220c3d80))
+* grant agy sandbox access to ~/.gemini ([d8cc410](https://github.com/d0ugal/graith/commit/d8cc410bdfc0609a49fd1bcaf30d7ff1502de4ee))
+* guard socket cleanup on confirmed daemon stop ([feab6a7](https://github.com/d0ugal/graith/commit/feab6a7951343be50203d38302bf4e655b60a0cf))
+* harden Resume path for shared worktree sessions ([303de4c](https://github.com/d0ugal/graith/commit/303de4cce2786274bf0ee901694e98d45e1b68da))
+* keep overlay open after deleting a session ([53a60c3](https://github.com/d0ugal/graith/commit/53a60c35586da97c5c2595524a138184b263a81a))
+* merge user agent configs with defaults instead of replacing ([0917664](https://github.com/d0ugal/graith/commit/0917664c124fffdd6d04ed3f008980dbfff9570b)), closes [#256](https://github.com/d0ugal/graith/issues/256)
+* move Resume shared-worktree guard before hook injection ([31173ac](https://github.com/d0ugal/graith/commit/31173ac2c1b3c88d68cbe01f0d2b02051f63e90f))
+* normalize sandbox paths before persisting to prevent cwd-dependent drift ([5451cb6](https://github.com/d0ugal/graith/commit/5451cb6e65164384bdb66f3fa627ee8cf91268a5))
+* parse mixed day+time durations like 7d12h in ParseDurationWithDays ([81f43f2](https://github.com/d0ugal/graith/commit/81f43f23d465286d3608ea91ce7367914e5e9127)), closes [#280](https://github.com/d0ugal/graith/issues/280)
+* persist AgentHooks on fork, clean up hook files on error ([bc9a9b1](https://github.com/d0ugal/graith/commit/bc9a9b112a412a2be20f0ed1468cd1b9d61964d2))
+* persist sandbox config at session creation to prevent resume/fork drift ([93cbcd6](https://github.com/d0ugal/graith/commit/93cbcd6086b39c1d47366146c1cfa3a35293a0ce)), closes [#276](https://github.com/d0ugal/graith/issues/276)
+* preserve stream high-water mark across message cleanup ([d26c36f](https://github.com/d0ugal/graith/commit/d26c36fbb274d869277eb6eb0e97e61fa9389fba)), closes [#275](https://github.com/d0ugal/graith/issues/275)
+* prune orphaned acked_messages rows during cleanup ([9bab4b7](https://github.com/d0ugal/graith/commit/9bab4b744301b8430937efcf1c890e4dff13732c))
+* reject --share-worktree when sandbox is disabled ([fedaaba](https://github.com/d0ugal/graith/commit/fedaaba53e3e95479fd695021a11dbc67ab65a9f)), closes [#245](https://github.com/d0ugal/graith/issues/245)
+* reject duplicate session names in Create, Fork, and Rename ([1527348](https://github.com/d0ugal/graith/commit/152734847c2abcca2c1ac9c7d2cd2b255cdeefd9)), closes [#273](https://github.com/d0ugal/graith/issues/273)
+* reject fork of no-repo sessions ([8a0b9e9](https://github.com/d0ugal/graith/commit/8a0b9e9d2fe00fbf150e2b20e81774acf953cd52)), closes [#246](https://github.com/d0ugal/graith/issues/246)
+* rename variable to avoid shadowing predeclared 'real' ([dc630f5](https://github.com/d0ugal/graith/commit/dc630f5679fd4639bf9597c520dd877f319d48d4))
+* resolve symlinks in RepoPathAllowed and validate PIDs before signaling ([9816b18](https://github.com/d0ugal/graith/commit/9816b18b14bbed51e3a1c7b296493091f62a9812)), closes [#248](https://github.com/d0ugal/graith/issues/248)
+* return error and roll back state when saveState fails after session creation ([81b2d2c](https://github.com/d0ugal/graith/commit/81b2d2c7349c2128d359698a10d7df40029b11c0)), closes [#247](https://github.com/d0ugal/graith/issues/247)
+* send SIGWINCH after type input to wake agent process ([d5625a6](https://github.com/d0ugal/graith/commit/d5625a691f9221f64278d3d0b82fbe5d00a379ee)), closes [#309](https://github.com/d0ugal/graith/issues/309)
+* show unsaved work warnings in overlay delete confirmation ([3cb9684](https://github.com/d0ugal/graith/commit/3cb9684270d2d8331f8d2834416bd55e25f4984f))
+* sort overlay session picker alphabetically by name ([5d9e8e0](https://github.com/d0ugal/graith/commit/5d9e8e01da8d4418af8c55d1b4beaeaa34392c9d)), closes [#310](https://github.com/d0ugal/graith/issues/310)
+* stricter PID parsing, cleanup stale files, align client guard ([3bc4e85](https://github.com/d0ugal/graith/commit/3bc4e85f7e28df6521df39aa8ba7c6070bb13723))
+* sync parent directory after rename, wrap close error ([d84f0b4](https://github.com/d0ugal/graith/commit/d84f0b45fbdf2310136dea236d04f560592045e8))
+* thread-filtered --ack no longer marks other threads as read ([5b09e23](https://github.com/d0ugal/graith/commit/5b09e23915cd8b7343148db67c77cefe2cc83e33)), closes [#259](https://github.com/d0ugal/graith/issues/259)
+* treat EPERM as alive in isPIDAlive to prevent duplicate daemons ([cbdb763](https://github.com/d0ugal/graith/commit/cbdb7632fb12f9299ea235987cc5fd5739de5933)), closes [#250](https://github.com/d0ugal/graith/issues/250)
+* update stale comments referencing old time-based sort order ([1577648](https://github.com/d0ugal/graith/commit/1577648ce851007004c9dd65a4a7cee36ba93ca8))
+* use configured approval timeout for hook connection deadline ([6fae2b0](https://github.com/d0ugal/graith/commit/6fae2b0564f0961de6233af91ae44a67f8d5c01b)), closes [#244](https://github.com/d0ugal/graith/issues/244)
+* use direct SIGWINCH signal instead of same-size Setsize in Poke ([0602d95](https://github.com/d0ugal/graith/commit/0602d95dfffddc75fe9ffa92b42f991db994f2b3))
+* use exact basename match in IsGraithDaemon, add symlink edge case tests ([74db1a3](https://github.com/d0ugal/graith/commit/74db1a3d0504b5c493d2a61ee34de1ec445605eb))
+* use strict PID parsing in client's stopDaemonByPID ([591c2b0](https://github.com/d0ugal/graith/commit/591c2b017c26c7ea250ec9ab5e82d9627553eb68))
+* validate PID before signaling in StopDaemon ([a9946f2](https://github.com/d0ugal/graith/commit/a9946f23ebe7d404cfa25b63d08d6d77a512fe7e)), closes [#236](https://github.com/d0ugal/graith/issues/236)
 
 ## [0.16.4](https://github.com/d0ugal/graith/compare/v0.16.3...v0.16.4) (2026-04-29)
 
 
 ### Bug Fixes
 
-* use clean restart for auto-upgrade, prefer PATH in resolveExecutable ([4d2e52c](https://github.com/d0ugal/graith/commit/4d2e52ca7379ef3c610bb8cdc634cb76691279e5))
+* use clean restart for auto-upgrade, prefer PATH in resolveExecutable ([e656e3c](https://github.com/d0ugal/graith/commit/e656e3c45b6a7d3a7c7cb02a2de06900590439b1))
 
 ## [0.16.3](https://github.com/d0ugal/graith/compare/v0.16.2...v0.16.3) (2026-04-29)
 
 
 ### Bug Fixes
 
-* auto-restart daemon on version mismatch after upgrades ([ad1312f](https://github.com/d0ugal/graith/commit/ad1312f16ed5058bd6f466e441d5c28addc0a7ba))
+* auto-restart daemon on version mismatch after upgrades ([520d5e9](https://github.com/d0ugal/graith/commit/520d5e9b7f4fd594cfa1271f3ef3b4a385024e4b))
 
 ## [0.16.2](https://github.com/d0ugal/graith/compare/v0.16.1...v0.16.2) (2026-04-29)
 
 
 ### Bug Fixes
 
-* make TestSessionAttachDetach more robust against PTY timing ([5457255](https://github.com/d0ugal/graith/commit/5457255a8bd1b0ea34f933691a577c40a6721611))
-* make TestSessionAttachDetach more robust against PTY timing ([97fdd5a](https://github.com/d0ugal/graith/commit/97fdd5a15fe93cc0896ca90d7791b2aa6c6d0381))
+* make TestSessionAttachDetach more robust against PTY timing ([08fe01e](https://github.com/d0ugal/graith/commit/08fe01e4f3b8a894d5f106e874b68d759071cd0d))
+* make TestSessionAttachDetach more robust against PTY timing ([bb9d4a3](https://github.com/d0ugal/graith/commit/bb9d4a35f3678f5cb67fd948a234e1c4dc4c3c5d))
 
 ## [0.16.1](https://github.com/d0ugal/graith/compare/v0.16.0...v0.16.1) (2026-04-27)
 
 
 ### Bug Fixes
 
-* only add hooks dir to sandbox read paths when agent hooks are enabled ([682682f](https://github.com/d0ugal/graith/commit/682682ff6d75da5afdeb457dab9e13e6e4bdb73e))
+* only add hooks dir to sandbox read paths when agent hooks are enabled ([250cf57](https://github.com/d0ugal/graith/commit/250cf572375284ea3cc832fc4d42343e143210f3))
 
 ## [0.16.0](https://github.com/d0ugal/graith/compare/v0.15.0...v0.16.0) (2026-04-27)
 
 
 ### Features
 
-* add batch delete/stop with --repo, --stopped, --stale filters ([26b1d4e](https://github.com/d0ugal/graith/commit/26b1d4e8be9bea95039e696d7269fe6a7172fdd2))
+* add batch delete/stop with --repo, --stopped, --stale filters ([0cb53b8](https://github.com/d0ugal/graith/commit/0cb53b8f0e5fc62b03dd0c2671eb5391c623edf8))
 
 ## [0.15.0](https://github.com/d0ugal/graith/compare/v0.14.0...v0.15.0) (2026-04-27)
 
 
 ### Features
 
-* rename --approvals to --agent-hooks with all-or-nothing semantics ([811d1e7](https://github.com/d0ugal/graith/commit/811d1e7158f1fd7c6e1279dd14e436691d51a3ab))
+* rename --approvals to --agent-hooks with all-or-nothing semantics ([e9d1422](https://github.com/d0ugal/graith/commit/e9d1422a0c5f37eb5a68c32b54055ea735c83836))
 
 ## [0.14.0](https://github.com/d0ugal/graith/compare/v0.13.0...v0.14.0) (2026-04-27)
 
 
 ### Features
 
-* add logging to approval request handling ([dc2a20a](https://github.com/d0ugal/graith/commit/dc2a20a6e120ec6289b7393dc263982cf379d3a3))
-* improve approval overlay formatting ([575f925](https://github.com/d0ugal/graith/commit/575f9258056b6849139801531f63392998190350))
-* improved approval overlay with detail panel ([3c827ce](https://github.com/d0ugal/graith/commit/3c827cebe01b3f4835101775a70f1921d99e291f))
-* inject unread inbox messages on session start ([f775b3c](https://github.com/d0ugal/graith/commit/f775b3c818a83eec90ab9904d68386d411cb8341))
-* make approval hooks opt-in per session with --approvals flag ([99792c8](https://github.com/d0ugal/graith/commit/99792c8c8617fefd5f41728b6097b6a33172cbc2))
-* red status bar and approval status for pending approvals ([c290dd4](https://github.com/d0ugal/graith/commit/c290dd4ddd197e2f79702a22d6c5e42cdf5676c5))
+* add logging to approval request handling ([c0dc4f0](https://github.com/d0ugal/graith/commit/c0dc4f03c84b203c590b28aadff84217b8b21ef1))
+* improve approval overlay formatting ([96d673d](https://github.com/d0ugal/graith/commit/96d673d0554f826c0d70d49fe1ca6bbcbc8a9a66))
+* improved approval overlay with detail panel ([5a300f8](https://github.com/d0ugal/graith/commit/5a300f89cb3457f7062e03495268ce096777111c))
+* inject unread inbox messages on session start ([09373a2](https://github.com/d0ugal/graith/commit/09373a24404fb6a2aab90b71c79a5fd33638e32b))
+* make approval hooks opt-in per session with --approvals flag ([de9a87c](https://github.com/d0ugal/graith/commit/de9a87cdfd080e72bddce01c513e80e1e38ff35e))
+* red status bar and approval status for pending approvals ([e5479de](https://github.com/d0ugal/graith/commit/e5479de9fdd7600d78ffc3f0c4a6d4db3e7d7148))
 
 
 ### Bug Fixes
 
-* handle Kitty keyboard protocol release events and encoded follow-up keys ([82207c6](https://github.com/d0ugal/graith/commit/82207c6581f3c6461b806f9b735c974dd8615fa6))
-* remove TODO comment that triggers godox lint ([31a82ba](https://github.com/d0ugal/graith/commit/31a82ba0ac569f8e04596a968b80546e5be882cb))
-* replace naked returns in parseKittyCSIu to satisfy nakedret lint ([20c5ef8](https://github.com/d0ugal/graith/commit/20c5ef8fd2f37c54641bb833ed5dbd60e053cd81))
+* handle Kitty keyboard protocol release events and encoded follow-up keys ([10668bb](https://github.com/d0ugal/graith/commit/10668bb7248fa32128336ecdb3518837bc337b4a))
+* remove TODO comment that triggers godox lint ([ca41d6c](https://github.com/d0ugal/graith/commit/ca41d6ceb406e06dee41e9b0d5081d775074e4d4))
+* replace naked returns in parseKittyCSIu to satisfy nakedret lint ([6a18513](https://github.com/d0ugal/graith/commit/6a18513cb7c1fc012b95b484eea5af43ea80005e))
 
 ## [0.13.0](https://github.com/d0ugal/graith/compare/v0.12.5...v0.13.0) (2026-04-26)
 
 
 ### Features
 
-* add --share-worktree flag for read-only worktree sharing ([964c569](https://github.com/d0ugal/graith/commit/964c56908e2999bc30e82b9a4762d6993bf74c53)), closes [#183](https://github.com/d0ugal/graith/issues/183)
-* add approval overlay UI and passthrough integration ([3084ce7](https://github.com/d0ugal/graith/commit/3084ce791d5d0ad124914f7d2eaa5a423016397d))
-* add cross-session approval system protocol, config, and daemon ([3dc1f64](https://github.com/d0ugal/graith/commit/3dc1f645234bb35c2c83c9690e220c368d906ff7))
-* add gr approve-request CLI and wire hooks ([3efd8e9](https://github.com/d0ugal/graith/commit/3efd8e94b9c03286632605e6fa7ecbdd3b2122ee))
+* add --share-worktree flag for read-only worktree sharing ([47aeddb](https://github.com/d0ugal/graith/commit/47aeddb125d8223dc6537e61c1153701db1b0bc4)), closes [#183](https://github.com/d0ugal/graith/issues/183)
+* add approval overlay UI and passthrough integration ([2ba9e47](https://github.com/d0ugal/graith/commit/2ba9e47f7ac4336b0515382903d718ffc1ee1321))
+* add cross-session approval system protocol, config, and daemon ([52c9b7d](https://github.com/d0ugal/graith/commit/52c9b7ded3bba437b0cd4fa9c4259cee7c2b4617))
+* add gr approve-request CLI and wire hooks ([2086661](https://github.com/d0ugal/graith/commit/208666149e36ef546ca8e1ea2af1b190605c65e1))
 
 
 ### Bug Fixes
 
-* resolve stale binary path during daemon upgrade ([a28263d](https://github.com/d0ugal/graith/commit/a28263d8c849a0eaea68eb882a4ab1d94e06d31a))
-* rewrite if-else chains to switch for gocritic lint ([fe7e5b8](https://github.com/d0ugal/graith/commit/fe7e5b8ddb99afe7565e84add93ee15c7b46a5c7))
+* resolve stale binary path during daemon upgrade ([2d55f6a](https://github.com/d0ugal/graith/commit/2d55f6a3b337ef36c6ef5048e926c57a697cf23a))
+* rewrite if-else chains to switch for gocritic lint ([0c0762d](https://github.com/d0ugal/graith/commit/0c0762db96d8b0e2406b6e220ab0226cf364ca32))
 
 ## [0.12.5](https://github.com/d0ugal/graith/compare/v0.12.4...v0.12.5) (2026-04-26)
 
 
 ### Bug Fixes
 
-* exclude _system.* streams from unread count and topic listing ([f515a92](https://github.com/d0ugal/graith/commit/f515a92ea6f59ea320ba46495f55d5c083df3503))
-* scope status bar unread count to session inbox only ([1961a68](https://github.com/d0ugal/graith/commit/1961a68046c4791df6c957f9e6e75fdacedb7925))
+* exclude _system.* streams from unread count and topic listing ([28e108d](https://github.com/d0ugal/graith/commit/28e108d48a7d9fa2483a1fcc99a13ce6c63f2016))
+* scope status bar unread count to session inbox only ([e7ff386](https://github.com/d0ugal/graith/commit/e7ff3869b050c82e59c2999e1305c14d60a728a2))
 
 ## [0.12.4](https://github.com/d0ugal/graith/compare/v0.12.3...v0.12.4) (2026-04-26)
 
 
 ### Bug Fixes
 
-* restore n/p as next/prev session, use c for create ([0c43365](https://github.com/d0ugal/graith/commit/0c4336568de0798f31e9499178add6870c820cb5))
+* restore n/p as next/prev session, use c for create ([5bbe38b](https://github.com/d0ugal/graith/commit/5bbe38bbb52dde9db5f4e38c0cec02b78d7c0b16))
 
 ## [0.12.3](https://github.com/d0ugal/graith/compare/v0.12.2...v0.12.3) (2026-04-26)
 
 
 ### Bug Fixes
 
-* include config dir in sandbox read paths for hook scripts ([1e92c0f](https://github.com/d0ugal/graith/commit/1e92c0fd3727fd8324cc743251b16d29543462d0))
+* include config dir in sandbox read paths for hook scripts ([3099533](https://github.com/d0ugal/graith/commit/309953329888628f9e90bbb4b31628945c626485))
 
 ## [0.12.2](https://github.com/d0ugal/graith/compare/v0.12.1...v0.12.2) (2026-04-26)
 
 
 ### Bug Fixes
 
-* include gr binary and socket paths in sandbox for hooks ([f946dfc](https://github.com/d0ugal/graith/commit/f946dfcaa7c52b0a83b121176f40b7ddd47c4839))
-* simplify hooks — call gr directly, drop shell script wrapper ([c4f17be](https://github.com/d0ugal/graith/commit/c4f17be74486adaa7ba4ea53874380a98bcbf40e))
-* use correct Claude Code hooks settings schema (matcher+hooks) ([07c1ada](https://github.com/d0ugal/graith/commit/07c1adaf7797464c8e71845dff0c412a68fd3939))
+* include gr binary and socket paths in sandbox for hooks ([07f955d](https://github.com/d0ugal/graith/commit/07f955d31b0268d70858e5f8a2cd753d40714ea0))
+* simplify hooks — call gr directly, drop shell script wrapper ([6086597](https://github.com/d0ugal/graith/commit/60865979a7fc2af8b34cf7aae4f4aeadf212fd0f))
+* use correct Claude Code hooks settings schema (matcher+hooks) ([6ec9650](https://github.com/d0ugal/graith/commit/6ec96505b6561ab2cc811bd1bd2cfb923ac30359))
 
 ## [0.12.1](https://github.com/d0ugal/graith/compare/v0.12.0...v0.12.1) (2026-04-25)
 
 
 ### Bug Fixes
 
-* auto-include agent config dirs in sandbox read/write paths ([543a47b](https://github.com/d0ugal/graith/commit/543a47b56a8b76b5af1872a2a2a290050bcd2bb8))
-* use daemon restart instead of reload in homebrew post_install ([bf7e5c8](https://github.com/d0ugal/graith/commit/bf7e5c8301d17808b55770cfb9d1203556572660))
+* auto-include agent config dirs in sandbox read/write paths ([5c2bc86](https://github.com/d0ugal/graith/commit/5c2bc86a85c648047d1a571388858ac27253d6e8))
+* use daemon restart instead of reload in homebrew post_install ([dd2d7b0](https://github.com/d0ugal/graith/commit/dd2d7b0b4178d304f74bb7036b52be406c05d935))
 
 ## [0.12.0](https://github.com/d0ugal/graith/compare/v0.11.0...v0.12.0) (2026-04-25)
 
 
 ### Features
 
-* add back-and-forth session switching (ctrl+b l) ([f67a226](https://github.com/d0ugal/graith/commit/f67a2269cdc01966f63ddc9930a60c4d82e14634)), closes [#164](https://github.com/d0ugal/graith/issues/164)
-* add gr restart command and overlay restart action ([e141ec0](https://github.com/d0ugal/graith/commit/e141ec0be86cf70a2e9302d1ab18da7245bc55ed)), closes [#155](https://github.com/d0ugal/graith/issues/155)
+* add back-and-forth session switching (ctrl+b l) ([a23853f](https://github.com/d0ugal/graith/commit/a23853f57c6412c26af80d8940b96b21b6dd2890)), closes [#164](https://github.com/d0ugal/graith/issues/164)
+* add gr restart command and overlay restart action ([6fb118a](https://github.com/d0ugal/graith/commit/6fb118adb63db92774fd7198b93c6762cf440d8b)), closes [#155](https://github.com/d0ugal/graith/issues/155)
 
 
 ### Bug Fixes
 
-* use ~/.config for config path instead of macOS Application Support ([3b049c0](https://github.com/d0ugal/graith/commit/3b049c0df82765a154362439f3279b5f6a4ecd5f))
-* use tuple swap for prevSessionID (gocritic valSwap) ([7e9c2ec](https://github.com/d0ugal/graith/commit/7e9c2ecca328711f7cd556efad26609260530d6a))
+* use ~/.config for config path instead of macOS Application Support ([4e19c47](https://github.com/d0ugal/graith/commit/4e19c476eea4ae71aebf4e311a5b22379b3773c3))
+* use tuple swap for prevSessionID (gocritic valSwap) ([2c59f0d](https://github.com/d0ugal/graith/commit/2c59f0d528df747026c39b6124f885fb151c159c))
 
 ## [0.11.0](https://github.com/d0ugal/graith/compare/v0.10.0...v0.11.0) (2026-04-23)
 
 
 ### Features
 
-* add allowed_repo_paths config to restrict session creation ([0c93144](https://github.com/d0ugal/graith/commit/0c93144918c75c18f54c7628725a0d3dd9e923b0))
-* add Codex lifecycle hook injection ([a1d0574](https://github.com/d0ugal/graith/commit/a1d0574a947fe01545f63c4f65f61ef7e24f6915))
-* add enrichment types to protocol ([10f874a](https://github.com/d0ugal/graith/commit/10f874aedc4fd7f35fddc6f26e47e042bc655b44))
-* add hook report ingestion and gr report-status command ([25fd792](https://github.com/d0ugal/graith/commit/25fd792f51bef2c165419c7a178283ddb05fc3c7))
-* add safehouse checks to gr doctor ([08f1301](https://github.com/d0ugal/graith/commit/08f13010170fa81eed9022575e8ec94f84badf4c))
-* add sandbox fields to state, protocol, and CLI ([6af6e99](https://github.com/d0ugal/graith/commit/6af6e99096cc260d69f8aeb18115e3ce687b2caf))
-* add sandbox package for safehouse command wrapping ([df46f8c](https://github.com/d0ugal/graith/commit/df46f8cd8dbeed51423929f1831266293c65171c))
-* add SandboxConfig to config schema with merge semantics ([ed9a47b](https://github.com/d0ugal/graith/commit/ed9a47b0aac3996611ecb5b32bd893a2ce2df082))
-* add StatusReportMsg to wire protocol ([3798290](https://github.com/d0ugal/graith/commit/3798290de35aeb1af1d9ad02613719810fa75818))
-* Claude hook injection and authority layer ([5955406](https://github.com/d0ugal/graith/commit/59554068dbed35d78ac2bd49da06fcdb31a0a628))
-* enrichment data pipeline — cost, tokens, model, tool in UI ([a5bc322](https://github.com/d0ugal/graith/commit/a5bc322272f4828718c1996023a483034a775fe6))
-* wire safehouse sandbox into Create, Resume, and Fork ([531aea4](https://github.com/d0ugal/graith/commit/531aea45b76c65ff7d1697033be4a9c3619880f0))
+* add allowed_repo_paths config to restrict session creation ([5ab3a01](https://github.com/d0ugal/graith/commit/5ab3a01c730885aaee38eb21c60696b0a6bf5eb6))
+* add Codex lifecycle hook injection ([8a367ea](https://github.com/d0ugal/graith/commit/8a367ea7f3a7519241e6e16208ba6c319342c7dd))
+* add enrichment types to protocol ([4c1ad76](https://github.com/d0ugal/graith/commit/4c1ad762ce3b0cac4e9c2b44f35d987f18acdd35))
+* add hook report ingestion and gr report-status command ([44e4cd9](https://github.com/d0ugal/graith/commit/44e4cd911eea32479448868ac6ea58869c2e589e))
+* add safehouse checks to gr doctor ([72b0e92](https://github.com/d0ugal/graith/commit/72b0e920dfec338153c9cfa74d634c75d31b34eb))
+* add sandbox fields to state, protocol, and CLI ([f703621](https://github.com/d0ugal/graith/commit/f7036211b5437b4097429c51ec3720d692d8215c))
+* add sandbox package for safehouse command wrapping ([0e23f71](https://github.com/d0ugal/graith/commit/0e23f71d320e72e2c0fa7c27e5344e3b88b9a794))
+* add SandboxConfig to config schema with merge semantics ([bb4d7ba](https://github.com/d0ugal/graith/commit/bb4d7baa87e37ee9abd3a9b17ae2b672861ab954))
+* add StatusReportMsg to wire protocol ([976fe55](https://github.com/d0ugal/graith/commit/976fe550e244b226f685fa2e591812947795649d))
+* Claude hook injection and authority layer ([4a1c450](https://github.com/d0ugal/graith/commit/4a1c450a62d2501d96e6015aeecddfe2b6621540))
+* enrichment data pipeline — cost, tokens, model, tool in UI ([77bf41e](https://github.com/d0ugal/graith/commit/77bf41ecce518b4dd1ff8a512e11d5bea4d478bc))
+* wire safehouse sandbox into Create, Resume, and Fork ([a0c0e83](https://github.com/d0ugal/graith/commit/a0c0e83ba73ce3fcee2bdc72a34676aa411a1503))
 
 
 ### Bug Fixes
 
-* address 5 review findings from Codex ([1c90101](https://github.com/d0ugal/graith/commit/1c9010155b9c1188ec2c43ecc139aca51507b99f))
-* clean up legacy daemon on startup after socket path change ([b97aedd](https://github.com/d0ugal/graith/commit/b97aedd2eaac442aa2c4e66d49c3796b8cac0911))
-* expand ~ and relative paths in sandbox read/write dirs ([cfcf547](https://github.com/d0ugal/graith/commit/cfcf547bfa52440a32bbcc679da426c221008039))
-* fail closed when sandbox is enabled but safehouse unavailable ([4a59264](https://github.com/d0ugal/graith/commit/4a59264c49beda42dee6a31c2f7159b71a45da47))
-* honor per-agent sandbox enablement and custom command paths ([23cb5c4](https://github.com/d0ugal/graith/commit/23cb5c4364b86755b8af2ea07645fd755b171f9d))
-* lint — gofmt alignment and switch over if/else chains ([e8f4c64](https://github.com/d0ugal/graith/commit/e8f4c64f7bebd3c3b45e8dc9e7579e8fcae89978))
-* make sandbox config-only, remove CLI override flags ([be08310](https://github.com/d0ugal/graith/commit/be08310c0bfc8b751124a83f7d9799c7e514b966))
-* move daemon socket fallback out of /tmp ([b71c4e6](https://github.com/d0ugal/graith/commit/b71c4e621c3237ac7e866013d013bea7aa738cda))
-* update module golang.org/x/term to v0.44.0 ([3e19e7d](https://github.com/d0ugal/graith/commit/3e19e7d4ebf53ff43860fcf87de6eda1b3f0f48f))
+* address 5 review findings from Codex ([bc95d5f](https://github.com/d0ugal/graith/commit/bc95d5f14e2c091a373ffd99c8a0f51b21340b8a))
+* clean up legacy daemon on startup after socket path change ([302e36c](https://github.com/d0ugal/graith/commit/302e36c9b57f2259b8ddb97175c2144c9bedddbc))
+* expand ~ and relative paths in sandbox read/write dirs ([876bfa7](https://github.com/d0ugal/graith/commit/876bfa745dd6f4c86e91e030ca653a25552cade6))
+* fail closed when sandbox is enabled but safehouse unavailable ([bdcd85d](https://github.com/d0ugal/graith/commit/bdcd85d55961b708ee6bc595fe86045603aa6118))
+* honor per-agent sandbox enablement and custom command paths ([aac5fde](https://github.com/d0ugal/graith/commit/aac5fde95cb9bdc737471a15f1634d86038f2110))
+* lint — gofmt alignment and switch over if/else chains ([4143a35](https://github.com/d0ugal/graith/commit/4143a3558bec39c7bb5fc1e14a55f8514f41ad23))
+* make sandbox config-only, remove CLI override flags ([f0cf954](https://github.com/d0ugal/graith/commit/f0cf954fbba224e46f46eea25441374579921e21))
+* move daemon socket fallback out of /tmp ([5998f98](https://github.com/d0ugal/graith/commit/5998f98c2e6ea78c5367c5a0eb9895094a09fc77))
+* update module golang.org/x/term to v0.44.0 ([7cef080](https://github.com/d0ugal/graith/commit/7cef0804cc75628339bce3ea8f5692671e6d312d))
 
 ## [0.10.0](https://github.com/d0ugal/graith/compare/v0.9.0...v0.10.0) (2026-04-22)
 
 
 ### Features
 
-* fork sessions with agent conversation history ([c123ca2](https://github.com/d0ugal/graith/commit/c123ca29fe40545727032747cd334597dd1aa0ed))
+* fork sessions with agent conversation history ([fd618ad](https://github.com/d0ugal/graith/commit/fd618adce3e2af44083a9efe7ef7a522b9b9a2ab))
 
 
 ### Bug Fixes
 
-* send type input and newline as a single PTY write ([42d0172](https://github.com/d0ugal/graith/commit/42d017209f5918732caea74c6e5338c7a91a76ca)), closes [#151](https://github.com/d0ugal/graith/issues/151)
+* send type input and newline as a single PTY write ([0bf6b0d](https://github.com/d0ugal/graith/commit/0bf6b0d8bdb2ad335446bf57f43b006766452540)), closes [#151](https://github.com/d0ugal/graith/issues/151)
 
 ## [0.9.0](https://github.com/d0ugal/graith/compare/v0.8.0...v0.9.0) (2026-04-22)
 
 
 ### Features
 
-* add ctrl+b n (new) and ctrl+b f (fork) keybindings ([a4bd9ec](https://github.com/d0ugal/graith/commit/a4bd9eccb8a39333c1f02e416d8f1daadc6765cf))
+* add ctrl+b n (new) and ctrl+b f (fork) keybindings ([f2a8721](https://github.com/d0ugal/graith/commit/f2a8721d45c7181b5e10448503a74261f7824785))
 
 ## [0.8.0](https://github.com/d0ugal/graith/compare/v0.7.0...v0.8.0) (2026-04-22)
 
 
 ### Features
 
-* simplify daemon subcommands and auto-reload on brew upgrade ([91a586a](https://github.com/d0ugal/graith/commit/91a586a8281221d3f5c852ab7dcaa588ac198484))
+* simplify daemon subcommands and auto-reload on brew upgrade ([dde12ec](https://github.com/d0ugal/graith/commit/dde12ec7c96b61ee426e3f3723e5eaf8ad3a7a55))
 
 ## [0.7.0](https://github.com/d0ugal/graith/compare/v0.6.1...v0.7.0) (2026-04-22)
 
 
 ### Features
 
-* redesign status bar with colors and fleet summary ([3a7e3cf](https://github.com/d0ugal/graith/commit/3a7e3cf60ee4d0e966158497c99975e9f24a5e41))
+* redesign status bar with colors and fleet summary ([81802d0](https://github.com/d0ugal/graith/commit/81802d08898d351f74d13b0f037edfd1fff30686))
 
 
 ### Bug Fixes
 
-* update module golang.org/x/sync to v0.21.0 ([ad408f3](https://github.com/d0ugal/graith/commit/ad408f327b85721875a466fbb09eabb24d6e5c61))
-* update module golang.org/x/sys to v0.46.0 ([09e327f](https://github.com/d0ugal/graith/commit/09e327fdb93035d4d734f16508c2eeabfa414e36))
+* update module golang.org/x/sync to v0.21.0 ([b2e860c](https://github.com/d0ugal/graith/commit/b2e860c5cfb273a389d6060eed813f113a3429ca))
+* update module golang.org/x/sys to v0.46.0 ([bfb3beb](https://github.com/d0ugal/graith/commit/bfb3bebce6bffd09b12e484e9de27c10e63c84c5))
 
 ## [0.6.1](https://github.com/d0ugal/graith/compare/v0.6.0...v0.6.1) (2026-04-22)
 
 
 ### Bug Fixes
 
-* reduce unknown agent status after daemon restart ([9aac03e](https://github.com/d0ugal/graith/commit/9aac03e36ec9fdbd49b9e53b2e910853978869dc))
-* stop boosting current session to top of sort order ([e03ba68](https://github.com/d0ugal/graith/commit/e03ba680138244bf83e5da303b559bb53846b083))
-* use byte-bounded scrollback replay and event-based grace period ([009d39d](https://github.com/d0ugal/graith/commit/009d39d7204b761d677e335428ff0501f2536763))
+* reduce unknown agent status after daemon restart ([8db590d](https://github.com/d0ugal/graith/commit/8db590d3058a00e319f6d3229198eac9f486cd3b))
+* stop boosting current session to top of sort order ([dc88a8b](https://github.com/d0ugal/graith/commit/dc88a8bdd82c2d22f2806aeddc5dc89501a3c131))
+* use byte-bounded scrollback replay and event-based grace period ([f1e6d45](https://github.com/d0ugal/graith/commit/f1e6d45d0504f861c539cd72635d9553fb18bf8a))
 
 ## [0.6.0](https://github.com/d0ugal/graith/compare/v0.5.1...v0.6.0) (2026-04-22)
 
 
 ### Features
 
-* color-code session status in overlay ([f7d5a2c](https://github.com/d0ugal/graith/commit/f7d5a2c7e856561966e9c65441301ceb005be3ed))
+* color-code session status in overlay ([396ddd3](https://github.com/d0ugal/graith/commit/396ddd354c902fec32edbb7ea0875f4f09387fc8))
 
 ## [0.5.1](https://github.com/d0ugal/graith/compare/v0.5.0...v0.5.1) (2026-04-22)
 
 
 ### Bug Fixes
 
-* reset filter cursor and align next/prev session order with overlay ([62a382f](https://github.com/d0ugal/graith/commit/62a382f2921da37ebea9b1c0a5cc322f46066782))
+* reset filter cursor and align next/prev session order with overlay ([c8d5b21](https://github.com/d0ugal/graith/commit/c8d5b213a3855524683281ab51214b524cff72d8))
 
 ## [0.5.0](https://github.com/d0ugal/graith/compare/v0.4.0...v0.5.0) (2026-04-22)
 
 
 ### Features
 
-* redesign session switcher overlay ([82f3504](https://github.com/d0ugal/graith/commit/82f3504c475cc22b0f8ab88de42c8863ff4127aa)), closes [#80](https://github.com/d0ugal/graith/issues/80)
+* redesign session switcher overlay ([e16addf](https://github.com/d0ugal/graith/commit/e16addf9e2743ad643d6affbdbbad2e829c62e2e)), closes [#80](https://github.com/d0ugal/graith/issues/80)
 
 
 ### Bug Fixes
 
-* add graith binary to .gitignore ([2c233e9](https://github.com/d0ugal/graith/commit/2c233e99ca89489be2999576ef448c36f4a45d2f))
+* add graith binary to .gitignore ([47cbe31](https://github.com/d0ugal/graith/commit/47cbe313f67dc4ebe30b038ee3fcb6e8166db516))
 
 ## [0.4.0](https://github.com/d0ugal/graith/compare/v0.3.1...v0.4.0) (2026-04-21)
 
 
 ### Features
 
-* include repo name in worktree directory path ([2f3f1bf](https://github.com/d0ugal/graith/commit/2f3f1bf410271bce71d863cac48e88db3c5071f0))
+* include repo name in worktree directory path ([53ecb47](https://github.com/d0ugal/graith/commit/53ecb47a7e143e1754ea41fa3e50571e48709db3))
 
 
 ### Bug Fixes
 
-* update github.com/charmbracelet/ultraviolet digest to 35bcb73 ([aaf9c82](https://github.com/d0ugal/graith/commit/aaf9c8246ffe24645676df306a5af2de9b2178cb))
-* update module modernc.org/libc to v1.73.0 ([9b990f6](https://github.com/d0ugal/graith/commit/9b990f61126564acdeeb3a07946ee76cad611880))
+* update github.com/charmbracelet/ultraviolet digest to 35bcb73 ([aac69c2](https://github.com/d0ugal/graith/commit/aac69c2c36fe4acedcf79c5cb5aecefacc50aadf))
+* update module modernc.org/libc to v1.73.0 ([8aad981](https://github.com/d0ugal/graith/commit/8aad9815f90be30dfa852e9a8ca9812911d78517))
 
 ## [0.3.1](https://github.com/d0ugal/graith/compare/v0.3.0...v0.3.1) (2026-04-19)
 
 
 ### Bug Fixes
 
-* delete dev tag before goreleaser snapshot ([246f631](https://github.com/d0ugal/graith/commit/246f6312920bc1403e19ea8ab27f7d487a1fae7d))
+* delete dev tag before goreleaser snapshot ([823281d](https://github.com/d0ugal/graith/commit/823281d474257e1ace5ebfc68cb32ddbfb4f5b32))
 
 ## [0.3.0](https://github.com/d0ugal/graith/compare/v0.2.1...v0.3.0) (2026-04-19)
 
 
 ### Features
 
-* add confirmation prompt for destructive gr delete ([bc3cb14](https://github.com/d0ugal/graith/commit/bc3cb141df091c7e33175dc235fecfedd142921a)), closes [#49](https://github.com/d0ugal/graith/issues/49)
-* add dev release workflow for pre-release builds ([74f9f51](https://github.com/d0ugal/graith/commit/74f9f5166cb8755f6458ce4c3ecd98b35dd2f9d0))
-* add live-updating dashboard command ([05d4d4d](https://github.com/d0ugal/graith/commit/05d4d4d94d2a2a4f0364c1f2285e9cd61c2a24fb)), closes [#24](https://github.com/d0ugal/graith/issues/24)
-* add MCP server mode for programmatic session management ([96ca8b8](https://github.com/d0ugal/graith/commit/96ca8b83b1cbeb1b21d24292105a79beae9b641b)), closes [#32](https://github.com/d0ugal/graith/issues/32)
-* add message retention/cleanup to prevent unbounded SQLite growth ([2231b14](https://github.com/d0ugal/graith/commit/2231b144eadc8e38aa22d4166714bb3b309e3eb4)), closes [#20](https://github.com/d0ugal/graith/issues/20)
-* add shell completions for flag values ([0820412](https://github.com/d0ugal/graith/commit/0820412ffd7a07bd8e32cf78c098a5261ac9b53d)), closes [#45](https://github.com/d0ugal/graith/issues/45)
-* add status bar renderer ([a235db1](https://github.com/d0ugal/graith/commit/a235db14be197f5e0ad3b5b41cce5b8e36875abb))
-* add status request/response protocol messages ([292792e](https://github.com/d0ugal/graith/commit/292792e88536fbf46aa975206a6292e84c87f021))
-* add status_bar config section ([98e9a3d](https://github.com/d0ugal/graith/commit/98e9a3d5389463eae517b5c69ed82d90b4b844ba))
-* add TotalUnread query to message store ([765b558](https://github.com/d0ugal/graith/commit/765b558056243041a7077e8de78cd5d4d4aa5fac))
-* config hot-reload without daemon restart ([602be96](https://github.com/d0ugal/graith/commit/602be96a25e7dae68b821c5e5bab7095f371b89d)), closes [#40](https://github.com/d0ugal/graith/issues/40)
-* dev release publishes gr-dev to existing tap ([a860eb4](https://github.com/d0ugal/graith/commit/a860eb40bb296e36f89c1b2e40d666dfd36480cd))
-* handle status control message in daemon ([9b4455f](https://github.com/d0ugal/graith/commit/9b4455fa5bef6d88172e7e7aaf993440d76def8f))
-* include sender and reply hint in msg send notification ([d244b61](https://github.com/d0ugal/graith/commit/d244b61e9be27008d84f6c1cc9849dfeb236c8bc))
-* integrate status bar into passthrough loop ([a0c65ed](https://github.com/d0ugal/graith/commit/a0c65edff7074e145b83b931672fbc36406f92ff))
-* notify agent when sending a direct message ([be13fc1](https://github.com/d0ugal/graith/commit/be13fc181ff16b5a290f6a440c199f77dfdd71f0))
-* notify when a new graith release is available ([bda8198](https://github.com/d0ugal/graith/commit/bda81987d8911f9f9bdca8e294cca0227d019d1a)), closes [#65](https://github.com/d0ugal/graith/issues/65)
-* show help on naked gr, add subcommand aliases ([61b2e0b](https://github.com/d0ugal/graith/commit/61b2e0b63bfc03fd92fa4e6d9466becfb428f783)), closes [#69](https://github.com/d0ugal/graith/issues/69)
-* upgrade charmbracelet libraries to v2 (charm.land) ([ca8efe6](https://github.com/d0ugal/graith/commit/ca8efe6551705e3564e1eadd9f6cbc718a0534e1))
-* wire up status bar in attach command ([bbabaf2](https://github.com/d0ugal/graith/commit/bbabaf29fa425a44dc132cce59d3887b414c7c32))
+* add confirmation prompt for destructive gr delete ([356c8eb](https://github.com/d0ugal/graith/commit/356c8eb9714fe0a5b1b53e477c8884a4e0a50e83)), closes [#49](https://github.com/d0ugal/graith/issues/49)
+* add dev release workflow for pre-release builds ([852c4a9](https://github.com/d0ugal/graith/commit/852c4a9e9895d930007b0c3f7817b4c43ee48376))
+* add live-updating dashboard command ([925a897](https://github.com/d0ugal/graith/commit/925a8970d4d1f7aa95d336204c9efb1e649a870c)), closes [#24](https://github.com/d0ugal/graith/issues/24)
+* add MCP server mode for programmatic session management ([8fdac1c](https://github.com/d0ugal/graith/commit/8fdac1cad4d5db4d2df56c6fad2948964b759df3)), closes [#32](https://github.com/d0ugal/graith/issues/32)
+* add message retention/cleanup to prevent unbounded SQLite growth ([f98de76](https://github.com/d0ugal/graith/commit/f98de76170f360327e89002d76a5d18c3475fa5e)), closes [#20](https://github.com/d0ugal/graith/issues/20)
+* add shell completions for flag values ([b5b4dca](https://github.com/d0ugal/graith/commit/b5b4dca6c21f2efd738928cf475db4bcf4bfa4dc)), closes [#45](https://github.com/d0ugal/graith/issues/45)
+* add status bar renderer ([2683921](https://github.com/d0ugal/graith/commit/2683921403e8e0e0c08248d0361cb5203758ed60))
+* add status request/response protocol messages ([b692f6f](https://github.com/d0ugal/graith/commit/b692f6faf33ff92734777150ed51329603cbcb37))
+* add status_bar config section ([4796ee5](https://github.com/d0ugal/graith/commit/4796ee57419aff59ff4cd5e17a3dada20490daab))
+* add TotalUnread query to message store ([1f9077c](https://github.com/d0ugal/graith/commit/1f9077c769411d35c117ad3be1588093dc997370))
+* config hot-reload without daemon restart ([e34e1a9](https://github.com/d0ugal/graith/commit/e34e1a9287ad2c015a4d2a7c023c666847886365)), closes [#40](https://github.com/d0ugal/graith/issues/40)
+* dev release publishes gr-dev to existing tap ([4272a8d](https://github.com/d0ugal/graith/commit/4272a8d056e508ed1e738fae838f8d2d4875da88))
+* handle status control message in daemon ([9f37923](https://github.com/d0ugal/graith/commit/9f37923fcb9ac8bc5b81d1dcfea064d09fc9d56a))
+* include sender and reply hint in msg send notification ([305067a](https://github.com/d0ugal/graith/commit/305067a244a6d35640b0cf366f0c147a3e3a5394))
+* integrate status bar into passthrough loop ([c83ff81](https://github.com/d0ugal/graith/commit/c83ff81e377cee13980887aba4d0f80712c65f1a))
+* notify agent when sending a direct message ([76e8684](https://github.com/d0ugal/graith/commit/76e868492927d3452a01b9d4ae4558cccac4c564))
+* notify when a new graith release is available ([ff024b1](https://github.com/d0ugal/graith/commit/ff024b1fb62bb9a0fc36d7dbb408da80bae841c9)), closes [#65](https://github.com/d0ugal/graith/issues/65)
+* show help on naked gr, add subcommand aliases ([35136d9](https://github.com/d0ugal/graith/commit/35136d9990ca145a883f3abf6ce88f19bd213e7d)), closes [#69](https://github.com/d0ugal/graith/issues/69)
+* upgrade charmbracelet libraries to v2 (charm.land) ([baa1779](https://github.com/d0ugal/graith/commit/baa17797bb9f8f3f03e429f0d1c90e6f156056ca))
+* wire up status bar in attach command ([31b17ee](https://github.com/d0ugal/graith/commit/31b17ee1cb3d2d939344515503b3274baaf4af67))
 
 
 ### Bug Fixes
 
-* address CI review feedback and stdlib vulnerabilities ([67951c6](https://github.com/d0ugal/graith/commit/67951c65f7454a9db74e4ef24ff8180072c5a225))
-* address PR review feedback for overlay tests ([771002e](https://github.com/d0ugal/graith/commit/771002e282061cf2cd097e267e28ccbabada178d))
-* address review feedback on dashboard PR ([e51b1bd](https://github.com/d0ugal/graith/commit/e51b1bdb91c82a435d1e1228b8a36eac42fc634a))
-* address review feedback on delete confirmation ([3cf8049](https://github.com/d0ugal/graith/commit/3cf804921e9e65bb40b70759881fb1f7b226b477))
-* align struct tags to satisfy tagalign linter ([f1295b2](https://github.com/d0ugal/graith/commit/f1295b2d2256d7860b7f13bb6fdc94cf9cdbad9a))
-* close pipe before PTY cleanup to prevent deadlock in CI ([c793cab](https://github.com/d0ugal/graith/commit/c793cab365ed7b29fa6c4c60f650aa08d81b1011))
-* improve agent activity status detection reliability ([69c0c3a](https://github.com/d0ugal/graith/commit/69c0c3a02cb3e7114596294df50309cb5df08fc0))
-* remove dead code and unify duplicates ([0980752](https://github.com/d0ugal/graith/commit/098075220447210ad14e855146cf4c895582c640)), closes [#48](https://github.com/d0ugal/graith/issues/48)
-* remove ineffectual assignment flagged by golangci-lint ([0c14cdf](https://github.com/d0ugal/graith/commit/0c14cdf113903f0d9d6f602811321af69fb07ef8))
-* resolve dupword lint warning in overlay test comment ([566da11](https://github.com/d0ugal/graith/commit/566da1145122d6cfff983b3855578ddc77075feb))
-* stabilize TestSessionEcho on macOS ([0ca23b9](https://github.com/d0ugal/graith/commit/0ca23b9a4aa50b2796a43e1c0ef88094eb5b0d85))
-* update fuzz test for Detect's new outputAge parameter ([32114f4](https://github.com/d0ugal/graith/commit/32114f4e4f5b67a03cb947696943f1c7de19d46e))
-* update github.com/charmbracelet/ultraviolet digest to 6cf7526 ([6a3516b](https://github.com/d0ugal/graith/commit/6a3516b87f2cf1c14a874498191f413a904a44d1))
-* update module github.com/charmbracelet/colorprofile to v0.4.3 ([1024ac1](https://github.com/d0ugal/graith/commit/1024ac111d935d1427ffcd24458fb26d2c8c600b))
-* update module github.com/charmbracelet/x/ansi to v0.11.7 ([83439d4](https://github.com/d0ugal/graith/commit/83439d485ee55fc0f6d0cc8bb1474b389100d4ed))
-* update module github.com/mattn/go-isatty to v0.0.22 ([9d6dbaa](https://github.com/d0ugal/graith/commit/9d6dbaa59e54e56699ab4d681d1fd8c838f1b055))
-* update module github.com/mattn/go-runewidth to v0.0.24 ([e695bc7](https://github.com/d0ugal/graith/commit/e695bc71a7c70265a5549ec2c4997ce5894a5240))
-* update module github.com/sahilm/fuzzy to v0.1.2 ([8ca7de9](https://github.com/d0ugal/graith/commit/8ca7de99ed04b6684f9ebfd7444a8b83a960dfdc))
-* update module github.com/segmentio/asm to v1.2.1 ([deec1bd](https://github.com/d0ugal/graith/commit/deec1bd156068ee03d17ac1f8630d13b66f98017))
-* update module github.com/spf13/pflag to v1.0.10 ([da5513a](https://github.com/d0ugal/graith/commit/da5513a0471d93097685d32af9387a134e31a7aa))
-* update module golang.org/x/oauth2 to v0.36.0 ([5466212](https://github.com/d0ugal/graith/commit/5466212a7cf86cafc451813bf843197c70c97b79))
-* update module golang.org/x/sys to v0.45.0 ([bb751b3](https://github.com/d0ugal/graith/commit/bb751b38c188b91a59cddeeaf58ebb2c6476a82e))
-* update module golang.org/x/text to v0.37.0 ([0ee4448](https://github.com/d0ugal/graith/commit/0ee44481e2d6871c2b43706102be2d19e8e8cc07))
-* update module golang.org/x/tools to v0.45.0 ([6d5290a](https://github.com/d0ugal/graith/commit/6d5290a7fbb3032f57940e4a070666ac5722edce))
-* update module modernc.org/libc to v1.72.5 ([005b1a7](https://github.com/d0ugal/graith/commit/005b1a7d1748e9e512f149ceeefd02c29b49f6b5))
-* update module modernc.org/libc to v1.72.5 ([44cfa05](https://github.com/d0ugal/graith/commit/44cfa052a2991d80725e3909d82e2f6bad311e74))
-* update module modernc.org/libc to v2 ([2c880d2](https://github.com/d0ugal/graith/commit/2c880d2412aa4f8ad7ccb198c5be23e8e4706c08))
-* update module modernc.org/sqlite to v1.52.0 ([d1fb952](https://github.com/d0ugal/graith/commit/d1fb9521b299d39e2cdca39c75d2021c5c0fb4e8))
-* update test to use renamed ShortDuration function ([a98e87f](https://github.com/d0ugal/graith/commit/a98e87fb7cf60159f7794010a3d1e84437addf2a))
-* use goreleaser snapshot instead of nightly (pro feature) ([b501f15](https://github.com/d0ugal/graith/commit/b501f15ca0524b0d8c79476e8b0be6247a9c0af3))
-* use internal/git package and include remote branches in --base completion ([6ee9f4e](https://github.com/d0ugal/graith/commit/6ee9f4e14fd1615aa5364a72da5ccf574a5ac0dd))
-* use protocol.Version after rebase on latest main ([0df2abd](https://github.com/d0ugal/graith/commit/0df2abda31c0737426ead26bd2b691c636c50399))
-* use release --snapshot --skip=publish to produce archives ([3cec9bf](https://github.com/d0ugal/graith/commit/3cec9bfc354f80b65a56a88ffbfa0eb49d47e237))
-* use tagged switch to satisfy staticcheck QF1003 ([89081f2](https://github.com/d0ugal/graith/commit/89081f2b9006d401f23b852b6b85495209793285))
+* address CI review feedback and stdlib vulnerabilities ([08e3f09](https://github.com/d0ugal/graith/commit/08e3f090ee46743688aa524370948cd19d0da566))
+* address PR review feedback for overlay tests ([86ae852](https://github.com/d0ugal/graith/commit/86ae85208d34a833aabb034b0758da46e4a89e8f))
+* address review feedback on dashboard PR ([2ca782a](https://github.com/d0ugal/graith/commit/2ca782a3269dd32d435e45ee462aee6996f45dce))
+* address review feedback on delete confirmation ([7f672c3](https://github.com/d0ugal/graith/commit/7f672c3cc4ec77d884c9fdb7bef1a4b08542d0ac))
+* align struct tags to satisfy tagalign linter ([7faec26](https://github.com/d0ugal/graith/commit/7faec2616bedcf567e7756ddff9d67a2f577e0ff))
+* close pipe before PTY cleanup to prevent deadlock in CI ([fa568b4](https://github.com/d0ugal/graith/commit/fa568b48dfdf05175a636b553f40189cbd256095))
+* improve agent activity status detection reliability ([096b336](https://github.com/d0ugal/graith/commit/096b336c7cd3703ef2fca1fb2640cf8080db43a7))
+* remove dead code and unify duplicates ([0ad8049](https://github.com/d0ugal/graith/commit/0ad80492936501ab8be7ecba1f83f88188cb97f4)), closes [#48](https://github.com/d0ugal/graith/issues/48)
+* remove ineffectual assignment flagged by golangci-lint ([d44c301](https://github.com/d0ugal/graith/commit/d44c301a1a28e5a0c1c7c3de2e934e21a21b0d4b))
+* resolve dupword lint warning in overlay test comment ([229e77c](https://github.com/d0ugal/graith/commit/229e77c066da0e496a968c3467384ce740675f1d))
+* stabilize TestSessionEcho on macOS ([c0592d2](https://github.com/d0ugal/graith/commit/c0592d208539ecd6dbd3f93468e98b8b68feb438))
+* update fuzz test for Detect's new outputAge parameter ([b02ed0a](https://github.com/d0ugal/graith/commit/b02ed0a89ab36c45e6789e9f5c378b9d9d9ba528))
+* update github.com/charmbracelet/ultraviolet digest to 6cf7526 ([acc4777](https://github.com/d0ugal/graith/commit/acc47778ba828b3a78e800862a311ffd68422fc5))
+* update module github.com/charmbracelet/colorprofile to v0.4.3 ([8d6674c](https://github.com/d0ugal/graith/commit/8d6674c3e49557d08c734c3908c7faae4d36da54))
+* update module github.com/charmbracelet/x/ansi to v0.11.7 ([6e3b6f2](https://github.com/d0ugal/graith/commit/6e3b6f2f31a3681742656bce69416240a784f342))
+* update module github.com/mattn/go-isatty to v0.0.22 ([af83489](https://github.com/d0ugal/graith/commit/af83489f1b9f90e05381de846392c1cbf77241ac))
+* update module github.com/mattn/go-runewidth to v0.0.24 ([e085988](https://github.com/d0ugal/graith/commit/e0859886190cac6e58f718761713224d1c159357))
+* update module github.com/sahilm/fuzzy to v0.1.2 ([c444819](https://github.com/d0ugal/graith/commit/c444819f933af077022f16169d9ec3bf0dab63a7))
+* update module github.com/segmentio/asm to v1.2.1 ([e0e6017](https://github.com/d0ugal/graith/commit/e0e60177db8180d590dc50b1618c4b2276be9410))
+* update module github.com/spf13/pflag to v1.0.10 ([b56f987](https://github.com/d0ugal/graith/commit/b56f987b78edff3ac7b881642816471e008a022f))
+* update module golang.org/x/oauth2 to v0.36.0 ([8eb1852](https://github.com/d0ugal/graith/commit/8eb1852ae718e45b9d4586ebe2f426185a8831eb))
+* update module golang.org/x/sys to v0.45.0 ([630081c](https://github.com/d0ugal/graith/commit/630081c1ed3b2fcd9796924c76f353a31ef91390))
+* update module golang.org/x/text to v0.37.0 ([037cb93](https://github.com/d0ugal/graith/commit/037cb936b658fa7f6c94108f7f9f1d28c7cb562a))
+* update module golang.org/x/tools to v0.45.0 ([74657b1](https://github.com/d0ugal/graith/commit/74657b1d57a5a9fa6616a62fb72f63864a6b497c))
+* update module modernc.org/libc to v1.72.5 ([51bafad](https://github.com/d0ugal/graith/commit/51bafada734730997ae85fb9fb08b5478d45ab22))
+* update module modernc.org/libc to v1.72.5 ([c0a70c7](https://github.com/d0ugal/graith/commit/c0a70c7533fbcf60412ce08e925fd7dd5e5897d1))
+* update module modernc.org/libc to v2 ([8352ea3](https://github.com/d0ugal/graith/commit/8352ea3fa3063dcfa7474920c054047ef3881b59))
+* update module modernc.org/sqlite to v1.52.0 ([b627d76](https://github.com/d0ugal/graith/commit/b627d7685badb588e7f282137ed92b5d363451e5))
+* update test to use renamed ShortDuration function ([031b10b](https://github.com/d0ugal/graith/commit/031b10b054b9a490d93144210807f893639ec0dd))
+* use goreleaser snapshot instead of nightly (pro feature) ([4cd18e7](https://github.com/d0ugal/graith/commit/4cd18e724df3d0d90849cf8fc5595cb6cde1e3c7))
+* use internal/git package and include remote branches in --base completion ([bbb0854](https://github.com/d0ugal/graith/commit/bbb0854326c51f713a45c047b87ec77b7377e9ca))
+* use protocol.Version after rebase on latest main ([f1b61cd](https://github.com/d0ugal/graith/commit/f1b61cd50eb3fe11044a0cb52095538242ac6840))
+* use release --snapshot --skip=publish to produce archives ([04b8c1d](https://github.com/d0ugal/graith/commit/04b8c1d342c7b3d530ddd0b00c4fabb1cc4aab47))
+* use tagged switch to satisfy staticcheck QF1003 ([2488a0d](https://github.com/d0ugal/graith/commit/2488a0d57aefd683aad3b4a4f894d94443c0f0d5))
 
 ## [0.2.1](https://github.com/d0ugal/graith/compare/v0.2.0...v0.2.1) (2026-04-18)
 
 
 ### Bug Fixes
 
-* resolve golangci-lint warnings in render and handler ([850f706](https://github.com/d0ugal/graith/commit/850f706125f53fac75786ed015ff0c31993b042b))
-* split goreleaser into separate tag-triggered workflow ([a1719aa](https://github.com/d0ugal/graith/commit/a1719aacbbcb6a25675693a4f63627df9c2afc94))
+* resolve golangci-lint warnings in render and handler ([7d72367](https://github.com/d0ugal/graith/commit/7d7236766591a00e904278f39ecda02d223a68ff))
+* split goreleaser into separate tag-triggered workflow ([3c134ce](https://github.com/d0ugal/graith/commit/3c134ce88f394baa97bd2fc697d5e02f36a0fcab))
 
 ## [0.2.0](https://github.com/d0ugal/graith/compare/v0.1.1...v0.2.0) (2026-04-15)
 
 
 ### Features
 
-* add daemon-side vt10x screen model with ANSI repaint renderer ([5b31c21](https://github.com/d0ugal/graith/commit/5b31c21711f744e4a9fb769afbff14956a25e28f))
-* add gr approvals command and highlight approval status in list ([1abe27d](https://github.com/d0ugal/graith/commit/1abe27d91dec1dea8501412e9806aa8ba9524e8d))
-* add notifications on agent status changes ([04e48d6](https://github.com/d0ugal/graith/commit/04e48d68745ec2f2355bcea0261396c5c7c1a52a))
-* add screen_snapshot protocol message for color-accurate restore ([8a1bf0f](https://github.com/d0ugal/graith/commit/8a1bf0f5dededbbdbede5fb269b4c26b7aa355f0))
-* remove alt screen from overlay to eliminate flash ([e4f67be](https://github.com/d0ugal/graith/commit/e4f67bef2e28a29c91492316ee53a190de168e89))
-* restore screen with ANSI repaint frame after overlay dismiss ([1ae353c](https://github.com/d0ugal/graith/commit/1ae353c369a8f00d65f3c36914b062436a5b75e5))
+* add daemon-side vt10x screen model with ANSI repaint renderer ([2c7c001](https://github.com/d0ugal/graith/commit/2c7c001f970694e7b7ca68069d1d179d4fda9acc))
+* add gr approvals command and highlight approval status in list ([1969b35](https://github.com/d0ugal/graith/commit/1969b357f44a61bae563db4760870c7e916d40d9))
+* add notifications on agent status changes ([aab02b3](https://github.com/d0ugal/graith/commit/aab02b376e22cb6085ea5be89346c920150ecb1d))
+* add screen_snapshot protocol message for color-accurate restore ([7325df7](https://github.com/d0ugal/graith/commit/7325df7017d211c8d64037a10668e22a5927dbaf))
+* remove alt screen from overlay to eliminate flash ([01557aa](https://github.com/d0ugal/graith/commit/01557aa19a450d7f20d1f7e219ae88a281968637))
+* restore screen with ANSI repaint frame after overlay dismiss ([34933b3](https://github.com/d0ugal/graith/commit/34933b3616bef2957452dae5bdde3f63947d953a))
 
 
 ### Bug Fixes
 
-* attach scrollback replay before registering writer ([#12](https://github.com/d0ugal/graith/issues/12)) ([8f83170](https://github.com/d0ugal/graith/commit/8f83170c13f34b18f9dd57a532a49a7071b33041))
-* close existing connections on shutdown ([#53](https://github.com/d0ugal/graith/issues/53)) ([13530aa](https://github.com/d0ugal/graith/commit/13530aaa2b4cfed180db17d3a43864259b476291))
-* goroutine leak in msg_sub follow path ([#13](https://github.com/d0ugal/graith/issues/13)) ([2b2e776](https://github.com/d0ugal/graith/commit/2b2e776305111e2427ea358629528daf1c02e662))
-* guard type assertion in RunOverlay against unexpected exit ([#15](https://github.com/d0ugal/graith/issues/15)) ([ef8f06d](https://github.com/d0ugal/graith/commit/ef8f06dcbc5efbae5498b9f8e96e7872a438af8c))
-* prevent panic on empty keybinding string ([#16](https://github.com/d0ugal/graith/issues/16)) ([de88a9f](https://github.com/d0ugal/graith/commit/de88a9f06f54b28fdc06aea9981c92029166d2eb))
-* release lock before blocking waits in StopAll and Delete ([#52](https://github.com/d0ugal/graith/issues/52)) ([3b47e2e](https://github.com/d0ugal/graith/commit/3b47e2ec450cc447706aa8708600211455c93ac2))
-* session Close races with readLoop on scrollback ([#14](https://github.com/d0ugal/graith/issues/14)) ([d205fbf](https://github.com/d0ugal/graith/commit/d205fbfcb2324f7907292ec343efbd2ab2397588))
-* surface config parse errors instead of silent fallback ([#17](https://github.com/d0ugal/graith/issues/17)) ([cc58969](https://github.com/d0ugal/graith/commit/cc58969b81c71004132c6b093aad9871e46d1292))
+* attach scrollback replay before registering writer ([#12](https://github.com/d0ugal/graith/issues/12)) ([41f5304](https://github.com/d0ugal/graith/commit/41f53041659dfcd8e94dced18c96ffb378574bab))
+* close existing connections on shutdown ([#53](https://github.com/d0ugal/graith/issues/53)) ([815e200](https://github.com/d0ugal/graith/commit/815e2005dbd2a70a6beaa18c66c17e75b77c4aa5))
+* goroutine leak in msg_sub follow path ([#13](https://github.com/d0ugal/graith/issues/13)) ([20a0780](https://github.com/d0ugal/graith/commit/20a0780e4743ef57737586de0e0ecc63712ac215))
+* guard type assertion in RunOverlay against unexpected exit ([#15](https://github.com/d0ugal/graith/issues/15)) ([fa0f173](https://github.com/d0ugal/graith/commit/fa0f17393dbbede626cbc382fa6ba2cf3b809c41))
+* prevent panic on empty keybinding string ([#16](https://github.com/d0ugal/graith/issues/16)) ([fc94d04](https://github.com/d0ugal/graith/commit/fc94d04fec37e033a9f8cb3482bf6df8e32aa354))
+* release lock before blocking waits in StopAll and Delete ([#52](https://github.com/d0ugal/graith/issues/52)) ([9144c12](https://github.com/d0ugal/graith/commit/9144c125d8b3e7275d6fdd4a0ae86de3add9a87e))
+* session Close races with readLoop on scrollback ([#14](https://github.com/d0ugal/graith/issues/14)) ([73c78ab](https://github.com/d0ugal/graith/commit/73c78abafacb29e384f64b4905c43253ba4815fa))
+* surface config parse errors instead of silent fallback ([#17](https://github.com/d0ugal/graith/issues/17)) ([d7f6f85](https://github.com/d0ugal/graith/commit/d7f6f8539ae18ae71878dabab11aac3935a4914a))
 
 ## [0.1.1](https://github.com/d0ugal/graith/compare/v0.1.0...v0.1.1) (2026-04-15)
 
 
 ### Bug Fixes
 
-* fetch tags after release-please before goreleaser ([b3406e4](https://github.com/d0ugal/graith/commit/b3406e4bbd3f65a5fdfc3cb9d57324c0fb1721ed))
+* fetch tags after release-please before goreleaser ([ab2817e](https://github.com/d0ugal/graith/commit/ab2817eb90fc033143b07de1dd3deda90989ec21))
 
 ## [0.1.0](https://github.com/d0ugal/graith/compare/v0.0.1...v0.1.0) (2026-04-15)
 
 
 ### Features
 
-* add ctrl+b n/p shortcuts to cycle through sessions ([#1](https://github.com/d0ugal/graith/issues/1)) ([5d22c9b](https://github.com/d0ugal/graith/commit/5d22c9bc0fc20aa9dec96a7d2c541f0056669ba5))
-* add gr type command for PTY input injection ([#5](https://github.com/d0ugal/graith/issues/5)) ([eb4d096](https://github.com/d0ugal/graith/commit/eb4d0969180ac0fc05d5793c7ddc2803854acc14))
-* add scrollback preview background to session overlay ([#4](https://github.com/d0ugal/graith/issues/4)) ([9cd1afd](https://github.com/d0ugal/graith/commit/9cd1afd291d82caa8687d30282bf0f86fb406b17))
-* auto-stop idle sessions after configurable timeout ([#3](https://github.com/d0ugal/graith/issues/3)) ([c489fb7](https://github.com/d0ugal/graith/commit/c489fb7ac77f8e1c43a5d06a4fade422c84b6c64))
+* add ctrl+b n/p shortcuts to cycle through sessions ([#1](https://github.com/d0ugal/graith/issues/1)) ([ed6e48d](https://github.com/d0ugal/graith/commit/ed6e48db9b0ea8718a954f0bdd164e73cd57f18c))
+* add gr type command for PTY input injection ([#5](https://github.com/d0ugal/graith/issues/5)) ([0284b40](https://github.com/d0ugal/graith/commit/0284b40a7e066f17e7570b55395745f58b19149a))
+* add scrollback preview background to session overlay ([#4](https://github.com/d0ugal/graith/issues/4)) ([f100972](https://github.com/d0ugal/graith/commit/f10097231dab609186bcecce6a4614bb5dc5dd59))
+* auto-stop idle sessions after configurable timeout ([#3](https://github.com/d0ugal/graith/issues/3)) ([227e389](https://github.com/d0ugal/graith/commit/227e3890dea5c1f35a0d9933a066cbe71066f9ae))
 
 
 ### Bug Fixes
 
-* align overlay columns with fixed-width padding ([8c6e435](https://github.com/d0ugal/graith/commit/8c6e4355d87e929d0239187be224461e8ac2b8b1))
-* drain PTY output before signalling session done ([63179a1](https://github.com/d0ugal/graith/commit/63179a15df2820060129887db190df0bfa775712))
-* dynamic overlay panel size and improved ANSI stripping ([a1846ad](https://github.com/d0ugal/graith/commit/a1846ad50b54a692d4307ce034b5e9897445422f))
-* preview not loading on overlay open ([4cd982d](https://github.com/d0ugal/graith/commit/4cd982d7e21bfc47cd72511758c8e4bd803b83d6))
-* resize PTY to attaching client's terminal on attach ([829fe72](https://github.com/d0ugal/graith/commit/829fe7248751a5adeeea1819e8282e5a7cbe809c))
-* show n/p shortcuts in overlay help bar ([5e95f63](https://github.com/d0ugal/graith/commit/5e95f6366a1c459fd0daeb717dbe6fcaaec98426))
-* sort sessions within overlay groups alphabetically ([a794780](https://github.com/d0ugal/graith/commit/a794780957578f71ab4c73c2069b47d0bc64b8ac))
-* update type.go imports to d0ugal module path ([45187bc](https://github.com/d0ugal/graith/commit/45187bc975cf3ef1e4a1cdd7bad838dcb652b0fd))
-* use ansi-aware truncation for overlay columns and preview ([2d0fea7](https://github.com/d0ugal/graith/commit/2d0fea7dbf39149ec9989f71c0167a18e2897519))
-* use RELEASE_TOKEN for release-please to trigger CI on PRs ([7ecdf32](https://github.com/d0ugal/graith/commit/7ecdf32f2146456b5c1c77fc8ae4b6503a39f19f))
-* use VT emulator for scrollback preview rendering ([cb463bd](https://github.com/d0ugal/graith/commit/cb463bdb4556d269dd3f456436936bb2d868e237))
+* align overlay columns with fixed-width padding ([edc6a44](https://github.com/d0ugal/graith/commit/edc6a4473c1976d6c4a4750b1459760795362008))
+* drain PTY output before signalling session done ([95bc31f](https://github.com/d0ugal/graith/commit/95bc31f32f1b3069f8f6e9a370512815325fd067))
+* dynamic overlay panel size and improved ANSI stripping ([6902c95](https://github.com/d0ugal/graith/commit/6902c95f6b6ac62c3b1a3a3e2433f41f231ddd1a))
+* preview not loading on overlay open ([4acdd11](https://github.com/d0ugal/graith/commit/4acdd11e29d4d53a61cd22777fdf020daf2470fb))
+* resize PTY to attaching client's terminal on attach ([26895ce](https://github.com/d0ugal/graith/commit/26895ce404d565cab62e0fc96be0c6f9d2fec0d3))
+* show n/p shortcuts in overlay help bar ([6b47a43](https://github.com/d0ugal/graith/commit/6b47a436a937f1a9bd759382de0af69ffd581708))
+* sort sessions within overlay groups alphabetically ([fe69957](https://github.com/d0ugal/graith/commit/fe6995759128bbf1118780362c9c46de4285e7f0))
+* update type.go imports to d0ugal module path ([a66afc3](https://github.com/d0ugal/graith/commit/a66afc3b7cedbc96c7994009c8e45eb8e2253184))
+* use ansi-aware truncation for overlay columns and preview ([d17dba1](https://github.com/d0ugal/graith/commit/d17dba1212c5d6040c1062bf8e6e1ba9d2b16ace))
+* use RELEASE_TOKEN for release-please to trigger CI on PRs ([011fc0a](https://github.com/d0ugal/graith/commit/011fc0a0daf13291a0c71298f41293e6910184ac))
+* use VT emulator for scrollback preview rendering ([083803d](https://github.com/d0ugal/graith/commit/083803df014c54bd36bc19d15c68d5e9e14a1482))
