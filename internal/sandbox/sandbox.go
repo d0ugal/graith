@@ -29,8 +29,17 @@ type WrapOpts struct {
 	WorktreeDir string
 	ReadDirs    []string
 	WriteDirs   []string
-	Features    []string
-	EnvKeys     []string
+	// ReadFiles / WriteFiles grant single files rather than whole directories,
+	// for paths that can't be a directory grant without over-sharing (notably
+	// single files directly in $HOME, e.g. an agent's ~/.claude.json). Paths are
+	// already ~/glob-expanded and absolute. ReadFiles is read-only (nono
+	// filesystem.read_file); WriteFiles is read+write (nono filesystem.allow_file,
+	// like WriteDirs → allow, not the write-only filesystem.write). The safehouse
+	// backend folds them into its read-only / read-write dir lists.
+	ReadFiles  []string
+	WriteFiles []string
+	Features   []string
+	EnvKeys    []string
 
 	// SignalMode maps to nono's security.signal_mode ("isolated",
 	// "allow_same_sandbox", "allow_all"). Empty inherits nono's default. The

@@ -889,3 +889,97 @@ func TestNetworkPolicyIsSet(t *testing.T) {
 		}
 	}
 }
+
+// TestBuildNonoProfileFileGrants: read_files map to filesystem.read_file and
+// write_files map to filesystem.allow_file (read+write single file), so a login
+// file like ~/.claude.json can be granted without exposing all of $HOME.
+func TestBuildNonoProfileFileGrants(t *testing.T) {
+	opts := WrapOpts{
+		Backend:     BackendNono,
+		WorktreeDir: "/hame/user/bothy",
+		ReadFiles:   []string{"/hame/user/.gitconfig"},
+		WriteFiles:  []string{"/hame/user/.claude.json", "/hame/user/.claude.json.lock"},
+	}
+
+	p, warnings := buildNonoProfile("graith-bothy", opts, "")
+	if len(warnings) != 0 {
+		t.Errorf("unexpected warnings: %v", warnings)
+	}
+
+	if !slices.Contains(p.Filesystem.ReadFile, "/hame/user/.gitconfig") {
+		t.Errorf("read_files should map to filesystem.read_file: %v", p.Filesystem.ReadFile)
+	}
+
+	for _, want := range []string{"/hame/user/.claude.json", "/hame/user/.claude.json.lock"} {
+		if !slices.Contains(p.Filesystem.AllowFile, want) {
+			t.Errorf("write_files should map to filesystem.allow_file (read+write); missing %q in %v", want, p.Filesystem.AllowFile)
+		}
+	}
+
+	// write_files must never become nono's write-only write_file.
+	if len(p.Filesystem.Write) != 0 {
+		t.Errorf("filesystem.write must stay empty; got %v", p.Filesystem.Write)
+	}
+}
+
+// TestBuildNonoProfileReadFileUnderTmpIsReDenied: like read_dirs, a read-only
+// file under /tmp is silently writable via nono's system_write_linux group, so
+// it must be re-denied to keep the read-only guarantee.
+func TestBuildNonoProfileReadFileUnderTmpIsReDenied(t *testing.T) {
+	opts := WrapOpts{
+		Backend:     BackendNono,
+		WorktreeDir: "/hame/user/bothy",
+		ReadFiles:   []string{"/tmp/dreich.conf", "/hame/user/.gitconfig"},
+	}
+
+	p, warnings := buildNonoProfile("graith-bothy", opts, "")
+
+	if !slices.Contains(p.Filesystem.Deny, "/tmp/dreich.conf") {
+		t.Errorf("read-only file under /tmp should be re-denied: deny=%v", p.Filesystem.Deny)
+	}
+
+	if slices.Contains(p.Filesystem.Deny, "/hame/user/.gitconfig") {
+		t.Errorf("non-/tmp read file should not be denied: %v", p.Filesystem.Deny)
+	}
+
+	if len(warnings) == 0 {
+		t.Error("expected a warning about the /tmp read-only file leak")
+	}
+}
+
+// TestWrapWithFileGrants: the safehouse backend folds read_files/write_files
+// into its read-only / read-write path lists (Seatbelt path rules cover files).
+func TestWrapWithFileGrants(t *testing.T) {
+	opts := WrapOpts{
+		Backend:     BackendSafehouse,
+		WorktreeDir: "/tmp/bothy",
+		ReadDirs:    []string{"/hame/user/glen"},
+		ReadFiles:   []string{"/hame/user/.gitconfig"},
+		WriteDirs:   []string{"/tmp/croft"},
+		WriteFiles:  []string{"/hame/user/.claude.json"},
+		EnvKeys:     []string{"TERM"},
+	}
+
+	_, args, err := Wrap("claude", nil, opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	valueAfter := func(flag string) string {
+		for i, a := range args {
+			if a == flag && i+1 < len(args) {
+				return args[i+1]
+			}
+		}
+
+		return ""
+	}
+
+	if ro := valueAfter("--add-dirs-ro"); !strings.Contains(ro, "/hame/user/.gitconfig") || !strings.Contains(ro, "/hame/user/glen") {
+		t.Errorf("--add-dirs-ro = %q, want it to include both the read dir and read file", ro)
+	}
+
+	if rw := valueAfter("--add-dirs"); !strings.Contains(rw, "/hame/user/.claude.json") || !strings.Contains(rw, "/tmp/croft") {
+		t.Errorf("--add-dirs = %q, want it to include both the write dir and write file", rw)
+	}
+}
