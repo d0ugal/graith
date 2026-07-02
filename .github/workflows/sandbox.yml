@@ -131,23 +131,29 @@ jobs:
           echo "readonly-secret"  > "$scratch/READONLY/secret-readonly.txt"
           echo "noaccess-secret"  > "$scratch/NOACCESS/secret-noaccess.txt"
 
-          # Hand-authored nono profile: allow read-only access to READONLY and
-          # read-write to WRITABLE. NOACCESS is deliberately absent, so it must
-          # be denied. "extends: default" pulls in nono's audited deny groups.
+          # Hand-authored nono profile in nono v0.66.0's schema (mirrors the
+          # profile graith's Phase 1 nono backend generates):
+          #   filesystem.allow -> read+write recursive (WRITABLE goes here)
+          #   filesystem.read  -> read-only recursive   (READONLY goes here)
+          # NOACCESS is deliberately in neither list, so it must be denied.
+          # "extends: default" pulls in nono's audited deny groups.
           profile="$scratch/profile.json"
           cat > "$profile" <<EOF
           {
             "extends": "default",
+            "meta": { "name": "graith-ci-smoke" },
+            "workdir": { "access": "readwrite" },
             "filesystem": {
-              "read": ["$scratch/READONLY"],
-              "read_write": ["$scratch/WRITABLE"]
+              "allow": ["$scratch/WRITABLE"],
+              "read": ["$scratch/READONLY"]
             }
           }
           EOF
           echo "profile:"; cat "$profile"; echo
 
-          # Helper: run a command under nono and report DENIED vs ALLOWED based
-          # on the real exit status, not just "did it print something".
+          # Helper: run a command under nono, capturing nono's own stderr so a
+          # denial (or a profile-parse failure) is diagnosable in the log rather
+          # than swallowed. Reports DENIED vs ALLOWED on the real exit status.
           run_sandboxed() {
             nono run --profile "$profile" -- "$@"
           }
@@ -159,24 +165,27 @@ jobs:
           echo "=== enforcement assertions ==="
 
           # 1. Read the no-access secret -> EXPECT DENIED.
-          if run_sandboxed cat "$scratch/NOACCESS/secret-noaccess.txt" >/dev/null 2>&1; then
+          if out="$(run_sandboxed cat "$scratch/NOACCESS/secret-noaccess.txt" 2>&1)"; then
             note "FAIL" "ALLOWED" "read NOACCESS secret (expected DENIED)"; fail=$((fail+1))
           else
             note "ok" "DENIED" "read NOACCESS secret"; pass=$((pass+1))
           fi
+          [ -n "${out:-}" ] && echo "    nono: $out"
 
           # 2. Read the read-only secret -> EXPECT ALLOWED.
-          if run_sandboxed cat "$scratch/READONLY/secret-readonly.txt" >/dev/null 2>&1; then
+          if out="$(run_sandboxed cat "$scratch/READONLY/secret-readonly.txt" 2>&1)"; then
             note "ok" "ALLOWED" "read READONLY secret"; pass=$((pass+1))
           else
             note "FAIL" "DENIED" "read READONLY secret (expected ALLOWED)"; fail=$((fail+1))
+            echo "    nono: $out"
           fi
 
           # 3. Write into the writable dir -> EXPECT ALLOWED.
-          if run_sandboxed sh -c "echo out > '$scratch/WRITABLE/out.txt'" >/dev/null 2>&1; then
+          if out="$(run_sandboxed sh -c "echo out > '$scratch/WRITABLE/out.txt'" 2>&1)"; then
             note "ok" "ALLOWED" "write WRITABLE/out.txt"; pass=$((pass+1))
           else
             note "FAIL" "DENIED" "write WRITABLE/out.txt (expected ALLOWED)"; fail=$((fail+1))
+            echo "    nono: $out"
           fi
 
           echo
