@@ -363,8 +363,10 @@ allowed_repo_paths = ["~/Code"]         # restrict which repos the daemon will c
 enabled  = true
 backend  = "nono"                       # REQUIRED: "safehouse" (macOS) or "nono" (Linux/macOS)
 features = ["ssh"]                      # feature gates (see caveats below)
-read_dirs  = ["~/Code"]                 # additional read-only paths
-write_dirs = []                         # additional read-write paths
+read_dirs  = ["~/Code"]                 # additional read-only paths (directories)
+write_dirs = []                         # additional read-write paths (directories)
+read_files  = []                        # additional read-only single files
+write_files = []                        # additional read-write single files
 
 [agents.claude]
 command     = "claude"
@@ -376,9 +378,18 @@ resume_args = ["--dangerously-skip-permissions", "--resume", "{agent_session_id}
 
 When `sandbox.enabled = true`, the daemon resolves the merged policy, expands `~`/globs, and wraps the agent with the selected backend.
 
-**safehouse** runs `safehouse wrap` (macOS `sandbox-exec`): denies file access by default, allows the worktree + `read_dirs`/`write_dirs`, strips the environment to an allowlist, and gates `features`.
+**safehouse** runs `safehouse wrap` (macOS `sandbox-exec`): denies file access by default, allows the worktree + `read_dirs`/`write_dirs` (and `read_files`/`write_files`, folded into the same path lists), strips the environment to an allowlist, and gates `features`.
 
-**nono** generates a per-session JSON profile and runs `nono run --profile <file> -- <agent>`. The profile `extends: "default"` (inheriting nono's audited credential/shell-history deny groups), maps the worktree and `write_dirs` to `filesystem.allow` (read+write — never nono's write-only `filesystem.write`), `read_dirs` to read-only, grants read on the agent binary's directory (nono does not auto-grant it), and maps the **environment to an allowlist** (`environment.allow_vars`, including `PATH`/`HOME`/`GRAITH_*`) so host secrets aren't leaked — nono otherwise inherits all env. Read-only paths that fall under nono's default-writable `/tmp`/`$TMPDIR` are re-denied so the read-only guarantee holds.
+**nono** generates a per-session JSON profile and runs `nono run --profile <file> -- <agent>`. The profile `extends: "default"` (inheriting nono's audited credential/shell-history deny groups), maps the worktree and `write_dirs` to `filesystem.allow` (read+write — never nono's write-only `filesystem.write`), `read_dirs` to read-only, and the single-file grants `read_files`/`write_files` to `filesystem.read_file` / `filesystem.allow_file`. It grants read on the agent binary's directory (nono does not auto-grant it), and maps the **environment to an allowlist** (`environment.allow_vars`, including `PATH`/`HOME`/`GRAITH_*`) so host secrets aren't leaked — nono otherwise inherits all env. Read-only paths that fall under nono's default-writable `/tmp`/`$TMPDIR` are re-denied so the read-only guarantee holds.
+
+**File grants (`read_files`/`write_files`)** exist for paths that can't be a directory grant without over-sharing — most importantly single files that live directly in `$HOME`. For example, Claude Code stores its login in `~/.claude.json`; granting `~` would expose every dotfile secret, so grant just the file (read+write, since the agent rewrites it to refresh tokens):
+
+```toml
+[agents.claude.sandbox]
+write_files = ["~/.claude.json", "~/.claude.json.lock", "~/.claude.lock"]
+```
+
+An explicit file grant also punches through the inherited `deny_credentials` group, which is what a login/token file needs.
 
 The sandbox **fails closed**: if enabled but the backend can't enforce (no backend chosen, binary missing, nono below the minimum version, or a Linux kernel too old for Landlock), session creation is refused. A Linux kernel with Landlock filesystem support but no network-filtering ABI runs in a *degraded* mode (filesystem confinement still holds, but see network below). `gr doctor` reports all of this.
 
@@ -471,8 +482,10 @@ enabled    = false                      # wrap agents in an OS sandbox
 # backend  = "nono"                     # REQUIRED when enabled: "safehouse" (macOS) | "nono" (Linux/macOS)
 # command  = "nono"                     # path to the backend binary (default: the backend name)
 # features = ["ssh", "process-control"] # feature gates (mapping differs per backend; see the Sandbox section)
-# read_dirs  = []                       # additional read-only paths for sandboxed agents
-# write_dirs = []                       # additional read-write paths for sandboxed agents
+# read_dirs  = []                       # additional read-only paths (directories)
+# write_dirs = []                       # additional read-write paths (directories)
+# read_files  = []                      # additional read-only single files
+# write_files = []                      # additional read-write single files (e.g. ~/.claude.json)
 # signal_mode = "isolated"              # nono only: "isolated" | "allow_same_sandbox" | "allow_all"
 
 # [sandbox.network]                     # nono only; needs Landlock ABI v4 (kernel 6.7+)
@@ -524,6 +537,7 @@ fork_args   = ["--resume", "{fork_source_agent_session_id}", "--fork-session", "
 # [agents.claude.sandbox]              # per-agent sandbox overrides (merged with global)
 # features  = ["clipboard"]
 # write_dirs = ["~/.claude"]
+# write_files = ["~/.claude.json", "~/.claude.json.lock", "~/.claude.lock"]  # login file (needs read+write)
 
 [agents.codex]
 command     = "codex"
