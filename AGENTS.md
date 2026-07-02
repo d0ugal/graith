@@ -108,10 +108,13 @@ no CLI flags — so agents can't escape by spawning unsandboxed children
 config (global + per-agent), expands `~`/globs to absolute paths, and either
 builds a `safehouse wrap` command or generates a per-session nono JSON profile
 (`nono run --profile`). The nono profile maps write_dirs + worktree to
-`filesystem.allow` (read+write, not the write-only `filesystem.write`), the env
-allowlist to `environment.allow_vars` (incl. PATH/HOME/GRAITH_*), grants read on
-the agent binary dir, and re-denies read-only paths under `/tmp`/`$TMPDIR`
-(writable by default under nono). An optional `[sandbox.network]` block
+`filesystem.allow` (read+write, not the write-only `filesystem.write`), read_dirs
+to `filesystem.read`, and the file-level grants read_files/write_files to
+`filesystem.read_file` / `filesystem.allow_file` (for single files that can't be
+a directory grant without over-sharing, e.g. an agent's `~/.claude.json` login
+file), the env allowlist to `environment.allow_vars` (incl. PATH/HOME/GRAITH_*),
+grants read on the agent binary dir, and re-denies read-only paths under
+`/tmp`/`$TMPDIR` (writable by default under nono). An optional `[sandbox.network]` block
 (`block` / `allow_domains`) maps to the profile's `network.block` /
 `network.allow_domain`, and `[sandbox] signal_mode` maps to
 `security.signal_mode`. `process-control` gates under safehouse but is a no-op

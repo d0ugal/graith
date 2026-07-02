@@ -84,8 +84,9 @@ agent command with the selected backend before spawning it under the PTY.
 
 **safehouse** runs `safehouse wrap ... -- <agent>` (macOS `sandbox-exec`):
 denies file access by default, allows the worktree (read-write) plus
-`read_dirs`/`write_dirs`, strips the environment to an allowlist, and gates
-`features`.
+`read_dirs`/`write_dirs` (and the single-file grants `read_files`/`write_files`,
+folded into the same read-only / read-write path lists), strips the environment
+to an allowlist, and gates `features`.
 
 **nono** generates a per-session JSON profile and runs
 `nono run --profile <file> -- <agent>`. The profile:
@@ -98,6 +99,13 @@ denies file access by default, allows the worktree (read-write) plus
   use nono's `filesystem.write`, which is *write-only* (no read-back or delete)
   and would break agents that read files they just wrote.
 - `read_dirs` → `filesystem.read` (read-only)
+- `write_files` → `filesystem.allow_file` (read+write, single file) and
+  `read_files` → `filesystem.read_file` (read-only, single file). These grant
+  individual files for paths that can't be a directory grant without
+  over-sharing — most importantly single files directly in `$HOME` such as an
+  agent's `~/.claude.json` login file. An explicit file grant also punches
+  through the inherited `deny_credentials` group, which is exactly what a
+  login/token file needs. See [File grants](#file-grants) below.
 - the env allowlist → `environment.allow_vars`, including `PATH`, `HOME`, and
   graith's injected `GRAITH_*` vars plus your configured keys. This block is
   **always emitted** for the nono backend, even when the allowlist is empty:
@@ -120,11 +128,40 @@ nono's built-in `system_write_linux` group makes `/tmp`, `$TMPDIR`,
 `/dev/null`, and `/proc/self/fd` writable by default. That means a `read_dirs`
 entry located under `/tmp` or `$TMPDIR` would be **silently writable**,
 breaking the read-only guarantee. graith detects read-only paths under those
-prefixes and adds an explicit `filesystem.deny` for them (and warns), so a
-read-only grant stays read-only. Paths that are meant to be writable (the
-worktree, `write_dirs`) are exempt. graith's own data dir defaults to
-`~/.local/share/graith` (not `/tmp`), so this only bites custom configs that
-point policy paths at `/tmp`.
+prefixes (both `read_dirs` and `read_files`) and adds an explicit
+`filesystem.deny` for them (and warns), so a read-only grant stays read-only.
+Paths that are meant to be writable (the worktree, `write_dirs`) are exempt.
+graith's own data dir defaults to `~/.local/share/graith` (not `/tmp`), so this
+only bites custom configs that point policy paths at `/tmp`.
+
+### File grants
+
+`read_dirs`/`write_dirs` grant whole directories (recursive). `read_files` and
+`write_files` grant **individual files**. Use them for paths that can't be a
+directory grant without over-sharing — most importantly single files that live
+directly in `$HOME`, where granting the parent would expose every dotfile
+secret.
+
+The motivating case is agent login state. Claude Code stores its OAuth login in
+`~/.claude.json` (plus `~/.claude.json.lock` / `~/.claude.lock`). Granting `~`
+would expose `.ssh`, `.aws`, `.env` files, etc.; granting just the files keeps
+the blast radius to the login file. Because the agent rewrites that file to
+refresh tokens, it needs **read+write** (`write_files`), not read-only:
+
+```toml
+[agents.claude.sandbox]
+write_files = ["~/.claude.json", "~/.claude.json.lock", "~/.claude.lock"]
+```
+
+Without this, a sandboxed Claude agent starts **logged out** — `~/.claude`
+(the directory) is granted, but the login lives in the sibling file
+`~/.claude.json`, and nono's inherited `deny_credentials` group blocks it. An
+explicit `write_files` grant both allows the file and overrides that deny.
+
+`read_files` is the read-only equivalent (nono `filesystem.read_file`), for
+single files an agent only needs to read (e.g. a shared `~/.gitconfig`). As with
+`write_dirs`, `write_files` maps to nono's read+write `filesystem.allow_file`,
+never its write-only `filesystem.write_file`.
 
 ## Config-only enforcement
 
@@ -157,7 +194,7 @@ graith never silently runs unsandboxed. The rules:
   and the Landlock enforcement state on Linux (`FullyEnforced` /
   `PartiallyEnforced` → degraded / `NotEnforced` → fail).
 - A **fail** if the sandbox is enabled with no backend selected.
-- Existence of every configured `read_dirs`/`write_dirs` path.
+- Existence of every configured `read_dirs`/`write_dirs`/`read_files`/`write_files` path.
 
 ## Debugging denials with `gr sandbox why`
 
@@ -203,8 +240,10 @@ enabled     = false           # wrap all agents in the sandbox
 backend     = "nono"          # REQUIRED when enabled: "safehouse" | "nono"
 command     = "nono"          # path/name of the backend binary (default: backend name)
 features    = ["ssh"]         # feature gates (see caveats below)
-read_dirs   = ["~/Code"]      # additional read-only paths
-write_dirs  = []              # additional read-write paths
+read_dirs   = ["~/Code"]      # additional read-only paths (directories)
+write_dirs  = []              # additional read-write paths (directories)
+read_files  = []              # additional read-only single files
+write_files = []              # additional read-write single files
 signal_mode = "isolated"      # nono only: "isolated" | "allow_same_sandbox" | "allow_all"
 
 [sandbox.network]             # nono only; needs Landlock ABI v4 (kernel 6.7+)
@@ -221,6 +260,7 @@ backend    = "nono"           # override the backend for this agent
 features   = ["ssh"]          # merged with global features
 read_dirs  = ["~/.claude"]    # merged with global read_dirs
 write_dirs = ["~/.claude"]    # merged with global write_dirs
+write_files = ["~/.claude.json", "~/.claude.json.lock", "~/.claude.lock"]  # login file (read+write)
 
 [agents.codex.sandbox]
 disabled = true               # force-disable for this agent
@@ -228,7 +268,7 @@ disabled = true               # force-disable for this agent
 
 ### Merge behavior
 
-- `features`, `read_dirs`, and `write_dirs` are merged (global + agent, deduplicated)
+- `features`, `read_dirs`, `write_dirs`, `read_files`, and `write_files` are merged (global + agent, deduplicated)
 - `backend`, `command`, and `signal_mode` are overridable per-agent (agent takes precedence)
 - `network` is overridable per-agent — an agent's `[agents.*.sandbox.network]` replaces the global policy wholesale (not merged element-wise)
 - `disabled = true` on an agent overrides `enabled = true` on the global config
@@ -296,14 +336,18 @@ args        = ["--dangerously-skip-permissions", "--session-id", "{agent_session
 resume_args = ["--dangerously-skip-permissions", "--resume", "{agent_session_id}"]
 
 [agents.claude.sandbox]
-read_dirs  = ["~/.claude"]
-write_dirs = ["~/.claude"]
+read_dirs   = ["~/.claude"]
+write_dirs  = ["~/.claude"]
+write_files = ["~/.claude.json", "~/.claude.json.lock", "~/.claude.lock"]
 ```
 
 The agent runs with `--dangerously-skip-permissions` (no interactive approval
 prompts), but the kernel sandbox restricts it to the worktree, `~/Code`
 (read-only), and `~/.claude` (read-write), and denies credentials/shell history
-via nono's default deny groups.
+via nono's default deny groups. The `write_files` grant is what keeps Claude
+**logged in**: its OAuth login lives in `~/.claude.json` (a file next to the
+`~/.claude` directory), which the `deny_credentials` group would otherwise
+block — see [File grants](#file-grants).
 
 ## Per-MCP-server sandbox
 

@@ -202,10 +202,11 @@ enabled    = true        # enable sandbox for this agent (merged with global)
 disabled   = false       # force-disable even if global sandbox is enabled
 read_dirs  = ["~/.claude"]
 write_dirs = ["~/.claude"]
+write_files = ["~/.claude.json", "~/.claude.json.lock", "~/.claude.lock"]  # login file (read+write)
 features   = ["clipboard"]
 ```
 
-Features and directories are merged with the global sandbox config. Setting `disabled = true` overrides `enabled = true` on the global config.
+Features, directories, and files (`read_files`/`write_files`, for single files that can't be a directory grant without over-sharing — e.g. Claude's `~/.claude.json` login file) are merged with the global sandbox config. Setting `disabled = true` overrides `enabled = true` on the global config. See the [Sandbox](/docs/sandbox/#file-grants) page for file grants.
 
 ### Per-agent MCP overrides
 
