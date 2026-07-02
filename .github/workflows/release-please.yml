@@ -18,7 +18,13 @@ jobs:
           token: ${{ secrets.RELEASE_TOKEN }}
       - uses: googleapis/release-please-action@v5
         with:
-          release-type: go
-          path: .
+          # Manifest mode: read release-please-config.json + the manifest so
+          # settings like `bump-minor-pre-major` actually apply. Passing
+          # `release-type`/`path` inputs instead puts the action in
+          # input-driven mode, where the config file is IGNORED and a pre-1.0
+          # breaking change graduates straight to 1.0.0. release-type is set
+          # per-package inside the config file.
+          config-file: .release-please-config.json
+          manifest-file: .release-please-manifest.json
           token: ${{ secrets.RELEASE_TOKEN }}
           target-branch: main
