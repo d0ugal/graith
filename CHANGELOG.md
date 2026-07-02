@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.64.1](https://github.com/d0ugal/graith/compare/v0.64.0...v0.64.1) (2026-07-02)
+
+
+### Features
+
+* **sandbox:** add read_files/write_files single-file grants ([4750010](https://github.com/d0ugal/graith/commit/475001056300002bcd1f837ffec1c6909e9df9d7))
+
+
+### Documentation
+
+* **sandbox:** document read_files/write_files file grants ([c25d6d0](https://github.com/d0ugal/graith/commit/c25d6d06904fb7f3c241a5135adc277d1fe23826))
+
+
+### Dependencies
+
+* **deps:** update trufflesecurity/trufflehog action to v3.95.8 ([bab0db3](https://github.com/d0ugal/graith/commit/bab0db365c26c5eedda27b2c197d7c66aca3f7b1))
+
 ## [0.64.0](https://github.com/d0ugal/graith/compare/v0.63.0...v0.64.0) (2026-07-02)
 
 
