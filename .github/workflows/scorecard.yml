@@ -1,0 +1,52 @@
+name: Scorecard
+
+# OpenSSF Scorecard — continuous scoring of the repo's supply-chain posture
+# (action pinning, token permissions, branch protection, dangerous workflows,
+# etc.). This is the ongoing north-star scorecard for the hardening in #697.
+# Results are uploaded to code scanning and drive the Scorecard badge.
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '19 7 * * 2'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  analysis:
+    name: Scorecard analysis
+    runs-on: ubuntu-latest
+    permissions:
+      # Upload the results to code scanning.
+      security-events: write
+      # Needed to publish results and get a badge (OIDC).
+      id-token: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Run analysis
+        uses: ossf/scorecard-action@4eaacf0543bb3f2c246792bd56e8cdeffafb205a # v2.4.3
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          publish_results: true
+
+      # Upload the results as an artifact for debugging / offline inspection.
+      - name: Upload artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: SARIF file
+          path: results.sarif
+          retention-days: 5
+
+      # Upload to code scanning so findings surface in the Security tab.
+      - name: Upload to code scanning
+        uses: github/codeql-action/upload-sarif@54f647b7e1bb85c95cddabcd46b0c578ec92bc1a # v4.36.3
+        with:
+          sarif_file: results.sarif
