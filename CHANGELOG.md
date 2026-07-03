@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.64.3](https://github.com/d0ugal/graith/compare/v0.64.2...v0.64.3) (2026-07-03)
+
+
+### Bug Fixes
+
+* **daemon:** allow deleting a disabled system session ([4c1c32e](https://github.com/d0ugal/graith/commit/4c1c32e81777b48b3b0f0da09875d1b4955ec3d3))
+
 ## [0.64.2](https://github.com/d0ugal/graith/compare/v0.64.1...v0.64.2) (2026-07-03)
 
 
