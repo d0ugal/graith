@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.64.2](https://github.com/d0ugal/graith/compare/v0.64.1...v0.64.2) (2026-07-03)
+
+
+### Bug Fixes
+
+* **sandbox:** don't drop non-existent file grants ([1c78415](https://github.com/d0ugal/graith/commit/1c78415c31acd428450e6e5878311c89a7b37b51))
+* update github.com/charmbracelet/ultraviolet digest to f5a850f ([71ecec1](https://github.com/d0ugal/graith/commit/71ecec108cc8b59770638e3c139aa5e3aeac0c4f))
+* update module charm.land/bubbletea/v2 to v2.0.8 ([ab9df3c](https://github.com/d0ugal/graith/commit/ab9df3c384e6abf0a17e1c5211f226e08bcec148))
+* update module charm.land/lipgloss/v2 to v2.0.5 ([e4d662e](https://github.com/d0ugal/graith/commit/e4d662ec77d31153aab210b24a6c714e1ce5e1e8))
+
+
+### Documentation
+
+* **sandbox:** note file grants aren't existence-checked ([529cfd1](https://github.com/d0ugal/graith/commit/529cfd1c5f3451fea3c02d1fa6a52244f858aa83))
+
+
+### Tests
+
+* **sandbox:** satisfy wsl lint in expandFilePaths test ([05b6b0d](https://github.com/d0ugal/graith/commit/05b6b0d534bad504a0fc3f0ff2bf4babb2455313))
+
 ## [0.64.1](https://github.com/d0ugal/graith/compare/v0.64.0...v0.64.1) (2026-07-02)
 
 
