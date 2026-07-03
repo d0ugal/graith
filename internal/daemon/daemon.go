@@ -4278,8 +4278,8 @@ func (sm *SessionManager) resolveSandboxFromConfig(cfg *config.Config, agentName
 func (sm *SessionManager) sandboxOptsFromConfig(merged config.SandboxConfig, sessionID, worktreePath, agentCommand string, envKeys []string, agentHooks bool) sandbox.WrapOpts {
 	readDirs := expandPaths(merged.ReadDirs, sm.log, "read")
 	writeDirs := expandPaths(merged.WriteDirs, sm.log, "write")
-	readFiles := expandPaths(merged.ReadFiles, sm.log, "read")
-	writeFiles := expandPaths(merged.WriteFiles, sm.log, "write")
+	readFiles := expandFilePaths(merged.ReadFiles, sm.log, "read")
+	writeFiles := expandFilePaths(merged.WriteFiles, sm.log, "write")
 
 	if agentHooks {
 		hd := sm.hookDir(sessionID)
@@ -4397,6 +4397,44 @@ func expandPaths(paths []string, log *slog.Logger, kind string) []string {
 		if _, err := os.Stat(expanded); err != nil {
 			log.Warn("sandbox: skipping non-existent path", "kind", kind, "path", expanded)
 			continue
+		}
+
+		out = append(out, expanded)
+	}
+
+	return out
+}
+
+// expandFilePaths expands ~ and globs in single-file grant paths (read_files /
+// write_files). Unlike expandPaths (for directories), it does NOT drop a path
+// that doesn't exist on disk: a writable file grant is routinely for a file the
+// agent creates at runtime — e.g. Claude's ~/.claude.json.lock / ~/.claude.lock
+// lockfiles, which don't exist until a write happens. Stat-filtering those would
+// silently drop the grant (and under nono deny the agent from creating the
+// file). Globs that match nothing are still skipped (there is nothing to grant);
+// a literal path whose parent directory is missing is kept but warned, since
+// nono cannot create the file without a grantable parent.
+func expandFilePaths(paths []string, log *slog.Logger, kind string) []string {
+	if len(paths) == 0 {
+		return nil
+	}
+
+	var out []string
+
+	for _, p := range paths {
+		expanded := config.ExpandPath(p)
+		if strings.ContainsAny(expanded, "*?[") {
+			if matches, err := filepath.Glob(expanded); err == nil && len(matches) > 0 {
+				out = append(out, matches...)
+			} else {
+				log.Warn("sandbox: file grant glob matched nothing", "kind", kind, "path", expanded)
+			}
+
+			continue
+		}
+
+		if _, err := os.Stat(filepath.Dir(expanded)); err != nil {
+			log.Warn("sandbox: file grant parent dir does not exist", "kind", kind, "path", expanded)
 		}
 
 		out = append(out, expanded)
