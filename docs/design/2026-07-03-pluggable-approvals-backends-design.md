@@ -431,12 +431,12 @@ Components:
    yields `block` for an unattended session via the timeout path — so mapping
    `askNoninteractive` to "no attached client" is a no-op *except* that it fires
    **immediately** (fast-deny) instead of after `timeout` (wait-then-deny).
-   That fast-deny is the only real behaviour it buys, and it is desirable (don't
-   stall an unattended agent for 10m just to reach the same `block`), so
-   `builtin` adopts it explicitly; without that distinction `askNoninteractive`
-   would be a redundant second path to the same outcome and we would drop it.
-   Documented as a divergence (semantic mapping: accept-edits ⇒
-   no-client-attached).
+   That fast-deny is the only real behaviour it would buy. As shipped, the
+   built-in engine **parses** `askNoninteractive` but does **not** wire the
+   fast-deny: a pure backend can't observe client attachment, so `ask` defers
+   and an unattended session still blocks via the timeout (just not
+   immediately). Wiring fast-deny is a follow-up needing daemon-side
+   client-count support (documented divergence).
 5. **Config loader + validator.** Read localmost's `config.json` verbatim
    (`allow`, `deny`, `allowSafeXargs`, `askNoninteractive`). Expose
    `gr approvals validate [--config path]` mirroring `localmost config
@@ -461,10 +461,21 @@ that unachievable, and Open-question 3 rightly prefers behavioural). The phrase
   corpus, and the **golden outputs are checked into the repo** so divergence is
   caught even where the binary is absent. Skip-by-default would let the claim
   rot silently.
-- **Documented divergences (running list):** `builtin` fails **closed** on an
-  invalid config, whereas localmost defaults to `ask` at runtime;
-  `askNoninteractive` is mapped approximately (§6); any parser edge cases the
-  corpus surfaces are added here rather than silently absorbed.
+- **Documented divergences (running list, as implemented in the built-in
+  engine):**
+  - `mvdan.cc/sh` parsing is not bit-identical to ShellCheck's, so rare
+    tokenisation edge cases may differ.
+  - `builtin` fails **closed** on an invalid config, whereas localmost defaults
+    to `ask` at runtime.
+  - `askNoninteractive` is parsed but its **fast-deny is not wired**: a pure
+    backend cannot observe client attachment, so `ask` always defers and an
+    unattended session still blocks via the approval timeout (just not
+    immediately). Wiring fast-deny needs daemon-side client-count support.
+  - `allowSafeXargs` is **partial**: the `echo ARGS | xargs PROG` and
+    `PROG1 | xargs PROG2` shapes are handled, but xargs's own options are not
+    stripped from the program, and xargs can only *allow* (never *deny*).
+  - Any further parser edge cases the corpus surfaces are added here rather than
+    silently absorbed.
 
 ### Fail-open vs fail-closed (unchanged philosophy)
 
