@@ -163,6 +163,13 @@ single files an agent only needs to read (e.g. a shared `~/.gitconfig`). As with
 `write_dirs`, `write_files` maps to nono's read+write `filesystem.allow_file`,
 never its write-only `filesystem.write_file`.
 
+Unlike `read_dirs`/`write_dirs` (which are dropped if the directory doesn't
+exist), file grants are **not** existence-checked: a `write_files` entry for a
+file that doesn't exist yet is kept, so the agent can create it at runtime. This
+is required for lockfiles like `~/.claude.json.lock` — they only appear while a
+write is in flight, so grants for them must survive a session start when the
+file is absent.
+
 ## Config-only enforcement
 
 Sandboxing is **config-only**. There are no CLI flags to enable or disable it.
