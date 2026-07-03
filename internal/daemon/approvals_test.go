@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
 )
 
@@ -236,6 +237,45 @@ func TestSubmitApprovalCommandBackendDenyBecomesBlock(t *testing.T) {
 
 	if decision.Decision != "block" {
 		t.Errorf("deny should normalise to block, got %q", decision.Decision)
+	}
+}
+
+// TestValidateApprovalsBackend covers the fail-closed check invoked at
+// session-create: an approvals backend that can't enforce is a hard error.
+func TestValidateApprovalsBackend(t *testing.T) {
+	badCfg := filepath.Join(t.TempDir(), "bad.json")
+	if err := os.WriteFile(badCfg, []byte(`{"allow":[{"rule":"foo @("}]}`), 0o600); err != nil {
+		t.Fatalf("write bad config: %v", err)
+	}
+
+	goodCfg := filepath.Join(t.TempDir(), "good.json")
+	if err := os.WriteFile(goodCfg, []byte(`{"allow":[{"rule":"echo @*"}]}`), 0o600); err != nil {
+		t.Fatalf("write good config: %v", err)
+	}
+
+	cases := []struct {
+		name    string
+		appr    config.Approvals
+		wantErr bool
+	}{
+		{"default prompt ok", config.Approvals{}, false},
+		{"command with no command errors", config.Approvals{Backend: "command"}, true},
+		{"command with command ok", config.Approvals{Backend: "command", Command: "my-approver"}, false},
+		{"builtin invalid config errors", config.Approvals{Backend: "builtin", Builtin: config.ApprovalsBuiltin{Config: badCfg}}, true},
+		{"builtin valid config ok", config.Approvals{Backend: "builtin", Builtin: config.ApprovalsBuiltin{Config: goodCfg}}, false},
+		{"localmost missing binary errors", config.Approvals{Backend: "localmost", Command: "definitely-not-real-xyz"}, true},
+		{"conflicting mode+backend errors", config.Approvals{Backend: "builtin", Mode: "localmost"}, true},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			sm := newTestSessionManager(t)
+			sm.cfg.Approvals = tt.appr
+
+			err := sm.validateApprovalsBackend()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateApprovalsBackend() err = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
 	}
 }
 
