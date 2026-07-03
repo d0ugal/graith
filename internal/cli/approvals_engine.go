@@ -94,7 +94,9 @@ var approvalsValidateCmd = &cobra.Command{
 	},
 }
 
-func init() {
+// registerApprovalsEngineCmds wires the check/validate subcommands and their
+// flags onto approvalsCmd. Called from registerApprovalsCmd.
+func registerApprovalsEngineCmds() {
 	approvalsCheckCmd.Flags().StringVar(&approvalsCheckConfig, "config", "", "path to a localmost-format config.json (defaults to [approvals.builtin] config)")
 	approvalsValidateCmd.Flags().StringVar(&approvalsValidateConfig, "config", "", "path to a localmost-format config.json (defaults to [approvals.builtin] config)")
 	approvalsCmd.AddCommand(approvalsCheckCmd, approvalsValidateCmd)

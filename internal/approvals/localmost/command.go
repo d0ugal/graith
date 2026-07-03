@@ -167,6 +167,7 @@ func flattenPipe(b *syntax.BinaryCmd) []*syntax.Stmt {
 	var members []*syntax.Stmt
 
 	var add func(st *syntax.Stmt)
+
 	add = func(st *syntax.Stmt) {
 		if bb, ok := st.Cmd.(*syntax.BinaryCmd); ok && (bb.Op == syntax.Pipe || bb.Op == syntax.PipeAll) {
 			add(bb.X)
@@ -217,6 +218,7 @@ func wordToken(w *syntax.Word) token {
 	)
 
 	var render func(parts []syntax.WordPart)
+
 	render = func(parts []syntax.WordPart) {
 		for _, p := range parts {
 			switch part := p.(type) {

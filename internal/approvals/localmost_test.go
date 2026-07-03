@@ -36,6 +36,7 @@ func TestLocalmostDecisionMapping(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.permission, func(t *testing.T) {
 			script := fakeLocalmost(t, c.permission, "hoots")
+
 			d, err := localmostBackend{}.Decide(context.Background(),
 				Request{ToolName: "Bash", ToolInput: `{"command":"ls -a"}`},
 				Config{Command: script})
@@ -54,6 +55,7 @@ func TestLocalmostNonBashDefers(t *testing.T) {
 	// Even with a script that would allow, a non-Bash tool must defer without
 	// invoking localmost.
 	script := fakeLocalmost(t, "allow", "")
+
 	d, err := localmostBackend{}.Decide(context.Background(),
 		Request{ToolName: "Write", ToolInput: `{"file_path":"x"}`},
 		Config{Command: script})
@@ -70,6 +72,7 @@ func TestLocalmostReconstructsEnvelopeWithoutPayload(t *testing.T) {
 	// No HookPayload: the backend reconstructs a PreToolUse envelope. The fake
 	// echoes allow regardless; we just confirm the round-trip succeeds.
 	script := fakeLocalmost(t, "allow", "")
+
 	d, err := localmostBackend{}.Decide(context.Background(),
 		Request{ToolName: "Bash", ToolInput: `{"command":"echo hi"}`},
 		Config{Command: script})
@@ -95,6 +98,7 @@ func TestLocalmostAvailability(t *testing.T) {
 
 func TestLocalmostFailsClosedOnError(t *testing.T) {
 	body := "#!/bin/sh\nexit 7\n"
+
 	p := filepath.Join(t.TempDir(), "localmost")
 	if err := os.WriteFile(p, []byte(body), 0o755); err != nil { //nolint:gosec // must be executable
 		t.Fatalf("write: %v", err)
