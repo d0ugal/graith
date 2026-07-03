@@ -52,10 +52,20 @@ type Rule struct {
 	Pipe     pipePolicy
 }
 
-// UnmarshalJSON parses a rule object, applying localmost's defaults
-// (redirect="safe", pipe=true) and accepting the bool/string forms of the
-// redirect and pipe keys.
+// UnmarshalJSON parses a rule, applying localmost's defaults (redirect="safe",
+// pipe=true) and accepting the bool/string forms of the redirect and pipe keys.
+// A rule may be given either as an object ({"rule":"..."}) or, as a
+// convenience, as a bare string ("...").
 func (r *Rule) UnmarshalJSON(b []byte) error {
+	var bare string
+	if json.Unmarshal(b, &bare) == nil {
+		r.Rule = bare
+		r.Redirect = redirectSafe
+		r.Pipe = pipeAny
+
+		return nil
+	}
+
 	var raw struct {
 		Rule     string          `json:"rule"`
 		Unless   []string        `json:"unless"`

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/adrg/xdg"
+	"github.com/d0ugal/graith/internal/approvals"
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -319,6 +320,13 @@ func (a Approvals) ResolveBackend() (backend, deprecation string, err error) {
 			return "", "", fmt.Errorf(
 				"[approvals] backend=%q conflicts with the deprecated mode=%q; remove mode (mode=%q maps to backend=%q)",
 				a.Backend, a.Mode, a.Mode, legacy)
+		}
+
+		if isLegacy {
+			// mode agrees with backend but is now redundant — nudge removal.
+			return a.Backend, fmt.Sprintf(
+				"[approvals] mode=%q is deprecated and redundant now that backend=%q is set; remove mode.",
+				a.Mode, a.Backend), nil
 		}
 
 		return a.Backend, "", nil
@@ -708,8 +716,20 @@ func (c *Config) Validate() error {
 		errs = append(errs, err)
 	}
 
-	if _, _, err := c.Approvals.ResolveBackend(); err != nil {
+	if backend, _, err := c.Approvals.ResolveBackend(); err != nil {
 		errs = append(errs, err)
+	} else if backend != "" && backend != approvals.BackendPrompt {
+		// Fail closed: an approvals backend that can't enforce (no command, no
+		// binary on PATH, unreadable/invalid config) is a loud config error, not
+		// a silent per-request defer.
+		be, _ := approvals.BackendByName(backend)
+		if av := be.Availability(approvals.Config{
+			Backend:       backend,
+			Command:       c.Approvals.Command,
+			BuiltinConfig: c.Approvals.Builtin.Config,
+		}); !av.CanEnforce {
+			errs = append(errs, fmt.Errorf("approvals: %s", av.Detail))
+		}
 	}
 
 	for agentName, agent := range c.Agents {

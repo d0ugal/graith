@@ -201,6 +201,25 @@ func TestEngineSafeXargs(t *testing.T) {
 	}
 }
 
+func TestEngineBareStringRules(t *testing.T) {
+	// Rules may be given as bare strings as well as objects.
+	e := mustEngine(t, `{"allow":["echo @*","ls @*"],"deny":["rm @arg*"]}`)
+
+	cases := []struct {
+		command string
+		want    Policy
+	}{
+		{"echo hi", PolicyAllow},
+		{"rm x", PolicyDeny},
+		{"kubectl get", PolicyAsk},
+	}
+	for _, c := range cases {
+		if got, _ := e.Evaluate(c.command); got != c.want {
+			t.Errorf("Evaluate(%q) = %q, want %q", c.command, got, c.want)
+		}
+	}
+}
+
 func TestParseInvalidRule(t *testing.T) {
 	if _, err := Parse([]byte(`{"allow":[{"rule":"foo @("}]}`)); err == nil {
 		t.Error("expected error for unbalanced group")
