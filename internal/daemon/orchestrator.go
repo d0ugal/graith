@@ -34,6 +34,23 @@ func (sm *SessionManager) orchestratorTmpDir() string {
 	return filepath.Join(sm.paths.DataDir, "orchestrator", "tmp")
 }
 
+// systemSessionEnabledInConfig reports whether the config feature that owns this
+// system session is currently enabled. A system session whose feature has been
+// disabled in config is an orphan (the daemon no longer manages it) and may be
+// deleted directly; an enabled one is daemon-managed and must be turned off in
+// config.toml first. Callers must hold sm.mu (read or write) so the sm.cfg
+// pointer read is race-free.
+func (sm *SessionManager) systemSessionEnabledInConfig(s *SessionState) bool {
+	switch s.SystemKind {
+	case SystemKindOrchestrator:
+		return sm.cfg.Orchestrator.Enabled
+	default:
+		// Unknown system kind: treat as managed so we never orphan-delete
+		// something we don't understand.
+		return true
+	}
+}
+
 func (sm *SessionManager) findOrchestratorID() string {
 	for id, s := range sm.state.Sessions {
 		if s.SystemKind == SystemKindOrchestrator {
