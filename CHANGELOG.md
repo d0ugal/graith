@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.64.4](https://github.com/d0ugal/graith/compare/v0.64.3...v0.64.4) (2026-07-03)
+
+
+### Features
+
+* **approvals:** pluggable backends + built-in localmost-compatible engine ([3165e62](https://github.com/d0ugal/graith/commit/3165e62e9fd970d790359807c230ca03cdc68cb9))
+
+
+### Bug Fixes
+
+* **approvals:** enforce backend availability at session-create ([db8f283](https://github.com/d0ugal/graith/commit/db8f283a041953056d89d9404bfd9ee2b024b9d8))
+* **approvals:** fail closed on unavailable backend; bare-string rules; redundant-mode nudge ([cd94afb](https://github.com/d0ugal/graith/commit/cd94afb0d49ebd08c72197126e4da4b2103c64e3))
+* **approvals:** re-validate backend availability on Resume too ([75fcc28](https://github.com/d0ugal/graith/commit/75fcc287146a44c6d25cf7f6ffc1b891b9cffde7))
+* **approvals:** reject empty/null rules in config.json ([b5c0415](https://github.com/d0ugal/graith/commit/b5c04154b3ae3825e904973ec9e4a2edbdd2ed7f))
+* **approvals:** satisfy golangci-lint (wsl whitespace, gochecknoinits, nolintlint) ([e4fc8d6](https://github.com/d0ugal/graith/commit/e4fc8d6371b94a2ccb8db469e956a3c48c926fd6))
+
+
+### Documentation
+
+* add pluggable approvals backends design doc ([884b33f](https://github.com/d0ugal/graith/commit/884b33f83e39fae23c769c7d85d0f51acbfbc0f0))
+* address rev1 review of approvals design ([7df87cd](https://github.com/d0ugal/graith/commit/7df87cddd91a1a919e0ed45047bfd3abf959f1c3))
+* address rev2 review nudges ([852940e](https://github.com/d0ugal/graith/commit/852940efbcd41c46d6d9ba01b46fc13a553a6e76))
+* sync divergences with as-shipped implementation ([#731](https://github.com/d0ugal/graith/issues/731)) ([cfb7292](https://github.com/d0ugal/graith/commit/cfb729228e3242c6db3be1ba0e98a2fa632d39c2))
+
+
+### Tests
+
+* **approvals:** cover Resume-path backend availability check ([8d52d44](https://github.com/d0ugal/graith/commit/8d52d4492ce068d53020cd6ae46252187f2c8a27))
+
 ## [0.64.3](https://github.com/d0ugal/graith/compare/v0.64.2...v0.64.3) (2026-07-03)
 
 
