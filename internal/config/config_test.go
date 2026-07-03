@@ -243,9 +243,9 @@ func TestApprovalsResolveBackend(t *testing.T) {
 		// mode-only stays a warning even for localmost; never an error.
 		{"mode=localmost alone is not an error", Approvals{Mode: "localmost", Command: "x"}, "command", true, false},
 
-		// both set: agree is fine, disagree is a hard error.
-		{"both agree (command)", Approvals{Backend: "command", Mode: "command"}, "command", false, false},
-		{"external+command agree", Approvals{Backend: "external", Mode: "localmost"}, "external", false, false},
+		// both set: agree is fine (with a redundant-mode nudge), disagree errors.
+		{"both agree (command)", Approvals{Backend: "command", Mode: "command"}, "command", true, false},
+		{"external+command agree", Approvals{Backend: "external", Mode: "localmost"}, "external", true, false},
 		{"conflict: builtin + mode=localmost", Approvals{Backend: "builtin", Mode: "localmost"}, "", false, true},
 		{"conflict: native localmost + mode=localmost", Approvals{Backend: "localmost", Mode: "localmost"}, "", false, true},
 	}
@@ -277,6 +277,28 @@ func TestApprovalsResolveBackendValidatedByConfig(t *testing.T) {
 
 	if err := c.Validate(); err == nil {
 		t.Error("Validate() should reject a conflicting approvals backend+mode")
+	}
+}
+
+func TestApprovalsBackendAvailabilityValidated(t *testing.T) {
+	// backend=command with no command -> fail closed at config validation.
+	c := Default()
+	c.Approvals = Approvals{Backend: "command"}
+
+	if err := c.Validate(); err == nil {
+		t.Error("Validate() should reject backend=command with no command")
+	}
+
+	// With a command set, it validates.
+	c.Approvals = Approvals{Backend: "command", Command: "my-approver"}
+	if err := c.Validate(); err != nil {
+		t.Errorf("Validate() should accept backend=command with a command: %v", err)
+	}
+
+	// prompt / default never needs availability.
+	c.Approvals = Approvals{}
+	if err := c.Validate(); err != nil {
+		t.Errorf("Validate() should accept the default (prompt) backend: %v", err)
 	}
 }
 
