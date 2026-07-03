@@ -73,7 +73,15 @@ type whyQuery struct {
 }
 
 func runSandboxWhy() error {
-	query := sandbox.WhyQuery{Path: whyPath, Op: whyOp, Host: whyHost, Port: whyPort}
+	// Expand ~/$HOME in the query path so it matches the absolute, expanded
+	// paths in the profile the daemon generates. The --help examples use ~, so
+	// an unexpanded ~ would otherwise misreport path_not_granted.
+	queryPath := whyPath
+	if queryPath != "" {
+		queryPath = config.ExpandPath(queryPath)
+	}
+
+	query := sandbox.WhyQuery{Path: queryPath, Op: whyOp, Host: whyHost, Port: whyPort}
 	if err := query.Validate(); err != nil {
 		return err
 	}
@@ -129,7 +137,10 @@ func runSandboxWhy() error {
 // (hook dir, runtime dir, agent binary dir) that the daemon adds at launch —
 // those are not part of the user-configured policy the user is reasoning about.
 // PATH/HOME are added because the daemon always includes them and a query
-// against the env would otherwise misreport.
+// against the env would otherwise misreport. ReadFiles/WriteFiles (single-file
+// grants) are included so `gr sandbox why` matches the profile the daemon
+// actually generates — omitting them produced false path_not_granted denials
+// for granted files (e.g. ~/.claude.json).
 func whyWrapOpts(merged config.SandboxConfig) sandbox.WrapOpts {
 	envKeys := ensureWhyEnvKeys(nil, "PATH", "HOME")
 
@@ -137,6 +148,8 @@ func whyWrapOpts(merged config.SandboxConfig) sandbox.WrapOpts {
 		Backend:        merged.Backend,
 		ReadDirs:       expandWhyPaths(merged.ReadDirs),
 		WriteDirs:      expandWhyPaths(merged.WriteDirs),
+		ReadFiles:      expandWhyFilePaths(merged.ReadFiles),
+		WriteFiles:     expandWhyFilePaths(merged.WriteFiles),
 		Features:       merged.Features,
 		EnvKeys:        envKeys,
 		SignalMode:     merged.SignalMode,
@@ -181,6 +194,36 @@ func expandWhyPaths(paths []string) []string {
 		if _, err := os.Stat(expanded); err == nil {
 			out = append(out, expanded)
 		}
+	}
+
+	return out
+}
+
+// expandWhyFilePaths mirrors the daemon's expandFilePaths: ~-expand, make
+// absolute, and glob-expand, but — unlike expandWhyPaths — it keeps a literal
+// path that does not exist on disk. A writable file grant is routinely for a
+// file the agent creates at runtime (e.g. Claude's ~/.claude.json.lock), so
+// stat-filtering would drop the grant and make the query misreport. Globs that
+// match nothing are still skipped, since there is nothing to grant.
+func expandWhyFilePaths(paths []string) []string {
+	if len(paths) == 0 {
+		return nil
+	}
+
+	var out []string
+
+	for _, p := range paths {
+		expanded := config.ExpandPath(p)
+
+		if strings.ContainsAny(expanded, "*?[") {
+			if matches, err := filepath.Glob(expanded); err == nil {
+				out = append(out, matches...)
+			}
+
+			continue
+		}
+
+		out = append(out, expanded)
 	}
 
 	return out

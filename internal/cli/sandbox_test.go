@@ -41,6 +41,62 @@ func TestExpandWhyPathsGlob(t *testing.T) {
 	}
 }
 
+func TestExpandWhyFilePathsKeepsMissing(t *testing.T) {
+	dir := t.TempDir()
+
+	present := filepath.Join(dir, "claude.json")
+	if err := os.WriteFile(present, []byte("{}"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// A writable file grant is routinely for a file the agent creates at
+	// runtime (e.g. a lockfile), so a missing literal path must be kept — not
+	// stat-dropped like a directory grant.
+	missing := filepath.Join(dir, "claude.json.lock")
+
+	got := expandWhyFilePaths([]string{present, missing})
+	if len(got) != 2 || got[0] != present || got[1] != missing {
+		t.Fatalf("expandWhyFilePaths() = %v, want [%s %s]", got, present, missing)
+	}
+}
+
+func TestExpandWhyFilePathsGlobSkipsNoMatch(t *testing.T) {
+	dir := t.TempDir()
+
+	got := expandWhyFilePaths([]string{filepath.Join(dir, "haar-*.lock")})
+	if len(got) != 0 {
+		t.Fatalf("expandWhyFilePaths() glob no-match = %v, want empty", got)
+	}
+}
+
+func TestWhyWrapOptsIncludesFileGrants(t *testing.T) {
+	dir := t.TempDir()
+
+	writeFile := filepath.Join(dir, "claude.json")
+	if err := os.WriteFile(writeFile, []byte("{}"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	readFile := filepath.Join(dir, "known_hosts")
+	if err := os.WriteFile(readFile, []byte(""), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	opts := whyWrapOpts(config.SandboxConfig{
+		Backend:    sandbox.BackendNono,
+		ReadFiles:  []string{readFile},
+		WriteFiles: []string{writeFile},
+	})
+
+	if !containsStr(opts.ReadFiles, readFile) {
+		t.Fatalf("ReadFiles = %v, want %s", opts.ReadFiles, readFile)
+	}
+
+	if !containsStr(opts.WriteFiles, writeFile) {
+		t.Fatalf("WriteFiles = %v, want %s", opts.WriteFiles, writeFile)
+	}
+}
+
 func TestWhyWrapOptsIncludesBaseEnvKeys(t *testing.T) {
 	opts := whyWrapOpts(config.SandboxConfig{Backend: sandbox.BackendNono})
 
