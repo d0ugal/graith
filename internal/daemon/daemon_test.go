@@ -1863,6 +1863,7 @@ func TestExpandPathsGlob(t *testing.T) {
 func TestExpandFilePaths(t *testing.T) {
 	dir := t.TempDir()
 	existing := filepath.Join(dir, "bide.json")
+
 	if err := os.WriteFile(existing, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -1873,6 +1874,7 @@ func TestExpandFilePaths(t *testing.T) {
 	// must be KEPT, unlike expandPaths which drops non-existent paths.
 	t.Run("non-existent file kept", func(t *testing.T) {
 		lock := filepath.Join(dir, "bide.json.lock") // does not exist
+
 		got := expandFilePaths([]string{lock}, log, "write")
 		if len(got) != 1 || got[0] != lock {
 			t.Errorf("expandFilePaths nonexistent = %v, want [%s]", got, lock)
