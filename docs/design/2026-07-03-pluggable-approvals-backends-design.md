@@ -295,7 +295,9 @@ value the code acts on). We preserve every existing config via
 
 1. If `backend` is set → use it (after validation). If **both** `backend` and a
    non-empty legacy `mode` are set, that is a **hard error** (refuse to guess
-   intent), unless they trivially agree.
+   intent), unless they trivially agree. This hard error is *exclusively* for
+   the both-set conflict — a pure back-compat config with only `mode` set (no
+   `backend`) is always a warning (step 2), never an error.
 2. Else if legacy `mode` ∈ {`command`, `external`, `localmost`} → map to a
    backend and emit a **one-time** deprecation warning (once per daemon
    lifetime, not per request — resolution is memoised, since `sm.cfg.Approvals`
@@ -316,7 +318,9 @@ over its native protocol, set backend="localmost".
 
 (We considered renaming the native backend `localmost-native` to remove the
 overload entirely; rejected to keep the config value intuitive, on the strength
-of the explicit warning + the both-set hard error. Revisit if it still
+of the explicit warning + the both-set hard error. Those two mitigations are a
+**package**: if the overloaded `localmost` is kept, neither is independently
+droppable — the overload is only survivable with both. Revisit if it still
 confuses — see Open questions.)
 
 Validation happens at config load and again at session create (fail-closed,
@@ -423,11 +427,16 @@ Components:
    else ask. Plus `allowSafeXargs` (the two `xargs` special cases) and
    `askNoninteractive`. Note the last is an **approximation, not an
    equivalence**: localmost's flag concerns Claude's accept-edits mode, whereas
-   graith's nearest signal is "no client attached." Mapping it to "no attached
-   client → treat `defer` as `block`" also overlaps the existing timeout→block
-   path (`daemon/approvals.go`); the implementation must confirm it isn't
-   redundant and document the exact semantic mapping chosen (a documented
-   divergence).
+   graith's nearest signal is "no client attached." And graith **already**
+   yields `block` for an unattended session via the timeout path — so mapping
+   `askNoninteractive` to "no attached client" is a no-op *except* that it fires
+   **immediately** (fast-deny) instead of after `timeout` (wait-then-deny).
+   That fast-deny is the only real behaviour it buys, and it is desirable (don't
+   stall an unattended agent for 10m just to reach the same `block`), so
+   `builtin` adopts it explicitly; without that distinction `askNoninteractive`
+   would be a redundant second path to the same outcome and we would drop it.
+   Documented as a divergence (semantic mapping: accept-edits ⇒
+   no-client-attached).
 5. **Config loader + validator.** Read localmost's `config.json` verbatim
    (`allow`, `deny`, `allowSafeXargs`, `askNoninteractive`). Expose
    `gr approvals validate [--config path]` mirroring `localmost config
