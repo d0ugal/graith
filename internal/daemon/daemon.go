@@ -1797,6 +1797,14 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 		return SessionState{}, err
 	}
 
+	// Resume re-enforces the approvals backend too, for parity with the sandbox
+	// re-check above: a config change that made the backend unenforceable must
+	// not silently resume a non-enforcing approver.
+	if err := sm.validateApprovalsBackend(); err != nil {
+		sm.mu.Unlock()
+		return SessionState{}, err
+	}
+
 	if sessState.SharedWorktree && !sandboxed {
 		sm.mu.Unlock()
 		return SessionState{}, fmt.Errorf("shared-worktree session %q requires sandbox but sandbox is not enabled in current config; enable sandbox to resume", id)
