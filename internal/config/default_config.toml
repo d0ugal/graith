@@ -109,7 +109,7 @@ enabled = true
 on_approval = true
 
 [approvals]
-mode = "prompt"
+backend = ""
 timeout = "10m"
 
 [overlay]

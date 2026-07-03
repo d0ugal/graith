@@ -348,11 +348,18 @@ type ScreenPreviewResponseMsg struct {
 
 // ApprovalRequestMsg is sent by the hook CLI (gr approve-request) to the daemon.
 // The handler blocks until a decision is made.
+//
+// ToolInput carries the FULL, untruncated tool input JSON — approvals backends
+// may need to evaluate the whole command, so truncation happens only at the
+// display layer (ApprovalInfo). HookPayload is the raw agent hook payload,
+// forwarded verbatim for backends (e.g. localmost) that speak the agent's
+// native protocol; it may be empty.
 type ApprovalRequestMsg struct {
-	RequestID string `json:"request_id"`
-	SessionID string `json:"session_id"`
-	ToolName  string `json:"tool_name"`
-	ToolInput string `json:"tool_input,omitempty"`
+	RequestID   string `json:"request_id"`
+	SessionID   string `json:"session_id"`
+	ToolName    string `json:"tool_name"`
+	ToolInput   string `json:"tool_input,omitempty"`
+	HookPayload string `json:"hook_payload,omitempty"`
 }
 
 type ApprovalInfo struct {

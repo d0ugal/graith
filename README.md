@@ -503,8 +503,15 @@ on_stopped  = false                     # notify when a session stops
 command     = ""                        # custom notification command (optional)
 
 [approvals]
-mode    = "prompt"                      # "prompt" (ask the agent) or "notify" (just notify)
-timeout = "10m"                         # how long to wait for an approval decision
+backend = ""                            # who decides: "" (prompt the human), "command"/"external"
+                                        #   (delegate to a command), "localmost" (real localmost binary),
+                                        #   or "builtin" (graith's built-in localmost-compatible engine).
+                                        #   "mode" is the deprecated predecessor (still works).
+timeout = "10m"                         # how long to wait for a human decision
+auto_pop = false                        # auto-open the approval overlay when a request is queued
+# command = ""                          # for backend "command"/"external" (or a localmost path override)
+# [approvals.builtin]
+# config = ""                           # localmost-format config.json (backend "builtin")
 
 [messages]
 max_age        = ""                     # prune messages older than e.g. "7d" / "168h" (empty = keep)

@@ -2,14 +2,18 @@ package daemon
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"os/exec"
-	"strings"
 	"time"
 
+	"github.com/d0ugal/graith/internal/approvals"
+	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
 )
+
+// approvalDisplayLimit caps the tool input shown in the approval overlay and
+// broadcast to attached clients. The full input is still evaluated by backends
+// (it travels in ApprovalRequestMsg.ToolInput); only the display copy is cut.
+const approvalDisplayLimit = 500
 
 type pendingApproval struct {
 	Info       protocol.ApprovalInfo
@@ -18,16 +22,15 @@ type pendingApproval struct {
 
 // SubmitApproval registers a pending approval and blocks until a decision is
 // made, the context is cancelled (hook disconnect), or the configured timeout
-// elapses. If localmost is configured, it is tried first.
+// elapses. An automated backend (if configured) is consulted first; a backend
+// that defers, errors, or is absent falls through to the human-queue path.
 func (sm *SessionManager) SubmitApproval(ctx context.Context, req protocol.ApprovalRequestMsg) protocol.ApprovalDecisionMsg {
 	sm.mu.RLock()
 	approvalsCfg := sm.cfg.Approvals
 	sm.mu.RUnlock()
 
-	if approvalsCfg.Mode == "localmost" {
-		if decision, ok := sm.tryLocalmost(ctx, req, approvalsCfg.Command); ok {
-			return decision
-		}
+	if decision, handled := sm.tryApprovalBackend(ctx, req, approvalsCfg); handled {
+		return decision
 	}
 
 	sm.mu.Lock()
@@ -43,7 +46,7 @@ func (sm *SessionManager) SubmitApproval(ctx context.Context, req protocol.Appro
 		SessionID:   req.SessionID,
 		SessionName: sess.Name,
 		ToolName:    req.ToolName,
-		ToolInput:   req.ToolInput,
+		ToolInput:   truncateForDisplay(req.ToolInput),
 		Agent:       sess.Agent,
 		RepoName:    sess.RepoName,
 		RequestedAt: time.Now().UTC().Format(time.RFC3339),
@@ -157,69 +160,81 @@ func (sm *SessionManager) broadcastApprovalNotification() {
 	}
 }
 
-type localmostRequest struct {
-	ToolName    string `json:"tool_name"`
-	ToolInput   string `json:"tool_input,omitempty"`
-	SessionID   string `json:"session_id"`
-	SessionName string `json:"session_name"`
-}
+// tryApprovalBackend consults the configured approvals backend. It returns
+// (decision, true) only for a definitive allow/block; a deferred/errored/absent
+// backend returns (_, false) so the caller falls through to the human queue.
+func (sm *SessionManager) tryApprovalBackend(ctx context.Context, req protocol.ApprovalRequestMsg, cfg config.Approvals) (protocol.ApprovalDecisionMsg, bool) {
+	backendName, deprecation, err := cfg.ResolveBackend()
+	if err != nil {
+		// Validation should have caught this at config load; fail safe to human.
+		sm.log.Error("approvals: invalid backend config, deferring to user", "err", err)
+		return protocol.ApprovalDecisionMsg{}, false
+	}
 
-type localmostResponse struct {
-	Decision string `json:"decision"`
-	Reason   string `json:"reason,omitempty"`
-}
+	if deprecation != "" {
+		sm.approvalsWarnOnce.Do(func() { sm.log.Warn(deprecation) })
+	}
 
-func (sm *SessionManager) tryLocalmost(ctx context.Context, req protocol.ApprovalRequestMsg, command string) (protocol.ApprovalDecisionMsg, bool) {
-	if command == "" {
-		command = "localmost"
+	if backendName == "" || backendName == approvals.BackendPrompt {
+		return protocol.ApprovalDecisionMsg{}, false
+	}
+
+	be, err := approvals.BackendByName(backendName)
+	if err != nil {
+		sm.log.Error("approvals: unknown backend, deferring to user", "backend", backendName, "err", err)
+		return protocol.ApprovalDecisionMsg{}, false
 	}
 
 	sm.mu.RLock()
 
-	var sessionName string
+	var sessionName, agent string
 	if sess, ok := sm.state.Sessions[req.SessionID]; ok {
 		sessionName = sess.Name
+		agent = sess.Agent
 	}
 
 	sm.mu.RUnlock()
 
-	input := localmostRequest{
-		ToolName:    req.ToolName,
-		ToolInput:   req.ToolInput,
+	acfg := approvals.Config{
+		Backend:       backendName,
+		Command:       cfg.Command,
+		BuiltinConfig: cfg.Builtin.Config,
+	}
+
+	decision, derr := be.Decide(ctx, approvals.Request{
+		RequestID:   req.RequestID,
 		SessionID:   req.SessionID,
 		SessionName: sessionName,
-	}
-
-	inputJSON, err := json.Marshal(input)
-	if err != nil {
-		sm.log.Error("localmost: marshal input", "err", err)
+		Agent:       agent,
+		ToolName:    req.ToolName,
+		ToolInput:   req.ToolInput,
+		HookPayload: req.HookPayload,
+	}, acfg)
+	if derr != nil {
+		sm.log.Warn("approvals: backend deferring to user", "backend", backendName, "err", derr)
 		return protocol.ApprovalDecisionMsg{}, false
 	}
 
-	cmdCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(cmdCtx, command)
-	cmd.Stdin = strings.NewReader(string(inputJSON))
-
-	out, err := cmd.Output()
-	if err != nil {
-		sm.log.Warn("localmost: command failed, deferring to user", "err", err)
+	// Belt-and-suspenders: each backend already normalises deny->block, but
+	// repeat it here so a future backend author can't reintroduce a silent
+	// defer by returning "deny".
+	switch approvals.Normalise(decision.Decision) {
+	case approvals.DecisionAllow:
+		return protocol.ApprovalDecisionMsg{Decision: approvals.DecisionAllow, Reason: decision.Reason}, true
+	case approvals.DecisionBlock:
+		return protocol.ApprovalDecisionMsg{Decision: approvals.DecisionBlock, Reason: decision.Reason}, true
+	default:
 		return protocol.ApprovalDecisionMsg{}, false
 	}
+}
 
-	var resp localmostResponse
-	if err := json.Unmarshal(out, &resp); err != nil {
-		sm.log.Warn("localmost: invalid JSON response, deferring to user", "err", err)
-		return protocol.ApprovalDecisionMsg{}, false
+// truncateForDisplay caps a tool-input string for the approval overlay. The
+// untruncated value is still what backends evaluate; this only affects what is
+// shown to and broadcast to attached clients.
+func truncateForDisplay(s string) string {
+	if len(s) > approvalDisplayLimit {
+		return s[:approvalDisplayLimit] + "..."
 	}
 
-	if resp.Decision == "defer" || resp.Decision == "" {
-		return protocol.ApprovalDecisionMsg{}, false
-	}
-
-	return protocol.ApprovalDecisionMsg{
-		Decision: resp.Decision,
-		Reason:   resp.Reason,
-	}, true
+	return s
 }

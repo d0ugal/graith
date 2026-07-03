@@ -246,10 +246,99 @@ type Notifications struct {
 }
 
 type Approvals struct {
-	Mode    string `toml:"mode"`
-	AutoPop bool   `toml:"auto_pop"`
-	Timeout string `toml:"timeout"`
-	Command string `toml:"command"`
+	// Backend selects who makes the automated decision: "" (none — always
+	// prompt the human), "command"/"external" (delegate to a command over
+	// graith's JSON contract), "localmost" (the real localmost binary over its
+	// native protocol), or "builtin" (graith's built-in localmost-compatible
+	// engine). It is the canonical selector; Mode is the deprecated predecessor.
+	Backend string           `toml:"backend"`
+	Mode    string           `toml:"mode"`
+	AutoPop bool             `toml:"auto_pop"`
+	Timeout string           `toml:"timeout"`
+	Command string           `toml:"command"`
+	Builtin ApprovalsBuiltin `toml:"builtin"`
+}
+
+// ApprovalsBuiltin configures the built-in localmost-compatible engine.
+type ApprovalsBuiltin struct {
+	// Config is the path to a localmost-format config.json (allow/deny rules).
+	Config string `toml:"config"`
+}
+
+// legacyModeBackend maps a deprecated [approvals] mode value to its effective
+// backend. All three legacy modes map to the "command" backend — for
+// mode="localmost" this preserves the historical behaviour (graith's own JSON
+// contract, NOT the native-protocol "localmost" backend).
+func legacyModeBackend(mode string) (string, bool) {
+	switch mode {
+	case "command", "external", "localmost":
+		return "command", true
+	default:
+		return "", false
+	}
+}
+
+func knownApprovalsBackend(name string) bool {
+	switch name {
+	case "prompt", "command", "external", "localmost", "builtin":
+		return true
+	default:
+		return false
+	}
+}
+
+func canonicalApprovalsBackend(name string) string {
+	if name == "external" {
+		return "command"
+	}
+
+	return name
+}
+
+// ResolveBackend resolves the effective approvals backend, applying back-compat
+// for the deprecated Mode field. It returns the backend name, a non-empty
+// deprecation message when a legacy Mode value was used (callers log it once),
+// and an error for an unknown backend or a conflicting Mode+Backend pair.
+//
+// Resolution order:
+//  1. If Backend is set, use it. If a legacy Mode is ALSO set and maps to a
+//     different backend, that is a hard error (refuse to guess intent).
+//  2. Else if Mode is one of command/external/localmost, map it to the
+//     "command" backend (historical behaviour) and return a deprecation
+//     message. A Mode with no Backend is always a warning, never an error.
+//  3. Else, the "prompt" backend (no automation).
+func (a Approvals) ResolveBackend() (backend, deprecation string, err error) {
+	legacy, isLegacy := legacyModeBackend(a.Mode)
+
+	if a.Backend != "" {
+		if !knownApprovalsBackend(a.Backend) {
+			return "", "", fmt.Errorf("[approvals] backend %q is not recognised (want one of prompt, command, external, localmost, builtin)", a.Backend)
+		}
+
+		if isLegacy && canonicalApprovalsBackend(a.Backend) != legacy {
+			return "", "", fmt.Errorf(
+				"[approvals] backend=%q conflicts with the deprecated mode=%q; remove mode (mode=%q maps to backend=%q)",
+				a.Backend, a.Mode, a.Mode, legacy)
+		}
+
+		return a.Backend, "", nil
+	}
+
+	if isLegacy {
+		return legacy, legacyDeprecationMessage(a.Mode), nil
+	}
+
+	return "prompt", "", nil
+}
+
+func legacyDeprecationMessage(mode string) string {
+	if mode == "localmost" {
+		return `[approvals] mode="localmost" is deprecated. It maps to backend="command" ` +
+			`(graith's JSON contract — unchanged behaviour); set backend="command" to silence this. ` +
+			`To instead run the real localmost binary over its native protocol, set backend="localmost".`
+	}
+
+	return fmt.Sprintf(`[approvals] mode=%q is deprecated; set backend="command" instead.`, mode)
 }
 
 type StatusConfig struct {
@@ -616,6 +705,10 @@ func (c *Config) Validate() error {
 	}
 
 	if err := c.Sandbox.validateSignalMode("sandbox"); err != nil {
+		errs = append(errs, err)
+	}
+
+	if _, _, err := c.Approvals.ResolveBackend(); err != nil {
 		errs = append(errs, err)
 	}
 

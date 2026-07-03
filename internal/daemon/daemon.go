@@ -70,6 +70,10 @@ type SessionManager struct {
 	lastInboxNotifyAt  map[string]time.Time
 	prWatch            *prWatchState
 
+	// approvalsWarnOnce guards the one-time [approvals] mode deprecation warning
+	// so it fires once per daemon lifetime, not per approval request.
+	approvalsWarnOnce sync.Once
+
 	// watchers tracks in-flight watchSession goroutines. StopAll waits on it so
 	// that post-exit state writes and status publishes complete before the
 	// daemon (or a test harness) closes the message store and removes data dirs.

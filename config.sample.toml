@@ -37,10 +37,20 @@
 # command = ""
 
 # [approvals]
-# mode = "prompt"
-# auto_pop = false
-# timeout = "10m"
-# command = ""
+# backend  = ""        # who decides: "" (none — always prompt the human),
+#                      # "command"/"external" (delegate to a command over graith's
+#                      # JSON contract), "localmost" (the real localmost binary via
+#                      # its native protocol), or "builtin" (graith's built-in
+#                      # localmost-compatible engine). "mode" is the deprecated
+#                      # predecessor and still works as a back-compat alias.
+# auto_pop = false     # auto-open the approval overlay when a request is queued
+# timeout  = "10m"     # how long to wait for a human decision
+# command  = ""        # required for backend "command"/"external"; optional path
+#                      # override for backend "localmost". Receives one JSON object
+#                      # on stdin ({tool_name,tool_input,session_id,session_name})
+#                      # and prints one to stdout ({decision:allow|block|deny|defer,reason}).
+# [approvals.builtin]
+# config = ""          # localmost-format config.json (backend "builtin")
 
 # [messages]
 # max_age = ""
