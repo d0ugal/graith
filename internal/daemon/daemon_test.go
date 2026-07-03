@@ -2563,6 +2563,64 @@ func TestDeleteInPlaceLeavesState(t *testing.T) {
 	}
 }
 
+func TestDeleteSystemSessionRejectedWhenEnabled(t *testing.T) {
+	sm := newTestSessionManager(t)
+	sm.cfg.Orchestrator.Enabled = true
+
+	sm.state.Sessions["orch1"] = &SessionState{
+		ID:         "orch1",
+		Name:       OrchestratorSessionName,
+		SystemKind: SystemKindOrchestrator,
+		Status:     StatusStopped,
+		CreatedAt:  time.Now().UTC(),
+	}
+
+	err := sm.Delete("orch1")
+	if err == nil {
+		t.Fatal("expected error deleting an enabled system session")
+	}
+
+	if _, ok := sm.state.Sessions["orch1"]; !ok {
+		t.Error("session should remain in state when delete is rejected")
+	}
+}
+
+func TestDeleteSystemSessionAllowedWhenDisabled(t *testing.T) {
+	sm := newTestSessionManager(t)
+	sm.cfg.Orchestrator.Enabled = false
+
+	// The orphaned orchestrator keeps its scratch/tmp tree under
+	// DataDir/orchestrator; deleting it must clean that up too.
+	orchDir := filepath.Join(sm.paths.DataDir, "orchestrator")
+	if err := os.MkdirAll(filepath.Join(orchDir, "scratch"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.MkdirAll(filepath.Join(orchDir, "tmp"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	sm.state.Sessions["orch1"] = &SessionState{
+		ID:         "orch1",
+		Name:       OrchestratorSessionName,
+		SystemKind: SystemKindOrchestrator,
+		Status:     StatusStopped,
+		CreatedAt:  time.Now().UTC(),
+	}
+
+	if err := sm.Delete("orch1"); err != nil {
+		t.Fatalf("delete of disabled system session should succeed: %v", err)
+	}
+
+	if _, ok := sm.state.Sessions["orch1"]; ok {
+		t.Error("session should be removed from state after delete")
+	}
+
+	if _, err := os.Stat(orchDir); !os.IsNotExist(err) {
+		t.Errorf("orchestrator scratch/tmp tree should be removed, stat err = %v", err)
+	}
+}
+
 func TestForkInPlaceRejects(t *testing.T) {
 	sm := newTestSessionManager(t)
 

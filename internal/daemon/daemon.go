@@ -2276,9 +2276,9 @@ func (sm *SessionManager) Delete(id string) error {
 		return fmt.Errorf("session %q not found", id)
 	}
 
-	if IsSystemSession(sessState) {
+	if IsSystemSession(sessState) && sm.systemSessionEnabledInConfig(sessState) {
 		sm.mu.Unlock()
-		return fmt.Errorf("session %q is a system session — disable it in config.toml instead of deleting", sessState.Name)
+		return fmt.Errorf("session %q is a system session managed by config.toml — disable it there and reload before deleting", sessState.Name)
 	}
 
 	if sessState.Starred {
@@ -2312,6 +2312,7 @@ func (sm *SessionManager) Delete(id string) error {
 	shared := sessState.SharedWorktree
 	inPlace := sessState.InPlace
 	agentName := sessState.Agent
+	sessSystemKind := sessState.SystemKind
 	prevStatus := sessState.Status
 	sessToken := sessState.Token
 	parentID := sessState.ParentID
@@ -2391,6 +2392,12 @@ func (sm *SessionManager) Delete(id string) error {
 	var teardownErr error
 
 	switch {
+	case sessSystemKind == SystemKindOrchestrator:
+		// The orchestrator has no worktree/branch; its scratch + tmp live under
+		// DataDir/orchestrator (see orchestratorScratchDir/orchestratorTmpDir),
+		// which the per-session scratch cleanup below doesn't cover. Remove the
+		// whole tree so a disabled-then-deleted orchestrator leaves nothing behind.
+		teardownErr = os.RemoveAll(filepath.Join(sm.paths.DataDir, "orchestrator"))
 	case shared:
 		scratchDir := filepath.Join(sm.paths.DataDir, "scratch", id)
 		teardownErr = os.RemoveAll(scratchDir)
