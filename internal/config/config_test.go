@@ -219,6 +219,67 @@ func TestApprovalTimeoutDuration(t *testing.T) {
 	}
 }
 
+func TestApprovalsResolveBackend(t *testing.T) {
+	tests := []struct {
+		name        string
+		a           Approvals
+		wantBackend string
+		wantDeprec  bool
+		wantErr     bool
+	}{
+		{"empty -> prompt", Approvals{}, "prompt", false, false},
+		{"explicit prompt", Approvals{Backend: "prompt"}, "prompt", false, false},
+		{"explicit command", Approvals{Backend: "command", Command: "x"}, "command", false, false},
+		{"explicit builtin", Approvals{Backend: "builtin"}, "builtin", false, false},
+		{"explicit native localmost", Approvals{Backend: "localmost"}, "localmost", false, false},
+		{"unknown backend errors", Approvals{Backend: "thrawn"}, "", false, true},
+
+		// Back-compat: legacy mode maps to the command backend with a warning.
+		{"legacy mode=localmost -> command (warn)", Approvals{Mode: "localmost"}, "command", true, false},
+		{"legacy mode=command -> command (warn)", Approvals{Mode: "command"}, "command", true, false},
+		{"legacy mode=external -> command (warn)", Approvals{Mode: "external"}, "command", true, false},
+		{"unknown mode ignored -> prompt", Approvals{Mode: "haar"}, "prompt", false, false},
+
+		// mode-only stays a warning even for localmost; never an error.
+		{"mode=localmost alone is not an error", Approvals{Mode: "localmost", Command: "x"}, "command", true, false},
+
+		// both set: agree is fine, disagree is a hard error.
+		{"both agree (command)", Approvals{Backend: "command", Mode: "command"}, "command", false, false},
+		{"external+command agree", Approvals{Backend: "external", Mode: "localmost"}, "external", false, false},
+		{"conflict: builtin + mode=localmost", Approvals{Backend: "builtin", Mode: "localmost"}, "", false, true},
+		{"conflict: native localmost + mode=localmost", Approvals{Backend: "localmost", Mode: "localmost"}, "", false, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			backend, deprec, err := tt.a.ResolveBackend()
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, tt.wantErr)
+			}
+
+			if tt.wantErr {
+				return
+			}
+
+			if backend != tt.wantBackend {
+				t.Errorf("backend = %q, want %q", backend, tt.wantBackend)
+			}
+
+			if (deprec != "") != tt.wantDeprec {
+				t.Errorf("deprecation = %q, wantDeprec %v", deprec, tt.wantDeprec)
+			}
+		})
+	}
+}
+
+func TestApprovalsResolveBackendValidatedByConfig(t *testing.T) {
+	c := Default()
+	c.Approvals = Approvals{Backend: "builtin", Mode: "localmost"}
+
+	if err := c.Validate(); err == nil {
+		t.Error("Validate() should reject a conflicting approvals backend+mode")
+	}
+}
+
 func TestParseDurationWithDays(t *testing.T) {
 	tests := []struct {
 		input   string

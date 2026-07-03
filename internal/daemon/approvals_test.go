@@ -180,6 +180,65 @@ func TestSubmitApprovalLocalmostCancelledByContext(t *testing.T) {
 	}
 }
 
+// TestSubmitApprovalCommandBackendDecision drives the "command" backend
+// through SubmitApproval and confirms a definitive decision is returned to the
+// agent (not queued for a human).
+func TestSubmitApprovalCommandBackendDecision(t *testing.T) {
+	script := filepath.Join(t.TempDir(), "approve.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\necho '{\"decision\":\"block\",\"reason\":\"nae the day\"}'\n"), 0o755); err != nil { //nolint:gosec // must be executable
+		t.Fatalf("write script: %v", err)
+	}
+
+	sm := newTestSessionManager(t)
+	sm.cfg.Approvals.Timeout = "10s"
+	sm.cfg.Approvals.Backend = "command"
+	sm.cfg.Approvals.Command = script
+
+	sm.mu.Lock()
+	sm.state.Sessions["braw1"] = &SessionState{Name: "bonnie-session"}
+	sm.mu.Unlock()
+
+	decision := sm.SubmitApproval(context.Background(), protocol.ApprovalRequestMsg{
+		RequestID: "neep-cmd",
+		SessionID: "braw1",
+		ToolName:  "Bash",
+		ToolInput: `{"command":"rm -rf /"}`,
+	})
+
+	if decision.Decision != "block" || decision.Reason != "nae the day" {
+		t.Errorf("got %q / %q, want block / nae the day", decision.Decision, decision.Reason)
+	}
+}
+
+// TestSubmitApprovalCommandBackendDenyBecomesBlock guards the load-bearing
+// deny->block normalisation: a backend returning "deny" must block, not
+// silently defer to the human.
+func TestSubmitApprovalCommandBackendDenyBecomesBlock(t *testing.T) {
+	script := filepath.Join(t.TempDir(), "approve.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\necho '{\"decision\":\"deny\"}'\n"), 0o755); err != nil { //nolint:gosec // must be executable
+		t.Fatalf("write script: %v", err)
+	}
+
+	sm := newTestSessionManager(t)
+	sm.cfg.Approvals.Timeout = "10s"
+	sm.cfg.Approvals.Backend = "command"
+	sm.cfg.Approvals.Command = script
+
+	sm.mu.Lock()
+	sm.state.Sessions["braw1"] = &SessionState{Name: "bonnie-session"}
+	sm.mu.Unlock()
+
+	decision := sm.SubmitApproval(context.Background(), protocol.ApprovalRequestMsg{
+		RequestID: "neep-deny",
+		SessionID: "braw1",
+		ToolName:  "Bash",
+	})
+
+	if decision.Decision != "block" {
+		t.Errorf("deny should normalise to block, got %q", decision.Decision)
+	}
+}
+
 func TestSubmitApprovalMissingSessionAllows(t *testing.T) {
 	sm := newTestSessionManager(t)
 

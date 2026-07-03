@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"time"
 
 	"github.com/d0ugal/graith/internal/client"
 	"github.com/d0ugal/graith/internal/config"
@@ -33,47 +32,28 @@ var approveRequestCmd = &cobra.Command{
 
 		agent := os.Getenv("GRAITH_AGENT_TYPE")
 
-		// Parse hook stdin for tool details (non-blocking with timeout).
-		type stdinResult struct {
-			data   approvalHookStdin
-			parsed bool
+		// Read the full hook payload from stdin BEFORE connecting. Approvals
+		// backends may need to evaluate the whole command, so we must not
+		// truncate or time-out the stdin read here — only the daemon round-trip
+		// is bounded (via ConnectForApproval). We skip the read when stdin is a
+		// terminal (no piped payload) to avoid blocking on interactive use.
+		var raw []byte
+		if fi, statErr := os.Stdin.Stat(); statErr == nil && (fi.Mode()&os.ModeCharDevice) == 0 {
+			raw, _ = io.ReadAll(os.Stdin)
 		}
 
-		ch := make(chan stdinResult, 1)
-
-		go func() {
-			data, err := io.ReadAll(os.Stdin)
-			if err == nil && len(data) > 0 {
-				var parsed approvalHookStdin
-				if json.Unmarshal(data, &parsed) == nil {
-					ch <- stdinResult{data: parsed, parsed: true}
-					return
+		var toolName, toolInput string
+		if len(raw) > 0 {
+			var parsed approvalHookStdin
+			if json.Unmarshal(raw, &parsed) == nil {
+				toolName = parsed.ToolName
+				if len(parsed.ToolInput) > 0 {
+					toolInput = string(parsed.ToolInput)
 				}
 			}
-
-			ch <- stdinResult{}
-		}()
-
-		var stdin stdinResult
-		select {
-		case stdin = <-ch:
-		case <-time.After(100 * time.Millisecond):
 		}
 
 		requestID := generateApprovalID()
-
-		var toolInput string
-		if stdin.parsed && len(stdin.data.ToolInput) > 0 {
-			toolInput = string(stdin.data.ToolInput)
-			if len(toolInput) > 500 {
-				toolInput = toolInput[:500] + "..."
-			}
-		}
-
-		var toolName string
-		if stdin.parsed {
-			toolName = stdin.data.ToolName
-		}
 
 		hookPaths, err := config.ResolvePaths()
 		if err != nil {
@@ -89,10 +69,11 @@ var approveRequestCmd = &cobra.Command{
 		defer c.Close()
 
 		_ = c.SendControl("approval_request", protocol.ApprovalRequestMsg{
-			RequestID: requestID,
-			SessionID: sessionID,
-			ToolName:  toolName,
-			ToolInput: toolInput,
+			RequestID:   requestID,
+			SessionID:   sessionID,
+			ToolName:    toolName,
+			ToolInput:   toolInput,
+			HookPayload: string(raw),
 		})
 
 		resp, err := c.ReadControlResponse()
