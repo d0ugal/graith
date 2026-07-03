@@ -271,8 +271,8 @@ func (m *MCPManager) startProcess(serverCfg config.MCPServerConfig, proxyID stri
 
 		merged.ReadDirs = expandPaths(merged.ReadDirs, m.log, "read")
 		merged.WriteDirs = expandPaths(merged.WriteDirs, m.log, "write")
-		merged.ReadFiles = expandPaths(merged.ReadFiles, m.log, "read")
-		merged.WriteFiles = expandPaths(merged.WriteFiles, m.log, "write")
+		merged.ReadFiles = expandFilePaths(merged.ReadFiles, m.log, "read")
+		merged.WriteFiles = expandFilePaths(merged.WriteFiles, m.log, "write")
 
 		envKeys := make([]string, 0, len(serverEnv)+1)
 

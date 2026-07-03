@@ -1860,6 +1860,53 @@ func TestExpandPathsGlob(t *testing.T) {
 	})
 }
 
+func TestExpandFilePaths(t *testing.T) {
+	dir := t.TempDir()
+	existing := filepath.Join(dir, "bide.json")
+	if err := os.WriteFile(existing, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	log := slog.Default()
+
+	// The whole point of file grants: a not-yet-created file (e.g. a lockfile)
+	// must be KEPT, unlike expandPaths which drops non-existent paths.
+	t.Run("non-existent file kept", func(t *testing.T) {
+		lock := filepath.Join(dir, "bide.json.lock") // does not exist
+		got := expandFilePaths([]string{lock}, log, "write")
+		if len(got) != 1 || got[0] != lock {
+			t.Errorf("expandFilePaths nonexistent = %v, want [%s]", got, lock)
+		}
+	})
+
+	t.Run("existing file kept", func(t *testing.T) {
+		got := expandFilePaths([]string{existing}, log, "write")
+		if len(got) != 1 || got[0] != existing {
+			t.Errorf("expandFilePaths existing = %v, want [%s]", got, existing)
+		}
+	})
+
+	t.Run("glob expands to matches", func(t *testing.T) {
+		got := expandFilePaths([]string{filepath.Join(dir, "*.json")}, log, "read")
+		if len(got) != 1 || got[0] != existing {
+			t.Errorf("expandFilePaths glob = %v, want [%s]", got, existing)
+		}
+	})
+
+	t.Run("unmatched glob skipped", func(t *testing.T) {
+		got := expandFilePaths([]string{filepath.Join(dir, "*.zzz")}, log, "read")
+		if len(got) != 0 {
+			t.Errorf("expandFilePaths no-match = %v, want []", got)
+		}
+	})
+
+	t.Run("nil input", func(t *testing.T) {
+		if got := expandFilePaths(nil, log, "read"); got != nil {
+			t.Errorf("expandFilePaths(nil) = %v, want nil", got)
+		}
+	})
+}
+
 func TestResumeRefreshesSandboxConfig(t *testing.T) {
 	t.Run("resume uses current config not stored config", func(t *testing.T) {
 		tmpDir := t.TempDir()
