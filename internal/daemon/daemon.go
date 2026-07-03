@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/d0ugal/graith/internal/approvals"
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/detector"
 	"github.com/d0ugal/graith/internal/git"
@@ -569,6 +570,16 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 	// Resolve sandbox under the lock (reads config, fast).
 	sandboxed, err := sm.resolveSandbox(agentName)
 	if err != nil {
+		if noRepo {
+			_ = os.RemoveAll(worktreePath)
+		}
+		sm.mu.Unlock()
+
+		return SessionState{}, err
+	}
+
+	// Fail closed if the configured approvals backend can't enforce.
+	if err := sm.validateApprovalsBackend(); err != nil {
 		if noRepo {
 			_ = os.RemoveAll(worktreePath)
 		}
@@ -1147,6 +1158,11 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 
 	sandboxed, err := sm.resolveSandbox(agentName)
 	if err != nil {
+		sm.mu.Unlock()
+		return SessionState{}, err
+	}
+
+	if err := sm.validateApprovalsBackend(); err != nil {
 		sm.mu.Unlock()
 		return SessionState{}, err
 	}
@@ -4250,6 +4266,41 @@ func (sm *SessionManager) deriveSandboxIncludesWriteDirs(includes []IncludedRepo
 
 func (sm *SessionManager) resolveSandbox(agentName string) (bool, error) {
 	return sm.resolveSandboxFromConfig(sm.cfg, agentName)
+}
+
+// validateApprovalsBackend fails closed at session-create when the configured
+// approvals backend can't enforce — a command backend with no command, a
+// missing localmost binary, or an unreadable/invalid builtin config. This
+// mirrors the sandbox availability check (resolveSandboxFromConfig) so a
+// misconfigured approvals backend errors loudly at create time instead of
+// silently deferring every request to the human. The default (prompt) backend
+// always enforces. Callers hold sm.mu.
+func (sm *SessionManager) validateApprovalsBackend() error {
+	acfg := sm.cfg.Approvals
+
+	backend, _, err := acfg.ResolveBackend()
+	if err != nil {
+		return err
+	}
+
+	if backend == "" || backend == approvals.BackendPrompt {
+		return nil
+	}
+
+	be, err := approvals.BackendByName(backend)
+	if err != nil {
+		return err
+	}
+
+	if av := be.Availability(approvals.Config{
+		Backend:       backend,
+		Command:       acfg.Command,
+		BuiltinConfig: acfg.Builtin.Config,
+	}); !av.CanEnforce {
+		return fmt.Errorf("approvals backend %q cannot enforce: %s", backend, av.Detail)
+	}
+
+	return nil
 }
 
 func (sm *SessionManager) resolveSandboxFromConfig(cfg *config.Config, agentName string) (bool, error) {

@@ -280,28 +280,6 @@ func TestApprovalsResolveBackendValidatedByConfig(t *testing.T) {
 	}
 }
 
-func TestApprovalsBackendAvailabilityValidated(t *testing.T) {
-	// backend=command with no command -> fail closed at config validation.
-	c := Default()
-	c.Approvals = Approvals{Backend: "command"}
-
-	if err := c.Validate(); err == nil {
-		t.Error("Validate() should reject backend=command with no command")
-	}
-
-	// With a command set, it validates.
-	c.Approvals = Approvals{Backend: "command", Command: "my-approver"}
-	if err := c.Validate(); err != nil {
-		t.Errorf("Validate() should accept backend=command with a command: %v", err)
-	}
-
-	// prompt / default never needs availability.
-	c.Approvals = Approvals{}
-	if err := c.Validate(); err != nil {
-		t.Errorf("Validate() should accept the default (prompt) backend: %v", err)
-	}
-}
-
 func TestParseDurationWithDays(t *testing.T) {
 	tests := []struct {
 		input   string
