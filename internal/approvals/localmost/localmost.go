@@ -154,7 +154,7 @@ type fileConfig struct {
 
 // Load reads and compiles a localmost-format config.json from path.
 func Load(path string) (*Engine, error) {
-	data, err := os.ReadFile(path) //nolint:gosec // path is operator-configured
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read approvals config: %w", err)
 	}

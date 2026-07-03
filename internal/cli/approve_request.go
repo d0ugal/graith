@@ -43,6 +43,7 @@ var approveRequestCmd = &cobra.Command{
 		}
 
 		var toolName, toolInput string
+
 		if len(raw) > 0 {
 			var parsed approvalHookStdin
 			if json.Unmarshal(raw, &parsed) == nil {

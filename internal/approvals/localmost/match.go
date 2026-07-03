@@ -100,6 +100,7 @@ func (ms *matchState) closure(t term, pos int, allowZero bool) []int {
 	visited := map[int]bool{}
 
 	var walk func(p int)
+
 	walk = func(p int) {
 		if visited[p] {
 			return
