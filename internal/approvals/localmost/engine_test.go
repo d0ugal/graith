@@ -232,4 +232,12 @@ func TestParseInvalidRule(t *testing.T) {
 	if _, err := Parse([]byte(`{"allow":[{"rule":"foo","redirect":"maybe"}]}`)); err == nil {
 		t.Error("expected error for invalid redirect value")
 	}
+
+	if _, err := Parse([]byte(`{"allow":[null]}`)); err == nil {
+		t.Error("expected error for a null rule")
+	}
+
+	if _, err := Parse([]byte(`{"allow":[""]}`)); err == nil {
+		t.Error("expected error for an empty rule")
+	}
 }

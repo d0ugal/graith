@@ -1,6 +1,9 @@
 package localmost
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // compiledRule is a rule with its DSL compiled to terms.
 type compiledRule struct {
@@ -51,6 +54,10 @@ func compileRules(rs []Rule) ([]compiledRule, error) {
 	out := make([]compiledRule, 0, len(rs))
 
 	for _, r := range rs {
+		if strings.TrimSpace(r.Rule) == "" {
+			return nil, fmt.Errorf("empty rule")
+		}
+
 		terms, err := compileRule(r.Rule)
 		if err != nil {
 			return nil, fmt.Errorf("rule %q: %w", r.Rule, err)
