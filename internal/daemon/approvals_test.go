@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -276,6 +277,27 @@ func TestValidateApprovalsBackend(t *testing.T) {
 				t.Errorf("validateApprovalsBackend() err = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+// TestResumeValidatesApprovalsBackend verifies the fail-closed check also fires
+// on the Resume path (parity with Create/Fork): resuming a session with an
+// unenforceable approvals backend errors before restarting the process.
+func TestResumeValidatesApprovalsBackend(t *testing.T) {
+	sm := newTestSessionManager(t)
+	sm.cfg.Approvals = config.Approvals{Backend: "command"} // no command -> unenforceable
+
+	sm.mu.Lock()
+	sm.state.Sessions["bide1"] = &SessionState{
+		Name:   "bide-session",
+		Agent:  "claude",
+		Status: StatusStopped,
+	}
+	sm.mu.Unlock()
+
+	_, err := sm.Resume("bide1", 24, 80)
+	if err == nil || !strings.Contains(err.Error(), "approvals") {
+		t.Fatalf("expected approvals availability error on resume, got %v", err)
 	}
 }
 
