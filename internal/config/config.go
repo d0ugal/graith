@@ -376,10 +376,10 @@ func (a Approvals) Validate() error {
 
 	if strings.TrimSpace(a.Command) != "" && !backendUsesCommand(backend) {
 		return fmt.Errorf(
-			"[approvals] command=%q is set but the resolved backend %q ignores it; "+
-				`command is only used by backend="command"/"external" (the external approver) `+
-				`or as the binary override for backend="localmost". `+
-				`Set backend="command" to use it as an external approver, or remove command.`,
+			"[approvals] command=%q is set but the resolved backend %q ignores it "+
+				`(command is only used by backend="command"/"external" as the external approver, `+
+				`or by backend="localmost" as the binary override); `+
+				`set backend="command" to use it as an external approver, or remove command`,
 			a.Command, backend)
 	}
 
