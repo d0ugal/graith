@@ -348,6 +348,44 @@ func legacyDeprecationMessage(mode string) string {
 	return fmt.Sprintf(`[approvals] mode=%q is deprecated; set backend="command" instead.`, mode)
 }
 
+// backendUsesCommand reports whether the [approvals] command key is meaningful
+// for the given resolved backend. The command/external backend requires it (the
+// approver command invoked over graith's JSON contract); the native localmost
+// backend uses it as an optional override for the "localmost" binary path. The
+// prompt and builtin backends ignore it entirely.
+func backendUsesCommand(backend string) bool {
+	switch backend {
+	case "command", "external", "localmost":
+		return true
+	default:
+		return false
+	}
+}
+
+// Validate checks the [approvals] config for static contradictions that would
+// otherwise only surface as an opaque fail-closed session crash at create time
+// (see #740). It rejects an unknown or conflicting backend/mode (via
+// ResolveBackend) and a command key set for a resolved backend that ignores it.
+// Backend *availability* (command present, localmost binary on PATH, builtin
+// config loadable) is still deferred to session-create by the daemon.
+func (a Approvals) Validate() error {
+	backend, _, err := a.ResolveBackend()
+	if err != nil {
+		return err
+	}
+
+	if strings.TrimSpace(a.Command) != "" && !backendUsesCommand(backend) {
+		return fmt.Errorf(
+			"[approvals] command=%q is set but the resolved backend %q ignores it; "+
+				`command is only used by backend="command"/"external" (the external approver) `+
+				`or as the binary override for backend="localmost". `+
+				`Set backend="command" to use it as an external approver, or remove command.`,
+			a.Command, backend)
+	}
+
+	return nil
+}
+
 type StatusConfig struct {
 	TTL string `toml:"ttl"`
 }
@@ -715,12 +753,13 @@ func (c *Config) Validate() error {
 		errs = append(errs, err)
 	}
 
-	// Validate the approvals backend name + mode/backend conflict here (pure).
-	// Backend *availability* (command present, localmost binary on PATH, builtin
-	// config loadable) is enforced at session-create by the daemon, mirroring
-	// the sandbox availability check — so a missing dependency fails the session
-	// loudly without bricking daemon startup.
-	if _, _, err := c.Approvals.ResolveBackend(); err != nil {
+	// Validate the approvals backend name, mode/backend conflict, and ignored
+	// command key here (pure static checks). Backend *availability* (command
+	// present, localmost binary on PATH, builtin config loadable) is enforced at
+	// session-create by the daemon, mirroring the sandbox availability check — so
+	// a missing dependency fails the session loudly without bricking daemon
+	// startup.
+	if err := c.Approvals.Validate(); err != nil {
 		errs = append(errs, err)
 	}
 
