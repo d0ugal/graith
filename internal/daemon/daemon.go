@@ -3756,6 +3756,13 @@ func (sm *SessionManager) Get(id string) (SessionState, bool) {
 	return cloneSessionState(s), ok
 }
 
+// scrollbackLogPath returns the on-disk scrollback log path for a session ID.
+// The file persists after the live PTY is torn down, so it can be read for
+// stopped or crashed sessions.
+func (sm *SessionManager) scrollbackLogPath(id string) string {
+	return filepath.Join(sm.paths.LogDir, id+".log")
+}
+
 // GetPTY returns the live PTY session by ID.
 func (sm *SessionManager) GetPTY(id string) (*grpty.Session, bool) {
 	sm.mu.RLock()

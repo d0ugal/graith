@@ -56,7 +56,15 @@ func (s *Scrollback) Write(data []byte) (int, error) {
 }
 
 func (s *Scrollback) Tail(lines int) ([]byte, error) {
-	f, err := os.Open(s.path)
+	return TailFile(s.path, lines)
+}
+
+// TailFile returns the last `lines` lines from a scrollback file on disk
+// without a live Scrollback. It is used to read logs for stopped sessions
+// whose live PTY has already been torn down. A missing file is returned as
+// an error; an existing but empty file returns (nil, nil).
+func TailFile(path string, lines int) ([]byte, error) {
+	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
