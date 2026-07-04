@@ -280,6 +280,45 @@ func TestApprovalsResolveBackendValidatedByConfig(t *testing.T) {
 	}
 }
 
+func TestApprovalsValidate(t *testing.T) {
+	tests := []struct {
+		name    string
+		a       Approvals
+		wantErr bool
+	}{
+		{"empty is fine", Approvals{}, false},
+		{"command backend with command", Approvals{Backend: "command", Command: "graith-approver"}, false},
+		{"external backend with command", Approvals{Backend: "external", Command: "graith-approver"}, false},
+		{"localmost backend with binary override", Approvals{Backend: "localmost", Command: "/opt/localmost"}, false},
+		{"legacy mode=localmost with command", Approvals{Mode: "localmost", Command: "graith-approver"}, false},
+
+		// The #740 case: command set for a backend that ignores it.
+		{"command ignored by prompt", Approvals{Command: "graith-approver"}, true},
+		{"command ignored by explicit prompt", Approvals{Backend: "prompt", Command: "graith-approver"}, true},
+		{"command ignored by builtin", Approvals{Backend: "builtin", Command: "graith-approver"}, true},
+
+		// Conflicts from ResolveBackend still surface.
+		{"unknown backend", Approvals{Backend: "thrawn"}, true},
+		{"conflicting backend+mode", Approvals{Backend: "builtin", Mode: "localmost"}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := tt.a.Validate(); (err != nil) != tt.wantErr {
+				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestApprovalsCommandIgnoredRejectedByConfig(t *testing.T) {
+	c := Default()
+	c.Approvals = Approvals{Backend: "builtin", Command: "graith-approver"}
+
+	if err := c.Validate(); err == nil {
+		t.Error("Validate() should reject a command set for a backend that ignores it")
+	}
+}
+
 func TestParseDurationWithDays(t *testing.T) {
 	tests := []struct {
 		input   string
