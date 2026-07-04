@@ -676,6 +676,97 @@ func TestLogsNotFound(t *testing.T) {
 	}
 }
 
+// addStoppedSession registers a session in state with no live PTY, mimicking a
+// session that has stopped or crashed. If scrollback is non-empty it is written
+// to the on-disk log so it can be read back without a live PTY.
+func (h *testHarness) addStoppedSession(t *testing.T, id, name string, exitCode int, scrollback string) {
+	t.Helper()
+
+	if scrollback != "" {
+		logPath := filepath.Join(h.sm.paths.LogDir, id+".log")
+		if err := os.WriteFile(logPath, []byte(scrollback), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	code := exitCode
+
+	h.sm.mu.Lock()
+	h.sm.state.Sessions[id] = &SessionState{
+		ID:        id,
+		Name:      name,
+		Agent:     "claude",
+		Status:    StatusStopped,
+		ExitCode:  &code,
+		CreatedAt: time.Now().UTC(),
+	}
+	h.sm.mu.Unlock()
+}
+
+func TestLogsStoppedSessionWithScrollback(t *testing.T) {
+	h := newTestHarness(t)
+	h.addStoppedSession(t, "bide-log", "bide-still", 0, "line one\nline two\n")
+
+	h.sendControl(t, "logs", protocol.LogsMsg{SessionID: "bide-log", Lines: 100})
+
+	var (
+		gotData []byte
+		done    bool
+	)
+
+	for !done {
+		frame, err := h.reader.ReadFrame()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		switch frame.Channel {
+		case protocol.ChannelData:
+			gotData = append(gotData, frame.Payload...)
+		case protocol.ChannelControl:
+			env, err := protocol.DecodeControl(frame.Payload)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if env.Type != "logs_done" {
+				t.Fatalf("expected logs_done, got %q", env.Type)
+			}
+
+			done = true
+		}
+	}
+
+	if !strings.Contains(string(gotData), "line two") {
+		t.Fatalf("expected scrollback content, got %q", gotData)
+	}
+}
+
+func TestLogsStoppedSessionNoOutput(t *testing.T) {
+	h := newTestHarness(t)
+	h.addStoppedSession(t, "dreich-log", "dreich-crash", 1, "")
+
+	h.sendControl(t, "logs", protocol.LogsMsg{SessionID: "dreich-log"})
+
+	env := h.readControlMsg(t)
+	if env.Type != "error" {
+		t.Fatalf("expected error, got %q", env.Type)
+	}
+
+	var e protocol.ErrorMsg
+	if err := protocol.DecodePayload(env, &e); err != nil {
+		t.Fatal(err)
+	}
+
+	if strings.Contains(e.Message, "session not found") {
+		t.Fatalf("crashed session should not report 'session not found', got %q", e.Message)
+	}
+
+	if !strings.Contains(e.Message, "no output captured") || !strings.Contains(e.Message, "exited with code 1") {
+		t.Fatalf("expected a clear no-output message with exit code, got %q", e.Message)
+	}
+}
+
 func TestLogsInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 

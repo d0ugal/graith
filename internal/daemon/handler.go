@@ -12,8 +12,32 @@ import (
 
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
+	grpty "github.com/d0ugal/graith/internal/pty"
 	"github.com/d0ugal/graith/internal/version"
 )
+
+// sessionLabel returns a human-friendly identifier for a session, preferring
+// its name and falling back to its ID.
+func sessionLabel(s SessionState) string {
+	if s.Name != "" {
+		return s.Name
+	}
+
+	return s.ID
+}
+
+// describeSessionExit returns a concise description of why a session is no
+// longer running, for use in log/error messages.
+func describeSessionExit(s SessionState) string {
+	switch {
+	case s.ExitSignal != "":
+		return fmt.Sprintf("killed by signal %s", s.ExitSignal)
+	case s.ExitCode != nil:
+		return fmt.Sprintf("exited with code %d", *s.ExitCode)
+	default:
+		return fmt.Sprintf("status: %s", s.Status)
+	}
+}
 
 const (
 	typeIdleTimeout = 10 * time.Second
@@ -558,15 +582,35 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					continue
 				}
 
-				ptySess, ok := sm.GetPTY(l.SessionID)
-				if !ok {
-					sendControl("error", protocol.ErrorMsg{Message: "session not found"})
-					continue
-				}
-
 				lines := l.Lines
 				if lines == 0 {
 					lines = 300
+				}
+
+				ptySess, ok := sm.GetPTY(l.SessionID)
+				if !ok {
+					// No live PTY. The session may still exist in state (stopped
+					// or crashed) with its scrollback log on disk — distinguish
+					// "no such session" from "session exists but has no output".
+					sess, exists := sm.Get(l.SessionID)
+					if !exists {
+						sendControl("error", protocol.ErrorMsg{Message: "session not found"})
+						continue
+					}
+
+					tail, err := grpty.TailFile(sm.scrollbackLogPath(l.SessionID), lines)
+					if err == nil && len(tail) > 0 {
+						_ = writer.WriteFrame(protocol.ChannelData, tail)
+						sendControl("logs_done", struct{}{})
+
+						continue
+					}
+
+					sendControl("error", protocol.ErrorMsg{
+						Message: fmt.Sprintf("no output captured for session %s (%s)", sessionLabel(sess), describeSessionExit(sess)),
+					})
+
+					continue
 				}
 
 				if tail, err := ptySess.Scrollback.Tail(lines); err == nil && len(tail) > 0 {
