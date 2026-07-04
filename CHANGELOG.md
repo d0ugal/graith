@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.64.5](https://github.com/d0ugal/graith/compare/v0.64.4...v0.64.5) (2026-07-04)
+
+
+### Bug Fixes
+
+* **config:** drop trailing period from approvals validate error (ST1005) ([95f842b](https://github.com/d0ugal/graith/commit/95f842ba6ff20a9ce9ac1bec7844a8019133ceda))
+* **config:** reject contradictory [approvals] config at validate ([91d4a53](https://github.com/d0ugal/graith/commit/91d4a53cbde432d64a70dd1791b81524d37e0af2)), closes [#740](https://github.com/d0ugal/graith/issues/740)
+* **daemon:** distinguish crashed session from missing one in gr logs ([23af129](https://github.com/d0ugal/graith/commit/23af1292989fbde81490983c11163a5fd794079c)), closes [#739](https://github.com/d0ugal/graith/issues/739)
+* **daemon:** distinguish crashed session from missing one in gr logs ([973aacc](https://github.com/d0ugal/graith/commit/973aaccba5f54164905fdf2bf0b00a19d6a28307)), closes [#739](https://github.com/d0ugal/graith/issues/739)
+* **sandbox:** include file grants in gr sandbox why profile ([8d2e76a](https://github.com/d0ugal/graith/commit/8d2e76ae719d0ad625dff9f00a07a94be1fb21b2)), closes [#736](https://github.com/d0ugal/graith/issues/736)
+
 ## [0.64.4](https://github.com/d0ugal/graith/compare/v0.64.3...v0.64.4) (2026-07-03)
 
 
