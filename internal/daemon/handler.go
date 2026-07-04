@@ -601,6 +601,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					tail, err := grpty.TailFile(sm.scrollbackLogPath(l.SessionID), lines)
 					if err == nil && len(tail) > 0 {
 						_ = writer.WriteFrame(protocol.ChannelData, tail)
+
 						sendControl("logs_done", struct{}{})
 
 						continue
