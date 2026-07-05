@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.64.7](https://github.com/d0ugal/graith/compare/v0.64.6...v0.64.7) (2026-07-05)
+
+
+### Dependencies
+
+* **deps:** update astral-sh/setup-uv action to v8.3.0 ([de69bb1](https://github.com/d0ugal/graith/commit/de69bb169a43ddf5748fcfc41ae2ddf0efba8496))
+
 ## [0.64.6](https://github.com/d0ugal/graith/compare/v0.64.5...v0.64.6) (2026-07-05)
 
 
