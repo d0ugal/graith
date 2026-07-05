@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.64.6](https://github.com/d0ugal/graith/compare/v0.64.5...v0.64.6) (2026-07-05)
+
+
+### Bug Fixes
+
+* update module charm.land/bubbles/v2 to v2.1.1 ([786f4a0](https://github.com/d0ugal/graith/commit/786f4a05feda0a57da1a83e1c224574efb179f33))
+* update module github.com/pelletier/go-toml/v2 to v2.4.3 ([e6d5670](https://github.com/d0ugal/graith/commit/e6d56702623311216108de5989acd600c7968145))
+
 ## [0.64.5](https://github.com/d0ugal/graith/compare/v0.64.4...v0.64.5) (2026-07-04)
 
 
