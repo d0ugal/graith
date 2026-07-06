@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -296,6 +297,19 @@ func (dc *doctorContext) checkSandboxBackend() {
 	}
 }
 
+// agentInstalled reports whether an agent's command is resolvable on PATH.
+// An empty command (or one not found) means the agent can't launch, so its
+// per-agent sandbox dirs are irrelevant.
+func agentInstalled(command string) bool {
+	if command == "" {
+		return false
+	}
+
+	_, err := exec.LookPath(command)
+
+	return err == nil
+}
+
 func (dc *doctorContext) checkSandboxPaths() {
 	allReadDirs := make(map[string][]string)
 	allWriteDirs := make(map[string][]string)
@@ -315,6 +329,16 @@ func (dc *doctorContext) checkSandboxPaths() {
 	add(allWriteFiles, cfg.Sandbox.WriteFiles, "global")
 
 	for name, agent := range cfg.Agents {
+		// Per-agent sandbox dirs only matter when the agent can actually
+		// launch. Skip the checks for agents whose command isn't resolvable
+		// on PATH — otherwise a single installed agent (e.g. "claude")
+		// produces a wall of spurious warnings for the built-in defaults of
+		// agents the user will never run. Paths shared with "global" or an
+		// installed agent are still checked, since they're added separately.
+		if !agentInstalled(agent.Command) {
+			continue
+		}
+
 		add(allReadDirs, agent.Sandbox.ReadDirs, name)
 		add(allWriteDirs, agent.Sandbox.WriteDirs, name)
 		add(allReadFiles, agent.Sandbox.ReadFiles, name)
