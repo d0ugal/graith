@@ -22,7 +22,7 @@ func writeStubExecutable(t *testing.T, dir, name string) string {
 	}
 
 	path := filepath.Join(dir, name)
-	if err := os.WriteFile(path, []byte("#!/bin/sh\n"), 0o755); err != nil {
+	if err := os.WriteFile(path, []byte("#!/bin/sh\n"), 0o755); err != nil { //nolint:gosec // G306: stub must be executable for exec.LookPath
 		t.Fatalf("write stub executable: %v", err)
 	}
 
