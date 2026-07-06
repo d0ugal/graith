@@ -983,3 +983,68 @@ func TestWrapWithFileGrants(t *testing.T) {
 		t.Errorf("--add-dirs = %q, want it to include both the write dir and write file", rw)
 	}
 }
+
+// TestBuildNonoProfileSingleFileInDirGrants: a read_dirs/write_dirs entry that
+// points at a single file (e.g. ~/.claude.json) must be routed to nono's
+// file-grant form (read_file/allow_file) rather than the directory-grant list
+// (read/allow), which nono rejects at profile parse — a fail-closed abort of
+// the whole session. Directory entries stay in the directory lists. Regression
+// test for issue #714.
+func TestBuildNonoProfileSingleFileInDirGrants(t *testing.T) {
+	tmp := t.TempDir()
+
+	readDir := filepath.Join(tmp, "glen")
+	writeDir := filepath.Join(tmp, "croft")
+	for _, d := range []string{readDir, writeDir} {
+		if err := os.Mkdir(d, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", d, err)
+		}
+	}
+
+	readFile := filepath.Join(tmp, ".gitconfig")
+	writeFile := filepath.Join(tmp, ".claude.json")
+	for _, f := range []string{readFile, writeFile} {
+		if err := os.WriteFile(f, []byte("skelf"), 0o600); err != nil {
+			t.Fatalf("write %s: %v", f, err)
+		}
+	}
+
+	opts := WrapOpts{
+		Backend:     BackendNono,
+		WorktreeDir: filepath.Join(tmp, "bothy"),
+		ReadDirs:    []string{readDir, readFile},
+		WriteDirs:   []string{writeDir, writeFile},
+	}
+
+	p, warnings := buildNonoProfile("graith-bothy", opts, "")
+	if len(warnings) != 0 {
+		t.Errorf("unexpected warnings: %v", warnings)
+	}
+
+	// The single-file entries are routed to the file-grant lists.
+	if !slices.Contains(p.Filesystem.ReadFile, readFile) {
+		t.Errorf("a read_dirs file should map to filesystem.read_file: %v", p.Filesystem.ReadFile)
+	}
+
+	if !slices.Contains(p.Filesystem.AllowFile, writeFile) {
+		t.Errorf("a write_dirs file should map to filesystem.allow_file: %v", p.Filesystem.AllowFile)
+	}
+
+	// ...and must NOT leak into the directory-grant lists (what nono rejects).
+	if slices.Contains(p.Filesystem.Read, readFile) {
+		t.Errorf("a read_dirs file must not stay in filesystem.read: %v", p.Filesystem.Read)
+	}
+
+	if slices.Contains(p.Filesystem.Allow, writeFile) {
+		t.Errorf("a write_dirs file must not stay in filesystem.allow: %v", p.Filesystem.Allow)
+	}
+
+	// Directory entries stay in the directory lists.
+	if !slices.Contains(p.Filesystem.Read, readDir) {
+		t.Errorf("a read_dirs directory should map to filesystem.read: %v", p.Filesystem.Read)
+	}
+
+	if !slices.Contains(p.Filesystem.Allow, writeDir) {
+		t.Errorf("a write_dirs directory should map to filesystem.allow: %v", p.Filesystem.Allow)
+	}
+}

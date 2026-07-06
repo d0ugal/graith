@@ -118,6 +118,21 @@ func underDefaultWritable(path string) bool {
 	return isWithinAny(path, defaultWritablePrefixes())
 }
 
+// isRegularFile reports whether path exists and is a regular file (not a
+// directory). nono's directory-grant lists (filesystem.read/allow) reject a
+// non-directory path at profile parse, so a read_dirs/write_dirs entry that
+// points at a single file must be routed to the file-grant form instead. A
+// path that doesn't exist (or can't be stat'd) is treated as a directory,
+// preserving the prior behaviour; non-existent paths are filtered upstream.
+func isRegularFile(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+
+	return info.Mode().IsRegular()
+}
+
 // isWithin reports whether path is prefix itself or nested under it.
 func isWithin(path, prefix string) bool {
 	if prefix == "" {
@@ -144,8 +159,10 @@ func isWithinAny(path string, prefixes []string) bool {
 //
 // Mapping:
 //   - worktree            -> filesystem.allow (read+write recursive) + workdir rw
-//   - write_dirs          -> filesystem.allow (read+write recursive)
-//   - read_dirs           -> filesystem.read  (read-only recursive)
+//   - write_dirs          -> filesystem.allow (read+write recursive); a single-file
+//     entry is routed to filesystem.allow_file (nono rejects a file in a dir grant)
+//   - read_dirs           -> filesystem.read  (read-only recursive); a single-file
+//     entry is routed to filesystem.read_file (nono rejects a file in a dir grant)
 //   - write_files         -> filesystem.allow_file (read+write single file)
 //   - read_files          -> filesystem.read_file  (read-only single file)
 //   - EnvKeys             -> environment.allow_vars (env allowlist; the env-leak
@@ -182,14 +199,29 @@ func buildNonoProfile(name string, opts WrapOpts, sshAuthSock string) (nonoProfi
 	}
 
 	// write_dirs (and the worktree above) map to Allow = read+write. NEVER to
-	// filesystem.write, which is write-only under nono.
-	p.Filesystem.Allow = append(p.Filesystem.Allow, opts.WriteDirs...)
+	// filesystem.write, which is write-only under nono. A write_dirs entry that
+	// is actually a single file is routed to allow_file instead, because nono's
+	// directory-grant list rejects a non-directory path at profile parse (and
+	// the sandbox is fail-closed, so that aborts the whole session).
+	for _, wd := range opts.WriteDirs {
+		if isRegularFile(wd) {
+			p.Filesystem.AllowFile = append(p.Filesystem.AllowFile, wd)
+		} else {
+			p.Filesystem.Allow = append(p.Filesystem.Allow, wd)
+		}
+	}
 
 	// read_dirs map to read-only. But nono grants write to /tmp and $TMPDIR by
 	// default (system_write_linux), so a read-only path located there would be
-	// silently writable. Re-deny those to preserve the read-only guarantee.
+	// silently writable. Re-deny those to preserve the read-only guarantee. A
+	// read_dirs entry that is actually a single file is routed to read_file, for
+	// the same reason write_dirs files are routed to allow_file above.
 	for _, rd := range opts.ReadDirs {
-		p.Filesystem.Read = append(p.Filesystem.Read, rd)
+		if isRegularFile(rd) {
+			p.Filesystem.ReadFile = append(p.Filesystem.ReadFile, rd)
+		} else {
+			p.Filesystem.Read = append(p.Filesystem.Read, rd)
+		}
 
 		if underDefaultWritable(rd) && !isWithinAny(rd, opts.WriteDirs) && !isWithin(rd, opts.WorktreeDir) {
 			p.Filesystem.Deny = append(p.Filesystem.Deny, rd)
