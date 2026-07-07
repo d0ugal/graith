@@ -15,12 +15,39 @@
 package sandbox
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
+
+// nonWritableTempRoot returns a fresh temp dir that is NOT under a nono
+// default-writable prefix (/tmp or $TMPDIR). t.TempDir() lives under $TMPDIR on
+// most hosts, which would make buildNonoProfile's re-deny guard fire for a
+// read-only source placed there — masking whether --workdir alone establishes
+// the read-only guarantee (issue #786). Real shared worktrees live under the
+// repo dir / ~/.local/share/graith, never /tmp, so we build the fixture under
+// $HOME to reproduce that faithfully.
+func nonWritableTempRoot(t *testing.T) string {
+	t.Helper()
+
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" || underDefaultWritable(home) {
+		t.Skipf("no home dir outside default-writable prefixes to isolate --workdir (home=%q, err=%v)", home, err)
+	}
+
+	dir, err := os.MkdirTemp(home, "graith-nono-786-")
+	if err != nil {
+		t.Fatalf("mkdir temp under home: %v", err)
+	}
+
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+
+	return dir
+}
 
 func mustEnforce(t *testing.T) {
 	t.Helper()
@@ -162,5 +189,114 @@ func TestNonoEnforcesFilesystemBoundary(t *testing.T) {
 
 	if _, err := os.Stat(target); err != nil {
 		t.Errorf("expected %s to be written inside the worktree: %v", target, err)
+	}
+}
+
+// TestNonoEnforcesSharedWorktreeReadOnly reproduces the --share-worktree layout
+// (issue #786): the source worktree is added read-only, the scratch dir is the
+// read-write workdir, and the process is launched with its cwd set to the source
+// worktree (as the daemon does via the PTY). It proves nono pins the workdir to
+// the scratch dir — writes to the source worktree fail while writes to scratch
+// succeed — even though the cwd is the source. Without the explicit --workdir in
+// nono.Wrap, nono would resolve the workdir from the cwd and make the source
+// writable.
+func TestNonoEnforcesSharedWorktreeReadOnly(t *testing.T) {
+	mustEnforce(t)
+
+	// Build the fixture OUTSIDE /tmp/$TMPDIR so buildNonoProfile's re-deny guard
+	// does NOT fire for the source (see nonWritableTempRoot). This is essential:
+	// if the source were under a default-writable prefix it would land in
+	// filesystem.deny as well as filesystem.read, giving a SECOND mechanism that
+	// keeps it read-only — the test would then pass even on the pre-fix build and
+	// prove nothing about --workdir. Keeping source out of the deny list means the
+	// only thing steering writes away from it is the pinned --workdir (issue #786).
+	root := nonWritableTempRoot(t)
+	source := filepath.Join(root, "bothy")    // read-only source worktree
+	scratch := filepath.Join(root, "scratch") // read-write workdir
+
+	for _, d := range []string{source, scratch} {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// A pre-existing file in the source so the agent has code to read.
+	srcFile := filepath.Join(source, "code.go")
+	if err := os.WriteFile(srcFile, []byte("package bonnie\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	profilePath := filepath.Join(root, "profile.json")
+	opts := WrapOpts{
+		Backend:     BackendNono,
+		WorktreeDir: scratch,          // scratch is the read-write workdir
+		ReadDirs:    []string{source}, // source is read-only
+		EnvKeys:     []string{"PATH", "HOME"},
+		ProfilePath: profilePath,
+	}
+
+	// Reading the source worktree must succeed (it is granted read-only).
+	cmd, args, err := Wrap("cat", []string{srcFile}, opts)
+	if err != nil {
+		t.Fatalf("wrap: %v", err)
+	}
+
+	// Isolation guard: prove the source is NOT re-denied, so this test exercises
+	// the --workdir pin rather than the /tmp re-deny path. If this fails, the
+	// fixture leaked under a default-writable prefix and the enforcement result
+	// below would be untrustworthy.
+	data, err := os.ReadFile(profilePath)
+	if err != nil {
+		t.Fatalf("read profile: %v", err)
+	}
+
+	var prof nonoProfile
+	if err := json.Unmarshal(data, &prof); err != nil {
+		t.Fatalf("profile is not valid JSON: %v", err)
+	}
+
+	if slices.Contains(prof.Filesystem.Deny, source) {
+		t.Fatalf("source %q is in filesystem.deny; test would pass via re-deny, not --workdir — fixture must live outside /tmp/$TMPDIR", source)
+	}
+
+	rc := exec.Command(cmd, args...) //nolint:gosec // test-controlled command
+	rc.Dir = source
+	if out, err := rc.CombinedOutput(); err != nil {
+		t.Errorf("reading granted source file failed: %v; output=%q", err, out)
+	}
+
+	// Writing into the source worktree must FAIL even though it is the cwd —
+	// this is the read-only guarantee the shared-worktree model depends on.
+	blocked := filepath.Join(source, "tamper.txt")
+	cmd, args, err = Wrap("sh", []string{"-c", "echo thrawn > " + blocked}, opts)
+	if err != nil {
+		t.Fatalf("wrap: %v", err)
+	}
+
+	wc := exec.Command(cmd, args...) //nolint:gosec // test-controlled command
+	wc.Dir = source
+	if out, err := wc.CombinedOutput(); err == nil {
+		t.Errorf("writing into the read-only source worktree succeeded under sandbox; output=%q", out)
+	}
+
+	if _, err := os.Stat(blocked); err == nil {
+		t.Errorf("file %s was written into the read-only source worktree", blocked)
+	}
+
+	// Writing into the scratch workdir must succeed.
+	allowed := filepath.Join(scratch, "canny.txt")
+	cmd, args, err = Wrap("sh", []string{"-c", "echo bonnie > " + allowed}, opts)
+	if err != nil {
+		t.Fatalf("wrap: %v", err)
+	}
+
+	sc := exec.Command(cmd, args...) //nolint:gosec // test-controlled command
+	sc.Dir = source
+	if out, err := sc.CombinedOutput(); err != nil {
+		t.Errorf("writing into the scratch workdir failed: %v; output=%q", err, out)
+	}
+
+	if _, err := os.Stat(allowed); err != nil {
+		t.Errorf("expected %s to be written inside the scratch workdir: %v", allowed, err)
 	}
 }

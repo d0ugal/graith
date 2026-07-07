@@ -641,7 +641,9 @@ Per AGENTS.md (tests beside the code; `-race`; Scots-word fixtures):
   no silent drop (a `thrawn`/`fash` case).
 - **argv & adversarial paths** (§4b/B5/B6): a `--`-prefixed path (`--wynd`) and a
   colon-containing path (`glen:ben`) both land intact in the profile file, and
-  the exec argv is exactly `nono run --profile <f> -- <agent> <args>`; a
+  the exec argv is exactly `nono run --profile <f> --workdir <dir> -- <agent> <args>`
+  (the `--workdir` pins nono's read-write workdir to `opts.WorktreeDir` rather
+  than letting nono derive it from the process cwd; see issue #786); a
   non-existent dir (`dreich`) is filtered out, not passed; a glob (`glen/*`)
   expands to per-entry grants; a file (not dir) uses the file-grant form.
 - **Backend selection** (`internal/config` + `internal/daemon`): `Merge` picks
