@@ -337,6 +337,21 @@ func TestBuildNonoProfileEmptyProfileDefaults(t *testing.T) {
 	}
 }
 
+func TestBuildNonoProfileWhitespaceProfileDefaultsAndTrims(t *testing.T) {
+	// A whitespace-only value is treated as unset (falls back to "default")
+	// rather than emitted verbatim as an unresolvable extends name.
+	blank, _, _ := buildNonoProfile("graith-haar", WrapOpts{Backend: BackendNono, Profile: "   "}, "")
+	if blank.Extends != "default" {
+		t.Errorf("Extends = %q, want default when Profile is whitespace-only", blank.Extends)
+	}
+
+	// Surrounding whitespace on a real value is trimmed so nono can resolve it.
+	padded, _, _ := buildNonoProfile("graith-braw", WrapOpts{Backend: BackendNono, Profile: "  always-further/claude  "}, "")
+	if padded.Extends != "always-further/claude" {
+		t.Errorf("Extends = %q, want trimmed always-further/claude", padded.Extends)
+	}
+}
+
 func TestBuildNonoProfileEnvAllowlist(t *testing.T) {
 	opts := WrapOpts{
 		Backend: BackendNono,

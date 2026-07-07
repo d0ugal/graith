@@ -200,9 +200,15 @@ func isWithinAny(path string, prefixes []string) bool {
 // (deny_credentials, deny_shell_history, ...) and base system paths, so graith
 // need not enumerate them. opts.Profile overrides that base with a maintained
 // registry profile (e.g. "always-further/claude") so a known agent's upstream
-// file grants are inherited instead of hand-listed; graith's own
-// filesystem.allow/read and environment.allow_vars are still layered on top and
-// win. sshAuthSock is $SSH_AUTH_SOCK resolved by the caller ("" if unset).
+// file grants are inherited instead of hand-listed. nono resolves "extends" by
+// MERGING the base with this generated profile, unioning collection fields
+// (filesystem.allow/read, environment.allow_vars, ...): graith's grants are
+// always present, but its env allowlist can only widen the base's, never narrow
+// it, so a custom base profile is only as tight as the operator audited it.
+// (nono's required deny groups are merged into every resolved profile, so the
+// credential-deny baseline survives regardless of this field.) A whitespace-only
+// value is treated as unset. sshAuthSock is $SSH_AUTH_SOCK resolved by the
+// caller ("" if unset).
 //
 // A read-only read_dirs/read_files entry that falls under a nono
 // default-writable prefix (/tmp, $TMPDIR) is rejected with an error: nono
@@ -211,7 +217,7 @@ func isWithinAny(path string, prefixes []string) bool {
 func buildNonoProfile(name string, opts WrapOpts, sshAuthSock string) (nonoProfile, []string, error) {
 	var warnings []string
 
-	extends := opts.Profile
+	extends := strings.TrimSpace(opts.Profile)
 	if extends == "" {
 		extends = "default"
 	}
