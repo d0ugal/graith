@@ -3435,6 +3435,21 @@ func TestDeleteRemovesNonoProfile(t *testing.T) {
 	}
 }
 
+func TestNonoProfilePathMatchesWrapOpts(t *testing.T) {
+	// The leak fix relies on Delete removing exactly the path that
+	// sandboxOptsFromConfig tells the nono backend to write. Both now route
+	// through nonoProfilePath; this locks that invariant so a future refactor
+	// reintroducing a literal path in one site is caught.
+	sm := newTestSessionManager(t)
+	sm.paths.RuntimeDir = t.TempDir()
+
+	opts := sm.sandboxOptsFromConfig(config.SandboxConfig{}, "braw1", "/nonexistent/worktree", "claude", nil, true)
+
+	if opts.ProfilePath != sm.nonoProfilePath("braw1") {
+		t.Errorf("write path %q != cleanup path %q", opts.ProfilePath, sm.nonoProfilePath("braw1"))
+	}
+}
+
 func TestDeleteWithChildrenRemovesNonoProfiles(t *testing.T) {
 	sm := newTestSessionManager(t)
 	sm.paths.RuntimeDir = t.TempDir()
