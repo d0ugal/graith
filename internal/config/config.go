@@ -852,6 +852,32 @@ func ExpandPath(p string) string {
 	return filepath.Clean(p)
 }
 
+// ExpandPathRelative resolves a configured path deterministically: it expands a
+// leading ~/, and resolves a still-relative path against baseDir (the directory
+// holding the config file) rather than the process working directory, then
+// cleans the result. This keeps a value like [approvals.builtin] config
+// resolving to the same absolute path regardless of which directory the daemon
+// or CLI happens to run from. An empty (or whitespace-only) path stays empty so
+// callers can distinguish "unset" from a resolved path.
+func ExpandPathRelative(p, baseDir string) string {
+	p = strings.TrimSpace(p)
+	if p == "" {
+		return ""
+	}
+
+	if strings.HasPrefix(p, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			p = filepath.Join(home, p[2:])
+		}
+	}
+
+	if !filepath.IsAbs(p) && baseDir != "" {
+		p = filepath.Join(baseDir, p)
+	}
+
+	return filepath.Clean(p)
+}
+
 func (rc RepoConfig) Validate() error {
 	if rc.Singleton && rc.AllowConcurrent {
 		return fmt.Errorf("repo %q: singleton and allow_concurrent cannot both be set", rc.Path)

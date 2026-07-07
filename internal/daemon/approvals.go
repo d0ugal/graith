@@ -3,32 +3,12 @@ package daemon
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/d0ugal/graith/internal/approvals"
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
 )
-
-// expandTilde trims surrounding whitespace and expands a leading ~/ to the
-// user's home directory, matching the CLI's approvalsConfigPath exactly (trim
-// then expand). Without this the daemon would pass a literal ~/... path to
-// localmost.Load and fail to open the documented default [approvals.builtin]
-// config = "~/.config/graith/approvals.json".
-func expandTilde(path string) string {
-	path = strings.TrimSpace(path)
-
-	if strings.HasPrefix(path, "~/") {
-		if home, err := os.UserHomeDir(); err == nil {
-			return filepath.Join(home, path[2:])
-		}
-	}
-
-	return path
-}
 
 // approvalDisplayLimit caps the tool input shown in the approval overlay and
 // broadcast to attached clients. The full input is still evaluated by backends
@@ -190,12 +170,16 @@ func (sm *SessionManager) broadcastApprovalNotification() {
 // approvalsBackendConfig builds the resolved approvals.Config for a backend,
 // rendering the builtin engine's inline TOML rules to localmost-format JSON when
 // they are present (config.Approvals.Validate guarantees inline and the external
-// config path are not both set).
-func approvalsBackendConfig(backend string, cfg config.Approvals) (approvals.Config, error) {
+// config path are not both set). The external [approvals.builtin] config path is
+// expanded via config.ExpandPathRelative so a leading ~/ resolves and a relative
+// path resolves against configDir (the directory holding config.toml) rather
+// than the daemon's working directory — matching the CLI's approvals validate so
+// a config that validates green also enforces at session-create.
+func approvalsBackendConfig(backend string, cfg config.Approvals, configDir string) (approvals.Config, error) {
 	acfg := approvals.Config{
 		Backend:       backend,
 		Command:       cfg.Command,
-		BuiltinConfig: expandTilde(cfg.Builtin.Config),
+		BuiltinConfig: config.ExpandPathRelative(cfg.Builtin.Config, configDir),
 	}
 
 	if cfg.Builtin.HasInline() {
@@ -245,7 +229,7 @@ func (sm *SessionManager) tryApprovalBackend(ctx context.Context, req protocol.A
 
 	sm.mu.RUnlock()
 
-	acfg, err := approvalsBackendConfig(backendName, cfg)
+	acfg, err := approvalsBackendConfig(backendName, cfg, sm.approvalsConfigDir())
 	if err != nil {
 		sm.log.Error("approvals: invalid builtin config, deferring to user", "err", err)
 		return protocol.ApprovalDecisionMsg{}, false
