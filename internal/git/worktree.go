@@ -85,36 +85,63 @@ func RepoRootFromWorktree(worktreePath string) (string, error) {
 	return filepath.Dir(commonDir), nil
 }
 
-// isBrokenWorktreeErr reports whether a `git worktree remove` failure is due to
-// the worktree itself being missing/broken/unregistered — as opposed to the
-// source repo being unreachable. Git returns exit 128 with one of these
-// messages when the worktree's .git link is broken or its registration is gone,
-// while the repo itself is still valid. In those cases teardown can safely fall
-// back to removing the directory and pruning the stale registration (#741).
-func isBrokenWorktreeErr(err error) bool {
-	msg := err.Error()
+// resolvePath returns the canonical path for comparison, following symlinks
+// when possible (macOS /var → /private/var) and falling back to a lexical
+// clean when the path can't be resolved.
+func resolvePath(p string) string {
+	if resolved, err := filepath.EvalSymlinks(p); err == nil {
+		return resolved
+	}
 
-	return strings.Contains(msg, "is not a working tree") ||
-		strings.Contains(msg, "cannot remove working tree")
+	return filepath.Clean(p)
+}
+
+// IsRegisteredWorktree reports whether worktreePath is registered as a worktree
+// of the repo at repoPath. It matches even a worktree whose .git link is broken,
+// since git still lists a stale (prunable) registration — that registration is
+// the signal graith owns the path and may remove it during teardown (#741). It
+// returns false when the repo is unreachable or the path is not a registered
+// worktree (an unrelated directory, an independent repo, or an already-orphaned
+// entry), so teardown never deletes a directory graith doesn't own. Detection
+// is based on the stable `--porcelain` listing rather than git's error text, so
+// it is independent of git's locale and message wording.
+func IsRegisteredWorktree(repoPath, worktreePath string) bool {
+	out, err := RunOutput(repoPath, "worktree", "list", "--porcelain")
+	if err != nil {
+		return false
+	}
+
+	target := resolvePath(worktreePath)
+	for line := range strings.SplitSeq(out, "\n") {
+		p, ok := strings.CutPrefix(line, "worktree ")
+		if ok && resolvePath(p) == target {
+			return true
+		}
+	}
+
+	return false
 }
 
 // TeardownSession removes a session's worktree and branch. It is idempotent: a
 // missing or broken worktree is treated as already-removed and never blocks
 // dropping the session. `git worktree remove --force` fails with exit 128 when
-// the directory is gone or its .git link is broken; in those cases we remove
-// the directory directly and prune the now-stale registration so a broken
-// worktree can't wedge delete forever (#741). A failure that instead points at
-// the source repo (unreachable / not a git repo) is surfaced so the session is
-// kept for retry rather than silently dropped.
+// the directory is gone or its .git link is broken; when git still lists the
+// path as a registered worktree of this repo (as it does for a broken link) we
+// remove the directory directly and prune the stale registration so a broken
+// worktree can't wedge delete forever (#741). A failure where the path is not a
+// registered worktree — an unreachable/invalid source repo, or a stale path
+// pointing somewhere graith doesn't own — is surfaced so the session is kept
+// for retry rather than dropped (and nothing unowned is deleted).
 func TeardownSession(repoPath, worktreePath, branchName string) error {
 	var errs []error
 
 	switch _, statErr := os.Stat(worktreePath); {
 	case statErr == nil:
 		if err := RemoveWorktree(repoPath, worktreePath); err != nil {
-			if isBrokenWorktreeErr(err) {
-				// Broken or unregistered worktree: remove the directory
-				// ourselves, then prune the stale git registration.
+			if IsRegisteredWorktree(repoPath, worktreePath) {
+				// graith owns this worktree but git can't cleanly remove it
+				// (broken .git link, etc). Remove the directory ourselves and
+				// prune the now-stale registration.
 				if rmErr := os.RemoveAll(worktreePath); rmErr != nil {
 					errs = append(errs, fmt.Errorf("remove worktree: %w (git worktree remove: %v)", rmErr, err))
 				}

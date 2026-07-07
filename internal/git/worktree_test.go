@@ -51,7 +51,8 @@ func TestTeardownSessionBrokenGitLink(t *testing.T) {
 	wt := makeWorktree(t, repo, "thrawn")
 
 	// Break the worktree's link to the repo by removing its .git file. `git
-	// worktree remove --force` now fails with "is not a working tree".
+	// worktree remove --force` now fails ("cannot remove working tree"), but
+	// git still lists the worktree as a prunable registration.
 	if err := os.Remove(filepath.Join(wt, ".git")); err != nil {
 		t.Fatalf("remove .git: %v", err)
 	}
@@ -98,6 +99,87 @@ func TestTeardownSessionMissingDirPrunes(t *testing.T) {
 
 	if n := worktreeCount(t, repo); n != 1 {
 		t.Errorf("stale registration not pruned: worktree count = %d, want 1", n)
+	}
+}
+
+// A directory at worktreePath that graith does not own (not a registered
+// worktree of the repo) must never be removed by teardown, even though `git
+// worktree remove` reports "is not a working tree" for it. Instead the error is
+// surfaced so the session is kept for retry (#741 safety: don't delete unowned
+// paths).
+func TestTeardownSessionUnregisteredPathNotRemoved(t *testing.T) {
+	repo := setupTestRepo(t)
+
+	// A plain directory that was never a worktree of repo.
+	stray := filepath.Join(t.TempDir(), "clachan")
+	if err := os.MkdirAll(stray, 0o700); err != nil {
+		t.Fatalf("mkdir stray: %v", err)
+	}
+
+	if IsRegisteredWorktree(repo, stray) {
+		t.Fatal("stray dir should not be a registered worktree")
+	}
+
+	err := TeardownSession(repo, stray, "")
+	if err == nil {
+		t.Fatal("expected error tearing down an unregistered path")
+	}
+
+	if _, statErr := os.Stat(stray); statErr != nil {
+		t.Errorf("unregistered dir must not be removed: %v", statErr)
+	}
+}
+
+// When the source repo is unreachable, teardown of an existing worktree
+// directory must surface an error (keep-for-retry) and must not remove the
+// directory, since it can't confirm ownership.
+func TestTeardownSessionRepoUnreachable(t *testing.T) {
+	notARepo := t.TempDir()
+	wt := filepath.Join(t.TempDir(), "bothy")
+	if err := os.MkdirAll(wt, 0o700); err != nil {
+		t.Fatalf("mkdir wt: %v", err)
+	}
+
+	err := TeardownSession(notARepo, wt, "")
+	if err == nil {
+		t.Fatal("expected error when repo is not a git repo")
+	}
+
+	if _, statErr := os.Stat(wt); statErr != nil {
+		t.Errorf("worktree dir must not be removed when repo is unreachable: %v", statErr)
+	}
+}
+
+func TestIsRegisteredWorktree(t *testing.T) {
+	repo := setupTestRepo(t)
+	wt := makeWorktree(t, repo, "braw")
+
+	if !IsRegisteredWorktree(repo, wt) {
+		t.Error("valid worktree should be registered")
+	}
+
+	// Broken .git link — still registered (prunable) until removed.
+	if err := os.Remove(filepath.Join(wt, ".git")); err != nil {
+		t.Fatalf("remove .git: %v", err)
+	}
+
+	if !IsRegisteredWorktree(repo, wt) {
+		t.Error("broken-link worktree should still be registered")
+	}
+
+	// An unrelated directory is not registered.
+	stray := filepath.Join(t.TempDir(), "haar")
+	if err := os.MkdirAll(stray, 0o700); err != nil {
+		t.Fatalf("mkdir stray: %v", err)
+	}
+
+	if IsRegisteredWorktree(repo, stray) {
+		t.Error("unrelated dir should not be registered")
+	}
+
+	// An unreachable repo yields no registrations.
+	if IsRegisteredWorktree(t.TempDir(), wt) {
+		t.Error("non-repo path should report no registered worktrees")
 	}
 }
 
