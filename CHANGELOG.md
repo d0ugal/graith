@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.65.0](https://github.com/d0ugal/graith/compare/v0.64.7...v0.65.0) (2026-07-07)
+
+
+### ⚠ BREAKING CHANGES
+
+* **approvals:** the approve-request approval hook is no longer installed by default. Set [approvals] enabled = true to restore human approval gating of agent tool calls.
+
+### Features
+
+* **approvals:** disable the approve-request hook by default ([b43d2c2](https://github.com/d0ugal/graith/commit/b43d2c2d67d204b2ccd5562a6ca988b4ff6030e7))
+
+
+### Bug Fixes
+
+* **doctor:** skip sandbox dir checks for uninstalled agents ([a401f97](https://github.com/d0ugal/graith/commit/a401f97bd5e5f693274eb67ef485d2701e63ce18)), closes [#715](https://github.com/d0ugal/graith/issues/715)
+* **doctor:** suppress gosec G306 on executable test stub ([0df016c](https://github.com/d0ugal/graith/commit/0df016cf60fd099d22b6800d6931023554ba7741))
+* **sandbox:** route single-file read_dirs/write_dirs to nono file grants ([9082db9](https://github.com/d0ugal/graith/commit/9082db95c19ce0466df84c0136060436a32ade9d)), closes [#714](https://github.com/d0ugal/graith/issues/714)
+* **sandbox:** tolerate expected /tmp re-deny warning and fix lint ([310206e](https://github.com/d0ugal/graith/commit/310206e4881ca05d9582c270b7881077d58ed688))
+* update module modernc.org/libc to v1.74.0 ([e64bb7b](https://github.com/d0ugal/graith/commit/e64bb7b105bc015e20015d48766570bda3195e14))
+
+
+### Dependencies
+
+* **deps:** update astral-sh/setup-uv action to v8.3.1 ([8d6e3b5](https://github.com/d0ugal/graith/commit/8d6e3b56217b60787603dd8be3dcabb2c93f3e5d))
+* **deps:** update dependency nolabs-ai/nono to v0.67.0 ([40a94a1](https://github.com/d0ugal/graith/commit/40a94a101dacc3653cec66be126f37c17309ef16))
+* **deps:** update dependency nolabs-ai/nono to v0.67.1 ([9077ed8](https://github.com/d0ugal/graith/commit/9077ed8169c3cb6f98a36adf5068983860c601dc))
+
 ## [0.64.7](https://github.com/d0ugal/graith/compare/v0.64.6...v0.64.7) (2026-07-05)
 
 
