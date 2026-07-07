@@ -274,6 +274,11 @@ func (sm *SessionManager) rollbackOrchestratorCreate(id string) {
 	delete(sm.state.Sessions, id)
 	_ = sm.saveState()
 	sm.mu.Unlock()
+
+	// createOrchestrator wraps via sandboxOptsFromConfig, which may have written
+	// a nono profile before this error path ran; state is now gone so no later
+	// Delete would remove it. Mirrors cleanupOnError/forkCleanup in Create/Fork.
+	_ = os.Remove(sm.nonoProfilePath(id))
 }
 
 func (sm *SessionManager) buildOrchestratorPrompt(agentName string, orchCfg config.OrchestratorConfig) []string {
