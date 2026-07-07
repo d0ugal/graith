@@ -2,9 +2,11 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"testing"
 	"time"
 
+	"github.com/d0ugal/graith/internal/output"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/spf13/cobra"
 )
@@ -115,6 +117,104 @@ func TestPrintTree(t *testing.T) {
 
 	if !bytes.Contains([]byte(output), []byte("thrawn")) {
 		t.Error("missing root session 'thrawn'")
+	}
+}
+
+func TestPrintQuietNames(t *testing.T) {
+	origJSON := jsonOutput
+
+	defer func() { jsonOutput = origJSON }()
+
+	jsonOutput = false
+
+	sessions := []protocol.SessionInfo{
+		{ID: "abc", Name: "thrawn", RepoName: "croft"},
+		{ID: "def", Name: "braw", RepoName: "croft"},
+		{ID: "ghi", Name: "canny", RepoName: "bothy"},
+	}
+
+	var buf bytes.Buffer
+
+	cmd := &cobra.Command{}
+	cmd.SetOut(&buf)
+
+	if err := printQuiet(cmd, sessions); err != nil {
+		t.Fatalf("printQuiet: %v", err)
+	}
+
+	// Sorted by repo, then name: bothy/canny, croft/braw, croft/thrawn.
+	want := "canny\nbraw\nthrawn\n"
+	if buf.String() != want {
+		t.Errorf("got %q, want %q", buf.String(), want)
+	}
+}
+
+func TestPrintQuietJSONIDs(t *testing.T) {
+	origOut := out
+	origJSON := jsonOutput
+
+	defer func() {
+		out = origOut
+		jsonOutput = origJSON
+	}()
+
+	var buf bytes.Buffer
+
+	jsonOutput = true
+	out = output.NewWithWriter(true, &buf)
+
+	sessions := []protocol.SessionInfo{
+		{ID: "abc", Name: "thrawn", RepoName: "croft"},
+		{ID: "def", Name: "braw", RepoName: "croft"},
+		{ID: "ghi", Name: "canny", RepoName: "bothy"},
+	}
+
+	cmd := &cobra.Command{}
+	cmd.SetOut(&buf)
+
+	if err := printQuiet(cmd, sessions); err != nil {
+		t.Fatalf("printQuiet: %v", err)
+	}
+
+	var ids []string
+	if err := json.Unmarshal(buf.Bytes(), &ids); err != nil {
+		t.Fatalf("output is not a JSON array: %v (%q)", err, buf.String())
+	}
+
+	// Sorted by repo, then name: canny(ghi), braw(def), thrawn(abc).
+	want := []string{"ghi", "def", "abc"}
+	if len(ids) != len(want) {
+		t.Fatalf("got %v, want %v", ids, want)
+	}
+
+	for i := range want {
+		if ids[i] != want[i] {
+			t.Fatalf("got %v, want %v", ids, want)
+		}
+	}
+}
+
+func TestPrintQuietDoesNotMutateInput(t *testing.T) {
+	origJSON := jsonOutput
+
+	defer func() { jsonOutput = origJSON }()
+
+	jsonOutput = false
+
+	sessions := []protocol.SessionInfo{
+		{ID: "abc", Name: "thrawn", RepoName: "croft"},
+		{ID: "def", Name: "braw", RepoName: "croft"},
+	}
+
+	cmd := &cobra.Command{}
+	cmd.SetOut(&bytes.Buffer{})
+
+	if err := printQuiet(cmd, sessions); err != nil {
+		t.Fatalf("printQuiet: %v", err)
+	}
+
+	if sessions[0].Name != "thrawn" || sessions[1].Name != "braw" {
+		t.Errorf("printQuiet mutated caller's slice order: %v", sessions)
 	}
 }
 

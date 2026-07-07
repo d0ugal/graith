@@ -18,6 +18,7 @@ var (
 	listTree     bool
 	listChildren string
 	listStarred  bool
+	listQuiet    bool
 )
 
 var listCmd = &cobra.Command{
@@ -79,6 +80,10 @@ var listCmd = &cobra.Command{
 			list.Sessions = filtered
 		}
 
+		if listQuiet {
+			return printQuiet(cmd, list.Sessions)
+		}
+
 		if jsonOutput {
 			return out.JSON(list)
 		}
@@ -111,6 +116,35 @@ var listCmd = &cobra.Command{
 
 		return nil
 	},
+}
+
+// printQuiet emits only session identifiers, one per line (or as a JSON array
+// of session IDs when --json is set), for scripting. Mirrors `docker ps -q`.
+func printQuiet(cmd *cobra.Command, sessions []protocol.SessionInfo) error {
+	sorted := make([]protocol.SessionInfo, len(sessions))
+	copy(sorted, sessions)
+	sort.Slice(sorted, func(i, j int) bool {
+		if sorted[i].RepoName != sorted[j].RepoName {
+			return sorted[i].RepoName < sorted[j].RepoName
+		}
+
+		return sorted[i].Name < sorted[j].Name
+	})
+
+	if jsonOutput {
+		ids := make([]string, 0, len(sorted))
+		for _, s := range sorted {
+			ids = append(ids, s.ID)
+		}
+
+		return out.JSON(ids)
+	}
+
+	for _, s := range sorted {
+		_, _ = fmt.Fprintln(cmd.OutOrStdout(), s.Name)
+	}
+
+	return nil
 }
 
 func printFlat(cmd *cobra.Command, sessions []protocol.SessionInfo, now time.Time) {
@@ -346,6 +380,7 @@ func registerListCmd() {
 	listCmd.Flags().BoolVar(&listTree, "tree", false, "show parent-child hierarchy")
 	listCmd.Flags().StringVar(&listChildren, "children", "", "filter to descendants of a session")
 	listCmd.Flags().BoolVar(&listStarred, "starred", false, "show only starred sessions")
+	listCmd.Flags().BoolVarP(&listQuiet, "quiet", "q", false, "output only session names (or IDs as JSON with --json)")
 
 	_ = listCmd.RegisterFlagCompletionFunc("repo", completeRepoPaths)
 	_ = listCmd.RegisterFlagCompletionFunc("children", completeSessionNames)
