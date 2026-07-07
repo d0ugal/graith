@@ -1498,6 +1498,43 @@ func LoadOrDefault(path string) (*Config, error) {
 	return cfg, nil
 }
 
+// ResolveConfigPath returns the config file that LoadOrDefault(explicit) would
+// read and whether that file exists on disk. When explicit is set it is used
+// verbatim. When empty, resolution mirrors LoadOrDefault: the profile/XDG path,
+// falling back to the legacy macOS path only when the XDG file is absent and no
+// profile is active. Diagnostics (e.g. gr doctor) use this so the reported and
+// inspected file is the same one the CLI/daemon actually load.
+func ResolveConfigPath(explicit string) (path string, exists bool, err error) {
+	if explicit != "" {
+		_, statErr := os.Stat(explicit)
+		return explicit, statErr == nil, nil
+	}
+
+	profile, _, err := ResolveProfile()
+	if err != nil {
+		return "", false, err
+	}
+
+	p, err := ResolvePaths()
+	if err != nil {
+		return "", false, err
+	}
+
+	if _, statErr := os.Stat(p.ConfigFile); statErr == nil {
+		return p.ConfigFile, true, nil
+	}
+
+	if profile == "" {
+		if legacy := legacyConfigFile(); legacy != "" {
+			if _, statErr := os.Stat(legacy); statErr == nil {
+				return legacy, true, nil
+			}
+		}
+	}
+
+	return p.ConfigFile, false, nil
+}
+
 // legacyConfigFile returns the old macOS config path (~/Library/Application
 // Support/graith/config.toml) if it differs from the current path.
 func legacyConfigFile() string {

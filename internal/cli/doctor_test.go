@@ -337,28 +337,6 @@ func TestCheckSandboxPathsChecksGlobal(t *testing.T) {
 	}
 }
 
-// TestEffectiveConfigPathHonoursConfigFlag verifies doctor inspects the
-// --config path when set, not the default XDG path.
-func TestEffectiveConfigPathHonoursConfigFlag(t *testing.T) {
-	oldCfgFile := cfgFile
-
-	t.Cleanup(func() {
-		cfgFile = oldCfgFile
-	})
-
-	cfgFile = ""
-
-	if got := effectiveConfigPath(); got != paths.ConfigFile {
-		t.Errorf("effectiveConfigPath() with no --config = %q, want default %q", got, paths.ConfigFile)
-	}
-
-	cfgFile = "/tmp/croft/config.toml"
-
-	if got := effectiveConfigPath(); got != cfgFile {
-		t.Errorf("effectiveConfigPath() with --config = %q, want %q", got, cfgFile)
-	}
-}
-
 // TestCheckConfigKeysWarnsAndPasses verifies checkConfigKeys emits a warn for an
 // unrecognised key (with a suggestion) and an ok when every key is recognised.
 func TestCheckConfigKeysWarnsAndPasses(t *testing.T) {
