@@ -29,6 +29,13 @@ func (sm *SessionManager) SubmitApproval(ctx context.Context, req protocol.Appro
 	approvalsCfg := sm.cfg.Approvals
 	sm.mu.RUnlock()
 
+	// When the approval gate is disabled, never queue for a human who may not
+	// be watching — allow by default. This is a defensive backstop; the
+	// PreToolUse hook is normally omitted entirely when disabled.
+	if !approvalsCfg.HookEnabled() {
+		return protocol.ApprovalDecisionMsg{Decision: "allow"}
+	}
+
 	if decision, handled := sm.tryApprovalBackend(ctx, req, approvalsCfg); handled {
 		return decision
 	}

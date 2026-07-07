@@ -109,6 +109,12 @@ enabled = true
 on_approval = true
 
 [approvals]
+# enabled controls whether the PreToolUse approve-request gating hook is
+# installed. Defaults to false: the status/lifecycle hooks still run but the
+# approval gate does not, because unattended agents otherwise see their own
+# tool calls as human-rejected and the OS sandbox is the intended guardrail.
+# Set to true to opt back into human approval gating.
+# enabled = true
 backend = ""
 timeout = "10m"
 

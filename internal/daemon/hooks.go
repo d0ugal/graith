@@ -52,6 +52,8 @@ func (sm *SessionManager) generateClaudeSettings(sessionID string) (string, erro
 
 	quoted := shellQuote(resolveGrBin())
 
+	hookEnabled := sm.cfg.Approvals.HookEnabled()
+
 	events := []string{
 		"SessionStart",
 		"UserPromptSubmit",
@@ -84,6 +86,10 @@ func (sm *SessionManager) generateClaudeSettings(sessionID string) (string, erro
 
 		switch event {
 		case "PreToolUse":
+			if !hookEnabled {
+				continue
+			}
+
 			handlers = []hookHandler{
 				{Type: "command", Command: fmt.Sprintf("%s approve-request", quoted)},
 			}
@@ -202,6 +208,8 @@ func (sm *SessionManager) injectCodexHooks(sessionID string) (extraArgs []string
 		"stop":               "Stop",
 	}
 
+	hookEnabled := sm.cfg.Approvals.HookEnabled()
+
 	hooksDir := filepath.Join(dir, "codex-hooks")
 	if err := os.MkdirAll(hooksDir, 0o700); err != nil {
 		return nil, nil, fmt.Errorf("create codex hooks dir: %w", err)
@@ -210,6 +218,10 @@ func (sm *SessionManager) injectCodexHooks(sessionID string) (extraArgs []string
 	quoted := shellQuote(grBin)
 
 	for filename, eventName := range events {
+		if filename == "permission-request" && !hookEnabled {
+			continue
+		}
+
 		var script string
 
 		switch filename {
@@ -366,9 +378,6 @@ func (sm *SessionManager) injectCursorHooks(sessionID, worktreePath string) (ext
 				{Command: fmt.Sprintf("%s report-status --event SessionStart", quoted)},
 				{Command: fmt.Sprintf("%s check-inbox", quoted)},
 			},
-			"preToolUse": {
-				{Command: fmt.Sprintf("%s approve-request", quoted)},
-			},
 			"postToolUse": {
 				{Command: fmt.Sprintf("%s report-status --event PostToolUse", quoted)},
 			},
@@ -376,6 +385,12 @@ func (sm *SessionManager) injectCursorHooks(sessionID, worktreePath string) (ext
 				{Command: fmt.Sprintf("%s report-status --event Stop", quoted)},
 			},
 		},
+	}
+
+	if sm.cfg.Approvals.HookEnabled() {
+		hooks.Hooks["preToolUse"] = []hookEntry{
+			{Command: fmt.Sprintf("%s approve-request", quoted)},
+		}
 	}
 
 	data, err := json.MarshalIndent(hooks, "", "  ")
