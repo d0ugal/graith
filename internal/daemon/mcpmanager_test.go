@@ -414,6 +414,166 @@ func TestMCPManagerReloadDetectsEnvChange(t *testing.T) {
 	}
 }
 
+// TestMCPManagerReloadTightensGlobalSandbox: a reload that changes only the
+// global sandbox policy must restart already-running MCP servers so the
+// tightened policy applies to them, not just to future connections (see #788).
+func TestMCPManagerReloadTightensGlobalSandbox(t *testing.T) {
+	logDir := t.TempDir()
+	cfg := &config.Config{
+		Sandbox: config.SandboxConfig{Enabled: false},
+		MCPServers: []config.MCPServerConfig{
+			{Name: "canny", Command: "cat"},
+		},
+	}
+
+	mgr := NewMCPManager(cfg, nil, logDir, slog.Default())
+	defer mgr.Shutdown()
+
+	proc, err := mgr.Connect("canny", "proxy-1", config.TemplateVars{})
+	if err != nil {
+		t.Fatalf("Connect() error = %v", err)
+	}
+
+	// Only the global sandbox policy changes (off -> on with a backend); the
+	// server command/args/env are untouched. The running process must be killed
+	// so it re-launches under the tightened policy.
+	mgr.Reload(&config.Config{
+		Sandbox: config.SandboxConfig{Enabled: true, Backend: "nono"},
+		MCPServers: []config.MCPServerConfig{
+			{Name: "canny", Command: "cat"},
+		},
+	})
+
+	select {
+	case <-proc.done:
+		// killed as expected
+	case <-time.After(5 * time.Second):
+		t.Fatal("process should have been killed after a global-sandbox-only change")
+	}
+}
+
+// TestMCPManagerReloadTightensServerSandbox: a reload that changes only a
+// per-server sandbox override must restart that server's running process.
+func TestMCPManagerReloadTightensServerSandbox(t *testing.T) {
+	logDir := t.TempDir()
+	cfg := &config.Config{
+		MCPServers: []config.MCPServerConfig{
+			{Name: "canny", Command: "cat", Sandbox: boolPtr(false)},
+		},
+	}
+
+	mgr := NewMCPManager(cfg, nil, logDir, slog.Default())
+	defer mgr.Shutdown()
+
+	proc, err := mgr.Connect("canny", "proxy-1", config.TemplateVars{})
+	if err != nil {
+		t.Fatalf("Connect() error = %v", err)
+	}
+
+	// Flip the per-server sandbox override on and add a config block — only the
+	// sandbox fields change. The process must be killed.
+	mgr.Reload(&config.Config{
+		MCPServers: []config.MCPServerConfig{
+			{
+				Name:          "canny",
+				Command:       "cat",
+				Sandbox:       boolPtr(true),
+				SandboxConfig: &config.SandboxConfig{Backend: "nono", ReadDirs: []string{"/glen"}},
+			},
+		},
+	})
+
+	select {
+	case <-proc.done:
+		// killed as expected
+	case <-time.After(5 * time.Second):
+		t.Fatal("process should have been killed after a per-server sandbox change")
+	}
+}
+
+// TestMCPManagerReloadDetectsServerSandboxConfigOnly: a reload that changes only
+// a nested field of the per-server SandboxConfig (leaving the Sandbox enable flag
+// untouched) must still restart the process. This isolates the SandboxConfig arm
+// of mcpSandboxEqual — a comparison that only looked at the Sandbox *bool would
+// pass the sibling test but fail this one.
+func TestMCPManagerReloadDetectsServerSandboxConfigOnly(t *testing.T) {
+	logDir := t.TempDir()
+	cfg := &config.Config{
+		MCPServers: []config.MCPServerConfig{
+			{
+				Name:          "canny",
+				Command:       "cat",
+				Sandbox:       boolPtr(false),
+				SandboxConfig: &config.SandboxConfig{Backend: "nono", ReadDirs: []string{"/glen"}},
+			},
+		},
+	}
+
+	mgr := NewMCPManager(cfg, nil, logDir, slog.Default())
+	defer mgr.Shutdown()
+
+	proc, err := mgr.Connect("canny", "proxy-1", config.TemplateVars{})
+	if err != nil {
+		t.Fatalf("Connect() error = %v", err)
+	}
+
+	// Only a nested SandboxConfig field changes (add a write dir); the Sandbox
+	// enable flag is identical. The process must still be killed.
+	mgr.Reload(&config.Config{
+		MCPServers: []config.MCPServerConfig{
+			{
+				Name:          "canny",
+				Command:       "cat",
+				Sandbox:       boolPtr(false),
+				SandboxConfig: &config.SandboxConfig{Backend: "nono", ReadDirs: []string{"/glen"}, WriteDirs: []string{"/brae"}},
+			},
+		},
+	})
+
+	select {
+	case <-proc.done:
+		// killed as expected
+	case <-time.After(5 * time.Second):
+		t.Fatal("process should have been killed after a per-server SandboxConfig-only change")
+	}
+}
+
+// TestMCPManagerReloadUnchangedSandboxKeepsProcess: reloading with an identical
+// config (sandbox included) must NOT restart a running process — the #788 fix
+// must not over-kill on no-op reloads.
+func TestMCPManagerReloadUnchangedSandboxKeepsProcess(t *testing.T) {
+	logDir := t.TempDir()
+	cfg := &config.Config{
+		Sandbox: config.SandboxConfig{Enabled: true, Backend: "nono", ReadDirs: []string{"/glen"}},
+		MCPServers: []config.MCPServerConfig{
+			{Name: "bide", Command: "cat", Sandbox: boolPtr(false)},
+		},
+	}
+
+	mgr := NewMCPManager(cfg, nil, logDir, slog.Default())
+	defer mgr.Shutdown()
+
+	proc, err := mgr.Connect("bide", "proxy-1", config.TemplateVars{})
+	if err != nil {
+		t.Fatalf("Connect() error = %v", err)
+	}
+
+	// Reload with a deep-equal copy of the same config — nothing changed.
+	mgr.Reload(&config.Config{
+		Sandbox: config.SandboxConfig{Enabled: true, Backend: "nono", ReadDirs: []string{"/glen"}},
+		MCPServers: []config.MCPServerConfig{
+			{Name: "bide", Command: "cat", Sandbox: boolPtr(false)},
+		},
+	})
+
+	select {
+	case <-proc.done:
+		t.Fatal("process should NOT be killed when the config is unchanged")
+	case <-time.After(500 * time.Millisecond):
+		// still running as expected
+	}
+}
+
 func TestMCPManagerUnknownTemplateVarFails(t *testing.T) {
 	logDir := t.TempDir()
 	cfg := &config.Config{
