@@ -86,6 +86,7 @@ func TestAURPackageSourcesAreArchived(t *testing.T) {
 	if len(cfg.Aurs) == 0 {
 		t.Fatal("no aurs block in .goreleaser.yaml")
 	}
+
 	if len(cfg.Archives) == 0 {
 		t.Fatal("no archives block in .goreleaser.yaml")
 	}
@@ -101,6 +102,7 @@ func TestAURPackageSourcesAreArchived(t *testing.T) {
 		if inst.src == "gr" {
 			continue
 		}
+
 		if !archived[inst.src] {
 			t.Errorf("AUR package() installs %q but it is not in the archive files: %v",
 				inst.src, cfg.Archives[0].Files)
@@ -142,6 +144,7 @@ func TestAURLicensePathUsesPkgname(t *testing.T) {
 	if strings.Contains(cfg.Aurs[0].Package, "usr/share/licenses/graith/") {
 		t.Errorf("AUR package() installs the license under graith/ but pkgname is graith-bin:\n%s", cfg.Aurs[0].Package)
 	}
+
 	if !strings.Contains(cfg.Aurs[0].Package, "usr/share/licenses/graith-bin/LICENSE") {
 		t.Errorf("AUR package() does not install the license under graith-bin/:\n%s", cfg.Aurs[0].Package)
 	}
