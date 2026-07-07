@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,114 @@ import (
 
 	toml "github.com/pelletier/go-toml/v2"
 )
+
+func TestDecodeLifecycleResult(t *testing.T) {
+	// The daemon's success payloads mix a string "name" field with the
+	// []string result. Decoding must extract the result cleanly and must not
+	// choke on the string field (issue #785).
+	tests := []struct {
+		name      string
+		payload   string
+		resultKey string
+		want      []string
+		wantNil   bool
+		wantErr   bool
+	}{
+		{
+			name:      "stopped with name field",
+			payload:   `{"name":"strath","stopped":["a","b","c"]}`,
+			resultKey: "stopped",
+			want:      []string{"a", "b", "c"},
+		},
+		{
+			name:      "deleted with name field",
+			payload:   `{"name":"strath","deleted":["braw"]}`,
+			resultKey: "deleted",
+			want:      []string{"braw"},
+		},
+		{
+			name:      "resumed empty list",
+			payload:   `{"name":"strath","resumed":[]}`,
+			resultKey: "resumed",
+			want:      []string{},
+			wantNil:   false,
+		},
+		{
+			name:      "present null result value is a no-op nil",
+			payload:   `{"name":"strath","stopped":null}`,
+			resultKey: "stopped",
+			want:      nil,
+			wantNil:   true,
+		},
+		{
+			name:      "missing result key errors (protocol drift)",
+			payload:   `{"name":"strath"}`,
+			resultKey: "stopped",
+			wantErr:   true,
+		},
+		{
+			name:      "misspelled result key errors (protocol drift)",
+			payload:   `{"name":"strath","stoped":["a"]}`,
+			resultKey: "stopped",
+			wantErr:   true,
+		},
+		{
+			name:      "empty payload errors",
+			payload:   "",
+			resultKey: "stopped",
+			wantErr:   true,
+		},
+		{
+			name:      "null payload errors",
+			payload:   "null",
+			resultKey: "stopped",
+			wantErr:   true,
+		},
+		{
+			name:      "result key wrong type errors",
+			payload:   `{"name":"strath","stopped":"not-a-list"}`,
+			resultKey: "stopped",
+			wantErr:   true,
+		},
+		{
+			name:      "malformed payload errors",
+			payload:   `{"name":`,
+			resultKey: "stopped",
+			wantErr:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := decodeLifecycleResult(json.RawMessage(tt.payload), tt.resultKey)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got nil (result=%v)", got)
+				}
+
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if tt.wantNil && got != nil {
+				t.Fatalf("got %v, want nil slice", got)
+			}
+
+			if len(got) != len(tt.want) {
+				t.Fatalf("got %v, want %v", got, tt.want)
+			}
+
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("got[%d] = %q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
 
 func TestScenarioFileParse(t *testing.T) {
 	input := `
