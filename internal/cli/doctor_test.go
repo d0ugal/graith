@@ -104,6 +104,101 @@ func TestCheckSandboxPathsSkipsUninstalledAgents(t *testing.T) {
 	}
 }
 
+// checkResults collects the checks a doctorContext accumulated, split by level.
+func checkResults(dc *doctorContext, level string) []string {
+	var out []string
+
+	for _, c := range dc.checks {
+		if c.Level == level {
+			out = append(out, c.Message)
+		}
+	}
+
+	return out
+}
+
+// TestCheckApprovalsBackendFailClosed verifies gr doctor surfaces the reason an
+// unenforceable approvals backend would fail closed at session-create — the fix
+// for issue #738, where that reason was buried in daemon.log and every new
+// session crashed with a bare "exit 1" and zero output.
+func TestCheckApprovalsBackendFailClosed(t *testing.T) {
+	oldCfg, oldOut := cfg, out
+
+	t.Cleanup(func() {
+		cfg, out = oldCfg, oldOut
+	})
+
+	out = output.NewWithWriter(false, io.Discard)
+
+	// backend="command" with no command set cannot enforce.
+	cfg = &config.Config{}
+	cfg.Approvals = config.Approvals{Backend: "command"}
+
+	dc := newDoctorContext()
+	dc.checkApprovalsBackend()
+
+	failed := strings.Join(checkResults(dc, "fail"), "\n")
+
+	if !strings.Contains(failed, "command") {
+		t.Errorf("expected a fail check naming the approvals backend, got: %q", failed)
+	}
+
+	if !strings.Contains(failed, "cannot enforce") {
+		t.Errorf("expected the fail check to explain it cannot enforce, got: %q", failed)
+	}
+}
+
+// TestCheckApprovalsBackendPromptDefault verifies the default (prompt) backend
+// passes — it always defers to the human and can never fail closed.
+func TestCheckApprovalsBackendPromptDefault(t *testing.T) {
+	oldCfg, oldOut := cfg, out
+
+	t.Cleanup(func() {
+		cfg, out = oldCfg, oldOut
+	})
+
+	out = output.NewWithWriter(false, io.Discard)
+
+	cfg = &config.Config{}
+
+	dc := newDoctorContext()
+	dc.checkApprovalsBackend()
+
+	if len(checkResults(dc, "fail")) != 0 {
+		t.Errorf("prompt backend should not fail, got: %v", dc.checks)
+	}
+
+	if len(checkResults(dc, "ok")) == 0 {
+		t.Errorf("prompt backend should record a passing check, got: %v", dc.checks)
+	}
+}
+
+// TestCheckApprovalsBackendAvailable verifies an enforceable backend passes.
+func TestCheckApprovalsBackendAvailable(t *testing.T) {
+	oldCfg, oldOut := cfg, out
+
+	t.Cleanup(func() {
+		cfg, out = oldCfg, oldOut
+	})
+
+	out = output.NewWithWriter(false, io.Discard)
+
+	binDir := t.TempDir()
+	t.Setenv("PATH", binDir)
+
+	approver := writeStubExecutable(t, binDir, "canny")
+
+	cfg = &config.Config{}
+	cfg.Approvals = config.Approvals{Backend: "command", Command: approver}
+
+	dc := newDoctorContext()
+	dc.checkApprovalsBackend()
+
+	if len(checkResults(dc, "fail")) != 0 {
+		t.Errorf("enforceable command backend should not fail, got: %v", dc.checks)
+	}
+}
+
 // TestCheckSandboxPathsChecksGlobal verifies global sandbox dirs are always
 // checked regardless of installed agents.
 func TestCheckSandboxPathsChecksGlobal(t *testing.T) {

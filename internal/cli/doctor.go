@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/d0ugal/graith/internal/approvals"
 	"github.com/d0ugal/graith/internal/client"
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/daemon"
@@ -239,6 +240,8 @@ func (dc *doctorContext) checkEnvironment() {
 		dc.warnf("environment", "Sandbox disabled")
 	}
 
+	dc.checkApprovalsBackend()
+
 	switch {
 	case cfg.AgentPrompt == "":
 		dc.warnf("environment", "Agent prompt is empty (agents will not receive graith context)")
@@ -295,6 +298,55 @@ func (dc *doctorContext) checkSandboxBackend() {
 			dc.passf("environment", "Sandbox network policy: proxy allowlist of %d domain(s)", len(cfg.Sandbox.Network.AllowDomains))
 		}
 	}
+}
+
+// checkApprovalsBackend reports whether the configured approvals backend can
+// enforce with the current config. This mirrors the daemon's fail-closed
+// validateApprovalsBackend check, which rejects an unenforceable backend at
+// session-create — a rejection that otherwise surfaces only as a bare "Crashed
+// exit 1" session with zero scrollback and a reason buried in daemon.log (see
+// issue #738). Surfacing it here means the reason is visible from a channel a
+// user can read, including from inside a sandboxed session.
+func (dc *doctorContext) checkApprovalsBackend() {
+	backend, deprecation, err := cfg.Approvals.ResolveBackend()
+	if err != nil {
+		dc.failf("environment", "Approvals backend invalid: %v", err)
+
+		return
+	}
+
+	if deprecation != "" {
+		dc.warnf("environment", "Approvals config deprecated: %s", deprecation)
+	}
+
+	// The prompt backend (the default) always defers to the human and needs no
+	// external dependency, so it can never fail closed.
+	if backend == "" || backend == approvals.BackendPrompt {
+		dc.passf("environment", "Approvals backend: prompt (manual)")
+
+		return
+	}
+
+	be, err := approvals.BackendByName(backend)
+	if err != nil {
+		dc.failf("environment", "Approvals backend invalid: %v", err)
+
+		return
+	}
+
+	av := be.Availability(approvals.Config{
+		Backend:       backend,
+		Command:       cfg.Approvals.Command,
+		BuiltinConfig: cfg.Approvals.Builtin.Config,
+	})
+	if !av.CanEnforce {
+		dc.failf("environment", "Approvals backend %q cannot enforce: %s", backend, av.Detail)
+		dc.hintf("Sessions will fail to start until this is fixed; set [approvals] backend = \"prompt\" or correct the backend config")
+
+		return
+	}
+
+	dc.passf("environment", "Approvals backend %q available", backend)
 }
 
 // agentInstalled reports whether an agent's command is resolvable on PATH.
