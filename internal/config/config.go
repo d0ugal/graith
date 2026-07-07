@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -1134,6 +1135,231 @@ func checkApprovalsBuiltinKeys(data []byte) error {
 	}
 
 	return nil
+}
+
+// UnknownKey is a config key that graith's schema does not recognise. It is a
+// diagnostic aid (surfaced by `gr doctor`), not a load error: the runtime load
+// stays lenient so an older daemon won't refuse a config written for a newer
+// graith, and a typo silently drops the key rather than bricking startup. See
+// issue #720.
+type UnknownKey struct {
+	// Table is the dotted parent-table path, e.g. "agents.claude.sandbox".
+	// Empty for top-level keys.
+	Table string
+	// Name is the unrecognised leaf key, e.g. "read_dir".
+	Name string
+	// Suggestion is the closest known key in the same table, or "" if none is
+	// close enough to be worth a "did you mean".
+	Suggestion string
+}
+
+// FullKey renders the key with its table prefix, e.g. "sandbox.read_dir".
+func (u UnknownKey) FullKey() string {
+	if u.Table == "" {
+		return u.Name
+	}
+
+	return u.Table + "." + u.Name
+}
+
+// UnknownKeys parses the TOML at path and reports keys that don't map to any
+// field in the Config schema — typos (read_dir vs read_dirs), keys under the
+// wrong table, or options from a newer graith than this binary. Unknown keys
+// are never returned as an error; the returned error is only for a missing,
+// unreadable, or unparseable file.
+func UnknownKeys(path string) ([]UnknownKey, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("reading config: %w", err)
+	}
+
+	return unknownKeysFromTOML(data)
+}
+
+func unknownKeysFromTOML(data []byte) ([]UnknownKey, error) {
+	var raw map[string]any
+	if err := toml.Unmarshal(data, &raw); err != nil {
+		return nil, fmt.Errorf("parsing config: %w", err)
+	}
+
+	var found []UnknownKey
+
+	collectUnknownKeys(reflect.TypeOf(Config{}), raw, "", &found)
+
+	// Array-of-tables entries share a table path, so the same key can surface
+	// more than once (e.g. a typo repeated across [[repos]] blocks). Dedupe by
+	// full key so doctor reports each unknown key once.
+	seen := make(map[string]bool, len(found))
+	out := found[:0]
+
+	for _, u := range found {
+		if seen[u.FullKey()] {
+			continue
+		}
+
+		seen[u.FullKey()] = true
+
+		out = append(out, u)
+	}
+
+	sort.Slice(out, func(i, j int) bool { return out[i].FullKey() < out[j].FullKey() })
+
+	return out, nil
+}
+
+// collectUnknownKeys walks a decoded TOML table against the struct type that
+// models it, recording keys that have no matching field and recursing into
+// nested tables, arrays of tables, and dynamic-key maps (e.g. [agents.<name>]).
+func collectUnknownKeys(t reflect.Type, raw map[string]any, table string, out *[]UnknownKey) {
+	t = derefType(t)
+	if t.Kind() != reflect.Struct {
+		return
+	}
+
+	fields, known := tomlFields(t)
+
+	for key, val := range raw {
+		ft, ok := fields[strings.ToLower(key)]
+		if !ok {
+			*out = append(*out, UnknownKey{
+				Table:      table,
+				Name:       key,
+				Suggestion: closestKey(key, known),
+			})
+
+			continue
+		}
+
+		recurseUnknownKeys(ft, val, joinTable(table, key), out)
+	}
+}
+
+func recurseUnknownKeys(ft reflect.Type, val any, table string, out *[]UnknownKey) {
+	switch derefType(ft).Kind() {
+	case reflect.Struct:
+		if m, ok := val.(map[string]any); ok {
+			collectUnknownKeys(ft, m, table, out)
+		}
+	case reflect.Map:
+		// Dynamic keys (e.g. agents.<name>): the key itself is user-defined, so
+		// recurse into the map's value type for each entry.
+		if m, ok := val.(map[string]any); ok {
+			for k, v := range m {
+				recurseUnknownKeys(derefType(ft).Elem(), v, joinTable(table, k), out)
+			}
+		}
+	case reflect.Slice, reflect.Array:
+		// Arrays of tables ([[repos]]) decode to a slice of tables. Iterate
+		// reflectively so both []any and []map[string]any element shapes work.
+		rv := reflect.ValueOf(val)
+		if rv.Kind() != reflect.Slice && rv.Kind() != reflect.Array {
+			return
+		}
+
+		for i := 0; i < rv.Len(); i++ {
+			recurseUnknownKeys(derefType(ft).Elem(), rv.Index(i).Interface(), table, out)
+		}
+	}
+}
+
+// tomlFields returns, for a struct type, a lookup from lowercased TOML key to
+// field type (matching is case-insensitive, mirroring go-toml's leniency so we
+// don't flag a key the loader would actually accept) and the canonical key
+// names for "did you mean" suggestions.
+func tomlFields(t reflect.Type) (map[string]reflect.Type, []string) {
+	lookup := make(map[string]reflect.Type, t.NumField())
+	names := make([]string, 0, t.NumField())
+
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		if f.PkgPath != "" { // unexported
+			continue
+		}
+
+		name := strings.Split(f.Tag.Get("toml"), ",")[0]
+		if name == "-" {
+			continue
+		}
+
+		if name == "" {
+			name = f.Name
+		}
+
+		lookup[strings.ToLower(name)] = f.Type
+		names = append(names, name)
+	}
+
+	return lookup, names
+}
+
+func joinTable(table, key string) string {
+	if table == "" {
+		return key
+	}
+
+	return table + "." + key
+}
+
+func derefType(t reflect.Type) reflect.Type {
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+
+	return t
+}
+
+// closestKey returns the known key nearest to key by edit distance, or "" if
+// none is close enough to be a plausible typo.
+func closestKey(key string, known []string) string {
+	lowKey := strings.ToLower(key)
+	best := ""
+	bestDist := -1
+
+	for _, k := range known {
+		d := levenshtein(lowKey, strings.ToLower(k))
+		if bestDist == -1 || d < bestDist {
+			bestDist = d
+			best = k
+		}
+	}
+
+	maxDist := len(key) / 2
+	if maxDist < 2 {
+		maxDist = 2
+	}
+
+	if bestDist >= 0 && bestDist <= maxDist {
+		return best
+	}
+
+	return ""
+}
+
+func levenshtein(a, b string) int {
+	ra, rb := []rune(a), []rune(b)
+	prev := make([]int, len(rb)+1)
+	curr := make([]int, len(rb)+1)
+
+	for j := range prev {
+		prev[j] = j
+	}
+
+	for i := 1; i <= len(ra); i++ {
+		curr[0] = i
+
+		for j := 1; j <= len(rb); j++ {
+			cost := 1
+			if ra[i-1] == rb[j-1] {
+				cost = 0
+			}
+
+			curr[j] = min(prev[j]+1, curr[j-1]+1, prev[j-1]+cost)
+		}
+
+		prev, curr = curr, prev
+	}
+
+	return prev[len(rb)]
 }
 
 func mergeAgents(defaults, user map[string]Agent) map[string]Agent {
