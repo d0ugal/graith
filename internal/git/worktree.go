@@ -112,6 +112,7 @@ func IsRegisteredWorktree(repoPath, worktreePath string) bool {
 	}
 
 	target := resolvePath(worktreePath)
+
 	for line := range strings.SplitSeq(out, "\n") {
 		p, ok := strings.CutPrefix(line, "worktree ")
 		if ok && resolvePath(p) == target {

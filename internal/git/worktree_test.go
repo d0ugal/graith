@@ -34,6 +34,7 @@ func worktreeCount(t *testing.T, repo string) int {
 	}
 
 	n := 0
+
 	for line := range strings.SplitSeq(out, "\n") {
 		if strings.HasPrefix(line, "worktree ") {
 			n++
@@ -136,6 +137,7 @@ func TestTeardownSessionUnregisteredPathNotRemoved(t *testing.T) {
 func TestTeardownSessionRepoUnreachable(t *testing.T) {
 	notARepo := t.TempDir()
 	wt := filepath.Join(t.TempDir(), "bothy")
+
 	if err := os.MkdirAll(wt, 0o700); err != nil {
 		t.Fatalf("mkdir wt: %v", err)
 	}
