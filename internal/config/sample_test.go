@@ -31,6 +31,7 @@ func TestSampleConfigSandboxDocumentsBackend(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading config.sample.toml: %v", err)
 	}
+
 	sample := string(data)
 
 	if !strings.Contains(sample, "backend = \"nono\"") {
