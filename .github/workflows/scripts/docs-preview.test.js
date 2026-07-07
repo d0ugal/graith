@@ -17,6 +17,7 @@ const {
   commitToBranch,
   cleanup,
   prune,
+  EMPTY_TREE_SHA,
 } = require('./docs-preview.js');
 
 const http = (status) => Object.assign(new Error(`HTTP ${status}`), { status });
@@ -351,6 +352,23 @@ test('cleanup no-ops when the branch does not exist', async () => {
   assert.equal(calls.createTree.length, 0);
 });
 
+// Issue #766: the closing PR held the only screenshots on the branch, so
+// nothing survives. createTree({ tree: [] }) is a 422 — the commit must point
+// at the empty-tree SHA and the ref must still advance.
+test('cleanup commits the empty-tree SHA when the closing PR was the last one', async () => {
+  const { github, calls } = fakeGithub({ blobs: ['pr-42/a/x.png', 'pr-42/a/y.png'] });
+  const core = fakeCore();
+  await cleanup({ github, context, core });
+
+  // No createTree call — an empty tree array would 422.
+  assert.equal(calls.createTree.length, 0);
+  // The commit points at git's well-known empty tree, and the ref advances.
+  assert.equal(calls.createCommit.length, 1);
+  assert.equal(calls.createCommit[0].tree, EMPTY_TREE_SHA);
+  assert.equal(calls.createCommit[0].parents[0], 'tip-commit');
+  assert.equal(calls.updateRef.length, 1);
+});
+
 // --- prune -----------------------------------------------------------------
 
 test('prune refuses to rewrite the branch on a truncated tree (#763)', async () => {
@@ -384,4 +402,21 @@ test('prune no-ops when nothing is stale', async () => {
   await prune({ github, context, core });
   assert.equal(calls.createTree.length, 0);
   assert.equal(calls.updateRef.length, 0);
+});
+
+// Issue #766: every remaining dir is stale, so nothing survives the prune.
+// As in cleanup, the commit must use the empty-tree SHA rather than
+// createTree({ tree: [] }).
+test('prune commits the empty-tree SHA when every dir is stale', async () => {
+  const { github, calls } = fakeGithub({
+    blobs: ['pr-1/20200101-abc-1.1/x.png', 'pr-2/20200102-def-1.1/y.png'],
+  });
+  const core = fakeCore();
+  await prune({ github, context, core });
+
+  assert.equal(calls.createTree.length, 0);
+  assert.equal(calls.createCommit.length, 1);
+  assert.equal(calls.createCommit[0].tree, EMPTY_TREE_SHA);
+  assert.equal(calls.createCommit[0].parents[0], 'tip-commit');
+  assert.equal(calls.updateRef.length, 1);
 });

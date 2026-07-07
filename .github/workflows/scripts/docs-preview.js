@@ -13,6 +13,12 @@ const SCREENSHOTS_BRANCH = 'screenshots';
 const STICKY_MARKER = '<!-- docs-preview -->';
 const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
+// Git's well-known empty-tree SHA. When a rewrite keeps nothing (the closing
+// PR held the only screenshots, or every dir is stale), createTree({ tree: [] })
+// is rejected by the GitHub API with a 422 — so point the commit at this
+// instead of building an empty tree (issue #766).
+const EMPTY_TREE_SHA = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
+
 // Fetch every blob in the screenshots tree, failing closed if GitHub
 // truncated the recursive response. `getTree(recursive: true)` caps large
 // trees; because cleanup/prune rebuild the branch with no `base_tree`, any
@@ -140,13 +146,22 @@ async function commitToBranch({
 // so any omitted path is deleted) and return its SHA. Advancing the ref — and
 // the compare-and-retry that guards it — is commitToBranch's job.
 async function buildRewriteCommit({ github, owner, repo, kept, parentSha, message }) {
-  const tree = kept.map((e) => ({ path: e.path, mode: e.mode, type: e.type, sha: e.sha }));
-  const newTree = await github.rest.git.createTree({ owner, repo, tree });
+  // When nothing survives, point at git's empty-tree SHA rather than calling
+  // createTree with an empty `tree` array, which the API rejects with a 422
+  // (issue #766).
+  let treeSha;
+  if (kept.length === 0) {
+    treeSha = EMPTY_TREE_SHA;
+  } else {
+    const tree = kept.map((e) => ({ path: e.path, mode: e.mode, type: e.type, sha: e.sha }));
+    const newTree = await github.rest.git.createTree({ owner, repo, tree });
+    treeSha = newTree.data.sha;
+  }
   const newCommit = await github.rest.git.createCommit({
     owner,
     repo,
     message,
-    tree: newTree.data.sha,
+    tree: treeSha,
     parents: [parentSha],
   });
   return newCommit.data.sha;
@@ -249,6 +264,7 @@ module.exports = {
   SCREENSHOTS_BRANCH,
   STICKY_MARKER,
   MAX_AGE_MS,
+  EMPTY_TREE_SHA,
   listBlobsOrFail,
   isStaleRunDir,
   getBranchTip,
