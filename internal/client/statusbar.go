@@ -224,6 +224,12 @@ func formatPRSection(info statusBarInfo, bg color.Color) string {
 		return base.Foreground(colorDim).Render(label + " merged")
 	case "closed":
 		return base.Foreground(colorDim).Render(label + " closed")
+	case "draft":
+		// Mark drafts with a "d" suffix, mirroring the overlay column's
+		// "#Nd", then fall through to conflict/CI rendering. (`gr list`
+		// shows the state textually, e.g. "#9 draft" — different form,
+		// same goal: a draft is distinguishable from a plain open PR.)
+		label += "d"
 	}
 
 	if info.prConflicting {
