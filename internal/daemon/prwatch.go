@@ -328,7 +328,7 @@ func (sm *SessionManager) diffAndBuild(cfg *configPRWatch, t prWatchTarget, slug
 		// a deferred conflict still re-fires from the steady-state path next poll
 		// because cur.mergeable was left un-baselined above.
 		if d.CIState == "failing" && cfg.NotifyCIFailures {
-			if _, ok := sm.gate(cfg, t.id, cur); ok {
+			if _, ok := sm.gate(cfg, t.id, cur, true); ok {
 				for _, name := range d.FailingChecks {
 					cur.failing[name] = true
 				}
@@ -338,7 +338,7 @@ func (sm *SessionManager) diffAndBuild(cfg *configPRWatch, t prWatchTarget, slug
 		}
 
 		if d.Mergeable == "CONFLICTING" && cfg.NotifyMergeConflicts {
-			if _, ok := sm.gate(cfg, t.id, cur); ok {
+			if _, ok := sm.gate(cfg, t.id, cur, true); ok {
 				cur.mergeable = "CONFLICTING" // advance only on delivery
 				return []string{conflictBody(t, d)}
 			}
@@ -360,7 +360,7 @@ func (sm *SessionManager) diffAndBuild(cfg *configPRWatch, t prWatchTarget, slug
 		}
 
 		if len(newlyFailing) > 0 {
-			if _, ok := sm.gate(cfg, t.id, cur); ok {
+			if _, ok := sm.gate(cfg, t.id, cur, true); ok {
 				for _, name := range d.FailingChecks {
 					cur.failing[name] = true
 				}
@@ -377,7 +377,7 @@ func (sm *SessionManager) diffAndBuild(cfg *configPRWatch, t prWatchTarget, slug
 			// delivered; if the gate rejects it (debounce/cap/rate-limit),
 			// keep cur.failing so recovery re-fires on a later poll (the
 			// cursor-advance-only-on-delivery invariant).
-			if _, ok := sm.gate(cfg, t.id, cur); ok {
+			if _, ok := sm.gate(cfg, t.id, cur, false); ok {
 				out = append(out, fmt.Sprintf("CI is green again on PR #%d (%s).", d.Number, t.branch))
 				cur.failing = map[string]bool{}
 			}
@@ -397,7 +397,7 @@ func (sm *SessionManager) diffAndBuild(cfg *configPRWatch, t prWatchTarget, slug
 		switch d.Mergeable {
 		case "CONFLICTING":
 			if cfg.NotifyMergeConflicts && cur.mergeable != "CONFLICTING" {
-				if _, ok := sm.gate(cfg, t.id, cur); ok {
+				if _, ok := sm.gate(cfg, t.id, cur, true); ok {
 					out = append(out, conflictBody(t, d))
 					cur.mergeable = "CONFLICTING"
 				}
@@ -412,7 +412,7 @@ func (sm *SessionManager) diffAndBuild(cfg *configPRWatch, t prWatchTarget, slug
 	// --- PR lifecycle (informational) ---
 	if cfg.NotifyPRLifecycle && d.State != cur.state &&
 		(d.State == "merged" || d.State == "closed") {
-		if _, ok := sm.gate(cfg, t.id, cur); ok {
+		if _, ok := sm.gate(cfg, t.id, cur, false); ok {
 			out = append(out, fmt.Sprintf("PR #%d (%s) was %s. %s", d.Number, t.branch, d.State,
 				"No further action needed unless you were mid-change."))
 			cur.state = d.State
@@ -424,7 +424,7 @@ func (sm *SessionManager) diffAndBuild(cfg *configPRWatch, t prWatchTarget, slug
 	// --- Review decisions (human intent, awareness) ---
 	if cfg.NotifyReviewDecisions && d.ReviewDecision != cur.reviewDecision &&
 		(d.ReviewDecision == "changes_requested" || d.ReviewDecision == "approved") {
-		if _, ok := sm.gate(cfg, t.id, cur); ok {
+		if _, ok := sm.gate(cfg, t.id, cur, false); ok {
 			out = append(out, reviewDecisionBody(t, d))
 			cur.reviewDecision = d.ReviewDecision
 		}
@@ -439,7 +439,7 @@ func (sm *SessionManager) diffAndBuild(cfg *configPRWatch, t prWatchTarget, slug
 
 		all := slices.Concat(newIssue, newReview)
 		if len(all) > 0 {
-			if _, ok := sm.gate(cfg, t.id, cur); ok {
+			if _, ok := sm.gate(cfg, t.id, cur, false); ok {
 				out = append(out, reviewCommentBody(t, d, all))
 				cur.lastIssueCommentID = maxInt64(cur.lastIssueCommentID, maxCommentID(d.IssueComments))
 				cur.lastReviewCommentID = maxInt64(cur.lastReviewCommentID, maxCommentID(d.ReviewComments))
@@ -458,14 +458,23 @@ func (sm *SessionManager) diffAndBuild(cfg *configPRWatch, t prWatchTarget, slug
 // be called holding sm.prWatch.mu. On success it records the send time and
 // increments counters. The rate-limit is the global anti-thrash backstop; the
 // per-SHA cap is the per-iteration one.
-func (sm *SessionManager) gate(cfg *configPRWatch, id string, cur *prWatchCursor) (string, bool) {
+//
+// directive marks a mechanical, actionable verdict (CI failure, merge conflict)
+// that auto-resumes the agent to act. Directive notices bypass the per-SHA cap
+// entirely — they neither check it nor count against it — because that cap
+// exists to throttle informational spam (comments, lifecycle, review
+// decisions), and letting it permanently mask a "your PR can't merge" or
+// "CI is red" signal strands a stopped agent on a broken PR (issue #771). They
+// are naturally bounded by state transitions (cur.failing / cur.mergeable) and
+// remain subject to debounce and the rolling rate-limit, so they can't thrash.
+func (sm *SessionManager) gate(cfg *configPRWatch, id string, cur *prWatchCursor, directive bool) (string, bool) {
 	now := time.Now()
 
 	if last, ok := sm.prWatch.lastSent[id]; ok && now.Sub(last) < cfg.DebounceDuration() {
 		return "debounced", false
 	}
 
-	if cur.notifyCount >= cfg.MaxNotifications() {
+	if !directive && cur.notifyCount >= cfg.MaxNotifications() {
 		return "cap", false
 	}
 	// Rolling rate-limit: at most 5 per 30 minutes.
@@ -486,7 +495,10 @@ func (sm *SessionManager) gate(cfg *configPRWatch, id string, cur *prWatchCursor
 
 	sm.prWatch.lastSent[id] = now
 	sm.prWatch.rateLog[id] = append(recent, now)
-	cur.notifyCount++
+
+	if !directive {
+		cur.notifyCount++
+	}
 
 	return "", true
 }
