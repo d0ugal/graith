@@ -162,12 +162,19 @@ type liveGitStatus struct {
 // liveSessionStatus recomputes a session's dirty/unpushed state with live git
 // checks, rather than trusting the daemon's cached SessionInfo fields (which
 // the background refresh loop skips for non-running sessions — see #209).
-// In-place sessions are reported clean because deleting one never removes the
-// worktree, so its git state is irrelevant to deletion safety.
+//
+// Some sessions carry no deletion-relevant git state and are reported clean:
+//   - In-place sessions: deleting one never removes the worktree.
+//   - Shared-worktree sessions: WorktreePath points at the source session's
+//     worktree, but deletion only removes the shared scratch dir — attributing
+//     the source's dirty/unpushed work here would be misleading. This matches
+//     the daemon refresh loop and the overlay's shared-worktree suppression.
+//   - No-repo sessions (empty RepoPath): the scratch worktree is not a git
+//     repo, so a git check would spuriously fail.
 func liveSessionStatus(s protocol.SessionInfo) liveGitStatus {
 	var st liveGitStatus
 
-	if s.InPlace {
+	if s.InPlace || s.SharedWorktree || s.RepoPath == "" {
 		return st
 	}
 

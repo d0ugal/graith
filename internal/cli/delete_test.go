@@ -42,54 +42,67 @@ func TestLiveSessionStatus(t *testing.T) {
 	}{
 		{
 			name:    "clean worktree",
-			session: protocol.SessionInfo{WorktreePath: "/bothy/braw", BaseBranch: "main"},
+			session: protocol.SessionInfo{WorktreePath: "/bothy/braw", RepoPath: "/croft/braw", BaseBranch: "main"},
 			want:    liveGitStatus{},
 		},
 		{
 			name:    "dirty worktree",
-			session: protocol.SessionInfo{WorktreePath: "/bothy/dreich", BaseBranch: "main"},
+			session: protocol.SessionInfo{WorktreePath: "/bothy/dreich", RepoPath: "/croft/dreich", BaseBranch: "main"},
 			dirty:   map[string][]string{"/bothy/dreich": {" M loch.go"}},
 			want:    liveGitStatus{dirty: true},
 		},
 		{
 			name:     "unpushed commits",
-			session:  protocol.SessionInfo{WorktreePath: "/bothy/bide", BaseBranch: "main"},
+			session:  protocol.SessionInfo{WorktreePath: "/bothy/bide", RepoPath: "/croft/bide", BaseBranch: "main"},
 			unpushed: map[string][]string{"/bothy/bide": {"abc auld", "def bonnie"}},
 			want:     liveGitStatus{unpushed: 2},
 		},
 		{
 			name:     "dirty check fails",
-			session:  protocol.SessionInfo{WorktreePath: "/bothy/fash", BaseBranch: "main"},
+			session:  protocol.SessionInfo{WorktreePath: "/bothy/fash", RepoPath: "/croft/fash", BaseBranch: "main"},
 			dirtyErr: map[string]error{"/bothy/fash": errors.New("scunner")},
 			want:     liveGitStatus{gitFailed: true},
 		},
 		{
 			name:        "unpushed check fails with base branch",
-			session:     protocol.SessionInfo{WorktreePath: "/bothy/thrawn", BaseBranch: "main"},
+			session:     protocol.SessionInfo{WorktreePath: "/bothy/thrawn", RepoPath: "/croft/thrawn", BaseBranch: "main"},
 			unpushedErr: map[string]error{"/bothy/thrawn": errors.New("scunner")},
 			want:        liveGitStatus{gitFailed: true},
 		},
 		{
 			name:        "unpushed check fails without base branch is ignored",
-			session:     protocol.SessionInfo{WorktreePath: "/bothy/haar", BaseBranch: ""},
+			session:     protocol.SessionInfo{WorktreePath: "/bothy/haar", RepoPath: "/croft/haar", BaseBranch: ""},
 			unpushedErr: map[string]error{"/bothy/haar": errors.New("scunner")},
 			want:        liveGitStatus{},
 		},
 		{
 			name:    "in-place session reported clean",
-			session: protocol.SessionInfo{WorktreePath: "/bothy/hame", BaseBranch: "main", InPlace: true},
+			session: protocol.SessionInfo{WorktreePath: "/bothy/hame", RepoPath: "/croft/hame", BaseBranch: "main", InPlace: true},
 			dirty:   map[string][]string{"/bothy/hame": {" M glen.go"}},
 			want:    liveGitStatus{},
 		},
 		{
+			name:    "shared-worktree session reported clean",
+			session: protocol.SessionInfo{WorktreePath: "/bothy/shared", RepoPath: "/croft/shared", BaseBranch: "main", SharedWorktree: true},
+			dirty:   map[string][]string{"/bothy/shared": {" M glen.go"}},
+			want:    liveGitStatus{},
+		},
+		{
+			name:    "no-repo session reported clean",
+			session: protocol.SessionInfo{WorktreePath: "/bothy/norepo", RepoPath: "", BaseBranch: "main"},
+			dirty:   map[string][]string{"/bothy/norepo": {" M glen.go"}},
+			want:    liveGitStatus{},
+		},
+		{
 			name:    "empty worktree path skipped",
-			session: protocol.SessionInfo{WorktreePath: "", BaseBranch: "main"},
+			session: protocol.SessionInfo{WorktreePath: "", RepoPath: "/croft/whin", BaseBranch: "main"},
 			want:    liveGitStatus{},
 		},
 		{
 			name: "includes aggregate dirty and unpushed",
 			session: protocol.SessionInfo{
 				WorktreePath: "/bothy/ben",
+				RepoPath:     "/croft/ben",
 				BaseBranch:   "main",
 				Includes: []protocol.IncludedRepoInfo{
 					{WorktreePath: "/bothy/wynd", BaseBranch: "main"},
@@ -104,6 +117,7 @@ func TestLiveSessionStatus(t *testing.T) {
 			name: "include git failure surfaces",
 			session: protocol.SessionInfo{
 				WorktreePath: "/bothy/clachan",
+				RepoPath:     "/croft/clachan",
 				BaseBranch:   "main",
 				Includes: []protocol.IncludedRepoInfo{
 					{WorktreePath: "/bothy/skelf", BaseBranch: "main"},

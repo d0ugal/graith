@@ -251,20 +251,27 @@ func confirmBatch(cmd *cobra.Command, verb string, pastTense string, sessions []
 
 		st := liveSessionStatus(s)
 
+		// A known-dirty result survives a partial git failure: if any repo's
+		// check confirmed dirt we still say "yes". Only genuinely-unknown
+		// columns render as "?".
 		dirty := "no"
 		if st.dirty {
 			dirty = "yes"
+		} else if st.gitFailed {
+			dirty = "?"
 		}
 
 		unpushed := "—"
-		if st.unpushed > 0 {
+		if st.gitFailed {
+			// The count is incomplete when a check failed, so don't imply a
+			// precise figure.
+			unpushed = "?"
+		} else if st.unpushed > 0 {
 			unpushed = fmt.Sprintf("%d commits", st.unpushed)
 		}
 
 		if st.gitFailed {
 			anyGitFailed = true
-			dirty = "?"
-			unpushed = "?"
 		}
 
 		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
