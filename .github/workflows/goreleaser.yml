@@ -104,7 +104,25 @@ jobs:
     # Phase 2 infra provisioned still succeeds (it just doesn't publish a repo).
     if: needs.goreleaser.outputs.has_gpg_key == 'true'
     runs-on: ubuntu-latest
+    # Serialize publish jobs. Two release tags pushed close together (or a
+    # rerun) would otherwise each check out graith-repo@main from an independent
+    # tip, regenerate the tree, and race on the push; the loser fails
+    # non-fast-forward and its packages are silently lost (issue #769).
+    # cancel-in-progress:false lets an in-flight publish finish rather than being
+    # dropped. This fully covers the two-release case in #769. Note: GitHub keeps
+    # at most one *pending* run per group, so in the rare event 3+ releases queue
+    # at once a superseded pending run must be re-run manually (GitHub Actions has
+    # no queue-depth knob — `queue:` is not a valid concurrency key).
+    concurrency:
+      group: publish-repo
+      cancel-in-progress: false
     steps:
+      - name: Check out graith (for the publish-push helper)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          # Only the scripts/ helper is needed here; no push, so drop creds.
+          persist-credentials: false
+
       - name: Install repo tooling
         run: |
           sudo apt-get update
@@ -133,6 +151,9 @@ jobs:
           token: ${{ secrets.RELEASE_TOKEN }}
           ref: main
           path: repo
+          # Full history so `git pull --rebase` in publish-push.sh has a real
+          # merge base to rebase onto (shallow clones can misbehave on rebase).
+          fetch-depth: 0
 
       - name: Import GPG signing key into a throwaway keyring
         env:
@@ -349,15 +370,9 @@ jobs:
           cp -a "${APTLY_ROOT}/public/." "$DEB_ROOT"/
 
       - name: Commit and push the static repo tree
+        # The helper commits the regenerated tree and pushes with a bounded
+        # rebase+retry, so a manual/external commit to graith-repo between
+        # checkout and push doesn't lose this release to a rejected push.
         run: |
-          set -euo pipefail
-          cd repo
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add -A
-          if git diff --cached --quiet; then
-            echo "No repo changes to publish."
-            exit 0
-          fi
-          git commit -m "chore: publish graith ${GITHUB_REF_NAME} apt/yum packages"
-          git push origin main
+          ./scripts/publish-push.sh repo \
+            "chore: publish graith ${GITHUB_REF_NAME} apt/yum packages"
