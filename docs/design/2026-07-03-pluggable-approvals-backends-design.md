@@ -280,6 +280,19 @@ command  = "my-approver" # required; receives graith's JSON on stdin, prints {de
 [approvals.builtin]
 config = "~/.config/graith/approvals.json"   # localmost-format config.json
                                              # (default: this path, then $XDG)
+
+# ...or, instead of an external file, define the rules inline (#737). The two
+# forms are mutually exclusive — setting both is a hard error.
+[approvals.builtin]
+allow = ["@arg @*"]
+deny  = ["shutdown @*", "reboot @*", "mkfs @*"]
+allowSafeXargs = true
+askNoninteractive = true
+
+# For per-rule keys (unless/redirect/pipe), use arrays of tables:
+[[approvals.builtin.allow]]
+rule   = "find @*"
+unless = ["-exec", "-delete"]
 ```
 
 `config.Approvals` gains `Backend string` and a nested

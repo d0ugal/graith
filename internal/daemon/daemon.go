@@ -4307,11 +4307,12 @@ func (sm *SessionManager) validateApprovalsBackend() error {
 		return err
 	}
 
-	if av := be.Availability(approvals.Config{
-		Backend:       backend,
-		Command:       acfg.Command,
-		BuiltinConfig: acfg.Builtin.Config,
-	}); !av.CanEnforce {
+	beCfg, err := approvalsBackendConfig(backend, acfg)
+	if err != nil {
+		return err
+	}
+
+	if av := be.Availability(beCfg); !av.CanEnforce {
 		return fmt.Errorf("approvals backend %q cannot enforce: %s", backend, av.Detail)
 	}
 

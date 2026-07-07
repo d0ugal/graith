@@ -264,6 +264,7 @@ func TestValidateApprovalsBackend(t *testing.T) {
 		{"command with command ok", config.Approvals{Backend: "command", Command: "my-approver"}, false},
 		{"builtin invalid config errors", config.Approvals{Backend: "builtin", Builtin: config.ApprovalsBuiltin{Config: badCfg}}, true},
 		{"builtin valid config ok", config.Approvals{Backend: "builtin", Builtin: config.ApprovalsBuiltin{Config: goodCfg}}, false},
+		{"builtin inline rules ok", config.Approvals{Backend: "builtin", Builtin: config.ApprovalsBuiltin{Allow: []any{"echo @*"}}}, false},
 		{"localmost missing binary errors", config.Approvals{Backend: "localmost", Command: "definitely-not-real-xyz"}, true},
 		{"conflicting mode+backend errors", config.Approvals{Backend: "builtin", Mode: "localmost"}, true},
 	}

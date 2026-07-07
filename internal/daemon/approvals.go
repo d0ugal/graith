@@ -167,6 +167,29 @@ func (sm *SessionManager) broadcastApprovalNotification() {
 	}
 }
 
+// approvalsBackendConfig builds the resolved approvals.Config for a backend,
+// rendering the builtin engine's inline TOML rules to localmost-format JSON when
+// they are present (config.Approvals.Validate guarantees inline and the external
+// config path are not both set).
+func approvalsBackendConfig(backend string, cfg config.Approvals) (approvals.Config, error) {
+	acfg := approvals.Config{
+		Backend:       backend,
+		Command:       cfg.Command,
+		BuiltinConfig: cfg.Builtin.Config,
+	}
+
+	if cfg.Builtin.HasInline() {
+		inline, err := cfg.Builtin.InlineJSON()
+		if err != nil {
+			return approvals.Config{}, fmt.Errorf("encode inline builtin approvals rules: %w", err)
+		}
+
+		acfg.BuiltinInline = inline
+	}
+
+	return acfg, nil
+}
+
 // tryApprovalBackend consults the configured approvals backend. It returns
 // (decision, true) only for a definitive allow/block; a deferred/errored/absent
 // backend returns (_, false) so the caller falls through to the human queue.
@@ -202,10 +225,10 @@ func (sm *SessionManager) tryApprovalBackend(ctx context.Context, req protocol.A
 
 	sm.mu.RUnlock()
 
-	acfg := approvals.Config{
-		Backend:       backendName,
-		Command:       cfg.Command,
-		BuiltinConfig: cfg.Builtin.Config,
+	acfg, err := approvalsBackendConfig(backendName, cfg)
+	if err != nil {
+		sm.log.Error("approvals: invalid builtin config, deferring to user", "err", err)
+		return protocol.ApprovalDecisionMsg{}, false
 	}
 
 	decision, derr := be.Decide(ctx, approvals.Request{

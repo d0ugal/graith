@@ -71,6 +71,11 @@ type Config struct {
 	Backend       string // effective backend name (already resolved)
 	Command       string // command/external command, or a localmost path override
 	BuiltinConfig string // path to the localmost-format config.json (builtin backend)
+	// BuiltinInline holds inline builtin rules as localmost-format JSON bytes,
+	// rendered from config.toml's [approvals.builtin] allow/deny/... keys. When
+	// set it takes the place of BuiltinConfig; the two are mutually exclusive
+	// (config.Approvals.Validate rejects both being set).
+	BuiltinInline []byte
 }
 
 // Availability reports whether a backend can enforce with the given config. A
