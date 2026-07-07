@@ -186,7 +186,9 @@ GitHub Pages at, say, `https://d0ugal.github.io/graith-repo/`:
 /rpm/                       yum/dnf repo root
   repodata/repomd.xml{,.asc}
   graith-<ver>.<arch>.rpm
-/gpg/graith.gpg             public signing key (ASCII-armored)
+/gpg/graith.asc             public signing key (ASCII-armored, for dnf/humans)
+/gpg/graith.gpg             public signing key (dearmored binary, for apt signed-by=)
+/gpg/graith-archive-keyring.gpg  copy of graith.gpg, conventional apt keyring name
 ```
 
 **Generating repo metadata in CI.** After GoReleaser produces the packages, a
@@ -211,8 +213,11 @@ A single project signing key (RSA 4096 or ed25519), created once:
   `GPG_PRIVATE_KEY`) plus its passphrase (`GPG_PASSPHRASE`). The release job
   imports it into a throwaway keyring (`gpg --batch --import`) at the start and
   the runner is ephemeral, so nothing persists.
-- **Public key** is committed to the repo tree at `/gpg/graith.gpg` and served
-  over the Pages site, so users can fetch and trust it.
+- **Public key** is published under `/gpg/` in two forms — ASCII-armored as
+  `graith.asc` (for dnf's `gpgkey=` and humans) and dearmored as `graith.gpg`
+  (for apt's `signed-by=`) — and served over the Pages site, so users can fetch
+  and trust it. The release job also publishes a copy of `graith.gpg` as
+  `graith-archive-keyring.gpg` (the conventional apt keyring filename).
 - **What gets signed:**
   - apt: the `Release` file (`Release.gpg` + inline `InRelease`).
   - rpm: `repomd.xml` (detached `.asc`) and each `.rpm` package
@@ -247,12 +252,12 @@ sudo apt-get install graith
 
 `apt-get upgrade` then picks up new releases automatically.
 
-The served key at `/gpg/graith.gpg` should be a binary (dearmored) GPG keyring
-so `signed-by=` can read it directly; if we publish the key ASCII-armored (as
-the GPG-signing section assumes), either serve a `.asc` and dearmor on the
-client (`gpg --dearmor`) or publish a dearmored copy. By convention the local
-keyring file is often named `graith-archive-keyring.gpg`; the exact filename is
-cosmetic as long as the `signed-by=` path matches.
+The served key at `/gpg/graith.gpg` is a binary (dearmored) GPG keyring so
+`signed-by=` can read it directly, while `/gpg/graith.asc` is the ASCII-armored
+form for dnf's `gpgkey=` and human inspection; the release job publishes both.
+By convention the local keyring file is often named
+`graith-archive-keyring.gpg`; the exact filename is cosmetic as long as the
+`signed-by=` path matches.
 
 **Fedora / RHEL:**
 
