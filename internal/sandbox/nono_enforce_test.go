@@ -61,7 +61,10 @@ func mustEnforce(t *testing.T) {
 func TestNonoProfileValidates(t *testing.T) {
 	mustEnforce(t)
 
-	root := t.TempDir()
+	// Build the fixture OUTSIDE /tmp/$TMPDIR: the read-only ReadDirs grant below
+	// would be rejected by buildNonoProfile if it lived under a default-writable
+	// prefix (issue #789 / #792).
+	root := nonWritableTempRoot(t)
 	worktree := filepath.Join(root, "bothy")
 	if err := os.MkdirAll(worktree, 0o700); err != nil {
 		t.Fatal(err)
@@ -90,7 +93,10 @@ func TestNonoProfileValidates(t *testing.T) {
 func TestNonoWhyPolicyDecisions(t *testing.T) {
 	mustEnforce(t)
 
-	root := t.TempDir()
+	// Build the fixture OUTSIDE /tmp/$TMPDIR: the read-only ReadDirs grant below
+	// would be rejected by buildNonoProfile if it lived under a default-writable
+	// prefix (issue #789 / #792).
+	root := nonWritableTempRoot(t)
 	worktree := filepath.Join(root, "bothy")
 	readOnly := filepath.Join(root, "glen")
 	secret := filepath.Join(root, "hame", ".ssh")
