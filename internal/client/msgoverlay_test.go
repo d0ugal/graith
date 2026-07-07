@@ -289,6 +289,153 @@ func TestMessageOverlayLongMessageScroll(t *testing.T) {
 	}
 }
 
+// longMessageModel builds a loaded model whose first message is far taller than
+// the viewport (so lineScroll is live) followed by a short tail message.
+func longMessageModel() messageOverlayModel {
+	var sb strings.Builder
+	for i := 0; i < 30; i++ {
+		sb.WriteString("line ")
+		sb.WriteString(strconv.Itoa(i))
+		sb.WriteString("\n")
+	}
+
+	m := newMessageOverlayModel("ben", nil, nil)
+	m.conversations = groupConversations("ben", []protocol.ConversationMessage{
+		{ID: "m0", Stream: "inbox:ben", SenderID: "bairn", Body: sb.String(), CreatedAt: "2026-06-25T10:00:00Z"},
+		{ID: "m1", Stream: "inbox:ben", SenderID: "bairn", Body: "short tail", CreatedAt: "2026-06-25T10:00:01Z"},
+	}, nil)
+	m.loaded = true
+	m.msgCursor = 0 // focus the long message
+	m.width, m.height = 80, 10
+
+	return m
+}
+
+// Paging down on a tall message clamps lineScroll to the block's real maximum
+// instead of accumulating unbounded (issue #774, bug 2). Otherwise a later pgup
+// appears to do nothing until the inflated value drops back under the clamp.
+func TestMessageOverlayLineScrollClampedOnPageDown(t *testing.T) {
+	m := longMessageModel()
+
+	maxScroll := m.maxLineScroll()
+	if maxScroll <= 0 {
+		t.Fatalf("expected a scrollable long message, maxLineScroll = %d", maxScroll)
+	}
+	// Page down far more times than needed to reach the end.
+	for i := 0; i < 50; i++ {
+		mm, _ := m.Update(keyPress(" "))
+		m = mm.(messageOverlayModel)
+	}
+
+	if m.lineScroll != maxScroll {
+		t.Fatalf("lineScroll = %d after paging past the end, want clamp at %d", m.lineScroll, maxScroll)
+	}
+	// A single pgup must now produce a visible change (the bug: it wouldn't,
+	// because lineScroll had accumulated far past the clamp).
+	mm, _ := m.Update(keyPress("pgup"))
+	m = mm.(messageOverlayModel)
+
+	if m.lineScroll != maxScroll-m.pageStep() {
+		t.Errorf("lineScroll = %d after one pgup, want %d", m.lineScroll, maxScroll-m.pageStep())
+	}
+}
+
+// After a resize shrinks the scrollable height, pgup must clamp to the new max
+// before subtracting, so the first press produces a visible change rather than
+// silently decrementing a stale (too-large) value (issue #774, resize edge).
+func TestMessageOverlayPageUpClampsAfterResize(t *testing.T) {
+	m := longMessageModel()
+	// Scroll to the bottom of the tall message at the small viewport.
+	for i := 0; i < 50; i++ {
+		mm, _ := m.Update(keyPress(" "))
+		m = mm.(messageOverlayModel)
+	}
+
+	stale := m.lineScroll
+	// Grow the viewport taller (but still shorter than the message): this shrinks
+	// maxLineScroll below `stale` while keeping the message scrollable.
+	mm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
+	m = mm.(messageOverlayModel)
+
+	newMax := m.maxLineScroll()
+	if newMax <= 0 || newMax >= stale {
+		t.Fatalf("resize should shrink maxLineScroll but keep it scrollable: stale=%d newMax=%d", stale, newMax)
+	}
+	// One pgup must move relative to the new max, not the stale value.
+	mm, _ = m.Update(keyPress("pgup"))
+	m = mm.(messageOverlayModel)
+
+	if want := max(0, newMax-m.pageStep()); m.lineScroll != want {
+		t.Errorf("lineScroll = %d after resize+pgup, want %d (clamped to new max)", m.lineScroll, want)
+	}
+}
+
+// A refresh that follows the newest message (prevAtLast) must reset lineScroll
+// so the newly focused message opens at its header rather than partway down
+// (issue #774, bug 1).
+func TestMessageOverlayRefreshResetsLineScrollOnFollow(t *testing.T) {
+	m := longMessageModel()
+	// Sit at the tail with a non-zero intra-message scroll, so the next refresh
+	// takes the prevAtLast (follow-newest) branch.
+	m.msgCursor = m.msgCount() - 1 // at last message (m1)
+	m.lineScroll = 7               // pretend we had paged down a tall focused message
+
+	// Refresh appends a new, tall newest message; prevAtLast is true so focus
+	// follows to it.
+	var sb strings.Builder
+	for i := 0; i < 30; i++ {
+		sb.WriteString("fresh ")
+		sb.WriteString(strconv.Itoa(i))
+		sb.WriteString("\n")
+	}
+
+	refreshed := groupConversations("ben", []protocol.ConversationMessage{
+		{ID: "m0", Stream: "inbox:ben", SenderID: "bairn", Body: "old long", CreatedAt: "2026-06-25T10:00:00Z"},
+		{ID: "m1", Stream: "inbox:ben", SenderID: "bairn", Body: "short tail", CreatedAt: "2026-06-25T10:00:01Z"},
+		{ID: "m2", Stream: "inbox:ben", SenderID: "bairn", Body: sb.String(), CreatedAt: "2026-06-25T10:00:02Z"},
+	}, nil)
+
+	mm, _ := m.Update(msgFetchedMsg{conversations: refreshed, ok: true})
+	m = mm.(messageOverlayModel)
+
+	if got := m.currentEntry(); got == nil || got.id != "m2" {
+		t.Fatalf("expected focus to follow to newest m2, got %+v", got)
+	}
+
+	if m.lineScroll != 0 {
+		t.Errorf("lineScroll = %d after refresh moved focus, want 0", m.lineScroll)
+	}
+}
+
+// A refresh that keeps focus on the same message id must preserve lineScroll so
+// the reader's scroll position within a still-focused message isn't lost.
+func TestMessageOverlayRefreshPreservesLineScrollOnSameMessage(t *testing.T) {
+	m := longMessageModel()
+	// Focus the tall message (not at last, so the re-find-by-id branch runs) and
+	// scroll into it.
+	m.msgCursor = 0
+	m.lineScroll = 5
+
+	// Refresh with the same messages plus a newer one, but focus stays on m0 by
+	// id (we're not at the tail).
+	refreshed := groupConversations("ben", []protocol.ConversationMessage{
+		{ID: "m0", Stream: "inbox:ben", SenderID: "bairn", Body: "old long", CreatedAt: "2026-06-25T10:00:00Z"},
+		{ID: "m1", Stream: "inbox:ben", SenderID: "bairn", Body: "short tail", CreatedAt: "2026-06-25T10:00:01Z"},
+		{ID: "m2", Stream: "inbox:ben", SenderID: "bairn", Body: "brand new", CreatedAt: "2026-06-25T10:00:05Z"},
+	}, nil)
+
+	mm, _ := m.Update(msgFetchedMsg{conversations: refreshed, ok: true})
+	m = mm.(messageOverlayModel)
+
+	if got := m.currentEntry(); got == nil || got.id != "m0" {
+		t.Fatalf("expected focus to stay on m0 by id, got %+v", got)
+	}
+
+	if m.lineScroll != 5 {
+		t.Errorf("lineScroll = %d after refresh kept focus on same message, want 5 (preserved)", m.lineScroll)
+	}
+}
+
 func TestMessageOverlayRenderShowsTimeAndDelta(t *testing.T) {
 	m := testModel(2)
 	out := m.renderThread(80, 20)

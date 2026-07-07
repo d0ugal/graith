@@ -289,6 +289,14 @@ func (m messageOverlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.msgCursor = max(0, m.msgCount()-1)
 		}
 
+		// If the refresh moved focus to a different message, reset the
+		// intra-message scroll so the new message opens at its header. Key-driven
+		// cursor moves already do this; the refresh path previously did not,
+		// leaving lineScroll pointing partway down an unrelated message.
+		if e := m.currentEntry(); e == nil || e.id != focusedMsgID {
+			m.lineScroll = 0
+		}
+
 		return m, nil
 
 	case tea.KeyPressMsg:
@@ -313,10 +321,18 @@ func (m messageOverlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		// Page within the focused message when it's taller than the viewport.
 		case "pgdown", "space", " ", "ctrl+d", "ctrl+f":
-			m.lineScroll += m.pageStep()
+			// Clamp to the focused block's scrollable height so the stored value
+			// can't accumulate past the real maximum (which would make later pgup
+			// presses appear to do nothing until it drops back under the clamp).
+			m.lineScroll = min(m.lineScroll+m.pageStep(), m.maxLineScroll())
 			return m, nil
 		case "pgup", "ctrl+u", "ctrl+b":
-			m.lineScroll = max(0, m.lineScroll-m.pageStep())
+			// Clamp to the current max before subtracting: a viewport resize can
+			// shrink maxLineScroll below a previously-valid lineScroll, and
+			// without this the first pgup(s) would subtract from the stale larger
+			// value and appear to do nothing (the same symptom bug 2 fixed for
+			// pgdown accumulation).
+			m.lineScroll = max(0, min(m.lineScroll, m.maxLineScroll())-m.pageStep())
 			return m, nil
 		// Horizontal: switch conversation in the rail.
 		case "l", "right", "tab":
@@ -370,6 +386,40 @@ func (m messageOverlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // roughly one viewport, leaving a line of overlap.
 func (m messageOverlayModel) pageStep() int {
 	return max(1, m.height-5)
+}
+
+// threadViewport returns the (width, height) the thread pane is rendered at,
+// mirroring View()'s layout math so scroll clamping matches what's displayed.
+func (m messageOverlayModel) threadViewport() (int, int) {
+	bodyH := max(1, m.height-4)
+	if m.width < 36 {
+		return max(1, m.width-1), bodyH
+	}
+
+	railW := 26
+	if m.width < 70 {
+		railW = max(16, m.width/3)
+	}
+
+	return max(10, m.width-railW-3), bodyH
+}
+
+// maxLineScroll is the furthest lineScroll can advance for the focused message:
+// 0 unless its rendered block is taller than the thread viewport. It mirrors the
+// render-time clamp in renderThread so the two never disagree.
+func (m messageOverlayModel) maxLineScroll() int {
+	e := m.currentEntry()
+	if e == nil {
+		return 0
+	}
+
+	width, height := m.threadViewport()
+	body := strings.TrimRight(sanitizeMessageBody(e.body), "\n")
+	bodyStyle := lipgloss.NewStyle().Width(width)
+	// Block layout matches renderThread: header (1) + wrapped body + trailing blank (1).
+	blockH := 1 + len(strings.Split(bodyStyle.Render(body), "\n")) + 1
+
+	return max(0, blockH-height)
 }
 
 // msgCount returns the number of messages in the selected conversation.
