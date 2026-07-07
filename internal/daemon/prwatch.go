@@ -287,8 +287,10 @@ func (sm *SessionManager) diffAndBuild(cfg *configPRWatch, t prWatchTarget, slug
 	// New PR or new head SHA resets the per-SHA notify cap and failing set.
 	// cur.mergeable is deliberately NOT reset here: unlike CI (which re-notifies
 	// per SHA), a still-conflicting PR after a push should not re-spam during an
-	// active rebase — and GitHub usually flips mergeability to UNKNOWN between
-	// pushes anyway, so a genuine re-conflict still transitions UNKNOWN→CONFLICTING.
+	// active rebase. Because UNKNOWN is never stored (the steady-state switch
+	// below only writes MERGEABLE/CONFLICTING), a persistent conflict across
+	// pushes stays CONFLICTING and is intentionally suppressed until a confirmed
+	// MERGEABLE is observed — only then does a subsequent CONFLICTING re-notify.
 	if cur.number != d.Number || cur.headRefOid != d.HeadRefOid {
 		cur.number = d.Number
 		cur.headRefOid = d.HeadRefOid

@@ -149,6 +149,59 @@ func TestDiffAndBuild_PrimeDirectiveNotRepeatedWhileDegraded(t *testing.T) {
 	}
 }
 
+// A persistent conflict across a push (new head SHA) is intentionally
+// suppressed: cur.mergeable is not reset on a new SHA and UNKNOWN is never
+// stored, so re-notifying only happens after a confirmed MERGEABLE is observed.
+func TestDiffAndBuild_PersistentConflictAcrossPushSuppressed(t *testing.T) {
+	sm := newPRWatchSM()
+	cfg := allOnConfig()
+	cfg.Debounce = "0s" // this test fires two conflict notices; don't debounce them
+	t1 := prWatchTarget{id: "bide", branch: "bide"}
+
+	// Prime mergeable, then transition to CONFLICTING (notifies once).
+	sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 10, State: "open", HeadRefOid: "sha1", CIState: "passing",
+		Mergeable: "MERGEABLE", CommentsOK: true,
+	})
+
+	if out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 10, State: "open", HeadRefOid: "sha1", CIState: "passing",
+		Mergeable: "CONFLICTING", CommentsOK: true,
+	}); len(out) != 1 || !strings.Contains(out[0], "merge conflicts") {
+		t.Fatalf("first conflict should notify, got %v", out)
+	}
+
+	// Push (new head SHA) while still conflicting. GitHub reports UNKNOWN first
+	// (never stored), then CONFLICTING again. Neither re-notifies: without an
+	// intervening MERGEABLE the cursor stays CONFLICTING.
+	if out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 10, State: "open", HeadRefOid: "sha2", CIState: "passing",
+		Mergeable: "UNKNOWN", CommentsOK: true,
+	}); len(out) != 0 {
+		t.Fatalf("UNKNOWN after push should not notify, got %v", out)
+	}
+
+	if out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 10, State: "open", HeadRefOid: "sha2", CIState: "passing",
+		Mergeable: "CONFLICTING", CommentsOK: true,
+	}); len(out) != 0 {
+		t.Fatalf("still-conflicting re-push should be suppressed, got %v", out)
+	}
+
+	// Only a confirmed MERGEABLE re-arms the notification.
+	sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 10, State: "open", HeadRefOid: "sha2", CIState: "passing",
+		Mergeable: "MERGEABLE", CommentsOK: true,
+	})
+
+	if out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 10, State: "open", HeadRefOid: "sha2", CIState: "passing",
+		Mergeable: "CONFLICTING", CommentsOK: true,
+	}); len(out) != 1 || !strings.Contains(out[0], "merge conflicts") {
+		t.Fatalf("conflict after confirmed MERGEABLE should re-notify, got %v", out)
+	}
+}
+
 func TestDiffAndBuild_PrimeConflictNotMaskedByCIFailure(t *testing.T) {
 	// On the priming poll a PR is BOTH failing CI and conflicting. CI takes
 	// priority and is delivered first; the conflict must NOT be permanently
