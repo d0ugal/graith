@@ -232,64 +232,24 @@ jobs:
       contents: write
       pull-requests: write
     steps:
+      # Only the helper script is needed — check it out sparsely (screenshots
+      # are read/written via the API, never the working tree) and don't
+      # persist git credentials (the branch is rewritten via github-script's
+      # token, not `git push`). Pin to the PR *base* SHA: this job runs with a
+      # write-scoped token and then executes the checked-out script, so it must
+      # run the trusted base version, never PR-controlled code from the default
+      # merge ref (the workflow YAML itself is already taken from the base).
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+          sparse-checkout: .github/workflows/scripts
       - name: Remove PR screenshots from the screenshots branch
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
-            const { owner, repo } = context.repo;
-            const pr = context.payload.pull_request.number;
-            const branch = 'screenshots';
-            const prefix = `pr-${pr}/`;
-
-            // Look up the tip of the screenshots branch. If the branch does
-            // not exist there is nothing to clean up.
-            let ref;
-            try {
-              ref = await github.rest.git.getRef({ owner, repo, ref: `heads/${branch}` });
-            } catch (e) {
-              if (e.status === 404) { core.info(`No ${branch} branch — nothing to clean up.`); return; }
-              throw e;
-            }
-
-            const commitSha = ref.data.object.sha;
-            const commit = await github.rest.git.getCommit({ owner, repo, commit_sha: commitSha });
-            const baseTreeSha = commit.data.tree.sha;
-
-            // Read the whole tree recursively and keep every blob that does
-            // not live under this PR's subtree.
-            const full = await github.rest.git.getTree({ owner, repo, tree_sha: baseTreeSha, recursive: 'true' });
-            if (full.data.truncated) {
-              core.warning('Screenshots tree was truncated; cleanup may be incomplete.');
-            }
-            const blobs = full.data.tree.filter(e => e.type === 'blob');
-            const kept = blobs.filter(e => !e.path.startsWith(prefix));
-
-            if (kept.length === blobs.length) {
-              core.info(`No screenshots found under ${prefix} — nothing to clean up.`);
-              return;
-            }
-
-            // Rebuild the tree from scratch (base_tree omitted) so removed
-            // paths disappear rather than lingering from the old tree.
-            const tree = kept.map(e => ({ path: e.path, mode: e.mode, type: e.type, sha: e.sha }));
-            const newTree = await github.rest.git.createTree({ owner, repo, tree });
-            const newCommit = await github.rest.git.createCommit({
-              owner, repo,
-              message: `docs preview: clean up PR #${pr}`,
-              tree: newTree.data.sha,
-              parents: [commitSha],
-            });
-            await github.rest.git.updateRef({ owner, repo, ref: `heads/${branch}`, sha: newCommit.data.sha });
-            core.info(`Removed ${blobs.length - kept.length} screenshot(s) for PR #${pr}.`);
-
-            // Update the sticky comment to note the previews were cleaned up.
-            const marker = '<!-- docs-preview -->';
-            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number: pr });
-            const existing = comments.find(c => c.body && c.body.includes(marker));
-            if (existing) {
-              const body = `${marker}\n### 📸 Docs preview\n\n_Preview screenshots for this PR were cleaned up after it was closed._`;
-              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
-            }
+            const { cleanup } = require('./.github/workflows/scripts/docs-preview.js');
+            await cleanup({ github, context, core });
 
   prune:
     name: Prune stale screenshots
@@ -299,63 +259,16 @@ jobs:
     permissions:
       contents: write
     steps:
+      # Only the helper script is needed — see the cleanup job's checkout note.
+      # No `ref` pin needed here: the schedule trigger checks out the default
+      # branch (trusted), never PR-controlled content.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/workflows/scripts
       - name: Remove screenshot dirs older than 30 days
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
-            const { owner, repo } = context.repo;
-            const branch = 'screenshots';
-            const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
-
-            // Look up the tip of the screenshots branch. If it doesn't exist
-            // there is nothing to prune.
-            let ref;
-            try {
-              ref = await github.rest.git.getRef({ owner, repo, ref: `heads/${branch}` });
-            } catch (e) {
-              if (e.status === 404) { core.info(`No ${branch} branch — nothing to prune.`); return; }
-              throw e;
-            }
-
-            const commitSha = ref.data.object.sha;
-            const commit = await github.rest.git.getCommit({ owner, repo, commit_sha: commitSha });
-            const baseTreeSha = commit.data.tree.sha;
-
-            const full = await github.rest.git.getTree({ owner, repo, tree_sha: baseTreeSha, recursive: 'true' });
-            if (full.data.truncated) {
-              core.warning('Screenshots tree was truncated; prune may be incomplete.');
-            }
-            const blobs = full.data.tree.filter(e => e.type === 'blob');
-
-            // Paths look like pr-<num>/<YYYYMMDD>-<sha>-<run>.<attempt>/<file>.
-            // Decide staleness from the leading YYYYMMDD of the run-dir. Paths
-            // that don't carry a parseable date are left untouched.
-            const now = Date.now();
-            const isStale = (p) => {
-              const seg = p.split('/');
-              if (seg.length < 3 || !seg[0].startsWith('pr-')) return false;
-              const m = seg[1].match(/^(\d{4})(\d{2})(\d{2})-/);
-              if (!m) return false;
-              const t = Date.parse(`${m[1]}-${m[2]}-${m[3]}T00:00:00Z`);
-              if (Number.isNaN(t)) return false;
-              return (now - t) > MAX_AGE_MS;
-            };
-
-            const kept = blobs.filter(e => !isStale(e.path));
-            const removed = blobs.length - kept.length;
-            if (removed === 0) {
-              core.info('No stale screenshot dirs to prune.');
-              return;
-            }
-
-            // Rebuild from scratch (no base_tree) so stale paths disappear.
-            const tree = kept.map(e => ({ path: e.path, mode: e.mode, type: e.type, sha: e.sha }));
-            const newTree = await github.rest.git.createTree({ owner, repo, tree });
-            const newCommit = await github.rest.git.createCommit({
-              owner, repo,
-              message: `docs preview: prune ${removed} stale screenshot(s)`,
-              tree: newTree.data.sha,
-              parents: [commitSha],
-            });
-            await github.rest.git.updateRef({ owner, repo, ref: `heads/${branch}`, sha: newCommit.data.sha });
-            core.info(`Pruned ${removed} screenshot(s) older than 30 days.`);
+            const { prune } = require('./.github/workflows/scripts/docs-preview.js');
+            await prune({ github, context, core });
