@@ -1,24 +1,20 @@
 name: Sandbox
 
-# Sandbox backend bring-up CI. This installs the per-OS sandbox backends
+# Sandbox backend CI. This installs the per-OS sandbox backends
 # (nono on Linux via Landlock+seccomp, safehouse on macOS via Seatbelt),
-# probes and REPORTS the enforcement level available on the GitHub-hosted
+# probes and reports the enforcement level available on the GitHub-hosted
 # runners, and runs a standalone enforcement smoke test to prove the runner
 # can actually enforce a deny-by-default policy.
 #
-# Design intent (bring-up phase): this workflow REPORTS the enforcement level
-# rather than hard-failing. We are learning what the GitHub-hosted runners
-# actually support. The key open question this answers, visible directly in
-# the PR checks, is:
+# The smoke test is a hard gate: `ubuntu-latest` is confirmed Landlock
+# FullyEnforced, so a broken deny/allow boundary fails the build red. The
+# enforcement-probe step below still records, visible directly in the PR
+# checks, the answer to the key question:
 #
 #   Does GitHub's `ubuntu-latest` runner have Landlock available and
 #   FullyEnforced?
 #
-# The smoke test is allowed to fail-soft during bring-up (continue-on-error)
-# so a NotEnforced/PartiallyEnforced runner still surfaces its findings in the
-# job log and step summary instead of just going red with no signal.
-#
-# FALLBACK OPTIONS if `ubuntu-latest` turns out NOT to be Landlock
+# FALLBACK OPTIONS if `ubuntu-latest` ever regresses and is NOT Landlock
 # FullyEnforced (documented here so the answer + remedy live together):
 #   1. Larger GitHub-hosted runner (e.g. `ubuntu-latest-4-cores`) — a newer
 #      kernel image may expose a higher Landlock ABI.
@@ -165,7 +161,7 @@ jobs:
           echo "noaccess-secret"  > "$scratch/NOACCESS/secret-noaccess.txt"
 
           # Hand-authored nono profile in nono v0.66.0's schema (mirrors the
-          # profile graith's Phase 1 nono backend generates):
+          # profile graith's nono backend generates):
           #   filesystem.allow -> read+write recursive (WRITABLE goes here)
           #   filesystem.read  -> read-only recursive   (READONLY goes here)
           # NOACCESS is deliberately in neither list, so it must be denied.
@@ -230,24 +226,23 @@ jobs:
             echo "- failed (unexpected outcome):  **$fail**"
             if [ "$fail" -ne 0 ]; then
               echo
-              echo "> One or more assertions did not hold. During bring-up this is"
-              echo "> reported, not fatal — it tells us this runner cannot fully"
-              echo "> enforce. See the fallback options in the workflow header."
+              echo "> One or more assertions did not hold. This is a hard failure:"
+              echo "> the deny/allow boundary this runner is expected to enforce"
+              echo "> broke. See the fallback options in the workflow header."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
-          # Report the outcome without hard-failing the job (continue-on-error
-          # already set; keep the real code so the step's own status is honest).
+          # Hard gate: any unexpected outcome fails the step red.
           [ "$fail" -eq 0 ]
 
       - name: graith tagged enforcement tests (nono)
-        # TODO(phase-1): activate once the nono sandbox backend + its
-        # build-tagged enforcement test land on main. Phase 1's enforcement
-        # test uses the build tag `nono_enforce` (Linux-only) and is invoked as:
+        # graith's nono enforcement test lives in
+        # internal/sandbox/nono_enforce_test.go behind the build tag
+        # `nono_enforce` (Linux-only) and is invoked as:
         #     go test -tags nono_enforce ./internal/sandbox/ -run TestNonoEnforces
-        # The test itself skips cleanly if nono cannot enforce on the host, so
-        # once it exists this step needs no continue-on-error. Until it lands we
-        # detect its absence and no-op so this workflow never breaks.
+        # The test skips cleanly if nono cannot enforce on the host, so it needs
+        # no continue-on-error. The grep guard fails the step red if the tagged
+        # tests go missing rather than silently passing on a no-op.
         run: |
           set -uo pipefail
           tag="nono_enforce"
@@ -255,13 +250,14 @@ jobs:
             echo "Found ${tag} build-tagged tests — running enforcement suite."
             go test -tags "${tag}" ./internal/sandbox/... -run TestNonoEnforces -v
           else
-            echo "::notice title=Phase 1 not merged::No '${tag}' build-tagged tests found in internal/sandbox/; skipping (no-op). Activate once Phase 1 lands."
-            echo "SKIPPED: graith '${tag}' enforcement tests not present yet." >> "$GITHUB_STEP_SUMMARY"
+            echo "::error title=Missing enforcement tests::No '${tag}' build-tagged tests found in internal/sandbox/."
+            echo "FAILED: graith '${tag}' enforcement tests missing." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
           fi
 
   # ---------------------------------------------------------------------------
   # macOS / safehouse — Seatbelt is always present; check the binary installs
-  # and add the same gracefully-gated enforcement-test step.
+  # and run the same hard-gated tagged enforcement-test step.
   # ---------------------------------------------------------------------------
   macos-safehouse:
     name: macOS (safehouse / Seatbelt)
@@ -305,11 +301,11 @@ jobs:
           fi
 
       - name: graith tagged enforcement tests (safehouse)
-        # TODO(phase-1): activate once the safehouse-path enforcement test lands.
-        # Gated identically to the Linux step: detect the build-tagged test and
-        # no-op if absent so this workflow never breaks before Phase 1 merges.
-        # The macOS/safehouse enforcement tag is expected to mirror the nono one
-        # (e.g. `safehouse_enforce`); adjust below when Phase 1 fixes the name.
+        # graith's safehouse enforcement test lives in
+        # internal/sandbox/safehouse_enforce_test.go behind the build tag
+        # `safehouse_enforce`. Gated identically to the Linux step: the grep
+        # guard fails the step red if the tagged tests go missing rather than
+        # silently passing on a no-op.
         run: |
           set -uo pipefail
           tag="safehouse_enforce"
@@ -317,6 +313,7 @@ jobs:
             echo "Found ${tag} build-tagged tests — running enforcement suite."
             go test -tags "${tag}" ./internal/sandbox/... -v
           else
-            echo "::notice title=Phase 1 not merged::No '${tag}' build-tagged tests found in internal/sandbox/; skipping (no-op). Activate once Phase 1 lands."
-            echo "SKIPPED: graith '${tag}' enforcement tests not present yet." >> "$GITHUB_STEP_SUMMARY"
+            echo "::error title=Missing enforcement tests::No '${tag}' build-tagged tests found in internal/sandbox/."
+            echo "FAILED: graith '${tag}' enforcement tests missing." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
           fi
