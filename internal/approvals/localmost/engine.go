@@ -34,11 +34,11 @@ func newEngine(fc fileConfig) (*Engine, error) {
 	}
 
 	var err error
-	if e.allow, err = compileRules(fc.Allow); err != nil {
+	if e.allow, err = e.compileRules(fc.Allow); err != nil {
 		return nil, fmt.Errorf("allow: %w", err)
 	}
 
-	if e.deny, err = compileRules(fc.Deny); err != nil {
+	if e.deny, err = e.compileRules(fc.Deny); err != nil {
 		return nil, fmt.Errorf("deny: %w", err)
 	}
 
@@ -50,7 +50,7 @@ func newEngine(fc fileConfig) (*Engine, error) {
 // non-interactive contexts.
 func (e *Engine) AskNoninteractive() bool { return e.askNoninteractive }
 
-func compileRules(rs []Rule) ([]compiledRule, error) {
+func (e *Engine) compileRules(rs []Rule) ([]compiledRule, error) {
 	out := make([]compiledRule, 0, len(rs))
 
 	for _, r := range rs {
@@ -66,9 +66,22 @@ func compileRules(rs []Rule) ([]compiledRule, error) {
 		var unless [][]term
 
 		for _, u := range r.Unless {
+			if strings.TrimSpace(u) == "" {
+				return nil, fmt.Errorf("rule %q: empty unless", r.Rule)
+			}
+
 			ut, uerr := compileRule(u)
 			if uerr != nil {
 				return nil, fmt.Errorf("unless %q: %w", u, uerr)
+			}
+
+			// An unless expression that can match the empty token run makes
+			// appearsAnywhere always true, silently disabling the rule it
+			// guards. For a deny rule that is fail-open. Reject at load time.
+			// This subsumes the empty/whitespace/null case above and also
+			// catches zero-width patterns like "@arg*" or "@arg?". See #781.
+			if ms := (&matchState{eng: e}); len(ms.seq(ut, 0)) > 0 {
+				return nil, fmt.Errorf("rule %q: unless %q matches the empty command", r.Rule, u)
 			}
 
 			unless = append(unless, ut)

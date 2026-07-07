@@ -241,3 +241,66 @@ func TestParseInvalidRule(t *testing.T) {
 		t.Error("expected error for an empty rule")
 	}
 }
+
+// TestEmptyUnlessRejected guards against a fail-open regression: an unless
+// entry that can match the empty command must be rejected at load time rather
+// than silently disabling the rule it is attached to. An empty/whitespace/null
+// entry compiles to an empty term sequence, and zero-width patterns like
+// "@arg*" or "@arg?" match empty too — both make appearsAnywhere always true,
+// which for a deny rule is fail-open. See issue #781.
+func TestEmptyUnlessRejected(t *testing.T) {
+	cases := []struct {
+		name string
+		cfg  string
+	}{
+		{"empty string", `{"deny":[{"rule":"rm @arg*","unless":[""]}]}`},
+		{"whitespace", `{"deny":[{"rule":"rm @arg*","unless":["   "]}]}`},
+		{"null element", `{"deny":[{"rule":"rm @arg*","unless":[null]}]}`},
+		{"empty among valid", `{"allow":[{"rule":"find @*","unless":["-exec",""]}]}`},
+		{"star matches empty", `{"deny":[{"rule":"rm @arg*","unless":["@arg*"]}]}`},
+		{"opt matches empty", `{"deny":[{"rule":"rm @arg*","unless":["@arg?"]}]}`},
+		{"optional group matches empty", `{"deny":[{"rule":"rm @arg*","unless":["@(-f)?"]}]}`},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := Parse([]byte(tc.cfg)); err == nil {
+				t.Fatalf("expected error for empty-matching unless entry, config %s", tc.cfg)
+			}
+		})
+	}
+}
+
+// TestValidUnlessStillCompiles ensures the fail-open guard did not over-reach:
+// unless entries that require at least one token must still compile and behave
+// as exceptions.
+func TestValidUnlessStillCompiles(t *testing.T) {
+	eng := mustEngine(t, `{"allow":[{"rule":"find @*","unless":["-exec","-delete"]}]}`)
+
+	if pol, _ := eng.Evaluate("find . -type f"); pol != PolicyAllow {
+		t.Fatalf("find without unless token: got %q, want allow", pol)
+	}
+
+	if pol, _ := eng.Evaluate("find . -exec rm {} ;"); pol != PolicyAsk {
+		t.Fatalf("find with -exec (unless fires): got %q, want ask", pol)
+	}
+}
+
+// TestEmptyUnlessDoesNotDisableDeny is the concrete fail-open reproduction from
+// issue #781: a deny rule with a stray empty unless must not stop denying.
+func TestEmptyUnlessDoesNotDisableDeny(t *testing.T) {
+	fc := fileConfig{Deny: []Rule{{Rule: "rm @arg*", Unless: []string{""}}}}
+	if _, err := newEngine(fc); err == nil {
+		t.Fatal("expected newEngine to reject a deny rule with an empty unless")
+	}
+
+	// Control: the same rule without unless still denies.
+	eng, err := newEngine(fileConfig{Deny: []Rule{{Rule: "rm @arg*"}}})
+	if err != nil {
+		t.Fatalf("newEngine: %v", err)
+	}
+
+	if pol, _ := eng.Evaluate("rm -rf /tmp/x"); pol != PolicyDeny {
+		t.Fatalf("control rule: got %q, want deny", pol)
+	}
+}
