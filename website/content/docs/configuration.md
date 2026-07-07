@@ -68,13 +68,25 @@ When `command` is set, graith executes it via `sh -c` instead of using the syste
 
 ```toml
 [approvals]
-mode     = "prompt"  # "prompt" or "localmost"
-timeout  = "10m"     # how long to wait for a decision
-auto_pop = false     # auto-show approval overlay when approval is needed
-command  = ""        # custom command to run for approval decisions
+backend  = ""        # who decides (see below); default "" = always prompt the human
+timeout  = "10m"     # how long to wait for a human decision
+auto_pop = false     # auto-open the approval overlay when a request is queued
+command  = ""        # required for backend "command"/"external"; path override for "localmost"
+
+[approvals.builtin]
+config   = ""        # localmost-format config.json (backend "builtin")
 ```
 
-The approval system integrates with agent hooks. When an agent requests approval (e.g. for a dangerous tool call), graith can prompt the user via the overlay (`prompt` mode) or delegate to a local command (`localmost` mode, which runs a command to make the decision with a 5-second timeout, falling back to user prompt).
+The approval system integrates with agent hooks. When an agent requests approval (e.g. for a dangerous tool call), the `backend` decides who resolves it:
+
+| `backend` | Who decides |
+|-----------|-------------|
+| `""` (default, equivalent to `"prompt"`) | Always prompt the human via the overlay |
+| `"command"` / `"external"` | Delegate to `command` over graith's JSON contract (one JSON object on stdin — `{tool_name,tool_input,session_id,session_name}` — and one on stdout — `{decision:allow\|block\|deny\|defer,reason}`) |
+| `"localmost"` | Delegate to the real localmost binary via its native protocol (`command` optionally overrides the binary path) |
+| `"builtin"` | graith's built-in localmost-compatible engine — configured via `[approvals.builtin] config` (a localmost-format `config.json` path) **or** inline rules (`allow`, `deny`, `allowSafeXargs`, `askNoninteractive`) |
+
+`mode` is deprecated. With no `backend` set, legacy `mode = "command"`, `mode = "external"`, and `mode = "localmost"` all resolve to `backend = "command"` (graith's JSON contract) for compatibility — `mode = "localmost"` does **not** select the native-protocol `backend = "localmost"`. Set `backend = "localmost"` explicitly to run the real localmost binary. See `ResolveBackend` in `internal/config/config.go` for the full resolution order.
 
 ## Messages
 

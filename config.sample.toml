@@ -42,7 +42,9 @@
 #                      # JSON contract), "localmost" (the real localmost binary via
 #                      # its native protocol), or "builtin" (graith's built-in
 #                      # localmost-compatible engine). "mode" is the deprecated
-#                      # predecessor and still works as a back-compat alias.
+#                      # predecessor: with no backend, legacy mode command/external/
+#                      # localmost all resolve to backend "command" (NOT native
+#                      # "localmost" — set backend = "localmost" for that).
 # auto_pop = false     # auto-open the approval overlay when a request is queued
 # timeout  = "10m"     # how long to wait for a human decision
 # command  = ""        # required for backend "command"/"external"; optional path
@@ -57,15 +59,24 @@
 # max_per_stream = 0
 
 # --- Sandbox ---
-# When enabled, agent processes are wrapped with safehouse (macOS sandbox-exec).
-# Agent-specific sandbox sections are merged with the global sandbox config.
+# OS-level sandbox for agent processes. Disabled by default. When enabled a
+# `backend` MUST be chosen — there is no default; an unset backend fails closed.
+# Agent-specific [agents.<name>.sandbox] sections are merged with this config.
 
 # [sandbox]
 # enabled = false
-# command = "safehouse"
-# features = []
-# read_dirs = []
-# write_dirs = []
+# backend = "nono"                        # REQUIRED when enabled: "safehouse" (macOS Seatbelt) | "nono" (Landlock+seccomp on Linux, Seatbelt on macOS)
+# command = "nono"                        # path to the backend binary (default: the backend name)
+# features = ["ssh"]                      # feature gates (mapping differs per backend; ssh -> $SSH_AUTH_SOCK, process-control -> signals)
+# read_dirs  = []                         # additional read-only paths (directories)
+# write_dirs = []                         # additional read-write paths (directories)
+# read_files  = []                        # additional read-only single files
+# write_files = []                        # additional read-write single files (e.g. ~/.claude.json login file)
+# signal_mode = "isolated"                # nono only: "isolated" | "allow_same_sandbox" (nono default) | "allow_all"
+
+# [sandbox.network]                       # nono only; needs Landlock ABI v4 (kernel 6.7+). safehouse fails closed if set.
+# block = true                            # deny all outbound network
+# allow_domains = ["github.com"]          # OR restrict to a proxy allowlist (host or URL glob)
 
 # --- Agents ---
 # Each agent needs its config directory in sandbox read/write dirs when
@@ -80,7 +91,11 @@ fork_args = ["--session-id", "{agent_session_id}", "--fork-session", "{fork_sour
 
 [agents.claude.sandbox]
 read_dirs = ["~/.claude"]
-write_dirs = ["~/.local/share/claude"]
+write_dirs = ["~/.claude"]
+# Claude stores its login in ~/.claude.json; granting ~ would expose every
+# dotfile secret, so grant just the login files (read+write — Claude rewrites
+# them to refresh tokens). Without this a sandboxed Claude stays logged out.
+write_files = ["~/.claude.json", "~/.claude.json.lock", "~/.claude.lock"]
 
 [agents.codex]
 command = "codex"
@@ -90,6 +105,7 @@ fork_args = ["fork", "{fork_source_agent_session_id}"]
 
 [agents.codex.sandbox]
 read_dirs = ["~/.codex"]
+write_dirs = ["~/.codex"]
 
 [agents.opencode]
 command = "opencode"

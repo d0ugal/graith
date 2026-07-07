@@ -33,7 +33,7 @@ Steps:
 2. **Branch** -- creates `<branch_prefix>/<session-name>-<session-id>` from the base branch (default: repo's default branch, override with `--base`)
 3. **Worktree** -- creates a git worktree at `<data_dir>/worktrees/<repo-name>/<repo-hash>/<session-id>/`
 4. **Environment** -- sets `GRAITH_SESSION_ID`, `GRAITH_SESSION_NAME`, `GRAITH_AGENT_TYPE`, `GRAITH_WORKTREE_PATH`, `GRAITH_REPO_PATH`, `GRAITH_TMPDIR`, `TMPDIR`
-5. **Sandbox** (if enabled) -- wraps the command with `safehouse wrap`
+5. **Sandbox** (if enabled) -- wraps the command with the configured backend (`safehouse wrap` or `nono run --profile`); fails closed if no `backend` is set or it can't enforce
 6. **Agent** -- starts the agent process with configured `command` and `args`
 7. **Prompt** (if `--prompt` or `--prompt-file`) -- types the prompt into the agent's stdin after startup
 8. **Attach** (unless `--background`) -- enters passthrough mode

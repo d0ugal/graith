@@ -196,12 +196,12 @@ The store (`store/store.go`) operates directly on disk:
 
 ## Sandbox
 
-When sandbox is enabled (`sandbox/sandbox.go`):
+When sandbox is enabled (`sandbox/sandbox.go`), the backend is pluggable — selected with `[sandbox] backend` (`safehouse` = macOS `sandbox-exec`; `nono` = Landlock+seccomp on Linux / Seatbelt on macOS). `backend` is required when the sandbox is enabled; an unset backend fails closed.
 
 1. The daemon resolves the merged sandbox config (global + per-agent)
-2. `~` paths are expanded to absolute
-3. The agent command is wrapped with `safehouse wrap` and the resolved options
-4. The daemon checks for safehouse availability before session creation
+2. `~` paths and globs are expanded to absolute
+3. The command is wrapped by the selected backend — either `safehouse wrap` (`sandbox/safehouse.go`) or a generated per-session nono JSON profile run via `nono run --profile` (`sandbox/nono.go`)
+4. The daemon checks the selected backend can enforce before session creation (binary present, kernel/version adequate, network policy supported); if not, creation fails closed
 
 ## Agent detection
 
@@ -225,7 +225,7 @@ internal/
   output/                Structured output helpers (text/JSON)
   protocol/              Wire protocol: framing, control messages, encoding
   pty/                   PTY session management, scrollback buffer
-  sandbox/               Safehouse sandbox wrapping
+  sandbox/               Pluggable OS sandbox backends (safehouse, nono)
   store/                 Flat-file git-backed document store
   version/               Build-time version injection
 ```
