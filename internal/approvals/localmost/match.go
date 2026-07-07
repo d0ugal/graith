@@ -273,6 +273,16 @@ func isInt(s string) bool {
 	return true
 }
 
+// isValidPath reports whether s is a valid POSIX pathname: non-empty and free
+// of NUL bytes. This is deliberately as permissive as localmost's @path — Linux
+// only forbids the empty string and NUL in a pathname, so a bare relative name
+// like "foo", a dot-file, an option-looking "-x", or an absolute "/etc/passwd"
+// are all valid paths. @path is therefore only marginally narrower than @arg
+// (it additionally rejects the empty-string argument ""). Tightening this to a
+// "path-shaped" heuristic (requiring a leading /, ./, ~, etc.) would break
+// parity with localmost, which allows e.g. `mkdir foo`. See issue #732 and the
+// documented behaviour in
+// docs/design/2026-07-03-pluggable-approvals-backends-design.md.
 func isValidPath(s string) bool {
 	if s == "" {
 		return false
