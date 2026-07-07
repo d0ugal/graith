@@ -1,5 +1,97 @@
 # Changelog
 
+## [0.66.0](https://github.com/d0ugal/graith/compare/v0.65.0...v0.66.0) (2026-07-07)
+
+
+### ⚠ BREAKING CHANGES
+
+* **sandbox:** reject read-only nono grants under /tmp instead of re-denying
+
+### Features
+
+* **approvals:** support inline builtin rules in config.toml ([adb9ab4](https://github.com/d0ugal/graith/commit/adb9ab4c98c579a894f60a6fee329c0e3d05e977)), closes [#737](https://github.com/d0ugal/graith/issues/737)
+* **doctor:** warn on unknown config keys ([341c344](https://github.com/d0ugal/graith/commit/341c344072d77913b3e3e9922530cb39fca2b9b5)), closes [#720](https://github.com/d0ugal/graith/issues/720)
+* **sandbox:** configurable base profile for nono (extends) ([02e6dc5](https://github.com/d0ugal/graith/commit/02e6dc5d54ee4eddd7c5e9b5c99bd9740d926b84)), closes [#726](https://github.com/d0ugal/graith/issues/726)
+
+
+### Bug Fixes
+
+* **approvals:** fail closed when an allow match exhausts the step budget ([61d5f61](https://github.com/d0ugal/graith/commit/61d5f61eb6dfbef5c22f7c90d834f81f68e4d020))
+* **approvals:** harden inline builtin rules against fail-open typos ([13f8aa4](https://github.com/d0ugal/graith/commit/13f8aa41da32ba55394162ac45619253c957e3d6))
+* **approvals:** honor --config override and expand path in doctor ([79e84d8](https://github.com/d0ugal/graith/commit/79e84d82bba7762e2367ab25f68e92b024d3d334))
+* **approvals:** reject unless entries that match the empty command ([9e6cd67](https://github.com/d0ugal/graith/commit/9e6cd67427d74d3fde5a2480be1b851ef42c7637)), closes [#781](https://github.com/d0ugal/graith/issues/781)
+* **approvals:** resolve builtin config path against config dir on daemon ([0fbf126](https://github.com/d0ugal/graith/commit/0fbf1269e97d57251a685b7814216fb08c4f76f9)), closes [#790](https://github.com/d0ugal/graith/issues/790)
+* **approvals:** stop [@env](https://github.com/env) allow rules auto-approving hidden commands ([#782](https://github.com/d0ugal/graith/issues/782)) ([dfe2fbb](https://github.com/d0ugal/graith/commit/dfe2fbb097396a3397de0e4f3ba8d0ab6a62b5aa))
+* **approvals:** tidy localmost engine robustness nits ([#798](https://github.com/d0ugal/graith/issues/798)) ([70be3d0](https://github.com/d0ugal/graith/commit/70be3d0a85c6efb42817f7d2c6ce499de9fce7da))
+* **approvals:** trim before ~-expand and tidy design-doc example ([18643c9](https://github.com/d0ugal/graith/commit/18643c99b3c924c3dfd361ceab79d327f7e6ed76))
+* **ci:** commit empty-tree SHA when docs-preview rewrite keeps nothing ([a59a09f](https://github.com/d0ugal/graith/commit/a59a09f80d9ade60885b75a61858bb0032da323a)), closes [#766](https://github.com/d0ugal/graith/issues/766)
+* **ci:** fail closed when the screenshots tree is truncated ([c64037f](https://github.com/d0ugal/graith/commit/c64037f0646e81cdc8494b0f445365139eb39cdf)), closes [#763](https://github.com/d0ugal/graith/issues/763)
+* **ci:** pin signer-workflow, trap cleanup, and fix ordering test ([#799](https://github.com/d0ugal/graith/issues/799)) ([8062102](https://github.com/d0ugal/graith/commit/80621022a6e91ed720765ccecbc2c42d24c25daa))
+* **ci:** provenance-verify actionlint and zizmor installs ([#799](https://github.com/d0ugal/graith/issues/799)) ([5e10da0](https://github.com/d0ugal/graith/commit/5e10da00d6cbcdb32447eceeaeb076c798928e3a))
+* **ci:** retry screenshots-branch writes on lost races ([#765](https://github.com/d0ugal/graith/issues/765)) ([b71f2c3](https://github.com/d0ugal/graith/commit/b71f2c34831a21061a5acae7d5d8d458a837cb94))
+* **docs-preview:** skip publish/cleanup for fork PRs (no same-repo guard) ([99e3ee2](https://github.com/d0ugal/graith/commit/99e3ee2c481c24dc550c3cb885339c0ab999bc32)), closes [#783](https://github.com/d0ugal/graith/issues/783)
+* **doctor:** check parent dir for write_files grants instead of the file ([b1bd518](https://github.com/d0ugal/graith/commit/b1bd5182d72af151ff44eb53998ba16cb4f22706)), closes [#794](https://github.com/d0ugal/graith/issues/794)
+* **doctor:** inspect legacy macOS config path for unknown keys ([9046d65](https://github.com/d0ugal/graith/commit/9046d657fff63e2b17a5be5c6579c63acbc99224))
+* **doctor:** restore agentInstalled, honour --config, tighten key suggestions ([cc9e574](https://github.com/d0ugal/graith/commit/cc9e57420abfd20a847d03ebccf961659e62802d))
+* **doctor:** stop recommending curl | sh for nono install ([039f46b](https://github.com/d0ugal/graith/commit/039f46bef8a92dce123f3fcfe679126f643a55b6)), closes [#795](https://github.com/d0ugal/graith/issues/795)
+* **doctor:** surface unenforceable approvals backend ([325803c](https://github.com/d0ugal/graith/commit/325803cfd439abf2a46834a1f63e2193b56ddd9b)), closes [#738](https://github.com/d0ugal/graith/issues/738)
+* **lint:** satisfy wsl_v5 in procstart_darwin.go and cover Darwin files in CI ([4dfaa34](https://github.com/d0ugal/graith/commit/4dfaa34f6af86a528756bf8e0f86b893abe7a305)), closes [#784](https://github.com/d0ugal/graith/issues/784)
+* **man:** make generated man page reproducible ([#778](https://github.com/d0ugal/graith/issues/778)) ([93a7d64](https://github.com/d0ugal/graith/commit/93a7d641306541d6e12db55ada4320e55cc940c8))
+* **msgoverlay:** reset and clamp lineScroll so paging stays in sync ([b57cb8f](https://github.com/d0ugal/graith/commit/b57cb8fb60d63638d35514673b0bc68983564f2f)), closes [#774](https://github.com/d0ugal/graith/issues/774)
+* **overlay:** prColor must not paint a merged/closed PR with stale CI ([19e24ea](https://github.com/d0ugal/graith/commit/19e24ea72dc6c7460b50fda453bcc49c724dba19)), closes [#773](https://github.com/d0ugal/graith/issues/773)
+* **prwatch:** clear unprimed CI dedup set when CI recovers ([735a273](https://github.com/d0ugal/graith/commit/735a273ccc9e2b8931a1107c44668edd9623c178))
+* **prwatch:** dedupe mechanical priming notices when comments stay degraded ([a7e1107](https://github.com/d0ugal/graith/commit/a7e11074edee8909f1fd4d0600c0a638ddab0780)), closes [#772](https://github.com/d0ugal/graith/issues/772)
+* **prwatch:** guard priming-branch directives against re-delivery ([64fd2ce](https://github.com/d0ugal/graith/commit/64fd2ce9526bb26002f30f5e57c67b75b1fe27ff))
+* **prwatch:** let directive notices bypass the per-SHA notification cap ([508fd00](https://github.com/d0ugal/graith/commit/508fd005ec499a1d1e44dd15bbc64d1abe96fb3e)), closes [#771](https://github.com/d0ugal/graith/issues/771)
+* **release:** gate apt/yum publish on all three required secrets ([a5cf70c](https://github.com/d0ugal/graith/commit/a5cf70cb9504bb67ce5f092cbf65b12e2febd487)), closes [#768](https://github.com/d0ugal/graith/issues/768)
+* **release:** package all man pages so gr.1 SEE ALSO resolves ([#779](https://github.com/d0ugal/graith/issues/779)) ([7eb7e5a](https://github.com/d0ugal/graith/commit/7eb7e5aa639ad2b682c01a6732cd3783c3b13049))
+* **release:** preset gpg passphrase for every signing keygrip ([8d3078f](https://github.com/d0ugal/graith/commit/8d3078f79bdd16873ae00fc55171888e4e7fb23f)), closes [#767](https://github.com/d0ugal/graith/issues/767)
+* **release:** serialize publish-repo and push with rebase/retry ([#769](https://github.com/d0ugal/graith/issues/769)) ([ae1683f](https://github.com/d0ugal/graith/commit/ae1683feb205e5e28656bb4770e4dd98a8a42b59))
+* **release:** ship completions & man page in archive for AUR package() ([#777](https://github.com/d0ugal/graith/issues/777)) ([e00ba97](https://github.com/d0ugal/graith/commit/e00ba97cbf18631aa9728a60f33c5628459ad548))
+* **release:** ship whole man tree to AUR; share goreleaser test config ([41b19a7](https://github.com/d0ugal/graith/commit/41b19a76f67eba80be7ed29949273062b56bf408))
+* **sandbox:** align struct tags for profile field group (tagalign) ([b28d2e2](https://github.com/d0ugal/graith/commit/b28d2e22219615f781079141e7ceae4291f8bc77))
+* **sandbox:** clean up nono profile on create/fork failure + harden temp path ([f74a5be](https://github.com/d0ugal/graith/commit/f74a5bed03949fd58a5525eca562d24ca733b092))
+* **sandbox:** clean up nono profile on orchestrator create failure ([28b2ff5](https://github.com/d0ugal/graith/commit/28b2ff54e79d4aa53a09f725ae8ff8a3fd3d2461))
+* **sandbox:** error on unknown --agent in 'gr sandbox why' ([b235565](https://github.com/d0ugal/graith/commit/b23556508003fa11daa7cae22ee3f203d793a438)), closes [#791](https://github.com/d0ugal/graith/issues/791)
+* **sandbox:** fail closed when MCP sandbox has no backend selected ([8b38f47](https://github.com/d0ugal/graith/commit/8b38f47a0e2c925a8aa221ce16ce64578a90b6f0)), closes [#787](https://github.com/d0ugal/graith/issues/787)
+* **sandbox:** pass --workdir in nono.Wrap for --share-worktree read-only ([0fb29b2](https://github.com/d0ugal/graith/commit/0fb29b21e1ef7ee612a853f88cc25dc304504626)), closes [#786](https://github.com/d0ugal/graith/issues/786)
+* **sandbox:** reject read-only nono grants under /tmp instead of re-denying ([854d012](https://github.com/d0ugal/graith/commit/854d012e540239ad3b3b8295bc4f4a1ce9296b01)), closes [#789](https://github.com/d0ugal/graith/issues/789)
+* **sandbox:** remove per-session nono profile on session delete ([8d3682d](https://github.com/d0ugal/graith/commit/8d3682dd329426466951973bb525087bc8e20329)), closes [#797](https://github.com/d0ugal/graith/issues/797)
+* **sandbox:** restart MCP processes when only sandbox policy changes ([b47ac5a](https://github.com/d0ugal/graith/commit/b47ac5a8f44b49cd477d81d83d1dfc0f61faaf82)), closes [#788](https://github.com/d0ugal/graith/issues/788)
+* **sandbox:** treat whitespace-only agent profile as unset in mergeAgent ([4084812](https://github.com/d0ugal/graith/commit/408481244f5f62a5296ffc2bcf548d548d2c0f47))
+* **sandbox:** trim profile at merge time so whitespace can't clobber global ([2b984ba](https://github.com/d0ugal/graith/commit/2b984bacd00377e1d97b13e656654bd8d540e08c))
+* **scenario:** decode lifecycle response per-field and surface errors ([3452644](https://github.com/d0ugal/graith/commit/345264444a2a231902d51ee01170a178eaf642a5)), closes [#785](https://github.com/d0ugal/graith/issues/785)
+* **statusbar:** mark draft PRs with a d suffix in the status bar ([a26c9a7](https://github.com/d0ugal/graith/commit/a26c9a7cc439dd3756e7ee7e5a55edc9e586de6e)), closes [#776](https://github.com/d0ugal/graith/issues/776)
+
+
+### Documentation
+
+* **ci:** reconcile sandbox.yml comments with the hard-gated reality ([1382007](https://github.com/d0ugal/graith/commit/1382007e1fb0eaf3b89f862c0cdbfa997fbeeeac)), closes [#793](https://github.com/d0ugal/graith/issues/793)
+* **design:** correct GPG key file references in packaging design ([74dbffa](https://github.com/d0ugal/graith/commit/74dbffa953866e0dd23f8d4f1b608bad9b0324a2)), closes [#770](https://github.com/d0ugal/graith/issues/770)
+* **design:** mark apt/yum packaging items shipped in v0.63.0 ([25b411b](https://github.com/d0ugal/graith/commit/25b411b1e71402eec9707fc6ab0a622e1d5a03c2)), closes [#780](https://github.com/d0ugal/graith/issues/780)
+* enable repo_gpgcheck=1 in dnf repo config ([56f7da8](https://github.com/d0ugal/graith/commit/56f7da8a4c7e607b1ec3b7e3248fdd6a4c62c8a6)), closes [#764](https://github.com/d0ugal/graith/issues/764)
+* **prwatch:** correct merge-conflict dedup comment to match code ([32dfe61](https://github.com/d0ugal/graith/commit/32dfe619cd0eb9759c7fba591ffae5b9f28b44b0)), closes [#775](https://github.com/d0ugal/graith/issues/775)
+* reconcile config.sample.toml + website docs with pluggable sandbox ([88b49dc](https://github.com/d0ugal/graith/commit/88b49dcea10988743eb2c089bd507861e8bca3db)), closes [#796](https://github.com/d0ugal/graith/issues/796)
+* **sandbox:** correct nono extends merge semantics; trim profile ([fcd9e51](https://github.com/d0ugal/graith/commit/fcd9e518e0e1f9c5f55a587d9c1c4c4a59a294ed))
+
+
+### Tests
+
+* **approvals:** satisfy wsl_v5 whitespace lint in CLI engine test ([18ddc7c](https://github.com/d0ugal/graith/commit/18ddc7c8ecc2efb98dc36956949565378da805da))
+* **config:** cover ResolveConfigPath legacy fallback and profile suppression ([48d9123](https://github.com/d0ugal/graith/commit/48d9123df4ee80ad6c9692ab5bffd5ffe2018eef))
+* **doctor:** assert command-backend pass check names the backend ([810ad0c](https://github.com/d0ugal/graith/commit/810ad0c88dce9db29f6002e3ea1fb7ebf99d1168))
+* **doctor:** make approvals command-backend test honest about PATH ([083e5f7](https://github.com/d0ugal/graith/commit/083e5f7d91e99c9751ffc5b282e5668081145135))
+* **man:** check os.Unsetenv error to satisfy errcheck ([b70e0fa](https://github.com/d0ugal/graith/commit/b70e0fa17e9c176622d76a86de387701dfd3a4f9))
+* **sandbox:** build read-only nono fixtures outside /tmp in newly-run tests ([a92c3fd](https://github.com/d0ugal/graith/commit/a92c3fdf83fdd17d5b4e60c39b0904efe8554a23))
+* **sandbox:** fix wsl_v5 lint in MCP backend test ([e3b359a](https://github.com/d0ugal/graith/commit/e3b359a67014ec63fa50a30315de69694eaac488))
+* **sandbox:** match nono's DENIED verb in TestNonoWhyPolicyDecisions ([adddae2](https://github.com/d0ugal/graith/commit/adddae2c8eb9d77ec7b05de5c239b0cfca361e9e))
+* **sandbox:** satisfy wsl_v5 whitespace lint in nono profile tests ([adf050a](https://github.com/d0ugal/graith/commit/adf050aaa74e27d50fc9ad8d40d4d2c1462ad414))
+
+
+### Continuous Integration
+
+* **sandbox:** run all nono_enforce-tagged tests, not just TestNonoEnforces ([61f0c80](https://github.com/d0ugal/graith/commit/61f0c80156a9e445ea4c4717eeefbadb3e0dd6a2)), closes [#792](https://github.com/d0ugal/graith/issues/792)
+
 ## [0.65.0](https://github.com/d0ugal/graith/compare/v0.64.7...v0.65.0) (2026-07-07)
 
 
