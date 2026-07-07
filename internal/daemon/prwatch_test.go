@@ -318,6 +318,40 @@ func TestDiffAndBuild_PrimeMechanicalNoticesDedupWhileCommentsDegraded(t *testin
 	}
 }
 
+func TestDiffAndBuild_PrimeCIReFailsAfterRecoveryWhileCommentsDegraded(t *testing.T) {
+	// While the comment fetch stays degraded (never primes), a same-SHA CI
+	// failing -> passing -> failing sequence must re-notify on the re-failure:
+	// the unprimed CI dedup set (cur.failing) has to be cleared when CI goes
+	// green, mirroring the steady-state reset. Otherwise the re-failure is
+	// silently deduped and a stopped agent is stranded on a red build.
+	sm := newPRWatchSM()
+	cfg := allOnConfig()
+	cfg.Debounce = "0s"
+	t1 := prWatchTarget{id: "fash", branch: "fash"}
+
+	failing := prData{
+		Number: 43, State: "open", HeadRefOid: "sha1",
+		CIState: "failing", FailingChecks: []string{"build"}, CommentsOK: false,
+	}
+	passing := prData{
+		Number: 43, State: "open", HeadRefOid: "sha1",
+		CIState: "passing", CommentsOK: false,
+	}
+
+	// Poll 1: failing -> notify.
+	if out := sm.diffAndBuild(cfg, t1, "croft/loch", failing); len(out) != 1 || !strings.Contains(out[0], "CI failed") {
+		t.Fatalf("first failing poll should notify, got %v", out)
+	}
+	// Poll 2: passing -> no notice, but clears the dedup set.
+	if out := sm.diffAndBuild(cfg, t1, "croft/loch", passing); len(out) != 0 {
+		t.Fatalf("passing poll should not notify while unprimed, got %v", out)
+	}
+	// Poll 3: same SHA fails again -> must re-notify (not deduped).
+	if out := sm.diffAndBuild(cfg, t1, "croft/loch", failing); len(out) != 1 || !strings.Contains(out[0], "CI failed") {
+		t.Fatalf("re-failure on the same SHA should re-notify, got %v", out)
+	}
+}
+
 func TestDiffAndBuild_CITransitionAndDedup(t *testing.T) {
 	sm := newPRWatchSM()
 	cfg := allOnConfig()

@@ -336,6 +336,14 @@ func (sm *SessionManager) diffAndBuild(cfg *configPRWatch, t prWatchTarget, slug
 		// delivered directive would re-fire every poll — and since directives now
 		// bypass the per-SHA cap, only debounce/rate-limit would bound it. Advancing
 		// the cursor only on delivery keeps the send retryable if the gate rejects.
+		if d.CIState == "passing" {
+			// CI recovered while still unprimed: clear the dedup set so a genuine
+			// re-failure on the same SHA re-notifies (mirrors the steady-state
+			// reset). No recovery notice is sent here — the unprimed branch only
+			// surfaces currently-broken state, not transitions back to green.
+			cur.failing = map[string]bool{}
+		}
+
 		if d.CIState == "failing" && cfg.NotifyCIFailures && !allFailingSeen(d.FailingChecks, cur.failing) {
 			if _, ok := sm.gate(cfg, t.id, cur, true); ok {
 				for _, name := range d.FailingChecks {
