@@ -305,9 +305,10 @@ func scrapesID(agent string) bool {
 // refuses to guess when multiple distinct native ids match the (since, cwd)
 // window. That alone isn't enough — staggered rollout writes leave a window
 // where only a sibling's rollout exists and would be mis-assigned — so second,
-// before recording an id we skip capture entirely if another live same-agent
-// session shares the cwd (hasOtherActiveScraper). Either way the session falls
-// back to a non-pinned resume (issue #844).
+// before recording an id we skip capture entirely if it would cross-assign
+// (wouldCrossAssign): the id is already another session's, or a same-agent
+// sibling shared the cwd during our capture window. Either way the session
+// falls back to a non-pinned resume (issue #844).
 //
 // stateRoot is the agent's effective state root (e.g. CODEX_HOME from the
 // session's launch env); pass "" to fall back to the daemon's default.
@@ -335,15 +336,16 @@ func (sm *SessionManager) captureNativeSessionID(id, agent, worktreePath, stateR
 		case expectedPID != 0 && (s.PID != expectedPID || (expectedPIDStartTime != 0 && s.PIDStartTime != expectedPIDStartTime)):
 			// a newer start replaced this process generation; its own capture
 			// goroutine owns the id now.
-		case sm.hasOtherActiveScraper(id, agent, worktreePath):
-			// another live same-agent session shares this cwd, so a single
-			// scraped id can't be attributed to us — the scrape's ambiguity
-			// guard only trips once *both* rollouts exist, but staggered writes
-			// leave a window where only the sibling's rollout is present and it
-			// would be mis-assigned. Skip capture; resume falls back to
-			// --last rather than pinning the wrong conversation (issue #844).
+		case sm.wouldCrossAssign(id, agent, worktreePath, sid, since):
+			// the scraped id can't be safely attributed to us — either another
+			// same-agent session shared this cwd during our capture window, or
+			// the id is already claimed by another session. The scrape's own
+			// ambiguity guard only trips once *both* rollouts exist, but
+			// staggered writes leave a window where only a sibling's rollout is
+			// present and it would be mis-assigned. Skip capture; resume falls
+			// back to --last rather than pinning the wrong conversation (#844).
 			sm.mu.Unlock()
-			sm.log.Warn("native session id capture skipped: shared cwd", "session_id", id, "agent", agent, "worktree", worktreePath)
+			sm.log.Warn("native session id capture skipped: ambiguous shared cwd", "session_id", id, "agent", agent, "worktree", worktreePath)
 
 			return
 		default:
@@ -358,24 +360,44 @@ func (sm *SessionManager) captureNativeSessionID(id, agent, worktreePath, stateR
 	sm.log.Warn("native session id capture timed out", "session_id", id, "agent", agent)
 }
 
-// hasOtherActiveScraper reports whether a session other than `id`, of the same
-// scrapeable agent, is live (running or being created) in the same worktree.
-// When one exists, on-disk rollouts in that cwd can't be attributed to a single
-// session, so capture must be skipped. Callers must hold sm.mu.
-func (sm *SessionManager) hasOtherActiveScraper(id, agent, worktreePath string) bool {
+// wouldCrossAssign reports whether recording `sid` for session `id` risks
+// pinning another session's conversation. It refuses in two cases:
+//
+//   - `sid` is already recorded as another session's AgentSessionID — a native
+//     id is unique to one conversation, so it must never back two sessions,
+//     regardless of that session's cwd or current status.
+//   - a different same-agent session shares this worktree and was live during
+//     our capture window: it is currently running/creating, or it stopped only
+//     after `since` (our start). Such a sibling may have written the rollout we
+//     just scraped, and the scrape can't say whose it is. A sibling that stopped
+//     before `since` is excluded — its rollout predates our window and the
+//     scrape's mtime filter already skips it.
+//
+// This closes the staggered-write race in #844 including the variant where the
+// sibling exits between the scrape and this check. Callers must hold sm.mu.
+func (sm *SessionManager) wouldCrossAssign(id, agent, worktreePath, sid string, since time.Time) bool {
 	want := canonWorktree(worktreePath)
 
 	for other, s := range sm.state.Sessions {
-		if other == id || s.Agent != agent {
+		if other == id {
 			continue
 		}
 
-		if s.Status != StatusRunning && s.Status != StatusCreating {
-			continue
-		}
-
-		if canonWorktree(s.WorktreePath) == want {
+		if sid != "" && s.AgentSessionID == sid {
 			return true
+		}
+
+		if s.Agent != agent || canonWorktree(s.WorktreePath) != want {
+			continue
+		}
+
+		switch s.Status {
+		case StatusRunning, StatusCreating:
+			return true
+		case StatusStopped, StatusErrored:
+			if s.StatusChangedAt.After(since) {
+				return true
+			}
 		}
 	}
 
