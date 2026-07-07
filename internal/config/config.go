@@ -1416,8 +1416,13 @@ func mergeAgent(def, usr Agent) Agent {
 		def.IdleTimeout = usr.IdleTimeout
 	}
 
+	// A whitespace-only Profile is treated as unset here too, matching
+	// SandboxConfig.Merge and buildNonoProfile. Otherwise a whitespace typo would
+	// trip this override predicate and replace the embedded default sandbox
+	// (dropping default grants like Claude's ~/.claude), even though the profile
+	// itself is later trimmed to unset — a fail-closed but surprising regression.
 	if usr.Sandbox.Enabled || usr.Sandbox.Disabled != nil || usr.Sandbox.Backend != "" ||
-		usr.Sandbox.Command != "" || usr.Sandbox.Profile != "" || usr.Sandbox.Features != nil ||
+		usr.Sandbox.Command != "" || strings.TrimSpace(usr.Sandbox.Profile) != "" || usr.Sandbox.Features != nil ||
 		usr.Sandbox.ReadDirs != nil || usr.Sandbox.WriteDirs != nil ||
 		usr.Sandbox.ReadFiles != nil || usr.Sandbox.WriteFiles != nil ||
 		usr.Sandbox.SignalMode != "" || usr.Sandbox.Network != nil {
