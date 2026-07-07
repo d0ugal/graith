@@ -211,6 +211,75 @@ func TestCheckApprovalsBackendAvailable(t *testing.T) {
 	}
 }
 
+// TestCheckApprovalsBackendInlineRules verifies the builtin backend with only
+// inline [approvals.builtin] rules (no external config file) is reported as
+// enforceable. doctor must render inline rules the same way the daemon does at
+// session-create; otherwise it falsely reports "cannot enforce" for a
+// first-class, fully-supported configuration (issue #790 convergence with the
+// daemon's resolution).
+func TestCheckApprovalsBackendInlineRules(t *testing.T) {
+	oldCfg, oldOut := cfg, out
+
+	t.Cleanup(func() {
+		cfg, out = oldCfg, oldOut
+	})
+
+	out = output.NewWithWriter(false, io.Discard)
+
+	cfg = &config.Config{}
+	cfg.Approvals = config.Approvals{
+		Backend: "builtin",
+		Builtin: config.ApprovalsBuiltin{Allow: []any{"@arg @*"}},
+	}
+
+	dc := newDoctorContext()
+	dc.checkApprovalsBackend()
+
+	if failed := checkResults(dc, "fail"); len(failed) != 0 {
+		t.Errorf("builtin backend with inline rules should not fail, got: %v", failed)
+	}
+
+	passed := strings.Join(checkResults(dc, "ok"), "\n")
+	if !strings.Contains(passed, "builtin") {
+		t.Errorf("expected a passing check naming the builtin backend, got: %q", passed)
+	}
+}
+
+// TestCheckApprovalsBackendRelativeConfig verifies doctor resolves a relative
+// [approvals.builtin] config path against the config dir (via approvalsConfigDir
+// → ExpandPathRelative) so a valid file found there is reported enforceable,
+// matching how the daemon resolves the same value at session-create.
+func TestCheckApprovalsBackendRelativeConfig(t *testing.T) {
+	oldCfg, oldOut, oldCfgFile := cfg, out, cfgFile
+
+	t.Cleanup(func() {
+		cfg, out, cfgFile = oldCfg, oldOut, oldCfgFile
+	})
+
+	out = output.NewWithWriter(false, io.Discard)
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "approvals.json"), []byte(`{"allow":["@arg @*"]}`), 0o600); err != nil {
+		t.Fatalf("write approvals.json: %v", err)
+	}
+
+	// cfgFile points at a config.toml in dir, so approvalsConfigDir() resolves
+	// the relative "approvals.json" against dir.
+	cfgFile = filepath.Join(dir, "config.toml")
+	cfg = &config.Config{}
+	cfg.Approvals = config.Approvals{
+		Backend: "builtin",
+		Builtin: config.ApprovalsBuiltin{Config: "approvals.json"},
+	}
+
+	dc := newDoctorContext()
+	dc.checkApprovalsBackend()
+
+	if failed := checkResults(dc, "fail"); len(failed) != 0 {
+		t.Errorf("builtin backend with a resolvable relative config should not fail, got: %v", failed)
+	}
+}
+
 // TestCheckSandboxPathsChecksGlobal verifies global sandbox dirs are always
 // checked regardless of installed agents.
 func TestCheckSandboxPathsChecksGlobal(t *testing.T) {

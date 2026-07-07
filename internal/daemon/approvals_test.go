@@ -407,3 +407,24 @@ func TestApprovalsConfigDir(t *testing.T) {
 		t.Errorf("approvalsConfigDir() with no config file = %q, want empty", got)
 	}
 }
+
+// TestApprovalsConfigDirPrefersConfigOverride verifies the daemon resolves a
+// relative [approvals.builtin] config path against the directory of the config
+// file it was actually started with (--config), not the default location — so a
+// relative path enforces against the same file `gr --config X approvals
+// validate` resolves (issue #790).
+func TestApprovalsConfigDirPrefersConfigOverride(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	sm.paths.ConfigFile = "/home/canny/.config/graith/config.toml"
+	sm.configFile = "/tmp/clachan/config.toml"
+
+	if got, want := sm.approvalsConfigDir(), "/tmp/clachan"; got != want {
+		t.Errorf("approvalsConfigDir() with --config override = %q, want %q", got, want)
+	}
+
+	sm.configFile = "   "
+	if got, want := sm.approvalsConfigDir(), "/home/canny/.config/graith"; got != want {
+		t.Errorf("approvalsConfigDir() with blank override = %q, want %q (should fall back)", got, want)
+	}
+}
