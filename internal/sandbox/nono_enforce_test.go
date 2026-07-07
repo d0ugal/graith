@@ -5,7 +5,7 @@
 // build-tagged (`-tags nono_enforce`) and Linux-only, and skips cleanly unless
 // a real `nono` binary is installed on a kernel that can enforce Landlock.
 //
-// Run with:  go test -tags nono_enforce ./internal/sandbox/ -run TestNonoEnforces
+// Run with:  go test -tags nono_enforce ./internal/sandbox/...
 //
 // It uses nono's own oracles where possible:
 //   - `nono profile validate` to prove the generated profile is well-formed
