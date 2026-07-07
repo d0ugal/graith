@@ -208,7 +208,11 @@ func whyForProfile(command, profilePath string, q WhyQuery, run nonoRunner) (Why
 // returned path; warnings mirror those the run path would emit.
 func BuildQueryProfile(opts WrapOpts) (path string, warnings []string, err error) {
 	name := opts.profileName()
-	profile, warnings := buildNonoProfile(name, opts, os.Getenv("SSH_AUTH_SOCK"))
+
+	profile, warnings, err := buildNonoProfile(name, opts, os.Getenv("SSH_AUTH_SOCK"))
+	if err != nil {
+		return "", warnings, err
+	}
 
 	path, err = writeNonoProfile(profile, "")
 	if err != nil {

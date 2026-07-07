@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -68,10 +69,6 @@ type nonoProfileFS struct {
 	ReadFile   []string `json:"read_file,omitempty"`
 	AllowFile  []string `json:"allow_file,omitempty"`
 	UnixSocket []string `json:"unix_socket,omitempty"`
-	// Deny re-denies read-only paths that fall under a nono default-writable
-	// prefix (/tmp, $TMPDIR), so a "read-only" read_dir there isn't silently
-	// writable via nono's system_write_linux group.
-	Deny []string `json:"deny,omitempty"`
 }
 
 type nonoProfileEnv struct {
@@ -101,8 +98,11 @@ type nonoProfileNetwork struct {
 
 // defaultWritablePrefixes are paths nono grants write to by default on Linux
 // via its system_write_linux group (/tmp, /dev/null, /proc/self/fd) plus
-// $TMPDIR. A read-only grant under one of these is silently writable, so
-// buildNonoProfile re-denies such paths.
+// $TMPDIR. nono cannot make a subpath of one of these read-only: Landlock has
+// no deny-under-an-allowed-parent semantics (it is a hard validation error) and
+// macOS Seatbelt deny removes read as well as write. buildNonoProfile therefore
+// rejects a read-only grant under one of these prefixes rather than emit a
+// profile that silently fails to enforce read-only.
 func defaultWritablePrefixes() []string {
 	prefixes := []string{"/tmp"}
 	if td := os.Getenv("TMPDIR"); td != "" {
@@ -114,6 +114,20 @@ func defaultWritablePrefixes() []string {
 
 // underDefaultWritable reports whether path is at or under a nono
 // default-writable prefix (/tmp or $TMPDIR).
+//
+// Known limitations (both pre-date this guard and are lexical, not resolved):
+//   - Symlink aliases are not resolved. On macOS /tmp is a symlink to
+//     /private/tmp; a grant spelled as the resolved target (or a config path that
+//     is itself a symlink into /tmp) is not caught here. Grant paths reach this
+//     code via config.ExpandPath (Abs+Clean, no EvalSymlinks).
+//   - $TMPDIR is read from the daemon's environment, not the (possibly
+//     agent/MCP-overridden) TMPDIR handed to the nono child. Normal sessions are
+//     unaffected because GRAITH_TMPDIR is added to write_dirs (so reads there are
+//     intentionally writable and exempt); only a custom TMPDIR in agent/MCP env
+//     could slip a read-only grant past this check.
+//
+// Resolving these needs symlink evaluation and threading the effective child
+// environment through WrapOpts; tracked as follow-up beyond issue #789.
 func underDefaultWritable(path string) bool {
 	return isWithinAny(path, defaultWritablePrefixes())
 }
@@ -189,7 +203,12 @@ func isWithinAny(path string, prefixes []string) bool {
 // file grants are inherited instead of hand-listed; graith's own
 // filesystem.allow/read and environment.allow_vars are still layered on top and
 // win. sshAuthSock is $SSH_AUTH_SOCK resolved by the caller ("" if unset).
-func buildNonoProfile(name string, opts WrapOpts, sshAuthSock string) (nonoProfile, []string) {
+//
+// A read-only read_dirs/read_files entry that falls under a nono
+// default-writable prefix (/tmp, $TMPDIR) is rejected with an error: nono
+// cannot enforce read-only there (see readOnlyUnderWritableErr), so graith fails
+// closed with a clear config error rather than emit a profile that pretends to.
+func buildNonoProfile(name string, opts WrapOpts, sshAuthSock string) (nonoProfile, []string, error) {
 	var warnings []string
 
 	extends := opts.Profile
@@ -221,20 +240,21 @@ func buildNonoProfile(name string, opts WrapOpts, sshAuthSock string) (nonoProfi
 	}
 
 	// read_dirs map to read-only. But nono grants write to /tmp and $TMPDIR by
-	// default (system_write_linux), so a read-only path located there would be
-	// silently writable. Re-deny those to preserve the read-only guarantee. A
-	// read_dirs entry that is actually a single file is routed to read_file, for
-	// the same reason write_dirs files are routed to allow_file above.
+	// default (system_write_linux), and nono cannot make a subpath of a writable
+	// prefix read-only (Landlock has no deny-under-allowed-parent; macOS deny
+	// removes read too). So a read-only grant there cannot be honoured — reject it
+	// with a clear config error rather than emit a profile that lies. A read_dirs
+	// entry that is actually a single file is routed to read_file, for the same
+	// reason write_dirs files are routed to allow_file above.
 	for _, rd := range opts.ReadDirs {
+		if underDefaultWritable(rd) && !isWithinAny(rd, opts.WriteDirs) && !isWithin(rd, opts.WorktreeDir) {
+			return nonoProfile{}, warnings, readOnlyUnderWritableErr("read-only path", rd)
+		}
+
 		if isRegularFile(rd) {
 			p.Filesystem.ReadFile = append(p.Filesystem.ReadFile, rd)
 		} else {
 			p.Filesystem.Read = append(p.Filesystem.Read, rd)
-		}
-
-		if underDefaultWritable(rd) && !isWithinAny(rd, opts.WriteDirs) && !isWithin(rd, opts.WorktreeDir) {
-			p.Filesystem.Deny = append(p.Filesystem.Deny, rd)
-			warnings = append(warnings, fmt.Sprintf("read-only path %q is under a nono default-writable dir (/tmp or $TMPDIR); re-denied to keep it read-only", rd))
 		}
 	}
 
@@ -245,15 +265,19 @@ func buildNonoProfile(name string, opts WrapOpts, sshAuthSock string) (nonoProfi
 	p.Filesystem.AllowFile = append(p.Filesystem.AllowFile, opts.WriteFiles...)
 
 	// read_files map to read_file = read-only single file, with the same
-	// /tmp/$TMPDIR re-deny guard as read_dirs (a read-only file under a
-	// default-writable prefix would otherwise be silently writable).
+	// /tmp/$TMPDIR rejection guard as read_dirs (nono cannot make a file under a
+	// default-writable prefix read-only, so fail closed rather than emit a lie).
+	// The exemptions mirror read_dirs (worktree, write_dirs) plus an exact
+	// write_files match: a file granted writable on purpose is fine, and config
+	// merge can only append/dedup, so an agent-level write_files entry cannot
+	// otherwise override a global read_files entry for the same file.
 	for _, rf := range opts.ReadFiles {
-		p.Filesystem.ReadFile = append(p.Filesystem.ReadFile, rf)
-
-		if underDefaultWritable(rf) && !isWithinAny(rf, opts.WriteDirs) && !isWithin(rf, opts.WorktreeDir) {
-			p.Filesystem.Deny = append(p.Filesystem.Deny, rf)
-			warnings = append(warnings, fmt.Sprintf("read-only file %q is under a nono default-writable dir (/tmp or $TMPDIR); re-denied to keep it read-only", rf))
+		exempt := isWithinAny(rf, opts.WriteDirs) || isWithin(rf, opts.WorktreeDir) || slices.Contains(opts.WriteFiles, rf)
+		if underDefaultWritable(rf) && !exempt {
+			return nonoProfile{}, warnings, readOnlyUnderWritableErr("read-only file", rf)
 		}
+
+		p.Filesystem.ReadFile = append(p.Filesystem.ReadFile, rf)
 	}
 
 	for _, f := range opts.Features {
@@ -312,7 +336,23 @@ func buildNonoProfile(name string, opts WrapOpts, sshAuthSock string) (nonoProfi
 		}
 	}
 
-	return p, warnings
+	return p, warnings, nil
+}
+
+// readOnlyUnderWritableErr builds the config error for a read-only grant that
+// falls under a nono default-writable prefix (/tmp, $TMPDIR). nono cannot honour
+// a read-only grant there: on Linux, Landlock has no deny-under-an-allowed-parent
+// (a deny overlapping the inherited /tmp allow is a hard validation error); on
+// macOS, Seatbelt deny removes read as well as write, making the path unreadable.
+// Either way the grant is not read-only, so graith fails closed with this error
+// rather than emit a profile that claims a guarantee it can't keep.
+func readOnlyUnderWritableErr(kind, path string) error {
+	return fmt.Errorf(
+		"%s %q is under a nono default-writable prefix (/tmp or $TMPDIR); nono cannot "+
+			"grant it read-only there (Linux Landlock has no deny-under-allowed-parent and "+
+			"macOS deny would make it unreadable). Move it outside /tmp and $TMPDIR, or grant "+
+			"it as a writable path",
+		kind, path)
 }
 
 func (nonoBackend) Wrap(command string, args []string, opts WrapOpts) (string, []string, error) {
@@ -323,11 +363,17 @@ func (nonoBackend) Wrap(command string, args []string, opts WrapOpts) (string, [
 
 	name := opts.profileName()
 
-	profile, warnings := buildNonoProfile(name, opts, os.Getenv("SSH_AUTH_SOCK"))
+	profile, warnings, err := buildNonoProfile(name, opts, os.Getenv("SSH_AUTH_SOCK"))
 	for _, w := range warnings {
 		// Best-effort: the daemon has structured logging, but Wrap has no
 		// logger; surface via stderr so warnings aren't silently lost.
 		fmt.Fprintln(os.Stderr, "graith: nono sandbox:", w)
+	}
+
+	if err != nil {
+		// A read-only grant under a default-writable prefix (or any other build
+		// error) is a config error nono can't enforce; fail closed.
+		return "", nil, err
 	}
 
 	profilePath, err := writeNonoProfile(profile, opts.ProfilePath)
