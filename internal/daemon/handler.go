@@ -1661,7 +1661,16 @@ func isConfigStale(s SessionState, cfg *config.Config) bool {
 		return true
 	}
 
-	if !reflect.DeepEqual(s.CreationCfg.Agent, agent) {
+	// interrupt_count / interrupt_delay_ms are read live at interrupt-delivery
+	// time (see InterruptSession), so changing them never requires a restart.
+	// Exclude them from the comparison so retuning interrupts — or the new
+	// Claude defaults after an upgrade — doesn't flag existing sessions stale.
+	created := s.CreationCfg.Agent
+	created.InterruptCount, created.InterruptDelayMs = nil, nil
+	current := agent
+	current.InterruptCount, current.InterruptDelayMs = nil, nil
+
+	if !reflect.DeepEqual(created, current) {
 		return true
 	}
 
