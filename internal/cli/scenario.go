@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -285,11 +286,47 @@ func runScenarioLifecycle(controlType string, payload any, resultKey string) (na
 		return nil, true, out.JSON(resp.Payload)
 	}
 
-	result := map[string][]string{}
+	names, err = decodeLifecycleResult(resp.Payload, resultKey)
+	if err != nil {
+		return nil, false, fmt.Errorf("%s response: %w", controlType, err)
+	}
 
-	_ = protocol.DecodePayload(resp, &result)
+	return names, false, nil
+}
 
-	return result[resultKey], false, nil
+// decodeLifecycleResult extracts the []string list stored under resultKey from a
+// scenario lifecycle response payload. The daemon's success payloads mix value
+// types (a string "name" field alongside the []string result), so we decode
+// each field into a json.RawMessage first and only unmarshal resultKey. Decode
+// errors are surfaced rather than swallowed so protocol drift is visible instead
+// of silently reporting 0 sessions.
+//
+// A valid daemon success payload always carries resultKey, so an empty/null
+// top-level payload or a missing key is treated as protocol drift and returns an
+// error. A present-but-null result value (an empty result marshals to JSON null
+// because the daemon builds it with `var stopped []string`) is a legitimate
+// no-op and yields a nil slice with no error.
+func decodeLifecycleResult(payload json.RawMessage, resultKey string) ([]string, error) {
+	if len(payload) == 0 || string(payload) == "null" {
+		return nil, fmt.Errorf("empty response payload")
+	}
+
+	fields := map[string]json.RawMessage{}
+	if err := json.Unmarshal(payload, &fields); err != nil {
+		return nil, fmt.Errorf("decode payload: %w", err)
+	}
+
+	raw, ok := fields[resultKey]
+	if !ok {
+		return nil, fmt.Errorf("response missing %q field", resultKey)
+	}
+
+	var names []string
+	if err := json.Unmarshal(raw, &names); err != nil {
+		return nil, fmt.Errorf("decode %q field: %w", resultKey, err)
+	}
+
+	return names, nil
 }
 
 var scenarioStopCmd = &cobra.Command{
