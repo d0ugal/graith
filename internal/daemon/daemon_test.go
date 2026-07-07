@@ -3422,6 +3422,7 @@ func TestDeleteRemovesNonoProfile(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(profilePath), 0o700); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
+
 	if err := os.WriteFile(profilePath, []byte("{}"), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
@@ -3469,6 +3470,7 @@ func TestRollbackOrchestratorCreateRemovesNonoProfile(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(profilePath), 0o700); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
+
 	if err := os.WriteFile(profilePath, []byte("{}"), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
@@ -3478,6 +3480,7 @@ func TestRollbackOrchestratorCreateRemovesNonoProfile(t *testing.T) {
 	if _, ok := sm.state.Sessions["thrawn1"]; ok {
 		t.Error("session should be removed from state after rollback")
 	}
+
 	if _, err := os.Stat(profilePath); !os.IsNotExist(err) {
 		t.Errorf("nono profile should be removed after rollback, stat err = %v", err)
 	}
@@ -3512,6 +3515,7 @@ func TestDeleteWithChildrenRemovesNonoProfiles(t *testing.T) {
 		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 			t.Fatalf("MkdirAll: %v", err)
 		}
+
 		if err := os.WriteFile(p, []byte("{}"), 0o600); err != nil {
 			t.Fatalf("WriteFile: %v", err)
 		}
