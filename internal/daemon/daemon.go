@@ -2488,6 +2488,7 @@ func (sm *SessionManager) Delete(id string) error {
 	sm.mu.Unlock()
 
 	_ = os.Remove(filepath.Join(sm.paths.LogDir, id+".log"))
+	_ = os.Remove(sm.nonoProfilePath(id))
 	sm.cleanupHooks(id, agentName, worktreePath)
 
 	if hasClient {
@@ -2841,6 +2842,7 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 	for _, s := range snaps {
 		if succeeded[s.id] {
 			_ = os.Remove(filepath.Join(sm.paths.LogDir, s.id+".log"))
+			_ = os.Remove(sm.nonoProfilePath(s.id))
 			sm.cleanupHooks(s.id, s.agent, s.worktreePath)
 		}
 
@@ -4392,6 +4394,14 @@ func validateSandboxBackend(merged config.SandboxConfig, subject string) (sandbo
 	return avail, nil
 }
 
+// nonoProfilePath returns the location of the per-session nono sandbox profile
+// for the given session ID. The nono backend writes this file under RuntimeDir
+// (see sandboxOptsFromConfig); session teardown removes it here so the small
+// JSON files don't accumulate for the lifetime of the daemon's data dir.
+func (sm *SessionManager) nonoProfilePath(sessionID string) string {
+	return filepath.Join(sm.paths.RuntimeDir, "nono", sessionID+".json")
+}
+
 func (sm *SessionManager) sandboxOptsFromConfig(merged config.SandboxConfig, sessionID, worktreePath, agentCommand string, envKeys []string, agentHooks bool) sandbox.WrapOpts {
 	readDirs := expandPaths(merged.ReadDirs, sm.log, "read")
 	writeDirs := expandPaths(merged.WriteDirs, sm.log, "write")
@@ -4427,7 +4437,7 @@ func (sm *SessionManager) sandboxOptsFromConfig(merged config.SandboxConfig, ses
 	// The nono backend writes a per-session profile under RuntimeDir, which is
 	// already granted read access above, so the profile is readable inside the
 	// sandbox and lives for the process lifetime (incl. resume).
-	profilePath := filepath.Join(sm.paths.RuntimeDir, "nono", sessionID+".json")
+	profilePath := sm.nonoProfilePath(sessionID)
 
 	return sandbox.WrapOpts{
 		Backend:        merged.Backend,
