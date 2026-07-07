@@ -312,7 +312,7 @@ func (sm *SessionManager) captureNativeSessionID(id, agent, worktreePath, stateR
 		return
 	}
 
-	for i := 0; i < 12; i++ {
+	for i := 0; i < 40; i++ {
 		time.Sleep(250 * time.Millisecond)
 
 		sid, ok := scrapeSessionID(agent, worktreePath, stateRoot, since)
