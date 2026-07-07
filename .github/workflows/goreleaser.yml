@@ -22,11 +22,14 @@ jobs:
     permissions:
       contents: write
     outputs:
-      # Whether the GPG signing key secret is configured. Secrets cannot be used
-      # directly in a job-level `if:`, so we surface a boolean output derived from
-      # the secret (mapped into an env var first) and gate the publish job on it.
-      # This keeps releases green even before the Phase 2 infra (the graith-repo
-      # repo + the GPG_* secrets) exists — the publish job is simply skipped.
+      # Whether the publish-repo job can run. Secrets cannot be used directly in
+      # a job-level `if:`, so we surface a boolean output derived from the secrets
+      # (mapped into env vars first) and gate the publish job on it. The publish
+      # job needs ALL THREE of GPG_PRIVATE_KEY, GPG_PASSPHRASE (rpm/apt/metadata
+      # signing) and RELEASE_TOKEN (checkout + cross-repo push to graith-repo), so
+      # this output is only true when all three are present. That keeps releases
+      # green before the Phase 2 infra exists — the publish job is simply skipped
+      # when nothing is configured (issue #768).
       has_gpg_key: ${{ steps.gpg_check.outputs.has_key }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
@@ -36,15 +39,40 @@ jobs:
         with:
           go-version-file: go.mod
       - id: gpg_check
-        name: Detect GPG signing key
+        name: Detect release publishing secrets
         env:
           GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
-          if [ -n "${GPG_PRIVATE_KEY}" ]; then
+          set -euo pipefail
+          # publish-repo needs all three secrets. Gating on only GPG_PRIVATE_KEY
+          # (the old behaviour) meant a half-provisioned setup — key present but
+          # GPG_PASSPHRASE or RELEASE_TOKEN missing — passed the gate and then
+          # failed mid-publish, *after* GoReleaser had already cut the GitHub
+          # release. Detect the exact missing secrets and either skip cleanly
+          # (nothing configured) or fail fast here, before the release is cut
+          # (issue #768).
+          missing=""
+          [ -n "${GPG_PRIVATE_KEY}" ] || missing="${missing:+${missing} }GPG_PRIVATE_KEY"
+          [ -n "${GPG_PASSPHRASE}" ] || missing="${missing:+${missing} }GPG_PASSPHRASE"
+          [ -n "${RELEASE_TOKEN}" ] || missing="${missing:+${missing} }RELEASE_TOKEN"
+          if [ -z "${missing}" ]; then
             echo "has_key=true" >> "$GITHUB_OUTPUT"
+          elif [ -n "${GPG_PRIVATE_KEY}" ]; then
+            # GPG_PRIVATE_KEY is set but at least one companion secret is not:
+            # partial provisioning. Fail now (before GoReleaser runs) with a
+            # clear message rather than after the release has been published.
+            # NB: don't advise unsetting RELEASE_TOKEN to "skip" — GoReleaser
+            # also uses it for the Homebrew tap push, so dropping it would just
+            # move the failure into the goreleaser step. To skip apt/yum repo
+            # publishing, unset GPG_PRIVATE_KEY.
+            echo "has_key=false" >> "$GITHUB_OUTPUT"
+            echo "::error::Release publishing is half-configured (missing: ${missing}). Set all of GPG_PRIVATE_KEY, GPG_PASSPHRASE and RELEASE_TOKEN; to skip apt/yum repo publishing, unset GPG_PRIVATE_KEY."
+            exit 1
           else
             echo "has_key=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::GPG_PRIVATE_KEY is not set; the apt/yum publish job will be skipped."
+            echo "::notice::apt/yum repo publishing not configured (missing: ${missing}); the publish job will be skipped."
           fi
       - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7
         with:
