@@ -42,6 +42,7 @@ const (
 	BackendExternal  = "external" // synonym of command
 	BackendLocalmost = "localmost"
 	BackendBuiltin   = "builtin"
+	BackendAuto      = "auto"
 )
 
 // Request is everything a backend needs to decide. The daemon resolves
@@ -124,6 +125,8 @@ func BackendByName(name string) (Backend, error) {
 		return localmostBackend{}, nil
 	case BackendBuiltin:
 		return builtinBackend{}, nil
+	case BackendAuto:
+		return autoBackend{}, nil
 	default:
 		return nil, fmt.Errorf("unknown approvals backend %q", name)
 	}

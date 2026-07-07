@@ -31,7 +31,7 @@ func TestGenerateClaudeSettings(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 	sessionID := "kirk-braw-02"
 
-	settingsPath, err := sm.generateClaudeSettings(sessionID)
+	settingsPath, err := sm.generateClaudeSettings(sessionID, false)
 	if err != nil {
 		t.Fatalf("generateClaudeSettings() error = %v", err)
 	}
@@ -128,7 +128,7 @@ func TestInjectClaudeHooks(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 	sessionID := "kirk-braw-03"
 
-	extraArgs, extraEnv, err := sm.injectClaudeHooks(sessionID, nil)
+	extraArgs, extraEnv, err := sm.injectClaudeHooks(sessionID, false, nil)
 	if err != nil {
 		t.Fatalf("injectClaudeHooks() error = %v", err)
 	}
@@ -154,7 +154,7 @@ func TestCleanupHooks(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 	sessionID := "kirk-braw-04"
 
-	_, err := sm.generateClaudeSettings(sessionID)
+	_, err := sm.generateClaudeSettings(sessionID, false)
 	if err != nil {
 		t.Fatalf("generateClaudeSettings() error = %v", err)
 	}
@@ -182,7 +182,7 @@ func TestCleanupCursorHooks(t *testing.T) {
 	sessionID := "kirk-cursor"
 	worktree := t.TempDir()
 
-	_, _, err := sm.injectCursorHooks(sessionID, worktree)
+	_, _, err := sm.injectCursorHooks(sessionID, worktree, false)
 	if err != nil {
 		t.Fatalf("injectCursorHooks() error = %v", err)
 	}
@@ -210,7 +210,7 @@ func TestInjectCodexHooks(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 	sessionID := "kirk-codex-01"
 
-	extraArgs, extraEnv, err := sm.injectCodexHooks(sessionID)
+	extraArgs, extraEnv, err := sm.injectCodexHooks(sessionID, false)
 	if err != nil {
 		t.Fatalf("injectCodexHooks() error = %v", err)
 	}
@@ -275,7 +275,7 @@ func TestCodexHookScriptContent(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 	sessionID := "kirk-codex-02"
 
-	_, _, err := sm.injectCodexHooks(sessionID)
+	_, _, err := sm.injectCodexHooks(sessionID, false)
 	if err != nil {
 		t.Fatalf("injectCodexHooks() error = %v", err)
 	}
@@ -335,7 +335,7 @@ func TestInjectHooksSupported(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	sm := newTestSessionManagerWithDataDir(t)
 
-	args, env, err := sm.injectHooks("claude", "kirk-claude", "", nil)
+	args, env, err := sm.injectHooks("claude", "kirk-claude", "", false, nil)
 	if err != nil {
 		t.Fatalf("injectHooks(claude) error = %v", err)
 	}
@@ -348,7 +348,7 @@ func TestInjectHooksSupported(t *testing.T) {
 		t.Errorf("injectHooks(claude) returned unexpected env: %v", env)
 	}
 
-	args, env, err = sm.injectHooks("codex", "kirk-codex", "", nil)
+	args, env, err = sm.injectHooks("codex", "kirk-codex", "", false, nil)
 	if err != nil {
 		t.Fatalf("injectHooks(codex) error = %v", err)
 	}
@@ -363,7 +363,7 @@ func TestInjectHooksSupported(t *testing.T) {
 
 	worktree := t.TempDir()
 
-	args, env, err = sm.injectHooks("cursor", "kirk-cursor-sup", worktree, nil)
+	args, env, err = sm.injectHooks("cursor", "kirk-cursor-sup", worktree, false, nil)
 	if err != nil {
 		t.Fatalf("injectHooks(cursor) error = %v", err)
 	}
@@ -386,7 +386,7 @@ func TestInjectHooksUnsupportedIsNoop(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 
 	for _, agent := range []string{"agy", "opencode", "custom-agent"} {
-		args, env, err := sm.injectHooks(agent, "haar-unsupported", "", nil)
+		args, env, err := sm.injectHooks(agent, "haar-unsupported", "", false, nil)
 		if err != nil {
 			t.Errorf("injectHooks(%q) unexpected error: %v", agent, err)
 		}
@@ -449,7 +449,7 @@ func TestCodexHookScriptsEscapeSingleQuotes(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 	sessionID := "kirk-codex-quote"
 
-	_, _, err := sm.injectCodexHooks(sessionID)
+	_, _, err := sm.injectCodexHooks(sessionID, false)
 	if err != nil {
 		t.Fatalf("injectCodexHooks() error = %v", err)
 	}
@@ -545,7 +545,7 @@ func TestInjectClaudeHooksWithMCPServers(t *testing.T) {
 		{Name: "chrome", Command: "npx", Args: []string{"chrome-mcp"}},
 	}
 
-	args, env, err := sm.injectClaudeHooks(sessionID, servers)
+	args, env, err := sm.injectClaudeHooks(sessionID, false, servers)
 	if err != nil {
 		t.Fatalf("injectClaudeHooks() error = %v", err)
 	}
@@ -582,7 +582,7 @@ func TestGenerateClaudeSettingsNoMCPServers(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 	sessionID := "kirk-mcp-02"
 
-	settingsPath, err := sm.generateClaudeSettings(sessionID)
+	settingsPath, err := sm.generateClaudeSettings(sessionID, false)
 	if err != nil {
 		t.Fatalf("generateClaudeSettings() error = %v", err)
 	}
@@ -739,7 +739,7 @@ func TestInjectCursorHooks(t *testing.T) {
 	sessionID := "kirk-cursor-01"
 	worktree := t.TempDir()
 
-	extraArgs, extraEnv, err := sm.injectCursorHooks(sessionID, worktree)
+	extraArgs, extraEnv, err := sm.injectCursorHooks(sessionID, worktree, false)
 	if err != nil {
 		t.Fatalf("injectCursorHooks() error = %v", err)
 	}
@@ -797,7 +797,7 @@ func TestInjectCursorHooksContent(t *testing.T) {
 	sessionID := "kirk-cursor-02"
 	worktree := t.TempDir()
 
-	_, _, err := sm.injectCursorHooks(sessionID, worktree)
+	_, _, err := sm.injectCursorHooks(sessionID, worktree, false)
 	if err != nil {
 		t.Fatalf("injectCursorHooks() error = %v", err)
 	}
@@ -895,7 +895,7 @@ func TestPreTrustCursorWorkspaceDisabled(t *testing.T) {
 
 	worktree := t.TempDir()
 
-	_, _, err := sm.injectCursorHooks("haar-no-trust", worktree)
+	_, _, err := sm.injectCursorHooks("haar-no-trust", worktree, false)
 	if err != nil {
 		t.Fatalf("injectCursorHooks() error = %v", err)
 	}
@@ -925,7 +925,7 @@ func TestPreTrustCursorWorkspaceIdempotent(t *testing.T) {
 func TestInjectCursorHooksEmptyWorktree(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 
-	args, env, err := sm.injectCursorHooks("haar-no-worktree", "")
+	args, env, err := sm.injectCursorHooks("haar-no-worktree", "", false)
 	if err != nil {
 		t.Fatalf("injectCursorHooks() error = %v", err)
 	}
@@ -955,7 +955,7 @@ func TestClaudeSettingsEscapeSingleQuotes(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 	sessionID := "kirk-claude-quote"
 
-	settingsPath, err := sm.generateClaudeSettings(sessionID)
+	settingsPath, err := sm.generateClaudeSettings(sessionID, false)
 	if err != nil {
 		t.Fatalf("generateClaudeSettings() error = %v", err)
 	}
@@ -994,7 +994,7 @@ func TestGenerateClaudeSettingsApprovalsDisabled(t *testing.T) {
 	disabled := false
 	sm.cfg.Approvals.Enabled = &disabled
 
-	settingsPath, err := sm.generateClaudeSettings("thrawn-no-approve")
+	settingsPath, err := sm.generateClaudeSettings("thrawn-no-approve", false)
 	if err != nil {
 		t.Fatalf("generateClaudeSettings() error = %v", err)
 	}
@@ -1031,12 +1031,50 @@ func TestGenerateClaudeSettingsApprovalsDisabled(t *testing.T) {
 	}
 }
 
+// TestGenerateClaudeSettingsYoloInstallsPreToolUse verifies that a yolo session
+// installs the PreToolUse approve-request hook even when global approval gating
+// is disabled, so its tool calls route through the daemon's auto-approve path.
+func TestGenerateClaudeSettingsYoloInstallsPreToolUse(t *testing.T) {
+	sm := newTestSessionManagerWithDataDir(t)
+	disabled := false
+	sm.cfg.Approvals.Enabled = &disabled
+
+	settingsPath, err := sm.generateClaudeSettings("bonnie-yolo", true)
+	if err != nil {
+		t.Fatalf("generateClaudeSettings() error = %v", err)
+	}
+
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("read settings: %v", err)
+	}
+
+	var parsed struct {
+		Hooks map[string][]struct {
+			Hooks []struct {
+				Command string `json:"command"`
+			} `json:"hooks"`
+		} `json:"hooks"`
+	}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("unmarshal settings: %v", err)
+	}
+
+	if _, ok := parsed.Hooks["PreToolUse"]; !ok {
+		t.Error("PreToolUse hook omitted for yolo session, want installed")
+	}
+
+	if !strings.Contains(string(data), "approve-request") {
+		t.Error("yolo settings missing approve-request command")
+	}
+}
+
 func TestInjectCodexHooksApprovalsDisabled(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 	disabled := false
 	sm.cfg.Approvals.Enabled = &disabled
 
-	_, extraEnv, err := sm.injectCodexHooks("thrawn-codex-no-approve")
+	_, extraEnv, err := sm.injectCodexHooks("thrawn-codex-no-approve", false)
 	if err != nil {
 		t.Fatalf("injectCodexHooks() error = %v", err)
 	}
@@ -1062,7 +1100,7 @@ func TestInjectCursorHooksApprovalsDisabled(t *testing.T) {
 	sm.cfg.Approvals.Enabled = &disabled
 	worktree := t.TempDir()
 
-	_, _, err := sm.injectCursorHooks("thrawn-cursor-no-approve", worktree)
+	_, _, err := sm.injectCursorHooks("thrawn-cursor-no-approve", worktree, false)
 	if err != nil {
 		t.Fatalf("injectCursorHooks() error = %v", err)
 	}

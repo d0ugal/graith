@@ -86,6 +86,7 @@ type CreateMsg struct {
 	InPlace             bool   `json:"in_place,omitempty"`
 	AllowConcurrent     bool   `json:"allow_concurrent,omitempty"`
 	SkipModelValidation bool   `json:"skip_model_validation,omitempty"`
+	Yolo                bool   `json:"yolo,omitempty"`
 }
 
 type ForkMsg struct {
