@@ -268,6 +268,15 @@ func prColor(s protocol.SessionInfo) color.Color {
 		return colorDim
 	}
 
+	// A merged/closed PR is a terminal state — its stale CI badge (or a stale
+	// CONFLICTING mergeable state) must not paint the token. Mirror displayPR's
+	// ordering exactly: terminal state is checked before conflict and CI,
+	// because resolvePR stops fetching checks once a PR leaves open/draft and
+	// writePRState keeps the last-known CI badge (issue #773).
+	if pr.State == "merged" || pr.State == "closed" {
+		return colorDim
+	}
+
 	if pr.Conflicting {
 		return colorRed
 	}
@@ -281,10 +290,6 @@ func prColor(s protocol.SessionInfo) color.Color {
 		case "pending":
 			return colorYellow
 		}
-	}
-
-	if pr.State == "merged" || pr.State == "closed" {
-		return colorDim
 	}
 
 	return colorBlue
