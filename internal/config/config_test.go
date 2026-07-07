@@ -1056,6 +1056,21 @@ func TestMergeAgent(t *testing.T) {
 		}
 	})
 
+	t.Run("whitespace-only profile does not clobber default sandbox", func(t *testing.T) {
+		// A whitespace typo in a user agent's profile must NOT trip the
+		// sandbox-override predicate — otherwise the embedded default sandbox
+		// grants (e.g. ~/.claude) would be dropped even though the profile is
+		// later trimmed to unset. See PR #807.
+		defWithSbx := def
+		defWithSbx.Sandbox = SandboxConfig{ReadDirs: []string{"~/.claude"}}
+		usr := Agent{Sandbox: SandboxConfig{Profile: "   "}}
+
+		got := mergeAgent(defWithSbx, usr)
+		if len(got.Sandbox.ReadDirs) != 1 || got.Sandbox.ReadDirs[0] != "~/.claude" {
+			t.Errorf("Sandbox.ReadDirs = %v, want [~/.claude] preserved from default", got.Sandbox.ReadDirs)
+		}
+	})
+
 	t.Run("override inject_prompt", func(t *testing.T) {
 		f := false
 		usr := Agent{InjectPrompt: &f}
