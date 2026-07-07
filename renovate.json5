@@ -28,5 +28,29 @@
       extractVersionTemplate: '^v(?<version>.+)$',
       versioningTemplate: 'semver',
     },
+    {
+      // Keep actionlint on the latest release. The workflow-lint workflow
+      // verifies the download by build-provenance attestation
+      // (version-independent), so only this version string needs bumping.
+      customType: 'regex',
+      managerFilePatterns: ['/^\\.github/workflows/workflow-lint\\.yml$/'],
+      matchStrings: ['ACTIONLINT_VERSION:\\s*(?<currentValue>[\\d.]+)'],
+      depNameTemplate: 'rhysd/actionlint',
+      datasourceTemplate: 'github-releases',
+      extractVersionTemplate: '^v(?<version>.+)$',
+      versioningTemplate: 'semver',
+    },
+    {
+      // Keep zizmor on the latest release. Same provenance-verified,
+      // version-independent install as actionlint/nono — only the version
+      // string bumps; the attestation check needs no per-version update.
+      customType: 'regex',
+      managerFilePatterns: ['/^\\.github/workflows/workflow-lint\\.yml$/'],
+      matchStrings: ['ZIZMOR_VERSION:\\s*(?<currentValue>[\\d.]+)'],
+      depNameTemplate: 'zizmorcore/zizmor',
+      datasourceTemplate: 'github-releases',
+      extractVersionTemplate: '^v(?<version>.+)$',
+      versioningTemplate: 'semver',
+    },
   ],
 }

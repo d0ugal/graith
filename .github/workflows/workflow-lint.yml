@@ -23,6 +23,9 @@ jobs:
   actionlint:
     name: actionlint
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      attestations: read # verify actionlint's build provenance (gh attestation verify)
     env:
       ACTIONLINT_VERSION: 1.7.12
     steps:
@@ -30,12 +33,27 @@ jobs:
         with:
           persist-credentials: false
       - name: Install actionlint
+        # Pinned, provenance-verified install. The release tarball is verified
+        # against actionlint's GitHub build-provenance attestation
+        # (`gh attestation verify`), which binds it via Sigstore to the
+        # rhysd/actionlint release workflow. This is version-independent — the
+        # ACTIONLINT_VERSION customManager in renovate.json5 can bump the version
+        # with no per-version checksum to update — and a tampered or MITM'd
+        # download fails closed. Mirrors the nono install in sandbox.yml.
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          url="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
-          curl -fsSL "$url" -o /tmp/actionlint.tar.gz
-          tar -xzf /tmp/actionlint.tar.gz -C /tmp actionlint
-          sudo install -m 0755 /tmp/actionlint /usr/local/bin/actionlint
+          tarball="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          url="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${tarball}"
+          tmp="$(mktemp -d)"
+          curl -fsSL --proto '=https' --tlsv1.2 "$url" -o "$tmp/$tarball"
+          # Fail closed: only install if build provenance verifies against
+          # rhysd/actionlint (proves actionlint's own CI produced the artifact).
+          gh attestation verify "$tmp/$tarball" --repo rhysd/actionlint
+          tar -xzf "$tmp/$tarball" -C "$tmp" actionlint
+          sudo install -m 0755 "$tmp/actionlint" /usr/local/bin/actionlint
+          rm -rf "$tmp"
           actionlint --version
       - name: Run actionlint
         # shellcheck is preinstalled on ubuntu runners; actionlint shells out
@@ -45,20 +63,49 @@ jobs:
   zizmor:
     name: zizmor
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      attestations: read # verify zizmor's build provenance (gh attestation verify)
     env:
       ZIZMOR_VERSION: 1.26.1
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@f98e06938123ccabd21905ea5d0069192241f9f1 # v8.3.1
+      - name: Install zizmor
+        # Pinned, provenance-verified install (replaces the unpinned `uv`-based
+        # download, which was version-pinned but not hash-locked). The release
+        # tarball is verified against zizmor's GitHub build-provenance
+        # attestation (`gh attestation verify`), binding it via Sigstore to the
+        # zizmorcore/zizmor release workflow. Version-independent (bumped by the
+        # ZIZMOR_VERSION customManager in renovate.json5) and fails closed on a
+        # tampered artifact — consistent with actionlint above and nono in
+        # sandbox.yml.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tarball="zizmor-x86_64-unknown-linux-gnu.tar.gz"
+          url="https://github.com/zizmorcore/zizmor/releases/download/v${ZIZMOR_VERSION}/${tarball}"
+          tmp="$(mktemp -d)"
+          curl -fsSL --proto '=https' --tlsv1.2 "$url" -o "$tmp/$tarball"
+          # Fail closed: only install if build provenance verifies against
+          # zizmorcore/zizmor (proves zizmor's own CI produced the artifact).
+          gh attestation verify "$tmp/$tarball" --repo zizmorcore/zizmor
+          dest="$HOME/.local/bin"
+          mkdir -p "$dest"
+          tar -xzf "$tmp/$tarball" -C "$dest" zizmor
+          chmod +x "$dest/zizmor"
+          echo "$dest" >> "$GITHUB_PATH"
+          rm -rf "$tmp"
+          "$dest/zizmor" --version
       - name: Run zizmor
         # --min-confidence=medium keeps the gate honest without blocking on
         # zizmor's low-confidence heuristics (e.g. artipacked on checkouts
         # that must persist credentials to push, cache-poisoning on
         # release-triggered setup-go). Real issues (template injection,
         # dangerous triggers, over-broad permissions) surface at medium+.
-        run: uvx "zizmor==${ZIZMOR_VERSION}" --min-confidence=medium .github/workflows/
+        run: zizmor --min-confidence=medium .github/workflows/
 
   scripts:
     name: workflow scripts
