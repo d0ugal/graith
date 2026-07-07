@@ -202,8 +202,12 @@ func TestCheckApprovalsBackendAvailable(t *testing.T) {
 		t.Errorf("enforceable command backend should not fail, got: %v", dc.checks)
 	}
 
-	if len(checkResults(dc, "ok")) == 0 {
-		t.Errorf("enforceable command backend should record a passing check, got: %v", dc.checks)
+	// Assert the passing check is specifically for the command backend, not just
+	// that *some* ok check exists — a regression that reported the prompt backend
+	// (or any other) as OK would otherwise slip through a bare len(ok) > 0 check.
+	passed := strings.Join(checkResults(dc, "ok"), "\n")
+	if !strings.Contains(passed, "command") {
+		t.Errorf("expected a passing check naming the command backend, got: %q", passed)
 	}
 }
 
