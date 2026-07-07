@@ -283,6 +283,31 @@ func TestBuildQueryProfile(t *testing.T) {
 	}
 }
 
+// TestBuildQueryProfileRejectsReadOnlyUnderTmp: a read-only grant under a nono
+// default-writable prefix cannot be enforced, so `gr sandbox why` (which reuses
+// the profile emitter) must fail closed with the config error rather than emit a
+// profile. Regression for issue #789.
+func TestBuildQueryProfileRejectsReadOnlyUnderTmp(t *testing.T) {
+	t.Parallel()
+
+	opts := WrapOpts{
+		Backend:     BackendNono,
+		WorktreeDir: "/hame/user/bothy",
+		ReadDirs:    []string{"/tmp/dreich-readonly"},
+	}
+
+	path, _, err := BuildQueryProfile(opts)
+	if err == nil {
+		_ = os.Remove(path)
+
+		t.Fatal("BuildQueryProfile should reject a read-only dir under /tmp, got nil error")
+	}
+
+	if !strings.Contains(err.Error(), "/tmp/dreich-readonly") {
+		t.Errorf("error should name the offending path, got: %v", err)
+	}
+}
+
 func TestBuildQueryProfileWarnsUnmappedFeature(t *testing.T) {
 	t.Parallel()
 

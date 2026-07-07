@@ -545,9 +545,12 @@ Rules (each gets a fixture in §C1/testing):
 >   fail-open guard is enforced.
 > - **Verb mapping:** `write_dirs` + worktree → `filesystem.allow` (read+write),
 >   never nono's write-only `filesystem.write`.
-> - **`/tmp`/`$TMPDIR` default-writable leak:** read-only paths under those
->   prefixes are re-denied via `filesystem.deny` (nono's `system_write_linux`
->   grants write there by default).
+> - **`/tmp`/`$TMPDIR` default-writable leak:** nono cannot make a path under
+>   those prefixes read-only (Landlock has no deny-under-an-allowed-parent; macOS
+>   `deny` removes read too), so a read-only `read_dirs`/`read_files` grant there
+>   is **rejected with a config error** (fail-closed) rather than emitted. See
+>   issue #789 — an earlier `filesystem.deny` re-deny attempt could not enforce
+>   read-only and tripped nono's deny-overlap validation.
 > - **env allowlist** includes `PATH`/`HOME`/`GRAITH_*` (nono scrubs everything
 >   else). The `environment.allow_vars` block is **always emitted for the nono
 >   backend, even when the allowlist is empty** — env is scrubbed by default
@@ -738,9 +741,10 @@ How it works, and why it is faithful:
   a temp profile, and calls `nono why --json -p <profile> ...`. Because `nono
   why -p <path>` evaluates against the passed profile (confirmed: decisions
   report `"source": "profile"`), the answer reflects graith's *generated* policy
-  — including the `environment.allow_vars` allowlist, the worktree/`write_dirs`
-  → `filesystem.allow` mapping, and the `/tmp`/`$TMPDIR` re-deny — not nono's
-  bare defaults.
+  — including the `environment.allow_vars` allowlist and the
+  worktree/`write_dirs` → `filesystem.allow` mapping — not nono's bare defaults.
+  A read-only grant under `/tmp`/`$TMPDIR` is rejected by the emitter itself, so
+  `why` returns that config error before it ever builds a profile.
 - `nono why --json` exits 0 for both allow and deny and emits a stable JSON
   object (`status` ∈ {allowed, denied}, plus `reason`/`details`/`source`/
   `policy_source`/`suggested_flag`). graith treats a non-JSON stdout (e.g. an
@@ -756,14 +760,16 @@ How it works, and why it is faithful:
   against a profile. The doc's original "nono-go becomes attractive for
   introspection" note (§3) does not hold in practice for v0.66.0.
 
-Genuine finding surfaced while testing: querying a `read_dir` located directly
-under `/tmp` triggers nono's *Landlock deny-overlap* refusal (the read-only
-grant there is re-denied by graith's profile, and nono refuses to combine a
-`deny` with its broad `/tmp` allow). The command surfaces nono's error verbatim
-rather than swallowing it; documented as a reason to keep sandbox dirs outside
-`/tmp`. This does not affect the run path (which passes the same deny set) — it
-is specific to the `why` evaluation, and the honest surfacing is the right
-behaviour.
+Genuine finding surfaced while testing (issue #789): an earlier design re-denied
+a read-only `read_dir` under `/tmp` via `filesystem.deny`, but that could not
+actually enforce read-only — on Linux, nono refused to combine a `deny` with its
+broad inherited `/tmp` allow (Landlock deny-overlap), and on macOS the `deny`
+would have removed read too. That was true on **both** the `why` path and the
+run path: a re-denied read-only grant under `/tmp` was fail-closed/unusable, not
+"read-only preserved". graith now rejects such a grant in the profile emitter
+(`buildNonoProfile` returns an error), so both `gr sandbox why` and real session
+creation fail closed with a clear config error pointing the user to move the
+path outside `/tmp`/`$TMPDIR`.
 
 Code: `internal/sandbox/why.go` (`WhyQuery`, `WhyResult`, `WhyForProfile`,
 `BuildQueryProfile`), `internal/cli/sandbox.go` (`gr sandbox why`). Tests beside

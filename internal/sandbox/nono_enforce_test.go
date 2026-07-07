@@ -26,11 +26,11 @@ import (
 
 // nonWritableTempRoot returns a fresh temp dir that is NOT under a nono
 // default-writable prefix (/tmp or $TMPDIR). t.TempDir() lives under $TMPDIR on
-// most hosts, which would make buildNonoProfile's re-deny guard fire for a
-// read-only source placed there — masking whether --workdir alone establishes
-// the read-only guarantee (issue #786). Real shared worktrees live under the
-// repo dir / ~/.local/share/graith, never /tmp, so we build the fixture under
-// $HOME to reproduce that faithfully.
+// most hosts, which would make buildNonoProfile reject a read-only source placed
+// there (issue #789) — so Wrap would fail before this test could exercise
+// whether --workdir alone establishes the read-only guarantee (issue #786). Real
+// shared worktrees live under the repo dir / ~/.local/share/graith, never /tmp,
+// so we build the fixture under $HOME to reproduce that faithfully.
 func nonWritableTempRoot(t *testing.T) string {
 	t.Helper()
 
@@ -203,13 +203,13 @@ func TestNonoEnforcesFilesystemBoundary(t *testing.T) {
 func TestNonoEnforcesSharedWorktreeReadOnly(t *testing.T) {
 	mustEnforce(t)
 
-	// Build the fixture OUTSIDE /tmp/$TMPDIR so buildNonoProfile's re-deny guard
-	// does NOT fire for the source (see nonWritableTempRoot). This is essential:
-	// if the source were under a default-writable prefix it would land in
-	// filesystem.deny as well as filesystem.read, giving a SECOND mechanism that
-	// keeps it read-only — the test would then pass even on the pre-fix build and
-	// prove nothing about --workdir. Keeping source out of the deny list means the
-	// only thing steering writes away from it is the pinned --workdir (issue #786).
+	// Build the fixture OUTSIDE /tmp/$TMPDIR (see nonWritableTempRoot). This is
+	// essential: if the source were under a default-writable prefix,
+	// buildNonoProfile would reject the read-only grant (issue #789) and Wrap
+	// would fail before the enforcement exec — so the test could not prove
+	// anything about --workdir. Keeping the source outside the default-writable
+	// prefixes means the only thing steering writes away from it is the pinned
+	// --workdir (issue #786).
 	root := nonWritableTempRoot(t)
 	source := filepath.Join(root, "bothy")    // read-only source worktree
 	scratch := filepath.Join(root, "scratch") // read-write workdir
@@ -241,10 +241,17 @@ func TestNonoEnforcesSharedWorktreeReadOnly(t *testing.T) {
 		t.Fatalf("wrap: %v", err)
 	}
 
-	// Isolation guard: prove the source is NOT re-denied, so this test exercises
-	// the --workdir pin rather than the /tmp re-deny path. If this fails, the
-	// fixture leaked under a default-writable prefix and the enforcement result
-	// below would be untrustworthy.
+	// Isolation guard: prove the source lives OUTSIDE a default-writable prefix,
+	// so this test exercises the --workdir pin rather than the #789 rejection
+	// path. If the source were under /tmp/$TMPDIR, buildNonoProfile would reject
+	// the read-only grant and Wrap above would have already failed — assert
+	// placement explicitly so a fixture leak is an obvious failure here. The
+	// source must be granted read-only via filesystem.read (the only mechanism
+	// keeping it read-only now that the re-deny path is gone).
+	if underDefaultWritable(source) {
+		t.Fatalf("source %q is under a default-writable prefix; fixture must live outside /tmp/$TMPDIR so this test exercises --workdir, not the #789 rejection", source)
+	}
+
 	data, err := os.ReadFile(profilePath)
 	if err != nil {
 		t.Fatalf("read profile: %v", err)
@@ -255,8 +262,8 @@ func TestNonoEnforcesSharedWorktreeReadOnly(t *testing.T) {
 		t.Fatalf("profile is not valid JSON: %v", err)
 	}
 
-	if slices.Contains(prof.Filesystem.Deny, source) {
-		t.Fatalf("source %q is in filesystem.deny; test would pass via re-deny, not --workdir — fixture must live outside /tmp/$TMPDIR", source)
+	if !slices.Contains(prof.Filesystem.Read, source) {
+		t.Fatalf("source %q should be granted read-only via filesystem.read: %v", source, prof.Filesystem.Read)
 	}
 
 	rc := exec.Command(cmd, args...) //nolint:gosec // test-controlled command

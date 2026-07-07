@@ -128,14 +128,21 @@ and lives for the session's lifetime, including resume.
 ### The `/tmp` default-writable caveat
 
 nono's built-in `system_write_linux` group makes `/tmp`, `$TMPDIR`,
-`/dev/null`, and `/proc/self/fd` writable by default. That means a `read_dirs`
-entry located under `/tmp` or `$TMPDIR` would be **silently writable**,
-breaking the read-only guarantee. graith detects read-only paths under those
-prefixes (both `read_dirs` and `read_files`) and adds an explicit
-`filesystem.deny` for them (and warns), so a read-only grant stays read-only.
-Paths that are meant to be writable (the worktree, `write_dirs`) are exempt.
-graith's own data dir defaults to `~/.local/share/graith` (not `/tmp`), so this
-only bites custom configs that point policy paths at `/tmp`.
+`/dev/null`, and `/proc/self/fd` writable by default, and nono **cannot** carve
+a read-only exception out of a writable prefix: on Linux, Landlock has no
+deny-under-an-allowed-parent (a deny overlapping the inherited `/tmp` allow is a
+hard validation error); on macOS, a Seatbelt `deny` removes read as well as
+write, making the path unreadable. Either way a read-only grant located under
+`/tmp` or `$TMPDIR` cannot be enforced.
+
+Rather than emit a profile that fails to keep that promise, graith **rejects**
+a read-only `read_dirs`/`read_files` grant under those prefixes with a clear
+config error and fails closed (session creation aborts). Paths that are meant
+to be writable (the worktree, `write_dirs`) are exempt — a read grant within a
+region you made writable on purpose is accepted. graith's own data dir defaults
+to `~/.local/share/graith` (not `/tmp`), so this only bites custom configs that
+point read-only policy paths at `/tmp` or `$TMPDIR`: move them elsewhere, or
+grant them as writable paths.
 
 ### File grants
 
@@ -233,12 +240,13 @@ machine-readable decision (`allowed`, `status`, `reason`, `details`, `source`,
 `suggested_flag`). The command **only targets the `nono` backend** — it is the
 only backend with a policy oracle; on a `safehouse` config it returns an error.
 
-The answer reflects graith's generated profile (including the `/tmp`/`$TMPDIR`
-re-deny and the `environment.allow_vars` allowlist), so it is a faithful preview
-of what a real session would enforce. Note that querying a `read_dir` located
-directly under `/tmp` surfaces nono's Landlock deny-overlap error (a read-only
-grant there is re-denied, which nono refuses to combine with its broad `/tmp`
-allow) — a reason to keep sandbox dirs outside `/tmp`.
+The answer reflects graith's generated profile (including the
+`environment.allow_vars` allowlist), so it is a faithful preview of what a real
+session would enforce. Note that a read-only `read_dirs`/`read_files` grant
+at or under `/tmp` or `$TMPDIR` is rejected up front (see the
+[default-writable caveat](#the-tmp-default-writable-caveat)), so `gr sandbox
+why` returns that config error rather than a decision — another reason to keep
+read-only sandbox paths outside `/tmp`.
 
 ## Configuration
 

@@ -113,8 +113,11 @@ to `filesystem.read`, and the file-level grants read_files/write_files to
 `filesystem.read_file` / `filesystem.allow_file` (for single files that can't be
 a directory grant without over-sharing, e.g. an agent's `~/.claude.json` login
 file), the env allowlist to `environment.allow_vars` (incl. PATH/HOME/GRAITH_*),
-grants read on the agent binary dir, and re-denies read-only paths under
-`/tmp`/`$TMPDIR` (writable by default under nono). An optional `[sandbox.network]` block
+grants read on the agent binary dir, and rejects read-only read_dirs/read_files
+grants located under `/tmp`/`$TMPDIR` with a clear config error (fail-closed):
+those prefixes are writable by default under nono and it cannot make a subpath
+read-only — Landlock has no deny-under-an-allowed-parent and macOS deny removes
+read too (issue #789). An optional `[sandbox.network]` block
 (`block` / `allow_domains`) maps to the profile's `network.block` /
 `network.allow_domain`, and `[sandbox] signal_mode` maps to
 `security.signal_mode`. `process-control` gates under safehouse but is a no-op

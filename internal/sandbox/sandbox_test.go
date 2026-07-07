@@ -271,7 +271,7 @@ func TestBuildNonoProfileFilesystemMapping(t *testing.T) {
 		EnvKeys:     []string{"PATH", "HOME"},
 	}
 
-	p, warnings := buildNonoProfile("graith-bothy", opts, "")
+	p, warnings, _ := buildNonoProfile("graith-bothy", opts, "")
 	if len(warnings) != 0 {
 		t.Errorf("unexpected warnings: %v", warnings)
 	}
@@ -306,7 +306,7 @@ func TestBuildNonoProfileExtendsCustomProfile(t *testing.T) {
 		EnvKeys:     []string{"PATH", "HOME"},
 	}
 
-	p, warnings := buildNonoProfile("graith-bothy", opts, "")
+	p, warnings, _ := buildNonoProfile("graith-bothy", opts, "")
 	if len(warnings) != 0 {
 		t.Errorf("unexpected warnings: %v", warnings)
 	}
@@ -331,7 +331,7 @@ func TestBuildNonoProfileExtendsCustomProfile(t *testing.T) {
 }
 
 func TestBuildNonoProfileEmptyProfileDefaults(t *testing.T) {
-	p, _ := buildNonoProfile("graith-neep", WrapOpts{Backend: BackendNono}, "")
+	p, _, _ := buildNonoProfile("graith-neep", WrapOpts{Backend: BackendNono}, "")
 	if p.Extends != "default" {
 		t.Errorf("Extends = %q, want default when Profile is empty", p.Extends)
 	}
@@ -343,7 +343,7 @@ func TestBuildNonoProfileEnvAllowlist(t *testing.T) {
 		EnvKeys: []string{"GRAITH_SESSION_ID", "TERM"},
 	}
 
-	p, _ := buildNonoProfile("graith-braw", opts, "")
+	p, _, _ := buildNonoProfile("graith-braw", opts, "")
 	if p.Environment == nil {
 		t.Fatal("environment section missing; env would leak (inherit-all)")
 	}
@@ -358,7 +358,7 @@ func TestBuildNonoProfileNoEnvKeysScrubsEnv(t *testing.T) {
 	// as an EMPTY allowlist. Omitting the block would make nono inherit the
 	// daemon's entire environment (fail-open credential leak); an empty
 	// allowlist scrubs all env instead (fail-closed). See issue #694.
-	p, _ := buildNonoProfile("graith-neep", WrapOpts{Backend: BackendNono}, "")
+	p, _, _ := buildNonoProfile("graith-neep", WrapOpts{Backend: BackendNono}, "")
 	if p.Environment == nil {
 		t.Fatal("environment section missing with empty EnvKeys; env would leak (inherit-all)")
 	}
@@ -372,7 +372,7 @@ func TestBuildNonoProfileEmptyEnvScrubsNotInherits(t *testing.T) {
 	// Prove the emitted profile scrubs env rather than inheriting it: the
 	// marshalled JSON must carry an explicit "allow_vars": [] so nono clears
 	// the environment. A missing allow_vars (null / absent) would inherit all.
-	p, _ := buildNonoProfile("graith-neep", WrapOpts{Backend: BackendNono}, "")
+	p, _, _ := buildNonoProfile("graith-neep", WrapOpts{Backend: BackendNono}, "")
 
 	data, err := json.Marshal(p)
 	if err != nil {
@@ -391,7 +391,7 @@ func TestBuildNonoProfileEmptyEnvScrubsNotInherits(t *testing.T) {
 func TestBuildNonoProfileSSHFeature(t *testing.T) {
 	opts := WrapOpts{Backend: BackendNono, WorktreeDir: "/tmp/bothy", Features: []string{"ssh"}}
 
-	p, warnings := buildNonoProfile("graith-bothy", opts, "/run/user/1000/ssh-agent.sock")
+	p, warnings, _ := buildNonoProfile("graith-bothy", opts, "/run/user/1000/ssh-agent.sock")
 	if len(warnings) != 0 {
 		t.Errorf("unexpected warnings for ssh with socket set: %v", warnings)
 	}
@@ -404,7 +404,7 @@ func TestBuildNonoProfileSSHFeature(t *testing.T) {
 func TestBuildNonoProfileSSHWithoutSocketWarns(t *testing.T) {
 	opts := WrapOpts{Backend: BackendNono, WorktreeDir: "/tmp/bothy", Features: []string{"ssh"}}
 
-	p, warnings := buildNonoProfile("graith-bothy", opts, "")
+	p, warnings, _ := buildNonoProfile("graith-bothy", opts, "")
 	if len(p.Filesystem.UnixSocket) != 0 {
 		t.Errorf("no socket should be granted when SSH_AUTH_SOCK unset: %v", p.Filesystem.UnixSocket)
 	}
@@ -417,7 +417,7 @@ func TestBuildNonoProfileSSHWithoutSocketWarns(t *testing.T) {
 func TestBuildNonoProfileProcessControlWarnsWithoutSignalMode(t *testing.T) {
 	opts := WrapOpts{Backend: BackendNono, WorktreeDir: "/tmp/bothy", Features: []string{"process-control"}}
 
-	p, warnings := buildNonoProfile("graith-bothy", opts, "")
+	p, warnings, _ := buildNonoProfile("graith-bothy", opts, "")
 	// process-control alone is a no-op under nono, but graith surfaces a hint
 	// (don't silently drop) telling the user to set signal_mode = "isolated".
 	if len(warnings) != 1 || !strings.Contains(warnings[0], "signal_mode") {
@@ -436,7 +436,7 @@ func TestBuildNonoProfileProcessControlWarnsWithoutSignalMode(t *testing.T) {
 func TestBuildNonoProfileUnmappedFeatureWarns(t *testing.T) {
 	opts := WrapOpts{Backend: BackendNono, WorktreeDir: "/tmp/bothy", Features: []string{"clipboard", "haar"}}
 
-	_, warnings := buildNonoProfile("graith-bothy", opts, "")
+	_, warnings, _ := buildNonoProfile("graith-bothy", opts, "")
 	if len(warnings) != 2 {
 		t.Fatalf("want 2 warnings for [clipboard haar], got %v", warnings)
 	}
@@ -548,6 +548,37 @@ func TestNonoWrapOmitsWorkdirWhenUnset(t *testing.T) {
 
 	if slices.Contains(args, "--workdir") {
 		t.Errorf("no --workdir expected when WorktreeDir is empty, got %v", args)
+	}
+}
+
+// TestNonoWrapRejectsReadOnlyUnderTmp: Wrap must fail closed (return an error
+// and write no profile) when a read-only grant falls under a nono
+// default-writable prefix, so session creation aborts rather than run under a
+// profile that can't enforce read-only. Regression for issue #789.
+func TestNonoWrapRejectsReadOnlyUnderTmp(t *testing.T) {
+	tmp := t.TempDir()
+	profilePath := filepath.Join(tmp, "thrawn.json")
+
+	opts := WrapOpts{
+		Backend:     BackendNono,
+		WorktreeDir: "/hame/user/bothy",
+		ReadDirs:    []string{"/tmp/dreich-readonly"},
+		EnvKeys:     []string{"PATH"},
+		ProfilePath: profilePath,
+	}
+
+	_, _, err := Wrap("claude", nil, opts)
+	if err == nil {
+		t.Fatal("Wrap should reject a read-only dir under /tmp, got nil error")
+	}
+
+	if !strings.Contains(err.Error(), "/tmp/dreich-readonly") {
+		t.Errorf("error should name the offending path, got: %v", err)
+	}
+
+	// Fail closed: no profile should be written when the config is rejected.
+	if _, statErr := os.Stat(profilePath); !os.IsNotExist(statErr) {
+		t.Errorf("no profile should be written on rejection; stat err = %v", statErr)
 	}
 }
 
@@ -700,7 +731,7 @@ func TestBuildNonoProfileWriteDirsUseAllowNotWrite(t *testing.T) {
 		WriteDirs:   []string{"/hame/user/croft"},
 	}
 
-	p, _ := buildNonoProfile("graith-bothy", opts, "")
+	p, _, _ := buildNonoProfile("graith-bothy", opts, "")
 
 	if len(p.Filesystem.Write) != 0 {
 		t.Errorf("filesystem.write must stay empty (it is write-only under nono); got %v", p.Filesystem.Write)
@@ -711,46 +742,117 @@ func TestBuildNonoProfileWriteDirsUseAllowNotWrite(t *testing.T) {
 	}
 }
 
-// TestBuildNonoProfileReadDirUnderTmpIsReDenied: a read-only path under /tmp is
-// silently writable via nono's system_write_linux group, so it must be
-// re-denied to keep the read-only guarantee.
-func TestBuildNonoProfileReadDirUnderTmpIsReDenied(t *testing.T) {
+// TestBuildNonoProfileReadDirUnderTmpIsRejected: nono cannot make a read-only
+// path under /tmp read-only (Landlock has no deny-under-allowed-parent; macOS
+// deny removes read too), so graith must reject such a config with a clear error
+// rather than emit a profile that fails to enforce read-only. Regression for
+// issue #789.
+func TestBuildNonoProfileReadDirUnderTmpIsRejected(t *testing.T) {
 	opts := WrapOpts{
 		Backend:     BackendNono,
 		WorktreeDir: "/hame/user/bothy",
 		ReadDirs:    []string{"/tmp/dreich-readonly", "/hame/user/glen"},
 	}
 
-	p, warnings := buildNonoProfile("graith-bothy", opts, "")
-
-	if !slices.Contains(p.Filesystem.Deny, "/tmp/dreich-readonly") {
-		t.Errorf("read-only path under /tmp should be re-denied: deny=%v", p.Filesystem.Deny)
+	_, _, err := buildNonoProfile("graith-bothy", opts, "")
+	if err == nil {
+		t.Fatal("read-only dir under /tmp should be rejected, got nil error")
 	}
 
-	// A read-only path NOT under /tmp is left alone.
-	if slices.Contains(p.Filesystem.Deny, "/hame/user/glen") {
-		t.Errorf("non-/tmp read dir should not be denied: %v", p.Filesystem.Deny)
-	}
-
-	if len(warnings) == 0 {
-		t.Error("expected a warning about the /tmp read-only leak")
+	if !strings.Contains(err.Error(), "/tmp/dreich-readonly") {
+		t.Errorf("error should name the offending path, got: %v", err)
 	}
 }
 
-// TestBuildNonoProfileWorktreeUnderTmpNotDenied: the worktree is meant to be
-// writable, so a worktree under /tmp is NOT re-denied even though it's under a
-// default-writable prefix.
-func TestBuildNonoProfileWorktreeUnderTmpNotDenied(t *testing.T) {
+// TestBuildNonoProfileReadDirOutsideTmpAccepted: a read-only path NOT under a
+// default-writable prefix is accepted and mapped to filesystem.read.
+func TestBuildNonoProfileReadDirOutsideTmpAccepted(t *testing.T) {
+	opts := WrapOpts{
+		Backend:     BackendNono,
+		WorktreeDir: "/hame/user/bothy",
+		ReadDirs:    []string{"/hame/user/glen"},
+	}
+
+	p, _, err := buildNonoProfile("graith-bothy", opts, "")
+	if err != nil {
+		t.Fatalf("read-only dir outside /tmp should be accepted, got: %v", err)
+	}
+
+	if !slices.Contains(p.Filesystem.Read, "/hame/user/glen") {
+		t.Errorf("read dir should map to filesystem.read: %v", p.Filesystem.Read)
+	}
+}
+
+// TestBuildNonoProfileWorktreeUnderTmpNotRejected: the worktree is meant to be
+// writable, so a read path within a worktree under /tmp is NOT rejected even
+// though it's under a default-writable prefix — it's within a region the user
+// made writable on purpose.
+func TestBuildNonoProfileWorktreeUnderTmpNotRejected(t *testing.T) {
 	opts := WrapOpts{
 		Backend:     BackendNono,
 		WorktreeDir: "/tmp/bothy",
 		ReadDirs:    []string{"/tmp/bothy/sub"}, // under the (writable) worktree
 	}
 
-	p, _ := buildNonoProfile("graith-bothy", opts, "")
+	if _, _, err := buildNonoProfile("graith-bothy", opts, ""); err != nil {
+		t.Errorf("read path within the writable worktree should not be rejected: %v", err)
+	}
+}
 
-	if slices.Contains(p.Filesystem.Deny, "/tmp/bothy/sub") {
-		t.Errorf("read path within the writable worktree should not be denied: %v", p.Filesystem.Deny)
+// TestBuildNonoProfileReadDirUnderWriteDirNotRejected: a read-only path under
+// /tmp that is also within an explicit write_dir is a region the user made
+// writable on purpose, so it must NOT be rejected (covers the write_dirs clause
+// of the guard). Issue #789.
+func TestBuildNonoProfileReadDirUnderWriteDirNotRejected(t *testing.T) {
+	opts := WrapOpts{
+		Backend:     BackendNono,
+		WorktreeDir: "/hame/user/bothy",
+		WriteDirs:   []string{"/tmp/croft"},
+		ReadDirs:    []string{"/tmp/croft/sub"}, // under the (writable) write_dir
+	}
+
+	if _, _, err := buildNonoProfile("graith-bothy", opts, ""); err != nil {
+		t.Errorf("read path within a writable write_dir should not be rejected: %v", err)
+	}
+}
+
+// TestBuildNonoProfileReadFileMatchingWriteFileNotRejected: a read_files entry
+// under /tmp that is also granted writable via an exact write_files entry is
+// intentionally writable, so it must NOT be rejected. Config merge only
+// appends/dedups, so an agent-level write_files can't otherwise override a global
+// read_files for the same file. Issue #789.
+func TestBuildNonoProfileReadFileMatchingWriteFileNotRejected(t *testing.T) {
+	opts := WrapOpts{
+		Backend:     BackendNono,
+		WorktreeDir: "/hame/user/bothy",
+		ReadFiles:   []string{"/tmp/dreich.conf"},
+		WriteFiles:  []string{"/tmp/dreich.conf"},
+	}
+
+	if _, _, err := buildNonoProfile("graith-bothy", opts, ""); err != nil {
+		t.Errorf("read file also granted writable via write_files should not be rejected: %v", err)
+	}
+}
+
+// TestBuildNonoProfileReadDirUnderCustomTmpdirRejected: a non-/tmp $TMPDIR is
+// also a nono default-writable prefix, so a read-only grant under it is rejected
+// just like one under /tmp. Issue #789.
+func TestBuildNonoProfileReadDirUnderCustomTmpdirRejected(t *testing.T) {
+	t.Setenv("TMPDIR", "/var/folders/haar")
+
+	opts := WrapOpts{
+		Backend:     BackendNono,
+		WorktreeDir: "/hame/user/bothy",
+		ReadDirs:    []string{"/var/folders/haar/dreich-readonly"},
+	}
+
+	_, _, err := buildNonoProfile("graith-bothy", opts, "")
+	if err == nil {
+		t.Fatal("read-only dir under $TMPDIR should be rejected, got nil error")
+	}
+
+	if !strings.Contains(err.Error(), "/var/folders/haar/dreich-readonly") {
+		t.Errorf("error should name the offending path, got: %v", err)
 	}
 }
 
@@ -778,7 +880,7 @@ func TestBuildNonoProfileSignalModeIsolated(t *testing.T) {
 		SignalMode:  "isolated",
 	}
 
-	p, warnings := buildNonoProfile("graith-bothy", opts, "")
+	p, warnings, _ := buildNonoProfile("graith-bothy", opts, "")
 	if p.Security == nil || p.Security.SignalMode != "isolated" {
 		t.Fatalf("signal_mode should be emitted as security.signal_mode=isolated, got %+v", p.Security)
 	}
@@ -794,7 +896,7 @@ func TestBuildNonoProfileSignalModeIsolated(t *testing.T) {
 func TestBuildNonoProfileNoSignalModeOmitsSecurity(t *testing.T) {
 	opts := WrapOpts{Backend: BackendNono, WorktreeDir: "/tmp/bothy"}
 
-	p, _ := buildNonoProfile("graith-canny", opts, "")
+	p, _, _ := buildNonoProfile("graith-canny", opts, "")
 	if p.Security != nil {
 		t.Errorf("no signal_mode should omit the security section, got %+v", p.Security)
 	}
@@ -803,7 +905,7 @@ func TestBuildNonoProfileNoSignalModeOmitsSecurity(t *testing.T) {
 func TestBuildNonoProfileSignalModeSerialisesInSecurity(t *testing.T) {
 	opts := WrapOpts{Backend: BackendNono, WorktreeDir: "/tmp/bothy", SignalMode: "isolated"}
 
-	p, _ := buildNonoProfile("graith-kirk", opts, "")
+	p, _, _ := buildNonoProfile("graith-kirk", opts, "")
 
 	data, err := json.Marshal(p)
 	if err != nil {
@@ -834,7 +936,7 @@ func TestBuildNonoProfileNetworkBlock(t *testing.T) {
 		Network:     &NetworkPolicy{Block: true},
 	}
 
-	p, _ := buildNonoProfile("graith-thrawn", opts, "")
+	p, _, _ := buildNonoProfile("graith-thrawn", opts, "")
 	if p.Network == nil || !p.Network.Block {
 		t.Fatalf("network.block should be true, got %+v", p.Network)
 	}
@@ -851,7 +953,7 @@ func TestBuildNonoProfileNetworkAllowDomains(t *testing.T) {
 		Network:     &NetworkPolicy{AllowDomains: []string{"kirk.example", "https://glen.example/**"}},
 	}
 
-	p, _ := buildNonoProfile("graith-glen", opts, "")
+	p, _, _ := buildNonoProfile("graith-glen", opts, "")
 	if p.Network == nil {
 		t.Fatal("network section should be emitted")
 	}
@@ -867,7 +969,7 @@ func TestBuildNonoProfileNoNetworkOmitsSection(t *testing.T) {
 	for _, np := range []*NetworkPolicy{nil, {}, {AllowDomains: nil}} {
 		opts := WrapOpts{Backend: BackendNono, WorktreeDir: "/tmp/bothy", Network: np}
 
-		p, _ := buildNonoProfile("graith-neep", opts, "")
+		p, _, _ := buildNonoProfile("graith-neep", opts, "")
 		if p.Network != nil {
 			t.Errorf("empty network policy %+v should omit the network section, got %+v", np, p.Network)
 		}
@@ -881,7 +983,7 @@ func TestBuildNonoProfileNetworkSerialises(t *testing.T) {
 		Network:     &NetworkPolicy{Block: true, AllowDomains: []string{"kirk.example"}},
 	}
 
-	p, _ := buildNonoProfile("graith-brig", opts, "")
+	p, _, _ := buildNonoProfile("graith-brig", opts, "")
 
 	data, err := json.Marshal(p)
 	if err != nil {
@@ -999,7 +1101,7 @@ func TestBuildNonoProfileFileGrants(t *testing.T) {
 		WriteFiles:  []string{"/hame/user/.claude.json", "/hame/user/.claude.json.lock"},
 	}
 
-	p, warnings := buildNonoProfile("graith-bothy", opts, "")
+	p, warnings, _ := buildNonoProfile("graith-bothy", opts, "")
 	if len(warnings) != 0 {
 		t.Errorf("unexpected warnings: %v", warnings)
 	}
@@ -1020,28 +1122,23 @@ func TestBuildNonoProfileFileGrants(t *testing.T) {
 	}
 }
 
-// TestBuildNonoProfileReadFileUnderTmpIsReDenied: like read_dirs, a read-only
-// file under /tmp is silently writable via nono's system_write_linux group, so
-// it must be re-denied to keep the read-only guarantee.
-func TestBuildNonoProfileReadFileUnderTmpIsReDenied(t *testing.T) {
+// TestBuildNonoProfileReadFileUnderTmpIsRejected: like read_dirs, nono cannot
+// make a read-only file under /tmp read-only, so graith rejects such a config
+// with a clear error. Regression for issue #789.
+func TestBuildNonoProfileReadFileUnderTmpIsRejected(t *testing.T) {
 	opts := WrapOpts{
 		Backend:     BackendNono,
 		WorktreeDir: "/hame/user/bothy",
 		ReadFiles:   []string{"/tmp/dreich.conf", "/hame/user/.gitconfig"},
 	}
 
-	p, warnings := buildNonoProfile("graith-bothy", opts, "")
-
-	if !slices.Contains(p.Filesystem.Deny, "/tmp/dreich.conf") {
-		t.Errorf("read-only file under /tmp should be re-denied: deny=%v", p.Filesystem.Deny)
+	_, _, err := buildNonoProfile("graith-bothy", opts, "")
+	if err == nil {
+		t.Fatal("read-only file under /tmp should be rejected, got nil error")
 	}
 
-	if slices.Contains(p.Filesystem.Deny, "/hame/user/.gitconfig") {
-		t.Errorf("non-/tmp read file should not be denied: %v", p.Filesystem.Deny)
-	}
-
-	if len(warnings) == 0 {
-		t.Error("expected a warning about the /tmp read-only file leak")
+	if !strings.Contains(err.Error(), "/tmp/dreich.conf") {
+		t.Errorf("error should name the offending file, got: %v", err)
 	}
 }
 
@@ -1109,23 +1206,25 @@ func TestBuildNonoProfileSingleFileInDirGrants(t *testing.T) {
 		}
 	}
 
+	// The fixtures live under t.TempDir(), which is /tmp (or $TMPDIR) in CI — a
+	// nono default-writable prefix. Read-only grants directly under such a prefix
+	// are rejected (issue #789), so the whole temp root is the writable worktree
+	// here: the read grants are then within a region the user made writable and
+	// aren't rejected, letting this test focus on the file-vs-dir routing (#714).
 	opts := WrapOpts{
 		Backend:     BackendNono,
-		WorktreeDir: filepath.Join(tmp, "bothy"),
+		WorktreeDir: tmp,
 		ReadDirs:    []string{readDir, readFile},
 		WriteDirs:   []string{writeDir, writeFile},
 	}
 
-	p, warnings := buildNonoProfile("graith-bothy", opts, "")
+	p, warnings, err := buildNonoProfile("graith-bothy", opts, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
-	// The fixtures live under t.TempDir(), which is /tmp (or $TMPDIR) in CI — a
-	// nono default-writable prefix. The builder therefore re-denies the read-only
-	// grants there to keep them read-only, which is expected here; any other
-	// warning is not.
-	for _, w := range warnings {
-		if !strings.Contains(w, "re-denied to keep it read-only") {
-			t.Errorf("unexpected warning: %v", w)
-		}
+	if len(warnings) != 0 {
+		t.Errorf("unexpected warnings: %v", warnings)
 	}
 
 	// The single-file entries are routed to the file-grant lists.
