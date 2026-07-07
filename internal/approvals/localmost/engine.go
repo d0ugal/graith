@@ -80,7 +80,7 @@ func (e *Engine) compileRules(rs []Rule) ([]compiledRule, error) {
 			// guards. For a deny rule that is fail-open. Reject at load time.
 			// This subsumes the empty/whitespace/null case above and also
 			// catches zero-width patterns like "@arg*" or "@arg?". See #781.
-			if ms := (&matchState{eng: e}); len(ms.seq(ut, 0)) > 0 {
+			if ms := (&matchState{eng: e, budget: &evalBudget{}}); len(ms.seq(ut, 0)) > 0 {
 				return nil, fmt.Errorf("rule %q: unless %q matches the empty command", r.Rule, u)
 			}
 
@@ -112,8 +112,13 @@ func (e *Engine) Evaluate(command string) (Policy, error) {
 		return PolicyAsk, nil
 	}
 
+	// One work budget is shared across every subcommand, rule, unless
+	// expression, and @sub recursion in this evaluation, so a pathological
+	// rule cannot be multiplied by the rule count or command structure.
+	budget := &evalBudget{}
+
 	if e.allowSafeXargs {
-		if pol, ok := e.evalXargs(subs); ok {
+		if pol, ok := e.evalXargs(subs, budget); ok {
 			return pol, nil
 		}
 	}
@@ -121,7 +126,7 @@ func (e *Engine) Evaluate(command string) (Policy, error) {
 	result := PolicyAllow
 
 	for _, sub := range subs {
-		switch e.subPolicy(sub) {
+		switch e.subPolicy(sub, budget) {
 		case PolicyDeny:
 			return PolicyDeny, nil
 		case PolicyAsk:
@@ -133,17 +138,30 @@ func (e *Engine) Evaluate(command string) (Policy, error) {
 }
 
 // subPolicy returns the policy for one subcommand: deny if any deny rule
-// matches, else allow if any allow rule matches, else ask.
-func (e *Engine) subPolicy(sub subcommand) Policy {
+// matches, else allow if any allow rule matches, else ask. If the shared work
+// budget is exhausted while matching any rule, it fails closed to PolicyAsk
+// (human review) rather than trusting an incomplete match — otherwise a
+// pathological deny rule that blew the budget would fall through to the allow
+// phase and a cheap allow rule could auto-approve a command the operator meant
+// to deny. See issue #798.
+func (e *Engine) subPolicy(sub subcommand, budget *evalBudget) Policy {
 	for _, r := range e.deny {
-		if e.ruleMatches(r, sub) {
+		if e.ruleMatches(r, sub, budget) {
 			return PolicyDeny
+		}
+
+		if budget.exhausted {
+			return PolicyAsk
 		}
 	}
 
 	for _, r := range e.allow {
-		if e.ruleMatches(r, sub) {
+		if e.ruleMatches(r, sub, budget) {
 			return PolicyAllow
+		}
+
+		if budget.exhausted {
+			return PolicyAsk
 		}
 	}
 
@@ -151,9 +169,10 @@ func (e *Engine) subPolicy(sub subcommand) Policy {
 }
 
 // tokensAllowed builds a standalone subcommand from tokens and reports whether
-// it resolves to allow (used by @sub and the xargs helper).
-func (e *Engine) tokensAllowed(tokens []token) bool {
-	return e.subPolicy(subcommand{tokens: tokens}) == PolicyAllow
+// it resolves to allow (used by @sub and the xargs helper). Budget exhaustion
+// resolves to PolicyAsk, so it correctly reports not-allowed.
+func (e *Engine) tokensAllowed(tokens []token, budget *evalBudget) bool {
+	return e.subPolicy(subcommand{tokens: tokens}, budget) == PolicyAllow
 }
 
 // evalXargs implements the allowSafeXargs special cases for a two-command
@@ -167,7 +186,7 @@ func (e *Engine) tokensAllowed(tokens []token) bool {
 // (_, false) to fall through to normal evaluation. This is a best-effort,
 // documented-partial implementation (xargs's own options are not stripped from
 // PROG2).
-func (e *Engine) evalXargs(subs []subcommand) (Policy, bool) {
+func (e *Engine) evalXargs(subs []subcommand, budget *evalBudget) (Policy, bool) {
 	if len(subs) != 2 {
 		return "", false
 	}
@@ -177,7 +196,7 @@ func (e *Engine) evalXargs(subs []subcommand) (Policy, bool) {
 		return "", false
 	}
 
-	if e.subPolicy(left) != PolicyAllow {
+	if e.subPolicy(left, budget) != PolicyAllow {
 		return "", false
 	}
 
@@ -188,14 +207,14 @@ func (e *Engine) evalXargs(subs []subcommand) (Policy, bool) {
 
 	if left.name() == "echo" {
 		combined := append(append([]token{}, prog2...), argTokensAfterName(left)...)
-		if e.tokensAllowed(combined) {
+		if e.tokensAllowed(combined, budget) {
 			return PolicyAllow, true
 		}
 
 		return "", false
 	}
 
-	if e.tokensAllowed(prog2) {
+	if e.tokensAllowed(prog2, budget) {
 		return PolicyAllow, true
 	}
 

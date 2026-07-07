@@ -181,7 +181,9 @@ func compileToken(tok string) (term, error) {
 	case body == "@env":
 		return term{kind: termEnv, quant: q}, nil
 	case body == "@sub":
-		return term{kind: termSub}, nil
+		// Carry the quantifier through so compileRule's guard can reject
+		// @sub*/@sub?/@sub+ rather than silently accepting it.
+		return term{kind: termSub, quant: q}, nil
 	case body == "@@":
 		return term{kind: termLiteral, literal: "@", quant: q}, nil
 	case strings.HasPrefix(tok, "@{"):
@@ -247,7 +249,32 @@ func compileGroup(tok string) (term, error) {
 		return term{}, fmt.Errorf("in group %q: %w", tok, err)
 	}
 
+	// A quantifier on a group wrapping @sub would let @sub match zero times
+	// (@(@sub)?/@(@sub)*) — auto-approving the bare command with no trailing
+	// subcommand — or repeat (@(@sub)+), neither of which is meaningful. This
+	// is the same malformed shape the top-level @sub-quantifier guard rejects,
+	// just hidden behind a group, so reject it here too. See issue #798.
+	if q != quantOne && groupContainsSub(sub) {
+		return term{}, fmt.Errorf("@sub does not accept a quantifier (in group %q)", tok)
+	}
+
 	return term{kind: termGroup, group: sub, quant: q}, nil
+}
+
+// groupContainsSub reports whether a compiled term sequence contains a terminal
+// @sub, recursing into nested groups.
+func groupContainsSub(terms []term) bool {
+	for _, t := range terms {
+		if t.kind == termSub {
+			return true
+		}
+
+		if t.kind == termGroup && groupContainsSub(t.group) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // groupBody strips the @<open> ... <closeR> wrapper and a trailing quantifier,

@@ -1,6 +1,9 @@
 package localmost
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 // exampleConfig mirrors rules from localmost's README and docs/examples.md, plus
 // a representative deny rule.
@@ -297,6 +300,15 @@ func TestParseInvalidRule(t *testing.T) {
 		t.Error("expected error for @sub not last")
 	}
 
+	// A quantifier on @sub is meaningless and must be rejected, not silently
+	// swallowed. See issue #798.
+	for _, q := range []string{"*", "?", "+"} {
+		cfg := `{"allow":[{"rule":"watch @sub` + q + `"}]}`
+		if _, err := Parse([]byte(cfg)); err == nil {
+			t.Errorf("expected error for @sub%s quantifier, config %s", q, cfg)
+		}
+	}
+
 	if _, err := Parse([]byte(`{"allow":[{"rule":"foo","redirect":"maybe"}]}`)); err == nil {
 		t.Error("expected error for invalid redirect value")
 	}
@@ -370,5 +382,101 @@ func TestEmptyUnlessDoesNotDisableDeny(t *testing.T) {
 
 	if pol, _ := eng.Evaluate("rm -rf /tmp/x"); pol != PolicyDeny {
 		t.Fatalf("control rule: got %q, want deny", pol)
+	}
+}
+
+// TestBacktrackingBudgetTerminates guards issue #798: a pathological rule with
+// several unbounded quantifiers, matched against a long agent-controlled
+// command, must not send the matcher super-linear. The step budget makes it
+// bail and fail closed (PolicyAsk) rather than pinning a CPU on the approval
+// path. Without the bound this evaluation would take effectively forever, so
+// the test runs it under a watchdog to fail fast instead of hanging the suite.
+func TestBacktrackingBudgetTerminates(t *testing.T) {
+	// Seven star terms plus a trailing literal that the command never
+	// provides: the matcher explores every way to split the tokens across the
+	// stars before failing to find the literal. C(N+k, k) blowup.
+	eng := mustEngine(t, `{"allow":[{"rule":"thrawn @arg* @arg* @arg* @arg* @arg* @arg* zzz"}]}`)
+
+	// The trailing literal is absent, so the rule cannot match; the engine must
+	// fail closed to human review rather than hang.
+	if pol := evalWithWatchdog(t, eng, longCommand("thrawn", 400)); pol != PolicyAsk {
+		t.Fatalf("got %q, want ask (fail closed)", pol)
+	}
+}
+
+// evalWithWatchdog runs eng.Evaluate under a 10s deadline so a matcher that
+// fails to terminate fails the test instead of hanging the suite.
+func evalWithWatchdog(t *testing.T, eng *Engine, command string) Policy {
+	t.Helper()
+
+	done := make(chan Policy, 1)
+
+	go func() {
+		pol, _ := eng.Evaluate(command)
+		done <- pol
+	}()
+
+	select {
+	case pol := <-done:
+		return pol
+	case <-time.After(10 * time.Second):
+		t.Fatal("matcher did not terminate — backtracking is unbounded")
+		return PolicyAsk
+	}
+}
+
+func longCommand(name string, args int) string {
+	cmd := name
+	for range args {
+		cmd += " x"
+	}
+
+	return cmd
+}
+
+// TestBacktrackingBudgetDenyFailsClosed is the critical fail-open case both
+// tribunal judges flagged for issue #798: when a pathological DENY rule
+// exhausts the shared work budget, budget exhaustion is a silent non-match, so
+// a cheap ALLOW rule for the same command must NOT auto-approve it. Exhaustion
+// has to fail closed to PolicyAsk (human review), never PolicyAllow.
+func TestBacktrackingBudgetDenyFailsClosed(t *testing.T) {
+	eng := mustEngine(t, `{
+		"deny": [{"rule":"thrawn @arg* @arg* @arg* @arg* @arg* @arg* zzz"}],
+		"allow": [{"rule":"thrawn @*"}]
+	}`)
+
+	if pol := evalWithWatchdog(t, eng, longCommand("thrawn", 400)); pol == PolicyAllow {
+		t.Fatalf("got %q — deny-rule budget exhaustion fell through to allow (fail open)", pol)
+	}
+}
+
+// TestBacktrackingBudgetUnlessFailsClosed covers the sibling fail-open: an
+// allow rule whose unless (exception) expression exhausts the budget must not
+// allow the command, because the exception check was incomplete.
+func TestBacktrackingBudgetUnlessFailsClosed(t *testing.T) {
+	eng := mustEngine(t, `{
+		"allow": [{"rule":"thrawn @*","unless":["@arg* @arg* @arg* @arg* @arg* @arg* zzz"]}]
+	}`)
+
+	if pol := evalWithWatchdog(t, eng, longCommand("thrawn", 400)); pol == PolicyAllow {
+		t.Fatalf("got %q — unless-clause budget exhaustion allowed the command (fail open)", pol)
+	}
+}
+
+// TestGroupSubQuantifierRejected guards the grouped-@sub bypass both judges
+// flagged: quantifying a group that wraps @sub is the same malformed shape as
+// @sub* and must be rejected at load time, while an unquantified @(@sub) still
+// compiles. See issue #798.
+func TestGroupSubQuantifierRejected(t *testing.T) {
+	for _, q := range []string{"?", "*", "+"} {
+		cfg := `{"allow":[{"rule":"watch @(@sub)` + q + `"},{"rule":"ls"}]}`
+		if _, err := Parse([]byte(cfg)); err == nil {
+			t.Errorf("expected error for @(@sub)%s, config %s", q, cfg)
+		}
+	}
+
+	// Unquantified @(@sub) remains valid.
+	if _, err := Parse([]byte(`{"allow":[{"rule":"watch @(@sub)"},{"rule":"ls"}]}`)); err != nil {
+		t.Errorf("unquantified @(@sub) should compile, got %v", err)
 	}
 }
