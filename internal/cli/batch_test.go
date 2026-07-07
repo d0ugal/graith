@@ -39,8 +39,12 @@ func TestParseStaleDurationErrors(t *testing.T) {
 		input string
 	}{
 		{"garbage", "garbage"},
-		{"overflow", "99999999999999999999d"},
+		{"atoi overflow", "99999999999999999999d"},
+		{"day multiplication overflow wraps small", "768614336404564651d"},
 		{"zero days", "0d"},
+		{"negative days", "-1d"},
+		{"negative hours", "-6h"},
+		{"zero hours", "0h"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
