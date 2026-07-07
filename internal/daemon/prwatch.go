@@ -327,7 +327,14 @@ func (sm *SessionManager) diffAndBuild(cfg *configPRWatch, t prWatchTarget, slug
 		// restart doesn't strand a stopped agent on a red build. CI takes priority;
 		// a deferred conflict still re-fires from the steady-state path next poll
 		// because cur.mergeable was left un-baselined above.
-		if d.CIState == "failing" && cfg.NotifyCIFailures {
+		//
+		// Guard these against the already-delivered cursor fields the same way the
+		// steady-state paths do. Priming persists across polls while comment fetches
+		// keep degrading (cur.primed stays false), so without a transition check a
+		// delivered directive would re-fire every poll — and since directives now
+		// bypass the per-SHA cap, only debounce/rate-limit would bound it. Advancing
+		// the cursor only on delivery keeps the send retryable if the gate rejects.
+		if d.CIState == "failing" && cfg.NotifyCIFailures && !allFailingSeen(d.FailingChecks, cur.failing) {
 			if _, ok := sm.gate(cfg, t.id, cur, true); ok {
 				for _, name := range d.FailingChecks {
 					cur.failing[name] = true
@@ -337,7 +344,7 @@ func (sm *SessionManager) diffAndBuild(cfg *configPRWatch, t prWatchTarget, slug
 			}
 		}
 
-		if d.Mergeable == "CONFLICTING" && cfg.NotifyMergeConflicts {
+		if d.Mergeable == "CONFLICTING" && cfg.NotifyMergeConflicts && cur.mergeable != "CONFLICTING" {
 			if _, ok := sm.gate(cfg, t.id, cur, true); ok {
 				cur.mergeable = "CONFLICTING" // advance only on delivery
 				return []string{conflictBody(t, d)}
@@ -624,6 +631,19 @@ func commentsAfter(comments []ghComment, after int64) []ghComment {
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 
 	return out
+}
+
+// allFailingSeen reports whether every currently-failing check has already been
+// delivered (is present in seen). An empty failing list counts as "all seen" —
+// there is nothing new to notify.
+func allFailingSeen(failing []string, seen map[string]bool) bool {
+	for _, name := range failing {
+		if !seen[name] {
+			return false
+		}
+	}
+
+	return true
 }
 
 func maxCommentID(comments []ghComment) int64 {

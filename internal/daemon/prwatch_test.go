@@ -109,6 +109,46 @@ func TestDiffAndBuild_ConflictNotMaskedByExhaustedCap(t *testing.T) {
 	}
 }
 
+// TestDiffAndBuild_PrimeDirectiveNotRepeatedWhileDegraded guards the priming
+// path: while comment fetches keep degrading (CommentsOK=false), cur.primed
+// stays false and the priming branch runs every poll. A directive (CI failure /
+// conflict) already delivered must NOT re-fire on subsequent polls — since
+// directives bypass the per-SHA cap, a missing transition guard would let them
+// repeat until the rate-limit. Each is delivered exactly once.
+func TestDiffAndBuild_PrimeDirectiveNotRepeatedWhileDegraded(t *testing.T) {
+	sm := newPRWatchSM()
+	cfg := allOnConfig()
+	cfg.Debounce = "0s" // drive multiple polls within the test's instant
+	t1 := prWatchTarget{id: "haar", branch: "haar"}
+
+	d := prData{
+		Number: 11, State: "open", HeadRefOid: "sha1",
+		CIState: "failing", FailingChecks: []string{"build"},
+		Mergeable: "CONFLICTING", CommentsOK: false, // degraded — never primes
+	}
+
+	// Poll 1: CI failure delivered first (takes priority).
+	out := sm.diffAndBuild(cfg, t1, "croft/loch", d)
+	if len(out) != 1 || !strings.Contains(out[0], "CI failed") {
+		t.Fatalf("poll 1 should deliver CI failure, got %v", out)
+	}
+
+	// Poll 2: CI already delivered (no newly-failing check), so the conflict
+	// surfaces instead of the CI notice repeating.
+	out = sm.diffAndBuild(cfg, t1, "croft/loch", d)
+	if len(out) != 1 || !strings.Contains(out[0], "merge conflicts") {
+		t.Fatalf("poll 2 should deliver the deferred conflict, got %v", out)
+	}
+
+	// Poll 3+: both directives already delivered — nothing repeats despite still
+	// being in the priming branch (CommentsOK stays false).
+	for i := 0; i < 3; i++ {
+		if out := sm.diffAndBuild(cfg, t1, "croft/loch", d); len(out) != 0 {
+			t.Fatalf("degraded prime must not repeat delivered directives, got %v", out)
+		}
+	}
+}
+
 func TestDiffAndBuild_PrimeConflictNotMaskedByCIFailure(t *testing.T) {
 	// On the priming poll a PR is BOTH failing CI and conflicting. CI takes
 	// priority and is delivered first; the conflict must NOT be permanently
