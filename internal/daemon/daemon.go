@@ -4324,25 +4324,9 @@ func (sm *SessionManager) resolveSandboxFromConfig(cfg *config.Config, agentName
 		return false, nil
 	}
 
-	// Backend must be chosen explicitly — there is no default. Fail closed with
-	// an actionable error rather than silently picking one.
-	if merged.Backend == "" {
-		return false, fmt.Errorf(
-			"sandbox enabled for agent %q but no backend selected — set [sandbox] backend = %q (macOS) or %q (Linux/macOS) in config",
-			agentName, sandbox.BackendSafehouse, sandbox.BackendNono)
-	}
-
-	req := sandbox.Requirements{Network: merged.Network.IsSet()}
-
-	avail, err := sandbox.CheckAvailability(merged.Backend, merged.Command, req)
+	avail, err := validateSandboxBackend(merged, fmt.Sprintf("agent %q", agentName))
 	if err != nil {
-		return false, fmt.Errorf("sandbox enabled for agent %q: %w", agentName, err)
-	}
-
-	if !avail.CanEnforce {
-		return false, fmt.Errorf(
-			"sandbox enabled for agent %q with backend %q but it cannot enforce: %s",
-			agentName, merged.Backend, avail.Detail)
+		return false, err
 	}
 
 	if avail.Degraded {
@@ -4350,6 +4334,40 @@ func (sm *SessionManager) resolveSandboxFromConfig(cfg *config.Config, agentName
 	}
 
 	return true, nil
+}
+
+// validateSandboxBackend enforces the explicit-backend rule and availability
+// check for an already-enabled merged sandbox config, returning the resolved
+// availability on success. subject names the process being sandboxed (e.g.
+// `agent "claude"` or `MCP server chrome`) and is interpolated into the
+// fail-closed errors. It is shared by the session (resolveSandboxFromConfig)
+// and MCP-server (MCPManager.startProcess) startup paths so both fail closed
+// identically — in particular, neither may silently fall back to safehouse
+// when no backend is selected (see #787). sandbox.Wrap keeps its empty-backend
+// compatibility only for low-level helpers that don't represent user config.
+func validateSandboxBackend(merged config.SandboxConfig, subject string) (sandbox.Availability, error) {
+	// Backend must be chosen explicitly — there is no default. Fail closed with
+	// an actionable error rather than silently picking one.
+	if merged.Backend == "" {
+		return sandbox.Availability{}, fmt.Errorf(
+			"sandbox enabled for %s but no backend selected — set [sandbox] backend = %q (macOS) or %q (Linux/macOS) in config",
+			subject, sandbox.BackendSafehouse, sandbox.BackendNono)
+	}
+
+	req := sandbox.Requirements{Network: merged.Network.IsSet()}
+
+	avail, err := sandbox.CheckAvailability(merged.Backend, merged.Command, req)
+	if err != nil {
+		return sandbox.Availability{}, fmt.Errorf("sandbox enabled for %s: %w", subject, err)
+	}
+
+	if !avail.CanEnforce {
+		return sandbox.Availability{}, fmt.Errorf(
+			"sandbox enabled for %s with backend %q but it cannot enforce: %s",
+			subject, merged.Backend, avail.Detail)
+	}
+
+	return avail, nil
 }
 
 func (sm *SessionManager) sandboxOptsFromConfig(merged config.SandboxConfig, sessionID, worktreePath, agentCommand string, envKeys []string, agentHooks bool) sandbox.WrapOpts {

@@ -3,6 +3,7 @@ package daemon
 import (
 	"log/slog"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -40,6 +41,58 @@ func TestMCPManagerConnectDisconnect(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("process should be done after disconnect")
 	}
+}
+
+// TestMCPManagerSandboxRequiresBackend: an enabled sandbox with no backend
+// selected must fail closed for MCP servers exactly as it does for agent
+// sessions — never silently fall back to safehouse (see #787).
+func TestMCPManagerSandboxRequiresBackend(t *testing.T) {
+	logDir := t.TempDir()
+	cfg := &config.Config{
+		Sandbox: config.SandboxConfig{Enabled: true}, // no Backend
+		MCPServers: []config.MCPServerConfig{
+			{Name: "thrawn", Command: "cat"},
+		},
+	}
+
+	mgr := NewMCPManager(cfg, nil, logDir, slog.Default())
+	defer mgr.Shutdown()
+
+	_, err := mgr.Connect("thrawn", "proxy-1", config.TemplateVars{})
+	if err == nil {
+		t.Fatal("expected a fail-closed error when sandbox is enabled with no backend")
+	}
+
+	if !strings.Contains(err.Error(), "no backend selected") {
+		t.Errorf("error should explain the missing backend, got: %v", err)
+	}
+
+	if !strings.Contains(err.Error(), "safehouse") || !strings.Contains(err.Error(), "nono") {
+		t.Errorf("error should name safehouse and nono, got: %v", err)
+	}
+}
+
+// TestMCPManagerSandboxDisabledNoBackendNeeded: when the per-server sandbox is
+// turned off, an unset global backend must not block the process from starting.
+func TestMCPManagerSandboxDisabledNoBackendNeeded(t *testing.T) {
+	logDir := t.TempDir()
+	cfg := &config.Config{
+		Sandbox: config.SandboxConfig{Enabled: true}, // no Backend
+		MCPServers: []config.MCPServerConfig{
+			{Name: "canny", Command: "cat", Sandbox: boolPtr(false)},
+		},
+	}
+
+	mgr := NewMCPManager(cfg, nil, logDir, slog.Default())
+	defer mgr.Shutdown()
+
+	proc, err := mgr.Connect("canny", "proxy-1", config.TemplateVars{})
+	if err != nil {
+		t.Fatalf("Connect() with sandbox disabled should not require a backend, got: %v", err)
+	}
+
+	mgr.Disconnect("proxy-1")
+	_ = proc
 }
 
 func TestMCPManagerConnectUnknownServer(t *testing.T) {
