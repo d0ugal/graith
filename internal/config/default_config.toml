@@ -209,11 +209,15 @@ prompt_file = ""
 #
 # profile (nono only): the base profile graith's generated profile extends.
 # Defaults to nono's built-in "default" (its audited deny groups + base system
-# paths). Set it — typically per-agent — to a maintained registry profile to
-# inherit that agent's upstream file grants instead of hand-listing them via
-# write_files. graith still layers its own read_dirs/write_dirs and env scrub on
-# top. e.g. under [agents.claude.sandbox]:  profile = "always-further/claude"
-# safehouse has no profile concept and ignores it.
+# paths). Set it — these profiles are agent-specific, so set it per-agent, not
+# globally — to a maintained registry profile to inherit that agent's upstream
+# file grants instead of hand-listing them via write_files. nono MERGES the base
+# with graith's profile: collection fields (read_dirs/write_dirs and the env
+# allowlist) are unioned, so graith's grants are always present but a custom
+# profile can only WIDEN the env allowlist and may add its own network/hook/env
+# policy — pick a trusted, least-privilege profile. nono's required deny groups
+# (deny_credentials, …) survive regardless. e.g. under [agents.claude.sandbox]:
+# profile = "always-further/claude". safehouse has no profile concept, ignores it.
 # profile = "always-further/claude"
 #
 # [sandbox.network]  (nono only)

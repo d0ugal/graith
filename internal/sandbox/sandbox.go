@@ -49,9 +49,12 @@ type WrapOpts struct {
 	// Profile (nono only) is the base profile the generated profile extends
 	// (nono's "extends" field). Empty means "default" (nono's audited deny
 	// groups + base system paths). A maintained registry profile such as
-	// "always-further/claude" inherits that agent's upstream file grants;
-	// graith's own filesystem/env grants are layered on top. The safehouse
-	// backend ignores it.
+	// "always-further/claude" inherits that agent's upstream file grants. nono
+	// MERGES the base with graith's generated profile — collection fields
+	// (filesystem.allow/read, environment.allow_vars, …) are unioned, so
+	// graith's grants are always present but its env allowlist can only widen
+	// the base profile's, never narrow it. A custom base profile is only as
+	// tight as the operator has audited it. The safehouse backend ignores it.
 	Profile string
 
 	// Network is the optional egress policy. Nil means no network restriction

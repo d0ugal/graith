@@ -623,11 +623,21 @@ type SandboxConfig struct {
 	// base system paths). Set it to a maintained registry profile — e.g.
 	// "always-further/claude" — to inherit that agent's upstream file grants
 	// (its ~/.claude, ~/.claude.json, versioned binary dir, …) instead of
-	// hand-listing them via write_files. graith still layers its own
-	// filesystem.allow/read (worktree, read_dirs, …) and its
-	// environment.allow_vars scrub on top, so the inherited profile composes
-	// with — it does not replace — graith's generated grants. The safehouse
-	// backend has no profile concept and ignores it.
+	// hand-listing them via write_files.
+	//
+	// nono resolves "extends" by MERGING the base profile with graith's
+	// generated one, not by letting graith override it. Collection fields
+	// (filesystem.allow/read, environment.allow_vars, network.allow_domain, …)
+	// are UNIONED (append + dedup): graith's filesystem grants are always
+	// present, but graith's env allowlist can only WIDEN the base profile's, it
+	// cannot narrow it. A base profile that allows extra env vars, network
+	// domains, set_vars, command policies, or session hooks (which run outside
+	// the sandbox) therefore relaxes graith's baseline — so a custom profile is
+	// only as tight as the operator has audited it to be. Choose a trusted,
+	// least-privilege profile. nono's audited deny groups (deny_credentials, …)
+	// are marked required and merged into every resolved profile regardless of
+	// this field, so a custom base cannot silently drop the credential-deny
+	// baseline. The safehouse backend has no profile concept and ignores it.
 	Profile   string   `json:"profile,omitempty"    toml:"profile"`
 	Features  []string `json:"features,omitempty"   toml:"features"`
 	ReadDirs  []string `json:"read_dirs,omitempty"  toml:"read_dirs"`
