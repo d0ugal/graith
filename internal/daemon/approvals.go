@@ -3,12 +3,29 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/d0ugal/graith/internal/approvals"
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
 )
+
+// expandTilde expands a leading ~/ in path to the user's home directory,
+// matching the CLI's approvalsConfigPath. Without this the daemon would pass a
+// literal ~/... path to localmost.Load and fail to open the documented default
+// [approvals.builtin] config = "~/.config/graith/approvals.json".
+func expandTilde(path string) string {
+	if strings.HasPrefix(path, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, path[2:])
+		}
+	}
+
+	return path
+}
 
 // approvalDisplayLimit caps the tool input shown in the approval overlay and
 // broadcast to attached clients. The full input is still evaluated by backends
@@ -175,7 +192,7 @@ func approvalsBackendConfig(backend string, cfg config.Approvals) (approvals.Con
 	acfg := approvals.Config{
 		Backend:       backend,
 		Command:       cfg.Command,
-		BuiltinConfig: cfg.Builtin.Config,
+		BuiltinConfig: expandTilde(cfg.Builtin.Config),
 	}
 
 	if cfg.Builtin.HasInline() {

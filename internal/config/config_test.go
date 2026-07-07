@@ -310,6 +310,15 @@ func TestApprovalsValidate(t *testing.T) {
 		{"inline flag only ok", Approvals{Backend: "builtin", Builtin: ApprovalsBuiltin{AskNoninteractive: boolPtr(false)}}, false},
 		{"inline invalid rule rejected", Approvals{Backend: "builtin", Builtin: ApprovalsBuiltin{Allow: []any{"foo @("}}}, true},
 		{"inline + external file conflict", Approvals{Backend: "builtin", Builtin: ApprovalsBuiltin{Config: "/tmp/approvals.json", Allow: []any{"echo @*"}}}, true},
+
+		// Per-rule table validation (#737 hardening).
+		{"inline rule table ok", Approvals{Backend: "builtin", Builtin: ApprovalsBuiltin{Allow: []any{map[string]any{"rule": "find @*", "unless": []any{"-delete"}}}}}, false},
+		{"inline rule table unknown key rejected", Approvals{Backend: "builtin", Builtin: ApprovalsBuiltin{Allow: []any{map[string]any{"rule": "find @*", "unles": []any{"-delete"}}}}}, true},
+		{"inline rule table missing rule rejected", Approvals{Backend: "builtin", Builtin: ApprovalsBuiltin{Allow: []any{map[string]any{"unless": []any{"-delete"}}}}}, true},
+		{"inline rule table empty rule rejected", Approvals{Backend: "builtin", Builtin: ApprovalsBuiltin{Deny: []any{map[string]any{"rule": "  "}}}}, true},
+		{"inline non-string non-table rejected", Approvals{Backend: "builtin", Builtin: ApprovalsBuiltin{Allow: []any{42}}}, true},
+		// Empty inline array is not "inline" and does not conflict with a file.
+		{"empty inline array not a conflict", Approvals{Backend: "builtin", Builtin: ApprovalsBuiltin{Config: "/tmp/approvals.json", Allow: []any{}}}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -2154,5 +2163,49 @@ allow = ["echo @*"]
 
 	if _, err := Load(cfgPath); err == nil {
 		t.Fatal("Load should reject both config path and inline rules being set")
+	}
+}
+
+// TestLoadConfigInlineApprovalsUnknownTopKey verifies a misspelled top-level key
+// under [approvals.builtin] is rejected at load rather than silently dropped —
+// a fail-open guard, since a typo'd "deny" would otherwise leave an allow-all
+// base rule in force (#737 hardening).
+func TestLoadConfigInlineApprovalsUnknownTopKey(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	toml := `
+[approvals]
+backend = "builtin"
+
+[approvals.builtin]
+allow = ["@arg @*"]
+dney  = ["rm @arg*"]
+`
+	_ = os.WriteFile(cfgPath, []byte(toml), 0o600)
+
+	if _, err := Load(cfgPath); err == nil {
+		t.Fatal("Load should reject an unknown [approvals.builtin] key (dney)")
+	}
+}
+
+// TestLoadConfigInlineApprovalsUnknownRuleKey verifies a misspelled per-rule key
+// (e.g. "unles" for "unless") is rejected at load. Without this, localmost's
+// rule decoder silently drops the unknown JSON field and the intended
+// constraint vanishes, broadening the rule (#737 hardening).
+func TestLoadConfigInlineApprovalsUnknownRuleKey(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	toml := `
+[approvals]
+backend = "builtin"
+
+[[approvals.builtin.allow]]
+rule  = "find @*"
+unles = ["-delete"]
+`
+	_ = os.WriteFile(cfgPath, []byte(toml), 0o600)
+
+	if _, err := Load(cfgPath); err == nil {
+		t.Fatal("Load should reject an unknown per-rule key (unles)")
 	}
 }

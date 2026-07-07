@@ -291,9 +291,46 @@ type ApprovalsBuiltin struct {
 }
 
 // HasInline reports whether any inline ruleset field is set. When true, the
-// rules are read from config.toml rather than an external Config file.
+// rules are read from config.toml rather than an external Config file. An empty
+// array (allow = []) defines no rules and does not count as inline, so it does
+// not spuriously conflict with an external Config path.
 func (b ApprovalsBuiltin) HasInline() bool {
-	return b.Allow != nil || b.Deny != nil || b.AllowSafeXargs != nil || b.AskNoninteractive != nil
+	return len(b.Allow) > 0 || len(b.Deny) > 0 || b.AllowSafeXargs != nil || b.AskNoninteractive != nil
+}
+
+// builtinRuleKeys is the set of keys a per-rule table may contain, mirroring the
+// localmost rule schema (see localmost.Rule). Any other key is a typo (e.g.
+// "unles" for "unless") that localmost would silently drop, so we reject it up
+// front rather than let an allow rule be silently broadened.
+var builtinRuleKeys = map[string]struct{}{
+	"rule": {}, "unless": {}, "redirect": {}, "pipe": {},
+}
+
+// validateInlineRules checks each element of an inline allow/deny ruleset. A
+// rule is either a bare string or a table; a table must carry a non-empty
+// "rule" key and no unknown keys. This closes the fail-open where a misspelled
+// per-rule key (unless/redirect/pipe) is silently ignored, broadening the rule.
+func validateInlineRules(list string, rules []any) error {
+	for i, elem := range rules {
+		switch v := elem.(type) {
+		case string:
+			// Bare rule string — always valid shape (localmost validates content).
+		case map[string]any:
+			if rule, ok := v["rule"].(string); !ok || strings.TrimSpace(rule) == "" {
+				return fmt.Errorf("[approvals.builtin] %s rule %d: table form requires a non-empty \"rule\" key", list, i)
+			}
+
+			for k := range v {
+				if _, ok := builtinRuleKeys[k]; !ok {
+					return fmt.Errorf("[approvals.builtin] %s rule %d: unknown key %q (valid: rule, unless, redirect, pipe)", list, i, k)
+				}
+			}
+		default:
+			return fmt.Errorf("[approvals.builtin] %s rule %d: must be a string or a table, got %T", list, i, elem)
+		}
+	}
+
+	return nil
 }
 
 // InlineJSON renders the inline ruleset as localmost-format config.json bytes,
@@ -455,6 +492,17 @@ func (a Approvals) Validate() error {
 	// is a pure static check (no file IO); the external-file path is deferred to
 	// session-create availability, mirroring the other backends.
 	if a.Builtin.HasInline() {
+		// Reject typo'd per-rule keys before compiling: localmost's rule decoder
+		// silently ignores unknown JSON fields, so a misspelled unless/redirect/
+		// pipe would otherwise pass validation while quietly broadening the rule.
+		if err := validateInlineRules("allow", a.Builtin.Allow); err != nil {
+			return err
+		}
+
+		if err := validateInlineRules("deny", a.Builtin.Deny); err != nil {
+			return err
+		}
+
 		data, err := a.Builtin.InlineJSON()
 		if err != nil {
 			return fmt.Errorf("[approvals.builtin] encode inline rules: %w", err)
@@ -980,11 +1028,54 @@ func Load(path string) (*Config, error) {
 	}
 
 	cfg.Agents = mergeAgents(defaultAgents, cfg.Agents)
+
+	// go-toml/v2's default Unmarshal silently ignores unknown keys, so a typo'd
+	// key under [approvals.builtin] (e.g. "dney" for "deny") would be dropped —
+	// a fail-open for an approvals deny-list. Reject unknown keys in that subtree
+	// specifically (scoped, so the rest of the config keeps its leniency).
+	if err := checkApprovalsBuiltinKeys(data); err != nil {
+		return nil, fmt.Errorf("config validation: %w", err)
+	}
+
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("config validation: %w", err)
 	}
 
 	return cfg, nil
+}
+
+// approvalsBuiltinKeys is the set of valid keys under [approvals.builtin].
+var approvalsBuiltinKeys = map[string]struct{}{
+	"config": {}, "allow": {}, "deny": {}, "allowSafeXargs": {}, "askNoninteractive": {},
+}
+
+// checkApprovalsBuiltinKeys rejects unknown keys under [approvals.builtin] so a
+// misspelled key can't be silently dropped (a fail-open for a deny-list). It
+// does a targeted generic decode rather than DisallowUnknownFields on the whole
+// document, keeping the rest of the config forwards-compatible.
+func checkApprovalsBuiltinKeys(data []byte) error {
+	var raw map[string]any
+	if err := toml.Unmarshal(data, &raw); err != nil {
+		return nil // structural errors surface from the typed Unmarshal instead
+	}
+
+	approvals, ok := raw["approvals"].(map[string]any)
+	if !ok {
+		return nil
+	}
+
+	builtin, ok := approvals["builtin"].(map[string]any)
+	if !ok {
+		return nil
+	}
+
+	for k := range builtin {
+		if _, ok := approvalsBuiltinKeys[k]; !ok {
+			return fmt.Errorf("[approvals.builtin] unknown key %q (valid: config, allow, deny, allowSafeXargs, askNoninteractive)", k)
+		}
+	}
+
+	return nil
 }
 
 func mergeAgents(defaults, user map[string]Agent) map[string]Agent {
