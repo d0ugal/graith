@@ -162,6 +162,7 @@ gr delete auth-rewrite
 | `gr info` | Show info for the current session (when inside a worktree) |
 | `gr logs <name>` (`l`) | Show a session's output without attaching |
 | `gr type <name> <text>` (`t`) | Type text into a session's stdin |
+| `gr interrupt <name>` | Send Ctrl-C to a session's agent (agent-aware) |
 | `gr status [session] <text>` | Set a status summary visible in the session picker |
 | `gr msg ...` (`m`) | Inter-agent messaging — see below |
 | `gr dashboard` | Live-updating dashboard of all sessions |
@@ -289,6 +290,9 @@ ttl = "5m"    # default
 gr type fix-auth-bug "/help"
 gr type fix-auth-bug --no-newline "y"
 
+# Interrupt the agent's current operation (sends Ctrl-C) without stopping it
+gr interrupt fix-auth-bug
+
 # Watch a session's output without attaching
 gr logs fix-auth-bug --follow
 gr logs fix-auth-bug --lines 500
@@ -299,6 +303,12 @@ gr approvals
 # A live TUI dashboard of every session (attach/stop/delete/resume inline)
 gr dashboard
 ```
+
+`gr interrupt` gently cancels whatever the agent is currently doing — the
+session stays alive and ready for the next instruction — whereas `gr stop`
+kills the session entirely. Because it's agent-aware (Claude gets two rapid
+presses, other agents one), it's handy for orchestration and scripting: cancel
+a runaway operation programmatically without ending the session.
 
 ## MCP server
 
