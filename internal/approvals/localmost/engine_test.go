@@ -136,6 +136,30 @@ func TestEnginePathMatching(t *testing.T) {
 	}
 }
 
+// TestIsValidPath pins the character-level boundary directly, including the NUL
+// case (issue #732) which is awkward to exercise through shell text: a valid
+// path is any non-empty, NUL-free string.
+func TestIsValidPath(t *testing.T) {
+	cases := []struct {
+		in   string
+		want bool
+	}{
+		{"bothy", true},
+		{"/glen/wynd", true},
+		{"-x", true},
+		{"", false},         // empty string is not a valid path
+		{"a\x00b", false},   // embedded NUL
+		{"\x00", false},     // lone NUL
+		{"braw\x00", false}, // trailing NUL
+	}
+
+	for _, c := range cases {
+		if got := isValidPath(c.in); got != c.want {
+			t.Errorf("isValidPath(%q) = %v, want %v", c.in, got, c.want)
+		}
+	}
+}
+
 func TestEngineRedirects(t *testing.T) {
 	e := mustEngine(t, `{"allow":[{"rule":"echo @*"},{"rule":"cat @*"},{"rule":"tee @*","redirect":true}]}`)
 

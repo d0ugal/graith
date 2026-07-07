@@ -521,15 +521,16 @@ that unachievable, and Open-question 3 rightly prefers behavioural). The phrase
     dangerous command hidden in a substitution that the shell executes but no
     rule ever saw) and is convergence with localmost/ShellCheck, not a
     divergence.
-  - `@path` matches any **valid POSIX pathname**: a literal argument that is
-    non-empty and free of NUL bytes. This mirrors localmost, where "a valid
-    path" excludes only the empty string and NUL on Linux — so `@path` also
-    matches bare relative names (`foo`), dot-files, option-looking tokens
-    (`-x`), and absolute paths. It is therefore only *marginally* narrower than
-    `@arg` (it additionally rejects the empty-string argument `""`), and
-    operators should not rely on `@path` to narrow an allow rule beyond `@arg`.
-    This is **convergence** with localmost, not a divergence: tightening to a
-    "path-shaped" heuristic (leading `/`, `./`, `~`, …) would reject paths
+  - `@path` uses localmost's **character-level path check**: a literal argument
+    that is non-empty and NUL-free. It does **not** require a path-shaped prefix
+    and does **not** validate filesystem limits (component/path length) or
+    existence — so `@path` also matches bare relative names (`foo`), dot-files,
+    option-looking tokens (`-x`), and absolute paths. It is therefore only
+    *marginally* narrower than `@arg` (it additionally rejects the empty-string
+    argument `""`), and operators should **not** rely on `@path` as an option
+    filter or path sanitizer, nor to narrow an allow rule meaningfully beyond
+    `@arg`. This is **convergence** with localmost, not a divergence: tightening
+    to a "path-shaped" heuristic (leading `/`, `./`, `~`, …) would reject paths
     localmost accepts (e.g. `mkdir foo`) and is deliberately avoided. See #732.
   - Any further parser edge cases the corpus surfaces are added here rather than
     silently absorbed.
