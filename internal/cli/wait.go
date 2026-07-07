@@ -64,7 +64,7 @@ is satisfied.`,
 			Mode:      mode,
 			Pattern:   pattern,
 			Status:    waitStatus,
-			TimeoutMs: int(waitTimeout.Milliseconds()),
+			TimeoutMs: timeoutMillis(waitTimeout),
 		}); err != nil {
 			return err
 		}
@@ -81,8 +81,15 @@ is satisfied.`,
 	},
 }
 
-// resolveWaitMode validates that exactly one condition flag is set and returns
-// the wire mode plus the (validated) contains pattern.
+// validWaitStatuses are the session lifecycle statuses --status accepts. Kept
+// in sync with the daemon's SessionStatus constants.
+var validWaitStatuses = map[string]bool{
+	"running": true, "stopped": true, "errored": true,
+	"creating": true, "deleting": true,
+}
+
+// resolveWaitMode validates the flag combination and returns the wire mode plus
+// the (validated) contains pattern.
 func resolveWaitMode() (mode, pattern string, err error) {
 	n := 0
 	if waitContains != "" {
@@ -107,13 +114,37 @@ func resolveWaitMode() (mode, pattern string, err error) {
 		return "", "", fmt.Errorf("--contains, --status, and --idle are mutually exclusive")
 	}
 
-	if mode == "contains" {
+	if waitTimeout < 0 {
+		return "", "", fmt.Errorf("--timeout must not be negative")
+	}
+
+	switch mode {
+	case "contains":
 		if _, err := regexp.Compile(waitContains); err != nil {
 			return "", "", fmt.Errorf("invalid --contains pattern: %w", err)
+		}
+	case "status":
+		if !validWaitStatuses[waitStatus] {
+			return "", "", fmt.Errorf("invalid --status %q: want one of running, stopped, errored, creating, deleting", waitStatus)
 		}
 	}
 
 	return mode, waitContains, nil
+}
+
+// timeoutMillis converts a wait timeout to whole milliseconds for the wire.
+// A positive duration below 1ms is floored to 1ms so it stays a real (short)
+// timeout rather than truncating to 0, which the daemon reads as "wait forever".
+func timeoutMillis(d time.Duration) int {
+	if d <= 0 {
+		return 0
+	}
+
+	if ms := d.Milliseconds(); ms > 0 {
+		return int(ms)
+	}
+
+	return 1
 }
 
 // readWaitResult reads control responses until the wait resolves. It returns

@@ -55,6 +55,32 @@ func TestMatchWriterPartialLine(t *testing.T) {
 	}
 }
 
+func TestMatchWriterTrailingEmptyGuard(t *testing.T) {
+	ch := make(chan string, 1)
+	mw := &matchWriter{re: regexp.MustCompile("^$"), matchCh: ch}
+
+	// A non-matching complete line leaves an empty trailing partial, which must
+	// NOT satisfy ^$ — otherwise every newline-terminated write would match.
+	_, _ = mw.Write([]byte("abc\n"))
+	select {
+	case got := <-ch:
+		t.Fatalf("empty trailing partial should not match, got %q", got)
+	default:
+	}
+
+	// A genuine blank line (its own newline) is a completed empty line and must
+	// match.
+	_, _ = mw.Write([]byte("\n"))
+	select {
+	case got := <-ch:
+		if got != "" {
+			t.Fatalf("matched %q, want empty blank line", got)
+		}
+	default:
+		t.Fatal("expected a blank line to match ^$")
+	}
+}
+
 func TestIsIdleAgentStatus(t *testing.T) {
 	idle := []string{"ready", "unknown", ""}
 	for _, s := range idle {
@@ -315,6 +341,53 @@ func TestWaitIdleTransition(t *testing.T) {
 	if _, err := h.sm.messages.Publish("_system.status", "whin-wait", "whin-active", "ready", "", ""); err != nil {
 		t.Fatal(err)
 	}
+
+	env := h.readWaitOutcome(t)
+	if env.Type != "wait_matched" {
+		t.Fatalf("expected wait_matched, got %q", env.Type)
+	}
+}
+
+func TestWaitStatusSessionDeleted(t *testing.T) {
+	h := newTestHarness(t)
+	h.addPTYSession(t, "fash-gone", "fash-doomed")
+
+	h.sendControl(t, "wait", protocol.WaitMsg{
+		SessionID: "fash-gone",
+		Mode:      "status",
+		Status:    "stopped",
+	})
+
+	if env := h.readControlMsg(t); env.Type != "wait_watching" {
+		t.Fatalf("expected wait_watching, got %q", env.Type)
+	}
+
+	// Deleting the session out from under the waiter must fail the wait rather
+	// than block forever (there is no timeout on this request).
+	h.sm.mu.Lock()
+	delete(h.sm.state.Sessions, "fash-gone")
+	h.sm.mu.Unlock()
+
+	if _, err := h.sm.messages.Publish("_system.status", "fash-gone", "fash-doomed", "gone", "", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	env := h.readWaitOutcome(t)
+	if env.Type != "error" {
+		t.Fatalf("expected error after deletion, got %q", env.Type)
+	}
+}
+
+func TestWaitContainsBlankLine(t *testing.T) {
+	h := newTestHarness(t)
+	h.addStoppedSession(t, "skelf-wait", "skelf-blank", 0, "first\n\nthird\n")
+
+	// A `^$` pattern should match the interior blank line.
+	h.sendControl(t, "wait", protocol.WaitMsg{
+		SessionID: "skelf-wait",
+		Mode:      "contains",
+		Pattern:   "^$",
+	})
 
 	env := h.readWaitOutcome(t)
 	if env.Type != "wait_matched" {

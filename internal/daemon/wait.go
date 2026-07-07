@@ -95,7 +95,7 @@ func (sm *SessionManager) handleWaitStatus(
 	sub, unsub := sm.messages.Subscribe("_system.status")
 	defer unsub()
 
-	if status, ok := sm.waitStatusMet(w); ok {
+	if status, matched, _ := sm.waitStatusMet(w); matched {
 		sendControl("wait_matched", protocol.WaitMatchedMsg{Status: status})
 		return false
 	}
@@ -107,23 +107,41 @@ func (sm *SessionManager) handleWaitStatus(
 	timeoutCh, stopTimeout := waitTimeoutChan(w.TimeoutMs)
 	defer stopTimeout()
 
-	// A slow backstop ticker re-checks authoritative state. The subscription
-	// above is the primary, sub-second wake source (the daemon republishes
-	// status transitions there); the ticker only covers transitions that emit
-	// no event, so the wait can never wedge forever short of its timeout.
-	ticker := time.NewTicker(time.Second)
+	// The subscription is the primary, event-driven wake source, but
+	// _system.status does not carry every lifecycle transition (create/resume
+	// to running and delete publish nothing), so a short backstop ticker
+	// re-checks authoritative in-memory state. That bounds detection latency
+	// well under a typical timeout instead of relying on an event that may
+	// never come. The re-check is a cheap map read under the state lock and
+	// only runs while a wait is pending.
+	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
+
+	check := func() (done bool) {
+		status, matched, exists := sm.waitStatusMet(w)
+
+		switch {
+		case matched:
+			sendControl("wait_matched", protocol.WaitMatchedMsg{Status: status})
+		case !exists:
+			// The session was deleted after we started waiting; the condition
+			// can never be met, so fail rather than block until timeout.
+			sendControl("error", protocol.ErrorMsg{Message: "session deleted before condition was met"})
+		default:
+			return false
+		}
+
+		return true
+	}
 
 	for {
 		select {
 		case <-sub:
-			if status, ok := sm.waitStatusMet(w); ok {
-				sendControl("wait_matched", protocol.WaitMatchedMsg{Status: status})
+			if check() {
 				return true
 			}
 		case <-ticker.C:
-			if status, ok := sm.waitStatusMet(w); ok {
-				sendControl("wait_matched", protocol.WaitMatchedMsg{Status: status})
+			if check() {
 				return true
 			}
 		case <-timeoutCh:
@@ -138,19 +156,20 @@ func (sm *SessionManager) handleWaitStatus(
 }
 
 // waitStatusMet reports whether the session currently satisfies a status/idle
-// wait, returning the observed status for the reply. The session is assumed to
-// exist; a session that has vanished is treated as unmet.
-func (sm *SessionManager) waitStatusMet(w protocol.WaitMsg) (string, bool) {
+// wait. It returns the observed status (for the reply), whether the condition
+// is met, and whether the session still exists — the caller distinguishes a
+// deleted session from an unmet condition.
+func (sm *SessionManager) waitStatusMet(w protocol.WaitMsg) (status string, matched, exists bool) {
 	sess, ok := sm.Get(w.SessionID)
 	if !ok {
-		return "", false
+		return "", false, false
 	}
 
 	if w.Mode == "idle" {
-		return sess.AgentStatus, isIdleAgentStatus(sess.AgentStatus)
+		return sess.AgentStatus, isIdleAgentStatus(sess.AgentStatus), true
 	}
 
-	return string(sess.Status), string(sess.Status) == w.Status
+	return string(sess.Status), string(sess.Status) == w.Status, true
 }
 
 // isIdleAgentStatus reports whether an agent status counts as idle: the agent
@@ -202,6 +221,19 @@ func (sm *SessionManager) handleWaitContains(
 		return false
 	}
 
+	matchCh := make(chan string, 1)
+	mw := &matchWriter{re: re, matchCh: matchCh}
+
+	// Attach the live matcher BEFORE scanning existing scrollback. Output
+	// produced in the gap between a scrollback snapshot and attaching is
+	// written to scrollback but not to a not-yet-attached writer, so scanning
+	// first would silently lose a match landing in that window. Attaching
+	// first means such output reaches matchWriter; the subsequent scrollback
+	// scan then covers anything already on screen. matchWriter fires once, so
+	// the overlap is harmless.
+	ptySess.Attach(mw)
+	defer ptySess.DetachWriter(mw)
+
 	// Catch a pattern already visible in scrollback before following.
 	if tail, terr := ptySess.Scrollback.Tail(waitScrollbackLines); terr == nil {
 		if line, matched := scanForMatch(re, tail); matched {
@@ -209,12 +241,6 @@ func (sm *SessionManager) handleWaitContains(
 			return false
 		}
 	}
-
-	matchCh := make(chan string, 1)
-	mw := &matchWriter{re: re, matchCh: matchCh}
-
-	ptySess.Attach(mw)
-	defer ptySess.DetachWriter(mw)
 
 	sendControl("wait_following", struct{}{})
 
@@ -238,11 +264,18 @@ func (sm *SessionManager) handleWaitContains(
 }
 
 // scanForMatch reports the first line in data (ANSI stripped, CR trimmed) that
-// matches re.
+// matches re. Blank lines are matched (so patterns like `^$` work), but the
+// empty final element that bytes.Split yields for data ending in a newline is
+// skipped so it cannot spuriously satisfy a zero-width pattern.
 func scanForMatch(re *regexp.Regexp, data []byte) (string, bool) {
-	for _, raw := range bytes.Split(data, []byte("\n")) {
+	lines := bytes.Split(data, []byte("\n"))
+	for i, raw := range lines {
+		if i == len(lines)-1 && len(raw) == 0 {
+			continue
+		}
+
 		clean := ansi.Strip(strings.TrimRight(string(raw), "\r"))
-		if clean != "" && re.MatchString(clean) {
+		if re.MatchString(clean) {
 			return clean, true
 		}
 	}
@@ -254,6 +287,11 @@ func scanForMatch(re *regexp.Regexp, data []byte) (string, bool) {
 // with the first output line matching re. It tolerates ANSI escape sequences
 // and matches the trailing partial line too, so a pattern that appears in a
 // prompt (with no trailing newline) is still caught.
+//
+// Write runs synchronously on the PTY read loop (pty.Session.readLoop fans each
+// chunk out to attached writers inline), so matching shares that goroutine. Go's
+// regexp is RE2 (linear time), so a pathological pattern cannot hang it; the
+// per-write cost is bounded by the 64 KiB partial-line cap below.
 type matchWriter struct {
 	re      *regexp.Regexp
 	matchCh chan string
@@ -283,14 +321,20 @@ func (m *matchWriter) Write(p []byte) (int, error) {
 		var segment []byte
 
 		i := bytes.IndexByte(m.buf[start:], '\n')
-		if i < 0 {
+		trailing := i < 0
+
+		if trailing {
 			segment = m.buf[start:] // trailing partial line
 		} else {
 			segment = m.buf[start : start+i]
 		}
 
 		clean := ansi.Strip(strings.TrimRight(string(segment), "\r"))
-		if clean != "" && m.re.MatchString(clean) {
+
+		// Match completed lines even when blank (so `^$` works), but skip an
+		// empty trailing partial so a zero-width/`.*` pattern can't fire on the
+		// empty tail that sits between writes.
+		if (!trailing || clean != "") && m.re.MatchString(clean) {
 			m.done = true
 
 			select {
@@ -301,7 +345,7 @@ func (m *matchWriter) Write(p []byte) (int, error) {
 			return len(p), nil
 		}
 
-		if i < 0 {
+		if trailing {
 			break
 		}
 
