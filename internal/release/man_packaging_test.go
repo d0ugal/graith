@@ -15,9 +15,11 @@ func goreleaserConfigPath() string {
 	return filepath.Join("..", "..", ".goreleaser.yaml")
 }
 
-// goreleaserConfig is the slice of .goreleaser.yaml this file cares about: the
-// before-hooks (which gzip the generated man tree) and the nfpm contents (which
-// map files into the package). Everything else is ignored.
+// goreleaserConfig is the slice of .goreleaser.yaml the release tests care
+// about, shared across this package: the before-hooks (which gzip the generated
+// man tree), the nfpm contents (which map files into the deb/rpm), the archive
+// files (what the release tarball carries), and the AUR package() script (what
+// the generated PKGBUILD installs). Everything else is ignored.
 type goreleaserConfig struct {
 	Before struct {
 		Hooks []string `yaml:"hooks"`
@@ -28,6 +30,12 @@ type goreleaserConfig struct {
 			Dst string `yaml:"dst"`
 		} `yaml:"contents"`
 	} `yaml:"nfpms"`
+	Archives []struct {
+		Files []string `yaml:"files"`
+	} `yaml:"archives"`
+	Aurs []struct {
+		Package string `yaml:"package"`
+	} `yaml:"aurs"`
 }
 
 func loadGoreleaserConfig(t *testing.T) goreleaserConfig {
