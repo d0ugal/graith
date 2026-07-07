@@ -111,6 +111,12 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             aptly createrepo-c gnupg rpm
 
+      - name: Check out graith (for the signing helper script)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+          path: graith
+
       - name: Download built packages
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
@@ -182,12 +188,16 @@ jobs:
           # no passphrase channel of its own) can sign non-interactively.
           gpg --batch --pinentry-mode loopback --passphrase "$GPG_PASSPHRASE" \
             --detach-sign -o /dev/null <<<"warmup" 2>/dev/null || true
-          KEYGRIP="$(gpg --with-keygrip --list-secret-keys --with-colons "$GPG_KEY_ID" \
-            | awk -F: '/^grp:/ {print $10; exit}')"
           gpgconf --launch gpg-agent
           PRESET=/usr/lib/gnupg/gpg-preset-passphrase
           [ -x "$PRESET" ] || PRESET=/usr/libexec/gpg-preset-passphrase
-          "$PRESET" --preset --passphrase "$GPG_PASSPHRASE" "$KEYGRIP"
+          # Preset the passphrase for EVERY keygrip (primary key + any signing
+          # subkey), not just the primary's. rpm --addsign may drive gpg to a
+          # dedicated signing subkey whose keygrip differs from the primary's,
+          # and the agent must already hold the passphrase for it. See #767.
+          gpg --with-keygrip --list-secret-keys --with-colons "$GPG_KEY_ID" \
+            | GPG_PASSPHRASE="$GPG_PASSPHRASE" \
+              bash graith/scripts/rpm-preset-keygrips.sh "$PRESET"
 
           # rpm --addsign selects the key via %_gpg_name and drives gpg (which
           # gets the passphrase from the primed agent, not from a pipe).
