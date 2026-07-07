@@ -31,17 +31,18 @@ var startDaemonFn = startDaemon
 // it's a live graith daemon: the socket may be stale (left behind by a stuck or
 // crashed process) or owned by an unrelated server. Rather than trust the dial
 // and then block forever on a handshake that never comes, EnsureDaemon probes
-// the socket with a handshake under a deadline. If the probe fails, the socket
-// is treated as stale — it's removed and a fresh daemon is started.
+// the socket with a handshake under a deadline. If the probe fails, a fresh
+// daemon is started — its startup removes any stale/foreign socket before
+// binding (daemon.Listen), while its PID-file guard (daemon.AcquirePIDFile)
+// refuses to start if a live graith daemon already owns the path. EnsureDaemon
+// deliberately does not unlink the socket itself: doing so could orphan a
+// live-but-slow daemon that merely lost the probe race — its socket would be
+// gone but the PID guard would then block the replacement from rebinding.
 func EnsureDaemon(sockPath, configFile string) (net.Conn, error) {
 	if daemonResponds(sockPath) {
 		if conn, err := net.DialTimeout("unix", sockPath, daemonDialTimeout); err == nil {
 			return conn, nil
 		}
-	} else {
-		// Either nothing is listening, or a stale/foreign socket is. Remove any
-		// leftover socket file so a fresh daemon can bind at this path.
-		_ = os.Remove(sockPath)
 	}
 
 	if err := startDaemonFn(configFile); err != nil {

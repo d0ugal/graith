@@ -137,11 +137,15 @@ func TestDaemonRespondsFalseOnStuckSocket(t *testing.T) {
 
 	sockPath := shortSockPath(t, "dreich.sock")
 
-	// A stuck process: accepts the connection but never writes a response.
+	// A stuck process: reads the probe's full handshake frame, then stays
+	// silent. The probe must hit its handshake deadline to give up — not EOF —
+	// so removing the deadline would hang instead of returning quickly.
 	serveHandshake(t, sockPath, func(conn net.Conn) {
-		// Block until the client gives up and closes the connection.
-		buf := make([]byte, 1)
-		_, _ = conn.Read(buf)
+		reader := protocol.NewFrameReader(conn)
+		// Drain the handshake frame the probe writes.
+		_, _ = reader.ReadFrame()
+		// Block until the probe closes the connection at its deadline.
+		_, _ = reader.ReadFrame()
 	})
 
 	start := time.Now()
@@ -149,7 +153,15 @@ func TestDaemonRespondsFalseOnStuckSocket(t *testing.T) {
 		t.Fatal("expected daemonResponds to be false for a socket that never replies")
 	}
 
-	if elapsed := time.Since(start); elapsed > 2*time.Second {
+	elapsed := time.Since(start)
+	// The probe should have blocked until roughly the (shortened) handshake
+	// deadline, proving the deadline — not an immediate EOF — is what unblocked
+	// it. Allow generous slack on both ends for scheduling jitter.
+	if elapsed < 100*time.Millisecond {
+		t.Fatalf("daemonResponds returned in %v; expected it to wait for the handshake deadline", elapsed)
+	}
+
+	if elapsed > 2*time.Second {
 		t.Fatalf("daemonResponds took %v; handshake deadline was not enforced", elapsed)
 	}
 }
@@ -246,21 +258,24 @@ func shortenStartTimeout(t *testing.T, d time.Duration) {
 	t.Cleanup(func() { daemonStartTimeout = orig })
 }
 
-func TestEnsureDaemonRemovesStaleSocket(t *testing.T) {
+func TestEnsureDaemonStartsFreshWhenSocketStale(t *testing.T) {
 	shortenHandshakeTimeout(t, 200*time.Millisecond)
 	shortenStartTimeout(t, 200*time.Millisecond)
 
 	sockPath := shortSockPath(t, "haar.sock")
 
-	// A stale/foreign server occupies the socket but never speaks graith.
+	// A stale/foreign server occupies the socket but never speaks graith: it
+	// drains the probe's handshake and then stays silent.
 	serveHandshake(t, sockPath, func(conn net.Conn) {
-		buf := make([]byte, 1)
-		_, _ = conn.Read(buf)
+		reader := protocol.NewFrameReader(conn)
+		_, _ = reader.ReadFrame()
+		_, _ = reader.ReadFrame()
 	})
 
-	// The stub records that a start was attempted and removes the (now-unlinked)
-	// listener's leftover so nothing lingers; it does not produce a real daemon,
-	// so EnsureDaemon times out waiting for a response.
+	// EnsureDaemon must not unlink the socket itself (that could orphan a
+	// live-but-slow daemon); it delegates cleanup to the fresh daemon's own
+	// startup. The stub only records that a start was attempted and does not
+	// produce a real daemon, so EnsureDaemon times out waiting for a response.
 	started := false
 	stubStartDaemon(t, func(string) error {
 		started = true
@@ -273,11 +288,13 @@ func TestEnsureDaemonRemovesStaleSocket(t *testing.T) {
 	}
 
 	if !started {
-		t.Fatal("expected EnsureDaemon to attempt a fresh daemon start after finding a stale socket")
+		t.Fatal("expected EnsureDaemon to attempt a fresh daemon start after an unresponsive socket")
 	}
 
-	if _, statErr := os.Stat(sockPath); !os.IsNotExist(statErr) {
-		t.Fatalf("expected stale socket file to be removed, stat err = %v", statErr)
+	// The socket file is left intact: EnsureDaemon delegates removal to the
+	// daemon's Listen, which unlinks before binding.
+	if _, statErr := os.Stat(sockPath); statErr != nil {
+		t.Fatalf("expected EnsureDaemon to leave the socket file untouched, stat err = %v", statErr)
 	}
 }
 
