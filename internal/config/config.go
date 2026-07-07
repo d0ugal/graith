@@ -575,6 +575,14 @@ type Agent struct {
 	Sandbox           SandboxConfig              `json:"sandbox"                       toml:"sandbox"`
 	MCPServers        map[string]MCPServerConfig `json:"mcp_servers,omitempty"         toml:"mcp_servers"`
 	ValidateModel     string                     `json:"validate_model,omitempty"      toml:"validate_model"`
+	// InterruptCount is how many times the interrupt byte (Ctrl-C, 0x03) is sent
+	// to interrupt this agent, and InterruptDelayMs is the pause in milliseconds
+	// between successive sends. Some agent TUIs ignore a single Ctrl-C and need
+	// two rapid presses to actually interrupt (Claude's TUI wants ~200ms apart),
+	// so both are configurable per agent. Unset means the built-in defaults
+	// (count 1, delay 0). See issue #620.
+	InterruptCount   *int `json:"interrupt_count,omitempty"    toml:"interrupt_count"`
+	InterruptDelayMs *int `json:"interrupt_delay_ms,omitempty" toml:"interrupt_delay_ms"`
 }
 
 func (a Agent) PromptInjectionEnabled() bool {
@@ -591,6 +599,27 @@ func (a Agent) PreTrustWorkspaceEnabled() bool {
 	}
 
 	return true
+}
+
+// InterruptCountValue returns how many times the interrupt byte (Ctrl-C, 0x03)
+// should be sent to interrupt this agent. Defaults to 1 when unset; a value
+// below 1 is clamped to 1 so an interrupt always sends at least once.
+func (a Agent) InterruptCountValue() int {
+	if a.InterruptCount == nil || *a.InterruptCount < 1 {
+		return 1
+	}
+
+	return *a.InterruptCount
+}
+
+// InterruptDelay returns the pause between successive interrupt bytes. Defaults
+// to 0 (send back-to-back) when unset; a negative value is treated as 0.
+func (a Agent) InterruptDelay() time.Duration {
+	if a.InterruptDelayMs == nil || *a.InterruptDelayMs < 0 {
+		return 0
+	}
+
+	return time.Duration(*a.InterruptDelayMs) * time.Millisecond
 }
 
 func (a Agent) IdleTimeoutDuration() time.Duration {
@@ -1443,6 +1472,14 @@ func mergeAgent(def, usr Agent) Agent {
 
 	if usr.ValidateModel != "" {
 		def.ValidateModel = usr.ValidateModel
+	}
+
+	if usr.InterruptCount != nil {
+		def.InterruptCount = usr.InterruptCount
+	}
+
+	if usr.InterruptDelayMs != nil {
+		def.InterruptDelayMs = usr.InterruptDelayMs
 	}
 
 	return def

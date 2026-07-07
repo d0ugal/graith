@@ -166,6 +166,38 @@ func (sm *SessionManager) notifyUnreadInbox(sessionID string) {
 	ptySess.Poke()
 }
 
+// InterruptSession delivers an interrupt (Ctrl-C) to a session's live PTY using
+// the agent's configured interrupt count and delay. Different agent CLIs need
+// different sequences — e.g. Claude's TUI ignores a single Ctrl-C and needs two
+// rapid presses — so delivery is agent-aware rather than a single 0x03 (issue
+// #620). Returns an error if the session has no live PTY.
+func (sm *SessionManager) InterruptSession(sessionID string) error {
+	ptySess, ok := sm.GetPTY(sessionID)
+	if !ok {
+		return fmt.Errorf("session not found")
+	}
+
+	sess, _ := sm.Get(sessionID)
+
+	sm.mu.RLock()
+	agentCfg := sm.cfg.Agents[sess.Agent]
+	sm.mu.RUnlock()
+
+	count := agentCfg.InterruptCountValue()
+	delay := agentCfg.InterruptDelay()
+
+	sm.log.Info("interrupting session",
+		"session", sessionID, "agent", sess.Agent, "count", count, "delay", delay)
+
+	if err := ptySess.Interrupt(count, delay); err != nil {
+		return err
+	}
+
+	ptySess.Poke()
+
+	return nil
+}
+
 func (sm *SessionManager) sendNotification(sessionName, status, command string) {
 	if err := ValidateSessionName(sessionName); err != nil {
 		sm.log.Error("refusing to send notification for unsafe session name", "name", sessionName, "err", err)

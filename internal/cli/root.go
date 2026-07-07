@@ -131,6 +131,7 @@ func registerCommands() {
 		registerDoctorCmd()
 		registerForkCmd()
 		registerInfoCmd()
+		registerInterruptCmd()
 		registerListCmd()
 		registerLogsCmd()
 		registerManCmd()
