@@ -148,6 +148,66 @@ func TestRunSandboxWhyValidatesQuery(t *testing.T) {
 	}
 }
 
+func TestRunSandboxWhyRejectsUnknownAgent(t *testing.T) {
+	oldCfg := cfg
+	oldPath, oldOp, oldHost, oldPort, oldAgent := whyPath, whyOp, whyHost, whyPort, whyAgent
+
+	t.Cleanup(func() {
+		cfg = oldCfg
+		whyPath, whyOp, whyHost, whyPort, whyAgent = oldPath, oldOp, oldHost, oldPort, oldAgent
+	})
+
+	cfg = config.Default()
+	cfg.Sandbox = config.SandboxConfig{Enabled: true, Backend: sandbox.BackendNono}
+	// "thrawn" is not a configured agent — a typo should error, not silently
+	// fall back to the global policy.
+	whyPath, whyOp, whyHost, whyPort, whyAgent = "/glen/bothy", "read", "", 0, "thrawn"
+
+	err := runSandboxWhy()
+	if err == nil || !strings.Contains(err.Error(), "unknown agent") {
+		t.Fatalf("runSandboxWhy() = %v, want unknown-agent error", err)
+	}
+
+	// The error should list the known agents so the user can correct the typo.
+	if !strings.Contains(err.Error(), "claude") {
+		t.Fatalf("runSandboxWhy() error = %v, want it to list known agents", err)
+	}
+}
+
+func TestRunSandboxWhyMergesKnownAgentOverride(t *testing.T) {
+	oldCfg := cfg
+	oldPath, oldOp, oldHost, oldPort, oldAgent := whyPath, whyOp, whyHost, whyPort, whyAgent
+
+	t.Cleanup(func() {
+		cfg = oldCfg
+		whyPath, whyOp, whyHost, whyPort, whyAgent = oldPath, oldOp, oldHost, oldPort, oldAgent
+	})
+
+	cfg = config.Default()
+	cfg.Sandbox = config.SandboxConfig{Enabled: true, Backend: sandbox.BackendNono}
+	// A known agent that overrides the backend proves the known-agent branch
+	// ran and merged the per-agent config: the backend gate should now report
+	// the agent's safehouse override, not the global nono backend.
+	cfg.Agents["braw"] = config.Agent{Sandbox: config.SandboxConfig{Backend: sandbox.BackendSafehouse}}
+	whyPath, whyOp, whyHost, whyPort, whyAgent = "/glen/bothy", "read", "", 0, "braw"
+
+	err := runSandboxWhy()
+	if err == nil || !strings.Contains(err.Error(), sandbox.BackendSafehouse) {
+		t.Fatalf("runSandboxWhy() = %v, want backend-gate error mentioning the merged safehouse override", err)
+	}
+}
+
+func TestKnownAgentNamesSortedAndEmpty(t *testing.T) {
+	if got := knownAgentNames(nil); got != "(none)" {
+		t.Fatalf("knownAgentNames(nil) = %q, want %q", got, "(none)")
+	}
+
+	agents := map[string]config.Agent{"codex": {}, "braw": {}, "claude": {}}
+	if got := knownAgentNames(agents); got != "braw, claude, codex" {
+		t.Fatalf("knownAgentNames() = %q, want sorted list", got)
+	}
+}
+
 func containsStr(s []string, v string) bool {
 	for _, x := range s {
 		if x == v {
