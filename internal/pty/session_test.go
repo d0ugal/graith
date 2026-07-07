@@ -81,18 +81,36 @@ func TestSessionInterrupt(t *testing.T) {
 	}
 	defer s.Close()
 
+	// Retry the interrupt on a short cadence rather than firing a single byte.
+	// Immediately after fork the child may not yet be the PTY's foreground
+	// process group, so an early 0x03 is buffered as a literal byte instead of
+	// being turned into SIGINT by the line discipline (`sleep` never reads
+	// stdin, so it's never consumed). Resending until the process exits closes
+	// that startup race, which is flaky on Linux and reliable on macOS.
+	deadline := time.After(10 * time.Second)
+	retry := time.NewTicker(200 * time.Millisecond)
+	defer retry.Stop()
+
 	if err := s.Interrupt(1, 0); err != nil {
 		t.Fatalf("Interrupt: %v", err)
 	}
 
-	select {
-	case <-s.Done():
-	case <-time.After(5 * time.Second):
-		t.Fatal("timeout: interrupt did not terminate the process")
-	}
+	for {
+		select {
+		case <-s.Done():
+			if !s.Exited() {
+				t.Error("expected process to have exited after interrupt")
+			}
 
-	if !s.Exited() {
-		t.Error("expected process to have exited after interrupt")
+			return
+		case <-retry.C:
+			// A resend can fail once the process has exited; that's the
+			// interrupt working, not an error, so ignore the error here and
+			// let the Done() case above observe the exit.
+			_ = s.Interrupt(1, 0)
+		case <-deadline:
+			t.Fatal("timeout: interrupt did not terminate the process")
+		}
 	}
 }
 
