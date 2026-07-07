@@ -189,6 +189,7 @@ gr new <name> [flags]
 | `--no-repo` | Create a session with no git repo or worktree |
 | `--in-place` | Run agent directly in the repo without creating a worktree |
 | `--allow-concurrent` | Allow multiple in-place sessions on the same repo |
+| `--yolo` | Auto-approve all tool requests for this session (no approval prompts) |
 | `--share-worktree <session>` | Share another session's worktree (read-only) |
 | `--background` | Create the session without attaching to it |
 | `-p, --prompt <text>` | Send an initial prompt to the agent on startup |
@@ -506,11 +507,14 @@ command     = ""                        # custom notification command (optional)
 [approvals]
 backend = ""                            # who decides: "" (prompt the human), "command"/"external"
                                         #   (delegate to a command), "localmost" (real localmost binary),
-                                        #   or "builtin" (graith's built-in localmost-compatible engine).
+                                        #   "builtin" (graith's built-in localmost-compatible engine),
+                                        #   or "auto" (auto-approve every request without prompting).
                                         #   "mode" is the deprecated predecessor (still works).
 timeout = "10m"                         # how long to wait for a human decision
 auto_pop = false                        # auto-open the approval overlay when a request is queued
 # command = ""                          # for backend "command"/"external" (or a localmost path override)
+# For a single unattended session, prefer per-session opt-in: gr new --yolo
+# (auto-approves that session only, regardless of the global backend above).
 # [approvals.builtin]
 # config = ""                           # localmost-format config.json (backend "builtin")
 
