@@ -93,7 +93,7 @@ Code `PreToolUse` handler." It is registered as `localmost check` on the
   | `@arg` | any single argument | | `?` | 0 or 1 |
   | `@path` | argument that is a valid path | | `+` | 1 or more |
   | `@int` | integer argument | | `*` | 0 or more |
-  | `@env` | `FOO=bar` assignment | | | |
+  | `@env` | `FOO=bar` assignment (literal value only) | | | |
   | `@sub` | trailing subcommand that must itself be `allow` (no quantifier) | | | |
   | `@@` | literal `@` | | | |
   | `@{a,b,c}` | choice | | | |
@@ -474,6 +474,21 @@ that unachievable, and Open-question 3 rightly prefers behavioural). The phrase
   - `allowSafeXargs` is **partial**: the `echo ARGS | xargs PROG` and
     `PROG1 | xargs PROG2` shapes are handled, but xargs's own options are not
     stripped from the program, and xargs can only *allow* (never *deny*).
+  - `@env` requires a **literal** assignment value: `@env` matches
+    `FOO=bar` but not `FOO=$(...)` / `FOO=$var` (it falls through to `ask`),
+    consistent with `@arg`/`@path`/`@int`. This is a security hardening over a
+    naive `@env` (see #782) — a non-literal value could otherwise smuggle an
+    unchecked command past the deny rules.
+  - Command and process substitutions (`$(...)`, backticks, `<(...)`, `>(...)`)
+    are **decomposed**: their inner commands are harvested as standalone
+    subcommands and evaluated against deny/allow rules, wherever the
+    substitution appears (assignment value, argument, redirect target,
+    here-string/heredoc body, `for` list, `case` subject, …). A substitution
+    running a denied command makes the whole command deny; one running an
+    un-allowed command makes it ask. This closes the #782 bypass class (a
+    dangerous command hidden in a substitution that the shell executes but no
+    rule ever saw) and is convergence with localmost/ShellCheck, not a
+    divergence.
   - Any further parser edge cases the corpus surfaces are added here rather than
     silently absorbed.
 
