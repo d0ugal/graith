@@ -93,13 +93,29 @@ func TestInterruptSession_DefaultAgentSinglePress(t *testing.T) {
 	sm.state.Sessions["canny"] = &SessionState{ID: "canny", Name: "canny", Agent: "opencode"}
 	sm.mu.Unlock()
 
+	// Retry the interrupt on a short cadence rather than firing once. Just
+	// after fork the child may not yet be the PTY's foreground process group,
+	// so an early Ctrl-C is buffered as a literal byte instead of becoming
+	// SIGINT — a startup race that flakes on Linux under -race (see the twin
+	// comment in internal/pty/session_test.go's TestSessionInterrupt).
+	deadline := time.After(10 * time.Second)
+	retry := time.NewTicker(200 * time.Millisecond)
+	defer retry.Stop()
+
 	if err := sm.InterruptSession("canny"); err != nil {
 		t.Fatalf("InterruptSession: %v", err)
 	}
 
-	select {
-	case <-ptySess.Done():
-	case <-time.After(5 * time.Second):
-		t.Fatal("timeout: single-press interrupt did not terminate the process")
+	for {
+		select {
+		case <-ptySess.Done():
+			return
+		case <-retry.C:
+			// A resend after the process has exited returns an error; that's
+			// the interrupt working, so ignore it and let Done() observe it.
+			_ = sm.InterruptSession("canny")
+		case <-deadline:
+			t.Fatal("timeout: single-press interrupt did not terminate the process")
+		}
 	}
 }
