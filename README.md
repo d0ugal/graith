@@ -59,6 +59,7 @@ name=graith
 baseurl=https://d0ugal.github.io/graith-repo/rpm
 enabled=1
 gpgcheck=1
+repo_gpgcheck=1
 gpgkey=https://d0ugal.github.io/graith-repo/gpg/graith.asc
 EOF
 
