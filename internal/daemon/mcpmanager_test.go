@@ -86,13 +86,11 @@ func TestMCPManagerSandboxDisabledNoBackendNeeded(t *testing.T) {
 	mgr := NewMCPManager(cfg, nil, logDir, slog.Default())
 	defer mgr.Shutdown()
 
-	proc, err := mgr.Connect("canny", "proxy-1", config.TemplateVars{})
-	if err != nil {
+	if _, err := mgr.Connect("canny", "proxy-1", config.TemplateVars{}); err != nil {
 		t.Fatalf("Connect() with sandbox disabled should not require a backend, got: %v", err)
 	}
 
 	mgr.Disconnect("proxy-1")
-	_ = proc
 }
 
 func TestMCPManagerConnectUnknownServer(t *testing.T) {
