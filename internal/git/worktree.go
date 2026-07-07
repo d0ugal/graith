@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 func CreateWorktree(repoPath, worktreePath, branchName string) error {
@@ -84,17 +85,50 @@ func RepoRootFromWorktree(worktreePath string) (string, error) {
 	return filepath.Dir(commonDir), nil
 }
 
+// isBrokenWorktreeErr reports whether a `git worktree remove` failure is due to
+// the worktree itself being missing/broken/unregistered — as opposed to the
+// source repo being unreachable. Git returns exit 128 with one of these
+// messages when the worktree's .git link is broken or its registration is gone,
+// while the repo itself is still valid. In those cases teardown can safely fall
+// back to removing the directory and pruning the stale registration (#741).
+func isBrokenWorktreeErr(err error) bool {
+	msg := err.Error()
+
+	return strings.Contains(msg, "is not a working tree") ||
+		strings.Contains(msg, "cannot remove working tree")
+}
+
+// TeardownSession removes a session's worktree and branch. It is idempotent: a
+// missing or broken worktree is treated as already-removed and never blocks
+// dropping the session. `git worktree remove --force` fails with exit 128 when
+// the directory is gone or its .git link is broken; in those cases we remove
+// the directory directly and prune the now-stale registration so a broken
+// worktree can't wedge delete forever (#741). A failure that instead points at
+// the source repo (unreachable / not a git repo) is surfaced so the session is
+// kept for retry rather than silently dropped.
 func TeardownSession(repoPath, worktreePath, branchName string) error {
 	var errs []error
 
-	if _, err := os.Stat(worktreePath); err == nil {
+	switch _, statErr := os.Stat(worktreePath); {
+	case statErr == nil:
 		if err := RemoveWorktree(repoPath, worktreePath); err != nil {
-			errs = append(errs, fmt.Errorf("remove worktree: %w", err))
+			if isBrokenWorktreeErr(err) {
+				// Broken or unregistered worktree: remove the directory
+				// ourselves, then prune the stale git registration.
+				if rmErr := os.RemoveAll(worktreePath); rmErr != nil {
+					errs = append(errs, fmt.Errorf("remove worktree: %w (git worktree remove: %v)", rmErr, err))
+				}
+
+				_ = PruneWorktrees(repoPath)
+			} else {
+				errs = append(errs, fmt.Errorf("remove worktree: %w", err))
+			}
 		}
-	} else if errors.Is(err, os.ErrNotExist) {
+	case errors.Is(statErr, os.ErrNotExist):
+		// Worktree directory already gone; drop the stale registration.
 		_ = PruneWorktrees(repoPath)
-	} else {
-		errs = append(errs, fmt.Errorf("stat worktree: %w", err))
+	default:
+		errs = append(errs, fmt.Errorf("stat worktree: %w", statErr))
 	}
 
 	if branchName != "" && RefExists(repoPath, branchName) {
