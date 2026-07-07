@@ -582,3 +582,95 @@ type ScenarioAddMsg struct {
 	Name    string               `json:"name"`
 	Session ScenarioSessionInput `json:"session"`
 }
+
+// Pairing protocol messages (see design §B.2)
+
+// PairRequestMsg is sent by a client to request pairing with the daemon. The
+// client supplies a human-readable device label and its device public key.
+type PairRequestMsg struct {
+	DeviceLabel  string `json:"device_label"`
+	DevicePubKey string `json:"device_pub_key"`
+}
+
+// PairResponseMsg is the daemon's response to a completed pairing. It returns
+// the assigned device ID, a client bearer token, the daemon profile to use, and
+// the TLS pin (SPKI) for certificate pinning.
+type PairResponseMsg struct {
+	DeviceID      string `json:"device_id"`
+	ClientToken   string `json:"client_token"`
+	DaemonProfile string `json:"daemon_profile"`
+	TLSPinSPKI    string `json:"tls_pin_spki"`
+}
+
+// PairApproveMsg approves a pending pairing request by its request ID.
+type PairApproveMsg struct {
+	RequestID string `json:"request_id"`
+}
+
+// PairListMsg requests the list of pending and paired devices.
+type PairListMsg struct{}
+
+// PairListResponseMsg is the daemon's response to pair_list.
+type PairListResponseMsg struct {
+	Pending []PairPending      `json:"pending"`
+	Paired  []PairedDeviceInfo `json:"paired"`
+}
+
+// PairPending describes a pending pairing request awaiting approval.
+type PairPending struct {
+	RequestID   string `json:"request_id"`
+	DeviceLabel string `json:"device_label"`
+	TailnetUser string `json:"tailnet_user"`
+	TailnetNode string `json:"tailnet_node"`
+	RequestedAt string `json:"requested_at"`
+}
+
+// PairedDeviceInfo describes an already-paired device.
+type PairedDeviceInfo struct {
+	DeviceID    string `json:"device_id"`
+	Label       string `json:"label"`
+	TailnetUser string `json:"tailnet_user"`
+	TailnetNode string `json:"tailnet_node"`
+	CreatedAt   string `json:"created_at"`
+	LastSeenAt  string `json:"last_seen_at"`
+}
+
+// PairRevokeMsg revokes a paired device by its device ID.
+type PairRevokeMsg struct {
+	DeviceID string `json:"device_id"`
+}
+
+// Proof-of-possession messages (see design §B.2.4)
+
+// AuthChallengeMsg is sent by the daemon to challenge a client to prove
+// possession of its device private key by signing the nonce.
+type AuthChallengeMsg struct {
+	Nonce string `json:"nonce"`
+}
+
+// AuthProofMsg is the client's response to an auth challenge: the signature of
+// the challenge nonce produced with the device private key.
+type AuthProofMsg struct {
+	DeviceID  string `json:"device_id"`
+	Signature string `json:"signature"`
+}
+
+// ApprovalSubscribeMsg subscribes the client to approval notifications.
+type ApprovalSubscribeMsg struct{}
+
+// Remote-create repo picker messages (see design §C.4)
+
+// RepoListMsg requests the list of repositories available for session creation.
+type RepoListMsg struct{}
+
+// RepoListResponseMsg is the daemon's response to repo_list.
+type RepoListResponseMsg struct {
+	Repos []RepoEntry `json:"repos"`
+}
+
+// RepoEntry describes a repository available for session creation.
+type RepoEntry struct {
+	Path   string `json:"path"`
+	Name   string `json:"name"`
+	Recent bool   `json:"recent,omitempty"`
+}

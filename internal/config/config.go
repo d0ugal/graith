@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -41,11 +42,132 @@ type Config struct {
 	MCPServers       []MCPServerConfig  `toml:"mcp_servers"`
 	Overlay          Overlay            `toml:"overlay"`
 	Orchestrator     OrchestratorConfig `toml:"orchestrator"`
+	Remote           RemoteConfig       `toml:"remote"`
 	Agents           map[string]Agent   `toml:"agents"`
 }
 
 type Overlay struct {
 	ShortcutKeys string `toml:"shortcut_keys"`
+}
+
+// RemoteConfig is the optional, off-by-default [remote] block that exposes a
+// tailnet-facing control listener (see the native-app design doc §A.4/§B). It
+// is fail-closed: when Enabled, an invalid block is a hard config-load error
+// (static validation only — runtime listener provisioning failures, e.g. a
+// missing tailnet IP or cert, are handled by the remote listener, not here).
+type RemoteConfig struct {
+	// Enabled turns the remote listener on. Off by default; when false the rest
+	// of the block is not validated so a disabled block never blocks startup.
+	Enabled bool `toml:"enabled"`
+	// Mode selects the transport: "tsnet" (embedded Tailscale via tsnet) or
+	// "interface" (bind the host's existing tailnet interface IP).
+	Mode string `toml:"mode"`
+	// Hostname is the tsnet node name / MagicDNS label (tsnet mode).
+	Hostname string `toml:"hostname"`
+	// Port is the TCP port the listener binds.
+	Port int `toml:"port"`
+	// AuthKeyFile is the path to a tsnet auth key (tsnet mode only).
+	AuthKeyFile string `toml:"auth_key_file"`
+	// Tags are the tsnet ACL tags applied to the node (tsnet mode only).
+	Tags []string `toml:"tags"`
+	// AllowTailnetUsers is the WhoIs allowlist (Gate 1). Entries are either a
+	// tailnet user email or a "tag:"-prefixed tag. A bare "tag:" entry opts
+	// tagged nodes in; with no tag entry, tagged nodes are disallowed.
+	AllowTailnetUsers []string `toml:"allow_tailnet_users"`
+	// RequirePairing requires per-device pairing (Gate 2) for human-level
+	// rights. Defaults to true; false is UNSAFE (trusts the tailnet identity
+	// alone) and is restricted to read-only access — see the design doc §B.2.
+	RequirePairing bool `toml:"require_pairing"`
+	// PairRequestRate is the anti-flood limit on pending pair requests, written
+	// "<n>/<unit>" (e.g. "5/min"); units are sec, min, or hour. Empty means no
+	// configured limit here (the daemon applies its own default).
+	PairRequestRate string `toml:"pair_request_rate"`
+}
+
+// PairRate is a parsed pair_request_rate: Count events per Per duration.
+type PairRate struct {
+	Count int
+	Per   time.Duration
+}
+
+// ParsePairRequestRate parses a "<n>/<unit>" rate such as "5/min". The unit is
+// one of sec/min/hour (with the aliases second/minute/hour). The count must be
+// a positive integer. Any other shape is a hard error (fail-closed).
+func ParsePairRequestRate(s string) (PairRate, error) {
+	parts := strings.SplitN(s, "/", 2)
+	if len(parts) != 2 {
+		return PairRate{}, fmt.Errorf("[remote] pair_request_rate %q is invalid (want \"<n>/<unit>\" like \"5/min\")", s)
+	}
+
+	n, err := strconv.Atoi(strings.TrimSpace(parts[0]))
+	if err != nil || n <= 0 {
+		return PairRate{}, fmt.Errorf("[remote] pair_request_rate %q: count must be a positive integer", s)
+	}
+
+	var per time.Duration
+
+	switch strings.ToLower(strings.TrimSpace(parts[1])) {
+	case "sec", "second", "seconds", "s":
+		per = time.Second
+	case "min", "minute", "minutes", "m":
+		per = time.Minute
+	case "hour", "hours", "hr", "h":
+		per = time.Hour
+	default:
+		return PairRate{}, fmt.Errorf("[remote] pair_request_rate %q: unit must be sec, min, or hour", s)
+	}
+
+	return PairRate{Count: n, Per: per}, nil
+}
+
+// AllowsTaggedNodes reports whether any allow_tailnet_users entry opts tagged
+// nodes in (a "tag:"-prefixed entry). With no such entry, tagged nodes — which
+// WhoIs resolves with no user — are disallowed by default.
+func (r RemoteConfig) AllowsTaggedNodes() bool {
+	for _, u := range r.AllowTailnetUsers {
+		if strings.HasPrefix(strings.TrimSpace(u), "tag:") {
+			return true
+		}
+	}
+
+	return false
+}
+
+// Validate checks the [remote] block for static contradictions. Rules are only
+// enforced when Enabled — a disabled block (even with otherwise-invalid values)
+// always loads. It is fail-closed: an invalid enabled block is a hard error.
+func (r RemoteConfig) Validate() error {
+	if !r.Enabled {
+		return nil
+	}
+
+	switch r.Mode {
+	case "tsnet", "interface":
+	default:
+		return fmt.Errorf("[remote] mode %q is invalid (want \"tsnet\" or \"interface\")", r.Mode)
+	}
+
+	if r.Port <= 0 || r.Port > 65535 {
+		return fmt.Errorf("[remote] port %d is invalid (want 1-65535)", r.Port)
+	}
+
+	if r.Mode == "interface" {
+		if strings.TrimSpace(r.AuthKeyFile) != "" {
+			return fmt.Errorf("[remote] auth_key_file is a tsnet-only field and cannot be set in interface mode")
+		}
+
+		if len(r.Tags) > 0 {
+			return fmt.Errorf("[remote] tags is a tsnet-only field and cannot be set in interface mode")
+		}
+	}
+
+	if strings.TrimSpace(r.PairRequestRate) != "" {
+		if _, err := ParsePairRequestRate(r.PairRequestRate); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 type OrchestratorConfig struct {
@@ -993,6 +1115,12 @@ func (c *Config) Validate() error {
 	// a missing dependency fails the session loudly without bricking daemon
 	// startup.
 	if err := c.Approvals.Validate(); err != nil {
+		errs = append(errs, err)
+	}
+
+	// Validate the [remote] block statically (fail-closed when enabled). Runtime
+	// listener provisioning (tailnet IP, TLS cert) is deferred to the daemon.
+	if err := c.Remote.Validate(); err != nil {
 		errs = append(errs, err)
 	}
 

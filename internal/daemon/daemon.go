@@ -57,7 +57,14 @@ type SessionManager struct {
 	attachedClients    map[string]*attachedClient
 	hookReports        map[string]hookReport
 	pendingApprovals   map[string]*pendingApproval
-	tokenIndex         map[string]string // token → session ID (reverse lookup)
+	tokenIndex         map[string]string              // token → session ID (reverse lookup)
+	pendingPairings    map[string]*pendingPairing     // requestID → pending device pairing (in-memory; not persisted)
+	pairWaiters        map[string]chan pairApproval   // requestID → waiter for a blocked pair_request connection
+	approvalSubs       map[net.Conn]func(string, any) // conn → sendControl for approval subscribers (no attach)
+	remoteTLSPin       string                         // SPKI pin of the remote listener's cert (set once at startup; "" if remote disabled)
+	deviceTokenIndex   map[string]string              // client-token HMAC → device ID (reverse lookup)
+	connsByDevice      map[string][]net.Conn          // device ID → live remote connections (for revocation)
+	pairReqTimes       []time.Time                    // recent pair_request timestamps (rate limiting)
 	cfg                *config.Config
 	paths              config.Paths
 	log                *slog.Logger
@@ -90,6 +97,11 @@ func NewSessionManager(cfg *config.Config, paths config.Paths, log *slog.Logger)
 		hookReports:        make(map[string]hookReport),
 		pendingApprovals:   make(map[string]*pendingApproval),
 		tokenIndex:         make(map[string]string),
+		pendingPairings:    make(map[string]*pendingPairing),
+		pairWaiters:        make(map[string]chan pairApproval),
+		approvalSubs:       make(map[net.Conn]func(string, any)),
+		deviceTokenIndex:   make(map[string]string),
+		connsByDevice:      make(map[string][]net.Conn),
 		orchestratorExitCh: make(chan string, 4),
 		lastInboxNotifyAt:  make(map[string]time.Time),
 		prWatch:            newPRWatchState(),
@@ -246,6 +258,7 @@ func (sm *SessionManager) LoadState() error {
 	state.Reconcile()
 	sm.state = state
 	sm.rebuildTokenIndex()
+	sm.rebuildDeviceTokenIndex()
 
 	return sm.saveState()
 }
@@ -318,6 +331,29 @@ func (sm *SessionManager) AdoptSessions(manifest *UpgradeManifest) error {
 
 func (sm *SessionManager) saveState() error {
 	return SaveState(sm.paths.StateFile, sm.state)
+}
+
+// recentRepos returns the distinct repositories the daemon currently knows
+// about (from live sessions), so a remote client with no local cwd can offer a
+// repo picker for session creation (design §C.4).
+func (sm *SessionManager) recentRepos() []protocol.RepoEntry {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	seen := make(map[string]bool)
+
+	var repos []protocol.RepoEntry
+
+	for _, s := range sm.state.Sessions {
+		if s.RepoPath == "" || seen[s.RepoPath] {
+			continue
+		}
+
+		seen[s.RepoPath] = true
+		repos = append(repos, protocol.RepoEntry{Path: s.RepoPath, Name: s.RepoName, Recent: true})
+	}
+
+	return repos
 }
 
 func generateID() string {
@@ -4743,10 +4779,38 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 	defer cancel()
 
 	srv := NewServer(l, func(ctx context.Context, conn net.Conn) {
-		HandleConnection(ctx, conn, sm, log)
+		HandleConnection(ctx, conn, ConnOrigin{}, sm, log)
 	}, log)
 
 	go func() { _ = srv.Serve(ctx) }()
+
+	// Optional tailnet-facing remote control surface (design §A). Off by
+	// default; the local Unix socket above is unaffected when disabled.
+	if sm.cfg.Remote.Enabled {
+		if len(sm.cfg.Remote.AllowTailnetUsers) == 0 {
+			log.Warn("[remote] enabled with empty allow_tailnet_users — all remote connections denied (Gate 1 fail-closed)")
+		}
+
+		certPath := filepath.Join(paths.DataDir, "remote-tls.crt")
+		keyPath := filepath.Join(paths.DataDir, "remote-tls.key")
+
+		if cert, pin, tErr := loadOrCreateRemoteTLS(certPath, keyPath, sm.cfg.Remote.Hostname, time.Now()); tErr != nil {
+			log.Error("[remote] TLS setup failed; remote surface disabled", "err", tErr)
+		} else if rl, rErr := newRemoteListener(ctx, sm.cfg.Remote, paths.DataDir); rErr != nil {
+			log.Error("[remote] listener setup failed; remote surface disabled", "err", rErr)
+		} else {
+			sm.remoteTLSPin = pin
+
+			log.Info("[remote] starting control surface", "mode", sm.cfg.Remote.Mode, "port", sm.cfg.Remote.Port, "tls_spki", pin)
+
+			go func() {
+				if err := sm.serveRemote(ctx, rl, sm.cfg.Remote, cert); err != nil {
+					log.Error("[remote] control surface failed", "err", err)
+				}
+			}()
+		}
+	}
+
 	go sm.RunDetectionLoop(ctx)
 	go sm.RunMessageCleanupLoop(ctx)
 	go sm.RunGitPullLoop(ctx)

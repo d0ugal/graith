@@ -1,0 +1,91 @@
+package client
+
+import (
+	"crypto/ed25519"
+	"path/filepath"
+	"testing"
+)
+
+func TestRemoteHostStoreRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "remote-hosts.json")
+
+	s, err := LoadRemoteHostStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(s.Hosts) != 0 {
+		t.Fatalf("fresh store has %d hosts, want 0", len(s.Hosts))
+	}
+
+	s.Put(&RemoteHost{Host: "graith-ben.ts.net", Port: 4823, Token: "braw-token", TLSPin: "pin==", Profile: ""})
+
+	if err := s.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	reloaded, err := LoadRemoteHostStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	h, ok := reloaded.Get("graith-ben.ts.net")
+	if !ok || h.Port != 4823 || h.Token != "braw-token" || h.TLSPin != "pin==" {
+		t.Errorf("host not round-tripped: %+v (ok=%v)", h, ok)
+	}
+}
+
+func TestRemoteHostStoreLoadMissing(t *testing.T) {
+	s, err := LoadRemoteHostStore(filepath.Join(t.TempDir(), "nope.json"))
+	if err != nil {
+		t.Fatalf("loading a missing store should not error: %v", err)
+	}
+
+	if s.Hosts == nil {
+		t.Error("missing store should have an initialized Hosts map")
+	}
+}
+
+func TestEnsureDeviceKeyStableAndSigns(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "remote-hosts.json")
+	s, _ := LoadRemoteHostStore(path)
+
+	priv1, pub1, err := s.EnsureDeviceKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if pub1 == "" || len(priv1) != ed25519.PrivateKeySize {
+		t.Fatal("EnsureDeviceKey returned an invalid key")
+	}
+
+	// Stable within the same store.
+	_, pub1b, _ := s.EnsureDeviceKey()
+	if pub1b != pub1 {
+		t.Error("EnsureDeviceKey should be stable within a store")
+	}
+
+	// Persists across save/reload.
+	if err := s.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	reloaded, _ := LoadRemoteHostStore(path)
+
+	priv2, pub2, err := reloaded.EnsureDeviceKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if pub2 != pub1 {
+		t.Error("device key should persist across reload")
+	}
+
+	// The key actually signs + verifies (proof-of-possession primitive).
+	nonce := []byte("haar-nonce")
+	sig := ed25519.Sign(priv2, nonce)
+
+	if !ed25519.Verify(priv2.Public().(ed25519.PublicKey), nonce, sig) {
+		t.Error("device key failed to sign/verify")
+	}
+}

@@ -1,0 +1,222 @@
+package cli
+
+import (
+	"context"
+	"crypto/ed25519"
+	"fmt"
+	"os"
+	"sort"
+	"strings"
+
+	"github.com/d0ugal/graith/internal/client"
+	"github.com/d0ugal/graith/internal/protocol"
+	"github.com/spf13/cobra"
+	"golang.org/x/term"
+)
+
+var remoteCmd = &cobra.Command{
+	Use:   "remote",
+	Short: "Manage and attach to remote daemons over Tailscale (#615)",
+}
+
+var (
+	remotePairPort    int
+	remotePairProfile string
+	remotePairLabel   string
+)
+
+var remotePairCmd = &cobra.Command{
+	Use:   "pair <host>",
+	Short: "Pair this device with a remote daemon (approve with `gr pair approve` on the host)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(_ *cobra.Command, args []string) error {
+		host := args[0]
+
+		store, err := client.LoadRemoteHostStore(client.RemoteHostsPath(paths.DataDir))
+		if err != nil {
+			return err
+		}
+
+		_, pubB64, err := store.EnsureDeviceKey()
+		if err != nil {
+			return err
+		}
+
+		// Persist the device key up front so an interrupted pairing (which can
+		// block for a while awaiting local approval) doesn't lose it.
+		if err := store.Save(); err != nil {
+			return err
+		}
+
+		label := remotePairLabel
+		if label == "" {
+			label, _ = os.Hostname()
+		}
+
+		out.Printf("Requesting pairing with %s:%d as %q — approve on the remote host: gr pair approve <id>\n", host, remotePairPort, label)
+
+		rh, err := client.PairRemote(paths, host, remotePairPort, remotePairProfile, label, pubB64)
+		if err != nil {
+			return err
+		}
+
+		store.Put(rh)
+
+		if err := store.Save(); err != nil {
+			return err
+		}
+
+		out.Printf("Paired with %s (profile %q, TLS pin %s)\n", rh.Host, rh.Profile, rh.TLSPin)
+
+		return nil
+	},
+}
+
+var remoteListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List paired remote hosts",
+	Args:  cobra.NoArgs,
+	RunE: func(_ *cobra.Command, _ []string) error {
+		store, err := client.LoadRemoteHostStore(client.RemoteHostsPath(paths.DataDir))
+		if err != nil {
+			return err
+		}
+
+		if len(store.Hosts) == 0 {
+			out.Printf("No paired remote hosts. Pair one with: gr remote pair <host>\n")
+			return nil
+		}
+
+		names := make([]string, 0, len(store.Hosts))
+		for name := range store.Hosts {
+			names = append(names, name)
+		}
+
+		sort.Strings(names) // stable, deterministic output
+
+		for _, name := range names {
+			h := store.Hosts[name]
+			out.Printf("  %s:%d  profile=%q\n", h.Host, h.Port, h.Profile)
+		}
+
+		return nil
+	},
+}
+
+var remoteAttachCmd = &cobra.Command{
+	Use:   "attach <host>/<session>",
+	Short: "Attach to a session on a paired remote daemon",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(_ *cobra.Command, args []string) error {
+		host, sessionArg, ok := strings.Cut(args[0], "/")
+		if !ok || host == "" || sessionArg == "" {
+			return fmt.Errorf("expected <host>/<session>, got %q", args[0])
+		}
+
+		store, err := client.LoadRemoteHostStore(client.RemoteHostsPath(paths.DataDir))
+		if err != nil {
+			return err
+		}
+
+		rh, ok := store.Get(host)
+		if !ok {
+			return fmt.Errorf("not paired with %q — run: gr remote pair %s", host, host)
+		}
+
+		priv, _, err := store.EnsureDeviceKey()
+		if err != nil {
+			return err
+		}
+
+		return runRemoteAttach(rh, priv, sessionArg)
+	},
+}
+
+// runRemoteAttach attaches to a session on a paired remote daemon. It is a
+// dedicated loop (NOT runAttachByID) so that reconnects re-dial the REMOTE host
+// rather than the local daemon. Remote overlay / session-switching is not yet
+// supported — those prefix actions detach with a notice instead of silently
+// talking to the local daemon.
+func runRemoteAttach(rh *client.RemoteHost, signer ed25519.PrivateKey, sessionArg string) error {
+	if isInsideGraith() {
+		return fmt.Errorf("cannot attach from inside a graith session")
+	}
+
+	cols, rows := uint16(80), uint16(24)
+	if w, h, gerr := term.GetSize(int(os.Stdout.Fd())); gerr == nil {
+		cols, rows = uint16(w), uint16(h) //nolint:gosec // G115: terminal dims are small non-negative ints
+	}
+
+	keys := client.PassthroughKeys{
+		Prefix:      parsePrefixKey(cfg.Keybindings.Prefix),
+		NextSession: parseKeyByte(cfg.Keybindings.NextSession),
+		PrevSession: parseKeyByte(cfg.Keybindings.PrevSession),
+	}
+
+	sessionID := ""
+
+	for {
+		c, err := client.ConnectRemote(paths, rh, signer, cols, rows)
+		if err != nil {
+			return err
+		}
+
+		if sessionID == "" {
+			sessionID, err = resolveSession(c, sessionArg)
+			if err != nil {
+				c.Close()
+				return err
+			}
+		}
+
+		_ = c.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+
+		resp, err := c.ReadControlResponse()
+		if err != nil {
+			c.Close()
+			return err
+		}
+
+		if resp.Type == "error" {
+			var e protocol.ErrorMsg
+
+			_ = protocol.DecodePayload(resp, &e)
+
+			c.Close()
+
+			return fmt.Errorf("%s", e.Message)
+		}
+
+		var info protocol.SessionInfo
+
+		_ = protocol.DecodePayload(resp, &info)
+
+		opts := client.PassthroughOpts{Keys: keys, SessionID: sessionID, Info: &info}
+		opts.AutoPopApproval = cfg.Approvals.AutoPop
+
+		result := c.RunPassthrough(context.Background(), opts) // closes c
+
+		switch result {
+		case client.ResultDetached, client.ResultQuit:
+			return nil
+		case client.ResultDisconnected:
+			out.Printf("Connection lost. Reconnecting to %s...\n", rh.Host)
+			continue
+		default:
+			out.Printf("(overlay and session switching are not yet supported over a remote attach — detaching)\n")
+			return nil
+		}
+	}
+}
+
+// registerRemoteCmd registers this command on rootCmd. Called from registerCommands.
+func registerRemoteCmd() {
+	remotePairCmd.Flags().IntVar(&remotePairPort, "port", 4823, "remote daemon port")
+	remotePairCmd.Flags().StringVar(&remotePairProfile, "profile", "", "remote daemon profile (if it runs a named profile)")
+	remotePairCmd.Flags().StringVar(&remotePairLabel, "label", "", "device label shown to the remote human (default: hostname)")
+
+	remoteCmd.AddCommand(remotePairCmd)
+	remoteCmd.AddCommand(remoteListCmd)
+	remoteCmd.AddCommand(remoteAttachCmd)
+	rootCmd.AddCommand(remoteCmd)
+}

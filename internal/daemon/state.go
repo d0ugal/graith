@@ -16,7 +16,7 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 )
 
-const CurrentStateVersion = 12
+const CurrentStateVersion = 13
 
 type SessionStatus string
 
@@ -174,13 +174,53 @@ type State struct {
 	Version   int                       `json:"version"`
 	Sessions  map[string]*SessionState  `json:"sessions"`
 	Scenarios map[string]*ScenarioState `json:"scenarios,omitempty"`
+	// PairedDevices holds remote client devices authorized via pairing for the
+	// optional network control surface (design §B.2), keyed by device ID.
+	PairedDevices map[string]*PairedDevice `json:"paired_devices,omitempty"`
+	// PairingHMACKey is the key used to HMAC client tokens at rest. Generated
+	// lazily on first pairing via EnsurePairingHMACKey; never the token itself.
+	PairingHMACKey string `json:"pairing_hmac_key,omitempty"`
+}
+
+// PairedDevice is a remote client device authorized via pairing (design §B.2).
+// It is bound to the tailnet identity observed at pairing time; TokenHash is an
+// HMAC of the client token, never the token itself.
+type PairedDevice struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	PubKey      string `json:"pub_key"`
+	TailnetUser string `json:"tailnet_user"`
+	TailnetNode string `json:"tailnet_node"`
+	TokenHash   string `json:"token_hash"`
+	// ReadOnly marks a device paired while require_pairing=false (the unsafe,
+	// WhoIs-only mode): it maps to roleRemoteGuest and gets a read-only subset.
+	ReadOnly   bool      `json:"read_only,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+	LastSeenAt time.Time `json:"last_seen_at,omitempty"`
+}
+
+// EnsurePairingHMACKey returns the key used to HMAC client tokens at rest,
+// generating and storing it on first use. The caller must hold the state write
+// lock and persist the state afterward.
+func (s *State) EnsurePairingHMACKey() (string, error) {
+	if s.PairingHMACKey == "" {
+		k, err := generateToken()
+		if err != nil {
+			return "", fmt.Errorf("generate pairing hmac key: %w", err)
+		}
+
+		s.PairingHMACKey = k
+	}
+
+	return s.PairingHMACKey, nil
 }
 
 func NewState() *State {
 	return &State{
-		Version:   CurrentStateVersion,
-		Sessions:  make(map[string]*SessionState),
-		Scenarios: make(map[string]*ScenarioState),
+		Version:       CurrentStateVersion,
+		Sessions:      make(map[string]*SessionState),
+		Scenarios:     make(map[string]*ScenarioState),
+		PairedDevices: make(map[string]*PairedDevice),
 	}
 }
 
@@ -206,6 +246,10 @@ func LoadState(path string) (*State, error) {
 
 	if state.Scenarios == nil {
 		state.Scenarios = make(map[string]*ScenarioState)
+	}
+
+	if state.PairedDevices == nil {
+		state.PairedDevices = make(map[string]*PairedDevice)
 	}
 
 	if state.Version > CurrentStateVersion {
@@ -244,6 +288,7 @@ var migrations = map[int]func(*State) error{
 	9:  migrateV9ToV10,
 	10: migrateV10ToV11,
 	11: migrateV11ToV12,
+	12: migrateV12ToV13,
 }
 
 func generateToken() (string, error) {
@@ -368,6 +413,18 @@ func migrateV10ToV11(state *State) error {
 // migrateV11ToV12 is a no-op: v12 adds the optional migrated_from field which
 // unmarshals fine from older state. Kept to preserve the migration chain.
 func migrateV11ToV12(_ *State) error {
+	return nil
+}
+
+// migrateV12ToV13 initializes the paired-devices map for the optional network
+// control surface (design §B). Older state has no paired devices; the map is
+// created empty. The pairing HMAC key is generated lazily on first pairing via
+// EnsurePairingHMACKey, so no key is minted here.
+func migrateV12ToV13(state *State) error {
+	if state.PairedDevices == nil {
+		state.PairedDevices = make(map[string]*PairedDevice)
+	}
+
 	return nil
 }
 

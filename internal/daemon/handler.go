@@ -45,7 +45,11 @@ const (
 )
 
 // HandleConnection processes the frame protocol for a single client connection.
-func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, log *slog.Logger) {
+// origin describes where the connection came from (local Unix socket vs remote
+// tailnet listener) and carries the tailnet identity for remote connections;
+// it is threaded to resolveAuth so authorization is origin-aware. The zero
+// ConnOrigin{} is a local connection, preserving the existing trust model.
+func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm *SessionManager, log *slog.Logger) {
 	reader := protocol.NewFrameReader(conn)
 	writer := &safeFrameWriter{writer: protocol.NewFrameWriter(conn)}
 
@@ -53,7 +57,40 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 		attachedSessionID      string
 		attachedDataWriter     *frameDataWriter
 		clientRows, clientCols uint16 = 24, 80
+		// poppedDeviceID is the device ID proven via proof-of-possession on this
+		// connection (set once a valid auth_proof is received); empty means the
+		// remote caller has not completed PoP and stays roleNone.
+		poppedDeviceID string
+		// challengeNonce is the per-connection PoP nonce issued after a remote
+		// handshake; the client must sign it in auth_proof. Single-use.
+		challengeNonce string
 	)
+
+	// connDone is closed when this connection's handler returns (for any
+	// reason). Background helpers spawned for this connection (e.g. a blocked
+	// pair_request) select on it to stop when the client disconnects.
+	connDone := make(chan struct{})
+
+	// Centralized cleanup: runs exactly once on every return path (read error,
+	// or an early return from logs --follow / wait / msg_sub / approval_request
+	// / upgrade), so per-connection registrations never leak.
+	defer func() {
+		close(connDone)
+
+		if attachedSessionID != "" {
+			sm.ClearAttachedClient(attachedSessionID, conn)
+
+			if pty, ok := sm.GetPTY(attachedSessionID); ok {
+				pty.DetachWriter(attachedDataWriter)
+			}
+		}
+
+		if poppedDeviceID != "" {
+			sm.UnregisterDeviceConn(poppedDeviceID, conn)
+		}
+
+		sm.RemoveApprovalSubscriber(conn)
+	}()
 
 	sendControl := func(msgType string, payload any) {
 		data, err := protocol.EncodeControl(msgType, payload)
@@ -78,15 +115,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 				log.Debug("client read error", "err", err)
 			}
 
-			if attachedSessionID != "" {
-				sm.ClearAttachedClient(attachedSessionID, conn)
-
-				if pty, ok := sm.GetPTY(attachedSessionID); ok {
-					pty.DetachWriter(attachedDataWriter)
-				}
-			}
-
-			return
+			return // deferred cleanup handles attach/device/subscriber teardown
 		}
 
 		switch frame.Channel {
@@ -98,11 +127,22 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 			}
 
 			sm.mu.RLock()
-			auth, authErr := resolveAuth(sm, msg.Token)
+			auth, authErr := resolveAuth(sm, msg.Token, origin, poppedDeviceID)
 			sm.mu.RUnlock()
 
 			if authErr != nil {
 				sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
+				continue
+			}
+
+			// Gate A (design §B.4): for remote (tailnet) connections, reject any
+			// message the caller's role may not use before it reaches dispatch.
+			// A roleNone remote may reach only the pairing lane; a read-only
+			// guest only observational messages; local connections are never
+			// gated here. This is the choke point that keeps the network surface
+			// fail-closed independent of the per-case handler checks below.
+			if origin.Remote && !remoteAllowed(auth.role, msg.Type) {
+				sendControl("error", protocol.ErrorMsg{Message: "not authorized over remote connection"})
 				continue
 			}
 
@@ -135,6 +175,190 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 
 				sendControl("handshake_ok", protocol.HandshakeOkMsg{Version: protocol.Version, DaemonVersion: version.Version})
 				log.Info("client connected", "client_id", h.ClientID, "cwd", h.Cwd)
+
+				// On a remote connection, issue a proof-of-possession challenge.
+				// The client must return a valid auth_proof (signing this nonce
+				// with its paired device key) before it advances past roleNone.
+				if origin.Remote {
+					nonce, nErr := randomHex(32)
+					if nErr != nil {
+						sendControl("error", protocol.ErrorMsg{Message: "failed to issue auth challenge"})
+						return
+					}
+
+					challengeNonce = nonce
+					sendControl("auth_challenge", protocol.AuthChallengeMsg{Nonce: nonce})
+				}
+
+			case "auth_proof":
+				// Proof-of-possession: verify the client signed the issued nonce
+				// with the private key of the device its token resolves to, and
+				// that the connection's tailnet identity still matches. On
+				// success the connection advances to its paired role.
+				var ap protocol.AuthProofMsg
+				if err := protocol.DecodePayload(msg, &ap); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid auth_proof"})
+					continue
+				}
+
+				sm.mu.RLock()
+				dev := sm.DeviceForToken(msg.Token)
+				sm.mu.RUnlock()
+
+				if dev == nil || challengeNonce == "" || !verifyPoP(dev.PubKey, challengeNonce, ap.Signature) ||
+					(origin.Remote && !identityMatchesDevice(origin.Identity, dev)) {
+					sendControl("error", protocol.ErrorMsg{Message: "proof of possession failed"})
+					continue
+				}
+
+				poppedDeviceID = dev.ID
+				challengeNonce = "" // single-use
+
+				sm.RegisterDeviceConn(dev.ID, conn)
+				sendControl("auth_ok", protocol.HandshakeOkMsg{Version: protocol.Version, DaemonVersion: version.Version})
+
+			case "pair_request":
+				// A device requests pairing. Queue it for local human approval;
+				// a background waiter delivers the minted token when approved.
+				// The read loop is NOT blocked — so a client disconnect is
+				// noticed promptly (connDone) and the waiter is cleaned up.
+				var pr protocol.PairRequestMsg
+				if err := protocol.DecodePayload(msg, &pr); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid pair_request"})
+					continue
+				}
+
+				var identity TailnetIdentity
+				if origin.Identity != nil {
+					identity = *origin.Identity
+				}
+
+				rid, waitCh, err := sm.AddPendingPairing(pr.DeviceLabel, pr.DevicePubKey, identity, time.Now())
+				if err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+					continue
+				}
+
+				log.Info("pairing requested", "request_id", rid, "label", pr.DeviceLabel, "tailnet_user", identity.User)
+
+				go func() {
+					select {
+					case appr := <-waitCh:
+						sendControl("pair_response", protocol.PairResponseMsg{
+							DeviceID:      appr.DeviceID,
+							ClientToken:   appr.Token,
+							DaemonProfile: appr.Profile,
+							TLSPinSPKI:    appr.TLSPin,
+						})
+					case <-time.After(pendingPairingTTL):
+						sm.unregisterPairWaiter(rid)
+						sendControl("error", protocol.ErrorMsg{Message: "pairing request timed out"})
+					case <-connDone:
+						sm.unregisterPairWaiter(rid)
+					}
+				}()
+
+			case "pair_approve":
+				if auth.role != roleLocalHuman {
+					sendControl("error", protocol.ErrorMsg{Message: "pairing approval is local-only"})
+					continue
+				}
+
+				var pa protocol.PairApproveMsg
+				if err := protocol.DecodePayload(msg, &pa); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid pair_approve"})
+					continue
+				}
+
+				// A device paired while require_pairing=false gets the read-only
+				// guest role (design §B.2).
+				readOnly := !sm.Config().Remote.RequirePairing
+
+				deviceID, token, err := sm.ApprovePairing(pa.RequestID, readOnly, time.Now())
+				if err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+					continue
+				}
+
+				log.Info("device paired", "device", deviceID, "read_only", readOnly)
+				sendControl("pair_approved", protocol.PairResponseMsg{DeviceID: deviceID, ClientToken: token, DaemonProfile: sm.paths.Profile, TLSPinSPKI: sm.remoteTLSPin})
+
+			case "pair_list":
+				if auth.role != roleLocalHuman {
+					sendControl("error", protocol.ErrorMsg{Message: "pair list is local-only"})
+					continue
+				}
+
+				pending, paired := sm.ListPairings()
+				resp := protocol.PairListResponseMsg{}
+
+				for _, p := range pending {
+					resp.Pending = append(resp.Pending, protocol.PairPending{
+						RequestID:   p.RequestID,
+						DeviceLabel: p.DeviceLabel,
+						TailnetUser: p.Identity.User,
+						TailnetNode: p.Identity.Node,
+						RequestedAt: p.RequestedAt.Format(time.RFC3339),
+					})
+				}
+
+				for _, d := range paired {
+					lastSeen := ""
+					if !d.LastSeenAt.IsZero() {
+						lastSeen = d.LastSeenAt.Format(time.RFC3339)
+					}
+
+					resp.Paired = append(resp.Paired, protocol.PairedDeviceInfo{
+						DeviceID:    d.ID,
+						Label:       d.Label,
+						TailnetUser: d.TailnetUser,
+						TailnetNode: d.TailnetNode,
+						CreatedAt:   d.CreatedAt.Format(time.RFC3339),
+						LastSeenAt:  lastSeen,
+					})
+				}
+
+				sendControl("pair_list", resp)
+
+			case "pair_revoke":
+				if auth.role != roleLocalHuman {
+					sendControl("error", protocol.ErrorMsg{Message: "pair revoke is local-only"})
+					continue
+				}
+
+				var pv protocol.PairRevokeMsg
+				if err := protocol.DecodePayload(msg, &pv); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid pair_revoke"})
+					continue
+				}
+
+				n, err := sm.RevokeDevice(pv.DeviceID)
+				if err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+					continue
+				}
+
+				log.Info("device revoked", "device", pv.DeviceID, "connections_closed", n)
+				sendControl("pair_revoked", protocol.PairRevokeMsg{DeviceID: pv.DeviceID})
+
+			case "approval_subscribe":
+				// Register this connection to receive approval notifications
+				// without attaching to a session (design §C.6). Human operators
+				// only. Cleaned up on disconnect.
+				if !auth.isHuman() {
+					sendControl("error", protocol.ErrorMsg{Message: "approval_subscribe requires a human operator"})
+					continue
+				}
+
+				sm.AddApprovalSubscriber(conn, sendControl)
+				// Send the current pending set immediately so the subscriber
+				// starts with fleet state, not just future changes.
+				sendControl("approval_notification", protocol.ApprovalNotificationMsg{Pending: sm.PendingApprovals()})
+
+			case "repo_list":
+				// Return the repos the daemon knows about so a remote client can
+				// offer a picker (it has no local cwd — design §C.4).
+				sendControl("repo_list", protocol.RepoListResponseMsg{Repos: sm.recentRepos()})
 
 			case "list":
 				sessions := sm.List()
@@ -672,24 +896,28 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					continue
 				}
 
-				if auth.authenticated {
+				// Sender identity is forced by role so it can't be spoofed. A
+				// session publishes as itself; the local human (CLI) may address
+				// on behalf of a named session (trusted local use); a remote
+				// human publishes as its device and CANNOT claim to be a session.
+				switch auth.role {
+				case roleSession, roleOrchestrator:
 					m.SenderID = auth.sessionID
 					if sess, ok := sm.Get(auth.sessionID); ok {
 						m.SenderName = sess.Name
 					}
-
-					sm.mu.RLock()
-					authErr := auth.checkMsgPub(sm, m.Stream)
-					sm.mu.RUnlock()
-
-					if authErr != nil {
-						sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
-						continue
+				case roleLocalHuman:
+					if m.SenderID != "" {
+						if sess, ok := sm.Get(m.SenderID); ok {
+							m.SenderName = sess.Name
+						}
 					}
-				} else if m.SenderID != "" {
-					if sess, ok := sm.Get(m.SenderID); ok {
-						m.SenderName = sess.Name
-					}
+				case roleRemoteHuman:
+					m.SenderID = "device:" + auth.deviceID
+					m.SenderName = "remote device"
+				default:
+					sendControl("error", protocol.ErrorMsg{Message: "not authorized to publish"})
+					continue
 				}
 
 				published, err := sm.messages.Publish(m.Stream, m.SenderID, m.SenderName, m.Body, m.ThreadID, m.ReplyTo)

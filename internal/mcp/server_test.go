@@ -84,7 +84,7 @@ func setup(t *testing.T) *testEnv {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	daemonSrv := daemon.NewServer(l, func(ctx context.Context, conn net.Conn) {
-		daemon.HandleConnection(ctx, conn, sm, log)
+		daemon.HandleConnection(ctx, conn, daemon.ConnOrigin{}, sm, log)
 	}, log)
 	go func() { _ = daemonSrv.Serve(ctx) }()
 	go sm.RunDetectionLoop(ctx)
