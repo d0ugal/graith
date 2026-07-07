@@ -118,8 +118,8 @@ var listCmd = &cobra.Command{
 	},
 }
 
-// printQuiet emits only session identifiers, one per line (or as a JSON array
-// of session IDs when --json is set), for scripting. Mirrors `docker ps -q`.
+// printQuiet emits bare session names, one per line (or a JSON array of session
+// IDs when --json is set), for scripting.
 func printQuiet(cmd *cobra.Command, sessions []protocol.SessionInfo) error {
 	sorted := make([]protocol.SessionInfo, len(sessions))
 	copy(sorted, sessions)
@@ -128,7 +128,13 @@ func printQuiet(cmd *cobra.Command, sessions []protocol.SessionInfo) error {
 			return sorted[i].RepoName < sorted[j].RepoName
 		}
 
-		return sorted[i].Name < sorted[j].Name
+		if sorted[i].Name != sorted[j].Name {
+			return sorted[i].Name < sorted[j].Name
+		}
+
+		// Tie-break on ID so output ordering is deterministic even when two
+		// sessions share a repo and name (names are not globally unique).
+		return sorted[i].ID < sorted[j].ID
 	})
 
 	if jsonOutput {
