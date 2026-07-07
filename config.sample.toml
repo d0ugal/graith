@@ -58,6 +58,27 @@
 # max_age = ""
 # max_per_stream = 0
 
+# --- Remote control (tailnet) ---
+# Optional, off-by-default network control surface over Tailscale. When enabled
+# the block is validated fail-closed (an invalid enabled block is a hard load
+# error). A disabled block always loads.
+
+# [remote]
+# enabled = false
+# mode = "tsnet"                          # "tsnet" (embedded Tailscale) | "interface" (bind the tailnet IP)
+# hostname = "graith-laptop"              # tsnet node name / MagicDNS label
+# port = 4823
+# auth_key_file = "~/.config/graith/ts-authkey"  # tsnet only (rejected in interface mode)
+# tags = ["tag:graith"]                   # tsnet ACL tags (tsnet only; rejected in interface mode)
+# allow_tailnet_users = ["you@example.com"]  # WhoIs allowlist (Gate 1). Entries are
+#                                            # user emails or "tag:"-prefixed tags; a bare
+#                                            # "tag:" entry opts tagged nodes in (default: disallowed).
+# require_pairing = true                  # default. Per-device pairing (Gate 2) for human rights.
+#                                         # WARNING: require_pairing = false is UNSAFE — it trusts the
+#                                         # tailnet identity alone, so a compromised tailnet account/node
+#                                         # equals full control. It is restricted to READ-ONLY access.
+# pair_request_rate = "5/min"             # anti-flood on pending pair requests ("<n>/<unit>": sec|min|hour)
+
 # --- Sandbox ---
 # OS-level sandbox for agent processes. Disabled by default. When enabled a
 # `backend` MUST be chosen — there is no default; an unset backend fails closed.

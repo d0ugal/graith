@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"net"
 	"time"
 	"unicode/utf8"
 
@@ -166,18 +167,39 @@ func (sm *SessionManager) PendingApprovals() []protocol.ApprovalInfo {
 	return infos
 }
 
-// broadcastApprovalNotification pushes the current pending approvals list
-// to all attached clients.
+// AddApprovalSubscriber registers a connection to receive approval
+// notifications without attaching to a session (design §C.6), so a remote app
+// browsing the fleet gets approval prompts without kicking a desktop attach.
+func (sm *SessionManager) AddApprovalSubscriber(conn net.Conn, sendControl func(string, any)) {
+	sm.mu.Lock()
+	sm.approvalSubs[conn] = sendControl
+	sm.mu.Unlock()
+}
+
+// RemoveApprovalSubscriber deregisters an approval subscriber (on disconnect).
+// It is a no-op if the connection was not subscribed.
+func (sm *SessionManager) RemoveApprovalSubscriber(conn net.Conn) {
+	sm.mu.Lock()
+	delete(sm.approvalSubs, conn)
+	sm.mu.Unlock()
+}
+
 func (sm *SessionManager) broadcastApprovalNotification() {
 	pending := sm.PendingApprovals()
 	msg := protocol.ApprovalNotificationMsg{Pending: pending}
 
 	sm.mu.RLock()
 
-	clients := make([]func(string, any), 0, len(sm.attachedClients))
+	clients := make([]func(string, any), 0, len(sm.attachedClients)+len(sm.approvalSubs))
 	for _, ac := range sm.attachedClients {
 		if ac.sendControl != nil {
 			clients = append(clients, ac.sendControl)
+		}
+	}
+	// Also fan out to explicit subscribers (connected but not attached).
+	for _, send := range sm.approvalSubs {
+		if send != nil {
+			clients = append(clients, send)
 		}
 	}
 

@@ -3,6 +3,7 @@ package daemon
 import (
 	"sync"
 	"testing"
+	"time"
 )
 
 func newTestSMWithSessions(sessions map[string]*SessionState) *SessionManager {
@@ -23,7 +24,7 @@ func newTestSMWithSessions(sessions map[string]*SessionState) *SessionManager {
 func TestResolveAuth_NoToken(t *testing.T) {
 	sm := newTestSMWithSessions(nil)
 
-	auth, err := resolveAuth(sm, "")
+	auth, err := resolveAuth(sm, "", ConnOrigin{}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +43,7 @@ func TestResolveAuth_ValidToken(t *testing.T) {
 		"braw": {ID: "braw", Token: "tok-braw"},
 	})
 
-	auth, err := resolveAuth(sm, "tok-braw")
+	auth, err := resolveAuth(sm, "tok-braw", ConnOrigin{}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +62,7 @@ func TestResolveAuth_InvalidToken(t *testing.T) {
 		"braw": {ID: "braw", Token: "tok-braw"},
 	})
 
-	_, err := resolveAuth(sm, "tok-thrawn")
+	_, err := resolveAuth(sm, "tok-thrawn", ConnOrigin{}, "")
 	if err == nil {
 		t.Fatal("expected error for invalid token")
 	}
@@ -245,64 +246,6 @@ func TestCheckTarget_Unauthenticated_AllowsWithTarget(t *testing.T) {
 	}
 }
 
-func TestCheckMsgPub_TopicAllowed(t *testing.T) {
-	sm := newTestSMWithSessions(map[string]*SessionState{
-		"braw": {ID: "braw"},
-	})
-
-	auth := authContext{sessionID: "braw", authenticated: true}
-	if err := auth.checkMsgPub(sm, "blether-review"); err != nil {
-		t.Errorf("expected allowed for topic publish, got: %v", err)
-	}
-}
-
-func TestCheckMsgPub_InboxSelfAllowed(t *testing.T) {
-	sm := newTestSMWithSessions(map[string]*SessionState{
-		"braw": {ID: "braw"},
-	})
-
-	auth := authContext{sessionID: "braw", authenticated: true}
-	if err := auth.checkMsgPub(sm, "inbox:braw"); err != nil {
-		t.Errorf("expected allowed for own inbox, got: %v", err)
-	}
-}
-
-func TestCheckMsgPub_InboxChildAllowed(t *testing.T) {
-	sm := newTestSMWithSessions(map[string]*SessionState{
-		"ben":   {ID: "ben"},
-		"bairn": {ID: "bairn", ParentID: "ben"},
-	})
-
-	auth := authContext{sessionID: "ben", authenticated: true}
-	if err := auth.checkMsgPub(sm, "inbox:bairn"); err != nil {
-		t.Errorf("expected allowed for child inbox, got: %v", err)
-	}
-}
-
-func TestCheckMsgPub_InboxParentAllowed(t *testing.T) {
-	sm := newTestSMWithSessions(map[string]*SessionState{
-		"ben":   {ID: "ben"},
-		"bairn": {ID: "bairn", ParentID: "ben"},
-	})
-
-	auth := authContext{sessionID: "bairn", authenticated: true}
-	if err := auth.checkMsgPub(sm, "inbox:ben"); err != nil {
-		t.Errorf("expected allowed for parent inbox, got: %v", err)
-	}
-}
-
-func TestCheckMsgPub_InboxUnrelatedAllowed(t *testing.T) {
-	sm := newTestSMWithSessions(map[string]*SessionState{
-		"braw":  {ID: "braw"},
-		"canny": {ID: "canny"},
-	})
-
-	auth := authContext{sessionID: "braw", authenticated: true}
-	if err := auth.checkMsgPub(sm, "inbox:canny"); err != nil {
-		t.Errorf("expected allowed for unrelated inbox, got: %v", err)
-	}
-}
-
 func TestIsDescendantOf(t *testing.T) {
 	sm := newTestSMWithSessions(map[string]*SessionState{
 		"brae":      {ID: "brae"},
@@ -413,5 +356,152 @@ func TestParseInboxStream(t *testing.T) {
 		if id != tt.wantID || isInbox != tt.wantInbox {
 			t.Errorf("parseInboxStream(%q) = (%q, %v), want (%q, %v)", tt.stream, id, isInbox, tt.wantID, tt.wantInbox)
 		}
+	}
+}
+
+func TestResolveAuth_LocalHumanRole(t *testing.T) {
+	sm := newTestSMWithSessions(nil)
+
+	auth, err := resolveAuth(sm, "", ConnOrigin{Remote: false}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if auth.role != roleLocalHuman {
+		t.Errorf("role = %d, want roleLocalHuman", auth.role)
+	}
+
+	if !auth.isLocalHuman() || !auth.isHuman() {
+		t.Error("local human should satisfy isLocalHuman() and isHuman()")
+	}
+}
+
+func TestResolveAuth_RemoteNoPoPIsRoleNone(t *testing.T) {
+	sm := newTestSMWithSessions(nil)
+
+	auth, err := resolveAuth(sm, "", ConnOrigin{Remote: true, Identity: &TailnetIdentity{User: "speir@example.com", Node: "ben"}}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if auth.role != roleNone {
+		t.Errorf("role = %d, want roleNone for a remote conn without proof-of-possession", auth.role)
+	}
+
+	if auth.isHuman() {
+		t.Error("roleNone must not be a human")
+	}
+}
+
+func TestResolveAuth_RemoteHuman(t *testing.T) {
+	sm := newPairingSM(t)
+	id := TailnetIdentity{User: "speir@example.com", Node: "ben"}
+	now := time.Now()
+
+	rid, _, err := sm.AddPendingPairing("bairn", testPubKey(t), id, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	deviceID, token, err := sm.ApprovePairing(rid, false, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	origin := ConnOrigin{Remote: true, Identity: &TailnetIdentity{User: "speir@example.com", Node: "ben"}}
+
+	auth, err := resolveAuth(sm, token, origin, deviceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if auth.role != roleRemoteHuman {
+		t.Errorf("role = %d, want roleRemoteHuman", auth.role)
+	}
+
+	if !auth.isHuman() || auth.isLocalHuman() {
+		t.Error("remote human: isHuman() true, isLocalHuman() false")
+	}
+
+	if auth.deviceID != deviceID {
+		t.Errorf("deviceID = %q, want %q", auth.deviceID, deviceID)
+	}
+}
+
+func TestResolveAuth_RemoteGuestReadOnly(t *testing.T) {
+	sm := newPairingSM(t)
+	id := TailnetIdentity{User: "speir@example.com", Node: "ben"}
+	now := time.Now()
+	rid, _, _ := sm.AddPendingPairing("bairn", testPubKey(t), id, now)
+	deviceID, token, _ := sm.ApprovePairing(rid, true, now) // readOnly
+
+	origin := ConnOrigin{Remote: true, Identity: &TailnetIdentity{User: "speir@example.com", Node: "ben"}}
+
+	auth, err := resolveAuth(sm, token, origin, deviceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if auth.role != roleRemoteGuest {
+		t.Errorf("role = %d, want roleRemoteGuest", auth.role)
+	}
+
+	if auth.isHuman() {
+		t.Error("roleRemoteGuest is read-only, not a full human")
+	}
+}
+
+func TestResolveAuth_RemoteIdentityMismatchIsRoleNone(t *testing.T) {
+	sm := newPairingSM(t)
+	id := TailnetIdentity{User: "speir@example.com", Node: "ben"}
+	now := time.Now()
+	rid, _, _ := sm.AddPendingPairing("bairn", testPubKey(t), id, now)
+	deviceID, token, _ := sm.ApprovePairing(rid, false, now)
+
+	// Same token + PoP, but the connection now comes from a different node.
+	origin := ConnOrigin{Remote: true, Identity: &TailnetIdentity{User: "speir@example.com", Node: "brae"}}
+
+	auth, err := resolveAuth(sm, token, origin, deviceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if auth.role != roleNone {
+		t.Errorf("role = %d, want roleNone when WhoIs identity does not match the paired record", auth.role)
+	}
+}
+
+func TestResolveAuth_RemoteWrongPoPDeviceIsRoleNone(t *testing.T) {
+	sm := newPairingSM(t)
+	id := TailnetIdentity{User: "speir@example.com", Node: "ben"}
+	now := time.Now()
+	rid, _, _ := sm.AddPendingPairing("bairn", testPubKey(t), id, now)
+	_, token, _ := sm.ApprovePairing(rid, false, now)
+
+	origin := ConnOrigin{Remote: true, Identity: &TailnetIdentity{User: "speir@example.com", Node: "ben"}}
+
+	// A valid token but PoP proved a *different* device ID → roleNone.
+	auth, err := resolveAuth(sm, token, origin, "some-other-device")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if auth.role != roleNone {
+		t.Errorf("role = %d, want roleNone when PoP device != token device", auth.role)
+	}
+}
+
+func TestResolveAuth_OrchestratorRole(t *testing.T) {
+	sm := newTestSMWithSessions(map[string]*SessionState{
+		"ben": {ID: "ben", Token: "tok-ben", SystemKind: SystemKindOrchestrator},
+	})
+
+	auth, err := resolveAuth(sm, "tok-ben", ConnOrigin{}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if auth.role != roleOrchestrator {
+		t.Errorf("role = %d, want roleOrchestrator", auth.role)
 	}
 }

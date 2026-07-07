@@ -73,7 +73,7 @@ func newTestHarness(t *testing.T) *testHarness {
 	go func() {
 		defer close(h.done)
 
-		HandleConnection(ctx, serverConn, sm, log)
+		HandleConnection(ctx, serverConn, ConnOrigin{}, sm, log)
 	}()
 
 	t.Cleanup(func() {
@@ -1423,7 +1423,7 @@ func TestAttachReplacesExistingClient(t *testing.T) {
 	go func() {
 		defer close(done2)
 
-		HandleConnection(ctx2, serverConn2, h1.sm, log)
+		HandleConnection(ctx2, serverConn2, ConnOrigin{}, h1.sm, log)
 	}()
 
 	writer2 := protocol.NewFrameWriter(clientConn2)
@@ -1487,7 +1487,7 @@ func TestConcurrentAttachDetach(t *testing.T) {
 			go func() {
 				defer close(done)
 
-				HandleConnection(ctx, serverConn, h.sm, log)
+				HandleConnection(ctx, serverConn, ConnOrigin{}, h.sm, log)
 			}()
 
 			writer := protocol.NewFrameWriter(clientConn)
@@ -1535,7 +1535,7 @@ func TestConnectionCloseWhileAttached(t *testing.T) {
 	go func() {
 		defer close(done)
 
-		HandleConnection(ctx, serverConn, h.sm, log)
+		HandleConnection(ctx, serverConn, ConnOrigin{}, h.sm, log)
 	}()
 
 	writer := protocol.NewFrameWriter(clientConn)
@@ -1600,7 +1600,7 @@ func TestContextCancellation(t *testing.T) {
 	go func() {
 		defer close(done)
 
-		HandleConnection(ctx, serverConn, sm, log)
+		HandleConnection(ctx, serverConn, ConnOrigin{}, sm, log)
 	}()
 
 	// Cancel the context
@@ -1817,7 +1817,7 @@ func TestKickedClientConnectionClosed(t *testing.T) {
 	go func() {
 		defer close(done2)
 
-		HandleConnection(ctx2, serverConn2, h1.sm, log)
+		HandleConnection(ctx2, serverConn2, ConnOrigin{}, h1.sm, log)
 	}()
 
 	writer2 := protocol.NewFrameWriter(clientConn2)
@@ -1896,7 +1896,7 @@ func TestKickedClientInputRejected(t *testing.T) {
 	ctxB, cancelB := context.WithCancel(context.Background())
 
 	doneB := make(chan struct{})
-	go func() { defer close(doneB); HandleConnection(ctxB, serverB, h1.sm, log) }()
+	go func() { defer close(doneB); HandleConnection(ctxB, serverB, ConnOrigin{}, h1.sm, log) }()
 
 	writerB := protocol.NewFrameWriter(clientB)
 	readerB := protocol.NewFrameReader(clientB)
@@ -2238,7 +2238,7 @@ func newTestHarnessWithConfig(t *testing.T, cfg *config.Config) *testHarness {
 	go func() {
 		defer close(h.done)
 
-		HandleConnection(ctx, serverConn, sm, log)
+		HandleConnection(ctx, serverConn, ConnOrigin{}, sm, log)
 	}()
 
 	t.Cleanup(func() {

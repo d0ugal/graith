@@ -5,28 +5,110 @@ import (
 	"strings"
 )
 
+// authRole is the resolved privilege class of a connection (design §B.3). It
+// makes authorization origin-aware so that "no token" over the network is never
+// treated as the local human.
+type authRole int
+
+const (
+	roleNone         authRole = iota // remote, unpaired/invalid — only handshake + pairing
+	roleLocalHuman                   // local Unix socket (the 0700 trust boundary)
+	roleRemoteHuman                  // paired remote device, PoP-verified, WhoIs matches
+	roleRemoteGuest                  // paired under require_pairing=false — read-only
+	roleSession                      // per-session agent token
+	roleOrchestrator                 // session token whose SystemKind == orchestrator
+)
+
 // authContext holds the resolved identity for a request after token validation.
 type authContext struct {
-	// sessionID is the authenticated session ID, or empty for unauthenticated
-	// (human) connections.
+	// role is the resolved privilege class (design §B.3).
+	role authRole
+	// sessionID is set for roleSession/roleOrchestrator (empty otherwise).
 	sessionID string
-	// authenticated is true when a valid token was presented.
+	// deviceID is set for roleRemoteHuman/roleRemoteGuest (empty otherwise).
+	deviceID string
+	// authenticated is true when a valid session token was presented. Retained
+	// so the existing handler checks keep working unchanged; the exhaustive
+	// role-based matrix (design §B.4, Task 6) replaces those call sites and
+	// makes the handler fully role-aware before any network listener lands.
 	authenticated bool
+	// origin describes where the connection came from (local vs remote tailnet).
+	origin ConnOrigin
 }
 
-// resolveAuth validates the token from the envelope and returns an authContext.
+// isHuman reports whether the caller is a human operator (local socket or a
+// PoP-verified paired remote human), as opposed to a session/agent.
+// roleRemoteGuest is intentionally excluded — it is read-only, not a full human.
+func (ac authContext) isHuman() bool {
+	return ac.role == roleLocalHuman || ac.role == roleRemoteHuman
+}
+
+// isLocalHuman reports whether the caller is on the local Unix socket. Used to
+// gate local-only operations (upgrade, reload, pairing approval).
+func (ac authContext) isLocalHuman() bool {
+	return ac.role == roleLocalHuman
+}
+
+// resolveAuth resolves the connection's role from its token, origin, and — for
+// remote connections — the device ID proven via proof-of-possession on this
+// connection (poppedDeviceID, empty until a valid auth_proof).
 // Must be called with sm.mu at least RLocked.
-func resolveAuth(sm *SessionManager, token string) (authContext, error) {
-	if token == "" {
-		return authContext{}, nil
+func resolveAuth(sm *SessionManager, token string, origin ConnOrigin, poppedDeviceID string) (authContext, error) {
+	// A session token authenticates an agent regardless of origin; the
+	// self/descendant limits are enforced downstream.
+	if token != "" {
+		if sid := sm.SessionForToken(token); sid != "" {
+			ac := authContext{role: roleSession, sessionID: sid, authenticated: true, origin: origin}
+			if ac.isOrchestrator(sm) {
+				ac.role = roleOrchestrator
+			}
+
+			return ac, nil
+		}
 	}
 
-	sid := sm.SessionForToken(token)
-	if sid == "" {
-		return authContext{}, fmt.Errorf("invalid token")
+	if !origin.Remote {
+		// Local Unix socket — the 0700 trust boundary. Empty token = local human.
+		if token == "" {
+			return authContext{role: roleLocalHuman, origin: origin}, nil
+		}
+		// A non-empty, non-session token is invalid locally: client/device
+		// tokens are only meaningful on remote connections.
+		return authContext{role: roleNone, origin: origin}, fmt.Errorf("invalid token")
 	}
 
-	return authContext{sessionID: sid, authenticated: true}, nil
+	// Remote connection: require proof-of-possession AND a client token that
+	// resolves to that same device, whose recorded tailnet identity matches the
+	// current WhoIs. Anything short of that is roleNone (Gate A restricts
+	// roleNone to the pairing messages).
+	if poppedDeviceID == "" {
+		return authContext{role: roleNone, origin: origin}, nil
+	}
+
+	d := sm.DeviceForToken(token)
+	if d == nil || d.ID != poppedDeviceID || !identityMatchesDevice(origin.Identity, d) {
+		return authContext{role: roleNone, origin: origin}, nil
+	}
+
+	role := roleRemoteHuman
+	if d.ReadOnly {
+		role = roleRemoteGuest
+	}
+
+	return authContext{role: role, deviceID: d.ID, origin: origin}, nil
+}
+
+// identityMatchesDevice reports whether the connection's current tailnet
+// identity matches the identity recorded when the device was paired. Fail
+// closed when the connection has no resolved identity, and require a non-empty
+// Node on both sides so a degenerate zero-value identity (e.g. a &TailnetIdentity{}
+// from a degraded WhoIs) can never match a device record with an empty Node.
+func identityMatchesDevice(id *TailnetIdentity, d *PairedDevice) bool {
+	if id == nil || id.Node == "" || d.TailnetNode == "" {
+		return false
+	}
+
+	return id.User == d.TailnetUser && id.Node == d.TailnetNode
 }
 
 type authRule int
@@ -105,13 +187,6 @@ func (ac authContext) checkTarget(sm *SessionManager, targetID string, rule auth
 	return fmt.Errorf("unknown auth rule")
 }
 
-// checkMsgPub validates msg_pub authorization. The sender_id is forced to the
-// authenticated session, so the recipient always knows who sent the message.
-// Any authenticated session may send to any inbox.
-func (ac authContext) checkMsgPub(_ *SessionManager, _ string) error {
-	return nil
-}
-
 func parseInboxStream(stream string) (string, bool) {
 	if !strings.HasPrefix(stream, "inbox:") {
 		return "", false
@@ -121,12 +196,18 @@ func parseInboxStream(stream string) (string, bool) {
 }
 
 // checkScenarioOp validates that the caller is authorized to operate on a
-// scenario. Unauthenticated callers (human CLI) are always allowed. Authenticated
-// callers must be the scenario's orchestrator or a descendant of it.
+// scenario. A human operator — the local CLI or a paired remote human — may
+// manage any scenario. A session must be the scenario's orchestrator or a
+// descendant of it. roleNone / read-only guests are rejected (Gate A also
+// blocks them from scenario_* over the network).
 // Must be called with sm.mu at least RLocked.
 func (ac authContext) checkScenarioOp(sm *SessionManager, scenarioName string) error {
-	if !ac.authenticated {
+	if ac.isHuman() {
 		return nil
+	}
+
+	if ac.role != roleSession && ac.role != roleOrchestrator {
+		return fmt.Errorf("not authorized to manage scenarios")
 	}
 
 	for _, sc := range sm.state.Scenarios {

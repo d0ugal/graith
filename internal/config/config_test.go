@@ -2414,3 +2414,249 @@ unles = ["-delete"]
 		t.Fatal("Load should reject an unknown per-rule key (unles)")
 	}
 }
+
+func TestParsePairRequestRate(t *testing.T) {
+	tests := []struct {
+		in        string
+		wantCount int
+		wantPer   time.Duration
+		wantErr   bool
+	}{
+		{"5/min", 5, time.Minute, false},
+		{"10/sec", 10, time.Second, false},
+		{"2/hour", 2, time.Hour, false},
+		{"1/minute", 1, time.Minute, false},
+		{" 3 / min ", 3, time.Minute, false},
+		{"5/wheesht", 0, 0, true},
+		{"haar", 0, 0, true},
+		{"0/min", 0, 0, true},
+		{"-1/min", 0, 0, true},
+		{"/min", 0, 0, true},
+		{"5/", 0, 0, true},
+		{"", 0, 0, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.in, func(t *testing.T) {
+			r, err := ParsePairRequestRate(tt.in)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ParsePairRequestRate(%q) err = %v, wantErr %v", tt.in, err, tt.wantErr)
+			}
+
+			if tt.wantErr {
+				return
+			}
+
+			if r.Count != tt.wantCount || r.Per != tt.wantPer {
+				t.Errorf("ParsePairRequestRate(%q) = {%d, %v}, want {%d, %v}", tt.in, r.Count, r.Per, tt.wantCount, tt.wantPer)
+			}
+		})
+	}
+}
+
+func TestRemoteConfigValidation(t *testing.T) {
+	t.Run("defaults", func(t *testing.T) {
+		cfg := Default()
+		r := cfg.Remote
+
+		if r.Enabled {
+			t.Error("default remote.enabled should be false")
+		}
+
+		if r.Mode != "tsnet" {
+			t.Errorf("default remote.mode = %q, want tsnet", r.Mode)
+		}
+
+		if r.Port != 4823 {
+			t.Errorf("default remote.port = %d, want 4823", r.Port)
+		}
+
+		if !r.RequirePairing {
+			t.Error("default remote.require_pairing should be true")
+		}
+
+		if err := r.Validate(); err != nil {
+			t.Errorf("default (disabled) remote config should validate: %v", err)
+		}
+	})
+
+	tests := []struct {
+		name    string
+		remote  RemoteConfig
+		wantErr bool
+	}{
+		{
+			name:    "disabled block with garbage still loads",
+			remote:  RemoteConfig{Enabled: false, Mode: "wheesht", AuthKeyFile: "~/ts-authkey"},
+			wantErr: false,
+		},
+		{
+			name:    "enabled tsnet defaults ok",
+			remote:  RemoteConfig{Enabled: true, Mode: "tsnet", Hostname: "ben", Port: 4823, RequirePairing: true},
+			wantErr: false,
+		},
+		{
+			name:    "enabled interface ok",
+			remote:  RemoteConfig{Enabled: true, Mode: "interface", Hostname: "brae", Port: 4823},
+			wantErr: false,
+		},
+		{
+			name:    "unknown mode rejected",
+			remote:  RemoteConfig{Enabled: true, Mode: "wheesht"},
+			wantErr: true,
+		},
+		{
+			name:    "interface with auth_key_file rejected",
+			remote:  RemoteConfig{Enabled: true, Mode: "interface", AuthKeyFile: "~/.config/graith/ts-authkey"},
+			wantErr: true,
+		},
+		{
+			name:    "interface with tags rejected",
+			remote:  RemoteConfig{Enabled: true, Mode: "interface", Tags: []string{"tag:graith"}},
+			wantErr: true,
+		},
+		{
+			name:    "tsnet with auth_key_file and tags ok",
+			remote:  RemoteConfig{Enabled: true, Mode: "tsnet", Port: 4823, AuthKeyFile: "~/.config/graith/ts-authkey", Tags: []string{"tag:graith"}},
+			wantErr: false,
+		},
+		{
+			name:    "valid pair_request_rate ok",
+			remote:  RemoteConfig{Enabled: true, Mode: "tsnet", Port: 4823, PairRequestRate: "5/min"},
+			wantErr: false,
+		},
+		{
+			name:    "garbage pair_request_rate rejected",
+			remote:  RemoteConfig{Enabled: true, Mode: "tsnet", PairRequestRate: "haar"},
+			wantErr: true,
+		},
+		{
+			name:    "allow_tailnet_users emails and tag entries ok",
+			remote:  RemoteConfig{Enabled: true, Mode: "tsnet", Port: 4823, AllowTailnetUsers: []string{"speir@example.com", "tag:graith"}},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.remote.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestRemoteConfigAllowsTaggedNodes(t *testing.T) {
+	no := RemoteConfig{AllowTailnetUsers: []string{"speir@example.com"}}
+	if no.AllowsTaggedNodes() {
+		t.Error("no tag: entry should mean tagged nodes are disallowed")
+	}
+
+	yes := RemoteConfig{AllowTailnetUsers: []string{"speir@example.com", "tag:graith"}}
+	if !yes.AllowsTaggedNodes() {
+		t.Error("a tag: entry should opt tagged nodes in")
+	}
+}
+
+func TestLoadConfigRemote(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+
+	toml := `
+[remote]
+enabled = true
+mode = "tsnet"
+hostname = "ben"
+port = 4823
+auth_key_file = "~/.config/graith/ts-authkey"
+tags = ["tag:graith"]
+allow_tailnet_users = ["speir@example.com"]
+require_pairing = true
+pair_request_rate = "5/min"
+`
+	if err := os.WriteFile(cfgPath, []byte(toml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if !cfg.Remote.Enabled || cfg.Remote.Hostname != "ben" || cfg.Remote.Port != 4823 {
+		t.Errorf("remote block did not load: %+v", cfg.Remote)
+	}
+}
+
+func TestLoadConfigRemoteInvalid(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+
+	toml := `
+[remote]
+enabled = true
+mode = "interface"
+auth_key_file = "~/.config/graith/ts-authkey"
+`
+	if err := os.WriteFile(cfgPath, []byte(toml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Load(cfgPath); err == nil {
+		t.Fatal("Load should reject a tsnet-only field in interface mode")
+	}
+}
+
+func TestLoadConfigRemoteDisabledLoads(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	// A disabled block with otherwise-invalid values must still load fine.
+	toml := `
+[remote]
+enabled = false
+mode = "interface"
+auth_key_file = "~/.config/graith/ts-authkey"
+tags = ["tag:graith"]
+`
+	if err := os.WriteFile(cfgPath, []byte(toml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Load(cfgPath); err != nil {
+		t.Fatalf("disabled remote block should load: %v", err)
+	}
+}
+
+func TestRemoteConfigPortValidation(t *testing.T) {
+	base := func() RemoteConfig {
+		return RemoteConfig{Enabled: true, Mode: "tsnet", Port: 4823, RequirePairing: true}
+	}
+
+	if err := base().Validate(); err != nil {
+		t.Fatalf("valid port rejected: %v", err)
+	}
+
+	bad := base()
+
+	bad.Port = 0
+	if err := bad.Validate(); err == nil {
+		t.Error("port 0 should be rejected")
+	}
+
+	bad = base()
+
+	bad.Port = 70000
+	if err := bad.Validate(); err == nil {
+		t.Error("port > 65535 should be rejected")
+	}
+
+	// A disabled block with a nonsense port still loads (validation is skipped).
+	off := base()
+	off.Enabled = false
+
+	off.Port = 0
+	if err := off.Validate(); err != nil {
+		t.Errorf("disabled block should not validate port: %v", err)
+	}
+}

@@ -247,6 +247,76 @@ func TestSandboxConfigPersistence(t *testing.T) {
 	}
 }
 
+func TestMigrateV12ToV13PairedDevices(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+
+	// A v12 state with no paired_devices field, as written by an older binary.
+	data := []byte(`{"version":12,"sessions":{
+		"braw1":{"id":"braw1","name":"bide-session","status":"running"}
+	}}`)
+	if err := writeFileAtomic(path, data); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := LoadState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if loaded.Version != CurrentStateVersion {
+		t.Errorf("version = %d, want %d after migration", loaded.Version, CurrentStateVersion)
+	}
+
+	if loaded.PairedDevices == nil {
+		t.Fatal("PairedDevices is nil after migration; want an initialized map")
+	}
+
+	if len(loaded.PairedDevices) != 0 {
+		t.Errorf("PairedDevices has %d entries, want 0", len(loaded.PairedDevices))
+	}
+
+	// The HMAC key is generated lazily, not by the migration.
+	if loaded.PairingHMACKey != "" {
+		t.Errorf("PairingHMACKey = %q, want empty until first pairing", loaded.PairingHMACKey)
+	}
+
+	// The pre-existing session must survive the migration untouched.
+	if s := loaded.Sessions["braw1"]; s == nil || s.Name != "bide-session" {
+		t.Error("braw1 session lost or altered during v12→v13 migration")
+	}
+}
+
+func TestEnsurePairingHMACKey(t *testing.T) {
+	s := NewState()
+
+	if s.PairingHMACKey != "" {
+		t.Fatalf("fresh state PairingHMACKey = %q, want empty", s.PairingHMACKey)
+	}
+
+	k1, err := s.EnsurePairingHMACKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if k1 == "" {
+		t.Fatal("EnsurePairingHMACKey returned empty key")
+	}
+
+	// Idempotent: a second call returns the same stored key.
+	k2, err := s.EnsurePairingHMACKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if k2 != k1 {
+		t.Errorf("second EnsurePairingHMACKey = %q, want stable %q", k2, k1)
+	}
+
+	if s.PairingHMACKey != k1 {
+		t.Errorf("PairingHMACKey = %q, want %q", s.PairingHMACKey, k1)
+	}
+}
+
 func TestMigrateApprovalsEnabledToAgentHooks(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
 

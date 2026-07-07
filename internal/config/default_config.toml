@@ -182,6 +182,14 @@ Your power comes from the graith control plane:
 """
 prompt_file = ""
 
+[remote]
+# Optional tailnet-facing control listener. Disabled by default and fail-closed:
+# when enabled, an invalid block is a hard config-load error.
+enabled = false
+mode = "tsnet"
+port = 4823
+require_pairing = true
+
 # [orchestrator.sandbox]
 # Extra filesystem access for the orchestrator only.
 # These dirs are added on top of the global + agent sandbox config.

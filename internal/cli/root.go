@@ -145,6 +145,8 @@ func registerCommands() {
 		registerReportStatusCmd()
 		registerRestartCmd()
 		registerResumeCmd()
+		registerPairCmd()
+		registerRemoteCmd()
 		registerSandboxCmd()
 		registerScenarioCmd()
 		registerStarCmd()
