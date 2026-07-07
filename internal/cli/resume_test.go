@@ -40,6 +40,29 @@ func TestResumeStatusErr(t *testing.T) {
 	}
 }
 
+func TestResumeAttachRejectsJSON(t *testing.T) {
+	origOut := out
+	origJSON := jsonOutput
+	origAttach := resumeAttach
+
+	defer func() {
+		out = origOut
+		jsonOutput = origJSON
+		resumeAttach = origAttach
+	}()
+
+	// --attach is interactive passthrough, incompatible with --json output. The
+	// guard must fire before any daemon connection is attempted.
+	err := executeWithArgs([]string{"--json", "resume", "--attach", "braw"})
+	if err == nil {
+		t.Fatal("expected error when --attach is combined with --json")
+	}
+
+	if !strings.Contains(err.Error(), "--attach cannot be combined with --json") {
+		t.Errorf("unexpected error message: %s", err.Error())
+	}
+}
+
 func TestResumeCmdRegistered(t *testing.T) {
 	registerCommands()
 
