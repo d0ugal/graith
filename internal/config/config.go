@@ -493,8 +493,8 @@ type SandboxConfig struct {
 	// (Linux + macOS). It has NO default — when the sandbox is enabled and
 	// Backend is unset the daemon fails closed with an actionable error. This
 	// is a deliberate pre-1.0 behaviour change (see the nono sandbox design doc).
-	Backend string `json:"backend,omitempty"    toml:"backend"`
-	Command string `json:"command,omitempty"    toml:"command"`
+	Backend string `json:"backend,omitempty" toml:"backend"`
+	Command string `json:"command,omitempty" toml:"command"`
 	// Profile (nono only) is the base profile graith's generated profile
 	// extends. Empty means nono's built-in "default" (its audited deny groups +
 	// base system paths). Set it to a maintained registry profile — e.g.
