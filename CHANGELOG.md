@@ -40,6 +40,8 @@
 
 ### Tests
 
+* **daemon:** harden TestInterruptSession_DefaultAgentSinglePress ([089402b](https://github.com/d0ugal/graith/commit/089402bb748d3da6ed619ce46ccff69ba603c85f))
+* **pty:** fix flaky TestSessionInterrupt on Linux ([01d2412](https://github.com/d0ugal/graith/commit/01d2412bd1cc01cbb7aea432e0724718be803ee7))
 * satisfy wsl linter in interrupt tests ([d21a032](https://github.com/d0ugal/graith/commit/d21a032361cfdddc1d261049716e7b1e3c5bbe1a))
 
 
