@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"time"
 
@@ -133,11 +134,16 @@ func (m *MCPManager) Reload(cfg *config.Config) {
 
 	var toKill []string
 
-	configChanged := len(newServers) != len(m.servers)
+	// A change to the global sandbox policy (enabling it, switching backend,
+	// adding read/write grants, network block, signal mode, …) must restart
+	// every running MCP server so a *tightened* policy actually applies to
+	// already-running processes — the launch path reads sandbox config only at
+	// start (see #788).
+	configChanged := len(newServers) != len(m.servers) || !reflect.DeepEqual(m.globalSbx, cfg.Sandbox)
 	if !configChanged {
 		for name, newCfg := range newServers {
 			oldCfg, ok := m.servers[name]
-			if !ok || oldCfg.Command != newCfg.Command || !slicesEqual(oldCfg.Args, newCfg.Args) || !mapsEqual(oldCfg.Env, newCfg.Env) {
+			if !ok || oldCfg.Command != newCfg.Command || !slicesEqual(oldCfg.Args, newCfg.Args) || !mapsEqual(oldCfg.Env, newCfg.Env) || !mcpSandboxEqual(oldCfg, newCfg) {
 				configChanged = true
 				break
 			}
@@ -367,6 +373,15 @@ func slicesEqual(a, b []string) bool {
 	}
 
 	return true
+}
+
+// mcpSandboxEqual reports whether two MCP server configs carry identical
+// per-server sandbox settings — the enable flag and the config override.
+// Reload compares these so tightening a per-server `[…sandbox]` override
+// restarts the running process instead of leaving it under the old, looser
+// policy (see #788).
+func mcpSandboxEqual(a, b config.MCPServerConfig) bool {
+	return reflect.DeepEqual(a.Sandbox, b.Sandbox) && reflect.DeepEqual(a.SandboxConfig, b.SandboxConfig)
 }
 
 func mapsEqual(a, b map[string]string) bool {
