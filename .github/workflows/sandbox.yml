@@ -236,11 +236,13 @@ jobs:
           [ "$fail" -eq 0 ]
 
       - name: graith tagged enforcement tests (nono)
-        # graith's nono enforcement test lives in
+        # graith's nono enforcement tests live in
         # internal/sandbox/nono_enforce_test.go behind the build tag
-        # `nono_enforce` (Linux-only) and is invoked as:
-        #     go test -tags nono_enforce ./internal/sandbox/ -run TestNonoEnforces
-        # The test skips cleanly if nono cannot enforce on the host, so it needs
+        # `nono_enforce` (Linux-only) and are invoked as:
+        #     go test -tags nono_enforce ./internal/sandbox/...
+        # No -run filter: the build tag alone selects the suite, so every tagged
+        # test runs (an over-narrow -run silently skipped most of them — #792).
+        # The tests skip cleanly if nono cannot enforce on the host, so they need
         # no continue-on-error. The grep guard fails the step red if the tagged
         # tests go missing rather than silently passing on a no-op.
         run: |
@@ -248,7 +250,11 @@ jobs:
           tag="nono_enforce"
           if grep -rqs -- "//go:build ${tag}" internal/sandbox/ 2>/dev/null; then
             echo "Found ${tag} build-tagged tests — running enforcement suite."
-            go test -tags "${tag}" ./internal/sandbox/... -run TestNonoEnforces -v
+            # No -run filter: run the whole sandbox package under the ${tag} tag,
+            # so every ${tag}-tagged test is included. An over-narrow -run
+            # (e.g. TestNonoEnforces) silently skips the profile-validation and
+            # `nono why` policy tests, defeating the point of the suite (#792).
+            go test -tags "${tag}" ./internal/sandbox/... -v
           else
             echo "::error title=Missing enforcement tests::No '${tag}' build-tagged tests found in internal/sandbox/."
             echo "FAILED: graith '${tag}' enforcement tests missing." >> "$GITHUB_STEP_SUMMARY"
