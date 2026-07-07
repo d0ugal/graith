@@ -64,6 +64,51 @@ func TestDiffAndBuild_MergeConflictTransition(t *testing.T) {
 	}
 }
 
+// TestDiffAndBuild_ConflictNotMaskedByExhaustedCap reproduces issue #771: once
+// the per-SHA notification cap is exhausted by informational notices, a conflict
+// detected afterwards must still be delivered (it's a directive signal that
+// auto-resumes the agent), not permanently masked on every subsequent poll.
+func TestDiffAndBuild_ConflictNotMaskedByExhaustedCap(t *testing.T) {
+	sm := newPRWatchSM()
+	cfg := allOnConfig()
+	cfg.Debounce = "0s"           // drive multiple polls within the test's instant
+	cfg.MaxNotificationsPerPR = 1 // one informational notice exhausts the cap
+	t1 := prWatchTarget{id: "thrawn", branch: "thrawn"}
+
+	// Prime: mergeable, passing CI, no comments.
+	sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 7, State: "open", HeadRefOid: "sha1", CIState: "passing",
+		Mergeable: "MERGEABLE", CommentsOK: true,
+	})
+
+	// An informational review comment consumes the single cap slot.
+	out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 7, State: "open", HeadRefOid: "sha1", CIState: "passing", Mergeable: "MERGEABLE",
+		IssueComments: []ghComment{{ID: 1, User: ghUser{Login: "ailsa"}, Body: "nit"}}, CommentsOK: true,
+	})
+	if len(out) != 1 || !strings.Contains(out[0], "review activity") {
+		t.Fatalf("review comment should notify and consume the cap, got %v", out)
+	}
+
+	// Cap is now exhausted. A conflict appears on the same head SHA — it must
+	// still be delivered rather than rejected with "cap" forever.
+	out = sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 7, State: "open", HeadRefOid: "sha1", CIState: "passing",
+		Mergeable: "CONFLICTING", CommentsOK: true,
+	})
+	if len(out) != 1 || !strings.Contains(out[0], "merge conflicts") {
+		t.Fatalf("conflict must be delivered despite exhausted cap, got %v", out)
+	}
+
+	// And once delivered, the cursor advances so it does not re-spam.
+	if out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 7, State: "open", HeadRefOid: "sha1", CIState: "passing",
+		Mergeable: "CONFLICTING", CommentsOK: true,
+	}); len(out) != 0 {
+		t.Fatalf("repeat conflict should not re-notify after delivery, got %v", out)
+	}
+}
+
 func TestDiffAndBuild_PrimeConflictNotMaskedByCIFailure(t *testing.T) {
 	// On the priming poll a PR is BOTH failing CI and conflicting. CI takes
 	// priority and is delivered first; the conflict must NOT be permanently
@@ -224,7 +269,7 @@ func TestGateRateLimit(t *testing.T) {
 	allowed := 0
 
 	for i := 0; i < 10; i++ {
-		if _, ok := sm.gate(cfg, "fash", cur); ok {
+		if _, ok := sm.gate(cfg, "fash", cur, false); ok {
 			allowed++
 		}
 	}
@@ -288,12 +333,40 @@ func TestGatePerSHACap(t *testing.T) {
 	allowed := 0
 
 	for i := 0; i < 5; i++ {
-		if _, ok := sm.gate(cfg, "fash", cur); ok {
+		if _, ok := sm.gate(cfg, "fash", cur, false); ok {
 			allowed++
 		}
 	}
 
 	if allowed != 2 {
 		t.Errorf("per-SHA cap should allow 2, allowed %d", allowed)
+	}
+}
+
+// TestGateDirectiveBypassesCap asserts that directive notices (CI failure, merge
+// conflict) are not blocked by the per-SHA cap and do not consume it, while
+// informational notices remain capped. Regression test for issue #771.
+func TestGateDirectiveBypassesCap(t *testing.T) {
+	sm := newPRWatchSM()
+	cfg := &config.PRWatchConfig{Enabled: true, Debounce: "0s", MaxNotificationsPerPR: 1}
+	cur := &prWatchCursor{failing: map[string]bool{}}
+
+	// Exhaust the cap with one informational notice.
+	if _, ok := sm.gate(cfg, "thrawn", cur, false); !ok {
+		t.Fatal("first informational notice should pass")
+	}
+
+	if _, ok := sm.gate(cfg, "thrawn", cur, false); ok {
+		t.Fatal("second informational notice should be capped")
+	}
+
+	// A directive notice must still get through despite the exhausted cap...
+	if reason, ok := sm.gate(cfg, "thrawn", cur, true); !ok {
+		t.Fatalf("directive notice must bypass the cap, got reason %q", reason)
+	}
+
+	// ...and must not have consumed the cap (notifyCount unchanged by directives).
+	if cur.notifyCount != 1 {
+		t.Errorf("directive notice must not increment notifyCount, got %d", cur.notifyCount)
 	}
 }
