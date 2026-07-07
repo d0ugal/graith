@@ -626,11 +626,13 @@ type SandboxConfig struct {
 	// hand-listing them via write_files.
 	//
 	// nono resolves "extends" by MERGING the base profile with graith's
-	// generated one, not by letting graith override it. Collection fields
-	// (filesystem.allow/read, environment.allow_vars, network.allow_domain, …)
-	// are UNIONED (append + dedup): graith's filesystem grants are always
-	// present, but graith's env allowlist can only WIDEN the base profile's, it
-	// cannot narrow it. A base profile that allows extra env vars, network
+	// generated one. Collection fields (filesystem.allow/read,
+	// environment.allow_vars, network.allow_domain, …) are UNIONED (append +
+	// dedup) — graith's grants are added to, not substituted for, the base's;
+	// only scalar fields (e.g. workdir.access, security.signal_mode) are
+	// child-overridden. So graith's filesystem grants are always present, but
+	// graith's env allowlist can only WIDEN the base profile's, it cannot narrow
+	// it. A base profile that allows extra env vars, network
 	// domains, set_vars, command policies, or session hooks (which run outside
 	// the sandbox) therefore relaxes graith's baseline — so a custom profile is
 	// only as tight as the operator has audited it to be. Choose a trusted,
@@ -754,7 +756,7 @@ func (s SandboxConfig) Merge(agent SandboxConfig) SandboxConfig {
 		Enabled:    s.Enabled || agent.Enabled,
 		Backend:    s.Backend,
 		Command:    s.Command,
-		Profile:    s.Profile,
+		Profile:    strings.TrimSpace(s.Profile),
 		SignalMode: s.SignalMode,
 		Network:    s.Network,
 	}
@@ -778,8 +780,12 @@ func (s SandboxConfig) Merge(agent SandboxConfig) SandboxConfig {
 		merged.Command = agent.Command
 	}
 
-	if agent.Profile != "" {
-		merged.Profile = agent.Profile
+	// Trim so a whitespace-only per-agent value is treated as unset (inherit the
+	// global profile) rather than clobbering it — matching buildNonoProfile,
+	// which trims at emission. Without this, " " would win here then silently
+	// fall back to "default", discarding a valid global profile.
+	if p := strings.TrimSpace(agent.Profile); p != "" {
+		merged.Profile = p
 	}
 
 	if agent.SignalMode != "" {
