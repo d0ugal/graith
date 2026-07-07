@@ -62,8 +62,9 @@ gr doctor            # checks safehouse is on $PATH
 ```bash
 # Homebrew (macOS or Linuxbrew)
 brew install nono
-# or the install script
-curl -fsSL https://nono.sh/install.sh | sh
+# or download the pinned release and verify its provenance before installing:
+#   https://github.com/nolabs-ai/nono/releases
+#   gh attestation verify <tarball> --repo nolabs-ai/nono
 
 gr doctor            # checks the nono binary, its version, and Landlock support
 ```

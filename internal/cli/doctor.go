@@ -23,6 +23,14 @@ import (
 
 var doctorAutofix bool
 
+// nonoInstallHint is the install guidance shown when the nono sandbox backend
+// can't enforce. It deliberately avoids the `curl … | sh` piped-shell pattern
+// the project moved away from in commit 0fa84fa / #697 — recommending a
+// piped remote shell from a security-focused tool would undercut that
+// hardening (issue #795). Point at brew and the pinned, attestation-verified
+// release download instead.
+const nonoInstallHint = "Install: brew install nono  (or download the pinned release from https://github.com/nolabs-ai/nono/releases and verify it with: gh attestation verify <tarball> --repo nolabs-ai/nono)"
+
 type doctorCheck struct {
 	Section string `json:"section"`
 	Level   string `json:"level"`
@@ -281,7 +289,7 @@ func (dc *doctorContext) checkSandboxBackend() {
 		case sandbox.BackendSafehouse:
 			dc.hintf("Install: brew install eugene1g/safehouse/agent-safehouse")
 		case sandbox.BackendNono:
-			dc.hintf("Install: brew install nono  (or: curl -fsSL https://nono.sh/install.sh | sh)")
+			dc.hintf("%s", nonoInstallHint)
 			dc.hintf("nono requires Linux kernel 5.13+ (Landlock) or macOS; minimum nono version %s", sandbox.MinNonoVersion)
 		}
 	case avail.Degraded:

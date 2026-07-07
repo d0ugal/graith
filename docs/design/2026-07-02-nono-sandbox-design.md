@@ -158,8 +158,9 @@ untrusted code.
 - **Not removing or replacing safehouse.** It stays the macOS-native option.
   This is additive.
 - **Not shipping or vendoring nono itself.** Like safehouse today, nono is an
-  external tool the user installs (`brew install nono` /
-  `curl -fsSL https://nono.sh/install.sh | sh`). graith detects it.
+  external tool the user installs (`brew install nono`, or a pinned release from
+  <https://github.com/nolabs-ai/nono/releases> verified with
+  `gh attestation verify`). graith detects it.
 - **Not wiring up credential injection in v1.** nono's `--credential`/proxy
   injection overlaps with graith #596 and needs a joined-up design (§C7, Open
   Questions). v1 maps filesystem + env allowlist + feature gates only.
