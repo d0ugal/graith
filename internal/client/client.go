@@ -143,11 +143,15 @@ func connect(cfg *config.Config, paths config.Paths, configFile string, autoUpgr
 }
 
 func probeDaemonVersion(sockPath string, paths config.Paths) string {
-	conn, err := net.DialTimeout("unix", sockPath, 500*time.Millisecond)
+	conn, err := net.DialTimeout("unix", sockPath, daemonDialTimeout)
 	if err != nil {
 		return ""
 	}
 	defer func() { _ = conn.Close() }()
+
+	// Bound the handshake so a stale/foreign socket that accepts but never
+	// replies can't hang the auto-upgrade version probe forever (issue #260).
+	_ = conn.SetDeadline(time.Now().Add(daemonHandshakeTimeout))
 
 	reader := protocol.NewFrameReader(conn)
 	writer := protocol.NewFrameWriter(conn)
