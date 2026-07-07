@@ -1,16 +1,55 @@
 package localmost
 
-// matchState carries the tokens being matched plus the engine, for @sub
-// recursion.
+// maxMatchSteps bounds the total matcher work for one command evaluation. The
+// seq/quant/closure matcher enumerates reachable end positions and recurses
+// combinatorially over quantified terms — a classic backtracking shape that can
+// go super-linear. Rules are operator-controlled, but a malicious agent
+// controls the command length, so a pathological rule against a long command
+// could otherwise pin a CPU on the approval path. The bound is far above any
+// realistic rule/command pairing. See issue #798.
+const maxMatchSteps = 1_000_000
+
+// evalBudget is a single work budget shared across every rule, unless
+// expression, and @sub recursion within one Engine.Evaluate call. When the
+// budget is exhausted, exhausted latches true and every subsequent seq returns
+// no positions; subPolicy observes the flag and fails closed to PolicyAsk
+// (human review) rather than trusting an incomplete match. A shared budget also
+// stops an attacker from multiplying the per-rule bound by the rule count or
+// @sub depth. See issue #798.
+type evalBudget struct {
+	steps     int
+	exhausted bool
+}
+
+// charge counts one unit of matcher work and reports whether the budget is now
+// exhausted. Once exhausted it stays exhausted (latched).
+func (b *evalBudget) charge() bool {
+	if b.exhausted {
+		return true
+	}
+
+	b.steps++
+	if b.steps > maxMatchSteps {
+		b.exhausted = true
+	}
+
+	return b.exhausted
+}
+
+// matchState carries the tokens being matched, the engine (for @sub recursion),
+// and the shared work budget.
 type matchState struct {
 	eng    *Engine
 	tokens []token
+	budget *evalBudget
 }
 
 // ruleMatches reports whether a compiled rule matches a subcommand: the term
 // sequence must consume all tokens, the redirect/pipe constraints must hold,
-// and no unless expression may appear anywhere in the tokens.
-func (e *Engine) ruleMatches(r compiledRule, sub subcommand) bool {
+// and no unless expression may appear anywhere in the tokens. Matcher work is
+// charged against the shared budget; callers must check budget.exhausted after
+// a false result, since an incomplete (budget-cut) match also returns false.
+func (e *Engine) ruleMatches(r compiledRule, sub subcommand, budget *evalBudget) bool {
 	if !redirectOK(r.redirect, sub) {
 		return false
 	}
@@ -19,7 +58,7 @@ func (e *Engine) ruleMatches(r compiledRule, sub subcommand) bool {
 		return false
 	}
 
-	ms := &matchState{eng: e, tokens: sub.tokens}
+	ms := &matchState{eng: e, tokens: sub.tokens, budget: budget}
 
 	for _, u := range r.unless {
 		if ms.appearsAnywhere(u) {
@@ -39,6 +78,10 @@ func (e *Engine) ruleMatches(r compiledRule, sub subcommand) bool {
 // seq returns every token index reachable after matching the whole term
 // sequence starting at pos.
 func (ms *matchState) seq(terms []term, pos int) []int {
+	if ms.budget.charge() {
+		return nil
+	}
+
 	if len(terms) == 0 {
 		return []int{pos}
 	}
@@ -49,7 +92,7 @@ func (ms *matchState) seq(terms []term, pos int) []int {
 	// @sub is terminal: it consumes the rest of the tokens as a subcommand that
 	// must itself resolve to allow.
 	if t.kind == termSub {
-		if ms.eng.tokensAllowed(ms.tokens[pos:]) {
+		if ms.eng.tokensAllowed(ms.tokens[pos:], ms.budget) {
 			return []int{len(ms.tokens)}
 		}
 

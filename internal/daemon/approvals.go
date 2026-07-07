@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"time"
+	"unicode/utf8"
 
 	"github.com/d0ugal/graith/internal/approvals"
 	"github.com/d0ugal/graith/internal/config"
@@ -264,11 +265,17 @@ func (sm *SessionManager) tryApprovalBackend(ctx context.Context, req protocol.A
 
 // truncateForDisplay caps a tool-input string for the approval overlay. The
 // untruncated value is still what backends evaluate; this only affects what is
-// shown to and broadcast to attached clients.
+// shown to and broadcast to attached clients. The cut backs off to a rune
+// boundary so a multi-byte character is never split into a mojibake tail.
 func truncateForDisplay(s string) string {
-	if len(s) > approvalDisplayLimit {
-		return s[:approvalDisplayLimit] + "..."
+	if len(s) <= approvalDisplayLimit {
+		return s
 	}
 
-	return s
+	cut := approvalDisplayLimit
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+
+	return s[:cut] + "..."
 }

@@ -7,10 +7,37 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
 )
+
+// TestTruncateForDisplayRuneBoundary guards issue #798: the display cut must not
+// split a multi-byte UTF-8 rune and leave a mojibake tail in the approval
+// overlay. A multi-byte rune straddling the byte limit should be dropped whole,
+// keeping the result valid UTF-8.
+func TestTruncateForDisplayRuneBoundary(t *testing.T) {
+	// "ü" is two bytes (0xC3 0xBC). Pad with ASCII so a "ü" straddles the
+	// approvalDisplayLimit byte offset, forcing a mid-rune cut.
+	s := strings.Repeat("a", approvalDisplayLimit-1) + "üüüü"
+
+	got := truncateForDisplay(s)
+
+	if !strings.HasSuffix(got, "...") {
+		t.Fatalf("expected truncation ellipsis, got %q", got)
+	}
+
+	body := strings.TrimSuffix(got, "...")
+	if !utf8.ValidString(body) {
+		t.Fatalf("truncated display split a rune: %q is not valid UTF-8", body)
+	}
+
+	// A short string is returned unchanged.
+	if short := "echo ünïcödé"; truncateForDisplay(short) != short {
+		t.Fatalf("short string altered: got %q, want %q", truncateForDisplay(short), short)
+	}
+}
 
 func TestSubmitApprovalTimeoutBlocksBeforeContextCancel(t *testing.T) {
 	sm := newTestSessionManager(t)
