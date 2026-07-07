@@ -100,6 +100,42 @@ func TestEngineExampleConfig(t *testing.T) {
 	}
 }
 
+// TestEnginePathMatching documents @path's semantics (issue #732): it matches
+// any valid POSIX pathname — non-empty and NUL-free — mirroring localmost.
+// @path is only marginally narrower than @arg: it accepts bare relative names,
+// option-looking tokens, and absolute paths, and rejects only the empty-string
+// argument. A deliberately un-tightened check keeps parity with localmost.
+func TestEnginePathMatching(t *testing.T) {
+	e := mustEngine(t, `{"allow":[{"rule":"mkdir @path"}]}`)
+
+	cases := []struct {
+		command string
+		want    Policy
+	}{
+		{"mkdir bothy", PolicyAllow},      // bare relative name is a valid path
+		{"mkdir /glen/wynd", PolicyAllow}, // absolute path
+		{"mkdir ./bothy", PolicyAllow},    // dot-relative path
+		{"mkdir ~/bothy", PolicyAllow},    // tilde path
+		{"mkdir .braw", PolicyAllow},      // dot-file
+		{"mkdir -x", PolicyAllow},         // option-looking token is still a valid path
+		{"mkdir 'a b'", PolicyAllow},      // spaces are fine in a path
+		{`mkdir ""`, PolicyAsk},           // empty-string arg is not a valid path
+	}
+
+	for _, c := range cases {
+		t.Run(c.command, func(t *testing.T) {
+			got, err := e.Evaluate(c.command)
+			if err != nil {
+				t.Fatalf("evaluate %q: %v", c.command, err)
+			}
+
+			if got != c.want {
+				t.Errorf("Evaluate(%q) = %q, want %q", c.command, got, c.want)
+			}
+		})
+	}
+}
+
 func TestEngineRedirects(t *testing.T) {
 	e := mustEngine(t, `{"allow":[{"rule":"echo @*"},{"rule":"cat @*"},{"rule":"tee @*","redirect":true}]}`)
 
