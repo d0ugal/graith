@@ -20,6 +20,10 @@ func keyPress(s string) tea.KeyPressMsg {
 		return tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift}
 	case "esc":
 		return tea.KeyPressMsg{Code: tea.KeyEscape}
+	case "pgup":
+		return tea.KeyPressMsg{Code: tea.KeyPgUp}
+	case "pgdown":
+		return tea.KeyPressMsg{Code: tea.KeyPgDown}
 	case "up":
 		return tea.KeyPressMsg{Code: tea.KeyUp}
 	case "down":
