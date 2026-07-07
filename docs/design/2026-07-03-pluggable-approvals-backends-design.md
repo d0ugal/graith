@@ -276,29 +276,46 @@ command  = "my-approver" # required; receives graith's JSON on stdin, prints {de
 # backend = "localmost" (real binary):
 #   command = "localmost"        # optional path override (default "localmost")
 
-# backend = "builtin" (graith's own engine):
+# backend = "builtin" (graith's own engine): point at an external file...
 [approvals.builtin]
 config = "~/.config/graith/approvals.json"   # localmost-format config.json
                                              # (default: this path, then $XDG)
+```
 
-# ...or, instead of an external file, define the rules inline (#737). The two
-# forms are mutually exclusive — setting both is a hard error.
+...**or**, instead of an external file, define the rules inline (#737). The two
+forms are mutually exclusive — setting both is a hard error. Pick one of the
+snippets below; they are alternatives, not to be combined in one config:
+
+```toml
+# Inline, flat form: bare rule strings plus the top-level flags.
 [approvals.builtin]
 allow = ["@arg @*"]
 deny  = ["shutdown @*", "reboot @*", "mkfs @*"]
 allowSafeXargs = true
 askNoninteractive = true
+```
 
-# For per-rule keys (unless/redirect/pipe), use arrays of tables:
+```toml
+# Inline, table form: for per-rule keys (unless/redirect/pipe) use arrays of
+# tables. Note a single key (allow) must use either bare strings OR tables, not
+# both, so this replaces the `allow = [...]` line above rather than adding to it.
 [[approvals.builtin.allow]]
 rule   = "find @*"
 unless = ["-exec", "-delete"]
+
+[[approvals.builtin.deny]]
+rule = "rm @arg*"
 ```
 
-`config.Approvals` gains `Backend string` and a nested
-`Builtin ApprovalsBuiltin{ Config string }`; the existing `Mode` field is kept
-only for back-compat. A `Backend()` accessor resolves the **effective** backend
-and encapsulates back-compat (§3).
+Unknown keys under `[approvals.builtin]` (or in a rule table) are rejected at
+config-load, so a misspelled `deny`/`unless` fails loudly rather than silently
+dropping a rule.
+
+`config.Approvals` gains `Backend string` and a nested `Builtin ApprovalsBuiltin`
+carrying either the external `Config` path or the inline
+`Allow`/`Deny`/`AllowSafeXargs`/`AskNoninteractive` rules; the existing `Mode`
+field is kept only for back-compat. A `Backend()` accessor resolves the
+**effective** backend and encapsulates back-compat (§3).
 
 ### 3. Backward compatibility
 
@@ -379,8 +396,9 @@ minimal `PreToolUse` envelope from `ToolName`/`ToolInput`, or falls back to
 `echo <command> | localmost check --mode text`. `Availability` requires the
 `localmost` binary on `PATH` (fail-closed).
 
-**`builtin` (`builtinBackend`)** — see §6. `Availability` requires a readable,
-valid `config.json` (fail-closed on parse error). Note this is itself a
+**`builtin` (`builtinBackend`)** — see §6. `Availability` requires either a
+readable, valid external `config.json` or a valid inline `[approvals.builtin]`
+ruleset (fail-closed on parse error). Note this is itself a
 **documented divergence** from localmost, which treats an invalid config as
 `ask` at runtime; we prefer a loud config error at session create.
 

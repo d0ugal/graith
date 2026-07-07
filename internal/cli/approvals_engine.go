@@ -34,11 +34,13 @@ func approvalsConfigPath(flag string) string {
 	return path
 }
 
-// approvalsEngine compiles the built-in approvals engine for the CLI. An
-// explicit --config flag always wins (external file); otherwise inline
+// approvalsEngine compiles the built-in approvals engine for the CLI. Among
+// rule sources an explicit --config flag wins (external file); otherwise inline
 // [approvals.builtin] rules are used when present, falling back to the
-// configured external config path. The returned source describes where the
-// rules came from, for human-readable output.
+// configured external config path. This selection only applies after the graith
+// config has loaded and validated: invalid inline rules still fail the whole
+// command at config-load, even when --config is passed. The returned source
+// describes where the rules came from, for human-readable output.
 func approvalsEngine(flag string) (engine *localmost.Engine, source string, err error) {
 	if strings.TrimSpace(flag) == "" && cfg.Approvals.Builtin.HasInline() {
 		data, jerr := cfg.Approvals.Builtin.InlineJSON()
