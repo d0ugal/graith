@@ -47,13 +47,17 @@ jobs:
           tarball="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
           url="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${tarball}"
           tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
           curl -fsSL --proto '=https' --tlsv1.2 "$url" -o "$tmp/$tarball"
           # Fail closed: only install if build provenance verifies against
-          # rhysd/actionlint (proves actionlint's own CI produced the artifact).
-          gh attestation verify "$tmp/$tarball" --repo rhysd/actionlint
+          # rhysd/actionlint's release workflow (proves actionlint's own CI
+          # produced the artifact). --signer-workflow pins the exact workflow,
+          # not just the repo, so a compromised non-release workflow in the same
+          # repo cannot mint a passing attestation.
+          gh attestation verify "$tmp/$tarball" --repo rhysd/actionlint \
+            --signer-workflow rhysd/actionlint/.github/workflows/release.yaml
           tar -xzf "$tmp/$tarball" -C "$tmp" actionlint
           sudo install -m 0755 "$tmp/actionlint" /usr/local/bin/actionlint
-          rm -rf "$tmp"
           actionlint --version
       - name: Run actionlint
         # shellcheck is preinstalled on ubuntu runners; actionlint shells out
@@ -88,16 +92,20 @@ jobs:
           tarball="zizmor-x86_64-unknown-linux-gnu.tar.gz"
           url="https://github.com/zizmorcore/zizmor/releases/download/v${ZIZMOR_VERSION}/${tarball}"
           tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
           curl -fsSL --proto '=https' --tlsv1.2 "$url" -o "$tmp/$tarball"
           # Fail closed: only install if build provenance verifies against
-          # zizmorcore/zizmor (proves zizmor's own CI produced the artifact).
-          gh attestation verify "$tmp/$tarball" --repo zizmorcore/zizmor
+          # zizmorcore/zizmor's release workflow (proves zizmor's own CI produced
+          # the artifact). --signer-workflow pins the exact workflow, not just the
+          # repo, so a compromised non-release workflow in the same repo cannot
+          # mint a passing attestation.
+          gh attestation verify "$tmp/$tarball" --repo zizmorcore/zizmor \
+            --signer-workflow zizmorcore/zizmor/.github/workflows/release-binaries.yml
           dest="$HOME/.local/bin"
           mkdir -p "$dest"
           tar -xzf "$tmp/$tarball" -C "$dest" zizmor
           chmod +x "$dest/zizmor"
           echo "$dest" >> "$GITHUB_PATH"
-          rm -rf "$tmp"
           "$dest/zizmor" --version
       - name: Run zizmor
         # --min-confidence=medium keeps the gate honest without blocking on
