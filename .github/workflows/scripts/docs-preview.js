@@ -13,6 +13,22 @@ const SCREENSHOTS_BRANCH = 'screenshots';
 const STICKY_MARKER = '<!-- docs-preview -->';
 const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
+// True only when the PR's head branch lives in the base repository itself, not
+// a fork. The publish path pushes the orphan `screenshots` branch and upserts a
+// sticky comment — both writes. GitHub downgrades `GITHUB_TOKEN` to read-only
+// for fork PRs regardless of the job's requested `permissions:`, so those write
+// calls 403 and fail the job on every external contributor's docs PR (#783).
+// The build/serve/screenshot steps need no token, so they still run and
+// validate the fork's docs render; only the publish step consults this guard
+// and no-ops for forks. Fail closed: a missing/deleted head repo counts as
+// "not same-repo" so we never attempt the doomed write.
+function isSameRepoPR(context) {
+  const pr = context && context.payload && context.payload.pull_request;
+  const headFullName = pr && pr.head && pr.head.repo && pr.head.repo.full_name;
+  if (!headFullName) return false;
+  return headFullName === `${context.repo.owner}/${context.repo.repo}`;
+}
+
 // Git's well-known empty-tree SHA. When a rewrite keeps nothing (the closing
 // PR held the only screenshots, or every dir is stale), createTree({ tree: [] })
 // is rejected by the GitHub API with a 422 — so point the commit at this
@@ -170,6 +186,16 @@ async function buildRewriteCommit({ github, owner, repo, kept, parentSha, messag
 // Remove one PR's screenshots on close, then note the cleanup in the sticky
 // comment.
 async function cleanup({ github, context, core }) {
+  // Fork PRs never publish screenshots (the publish step's same-repo guard
+  // skips them, #783), so there's nothing to remove — and the closed-event
+  // token is read-only for forks, so attempting the branch rewrite would 403.
+  // Skip fork PRs outright rather than relying on the "no matching prefix →
+  // no-op" path to happen to avoid a write. This job pins the PR base SHA, so
+  // this module is the trusted base version and the guard can't be tampered.
+  if (!isSameRepoPR(context)) {
+    core.info('Fork PR — no screenshots were published, nothing to clean up.');
+    return;
+  }
   const { owner, repo } = context.repo;
   const pr = context.payload.pull_request.number;
   const prefix = `pr-${pr}/`;
@@ -265,6 +291,7 @@ module.exports = {
   STICKY_MARKER,
   MAX_AGE_MS,
   EMPTY_TREE_SHA,
+  isSameRepoPR,
   listBlobsOrFail,
   isStaleRunDir,
   getBranchTip,

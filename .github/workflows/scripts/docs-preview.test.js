@@ -14,6 +14,7 @@ const assert = require('node:assert/strict');
 const {
   listBlobsOrFail,
   isStaleRunDir,
+  isSameRepoPR,
   commitToBranch,
   cleanup,
   prune,
@@ -135,9 +136,11 @@ function fakeGithub({ blobs = null, truncated = false, branchExists = true, comm
   return { github, calls };
 }
 
+// A same-repo PR context: head.repo.full_name matches owner/repo, so cleanup
+// treats it as a repo it published for and proceeds (#783).
 const context = {
   repo: { owner: 'clachan', repo: 'croft' },
-  payload: { pull_request: { number: 42 } },
+  payload: { pull_request: { number: 42, head: { repo: { full_name: 'clachan/croft' } } } },
 };
 
 test('listBlobsOrFail throws when the tree is truncated', async () => {
@@ -164,6 +167,28 @@ test('isStaleRunDir flags old run-dirs and spares recent/undated ones', () => {
   assert.equal(isStaleRunDir('pr-1/nodate/x.png', now), false);
   // Not a pr- dir -> kept.
   assert.equal(isStaleRunDir('README.md', now), false);
+});
+
+// --- isSameRepoPR fork guard (#783) ----------------------------------------
+
+// Build a github-script-style context whose head repo full_name is `head`.
+const prContext = (head) => ({
+  repo: { owner: 'clachan', repo: 'croft' },
+  payload: { pull_request: { head: { repo: head == null ? null : { full_name: head } } } },
+});
+
+test('isSameRepoPR is true when the PR head lives in the base repo', () => {
+  assert.equal(isSameRepoPR(prContext('clachan/croft')), true);
+});
+
+test('isSameRepoPR is false for a fork PR (different head repo)', () => {
+  assert.equal(isSameRepoPR(prContext('thrawn/croft')), false);
+});
+
+test('isSameRepoPR fails closed when the head repo is missing (deleted fork)', () => {
+  assert.equal(isSameRepoPR(prContext(null)), false);
+  // No pull_request payload at all must also fail closed, not throw.
+  assert.equal(isSameRepoPR({ repo: { owner: 'clachan', repo: 'croft' }, payload: {} }), false);
 });
 
 // --- commitToBranch compare-and-retry (#765) -------------------------------
@@ -350,6 +375,25 @@ test('cleanup no-ops when the branch does not exist', async () => {
   const core = fakeCore();
   await cleanup({ github, context, core });
   assert.equal(calls.createTree.length, 0);
+});
+
+// #783: a fork PR never published, and its closed-event token is read-only.
+// cleanup must skip before touching the branch — even if stale fork artifacts
+// exist — rather than 403 on the rewrite.
+test('cleanup skips fork PRs without reading or writing the branch', async () => {
+  const { github, calls } = fakeGithub({ blobs: ['pr-42/a/x.png', 'pr-7/b/z.png'] });
+  let readTree = false;
+  github.rest.git.getTree = async () => { readTree = true; return { data: { truncated: false, tree: [] } }; };
+  const forkContext = {
+    repo: { owner: 'clachan', repo: 'croft' },
+    payload: { pull_request: { number: 42, head: { repo: { full_name: 'thrawn/croft' } } } },
+  };
+  const core = fakeCore();
+  await cleanup({ github, context: forkContext, core });
+  assert.equal(readTree, false, 'must not even read the tree for a fork PR');
+  assert.equal(calls.createTree.length, 0);
+  assert.equal(calls.updateRef.length, 0);
+  assert.equal(calls.updatedComments.length, 0);
 });
 
 // Issue #766: the closing PR held the only screenshots on the branch, so

@@ -146,6 +146,29 @@ jobs:
             // Shared compare-and-retry loop for the single `screenshots` branch
             // every docs-preview writer contends over (issue #765). Resolved
             // relative to the workspace, per the github-script require docs.
+            // Fork PRs get a read-only GITHUB_TOKEN regardless of the job's
+            // requested permissions, so pushing the screenshots branch and
+            // upserting the comment would 403 and fail the job (#783). Publish
+            // only for same-repo PRs; forks still ran build/screenshot above,
+            // so their docs render is validated — just not previewed.
+            //
+            // Decide this INLINE, before requiring the workspace helper: for a
+            // `pull_request` event the workflow YAML is taken from the trusted
+            // base, but the checked-out workspace (including docs-preview.js)
+            // is the fork's PR merge ref. Reading the guard from that module
+            // would let a fork PR that also edits docs-preview.js bypass it and
+            // re-trigger the 403. The mirror of this check lives in the helper's
+            // `isSameRepoPR` (used by the base-pinned cleanup job) and is unit
+            // tested. Fail closed: a missing/deleted head repo skips publish.
+            const headRepo = context.payload.pull_request.head.repo;
+            const sameRepo =
+              !!headRepo && headRepo.full_name === `${context.repo.owner}/${context.repo.repo}`;
+            if (!sameRepo) {
+              core.info('Fork PR — screenshots are published only for same-repo PRs (fork PRs get a read-only token). Skipping publish.');
+              return;
+            }
+            // Same-repo PR: its head branch lives in the base repo, so the
+            // checked-out helper is trusted. Safe to require and run its writes.
             const { commitToBranch } = require('./.github/workflows/scripts/docs-preview.js');
             const { owner, repo } = context.repo;
             const pr = context.payload.pull_request.number;
