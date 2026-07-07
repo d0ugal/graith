@@ -195,6 +195,7 @@ func (dc *doctorContext) checkEnvironment() {
 
 	if _, err := os.Stat(paths.ConfigFile); err == nil {
 		dc.passf("environment", "Config file: %s", paths.ConfigFile)
+		dc.checkConfigKeys()
 	} else {
 		dc.warnf("environment", "No config file (using defaults): %s", paths.ConfigFile)
 		dc.hintf("Run: gr config reset")
@@ -257,6 +258,38 @@ func (dc *doctorContext) checkEnvironment() {
 		dc.passf("environment", "Agent prompt: customized")
 	default:
 		dc.passf("environment", "Agent prompt: default")
+	}
+}
+
+// checkConfigKeys warns about config keys graith doesn't recognise — typos or
+// options from a newer graith than this binary. It warns (never fails) because
+// the runtime load is intentionally lenient: silently ignoring unknown keys is
+// what preserves forward compatibility, so doctor is the place to surface "this
+// key isn't doing anything" without breaking the run. See issue #720.
+func (dc *doctorContext) checkConfigKeys() {
+	unknown, err := config.UnknownKeys(paths.ConfigFile)
+	if err != nil {
+		// A parse/read failure here would already have failed the daemon's own
+		// config load; don't double-report it as a doctor finding.
+		return
+	}
+
+	if len(unknown) == 0 {
+		dc.passf("environment", "Config keys: all recognised")
+		return
+	}
+
+	for _, u := range unknown {
+		table := u.Table
+		if table == "" {
+			table = "top level"
+		}
+
+		if u.Suggestion != "" {
+			dc.warnf("environment", "Unknown config key [%s] %q — did you mean %q? (ignored)", table, u.Name, u.Suggestion)
+		} else {
+			dc.warnf("environment", "Unknown config key [%s] %q — ignored (typo? unsupported in this version?)", table, u.Name)
+		}
 	}
 }
 
@@ -406,16 +439,6 @@ func (dc *doctorContext) checkSandboxPaths() {
 	add(allWriteFiles, cfg.Sandbox.WriteFiles, "global")
 
 	for name, agent := range cfg.Agents {
-		// Per-agent sandbox dirs only matter when the agent can actually
-		// launch. Skip the checks for agents whose command isn't resolvable
-		// on PATH — otherwise a single installed agent (e.g. "claude")
-		// produces a wall of spurious warnings for the built-in defaults of
-		// agents the user will never run. Paths shared with "global" or an
-		// installed agent are still checked, since they're added separately.
-		if !agentInstalled(agent.Command) {
-			continue
-		}
-
 		add(allReadDirs, agent.Sandbox.ReadDirs, name)
 		add(allWriteDirs, agent.Sandbox.WriteDirs, name)
 		add(allReadFiles, agent.Sandbox.ReadFiles, name)
