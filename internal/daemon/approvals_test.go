@@ -349,3 +349,57 @@ func TestSubmitApprovalDisabledAllows(t *testing.T) {
 		t.Error("approval should not be queued when approvals disabled")
 	}
 }
+
+// TestExpandTilde verifies the daemon expands a leading ~/ (after trimming
+// whitespace) so the documented default builtin config path resolves, matching
+// the CLI's approvalsConfigPath.
+func TestExpandTilde(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skipf("no home dir: %v", err)
+	}
+
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"tilde expanded", "~/.config/graith/approvals.json", filepath.Join(home, ".config/graith/approvals.json")},
+		{"leading whitespace trimmed then expanded", "  ~/glen.json  ", filepath.Join(home, "glen.json")},
+		{"absolute path untouched", "/etc/graith/approvals.json", "/etc/graith/approvals.json"},
+		{"empty stays empty", "", ""},
+		{"bare tilde not a prefix", "~croft", "~croft"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := expandTilde(c.in); got != c.want {
+				t.Errorf("expandTilde(%q) = %q, want %q", c.in, got, c.want)
+			}
+		})
+	}
+}
+
+// TestApprovalsBackendConfigExpandsTilde verifies the resolved backend config
+// carries an expanded external path, not a literal ~/.
+func TestApprovalsBackendConfigExpandsTilde(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skipf("no home dir: %v", err)
+	}
+
+	acfg, err := approvalsBackendConfig("builtin", config.Approvals{
+		Builtin: config.ApprovalsBuiltin{Config: "~/.config/graith/approvals.json"},
+	})
+	if err != nil {
+		t.Fatalf("approvalsBackendConfig: %v", err)
+	}
+
+	want := filepath.Join(home, ".config/graith/approvals.json")
+	if acfg.BuiltinConfig != want {
+		t.Errorf("BuiltinConfig = %q, want %q", acfg.BuiltinConfig, want)
+	}
+
+	if strings.HasPrefix(acfg.BuiltinConfig, "~") {
+		t.Error("BuiltinConfig should not retain a literal ~")
+	}
+}
