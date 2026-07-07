@@ -149,6 +149,7 @@ func TestDaemonRespondsFalseOnStuckSocket(t *testing.T) {
 	})
 
 	start := time.Now()
+
 	if daemonResponds(sockPath) {
 		t.Fatal("expected daemonResponds to be false for a socket that never replies")
 	}
@@ -223,6 +224,7 @@ func writeHandshakeResponse(t *testing.T, conn net.Conn, respType string) {
 	}
 
 	var payload any
+
 	switch respType {
 	case "handshake_ok":
 		payload = protocol.HandshakeOkMsg{Version: protocol.Version}
@@ -277,6 +279,7 @@ func TestEnsureDaemonStartsFreshWhenSocketStale(t *testing.T) {
 	// startup. The stub only records that a start was attempted and does not
 	// produce a real daemon, so EnsureDaemon times out waiting for a response.
 	started := false
+
 	stubStartDaemon(t, func(string) error {
 		started = true
 		return nil
