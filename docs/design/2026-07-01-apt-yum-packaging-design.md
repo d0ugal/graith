@@ -9,6 +9,19 @@ informed: (TBD)
 
 # apt & yum/dnf Packaging
 
+> **Status update (implemented in v0.63.0).** This doc was written as a
+> forward-looking design. Since v0.63.0 the full plan — plus several items it
+> originally deferred — has shipped: `.deb`/`.rpm`/`.apk` packages, signed
+> apt/yum repos on GitHub Pages, GPG signing, a man page (`gr man`, packaged as
+> `gr.1.gz`), an AUR scaffold, and retention/pruning of old versions in the
+> release workflow. The whole document is preserved as originally written
+> (2026-07-01) for historical context — in particular the "Background",
+> "Problem", and "Maintenance & cost" sections describe the pre-v0.63.0 state
+> and are written in the present tense of that time. Inline **[Implemented in
+> v0.63.0]** / **[Resolved in v0.63.0]** notes mark the specific statements that
+> no longer hold. See `.goreleaser.yaml` and
+> `.github/workflows/goreleaser.yml` for the current implementation.
+
 ## Background
 
 graith ships as a single Go binary (`gr`, module `github.com/d0ugal/graith`).
@@ -64,10 +77,14 @@ release machinery — not a bespoke build farm.
 - **No systemd unit.** `gr` is an interactive CLI; the daemon (`graithd`) is
   auto-started on first command and lives in the user's session, not as a
   system service. We do not ship a unit file.
-- **No man page (v1).** The CLI has no `GenManTree` today. Generating and
-  packaging a man page is deferred (see Open Questions).
+- **No man page (v1).** ~~The CLI has no `GenManTree` today. Generating and
+  packaging a man page is deferred (see Open Questions).~~ **[Implemented in
+  v0.63.0]** — `gr man` generates a man page, packaged as `gr.1.gz` in the
+  Linux packages (deb/rpm/apk).
 - **No Alpine/`apk`, Arch/AUR, Nix, Snap, Flatpak, or Windows packaging** — out
   of scope here; can follow the same pattern later if there's demand.
+  **[Partially implemented in v0.63.0]** — `.apk` packages and an AUR scaffold
+  shipped; Nix, Snap, Flatpak, and Windows remain out of scope.
 - **No changes to the binary, the daemon, or the CLI command surface.** This is
   purely packaging and distribution.
 - **No mirroring/CDN or Debian/Fedora upstream inclusion.** We are not seeking
@@ -185,7 +202,7 @@ GitHub Pages at, say, `https://d0ugal.github.io/graith-repo/`:
   pool/main/g/graith/*.deb
 /rpm/                       yum/dnf repo root
   repodata/repomd.xml{,.asc}
-  graith-<ver>.<arch>.rpm
+  graith_<ver>_linux_<arch>.rpm   # GoReleaser/nfpm default naming; the prune script parses the `_linux_` form
 /gpg/graith.asc             public signing key (ASCII-armored, for dnf/humans)
 /gpg/graith.gpg             public signing key (dearmored binary, for apt signed-by=)
 /gpg/graith-archive-keyring.gpg  copy of graith.gpg, conventional apt keyring name
@@ -304,12 +321,16 @@ already set.
 
 - **Cost:** $0. GitHub Pages hosting + GitHub Actions minutes only.
 - **Maintenance:** effectively none per release — the repo regenerates itself in
-  CI. The only recurring human tasks are (a) GPG key rotation (rare) and (b)
-  occasional pruning of very old package versions from the repo tree if the
-  Pages repo grows large.
-- **Repo size growth:** each release adds ~4 packages (2 formats × 2 arches).
-  With `aptly`/`createrepo_c` we can retain the last N versions and drop older
-  ones to bound the git history / Pages size.
+  CI. The only recurring human task is GPG key rotation (rare). ~~occasional
+  pruning of very old package versions from the repo tree if the Pages repo grows
+  large.~~ **[Implemented in v0.63.0]** — pruning is now automated: the release
+  workflow retains the newest `RETAIN_RELEASES` (currently 5) versions per arch
+  and drops older ones before regenerating metadata.
+- **Repo size growth:** each release adds ~6 packages (3 formats × 2 arches).
+  ~~With `aptly`/`createrepo_c` we can retain the last N versions and drop older
+  ones to bound the git history / Pages size.~~ **[Implemented in v0.63.0]** —
+  the release workflow's `prune_dir` helper retains the newest N versions per
+  arch (via `RETAIN_RELEASES`) to bound the git history / Pages size.
 
 ## Other Notes
 
@@ -322,16 +343,19 @@ follow the one-time "add key + repo" step above.
 
 ### Open questions / decisions to be made
 
-- **Repo hosting host:** confirm GitHub Pages self-hosted vs. adopting Fury.io
-  free tier (less CI to own, at the cost of a third-party URL and free-tier
-  limits). Recommendation is self-hosted, but Fury is a low-effort fallback if
-  the CI metadata generation proves fiddly.
-- **Repo layout / naming:** one repo (`d0ugal/graith-repo` with `/deb` +
-  `/rpm`) vs. two (`d0ugal/apt`, `d0ugal/yum`) to mirror `homebrew-tap`.
-- **apt tooling:** `aptly` (nicer publish/snapshot model, retention) vs.
-  `reprepro` (simpler, ships in Debian). Both are viable in CI.
-- **Man page:** add `GenManTree` to the CLI and package a man page under
-  `/usr/share/man/man1/gr.1`? Deferred to a follow-up unless wanted now.
+- **Repo hosting host:** ~~confirm GitHub Pages self-hosted vs. adopting Fury.io
+  free tier.~~ **[Resolved in v0.63.0]** — self-hosted GitHub Pages, as
+  recommended.
+- **Repo layout / naming:** ~~one repo (`d0ugal/graith-repo` with `/deb` +
+  `/rpm`) vs. two (`d0ugal/apt`, `d0ugal/yum`) to mirror `homebrew-tap`.~~
+  **[Resolved in v0.63.0]** — one repo, `d0ugal/graith-repo`.
+- **apt tooling:** ~~`aptly` (nicer publish/snapshot model, retention) vs.
+  `reprepro` (simpler, ships in Debian).~~ **[Resolved in v0.63.0]** — `aptly`
+  (with `createrepo_c` for the rpm side).
+- **Man page:** ~~add `GenManTree` to the CLI and package a man page under
+  `/usr/share/man/man1/gr.1`? Deferred to a follow-up unless wanted now.~~
+  **[Implemented in v0.63.0]** — `gr man` was added and `gr.1.gz` is packaged
+  under `/usr/share/man/man1/`.
 - **Package name:** confirm `graith` (recommended, matches the tap) vs. `gr`.
   `gr` is unclaimed on Debian (no `gr` package, no package shipping `/usr/bin/gr`),
   so it wouldn't collide, but `graith` is preferred for branding/discoverability
@@ -351,7 +375,8 @@ follow the one-time "add key + repo" step above.
    `apt-get install` / `dnf install` instructions to the README.
 3. **Phase 3 — polish.** Retention/pruning of old versions, optional man page,
    and (if demand appears) additional package formats (apk, AUR, etc.) following
-   the same GoReleaser-driven pattern.
+   the same GoReleaser-driven pattern. **[Implemented in v0.63.0]** — retention/
+   pruning, the man page, `.apk` packages, and an AUR scaffold all shipped.
 
 ### References
 
