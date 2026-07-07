@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func writeConfig(t *testing.T, body string) string {
@@ -103,6 +104,71 @@ func TestBuiltinBackendInline(t *testing.T) {
 				t.Errorf("decision = %q, want %q", d.Decision, c.want)
 			}
 		})
+	}
+}
+
+// TestBuiltinEngineCache verifies the compiled engine is reused while the
+// config file is unchanged, and reloaded (picking up new rules) once its mtime
+// changes.
+func TestBuiltinEngineCache(t *testing.T) {
+	p := writeConfig(t, `{"allow":[{"rule":"echo @*"}]}`)
+
+	first, err := loadEngineCached(p)
+	if err != nil {
+		t.Fatalf("first load: %v", err)
+	}
+
+	second, err := loadEngineCached(p)
+	if err != nil {
+		t.Fatalf("second load: %v", err)
+	}
+
+	if first != second {
+		t.Error("expected the cached engine to be reused for an unchanged file")
+	}
+
+	// Rewrite the file with different rules and bump the mtime so the cache key
+	// changes; the reload should return a fresh engine.
+	if err := os.WriteFile(p, []byte(`{"allow":[{"rule":"ls @*"}]}`), 0o600); err != nil {
+		t.Fatalf("rewrite config: %v", err)
+	}
+
+	later := time.Now().Add(2 * time.Second)
+	if err := os.Chtimes(p, later, later); err != nil {
+		t.Fatalf("chtimes: %v", err)
+	}
+
+	third, err := loadEngineCached(p)
+	if err != nil {
+		t.Fatalf("third load: %v", err)
+	}
+
+	if third == first {
+		t.Error("expected the engine to be reloaded after the file mtime changed")
+	}
+}
+
+// TestBuiltinEngineCacheReloadFailure verifies a reload failure surfaces the
+// error rather than serving a stale engine.
+func TestBuiltinEngineCacheReloadFailure(t *testing.T) {
+	p := writeConfig(t, builtinTestConfig)
+
+	if _, err := loadEngineCached(p); err != nil {
+		t.Fatalf("initial load: %v", err)
+	}
+
+	// Corrupt the file and bump its mtime so the cache is invalidated.
+	if err := os.WriteFile(p, []byte(`{"allow":[{"rule":"foo @("}]}`), 0o600); err != nil {
+		t.Fatalf("corrupt config: %v", err)
+	}
+
+	later := time.Now().Add(2 * time.Second)
+	if err := os.Chtimes(p, later, later); err != nil {
+		t.Fatalf("chtimes: %v", err)
+	}
+
+	if _, err := loadEngineCached(p); err == nil {
+		t.Error("expected an error when reloading an invalid config, got nil")
 	}
 }
 

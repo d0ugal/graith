@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/d0ugal/graith/internal/approvals/localmost"
 )
@@ -35,6 +38,19 @@ func (builtinBackend) Availability(cfg Config) Availability {
 	return Availability{CanEnforce: true}
 }
 
+// engineCacheEntry is a compiled engine plus the file identity it was compiled
+// from, so a reload can be skipped while the file is unchanged.
+type engineCacheEntry struct {
+	modTime time.Time
+	size    int64
+	engine  *localmost.Engine
+}
+
+var (
+	engineCacheMu sync.Mutex
+	engineCache   = map[string]engineCacheEntry{}
+)
+
 // builtinEngine compiles the localmost engine for the builtin backend, from the
 // inline ruleset when present, else from the external config.json path.
 func builtinEngine(cfg Config) (*localmost.Engine, error) {
@@ -47,7 +63,38 @@ func builtinEngine(cfg Config) (*localmost.Engine, error) {
 		return nil, fmt.Errorf("no builtin approvals config configured")
 	}
 
-	return localmost.Load(path)
+	return loadEngineCached(path)
+}
+
+// loadEngineCached returns the compiled engine for the config.json at path,
+// reusing a previously compiled engine while the file's mtime and size are
+// unchanged. On a stat or reload failure it returns the error rather than a
+// stale engine, and leaves any existing cache entry untouched so subsequent
+// calls keep surfacing the failure until the file is valid again.
+func loadEngineCached(path string) (*localmost.Engine, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, fmt.Errorf("stat approvals config: %w", err)
+	}
+
+	modTime := info.ModTime()
+	size := info.Size()
+
+	engineCacheMu.Lock()
+	defer engineCacheMu.Unlock()
+
+	if entry, ok := engineCache[path]; ok && entry.modTime.Equal(modTime) && entry.size == size {
+		return entry.engine, nil
+	}
+
+	engine, err := localmost.Load(path)
+	if err != nil {
+		return nil, err
+	}
+
+	engineCache[path] = engineCacheEntry{modTime: modTime, size: size, engine: engine}
+
+	return engine, nil
 }
 
 func (builtinBackend) Decide(_ context.Context, req Request, cfg Config) (Decision, error) {
