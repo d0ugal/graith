@@ -67,6 +67,11 @@ func connect(cfg *config.Config, paths config.Paths, configFile string, autoUpgr
 		return nil, err
 	}
 
+	// Bound the handshake so a daemon that dies between EnsureDaemon's probe and
+	// this connection can't hang the command forever. Cleared once the handshake
+	// completes; long-lived reads afterwards run without a deadline.
+	_ = c.conn.SetDeadline(time.Now().Add(daemonHandshakeTimeout))
+
 	if err := c.Handshake(); err != nil {
 		c.Close()
 		return nil, err
@@ -98,6 +103,10 @@ func connect(cfg *config.Config, paths config.Paths, configFile string, autoUpgr
 		c.Close()
 		return nil, fmt.Errorf("invalid handshake_ok payload: %w", err)
 	}
+
+	// Handshake done — clear the deadline so the long-lived connection can block
+	// on reads (attach, subscribe, approval waits) without timing out.
+	_ = c.conn.SetDeadline(time.Time{})
 
 	if autoUpgrade && version.Version != "dev" {
 		if hsOk.DaemonVersion != "" && hsOk.DaemonVersion != version.Version && version.IsNewer(version.Version, hsOk.DaemonVersion) {
