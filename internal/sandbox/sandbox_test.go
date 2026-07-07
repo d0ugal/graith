@@ -427,7 +427,7 @@ func TestNonoWrapArgvShapeAndAdversarialPaths(t *testing.T) {
 		t.Fatalf("cmd = %q, want nono", cmd)
 	}
 
-	want := []string{"run", "--profile", profilePath, "--", "claude", "resume", "--last"}
+	want := []string{"run", "--profile", profilePath, "--workdir", "/tmp/bothy", "--", "claude", "resume", "--last"}
 	if !slices.Equal(args, want) {
 		t.Fatalf("argv = %v, want %v", args, want)
 	}
@@ -450,6 +450,64 @@ func TestNonoWrapArgvShapeAndAdversarialPaths(t *testing.T) {
 
 	if !slices.Contains(got.Filesystem.Read, "--wynd") || !slices.Contains(got.Filesystem.Read, "/glen:ben") {
 		t.Errorf("adversarial paths not preserved in profile read list: %v", got.Filesystem.Read)
+	}
+}
+
+// TestNonoWrapEmitsWorkdirForSharedWorktree proves nono.Wrap passes an explicit
+// --workdir so nono resolves the workdir from opts.WorktreeDir (the read-write
+// scratch dir) rather than the process cwd. For a --share-worktree session the
+// PTY cwd is the read-only source worktree; without --workdir nono would apply
+// workdir.access = "readwrite" to the source, breaking the read-only guarantee
+// (issue #786).
+func TestNonoWrapEmitsWorkdirForSharedWorktree(t *testing.T) {
+	tmp := t.TempDir()
+	profilePath := filepath.Join(tmp, "kirk.json")
+	scratch := "/tmp/scratch/braw"
+
+	opts := WrapOpts{
+		Backend:     BackendNono,
+		WorktreeDir: scratch,
+		ReadDirs:    []string{"/hame/user/source-worktree"},
+		ProfilePath: profilePath,
+	}
+
+	_, args, err := Wrap("claude", nil, opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// --workdir must appear before the -- terminator and name the scratch dir.
+	sep := slices.Index(args, "--")
+	if sep < 0 {
+		t.Fatalf("argv %v has no -- terminator", args)
+	}
+
+	wd := slices.Index(args, "--workdir")
+	if wd < 0 || wd >= sep {
+		t.Fatalf("--workdir must appear before -- in argv %v", args)
+	}
+
+	if args[wd+1] != scratch {
+		t.Errorf("--workdir = %q, want scratch dir %q", args[wd+1], scratch)
+	}
+}
+
+// TestNonoWrapOmitsWorkdirWhenUnset guards the defensive branch: with no
+// WorktreeDir there is nothing to pin, so no --workdir is emitted (nono falls
+// back to its cwd resolution).
+func TestNonoWrapOmitsWorkdirWhenUnset(t *testing.T) {
+	tmp := t.TempDir()
+	profilePath := filepath.Join(tmp, "haar.json")
+
+	opts := WrapOpts{Backend: BackendNono, ProfilePath: profilePath}
+
+	_, args, err := Wrap("claude", nil, opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if slices.Contains(args, "--workdir") {
+		t.Errorf("no --workdir expected when WorktreeDir is empty, got %v", args)
 	}
 }
 

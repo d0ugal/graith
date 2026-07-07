@@ -326,7 +326,21 @@ func (nonoBackend) Wrap(command string, args []string, opts WrapOpts) (string, [
 		return "", nil, fmt.Errorf("write nono profile: %w", err)
 	}
 
-	wrapped := []string{"run", "--profile", profilePath, "--", command}
+	wrapped := []string{"run", "--profile", profilePath}
+
+	// Emit --workdir so nono resolves its workdir from opts.WorktreeDir rather
+	// than the process cwd. This matters for --share-worktree sessions: the PTY
+	// is spawned with its cwd set to the read-only source worktree, but the
+	// read-write workdir is the scratch dir (opts.WorktreeDir). Without an
+	// explicit --workdir, nono would resolve the workdir from the cwd (the
+	// source worktree) and apply profile.workdir.access = "readwrite" to it,
+	// making the source writable and breaking the read-only guarantee. safehouse
+	// already passes --workdir for the same reason.
+	if opts.WorktreeDir != "" {
+		wrapped = append(wrapped, "--workdir", opts.WorktreeDir)
+	}
+
+	wrapped = append(wrapped, "--", command)
 	wrapped = append(wrapped, args...)
 
 	return nono, wrapped, nil
