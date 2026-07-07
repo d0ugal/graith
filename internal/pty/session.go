@@ -336,6 +336,37 @@ func (s *Session) WriteInputAndSubmit(data []byte) error {
 	return s.writeInputLocked([]byte("\r"))
 }
 
+// interruptByte is the ETX control code (Ctrl-C), which TUI agents treat as an
+// interrupt request.
+const interruptByte = 0x03
+
+// Interrupt sends the interrupt byte (Ctrl-C, 0x03) to the PTY count times,
+// pausing delay between successive sends. Some agent TUIs (notably Claude)
+// ignore a single Ctrl-C and need two rapid presses to actually interrupt, so
+// the count and delay are configurable per agent (see issue #620). A count
+// below 1 sends once. The whole operation holds writeMu so the presses aren't
+// interleaved with other input.
+func (s *Session) Interrupt(count int, delay time.Duration) error {
+	if count < 1 {
+		count = 1
+	}
+
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	for i := 0; i < count; i++ {
+		if i > 0 && delay > 0 {
+			time.Sleep(delay)
+		}
+
+		if err := s.writeInputLocked([]byte{interruptByte}); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func (s *Session) writeInputLocked(data []byte) error {
 	s.mu.RLock()
 	exited := s.exited

@@ -152,6 +152,10 @@ type TypeMsg struct {
 	NoNewline bool   `json:"no_newline,omitempty"`
 }
 
+type InterruptMsg struct {
+	SessionID string `json:"session_id"`
+}
+
 type ResumeMsg struct {
 	SessionID string `json:"session_id"`
 }

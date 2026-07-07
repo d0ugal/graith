@@ -66,6 +66,69 @@ func TestSessionEcho(t *testing.T) {
 	}
 }
 
+func TestSessionInterrupt(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "test.log")
+
+	// A bare `sleep` runs as the foreground process on the PTY, so the interrupt
+	// byte (0x03) is turned into SIGINT by the line discipline and kills it.
+	s, err := NewSession(SessionOpts{
+		ID: "braw", Command: "sh", Args: []string{"-c", "sleep 30"},
+		Dir: t.TempDir(), Rows: 24, Cols: 80,
+		LogPath: logPath, MaxLogSize: 1024 * 1024,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	if err := s.Interrupt(1, 0); err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+
+	select {
+	case <-s.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout: interrupt did not terminate the process")
+	}
+
+	if !s.Exited() {
+		t.Error("expected process to have exited after interrupt")
+	}
+}
+
+func TestSessionInterruptCountAndDelay(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "test.log")
+
+	// Ignore SIGINT so the process survives every press — this lets us observe
+	// that Interrupt sends `count` times and sleeps `delay` between each.
+	s, err := NewSession(SessionOpts{
+		ID: "canny", Command: "sh", Args: []string{"-c", "trap '' INT; sleep 30"},
+		Dir: t.TempDir(), Rows: 24, Cols: 80,
+		LogPath: logPath, MaxLogSize: 1024 * 1024,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	// Give the trap time to install before interrupting.
+	time.Sleep(200 * time.Millisecond)
+
+	start := time.Now()
+	if err := s.Interrupt(3, 100*time.Millisecond); err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+
+	// 3 presses with a 100ms gap means at least 2 gaps (~200ms) of sleeping.
+	if elapsed := time.Since(start); elapsed < 180*time.Millisecond {
+		t.Errorf("Interrupt returned after %v, want >= ~200ms for the inter-press delays", elapsed)
+	}
+
+	if s.Exited() {
+		t.Error("process ignoring SIGINT should still be running")
+	}
+}
+
 func TestSessionAttachDetach(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "test.log")
 

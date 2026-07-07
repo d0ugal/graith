@@ -1101,6 +1101,115 @@ func TestMergeAgent(t *testing.T) {
 			t.Errorf("InjectPrompt = %v, want true (preserved from default)", got.InjectPrompt)
 		}
 	})
+
+	t.Run("override interrupt fields", func(t *testing.T) {
+		count, delay := 3, 150
+		usr := Agent{InterruptCount: &count, InterruptDelayMs: &delay}
+
+		got := mergeAgent(def, usr)
+		if got.InterruptCount == nil || *got.InterruptCount != 3 {
+			t.Errorf("InterruptCount = %v, want 3", got.InterruptCount)
+		}
+
+		if got.InterruptDelayMs == nil || *got.InterruptDelayMs != 150 {
+			t.Errorf("InterruptDelayMs = %v, want 150", got.InterruptDelayMs)
+		}
+	})
+
+	t.Run("nil interrupt fields preserve default", func(t *testing.T) {
+		count, delay := 2, 200
+		defWithInt := def
+		defWithInt.InterruptCount = &count
+		defWithInt.InterruptDelayMs = &delay
+		usr := Agent{Command: "auld-claude"}
+
+		got := mergeAgent(defWithInt, usr)
+		if got.InterruptCount == nil || *got.InterruptCount != 2 {
+			t.Errorf("InterruptCount = %v, want 2 (preserved from default)", got.InterruptCount)
+		}
+
+		if got.InterruptDelayMs == nil || *got.InterruptDelayMs != 200 {
+			t.Errorf("InterruptDelayMs = %v, want 200 (preserved from default)", got.InterruptDelayMs)
+		}
+	})
+}
+
+func TestAgentInterruptAccessors(t *testing.T) {
+	t.Run("unset defaults to count 1 delay 0", func(t *testing.T) {
+		a := Agent{}
+		if got := a.InterruptCountValue(); got != 1 {
+			t.Errorf("InterruptCountValue() = %d, want 1", got)
+		}
+
+		if got := a.InterruptDelay(); got != 0 {
+			t.Errorf("InterruptDelay() = %v, want 0", got)
+		}
+	})
+
+	t.Run("configured values are honoured", func(t *testing.T) {
+		count, delay := 2, 200
+		a := Agent{InterruptCount: &count, InterruptDelayMs: &delay}
+
+		if got := a.InterruptCountValue(); got != 2 {
+			t.Errorf("InterruptCountValue() = %d, want 2", got)
+		}
+
+		if got := a.InterruptDelay(); got != 200*time.Millisecond {
+			t.Errorf("InterruptDelay() = %v, want 200ms", got)
+		}
+	})
+
+	t.Run("count below 1 is clamped to 1", func(t *testing.T) {
+		zero := 0
+		neg := -5
+		if got := (Agent{InterruptCount: &zero}).InterruptCountValue(); got != 1 {
+			t.Errorf("InterruptCountValue() = %d, want 1", got)
+		}
+
+		if got := (Agent{InterruptCount: &neg}).InterruptCountValue(); got != 1 {
+			t.Errorf("InterruptCountValue() = %d, want 1", got)
+		}
+	})
+
+	t.Run("negative delay is treated as 0", func(t *testing.T) {
+		neg := -10
+		if got := (Agent{InterruptDelayMs: &neg}).InterruptDelay(); got != 0 {
+			t.Errorf("InterruptDelay() = %v, want 0", got)
+		}
+	})
+}
+
+func TestDefaultConfigClaudeInterrupt(t *testing.T) {
+	cfg := Default()
+
+	claude, ok := cfg.Agents["claude"]
+	if !ok {
+		t.Fatal("default config has no claude agent")
+	}
+
+	if got := claude.InterruptCountValue(); got != 2 {
+		t.Errorf("claude InterruptCountValue() = %d, want 2", got)
+	}
+
+	if got := claude.InterruptDelay(); got != 200*time.Millisecond {
+		t.Errorf("claude InterruptDelay() = %v, want 200ms", got)
+	}
+
+	// Other known agents keep the single-press default.
+	for _, name := range []string{"codex", "opencode", "cursor", "agy"} {
+		agent, ok := cfg.Agents[name]
+		if !ok {
+			continue
+		}
+
+		if got := agent.InterruptCountValue(); got != 1 {
+			t.Errorf("%s InterruptCountValue() = %d, want 1", name, got)
+		}
+
+		if got := agent.InterruptDelay(); got != 0 {
+			t.Errorf("%s InterruptDelay() = %v, want 0", name, got)
+		}
+	}
 }
 
 func TestLoadConfigRepos(t *testing.T) {

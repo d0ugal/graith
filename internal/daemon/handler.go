@@ -982,6 +982,31 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					SessionID string `json:"session_id"`
 				}{t.SessionID})
 
+			case "interrupt":
+				var in protocol.InterruptMsg
+				if err := protocol.DecodePayload(msg, &in); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid interrupt message"})
+					continue
+				}
+
+				sm.mu.RLock()
+				authErr := auth.checkTarget(sm, in.SessionID, authSelfOrDescendant)
+				sm.mu.RUnlock()
+
+				if authErr != nil {
+					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
+					continue
+				}
+
+				if err := sm.InterruptSession(in.SessionID); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+					continue
+				}
+
+				sendControl("interrupted", struct {
+					SessionID string `json:"session_id"`
+				}{in.SessionID})
+
 			case "resize":
 				var r protocol.ResizeMsg
 				if err := protocol.DecodePayload(msg, &r); err != nil {

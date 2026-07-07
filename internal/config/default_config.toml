@@ -238,6 +238,10 @@ command = "claude"
 args = ["--session-id", "{agent_session_id}"]
 resume_args = ["--resume", "{agent_session_id}"]
 fork_args = ["--resume", "{fork_source_agent_session_id}", "--fork-session", "--session-id", "{agent_session_id}"]
+# Claude's TUI ignores a single Ctrl-C; it needs two rapid presses (~200ms
+# apart) to actually interrupt. Other agents default to a single Ctrl-C.
+interrupt_count = 2
+interrupt_delay_ms = 200
 
 [agents.claude.sandbox]
 read_dirs = ["~/.claude"]
