@@ -1557,6 +1557,7 @@ func toSessionInfo(s SessionState, cfg *config.Config, hr *hookReport) protocol.
 		Sandboxed:      s.Sandboxed,
 		SharedWorktree: s.SharedWorktree,
 		InPlace:        s.InPlace,
+		Yolo:           s.Yolo,
 		Model:          s.Model,
 		ToolName:       s.HookToolName,
 		ConfigStale:    isConfigStale(s, cfg),

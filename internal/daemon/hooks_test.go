@@ -1069,6 +1069,54 @@ func TestGenerateClaudeSettingsYoloInstallsPreToolUse(t *testing.T) {
 	}
 }
 
+// TestInjectCodexHooksYoloInstallsPermissionRequest verifies a yolo codex
+// session installs the permission-request (approve-request) hook script even
+// when global approval gating is off.
+func TestInjectCodexHooksYoloInstallsPermissionRequest(t *testing.T) {
+	sm := newTestSessionManagerWithDataDir(t)
+	disabled := false
+	sm.cfg.Approvals.Enabled = &disabled
+
+	_, extraEnv, err := sm.injectCodexHooks("bonnie-codex-yolo", true)
+	if err != nil {
+		t.Fatalf("injectCodexHooks() error = %v", err)
+	}
+
+	hooksDir := extraEnv["CODEX_HOOKS_DIR"]
+
+	script, err := os.ReadFile(filepath.Join(hooksDir, "permission-request"))
+	if err != nil {
+		t.Fatalf("permission-request script missing for yolo session: %v", err)
+	}
+
+	if !strings.Contains(string(script), "approve-request") {
+		t.Error("yolo permission-request script missing approve-request command")
+	}
+}
+
+// TestInjectCursorHooksYoloInstallsPreToolUse verifies a yolo cursor session
+// installs the preToolUse approve-request hook even when gating is off.
+func TestInjectCursorHooksYoloInstallsPreToolUse(t *testing.T) {
+	sm := newTestSessionManagerWithDataDir(t)
+	disabled := false
+	sm.cfg.Approvals.Enabled = &disabled
+
+	worktree := t.TempDir()
+
+	if _, _, err := sm.injectCursorHooks("bonnie-cursor-yolo", worktree, true); err != nil {
+		t.Fatalf("injectCursorHooks() error = %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(worktree, ".cursor", "hooks.json"))
+	if err != nil {
+		t.Fatalf("read cursor hooks: %v", err)
+	}
+
+	if !strings.Contains(string(data), "preToolUse") || !strings.Contains(string(data), "approve-request") {
+		t.Errorf("yolo cursor hooks missing preToolUse approve-request: %s", data)
+	}
+}
+
 func TestInjectCodexHooksApprovalsDisabled(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 	disabled := false

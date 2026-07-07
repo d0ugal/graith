@@ -288,6 +288,7 @@ type SessionInfo struct {
 	Sandboxed       bool               `json:"sandboxed,omitempty"`
 	SharedWorktree  bool               `json:"shared_worktree,omitempty"`
 	InPlace         bool               `json:"in_place,omitempty"`
+	Yolo            bool               `json:"yolo,omitempty"`
 	Model           string             `json:"model,omitempty"`
 	ToolName        string             `json:"tool_name,omitempty"`
 	Includes        []IncludedRepoInfo `json:"includes,omitempty"`
