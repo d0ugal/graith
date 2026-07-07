@@ -1323,9 +1323,19 @@ func closestKey(key string, known []string) string {
 		}
 	}
 
-	maxDist := len(key) / 2
+	// Only offer a suggestion when the nearest key is a plausible typo: up to a
+	// third of the key's length in edits, floored at 2 (so short keys like
+	// "arg"/"args" still match) and capped at 3. The cap matters for forward
+	// compatibility — a genuinely new, long key from a newer graith should warn
+	// as unknown without a misleading "did you mean" pointing at an unrelated
+	// existing key. Length is measured in runes to match levenshtein's unit.
+	maxDist := len([]rune(key)) / 3
 	if maxDist < 2 {
 		maxDist = 2
+	}
+
+	if maxDist > 3 {
+		maxDist = 3
 	}
 
 	if bestDist >= 0 && bestDist <= maxDist {
