@@ -3404,6 +3404,82 @@ func TestDeleteSucceedsWhenWorktreeAlreadyGone(t *testing.T) {
 	}
 }
 
+func TestDeleteRemovesNonoProfile(t *testing.T) {
+	sm := newTestSessionManager(t)
+	sm.paths.RuntimeDir = t.TempDir()
+
+	sm.state.Sessions["braw1"] = &SessionState{
+		ID:           "braw1",
+		Name:         "braw",
+		Agent:        "claude",
+		RepoPath:     "/nonexistent/repo",
+		WorktreePath: "/nonexistent/worktree",
+		Branch:       "graith/braw-braw1",
+		Status:       StatusStopped,
+	}
+
+	profilePath := sm.nonoProfilePath("braw1")
+	if err := os.MkdirAll(filepath.Dir(profilePath), 0o700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(profilePath, []byte("{}"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	if err := sm.Delete("braw1"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	if _, err := os.Stat(profilePath); !os.IsNotExist(err) {
+		t.Errorf("nono profile should be removed after delete, stat err = %v", err)
+	}
+}
+
+func TestDeleteWithChildrenRemovesNonoProfiles(t *testing.T) {
+	sm := newTestSessionManager(t)
+	sm.paths.RuntimeDir = t.TempDir()
+
+	sm.state.Sessions["ben1"] = &SessionState{
+		ID:           "ben1",
+		Name:         "ben",
+		Agent:        "claude",
+		RepoPath:     "/nonexistent/repo",
+		WorktreePath: "/nonexistent/worktree",
+		Branch:       "graith/ben-ben1",
+		Status:       StatusStopped,
+	}
+	sm.state.Sessions["bairn1"] = &SessionState{
+		ID:           "bairn1",
+		Name:         "bairn",
+		Agent:        "claude",
+		RepoPath:     "/nonexistent/repo",
+		WorktreePath: "/nonexistent/worktree",
+		Branch:       "graith/bairn-bairn1",
+		ParentID:     "ben1",
+		Status:       StatusStopped,
+	}
+
+	for _, id := range []string{"ben1", "bairn1"} {
+		p := sm.nonoProfilePath(id)
+		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+			t.Fatalf("MkdirAll: %v", err)
+		}
+		if err := os.WriteFile(p, []byte("{}"), 0o600); err != nil {
+			t.Fatalf("WriteFile: %v", err)
+		}
+	}
+
+	if _, err := sm.DeleteWithChildren("ben1", false); err != nil {
+		t.Fatalf("DeleteWithChildren: %v", err)
+	}
+
+	for _, id := range []string{"ben1", "bairn1"} {
+		if _, err := os.Stat(sm.nonoProfilePath(id)); !os.IsNotExist(err) {
+			t.Errorf("nono profile for %s should be removed, stat err = %v", id, err)
+		}
+	}
+}
+
 func TestDeleteReparentsChildren(t *testing.T) {
 	sm := newTestSessionManager(t)
 

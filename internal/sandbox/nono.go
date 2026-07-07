@@ -415,6 +415,12 @@ func (opts WrapOpts) profileName() string {
 // non-empty the daemon has chosen a stable location (under RuntimeDir) that is
 // readable inside the sandbox and lives for the process lifetime; the parent
 // directory is created. Otherwise a temp file is used.
+//
+// In both cases the profile must outlive this call — the sandboxed process
+// reads it for its whole lifetime — so writeNonoProfile never removes the file
+// it returns. The caller owns removal: the daemon deletes the stable profile in
+// SessionManager.Delete (see nonoProfilePath), and temp-file callers (e.g.
+// `gr sandbox why`) must remove the returned path themselves.
 func writeNonoProfile(p nonoProfile, path string) (string, error) {
 	data, err := json.MarshalIndent(p, "", "  ")
 	if err != nil {
