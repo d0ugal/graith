@@ -59,3 +59,19 @@ jobs:
         # release-triggered setup-go). Real issues (template injection,
         # dangerous triggers, over-broad permissions) surface at medium+.
         run: uvx "zizmor==${ZIZMOR_VERSION}" --min-confidence=medium .github/workflows/
+
+  scripts:
+    name: workflow scripts
+    # Unit tests for the JS helpers used by github-script steps (e.g.
+    # docs-preview cleanup/prune). Uses the Node built-in test runner — no
+    # package.json or dependencies. Guards the #763 truncation-safety fix.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - name: Run workflow script tests
+        # Let bash expand the glob so Node receives explicit file paths — this
+        # works on every Node ≥ 18, whereas Node's own `--test` glob support
+        # only landed in v21 and the runner's system Node isn't pinned here.
+        run: node --test .github/workflows/scripts/*.test.js
