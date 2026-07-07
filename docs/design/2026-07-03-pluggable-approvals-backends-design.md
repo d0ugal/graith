@@ -270,8 +270,9 @@ backend  = "builtin"     # "" (none) | command | external | localmost | builtin
 timeout  = "10m"
 auto_pop = false         # unchanged: auto-open the overlay when a request is queued
 
-# backend = "command" / "external":
-command  = "my-approver" # required; receives graith's JSON on stdin, prints {decision,reason}
+# backend = "command" / "external" (uncomment for those backends — with
+# backend = "builtin" a set command is a hard error):
+#   command = "my-approver" # required; receives graith's JSON on stdin, prints {decision,reason}
 
 # backend = "localmost" (real binary):
 #   command = "localmost"        # optional path override (default "localmost")

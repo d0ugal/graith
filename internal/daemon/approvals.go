@@ -13,11 +13,14 @@ import (
 	"github.com/d0ugal/graith/internal/protocol"
 )
 
-// expandTilde expands a leading ~/ in path to the user's home directory,
-// matching the CLI's approvalsConfigPath. Without this the daemon would pass a
-// literal ~/... path to localmost.Load and fail to open the documented default
-// [approvals.builtin] config = "~/.config/graith/approvals.json".
+// expandTilde trims surrounding whitespace and expands a leading ~/ to the
+// user's home directory, matching the CLI's approvalsConfigPath exactly (trim
+// then expand). Without this the daemon would pass a literal ~/... path to
+// localmost.Load and fail to open the documented default [approvals.builtin]
+// config = "~/.config/graith/approvals.json".
 func expandTilde(path string) string {
+	path = strings.TrimSpace(path)
+
 	if strings.HasPrefix(path, "~/") {
 		if home, err := os.UserHomeDir(); err == nil {
 			return filepath.Join(home, path[2:])

@@ -314,6 +314,9 @@ func TestApprovalsValidate(t *testing.T) {
 		// Per-rule table validation (#737 hardening).
 		{"inline rule table ok", Approvals{Backend: "builtin", Builtin: ApprovalsBuiltin{Allow: []any{map[string]any{"rule": "find @*", "unless": []any{"-delete"}}}}}, false},
 		{"inline rule table unknown key rejected", Approvals{Backend: "builtin", Builtin: ApprovalsBuiltin{Allow: []any{map[string]any{"rule": "find @*", "unles": []any{"-delete"}}}}}, true},
+		// The localmost #781 guard rejects an unless term matching the empty
+		// command; inline rules compile through localmost.Parse so they get it too.
+		{"inline empty unless rejected", Approvals{Backend: "builtin", Builtin: ApprovalsBuiltin{Deny: []any{map[string]any{"rule": "rm @arg*", "unless": []any{""}}}}}, true},
 		{"inline rule table missing rule rejected", Approvals{Backend: "builtin", Builtin: ApprovalsBuiltin{Allow: []any{map[string]any{"unless": []any{"-delete"}}}}}, true},
 		{"inline rule table empty rule rejected", Approvals{Backend: "builtin", Builtin: ApprovalsBuiltin{Deny: []any{map[string]any{"rule": "  "}}}}, true},
 		{"inline non-string non-table rejected", Approvals{Backend: "builtin", Builtin: ApprovalsBuiltin{Allow: []any{42}}}, true},
