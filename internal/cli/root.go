@@ -143,6 +143,7 @@ func registerCommands() {
 		registerRenameCmd()
 		registerReportStatusCmd()
 		registerRestartCmd()
+		registerResumeCmd()
 		registerSandboxCmd()
 		registerScenarioCmd()
 		registerStarCmd()
