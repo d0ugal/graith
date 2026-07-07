@@ -28,10 +28,12 @@ type pendingApproval struct {
 func (sm *SessionManager) SubmitApproval(ctx context.Context, req protocol.ApprovalRequestMsg) protocol.ApprovalDecisionMsg {
 	sm.mu.RLock()
 	approvalsCfg := sm.cfg.Approvals
+
 	yolo := false
 	if sess, ok := sm.state.Sessions[req.SessionID]; ok {
 		yolo = sess.Yolo
 	}
+
 	sm.mu.RUnlock()
 
 	// A yolo session auto-approves every request via the "auto" backend,
@@ -264,6 +266,7 @@ func (sm *SessionManager) decideWithBackend(ctx context.Context, req protocol.Ap
 	// for it — otherwise an unrelated malformed [approvals.builtin] config would
 	// make a yolo session fall through to the human queue.
 	var acfg approvals.Config
+
 	if backendName != approvals.BackendAuto {
 		var err error
 
