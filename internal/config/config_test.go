@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/d0ugal/graith/internal/approvals/localmost"
 )
 
 func TestLoadConfig(t *testing.T) {
@@ -280,6 +282,8 @@ func TestApprovalsResolveBackendValidatedByConfig(t *testing.T) {
 	}
 }
 
+func boolPtr(b bool) *bool { return &b }
+
 func TestApprovalsValidate(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -300,6 +304,12 @@ func TestApprovalsValidate(t *testing.T) {
 		// Conflicts from ResolveBackend still surface.
 		{"unknown backend", Approvals{Backend: "thrawn"}, true},
 		{"conflicting backend+mode", Approvals{Backend: "builtin", Mode: "localmost"}, true},
+
+		// Inline builtin ruleset (#737).
+		{"inline allow rules ok", Approvals{Backend: "builtin", Builtin: ApprovalsBuiltin{Allow: []any{"echo @*"}}}, false},
+		{"inline flag only ok", Approvals{Backend: "builtin", Builtin: ApprovalsBuiltin{AskNoninteractive: boolPtr(false)}}, false},
+		{"inline invalid rule rejected", Approvals{Backend: "builtin", Builtin: ApprovalsBuiltin{Allow: []any{"foo @("}}}, true},
+		{"inline + external file conflict", Approvals{Backend: "builtin", Builtin: ApprovalsBuiltin{Config: "/tmp/approvals.json", Allow: []any{"echo @*"}}}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -2060,5 +2070,118 @@ enabled = false
 
 	if cfg.Approvals.HookEnabled() {
 		t.Error("HookEnabled() = true, want false when disabled in TOML")
+	}
+}
+
+// TestLoadConfigInlineApprovalsBareStrings verifies the bare-string array form
+// of inline builtin rules decodes and compiles (#737).
+func TestLoadConfigInlineApprovalsBareStrings(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	toml := `
+[approvals]
+backend = "builtin"
+
+[approvals.builtin]
+allow = ["echo @*", "ls @*"]
+deny = ["rm @arg*"]
+allowSafeXargs = true
+askNoninteractive = false
+`
+	_ = os.WriteFile(cfgPath, []byte(toml), 0o600)
+
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	b := cfg.Approvals.Builtin
+	if !b.HasInline() {
+		t.Fatal("HasInline() = false, want true")
+	}
+
+	if len(b.Allow) != 2 || len(b.Deny) != 1 {
+		t.Errorf("allow=%v deny=%v", b.Allow, b.Deny)
+	}
+
+	if b.AskNoninteractive == nil || *b.AskNoninteractive {
+		t.Errorf("askNoninteractive = %v, want false", b.AskNoninteractive)
+	}
+
+	data, err := b.InlineJSON()
+	if err != nil {
+		t.Fatalf("InlineJSON: %v", err)
+	}
+
+	if _, err := localmost.Parse(data); err != nil {
+		t.Fatalf("inline rules should compile: %v", err)
+	}
+}
+
+// TestLoadConfigInlineApprovalsTables verifies the array-of-tables form (with
+// per-rule keys like unless) decodes and compiles (#737).
+func TestLoadConfigInlineApprovalsTables(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	toml := `
+[approvals]
+backend = "builtin"
+
+[[approvals.builtin.allow]]
+rule = "find @*"
+unless = ["-exec", "-delete"]
+
+[[approvals.builtin.deny]]
+rule = "rm @arg*"
+`
+	_ = os.WriteFile(cfgPath, []byte(toml), 0o600)
+
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	b := cfg.Approvals.Builtin
+	if len(b.Allow) != 1 || len(b.Deny) != 1 {
+		t.Fatalf("allow=%v deny=%v", b.Allow, b.Deny)
+	}
+
+	data, err := b.InlineJSON()
+	if err != nil {
+		t.Fatalf("InlineJSON: %v", err)
+	}
+
+	engine, err := localmost.Parse(data)
+	if err != nil {
+		t.Fatalf("inline rules should compile: %v", err)
+	}
+
+	// The unless clause should exempt find -delete from the allow rule.
+	if pol, _ := engine.Evaluate("find . -name x"); pol != localmost.PolicyAllow {
+		t.Errorf("find without unless term: policy = %q, want allow", pol)
+	}
+
+	if pol, _ := engine.Evaluate("find . -delete"); pol == localmost.PolicyAllow {
+		t.Errorf("find -delete should not be allowed (unless clause), got %q", pol)
+	}
+}
+
+// TestLoadConfigInlineApprovalsConflict verifies the external file + inline
+// conflict is rejected at load (#737).
+func TestLoadConfigInlineApprovalsConflict(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	toml := `
+[approvals]
+backend = "builtin"
+
+[approvals.builtin]
+config = "~/.config/graith/approvals.json"
+allow = ["echo @*"]
+`
+	_ = os.WriteFile(cfgPath, []byte(toml), 0o600)
+
+	if _, err := Load(cfgPath); err == nil {
+		t.Fatal("Load should reject both config path and inline rules being set")
 	}
 }

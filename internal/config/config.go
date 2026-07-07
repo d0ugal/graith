@@ -2,6 +2,7 @@ package config
 
 import (
 	_ "embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/adrg/xdg"
+	"github.com/d0ugal/graith/internal/approvals/localmost"
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -266,10 +268,58 @@ type Approvals struct {
 	Builtin ApprovalsBuiltin `toml:"builtin"`
 }
 
-// ApprovalsBuiltin configures the built-in localmost-compatible engine.
+// ApprovalsBuiltin configures the built-in localmost-compatible engine. Rules
+// can be supplied either as a path to an external localmost-format config.json
+// (Config), or inline in config.toml via Allow/Deny/AllowSafeXargs/
+// AskNoninteractive. The two forms are mutually exclusive (see Approvals.Validate).
 type ApprovalsBuiltin struct {
 	// Config is the path to a localmost-format config.json (allow/deny rules).
 	Config string `toml:"config"`
+
+	// Allow and Deny are the inline allow/deny rulesets. Each element is either
+	// a bare rule string ("@arg @*") or a table with per-rule keys
+	// (rule/unless/redirect/pipe). They are decoded as []any so both TOML forms
+	// — an array of strings and an array of tables ([[approvals.builtin.allow]])
+	// — are accepted, then converted to the localmost schema (see InlineJSON).
+	Allow []any `toml:"allow"`
+	Deny  []any `toml:"deny"`
+
+	// AllowSafeXargs and AskNoninteractive mirror the localmost top-level flags.
+	// nil means unset (the engine's default of true applies).
+	AllowSafeXargs    *bool `toml:"allowSafeXargs"`
+	AskNoninteractive *bool `toml:"askNoninteractive"`
+}
+
+// HasInline reports whether any inline ruleset field is set. When true, the
+// rules are read from config.toml rather than an external Config file.
+func (b ApprovalsBuiltin) HasInline() bool {
+	return b.Allow != nil || b.Deny != nil || b.AllowSafeXargs != nil || b.AskNoninteractive != nil
+}
+
+// InlineJSON renders the inline ruleset as localmost-format config.json bytes,
+// so the existing (tested) localmost parser can compile it. The TOML keys map
+// 1:1 to the localmost JSON schema (allow/deny/allowSafeXargs/askNoninteractive,
+// and per-rule rule/unless/redirect/pipe), so a plain JSON re-encode suffices.
+func (b ApprovalsBuiltin) InlineJSON() ([]byte, error) {
+	payload := map[string]any{}
+
+	if b.Allow != nil {
+		payload["allow"] = b.Allow
+	}
+
+	if b.Deny != nil {
+		payload["deny"] = b.Deny
+	}
+
+	if b.AllowSafeXargs != nil {
+		payload["allowSafeXargs"] = *b.AllowSafeXargs
+	}
+
+	if b.AskNoninteractive != nil {
+		payload["askNoninteractive"] = *b.AskNoninteractive
+	}
+
+	return json.Marshal(payload)
 }
 
 // legacyModeBackend maps a deprecated [approvals] mode value to its effective
@@ -388,6 +438,31 @@ func (a Approvals) Validate() error {
 				`or by backend="localmost" as the binary override); `+
 				`set backend="command" to use it as an external approver, or remove command`,
 			a.Command, backend)
+	}
+
+	// The builtin engine's rules come from either an external file (Config) or
+	// inline TOML — never both. A conflict is a hard error (mirrors mode vs
+	// backend) rather than a silent precedence rule.
+	if strings.TrimSpace(a.Builtin.Config) != "" && a.Builtin.HasInline() {
+		return fmt.Errorf(
+			"[approvals.builtin] config (external file) and inline rules " +
+				"(allow/deny/allowSafeXargs/askNoninteractive) are both set; " +
+				"use one or the other")
+	}
+
+	// Compile the inline ruleset now so a malformed rule fails at config-load
+	// with a clear message instead of an opaque fail-closed session crash. This
+	// is a pure static check (no file IO); the external-file path is deferred to
+	// session-create availability, mirroring the other backends.
+	if a.Builtin.HasInline() {
+		data, err := a.Builtin.InlineJSON()
+		if err != nil {
+			return fmt.Errorf("[approvals.builtin] encode inline rules: %w", err)
+		}
+
+		if _, err := localmost.Parse(data); err != nil {
+			return fmt.Errorf("[approvals.builtin] inline rules are invalid: %w", err)
+		}
 	}
 
 	return nil

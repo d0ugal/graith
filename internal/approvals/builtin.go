@@ -18,15 +18,14 @@ type builtinBackend struct{}
 func (builtinBackend) Name() string { return BackendBuiltin }
 
 func (builtinBackend) Availability(cfg Config) Availability {
-	path := strings.TrimSpace(cfg.BuiltinConfig)
-	if path == "" {
+	if len(cfg.BuiltinInline) == 0 && strings.TrimSpace(cfg.BuiltinConfig) == "" {
 		return Availability{
 			CanEnforce: false,
-			Detail:     `approvals backend "builtin" requires [approvals.builtin] config to be set`,
+			Detail:     `approvals backend "builtin" requires [approvals.builtin] config (external file) or inline rules to be set`,
 		}
 	}
 
-	if _, err := localmost.Load(path); err != nil {
+	if _, err := builtinEngine(cfg); err != nil {
 		return Availability{
 			CanEnforce: false,
 			Detail:     fmt.Sprintf(`approvals backend "builtin" config is invalid: %v`, err),
@@ -36,18 +35,28 @@ func (builtinBackend) Availability(cfg Config) Availability {
 	return Availability{CanEnforce: true}
 }
 
+// builtinEngine compiles the localmost engine for the builtin backend, from the
+// inline ruleset when present, else from the external config.json path.
+func builtinEngine(cfg Config) (*localmost.Engine, error) {
+	if len(cfg.BuiltinInline) > 0 {
+		return localmost.Parse(cfg.BuiltinInline)
+	}
+
+	path := strings.TrimSpace(cfg.BuiltinConfig)
+	if path == "" {
+		return nil, fmt.Errorf("no builtin approvals config configured")
+	}
+
+	return localmost.Load(path)
+}
+
 func (builtinBackend) Decide(_ context.Context, req Request, cfg Config) (Decision, error) {
 	// localmost only reasons about shell commands; defer other tools.
 	if req.ToolName != "Bash" {
 		return Decision{Decision: DecisionDefer}, nil
 	}
 
-	path := strings.TrimSpace(cfg.BuiltinConfig)
-	if path == "" {
-		return Decision{Decision: DecisionDefer}, fmt.Errorf("no builtin approvals config configured")
-	}
-
-	engine, err := localmost.Load(path)
+	engine, err := builtinEngine(cfg)
 	if err != nil {
 		return Decision{Decision: DecisionDefer}, fmt.Errorf("load builtin approvals config: %w", err)
 	}
