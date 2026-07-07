@@ -194,6 +194,42 @@ func TestPrintQuietJSONIDs(t *testing.T) {
 	}
 }
 
+func TestPrintQuietEmptyJSON(t *testing.T) {
+	origOut := out
+	origJSON := jsonOutput
+
+	defer func() {
+		out = origOut
+		jsonOutput = origJSON
+	}()
+
+	var buf bytes.Buffer
+
+	jsonOutput = true
+	out = output.NewWithWriter(true, &buf)
+
+	cmd := &cobra.Command{}
+	cmd.SetOut(&buf)
+
+	if err := printQuiet(cmd, nil); err != nil {
+		t.Fatalf("printQuiet: %v", err)
+	}
+
+	// An empty list must serialize as [] not null, so jq consumers work.
+	var ids []string
+	if err := json.Unmarshal(buf.Bytes(), &ids); err != nil {
+		t.Fatalf("output is not a JSON array: %v (%q)", err, buf.String())
+	}
+
+	if len(ids) != 0 {
+		t.Errorf("got %v, want empty array", ids)
+	}
+
+	if !bytes.Contains(buf.Bytes(), []byte("[]")) {
+		t.Errorf("empty list should serialize as [], got %q", buf.String())
+	}
+}
+
 func TestPrintQuietDoesNotMutateInput(t *testing.T) {
 	origJSON := jsonOutput
 
