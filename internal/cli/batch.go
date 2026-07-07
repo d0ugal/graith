@@ -37,12 +37,27 @@ func (bf *batchFlags) active() bool {
 var dayPattern = regexp.MustCompile(`(\d+)d`)
 
 func parseStaleDuration(s string) (time.Duration, error) {
+	var convErr error
+
 	expanded := dayPattern.ReplaceAllStringFunc(s, func(match string) string {
 		numStr := match[:len(match)-1]
-		n, _ := strconv.Atoi(numStr)
+		n, err := strconv.Atoi(numStr)
+		if err != nil {
+			convErr = fmt.Errorf("invalid day count %q: %w", numStr, err)
+
+			return match
+		}
+		if n <= 0 {
+			convErr = fmt.Errorf("day count must be positive, got %d", n)
+
+			return match
+		}
 
 		return fmt.Sprintf("%dh", n*24)
 	})
+	if convErr != nil {
+		return 0, convErr
+	}
 
 	return time.ParseDuration(expanded)
 }

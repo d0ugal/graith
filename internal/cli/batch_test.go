@@ -34,9 +34,20 @@ func TestParseStaleDuration(t *testing.T) {
 }
 
 func TestParseStaleDurationErrors(t *testing.T) {
-	_, err := parseStaleDuration("garbage")
-	if err == nil {
-		t.Error("expected error for invalid duration")
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{"garbage", "garbage"},
+		{"overflow", "99999999999999999999d"},
+		{"zero days", "0d"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := parseStaleDuration(tt.input); err == nil {
+				t.Errorf("parseStaleDuration(%q) expected error, got nil", tt.input)
+			}
+		})
 	}
 }
 
