@@ -337,6 +337,82 @@ func TestCheckSandboxPathsChecksGlobal(t *testing.T) {
 	}
 }
 
+// TestEffectiveConfigPathHonoursConfigFlag verifies doctor inspects the
+// --config path when set, not the default XDG path.
+func TestEffectiveConfigPathHonoursConfigFlag(t *testing.T) {
+	oldCfgFile := cfgFile
+
+	t.Cleanup(func() {
+		cfgFile = oldCfgFile
+	})
+
+	cfgFile = ""
+
+	if got := effectiveConfigPath(); got != paths.ConfigFile {
+		t.Errorf("effectiveConfigPath() with no --config = %q, want default %q", got, paths.ConfigFile)
+	}
+
+	cfgFile = "/tmp/croft/config.toml"
+
+	if got := effectiveConfigPath(); got != cfgFile {
+		t.Errorf("effectiveConfigPath() with --config = %q, want %q", got, cfgFile)
+	}
+}
+
+// TestCheckConfigKeysWarnsAndPasses verifies checkConfigKeys emits a warn for an
+// unrecognised key (with a suggestion) and an ok when every key is recognised.
+func TestCheckConfigKeysWarnsAndPasses(t *testing.T) {
+	oldOut := out
+
+	t.Cleanup(func() {
+		out = oldOut
+	})
+
+	out = output.NewWithWriter(false, io.Discard)
+
+	dir := t.TempDir()
+
+	bad := filepath.Join(dir, "bad.toml")
+	if err := os.WriteFile(bad, []byte("[sandbox]\nread_dir = [\"/etc\"]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	dc := newDoctorContext()
+	dc.checkConfigKeys(bad)
+
+	warned := false
+
+	for _, c := range dc.checks {
+		if c.Level == "warn" && strings.Contains(c.Message, "read_dir") && strings.Contains(c.Message, "read_dirs") {
+			warned = true
+		}
+	}
+
+	if !warned {
+		t.Errorf("expected warn naming read_dir and suggesting read_dirs, got: %v", dc.checks)
+	}
+
+	good := filepath.Join(dir, "good.toml")
+	if err := os.WriteFile(good, []byte("[sandbox]\nread_dirs = [\"/etc\"]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	dc2 := newDoctorContext()
+	dc2.checkConfigKeys(good)
+
+	recognised := false
+
+	for _, c := range dc2.checks {
+		if c.Level == "ok" && strings.Contains(c.Message, "all recognised") {
+			recognised = true
+		}
+	}
+
+	if !recognised {
+		t.Errorf("expected ok 'all recognised' for valid config, got: %v", dc2.checks)
+	}
+}
+
 // TestCheckSandboxPathsWriteFileNotExistenceChecked verifies that a write_files
 // grant for a file that does not exist but whose parent dir does exist produces
 // NO warning — mirroring expandFilePaths, which keeps such grants because they

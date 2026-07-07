@@ -79,6 +79,10 @@ singletn = true
 }
 
 func TestUnknownKeysAcceptsValidConfig(t *testing.T) {
+	// Exercises the false-positive-prone shapes: dynamic-key maps (agents.<name>,
+	// env, per-agent mcp_servers.<name>), pointer-struct tables (sandbox.network),
+	// arrays of tables ([[repos]], [[mcp_servers]]), and a case-variant key
+	// (READ_DIRS) that go-toml accepts and so must not be flagged.
 	toml := `
 default_agent = "claude"
 github_username = "braw-lad"
@@ -87,11 +91,32 @@ branch_prefix = "{username}/graith"
 [sandbox]
 enabled = true
 backend = "nono"
-read_dirs = ["/etc"]
+READ_DIRS = ["/etc"]
 write_dirs = ["/tmp/bothy"]
+
+[sandbox.network]
+block = true
+allow_domains = ["example.com"]
 
 [agents.claude.sandbox]
 write_files = ["/home/braw/.claude.json"]
+
+[agents.claude.env]
+FOO = "bar"
+ANY_USER_KEY = "value"
+
+[agents.claude.mcp_servers.braw]
+command = "npx"
+
+[agents.claude.mcp_servers.braw.env]
+PORT = "9222"
+
+[[mcp_servers]]
+name = "chrome-devtools"
+command = "npx"
+
+[mcp_servers.env]
+WHATEVER = "ok"
 
 [[repos]]
 path = "~/Code/croft"
@@ -106,6 +131,55 @@ includes = ["shared.env"]
 
 	if len(got) != 0 {
 		t.Fatalf("expected no unknown keys for valid config, got %+v", got)
+	}
+}
+
+func TestUnknownKeysNoSuggestionForDistantKey(t *testing.T) {
+	// A genuinely new key from a newer graith (not a typo of any existing key)
+	// must be reported as unknown WITHOUT a misleading "did you mean". The
+	// closestKey threshold is capped so long, unrelated keys get no suggestion.
+	got, err := unknownKeysFromTOML([]byte("experimental_telemetry_pipeline = true\n"))
+	if err != nil {
+		t.Fatalf("unknownKeysFromTOML: %v", err)
+	}
+
+	if len(got) != 1 || got[0].FullKey() != "experimental_telemetry_pipeline" {
+		t.Fatalf("expected one unknown key, got %+v", got)
+	}
+
+	if got[0].Suggestion != "" {
+		t.Errorf("expected no suggestion for distant key, got %q", got[0].Suggestion)
+	}
+}
+
+func TestUnknownKeysTypoUnderPointerStructTable(t *testing.T) {
+	// sandbox.network is a *SandboxNetworkConfig pointer field — a typo under it
+	// must still be caught, with a suggestion.
+	toml := `
+[sandbox.network]
+allow_domian = ["example.com"]
+`
+
+	got, err := unknownKeysFromTOML([]byte(toml))
+	if err != nil {
+		t.Fatalf("unknownKeysFromTOML: %v", err)
+	}
+
+	var match *UnknownKey
+
+	for i := range got {
+		if got[i].FullKey() == "sandbox.network.allow_domian" {
+			match = &got[i]
+			break
+		}
+	}
+
+	if match == nil {
+		t.Fatalf("expected sandbox.network.allow_domian, got %+v", got)
+	}
+
+	if match.Suggestion != "allow_domains" {
+		t.Errorf("suggestion = %q, want %q", match.Suggestion, "allow_domains")
 	}
 }
 
