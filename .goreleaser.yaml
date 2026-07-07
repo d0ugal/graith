@@ -51,6 +51,20 @@ builds:
 
 archives:
   - format: tar.gz
+    # Ship the generated completions and man page inside the release archive so
+    # the AUR `package()` (below) can install them: graith-bin is a `-bin`
+    # package that builds from these prebuilt binary tarballs, not from source.
+    # Specifying `files` replaces GoReleaser's default set, so the LICENSE,
+    # README, and CHANGELOG that used to be included implicitly are re-listed
+    # here explicitly (issue #777).
+    files:
+      - LICENSE
+      - README.md
+      - CHANGELOG.md
+      - completions/gr.bash
+      - completions/gr.zsh
+      - completions/gr.fish
+      - man/gr.1.gz
 
 nfpms:
   - id: graith
@@ -159,9 +173,11 @@ aurs:
     package: |-
       # bin
       install -Dm755 "./gr" "${pkgdir}/usr/bin/gr"
-      # license
-      install -Dm644 "./LICENSE" "${pkgdir}/usr/share/licenses/graith/LICENSE"
+      # license (Arch convention: under the pkgname, graith-bin)
+      install -Dm644 "./LICENSE" "${pkgdir}/usr/share/licenses/graith-bin/LICENSE"
       # completions
       install -Dm644 "./completions/gr.bash" "${pkgdir}/usr/share/bash-completion/completions/gr"
       install -Dm644 "./completions/gr.zsh" "${pkgdir}/usr/share/zsh/site-functions/_gr"
       install -Dm644 "./completions/gr.fish" "${pkgdir}/usr/share/fish/vendor_completions.d/gr.fish"
+      # man page
+      install -Dm644 "./man/gr.1.gz" "${pkgdir}/usr/share/man/man1/gr.1.gz"
