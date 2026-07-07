@@ -174,9 +174,13 @@ func (sm *SessionManager) notifyUnreadInbox(sessionID string) {
 func (sm *SessionManager) InterruptSession(sessionID string) error {
 	ptySess, ok := sm.GetPTY(sessionID)
 	if !ok {
-		return fmt.Errorf("session not found")
+		return fmt.Errorf("session has no live process to interrupt")
 	}
 
+	// A session deleted between GetPTY and here yields a zero-value state whose
+	// Agent is "", which resolves to a zero Agent config → the single-press
+	// default. That degrades gracefully rather than erroring, so the found flag
+	// is intentionally ignored.
 	sess, _ := sm.Get(sessionID)
 
 	sm.mu.RLock()

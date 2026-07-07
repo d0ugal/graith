@@ -360,6 +360,13 @@ func (s *Session) Interrupt(count int, delay time.Duration) error {
 		}
 
 		if err := s.writeInputLocked([]byte{interruptByte}); err != nil {
+			// A press after the first can fail because the process already
+			// exited — which is the interrupt working, not an error. Only the
+			// very first press failing (nothing delivered) is a real failure.
+			if i > 0 {
+				return nil
+			}
+
 			return err
 		}
 	}
