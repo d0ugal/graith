@@ -12,10 +12,16 @@ before:
     # The man page is likewise generated once by the binary itself (cobra's
     # GenManTree) and is arch independent, so it is emitted here and gzipped for
     # /usr/share/man/man1 per convention. The hidden `gr man <outdir>` command
-    # writes gr.1 (plus a page per subcommand); we ship the top-level gr.1.
+    # writes gr.1 plus a page per subcommand (gr-attach.1, gr-msg.1, …), and the
+    # root gr.1's SEE ALSO section cross-references those subcommand pages, so we
+    # gzip and ship the whole tree — otherwise `man gr` links to pages that were
+    # never installed (issue #779). The man dir is wiped first so a non-clean
+    # rerun (e.g. a local release after a command was renamed) can't leave a
+    # stale gr-*.1.gz behind for the packaging glob to pick up.
+    - rm -rf man
     - mkdir -p man
     - sh -c 'go run ./cmd/graith man man'
-    - sh -c 'gzip -9 -n -f man/gr.1'
+    - sh -c 'gzip -9 -n -f man/*.1'
 
 builds:
   - main: ./cmd/graith
@@ -81,8 +87,12 @@ nfpms:
         dst: /usr/share/fish/vendor_completions.d/gr.fish
         file_info:
           mtime: "{{ .CommitDate }}"
-      - src: ./man/gr.1.gz
-        dst: /usr/share/man/man1/gr.1.gz
+      # Ship the whole man tree (gr.1.gz plus every gr-*.1.gz subcommand page)
+      # so the root page's SEE ALSO cross-references resolve on the target
+      # system. nfpm expands the glob and drops each match into the man1 dir
+      # (issue #779).
+      - src: ./man/*.1.gz
+        dst: /usr/share/man/man1/
         file_info:
           mtime: "{{ .CommitDate }}"
       - src: ./LICENSE
