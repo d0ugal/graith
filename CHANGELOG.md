@@ -1,5 +1,52 @@
 # Changelog
 
+## [0.66.2](https://github.com/d0ugal/graith/compare/v0.66.1...v0.66.2) (2026-07-07)
+
+
+### Features
+
+* **approvals:** add auto-approve "yolo" mode ([#629](https://github.com/d0ugal/graith/issues/629)) ([86c2aa6](https://github.com/d0ugal/graith/commit/86c2aa6da090ce0b990b625e7cc31c089a708ce9))
+* **daemon:** per-agent interrupt tuning ([#620](https://github.com/d0ugal/graith/issues/620)) ([268dcd6](https://github.com/d0ugal/graith/commit/268dcd680e5a8c2df12b21e43e9fea246d7115d9))
+* **wait:** add gr wait command to block on session conditions ([e2d378a](https://github.com/d0ugal/graith/commit/e2d378ac3674c7cea49142814d47b8190272d0f0)), closes [#646](https://github.com/d0ugal/graith/issues/646)
+
+
+### Bug Fixes
+
+* **approvals:** address review findings for yolo mode ([f8256bd](https://github.com/d0ugal/graith/commit/f8256bdd88f97571eb00f777dd8801b8b98a6c54))
+* **approvals:** key builtin engine cache on content hash, not mtime ([35c660e](https://github.com/d0ugal/graith/commit/35c660ee3e0f063d1c7655af991c50e5e6cedebd))
+* **client:** don't unlink daemon socket; bound upgrade-probe handshake ([c011a06](https://github.com/d0ugal/graith/commit/c011a06d0f97a7e2aecf3bc5e6a466a76fc2c318))
+* **client:** probe daemon socket to avoid hanging on stale/foreign sockets ([f8e3b17](https://github.com/d0ugal/graith/commit/f8e3b178ccff3fddf6be6d1322a92b2693e8466e)), closes [#260](https://github.com/d0ugal/graith/issues/260)
+* **daemon:** address review findings for interrupt tuning ([9a8ff11](https://github.com/d0ugal/graith/commit/9a8ff111ac969227809a1a151a58264c35f686c2))
+* **daemon:** close residual codex id cross-assignment races ([ac0cc8b](https://github.com/d0ugal/graith/commit/ac0cc8bdd0163d70a533265b29383c444e3daa90))
+* **daemon:** skip native id capture when a sibling shares the cwd ([736c0a6](https://github.com/d0ugal/graith/commit/736c0a66bbe14bc4e6aa9aacb6ea97c66f744c3c)), closes [#844](https://github.com/d0ugal/graith/issues/844)
+* **delete:** show live dirty/unpushed in batch confirmation ([#209](https://github.com/d0ugal/graith/issues/209)) ([325e3bc](https://github.com/d0ugal/graith/commit/325e3bc5e08ee750982e9b419a63830e78df28fc))
+* **delete:** skip git checks for shared/no-repo sessions in batch confirm ([c00900a](https://github.com/d0ugal/graith/commit/c00900a9784b99e381ec7cdfc0f10aee4b9769c9))
+* **git:** gate worktree removal on registration, not error text ([7d54e06](https://github.com/d0ugal/graith/commit/7d54e068d78ec7ae899949846ea26f2ced0a5ccd))
+* **git:** make worktree teardown idempotent for broken worktrees ([1f51fd5](https://github.com/d0ugal/graith/commit/1f51fd53844eb873496841e24e24be9ec060bd82)), closes [#741](https://github.com/d0ugal/graith/issues/741)
+* **wait:** address review findings ([6f3040f](https://github.com/d0ugal/graith/commit/6f3040f1e5ed69f43574b4bce054fe96a65bc8a0))
+
+
+### Performance Improvements
+
+* **approvals:** cache compiled builtin engine per (path, mtime) ([329613a](https://github.com/d0ugal/graith/commit/329613a3f86aaae1f9d3a05cbc2ca8930a0e1d1e)), closes [#733](https://github.com/d0ugal/graith/issues/733)
+
+
+### Documentation
+
+* **approvals:** document [@path](https://github.com/path) parity with localmost ([#732](https://github.com/d0ugal/graith/issues/732)) ([36c2681](https://github.com/d0ugal/graith/commit/36c268115cdcd7f747a6ba1d06ca0636840b427f))
+* document auto approvals backend and gr new --yolo ([5b519a5](https://github.com/d0ugal/graith/commit/5b519a5a796376e00c42e265327e32916c272bbe))
+* document gr interrupt command ([#620](https://github.com/d0ugal/graith/issues/620) follow-up) ([49d67fc](https://github.com/d0ugal/graith/commit/49d67fcea692e4c4459c404a022bdaa0bf485ae7))
+
+
+### Tests
+
+* satisfy wsl linter in interrupt tests ([d21a032](https://github.com/d0ugal/graith/commit/d21a032361cfdddc1d261049716e7b1e3c5bbe1a))
+
+
+### Dependencies
+
+* **approvals:** address review findings on [@path](https://github.com/path) docs ([#732](https://github.com/d0ugal/graith/issues/732)) ([1d277db](https://github.com/d0ugal/graith/commit/1d277db10c723a2c59d9ab45d28087778f7cf12c))
+
 ## [0.66.1](https://github.com/d0ugal/graith/compare/v0.66.0...v0.66.1) (2026-07-07)
 
 
