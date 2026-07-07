@@ -17,6 +17,7 @@ import (
 // location so it works regardless of the caller's working directory.
 func repoRoot(t *testing.T) string {
 	t.Helper()
+
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("runtime.Caller failed")
@@ -27,16 +28,19 @@ func repoRoot(t *testing.T) string {
 
 func publishPushScript(t *testing.T) string {
 	t.Helper()
+
 	path := filepath.Join(repoRoot(t), "scripts", "publish-push.sh")
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("publish-push.sh not found: %v", err)
 	}
+
 	return path
 }
 
 // git runs a git command in dir and fails the test on error.
 func git(t *testing.T, dir string, args ...string) string {
 	t.Helper()
+
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
 	// Keep git deterministic and non-interactive regardless of the host env.
@@ -47,16 +51,19 @@ func git(t *testing.T, dir string, args ...string) string {
 		"GIT_COMMITTER_NAME=canny",
 		"GIT_COMMITTER_EMAIL=canny@example.com",
 	)
+
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %s in %s failed: %v\n%s", strings.Join(args, " "), dir, err, out)
 	}
+
 	return string(out)
 }
 
 func writeFile(t *testing.T, dir, name, content string) {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
 		t.Fatalf("write %s: %v", name, err)
 	}
 }
@@ -66,10 +73,13 @@ func writeFile(t *testing.T, dir, name, content string) {
 // override) are appended after the commit message.
 func runScript(t *testing.T, script, workDir, message string, extra ...string) (string, error) {
 	t.Helper()
+
 	args := append([]string{script, workDir, message}, extra...)
 	cmd := exec.Command("bash", args...)
+
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	out, err := cmd.CombinedOutput()
+
 	return string(out), err
 }
 
@@ -88,6 +98,7 @@ func newOrigin(t *testing.T) string {
 	git(t, seed, "add", "-A")
 	git(t, seed, "commit", "-m", "initial")
 	git(t, seed, "push", "origin", "main")
+
 	return origin
 }
 
@@ -97,6 +108,7 @@ func clone(t *testing.T, origin string) string {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), "repo")
 	git(t, filepath.Dir(dir), "clone", origin, dir)
+
 	return dir
 }
 
@@ -108,10 +120,12 @@ func TestPublishPushFastForward(t *testing.T) {
 	work := clone(t, origin)
 
 	writeFile(t, work, "packages.txt", "graith 1.0.0\n")
+
 	out, err := runScript(t, script, work, "chore: publish braw")
 	if err != nil {
 		t.Fatalf("script failed: %v\n%s", err, out)
 	}
+
 	if !strings.Contains(out, "Pushed on attempt 1.") {
 		t.Fatalf("expected first-attempt push, got:\n%s", out)
 	}
@@ -140,20 +154,24 @@ func TestPublishPushRebasesOnNonFastForward(t *testing.T) {
 
 	// Now `work` is behind: a naive push would be rejected non-fast-forward.
 	writeFile(t, work, "packages.txt", "graith 1.0.0\n")
+
 	out, err := runScript(t, script, work, "chore: publish canny release")
 	if err != nil {
 		t.Fatalf("script failed to recover from non-fast-forward: %v\n%s", err, out)
 	}
+
 	if !strings.Contains(out, "rebasing onto origin/main") {
 		t.Fatalf("expected a rebase+retry, got:\n%s", out)
 	}
 
 	// Both the concurrent commit and our publish must survive on origin/main.
 	git(t, work, "fetch", "origin", "main")
+
 	log := git(t, work, "log", "--oneline", "origin/main")
 	if !strings.Contains(log, "chore: publish canny release") {
 		t.Fatalf("publish commit lost after rebase:\n%s", log)
 	}
+
 	if !strings.Contains(log, "chore: concurrent thrawn commit") {
 		t.Fatalf("concurrent commit lost after rebase:\n%s", log)
 	}
@@ -167,13 +185,16 @@ func TestPublishPushNoChanges(t *testing.T) {
 	work := clone(t, origin)
 
 	before := git(t, work, "rev-parse", "HEAD")
+
 	out, err := runScript(t, script, work, "chore: publish nothing")
 	if err != nil {
 		t.Fatalf("script failed on no-op: %v\n%s", err, out)
 	}
+
 	if !strings.Contains(out, "No repo changes to publish.") {
 		t.Fatalf("expected no-op message, got:\n%s", out)
 	}
+
 	after := git(t, work, "rev-parse", "HEAD")
 	if before != after {
 		t.Fatalf("expected no new commit; HEAD moved %s -> %s", before, after)
@@ -197,10 +218,12 @@ func TestPublishPushExhaustsAttempts(t *testing.T) {
 	git(t, other, "push", "origin", "main")
 
 	writeFile(t, work, "packages.txt", "graith 1.0.0\n")
+
 	out, err := runScript(t, script, work, "chore: publish fash", "1")
 	if err == nil {
 		t.Fatalf("expected non-zero exit on exhausted attempts, got success:\n%s", out)
 	}
+
 	if !strings.Contains(out, "Failed to push after 1 attempts.") {
 		t.Fatalf("expected exhaustion failure message, got:\n%s", out)
 	}
@@ -226,10 +249,12 @@ func TestPublishPushAbortsOnConflictingRebase(t *testing.T) {
 	git(t, other, "push", "origin", "main")
 
 	writeFile(t, work, "packages.txt", "graith 1.0.0 from us\n")
+
 	out, err := runScript(t, script, work, "chore: publish scunner")
 	if err == nil {
 		t.Fatalf("expected non-zero exit on conflicting rebase, got success:\n%s", out)
 	}
+
 	if !strings.Contains(out, "conflicting change") {
 		t.Fatalf("expected conflict-abort message, got:\n%s", out)
 	}
@@ -247,6 +272,7 @@ func TestPublishPushScriptIsExecutable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat script: %v", err)
 	}
+
 	if info.Mode()&0o111 == 0 {
 		t.Errorf("scripts/publish-push.sh is not executable (mode %v)", info.Mode())
 	}
@@ -260,6 +286,7 @@ func TestGoreleaserWorkflowHasPublishGuards(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read goreleaser.yml: %v", err)
 	}
+
 	yaml := string(data)
 
 	for _, want := range []string{
@@ -292,6 +319,7 @@ func hasJobScopedConcurrency(yaml string) bool {
 	lines := strings.Split(yaml, "\n")
 	inPublishJob := false
 	sawConcurrency, sawGroup, sawCancel := false, false, false
+
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "#") {
@@ -302,13 +330,16 @@ func hasJobScopedConcurrency(yaml string) bool {
 			inPublishJob = true
 			continue
 		}
+
 		if inPublishJob && strings.HasPrefix(line, "  ") && !strings.HasPrefix(line, "   ") && strings.HasSuffix(trimmed, ":") {
 			// A new two-space job header ends the publish-repo job.
 			break
 		}
+
 		if !inPublishJob {
 			continue
 		}
+
 		switch {
 		case line == "    concurrency:":
 			sawConcurrency = true
@@ -318,5 +349,6 @@ func hasJobScopedConcurrency(yaml string) bool {
 			sawCancel = true
 		}
 	}
+
 	return sawConcurrency && sawGroup && sawCancel
 }
