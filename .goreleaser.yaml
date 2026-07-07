@@ -18,9 +18,14 @@ before:
     # never installed (issue #779). The man dir is wiped first so a non-clean
     # rerun (e.g. a local release after a command was renamed) can't leave a
     # stale gr-*.1.gz behind for the packaging glob to pick up.
+    # SOURCE_DATE_EPOCH is pinned to the commit date so the embedded .TH date is
+    # deterministic (see internal/cli/man.go) — otherwise rebuilds of the same
+    # commit in different months yield different gr.1.gz bytes and break
+    # byte-for-byte reproducibility (issue #778). The command fails closed if
+    # git log yields nothing rather than silently stamping wall-clock time.
     - rm -rf man
     - mkdir -p man
-    - sh -c 'go run ./cmd/graith man man'
+    - sh -c 'SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) && export SOURCE_DATE_EPOCH && go run ./cmd/graith man man'
     - sh -c 'gzip -9 -n -f man/*.1'
 
 builds:
