@@ -280,6 +280,44 @@ func TestDiffAndBuild_PrimeNotifiesCurrentCIFailure(t *testing.T) {
 	}
 }
 
+func TestDiffAndBuild_PrimeMechanicalNoticesDedupWhileCommentsDegraded(t *testing.T) {
+	// Regression for #772: if the comment fetch is persistently degraded
+	// (CommentsOK == false) the session never primes, so every poll re-enters the
+	// unprimed branch. The mechanical notices (failing CI, conflict) must still
+	// fire exactly once each — deduped against cur.failing / cur.mergeable —
+	// rather than re-firing on every poll.
+	sm := newPRWatchSM()
+	cfg := allOnConfig()
+	cfg.Debounce = "0s" // so a deferred/second notice isn't debounced within the test
+	t1 := prWatchTarget{id: "dreich", branch: "dreich"}
+
+	d := prData{
+		Number: 42, State: "open", HeadRefOid: "sha1",
+		CIState: "failing", FailingChecks: []string{"build"},
+		Mergeable: "CONFLICTING", CommentsOK: false,
+	}
+
+	// Poll 1: CI failure fires first (never primes because CommentsOK == false).
+	out := sm.diffAndBuild(cfg, t1, "croft/loch", d)
+	if len(out) != 1 || !strings.Contains(out[0], "CI failed") {
+		t.Fatalf("first unprimed poll should deliver the CI failure, got %v", out)
+	}
+
+	// Poll 2: CI already delivered (no re-fire); the deferred conflict now surfaces.
+	out = sm.diffAndBuild(cfg, t1, "croft/loch", d)
+	if len(out) != 1 || !strings.Contains(out[0], "merge conflicts") {
+		t.Fatalf("second unprimed poll should deliver the deferred conflict, got %v", out)
+	}
+
+	// Poll 3+: both mechanical notices already delivered — still unprimed, but no
+	// notice should re-fire. Before the fix these re-fired on every poll.
+	for i := 0; i < 3; i++ {
+		if out := sm.diffAndBuild(cfg, t1, "croft/loch", d); len(out) != 0 {
+			t.Fatalf("unprimed poll %d should not re-fire mechanical notices, got %v", i+3, out)
+		}
+	}
+}
+
 func TestDiffAndBuild_CITransitionAndDedup(t *testing.T) {
 	sm := newPRWatchSM()
 	cfg := allOnConfig()
