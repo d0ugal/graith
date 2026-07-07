@@ -182,14 +182,23 @@ func isWithinAny(path string, prefixes []string) bool {
 // any other process. graith emits security.signal_mode only when SignalMode is
 // non-empty, leaving nono's base default otherwise.
 //
-// "extends": "default" pulls in nono's audited deny groups (deny_credentials,
-// deny_shell_history, ...) and base system paths, so graith need not enumerate
-// them. sshAuthSock is $SSH_AUTH_SOCK resolved by the caller ("" if unset).
+// "extends" defaults to "default", which pulls in nono's audited deny groups
+// (deny_credentials, deny_shell_history, ...) and base system paths, so graith
+// need not enumerate them. opts.Profile overrides that base with a maintained
+// registry profile (e.g. "always-further/claude") so a known agent's upstream
+// file grants are inherited instead of hand-listed; graith's own
+// filesystem.allow/read and environment.allow_vars are still layered on top and
+// win. sshAuthSock is $SSH_AUTH_SOCK resolved by the caller ("" if unset).
 func buildNonoProfile(name string, opts WrapOpts, sshAuthSock string) (nonoProfile, []string) {
 	var warnings []string
 
+	extends := opts.Profile
+	if extends == "" {
+		extends = "default"
+	}
+
 	p := nonoProfile{
-		Extends: "default",
+		Extends: extends,
 		Meta:    nonoProfileMeta{Name: name},
 		Workdir: nonoProfileWorkdir{Access: "readwrite"},
 	}

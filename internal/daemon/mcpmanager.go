@@ -290,6 +290,7 @@ func (m *MCPManager) startProcess(serverCfg config.MCPServerConfig, proxyID stri
 			Features:       merged.Features,
 			EnvKeys:        envKeys,
 			SignalMode:     merged.SignalMode,
+			Profile:        merged.Profile,
 			Network:        networkPolicy(merged.Network),
 			BackendCommand: merged.Command,
 			// No session ID here; nono writes a temp profile (empty ProfilePath).

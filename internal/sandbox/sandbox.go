@@ -46,6 +46,14 @@ type WrapOpts struct {
 	// safehouse backend ignores it.
 	SignalMode string
 
+	// Profile (nono only) is the base profile the generated profile extends
+	// (nono's "extends" field). Empty means "default" (nono's audited deny
+	// groups + base system paths). A maintained registry profile such as
+	// "always-further/claude" inherits that agent's upstream file grants;
+	// graith's own filesystem/env grants are layered on top. The safehouse
+	// backend ignores it.
+	Profile string
+
 	// Network is the optional egress policy. Nil means no network restriction
 	// (nono is allow-by-default). When set, the nono backend emits a
 	// network.block / network.allow_domain section; the safehouse backend has

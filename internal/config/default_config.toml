@@ -207,6 +207,15 @@ prompt_file = ""
 # under nono (safehouse ignores this field).
 # signal_mode = "isolated"
 #
+# profile (nono only): the base profile graith's generated profile extends.
+# Defaults to nono's built-in "default" (its audited deny groups + base system
+# paths). Set it — typically per-agent — to a maintained registry profile to
+# inherit that agent's upstream file grants instead of hand-listing them via
+# write_files. graith still layers its own read_dirs/write_dirs and env scrub on
+# top. e.g. under [agents.claude.sandbox]:  profile = "always-further/claude"
+# safehouse has no profile concept and ignores it.
+# profile = "always-further/claude"
+#
 # [sandbox.network]  (nono only)
 # Optional egress policy. Requires Landlock ABI v4 (kernel 6.7+) on Linux; a
 # requested policy on an older kernel fails closed. safehouse has no network

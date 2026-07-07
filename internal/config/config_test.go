@@ -553,6 +553,24 @@ func TestSandboxConfigMergeNetworkAndSignalMode(t *testing.T) {
 	}
 }
 
+func TestSandboxConfigMergeProfile(t *testing.T) {
+	// Global profile inherits when the agent sets none.
+	global := SandboxConfig{Enabled: true, Backend: "nono", Profile: "always-further/base"}
+	merged := global.Merge(SandboxConfig{})
+
+	if merged.Profile != "always-further/base" {
+		t.Errorf("profile should inherit from global, got %q", merged.Profile)
+	}
+
+	// Agent profile overrides the global one wholesale (like backend/command).
+	agent := SandboxConfig{Profile: "always-further/claude"}
+	merged = global.Merge(agent)
+
+	if merged.Profile != "always-further/claude" {
+		t.Errorf("agent profile should win, got %q", merged.Profile)
+	}
+}
+
 func TestSandboxSignalModeValidation(t *testing.T) {
 	valid := &Config{Sandbox: SandboxConfig{SignalMode: "isolated"}}
 	if err := valid.Validate(); err != nil {
@@ -962,6 +980,17 @@ func TestMergeAgent(t *testing.T) {
 
 		if len(got.Sandbox.Features) != 1 || got.Sandbox.Features[0] != "ssh" {
 			t.Errorf("Sandbox.Features = %v, want [ssh]", got.Sandbox.Features)
+		}
+	})
+
+	t.Run("sandbox profile-only override replaces default sandbox", func(t *testing.T) {
+		defWithSbx := def
+		defWithSbx.Sandbox = SandboxConfig{ReadDirs: []string{"~/.claude"}}
+		usr := Agent{Sandbox: SandboxConfig{Profile: "always-further/claude"}}
+
+		got := mergeAgent(defWithSbx, usr)
+		if got.Sandbox.Profile != "always-further/claude" {
+			t.Errorf("Sandbox.Profile = %q, want always-further/claude", got.Sandbox.Profile)
 		}
 	})
 

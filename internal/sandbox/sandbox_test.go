@@ -297,6 +297,46 @@ func TestBuildNonoProfileFilesystemMapping(t *testing.T) {
 	}
 }
 
+func TestBuildNonoProfileExtendsCustomProfile(t *testing.T) {
+	opts := WrapOpts{
+		Backend:     BackendNono,
+		Profile:     "always-further/claude",
+		WorktreeDir: "/hame/user/bothy",
+		ReadDirs:    []string{"/hame/user/glen"},
+		EnvKeys:     []string{"PATH", "HOME"},
+	}
+
+	p, warnings := buildNonoProfile("graith-bothy", opts, "")
+	if len(warnings) != 0 {
+		t.Errorf("unexpected warnings: %v", warnings)
+	}
+
+	if p.Extends != "always-further/claude" {
+		t.Errorf("Extends = %q, want always-further/claude (inherits maintained profile)", p.Extends)
+	}
+
+	// graith's own grants must still be layered on top of the inherited profile.
+	if !slices.Contains(p.Filesystem.Allow, "/hame/user/bothy") {
+		t.Errorf("filesystem.allow missing worktree despite custom profile: %v", p.Filesystem.Allow)
+	}
+
+	if !slices.Contains(p.Filesystem.Read, "/hame/user/glen") {
+		t.Errorf("filesystem.read missing read dir despite custom profile: %v", p.Filesystem.Read)
+	}
+
+	// graith emits its own env allowlist regardless of the inherited profile.
+	if p.Environment == nil || !slices.Equal(p.Environment.AllowVars, []string{"PATH", "HOME"}) {
+		t.Errorf("env allow_vars not owned by graith: %+v", p.Environment)
+	}
+}
+
+func TestBuildNonoProfileEmptyProfileDefaults(t *testing.T) {
+	p, _ := buildNonoProfile("graith-neep", WrapOpts{Backend: BackendNono}, "")
+	if p.Extends != "default" {
+		t.Errorf("Extends = %q, want default when Profile is empty", p.Extends)
+	}
+}
+
 func TestBuildNonoProfileEnvAllowlist(t *testing.T) {
 	opts := WrapOpts{
 		Backend: BackendNono,
