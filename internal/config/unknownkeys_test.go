@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/adrg/xdg"
 )
 
 func TestUnknownKeysFromTOML(t *testing.T) {
@@ -266,6 +268,47 @@ func TestResolveConfigPath(t *testing.T) {
 
 	if path, exists, err := ResolveConfigPath(""); err != nil || !exists || path != xdgConfig {
 		t.Errorf("ResolveConfigPath(\"\") with XDG config = (%q, %v, %v), want (%q, true, nil)", path, exists, err, xdgConfig)
+	}
+}
+
+func TestResolveConfigPathLegacyFallback(t *testing.T) {
+	// Simulate the macOS shape where the legacy path (xdg.ConfigHome) differs
+	// from the current XDG path (configHome via XDG_CONFIG_HOME). legacyConfigFile
+	// derives from xdg.ConfigHome, so override it to a distinct dir for the test.
+	oldXDGConfigHome := xdg.ConfigHome
+
+	t.Cleanup(func() { xdg.ConfigHome = oldXDGConfigHome })
+
+	xdgDir := t.TempDir()    // "current" config home (no config.toml here)
+	legacyDir := t.TempDir() // "legacy" config home (has config.toml)
+
+	t.Setenv("XDG_CONFIG_HOME", xdgDir)
+
+	xdg.ConfigHome = legacyDir
+
+	legacyConfig := filepath.Join(legacyDir, "graith", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(legacyConfig), 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(legacyConfig, []byte("default_agent = \"claude\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// No profile: legacy fallback is consulted when the XDG config is absent.
+	t.Setenv("GRAITH_PROFILE", "")
+
+	if path, exists, err := ResolveConfigPath(""); err != nil || !exists || path != legacyConfig {
+		t.Errorf("ResolveConfigPath(\"\") with only legacy config = (%q, %v, %v), want (%q, true, nil)", path, exists, err, legacyConfig)
+	}
+
+	// A profile suppresses the legacy fallback (matches LoadOrDefault), so the
+	// (absent) profile-scoped XDG path is reported as not existing.
+	t.Setenv("GRAITH_PROFILE", "braw")
+
+	wantProfilePath := filepath.Join(xdgDir, "graith-braw", "config.toml")
+	if path, exists, err := ResolveConfigPath(""); err != nil || exists || path != wantProfilePath {
+		t.Errorf("ResolveConfigPath(\"\") with profile = (%q, %v, %v), want (%q, false, nil)", path, exists, err, wantProfilePath)
 	}
 }
 
