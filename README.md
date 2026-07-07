@@ -352,7 +352,7 @@ Sandboxing is **config-only** — there are no CLI flags to enable or disable it
 
 **safehouse (macOS):** `brew install eugene1g/safehouse/agent-safehouse`
 
-**nono (Linux/macOS):** `brew install nono` (or `curl -fsSL https://nono.sh/install.sh | sh`). nono needs Linux kernel 5.13+ for Landlock (practical floor 5.14+); on macOS it uses Seatbelt. graith enforces a minimum nono version.
+**nono (Linux/macOS):** `brew install nono` (or download the pinned release from <https://github.com/nolabs-ai/nono/releases> and verify it with `gh attestation verify <tarball> --repo nolabs-ai/nono` before installing). nono needs Linux kernel 5.13+ for Landlock (practical floor 5.14+); on macOS it uses Seatbelt. graith enforces a minimum nono version.
 
 Verify with `gr doctor`, then configure:
 

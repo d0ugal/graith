@@ -148,6 +148,31 @@ func TestCheckApprovalsBackendFailClosed(t *testing.T) {
 	}
 }
 
+// TestNonoInstallHintNotPipedShell verifies gr doctor's nono install guidance
+// never recommends the `curl … | sh` piped-shell pattern the project moved away
+// from in commit 0fa84fa / #697 — emitting that advice from a security-focused
+// tool would contradict the supply-chain hardening (issue #795). The hint must
+// point at brew and the pinned, attestation-verified release instead.
+func TestNonoInstallHintNotPipedShell(t *testing.T) {
+	lowered := strings.ToLower(nonoInstallHint)
+
+	if strings.Contains(lowered, "| sh") || strings.Contains(lowered, "|sh") {
+		t.Errorf("nono install hint recommends a piped shell (issue #795): %q", nonoInstallHint)
+	}
+
+	if strings.Contains(lowered, "install.sh") {
+		t.Errorf("nono install hint references the unpinned remote install script (issue #795): %q", nonoInstallHint)
+	}
+
+	if !strings.Contains(lowered, "brew install nono") {
+		t.Errorf("nono install hint should recommend brew, got: %q", nonoInstallHint)
+	}
+
+	if !strings.Contains(lowered, "attestation verify") {
+		t.Errorf("nono install hint should point at the pinned, attestation-verified install, got: %q", nonoInstallHint)
+	}
+}
+
 // TestCheckApprovalsBackendPromptDefault verifies the default (prompt) backend
 // passes — it always defers to the human and can never fail closed.
 func TestCheckApprovalsBackendPromptDefault(t *testing.T) {
