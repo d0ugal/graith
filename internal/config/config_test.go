@@ -591,6 +591,19 @@ func TestSandboxConfigMergeProfile(t *testing.T) {
 	if merged.Profile != "always-further/claude" {
 		t.Errorf("agent profile should win, got %q", merged.Profile)
 	}
+
+	// A whitespace-only agent profile is treated as unset: it must NOT clobber
+	// the global profile (a config typo shouldn't silently discard inheritance).
+	merged = global.Merge(SandboxConfig{Profile: "   "})
+	if merged.Profile != "always-further/base" {
+		t.Errorf("whitespace agent profile should inherit global, got %q", merged.Profile)
+	}
+
+	// Surrounding whitespace on a real agent value is trimmed.
+	merged = global.Merge(SandboxConfig{Profile: "  always-further/claude  "})
+	if merged.Profile != "always-further/claude" {
+		t.Errorf("agent profile should be trimmed, got %q", merged.Profile)
+	}
 }
 
 func TestSandboxSignalModeValidation(t *testing.T) {
