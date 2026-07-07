@@ -1,5 +1,7 @@
 package localmost
 
+import "strings"
+
 // maxMatchSteps bounds the total matcher work for one command evaluation. The
 // seq/quant/closure matcher enumerates reachable end positions and recurses
 // combinatorially over quantified terms — a classic backtracking shape that can
@@ -273,26 +275,16 @@ func isInt(s string) bool {
 	return true
 }
 
-// isValidPath reports whether s is a valid POSIX pathname: non-empty and free
-// of NUL bytes. This is deliberately as permissive as localmost's @path — Linux
-// only forbids the empty string and NUL in a pathname, so a bare relative name
-// like "foo", a dot-file, an option-looking "-x", or an absolute "/etc/passwd"
-// are all valid paths. @path is therefore only marginally narrower than @arg
-// (it additionally rejects the empty-string argument ""). Tightening this to a
-// "path-shaped" heuristic (requiring a leading /, ./, ~, etc.) would break
-// parity with localmost, which allows e.g. `mkdir foo`. See issue #732 and the
-// documented behaviour in
-// docs/design/2026-07-03-pluggable-approvals-backends-design.md.
+// isValidPath applies localmost's character-level path check: a path is any
+// non-empty, NUL-free string. It deliberately does NOT require a path-shaped
+// prefix and does NOT validate filesystem limits (component/path length) or
+// whether the path resolves — so a bare relative name like "foo", a dot-file,
+// an option-looking "-x", or an absolute "/etc/passwd" are all valid paths.
+// @path is therefore only marginally narrower than @arg (it additionally
+// rejects the empty-string argument ""). Tightening this to a "path-shaped"
+// heuristic (requiring a leading /, ./, ~, etc.) would break parity with
+// localmost, which allows e.g. `mkdir foo`. See issue #732 and the documented
+// behaviour in docs/design/2026-07-03-pluggable-approvals-backends-design.md.
 func isValidPath(s string) bool {
-	if s == "" {
-		return false
-	}
-
-	for _, r := range s {
-		if r == 0 {
-			return false
-		}
-	}
-
-	return true
+	return s != "" && strings.IndexByte(s, 0) < 0
 }
