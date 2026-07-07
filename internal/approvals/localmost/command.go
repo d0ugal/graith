@@ -63,6 +63,26 @@ func parseCommand(cmd string) ([]subcommand, error) {
 		c.stmt(st, pipeCtx{})
 	}
 
+	// Command and process substitutions ($(...), `...`, <(...), >(...)) are
+	// executed by the shell but live inside word parts, which the statement
+	// walk above never descends into. Harvest their inner commands as
+	// standalone subcommands so they are still checked against deny/allow
+	// rules — otherwise a dangerous command hidden in a substitution would
+	// silently escape evaluation. This covers substitutions anywhere: an
+	// assignment value (FOO=$(evil) make), a redirect target (cat < <(evil)),
+	// a here-string / heredoc body (cat <<< $(evil)), a for-loop list
+	// (for f in $(evil)), a case subject (case $(evil) in), etc. See #782.
+	syntax.Walk(f, func(n syntax.Node) bool {
+		switch x := n.(type) {
+		case *syntax.CmdSubst:
+			c.stmts(x.Stmts)
+		case *syntax.ProcSubst:
+			c.stmts(x.Stmts)
+		}
+
+		return true
+	})
+
 	return subs, nil
 }
 
