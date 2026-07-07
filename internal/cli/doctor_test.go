@@ -242,3 +242,69 @@ func TestCheckSandboxPathsChecksGlobal(t *testing.T) {
 		t.Errorf("expected warning for missing global dir %q, got checks: %v", globalMissing, dc.checks)
 	}
 }
+
+// TestCheckSandboxPathsWriteFileNotExistenceChecked verifies that a write_files
+// grant for a file that does not exist but whose parent dir does exist produces
+// NO warning — mirroring expandFilePaths, which keeps such grants because they
+// are routinely files the agent creates at runtime (e.g. ~/.claude.json.lock).
+// This is the fix for issue #794, where the recommended config was flagged as
+// unhealthy by gr doctor.
+func TestCheckSandboxPathsWriteFileNotExistenceChecked(t *testing.T) {
+	oldCfg, oldOut := cfg, out
+
+	t.Cleanup(func() {
+		cfg, out = oldCfg, oldOut
+	})
+
+	out = output.NewWithWriter(false, io.Discard)
+
+	// Parent dir exists (t.TempDir()), lockfile itself does not.
+	lockfile := filepath.Join(t.TempDir(), ".claude.json.lock")
+
+	cfg = &config.Config{}
+	cfg.Sandbox = config.SandboxConfig{WriteFiles: []string{lockfile}}
+
+	dc := newDoctorContext()
+	dc.checkSandboxPaths()
+
+	for _, c := range dc.checks {
+		if c.Level == "warn" && strings.Contains(c.Message, lockfile) {
+			t.Errorf("did not expect a warning for a non-existent write file whose parent exists, got: %q", c.Message)
+		}
+	}
+}
+
+// TestCheckSandboxPathsWriteFileMissingParent verifies that a write_files grant
+// whose *parent directory* does not exist still warns — nono cannot create the
+// file without a grantable parent, so this mirrors expandFilePaths' parent-dir
+// warning.
+func TestCheckSandboxPathsWriteFileMissingParent(t *testing.T) {
+	oldCfg, oldOut := cfg, out
+
+	t.Cleanup(func() {
+		cfg, out = oldCfg, oldOut
+	})
+
+	out = output.NewWithWriter(false, io.Discard)
+
+	missingParent := filepath.Join(t.TempDir(), "wynd")
+	orphanFile := filepath.Join(missingParent, ".claude.json.lock")
+
+	cfg = &config.Config{}
+	cfg.Sandbox = config.SandboxConfig{WriteFiles: []string{orphanFile}}
+
+	dc := newDoctorContext()
+	dc.checkSandboxPaths()
+
+	found := false
+
+	for _, c := range dc.checks {
+		if c.Level == "warn" && strings.Contains(c.Message, missingParent) {
+			found = true
+		}
+	}
+
+	if !found {
+		t.Errorf("expected warning for write file with missing parent dir %q, got checks: %v", missingParent, dc.checks)
+	}
+}
