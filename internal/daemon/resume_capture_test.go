@@ -262,6 +262,63 @@ func TestCaptureNativeSessionIDCapturesWhenSiblingStopped(t *testing.T) {
 	}
 }
 
+func TestCaptureNativeSessionIDSkipsSiblingStoppedAfterStart(t *testing.T) {
+	sm := newMigrateTestManager(t)
+	root := t.TempDir()
+	cwd := t.TempDir()
+	since := time.Now().Add(-time.Minute)
+
+	// Sibling A wrote its rollout, then exited *after* B's capture started
+	// (StatusChangedAt after `since`) — a short-lived Codex start racing B. Its
+	// rollout is the only one on disk and it has no recorded id yet, so only the
+	// active-during-window check can stop the cross-assignment.
+	writeCodexRollout(t, root, "haar-native-id", cwd, time.Now())
+	sm.state.Sessions["haar"] = &SessionState{
+		ID: "haar", Name: "haar-bothy", Agent: "codex",
+		AgentSessionID: "", PID: 0,
+		Status: StatusStopped, StatusChangedAt: time.Now(), WorktreePath: cwd,
+	}
+
+	sm.state.Sessions["fash"] = &SessionState{
+		ID: "fash", Name: "fash-bothy", Agent: "codex",
+		AgentSessionID: "", PID: 400, PIDStartTime: 400,
+		Status: StatusRunning, WorktreePath: cwd,
+	}
+
+	sm.captureNativeSessionID("fash", "codex", cwd, root, since, 400, 400)
+
+	if got := sm.state.Sessions["fash"].AgentSessionID; got != "" {
+		t.Fatalf("AgentSessionID = %q; want empty (sibling stopped mid-capture must not cross-assign)", got)
+	}
+}
+
+func TestCaptureNativeSessionIDSkipsIDAlreadyClaimed(t *testing.T) {
+	sm := newMigrateTestManager(t)
+	root := t.TempDir()
+	cwd := t.TempDir()
+
+	// The scraped id is already recorded by another session (any cwd/status) —
+	// a native id backs exactly one conversation, so it must never be reused.
+	writeCodexRollout(t, root, "thrawn-id", cwd, time.Now())
+	sm.state.Sessions["ben"] = &SessionState{
+		ID: "ben", Name: "ben-bothy", Agent: "codex",
+		AgentSessionID: "thrawn-id", PID: 0,
+		Status: StatusStopped, WorktreePath: t.TempDir(),
+	}
+
+	sm.state.Sessions["scunner"] = &SessionState{
+		ID: "scunner", Name: "scunner-bothy", Agent: "codex",
+		AgentSessionID: "", PID: 500, PIDStartTime: 500,
+		Status: StatusRunning, WorktreePath: cwd,
+	}
+
+	sm.captureNativeSessionID("scunner", "codex", cwd, root, time.Now().Add(-time.Minute), 500, 500)
+
+	if got := sm.state.Sessions["scunner"].AgentSessionID; got != "" {
+		t.Fatalf("AgentSessionID = %q; want empty (id already claimed must not be reused)", got)
+	}
+}
+
 func TestArgsNeedForkSourceID(t *testing.T) {
 	if !argsNeedForkSourceID([]string{"fork", "{fork_source_agent_session_id}"}) {
 		t.Error("expected fork-source token to be detected")
