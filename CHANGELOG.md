@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.66.1](https://github.com/d0ugal/graith/compare/v0.66.0...v0.66.1) (2026-07-07)
+
+
+### Features
+
+* **cli:** add top-level gr resume command ([bc46a6f](https://github.com/d0ugal/graith/commit/bc46a6f755ed60f15dc0e2592e0c64184ec98a0e)), closes [#29](https://github.com/d0ugal/graith/issues/29)
+* **list:** add --quiet/-q flag for bare session output ([db87f80](https://github.com/d0ugal/graith/commit/db87f809dceda4d657fb286573efc6eada1c5e42)), closes [#44](https://github.com/d0ugal/graith/issues/44)
+
+
+### Bug Fixes
+
+* **cli:** error on parseStaleDuration overflow instead of matching all sessions ([6ae2a6b](https://github.com/d0ugal/graith/commit/6ae2a6b9bb15998a6b8da26b67e1d9ea46973354)), closes [#210](https://github.com/d0ugal/graith/issues/210)
+* **cli:** reject gr resume --attach with --json ([8f1ce31](https://github.com/d0ugal/graith/commit/8f1ce319b7981636d6d69559974e7803207fb5b3))
+* **cli:** reject non-positive and overflowing stale durations ([a5cea9e](https://github.com/d0ugal/graith/commit/a5cea9e520b6f335c8178490657e9af5e65f403f))
+* **daemon:** widen codex session ID capture window to 10s ([eaee1f7](https://github.com/d0ugal/graith/commit/eaee1f7550e3d10eb6eb53d60726c0006afeff0d)), closes [#840](https://github.com/d0ugal/graith/issues/840)
+* **mcp:** respect context cancellation in readMessages ([7fce9d1](https://github.com/d0ugal/graith/commit/7fce9d1f24399c480478919b84879ef9f695d511)), closes [#261](https://github.com/d0ugal/graith/issues/261)
+
+
+### Dependencies
+
+* **list:** address review findings ([b67444d](https://github.com/d0ugal/graith/commit/b67444d24ade5f8bcb929953c0b047ce9a1212e0))
+
 ## [0.66.0](https://github.com/d0ugal/graith/compare/v0.65.0...v0.66.0) (2026-07-07)
 
 
