@@ -300,10 +300,14 @@ func scrapesID(agent string) bool {
 // resume holds the *old* PID in state until the new one is committed (and PIDs
 // can be reused), so the start time disambiguates the generation.
 //
-// Concurrency note: the scrape itself refuses to guess when two sessions share
-// a cwd — scrapeSessionID returns no id if multiple distinct native ids match
-// the (since, cwd) window — so this never cross-assigns ids between concurrent
-// shared-worktree / in-place sessions; they fall back to a non-pinned resume.
+// Concurrency note: two guards keep this from cross-assigning ids between
+// concurrent shared-worktree / in-place sessions. First, scrapeSessionID
+// refuses to guess when multiple distinct native ids match the (since, cwd)
+// window. That alone isn't enough — staggered rollout writes leave a window
+// where only a sibling's rollout exists and would be mis-assigned — so second,
+// before recording an id we skip capture entirely if another live same-agent
+// session shares the cwd (hasOtherActiveScraper). Either way the session falls
+// back to a non-pinned resume (issue #844).
 //
 // stateRoot is the agent's effective state root (e.g. CODEX_HOME from the
 // session's launch env); pass "" to fall back to the daemon's default.
@@ -331,6 +335,17 @@ func (sm *SessionManager) captureNativeSessionID(id, agent, worktreePath, stateR
 		case expectedPID != 0 && (s.PID != expectedPID || (expectedPIDStartTime != 0 && s.PIDStartTime != expectedPIDStartTime)):
 			// a newer start replaced this process generation; its own capture
 			// goroutine owns the id now.
+		case sm.hasOtherActiveScraper(id, agent, worktreePath):
+			// another live same-agent session shares this cwd, so a single
+			// scraped id can't be attributed to us — the scrape's ambiguity
+			// guard only trips once *both* rollouts exist, but staggered writes
+			// leave a window where only the sibling's rollout is present and it
+			// would be mis-assigned. Skip capture; resume falls back to
+			// --last rather than pinning the wrong conversation (issue #844).
+			sm.mu.Unlock()
+			sm.log.Warn("native session id capture skipped: shared cwd", "session_id", id, "agent", agent, "worktree", worktreePath)
+
+			return
 		default:
 			s.AgentSessionID = sid
 			_ = sm.saveState()
@@ -341,6 +356,48 @@ func (sm *SessionManager) captureNativeSessionID(id, agent, worktreePath, stateR
 	}
 
 	sm.log.Warn("native session id capture timed out", "session_id", id, "agent", agent)
+}
+
+// hasOtherActiveScraper reports whether a session other than `id`, of the same
+// scrapeable agent, is live (running or being created) in the same worktree.
+// When one exists, on-disk rollouts in that cwd can't be attributed to a single
+// session, so capture must be skipped. Callers must hold sm.mu.
+func (sm *SessionManager) hasOtherActiveScraper(id, agent, worktreePath string) bool {
+	want := canonWorktree(worktreePath)
+
+	for other, s := range sm.state.Sessions {
+		if other == id || s.Agent != agent {
+			continue
+		}
+
+		if s.Status != StatusRunning && s.Status != StatusCreating {
+			continue
+		}
+
+		if canonWorktree(s.WorktreePath) == want {
+			return true
+		}
+	}
+
+	return false
+}
+
+// canonWorktree cleans a worktree path (resolving symlinks when possible) so
+// two spellings of the same directory compare equal.
+func canonWorktree(p string) string {
+	if p == "" {
+		return ""
+	}
+
+	if abs, err := filepath.Abs(p); err == nil {
+		p = abs
+	}
+
+	if resolved, err := filepath.EvalSymlinks(p); err == nil {
+		return resolved
+	}
+
+	return filepath.Clean(p)
 }
 
 // scrapeSessionID reads the native session id for a single agent from its
