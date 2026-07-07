@@ -579,7 +579,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 	}
 
 	// Fail closed if the configured approvals backend can't enforce.
-	if err := sm.validateApprovalsBackend(); err != nil {
+	if err := sm.validateApprovalsBackend(yolo); err != nil {
 		if noRepo {
 			_ = os.RemoveAll(worktreePath)
 		}
@@ -592,6 +592,14 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 		sm.mu.Unlock()
 		return SessionState{}, fmt.Errorf("--share-worktree requires sandbox to be enabled so the shared worktree can be mounted read-only; set sandbox.enabled = true in config and ensure safehouse is installed (gr doctor)")
 	}
+
+	// Yolo requires the PreToolUse approval hook to function, so it forces agent
+	// hooks on regardless of the requested value — otherwise a Yolo session with
+	// hooks disabled would auto-mark itself yolo but never install the hook that
+	// routes tool calls to the auto backend. Reassigning here keeps every
+	// downstream use (MCP resolution, persisted AgentHooks, hook injection,
+	// sandbox hook-dir allowance) consistent.
+	agentHooks = agentHooks || yolo
 
 	// Resolve MCP servers under the lock (reads config).
 	var mcpServers []config.MCPServerConfig
@@ -1141,8 +1149,10 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 	baseBranch := source.BaseBranch
 	sourceModel := source.Model
 	sourceAgentSessionID := source.AgentSessionID
-	sourceAgentHooks := source.AgentHooks
 	sourceYolo := source.Yolo
+	// Yolo forces agent hooks on (see Create) so a forked yolo session always
+	// installs the approval hook, even if the source had hooks disabled.
+	sourceAgentHooks := source.AgentHooks || sourceYolo
 	sourceForkIncludes := make([]IncludedRepoState, len(source.Includes))
 	copy(sourceForkIncludes, source.Includes)
 
@@ -1169,7 +1179,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 		return SessionState{}, err
 	}
 
-	if err := sm.validateApprovalsBackend(); err != nil {
+	if err := sm.validateApprovalsBackend(sourceYolo); err != nil {
 		sm.mu.Unlock()
 		return SessionState{}, err
 	}
@@ -1811,7 +1821,7 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	// Resume re-enforces the approvals backend too, for parity with the sandbox
 	// re-check above: a config change that made the backend unenforceable must
 	// not silently resume a non-enforcing approver.
-	if err := sm.validateApprovalsBackend(); err != nil {
+	if err := sm.validateApprovalsBackend(sessState.Yolo); err != nil {
 		sm.mu.Unlock()
 		return SessionState{}, err
 	}
@@ -1871,9 +1881,10 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 		}
 	}
 
-	// Resolve MCP servers under the lock.
+	// Resolve MCP servers under the lock. Yolo forces hooks on (see Create), so
+	// resolve MCP servers for a yolo session even if hooks were disabled.
 	var mcpServers []config.MCPServerConfig
-	if sessState.AgentHooks {
+	if sessState.AgentHooks || sessState.Yolo {
 		mcpServers = sm.resolveMCPServers(sessState.Agent)
 	}
 
@@ -1926,8 +1937,10 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	sessWorktreePath := sessState.WorktreePath
 	sessAgentSessionID := sessState.AgentSessionID
 	sessModel := sessState.Model
-	sessAgentHooks := sessState.AgentHooks
 	sessYolo := sessState.Yolo
+	// Yolo forces agent hooks on (see Create) so a resumed yolo session always
+	// re-installs the approval hook, even if hooks were disabled at create.
+	sessAgentHooks := sessState.AgentHooks || sessYolo
 	sessIncludes := make([]IncludedRepoState, len(sessState.Includes))
 	copy(sessIncludes, sessState.Includes)
 	sessInPlace := sessState.InPlace
@@ -4325,7 +4338,16 @@ func (sm *SessionManager) approvalsConfigDir() string {
 // misconfigured approvals backend errors loudly at create time instead of
 // silently deferring every request to the human. The default (prompt) backend
 // always enforces. Callers hold sm.mu.
-func (sm *SessionManager) validateApprovalsBackend() error {
+//
+// A yolo session resolves every request through the auto backend, which always
+// enforces, so the global [approvals] backend is irrelevant to it — validating
+// (and failing on) an unavailable global backend would contradict yolo's
+// per-session override. Yolo sessions therefore skip the global check.
+func (sm *SessionManager) validateApprovalsBackend(yolo bool) error {
+	if yolo {
+		return nil
+	}
+
 	acfg := sm.cfg.Approvals
 
 	backend, _, err := acfg.ResolveBackend()

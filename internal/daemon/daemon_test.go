@@ -2711,6 +2711,65 @@ func TestForkUsesSourceBaseBranch(t *testing.T) {
 	}
 }
 
+// TestForkInheritsYolo verifies a fork of a yolo session is itself yolo, so the
+// auto-approve mode propagates and the fork doesn't silently start prompting.
+func TestForkInheritsYolo(t *testing.T) {
+	repoDir := initTempGitRepo(t)
+	tmpDir := t.TempDir()
+
+	cfg := config.Default()
+	cfg.FetchOnCreate = false
+	cfg.Agents["sleeper"] = config.Agent{
+		Command: "sleep",
+		Args:    []string{"60"},
+	}
+
+	sm := NewSessionManager(cfg, config.Paths{
+		StateFile: filepath.Join(tmpDir, "state.json"),
+		DataDir:   tmpDir,
+		LogDir:    tmpDir,
+	}, slog.Default())
+
+	sm.state.Sessions["src1"] = &SessionState{
+		ID:           "src1",
+		Name:         "braw-source-session",
+		RepoPath:     repoDir,
+		RepoName:     "testrepo",
+		WorktreePath: repoDir,
+		Branch:       "feat/my-feature",
+		BaseBranch:   "main",
+		Agent:        "sleeper",
+		Status:       StatusRunning,
+		Yolo:         true,
+	}
+
+	forked, err := sm.Fork("braw-fork", "src1", 24, 80)
+	if err != nil {
+		t.Fatalf("Fork() unexpected error: %v", err)
+	}
+
+	t.Cleanup(func() {
+		sm.mu.RLock()
+		sess, ok := sm.sessions[forked.ID]
+		sm.mu.RUnlock()
+
+		if ok {
+			_ = sess.Kill()
+			sess.Close()
+		}
+
+		if forked.WorktreePath != "" {
+			cmd := exec.Command("git", "worktree", "remove", "--force", forked.WorktreePath)
+			cmd.Dir = repoDir
+			_ = cmd.Run()
+		}
+	})
+
+	if !forked.Yolo {
+		t.Error("Fork() of a yolo session did not inherit Yolo")
+	}
+}
+
 func TestResumeInPlaceRejectsRemovedConfig(t *testing.T) {
 	sm := newTestSessionManager(t)
 	repoDir := initTempGitRepo(t)

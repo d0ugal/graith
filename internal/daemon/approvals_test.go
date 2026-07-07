@@ -284,23 +284,27 @@ func TestValidateApprovalsBackend(t *testing.T) {
 	cases := []struct {
 		name    string
 		appr    config.Approvals
+		yolo    bool
 		wantErr bool
 	}{
-		{"default prompt ok", config.Approvals{}, false},
-		{"command with no command errors", config.Approvals{Backend: "command"}, true},
-		{"command with command ok", config.Approvals{Backend: "command", Command: "my-approver"}, false},
-		{"builtin invalid config errors", config.Approvals{Backend: "builtin", Builtin: config.ApprovalsBuiltin{Config: badCfg}}, true},
-		{"builtin valid config ok", config.Approvals{Backend: "builtin", Builtin: config.ApprovalsBuiltin{Config: goodCfg}}, false},
-		{"builtin inline rules ok", config.Approvals{Backend: "builtin", Builtin: config.ApprovalsBuiltin{Allow: []any{"echo @*"}}}, false},
-		{"localmost missing binary errors", config.Approvals{Backend: "localmost", Command: "definitely-not-real-xyz"}, true},
-		{"conflicting mode+backend errors", config.Approvals{Backend: "builtin", Mode: "localmost"}, true},
+		{"default prompt ok", config.Approvals{}, false, false},
+		{"command with no command errors", config.Approvals{Backend: "command"}, false, true},
+		{"command with command ok", config.Approvals{Backend: "command", Command: "my-approver"}, false, false},
+		{"builtin invalid config errors", config.Approvals{Backend: "builtin", Builtin: config.ApprovalsBuiltin{Config: badCfg}}, false, true},
+		{"builtin valid config ok", config.Approvals{Backend: "builtin", Builtin: config.ApprovalsBuiltin{Config: goodCfg}}, false, false},
+		{"builtin inline rules ok", config.Approvals{Backend: "builtin", Builtin: config.ApprovalsBuiltin{Allow: []any{"echo @*"}}}, false, false},
+		{"localmost missing binary errors", config.Approvals{Backend: "localmost", Command: "definitely-not-real-xyz"}, false, true},
+		{"conflicting mode+backend errors", config.Approvals{Backend: "builtin", Mode: "localmost"}, false, true},
+		// A yolo session uses the auto backend, so an otherwise-unenforceable
+		// global backend must not block it.
+		{"yolo skips unavailable global backend", config.Approvals{Backend: "command"}, true, false},
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
 			sm := newTestSessionManager(t)
 			sm.cfg.Approvals = tt.appr
 
-			err := sm.validateApprovalsBackend()
+			err := sm.validateApprovalsBackend(tt.yolo)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("validateApprovalsBackend() err = %v, wantErr %v", err, tt.wantErr)
 			}

@@ -21,5 +21,7 @@ func (autoBackend) Availability(Config) Availability {
 }
 
 func (autoBackend) Decide(context.Context, Request, Config) (Decision, error) {
-	return Decision{Decision: DecisionAllow, Reason: "auto-approved (yolo mode)"}, nil
+	// Reachable via both per-session yolo and the [approvals] backend = "auto"
+	// config, so keep the reason backend-neutral rather than yolo-specific.
+	return Decision{Decision: DecisionAllow, Reason: "auto-approved"}, nil
 }

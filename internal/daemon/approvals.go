@@ -40,6 +40,12 @@ func (sm *SessionManager) SubmitApproval(ctx context.Context, req protocol.Appro
 	// so a hard block would surface here rather than being silently allowed.
 	if yolo {
 		if decision, handled := sm.decideWithBackend(ctx, req, approvals.BackendAuto, approvalsCfg); handled {
+			// Auto-approve bypasses human review, so leave an audit trail: this
+			// is the only record that a yolo session allowed this tool call.
+			sm.log.Info("approval auto-decided (yolo)",
+				"request_id", req.RequestID, "session", req.SessionID,
+				"tool", req.ToolName, "decision", decision.Decision)
+
 			return decision
 		}
 	}
@@ -254,10 +260,18 @@ func (sm *SessionManager) decideWithBackend(ctx context.Context, req protocol.Ap
 
 	sm.mu.RUnlock()
 
-	acfg, err := approvalsBackendConfig(backendName, cfg, sm.approvalsConfigDir())
-	if err != nil {
-		sm.log.Error("approvals: invalid builtin config, deferring to user", "err", err)
-		return protocol.ApprovalDecisionMsg{}, false
+	// The auto backend ignores all config, so don't parse the builtin ruleset
+	// for it — otherwise an unrelated malformed [approvals.builtin] config would
+	// make a yolo session fall through to the human queue.
+	var acfg approvals.Config
+	if backendName != approvals.BackendAuto {
+		var err error
+
+		acfg, err = approvalsBackendConfig(backendName, cfg, sm.approvalsConfigDir())
+		if err != nil {
+			sm.log.Error("approvals: invalid builtin config, deferring to user", "err", err)
+			return protocol.ApprovalDecisionMsg{}, false
+		}
 	}
 
 	decision, derr := be.Decide(ctx, approvals.Request{
