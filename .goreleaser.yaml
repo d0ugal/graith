@@ -64,7 +64,10 @@ archives:
       - completions/gr.bash
       - completions/gr.zsh
       - completions/gr.fish
-      - man/gr.1.gz
+      # Ship the whole gzipped man tree (gr.1.gz plus every gr-*.1.gz subcommand
+      # page) so the root page's SEE ALSO cross-references resolve for AUR users
+      # too, matching the nfpm contents glob (issue #779).
+      - man/*.1.gz
 
 nfpms:
   - id: graith
@@ -179,5 +182,7 @@ aurs:
       install -Dm644 "./completions/gr.bash" "${pkgdir}/usr/share/bash-completion/completions/gr"
       install -Dm644 "./completions/gr.zsh" "${pkgdir}/usr/share/zsh/site-functions/_gr"
       install -Dm644 "./completions/gr.fish" "${pkgdir}/usr/share/fish/vendor_completions.d/gr.fish"
-      # man page
-      install -Dm644 "./man/gr.1.gz" "${pkgdir}/usr/share/man/man1/gr.1.gz"
+      # man pages: install the whole tree (gr.1.gz plus every gr-*.1.gz subcommand
+      # page) so the root page's SEE ALSO cross-references resolve (issue #779).
+      install -dm755 "${pkgdir}/usr/share/man/man1"
+      install -m644 ./man/*.1.gz "${pkgdir}/usr/share/man/man1/"

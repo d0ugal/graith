@@ -1,64 +1,33 @@
 package release
 
 import (
-	"os"
-	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
-
-	yaml "go.yaml.in/yaml/v3"
 )
 
-// goreleaserConfigPath returns the path to the repo-root .goreleaser.yaml,
-// relative to this test file (internal/release).
-func goreleaserConfigPath() string {
-	return filepath.Join("..", "..", ".goreleaser.yaml")
-}
-
-// goreleaserConfig is the slice of .goreleaser.yaml this test cares about: the
-// archive `files` list (what the source tarball actually carries) and the AUR
-// `package()` install script (what the generated PKGBUILD tries to install).
-type goreleaserConfig struct {
-	Archives []struct {
-		Files []string `yaml:"files"`
-	} `yaml:"archives"`
-	Aurs []struct {
-		Package string `yaml:"package"`
-	} `yaml:"aurs"`
-}
-
-func loadGoreleaserConfig(t *testing.T) goreleaserConfig {
-	t.Helper()
-
-	data, err := os.ReadFile(goreleaserConfigPath())
-	if err != nil {
-		t.Fatalf("reading .goreleaser.yaml: %v", err)
-	}
-
-	var cfg goreleaserConfig
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		t.Fatalf("parsing .goreleaser.yaml: %v", err)
-	}
-
-	return cfg
-}
+// The goreleaserConfig type and loadGoreleaserConfig helper are shared across
+// this package's release tests; they are defined in man_packaging_test.go.
 
 // installRe pulls the source and destination out of an
 // `install -Dm... "./src" "${pkgdir}/dst"` line in the AUR package() script.
 // Capturing both (not just the source) lets tests assert where a file lands,
-// so a source that installs to the wrong destination is still caught.
+// so a source that installs to the wrong destination is still caught. It only
+// matches quoted single-file installs (the completions, license, and binary);
+// the man-tree glob install is checked separately in TestAURPackageShipsManTree.
 var installRe = regexp.MustCompile(`install\s+-D\S*\s+"\./([^"]+)"\s+"([^"]+)"`)
 
-// aurInstall is one `install` invocation from the AUR package() script.
+// aurInstall is one single-file `install` invocation from the AUR package()
+// script.
 type aurInstall struct {
 	src string // source path relative to the archive root (no leading ./)
-	dst string // destination, e.g. ${pkgdir}/usr/share/man/man1/gr.1.gz
+	dst string // destination, e.g. ${pkgdir}/usr/share/licenses/graith-bin/LICENSE
 }
 
-// aurPackageInstalls returns the install invocations in the AUR package()
-// script. Parsing source and destination together means these tests match on
-// the real install lines, not on incidental substrings in comments.
+// aurPackageInstalls returns the single-file install invocations in the AUR
+// package() script. Parsing source and destination together means these tests
+// match on real install lines, not on incidental substrings in comments.
 func aurPackageInstalls(t *testing.T, script string) []aurInstall {
 	t.Helper()
 
@@ -68,18 +37,19 @@ func aurPackageInstalls(t *testing.T, script string) []aurInstall {
 	}
 
 	if len(installs) == 0 {
-		t.Fatal("no `install` lines found in AUR package() script")
+		t.Fatal("no single-file `install` lines found in AUR package() script")
 	}
 
 	return installs
 }
 
 // TestAURPackageSourcesAreArchived is the regression test for issue #777: the
-// AUR package() installed completions (and, once fixed, a man page) from paths
-// like ./completions/gr.bash, but the release archive graith-bin builds from
-// did not contain them because the archive had no `files:` list. Every
-// non-binary source the package() references must be present in the archive
-// files, or the generated PKGBUILD fails at build time with "cannot stat".
+// AUR package() installed completions from paths like ./completions/gr.bash,
+// but the release archive graith-bin builds from did not contain them because
+// the archive had no `files:` list. Every single-file source the package()
+// references must be present in the archive files, or the generated PKGBUILD
+// fails at build time with "cannot stat". (The man tree is a glob and is
+// checked in TestAURPackageShipsManTree.)
 func TestAURPackageSourcesAreArchived(t *testing.T) {
 	cfg := loadGoreleaserConfig(t)
 
@@ -110,29 +80,32 @@ func TestAURPackageSourcesAreArchived(t *testing.T) {
 	}
 }
 
-// TestAURPackageInstallsManPage guards the man page install the deb/rpm already
-// ship: without it, Arch users get completions but no `man gr`. It asserts the
-// exact source→destination pair, so a bare mention of the path in a comment (or
-// an install to the wrong dir) does not satisfy it (issue #777).
-func TestAURPackageInstallsManPage(t *testing.T) {
+// TestAURPackageShipsManTree guards the man page install the deb/rpm already
+// ship: without it, Arch users get completions but no `man gr`. The man tree is
+// shipped as a glob (gr.1.gz plus gr-*.1.gz subcommand pages, issue #779), so
+// this asserts both halves — the archive carries man/*.1.gz and the AUR
+// package() installs it into the man1 directory (issue #777).
+func TestAURPackageShipsManTree(t *testing.T) {
 	cfg := loadGoreleaserConfig(t)
 
-	const (
-		wantSrc = "man/gr.1.gz"
-		wantDst = "/usr/share/man/man1/gr.1.gz"
-	)
-
-	for _, inst := range aurPackageInstalls(t, cfg.Aurs[0].Package) {
-		if inst.src == wantSrc {
-			if !strings.HasSuffix(inst.dst, wantDst) {
-				t.Errorf("AUR package() installs the man page to %q, want it under %q", inst.dst, wantDst)
-			}
-
-			return
-		}
+	if len(cfg.Archives) == 0 {
+		t.Fatal("no archives block in .goreleaser.yaml")
 	}
 
-	t.Errorf("AUR package() does not install the man page (%s):\n%s", wantSrc, cfg.Aurs[0].Package)
+	const manGlob = "man/*.1.gz"
+
+	if !slices.Contains(cfg.Archives[0].Files, manGlob) {
+		t.Errorf("archive files does not ship the man tree glob %q; found: %v", manGlob, cfg.Archives[0].Files)
+	}
+
+	pkg := cfg.Aurs[0].Package
+	if !strings.Contains(pkg, "./man/*.1.gz") {
+		t.Errorf("AUR package() does not install the man tree glob (./man/*.1.gz):\n%s", pkg)
+	}
+
+	if !strings.Contains(pkg, "/usr/share/man/man1") {
+		t.Errorf("AUR package() does not install the man tree into /usr/share/man/man1:\n%s", pkg)
+	}
 }
 
 // TestAURLicensePathUsesPkgname locks in the Arch convention that a package's
