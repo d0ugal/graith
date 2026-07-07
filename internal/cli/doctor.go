@@ -334,11 +334,28 @@ func (dc *doctorContext) checkApprovalsBackend() {
 		return
 	}
 
-	av := be.Availability(approvals.Config{
+	acfg := approvals.Config{
 		Backend:       backend,
 		Command:       cfg.Approvals.Command,
-		BuiltinConfig: cfg.Approvals.Builtin.Config,
-	})
+		BuiltinConfig: config.ExpandPathRelative(cfg.Approvals.Builtin.Config, approvalsConfigDir()),
+	}
+
+	// Mirror the daemon's approvalsBackendConfig: render inline
+	// [approvals.builtin] rules to localmost JSON so an inline-only config is
+	// judged enforceable here exactly as it is at session-create, rather than
+	// being reported as a missing external config.
+	if cfg.Approvals.Builtin.HasInline() {
+		inline, err := cfg.Approvals.Builtin.InlineJSON()
+		if err != nil {
+			dc.failf("environment", "Approvals inline rules invalid: %v", err)
+
+			return
+		}
+
+		acfg.BuiltinInline = inline
+	}
+
+	av := be.Availability(acfg)
 	if !av.CanEnforce {
 		dc.failf("environment", "Approvals backend %q cannot enforce: %s", backend, av.Detail)
 		dc.hintf("Sessions will fail to start until this is fixed; set [approvals] backend = \"prompt\" or correct the backend config")

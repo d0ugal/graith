@@ -4285,10 +4285,18 @@ func (sm *SessionManager) resolveSandbox(agentName string) (bool, error) {
 
 // approvalsConfigDir returns the directory holding graith's config file, used to
 // resolve a relative [approvals.builtin] config path deterministically (rather
-// than against the daemon's working directory). Returns "" when the config file
-// path is unknown, in which case a relative path is left for the caller to
-// resolve against the working directory as before.
+// than against the daemon's working directory). It prefers the explicit global
+// --config override (sm.configFile, the file the daemon actually loaded) over
+// the default resolved path, mirroring the CLI's approvalsConfigDir so
+// `gr --config X approvals validate` and daemon enforcement resolve a relative
+// path against the same directory. Returns "" when no config path is known, in
+// which case a relative path is left for the caller to resolve against the
+// working directory as before.
 func (sm *SessionManager) approvalsConfigDir() string {
+	if f := strings.TrimSpace(sm.configFile); f != "" {
+		return filepath.Dir(f)
+	}
+
 	if sm.paths.ConfigFile == "" {
 		return ""
 	}
