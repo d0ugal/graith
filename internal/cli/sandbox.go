@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/d0ugal/graith/internal/config"
@@ -88,7 +89,14 @@ func runSandboxWhy() error {
 
 	merged := cfg.Sandbox
 	if whyAgent != "" {
-		merged = cfg.Sandbox.Merge(cfg.Agents[whyAgent].Sandbox)
+		agent, ok := cfg.Agents[whyAgent]
+		if !ok {
+			return fmt.Errorf(
+				"unknown agent %q; configured agents are: %s",
+				whyAgent, knownAgentNames(cfg.Agents))
+		}
+
+		merged = cfg.Sandbox.Merge(agent.Sandbox)
 	}
 
 	if merged.Backend != sandbox.BackendNono {
@@ -279,6 +287,24 @@ func renderWhy(backend string, q sandbox.WhyQuery, res sandbox.WhyResult, warnin
 	out.Printf("%s %s: %s\n", verb, subject, res.Explanation())
 
 	return nil
+}
+
+// knownAgentNames returns the configured agent names, sorted, for use in the
+// unknown-agent error. If none are configured it returns "(none)" so the error
+// still reads sensibly.
+func knownAgentNames(agents map[string]config.Agent) string {
+	if len(agents) == 0 {
+		return "(none)"
+	}
+
+	names := make([]string, 0, len(agents))
+	for name := range agents {
+		names = append(names, name)
+	}
+
+	sort.Strings(names)
+
+	return strings.Join(names, ", ")
 }
 
 func whySource(res sandbox.WhyResult) string {
