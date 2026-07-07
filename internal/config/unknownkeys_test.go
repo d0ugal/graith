@@ -231,6 +231,44 @@ func TestUnknownKeysReadsFile(t *testing.T) {
 	}
 }
 
+func TestResolveConfigPath(t *testing.T) {
+	dir := t.TempDir()
+
+	// Explicit path that exists.
+	explicit := filepath.Join(dir, "croft.toml")
+	if err := os.WriteFile(explicit, []byte("default_agent = \"claude\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if path, exists, err := ResolveConfigPath(explicit); err != nil || !exists || path != explicit {
+		t.Errorf("ResolveConfigPath(existing) = (%q, %v, %v), want (%q, true, nil)", path, exists, err, explicit)
+	}
+
+	// Explicit path that does not exist: returned verbatim, exists=false.
+	missing := filepath.Join(dir, "nae-sic-file.toml")
+	if path, exists, err := ResolveConfigPath(missing); err != nil || exists || path != missing {
+		t.Errorf("ResolveConfigPath(missing) = (%q, %v, %v), want (%q, false, nil)", path, exists, err, missing)
+	}
+
+	// No explicit path: resolves the XDG config when present.
+	xdgHome := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdgHome)
+	t.Setenv("GRAITH_PROFILE", "")
+
+	xdgConfig := filepath.Join(xdgHome, "graith", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(xdgConfig), 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(xdgConfig, []byte("default_agent = \"claude\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if path, exists, err := ResolveConfigPath(""); err != nil || !exists || path != xdgConfig {
+		t.Errorf("ResolveConfigPath(\"\") with XDG config = (%q, %v, %v), want (%q, true, nil)", path, exists, err, xdgConfig)
+	}
+}
+
 func TestLevenshtein(t *testing.T) {
 	cases := []struct {
 		a, b string

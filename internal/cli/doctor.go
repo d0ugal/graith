@@ -193,9 +193,13 @@ func (dc *doctorContext) checkVersion(report *doctorReport) string {
 func (dc *doctorContext) checkEnvironment() {
 	dc.section("Environment")
 
-	configPath := effectiveConfigPath()
-
-	if _, err := os.Stat(configPath); err == nil {
+	// Resolve the same file the CLI/daemon load — honouring --config and the
+	// legacy macOS fallback — so the report and the unknown-key check inspect
+	// the config that's actually in effect, not just the default XDG path. The
+	// profile/paths errors here can't occur: root has already resolved both
+	// (LoadOrDefault) before any command runs.
+	configPath, configExists, _ := config.ResolveConfigPath(cfgFile)
+	if configExists {
 		dc.passf("environment", "Config file: %s", configPath)
 		dc.checkConfigKeys(configPath)
 	} else {
@@ -261,18 +265,6 @@ func (dc *doctorContext) checkEnvironment() {
 	default:
 		dc.passf("environment", "Agent prompt: default")
 	}
-}
-
-// effectiveConfigPath returns the config file doctor should inspect: the
-// explicit --config path when the user passed one, otherwise the resolved
-// default XDG path. This keeps the "Config file" report and the unknown-key
-// check pointed at the same file the daemon/CLI actually loads.
-func effectiveConfigPath() string {
-	if cfgFile != "" {
-		return cfgFile
-	}
-
-	return paths.ConfigFile
 }
 
 // checkConfigKeys warns about config keys graith doesn't recognise — typos or
