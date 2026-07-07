@@ -8,23 +8,54 @@ import (
 	"os/exec"
 	"syscall"
 	"time"
+
+	"github.com/d0ugal/graith/internal/protocol"
 )
 
+// Timeouts for talking to the daemon socket. These are package vars rather than
+// consts so tests can shorten the handshake timeout without waiting seconds.
+var (
+	daemonDialTimeout      = 500 * time.Millisecond
+	daemonHandshakeTimeout = 5 * time.Second
+	daemonStartTimeout     = 5 * time.Second
+)
+
+// startDaemonFn spawns a fresh daemon. It's a package var so tests can
+// substitute a stub instead of exec'ing a real daemon process.
+var startDaemonFn = startDaemon
+
+// EnsureDaemon returns a connection to a live graith daemon, starting one if
+// necessary.
+//
+// A successful Unix socket dial proves *something* is listening, but not that
+// it's a live graith daemon: the socket may be stale (left behind by a stuck or
+// crashed process) or owned by an unrelated server. Rather than trust the dial
+// and then block forever on a handshake that never comes, EnsureDaemon probes
+// the socket with a handshake under a deadline. If the probe fails, the socket
+// is treated as stale — it's removed and a fresh daemon is started.
 func EnsureDaemon(sockPath, configFile string) (net.Conn, error) {
-	if conn, err := net.DialTimeout("unix", sockPath, 500*time.Millisecond); err == nil {
-		return conn, nil
+	if daemonResponds(sockPath) {
+		if conn, err := net.DialTimeout("unix", sockPath, daemonDialTimeout); err == nil {
+			return conn, nil
+		}
+	} else {
+		// Either nothing is listening, or a stale/foreign socket is. Remove any
+		// leftover socket file so a fresh daemon can bind at this path.
+		_ = os.Remove(sockPath)
 	}
 
-	if err := startDaemon(configFile); err != nil {
+	if err := startDaemonFn(configFile); err != nil {
 		return nil, fmt.Errorf("start daemon: %w", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), daemonStartTimeout)
 	defer cancel()
 
 	for {
-		if conn, err := net.DialTimeout("unix", sockPath, 200*time.Millisecond); err == nil {
-			return conn, nil
+		if daemonResponds(sockPath) {
+			if conn, err := net.DialTimeout("unix", sockPath, daemonDialTimeout); err == nil {
+				return conn, nil
+			}
 		}
 
 		select {
@@ -33,6 +64,53 @@ func EnsureDaemon(sockPath, configFile string) (net.Conn, error) {
 		case <-time.After(50 * time.Millisecond):
 		}
 	}
+}
+
+// daemonResponds reports whether a live graith daemon is listening on sockPath.
+// It dials with a short timeout and performs a throwaway handshake under a
+// deadline. A socket that accepts the connection but never completes a graith
+// handshake — a stale socket from a stuck process, or a non-graith server — is
+// reported as not responding, so callers treat it as stale instead of blocking
+// on it forever. A protocol-level rejection (handshake_err, e.g. a profile or
+// version mismatch) still proves a graith daemon is present, so it counts as
+// responding.
+func daemonResponds(sockPath string) bool {
+	conn, err := net.DialTimeout("unix", sockPath, daemonDialTimeout)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = conn.Close() }()
+
+	_ = conn.SetDeadline(time.Now().Add(daemonHandshakeTimeout))
+
+	reader := protocol.NewFrameReader(conn)
+	writer := protocol.NewFrameWriter(conn)
+
+	hs := protocol.HandshakeMsg{
+		Version:  protocol.Version,
+		ClientID: fmt.Sprintf("probe-%d", os.Getpid()),
+	}
+
+	data, err := protocol.EncodeControl("handshake", hs)
+	if err != nil {
+		return false
+	}
+
+	if err := writer.WriteFrame(protocol.ChannelControl, data); err != nil {
+		return false
+	}
+
+	frame, err := reader.ReadFrame()
+	if err != nil || frame.Channel != protocol.ChannelControl {
+		return false
+	}
+
+	env, err := protocol.DecodeControl(frame.Payload)
+	if err != nil {
+		return false
+	}
+
+	return env.Type == "handshake_ok" || env.Type == "handshake_err"
 }
 
 func startDaemon(configFile string) error {

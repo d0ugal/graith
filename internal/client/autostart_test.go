@@ -1,8 +1,14 @@
 package client
 
 import (
+	"net"
 	"os"
+	"path/filepath"
+	"sync"
 	"testing"
+	"time"
+
+	"github.com/d0ugal/graith/internal/protocol"
 )
 
 func TestDaemonStartArgsStripsConfigInsideSession(t *testing.T) {
@@ -53,4 +59,246 @@ func TestDaemonStartArgsEmptyConfigFile(t *testing.T) {
 	if len(args) != 2 || args[0] != "daemon" || args[1] != "start" {
 		t.Errorf("expected [daemon start] for empty config, got %v", args)
 	}
+}
+
+// shortSockPath returns a Unix socket path in /tmp, keeping it under the
+// macOS 104-byte sun_path limit that t.TempDir's long paths can exceed.
+func shortSockPath(t *testing.T, name string) string {
+	t.Helper()
+
+	dir, err := os.MkdirTemp("/tmp", "gr-sock-*")
+	if err != nil {
+		t.Fatalf("mkdir temp: %v", err)
+	}
+
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+
+	return filepath.Join(dir, name)
+}
+
+// shortenHandshakeTimeout swaps in a small handshake timeout for the duration
+// of a test so probes against unresponsive sockets don't wait the full 5s.
+func shortenHandshakeTimeout(t *testing.T, d time.Duration) {
+	t.Helper()
+
+	orig := daemonHandshakeTimeout
+	daemonHandshakeTimeout = d
+
+	t.Cleanup(func() { daemonHandshakeTimeout = orig })
+}
+
+// serveHandshake starts a Unix listener at sockPath whose behaviour on each
+// accepted connection is supplied by handle. It returns once the listener is
+// ready. The listener is closed via t.Cleanup.
+func serveHandshake(t *testing.T, sockPath string, handle func(net.Conn)) {
+	t.Helper()
+
+	ln, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatalf("listen on %s: %v", sockPath, err)
+	}
+
+	t.Cleanup(func() { _ = ln.Close() })
+
+	var wg sync.WaitGroup
+
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				wg.Wait()
+				return
+			}
+
+			wg.Add(1)
+
+			go func() {
+				defer wg.Done()
+				defer func() { _ = conn.Close() }()
+
+				handle(conn)
+			}()
+		}
+	}()
+}
+
+func TestDaemonRespondsFalseWhenNothingListening(t *testing.T) {
+	shortenHandshakeTimeout(t, 200*time.Millisecond)
+
+	sockPath := shortSockPath(t, "graith.sock")
+
+	if daemonResponds(sockPath) {
+		t.Fatal("expected daemonResponds to be false when nothing is listening")
+	}
+}
+
+func TestDaemonRespondsFalseOnStuckSocket(t *testing.T) {
+	shortenHandshakeTimeout(t, 200*time.Millisecond)
+
+	sockPath := shortSockPath(t, "dreich.sock")
+
+	// A stuck process: accepts the connection but never writes a response.
+	serveHandshake(t, sockPath, func(conn net.Conn) {
+		// Block until the client gives up and closes the connection.
+		buf := make([]byte, 1)
+		_, _ = conn.Read(buf)
+	})
+
+	start := time.Now()
+	if daemonResponds(sockPath) {
+		t.Fatal("expected daemonResponds to be false for a socket that never replies")
+	}
+
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("daemonResponds took %v; handshake deadline was not enforced", elapsed)
+	}
+}
+
+func TestDaemonRespondsFalseOnForeignSocket(t *testing.T) {
+	shortenHandshakeTimeout(t, 500*time.Millisecond)
+
+	sockPath := shortSockPath(t, "thrawn.sock")
+
+	// A non-graith server: sends bytes that aren't a valid graith frame.
+	serveHandshake(t, sockPath, func(conn net.Conn) {
+		_, _ = conn.Write([]byte("HTTP/1.1 200 OK\r\n\r\ngarbage"))
+	})
+
+	if daemonResponds(sockPath) {
+		t.Fatal("expected daemonResponds to be false for a non-graith server")
+	}
+}
+
+func TestDaemonRespondsTrueOnHandshakeOK(t *testing.T) {
+	shortenHandshakeTimeout(t, 2*time.Second)
+
+	sockPath := shortSockPath(t, "braw.sock")
+
+	serveHandshake(t, sockPath, func(conn net.Conn) {
+		writeHandshakeResponse(t, conn, "handshake_ok")
+	})
+
+	if !daemonResponds(sockPath) {
+		t.Fatal("expected daemonResponds to be true for a graith daemon replying handshake_ok")
+	}
+}
+
+func TestDaemonRespondsTrueOnHandshakeErr(t *testing.T) {
+	shortenHandshakeTimeout(t, 2*time.Second)
+
+	sockPath := shortSockPath(t, "canny.sock")
+
+	// A protocol-level rejection still proves a graith daemon is present.
+	serveHandshake(t, sockPath, func(conn net.Conn) {
+		writeHandshakeResponse(t, conn, "handshake_err")
+	})
+
+	if !daemonResponds(sockPath) {
+		t.Fatal("expected daemonResponds to be true for a daemon replying handshake_err")
+	}
+}
+
+// writeHandshakeResponse reads the client's handshake frame and replies with a
+// control frame of the given type, mimicking a graith daemon.
+func writeHandshakeResponse(t *testing.T, conn net.Conn, respType string) {
+	t.Helper()
+
+	reader := protocol.NewFrameReader(conn)
+	writer := protocol.NewFrameWriter(conn)
+
+	if _, err := reader.ReadFrame(); err != nil {
+		return
+	}
+
+	var payload any
+	switch respType {
+	case "handshake_ok":
+		payload = protocol.HandshakeOkMsg{Version: protocol.Version}
+	default:
+		payload = protocol.HandshakeErrMsg{Reason: "thrawn"}
+	}
+
+	data, err := protocol.EncodeControl(respType, payload)
+	if err != nil {
+		return
+	}
+
+	_ = writer.WriteFrame(protocol.ChannelControl, data)
+}
+
+// stubStartDaemon replaces the daemon-spawning function for the duration of a
+// test so EnsureDaemon can be exercised without exec'ing a real process.
+func stubStartDaemon(t *testing.T, fn func(configFile string) error) {
+	t.Helper()
+
+	orig := startDaemonFn
+	startDaemonFn = fn
+
+	t.Cleanup(func() { startDaemonFn = orig })
+}
+
+func shortenStartTimeout(t *testing.T, d time.Duration) {
+	t.Helper()
+
+	orig := daemonStartTimeout
+	daemonStartTimeout = d
+
+	t.Cleanup(func() { daemonStartTimeout = orig })
+}
+
+func TestEnsureDaemonRemovesStaleSocket(t *testing.T) {
+	shortenHandshakeTimeout(t, 200*time.Millisecond)
+	shortenStartTimeout(t, 200*time.Millisecond)
+
+	sockPath := shortSockPath(t, "haar.sock")
+
+	// A stale/foreign server occupies the socket but never speaks graith.
+	serveHandshake(t, sockPath, func(conn net.Conn) {
+		buf := make([]byte, 1)
+		_, _ = conn.Read(buf)
+	})
+
+	// The stub records that a start was attempted and removes the (now-unlinked)
+	// listener's leftover so nothing lingers; it does not produce a real daemon,
+	// so EnsureDaemon times out waiting for a response.
+	started := false
+	stubStartDaemon(t, func(string) error {
+		started = true
+		return nil
+	})
+
+	_, err := EnsureDaemon(sockPath, "")
+	if err == nil {
+		t.Fatal("expected EnsureDaemon to fail when no real daemon starts")
+	}
+
+	if !started {
+		t.Fatal("expected EnsureDaemon to attempt a fresh daemon start after finding a stale socket")
+	}
+
+	if _, statErr := os.Stat(sockPath); !os.IsNotExist(statErr) {
+		t.Fatalf("expected stale socket file to be removed, stat err = %v", statErr)
+	}
+}
+
+func TestEnsureDaemonReusesLiveDaemon(t *testing.T) {
+	shortenHandshakeTimeout(t, 2*time.Second)
+
+	sockPath := shortSockPath(t, "bide.sock")
+
+	serveHandshake(t, sockPath, func(conn net.Conn) {
+		writeHandshakeResponse(t, conn, "handshake_ok")
+	})
+
+	stubStartDaemon(t, func(string) error {
+		t.Error("EnsureDaemon should not start a daemon when a live one responds")
+		return nil
+	})
+
+	conn, err := EnsureDaemon(sockPath, "")
+	if err != nil {
+		t.Fatalf("EnsureDaemon returned error for a live daemon: %v", err)
+	}
+
+	_ = conn.Close()
 }
