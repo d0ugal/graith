@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net"
 	"os"
@@ -317,6 +318,37 @@ func TestReadMessagesEmpty(t *testing.T) {
 
 	if len(msgs.Messages) != 0 {
 		t.Errorf("expected 0 messages, got %d", len(msgs.Messages))
+	}
+}
+
+func TestReadMessagesRespectsContextCancellation(t *testing.T) {
+	env := setup(t)
+	defer env.teardown()
+
+	// Publish a message so there is something in the stream to read.
+	_, _, err := env.srv.publishMessage(context.Background(), &gomcp.CallToolRequest{}, PublishMessageInput{
+		Topic: "dreich",
+		Body:  "you shall not read me",
+	})
+	if err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	// A cancelled context must make readMessages bail out with the context
+	// error instead of blocking in its read loop forever.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, _, err = env.srv.readMessages(ctx, &gomcp.CallToolRequest{}, ReadMessagesInput{
+		Topic: "dreich",
+		All:   true,
+	})
+	if err == nil {
+		t.Fatal("expected error from cancelled context, got nil")
+	}
+
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("err = %v, want context.Canceled", err)
 	}
 }
 

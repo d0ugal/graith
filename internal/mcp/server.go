@@ -340,7 +340,7 @@ func (s *Server) publishMessage(_ context.Context, _ *gomcp.CallToolRequest, inp
 	return nil, msg, nil
 }
 
-func (s *Server) readMessages(_ context.Context, _ *gomcp.CallToolRequest, input ReadMessagesInput) (*gomcp.CallToolResult, ReadMessagesOutput, error) {
+func (s *Server) readMessages(ctx context.Context, _ *gomcp.CallToolRequest, input ReadMessagesInput) (*gomcp.CallToolResult, ReadMessagesOutput, error) {
 	if strings.HasPrefix(input.Topic, "inbox:") {
 		return nil, ReadMessagesOutput{}, fmt.Errorf("cannot read inbox streams via read_messages — use the read_inbox tool instead")
 	}
@@ -371,6 +371,13 @@ func (s *Server) readMessages(_ context.Context, _ *gomcp.CallToolRequest, input
 	var messages []MessageOutput
 
 	for {
+		select {
+		case <-ctx.Done():
+			_ = c.SendControl("detach", struct{}{})
+			return nil, ReadMessagesOutput{}, ctx.Err()
+		default:
+		}
+
 		frame, err := c.ReadFrame()
 		if err != nil {
 			return nil, ReadMessagesOutput{}, fmt.Errorf("read frame: %w", err)
