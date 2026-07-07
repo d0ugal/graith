@@ -3957,6 +3957,21 @@ func TestFormatPRSection(t *testing.T) {
 	if got := formatPRSection(statusBarInfo{}, barBg); got != "" {
 		t.Errorf("no PR should render empty, got %q", got)
 	}
+	// Draft PR must carry the "d" suffix so it is distinguishable from a
+	// plain open PR, mirroring the overlay column's "#Nd" (#776).
+	if got := ansi.Strip(formatPRSection(statusBarInfo{prNumber: 9, prState: "draft"}, barBg)); got != "PR#9d" {
+		t.Errorf("status bar PR section should mark draft as PR#9d, got %q", got)
+	}
+	// Draft must fall through to CI rendering: the suffix AND the CI marker
+	// both appear. Asserting the CI marker guards the fall-through — a stray
+	// return after the "d" suffix would drop it.
+	if got := ansi.Strip(formatPRSection(statusBarInfo{prNumber: 9, prState: "draft", ciState: "pending"}, barBg)); got != "PR#9d ·CI" {
+		t.Errorf("draft PR should keep the d suffix alongside CI state, got %q", got)
+	}
+	// Conflict beats CI even for a draft, and the draft suffix is retained.
+	if got := ansi.Strip(formatPRSection(statusBarInfo{prNumber: 9, prState: "draft", prConflicting: true, ciState: "passing"}, barBg)); got != "PR#9d ⚠conflict" {
+		t.Errorf("draft+conflict should render PR#9d ⚠conflict, got %q", got)
+	}
 }
 
 func TestColumnWidths_TotalWidthIncludesPR(t *testing.T) {
