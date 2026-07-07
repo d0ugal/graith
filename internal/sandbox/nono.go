@@ -418,9 +418,17 @@ func (opts WrapOpts) profileName() string {
 //
 // In both cases the profile must outlive this call — the sandboxed process
 // reads it for its whole lifetime — so writeNonoProfile never removes the file
-// it returns. The caller owns removal: the daemon deletes the stable profile in
-// SessionManager.Delete (see nonoProfilePath), and temp-file callers (e.g.
-// `gr sandbox why`) must remove the returned path themselves.
+// it returns on success. The caller owns removal: the daemon deletes the stable
+// profile in SessionManager.Delete (see nonoProfilePath), and temp-file callers
+// that receive the path back (e.g. `gr sandbox why`) must remove it themselves.
+// Note that callers reaching writeNonoProfile via sandbox.Wrap with an empty
+// ProfilePath (e.g. sandboxed MCP-server processes) do not get the temp path
+// back — it lives only inside the generated argv — and so cannot clean it up;
+// give those callers a stable ProfilePath if the temp file must be reclaimed.
+//
+// On the temp-file branch a failed write removes the partial file before
+// returning the error, so a caller that only ever sees a returned path never
+// leaks one it wasn't told about.
 func writeNonoProfile(p nonoProfile, path string) (string, error) {
 	data, err := json.MarshalIndent(p, "", "  ")
 	if err != nil {
@@ -436,6 +444,7 @@ func writeNonoProfile(p nonoProfile, path string) (string, error) {
 		defer func() { _ = f.Close() }()
 
 		if _, err := f.Write(data); err != nil {
+			_ = os.Remove(f.Name())
 			return "", err
 		}
 

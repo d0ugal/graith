@@ -648,6 +648,11 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 
 	cleanupOnError := func() {
 		sm.cleanupHooks(id, agentName, worktreePath)
+		// A per-session nono profile may already have been written by
+		// sandbox.Wrap before this error path ran; rollbackState deletes the
+		// session from state, so no later Delete would remove it. Harmless if
+		// no profile was written (os.Remove ignores a missing file).
+		_ = os.Remove(sm.nonoProfilePath(id))
 
 		if sharedWorktree || inPlace {
 			return
@@ -1209,6 +1214,9 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 
 	forkCleanup := func() {
 		sm.cleanupHooks(id, agentName, worktreePath)
+		// See cleanupOnError in Create: remove any nono profile Wrap wrote
+		// before the error path so it isn't orphaned when state is rolled back.
+		_ = os.Remove(sm.nonoProfilePath(id))
 
 		if len(forkIncludes) > 0 {
 			_ = sm.teardownIncludes(repoRoot, worktreePath, branchName, forkIncludes)
