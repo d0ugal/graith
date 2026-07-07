@@ -231,7 +231,12 @@ func confirmBatch(cmd *cobra.Command, verb string, pastTense string, sessions []
 
 	out.Printf("The following %d sessions will be %s:\n\n", n, pastTense)
 
+	// The daemon's background refresh loop skips non-running sessions, so the
+	// Dirty/UnpushedCount fields on SessionInfo are stale for stopped sessions
+	// (#209). Recompute them with live git checks so the table reflects the
+	// real deletion risk.
 	now := time.Now()
+	anyGitFailed := false
 	tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
 	_, _ = fmt.Fprintln(tw, "NAME\tAGENT\tREPO\tSTATUS\tLAST ATTACHED\tDIRTY\tUNPUSHED")
 
@@ -244,14 +249,22 @@ func confirmBatch(cmd *cobra.Command, verb string, pastTense string, sessions []
 			}
 		}
 
+		st := liveSessionStatus(s)
+
 		dirty := "no"
-		if s.Dirty {
+		if st.dirty {
 			dirty = "yes"
 		}
 
 		unpushed := "—"
-		if s.UnpushedCount > 0 {
-			unpushed = fmt.Sprintf("%d commits", s.UnpushedCount)
+		if st.unpushed > 0 {
+			unpushed = fmt.Sprintf("%d commits", st.unpushed)
+		}
+
+		if st.gitFailed {
+			anyGitFailed = true
+			dirty = "?"
+			unpushed = "?"
 		}
 
 		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
@@ -259,6 +272,10 @@ func confirmBatch(cmd *cobra.Command, verb string, pastTense string, sessions []
 	}
 
 	_ = tw.Flush()
+
+	if anyGitFailed {
+		out.Printf("\nWarning: could not check git status for sessions marked \"?\" — dirty/unpushed state is unknown\n")
+	}
 
 	prompt := strings.ToUpper(verb[:1]) + verb[1:]
 	out.Printf("\n%s %d sessions? [y/N] ", prompt, n)

@@ -144,11 +144,66 @@ type repoStatus struct {
 	gitFailed       bool
 }
 
+// dirtyFilesFn and unpushedSummariesFn indirect the git status lookups so
+// tests can inject fakes without spawning git.
+var (
+	dirtyFilesFn        = git.DirtyFiles
+	unpushedSummariesFn = git.UnpushedCommitSummaries
+)
+
+// liveGitStatus is a live dirty/unpushed summary for a single session,
+// aggregated across its main worktree and any included repos.
+type liveGitStatus struct {
+	dirty     bool
+	unpushed  int
+	gitFailed bool
+}
+
+// liveSessionStatus recomputes a session's dirty/unpushed state with live git
+// checks, rather than trusting the daemon's cached SessionInfo fields (which
+// the background refresh loop skips for non-running sessions — see #209).
+// In-place sessions are reported clean because deleting one never removes the
+// worktree, so its git state is irrelevant to deletion safety.
+func liveSessionStatus(s protocol.SessionInfo) liveGitStatus {
+	var st liveGitStatus
+
+	if s.InPlace {
+		return st
+	}
+
+	check := func(worktreePath, baseBranch string) {
+		if worktreePath == "" {
+			return
+		}
+
+		dirty, dirtyErr := dirtyFilesFn(worktreePath)
+		unpushed, unpushedErr := unpushedSummariesFn(worktreePath, baseBranch)
+
+		if len(dirty) > 0 {
+			st.dirty = true
+		}
+
+		st.unpushed += len(unpushed)
+
+		if dirtyErr != nil || (baseBranch != "" && unpushedErr != nil) {
+			st.gitFailed = true
+		}
+	}
+
+	check(s.WorktreePath, s.BaseBranch)
+
+	for _, inc := range s.Includes {
+		check(inc.WorktreePath, inc.BaseBranch)
+	}
+
+	return st
+}
+
 func confirmDelete(session *protocol.SessionInfo) (bool, error) {
 	var repos []repoStatus
 
-	mainDirty, mainDirtyErr := git.DirtyFiles(session.WorktreePath)
-	mainUnpushed, mainUnpushedErr := git.UnpushedCommitSummaries(session.WorktreePath, session.BaseBranch)
+	mainDirty, mainDirtyErr := dirtyFilesFn(session.WorktreePath)
+	mainUnpushed, mainUnpushedErr := unpushedSummariesFn(session.WorktreePath, session.BaseBranch)
 	repos = append(repos, repoStatus{
 		name:            session.RepoName,
 		dirtyFiles:      mainDirty,
@@ -157,8 +212,8 @@ func confirmDelete(session *protocol.SessionInfo) (bool, error) {
 	})
 
 	for _, inc := range session.Includes {
-		incDirty, incDirtyErr := git.DirtyFiles(inc.WorktreePath)
-		incUnpushed, incUnpushedErr := git.UnpushedCommitSummaries(inc.WorktreePath, inc.BaseBranch)
+		incDirty, incDirtyErr := dirtyFilesFn(inc.WorktreePath)
+		incUnpushed, incUnpushedErr := unpushedSummariesFn(inc.WorktreePath, inc.BaseBranch)
 		repos = append(repos, repoStatus{
 			name:            inc.RepoName,
 			dirtyFiles:      incDirty,
