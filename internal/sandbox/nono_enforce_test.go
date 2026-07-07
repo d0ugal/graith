@@ -134,11 +134,11 @@ func TestNonoWhyPolicyDecisions(t *testing.T) {
 		t.Errorf("read_dir read should be ALLOWED, got: %s", got)
 	}
 
-	if got := why(filepath.Join(readOnly, "f"), "write"); !strings.Contains(got, "DENY") {
+	if got := why(filepath.Join(readOnly, "f"), "write"); !strings.Contains(got, "DENIED") {
 		t.Errorf("read_dir write should be DENIED, got: %s", got)
 	}
 
-	if got := why(filepath.Join(secret, "id_rsa"), "read"); !strings.Contains(got, "DENY") {
+	if got := why(filepath.Join(secret, "id_rsa"), "read"); !strings.Contains(got, "DENIED") {
 		t.Errorf("ungranted secret read should be DENIED, got: %s", got)
 	}
 }
