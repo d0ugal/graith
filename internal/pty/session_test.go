@@ -115,6 +115,7 @@ func TestSessionInterruptCountAndDelay(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	start := time.Now()
+
 	if err := s.Interrupt(3, 100*time.Millisecond); err != nil {
 		t.Fatalf("Interrupt: %v", err)
 	}

@@ -1152,11 +1152,11 @@ func TestAgentInterruptAccessors(t *testing.T) {
 
 	t.Run("count below 1 is clamped to 1", func(t *testing.T) {
 		zero := 0
-		neg := -5
 		if got := (Agent{InterruptCount: &zero}).InterruptCountValue(); got != 1 {
 			t.Errorf("InterruptCountValue() = %d, want 1", got)
 		}
 
+		neg := -5
 		if got := (Agent{InterruptCount: &neg}).InterruptCountValue(); got != 1 {
 			t.Errorf("InterruptCountValue() = %d, want 1", got)
 		}
