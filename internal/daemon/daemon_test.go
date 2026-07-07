@@ -3450,6 +3450,39 @@ func TestNonoProfilePathMatchesWrapOpts(t *testing.T) {
 	}
 }
 
+func TestRollbackOrchestratorCreateRemovesNonoProfile(t *testing.T) {
+	// createOrchestrator writes a nono profile via sandboxOptsFromConfig before
+	// it can fail (PTY start / state persist), and rollback deletes the session
+	// from state so no later Delete runs. rollbackOrchestratorCreate must remove
+	// the profile itself, mirroring cleanupOnError/forkCleanup.
+	sm := newTestSessionManager(t)
+	sm.paths.RuntimeDir = t.TempDir()
+
+	sm.state.Sessions["thrawn1"] = &SessionState{
+		ID:     "thrawn1",
+		Name:   "thrawn",
+		Agent:  "claude",
+		Status: StatusCreating,
+	}
+
+	profilePath := sm.nonoProfilePath("thrawn1")
+	if err := os.MkdirAll(filepath.Dir(profilePath), 0o700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(profilePath, []byte("{}"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	sm.rollbackOrchestratorCreate("thrawn1")
+
+	if _, ok := sm.state.Sessions["thrawn1"]; ok {
+		t.Error("session should be removed from state after rollback")
+	}
+	if _, err := os.Stat(profilePath); !os.IsNotExist(err) {
+		t.Errorf("nono profile should be removed after rollback, stat err = %v", err)
+	}
+}
+
 func TestDeleteWithChildrenRemovesNonoProfiles(t *testing.T) {
 	sm := newTestSessionManager(t)
 	sm.paths.RuntimeDir = t.TempDir()
