@@ -234,7 +234,14 @@ func TestApprovalsResolveBackend(t *testing.T) {
 		{"explicit command", Approvals{Backend: "command", Command: "x"}, "command", false, false},
 		{"explicit builtin", Approvals{Backend: "builtin"}, "builtin", false, false},
 		{"explicit native localmost", Approvals{Backend: "localmost"}, "localmost", false, false},
+		{"explicit auto", Approvals{Backend: "auto"}, "auto", false, false},
 		{"unknown backend errors", Approvals{Backend: "thrawn"}, "", false, true},
+
+		// auto is a first-class value in the deprecated Mode field too: it maps
+		// straight to the "auto" backend (not "command") with a deprecation nudge.
+		{"legacy mode=auto -> auto (warn)", Approvals{Mode: "auto"}, "auto", true, false},
+		{"both agree (auto)", Approvals{Backend: "auto", Mode: "auto"}, "auto", true, false},
+		{"conflict: auto + mode=localmost", Approvals{Backend: "auto", Mode: "localmost"}, "", false, true},
 
 		// Back-compat: legacy mode maps to the command backend with a warning.
 		{"legacy mode=localmost -> command (warn)", Approvals{Mode: "localmost"}, "command", true, false},
@@ -300,6 +307,8 @@ func TestApprovalsValidate(t *testing.T) {
 		{"command ignored by prompt", Approvals{Command: "graith-approver"}, true},
 		{"command ignored by explicit prompt", Approvals{Backend: "prompt", Command: "graith-approver"}, true},
 		{"command ignored by builtin", Approvals{Backend: "builtin", Command: "graith-approver"}, true},
+		{"auto backend is fine", Approvals{Backend: "auto"}, false},
+		{"command ignored by auto", Approvals{Backend: "auto", Command: "graith-approver"}, true},
 
 		// Conflicts from ResolveBackend still surface.
 		{"unknown backend", Approvals{Backend: "thrawn"}, true},

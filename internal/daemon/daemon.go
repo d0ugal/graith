@@ -369,7 +369,7 @@ func (sm *SessionManager) repoStoreDir(repoRoot string) (string, error) {
 //  1. Lock: validate, reserve session as StatusCreating, unlock
 //  2. Git setup and PTY spawn (no lock held)
 //  3. Lock: commit to StatusRunning, unlock
-func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, model, parentID string, noRepo bool, shareWorktree string, agentHooks bool, inPlace, allowConcurrent, skipModelValidation bool, rows, cols uint16, envExtra ...map[string]string) (SessionState, error) {
+func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, model, parentID string, noRepo bool, shareWorktree string, agentHooks bool, inPlace, allowConcurrent, skipModelValidation, yolo bool, rows, cols uint16, envExtra ...map[string]string) (SessionState, error) {
 	if err := ValidateSessionName(name); err != nil {
 		return SessionState{}, err
 	}
@@ -621,6 +621,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 		SharedWorktreeSourceID: sharedWorktreeSourceID,
 		InPlace:                inPlace,
 		AgentHooks:             agentHooks,
+		Yolo:                   yolo,
 		Status:                 StatusCreating,
 		CreatedAt:              time.Now().UTC(),
 		StatusChangedAt:        time.Now().UTC(),
@@ -848,7 +849,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 	}
 
 	if agentHooks {
-		hookArgs, hookEnv, err := sm.injectHooks(agentName, id, worktreePath, mcpServers)
+		hookArgs, hookEnv, err := sm.injectHooks(agentName, id, worktreePath, yolo, mcpServers)
 		if err != nil {
 			cleanupOnError()
 			rollbackState()
@@ -1141,6 +1142,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 	sourceModel := source.Model
 	sourceAgentSessionID := source.AgentSessionID
 	sourceAgentHooks := source.AgentHooks
+	sourceYolo := source.Yolo
 	sourceForkIncludes := make([]IncludedRepoState, len(source.Includes))
 	copy(sourceForkIncludes, source.Includes)
 
@@ -1193,6 +1195,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 		AgentSessionID:  agentSessionID,
 		Model:           sourceModel,
 		AgentHooks:      sourceAgentHooks,
+		Yolo:            sourceYolo,
 		Status:          StatusCreating,
 		CreatedAt:       time.Now().UTC(),
 		StatusChangedAt: time.Now().UTC(),
@@ -1348,7 +1351,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 	}
 
 	if sourceAgentHooks {
-		hookArgs, hookEnv, err := sm.injectHooks(agentName, id, worktreePath, mcpServers)
+		hookArgs, hookEnv, err := sm.injectHooks(agentName, id, worktreePath, sourceYolo, mcpServers)
 		if err != nil {
 			forkCleanup()
 			rollbackState()
@@ -1924,6 +1927,7 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	sessAgentSessionID := sessState.AgentSessionID
 	sessModel := sessState.Model
 	sessAgentHooks := sessState.AgentHooks
+	sessYolo := sessState.Yolo
 	sessIncludes := make([]IncludedRepoState, len(sessState.Includes))
 	copy(sessIncludes, sessState.Includes)
 	sessInPlace := sessState.InPlace
@@ -2082,7 +2086,7 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	}
 
 	if sessAgentHooks {
-		hookArgs, hookEnv, err := sm.injectHooks(sessAgent, id, sessWorktreePath, mcpServers)
+		hookArgs, hookEnv, err := sm.injectHooks(sessAgent, id, sessWorktreePath, sessYolo, mcpServers)
 		if err != nil {
 			rollbackState()
 			return SessionState{}, fmt.Errorf("inject agent hooks: %w", err)

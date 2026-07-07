@@ -361,13 +361,18 @@ func (b ApprovalsBuiltin) InlineJSON() ([]byte, error) {
 }
 
 // legacyModeBackend maps a deprecated [approvals] mode value to its effective
-// backend. All three legacy modes map to the "command" backend — for
-// mode="localmost" this preserves the historical behaviour (graith's own JSON
-// contract, NOT the native-protocol "localmost" backend).
+// backend. The command/external/localmost modes all map to the "command"
+// backend — for mode="localmost" this preserves the historical behaviour
+// (graith's own JSON contract, NOT the native-protocol "localmost" backend).
+// mode="auto" maps straight to the "auto" backend.
 func legacyModeBackend(mode string) (string, bool) {
 	switch mode {
 	case "command", "external", "localmost":
 		return "command", true
+	case "auto":
+		// mode="auto" is the deprecated spelling of backend="auto"; it maps
+		// straight through rather than to the "command" backend.
+		return "auto", true
 	default:
 		return "", false
 	}
@@ -375,7 +380,7 @@ func legacyModeBackend(mode string) (string, bool) {
 
 func knownApprovalsBackend(name string) bool {
 	switch name {
-	case "prompt", "command", "external", "localmost", "builtin":
+	case "prompt", "command", "external", "localmost", "builtin", "auto":
 		return true
 	default:
 		return false
@@ -407,7 +412,7 @@ func (a Approvals) ResolveBackend() (backend, deprecation string, err error) {
 
 	if a.Backend != "" {
 		if !knownApprovalsBackend(a.Backend) {
-			return "", "", fmt.Errorf("[approvals] backend %q is not recognised (want one of prompt, command, external, localmost, builtin)", a.Backend)
+			return "", "", fmt.Errorf("[approvals] backend %q is not recognised (want one of prompt, command, external, localmost, builtin, auto)", a.Backend)
 		}
 
 		if isLegacy && canonicalApprovalsBackend(a.Backend) != legacy {
@@ -434,6 +439,10 @@ func (a Approvals) ResolveBackend() (backend, deprecation string, err error) {
 }
 
 func legacyDeprecationMessage(mode string) string {
+	if mode == "auto" {
+		return `[approvals] mode="auto" is deprecated; set backend="auto" instead.`
+	}
+
 	if mode == "localmost" {
 		return `[approvals] mode="localmost" is deprecated. It maps to backend="command" ` +
 			`(graith's JSON contract — unchanged behaviour); set backend="command" to silence this. ` +

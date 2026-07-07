@@ -68,25 +68,29 @@ type SessionState struct {
 	Includes               []IncludedRepoState   `json:"includes,omitempty"`
 	AgentHooks             bool                  `json:"agent_hooks,omitempty"`
 	ApprovalsEnabled       bool                  `json:"approvals_enabled,omitempty"` // deprecated: migrated to AgentHooks in v4
-	Starred                bool                  `json:"starred,omitempty"`
-	SystemKind             string                `json:"system_kind,omitempty"`
-	StopReason             string                `json:"stop_reason,omitempty"`
-	BackoffLevel           int                   `json:"backoff_level,omitempty"`
-	FreshStart             bool                  `json:"fresh_start,omitempty"`
-	LastStartedAt          time.Time             `json:"last_started_at,omitempty"`
-	SummaryText            string                `json:"summary_text,omitempty"`
-	SummarySetAt           *time.Time            `json:"summary_set_at,omitempty"`
-	SummaryTTL             int                   `json:"summary_ttl,omitempty"`
-	LastOutputAt           *time.Time            `json:"last_output_at,omitempty"`
-	CreatedAt              time.Time             `json:"created_at"`
-	LastAttachedAt         *time.Time            `json:"last_attached_at,omitempty"`
-	CreationCfg            *CreationConfig       `json:"creation_config,omitempty"`
-	Token                  string                `json:"token,omitempty"`
-	ScenarioID             string                `json:"scenario_id,omitempty"`
-	ScenarioName           string                `json:"scenario_name,omitempty"`
-	ScenarioRole           string                `json:"scenario_role,omitempty"`
-	ScenarioGoal           string                `json:"scenario_goal,omitempty"`
-	MigratedFrom           *MigrationInfo        `json:"migrated_from,omitempty"`
+	// Yolo opts this session into auto-approve ("yolo") mode: the PreToolUse
+	// approval hook is installed and every request is auto-allowed via the
+	// "auto" approvals backend, regardless of the global [approvals] backend.
+	Yolo           bool            `json:"yolo,omitempty"`
+	Starred        bool            `json:"starred,omitempty"`
+	SystemKind     string          `json:"system_kind,omitempty"`
+	StopReason     string          `json:"stop_reason,omitempty"`
+	BackoffLevel   int             `json:"backoff_level,omitempty"`
+	FreshStart     bool            `json:"fresh_start,omitempty"`
+	LastStartedAt  time.Time       `json:"last_started_at,omitempty"`
+	SummaryText    string          `json:"summary_text,omitempty"`
+	SummarySetAt   *time.Time      `json:"summary_set_at,omitempty"`
+	SummaryTTL     int             `json:"summary_ttl,omitempty"`
+	LastOutputAt   *time.Time      `json:"last_output_at,omitempty"`
+	CreatedAt      time.Time       `json:"created_at"`
+	LastAttachedAt *time.Time      `json:"last_attached_at,omitempty"`
+	CreationCfg    *CreationConfig `json:"creation_config,omitempty"`
+	Token          string          `json:"token,omitempty"`
+	ScenarioID     string          `json:"scenario_id,omitempty"`
+	ScenarioName   string          `json:"scenario_name,omitempty"`
+	ScenarioRole   string          `json:"scenario_role,omitempty"`
+	ScenarioGoal   string          `json:"scenario_goal,omitempty"`
+	MigratedFrom   *MigrationInfo  `json:"migrated_from,omitempty"`
 }
 
 // MigrationInfo records the agent a session was migrated from, so a failed

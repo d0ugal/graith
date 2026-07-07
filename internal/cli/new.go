@@ -24,6 +24,7 @@ var (
 	newInPlace             bool
 	newAllowConcurrent     bool
 	newSkipModelValidation bool
+	newYolo                bool
 )
 
 var newCmd = &cobra.Command{
@@ -100,6 +101,7 @@ var newCmd = &cobra.Command{
 			InPlace:             newInPlace,
 			AllowConcurrent:     newAllowConcurrent,
 			SkipModelValidation: newSkipModelValidation,
+			Yolo:                newYolo,
 		})
 
 		resp, err := c.ReadControlResponse()
@@ -153,6 +155,7 @@ func registerNewCmd() {
 	newCmd.Flags().BoolVar(&newInPlace, "in-place", false, "run agent directly in the repo without creating a worktree")
 	newCmd.Flags().BoolVar(&newAllowConcurrent, "allow-concurrent", false, "allow multiple in-place sessions on the same repo")
 	newCmd.Flags().BoolVar(&newSkipModelValidation, "skip-model-validation", false, "skip validate_model check (use models not in the validation list)")
+	newCmd.Flags().BoolVar(&newYolo, "yolo", false, "auto-approve all tool requests for this session (no approval prompts)")
 	_ = newCmd.RegisterFlagCompletionFunc("agent", completeAgentNames)
 	_ = newCmd.RegisterFlagCompletionFunc("repo", completeRepoPaths)
 	_ = newCmd.RegisterFlagCompletionFunc("base", completeBranchNames)

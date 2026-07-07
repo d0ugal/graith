@@ -42,7 +42,7 @@ func resolveGrBin() string {
 // hooks for all relevant lifecycle events. Returns the path to the settings file.
 // All supported hooks are generated including PreToolUse (approve-request) and
 // SessionStart (check-inbox). Only called when agent hooks are enabled.
-func (sm *SessionManager) generateClaudeSettings(sessionID string) (string, error) {
+func (sm *SessionManager) generateClaudeSettings(sessionID string, yolo bool) (string, error) {
 	dir := sm.hookDir(sessionID)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("create hook dir: %w", err)
@@ -52,7 +52,10 @@ func (sm *SessionManager) generateClaudeSettings(sessionID string) (string, erro
 
 	quoted := shellQuote(resolveGrBin())
 
-	hookEnabled := sm.cfg.Approvals.HookEnabled()
+	// A yolo session always installs the PreToolUse approval hook so its tool
+	// calls route through the daemon's auto-approve backend (and any future
+	// dangerous-command blocklist), even when global approval gating is off.
+	hookEnabled := sm.cfg.Approvals.HookEnabled() || yolo
 
 	events := []string{
 		"SessionStart",
@@ -170,8 +173,8 @@ func (sm *SessionManager) generateMCPConfig(sessionID string, mcpServers []confi
 
 // injectClaudeHooks generates hook files for a Claude session and returns
 // the extra args and env vars to add to the agent launch.
-func (sm *SessionManager) injectClaudeHooks(sessionID string, mcpServers []config.MCPServerConfig) (extraArgs []string, extraEnv map[string]string, err error) {
-	settingsPath, err := sm.generateClaudeSettings(sessionID)
+func (sm *SessionManager) injectClaudeHooks(sessionID string, yolo bool, mcpServers []config.MCPServerConfig) (extraArgs []string, extraEnv map[string]string, err error) {
+	settingsPath, err := sm.generateClaudeSettings(sessionID, yolo)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -195,7 +198,7 @@ func (sm *SessionManager) injectClaudeHooks(sessionID string, mcpServers []confi
 
 // injectCodexHooks generates per-event hook scripts for a Codex session and
 // returns extra env vars (including CODEX_HOOKS_DIR) to add to the agent launch.
-func (sm *SessionManager) injectCodexHooks(sessionID string) (extraArgs []string, extraEnv map[string]string, err error) {
+func (sm *SessionManager) injectCodexHooks(sessionID string, yolo bool) (extraArgs []string, extraEnv map[string]string, err error) {
 	dir := sm.hookDir(sessionID)
 	grBin := resolveGrBin()
 
@@ -208,7 +211,7 @@ func (sm *SessionManager) injectCodexHooks(sessionID string) (extraArgs []string
 		"stop":               "Stop",
 	}
 
-	hookEnabled := sm.cfg.Approvals.HookEnabled()
+	hookEnabled := sm.cfg.Approvals.HookEnabled() || yolo
 
 	hooksDir := filepath.Join(dir, "codex-hooks")
 	if err := os.MkdirAll(hooksDir, 0o700); err != nil {
@@ -342,7 +345,7 @@ func preTrustCursorWorkspace(worktreePath string) error {
 // injectCursorHooks generates a .cursor/hooks.json in the worktree for a
 // Cursor session. Returns no extra args or env — cursor reads hooks from the
 // project directory automatically.
-func (sm *SessionManager) injectCursorHooks(sessionID, worktreePath string) (extraArgs []string, extraEnv map[string]string, err error) {
+func (sm *SessionManager) injectCursorHooks(sessionID, worktreePath string, yolo bool) (extraArgs []string, extraEnv map[string]string, err error) {
 	if worktreePath == "" {
 		return nil, nil, nil
 	}
@@ -387,7 +390,7 @@ func (sm *SessionManager) injectCursorHooks(sessionID, worktreePath string) (ext
 		},
 	}
 
-	if sm.cfg.Approvals.HookEnabled() {
+	if sm.cfg.Approvals.HookEnabled() || yolo {
 		hooks.Hooks["preToolUse"] = []hookEntry{
 			{Command: fmt.Sprintf("%s approve-request", quoted)},
 		}
@@ -409,14 +412,14 @@ func (sm *SessionManager) injectCursorHooks(sessionID, worktreePath string) (ext
 
 // injectHooks dispatches hook injection to the agent-specific implementation.
 // Returns nil for agents that don't support hooks.
-func (sm *SessionManager) injectHooks(agentName, sessionID, worktreePath string, mcpServers []config.MCPServerConfig) (extraArgs []string, extraEnv map[string]string, err error) {
+func (sm *SessionManager) injectHooks(agentName, sessionID, worktreePath string, yolo bool, mcpServers []config.MCPServerConfig) (extraArgs []string, extraEnv map[string]string, err error) {
 	switch agentName {
 	case "claude":
-		return sm.injectClaudeHooks(sessionID, mcpServers)
+		return sm.injectClaudeHooks(sessionID, yolo, mcpServers)
 	case "codex":
-		return sm.injectCodexHooks(sessionID)
+		return sm.injectCodexHooks(sessionID, yolo)
 	case "cursor":
-		return sm.injectCursorHooks(sessionID, worktreePath)
+		return sm.injectCursorHooks(sessionID, worktreePath, yolo)
 	default:
 		sm.log.Info("agent does not support hooks, skipping", "agent", agentName, "session_id", sessionID)
 		return nil, nil, nil

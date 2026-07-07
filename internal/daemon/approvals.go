@@ -28,7 +28,21 @@ type pendingApproval struct {
 func (sm *SessionManager) SubmitApproval(ctx context.Context, req protocol.ApprovalRequestMsg) protocol.ApprovalDecisionMsg {
 	sm.mu.RLock()
 	approvalsCfg := sm.cfg.Approvals
+	yolo := false
+	if sess, ok := sm.state.Sessions[req.SessionID]; ok {
+		yolo = sess.Yolo
+	}
 	sm.mu.RUnlock()
+
+	// A yolo session auto-approves every request via the "auto" backend,
+	// overriding whatever global backend is configured. This is the composition
+	// point for a future dangerous-command blocklist: the auto backend decides,
+	// so a hard block would surface here rather than being silently allowed.
+	if yolo {
+		if decision, handled := sm.decideWithBackend(ctx, req, approvals.BackendAuto, approvalsCfg); handled {
+			return decision
+		}
+	}
 
 	// When the approval gate is disabled, never queue for a human who may not
 	// be watching — allow by default. This is a defensive backstop; the
@@ -214,6 +228,16 @@ func (sm *SessionManager) tryApprovalBackend(ctx context.Context, req protocol.A
 		return protocol.ApprovalDecisionMsg{}, false
 	}
 
+	return sm.decideWithBackend(ctx, req, backendName, cfg)
+}
+
+// decideWithBackend consults a specific, already-resolved approvals backend and
+// returns (decision, true) only for a definitive allow/block. A deferred,
+// errored, or unloadable backend returns (_, false) so the caller falls through
+// to the human queue. It is the shared decision core used both by
+// tryApprovalBackend (config-resolved backend) and by the per-session yolo path
+// (forced "auto" backend).
+func (sm *SessionManager) decideWithBackend(ctx context.Context, req protocol.ApprovalRequestMsg, backendName string, cfg config.Approvals) (protocol.ApprovalDecisionMsg, bool) {
 	be, err := approvals.BackendByName(backendName)
 	if err != nil {
 		sm.log.Error("approvals: unknown backend, deferring to user", "backend", backendName, "err", err)

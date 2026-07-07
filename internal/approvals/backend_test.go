@@ -34,6 +34,7 @@ func TestBackendByName(t *testing.T) {
 		{"external", "command", false}, // synonym dispatches to the same backend
 		{"localmost", "localmost", false},
 		{"builtin", "builtin", false},
+		{"auto", "auto", false},
 		{"thrawn", "", true},
 	}
 	for _, c := range cases {

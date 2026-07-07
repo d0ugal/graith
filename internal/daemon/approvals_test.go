@@ -377,6 +377,93 @@ func TestSubmitApprovalDisabledAllows(t *testing.T) {
 	}
 }
 
+// TestSubmitApprovalYoloAllowsWhenGatingEnabled verifies a yolo session
+// auto-approves via the "auto" backend even when global approval gating is on
+// and the configured backend is the human-prompt default (which would otherwise
+// queue for a human). A short timeout ensures the test fails rather than hangs
+// if the yolo override did not short-circuit.
+func TestSubmitApprovalYoloAllowsWhenGatingEnabled(t *testing.T) {
+	sm := newTestSessionManager(t) // Enabled=true, backend defaults to prompt
+	sm.cfg.Approvals.Timeout = "100ms"
+
+	sm.mu.Lock()
+	sm.state.Sessions["braw-yolo"] = &SessionState{Name: "bonnie-session", Yolo: true}
+	sm.mu.Unlock()
+
+	req := protocol.ApprovalRequestMsg{
+		RequestID: "neep-yolo",
+		SessionID: "braw-yolo",
+		ToolName:  "Bash",
+		ToolInput: `{"command":"rm -rf /"}`,
+	}
+
+	decision := sm.SubmitApproval(context.Background(), req)
+
+	if decision.Decision != "allow" {
+		t.Errorf("expected allow for yolo session, got %q", decision.Decision)
+	}
+
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	if _, exists := sm.pendingApprovals["neep-yolo"]; exists {
+		t.Error("yolo approval should not be queued for a human")
+	}
+}
+
+// TestSubmitApprovalYoloAllowsWhenGatingDisabled verifies a yolo session still
+// resolves through the auto backend (allow) even when global gating is off — the
+// PreToolUse hook is installed per-session, so SubmitApproval is reached.
+func TestSubmitApprovalYoloAllowsWhenGatingDisabled(t *testing.T) {
+	sm := newTestSessionManager(t)
+	disabled := false
+	sm.cfg.Approvals.Enabled = &disabled
+
+	sm.mu.Lock()
+	sm.state.Sessions["braw-yolo"] = &SessionState{Name: "bonnie-session", Yolo: true}
+	sm.mu.Unlock()
+
+	req := protocol.ApprovalRequestMsg{
+		RequestID: "neep-yolo2",
+		SessionID: "braw-yolo",
+		ToolName:  "Bash",
+	}
+
+	decision := sm.SubmitApproval(context.Background(), req)
+
+	if decision.Decision != "allow" {
+		t.Errorf("expected allow for yolo session, got %q", decision.Decision)
+	}
+
+	if decision.Reason == "" {
+		t.Error("expected an auto-approve reason on the yolo decision")
+	}
+}
+
+// TestSubmitApprovalNonYoloStillQueues guards against the yolo override leaking
+// to other sessions: a non-yolo session under the same enabled config must still
+// queue for a human (and time out here rather than auto-allow).
+func TestSubmitApprovalNonYoloStillQueues(t *testing.T) {
+	sm := newTestSessionManager(t)
+	sm.cfg.Approvals.Timeout = "100ms"
+
+	sm.mu.Lock()
+	sm.state.Sessions["canny-plain"] = &SessionState{Name: "canny-session", Yolo: false}
+	sm.mu.Unlock()
+
+	req := protocol.ApprovalRequestMsg{
+		RequestID: "neep-plain",
+		SessionID: "canny-plain",
+		ToolName:  "Bash",
+	}
+
+	decision := sm.SubmitApproval(context.Background(), req)
+
+	if decision.Decision != "block" {
+		t.Errorf("expected block (timeout) for non-yolo session, got %q", decision.Decision)
+	}
+}
+
 // TestApprovalsBackendConfigExpandsTilde verifies the resolved backend config
 // carries an expanded external path, not a literal ~/.
 func TestApprovalsBackendConfigExpandsTilde(t *testing.T) {
