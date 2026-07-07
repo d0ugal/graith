@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/d0ugal/graith/internal/approvals/localmost"
+	"github.com/d0ugal/graith/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -17,21 +18,43 @@ var (
 )
 
 // approvalsConfigPath resolves the built-in approvals config path: the --config
-// flag takes precedence, else the configured [approvals.builtin] config. A
-// leading ~/ is expanded. Returns "" when neither is set.
+// flag takes precedence, else the configured [approvals.builtin] config.
+// Returns "" when neither is set.
+//
+// An explicit --config flag is a user-typed argument, so a leading ~/ is
+// expanded but a relative path stays relative to the current working directory
+// (standard CLI behaviour). The [approvals.builtin] config value from
+// config.toml, by contrast, is resolved via config.ExpandPathRelative so a
+// relative path resolves against the config directory — exactly as the daemon
+// resolves it at session-create, so `gr approvals validate` and enforcement
+// agree on the same file.
 func approvalsConfigPath(flag string) string {
-	path := strings.TrimSpace(flag)
-	if path == "" {
-		path = strings.TrimSpace(cfg.Approvals.Builtin.Config)
-	}
-
-	if strings.HasPrefix(path, "~/") {
-		if home, err := os.UserHomeDir(); err == nil {
-			path = filepath.Join(home, path[2:])
+	if path := strings.TrimSpace(flag); path != "" {
+		if strings.HasPrefix(path, "~/") {
+			if home, err := os.UserHomeDir(); err == nil {
+				path = filepath.Join(home, path[2:])
+			}
 		}
+
+		return path
 	}
 
-	return path
+	return config.ExpandPathRelative(cfg.Approvals.Builtin.Config, approvalsConfigDir())
+}
+
+// approvalsConfigDir returns the directory holding the loaded graith config,
+// used to resolve a relative [approvals.builtin] config path. It honours the
+// global --config override when set, else the resolved default config path.
+func approvalsConfigDir() string {
+	if f := strings.TrimSpace(cfgFile); f != "" {
+		return filepath.Dir(f)
+	}
+
+	if paths.ConfigFile == "" {
+		return ""
+	}
+
+	return filepath.Dir(paths.ConfigFile)
 }
 
 // approvalsEngine compiles the built-in approvals engine for the CLI. Among

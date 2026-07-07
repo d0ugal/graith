@@ -4283,6 +4283,19 @@ func (sm *SessionManager) resolveSandbox(agentName string) (bool, error) {
 	return sm.resolveSandboxFromConfig(sm.cfg, agentName)
 }
 
+// approvalsConfigDir returns the directory holding graith's config file, used to
+// resolve a relative [approvals.builtin] config path deterministically (rather
+// than against the daemon's working directory). Returns "" when the config file
+// path is unknown, in which case a relative path is left for the caller to
+// resolve against the working directory as before.
+func (sm *SessionManager) approvalsConfigDir() string {
+	if sm.paths.ConfigFile == "" {
+		return ""
+	}
+
+	return filepath.Dir(sm.paths.ConfigFile)
+}
+
 // validateApprovalsBackend fails closed at session-create when the configured
 // approvals backend can't enforce — a command backend with no command, a
 // missing localmost binary, or an unreadable/invalid builtin config. This
@@ -4307,7 +4320,7 @@ func (sm *SessionManager) validateApprovalsBackend() error {
 		return err
 	}
 
-	beCfg, err := approvalsBackendConfig(backend, acfg)
+	beCfg, err := approvalsBackendConfig(backend, acfg, sm.approvalsConfigDir())
 	if err != nil {
 		return err
 	}

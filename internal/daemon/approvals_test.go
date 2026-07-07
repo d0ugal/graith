@@ -350,35 +350,6 @@ func TestSubmitApprovalDisabledAllows(t *testing.T) {
 	}
 }
 
-// TestExpandTilde verifies the daemon expands a leading ~/ (after trimming
-// whitespace) so the documented default builtin config path resolves, matching
-// the CLI's approvalsConfigPath.
-func TestExpandTilde(t *testing.T) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Skipf("no home dir: %v", err)
-	}
-
-	cases := []struct {
-		name string
-		in   string
-		want string
-	}{
-		{"tilde expanded", "~/.config/graith/approvals.json", filepath.Join(home, ".config/graith/approvals.json")},
-		{"leading whitespace trimmed then expanded", "  ~/glen.json  ", filepath.Join(home, "glen.json")},
-		{"absolute path untouched", "/etc/graith/approvals.json", "/etc/graith/approvals.json"},
-		{"empty stays empty", "", ""},
-		{"bare tilde not a prefix", "~croft", "~croft"},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			if got := expandTilde(c.in); got != c.want {
-				t.Errorf("expandTilde(%q) = %q, want %q", c.in, got, c.want)
-			}
-		})
-	}
-}
-
 // TestApprovalsBackendConfigExpandsTilde verifies the resolved backend config
 // carries an expanded external path, not a literal ~/.
 func TestApprovalsBackendConfigExpandsTilde(t *testing.T) {
@@ -389,7 +360,7 @@ func TestApprovalsBackendConfigExpandsTilde(t *testing.T) {
 
 	acfg, err := approvalsBackendConfig("builtin", config.Approvals{
 		Builtin: config.ApprovalsBuiltin{Config: "~/.config/graith/approvals.json"},
-	})
+	}, "/etc/graith")
 	if err != nil {
 		t.Fatalf("approvalsBackendConfig: %v", err)
 	}
@@ -401,5 +372,38 @@ func TestApprovalsBackendConfigExpandsTilde(t *testing.T) {
 
 	if strings.HasPrefix(acfg.BuiltinConfig, "~") {
 		t.Error("BuiltinConfig should not retain a literal ~")
+	}
+}
+
+// TestApprovalsBackendConfigRelativeToConfigDir verifies a relative
+// [approvals.builtin] config path resolves against the config directory (issue
+// #790) rather than being passed verbatim to be opened against the daemon's
+// working directory.
+func TestApprovalsBackendConfigRelativeToConfigDir(t *testing.T) {
+	acfg, err := approvalsBackendConfig("builtin", config.Approvals{
+		Builtin: config.ApprovalsBuiltin{Config: "approvals.json"},
+	}, "/etc/graith")
+	if err != nil {
+		t.Fatalf("approvalsBackendConfig: %v", err)
+	}
+
+	if want := filepath.Join("/etc/graith", "approvals.json"); acfg.BuiltinConfig != want {
+		t.Errorf("BuiltinConfig = %q, want %q", acfg.BuiltinConfig, want)
+	}
+}
+
+// TestApprovalsConfigDir verifies the config directory is derived from the
+// resolved config file path, and is empty when that path is unknown.
+func TestApprovalsConfigDir(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	sm.paths.ConfigFile = "/home/canny/.config/graith/config.toml"
+	if got, want := sm.approvalsConfigDir(), "/home/canny/.config/graith"; got != want {
+		t.Errorf("approvalsConfigDir() = %q, want %q", got, want)
+	}
+
+	sm.paths.ConfigFile = ""
+	if got := sm.approvalsConfigDir(); got != "" {
+		t.Errorf("approvalsConfigDir() with no config file = %q, want empty", got)
 	}
 }
