@@ -174,6 +174,15 @@ func TestCheckApprovalsBackendPromptDefault(t *testing.T) {
 }
 
 // TestCheckApprovalsBackendAvailable verifies an enforceable backend passes.
+//
+// The command backend's Availability only checks that the command string is
+// non-empty (see approvals.commandBackend.Availability) — it deliberately does
+// NOT resolve the command on PATH, and the daemon's validateApprovalsBackend
+// shares that exact check. We therefore use a command name that is *not*
+// resolvable on PATH to pin that semantics: doctor must pass on any non-empty
+// command, mirroring session-create. If command availability ever grows a
+// PATH-resolution requirement, this test breaks loudly and both this check and
+// the daemon must change together.
 func TestCheckApprovalsBackendAvailable(t *testing.T) {
 	oldCfg, oldOut := cfg, out
 
@@ -183,19 +192,18 @@ func TestCheckApprovalsBackendAvailable(t *testing.T) {
 
 	out = output.NewWithWriter(false, io.Discard)
 
-	binDir := t.TempDir()
-	t.Setenv("PATH", binDir)
-
-	approver := writeStubExecutable(t, binDir, "canny")
-
 	cfg = &config.Config{}
-	cfg.Approvals = config.Approvals{Backend: "command", Command: approver}
+	cfg.Approvals = config.Approvals{Backend: "command", Command: "thrawn-not-on-path"}
 
 	dc := newDoctorContext()
 	dc.checkApprovalsBackend()
 
 	if len(checkResults(dc, "fail")) != 0 {
 		t.Errorf("enforceable command backend should not fail, got: %v", dc.checks)
+	}
+
+	if len(checkResults(dc, "ok")) == 0 {
+		t.Errorf("enforceable command backend should record a passing check, got: %v", dc.checks)
 	}
 }
 
