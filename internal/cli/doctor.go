@@ -413,14 +413,42 @@ func (dc *doctorContext) checkSandboxPaths() {
 		}
 	}
 
+	// write_files grants are deliberately NOT existence-checked at runtime: they
+	// are routinely files the agent creates itself (e.g. Claude's
+	// ~/.claude.json.lock). Mirror expandFilePaths in daemon.go, which keeps a
+	// missing file grant but warns only when its *parent directory* is absent
+	// (nono can't create the file without a grantable parent). Warning on the
+	// file itself would flag the recommended config as unhealthy (issue #794).
+	checkWriteFiles := func(m map[string][]string) {
+		for p, sources := range m {
+			if strings.ContainsAny(p, "*?[") {
+				continue
+			}
+
+			parent := filepath.Dir(p)
+			if _, err := os.Stat(parent); err != nil {
+				dc.warnf("environment", "Sandbox write file parent dir does not exist: %s (for %s, configured in: %s)", parent, p, strings.Join(sources, ", "))
+
+				missing++
+			}
+		}
+	}
+
 	check(allReadDirs, "read dir")
 	check(allWriteDirs, "write dir")
+	// read_files keeps the stricter file-existence check even though runtime
+	// expandFilePaths also retains a missing read grant: a read grant is almost
+	// always for a file that must already exist to be useful (e.g. an agent's
+	// login file), so a missing one is worth surfacing. write_files are the
+	// files the agent creates itself, hence the parent-dir check below.
 	check(allReadFiles, "read file")
-	check(allWriteFiles, "write file")
+	checkWriteFiles(allWriteFiles)
 
 	total := len(allReadDirs) + len(allWriteDirs) + len(allReadFiles) + len(allWriteFiles)
 	if missing == 0 && total > 0 {
-		dc.passf("environment", "All sandbox paths exist (%d read dir, %d write dir, %d read file, %d write file)",
+		// "grants usable" rather than "paths exist": a write file whose parent
+		// dir exists is healthy even though the file itself may not exist yet.
+		dc.passf("environment", "All sandbox grants usable (%d read dir, %d write dir, %d read file, %d write file)",
 			len(allReadDirs), len(allWriteDirs), len(allReadFiles), len(allWriteFiles))
 	}
 }
