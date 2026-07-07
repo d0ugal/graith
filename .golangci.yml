@@ -45,8 +45,8 @@ linters:
     - usetesting  # Not critical
     - varnamelen  # Variable names fine
     - wsl  # Use wsl_v5 instead
-    - gocyclo  # Allow complex functions for SNMP data processing
-    - maintidx  # Allow complex registry functions
+    - gocyclo  # Allow complex functions
+    - maintidx  # Allow complex functions
 
   settings:
     gosec:

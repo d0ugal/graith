@@ -72,6 +72,9 @@ jobs:
         with:
           persist-credentials: false
       - run: make lint-only
+      # Lint Darwin-only files too — the Linux lint above never compiles them,
+      # so wsl_v5/etc. findings in *_darwin.go slip through (issue #784).
+      - run: make lint-darwin
 
   govulncheck:
     name: Vulnerability Check

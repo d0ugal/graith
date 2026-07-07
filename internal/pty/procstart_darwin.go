@@ -14,6 +14,8 @@ func ProcessStartTime(pid int) (int64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("sysctl kern.proc.pid.%d: %w", pid, err)
 	}
+
 	tv := info.Proc.P_starttime
+
 	return tv.Sec*1_000_000 + int64(tv.Usec), nil
 }
