@@ -139,11 +139,20 @@ func (e *Engine) Evaluate(command string) (Policy, error) {
 
 // subPolicy returns the policy for one subcommand: deny if any deny rule
 // matches, else allow if any allow rule matches, else ask. If the shared work
-// budget is exhausted while matching any rule, it fails closed to PolicyAsk
-// (human review) rather than trusting an incomplete match — otherwise a
-// pathological deny rule that blew the budget would fall through to the allow
-// phase and a cheap allow rule could auto-approve a command the operator meant
-// to deny. See issue #798.
+// budget is exhausted while matching, it fails closed rather than trusting an
+// incomplete evaluation. Two fail-closed paths matter (see issue #798):
+//
+//   - A pathological deny rule that blew the budget must not fall through to
+//     the allow phase, or a cheap allow rule could auto-approve a command the
+//     operator meant to deny. Hence the exhaustion check after each deny miss.
+//   - The matcher enumerates every reachable end position (it does not stop at
+//     the first match), so an allow rule can find a genuine match yet still trip
+//     the budget while exploring alternatives. Checking exhaustion *before*
+//     honouring an allow match keeps the "exhaustion → human review" guarantee
+//     uniform: only commands that overrun the (huge) step budget are affected,
+//     and routing those to a human is the conservative choice on the approval
+//     path. Deny still returns on a positive match — a hard block is strictly
+//     safer than deferring to a human.
 func (e *Engine) subPolicy(sub subcommand, budget *evalBudget) Policy {
 	for _, r := range e.deny {
 		if e.ruleMatches(r, sub, budget) {
@@ -156,12 +165,14 @@ func (e *Engine) subPolicy(sub subcommand, budget *evalBudget) Policy {
 	}
 
 	for _, r := range e.allow {
-		if e.ruleMatches(r, sub, budget) {
-			return PolicyAllow
-		}
+		matched := e.ruleMatches(r, sub, budget)
 
 		if budget.exhausted {
 			return PolicyAsk
+		}
+
+		if matched {
+			return PolicyAllow
 		}
 	}
 

@@ -463,6 +463,22 @@ func TestBacktrackingBudgetUnlessFailsClosed(t *testing.T) {
 	}
 }
 
+// TestBacktrackingBudgetAllowMatchFailsClosed guards the subtle fail-open a
+// tribunal judge caught: the matcher enumerates every reachable end position
+// rather than stopping at the first match, so an allow rule can find a genuine
+// match AND trip the budget while exploring alternatives. subPolicy must check
+// exhaustion before honouring the allow match — otherwise the "exhaustion →
+// human review" guarantee only holds for non-matching rules. See issue #798.
+func TestBacktrackingBudgetAllowMatchFailsClosed(t *testing.T) {
+	// Six stars with no trailing literal: `thrawn` + 400 args is a genuine
+	// full match, but enumerating every split overruns the step budget.
+	eng := mustEngine(t, `{"allow":[{"rule":"thrawn @arg* @arg* @arg* @arg* @arg* @arg*"}]}`)
+
+	if pol := evalWithWatchdog(t, eng, longCommand("thrawn", 400)); pol == PolicyAllow {
+		t.Fatalf("got %q — allow match that exhausted the budget was auto-approved (fail open)", pol)
+	}
+}
+
 // TestGroupSubQuantifierRejected guards the grouped-@sub bypass both judges
 // flagged: quantifying a group that wraps @sub is the same malformed shape as
 // @sub* and must be rejected at load time, while an unquantified @(@sub) still
