@@ -2,12 +2,12 @@ package approvals
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/d0ugal/graith/internal/approvals/localmost"
 )
@@ -38,12 +38,12 @@ func (builtinBackend) Availability(cfg Config) Availability {
 	return Availability{CanEnforce: true}
 }
 
-// engineCacheEntry is a compiled engine plus the file identity it was compiled
-// from, so a reload can be skipped while the file is unchanged.
+// engineCacheEntry is a compiled engine plus a hash of the exact config bytes
+// it was compiled from, so the expensive parse+compile can be skipped while the
+// file content is unchanged.
 type engineCacheEntry struct {
-	modTime time.Time
-	size    int64
-	engine  *localmost.Engine
+	hash   [sha256.Size]byte
+	engine *localmost.Engine
 }
 
 var (
@@ -67,32 +67,40 @@ func builtinEngine(cfg Config) (*localmost.Engine, error) {
 }
 
 // loadEngineCached returns the compiled engine for the config.json at path,
-// reusing a previously compiled engine while the file's mtime and size are
-// unchanged. On a stat or reload failure it returns the error rather than a
-// stale engine, and leaves any existing cache entry untouched so subsequent
-// calls keep surfacing the failure until the file is valid again.
+// reusing a previously compiled engine while the file content is byte-identical
+// to the cached one. Invalidation is keyed on a content hash rather than
+// (mtime, size): this is a security-sensitive approvals policy, so a same-length
+// rule edit within the filesystem timestamp granularity (or an atomic replace
+// that preserves the mtime) must still be picked up — a stale engine could keep
+// auto-allowing a command the operator just moved to the deny list.
+//
+// The file is read on every call (cheap for a small policy file) and hashed; the
+// win is skipping the JSON parse + rule compilation, which was the actual cost.
+// Reading and hashing before taking the lock keeps the hash consistent with the
+// bytes that would be parsed. On a read or reload failure the error is returned
+// rather than a stale engine, and any existing cache entry is left untouched so
+// subsequent calls keep surfacing the failure until the config is valid again.
 func loadEngineCached(path string) (*localmost.Engine, error) {
-	info, err := os.Stat(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("stat approvals config: %w", err)
+		return nil, fmt.Errorf("read approvals config: %w", err)
 	}
 
-	modTime := info.ModTime()
-	size := info.Size()
+	hash := sha256.Sum256(data)
 
 	engineCacheMu.Lock()
 	defer engineCacheMu.Unlock()
 
-	if entry, ok := engineCache[path]; ok && entry.modTime.Equal(modTime) && entry.size == size {
+	if entry, ok := engineCache[path]; ok && entry.hash == hash {
 		return entry.engine, nil
 	}
 
-	engine, err := localmost.Load(path)
+	engine, err := localmost.Parse(data)
 	if err != nil {
 		return nil, err
 	}
 
-	engineCache[path] = engineCacheEntry{modTime: modTime, size: size, engine: engine}
+	engineCache[path] = engineCacheEntry{hash: hash, engine: engine}
 
 	return engine, nil
 }
