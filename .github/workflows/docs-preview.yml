@@ -143,6 +143,10 @@ jobs:
           script: |
             const fs = require('fs');
             const path = require('path');
+            // Shared compare-and-retry loop for the single `screenshots` branch
+            // every docs-preview writer contends over (issue #765). Resolved
+            // relative to the workspace, per the github-script require docs.
+            const { commitToBranch } = require('./.github/workflows/scripts/docs-preview.js');
             const { owner, repo } = context.repo;
             const pr = context.payload.pull_request.number;
             const shortSha = context.sha.substring(0, 7);
@@ -160,7 +164,9 @@ jobs:
             const files = fs.readdirSync('shots').filter(f => f.endsWith('.png')).sort();
             if (files.length === 0) { core.info('No screenshots produced.'); return; }
 
-            // Build a tree of blobs for the screenshots.
+            // Build the blobs for the screenshots. Blobs are content-addressed,
+            // so this is independent of the branch tip — done once, outside the
+            // retry loop.
             const tree = [];
             for (const f of files) {
               const content = fs.readFileSync(path.join('shots', f)).toString('base64');
@@ -168,30 +174,28 @@ jobs:
               tree.push({ path: `${dir}/${f}`, mode: '100644', type: 'blob', sha: blob.data.sha });
             }
 
-            // Find the current tip of the screenshots branch (if any) to chain onto.
-            let parents = [];
-            let baseTree;
-            try {
-              const ref = await github.rest.git.getRef({ owner, repo, ref: `heads/${branch}` });
-              parents = [ref.data.object.sha];
-              const c = await github.rest.git.getCommit({ owner, repo, commit_sha: ref.data.object.sha });
-              baseTree = c.data.tree.sha;
-            } catch (e) {
-              if (e.status !== 404) throw e; // branch doesn't exist yet -> orphan root commit
-            }
-
-            const treeObj = await github.rest.git.createTree({ owner, repo, tree, base_tree: baseTree });
-            const commit = await github.rest.git.createCommit({
-              owner, repo,
-              message: `docs preview: PR #${pr} @ ${shortSha}`,
-              tree: treeObj.data.sha,
-              parents,
+            // Append onto the current tip (chaining via base_tree so existing
+            // screenshots are preserved), creating an orphan root commit if the
+            // branch doesn't exist yet. commitToBranch re-invokes buildCommit on
+            // a lost race so the commit always chains onto the re-read tip, and
+            // only falls back to createRef on a genuine branch-absent case —
+            // never by swallowing an unrelated updateRef failure.
+            await commitToBranch({
+              github, core, owner, repo,
+              createIfAbsent: true,
+              buildCommit: async (tip) => {
+                const treeObj = await github.rest.git.createTree({
+                  owner, repo, tree, base_tree: tip ? tip.treeSha : undefined,
+                });
+                const commit = await github.rest.git.createCommit({
+                  owner, repo,
+                  message: `docs preview: PR #${pr} @ ${shortSha}`,
+                  tree: treeObj.data.sha,
+                  parents: tip ? [tip.commitSha] : [],
+                });
+                return commit.data.sha;
+              },
             });
-            try {
-              await github.rest.git.updateRef({ owner, repo, ref: `heads/${branch}`, sha: commit.data.sha });
-            } catch (e) {
-              await github.rest.git.createRef({ owner, repo, ref: `refs/heads/${branch}`, sha: commit.data.sha });
-            }
 
             // Group desktop/mobile per page into a comment.
             const raw = f => `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${dir}/${f}`;

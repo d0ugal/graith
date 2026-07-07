@@ -64,10 +64,82 @@ async function getBranchTip({ github, owner, repo }) {
   return { commitSha, treeSha: commit.data.tree.sha };
 }
 
-// Rebuild the screenshots branch to contain exactly `kept`. The tree is built
-// with no `base_tree`, so this is a full replacement — hence `kept` must be a
-// complete listing (guaranteed by listBlobsOrFail).
-async function rewriteBranch({ github, owner, repo, kept, parentSha, message }) {
+// Advance the screenshots branch with a bounded compare-and-retry loop.
+//
+// Every writer (preview publish, cleanup, prune) does a read-modify-write
+// against this single shared branch. `updateRef` is fast-forward-only by
+// default, so when a concurrent writer (another PR's preview, or the daily
+// prune) advances the tip between our read and our write, `updateRef` returns
+// 422 non-fast-forward. The per-PR concurrency group serializes runs for the
+// same PR but not across different PRs, nor against the schedule, so this
+// genuinely happens (issue #765). On a 422 we re-read the tip and rebuild the
+// commit on the new parent, up to `maxAttempts` times.
+//
+// `buildCommit(tip)` receives the freshly-read tip (`{ commitSha, treeSha }`,
+// or null when the branch is absent) and returns the SHA of the commit to
+// point the branch at — or null to signal "nothing to do". It is re-invoked on
+// every attempt so the commit always chains onto the *current* tip, never a
+// stale one; for the destructive rebuilds that means re-listing the tree each
+// attempt so a concurrent writer's additions survive the retry.
+async function commitToBranch({
+  github,
+  core,
+  owner,
+  repo,
+  createIfAbsent = false,
+  maxAttempts = 5,
+  buildCommit,
+}) {
+  let lastErr;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const tip = await getBranchTip({ github, owner, repo });
+    if (!tip && !createIfAbsent) return { outcome: 'absent', attempts: attempt };
+
+    const newCommitSha = await buildCommit(tip);
+    if (newCommitSha == null) return { outcome: 'noop', attempts: attempt };
+
+    try {
+      if (!tip) {
+        await github.rest.git.createRef({
+          owner,
+          repo,
+          ref: `refs/heads/${SCREENSHOTS_BRANCH}`,
+          sha: newCommitSha,
+        });
+        return { outcome: 'created', attempts: attempt };
+      }
+      await github.rest.git.updateRef({
+        owner,
+        repo,
+        ref: `heads/${SCREENSHOTS_BRANCH}`,
+        sha: newCommitSha,
+      });
+      return { outcome: 'updated', attempts: attempt };
+    } catch (e) {
+      // 422 = a fast-forward-only updateRef that lost the race, or a createRef
+      // that lost the create race (the branch now exists). Either way: re-read
+      // the tip and rebuild on the new parent. Anything else is a real error
+      // and must propagate — never swallow an unrelated failure into createRef.
+      if (e.status !== 422) throw e;
+      lastErr = e;
+      if (core && typeof core.info === 'function') {
+        core.info(
+          `screenshots branch write lost a race (attempt ${attempt}/${maxAttempts}); ` +
+            're-reading tip and retrying',
+        );
+      }
+    }
+  }
+  throw new Error(
+    `could not update the ${SCREENSHOTS_BRANCH} branch after ${maxAttempts} attempts` +
+      (lastErr ? `: ${lastErr.message}` : ''),
+  );
+}
+
+// Build a full-replacement commit containing exactly `kept` (no `base_tree`,
+// so any omitted path is deleted) and return its SHA. Advancing the ref — and
+// the compare-and-retry that guards it — is commitToBranch's job.
+async function buildRewriteCommit({ github, owner, repo, kept, parentSha, message }) {
   const tree = kept.map((e) => ({ path: e.path, mode: e.mode, type: e.type, sha: e.sha }));
   const newTree = await github.rest.git.createTree({ owner, repo, tree });
   const newCommit = await github.rest.git.createCommit({
@@ -77,12 +149,7 @@ async function rewriteBranch({ github, owner, repo, kept, parentSha, message }) 
     tree: newTree.data.sha,
     parents: [parentSha],
   });
-  await github.rest.git.updateRef({
-    owner,
-    repo,
-    ref: `heads/${SCREENSHOTS_BRANCH}`,
-    sha: newCommit.data.sha,
-  });
+  return newCommit.data.sha;
 }
 
 // Remove one PR's screenshots on close, then note the cleanup in the sticky
@@ -91,30 +158,40 @@ async function cleanup({ github, context, core }) {
   const { owner, repo } = context.repo;
   const pr = context.payload.pull_request.number;
   const prefix = `pr-${pr}/`;
+  let removed = 0;
 
-  const tip = await getBranchTip({ github, owner, repo });
-  if (!tip) {
+  const result = await commitToBranch({
+    github,
+    core,
+    owner,
+    repo,
+    // Re-listed on every attempt so a concurrent writer's additions survive a
+    // retry rebuild rather than being clobbered by a stale listing.
+    buildCommit: async (tip) => {
+      const blobs = await listBlobsOrFail({ github, owner, repo, treeSha: tip.treeSha });
+      const kept = blobs.filter((e) => !e.path.startsWith(prefix));
+      if (kept.length === blobs.length) {
+        core.info(`No screenshots found under ${prefix} — nothing to clean up.`);
+        return null;
+      }
+      removed = blobs.length - kept.length;
+      return buildRewriteCommit({
+        github,
+        owner,
+        repo,
+        kept,
+        parentSha: tip.commitSha,
+        message: `docs preview: clean up PR #${pr}`,
+      });
+    },
+  });
+
+  if (result.outcome === 'absent') {
     core.info(`No ${SCREENSHOTS_BRANCH} branch — nothing to clean up.`);
     return;
   }
-
-  const blobs = await listBlobsOrFail({ github, owner, repo, treeSha: tip.treeSha });
-  const kept = blobs.filter((e) => !e.path.startsWith(prefix));
-
-  if (kept.length === blobs.length) {
-    core.info(`No screenshots found under ${prefix} — nothing to clean up.`);
-    return;
-  }
-
-  await rewriteBranch({
-    github,
-    owner,
-    repo,
-    kept,
-    parentSha: tip.commitSha,
-    message: `docs preview: clean up PR #${pr}`,
-  });
-  core.info(`Removed ${blobs.length - kept.length} screenshot(s) for PR #${pr}.`);
+  if (result.outcome !== 'updated') return; // nothing under this PR's prefix
+  core.info(`Removed ${removed} screenshot(s) for PR #${pr}.`);
 
   // Update the sticky comment to note the previews were cleaned up.
   const comments = await github.paginate(github.rest.issues.listComments, {
@@ -132,32 +209,40 @@ async function cleanup({ github, context, core }) {
 // Remove screenshot dirs older than MAX_AGE_MS on the daily schedule.
 async function prune({ github, context, core }) {
   const { owner, repo } = context.repo;
+  let removed = 0;
 
-  const tip = await getBranchTip({ github, owner, repo });
-  if (!tip) {
+  const result = await commitToBranch({
+    github,
+    core,
+    owner,
+    repo,
+    buildCommit: async (tip) => {
+      const blobs = await listBlobsOrFail({ github, owner, repo, treeSha: tip.treeSha });
+      const now = Date.now();
+      const kept = blobs.filter((e) => !isStaleRunDir(e.path, now));
+      removed = blobs.length - kept.length;
+      if (removed === 0) {
+        core.info('No stale screenshot dirs to prune.');
+        return null;
+      }
+      return buildRewriteCommit({
+        github,
+        owner,
+        repo,
+        kept,
+        parentSha: tip.commitSha,
+        message: `docs preview: prune ${removed} stale screenshot(s)`,
+      });
+    },
+  });
+
+  if (result.outcome === 'absent') {
     core.info(`No ${SCREENSHOTS_BRANCH} branch — nothing to prune.`);
     return;
   }
-
-  const blobs = await listBlobsOrFail({ github, owner, repo, treeSha: tip.treeSha });
-
-  const now = Date.now();
-  const kept = blobs.filter((e) => !isStaleRunDir(e.path, now));
-  const removed = blobs.length - kept.length;
-  if (removed === 0) {
-    core.info('No stale screenshot dirs to prune.');
-    return;
+  if (result.outcome === 'updated') {
+    core.info(`Pruned ${removed} screenshot(s) older than 30 days.`);
   }
-
-  await rewriteBranch({
-    github,
-    owner,
-    repo,
-    kept,
-    parentSha: tip.commitSha,
-    message: `docs preview: prune ${removed} stale screenshot(s)`,
-  });
-  core.info(`Pruned ${removed} screenshot(s) older than 30 days.`);
 }
 
 module.exports = {
@@ -167,7 +252,8 @@ module.exports = {
   listBlobsOrFail,
   isStaleRunDir,
   getBranchTip,
-  rewriteBranch,
+  commitToBranch,
+  buildRewriteCommit,
   cleanup,
   prune,
 };

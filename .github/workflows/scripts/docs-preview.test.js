@@ -11,7 +11,62 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { listBlobsOrFail, isStaleRunDir, cleanup, prune } = require('./docs-preview.js');
+const {
+  listBlobsOrFail,
+  isStaleRunDir,
+  commitToBranch,
+  cleanup,
+  prune,
+} = require('./docs-preview.js');
+
+const http = (status) => Object.assign(new Error(`HTTP ${status}`), { status });
+
+// A github stub for commitToBranch's compare-and-retry (issue #765). It tracks
+// a single branch tip (null = absent) and can be told to fail the next N
+// updateRef/createRef calls with a 422 — the non-fast-forward race that
+// interleaved docs-preview writers hit in production.
+function raceGithub({ tip = null } = {}) {
+  const calls = { getRef: 0, getCommit: 0, createRef: 0, updateRef: 0 };
+  const state = { tip };
+  let updateFails = 0;
+  let createFails = 0;
+  return {
+    calls,
+    state,
+    setUpdateRefFailures(n) { updateFails = n; },
+    setCreateRefFailures(n) { createFails = n; },
+    rest: {
+      git: {
+        getRef: async () => {
+          calls.getRef++;
+          if (state.tip == null) throw http(404);
+          return { data: { object: { sha: state.tip } } };
+        },
+        getCommit: async ({ commit_sha }) => {
+          calls.getCommit++;
+          return { data: { tree: { sha: `tree@${commit_sha}` } } };
+        },
+        createRef: async ({ sha }) => {
+          calls.createRef++;
+          if (createFails > 0) {
+            createFails--;
+            state.tip = 'created-by-another-writer'; // someone else won
+            throw http(422);
+          }
+          state.tip = sha;
+        },
+        updateRef: async ({ sha }) => {
+          calls.updateRef++;
+          if (updateFails > 0) {
+            updateFails--;
+            throw http(422);
+          }
+          state.tip = sha;
+        },
+      },
+    },
+  };
+}
 
 // Minimal core stub capturing info/warning output.
 function fakeCore() {
@@ -108,6 +163,137 @@ test('isStaleRunDir flags old run-dirs and spares recent/undated ones', () => {
   assert.equal(isStaleRunDir('pr-1/nodate/x.png', now), false);
   // Not a pr- dir -> kept.
   assert.equal(isStaleRunDir('README.md', now), false);
+});
+
+// --- commitToBranch compare-and-retry (#765) -------------------------------
+
+const owner = 'clachan';
+const repo = 'croft';
+
+test('commitToBranch creates the branch when absent and createIfAbsent is set', async () => {
+  const github = raceGithub({ tip: null });
+  const seen = [];
+  const result = await commitToBranch({
+    github,
+    owner,
+    repo,
+    createIfAbsent: true,
+    buildCommit: async (tip) => { seen.push(tip); return 'commit-1'; },
+  });
+  assert.equal(result.outcome, 'created');
+  assert.equal(github.calls.createRef, 1);
+  assert.equal(github.calls.updateRef, 0);
+  assert.equal(github.state.tip, 'commit-1');
+  assert.deepEqual(seen, [null]);
+});
+
+test('commitToBranch returns absent (never builds) when branch missing and createIfAbsent false', async () => {
+  const github = raceGithub({ tip: null });
+  let built = false;
+  const result = await commitToBranch({
+    github,
+    owner,
+    repo,
+    buildCommit: async () => { built = true; return 'x'; },
+  });
+  assert.equal(result.outcome, 'absent');
+  assert.equal(built, false);
+  assert.equal(github.calls.createRef, 0);
+});
+
+test('commitToBranch returns noop when buildCommit signals nothing to do', async () => {
+  const github = raceGithub({ tip: 'A' });
+  const result = await commitToBranch({ github, owner, repo, buildCommit: async () => null });
+  assert.equal(result.outcome, 'noop');
+  assert.equal(github.calls.updateRef, 0);
+  assert.equal(github.state.tip, 'A');
+});
+
+test('commitToBranch, after a lost updateRef race, rebuilds on the winner tip (A -> B)', async () => {
+  // The exact #765 failure: a competing writer advanced the branch to B
+  // between our read and our write. The retry must re-read B and rebuild on
+  // it — not replay the stale A-parented commit.
+  const github = raceGithub({ tip: 'A' });
+  const realUpdateRef = github.rest.git.updateRef;
+  let raced = false;
+  github.rest.git.updateRef = async (args) => {
+    if (!raced) {
+      raced = true;
+      github.state.tip = 'B';
+      throw http(422);
+    }
+    return realUpdateRef(args);
+  };
+  const seen = [];
+  const result = await commitToBranch({
+    github,
+    owner,
+    repo,
+    buildCommit: async (tip) => { seen.push(tip); return 'commit-onto-B'; },
+  });
+  assert.equal(result.outcome, 'updated');
+  assert.equal(result.attempts, 2);
+  assert.deepEqual(seen[0], { commitSha: 'A', treeSha: 'tree@A' });
+  assert.deepEqual(seen[1], { commitSha: 'B', treeSha: 'tree@B' }, 'rebuild must chain onto the new tip B');
+  assert.equal(github.state.tip, 'commit-onto-B');
+});
+
+test('commitToBranch: a lost createRef race retries as an update once the branch exists', async () => {
+  const github = raceGithub({ tip: null });
+  github.setCreateRefFailures(1);
+  const seen = [];
+  const result = await commitToBranch({
+    github,
+    owner,
+    repo,
+    createIfAbsent: true,
+    buildCommit: async (tip) => { seen.push(tip); return 'commit-3'; },
+  });
+  assert.equal(result.outcome, 'updated');
+  assert.equal(result.attempts, 2);
+  assert.equal(github.calls.createRef, 1);
+  assert.equal(github.calls.updateRef, 1);
+  assert.equal(seen[0], null);
+  assert.deepEqual(seen[1], { commitSha: 'created-by-another-writer', treeSha: 'tree@created-by-another-writer' });
+  assert.equal(github.state.tip, 'commit-3');
+});
+
+test('commitToBranch gives up after maxAttempts when the race never resolves', async () => {
+  const github = raceGithub({ tip: 'A' });
+  github.setUpdateRefFailures(99);
+  await assert.rejects(
+    commitToBranch({ github, owner, repo, maxAttempts: 3, buildCommit: async () => 'x' }),
+    /could not update the screenshots branch after 3 attempts/,
+  );
+  assert.equal(github.calls.updateRef, 3);
+});
+
+test('commitToBranch propagates a non-422 write error without retrying', async () => {
+  const github = raceGithub({ tip: 'A' });
+  github.rest.git.updateRef = async () => { throw http(500); };
+  await assert.rejects(
+    commitToBranch({ github, owner, repo, maxAttempts: 5, buildCommit: async () => 'x' }),
+    /HTTP 500/,
+  );
+});
+
+test('commitToBranch propagates a buildCommit throw and never retries it', async () => {
+  // e.g. listBlobsOrFail throwing on a truncated tree (#763), or createTree
+  // rejecting an empty tree — errors outside the ref-write must surface as-is.
+  const github = raceGithub({ tip: 'A' });
+  let builds = 0;
+  await assert.rejects(
+    commitToBranch({
+      github,
+      owner,
+      repo,
+      maxAttempts: 5,
+      buildCommit: async () => { builds++; throw new Error('tree is empty'); },
+    }),
+    /tree is empty/,
+  );
+  assert.equal(builds, 1);
+  assert.equal(github.calls.updateRef, 0);
 });
 
 // --- cleanup ---------------------------------------------------------------
