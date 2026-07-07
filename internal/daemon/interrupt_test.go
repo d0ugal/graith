@@ -56,6 +56,7 @@ func TestInterruptSession_UsesAgentConfig(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	start := time.Now()
+
 	if err := sm.InterruptSession("braw"); err != nil {
 		t.Fatalf("InterruptSession: %v", err)
 	}
