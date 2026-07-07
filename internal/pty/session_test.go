@@ -88,6 +88,7 @@ func TestSessionInterrupt(t *testing.T) {
 	// stdin, so it's never consumed). Resending until the process exits closes
 	// that startup race, which is flaky on Linux and reliable on macOS.
 	deadline := time.After(10 * time.Second)
+
 	retry := time.NewTicker(200 * time.Millisecond)
 	defer retry.Stop()
 
