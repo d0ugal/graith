@@ -995,14 +995,16 @@ func TestBuildNonoProfileSingleFileInDirGrants(t *testing.T) {
 
 	readDir := filepath.Join(tmp, "glen")
 	writeDir := filepath.Join(tmp, "croft")
+
 	for _, d := range []string{readDir, writeDir} {
-		if err := os.Mkdir(d, 0o755); err != nil {
+		if err := os.Mkdir(d, 0o750); err != nil {
 			t.Fatalf("mkdir %s: %v", d, err)
 		}
 	}
 
 	readFile := filepath.Join(tmp, ".gitconfig")
 	writeFile := filepath.Join(tmp, ".claude.json")
+
 	for _, f := range []string{readFile, writeFile} {
 		if err := os.WriteFile(f, []byte("skelf"), 0o600); err != nil {
 			t.Fatalf("write %s: %v", f, err)
@@ -1017,8 +1019,15 @@ func TestBuildNonoProfileSingleFileInDirGrants(t *testing.T) {
 	}
 
 	p, warnings := buildNonoProfile("graith-bothy", opts, "")
-	if len(warnings) != 0 {
-		t.Errorf("unexpected warnings: %v", warnings)
+
+	// The fixtures live under t.TempDir(), which is /tmp (or $TMPDIR) in CI — a
+	// nono default-writable prefix. The builder therefore re-denies the read-only
+	// grants there to keep them read-only, which is expected here; any other
+	// warning is not.
+	for _, w := range warnings {
+		if !strings.Contains(w, "re-denied to keep it read-only") {
+			t.Errorf("unexpected warning: %v", w)
+		}
 	}
 
 	// The single-file entries are routed to the file-grant lists.
