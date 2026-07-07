@@ -99,6 +99,7 @@ func TestInterruptSession_DefaultAgentSinglePress(t *testing.T) {
 	// SIGINT — a startup race that flakes on Linux under -race (see the twin
 	// comment in internal/pty/session_test.go's TestSessionInterrupt).
 	deadline := time.After(10 * time.Second)
+
 	retry := time.NewTicker(200 * time.Millisecond)
 	defer retry.Stop()
 
