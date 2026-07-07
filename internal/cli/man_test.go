@@ -134,8 +134,13 @@ func TestManRequiresOutdirArg(t *testing.T) {
 
 func TestSourceDate(t *testing.T) {
 	t.Run("unset returns nil", func(t *testing.T) {
+		// Register the var with t.Setenv first so its original value is
+		// restored on cleanup, then actually unset it for this subtest.
 		t.Setenv("SOURCE_DATE_EPOCH", "")
-		os.Unsetenv("SOURCE_DATE_EPOCH")
+
+		if err := os.Unsetenv("SOURCE_DATE_EPOCH"); err != nil {
+			t.Fatalf("unset SOURCE_DATE_EPOCH: %v", err)
+		}
 
 		if got := sourceDate(); got != nil {
 			t.Fatalf("sourceDate() = %v, want nil when unset", got)
