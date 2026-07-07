@@ -177,6 +177,30 @@ type LogsMsg struct {
 	Follow    bool   `json:"follow"`
 }
 
+// WaitMsg asks the daemon to block until a session satisfies a condition.
+// Mode selects the condition:
+//   - "contains": Pattern (a regexp) matches a line of the session's output
+//   - "status":   the session's lifecycle status equals Status
+//   - "idle":     the session's agent becomes idle (ready/unknown)
+//
+// TimeoutMs, when > 0, bounds the wait; the daemon replies with a timeout
+// result if the condition is not met in time.
+type WaitMsg struct {
+	SessionID string `json:"session_id"`
+	Mode      string `json:"mode"`
+	Pattern   string `json:"pattern,omitempty"`
+	Status    string `json:"status,omitempty"`
+	TimeoutMs int    `json:"timeout_ms,omitempty"`
+}
+
+// WaitMatchedMsg is sent by the daemon when a wait condition is satisfied.
+// MatchedLine carries the matching output line (contains mode); Status carries
+// the observed status (status/idle modes).
+type WaitMatchedMsg struct {
+	MatchedLine string `json:"matched_line,omitempty"`
+	Status      string `json:"status,omitempty"`
+}
+
 type MsgPubMsg struct {
 	Stream     string `json:"stream"`
 	Body       string `json:"body"`

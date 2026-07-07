@@ -645,6 +645,26 @@ func HandleConnection(ctx context.Context, conn net.Conn, sm *SessionManager, lo
 					}
 				}
 
+			case "wait":
+				var w protocol.WaitMsg
+				if err := protocol.DecodePayload(msg, &w); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid wait message"})
+					continue
+				}
+
+				sm.mu.RLock()
+				authErr := auth.checkTarget(sm, w.SessionID, authSelfOrDescendant)
+				sm.mu.RUnlock()
+
+				if authErr != nil {
+					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
+					continue
+				}
+
+				if sm.handleWait(ctx, sendControl, reader, w) {
+					return
+				}
+
 			case "msg_pub":
 				var m protocol.MsgPubMsg
 				if err := protocol.DecodePayload(msg, &m); err != nil {

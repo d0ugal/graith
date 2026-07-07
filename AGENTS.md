@@ -435,9 +435,20 @@ gr list
 # Stream logs from a session
 gr logs fix-overlay --follow
 
+# Block until a session matches a condition (event-driven, no polling)
+gr wait fix-overlay --contains "tests passed" --timeout 5m
+gr wait fix-overlay --status stopped
+gr wait fix-overlay --idle --timeout 10m
+
 # Check health
 gr doctor
 ```
+
+`gr wait` exits 0 as soon as the condition is met and non-zero on timeout, so
+orchestrators can gate on a session's output or state instead of polling
+`gr logs -f`. Exactly one of `--contains` (regexp over output), `--status`
+(lifecycle status, e.g. `running`/`stopped`), or `--idle` (agent at rest) must
+be given.
 
 ### Scenarios (multi-session orchestration)
 

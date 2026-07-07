@@ -153,5 +153,6 @@ func registerCommands() {
 		registerTypeCmd()
 		registerUpdateCmd()
 		registerVersionCmd()
+		registerWaitCmd()
 	})
 }
