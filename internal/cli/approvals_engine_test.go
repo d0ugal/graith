@@ -14,6 +14,7 @@ import (
 // rules when no --config flag is given, and reports the inline source (#737).
 func TestApprovalsEngineInline(t *testing.T) {
 	oldCfg := cfg
+
 	t.Cleanup(func() { cfg = oldCfg })
 
 	cfg = config.Default()
@@ -41,10 +42,12 @@ func TestApprovalsEngineInline(t *testing.T) {
 // over inline rules: the external file's rules apply, not the inline ones.
 func TestApprovalsEngineFlagWinsOverInline(t *testing.T) {
 	oldCfg := cfg
+
 	t.Cleanup(func() { cfg = oldCfg })
 
 	dir := t.TempDir()
 	external := filepath.Join(dir, "approvals.json")
+
 	if err := os.WriteFile(external, []byte(`{"allow":[{"rule":"echo @*"}]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -74,6 +77,7 @@ func TestApprovalsEngineFlagWinsOverInline(t *testing.T) {
 // a configured path, nor a --config flag is set.
 func TestApprovalsEngineNoConfig(t *testing.T) {
 	oldCfg := cfg
+
 	t.Cleanup(func() { cfg = oldCfg })
 
 	cfg = config.Default()
