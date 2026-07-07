@@ -108,8 +108,8 @@ func TestBuiltinBackendInline(t *testing.T) {
 }
 
 // TestBuiltinEngineCache verifies the compiled engine is reused while the
-// config file is unchanged, and reloaded (picking up new rules) once its mtime
-// changes.
+// config file content is unchanged, and reloaded (picking up new rules) once
+// the content changes.
 func TestBuiltinEngineCache(t *testing.T) {
 	p := writeConfig(t, `{"allow":[{"rule":"echo @*"}]}`)
 
@@ -124,18 +124,13 @@ func TestBuiltinEngineCache(t *testing.T) {
 	}
 
 	if first != second {
-		t.Error("expected the cached engine to be reused for an unchanged file")
+		t.Error("expected the cached engine to be reused for unchanged content")
 	}
 
-	// Rewrite the file with different rules and bump the mtime so the cache key
-	// changes; the reload should return a fresh engine.
+	// Rewrite the file with different rules; the reload should return a fresh
+	// engine because the content hash changed.
 	if err := os.WriteFile(p, []byte(`{"allow":[{"rule":"ls @*"}]}`), 0o600); err != nil {
 		t.Fatalf("rewrite config: %v", err)
-	}
-
-	later := time.Now().Add(2 * time.Second)
-	if err := os.Chtimes(p, later, later); err != nil {
-		t.Fatalf("chtimes: %v", err)
 	}
 
 	third, err := loadEngineCached(p)
@@ -144,7 +139,46 @@ func TestBuiltinEngineCache(t *testing.T) {
 	}
 
 	if third == first {
-		t.Error("expected the engine to be reloaded after the file mtime changed")
+		t.Error("expected the engine to be reloaded after the content changed")
+	}
+}
+
+// TestBuiltinEngineCacheDetectsSameMtimeSameSizeEdit is the security-critical
+// case: a same-length rule swap that preserves the file's mtime and size must
+// still be picked up. A stat-based (mtime, size) cache would miss it and keep
+// serving a stale engine — potentially auto-allowing a command the operator
+// just moved to the deny list. Content-hash invalidation catches it.
+func TestBuiltinEngineCacheDetectsSameMtimeSameSizeEdit(t *testing.T) {
+	// Both rulesets are the same byte length ("rm @arg*" vs "ls @arg*").
+	p := writeConfig(t, `{"deny":[{"rule":"rm @arg*"}]}`)
+
+	fixedTime := time.Unix(1_600_000_000, 0)
+	if err := os.Chtimes(p, fixedTime, fixedTime); err != nil {
+		t.Fatalf("chtimes: %v", err)
+	}
+
+	first, err := loadEngineCached(p)
+	if err != nil {
+		t.Fatalf("first load: %v", err)
+	}
+
+	// Rewrite with a same-length ruleset and restore the exact same mtime, so
+	// (mtime, size) is unchanged but the content differs.
+	if err := os.WriteFile(p, []byte(`{"deny":[{"rule":"ls @arg*"}]}`), 0o600); err != nil {
+		t.Fatalf("rewrite config: %v", err)
+	}
+
+	if err := os.Chtimes(p, fixedTime, fixedTime); err != nil {
+		t.Fatalf("chtimes: %v", err)
+	}
+
+	second, err := loadEngineCached(p)
+	if err != nil {
+		t.Fatalf("second load: %v", err)
+	}
+
+	if second == first {
+		t.Error("expected the engine to be reloaded after a same-mtime, same-size content change")
 	}
 }
 
@@ -157,14 +191,10 @@ func TestBuiltinEngineCacheReloadFailure(t *testing.T) {
 		t.Fatalf("initial load: %v", err)
 	}
 
-	// Corrupt the file and bump its mtime so the cache is invalidated.
+	// Corrupt the file; the content change invalidates the cache and the reload
+	// should fail rather than serving the previously compiled engine.
 	if err := os.WriteFile(p, []byte(`{"allow":[{"rule":"foo @("}]}`), 0o600); err != nil {
 		t.Fatalf("corrupt config: %v", err)
-	}
-
-	later := time.Now().Add(2 * time.Second)
-	if err := os.Chtimes(p, later, later); err != nil {
-		t.Fatalf("chtimes: %v", err)
 	}
 
 	if _, err := loadEngineCached(p); err == nil {
