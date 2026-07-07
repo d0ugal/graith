@@ -3,6 +3,7 @@ package cli
 import (
 	"bufio"
 	"fmt"
+	"math"
 	"os"
 	"regexp"
 	"strconv"
@@ -52,6 +53,11 @@ func parseStaleDuration(s string) (time.Duration, error) {
 
 			return match
 		}
+		if n > math.MaxInt/24 {
+			convErr = fmt.Errorf("day count %d is too large", n)
+
+			return match
+		}
 
 		return fmt.Sprintf("%dh", n*24)
 	})
@@ -59,7 +65,20 @@ func parseStaleDuration(s string) (time.Duration, error) {
 		return 0, convErr
 	}
 
-	return time.ParseDuration(expanded)
+	d, err := time.ParseDuration(expanded)
+	if err != nil {
+		return 0, err
+	}
+	// A non-positive duration (e.g. "-1d", "-6h", "0h") would make every
+	// session match in filterSessions, the same match-everything hazard as
+	// an overflowing day count. Reject it. The day-count guard above only
+	// catches unsigned day values because the regex matches digits only, so
+	// signed and non-day units are handled here.
+	if d <= 0 {
+		return 0, fmt.Errorf("stale duration must be positive, got %q", s)
+	}
+
+	return d, nil
 }
 
 func filterSessions(sessions []protocol.SessionInfo, bf *batchFlags) ([]protocol.SessionInfo, error) {
