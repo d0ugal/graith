@@ -493,8 +493,19 @@ type SandboxConfig struct {
 	// (Linux + macOS). It has NO default — when the sandbox is enabled and
 	// Backend is unset the daemon fails closed with an actionable error. This
 	// is a deliberate pre-1.0 behaviour change (see the nono sandbox design doc).
-	Backend   string   `json:"backend,omitempty"    toml:"backend"`
-	Command   string   `json:"command,omitempty"    toml:"command"`
+	Backend string `json:"backend,omitempty"    toml:"backend"`
+	Command string `json:"command,omitempty"    toml:"command"`
+	// Profile (nono only) is the base profile graith's generated profile
+	// extends. Empty means nono's built-in "default" (its audited deny groups +
+	// base system paths). Set it to a maintained registry profile — e.g.
+	// "always-further/claude" — to inherit that agent's upstream file grants
+	// (its ~/.claude, ~/.claude.json, versioned binary dir, …) instead of
+	// hand-listing them via write_files. graith still layers its own
+	// filesystem.allow/read (worktree, read_dirs, …) and its
+	// environment.allow_vars scrub on top, so the inherited profile composes
+	// with — it does not replace — graith's generated grants. The safehouse
+	// backend has no profile concept and ignores it.
+	Profile   string   `json:"profile,omitempty"    toml:"profile"`
 	Features  []string `json:"features,omitempty"   toml:"features"`
 	ReadDirs  []string `json:"read_dirs,omitempty"  toml:"read_dirs"`
 	WriteDirs []string `json:"write_dirs,omitempty" toml:"write_dirs"`
@@ -610,6 +621,7 @@ func (s SandboxConfig) Merge(agent SandboxConfig) SandboxConfig {
 		Enabled:    s.Enabled || agent.Enabled,
 		Backend:    s.Backend,
 		Command:    s.Command,
+		Profile:    s.Profile,
 		SignalMode: s.SignalMode,
 		Network:    s.Network,
 	}
@@ -631,6 +643,10 @@ func (s SandboxConfig) Merge(agent SandboxConfig) SandboxConfig {
 
 	if agent.Command != "" {
 		merged.Command = agent.Command
+	}
+
+	if agent.Profile != "" {
+		merged.Profile = agent.Profile
 	}
 
 	if agent.SignalMode != "" {
@@ -957,7 +973,7 @@ func mergeAgent(def, usr Agent) Agent {
 	}
 
 	if usr.Sandbox.Enabled || usr.Sandbox.Disabled != nil || usr.Sandbox.Backend != "" ||
-		usr.Sandbox.Command != "" || usr.Sandbox.Features != nil ||
+		usr.Sandbox.Command != "" || usr.Sandbox.Profile != "" || usr.Sandbox.Features != nil ||
 		usr.Sandbox.ReadDirs != nil || usr.Sandbox.WriteDirs != nil ||
 		usr.Sandbox.ReadFiles != nil || usr.Sandbox.WriteFiles != nil ||
 		usr.Sandbox.SignalMode != "" || usr.Sandbox.Network != nil {

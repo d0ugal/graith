@@ -4399,6 +4399,7 @@ func (sm *SessionManager) sandboxOptsFromConfig(merged config.SandboxConfig, ses
 		Features:       merged.Features,
 		EnvKeys:        envKeys,
 		SignalMode:     merged.SignalMode,
+		Profile:        merged.Profile,
 		Network:        networkPolicy(merged.Network),
 		BackendCommand: merged.Command,
 		ProfilePath:    profilePath,

@@ -153,6 +153,7 @@ func whyWrapOpts(merged config.SandboxConfig) sandbox.WrapOpts {
 		Features:       merged.Features,
 		EnvKeys:        envKeys,
 		SignalMode:     merged.SignalMode,
+		Profile:        merged.Profile,
 		BackendCommand: merged.Command,
 	}
 
