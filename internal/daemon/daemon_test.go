@@ -21,7 +21,13 @@ func newTestSessionManager(t *testing.T) *SessionManager {
 	t.Helper()
 	tmpDir := t.TempDir()
 
-	return NewSessionManager(config.Default(), config.Paths{
+	// Approval gating is opt-in (disabled by default). These tests exercise
+	// the hook-generation and approval-queue mechanics, so enable it here.
+	cfg := config.Default()
+	enabled := true
+	cfg.Approvals.Enabled = &enabled
+
+	return NewSessionManager(cfg, config.Paths{
 		StateFile: filepath.Join(tmpDir, "state.json"),
 		DataDir:   tmpDir,
 		LogDir:    tmpDir,

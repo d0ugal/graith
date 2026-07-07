@@ -1972,3 +1972,64 @@ func TestOrchestratorSandboxBackwardCompat(t *testing.T) {
 		t.Errorf("empty orchestrator sandbox should produce same result as two-layer merge\ntwo-layer: %+v\nthree-layer: %+v", twoLayer, threeLayer)
 	}
 }
+
+func TestApprovalsHookEnabled(t *testing.T) {
+	no := false
+	yes := true
+
+	tests := []struct {
+		name    string
+		enabled *bool
+		want    bool
+	}{
+		{"unset defaults to disabled", nil, false},
+		{"explicitly enabled", &yes, true},
+		{"explicitly disabled", &no, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := Approvals{Enabled: tt.enabled}
+			if got := a.HookEnabled(); got != tt.want {
+				t.Errorf("HookEnabled() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestApprovalsDefaultConfigDisablesHook(t *testing.T) {
+	// The shipped default must leave approval gating off so unattended agents
+	// aren't gated on a human who may never answer.
+	if Default().Approvals.HookEnabled() {
+		t.Error("Default() approvals hook is enabled, want disabled by default")
+	}
+}
+
+func TestApprovalsEnabledParsedFromTOML(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	toml := `
+[approvals]
+enabled = false
+`
+
+	if err := os.WriteFile(cfgPath, []byte(toml), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if cfg.Approvals.Enabled == nil {
+		t.Fatal("Approvals.Enabled is nil, want explicit false")
+	}
+
+	if *cfg.Approvals.Enabled {
+		t.Error("Approvals.Enabled = true, want false")
+	}
+
+	if cfg.Approvals.HookEnabled() {
+		t.Error("HookEnabled() = true, want false when disabled in TOML")
+	}
+}

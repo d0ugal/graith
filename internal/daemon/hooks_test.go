@@ -15,7 +15,13 @@ func newTestSessionManagerWithDataDir(t *testing.T) *SessionManager {
 	t.Helper()
 	dir := t.TempDir()
 
-	return NewSessionManager(config.Default(), config.Paths{
+	// Approval gating is opt-in (disabled by default). These tests exercise
+	// the hook-generation and approval-queue mechanics, so enable it here.
+	cfg := config.Default()
+	enabled := true
+	cfg.Approvals.Enabled = &enabled
+
+	return NewSessionManager(cfg, config.Paths{
 		StateFile: filepath.Join(dir, "state.json"),
 		DataDir:   dir,
 	}, slog.Default())
@@ -980,5 +986,112 @@ func TestClaudeSettingsEscapeSingleQuotes(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestGenerateClaudeSettingsApprovalsDisabled(t *testing.T) {
+	sm := newTestSessionManagerWithDataDir(t)
+	disabled := false
+	sm.cfg.Approvals.Enabled = &disabled
+
+	settingsPath, err := sm.generateClaudeSettings("thrawn-no-approve")
+	if err != nil {
+		t.Fatalf("generateClaudeSettings() error = %v", err)
+	}
+
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("read settings: %v", err)
+	}
+
+	var parsed struct {
+		Hooks map[string][]struct {
+			Hooks []struct {
+				Command string `json:"command"`
+			} `json:"hooks"`
+		} `json:"hooks"`
+	}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("unmarshal settings: %v", err)
+	}
+
+	if _, ok := parsed.Hooks["PreToolUse"]; ok {
+		t.Error("PreToolUse hook present when approvals disabled, want omitted")
+	}
+
+	// The other lifecycle hooks must still be installed.
+	for _, event := range []string{"SessionStart", "UserPromptSubmit", "PostToolUse", "Notification", "Stop"} {
+		if _, ok := parsed.Hooks[event]; !ok {
+			t.Errorf("event %q missing when approvals disabled, want present", event)
+		}
+	}
+
+	if strings.Contains(string(data), "approve-request") {
+		t.Error("settings contain approve-request when approvals disabled")
+	}
+}
+
+func TestInjectCodexHooksApprovalsDisabled(t *testing.T) {
+	sm := newTestSessionManagerWithDataDir(t)
+	disabled := false
+	sm.cfg.Approvals.Enabled = &disabled
+
+	_, extraEnv, err := sm.injectCodexHooks("thrawn-codex-no-approve")
+	if err != nil {
+		t.Fatalf("injectCodexHooks() error = %v", err)
+	}
+
+	hooksDir := extraEnv["CODEX_HOOKS_DIR"]
+
+	if _, err := os.Stat(filepath.Join(hooksDir, "permission-request")); !os.IsNotExist(err) {
+		t.Errorf("permission-request script present when approvals disabled, err = %v", err)
+	}
+
+	// Other lifecycle scripts must still exist.
+	for _, name := range []string{"session-start", "user-prompt-submit", "pre-tool-use", "post-tool-use", "stop"} {
+		if _, err := os.Stat(filepath.Join(hooksDir, name)); err != nil {
+			t.Errorf("script %q missing when approvals disabled: %v", name, err)
+		}
+	}
+}
+
+func TestInjectCursorHooksApprovalsDisabled(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	sm := newTestSessionManagerWithDataDir(t)
+	disabled := false
+	sm.cfg.Approvals.Enabled = &disabled
+	worktree := t.TempDir()
+
+	_, _, err := sm.injectCursorHooks("thrawn-cursor-no-approve", worktree)
+	if err != nil {
+		t.Fatalf("injectCursorHooks() error = %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(worktree, ".cursor", "hooks.json"))
+	if err != nil {
+		t.Fatalf("read cursor hooks: %v", err)
+	}
+
+	var parsed struct {
+		Hooks map[string][]struct {
+			Command string `json:"command"`
+		} `json:"hooks"`
+	}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("unmarshal cursor hooks: %v", err)
+	}
+
+	if _, ok := parsed.Hooks["preToolUse"]; ok {
+		t.Error("preToolUse hook present when approvals disabled, want omitted")
+	}
+
+	for _, event := range []string{"sessionStart", "postToolUse", "stop"} {
+		if _, ok := parsed.Hooks[event]; !ok {
+			t.Errorf("event %q missing when approvals disabled, want present", event)
+		}
+	}
+
+	if strings.Contains(string(data), "approve-request") {
+		t.Error("cursor hooks contain approve-request when approvals disabled")
 	}
 }

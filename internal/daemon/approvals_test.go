@@ -316,3 +316,35 @@ func TestSubmitApprovalMissingSessionAllows(t *testing.T) {
 		t.Errorf("expected allow for missing session, got %q", decision.Decision)
 	}
 }
+
+func TestSubmitApprovalDisabledAllows(t *testing.T) {
+	sm := newTestSessionManager(t)
+	disabled := false
+	sm.cfg.Approvals.Enabled = &disabled
+	// A short timeout ensures the test would fail (block) rather than hang if
+	// the disabled path did not short-circuit to allow.
+	sm.cfg.Approvals.Timeout = "100ms"
+
+	sm.mu.Lock()
+	sm.state.Sessions["braw1"] = &SessionState{Name: "bonnie-session"}
+	sm.mu.Unlock()
+
+	req := protocol.ApprovalRequestMsg{
+		RequestID: "neep6",
+		SessionID: "braw1",
+		ToolName:  "Bash",
+	}
+
+	decision := sm.SubmitApproval(context.Background(), req)
+
+	if decision.Decision != "allow" {
+		t.Errorf("expected allow when approvals disabled, got %q", decision.Decision)
+	}
+
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	if _, exists := sm.pendingApprovals["neep6"]; exists {
+		t.Error("approval should not be queued when approvals disabled")
+	}
+}

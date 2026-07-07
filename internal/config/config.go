@@ -246,6 +246,13 @@ type Notifications struct {
 }
 
 type Approvals struct {
+	// Enabled controls whether the PreToolUse approve-request gating hook is
+	// installed. nil (unset) means disabled: the status/lifecycle hooks are
+	// still installed but the approval gate is not, because unattended agents
+	// otherwise see their own tool calls as human-rejected and the OS sandbox
+	// is the intended guardrail. Set to true to opt back into human approval
+	// gating.
+	Enabled *bool `toml:"enabled"`
 	// Backend selects who makes the automated decision: "" (none — always
 	// prompt the human), "command"/"external" (delegate to a command over
 	// graith's JSON contract), "localmost" (the real localmost binary over its
@@ -384,6 +391,12 @@ func (a Approvals) Validate() error {
 	}
 
 	return nil
+}
+
+// HookEnabled reports whether the approve-request PreToolUse hook should be
+// installed. Defaults to false when unset — approval gating is opt-in.
+func (a Approvals) HookEnabled() bool {
+	return a.Enabled != nil && *a.Enabled
 }
 
 type StatusConfig struct {
