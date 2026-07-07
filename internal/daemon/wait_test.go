@@ -37,6 +37,7 @@ func TestMatchWriterPartialLine(t *testing.T) {
 
 	// Arrives across writes and without a trailing newline (like a prompt).
 	_, _ = mw.Write([]byte("waiting\nrea"))
+
 	select {
 	case <-ch:
 		t.Fatal("matched too early")
@@ -62,6 +63,7 @@ func TestMatchWriterTrailingEmptyGuard(t *testing.T) {
 	// A non-matching complete line leaves an empty trailing partial, which must
 	// NOT satisfy ^$ — otherwise every newline-terminated write would match.
 	_, _ = mw.Write([]byte("abc\n"))
+
 	select {
 	case got := <-ch:
 		t.Fatalf("empty trailing partial should not match, got %q", got)
@@ -71,6 +73,7 @@ func TestMatchWriterTrailingEmptyGuard(t *testing.T) {
 	// A genuine blank line (its own newline) is a completed empty line and must
 	// match.
 	_, _ = mw.Write([]byte("\n"))
+
 	select {
 	case got := <-ch:
 		if got != "" {

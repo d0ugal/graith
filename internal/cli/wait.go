@@ -74,6 +74,7 @@ is satisfied.`,
 
 		go func() {
 			<-sigCh
+
 			_ = c.SendControl("detach", struct{}{})
 		}()
 
