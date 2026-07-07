@@ -2,6 +2,7 @@ package client
 
 import (
 	"fmt"
+	"image/color"
 	"strings"
 	"testing"
 	"time"
@@ -3908,6 +3909,39 @@ func TestDisplayPR(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			if got := displayPR(c.info); got != c.want {
 				t.Errorf("displayPR = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+func TestPRColor(t *testing.T) {
+	cases := []struct {
+		name string
+		info protocol.SessionInfo
+		want color.Color
+	}{
+		{"no PR", protocol.SessionInfo{}, colorDim},
+		{"conflict beats CI", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 56, State: "open", Conflicting: true}, CI: &protocol.CIInfo{State: "passing"}}, colorRed},
+		{"open passing", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 56, State: "open"}, CI: &protocol.CIInfo{State: "passing"}}, colorGreen},
+		{"open failing", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 56, State: "open"}, CI: &protocol.CIInfo{State: "failing"}}, colorRed},
+		{"open pending", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 56, State: "open"}, CI: &protocol.CIInfo{State: "pending"}}, colorYellow},
+		{"open no CI", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 56, State: "open"}}, colorBlue},
+		// A merged/closed PR retains its last-known (stale) CI badge because
+		// resolvePR stops fetching checks once it leaves open/draft. The
+		// terminal state must win over that stale badge (issue #773).
+		{"merged with stale failing CI", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 583, State: "merged"}, CI: &protocol.CIInfo{State: "failing"}}, colorDim},
+		{"closed with stale failing CI", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 583, State: "closed"}, CI: &protocol.CIInfo{State: "failing"}}, colorDim},
+		{"merged with stale passing CI", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 583, State: "merged"}, CI: &protocol.CIInfo{State: "passing"}}, colorDim},
+		{"merged no CI", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 583, State: "merged"}}, colorDim},
+		// A closed PR can carry a stale CONFLICTING mergeable state (resolvePR
+		// sets Conflicting unconditionally). Terminal state must still win, to
+		// mirror displayPR which renders "#N closed" for this case (issue #773).
+		{"closed and conflicting", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 583, State: "closed", Conflicting: true}}, colorDim},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := prColor(c.info); got != c.want {
+				t.Errorf("prColor = %v, want %v", got, c.want)
 			}
 		})
 	}
