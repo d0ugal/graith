@@ -207,6 +207,61 @@ func TestCodexSessionIDSinceAmbiguous(t *testing.T) {
 	}
 }
 
+func TestCaptureNativeSessionIDSkipsSharedCwdSibling(t *testing.T) {
+	sm := newMigrateTestManager(t)
+	root := t.TempDir()
+	cwd := t.TempDir()
+
+	// Session A (the sibling) started first and its rollout is already on disk.
+	writeCodexRollout(t, root, "ben-native-id", cwd, time.Now())
+	sm.state.Sessions["ben"] = &SessionState{
+		ID: "ben", Name: "ben-bothy", Agent: "codex",
+		AgentSessionID: "ben-native-id", PID: 100, PIDStartTime: 100,
+		Status: StatusRunning, WorktreePath: cwd,
+	}
+
+	// Session B shares the same cwd and has not written its own rollout yet.
+	sm.state.Sessions["bairn"] = &SessionState{
+		ID: "bairn", Name: "bairn-bothy", Agent: "codex",
+		AgentSessionID: "", PID: 200, PIDStartTime: 200,
+		Status: StatusRunning, WorktreePath: cwd,
+	}
+
+	// B's capture runs while only A's rollout exists — it must not pin A's id.
+	sm.captureNativeSessionID("bairn", "codex", cwd, root, time.Now().Add(-time.Minute), 200, 200)
+
+	if got := sm.state.Sessions["bairn"].AgentSessionID; got != "" {
+		t.Fatalf("AgentSessionID = %q; want empty (must not cross-assign sibling's id)", got)
+	}
+}
+
+func TestCaptureNativeSessionIDCapturesWhenSiblingStopped(t *testing.T) {
+	sm := newMigrateTestManager(t)
+	root := t.TempDir()
+	cwd := t.TempDir()
+
+	// A stopped sibling in the same cwd does not block capture — only a live
+	// same-agent session in the cwd makes attribution ambiguous.
+	sm.state.Sessions["auld"] = &SessionState{
+		ID: "auld", Name: "auld-bothy", Agent: "codex",
+		AgentSessionID: "auld-id", PID: 0,
+		Status: StatusStopped, WorktreePath: cwd,
+	}
+
+	writeCodexRollout(t, root, "bonnie-native-id", cwd, time.Now())
+	sm.state.Sessions["bonnie"] = &SessionState{
+		ID: "bonnie", Name: "bonnie-bothy", Agent: "codex",
+		AgentSessionID: "", PID: 300, PIDStartTime: 300,
+		Status: StatusRunning, WorktreePath: cwd,
+	}
+
+	sm.captureNativeSessionID("bonnie", "codex", cwd, root, time.Now().Add(-time.Minute), 300, 300)
+
+	if got := sm.state.Sessions["bonnie"].AgentSessionID; got != "bonnie-native-id" {
+		t.Fatalf("AgentSessionID = %q; want bonnie-native-id (stopped sibling must not block)", got)
+	}
+}
+
 func TestArgsNeedForkSourceID(t *testing.T) {
 	if !argsNeedForkSourceID([]string{"fork", "{fork_source_agent_session_id}"}) {
 		t.Error("expected fork-source token to be detected")
