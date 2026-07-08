@@ -31,6 +31,11 @@ func FuzzDetect(f *testing.F) {
 		approval := d.NeedsApproval(content)
 		ready := d.IsReady(content)
 
+		// Approval status is intentionally not inferred from PTY text.
+		if approval {
+			t.Error("NeedsApproval returned true for terminal content")
+		}
+
 		// Verify invariants:
 		// 1. If busy, NeedsApproval must be false (busy takes priority)
 		if busy && approval {
@@ -52,10 +57,6 @@ func FuzzDetect(f *testing.F) {
 		case StatusActive:
 			if !busy {
 				t.Error("Detect returned active but IsBusy is false")
-			}
-		case StatusApproval:
-			if !approval {
-				t.Error("Detect returned approval but NeedsApproval is false")
 			}
 		case StatusReady:
 			if !ready {

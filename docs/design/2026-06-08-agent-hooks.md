@@ -6,9 +6,9 @@
 
 ## Problem
 
-graith detects agent status (active, approval, ready, unknown) by scraping PTY
-scrollback text every 500ms (`internal/detector/detector.go`). This approach has
-three structural problems:
+graith originally detected agent status (active, approval, ready, unknown) by
+scraping PTY scrollback text every 500ms (`internal/detector/detector.go`). This
+approach has three structural problems:
 
 1. **Fragile** — hardcoded string literals (`"Yes, allow once"`, `"esc to
    interrupt"`, ~90 thinking words, braille spinner glyphs) break when agents
@@ -24,8 +24,11 @@ three structural problems:
 ## Solution
 
 Replace scraping with structured hook events from agents that support them
-(Claude Code, Codex), while keeping the scraper as a fallback for agents that
-don't (opencode, agy).
+(Claude Code, Codex). The scraper can remain as a best-effort fallback for
+low-risk active/ready inference, but approval status must come from structured
+hooks or the daemon approval queue. PTY text is not authoritative enough for an
+approval state because false positives put sessions in the "needs human action"
+path.
 
 Both Claude Code and Codex emit JSON lifecycle events through configurable hooks:
 `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`,
@@ -75,8 +78,9 @@ AgentStatus update + onAgentStatusChange()
 | Process exit                          | `stopped`     | (existing path)    |
 
 "Sticky until next" means the status holds until a contradicting event arrives.
-`active` events expire after their TTL and fall back to scraping if no new hook
-event arrives.
+`active` events expire after their TTL and fall back to low-risk active/ready
+scraping if no new hook event arrives. `approval` does not fall back to PTY
+string detection.
 
 ### Phase 1: Protocol + Ingestion
 
@@ -136,8 +140,8 @@ type hookReport struct {
 hookReports map[string]hookReport  // keyed by session ID
 ```
 
-On daemon restart, `hookReports` is empty, so the scraper naturally resumes
-authority until hooks start firing again. No state migration needed.
+On daemon restart, `hookReports` is empty, so low-risk active/ready scraping
+resumes until hooks start firing again. No state migration needed.
 
 ### Phase 2: Claude Code Hook Injection
 
@@ -207,7 +211,7 @@ func (sm *SessionManager) detectAgentStatuses() {
         if hasHook && time.Now().Before(hr.AuthoritativeUntil) {
             status = hr.Status
         } else {
-            // Fall back to PTY scraping
+            // Fall back to low-risk PTY scraping (active/ready only)
             content := t.pty.ScreenPreview()
             if content == "" {
                 continue
@@ -287,23 +291,23 @@ Surface in:
 
 | Failure | Impact | Mitigation |
 |---------|--------|------------|
-| Hook script can't connect to daemon | No status report | Exit 0 silently; scraper takes over after authority expires |
-| Daemon restarts | hookReports map is empty | Scraper resumes until hooks fire again |
-| Agent updates hook event names | Events don't map to status | Unknown events are logged and ignored; scraper fallback |
+| Hook script can't connect to daemon | No status report | Exit 0 silently; active/ready scraping takes over after authority expires, but approval requires hooks/approval queue |
+| Daemon restarts | hookReports map is empty | Active/ready scraping resumes until hooks fire again |
+| Agent updates hook event names | Events don't map to status | Unknown events are logged and ignored; active/ready scraper fallback |
 | `gr` binary not found by hook | Hook is a no-op | GRAITH_BIN env + PATH fallback + silent exit |
 | Hook fires between detection ticks | Status update delayed up to 500ms | Acceptable — still far better than scraping race |
 | Claude `--settings` merge conflict | User hooks overwritten | Claude merges settings files; user hooks preserved |
 | Codex hook trust verification | Hook rejected | Document opt-in; don't bypass trust silently |
-| Long tool execution (>30s) | Active status expires, scraper takes over | Scraper would also detect active state; graceful degradation |
+| Long tool execution (>30s) | Active status expires, scraper takes over | Active/ready scraping still detects active state; graceful degradation |
 
 ## What This Does NOT Change
 
-- `detector.go` remains as-is — it's the fallback for hookless agents and for
-  when hooks fail
+- `detector.go` remains as the active/ready fallback for hookless agents and
+  for when hooks fail; it does not infer approval from PTY text
 - The 500ms detection loop continues running — it still drives git state checks,
   idle timeout, and scraper fallback
 - `state.json` schema is unchanged — no state migration
-- opencode and agy continue to work via scraping only
+- opencode and agy continue to work via active/ready scraping only
 
 ## Files Changed
 
@@ -326,7 +330,7 @@ Surface in:
 
 1. **PR 1**: Protocol + `gr report-status` + daemon ingestion + tests
 2. **PR 2**: Claude Code hook injection for Create/Fork/Resume
-3. **PR 3**: Authority layer in detection loop with scraper fallback
+3. **PR 3**: Authority layer in detection loop with active/ready scraper fallback
 4. **PR 4**: Codex lifecycle hook injection
 5. **PR 5**: Enrichment (extended model, UI changes)
 
@@ -336,7 +340,7 @@ PR 5 is additive enrichment that can land independently.
 ## Review Notes
 
 **Round 1 consensus** (both agents independently agreed):
-- Hook-first with scraper fallback is the right architecture
+- Hook-first with active/ready scraper fallback is the right architecture
 - `gr report-status` via Unix socket is the correct ingestion path
 - Single generic hook script, not per-event scripts
 - Hook script must be silent (no stdout)
@@ -349,7 +353,8 @@ PR 5 is additive enrichment that can land independently.
 - Data model: start minimal (4 fields), extend in phase 5 — the UI can't
   display richer data until it's built
 - Authority state: in-memory `hookReports` map on SessionManager, NOT on
-  persisted SessionState — daemon restart naturally falls back to scraping
+  persisted SessionState — daemon restart naturally falls back to active/ready
+  scraping
 - Implementation order: protocol → injection → authority (not authority before
   injection) — real hook data validates assumptions before building authority
 - Binary path: `GRAITH_BIN` env var with `exec.LookPath` + `os.Executable()`

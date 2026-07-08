@@ -3965,8 +3965,9 @@ func (sm *SessionManager) runMessageCleanup(maxAge time.Duration, maxPerStream i
 	}
 }
 
-// RunDetectionLoop periodically scans PTY scrollback to detect agent status
-// (active, needs approval, ready) for all running sessions.
+// RunDetectionLoop periodically scans PTY scrollback to detect low-risk agent
+// status (active/ready) for all running sessions. Approval status comes from
+// hooks or the daemon approval queue, not PTY text.
 func (sm *SessionManager) RunDetectionLoop(ctx context.Context) {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
