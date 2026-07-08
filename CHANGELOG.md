@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.66.5](https://github.com/d0ugal/graith/compare/v0.66.4...v0.66.5) (2026-07-08)
+
+
+### Bug Fixes
+
+* update golang.org/x/exp digest to c48552f ([32da618](https://github.com/d0ugal/graith/commit/32da618d5457af63fcc5078ee1f28c63ac2484df))
+
 ## [0.66.4](https://github.com/d0ugal/graith/compare/v0.66.3...v0.66.4) (2026-07-08)
 
 
