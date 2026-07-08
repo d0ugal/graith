@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.66.4](https://github.com/d0ugal/graith/compare/v0.66.3...v0.66.4) (2026-07-08)
+
+
+### Features
+
+* **cli:** JSON list output + attach short-name matching for gr remote/pair ([#628](https://github.com/d0ugal/graith/issues/628), [#615](https://github.com/d0ugal/graith/issues/615)) ([167d6db](https://github.com/d0ugal/graith/commit/167d6dbd8243f3e1421bc12f31dec0d2d7151a24))
+
+
+### Bug Fixes
+
+* update github.com/alexbrainman/sspi digest to 7d374ff ([9e7556a](https://github.com/d0ugal/graith/commit/9e7556a07998409ed84a6e12c6ffe8c54dd38292))
+* update github.com/dblohm7/wingoes digest to fb298ca ([e4ec212](https://github.com/d0ugal/graith/commit/e4ec212210ce64d2ea956f0fea2106cbfa02b6fa))
+* update github.com/go-json-experiment/json digest to 01eb442 ([2828189](https://github.com/d0ugal/graith/commit/282818963615e8d84ee8c0578ff9aa1cdc595780))
+* update github.com/tailscale/web-client-prebuilt digest to f19339b ([763962c](https://github.com/d0ugal/graith/commit/763962c6782a0b70596365ce0cf78d67a00447b8))
+
 ## [0.66.3](https://github.com/d0ugal/graith/compare/v0.66.2...v0.66.3) (2026-07-08)
 
 
