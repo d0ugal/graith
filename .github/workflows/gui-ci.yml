@@ -1,0 +1,73 @@
+name: GUI CI
+
+# Verification for the universal iOS + macOS Swift app under gui/. Runs only
+# when gui/ changes (macOS runner-minutes bill ~10x Linux) and on manual
+# dispatch. Deliberately NOT wired as a required status check: a paths-filtered
+# workflow that's required would leave its context permanently "expected" on
+# non-gui PRs and block them (see the note in ci.yml). Make it required only if
+# it's switched to run on every PR.
+#
+# Gated on gui/** only (not this workflow file): gui/ lands on main via its own
+# PR, so triggering on the workflow path would run the job against a tree with
+# no gui/ and fail. Use workflow_dispatch to validate the workflow itself once
+# gui/ is present on main.
+on:
+  push:
+    branches: [main]
+    paths: ['gui/**']
+  pull_request:
+    paths: ['gui/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build & Test (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      # macos-latest ships a full Xcode (with the swift-testing `Testing`
+      # module the shared suites use) selected by default. Log it for the
+      # record; pin a specific version here with
+      #   sudo xcode-select -s /Applications/Xcode_<ver>.app
+      # if a floating toolchain ever causes drift.
+      - name: Toolchain versions
+        run: |
+          swift --version
+          xcodebuild -version
+
+      # Cross-compile every module for the iOS simulator, including the UIKit
+      # terminal surface — the broadest, cheapest type-check.
+      - name: Cross-compile all modules for iOS
+        run: make -C gui/ios build-ios
+
+      # Host builds: the shared core + the AppKit macOS app. This also proves
+      # the checksummed remote libghostty-vt binaryTarget resolves (SPM
+      # downloads + verifies it; runners have network egress).
+      - name: Build shared + macOS packages
+        run: |
+          swift build --package-path gui/shared
+          swift build --package-path gui/macos
+
+      # UIKit-free logic suites: TLS-pin known-answer test, frame decoder, RPC
+      # serialization, client integration, terminal core. No simulator needed.
+      - name: Shared logic tests
+        run: swift test --package-path gui/shared
+
+      # SDK-neutral logic checks (pairing confirmation gate, host registry,
+      # attach ownership, reachability, error mapping).
+      - name: Smoke checks
+        run: make -C gui/ios smoke
+
+  # NOTE (follow-up): the UIKit XCTest suites (GraithMobileKitTests,
+  # GraithTerminalUIKitTests) need a booted simulator via
+  #   xcodebuild test -scheme GraithMobile-Package \
+  #     -destination 'platform=iOS Simulator,name=<device on the runner>'
+  # Left out of the required path for now — it's slower and sensitive to the
+  # runner image's available simulator device/OS names. Add as a separate,
+  # non-blocking job once a device name is pinned against the runner image.
