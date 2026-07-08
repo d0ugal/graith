@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.66.3](https://github.com/d0ugal/graith/compare/v0.66.2...v0.66.3) (2026-07-08)
+
+
+### Features
+
+* **daemon:** remote control over Tailscale — pairing, auth, TLS ([#628](https://github.com/d0ugal/graith/issues/628), [#615](https://github.com/d0ugal/graith/issues/615)) ([88b67eb](https://github.com/d0ugal/graith/commit/88b67ebe843a9bae14aef033a391fabc46aac638))
+
+
+### Dependencies
+
+* **deps:** update github/codeql-action action to v4.37.0 ([fd823a0](https://github.com/d0ugal/graith/commit/fd823a041e97c0d9ed5d02473e233b1d4f61692f))
+* **main:** release 0.66.2 ([768d86c](https://github.com/d0ugal/graith/commit/768d86c5b5b3854b5ef6ae5d3b234c018e1de3d6))
+
 ## [0.66.2](https://github.com/d0ugal/graith/compare/v0.66.1...v0.66.2) (2026-07-07)
 
 
