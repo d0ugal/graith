@@ -43,6 +43,10 @@ var pairListCmd = &cobra.Command{
 			return err
 		}
 
+		if out.IsJSON() {
+			return out.JSON(pl)
+		}
+
 		if len(pl.Pending) == 0 && len(pl.Paired) == 0 {
 			out.Printf("No pending requests or paired devices.\n")
 			return nil

@@ -5,7 +5,6 @@ import (
 	"crypto/ed25519"
 	"fmt"
 	"os"
-	"sort"
 	"strings"
 
 	"github.com/d0ugal/graith/internal/client"
@@ -82,17 +81,28 @@ var remoteListCmd = &cobra.Command{
 			return err
 		}
 
-		if len(store.Hosts) == 0 {
+		names := store.Names() // sorted, deterministic
+
+		if out.IsJSON() {
+			type row struct {
+				Host    string `json:"host"`
+				Port    int    `json:"port"`
+				Profile string `json:"profile"`
+			}
+
+			rows := make([]row, 0, len(names))
+			for _, name := range names {
+				h := store.Hosts[name]
+				rows = append(rows, row{Host: h.Host, Port: h.Port, Profile: h.Profile})
+			}
+
+			return out.JSON(rows)
+		}
+
+		if len(names) == 0 {
 			out.Printf("No paired remote hosts. Pair one with: gr remote pair <host>\n")
 			return nil
 		}
-
-		names := make([]string, 0, len(store.Hosts))
-		for name := range store.Hosts {
-			names = append(names, name)
-		}
-
-		sort.Strings(names) // stable, deterministic output
 
 		for _, name := range names {
 			h := store.Hosts[name]
@@ -118,9 +128,14 @@ var remoteAttachCmd = &cobra.Command{
 			return err
 		}
 
-		rh, ok := store.Get(host)
-		if !ok {
-			return fmt.Errorf("not paired with %q — run: gr remote pair %s", host, host)
+		rh, candidates := store.Resolve(host)
+		if rh == nil {
+			if len(candidates) == 0 {
+				return fmt.Errorf("no paired remote hosts — run: gr remote pair %s", host)
+			}
+
+			return fmt.Errorf("not paired with %q; paired hosts: %s (run: gr remote pair %s)",
+				host, strings.Join(candidates, ", "), host)
 		}
 
 		priv, _, err := store.EnsureDeviceKey()

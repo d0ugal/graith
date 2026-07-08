@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 )
 
 // RemoteHost is a paired remote graith daemon reachable over the tailnet
@@ -127,6 +129,45 @@ func (s *RemoteHostStore) EnsureDeviceKey() (ed25519.PrivateKey, string, error) 
 func (s *RemoteHostStore) Get(host string) (*RemoteHost, bool) {
 	h, ok := s.Hosts[host]
 	return h, ok
+}
+
+// Names returns the paired host keys, sorted — for stable listings and error
+// messages.
+func (s *RemoteHostStore) Names() []string {
+	names := make([]string, 0, len(s.Hosts))
+	for name := range s.Hosts {
+		names = append(names, name)
+	}
+
+	sort.Strings(names)
+
+	return names
+}
+
+// Resolve finds a paired host by exact key or by short-name/prefix match, so a
+// user can type "myhost" for a host stored as "myhost.tailnet.ts.net". On a
+// unique match it returns the host; otherwise it returns nil plus the sorted
+// list of paired names (empty, or the candidates) for a helpful error.
+func (s *RemoteHostStore) Resolve(host string) (*RemoteHost, []string) {
+	if h, ok := s.Hosts[host]; ok {
+		return h, nil
+	}
+
+	var matches []*RemoteHost
+
+	for name, h := range s.Hosts {
+		// "myhost" matches "myhost.tailnet.ts.net" (label boundary), and a
+		// trailing-dot query is tolerated.
+		if strings.HasPrefix(name, strings.TrimSuffix(host, ".")+".") {
+			matches = append(matches, h)
+		}
+	}
+
+	if len(matches) == 1 {
+		return matches[0], nil
+	}
+
+	return nil, s.Names()
 }
 
 // Put stores/updates a paired host (keyed by Host).
