@@ -89,3 +89,41 @@ func TestEnsureDeviceKeyStableAndSigns(t *testing.T) {
 		t.Error("device key failed to sign/verify")
 	}
 }
+
+func TestRemoteHostStoreResolve(t *testing.T) {
+	s, _ := LoadRemoteHostStore(filepath.Join(t.TempDir(), "remote-hosts.json"))
+	s.Put(&RemoteHost{Host: "ben.tail-glen.ts.net", Port: 4823})
+	s.Put(&RemoteHost{Host: "brae.tail-glen.ts.net", Port: 4823})
+	s.Put(&RemoteHost{Host: "whin.tail-a.ts.net", Port: 4823})
+	s.Put(&RemoteHost{Host: "whin.tail-b.ts.net", Port: 4823})
+
+	// Exact key.
+	if h, cand := s.Resolve("ben.tail-glen.ts.net"); h == nil || cand != nil {
+		t.Errorf("exact match: h=%+v cand=%v", h, cand)
+	}
+
+	// Unique short-name (only one host starts with "ben.").
+	if h, _ := s.Resolve("ben"); h == nil || h.Host != "ben.tail-glen.ts.net" {
+		t.Errorf("short-name match: %+v", h)
+	}
+
+	// A trailing dot in the query is tolerated.
+	if h, _ := s.Resolve("brae."); h == nil || h.Host != "brae.tail-glen.ts.net" {
+		t.Errorf("trailing-dot match: %+v", h)
+	}
+
+	// Ambiguous short-name (two "whin.*" hosts) does not resolve.
+	if h, cand := s.Resolve("whin"); h != nil || len(cand) != 4 {
+		t.Errorf("ambiguous short-name should not resolve: h=%+v cand=%v", h, cand)
+	}
+
+	// No match returns nil + the sorted candidate list.
+	h, cand := s.Resolve("dreich")
+	if h != nil {
+		t.Errorf("expected no match for dreich, got %+v", h)
+	}
+
+	if len(cand) != 4 || cand[0] != "ben.tail-glen.ts.net" {
+		t.Errorf("expected 4 sorted candidates, got %v", cand)
+	}
+}
