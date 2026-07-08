@@ -7,7 +7,10 @@ import GraithProtocol
 /// it produces verify under Go's `crypto/ed25519` (`verifyPoP`).
 struct TestSigner: DeviceKeySigner {
     let deviceID: String
-    private let key: Curve25519.Signing.PrivateKey
+    // Generated at runtime in init(); this is a type declaration, not a
+    // hardcoded secret (gitleaks' generic-api-key rule false-positives on
+    // "key: Curve25519.Signing.PrivateKey"). gitleaks:allow
+    private let key: Curve25519.Signing.PrivateKey // gitleaks:allow
 
     init(deviceID: String) {
         self.deviceID = deviceID
