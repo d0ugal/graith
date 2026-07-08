@@ -8,10 +8,9 @@ import (
 type AgentStatus string
 
 const (
-	StatusActive   AgentStatus = "active"
-	StatusApproval AgentStatus = "approval"
-	StatusReady    AgentStatus = "ready"
-	StatusUnknown  AgentStatus = "unknown"
+	StatusActive  AgentStatus = "active"
+	StatusReady   AgentStatus = "ready"
+	StatusUnknown AgentStatus = "unknown"
 )
 
 type Detector struct {
@@ -104,68 +103,11 @@ func (d *Detector) IsBusy(content string) bool {
 	return false
 }
 
-// NeedsApproval returns true if the terminal shows a permission/approval dialog.
-func (d *Detector) NeedsApproval(content string) bool {
-	if d.IsBusy(content) {
-		return false
-	}
-
-	lines := lastNonEmptyLines(content, 15)
-	recent := strings.Join(lines, "\n")
-
-	permissionPrompts := []string{
-		"No, and tell Claude what to do differently",
-		"Yes, allow once",
-		"Yes, allow always",
-		"Allow once",
-		"Allow always",
-		"Would you like to run the following command?",
-		"Press enter to confirm or esc to cancel",
-		"│ Do you want",
-		"│ Would you like",
-		"│ Allow",
-		"❯ Yes",
-		"❯ No",
-		"❯ Allow",
-		"Do you trust the files in this folder?",
-		"Do you trust the contents of this directory?",
-		"Workspace Trust Required",
-		"Allow this MCP server",
-		"Run this command?",
-		"Execute this?",
-		"Action Required",
-		"Waiting for user confirmation",
-		"Allow execution of",
-		"Use arrow keys to navigate",
-		"Press Enter to select",
-		"Allow this action",
-		"Do you want to proceed?",
-		"Do you want to create",
-		"Do you want to make this edit",
-	}
-	for _, prompt := range permissionPrompts {
-		if strings.Contains(recent, prompt) {
-			return true
-		}
-	}
-
-	confirmPatterns := []string{
-		"(Y/n)", "[Y/n]", "(y/N)", "[y/N]",
-		"(yes/no)", "[yes/no]",
-		"Continue?", "Proceed?",
-		"Approve this plan?",
-		"Execute plan?",
-	}
-	for _, pattern := range confirmPatterns {
-		if d.tool == "codex" && pattern == "Continue?" {
-			continue
-		}
-
-		if strings.Contains(recent, pattern) {
-			return true
-		}
-	}
-
+// NeedsApproval intentionally does not infer approval from terminal text.
+// Approval state is too high-impact for PTY scraping: short strings like
+// selected menu choices are indistinguishable from ordinary prompt history.
+// Real approval status comes from hooks and the daemon approval queue.
+func (*Detector) NeedsApproval(string) bool {
 	return false
 }
 
@@ -231,10 +173,6 @@ const OutputAgeUnknown = time.Duration(-1)
 func (d *Detector) Detect(content string, outputAge time.Duration) AgentStatus {
 	if d.IsBusy(content) {
 		return StatusActive
-	}
-
-	if d.NeedsApproval(content) {
-		return StatusApproval
 	}
 
 	if d.IsReady(content) {
