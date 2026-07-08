@@ -1,0 +1,16 @@
+.build/
+*.xcodeproj
+.DS_Store
+
+# libghostty-vt is a checksummed remote binaryTarget (shared/Package.swift);
+# SPM downloads it — never commit a locally-built/extracted copy.
+shared/Libraries/*.xcframework
+shared/Libraries/*.xcframework.zip
+
+# Per-user Xcode state (schemes, breakpoints) — machine-specific, never shared.
+# Match at any depth (e.g. shared/.swiftpm/…), not just gui/.swiftpm/.
+**/.swiftpm/xcode/xcuserdata/
+
+# Machine-specific `swift build --destination` file (SDK/toolchain abs paths);
+# the ios Makefile generates its own into a temp dir at build time.
+ios/.json

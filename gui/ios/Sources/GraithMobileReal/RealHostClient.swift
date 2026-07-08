@@ -1,0 +1,173 @@
+import Foundation
+import GraithClientAPI
+import GraithProtocol
+
+/// The real `GraithHostClient`, wrapping the shared `GraithProtocolClient` actor
+/// and mapping its shared wire models onto the boundary value types. This is the
+/// production replacement for `GraithMobileMock.MockHostClient`; the UI above the
+/// boundary is unchanged.
+public actor RealHostClient: GraithHostClient {
+    private let inner: GraithProtocolClient
+    private var connected = false
+
+    public init(inner: GraithProtocolClient) {
+        self.inner = inner
+    }
+
+    public var isConnected: Bool { connected }
+
+    // MARK: - Lifecycle
+
+    public func connect() async throws {
+        do {
+            try await inner.connect()
+            connected = true
+        } catch {
+            connected = false
+            throw RealClientError.map(error)
+        }
+    }
+
+    public func disconnect() async {
+        await inner.close()
+        connected = false
+    }
+
+    // MARK: - Reads
+
+    public func listSessions() async throws -> [GraithClientAPI.SessionInfo] {
+        do {
+            return try await inner.list().map { GraithClientAPI.SessionInfo($0) }
+        } catch {
+            throw RealClientError.map(error)
+        }
+    }
+
+    /// `GraithProtocolClient` has no dedicated `status` RPC, and the mobile UI
+    /// does not call this directly — synthesize it from `list` to satisfy the
+    /// boundary (session + a fleet summary derived from the full list).
+    public func status(sessionID: String) async throws -> StatusResponse {
+        let sessions: [GraithProtocol.SessionInfo]
+        do {
+            sessions = try await inner.list()
+        } catch {
+            throw RealClientError.map(error)
+        }
+        guard let target = sessions.first(where: { $0.id == sessionID }) else {
+            throw GraithClientError.daemon("session not found: \(sessionID)")
+        }
+        return StatusResponse(session: GraithClientAPI.SessionInfo(target), unreadCount: 0,
+                              fleet: Self.fleet(from: sessions))
+    }
+
+    public func repoList() async throws -> [GraithClientAPI.RepoEntry] {
+        do {
+            return try await inner.repoList().map { GraithClientAPI.RepoEntry($0) }
+        } catch {
+            throw RealClientError.map(error)
+        }
+    }
+
+    public func logs(sessionID: String, lines: Int) async throws -> String {
+        do {
+            return try await inner.logs(sessionID: sessionID, lines: lines)
+        } catch {
+            throw RealClientError.map(error)
+        }
+    }
+
+    public func screenSnapshot(sessionID: String) async throws -> ScreenSnapshot {
+        do {
+            return ScreenSnapshot(try await inner.screenSnapshot(sessionID: sessionID))
+        } catch {
+            throw RealClientError.map(error)
+        }
+    }
+
+    // MARK: - Mutations
+
+    public func create(_ request: CreateRequest) async throws {
+        do {
+            _ = try await inner.create(GraithProtocol.CreateMsg(request))
+        } catch {
+            throw RealClientError.map(error)
+        }
+    }
+
+    public func stop(sessionID: String) async throws { try await run { try await self.inner.stop(sessionID: sessionID) } }
+    public func resume(sessionID: String) async throws { try await run { try await self.inner.resume(sessionID: sessionID) } }
+    public func restart(sessionID: String) async throws { try await run { try await self.inner.restart(sessionID: sessionID) } }
+    public func interrupt(sessionID: String) async throws { try await run { try await self.inner.interrupt(sessionID: sessionID) } }
+
+    // MARK: - Approvals (event connection)
+
+    /// Bridge the shared `subscribeApprovals()` (async/throws) into the boundary's
+    /// synchronous stream: a producer task establishes the subscription and
+    /// forwards each mapped pending set.
+    ///
+    /// Contract: **a finished stream means the subscription has ended**, never
+    /// "no approvals". Because the boundary stream is non-throwing, a failure to
+    /// establish the subscription — or a dropped event connection — is signalled
+    /// by finishing the stream promptly, so a consumer's `for await` always
+    /// completes instead of hanging. When the consumer stops iterating, the
+    /// producer task is cancelled, which tears down the shared subscription and
+    /// its connection.
+    public func approvalStream() -> AsyncStream<[GraithClientAPI.ApprovalInfo]> {
+        AsyncStream { continuation in
+            let task = Task {
+                do {
+                    let shared = try await inner.subscribeApprovals()
+                    for await pending in shared {
+                        continuation.yield(pending.map { GraithClientAPI.ApprovalInfo($0) })
+                    }
+                } catch {
+                    // Failed to establish the subscription — fall through to
+                    // finish() so the caller's `for await` loop completes rather
+                    // than waiting on a subscription that will never arrive.
+                }
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    public func respondApproval(requestID: String, decision: ApprovalDecision, reason: String?) async throws {
+        do {
+            try await inner.respondApproval(requestID: requestID, decision: decision.rawValue, reason: reason)
+        } catch {
+            throw RealClientError.map(error)
+        }
+    }
+
+    // MARK: - Attach (Task 20)
+
+    public func attach(sessionID: String) async throws -> any TerminalAttachSession {
+        do {
+            // Best-guess 80x24 initial size; `BaseTerminalUIView` sends the real
+            // geometry via `resize()` from `layoutSubviews` after attach
+            // (confirmed with apple-macos on topic apple-track-628).
+            let session = try await inner.attach(sessionID: sessionID, cols: 80, rows: 24)
+            return RealAttachSession(inner: session)
+        } catch {
+            throw RealClientError.map(error)
+        }
+    }
+
+    // MARK: - Helpers
+
+    private func run(_ op: @Sendable () async throws -> Void) async throws {
+        do { try await op() }
+        catch { throw RealClientError.map(error) }
+    }
+
+    private static func fleet(from sessions: [GraithProtocol.SessionInfo]) -> FleetSummary {
+        FleetSummary(
+            total: sessions.count,
+            active: sessions.filter { $0.agentStatus == "active" }.count,
+            approval: sessions.filter { $0.agentStatus == "approval" }.count,
+            ready: sessions.filter { $0.agentStatus == "ready" }.count,
+            errored: sessions.filter { $0.status == "errored" }.count,
+            stopped: sessions.filter { $0.status == "stopped" }.count
+        )
+    }
+}

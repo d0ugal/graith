@@ -1,0 +1,56 @@
+# XcodeGen spec for the graith iOS app (#628). Generate with:
+#   xcodegen generate            (from gui/ios/)
+# then: open graith-ios.xcodeproj, pick your Apple ID under Signing &
+# Capabilities, connect your iPhone, and Run.
+#
+# The app target reuses the @main SwiftUI App (Sources/GraithMobileApp) and
+# depends on the local SwiftPM package's library products, which transitively
+# pull in ../shared (GraithProtocol, GraithTerminalCore, GraithDesign) and the
+# libghostty-vt.xcframework — Xcode selects the device/simulator slice + signs.
+name: graith-ios
+options:
+  bundleIdPrefix: net.graith
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+packages:
+  GraithMobile:
+    path: .
+targets:
+  graith:
+    type: application
+    platform: iOS
+    sources:
+      - Sources/GraithMobileApp
+    dependencies:
+      - package: GraithMobile
+        product: GraithMobileUI
+      - package: GraithMobile
+        product: GraithMobileReal
+      - package: GraithMobile
+        product: GraithMobileRealTerminal
+      - package: GraithMobile
+        product: GraithMobileKit
+      - package: GraithMobile
+        product: GraithClientAPI
+      - package: GraithMobile
+        product: GraithMobileMock
+    info:
+      path: graith-Info.plist
+      properties:
+        CFBundleDisplayName: graith
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: net.graith.mobile
+        MARKETING_VERSION: "0.1"
+        CURRENT_PROJECT_VERSION: "1"
+        CODE_SIGN_STYLE: Automatic
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SWIFT_VERSION: "5.9"

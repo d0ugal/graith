@@ -1,3 +1,7 @@
 # Binary
 /gr
 /graith
+
+# XcodeGen-generated project user state
+gui/ios/graith-ios.xcodeproj/xcuserdata/
+gui/ios/graith-ios.xcodeproj/project.xcworkspace/xcuserdata/
