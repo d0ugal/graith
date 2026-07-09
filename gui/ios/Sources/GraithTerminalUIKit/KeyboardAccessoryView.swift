@@ -1,4 +1,5 @@
 #if canImport(UIKit)
+import QuartzCore
 import UIKit
 import GraithClientAPI
 
@@ -32,11 +33,17 @@ final class KeyboardAccessoryView: UIView {
     private var stack: UIStackView!
 
     // Space-key drag → arrow keys (issue #979). The tracker is the pure state
-    // machine; the recognizer feeds it translations and it decides which arrows
-    // (if any) to emit. `spaceDragStart` anchors the gesture so translations are
-    // measured from the touch-down point regardless of where on the key it began.
+    // machine; the recognizer feeds it translations and timestamps and it decides
+    // which arrow (if any) to emit, modelling a held hardware arrow key: one press,
+    // a delay, then auto-repeat. `spaceDragStart` anchors the gesture so
+    // translations are measured from the touch-down point regardless of where on
+    // the key it began. A display link ticks while the finger is held so a
+    // stationary hold still repeats — `.changed` alone fires only on movement.
     private var spaceTracker = SpaceDragTracker()
     private var spaceDragStart: CGPoint = .zero
+    private var spaceDragTranslation: CGPoint = .zero
+    private weak var spaceDragView: UIView?
+    private var spaceRepeatLink: CADisplayLink?
     private let arrowHaptics = UIImpactFeedbackGenerator(style: .light)
 
     init() {
@@ -117,8 +124,9 @@ final class KeyboardAccessoryView: UIView {
 
     /// A wider "space" key that doubles as an arrow-key trackpad (issue #979):
     /// a plain tap types a space; holding and dragging emits arrow keys in the
-    /// drag direction (one per threshold of travel) with light haptic feedback,
-    /// and suppresses the space so a drag never also types a character.
+    /// drag direction — one press per direction, then keyboard-style auto-repeat
+    /// if held — with light haptic feedback, and suppresses the space so a drag
+    /// never also types a character.
     ///
     /// A single `UILongPressGestureRecognizer` with `minimumPressDuration = 0`
     /// handles both: it fires on touch-down (`.began`), reports finger movement
@@ -142,18 +150,20 @@ final class KeyboardAccessoryView: UIView {
         switch gesture.state {
         case .began:
             spaceDragStart = point
+            spaceDragTranslation = .zero
+            spaceDragView = view
             spaceTracker.begin()
             arrowHaptics.prepare()
             view.backgroundColor = .systemBlue
+            startSpaceRepeatLink()
         case .changed:
-            let translation = CGPoint(x: point.x - spaceDragStart.x,
-                                      y: point.y - spaceDragStart.y)
-            for key in spaceTracker.update(translation: translation) {
-                delegate?.accessory(self, didPress: key, modifiers: [])
-                arrowHaptics.impactOccurred()
-                arrowHaptics.prepare()
-            }
+            spaceDragTranslation = CGPoint(x: point.x - spaceDragStart.x,
+                                           y: point.y - spaceDragStart.y)
+            // Feed the new position immediately so a direction change registers
+            // without waiting for the next tick; repeats are driven by the link.
+            emitSpaceArrows()
         case .ended:
+            stopSpaceRepeatLink()
             view.backgroundColor = .tertiarySystemBackground
             // A drag that moved an arrow is navigation only — no space. A plain
             // tap (no arrow emitted) types a space, consuming any sticky modifier
@@ -164,10 +174,37 @@ final class KeyboardAccessoryView: UIView {
                 stickyModifiers = []
             }
         case .cancelled, .failed:
+            stopSpaceRepeatLink()
             view.backgroundColor = .tertiarySystemBackground
         default:
             break
         }
+    }
+
+    /// Advance the tracker at the current translation/time and send whatever arrow
+    /// it emits. Called both on finger movement and on each repeat-link tick.
+    private func emitSpaceArrows() {
+        for key in spaceTracker.update(translation: spaceDragTranslation, time: CACurrentMediaTime()) {
+            delegate?.accessory(self, didPress: key, modifiers: [])
+            arrowHaptics.impactOccurred()
+            arrowHaptics.prepare()
+        }
+    }
+
+    @objc private func spaceRepeatTick() {
+        emitSpaceArrows()
+    }
+
+    private func startSpaceRepeatLink() {
+        stopSpaceRepeatLink()
+        let link = CADisplayLink(target: self, selector: #selector(spaceRepeatTick))
+        link.add(to: .main, forMode: .common)
+        spaceRepeatLink = link
+    }
+
+    private func stopSpaceRepeatLink() {
+        spaceRepeatLink?.invalidate()
+        spaceRepeatLink = nil
     }
 
     private func stickyButton(title: String, modifier: TerminalModifiers) -> UIButton {
