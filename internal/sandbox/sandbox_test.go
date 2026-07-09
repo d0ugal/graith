@@ -257,6 +257,102 @@ func TestWrapUnixSocketsMultiple(t *testing.T) {
 	}
 }
 
+// TestWrapSSHAgentSocketGranted is the Secretive regression test: safehouse's
+// built-in `ssh` integration only re-opens the standard macOS agent sockets
+// (launchd Listeners, ~/.ssh/agent), so a non-standard agent socket such as
+// Secretive's app-container socket is denied connect() even with `ssh` enabled.
+// When the "ssh" feature is on, graith must feed $SSH_AUTH_SOCK into the
+// --append-profile fragment so connect() to that socket is granted.
+func TestWrapSSHAgentSocketGranted(t *testing.T) {
+	agentSock := "/hame/user/Library/Containers/com.maxgoedjen.Secretive.SecretAgent/Data/socket.ssh"
+	t.Setenv("SSH_AUTH_SOCK", agentSock)
+
+	frag := filepath.Join(t.TempDir(), "bonnie.sb")
+	opts := WrapOpts{
+		Backend:               BackendSafehouse,
+		WorktreeDir:           "/tmp/bothy",
+		UnixSockets:           []string{"/hame/user/.graith/graith.sock"},
+		Features:              []string{"ssh"},
+		SafehouseFragmentPath: frag,
+		EnvKeys:               []string{"TERM"},
+	}
+
+	if _, _, err := Wrap("claude", nil, opts); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, err := os.ReadFile(frag)
+	if err != nil {
+		t.Fatalf("read fragment: %v", err)
+	}
+
+	want := `(allow network-outbound (remote unix-socket (path-literal "` + agentSock + `")))`
+	if !strings.Contains(string(data), want) {
+		t.Errorf("fragment missing connect grant for the SSH agent socket.\nwant line: %s\ngot:\n%s", want, data)
+	}
+}
+
+// TestWrapSSHAgentSocketNotGrantedWithoutFeature guards the other direction: the
+// SSH agent socket must NOT be granted when the "ssh" feature is off, even if
+// SSH_AUTH_SOCK is set in the environment (no implicit egress).
+func TestWrapSSHAgentSocketNotGrantedWithoutFeature(t *testing.T) {
+	agentSock := "/hame/user/Library/Containers/com.maxgoedjen.Secretive.SecretAgent/Data/socket.ssh"
+	t.Setenv("SSH_AUTH_SOCK", agentSock)
+
+	frag := filepath.Join(t.TempDir(), "thrawn.sb")
+	opts := WrapOpts{
+		Backend:               BackendSafehouse,
+		WorktreeDir:           "/tmp/bothy",
+		UnixSockets:           []string{"/hame/user/.graith/graith.sock"},
+		SafehouseFragmentPath: frag,
+		EnvKeys:               []string{"TERM"},
+	}
+
+	if _, _, err := Wrap("claude", nil, opts); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, err := os.ReadFile(frag)
+	if err != nil {
+		t.Fatalf("read fragment: %v", err)
+	}
+
+	if strings.Contains(string(data), agentSock) {
+		t.Errorf("SSH agent socket granted without the \"ssh\" feature:\n%s", data)
+	}
+}
+
+// TestSafehouseSockets covers the pure socket-selection helper: the SSH agent
+// socket is appended only when the "ssh" feature is enabled and $SSH_AUTH_SOCK
+// is set, and it is never duplicated.
+func TestSafehouseSockets(t *testing.T) {
+	daemon := "/hame/user/.graith/graith.sock"
+	agentSock := "/hame/user/Library/Containers/com.maxgoedjen.Secretive.SecretAgent/Data/socket.ssh"
+
+	cases := []struct {
+		name        string
+		features    []string
+		sshAuthSock string
+		want        []string
+	}{
+		{"ssh feature + sock", []string{"ssh"}, agentSock, []string{daemon, agentSock}},
+		{"ssh feature, no sock", []string{"ssh"}, "", []string{daemon}},
+		{"sock, no ssh feature", nil, agentSock, []string{daemon}},
+		{"sock equals daemon socket (dedup)", []string{"ssh"}, daemon, []string{daemon}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := WrapOpts{UnixSockets: []string{daemon}, Features: tc.features}
+			got := safehouseSockets(opts, tc.sshAuthSock)
+
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("safehouseSockets = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestSeatbeltString locks the escaping of the Seatbelt string literal: a path
 // with a quote or backslash must not break out of the literal or inject policy.
 func TestSeatbeltString(t *testing.T) {
