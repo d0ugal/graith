@@ -137,6 +137,32 @@ public final class HostConnection: ObservableObject, Identifiable {
     public func resume(_ session: SessionInfo) async { await run { try await self.client.resume(sessionID: session.id) } }
     public func restart(_ session: SessionInfo) async { await run { try await self.client.restart(sessionID: session.id) } }
     public func interrupt(_ session: SessionInfo) async { await run { try await self.client.interrupt(sessionID: session.id) } }
+    public func delete(_ session: SessionInfo) async { await run { try await self.client.delete(sessionID: session.id) } }
+
+    public func rename(_ session: SessionInfo, to newName: String) async {
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != session.name else { return }
+        await run { try await self.client.rename(sessionID: session.id, newName: trimmed) }
+    }
+
+    /// Toggle a session's star: `unstar` when currently starred, else `star`.
+    public func toggleStar(_ session: SessionInfo) async {
+        if session.starred == true {
+            await run { try await self.client.unstar(sessionID: session.id) }
+        } else {
+            await run { try await self.client.star(sessionID: session.id) }
+        }
+    }
+
+    public func fork(_ session: SessionInfo, name: String) async {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        await run { try await self.client.fork(name: trimmed, sourceSessionID: session.id) }
+    }
+
+    public func migrate(_ session: SessionInfo, agent: String) async {
+        await run { try await self.client.migrate(sessionID: session.id, agent: agent, model: nil) }
+    }
 
     public func logs(_ session: SessionInfo, lines: Int = 300) async -> String {
         (try? await client.logs(sessionID: session.id, lines: lines)) ?? ""

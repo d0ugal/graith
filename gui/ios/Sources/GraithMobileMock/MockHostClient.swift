@@ -108,6 +108,48 @@ public actor MockHostClient: GraithHostClient {
         try check(ControlType.interrupt)
     }
 
+    public func delete(sessionID: String) async throws {
+        try check(ControlType.delete)
+        sessions.removeAll { $0.id == sessionID }
+    }
+
+    public func rename(sessionID: String, newName: String) async throws {
+        try check(ControlType.rename)
+        mutate(sessionID) { $0 = $0.with(name: newName) }
+    }
+
+    public func star(sessionID: String) async throws {
+        try check(ControlType.star)
+        mutate(sessionID) { $0 = $0.with(starred: true) }
+    }
+
+    public func unstar(sessionID: String) async throws {
+        try check(ControlType.unstar)
+        mutate(sessionID) { $0 = $0.with(starred: false) }
+    }
+
+    public func fork(name: String, sourceSessionID: String) async throws {
+        try check(ControlType.fork)
+        guard let source = sessions.first(where: { $0.id == sourceSessionID }) else {
+            throw GraithClientError.daemon("session not found: \(sourceSessionID)")
+        }
+        let new = SessionInfo(
+            id: String(UUID().uuidString.prefix(8)),
+            name: name,
+            repoPath: source.repoPath,
+            repoName: source.repoName,
+            agent: source.agent,
+            status: "running",
+            agentStatus: "active"
+        )
+        sessions.append(new)
+    }
+
+    public func migrate(sessionID: String, agent: String, model: String?) async throws {
+        try check(ControlType.migrate)
+        mutate(sessionID) { $0 = $0.with(agent: agent) }
+    }
+
     // MARK: - Approvals
 
     public func approvalStream() -> AsyncStream<[ApprovalInfo]> {
@@ -204,17 +246,25 @@ extension MockHostClient {
 }
 
 extension SessionInfo {
-    /// Return a copy with a new status / agentStatus (mock convenience).
-    func with(status: String, agentStatus: String?) -> SessionInfo {
+    /// Return a copy overriding selected fields (mock convenience). Unspecified
+    /// parameters keep the receiver's current value.
+    func with(
+        status: String? = nil,
+        agentStatus: String? = nil,
+        name: String? = nil,
+        agent: String? = nil,
+        starred: Bool? = nil
+    ) -> SessionInfo {
         SessionInfo(
-            id: id, parentID: parentID, name: name, repoPath: repoPath, repoName: repoName,
-            worktreePath: worktreePath, branch: branch, baseBranch: baseBranch, agent: agent,
-            agentSessionID: agentSessionID, status: status, agentStatus: agentStatus,
+            id: id, parentID: parentID, name: name ?? self.name, repoPath: repoPath, repoName: repoName,
+            worktreePath: worktreePath, branch: branch, baseBranch: baseBranch, agent: agent ?? self.agent,
+            agentSessionID: agentSessionID, status: status ?? self.status,
+            agentStatus: agentStatus ?? self.agentStatus,
             exitCode: exitCode, exitSignal: exitSignal, createdAt: createdAt,
             lastAttachedAt: lastAttachedAt, statusChangedAt: statusChangedAt, dirty: dirty,
             unpushedCount: unpushedCount, sandboxed: sandboxed, sharedWorktree: sharedWorktree,
             inPlace: inPlace, yolo: yolo, model: model, toolName: toolName, includes: includes,
-            configStale: configStale, starred: starred, systemKind: systemKind,
+            configStale: configStale, starred: starred ?? self.starred, systemKind: systemKind,
             scenarioID: scenarioID, scenarioName: scenarioName, summaryText: summaryText,
             summaryFaded: summaryFaded, lastOutputAt: lastOutputAt, migratedFrom: migratedFrom,
             pullRequest: pullRequest, ci: ci

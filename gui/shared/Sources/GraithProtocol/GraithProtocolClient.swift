@@ -263,6 +263,38 @@ public actor GraithProtocolClient {
         _ = try await conn.request("rename", payload: RenameMsg(sessionID: sessionID, newName: newName))
     }
 
+    /// `star` — mark a session as starred. The daemon replies `starred`.
+    /// `StarMsg` is wire-identical to `SessionIDMsg` (`{session_id}`), so the
+    /// latter is reused.
+    public func star(sessionID: String) async throws {
+        let conn = try await controlConnection()
+        _ = try await conn.request("star", payload: SessionIDMsg(sessionID: sessionID))
+    }
+
+    /// `unstar` — clear a session's star. The daemon replies `unstarred`.
+    public func unstar(sessionID: String) async throws {
+        let conn = try await controlConnection()
+        _ = try await conn.request("unstar", payload: SessionIDMsg(sessionID: sessionID))
+    }
+
+    /// `fork` — create a new session cloning `sourceSessionID`'s worktree and
+    /// agent state under `name`. The daemon replies `created` with the new
+    /// session (handler.go), so this returns the created `SessionInfo`.
+    public func fork(name: String, sourceSessionID: String) async throws -> SessionInfo {
+        let conn = try await controlConnection()
+        let reply = try await conn.request("fork", payload: ForkMsg(name: name, sourceSessionID: sourceSessionID))
+        return try decodePayload(reply, as: SessionInfo.self)
+    }
+
+    /// `migrate` — swap a session's agent (and optionally model) in place. The
+    /// daemon replies `migrated` with the updated session (handler.go), so this
+    /// returns the migrated `SessionInfo`.
+    public func migrate(sessionID: String, agent: String, model: String? = nil) async throws -> SessionInfo {
+        let conn = try await controlConnection()
+        let reply = try await conn.request("migrate", payload: MigrateMsg(sessionID: sessionID, agent: agent, model: model))
+        return try decodePayload(reply, as: SessionInfo.self)
+    }
+
     public func setStatus(sessionID: String, text: String, ttlSeconds: Int? = nil, clear: Bool = false) async throws {
         let conn = try await controlConnection()
         _ = try await conn.request("set_status", payload: SetStatusMsg(sessionID: sessionID, text: text, ttlSeconds: ttlSeconds, clear: clear))

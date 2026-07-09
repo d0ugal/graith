@@ -286,6 +286,26 @@ struct SessionRow: View {
     @EnvironmentObject var store: SessionStore
     @EnvironmentObject var window: WindowState
 
+    /// Width of the swipe-to-delete action revealed behind the row.
+    private let swipeActionWidth: CGFloat = 72
+
+    // Swipe-to-delete state. `revealed` is the committed (snapped) state; the
+    // live finger drag is tracked in `dragOffset` and auto-resets when the
+    // gesture ends. `offset` composes the two.
+    @State private var revealed = false
+    @GestureState private var dragOffset: CGFloat = 0
+
+    // Action sheets / confirmation.
+    @State private var showRename = false
+    @State private var renameText = ""
+    @State private var showFork = false
+    @State private var forkName = ""
+    @State private var showMigrate = false
+    @State private var migrateAgent = "claude"
+    @State private var showDeleteConfirm = false
+
+    private let migrateAgents = ["claude", "codex", "agy", "opencode"]
+
     var isSelected: Bool {
         window.selectedSessionID == session.id
     }
@@ -298,7 +318,116 @@ struct SessionRow: View {
         isSelected || isInSplitPane
     }
 
+    /// Composed swipe offset: the committed reveal plus the live drag, clamped
+    /// so the row can only slide left far enough to expose the delete action.
+    private var offset: CGFloat {
+        let base: CGFloat = revealed ? -swipeActionWidth : 0
+        return max(-swipeActionWidth, min(0, base + dragOffset))
+    }
+
     var body: some View {
+        ZStack(alignment: .trailing) {
+            // Red delete action revealed as the row slides left.
+            if offset < 0 {
+                Button(action: { requestDelete() }) {
+                    VStack(spacing: 2) {
+                        Image(systemName: "trash.fill")
+                            .font(.system(size: 13, weight: .semibold))
+                        Text("Delete")
+                            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    }
+                    .foregroundStyle(.white)
+                    .frame(width: swipeActionWidth)
+                    .frame(maxHeight: .infinity)
+                    .background(Theme.red)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+
+            rowContent
+                .background(Theme.mantle)
+                .offset(x: offset)
+                .gesture(swipeGesture)
+        }
+        .sheet(isPresented: $showRename) {
+            SessionTextPromptSheet(
+                title: "Rename Session",
+                fieldLabel: "New name",
+                placeholder: session.name,
+                initialText: session.name,
+                confirmLabel: "Rename",
+                text: $renameText
+            ) { store.renameSession(session, to: $0) }
+        }
+        .sheet(isPresented: $showFork) {
+            SessionTextPromptSheet(
+                title: "Fork Session",
+                fieldLabel: "New session name",
+                placeholder: "\(session.name)-fork",
+                initialText: "\(session.name)-fork",
+                confirmLabel: "Fork",
+                text: $forkName
+            ) { store.forkSession(session, name: $0) }
+        }
+        .sheet(isPresented: $showMigrate) {
+            MigrateSheet(
+                sessionName: session.name,
+                agents: migrateAgents,
+                currentAgent: session.agent,
+                selectedAgent: $migrateAgent
+            ) { store.migrateSession(session, agent: $0) }
+        }
+        .confirmationDialog(
+            "Delete session \u{201c}\(session.name)\u{201d}?",
+            isPresented: $showDeleteConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                closeSwipe()
+                store.deleteSession(session)
+            }
+            Button("Cancel", role: .cancel) { closeSwipe() }
+        } message: {
+            Text("This session is running. Deleting it stops the agent and removes its worktree.")
+        }
+    }
+
+    /// Snap the swipe action closed.
+    private func closeSwipe() {
+        withAnimation(.easeOut(duration: 0.18)) { revealed = false }
+    }
+
+    /// Delete flow shared by the swipe action and context menu: confirm when the
+    /// session is running, delete immediately when stopped.
+    private func requestDelete() {
+        if session.isRunning {
+            showDeleteConfirm = true
+        } else {
+            closeSwipe()
+            store.deleteSession(session)
+        }
+    }
+
+    private var swipeGesture: some Gesture {
+        DragGesture(minimumDistance: 14)
+            .updating($dragOffset) { value, state, _ in
+                // Track horizontal drags only; ignore predominantly-vertical
+                // ones so the enclosing scroll view keeps working.
+                if abs(value.translation.width) > abs(value.translation.height) {
+                    state = value.translation.width
+                }
+            }
+            .onEnded { value in
+                guard abs(value.translation.width) > abs(value.translation.height) else { return }
+                let projected = (revealed ? -swipeActionWidth : 0) + value.translation.width
+                withAnimation(.easeOut(duration: 0.18)) {
+                    revealed = projected < -swipeActionWidth / 2
+                }
+            }
+    }
+
+    private var rowContent: some View {
         HStack(spacing: 8) {
             // Tree indentation
             if depth > 0 {
@@ -422,8 +551,25 @@ struct SessionRow: View {
             if session.isRunning {
                 Button("Stop") { store.stopSession(session) }
                 Button("Restart") { store.restartSession(session) }
+                Button("Interrupt (Ctrl-C)") { store.interruptSession(session) }
             } else {
                 Button("Resume") { store.resumeSession(session) }
+            }
+            Divider()
+            Button("Rename…") {
+                renameText = session.name
+                showRename = true
+            }
+            Button((session.starred ?? false) ? "Unstar" : "Star") {
+                store.toggleStar(session)
+            }
+            Button("Fork…") {
+                forkName = "\(session.name)-fork"
+                showFork = true
+            }
+            Button("Migrate…") {
+                migrateAgent = session.agent
+                showMigrate = true
             }
             Divider()
             Button("Copy name") {
@@ -435,7 +581,7 @@ struct SessionRow: View {
                 NSPasteboard.general.setString(session.id, forType: .string)
             }
             Divider()
-            Button("Delete", role: .destructive) { store.deleteSession(session) }
+            Button("Delete", role: .destructive) { requestDelete() }
         }
     }
 
@@ -515,6 +661,132 @@ struct SessionRow: View {
         }
 
         return parts.joined(separator: " \u{b7} ")
+    }
+}
+
+/// A small modal prompting for a single line of text (used for Rename and
+/// Fork). Styled to match `NewSessionSheet`.
+struct SessionTextPromptSheet: View {
+    let title: String
+    let fieldLabel: String
+    let placeholder: String
+    let initialText: String
+    let confirmLabel: String
+    @Binding var text: String
+    let onConfirm: (String) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    private var trimmed: String {
+        text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(title)
+                    .font(.system(.title3, design: .monospaced))
+                    .fontWeight(.semibold)
+                    .foregroundStyle(Theme.text)
+                Spacer()
+            }
+            .padding(20)
+
+            Divider().background(Theme.surface0)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(fieldLabel)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(Theme.subtext0)
+                TextField(placeholder, text: $text)
+                    .textFieldStyle(.plain)
+                    .font(.system(.body, design: .monospaced))
+                    .padding(8)
+                    .background(Theme.crust)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .onSubmit(confirm)
+            }
+            .padding(20)
+
+            Divider().background(Theme.surface0)
+
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button(confirmLabel, action: confirm)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(trimmed.isEmpty)
+            }
+            .padding(20)
+        }
+        .frame(width: 360)
+        .background(Theme.mantle)
+        .onAppear { if text.isEmpty { text = initialText } }
+    }
+
+    private func confirm() {
+        guard !trimmed.isEmpty else { return }
+        onConfirm(trimmed)
+        dismiss()
+    }
+}
+
+/// A small modal to pick a new agent for `migrate`.
+struct MigrateSheet: View {
+    let sessionName: String
+    let agents: [String]
+    let currentAgent: String
+    @Binding var selectedAgent: String
+    let onConfirm: (String) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Migrate Session")
+                    .font(.system(.title3, design: .monospaced))
+                    .fontWeight(.semibold)
+                    .foregroundStyle(Theme.text)
+                Spacer()
+            }
+            .padding(20)
+
+            Divider().background(Theme.surface0)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Swap \u{201c}\(sessionName)\u{201d} to a different agent")
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(Theme.subtext0)
+                HStack(spacing: 8) {
+                    ForEach(agents, id: \.self) { a in
+                        AgentChip(name: a, isSelected: selectedAgent == a) {
+                            selectedAgent = a
+                        }
+                    }
+                    Spacer()
+                }
+            }
+            .padding(20)
+
+            Divider().background(Theme.surface0)
+
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button("Migrate") {
+                    onConfirm(selectedAgent)
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(selectedAgent == currentAgent)
+            }
+            .padding(20)
+        }
+        .frame(width: 360)
+        .background(Theme.mantle)
     }
 }
 

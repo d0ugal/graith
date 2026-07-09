@@ -98,6 +98,18 @@ public actor RealHostClient: GraithHostClient {
     public func resume(sessionID: String) async throws { try await run { try await self.inner.resume(sessionID: sessionID) } }
     public func restart(sessionID: String) async throws { try await run { try await self.inner.restart(sessionID: sessionID) } }
     public func interrupt(sessionID: String) async throws { try await run { try await self.inner.interrupt(sessionID: sessionID) } }
+    public func delete(sessionID: String) async throws { try await run { try await self.inner.delete(sessionID: sessionID) } }
+    public func rename(sessionID: String, newName: String) async throws {
+        try await run { try await self.inner.rename(sessionID: sessionID, newName: newName) }
+    }
+    public func star(sessionID: String) async throws { try await run { try await self.inner.star(sessionID: sessionID) } }
+    public func unstar(sessionID: String) async throws { try await run { try await self.inner.unstar(sessionID: sessionID) } }
+    public func fork(name: String, sourceSessionID: String) async throws {
+        try await run { _ = try await self.inner.fork(name: name, sourceSessionID: sourceSessionID) }
+    }
+    public func migrate(sessionID: String, agent: String, model: String?) async throws {
+        try await run { _ = try await self.inner.migrate(sessionID: sessionID, agent: agent, model: model) }
+    }
 
     // MARK: - Approvals (event connection)
 

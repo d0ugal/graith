@@ -152,6 +152,90 @@ func testMockClient() async throws {
     check(second?.isEmpty == true, "respond clears the pending approval")
 }
 
+// MARK: - Session actions (issue #899): delete / rename / star / fork / migrate
+
+func testMockClientSessionActions() async throws {
+    section("MockHostClient — session actions (#899)")
+    let client = MockHostClient()
+    try await client.connect()
+
+    // Rename mutates the session name in place.
+    try await client.rename(sessionID: "braw0001", newName: "bonnie")
+    var sessions = try await client.listSessions()
+    check(sessions.first { $0.id == "braw0001" }?.name == "bonnie", "rename updates the session name")
+
+    // Star / unstar toggle the flag.
+    check(sessions.first { $0.id == "braw0001" }?.starred != true, "session starts unstarred")
+    try await client.star(sessionID: "braw0001")
+    sessions = try await client.listSessions()
+    check(sessions.first { $0.id == "braw0001" }?.starred == true, "star sets the flag")
+    try await client.unstar(sessionID: "braw0001")
+    sessions = try await client.listSessions()
+    check(sessions.first { $0.id == "braw0001" }?.starred != true, "unstar clears the flag")
+
+    // Migrate swaps the agent.
+    try await client.migrate(sessionID: "braw0001", agent: "codex", model: nil)
+    sessions = try await client.listSessions()
+    check(sessions.first { $0.id == "braw0001" }?.agent == "codex", "migrate swaps the agent")
+
+    // Fork clones a source session under a new name.
+    let before = try await client.listSessions().count
+    try await client.fork(name: "bairn", sourceSessionID: "braw0001")
+    sessions = try await client.listSessions()
+    check(sessions.count == before + 1, "fork adds a session")
+    check(sessions.contains { $0.name == "bairn" }, "forked session carries the new name")
+
+    // Delete removes the session.
+    try await client.delete(sessionID: "braw0001")
+    sessions = try await client.listSessions()
+    check(!sessions.contains { $0.id == "braw0001" }, "delete removes the session")
+
+    // A fork of a missing source surfaces a daemon error.
+    do {
+        try await client.fork(name: "dreich", sourceSessionID: "missing")
+        check(false, "fork of a missing source should throw")
+    } catch {
+        check(true, "fork of a missing source throws")
+    }
+}
+
+// MARK: - HostConnection action wiring (issue #899)
+
+@MainActor
+func testHostConnectionActions() async throws {
+    section("HostConnection — action wiring (#899)")
+    let client = MockHostClient()
+    let entry = HostEntry(id: "ben", label: "ben", magicDNSName: "graith-ben.ts.net")
+    let conn = HostConnection(entry: entry, client: client)
+    await conn.connect()
+    check(conn.state == .connected, "connection is connected")
+
+    let target = conn.sessions.first { $0.id == "braw0001" }!
+
+    // toggleStar flips the flag through the connection + refresh.
+    await conn.toggleStar(target)
+    check(conn.sessions.first { $0.id == "braw0001" }?.starred == true, "toggleStar stars via the connection")
+    await conn.toggleStar(conn.sessions.first { $0.id == "braw0001" }!)
+    check(conn.sessions.first { $0.id == "braw0001" }?.starred != true, "toggleStar unstars via the connection")
+
+    // rename ignores an empty / unchanged name, applies a real change.
+    await conn.rename(target, to: "   ")
+    check(conn.sessions.first { $0.id == "braw0001" }?.name == "braw", "rename ignores blank input")
+    await conn.rename(target, to: "bonnie")
+    check(conn.sessions.first { $0.id == "braw0001" }?.name == "bonnie", "rename applies via the connection")
+
+    // fork ignores blank name, applies a real one.
+    let beforeFork = conn.sessions.count
+    await conn.fork(target, name: "  ")
+    check(conn.sessions.count == beforeFork, "fork ignores blank name")
+    await conn.fork(target, name: "bairn")
+    check(conn.sessions.count == beforeFork + 1, "fork adds a session via the connection")
+
+    // delete removes it.
+    await conn.delete(target)
+    check(!conn.sessions.contains { $0.id == "braw0001" }, "delete removes via the connection")
+}
+
 // MARK: - AppModel multi-host aggregation (Task 19)
 
 @MainActor
@@ -309,6 +393,8 @@ struct Smoke {
             try await MainActor.run { try testHostRegistry() }
             try await testPairing()
             try await testMockClient()
+            try await testMockClientSessionActions()
+            try await testHostConnectionActions()
             try await testAppModel()
             try await testAttach()
             try await testRealAdapters()
