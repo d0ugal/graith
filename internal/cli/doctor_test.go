@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"io"
 	"os"
 	"path/filepath"
@@ -27,6 +28,94 @@ func writeStubExecutable(t *testing.T, dir, name string) string {
 	}
 
 	return name
+}
+
+// makeTmpRepo creates the <repo>/<hash> layout gr doctor's checkTmpDir expects
+// under root, writing a file of the given size so a size walk has something to
+// count. The caller points paths.TmpDir at root.
+func makeTmpRepo(t *testing.T, root, repo, hash string, fileBytes int) {
+	t.Helper()
+
+	dir := filepath.Join(root, repo, hash)
+	if err := os.MkdirAll(dir, 0o755); err != nil { //nolint:gosec // G301: test fixture
+		t.Fatalf("mkdir tmp repo: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "neep"), bytes.Repeat([]byte("x"), fileBytes), 0o600); err != nil {
+		t.Fatalf("write tmp repo file: %v", err)
+	}
+}
+
+// TestCheckTmpDirSkipsSizeByDefault verifies the default (no --disk) run reports
+// the tmp repo count without walking the tree for a byte size, and flags that a
+// --disk run would surface sizes. This is the crux of the doctor perf fix: the
+// expensive full-tree walk must not run unless explicitly requested.
+func TestCheckTmpDirSkipsSizeByDefault(t *testing.T) {
+	oldOut, oldPaths, oldDisk := out, paths, doctorDisk
+
+	t.Cleanup(func() {
+		out, paths, doctorDisk = oldOut, oldPaths, oldDisk
+	})
+
+	tmpRoot := t.TempDir()
+	makeTmpRepo(t, tmpRoot, "croft", "abc123", 2048)
+
+	paths = config.Paths{TmpDir: tmpRoot}
+
+	doctorDisk = false
+	buf := &bytes.Buffer{}
+	out = output.NewWithWriter(false, buf)
+
+	dc := newDoctorContext()
+	dc.checkTmpDir()
+
+	got := buf.String()
+	if !strings.Contains(got, "1 repo(s)") {
+		t.Errorf("expected tmp repo count in default output, got: %q", got)
+	}
+
+	if strings.Contains(got, "KB") || strings.Contains(got, "MB") {
+		t.Errorf("default run should not report a byte size (no full-tree walk), got: %q", got)
+	}
+
+	if !dc.suggestDisk {
+		t.Error("expected suggestDisk to be set when tmp repos exist without --disk")
+	}
+}
+
+// TestCheckTmpDirReportsSizeWithDisk verifies --disk restores the byte size,
+// walking the tree as before.
+func TestCheckTmpDirReportsSizeWithDisk(t *testing.T) {
+	oldOut, oldPaths, oldDisk := out, paths, doctorDisk
+
+	t.Cleanup(func() {
+		out, paths, doctorDisk = oldOut, oldPaths, oldDisk
+	})
+
+	tmpRoot := t.TempDir()
+	makeTmpRepo(t, tmpRoot, "croft", "abc123", 2048)
+
+	paths = config.Paths{TmpDir: tmpRoot}
+
+	doctorDisk = true
+	buf := &bytes.Buffer{}
+	out = output.NewWithWriter(false, buf)
+
+	dc := newDoctorContext()
+	dc.checkTmpDir()
+
+	got := buf.String()
+	if !strings.Contains(got, "1 repo(s)") {
+		t.Errorf("expected tmp repo count with --disk, got: %q", got)
+	}
+
+	if !strings.Contains(got, "KB") {
+		t.Errorf("--disk run should report a byte size, got: %q", got)
+	}
+
+	if dc.suggestDisk {
+		t.Error("suggestDisk should not be set when --disk already measured sizes")
+	}
 }
 
 func TestAgentInstalled(t *testing.T) {

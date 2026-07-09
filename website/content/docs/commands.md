@@ -155,9 +155,12 @@ List sessions waiting for approval.
 
 Run health checks and diagnostics. Checks daemon status, safehouse availability, orphaned worktrees, oversized scrollback files, and stale PID files.
 
+By default `gr doctor` avoids walking the data dir to measure on-disk sizes — that walk can take tens of seconds on a large install (worktrees full of `node_modules` and `.git` objects), so it's opt-in. Pass `--disk` to report the size of the data dir, tmp repos, and orphaned worktrees. When artifacts that might use disk space are found, the default run recommends re-running with `--disk`.
+
 | Flag | Description |
 |------|-------------|
 | `--autofix` | Automatically fix issues |
+| `--disk` | Measure on-disk sizes (walks the data dir; can be slow on large installs) |
 
 ### `gr sandbox why`
 
