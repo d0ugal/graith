@@ -3,9 +3,11 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/d0ugal/graith/internal/client"
 	"github.com/d0ugal/graith/internal/output"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/spf13/cobra"
@@ -276,6 +278,194 @@ func TestPrintTreeOrphansAsRoots(t *testing.T) {
 	}
 }
 
+func TestShouldColor(t *testing.T) {
+	tests := []struct {
+		name        string
+		noColorFlag bool
+		noColorEnv  string
+		isTTY       bool
+		want        bool
+	}{
+		{"tty, no flags", false, "", true, true},
+		{"not a tty", false, "", false, false},
+		{"no-color flag", true, "", true, false},
+		{"NO_COLOR env set", false, "1", true, false},
+		{"NO_COLOR empty string is off", false, "", true, true},
+		{"flag wins over tty", true, "", true, false},
+		{"env wins over tty", false, "anything", true, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := shouldColor(tt.noColorFlag, tt.noColorEnv, tt.isTTY); got != tt.want {
+				t.Errorf("shouldColor(%v, %q, %v) = %v, want %v",
+					tt.noColorFlag, tt.noColorEnv, tt.isTTY, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestColorize(t *testing.T) {
+	green := client.StatusColor("running")
+
+	t.Run("disabled returns text unchanged", func(t *testing.T) {
+		if got := colorize("running", green, false); got != "running" {
+			t.Errorf("got %q, want %q", got, "running")
+		}
+	})
+
+	t.Run("empty text is never wrapped", func(t *testing.T) {
+		if got := colorize("", green, true); got != "" {
+			t.Errorf("got %q, want empty", got)
+		}
+	})
+
+	t.Run("enabled wraps ANSI bracketed by tabwriter escape bytes", func(t *testing.T) {
+		got := colorize("running", green, true)
+
+		if !strings.Contains(got, "\x1b[") {
+			t.Errorf("expected ANSI escape in %q", got)
+		}
+
+		if !strings.Contains(got, "running") {
+			t.Errorf("expected visible text preserved in %q", got)
+		}
+
+		// Every ANSI sequence must be bracketed by the tabwriter Escape byte so
+		// a StripEscape tabwriter aligns columns by visible width.
+		if !strings.Contains(got, "\xff\x1b[") || !strings.Contains(got, "m\xff") {
+			t.Errorf("ANSI not bracketed by escape bytes: %q", got)
+		}
+
+		// Stripping the escape bytes and ANSI sequences leaves the plain text.
+		stripped := ansiSeqRe.ReplaceAllString(strings.ReplaceAll(got, "\xff", ""), "")
+		if stripped != "running" {
+			t.Errorf("stripped %q, want %q", stripped, "running")
+		}
+	})
+}
+
+func TestVisibleColumns(t *testing.T) {
+	compact := visibleColumns(false)
+	wide := visibleColumns(true)
+
+	if len(wide) <= len(compact) {
+		t.Fatalf("wide (%d) should have more columns than compact (%d)", len(wide), len(compact))
+	}
+
+	has := func(cols []sessionColumn, header string) bool {
+		for _, c := range cols {
+			if c.header == header {
+				return true
+			}
+		}
+
+		return false
+	}
+
+	// Wide-only columns are hidden in compact but present in wide.
+	for _, h := range []string{"MODEL", "BRANCH", "ATTACHED"} {
+		if has(compact, h) {
+			t.Errorf("compact should not include %q", h)
+		}
+
+		if !has(wide, h) {
+			t.Errorf("wide should include %q", h)
+		}
+	}
+
+	// Core columns appear in both modes.
+	for _, h := range []string{"REPO", "AGENT", "STATUS", "ACTIVITY", "GIT", "PR", "AGE"} {
+		if !has(compact, h) {
+			t.Errorf("compact should include %q", h)
+		}
+
+		if !has(wide, h) {
+			t.Errorf("wide should include %q", h)
+		}
+	}
+}
+
+func TestPrintFlatWideColumns(t *testing.T) {
+	orig := listWide
+	defer func() { listWide = orig }()
+
+	sessions := []protocol.SessionInfo{
+		{ID: "braw", Name: "braw", RepoName: "croft", Agent: "claude", Status: "running",
+			Model: "opus", Branch: "user/graith/braw", CreatedAt: time.Now().Format(time.RFC3339)},
+	}
+
+	render := func(wide bool) string {
+		listWide = wide
+
+		var buf bytes.Buffer
+
+		cmd := &cobra.Command{}
+		cmd.SetOut(&buf)
+		printFlat(cmd, sessions, time.Now())
+
+		return buf.String()
+	}
+
+	compact := render(false)
+	if strings.Contains(compact, "MODEL") || strings.Contains(compact, "BRANCH") || strings.Contains(compact, "ATTACHED") {
+		t.Errorf("compact output should omit wide columns:\n%s", compact)
+	}
+
+	wide := render(true)
+	for _, h := range []string{"MODEL", "BRANCH", "ATTACHED"} {
+		if !strings.Contains(wide, h) {
+			t.Errorf("wide output should include %q:\n%s", h, wide)
+		}
+	}
+
+	// The model value only shows in wide mode.
+	if strings.Contains(compact, "opus") {
+		t.Errorf("compact should not show model value:\n%s", compact)
+	}
+
+	if !strings.Contains(wide, "opus") {
+		t.Errorf("wide should show model value:\n%s", wide)
+	}
+}
+
+func TestPrintFlatBufferHasNoColor(t *testing.T) {
+	// A bytes.Buffer is not a TTY, so printFlat must emit plain text with no
+	// ANSI escape codes even for a running (would-be-green) session.
+	sessions := []protocol.SessionInfo{
+		{ID: "braw", Name: "braw", RepoName: "croft", Agent: "claude", Status: "running",
+			CreatedAt: time.Now().Format(time.RFC3339)},
+	}
+
+	var buf bytes.Buffer
+
+	cmd := &cobra.Command{}
+	cmd.SetOut(&buf)
+	printFlat(cmd, sessions, time.Now())
+
+	if strings.ContainsRune(buf.String(), '\x1b') {
+		t.Errorf("non-tty output must not contain ANSI escapes:\n%q", buf.String())
+	}
+}
+
+func TestFormatAgentStatusColored(t *testing.T) {
+	s := protocol.SessionInfo{Status: "running", AgentStatus: "approval"}
+
+	plain := formatAgentStatus(s, false)
+	if plain != "⚠ approval" {
+		t.Errorf("plain = %q, want %q", plain, "⚠ approval")
+	}
+
+	colored := formatAgentStatus(s, true)
+	if !strings.Contains(colored, "\x1b[") {
+		t.Errorf("colored output should contain ANSI: %q", colored)
+	}
+
+	if !strings.Contains(colored, "⚠ approval") {
+		t.Errorf("colored output should preserve text: %q", colored)
+	}
+}
+
 // TestFormatAgentStatusCov covers each branch: a non-running session shows no
 // agent status at all, an approval-pending session gets the ⚠ prefix, an active
 // session with a tool name is annotated, and a plain active status passes
@@ -315,7 +505,7 @@ func TestFormatAgentStatusCov(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := formatAgentStatus(tt.in); got != tt.want {
+			if got := formatAgentStatus(tt.in, false); got != tt.want {
 				t.Errorf("formatAgentStatus = %q, want %q", got, tt.want)
 			}
 		})
@@ -534,7 +724,7 @@ func TestPrintFlatCov(t *testing.T) {
 
 	out := buf.String()
 
-	if !bytes.Contains([]byte(out), []byte("NAME")) || !bytes.Contains([]byte(out), []byte("BRANCH")) {
+	if !bytes.Contains([]byte(out), []byte("NAME")) || !bytes.Contains([]byte(out), []byte("STATUS")) {
 		t.Error("missing table header")
 	}
 

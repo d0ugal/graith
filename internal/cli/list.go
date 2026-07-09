@@ -2,15 +2,20 @@ package cli
 
 import (
 	"fmt"
+	"image/color"
+	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"text/tabwriter"
 	"time"
 
+	"charm.land/lipgloss/v2"
 	"github.com/d0ugal/graith/internal/client"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/d0ugal/graith/internal/version"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 var (
@@ -19,7 +24,51 @@ var (
 	listChildren string
 	listStarred  bool
 	listQuiet    bool
+	listWide     bool
+	listNoColor  bool
 )
+
+// ansiSeqRe matches SGR (color) escape sequences so they can be bracketed with
+// tabwriter's Escape byte (0xff). Bracketing keeps tabwriter from counting the
+// invisible bytes toward column width, so colored cells stay aligned.
+var ansiSeqRe = regexp.MustCompile("\x1b\\[[0-9;]*m")
+
+// colorize wraps text in the given foreground color for terminal output. When
+// coloring is disabled (or the text is empty) it returns the text unchanged.
+// The emitted escape sequences are bracketed with tabwriter.Escape bytes so a
+// tabwriter created with tabwriter.StripEscape aligns columns by visible width.
+func colorize(text string, c color.Color, enabled bool) string {
+	if !enabled || text == "" {
+		return text
+	}
+
+	rendered := lipgloss.NewStyle().Foreground(c).Render(text)
+
+	return ansiSeqRe.ReplaceAllString(rendered, "\xff$0\xff")
+}
+
+// shouldColor decides whether colored output is appropriate. Colors are
+// disabled by the --no-color flag, by a non-empty NO_COLOR env var (per the
+// no-color.org convention), or when stdout is not a terminal (to avoid leaking
+// escape codes into pipes and files).
+func shouldColor(noColorFlag bool, noColorEnv string, isTTY bool) bool {
+	if noColorFlag || noColorEnv != "" {
+		return false
+	}
+
+	return isTTY
+}
+
+// listColorEnabled resolves shouldColor against the current flags, environment,
+// and the command's output stream.
+func listColorEnabled(cmd *cobra.Command) bool {
+	isTTY := false
+	if f, ok := cmd.OutOrStdout().(*os.File); ok {
+		isTTY = term.IsTerminal(int(f.Fd()))
+	}
+
+	return shouldColor(listNoColor, os.Getenv("NO_COLOR"), isTTY)
+}
 
 var listCmd = &cobra.Command{
 	Use:     "list",
@@ -157,6 +206,78 @@ func printQuiet(cmd *cobra.Command, sessions []protocol.SessionInfo) error {
 	return nil
 }
 
+// sessionColumn describes a trailing column (everything after NAME) in the
+// `gr list` table. Columns marked wide are only shown with the --wide flag.
+type sessionColumn struct {
+	header string
+	wide   bool
+	value  func(s protocol.SessionInfo, now time.Time, colorOn bool) string
+}
+
+// trailingColumns returns every column after NAME in display order. The compact
+// default hides the wide columns (model, branch, attached); --wide shows all.
+func trailingColumns() []sessionColumn {
+	return []sessionColumn{
+		{"REPO", false, func(s protocol.SessionInfo, _ time.Time, _ bool) string { return s.RepoName }},
+		{"AGENT", false, func(s protocol.SessionInfo, _ time.Time, _ bool) string { return s.Agent }},
+		{"STATUS", false, func(s protocol.SessionInfo, _ time.Time, colorOn bool) string {
+			return colorize(s.Status, client.StatusColor(s.Status), colorOn)
+		}},
+		{"ACTIVITY", false, func(s protocol.SessionInfo, _ time.Time, colorOn bool) string {
+			return formatAgentStatus(s, colorOn)
+		}},
+		{"MODEL", true, func(s protocol.SessionInfo, _ time.Time, _ bool) string { return formatModel(s) }},
+		{"BRANCH", true, func(s protocol.SessionInfo, _ time.Time, _ bool) string { return formatBranch(s) }},
+		{"GIT", false, func(s protocol.SessionInfo, _ time.Time, _ bool) string { return formatGitStatus(s) }},
+		{"PR", false, func(s protocol.SessionInfo, _ time.Time, _ bool) string { return formatPR(s) }},
+		{"AGE", false, func(s protocol.SessionInfo, now time.Time, _ bool) string { return formatAge(s, now) }},
+		{"ATTACHED", true, func(s protocol.SessionInfo, now time.Time, _ bool) string { return formatAttached(s, now) }},
+	}
+}
+
+// visibleColumns filters trailingColumns by the wide flag.
+func visibleColumns(wide bool) []sessionColumn {
+	all := trailingColumns()
+	if wide {
+		return all
+	}
+
+	visible := make([]sessionColumn, 0, len(all))
+
+	for _, c := range all {
+		if !c.wide {
+			visible = append(visible, c)
+		}
+	}
+
+	return visible
+}
+
+// headerRow builds the tab-separated header line for the given columns.
+func headerRow(cols []sessionColumn) string {
+	cells := make([]string, 0, len(cols)+1)
+	cells = append(cells, "NAME")
+
+	for _, c := range cols {
+		cells = append(cells, c.header)
+	}
+
+	return strings.Join(cells, "\t")
+}
+
+// dataRow builds the tab-separated data line for a session. The name cell is
+// supplied by the caller so callers can prepend tree prefixes.
+func dataRow(name string, s protocol.SessionInfo, cols []sessionColumn, now time.Time, colorOn bool) string {
+	cells := make([]string, 0, len(cols)+1)
+	cells = append(cells, name)
+
+	for _, c := range cols {
+		cells = append(cells, c.value(s, now, colorOn))
+	}
+
+	return strings.Join(cells, "\t")
+}
+
 func printFlat(cmd *cobra.Command, sessions []protocol.SessionInfo, now time.Time) {
 	sort.Slice(sessions, func(i, j int) bool {
 		if sessions[i].RepoName != sessions[j].RepoName {
@@ -166,8 +287,11 @@ func printFlat(cmd *cobra.Command, sessions []protocol.SessionInfo, now time.Tim
 		return sessions[i].Name < sessions[j].Name
 	})
 
-	tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-	_, _ = fmt.Fprintln(tw, "NAME\tREPO\tAGENT\tSTATUS\tACTIVITY\tMODEL\tBRANCH\tGIT\tPR\tAGE\tATTACHED")
+	colorOn := listColorEnabled(cmd)
+	cols := visibleColumns(listWide)
+
+	tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', tabwriter.StripEscape)
+	_, _ = fmt.Fprintln(tw, headerRow(cols))
 
 	for _, s := range sessions {
 		name := s.Name
@@ -175,10 +299,7 @@ func printFlat(cmd *cobra.Command, sessions []protocol.SessionInfo, now time.Tim
 			name = "★ " + name
 		}
 
-		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			name, s.RepoName, s.Agent, s.Status,
-			formatAgentStatus(s), formatModel(s),
-			formatBranch(s), formatGitStatus(s), formatPR(s), formatAge(s, now), formatAttached(s, now))
+		_, _ = fmt.Fprintln(tw, dataRow(name, s, cols, now, colorOn))
 	}
 
 	_ = tw.Flush()
@@ -217,8 +338,11 @@ func printTree(cmd *cobra.Command, sessions []protocol.SessionInfo, now time.Tim
 		sortSessions(children[k])
 	}
 
-	tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-	_, _ = fmt.Fprintln(tw, "NAME\tREPO\tAGENT\tSTATUS\tACTIVITY\tMODEL\tBRANCH\tGIT\tPR\tAGE\tATTACHED")
+	colorOn := listColorEnabled(cmd)
+	cols := visibleColumns(listWide)
+
+	tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', tabwriter.StripEscape)
+	_, _ = fmt.Fprintln(tw, headerRow(cols))
 
 	var walk func(s protocol.SessionInfo, prefix, childPrefix string)
 
@@ -228,10 +352,7 @@ func printTree(cmd *cobra.Command, sessions []protocol.SessionInfo, now time.Tim
 			name = "★ " + name
 		}
 
-		_, _ = fmt.Fprintf(tw, "%s%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			prefix, name, s.RepoName, s.Agent, s.Status,
-			formatAgentStatus(s), formatModel(s),
-			formatBranch(s), formatGitStatus(s), formatPR(s), formatAge(s, now), formatAttached(s, now))
+		_, _ = fmt.Fprintln(tw, dataRow(prefix+name, s, cols, now, colorOn))
 
 		kids := children[s.ID]
 		for i, kid := range kids {
@@ -289,19 +410,24 @@ func descendantsOf(sessions []protocol.SessionInfo, parentID string) []protocol.
 	return result
 }
 
-func formatAgentStatus(s protocol.SessionInfo) string {
+func formatAgentStatus(s protocol.SessionInfo, colorOn bool) string {
 	agentStatus := s.AgentStatus
 	if s.Status != "running" {
-		agentStatus = ""
+		return ""
 	}
 
+	if agentStatus == "" {
+		return ""
+	}
+
+	text := agentStatus
 	if agentStatus == "approval" {
-		agentStatus = "⚠ approval"
+		text = "⚠ approval"
 	} else if agentStatus == "active" && s.ToolName != "" {
-		agentStatus = fmt.Sprintf("active (%s)", s.ToolName)
+		text = fmt.Sprintf("active (%s)", s.ToolName)
 	}
 
-	return agentStatus
+	return colorize(text, client.AgentStatusColor(agentStatus), colorOn)
 }
 
 func formatModel(s protocol.SessionInfo) string {
@@ -391,6 +517,8 @@ func registerListCmd() {
 	listCmd.Flags().StringVar(&listChildren, "children", "", "filter to descendants of a session")
 	listCmd.Flags().BoolVar(&listStarred, "starred", false, "show only starred sessions")
 	listCmd.Flags().BoolVarP(&listQuiet, "quiet", "q", false, "output only session names (or IDs as JSON with --json)")
+	listCmd.Flags().BoolVar(&listWide, "wide", false, "show all columns (model, branch, attached)")
+	listCmd.Flags().BoolVar(&listNoColor, "no-color", false, "disable colored status output")
 
 	_ = listCmd.RegisterFlagCompletionFunc("repo", completeRepoPaths)
 	_ = listCmd.RegisterFlagCompletionFunc("children", completeSessionNames)
