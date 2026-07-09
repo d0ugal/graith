@@ -61,9 +61,13 @@ struct DeviceIdentityTests {
         // Each host presents its own device ID...
         #expect(scopedA.deviceID == "dev-A")
         #expect(scopedB.deviceID == "dev-B")
-        // ...but signs with the same underlying key.
+        // ...but signs with the same underlying key. ed25519 signatures from
+        // CryptoKit are non-deterministic (randomised), so we can't compare raw
+        // signature bytes — instead verify the scoped signer's signature against
+        // the base identity's public key, and confirm the public keys match.
         let nonce = Data("brig".utf8)
-        #expect(try scopedA.sign(nonce) == base.sign(nonce))
+        let basePub = try Curve25519.Signing.PublicKey(rawRepresentation: base.publicKeyRaw())
+        #expect(try basePub.isValidSignature(scopedA.sign(nonce), for: nonce))
         #expect(try scopedA.publicKeyRaw() == base.publicKeyRaw())
 
         // And the proof carries the scoped ID.
