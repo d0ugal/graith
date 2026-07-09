@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.66.6](https://github.com/d0ugal/graith/compare/v0.66.5...v0.66.6) (2026-07-09)
+
+
+### Features
+
+* **gui:** universal iOS + macOS app on libghostty over Tailscale ([#628](https://github.com/d0ugal/graith/issues/628)) ([bbcff8e](https://github.com/d0ugal/graith/commit/bbcff8e803382c7d37f9fc4e8c32951c574e2b64))
+
+
+### Bug Fixes
+
+* bump go patch version for tls advisory ([f35394e](https://github.com/d0ugal/graith/commit/f35394ec5028fdd4f22eb6f3e28df09818712cc9))
+* remove pty approval scraping ([92025b1](https://github.com/d0ugal/graith/commit/92025b1b519923a78d42ca6c27583cf48aedf908))
+* update module github.com/coder/websocket to v1.8.15 ([f22c17c](https://github.com/d0ugal/graith/commit/f22c17c0bac1292e9f24a72cd260e1af4a32a576))
+* update module github.com/creachadair/msync to v0.9.1 ([64670fc](https://github.com/d0ugal/graith/commit/64670fce91bd39c1b05ccf59ea14e757147f6a28))
+* update module github.com/fxamacker/cbor/v2 to v2.9.2 ([f62220d](https://github.com/d0ugal/graith/commit/f62220d9bd6eaa74d28b02b0e0c8f0ac824c7185))
+* update module github.com/gaissmai/bart to v0.28.0 ([438aafc](https://github.com/d0ugal/graith/commit/438aafc0dfdc55a9f3ffa884e16a47400d576bbb))
+* update module github.com/jsimonetti/rtnetlink to v1.4.2 ([5ed1a27](https://github.com/d0ugal/graith/commit/5ed1a27cfc6a0c4335d0390622d5099ab7ee0fe4))
+* update module modernc.org/libc to v1.74.1 ([cee270a](https://github.com/d0ugal/graith/commit/cee270ae11db1b9a6434e8846439aab723e9af70))
+
 ## [0.66.5](https://github.com/d0ugal/graith/compare/v0.66.4...v0.66.5) (2026-07-08)
 
 
