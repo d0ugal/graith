@@ -454,39 +454,35 @@ func TestDiffAndBuild_PRCommentAwarenessFraming(t *testing.T) {
 // the disabled surface's cursor is kept current (baselined) so enabling it
 // later doesn't dump backlog.
 func TestDiffAndBuild_CommentGatesIndependent(t *testing.T) {
-	// Review comments ON, PR comments OFF.
-	t.Run("review-only", func(t *testing.T) {
-		sm := newPRWatchSM()
-		cfg := &config.PRWatchConfig{Enabled: true, NotifyReviewComments: true, NotifyPRComments: false, Debounce: "0s"}
-		t1 := prWatchTarget{id: "canny", branch: "canny"}
-		sm.diffAndBuild(cfg, t1, "croft/loch", prData{Number: 1, State: "open", HeadRefOid: "sha1", CIState: "passing", CommentsOK: true})
+	cases := []struct {
+		name         string
+		id           string
+		reviewOn     bool
+		prOn         bool
+		wantContains string // marker for the surface that should notify
+	}{
+		{"review-only", "canny", true, false, "inline code-review"},
+		{"pr-only", "ken", false, true, "conversation"},
+	}
 
-		out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
-			Number: 1, State: "open", HeadRefOid: "sha1", CIState: "passing", CommentsOK: true,
-			IssueComments:  []ghComment{{ID: 10, User: ghUser{Login: "hamish"}, Body: "ship it"}},
-			ReviewComments: []ghComment{{ID: 20, User: ghUser{Login: "ailsa"}, Body: "nit", Path: "a.go", Line: 4}},
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sm := newPRWatchSM()
+			cfg := &config.PRWatchConfig{Enabled: true, NotifyReviewComments: tc.reviewOn, NotifyPRComments: tc.prOn, Debounce: "0s"}
+			t1 := prWatchTarget{id: tc.id, branch: tc.id}
+			sm.diffAndBuild(cfg, t1, "croft/loch", prData{Number: 1, State: "open", HeadRefOid: "sha1", CIState: "passing", CommentsOK: true})
+
+			// Both surfaces have a new comment; only the enabled gate should fire.
+			out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+				Number: 1, State: "open", HeadRefOid: "sha1", CIState: "passing", CommentsOK: true,
+				IssueComments:  []ghComment{{ID: 10, User: ghUser{Login: "hamish"}, Body: "ship it"}},
+				ReviewComments: []ghComment{{ID: 20, User: ghUser{Login: "ailsa"}, Body: "nit", Path: "a.go", Line: 4}},
+			})
+			if len(out) != 1 || !strings.Contains(out[0], tc.wantContains) {
+				t.Fatalf("only the %s comment should notify, got %v", tc.wantContains, out)
+			}
 		})
-		if len(out) != 1 || !strings.Contains(out[0], "inline code-review") {
-			t.Fatalf("only the inline review comment should notify, got %v", out)
-		}
-	})
-
-	// PR comments ON, review comments OFF.
-	t.Run("pr-only", func(t *testing.T) {
-		sm := newPRWatchSM()
-		cfg := &config.PRWatchConfig{Enabled: true, NotifyReviewComments: false, NotifyPRComments: true, Debounce: "0s"}
-		t1 := prWatchTarget{id: "ken", branch: "ken"}
-		sm.diffAndBuild(cfg, t1, "croft/loch", prData{Number: 2, State: "open", HeadRefOid: "sha1", CIState: "passing", CommentsOK: true})
-
-		out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
-			Number: 2, State: "open", HeadRefOid: "sha1", CIState: "passing", CommentsOK: true,
-			IssueComments:  []ghComment{{ID: 10, User: ghUser{Login: "hamish"}, Body: "ship it"}},
-			ReviewComments: []ghComment{{ID: 20, User: ghUser{Login: "ailsa"}, Body: "nit", Path: "a.go", Line: 4}},
-		})
-		if len(out) != 1 || !strings.Contains(out[0], "conversation") {
-			t.Fatalf("only the PR conversation comment should notify, got %v", out)
-		}
-	})
+	}
 }
 
 // TestDiffAndBuild_BothGatesSamePollDefersNotDrops covers the new interaction

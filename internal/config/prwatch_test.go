@@ -51,6 +51,7 @@ func TestPRWatchCommentCompat(t *testing.T) {
 
 		dir := t.TempDir()
 		path := filepath.Join(dir, "config.toml")
+
 		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 			t.Fatal(err)
 		}
