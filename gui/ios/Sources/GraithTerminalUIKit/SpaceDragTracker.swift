@@ -1,75 +1,107 @@
 import CoreGraphics
 import GraithClientAPI
 
-/// Pure state machine that turns a drag on the on-screen space key into a run of
-/// arrow-key emissions (issue #979). Kept free of UIKit so it can be unit-tested
-/// off-device — the UIKit `KeyboardAccessoryView` owns the gesture recognizer and
-/// feeds translations in, exactly the "extract the pure logic and cover that"
-/// approach the project's testing guidance calls for.
+/// Pure state machine that turns a drag on the on-screen space key into arrow-key
+/// emissions (issue #979). Kept free of UIKit so it can be unit-tested off-device
+/// — the UIKit `KeyboardAccessoryView` owns the gesture recognizer plus a repeat
+/// timer and feeds translations + timestamps in, exactly the "extract the pure
+/// logic and cover that" approach the project's testing guidance calls for.
 ///
-/// Behaviour: holding the space key and dragging moves a cursor through the
-/// terminal. The dominant drag axis selects the direction (up/down/left/right),
-/// and every `threshold` points of travel emits one more arrow key — so a short
-/// flick sends a single arrow and a long continuous drag sends a run of them.
-/// If any arrow is emitted the drag is "committed": the space character is
-/// suppressed on release (`didEmit`), so a plain tap still types a space.
+/// Behaviour models a physical arrow key rather than a scroll wheel: holding the
+/// space key and dragging in a direction sends **one** arrow immediately. Keep
+/// holding in that direction and, after `initialRepeatDelay`, it starts repeating
+/// every `repeatInterval` — the same press → pause → repeat cadence as holding a
+/// key on a hardware keyboard. Changing direction sends one arrow the new way and
+/// restarts the repeat delay. Releasing (via `begin()` on the next drag) resets
+/// everything. If any arrow is emitted the drag is "committed" (`didEmit`), so the
+/// caller suppresses the space character on release; a plain tap still types a
+/// space.
 public struct SpaceDragTracker {
-    /// Points of travel per emitted arrow key.
-    public let threshold: CGFloat
+    /// Points of travel from the drag origin before a direction registers. Keeps a
+    /// tap or tiny jitter from being read as navigation.
+    public let activationThreshold: CGFloat
 
-    /// The reference point the next emission is measured from, in the gesture's
-    /// translation space (translation is relative to the drag's start). Advances
-    /// by `threshold` along the emitted axis on each emission.
-    private var anchor: CGPoint = .zero
+    /// Seconds a direction must be held before the first auto-repeat fires.
+    public let initialRepeatDelay: Double
+
+    /// Seconds between auto-repeats once repeating has started.
+    public let repeatInterval: Double
+
+    /// The direction currently "held" (nil when the finger is within the
+    /// activation threshold of the origin, i.e. no key pressed).
+    private var heldDirection: TerminalKey?
+
+    /// Timestamp of the most recent emission in the held direction.
+    private var lastEmit: Double = 0
+
+    /// True until the first auto-repeat fires, so the initial (longer) delay is
+    /// used once and the faster interval thereafter.
+    private var awaitingFirstRepeat = true
 
     /// True once at least one arrow has been emitted this drag, so the caller
     /// knows to suppress the space character on release.
     public private(set) var didEmit = false
 
-    public init(threshold: CGFloat = 22) {
-        self.threshold = max(1, threshold)
+    public init(activationThreshold: CGFloat = 22,
+                initialRepeatDelay: Double = 0.5,
+                repeatInterval: Double = 0.1) {
+        self.activationThreshold = max(1, activationThreshold)
+        self.initialRepeatDelay = max(0, initialRepeatDelay)
+        self.repeatInterval = max(0.001, repeatInterval)
     }
 
     /// Begin a fresh drag (call on gesture `.began`).
     public mutating func begin() {
-        anchor = .zero
+        heldDirection = nil
+        lastEmit = 0
+        awaitingFirstRepeat = true
         didEmit = false
     }
 
-    /// Feed the current translation from the drag's start point (gesture
-    /// `.changed`). Returns the arrow keys crossed since the last call — none,
-    /// one, or several for a fast drag that spanned multiple thresholds.
-    public mutating func update(translation: CGPoint) -> [TerminalKey] {
-        var keys: [TerminalKey] = []
-        // Emit one arrow per `threshold` of travel. Re-evaluate the dominant axis
-        // each step so a curving drag follows direction changes; every emission
-        // shrinks the remaining offset by `threshold`, so this always terminates.
-        while true {
-            let dx = translation.x - anchor.x
-            let dy = translation.y - anchor.y
-            if abs(dx) >= abs(dy) {
-                if dx >= threshold {
-                    keys.append(.arrowRight)
-                    anchor.x += threshold
-                } else if dx <= -threshold {
-                    keys.append(.arrowLeft)
-                    anchor.x -= threshold
-                } else {
-                    break
-                }
-            } else {
-                if dy >= threshold {
-                    keys.append(.arrowDown)
-                    anchor.y += threshold
-                } else if dy <= -threshold {
-                    keys.append(.arrowUp)
-                    anchor.y -= threshold
-                } else {
-                    break
-                }
-            }
+    /// Feed the current translation from the drag's start point plus the current
+    /// time (seconds). Call on gesture `.changed` and on each repeat-timer tick.
+    /// Returns at most one arrow key: the initial press when a direction is first
+    /// entered or changed, or an auto-repeat once the direction has been held past
+    /// the delay. Returns none while below the activation threshold or between
+    /// repeats.
+    public mutating func update(translation: CGPoint, time: Double) -> [TerminalKey] {
+        let target = direction(for: translation)
+
+        // Direction changed (including entering a direction from neutral): a fresh
+        // press. Emit one arrow now and restart the repeat delay.
+        if target != heldDirection {
+            heldDirection = target
+            guard let key = target else { return [] }
+            lastEmit = time
+            awaitingFirstRepeat = true
+            didEmit = true
+            return [key]
         }
-        if !keys.isEmpty { didEmit = true }
-        return keys
+
+        // Same direction still held: auto-repeat once enough time has elapsed.
+        guard let key = heldDirection else { return [] }
+        let delay = awaitingFirstRepeat ? initialRepeatDelay : repeatInterval
+        if time - lastEmit >= delay {
+            lastEmit = time
+            awaitingFirstRepeat = false
+            didEmit = true
+            return [key]
+        }
+        return []
+    }
+
+    /// The arrow implied by a translation, or nil if the finger is still within
+    /// the activation threshold of the origin. The dominant axis wins; because the
+    /// larger component decides direction, whenever either component clears the
+    /// threshold the dominant one has too.
+    private func direction(for translation: CGPoint) -> TerminalKey? {
+        let ax = abs(translation.x)
+        let ay = abs(translation.y)
+        if ax < activationThreshold && ay < activationThreshold { return nil }
+        if ax >= ay {
+            return translation.x >= 0 ? .arrowRight : .arrowLeft
+        } else {
+            return translation.y >= 0 ? .arrowDown : .arrowUp
+        }
     }
 }

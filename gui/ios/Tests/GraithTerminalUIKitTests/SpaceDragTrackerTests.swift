@@ -5,23 +5,28 @@ import GraithClientAPI
 
 /// Covers the space-drag → arrow-key state machine (issue #979). This is the
 /// pure logic behind the UIKit gesture, extracted so it can be tested without a
-/// real `UILongPressGestureRecognizer`.
+/// real `UILongPressGestureRecognizer`. The model is a held hardware arrow key:
+/// one press per direction, a delay, then auto-repeat while held.
 final class SpaceDragTrackerTests: XCTestCase {
 
     func testStationaryTapEmitsNothingAndDoesNotCommit() {
-        var tracker = SpaceDragTracker(threshold: 22)
+        var tracker = SpaceDragTracker(activationThreshold: 22)
         tracker.begin()
-        XCTAssertTrue(tracker.update(translation: .zero).isEmpty)
+        XCTAssertTrue(tracker.update(translation: .zero, time: 0).isEmpty)
         // Sub-threshold jitter still must not commit — a tap types a space.
-        XCTAssertTrue(tracker.update(translation: CGPoint(x: 5, y: 5)).isEmpty)
+        XCTAssertTrue(tracker.update(translation: CGPoint(x: 5, y: 5), time: 0.1).isEmpty)
         XCTAssertFalse(tracker.didEmit, "a tap must leave the drag uncommitted so space is typed")
     }
 
-    func testShortDragEmitsOneArrowAndCommits() {
-        var tracker = SpaceDragTracker(threshold: 22)
+    func testDragEmitsExactlyOneArrowAndCommits() {
+        var tracker = SpaceDragTracker(activationThreshold: 22)
         tracker.begin()
-        XCTAssertEqual(tracker.update(translation: CGPoint(x: 25, y: 0)), [.arrowRight])
+        XCTAssertEqual(tracker.update(translation: CGPoint(x: 25, y: 0), time: 0), [.arrowRight])
         XCTAssertTrue(tracker.didEmit, "emitting an arrow commits the drag (suppresses space)")
+        // Dragging further in the same direction does NOT emit more arrows — the
+        // model is a key press, not a scroll wheel.
+        XCTAssertTrue(tracker.update(translation: CGPoint(x: 200, y: 0), time: 0.05).isEmpty,
+                      "extra travel in the held direction must not emit more arrows")
     }
 
     func testEachDirectionMapsToTheExpectedArrow() {
@@ -33,64 +38,88 @@ final class SpaceDragTrackerTests: XCTestCase {
             (CGPoint(x: 0, y: -30), .arrowUp),
         ]
         for (translation, expected) in cases {
-            var tracker = SpaceDragTracker(threshold: 22)
+            var tracker = SpaceDragTracker(activationThreshold: 22)
             tracker.begin()
-            XCTAssertEqual(tracker.update(translation: translation), [expected],
+            XCTAssertEqual(tracker.update(translation: translation, time: 0), [expected],
                            "translation \(translation) should map to \(expected)")
         }
     }
 
-    func testContinuousDragEmitsRepeatedArrows() {
-        var tracker = SpaceDragTracker(threshold: 20)
+    func testHoldingRepeatsAfterInitialDelayThenAtInterval() {
+        var tracker = SpaceDragTracker(activationThreshold: 22,
+                                       initialRepeatDelay: 0.5,
+                                       repeatInterval: 0.1)
         tracker.begin()
-        XCTAssertEqual(tracker.update(translation: CGPoint(x: 65, y: 0)),
-                       [.arrowRight, .arrowRight, .arrowRight],
-                       "65pt over a 20pt threshold crosses three thresholds")
+        let held = CGPoint(x: 30, y: 0)
+        XCTAssertEqual(tracker.update(translation: held, time: 0.0), [.arrowRight], "initial press")
+        XCTAssertTrue(tracker.update(translation: held, time: 0.4).isEmpty,
+                      "no repeat before the initial delay elapses")
+        XCTAssertEqual(tracker.update(translation: held, time: 0.5), [.arrowRight],
+                       "first repeat fires at the initial delay")
+        XCTAssertTrue(tracker.update(translation: held, time: 0.55).isEmpty,
+                      "no repeat before the faster interval elapses")
+        XCTAssertEqual(tracker.update(translation: held, time: 0.65), [.arrowRight],
+                       "subsequent repeats fire at the repeat interval")
     }
 
-    func testIncrementalUpdatesOnlyEmitNewlyCrossedThresholds() {
-        var tracker = SpaceDragTracker(threshold: 20)
+    func testChangingDirectionEmitsOneArrowAndRestartsTheDelay() {
+        var tracker = SpaceDragTracker(activationThreshold: 22,
+                                       initialRepeatDelay: 0.5,
+                                       repeatInterval: 0.1)
         tracker.begin()
-        XCTAssertEqual(tracker.update(translation: CGPoint(x: 25, y: 0)), [.arrowRight])
-        XCTAssertEqual(tracker.update(translation: CGPoint(x: 45, y: 0)), [.arrowRight])
-        XCTAssertTrue(tracker.update(translation: CGPoint(x: 50, y: 0)).isEmpty,
-                      "a sub-threshold advance from the last emission emits nothing")
+        XCTAssertEqual(tracker.update(translation: CGPoint(x: 30, y: 0), time: 0.0), [.arrowRight])
+        // Change direction well before any repeat would have fired: one immediate
+        // arrow the new way.
+        XCTAssertEqual(tracker.update(translation: CGPoint(x: 0, y: 30), time: 0.05), [.arrowDown],
+                       "a direction change presses the new arrow immediately")
+        // The repeat delay restarts for the new direction.
+        XCTAssertTrue(tracker.update(translation: CGPoint(x: 0, y: 30), time: 0.4).isEmpty,
+                      "changing direction restarts the initial repeat delay")
+        XCTAssertEqual(tracker.update(translation: CGPoint(x: 0, y: 30), time: 0.55), [.arrowDown])
     }
 
-    func testReversingDirectionEmitsTheOppositeArrow() {
-        var tracker = SpaceDragTracker(threshold: 20)
+    func testReturningToCentreStopsRepeatAndReleasesTheKey() {
+        var tracker = SpaceDragTracker(activationThreshold: 22,
+                                       initialRepeatDelay: 0.5,
+                                       repeatInterval: 0.1)
         tracker.begin()
-        XCTAssertEqual(tracker.update(translation: CGPoint(x: 40, y: 0)),
-                       [.arrowRight, .arrowRight])
-        // Drag back left past the anchor: now two thresholds to the left of the
-        // last emission point (40 → 0 is 40pt of travel back).
-        XCTAssertEqual(tracker.update(translation: CGPoint(x: 0, y: 0)),
-                       [.arrowLeft, .arrowLeft])
+        XCTAssertEqual(tracker.update(translation: CGPoint(x: 30, y: 0), time: 0.0), [.arrowRight])
+        // Finger drifts back within the threshold: key released, nothing repeats.
+        XCTAssertTrue(tracker.update(translation: CGPoint(x: 5, y: 0), time: 1.0).isEmpty,
+                      "returning within the activation threshold releases the key")
+        // Pushing back out is a fresh press.
+        XCTAssertEqual(tracker.update(translation: CGPoint(x: 30, y: 0), time: 1.05), [.arrowRight],
+                       "re-crossing the threshold is a new press")
     }
 
-    func testDominantAxisWinsPerStep() {
-        var tracker = SpaceDragTracker(threshold: 20)
+    func testDominantAxisWins() {
+        var tracker = SpaceDragTracker(activationThreshold: 22)
         tracker.begin()
-        XCTAssertEqual(tracker.update(translation: CGPoint(x: 5, y: 30)), [.arrowDown],
+        XCTAssertEqual(tracker.update(translation: CGPoint(x: 5, y: 30), time: 0), [.arrowDown],
                        "a mostly-vertical drag reads as vertical")
     }
 
-    func testBeginResetsCommittedState() {
-        var tracker = SpaceDragTracker(threshold: 20)
+    func testBeginResetsState() {
+        var tracker = SpaceDragTracker(activationThreshold: 22)
         tracker.begin()
-        _ = tracker.update(translation: CGPoint(x: 40, y: 0))
+        _ = tracker.update(translation: CGPoint(x: 40, y: 0), time: 0)
         XCTAssertTrue(tracker.didEmit)
         tracker.begin()
         XCTAssertFalse(tracker.didEmit, "begin() must clear the committed flag for reuse")
-        XCTAssertTrue(tracker.update(translation: CGPoint(x: 5, y: 0)).isEmpty,
-                      "and reset the anchor so travel is measured from the new start")
+        XCTAssertTrue(tracker.update(translation: CGPoint(x: 5, y: 0), time: 0).isEmpty,
+                      "and reset so sub-threshold travel from the new start emits nothing")
     }
 
-    func testThresholdIsClampedToAtLeastOne() {
-        var tracker = SpaceDragTracker(threshold: 0)
+    func testActivationThresholdIsClampedToAtLeastOne() {
+        var tracker = SpaceDragTracker(activationThreshold: 0)
+        XCTAssertEqual(tracker.activationThreshold, 1, "a zero threshold is clamped to 1")
         tracker.begin()
-        // A zero threshold would loop forever; the initializer clamps it to 1.
-        let keys = tracker.update(translation: CGPoint(x: 3, y: 0))
-        XCTAssertEqual(keys, [.arrowRight, .arrowRight, .arrowRight])
+        XCTAssertEqual(tracker.update(translation: CGPoint(x: 1, y: 0), time: 0), [.arrowRight])
+    }
+
+    func testRepeatIntervalIsClampedAwayFromZero() {
+        // A zero interval would fire on every tick; the initializer floors it.
+        let tracker = SpaceDragTracker(repeatInterval: 0)
+        XCTAssertGreaterThan(tracker.repeatInterval, 0)
     }
 }
