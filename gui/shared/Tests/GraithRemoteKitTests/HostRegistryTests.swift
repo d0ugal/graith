@@ -70,6 +70,18 @@ struct HostRegistryTests {
         #expect(registry.credentials(for: host) == nil)
     }
 
+    @Test func completePairingThrowsForUnknownHostWithoutOrphaningToken() {
+        // If the placeholder was forgotten before confirmation, completePairing
+        // must not write a token that no host references.
+        let store = InMemorySecretStore()
+        let (registry, _) = makeRegistry(store: store)
+        let resp = makePairResponse(deviceID: "dev", clientToken: "tok", tlsPinSPKI: "cGlu")
+        #expect(throws: HostRegistryError.self) {
+            try registry.completePairing(hostID: "ghost", response: resp)
+        }
+        #expect((try? store.string(for: "host.ghost.clientToken")) == nil)
+    }
+
     @Test func removeWipesToken() {
         let store = InMemorySecretStore()
         let (registry, _) = makeRegistry(store: store)

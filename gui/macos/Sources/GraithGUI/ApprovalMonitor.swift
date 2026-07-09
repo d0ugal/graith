@@ -95,17 +95,28 @@ final class ApprovalMonitor: ObservableObject {
     }
 
     /// Merge every host's pending approvals into one list + fire banners for
-    /// newly-arrived requests.
+    /// newly-arrived requests. Notification identity is keyed by
+    /// `hostID:requestID` — request IDs are daemon-local, so two hosts can mint
+    /// the same one, and a bare-requestID key would let one host's approval
+    /// suppress the other's banner (and collide as a SwiftUI id).
     private func recomputePending() {
-        let merged = store.hostClients.flatMap { pendingByHost[$0.host.id] ?? [] }
+        var merged: [ApprovalInfo] = []
+        var currentKeys = Set<String>()
+        var fresh: [(hostID: String, approval: ApprovalInfo)] = []
+        for entry in store.hostClients {
+            let hostID = entry.host.id
+            for approval in pendingByHost[hostID] ?? [] {
+                merged.append(approval)
+                let key = "\(hostID):\(approval.requestID)"
+                currentKeys.insert(key)
+                if !notified.contains(key) { fresh.append((hostID, approval)) }
+            }
+        }
         self.pending = merged
         updateDockBadge(count: merged.count)
-
-        let currentIDs = Set(merged.map(\.requestID))
-        let fresh = merged.filter { !notified.contains($0.requestID) }
-        notified = currentIDs
-        for approval in fresh {
-            postNotification(for: approval)
+        notified = currentKeys
+        for item in fresh {
+            postNotification(for: item.approval, hostID: item.hostID)
         }
     }
 
@@ -124,18 +135,21 @@ final class ApprovalMonitor: ObservableObject {
         }
     }
 
-    private func postNotification(for approval: ApprovalInfo) {
+    private func postNotification(for approval: ApprovalInfo, hostID: String) {
         guard canUseNotifications, notificationsReady else { return }
         let content = UNMutableNotificationContent()
         content.title = "Approval needed — \(approval.sessionName)"
         content.body = "\(approval.agent) wants to run \(approval.toolName)"
         content.sound = .default
         content.userInfo = [
+            "hostID": hostID,
             "sessionID": approval.sessionID,
             "requestID": approval.requestID,
         ]
+        // Composite identifier so two hosts with the same daemon-local request
+        // id don't overwrite each other's banner.
         let request = UNNotificationRequest(
-            identifier: approval.requestID,
+            identifier: "\(hostID):\(approval.requestID)",
             content: content,
             trigger: nil
         )

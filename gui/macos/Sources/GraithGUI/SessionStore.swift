@@ -128,6 +128,12 @@ class SessionStore: ObservableObject {
 
     private var timer: Timer?
     private var refreshGeneration: UInt64 = 0
+    /// Guards against overlapping refresh passes piling up when a host is slow:
+    /// the 2s timer skips a tick while one refresh is still in flight.
+    private var isRefreshing = false
+    /// Per-host list() deadline — a host that connects but never replies fails
+    /// closed after this rather than wedging the whole refresh forever.
+    private let hostRefreshTimeout: Double = 12.0
     private var cancellables = Set<AnyCancellable>()
 
     /// Production initializer: builds clients from the registry.
@@ -171,7 +177,8 @@ class SessionStore: ObservableObject {
         var next: [String: GraithProtocolClient] = [:]
         var builds: [String: Host] = [:]
         for host in registry.hosts {
-            if let existing = clients[host.id], builtFrom[host.id] == host {
+            if let existing = clients[host.id], let prev = builtFrom[host.id],
+               Self.connectionUnchanged(prev, host) {
                 next[host.id] = existing
                 builds[host.id] = host
                 continue
@@ -186,6 +193,16 @@ class SessionStore: ObservableObject {
         }
         clients = next
         builtFrom = builds
+    }
+
+    /// Whether two host records describe the *same connection*, so a cached
+    /// client can be reused. Deliberately ignores display-only fields (label,
+    /// `lastSeen`) — otherwise a future `markSeen()` tick would tear down and
+    /// re-dial every remote client each refresh.
+    private static func connectionUnchanged(_ a: Host, _ b: Host) -> Bool {
+        a.id == b.id && a.kind == b.kind && a.transport == b.transport
+            && a.daemonProfile == b.daemonProfile && a.deviceID == b.deviceID
+            && a.isPaired == b.isPaired
     }
 
     private func makeClient(for host: Host) -> GraithProtocolClient? {
@@ -413,23 +430,28 @@ class SessionStore: ObservableObject {
     }
 
     /// Refresh the session list from every connected host, merging the results.
-    /// Hosts are queried concurrently so one slow/unreachable remote can't stall
-    /// the others (or the local daemon). A generation counter drops stale
-    /// responses if several passes are in flight.
+    /// Hosts are queried concurrently, each under a deadline, so one
+    /// slow/unreachable remote can't stall the others (or the local daemon).
+    /// Overlapping passes are skipped, and a generation counter drops any stale
+    /// response.
     func refresh() {
+        guard !isRefreshing else { return }
+        isRefreshing = true
         refreshGeneration &+= 1
         let gen = refreshGeneration
         let ordered = registry.hosts.compactMap { host -> (id: String, client: GraithProtocolClient)? in
             guard let client = clients[host.id] else { return nil }
             return (host.id, client)
         }
+        let timeout = hostRefreshTimeout
         Task {
-            // Fan out one list() per host; each result is tagged with its host id.
+            defer { isRefreshing = false }
+            // Fan out one list() per host; each result is tagged with its host id
+            // and bounded by a per-host deadline.
             let results = await withTaskGroup(of: (String, Result<[Session], Error>).self) { group in
                 for entry in ordered {
                     group.addTask {
-                        do { return (entry.id, .success(try await entry.client.list())) }
-                        catch { return (entry.id, .failure(error)) }
+                        (entry.id, await Self.listWithTimeout(entry.client, seconds: timeout))
                     }
                 }
                 var byHost: [String: Result<[Session], Error>] = [:]
@@ -463,10 +485,41 @@ class SessionStore: ObservableObject {
             self.error = errors["local"]
             // Drop attach ownership for sessions that no longer exist (or whose
             // owning window has gone) so nothing wedges a session as "open
-            // elsewhere".
+            // elsewhere". Only reassign when something was actually pruned, so
+            // the steady state doesn't fire a redundant objectWillChange each
+            // poll.
             let live = Set(merged.map(\.id))
-            attachOwners = attachOwners.filter { live.contains($0.key) && $0.value.window != nil }
+            let pruned = attachOwners.filter { live.contains($0.key) && $0.value.window != nil }
+            if pruned.count != attachOwners.count { attachOwners = pruned }
         }
+    }
+
+    /// Run `client.list()` under a deadline. Returns the sessions on success,
+    /// or a failure (the daemon error, or a timeout) so a host that connects but
+    /// never replies is isolated to its own entry instead of wedging refresh.
+    private static func listWithTimeout(_ client: GraithProtocolClient, seconds: Double) async -> Result<[Session], Error> {
+        await withTaskGroup(of: Result<[Session], Error>?.self) { group in
+            group.addTask {
+                do { return .success(try await client.list()) }
+                catch { return .failure(error) }
+            }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                return nil // timeout sentinel
+            }
+            defer { group.cancelAll() }
+            // First task to finish wins: a real Result from list(), or the nil
+            // timeout sentinel.
+            for await outcome in group {
+                if let outcome { return outcome }
+                return .failure(RefreshTimeout())
+            }
+            return .failure(RefreshTimeout())
+        }
+    }
+
+    struct RefreshTimeout: LocalizedError {
+        var errorDescription: String? { "timed out" }
     }
 
     /// Run a mutating action against the session's owning host client, then
