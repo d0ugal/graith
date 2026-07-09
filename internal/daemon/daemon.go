@@ -2163,8 +2163,9 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	if isOrchestrator {
 		sm.mu.RLock()
 		orchCfg := sm.cfg.Orchestrator
+		repoPaths := sm.cfg.AvailableRepoPaths()
 		sm.mu.RUnlock()
-		promptArgs := sm.buildOrchestratorPrompt(sessAgent, orchCfg)
+		promptArgs := sm.buildOrchestratorPrompt(sessAgent, orchCfg, repoPaths)
 		expandedArgs = append(expandedArgs, promptArgs...)
 	} else if agent.PromptInjectionEnabled() {
 		promptArgs, err := sm.injectPrompt(sessAgent, sessWorktreePath)

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/d0ugal/graith/internal/config"
@@ -151,7 +152,7 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 		return SessionState{}, fmt.Errorf("expand orchestrator agent args: %w", err)
 	}
 
-	promptArgs := sm.buildOrchestratorPrompt(agentName, orchCfg)
+	promptArgs := sm.buildOrchestratorPrompt(agentName, orchCfg, cfgSnap.AvailableRepoPaths())
 	expandedArgs = append(expandedArgs, promptArgs...)
 
 	logPath := filepath.Join(sm.paths.LogDir, id+".log")
@@ -283,7 +284,7 @@ func (sm *SessionManager) rollbackOrchestratorCreate(id string) {
 	_ = os.Remove(sm.safehouseFragmentPath(id))
 }
 
-func (sm *SessionManager) buildOrchestratorPrompt(agentName string, orchCfg config.OrchestratorConfig) []string {
+func (sm *SessionManager) buildOrchestratorPrompt(agentName string, orchCfg config.OrchestratorConfig, repoPaths []string) []string {
 	if agentName != "claude" {
 		return nil
 	}
@@ -305,11 +306,41 @@ func (sm *SessionManager) buildOrchestratorPrompt(agentName string, orchCfg conf
 		}
 	}
 
+	if section := orchestratorRepoPathsSection(repoPaths); section != "" {
+		if prompt != "" {
+			prompt += "\n\n"
+		}
+
+		prompt += section
+	}
+
 	if prompt == "" {
 		return nil
 	}
 
 	return []string{"--append-system-prompt", prompt}
+}
+
+// orchestratorRepoPathsSection renders the configured repo paths as a prompt
+// section so the orchestrator is told which repos are available instead of
+// having to discover them. It returns "" when no repo paths are configured.
+func orchestratorRepoPathsSection(repoPaths []string) string {
+	if len(repoPaths) == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+
+	b.WriteString("## Available repositories\n\n")
+	b.WriteString("These repository paths are configured and available for you to use with `gr new --repo <path>`:\n\n")
+
+	for _, p := range repoPaths {
+		b.WriteString("- ")
+		b.WriteString(p)
+		b.WriteString("\n")
+	}
+
+	return b.String()
 }
 
 func (sm *SessionManager) ensureOrchestrator(ctx context.Context) {

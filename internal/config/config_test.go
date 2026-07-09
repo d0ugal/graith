@@ -1289,6 +1289,45 @@ func TestFindRepo(t *testing.T) {
 	})
 }
 
+func TestAvailableRepoPaths(t *testing.T) {
+	home, _ := os.UserHomeDir()
+
+	t.Run("empty config", func(t *testing.T) {
+		cfg := &Config{}
+		if got := cfg.AvailableRepoPaths(); got != nil {
+			t.Errorf("expected nil for empty config, got %v", got)
+		}
+	})
+
+	t.Run("allowed paths and repos combined, deduped, ~ expanded", func(t *testing.T) {
+		cfg := &Config{
+			AllowedRepoPaths: []string{"~/Code/croft", "/glen/bothy"},
+			Repos: []RepoConfig{
+				{Path: "/glen/bothy"}, // duplicate of an allowed path
+				{Path: "~/Code/clachan"},
+			},
+		}
+
+		got := cfg.AvailableRepoPaths()
+		want := []string{
+			filepath.Join(home, "Code", "croft"),
+			"/glen/bothy",
+			filepath.Join(home, "Code", "clachan"),
+		}
+
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("AvailableRepoPaths() = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("repos only", func(t *testing.T) {
+		cfg := &Config{Repos: []RepoConfig{{Path: "/glen/croft"}}}
+		if got := cfg.AvailableRepoPaths(); !reflect.DeepEqual(got, []string{"/glen/croft"}) {
+			t.Errorf("AvailableRepoPaths() = %v, want [/glen/croft]", got)
+		}
+	})
+}
+
 func TestDefaultParsesEmbeddedTOML(t *testing.T) {
 	cfg := Default()
 	if cfg.DefaultAgent != "claude" {
