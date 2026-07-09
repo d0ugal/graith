@@ -711,6 +711,8 @@ var prefixKeyOpts = PassthroughOpts{
 		NewSession:          'c',
 		ForkSession:         'f',
 		OrchestratorSession: 'o',
+		RenameSession:       ',',
+		ScrollMode:          '[',
 	},
 }
 
@@ -767,6 +769,8 @@ func TestPrefixKeyActions2(t *testing.T) {
 		{"new", 'c', ResultNewSession},
 		{"fork", 'f', ResultForkSession},
 		{"orchestrator", 'o', ResultOrchestratorSession},
+		{"rename", ',', ResultRenameSession},
+		{"scroll", '[', ResultScrollMode},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -874,13 +878,77 @@ func TestShowHelpBarReflectsConfiguredKeys(t *testing.T) {
 		PrevSession:         'P',
 		NewSession:          'C',
 		ForkSession:         'F',
+		RenameSession:       'M',
+		ScrollMode:          'B',
 	})
 
 	got := buf.String()
-	for _, want := range []string{"Q detach", "Z sessions", "V shell", "O orch", "L last", "N/P next/prev", "C new", "F fork"} {
+	for _, want := range []string{"Q detach", "Z sessions", "V shell", "O orch", "L last", "N/P next/prev", "C new", "F fork", "M rename", "B scroll"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("help bar missing %q; got %q", want, got)
 		}
+	}
+}
+
+// TestPrefixRenameScrollHonorConfiguredKeys is the regression test for #919:
+// rename_session and scroll_mode must be driven by their configured key bytes,
+// not hardcoded. It rebinds both to non-default keys and verifies the custom
+// keys trigger the actions while the default keys (',' / '[') no longer do.
+func TestPrefixRenameScrollHonorConfiguredKeys(t *testing.T) {
+	opts := PassthroughOpts{
+		Keys: PassthroughKeys{
+			Prefix:        0x02,
+			RenameSession: 'R',
+			ScrollMode:    'S',
+		},
+	}
+
+	run := func(t *testing.T, key byte) PassthroughResult {
+		t.Helper()
+
+		clientConn, daemonConn := net.Pipe()
+		defer func() { _ = daemonConn.Close() }()
+
+		c := newTestClient(clientConn)
+
+		go func() {
+			r := protocol.NewFrameReader(daemonConn)
+			for {
+				if _, err := r.ReadFrame(); err != nil {
+					return
+				}
+			}
+		}()
+
+		stdinR, stdinW := io.Pipe()
+		stdout := &lockedWriter{}
+
+		go func() {
+			time.Sleep(30 * time.Millisecond)
+			_, _ = stdinW.Write([]byte{0x02})
+			time.Sleep(10 * time.Millisecond)
+			_, _ = stdinW.Write([]byte{key})
+			// A default-key case falls through to the agent, so follow up with
+			// prefix+d to end the loop deterministically.
+			time.Sleep(20 * time.Millisecond)
+			_, _ = stdinW.Write([]byte{0x02, 'd'})
+		}()
+
+		return c.runPassthroughLoop(context.Background(), opts, stdinR, stdout, nil)
+	}
+
+	if got := run(t, 'R'); got != ResultRenameSession {
+		t.Fatalf("prefix+R = %d, want ResultRenameSession (%d)", got, ResultRenameSession)
+	}
+
+	if got := run(t, 'S'); got != ResultScrollMode {
+		t.Fatalf("prefix+S = %d, want ResultScrollMode (%d)", got, ResultScrollMode)
+	}
+
+	// The default keys are no longer bound, so they fall through and the loop
+	// only ends on the trailing prefix+d.
+	if got := run(t, ','); got != ResultDetached {
+		t.Fatalf("prefix+, with rename rebound = %d, want ResultDetached (%d)", got, ResultDetached)
 	}
 }
 

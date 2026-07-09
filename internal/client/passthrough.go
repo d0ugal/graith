@@ -31,6 +31,8 @@ const (
 	ResultApprovalOverlay
 	ResultOrchestratorSession
 	ResultMessageOverlay
+	ResultRenameSession
+	ResultScrollMode
 )
 
 // kittyCtrlSeq returns the Kitty keyboard protocol escape sequence for
@@ -173,7 +175,7 @@ func keyLabel(b byte) string {
 // about a remapped key. (m/a/r have no config field yet and stay literal.)
 func showHelpBar(w io.Writer, keys PassthroughKeys) {
 	help := fmt.Sprintf(
-		"\x1b[7m %s detach  %s sessions  m messages  a approvals  %s orch  %s last  %s/%s next/prev  %s new  %s fork  %s shell  r restart \x1b[0m",
+		"\x1b[7m %s detach  %s sessions  m messages  a approvals  %s orch  %s last  %s/%s next/prev  %s new  %s fork  %s rename  %s scroll  %s shell  r restart \x1b[0m",
 		keyLabel(keys.Detach),
 		keyLabel(keys.SessionList),
 		keyLabel(keys.OrchestratorSession),
@@ -182,6 +184,8 @@ func showHelpBar(w io.Writer, keys PassthroughKeys) {
 		keyLabel(keys.PrevSession),
 		keyLabel(keys.NewSession),
 		keyLabel(keys.ForkSession),
+		keyLabel(keys.RenameSession),
+		keyLabel(keys.ScrollMode),
 		keyLabel(keys.Shell),
 	)
 	_, _ = w.Write([]byte("\x1b7\x1b[999B\r\x1b[2K" + help + "\x1b8"))
@@ -214,6 +218,8 @@ type PassthroughKeys struct {
 	NewSession          byte
 	ForkSession         byte
 	OrchestratorSession byte
+	RenameSession       byte
+	ScrollMode          byte
 }
 
 type PassthroughOpts struct {
@@ -525,6 +531,12 @@ func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, s
 						return
 					case keys.OrchestratorSession:
 						setResult(ResultOrchestratorSession)
+						return
+					case keys.RenameSession:
+						setResult(ResultRenameSession)
+						return
+					case keys.ScrollMode:
+						setResult(ResultScrollMode)
 						return
 					default:
 						_ = c.SendData([]byte{prefixByte, key})

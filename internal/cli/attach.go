@@ -9,6 +9,7 @@ import (
 
 	"github.com/d0ugal/graith/internal/client"
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/daemon"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/spf13/cobra"
 )
@@ -83,6 +84,8 @@ func passthroughKeysFromConfig() client.PassthroughKeys {
 		NewSession:          parseKeyByte(cfg.Keybindings.NewSession),
 		ForkSession:         parseKeyByte(cfg.Keybindings.ForkSession),
 		OrchestratorSession: parseKeyByte(cfg.Keybindings.OrchestratorSession),
+		RenameSession:       parseKeyByte(cfg.Keybindings.RenameSession),
+		ScrollMode:          parseKeyByte(cfg.Keybindings.ScrollMode),
 	}
 }
 
@@ -869,6 +872,50 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 
 			continue
 
+		case client.ResultRenameSession:
+			newName := client.RunNameInput("Rename Session")
+			if newName != "" {
+				if err := renameSession(sessionID, newName); err != nil {
+					out.Printf("Rename failed: %s\n", err)
+				}
+			}
+
+			nc, err := freshClient()
+			if err != nil {
+				return err
+			}
+
+			restoreScreen(sessionID)
+			_ = nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+			attachResp, _ := nc.ReadControlResponse()
+			_ = protocol.DecodePayload(attachResp, &info)
+
+			opts.SessionID = sessionID
+			opts.Info = &info
+			c = nc
+
+			continue
+
+		case client.ResultScrollMode:
+			scrollback := client.FetchScrollback(cfg, paths, cfgFile, sessionID, 2000)
+			client.RunScrollView("Scrollback — "+info.Name, scrollback)
+
+			nc, err := freshClient()
+			if err != nil {
+				return err
+			}
+
+			restoreScreen(sessionID)
+			_ = nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+			attachResp, _ := nc.ReadControlResponse()
+			_ = protocol.DecodePayload(attachResp, &info)
+
+			opts.SessionID = sessionID
+			opts.Info = &info
+			c = nc
+
+			continue
+
 		case client.ResultDetached, client.ResultQuit:
 			resetTerminal()
 			return nil
@@ -1013,6 +1060,35 @@ func stopSession(sessionID string) error {
 	_ = sc.SendControl("stop", protocol.StopMsg{SessionID: sessionID})
 
 	resp, err := sc.ReadControlResponse()
+	if err != nil {
+		return err
+	}
+
+	if resp.Type == "error" {
+		var e protocol.ErrorMsg
+
+		_ = protocol.DecodePayload(resp, &e)
+
+		return fmt.Errorf("%s", e.Message)
+	}
+
+	return nil
+}
+
+func renameSession(sessionID, newName string) error {
+	if err := daemon.ValidateSessionName(newName); err != nil {
+		return err
+	}
+
+	rc, err := freshClient()
+	if err != nil {
+		return err
+	}
+	defer rc.Close()
+
+	_ = rc.SendControl("rename", protocol.RenameMsg{SessionID: sessionID, NewName: newName})
+
+	resp, err := rc.ReadControlResponse()
 	if err != nil {
 		return err
 	}
