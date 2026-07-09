@@ -25,7 +25,7 @@ type batchFlags struct {
 }
 
 func addBatchFlags(cmd *cobra.Command, bf *batchFlags) {
-	cmd.Flags().StringVar(&bf.repo, "repo", "", "filter by repo name")
+	cmd.Flags().StringVar(&bf.repo, "repo", "", "filter by repo name or path")
 	cmd.Flags().BoolVar(&bf.stopped, "stopped", false, "match stopped and errored sessions")
 	cmd.Flags().StringVar(&bf.stale, "stale", "", "match sessions not attached for this duration (e.g. 7d, 24h)")
 	cmd.Flags().BoolVarP(&bf.force, "force", "f", false, "skip confirmation prompt")
@@ -102,7 +102,7 @@ func filterSessions(sessions []protocol.SessionInfo, bf *batchFlags) ([]protocol
 	now := time.Now()
 
 	for _, s := range sessions {
-		if bf.repo != "" && s.RepoName != bf.repo {
+		if bf.repo != "" && !matchesRepo(s, bf.repo) {
 			continue
 		}
 
