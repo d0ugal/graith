@@ -72,6 +72,38 @@ public final class GhosttyTerminalDriver: TerminalCoreDriving {
         core.isViewportAtBottom()
     }
 
+    public func scrollMetrics() -> ScrollMetrics {
+        let sb = core.scrollbar()
+        return ScrollMetrics(total: sb.total, offset: sb.offset, len: sb.len)
+    }
+
+    public var isMouseTrackingActive: Bool {
+        core.isMouseTrackingActive()
+    }
+
+    public func encodeScrollWheel(ticks: Int, surfaceX: Double, surfaceY: Double,
+                                  screenWidth: UInt32, screenHeight: UInt32,
+                                  cellWidth: UInt32, cellHeight: UInt32) -> [Data] {
+        guard ticks != 0 else { return [] }
+        // Wheel-down (button 5) scrolls content down/forward; wheel-up (button 4)
+        // scrolls back. Mirrors the macOS BaseTerminalNSView.handleMouseScroll
+        // mapping (delta < 0 ⇒ button five).
+        let button: GhosttyMouseButton = ticks > 0 ? GHOSTTY_MOUSE_BUTTON_FIVE : GHOSTTY_MOUSE_BUTTON_FOUR
+        core.setMouseEncoderSize(screenWidth: screenWidth, screenHeight: screenHeight,
+                                 cellWidth: cellWidth, cellHeight: cellHeight)
+        var out: [Data] = []
+        for _ in 0..<abs(ticks) {
+            if let encoded = core.encodeMouse(
+                action: GHOSTTY_MOUSE_ACTION_PRESS,
+                button: button, mods: 0,
+                x: Float(surfaceX), y: Float(surfaceY)
+            ) {
+                out.append(encoded)
+            }
+        }
+        return out
+    }
+
     // MARK: - Selection
 
     public func beginSelection(at cell: ViewportCell, surfaceX: Double, surfaceY: Double, timeNs: UInt64) {

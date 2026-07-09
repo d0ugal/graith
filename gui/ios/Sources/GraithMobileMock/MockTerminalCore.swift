@@ -14,6 +14,11 @@ public final class MockTerminalCore: TerminalCoreDriving, @unchecked Sendable {
     public private(set) var scrollDeltas: [Int] = []
     public var isViewportAtBottom = true
     public var isBracketedPasteEnabled = false
+    public var isMouseTrackingActive = false
+    /// Overridable scrollback geometry for indicator tests.
+    public var metrics = ScrollMetrics(total: 24, offset: 0, len: 24)
+    /// Records the signed wheel-tick counts passed to `encodeScrollWheel`.
+    public private(set) var wheelTicks: [Int] = []
     private var selection: String?
 
     public init(cols: UInt16 = 80, rows: UInt16 = 24) {
@@ -59,10 +64,30 @@ public final class MockTerminalCore: TerminalCoreDriving, @unchecked Sendable {
 
     public func scrollViewport(byRows delta: Int) {
         scrollDeltas.append(delta)
-        if delta > 0 { isViewportAtBottom = false }
+        // Model a clamped viewport so before/after-offset boundary detection can
+        // be exercised: negative delta scrolls up (offset toward 0), positive
+        // scrolls down (offset toward total-len).
+        let maxOffset = max(0, metrics.total - metrics.len)
+        metrics.offset = min(maxOffset, max(0, metrics.offset + delta))
+        isViewportAtBottom = metrics.offset >= maxOffset
     }
 
-    public func scrollToBottom() { isViewportAtBottom = true }
+    public func scrollToBottom() {
+        metrics.offset = max(0, metrics.total - metrics.len)
+        isViewportAtBottom = true
+    }
+
+    public func scrollMetrics() -> ScrollMetrics { metrics }
+
+    public func encodeScrollWheel(ticks: Int, surfaceX: Double, surfaceY: Double,
+                                  screenWidth: UInt32, screenHeight: UInt32,
+                                  cellWidth: UInt32, cellHeight: UInt32) -> [Data] {
+        guard ticks != 0 else { return [] }
+        wheelTicks.append(ticks)
+        // Deterministic stand-in bytes: one per tick (not the real ghostty encoding).
+        let byte: UInt8 = ticks > 0 ? 0x35 /* '5' */ : 0x34 /* '4' */
+        return (0..<abs(ticks)).map { _ in Data([byte]) }
+    }
 
     public func beginSelection(at cell: ViewportCell, surfaceX: Double, surfaceY: Double, timeNs: UInt64) {
         selection = "sel@\(cell.col),\(cell.row)"

@@ -375,6 +375,20 @@ public final class GhosttyTerminalState {
         return active
     }
 
+    /// Scrollbar geometry for the current viewport: the total scrollable height
+    /// in rows, the viewport's offset (rows) from the top of that area, and the
+    /// visible length in rows. Used to draw a scroll-position indicator and to
+    /// detect scrollback boundaries (issue #984). Reads
+    /// `GHOSTTY_TERMINAL_DATA_SCROLLBAR`, which libghostty notes can be expensive
+    /// when the viewport sits at an arbitrary pin — call it only when rendering
+    /// the indicator, not every frame.
+    public func scrollbar() -> (total: Int, offset: Int, len: Int) {
+        guard let terminal else { return (0, 0, 0) }
+        var sb = GhosttyTerminalScrollbar()
+        ghostty_terminal_get(terminal, GHOSTTY_TERMINAL_DATA_SCROLLBAR, &sb)
+        return (Int(sb.total), Int(sb.offset), Int(sb.len))
+    }
+
     // MARK: - Selection
 
     private var selectionGesture: GhosttySelectionGesture?

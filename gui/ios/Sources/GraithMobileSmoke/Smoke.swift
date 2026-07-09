@@ -430,6 +430,84 @@ func testSpaceDrag() {
     check(!reused.didEmit, "begin() clears the committed flag")
 }
 
+// MARK: - Terminal scroll physics (issue #984)
+
+func testScroll() {
+    section("TerminalScrollController — scrollback physics (#984)")
+
+    // Finger down reveals older output ⇒ negative viewport rows; up ⇒ positive.
+    var drag = TerminalScrollController(cellHeight: 16)
+    drag.beginDrag()
+    check(drag.drag(translationDelta: 32) == -2, "drag down 32pt ⇒ 2 rows up into history")
+    var up = TerminalScrollController(cellHeight: 16); up.beginDrag()
+    check(up.drag(translationDelta: -48) == 3, "drag up 48pt ⇒ 3 rows toward the live bottom")
+
+    // Fractional travel banks across calls.
+    var frac = TerminalScrollController(cellHeight: 16); frac.beginDrag()
+    check(frac.drag(translationDelta: -8) == 0, "half a cell emits no row")
+    check(frac.drag(translationDelta: -8) == 1, "the second half completes one row")
+
+    // A reverse drag unwinds an active bounce before scrolling the core.
+    var rev = TerminalScrollController(cellHeight: 16); rev.beginDrag()
+    rev.absorbOverscroll(rows: 6)   // +96pt past the bottom
+    check(rev.drag(translationDelta: 50) == 0, "reverse drag spends itself unwinding the bounce")
+    check(abs(rev.overscroll - 46) < 0.001, "96 − 50 of overscroll remains")
+
+    // Rubber-band translation is signed and damped below the raw pull + viewport.
+    var band = TerminalScrollController(cellHeight: 16)
+    band.absorbOverscroll(rows: -10)  // past the top
+    let t = band.contentTranslation(viewportHeight: 800)
+    check(t > 0 && t < 160, "past-top pull moves content down, damped below 160pt")
+    var huge = TerminalScrollController(cellHeight: 16)
+    huge.absorbOverscroll(rows: 10_000)
+    check(abs(huge.contentTranslation(viewportHeight: 800)) < 800, "band stays below the viewport height")
+
+    // A fling starts momentum that decays to idle, moving rows in its direction.
+    var fling = TerminalScrollController(cellHeight: 16); fling.beginDrag()
+    fling.endDrag(velocityY: -1200)
+    check(fling.phase == .momentum, "a fast release starts momentum")
+    var moved = 0
+    for _ in 0..<600 where fling.isSettling { moved += fling.tick(dt: 1.0 / 60.0) }
+    check(fling.phase == .idle, "momentum settles to idle")
+    check(moved > 0, "a fling toward the bottom moves positive rows")
+
+    // A slow release does not fling.
+    var slow = TerminalScrollController(cellHeight: 16); slow.beginDrag()
+    slow.endDrag(velocityY: 5)
+    check(slow.phase == .idle && !slow.isSettling, "a slow release does not start momentum")
+
+    // Momentum hitting a boundary converts to a spring bounce.
+    var bounce = TerminalScrollController(cellHeight: 16); bounce.beginDrag()
+    bounce.endDrag(velocityY: -1200)
+    _ = bounce.tick(dt: 1.0 / 60.0)
+    bounce.absorbOverscroll(rows: 4)
+    _ = bounce.tick(dt: 1.0 / 60.0)
+    check(bounce.phase == .springing, "a boundary during momentum becomes a bounce")
+
+    // The spring pulls overscroll back to zero and settles.
+    var spring = TerminalScrollController(cellHeight: 16); spring.beginDrag()
+    spring.absorbOverscroll(rows: 6)
+    spring.endDrag(velocityY: 0)
+    check(spring.phase == .springing, "a pulled-out overscroll springs on release")
+    for _ in 0..<600 where spring.isSettling { _ = spring.tick(dt: 1.0 / 60.0) }
+    check(spring.phase == .idle && abs(spring.overscroll) < 0.001, "the spring returns overscroll to zero")
+
+    // Indicator thumb geometry.
+    check(TerminalScrollController.thumb(
+        metrics: ScrollMetrics(total: 24, offset: 0, len: 24), trackLength: 200) == nil,
+        "no history ⇒ no thumb")
+    let top = TerminalScrollController.thumb(
+        metrics: ScrollMetrics(total: 100, offset: 0, len: 20), trackLength: 200, minThumb: 10)
+    check(abs((top?.length ?? 0) - 40) < 0.001 && abs(top?.offset ?? -1) < 0.001,
+          "20/100 of a 200pt track, pinned to the top")
+    let bot = TerminalScrollController.thumb(
+        metrics: ScrollMetrics(total: 100, offset: 80, len: 20), trackLength: 200, minThumb: 10)
+    check(abs((bot?.offset ?? -1) - 160) < 0.001, "at the bottom ⇒ thumb at the track end")
+    let tiny = TerminalScrollController.thumb(
+        metrics: ScrollMetrics(total: 10_000, offset: 0, len: 20), trackLength: 200, minThumb: 36)
+    check(abs((tiny?.length ?? 0) - 36) < 0.001, "a tiny fraction still shows a grabbable thumb")
+}
+
 // MARK: - Frame codec (channel byte + BE length) — mirrors frame.go
 
 func testFrameCodec() {
@@ -465,6 +543,7 @@ struct Smoke {
             try await testAttach()
             try await testRealAdapters()
             testSpaceDrag()
+            testScroll()
             testFrameCodec()
         } catch {
             print("EXCEPTION: \(error)")
