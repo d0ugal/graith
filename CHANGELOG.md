@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.66.12](https://github.com/d0ugal/graith/compare/v0.66.11...v0.66.12) (2026-07-09)
+
+
+### Features
+
+* **cli:** add gr config init and gr config path ([b7417e6](https://github.com/d0ugal/graith/commit/b7417e6399a6d8277f6f9fbc5d8b28d482ddd217)), closes [#42](https://github.com/d0ugal/graith/issues/42)
+* **cli:** color-code status in gr list, add --wide and --no-color ([f12b9df](https://github.com/d0ugal/graith/commit/f12b9df60e0365ae450264953061904f5a04bac8)), closes [#43](https://github.com/d0ugal/graith/issues/43)
+* **sandbox:** grant $SSH_AUTH_SOCK connect under safehouse ssh feature ([0717bd5](https://github.com/d0ugal/graith/commit/0717bd50297e4ff404a4c03b07bd85fd374b4c96))
+
+
+### Bug Fixes
+
+* **cli:** make batch --repo matching consistent with list --repo ([d939dc4](https://github.com/d0ugal/graith/commit/d939dc44ea94320dcedeaaa32efb79e4789e5d3b)), closes [#202](https://github.com/d0ugal/graith/issues/202)
+* **cli:** report partial success in batch stop/delete instead of aborting ([40b0359](https://github.com/d0ugal/graith/commit/40b0359922e7795610e98176da2df6f29eebf68d)), closes [#201](https://github.com/d0ugal/graith/issues/201)
+* **cli:** treat non-running sessions as no-ops in batch stop ([8803d7b](https://github.com/d0ugal/graith/commit/8803d7bdc4b4f2c664fa7cf958e8fea2c7b862fa)), closes [#203](https://github.com/d0ugal/graith/issues/203)
+* **daemon:** base unpushed count on tracking ref, not stale base branch ([822874e](https://github.com/d0ugal/graith/commit/822874e3dc22052276526e79a58ceee9c9e138a6)), closes [#197](https://github.com/d0ugal/graith/issues/197)
+
+
+### Tests
+
+* **cli:** cover config init directory-creation error path ([d367b99](https://github.com/d0ugal/graith/commit/d367b9920c6172250fc2ec0e290f9267811b1dfb))
+* **cli:** fix wsl whitespace lint in batch summary test ([03784f5](https://github.com/d0ugal/graith/commit/03784f5dd09a2c446e16e7a8dba59b4cf66d078d))
+* **sandbox:** fully dedupe safehouse socket list, cover ssh-only grant ([f8f30f7](https://github.com/d0ugal/graith/commit/f8f30f7ff7f18801ae4887e35ebf1b55815a12b9))
+
 ## [0.66.11](https://github.com/d0ugal/graith/compare/v0.66.10...v0.66.11) (2026-07-09)
 
 
