@@ -6,6 +6,15 @@
     { matchManagers: ['gomod'], enabled: true },
     { matchManagers: ['gomod'], postUpdateOptions: ['gomodTidy'] },
     { matchManagers: ['gomod'], commitMessagePrefix: 'fix:', commitMessageAction: 'update' },
+    {
+      // gvisor.dev/gvisor is a transitive dependency of tailscale.com, which
+      // pins the exact revision it needs. gvisor's repo is Bazel-structured, so
+      // arbitrary upstream commits don't compile with `go build` (e.g. a stray
+      // `package bridge` test file in pkg/tcpip/stack). Let the pin track
+      // tailscale rather than the latest digest. See closed PR #875.
+      matchPackageNames: ['gvisor.dev/gvisor'],
+      enabled: false,
+    },
   ],
   customManagers: [
     {
