@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.66.11](https://github.com/d0ugal/graith/compare/v0.66.10...v0.66.11) (2026-07-09)
+
+
+### Features
+
+* **gui:** add unified XcodeGen project for the iOS + macOS apps ([dbbe4d1](https://github.com/d0ugal/graith/commit/dbbe4d152b698cd275f2a353190a3b152f11444f))
+
+
+### Bug Fixes
+
+* **gui:** drive macOS app version from XcodeGen build settings ([ffa0c9e](https://github.com/d0ugal/graith/commit/ffa0c9e1d03ae819b1d196326d17e9a42dda52b9))
+* **gui:** update DeviceIdentity test for channelBinding PoP signature ([e52c695](https://github.com/d0ugal/graith/commit/e52c695bd33c8edfd84dd572db88e689cfcb6b72))
+* **gui:** verify scoped signer via public key, not raw signature bytes ([8ccc053](https://github.com/d0ugal/graith/commit/8ccc0539f58bea60b1e7ed65c9743b704174a0d9))
+
 ## [0.66.10](https://github.com/d0ugal/graith/compare/v0.66.9...v0.66.10) (2026-07-09)
 
 
