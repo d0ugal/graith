@@ -490,6 +490,7 @@ func TestPrintBatchSummary(t *testing.T) {
 	var buf bytes.Buffer
 
 	orig := out
+
 	t.Cleanup(func() { out = orig })
 
 	out = output.NewWithWriter(false, &buf)
