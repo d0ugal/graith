@@ -117,8 +117,11 @@ func TestSandboxOptsGrantDaemonSocket(t *testing.T) {
 
 	opts := sm.sandboxOptsFromConfig(cfg.Sandbox, "braw123", "/tmp/bothy", "claude", []string{"TERM"}, false)
 
-	if !slices.Contains(opts.UnixSockets, sm.paths.SocketPath) {
-		t.Fatalf("daemon socket %q not granted via UnixSockets: %v", sm.paths.SocketPath, opts.UnixSockets)
+	// The granted path is symlink-resolved (Seatbelt/Landlock match canonical
+	// paths); under a symlinked temp dir it may differ from the raw SocketPath.
+	wantSock := resolveSocketPath(sm.paths.SocketPath)
+	if !slices.Contains(opts.UnixSockets, wantSock) {
+		t.Fatalf("daemon socket %q not granted via UnixSockets: %v", wantSock, opts.UnixSockets)
 	}
 
 	// The fragment must live under RuntimeDir (readable by safehouse, cleaned up
@@ -151,7 +154,7 @@ func TestSandboxOptsGrantDaemonSocket(t *testing.T) {
 		t.Fatalf("read fragment: %v", err)
 	}
 
-	want := `(allow network-outbound (remote unix-socket (path-literal "` + sm.paths.SocketPath + `")))`
+	want := `(allow network-outbound (remote unix-socket (path-literal "` + wantSock + `")))`
 	if !strings.Contains(string(data), want) {
 		t.Errorf("fragment missing connect grant for daemon socket.\nwant: %s\ngot:\n%s", want, data)
 	}

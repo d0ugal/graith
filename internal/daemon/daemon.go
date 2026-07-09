@@ -4488,6 +4488,28 @@ func (sm *SessionManager) nonoProfilePath(sessionID string) string {
 	return filepath.Join(sm.paths.RuntimeDir, "nono", sessionID+".json")
 }
 
+// resolveSocketPath returns the symlink-resolved daemon socket path. Seatbelt
+// and Landlock match canonical (symlink-resolved) paths, but sm.paths.SocketPath
+// comes from filepath.Join and is not resolved — so a data/runtime dir under a
+// symlinked prefix (e.g. macOS /tmp -> /private/tmp, /var -> /private/var) would
+// make the sandbox grant's path-literal miss and silently re-deny the connect,
+// reintroducing the original bug with a green test. Resolve here, at the single
+// choke point, so every backend gets the canonical path. Falls back to resolving
+// the parent dir + basename (the socket's own inode is a live AF_UNIX node), then
+// to the raw path if resolution fails (e.g. before the socket file exists).
+func resolveSocketPath(p string) string {
+	if resolved, err := filepath.EvalSymlinks(p); err == nil {
+		return resolved
+	}
+
+	dir, base := filepath.Split(p)
+	if rdir, err := filepath.EvalSymlinks(dir); err == nil {
+		return filepath.Join(rdir, base)
+	}
+
+	return p
+}
+
 // safehouseFragmentPath returns the location of the per-session safehouse
 // Seatbelt fragment (the --append-profile file that grants the daemon socket
 // connect access) for the given session ID. Written under RuntimeDir by the
@@ -4521,7 +4543,10 @@ func (sm *SessionManager) sandboxOptsFromConfig(merged config.SandboxConfig, ses
 	// connect separately from file read). Grant the socket explicitly so
 	// sandboxed agents can reach the daemon for `gr msg`, `gr status`, etc.
 	// This is scoped to the single socket file, not the whole runtime/data dir.
-	unixSockets := []string{sm.paths.SocketPath}
+	// The path is symlink-resolved (see resolveSocketPath): Seatbelt/Landlock
+	// match canonical paths, so a data/runtime dir under a symlinked prefix
+	// would otherwise make the grant's path-literal miss and silently re-deny.
+	unixSockets := []string{resolveSocketPath(sm.paths.SocketPath)}
 
 	// nono does not auto-grant the launched command's location (only system
 	// paths like /usr/bin). Grant read on the agent binary's directory so the
