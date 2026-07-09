@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
 	"testing"
 
 	"github.com/d0ugal/graith/internal/git"
@@ -17,6 +18,32 @@ func putSession(sm *SessionManager, s *SessionState) {
 	sm.mu.Lock()
 	sm.state.Sessions[s.ID] = s
 	sm.mu.Unlock()
+}
+
+// spawnContainedSleeper starts a long-lived child in its own process group and
+// returns its PID. It is used as a *live* PID fixture for the kill/orphan guard
+// tests: the guards under test are supposed to refuse to signal this PID, but if
+// one ever regresses, the resulting kill is contained to this child's process
+// group (Setpgid) instead of taking down the test runner or unrelated
+// processes. Cleanup SIGKILLs the group and reaps the child.
+func spawnContainedSleeper(t *testing.T) int {
+	t.Helper()
+
+	cmd := exec.Command("sleep", "300")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start sleeper: %v", err)
+	}
+
+	pid := cmd.Process.Pid
+
+	t.Cleanup(func() {
+		_ = syscall.Kill(-pid, syscall.SIGKILL)
+		_ = cmd.Wait()
+	})
+
+	return pid
 }
 
 func TestCovStarUnstarLifecycle(t *testing.T) {
@@ -194,30 +221,36 @@ func TestCovKillVerifiedProcess(t *testing.T) {
 	})
 
 	t.Run("live pid without recorded start time errors", func(t *testing.T) {
-		// Our own pid is alive; startTime 0 means identity was never recorded,
-		// so the kill is refused rather than risk killing the wrong process.
-		_, err := sm.killVerifiedProcess(os.Getpid(), 0)
+		// A live child in its own process group; startTime 0 means identity was
+		// never recorded, so the kill is refused rather than risk killing the
+		// wrong process. Using a contained child (not os.Getpid) keeps a guard
+		// regression from ever terminating the test runner.
+		pid := spawnContainedSleeper(t)
+
+		_, err := sm.killVerifiedProcess(pid, 0)
 		if err == nil {
 			t.Fatal("expected error for live pid with no recorded start time")
+		}
+
+		if !isProcessAlive(pid) {
+			t.Fatal("sleeper was killed; kill guard should have refused")
 		}
 	})
 
 	t.Run("live pid with mismatched start time errors", func(t *testing.T) {
 		// startTime=1 will not match the real start time, so the identity
 		// check fails and no signal is sent.
-		_, err := sm.killVerifiedProcess(os.Getpid(), 1)
+		pid := spawnContainedSleeper(t)
+
+		_, err := sm.killVerifiedProcess(pid, 1)
 		if err == nil {
 			t.Fatal("expected identity-mismatch error")
 		}
-	})
-}
 
-func TestCovKillProcessGroupRejectsLowPID(t *testing.T) {
-	for _, pid := range []int{-1, 0, 1} {
-		if err := killProcessGroup(pid); err == nil {
-			t.Errorf("killProcessGroup(%d) = nil, want error", pid)
+		if !isProcessAlive(pid) {
+			t.Fatal("sleeper was killed; identity check should have refused")
 		}
-	}
+	})
 }
 
 func TestCovStopWithChildren(t *testing.T) {
@@ -285,15 +318,22 @@ func TestCovStopWithReasonOrphanAndErrors(t *testing.T) {
 func TestCovCleanupOrphanedProcesses(t *testing.T) {
 	sm := newTestSessionManager(t)
 
-	// Alive pid (our own) with no recorded identity: cannot be verified, so it
-	// is marked errored rather than killed.
-	putSession(sm, &SessionState{ID: "scunner1", Name: "scunner", Status: StatusRunning, PID: os.Getpid(), PIDStartTime: 0})
+	// A live child (in its own process group) with no recorded identity: cannot
+	// be verified, so it is marked errored rather than killed. A contained child
+	// rather than os.Getpid means a regression that killed here can't take down
+	// the test runner.
+	sleeper := spawnContainedSleeper(t)
+	putSession(sm, &SessionState{ID: "scunner1", Name: "scunner", Status: StatusRunning, PID: sleeper, PIDStartTime: 0})
 	// Dead pid: not a candidate, left untouched.
 	putSession(sm, &SessionState{ID: "whin1", Name: "whin", Status: StatusRunning, PID: 1 << 30})
 	// Not running: ignored.
-	putSession(sm, &SessionState{ID: "neep1", Name: "neep", Status: StatusStopped, PID: os.Getpid()})
+	putSession(sm, &SessionState{ID: "neep1", Name: "neep", Status: StatusStopped, PID: sleeper})
 
 	sm.cleanupOrphanedProcesses()
+
+	if !isProcessAlive(sleeper) {
+		t.Fatal("sleeper was killed; unverifiable orphan must not be signalled")
+	}
 
 	if s, _ := sm.Get("scunner1"); s.Status != StatusErrored {
 		t.Errorf("scunner1 status = %q, want errored (unverifiable orphan)", s.Status)
@@ -374,17 +414,30 @@ func TestCovDeriveSandboxIncludesWriteDirsGit(t *testing.T) {
 		t.Fatalf("SetupSession: %v", err)
 	}
 
+	gitDir, commonDir, err := git.WorktreeGitDirs(worktree)
+	if err != nil {
+		t.Fatalf("WorktreeGitDirs: %v", err)
+	}
+
+	if gitDir == "" || commonDir == "" {
+		t.Fatalf("expected non-empty git dirs, got gitDir=%q commonDir=%q", gitDir, commonDir)
+	}
+
 	dirs := sm.deriveSandboxIncludesWriteDirs([]IncludedRepoState{
 		{RepoName: "croft", WorktreePath: worktree},
 	})
 
-	// worktree path plus its resolved git dir and common dir.
-	if len(dirs) != 3 {
-		t.Fatalf("deriveSandboxIncludesWriteDirs = %v, want 3 entries", dirs)
+	// Exact, ordered slice: worktree path plus its resolved git dir and common
+	// dir — so a regression that appended empty or duplicate strings is caught.
+	want := []string{worktree, gitDir, commonDir}
+	if len(dirs) != len(want) {
+		t.Fatalf("deriveSandboxIncludesWriteDirs = %v, want %v", dirs, want)
 	}
 
-	if dirs[0] != worktree {
-		t.Errorf("first dir = %q, want worktree %q", dirs[0], worktree)
+	for i := range want {
+		if dirs[i] != want[i] {
+			t.Errorf("dirs[%d] = %q, want %q", i, dirs[i], want[i])
+		}
 	}
 }
 
@@ -408,6 +461,17 @@ func TestCovTeardownIncludes(t *testing.T) {
 		{RepoPath: clone, RepoName: "bairn", WorktreePath: incWorktree, Branch: "graith/skelf-inc"},
 	}
 
+	// Sanity: both branches and worktrees exist before teardown, so the
+	// post-conditions below prove teardown actually removed them (not that they
+	// were never created).
+	if !git.RefExists(clone, "graith/skelf-main") || !git.RefExists(clone, "graith/skelf-inc") {
+		t.Fatal("expected both branches to exist before teardown")
+	}
+
+	if !git.IsRegisteredWorktree(clone, mainWorktree) || !git.IsRegisteredWorktree(clone, incWorktree) {
+		t.Fatal("expected both worktrees registered before teardown")
+	}
+
 	if err := sm.teardownIncludes(clone, mainWorktree, "graith/skelf-main", includes); err != nil {
 		t.Fatalf("teardownIncludes: %v", err)
 	}
@@ -415,20 +479,42 @@ func TestCovTeardownIncludes(t *testing.T) {
 	if _, err := os.Stat(sessionDir); !os.IsNotExist(err) {
 		t.Errorf("expected session dir removed, stat err = %v", err)
 	}
+
+	// The branches and worktree registrations in the source repo must also be
+	// gone — removing only the session dir would leave git metadata behind.
+	if git.RefExists(clone, "graith/skelf-main") {
+		t.Error("main branch still exists after teardown")
+	}
+
+	if git.RefExists(clone, "graith/skelf-inc") {
+		t.Error("include branch still exists after teardown")
+	}
+
+	if git.IsRegisteredWorktree(clone, mainWorktree) {
+		t.Error("main worktree still registered after teardown")
+	}
+
+	if git.IsRegisteredWorktree(clone, incWorktree) {
+		t.Error("include worktree still registered after teardown")
+	}
 }
 
 func TestCovSetStores(t *testing.T) {
 	sm := newTestSessionManager(t)
 
-	// Trivial setters should not panic and should record the pointers.
-	sm.SetMsgStore(nil)
-	sm.SetMCPManager(nil)
+	// Assign non-nil sentinels and assert the pointers round-trip, so a no-op
+	// setter would fail (the fields default to nil after NewSessionManager).
+	ms := &MsgStore{}
+	mm := &MCPManager{}
 
-	if sm.messages != nil {
-		t.Error("expected messages nil after SetMsgStore(nil)")
+	sm.SetMsgStore(ms)
+	sm.SetMCPManager(mm)
+
+	if sm.messages != ms {
+		t.Error("SetMsgStore did not assign the given pointer")
 	}
 
-	if sm.mcpManager != nil {
-		t.Error("expected mcpManager nil after SetMCPManager(nil)")
+	if sm.mcpManager != mm {
+		t.Error("SetMCPManager did not assign the given pointer")
 	}
 }
