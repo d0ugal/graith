@@ -210,21 +210,23 @@ public final class BaseTerminalUIView: UIView {
                                          screenHeight: UInt32(bounds.height * scale))
         case .ended, .cancelled:
             viewModel.core.endSelection(at: ref)
-            if let text = viewModel.core.selectedText() {
-                showSelectionMenu(with: text, at: point)
-            }
+            // Always present the edit menu on long-press: with a selection it
+            // offers Copy (+ Paste); a stationary long-press selects nothing, so
+            // it offers Paste alone — the standard iOS long-press-to-paste
+            // gesture (canPerformAction filters the items).
+            let selected = viewModel.core.selectedText()
+            showEditMenu(selectedText: (selected?.isEmpty ?? true) ? nil : selected, at: point)
         default:
             break
         }
         renderer.setNeedsRender()
     }
 
-    private func showSelectionMenu(with text: String, at point: CGPoint) {
+    private func showEditMenu(selectedText: String?, at point: CGPoint) {
         becomeFirstResponder()
-        let menu = UIMenuController.shared
-        pendingSelectedText = text
+        pendingSelectedText = selectedText
         if #available(iOS 16.0, *) {
-            menu.showMenu(from: self, rect: CGRect(origin: point, size: .zero))
+            UIMenuController.shared.showMenu(from: self, rect: CGRect(origin: point, size: .zero))
         }
     }
 
