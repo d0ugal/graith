@@ -13,6 +13,7 @@ struct NewSessionSheet: View {
     @State private var prompt = ""
     @State private var isCreating = false
     @State private var error: String?
+    @State private var selectedHostID = "local"
 
     let agents = ["claude", "codex", "agy", "opencode"]
 
@@ -38,6 +39,19 @@ struct NewSessionSheet: View {
 
             // Form
             VStack(alignment: .leading, spacing: 16) {
+                if store.hasRemoteHosts {
+                    FormField(label: "Host") {
+                        HStack(spacing: 8) {
+                            ForEach(store.registry.hosts) { host in
+                                AgentChip(name: host.label, isSelected: selectedHostID == host.id) {
+                                    selectedHostID = host.id
+                                }
+                            }
+                            Spacer()
+                        }
+                    }
+                }
+
                 FormField(label: "Name") {
                     TextField("my-feature", text: $name)
                         .textFieldStyle(.plain)
@@ -147,7 +161,8 @@ struct NewSessionSheet: View {
             agent: agent,
             repoPath: repoPath,
             model: model,
-            prompt: prompt
+            prompt: prompt,
+            hostID: selectedHostID
         ) { result in
             isCreating = false
             switch result {

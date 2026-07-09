@@ -1,5 +1,6 @@
 import SwiftUI
 import GraithProtocol
+import GraithRemoteKit
 
 /// The ⌘, preferences window. SwiftUI's `Settings` scene wires up the menu item
 /// and a standard preferences window automatically; this is its content. Styled
@@ -100,7 +101,9 @@ struct GeneralSettings: View {
 // MARK: - Hosts
 
 struct HostsSettings: View {
+    @EnvironmentObject var store: SessionStore
     @EnvironmentObject var hosts: HostRegistry
+    @State private var showAddHost = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -112,30 +115,53 @@ struct HostsSettings: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(host.label)
                                 .font(.system(.body, design: .monospaced))
-                            Text(host.kind == .local
-                                 ? "Local daemon · Unix socket"
-                                 : "Remote · \(host.magicDNSName ?? "?"):\(host.port ?? 0)")
+                            Text(subtitle(for: host))
                                 .font(.system(.caption2, design: .monospaced))
                                 .foregroundStyle(Theme.overlay0)
                         }
                         Spacer()
                         if host.kind != .local {
                             Button(role: .destructive) {
-                                hosts.remove(host)
+                                store.removeHost(host)
                             } label: {
                                 Image(systemName: "minus.circle")
                             }
                             .buttonStyle(.borderless)
+                            .help("Forget this host (revokes trust on this Mac)")
                         }
                     }
                     .padding(.vertical, 2)
                 }
             }
-            Text("Remote hosts are paired with `gr remote pair` over Tailscale. "
-                 + "Keychain-backed pairing from the app is not wired up yet.")
+            HStack {
+                Button {
+                    showAddHost = true
+                } label: {
+                    Label("Add Host…", systemImage: "plus")
+                }
+                Spacer()
+            }
+            .padding(12)
+            Text("Remote hosts are reached over Tailscale. Adding one runs a one-time "
+                 + "device pairing — approve it on the host with `gr pair approve`.")
                 .font(.caption)
                 .foregroundStyle(Theme.overlay0)
-                .padding(12)
+                .padding(.horizontal, 12)
+                .padding(.bottom, 12)
         }
+        .sheet(isPresented: $showAddHost) {
+            AddHostSheet()
+        }
+    }
+
+    private func subtitle(for host: Host) -> String {
+        if host.kind == .local {
+            return "Local daemon · Unix socket"
+        }
+        let endpoint = "\(host.magicDNSName ?? "?"):\(host.port)"
+        if let err = store.hostErrors[host.id] {
+            return "Remote · \(endpoint) · \(err)"
+        }
+        return host.isPaired ? "Remote · \(endpoint)" : "Remote · \(endpoint) · pairing…"
     }
 }

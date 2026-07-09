@@ -1,6 +1,13 @@
 import Foundation
 import Combine
 import GraithProtocol
+import GraithRemoteKit
+
+/// Disambiguate our `Host` model from `Foundation.Host` (macOS ships both once
+/// GraithRemoteKit is imported). A module-scope typealias shadows the Foundation
+/// type across the whole GraithGUI module, mirroring the in-module `Host` struct
+/// this replaced.
+typealias Host = GraithRemoteKit.Host
 
 /// Resolves the local daemon's Unix socket path, mirroring the Go client's
 /// `config.ResolvePaths` on macOS.
@@ -27,12 +34,20 @@ enum GraithLocalSocket {
     }
 
     static var profile: String { ProcessInfo.processInfo.environment["GRAITH_PROFILE"] ?? "" }
+
+    /// The local daemon host entry for this machine.
+    static func localHost() -> Host {
+        Host.local(socketPath: defaultPath(), profile: profile)
+    }
 }
 
 @MainActor
 class SessionStore: ObservableObject {
     @Published var sessions: [Session] = []
+    /// The primary (local daemon) error, kept for the sidebar footer.
     @Published var error: String?
+    /// Per-host connection error, keyed by host id (shown in host headers).
+    @Published var hostErrors: [String: String] = [:]
     @Published var collapsedSessions: Set<String> = []
 
     enum RendererType: String, CaseIterable {
@@ -94,37 +109,177 @@ class SessionStore: ObservableObject {
         return current !== owner
     }
 
-    /// The shared, transport-abstract protocol client, connected to the local
-    /// daemon over its Unix socket. Replaces the old `gr` subprocess model —
-    /// no child process is spawned for list/status/lifecycle or attach.
-    let client: GraithProtocolClient
+    // MARK: - Multi-host connections
+
+    /// The registry of daemons (local + paired remotes). Owns pairing metadata;
+    /// per-host client tokens live in the Keychain.
+    let registry: HostRegistry
+    /// The device's ed25519 identity, used to sign proof-of-possession for
+    /// remote hosts. Nil only if the Keychain/identity could not be created.
+    let identity: DeviceIdentity?
+
+    /// One protocol client per reachable host, keyed by host id. Local uses the
+    /// Unix socket (tokenless); remotes use TLS + a Keychain token + PoP signer.
+    private var clients: [String: GraithProtocolClient] = [:]
+    /// The host each client was built from, so we only rebuild on change.
+    private var builtFrom: [String: Host] = [:]
+    /// Which host owns each session id (session ids are per-daemon).
+    private var hostBySession: [String: String] = [:]
+
     private var timer: Timer?
     private var refreshGeneration: UInt64 = 0
+    private var cancellables = Set<AnyCancellable>()
 
-    init() {
-        self.client = GraithProtocolClient(
-            transport: .unix(path: GraithLocalSocket.defaultPath()),
-            profile: GraithLocalSocket.profile,
-            clientID: "graith-macos",
-            // The desktop app is the *local human* — it owns the 0700 Unix
-            // socket trust boundary and must resolve as `roleLocalHuman`, not
-            // `roleSession`. We deliberately do NOT forward `GRAITH_TOKEN`: when
-            // the app is launched from inside an agent session that env var is a
-            // per-session bearer token, and carrying it would make the daemon
-            // treat every window as that agent (denying local-human operations).
-            // A tokenless connection over the local socket is the human.
-            token: nil,
-            signer: nil // local Unix socket: no proof-of-possession
-        )
+    /// Production initializer: builds clients from the registry.
+    init(registry: HostRegistry, identity: DeviceIdentity?) {
+        self.registry = registry
+        self.identity = identity
+        rebuildClients()
+        // Rebuild + refresh whenever the set of paired hosts changes (e.g. a
+        // pairing completes or a host is removed).
+        registry.$hosts
+            .dropFirst()
+            .sink { [weak self] _ in
+                Task { @MainActor in
+                    self?.rebuildClients()
+                    self?.refresh()
+                }
+            }
+            .store(in: &cancellables)
         refresh()
         startPolling()
     }
 
-    // Sessions grouped by repo name for sidebar display
-    var sessionsByRepo: [(repo: String, sessions: [Session])] {
+    /// Convenience initializer for tests / previews: local host only, backed by
+    /// an in-memory secret store so no Keychain access is attempted.
+    convenience init() {
+        let secrets = InMemorySecretStore()
+        let identity = try? DeviceIdentity(keychain: secrets)
+        let registry = HostRegistry(
+            keychain: secrets,
+            localHost: GraithLocalSocket.localHost(),
+            storeURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("graith-test-\(UUID().uuidString)", isDirectory: true)
+                .appendingPathComponent("hosts.json")
+        )
+        self.init(registry: registry, identity: identity)
+    }
+
+    /// (Re)build the per-host clients from the registry, preserving existing
+    /// clients for hosts whose transport/credentials are unchanged.
+    private func rebuildClients() {
+        var next: [String: GraithProtocolClient] = [:]
+        var builds: [String: Host] = [:]
+        for host in registry.hosts {
+            if let existing = clients[host.id], builtFrom[host.id] == host {
+                next[host.id] = existing
+                builds[host.id] = host
+                continue
+            }
+            guard let client = makeClient(for: host) else { continue }
+            next[host.id] = client
+            builds[host.id] = host
+        }
+        // Close clients for hosts that went away.
+        for (id, client) in clients where next[id] == nil {
+            Task { await client.close() }
+        }
+        clients = next
+        builtFrom = builds
+    }
+
+    private func makeClient(for host: Host) -> GraithProtocolClient? {
+        switch host.kind {
+        case .local:
+            // The desktop app is the *local human*: it owns the 0700 Unix socket
+            // trust boundary and connects tokenless (no PoP). We deliberately do
+            // NOT forward GRAITH_TOKEN — that per-session token would make the
+            // daemon treat every window as the launching agent.
+            return GraithProtocolClient(
+                transport: host.transport,
+                profile: host.daemonProfile,
+                clientID: "graith-macos",
+                token: nil,
+                signer: nil
+            )
+        case .remote:
+            guard let creds = registry.credentials(for: host), let identity else { return nil }
+            // Sign PoP with the per-host device ID (a later pairing of host B
+            // must not clobber how we identify to host A).
+            let signer = HostScopedSigner(base: identity, deviceID: creds.deviceID)
+            return GraithProtocolClient(
+                transport: host.transport,
+                profile: creds.daemonProfile,
+                clientID: "graith-macos",
+                token: creds.clientToken,
+                signer: signer
+            )
+        }
+    }
+
+    /// The client for a host id, if connected.
+    func client(forHost hostID: String) -> GraithProtocolClient? { clients[hostID] }
+
+    /// The client owning `sessionID` (the daemon it lives on).
+    func client(for sessionID: String) -> GraithProtocolClient? {
+        guard let hostID = hostBySession[sessionID] else { return clients["local"] }
+        return clients[hostID] ?? clients["local"]
+    }
+
+    /// The host a session belongs to.
+    func host(for sessionID: String) -> Host? {
+        guard let hostID = hostBySession[sessionID] else { return nil }
+        return registry.host(id: hostID)
+    }
+
+    /// All (host, client) pairs, in registry order — used by the approvals
+    /// monitor to subscribe across every daemon.
+    var hostClients: [(host: Host, client: GraithProtocolClient)] {
+        registry.hosts.compactMap { host in
+            guard let client = clients[host.id] else { return nil }
+            return (host, client)
+        }
+    }
+
+    /// Remove a remote host: close its client, drop it from the registry (which
+    /// wipes the Keychain token and triggers a rebuild).
+    func removeHost(_ host: Host) {
+        guard host.kind != .local else { return }
+        if let client = clients[host.id] {
+            Task { await client.close() }
+        }
+        registry.remove(hostID: host.id)
+    }
+
+    // MARK: - Grouping for the sidebar
+
+    /// Sessions on a single host grouped by repo name.
+    private func groups(for sessions: [Session]) -> [(repo: String, sessions: [Session])] {
         let grouped = Dictionary(grouping: sessions) { $0.repoName }
         return grouped.sorted { $0.key < $1.key }
             .map { (repo: $0.key, sessions: $0.value.sorted { $0.name < $1.name }) }
+    }
+
+    /// Sessions grouped by repo (flat, host-agnostic). Retained for the
+    /// single-host rendering path.
+    var sessionsByRepo: [(repo: String, sessions: [Session])] {
+        groups(for: sessions)
+    }
+
+    /// Whether any remote hosts are configured (drives the sidebar's per-host
+    /// grouping vs. the familiar single-host layout).
+    var hasRemoteHosts: Bool {
+        registry.hosts.contains { $0.kind == .remote }
+    }
+
+    /// Sessions grouped by host, then repo — for the multi-host sidebar. Every
+    /// configured host appears even with no sessions, so its connection state is
+    /// visible.
+    var sessionsByHost: [(host: Host, groups: [(repo: String, sessions: [Session])])] {
+        registry.hosts.map { host in
+            let owned = sessions.filter { hostBySession[$0.id] == host.id }
+            return (host: host, groups: groups(for: owned))
+        }
     }
 
     func roots(in sessions: [Session]) -> [Session] {
@@ -154,19 +309,19 @@ class SessionStore: ObservableObject {
     // MARK: - Session Actions
 
     func stopSession(_ session: Session) {
-        runAction { try await self.client.stop(sessionID: session.id) }
+        runAction(session) { try await $0.stop(sessionID: session.id) }
     }
 
     func resumeSession(_ session: Session) {
-        runAction { try await self.client.resume(sessionID: session.id) }
+        runAction(session) { try await $0.resume(sessionID: session.id) }
     }
 
     func deleteSession(_ session: Session) {
-        runAction { try await self.client.delete(sessionID: session.id) }
+        runAction(session) { try await $0.delete(sessionID: session.id) }
     }
 
     func restartSession(_ session: Session) {
-        runAction { try await self.client.restart(sessionID: session.id) }
+        runAction(session) { try await $0.restart(sessionID: session.id) }
     }
 
     func createSession(
@@ -175,8 +330,13 @@ class SessionStore: ObservableObject {
         repoPath: String,
         model: String,
         prompt: String,
+        hostID: String = "local",
         completion: @escaping (Result<Session?, Error>) -> Void
     ) {
+        guard let client = clients[hostID] else {
+            completion(.failure(SessionStoreError.hostUnavailable))
+            return
+        }
         let msg = CreateMsg(
             name: name,
             agent: agent,
@@ -188,10 +348,20 @@ class SessionStore: ObservableObject {
         Task {
             do {
                 let session = try await client.create(msg)
+                hostBySession[session.id] = hostID
                 refresh()
                 completion(.success(session))
             } catch {
                 completion(.failure(error))
+            }
+        }
+    }
+
+    enum SessionStoreError: LocalizedError {
+        case hostUnavailable
+        var errorDescription: String? {
+            switch self {
+            case .hostUnavailable: return "That host isn't connected."
             }
         }
     }
@@ -242,34 +412,73 @@ class SessionStore: ObservableObject {
         }
     }
 
-    /// Refresh the session list from the daemon over the protocol client.
-    /// A generation counter drops stale responses if several are in flight.
+    /// Refresh the session list from every connected host, merging the results.
+    /// Hosts are queried concurrently so one slow/unreachable remote can't stall
+    /// the others (or the local daemon). A generation counter drops stale
+    /// responses if several passes are in flight.
     func refresh() {
         refreshGeneration &+= 1
         let gen = refreshGeneration
+        let ordered = registry.hosts.compactMap { host -> (id: String, client: GraithProtocolClient)? in
+            guard let client = clients[host.id] else { return nil }
+            return (host.id, client)
+        }
         Task {
-            do {
-                let list = try await client.list()
-                guard gen == refreshGeneration else { return }
-                self.sessions = list
-                // Drop attach ownership for sessions that no longer exist (or
-                // whose owning window has gone) so nothing wedges a session as
-                // "open elsewhere".
-                let live = Set(list.map(\.id))
-                attachOwners = attachOwners.filter { live.contains($0.key) && $0.value.window != nil }
-                self.error = nil
-            } catch {
-                guard gen == refreshGeneration else { return }
-                self.error = error.localizedDescription
+            // Fan out one list() per host; each result is tagged with its host id.
+            let results = await withTaskGroup(of: (String, Result<[Session], Error>).self) { group in
+                for entry in ordered {
+                    group.addTask {
+                        do { return (entry.id, .success(try await entry.client.list())) }
+                        catch { return (entry.id, .failure(error)) }
+                    }
+                }
+                var byHost: [String: Result<[Session], Error>] = [:]
+                for await (id, result) in group { byHost[id] = result }
+                return byHost
             }
+
+            guard gen == refreshGeneration else { return }
+
+            // Assemble in registry order so the merged list is stable regardless
+            // of which host answered first.
+            var merged: [Session] = []
+            var owners: [String: String] = [:]
+            var errors: [String: String] = [:]
+            for entry in ordered {
+                switch results[entry.id] {
+                case .success(let list):
+                    for session in list where owners[session.id] == nil {
+                        owners[session.id] = entry.id
+                        merged.append(session)
+                    }
+                case .failure(let error):
+                    errors[entry.id] = error.localizedDescription
+                case nil:
+                    break
+                }
+            }
+            self.sessions = merged
+            self.hostBySession = owners
+            self.hostErrors = errors
+            self.error = errors["local"]
+            // Drop attach ownership for sessions that no longer exist (or whose
+            // owning window has gone) so nothing wedges a session as "open
+            // elsewhere".
+            let live = Set(merged.map(\.id))
+            attachOwners = attachOwners.filter { live.contains($0.key) && $0.value.window != nil }
         }
     }
 
-    /// Run a mutating client action, then refresh. Errors surface on `error`.
-    private func runAction(_ action: @escaping () async throws -> Void) {
+    /// Run a mutating action against the session's owning host client, then
+    /// refresh. Errors surface on `error`.
+    private func runAction(_ session: Session, _ action: @escaping (GraithProtocolClient) async throws -> Void) {
+        guard let client = client(for: session.id) else {
+            self.error = SessionStoreError.hostUnavailable.localizedDescription
+            return
+        }
         Task {
             do {
-                try await action()
+                try await action(client)
             } catch {
                 self.error = error.localizedDescription
             }
