@@ -438,6 +438,14 @@ func (c *Client) ReadFrame() (protocol.Frame, error) {
 	return c.reader.ReadFrame()
 }
 
+// SetReadDeadline sets the read deadline on the underlying connection. A zero
+// time clears the deadline. Callers reading a bounded stream of frames (e.g.
+// the check-inbox hook) use this so a slow or hung daemon can't block them
+// indefinitely.
+func (c *Client) SetReadDeadline(t time.Time) error {
+	return c.conn.SetReadDeadline(t)
+}
+
 func (c *Client) ReadControlResponse() (protocol.Envelope, error) {
 	frame, err := c.reader.ReadFrame()
 	if err != nil {
