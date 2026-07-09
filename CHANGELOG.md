@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.66.13](https://github.com/d0ugal/graith/compare/v0.66.12...v0.66.13) (2026-07-09)
+
+
+### Features
+
+* **orchestrator:** include configured repo paths in prompt ([77f89d2](https://github.com/d0ugal/graith/commit/77f89d25c77dd6e7c471d78635f5486aab7bdb4e))
+
+
+### Bug Fixes
+
+* **orchestrator:** clarify available-repositories prompt wording ([bf47cb9](https://github.com/d0ugal/graith/commit/bf47cb952775783e7ce0fee0647211ac319d524c))
+
 ## [0.66.12](https://github.com/d0ugal/graith/compare/v0.66.11...v0.66.12) (2026-07-09)
 
 
