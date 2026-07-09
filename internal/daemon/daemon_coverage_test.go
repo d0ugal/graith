@@ -300,12 +300,14 @@ func TestCovStopWithReasonOrphanAndErrors(t *testing.T) {
 	}
 
 	putSession(sm, &SessionState{ID: "dreich1", Name: "dreich", Status: StatusStopped})
+
 	if err := sm.Stop("dreich1"); err == nil {
 		t.Fatal("expected error stopping a non-running session")
 	}
 
 	// Running with no PTY and pid 0: the orphan path treats it as already exited.
 	putSession(sm, &SessionState{ID: "bide1", Name: "bide", Status: StatusRunning})
+
 	if err := sm.Stop("bide1"); err != nil {
 		t.Fatalf("Stop orphan: %v", err)
 	}
