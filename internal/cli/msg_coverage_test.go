@@ -320,10 +320,19 @@ func captureMsgStdout(t *testing.T, fn func()) string {
 		done <- sb.String()
 	}()
 
-	fn()
+	var result string
 
-	_ = w.Close()
-	os.Stdout = orig
+	// Restore os.Stdout and drain the reader even if fn() aborts via t.Fatalf
+	// (runtime.Goexit) or panic.
+	func() {
+		defer func() {
+			_ = w.Close()
+			os.Stdout = orig
+			result = <-done
+		}()
 
-	return <-done
+		fn()
+	}()
+
+	return result
 }

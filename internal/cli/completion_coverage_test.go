@@ -86,7 +86,7 @@ func TestCompleteSessionNamesCovArgsShortCircuit(t *testing.T) {
 	}
 }
 
-func TestCompleteBranchNamesCovLocalAndRemote(t *testing.T) {
+func TestCompleteBranchNamesCovLocalBranches(t *testing.T) {
 	repo := t.TempDir()
 	initBranchRepo(t, repo)
 

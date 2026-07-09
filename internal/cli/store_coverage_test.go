@@ -83,6 +83,20 @@ func TestResolveStoreRepoPathCovEnv(t *testing.T) {
 	}
 }
 
+// chdirOutsideGit changes into a fresh temp dir and prevents `git rev-parse`
+// from walking up into an enclosing repository (which would happen if TMPDIR
+// itself sat inside a git checkout). GIT_CEILING_DIRECTORIES stops the upward
+// search at the temp dir's parent, so detection reliably fails.
+func chdirOutsideGit(t *testing.T) string {
+	t.Helper()
+
+	dir := t.TempDir()
+	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(dir))
+	t.Chdir(dir)
+
+	return dir
+}
+
 func TestResolveStoreRepoPathCovErrorOutsideGit(t *testing.T) {
 	storeTestEnv(t, false, "")
 
@@ -90,7 +104,7 @@ func TestResolveStoreRepoPathCovErrorOutsideGit(t *testing.T) {
 	os.Unsetenv("GRAITH_REPO_PATH")
 
 	// A fresh temp dir is not a git repo, so detection must fail cleanly.
-	t.Chdir(t.TempDir())
+	chdirOutsideGit(t)
 
 	if _, err := resolveStoreRepoPath(); err == nil {
 		t.Error("expected error resolving repo path outside a git repo")
@@ -155,7 +169,7 @@ func TestResolveCurrentRepoCovEnv(t *testing.T) {
 func TestResolveCurrentRepoCovNonGit(t *testing.T) {
 	t.Setenv("GRAITH_REPO_PATH", "")
 	os.Unsetenv("GRAITH_REPO_PATH")
-	t.Chdir(t.TempDir())
+	chdirOutsideGit(t)
 
 	if got := resolveCurrentRepo(); got != "" {
 		t.Errorf("expected empty string outside git repo, got %q", got)
@@ -167,7 +181,7 @@ func TestCheckWritePermissionCovNoCurrentRepo(t *testing.T) {
 
 	t.Setenv("GRAITH_REPO_PATH", "")
 	os.Unsetenv("GRAITH_REPO_PATH")
-	t.Chdir(t.TempDir())
+	chdirOutsideGit(t)
 
 	// current repo is empty -> always allowed.
 	if err := checkWritePermission("/anything"); err != nil {
@@ -207,7 +221,7 @@ func TestInGraithSessionWithNoRepoCov(t *testing.T) {
 		t.Setenv("GRAITH_SESSION_ID", "braw-session")
 		t.Setenv("GRAITH_REPO_PATH", "")
 		os.Unsetenv("GRAITH_REPO_PATH")
-		t.Chdir(t.TempDir())
+		chdirOutsideGit(t)
 
 		if !inGraithSessionWithNoRepo() {
 			t.Error("expected true for session with no repo context")
@@ -399,8 +413,6 @@ func captureStdout(t *testing.T, fn func()) string {
 	prevOut := out
 	out = output.NewWithWriter(jsonOutput, w)
 
-	defer func() { out = prevOut }()
-
 	done := make(chan string, 1)
 
 	go func() {
@@ -422,10 +434,21 @@ func captureStdout(t *testing.T, fn func()) string {
 		done <- sb.String()
 	}()
 
-	fn()
+	var result string
 
-	_ = w.Close()
-	os.Stdout = orig
+	// Restore global stdout/out and drain the reader even if fn() aborts via
+	// t.Fatalf (runtime.Goexit) or panic — otherwise os.Stdout would stay
+	// pointed at the pipe and poison later tests.
+	func() {
+		defer func() {
+			_ = w.Close()
+			os.Stdout = orig
+			out = prevOut
+			result = <-done
+		}()
 
-	return <-done
+		fn()
+	}()
+
+	return result
 }
