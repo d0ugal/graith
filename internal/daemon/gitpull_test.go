@@ -490,18 +490,45 @@ func TestRunGitPullLoop_InitialTickBeforeInterval(t *testing.T) {
 	before := headRev(t, cloneDir)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
-	go sm.RunGitPullLoop(ctx)
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+
+		sm.RunGitPullLoop(ctx)
+	}()
+
+	// Stop the loop and wait for it — and any git subprocess it cancels — to
+	// exit before t.TempDir removes the clone. Registered after setupTestRepo's
+	// t.TempDir, so LIFO cleanup order runs this first: otherwise a git process
+	// still finishing the fast-forward would race the directory removal.
+	t.Cleanup(func() {
+		cancel()
+
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Error("git-pull loop did not exit after context cancellation")
+		}
+	})
+
+	// The clone can only fast-forward within this window via the initial tick;
+	// with a 24h interval, a wait-first loop would not have ticked yet.
+	pulled := false
 
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if headRev(t, cloneDir) != before {
-			return // initial tick fast-forwarded the clone, well inside the 24h interval
+			pulled = true
+
+			break
 		}
 
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	t.Fatal("git-pull loop did not perform its initial tick before the interval elapsed")
+	if !pulled {
+		t.Fatal("git-pull loop did not perform its initial tick before the interval elapsed")
+	}
 }
