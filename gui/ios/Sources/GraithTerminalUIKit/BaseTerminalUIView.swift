@@ -38,6 +38,22 @@ public final class BaseTerminalUIView: UIView {
     public lazy var tokenizer: UITextInputTokenizer = UITextInputStringTokenizer(textInput: self)
     public weak var inputDelegate: UITextInputDelegate?
 
+    // MARK: - Scroll (issue #984)
+
+    /// Pure physics/state for two-finger scrollback scrolling: momentum, bounce,
+    /// and the indicator thumb. UIKit glue below feeds it gestures + frame ticks.
+    private var scroll = TerminalScrollController()
+    /// Last touch point of a scroll gesture, reused as the surface position for
+    /// forwarded mouse-wheel events (TUI apps) and momentum frames.
+    private var lastScrollPoint: CGPoint = .zero
+    /// Thin scroll-position indicator drawn on the trailing edge.
+    private let scrollIndicator = UIView()
+    private let scrollIndicatorInset: CGFloat = 4
+    private var indicatorHideWork: DispatchWorkItem?
+    /// Chevron shown when the viewport is scrolled up off the live bottom.
+    private let jumpToBottomButton = UIButton(type: .system)
+    private var jumpButtonVisible = false
+
     public init(viewModel: TerminalAttachViewModel, renderer: TerminalRenderer) {
         self.viewModel = viewModel
         self.renderer = renderer
@@ -46,6 +62,7 @@ public final class BaseTerminalUIView: UIView {
         backgroundColor = .black
         isMultipleTouchEnabled = true
         accessory.delegate = self
+        setupScrollUI()
         setupGestures()
     }
 
@@ -100,6 +117,12 @@ public final class BaseTerminalUIView: UIView {
     }
 
     @objc private func tick() {
+        if scroll.isSettling, let link = displayLink {
+            // CADisplayLink's frame interval; clamp so a stall doesn't fling.
+            let dt = CGFloat(min(0.05, max(0, link.targetTimestamp - link.timestamp)))
+            stepScrollPhysics(dt: dt)
+        }
+        refreshJumpButton()
         renderer.renderIfNeeded()
     }
 
@@ -109,6 +132,11 @@ public final class BaseTerminalUIView: UIView {
         super.layoutSubviews()
         let scale = window?.screen.scale ?? UIScreen.main.scale
         renderer.layout(bounds: bounds, scale: scale)
+        // Re-apply any live overscroll transform after the renderer resets its
+        // layer frame to `bounds`, so a resize mid-bounce doesn't snap.
+        applyOverscrollTransform()
+        layoutJumpToBottomButton()
+        updateScrollIndicator()
         sendResizeFromBounds()
     }
 
@@ -150,9 +178,12 @@ public final class BaseTerminalUIView: UIView {
         let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap))
         addGestureRecognizer(tap)
 
+        // Two-finger drag scrolls the scrollback (issue #984). Single-finger is
+        // reserved for tap-to-focus and long-press selection, matching the iOS
+        // convention where one finger interacts with content and two scroll it.
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handleScroll))
-        pan.minimumNumberOfTouches = 1
-        pan.maximumNumberOfTouches = 1
+        pan.minimumNumberOfTouches = 2
+        pan.maximumNumberOfTouches = 2
         addGestureRecognizer(pan)
 
         let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleSelection))
@@ -164,28 +195,171 @@ public final class BaseTerminalUIView: UIView {
         if !isFirstResponder { _ = becomeFirstResponder() }
     }
 
-    private var scrollAccumulator: CGFloat = 0
+    // MARK: - Scroll gesture + physics (issue #984)
 
     @objc private func handleScroll(_ gesture: UIPanGestureRecognizer) {
         let cell = renderer.cellSize
         guard cell.height > 0 else { return }
+        lastScrollPoint = gesture.location(in: self)
         switch gesture.state {
         case .began:
-            scrollAccumulator = 0
+            scroll.cellHeight = cell.height
+            scroll.beginDrag()
+            showScrollIndicator()
         case .changed:
-            let translation = gesture.translation(in: self).y
-            scrollAccumulator += translation
+            let dy = gesture.translation(in: self).y
             gesture.setTranslation(.zero, in: self)
-            let rowDelta = Int(scrollAccumulator / cell.height)
-            if rowDelta != 0 {
-                // Drag down => scroll up into scrollback (negative viewport delta).
-                viewModel.core.scrollViewport(byRows: -rowDelta)
-                scrollAccumulator -= CGFloat(rowDelta) * cell.height
-                renderer.setNeedsRender()
+            let rows = scroll.drag(translationDelta: dy)
+            if rows != 0 {
+                scroll.absorbOverscroll(rows: applyScroll(rows, at: lastScrollPoint))
             }
+            applyOverscrollTransform()
+            updateScrollIndicator()
+        case .ended, .cancelled, .failed:
+            scroll.endDrag(velocityY: gesture.velocity(in: self).y)
+            // Momentum / spring continues on the display-link `tick`; if it
+            // settled immediately, fade the indicator out.
+            if !scroll.isSettling { scheduleIndicatorHide() }
         default:
             break
         }
+    }
+
+    /// Advance momentum/spring one frame: apply any row delta (or forward it as
+    /// mouse-wheel to a TUI), feed back boundary overscroll, and update the
+    /// visual bounce + indicator.
+    private func stepScrollPhysics(dt: CGFloat) {
+        let rows = scroll.tick(dt: dt)
+        if rows != 0 {
+            scroll.absorbOverscroll(rows: applyScroll(rows, at: lastScrollPoint))
+        }
+        applyOverscrollTransform()
+        updateScrollIndicator()
+        if !scroll.isSettling { scheduleIndicatorHide() }
+    }
+
+    /// Apply a viewport row delta. For a mouse-tracking program (a TUI like
+    /// `claude`, vim, tmux) the scroll is forwarded as wheel events so the
+    /// program scrolls its own content; otherwise it moves the local scrollback
+    /// viewport. Returns the rows the core refused at a boundary (0 for a TUI,
+    /// which manages its own history), for rubber-band overscroll.
+    @discardableResult
+    private func applyScroll(_ rows: Int, at point: CGPoint) -> Int {
+        guard rows != 0 else { return 0 }
+        if viewModel.core.isMouseTrackingActive {
+            forwardWheel(rows: rows, at: point)
+            return 0
+        }
+        let before = viewModel.core.scrollMetrics().offset
+        viewModel.core.scrollViewport(byRows: rows)
+        renderer.setNeedsRender()
+        let after = viewModel.core.scrollMetrics().offset
+        return rows - (after - before)
+    }
+
+    /// Forward a row delta to a mouse-tracking program as wheel events.
+    private func forwardWheel(rows: Int, at point: CGPoint) {
+        let cell = renderer.cellSize
+        guard cell.width > 0, cell.height > 0 else { return }
+        let scale = window?.screen.scale ?? UIScreen.main.scale
+        let chunks = viewModel.core.encodeScrollWheel(
+            ticks: rows,
+            surfaceX: Double(point.x * scale), surfaceY: Double(point.y * scale),
+            screenWidth: UInt32(bounds.width * scale), screenHeight: UInt32(bounds.height * scale),
+            cellWidth: UInt32(cell.width * scale), cellHeight: UInt32(cell.height * scale))
+        for chunk in chunks { viewModel.sendRaw(chunk) }
+    }
+
+    private func applyOverscrollTransform() {
+        let ty = scroll.contentTranslation(viewportHeight: bounds.height)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        renderer.layer.transform = CATransform3DMakeTranslation(0, ty, 0)
+        CATransaction.commit()
+    }
+
+    // MARK: - Scroll indicator + jump-to-bottom
+
+    private func setupScrollUI() {
+        scrollIndicator.backgroundColor = UIColor.white.withAlphaComponent(0.35)
+        scrollIndicator.layer.cornerRadius = 1.5
+        scrollIndicator.alpha = 0
+        scrollIndicator.isUserInteractionEnabled = false
+        addSubview(scrollIndicator)
+
+        let config = UIImage.SymbolConfiguration(pointSize: 20, weight: .semibold)
+        jumpToBottomButton.setImage(UIImage(systemName: "chevron.down", withConfiguration: config), for: .normal)
+        jumpToBottomButton.tintColor = .white
+        jumpToBottomButton.backgroundColor = UIColor.black.withAlphaComponent(0.55)
+        jumpToBottomButton.layer.cornerRadius = 20
+        jumpToBottomButton.alpha = 0
+        jumpToBottomButton.isUserInteractionEnabled = false
+        jumpToBottomButton.addTarget(self, action: #selector(handleJumpToBottom), for: .touchUpInside)
+        addSubview(jumpToBottomButton)
+    }
+
+    private func layoutJumpToBottomButton() {
+        let size: CGFloat = 40
+        let margin: CGFloat = 16
+        jumpToBottomButton.frame = CGRect(
+            x: bounds.width - size - margin,
+            y: bounds.height - size - margin,
+            width: size, height: size)
+    }
+
+    private func showScrollIndicator() {
+        indicatorHideWork?.cancel()
+        indicatorHideWork = nil
+        updateScrollIndicator()
+        UIView.animate(withDuration: 0.1) { self.scrollIndicator.alpha = 1 }
+    }
+
+    private func scheduleIndicatorHide() {
+        indicatorHideWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            UIView.animate(withDuration: 0.4) { self?.scrollIndicator.alpha = 0 }
+        }
+        indicatorHideWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: work)
+    }
+
+    private func updateScrollIndicator() {
+        let track = bounds.height - 2 * scrollIndicatorInset
+        guard track > 0,
+              let thumb = TerminalScrollController.thumb(
+                metrics: viewModel.core.scrollMetrics(), trackLength: track) else {
+            // Nothing to scroll (empty history, or a TUI's alt-screen).
+            scrollIndicator.isHidden = true
+            return
+        }
+        scrollIndicator.isHidden = false
+        let width: CGFloat = 3
+        scrollIndicator.frame = CGRect(
+            x: bounds.width - width - 2,
+            y: scrollIndicatorInset + thumb.offset,
+            width: width, height: thumb.length)
+        scrollIndicator.layer.cornerRadius = width / 2
+    }
+
+    /// Show the jump-to-bottom chevron only when scrolled up off the live bottom
+    /// and not driving a mouse-tracking program (which owns its own scrollback).
+    /// Called every frame but no-ops unless the visible state actually changes.
+    private func refreshJumpButton() {
+        let shouldShow = !viewModel.core.isViewportAtBottom && !viewModel.core.isMouseTrackingActive
+        guard shouldShow != jumpButtonVisible else { return }
+        jumpButtonVisible = shouldShow
+        jumpToBottomButton.isUserInteractionEnabled = shouldShow
+        UIView.animate(withDuration: 0.2) { self.jumpToBottomButton.alpha = shouldShow ? 1 : 0 }
+    }
+
+    @objc private func handleJumpToBottom() {
+        scroll.stop()
+        viewModel.core.scrollToBottom()
+        applyOverscrollTransform()
+        renderer.setNeedsRender()
+        refreshJumpButton()
+        updateScrollIndicator()
+        scheduleIndicatorHide()
     }
 
     @objc private func handleSelection(_ gesture: UILongPressGestureRecognizer) {

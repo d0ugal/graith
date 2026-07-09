@@ -77,6 +77,27 @@ public struct ViewportCell: Sendable, Hashable {
     }
 }
 
+/// Scrollback geometry for drawing a scroll-position indicator and detecting
+/// boundaries (issue #984). `total` is the scrollable height in rows, `offset`
+/// the viewport's distance in rows from the top of that area, and `len` the
+/// visible viewport height in rows. When `total <= len` there is nothing to
+/// scroll (no history).
+public struct ScrollMetrics: Sendable, Equatable {
+    public var total: Int
+    public var offset: Int
+    public var len: Int
+    public init(total: Int, offset: Int, len: Int) {
+        self.total = total
+        self.offset = offset
+        self.len = len
+    }
+
+    /// True when the viewport sits at the live bottom (no room to scroll down).
+    public var isAtBottom: Bool { offset >= max(0, total - len) }
+    /// True when there is scrollback history to reveal.
+    public var hasHistory: Bool { total > len }
+}
+
 /// What `BaseTerminalUIView` needs from the VT core. Implemented for real by
 /// `GhosttyTerminalState` (via an adapter extension) and by
 /// `GraithMobileMock.MockTerminalCore` for tests / previews.
@@ -99,6 +120,25 @@ public protocol TerminalCoreDriving: AnyObject {
     func scrollViewport(byRows delta: Int)
     func scrollToBottom()
     var isViewportAtBottom: Bool { get }
+
+    /// Current scrollback geometry (for the scroll-position indicator and
+    /// boundary detection). May be relatively expensive — read it only when
+    /// updating the indicator, not on every frame.
+    func scrollMetrics() -> ScrollMetrics
+
+    /// Whether the running program has requested mouse tracking (e.g. a TUI like
+    /// `claude`, vim, htop, tmux). When true, scroll gestures must be forwarded
+    /// as mouse-wheel events (`encodeScrollWheel`) so the program scrolls its own
+    /// content, rather than moving the local scrollback viewport.
+    var isMouseTrackingActive: Bool { get }
+
+    /// Encode `ticks` mouse-wheel events for a mouse-tracking program at the
+    /// given surface pixel position. `ticks` is signed: positive scrolls the
+    /// content down (toward newer output / wheel-down), negative scrolls up.
+    /// Returns one encoded byte-chunk per tick, to send on channel 0x01.
+    func encodeScrollWheel(ticks: Int, surfaceX: Double, surfaceY: Double,
+                           screenWidth: UInt32, screenHeight: UInt32,
+                           cellWidth: UInt32, cellHeight: UInt32) -> [Data]
 
     // Selection (touch gestures on iOS).
     func beginSelection(at cell: ViewportCell, surfaceX: Double, surfaceY: Double, timeNs: UInt64)
