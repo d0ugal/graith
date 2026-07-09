@@ -107,8 +107,39 @@ func HasUncommittedChanges(dir string) (bool, error) {
 	return len(out) > 0, nil
 }
 
+// UnpushedCommitCount returns the number of commits on HEAD that have not been
+// pushed to the remote.
+//
+// It compares against the current branch's remote tracking ref
+// (origin/<branch>) when that ref exists. This answers "have I pushed my
+// commits?" and reflects real push state without any network I/O: `git push`
+// updates the local tracking ref, and after a branch's PR is merged the
+// tracking ref still points at the pushed tip, so the count correctly reads 0
+// (no false "N ahead of main"). See issue #197.
+//
+// When the branch has never been pushed (no tracking ref) it falls back to
+// counting commits ahead of the base branch — everything that would be pushed.
+// The base ref itself may be stale without a fetch; a periodic fetch in the
+// daemon keeps it reasonably fresh.
 func UnpushedCommitCount(worktreePath, baseBranch string) (int, error) {
-	out, err := RunOutput(worktreePath, "rev-list", "--count", "origin/"+baseBranch+"..HEAD")
+	branch, err := RunOutput(worktreePath, "rev-parse", "--abbrev-ref", "HEAD")
+	if err == nil && branch != "" && branch != "HEAD" {
+		if trackingRef := "origin/" + branch; RefExists(worktreePath, trackingRef) {
+			return commitCount(worktreePath, trackingRef+"..HEAD")
+		}
+	}
+
+	// Branch not pushed yet (no tracking ref): count commits ahead of the base.
+	baseRef := "origin/" + baseBranch
+	if !RefExists(worktreePath, baseRef) {
+		baseRef = baseBranch
+	}
+
+	return commitCount(worktreePath, baseRef+"..HEAD")
+}
+
+func commitCount(worktreePath, revRange string) (int, error) {
+	out, err := RunOutput(worktreePath, "rev-list", "--count", revRange)
 	if err != nil {
 		return 0, err
 	}
@@ -119,6 +150,19 @@ func UnpushedCommitCount(worktreePath, baseBranch string) (int, error) {
 	}
 
 	return n, nil
+}
+
+// FetchRemote updates remote tracking refs from origin. It prunes deleted
+// remote branches and never rewrites local branches. It is best-effort:
+// callers use it to keep base-branch refs fresh for the diverged-from-base
+// count and should tolerate failures (offline, no remote).
+func FetchRemote(ctx context.Context, worktreePath string) error {
+	_, stderr, err := RunContext(ctx, worktreePath, "fetch", "--prune", "--quiet", "origin")
+	if err != nil {
+		return fmt.Errorf("git fetch origin: %w\nstderr: %s", err, stderr)
+	}
+
+	return nil
 }
 
 func DirtyFiles(dir string) ([]string, error) {
