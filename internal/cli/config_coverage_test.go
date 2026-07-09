@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/d0ugal/graith/internal/config"
@@ -76,6 +77,10 @@ func TestConfigResetCovRefusesOverwriteNonInteractive(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error refusing to overwrite in non-interactive mode")
 		}
+
+		if !strings.Contains(err.Error(), "--force") {
+			t.Errorf("error should direct the user to --force, got %q", err)
+		}
 	})
 
 	// The original content must be untouched.
@@ -144,22 +149,40 @@ func TestConfigShowCovValidFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	var got string
+
 	withConfigGlobals(t, target, config.Paths{ConfigFile: target}, func() {
-		if err := configShowCmd.RunE(configShowCmd, nil); err != nil {
-			t.Fatalf("show: %v", err)
-		}
+		got = captureStdout(t, func() {
+			if err := configShowCmd.RunE(configShowCmd, nil); err != nil {
+				t.Fatalf("show: %v", err)
+			}
+		})
 	})
+
+	// The user-set value must appear in the merged output.
+	if !strings.Contains(got, `default_agent = 'codex'`) && !strings.Contains(got, `default_agent = "codex"`) {
+		t.Errorf("show output missing user default_agent=codex:\n%s", got)
+	}
 }
 
 func TestConfigShowCovMissingFileUsesDefaults(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "nope.toml")
 
+	var got string
+
 	withConfigGlobals(t, target, config.Paths{ConfigFile: target}, func() {
-		if err := configShowCmd.RunE(configShowCmd, nil); err != nil {
-			t.Fatalf("show missing file should fall back to defaults: %v", err)
-		}
+		got = captureStdout(t, func() {
+			if err := configShowCmd.RunE(configShowCmd, nil); err != nil {
+				t.Fatalf("show missing file should fall back to defaults: %v", err)
+			}
+		})
 	})
+
+	// Missing file -> defaults, so the default agent must be printed.
+	if !strings.Contains(got, "claude") {
+		t.Errorf("show output for missing file should contain default agent 'claude':\n%s", got)
+	}
 }
 
 func TestConfigDiffCovNoChanges(t *testing.T) {
