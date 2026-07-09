@@ -245,6 +245,10 @@ func (g GitPullConfig) IntervalDuration() time.Duration {
 // They are separate signals: a reviewer leaving inline nits and someone
 // dropping a "ship it" on the conversation thread differ, and a user may want
 // one without the other.
+//
+// For backward compatibility, notify_pr_comments used to be folded into
+// notify_review_comments; see applyPRWatchCommentCompat, which keeps an older
+// config that only set notify_review_comments delivering conversation comments.
 type PRWatchConfig struct {
 	Enabled               bool   `toml:"enabled"`
 	NotifyCIFailures      bool   `toml:"notify_ci_failures"`
@@ -1266,6 +1270,8 @@ func Load(path string) (*Config, error) {
 
 	cfg.Agents = mergeAgents(defaultAgents, cfg.Agents)
 
+	applyPRWatchCommentCompat(cfg, data)
+
 	// go-toml/v2's default Unmarshal silently ignores unknown keys, so a typo'd
 	// key under [approvals.builtin] (e.g. "dney" for "deny") would be dropped —
 	// a fail-open for an approvals deny-list. Reject unknown keys in that subtree
@@ -1279,6 +1285,47 @@ func Load(path string) (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// applyPRWatchCommentCompat preserves the pre-split meaning of
+// notify_review_comments for existing configs. Before notify_pr_comments
+// existed, notify_review_comments gated BOTH inline review comments and
+// issue-style PR conversation comments. So that upgrading doesn't silently drop
+// a whole notification class, a config that enables notify_review_comments but
+// never mentions notify_pr_comments keeps delivering conversation comments. A
+// config that sets notify_pr_comments explicitly (to either value) has opted
+// into the granular gates and is left untouched — including the fresh-install
+// default, where the embedded default TOML sets the key.
+func applyPRWatchCommentCompat(cfg *Config, data []byte) {
+	if !cfg.PRWatch.NotifyReviewComments {
+		return
+	}
+
+	if tomlHasKey(data, "pr_watch", "notify_pr_comments") {
+		return
+	}
+
+	cfg.PRWatch.NotifyPRComments = true
+}
+
+// tomlHasKey reports whether the raw TOML sets table.key. It distinguishes an
+// explicitly-set value from an absent one, which a typed unmarshal into a plain
+// bool cannot. Structural errors are ignored here — they surface from the typed
+// Unmarshal in Load instead.
+func tomlHasKey(data []byte, table, key string) bool {
+	var raw map[string]any
+	if err := toml.Unmarshal(data, &raw); err != nil {
+		return false
+	}
+
+	t, ok := raw[table].(map[string]any)
+	if !ok {
+		return false
+	}
+
+	_, ok = t[key]
+
+	return ok
 }
 
 // approvalsBuiltinKeys is the set of valid keys under [approvals.builtin].
