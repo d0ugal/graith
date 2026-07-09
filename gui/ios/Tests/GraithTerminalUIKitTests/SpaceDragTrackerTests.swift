@@ -92,6 +92,25 @@ final class SpaceDragTrackerTests: XCTestCase {
                        "re-crossing the threshold is a new press")
     }
 
+    func testHysteresisKeepsAHeldAxisAgainstDiagonalWobble() {
+        var tracker = SpaceDragTracker(activationThreshold: 22, directionHysteresis: 1.5)
+        tracker.begin()
+        XCTAssertEqual(tracker.update(translation: CGPoint(x: 30, y: 0), time: 0.0), [.arrowRight])
+        // Vertical now nominally dominates (29 < 30) but not past the hysteresis
+        // margin, so the held horizontal axis stays and no spurious arrow fires.
+        XCTAssertTrue(tracker.update(translation: CGPoint(x: 29, y: 30), time: 0.01).isEmpty,
+                      "a near-diagonal wobble must not thrash off the held axis")
+    }
+
+    func testHysteresisStillYieldsToAClearAxisChange() {
+        var tracker = SpaceDragTracker(activationThreshold: 22, directionHysteresis: 1.5)
+        tracker.begin()
+        XCTAssertEqual(tracker.update(translation: CGPoint(x: 30, y: 0), time: 0.0), [.arrowRight])
+        // Vertical clearly dominates (40 vs 5), well past the margin: switch axes.
+        XCTAssertEqual(tracker.update(translation: CGPoint(x: 5, y: 40), time: 0.01), [.arrowDown],
+                       "a decisive axis change still flips direction")
+    }
+
     func testDominantAxisWins() {
         var tracker = SpaceDragTracker(activationThreshold: 22)
         tracker.begin()

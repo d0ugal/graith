@@ -415,6 +415,13 @@ func testSpaceDrag() {
     var diag = SpaceDragTracker(activationThreshold: 22); diag.begin()
     check(diag.update(translation: CGPoint(x: 5, y: 30), time: 0) == [.arrowDown], "vertical-dominant drag ⇒ arrowDown")
 
+    // Hysteresis holds a chosen axis against near-diagonal wobble, but yields to a
+    // decisive axis change.
+    var hyst = SpaceDragTracker(activationThreshold: 22, directionHysteresis: 1.5); hyst.begin()
+    check(hyst.update(translation: CGPoint(x: 30, y: 0), time: 0.0) == [.arrowRight], "press right")
+    check(hyst.update(translation: CGPoint(x: 29, y: 30), time: 0.01).isEmpty, "near-diagonal wobble stays on the held axis")
+    check(hyst.update(translation: CGPoint(x: 5, y: 40), time: 0.02) == [.arrowDown], "decisive axis change still flips")
+
     // begin() resets committed state so the tracker is reusable across drags.
     var reused = SpaceDragTracker(activationThreshold: 22); reused.begin()
     _ = reused.update(translation: CGPoint(x: 40, y: 0), time: 0)

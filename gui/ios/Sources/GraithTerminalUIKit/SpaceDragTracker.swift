@@ -27,6 +27,12 @@ public struct SpaceDragTracker {
     /// Seconds between auto-repeats once repeating has started.
     public let repeatInterval: Double
 
+    /// How much the off-axis component must beat the currently-held axis before
+    /// the direction switches axes (horizontal ⇄ vertical). Keeps a finger held
+    /// near a 45° diagonal from thrashing between two arrows on tiny wobbles. A
+    /// value of 1 disables the hysteresis (any dominance switches).
+    public let directionHysteresis: CGFloat
+
     /// The direction currently "held" (nil when the finger is within the
     /// activation threshold of the origin, i.e. no key pressed).
     private var heldDirection: TerminalKey?
@@ -44,10 +50,12 @@ public struct SpaceDragTracker {
 
     public init(activationThreshold: CGFloat = 22,
                 initialRepeatDelay: Double = 0.5,
-                repeatInterval: Double = 0.1) {
+                repeatInterval: Double = 0.1,
+                directionHysteresis: CGFloat = 1.5) {
         self.activationThreshold = max(1, activationThreshold)
         self.initialRepeatDelay = max(0, initialRepeatDelay)
         self.repeatInterval = max(0.001, repeatInterval)
+        self.directionHysteresis = max(1, directionHysteresis)
     }
 
     /// Begin a fresh drag (call on gesture `.began`).
@@ -93,12 +101,29 @@ public struct SpaceDragTracker {
     /// The arrow implied by a translation, or nil if the finger is still within
     /// the activation threshold of the origin. The dominant axis wins; because the
     /// larger component decides direction, whenever either component clears the
-    /// threshold the dominant one has too.
+    /// threshold the dominant one has too. When a direction is already held, the
+    /// off-axis component must beat the held axis by `directionHysteresis` before
+    /// the axis flips, so a finger wobbling near the diagonal stays put instead of
+    /// thrashing between two arrows.
     private func direction(for translation: CGPoint) -> TerminalKey? {
         let ax = abs(translation.x)
         let ay = abs(translation.y)
         if ax < activationThreshold && ay < activationThreshold { return nil }
-        if ax >= ay {
+
+        let horizontal: Bool
+        switch heldDirection {
+        case .arrowLeft, .arrowRight:
+            // Held horizontal: flip to vertical only if vertical clearly dominates.
+            horizontal = ay <= ax * directionHysteresis
+        case .arrowUp, .arrowDown:
+            // Held vertical: flip to horizontal only if horizontal clearly dominates.
+            horizontal = ax > ay * directionHysteresis
+        default:
+            // No axis held yet: plain dominant-axis pick, ties go horizontal.
+            horizontal = ax >= ay
+        }
+
+        if horizontal {
             return translation.x >= 0 ? .arrowRight : .arrowLeft
         } else {
             return translation.y >= 0 ? .arrowDown : .arrowUp
