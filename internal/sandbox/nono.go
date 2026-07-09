@@ -179,6 +179,8 @@ func isWithinAny(path string, prefixes []string) bool {
 //     entry is routed to filesystem.read_file (nono rejects a file in a dir grant)
 //   - write_files         -> filesystem.allow_file (read+write single file)
 //   - read_files          -> filesystem.read_file  (read-only single file)
+//   - unix_sockets        -> filesystem.unix_socket (connect to existing socket,
+//     e.g. the graith daemon socket; same field the "ssh" feature uses)
 //   - EnvKeys             -> environment.allow_vars (env allowlist; the env-leak
 //     fix). Always emitted, even when EnvKeys is empty: an absent block makes
 //     nono inherit ALL of the daemon's env (fail-open), so an empty allowlist
@@ -269,6 +271,11 @@ func buildNonoProfile(name string, opts WrapOpts, sshAuthSock string) (nonoProfi
 	// also punches through the "extends: default" deny_credentials group, which
 	// is exactly what a login file like ~/.claude.json needs.
 	p.Filesystem.AllowFile = append(p.Filesystem.AllowFile, opts.WriteFiles...)
+
+	// unix_sockets map to filesystem.unix_socket = connect access to an existing
+	// socket (the same field the "ssh" feature uses for $SSH_AUTH_SOCK). This is
+	// how a sandboxed agent reaches the graith daemon socket for `gr msg` etc.
+	p.Filesystem.UnixSocket = append(p.Filesystem.UnixSocket, opts.UnixSockets...)
 
 	// read_files map to read_file = read-only single file, with the same
 	// /tmp/$TMPDIR rejection guard as read_dirs (nono cannot make a file under a

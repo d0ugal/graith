@@ -38,8 +38,17 @@ type WrapOpts struct {
 	// backend folds them into its read-only / read-write dir lists.
 	ReadFiles  []string
 	WriteFiles []string
-	Features   []string
-	EnvKeys    []string
+	// UnixSockets grants connect access to existing Unix domain sockets (e.g.
+	// the graith daemon socket, so a sandboxed agent can reach the daemon for
+	// `gr msg`, `gr status`, etc.). A read-only path grant is NOT enough to
+	// connect() to a socket: safehouse folds these into its read/write dir list
+	// (a read/write grant is what lets Seatbelt permit the connect, as proven by
+	// docker.sock/podman.sock), and nono maps them to filesystem.unix_socket
+	// (the same field the "ssh" feature uses for $SSH_AUTH_SOCK). Paths are
+	// already absolute.
+	UnixSockets []string
+	Features    []string
+	EnvKeys     []string
 
 	// SignalMode maps to nono's security.signal_mode ("isolated",
 	// "allow_same_sandbox", "allow_all"). Empty inherits nono's default. The

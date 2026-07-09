@@ -73,11 +73,18 @@ func (safehouseBackend) Wrap(command string, args []string, opts WrapOpts) (stri
 		return "", nil, fmt.Errorf("write files: %w", err)
 	}
 
+	if err := validateSafehousePaths(opts.UnixSockets...); err != nil {
+		return "", nil, fmt.Errorf("unix sockets: %w", err)
+	}
+
 	// safehouse has no file-vs-directory distinction in its flags; Seatbelt path
 	// rules apply to files too. Fold file grants into the matching path list so
-	// read_files/write_files behave consistently across backends.
+	// read_files/write_files behave consistently across backends. Unix sockets
+	// need a read/write grant to connect() (read-only lets a process stat the
+	// socket but not connect), so they join the write list alongside how
+	// docker.sock/podman.sock are granted.
 	readPaths := append(append([]string{}, opts.ReadDirs...), opts.ReadFiles...)
-	writePaths := append(append([]string{}, opts.WriteDirs...), opts.WriteFiles...)
+	writePaths := append(append(append([]string{}, opts.WriteDirs...), opts.WriteFiles...), opts.UnixSockets...)
 
 	var wrapped []string
 

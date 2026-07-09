@@ -3,10 +3,12 @@ package daemon
 import (
 	"log/slog"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/sandbox"
 )
 
 func newSandboxTestManager(t *testing.T, cfg *config.Config) *SessionManager {
@@ -96,6 +98,50 @@ func TestSandboxOptsCarryBackend(t *testing.T) {
 
 	if !strings.Contains(opts.ProfilePath, sm.paths.RuntimeDir) {
 		t.Errorf("opts.ProfilePath should live under RuntimeDir (readable in sandbox), got %q", opts.ProfilePath)
+	}
+}
+
+// TestSandboxOptsGrantDaemonSocket is a regression test for sandboxed agents
+// being unable to reach the daemon: `gr msg`, `gr status`, etc. failed with
+// "daemon did not start in time" because the runtime dir holding the daemon
+// socket was granted read-only, and a read-only grant lets a process stat a
+// Unix socket but not connect() to it. sandboxOptsFromConfig must grant the
+// socket via UnixSockets (a connect-capable grant), scoped to the socket file.
+func TestSandboxOptsGrantDaemonSocket(t *testing.T) {
+	cfg := config.Default()
+	cfg.Sandbox = config.SandboxConfig{Enabled: true, Backend: "safehouse"}
+
+	sm := newSandboxTestManager(t, cfg)
+
+	opts := sm.sandboxOptsFromConfig(cfg.Sandbox, "braw123", "/tmp/bothy", "claude", []string{"TERM"}, false)
+
+	if !slices.Contains(opts.UnixSockets, sm.paths.SocketPath) {
+		t.Fatalf("daemon socket %q not granted via UnixSockets: %v", sm.paths.SocketPath, opts.UnixSockets)
+	}
+
+	// The safehouse backend must fold it into the read/write --add-dirs list
+	// (connect-capable), never the read-only --add-dirs-ro list.
+	_, args, err := sandbox.Wrap("claude", nil, opts)
+	if err != nil {
+		t.Fatalf("wrap: %v", err)
+	}
+
+	inFlag := func(flag string) bool {
+		for i, a := range args {
+			if a == flag && i+1 < len(args) && slices.Contains(strings.Split(args[i+1], ":"), sm.paths.SocketPath) {
+				return true
+			}
+		}
+
+		return false
+	}
+
+	if !inFlag("--add-dirs") {
+		t.Errorf("daemon socket not in read/write --add-dirs: %v", args)
+	}
+
+	if inFlag("--add-dirs-ro") {
+		t.Errorf("daemon socket wrongly in read-only --add-dirs-ro: %v", args)
 	}
 }
 
