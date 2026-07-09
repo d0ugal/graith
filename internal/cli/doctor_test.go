@@ -47,9 +47,11 @@ func makeTmpRepo(t *testing.T, root, repo, hash string, fileBytes int) {
 }
 
 // TestCheckTmpDirSkipsSizeByDefault verifies the default (no --disk) run reports
-// the tmp repo count without walking the tree for a byte size, and flags that a
-// --disk run would surface sizes. This is the crux of the doctor perf fix: the
-// expensive full-tree walk must not run unless explicitly requested.
+// the tmp repo count without walking the tree for a byte size. This is the crux
+// of the doctor perf fix: the expensive full-tree walk must not run unless
+// explicitly requested. It must also NOT set suggestDisk — a tmp repo dir
+// exists on every active install, so the --disk hint would otherwise fire on
+// essentially every run.
 func TestCheckTmpDirSkipsSizeByDefault(t *testing.T) {
 	oldOut, oldPaths, oldDisk := out, paths, doctorDisk
 
@@ -78,8 +80,41 @@ func TestCheckTmpDirSkipsSizeByDefault(t *testing.T) {
 		t.Errorf("default run should not report a byte size (no full-tree walk), got: %q", got)
 	}
 
+	if dc.suggestDisk {
+		t.Error("suggestDisk should not fire for ordinary tmp repos (present on every install)")
+	}
+}
+
+// TestCheckTmpDirLegacyDirSuggestsDisk verifies a leftover legacy "share" dir
+// (a genuine anomaly, unlike ordinary tmp repos) does set suggestDisk in the
+// default run, so doctor recommends --disk to measure it.
+func TestCheckTmpDirLegacyDirSuggestsDisk(t *testing.T) {
+	oldOut, oldPaths, oldDisk := out, paths, doctorDisk
+
+	t.Cleanup(func() {
+		out, paths, doctorDisk = oldOut, oldPaths, oldDisk
+	})
+
+	// checkTmpDir looks for a "share" dir alongside tmpDir, so tmpDir must sit
+	// under a parent we control.
+	parent := t.TempDir()
+	tmpRoot := filepath.Join(parent, "tmp")
+	makeTmpRepo(t, tmpRoot, "croft", "abc123", 1024)
+
+	if err := os.MkdirAll(filepath.Join(parent, "share"), 0o755); err != nil { //nolint:gosec // G301: test fixture
+		t.Fatalf("mkdir legacy share: %v", err)
+	}
+
+	paths = config.Paths{TmpDir: tmpRoot}
+
+	doctorDisk = false
+	out = output.NewWithWriter(false, io.Discard)
+
+	dc := newDoctorContext()
+	dc.checkTmpDir()
+
 	if !dc.suggestDisk {
-		t.Error("expected suggestDisk to be set when tmp repos exist without --disk")
+		t.Error("expected suggestDisk to be set when a legacy share dir exists")
 	}
 }
 

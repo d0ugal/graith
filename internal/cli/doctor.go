@@ -43,11 +43,15 @@ type doctorCheck struct {
 }
 
 type doctorReport struct {
-	CLIVersion    string                   `json:"cli_version"`
-	DaemonVersion string                   `json:"daemon_version,omitempty"`
-	OK            bool                     `json:"ok"`
-	Checks        []doctorCheck            `json:"checks"`
-	Diagnostics   *protocol.DiagnosticsMsg `json:"diagnostics,omitempty"`
+	CLIVersion    string `json:"cli_version"`
+	DaemonVersion string `json:"daemon_version,omitempty"`
+	OK            bool   `json:"ok"`
+	// DiskMeasured reports whether on-disk sizes were computed (the --disk
+	// flag). When false, size figures are omitted from the check messages, so
+	// JSON consumers can tell sizes were skipped rather than assumed zero.
+	DiskMeasured bool                     `json:"disk_measured"`
+	Checks       []doctorCheck            `json:"checks"`
+	Diagnostics  *protocol.DiagnosticsMsg `json:"diagnostics,omitempty"`
 }
 
 type doctorContext struct {
@@ -122,6 +126,7 @@ var doctorCmd = &cobra.Command{
 		}
 
 		report.OK = dc.ok
+		report.DiskMeasured = doctorDisk
 		report.Checks = dc.checks
 
 		if jsonOutput {
@@ -1016,14 +1021,21 @@ func (dc *doctorContext) checkTmpDir() {
 	case doctorDisk:
 		dc.passf("storage", "Tmp dir: %s (%d repo(s), %s)", tmpDir, repoCount, formatBytes(totalSize))
 	default:
+		// Deliberately do NOT set suggestDisk here: a tmp repo dir is created
+		// for every repo graith operates on, so it's present on every active
+		// install and is not an anomaly. Suggesting --disk on it would make the
+		// hint fire on essentially every run. The hint is reserved for genuine
+		// leftover artifacts (orphaned worktrees, a legacy dir).
 		dc.passf("storage", "Tmp dir: %s (%d repo(s))", tmpDir, repoCount)
-		dc.suggestDisk = true
 	}
 
 	legacyShareDir := filepath.Join(filepath.Dir(tmpDir), "share")
 	if info, err := os.Stat(legacyShareDir); err == nil && info.IsDir() {
 		dc.warnf("storage", "Legacy share dir exists: %s%s", legacyShareDir, dirSizeSuffix(legacyShareDir))
-		dc.suggestDisk = true
+
+		if !doctorDisk {
+			dc.suggestDisk = true
+		}
 
 		if doctorAutofix {
 			if os.RemoveAll(legacyShareDir) == nil {
