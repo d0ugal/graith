@@ -145,8 +145,8 @@ func (sm *SessionManager) pullIfClean(ctx context.Context, repoPath string) (boo
 		return false, nil
 	}
 
-	if sm.hasActiveSessionForRepo(repoPath) {
-		sm.log.Debug("git-pull: skipping repo with active session", "repo", repoPath)
+	if sm.hasBlockingSessionForRepo(repoPath, defaultBranch) {
+		sm.log.Debug("git-pull: skipping repo with active session on default branch", "repo", repoPath)
 		return false, nil
 	}
 
@@ -235,8 +235,8 @@ func (sm *SessionManager) pullIfClean(ctx context.Context, repoPath string) (boo
 		return false, nil
 	}
 
-	if sm.hasActiveSessionForRepo(repoPath) {
-		sm.log.Debug("git-pull: skipping repo with session created during fetch", "repo", repoPath)
+	if sm.hasBlockingSessionForRepo(repoPath, defaultBranch) {
+		sm.log.Debug("git-pull: skipping repo with blocking session created during fetch", "repo", repoPath)
 		return false, nil
 	}
 
@@ -254,23 +254,51 @@ func (sm *SessionManager) pullIfClean(ctx context.Context, repoPath string) (boo
 	return true, nil
 }
 
-func (sm *SessionManager) hasActiveSessionForRepo(repoPath string) bool {
+// hasBlockingSessionForRepo reports whether an active session would be
+// disrupted by fast-forwarding defaultBranch in repoPath's source checkout.
+//
+// Sessions run in their own worktrees on feature branches, which share the
+// object store but not the working tree or the default-branch ref — a
+// fast-forward of the default branch cannot disturb them, so their presence
+// must not block the pull (otherwise a repo you develop in via graith would
+// never auto-update). Only two cases are unsafe: an in-place session working
+// directly in the source checkout, and a worktree that has the default branch
+// itself checked out. Those are the only sessions that block the pull.
+func (sm *SessionManager) hasBlockingSessionForRepo(repoPath, defaultBranch string) bool {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 
 	repoPath = config.ResolvePath(repoPath)
+
+	blocks := func(sRepo, worktree, branch string) bool {
+		if sRepo == "" || config.ResolvePath(sRepo) != repoPath {
+			return false
+		}
+
+		// In-place session operating directly in the source checkout.
+		if worktree != "" && config.ResolvePath(worktree) == repoPath {
+			return true
+		}
+
+		// Worktree that has the branch we are about to move checked out.
+		if defaultBranch != "" && branch == defaultBranch {
+			return true
+		}
+
+		return false
+	}
 
 	for _, s := range sm.state.Sessions {
 		if s.Status != StatusRunning && s.Status != StatusCreating {
 			continue
 		}
 
-		if s.RepoPath != "" && config.ResolvePath(s.RepoPath) == repoPath {
+		if blocks(s.RepoPath, s.WorktreePath, s.Branch) {
 			return true
 		}
 
 		for _, inc := range s.Includes {
-			if inc.RepoPath != "" && config.ResolvePath(inc.RepoPath) == repoPath {
+			if blocks(inc.RepoPath, inc.WorktreePath, inc.Branch) {
 				return true
 			}
 		}

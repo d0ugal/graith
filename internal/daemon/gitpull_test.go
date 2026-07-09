@@ -255,15 +255,20 @@ func TestPullIfClean_HooksDisabled(t *testing.T) {
 	}
 }
 
-func TestPullIfClean_ActiveSession(t *testing.T) {
+// A session in its own worktree on a feature branch shares only the object
+// store with the source checkout — a fast-forward of the default branch cannot
+// disturb it, so it must not block the pull.
+func TestPullIfClean_WorktreeSessionDoesNotBlock(t *testing.T) {
 	bareDir, cloneDir := setupTestRepo(t)
 	advanceRemote(t, bareDir, cloneDir)
 
 	sm := newTestSM(t)
 	sm.state.Sessions["braw-session"] = &SessionState{
-		ID:       "braw-session",
-		RepoPath: cloneDir,
-		Status:   StatusRunning,
+		ID:           "braw-session",
+		RepoPath:     cloneDir,
+		WorktreePath: filepath.Join(t.TempDir(), "bothy"),
+		Branch:       "canny-feature",
+		Status:       StatusRunning,
 	}
 
 	pulled, err := sm.pullIfClean(context.Background(), cloneDir)
@@ -271,20 +276,24 @@ func TestPullIfClean_ActiveSession(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if pulled {
-		t.Fatal("expected skip with active session")
+	if !pulled {
+		t.Fatal("expected pull to proceed for a worktree session on a feature branch")
 	}
 }
 
-func TestPullIfClean_ActiveSessionCreating(t *testing.T) {
+// An in-place session operates directly in the source checkout, so pulling
+// would move files under an active agent — it must block the pull.
+func TestPullIfClean_InPlaceSessionBlocks(t *testing.T) {
 	bareDir, cloneDir := setupTestRepo(t)
 	advanceRemote(t, bareDir, cloneDir)
 
 	sm := newTestSM(t)
-	sm.state.Sessions["braw-session"] = &SessionState{
-		ID:       "braw-session",
-		RepoPath: cloneDir,
-		Status:   StatusCreating,
+	sm.state.Sessions["thrawn-session"] = &SessionState{
+		ID:           "thrawn-session",
+		RepoPath:     cloneDir,
+		WorktreePath: cloneDir,
+		Branch:       "main",
+		Status:       StatusRunning,
 	}
 
 	pulled, err := sm.pullIfClean(context.Background(), cloneDir)
@@ -293,7 +302,32 @@ func TestPullIfClean_ActiveSessionCreating(t *testing.T) {
 	}
 
 	if pulled {
-		t.Fatal("expected skip with creating session")
+		t.Fatal("expected skip with in-place session on the source checkout")
+	}
+}
+
+// A session whose worktree has the default branch checked out would have the
+// ref moved out from under it — it must block the pull, even while creating.
+func TestPullIfClean_DefaultBranchSessionBlocks(t *testing.T) {
+	bareDir, cloneDir := setupTestRepo(t)
+	advanceRemote(t, bareDir, cloneDir)
+
+	sm := newTestSM(t)
+	sm.state.Sessions["thrawn-session"] = &SessionState{
+		ID:           "thrawn-session",
+		RepoPath:     cloneDir,
+		WorktreePath: filepath.Join(t.TempDir(), "bothy"),
+		Branch:       "main",
+		Status:       StatusCreating,
+	}
+
+	pulled, err := sm.pullIfClean(context.Background(), cloneDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if pulled {
+		t.Fatal("expected skip with session on the default branch")
 	}
 }
 
