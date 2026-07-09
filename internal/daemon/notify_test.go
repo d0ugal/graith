@@ -121,6 +121,53 @@ func TestSendNotification_CommandInjectionPrevented(t *testing.T) {
 	}
 }
 
+func TestIsSystemSender(t *testing.T) {
+	if !isSystemSender(systemSenderID) {
+		t.Errorf("isSystemSender(%q) = false, want true", systemSenderID)
+	}
+
+	for _, id := range []string{"", "graith", "braw-session", "device:abc", systemSenderName} {
+		if isSystemSender(id) {
+			t.Errorf("isSystemSender(%q) = true, want false", id)
+		}
+	}
+}
+
+func TestNotifyFromDaemon_PublishesSystemNotification(t *testing.T) {
+	h := newTestHarness(t)
+	h.addPTYSession(t, "braw-sess", "braw-session")
+
+	h.sm.notifyFromDaemon("braw-sess", "PR #884 was merged. No further action needed.")
+
+	msgs, err := h.sm.messages.Read("inbox:braw-sess", "", false, "")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+
+	if len(msgs) != 1 {
+		t.Fatalf("got %d messages, want 1", len(msgs))
+	}
+
+	m := msgs[0]
+	if !m.System {
+		t.Errorf("System = false, want true — daemon notifications must be flagged")
+	}
+
+	if m.SenderID != systemSenderID {
+		t.Errorf("SenderID = %q, want %q", m.SenderID, systemSenderID)
+	}
+
+	if m.SenderName != systemSenderName {
+		t.Errorf("SenderName = %q, want %q", m.SenderName, systemSenderName)
+	}
+
+	// The sender must not look like an addressable session name (issue #887):
+	// a real session ID never carries the "graith:" prefix.
+	if m.SenderID == "graith" {
+		t.Errorf("SenderID = %q — must be distinct from the ambiguous bare 'graith'", m.SenderID)
+	}
+}
+
 func TestOnAgentStatusChange_PublishesToMessageStore(t *testing.T) {
 	dir := t.TempDir()
 

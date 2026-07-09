@@ -156,6 +156,10 @@ type MessageOutput struct {
 	ThreadID   string `json:"thread_id,omitempty"`
 	ReplyTo    string `json:"reply_to,omitempty"`
 	CreatedAt  string `json:"created_at"`
+	// System marks an automated daemon-authored notification (e.g. PR/CI
+	// notices) rather than a session/human message. It is not a replyable
+	// session. See issue #887.
+	System bool `json:"system,omitempty"`
 }
 
 type ReadMessagesOutput struct {

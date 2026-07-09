@@ -46,12 +46,24 @@ func (sm *SessionManager) onAgentStatusChange(sessionID, sessionName, oldStatus,
 	sm.sendNotification(sessionName, newStatus, notifCfg.Command)
 }
 
-// daemonSenderID / daemonSenderName identify messages the daemon authors
-// itself (e.g. PR/CI notices), so an agent sees "New message from graith".
+// systemSenderID / systemSenderName identify messages the daemon authors
+// itself (e.g. PR/CI notices). The ID uses a "graith:" prefix — mirroring the
+// synthetic "device:" sender IDs — so it can never collide with a real session
+// ID (those are random hex) and is recognisable as an automated source. The
+// display name makes it obvious the message is an automated notification, not
+// an LLM/session that can be replied to. See issue #887.
 const (
-	daemonSenderID   = "graith"
-	daemonSenderName = "graith"
+	systemSenderID   = "graith:system"
+	systemSenderName = "graith notifications"
 )
+
+// isSystemSender reports whether a sender ID identifies an automated,
+// non-replyable graith notification (rather than a session or human). Display
+// and notification code uses this to mark such messages as system-sourced and
+// to avoid suggesting a reply path to a session that does not exist.
+func isSystemSender(senderID string) bool {
+	return senderID == systemSenderID
+}
 
 // notifyFromDaemon publishes a daemon-authored message into a session's inbox
 // and then explicitly triggers notifyInbox (which auto-resumes a stopped
@@ -63,11 +75,11 @@ func (sm *SessionManager) notifyFromDaemon(sessionID, body string) {
 		return
 	}
 
-	if _, err := sm.messages.Publish("inbox:"+sessionID, daemonSenderID, daemonSenderName, body, "", ""); err != nil {
+	if _, err := sm.messages.Publish("inbox:"+sessionID, systemSenderID, systemSenderName, body, "", ""); err != nil {
 		sm.log.Error("failed to publish daemon notification", "session", sessionID, "err", err)
 		return
 	}
-	go sm.notifyInbox(sessionID, daemonSenderID, daemonSenderName)
+	go sm.notifyInbox(sessionID, systemSenderID, systemSenderName)
 }
 
 // notifyInbox injects a notification into the target session's PTY when a
@@ -87,7 +99,15 @@ func (sm *SessionManager) notifyInbox(targetID, senderID, senderName string) {
 		sender = senderID
 	}
 
-	hint := fmt.Sprintf("New message from %s. Read: gr msg inbox --all --ack | Reply: gr msg send %s \"<reply>\"", sender, sender)
+	// System notifications (PR/CI notices, etc.) are automated and not backed by
+	// an addressable session, so don't suggest a reply path that would fail with
+	// "no session named ..." — issue #887.
+	var hint string
+	if isSystemSender(senderID) {
+		hint = fmt.Sprintf("Automated notification from %s (not a session — nothing to reply to). Read: gr msg inbox --all --ack", sender)
+	} else {
+		hint = fmt.Sprintf("New message from %s. Read: gr msg inbox --all --ack | Reply: gr msg send %s \"<reply>\"", sender, sender)
+	}
 
 	if sm.HasAttachedClient(targetID) {
 		ptySess.WaitForUserIdle(10*time.Second, 2*time.Minute)
@@ -114,6 +134,9 @@ func (sm *SessionManager) resumeForInbox(targetID, senderID, senderName string) 
 	}
 
 	summary := fmt.Sprintf("Resumed by inbox message from %s", sender)
+	if isSystemSender(senderID) {
+		summary = fmt.Sprintf("Resumed by automated notification from %s", sender)
+	}
 	sm.log.Info("auto-resuming stopped session on inbox message",
 		"session", sess.Name, "id", targetID, "sender", sender)
 

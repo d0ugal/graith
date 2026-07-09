@@ -642,6 +642,7 @@ func printMessage(payload json.RawMessage) {
 		Body       string `json:"body"`
 		CreatedAt  string `json:"created_at"`
 		ThreadID   string `json:"thread_id"`
+		System     bool   `json:"system"`
 	}
 
 	_ = json.Unmarshal(payload, &m)
@@ -649,6 +650,12 @@ func printMessage(payload json.RawMessage) {
 	sender := m.SenderName
 	if sender == "" {
 		sender = m.SenderID
+	}
+
+	// Mark automated daemon notifications so they read distinctly from
+	// session/human messages and don't imply a replyable sender — issue #887.
+	if m.System {
+		sender += " (automated notification)"
 	}
 
 	threadInfo := ""

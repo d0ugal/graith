@@ -1088,6 +1088,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 						ThreadID:   cm.ThreadID,
 						ReplyTo:    cm.ReplyTo,
 						CreatedAt:  cm.CreatedAt,
+						System:     cm.System,
 					}
 				}
 

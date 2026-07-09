@@ -23,6 +23,11 @@ type Message struct {
 	ThreadID   string `json:"thread_id,omitempty"`
 	ReplyTo    string `json:"reply_to,omitempty"`
 	CreatedAt  string `json:"created_at"`
+	// System marks a daemon-authored automated notification (PR/CI notices,
+	// etc.) as distinct from an LLM/session/human message. It is derived from
+	// the sender ID rather than stored, so it is set when messages are read or
+	// published, not persisted as a column. See issue #887.
+	System bool `json:"system,omitempty"`
 }
 
 type StreamInfo struct {
@@ -156,6 +161,7 @@ func (s *MsgStore) Publish(stream, senderID, senderName, body, threadID, replyTo
 		ThreadID:   threadID,
 		ReplyTo:    replyTo,
 		CreatedAt:  time.Now().UTC().Format(time.RFC3339Nano),
+		System:     isSystemSender(senderID),
 	}
 
 	_, err = tx.Exec(
@@ -225,6 +231,8 @@ func (s *MsgStore) Read(stream, subscriber string, onlyUnread bool, threadID str
 			return nil, fmt.Errorf("scan message: %w", err)
 		}
 
+		m.System = isSystemSender(m.SenderID)
+
 		msgs = append(msgs, m)
 	}
 
@@ -287,6 +295,8 @@ func (s *MsgStore) Conversation(self string, limit int) ([]Message, error) {
 		if err := rows.Scan(&m.ID, &m.Seq, &m.Stream, &m.SenderID, &m.SenderName, &m.Body, &m.ThreadID, &m.ReplyTo, &m.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan conversation message: %w", err)
 		}
+
+		m.System = isSystemSender(m.SenderID)
 
 		msgs = append(msgs, m)
 	}
