@@ -351,6 +351,7 @@ func TestCoverStatusReport(t *testing.T) {
 	h.sm.mu.RLock()
 	sess := h.sm.state.Sessions["kirk-rep"]
 	agentStatus, toolName := sess.AgentStatus, sess.HookToolName
+
 	h.sm.mu.RUnlock()
 
 	if agentStatus != "active" {
