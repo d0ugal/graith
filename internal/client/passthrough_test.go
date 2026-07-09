@@ -696,6 +696,218 @@ func TestEscapeSequenceNotPrefixIsForwarded(t *testing.T) {
 	}
 }
 
+// TestCtrlCRoutesThroughInterrupt verifies that a raw Ctrl-C (0x03) while
+// attached is routed through the agent-aware interrupt control message (issue
+// #857) rather than being forwarded as a raw byte to the PTY. Regression test:
+// before the fix, 0x03 was forwarded on the data channel, bypassing the tuned
+// per-agent interrupt count/delay from #620.
+func TestCtrlCRoutesThroughInterrupt(t *testing.T) {
+	clientConn, daemonConn := net.Pipe()
+	defer func() { _ = daemonConn.Close() }()
+
+	c := newTestClient(clientConn)
+
+	daemonReader := protocol.NewFrameReader(daemonConn)
+	dataCh := make(chan []byte, 10)
+	interruptCh := make(chan protocol.InterruptMsg, 4)
+
+	go func() {
+		for {
+			frame, err := daemonReader.ReadFrame()
+			if err != nil {
+				return
+			}
+
+			switch frame.Channel {
+			case protocol.ChannelData:
+				dataCh <- append([]byte{}, frame.Payload...)
+			case protocol.ChannelControl:
+				env, err := protocol.DecodeControl(frame.Payload)
+				if err != nil || env.Type != "interrupt" {
+					continue
+				}
+
+				var in protocol.InterruptMsg
+				if protocol.DecodePayload(env, &in) == nil {
+					interruptCh <- in
+				}
+			}
+		}
+	}()
+
+	opts := testOpts
+	opts.SessionID = "braw"
+
+	stdinR, stdinW := io.Pipe()
+	stdout := &lockedWriter{}
+
+	go func() {
+		time.Sleep(30 * time.Millisecond)
+
+		_, _ = stdinW.Write([]byte{interruptByte})
+
+		time.Sleep(30 * time.Millisecond)
+
+		_, _ = stdinW.Write([]byte{0x02, 'd'}) // detach to end the loop
+	}()
+
+	ctx := context.Background()
+	result := c.runPassthroughLoop(ctx, opts, stdinR, stdout, nil)
+
+	if result != ResultDetached {
+		t.Fatalf("expected ResultDetached, got %d", result)
+	}
+
+	select {
+	case in := <-interruptCh:
+		if in.SessionID != "braw" {
+			t.Fatalf("interrupt targeted %q, want %q", in.SessionID, "braw")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for interrupt control message")
+	}
+
+	// The raw interrupt byte must never reach the data channel.
+	for {
+		select {
+		case data := <-dataCh:
+			if bytes.Contains(data, []byte{interruptByte}) {
+				t.Fatalf("raw Ctrl-C (0x03) was forwarded on the data channel: %x", data)
+			}
+		case <-time.After(50 * time.Millisecond):
+			return
+		}
+	}
+}
+
+// TestCtrlCFlushesPendingData verifies that data typed before Ctrl-C is still
+// forwarded, and the interrupt is delivered separately — the interception must
+// split the byte stream rather than dropping surrounding input.
+func TestCtrlCFlushesPendingData(t *testing.T) {
+	clientConn, daemonConn := net.Pipe()
+	defer func() { _ = daemonConn.Close() }()
+
+	c := newTestClient(clientConn)
+
+	daemonReader := protocol.NewFrameReader(daemonConn)
+	dataCh := make(chan []byte, 10)
+	interruptCh := make(chan struct{}, 4)
+
+	go func() {
+		for {
+			frame, err := daemonReader.ReadFrame()
+			if err != nil {
+				return
+			}
+
+			switch frame.Channel {
+			case protocol.ChannelData:
+				dataCh <- append([]byte{}, frame.Payload...)
+			case protocol.ChannelControl:
+				env, err := protocol.DecodeControl(frame.Payload)
+				if err == nil && env.Type == "interrupt" {
+					interruptCh <- struct{}{}
+				}
+			}
+		}
+	}()
+
+	opts := testOpts
+	opts.SessionID = "canny"
+
+	stdinR, stdinW := io.Pipe()
+	stdout := &lockedWriter{}
+
+	go func() {
+		time.Sleep(30 * time.Millisecond)
+
+		// "abc" then Ctrl-C in a single read.
+		_, _ = stdinW.Write([]byte{'a', 'b', 'c', interruptByte})
+
+		time.Sleep(30 * time.Millisecond)
+
+		_, _ = stdinW.Write([]byte{0x02, 'd'})
+	}()
+
+	ctx := context.Background()
+	result := c.runPassthroughLoop(ctx, opts, stdinR, stdout, nil)
+
+	if result != ResultDetached {
+		t.Fatalf("expected ResultDetached, got %d", result)
+	}
+
+	select {
+	case data := <-dataCh:
+		if string(data) != "abc" {
+			t.Fatalf("expected 'abc' forwarded before interrupt, got %q", data)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for forwarded data before interrupt")
+	}
+
+	select {
+	case <-interruptCh:
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for interrupt control message")
+	}
+}
+
+// TestCtrlCWithoutSessionIsForwarded verifies the fallback: when the attached
+// session is unknown (empty SessionID), Ctrl-C is forwarded as a raw byte
+// rather than being swallowed.
+func TestCtrlCWithoutSessionIsForwarded(t *testing.T) {
+	clientConn, daemonConn := net.Pipe()
+	defer func() { _ = daemonConn.Close() }()
+
+	c := newTestClient(clientConn)
+
+	daemonReader := protocol.NewFrameReader(daemonConn)
+	dataCh := make(chan []byte, 10)
+
+	go func() {
+		for {
+			frame, err := daemonReader.ReadFrame()
+			if err != nil {
+				return
+			}
+
+			if frame.Channel == protocol.ChannelData {
+				dataCh <- append([]byte{}, frame.Payload...)
+			}
+		}
+	}()
+
+	// testOpts has no SessionID set.
+	stdinR, stdinW := io.Pipe()
+	stdout := &lockedWriter{}
+
+	go func() {
+		time.Sleep(30 * time.Millisecond)
+
+		_, _ = stdinW.Write([]byte{interruptByte})
+
+		time.Sleep(30 * time.Millisecond)
+
+		_, _ = stdinW.Write([]byte{0x02, 'd'})
+	}()
+
+	ctx := context.Background()
+	result := c.runPassthroughLoop(ctx, testOpts, stdinR, stdout, nil)
+
+	if result != ResultDetached {
+		t.Fatalf("expected ResultDetached, got %d", result)
+	}
+
+	select {
+	case data := <-dataCh:
+		if !bytes.Contains(data, []byte{interruptByte}) {
+			t.Fatalf("expected raw Ctrl-C forwarded, got %x", data)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for forwarded Ctrl-C")
+	}
+}
+
 // prefixKeyOpts mirrors the real key bindings so every prefix branch is
 // reachable from a test.
 var prefixKeyOpts = PassthroughOpts{

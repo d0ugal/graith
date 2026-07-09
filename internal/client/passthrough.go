@@ -14,6 +14,13 @@ import (
 	"golang.org/x/term"
 )
 
+// interruptByte is the ETX control code (Ctrl-C). While attached, the client
+// intercepts this byte and routes it through the agent-aware interrupt control
+// message instead of forwarding the raw byte to the PTY, so the tuned
+// per-agent interrupt count/delay (issue #620) applies to interactive Ctrl-C
+// too (issue #857).
+const interruptByte = 0x03
+
 type PassthroughResult int
 
 const (
@@ -518,6 +525,25 @@ func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, s
 					prefixSeen = true
 
 					showHelpBar(stdout)
+
+					sendStart = i + 1
+
+					continue
+				}
+
+				// Route interactive Ctrl-C through the agent-aware interrupt
+				// path rather than forwarding the raw byte. The daemon applies
+				// the agent's tuned interrupt count/delay (issues #620, #857).
+				// Fall through to raw forwarding when the attached session is
+				// unknown, so Ctrl-C is never silently swallowed.
+				if input[i] == interruptByte && opts.SessionID != "" {
+					if i > sendStart {
+						_ = c.SendData(input[sendStart:i])
+					}
+
+					_ = c.SendControl("interrupt", protocol.InterruptMsg{
+						SessionID: opts.SessionID,
+					})
 
 					sendStart = i + 1
 
