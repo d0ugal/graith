@@ -360,7 +360,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 			case "repo_list":
 				// Return the repos the daemon knows about so a remote client can
 				// offer a picker (it has no local cwd — design §C.4).
-				sendControl("repo_list", protocol.RepoListResponseMsg{Repos: sm.recentRepos()})
+				sendControl("repo_list", protocol.RepoListResponseMsg{Repos: sm.availableRepos()})
 
 			case "list":
 				sessions := sm.List()
