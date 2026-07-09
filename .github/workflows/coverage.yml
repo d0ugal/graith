@@ -186,12 +186,16 @@ jobs:
           )"
 
           # Sticky comment: find our previous one by marker and edit it, else
-          # create. Self-contained via gh api — no third-party action. --slurp
-          # merges all pages into one array first, so the match works even when
-          # the marker comment isn't on the first page (per-page `first` would
-          # miss it and post a duplicate).
-          cid="$(gh api "repos/$REPO/issues/$PR/comments" --paginate --slurp \
-            --jq "map(.[] | select(.body | startswith(\"$marker\")) | .id) | first")"
+          # create. Self-contained via gh api — no third-party action. The jq
+          # streams matching ids (no array-wrap, so non-matching pages emit
+          # nothing rather than `null`) and `--paginate` concatenates across all
+          # pages, so the match works even when the marker comment isn't on the
+          # first page. (`--slurp` can't combine with `--jq` on the runner's gh.)
+          # Capture first, then take the first line separately — piping gh into
+          # head would risk a SIGPIPE failure under `pipefail`.
+          cids="$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+            --jq ".[] | select(.body | startswith(\"$marker\")) | .id")"
+          cid="$(printf '%s\n' "$cids" | head -n1)"
           if [ -n "$cid" ] && [ "$cid" != "null" ]; then
             gh api -X PATCH "repos/$REPO/issues/comments/$cid" -f body="$body" >/dev/null
             echo "Updated coverage comment $cid"
