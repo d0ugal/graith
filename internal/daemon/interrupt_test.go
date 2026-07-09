@@ -153,6 +153,7 @@ func TestInterruptFromAttachedClientMarksUserInput(t *testing.T) {
 
 	// Before any interrupt the session is idle: WaitForUserIdle returns fast.
 	start := time.Now()
+
 	if !sess.WaitForUserIdle(150*time.Millisecond, time.Second) {
 		t.Fatal("expected idle before interrupt")
 	}
@@ -170,6 +171,7 @@ func TestInterruptFromAttachedClientMarksUserInput(t *testing.T) {
 
 	// The idle window must now reset — WaitForUserIdle should wait ~150ms.
 	start = time.Now()
+
 	if !sess.WaitForUserIdle(150*time.Millisecond, 2*time.Second) {
 		t.Fatal("expected idle=true after the window elapses")
 	}
