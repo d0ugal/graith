@@ -331,6 +331,92 @@ func TestPullIfClean_DefaultBranchSessionBlocks(t *testing.T) {
 	}
 }
 
+// The explicit InPlace flag blocks the pull even when the recorded WorktreePath
+// does not resolve to the repo root, decoupling the guard from that invariant.
+func TestPullIfClean_InPlaceFlagBlocks(t *testing.T) {
+	bareDir, cloneDir := setupTestRepo(t)
+	advanceRemote(t, bareDir, cloneDir)
+
+	sm := newTestSM(t)
+	sm.state.Sessions["thrawn-session"] = &SessionState{
+		ID:           "thrawn-session",
+		RepoPath:     cloneDir,
+		WorktreePath: filepath.Join(t.TempDir(), "bothy"),
+		Branch:       "canny-feature",
+		InPlace:      true,
+		Status:       StatusRunning,
+	}
+
+	pulled, err := sm.pullIfClean(context.Background(), cloneDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if pulled {
+		t.Fatal("expected skip with an in-place session flagged InPlace")
+	}
+}
+
+// An included repo on a feature branch, like a primary worktree session, must
+// not block the pull of that included repo.
+func TestPullIfClean_IncludeOnFeatureBranchDoesNotBlock(t *testing.T) {
+	bareDir, cloneDir := setupTestRepo(t)
+	advanceRemote(t, bareDir, cloneDir)
+
+	sm := newTestSM(t)
+	sm.state.Sessions["braw-session"] = &SessionState{
+		ID:           "braw-session",
+		RepoPath:     filepath.Join(t.TempDir(), "croft"),
+		WorktreePath: filepath.Join(t.TempDir(), "bothy"),
+		Branch:       "canny-feature",
+		Status:       StatusRunning,
+		Includes: []IncludedRepoState{{
+			RepoPath:     cloneDir,
+			WorktreePath: filepath.Join(t.TempDir(), "wynd"),
+			Branch:       "canny-feature",
+		}},
+	}
+
+	pulled, err := sm.pullIfClean(context.Background(), cloneDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !pulled {
+		t.Fatal("expected pull to proceed for an included repo on a feature branch")
+	}
+}
+
+// An included repo checked out on the default branch would have the ref moved
+// out from under it — it must block the pull.
+func TestPullIfClean_IncludeOnDefaultBranchBlocks(t *testing.T) {
+	bareDir, cloneDir := setupTestRepo(t)
+	advanceRemote(t, bareDir, cloneDir)
+
+	sm := newTestSM(t)
+	sm.state.Sessions["thrawn-session"] = &SessionState{
+		ID:           "thrawn-session",
+		RepoPath:     filepath.Join(t.TempDir(), "croft"),
+		WorktreePath: filepath.Join(t.TempDir(), "bothy"),
+		Branch:       "canny-feature",
+		Status:       StatusRunning,
+		Includes: []IncludedRepoState{{
+			RepoPath:     cloneDir,
+			WorktreePath: filepath.Join(t.TempDir(), "wynd"),
+			Branch:       "main",
+		}},
+	}
+
+	pulled, err := sm.pullIfClean(context.Background(), cloneDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if pulled {
+		t.Fatal("expected skip with an included repo on the default branch")
+	}
+}
+
 func TestHasInProgressOp(t *testing.T) {
 	dir := t.TempDir()
 	if hasInProgressOp(dir) {

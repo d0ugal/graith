@@ -257,26 +257,29 @@ func (sm *SessionManager) pullIfClean(ctx context.Context, repoPath string) (boo
 // hasBlockingSessionForRepo reports whether an active session would be
 // disrupted by fast-forwarding defaultBranch in repoPath's source checkout.
 //
-// Sessions run in their own worktrees on feature branches, which share the
-// object store but not the working tree or the default-branch ref — a
-// fast-forward of the default branch cannot disturb them, so their presence
-// must not block the pull (otherwise a repo you develop in via graith would
-// never auto-update). Only two cases are unsafe: an in-place session working
-// directly in the source checkout, and a worktree that has the default branch
-// itself checked out. Those are the only sessions that block the pull.
+// Sessions run in their own worktrees on feature branches. A worktree shares
+// the object store and refs with the source checkout, but has its own working
+// tree, index, and HEAD — so moving the default-branch ref cannot rewrite a
+// worktree that has a different branch checked out. Blocking on such sessions
+// would mean a repo you develop in via graith (the documented workflow) never
+// auto-updates, since it almost always has a session open against it. Only two
+// cases are genuinely unsafe: an in-place session working directly in the
+// source checkout, and a worktree that has the default branch itself checked
+// out. Those are the only sessions that block the pull.
 func (sm *SessionManager) hasBlockingSessionForRepo(repoPath, defaultBranch string) bool {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 
 	repoPath = config.ResolvePath(repoPath)
 
-	blocks := func(sRepo, worktree, branch string) bool {
+	blocks := func(inPlace bool, sRepo, worktree, branch string) bool {
 		if sRepo == "" || config.ResolvePath(sRepo) != repoPath {
 			return false
 		}
 
-		// In-place session operating directly in the source checkout.
-		if worktree != "" && config.ResolvePath(worktree) == repoPath {
+		// Session operating directly in the source checkout: either flagged
+		// in-place, or with a worktree that resolves to the repo root.
+		if inPlace || (worktree != "" && config.ResolvePath(worktree) == repoPath) {
 			return true
 		}
 
@@ -293,12 +296,13 @@ func (sm *SessionManager) hasBlockingSessionForRepo(repoPath, defaultBranch stri
 			continue
 		}
 
-		if blocks(s.RepoPath, s.WorktreePath, s.Branch) {
+		if blocks(s.InPlace, s.RepoPath, s.WorktreePath, s.Branch) {
 			return true
 		}
 
+		// Included repos always get their own worktree; they are never in-place.
 		for _, inc := range s.Includes {
-			if blocks(inc.RepoPath, inc.WorktreePath, inc.Branch) {
+			if blocks(false, inc.RepoPath, inc.WorktreePath, inc.Branch) {
 				return true
 			}
 		}
