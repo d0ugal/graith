@@ -18,26 +18,30 @@ var gitNoPromptEnv = []string{
 }
 
 func (sm *SessionManager) RunGitPullLoop(ctx context.Context) {
+	// Tick shortly after startup, then on the configured interval. Waiting a
+	// full interval before the first tick (the obvious wait-first loop) means a
+	// daemon restart leaves every maintenance repo stale until the interval
+	// elapses again — since a restart re-execs this loop from scratch. See
+	// gitPullStartupDelay.
+	timer := time.NewTimer(gitPullStartupDelay)
+	defer timer.Stop()
+
 	for {
-		sm.mu.RLock()
-		cfg := sm.cfg
-		sm.mu.RUnlock()
-
-		interval := cfg.GitPull.IntervalDuration()
-
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(interval):
+		case <-timer.C:
 		}
 
 		sm.mu.RLock()
-		cfg = sm.cfg
+		cfg := sm.cfg
 		sm.mu.RUnlock()
 
 		if cfg.GitPull.Enabled {
 			sm.runGitPullTick(ctx)
 		}
+
+		timer.Reset(cfg.GitPull.IntervalDuration())
 	}
 }
 

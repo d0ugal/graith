@@ -115,7 +115,9 @@ enabled  = false  # periodically pull updates into worktrees
 interval = "1h"   # how often to pull (minimum: 1 minute)
 ```
 
-When enabled, the daemon periodically fetches and fast-forward merges repos registered with `git maintenance`. It skips repos that have active sessions to avoid disrupting running agents. This keeps default branches up to date for future session creation. It does not pull into active session worktrees.
+When enabled, the daemon fetches and fast-forward merges the default branch of each repo registered with `git maintenance`. The first pull runs shortly after the daemon starts, then on the configured `interval` — so a daemon restart doesn't leave repos stale for a full interval before the next pull.
+
+Sessions run in their own worktrees on feature branches, which share only the object store with the source checkout, so fast-forwarding the default branch cannot disturb them — those sessions do **not** block the pull. A repo is only skipped when a session works directly on the source checkout (in-place) or has the default branch itself checked out in its worktree. This keeps default branches up to date for future session creation without ever pulling into an active worktree.
 
 ## Keybindings
 

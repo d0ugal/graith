@@ -33,6 +33,14 @@ const (
 	gitUsernameTimeout = 15 * time.Second
 )
 
+// gitPullStartupDelay is how long the git-pull loop waits after the daemon
+// starts before its first tick. A daemon (re)start re-execs the loop from
+// scratch, so waiting a full interval first would leave maintenance repos stale
+// for up to that interval after every restart. A short delay instead lets
+// session adoption and other startup work settle before the first pull. It is a
+// var, not a const, so tests can shrink it.
+var gitPullStartupDelay = 15 * time.Second
+
 type attachedClient struct {
 	conn        net.Conn
 	kick        func()
