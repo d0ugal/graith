@@ -8,11 +8,11 @@ import (
 
 // withStatusClearCov2 sets the package-global statusSummaryClear flag and
 // restores it afterwards so these tests don't leak state into siblings.
-func withStatusClearCov2(t *testing.T, clear bool, fn func()) {
+func withStatusClearCov2(t *testing.T, doClear bool, fn func()) {
 	t.Helper()
 
 	prev := statusSummaryClear
-	statusSummaryClear = clear
+	statusSummaryClear = doClear
 
 	defer func() { statusSummaryClear = prev }()
 
