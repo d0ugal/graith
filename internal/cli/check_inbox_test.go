@@ -2,8 +2,10 @@ package cli
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net"
+	"strings"
 	"testing"
 
 	"github.com/d0ugal/graith/internal/protocol"
@@ -144,7 +146,7 @@ func TestReadInboxMessagesTimeout(t *testing.T) {
 	}
 }
 
-// TestReadInboxMessagesEOF treats a clean EOF as a normal end of stream.
+// TestReadInboxMessagesEOF treats a clean (bare io.EOF) end of stream as normal.
 func TestReadInboxMessagesEOF(t *testing.T) {
 	fr := &fakeFrameReader{frames: []protocol.Frame{
 		controlFrame(t, "msg_message", inboxMessage{SenderName: "bide", Body: "stay"}),
@@ -160,15 +162,47 @@ func TestReadInboxMessagesEOF(t *testing.T) {
 	}
 }
 
-// TestReadInboxMessagesErrorFrame surfaces a daemon "error" frame.
+// TestReadInboxMessagesTruncatedFrame is the regression test for treating a
+// wrapped EOF as a clean end of stream. FrameReader wraps a truncated-payload
+// read as "read frame payload: EOF"; that is a real error and must be surfaced,
+// not mistaken for a clean close (which would re-swallow the failure #206 is
+// about).
+func TestReadInboxMessagesTruncatedFrame(t *testing.T) {
+	fr := &fakeFrameReader{
+		frames: []protocol.Frame{
+			controlFrame(t, "msg_message", inboxMessage{SenderName: "haar", Body: "cut off"}),
+		},
+		err: fmt.Errorf("read frame payload: %w", io.EOF),
+	}
+
+	messages, err := readInboxMessages(fr)
+	if err == nil {
+		t.Fatal("expected a wrapped-EOF (truncated frame) to surface as an error, got nil")
+	}
+
+	if err == io.EOF {
+		t.Fatalf("wrapped EOF must not be reported as a bare io.EOF, got %v", err)
+	}
+
+	if len(messages) != 1 {
+		t.Fatalf("expected the 1 message read before truncation, got %d", len(messages))
+	}
+}
+
+// TestReadInboxMessagesErrorFrame surfaces a daemon "error" frame and preserves
+// the daemon's message text so the hook's stderr diagnostic is actionable.
 func TestReadInboxMessagesErrorFrame(t *testing.T) {
 	fr := &fakeFrameReader{frames: []protocol.Frame{
-		controlFrame(t, "error", map[string]string{"message": "thrawn"}),
+		controlFrame(t, "error", protocol.ErrorMsg{Message: "thrawn: not authorized"}),
 	}}
 
 	_, err := readInboxMessages(fr)
 	if err == nil {
 		t.Fatal("expected an error for a daemon error frame, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "thrawn: not authorized") {
+		t.Fatalf("expected the daemon error message to be preserved, got %v", err)
 	}
 }
 

@@ -2,7 +2,6 @@ package cli
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -113,7 +112,11 @@ func readInboxMessages(fr frameReader) ([]inboxMessage, error) {
 	for {
 		frame, err := fr.ReadFrame()
 		if err != nil {
-			if errors.Is(err, io.EOF) {
+			// Only a bare io.EOF means the daemon closed cleanly at a frame
+			// boundary. A wrapped EOF (e.g. "read frame payload: EOF" from a
+			// truncated frame) is a real error and must be surfaced, not
+			// mistaken for a clean end of stream.
+			if err == io.EOF {
 				return messages, nil
 			}
 
@@ -138,6 +141,11 @@ func readInboxMessages(fr frameReader) ([]inboxMessage, error) {
 		case "msg_done":
 			return messages, nil
 		case "error":
+			var e protocol.ErrorMsg
+			if json.Unmarshal(msg.Payload, &e) == nil && e.Message != "" {
+				return messages, fmt.Errorf("daemon error while reading inbox: %s", e.Message)
+			}
+
 			return messages, fmt.Errorf("daemon returned an error while reading inbox")
 		}
 	}
