@@ -151,6 +151,7 @@ func TestDeleteScenarioCovKeepsRecordOnTeardownFailure(t *testing.T) {
 	// so git teardown fails and Delete keeps the session for retry.
 	notGitRepo := t.TempDir()
 	worktree := filepath.Join(t.TempDir(), "bothy")
+
 	if err := os.MkdirAll(worktree, 0o700); err != nil {
 		t.Fatal(err)
 	}
