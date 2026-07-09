@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 )
 
@@ -106,8 +107,14 @@ func (safehouseBackend) Wrap(command string, args []string, opts WrapOpts) (stri
 	// per socket and append it via --append-profile (last-match-wins, so it
 	// overrides the default network posture). safehouse also auto-denies writes
 	// to the appended fragment, so the sandboxed process can't tamper with it.
-	if len(opts.UnixSockets) > 0 {
-		fragPath, err := writeSafehouseSocketFragment(opts.UnixSockets, opts.SafehouseFragmentPath)
+	// Sockets needing an explicit connect grant: the daemon socket, plus (when the
+	// "ssh" feature is enabled) $SSH_AUTH_SOCK. safehouse's built-in ssh
+	// integration only re-opens the standard macOS agent sockets (launchd
+	// Listeners, ~/.ssh/agent), so a non-standard agent socket — e.g. Secretive's
+	// app-container socket — needs an explicit fragment grant here.
+	sockets := safehouseSockets(opts, os.Getenv("SSH_AUTH_SOCK"))
+	if len(sockets) > 0 {
+		fragPath, err := writeSafehouseSocketFragment(sockets, opts.SafehouseFragmentPath)
 		if err != nil {
 			return "", nil, fmt.Errorf("unix sockets: %w", err)
 		}
@@ -127,6 +134,27 @@ func (safehouseBackend) Wrap(command string, args []string, opts WrapOpts) (stri
 	wrapped = append(wrapped, args...)
 
 	return safehouse, wrapped, nil
+}
+
+// safehouseSockets returns the unix sockets that need an explicit
+// network-outbound connect grant in the appended Seatbelt fragment. It always
+// includes opts.UnixSockets (e.g. the graith daemon socket). When the "ssh"
+// feature is enabled it also appends sshAuthSock ($SSH_AUTH_SOCK resolved by the
+// caller, "" if unset): safehouse's built-in ssh integration only re-opens the
+// standard macOS agent sockets (launchd Listeners, ~/.ssh/agent), so a
+// non-standard agent socket such as Secretive's app-container socket would
+// otherwise be denied connect(). This mirrors the nono backend, which grants
+// $SSH_AUTH_SOCK for the "ssh" feature via filesystem.unix_socket. The result is
+// deduplicated so a socket already granted (e.g. an agent whose SSH_AUTH_SOCK is
+// the daemon socket) isn't emitted twice.
+func safehouseSockets(opts WrapOpts, sshAuthSock string) []string {
+	sockets := append([]string{}, opts.UnixSockets...)
+
+	if sshAuthSock != "" && slices.Contains(opts.Features, "ssh") && !slices.Contains(sockets, sshAuthSock) {
+		sockets = append(sockets, sshAuthSock)
+	}
+
+	return sockets
 }
 
 // writeSafehouseSocketFragment writes a Seatbelt policy fragment granting
