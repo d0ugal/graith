@@ -82,7 +82,10 @@ func (safehouseBackend) Wrap(command string, args []string, opts WrapOpts) (stri
 	// read_files/write_files behave consistently across backends. Unix sockets
 	// need a read/write grant to connect() (read-only lets a process stat the
 	// socket but not connect), so they join the write list alongside how
-	// docker.sock/podman.sock are granted.
+	// docker.sock/podman.sock are granted. Unlike nono's connect-only
+	// filesystem.unix_socket, safehouse has no connect-only primitive, so this
+	// also grants read/write on the socket inode (the minimum Seatbelt needs to
+	// permit connect); the wrapped process is the user's own trusted agent.
 	readPaths := append(append([]string{}, opts.ReadDirs...), opts.ReadFiles...)
 	writePaths := append(append(append([]string{}, opts.WriteDirs...), opts.WriteFiles...), opts.UnixSockets...)
 
