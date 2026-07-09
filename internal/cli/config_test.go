@@ -493,6 +493,36 @@ func TestConfigInitForceOverwrites(t *testing.T) {
 	}
 }
 
+func TestConfigInitErrorsWhenDirUncreatable(t *testing.T) {
+	dir := t.TempDir()
+
+	// A regular file where a directory is expected: MkdirAll on a path *under*
+	// it must fail, exercising writeDefaultConfig's "create config directory"
+	// error branch.
+	blocker := filepath.Join(dir, "scunner")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	target := filepath.Join(blocker, "graith", "config.toml")
+
+	withConfigGlobals(t, target, config.Paths{ConfigFile: target}, func() {
+		prev := configForceReset
+		configForceReset = true
+
+		defer func() { configForceReset = prev }()
+
+		err := configInitCmd.RunE(configInitCmd, nil)
+		if err == nil {
+			t.Fatal("expected error when the config directory cannot be created")
+		}
+
+		if !strings.Contains(err.Error(), "create config directory") {
+			t.Errorf("error = %q, want it to mention creating the config directory", err)
+		}
+	})
+}
+
 func TestConfigPathPrintsExplicitFile(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "config.toml")
