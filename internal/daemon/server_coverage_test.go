@@ -180,6 +180,7 @@ func TestCoverListenStaleSocketRemoval(t *testing.T) {
 	info, err := os.Stat(sockPath)
 	if err != nil {
 		_ = l1.Close()
+
 		t.Fatalf("stat socket: %v", err)
 	}
 
