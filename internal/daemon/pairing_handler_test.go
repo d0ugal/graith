@@ -5,6 +5,8 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"net"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -294,18 +296,51 @@ func TestAvailableReposReturnsSessionRepos(t *testing.T) {
 	}
 }
 
+// mkGitRepo creates dir (and parents) with a .git marker so isGitRepo treats it
+// as a repo, and returns the path.
+func mkGitRepo(t *testing.T, dir string) string {
+	t.Helper()
+
+	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	return dir
+}
+
 // Regression for #896: a remote client's create picker is populated from
 // repo_list, which must include the configured repos — not only repos that
 // already have a live session. Before the fix a daemon with no session in a
 // configured repo offered an empty/incomplete picker, so the user could not
 // pick a repository to create in at all.
+//
+// It also guards the follow-up: allowed_repo_paths are container roots, so the
+// daemon must SCAN them for git repos (like the local picker) rather than
+// listing the container itself — otherwise it offers a non-git directory that
+// create rejects.
 func TestAvailableReposIncludesConfiguredRepos(t *testing.T) {
 	sm := newPairingSM(t)
-	// One live session in /glen/croft (recent), plus two configured repos, one
-	// of which duplicates the session repo and must not appear twice.
-	sm.state.Sessions["braw1"] = &SessionState{ID: "braw1", RepoPath: "/glen/croft", RepoName: "croft"}
-	sm.cfg.AllowedRepoPaths = []string{"/brae/bothy"}
-	sm.cfg.Repos = []config.RepoConfig{{Path: "/wynd/clachan"}, {Path: "/glen/croft"}}
+
+	root := t.TempDir()
+	// A container root (allowed_repo_paths) holding two child repos and one
+	// non-git dir that must be ignored.
+	code := filepath.Join(root, "code")
+	bothy := mkGitRepo(t, filepath.Join(code, "bothy"))
+	clachan := mkGitRepo(t, filepath.Join(code, "clachan"))
+	mkGitRepo(t, filepath.Join(code, "notes")) // git — also discovered
+	if err := os.MkdirAll(filepath.Join(code, "empty"), 0o755); err != nil {
+		t.Fatal(err) // non-git dir, must be skipped
+	}
+
+	// A repo that also has a live session — it must appear once, as recent,
+	// keeping its session-derived name.
+	croft := mkGitRepo(t, filepath.Join(root, "croft"))
+	sm.state.Sessions["braw1"] = &SessionState{ID: "braw1", RepoPath: croft, RepoName: "croft"}
+
+	sm.cfg.AllowedRepoPaths = []string{code}
+	// A [[repos]] entry pointing straight at a repo (added directly) plus a
+	// duplicate of the session repo (must not appear twice).
+	sm.cfg.Repos = []config.RepoConfig{{Path: clachan}, {Path: croft}}
 
 	repos := sm.availableRepos()
 
@@ -318,20 +353,30 @@ func TestAvailableReposIncludesConfiguredRepos(t *testing.T) {
 		byPath[r.Path] = r
 	}
 
-	for _, want := range []string{"/glen/croft", "/brae/bothy", "/wynd/clachan"} {
+	for _, want := range []string{croft, bothy, clachan} {
 		if _, ok := byPath[want]; !ok {
-			t.Errorf("expected configured/session repo %q in picker, got %+v", want, repos)
+			t.Errorf("expected repo %q in picker, got %+v", want, repos)
 		}
 	}
 
-	// The session repo keeps its recent flag and session-derived name; the
-	// configured-only repos are not recent and take their name from the path.
-	if r := byPath["/glen/croft"]; !r.Recent || r.Name != "croft" {
-		t.Errorf("session repo /glen/croft: got recent=%v name=%q, want recent=true name=croft", r.Recent, r.Name)
+	// The container root itself is not a git repo, so it must not be listed.
+	if _, bad := byPath[code]; bad {
+		t.Errorf("non-git container %q should not be offered as a repo", code)
 	}
 
-	if r := byPath["/brae/bothy"]; r.Recent || r.Name != "bothy" {
-		t.Errorf("configured repo /brae/bothy: got recent=%v name=%q, want recent=false name=bothy", r.Recent, r.Name)
+	// The empty non-git child must not be listed.
+	if _, bad := byPath[filepath.Join(code, "empty")]; bad {
+		t.Errorf("non-git dir %q should not be offered as a repo", filepath.Join(code, "empty"))
+	}
+
+	// The session repo keeps its recent flag and session-derived name; a repo
+	// discovered only from config is not recent and takes its name from the path.
+	if r := byPath[croft]; !r.Recent || r.Name != "croft" {
+		t.Errorf("session repo %q: got recent=%v name=%q, want recent=true name=croft", croft, r.Recent, r.Name)
+	}
+
+	if r := byPath[bothy]; r.Recent || r.Name != "bothy" {
+		t.Errorf("scanned repo %q: got recent=%v name=%q, want recent=false name=bothy", bothy, r.Recent, r.Name)
 	}
 }
 

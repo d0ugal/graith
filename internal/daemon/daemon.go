@@ -341,27 +341,58 @@ func (sm *SessionManager) saveState() error {
 	return SaveState(sm.paths.StateFile, sm.state)
 }
 
-// recentRepos returns the distinct repositories the daemon currently knows
-// about, so a remote client with no local cwd can offer a repo picker for
-// session creation (design §C.4). The picker is populated from two sources:
-// the repos of live sessions (marked recent) and the configured repos
-// (allowed_repo_paths + [[repos]]). Session repos are added first so they win
-// on duplicate paths and keep their recent flag and session-derived name.
+// availableRepos returns the distinct repositories the daemon can offer a
+// remote client (which has no local cwd) for session creation (design §C.4).
+// The picker is populated from two sources:
 //
-// Including configured repos matters: without them a daemon with no sessions
-// (or no session in a given repo) offers an empty or incomplete picker, so a
-// remote user cannot pick a repository to create in at all (issue #896).
+//   - the repos of live sessions, marked recent; and
+//   - the configured repos, discovered the same way the local CLI/overlay
+//     picker discovers them (client.DiscoverRepos): each configured entry is
+//     treated as a root — added if it is itself a git repo, and scanned one
+//     directory level for child git repos. This matters because
+//     allowed_repo_paths entries are container roots (e.g. "~/Code"), not repo
+//     paths, so listing them verbatim would offer a non-git directory that
+//     create rejects. [[repos]] entries point straight at a repo and so are
+//     added directly.
+//
+// Session repos are added first so they win on duplicate paths and keep their
+// recent flag and session-derived name. Including configured repos matters:
+// without them a daemon with no session in a given repo offers an empty or
+// incomplete picker, so a remote user cannot pick a repository at all (#896).
+//
+// Only session/config state is read under the lock; the filesystem probes
+// (git-repo checks + directory scans) run after releasing it, so repo_list —
+// called whenever the New Session screen opens — never blocks a config reload
+// or session create behind stat() calls.
 func (sm *SessionManager) availableRepos() []protocol.RepoEntry {
+	type repoRef struct{ path, name string }
+
+	var (
+		sessionRepos []repoRef
+		configRoots  []string
+	)
+
 	sm.mu.RLock()
-	defer sm.mu.RUnlock()
+	for _, s := range sm.state.Sessions {
+		if s.RepoPath == "" {
+			continue
+		}
+
+		sessionRepos = append(sessionRepos, repoRef{s.RepoPath, s.RepoName})
+	}
+
+	if sm.cfg != nil {
+		configRoots = sm.cfg.AvailableRepoPaths()
+	}
+	sm.mu.RUnlock()
 
 	seen := make(map[string]bool)
 
 	var repos []protocol.RepoEntry
 
-	// Dedup on the resolved path so a symlinked config path and a session's
+	// Dedup on the resolved path so a symlinked/`~` config path and a session's
 	// already-resolved RepoPath for the same repo don't both appear, while the
-	// entry keeps the original path (which create accepts either way).
+	// entry keeps its original path (which create accepts either way).
 	add := func(path, name string, recent bool) {
 		if path == "" {
 			return
@@ -376,17 +407,44 @@ func (sm *SessionManager) availableRepos() []protocol.RepoEntry {
 		repos = append(repos, protocol.RepoEntry{Path: path, Name: name, Recent: recent})
 	}
 
-	for _, s := range sm.state.Sessions {
-		add(s.RepoPath, s.RepoName, true)
+	for _, r := range sessionRepos {
+		add(r.path, r.name, true)
 	}
 
-	if sm.cfg != nil {
-		for _, p := range sm.cfg.AvailableRepoPaths() {
-			add(p, filepath.Base(p), false)
+	for _, root := range configRoots {
+		expanded := config.ResolvePath(root)
+		if isGitRepo(expanded) {
+			add(root, filepath.Base(expanded), false)
+		}
+
+		entries, err := os.ReadDir(expanded)
+		if err != nil {
+			continue
+		}
+
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+
+			child := filepath.Join(expanded, e.Name())
+			if isGitRepo(child) {
+				add(child, filepath.Base(child), false)
+			}
 		}
 	}
 
 	return repos
+}
+
+// isGitRepo reports whether dir looks like a git repo (or worktree) by the
+// presence of a .git entry — matching the local picker's cheap check
+// (client.isGitRepo). .git is a directory in a normal clone and a file in a
+// linked worktree, so os.Stat (not a dir-only check) is what we want.
+func isGitRepo(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, ".git"))
+
+	return err == nil
 }
 
 func generateID() string {
