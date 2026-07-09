@@ -138,14 +138,6 @@ public final class HostConnection: ObservableObject, Identifiable {
     public func restart(_ session: SessionInfo) async { await run { try await self.client.restart(sessionID: session.id) } }
     public func interrupt(_ session: SessionInfo) async { await run { try await self.client.interrupt(sessionID: session.id) } }
 
-    public func logs(_ session: SessionInfo, lines: Int = 300) async -> String {
-        (try? await client.logs(sessionID: session.id, lines: lines)) ?? ""
-    }
-
-    public func screenSnapshot(_ session: SessionInfo) async -> ScreenSnapshot? {
-        try? await client.screenSnapshot(sessionID: session.id)
-    }
-
     /// Expose the underlying client for the attach path (Task 20).
     public var underlyingClient: any GraithHostClient { client }
 

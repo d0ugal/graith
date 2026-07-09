@@ -4,47 +4,26 @@ import GraithTerminalUIKit
 import GraithMobileRealTerminal
 import GraithTerminalCore
 
-/// Session detail: a live interactive terminal (real libghostty render), plus a
-/// non-attaching screen peek and a log tail, and lifecycle actions. The terminal
-/// tab attaches over the host's PTY stream (Task 20); peek/logs don't attach
-/// (design §C.6).
+/// Session detail: a live interactive terminal (real libghostty render) plus
+/// lifecycle actions. The terminal attaches over the host's PTY stream (Task 20).
 struct SessionDetailView: View {
     @ObservedObject var connection: HostConnection
     let session: SessionInfo
 
-    @State private var snapshot: ScreenSnapshot?
-    @State private var logText: String = ""
-    @State private var mode: Mode = .terminal
-    @State private var loading = false
-
-    enum Mode: String, CaseIterable, Identifiable {
-        case terminal = "Terminal"
-        case peek = "Peek"
-        case logs = "Logs"
-        var id: String { rawValue }
-    }
-
     var body: some View {
-        // Full-bleed content (terminal fills the screen); everything else — the
-        // view switcher, lifecycle actions, and session metadata — lives in the
-        // hamburger menu, so the terminal isn't squeezed by a big header.
-        content
+        // Full-bleed content (terminal fills the screen); the lifecycle actions
+        // and session metadata live in the hamburger menu, so the terminal isn't
+        // squeezed by a big header.
+        SessionTerminalPane(connection: connection, session: session)
             .navigationTitle(session.name)
             .compactInlineTitle()
             .toolbar { ToolbarItem(placement: .primaryAction) { sessionMenu } }
-            .task(id: refreshKey) { await reload() }
     }
-
-    private var refreshKey: String { "\(session.id)/\(mode.rawValue)" }
 
     // MARK: - Hamburger menu
 
     private var sessionMenu: some View {
         Menu {
-            Picker("View", selection: $mode) {
-                ForEach(Mode.allCases) { Text($0.rawValue).tag($0) }
-            }
-            Divider()
             if session.isRunning {
                 Button { Task { await connection.interrupt(session) } } label: {
                     Label("Interrupt", systemImage: "stop.circle")
@@ -73,44 +52,6 @@ struct SessionDetailView: View {
             }
         } label: {
             Image(systemName: "line.3.horizontal")
-        }
-    }
-
-    // MARK: - Content
-
-    @ViewBuilder
-    private var content: some View {
-        switch mode {
-        case .terminal:
-            SessionTerminalPane(connection: connection, session: session)
-        case .peek, .logs:
-            ScrollView {
-                if loading {
-                    ProgressView().padding()
-                } else if mode == .peek {
-                    TerminalTextView(text: snapshot?.frame ?? "(no screen)")
-                } else {
-                    TerminalTextView(text: logText.isEmpty ? "(no logs)" : logText)
-                }
-            }
-            .refreshable { await reload() }
-        }
-    }
-
-
-    // MARK: - Loading
-
-    private func reload() async {
-        guard mode != .terminal else { return } // the terminal pane self-manages its attach
-        loading = true
-        defer { loading = false }
-        switch mode {
-        case .peek:
-            snapshot = await connection.screenSnapshot(session)
-        case .logs:
-            logText = await connection.logs(session)
-        case .terminal:
-            break
         }
     }
 }
@@ -142,17 +83,5 @@ struct SessionTerminalPane: View {
         #else
         TerminalAttachView(viewModel: viewModel)
         #endif
-    }
-}
-
-/// A monospaced, selectable text block used for peeks and logs.
-struct TerminalTextView: View {
-    let text: String
-    var body: some View {
-        Text(text)
-            .font(.system(.footnote, design: .monospaced))
-            .textSelection(.enabled)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(12)
     }
 }
