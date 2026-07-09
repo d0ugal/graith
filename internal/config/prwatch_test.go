@@ -15,29 +15,34 @@ func TestPRWatchDefaults(t *testing.T) {
 	if pw.Enabled {
 		t.Error("pr_watch should default disabled")
 	}
-	// CI failures default ON (machine verdict, safe); human-intent default OFF.
+	// Every notify_* sub-option defaults ON: enabling pr_watch is a single
+	// switch that turns on all notification classes; users disable selectively.
 	if !pw.NotifyCIFailures {
 		t.Error("notify_ci_failures should default true")
 	}
 
 	if !pw.NotifyMergeConflicts {
-		t.Error("notify_merge_conflicts should default true (directive)")
+		t.Error("notify_merge_conflicts should default true")
 	}
 
-	if pw.NotifyReviewComments {
-		t.Error("notify_review_comments should default false")
+	if !pw.NotifyReviewComments {
+		t.Error("notify_review_comments should default true")
 	}
 
-	if pw.NotifyPRComments {
-		t.Error("notify_pr_comments should default false")
+	if !pw.NotifyPRComments {
+		t.Error("notify_pr_comments should default true")
 	}
 
-	if pw.NotifyReviewDecisions {
-		t.Error("notify_review_decisions should default false")
+	if !pw.NotifyReviewDecisions {
+		t.Error("notify_review_decisions should default true")
 	}
 
 	if !pw.NotifyPRLifecycle {
 		t.Error("notify_pr_lifecycle should default true")
+	}
+
+	if !pw.NotifyCIRecovery {
+		t.Error("notify_ci_recovery should default true")
 	}
 }
 
@@ -78,10 +83,21 @@ func TestPRWatchCommentCompat(t *testing.T) {
 		}
 	})
 
-	t.Run("review-comments off does not enable pr-comments", func(t *testing.T) {
-		pw := load(t, "[pr_watch]\nenabled = true\nnotify_ci_failures = true\n")
+	t.Run("explicit disables are respected", func(t *testing.T) {
+		// Every notify_* class defaults on; a user selectively disabling some
+		// keeps those off (and the compat bridge does not re-enable pr-comments
+		// when review-comments is explicitly off).
+		pw := load(t, "[pr_watch]\nenabled = true\nnotify_review_comments = false\nnotify_pr_comments = false\nnotify_ci_recovery = false\n")
+		if pw.NotifyReviewComments {
+			t.Error("explicit notify_review_comments=false must be respected")
+		}
+
 		if pw.NotifyPRComments {
-			t.Error("compat must not fire when notify_review_comments is off")
+			t.Error("explicit notify_pr_comments=false must be respected")
+		}
+
+		if pw.NotifyCIRecovery {
+			t.Error("explicit notify_ci_recovery=false must be respected")
 		}
 	})
 }

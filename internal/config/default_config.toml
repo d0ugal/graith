@@ -100,15 +100,15 @@ interval = "1h"          # how often to pull (must be at least 1 minute)
 enabled = false                  # turn the PR/CI watch loop on
 notify_ci_failures = true        # notify when CI checks start failing (machine verdict, safe to act on)
 notify_merge_conflicts = true    # notify when the PR becomes CONFLICTING with its base
-notify_review_comments = false   # notify on new inline code-review comments (anchored to a file:line)
+notify_review_comments = true    # notify on new inline code-review comments (anchored to a file:line)
 # notify_pr_comments: regular conversation comments on the PR thread (issue-style,
 # not tied to a line of code). Distinct from notify_review_comments above.
 # Compat: notify_review_comments once gated both surfaces; an older config that
 # enables it but omits notify_pr_comments keeps getting conversation comments.
-notify_pr_comments = false       # notify on new PR conversation (issue-style) comments
-notify_review_decisions = false  # notify on approved / changes-requested review decisions
+notify_pr_comments = true        # notify on new PR conversation (issue-style) comments
+notify_review_decisions = true   # notify on approved / changes-requested review decisions
 notify_pr_lifecycle = true       # notify when the PR is merged or closed
-notify_ci_recovery = false       # notify when CI goes green again after having failed
+notify_ci_recovery = true        # notify when CI goes green again after having failed
 poll_pending = "30s"             # poll interval while checks are pending/in-progress
 poll_terminal = "5m"             # poll interval once all checks are terminal but the PR is still open
 poll_merged = "15m"              # sweep interval for merged/closed PRs

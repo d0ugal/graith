@@ -230,10 +230,12 @@ func (g GitPullConfig) IntervalDuration() time.Duration {
 // session's GitHub PR via the gh CLI, polls its CI checks and review comments,
 // and notifies the owning session's inbox on meaningful transitions.
 //
-// CI failures and review feedback are gated separately because they carry
-// different authority: a CI failure is a machine verdict (safe to act on,
-// default on); a review comment or decision is human intent that may not be
-// actionable (default off).
+// Every notify_* sub-option defaults on: enabling pr_watch is meant to be a
+// single switch (enabled = true) that turns on all notifications, and users
+// selectively disable the classes they don't want. The classes are still gated
+// separately because they carry different authority — a CI failure is a machine
+// verdict (safe to act on), while a review comment or decision is human intent
+// that may not be actionable — so each can be turned off independently.
 //
 // Comments come in two distinct kinds, each with its own gate:
 //   - NotifyReviewComments covers inline code-review comments (the
