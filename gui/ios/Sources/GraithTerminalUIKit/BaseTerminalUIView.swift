@@ -69,6 +69,13 @@ public final class BaseTerminalUIView: UIView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    deinit {
+        // The weak-proxy display link (see startDisplayLink) breaks the run-loop
+        // → link → view retain cycle, so this can run; tear the link down here as
+        // a backstop in case the integrator never calls `stop()`.
+        displayLink?.invalidate()
+    }
+
     // MARK: - First responder / accessory
 
     public override var canBecomeFirstResponder: Bool { true }
@@ -105,7 +112,12 @@ public final class BaseTerminalUIView: UIView {
 
     private func startDisplayLink() {
         guard displayLink == nil else { return }
-        let link = CADisplayLink(target: self, selector: #selector(tick))
+        // Target the weak proxy, not `self`: CADisplayLink retains its target and
+        // the run loop retains the link, so a direct target would be a permanent
+        // retain cycle that also prevents `deinit` from ever running. The proxy
+        // holds the view weakly, so the view can deallocate and its `deinit`
+        // tears the link down even if the integrator never calls `stop()`.
+        let link = CADisplayLink(target: DisplayLinkProxy(self), selector: #selector(DisplayLinkProxy.tick))
         link.preferredFramesPerSecond = 60
         link.add(to: .main, forMode: .common)
         displayLink = link
@@ -116,7 +128,7 @@ public final class BaseTerminalUIView: UIView {
         displayLink = nil
     }
 
-    @objc private func tick() {
+    @objc fileprivate func tick() {
         if scroll.isSettling, let link = displayLink {
             // CADisplayLink's frame interval; clamp so a stall doesn't fling.
             let dt = CGFloat(min(0.05, max(0, link.targetTimestamp - link.timestamp)))
@@ -210,11 +222,14 @@ public final class BaseTerminalUIView: UIView {
             let dy = gesture.translation(in: self).y
             gesture.setTranslation(.zero, in: self)
             let rows = scroll.drag(translationDelta: dy)
+            // One scrollbar read per frame (it is flagged expensive): reuse it for
+            // boundary detection and the indicator.
+            let metrics = viewModel.core.scrollMetrics()
             if rows != 0 {
-                scroll.absorbOverscroll(rows: applyScroll(rows, at: lastScrollPoint))
+                scroll.absorbOverscroll(rows: applyScroll(rows, at: lastScrollPoint, metrics: metrics))
             }
             applyOverscrollTransform()
-            updateScrollIndicator()
+            updateScrollIndicator(metrics: metrics)
         case .ended, .cancelled, .failed:
             scroll.endDrag(velocityY: gesture.velocity(in: self).y)
             // Momentum / spring continues on the display-link `tick`; if it
@@ -230,11 +245,15 @@ public final class BaseTerminalUIView: UIView {
     /// visual bounce + indicator.
     private func stepScrollPhysics(dt: CGFloat) {
         let rows = scroll.tick(dt: dt)
+        // Skip the (expensive) scrollbar read entirely while purely springing:
+        // the bounce moves no rows, so there is no boundary to detect and the
+        // indicator's thumb position hasn't changed.
         if rows != 0 {
-            scroll.absorbOverscroll(rows: applyScroll(rows, at: lastScrollPoint))
+            let metrics = viewModel.core.scrollMetrics()
+            scroll.absorbOverscroll(rows: applyScroll(rows, at: lastScrollPoint, metrics: metrics))
+            updateScrollIndicator(metrics: metrics)
         }
         applyOverscrollTransform()
-        updateScrollIndicator()
         if !scroll.isSettling { scheduleIndicatorHide() }
     }
 
@@ -244,17 +263,22 @@ public final class BaseTerminalUIView: UIView {
     /// viewport. Returns the rows the core refused at a boundary (0 for a TUI,
     /// which manages its own history), for rubber-band overscroll.
     @discardableResult
-    private func applyScroll(_ rows: Int, at point: CGPoint) -> Int {
+    private func applyScroll(_ rows: Int, at point: CGPoint, metrics: ScrollMetrics) -> Int {
         guard rows != 0 else { return 0 }
         if viewModel.core.isMouseTrackingActive {
             forwardWheel(rows: rows, at: point)
             return 0
         }
-        let before = viewModel.core.scrollMetrics().offset
         viewModel.core.scrollViewport(byRows: rows)
         renderer.setNeedsRender()
-        let after = viewModel.core.scrollMetrics().offset
-        return rows - (after - before)
+        // Estimate how many rows the core actually applied from the single
+        // metrics read: it clamps the viewport offset into [0, total-len], so
+        // anything past that is refused and becomes rubber-band overscroll. This
+        // avoids a second per-frame scrollbar read (the contract flags it as
+        // expensive at an arbitrary pin).
+        let maxOffset = max(0, metrics.total - metrics.len)
+        let applied = min(maxOffset, max(0, metrics.offset + rows)) - metrics.offset
+        return rows - applied
     }
 
     /// Forward a row delta to a mouse-tracking program as wheel events.
@@ -308,6 +332,9 @@ public final class BaseTerminalUIView: UIView {
     }
 
     private func showScrollIndicator() {
+        // A mouse-tracking program (a TUI) scrolls its own content; graith's local
+        // scrollback indicator would be misleading, so don't show it there.
+        guard !viewModel.core.isMouseTrackingActive else { return }
         indicatorHideWork?.cancel()
         indicatorHideWork = nil
         updateScrollIndicator()
@@ -323,11 +350,17 @@ public final class BaseTerminalUIView: UIView {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: work)
     }
 
-    private func updateScrollIndicator() {
+    private func updateScrollIndicator(metrics: ScrollMetrics? = nil) {
         let track = bounds.height - 2 * scrollIndicatorInset
+        // Reuse a caller-supplied read where possible; the scrollbar read is
+        // flagged expensive. Never show the local indicator over a TUI.
+        guard !viewModel.core.isMouseTrackingActive else {
+            scrollIndicator.isHidden = true
+            return
+        }
+        let m = metrics ?? viewModel.core.scrollMetrics()
         guard track > 0,
-              let thumb = TerminalScrollController.thumb(
-                metrics: viewModel.core.scrollMetrics(), trackLength: track) else {
+              let thumb = TerminalScrollController.thumb(metrics: m, trackLength: track) else {
             // Nothing to scroll (empty history, or a TUI's alt-screen).
             scrollIndicator.isHidden = true
             return
@@ -432,6 +465,14 @@ public final class BaseTerminalUIView: UIView {
             return super.canPerformAction(action, withSender: sender)
         }
     }
+}
+
+/// Weak forwarder for `CADisplayLink` so the link (and the run loop) don't retain
+/// the terminal view. See `BaseTerminalUIView.startDisplayLink`.
+private final class DisplayLinkProxy {
+    private weak var view: BaseTerminalUIView?
+    init(_ view: BaseTerminalUIView) { self.view = view }
+    @objc func tick() { view?.tick() }
 }
 
 // MARK: - UIKeyInput
