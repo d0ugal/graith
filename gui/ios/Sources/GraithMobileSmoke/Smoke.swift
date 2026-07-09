@@ -508,6 +508,32 @@ func testScroll() {
     check(abs((tiny?.length ?? 0) - 36) < 0.001, "a tiny fraction still shows a grabbable thumb")
 }
 
+// MARK: - Repo picker selection (issue #896)
+
+func testRepoPickerSelection() {
+    section("RepoPickerLogic — create repo picker selection (#896)")
+
+    let croft = RepoEntry(path: "/Code/croft", name: "croft", recent: true)
+    let bothy = RepoEntry(path: "/Code/bothy", name: "bothy")
+    let repos = [bothy, croft]
+
+    // A still-offered current selection is kept (an unchanged reload).
+    check(RepoPickerLogic.resolveSelection(repos: repos, current: "/Code/bothy") == "/Code/bothy",
+          "keeps the current selection when this host still offers it")
+
+    // A stale selection (host switched away) falls back to a recent repo.
+    check(RepoPickerLogic.resolveSelection(repos: repos, current: "/gone/glen") == "/Code/croft",
+          "stale selection falls back to a recent repo")
+
+    // Empty initial selection with no recent repo falls back to the first.
+    check(RepoPickerLogic.resolveSelection(repos: [bothy], current: "") == "/Code/bothy",
+          "empty selection with no recent repo falls back to the first")
+
+    // No repos at all ⇒ empty selection (Create stays disabled, no crash).
+    check(RepoPickerLogic.resolveSelection(repos: [], current: "/gone/glen") == "",
+          "empty repo list yields no selection")
+}
+
 // MARK: - Frame codec (channel byte + BE length) — mirrors frame.go
 
 func testFrameCodec() {
@@ -544,6 +570,7 @@ struct Smoke {
             try await testRealAdapters()
             testSpaceDrag()
             testScroll()
+            testRepoPickerSelection()
             testFrameCodec()
         } catch {
             print("EXCEPTION: \(error)")

@@ -82,22 +82,17 @@ struct NewSessionView: View {
     }
 
     private func loadRepos() async {
-        guard let conn = model.connections.first(where: { $0.id == hostID }) else { return }
+        let requestedHostID = hostID
+        guard let conn = model.connections.first(where: { $0.id == requestedHostID }) else { return }
         loadingRepos = true
         defer { loadingRepos = false }
-        repos = await conn.repoList()
-        selectedRepo = Self.resolveSelection(repos: repos, current: selectedRepo)
-    }
-
-    /// Choose which repo the picker should have selected after a (re)load. Keep
-    /// the current selection only if this host still offers it (an unchanged
-    /// reload); otherwise fall back to a recent repo, then the first. Without
-    /// this, switching hosts leaves the selection pointing at a path the new
-    /// host doesn't list, so the picker shows nothing selected and Create stays
-    /// disabled (#896).
-    static func resolveSelection(repos: [RepoEntry], current: String) -> String {
-        if repos.contains(where: { $0.path == current }) { return current }
-        return repos.first(where: { $0.recent })?.path ?? repos.first?.path ?? ""
+        let loaded = await conn.repoList()
+        // Drop a late response for a host we've since switched away from —
+        // otherwise a slow host's repos could overwrite the current host's list
+        // (and selection) after the user has moved on.
+        guard requestedHostID == hostID else { return }
+        repos = loaded
+        selectedRepo = RepoPickerLogic.resolveSelection(repos: loaded, current: selectedRepo)
     }
 
     private func create() async {
@@ -115,6 +110,22 @@ struct NewSessionView: View {
         } else {
             error = conn.lastError ?? "Create failed."
         }
+    }
+}
+
+/// Pure repo-picker selection logic, split out of the SwiftUI view so it can be
+/// exercised without driving SwiftUI (see GraithMobileSmoke — the CLT toolchain
+/// has no XCTest).
+public enum RepoPickerLogic {
+    /// Choose which repo the picker should have selected after a (re)load. Keep
+    /// the current selection only if this host still offers it (an unchanged
+    /// reload); otherwise fall back to a recent repo, then the first. Without
+    /// this, switching hosts leaves the selection pointing at a path the new
+    /// host doesn't list, so the picker shows nothing selected and Create stays
+    /// disabled (#896).
+    public static func resolveSelection(repos: [RepoEntry], current: String) -> String {
+        if repos.contains(where: { $0.path == current }) { return current }
+        return repos.first(where: { $0.recent })?.path ?? repos.first?.path ?? ""
     }
 }
 
