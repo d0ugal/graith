@@ -1,0 +1,178 @@
+name: Coverage
+
+# Self-hosted test-coverage reporting: computes Go and Swift coverage and posts
+# a single sticky comment on the PR. No third-party service and no historical
+# tracking — the "delta vs base" is measured in-run by re-testing the base
+# commit (cheap on Linux; Swift shows an absolute % only to avoid doubling
+# expensive macOS runner minutes).
+#
+# NOT wired as a required status check: it only runs on pull_request and its
+# result is informational. See the required-check note in ci.yml.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  # Cheap Linux pre-check so the expensive macOS Swift job only spins up when the
+  # PR actually touches gui/. Avoids burning macOS minutes on Go-only PRs.
+  changes:
+    name: Detect gui changes
+    runs-on: ubuntu-latest
+    outputs:
+      gui: ${{ steps.filter.outputs.gui }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - id: filter
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          if git diff --name-only "$BASE_SHA" HEAD -- 'gui/**' | grep -q .; then
+            echo "gui=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "gui=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  go-coverage:
+    name: Go coverage
+    runs-on: ubuntu-latest
+    outputs:
+      pct: ${{ steps.cov.outputs.pct }}
+      base: ${{ steps.cov.outputs.base }}
+      delta: ${{ steps.cov.outputs.delta }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+      - id: cov
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          # Emit the aggregate statement-coverage % for the current tree into a
+          # profile. `|| true`: a flaky/failing package must not abort the
+          # report — ci.yml is the authoritative test gate. Empty profile → 0.0.
+          measure() {
+            go test -coverprofile="$1" ./... >/dev/null 2>&1 || true
+            if [ -s "$1" ]; then
+              go tool cover -func="$1" | awk '/^total:/ {gsub(/%/,"",$3); print $3}'
+            else
+              echo "0.0"
+            fi
+          }
+          HEAD_PCT="$(measure cover.head.out)"
+          # Measure the base commit the same way, then diff. Go's build cache
+          # makes the second pass much cheaper than the first.
+          git checkout --quiet --force "$BASE_SHA"
+          BASE_PCT="$(measure cover.base.out)"
+          DELTA="$(awk -v a="$HEAD_PCT" -v b="$BASE_PCT" 'BEGIN{printf "%+.1f", a-b}')"
+          {
+            echo "pct=$HEAD_PCT"
+            echo "base=$BASE_PCT"
+            echo "delta=$DELTA"
+          } >> "$GITHUB_OUTPUT"
+
+  swift-coverage:
+    name: Swift coverage
+    needs: changes
+    if: needs.changes.outputs.gui == 'true'
+    runs-on: macos-latest
+    outputs:
+      pct: ${{ steps.cov.outputs.pct }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - name: Toolchain versions
+        run: swift --version
+      - id: cov
+        # SwiftPM-native coverage (no simulator / xcodebuild), matching the
+        # existing GUI CI. Covers the UIKit-free shared logic package
+        # (gui/shared). `--show-codecov-path` prints the merged llvm-cov export
+        # JSON produced by the coverage-enabled run above.
+        run: |
+          set -euo pipefail
+          swift test --package-path gui/shared --enable-code-coverage
+          COV_JSON="$(swift test --package-path gui/shared --show-codecov-path | tail -n1)"
+          PCT="$(jq '.data[0].totals.lines.percent' "$COV_JSON" | awk '{printf "%.1f", $1}')"
+          echo "pct=$PCT" >> "$GITHUB_OUTPUT"
+
+  comment:
+    name: Coverage comment
+    needs: [changes, go-coverage, swift-coverage]
+    # always(): still post when swift-coverage is skipped (Go-only PR) or fails.
+    # Fork PRs get a read-only token and can't comment, so skip them (their
+    # coverage still runs and shows in the job logs) rather than fail the run.
+    if: always() && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Build and post sticky comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          GO_PCT: ${{ needs.go-coverage.outputs.pct }}
+          GO_BASE: ${{ needs.go-coverage.outputs.base }}
+          GO_DELTA: ${{ needs.go-coverage.outputs.delta }}
+          GO_RESULT: ${{ needs.go-coverage.result }}
+          GUI_CHANGED: ${{ needs.changes.outputs.gui }}
+          SWIFT_PCT: ${{ needs.swift-coverage.outputs.pct }}
+          SWIFT_RESULT: ${{ needs.swift-coverage.result }}
+        run: |
+          set -euo pipefail
+          marker='<!-- coverage-report -->'
+
+          # Go row.
+          if [ "$GO_RESULT" = "success" ] && [ -n "${GO_PCT:-}" ]; then
+            go_row="| Go (\`./...\`) | ${GO_PCT}% | ${GO_DELTA}% |"
+          else
+            go_row="| Go (\`./...\`) | n/a | — |"
+          fi
+
+          # Swift row: only meaningful when the PR touches gui/.
+          if [ "$GUI_CHANGED" = "true" ]; then
+            if [ "$SWIFT_RESULT" = "success" ] && [ -n "${SWIFT_PCT:-}" ]; then
+              swift_row="| Swift (\`gui/shared\`) | ${SWIFT_PCT}% | — |"
+            else
+              swift_row="| Swift (\`gui/shared\`) | failed | — |"
+            fi
+          else
+            swift_row="| Swift (\`gui/shared\`) | not run (no \`gui/\` changes) | — |"
+          fi
+
+          body="$(cat <<EOF
+          $marker
+          ### 📊 Test coverage
+
+          | Component | Coverage | Δ vs base |
+          |-----------|:--------:|:---------:|
+          $go_row
+          $swift_row
+
+          <sub>Base coverage: Go \`${GO_BASE:-n/a}%\`. Swift shows an absolute % (no delta) to keep macOS CI light. Updated on every push.</sub>
+          EOF
+          )"
+
+          # Sticky comment: find our previous one by marker and edit it, else
+          # create. Self-contained via gh api — no third-party action.
+          cid="$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+            --jq "[.[] | select(.body | startswith(\"$marker\")) | .id] | first")"
+          if [ -n "$cid" ] && [ "$cid" != "null" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$cid" -f body="$body" >/dev/null
+            echo "Updated coverage comment $cid"
+          else
+            gh api -X POST "repos/$REPO/issues/$PR/comments" -f body="$body" >/dev/null
+            echo "Created coverage comment"
+          fi
