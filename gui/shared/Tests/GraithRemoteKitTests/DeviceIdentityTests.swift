@@ -67,7 +67,7 @@ struct DeviceIdentityTests {
         #expect(try scopedA.publicKeyRaw() == base.publicKeyRaw())
 
         // And the proof carries the scoped ID.
-        let proof = try scopedA.proof(forNonce: "brig")
+        let proof = try scopedA.proof(forNonce: "brig", channelBinding: "brig-spki")
         #expect(proof.deviceID == "dev-A")
     }
 }
