@@ -24,22 +24,32 @@ concurrency:
 jobs:
   # Cheap Linux pre-check so the expensive macOS Swift job only spins up when the
   # PR actually touches gui/. Avoids burning macOS minutes on Go-only PRs.
+  #
+  # Uses the PR files API rather than a local `git diff`: the checked-out
+  # pull_request merge ref can be built against an older base than
+  # `base.sha`, so diffing the two surfaces the base branch's own gui/ commits
+  # and spuriously flips gui=true. The API returns exactly the PR's changed
+  # files, immune to that drift — and needs no checkout.
   changes:
     name: Detect gui changes
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       gui: ${{ steps.filter.outputs.gui }}
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
-        with:
-          persist-credentials: false
-          fetch-depth: 0
       - id: filter
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          if git diff --name-only "$BASE_SHA" HEAD -- 'gui/**' | grep -q .; then
+          files="$(gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[].filename')"
+          # here-string (not a pipe) so grep matching early can't SIGPIPE-fail
+          # an upstream command under pipefail.
+          if grep -q '^gui/' <<<"$files"; then
             echo "gui=true" >> "$GITHUB_OUTPUT"
           else
             echo "gui=false" >> "$GITHUB_OUTPUT"
