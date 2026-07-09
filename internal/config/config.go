@@ -234,11 +234,23 @@ func (g GitPullConfig) IntervalDuration() time.Duration {
 // different authority: a CI failure is a machine verdict (safe to act on,
 // default on); a review comment or decision is human intent that may not be
 // actionable (default off).
+//
+// Comments come in two distinct kinds, each with its own gate:
+//   - NotifyReviewComments covers inline code-review comments (the
+//     pulls/{n}/comments surface) — feedback anchored to a file and line.
+//   - NotifyPRComments covers regular conversation comments on the PR thread
+//     (the issues/{n}/comments surface) — issue-style comments not tied to a
+//     line of code.
+//
+// They are separate signals: a reviewer leaving inline nits and someone
+// dropping a "ship it" on the conversation thread differ, and a user may want
+// one without the other.
 type PRWatchConfig struct {
 	Enabled               bool   `toml:"enabled"`
 	NotifyCIFailures      bool   `toml:"notify_ci_failures"`
 	NotifyMergeConflicts  bool   `toml:"notify_merge_conflicts"`
 	NotifyReviewComments  bool   `toml:"notify_review_comments"`
+	NotifyPRComments      bool   `toml:"notify_pr_comments"`
 	NotifyReviewDecisions bool   `toml:"notify_review_decisions"`
 	NotifyPRLifecycle     bool   `toml:"notify_pr_lifecycle"`
 	NotifyCIRecovery      bool   `toml:"notify_ci_recovery"`

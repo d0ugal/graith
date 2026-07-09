@@ -26,6 +26,10 @@ func TestPRWatchDefaults(t *testing.T) {
 		t.Error("notify_review_comments should default false")
 	}
 
+	if pw.NotifyPRComments {
+		t.Error("notify_pr_comments should default false")
+	}
+
 	if pw.NotifyReviewDecisions {
 		t.Error("notify_review_decisions should default false")
 	}
