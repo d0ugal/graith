@@ -131,7 +131,7 @@ func stopBatchRun(cmd *cobra.Command) error {
 	return runBatch(cmd, &stopBatch, "stop", "stopped", "stopping", "stop",
 		func(sessionID string) any {
 			return protocol.StopMsg{SessionID: sessionID}
-		})
+		}, stopNoOpSkip)
 }
 
 // registerStopCmd registers this command on rootCmd. Called from registerCommands.

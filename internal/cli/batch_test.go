@@ -266,6 +266,94 @@ func TestFilterSessions2InvalidStalePropagates(t *testing.T) {
 	}
 }
 
+// TestStopNoOpSkip verifies that batch stop treats non-running sessions as
+// no-ops (skipped with a note) and only leaves running sessions actionable, so
+// `gr stop` on an already-stopped session succeeds instead of erroring (#203).
+func TestStopNoOpSkip(t *testing.T) {
+	tests := []struct {
+		name       string
+		status     string
+		wantReason string
+		wantSkip   bool
+	}{
+		{name: "running is actionable", status: "running", wantSkip: false},
+		{name: "stopped is a no-op", status: "stopped", wantReason: "not running (stopped)", wantSkip: true},
+		{name: "errored is a no-op", status: "errored", wantReason: "not running (errored)", wantSkip: true},
+		{name: "empty status is a no-op", status: "", wantReason: "not running", wantSkip: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reason, skip := stopNoOpSkip(protocol.SessionInfo{Name: "braw", Status: tt.status})
+			if skip != tt.wantSkip {
+				t.Fatalf("stopNoOpSkip(status=%q) skip = %v, want %v", tt.status, skip, tt.wantSkip)
+			}
+
+			if reason != tt.wantReason {
+				t.Errorf("stopNoOpSkip(status=%q) reason = %q, want %q", tt.status, reason, tt.wantReason)
+			}
+		})
+	}
+}
+
+// TestPartitionNoOp covers the split of matched sessions into actionable and
+// skipped no-ops, mirroring the batch-stop scenarios from #203: an
+// already-stopped session is skipped, `--stopped` skips all matches, and a
+// mixed repo filter stops only the running sessions.
+func TestPartitionNoOp(t *testing.T) {
+	running := protocol.SessionInfo{ID: "1", Name: "running-croft", Status: "running"}
+	stopped := protocol.SessionInfo{ID: "2", Name: "stopped-croft", Status: "stopped"}
+	errored := protocol.SessionInfo{ID: "3", Name: "errored-croft", Status: "errored"}
+
+	t.Run("nil noOp leaves everything actionable", func(t *testing.T) {
+		matched := []protocol.SessionInfo{running, stopped}
+
+		actionable, skips := partitionNoOp(matched, nil)
+		if len(actionable) != 2 || len(skips) != 0 {
+			t.Fatalf("nil noOp: actionable=%d skips=%d, want 2/0", len(actionable), len(skips))
+		}
+	})
+
+	t.Run("already-stopped session is skipped", func(t *testing.T) {
+		actionable, skips := partitionNoOp([]protocol.SessionInfo{stopped}, stopNoOpSkip)
+		if len(actionable) != 0 {
+			t.Fatalf("actionable = %d, want 0", len(actionable))
+		}
+
+		if len(skips) != 1 || skips[0] != "stopped-croft: not running (stopped)" {
+			t.Fatalf("skips = %v, want one stopped-croft note", skips)
+		}
+	})
+
+	t.Run("--stopped skips all matches", func(t *testing.T) {
+		// filterSessions with --stopped yields only stopped/errored sessions;
+		// every one of them is a no-op for stop.
+		matched := []protocol.SessionInfo{stopped, errored}
+
+		actionable, skips := partitionNoOp(matched, stopNoOpSkip)
+		if len(actionable) != 0 {
+			t.Fatalf("actionable = %d, want 0", len(actionable))
+		}
+
+		if len(skips) != 2 {
+			t.Fatalf("skips = %v, want 2", skips)
+		}
+	})
+
+	t.Run("mixed states leave only running actionable", func(t *testing.T) {
+		matched := []protocol.SessionInfo{running, stopped, errored}
+
+		actionable, skips := partitionNoOp(matched, stopNoOpSkip)
+		if len(actionable) != 1 || actionable[0].ID != "1" {
+			t.Fatalf("actionable = %+v, want only the running session", actionable)
+		}
+
+		if len(skips) != 2 {
+			t.Fatalf("skips = %v, want 2", skips)
+		}
+	})
+}
+
 // TestParseStaleDuration2 adds combined day+hour forms not covered by round 1.
 func TestParseStaleDuration2(t *testing.T) {
 	d, err := parseStaleDuration("3d1h")
@@ -499,6 +587,7 @@ func TestPrintBatchSummary(t *testing.T) {
 		succeeded: []string{"braw", "canny"},
 		failed:    []batchFailure{{name: "dreich", msg: "worktree busy"}},
 		skipped:   []string{"thrawn"},
+		noOps:     []string{"bide: not running (stopped)"},
 	}
 
 	printBatchSummary("deleted", "deleting", res)
@@ -508,6 +597,7 @@ func TestPrintBatchSummary(t *testing.T) {
 	for _, want := range []string{
 		"Deleted 2 sessions",
 		"Skipped starred session: thrawn",
+		"Skipped bide: not running (stopped)",
 		"Failed deleting dreich: worktree busy",
 	} {
 		if !strings.Contains(got, want) {
