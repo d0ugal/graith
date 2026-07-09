@@ -18,6 +18,7 @@ let package = Package(
             name: "GraithGUI",
             dependencies: [
                 .product(name: "GraithProtocol", package: "shared"),
+                .product(name: "GraithRemoteKit", package: "shared"),
                 .product(name: "GraithTerminalCore", package: "shared"),
                 .product(name: "CGhosttyVT", package: "shared"),
                 .product(name: "GraithDesign", package: "shared"),

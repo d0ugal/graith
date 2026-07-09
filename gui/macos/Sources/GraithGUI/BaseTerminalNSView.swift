@@ -756,36 +756,43 @@ struct TerminalContainer: View {
 
     @ViewBuilder
     private var terminalPane: some View {
-        switch store.renderer {
-        case .ghosttyCoreText:
-            GhosttyTerminalPane(
-                sessionID: session.id,
-                client: store.client,
-                fontSize: store.fontSize,
-                onExit: handleExit,
-                searchState: searchState
-            )
-        case .ghosttyMetal:
-            if MTLCreateSystemDefaultDevice() != nil {
-                MetalTerminalPane(
-                    sessionID: session.id,
-                    client: store.client,
-                    fontSize: store.fontSize,
-                    onExit: handleExit,
-                    searchState: searchState
-                )
-            } else {
+        // Attach over the client for the daemon this session lives on (local
+        // Unix socket, or a paired remote over the tailnet). The transport is
+        // abstract, so the terminal drives a remote session identically.
+        if let client = store.client(for: session.id) {
+            switch store.renderer {
+            case .ghosttyCoreText:
                 GhosttyTerminalPane(
                     sessionID: session.id,
-                    client: store.client,
+                    client: client,
                     fontSize: store.fontSize,
                     onExit: handleExit,
                     searchState: searchState
                 )
-                .onAppear {
-                    store.renderer = .ghosttyCoreText
+            case .ghosttyMetal:
+                if MTLCreateSystemDefaultDevice() != nil {
+                    MetalTerminalPane(
+                        sessionID: session.id,
+                        client: client,
+                        fontSize: store.fontSize,
+                        onExit: handleExit,
+                        searchState: searchState
+                    )
+                } else {
+                    GhosttyTerminalPane(
+                        sessionID: session.id,
+                        client: client,
+                        fontSize: store.fontSize,
+                        onExit: handleExit,
+                        searchState: searchState
+                    )
+                    .onAppear {
+                        store.renderer = .ghosttyCoreText
+                    }
                 }
             }
+        } else {
+            HostDisconnected(sessionName: session.name)
         }
     }
 
@@ -864,6 +871,32 @@ struct SessionBusyElsewhere: View {
                 .clipShape(RoundedRectangle(cornerRadius: 6))
             }
             .buttonStyle(.plain)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Theme.base)
+    }
+}
+
+/// Shown when a session's host is not connected (a remote daemon dropped off
+/// the tailnet, or was removed). The list refreshes on its own; this is a
+/// placeholder rather than an error.
+struct HostDisconnected: View {
+    let sessionName: String
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "wifi.slash")
+                .font(.system(size: 28))
+                .foregroundStyle(Theme.overlay0)
+
+            VStack(spacing: 4) {
+                Text("Host not connected")
+                    .font(.system(.body, design: .monospaced))
+                    .foregroundStyle(Theme.text)
+                Text("Can't reach the daemon for “\(sessionName)”")
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(Theme.overlay0)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.base)

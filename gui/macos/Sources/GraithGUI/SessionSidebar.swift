@@ -1,8 +1,10 @@
 import SwiftUI
+import GraithRemoteKit
 
 struct SessionSidebar: View {
     @EnvironmentObject var store: SessionStore
     @Binding var showNewSession: Bool
+    @State private var showAddHost = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -22,6 +24,18 @@ struct SessionSidebar: View {
                     .padding(.vertical, 2)
                     .background(Theme.surface0)
                     .clipShape(Capsule())
+
+                // Add host button
+                Button(action: { showAddHost = true }) {
+                    Image(systemName: "network")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Theme.subtext0)
+                        .frame(width: 22, height: 22)
+                        .background(Theme.surface0)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                }
+                .buttonStyle(.plain)
+                .help("Add a remote host over Tailscale")
 
                 // New session button
                 Button(action: { showNewSession = true }) {
@@ -48,7 +62,18 @@ struct SessionSidebar: View {
             }
 
             // Session list
-            if store.sessions.isEmpty {
+            if store.hasRemoteHosts {
+                // Multi-host: group by host, then repo, so every daemon (and its
+                // connection state) is visible in one sidebar.
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(store.sessionsByHost, id: \.host.id) { entry in
+                            HostSection(host: entry.host, groups: entry.groups)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+            } else if store.sessions.isEmpty {
                 Spacer()
                 VStack(spacing: 8) {
                     Image(systemName: "terminal")
@@ -91,6 +116,74 @@ struct SessionSidebar: View {
             }
         }
         .background(Theme.mantle)
+        .sheet(isPresented: $showAddHost) {
+            AddHostSheet()
+        }
+    }
+}
+
+/// A collapsible per-host section in the multi-host sidebar: a host header
+/// (label, connection state, session count, forget button) over its repo groups.
+struct HostSection: View {
+    let host: Host
+    let groups: [(repo: String, sessions: [Session])]
+    @EnvironmentObject var store: SessionStore
+
+    private var sessionCount: Int { groups.reduce(0) { $0 + $1.sessions.count } }
+    private var errorText: String? { store.hostErrors[host.id] }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: host.kind == .local ? "desktopcomputer" : "network")
+                    .font(.system(size: 11))
+                    .foregroundStyle(host.kind == .local ? Theme.blue : Theme.teal)
+                Circle()
+                    .fill(errorText == nil ? Theme.green : Theme.overlay0)
+                    .frame(width: 6, height: 6)
+                Text(host.label.uppercased())
+                    .font(.system(.caption, design: .monospaced))
+                    .fontWeight(.semibold)
+                    .foregroundStyle(Theme.subtext0)
+                    .lineLimit(1)
+                Spacer()
+                Text("\(sessionCount)")
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(Theme.overlay0)
+                if host.kind != .local {
+                    Button(action: { store.removeHost(host) }) {
+                        Image(systemName: "minus.circle")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Theme.overlay0)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Forget this host")
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 12)
+            .padding(.bottom, 4)
+            .background(Theme.crust)
+
+            if let errorText {
+                Text(errorText)
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(Theme.yellow)
+                    .lineLimit(1)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 4)
+            } else if sessionCount == 0 {
+                Text(host.isPaired ? "No sessions" : "Pairing…")
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(Theme.overlay0)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 4)
+            }
+
+            ForEach(groups, id: \.repo) { group in
+                RepoSection(repo: group.repo, sessions: group.sessions)
+            }
+        }
     }
 }
 

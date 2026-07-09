@@ -10,6 +10,12 @@ let package = Package(
     platforms: [.macOS(.v14), .iOS(.v16)],
     products: [
         .library(name: "GraithProtocol", targets: ["GraithProtocol"]),
+        // Cross-platform remote/pairing substrate over GraithProtocol: device
+        // identity (Keychain + ed25519), the host registry, and the pairing
+        // coordinator. The macOS app consumes it to gain the multi-host remote
+        // experience iOS already has (#885); iOS keeps its GraithMobileKit copies
+        // for now (a future task can unify them onto this).
+        .library(name: "GraithRemoteKit", targets: ["GraithRemoteKit"]),
         .library(name: "GraithTerminalCore", targets: ["GraithTerminalCore"]),
         .library(name: "CGhosttyVT", targets: ["CGhosttyVT"]),
         // Shared design language (Catppuccin palette, monospace type, GRAITH
@@ -24,6 +30,14 @@ let package = Package(
         .testTarget(
             name: "GraithProtocolTests",
             dependencies: ["GraithProtocol"]
+        ),
+        .target(
+            name: "GraithRemoteKit",
+            dependencies: ["GraithProtocol"]
+        ),
+        .testTarget(
+            name: "GraithRemoteKitTests",
+            dependencies: ["GraithRemoteKit", "GraithProtocol"]
         ),
         .target(
             name: "GraithTerminalCore",
