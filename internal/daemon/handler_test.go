@@ -2139,6 +2139,13 @@ func TestDiagnostics(t *testing.T) {
 		t.Error("expected non-empty uptime")
 	}
 
+	// The handler must stamp the daemon's own version so gr doctor can detect a
+	// CLI/daemon mismatch authoritatively (issue #945). Assert it's populated so
+	// the population can't silently regress.
+	if diag.DaemonVersion == "" {
+		t.Error("expected non-empty daemon version")
+	}
+
 	if diag.Fleet.Total != 2 {
 		t.Errorf("fleet total = %d, want 2", diag.Fleet.Total)
 	}

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -41,6 +42,11 @@ func TestClassifyDialErr(t *testing.T) {
 		{"enoent is no socket", wrapDialErr(syscall.ENOENT), daemonReachNoSocket},
 		{"econnrefused is down", wrapDialErr(syscall.ECONNREFUSED), daemonReachDown},
 		{"timeout is down", wrapDialErr(syscall.ETIMEDOUT), daemonReachDown},
+		// Bare and fmt-wrapped errnos must classify identically — this pins the
+		// use of errors.Is (not ==), so a refactor to a direct comparison breaks
+		// loudly rather than silently misclassifying every dial error as "down".
+		{"bare eperm is sandbox denial", syscall.EPERM, daemonReachSandboxed},
+		{"fmt-wrapped eperm is sandbox denial", fmt.Errorf("dial: %w", syscall.EPERM), daemonReachSandboxed},
 	}
 
 	for _, tt := range tests {
@@ -276,7 +282,10 @@ func TestProbeDaemonOverSocket(t *testing.T) {
 	paths = oldPaths
 	paths.SocketPath = sock
 
-	fakeDaemon(t, sock, "1.2.3-canny", protocol.DiagnosticsMsg{
+	// Deliberately send a different version in the handshake than in diagnostics
+	// so the assertion below actually proves probeDaemon prefers the
+	// diagnostics-reported version over the handshake one.
+	fakeDaemon(t, sock, "0.0.1-haar-handshake", protocol.DiagnosticsMsg{
 		DaemonPID:     777,
 		DaemonVersion: "1.2.3-canny",
 		DaemonUptime:  "3m",
@@ -290,7 +299,7 @@ func TestProbeDaemonOverSocket(t *testing.T) {
 	}
 
 	if probe.daemonVersion != "1.2.3-canny" {
-		t.Errorf("daemonVersion = %q, want 1.2.3-canny", probe.daemonVersion)
+		t.Errorf("daemonVersion = %q, want the diagnostics value 1.2.3-canny (not the handshake value)", probe.daemonVersion)
 	}
 
 	if probe.diag == nil || probe.diag.DaemonPID != 777 {
