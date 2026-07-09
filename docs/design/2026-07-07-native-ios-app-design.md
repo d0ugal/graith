@@ -403,6 +403,17 @@ distinct from session tokens:
    client replies `auth_proof{device_id, signature}` signing the nonce with its
    device private key. The connection stays `roleNone` (Gate-A lane only) until a
    valid `auth_proof` is received, so a leaked bearer token alone is insufficient.
+   **Channel binding (issue #886).** The signed material is not the bare nonce
+   but `"graith-pop-v1:" + nonce + ":" + spki`, where `spki` is the base64
+   SHA-256 SPKI pin of the server certificate this TLS connection actually
+   terminates on. The daemon signs against its own pin (`remoteTLSPin`); each
+   client signs against the pin it observed/pinned — never one the peer reports.
+   A man-in-the-middle who relays the handshake terminates TLS with a different
+   certificate (different SPKI), so a proof it captures will not verify against
+   the honest daemon's pin, and it cannot obtain the session token. The exact
+   construction is `protocol.PoPSigningInput`, shared verbatim by the daemon
+   (`verifyPoP`), the Go client (`completeRemotePoP`), and the Swift client
+   (`DeviceKeySigner.proof(forNonce:channelBinding:)`).
    (If we later decide PoP is more than v1 warrants, we **delete
    `auth_challenge`/`auth_proof` and the keypair** and treat the token as
    bearer-bound-to-WhoIs — but the design and the wire must stay in lockstep; the

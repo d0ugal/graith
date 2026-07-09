@@ -652,10 +652,36 @@ type AuthChallengeMsg struct {
 }
 
 // AuthProofMsg is the client's response to an auth challenge: the signature of
-// the challenge nonce produced with the device private key.
+// the proof-of-possession signing input (see PoPSigningInput) produced with
+// the device private key.
 type AuthProofMsg struct {
 	DeviceID  string `json:"device_id"`
 	Signature string `json:"signature"`
+}
+
+// popSigningPrefix is the domain-separation tag for the proof-of-possession
+// signing input. Bump the version suffix if the construction ever changes so
+// signatures for the old and new formats can never be confused.
+const popSigningPrefix = "graith-pop-v1:"
+
+// PoPSigningInput returns the exact bytes a device must sign for
+// proof-of-possession, binding the challenge nonce to the TLS channel it is
+// presented over (issue #886). The server-certificate SPKI pin (spki, base64
+// SHA-256) is mixed into the signed material, so a man-in-the-middle relaying
+// the pairing/auth handshake — who necessarily terminates TLS with a different
+// certificate, hence a different SPKI — cannot relay a captured signature: the
+// daemon verifies against its own pin and the relayed proof will not match.
+//
+// Both the daemon (verifyPoP) and every client (Go completeRemotePoP, Swift
+// DeviceKeySigner.proof) must build this input identically, byte for byte. The
+// client feeds its own observed/pinned SPKI here, never one the peer reports,
+// so an attacker cannot talk it into signing over the honest daemon's pin.
+//
+// Format: "graith-pop-v1:" + nonce + ":" + spki. nonce is the hex challenge
+// string and spki is base64 (std) — neither alphabet contains ':' — so the
+// delimiters are unambiguous.
+func PoPSigningInput(nonce, spki string) []byte {
+	return []byte(popSigningPrefix + nonce + ":" + spki)
 }
 
 // ApprovalSubscribeMsg subscribes the client to approval notifications.

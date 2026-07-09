@@ -21,14 +21,15 @@ struct TestSigner: DeviceKeySigner {
         key.publicKey.rawRepresentation
     }
 
-    func sign(_ nonce: Data) throws -> Data {
-        try key.signature(for: nonce)
+    func sign(_ message: Data) throws -> Data {
+        try key.signature(for: message)
     }
 
-    /// Verify a base64-std signature over a nonce string's UTF-8 bytes, exactly
-    /// as the daemon's `verifyPoP` does.
-    func verify(base64Signature: String, nonce: String) -> Bool {
+    /// Verify a base64-std signature over the channel-bound proof-of-possession
+    /// signing input, exactly as the daemon's `verifyPoP` does (issue #886):
+    /// `"graith-pop-v1:" + nonce + ":" + spki`.
+    func verify(base64Signature: String, nonce: String, channelBinding spki: String) -> Bool {
         guard let sig = Data(base64Encoded: base64Signature) else { return false }
-        return key.publicKey.isValidSignature(sig, for: Data(nonce.utf8))
+        return key.publicKey.isValidSignature(sig, for: Data("graith-pop-v1:\(nonce):\(spki)".utf8))
     }
 }

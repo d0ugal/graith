@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/protocol"
 )
 
 // This file implements the cryptographic primitives for device pairing and
@@ -41,13 +42,16 @@ func hmacToken(key, token string) string {
 }
 
 // verifyPoP verifies a proof-of-possession: that sigB64 is a valid ed25519
-// signature over nonce by the private key matching pubKeyB64. pubKeyB64 and
-// sigB64 are base64 (std encoding); nonce is the raw challenge string, signed
-// verbatim (not base64). Any empty input, decode failure, or size mismatch
-// returns false (fail closed). Replay safety depends on the caller issuing a
-// fresh, single-use, connection-bound nonce (handler wiring, Task 6).
-func verifyPoP(pubKeyB64, nonce, sigB64 string) bool {
-	if pubKeyB64 == "" || nonce == "" || sigB64 == "" {
+// signature, by the private key matching pubKeyB64, over the channel-bound
+// signing input for (nonce, spki) — see protocol.PoPSigningInput. pubKeyB64 and
+// sigB64 are base64 (std encoding); nonce is the raw challenge string and spki
+// the daemon's own TLS SPKI pin, which binds the proof to this TLS channel and
+// defeats a MITM relaying the handshake (issue #886). Any empty input
+// (including an empty spki — fail closed if the pin is somehow unset), decode
+// failure, or size mismatch returns false. Replay safety depends on the caller
+// issuing a fresh, single-use, connection-bound nonce (handler wiring, Task 6).
+func verifyPoP(pubKeyB64, nonce, spki, sigB64 string) bool {
+	if pubKeyB64 == "" || nonce == "" || spki == "" || sigB64 == "" {
 		return false
 	}
 
@@ -61,7 +65,7 @@ func verifyPoP(pubKeyB64, nonce, sigB64 string) bool {
 		return false
 	}
 
-	return ed25519.Verify(ed25519.PublicKey(pub), []byte(nonce), sig)
+	return ed25519.Verify(ed25519.PublicKey(pub), protocol.PoPSigningInput(nonce, spki), sig)
 }
 
 // validEd25519PubKey reports whether s is a base64 std-encoded ed25519 public

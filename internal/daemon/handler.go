@@ -192,8 +192,10 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 
 			case "auth_proof":
 				// Proof-of-possession: verify the client signed the issued nonce
-				// with the private key of the device its token resolves to, and
-				// that the connection's tailnet identity still matches. On
+				// bound to this daemon's TLS SPKI pin (issue #886), with the
+				// private key of the device its token resolves to, and that the
+				// connection's tailnet identity still matches. Binding to the
+				// server cert defeats a MITM relaying the challenge/response. On
 				// success the connection advances to its paired role.
 				var ap protocol.AuthProofMsg
 				if err := protocol.DecodePayload(msg, &ap); err != nil {
@@ -205,7 +207,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				dev := sm.DeviceForToken(msg.Token)
 				sm.mu.RUnlock()
 
-				if dev == nil || challengeNonce == "" || !verifyPoP(dev.PubKey, challengeNonce, ap.Signature) ||
+				if dev == nil || challengeNonce == "" || !verifyPoP(dev.PubKey, challengeNonce, sm.remoteTLSPin, ap.Signature) ||
 					(origin.Remote && !identityMatchesDevice(origin.Identity, dev)) {
 					sendControl("error", protocol.ErrorMsg{Message: "proof of possession failed"})
 					continue

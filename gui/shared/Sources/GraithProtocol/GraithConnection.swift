@@ -115,17 +115,24 @@ public actor GraithConnection {
         return ok
     }
 
-    /// Answer the daemon's `auth_challenge` with an `auth_proof` (design B.2.4).
+    /// Answer the daemon's `auth_challenge` with an `auth_proof` (design B.2.4),
+    /// binding the proof to this connection's pinned TLS channel (issue #886).
     private func completeProofOfPossession(signer: DeviceKeySigner?) async throws {
         guard let signer else {
             throw ControlError.malformed("remote connection requires a DeviceKeySigner for proof-of-possession")
+        }
+        // Bind the proof to the server cert we pinned. `connect` already refuses
+        // an authenticated remote connection without a pin, so this is always
+        // present here; fail closed rather than sign an unbound (relayable) proof.
+        guard case let .remote(_, _, pin) = transport, let spki = pin, !spki.isEmpty else {
+            throw ControlError.malformed("proof-of-possession requires a pinned TLS channel to bind against")
         }
         let challengeEnv = try await nextReply()
         guard challengeEnv.type == "auth_challenge" else {
             throw ControlError.unexpectedReply("expected auth_challenge, got \(challengeEnv.type)")
         }
         let challenge = try decodePayload(challengeEnv, as: AuthChallengeMsg.self)
-        let proof = try signer.proof(forNonce: challenge.nonce)
+        let proof = try signer.proof(forNonce: challenge.nonce, channelBinding: spki)
         try await send(control: "auth_proof", payload: proof)
 
         // The daemon replies `auth_ok` on a valid proof (handler.go) — consume it

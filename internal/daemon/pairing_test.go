@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/protocol"
 )
 
 func newPairingSM(t *testing.T) *SessionManager {
@@ -20,7 +21,13 @@ func newPairingSM(t *testing.T) *SessionManager {
 	cfg := config.Default()
 	paths := config.Paths{StateFile: filepath.Join(t.TempDir(), "state.json")}
 
-	return NewSessionManager(cfg, paths, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	sm := NewSessionManager(cfg, paths, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	// A real remote listener sets this at startup; proof-of-possession binds to
+	// it (issue #886), so the handler-level tests need a non-empty pin to sign
+	// against.
+	sm.remoteTLSPin = "bide-spki-pin"
+
+	return sm
 }
 
 // testPubKey returns a fresh base64 ed25519 public key for pairing fixtures.
@@ -66,36 +73,51 @@ func TestVerifyPoP(t *testing.T) {
 
 	pubB64 := base64.StdEncoding.EncodeToString(pub)
 	nonce := "haar-nonce-1234"
-	sig := base64.StdEncoding.EncodeToString(ed25519.Sign(priv, []byte(nonce)))
+	spki := "bide-spki-pin"
+	sig := base64.StdEncoding.EncodeToString(ed25519.Sign(priv, protocol.PoPSigningInput(nonce, spki)))
 
-	if !verifyPoP(pubB64, nonce, sig) {
+	if !verifyPoP(pubB64, nonce, spki, sig) {
 		t.Error("verifyPoP = false for a valid signature")
 	}
 
 	// Wrong nonce (signature is over a different message).
-	if verifyPoP(pubB64, "different-nonce", sig) {
+	if verifyPoP(pubB64, "different-nonce", spki, sig) {
 		t.Error("verifyPoP = true for a signature over a different nonce")
+	}
+
+	// Wrong channel binding (a MITM presents a different cert → different SPKI):
+	// the proof must not verify against the daemon's own pin (issue #886).
+	if verifyPoP(pubB64, nonce, "thrawn-mitm-pin", sig) {
+		t.Error("verifyPoP = true for a signature bound to a different SPKI")
+	}
+
+	// A signature bound to the nonce alone (no channel binding) must be rejected
+	// — this is exactly the pre-#886 signature a relay could forward.
+	unbound := base64.StdEncoding.EncodeToString(ed25519.Sign(priv, []byte(nonce)))
+	if verifyPoP(pubB64, nonce, spki, unbound) {
+		t.Error("verifyPoP = true for an unbound (nonce-only) signature")
 	}
 
 	// Signature from a different key.
 	_, otherPriv, _ := ed25519.GenerateKey(nil)
-	otherSig := base64.StdEncoding.EncodeToString(ed25519.Sign(otherPriv, []byte(nonce)))
+	otherSig := base64.StdEncoding.EncodeToString(ed25519.Sign(otherPriv, protocol.PoPSigningInput(nonce, spki)))
 
-	if verifyPoP(pubB64, nonce, otherSig) {
+	if verifyPoP(pubB64, nonce, spki, otherSig) {
 		t.Error("verifyPoP = true for a signature from a different key")
 	}
 
 	// Malformed / empty inputs fail closed.
-	if verifyPoP("not-base64!!", nonce, sig) || verifyPoP(pubB64, nonce, "not-base64!!") {
+	if verifyPoP("not-base64!!", nonce, spki, sig) || verifyPoP(pubB64, nonce, spki, "not-base64!!") {
 		t.Error("verifyPoP must fail closed on malformed base64")
 	}
 
-	if verifyPoP("", nonce, sig) || verifyPoP(pubB64, "", sig) || verifyPoP(pubB64, nonce, "") {
+	if verifyPoP("", nonce, spki, sig) || verifyPoP(pubB64, "", spki, sig) ||
+		verifyPoP(pubB64, nonce, "", sig) || verifyPoP(pubB64, nonce, spki, "") {
 		t.Error("verifyPoP must fail closed on empty inputs")
 	}
 
 	// A valid-base64 but wrong-size public key must fail closed.
-	if verifyPoP(base64.StdEncoding.EncodeToString([]byte("short")), nonce, sig) {
+	if verifyPoP(base64.StdEncoding.EncodeToString([]byte("short")), nonce, spki, sig) {
 		t.Error("verifyPoP must reject a wrong-size public key")
 	}
 }

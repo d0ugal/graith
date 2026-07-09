@@ -10,6 +10,9 @@ struct ClientIntegrationTests {
         let daemon = MockDaemon(stream: serverStream)
         let signer = TestSigner(deviceID: "bairn")
         let nonce = "whin-nonce-123"
+        // The PoP proof binds the nonce to the pinned server SPKI (issue #886);
+        // it must match the transport's tlsPinSPKI below.
+        let pin = "bide-pin"
 
         let server = Task {
             let hs = try await daemon.readControl()
@@ -23,7 +26,10 @@ struct ClientIntegrationTests {
             #expect(proofEnv.type == "auth_proof")
             let proof = try decodePayload(proofEnv, as: AuthProofMsg.self)
             #expect(proof.deviceID == "bairn")
-            #expect(signer.verify(base64Signature: proof.signature, nonce: nonce))
+            #expect(signer.verify(base64Signature: proof.signature, nonce: nonce, channelBinding: pin))
+            // Bound to a MITM's different cert (SPKI), the same proof must NOT
+            // verify — this is what defeats a relayed handshake (issue #886).
+            #expect(!signer.verify(base64Signature: proof.signature, nonce: nonce, channelBinding: "thrawn-mitm-pin"))
 
             // A valid proof ⇒ the daemon replies auth_ok (handler.go). The client
             // blocks in completeProofOfPossession awaiting it before sending the
