@@ -129,6 +129,31 @@ func TestGroupConversationsSystemClassification(t *testing.T) {
 	}
 }
 
+func TestGroupConversationsAutomatedNotificationIsSystem(t *testing.T) {
+	// An automated daemon notification (issue #887) arrives on a session's
+	// normal inbox stream, not a "_system." stream, so it must be classified
+	// as system via the System flag alone.
+	convs := groupConversations("ben", []protocol.ConversationMessage{
+		{
+			Stream:     "inbox:ben",
+			SenderID:   "graith:system",
+			SenderName: "graith notifications",
+			Body:       "PR #884 was merged.",
+			CreatedAt:  "2026-06-25T10:00:00Z",
+			System:     true,
+		},
+	}, nil)
+
+	c := findConv(convs, "graith:system")
+	if c == nil || len(c.messages) != 1 {
+		t.Fatalf("conversation/messages missing: %+v", convs)
+	}
+
+	if !c.messages[0].system {
+		t.Error("automated notification not classified as system")
+	}
+}
+
 func TestGroupConversationsSortedByActivity(t *testing.T) {
 	convs := groupConversations("ben", []protocol.ConversationMessage{
 		cm("inbox:ben", "auld", "auld", "old", "2026-06-25T10:00:00Z"),
