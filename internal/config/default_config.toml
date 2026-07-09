@@ -143,25 +143,23 @@ timeout = "10m"  # how long to wait for an approval decision before it times out
 shortcut_keys = "1234567890"
 
 # Prefix key plus a command key trigger these actions while attached.
-# NOTE: only prefix, new_session, fork_session, next_session, prev_session,
-# last_session, and orchestrator_session are currently read from config (see
-# cli/attach.go PassthroughKeys). The rest are hardcoded — changing their values
-# here has no effect yet — and a few are reserved with no handler at all.
+# NOTE: all keys below are read from config EXCEPT rename_session and
+# scroll_mode, which are reserved and have no handler wired yet (issue #919).
 [keybindings]
 prefix = "ctrl+b"             # the prefix key; press it, then one of the keys below
 new_session = "c"             # open the create-session form
 fork_session = "f"           # fork the current session
-delete_session = "x"         # (hardcoded) delete a session in the picker
-detach = "d"                 # (hardcoded) detach without stopping the agent
-session_list = "w"           # (hardcoded) open the session picker overlay
+delete_session = "x"         # delete a session in the picker
+detach = "d"                 # detach without stopping the agent
+session_list = "w"           # open the session picker overlay
 next_session = "n"           # switch to the next session
 prev_session = "p"           # switch to the previous session
 last_session = "l"           # switch to the most recently used session
-resume_session = "R"         # (hardcoded) open the restart menu for a session in the picker
+resume_session = "R"         # open the restart menu for a session in the picker
 rename_session = ","         # (reserved — no handler wired yet)
-search = "/"                 # (hardcoded) filter sessions in the picker
+search = "/"                 # filter sessions in the picker
 scroll_mode = "["            # (reserved — no handler wired yet)
-shell = "s"                  # (hardcoded) open a shell in the session's worktree
+shell = "s"                  # open a shell in the session's worktree
 orchestrator_session = "o"   # jump to the orchestrator session
 
 # A special worktree-less session for coordinating other sessions (ctrl+b o).

@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"net"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -13,7 +14,7 @@ import (
 )
 
 var testOpts = PassthroughOpts{
-	Keys: PassthroughKeys{Prefix: 0x02, NextSession: 'n', PrevSession: 'p'},
+	Keys: PassthroughKeys{Prefix: 0x02, Detach: 'd', SessionList: 'w', Shell: 's', NextSession: 'n', PrevSession: 'p'},
 }
 
 type lockedWriter struct {
@@ -701,6 +702,9 @@ func TestEscapeSequenceNotPrefixIsForwarded(t *testing.T) {
 var prefixKeyOpts = PassthroughOpts{
 	Keys: PassthroughKeys{
 		Prefix:              0x02, // ctrl+b
+		Detach:              'd',
+		SessionList:         'w',
+		Shell:               's',
 		NextSession:         'n',
 		PrevSession:         'p',
 		LastSession:         'l',
@@ -770,6 +774,113 @@ func TestPrefixKeyActions2(t *testing.T) {
 				t.Fatalf("prefix+%q = %d, want %d", tc.key, got, tc.want)
 			}
 		})
+	}
+}
+
+// runPrefixSequenceWithOpts drives one prefix+key sequence through the loop with
+// caller-supplied keybindings. A short context deadline guards against a hang
+// when the key never maps to an action (old hardcoded behaviour): the loop then
+// returns the default ResultQuit instead of blocking forever.
+func runPrefixSequenceWithOpts(t *testing.T, opts PassthroughOpts, keys []byte) PassthroughResult {
+	t.Helper()
+
+	clientConn, daemonConn := net.Pipe()
+	defer func() { _ = daemonConn.Close() }()
+
+	c := newTestClient(clientConn)
+
+	go func() {
+		r := protocol.NewFrameReader(daemonConn)
+		for {
+			if _, err := r.ReadFrame(); err != nil {
+				return
+			}
+		}
+	}()
+
+	stdinR, stdinW := io.Pipe()
+	stdout := &lockedWriter{}
+
+	go func() {
+		time.Sleep(30 * time.Millisecond)
+
+		_, _ = stdinW.Write([]byte{opts.Keys.Prefix})
+
+		time.Sleep(10 * time.Millisecond)
+
+		_, _ = stdinW.Write(keys)
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	return c.runPassthroughLoop(ctx, opts, stdinR, stdout, nil)
+}
+
+// TestPrefixKeyConfigurable is the regression test for issue #918: the detach,
+// session_list and shell prefix keys must honour the configured keybinding
+// instead of the old hardcoded d/w/s literals. Rebinding them to q/z/v and
+// pressing those keys must trigger the corresponding action.
+func TestPrefixKeyConfigurable(t *testing.T) {
+	opts := PassthroughOpts{Keys: PassthroughKeys{
+		Prefix:      0x02,
+		Detach:      'q',
+		SessionList: 'z',
+		Shell:       'v',
+	}}
+
+	cases := []struct {
+		name string
+		key  byte
+		want PassthroughResult
+	}{
+		{"detach", 'q', ResultDetached},
+		{"session_list", 'z', ResultOverlay},
+		{"shell", 'v', ResultShell},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := runPrefixSequenceWithOpts(t, opts, []byte{tc.key}); got != tc.want {
+				t.Fatalf("prefix+%q = %d, want %d", tc.key, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestPrefixKeyOldLiteralIgnoredAfterRemap confirms the previously-hardcoded
+// literal no longer triggers detach once the key is rebound — pressing 'd' with
+// detach mapped to 'q' forwards the byte and takes no action (ResultQuit via the
+// context deadline).
+func TestPrefixKeyOldLiteralIgnoredAfterRemap(t *testing.T) {
+	opts := PassthroughOpts{Keys: PassthroughKeys{Prefix: 0x02, Detach: 'q'}}
+
+	if got := runPrefixSequenceWithOpts(t, opts, []byte{'d'}); got == ResultDetached {
+		t.Fatal("prefix+'d' should not detach when detach is remapped to 'q'")
+	}
+}
+
+// TestShowHelpBarReflectsConfiguredKeys checks the help bar renders the
+// configured keys rather than fixed letters.
+func TestShowHelpBarReflectsConfiguredKeys(t *testing.T) {
+	var buf bytes.Buffer
+
+	showHelpBar(&buf, PassthroughKeys{
+		Detach:              'Q',
+		SessionList:         'Z',
+		Shell:               'V',
+		OrchestratorSession: 'O',
+		LastSession:         'L',
+		NextSession:         'N',
+		PrevSession:         'P',
+		NewSession:          'C',
+		ForkSession:         'F',
+	})
+
+	got := buf.String()
+	for _, want := range []string{"Q detach", "Z sessions", "V shell", "O orch", "L last", "N/P next/prev", "C new", "F fork"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("help bar missing %q; got %q", want, got)
+		}
 	}
 }
 

@@ -69,6 +69,33 @@ func orderAgents(agents map[string]config.Agent, def string) []string {
 	return names
 }
 
+// passthroughKeysFromConfig builds the prefix-action keybindings for the attach
+// passthrough loop from the [keybindings] config table.
+func passthroughKeysFromConfig() client.PassthroughKeys {
+	return client.PassthroughKeys{
+		Prefix:              parsePrefixKey(cfg.Keybindings.Prefix),
+		Detach:              parseKeyByte(cfg.Keybindings.Detach),
+		SessionList:         parseKeyByte(cfg.Keybindings.SessionList),
+		Shell:               parseKeyByte(cfg.Keybindings.Shell),
+		NextSession:         parseKeyByte(cfg.Keybindings.NextSession),
+		PrevSession:         parseKeyByte(cfg.Keybindings.PrevSession),
+		LastSession:         parseKeyByte(cfg.Keybindings.LastSession),
+		NewSession:          parseKeyByte(cfg.Keybindings.NewSession),
+		ForkSession:         parseKeyByte(cfg.Keybindings.ForkSession),
+		OrchestratorSession: parseKeyByte(cfg.Keybindings.OrchestratorSession),
+	}
+}
+
+// overlayKeysFromConfig builds the session-picker keybindings from the
+// [keybindings] config table.
+func overlayKeysFromConfig() client.OverlayKeys {
+	return client.OverlayKeys{
+		DeleteSession: cfg.Keybindings.DeleteSession,
+		ResumeSession: cfg.Keybindings.ResumeSession,
+		Search:        cfg.Keybindings.Search,
+	}
+}
+
 func runAttach(cmd *cobra.Command, name string) error {
 	if isInsideGraith() {
 		return fmt.Errorf("cannot attach from inside a graith session (nested sessions are not supported)")
@@ -101,7 +128,7 @@ func runAttach(cmd *cobra.Command, name string) error {
 		repos := client.DiscoverRepos(cfg.AllowedRepoPaths, list.Sessions)
 		agents, defaultAgent := agentChoices()
 
-		result := client.RunOverlay(list.Sessions, "", previewFetcher(), sessionRefresher(), deleteSession, restartSession, stopSession, toggleStar, paths.Profile, nil, repos, cfg.Overlay.ShortcutKeys, agents, defaultAgent)
+		result := client.RunOverlay(list.Sessions, "", previewFetcher(), sessionRefresher(), deleteSession, restartSession, stopSession, toggleStar, paths.Profile, nil, repos, cfg.Overlay.ShortcutKeys, agents, defaultAgent, overlayKeysFromConfig())
 		if result == nil || result.Action == "" {
 			return nil
 		}
@@ -171,15 +198,7 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 	_ = protocol.DecodePayload(resp, &info)
 
 	ctx := context.Background()
-	keys := client.PassthroughKeys{
-		Prefix:              parsePrefixKey(cfg.Keybindings.Prefix),
-		NextSession:         parseKeyByte(cfg.Keybindings.NextSession),
-		PrevSession:         parseKeyByte(cfg.Keybindings.PrevSession),
-		LastSession:         parseKeyByte(cfg.Keybindings.LastSession),
-		NewSession:          parseKeyByte(cfg.Keybindings.NewSession),
-		ForkSession:         parseKeyByte(cfg.Keybindings.ForkSession),
-		OrchestratorSession: parseKeyByte(cfg.Keybindings.OrchestratorSession),
-	}
+	keys := passthroughKeysFromConfig()
 
 	prevSessionID := ""
 	overlayCollapsed := initialCollapsed
@@ -224,7 +243,7 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 			repos := client.DiscoverRepos(cfg.AllowedRepoPaths, list.Sessions)
 			agents, defaultAgent := agentChoices()
 
-			overlayResult := client.RunOverlay(list.Sessions, sessionID, previewFetcher(), sessionRefresher(), deleteSession, restartSession, stopSession, toggleStar, paths.Profile, overlayCollapsed, repos, cfg.Overlay.ShortcutKeys, agents, defaultAgent)
+			overlayResult := client.RunOverlay(list.Sessions, sessionID, previewFetcher(), sessionRefresher(), deleteSession, restartSession, stopSession, toggleStar, paths.Profile, overlayCollapsed, repos, cfg.Overlay.ShortcutKeys, agents, defaultAgent, overlayKeysFromConfig())
 			if overlayResult != nil {
 				overlayCollapsed = overlayResult.Collapsed
 			}

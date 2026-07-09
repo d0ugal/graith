@@ -2352,6 +2352,60 @@ func TestUpdate_FilterEscRestoresFullList(t *testing.T) {
 	}
 }
 
+// --- Update: configurable picker keybindings (issue #918) ---
+
+// TestOverlayConfigurableKeys is the regression test for the picker side of
+// #918: delete_session, resume_session and search must honour the configured
+// keybinding instead of the old hardcoded x/R/ literals.
+func TestOverlayConfigurableKeys(t *testing.T) {
+	cases := []struct {
+		name  string
+		keys  OverlayKeys
+		press string
+		want  overlayState
+	}{
+		{"delete", OverlayKeys{DeleteSession: "z"}, "z", stateConfirmDelete},
+		{"resume", OverlayKeys{ResumeSession: "Z"}, "Z", stateRestartMenu},
+		{"search", OverlayKeys{Search: "?"}, "?", stateFilter},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newOverlayModel(overlayTestSessions(), "", nil, func(string) error { return nil }, nil, nil)
+			m.restartSession = func(string) error { return nil }
+			m.applyKeys(tc.keys)
+
+			updated, _ := sendKey(m, tc.press)
+			if got := asOverlay(updated).state; got != tc.want {
+				t.Fatalf("press %q: state = %v, want %v", tc.press, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestOverlayOldLiteralIgnoredAfterRemap confirms the previously-hardcoded 'x'
+// no longer opens the delete prompt once delete_session is rebound.
+func TestOverlayOldLiteralIgnoredAfterRemap(t *testing.T) {
+	m := newOverlayModel(overlayTestSessions(), "", nil, func(string) error { return nil }, nil, nil)
+	m.applyKeys(OverlayKeys{DeleteSession: "z"})
+
+	updated, _ := sendKey(m, "x")
+	if got := asOverlay(updated).state; got == stateConfirmDelete {
+		t.Fatal("'x' should not open confirm-delete after delete_session is remapped to 'z'")
+	}
+}
+
+// TestOverlayDefaultKeysWhenUnset confirms the built-in defaults still apply
+// when no keybindings are configured (empty OverlayKeys).
+func TestOverlayDefaultKeysWhenUnset(t *testing.T) {
+	m := newOverlayModel(overlayTestSessions(), "", nil, func(string) error { return nil }, nil, nil)
+	m.applyKeys(OverlayKeys{})
+
+	updated, _ := sendKey(m, "x")
+	if got := asOverlay(updated).state; got != stateConfirmDelete {
+		t.Fatalf("default 'x' should open confirm-delete, got %v", got)
+	}
+}
+
 // --- Update: Confirm delete state ---
 
 func TestUpdate_ConfirmDeleteY(t *testing.T) {
