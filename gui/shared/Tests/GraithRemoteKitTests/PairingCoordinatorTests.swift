@@ -64,6 +64,22 @@ struct PairingCoordinatorTests {
         #expect((try? store.string(for: "host.ben.clientToken")) == nil)
     }
 
+    @Test func resetDropsUnconfirmedPlaceholder() async throws {
+        // Dismissing the sheet (reset) after the daemon replied but before the
+        // user confirmed the fingerprint must drop the placeholder host and
+        // never persist the token.
+        let resp = makePairResponse(deviceID: "dev-ben", clientToken: "tok-braw", tlsPinSPKI: "AQID")
+        let (coordinator, registry, store) = try makeCoordinator(outcome: .succeed(resp))
+
+        await coordinator.pair(hostID: "ben", label: "ben",
+                               magicDNSName: "ben.tail.ts.net", deviceLabel: "canny-mac")
+        coordinator.reset()
+
+        #expect(coordinator.phase == .idle)
+        #expect(registry.host(id: "ben") == nil)
+        #expect((try? store.string(for: "host.ben.clientToken")) == nil)
+    }
+
     @Test func daemonErrorFailsAndDropsPlaceholder() async throws {
         let (coordinator, registry, _) = try makeCoordinator(
             outcome: .fail(.daemon("pairing disabled"))

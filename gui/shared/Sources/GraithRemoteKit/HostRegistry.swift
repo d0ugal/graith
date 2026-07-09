@@ -9,6 +9,12 @@ import GraithProtocol
 /// The local host is always present and never removable. Only remote hosts are
 /// persisted to disk (the local host is re-seeded from the app at launch, so a
 /// changed socket path is never stale).
+public enum HostRegistryError: Error, Equatable {
+    /// `completePairing` was called for a host that is not in the registry
+    /// (its placeholder was removed before the pairing was confirmed).
+    case unknownHost(String)
+}
+
 @MainActor
 public final class HostRegistry: ObservableObject {
     @Published public private(set) var hosts: [Host] = []
@@ -82,9 +88,15 @@ public final class HostRegistry: ObservableObject {
 
     /// Record the result of a successful pairing: store the token in the
     /// Keychain and mark the entry paired with its profile + TLS pin + device ID.
+    ///
+    /// The host row is checked *before* the token is written, so a pairing
+    /// confirmed after its placeholder was forgotten can't orphan a token in the
+    /// Keychain with no host referencing it.
     public func completePairing(hostID: String, response: PairResponseMsg) throws {
+        guard let idx = hosts.firstIndex(where: { $0.id == hostID }) else {
+            throw HostRegistryError.unknownHost(hostID)
+        }
         try keychain.set(response.clientToken, for: Self.tokenAccount(hostID))
-        guard let idx = hosts.firstIndex(where: { $0.id == hostID }) else { return }
         hosts[idx].isPaired = true
         hosts[idx].daemonProfile = response.daemonProfile
         hosts[idx].tlsPinSPKI = response.tlsPinSPKI

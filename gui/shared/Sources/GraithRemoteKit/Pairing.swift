@@ -92,6 +92,12 @@ public final class PairingCoordinator: ObservableObject {
     private var pendingResponse: PairResponseMsg?
     private var pendingHostID: String?
     private var pendingHost: Host?
+    /// Bumped whenever a pairing attempt is started, cancelled, or reset. A
+    /// `pair()` call captures its generation and ignores its own (possibly
+    /// minutes-late) response once the generation has moved on — so cancelling
+    /// the sheet while awaiting approval can't later resurrect the flow and
+    /// confirm a pairing the user walked away from.
+    private var generation = 0
 
     public init(pairing: GraithPairing, identity: DeviceIdentity, registry: HostRegistry) {
         self.pairing = pairing
@@ -109,15 +115,19 @@ public final class PairingCoordinator: ObservableObject {
         profile: String = "",
         deviceLabel: String
     ) async {
+        generation &+= 1
+        let myGen = generation
         phase = .awaitingApproval
         spkiFingerprint = nil
 
         // Record the entry up-front (unpaired) so it appears in the sidebar
-        // while approval is pending.
+        // while approval is pending. `pendingHostID` is set *before* the upsert
+        // so `reset()` can always drop the placeholder if the user cancels.
         var host = Host(
             id: hostID, label: label, kind: .remote,
             magicDNSName: magicDNSName, port: port, daemonProfile: profile
         )
+        pendingHostID = hostID
         registry.upsert(host)
 
         do {
@@ -129,6 +139,14 @@ public final class PairingCoordinator: ObservableObject {
                 signer: identity
             )
 
+            // If the attempt was cancelled/superseded while we awaited the local
+            // human's approval, discard the result: drop the placeholder and do
+            // not touch the (now unrelated) coordinator state.
+            guard myGen == generation else {
+                registry.remove(hostID: hostID)
+                return
+            }
+
             // Do NOT persist trust yet. The token/pin/device-ID are held in
             // memory and only written to the store + registry once the user
             // confirms the fingerprint (confirmPairing).
@@ -137,16 +155,15 @@ public final class PairingCoordinator: ObservableObject {
             host.deviceID = response.deviceID
 
             pendingResponse = response
-            pendingHostID = hostID
             pendingHost = host
             spkiFingerprint = Self.formatFingerprint(response.tlsPinSPKI)
             phase = .awaitingConfirmation(host)
         } catch let error as ControlError {
             registry.remove(hostID: hostID)
-            phase = .failed(Self.describe(error))
+            if myGen == generation { phase = .failed(Self.describe(error)) }
         } catch {
             registry.remove(hostID: hostID)
-            phase = .failed(error.localizedDescription)
+            if myGen == generation { phase = .failed(error.localizedDescription) }
         }
     }
 
@@ -179,7 +196,17 @@ public final class PairingCoordinator: ObservableObject {
         phase = .idle
     }
 
+    /// Abandon the current attempt (Cancel / sheet dismissed). Invalidates any
+    /// in-flight `pair()` (via `generation`) and drops the unpaired placeholder
+    /// host so a cancelled pairing leaves no trace. A completed (`.paired`)
+    /// attempt is left alone — its host is legitimately trusted.
     public func reset() {
+        generation &+= 1
+        if case .paired = phase {
+            // Trusted host — keep it.
+        } else if let hostID = pendingHostID {
+            registry.remove(hostID: hostID)
+        }
         clearPending()
         phase = .idle
         spkiFingerprint = nil
