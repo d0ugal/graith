@@ -602,13 +602,17 @@ func TestCheckTmpDirEmpty(t *testing.T) {
 }
 
 // TestCheckTmpDirWithRepos builds the <tmp>/<repoName>/<repoHash> layout doctor
-// walks and verifies the repo count and non-empty size are reported.
+// walks and verifies the repo count and non-empty size are reported. Sizes are
+// only computed under --disk (the default run skips the walk for speed), so this
+// exercises the --disk path.
 func TestCheckTmpDirWithRepos(t *testing.T) {
-	oldPaths := paths
+	oldPaths, oldDisk := paths, doctorDisk
 
-	t.Cleanup(func() { paths = oldPaths })
+	t.Cleanup(func() { paths, doctorDisk = oldPaths, oldDisk })
 
 	discardOut(t)
+
+	doctorDisk = true
 
 	tmpDir := t.TempDir()
 
@@ -632,8 +636,8 @@ func TestCheckTmpDirWithRepos(t *testing.T) {
 		t.Errorf("expected '1 repo(s)' in tmp dir report, got: %q", passed)
 	}
 
-	// The 128-byte checkout must be summed and rendered — guards against dirSize
-	// being dropped or the total always reported as 0 B.
+	// Under --disk the 128-byte checkout must be summed and rendered — guards
+	// against dirSize being dropped or the total always reported as 0 B.
 	if !strings.Contains(passed, "128 B") {
 		t.Errorf("expected summed checkout size '128 B' in tmp dir report, got: %q", passed)
 	}
