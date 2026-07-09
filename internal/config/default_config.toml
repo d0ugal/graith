@@ -143,8 +143,11 @@ timeout = "10m"  # how long to wait for an approval decision before it times out
 shortcut_keys = "1234567890"
 
 # Prefix key plus a command key trigger these actions while attached.
-# NOTE: all keys below are read from config EXCEPT rename_session and
-# scroll_mode, which are reserved and have no handler wired yet (issue #919).
+# NOTE: all keys below are read from config (passthrough keys via
+# cli/attach.go passthroughKeysFromConfig, picker keys via overlayKeysFromConfig).
+# The messages/approvals/restart passthrough keys (m/a/r) have no config field
+# yet and stay literal.
+# Each command key is a single literal character (only prefix accepts "ctrl+…").
 [keybindings]
 prefix = "ctrl+b"             # the prefix key; press it, then one of the keys below
 new_session = "c"             # open the create-session form
@@ -156,9 +159,9 @@ next_session = "n"           # switch to the next session
 prev_session = "p"           # switch to the previous session
 last_session = "l"           # switch to the most recently used session
 resume_session = "R"         # open the restart menu for a session in the picker
-rename_session = ","         # (reserved — no handler wired yet)
+rename_session = ","         # prompt for a new name and rename the current session
 search = "/"                 # filter sessions in the picker
-scroll_mode = "["            # (reserved — no handler wired yet)
+scroll_mode = "["            # open a scrollable pager over the session's history
 shell = "s"                  # open a shell in the session's worktree
 orchestrator_session = "o"   # jump to the orchestrator session
 

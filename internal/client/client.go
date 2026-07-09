@@ -527,6 +527,44 @@ func FetchScrollbackPreview(cfg *config.Config, paths config.Paths, configFile s
 	return preview.Preview
 }
 
+// FetchScrollback retrieves up to `lines` lines of a session's raw scrollback
+// via a one-shot connection using the same "logs" message `gr logs` uses. It
+// collects the data frames until the daemon signals logs_done (or an error) and
+// returns the accumulated output cleaned to plain, scroll-friendly text. It
+// returns "" when the daemon is unreachable or the session has no output.
+func FetchScrollback(cfg *config.Config, paths config.Paths, configFile string, sessionID string, lines int) string {
+	c, err := Connect(cfg, paths, configFile)
+	if err != nil {
+		return ""
+	}
+	defer c.Close()
+
+	if err := c.SendControl("logs", protocol.LogsMsg{SessionID: sessionID, Lines: lines, Follow: false}); err != nil {
+		return ""
+	}
+
+	var buf strings.Builder
+
+	for {
+		frame, err := c.ReadFrame()
+		if err != nil {
+			break
+		}
+
+		switch frame.Channel {
+		case protocol.ChannelData:
+			buf.Write(frame.Payload)
+		case protocol.ChannelControl:
+			msg, _ := protocol.DecodeControl(frame.Payload)
+			if msg.Type == "logs_done" || msg.Type == "error" {
+				return cleanScrollback(buf.String())
+			}
+		}
+	}
+
+	return cleanScrollback(buf.String())
+}
+
 // FetchConversation retrieves the full direct-message conversation (both
 // directions) for sessionID via a one-shot passive connection. It is safe for
 // the human CLI: msg_conversation authorises with the self-or-descendant rule,
