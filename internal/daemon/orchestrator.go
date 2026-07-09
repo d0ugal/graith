@@ -332,7 +332,9 @@ func orchestratorRepoPathsSection(repoPaths []string) string {
 	var b strings.Builder
 
 	b.WriteString("## Available repositories\n\n")
-	b.WriteString("These repository paths are configured and available for you to use with `gr new --repo <path>`:\n\n")
+	b.WriteString("These repository paths are configured for use with `gr new --repo <path>`. " +
+		"Some entries are concrete repos and some are parent directories that " +
+		"contain repos, so pass either a listed path or a repo found under one:\n\n")
 
 	for _, p := range repoPaths {
 		b.WriteString("- ")
