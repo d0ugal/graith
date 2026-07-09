@@ -135,6 +135,7 @@ func TestNotifyOrchestratorExit_Cov(t *testing.T) {
 
 	// Delivers onto the buffered channel.
 	sm.notifyOrchestratorExit("ben")
+
 	select {
 	case id := <-sm.orchestratorExitCh:
 		if id != "ben" {
@@ -150,6 +151,7 @@ func TestNotifyOrchestratorExit_Cov(t *testing.T) {
 	}
 
 	done := make(chan struct{})
+
 	go func() {
 		sm.notifyOrchestratorExit("dreich") // must not block
 		close(done)

@@ -95,6 +95,7 @@ func TestRunGitPullLoop_CancelledCtxReturns_Cov(t *testing.T) {
 	cancel()
 
 	done := make(chan struct{})
+
 	go func() {
 		sm.RunGitPullLoop(ctx)
 		close(done)

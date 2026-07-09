@@ -48,7 +48,9 @@ func TestSchedulePoll_Cov(t *testing.T) {
 	sm := newPRWatchCovSM()
 
 	before := time.Now()
+
 	sm.schedulePoll("bide", time.Hour)
+
 	after := time.Now()
 
 	sm.prWatch.mu.Lock()
@@ -87,6 +89,7 @@ func TestWriteAndClearPRState_Cov(t *testing.T) {
 
 	// An empty CIState must NOT clobber the last-known CI badge.
 	sm.writePRState("braw", prData{Number: 7, State: "open", CIState: ""})
+
 	if sm.state.Sessions["braw"].CI.State != "failing" {
 		t.Errorf("empty CIState should preserve last-known CI, got %q", sm.state.Sessions["braw"].CI.State)
 	}
@@ -96,6 +99,7 @@ func TestWriteAndClearPRState_Cov(t *testing.T) {
 
 	// clearPRState resets both.
 	sm.clearPRState("braw")
+
 	if sm.state.Sessions["braw"].PullRequest.Number != 0 || sm.state.Sessions["braw"].CI.State != "" {
 		t.Errorf("clearPRState should reset PR and CI, got %+v / %+v",
 			sm.state.Sessions["braw"].PullRequest, sm.state.Sessions["braw"].CI)
@@ -269,6 +273,7 @@ func TestPollSession_NoPRClearsState_Cov(t *testing.T) {
 
 	orig := ghRunner
 	defer func() { ghRunner = orig }()
+
 	ghRunner = func(ctx context.Context, dir string, args ...string) (string, error) {
 		return `[]`, nil // no PR
 	}
@@ -283,6 +288,7 @@ func TestPollSession_NoPRClearsState_Cov(t *testing.T) {
 	tgt := prWatchTarget{id: "ken", branch: "bide", worktreePath: cloneDir}
 
 	before := time.Now()
+
 	sm.pollSession(context.Background(), cfg, tgt)
 
 	s := sm.state.Sessions["ken"]
@@ -348,6 +354,7 @@ func TestRunPRWatchLoop_CancelledCtxReturns_Cov(t *testing.T) {
 	cancel()
 
 	done := make(chan struct{})
+
 	go func() {
 		sm.RunPRWatchLoop(ctx)
 		close(done)
