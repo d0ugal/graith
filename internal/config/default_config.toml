@@ -17,8 +17,11 @@
 #   {worktree_path}                 - Absolute path to the session worktree
 #   {fork_source_agent_session_id}  - Source session's agent ID (fork only)
 
+# Agent type used by `gr new` when --agent is not given (must match an [agents.*] key).
 default_agent = "claude"
+# Prefix for the git branch created per session; {username} expands to the GitHub username.
 branch_prefix = "{username}/graith"
+# Run `git fetch` on the source repo before creating a worktree, so new sessions branch off up-to-date refs.
 fetch_on_create = true
 # data_dir = "~/.graith"  # Override data directory (default: XDG data home)
 
@@ -82,37 +85,44 @@ gr store ls --shared
 Run `gr --help` for the full command list.\
 """
 
+# Background auto-pull to keep tracked git-maintenance repos current (NOT session
+# worktrees). Fast-forwards a repo only when it is on its default branch, clean,
+# has an upstream, and can fast-forward; skips detached HEADs, in-progress git
+# ops, and repos with an active in-place or default-branch session.
 [git_pull]
-enabled = false
-interval = "1h"
+enabled = false          # run the background pull loop
+interval = "1h"          # how often to pull (must be at least 1 minute)
 
+# PR & CI awareness loop: resolves eligible worktree sessions' GitHub PRs via the
+# gh CLI, polls their checks/reviews, and notifies the owning session's inbox on
+# transitions.
 [pr_watch]
-enabled = false
-notify_ci_failures = true
-notify_merge_conflicts = true
-# notify_review_comments: inline code-review comments (anchored to a file:line).
-notify_review_comments = false
+enabled = false                  # turn the PR/CI watch loop on
+notify_ci_failures = true        # notify when CI checks start failing (machine verdict, safe to act on)
+notify_merge_conflicts = true    # notify when the PR becomes CONFLICTING with its base
+notify_review_comments = false   # notify on new inline code-review comments (anchored to a file:line)
 # notify_pr_comments: regular conversation comments on the PR thread (issue-style,
 # not tied to a line of code). Distinct from notify_review_comments above.
 # Compat: notify_review_comments once gated both surfaces; an older config that
 # enables it but omits notify_pr_comments keeps getting conversation comments.
-notify_pr_comments = false
-notify_review_decisions = false
-notify_pr_lifecycle = true
-notify_ci_recovery = false
-poll_pending = "30s"
-poll_terminal = "5m"
-poll_merged = "15m"
-max_notifications_per_pr = 10
-debounce = "2m"
+notify_pr_comments = false       # notify on new PR conversation (issue-style) comments
+notify_review_decisions = false  # notify on approved / changes-requested review decisions
+notify_pr_lifecycle = true       # notify when the PR is merged or closed
+notify_ci_recovery = false       # notify when CI goes green again after having failed
+poll_pending = "30s"             # poll interval while checks are pending/in-progress
+poll_terminal = "5m"             # poll interval once all checks are terminal but the PR is still open
+poll_merged = "15m"              # sweep interval for merged/closed PRs
+max_notifications_per_pr = 10    # cap on informational notices per PR head SHA (CI-failure/conflict directives bypass it)
+debounce = "2m"                  # minimum cooldown between notifications to one session
 
 [status_bar]
-enabled = true
-position = "bottom"
+enabled = true       # show the status bar in attached sessions
+position = "bottom"  # where to render it: "top" or "bottom"
 
+# Desktop notifications for selected agent status changes (approval, stopped).
 [notifications]
-enabled = true
-on_approval = true
+enabled = true      # master switch for status-change notifications
+on_approval = true  # notify when a session enters the "approval" (waiting-for-human) state
 
 [approvals]
 # enabled controls whether the PreToolUse approve-request gating hook is
@@ -121,34 +131,45 @@ on_approval = true
 # tool calls as human-rejected and the OS sandbox is the intended guardrail.
 # Set to true to opt back into human approval gating.
 # enabled = true
+# backend selects who makes the automated decision: "" (none — always prompt the
+# human), "command"/"external" (delegate to a command over graith's JSON contract),
+# "localmost" (the real localmost binary over its native protocol), "builtin"
+# (graith's built-in localmost-compatible engine), or "auto".
 backend = ""
-timeout = "10m"
+timeout = "10m"  # how long to wait for an approval decision before it times out
 
 [overlay]
+# Keys that jump straight to the Nth session in the picker (1st key → session 1, …).
 shortcut_keys = "1234567890"
 
+# Prefix key plus a command key trigger these actions while attached.
+# NOTE: only prefix, new_session, fork_session, next_session, prev_session,
+# last_session, and orchestrator_session are currently read from config (see
+# cli/attach.go PassthroughKeys). The rest are hardcoded — changing their values
+# here has no effect yet — and a few are reserved with no handler at all.
 [keybindings]
-prefix = "ctrl+b"
-new_session = "c"
-fork_session = "f"
-delete_session = "x"
-detach = "d"
-session_list = "w"
-next_session = "n"
-prev_session = "p"
-last_session = "l"
-resume_session = "R"
-rename_session = ","
-search = "/"
-scroll_mode = "["
-shell = "s"
-orchestrator_session = "o"
+prefix = "ctrl+b"             # the prefix key; press it, then one of the keys below
+new_session = "c"             # open the create-session form
+fork_session = "f"           # fork the current session
+delete_session = "x"         # (hardcoded) delete a session in the picker
+detach = "d"                 # (hardcoded) detach without stopping the agent
+session_list = "w"           # (hardcoded) open the session picker overlay
+next_session = "n"           # switch to the next session
+prev_session = "p"           # switch to the previous session
+last_session = "l"           # switch to the most recently used session
+resume_session = "R"         # (hardcoded) open the restart menu for a session in the picker
+rename_session = ","         # (reserved — no handler wired yet)
+search = "/"                 # (hardcoded) filter sessions in the picker
+scroll_mode = "["            # (reserved — no handler wired yet)
+shell = "s"                  # (hardcoded) open a shell in the session's worktree
+orchestrator_session = "o"   # jump to the orchestrator session
 
+# A special worktree-less session for coordinating other sessions (ctrl+b o).
 [orchestrator]
-enabled = false
-agent = "claude"
-model = ""
-idle_timeout = "30m"
+enabled = false        # make an orchestrator session available
+agent = "claude"       # agent type to run as the orchestrator (defaults to claude)
+model = ""             # model override; empty uses the agent's default
+idle_timeout = "30m"   # stop the orchestrator after this long idle (no client, agent ready)
 prompt = """\
 You are the orchestrator session in a graith terminal multiplexer. You manage \
 and coordinate other agent sessions working across repositories.
@@ -186,15 +207,16 @@ Your power comes from the graith control plane:
 - You are the parent of sessions you create — use `--children` flags to manage them
 - Wait for user input or messages rather than acting unprompted\
 """
+# Path to a file whose contents are appended to the prompt above (empty = none).
 prompt_file = ""
 
 [remote]
 # Optional tailnet-facing control listener. Disabled by default and fail-closed:
 # when enabled, an invalid block is a hard config-load error.
-enabled = false
-mode = "tsnet"
-port = 4823
-require_pairing = true
+enabled = false           # expose the remote control listener over the tailnet
+mode = "tsnet"            # transport: "tsnet" (embedded Tailscale) or "interface" (bind an existing tailnet IP)
+port = 4823               # TCP port the listener binds
+require_pairing = true    # require per-device pairing for human-level rights; false is read-only and UNSAFE
 
 # [orchestrator.sandbox]
 # Extra filesystem access for the orchestrator only.
@@ -243,20 +265,25 @@ require_pairing = true
 # block = false
 # allow_domains = []
 
-# Agent definitions
+# Agent definitions. The map key (e.g. "claude") is the agent type name.
 # Each agent needs at minimum: command, args
-# Optional: resume_args, fork_args, env, idle_timeout, sandbox
+# Optional: resume_args, fork_args, env, idle_timeout, sandbox, mcp_servers,
+#   validate_model, interrupt_count, interrupt_delay_ms, inject_prompt,
+#   pre_trust_workspace
 
 [agents.claude]
-command = "claude"
-args = ["--session-id", "{agent_session_id}"]
-resume_args = ["--resume", "{agent_session_id}"]
+command = "claude"                                    # binary to launch
+args = ["--session-id", "{agent_session_id}"]        # args for a fresh session (templates expanded)
+resume_args = ["--resume", "{agent_session_id}"]     # args to resume an existing session
+# args to fork from a source session (used by ctrl+b f)
 fork_args = ["--resume", "{fork_source_agent_session_id}", "--fork-session", "--session-id", "{agent_session_id}"]
 # Claude's TUI ignores a single Ctrl-C; it needs two rapid presses (~200ms
 # apart) to actually interrupt. Other agents default to a single Ctrl-C.
 interrupt_count = 2
 interrupt_delay_ms = 200
 
+# Extra sandbox grants for this agent, merged on top of the global [sandbox]
+# config. Only take effect when the sandbox is enabled. "write" means read+write.
 [agents.claude.sandbox]
 read_dirs = ["~/.claude"]
 write_dirs = ["~/.claude"]
@@ -281,9 +308,11 @@ args = []
 resume_args = ["--session", "{agent_session_id}"]
 
 [agents.cursor]
-command = "agent"
+command = "agent"           # the Cursor CLI binary is named `agent`
 args = []
 resume_args = ["resume"]
+# Command listing valid model IDs ("id - description" per line); a requested
+# {model} not in the list is rejected before the session starts.
 validate_model = "agent --list-models"
 
 [agents.cursor.sandbox]
