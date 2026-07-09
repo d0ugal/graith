@@ -114,11 +114,14 @@ CI (`ci.yml`) runs on every push to `main` and every pull request:
 | Job | What it does |
 |-----|-------------|
 | Build | `go build` on Ubuntu and macOS |
-| Test | `go test -race` with coverage on Ubuntu and macOS |
+| Test | `go test -race` on Ubuntu and macOS |
 | Integration | `go test -tags=integration` on Ubuntu and macOS |
 | Lint | `golangci-lint run` on Ubuntu |
 | Vulnerability Check | `govulncheck ./...` on Ubuntu |
 | Conventional Commits | Validates PR commit messages |
+
+A separate `coverage.yml` workflow runs on pull requests only and posts the
+coverage summary comment described above (informational, not a required check).
 
 ## Profiles (`GRAITH_PROFILE`)
 
