@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/git"
@@ -442,4 +443,65 @@ func TestHasInProgressOp(t *testing.T) {
 
 		_ = os.RemoveAll(filepath.Join(dir, indicator))
 	}
+}
+
+func headRev(t *testing.T, dir string) string {
+	t.Helper()
+
+	rev, err := git.RunOutputContext(context.Background(), dir, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatalf("rev-parse HEAD in %s: %v", dir, err)
+	}
+
+	return rev
+}
+
+// The loop must perform its first tick shortly after startup, not after a full
+// interval. A daemon restart re-execs the loop from scratch, so a wait-first
+// loop would leave maintenance repos stale for up to the interval after every
+// restart. With a tiny startup delay and a 24h interval, the clone can only
+// fast-forward within the test window if that initial tick fires.
+func TestRunGitPullLoop_InitialTickBeforeInterval(t *testing.T) {
+	bareDir, cloneDir := setupTestRepo(t)
+	advanceRemote(t, bareDir, cloneDir)
+
+	// Register the clone as a git maintenance repo under a temp global config so
+	// ListMaintenanceRepos returns it. Point both HOME (which it resolves) and
+	// GIT_CONFIG_GLOBAL at the seeded config to be robust against an inherited
+	// GIT_CONFIG_GLOBAL in the environment.
+	home := t.TempDir()
+	gitConfig := filepath.Join(home, ".gitconfig")
+
+	if err := os.WriteFile(gitConfig, []byte("[maintenance]\n\trepo = "+cloneDir+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("HOME", home)
+	t.Setenv("GIT_CONFIG_GLOBAL", gitConfig)
+
+	origDelay := gitPullStartupDelay
+	gitPullStartupDelay = 5 * time.Millisecond
+
+	t.Cleanup(func() { gitPullStartupDelay = origDelay })
+
+	sm := newTestSM(t)
+	sm.cfg.GitPull.Interval = "24h"
+
+	before := headRev(t, cloneDir)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go sm.RunGitPullLoop(ctx)
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if headRev(t, cloneDir) != before {
+			return // initial tick fast-forwarded the clone, well inside the 24h interval
+		}
+
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	t.Fatal("git-pull loop did not perform its initial tick before the interval elapsed")
 }
