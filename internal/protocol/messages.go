@@ -264,6 +264,9 @@ type ConversationMessage struct {
 	ThreadID   string `json:"thread_id,omitempty"`
 	ReplyTo    string `json:"reply_to,omitempty"`
 	CreatedAt  string `json:"created_at"`
+	// System marks an automated daemon-authored notification rather than a
+	// session/human message. See issue #887.
+	System bool `json:"system,omitempty"`
 }
 
 // MsgConversationListMsg is the daemon's response to msg_conversation.

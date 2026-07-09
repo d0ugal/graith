@@ -83,7 +83,11 @@ var checkInboxCmd = &cobra.Command{
 				sender = m.SenderID
 			}
 
-			fmt.Fprintf(&preview, "From %s: %s\n", sender, m.Body)
+			if m.System {
+				fmt.Fprintf(&preview, "Automated notification from %s: %s\n", sender, m.Body)
+			} else {
+				fmt.Fprintf(&preview, "From %s: %s\n", sender, m.Body)
+			}
 		}
 
 		previewStr := preview.String()
@@ -111,6 +115,7 @@ type inboxMessage struct {
 	SenderID   string `json:"sender_id"`
 	Body       string `json:"body"`
 	CreatedAt  string `json:"created_at"`
+	System     bool   `json:"system"`
 }
 
 // registerCheckInboxCmd registers this command on rootCmd. Called from registerCommands.

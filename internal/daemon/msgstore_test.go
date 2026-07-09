@@ -69,6 +69,48 @@ func TestPublishAndRead(t *testing.T) {
 	}
 }
 
+func TestSystemMarkerDerivedFromSender(t *testing.T) {
+	s := testStore(t)
+
+	// A daemon-authored notification is flagged system; an ordinary
+	// session-authored message is not. See issue #887.
+	sysMsg, err := s.Publish("inbox:braw-sess", systemSenderID, systemSenderName, "PR merged", "", "")
+	if err != nil {
+		t.Fatalf("Publish system: %v", err)
+	}
+
+	if !sysMsg.System {
+		t.Errorf("system notification: System = false, want true")
+	}
+
+	sessMsg, err := s.Publish("inbox:braw-sess", "canny-sess", "canny", "hullo", "", "")
+	if err != nil {
+		t.Fatalf("Publish session: %v", err)
+	}
+
+	if sessMsg.System {
+		t.Errorf("session message: System = true, want false")
+	}
+
+	// The marker is derived on read too, not only on publish.
+	msgs, err := s.Read("inbox:braw-sess", "", false, "")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+
+	if len(msgs) != 2 {
+		t.Fatalf("got %d messages, want 2", len(msgs))
+	}
+
+	if !msgs[0].System {
+		t.Errorf("read msgs[0].System = false, want true (system notification)")
+	}
+
+	if msgs[1].System {
+		t.Errorf("read msgs[1].System = true, want false (session message)")
+	}
+}
+
 func TestReadUnackedOnly(t *testing.T) {
 	s := testStore(t)
 
