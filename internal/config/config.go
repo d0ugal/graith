@@ -1248,6 +1248,39 @@ func (c *Config) RepoPathAllowed(repoPath string) bool {
 	return false
 }
 
+// AvailableRepoPaths returns the repo paths the orchestrator may use, combining
+// the allowed_repo_paths list and the [[repos]] entries with ~ expanded, in
+// config order and de-duplicated. It returns nil when none are configured.
+func (c *Config) AvailableRepoPaths() []string {
+	var paths []string
+
+	seen := make(map[string]bool)
+
+	add := func(p string) {
+		if p == "" {
+			return
+		}
+
+		expanded := ExpandPath(p)
+		if seen[expanded] {
+			return
+		}
+
+		seen[expanded] = true
+		paths = append(paths, expanded)
+	}
+
+	for _, p := range c.AllowedRepoPaths {
+		add(p)
+	}
+
+	for _, r := range c.Repos {
+		add(r.Path)
+	}
+
+	return paths
+}
+
 func ResolvePath(p string) string {
 	p = ExpandPath(p)
 	if resolved, err := filepath.EvalSymlinks(p); err == nil {
