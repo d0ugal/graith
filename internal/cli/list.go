@@ -27,8 +27,12 @@ var listCmd = &cobra.Command{
 	Short:   "List all sessions",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		updateCh := make(chan *version.UpdateResult, 1)
+		// Snapshot the data dir before the goroutine so it doesn't read the
+		// mutable package-global `paths` after RunE returns (data race under -race).
+		updateDataDir := paths.DataDir
+
 		go func() {
-			updateCh <- version.CheckForUpdate(paths.DataDir)
+			updateCh <- version.CheckForUpdate(updateDataDir)
 		}()
 
 		c, err := client.Connect(cfg, paths, cfgFile)
