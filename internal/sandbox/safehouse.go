@@ -148,10 +148,28 @@ func (safehouseBackend) Wrap(command string, args []string, opts WrapOpts) (stri
 // deduplicated so a socket already granted (e.g. an agent whose SSH_AUTH_SOCK is
 // the daemon socket) isn't emitted twice.
 func safehouseSockets(opts WrapOpts, sshAuthSock string) []string {
-	sockets := append([]string{}, opts.UnixSockets...)
+	sockets := make([]string, 0, len(opts.UnixSockets)+1)
+	seen := make(map[string]struct{}, len(opts.UnixSockets)+1)
 
-	if sshAuthSock != "" && slices.Contains(opts.Features, "ssh") && !slices.Contains(sockets, sshAuthSock) {
-		sockets = append(sockets, sshAuthSock)
+	add := func(s string) {
+		if s == "" {
+			return
+		}
+
+		if _, dup := seen[s]; dup {
+			return
+		}
+
+		seen[s] = struct{}{}
+		sockets = append(sockets, s)
+	}
+
+	for _, s := range opts.UnixSockets {
+		add(s)
+	}
+
+	if slices.Contains(opts.Features, "ssh") {
+		add(sshAuthSock)
 	}
 
 	return sockets

@@ -85,10 +85,14 @@ type WrapOpts struct {
 
 	// SafehouseFragmentPath, for the safehouse backend, is where the generated
 	// per-session Seatbelt fragment (the --append-profile file granting
-	// UnixSockets connect access) is written. Like ProfilePath the daemon points
+	// unix-socket connect access) is written. Like ProfilePath the daemon points
 	// it under RuntimeDir so it survives resume and is cleaned up on delete;
-	// empty means the backend writes to an os.CreateTemp file. Only used when
-	// UnixSockets is non-empty.
+	// empty means the backend writes to an os.CreateTemp file. Used whenever any
+	// socket needs a connect grant: opts.UnixSockets (e.g. the daemon socket)
+	// and/or $SSH_AUTH_SOCK when the "ssh" feature is enabled. A caller that
+	// grants a socket but leaves this empty (e.g. a sandboxed MCP server that has
+	// the "ssh" feature but no daemon-socket grant) gets an os.CreateTemp
+	// fragment, mirroring the nono temp-profile fallback for path-less callers.
 	SafehouseFragmentPath string
 }
 
