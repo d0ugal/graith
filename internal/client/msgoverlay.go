@@ -185,7 +185,10 @@ func resolvePeerName(peerID string, cm protocol.ConversationMessage, names map[s
 }
 
 func isSystemMessage(cm protocol.ConversationMessage) bool {
-	return strings.HasPrefix(cm.Stream, "_system.") || cm.SenderName == "orchestrator"
+	// cm.System flags automated daemon notifications (issue #887), which arrive
+	// on a session's normal inbox stream rather than a "_system." stream — so
+	// the stream/sender heuristics below miss them without this check.
+	return cm.System || strings.HasPrefix(cm.Stream, "_system.") || cm.SenderName == "orchestrator"
 }
 
 func shortID(id string) string {
