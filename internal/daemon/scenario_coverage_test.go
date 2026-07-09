@@ -111,9 +111,17 @@ func TestDeleteScenarioCovDeletesAndRemovesRecord(t *testing.T) {
 		t.Fatalf("DeleteScenario() error = %v", err)
 	}
 
-	// braw-del, canny-del, and the ghost (absent) are all reported deleted.
-	if len(deleted) != 3 {
-		t.Fatalf("deleted = %v, want 3 entries", deleted)
+	// braw-del, canny-del, and the ghost (absent) are all reported deleted,
+	// in scenario-session order; the shared session is not.
+	want := []string{"braw-del", "canny-del", "haar-ghost"}
+	if len(deleted) != len(want) {
+		t.Fatalf("deleted = %v, want %v", deleted, want)
+	}
+
+	for i, id := range want {
+		if deleted[i] != id {
+			t.Errorf("deleted[%d] = %q, want %q", i, deleted[i], id)
+		}
 	}
 
 	sm.mu.RLock()
@@ -125,6 +133,10 @@ func TestDeleteScenarioCovDeletesAndRemovesRecord(t *testing.T) {
 
 	if _, ok := sm.state.Sessions["braw-del"]; ok {
 		t.Error("braw-del should be deleted")
+	}
+
+	if _, ok := sm.state.Sessions["canny-del"]; ok {
+		t.Error("canny-del (running) should be stopped then deleted")
 	}
 
 	if _, ok := sm.state.Sessions["ben-shared"]; !ok {
@@ -170,6 +182,18 @@ func TestDeleteScenarioCovKeepsRecordOnTeardownFailure(t *testing.T) {
 
 	if _, ok := sm.state.Scenarios["sc-strath"]; !ok {
 		t.Error("scenario record should be kept when a session failed to delete")
+	}
+
+	// The failed session must survive so cleanup can be retried, with its
+	// status restored (Delete downgrades a running session to stopped on
+	// teardown failure; this one was already stopped).
+	sess, ok := sm.state.Sessions["thrawn-del"]
+	if !ok {
+		t.Fatal("failed session should be kept in state for retry")
+	}
+
+	if sess.Status != StatusStopped {
+		t.Errorf("failed session status = %q, want stopped", sess.Status)
 	}
 }
 
@@ -242,6 +266,20 @@ func TestResumeScenarioCovSkipsAndLogsErrors(t *testing.T) {
 
 	if len(resumed) != 0 {
 		t.Errorf("resumed = %v, want none (all skipped or errored)", resumed)
+	}
+
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	// The running session must be left untouched by the skip guard.
+	if sm.state.Sessions["braw-run"].Status != StatusRunning {
+		t.Errorf("braw-run status = %q, want running (should be skipped)", sm.state.Sessions["braw-run"].Status)
+	}
+
+	// The stopped session was attempted but Resume failed on the unknown
+	// agent, so it stays stopped rather than being marked resumed/running.
+	if sm.state.Sessions["dreich-stop"].Status != StatusStopped {
+		t.Errorf("dreich-stop status = %q, want stopped (resume should have failed)", sm.state.Sessions["dreich-stop"].Status)
 	}
 }
 
@@ -352,7 +390,9 @@ func TestStartScenarioCovDuplicateScenarioName(t *testing.T) {
 			{Name: "braw-a", Repo: repo},
 		},
 	}, 24, 80)
-	if err == nil || !strings.Contains(err.Error(), "already exists") {
+	// Use the full scenario-specific message so this can't be satisfied by the
+	// session-name collision path (which also contains "already exists").
+	if err == nil || !strings.Contains(err.Error(), `scenario "strath-neep" already exists`) {
 		t.Fatalf("error = %v, want scenario-already-exists", err)
 	}
 }
@@ -380,6 +420,16 @@ func TestStartScenarioCovSessionNameCollision(t *testing.T) {
 func TestStartScenarioCovSharedSessionNotRunning(t *testing.T) {
 	sm := startScenarioOrchestrator(t)
 	repo := initTempGitRepo(t)
+
+	// A session with the shared name exists but is stopped, so the shared
+	// block's StatusRunning requirement (scenario.go) is not satisfied and
+	// reuse must be rejected — covers "present but not running", not merely
+	// "absent".
+	sm.mu.Lock()
+	sm.state.Sessions["stale-shared"] = &SessionState{
+		ID: "stale-shared", Name: "clachan-shared", Status: StatusStopped,
+	}
+	sm.mu.Unlock()
 
 	_, err := sm.StartScenario(protocol.ScenarioStartMsg{
 		CallerSessionID: "ben-orch",
@@ -440,8 +490,14 @@ func TestPersistManifestCovWritesStore(t *testing.T) {
 func TestRepublishManifestsCovNoScenario(t *testing.T) {
 	sm := newTestSessionManager(t)
 
-	// Should not panic or write anything for an unknown scenario id.
+	// Unknown scenario id: republish returns before touching the store, so no
+	// manifest directory should be created (and it must not panic).
 	sm.republishManifests("sc-nope")
+
+	storeDir := store.SharedStorePath(sm.paths.DataDir)
+	if _, err := os.Stat(filepath.Join(storeDir, "scenarios", "sc-nope")); !os.IsNotExist(err) {
+		t.Errorf("expected no manifest dir for unknown scenario, stat err = %v", err)
+	}
 }
 
 func TestRepublishManifestsCovWritesStore(t *testing.T) {
@@ -494,7 +550,9 @@ func TestBuildScenarioRecordCovEmpty(t *testing.T) {
 	rec := sm.buildScenarioRecord(&ScenarioState{ID: "sc-e", Name: "strath-empty"})
 	sm.mu.Unlock()
 
-	// total == 0: running == total, so status is "running".
+	// StartScenario rejects empty scenarios, so this only arises from corrupted
+	// or hand-built in-memory state. Documents that buildScenarioRecord reports
+	// "running" for total == 0 because the running == total branch wins first.
 	if rec.Status != "running" {
 		t.Errorf("status = %q, want running for empty scenario", rec.Status)
 	}
