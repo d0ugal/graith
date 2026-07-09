@@ -18,6 +18,7 @@ func allOnConfig() *config.PRWatchConfig {
 		NotifyCIFailures:      true,
 		NotifyMergeConflicts:  true,
 		NotifyReviewComments:  true,
+		NotifyPRComments:      true,
 		NotifyReviewDecisions: true,
 		NotifyPRLifecycle:     true,
 	}
@@ -86,8 +87,8 @@ func TestDiffAndBuild_ConflictNotMaskedByExhaustedCap(t *testing.T) {
 		Number: 7, State: "open", HeadRefOid: "sha1", CIState: "passing", Mergeable: "MERGEABLE",
 		IssueComments: []ghComment{{ID: 1, User: ghUser{Login: "ailsa"}, Body: "nit"}}, CommentsOK: true,
 	})
-	if len(out) != 1 || !strings.Contains(out[0], "review activity") {
-		t.Fatalf("review comment should notify and consume the cap, got %v", out)
+	if len(out) != 1 || !strings.Contains(out[0], "conversation activity") {
+		t.Fatalf("PR comment should notify and consume the cap, got %v", out)
 	}
 
 	// Cap is now exhausted. A conflict appears on the same head SHA — it must
@@ -413,6 +414,78 @@ func TestDiffAndBuild_ReviewCommentAwarenessFraming(t *testing.T) {
 	if !strings.Contains(body, "Consider whether") {
 		t.Errorf("review-comment notice should use awareness framing, got: %s", body)
 	}
+}
+
+func TestDiffAndBuild_PRCommentAwarenessFraming(t *testing.T) {
+	// A regular conversation comment (issues/{n}/comments) must notify under
+	// notify_pr_comments with awareness framing and a body that clearly marks it
+	// as a conversation comment, distinct from an inline review comment.
+	sm := newPRWatchSM()
+	cfg := allOnConfig()
+	t1 := prWatchTarget{id: "blether", branch: "blether"}
+	sm.diffAndBuild(cfg, t1, "croft/loch", prData{Number: 3, State: "open", HeadRefOid: "sha1", CIState: "passing", CommentsOK: true})
+
+	out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 3, State: "open", HeadRefOid: "sha1", CIState: "passing", CommentsOK: true,
+		IssueComments: []ghComment{{ID: 42, User: ghUser{Login: "hamish"}, Body: "ship it"}},
+	})
+	if len(out) != 1 {
+		t.Fatalf("new PR conversation comment should notify once, got %v", out)
+	}
+
+	body := out[0]
+	if !strings.Contains(body, "conversation") {
+		t.Errorf("PR-comment notice should identify itself as a conversation comment, got: %s", body)
+	}
+
+	if strings.Contains(body, "inline code-review") {
+		t.Errorf("PR-comment notice must not be labelled as an inline review comment, got: %s", body)
+	}
+
+	if !strings.Contains(body, "Consider whether") {
+		t.Errorf("PR-comment notice should use awareness framing, got: %s", body)
+	}
+}
+
+// TestDiffAndBuild_CommentGatesIndependent asserts that the two comment gates
+// are truly independent: with only notify_review_comments on, an inline review
+// comment notifies but a conversation comment does not, and vice versa. Each
+// gate also advances only its own cursor, so a suppressed surface is delivered
+// once its gate is enabled rather than being silently baselined away.
+func TestDiffAndBuild_CommentGatesIndependent(t *testing.T) {
+	// Review comments ON, PR comments OFF.
+	t.Run("review-only", func(t *testing.T) {
+		sm := newPRWatchSM()
+		cfg := &config.PRWatchConfig{Enabled: true, NotifyReviewComments: true, NotifyPRComments: false, Debounce: "0s"}
+		t1 := prWatchTarget{id: "canny", branch: "canny"}
+		sm.diffAndBuild(cfg, t1, "croft/loch", prData{Number: 1, State: "open", HeadRefOid: "sha1", CIState: "passing", CommentsOK: true})
+
+		out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+			Number: 1, State: "open", HeadRefOid: "sha1", CIState: "passing", CommentsOK: true,
+			IssueComments:  []ghComment{{ID: 10, User: ghUser{Login: "hamish"}, Body: "ship it"}},
+			ReviewComments: []ghComment{{ID: 20, User: ghUser{Login: "ailsa"}, Body: "nit", Path: "a.go", Line: 4}},
+		})
+		if len(out) != 1 || !strings.Contains(out[0], "inline code-review") {
+			t.Fatalf("only the inline review comment should notify, got %v", out)
+		}
+	})
+
+	// PR comments ON, review comments OFF.
+	t.Run("pr-only", func(t *testing.T) {
+		sm := newPRWatchSM()
+		cfg := &config.PRWatchConfig{Enabled: true, NotifyReviewComments: false, NotifyPRComments: true, Debounce: "0s"}
+		t1 := prWatchTarget{id: "ken", branch: "ken"}
+		sm.diffAndBuild(cfg, t1, "croft/loch", prData{Number: 2, State: "open", HeadRefOid: "sha1", CIState: "passing", CommentsOK: true})
+
+		out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+			Number: 2, State: "open", HeadRefOid: "sha1", CIState: "passing", CommentsOK: true,
+			IssueComments:  []ghComment{{ID: 10, User: ghUser{Login: "hamish"}, Body: "ship it"}},
+			ReviewComments: []ghComment{{ID: 20, User: ghUser{Login: "ailsa"}, Body: "nit", Path: "a.go", Line: 4}},
+		})
+		if len(out) != 1 || !strings.Contains(out[0], "conversation") {
+			t.Fatalf("only the PR conversation comment should notify, got %v", out)
+		}
+	})
 }
 
 func TestCIFailureBodyIsDirective(t *testing.T) {
