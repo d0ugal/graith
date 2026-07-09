@@ -343,7 +343,7 @@ Transitions that notify:
   previously failing. **`NEUTRAL`/`SKIPPED` are pass-like and must not fire**
   (tribunal — they would wake an agent spuriously); `CANCELLED`/`cancel` is a
   non-directive state. Recovery (fail→pass) is informational — notify only if
-  `notify_ci_recovery` (default off).
+  `notify_ci_recovery` (default on; see §7 update note).
 - **Comments/reviews:** any item with `id` greater than the **matching
   per-surface cursor** (`LastIssueCommentID` / `LastReviewCommentID` /
   `LastReviewID`); advance only that surface's cursor.
@@ -533,6 +533,14 @@ everything. This keeps inbox messages small while making the agent autonomous.
 
 #### 7. Config / opt-in
 
+> **Update (2026-07-09).** The per-class defaults below were later changed: all
+> `notify_*` sub-options now default **on** so that enabling `pr_watch` is a
+> single switch (`enabled = true`) and users disable the classes they don't
+> want. The examples and rationale in this section are preserved as the original
+> design record; the concrete default values shown have been corrected to match
+> the code. The directive/awareness split is retained as the reason the classes
+> remain *independently* gateable, not as a reason for any class to default off.
+
 Injecting messages into agents is a behavior change, so it's gated — and per
 §3a, **CI failures and review comments are gated separately**, not behind one
 `notify_agents` switch. New config block mirroring `GitPullConfig`
@@ -542,10 +550,10 @@ Injecting messages into agents is a behavior change, so it's gated — and per
 [pr_watch]
 enabled = true                  # master switch for PR/CI awareness (display + notify)
 notify_ci_failures = true       # directive: machine verdict, safe to act on — default ON
-notify_review_comments = false  # awareness: human intent, may not be actionable — default OFF
-notify_review_decisions = false # CHANGES_REQUESTED/APPROVED — human intent — default OFF
+notify_review_comments = true   # awareness: human intent, may not be actionable — default ON
+notify_review_decisions = true  # CHANGES_REQUESTED/APPROVED — human intent — default ON
 notify_pr_lifecycle = true      # merged/closed — pure facts — default ON
-notify_ci_recovery = false      # regressions only by default
+notify_ci_recovery = true       # CI green again after a failure — default ON
 poll_pending = "30s"
 poll_terminal = "5m"
 max_notifications_per_pr = 10
@@ -556,10 +564,10 @@ debounce = "2m"
 type PRWatchConfig struct {
     Enabled               bool   `toml:"enabled"`
     NotifyCIFailures      bool   `toml:"notify_ci_failures"`      // default true
-    NotifyReviewComments  bool   `toml:"notify_review_comments"`  // default false
-    NotifyReviewDecisions bool   `toml:"notify_review_decisions"` // default false
+    NotifyReviewComments  bool   `toml:"notify_review_comments"`  // default true
+    NotifyReviewDecisions bool   `toml:"notify_review_decisions"` // default true
     NotifyPRLifecycle     bool   `toml:"notify_pr_lifecycle"`     // default true
-    NotifyCIRecovery      bool   `toml:"notify_ci_recovery"`      // default false
+    NotifyCIRecovery      bool   `toml:"notify_ci_recovery"`      // default true
     PollPending           string `toml:"poll_pending"`
     PollTerminal          string `toml:"poll_terminal"`
     MaxNotificationsPerPR int    `toml:"max_notifications_per_pr"`
@@ -574,19 +582,22 @@ authority (§3a):**
   unambiguous and unambiguously actionable. Waking an agent to fix a red check
   is the core value of the loop and is low-risk; the guardrails (§4) bound the
   blast radius.
-- **`notify_review_comments = false`** (default off / conservative): a comment
-  is **human intent that may not be actionable** — a question, a discussion, a
-  nit. Auto-resuming an agent to "address" every comment risks unwanted
-  autonomous edits or the agent arguing with a reviewer. Off by default; even
-  when on, the message is framed as awareness (§6), never an imperative.
-- **`notify_review_decisions = false`** (default off — tribunal fix): the
+- **`notify_review_comments`** (originally default off / conservative; now
+  default on — see §7 update note): a comment is **human intent that may not be
+  actionable** — a question, a discussion, a nit. Auto-resuming an agent to
+  "address" every comment risks unwanted autonomous edits or the agent arguing
+  with a reviewer. Whether on or off, the message is framed as awareness (§6),
+  never an imperative.
+- **`notify_review_decisions`** (originally default off — tribunal fix; now
+  default on — see §7 update note): the
   original doc folded `CHANGES_REQUESTED`/`APPROVED` into a single default-on
   `notify_state_changes`. But `CHANGES_REQUESTED` is **human review intent**, and
   because *any* inbox notification can auto-resume, a default-on state-change
   toggle would wake an agent on a human's review verdict even with
-  `notify_review_comments = false` — undermining the directive/awareness split.
-  So review **decisions** are split out and default **off** (awareness-class),
-  separate from pure lifecycle facts.
+  `notify_review_comments` off — undermining the directive/awareness split.
+  So review **decisions** are split out into their own toggle (awareness-class),
+  independently gateable and separate from pure lifecycle facts — they now
+  default on with the rest, but can be turned off on their own.
 - **`notify_pr_lifecycle = true`** (default on): `merged`/`closed` are pure
   facts, not intent — low risk, useful "task likely done" signals.
 
