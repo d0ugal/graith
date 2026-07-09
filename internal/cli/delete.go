@@ -306,7 +306,7 @@ func deleteBatchRun(cmd *cobra.Command) error {
 	return runBatch(cmd, &deleteBatch, "delete", "deleted", "deleting", "delete",
 		func(sessionID string) any {
 			return protocol.DeleteMsg{SessionID: sessionID}
-		})
+		}, nil)
 }
 
 // registerDeleteCmd registers this command on rootCmd. Called from registerCommands.

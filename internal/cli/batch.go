@@ -136,11 +136,60 @@ func filterSessions(sessions []protocol.SessionInfo, bf *batchFlags) ([]protocol
 	return result, nil
 }
 
+// noOpSkip reports whether a matched session should be treated as a no-op for
+// the operation (e.g. stopping an already-stopped session) and, if so, a short
+// human-readable reason. Returning ("", false) means the session is actionable.
+// A nil noOpSkip means every matched session is actionable.
+type noOpSkip func(protocol.SessionInfo) (reason string, skip bool)
+
+// stopNoOpSkip treats non-running sessions as no-ops for batch stop: stopping a
+// session that is already stopped/errored (or otherwise not running) is a
+// success by intent, so skip it with a note rather than erroring (#203).
+func stopNoOpSkip(s protocol.SessionInfo) (string, bool) {
+	if s.Status == "running" {
+		return "", false
+	}
+
+	if s.Status == "" {
+		return "not running", true
+	}
+
+	return fmt.Sprintf("not running (%s)", s.Status), true
+}
+
+// partitionNoOp splits matched sessions into the actionable ones and a list of
+// "<name>: <reason>" notes for the no-ops, using noOp to classify each. A nil
+// noOp leaves every session actionable and returns no notes.
+func partitionNoOp(matched []protocol.SessionInfo, noOp noOpSkip) ([]protocol.SessionInfo, []string) {
+	if noOp == nil {
+		return matched, nil
+	}
+
+	var (
+		actionable []protocol.SessionInfo
+		skips      []string
+	)
+
+	for _, s := range matched {
+		if reason, skip := noOp(s); skip {
+			skips = append(skips, fmt.Sprintf("%s: %s", s.Name, reason))
+			continue
+		}
+
+		actionable = append(actionable, s)
+	}
+
+	return actionable, skips
+}
+
 // runBatch performs a batch operation (stop or delete) over the sessions that
 // match bf's filters. verb/pastTense/gerund provide the human-readable words
 // ("stop"/"stopped"/"stopping"), controlType is the control message name and
 // payload builds the per-session message to send. Starred sessions are skipped.
-func runBatch(cmd *cobra.Command, bf *batchFlags, verb, pastTense, gerund, controlType string, payload func(sessionID string) any) error {
+// noOp, when non-nil, marks matched sessions the operation cannot meaningfully
+// act on (e.g. already-stopped sessions for a stop); they are skipped with a
+// note instead of being sent to the daemon.
+func runBatch(cmd *cobra.Command, bf *batchFlags, verb, pastTense, gerund, controlType string, payload func(sessionID string) any, noOp noOpSkip) error {
 	c, err := client.Connect(cfg, paths, cfgFile)
 	if err != nil {
 		return err
@@ -164,8 +213,25 @@ func runBatch(cmd *cobra.Command, bf *batchFlags, verb, pastTense, gerund, contr
 		return err
 	}
 
+	// Split matched sessions into the ones the operation can act on and the
+	// no-ops (e.g. already-stopped sessions for a stop). No-ops are reported as
+	// skipped notes rather than sent to the daemon, so a mixed filter still acts
+	// on the actionable sessions instead of aborting on the first no-op (#203).
+	matched, noOpSkips := partitionNoOp(matched, noOp)
+
 	if len(matched) == 0 {
+		if len(noOpSkips) > 0 {
+			out.Printf("No sessions to %s\n", verb)
+
+			for _, note := range noOpSkips {
+				out.Printf("Skipped %s\n", note)
+			}
+
+			return nil
+		}
+
 		out.Printf("No sessions match the given filters\n")
+
 		return nil
 	}
 
@@ -181,6 +247,7 @@ func runBatch(cmd *cobra.Command, bf *batchFlags, verb, pastTense, gerund, contr
 	}
 
 	res, transportErr := executeBatch(c, matched, controlType, payload)
+	res.noOps = noOpSkips
 
 	printBatchSummary(pastTense, gerund, res)
 
@@ -221,6 +288,10 @@ type batchResults struct {
 	succeeded []string
 	failed    []batchFailure
 	skipped   []string
+	// noOps holds "<name>: <reason>" notes for matched sessions the operation
+	// could not meaningfully act on and skipped without contacting the daemon
+	// (e.g. already-stopped sessions for a stop — issue #203).
+	noOps []string
 }
 
 // executeBatch runs controlType against every matched session, collecting a
@@ -277,6 +348,10 @@ func printBatchSummary(pastTense, gerund string, res batchResults) {
 
 	for _, name := range res.skipped {
 		out.Printf("Skipped starred session: %s\n", name)
+	}
+
+	for _, note := range res.noOps {
+		out.Printf("Skipped %s\n", note)
 	}
 
 	for _, f := range res.failed {
