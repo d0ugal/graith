@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -15,15 +16,37 @@ import (
 	"github.com/d0ugal/graith/internal/protocol"
 )
 
-// discardOut swaps the package-level output writer for one that discards, and
-// restores it on cleanup. Returns nothing — callers just want the side effect.
+// discardOut swaps the package-level output writer for one that discards and
+// pins doctorAutofix to a known-off state, restoring both on cleanup. Isolating
+// doctorAutofix here (not just out) means tests that read it implicitly — the
+// storage/tmp/session checks all branch on it — never inherit a `true` leaked
+// by an autofix test whose own cleanup regressed.
 func discardOut(t *testing.T) {
 	t.Helper()
 
-	old := out
-	t.Cleanup(func() { out = old })
+	oldOut, oldFix := out, doctorAutofix
+	t.Cleanup(func() { out, doctorAutofix = oldOut, oldFix })
 
 	out = output.NewWithWriter(false, io.Discard)
+	doctorAutofix = false
+}
+
+// deadPID starts and immediately reaps a short-lived process, returning its now-
+// dead PID. This gives checkStalePID a deterministic non-graith target: the PID
+// is not alive, so IsGraithDaemon returns false regardless of what the test
+// binary happens to be named (using os.Getpid() would misfire if the binary
+// were ever run as "gr"/"graith").
+func deadPID(t *testing.T) int {
+	t.Helper()
+
+	cmd := exec.Command("true") //nolint:gosec // fixed command; we only need a PID that exits immediately
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start throwaway process: %v", err)
+	}
+
+	_ = cmd.Wait() // reap; the PID is now dead
+
+	return cmd.Process.Pid
 }
 
 // TestFormatBytesBoundaries checks the human-readable formatter across every
@@ -231,8 +254,8 @@ func TestCheckSandboxBackendInvalid(t *testing.T) {
 }
 
 // TestCheckStalePIDStale verifies checkStalePID fails when the PID file names a
-// process that is not a graith daemon. The test's own PID is alive but its
-// process name is not "gr"/"graith", so IsGraithDaemon reports it stale.
+// process that is not a live graith daemon. deadPID gives a reaped (dead) PID,
+// so IsGraithDaemon returns false deterministically.
 func TestCheckStalePIDStale(t *testing.T) {
 	oldPaths := paths
 	t.Cleanup(func() { paths = oldPaths })
@@ -240,7 +263,7 @@ func TestCheckStalePIDStale(t *testing.T) {
 	discardOut(t)
 
 	pidFile := filepath.Join(t.TempDir(), "graith.pid")
-	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
+	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(deadPID(t))), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -255,23 +278,28 @@ func TestCheckStalePIDStale(t *testing.T) {
 	}
 }
 
-// TestCheckStalePIDAutofix verifies --autofix removes a stale PID file.
+// TestCheckStalePIDAutofix verifies --autofix both detects the stale PID and
+// removes the file.
 func TestCheckStalePIDAutofix(t *testing.T) {
-	oldPaths, oldFix := paths, doctorAutofix
-	t.Cleanup(func() { paths, doctorAutofix = oldPaths, oldFix })
+	oldPaths := paths
+	t.Cleanup(func() { paths = oldPaths })
 
 	discardOut(t)
 
 	pidFile := filepath.Join(t.TempDir(), "graith.pid")
-	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
+	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(deadPID(t))), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
 	paths.PIDFile = pidFile
-	doctorAutofix = true
+	doctorAutofix = true // restored by discardOut
 
 	dc := newDoctorContext()
 	dc.checkStalePID()
+
+	if failed := strings.Join(checkResults(dc, "fail"), "\n"); !strings.Contains(failed, "stale") {
+		t.Errorf("expected a stale-PID fail before removal, got: %q", failed)
+	}
 
 	if _, err := os.Stat(pidFile); !os.IsNotExist(err) {
 		t.Errorf("expected stale PID file removed by autofix, stat err = %v", err)
@@ -588,6 +616,12 @@ func TestCheckTmpDirWithRepos(t *testing.T) {
 	if !strings.Contains(passed, "1 repo(s)") {
 		t.Errorf("expected '1 repo(s)' in tmp dir report, got: %q", passed)
 	}
+
+	// The 128-byte checkout must be summed and rendered — guards against dirSize
+	// being dropped or the total always reported as 0 B.
+	if !strings.Contains(passed, "128 B") {
+		t.Errorf("expected summed checkout size '128 B' in tmp dir report, got: %q", passed)
+	}
 }
 
 // TestCheckTmpDirLegacyShareDir verifies the legacy sibling share/ dir (renamed
@@ -794,10 +828,15 @@ func TestCheckEnvironment(t *testing.T) {
 }
 
 // TestCheckEnvironmentLargeDaemonLog verifies a daemon log over the 10 MB
-// threshold is warned about, and that --autofix truncates it to the tail.
+// threshold is warned about, and that --autofix truncates it to exactly the
+// trailing 1 MB. The log is 10 MB of 'H' (head) followed by exactly 1 MB of 'T'
+// (tail) with distinct bytes, so the assertions pin both the 1 MB keep size
+// checkEnvironment wires into truncateFileKeepTail and that it keeps the tail
+// (not the head) — a regression to a different keep size, or to head-keeping,
+// fails here even though the low-level helper test also covers the tail.
 func TestCheckEnvironmentLargeDaemonLog(t *testing.T) {
-	oldCfg, oldPaths, oldCfgFile, oldFix := cfg, paths, cfgFile, doctorAutofix
-	t.Cleanup(func() { cfg, paths, cfgFile, doctorAutofix = oldCfg, oldPaths, oldCfgFile, oldFix })
+	oldCfg, oldPaths, oldCfgFile := cfg, paths, cfgFile
+	t.Cleanup(func() { cfg, paths, cfgFile = oldCfg, oldPaths, oldCfgFile })
 
 	discardOut(t)
 
@@ -808,9 +847,14 @@ func TestCheckEnvironmentLargeDaemonLog(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 11 MB daemon log — over the 10 MB warn threshold.
+	const oneMB = 1024 * 1024
+
+	// 11 MB total: 10 MB 'H' head + exactly 1 MB 'T' tail. Over the 10 MB warn
+	// threshold; the kept tail must be the pure 'T' block.
 	logPath := filepath.Join(dir, "daemon.log")
-	if err := os.WriteFile(logPath, bytes.Repeat([]byte("z"), 11*1024*1024), 0o600); err != nil {
+	content := append(bytes.Repeat([]byte("H"), 10*oneMB), bytes.Repeat([]byte("T"), oneMB)...)
+
+	if err := os.WriteFile(logPath, content, 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -819,7 +863,7 @@ func TestCheckEnvironmentLargeDaemonLog(t *testing.T) {
 	cfg = &config.Config{}
 	cfg.Sandbox = config.SandboxConfig{Enabled: false}
 
-	doctorAutofix = true
+	doctorAutofix = true // restored by discardOut
 
 	dc := newDoctorContext()
 	dc.checkEnvironment()
@@ -829,13 +873,17 @@ func TestCheckEnvironmentLargeDaemonLog(t *testing.T) {
 		t.Errorf("expected daemon-log size warn, got: %q", warned)
 	}
 
-	info, err := os.Stat(logPath)
+	got, err := os.ReadFile(logPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if info.Size() > 2*1024*1024 {
-		t.Errorf("autofix should have truncated daemon log to ~1 MB, size now %d", info.Size())
+	if int64(len(got)) != oneMB {
+		t.Errorf("autofix should have truncated daemon log to exactly 1 MB, size now %d", len(got))
+	}
+
+	if want := bytes.Repeat([]byte("T"), oneMB); !bytes.Equal(got, want) {
+		t.Errorf("autofix kept the wrong bytes: expected the 1 MB 'T' tail, got head bytes present=%v", bytes.Contains(got, []byte("H")))
 	}
 }
 
