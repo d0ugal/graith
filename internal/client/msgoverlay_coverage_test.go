@@ -70,6 +70,7 @@ func TestCurrentEntry_OutOfRange(t *testing.T) {
 
 	m.cursor = 0
 	m.msgCursor = 99
+
 	if m.currentEntry() != nil {
 		t.Error("currentEntry should be nil when msgCursor is out of range")
 	}
@@ -435,6 +436,7 @@ func TestRenderRail_EmptyLoaded(t *testing.T) {
 
 func TestRenderRail_ScrollsToSelected(t *testing.T) {
 	msgs := make([]protocol.ConversationMessage, 0, 10)
+
 	for i := 0; i < 10; i++ {
 		// Distinct peers, decreasing time so order is stable.
 		peer := string(rune('a' + i))

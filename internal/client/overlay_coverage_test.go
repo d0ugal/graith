@@ -313,6 +313,7 @@ func TestRefreshTickMsg_TriggersRefresh(t *testing.T) {
 	}
 
 	cmd() // run the refresh
+
 	if !fetched {
 		t.Error("refresh tick should invoke refreshSessions in list state")
 	}
