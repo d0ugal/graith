@@ -301,7 +301,7 @@ func TestAvailableReposReturnsSessionRepos(t *testing.T) {
 func mkGitRepo(t *testing.T, dir string) string {
 	t.Helper()
 
-	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o750); err != nil {
 		t.Fatal(err)
 	}
 
@@ -328,7 +328,8 @@ func TestAvailableReposIncludesConfiguredRepos(t *testing.T) {
 	bothy := mkGitRepo(t, filepath.Join(code, "bothy"))
 	clachan := mkGitRepo(t, filepath.Join(code, "clachan"))
 	mkGitRepo(t, filepath.Join(code, "notes")) // git — also discovered
-	if err := os.MkdirAll(filepath.Join(code, "empty"), 0o755); err != nil {
+
+	if err := os.MkdirAll(filepath.Join(code, "empty"), 0o750); err != nil {
 		t.Fatal(err) // non-git dir, must be skipped
 	}
 
@@ -344,38 +345,45 @@ func TestAvailableReposIncludesConfiguredRepos(t *testing.T) {
 
 	repos := sm.availableRepos()
 
+	// Key on the resolved path: a scanned repo's entry path is built from the
+	// resolved root, while a session repo keeps its stored (unresolved) path —
+	// on macOS /var symlinks to /private/var, so the two spellings differ. Both
+	// are valid create inputs; the resolved path is the stable comparison key.
 	byPath := map[string]protocol.RepoEntry{}
+
 	for _, r := range repos {
-		if _, dup := byPath[r.Path]; dup {
+		key := config.ResolvePath(r.Path)
+		if _, dup := byPath[key]; dup {
 			t.Errorf("duplicate repo entry for %q", r.Path)
 		}
 
-		byPath[r.Path] = r
+		byPath[key] = r
 	}
 
 	for _, want := range []string{croft, bothy, clachan} {
-		if _, ok := byPath[want]; !ok {
+		if _, ok := byPath[config.ResolvePath(want)]; !ok {
 			t.Errorf("expected repo %q in picker, got %+v", want, repos)
 		}
 	}
 
 	// The container root itself is not a git repo, so it must not be listed.
-	if _, bad := byPath[code]; bad {
+	if _, bad := byPath[config.ResolvePath(code)]; bad {
 		t.Errorf("non-git container %q should not be offered as a repo", code)
 	}
 
 	// The empty non-git child must not be listed.
-	if _, bad := byPath[filepath.Join(code, "empty")]; bad {
-		t.Errorf("non-git dir %q should not be offered as a repo", filepath.Join(code, "empty"))
+	empty := filepath.Join(code, "empty")
+	if _, bad := byPath[config.ResolvePath(empty)]; bad {
+		t.Errorf("non-git dir %q should not be offered as a repo", empty)
 	}
 
 	// The session repo keeps its recent flag and session-derived name; a repo
 	// discovered only from config is not recent and takes its name from the path.
-	if r := byPath[croft]; !r.Recent || r.Name != "croft" {
+	if r := byPath[config.ResolvePath(croft)]; !r.Recent || r.Name != "croft" {
 		t.Errorf("session repo %q: got recent=%v name=%q, want recent=true name=croft", croft, r.Recent, r.Name)
 	}
 
-	if r := byPath[bothy]; r.Recent || r.Name != "bothy" {
+	if r := byPath[config.ResolvePath(bothy)]; r.Recent || r.Name != "bothy" {
 		t.Errorf("scanned repo %q: got recent=%v name=%q, want recent=false name=bothy", bothy, r.Recent, r.Name)
 	}
 }
