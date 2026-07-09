@@ -150,6 +150,129 @@ struct ClientIntegrationTests {
         #expect(key == Data("x".utf8))
         await attach.close()
     }
+
+    /// `star`/`unstar` send `{session_id}` and complete on the daemon's
+    /// `starred`/`unstarred` acks (issue #899).
+    @Test func starAndUnstarRoundTrip() async throws {
+        let (clientStream, serverStream) = InMemoryByteStream.makePair()
+        let daemon = MockDaemon(stream: serverStream)
+
+        let server = Task {
+            _ = try await daemon.readControl() // handshake
+            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "1.0", daemonVersion: "dev"))
+
+            let starReq = try await daemon.readControl()
+            #expect(starReq.type == "star")
+            #expect(try decodePayload(starReq, as: SessionIDMsg.self).sessionID == "braw")
+            try await daemon.writeControl("starred", SessionIDMsg(sessionID: "braw"))
+
+            let unstarReq = try await daemon.readControl()
+            #expect(unstarReq.type == "unstar")
+            #expect(try decodePayload(unstarReq, as: SessionIDMsg.self).sessionID == "braw")
+            try await daemon.writeControl("unstarred", SessionIDMsg(sessionID: "braw"))
+        }
+
+        let stream = clientStream
+        let client = GraithProtocolClient(
+            transport: .unix(path: "/tmp/graith.sock"),
+            profile: "", clientID: "app", token: nil, signer: nil,
+            streamFactory: { _ in stream }
+        )
+        try await client.star(sessionID: "braw")
+        try await client.unstar(sessionID: "braw")
+
+        _ = await server.result
+        await client.close()
+    }
+
+    /// `fork` sends `{name, source_session_id}` and returns the `created`
+    /// session the daemon replies with (issue #899).
+    @Test func forkReturnsCreatedSession() async throws {
+        let (clientStream, serverStream) = InMemoryByteStream.makePair()
+        let daemon = MockDaemon(stream: serverStream)
+
+        let server = Task {
+            _ = try await daemon.readControl() // handshake
+            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "1.0", daemonVersion: "dev"))
+            let forkReq = try await daemon.readControl()
+            #expect(forkReq.type == "fork")
+            let f = try decodePayload(forkReq, as: ForkMsg.self)
+            #expect(f.name == "bairn")
+            #expect(f.sourceSessionID == "braw")
+            try await daemon.writeControl("created", makeSession(id: "bairn01", name: "bairn"))
+        }
+
+        let stream = clientStream
+        let client = GraithProtocolClient(
+            transport: .unix(path: "/tmp/graith.sock"),
+            profile: "", clientID: "app", token: nil, signer: nil,
+            streamFactory: { _ in stream }
+        )
+        let forked = try await client.fork(name: "bairn", sourceSessionID: "braw")
+        #expect(forked.id == "bairn01")
+        #expect(forked.name == "bairn")
+
+        _ = await server.result
+        await client.close()
+    }
+
+    /// `migrate` sends `{session_id, agent, model?}` and returns the `migrated`
+    /// session (issue #899).
+    @Test func migrateReturnsMigratedSession() async throws {
+        let (clientStream, serverStream) = InMemoryByteStream.makePair()
+        let daemon = MockDaemon(stream: serverStream)
+
+        let server = Task {
+            _ = try await daemon.readControl() // handshake
+            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "1.0", daemonVersion: "dev"))
+            let migReq = try await daemon.readControl()
+            #expect(migReq.type == "migrate")
+            let m = try decodePayload(migReq, as: MigrateMsg.self)
+            #expect(m.sessionID == "canny")
+            #expect(m.agent == "codex")
+            #expect(m.model == "o3")
+            try await daemon.writeControl("migrated", makeSession(id: "canny", name: "canny"))
+        }
+
+        let stream = clientStream
+        let client = GraithProtocolClient(
+            transport: .unix(path: "/tmp/graith.sock"),
+            profile: "", clientID: "app", token: nil, signer: nil,
+            streamFactory: { _ in stream }
+        )
+        let migrated = try await client.migrate(sessionID: "canny", agent: "codex", model: "o3")
+        #expect(migrated.id == "canny")
+
+        _ = await server.result
+        await client.close()
+    }
+
+    /// A daemon `error` reply to `fork` surfaces as a thrown `ControlError`
+    /// rather than a bogus session (issue #899).
+    @Test func forkErrorReplyThrows() async throws {
+        let (clientStream, serverStream) = InMemoryByteStream.makePair()
+        let daemon = MockDaemon(stream: serverStream)
+
+        let server = Task {
+            _ = try await daemon.readControl() // handshake
+            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "1.0", daemonVersion: "dev"))
+            _ = try await daemon.readControl() // fork
+            try await daemon.writeControl("error", ErrorMsg(message: "source not found"))
+        }
+
+        let stream = clientStream
+        let client = GraithProtocolClient(
+            transport: .unix(path: "/tmp/graith.sock"),
+            profile: "", clientID: "app", token: nil, signer: nil,
+            streamFactory: { _ in stream }
+        )
+        await #expect(throws: ControlError.self) {
+            _ = try await client.fork(name: "dreich", sourceSessionID: "missing")
+        }
+
+        _ = await server.result
+        await client.close()
+    }
 }
 
     /// CRITICAL regression: the token-less pairing lane must consume the

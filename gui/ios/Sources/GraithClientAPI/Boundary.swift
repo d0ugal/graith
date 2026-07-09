@@ -73,6 +73,11 @@ public enum ControlType {
     public static let restart = "restart"
     public static let delete = "delete"
     public static let interrupt = "interrupt"
+    public static let rename = "rename"
+    public static let star = "star"
+    public static let unstar = "unstar"
+    public static let fork = "fork"
+    public static let migrate = "migrate"
     public static let logs = "logs"
     public static let resize = "resize"
     public static let attach = "attach"
@@ -140,6 +145,14 @@ public protocol GraithHostClient: Actor {
     func resume(sessionID: String) async throws
     func restart(sessionID: String) async throws
     func interrupt(sessionID: String) async throws
+    func delete(sessionID: String) async throws
+    func rename(sessionID: String, newName: String) async throws
+    func star(sessionID: String) async throws
+    func unstar(sessionID: String) async throws
+    /// Fork `sourceSessionID` into a new session named `name`.
+    func fork(name: String, sourceSessionID: String) async throws
+    /// Migrate `sessionID` to a different `agent` (and optionally `model`).
+    func migrate(sessionID: String, agent: String, model: String?) async throws
 
     // Approvals — event connection.
     /// Subscribe to approval notifications without attaching to any session.

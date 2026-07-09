@@ -341,6 +341,62 @@ class SessionStore: ObservableObject {
         runAction(session) { try await $0.restart(sessionID: session.id) }
     }
 
+    func interruptSession(_ session: Session) {
+        runAction(session) { try await $0.interrupt(sessionID: session.id) }
+    }
+
+    func renameSession(_ session: Session, to newName: String) {
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != session.name else { return }
+        runAction(session) { try await $0.rename(sessionID: session.id, newName: trimmed) }
+    }
+
+    /// Toggle a session's star, calling `unstar` when currently starred and
+    /// `star` otherwise.
+    func toggleStar(_ session: Session) {
+        let starred = session.starred ?? false
+        runAction(session) {
+            if starred {
+                try await $0.unstar(sessionID: session.id)
+            } else {
+                try await $0.star(sessionID: session.id)
+            }
+        }
+    }
+
+    /// Fork `session` into a new session named `name` on the same host, then
+    /// refresh so the fork appears in the sidebar.
+    func forkSession(_ session: Session, name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        guard let client = client(for: session.id) else {
+            self.error = SessionStoreError.hostUnavailable.localizedDescription
+            return
+        }
+        let hostID = hostBySession[session.id] ?? "local"
+        Task {
+            do {
+                let forked = try await client.fork(name: trimmed, sourceSessionID: session.id)
+                hostBySession[forked.id] = hostID
+            } catch {
+                self.error = error.localizedDescription
+            }
+            refresh()
+        }
+    }
+
+    /// Migrate `session` to a different agent (and optionally model) in place.
+    func migrateSession(_ session: Session, agent: String, model: String? = nil) {
+        let trimmedModel = model?.trimmingCharacters(in: .whitespacesAndNewlines)
+        runAction(session) {
+            _ = try await $0.migrate(
+                sessionID: session.id,
+                agent: agent,
+                model: (trimmedModel?.isEmpty ?? true) ? nil : trimmedModel
+            )
+        }
+    }
+
     func createSession(
         name: String,
         agent: String,

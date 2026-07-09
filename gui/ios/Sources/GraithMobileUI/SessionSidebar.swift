@@ -38,7 +38,7 @@ private struct HostSection: View {
                     .font(.footnote)
             case .idle, .connected:
                 ForEach(repoGroups, id: \.repo) { group in
-                    RepoGroup(repo: group.repo, sessions: group.sessions, hostID: connection.id)
+                    RepoGroup(repo: group.repo, sessions: group.sessions, connection: connection)
                 }
             }
         } header: {
@@ -62,13 +62,13 @@ private struct HostSection: View {
 private struct RepoGroup: View {
     let repo: String
     let sessions: [SessionInfo]
-    let hostID: String
+    @ObservedObject var connection: HostConnection
 
     var body: some View {
         DisclosureGroup {
             ForEach(sessions) { session in
-                SessionRow(session: session)
-                    .tag(SessionRef(hostID: hostID, sessionID: session.id))
+                SessionRow(session: session, connection: connection)
+                    .tag(SessionRef(hostID: connection.id, sessionID: session.id))
             }
         } label: {
             HStack {
@@ -82,8 +82,20 @@ private struct RepoGroup: View {
 }
 
 /// A single session row: status dot, name, agent, and PR/CI + attention badges.
+/// Carries the per-session actions (swipe-to-delete + context menu, issue #899).
 struct SessionRow: View {
     let session: SessionInfo
+    @ObservedObject var connection: HostConnection
+
+    // Action sheets / confirmation.
+    @State private var showRename = false
+    @State private var renameText = ""
+    @State private var showFork = false
+    @State private var forkName = ""
+    @State private var showMigrate = false
+    @State private var showDeleteConfirm = false
+
+    private let migrateAgents = ["claude", "codex", "agy", "opencode"]
 
     var body: some View {
         HStack(spacing: 8) {
@@ -113,6 +125,166 @@ struct SessionRow: View {
             }
         }
         .padding(.vertical, 2)
+        // Swipe left → Delete (red). Confirms when running, immediate when
+        // stopped (issue #899).
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            Button(role: .destructive) { requestDelete() } label: {
+                Label("Delete", systemImage: "trash")
+            }
+        }
+        // Swipe right → toggle star.
+        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+            Button { Task { await connection.toggleStar(session) } } label: {
+                Label(session.starred == true ? "Unstar" : "Star",
+                      systemImage: session.starred == true ? "star.slash" : "star")
+            }
+            .tint(.yellow)
+        }
+        .contextMenu { contextMenuItems }
+        .confirmationDialog(
+            "Delete session \u{201c}\(session.name)\u{201d}?",
+            isPresented: $showDeleteConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) { Task { await connection.delete(session) } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This session is running. Deleting it stops the agent and removes its worktree.")
+        }
+        .sheet(isPresented: $showRename) {
+            SessionTextPromptSheet(
+                title: "Rename Session", fieldLabel: "New name",
+                placeholder: session.name, confirmLabel: "Rename", text: $renameText
+            ) { newName in Task { await connection.rename(session, to: newName) } }
+        }
+        .sheet(isPresented: $showFork) {
+            SessionTextPromptSheet(
+                title: "Fork Session", fieldLabel: "New session name",
+                placeholder: "\(session.name)-fork", confirmLabel: "Fork", text: $forkName
+            ) { name in Task { await connection.fork(session, name: name) } }
+        }
+        .sheet(isPresented: $showMigrate) {
+            MigrateSheet(sessionName: session.name, agents: migrateAgents, currentAgent: session.agent) { agent in
+                Task { await connection.migrate(session, agent: agent) }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var contextMenuItems: some View {
+        if session.isStopped {
+            Button { Task { await connection.resume(session) } } label: { Label("Resume", systemImage: "play") }
+        } else {
+            Button { Task { await connection.stop(session) } } label: { Label("Stop", systemImage: "stop") }
+            Button { Task { await connection.restart(session) } } label: { Label("Restart", systemImage: "arrow.clockwise") }
+            Button { Task { await connection.interrupt(session) } } label: { Label("Interrupt (Ctrl-C)", systemImage: "hand.raised") }
+        }
+        Divider()
+        Button { renameText = session.name; showRename = true } label: { Label("Rename…", systemImage: "pencil") }
+        Button { Task { await connection.toggleStar(session) } } label: {
+            Label(session.starred == true ? "Unstar" : "Star",
+                  systemImage: session.starred == true ? "star.slash" : "star")
+        }
+        Button { forkName = "\(session.name)-fork"; showFork = true } label: { Label("Fork…", systemImage: "arrow.triangle.branch") }
+        Button { showMigrate = true } label: { Label("Migrate…", systemImage: "arrow.left.arrow.right") }
+        Divider()
+        Button(role: .destructive) { requestDelete() } label: { Label("Delete", systemImage: "trash") }
+    }
+
+    /// Confirm when running, delete immediately when stopped.
+    private func requestDelete() {
+        if session.isRunning {
+            showDeleteConfirm = true
+        } else {
+            Task { await connection.delete(session) }
+        }
+    }
+}
+
+/// A minimal single-field prompt sheet (Rename / Fork).
+struct SessionTextPromptSheet: View {
+    let title: String
+    let fieldLabel: String
+    let placeholder: String
+    let confirmLabel: String
+    @Binding var text: String
+    let onConfirm: (String) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    private var trimmed: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section(fieldLabel) {
+                    TextField(placeholder, text: $text)
+                        .autocorrectionDisabled()
+                        .onSubmit(confirm)
+                }
+            }
+            .navigationTitle(title)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(confirmLabel, action: confirm).disabled(trimmed.isEmpty)
+                }
+            }
+        }
+    }
+
+    private func confirm() {
+        guard !trimmed.isEmpty else { return }
+        onConfirm(trimmed)
+        dismiss()
+    }
+}
+
+/// A picker sheet for choosing a new agent to migrate a session to.
+struct MigrateSheet: View {
+    let sessionName: String
+    let agents: [String]
+    let currentAgent: String
+    let onConfirm: (String) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var selectedAgent: String
+
+    init(sessionName: String, agents: [String], currentAgent: String, onConfirm: @escaping (String) -> Void) {
+        self.sessionName = sessionName
+        self.agents = agents
+        self.currentAgent = currentAgent
+        self.onConfirm = onConfirm
+        _selectedAgent = State(initialValue: currentAgent)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Swap \u{201c}\(sessionName)\u{201d} to a different agent") {
+                    Picker("Agent", selection: $selectedAgent) {
+                        ForEach(agents, id: \.self) { Text($0).tag($0) }
+                    }
+                    .pickerStyle(.inline)
+                    .labelsHidden()
+                }
+            }
+            .navigationTitle("Migrate Session")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Migrate") {
+                        onConfirm(selectedAgent)
+                        dismiss()
+                    }
+                    .disabled(selectedAgent == currentAgent)
+                }
+            }
+        }
     }
 }
 
