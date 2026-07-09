@@ -199,6 +199,7 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 
 	sm.log.Info("sandboxing orchestrator", "id", id,
 		"command", command, "read_dirs", opts.ReadDirs, "write_dirs", opts.WriteDirs,
+		"unix_sockets", opts.UnixSockets,
 		"workdir", opts.WorktreeDir)
 
 	ptySess, err := grpty.NewSession(grpty.SessionOpts{
@@ -279,6 +280,7 @@ func (sm *SessionManager) rollbackOrchestratorCreate(id string) {
 	// a nono profile before this error path ran; state is now gone so no later
 	// Delete would remove it. Mirrors cleanupOnError/forkCleanup in Create/Fork.
 	_ = os.Remove(sm.nonoProfilePath(id))
+	_ = os.Remove(sm.safehouseFragmentPath(id))
 }
 
 func (sm *SessionManager) buildOrchestratorPrompt(agentName string, orchCfg config.OrchestratorConfig) []string {

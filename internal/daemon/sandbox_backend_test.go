@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"log/slog"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -103,10 +104,11 @@ func TestSandboxOptsCarryBackend(t *testing.T) {
 
 // TestSandboxOptsGrantDaemonSocket is a regression test for sandboxed agents
 // being unable to reach the daemon: `gr msg`, `gr status`, etc. failed with
-// "daemon did not start in time" because the runtime dir holding the daemon
-// socket was granted read-only, and a read-only grant lets a process stat a
-// Unix socket but not connect() to it. sandboxOptsFromConfig must grant the
-// socket via UnixSockets (a connect-capable grant), scoped to the socket file.
+// "daemon did not start in time" because connecting to the daemon Unix socket
+// is network-outbound under Seatbelt (not file access), and safehouse's default
+// profile denies it. sandboxOptsFromConfig must grant the socket via
+// UnixSockets and point SafehouseFragmentPath under RuntimeDir, and the
+// safehouse backend must turn that into a --append-profile connect grant.
 func TestSandboxOptsGrantDaemonSocket(t *testing.T) {
 	cfg := config.Default()
 	cfg.Sandbox = config.SandboxConfig{Enabled: true, Backend: "safehouse"}
@@ -119,29 +121,39 @@ func TestSandboxOptsGrantDaemonSocket(t *testing.T) {
 		t.Fatalf("daemon socket %q not granted via UnixSockets: %v", sm.paths.SocketPath, opts.UnixSockets)
 	}
 
-	// The safehouse backend must fold it into the read/write --add-dirs list
-	// (connect-capable), never the read-only --add-dirs-ro list.
+	// The fragment must live under RuntimeDir (readable by safehouse, cleaned up
+	// on teardown) — never a stray temp file.
+	if !strings.HasPrefix(opts.SafehouseFragmentPath, sm.paths.RuntimeDir) {
+		t.Errorf("SafehouseFragmentPath %q should live under RuntimeDir %q", opts.SafehouseFragmentPath, sm.paths.RuntimeDir)
+	}
+
+	// The safehouse backend must emit --append-profile pointing at that fragment,
+	// and the fragment must grant network-outbound connect to the socket.
 	_, args, err := sandbox.Wrap("claude", nil, opts)
 	if err != nil {
 		t.Fatalf("wrap: %v", err)
 	}
 
-	inFlag := func(flag string) bool {
-		for i, a := range args {
-			if a == flag && i+1 < len(args) && slices.Contains(strings.Split(args[i+1], ":"), sm.paths.SocketPath) {
-				return true
-			}
+	appended := ""
+
+	for i, a := range args {
+		if a == "--append-profile" && i+1 < len(args) {
+			appended = args[i+1]
 		}
-
-		return false
 	}
 
-	if !inFlag("--add-dirs") {
-		t.Errorf("daemon socket not in read/write --add-dirs: %v", args)
+	if appended != opts.SafehouseFragmentPath {
+		t.Fatalf("--append-profile %q, want %q; args: %v", appended, opts.SafehouseFragmentPath, args)
 	}
 
-	if inFlag("--add-dirs-ro") {
-		t.Errorf("daemon socket wrongly in read-only --add-dirs-ro: %v", args)
+	data, err := os.ReadFile(appended)
+	if err != nil {
+		t.Fatalf("read fragment: %v", err)
+	}
+
+	want := `(allow network-outbound (remote unix-socket (path-literal "` + sm.paths.SocketPath + `")))`
+	if !strings.Contains(string(data), want) {
+		t.Errorf("fragment missing connect grant for daemon socket.\nwant: %s\ngot:\n%s", want, data)
 	}
 }
 

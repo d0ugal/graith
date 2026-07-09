@@ -40,12 +40,13 @@ type WrapOpts struct {
 	WriteFiles []string
 	// UnixSockets grants connect access to existing Unix domain sockets (e.g.
 	// the graith daemon socket, so a sandboxed agent can reach the daemon for
-	// `gr msg`, `gr status`, etc.). A read-only path grant is NOT enough to
-	// connect() to a socket: safehouse folds these into its read/write dir list
-	// (a read/write grant is what lets Seatbelt permit the connect, as proven by
-	// docker.sock/podman.sock), and nono maps them to filesystem.unix_socket
-	// (the same field the "ssh" feature uses for $SSH_AUTH_SOCK). Paths are
-	// already absolute.
+	// `gr msg`, `gr status`, etc.). Connecting to a socket is NOT file access:
+	// both Seatbelt and Landlock classify it as network egress, so neither a
+	// read-only nor a read/write path grant permits it. nono maps these to
+	// filesystem.unix_socket (the same field the "ssh" feature uses for
+	// $SSH_AUTH_SOCK). safehouse has no socket flag, so the backend emits a
+	// Seatbelt fragment with `(allow network-outbound (remote unix-socket …))`
+	// and appends it via --append-profile. Paths are already absolute.
 	UnixSockets []string
 	Features    []string
 	EnvKeys     []string
@@ -81,6 +82,14 @@ type WrapOpts struct {
 	// readable inside the sandbox and survives for the process lifetime and
 	// resume. Empty means the backend writes to an os.CreateTemp file.
 	ProfilePath string
+
+	// SafehouseFragmentPath, for the safehouse backend, is where the generated
+	// per-session Seatbelt fragment (the --append-profile file granting
+	// UnixSockets connect access) is written. Like ProfilePath the daemon points
+	// it under RuntimeDir so it survives resume and is cleaned up on delete;
+	// empty means the backend writes to an os.CreateTemp file. Only used when
+	// UnixSockets is non-empty.
+	SafehouseFragmentPath string
 }
 
 // NetworkPolicy is the resolved egress policy passed to a backend. It mirrors
