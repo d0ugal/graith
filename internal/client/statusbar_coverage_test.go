@@ -2,6 +2,7 @@ package client
 
 import (
 	"bytes"
+	"image/color"
 	"strings"
 	"testing"
 
@@ -162,14 +163,35 @@ func TestFormatFleetMinimal(t *testing.T) {
 	}
 }
 
-// --- styledStatus: each status branch (via rendered output presence) ---
+// --- styledStatus: each status branch maps to the right foreground/weight ---
 
 func TestStyledStatus_Branches(t *testing.T) {
-	for _, status := range []string{"active", "running", "approval", "ready", "errored", "stopped", "unknown"} {
-		out := styledStatus(status, barBg).Render("x")
-		if !strings.Contains(out, "x") {
-			t.Errorf("styledStatus(%q) dropped its content: %q", status, out)
-		}
+	cases := []struct {
+		status   string
+		wantFg   color.Color
+		wantBold bool
+	}{
+		{"active", colorGreen, false},
+		{"running", colorGreen, false},
+		{"approval", colorRed, true},
+		{"ready", colorBlue, false},
+		{"errored", colorRed, false},
+		{"stopped", colorDim, false},
+		{"unknown", colorDim, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.status, func(t *testing.T) {
+			style := styledStatus(tc.status, barBg)
+
+			if fg := style.GetForeground(); fg != tc.wantFg {
+				t.Errorf("styledStatus(%q) fg = %v, want %v", tc.status, fg, tc.wantFg)
+			}
+
+			if style.GetBold() != tc.wantBold {
+				t.Errorf("styledStatus(%q) bold = %v, want %v", tc.status, style.GetBold(), tc.wantBold)
+			}
+		})
 	}
 }
 

@@ -76,7 +76,7 @@ func TestSortByStatusAge_ZeroTimesStable(t *testing.T) {
 	}
 }
 
-func TestSortByStatusAge_ZeroSortsAfterNonZero(t *testing.T) {
+func TestSortByStatusAge_ZeroSortsBeforeNonZero(t *testing.T) {
 	old := time.Now().Add(-time.Hour).Format(time.RFC3339)
 	sessions := []protocol.SessionInfo{
 		{ID: "hasTime", StatusChangedAt: old},
@@ -285,9 +285,11 @@ func TestRefreshSessionsCmd_ProducesMsg(t *testing.T) {
 		t.Fatal("refreshSessionsCmd should return a command")
 	}
 
-	msg, ok := cmd().(refreshSessionsMsg)
+	produced := cmd()
+
+	msg, ok := produced.(refreshSessionsMsg)
 	if !ok {
-		t.Fatalf("expected refreshSessionsMsg, got %T", cmd())
+		t.Fatalf("expected refreshSessionsMsg, got %T", produced)
 	}
 
 	if len(msg.sessions) != len(sessions) {
@@ -502,7 +504,11 @@ func TestUpdate_DeleteResultLastSessionQuits(t *testing.T) {
 
 	_, cmd := m.Update(deleteResultMsg{sessionID: "only"})
 	if cmd == nil {
-		t.Fatal("deleting the last session should return a quit command")
+		t.Fatal("deleting the last session should return a command")
+	}
+
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Errorf("deleting the last session should quit the overlay, got %T", cmd())
 	}
 }
 
@@ -580,14 +586,17 @@ func TestView_ProfileShownInTitle(t *testing.T) {
 }
 
 func TestView_RestartMenuShowsCounts(t *testing.T) {
+	// overlayTestSessions(): 3 sessions, one stopped (s2), none config-stale.
 	m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil, nil)
 	m.restartSession = func(string) error { return nil }
 	m.width, m.height = 120, 40
 	m.state = stateRestartMenu
 
 	out := m.View().Content
-	if !strings.Contains(out, "Restart:") {
-		t.Errorf("restart menu should show its prompt:\n%s", out)
+	for _, want := range []string{"Restart:", "[a]ll (3)", "[o]utdated (0)", "[s]topped (1)"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("restart menu should show %q:\n%s", want, out)
+		}
 	}
 }
 
