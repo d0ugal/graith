@@ -42,7 +42,6 @@ final class KeyboardAccessoryView: UIView {
     private var spaceTracker = SpaceDragTracker()
     private var spaceDragStart: CGPoint = .zero
     private var spaceDragTranslation: CGPoint = .zero
-    private weak var spaceDragView: UIView?
     private var spaceRepeatLink: CADisplayLink?
     private let arrowHaptics = UIImpactFeedbackGenerator(style: .light)
 
@@ -151,7 +150,6 @@ final class KeyboardAccessoryView: UIView {
         case .began:
             spaceDragStart = point
             spaceDragTranslation = .zero
-            spaceDragView = view
             spaceTracker.begin()
             arrowHaptics.prepare()
             view.backgroundColor = .systemBlue
@@ -205,6 +203,17 @@ final class KeyboardAccessoryView: UIView {
     private func stopSpaceRepeatLink() {
         spaceRepeatLink?.invalidate()
         spaceRepeatLink = nil
+    }
+
+    // `CADisplayLink` retains its target, and the view retains the link, so an
+    // active link is a retain cycle broken by `stopSpaceRepeatLink()`. The gesture
+    // terminal states (.ended/.cancelled/.failed) normally do that, but if the
+    // accessory view is torn down mid-drag without one arriving the link would
+    // keep ticking on a leaked view. Invalidating on window removal is the
+    // backstop (`deinit` can't run while the link holds the view alive).
+    override func willMove(toWindow newWindow: UIWindow?) {
+        super.willMove(toWindow: newWindow)
+        if newWindow == nil { stopSpaceRepeatLink() }
     }
 
     private func stickyButton(title: String, modifier: TerminalModifiers) -> UIButton {
