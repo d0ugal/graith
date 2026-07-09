@@ -111,7 +111,7 @@ When an agent sets a status via `gr status`, it auto-expires after this TTL if t
 
 ```toml
 [git_pull]
-enabled  = false  # periodically pull updates into worktrees
+enabled  = false  # periodically fast-forward maintenance repos' default branches
 interval = "1h"   # how often to pull (minimum: 1 minute)
 ```
 
