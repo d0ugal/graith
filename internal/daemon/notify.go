@@ -137,6 +137,7 @@ func (sm *SessionManager) resumeForInbox(targetID, senderID, senderName string) 
 	if isSystemSender(senderID) {
 		summary = fmt.Sprintf("Resumed by automated notification from %s", sender)
 	}
+
 	sm.log.Info("auto-resuming stopped session on inbox message",
 		"session", sess.Name, "id", targetID, "sender", sender)
 
