@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.66.9](https://github.com/d0ugal/graith/compare/v0.66.8...v0.66.9) (2026-07-09)
+
+
+### Tests
+
+* **sandbox:** address review findings for socket-connect fix ([557f594](https://github.com/d0ugal/graith/commit/557f5942d027962f0e8805edf57c6dcbe3d602de))
+
 ## [0.66.8](https://github.com/d0ugal/graith/compare/v0.66.7...v0.66.8) (2026-07-09)
 
 
