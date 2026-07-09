@@ -480,7 +480,18 @@ When empty (the default), any repo path is accepted.
 
 ## Configuration
 
-Config lives at `~/.config/graith/config.toml` (or `$XDG_CONFIG_HOME/graith/config.toml`). All fields are optional — sensible defaults are provided. The block below shows common options at their default values. Run `gr config show` for the full effective config.
+Config lives at `~/.config/graith/config.toml` (or `$XDG_CONFIG_HOME/graith/config.toml`). All fields are optional — sensible defaults are provided. The block below shows common options at their default values.
+
+Inspect and manage config from the CLI:
+
+```bash
+gr config show     # print the full effective (merged) config
+gr config path     # print the config file path
+gr config init     # generate a sample config.toml with built-in defaults
+gr config diff     # show your changes vs the built-in defaults
+```
+
+(`gr config reset` is an alias for `init` — both write the defaults; neither overwrites an existing file without `--force`.)
 
 ```toml
 default_agent   = "claude"              # agent used when --agent isn't given

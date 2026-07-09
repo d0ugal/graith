@@ -33,69 +33,103 @@ var configCmd = &cobra.Command{
 	},
 }
 
+// writeDefaultConfig writes the built-in default config TOML to the resolved
+// target path. When the file already exists it refuses to overwrite unless
+// configForceReset is set or the user confirms interactively. Shared by the
+// `reset` and `init` subcommands.
+func writeDefaultConfig() error {
+	target := cfgFile
+	if target == "" {
+		target = paths.ConfigFile
+	}
+
+	if _, err := os.Stat(target); err == nil {
+		if !configForceReset {
+			if !term.IsTerminal(int(os.Stdin.Fd())) {
+				return fmt.Errorf("config file exists at %s; use --force to overwrite in non-interactive mode", target)
+			}
+
+			fmt.Fprintf(os.Stderr, "This will overwrite your config at %s. Continue? [y/N] ", target)
+
+			var answer string
+
+			_, _ = fmt.Scanln(&answer)
+
+			if answer != "y" && answer != "Y" {
+				fmt.Fprintln(os.Stderr, "Aborted.")
+				return nil
+			}
+		}
+	}
+
+	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+		return fmt.Errorf("create config directory: %w", err)
+	}
+
+	f, err := os.CreateTemp(filepath.Dir(target), ".config-*.toml.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp file: %w", err)
+	}
+
+	tmp := f.Name()
+	if _, err := f.Write(config.DefaultTOML()); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+
+		return fmt.Errorf("write config: %w", err)
+	}
+
+	if err := f.Chmod(0o600); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+
+		return fmt.Errorf("set config permissions: %w", err)
+	}
+
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("close temp file: %w", err)
+	}
+
+	if err := os.Rename(tmp, target); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("rename config: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "Wrote default config to %s\n", target)
+
+	return nil
+}
+
 var configResetCmd = &cobra.Command{
 	Use:   "reset",
 	Short: "Write built-in defaults to config file",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return writeDefaultConfig()
+	},
+}
+
+var configInitCmd = &cobra.Command{
+	Use:   "init",
+	Short: "Generate a sample config file with built-in defaults",
+	Long: "Generate a sample config.toml populated with the built-in defaults.\n\n" +
+		"Writes to the resolved config path (or --config). Refuses to overwrite an\n" +
+		"existing file unless --force is given.",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return writeDefaultConfig()
+	},
+}
+
+var configPathCmd = &cobra.Command{
+	Use:   "path",
+	Short: "Print the config file path",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		target := cfgFile
 		if target == "" {
 			target = paths.ConfigFile
 		}
 
-		if _, err := os.Stat(target); err == nil {
-			if !configForceReset {
-				if !term.IsTerminal(int(os.Stdin.Fd())) {
-					return fmt.Errorf("config file exists at %s; use --force to overwrite in non-interactive mode", target)
-				}
-
-				fmt.Fprintf(os.Stderr, "This will overwrite your config at %s. Continue? [y/N] ", target)
-
-				var answer string
-
-				_, _ = fmt.Scanln(&answer)
-
-				if answer != "y" && answer != "Y" {
-					fmt.Fprintln(os.Stderr, "Aborted.")
-					return nil
-				}
-			}
-		}
-
-		if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
-			return fmt.Errorf("create config directory: %w", err)
-		}
-
-		f, err := os.CreateTemp(filepath.Dir(target), ".config-*.toml.tmp")
-		if err != nil {
-			return fmt.Errorf("create temp file: %w", err)
-		}
-
-		tmp := f.Name()
-		if _, err := f.Write(config.DefaultTOML()); err != nil {
-			_ = f.Close()
-			_ = os.Remove(tmp)
-
-			return fmt.Errorf("write config: %w", err)
-		}
-
-		if err := f.Chmod(0o600); err != nil {
-			_ = f.Close()
-			_ = os.Remove(tmp)
-
-			return fmt.Errorf("set config permissions: %w", err)
-		}
-
-		if err := f.Close(); err != nil {
-			_ = os.Remove(tmp)
-			return fmt.Errorf("close temp file: %w", err)
-		}
-
-		if err := os.Rename(tmp, target); err != nil {
-			_ = os.Remove(tmp)
-			return fmt.Errorf("rename config: %w", err)
-		}
-
-		fmt.Fprintf(os.Stderr, "Wrote default config to %s\n", target)
+		fmt.Println(target)
 
 		return nil
 	},
@@ -179,7 +213,10 @@ var configShowCmd = &cobra.Command{
 func registerConfigCmd() {
 	rootCmd.AddCommand(configCmd)
 	configCmd.AddCommand(configResetCmd)
+	configCmd.AddCommand(configInitCmd)
+	configCmd.AddCommand(configPathCmd)
 	configCmd.AddCommand(configDiffCmd)
 	configCmd.AddCommand(configShowCmd)
 	configResetCmd.Flags().BoolVar(&configForceReset, "force", false, "overwrite without confirmation")
+	configInitCmd.Flags().BoolVar(&configForceReset, "force", false, "overwrite without confirmation")
 }
