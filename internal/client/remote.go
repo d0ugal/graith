@@ -281,6 +281,13 @@ func (c *Client) completeRemotePoP(signer ed25519.PrivateKey, spki string) error
 		return err
 	}
 
+	// Refuse to sign an unbound (relayable) proof. In practice the pinned TLS
+	// handshake already failed closed if the pin were empty, but make the
+	// channel-binding invariant explicit here too (mirrors the Swift client).
+	if spki == "" {
+		return fmt.Errorf("cannot complete proof-of-possession without a pinned TLS channel to bind against")
+	}
+
 	sig := base64.StdEncoding.EncodeToString(ed25519.Sign(signer, protocol.PoPSigningInput(ch.Nonce, spki)))
 
 	if err := c.SendControl("auth_proof", protocol.AuthProofMsg{Signature: sig}); err != nil {
