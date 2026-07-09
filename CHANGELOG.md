@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.66.14](https://github.com/d0ugal/graith/compare/v0.66.13...v0.66.14) (2026-07-09)
+
+
+### Features
+
+* **gui:** add session actions + swipe-to-delete ([#899](https://github.com/d0ugal/graith/issues/899)) ([05827f6](https://github.com/d0ugal/graith/commit/05827f6b1cce0b75c7a04c5d6a99f34731ce509e))
+* **gui:** iOS space-drag gesture for arrow keys ([#979](https://github.com/d0ugal/graith/issues/979)) ([b1e1141](https://github.com/d0ugal/graith/commit/b1e11415371bd6de200e3576ce394b3ada834e6f))
+
+
+### Bug Fixes
+
+* **ios:** remove broken Peek and Logs views from session detail ([e314650](https://github.com/d0ugal/graith/commit/e314650fd885d1ce401e19f0318dff3179d53ab8))
+* update golang.org/x/exp digest to 9ea1abe ([e7f11fd](https://github.com/d0ugal/graith/commit/e7f11fde2cc54e2036f3cec64a714f529aedf7c6))
+
 ## [0.66.13](https://github.com/d0ugal/graith/compare/v0.66.12...v0.66.13) (2026-07-09)
 
 
