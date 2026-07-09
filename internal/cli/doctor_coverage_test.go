@@ -25,6 +25,7 @@ func discardOut(t *testing.T) {
 	t.Helper()
 
 	oldOut, oldFix := out, doctorAutofix
+
 	t.Cleanup(func() { out, doctorAutofix = oldOut, oldFix })
 
 	out = output.NewWithWriter(false, io.Discard)
@@ -39,7 +40,7 @@ func discardOut(t *testing.T) {
 func deadPID(t *testing.T) int {
 	t.Helper()
 
-	cmd := exec.Command("true") //nolint:gosec // fixed command; we only need a PID that exits immediately
+	cmd := exec.Command("true")
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start throwaway process: %v", err)
 	}
@@ -87,7 +88,7 @@ func TestDirSizeTree(t *testing.T) {
 	}
 
 	sub := filepath.Join(root, "glen")
-	if err := os.Mkdir(sub, 0o755); err != nil {
+	if err := os.Mkdir(sub, 0o750); err != nil {
 		t.Fatal(err)
 	}
 
@@ -217,6 +218,7 @@ func TestTruncateFileKeepTailMissing(t *testing.T) {
 // selected fails closed — mirroring the daemon's fail-closed rule.
 func TestCheckSandboxBackendNoBackend(t *testing.T) {
 	old := cfg
+
 	t.Cleanup(func() { cfg = old })
 
 	discardOut(t)
@@ -237,6 +239,7 @@ func TestCheckSandboxBackendNoBackend(t *testing.T) {
 // invalid (CheckAvailability returns an error).
 func TestCheckSandboxBackendInvalid(t *testing.T) {
 	old := cfg
+
 	t.Cleanup(func() { cfg = old })
 
 	discardOut(t)
@@ -258,6 +261,7 @@ func TestCheckSandboxBackendInvalid(t *testing.T) {
 // so IsGraithDaemon returns false deterministically.
 func TestCheckStalePIDStale(t *testing.T) {
 	oldPaths := paths
+
 	t.Cleanup(func() { paths = oldPaths })
 
 	discardOut(t)
@@ -282,6 +286,7 @@ func TestCheckStalePIDStale(t *testing.T) {
 // removes the file.
 func TestCheckStalePIDAutofix(t *testing.T) {
 	oldPaths := paths
+
 	t.Cleanup(func() { paths = oldPaths })
 
 	discardOut(t)
@@ -310,6 +315,7 @@ func TestCheckStalePIDAutofix(t *testing.T) {
 // no daemon to be stale about.
 func TestCheckStalePIDNoFile(t *testing.T) {
 	oldPaths := paths
+
 	t.Cleanup(func() { paths = oldPaths })
 
 	discardOut(t)
@@ -328,6 +334,7 @@ func TestCheckStalePIDNoFile(t *testing.T) {
 // ignored (no panic, no check).
 func TestCheckStalePIDGarbage(t *testing.T) {
 	oldPaths := paths
+
 	t.Cleanup(func() { paths = oldPaths })
 
 	discardOut(t)
@@ -351,6 +358,7 @@ func TestCheckStalePIDGarbage(t *testing.T) {
 // passing check when the sandbox is enabled (so the isolation warning is off).
 func TestCheckSessionsClean(t *testing.T) {
 	old := cfg
+
 	t.Cleanup(func() { cfg = old })
 
 	discardOut(t)
@@ -381,6 +389,7 @@ func TestCheckSessionsClean(t *testing.T) {
 // alive is reported as a failure.
 func TestCheckSessionsDeadPID(t *testing.T) {
 	old := cfg
+
 	t.Cleanup(func() { cfg = old })
 
 	discardOut(t)
@@ -409,6 +418,7 @@ func TestCheckSessionsDeadPID(t *testing.T) {
 // auth token. Each should record a fail or warn.
 func TestCheckSessionsIssues(t *testing.T) {
 	old := cfg
+
 	t.Cleanup(func() { cfg = old })
 
 	discardOut(t)
@@ -469,6 +479,7 @@ func TestCheckSessionsIssues(t *testing.T) {
 // fires when the sandbox is off and more than one session is running.
 func TestCheckSessionsSandboxDisabledMultiRunning(t *testing.T) {
 	old := cfg
+
 	t.Cleanup(func() { cfg = old })
 
 	discardOut(t)
@@ -498,6 +509,7 @@ func TestCheckSessionsSandboxDisabledMultiRunning(t *testing.T) {
 // the tmp-dir sub-check runs against an empty tmp dir.
 func TestCheckStorage(t *testing.T) {
 	oldPaths := paths
+
 	t.Cleanup(func() { paths = oldPaths })
 
 	discardOut(t)
@@ -505,7 +517,7 @@ func TestCheckStorage(t *testing.T) {
 	dataDir := t.TempDir()
 
 	logDir := filepath.Join(dataDir, "logs")
-	if err := os.Mkdir(logDir, 0o755); err != nil {
+	if err := os.Mkdir(logDir, 0o750); err != nil {
 		t.Fatal(err)
 	}
 
@@ -546,6 +558,7 @@ func TestCheckStorage(t *testing.T) {
 // surfaced as a warning rather than a plain pass.
 func TestCheckStorageSaturatedScrollback(t *testing.T) {
 	oldPaths := paths
+
 	t.Cleanup(func() { paths = oldPaths })
 
 	discardOut(t)
@@ -572,6 +585,7 @@ func TestCheckStorageSaturatedScrollback(t *testing.T) {
 // TestCheckTmpDirEmpty verifies an absent tmp dir reports as empty.
 func TestCheckTmpDirEmpty(t *testing.T) {
 	oldPaths := paths
+
 	t.Cleanup(func() { paths = oldPaths })
 
 	discardOut(t)
@@ -591,6 +605,7 @@ func TestCheckTmpDirEmpty(t *testing.T) {
 // walks and verifies the repo count and non-empty size are reported.
 func TestCheckTmpDirWithRepos(t *testing.T) {
 	oldPaths := paths
+
 	t.Cleanup(func() { paths = oldPaths })
 
 	discardOut(t)
@@ -599,7 +614,7 @@ func TestCheckTmpDirWithRepos(t *testing.T) {
 
 	// tmp/croft/<hash>/file — one repo checkout with content.
 	hashDir := filepath.Join(tmpDir, "croft", "deadbeef")
-	if err := os.MkdirAll(hashDir, 0o755); err != nil {
+	if err := os.MkdirAll(hashDir, 0o750); err != nil {
 		t.Fatal(err)
 	}
 
@@ -628,6 +643,7 @@ func TestCheckTmpDirWithRepos(t *testing.T) {
 // to tmp/ in v0.39.0) is surfaced as a warning.
 func TestCheckTmpDirLegacyShareDir(t *testing.T) {
 	oldPaths := paths
+
 	t.Cleanup(func() { paths = oldPaths })
 
 	discardOut(t)
@@ -635,13 +651,13 @@ func TestCheckTmpDirLegacyShareDir(t *testing.T) {
 	base := t.TempDir()
 
 	tmpDir := filepath.Join(base, "tmp")
-	if err := os.Mkdir(tmpDir, 0o755); err != nil {
+	if err := os.Mkdir(tmpDir, 0o750); err != nil {
 		t.Fatal(err)
 	}
 
 	// Sibling legacy share/ dir with content.
 	shareDir := filepath.Join(base, "share")
-	if err := os.Mkdir(shareDir, 0o755); err != nil {
+	if err := os.Mkdir(shareDir, 0o750); err != nil {
 		t.Fatal(err)
 	}
 
@@ -665,6 +681,7 @@ func TestCheckTmpDirLegacyShareDir(t *testing.T) {
 // from the live set is reported as orphaned while a live one is skipped.
 func TestFindOrphanedWorktrees(t *testing.T) {
 	oldPaths := paths
+
 	t.Cleanup(func() { paths = oldPaths })
 
 	discardOut(t)
@@ -677,7 +694,7 @@ func TestFindOrphanedWorktrees(t *testing.T) {
 	liveWT := filepath.Join(dataDir, "worktrees", "croft", "deadbeef", "live-sess")
 
 	for _, d := range []string{orphanWT, liveWT} {
-		if err := os.MkdirAll(d, 0o755); err != nil {
+		if err := os.MkdirAll(d, 0o750); err != nil {
 			t.Fatal(err)
 		}
 
@@ -688,7 +705,7 @@ func TestFindOrphanedWorktrees(t *testing.T) {
 
 	// Scratch dirs live at <DataDir>/scratch/<sessionID>.
 	orphanScratch := filepath.Join(dataDir, "scratch", "orphan-scratch")
-	if err := os.MkdirAll(orphanScratch, 0o755); err != nil {
+	if err := os.MkdirAll(orphanScratch, 0o750); err != nil {
 		t.Fatal(err)
 	}
 
@@ -730,6 +747,7 @@ func TestFindOrphanedWorktrees(t *testing.T) {
 // orphaned worktree dir as a warning with a per-path hint.
 func TestCheckStorageOrphanedWorktree(t *testing.T) {
 	oldPaths := paths
+
 	t.Cleanup(func() { paths = oldPaths })
 
 	discardOut(t)
@@ -740,7 +758,7 @@ func TestCheckStorageOrphanedWorktree(t *testing.T) {
 	paths.TmpDir = filepath.Join(dataDir, "tmp")
 
 	orphanWT := filepath.Join(dataDir, "worktrees", "croft", "deadbeef", "gane-sess")
-	if err := os.MkdirAll(orphanWT, 0o755); err != nil {
+	if err := os.MkdirAll(orphanWT, 0o750); err != nil {
 		t.Fatal(err)
 	}
 
@@ -775,6 +793,7 @@ func TestCheckStorageOrphanedWorktree(t *testing.T) {
 // sandbox-disabled and empty-prompt warnings.
 func TestCheckEnvironment(t *testing.T) {
 	oldCfg, oldPaths, oldCfgFile := cfg, paths, cfgFile
+
 	t.Cleanup(func() { cfg, paths, cfgFile = oldCfg, oldPaths, oldCfgFile })
 
 	discardOut(t)
@@ -836,6 +855,7 @@ func TestCheckEnvironment(t *testing.T) {
 // fails here even though the low-level helper test also covers the tail.
 func TestCheckEnvironmentLargeDaemonLog(t *testing.T) {
 	oldCfg, oldPaths, oldCfgFile := cfg, paths, cfgFile
+
 	t.Cleanup(func() { cfg, paths, cfgFile = oldCfg, oldPaths, oldCfgFile })
 
 	discardOut(t)
@@ -852,6 +872,7 @@ func TestCheckEnvironmentLargeDaemonLog(t *testing.T) {
 	// 11 MB total: 10 MB 'H' head + exactly 1 MB 'T' tail. Over the 10 MB warn
 	// threshold; the kept tail must be the pure 'T' block.
 	logPath := filepath.Join(dir, "daemon.log")
+
 	content := append(bytes.Repeat([]byte("H"), 10*oneMB), bytes.Repeat([]byte("T"), oneMB)...)
 
 	if err := os.WriteFile(logPath, content, 0o600); err != nil {
@@ -891,9 +912,11 @@ func TestCheckEnvironmentLargeDaemonLog(t *testing.T) {
 // writer (blank line + name) without recording a check.
 func TestSectionEmitsHeader(t *testing.T) {
 	old := out
+
 	t.Cleanup(func() { out = old })
 
 	var buf bytes.Buffer
+
 	out = output.NewWithWriter(false, &buf)
 
 	dc := newDoctorContext()
