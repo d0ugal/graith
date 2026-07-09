@@ -31,6 +31,14 @@ final class KeyboardAccessoryView: UIView {
     private var altButton: UIButton!
     private var stack: UIStackView!
 
+    // Space-key drag → arrow keys (issue #979). The tracker is the pure state
+    // machine; the recognizer feeds it translations and it decides which arrows
+    // (if any) to emit. `spaceDragStart` anchors the gesture so translations are
+    // measured from the touch-down point regardless of where on the key it began.
+    private var spaceTracker = SpaceDragTracker()
+    private var spaceDragStart: CGPoint = .zero
+    private let arrowHaptics = UIImpactFeedbackGenerator(style: .light)
+
     init() {
         super.init(frame: CGRect(x: 0, y: 0, width: 0, height: 44))
         autoresizingMask = .flexibleWidth
@@ -50,6 +58,7 @@ final class KeyboardAccessoryView: UIView {
             ctrlButton,
             altButton,
             keyButton(title: "tab", key: .tab),
+            spaceKey(),
             keyButton(title: "↑", key: .arrowUp),
             keyButton(title: "↓", key: .arrowDown),
             keyButton(title: "←", key: .arrowLeft),
@@ -104,6 +113,61 @@ final class KeyboardAccessoryView: UIView {
             self.stickyModifiers = []
         }, for: .touchUpInside)
         return button
+    }
+
+    /// A wider "space" key that doubles as an arrow-key trackpad (issue #979):
+    /// a plain tap types a space; holding and dragging emits arrow keys in the
+    /// drag direction (one per threshold of travel) with light haptic feedback,
+    /// and suppresses the space so a drag never also types a character.
+    ///
+    /// A single `UILongPressGestureRecognizer` with `minimumPressDuration = 0`
+    /// handles both: it fires on touch-down (`.began`), reports finger movement
+    /// (`.changed`), and its `.ended` tells us whether to send a space. Because
+    /// the recognizer owns the touch we don't also wire `.touchUpInside`, so tap
+    /// and drag can't both fire.
+    private func spaceKey() -> UIView {
+        let key = makeButton(title: "␣ space")
+        key.contentEdgeInsets = UIEdgeInsets(top: 6, left: 28, bottom: 6, right: 28)
+        key.accessibilityLabel = "Space (drag for arrow keys)"
+
+        let drag = UILongPressGestureRecognizer(target: self, action: #selector(handleSpaceDrag))
+        drag.minimumPressDuration = 0
+        key.addGestureRecognizer(drag)
+        return key
+    }
+
+    @objc private func handleSpaceDrag(_ gesture: UILongPressGestureRecognizer) {
+        guard let view = gesture.view else { return }
+        let point = gesture.location(in: view)
+        switch gesture.state {
+        case .began:
+            spaceDragStart = point
+            spaceTracker.begin()
+            arrowHaptics.prepare()
+            view.backgroundColor = .systemBlue
+        case .changed:
+            let translation = CGPoint(x: point.x - spaceDragStart.x,
+                                      y: point.y - spaceDragStart.y)
+            for key in spaceTracker.update(translation: translation) {
+                delegate?.accessory(self, didPress: key, modifiers: [])
+                arrowHaptics.impactOccurred()
+                arrowHaptics.prepare()
+            }
+        case .ended:
+            view.backgroundColor = .tertiarySystemBackground
+            // A drag that moved an arrow is navigation only — no space. A plain
+            // tap (no arrow emitted) types a space, consuming any sticky modifier
+            // like the other keys do.
+            if !spaceTracker.didEmit {
+                let mods = stickyModifiers
+                delegate?.accessory(self, didPress: .character(" "), modifiers: mods)
+                stickyModifiers = []
+            }
+        case .cancelled, .failed:
+            view.backgroundColor = .tertiarySystemBackground
+        default:
+            break
+        }
     }
 
     private func stickyButton(title: String, modifier: TerminalModifiers) -> UIButton {
