@@ -282,7 +282,7 @@ jobs:
         # agent-safehouse, which installs the `safehouse` binary.
         # Upstream: https://github.com/eugene1g/agent-safehouse
         run: |
-          set -uo pipefail
+          set -euo pipefail
           brew install eugene1g/safehouse/agent-safehouse
           {
             echo "## safehouse install (macOS)"
@@ -293,6 +293,14 @@ jobs:
               echo "brew install succeeded but no \`safehouse\` on PATH."
             fi
           } | tee -a "$GITHUB_STEP_SUMMARY"
+          # Fail closed: the enforcement suite is the whole point of this job.
+          # If safehouse isn't actually on PATH, the tagged tests would t.Skip()
+          # and the job would go green enforcing nothing — the exact false-green
+          # this suite exists to prevent.
+          command -v safehouse >/dev/null 2>&1 || {
+            echo "::error title=safehouse missing::brew install did not put 'safehouse' on PATH"
+            exit 1
+          }
 
       - name: Check safehouse availability
         run: |
@@ -303,7 +311,9 @@ jobs:
             safehouse --version 2>&1 || echo "<safehouse --version failed>"
             echo "Seatbelt (macOS sandbox-exec) is always present on macOS runners."
           else
-            echo "::warning title=safehouse unavailable::No 'safehouse' binary on PATH; enforcement tests will skip."
+            # Fatal, not a warning: skipping the enforcement suite is a false green.
+            echo "::error title=safehouse unavailable::No 'safehouse' binary on PATH; enforcement tests would silently skip."
+            exit 1
           fi
 
       - name: graith tagged enforcement tests (safehouse)
@@ -315,11 +325,27 @@ jobs:
         run: |
           set -uo pipefail
           tag="safehouse_enforce"
-          if grep -rqs -- "//go:build ${tag}" internal/sandbox/ 2>/dev/null; then
-            echo "Found ${tag} build-tagged tests — running enforcement suite."
-            go test -tags "${tag}" ./internal/sandbox/... -v
-          else
+          if ! grep -rqs -- "//go:build ${tag}" internal/sandbox/ 2>/dev/null; then
             echo "::error title=Missing enforcement tests::No '${tag}' build-tagged tests found in internal/sandbox/."
             echo "FAILED: graith '${tag}' enforcement tests missing." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          echo "Found ${tag} build-tagged tests — running enforcement suite."
+          # Capture output so we can fail the step if any enforcement test SKIPs.
+          # A t.Skip() (missing safehouse/python3, or a non-enforcing host) would
+          # otherwise exit 0 and go green while proving nothing at the kernel
+          # level — the precise false-green this suite guards against.
+          set +e
+          go test -tags "${tag}" ./internal/sandbox/... -v 2>&1 | tee /tmp/enforce.out
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ "$status" -ne 0 ]; then
+            echo "::error title=Enforcement tests failed::safehouse enforcement suite failed."
+            exit "$status"
+          fi
+          if grep -q -- "--- SKIP" /tmp/enforce.out; then
+            echo "::error title=Enforcement tests skipped::A safehouse enforcement test was SKIPPED; it must run on macOS CI (green-while-skipped is a false pass)."
+            grep -- "--- SKIP" /tmp/enforce.out || true
             exit 1
           fi
