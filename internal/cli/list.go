@@ -65,7 +65,7 @@ var listCmd = &cobra.Command{
 		if listRepo != "" {
 			filtered := list.Sessions[:0]
 			for _, s := range list.Sessions {
-				if s.RepoPath == listRepo || strings.HasSuffix(s.RepoPath, "/"+listRepo) || s.RepoName == listRepo {
+				if matchesRepo(s, listRepo) {
 					filtered = append(filtered, s)
 				}
 			}
