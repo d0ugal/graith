@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
 )
 
@@ -269,24 +270,68 @@ func TestApprovalSubscriberReceivesAndUnsubscribes(t *testing.T) {
 	}
 }
 
-func TestRepoListReturnsSessionRepos(t *testing.T) {
+func TestAvailableReposReturnsSessionRepos(t *testing.T) {
 	sm := newPairingSM(t)
 	sm.state.Sessions["braw1"] = &SessionState{ID: "braw1", RepoPath: "/glen/croft", RepoName: "croft"}
 	sm.state.Sessions["braw2"] = &SessionState{ID: "braw2", RepoPath: "/glen/croft", RepoName: "croft"} // dup path
 	sm.state.Sessions["braw3"] = &SessionState{ID: "braw3", RepoPath: "/brae/bothy", RepoName: "bothy"}
 
-	repos := sm.recentRepos()
+	repos := sm.availableRepos()
 	if len(repos) != 2 {
-		t.Fatalf("recentRepos returned %d, want 2 distinct", len(repos))
+		t.Fatalf("availableRepos returned %d, want 2 distinct", len(repos))
 	}
 
 	paths := map[string]bool{}
 	for _, r := range repos {
 		paths[r.Path] = true
+		if !r.Recent {
+			t.Errorf("session repo %q should be marked recent", r.Path)
+		}
 	}
 
 	if !paths["/glen/croft"] || !paths["/brae/bothy"] {
 		t.Errorf("unexpected repo set: %+v", repos)
+	}
+}
+
+// Regression for #896: a remote client's create picker is populated from
+// repo_list, which must include the configured repos — not only repos that
+// already have a live session. Before the fix a daemon with no session in a
+// configured repo offered an empty/incomplete picker, so the user could not
+// pick a repository to create in at all.
+func TestAvailableReposIncludesConfiguredRepos(t *testing.T) {
+	sm := newPairingSM(t)
+	// One live session in /glen/croft (recent), plus two configured repos, one
+	// of which duplicates the session repo and must not appear twice.
+	sm.state.Sessions["braw1"] = &SessionState{ID: "braw1", RepoPath: "/glen/croft", RepoName: "croft"}
+	sm.cfg.AllowedRepoPaths = []string{"/brae/bothy"}
+	sm.cfg.Repos = []config.RepoConfig{{Path: "/wynd/clachan"}, {Path: "/glen/croft"}}
+
+	repos := sm.availableRepos()
+
+	byPath := map[string]protocol.RepoEntry{}
+	for _, r := range repos {
+		if _, dup := byPath[r.Path]; dup {
+			t.Errorf("duplicate repo entry for %q", r.Path)
+		}
+
+		byPath[r.Path] = r
+	}
+
+	for _, want := range []string{"/glen/croft", "/brae/bothy", "/wynd/clachan"} {
+		if _, ok := byPath[want]; !ok {
+			t.Errorf("expected configured/session repo %q in picker, got %+v", want, repos)
+		}
+	}
+
+	// The session repo keeps its recent flag and session-derived name; the
+	// configured-only repos are not recent and take their name from the path.
+	if r := byPath["/glen/croft"]; !r.Recent || r.Name != "croft" {
+		t.Errorf("session repo /glen/croft: got recent=%v name=%q, want recent=true name=croft", r.Recent, r.Name)
+	}
+
+	if r := byPath["/brae/bothy"]; r.Recent || r.Name != "bothy" {
+		t.Errorf("configured repo /brae/bothy: got recent=%v name=%q, want recent=false name=bothy", r.Recent, r.Name)
 	}
 }
 

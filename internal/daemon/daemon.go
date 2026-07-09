@@ -342,9 +342,16 @@ func (sm *SessionManager) saveState() error {
 }
 
 // recentRepos returns the distinct repositories the daemon currently knows
-// about (from live sessions), so a remote client with no local cwd can offer a
-// repo picker for session creation (design §C.4).
-func (sm *SessionManager) recentRepos() []protocol.RepoEntry {
+// about, so a remote client with no local cwd can offer a repo picker for
+// session creation (design §C.4). The picker is populated from two sources:
+// the repos of live sessions (marked recent) and the configured repos
+// (allowed_repo_paths + [[repos]]). Session repos are added first so they win
+// on duplicate paths and keep their recent flag and session-derived name.
+//
+// Including configured repos matters: without them a daemon with no sessions
+// (or no session in a given repo) offers an empty or incomplete picker, so a
+// remote user cannot pick a repository to create in at all (issue #896).
+func (sm *SessionManager) availableRepos() []protocol.RepoEntry {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 
@@ -352,13 +359,31 @@ func (sm *SessionManager) recentRepos() []protocol.RepoEntry {
 
 	var repos []protocol.RepoEntry
 
-	for _, s := range sm.state.Sessions {
-		if s.RepoPath == "" || seen[s.RepoPath] {
-			continue
+	// Dedup on the resolved path so a symlinked config path and a session's
+	// already-resolved RepoPath for the same repo don't both appear, while the
+	// entry keeps the original path (which create accepts either way).
+	add := func(path, name string, recent bool) {
+		if path == "" {
+			return
 		}
 
-		seen[s.RepoPath] = true
-		repos = append(repos, protocol.RepoEntry{Path: s.RepoPath, Name: s.RepoName, Recent: true})
+		key := config.ResolvePath(path)
+		if seen[key] {
+			return
+		}
+
+		seen[key] = true
+		repos = append(repos, protocol.RepoEntry{Path: path, Name: name, Recent: recent})
+	}
+
+	for _, s := range sm.state.Sessions {
+		add(s.RepoPath, s.RepoName, true)
+	}
+
+	if sm.cfg != nil {
+		for _, p := range sm.cfg.AvailableRepoPaths() {
+			add(p, filepath.Base(p), false)
+		}
 	}
 
 	return repos
