@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"net"
@@ -8,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/d0ugal/graith/internal/approvals"
@@ -92,13 +94,20 @@ var doctorCmd = &cobra.Command{
 
 		out.Printf("Checking graith health...\n")
 
-		daemonVersion := dc.checkVersion(report)
+		// Probe the daemon once, over the control protocol, and reuse the result
+		// for both the Version and Daemon sections. Doing it once means a
+		// sandboxed session that can't reach the socket is diagnosed as
+		// "cannot verify" in a single place rather than producing a cascade of
+		// false failures across sections (issue #945).
+		probe := dc.probeDaemon()
+		report.DaemonVersion = probe.daemonVersion
+
+		dc.checkVersion(probe)
 		dc.checkEnvironment()
 
-		diag := dc.checkDaemon(daemonVersion)
+		diag := dc.checkDaemon(probe)
 		if diag != nil {
 			report.Diagnostics = diag
-			report.DaemonVersion = daemonVersion
 
 			dc.checkSessions(diag)
 			dc.checkStorage(diag)
@@ -133,50 +142,167 @@ var doctorCmd = &cobra.Command{
 	},
 }
 
-func (dc *doctorContext) checkVersion(report *doctorReport) string {
+// daemonReachability classifies the outcome of trying to reach the daemon over
+// its Unix socket. The distinction matters most from inside a sandboxed agent
+// session: a sandbox (e.g. macOS Seatbelt via safehouse) can deny the socket
+// connect() with EPERM, which must NOT be reported as "daemon down" — the
+// daemon is almost certainly alive, we just can't see it from in here.
+type daemonReachability int
+
+const (
+	// daemonReachOK: connected and handshake succeeded.
+	daemonReachOK daemonReachability = iota
+	// daemonReachNoSocket: no socket file — the daemon isn't running (it will
+	// auto-start on the next command).
+	daemonReachNoSocket
+	// daemonReachSandboxed: connect() was denied (EPERM/EACCES), which from an
+	// agent session means the sandbox blocked it, not that the daemon is down.
+	daemonReachSandboxed
+	// daemonReachDown: connect refused / handshake failed — genuinely unreachable.
+	daemonReachDown
+)
+
+// daemonProbe is the single, shared result of contacting the daemon. Both the
+// Version and Daemon sections read from it so a sandbox denial is diagnosed
+// consistently instead of surfacing as several unrelated failures.
+type daemonProbe struct {
+	reach           daemonReachability
+	dialErr         error
+	daemonVersion   string
+	diag            *protocol.DiagnosticsMsg
+	diagUnsupported bool // handshake ok but the daemon didn't return diagnostics
+}
+
+// classifyDialErr maps a socket dial error onto a reachability class. EPERM and
+// EACCES mean a sandbox (or file permissions) blocked the connect — the daemon
+// itself is not implicated. ENOENT means the socket file is gone (not running).
+// Everything else (ECONNREFUSED, timeouts) is a genuine "can't reach it".
+func classifyDialErr(err error) daemonReachability {
+	switch {
+	case errors.Is(err, syscall.EPERM), errors.Is(err, syscall.EACCES):
+		return daemonReachSandboxed
+	case errors.Is(err, syscall.ENOENT), errors.Is(err, os.ErrNotExist):
+		return daemonReachNoSocket
+	default:
+		return daemonReachDown
+	}
+}
+
+// probeDaemon opens one connection to the daemon, completes the handshake, and
+// (if supported) requests diagnostics — all over the existing control protocol
+// so the unsandboxed daemon does the introspection the sandboxed client can't.
+// It never fails a check itself; it only gathers the facts the sections report.
+func (dc *doctorContext) probeDaemon() daemonProbe {
+	// Stat can itself be blocked under a sandbox; only trust an explicit
+	// "does not exist". Any other stat error falls through to the dial, which
+	// classifies the failure authoritatively.
+	if _, err := os.Stat(paths.SocketPath); err != nil && errors.Is(err, os.ErrNotExist) {
+		return daemonProbe{reach: daemonReachNoSocket}
+	}
+
+	conn, err := net.DialTimeout("unix", paths.SocketPath, 2*time.Second)
+	if err != nil {
+		return daemonProbe{reach: classifyDialErr(err), dialErr: err}
+	}
+	defer func() { _ = conn.Close() }()
+
+	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+
+	reader := protocol.NewFrameReader(conn)
+	writer := protocol.NewFrameWriter(conn)
+
+	hs := client.BuildHandshake(paths, 0, 0, "")
+	hs.ClientID = "doctor"
+
+	hsData, _ := protocol.EncodeControl("handshake", hs)
+	if err := writer.WriteFrame(protocol.ChannelControl, hsData); err != nil {
+		return daemonProbe{reach: daemonReachDown, dialErr: err}
+	}
+
+	frame, err := reader.ReadFrame()
+	if err != nil || frame.Channel != protocol.ChannelControl {
+		return daemonProbe{reach: daemonReachDown, dialErr: err}
+	}
+
+	probe := daemonProbe{reach: daemonReachOK}
+
+	if env, err := protocol.DecodeControl(frame.Payload); err == nil {
+		var hsOk protocol.HandshakeOkMsg
+
+		_ = protocol.DecodePayload(env, &hsOk)
+		probe.daemonVersion = hsOk.DaemonVersion
+	}
+
+	// Ask the daemon to gather diagnostics on the same connection. An older
+	// daemon that doesn't understand the message replies with an error (or
+	// nothing) — that's a "diagnostics unsupported", not a connectivity fault.
+	diagData, _ := protocol.EncodeControl("diagnostics", struct{}{})
+	if err := writer.WriteFrame(protocol.ChannelControl, diagData); err != nil {
+		return probe
+	}
+
+	frame, err = reader.ReadFrame()
+	if err != nil || frame.Channel != protocol.ChannelControl {
+		probe.diagUnsupported = true
+		return probe
+	}
+
+	resp, err := protocol.DecodeControl(frame.Payload)
+	if err != nil || resp.Type == "error" {
+		probe.diagUnsupported = true
+		return probe
+	}
+
+	var diag protocol.DiagnosticsMsg
+	if err := protocol.DecodePayload(resp, &diag); err != nil {
+		probe.diagUnsupported = true
+		return probe
+	}
+
+	// The daemon reports its own version authoritatively in diagnostics; prefer
+	// it over the handshake value when present.
+	if diag.DaemonVersion != "" {
+		probe.daemonVersion = diag.DaemonVersion
+	}
+
+	probe.diag = &diag
+
+	return probe
+}
+
+func (dc *doctorContext) checkVersion(probe daemonProbe) {
 	dc.section("Version")
 	dc.passf("version", "CLI version: %s (%s)", version.Version, version.CommitSHA)
 
-	var daemonVersion string
-
-	if _, err := os.Stat(paths.SocketPath); err == nil {
-		conn, err := net.DialTimeout("unix", paths.SocketPath, 500*time.Millisecond)
-		if err != nil {
-			dc.failf("version", "Socket exists but daemon not responding: %s", paths.SocketPath)
-
-			if doctorAutofix {
-				_ = os.Remove(paths.SocketPath)
-
-				dc.hintf("Removed stale socket")
-			}
-		} else {
-			reader := protocol.NewFrameReader(conn)
-			writer := protocol.NewFrameWriter(conn)
-
-			hs := client.BuildHandshake(paths, 0, 0, "")
-			hs.ClientID = "doctor"
-			hsData, _ := protocol.EncodeControl("handshake", hs)
-			_ = writer.WriteFrame(protocol.ChannelControl, hsData)
-
-			frame, err := reader.ReadFrame()
-			if err == nil && frame.Channel == protocol.ChannelControl {
-				env, _ := protocol.DecodeControl(frame.Payload)
-
-				var hsOk protocol.HandshakeOkMsg
-
-				_ = protocol.DecodePayload(env, &hsOk)
-				daemonVersion = hsOk.DaemonVersion
-
-				if daemonVersion != "" && daemonVersion != version.Version {
-					dc.failf("version", "Version mismatch: CLI=%s, daemon=%s", version.Version, daemonVersion)
-					dc.hintf("Run: gr daemon restart")
-				} else if daemonVersion != "" {
-					dc.passf("version", "Daemon version: %s", daemonVersion)
-				}
-			}
-
-			_ = conn.Close()
+	switch probe.reach {
+	case daemonReachOK:
+		switch {
+		case probe.daemonVersion == "":
+			// Reachable but version unknown (very old daemon) — nothing to compare.
+		case probe.daemonVersion != version.Version:
+			dc.failf("version", "Version mismatch: CLI=%s, daemon=%s", version.Version, probe.daemonVersion)
+			dc.hintf("Run: gr daemon restart")
+		default:
+			dc.passf("version", "Daemon version: %s", probe.daemonVersion)
 		}
+	case daemonReachSandboxed:
+		// A sandboxed session can't read the daemon's version, but it's running.
+		// Report honestly instead of the old false "daemon not responding".
+		dc.warnf("version", "Cannot verify daemon version from inside a sandboxed session")
+		dc.hintf("Run 'gr doctor' from a non-sandboxed shell to check for a version mismatch")
+	case daemonReachDown:
+		// Socket present but nothing answering — a stale socket from a crashed
+		// daemon. The Daemon section reports the connectivity failure; here we
+		// only offer to clear the stale socket.
+		dc.failf("version", "Socket exists but daemon not responding: %s", paths.SocketPath)
+
+		if doctorAutofix {
+			_ = os.Remove(paths.SocketPath)
+
+			dc.hintf("Removed stale socket")
+		}
+	case daemonReachNoSocket:
+		// Daemon not running; the Daemon section already says so. No version line.
 	}
 
 	updateResult := version.CheckForUpdate(paths.DataDir)
@@ -186,8 +312,6 @@ func (dc *doctorContext) checkVersion(report *doctorReport) string {
 	} else if version.Version != "dev" {
 		dc.passf("version", "Up to date (%s)", version.Version)
 	}
-
-	return daemonVersion
 }
 
 func (dc *doctorContext) checkEnvironment() {
@@ -517,86 +641,50 @@ func (dc *doctorContext) checkSandboxPaths() {
 	}
 }
 
-func (dc *doctorContext) checkDaemon(daemonVersion string) *protocol.DiagnosticsMsg {
+// checkDaemon reports on daemon health from the shared probe. The probe already
+// did all the network I/O over the control protocol, so the unsandboxed daemon
+// performed the socket/PID/version introspection that a sandboxed client can't.
+func (dc *doctorContext) checkDaemon(probe daemonProbe) *protocol.DiagnosticsMsg {
 	dc.section("Daemon")
 
-	if _, err := os.Stat(paths.SocketPath); err != nil {
+	switch probe.reach {
+	case daemonReachNoSocket:
 		dc.warnf("daemon", "Not running (will auto-start on first command)")
 		return nil
-	}
 
-	// Use a raw dial with deadline instead of client.Connect to avoid
-	// triggering auto-upgrade/restart as a side effect of diagnostics.
-	conn, err := net.DialTimeout("unix", paths.SocketPath, 2*time.Second)
-	if err != nil {
-		dc.failf("daemon", "Cannot connect to daemon: %v", err)
+	case daemonReachSandboxed:
+		// The daemon is unreachable only because the sandbox denied the socket
+		// connect(); it's still running. Don't fail — and crucially don't run
+		// the client-side stale-PID probe, which shells out to `ps` (also
+		// blocked here) and would falsely report the live daemon as stale.
+		dc.warnf("daemon", "Cannot verify daemon health from inside a sandboxed session (socket connect denied: %v)", probe.dialErr)
+		dc.hintf("The daemon is running but unreachable from the sandbox; run 'gr doctor' from a non-sandboxed shell to inspect it")
+
+		return nil
+
+	case daemonReachDown:
+		if probe.dialErr != nil {
+			dc.failf("daemon", "Cannot connect to daemon: %v", probe.dialErr)
+		} else {
+			dc.failf("daemon", "Daemon not responding")
+		}
+
 		dc.checkStalePID()
 
 		return nil
 	}
-	defer func() { _ = conn.Close() }()
 
-	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
-
-	reader := protocol.NewFrameReader(conn)
-	writer := protocol.NewFrameWriter(conn)
-
-	hs := client.BuildHandshake(paths, 0, 0, "")
-	hs.ClientID = "doctor-diag"
-
-	hsData, _ := protocol.EncodeControl("handshake", hs)
-	if err := writer.WriteFrame(protocol.ChannelControl, hsData); err != nil {
-		dc.failf("daemon", "Failed to send handshake: %v", err)
-		return nil
-	}
-
-	frame, err := reader.ReadFrame()
-	if err != nil || frame.Channel != protocol.ChannelControl {
-		dc.failf("daemon", "Failed to read handshake response")
-		return nil
-	}
-
-	diagData, _ := protocol.EncodeControl("diagnostics", struct{}{})
-	if err := writer.WriteFrame(protocol.ChannelControl, diagData); err != nil {
-		dc.failf("daemon", "Failed to request diagnostics: %v", err)
-		return nil
-	}
-
-	frame, err = reader.ReadFrame()
-	if err != nil {
+	// daemonReachOK
+	if probe.diag == nil {
 		dc.warnf("daemon", "Daemon does not support diagnostics (upgrade daemon)")
 		dc.hintf("Run: gr daemon restart")
 
 		return nil
 	}
 
-	if frame.Channel != protocol.ChannelControl {
-		dc.failf("daemon", "Unexpected response from daemon")
-		return nil
-	}
+	dc.passf("daemon", "Running (PID %d, uptime %s)", probe.diag.DaemonPID, probe.diag.DaemonUptime)
 
-	resp, err := protocol.DecodeControl(frame.Payload)
-	if err != nil {
-		dc.failf("daemon", "Failed to decode response: %v", err)
-		return nil
-	}
-
-	if resp.Type == "error" {
-		dc.warnf("daemon", "Daemon does not support diagnostics (upgrade daemon)")
-		dc.hintf("Run: gr daemon restart")
-
-		return nil
-	}
-
-	var diag protocol.DiagnosticsMsg
-	if err := protocol.DecodePayload(resp, &diag); err != nil {
-		dc.failf("daemon", "Failed to decode diagnostics: %v", err)
-		return nil
-	}
-
-	dc.passf("daemon", "Running (PID %d, uptime %s)", diag.DaemonPID, diag.DaemonUptime)
-
-	return &diag
+	return probe.diag
 }
 
 func (dc *doctorContext) checkStalePID() {

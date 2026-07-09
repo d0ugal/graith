@@ -1381,7 +1381,9 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				sendControl("status_reported", struct{}{})
 
 			case "diagnostics":
-				sendControl("diagnostics", sm.Diagnostics())
+				diag := sm.Diagnostics()
+				diag.DaemonVersion = version.Version
+				sendControl("diagnostics", diag)
 
 			case "mcp_connect":
 				var mc protocol.MCPConnectMsg

@@ -454,12 +454,13 @@ type StatusRequestMsg struct {
 // Diagnostics types (daemon -> client, in response to "diagnostics" message)
 
 type DiagnosticsMsg struct {
-	DaemonPID    int                  `json:"daemon_pid"`
-	DaemonUptime string               `json:"daemon_uptime"`
-	Fleet        FleetSummary         `json:"fleet"`
-	Sessions     []SessionDiagnostic  `json:"sessions"`
-	Scrollback   ScrollbackDiagnostic `json:"scrollback"`
-	Messages     MessagesDiagnostic   `json:"messages"`
+	DaemonPID     int                  `json:"daemon_pid"`
+	DaemonVersion string               `json:"daemon_version,omitempty"`
+	DaemonUptime  string               `json:"daemon_uptime"`
+	Fleet         FleetSummary         `json:"fleet"`
+	Sessions      []SessionDiagnostic  `json:"sessions"`
+	Scrollback    ScrollbackDiagnostic `json:"scrollback"`
+	Messages      MessagesDiagnostic   `json:"messages"`
 }
 
 type SessionDiagnostic struct {
