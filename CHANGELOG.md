@@ -1,5 +1,60 @@
 # Changelog
 
+## [0.66.7](https://github.com/d0ugal/graith/compare/v0.66.6...v0.66.7) (2026-07-09)
+
+
+### Features
+
+* **gui:** paste into iOS terminal via long-press menu ([02844c5](https://github.com/d0ugal/graith/commit/02844c5d5db7e83b4669454aec81f029c096bc5e)), closes [#894](https://github.com/d0ugal/graith/issues/894)
+* **gui:** wire remote/multi-host pairing into the macOS app ([#885](https://github.com/d0ugal/graith/issues/885)) ([192064f](https://github.com/d0ugal/graith/commit/192064fc1006064413ecb740fa1d2ea1d96da2cb))
+* **prwatch:** notify separately on PR conversation comments ([bfd0a9f](https://github.com/d0ugal/graith/commit/bfd0a9fba9447c147d1314b961f42efd400d7822))
+
+
+### Bug Fixes
+
+* **client:** mark automated notifications as system in message overlay ([691f10b](https://github.com/d0ugal/graith/commit/691f10be776a4fc3673aaec80e6f41d545bf475f))
+* **daemon:** mark automated notifications as a distinct system source ([a50ee28](https://github.com/d0ugal/graith/commit/a50ee289073ed26959c459ffba785b8f9f53a580)), closes [#887](https://github.com/d0ugal/graith/issues/887)
+* don't block git-pull on feature-branch worktree sessions ([b4fdd97](https://github.com/d0ugal/graith/commit/b4fdd97091915d029ae25f1b3e6bda78447c92af))
+* **gui:** address review findings for [#885](https://github.com/d0ugal/graith/issues/885) pairing/multi-host ([15c563f](https://github.com/d0ugal/graith/commit/15c563f9169d8914d28640a53cb8fe8b15c487ae))
+* **prwatch:** preserve conversation comments for legacy configs ([589b556](https://github.com/d0ugal/graith/commit/589b556c3631c8c760bee9c3330d5c0b40e383ef))
+* **remote:** bind device proof-of-possession to the TLS channel ([cf8ec57](https://github.com/d0ugal/graith/commit/cf8ec57b026b4defe381102247bb78fea6b6927d)), closes [#886](https://github.com/d0ugal/graith/issues/886)
+* **remote:** make empty-SPKI guard explicit in Go PoP client ([4f0b511](https://github.com/d0ugal/graith/commit/4f0b511cdbc44a268eadfd41e9ede5e7bf95b90e))
+* update module github.com/godbus/dbus/v5 to v5.2.2 ([9d4731e](https://github.com/d0ugal/graith/commit/9d4731e715ea6228f7eb6a60119e5bea98ec6266))
+* update module github.com/jsimonetti/rtnetlink to v2 ([0102f7e](https://github.com/d0ugal/graith/commit/0102f7e0f138df13f151ae591ff17d81df85f4bb))
+* update module github.com/klauspost/compress to v1.19.0 ([99e8e3b](https://github.com/d0ugal/graith/commit/99e8e3b7fbf10f17e7db0ec31e64b7cf5909984c))
+* update module github.com/mdlayher/netlink to v1.11.2 ([47232d7](https://github.com/d0ugal/graith/commit/47232d7838597a52a6c3ebff5db1e391a6ca8f6e))
+* update module github.com/mdlayher/socket to v0.6.1 ([fe91658](https://github.com/d0ugal/graith/commit/fe9165883d6ab1b37e544aa4fc80a29669aaff4b))
+* update module github.com/pires/go-proxyproto to v0.14.0 ([a66ce07](https://github.com/d0ugal/graith/commit/a66ce075f69cab0ff1fe91f54841fe7814d1cdba))
+* update module github.com/safchain/ethtool to v0.7.0 ([778f5b0](https://github.com/d0ugal/graith/commit/778f5b0d2ad46d8124f634051cf978c3169e0498))
+* update module golang.org/x/sync to v0.22.0 ([fd5a6fb](https://github.com/d0ugal/graith/commit/fd5a6fbc4f8419ed94104b3a14cd7d8bf632793d))
+* update module golang.org/x/term to v0.45.0 ([fbb2fb6](https://github.com/d0ugal/graith/commit/fbb2fb6993a40e30b755eebc907bd89384c2b404))
+* update module golang.org/x/time to v0.15.0 ([914ba1d](https://github.com/d0ugal/graith/commit/914ba1d068d08b9ac634e0ed5059a01cc3562b60))
+* update module golang.zx2c4.com/wireguard/windows to v1 ([b537646](https://github.com/d0ugal/graith/commit/b5376462976af87dd55c2b2e9e40233d1605ffed))
+
+
+### Documentation
+
+* **config:** document every key in default_config.toml ([d04fce6](https://github.com/d0ugal/graith/commit/d04fce62036a5a03b3d9f0226291e30c8de39acc))
+
+
+### Tests
+
+* cover includes and in-place flag in git-pull guard ([e7b0cb8](https://github.com/d0ugal/graith/commit/e7b0cb8d8a3d94bd88ba62f38e52700952eb64a6))
+* **prwatch:** satisfy dupl and wsl_v5 linters in new tests ([2727f6c](https://github.com/d0ugal/graith/commit/2727f6cf903165fff7148fa2df3b14474c088ab0))
+
+
+### Continuous Integration
+
+* **coverage:** address review findings ([1929afc](https://github.com/d0ugal/graith/commit/1929afc2ef9ca8e9dd4f2d2f1313a3342f47fdfd))
+* **coverage:** detect gui changes via the PR files API ([2244f6f](https://github.com/d0ugal/graith/commit/2244f6fd9ff7b43cd49e33a052819b63f81d449b))
+* **coverage:** fix sticky-comment lookup for the runner's gh ([30443b8](https://github.com/d0ugal/graith/commit/30443b8f73f5a7c70dd982b75920f5c025a0c291))
+* **coverage:** self-hosted Go + Swift coverage PR comment ([f247e0c](https://github.com/d0ugal/graith/commit/f247e0c33ad2b981b28b26b51f0d9ef2f5289e34))
+
+
+### Dependencies
+
+* disable renovate gvisor digest updates ([a383437](https://github.com/d0ugal/graith/commit/a38343787b63d6c76113638824a2cb27c9307c89)), closes [#875](https://github.com/d0ugal/graith/issues/875)
+
 ## [0.66.6](https://github.com/d0ugal/graith/compare/v0.66.5...v0.66.6) (2026-07-09)
 
 
