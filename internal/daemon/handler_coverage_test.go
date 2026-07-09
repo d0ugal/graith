@@ -19,12 +19,31 @@ import (
 // message and asserts the reply type, so it protects the real success and
 // error paths rather than padding line counts.
 
-// --- unsupported / fallthrough -------------------------------------------
+// sendWrongShapePayload sends a control message whose payload is syntactically
+// valid JSON but cannot decode into the handler's target struct (a bare JSON
+// string). This forces the *per-case* DecodePayload branch (e.g. "invalid star
+// message") to fire, rather than the global malformed-frame gate that an
+// unparseable frame would hit. A raw `{bad` payload cannot be used here because
+// json.Marshal rejects it and yields an empty frame, which never reaches the
+// per-case branch.
+func (h *testHarness) sendWrongShapePayload(t *testing.T, msgType string) {
+	t.Helper()
 
-func TestCoverUnsupportedMessage(t *testing.T) {
-	h := newTestHarness(t)
+	raw, err := json.Marshal(protocol.Envelope{Type: msgType, Payload: json.RawMessage(`"scunner"`)})
+	if err != nil {
+		t.Fatalf("marshal envelope for %q: %v", msgType, err)
+	}
 
-	h.sendControl(t, "wheesht_unknown", struct{}{})
+	if err := h.writer.WriteFrame(protocol.ChannelControl, raw); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// expectError reads the next control message, asserts it is an error, and
+// checks the message contains wantSubstr — so a test can't pass by tripping a
+// different error path than the one it targets.
+func (h *testHarness) expectError(t *testing.T, wantSubstr string) {
+	t.Helper()
 
 	env := h.readControlMsg(t)
 	if env.Type != "error" {
@@ -35,9 +54,19 @@ func TestCoverUnsupportedMessage(t *testing.T) {
 
 	_ = protocol.DecodePayload(env, &e)
 
-	if !strings.Contains(e.Message, "unsupported control message") {
-		t.Errorf("message = %q, want it to mention unsupported control message", e.Message)
+	if !strings.Contains(e.Message, wantSubstr) {
+		t.Fatalf("error message = %q, want substring %q", e.Message, wantSubstr)
 	}
+}
+
+// --- unsupported / fallthrough -------------------------------------------
+
+func TestCoverUnsupportedMessage(t *testing.T) {
+	h := newTestHarness(t)
+
+	h.sendControl(t, "wheesht_unknown", struct{}{})
+
+	h.expectError(t, "unsupported control message")
 }
 
 // --- repo_list ------------------------------------------------------------
@@ -106,18 +135,7 @@ func TestCoverApprovalSubscribeRejectsAgent(t *testing.T) {
 
 	h.sendControlWithToken(t, "approval_subscribe", struct{}{}, "tok-thrawn")
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
-
-	var e protocol.ErrorMsg
-
-	_ = protocol.DecodePayload(env, &e)
-
-	if !strings.Contains(e.Message, "human operator") {
-		t.Errorf("message = %q, want it to mention human operator", e.Message)
-	}
+	h.expectError(t, "human operator")
 }
 
 func TestCoverApprovalRespondRejectsAgent(t *testing.T) {
@@ -128,30 +146,17 @@ func TestCoverApprovalRespondRejectsAgent(t *testing.T) {
 		RequestID: "req-1", Decision: "allow",
 	}, "tok-fash")
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
-
-	var e protocol.ErrorMsg
-
-	_ = protocol.DecodePayload(env, &e)
-
-	if !strings.Contains(e.Message, "not permitted for agent sessions") {
-		t.Errorf("message = %q, want agent-not-permitted", e.Message)
-	}
+	h.expectError(t, "not permitted for agent sessions")
 }
 
 func TestCoverApprovalRespondInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
-	raw, _ := json.Marshal(protocol.Envelope{Type: "approval_respond", Payload: json.RawMessage(`{bad`)})
-	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
+	// Sent as the local human (no token) so it reaches the DecodePayload branch;
+	// an agent token would short-circuit at the authenticated check first.
+	h.sendWrongShapePayload(t, "approval_respond")
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectError(t, "invalid approval_respond")
 }
 
 func TestCoverApprovalRespondNotFound(t *testing.T) {
@@ -162,30 +167,15 @@ func TestCoverApprovalRespondNotFound(t *testing.T) {
 		RequestID: "haar-missing", Decision: "deny",
 	})
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
-
-	var e protocol.ErrorMsg
-
-	_ = protocol.DecodePayload(env, &e)
-
-	if !strings.Contains(e.Message, "not found") {
-		t.Errorf("message = %q, want not-found", e.Message)
-	}
+	h.expectError(t, "not found")
 }
 
 func TestCoverApprovalRequestInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
-	raw, _ := json.Marshal(protocol.Envelope{Type: "approval_request", Payload: json.RawMessage(`{bad`)})
-	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
+	h.sendWrongShapePayload(t, "approval_request")
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectError(t, "invalid approval_request")
 }
 
 // --- set_status -----------------------------------------------------------
@@ -193,13 +183,9 @@ func TestCoverApprovalRequestInvalidPayload(t *testing.T) {
 func TestCoverSetStatusInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
-	raw, _ := json.Marshal(protocol.Envelope{Type: "set_status", Payload: json.RawMessage(`{bad`)})
-	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
+	h.sendWrongShapePayload(t, "set_status")
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectError(t, "invalid set_status message")
 }
 
 func TestCoverSetStatusSetAndClear(t *testing.T) {
@@ -250,10 +236,7 @@ func TestCoverSetStatusNotFound(t *testing.T) {
 
 	h.sendControl(t, "set_status", protocol.SetStatusMsg{SessionID: "haar", Text: "nae session"})
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectError(t, "not found")
 }
 
 func TestCoverSetStatusClearNotFound(t *testing.T) {
@@ -261,10 +244,7 @@ func TestCoverSetStatusClearNotFound(t *testing.T) {
 
 	h.sendControl(t, "set_status", protocol.SetStatusMsg{SessionID: "haar", Clear: true})
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectError(t, "not found")
 }
 
 func TestCoverSetStatusForcedToOwnSession(t *testing.T) {
@@ -296,13 +276,9 @@ func TestCoverSetStatusForcedToOwnSession(t *testing.T) {
 func TestCoverStatusInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
-	raw, _ := json.Marshal(protocol.Envelope{Type: "status", Payload: json.RawMessage(`{bad`)})
-	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
+	h.sendWrongShapePayload(t, "status")
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectError(t, "invalid status message")
 }
 
 func TestCoverStatusNotFound(t *testing.T) {
@@ -310,10 +286,7 @@ func TestCoverStatusNotFound(t *testing.T) {
 
 	h.sendControl(t, "status", protocol.StatusRequestMsg{SessionID: "haar"})
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectError(t, "not found")
 }
 
 func TestCoverStatusResponse(t *testing.T) {
@@ -353,27 +326,39 @@ func TestCoverStatusResponse(t *testing.T) {
 func TestCoverStatusReportInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
-	raw, _ := json.Marshal(protocol.Envelope{Type: "status_report", Payload: json.RawMessage(`{bad`)})
-	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
+	h.sendWrongShapePayload(t, "status_report")
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectError(t, "invalid status_report")
 }
 
 func TestCoverStatusReport(t *testing.T) {
 	h := newTestHarness(t)
 	h.addAuthenticatedSession(t, "kirk-rep", "kirk", "tok-kirk")
 
+	// A real hook event drives the session's agent status and tool name, not
+	// just the ack — so the test would catch HandleHookReport being skipped.
 	h.sendControlWithToken(t, "status_report", protocol.StatusReportMsg{
 		SessionID: "kirk-rep",
+		Event:     "PreToolUse",
 		ToolName:  "Edit",
 	}, "tok-kirk")
 
 	env := h.readControlMsg(t)
 	if env.Type != "status_reported" {
 		t.Fatalf("expected status_reported, got %q", env.Type)
+	}
+
+	h.sm.mu.RLock()
+	sess := h.sm.state.Sessions["kirk-rep"]
+	agentStatus, toolName := sess.AgentStatus, sess.HookToolName
+	h.sm.mu.RUnlock()
+
+	if agentStatus != "active" {
+		t.Errorf("agent status = %q, want active", agentStatus)
+	}
+
+	if toolName != "Edit" {
+		t.Errorf("hook tool name = %q, want Edit", toolName)
 	}
 }
 
@@ -425,10 +410,7 @@ func TestCoverStarNotFound(t *testing.T) {
 
 	h.sendControl(t, "star", protocol.StarMsg{SessionID: "haar"})
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectError(t, "not found")
 }
 
 func TestCoverUnstarNotFound(t *testing.T) {
@@ -436,34 +418,23 @@ func TestCoverUnstarNotFound(t *testing.T) {
 
 	h.sendControl(t, "unstar", protocol.UnstarMsg{SessionID: "haar"})
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectError(t, "not found")
 }
 
 func TestCoverStarInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
-	raw, _ := json.Marshal(protocol.Envelope{Type: "star", Payload: json.RawMessage(`{bad`)})
-	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
+	h.sendWrongShapePayload(t, "star")
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectError(t, "invalid star message")
 }
 
 func TestCoverUnstarInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
-	raw, _ := json.Marshal(protocol.Envelope{Type: "unstar", Payload: json.RawMessage(`{bad`)})
-	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
+	h.sendWrongShapePayload(t, "unstar")
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectError(t, "invalid unstar message")
 }
 
 // --- interrupt ------------------------------------------------------------
@@ -471,13 +442,9 @@ func TestCoverUnstarInvalidPayload(t *testing.T) {
 func TestCoverInterruptInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
-	raw, _ := json.Marshal(protocol.Envelope{Type: "interrupt", Payload: json.RawMessage(`{bad`)})
-	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
+	h.sendWrongShapePayload(t, "interrupt")
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectError(t, "invalid interrupt message")
 }
 
 func TestCoverInterruptNotFound(t *testing.T) {
@@ -485,10 +452,7 @@ func TestCoverInterruptNotFound(t *testing.T) {
 
 	h.sendControl(t, "interrupt", protocol.InterruptMsg{SessionID: "haar"})
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectError(t, "no live process to interrupt")
 }
 
 // --- restart --------------------------------------------------------------
@@ -496,13 +460,9 @@ func TestCoverInterruptNotFound(t *testing.T) {
 func TestCoverRestartInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
-	raw, _ := json.Marshal(protocol.Envelope{Type: "restart", Payload: json.RawMessage(`{bad`)})
-	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
+	h.sendWrongShapePayload(t, "restart")
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectError(t, "invalid restart message")
 }
 
 func TestCoverRestartNotFound(t *testing.T) {
@@ -510,10 +470,7 @@ func TestCoverRestartNotFound(t *testing.T) {
 
 	h.sendControl(t, "restart", protocol.RestartMsg{SessionID: "haar"})
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectError(t, "not found")
 }
 
 func TestCoverRestartWithChildrenNotFound(t *testing.T) {
@@ -521,10 +478,7 @@ func TestCoverRestartWithChildrenNotFound(t *testing.T) {
 
 	h.sendControl(t, "restart", protocol.RestartMsg{SessionID: "haar", Children: true})
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectError(t, "not found")
 }
 
 // --- msg_conversation -----------------------------------------------------
@@ -532,13 +486,9 @@ func TestCoverRestartWithChildrenNotFound(t *testing.T) {
 func TestCoverMsgConversationInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
-	raw, _ := json.Marshal(protocol.Envelope{Type: "msg_conversation", Payload: json.RawMessage(`{bad`)})
-	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
+	h.sendWrongShapePayload(t, "msg_conversation")
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectError(t, "invalid msg_conversation message")
 }
 
 func TestCoverMsgConversation(t *testing.T) {
@@ -570,7 +520,7 @@ func TestCoverMsgConversation(t *testing.T) {
 	}
 }
 
-func TestCoverMsgConversationClampsLimit(t *testing.T) {
+func TestCoverMsgConversationOversizedLimit(t *testing.T) {
 	h := newTestHarness(t)
 
 	h.sm.mu.Lock()
@@ -580,7 +530,8 @@ func TestCoverMsgConversationClampsLimit(t *testing.T) {
 	}
 	h.sm.mu.Unlock()
 
-	// A wildly oversized limit is clamped rather than honoured verbatim.
+	// Exercises the oversized-limit clamp branch (limit > maxConversationLimit):
+	// the request must still succeed rather than be rejected for asking too much.
 	h.sendControl(t, "msg_conversation", protocol.MsgConversationMsg{
 		SessionID: "skelf-sess", Limit: 999999,
 	})
@@ -596,25 +547,17 @@ func TestCoverMsgConversationClampsLimit(t *testing.T) {
 func TestCoverForkInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
-	raw, _ := json.Marshal(protocol.Envelope{Type: "fork", Payload: json.RawMessage(`{bad`)})
-	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
+	h.sendWrongShapePayload(t, "fork")
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectError(t, "invalid fork message")
 }
 
 func TestCoverMigrateInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
-	raw, _ := json.Marshal(protocol.Envelope{Type: "migrate", Payload: json.RawMessage(`{bad`)})
-	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
+	h.sendWrongShapePayload(t, "migrate")
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectError(t, "invalid migrate message")
 }
 
 // --- reload ---------------------------------------------------------------
@@ -641,18 +584,7 @@ func TestCoverReloadRejectsAgent(t *testing.T) {
 
 	h.sendControlWithToken(t, "reload", struct{}{}, "tok-rl")
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
-
-	var e protocol.ErrorMsg
-
-	_ = protocol.DecodePayload(env, &e)
-
-	if !strings.Contains(e.Message, "not permitted for agent sessions") {
-		t.Errorf("message = %q, want agent-not-permitted", e.Message)
-	}
+	h.expectError(t, "not permitted for agent sessions")
 }
 
 // --- mcp_connect guards ---------------------------------------------------
@@ -660,13 +592,9 @@ func TestCoverReloadRejectsAgent(t *testing.T) {
 func TestCoverMCPConnectInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
-	raw, _ := json.Marshal(protocol.Envelope{Type: "mcp_connect", Payload: json.RawMessage(`{bad`)})
-	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
+	h.sendWrongShapePayload(t, "mcp_connect")
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectError(t, "invalid mcp_connect")
 }
 
 func TestCoverMCPConnectNoManager(t *testing.T) {
@@ -675,18 +603,7 @@ func TestCoverMCPConnectNoManager(t *testing.T) {
 	// The harness has no MCP manager configured, so a connect must fail closed.
 	h.sendControl(t, "mcp_connect", protocol.MCPConnectMsg{Server: "chrome"})
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
-
-	var e protocol.ErrorMsg
-
-	_ = protocol.DecodePayload(env, &e)
-
-	if !strings.Contains(e.Message, "MCP manager not initialized") {
-		t.Errorf("message = %q, want MCP-manager-not-initialized", e.Message)
-	}
+	h.expectError(t, "MCP manager not initialized")
 }
 
 // --- scenario lifecycle ---------------------------------------------------
@@ -697,30 +614,15 @@ func TestCoverScenarioStartRequiresAuth(t *testing.T) {
 	// Local human (unauthenticated) may not start a scenario.
 	h.sendControl(t, "scenario_start", protocol.ScenarioStartMsg{Name: "strath"})
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
-
-	var e protocol.ErrorMsg
-
-	_ = protocol.DecodePayload(env, &e)
-
-	if !strings.Contains(e.Message, "requires authentication") {
-		t.Errorf("message = %q, want requires-authentication", e.Message)
-	}
+	h.expectError(t, "requires authentication")
 }
 
 func TestCoverScenarioStartInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
-	raw, _ := json.Marshal(protocol.Envelope{Type: "scenario_start", Payload: json.RawMessage(`{bad`)})
-	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
+	h.sendWrongShapePayload(t, "scenario_start")
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectError(t, "invalid scenario_start message")
 }
 
 func TestCoverScenarioStatusNotFound(t *testing.T) {
@@ -728,22 +630,15 @@ func TestCoverScenarioStatusNotFound(t *testing.T) {
 
 	h.sendControl(t, "scenario_status", protocol.ScenarioStatusMsg{Name: "haar-strath"})
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectError(t, "not found")
 }
 
 func TestCoverScenarioStatusInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
-	raw, _ := json.Marshal(protocol.Envelope{Type: "scenario_status", Payload: json.RawMessage(`{bad`)})
-	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
+	h.sendWrongShapePayload(t, "scenario_status")
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectError(t, "invalid scenario_status message")
 }
 
 func TestCoverScenarioList(t *testing.T) {
@@ -772,22 +667,15 @@ func TestCoverScenarioStopNotFound(t *testing.T) {
 	// because there is no such scenario.
 	h.sendControl(t, "scenario_stop", protocol.ScenarioStopMsg{Name: "haar-strath"})
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectError(t, "not found")
 }
 
 func TestCoverScenarioStopInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
-	raw, _ := json.Marshal(protocol.Envelope{Type: "scenario_stop", Payload: json.RawMessage(`{bad`)})
-	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
+	h.sendWrongShapePayload(t, "scenario_stop")
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectError(t, "invalid scenario_stop message")
 }
 
 func TestCoverScenarioDeleteNotFound(t *testing.T) {
@@ -795,22 +683,15 @@ func TestCoverScenarioDeleteNotFound(t *testing.T) {
 
 	h.sendControl(t, "scenario_delete", protocol.ScenarioDeleteMsg{Name: "haar-strath"})
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectError(t, "not found")
 }
 
 func TestCoverScenarioDeleteInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
-	raw, _ := json.Marshal(protocol.Envelope{Type: "scenario_delete", Payload: json.RawMessage(`{bad`)})
-	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
+	h.sendWrongShapePayload(t, "scenario_delete")
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectError(t, "invalid scenario_delete message")
 }
 
 func TestCoverScenarioResumeNotFound(t *testing.T) {
@@ -818,45 +699,37 @@ func TestCoverScenarioResumeNotFound(t *testing.T) {
 
 	h.sendControl(t, "scenario_resume", protocol.ScenarioResumeMsg{Name: "haar-strath"})
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectError(t, "not found")
 }
 
 func TestCoverScenarioResumeInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
-	raw, _ := json.Marshal(protocol.Envelope{Type: "scenario_resume", Payload: json.RawMessage(`{bad`)})
-	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
+	h.sendWrongShapePayload(t, "scenario_resume")
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectError(t, "invalid scenario_resume message")
 }
 
-func TestCoverScenarioAddNotFound(t *testing.T) {
+func TestCoverScenarioAddIncompleteSession(t *testing.T) {
 	h := newTestHarness(t)
 
-	h.sendControl(t, "scenario_add", protocol.ScenarioAddMsg{Name: "haar-strath"})
+	// The local human passes the scenario-op check; AddToScenario then validates
+	// the session input and rejects it (a valid name but no repo). This exercises
+	// the scenario_add dispatch surfacing the operation error to the client.
+	h.sendControl(t, "scenario_add", protocol.ScenarioAddMsg{
+		Name:    "haar-strath",
+		Session: protocol.ScenarioSessionInput{Name: "bairn"},
+	})
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectError(t, "repo is required")
 }
 
 func TestCoverScenarioAddInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
-	raw, _ := json.Marshal(protocol.Envelope{Type: "scenario_add", Payload: json.RawMessage(`{bad`)})
-	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
+	h.sendWrongShapePayload(t, "scenario_add")
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectError(t, "invalid scenario_add message")
 }
 
 func TestCoverScenarioTaskDoneRequiresAuth(t *testing.T) {
@@ -866,30 +739,15 @@ func TestCoverScenarioTaskDoneRequiresAuth(t *testing.T) {
 	// whose task could be marked done.
 	h.sendControl(t, "scenario_task_done", protocol.ScenarioTaskDoneMsg{Name: "strath"})
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
-
-	var e protocol.ErrorMsg
-
-	_ = protocol.DecodePayload(env, &e)
-
-	if !strings.Contains(e.Message, "authenticated session") {
-		t.Errorf("message = %q, want requires-authenticated-session", e.Message)
-	}
+	h.expectError(t, "authenticated session")
 }
 
 func TestCoverScenarioTaskDoneInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
-	raw, _ := json.Marshal(protocol.Envelope{Type: "scenario_task_done", Payload: json.RawMessage(`{bad`)})
-	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
+	h.sendWrongShapePayload(t, "scenario_task_done")
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectError(t, "invalid scenario_task_done message")
 }
 
 // --- session lifecycle with children -------------------------------------
@@ -917,6 +775,14 @@ func TestCoverStopWithChildren(t *testing.T) {
 	if resp.SessionID != "ben-root" {
 		t.Errorf("session_id = %q, want ben-root", resp.SessionID)
 	}
+
+	// The root must actually appear in the affected list — a test that only
+	// checked the event type would pass even on an empty result. (The PTY is
+	// killed here; the state transition to StatusStopped happens asynchronously
+	// once process death is observed, so it is not asserted synchronously.)
+	if !containsString(resp.Stopped, "ben-root") {
+		t.Errorf("stopped list %v does not include ben-root", resp.Stopped)
+	}
 }
 
 func TestCoverDeleteWithChildren(t *testing.T) {
@@ -940,6 +806,15 @@ func TestCoverDeleteWithChildren(t *testing.T) {
 	if resp.SessionID != "brae-root" {
 		t.Errorf("session_id = %q, want brae-root", resp.SessionID)
 	}
+
+	if !containsString(resp.Deleted, "brae-root") {
+		t.Errorf("deleted list %v does not include brae-root", resp.Deleted)
+	}
+
+	// The session must actually be gone from state.
+	if _, ok := h.sm.Get("brae-root"); ok {
+		t.Error("expected brae-root to be removed from state after delete")
+	}
 }
 
 func TestCoverScenarioTaskDoneUnknownScenario(t *testing.T) {
@@ -950,8 +825,15 @@ func TestCoverScenarioTaskDoneUnknownScenario(t *testing.T) {
 		Name: "haar-strath",
 	}, "tok-strath")
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
+	h.expectError(t, "not found")
+}
+
+func containsString(ss []string, want string) bool {
+	for _, s := range ss {
+		if s == want {
+			return true
+		}
 	}
+
+	return false
 }
