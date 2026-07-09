@@ -373,6 +373,7 @@ func (sm *SessionManager) availableRepos() []protocol.RepoEntry {
 	)
 
 	sm.mu.RLock()
+
 	for _, s := range sm.state.Sessions {
 		if s.RepoPath == "" {
 			continue
@@ -384,6 +385,7 @@ func (sm *SessionManager) availableRepos() []protocol.RepoEntry {
 	if sm.cfg != nil {
 		configRoots = sm.cfg.AvailableRepoPaths()
 	}
+
 	sm.mu.RUnlock()
 
 	seen := make(map[string]bool)
@@ -404,6 +406,7 @@ func (sm *SessionManager) availableRepos() []protocol.RepoEntry {
 		}
 
 		seen[key] = true
+
 		repos = append(repos, protocol.RepoEntry{Path: path, Name: name, Recent: recent})
 	}
 
