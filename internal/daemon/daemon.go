@@ -3987,13 +3987,84 @@ func (sm *SessionManager) RunDetectionLoop(ctx context.Context) {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
+	// The detection tick is far too frequent to fetch on (network I/O). A
+	// slower fetch keeps origin/<base> reasonably fresh so the fallback
+	// diverged-from-base count doesn't go stale after remote merges (#197).
+	fetchTicker := time.NewTicker(fetchInterval)
+	defer fetchTicker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
 			sm.detectAgentStatuses()
+		case <-fetchTicker.C:
+			sm.fetchRemotes(ctx)
 		}
+	}
+}
+
+// fetchInterval is how often the detection loop refreshes remote tracking refs.
+const fetchInterval = 5 * time.Minute
+
+// fetchPerRepoTimeout bounds a single `git fetch` so a slow or hung remote
+// can't stall the fetch pass for other sessions.
+const fetchPerRepoTimeout = 30 * time.Second
+
+// fetchRemotes runs a best-effort `git fetch` for every running session's
+// worktree (and included repos) so remote tracking refs stay fresh. Failures
+// are logged at debug level and otherwise ignored — a session may be offline
+// or have no remote.
+func (sm *SessionManager) fetchRemotes(ctx context.Context) {
+	sm.mu.RLock()
+
+	seen := make(map[string]struct{})
+
+	var dirs []string
+
+	for _, s := range sm.state.Sessions {
+		if s.Status != StatusRunning || s.SharedWorktree {
+			continue
+		}
+
+		if s.WorktreePath != "" {
+			if _, ok := seen[s.WorktreePath]; !ok {
+				seen[s.WorktreePath] = struct{}{}
+				dirs = append(dirs, s.WorktreePath)
+			}
+		}
+
+		for i := range s.Includes {
+			wp := s.Includes[i].WorktreePath
+			if wp == "" {
+				continue
+			}
+
+			if _, ok := seen[wp]; !ok {
+				seen[wp] = struct{}{}
+				dirs = append(dirs, wp)
+			}
+		}
+	}
+
+	sm.mu.RUnlock()
+
+	for _, dir := range dirs {
+		if ctx.Err() != nil {
+			return
+		}
+
+		if !git.HasRemote(dir, "origin") {
+			continue
+		}
+
+		fetchCtx, cancel := context.WithTimeout(ctx, fetchPerRepoTimeout)
+		if err := git.FetchRemote(fetchCtx, dir); err != nil {
+			sm.log.Debug("periodic fetch failed", "dir", dir, "error", err)
+		}
+
+		cancel()
 	}
 }
 

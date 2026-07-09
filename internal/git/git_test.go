@@ -271,6 +271,67 @@ func TestUnpushedCommitSummariesNoRemote(t *testing.T) {
 	}
 }
 
+// TestFetchRemoteUpdatesTrackingRef verifies FetchRemote advances the local
+// origin/main ref after the remote moves on, which is what keeps the
+// diverged-from-base fallback count fresh (#197).
+func TestFetchRemoteUpdatesTrackingRef(t *testing.T) {
+	dir := setupTestRepo(t)
+
+	run := func(wd string, args ...string) string {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = wd
+
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=braw", "GIT_AUTHOR_EMAIL=braw@croft.local",
+			"GIT_COMMITTER_NAME=braw", "GIT_COMMITTER_EMAIL=braw@croft.local",
+		)
+
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+
+		return strings.TrimSpace(string(out))
+	}
+
+	origin := t.TempDir()
+	run(origin, "init", "--bare", "-b", "main")
+	run(dir, "remote", "add", "origin", origin)
+	run(dir, "push", "origin", "main")
+	run(dir, "fetch", "origin")
+
+	// A second clone pushes a new commit to origin/main behind our back.
+	other := t.TempDir()
+	run(other, "clone", origin, ".")
+	writeFile(t, filepath.Join(other, "neep.txt"), "neep")
+	run(other, "add", ".")
+	run(other, "commit", "-m", "bonnie remote commit")
+	run(other, "push", "origin", "main")
+
+	remoteTip := run(other, "rev-parse", "HEAD")
+
+	// Before fetch our origin/main is stale.
+	if before := run(dir, "rev-parse", "origin/main"); before == remoteTip {
+		t.Fatal("origin/main should be stale before fetch")
+	}
+
+	if err := FetchRemote(context.Background(), dir); err != nil {
+		t.Fatalf("FetchRemote: %v", err)
+	}
+
+	if after := run(dir, "rev-parse", "origin/main"); after != remoteTip {
+		t.Errorf("origin/main not updated: got %s, want %s", after, remoteTip)
+	}
+}
+
+func TestFetchRemoteNoRemote(t *testing.T) {
+	dir := setupTestRepo(t)
+
+	if err := FetchRemote(context.Background(), dir); err == nil {
+		t.Error("expected error fetching with no origin remote")
+	}
+}
+
 func TestParseGitHubUsernameSSH(t *testing.T) {
 	u, ok := ParseGitHubUsername("git@github.com:d0ugal/graith.git")
 	if !ok || u != "d0ugal" {
@@ -531,9 +592,112 @@ func TestHasUncommittedChangesErrorCov(t *testing.T) {
 func TestUnpushedCommitCountErrorCov(t *testing.T) {
 	dir := setupTestRepo(t)
 
-	// No origin remote, so rev-list origin/<base>..HEAD fails.
-	if _, err := UnpushedCommitCount(dir, "main"); err == nil {
-		t.Error("expected error counting against a missing origin ref")
+	// No tracking ref and a base branch that doesn't exist locally either, so
+	// rev-list <base>..HEAD fails.
+	if _, err := UnpushedCommitCount(dir, "glen-thrawn-nonexistent"); err == nil {
+		t.Error("expected error counting against a missing base ref")
+	}
+}
+
+// TestUnpushedCommitCountAfterMerge is the regression test for issue #197: a
+// branch's commits are pushed, then the PR is merged into main (advancing
+// origin/main). The unpushed count must read 0 because we compare against the
+// branch's own tracking ref, not against origin/main.
+func TestUnpushedCommitCountAfterMerge(t *testing.T) {
+	dir := setupTestRepo(t)
+
+	run := func(wd string, args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = wd
+
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=braw", "GIT_AUTHOR_EMAIL=braw@croft.local",
+			"GIT_COMMITTER_NAME=braw", "GIT_COMMITTER_EMAIL=braw@croft.local",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	origin := t.TempDir()
+	run(origin, "init", "--bare", "-b", "main")
+	run(dir, "remote", "add", "origin", origin)
+	run(dir, "push", "origin", "main")
+
+	// Create a feature branch with two commits and push it.
+	run(dir, "checkout", "-b", "glen-feature")
+	writeFile(t, filepath.Join(dir, "neep-a.txt"), "neep")
+	run(dir, "add", ".")
+	run(dir, "commit", "-m", "braw feature commit")
+	writeFile(t, filepath.Join(dir, "neep-b.txt"), "neep")
+	run(dir, "add", ".")
+	run(dir, "commit", "-m", "bonnie feature commit")
+	run(dir, "push", "-u", "origin", "glen-feature")
+
+	// Everything is pushed to the branch's tracking ref: 0 unpushed.
+	n, err := UnpushedCommitCount(dir, "main")
+	if err != nil {
+		t.Fatalf("UnpushedCommitCount: %v", err)
+	}
+
+	if n != 0 {
+		t.Errorf("after push: got %d unpushed, want 0", n)
+	}
+
+	// Simulate the PR being merged: advance origin/main to the feature tip via
+	// a clone that pushes into the bare origin. The stale local origin/main
+	// ref would previously make the count read 2 "ahead"; we count against the
+	// tracking ref, so it stays 0.
+	run(dir, "push", "origin", "glen-feature:main")
+
+	n, err = UnpushedCommitCount(dir, "main")
+	if err != nil {
+		t.Fatalf("UnpushedCommitCount after merge: %v", err)
+	}
+
+	if n != 0 {
+		t.Errorf("after merge: got %d unpushed, want 0 (no false ahead-of-main)", n)
+	}
+}
+
+// TestUnpushedCommitCountNeverPushed covers the fallback path: a branch that
+// has never been pushed has no tracking ref, so the count reflects commits
+// ahead of the base branch.
+func TestUnpushedCommitCountNeverPushed(t *testing.T) {
+	dir := setupTestRepo(t)
+
+	run := func(wd string, args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = wd
+
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=braw", "GIT_AUTHOR_EMAIL=braw@croft.local",
+			"GIT_COMMITTER_NAME=braw", "GIT_COMMITTER_EMAIL=braw@croft.local",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	origin := t.TempDir()
+	run(origin, "init", "--bare", "-b", "main")
+	run(dir, "remote", "add", "origin", origin)
+	run(dir, "push", "origin", "main")
+	run(dir, "fetch", "origin")
+
+	// Feature branch with one commit, never pushed (no origin/glen-feature).
+	run(dir, "checkout", "-b", "glen-feature")
+	writeFile(t, filepath.Join(dir, "neep-a.txt"), "neep")
+	run(dir, "add", ".")
+	run(dir, "commit", "-m", "braw feature commit")
+
+	n, err := UnpushedCommitCount(dir, "main")
+	if err != nil {
+		t.Fatalf("UnpushedCommitCount: %v", err)
+	}
+
+	if n != 1 {
+		t.Errorf("never pushed: got %d unpushed, want 1 (ahead of base)", n)
 	}
 }
 

@@ -5167,6 +5167,142 @@ func sleeperSM(t *testing.T) *SessionManager {
 	}, slog.Default())
 }
 
+// TestFetchRemotesUpdatesTrackingRefs verifies the periodic fetch pass advances
+// the local origin/main ref for a running session's worktree after the remote
+// moves on, keeping the diverged-from-base count fresh (#197).
+func TestFetchRemotesUpdatesTrackingRefs(t *testing.T) {
+	sm := sleeperSM(t)
+
+	runGit := func(dir string, args ...string) string {
+		t.Helper()
+
+		full := append([]string{"-c", "commit.gpgsign=false"}, args...)
+		env := append(os.Environ(),
+			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
+			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
+		)
+
+		cmd := exec.Command("git", full...)
+		cmd.Dir = dir
+		cmd.Env = env
+
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %s: %v", args, out, err)
+		}
+
+		return strings.TrimSpace(string(out))
+	}
+
+	worktree := t.TempDir()
+	runGit(worktree, "init", "-b", "main")
+
+	if err := os.WriteFile(filepath.Join(worktree, "file.txt"), []byte("braw"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	runGit(worktree, "add", ".")
+	runGit(worktree, "commit", "-m", "init")
+
+	origin := t.TempDir()
+	runGit(origin, "init", "--bare", "-b", "main")
+	runGit(worktree, "remote", "add", "origin", origin)
+	runGit(worktree, "push", "origin", "main")
+	runGit(worktree, "fetch", "origin")
+
+	// Advance origin/main from a separate clone.
+	other := t.TempDir()
+	runGit(other, "clone", origin, ".")
+
+	if err := os.WriteFile(filepath.Join(other, "neep.txt"), []byte("neep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	runGit(other, "add", ".")
+	runGit(other, "commit", "-m", "bonnie remote commit")
+	runGit(other, "push", "origin", "main")
+
+	remoteTip := runGit(other, "rev-parse", "HEAD")
+
+	sm.state.Sessions["glen1"] = &SessionState{
+		ID: "glen1", Name: "glen", Agent: "sleeper",
+		Status: StatusRunning, WorktreePath: worktree, RepoPath: worktree,
+		BaseBranch: "main",
+	}
+
+	sm.fetchRemotes(context.Background())
+
+	if after := runGit(worktree, "rev-parse", "origin/main"); after != remoteTip {
+		t.Errorf("origin/main not updated by fetchRemotes: got %s, want %s", after, remoteTip)
+	}
+}
+
+// TestFetchRemotesSkipsNonRunningAndShared verifies fetchRemotes ignores
+// sessions that are not running and shared worktrees, and tolerates a worktree
+// with no remote without error.
+func TestFetchRemotesSkipsNonRunningAndShared(t *testing.T) {
+	sm := sleeperSM(t)
+
+	dir := t.TempDir()
+	runGit := func(args ...string) {
+		t.Helper()
+
+		full := append([]string{"-c", "commit.gpgsign=false"}, args...)
+		env := append(os.Environ(),
+			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
+			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
+		)
+
+		cmd := exec.Command("git", full...)
+		cmd.Dir = dir
+		cmd.Env = env
+
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %s: %v", args, out, err)
+		}
+	}
+
+	runGit("init", "-b", "main")
+
+	if err := os.WriteFile(filepath.Join(dir, "file.txt"), []byte("braw"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	runGit("add", ".")
+	runGit("commit", "-m", "init")
+
+	// Stopped session, shared session, and a running session with no remote —
+	// none should cause fetchRemotes to error out.
+	sm.state.Sessions["dreich1"] = &SessionState{
+		ID: "dreich1", Status: StatusStopped, WorktreePath: dir, BaseBranch: "main",
+	}
+	sm.state.Sessions["dreich2"] = &SessionState{
+		ID: "dreich2", Status: StatusRunning, SharedWorktree: true, WorktreePath: dir, BaseBranch: "main",
+	}
+	sm.state.Sessions["braw1"] = &SessionState{
+		ID: "braw1", Status: StatusRunning, WorktreePath: dir, BaseBranch: "main",
+	}
+
+	// Must not panic or block; no assertion needed beyond completion.
+	sm.fetchRemotes(context.Background())
+}
+
+// TestFetchRemotesCanceledContext verifies fetchRemotes returns promptly when
+// its context is already canceled.
+func TestFetchRemotesCanceledContext(t *testing.T) {
+	sm := sleeperSM(t)
+
+	dir := t.TempDir()
+	sm.state.Sessions["glen1"] = &SessionState{
+		ID: "glen1", Status: StatusRunning, WorktreePath: dir, BaseBranch: "main",
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	sm.fetchRemotes(ctx)
+}
+
 // spawnReapableSleeper starts a sleeper in its own process group and reaps it in
 // the background, so a SIGTERM/SIGKILL delivered by the code under test clears
 // the zombie promptly (letting killProcessGroup's poll loop observe ESRCH and
