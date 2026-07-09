@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.66.10](https://github.com/d0ugal/graith/compare/v0.66.9...v0.66.10) (2026-07-09)
+
+
+### Continuous Integration
+
+* **sandbox:** fail closed if safehouse enforcement suite skips ([1683998](https://github.com/d0ugal/graith/commit/1683998536bbb8a4e0237ad0f66fb6c43b1cfca2))
+
 ## [0.66.9](https://github.com/d0ugal/graith/compare/v0.66.8...v0.66.9) (2026-07-09)
 
 
