@@ -1,0 +1,129 @@
+# XcodeGen spec for the graith universal app (#628) — one project, both
+# platforms. Generate with:
+#   xcodegen generate            (from gui/)   or:  make -C gui xcodeproj
+# then: open graith.xcodeproj, pick the "graith (iOS)" or "GraithGUI (macOS)"
+# scheme, choose your Apple ID under Signing & Capabilities, and Run.
+#
+# This is the umbrella project the design calls for (§C.0 "one universal app"):
+# it builds the iOS app AND the macOS app from the same three SwiftPM packages
+# in gui/ (shared, ios, macos), so you can open a single project and run either
+# platform. Both app targets compile their own @main entry sources and link the
+# library products of the local packages, which transitively pull in ../shared
+# (GraithProtocol, GraithTerminalCore, GraithDesign, …) and the pinned
+# libghostty-vt.xcframework — Xcode resolves the packages, selects the
+# device/simulator slice, and signs.
+#
+# The generated *.xcodeproj is gitignored — this spec is the checked-in source
+# of truth. gui/ios/project.yml remains for isolated iOS-only generation.
+name: graith
+options:
+  bundleIdPrefix: net.graith
+  deploymentTarget:
+    iOS: "16.0"
+    macOS: "14.0"
+  createIntermediateGroups: true
+  minimumXcodeGenVersion: "2.42.0"
+packages:
+  # The iOS module package (gui/ios/Package.swift, name "GraithMobile"). Its
+  # library products transitively depend on ../shared.
+  GraithMobile:
+    path: ios
+  # The shared cross-platform core (gui/shared/Package.swift, name
+  # "GraithShared"). The macOS app links its library products directly, mirroring
+  # gui/macos/Package.swift's GraithGUI target dependencies.
+  GraithShared:
+    path: shared
+targets:
+  # ---- iOS app --------------------------------------------------------------
+  graith:
+    type: application
+    platform: iOS
+    # Compile the @main SwiftUI App directly; link the package's library
+    # products (matching gui/ios/project.yml). The GraithMobileApp *executable*
+    # product is intentionally not depended on, to avoid double-compiling it.
+    sources:
+      - path: ios/Sources/GraithMobileApp
+    dependencies:
+      - package: GraithMobile
+        product: GraithMobileUI
+      - package: GraithMobile
+        product: GraithMobileReal
+      - package: GraithMobile
+        product: GraithMobileRealTerminal
+      - package: GraithMobile
+        product: GraithMobileKit
+      - package: GraithMobile
+        product: GraithClientAPI
+      - package: GraithMobile
+        product: GraithMobileMock
+    info:
+      path: ios/graith-Info.plist
+      properties:
+        CFBundleDisplayName: graith
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: net.graith.mobile
+        MARKETING_VERSION: "0.1"
+        CURRENT_PROJECT_VERSION: "1"
+        CODE_SIGN_STYLE: Automatic
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SWIFT_VERSION: "5.9"
+  # ---- macOS app ------------------------------------------------------------
+  GraithGUI:
+    type: application
+    platform: macOS
+    # Compile GraithGUI's @main sources directly and link ../shared's library
+    # products — exactly the dependency set in gui/macos/Package.swift. (The
+    # macOS package exposes only an executable product, so we build its sources
+    # here rather than linking it as a library.)
+    sources:
+      - path: macos/Sources/GraithGUI
+    dependencies:
+      - package: GraithShared
+        product: GraithProtocol
+      - package: GraithShared
+        product: GraithRemoteKit
+      - package: GraithShared
+        product: GraithTerminalCore
+      - package: GraithShared
+        product: CGhosttyVT
+      - package: GraithShared
+        product: GraithDesign
+    info:
+      path: macos/Resources/GraithGUI-Info.plist
+      properties:
+        CFBundleDisplayName: graith
+        LSMinimumSystemVersion: "$(MACOSX_DEPLOYMENT_TARGET)"
+        LSApplicationCategoryType: public.app-category.developer-tools
+        NSHighResolutionCapable: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: net.graith.macos
+        MARKETING_VERSION: "0.1"
+        CURRENT_PROJECT_VERSION: "1"
+        CODE_SIGN_STYLE: Automatic
+        # The app degrades gracefully to an in-memory secret store when the
+        # Keychain is unreachable (see GraithApp.makeSecretStore), so it runs
+        # unsigned/ad-hoc. For persistent Keychain identity, add a real team +
+        # an entitlements file (keychain-access-groups) here.
+        SWIFT_VERSION: "5.9"
+schemes:
+  graith (iOS):
+    build:
+      targets:
+        graith: all
+    run:
+      config: Debug
+  GraithGUI (macOS):
+    build:
+      targets:
+        GraithGUI: all
+    run:
+      config: Debug

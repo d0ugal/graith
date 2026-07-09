@@ -17,7 +17,7 @@ export DEVELOPER_DIR ?= /Applications/Xcode.app/Contents/Developer
 help: ## Show this help
 	@echo "graith universal app (gui/) — packages: shared, macos, ios"
 	@echo ""
-	@echo "Aggregate targets:"
+	@echo "Aggregate targets (incl. 'xcodeproj' to generate the Xcode project):"
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
 		awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
 	@echo ""
@@ -33,6 +33,13 @@ build: ## Build all three packages (safe inside the graith sandbox)
 	$(MAKE) -C shared build
 	$(MAKE) -C macos build
 	$(MAKE) -C ios build
+
+.PHONY: xcodeproj
+xcodeproj: ## Generate graith.xcodeproj (both iOS + macOS apps) via XcodeGen
+	@command -v xcodegen >/dev/null 2>&1 || { \
+		echo "xcodegen not found. Install it: brew install xcodegen"; exit 1; }
+	xcodegen generate --spec project.yml
+	@echo "Generated graith.xcodeproj — open it and pick the 'graith (iOS)' or 'GraithGUI (macOS)' scheme."
 
 .PHONY: test
 test: ## Test shared + ios (needs full Xcode; run OUTSIDE the graith sandbox)
