@@ -94,6 +94,8 @@ notify_merge_conflicts = true
 notify_review_comments = false
 # notify_pr_comments: regular conversation comments on the PR thread (issue-style,
 # not tied to a line of code). Distinct from notify_review_comments above.
+# Compat: notify_review_comments once gated both surfaces; an older config that
+# enables it but omits notify_pr_comments keeps getting conversation comments.
 notify_pr_comments = false
 notify_review_decisions = false
 notify_pr_lifecycle = true

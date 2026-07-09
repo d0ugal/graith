@@ -374,21 +374,21 @@ func TestDiffAndBuild_CITransitionAndDedup(t *testing.T) {
 }
 
 func TestDiffAndBuild_GatesCIvsComments(t *testing.T) {
-	// notify_ci_failures on, notify_review_comments off → CI notifies, comment does not.
+	// notify_ci_failures on, both comment gates off → CI notifies, comment does not.
 	sm := newPRWatchSM()
-	cfg := &config.PRWatchConfig{Enabled: true, NotifyCIFailures: true, NotifyReviewComments: false}
+	cfg := &config.PRWatchConfig{Enabled: true, NotifyCIFailures: true, NotifyReviewComments: false, NotifyPRComments: false}
 	t1 := prWatchTarget{id: "canny", branch: "canny"}
 
 	// Prime passing with no comments.
 	sm.diffAndBuild(cfg, t1, "croft/loch", prData{Number: 2, State: "open", HeadRefOid: "sha1", CIState: "passing", CommentsOK: true})
 
-	// New comment arrives but comments are gated off → no notify.
+	// A conversation comment arrives but notify_pr_comments is off → no notify.
 	out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
 		Number: 2, State: "open", HeadRefOid: "sha1", CIState: "passing", CommentsOK: true,
 		IssueComments: []ghComment{{ID: 500, User: ghUser{Login: "hamish"}, Body: "a nit"}},
 	})
 	if len(out) != 0 {
-		t.Fatalf("review comment with gate off should not notify, got %v", out)
+		t.Fatalf("PR comment with gate off should not notify, got %v", out)
 	}
 }
 
@@ -450,8 +450,9 @@ func TestDiffAndBuild_PRCommentAwarenessFraming(t *testing.T) {
 // TestDiffAndBuild_CommentGatesIndependent asserts that the two comment gates
 // are truly independent: with only notify_review_comments on, an inline review
 // comment notifies but a conversation comment does not, and vice versa. Each
-// gate also advances only its own cursor, so a suppressed surface is delivered
-// once its gate is enabled rather than being silently baselined away.
+// gate touches only its own cursor — the enabled surface advances on delivery,
+// the disabled surface's cursor is kept current (baselined) so enabling it
+// later doesn't dump backlog.
 func TestDiffAndBuild_CommentGatesIndependent(t *testing.T) {
 	// Review comments ON, PR comments OFF.
 	t.Run("review-only", func(t *testing.T) {
@@ -486,6 +487,54 @@ func TestDiffAndBuild_CommentGatesIndependent(t *testing.T) {
 			t.Fatalf("only the PR conversation comment should notify, got %v", out)
 		}
 	})
+}
+
+// TestDiffAndBuild_BothGatesSamePollDefersNotDrops covers the new interaction
+// introduced by the split: with both gates on and new comments on both surfaces
+// in one poll, the review comment (evaluated first) consumes the single debounce
+// slot and the conversation comment is debounced. The deferred comment must not
+// be dropped — its cursor stays un-advanced, so a later poll delivers it.
+func TestDiffAndBuild_BothGatesSamePollDefersNotDrops(t *testing.T) {
+	sm := newPRWatchSM()
+	cfg := allOnConfig() // default 2m debounce
+	t1 := prWatchTarget{id: "kirk", branch: "kirk"}
+	sm.diffAndBuild(cfg, t1, "croft/loch", prData{Number: 1, State: "open", HeadRefOid: "sha1", CIState: "passing", CommentsOK: true})
+
+	both := prData{
+		Number: 1, State: "open", HeadRefOid: "sha1", CIState: "passing", CommentsOK: true,
+		ReviewComments: []ghComment{{ID: 20, User: ghUser{Login: "ailsa"}, Body: "nit", Path: "a.go", Line: 4}},
+		IssueComments:  []ghComment{{ID: 30, User: ghUser{Login: "hamish"}, Body: "ship it"}},
+	}
+
+	out := sm.diffAndBuild(cfg, t1, "croft/loch", both)
+	if len(out) != 1 || !strings.Contains(out[0], "inline code-review") {
+		t.Fatalf("first poll should deliver the review comment, got %v", out)
+	}
+
+	// The delivered review cursor advances; the debounced conversation cursor must
+	// stay un-advanced (deferred, not baselined away).
+	sm.prWatch.mu.Lock()
+	cur := sm.prWatch.cursors[t1.id]
+	reviewCursor, issueCursor := cur.lastReviewCommentID, cur.lastIssueCommentID
+	sm.prWatch.mu.Unlock()
+
+	if reviewCursor != 20 {
+		t.Errorf("delivered review cursor should advance to 20, got %d", reviewCursor)
+	}
+
+	if issueCursor != 0 {
+		t.Errorf("debounced conversation cursor must stay un-advanced, got %d", issueCursor)
+	}
+
+	// Clear the debounce and re-poll: the deferred conversation comment now fires.
+	sm.prWatch.mu.Lock()
+	delete(sm.prWatch.lastSent, t1.id)
+	sm.prWatch.mu.Unlock()
+
+	out = sm.diffAndBuild(cfg, t1, "croft/loch", both)
+	if len(out) != 1 || !strings.Contains(out[0], "conversation") {
+		t.Fatalf("second poll should deliver the deferred conversation comment, got %v", out)
+	}
 }
 
 func TestCIFailureBodyIsDirective(t *testing.T) {
