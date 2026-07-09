@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/d0ugal/graith/internal/client"
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
 )
@@ -127,6 +128,69 @@ func TestAgentChoicesCov(t *testing.T) {
 	want := []string{"codex", "claude", "cursor"}
 	if !reflect.DeepEqual(names, want) {
 		t.Errorf("agentChoices names = %v, want %v", names, want)
+	}
+}
+
+// TestPassthroughKeysFromConfig verifies the [keybindings] config maps into
+// PassthroughKeys, including the detach/session_list/shell keys wired for #918.
+func TestPassthroughKeysFromConfig(t *testing.T) {
+	oldCfg := cfg
+
+	t.Cleanup(func() { cfg = oldCfg })
+
+	cfg = &config.Config{
+		Keybindings: config.Keybindings{
+			Prefix:              "ctrl+a",
+			Detach:              "q",
+			SessionList:         "z",
+			Shell:               "v",
+			NextSession:         "n",
+			PrevSession:         "p",
+			LastSession:         "l",
+			NewSession:          "c",
+			ForkSession:         "f",
+			OrchestratorSession: "o",
+		},
+	}
+
+	keys := passthroughKeysFromConfig()
+
+	want := client.PassthroughKeys{
+		Prefix:              0x01, // ctrl+a
+		Detach:              'q',
+		SessionList:         'z',
+		Shell:               'v',
+		NextSession:         'n',
+		PrevSession:         'p',
+		LastSession:         'l',
+		NewSession:          'c',
+		ForkSession:         'f',
+		OrchestratorSession: 'o',
+	}
+	if keys != want {
+		t.Errorf("passthroughKeysFromConfig() = %+v, want %+v", keys, want)
+	}
+}
+
+// TestOverlayKeysFromConfig verifies the picker keybindings map into OverlayKeys.
+func TestOverlayKeysFromConfig(t *testing.T) {
+	oldCfg := cfg
+
+	t.Cleanup(func() { cfg = oldCfg })
+
+	cfg = &config.Config{
+		Keybindings: config.Keybindings{
+			DeleteSession: "z",
+			ResumeSession: "Z",
+			Search:        "?",
+		},
+	}
+
+	keys := overlayKeysFromConfig()
+
+	want := client.OverlayKeys{DeleteSession: "z", ResumeSession: "Z", Search: "?"}
+	if keys != want {
+		t.Errorf("overlayKeysFromConfig() = %+v, want %+v", keys, want)
 	}
 }
 

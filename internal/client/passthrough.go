@@ -157,10 +157,33 @@ func processKittyPrefix(input []byte, prefixByte byte) []byte {
 	return append(out, input[copied:]...)
 }
 
+// keyLabel renders a keybinding byte for display in the help bar. Printable
+// ASCII bytes show as themselves; anything else (unset or control) shows "?".
+func keyLabel(b byte) string {
+	if b >= 0x20 && b < 0x7f {
+		return string(b)
+	}
+
+	return "?"
+}
+
 // showHelpBar renders a one-line help bar at the bottom of the screen using
-// ANSI save-cursor / restore-cursor so the agent's output isn't disturbed.
-func showHelpBar(w io.Writer) {
-	help := "\x1b[7m d detach  w sessions  m messages  a approvals  o orch  l last  n/p next/prev  c new  f fork  s shell  r restart \x1b[0m"
+// ANSI save-cursor / restore-cursor so the agent's output isn't disturbed. The
+// prefix-action keys reflect the configured keybindings so the bar never lies
+// about a remapped key. (m/a/r have no config field yet and stay literal.)
+func showHelpBar(w io.Writer, keys PassthroughKeys) {
+	help := fmt.Sprintf(
+		"\x1b[7m %s detach  %s sessions  m messages  a approvals  %s orch  %s last  %s/%s next/prev  %s new  %s fork  %s shell  r restart \x1b[0m",
+		keyLabel(keys.Detach),
+		keyLabel(keys.SessionList),
+		keyLabel(keys.OrchestratorSession),
+		keyLabel(keys.LastSession),
+		keyLabel(keys.NextSession),
+		keyLabel(keys.PrevSession),
+		keyLabel(keys.NewSession),
+		keyLabel(keys.ForkSession),
+		keyLabel(keys.Shell),
+	)
 	_, _ = w.Write([]byte("\x1b7\x1b[999B\r\x1b[2K" + help + "\x1b8"))
 }
 
@@ -182,6 +205,9 @@ func (sw *syncWriter) Write(p []byte) (int, error) {
 
 type PassthroughKeys struct {
 	Prefix              byte
+	Detach              byte
+	SessionList         byte
+	Shell               byte
 	NextSession         byte
 	PrevSession         byte
 	LastSession         byte
@@ -464,19 +490,19 @@ func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, s
 					switch key {
 					case prefixByte:
 						_ = c.SendData([]byte{prefixByte})
-					case 'd':
+					case keys.Detach:
 						setResult(ResultDetached)
 						return
 					case 'a':
 						setResult(ResultApprovalOverlay)
 						return
-					case 'w', 0:
+					case keys.SessionList, 0:
 						setResult(ResultOverlay)
 						return
 					case 'm':
 						setResult(ResultMessageOverlay)
 						return
-					case 's':
+					case keys.Shell:
 						setResult(ResultShell)
 						return
 					case keys.NextSession:
@@ -517,7 +543,7 @@ func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, s
 
 					prefixSeen = true
 
-					showHelpBar(stdout)
+					showHelpBar(stdout, keys)
 
 					sendStart = i + 1
 

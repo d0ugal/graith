@@ -716,6 +716,36 @@ type overlayModel struct {
 	repoSuggestions []RepoSuggestion
 	agents          []string
 	defaultAgent    string
+
+	// Configurable list-mode keybindings. Populated with defaults by
+	// newOverlayModel and overridden from config by RunOverlay.
+	keyDelete string
+	keyResume string
+	keySearch string
+}
+
+// OverlayKeys carries the configurable picker keybindings from [keybindings].
+// Empty fields fall back to the built-in defaults (see newOverlayModel).
+type OverlayKeys struct {
+	DeleteSession string
+	ResumeSession string
+	Search        string
+}
+
+// applyKeys overrides the model's list-mode keybindings with any non-empty
+// values from keys, leaving the built-in defaults in place otherwise.
+func (m *overlayModel) applyKeys(keys OverlayKeys) {
+	if keys.DeleteSession != "" {
+		m.keyDelete = keys.DeleteSession
+	}
+
+	if keys.ResumeSession != "" {
+		m.keyResume = keys.ResumeSession
+	}
+
+	if keys.Search != "" {
+		m.keySearch = keys.Search
+	}
 }
 
 func (m *overlayModel) resizeList() {
@@ -1117,6 +1147,9 @@ func newOverlayModel(sessions []protocol.SessionInfo, currentSessionID string, f
 		deleteSession:    deleteSession,
 		collapsed:        collapsed,
 		shortcutKeys:     shortcutKeys,
+		keyDelete:        "x",
+		keyResume:        "R",
+		keySearch:        "/",
 	}
 }
 
@@ -1717,7 +1750,7 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 				return m, tea.Quit
 
-			case "x":
+			case m.keyDelete:
 				if _, ok := m.list.SelectedItem().(sessionItem); ok {
 					m.state = stateConfirmDelete
 					m.resizeList()
@@ -1733,7 +1766,7 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 				return m, nil
 
-			case "R":
+			case m.keyResume:
 				m.state = stateRestartMenu
 				m.resizeList()
 
@@ -1819,7 +1852,7 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 				return m, m.fetchPreviewCmd()
 
-			case "/":
+			case m.keySearch:
 				m.filterInput.SetValue("")
 				m.filterInput.Focus()
 				m.state = stateFilter
@@ -2226,7 +2259,7 @@ func (m overlayModel) View() tea.View {
 			helpParts = append(helpParts, first+"-"+last+" jump")
 		}
 
-		helpParts = append(helpParts, "enter attach", "n new", "◂▸ view", "/ filter", "tab group", "s star", "space fold", "C fold-all", "x delete", "S stop", "r/R restart", "q quit")
+		helpParts = append(helpParts, "enter attach", "n new", "◂▸ view", m.keySearch+" filter", "tab group", "s star", "space fold", "C fold-all", m.keyDelete+" delete", "S stop", "r/"+m.keyResume+" restart", "q quit")
 		panelContent.WriteString(helpStyle.Render(strings.Join(helpParts, "  ")))
 	}
 
@@ -2312,7 +2345,7 @@ func (m overlayModel) View() tea.View {
 // RunOverlay launches the bubbletea overlay listing sessions grouped by repo.
 // currentSessionID highlights the session the user was just attached to.
 // fetchPreview is called asynchronously to load scrollback for the selected session.
-func RunOverlay(sessions []protocol.SessionInfo, currentSessionID string, fetchPreview func(sessionID string) string, refreshSessions func() []protocol.SessionInfo, deleteSession func(sessionID string) error, restartSession func(sessionID string) error, stopSession func(sessionID string) error, toggleStar func(sessionID string, star bool) error, profile string, collapsed map[string]bool, repoSuggestions []RepoSuggestion, shortcutKeys string, agents []string, defaultAgent string) *OverlayResult {
+func RunOverlay(sessions []protocol.SessionInfo, currentSessionID string, fetchPreview func(sessionID string) string, refreshSessions func() []protocol.SessionInfo, deleteSession func(sessionID string) error, restartSession func(sessionID string) error, stopSession func(sessionID string) error, toggleStar func(sessionID string, star bool) error, profile string, collapsed map[string]bool, repoSuggestions []RepoSuggestion, shortcutKeys string, agents []string, defaultAgent string, keys OverlayKeys) *OverlayResult {
 	m := newOverlayModel(sessions, currentSessionID, fetchPreview, deleteSession, collapsed, []rune(shortcutKeys))
 	m.refreshSessions = refreshSessions
 	m.restartSession = restartSession
@@ -2322,6 +2355,7 @@ func RunOverlay(sessions []protocol.SessionInfo, currentSessionID string, fetchP
 	m.repoSuggestions = repoSuggestions
 	m.agents = agents
 	m.defaultAgent = defaultAgent
+	m.applyKeys(keys)
 	p := tea.NewProgram(m)
 
 	final, err := p.Run()

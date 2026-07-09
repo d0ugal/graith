@@ -164,6 +164,7 @@ func runRemoteAttach(rh *client.RemoteHost, signer ed25519.PrivateKey, sessionAr
 
 	keys := client.PassthroughKeys{
 		Prefix:      parsePrefixKey(cfg.Keybindings.Prefix),
+		Detach:      parseKeyByte(cfg.Keybindings.Detach),
 		NextSession: parseKeyByte(cfg.Keybindings.NextSession),
 		PrevSession: parseKeyByte(cfg.Keybindings.PrevSession),
 	}
