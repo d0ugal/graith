@@ -1229,6 +1229,17 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					continue
 				}
 
+				// An interactive Ctrl-C from the attached client is user input:
+				// the raw data path it replaced (issue #857) called
+				// NotifyUserInput, so preserve that here to keep the
+				// attached-user idle window (e.g. inbox-notification injection)
+				// accurate.
+				if in.SessionID == attachedSessionID && sm.IsAttachedClient(attachedSessionID, conn) {
+					if pty, ok := sm.GetPTY(attachedSessionID); ok {
+						pty.NotifyUserInput()
+					}
+				}
+
 				if err := sm.InterruptSession(in.SessionID); err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 					continue

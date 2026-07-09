@@ -21,6 +21,12 @@ import (
 // too (issue #857).
 const interruptByte = 0x03
 
+// interruptCP is the Kitty keyboard protocol codepoint for Ctrl-C — the 'c'
+// key (0x03 + 96 = 99). Terminals like Ghostty encode Ctrl-C as the CSI-u
+// sequence "ESC [ 99 ; 5 u" (modifier 5 = ctrl) rather than the raw ETX byte,
+// so the passthrough client intercepts that form too.
+const interruptCP = int(interruptByte) + 96
+
 type PassthroughResult int
 
 const (
@@ -534,20 +540,46 @@ func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, s
 				// Route interactive Ctrl-C through the agent-aware interrupt
 				// path rather than forwarding the raw byte. The daemon applies
 				// the agent's tuned interrupt count/delay (issues #620, #857).
-				// Fall through to raw forwarding when the attached session is
-				// unknown, so Ctrl-C is never silently swallowed.
-				if input[i] == interruptByte && opts.SessionID != "" {
-					if i > sendStart {
-						_ = c.SendData(input[sendStart:i])
+				// Terminals deliver Ctrl-C either as the raw ETX byte or, under
+				// the Kitty keyboard protocol (e.g. Ghostty), as a CSI-u
+				// sequence (ESC [ 99 ; 5 u) — both are intercepted here. Ctrl-C
+				// falls back to raw forwarding when the attached session is
+				// unknown so it is never silently swallowed.
+				if opts.SessionID != "" {
+					if input[i] == interruptByte {
+						if i > sendStart {
+							_ = c.SendData(input[sendStart:i])
+						}
+
+						_ = c.SendControl("interrupt", protocol.InterruptMsg{
+							SessionID: opts.SessionID,
+						})
+
+						sendStart = i + 1
+
+						continue
 					}
 
-					_ = c.SendControl("interrupt", protocol.InterruptMsg{
-						SessionID: opts.SessionID,
-					})
+					if input[i] == '\x1b' {
+						if cp, mods, evType, seqLen, ok := parseKittyCSIu(input, i); ok && cp == interruptCP && mods == 5 {
+							if i > sendStart {
+								_ = c.SendData(input[sendStart:i])
+							}
 
-					sendStart = i + 1
+							// Release events (event_type=3) are consumed but
+							// don't interrupt — only presses/repeats do.
+							if evType != 3 {
+								_ = c.SendControl("interrupt", protocol.InterruptMsg{
+									SessionID: opts.SessionID,
+								})
+							}
 
-					continue
+							i += seqLen - 1
+							sendStart = i + 1
+
+							continue
+						}
+					}
 				}
 			}
 

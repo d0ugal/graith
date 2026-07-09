@@ -908,6 +908,240 @@ func TestCtrlCWithoutSessionIsForwarded(t *testing.T) {
 	}
 }
 
+// TestKittyCtrlCRoutesThroughInterrupt verifies that a Kitty-keyboard-protocol
+// encoded Ctrl-C ("ESC [ 99 ; 5 u", as sent by Ghostty and similar terminals)
+// while attached is routed through the interrupt control message rather than
+// forwarded as raw escape-sequence data (issue #857). Without this, the fix
+// silently does nothing on the exact terminals that motivated #620.
+func TestKittyCtrlCRoutesThroughInterrupt(t *testing.T) {
+	clientConn, daemonConn := net.Pipe()
+	defer func() { _ = daemonConn.Close() }()
+
+	c := newTestClient(clientConn)
+
+	daemonReader := protocol.NewFrameReader(daemonConn)
+	dataCh := make(chan []byte, 10)
+	interruptCh := make(chan protocol.InterruptMsg, 4)
+
+	go func() {
+		for {
+			frame, err := daemonReader.ReadFrame()
+			if err != nil {
+				return
+			}
+
+			switch frame.Channel {
+			case protocol.ChannelData:
+				dataCh <- append([]byte{}, frame.Payload...)
+			case protocol.ChannelControl:
+				env, err := protocol.DecodeControl(frame.Payload)
+				if err != nil || env.Type != "interrupt" {
+					continue
+				}
+
+				var in protocol.InterruptMsg
+				if protocol.DecodePayload(env, &in) == nil {
+					interruptCh <- in
+				}
+			}
+		}
+	}()
+
+	opts := testOpts
+	opts.SessionID = "bonnie"
+
+	stdinR, stdinW := io.Pipe()
+	stdout := &lockedWriter{}
+
+	go func() {
+		time.Sleep(30 * time.Millisecond)
+
+		_, _ = stdinW.Write([]byte("\x1b[99;5u")) // ctrl+c, kitty encoding
+
+		time.Sleep(30 * time.Millisecond)
+
+		_, _ = stdinW.Write([]byte{0x02, 'd'}) // detach to end the loop
+	}()
+
+	ctx := context.Background()
+	result := c.runPassthroughLoop(ctx, opts, stdinR, stdout, nil)
+
+	if result != ResultDetached {
+		t.Fatalf("expected ResultDetached, got %d", result)
+	}
+
+	select {
+	case in := <-interruptCh:
+		if in.SessionID != "bonnie" {
+			t.Fatalf("interrupt targeted %q, want %q", in.SessionID, "bonnie")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for interrupt control message")
+	}
+
+	// The kitty Ctrl-C sequence must never reach the data channel.
+	for {
+		select {
+		case data := <-dataCh:
+			if bytes.Contains(data, []byte("\x1b[99;5u")) {
+				t.Fatalf("kitty Ctrl-C was forwarded on the data channel: %q", data)
+			}
+		case <-time.After(50 * time.Millisecond):
+			return
+		}
+	}
+}
+
+// TestKittyCtrlCReleaseIsNotInterrupt verifies that a Kitty Ctrl-C *release*
+// event ("ESC [ 99 ; 5 : 3 u") is consumed but does NOT trigger an interrupt —
+// only presses and repeats should — and is not forwarded raw either.
+func TestKittyCtrlCReleaseIsNotInterrupt(t *testing.T) {
+	clientConn, daemonConn := net.Pipe()
+	defer func() { _ = daemonConn.Close() }()
+
+	c := newTestClient(clientConn)
+
+	daemonReader := protocol.NewFrameReader(daemonConn)
+	dataCh := make(chan []byte, 10)
+	interruptCh := make(chan struct{}, 4)
+
+	go func() {
+		for {
+			frame, err := daemonReader.ReadFrame()
+			if err != nil {
+				return
+			}
+
+			switch frame.Channel {
+			case protocol.ChannelData:
+				dataCh <- append([]byte{}, frame.Payload...)
+			case protocol.ChannelControl:
+				env, err := protocol.DecodeControl(frame.Payload)
+				if err == nil && env.Type == "interrupt" {
+					interruptCh <- struct{}{}
+				}
+			}
+		}
+	}()
+
+	opts := testOpts
+	opts.SessionID = "haar"
+
+	stdinR, stdinW := io.Pipe()
+	stdout := &lockedWriter{}
+
+	go func() {
+		time.Sleep(30 * time.Millisecond)
+
+		_, _ = stdinW.Write([]byte("\x1b[99;5:3u")) // ctrl+c release
+
+		time.Sleep(30 * time.Millisecond)
+
+		_, _ = stdinW.Write([]byte{0x02, 'd'})
+	}()
+
+	ctx := context.Background()
+	result := c.runPassthroughLoop(ctx, opts, stdinR, stdout, nil)
+
+	if result != ResultDetached {
+		t.Fatalf("expected ResultDetached, got %d", result)
+	}
+
+	select {
+	case <-interruptCh:
+		t.Fatal("release event must not trigger an interrupt")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	// The release sequence must not be forwarded raw either.
+	for {
+		select {
+		case data := <-dataCh:
+			if bytes.Contains(data, []byte("\x1b[99;5")) {
+				t.Fatalf("kitty Ctrl-C release was forwarded on the data channel: %q", data)
+			}
+		case <-time.After(50 * time.Millisecond):
+			return
+		}
+	}
+}
+
+// TestPrefixThenCtrlCIsRawEscapeHatch documents that pressing the prefix key
+// followed by Ctrl-C forwards the raw {prefix, 0x03} bytes rather than routing
+// through the interrupt path — the prefix is the literal-passthrough escape
+// hatch, matching the "unknown prefix key passes through" behavior.
+func TestPrefixThenCtrlCIsRawEscapeHatch(t *testing.T) {
+	clientConn, daemonConn := net.Pipe()
+	defer func() { _ = daemonConn.Close() }()
+
+	c := newTestClient(clientConn)
+
+	daemonReader := protocol.NewFrameReader(daemonConn)
+	dataCh := make(chan []byte, 10)
+	interruptCh := make(chan struct{}, 4)
+
+	go func() {
+		for {
+			frame, err := daemonReader.ReadFrame()
+			if err != nil {
+				return
+			}
+
+			switch frame.Channel {
+			case protocol.ChannelData:
+				dataCh <- append([]byte{}, frame.Payload...)
+			case protocol.ChannelControl:
+				env, err := protocol.DecodeControl(frame.Payload)
+				if err == nil && env.Type == "interrupt" {
+					interruptCh <- struct{}{}
+				}
+			}
+		}
+	}()
+
+	opts := testOpts
+	opts.SessionID = "thrawn"
+
+	stdinR, stdinW := io.Pipe()
+	stdout := &lockedWriter{}
+
+	go func() {
+		time.Sleep(30 * time.Millisecond)
+
+		_, _ = stdinW.Write([]byte{0x02}) // prefix
+
+		time.Sleep(20 * time.Millisecond)
+
+		_, _ = stdinW.Write([]byte{interruptByte}) // then Ctrl-C
+
+		time.Sleep(30 * time.Millisecond)
+
+		_, _ = stdinW.Write([]byte{0x02, 'd'}) // detach to end the loop
+	}()
+
+	ctx := context.Background()
+	result := c.runPassthroughLoop(ctx, opts, stdinR, stdout, nil)
+
+	if result != ResultDetached {
+		t.Fatalf("expected ResultDetached, got %d", result)
+	}
+
+	select {
+	case data := <-dataCh:
+		if !bytes.Equal(data, []byte{0x02, interruptByte}) {
+			t.Fatalf("expected raw {prefix, 0x03} forwarded, got %x", data)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for forwarded prefix+Ctrl-C")
+	}
+
+	select {
+	case <-interruptCh:
+		t.Fatal("prefix+Ctrl-C must not route through the interrupt path")
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
 // prefixKeyOpts mirrors the real key bindings so every prefix branch is
 // reachable from a test.
 var prefixKeyOpts = PassthroughOpts{

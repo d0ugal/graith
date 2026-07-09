@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/protocol"
 	grpty "github.com/d0ugal/graith/internal/pty"
 )
 
@@ -68,6 +69,113 @@ func TestInterruptSession_UsesAgentConfig(t *testing.T) {
 
 	if ptySess.Exited() {
 		t.Error("process ignoring SIGINT should still be running after interrupt")
+	}
+}
+
+// TestInterruptFromAttachedClientMarksUserInput verifies that an interrupt
+// control message from the attached client records user input on the session,
+// so the attached-user idle window (e.g. inbox-notification injection) treats
+// an interactive Ctrl-C as activity — matching the raw data path it replaced
+// (issue #857). Regression test: before the fix the interrupt handler skipped
+// NotifyUserInput entirely.
+func TestInterruptFromAttachedClientMarksUserInput(t *testing.T) {
+	h := newTestHarness(t)
+
+	// Ignore SIGINT so the interrupt doesn't exit the process — otherwise
+	// WaitForUserIdle short-circuits on exit rather than reflecting the
+	// recorded user input.
+	logPath := filepath.Join(h.sm.paths.LogDir, "braw-int.log")
+
+	sess, err := grpty.NewSession(grpty.SessionOpts{
+		ID: "braw-int", Command: "sh", Args: []string{"-c", "trap '' INT; sleep 30"},
+		Dir: t.TempDir(), Rows: 24, Cols: 80, LogPath: logPath,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() {
+		_ = sess.Kill()
+		<-sess.Done()
+		sess.Close()
+	})
+
+	h.sm.mu.Lock()
+	h.sm.state.Sessions["braw-int"] = &SessionState{
+		ID: "braw-int", Name: "braw-interrupt", Agent: "opencode",
+		Status: StatusRunning, CreatedAt: time.Now().UTC(),
+	}
+	h.sm.sessions["braw-int"] = sess
+	h.sm.mu.Unlock()
+
+	// Give the trap time to install before interrupting.
+	time.Sleep(200 * time.Millisecond)
+
+	// Drain frames in the background so the handler's attach-time scrollback
+	// data frame never blocks the unbuffered net.Pipe while the test is busy
+	// in WaitForUserIdle. Control envelopes are routed to a channel.
+	ctrlCh := make(chan protocol.Envelope, 16)
+
+	go func() {
+		for {
+			frame, err := h.reader.ReadFrame()
+			if err != nil {
+				return
+			}
+
+			if frame.Channel == protocol.ChannelControl {
+				if env, err := protocol.DecodeControl(frame.Payload); err == nil {
+					ctrlCh <- env
+				}
+			}
+		}
+	}()
+
+	readCtrl := func() protocol.Envelope {
+		t.Helper()
+
+		select {
+		case env := <-ctrlCh:
+			return env
+		case <-time.After(3 * time.Second):
+			t.Fatal("timeout waiting for control message")
+
+			return protocol.Envelope{}
+		}
+	}
+
+	// Attach so the interrupt is treated as coming from the attached client.
+	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "braw-int"})
+
+	if env := readCtrl(); env.Type != "attached" {
+		t.Fatalf("expected attached, got %q", env.Type)
+	}
+
+	// Before any interrupt the session is idle: WaitForUserIdle returns fast.
+	start := time.Now()
+	if !sess.WaitForUserIdle(150*time.Millisecond, time.Second) {
+		t.Fatal("expected idle before interrupt")
+	}
+
+	if elapsed := time.Since(start); elapsed > 50*time.Millisecond {
+		t.Fatalf("expected immediate idle before interrupt, took %v", elapsed)
+	}
+
+	// Interrupt from the attached client should record user input.
+	h.sendControl(t, "interrupt", protocol.InterruptMsg{SessionID: "braw-int"})
+
+	if env := readCtrl(); env.Type != "interrupted" {
+		t.Fatalf("expected interrupted, got %q", env.Type)
+	}
+
+	// The idle window must now reset — WaitForUserIdle should wait ~150ms.
+	start = time.Now()
+	if !sess.WaitForUserIdle(150*time.Millisecond, 2*time.Second) {
+		t.Fatal("expected idle=true after the window elapses")
+	}
+
+	if elapsed := time.Since(start); elapsed < 100*time.Millisecond {
+		t.Fatalf("interrupt did not reset the user-idle window (returned in %v)", elapsed)
 	}
 }
 
