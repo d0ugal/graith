@@ -49,6 +49,7 @@ func TestSchedulePoll_Cov(t *testing.T) {
 
 	before := time.Now()
 	sm.schedulePoll("bide", time.Hour)
+	after := time.Now()
 
 	sm.prWatch.mu.Lock()
 	next, ok := sm.prWatch.nextPoll["bide"]
@@ -58,8 +59,10 @@ func TestSchedulePoll_Cov(t *testing.T) {
 		t.Fatal("schedulePoll should record a nextPoll time")
 	}
 
-	if next.Before(before.Add(30 * time.Minute)) {
-		t.Errorf("nextPoll should be roughly an hour out, got %v (base %v)", next, before)
+	// nextPoll must be now+1h, bracketed by the before/after snapshots — a bug
+	// that used a different multiple of the interval would fall outside this window.
+	if next.Before(before.Add(time.Hour)) || next.After(after.Add(time.Hour)) {
+		t.Errorf("nextPoll should be ~1h out, got %v (window %v..%v)", next, before.Add(time.Hour), after.Add(time.Hour))
 	}
 }
 
@@ -144,8 +147,9 @@ func TestCommentsAfter_Cov(t *testing.T) {
 		t.Errorf("commentsAfter(>2) should return sorted [3,5], got %+v", got)
 	}
 
-	if got := commentsAfter(comments, 100); got != nil {
-		t.Errorf("commentsAfter with high cursor should return nil, got %+v", got)
+	// Callers only care about the count; nil vs empty is not part of the contract.
+	if got := commentsAfter(comments, 100); len(got) != 0 {
+		t.Errorf("commentsAfter with a cursor past all IDs should be empty, got %+v", got)
 	}
 }
 
@@ -278,10 +282,29 @@ func TestPollSession_NoPRClearsState_Cov(t *testing.T) {
 	cfg := &config.PRWatchConfig{Enabled: true}
 	tgt := prWatchTarget{id: "ken", branch: "bide", worktreePath: cloneDir}
 
+	before := time.Now()
 	sm.pollSession(context.Background(), cfg, tgt)
 
-	if sm.state.Sessions["ken"].PullRequest.Number != 0 {
-		t.Errorf("no-PR poll should clear PR state, got %+v", sm.state.Sessions["ken"].PullRequest)
+	s := sm.state.Sessions["ken"]
+	if s.PullRequest.Number != 0 {
+		t.Errorf("no-PR poll should clear PR state, got %+v", s.PullRequest)
+	}
+
+	if s.CI.State != "" {
+		t.Errorf("no-PR poll should clear CI state, got %+v", s.CI)
+	}
+
+	// The branch should be negative-cached (long back-off), not re-polled soon.
+	sm.prWatch.mu.Lock()
+	next, ok := sm.prWatch.nextPoll["ken"]
+	sm.prWatch.mu.Unlock()
+
+	if !ok {
+		t.Fatal("no-PR poll should schedule a back-off poll")
+	}
+
+	if next.Before(before.Add(prNoPRNegCache - time.Minute)) {
+		t.Errorf("no-PR poll should apply the long negative-cache back-off, got %v", next)
 	}
 }
 
