@@ -331,19 +331,25 @@ func TestSafehouseSockets(t *testing.T) {
 
 	cases := []struct {
 		name        string
+		unix        []string
 		features    []string
 		sshAuthSock string
 		want        []string
 	}{
-		{"ssh feature + sock", []string{"ssh"}, agentSock, []string{daemon, agentSock}},
-		{"ssh feature, no sock", []string{"ssh"}, "", []string{daemon}},
-		{"sock, no ssh feature", nil, agentSock, []string{daemon}},
-		{"sock equals daemon socket (dedup)", []string{"ssh"}, daemon, []string{daemon}},
+		{"ssh feature + sock", []string{daemon}, []string{"ssh"}, agentSock, []string{daemon, agentSock}},
+		{"ssh feature, no sock", []string{daemon}, []string{"ssh"}, "", []string{daemon}},
+		{"sock, no ssh feature", []string{daemon}, nil, agentSock, []string{daemon}},
+		{"sock equals daemon socket (dedup)", []string{daemon}, []string{"ssh"}, daemon, []string{daemon}},
+		// ssh-only path: a caller with no daemon-socket grant (e.g. a sandboxed
+		// MCP server) still gets the SSH agent socket when the feature is on.
+		{"ssh-only, no daemon socket", nil, []string{"ssh"}, agentSock, []string{agentSock}},
+		// duplicates already within UnixSockets are collapsed (full dedup).
+		{"dupes within UnixSockets", []string{daemon, daemon}, nil, "", []string{daemon}},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			opts := WrapOpts{UnixSockets: []string{daemon}, Features: tc.features}
+			opts := WrapOpts{UnixSockets: tc.unix, Features: tc.features}
 			got := safehouseSockets(opts, tc.sshAuthSock)
 
 			if !slices.Equal(got, tc.want) {
