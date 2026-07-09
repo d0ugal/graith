@@ -3465,36 +3465,46 @@ func TestDeleteSucceedsWhenWorktreeAlreadyGone(t *testing.T) {
 	}
 }
 
-func TestDeleteRemovesNonoProfile(t *testing.T) {
+// assertDeleteRemovesRuntimeFile creates a stopped session, writes a per-session
+// runtime artifact at pathFn(sm, id), deletes the session, and asserts the file
+// is gone. Shared by the nono-profile and safehouse-fragment cleanup tests so
+// they don't duplicate the setup boilerplate.
+func assertDeleteRemovesRuntimeFile(t *testing.T, id, name, contents string, pathFn func(*SessionManager, string) string) {
+	t.Helper()
+
 	sm := newTestSessionManager(t)
 	sm.paths.RuntimeDir = t.TempDir()
 
-	sm.state.Sessions["braw1"] = &SessionState{
-		ID:           "braw1",
-		Name:         "braw",
+	sm.state.Sessions[id] = &SessionState{
+		ID:           id,
+		Name:         name,
 		Agent:        "claude",
 		RepoPath:     "/nonexistent/repo",
 		WorktreePath: "/nonexistent/worktree",
-		Branch:       "graith/braw-braw1",
+		Branch:       "graith/" + name + "-" + id,
 		Status:       StatusStopped,
 	}
 
-	profilePath := sm.nonoProfilePath("braw1")
-	if err := os.MkdirAll(filepath.Dir(profilePath), 0o700); err != nil {
+	path := pathFn(sm, id)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
 
-	if err := os.WriteFile(profilePath, []byte("{}"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	if err := sm.Delete("braw1"); err != nil {
+	if err := sm.Delete(id); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 
-	if _, err := os.Stat(profilePath); !os.IsNotExist(err) {
-		t.Errorf("nono profile should be removed after delete, stat err = %v", err)
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("%s should be removed after delete, stat err = %v", filepath.Base(path), err)
 	}
+}
+
+func TestDeleteRemovesNonoProfile(t *testing.T) {
+	assertDeleteRemovesRuntimeFile(t, "braw1", "braw", "{}", (*SessionManager).nonoProfilePath)
 }
 
 func TestNonoProfilePathMatchesWrapOpts(t *testing.T) {
@@ -3509,6 +3519,61 @@ func TestNonoProfilePathMatchesWrapOpts(t *testing.T) {
 
 	if opts.ProfilePath != sm.nonoProfilePath("braw1") {
 		t.Errorf("write path %q != cleanup path %q", opts.ProfilePath, sm.nonoProfilePath("braw1"))
+	}
+}
+
+// TestDeleteRemovesSafehouseFragment: a regression that drops the os.Remove for
+// the safehouse --append-profile fragment would leak a stale .sb file under
+// RuntimeDir on every session delete.
+func TestDeleteRemovesSafehouseFragment(t *testing.T) {
+	assertDeleteRemovesRuntimeFile(t, "canny1", "canny", ";; frag\n", (*SessionManager).safehouseFragmentPath)
+}
+
+func TestSafehouseFragmentPathMatchesWrapOpts(t *testing.T) {
+	// Like TestNonoProfilePathMatchesWrapOpts: Delete must remove exactly the
+	// path sandboxOptsFromConfig tells the safehouse backend to write.
+	sm := newTestSessionManager(t)
+	sm.paths.RuntimeDir = t.TempDir()
+
+	opts := sm.sandboxOptsFromConfig(config.SandboxConfig{}, "braw1", "/nonexistent/worktree", "claude", nil, true)
+
+	if opts.SafehouseFragmentPath != sm.safehouseFragmentPath("braw1") {
+		t.Errorf("fragment write path %q != cleanup path %q", opts.SafehouseFragmentPath, sm.safehouseFragmentPath("braw1"))
+	}
+}
+
+func TestResolveSocketPathResolvesSymlinks(t *testing.T) {
+	// Seatbelt/Landlock match canonical paths, so the daemon must symlink-resolve
+	// the socket path before granting it — otherwise a data/runtime dir under a
+	// symlinked prefix silently re-denies connect (the original bug).
+	realDir := t.TempDir()
+
+	linkDir := filepath.Join(t.TempDir(), "brig") // a symlink pointing at realDir
+	if err := os.Symlink(realDir, linkDir); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	// The socket file must exist for EvalSymlinks to resolve it.
+	sockViaReal := filepath.Join(realDir, "graith.sock")
+	if err := os.WriteFile(sockViaReal, nil, 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	got := resolveSocketPath(filepath.Join(linkDir, "graith.sock"))
+
+	want, err := filepath.EvalSymlinks(sockViaReal)
+	if err != nil {
+		t.Fatalf("EvalSymlinks: %v", err)
+	}
+
+	if got != want {
+		t.Errorf("resolveSocketPath through symlink = %q, want canonical %q", got, want)
+	}
+
+	// Falls back to the raw path when nothing resolves (path does not exist).
+	missing := filepath.Join(realDir, "nae-such", "graith.sock")
+	if got := resolveSocketPath(missing); got != missing {
+		t.Errorf("resolveSocketPath(missing) = %q, want raw %q", got, missing)
 	}
 }
 

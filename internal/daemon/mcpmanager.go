@@ -300,6 +300,12 @@ func (m *MCPManager) startProcess(serverCfg config.MCPServerConfig, proxyID stri
 			Network:        networkPolicy(merged.Network),
 			BackendCommand: merged.Command,
 			// No session ID here; nono writes a temp profile (empty ProfilePath).
+			// UnixSockets is deliberately NOT set: MCP servers are tools, not
+			// daemon clients, so a sandboxed MCP server intentionally cannot reach
+			// the daemon socket. The only auto-injected server that talks to the
+			// daemon (the `graith` server) runs unsandboxed (see hooks.go), so it
+			// needs no grant. A user-configured sandboxed server that shells out to
+			// `gr` would hit the original bug — accepted, pre-existing limitation.
 		}
 
 		var wrapErr error

@@ -227,6 +227,52 @@ func TestWrapUnixSocketsAppendProfile(t *testing.T) {
 	}
 }
 
+// TestWrapUnixSocketsMultiple ensures every granted socket gets its own
+// connect rule in the fragment (the backend loops over UnixSockets).
+func TestWrapUnixSocketsMultiple(t *testing.T) {
+	frag := filepath.Join(t.TempDir(), "canny.sb")
+	socks := []string{"/hame/user/.graith/graith.sock", "/hame/user/.graith/other.sock"}
+	opts := WrapOpts{
+		Backend:               BackendSafehouse,
+		WorktreeDir:           "/tmp/bothy",
+		UnixSockets:           socks,
+		SafehouseFragmentPath: frag,
+		EnvKeys:               []string{"TERM"},
+	}
+
+	if _, _, err := Wrap("claude", nil, opts); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, err := os.ReadFile(frag)
+	if err != nil {
+		t.Fatalf("read fragment: %v", err)
+	}
+
+	for _, s := range socks {
+		want := `(allow network-outbound (remote unix-socket (path-literal "` + s + `")))`
+		if !strings.Contains(string(data), want) {
+			t.Errorf("fragment missing grant for %s:\n%s", s, data)
+		}
+	}
+}
+
+// TestSeatbeltString locks the escaping of the Seatbelt string literal: a path
+// with a quote or backslash must not break out of the literal or inject policy.
+func TestSeatbeltString(t *testing.T) {
+	cases := map[string]string{
+		`/hame/user/.graith/graith.sock`: `"/hame/user/.graith/graith.sock"`,
+		`/glen/with "quote"/s.sock`:      `"/glen/with \"quote\"/s.sock"`,
+		`/wynd/with\back/s.sock`:         `"/wynd/with\\back/s.sock"`,
+	}
+
+	for in, want := range cases {
+		if got := seatbeltString(in); got != want {
+			t.Errorf("seatbeltString(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestWrapNoEnvKeys(t *testing.T) {
 	opts := WrapOpts{Backend: BackendSafehouse, WorktreeDir: "/tmp/bothy"}
 
@@ -507,9 +553,19 @@ func TestBuildNonoProfileUnixSockets(t *testing.T) {
 		t.Errorf("daemon socket not in filesystem.unix_socket (cannot connect): %v", p.Filesystem.UnixSocket)
 	}
 
-	// It must NOT be demoted to a read-only grant.
-	if slices.Contains(p.Filesystem.Read, sock) || slices.Contains(p.Filesystem.ReadFile, sock) {
-		t.Errorf("daemon socket wrongly in a read-only grant: read=%v read_file=%v", p.Filesystem.Read, p.Filesystem.ReadFile)
+	// It must appear ONLY in unix_socket — not demoted to any file grant
+	// (read-only OR read/write). A file grant is useless for connect and would
+	// misleadingly look granted.
+	for name, list := range map[string][]string{
+		"read":       p.Filesystem.Read,
+		"read_file":  p.Filesystem.ReadFile,
+		"allow":      p.Filesystem.Allow,
+		"allow_file": p.Filesystem.AllowFile,
+		"write":      p.Filesystem.Write,
+	} {
+		if slices.Contains(list, sock) {
+			t.Errorf("daemon socket wrongly in filesystem.%s (should be unix_socket only): %v", name, list)
+		}
 	}
 }
 
