@@ -101,7 +101,6 @@ func TestResolveStoreRepoPathCovErrorOutsideGit(t *testing.T) {
 	storeTestEnv(t, false, "")
 
 	t.Setenv("GRAITH_REPO_PATH", "")
-	os.Unsetenv("GRAITH_REPO_PATH")
 
 	// A fresh temp dir is not a git repo, so detection must fail cleanly.
 	chdirOutsideGit(t)
@@ -168,7 +167,7 @@ func TestResolveCurrentRepoCovEnv(t *testing.T) {
 
 func TestResolveCurrentRepoCovNonGit(t *testing.T) {
 	t.Setenv("GRAITH_REPO_PATH", "")
-	os.Unsetenv("GRAITH_REPO_PATH")
+
 	chdirOutsideGit(t)
 
 	if got := resolveCurrentRepo(); got != "" {
@@ -180,7 +179,7 @@ func TestCheckWritePermissionCovNoCurrentRepo(t *testing.T) {
 	storeTestEnv(t, false, "")
 
 	t.Setenv("GRAITH_REPO_PATH", "")
-	os.Unsetenv("GRAITH_REPO_PATH")
+
 	chdirOutsideGit(t)
 
 	// current repo is empty -> always allowed.
@@ -220,7 +219,7 @@ func TestInGraithSessionWithNoRepoCov(t *testing.T) {
 	t.Run("session with no repo", func(t *testing.T) {
 		t.Setenv("GRAITH_SESSION_ID", "braw-session")
 		t.Setenv("GRAITH_REPO_PATH", "")
-		os.Unsetenv("GRAITH_REPO_PATH")
+
 		chdirOutsideGit(t)
 
 		if !inGraithSessionWithNoRepo() {
@@ -230,7 +229,6 @@ func TestInGraithSessionWithNoRepoCov(t *testing.T) {
 
 	t.Run("no session id", func(t *testing.T) {
 		t.Setenv("GRAITH_SESSION_ID", "")
-		os.Unsetenv("GRAITH_SESSION_ID")
 
 		if inGraithSessionWithNoRepo() {
 			t.Error("expected false when GRAITH_SESSION_ID is unset")
@@ -336,6 +334,7 @@ func TestStoreAppendCov(t *testing.T) {
 
 func TestStorePutCovJSONOutput(t *testing.T) {
 	storeTestEnv(t, true, "")
+
 	jsonOutput = true
 	out = output.New(true)
 

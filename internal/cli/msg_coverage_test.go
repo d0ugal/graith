@@ -76,10 +76,10 @@ func TestDetectSenderCovFromEnv(t *testing.T) {
 }
 
 func TestDetectSenderCovPIDFallback(t *testing.T) {
+	// detectSender reads these via os.Getenv, so an empty value is
+	// indistinguishable from unset — clearing them exercises the pid fallback.
 	t.Setenv("GRAITH_SESSION_ID", "")
-	os.Unsetenv("GRAITH_SESSION_ID")
 	t.Setenv("GRAITH_SESSION_NAME", "")
-	os.Unsetenv("GRAITH_SESSION_NAME")
 
 	id, name := detectSender()
 	if !strings.HasPrefix(id, "pid:") {
