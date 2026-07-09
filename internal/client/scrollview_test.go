@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func updateScrollModel(m scrollViewModel, msg tea.Msg) scrollViewModel {
@@ -26,9 +27,21 @@ func TestCleanScrollback(t *testing.T) {
 			"dreich\nbraw",
 		},
 		{
-			"strips cursor addressing",
+			// Cursor-row moves and screen clears become newlines so regions
+			// drawn at different rows aren't concatenated onto one line.
+			"cursor addressing becomes row breaks",
 			"\x1b[2J\x1b[Hbothy\x1b[10;5Hglen",
-			"bothyglen",
+			"bothy\nglen",
+		},
+		{
+			"cursor next/prev line breaks rows",
+			"braw\x1b[1Ebonnie\x1b[Fcanny",
+			"braw\nbonnie\ncanny",
+		},
+		{
+			"leading blank lines dropped",
+			"\n\n\nwhin",
+			"whin",
 		},
 		{
 			"collapses carriage-return overwrite",
@@ -141,6 +154,31 @@ func TestScrollViewModel_GotoTopBottom(t *testing.T) {
 	m = updateScrollModel(m, tea.KeyPressMsg{Code: 'G', Text: "G"})
 	if !m.viewport.AtBottom() {
 		t.Error("G should scroll to the bottom")
+	}
+}
+
+// TestScrollViewModel_HeaderFooterFitWidth guards against the header/footer
+// wrapping on a narrow terminal (or with a long title), which would push the
+// viewport past the terminal height and clobber content.
+func TestScrollViewModel_HeaderFooterFitWidth(t *testing.T) {
+	longTitle := "Scrollback — " + strings.Repeat("verra-lang-name-", 8)
+
+	m := newScrollViewModel(longTitle, "content")
+	m = updateScrollModel(m, tea.WindowSizeMsg{Width: 30, Height: 24})
+
+	lines := strings.Split(m.View().Content, "\n")
+	if len(lines) != 24 {
+		t.Fatalf("view has %d lines, want 24 (must equal terminal height)", len(lines))
+	}
+
+	// Header (line 0) and footer (last line) must not exceed the width once
+	// ANSI styling is discounted.
+	if w := ansi.StringWidth(lines[0]); w > 30 {
+		t.Errorf("header visible width = %d, want <= 30", w)
+	}
+
+	if w := ansi.StringWidth(lines[len(lines)-1]); w > 30 {
+		t.Errorf("footer visible width = %d, want <= 30", w)
 	}
 }
 

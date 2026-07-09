@@ -2,6 +2,7 @@ package client
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"charm.land/bubbles/v2/viewport"
@@ -10,13 +11,24 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
+// scrollbackRowBreakRE matches escape sequences that reposition the cursor to a
+// different row or clear the screen: cursor position (CSI H / CSI f), cursor
+// next/previous line (CSI E / CSI F), and erase-display (CSI J). These are
+// turned into newlines by cleanScrollback so regions the TUI drew at different
+// rows aren't concatenated onto one line once the escapes are stripped.
+var scrollbackRowBreakRE = regexp.MustCompile(`\x1b\[[0-9;]*[HfEF]|\x1b\[[0-9]*J`)
+
 // cleanScrollback turns raw PTY scrollback bytes into plain, scroll-friendly
-// text. It strips ANSI escape sequences (cursor addressing, colours) so an
-// agent TUI's redraws don't corrupt the pager, collapses carriage-return
-// overwrites (progress bars/spinners rewrite a line in place) to the final
-// text, and drops trailing blank lines. The result is line-oriented history
-// suitable for a viewport.
+// text. This is a best-effort, lossy transform: it converts cursor-row moves
+// and screen clears to newlines, strips the remaining ANSI (colours, other
+// escapes), and collapses carriage-return overwrites (progress bars/spinners
+// rewriting a line in place) to the final text. It is clean and readable for
+// line-oriented output (shell sessions, plain logs); a full-screen agent TUI
+// that repaints via absolute cursor addressing on the alternate screen won't
+// reconstruct exactly, but stays legible rather than a run-together escape
+// soup. Leading and trailing blank lines are dropped.
 func cleanScrollback(raw string) string {
+	raw = scrollbackRowBreakRE.ReplaceAllString(raw, "\n")
 	stripped := ansi.Strip(raw)
 	lines := strings.Split(stripped, "\n")
 
@@ -33,6 +45,10 @@ func cleanScrollback(raw string) string {
 
 	for len(out) > 0 && strings.TrimSpace(out[len(out)-1]) == "" {
 		out = out[:len(out)-1]
+	}
+
+	for len(out) > 0 && strings.TrimSpace(out[0]) == "" {
+		out = out[1:]
 	}
 
 	return strings.Join(out, "\n")
@@ -108,8 +124,12 @@ func (m scrollViewModel) View() tea.View {
 	dim := lipgloss.NewStyle().Foreground(colorFaint)
 
 	pct := int(m.viewport.ScrollPercent() * 100)
-	header := titleStyle.Render(m.title)
-	footer := dim.Render(fmt.Sprintf("↑/↓ scroll · pgup/pgdn page · g/G top/bottom · q quit · %d%%", pct))
+
+	// Truncate header/footer to the terminal width so a long title or a narrow
+	// terminal can't wrap them onto a second row — that would push the viewport
+	// (sized at height-2) past the bottom and clobber content.
+	header := ansi.Truncate(titleStyle.Render(m.title), m.width, "")
+	footer := ansi.Truncate(dim.Render(fmt.Sprintf("↑/↓ scroll · pgup/pgdn page · g/G top/bottom · q quit · %d%%", pct)), m.width, "")
 
 	v := tea.NewView(header + "\n" + m.viewport.View() + "\n" + footer)
 	v.AltScreen = true
