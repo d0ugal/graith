@@ -280,6 +280,56 @@ func testRealAdapters() async throws {
     check(!connected, "real host client starts disconnected")
 }
 
+// MARK: - Space-drag → arrow keys (issue #979)
+
+func testSpaceDrag() {
+    section("SpaceDragTracker — space drag → arrow keys (#979)")
+
+    // A plain tap (no movement) emits nothing and doesn't commit ⇒ space is sent.
+    var tap = SpaceDragTracker(threshold: 22)
+    tap.begin()
+    check(tap.update(translation: .zero).isEmpty, "no translation emits no arrow")
+    check(!tap.didEmit, "a stationary tap does not commit (space is typed)")
+
+    // A short drag past the threshold emits exactly one arrow in that direction
+    // and commits (space suppressed) — the "single-tap drag" case.
+    var right = SpaceDragTracker(threshold: 22)
+    right.begin()
+    check(right.update(translation: CGPoint(x: 25, y: 0)) == [.arrowRight], "right drag ⇒ one arrowRight")
+    check(right.didEmit, "an emitted arrow commits the drag (suppresses space)")
+
+    // Each axis maps to the expected arrow. Y grows downward on screen.
+    var up = SpaceDragTracker(threshold: 22); up.begin()
+    check(up.update(translation: CGPoint(x: 0, y: -30)) == [.arrowUp], "up drag ⇒ arrowUp")
+    var down = SpaceDragTracker(threshold: 22); down.begin()
+    check(down.update(translation: CGPoint(x: 0, y: 30)) == [.arrowDown], "down drag ⇒ arrowDown")
+    var left = SpaceDragTracker(threshold: 22); left.begin()
+    check(left.update(translation: CGPoint(x: -30, y: 0)) == [.arrowLeft], "left drag ⇒ arrowLeft")
+
+    // A long continuous drag emits repeated arrows — one per threshold of travel.
+    var run = SpaceDragTracker(threshold: 20); run.begin()
+    check(run.update(translation: CGPoint(x: 65, y: 0)) == [.arrowRight, .arrowRight, .arrowRight],
+          "65pt / 20pt threshold ⇒ three arrowRight")
+
+    // Incremental updates accumulate: the second call only emits newly-crossed
+    // thresholds, not the whole distance again.
+    var incr = SpaceDragTracker(threshold: 20); incr.begin()
+    check(incr.update(translation: CGPoint(x: 25, y: 0)) == [.arrowRight], "first 25pt ⇒ one arrowRight")
+    check(incr.update(translation: CGPoint(x: 45, y: 0)) == [.arrowRight], "next 20pt ⇒ one more arrowRight")
+    check(incr.update(translation: CGPoint(x: 50, y: 0)).isEmpty, "sub-threshold advance emits nothing")
+
+    // Dominant axis wins per step: a mostly-vertical drag reads as up/down.
+    var diag = SpaceDragTracker(threshold: 20); diag.begin()
+    check(diag.update(translation: CGPoint(x: 5, y: 30)) == [.arrowDown], "vertical-dominant drag ⇒ arrowDown")
+
+    // begin() resets committed state so the tracker is reusable across drags.
+    var reused = SpaceDragTracker(threshold: 20); reused.begin()
+    _ = reused.update(translation: CGPoint(x: 40, y: 0))
+    check(reused.didEmit, "committed after a drag")
+    reused.begin()
+    check(!reused.didEmit, "begin() clears the committed flag")
+}
+
 // MARK: - Frame codec (channel byte + BE length) — mirrors frame.go
 
 func testFrameCodec() {
@@ -312,6 +362,7 @@ struct Smoke {
             try await testAppModel()
             try await testAttach()
             try await testRealAdapters()
+            testSpaceDrag()
             testFrameCodec()
         } catch {
             print("EXCEPTION: \(error)")
