@@ -344,6 +344,22 @@ public final class GhosttyTerminalState {
         return nil
     }
 
+    /// Encode a single mouse-wheel tick. A wheel tick is momentary and has no
+    /// matching release, so — unlike `encodeMouse(action: PRESS, …)` — it must not
+    /// leave the encoder believing a button is held (which would turn the next
+    /// pointer move into a drag, motion-with-button). Clears the "any button
+    /// pressed" bookkeeping that the PRESS sets.
+    public func encodeMouseWheel(button: GhosttyMouseButton, mods: GhosttyMods,
+                                 x: Float, y: Float) -> Data? {
+        let data = encodeMouse(action: GHOSTTY_MOUSE_ACTION_PRESS, button: button, mods: mods, x: x, y: y)
+        anyButtonPressed = false
+        if let mouseEncoder {
+            var pressed = false
+            ghostty_mouse_encoder_setopt(mouseEncoder, GHOSTTY_MOUSE_ENCODER_OPT_ANY_BUTTON_PRESSED, &pressed)
+        }
+        return data
+    }
+
     // MARK: - Scrollback
 
     public func scrollViewport(delta: Int) {

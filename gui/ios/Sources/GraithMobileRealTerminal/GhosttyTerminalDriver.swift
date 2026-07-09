@@ -93,8 +93,7 @@ public final class GhosttyTerminalDriver: TerminalCoreDriving {
                                  cellWidth: cellWidth, cellHeight: cellHeight)
         var out: [Data] = []
         for _ in 0..<abs(ticks) {
-            if let encoded = core.encodeMouse(
-                action: GHOSTTY_MOUSE_ACTION_PRESS,
+            if let encoded = core.encodeMouseWheel(
                 button: button, mods: 0,
                 x: Float(surfaceX), y: Float(surfaceY)
             ) {
