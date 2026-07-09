@@ -233,6 +233,36 @@ and the templated `--user-data-dir` keeps each session's profile separate.
 - Tests must pass with `-race` flag
 - Use `t.TempDir()` for test fixtures, not hardcoded paths
 
+### Coverage expectations
+
+Test coverage is a hard requirement, not a nice-to-have.
+
+- **Keep coverage high and never regress it.** The target is **≥ 80%** of Go
+  statements overall. The self-hosted Coverage workflow comments the Go coverage
+  delta on every PR — a negative delta is a red flag and needs justification in
+  the PR description.
+- **New code ships with tests.** Any PR that adds behaviour adds the tests that
+  exercise it. Don't defer test coverage to "a follow-up".
+- **Test real behaviour, not lines.** Cover edge cases and error paths — invalid
+  input, missing files, auth failures, context cancellation, rollback — not just
+  the happy path. Tests written only to touch lines are worse than no tests: they
+  give false confidence and calcify implementation details.
+- **Some code is genuinely hard to unit-test** (raw PTY passthrough, the
+  interactive attach loop, unix-socket servers). Extract the pure logic
+  (state machines, formatters, validators) into functions you *can* test, and
+  cover those. Prefer testing a bubbletea `Model`'s `Update`/`View` over driving
+  a real terminal.
+- Name test files with the plain `<file>_test.go` convention — don't encode the
+  reason you wrote them (e.g. `foo_coverage_test.go`) into the filename.
+
+### Regression tests
+
+**Every bug fix must come with a regression test.** The test should fail against
+the old (buggy) code and pass with the fix — write it first, watch it fail, then
+fix. This locks the bug closed, documents the intended behaviour, and stops the
+same regression from silently returning later. A bug-fix PR without a regression
+test should be sent back.
+
 ### Scots words in test fixtures
 
 The project name "graith" is an old Scots word meaning equipment or gear. As a
