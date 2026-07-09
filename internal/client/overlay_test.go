@@ -2382,15 +2382,30 @@ func TestOverlayConfigurableKeys(t *testing.T) {
 	}
 }
 
-// TestOverlayOldLiteralIgnoredAfterRemap confirms the previously-hardcoded 'x'
-// no longer opens the delete prompt once delete_session is rebound.
+// TestOverlayOldLiteralIgnoredAfterRemap confirms the previously-hardcoded
+// literals no longer trigger their action once the key is rebound.
 func TestOverlayOldLiteralIgnoredAfterRemap(t *testing.T) {
-	m := newOverlayModel(overlayTestSessions(), "", nil, func(string) error { return nil }, nil, nil)
-	m.applyKeys(OverlayKeys{DeleteSession: "z"})
+	cases := []struct {
+		name    string
+		keys    OverlayKeys
+		oldKey  string
+		notWant overlayState
+	}{
+		{"delete", OverlayKeys{DeleteSession: "z"}, "x", stateConfirmDelete},
+		{"resume", OverlayKeys{ResumeSession: "Z"}, "R", stateRestartMenu},
+		{"search", OverlayKeys{Search: "?"}, "/", stateFilter},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newOverlayModel(overlayTestSessions(), "", nil, func(string) error { return nil }, nil, nil)
+			m.restartSession = func(string) error { return nil }
+			m.applyKeys(tc.keys)
 
-	updated, _ := sendKey(m, "x")
-	if got := asOverlay(updated).state; got == stateConfirmDelete {
-		t.Fatal("'x' should not open confirm-delete after delete_session is remapped to 'z'")
+			updated, _ := sendKey(m, tc.oldKey)
+			if got := asOverlay(updated).state; got == tc.notWant {
+				t.Fatalf("old literal %q should not trigger %v after remap", tc.oldKey, tc.notWant)
+			}
+		})
 	}
 }
 

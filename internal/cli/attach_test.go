@@ -172,6 +172,41 @@ func TestPassthroughKeysFromConfig(t *testing.T) {
 	}
 }
 
+// TestRemotePassthroughKeysFromConfig verifies remote attach still wires
+// session_list and shell (regression for the #918 review): without them,
+// prefix+w / prefix+s forward raw bytes to the remote agent instead of hitting
+// the "not yet supported — detaching" notice.
+func TestRemotePassthroughKeysFromConfig(t *testing.T) {
+	oldCfg := cfg
+
+	t.Cleanup(func() { cfg = oldCfg })
+
+	cfg = &config.Config{
+		Keybindings: config.Keybindings{
+			Prefix:      "ctrl+b",
+			Detach:      "d",
+			SessionList: "w",
+			Shell:       "s",
+			NextSession: "n",
+			PrevSession: "p",
+		},
+	}
+
+	keys := remotePassthroughKeysFromConfig()
+
+	if keys.SessionList != 'w' {
+		t.Errorf("remote SessionList = %q, want 'w'", keys.SessionList)
+	}
+
+	if keys.Shell != 's' {
+		t.Errorf("remote Shell = %q, want 's'", keys.Shell)
+	}
+
+	if keys.Detach != 'd' || keys.Prefix != 0x02 {
+		t.Errorf("remote Detach/Prefix = %q/%#x, want 'd'/0x02", keys.Detach, keys.Prefix)
+	}
+}
+
 // TestOverlayKeysFromConfig verifies the picker keybindings map into OverlayKeys.
 func TestOverlayKeysFromConfig(t *testing.T) {
 	oldCfg := cfg

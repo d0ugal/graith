@@ -1750,6 +1750,10 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 				return m, tea.Quit
 
+			// keyDelete/keyResume/keySearch are the configurable picker keys.
+			// This is a first-match-wins switch, so a user who rebinds one onto
+			// an existing literal (e.g. search onto "q") gets whichever case
+			// appears first. Defaults (x/R//) don't collide with any literal.
 			case m.keyDelete:
 				if _, ok := m.list.SelectedItem().(sessionItem); ok {
 					m.state = stateConfirmDelete
