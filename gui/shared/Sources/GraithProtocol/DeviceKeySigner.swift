@@ -11,11 +11,12 @@ import Foundation
 /// Wire contract (verified against `internal/daemon/pairing.go` `verifyPoP`):
 /// - ``publicKeyRaw()`` returns the **raw 32-byte** ed25519 public key; the
 ///   client base64-std encodes it into `PairRequestMsg.devicePubKey`.
-/// - ``sign(_:)`` returns the **raw 64-byte** ed25519 signature over the nonce
-///   bytes it is given; the client base64-std encodes it into
-///   `AuthProofMsg.signature`.
-/// - The nonce passed to ``sign(_:)`` is the challenge string's **verbatim
-///   UTF-8 bytes** (the daemon signs `[]byte(nonce)`, not a base64-decode).
+/// - ``sign(_:)`` returns the **raw 64-byte** ed25519 signature over the bytes
+///   it is given; the client base64-std encodes it into `AuthProofMsg.signature`.
+/// - The proof-of-possession signing input is **not** the bare nonce: it is the
+///   nonce bound to the TLS channel's server-cert SPKI (issue #886), built by
+///   ``proof(forNonce:channelBinding:)`` to match the daemon's
+///   `protocol.PoPSigningInput`.
 public protocol DeviceKeySigner: Sendable {
     /// The device ID assigned by the daemon at pairing. Empty until paired
     /// (a fresh device sends `pair_request` before it has an ID).
@@ -24,8 +25,8 @@ public protocol DeviceKeySigner: Sendable {
     /// The raw 32-byte ed25519 public key for `pair_request`.
     func publicKeyRaw() throws -> Data
 
-    /// Sign the challenge nonce bytes, returning the raw 64-byte signature.
-    func sign(_ nonce: Data) throws -> Data
+    /// Sign the given bytes, returning the raw 64-byte signature.
+    func sign(_ message: Data) throws -> Data
 }
 
 public extension DeviceKeySigner {
@@ -34,10 +35,17 @@ public extension DeviceKeySigner {
         try publicKeyRaw().base64EncodedString()
     }
 
-    /// Produce the `AuthProofMsg` for a challenge: sign the nonce's UTF-8 bytes
-    /// and base64-std encode the signature.
-    func proof(forNonce nonce: String) throws -> AuthProofMsg {
-        let sig = try sign(Data(nonce.utf8))
+    /// Produce the `AuthProofMsg` for a challenge, binding the proof to the TLS
+    /// channel it is presented over (issue #886): sign
+    /// `"graith-pop-v1:" + nonce + ":" + spki` and base64-std encode the
+    /// signature. `spki` is the base64 SHA-256 SPKI pin of the certificate this
+    /// connection actually observed — never one the peer reports — so a MITM
+    /// relaying the handshake (who presents a different cert, hence a different
+    /// SPKI) cannot forward a captured proof. Must stay byte-for-byte identical
+    /// to the daemon's `protocol.PoPSigningInput`.
+    func proof(forNonce nonce: String, channelBinding spki: String) throws -> AuthProofMsg {
+        let input = Data("graith-pop-v1:\(nonce):\(spki)".utf8)
+        let sig = try sign(input)
         return AuthProofMsg(deviceID: deviceID, signature: sig.base64EncodedString())
     }
 }

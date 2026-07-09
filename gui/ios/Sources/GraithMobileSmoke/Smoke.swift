@@ -41,6 +41,16 @@ func testDeviceIdentity() throws {
     check(key.isValidSignature(sig, for: nonce), "signature verifies over the nonce")
     check(!key.isValidSignature(sig, for: Data("thrawn".utf8)), "signature rejects a different message")
 
+    // Proof-of-possession binds the nonce to the TLS channel's SPKI (issue #886).
+    let proof = try id.proof(forNonce: "haar-nonce", channelBinding: "bide-spki-pin")
+    let proofSig = Data(base64Encoded: proof.signature)!
+    let bound = Data("graith-pop-v1:haar-nonce:bide-spki-pin".utf8)
+    check(key.isValidSignature(proofSig, for: bound), "proof verifies over the channel-bound input")
+    check(!key.isValidSignature(proofSig, for: Data("haar-nonce".utf8)),
+          "proof does NOT verify as a bare nonce (defeats MITM relay)")
+    check(!key.isValidSignature(proofSig, for: Data("graith-pop-v1:haar-nonce:thrawn-mitm-pin".utf8)),
+          "proof does NOT verify bound to a different SPKI")
+
     // Key is stable across instances backed by the same store.
     let id2 = try DeviceIdentity(keychain: secrets)
     check(try id2.publicKeyRaw() == pub, "key is stable across instances")

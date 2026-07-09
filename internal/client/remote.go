@@ -120,7 +120,7 @@ func ConnectRemote(paths config.Paths, rh *RemoteHost, signer ed25519.PrivateKey
 		return nil, fmt.Errorf("unexpected handshake response: %s", resp.Type)
 	}
 
-	if err := c.completeRemotePoP(signer); err != nil {
+	if err := c.completeRemotePoP(signer, rh.TLSPin); err != nil {
 		c.Close()
 		return nil, err
 	}
@@ -264,8 +264,9 @@ func PairRemote(paths config.Paths, host string, port int, profile, deviceLabel,
 
 // completeRemotePoP answers the daemon's auth_challenge with a signed auth_proof
 // and consumes the auth_ok acknowledgement, so the connection advances to its
-// paired role before any RPC is issued.
-func (c *Client) completeRemotePoP(signer ed25519.PrivateKey) error {
+// paired role before any RPC is issued. The signature binds the nonce to the
+// pinned server SPKI (spki) so a MITM cannot relay the proof (issue #886).
+func (c *Client) completeRemotePoP(signer ed25519.PrivateKey, spki string) error {
 	chEnv, err := c.ReadControlResponse()
 	if err != nil {
 		return err
@@ -280,7 +281,7 @@ func (c *Client) completeRemotePoP(signer ed25519.PrivateKey) error {
 		return err
 	}
 
-	sig := base64.StdEncoding.EncodeToString(ed25519.Sign(signer, []byte(ch.Nonce)))
+	sig := base64.StdEncoding.EncodeToString(ed25519.Sign(signer, protocol.PoPSigningInput(ch.Nonce, spki)))
 
 	if err := c.SendControl("auth_proof", protocol.AuthProofMsg{Signature: sig}); err != nil {
 		return err

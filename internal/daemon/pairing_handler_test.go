@@ -198,8 +198,9 @@ func TestProofOfPossessionUnlocksRemoteHuman(t *testing.T) {
 		t.Fatalf("list before PoP: expected error, got %q", env.Type)
 	}
 
-	// Sign the challenge and present proof.
-	sig := base64.StdEncoding.EncodeToString(ed25519.Sign(priv, []byte(ch.Nonce)))
+	// Sign the challenge (bound to the daemon's TLS pin, issue #886) and present
+	// proof.
+	sig := base64.StdEncoding.EncodeToString(ed25519.Sign(priv, protocol.PoPSigningInput(ch.Nonce, sm.remoteTLSPin)))
 	rc.send(t, "auth_proof", protocol.AuthProofMsg{Signature: sig}, token)
 
 	if env := rc.read(t); env.Type != "auth_ok" {
@@ -309,7 +310,7 @@ func TestRemoteGuestReadOnlyEndToEnd(t *testing.T) {
 	rc := newRemoteConn(t, sm, id)
 	ch := rc.handshake(t, sm)
 
-	rc.send(t, "auth_proof", protocol.AuthProofMsg{Signature: base64.StdEncoding.EncodeToString(ed25519.Sign(priv, []byte(ch.Nonce)))}, token)
+	rc.send(t, "auth_proof", protocol.AuthProofMsg{Signature: base64.StdEncoding.EncodeToString(ed25519.Sign(priv, protocol.PoPSigningInput(ch.Nonce, sm.remoteTLSPin)))}, token)
 
 	if env := rc.read(t); env.Type != "auth_ok" {
 		t.Fatalf("expected auth_ok, got %q", env.Type)
@@ -350,7 +351,7 @@ func TestRevokeDropsLiveRemoteConnection(t *testing.T) {
 	rc := newRemoteConn(t, sm, id)
 	ch := rc.handshake(t, sm)
 
-	rc.send(t, "auth_proof", protocol.AuthProofMsg{Signature: base64.StdEncoding.EncodeToString(ed25519.Sign(priv, []byte(ch.Nonce)))}, token)
+	rc.send(t, "auth_proof", protocol.AuthProofMsg{Signature: base64.StdEncoding.EncodeToString(ed25519.Sign(priv, protocol.PoPSigningInput(ch.Nonce, sm.remoteTLSPin)))}, token)
 
 	if env := rc.read(t); env.Type != "auth_ok" {
 		t.Fatalf("expected auth_ok, got %q", env.Type)
