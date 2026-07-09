@@ -1,5 +1,71 @@
 # Changelog
 
+## [0.66.8](https://github.com/d0ugal/graith/compare/v0.66.7...v0.66.8) (2026-07-09)
+
+
+### Bug Fixes
+
+* default all pr_watch notifications to on when enabled ([ebffe36](https://github.com/d0ugal/graith/commit/ebffe364423e423cc539f3bfca629e359f224c76))
+* **doctor:** report sandbox denial instead of false daemon failures ([658f3be](https://github.com/d0ugal/graith/commit/658f3be7cd6cf59e11f1d3b1295192788d9a68d9)), closes [#945](https://github.com/d0ugal/graith/issues/945)
+* **doctor:** reserve --disk hint for anomalies and expose disk_measured ([f12e7f6](https://github.com/d0ugal/graith/commit/f12e7f6f35ba4457f130c5020099032681e133a7))
+* run git-pull's first tick shortly after daemon start ([8be5201](https://github.com/d0ugal/graith/commit/8be52019e37704ae8a185d67a0fd9081e622b518))
+* **sandbox:** grant daemon socket connect access to sandboxed agents ([6476943](https://github.com/d0ugal/graith/commit/64769433c342b394ff9c1c61e7c73058be3d6dce))
+* update module github.com/cilium/ebpf to v0.22.0 ([2ee8d11](https://github.com/d0ugal/graith/commit/2ee8d11641e6cb7aef1a284282d78ad1efb1749c))
+* update module github.com/go-quicktest/qt to v1.102.0 ([a12c70e](https://github.com/d0ugal/graith/commit/a12c70ed9a34f19119c22d2b6a800d807f2573f0))
+* update module github.com/jsimonetti/rtnetlink to v1.4.2 ([1d0a5d3](https://github.com/d0ugal/graith/commit/1d0a5d33ceeb03161817772f00d772cd5e654484))
+* update module golang.org/x/crypto to v0.54.0 ([4500298](https://github.com/d0ugal/graith/commit/45002989e512fc8b8e00af4cc0ec1bd3ff0b31a8))
+* update module golang.org/x/net to v0.57.0 ([060c855](https://github.com/d0ugal/graith/commit/060c8554a58bb1696963113fdf695326bd73febd))
+
+
+### Performance Improvements
+
+* **doctor:** gate on-disk size scans behind --disk flag ([73a7da5](https://github.com/d0ugal/graith/commit/73a7da5c4b7f2552d353a77993f543f73fb60533))
+
+
+### Documentation
+
+* **agents:** require high test coverage and regression tests ([d69e011](https://github.com/d0ugal/graith/commit/d69e011bf4ba270989e75633a7ff8bf7caf51d5b))
+* **sandbox:** note safehouse vs nono socket-grant divergence ([08e6493](https://github.com/d0ugal/graith/commit/08e649349074ef8064e32a128ec783ec4e8fd0a3))
+* update PR/CI awareness design doc for all-on notify defaults ([7f5f9f1](https://github.com/d0ugal/graith/commit/7f5f9f1186e51164a4d2aace9d147417b9a50c69))
+
+
+### Tests
+
+* add unit tests for gr doctor helpers and check functions ([6efde6a](https://github.com/d0ugal/graith/commit/6efde6a46bcbc7e2b5b1a74d5e9c9a04b769e279))
+* **cli:** add tests for msg/config/store/completion commands ([2b86f31](https://github.com/d0ugal/graith/commit/2b86f313796ff017be751686c4d2bca7e4639893))
+* **cli:** address review findings ([ba59ade](https://github.com/d0ugal/graith/commit/ba59ade7a290a3931d908dd1c553b2e7d9fe1d15))
+* **cli:** cover attach navigation helpers and list formatters ([cdef515](https://github.com/d0ugal/graith/commit/cdef5158e851c2f399d320aeeded8cb8ca4ba1c5))
+* **cli:** cover command validation, confirmation, and error paths ([993e9e1](https://github.com/d0ugal/graith/commit/993e9e18e1abbcbdf03cb10667aaac6c397f3a9f))
+* **cli:** cover helpers in pair/store/status/wait/stop/restart commands ([9e4db9e](https://github.com/d0ugal/graith/commit/9e4db9e63fae7c01a3d412b4d7487d0ab983af2d))
+* **cli:** cover msg/scenario/doctor helpers and error paths ([3b14f2e](https://github.com/d0ugal/graith/commit/3b14f2ea633dc96eba570c4f65dfc84483d42c22))
+* **client:** address review findings ([c07c5c8](https://github.com/d0ugal/graith/commit/c07c5c8b723164925cb45b93083bdf4f9a9d0cb1))
+* **client:** cover name/create input models and client helpers ([5e7c292](https://github.com/d0ugal/graith/commit/5e7c292d25014f73fee0b7d4d7feae153465975c))
+* **client:** cover overlay/msgoverlay/statusbar TUI model logic ([ef20cec](https://github.com/d0ugal/graith/commit/ef20cec1fe11e064ab200888502d761a42b314ed))
+* **client:** cover overlays, passthrough prefix keys, and remote pairing ([8e16d4e](https://github.com/d0ugal/graith/commit/8e16d4e2b0e7cdc378c1bced24769499c34739a4))
+* **client:** satisfy wsl_v5 whitespace lint ([c079b20](https://github.com/d0ugal/graith/commit/c079b2097c428601990bafecedb3ee2211b436a8))
+* **cli:** rename test helper param shadowing predeclared clear ([af5e190](https://github.com/d0ugal/graith/commit/af5e19069969beaab900f0378327b4b8ea63b20d))
+* **cli:** satisfy linters in coverage tests ([6695b6d](https://github.com/d0ugal/graith/commit/6695b6d175e5fde900395d10f5916266ca93ebfc))
+* consolidate coverage test files into idiomatic &lt;file&gt;_test.go ([7e6523a](https://github.com/d0ugal/graith/commit/7e6523a067b2d6c00c4439343d951e945634391f))
+* cover Codex transcript locating/parsing and git worktree helpers ([35ab479](https://github.com/d0ugal/graith/commit/35ab47995f4d518a7b0cfbf933c724e363149c76))
+* **daemon:** add blank line to satisfy wsl_v5 linter ([f4b4750](https://github.com/d0ugal/graith/commit/f4b4750759bbc02be438d0b8b50b2828d2fac556))
+* **daemon:** address review findings ([016bbb9](https://github.com/d0ugal/graith/commit/016bbb9e8a08dd55ee478d3f704d3379f25d8acc))
+* **daemon:** address review findings ([a7f6b93](https://github.com/d0ugal/graith/commit/a7f6b930b6c66c404b72338130b11e6bc4c014cd))
+* **daemon:** cover handler dispatch and socket server behavior ([9303eac](https://github.com/d0ugal/graith/commit/9303eacb9ea934e55ea63ab3c6c508fc81cf1301))
+* **daemon:** cover orchestrator lifecycle, scenario start, handler guards ([9dfd0e1](https://github.com/d0ugal/graith/commit/9dfd0e1da70115826ca09ad21eb6e134434ba136))
+* **daemon:** cover orchestrator, prwatch, gitpull, ghpr behavior ([1e16ae0](https://github.com/d0ugal/graith/commit/1e16ae0616b65c617a7ec63d6f18c0875c208a4c))
+* **daemon:** cover scenario lifecycle error and skip paths ([bcddb4e](https://github.com/d0ugal/graith/commit/bcddb4ef293b3defc36cefec24d7841e582c770a))
+* **daemon:** cover session lifecycle helpers and orphan handling ([3fe3915](https://github.com/d0ugal/graith/commit/3fe3915a825922bfb6002e828aec3771d3990deb))
+* **daemon:** cover SessionManager lifecycle and detection paths ([71d08a8](https://github.com/d0ugal/graith/commit/71d08a8a4612a82da95ea24b678a8622275a98bc))
+* **daemon:** harden git-config isolation and tighten assertions ([571576c](https://github.com/d0ugal/graith/commit/571576ca2a08d343f23c531418bb16dbdfbd3a04))
+* **daemon:** satisfy wsl linter whitespace rules ([fa32f15](https://github.com/d0ugal/graith/commit/fa32f157cc681e9fc4ab4cde164174adaf0443ca))
+* **daemon:** satisfy wsl whitespace linter ([a1ef93e](https://github.com/d0ugal/graith/commit/a1ef93eb87f4ebc1cdb4f8fccf930aedbd2405bb))
+* **daemon:** strengthen scenario test assertions ([75a7aa6](https://github.com/d0ugal/graith/commit/75a7aa68a5bb90ff87a7a728cf27b86f811aded3))
+* **doctor:** harden sandbox-probe coverage from review ([ba70af6](https://github.com/d0ugal/graith/commit/ba70af6f9a0719978c091b0dd149af5becf6a118))
+* **doctor:** run inherited tmp-size coverage test under --disk ([3fbe444](https://github.com/d0ugal/graith/commit/3fbe4448b04d9ad85bea1e98eebfd7d84f522073))
+* harden doctor tests from review feedback ([c2cf3e5](https://github.com/d0ugal/graith/commit/c2cf3e5e49601a3652d1eb6231667ea21296778e))
+* satisfy golangci-lint in doctor coverage tests ([8d242c7](https://github.com/d0ugal/graith/commit/8d242c74ac36e11e4f1dfe15fe9169fe5bb135ad))
+* stop git-pull loop deterministically before temp-dir cleanup ([f01e93b](https://github.com/d0ugal/graith/commit/f01e93b37e12675eea06b156deb9373823b9b13c))
+
 ## [0.66.7](https://github.com/d0ugal/graith/compare/v0.66.6...v0.66.7) (2026-07-09)
 
 
