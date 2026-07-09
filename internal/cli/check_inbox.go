@@ -2,16 +2,29 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/d0ugal/graith/internal/client"
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/spf13/cobra"
 )
+
+// inboxReadTimeout bounds how long the check-inbox hook waits for the daemon to
+// finish streaming inbox frames. Without it a slow or hung daemon connection
+// would block the agent's SessionStart hook indefinitely.
+const inboxReadTimeout = 5 * time.Second
+
+// frameReader is the subset of *client.Client used to read the inbox response.
+// It exists so the read loop can be unit-tested without a live daemon.
+type frameReader interface {
+	ReadFrame() (protocol.Frame, error)
+}
 
 var checkInboxCmd = &cobra.Command{
 	Use:    "check-inbox",
@@ -39,37 +52,15 @@ var checkInboxCmd = &cobra.Command{
 			Ack:        true,
 		})
 
-		var messages []inboxMessage
+		// Bound the read so a slow or hung daemon can't block the hook forever.
+		_ = c.SetReadDeadline(time.Now().Add(inboxReadTimeout))
 
-		for {
-			frame, err := c.ReadFrame()
-			if err != nil {
-				if err == io.EOF {
-					break
-				}
-
-				return nil
-			}
-
-			if frame.Channel != protocol.ChannelControl {
-				continue
-			}
-
-			msg, _ := protocol.DecodeControl(frame.Payload)
-			switch msg.Type {
-			case "msg_message":
-				var m inboxMessage
-				if json.Unmarshal(msg.Payload, &m) == nil {
-					messages = append(messages, m)
-				}
-			case "msg_done":
-				goto done
-			case "error":
-				return nil
-			}
+		messages, err := readInboxMessages(c)
+		if err != nil {
+			// Don't fail the agent's hook, but don't swallow the error either:
+			// surface it on stderr and emit whatever we managed to collect.
+			fmt.Fprintf(os.Stderr, "gr check-inbox: %v\n", err)
 		}
-
-	done:
 
 		if len(messages) == 0 {
 			return nil
@@ -107,6 +98,49 @@ var checkInboxCmd = &cobra.Command{
 
 		return nil
 	},
+}
+
+// readInboxMessages reads control frames from fr until it sees msg_done, an
+// error frame, EOF, or a read error (including a deadline timeout). Messages
+// collected before a terminating error are returned alongside that error, so
+// the caller can still surface what arrived. A frame that fails to decode is
+// reported rather than silently swallowed: the old code ignored the decode
+// error, yielding an empty envelope that matched no case and left the loop
+// waiting for a msg_done that was already lost.
+func readInboxMessages(fr frameReader) ([]inboxMessage, error) {
+	var messages []inboxMessage
+
+	for {
+		frame, err := fr.ReadFrame()
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return messages, nil
+			}
+
+			return messages, err
+		}
+
+		if frame.Channel != protocol.ChannelControl {
+			continue
+		}
+
+		msg, err := protocol.DecodeControl(frame.Payload)
+		if err != nil {
+			return messages, fmt.Errorf("decode inbox frame: %w", err)
+		}
+
+		switch msg.Type {
+		case "msg_message":
+			var m inboxMessage
+			if json.Unmarshal(msg.Payload, &m) == nil {
+				messages = append(messages, m)
+			}
+		case "msg_done":
+			return messages, nil
+		case "error":
+			return messages, fmt.Errorf("daemon returned an error while reading inbox")
+		}
+	}
 }
 
 type inboxMessage struct {
