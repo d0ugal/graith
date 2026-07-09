@@ -236,8 +236,11 @@ func TestRejectConfigInsideSessionCov(t *testing.T) {
 	}
 
 	t.Run("outside session is allowed", func(t *testing.T) {
+		// insideSession uses os.LookupEnv, so the var must be truly unset (not
+		// just empty). t.Setenv registers the restore-to-original cleanup.
 		t.Setenv("GRAITH_SESSION_ID", "")
-		os.Unsetenv("GRAITH_SESSION_ID")
+
+		_ = os.Unsetenv("GRAITH_SESSION_ID")
 
 		cmd := makeCmd()
 		_ = cmd.Flags().Set("config", "/tmp/x.toml")
