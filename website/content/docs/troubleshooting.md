@@ -121,6 +121,12 @@ Worktrees left behind from crashed or improperly deleted sessions waste disk spa
 gr doctor --autofix
 ```
 
+To see how much disk space the data dir, tmp repos, and orphaned worktrees are using, add `--disk`. This is off by default because measuring sizes means walking the whole tree, which is slow on large installs:
+
+```bash
+gr doctor --disk
+```
+
 ### Cannot delete starred session
 
 Starred sessions are protected from deletion and skipped by batch operations. Unstar first:

@@ -23,7 +23,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var doctorAutofix bool
+var (
+	doctorAutofix bool
+	doctorDisk    bool
+)
 
 // nonoInstallHint is the install guidance shown when the nono sandbox backend
 // can't enforce. It deliberately avoids the `curl … | sh` piped-shell pattern
@@ -50,6 +53,11 @@ type doctorReport struct {
 type doctorContext struct {
 	checks []doctorCheck
 	ok     bool
+
+	// suggestDisk records that a cheap check found an artifact whose disk usage
+	// might be worth measuring (orphaned files/worktrees, a legacy dir). When
+	// set and --disk was not passed, doctor recommends re-running with --disk.
+	suggestDisk bool
 }
 
 func newDoctorContext() *doctorContext {
@@ -132,6 +140,10 @@ var doctorCmd = &cobra.Command{
 			}
 
 			out.Printf("\n%d issue(s) found.\n", count)
+		}
+
+		if dc.suggestDisk && !doctorDisk {
+			out.Printf("\nRun 'gr doctor --disk' to measure on-disk sizes of the items above.\n")
 		}
 
 		if !dc.ok {
@@ -331,11 +343,7 @@ func (dc *doctorContext) checkEnvironment() {
 		dc.hintf("Run: gr config reset")
 	}
 
-	if dataDirSize, err := dirSize(paths.DataDir); err == nil {
-		dc.passf("environment", "Data dir: %s (%s)", paths.DataDir, formatBytes(dataDirSize))
-	} else {
-		dc.passf("environment", "Data dir: %s", paths.DataDir)
-	}
+	dc.passf("environment", "Data dir: %s%s", paths.DataDir, dirSizeSuffix(paths.DataDir))
 
 	if info, err := os.Stat(paths.DaemonLog); err == nil {
 		size := info.Size()
@@ -901,7 +909,12 @@ func (dc *doctorContext) checkStorage(diag *protocol.DiagnosticsMsg) {
 			}
 		}
 
-		dc.warnf("storage", "%d orphaned worktree dir(s) (%s)", len(orphanedWorktrees), formatBytes(totalSize))
+		if doctorDisk {
+			dc.warnf("storage", "%d orphaned worktree dir(s) (%s)", len(orphanedWorktrees), formatBytes(totalSize))
+		} else {
+			dc.warnf("storage", "%d orphaned worktree dir(s)", len(orphanedWorktrees))
+			dc.suggestDisk = true
+		}
 
 		for _, wt := range orphanedWorktrees {
 			extra := ""
@@ -909,7 +922,11 @@ func (dc *doctorContext) checkStorage(diag *protocol.DiagnosticsMsg) {
 				extra = " [has uncommitted changes]"
 			}
 
-			dc.hintf("%s (%s)%s", wt.path, formatBytes(wt.size), extra)
+			if doctorDisk {
+				dc.hintf("%s (%s)%s", wt.path, formatBytes(wt.size), extra)
+			} else {
+				dc.hintf("%s%s", wt.path, extra)
+			}
 		}
 
 		if doctorAutofix {
@@ -983,21 +1000,30 @@ func (dc *doctorContext) checkTmpDir() {
 			}
 
 			repoCount++
-			size, _ := dirSize(filepath.Join(repoDir, hash.Name()))
-			totalSize += size
+
+			// The per-repo size walk is the expensive part; the repo count is a
+			// cheap ReadDir. Only sum sizes when --disk asked for them.
+			if doctorDisk {
+				size, _ := dirSize(filepath.Join(repoDir, hash.Name()))
+				totalSize += size
+			}
 		}
 	}
 
-	if repoCount == 0 {
+	switch {
+	case repoCount == 0:
 		dc.passf("storage", "Tmp dir: %s (empty)", tmpDir)
-	} else {
+	case doctorDisk:
 		dc.passf("storage", "Tmp dir: %s (%d repo(s), %s)", tmpDir, repoCount, formatBytes(totalSize))
+	default:
+		dc.passf("storage", "Tmp dir: %s (%d repo(s))", tmpDir, repoCount)
+		dc.suggestDisk = true
 	}
 
 	legacyShareDir := filepath.Join(filepath.Dir(tmpDir), "share")
 	if info, err := os.Stat(legacyShareDir); err == nil && info.IsDir() {
-		size, _ := dirSize(legacyShareDir)
-		dc.warnf("storage", "Legacy share dir exists: %s (%s)", legacyShareDir, formatBytes(size))
+		dc.warnf("storage", "Legacy share dir exists: %s%s", legacyShareDir, dirSizeSuffix(legacyShareDir))
+		dc.suggestDisk = true
 
 		if doctorAutofix {
 			if os.RemoveAll(legacyShareDir) == nil {
@@ -1050,8 +1076,7 @@ func (dc *doctorContext) findOrphanedWorktrees(sessionIDs map[string]bool) []orp
 				continue
 			}
 
-			size, _ := dirSize(sDir)
-			orphaned = append(orphaned, orphanedWorktree{path: sDir, size: size})
+			orphaned = append(orphaned, orphanedWorktree{path: sDir, size: orphanDirSize(sDir)})
 		}
 	}
 
@@ -1099,8 +1124,7 @@ func findOrphanedInWorktrees(repos []os.DirEntry, worktreesDir string, sessionID
 					continue
 				}
 
-				size, _ := dirSize(sessDir)
-				wt := orphanedWorktree{path: sessDir, size: size}
+				wt := orphanedWorktree{path: sessDir, size: orphanDirSize(sessDir)}
 
 				if git.IsInsideGitRepo(sessDir) {
 					wt.isGitWorktree = true
@@ -1128,6 +1152,38 @@ func formatBytes(b int64) string {
 	default:
 		return fmt.Sprintf("%d B", b)
 	}
+}
+
+// dirSizeSuffix returns a " (<size>)" suffix describing a directory's on-disk
+// size, or "" when disk scanning is disabled. Computing a directory size means
+// walking the whole tree, which is fast for small dirs but can take tens of
+// seconds on a large data dir (worktrees full of node_modules and .git
+// objects). It's purely informational, so it's gated behind --disk to keep the
+// default `gr doctor` snappy.
+func dirSizeSuffix(path string) string {
+	if !doctorDisk {
+		return ""
+	}
+
+	size, err := dirSize(path)
+	if err != nil {
+		return ""
+	}
+
+	return " (" + formatBytes(size) + ")"
+}
+
+// orphanDirSize returns the on-disk size of an orphaned dir, or 0 when --disk
+// was not passed. Sizing walks the whole subtree, so it's skipped by default;
+// orphan detection itself (a cheap ReadDir) always runs.
+func orphanDirSize(path string) int64 {
+	if !doctorDisk {
+		return 0
+	}
+
+	size, _ := dirSize(path)
+
+	return size
 }
 
 func dirSize(path string) (int64, error) {
@@ -1169,4 +1225,5 @@ func truncateFileKeepTail(path string, keepBytes int64) error {
 func registerDoctorCmd() {
 	rootCmd.AddCommand(doctorCmd)
 	doctorCmd.Flags().BoolVar(&doctorAutofix, "autofix", false, "auto-fix issues")
+	doctorCmd.Flags().BoolVar(&doctorDisk, "disk", false, "measure on-disk sizes (walks the data dir; can be slow on large installs)")
 }
