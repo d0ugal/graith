@@ -56,11 +56,47 @@ make -C gui shared-test          # unit tests (run outside the sandbox; test-clt
 make -C gui build                # all three; `make -C gui help` for everything
 ```
 
-The iOS app has **no `.xcodeproj`** (and this repo assumes no xcodegen/tuist).
+### Xcode project (build + run + sign in Xcode)
+
+For the full Xcode experience — pick an Apple ID, connect a device, hit Run,
+edit in the IDE — generate a `.xcodeproj` with [XcodeGen](https://github.com/yonaskolb/XcodeGen):
+
+```bash
+brew install xcodegen        # one-time
+make -C gui xcodeproj         # generates gui/graith.xcodeproj (both apps)
+open gui/graith.xcodeproj
+```
+
+`gui/project.yml` is the checked-in **source of truth**; the generated
+`graith.xcodeproj` is gitignored (regenerate any time). It is one umbrella
+project with two app targets / schemes:
+
+- **graith (iOS)** — bundle id `net.graith.mobile`, iOS 16+
+- **GraithGUI (macOS)** — bundle id `net.graith.macos`, macOS 14+
+
+Both compile their `@main` entry sources and link the local SwiftPM packages'
+library products, which transitively pull in `../shared` and the pinned
+libghostty-vt xcframework. Pick your team under *Signing & Capabilities* and
+Run. (`gui/ios/project.yml` remains for isolated iOS-only generation via
+`xcodegen generate` in `ios/`.)
+
+Then build/run from Xcode or the CLI:
+
+```bash
+xcodebuild -project gui/graith.xcodeproj -scheme "GraithGUI (macOS)" build
+xcodebuild -project gui/graith.xcodeproj -scheme "graith (iOS)" \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build
+```
+
+For a signed, Keychain-backed iOS build, add a real team + the
+`ios/Resources/GraithMobile.entitlements` file in the target's *Signing &
+Capabilities*.
+
+### Ad-hoc iOS build without Xcode-project signing
+
 `ios/build-ios-app.sh` builds the SwiftPM product for the `iphonesimulator` SDK
-and hand-assembles an ad-hoc-signed `.app`; `simctl` installs + launches it.
-For a Keychain-backed, distributable build, sign with a real identity and
-`ios/Resources/GraithMobile.entitlements` (see that script's header).
+and hand-assembles an ad-hoc-signed `.app`; `simctl` installs + launches it
+(no `.xcodeproj` needed). This is what `make -C gui ios-app` / `ios-run` use.
 
 ## Connecting over Tailscale
 

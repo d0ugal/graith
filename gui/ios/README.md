@@ -45,3 +45,16 @@ The eventual integration target is a single **SwiftUI multiplatform** Xcode app
 (design §C.0) that links `GraithTerminalCore` + `GraithProtocolClient` (shared)
 and this tree's iOS views. This SwiftPM manifest exists so the code is
 organised, type-checked in Xcode, and unit-testable in isolation.
+
+## Xcode project
+
+Two XcodeGen specs can generate a `.xcodeproj` (both gitignored — the specs are
+the source of truth):
+
+- **`../project.yml`** (recommended) → `gui/graith.xcodeproj`: the umbrella
+  project with *both* the iOS `graith` app and the macOS `GraithGUI` app.
+  Generate with `make -C gui xcodeproj`.
+- **`project.yml`** (this dir) → `gui/ios/graith-ios.xcodeproj`: an isolated
+  iOS-only project. Generate with `xcodegen generate` from `gui/ios/`.
+
+Both need `brew install xcodegen`. See `../README.md` for details.
