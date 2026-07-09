@@ -138,12 +138,10 @@ func TestMsgOverlay_FetchCmdTransientError(t *testing.T) {
 	}
 }
 
-func TestMsgOverlay_TickCmdProducesTickMsg(t *testing.T) {
-	m := newMessageOverlayModel("ben", nil, nil)
-	if _, ok := m.tickCmd()().(msgTickMsg); !ok {
-		t.Error("tickCmd should produce a msgTickMsg")
-	}
-}
+// Note: tickCmd's timer behavior is covered structurally via the msgTickMsg
+// handler tests below (TickStartsFetch / TickSkipsWhenFetching) rather than by
+// executing the real 2-second tea.Tick, which would add a wall-clock delay to
+// the suite.
 
 // --- Update: tick fetching guard ---
 
@@ -329,7 +327,11 @@ func TestMsgOverlay_QuitKeys(t *testing.T) {
 
 		_, cmd := m.Update(keyPress(k))
 		if cmd == nil {
-			t.Errorf("key %q should return a quit command", k)
+			t.Fatalf("key %q should return a command", k)
+		}
+
+		if _, ok := cmd().(tea.QuitMsg); !ok {
+			t.Errorf("key %q should return tea.Quit, got %T", k, cmd())
 		}
 	}
 }
