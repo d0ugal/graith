@@ -100,6 +100,11 @@ targets:
       path: macos/Resources/GraithGUI-Info.plist
       properties:
         CFBundleDisplayName: graith
+        # Drive the bundle version from the target's build settings so bumping
+        # MARKETING_VERSION / CURRENT_PROJECT_VERSION below actually changes the
+        # built app's version (rather than a hardcoded string drifting from it).
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         LSMinimumSystemVersion: "$(MACOSX_DEPLOYMENT_TARGET)"
         LSApplicationCategoryType: public.app-category.developer-tools
         NSHighResolutionCapable: true
