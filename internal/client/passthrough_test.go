@@ -925,12 +925,17 @@ func TestPrefixRenameScrollHonorConfiguredKeys(t *testing.T) {
 
 		go func() {
 			time.Sleep(30 * time.Millisecond)
+
 			_, _ = stdinW.Write([]byte{0x02})
+
 			time.Sleep(10 * time.Millisecond)
+
 			_, _ = stdinW.Write([]byte{key})
+
 			// A default-key case falls through to the agent, so follow up with
 			// prefix+d to end the loop deterministically.
 			time.Sleep(20 * time.Millisecond)
+
 			_, _ = stdinW.Write([]byte{0x02, 'd'})
 		}()
 
