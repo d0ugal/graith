@@ -396,6 +396,148 @@ func TestConfigDiffCovMissingFile(t *testing.T) {
 	})
 }
 
+func TestConfigInitWritesWhenAbsent(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "graith", "config.toml")
+
+	withConfigGlobals(t, target, config.Paths{ConfigFile: target}, func() {
+		prev := configForceReset
+		configForceReset = false
+
+		defer func() { configForceReset = prev }()
+
+		if err := configInitCmd.RunE(configInitCmd, nil); err != nil {
+			t.Fatalf("init when absent: %v", err)
+		}
+	})
+
+	info, err := os.Stat(target)
+	if err != nil {
+		t.Fatalf("expected config written: %v", err)
+	}
+
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Errorf("perm = %o, want 600", perm)
+	}
+
+	// The generated file must parse and carry the built-in defaults.
+	cfg, err := config.LoadOrDefault(target)
+	if err != nil {
+		t.Fatalf("init produced unparseable config: %v", err)
+	}
+
+	if cfg.DefaultAgent != "claude" {
+		t.Errorf("DefaultAgent = %q, want claude", cfg.DefaultAgent)
+	}
+}
+
+func TestConfigInitRefusesOverwriteNonInteractive(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "config.toml")
+
+	if err := os.WriteFile(target, []byte("default_agent = \"canny\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	withConfigGlobals(t, target, config.Paths{ConfigFile: target}, func() {
+		prev := configForceReset
+		configForceReset = false
+
+		defer func() { configForceReset = prev }()
+
+		// go test's stdin is not a terminal, so init must refuse and point the
+		// user at --force rather than clobbering an existing config.
+		err := configInitCmd.RunE(configInitCmd, nil)
+		if err == nil {
+			t.Fatal("expected error refusing to overwrite in non-interactive mode")
+		}
+
+		if !strings.Contains(err.Error(), "--force") {
+			t.Errorf("error should direct the user to --force, got %q", err)
+		}
+	})
+
+	// The existing config must be untouched.
+	data, _ := os.ReadFile(target)
+	if string(data) != "default_agent = \"canny\"\n" {
+		t.Errorf("existing config was modified: %q", data)
+	}
+}
+
+func TestConfigInitForceOverwrites(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "config.toml")
+
+	if err := os.WriteFile(target, []byte("thrawn nonsense"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	withConfigGlobals(t, target, config.Paths{ConfigFile: target}, func() {
+		prev := configForceReset
+		configForceReset = true
+
+		defer func() { configForceReset = prev }()
+
+		if err := configInitCmd.RunE(configInitCmd, nil); err != nil {
+			t.Fatalf("force init: %v", err)
+		}
+	})
+
+	cfg, err := config.LoadOrDefault(target)
+	if err != nil {
+		t.Fatalf("init produced unparseable config: %v", err)
+	}
+
+	if cfg.DefaultAgent != "claude" {
+		t.Errorf("DefaultAgent = %q, want claude", cfg.DefaultAgent)
+	}
+}
+
+func TestConfigPathPrintsExplicitFile(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "config.toml")
+
+	if err := os.WriteFile(target, config.DefaultTOML(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var got string
+
+	// cfgFile set (--config) is used verbatim by ResolveConfigPath.
+	withConfigGlobals(t, target, config.Paths{ConfigFile: target}, func() {
+		got = captureStdout(t, func() {
+			if err := configPathCmd.RunE(configPathCmd, nil); err != nil {
+				t.Fatalf("path: %v", err)
+			}
+		})
+	})
+
+	if strings.TrimSpace(got) != target {
+		t.Errorf("path output = %q, want %q", strings.TrimSpace(got), target)
+	}
+}
+
+func TestConfigPathPrintsResolvedWhenAbsent(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "ghost.toml")
+
+	var got string
+
+	// cfgFile empty -> ResolveConfigPath returns paths.ConfigFile even when the
+	// file does not exist, so `gr config path` still reports where it would live.
+	withConfigGlobals(t, "", config.Paths{ConfigFile: target}, func() {
+		got = captureStdout(t, func() {
+			if err := configPathCmd.RunE(configPathCmd, nil); err != nil {
+				t.Fatalf("path missing file: %v", err)
+			}
+		})
+	})
+
+	if strings.TrimSpace(got) != target {
+		t.Errorf("path output = %q, want %q", strings.TrimSpace(got), target)
+	}
+}
+
 func TestRejectConfigInsideSessionCov(t *testing.T) {
 	makeCmd := func() *cobra.Command {
 		cmd := &cobra.Command{Use: "config"}
