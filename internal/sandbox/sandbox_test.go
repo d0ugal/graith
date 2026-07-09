@@ -162,19 +162,23 @@ func TestWrapWithWriteDirs(t *testing.T) {
 	}
 }
 
-// TestWrapUnixSocketsGrantedWritable is a regression test for the daemon socket
-// being unreachable from a sandboxed agent. A read-only grant lets the agent
-// stat the socket but not connect() to it, so `gr msg`/`gr status` failed with
-// "daemon did not start in time". UnixSockets must land in the read/write
-// (--add-dirs) list — the same grant that makes docker.sock/podman.sock
-// connectable — NOT the read-only --add-dirs-ro list.
-func TestWrapUnixSocketsGrantedWritable(t *testing.T) {
+// TestWrapUnixSocketsAppendProfile is a regression test for the daemon socket
+// being unreachable from a sandboxed agent. Connecting to a Unix socket is
+// network-outbound under Seatbelt, NOT file access — safehouse's default
+// profile denies it — so a file grant (--add-dirs/--add-dirs-ro) cannot make
+// the socket connectable. UnixSockets must instead produce a --append-profile
+// fragment granting `network-outbound (remote unix-socket …)`, and the socket
+// must NOT appear in the file-path flags (a file grant there is misleading and
+// useless for connect).
+func TestWrapUnixSocketsAppendProfile(t *testing.T) {
 	sock := "/hame/user/.graith/graith.sock"
+	frag := filepath.Join(t.TempDir(), "braw.sb")
 	opts := WrapOpts{
-		Backend:     BackendSafehouse,
-		WorktreeDir: "/tmp/bothy",
-		UnixSockets: []string{sock},
-		EnvKeys:     []string{"TERM"},
+		Backend:               BackendSafehouse,
+		WorktreeDir:           "/tmp/bothy",
+		UnixSockets:           []string{sock},
+		SafehouseFragmentPath: frag,
+		EnvKeys:               []string{"TERM"},
 	}
 
 	_, args, err := Wrap("claude", nil, opts)
@@ -182,7 +186,33 @@ func TestWrapUnixSocketsGrantedWritable(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	inList := func(flag string) bool {
+	// --append-profile must point at the fragment we asked for.
+	appended := ""
+
+	for i, a := range args {
+		if a == "--append-profile" && i+1 < len(args) {
+			appended = args[i+1]
+		}
+	}
+
+	if appended != frag {
+		t.Fatalf("--append-profile %q, want %q; args: %v", appended, frag, args)
+	}
+
+	// The fragment must grant network-outbound connect to the socket.
+	data, err := os.ReadFile(frag)
+	if err != nil {
+		t.Fatalf("read fragment: %v", err)
+	}
+
+	want := `(allow network-outbound (remote unix-socket (path-literal "` + sock + `")))`
+	if !strings.Contains(string(data), want) {
+		t.Errorf("fragment missing connect grant.\nwant line: %s\ngot:\n%s", want, data)
+	}
+
+	// The socket must NOT be smuggled into the file-path flags (useless for
+	// connect, and it would misleadingly look granted).
+	inFileFlag := func(flag string) bool {
 		for i, a := range args {
 			if a == flag && i+1 < len(args) && slices.Contains(strings.Split(args[i+1], ":"), sock) {
 				return true
@@ -192,12 +222,8 @@ func TestWrapUnixSocketsGrantedWritable(t *testing.T) {
 		return false
 	}
 
-	if !inList("--add-dirs") {
-		t.Errorf("daemon socket not in read/write --add-dirs (cannot connect): %v", args)
-	}
-
-	if inList("--add-dirs-ro") {
-		t.Errorf("daemon socket wrongly in read-only --add-dirs-ro (connect would be denied): %v", args)
+	if inFileFlag("--add-dirs") || inFileFlag("--add-dirs-ro") {
+		t.Errorf("daemon socket wrongly placed in a file-path flag: %v", args)
 	}
 }
 

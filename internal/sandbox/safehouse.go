@@ -2,7 +2,9 @@ package sandbox
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 )
@@ -79,15 +81,9 @@ func (safehouseBackend) Wrap(command string, args []string, opts WrapOpts) (stri
 
 	// safehouse has no file-vs-directory distinction in its flags; Seatbelt path
 	// rules apply to files too. Fold file grants into the matching path list so
-	// read_files/write_files behave consistently across backends. Unix sockets
-	// need a read/write grant to connect() (read-only lets a process stat the
-	// socket but not connect), so they join the write list alongside how
-	// docker.sock/podman.sock are granted. Unlike nono's connect-only
-	// filesystem.unix_socket, safehouse has no connect-only primitive, so this
-	// also grants read/write on the socket inode (the minimum Seatbelt needs to
-	// permit connect); the wrapped process is the user's own trusted agent.
+	// read_files/write_files behave consistently across backends.
 	readPaths := append(append([]string{}, opts.ReadDirs...), opts.ReadFiles...)
-	writePaths := append(append(append([]string{}, opts.WriteDirs...), opts.WriteFiles...), opts.UnixSockets...)
+	writePaths := append(append([]string{}, opts.WriteDirs...), opts.WriteFiles...)
 
 	var wrapped []string
 
@@ -99,6 +95,24 @@ func (safehouseBackend) Wrap(command string, args []string, opts WrapOpts) (stri
 
 	if len(writePaths) > 0 {
 		wrapped = append(wrapped, "--add-dirs", strings.Join(writePaths, ":"))
+	}
+
+	// Unix sockets need a CONNECT grant, which Seatbelt classifies as
+	// network-outbound — NOT file-read/write. safehouse's default profile only
+	// allows network-outbound to IPs and the DNS socket, so connecting to any
+	// other Unix socket (e.g. the graith daemon socket) is deny-by-default and
+	// no --add-dirs/--add-dirs-ro grant can change that. Emit a Seatbelt
+	// fragment with an explicit `(allow network-outbound (remote unix-socket …))`
+	// per socket and append it via --append-profile (last-match-wins, so it
+	// overrides the default network posture). safehouse also auto-denies writes
+	// to the appended fragment, so the sandboxed process can't tamper with it.
+	if len(opts.UnixSockets) > 0 {
+		fragPath, err := writeSafehouseSocketFragment(opts.UnixSockets, opts.SafehouseFragmentPath)
+		if err != nil {
+			return "", nil, fmt.Errorf("unix sockets: %w", err)
+		}
+
+		wrapped = append(wrapped, "--append-profile", fragPath)
 	}
 
 	if len(opts.Features) > 0 {
@@ -113,6 +127,61 @@ func (safehouseBackend) Wrap(command string, args []string, opts WrapOpts) (stri
 	wrapped = append(wrapped, args...)
 
 	return safehouse, wrapped, nil
+}
+
+// writeSafehouseSocketFragment writes a Seatbelt policy fragment granting
+// network-outbound connect access to each socket, for use with safehouse's
+// --append-profile. It returns the fragment path. An empty path writes a temp
+// file (matching writeNonoProfile); the daemon normally supplies a per-session
+// path under RuntimeDir so the fragment survives resume and is cleaned up on
+// session delete.
+func writeSafehouseSocketFragment(sockets []string, path string) (string, error) {
+	var b strings.Builder
+
+	b.WriteString(";; graith: allow connect() to the daemon socket(s).\n")
+	b.WriteString(";; Unix-socket connect is network-outbound under Seatbelt, not file access.\n")
+
+	for _, s := range sockets {
+		fmt.Fprintf(&b, "(allow network-outbound (remote unix-socket (path-literal %s)))\n", seatbeltString(s))
+	}
+
+	data := []byte(b.String())
+
+	if path == "" {
+		f, err := os.CreateTemp("", "graith-safehouse-*.sb")
+		if err != nil {
+			return "", err
+		}
+
+		defer func() { _ = f.Close() }()
+
+		if _, err := f.Write(data); err != nil {
+			_ = os.Remove(f.Name())
+			return "", err
+		}
+
+		return f.Name(), nil
+	}
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return "", err
+	}
+
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return "", err
+	}
+
+	return path, nil
+}
+
+// seatbeltString renders a Go string as a Seatbelt/TinyScheme string literal,
+// escaping backslashes and double quotes so a path can't break out of the
+// literal or inject policy. Absolute socket paths won't normally contain these,
+// but escaping keeps the emitted policy well-formed regardless.
+func seatbeltString(s string) string {
+	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`)
+
+	return `"` + r.Replace(s) + `"`
 }
 
 // validateSafehousePaths rejects colons, which conflict with safehouse's

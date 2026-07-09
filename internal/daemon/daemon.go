@@ -706,6 +706,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 		// session from state, so no later Delete would remove it. Harmless if
 		// no profile was written (os.Remove ignores a missing file).
 		_ = os.Remove(sm.nonoProfilePath(id))
+		_ = os.Remove(sm.safehouseFragmentPath(id))
 
 		if sharedWorktree || inPlace {
 			return
@@ -996,6 +997,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, 
 
 		sm.log.Info("sandboxing session", "id", id, "agent", agentName,
 			"command", command, "read_dirs", opts.ReadDirs, "write_dirs", opts.WriteDirs,
+			"unix_sockets", opts.UnixSockets,
 			"features", opts.Features, "workdir", opts.WorktreeDir)
 	}
 
@@ -1274,6 +1276,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 		// See cleanupOnError in Create: remove any nono profile Wrap wrote
 		// before the error path so it isn't orphaned when state is rolled back.
 		_ = os.Remove(sm.nonoProfilePath(id))
+		_ = os.Remove(sm.safehouseFragmentPath(id))
 
 		if len(forkIncludes) > 0 {
 			_ = sm.teardownIncludes(repoRoot, worktreePath, branchName, forkIncludes)
@@ -1475,6 +1478,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 
 		sm.log.Info("sandboxing forked session", "id", id,
 			"command", command, "read_dirs", opts.ReadDirs, "write_dirs", opts.WriteDirs,
+			"unix_sockets", opts.UnixSockets,
 			"features", opts.Features, "workdir", opts.WorktreeDir)
 	}
 
@@ -2244,6 +2248,7 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 
 		sm.log.Info("sandboxing resumed session", "id", id,
 			"command", command, "read_dirs", opts.ReadDirs, "write_dirs", opts.WriteDirs,
+			"unix_sockets", opts.UnixSockets,
 			"features", opts.Features, "workdir", opts.WorktreeDir)
 	}
 
@@ -2558,6 +2563,7 @@ func (sm *SessionManager) Delete(id string) error {
 
 	_ = os.Remove(filepath.Join(sm.paths.LogDir, id+".log"))
 	_ = os.Remove(sm.nonoProfilePath(id))
+	_ = os.Remove(sm.safehouseFragmentPath(id))
 	sm.cleanupHooks(id, agentName, worktreePath)
 
 	if hasClient {
@@ -2912,6 +2918,7 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 		if succeeded[s.id] {
 			_ = os.Remove(filepath.Join(sm.paths.LogDir, s.id+".log"))
 			_ = os.Remove(sm.nonoProfilePath(s.id))
+			_ = os.Remove(sm.safehouseFragmentPath(s.id))
 			sm.cleanupHooks(s.id, s.agent, s.worktreePath)
 		}
 
@@ -4481,6 +4488,14 @@ func (sm *SessionManager) nonoProfilePath(sessionID string) string {
 	return filepath.Join(sm.paths.RuntimeDir, "nono", sessionID+".json")
 }
 
+// safehouseFragmentPath returns the location of the per-session safehouse
+// Seatbelt fragment (the --append-profile file that grants the daemon socket
+// connect access) for the given session ID. Written under RuntimeDir by the
+// safehouse backend; session teardown removes it alongside the nono profile.
+func (sm *SessionManager) safehouseFragmentPath(sessionID string) string {
+	return filepath.Join(sm.paths.RuntimeDir, "safehouse", sessionID+".sb")
+}
+
 func (sm *SessionManager) sandboxOptsFromConfig(merged config.SandboxConfig, sessionID, worktreePath, agentCommand string, envKeys []string, agentHooks bool) sandbox.WrapOpts {
 	readDirs := expandPaths(merged.ReadDirs, sm.log, "read")
 	writeDirs := expandPaths(merged.WriteDirs, sm.log, "write")
@@ -4522,24 +4537,28 @@ func (sm *SessionManager) sandboxOptsFromConfig(merged config.SandboxConfig, ses
 
 	// The nono backend writes a per-session profile under RuntimeDir, which is
 	// already granted read access above, so the profile is readable inside the
-	// sandbox and lives for the process lifetime (incl. resume).
+	// sandbox and lives for the process lifetime (incl. resume). The safehouse
+	// backend likewise writes its --append-profile socket fragment under
+	// RuntimeDir (read by safehouse before the sandbox is applied).
 	profilePath := sm.nonoProfilePath(sessionID)
+	fragmentPath := sm.safehouseFragmentPath(sessionID)
 
 	return sandbox.WrapOpts{
-		Backend:        merged.Backend,
-		WorktreeDir:    worktreePath,
-		ReadDirs:       readDirs,
-		WriteDirs:      writeDirs,
-		ReadFiles:      readFiles,
-		WriteFiles:     writeFiles,
-		UnixSockets:    unixSockets,
-		Features:       merged.Features,
-		EnvKeys:        envKeys,
-		SignalMode:     merged.SignalMode,
-		Profile:        merged.Profile,
-		Network:        networkPolicy(merged.Network),
-		BackendCommand: merged.Command,
-		ProfilePath:    profilePath,
+		Backend:               merged.Backend,
+		WorktreeDir:           worktreePath,
+		ReadDirs:              readDirs,
+		WriteDirs:             writeDirs,
+		ReadFiles:             readFiles,
+		WriteFiles:            writeFiles,
+		UnixSockets:           unixSockets,
+		Features:              merged.Features,
+		EnvKeys:               envKeys,
+		SignalMode:            merged.SignalMode,
+		Profile:               merged.Profile,
+		Network:               networkPolicy(merged.Network),
+		BackendCommand:        merged.Command,
+		ProfilePath:           profilePath,
+		SafehouseFragmentPath: fragmentPath,
 	}
 }
 

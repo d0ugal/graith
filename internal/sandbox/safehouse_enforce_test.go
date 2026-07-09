@@ -27,6 +27,7 @@
 package sandbox
 
 import (
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -122,5 +123,99 @@ func TestSafehouseEnforcesFilesystemBoundary(t *testing.T) {
 
 	if _, err := os.Stat(target); err != nil {
 		t.Errorf("expected %s to be written into the granted write dir: %v", target, err)
+	}
+}
+
+// TestSafehouseEnforcesUnixSocketConnect is the kernel-level regression test for
+// the daemon-socket bug: a sandboxed agent could not connect() to the daemon
+// socket, so `gr msg`/`gr status` failed. It proves (1) safehouse's default
+// profile DENIES connecting to an arbitrary Unix socket even when the socket
+// file is readable — i.e. a file grant is not enough — and (2) a UnixSockets
+// grant (emitted as an --append-profile network-outbound rule) actually makes
+// the connect succeed. Without this test the earlier file-grant "fix" passed
+// argv assertions but did nothing at the kernel level.
+func TestSafehouseEnforcesUnixSocketConnect(t *testing.T) {
+	mustEnforceSafehouse(t)
+
+	py, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 not available; skipping socket-connect enforcement test")
+	}
+
+	// The socket path must stay under the ~104-char AF_UNIX limit and must be a
+	// real (symlink-resolved) path so it matches Seatbelt's canonical path rules.
+	// A short /tmp base resolves to /private/tmp, which safehouse allows for file
+	// access — so path resolution is fine and the ONLY thing under test is the
+	// network-outbound connect gate. We still grant the dir read explicitly so
+	// the negative case fails on connect, not on file access.
+	base, err := os.MkdirTemp("/tmp", "gsk")
+	if err != nil {
+		t.Fatalf("mkdir temp: %v", err)
+	}
+
+	t.Cleanup(func() { _ = os.RemoveAll(base) })
+
+	base, err = filepath.EvalSymlinks(base)
+	if err != nil {
+		t.Fatalf("eval symlinks: %v", err)
+	}
+
+	worktree := filepath.Join(base, "bothy")
+	if err := os.MkdirAll(worktree, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	sockPath := filepath.Join(base, "d.sock")
+
+	ln, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatalf("listen on %s: %v", sockPath, err)
+	}
+
+	defer func() { _ = ln.Close() }()
+
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+
+			_ = c.Close()
+		}
+	}()
+
+	// Connects to the socket; exits 0 on success, non-zero on EPERM.
+	script := "import socket,sys; s=socket.socket(socket.AF_UNIX); s.settimeout(5); s.connect(sys.argv[1])"
+
+	runConnect := func(sockets []string) error {
+		opts := WrapOpts{
+			Backend:               BackendSafehouse,
+			WorktreeDir:           worktree,
+			ReadDirs:              []string{base}, // file access to the socket; isolates the connect gate
+			UnixSockets:           sockets,
+			SafehouseFragmentPath: filepath.Join(base, "frag.sb"),
+			EnvKeys:               []string{"PATH", "HOME"},
+		}
+
+		cmd, wargs, err := Wrap(py, []string{"-c", script, sockPath}, opts)
+		if err != nil {
+			t.Fatalf("wrap: %v", err)
+		}
+
+		_, execErr := exec.Command(cmd, wargs...).CombinedOutput() //nolint:gosec // test-controlled command
+
+		return execErr
+	}
+
+	// 1. WITHOUT a UnixSockets grant, connect must be DENIED (the whole bug:
+	//    file access alone does not permit connect under Seatbelt).
+	if err := runConnect(nil); err == nil {
+		t.Errorf("connect succeeded WITHOUT a UnixSockets grant; safehouse should deny Unix-socket connect by default")
+	}
+
+	// 2. WITH the grant, connect must SUCCEED.
+	if err := runConnect([]string{sockPath}); err != nil {
+		t.Errorf("connect failed WITH a UnixSockets grant (the fix does not work): %v", err)
 	}
 }
