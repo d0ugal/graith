@@ -4501,6 +4501,13 @@ func (sm *SessionManager) sandboxOptsFromConfig(merged config.SandboxConfig, ses
 
 	readDirs = append(readDirs, sm.paths.RuntimeDir)
 
+	// The runtime dir grant above is read-only, which lets the agent see the
+	// daemon socket but NOT connect() to it (Seatbelt/Landlock gate socket
+	// connect separately from file read). Grant the socket explicitly so
+	// sandboxed agents can reach the daemon for `gr msg`, `gr status`, etc.
+	// This is scoped to the single socket file, not the whole runtime/data dir.
+	unixSockets := []string{sm.paths.SocketPath}
+
 	// nono does not auto-grant the launched command's location (only system
 	// paths like /usr/bin). Grant read on the agent binary's directory so the
 	// sandboxed process can exec it. safehouse is unaffected by the extra dir.
@@ -4525,6 +4532,7 @@ func (sm *SessionManager) sandboxOptsFromConfig(merged config.SandboxConfig, ses
 		WriteDirs:      writeDirs,
 		ReadFiles:      readFiles,
 		WriteFiles:     writeFiles,
+		UnixSockets:    unixSockets,
 		Features:       merged.Features,
 		EnvKeys:        envKeys,
 		SignalMode:     merged.SignalMode,

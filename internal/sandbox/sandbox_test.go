@@ -162,6 +162,45 @@ func TestWrapWithWriteDirs(t *testing.T) {
 	}
 }
 
+// TestWrapUnixSocketsGrantedWritable is a regression test for the daemon socket
+// being unreachable from a sandboxed agent. A read-only grant lets the agent
+// stat the socket but not connect() to it, so `gr msg`/`gr status` failed with
+// "daemon did not start in time". UnixSockets must land in the read/write
+// (--add-dirs) list — the same grant that makes docker.sock/podman.sock
+// connectable — NOT the read-only --add-dirs-ro list.
+func TestWrapUnixSocketsGrantedWritable(t *testing.T) {
+	sock := "/hame/user/.graith/graith.sock"
+	opts := WrapOpts{
+		Backend:     BackendSafehouse,
+		WorktreeDir: "/tmp/bothy",
+		UnixSockets: []string{sock},
+		EnvKeys:     []string{"TERM"},
+	}
+
+	_, args, err := Wrap("claude", nil, opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	inList := func(flag string) bool {
+		for i, a := range args {
+			if a == flag && i+1 < len(args) && slices.Contains(strings.Split(args[i+1], ":"), sock) {
+				return true
+			}
+		}
+
+		return false
+	}
+
+	if !inList("--add-dirs") {
+		t.Errorf("daemon socket not in read/write --add-dirs (cannot connect): %v", args)
+	}
+
+	if inList("--add-dirs-ro") {
+		t.Errorf("daemon socket wrongly in read-only --add-dirs-ro (connect would be denied): %v", args)
+	}
+}
+
 func TestWrapNoEnvKeys(t *testing.T) {
 	opts := WrapOpts{Backend: BackendSafehouse, WorktreeDir: "/tmp/bothy"}
 
@@ -413,6 +452,38 @@ func TestBuildNonoProfileSSHFeature(t *testing.T) {
 
 	if !slices.Contains(p.Filesystem.UnixSocket, "/run/user/1000/ssh-agent.sock") {
 		t.Errorf("ssh feature did not grant the agent socket: %v", p.Filesystem.UnixSocket)
+	}
+}
+
+// TestBuildNonoProfileUnixSockets is the nono half of the daemon-socket
+// regression: UnixSockets (the graith daemon socket) must map to
+// filesystem.unix_socket so a sandboxed agent can connect() to the daemon,
+// not just read the socket inode.
+func TestBuildNonoProfileUnixSockets(t *testing.T) {
+	sock := "/hame/user/.graith/graith.sock"
+	opts := WrapOpts{
+		Backend:     BackendNono,
+		WorktreeDir: "/tmp/bothy",
+		UnixSockets: []string{sock},
+		EnvKeys:     []string{"PATH", "HOME"},
+	}
+
+	p, warnings, err := buildNonoProfile("graith-bothy", opts, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(warnings) != 0 {
+		t.Errorf("unexpected warnings: %v", warnings)
+	}
+
+	if !slices.Contains(p.Filesystem.UnixSocket, sock) {
+		t.Errorf("daemon socket not in filesystem.unix_socket (cannot connect): %v", p.Filesystem.UnixSocket)
+	}
+
+	// It must NOT be demoted to a read-only grant.
+	if slices.Contains(p.Filesystem.Read, sock) || slices.Contains(p.Filesystem.ReadFile, sock) {
+		t.Errorf("daemon socket wrongly in a read-only grant: read=%v read_file=%v", p.Filesystem.Read, p.Filesystem.ReadFile)
 	}
 }
 
