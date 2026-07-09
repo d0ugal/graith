@@ -59,11 +59,21 @@ go test -fuzz=FuzzStripANSI ./internal/detector/
 
 ### Coverage
 
-CI uploads coverage to Codecov. Generate locally:
+CI measures Go and Swift coverage on every PR and posts a summary comment
+(overall % plus a Go delta vs the base branch) via the `Coverage` workflow —
+no third-party service. Generate the Go report locally:
 
 ```bash
-go test -race -coverprofile=coverage.txt ./...
-go tool cover -html=coverage.txt
+go test -coverprofile=coverage.txt ./...
+go tool cover -func=coverage.txt   # overall % (total: line)
+go tool cover -html=coverage.txt   # browsable HTML report
+```
+
+Swift coverage for the shared package:
+
+```bash
+swift test --package-path gui/shared --enable-code-coverage
+jq '.data[0].totals.lines.percent' "$(swift test --package-path gui/shared --show-codecov-path)"
 ```
 
 ## Lint
