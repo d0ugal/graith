@@ -1,7 +1,10 @@
 package cli
 
 import (
+	"bytes"
+	"errors"
 	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -272,5 +275,242 @@ func TestParseStaleDuration2(t *testing.T) {
 
 	if d.Hours() != 73 {
 		t.Errorf("parseStaleDuration(3d1h) = %v hours, want 73", d.Hours())
+	}
+}
+
+// errorEnvelope builds a daemon "error" response envelope carrying msg.
+func errorEnvelope(t *testing.T, msg string) protocol.Envelope {
+	t.Helper()
+
+	raw, err := protocol.EncodeControl("error", protocol.ErrorMsg{Message: msg})
+	if err != nil {
+		t.Fatalf("encode error envelope: %v", err)
+	}
+
+	env, err := protocol.DecodeControl(raw)
+	if err != nil {
+		t.Fatalf("decode error envelope: %v", err)
+	}
+
+	return env
+}
+
+// okEnvelope builds a successful (non-error) response envelope.
+func okEnvelope() protocol.Envelope {
+	return protocol.Envelope{Type: "ok"}
+}
+
+// fakeBatchConn is a scripted batchConn: each ReadControlResponse call returns
+// the next queued response (or read error). It records the control types sent
+// so tests can assert every non-skipped session was contacted.
+type fakeBatchConn struct {
+	responses []protocol.Envelope
+	readErrs  []error // parallel to responses; non-nil means ReadControlResponse fails
+	sendErr   error   // if set, SendControl fails on the first send
+
+	sent      []string
+	readIndex int
+}
+
+func (f *fakeBatchConn) SendControl(msgType string, _ any) error {
+	if f.sendErr != nil {
+		return f.sendErr
+	}
+
+	f.sent = append(f.sent, msgType)
+
+	return nil
+}
+
+func (f *fakeBatchConn) ReadControlResponse() (protocol.Envelope, error) {
+	i := f.readIndex
+	f.readIndex++
+
+	if i < len(f.readErrs) && f.readErrs[i] != nil {
+		return protocol.Envelope{}, f.readErrs[i]
+	}
+
+	return f.responses[i], nil
+}
+
+// TestExecuteBatchContinuesPastFailure is the core regression test for #201:
+// when a session in the middle fails, executeBatch must still process the
+// sessions after it and report both the successes and the failure, rather than
+// aborting on the first error.
+func TestExecuteBatchContinuesPastFailure(t *testing.T) {
+	matched := []protocol.SessionInfo{
+		{ID: "1", Name: "braw"},
+		{ID: "2", Name: "canny"},
+		{ID: "3", Name: "dreich"}, // this one fails
+		{ID: "4", Name: "bonnie"},
+		{ID: "5", Name: "kirk"},
+	}
+
+	conn := &fakeBatchConn{
+		responses: []protocol.Envelope{
+			okEnvelope(),
+			okEnvelope(),
+			errorEnvelope(t, "worktree busy"),
+			okEnvelope(),
+			okEnvelope(),
+		},
+	}
+
+	res, transportErr := executeBatch(conn, matched, "delete", func(id string) any { return id })
+	if transportErr != nil {
+		t.Fatalf("unexpected transport error: %v", transportErr)
+	}
+
+	wantSucceeded := []string{"braw", "canny", "bonnie", "kirk"}
+	if strings.Join(res.succeeded, ",") != strings.Join(wantSucceeded, ",") {
+		t.Errorf("succeeded = %v, want %v", res.succeeded, wantSucceeded)
+	}
+
+	if len(res.failed) != 1 || res.failed[0].name != "dreich" || res.failed[0].msg != "worktree busy" {
+		t.Fatalf("failed = %+v, want one failure for dreich with message %q", res.failed, "worktree busy")
+	}
+
+	// All five sessions must have been contacted — the failure at #3 must not
+	// have short-circuited #4 and #5.
+	if len(conn.sent) != 5 {
+		t.Errorf("sent %d control messages, want 5 (failure should not abort the loop)", len(conn.sent))
+	}
+}
+
+// TestExecuteBatchSkipsStarred verifies starred sessions are skipped without
+// contacting the daemon and reported separately from successes.
+func TestExecuteBatchSkipsStarred(t *testing.T) {
+	matched := []protocol.SessionInfo{
+		{ID: "1", Name: "braw"},
+		{ID: "2", Name: "thrawn", Starred: true},
+		{ID: "3", Name: "canny"},
+	}
+
+	conn := &fakeBatchConn{responses: []protocol.Envelope{okEnvelope(), okEnvelope()}}
+
+	res, transportErr := executeBatch(conn, matched, "stop", func(id string) any { return id })
+	if transportErr != nil {
+		t.Fatalf("unexpected transport error: %v", transportErr)
+	}
+
+	if strings.Join(res.succeeded, ",") != "braw,canny" {
+		t.Errorf("succeeded = %v, want [braw canny]", res.succeeded)
+	}
+
+	if len(res.skipped) != 1 || res.skipped[0] != "thrawn" {
+		t.Errorf("skipped = %v, want [thrawn]", res.skipped)
+	}
+
+	if len(res.failed) != 0 {
+		t.Errorf("failed = %v, want none", res.failed)
+	}
+
+	// Only the two non-starred sessions were contacted.
+	if len(conn.sent) != 2 {
+		t.Errorf("sent %d control messages, want 2 (starred must not be sent)", len(conn.sent))
+	}
+}
+
+// TestExecuteBatchAllFail verifies every session failing is recorded, with no
+// successes, and the loop still runs to completion.
+func TestExecuteBatchAllFail(t *testing.T) {
+	matched := []protocol.SessionInfo{
+		{ID: "1", Name: "dreich"},
+		{ID: "2", Name: "fash"},
+	}
+
+	conn := &fakeBatchConn{
+		responses: []protocol.Envelope{
+			errorEnvelope(t, "boom"),
+			errorEnvelope(t, "scunner"),
+		},
+	}
+
+	res, transportErr := executeBatch(conn, matched, "delete", func(id string) any { return id })
+	if transportErr != nil {
+		t.Fatalf("unexpected transport error: %v", transportErr)
+	}
+
+	if len(res.succeeded) != 0 {
+		t.Errorf("succeeded = %v, want none", res.succeeded)
+	}
+
+	if len(res.failed) != 2 {
+		t.Fatalf("failed = %+v, want 2 failures", res.failed)
+	}
+}
+
+// TestExecuteBatchTransportErrorAborts verifies a read (transport) error stops
+// the loop and is returned separately, while the results gathered before it
+// are preserved so the caller can still report them.
+func TestExecuteBatchTransportErrorAborts(t *testing.T) {
+	matched := []protocol.SessionInfo{
+		{ID: "1", Name: "braw"},
+		{ID: "2", Name: "dreich"}, // read fails here
+		{ID: "3", Name: "canny"},
+	}
+
+	conn := &fakeBatchConn{
+		responses: []protocol.Envelope{okEnvelope(), {}, okEnvelope()},
+		readErrs:  []error{nil, errors.New("connection reset"), nil},
+	}
+
+	res, transportErr := executeBatch(conn, matched, "stop", func(id string) any { return id })
+	if transportErr == nil {
+		t.Fatalf("expected transport error, got nil")
+	}
+
+	// The first session's success is preserved.
+	if strings.Join(res.succeeded, ",") != "braw" {
+		t.Errorf("succeeded = %v, want [braw]", res.succeeded)
+	}
+
+	// The loop aborted at the second session, so the third was never contacted.
+	if len(conn.sent) != 2 {
+		t.Errorf("sent %d control messages, want 2 (transport error must abort)", len(conn.sent))
+	}
+}
+
+// TestExecuteBatchSendErrorAborts verifies a SendControl (transport) failure is
+// returned as a transport error rather than silently swallowed.
+func TestExecuteBatchSendErrorAborts(t *testing.T) {
+	matched := []protocol.SessionInfo{{ID: "1", Name: "braw"}}
+
+	conn := &fakeBatchConn{sendErr: errors.New("broken pipe")}
+
+	_, transportErr := executeBatch(conn, matched, "delete", func(id string) any { return id })
+	if transportErr == nil {
+		t.Fatalf("expected transport error from failed send, got nil")
+	}
+}
+
+// TestPrintBatchSummary verifies the summary reports the success count and
+// lists both skipped-starred and failed sessions (with the daemon's error).
+func TestPrintBatchSummary(t *testing.T) {
+	var buf bytes.Buffer
+
+	orig := out
+	t.Cleanup(func() { out = orig })
+
+	out = output.NewWithWriter(false, &buf)
+
+	res := batchResults{
+		succeeded: []string{"braw", "canny"},
+		failed:    []batchFailure{{name: "dreich", msg: "worktree busy"}},
+		skipped:   []string{"thrawn"},
+	}
+
+	printBatchSummary("deleted", "deleting", res)
+
+	got := buf.String()
+
+	for _, want := range []string{
+		"Deleted 2 sessions",
+		"Skipped starred session: thrawn",
+		"Failed deleting dreich: worktree busy",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("summary missing %q\nfull output:\n%s", want, got)
+		}
 	}
 }

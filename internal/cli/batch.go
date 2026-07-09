@@ -180,22 +180,76 @@ func runBatch(cmd *cobra.Command, bf *batchFlags, verb, pastTense, gerund, contr
 		}
 	}
 
-	var (
-		skipped []string
-		done    int
-	)
+	res, transportErr := executeBatch(c, matched, controlType, payload)
+
+	printBatchSummary(pastTense, gerund, res)
+
+	// A transport-level failure desyncs the stream, so no further sessions
+	// could be processed — surface it after reporting what did complete.
+	if transportErr != nil {
+		return transportErr
+	}
+
+	// Partial failure must still exit non-zero so scripts and orchestrators
+	// can detect that not every session was affected.
+	if len(res.failed) > 0 {
+		attempted := len(res.succeeded) + len(res.failed)
+
+		return fmt.Errorf("%d of %d sessions could not be %s", len(res.failed), attempted, pastTense)
+	}
+
+	return nil
+}
+
+// batchConn is the subset of *client.Client that the batch execution loop
+// needs. It is an interface so the loop can be unit-tested without a live
+// daemon connection.
+type batchConn interface {
+	SendControl(msgType string, payload any) error
+	ReadControlResponse() (protocol.Envelope, error)
+}
+
+// batchFailure records a session whose per-session operation the daemon
+// rejected, along with the daemon's error message.
+type batchFailure struct {
+	name string
+	msg  string
+}
+
+// batchResults collects the per-session outcomes of a batch operation.
+type batchResults struct {
+	succeeded []string
+	failed    []batchFailure
+	skipped   []string
+}
+
+// executeBatch runs controlType against every matched session, collecting a
+// per-session result instead of aborting on the first daemon error. Starred
+// sessions are skipped without contacting the daemon. A daemon "error"
+// response is recorded as a failure and processing continues, so earlier
+// successes are never hidden by a later failure (issue #201).
+//
+// A transport-level error (SendControl / ReadControlResponse failing) is
+// returned separately: it means the connection or framing is broken, so the
+// stream is desynced and no further sessions can be processed reliably. The
+// results gathered before that point are still returned so the caller can
+// report them.
+func executeBatch(c batchConn, matched []protocol.SessionInfo, controlType string, payload func(sessionID string) any) (batchResults, error) {
+	var res batchResults
 
 	for _, s := range matched {
 		if s.Starred {
-			skipped = append(skipped, s.Name)
+			res.skipped = append(res.skipped, s.Name)
 			continue
 		}
 
-		_ = c.SendControl(controlType, payload(s.ID))
+		if err := c.SendControl(controlType, payload(s.ID)); err != nil {
+			return res, fmt.Errorf("sending request for %s: %w", s.Name, err)
+		}
 
 		resp, err := c.ReadControlResponse()
 		if err != nil {
-			return err
+			return res, fmt.Errorf("reading response for %s: %w", s.Name, err)
 		}
 
 		if resp.Type == "error" {
@@ -203,19 +257,31 @@ func runBatch(cmd *cobra.Command, bf *batchFlags, verb, pastTense, gerund, contr
 
 			_ = protocol.DecodePayload(resp, &e)
 
-			return fmt.Errorf("%s %s: %s", gerund, s.Name, e.Message)
+			res.failed = append(res.failed, batchFailure{name: s.Name, msg: e.Message})
+
+			continue
 		}
 
-		done++
+		res.succeeded = append(res.succeeded, s.Name)
 	}
 
-	out.Printf("%s %d sessions\n", strings.ToUpper(pastTense[:1])+pastTense[1:], done)
+	return res, nil
+}
 
-	for _, name := range skipped {
+// printBatchSummary reports how many sessions succeeded, then lists the
+// starred sessions that were skipped and the sessions that failed (with the
+// daemon's error). pastTense is e.g. "deleted"/"stopped"; gerund is e.g.
+// "deleting"/"stopping".
+func printBatchSummary(pastTense, gerund string, res batchResults) {
+	out.Printf("%s %d sessions\n", strings.ToUpper(pastTense[:1])+pastTense[1:], len(res.succeeded))
+
+	for _, name := range res.skipped {
 		out.Printf("Skipped starred session: %s\n", name)
 	}
 
-	return nil
+	for _, f := range res.failed {
+		out.Printf("Failed %s %s: %s\n", gerund, f.name, f.msg)
+	}
 }
 
 func confirmBatch(cmd *cobra.Command, verb string, pastTense string, sessions []protocol.SessionInfo) (bool, error) {
