@@ -115,20 +115,38 @@ func TestRunGitPullTick_PullsMaintenanceRepo_Cov(t *testing.T) {
 	bareDir, cloneDir := setupTestRepo(t)
 	advanceRemote(t, bareDir, cloneDir)
 
-	// Isolate git's global config in a temp HOME so ListMaintenanceRepos only
-	// sees the repo we register — never the developer's real maintenance repos.
+	// Fully isolate git's global/system config so ListMaintenanceRepos only sees
+	// the repo we register — never the developer's real maintenance repos.
+	// Overriding HOME alone is NOT enough: git's --global scope also reads/writes
+	// $XDG_CONFIG_HOME/git/config, so a developer with XDG_CONFIG_HOME set (common
+	// on Linux/CI) could have their real config read (and its repos then fetched)
+	// or overwritten. Pin GIT_CONFIG_GLOBAL to a temp file, disable system config,
+	// and redirect XDG so every read/write path lands inside the temp home.
+	// RunContextEnv/RunOutputContext build their env from os.Environ(), so these
+	// t.Setenv values reach the production ListMaintenanceRepos + pullIfClean paths.
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	// git resolves --global from $HOME/.gitconfig; write via git config itself.
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(home, ".gitconfig"))
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	// Register the maintenance repo in the isolated global config.
 	gitRunHome(t, home, cloneDir, "config", "--global", "maintenance.repo", cloneDir)
 
 	sm := newTestSM(t)
 
 	sm.runGitPullTick(context.Background())
 
-	head, _ := gitOutHome(t, home, cloneDir, "rev-parse", "HEAD")
-	remoteHead, _ := gitOutHome(t, home, cloneDir, "rev-parse", "origin/main")
-	if head != remoteHead {
+	head, err := gitOutHome(t, home, cloneDir, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatalf("rev-parse HEAD: %v", err)
+	}
+
+	remoteHead, err := gitOutHome(t, home, cloneDir, "rev-parse", "origin/main")
+	if err != nil {
+		t.Fatalf("rev-parse origin/main: %v", err)
+	}
+
+	if head == "" || head != remoteHead {
 		t.Fatalf("maintenance repo should have been fast-forwarded: HEAD %q vs origin/main %q", head, remoteHead)
 	}
 }

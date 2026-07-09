@@ -168,7 +168,13 @@ func TestNotifyOrchestratorExit_Cov(t *testing.T) {
 
 func TestHandleOrchestratorExit_EarlyReturns_Cov(t *testing.T) {
 	sm := newOrchTestSM(t)
-	ctx := context.Background()
+
+	// A cancelled context guarantees that even if a guard regressed and fell
+	// through to the backoff-scheduling path, the test would not sleep — so a
+	// prompt return alone cannot mask a broken guard; the BackoffLevel assertion
+	// below is what actually pins the behavior.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
 
 	// Unknown session: returns without touching state.
 	sm.handleOrchestratorExit(ctx, "missing")
@@ -177,16 +183,22 @@ func TestHandleOrchestratorExit_EarlyReturns_Cov(t *testing.T) {
 	sm.state.Sessions["braw"] = &SessionState{ID: "braw", SystemKind: ""}
 	sm.handleOrchestratorExit(ctx, "braw")
 
-	// Orchestrator stopped for a terminal reason must NOT auto-restart.
+	// Orchestrator stopped for a terminal reason must NOT auto-restart: it returns
+	// before any backoff bookkeeping, so a non-zero sentinel BackoffLevel must be
+	// left untouched (the backoff path would have bumped it).
 	for _, reason := range []string{StopReasonUser, StopReasonIdle, StopReasonShutdown} {
 		id := "orch-" + reason
 		sm.state.Sessions[id] = &SessionState{
-			ID:         id,
-			SystemKind: SystemKindOrchestrator,
-			StopReason: reason,
+			ID:           id,
+			SystemKind:   SystemKindOrchestrator,
+			StopReason:   reason,
+			BackoffLevel: 3,
 		}
-		// Should return quickly without scheduling a restart.
 		sm.handleOrchestratorExit(ctx, id)
+
+		if got := sm.state.Sessions[id].BackoffLevel; got != 3 {
+			t.Errorf("terminal stop reason %q must not touch BackoffLevel, got %d", reason, got)
+		}
 	}
 }
 
