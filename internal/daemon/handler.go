@@ -405,12 +405,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					continue
 				}
 
-				sm.mu.RLock()
-				authErr := auth.checkTarget(sm, f.SourceSessionID, authSelfOrDescendant)
-				sm.mu.RUnlock()
-
-				if authErr != nil {
-					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
+				if !auth.authorizeTarget(sm, f.SourceSessionID, authSelfOrDescendant, sendControl) {
 					continue
 				}
 
@@ -428,12 +423,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					continue
 				}
 
-				sm.mu.RLock()
-				authErr := auth.checkTarget(sm, m.SessionID, authSelfOrDescendant)
-				sm.mu.RUnlock()
-
-				if authErr != nil {
-					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
+				if !auth.authorizeTarget(sm, m.SessionID, authSelfOrDescendant, sendControl) {
 					continue
 				}
 
@@ -451,12 +441,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					continue
 				}
 
-				sm.mu.RLock()
-				authErr := auth.checkTarget(sm, a.SessionID, authSelfOrDescendant)
-				sm.mu.RUnlock()
-
-				if authErr != nil {
-					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
+				if !auth.authorizeTarget(sm, a.SessionID, authSelfOrDescendant, sendControl) {
 					continue
 				}
 
@@ -589,12 +574,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					continue
 				}
 
-				sm.mu.RLock()
-				authErr := auth.checkTarget(sm, r.SessionID, authSelfOrDescendant)
-				sm.mu.RUnlock()
-
-				if authErr != nil {
-					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
+				if !auth.authorizeTarget(sm, r.SessionID, authSelfOrDescendant, sendControl) {
 					continue
 				}
 
@@ -657,12 +637,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					continue
 				}
 
-				sm.mu.RLock()
-				authErr := auth.checkTarget(sm, s.SessionID, authSelfOrDescendant)
-				sm.mu.RUnlock()
-
-				if authErr != nil {
-					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
+				if !auth.authorizeTarget(sm, s.SessionID, authSelfOrDescendant, sendControl) {
 					continue
 				}
 
@@ -680,12 +655,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					continue
 				}
 
-				sm.mu.RLock()
-				authErr := auth.checkTarget(sm, u.SessionID, authSelfOrDescendant)
-				sm.mu.RUnlock()
-
-				if authErr != nil {
-					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
+				if !auth.authorizeTarget(sm, u.SessionID, authSelfOrDescendant, sendControl) {
 					continue
 				}
 
@@ -707,12 +677,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					m.SessionID = auth.sessionID
 				}
 
-				sm.mu.RLock()
-				authErr := auth.checkTarget(sm, m.SessionID, authSelfOnly)
-				sm.mu.RUnlock()
-
-				if authErr != nil {
-					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
+				if !auth.authorizeTarget(sm, m.SessionID, authSelfOnly, sendControl) {
 					continue
 				}
 
@@ -736,12 +701,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					continue
 				}
 
-				sm.mu.RLock()
-				authErr := auth.checkTarget(sm, r.SessionID, authSelfOrDescendant)
-				sm.mu.RUnlock()
-
-				if authErr != nil {
-					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
+				if !auth.authorizeTarget(sm, r.SessionID, authSelfOrDescendant, sendControl) {
 					continue
 				}
 
@@ -759,12 +719,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					continue
 				}
 
-				sm.mu.RLock()
-				authErr := auth.checkTarget(sm, r.SessionID, authSelfOrDescendant)
-				sm.mu.RUnlock()
-
-				if authErr != nil {
-					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
+				if !auth.authorizeTarget(sm, r.SessionID, authSelfOrDescendant, sendControl) {
 					continue
 				}
 
@@ -795,12 +750,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					continue
 				}
 
-				sm.mu.RLock()
-				authErr := auth.checkTarget(sm, l.SessionID, authSelfOrDescendant)
-				sm.mu.RUnlock()
-
-				if authErr != nil {
-					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
+				if !auth.authorizeTarget(sm, l.SessionID, authSelfOrDescendant, sendControl) {
 					continue
 				}
 
@@ -873,12 +823,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					continue
 				}
 
-				sm.mu.RLock()
-				authErr := auth.checkTarget(sm, w.SessionID, authSelfOrDescendant)
-				sm.mu.RUnlock()
-
-				if authErr != nil {
-					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
+				if !auth.authorizeTarget(sm, w.SessionID, authSelfOrDescendant, sendControl) {
 					continue
 				}
 
@@ -1034,12 +979,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				// filter inside Conversation keeps the cross-inbox scan safe: for
 				// the target session, outbound results are limited to messages it
 				// authored, plus everything in its own inbox.
-				sm.mu.RLock()
-				authErr := auth.checkTarget(sm, m.SessionID, authSelfOrDescendant)
-				sm.mu.RUnlock()
-
-				if authErr != nil {
-					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
+				if !auth.authorizeTarget(sm, m.SessionID, authSelfOrDescendant, sendControl) {
 					continue
 				}
 
@@ -1095,12 +1035,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					req.SessionID = auth.sessionID
 				}
 
-				sm.mu.RLock()
-				authErr := auth.checkTarget(sm, req.SessionID, authSelfOnly)
-				sm.mu.RUnlock()
-
-				if authErr != nil {
-					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
+				if !auth.authorizeTarget(sm, req.SessionID, authSelfOnly, sendControl) {
 					continue
 				}
 
@@ -1160,12 +1095,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					continue
 				}
 
-				sm.mu.RLock()
-				authErr := auth.checkTarget(sm, t.SessionID, authSelfOrDescendant)
-				sm.mu.RUnlock()
-
-				if authErr != nil {
-					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
+				if !auth.authorizeTarget(sm, t.SessionID, authSelfOrDescendant, sendControl) {
 					continue
 				}
 
@@ -1205,12 +1135,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					continue
 				}
 
-				sm.mu.RLock()
-				authErr := auth.checkTarget(sm, in.SessionID, authSelfOrDescendant)
-				sm.mu.RUnlock()
-
-				if authErr != nil {
-					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
+				if !auth.authorizeTarget(sm, in.SessionID, authSelfOrDescendant, sendControl) {
 					continue
 				}
 
@@ -1241,12 +1166,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					continue
 				}
 
-				sm.mu.RLock()
-				authErr := auth.checkTarget(sm, sp.SessionID, authSelfOrDescendant)
-				sm.mu.RUnlock()
-
-				if authErr != nil {
-					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
+				if !auth.authorizeTarget(sm, sp.SessionID, authSelfOrDescendant, sendControl) {
 					continue
 				}
 
@@ -1267,12 +1187,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					continue
 				}
 
-				sm.mu.RLock()
-				authErr := auth.checkTarget(sm, ss.SessionID, authSelfOrDescendant)
-				sm.mu.RUnlock()
-
-				if authErr != nil {
-					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
+				if !auth.authorizeTarget(sm, ss.SessionID, authSelfOrDescendant, sendControl) {
 					continue
 				}
 
@@ -1312,12 +1227,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					continue
 				}
 
-				sm.mu.RLock()
-				authErr := auth.checkTarget(sm, sr.SessionID, authSelfOrDescendant)
-				sm.mu.RUnlock()
-
-				if authErr != nil {
-					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
+				if !auth.authorizeTarget(sm, sr.SessionID, authSelfOrDescendant, sendControl) {
 					continue
 				}
 
@@ -1349,12 +1259,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					sr.SessionID = auth.sessionID
 				}
 
-				sm.mu.RLock()
-				authErr := auth.checkTarget(sm, sr.SessionID, authSelfOnly)
-				sm.mu.RUnlock()
-
-				if authErr != nil {
-					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
+				if !auth.authorizeTarget(sm, sr.SessionID, authSelfOnly, sendControl) {
 					continue
 				}
 
@@ -1402,12 +1307,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					mc.SessionID = auth.sessionID
 				}
 
-				sm.mu.RLock()
-				authErr := auth.checkTarget(sm, mc.SessionID, authSelfOnly)
-				sm.mu.RUnlock()
-
-				if authErr != nil {
-					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
+				if !auth.authorizeTarget(sm, mc.SessionID, authSelfOnly, sendControl) {
 					continue
 				}
 
@@ -1743,6 +1643,24 @@ func decodePayload[T any](msg protocol.Envelope, send func(string, any), errMsg 
 	}
 
 	return v, true
+}
+
+// authorizeTarget checks whether the caller may act on target session id under
+// the given rule, taking sm.mu around the check. On failure it sends an "error"
+// control message and returns false, so callers can uniformly
+// `if !auth.authorizeTarget(...) { continue }`.
+func (ac authContext) authorizeTarget(sm *SessionManager, id string, rule authRule, send func(string, any)) bool {
+	sm.mu.RLock()
+	err := ac.checkTarget(sm, id, rule)
+	sm.mu.RUnlock()
+
+	if err != nil {
+		send("error", protocol.ErrorMsg{Message: err.Error()})
+
+		return false
+	}
+
+	return true
 }
 
 // lifecycleRequest holds the fields shared by the stop and delete control
