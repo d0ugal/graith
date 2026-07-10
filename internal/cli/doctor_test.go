@@ -11,7 +11,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/output"
@@ -1077,11 +1076,24 @@ func TestCheckSessionsSandboxDisabledMultiRunning(t *testing.T) {
 // TestCheckStorage exercises the storage section end-to-end: scrollback and
 // message counts pass, an orphaned .log file (no matching session) warns, and
 // the tmp-dir sub-check runs against an empty tmp dir.
+// stubNoOrphans replaces the daemon GC round-trip with a no-op returning no
+// orphans, so checkStorage tests that aren't about orphan cleanup neither dial
+// the socket nor (critically) reach the auto-starting client path.
+func stubNoOrphans(t *testing.T) {
+	t.Helper()
+
+	old := daemonGCFetch
+	daemonGCFetch = func(bool) ([]protocol.GCOrphanInfo, error) { return nil, nil }
+
+	t.Cleanup(func() { daemonGCFetch = old })
+}
+
 func TestCheckStorage(t *testing.T) {
 	oldPaths := paths
 
 	t.Cleanup(func() { paths = oldPaths })
 
+	stubNoOrphans(t)
 	discardOut(t)
 
 	dataDir := t.TempDir()
@@ -1131,6 +1143,7 @@ func TestCheckStorageSaturatedScrollback(t *testing.T) {
 
 	t.Cleanup(func() { paths = oldPaths })
 
+	stubNoOrphans(t)
 	discardOut(t)
 
 	dataDir := t.TempDir()
@@ -1250,79 +1263,14 @@ func TestCheckTmpDirLegacyShareDir(t *testing.T) {
 	}
 }
 
-// TestFindOrphanedWorktrees builds the on-disk worktree and scratch layouts
-// doctor walks, ages them past orphanMinAge, and verifies a session ID absent
-// from the live set is reported as orphaned while a live one is skipped.
-func TestFindOrphanedWorktrees(t *testing.T) {
-	oldPaths := paths
-
-	t.Cleanup(func() { paths = oldPaths })
-
-	discardOut(t)
-
-	dataDir := t.TempDir()
-	paths.DataDir = dataDir
-
-	// Worktrees live at <DataDir>/worktrees/<repoName>/<repoHash>/<sessionID>.
-	orphanWT := filepath.Join(dataDir, "worktrees", "croft", "deadbeef", "orphan-sess")
-	liveWT := filepath.Join(dataDir, "worktrees", "croft", "deadbeef", "live-sess")
-
-	for _, d := range []string{orphanWT, liveWT} {
-		if err := os.MkdirAll(d, 0o750); err != nil {
-			t.Fatal(err)
-		}
-
-		if err := os.WriteFile(filepath.Join(d, "whin.txt"), []byte("bide"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	// Scratch dirs live at <DataDir>/scratch/<sessionID>.
-	orphanScratch := filepath.Join(dataDir, "scratch", "orphan-scratch")
-	if err := os.MkdirAll(orphanScratch, 0o750); err != nil {
-		t.Fatal(err)
-	}
-
-	// Age every candidate past orphanMinAge so the recency guard doesn't skip
-	// them. Use a fixed epoch well in the past.
-	old := time.Now().Add(-time.Hour)
-	for _, d := range []string{orphanWT, liveWT, orphanScratch} {
-		if err := os.Chtimes(d, old, old); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	sessionIDs := map[string]bool{"live-sess": true}
-
-	dc := newDoctorContext()
-	orphans := dc.findOrphanedWorktrees(sessionIDs)
-
-	var paths_ []string
-	for _, o := range orphans {
-		paths_ = append(paths_, o.path)
-	}
-
-	joined := strings.Join(paths_, "\n")
-
-	if !strings.Contains(joined, orphanWT) {
-		t.Errorf("expected orphaned worktree %q, got: %v", orphanWT, paths_)
-	}
-
-	if !strings.Contains(joined, orphanScratch) {
-		t.Errorf("expected orphaned scratch dir %q, got: %v", orphanScratch, paths_)
-	}
-
-	if strings.Contains(joined, liveWT) {
-		t.Errorf("live session worktree %q should not be reported orphaned", liveWT)
-	}
-}
-
-// TestCheckStorageOrphanedWorktree verifies checkStorage surfaces an aged
-// orphaned worktree dir as a warning with a per-path hint.
+// TestCheckStorageOrphanedWorktree verifies checkStorage surfaces the daemon's
+// reported orphaned worktree dirs as a warning with a per-path hint. Detection
+// itself lives on the daemon (internal/daemon gc tests); here the daemon fetch
+// is stubbed so the CLI rendering can be exercised without a running daemon.
 func TestCheckStorageOrphanedWorktree(t *testing.T) {
-	oldPaths := paths
+	oldPaths, oldFetch := paths, daemonGCFetch
 
-	t.Cleanup(func() { paths = oldPaths })
+	t.Cleanup(func() { paths, daemonGCFetch = oldPaths, oldFetch })
 
 	discardOut(t)
 
@@ -1332,17 +1280,9 @@ func TestCheckStorageOrphanedWorktree(t *testing.T) {
 	paths.TmpDir = filepath.Join(dataDir, "tmp")
 
 	orphanWT := filepath.Join(dataDir, "worktrees", "croft", "deadbeef", "gane-sess")
-	if err := os.MkdirAll(orphanWT, 0o750); err != nil {
-		t.Fatal(err)
-	}
 
-	if err := os.WriteFile(filepath.Join(orphanWT, "neep.txt"), []byte("x"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	old := time.Now().Add(-time.Hour)
-	if err := os.Chtimes(orphanWT, old, old); err != nil {
-		t.Fatal(err)
+	daemonGCFetch = func(_ bool) ([]protocol.GCOrphanInfo, error) {
+		return []protocol.GCOrphanInfo{{Type: "worktree", Path: orphanWT, ID: "gane-sess"}}, nil
 	}
 
 	diag := &protocol.DiagnosticsMsg{
@@ -1357,6 +1297,50 @@ func TestCheckStorageOrphanedWorktree(t *testing.T) {
 	warned := strings.Join(checkResults(dc, "warn"), "\n")
 	if !strings.Contains(warned, "orphaned worktree dir") {
 		t.Errorf("expected orphaned worktree warn, got: %q", warned)
+	}
+}
+
+// TestCheckStorageOrphanedWorktreeAutofix verifies that --autofix triggers the
+// daemon force pass and reports the removed/skipped counts it returns.
+func TestCheckStorageOrphanedWorktreeAutofix(t *testing.T) {
+	oldPaths, oldFetch := paths, daemonGCFetch
+
+	t.Cleanup(func() { paths, daemonGCFetch = oldPaths, oldFetch })
+
+	discardOut(t)
+
+	dataDir := t.TempDir()
+	paths.DataDir = dataDir
+	paths.LogDir = filepath.Join(dataDir, "logs")
+	paths.TmpDir = filepath.Join(dataDir, "tmp")
+
+	doctorAutofix = true // restored by discardOut
+
+	var forceCalled bool
+
+	daemonGCFetch = func(force bool) ([]protocol.GCOrphanInfo, error) {
+		if force {
+			forceCalled = true
+
+			return []protocol.GCOrphanInfo{
+				{Type: "worktree", Path: "/x/braw", ID: "braw", Removed: true},
+				{Type: "worktree", Path: "/x/dreich", ID: "dreich", HasDirtyFiles: true, Skipped: true, Reason: "uncommitted changes — remove manually"},
+			}, nil
+		}
+
+		return []protocol.GCOrphanInfo{
+			{Type: "worktree", Path: "/x/braw", ID: "braw"},
+			{Type: "worktree", Path: "/x/dreich", ID: "dreich", HasDirtyFiles: true},
+		}, nil
+	}
+
+	diag := &protocol.DiagnosticsMsg{Sessions: []protocol.SessionDiagnostic{}}
+
+	dc := newDoctorContext()
+	dc.checkStorage(diag)
+
+	if !forceCalled {
+		t.Error("--autofix did not trigger the daemon force pass")
 	}
 }
 
@@ -1711,6 +1695,7 @@ func TestCheckStorageCov2OrphanScrollbackAutofix(t *testing.T) {
 
 	t.Cleanup(func() { paths = oldPaths })
 
+	stubNoOrphans(t)
 	discardOut(t)
 
 	dataDir := t.TempDir()
@@ -1750,57 +1735,5 @@ func TestCheckStorageCov2OrphanScrollbackAutofix(t *testing.T) {
 
 	if _, err := os.Stat(liveLog); err != nil {
 		t.Errorf("live scrollback must be preserved, stat err = %v", err)
-	}
-}
-
-// TestFindOrphanedInWorktreesCov2GitDirty builds a real git worktree with an
-// untracked (dirty) file under the worktrees/<repo>/<hash>/<sess> layout, ages
-// it past orphanMinAge, and verifies findOrphanedInWorktrees flags it as a git
-// worktree with uncommitted changes so autofix will skip it.
-func TestFindOrphanedInWorktreesCov2GitDirty(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not available")
-	}
-
-	dataDir := t.TempDir()
-	worktreesDir := filepath.Join(dataDir, "worktrees")
-
-	sessDir := filepath.Join(worktreesDir, "croft", "deadbeef", "gane-sess")
-	if err := os.MkdirAll(sessDir, 0o750); err != nil {
-		t.Fatal(err)
-	}
-
-	// A bare `git init` plus an untracked file makes HasUncommittedChanges true
-	// without needing a commit (which the sandboxed env can't always produce).
-	if out, err := exec.Command("git", "-C", sessDir, "init").CombinedOutput(); err != nil {
-		t.Fatalf("git init: %v (%s)", err, out)
-	}
-
-	if err := os.WriteFile(filepath.Join(sessDir, "skelf.txt"), []byte("dirty"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	old := time.Now().Add(-time.Hour)
-	if err := os.Chtimes(sessDir, old, old); err != nil {
-		t.Fatal(err)
-	}
-
-	repos, err := os.ReadDir(worktreesDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	orphans := findOrphanedInWorktrees(repos, worktreesDir, map[string]bool{}, time.Now())
-	if len(orphans) != 1 {
-		t.Fatalf("expected 1 orphan, got %d (%+v)", len(orphans), orphans)
-	}
-
-	o := orphans[0]
-	if !o.isGitWorktree {
-		t.Error("expected isGitWorktree = true for a git-initialised dir")
-	}
-
-	if !o.hasDirtyFiles {
-		t.Error("expected hasDirtyFiles = true for an untracked file")
 	}
 }
