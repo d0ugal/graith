@@ -141,9 +141,11 @@ gr    # bare gr opens the session picker
 #   ctrl+b r    → restart a stopped session
 #   ctrl+b ctrl+b → send a literal ctrl+b
 
-# Rename / delete
+# Rename / delete (soft — recoverable for 24h) / restore / purge (destroy now)
 gr rename fix-auth-bug auth-rewrite
-gr delete auth-rewrite
+gr delete auth-rewrite            # soft delete: hidden, but recoverable
+gr restore auth-rewrite           # bring it back within the retention window
+gr purge auth-rewrite             # hard-delete now (irrecoverable)
 ```
 
 ## Commands
@@ -156,7 +158,10 @@ gr delete auth-rewrite
 | `gr attach [name]` (`a`) | Attach to a session |
 | `gr stop <name>` | Stop a running session (keeps the worktree); `--children` stops descendants |
 | `gr restart <name>` | Restart a stopped session |
-| `gr delete <name>` (`rm`) | Delete a session and its worktree; `--children` deletes descendants |
+| `gr delete <name>` (`rm`) | Soft-delete a session — hide it but keep the worktree for the recovery window (default 24h); `--children` deletes descendants |
+| `gr restore <name>` | Restore a soft-deleted session within its recovery window |
+| `gr purge <name>` | Permanently delete a session now (worktree + branch gone), bypassing the recovery window |
+| `gr list --deleted` | List soft-deleted sessions and their expiry |
 | `gr rename <old> <new>` | Rename a session |
 | `gr fork <source> <name>` | Fork a session (new worktree + agent conversation history) |
 | `gr info` | Show info for the current session (when inside a worktree) |
@@ -543,6 +548,10 @@ auto_pop = false                        # auto-open the approval overlay when a 
 max_age        = ""                     # prune messages older than e.g. "7d" / "168h" (empty = keep)
 max_per_stream = 0                      # cap messages per stream (0 = unlimited)
 
+[delete]
+retention      = "24h"                  # how long soft-deleted sessions are kept before purge
+# retention    = "0"                    # disable soft delete: gr delete is rejected, use gr purge
+
 [keybindings]
 prefix         = "ctrl+b"               # prefix key
 new_session    = "c"                    # create a session
@@ -635,16 +644,20 @@ Press the prefix (`ctrl+b`), then:
 |-----|--------|
 | `enter` | Attach to the highlighted session |
 | `j` / `k` (or arrows) | Move the cursor |
-| `h` / `l` (or left/right) | Cycle view: All → Needs Attention → Active |
+| `h` / `l` (or left/right) | Cycle view: All → Needs Attention → Active → Starred → Scenarios → Deleted |
 | `n` / `p` | Next / previous session |
 | `/` | Filter by name |
-| `x` then `y` | Delete (with confirmation) |
+| `x` then `y` | Delete (soft, with confirmation) |
+| `enter` (in Deleted view) | Restore the highlighted soft-deleted session |
 | `q` / `esc` | Close the overlay |
 
 **Views:**
 - **All** — every session, grouped by repo (default)
 - **Needs Attention** — sessions waiting for approval, errored, idle, or stopped with uncommitted/unpushed changes, sorted by time in current state (oldest first)
 - **Active** — running sessions only, sorted newest first
+- **Starred** — starred sessions only
+- **Scenarios** — sessions grouped by scenario
+- **Deleted** — soft-deleted sessions, most-recently-deleted first, with their expiry; `enter` restores the highlighted one (the only action in this view)
 
 ### Dashboard (`gr dashboard`)
 
@@ -666,7 +679,9 @@ When you create a session:
 3. Creates a worktree at `~/.local/share/graith/worktrees/<repo-name>/<repo-hash>/<session-id>/`
 4. Starts the agent in that worktree
 
-When you stop a session, the agent process is killed but the worktree and branch are kept (resume restarts the agent in place). When you delete a session, the process is killed, the worktree is removed, and the branch is deleted.
+When you stop a session, the agent process is killed but the worktree and branch are kept (resume restarts the agent in place).
+
+When you **delete** a session it is *soft-deleted*: the agent is stopped and the session is hidden from `gr list` and the picker, but its worktree, branch, and state are preserved for a recovery window (default 24h, configurable via `[delete] retention`). Within that window `gr restore <name>` brings it back as a stopped session, and `gr list --deleted` (or the picker's *Deleted* view) shows what's pending purge and when. A background loop hard-deletes sessions once their window elapses. To reclaim the disk immediately, `gr purge <name>` hard-deletes now — process killed, worktree removed, branch deleted — bypassing the window; it prompts on unsaved work. Set `retention = "0"` to disable soft delete (then `gr delete` is rejected and you use `gr purge`).
 
 ## Environment variables
 
