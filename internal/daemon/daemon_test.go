@@ -65,6 +65,20 @@ func gitOut(t *testing.T, dir string, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
+// assertErrContains fails the test if err is nil or its message does not
+// contain want.
+func assertErrContains(t *testing.T, err error, want string) {
+	t.Helper()
+
+	if err == nil {
+		t.Fatalf("expected error containing %q, got nil", want)
+	}
+
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("expected error containing %q, got %v", want, err)
+	}
+}
+
 func TestGenerateID(t *testing.T) {
 	t.Run("length", func(t *testing.T) {
 		id := generateID()
@@ -1430,13 +1444,7 @@ func TestForkNoRepoSession(t *testing.T) {
 	}
 
 	_, err := sm.Fork("braw-fork", "norepo1", 24, 80)
-	if err == nil {
-		t.Fatal("Fork() should fail for no-repo source session")
-	}
-
-	if !strings.Contains(err.Error(), "no repo") {
-		t.Errorf("Fork() error = %q, want error mentioning 'no repo'", err)
-	}
+	assertErrContains(t, err, "no repo")
 
 	if len(sm.state.Sessions) != 1 {
 		t.Errorf("expected 1 session (source only), got %d", len(sm.state.Sessions))
@@ -1508,13 +1516,7 @@ func TestReloadConfigRejectsDataDirChange(t *testing.T) {
 	sm.configFile = cfgPath
 
 	err := sm.ReloadConfig()
-	if err == nil {
-		t.Fatal("expected error when data_dir changes")
-	}
-
-	if !strings.Contains(err.Error(), "data_dir changed") {
-		t.Errorf("error = %q, want it to mention data_dir changed", err)
-	}
+	assertErrContains(t, err, "data_dir changed")
 }
 
 func TestReloadConfigInvalidFile(t *testing.T) {
@@ -1644,13 +1646,7 @@ func TestShareWorktreeRequiresSandbox(t *testing.T) {
 	}
 
 	_, err := sm.Create("canny-reviewer", "claude", "", "", "", "", "", false, "braw-source", false, false, false, false, false, 24, 80)
-	if err == nil {
-		t.Fatal("expected error when --share-worktree used without sandbox, got nil")
-	}
-
-	if !strings.Contains(err.Error(), "requires sandbox") {
-		t.Errorf("unexpected error message: %v", err)
-	}
+	assertErrContains(t, err, "requires sandbox")
 }
 
 func TestShareWorktreeRequiresSandboxPerAgent(t *testing.T) {
@@ -1677,13 +1673,7 @@ func TestShareWorktreeRequiresSandboxPerAgent(t *testing.T) {
 	}
 
 	_, err := sm.Create("canny-reviewer", "claude", "", "", "", "", "", false, "braw-source", false, false, false, false, false, 24, 80)
-	if err == nil {
-		t.Fatal("expected error when --share-worktree used with per-agent sandbox disabled, got nil")
-	}
-
-	if !strings.Contains(err.Error(), "requires sandbox") {
-		t.Errorf("unexpected error message: %v", err)
-	}
+	assertErrContains(t, err, "requires sandbox")
 }
 
 func TestResumeSharedWorktreeWithoutSandboxRejects(t *testing.T) {
@@ -1706,13 +1696,7 @@ func TestResumeSharedWorktreeWithoutSandboxRejects(t *testing.T) {
 	}
 
 	_, err := sm.Resume("legacy1", 24, 80)
-	if err == nil {
-		t.Fatal("expected error when resuming shared-worktree session without sandbox, got nil")
-	}
-
-	if !strings.Contains(err.Error(), "requires sandbox") {
-		t.Errorf("unexpected error message: %v", err)
-	}
+	assertErrContains(t, err, "requires sandbox")
 }
 
 func TestCreateRollsBackOnSaveStateFailure(t *testing.T) {
@@ -2442,13 +2426,7 @@ func TestCreateInPlaceRejectsUnconfiguredRepo(t *testing.T) {
 	repoDir := initTempGitRepo(t)
 
 	_, err := sm.Create("braw", "claude", repoDir, "", "", "", "", false, "", false, true, false, false, false, 24, 80)
-	if err == nil {
-		t.Fatal("expected error for unconfigured repo")
-	}
-
-	if !strings.Contains(err.Error(), "not configured in [[repos]]") {
-		t.Errorf("error = %q, want mention of [[repos]]", err.Error())
-	}
+	assertErrContains(t, err, "not configured in [[repos]]")
 }
 
 func TestCreateInPlaceMutuallyExclusiveFlags(t *testing.T) {
@@ -2456,35 +2434,17 @@ func TestCreateInPlaceMutuallyExclusiveFlags(t *testing.T) {
 
 	t.Run("in-place with no-repo", func(t *testing.T) {
 		_, err := sm.Create("braw", "claude", "", "", "", "", "", true, "", false, true, false, false, false, 24, 80)
-		if err == nil {
-			t.Fatal("expected error for --in-place with --no-repo")
-		}
-
-		if !strings.Contains(err.Error(), "mutually exclusive") {
-			t.Errorf("error = %q, want mutually exclusive", err.Error())
-		}
+		assertErrContains(t, err, "mutually exclusive")
 	})
 
 	t.Run("in-place with share-worktree", func(t *testing.T) {
 		_, err := sm.Create("braw", "claude", "", "", "", "", "", false, "some-session", false, true, false, false, false, 24, 80)
-		if err == nil {
-			t.Fatal("expected error for --in-place with --share-worktree")
-		}
-
-		if !strings.Contains(err.Error(), "mutually exclusive") {
-			t.Errorf("error = %q, want mutually exclusive", err.Error())
-		}
+		assertErrContains(t, err, "mutually exclusive")
 	})
 
 	t.Run("in-place with base", func(t *testing.T) {
 		_, err := sm.Create("braw", "claude", "/tmp/whatever", "main", "", "", "", false, "", false, true, false, false, false, 24, 80)
-		if err == nil {
-			t.Fatal("expected error for --in-place with --base")
-		}
-
-		if !strings.Contains(err.Error(), "mutually exclusive") {
-			t.Errorf("error = %q, want mutually exclusive", err.Error())
-		}
+		assertErrContains(t, err, "mutually exclusive")
 	})
 }
 
@@ -2502,13 +2462,7 @@ func TestCreateInPlaceRejectsConcurrent(t *testing.T) {
 	}
 
 	_, err := sm.Create("canny-two", "claude", repoDir, "", "", "", "", false, "", false, true, false, false, false, 24, 80)
-	if err == nil {
-		t.Fatal("expected error for concurrent in-place session")
-	}
-
-	if !strings.Contains(err.Error(), "already running") {
-		t.Errorf("error = %q, want mention of already running", err.Error())
-	}
+	assertErrContains(t, err, "already running")
 }
 
 func TestCreateInPlaceAllowConcurrentFlag(t *testing.T) {
@@ -2645,13 +2599,7 @@ func TestForkInPlaceRejects(t *testing.T) {
 	}
 
 	_, err := sm.Fork("braw-fork", "inplace1", 24, 80)
-	if err == nil {
-		t.Fatal("expected error forking an in-place session")
-	}
-
-	if !strings.Contains(err.Error(), "in-place") {
-		t.Errorf("error = %q, want mention of in-place", err.Error())
-	}
+	assertErrContains(t, err, "in-place")
 }
 
 func TestForkUsesSourceBaseBranch(t *testing.T) {
@@ -2789,13 +2737,7 @@ func TestResumeInPlaceRejectsRemovedConfig(t *testing.T) {
 	}
 
 	_, err := sm.Resume("inplace1", 24, 80)
-	if err == nil {
-		t.Fatal("expected error resuming in-place session after repo removed from config")
-	}
-
-	if !strings.Contains(err.Error(), "[[repos]]") {
-		t.Errorf("error = %q, want mention of [[repos]]", err.Error())
-	}
+	assertErrContains(t, err, "[[repos]]")
 }
 
 func TestResumeInPlaceRejectsConcurrentRunning(t *testing.T) {
@@ -2823,13 +2765,7 @@ func TestResumeInPlaceRejectsConcurrentRunning(t *testing.T) {
 	}
 
 	_, err := sm.Resume("inplace1", 24, 80)
-	if err == nil {
-		t.Fatal("expected error: another in-place session is running in the same repo")
-	}
-
-	if !strings.Contains(err.Error(), "already running") {
-		t.Errorf("error = %q, want mention of already running", err.Error())
-	}
+	assertErrContains(t, err, "already running")
 }
 
 func TestResumeInPlaceRejectsDeletedRepo(t *testing.T) {
@@ -2850,26 +2786,14 @@ func TestResumeInPlaceRejectsDeletedRepo(t *testing.T) {
 	_ = os.RemoveAll(repoDir)
 
 	_, err := sm.Resume("inplace1", 24, 80)
-	if err == nil {
-		t.Fatal("expected error resuming after repo deleted")
-	}
-
-	if !strings.Contains(err.Error(), "no longer a git repository") {
-		t.Errorf("error = %q, want mention of no longer a git repository", err.Error())
-	}
+	assertErrContains(t, err, "no longer a git repository")
 }
 
 func TestCreateInPlaceBaseRejectedByDaemon(t *testing.T) {
 	sm := newTestSessionManager(t)
 
 	_, err := sm.Create("braw", "claude", "/tmp/whatever", "main", "", "", "", false, "", false, true, false, false, false, 24, 80)
-	if err == nil {
-		t.Fatal("expected error for --in-place with --base")
-	}
-
-	if !strings.Contains(err.Error(), "mutually exclusive") {
-		t.Errorf("error = %q, want mutually exclusive", err.Error())
-	}
+	assertErrContains(t, err, "mutually exclusive")
 }
 
 func TestStateSaveLoadInPlace(t *testing.T) {
@@ -2938,13 +2862,7 @@ func TestSingletonBlocksCreateWhenRunning(t *testing.T) {
 	}
 
 	_, err := sm.Create("canny-two", "claude", repoDir, "main", "", "", "", false, "", false, false, false, false, false, 24, 80)
-	if err == nil {
-		t.Fatal("expected error for singleton repo with running session")
-	}
-
-	if !strings.Contains(err.Error(), "singleton") {
-		t.Errorf("error = %q, want mention of singleton", err.Error())
-	}
+	assertErrContains(t, err, "singleton")
 }
 
 func TestSingletonAllowsCreateWhenStopped(t *testing.T) {
@@ -2972,13 +2890,7 @@ func TestInPlaceRejectsRepoWithIncludes(t *testing.T) {
 	sm.cfg.Repos = []config.RepoConfig{{Path: repoDir, Includes: []string{incDir}}}
 
 	_, err := sm.Create("braw", "claude", repoDir, "", "", "", "", false, "", false, true, false, false, false, 24, 80)
-	if err == nil {
-		t.Fatal("expected error for --in-place with includes configured")
-	}
-
-	if !strings.Contains(err.Error(), "includes configured") {
-		t.Errorf("error = %q, want mention of includes configured", err.Error())
-	}
+	assertErrContains(t, err, "includes configured")
 }
 
 func TestForkSingletonRejects(t *testing.T) {
@@ -2997,13 +2909,7 @@ func TestForkSingletonRejects(t *testing.T) {
 	}
 
 	_, err := sm.Fork("braw-fork", "braw-source", 24, 80)
-	if err == nil {
-		t.Fatal("expected error for fork of singleton session")
-	}
-
-	if !strings.Contains(err.Error(), "singleton") {
-		t.Errorf("error = %q, want mention of singleton", err.Error())
-	}
+	assertErrContains(t, err, "singleton")
 }
 
 func TestToSessionInfoIncludes(t *testing.T) {
@@ -3152,13 +3058,7 @@ func TestResumeIncludesValidatesMissingWorktree(t *testing.T) {
 	}
 
 	_, err := sm.Resume("s1", 24, 80)
-	if err == nil {
-		t.Fatal("expected error for missing included worktree")
-	}
-
-	if !strings.Contains(err.Error(), "no longer a valid git repo") {
-		t.Errorf("error = %q, want mention of no longer a valid git repo", err.Error())
-	}
+	assertErrContains(t, err, "no longer a valid git repo")
 }
 
 func TestParentIDPersistence(t *testing.T) {
@@ -3263,13 +3163,7 @@ func TestStateVersionRejectsNewer(t *testing.T) {
 	}
 
 	_, err := LoadState(path)
-	if err == nil {
-		t.Fatal("expected error loading state with newer version")
-	}
-
-	if !strings.Contains(err.Error(), "newer than this binary") {
-		t.Errorf("unexpected error: %v", err)
-	}
+	assertErrContains(t, err, "newer than this binary")
 }
 
 func TestRunMessageCleanupLoopReadsConfig(t *testing.T) {
@@ -3363,13 +3257,7 @@ func TestResumeRejectsDeletingSession(t *testing.T) {
 	}
 
 	_, err := sm.Resume("del1", 24, 80)
-	if err == nil {
-		t.Fatal("expected error resuming a deleting session")
-	}
-
-	if !strings.Contains(err.Error(), "is being deleted") {
-		t.Errorf("error = %q, want mention of 'is being deleted'", err.Error())
-	}
+	assertErrContains(t, err, "is being deleted")
 }
 
 func TestDeleteSetsDeletingStatus(t *testing.T) {
@@ -3431,13 +3319,7 @@ func TestDeleteKeepsSessionOnTeardownFailure(t *testing.T) {
 	}
 
 	err := sm.Delete("fail1")
-	if err == nil {
-		t.Fatal("expected error from failed git teardown")
-	}
-
-	if !strings.Contains(err.Error(), "git teardown failed") {
-		t.Errorf("error = %q, want mention of git teardown", err.Error())
-	}
+	assertErrContains(t, err, "git teardown failed")
 
 	if _, ok := sm.state.Sessions["fail1"]; !ok {
 		t.Error("session should be kept in state when teardown fails")
