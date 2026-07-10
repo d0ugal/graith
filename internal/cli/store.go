@@ -366,6 +366,10 @@ var storeRmCmd = &cobra.Command{
 			}
 		}
 
+		if err := store.Init(storePath); err != nil {
+			return err
+		}
+
 		if err := store.Remove(storePath, key); err != nil {
 			return err
 		}
