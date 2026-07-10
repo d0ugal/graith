@@ -8,6 +8,11 @@ import (
 	"github.com/d0ugal/graith/internal/git"
 )
 
+// gcHasUncommittedChanges indirects the dirty-worktree check so tests can
+// simulate a git failure (an undeterminable dirty state) without constructing a
+// corrupt repository on disk.
+var gcHasUncommittedChanges = git.HasUncommittedChanges
+
 // gcOrphanMinAge is the minimum age a worktree/scratch directory must have
 // before GC will consider it an orphan. Directories are created early in a
 // session's lifecycle (during StatusCreating, before the session is committed
@@ -33,6 +38,11 @@ type GCOrphan struct {
 	Removed       bool   `json:"removed,omitempty"`
 	Skipped       bool   `json:"skipped,omitempty"`
 	Reason        string `json:"reason,omitempty"`
+
+	// dirtyUndetermined records that HasDirtyFiles was set because the git dirty
+	// state could not be read (not because changes were confirmed present), so
+	// RunGC can explain the skip accurately. Not serialized.
+	dirtyUndetermined bool
 }
 
 // knownSessionIDs snapshots every session ID currently in state (any status),
@@ -129,9 +139,16 @@ func findOrphanWorktrees(repos []os.DirEntry, worktreesDir string, known map[str
 
 				if git.IsInsideGitRepo(sessDir) {
 					o.IsGitWorktree = true
-					if dirty, err := git.HasUncommittedChanges(sessDir); err == nil && dirty {
+
+					// Fail closed: if the dirty state can't be determined (corrupt
+					// index, broken gitlink, transient git error), treat it as dirty
+					// so --force never deletes a worktree whose WIP we can't rule out.
+					dirty, err := gcHasUncommittedChanges(sessDir)
+					if err != nil || dirty {
 						o.HasDirtyFiles = true
 					}
+
+					o.dirtyUndetermined = err != nil
 				}
 
 				orphans = append(orphans, o)
@@ -159,7 +176,11 @@ func (sm *SessionManager) RunGC(force bool, now time.Time) []GCOrphan {
 
 		if o.HasDirtyFiles {
 			o.Skipped = true
-			o.Reason = "uncommitted changes — remove manually"
+			if o.dirtyUndetermined {
+				o.Reason = "could not determine git state — remove manually"
+			} else {
+				o.Reason = "uncommitted changes — remove manually"
+			}
 
 			continue
 		}

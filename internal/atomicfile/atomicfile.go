@@ -15,8 +15,18 @@ import (
 // directory is created (mode 0o700) if it does not exist. The temp file is
 // created in the same directory as path so the final rename stays on one
 // filesystem (a cross-device rename would fail and is not atomic).
+//
+// When Write has to create parent directories, it fsyncs each one's parent
+// after the write so the whole new path is durable — not just the leaf. Without
+// this, a crash could lose a freshly-created directory even though the file's
+// own data was synced.
 func Write(path string, data []byte, perm os.FileMode) error {
 	dir := filepath.Dir(path)
+
+	// Record the deepest already-existing ancestor before creating the tree, so
+	// only the directories this call actually creates get their parents fsynced.
+	base := deepestExisting(dir)
+
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create dir: %w", err)
 	}
@@ -63,7 +73,37 @@ func Write(path string, data []byte, perm os.FileMode) error {
 		return fmt.Errorf("sync dir: %w", err)
 	}
 
+	// Make the entries for any directories we created durable. Each created
+	// directory's entry lives in its parent, so fsync parent(dir) up to and
+	// including base (base pre-existed, so its own entry was already durable).
+	for p := dir; p != base; {
+		p = filepath.Dir(p)
+		if err := syncDir(p); err != nil {
+			return fmt.Errorf("sync parent dir: %w", err)
+		}
+	}
+
 	return nil
+}
+
+// deepestExisting returns the closest ancestor of dir (or dir itself) that
+// already exists on disk. It is used to bound the parent-directory fsync loop
+// to only the directories Write creates.
+func deepestExisting(dir string) string {
+	for {
+		if _, err := os.Stat(dir); err == nil {
+			return dir
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			// Reached the filesystem root without finding an existing dir; it
+			// exists in practice, so stop here.
+			return dir
+		}
+
+		dir = parent
+	}
 }
 
 // syncDir fsyncs a directory so that a rename into it is durable. Without this,

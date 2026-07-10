@@ -116,8 +116,6 @@ func (sm *SessionManager) resumeTombstones() {
 		return
 	}
 
-	changed := false
-
 	for _, e := range entries {
 		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
 			continue
@@ -155,6 +153,10 @@ func (sm *SessionManager) resumeTombstones() {
 				"id", t.ID, "err", err)
 		}
 
+		// Persist the state removal BEFORE unlinking the tombstone: the state
+		// save is the durable commit point. If it fails, keep the tombstone so a
+		// later startup retries — unlinking first could leave state.json still
+		// listing a torn-down session with no marker to finish it.
 		sm.mu.Lock()
 		if sess, ok := sm.state.Sessions[t.ID]; ok {
 			if sess.Token != "" {
@@ -164,19 +166,21 @@ func (sm *SessionManager) resumeTombstones() {
 			sm.reparentChildrenLocked(t.ID, sess.ParentID)
 			delete(sm.state.Sessions, t.ID)
 			delete(sm.hookReports, t.ID)
-			changed = true
 		}
+
+		saveErr := sm.saveState()
 		sm.mu.Unlock()
+
+		if saveErr != nil {
+			sm.log.Error("failed to persist state during delete-resume; keeping tombstone",
+				"id", t.ID, "err", saveErr)
+
+			continue
+		}
 
 		_ = os.Remove(filepath.Join(sm.paths.LogDir, t.ID+".log"))
 		_ = os.Remove(sm.nonoProfilePath(t.ID))
 		_ = os.Remove(sm.safehouseFragmentPath(t.ID))
 		_ = os.Remove(path)
-	}
-
-	if changed {
-		sm.mu.Lock()
-		_ = sm.saveState()
-		sm.mu.Unlock()
 	}
 }

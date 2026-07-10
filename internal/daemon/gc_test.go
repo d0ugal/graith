@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,6 +27,28 @@ func mkOrphanDir(t *testing.T, path string) {
 // worktreeDir returns the on-disk path GC scans for a session worktree.
 func worktreeDir(dataDir, repoName, repoPath, id string) string {
 	return filepath.Join(dataDir, "worktrees", repoName, repoHash(repoPath), id)
+}
+
+// initGitRepo turns dir into a git repo so git.IsInsideGitRepo reports true.
+func initGitRepo(t *testing.T, dir string) {
+	t.Helper()
+
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+
+	for _, args := range [][]string{
+		{"init", "--quiet"},
+		{"config", "user.email", "graith@localhost"},
+		{"config", "user.name", "graith"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
 }
 
 func TestFindOrphansDetectsWorktreeAndScratch(t *testing.T) {
@@ -139,6 +162,52 @@ func TestRunGCForceRemovesOrphans(t *testing.T) {
 	}
 }
 
+// TestRunGCSkipsUndeterminableWorktree is the regression test for the fail-open
+// bug: a git worktree whose dirty state can't be read must be preserved, not
+// force-removed.
+func TestRunGCSkipsUndeterminableWorktree(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	sm := newTestSessionManager(t)
+	dataDir := sm.paths.DataDir
+
+	orphanWT := worktreeDir(dataDir, "croft", "/Code/croft", "haar0001")
+	initGitRepo(t, orphanWT)
+
+	old := time.Now().Add(-gcOrphanMinAge - time.Minute)
+	if err := os.Chtimes(orphanWT, old, old); err != nil {
+		t.Fatalf("chtimes: %v", err)
+	}
+
+	// Simulate `git status` failing for this worktree (corrupt index, broken
+	// gitlink, transient error) — the dirty state is undeterminable.
+	orig := gcHasUncommittedChanges
+	gcHasUncommittedChanges = func(string) (bool, error) {
+		return false, errors.New("simulated git failure")
+	}
+
+	t.Cleanup(func() { gcHasUncommittedChanges = orig })
+
+	orphans := sm.RunGC(true, time.Now())
+	if len(orphans) != 1 {
+		t.Fatalf("found %d orphans, want 1", len(orphans))
+	}
+
+	if orphans[0].Removed {
+		t.Error("undeterminable worktree was removed; it should be skipped")
+	}
+
+	if !orphans[0].Skipped {
+		t.Error("undeterminable worktree not marked Skipped")
+	}
+
+	if _, err := os.Stat(orphanWT); err != nil {
+		t.Errorf("undeterminable worktree deleted despite skip: %v", err)
+	}
+}
+
 func TestRunGCSkipsDirtyWorktree(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
@@ -148,24 +217,9 @@ func TestRunGCSkipsDirtyWorktree(t *testing.T) {
 	dataDir := sm.paths.DataDir
 
 	orphanWT := worktreeDir(dataDir, "croft", "/Code/croft", "dreich01")
-	if err := os.MkdirAll(orphanWT, 0o700); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
+	initGitRepo(t, orphanWT)
 
-	// Make it a git repo with an uncommitted file so it reads as dirty.
-	for _, args := range [][]string{
-		{"init", "--quiet"},
-		{"config", "user.email", "graith@localhost"},
-		{"config", "user.name", "graith"},
-	} {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = orphanWT
-
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v: %s", args, err, out)
-		}
-	}
-
+	// An uncommitted file makes the worktree read as dirty.
 	if err := os.WriteFile(filepath.Join(orphanWT, "scunner.txt"), []byte("wip"), 0o600); err != nil {
 		t.Fatalf("write dirty file: %v", err)
 	}
