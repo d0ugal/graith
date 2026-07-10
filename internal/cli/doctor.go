@@ -931,7 +931,11 @@ func (dc *doctorContext) checkStorage(diag *protocol.DiagnosticsMsg) {
 
 		for i, o := range orphans {
 			extra := ""
-			if o.HasDirtyFiles {
+
+			switch {
+			case o.DirtyUndetermined:
+				extra = " [git state undetermined]"
+			case o.HasDirtyFiles:
 				extra = " [has uncommitted changes]"
 			}
 
@@ -962,11 +966,11 @@ func (dc *doctorContext) checkStorage(diag *protocol.DiagnosticsMsg) {
 				dc.hintf("Removed %d orphaned worktree dir(s)", removed)
 
 				if skipped > 0 {
-					dc.hintf("Skipped %d with uncommitted changes (inspect manually)", skipped)
+					dc.hintf("Skipped %d that could not be proven clean (inspect manually)", skipped)
 				}
 			}
 		} else if dirtyCount > 0 {
-			dc.hintf("Use --autofix to remove (%d with uncommitted changes will be skipped)", dirtyCount)
+			dc.hintf("Use --autofix to remove (%d that can't be proven clean will be skipped)", dirtyCount)
 		} else {
 			dc.hintf("Use --autofix to remove")
 		}
@@ -1065,7 +1069,9 @@ var daemonGCFetch = func(force bool) ([]protocol.GCOrphanInfo, error) {
 	}
 	defer c.Close()
 
-	_ = c.SendControl("gc", protocol.GCMsg{Force: force})
+	if err := c.SendControl("gc", protocol.GCMsg{Force: force}); err != nil {
+		return nil, err
+	}
 
 	resp, err := c.ReadControlResponse()
 	if err != nil {
@@ -1078,6 +1084,13 @@ var daemonGCFetch = func(force bool) ([]protocol.GCOrphanInfo, error) {
 		_ = protocol.DecodePayload(resp, &e)
 
 		return nil, fmt.Errorf("%s", e.Message)
+	}
+
+	// Require the expected reply type; otherwise an unrelated payload that lacks
+	// these fields would decode to an empty result and be misreported as "no
+	// orphans".
+	if resp.Type != "gc_result" {
+		return nil, fmt.Errorf("unexpected response to gc: %q", resp.Type)
 	}
 
 	var result protocol.GCResultMsg

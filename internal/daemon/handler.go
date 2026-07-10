@@ -1412,14 +1412,15 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				infos := make([]protocol.GCOrphanInfo, 0, len(orphans))
 				for _, o := range orphans {
 					infos = append(infos, protocol.GCOrphanInfo{
-						Type:          o.Type,
-						Path:          o.Path,
-						ID:            o.ID,
-						IsGitWorktree: o.IsGitWorktree,
-						HasDirtyFiles: o.HasDirtyFiles,
-						Removed:       o.Removed,
-						Skipped:       o.Skipped,
-						Reason:        o.Reason,
+						Type:              o.Type,
+						Path:              o.Path,
+						ID:                o.ID,
+						IsGitWorktree:     o.IsGitWorktree,
+						HasDirtyFiles:     o.HasDirtyFiles,
+						DirtyUndetermined: o.dirtyUndetermined,
+						Removed:           o.Removed,
+						Skipped:           o.Skipped,
+						Reason:            o.Reason,
 					})
 				}
 

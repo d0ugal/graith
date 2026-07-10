@@ -1300,28 +1300,29 @@ func TestCheckStorageOrphanedWorktree(t *testing.T) {
 	}
 }
 
-// TestCheckStorageOrphanedWorktreeAutofix verifies that --autofix triggers the
-// daemon force pass and reports the removed/skipped counts it returns.
+// TestCheckStorageOrphanedWorktreeAutofix verifies that --autofix runs a dry-run
+// listing first and then a force pass, and reports the removed/skipped counts
+// the daemon returns.
 func TestCheckStorageOrphanedWorktreeAutofix(t *testing.T) {
 	oldPaths, oldFetch := paths, daemonGCFetch
 
 	t.Cleanup(func() { paths, daemonGCFetch = oldPaths, oldFetch })
-
-	discardOut(t)
 
 	dataDir := t.TempDir()
 	paths.DataDir = dataDir
 	paths.LogDir = filepath.Join(dataDir, "logs")
 	paths.TmpDir = filepath.Join(dataDir, "tmp")
 
-	doctorAutofix = true // restored by discardOut
+	oldFix := doctorAutofix
+	doctorAutofix = true
 
-	var forceCalled bool
+	t.Cleanup(func() { doctorAutofix = oldFix })
+
+	var calls []bool // records force flag per call, in order
 
 	daemonGCFetch = func(force bool) ([]protocol.GCOrphanInfo, error) {
+		calls = append(calls, force)
 		if force {
-			forceCalled = true
-
 			return []protocol.GCOrphanInfo{
 				{Type: "worktree", Path: "/x/braw", ID: "braw", Removed: true},
 				{Type: "worktree", Path: "/x/dreich", ID: "dreich", HasDirtyFiles: true, Skipped: true, Reason: "uncommitted changes — remove manually"},
@@ -1337,10 +1338,52 @@ func TestCheckStorageOrphanedWorktreeAutofix(t *testing.T) {
 	diag := &protocol.DiagnosticsMsg{Sessions: []protocol.SessionDiagnostic{}}
 
 	dc := newDoctorContext()
-	dc.checkStorage(diag)
 
-	if !forceCalled {
-		t.Error("--autofix did not trigger the daemon force pass")
+	got := captureStdout(t, func() { dc.checkStorage(diag) })
+
+	// Dry-run before force: first call force=false, second force=true.
+	if len(calls) != 2 || calls[0] != false || calls[1] != true {
+		t.Fatalf("expected [dry-run, force] call order, got %v", calls)
+	}
+
+	if !strings.Contains(got, "Removed 1 orphaned worktree dir") {
+		t.Errorf("expected 'Removed 1' in output, got: %q", got)
+	}
+
+	if !strings.Contains(got, "Skipped 1") {
+		t.Errorf("expected 'Skipped 1' in output, got: %q", got)
+	}
+}
+
+// TestCheckStorageOrphanUndeterminedLabel verifies an orphan whose git state
+// could not be determined is labelled distinctly (not as confirmed WIP).
+func TestCheckStorageOrphanUndeterminedLabel(t *testing.T) {
+	oldPaths, oldFetch, oldFix := paths, daemonGCFetch, doctorAutofix
+
+	t.Cleanup(func() { paths, daemonGCFetch, doctorAutofix = oldPaths, oldFetch, oldFix })
+
+	dataDir := t.TempDir()
+	paths.DataDir = dataDir
+	paths.LogDir = filepath.Join(dataDir, "logs")
+	paths.TmpDir = filepath.Join(dataDir, "tmp")
+	doctorAutofix = false
+
+	daemonGCFetch = func(bool) ([]protocol.GCOrphanInfo, error) {
+		return []protocol.GCOrphanInfo{
+			{Type: "worktree", Path: "/x/haar", ID: "haar", HasDirtyFiles: true, DirtyUndetermined: true},
+		}, nil
+	}
+
+	dc := newDoctorContext()
+
+	got := captureStdout(t, func() { dc.checkStorage(&protocol.DiagnosticsMsg{}) })
+
+	if !strings.Contains(got, "[git state undetermined]") {
+		t.Errorf("expected undetermined label, got: %q", got)
+	}
+
+	if strings.Contains(got, "[has uncommitted changes]") {
+		t.Errorf("undetermined orphan mislabelled as confirmed WIP: %q", got)
 	}
 }
 

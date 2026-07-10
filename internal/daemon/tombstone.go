@@ -79,9 +79,9 @@ func (sm *SessionManager) tombstonePath(id string) string {
 }
 
 // writeTombstone durably records a pending deletion before teardown begins.
-// Best-effort: a failure to write the tombstone must not block the delete
-// itself (the worst case is losing crash-resume for that one delete), so the
-// caller logs and continues.
+// Callers treat a failure as fatal to the delete and fail closed (abort and
+// keep the session) rather than tear down artifacts with no recovery marker, so
+// the returned error must be checked.
 func (sm *SessionManager) writeTombstone(t tombstone) error {
 	data, err := json.MarshalIndent(t, "", "  ")
 	if err != nil {

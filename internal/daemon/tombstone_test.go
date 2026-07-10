@@ -177,6 +177,55 @@ func TestDeleteAbortsWhenTombstoneUnwritable(t *testing.T) {
 	}
 }
 
+// TestDeleteAbortRestoresRunningSessionOwnership checks the abort path for a
+// *running* session with an attached client: the session must be reverted to
+// running (not stopped, since nothing was killed) and its attached-client
+// ownership restored, rather than left as a live-but-unmanaged agent.
+func TestDeleteAbortRestoresRunningSessionOwnership(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	worktree := filepath.Join(sm.paths.DataDir, "worktrees", "croft", "hash", "braw0001")
+	if err := os.MkdirAll(worktree, 0o700); err != nil {
+		t.Fatalf("mkdir worktree: %v", err)
+	}
+
+	// Block tombstone creation so Delete hits the fail-closed abort branch.
+	if err := os.WriteFile(sm.tombstoneDir(), []byte("thrawn"), 0o600); err != nil {
+		t.Fatalf("plant tombstone-dir file: %v", err)
+	}
+
+	sm.state.Sessions["braw0001"] = &SessionState{
+		ID:           "braw0001",
+		Name:         "braw",
+		WorktreePath: worktree,
+		Status:       StatusRunning,
+	}
+
+	kicked := false
+	sm.attachedClients["braw0001"] = &attachedClient{kick: func() { kicked = true }}
+
+	if err := sm.Delete("braw0001"); err == nil {
+		t.Fatal("Delete succeeded; expected abort when tombstone unwritable")
+	}
+
+	sm.mu.RLock()
+	sess := sm.state.Sessions["braw0001"]
+	_, clientRestored := sm.attachedClients["braw0001"]
+	sm.mu.RUnlock()
+
+	if sess == nil || sess.Status != StatusRunning {
+		t.Errorf("running session not reverted to running after abort: %+v", sess)
+	}
+
+	if !clientRestored {
+		t.Error("attached client not restored after aborted delete")
+	}
+
+	if kicked {
+		t.Error("attached client was kicked on an aborted delete (should stay attached)")
+	}
+}
+
 func TestTeardownArtifactsInPlaceIsNoop(t *testing.T) {
 	sm := newTestSessionManager(t)
 

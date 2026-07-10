@@ -172,9 +172,13 @@ type GCOrphanInfo struct {
 	ID            string `json:"id"`
 	IsGitWorktree bool   `json:"is_git_worktree,omitempty"`
 	HasDirtyFiles bool   `json:"has_dirty_files,omitempty"`
-	Removed       bool   `json:"removed,omitempty"`
-	Skipped       bool   `json:"skipped,omitempty"`
-	Reason        string `json:"reason,omitempty"`
+	// DirtyUndetermined is set when HasDirtyFiles was forced true because the
+	// git state could not be read (not because changes were confirmed), so the
+	// CLI can distinguish "has WIP" from "couldn't check".
+	DirtyUndetermined bool   `json:"dirty_undetermined,omitempty"`
+	Removed           bool   `json:"removed,omitempty"`
+	Skipped           bool   `json:"skipped,omitempty"`
+	Reason            string `json:"reason,omitempty"`
 }
 
 // GCResultMsg is the daemon's reply to a GCMsg.
