@@ -148,9 +148,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 
 			switch msg.Type {
 			case "handshake":
-				var h protocol.HandshakeMsg
-				if err := protocol.DecodePayload(msg, &h); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: "invalid handshake"})
+				h, ok := decodePayload[protocol.HandshakeMsg](msg, sendControl, "invalid handshake")
+				if !ok {
 					continue
 				}
 
@@ -197,9 +196,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				// connection's tailnet identity still matches. Binding to the
 				// server cert defeats a MITM relaying the challenge/response. On
 				// success the connection advances to its paired role.
-				var ap protocol.AuthProofMsg
-				if err := protocol.DecodePayload(msg, &ap); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: "invalid auth_proof"})
+				ap, ok := decodePayload[protocol.AuthProofMsg](msg, sendControl, "invalid auth_proof")
+				if !ok {
 					continue
 				}
 
@@ -224,9 +222,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				// a background waiter delivers the minted token when approved.
 				// The read loop is NOT blocked — so a client disconnect is
 				// noticed promptly (connDone) and the waiter is cleaned up.
-				var pr protocol.PairRequestMsg
-				if err := protocol.DecodePayload(msg, &pr); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: "invalid pair_request"})
+				pr, ok := decodePayload[protocol.PairRequestMsg](msg, sendControl, "invalid pair_request")
+				if !ok {
 					continue
 				}
 
@@ -266,9 +263,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					continue
 				}
 
-				var pa protocol.PairApproveMsg
-				if err := protocol.DecodePayload(msg, &pa); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: "invalid pair_approve"})
+				pa, ok := decodePayload[protocol.PairApproveMsg](msg, sendControl, "invalid pair_approve")
+				if !ok {
 					continue
 				}
 
@@ -328,9 +324,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					continue
 				}
 
-				var pv protocol.PairRevokeMsg
-				if err := protocol.DecodePayload(msg, &pv); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: "invalid pair_revoke"})
+				pv, ok := decodePayload[protocol.PairRevokeMsg](msg, sendControl, "invalid pair_revoke")
+				if !ok {
 					continue
 				}
 
@@ -382,9 +377,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				sendControl("session_list", protocol.SessionListMsg{Sessions: infos})
 
 			case "create":
-				var c protocol.CreateMsg
-				if err := protocol.DecodePayload(msg, &c); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: "invalid create message"})
+				c, ok := decodePayload[protocol.CreateMsg](msg, sendControl, "invalid create message")
+				if !ok {
 					continue
 				}
 
@@ -406,9 +400,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				}
 
 			case "fork":
-				var f protocol.ForkMsg
-				if err := protocol.DecodePayload(msg, &f); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: "invalid fork message"})
+				f, ok := decodePayload[protocol.ForkMsg](msg, sendControl, "invalid fork message")
+				if !ok {
 					continue
 				}
 
@@ -430,9 +423,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				}
 
 			case "migrate":
-				var m protocol.MigrateMsg
-				if err := protocol.DecodePayload(msg, &m); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: "invalid migrate message"})
+				m, ok := decodePayload[protocol.MigrateMsg](msg, sendControl, "invalid migrate message")
+				if !ok {
 					continue
 				}
 
@@ -454,9 +446,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				}
 
 			case "attach":
-				var a protocol.AttachMsg
-				if err := protocol.DecodePayload(msg, &a); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: "invalid attach message"})
+				a, ok := decodePayload[protocol.AttachMsg](msg, sendControl, "invalid attach message")
+				if !ok {
 					continue
 				}
 
@@ -566,9 +557,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				sendControl("detached", protocol.DetachedMsg{Reason: "user"})
 
 			case "delete":
-				var d protocol.DeleteMsg
-				if err := protocol.DecodePayload(msg, &d); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: "invalid delete message"})
+				d, ok := decodePayload[protocol.DeleteMsg](msg, sendControl, "invalid delete message")
+				if !ok {
 					continue
 				}
 
@@ -584,9 +574,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				handleRestore(sm, auth, sendControl, r)
 
 			case "stop":
-				var s protocol.StopMsg
-				if err := protocol.DecodePayload(msg, &s); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: "invalid stop message"})
+				s, ok := decodePayload[protocol.StopMsg](msg, sendControl, "invalid stop message")
+				if !ok {
 					continue
 				}
 
@@ -595,9 +584,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					"stopped", "stopped", sm.StopWithChildren, sm.Stop)
 
 			case "rename":
-				var r protocol.RenameMsg
-				if err := protocol.DecodePayload(msg, &r); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: "invalid rename message"})
+				r, ok := decodePayload[protocol.RenameMsg](msg, sendControl, "invalid rename message")
+				if !ok {
 					continue
 				}
 
@@ -620,9 +608,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				}
 
 			case "update":
-				var u protocol.UpdateMsg
-				if err := protocol.DecodePayload(msg, &u); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: "invalid update message"})
+				u, ok := decodePayload[protocol.UpdateMsg](msg, sendControl, "invalid update message")
+				if !ok {
 					continue
 				}
 				// Authorize the update. The caller must have authority over the
@@ -665,9 +652,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				}
 
 			case "star":
-				var s protocol.StarMsg
-				if err := protocol.DecodePayload(msg, &s); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: "invalid star message"})
+				s, ok := decodePayload[protocol.StarMsg](msg, sendControl, "invalid star message")
+				if !ok {
 					continue
 				}
 
@@ -689,9 +675,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				}
 
 			case "unstar":
-				var u protocol.UnstarMsg
-				if err := protocol.DecodePayload(msg, &u); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: "invalid unstar message"})
+				u, ok := decodePayload[protocol.UnstarMsg](msg, sendControl, "invalid unstar message")
+				if !ok {
 					continue
 				}
 
@@ -713,9 +698,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				}
 
 			case "set_status":
-				var m protocol.SetStatusMsg
-				if err := protocol.DecodePayload(msg, &m); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: "invalid set_status message"})
+				m, ok := decodePayload[protocol.SetStatusMsg](msg, sendControl, "invalid set_status message")
+				if !ok {
 					continue
 				}
 
@@ -747,9 +731,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				}
 
 			case "resume":
-				var r protocol.ResumeMsg
-				if err := protocol.DecodePayload(msg, &r); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: "invalid resume message"})
+				r, ok := decodePayload[protocol.ResumeMsg](msg, sendControl, "invalid resume message")
+				if !ok {
 					continue
 				}
 
@@ -771,9 +754,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				}
 
 			case "restart":
-				var r protocol.RestartMsg
-				if err := protocol.DecodePayload(msg, &r); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: "invalid restart message"})
+				r, ok := decodePayload[protocol.RestartMsg](msg, sendControl, "invalid restart message")
+				if !ok {
 					continue
 				}
 
@@ -808,9 +790,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				}
 
 			case "logs":
-				var l protocol.LogsMsg
-				if err := protocol.DecodePayload(msg, &l); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: "invalid logs message"})
+				l, ok := decodePayload[protocol.LogsMsg](msg, sendControl, "invalid logs message")
+				if !ok {
 					continue
 				}
 
@@ -887,9 +868,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				}
 
 			case "wait":
-				var w protocol.WaitMsg
-				if err := protocol.DecodePayload(msg, &w); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: "invalid wait message"})
+				w, ok := decodePayload[protocol.WaitMsg](msg, sendControl, "invalid wait message")
+				if !ok {
 					continue
 				}
 
@@ -907,9 +887,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				}
 
 			case "msg_pub":
-				var m protocol.MsgPubMsg
-				if err := protocol.DecodePayload(msg, &m); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: "invalid msg_pub message"})
+				m, ok := decodePayload[protocol.MsgPubMsg](msg, sendControl, "invalid msg_pub message")
+				if !ok {
 					continue
 				}
 
@@ -952,9 +931,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				}
 
 			case "msg_inbox":
-				var m protocol.MsgInboxMsg
-				if err := protocol.DecodePayload(msg, &m); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: "invalid msg_inbox message"})
+				m, ok := decodePayload[protocol.MsgInboxMsg](msg, sendControl, "invalid msg_inbox message")
+				if !ok {
 					continue
 				}
 
@@ -972,9 +950,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				}
 
 			case "msg_sub":
-				var m protocol.MsgSubMsg
-				if err := protocol.DecodePayload(msg, &m); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: "invalid msg_sub message"})
+				m, ok := decodePayload[protocol.MsgSubMsg](msg, sendControl, "invalid msg_sub message")
+				if !ok {
 					continue
 				}
 
@@ -994,9 +971,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				}
 
 			case "msg_ack":
-				var m protocol.MsgAckMsg
-				if err := protocol.DecodePayload(msg, &m); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: "invalid msg_ack message"})
+				m, ok := decodePayload[protocol.MsgAckMsg](msg, sendControl, "invalid msg_ack message")
+				if !ok {
 					continue
 				}
 
@@ -1018,9 +994,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				}
 
 			case "msg_topics":
-				var m protocol.MsgTopicsMsg
-				if err := protocol.DecodePayload(msg, &m); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: "invalid msg_topics message"})
+				m, ok := decodePayload[protocol.MsgTopicsMsg](msg, sendControl, "invalid msg_topics message")
+				if !ok {
 					continue
 				}
 
@@ -1049,9 +1024,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				}
 
 			case "msg_conversation":
-				var m protocol.MsgConversationMsg
-				if err := protocol.DecodePayload(msg, &m); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: "invalid msg_conversation message"})
+				m, ok := decodePayload[protocol.MsgConversationMsg](msg, sendControl, "invalid msg_conversation message")
+				if !ok {
 					continue
 				}
 				// Authorise the target session. The self-or-descendant rule lets
@@ -1112,9 +1086,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				sendControl("msg_conversation_list", protocol.MsgConversationListMsg{Messages: out})
 
 			case "approval_request":
-				var req protocol.ApprovalRequestMsg
-				if err := protocol.DecodePayload(msg, &req); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: "invalid approval_request"})
+				req, ok := decodePayload[protocol.ApprovalRequestMsg](msg, sendControl, "invalid approval_request")
+				if !ok {
 					continue
 				}
 
@@ -1164,9 +1137,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					continue
 				}
 
-				var resp protocol.ApprovalRespondMsg
-				if err := protocol.DecodePayload(msg, &resp); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: "invalid approval_respond"})
+				resp, ok := decodePayload[protocol.ApprovalRespondMsg](msg, sendControl, "invalid approval_respond")
+				if !ok {
 					continue
 				}
 
@@ -1183,9 +1155,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				})
 
 			case "type":
-				var t protocol.TypeMsg
-				if err := protocol.DecodePayload(msg, &t); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: "invalid type message"})
+				t, ok := decodePayload[protocol.TypeMsg](msg, sendControl, "invalid type message")
+				if !ok {
 					continue
 				}
 
@@ -1229,9 +1200,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				}{t.SessionID})
 
 			case "interrupt":
-				var in protocol.InterruptMsg
-				if err := protocol.DecodePayload(msg, &in); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: "invalid interrupt message"})
+				in, ok := decodePayload[protocol.InterruptMsg](msg, sendControl, "invalid interrupt message")
+				if !ok {
 					continue
 				}
 
@@ -1266,9 +1236,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				}
 
 			case "screen_preview":
-				var sp protocol.ScreenPreviewMsg
-				if err := protocol.DecodePayload(msg, &sp); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: "invalid screen_preview message"})
+				sp, ok := decodePayload[protocol.ScreenPreviewMsg](msg, sendControl, "invalid screen_preview message")
+				if !ok {
 					continue
 				}
 
@@ -1293,9 +1262,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				})
 
 			case "screen_snapshot":
-				var ss protocol.ScreenSnapshotMsg
-				if err := protocol.DecodePayload(msg, &ss); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: "invalid screen_snapshot message"})
+				ss, ok := decodePayload[protocol.ScreenSnapshotMsg](msg, sendControl, "invalid screen_snapshot message")
+				if !ok {
 					continue
 				}
 
@@ -1339,9 +1307,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				}
 
 			case "status":
-				var sr protocol.StatusRequestMsg
-				if err := protocol.DecodePayload(msg, &sr); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: "invalid status message"})
+				sr, ok := decodePayload[protocol.StatusRequestMsg](msg, sendControl, "invalid status message")
+				if !ok {
 					continue
 				}
 
@@ -1373,9 +1340,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				})
 
 			case "status_report":
-				var sr protocol.StatusReportMsg
-				if err := protocol.DecodePayload(msg, &sr); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: "invalid status_report"})
+				sr, ok := decodePayload[protocol.StatusReportMsg](msg, sendControl, "invalid status_report")
+				if !ok {
 					continue
 				}
 
@@ -1401,9 +1367,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				sendControl("diagnostics", diag)
 
 			case "mcp_connect":
-				var mc protocol.MCPConnectMsg
-				if err := protocol.DecodePayload(msg, &mc); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: "invalid mcp_connect"})
+				mc, ok := decodePayload[protocol.MCPConnectMsg](msg, sendControl, "invalid mcp_connect")
+				if !ok {
 					continue
 				}
 
@@ -1535,9 +1500,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				return
 
 			case "scenario_start":
-				var s protocol.ScenarioStartMsg
-				if err := protocol.DecodePayload(msg, &s); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: "invalid scenario_start message"})
+				s, ok := decodePayload[protocol.ScenarioStartMsg](msg, sendControl, "invalid scenario_start message")
+				if !ok {
 					continue
 				}
 
@@ -1558,9 +1522,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				}
 
 			case "scenario_stop":
-				var s protocol.ScenarioStopMsg
-				if err := protocol.DecodePayload(msg, &s); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: "invalid scenario_stop message"})
+				s, ok := decodePayload[protocol.ScenarioStopMsg](msg, sendControl, "invalid scenario_stop message")
+				if !ok {
 					continue
 				}
 
@@ -1586,9 +1549,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				}
 
 			case "scenario_delete":
-				var s protocol.ScenarioDeleteMsg
-				if err := protocol.DecodePayload(msg, &s); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: "invalid scenario_delete message"})
+				s, ok := decodePayload[protocol.ScenarioDeleteMsg](msg, sendControl, "invalid scenario_delete message")
+				if !ok {
 					continue
 				}
 
@@ -1614,9 +1576,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				}
 
 			case "scenario_status":
-				var s protocol.ScenarioStatusMsg
-				if err := protocol.DecodePayload(msg, &s); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: "invalid scenario_status message"})
+				s, ok := decodePayload[protocol.ScenarioStatusMsg](msg, sendControl, "invalid scenario_status message")
+				if !ok {
 					continue
 				}
 
@@ -1628,9 +1589,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				}
 
 			case "scenario_resume":
-				var s protocol.ScenarioResumeMsg
-				if err := protocol.DecodePayload(msg, &s); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: "invalid scenario_resume message"})
+				s, ok := decodePayload[protocol.ScenarioResumeMsg](msg, sendControl, "invalid scenario_resume message")
+				if !ok {
 					continue
 				}
 
@@ -1657,9 +1617,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				}
 
 			case "scenario_task_done":
-				var s protocol.ScenarioTaskDoneMsg
-				if err := protocol.DecodePayload(msg, &s); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: "invalid scenario_task_done message"})
+				s, ok := decodePayload[protocol.ScenarioTaskDoneMsg](msg, sendControl, "invalid scenario_task_done message")
+				if !ok {
 					continue
 				}
 
@@ -1682,9 +1641,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				}
 
 			case "scenario_add":
-				var s protocol.ScenarioAddMsg
-				if err := protocol.DecodePayload(msg, &s); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: "invalid scenario_add message"})
+				s, ok := decodePayload[protocol.ScenarioAddMsg](msg, sendControl, "invalid scenario_add message")
+				if !ok {
 					continue
 				}
 
@@ -1745,6 +1703,20 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 			}
 		}
 	}
+}
+
+// decodePayload decodes the control message payload into a value of type T. On
+// failure it sends an "error" control message with errMsg and returns ok=false,
+// so callers can uniformly `if !ok { continue }`.
+func decodePayload[T any](msg protocol.Envelope, send func(string, any), errMsg string) (T, bool) {
+	var v T
+	if err := protocol.DecodePayload(msg, &v); err != nil {
+		send("error", protocol.ErrorMsg{Message: errMsg})
+
+		return v, false
+	}
+
+	return v, true
 }
 
 // lifecycleRequest holds the fields shared by the stop and delete control
