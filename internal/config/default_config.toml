@@ -171,6 +171,9 @@ orchestrator_session = "o"   # jump to the orchestrator session
 # button then drag up/down/left/right to emit discrete arrow-key presses to the
 # focused pane. Off by default because it repurposes left-drag, which terminals
 # otherwise use for text selection; mouse-wheel scrolling always passes through.
+# Only takes effect when the focused app has SGR mouse reporting enabled (e.g. a
+# TUI that tracks the mouse, or a touch/mobile terminal that reports drags);
+# graith translates those reports, it does not enable mouse tracking itself.
 drag_arrow_keys = false
 # Cells of drag movement per emitted arrow-key press (values < 1 use the default).
 drag_arrow_threshold = 2
