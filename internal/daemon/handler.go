@@ -1427,16 +1427,9 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					continue
 				}
 
-				sm.mu.RLock()
-
-				if err := auth.checkScenarioOp(sm, s.Name); err != nil {
-					sm.mu.RUnlock()
-					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-
+				if !auth.authorizeScenarioOp(sm, s.Name, sendControl) {
 					continue
 				}
-
-				sm.mu.RUnlock()
 
 				stopped, err := sm.StopScenario(s.Name)
 				if err != nil {
@@ -1454,16 +1447,9 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					continue
 				}
 
-				sm.mu.RLock()
-
-				if err := auth.checkScenarioOp(sm, s.Name); err != nil {
-					sm.mu.RUnlock()
-					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-
+				if !auth.authorizeScenarioOp(sm, s.Name, sendControl) {
 					continue
 				}
-
-				sm.mu.RUnlock()
 
 				deleted, err := sm.DeleteScenario(s.Name)
 				if err != nil {
@@ -1494,16 +1480,9 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					continue
 				}
 
-				sm.mu.RLock()
-
-				if err := auth.checkScenarioOp(sm, s.Name); err != nil {
-					sm.mu.RUnlock()
-					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-
+				if !auth.authorizeScenarioOp(sm, s.Name, sendControl) {
 					continue
 				}
-
-				sm.mu.RUnlock()
 
 				//nolint:contextcheck // session lifecycle is intentionally detached from the client connection: resumed scenario sessions must survive client disconnect, so ResumeScenario uses its own bounded background timeouts rather than the request ctx.
 				resumed, err := sm.ResumeScenario(s.Name, clientRows, clientCols)
@@ -1546,16 +1525,9 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					continue
 				}
 
-				sm.mu.RLock()
-
-				if err := auth.checkScenarioOp(sm, s.Name); err != nil {
-					sm.mu.RUnlock()
-					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-
+				if !auth.authorizeScenarioOp(sm, s.Name, sendControl) {
 					continue
 				}
-
-				sm.mu.RUnlock()
 
 				//nolint:contextcheck // session lifecycle is intentionally detached from the client connection: the added session must survive client disconnect, so AddToScenario uses its own bounded background timeouts rather than the request ctx.
 				sess, err := sm.AddToScenario(s.Name, s.Session, clientRows, clientCols)
@@ -1626,6 +1598,24 @@ func decodePayload[T any](msg protocol.Envelope, send func(string, any), errMsg 
 func (ac authContext) authorizeTarget(sm *SessionManager, id string, rule authRule, send func(string, any)) bool {
 	sm.mu.RLock()
 	err := ac.checkTarget(sm, id, rule)
+	sm.mu.RUnlock()
+
+	if err != nil {
+		send("error", protocol.ErrorMsg{Message: err.Error()})
+
+		return false
+	}
+
+	return true
+}
+
+// authorizeScenarioOp checks whether the caller may operate on the named
+// scenario, taking sm.mu around the check. On failure it sends an "error"
+// control message and returns false, so callers can uniformly
+// `if !auth.authorizeScenarioOp(...) { continue }`.
+func (ac authContext) authorizeScenarioOp(sm *SessionManager, name string, send func(string, any)) bool {
+	sm.mu.RLock()
+	err := ac.checkScenarioOp(sm, name)
 	sm.mu.RUnlock()
 
 	if err != nil {
