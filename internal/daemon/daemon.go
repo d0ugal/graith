@@ -3092,6 +3092,7 @@ func (sm *SessionManager) Delete(id string) error {
 		delete(sm.sessions, id)
 	}
 
+	name := sessState.Name
 	repoPath := sessState.RepoPath
 	worktreePath := sessState.WorktreePath
 	branch := sessState.Branch
@@ -3137,6 +3138,29 @@ func (sm *SessionManager) Delete(id string) error {
 	_ = sm.saveState()
 	sm.mu.Unlock()
 
+	// Write a tombstone before any teardown so a crash mid-delete is resumed on
+	// next startup (the session is already committed to removal). Best-effort:
+	// failing to write it only costs crash-resume for this one delete.
+	spec := teardownSpec{
+		ID:           id,
+		RepoPath:     repoPath,
+		WorktreePath: worktreePath,
+		Branch:       branch,
+		Shared:       shared,
+		InPlace:      inPlace,
+		SystemKind:   sessSystemKind,
+		Includes:     sessionIncludes,
+	}
+	if err := sm.writeTombstone(tombstone{
+		teardownSpec: spec,
+		Name:         name,
+		PID:          orphanPID,
+		PIDStartTime: orphanStartTime,
+		CreatedAt:    time.Now(),
+	}); err != nil {
+		sm.log.Warn("failed to write delete tombstone", "id", id, "err", err)
+	}
+
 	// Blocking operations outside the lock.
 	if hasPTY {
 		ptySess.Detach()
@@ -3166,6 +3190,10 @@ func (sm *SessionManager) Delete(id string) error {
 			}
 			sm.mu.Unlock()
 
+			// Delete is aborted and the session is kept, so drop the tombstone —
+			// there is no interrupted delete to resume.
+			sm.removeTombstone(id)
+
 			if hasClient {
 				ac.kick()
 			}
@@ -3175,27 +3203,7 @@ func (sm *SessionManager) Delete(id string) error {
 	}
 
 	// Attempt git teardown before removing the session from state.
-	var teardownErr error
-
-	switch {
-	case sessSystemKind == SystemKindOrchestrator:
-		// The orchestrator has no worktree/branch; its scratch + tmp live under
-		// DataDir/orchestrator (see orchestratorScratchDir/orchestratorTmpDir),
-		// which the per-session scratch cleanup below doesn't cover. Remove the
-		// whole tree so a disabled-then-deleted orchestrator leaves nothing behind.
-		teardownErr = os.RemoveAll(filepath.Join(sm.paths.DataDir, "orchestrator"))
-	case shared:
-		scratchDir := filepath.Join(sm.paths.DataDir, "scratch", id)
-		teardownErr = os.RemoveAll(scratchDir)
-	case inPlace:
-		// In-place sessions: leave the repo completely untouched
-	case repoPath != "" && len(sessionIncludes) > 0:
-		teardownErr = sm.teardownIncludes(repoPath, worktreePath, branch, sessionIncludes)
-	case repoPath != "":
-		teardownErr = git.TeardownSession(repoPath, worktreePath, branch)
-	case worktreePath != "":
-		teardownErr = os.RemoveAll(worktreePath)
-	}
+	teardownErr := sm.teardownArtifacts(spec)
 
 	if teardownErr != nil {
 		sm.log.Error("git teardown failed, session kept for retry",
@@ -3211,6 +3219,10 @@ func (sm *SessionManager) Delete(id string) error {
 			_ = sm.saveState()
 		}
 		sm.mu.Unlock()
+
+		// Teardown failed and the session is kept for retry, so drop the
+		// tombstone — the delete did not commit and must not auto-resume.
+		sm.removeTombstone(id)
 
 		if hasClient {
 			ac.kick()
@@ -3244,6 +3256,10 @@ func (sm *SessionManager) Delete(id string) error {
 
 	err := sm.saveState()
 	sm.mu.Unlock()
+
+	// Teardown succeeded and the session is gone from state; the delete is
+	// fully committed, so the tombstone is no longer needed.
+	sm.removeTombstone(id)
 
 	_ = os.Remove(filepath.Join(sm.paths.LogDir, id+".log"))
 	_ = os.Remove(sm.nonoProfilePath(id))
@@ -3537,24 +3553,32 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 			continue
 		}
 
-		var err error
-
-		switch {
-		case s.shared:
-			err = os.RemoveAll(filepath.Join(sm.paths.DataDir, "scratch", s.id))
-		case s.inPlace:
-		case s.repoPath != "" && len(s.includes) > 0:
-			err = sm.teardownIncludes(s.repoPath, s.worktreePath, s.branch, s.includes)
-		case s.repoPath != "":
-			err = git.TeardownSession(s.repoPath, s.worktreePath, s.branch)
-		case s.worktreePath != "":
-			err = os.RemoveAll(s.worktreePath)
+		spec := teardownSpec{
+			ID:           s.id,
+			RepoPath:     s.repoPath,
+			WorktreePath: s.worktreePath,
+			Branch:       s.branch,
+			Shared:       s.shared,
+			InPlace:      s.inPlace,
+			Includes:     s.includes,
 		}
 
-		if err != nil {
+		// Tombstone before teardown so a crash mid-delete is resumed on startup.
+		if err := sm.writeTombstone(tombstone{
+			teardownSpec: spec,
+			PID:          s.pid,
+			PIDStartTime: s.pidStartTime,
+			CreatedAt:    time.Now(),
+		}); err != nil {
+			sm.log.Warn("failed to write delete tombstone", "id", s.id, "err", err)
+		}
+
+		if err := sm.teardownArtifacts(spec); err != nil {
 			sm.log.Error("git teardown failed, session kept for retry",
 				"session_id", s.id, "err", err)
 			teardownErrs = append(teardownErrs, fmt.Errorf("session %s: %w", s.id, err))
+			// Delete did not commit; drop the tombstone so it does not auto-resume.
+			sm.removeTombstone(s.id)
 		} else {
 			succeeded[s.id] = true
 		}
@@ -3600,6 +3624,7 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 
 	for _, s := range snaps {
 		if succeeded[s.id] {
+			sm.removeTombstone(s.id)
 			_ = os.Remove(filepath.Join(sm.paths.LogDir, s.id+".log"))
 			_ = os.Remove(sm.nonoProfilePath(s.id))
 			_ = os.Remove(sm.safehouseFragmentPath(s.id))
@@ -5647,6 +5672,11 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 
 			log.Warn("failed to load state", "err", err)
 		}
+
+		// Finish any deletes interrupted mid-flight (crash/kill/power loss)
+		// before reaping orphaned processes, so a half-deleted session's
+		// worktree and state entry are removed together.
+		sm.resumeTombstones()
 
 		sm.cleanupOrphanedProcesses()
 
