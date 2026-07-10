@@ -898,6 +898,7 @@ func TestPrefixRenameScrollHonorConfiguredKeys(t *testing.T) {
 	opts := PassthroughOpts{
 		Keys: PassthroughKeys{
 			Prefix:        0x02,
+			Detach:        'd', // detach is config-driven (#918); bind it so the trailing prefix+d ends the loop
 			RenameSession: 'R',
 			ScrollMode:    'S',
 		},
