@@ -43,11 +43,26 @@ type Config struct {
 	Overlay          Overlay            `toml:"overlay"`
 	Orchestrator     OrchestratorConfig `toml:"orchestrator"`
 	Remote           RemoteConfig       `toml:"remote"`
+	Input            InputConfig        `toml:"input"`
 	Agents           map[string]Agent   `toml:"agents"`
 }
 
 type Overlay struct {
 	ShortcutKeys string `toml:"shortcut_keys"`
+}
+
+// InputConfig is the optional [input] block controlling terminal input
+// gestures in the attach passthrough loop.
+type InputConfig struct {
+	// DragArrowKeys enables touch/hold-and-drag arrow keys:
+	// press-and-hold the left mouse button then drag to emit discrete arrow-key
+	// presses to the focused pane. Off by default because it repurposes
+	// left-drag (which terminals otherwise use for text selection). Mouse-wheel
+	// scrolling is always passed through unchanged.
+	DragArrowKeys bool `toml:"drag_arrow_keys"`
+	// DragArrowThreshold is the number of cells of drag movement that produces
+	// one arrow-key press. Values below 1 fall back to the default.
+	DragArrowThreshold int `toml:"drag_arrow_threshold"`
 }
 
 // RemoteConfig is the optional, off-by-default [remote] block that exposes a

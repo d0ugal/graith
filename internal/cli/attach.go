@@ -218,6 +218,8 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 	}
 
 	opts.AutoPopApproval = cfg.Approvals.AutoPop
+	opts.DragArrowKeys = cfg.Input.DragArrowKeys
+	opts.DragArrowThreshold = cfg.Input.DragArrowThreshold
 
 	for {
 		result := c.RunPassthrough(ctx, opts)
