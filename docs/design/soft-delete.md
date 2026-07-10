@@ -83,15 +83,16 @@ destroyed. Concretely:
 - `gr restore <name>` **un-deletes** a soft-deleted session within its window,
   returning it to `stopped` so it can be `gr resume`d.
 - `gr list --deleted` shows soft-deleted sessions and their **expiry time**.
-- `gr delete --force` / `gr delete --purge` **hard-deletes immediately**,
-  bypassing the window (today's behaviour).
+- `gr purge <name>` **hard-deletes immediately**, bypassing the window — the one
+  explicitly destructive verb (works on a live or already-trashed session).
 - The daemon runs a **purge loop** that hard-deletes soft-deleted sessions once
   their window expires, catching up on restart for windows that elapsed while it
   was down.
 - Retention is configurable via `[delete] retention`, with `"0"` disabling soft
   delete entirely (every `gr delete` is a hard delete).
 - Backward compatible: existing `state.json` files load unchanged; existing
-  scripts calling `gr delete --force` keep their exact meaning.
+  `gr delete --force` scripts keep working — with a safety upgrade (they now
+  soft-delete and stay recoverable rather than destroying immediately).
 
 ### Non-Goals
 
@@ -171,7 +172,7 @@ can loop back to `stopped`:
      │                       │  gr restore (clear DeletedAt       │  │
      │                       └───  + ExpiresAt)───────────────────┘  │
      │                                                               │ purge loop
-     │ gr delete --force / --purge                                   │ (now >=
+     │ gr purge                                                      │ (now >=
      ▼                                                               ▼  ExpiresAt)
   ─────────────────────── hard delete (Delete) ───────────────────────▶ gone
 ```
@@ -183,18 +184,20 @@ can loop back to `stopped`:
 - **`soft-deleted → stopped`**: `gr restore` clears `DeletedAt`, *if still within
   the window*. The session reappears in `gr list` as a normal stopped session,
   ready for `gr resume`.
-- **`soft-deleted → gone`**: the purge loop (or `gr delete --purge`) runs the
-  existing hard `Delete`.
-- **`* → gone`**: `gr delete --force`/`--purge` and all non-CLI callers
-  (scenarios) go straight to hard `Delete`, unchanged.
+- **`soft-deleted → gone`**: the purge loop (or `gr purge`) runs the existing hard
+  `Delete`.
+- **`* → gone`**: `gr purge` and all non-CLI callers (scenarios) go straight to
+  hard `Delete`, unchanged. `gr delete` never lands here (unless `retention = 0`).
 
 #### Who decides: the daemon, not the CLI
 
 The daemon — not the CLI — decides soft vs hard, based on `!Purge && retention >
 0`. The CLI does not know the retention value (it lives in daemon-side config),
-so it simply forwards a single `Purge` bool (set by `--force`/`--purge`). The
-daemon-side predicate is named after the wire field (`Purge`), not the CLI's
-historical `--force`, to avoid overloading "force" inside the daemon.
+so it simply forwards a single `Purge` bool — set **only** by the `gr purge`
+command. `gr delete` always sends `Purge = false`, so it soft-deletes whenever
+`retention > 0` and hard-deletes only when the operator has set `retention = 0`.
+The daemon-side predicate is named after the wire field (`Purge`), which maps
+one-to-one to the `gr purge` verb.
 
 **Hiding is not the same as unreachability.** Filtering `list` (below) removes
 soft-deleted sessions from *client-side* name resolution, but the daemon protocol
@@ -205,74 +208,66 @@ operations — see [Daemon-side guards](#daemon-side-guards-on-id-addressable-op
 
 ### CLI UX
 
-#### `gr delete` (default: soft)
+The model is **two verbs plus restore**: `gr delete` trashes (recoverable),
+`gr purge` destroys (immediate), `gr restore` brings back. Destructiveness lives in
+the *verb*, not in a flag — so there is no dangerous flag to fat-finger and no
+overloaded `--force`.
+
+#### `gr delete` — always soft, one step
 
 ```
 $ gr delete braw
 Soft-deleted braw. Recoverable until 2026-07-11 06:53 (in 24h).
-  gr restore braw        to bring it back
-  gr delete braw --purge to remove it now
+  gr restore braw   to bring it back
+  gr purge braw     to remove it now
 ```
 
-The existing **unsaved-work confirmation** is preserved: if the worktree has
-uncommitted or un-pushed work, `gr delete` prompts `Delete anyway? [y/N]`. Because
-the CLI doesn't know the retention value, the prompt wording stays generic
-("Delete …?"); the success line printed afterward reflects what actually happened,
-driven by the daemon's response — which means the delete response must carry the
-soft/hard outcome and, for a soft delete, the computed expiry (see
-[Control messages](#control-messages)). Today the delete handler replies with a
-bare `{session_id}`; that is not enough to render "Recoverable until …", so the
-response schema is extended.
+`gr delete` is now **safe by design**, and that changes its behaviour in one
+important way: it needs **no confirmation and no `--force`**. If the session is
+running, delete stops the agent and soft-deletes it *in a single step* — the exact
+"delete a running agent without a separate stop" job `--force` used to do — because
+nothing is destroyed: the worktree, branch, and un-pushed commits all survive the
+recovery window. There is no unsaved-work prompt on `gr delete`, because there is
+no unsaved work at risk.
 
-**Critical: the confirmation must not force agents onto a destructive path.**
-Today `confirmDelete` (`cli/delete.go`) errors with *"…use `--force` to delete"*
-whenever there is unsaved work **and** output is JSON **or** stdin is not a TTY.
-Agents auto-enable JSON mode, so under a naive design the feature's *primary
-audience* — an agent deleting a session with un-pushed work, which is the exact
-originating failure — would be offered only `--force`, and `--force` now escalates
-to immediate **hard** delete. That re-creates the data-loss footgun this feature
-exists to remove.
+This is the payoff of the whole design: delete stops being the dangerous verb.
+`--force` is therefore **implied** and no longer needed. For backward compatibility
+`gr delete --force` (and `-y`) are still accepted, but they are **no-ops /
+deprecated aliases** — `gr delete` already does what they asked for, just
+recoverably. Existing `gr delete --force` scripts keep working and get a strict
+*safety upgrade*: where they used to destroy immediately, they now soft-delete and
+stay recoverable for the window (the only change being that disk is reclaimed at
+purge time, not instantly — the retention trade-off the feature is built on).
 
-The fix is to **split "skip the prompt" from "delete destructively":**
+The success line is driven by the daemon's response (see
+[Control messages](#control-messages)) — the delete handler's bare `{session_id}`
+reply is extended so the CLI can render "Recoverable until …". With
+`retention = "0"` the daemon hard-deletes and the line reads
+"Deleted braw (permanently)" instead (see [Config](#config-delete-retention)).
 
-- `--yes` / `-y` — skip the unsaved-work confirmation, but **still let the daemon
-  decide soft vs hard**. This is the non-interactive soft-safe path: an agent (or
-  script) that just wants the session gone gets a *recoverable* soft delete.
-- `--force` / `--purge` — hard-delete now (bypass the window). Destructive by
-  intent.
+#### `gr purge` — destroy now (the only dangerous verb)
 
-In JSON / non-TTY mode with unsaved work, the error must recommend **`--yes`**
-(recoverable soft delete), and only mention `--purge` for the destroy-now case.
-The error string must **stop recommending `--force`** now that `--force` means
-destroy. With this split, the dangerous flag is never the one an agent is nudged
-toward by default.
+```
+$ gr purge braw
+braw has uncommitted changes and 2 unpushed commits. Purge anyway? [y/N]
+```
 
-#### `gr delete --force` / `gr delete --purge`
+`gr purge <name>` hard-deletes immediately, bypassing the window — worktree and
+branch gone, unrecoverable. It works on a **live** session or one already in the
+trash (so it doubles as "empty this one trash entry"). Because purge is the verb
+that can actually lose work, this is where the **unsaved-work confirmation now
+lives**: purge prompts `Purge anyway? [y/N]` when the worktree is dirty or has
+un-pushed commits, and `-y` (or the deprecated `--force`) skips that prompt. In
+JSON / non-TTY mode with unsaved work, purge errors unless `-y` is given — the same
+guard `delete` used to carry, now attached to the operation that deserves it.
+`gr purge` is the CLI command that sets `DeleteMsg.Purge = true`; `gr delete` never
+does.
 
-Both mean **hard-delete now, bypassing the window, and skip the confirmation
-prompt**:
-
-- `--force` retains its historical meaning ("don't prompt") and *additionally*
-  now means "don't soft-delete". Existing scripts using `--force` keep working
-  and get the same immediate destruction they always did.
-- `--purge` is the discoverable, self-documenting name for "really delete now",
-  and is the flag we advertise in the soft-delete success message. It also works
-  on an already-soft-deleted session (empty the trash for one entry).
-
-They are equivalent flags; `--purge` is sugar. Supplying both is not an error.
-Note the three-way distinction, which is the crux of keeping delete safe by
-default: **`gr delete`** = prompt then soft-delete; **`gr delete --yes`** = no
-prompt, still soft-delete; **`gr delete --force`/`--purge`** = no prompt, hard
-delete. Only the last is destructive.
-
-**Batch delete must forward this too.** `gr delete` with batch filters (e.g.
-`gr delete --stopped`) goes through a separate code path (`deleteBatchRun`), where
-`--force` today skips the batch confirmation. That path must also set `Purge` on
-each `DeleteMsg` when `--force`/`--purge` is given — otherwise `gr delete
---stopped --force` would *soft*-delete, silently breaking the backward-compat
-promise that `--force` means immediate hard delete. Batch delete without
-`--force`/`--purge` soft-deletes each matched session (subject to the daemon's
-retention); `--yes` skips the batch confirmation while staying soft.
+**Batch follows the verbs.** Both commands accept the existing batch filters (e.g.
+`--stopped`) via `deleteBatchRun`. `gr delete --stopped` soft-deletes each match
+(recoverable, no prompt). `gr purge --stopped` hard-deletes each and prompts once
+for the batch (or errors in JSON/non-TTY) unless `-y`. `gr purge` sets
+`Purge = true` on every `DeleteMsg` it sends; `gr delete` never does.
 
 #### `gr restore <name>`
 
@@ -284,10 +279,9 @@ Restored braw (stopped). Resume it with: gr resume braw
 Restore clears `DeletedAt`/`ExpiresAt`, leaves `Status = stopped`, and returns the
 `SessionInfo`. Auth mirrors delete (`authSelfOrDescendant`). Shell completion for
 `gr restore` queries the **deleted** list (a new `completeDeletedSessionNames`),
-since live-name completion would never see soft-deleted sessions. **`gr delete
---purge <TAB>` must also offer deleted names** (the design explicitly supports
-purging an already-soft-deleted session by name), so `--purge` completion unions
-live + deleted names.
+since live-name completion would never see soft-deleted sessions. **`gr purge
+<TAB>` unions live + deleted names** (purge acts on both a live session and a
+trashed one); `gr delete <TAB>` offers live names only.
 
 #### `gr list --deleted`
 
@@ -358,12 +352,12 @@ checklist for implementation and review.
 `DeletedAt`/`ExpiresAt` are nil, so live output and existing `--json` consumers are
 unchanged.
 
-`gr restore` and `gr delete --purge` need to resolve names that only exist in the
-deleted list. `resolveSessionInfo` (used by most commands) searches the live list
-only, which is correct for `info`/`path`/`resume`/`stop` — a soft-deleted session
-is intentionally "gone" from normal operations. A new
-`resolveDeletableSessionInfo` tries the live list first, then the deleted list,
-so `--purge` works on both, and `gr restore` resolves against the deleted list. If
+`gr restore` and `gr purge` need to resolve names that only exist in the deleted
+list. `resolveSessionInfo` (used by most commands) searches the live list only,
+which is correct for `info`/`path`/`resume`/`stop` — a soft-deleted session is
+intentionally "gone" from normal operations. A new `resolveDeletableSessionInfo`
+tries the live list first, then the deleted list, so `gr purge` works on both, and
+`gr restore` resolves against the deleted list. If
 a name matches **more than one** session (e.g. a live session and a soft-deleted
 one, or two soft-deleted ones from delete/recreate cycles — names are not unique),
 the resolver reports the ambiguity and requires an explicit ID rather than acting
@@ -376,9 +370,11 @@ CLI command):
 
 - **`ListMsg`** (above) — extend the existing `list` request; response is the
   unchanged `SessionListMsg` (now filtered).
-- **`DeleteMsg`** gains `Purge bool` (the CLI sets it when `--force`/`--purge` is
-  given). The handler passes it through to the daemon, which chooses soft vs
-  hard.
+- **`DeleteMsg`** gains `Purge bool`. Both CLI verbs send this one message over
+  the existing `delete` control type: `gr delete` sends `Purge = false`, the new
+  `gr purge` command sends `Purge = true`. Two verbs, one wire message — no new
+  control type needed. The handler passes `Purge` through to the daemon, which
+  chooses soft vs hard.
 - **Delete response.** Today `delete` goes through the shared
   `handleSessionLifecycle`, which replies with a bare `{session_id}` (or
   `{session_id, deleted:[…]}` for `--children`). That cannot express soft-vs-hard
@@ -396,7 +392,8 @@ CLI command):
   ```
 
   This is what lets the CLI print "Soft-deleted braw. Recoverable until … (in
-  24h)." vs "Deleted braw." for a purge, and drives `--json` for delete. `Affected`
+  24h)." vs "Deleted braw (permanently)." for a purge, and drives `--json` for
+  delete. `Affected`
   is a **flat** list (one entry per affected descendant), mirroring
   `DeleteWithChildren`'s existing flat `[]string` return — it is not a nested tree,
   so a caller reads soft-vs-purged per session without recursing.
@@ -429,7 +426,7 @@ operation that would otherwise act on a stopped session:
   violating "only restore/purge act on the trash"), `rename`, `star`/`unstar`,
   `update`, `type`/shell input, and `--share-worktree` sourcing.
 - **Allow** (these are the only ways to act on a soft-deleted session): `restore`,
-  `delete --purge`, `list --deleted`, and read-only `logs`/`wait`/`info`. Because
+  `purge`, `list --deleted`, and read-only `logs`/`wait`/`info`. Because
   CLI name resolution is live-only, these read-only ops reach a soft-deleted
   session **only by its raw ID** (copied from `gr list --deleted`), not by name —
   the doc states this rather than implying `gr logs <name>` works on the trash.
@@ -463,11 +460,11 @@ the git teardown and minus the final state removal**:
    **system/orchestrator** sessions and **starred** sessions ("unstar it first"),
    matching `Delete`'s rejections. Reject **`StatusDeleting`** (as `Delete` does)
    and an **already soft-deleted** session (error pointing at `gr restore` /
-   `--purge`). `StatusCreating` is also rejected — but note this is *not* "the
+   `gr purge`). `StatusCreating` is also rejected — but note this is *not* "the
    same as `Delete`": `Delete` handles a creating session *specially* (it removes
    the placeholder so the in-flight create's Phase 3 detects the deletion and
    cleans up). Soft-deleting a half-created session is not meaningful, so
-   `SoftDelete` rejects it and tells the user to wait or `--purge`.
+   `SoftDelete` rejects it and tells the user to wait or `gr purge`.
 2. **Detach and kick any attached client** and remove the PTY from `sm.sessions`
    **before** killing it — exactly as `Delete` does (`Delete` removes the client
    from `sm.attachedClients` up front and kicks it after teardown). Removing the
@@ -507,7 +504,7 @@ The routing decision lives in the handler's delete path: if `Purge` is set or
 `tokenIndex` and remains valid — this is intentional, so `gr restore` (and the
 session's own descendants) keep working. The daemon-side guards above are what
 prevent a still-valid token from *operating* a soft-deleted session; the token is
-only good for `restore`/`--purge`/read-only ops until the session is restored.
+only good for `restore`/`purge`/read-only ops until the session is restored.
 
 `Restore`:
 
@@ -641,7 +638,7 @@ live for up to the retention window. This is an accepted trade-off:
 
 - The default window is 24h, bounding worst-case accumulation to "everything
   deleted in the last day".
-- Users who want the disk back immediately have `gr delete --purge`.
+- Users who want the disk back immediately have `gr purge`.
 - Users who never want the overhead can set `retention = "0"`.
 
 **Archiving/compression is explicitly out of scope** (a Non-Goal). It is a
@@ -751,26 +748,31 @@ Reconcile.
 
 ## Edge cases
 
-- **Delete a running session.** Soft delete kicks any attached client and stops
-  the agent first (using `Delete`'s kill sequence), then marks `DeletedAt`. It
-  does *not* leave a running agent, or an attached client, on a hidden session.
-- **Delete an already soft-deleted session.** `SoftDelete` errors with a message
-  pointing at `gr restore <name>` (to recover) or `gr delete <name> --purge` (to
-  finish it off). `gr delete --purge` on an already-soft-deleted session hard
-  deletes it (resolved via `resolveDeletableSessionInfo`).
-- **Delete with unsaved work, non-interactively.** An agent (JSON mode) or a piped
-  script deleting a session with un-pushed work is offered `--yes` (skip the prompt,
-  daemon still soft-deletes → recoverable) — **not** `--force`. This is the fix for
-  the primary-audience footgun: the non-interactive path defaults to *recoverable*,
-  and destruction (`--purge`/`--force`) is only ever explicit.
-- **`--yes` with `retention = "0"`.** When the operator has explicitly disabled
-  soft delete, `--yes` means "skip the prompt and hard-delete the dirty session",
-  because there is no soft state to fall back to. This is a deliberate, documented
-  consequence of the opt-out config, not a surprise: an admin who sets
-  `retention = "0"` has chosen destroy-on-delete globally. To keep it unmissable,
-  the success line is driven by `DeleteResultMsg.Soft`: a hard delete prints
-  **"Deleted braw (permanently)"**, never the "Recoverable until …" line — so even
-  a scripted caller's output makes the destructive outcome explicit.
+- **Delete a running session.** `gr delete` kicks any attached client and stops
+  the agent first (using `Delete`'s kill sequence), then marks `DeletedAt` — all in
+  one step, no confirmation, because it is recoverable. It does *not* leave a
+  running agent, or an attached client, on a hidden session. (This is the job that
+  used to require `gr delete --force`; it is now just what `gr delete` does.)
+- **Delete an already soft-deleted session.** `gr delete` on a trashed session is
+  a no-op-ish "already deleted" message pointing at `gr restore <name>` (recover)
+  or `gr purge <name>` (destroy now). `gr purge` on a trashed session hard-deletes
+  it (resolved via `resolveDeletableSessionInfo`).
+- **Deleting with unsaved work is safe and silent.** Because `gr delete` is
+  recoverable, it does **not** prompt or error on un-pushed work — an agent (JSON
+  mode) or a piped script just gets a soft delete, no `--force` needed. This is the
+  fix for the primary-audience footgun: the everyday path is recoverable by
+  default, and destruction (`gr purge`) is a different, explicit verb. The dirty-work
+  confirmation lives on `gr purge`, which is the only thing that can actually lose
+  it.
+- **`gr delete` with `retention = "0"`.** When the operator has explicitly disabled
+  soft delete, `gr delete` hard-deletes — there is no soft state to fall back to.
+  This is a deliberate, documented consequence of the opt-out config, not a
+  surprise: an admin who sets `retention = "0"` has chosen destroy-on-delete
+  globally. To keep it unmissable, the success line is driven by
+  `DeleteResultMsg.Soft`: a hard delete prints **"Deleted braw (permanently)"**,
+  never the "Recoverable until …" line — so even a scripted caller's output makes
+  the destructive outcome explicit. (This is the one case where `gr delete` is
+  destructive, and it is the operator's own configuration choice.)
 - **Restore after the window / restore a purged session.** Once purged the
   session is gone from state; `gr restore` reports "not found". Before purge but
   after `ExpiresAt`, restore is refused with an "expired" error (same predicate as
@@ -839,14 +841,14 @@ Reconcile.
   by the daemon-side `IsSoftDeleted()` guards even when addressed by raw ID (see
   [Daemon-side guards](#daemon-side-guards-on-id-addressable-operations)). To act
   on a soft-deleted session you first `gr restore` (then it's a normal stopped
-  session) or `gr delete --purge` (to finish deleting).
+  session) or `gr purge` (to finish deleting).
 - **Overlay has no trash view.** The interactive session picker (`ctrl+b w`)
   offers no way to see or restore soft-deleted sessions — `gr list --deleted` and
   `gr restore` are CLI-only. This is a deliberate scoping decision for v1 (keep the
   picker focused on live work); an overlay "trash" view is a plausible follow-up.
 - **Disk pressure.** The mitigation is visibility + manual purge:
   `gr list --deleted` shows what's pending and its size implicitly (one row per
-  retained worktree), and `gr delete <name> --purge` reclaims any single one
+  retained worktree), and `gr purge <name>` reclaims any single one
   immediately. Lowering `[delete] retention` shortens the window for future
   deletes. Auto-purge under disk pressure is a possible future enhancement but is
   not in scope; the bounded default window is the primary guard.
@@ -873,9 +875,11 @@ Reconcile.
   `fork` (by raw `SourceSessionID`), `rename`, `star`/`unstar`, `update`, and
   `--share-worktree` sourcing all reject a soft-deleted session by raw ID;
   `scenario_resume` skips soft-deleted members.
-- **Unit — CLI flag split.** `gr delete` prompts then soft-deletes; `--yes` skips
-  the prompt and still soft-deletes; `--force`/`--purge` hard-delete. The
-  JSON/non-TTY unsaved-work error recommends `--yes`, **not** `--force`.
+- **Unit — CLI verbs.** `gr delete` soft-deletes with **no prompt** even with
+  unsaved work / a running agent (recoverable); `gr delete --force`/`-y` behave
+  identically (deprecated no-op aliases). `gr purge` hard-deletes and **prompts**
+  on unsaved work (errors in JSON/non-TTY) unless `-y`. `gr purge` sets
+  `DeleteMsg.Purge=true`; `gr delete` never does.
 - **Unit — frozen expiry.** `SoftDelete` sets `ExpiresAt = DeletedAt + retention`;
   lowering retention (or `"0"`) afterward does **not** change an existing
   `ExpiresAt`, and purge honours the frozen value (a session promised 24h is not
@@ -885,8 +889,8 @@ Reconcile.
   fake live PID).
 - **Unit — routing.** Handler chooses soft vs hard from `Purge` and retention:
   `retention>0 && !Purge` → soft; `Purge` → hard; `retention==0` → hard. Table
-  test the four combinations, single **and batch** (`gr delete --stopped --force`
-  must hard-delete, per the backward-compat promise).
+  test the four combinations, single **and batch** (`gr delete --stopped` soft;
+  `gr purge --stopped` hard).
 - **Unit — config.** `RetentionDuration()`: unset → 24h; `"0"` → 0 (disabled);
   `"7d"`/`"7d12h"` parse; `"banana"` → 24h (accessor fail-safe) *and*
   `Config.Validate()` returns an error for it (so load/reload fails loudly).
@@ -911,11 +915,11 @@ Reconcile.
   the **compare-and-delete race**: a session restored (or re-deleted with a new
   `ExpiresAt`) between snapshot and delete is **not** purged. Do not sleep on
   wall-clock in tests.
-- **Integration** (`internal/integration/`, real daemon): delete → session hidden
-  from `gr list`, visible under `--deleted`, worktree still on disk; restore →
-  reappears stopped, resume works; `--purge` → gone immediately; resume/restart by
-  raw ID on a soft-deleted session is rejected; set a tiny retention and assert the
-  startup sweep purges an already-expired fixture.
+- **Integration** (`internal/integration/`, real daemon): `gr delete` → session
+  hidden from `gr list`, visible under `--deleted`, worktree still on disk;
+  `gr restore` → reappears stopped, resume works; `gr purge` → gone immediately;
+  resume/restart by raw ID on a soft-deleted session is rejected; set a tiny
+  retention and assert the startup sweep purges an already-expired fixture.
 - **Regression test for the originating bug:** deleting a *stopped* session no
   longer destroys its worktree/branch; it is recoverable via `gr restore` within
   the window. This test should fail against today's hard-delete code and pass
@@ -937,9 +941,27 @@ test, `croft` for repo names.
   making the CLI authoritative would require shipping the retention value to
   every client (or a config round-trip) just to pick a code path, and would let a
   stale client disagree with the daemon. The daemon is the single source of truth
-  for the window; the CLI only expresses intent (`--purge` or not). The one cost
-  — the CLI can't tailor its confirmation wording to soft/hard — is handled by a
-  generic prompt plus a result-driven success message.
+  for the window; the CLI only expresses intent (`gr delete` vs `gr purge`,
+  i.e. `Purge` false/true).
+- **Destructiveness as a flag (`gr delete --hard`/`--purge`) instead of a second
+  verb.** Rejected in favour of `gr delete` + `gr purge`. A flag on a single verb
+  keeps the dangerous operation one fat-fingered `--hard` away from the safe one
+  and forces `--force`-style overloading; two verbs put the destructive intent in
+  the command name, where it can't be confused, and let `gr delete` shed its
+  confirmation entirely (it is recoverable, so it needs none). This also
+  dissolves the earlier "`--force` re-creates the footgun" problem: there is no
+  destructive flag on `delete` to misuse. `--force`/`-y` survive only as
+  deprecated, accepted-but-inert aliases on `gr delete` for script compatibility.
+- **`--yes` as a separate "skip prompt but stay soft" flag.** Considered, then
+  dropped: once `gr delete` is unconditionally recoverable it needs no prompt to
+  skip, so a `--yes` on `delete` has nothing to do. The prompt (and thus `-y`)
+  belongs on `gr purge`, the only verb that can lose work.
+- **Trash-metaphor vocabulary (`gr trash`/`gr untrash`/`gr trash --empty`).**
+  Considered; rejected because it would make `gr delete` the *permanent* verb,
+  which inverts the issue's requirement that `gr delete` become the safe default
+  and would surprise every existing user's muscle memory. `delete` = safe/trash,
+  `purge` = destroy keeps `delete` where users expect it while making the
+  destructive path explicit.
 - **Separate graveyard directory / move worktrees on delete.** Rejected: moving a
   worktree breaks git's recorded worktree path and needs `git worktree repair` on
   restore, the move is non-atomic and slow for large trees, and it reintroduces
@@ -978,10 +1000,12 @@ test, `croft` for repo names.
 - `internal/config/config.go` — `ParseDurationWithDays`, `StatusConfig.TTL`/
   `TTLDuration`, `Messages.MaxAge`/`MaxAgeDuration`, `Config.Validate`,
   `Default()`/`default_config.toml`.
-- `internal/cli/delete.go` (incl. `deleteBatchRun`), `internal/cli/batch.go`
-  (`--force`), `internal/cli/list.go`, `internal/cli/resume.go`,
-  `internal/cli/completion.go`, `internal/mcp/server.go` (MCP list paths) — CLI
-  and MCP surfaces to extend.
+- `internal/cli/delete.go` (incl. `confirmDelete`, `deleteBatchRun`) and a new
+  `internal/cli/purge.go` (the `gr purge` verb) + `internal/cli/restore.go`;
+  `internal/cli/batch.go` (`--force`/`-y`), `internal/cli/list.go`,
+  `internal/cli/resume.go`, `internal/cli/completion.go`, `internal/cli/root.go`
+  (`registerCommands`), `internal/mcp/server.go` (MCP list paths) — CLI and MCP
+  surfaces to add/extend.
 - Prior art: `git reflog` (commit recovery), desktop trash/recycle bins
   (retention + restore + empty-now), Kubernetes graceful deletion
   (`deletionTimestamp` + grace period — directly analogous to `DeletedAt` +
