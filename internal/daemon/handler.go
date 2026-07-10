@@ -1400,6 +1400,31 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				diag.DaemonVersion = version.Version
 				sendControl("diagnostics", diag)
 
+			case "gc":
+				var g protocol.GCMsg
+				if err := protocol.DecodePayload(msg, &g); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid gc message"})
+					continue
+				}
+
+				orphans := sm.RunGC(g.Force, time.Now())
+
+				infos := make([]protocol.GCOrphanInfo, 0, len(orphans))
+				for _, o := range orphans {
+					infos = append(infos, protocol.GCOrphanInfo{
+						Type:          o.Type,
+						Path:          o.Path,
+						ID:            o.ID,
+						IsGitWorktree: o.IsGitWorktree,
+						HasDirtyFiles: o.HasDirtyFiles,
+						Removed:       o.Removed,
+						Skipped:       o.Skipped,
+						Reason:        o.Reason,
+					})
+				}
+
+				sendControl("gc_result", protocol.GCResultMsg{DryRun: !g.Force, Orphans: infos})
+
 			case "mcp_connect":
 				var mc protocol.MCPConnectMsg
 				if err := protocol.DecodePayload(msg, &mc); err != nil {

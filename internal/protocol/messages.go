@@ -159,6 +159,30 @@ type RestoreResultMsg struct {
 	DeletedDescendants int           `json:"deleted_descendants,omitempty"`
 }
 
+// GCMsg requests orphan garbage collection. When Force is false (the default)
+// the daemon returns a dry-run listing without deleting anything.
+type GCMsg struct {
+	Force bool `json:"force,omitempty"`
+}
+
+// GCOrphanInfo describes one orphaned directory in a GCResultMsg.
+type GCOrphanInfo struct {
+	Type          string `json:"type"`
+	Path          string `json:"path"`
+	ID            string `json:"id"`
+	IsGitWorktree bool   `json:"is_git_worktree,omitempty"`
+	HasDirtyFiles bool   `json:"has_dirty_files,omitempty"`
+	Removed       bool   `json:"removed,omitempty"`
+	Skipped       bool   `json:"skipped,omitempty"`
+	Reason        string `json:"reason,omitempty"`
+}
+
+// GCResultMsg is the daemon's reply to a GCMsg.
+type GCResultMsg struct {
+	DryRun  bool           `json:"dry_run"`
+	Orphans []GCOrphanInfo `json:"orphans"`
+}
+
 type RenameMsg struct {
 	SessionID string `json:"session_id"`
 	NewName   string `json:"new_name"`

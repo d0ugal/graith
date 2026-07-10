@@ -489,7 +489,19 @@ gr wait fix-overlay --idle --timeout 10m
 
 # Check health
 gr doctor
+
+# Garbage-collect orphaned worktrees/scratch dirs (dry run by default)
+gr gc
+gr gc --force
 ```
+
+`gr gc` reaps worktree and scratch directories under the data dir that have no
+matching session — typically left by a daemon crash mid-delete. It is a dry run
+by default; `--force` actually removes them. Worktrees with uncommitted changes
+are never removed. The daemon also runs this cleanup automatically on startup
+(alongside tombstone-based resume of interrupted deletes), so `gr gc` is mainly
+for reclaiming disk on demand. State writes (`state.json`, the document store)
+use a crash-safe temp→fsync→rename pattern via `internal/atomicfile`.
 
 `gr wait` exits 0 as soon as the condition is met and non-zero on timeout, so
 orchestrators can gate on a session's output or state instead of polling

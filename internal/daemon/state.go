@@ -9,10 +9,10 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"syscall"
 	"time"
 
+	"github.com/d0ugal/graith/internal/atomicfile"
 	"github.com/d0ugal/graith/internal/config"
 )
 
@@ -473,59 +473,11 @@ func migrateV13ToV14(_ *State) error {
 	return nil
 }
 
+// writeFileAtomic writes state to disk crash-safely (temp + fsync + rename +
+// dir fsync). It delegates to the shared atomicfile helper so every state
+// writer in the daemon and store uses the same primitive.
 func writeFileAtomic(path string, data []byte) error {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("create dir: %w", err)
-	}
-
-	tmp, err := os.CreateTemp(dir, ".state-*.tmp")
-	if err != nil {
-		return fmt.Errorf("create temp: %w", err)
-	}
-
-	tmpPath := tmp.Name()
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpPath)
-
-		return fmt.Errorf("write temp: %w", err)
-	}
-
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpPath)
-
-		return fmt.Errorf("sync temp: %w", err)
-	}
-
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("close temp: %w", err)
-	}
-
-	if err := os.Rename(tmpPath, path); err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("rename: %w", err)
-	}
-
-	if err := syncDir(dir); err != nil {
-		return fmt.Errorf("sync dir: %w", err)
-	}
-
-	return nil
-}
-
-func syncDir(path string) error {
-	d, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-
-	err = d.Sync()
-	_ = d.Close()
-
-	return err
+	return atomicfile.Write(path, data, 0o600)
 }
 
 func (s *State) Reconcile() {

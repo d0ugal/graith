@@ -9,6 +9,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/d0ugal/graith/internal/atomicfile"
 )
 
 // Entry represents a document in the store.
@@ -194,7 +196,7 @@ func Put(storePath, key, body string) error {
 			return fmt.Errorf("create parent directories: %w", err)
 		}
 
-		if err := os.WriteFile(filePath, []byte(body), 0o600); err != nil {
+		if err := atomicfile.Write(filePath, []byte(body), 0o600); err != nil {
 			return fmt.Errorf("write file: %w", err)
 		}
 
@@ -229,24 +231,21 @@ func Append(storePath, key, line string) error {
 			return fmt.Errorf("create parent directories: %w", err)
 		}
 
-		f, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
-		if err != nil {
-			return fmt.Errorf("open file for append: %w", err)
-		}
-
 		if !strings.HasSuffix(line, "\n") {
 			line += "\n"
 		}
 
-		_, writeErr := f.WriteString(line)
-		closeErr := f.Close()
-
-		if writeErr != nil {
-			return fmt.Errorf("append to file: %w", writeErr)
+		// Read-modify-write under the store lock so the append is atomic: a
+		// crash mid-write leaves the old file intact rather than a torn line.
+		// The store lock (held by withLock) serializes concurrent appends, so
+		// no reader/writer sees the intermediate temp file.
+		existing, err := os.ReadFile(filePath)
+		if err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("read file for append: %w", err)
 		}
 
-		if closeErr != nil {
-			return fmt.Errorf("close file: %w", closeErr)
+		if err := atomicfile.Write(filePath, append(existing, line...), 0o600); err != nil {
+			return fmt.Errorf("append to file: %w", err)
 		}
 
 		if err := git(storePath, "add", "--", key); err != nil {
