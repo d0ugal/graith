@@ -91,6 +91,21 @@ func waitExit(t *testing.T, sess *grpty.Session) {
 	}
 }
 
+// newSMWithConfig builds a SessionManager with the given config and paths
+// rooted at a single fresh temp dir. Unlike newTestSessionManager it does not
+// force approvals on, so callers control the whole config.
+func newSMWithConfig(t *testing.T, cfg *config.Config) *SessionManager {
+	t.Helper()
+	dir := t.TempDir()
+
+	return NewSessionManager(cfg, config.Paths{
+		StateFile:  filepath.Join(dir, "state.json"),
+		DataDir:    dir,
+		LogDir:     dir,
+		RuntimeDir: dir,
+	}, slog.Default())
+}
+
 func TestGenerateID(t *testing.T) {
 	t.Run("length", func(t *testing.T) {
 		id := generateID()
@@ -872,7 +887,6 @@ func TestIsConfigStaleOrchestrator(t *testing.T) {
 
 func TestResolveSandboxIgnoresOrchestratorLayer(t *testing.T) {
 	t.Run("orchestrator sandbox dirs do not affect resolveSandbox", func(t *testing.T) {
-		tmpDir := t.TempDir()
 		cfg := config.Default()
 		cfg.Sandbox = config.SandboxConfig{Enabled: true}
 		cfg.Agents["claude"] = config.Agent{
@@ -880,11 +894,7 @@ func TestResolveSandboxIgnoresOrchestratorLayer(t *testing.T) {
 			Sandbox: config.SandboxConfig{ReadDirs: []string{"/agent-dir"}},
 		}
 
-		smWithout := NewSessionManager(cfg, config.Paths{
-			StateFile: filepath.Join(tmpDir, "state1.json"),
-			DataDir:   tmpDir,
-			LogDir:    tmpDir,
-		}, slog.Default())
+		smWithout := newSMWithConfig(t, cfg)
 
 		cfgWith := config.Default()
 		cfgWith.Sandbox = config.SandboxConfig{Enabled: true}
@@ -899,11 +909,7 @@ func TestResolveSandboxIgnoresOrchestratorLayer(t *testing.T) {
 			},
 		}
 
-		smWith := NewSessionManager(cfgWith, config.Paths{
-			StateFile: filepath.Join(tmpDir, "state2.json"),
-			DataDir:   tmpDir,
-			LogDir:    tmpDir,
-		}, slog.Default())
+		smWith := newSMWithConfig(t, cfgWith)
 
 		resultWithout, errWithout := smWithout.resolveSandbox("claude")
 		resultWith, errWith := smWith.resolveSandbox("claude")
@@ -922,7 +928,6 @@ func TestResolveSandboxIgnoresOrchestratorLayer(t *testing.T) {
 	})
 
 	t.Run("orchestrator sandbox cannot enable sandboxing", func(t *testing.T) {
-		tmpDir := t.TempDir()
 		cfg := config.Default()
 		cfg.Sandbox = config.SandboxConfig{Enabled: false}
 		cfg.Agents["claude"] = config.Agent{Command: "claude"}
@@ -932,11 +937,7 @@ func TestResolveSandboxIgnoresOrchestratorLayer(t *testing.T) {
 			},
 		}
 
-		sm := NewSessionManager(cfg, config.Paths{
-			StateFile: filepath.Join(tmpDir, "state.json"),
-			DataDir:   tmpDir,
-			LogDir:    tmpDir,
-		}, slog.Default())
+		sm := newSMWithConfig(t, cfg)
 
 		result, _ := sm.resolveSandbox("claude")
 		if result {
@@ -1641,13 +1642,8 @@ func TestStateSaveLoadSharedWorktree(t *testing.T) {
 }
 
 func TestShareWorktreeRequiresSandbox(t *testing.T) {
-	tmpDir := t.TempDir()
 	cfg := config.Default()
-	sm := NewSessionManager(cfg, config.Paths{
-		StateFile: filepath.Join(tmpDir, "state.json"),
-		DataDir:   tmpDir,
-		LogDir:    tmpDir,
-	}, slog.Default())
+	sm := newSMWithConfig(t, cfg)
 
 	sm.state.Sessions["src1"] = &SessionState{
 		ID:           "src1",
@@ -1662,7 +1658,6 @@ func TestShareWorktreeRequiresSandbox(t *testing.T) {
 }
 
 func TestShareWorktreeRequiresSandboxPerAgent(t *testing.T) {
-	tmpDir := t.TempDir()
 	cfg := config.Default()
 	cfg.Sandbox.Enabled = true
 	disabled := true
@@ -1670,11 +1665,7 @@ func TestShareWorktreeRequiresSandboxPerAgent(t *testing.T) {
 	agent.Sandbox = config.SandboxConfig{Disabled: &disabled}
 	cfg.Agents["claude"] = agent
 
-	sm := NewSessionManager(cfg, config.Paths{
-		StateFile: filepath.Join(tmpDir, "state.json"),
-		DataDir:   tmpDir,
-		LogDir:    tmpDir,
-	}, slog.Default())
+	sm := newSMWithConfig(t, cfg)
 
 	sm.state.Sessions["src1"] = &SessionState{
 		ID:           "src1",
@@ -1689,13 +1680,8 @@ func TestShareWorktreeRequiresSandboxPerAgent(t *testing.T) {
 }
 
 func TestResumeSharedWorktreeWithoutSandboxRejects(t *testing.T) {
-	tmpDir := t.TempDir()
 	cfg := config.Default()
-	sm := NewSessionManager(cfg, config.Paths{
-		StateFile: filepath.Join(tmpDir, "state.json"),
-		DataDir:   tmpDir,
-		LogDir:    tmpDir,
-	}, slog.Default())
+	sm := newSMWithConfig(t, cfg)
 
 	sm.state.Sessions["legacy1"] = &SessionState{
 		ID:             "legacy1",
@@ -1758,7 +1744,6 @@ func TestCreateRollsBackOnSaveStateFailure(t *testing.T) {
 
 func TestResumeRollsBackOnSaveStateFailure(t *testing.T) {
 	tmpDir := t.TempDir()
-	stateFile := filepath.Join(tmpDir, "state.json")
 
 	cfg := config.Default()
 	cfg.Agents["sleeper"] = config.Agent{
@@ -1766,11 +1751,7 @@ func TestResumeRollsBackOnSaveStateFailure(t *testing.T) {
 		Args:    []string{"60"},
 	}
 
-	sm := NewSessionManager(cfg, config.Paths{
-		StateFile: stateFile,
-		DataDir:   tmpDir,
-		LogDir:    tmpDir,
-	}, slog.Default())
+	sm := newSMWithConfig(t, cfg)
 
 	exitCode := 42
 	sm.state.Sessions["s1"] = &SessionState{
@@ -1948,12 +1929,7 @@ func TestResumeRefreshesSandboxConfig(t *testing.T) {
 			Args:    []string{"60"},
 		}
 
-		sm := NewSessionManager(cfg, config.Paths{
-			StateFile:  filepath.Join(tmpDir, "state.json"),
-			DataDir:    tmpDir,
-			LogDir:     tmpDir,
-			RuntimeDir: tmpDir,
-		}, slog.Default())
+		sm := newSMWithConfig(t, cfg)
 
 		sm.state.Sessions["s1"] = &SessionState{
 			ID:           "s1",
@@ -2035,11 +2011,7 @@ func TestResumeRefreshesSandboxConfig(t *testing.T) {
 			Args:    []string{"60"},
 		}
 
-		sm := NewSessionManager(cfg, config.Paths{
-			StateFile: filepath.Join(tmpDir, "state.json"),
-			DataDir:   tmpDir,
-			LogDir:    tmpDir,
-		}, slog.Default())
+		sm := newSMWithConfig(t, cfg)
 
 		sm.state.Sessions["s1"] = &SessionState{
 			ID:           "s1",
@@ -2088,7 +2060,6 @@ func TestResumeRefreshesSandboxConfig(t *testing.T) {
 
 	t.Run("resume rollback restores sandbox fields", func(t *testing.T) {
 		tmpDir := t.TempDir()
-		stateFile := filepath.Join(tmpDir, "state.json")
 
 		cfg := config.Default()
 		cfg.Sandbox = config.SandboxConfig{Enabled: false}
@@ -2097,11 +2068,7 @@ func TestResumeRefreshesSandboxConfig(t *testing.T) {
 			Args:    []string{"60"},
 		}
 
-		sm := NewSessionManager(cfg, config.Paths{
-			StateFile: stateFile,
-			DataDir:   tmpDir,
-			LogDir:    tmpDir,
-		}, slog.Default())
+		sm := newSMWithConfig(t, cfg)
 
 		oldConfig := &config.SandboxConfig{
 			Enabled:  true,
@@ -2592,7 +2559,6 @@ func TestForkInPlaceRejects(t *testing.T) {
 
 func TestForkUsesSourceBaseBranch(t *testing.T) {
 	repoDir := initTempGitRepo(t)
-	tmpDir := t.TempDir()
 
 	cfg := config.Default()
 	cfg.FetchOnCreate = false
@@ -2601,11 +2567,7 @@ func TestForkUsesSourceBaseBranch(t *testing.T) {
 		Args:    []string{"60"},
 	}
 
-	sm := NewSessionManager(cfg, config.Paths{
-		StateFile: filepath.Join(tmpDir, "state.json"),
-		DataDir:   tmpDir,
-		LogDir:    tmpDir,
-	}, slog.Default())
+	sm := newSMWithConfig(t, cfg)
 
 	sm.state.Sessions["src1"] = &SessionState{
 		ID:             "src1",
@@ -2655,7 +2617,6 @@ func TestForkUsesSourceBaseBranch(t *testing.T) {
 // auto-approve mode propagates and the fork doesn't silently start prompting.
 func TestForkInheritsYolo(t *testing.T) {
 	repoDir := initTempGitRepo(t)
-	tmpDir := t.TempDir()
 
 	cfg := config.Default()
 	cfg.FetchOnCreate = false
@@ -2664,11 +2625,7 @@ func TestForkInheritsYolo(t *testing.T) {
 		Args:    []string{"60"},
 	}
 
-	sm := NewSessionManager(cfg, config.Paths{
-		StateFile: filepath.Join(tmpDir, "state.json"),
-		DataDir:   tmpDir,
-		LogDir:    tmpDir,
-	}, slog.Default())
+	sm := newSMWithConfig(t, cfg)
 
 	sm.state.Sessions["src1"] = &SessionState{
 		ID:           "src1",
