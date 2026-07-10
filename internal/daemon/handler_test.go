@@ -494,11 +494,11 @@ func TestAttachAndDetach(t *testing.T) {
 
 	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "braw-att"})
 
-	env := h.expectType(t, "attached")
+	h.expectType(t, "attached")
 
 	h.sendControl(t, "detach", struct{}{})
 
-	env = h.expectType(t, "detached")
+	env := h.expectType(t, "detached")
 
 	var detached protocol.DetachedMsg
 
@@ -1002,9 +1002,9 @@ func TestMsgSubReadAll(t *testing.T) {
 		t.Errorf("first message body = %q", m1.Body)
 	}
 
-	env = h.expectType(t, "msg_message")
+	h.expectType(t, "msg_message")
 
-	env = h.expectType(t, "msg_done")
+	h.expectType(t, "msg_done")
 }
 
 func TestMsgSubWithAck(t *testing.T) {
@@ -1101,7 +1101,7 @@ func TestMsgSubWaitForNewMessage(t *testing.T) {
 		Wait:   true,
 	})
 
-	env := h.expectType(t, "msg_following")
+	h.expectType(t, "msg_following")
 
 	env, ok := h.readControlMsgTimeout(t, 2*time.Second)
 	if !ok {
@@ -1502,7 +1502,7 @@ func TestMsgSubFollowThreadFilter(t *testing.T) {
 		t.Errorf("thread_id = %q, want %q", msg.ThreadID, "thread-1")
 	}
 
-	env = h.expectType(t, "msg_done")
+	h.expectType(t, "msg_done")
 }
 
 func TestMsgPubWithThread(t *testing.T) {
@@ -1822,7 +1822,7 @@ func TestNullPayloadRejected(t *testing.T) {
 				Cwd:          "/tmp",
 			})
 
-			env := h.expectType(t, "handshake_ok")
+			h.expectType(t, "handshake_ok")
 
 			nullEnvelope, _ := json.Marshal(protocol.Envelope{
 				Type:    tt.msgType,
@@ -1830,7 +1830,7 @@ func TestNullPayloadRejected(t *testing.T) {
 			})
 			_ = h.writer.WriteFrame(protocol.ChannelControl, nullEnvelope)
 
-			env = h.expectType(t, "error")
+			env := h.expectType(t, "error")
 
 			var errMsg protocol.ErrorMsg
 
@@ -1851,12 +1851,12 @@ func TestAttachSwitchSession(t *testing.T) {
 	// Attach to first session
 	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "braw-sw1"})
 
-	env := h.expectType(t, "attached")
+	h.expectType(t, "attached")
 
 	// Attach to second session (should detach from first)
 	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "braw-sw2"})
 
-	env = h.expectType(t, "attached")
+	env := h.expectType(t, "attached")
 
 	var info protocol.SessionInfo
 
@@ -2223,7 +2223,7 @@ func TestMsgInboxReadUnread(t *testing.T) {
 		t.Errorf("body = %q, want %q", m.Body, "braw tidings")
 	}
 
-	env = h.expectType(t, "msg_done")
+	h.expectType(t, "msg_done")
 }
 
 func TestMsgInboxRequiresAuth(t *testing.T) {
