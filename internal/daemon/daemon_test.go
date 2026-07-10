@@ -86,6 +86,27 @@ func waitExit(t *testing.T, sess *grpty.Session) {
 	}
 }
 
+// stopAndClosePTY detaches the named session's live PTY from the manager, kills
+// it if still running, and waits for it to exit before closing. No-op if the
+// session has no live PTY.
+func stopAndClosePTY(sm *SessionManager, id string) {
+	ptySess, ok := sm.GetPTY(id)
+	if !ok {
+		return
+	}
+
+	sm.mu.Lock()
+	delete(sm.sessions, id)
+	sm.mu.Unlock()
+
+	if !ptySess.Exited() {
+		_ = ptySess.Kill()
+	}
+
+	<-ptySess.Done()
+	ptySess.Close()
+}
+
 // newSMWithConfig builds a SessionManager with the given config and paths
 // rooted at a single fresh temp dir. Unlike newTestSessionManager it does not
 // force approvals on, so callers control the whole config.
@@ -1982,19 +2003,7 @@ func TestResumeRefreshesSandboxConfig(t *testing.T) {
 			t.Errorf("SandboxConfig.ReadDirs = %v, want to contain %s", s.SandboxConfig.ReadDirs, updatedDir)
 		}
 
-		ptySess, ok := sm.GetPTY("s1")
-		if ok {
-			sm.mu.Lock()
-			delete(sm.sessions, "s1")
-			sm.mu.Unlock()
-
-			if !ptySess.Exited() {
-				_ = ptySess.Kill()
-			}
-
-			<-ptySess.Done()
-			ptySess.Close()
-		}
+		stopAndClosePTY(sm, "s1")
 	})
 
 	t.Run("resume without sandbox when config disables it", func(t *testing.T) {
@@ -2038,19 +2047,7 @@ func TestResumeRefreshesSandboxConfig(t *testing.T) {
 			t.Errorf("SandboxConfig should be nil when sandbox is disabled, got %+v", sess.SandboxConfig)
 		}
 
-		ptySess, ok := sm.GetPTY("s1")
-		if ok {
-			sm.mu.Lock()
-			delete(sm.sessions, "s1")
-			sm.mu.Unlock()
-
-			if !ptySess.Exited() {
-				_ = ptySess.Kill()
-			}
-
-			<-ptySess.Done()
-			ptySess.Close()
-		}
+		stopAndClosePTY(sm, "s1")
 	})
 
 	t.Run("resume rollback restores sandbox fields", func(t *testing.T) {
