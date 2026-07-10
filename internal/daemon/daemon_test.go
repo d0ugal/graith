@@ -1393,19 +1393,7 @@ func TestDetectAgentStatusesHookAuthority(t *testing.T) {
 func TestDetectAgentStatuses_SharedWorktreeSkipsGit(t *testing.T) {
 	sm := newTestSessionManager(t)
 
-	repoDir := t.TempDir()
-	gitRun(t, repoDir, "init", "-b", "main")
-
-	if err := os.WriteFile(filepath.Join(repoDir, "file.txt"), []byte("original"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	gitRun(t, repoDir, "add", "file.txt")
-	gitRun(t, repoDir, "commit", "-m", "init")
-
-	if err := os.WriteFile(filepath.Join(repoDir, "file.txt"), []byte("modified"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	repoDir := initDirtyRepo(t)
 
 	logDir := t.TempDir()
 
@@ -2361,6 +2349,28 @@ func initTempGitRepo(t *testing.T) string {
 	gitRun(t, dir, "commit", "--allow-empty", "-m", "init")
 
 	return dir
+}
+
+// initDirtyRepo creates a git repo with one committed file plus an uncommitted
+// modification, so worktree-status checks report it dirty. Returns the path.
+func initDirtyRepo(t *testing.T) string {
+	t.Helper()
+	repoDir := t.TempDir()
+
+	gitRun(t, repoDir, "init", "-b", "main")
+
+	if err := os.WriteFile(filepath.Join(repoDir, "file.txt"), []byte("original"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	gitRun(t, repoDir, "add", "file.txt")
+	gitRun(t, repoDir, "commit", "-m", "init")
+
+	if err := os.WriteFile(filepath.Join(repoDir, "file.txt"), []byte("modified"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	return repoDir
 }
 
 func TestCreateInPlaceRejectsUnconfiguredRepo(t *testing.T) {
@@ -5403,20 +5413,7 @@ func TestApplyConfigChangesCov2(t *testing.T) {
 func TestDetectAgentStatusesGitBranchesCov2(t *testing.T) {
 	sm := sleeperSM(t)
 
-	repoDir := t.TempDir()
-	gitRun(t, repoDir, "init", "-b", "main")
-
-	if err := os.WriteFile(filepath.Join(repoDir, "file.txt"), []byte("original"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	gitRun(t, repoDir, "add", "file.txt")
-	gitRun(t, repoDir, "commit", "-m", "init")
-
-	// Leave an uncommitted modification so HasUncommittedChanges reports dirty.
-	if err := os.WriteFile(filepath.Join(repoDir, "file.txt"), []byte("modified"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	repoDir := initDirtyRepo(t)
 
 	logDir := t.TempDir()
 
