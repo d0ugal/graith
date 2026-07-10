@@ -121,6 +121,7 @@ func startDaemon(configFile string) error {
 	if err != nil {
 		return err
 	}
+
 	if err := validateDaemonExecutable(self); err != nil {
 		return err
 	}
