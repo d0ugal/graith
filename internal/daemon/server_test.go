@@ -14,10 +14,14 @@ import (
 )
 
 func TestServerAcceptsConnections(t *testing.T) {
-	sockPath := filepath.Join(t.TempDir(), "test.sock")
+	sockPath := filepath.Join(shortSocketDir(t), "test.sock")
 
 	l, err := Listen(sockPath)
 	if err != nil {
+		if bindUnavailable(err) {
+			t.Skipf("unix socket bind unavailable in this environment: %v", err)
+		}
+
 		t.Fatal(err)
 	}
 
@@ -73,6 +77,23 @@ func TestServerAcceptsConnections(t *testing.T) {
 // than hard-fail where AF_UNIX bind is disallowed.
 func bindUnavailable(err error) bool {
 	return errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EACCES)
+}
+
+// shortSocketDir returns a temp directory under /tmp for unix-socket tests.
+// t.TempDir() honors the graith-set TMPDIR (a deeply-nested per-repo path), so
+// a socket built under it can exceed the ~104-byte sockaddr limit on macOS and
+// fail bind with EINVAL. /tmp keeps the path short. Cleaned up automatically.
+func shortSocketDir(t *testing.T) string {
+	t.Helper()
+
+	dir, err := os.MkdirTemp("/tmp", "gr")
+	if err != nil {
+		t.Skipf("cannot create short tmp dir: %v", err)
+	}
+
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+
+	return dir
 }
 
 // TestCoverServeAndShutdownTCP drives NewServer/Serve/trackConn/untrackConn and
@@ -206,14 +227,7 @@ func TestCoverServeContextCancelReturns(t *testing.T) {
 // remove it and bind successfully. It skips (rather than fails) where the
 // sandbox denies AF_UNIX bind.
 func TestCoverListenStaleSocketRemoval(t *testing.T) {
-	dir, err := os.MkdirTemp("/tmp", "grcov")
-	if err != nil {
-		t.Skipf("cannot create short tmp dir: %v", err)
-	}
-
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
-
-	sockPath := filepath.Join(dir, "s.sock")
+	sockPath := filepath.Join(shortSocketDir(t), "s.sock")
 
 	l1, err := Listen(sockPath)
 	if err != nil {
