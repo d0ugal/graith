@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"testing"
 	"time"
 
 	"github.com/d0ugal/graith/internal/protocol"
@@ -117,23 +118,34 @@ func daemonResponds(sockPath string) bool {
 }
 
 func startDaemon(configFile string) error {
+	return startDaemonWithLauncher(configFile, launchDaemon)
+}
+
+func startDaemonWithLauncher(configFile string, launch func(string, []string) error) error {
 	self, err := os.Executable()
 	if err != nil {
 		return err
 	}
 
-	if err := validateDaemonExecutable(self); err != nil {
+	return startDaemonExecutable(configFile, self, testing.Testing(), launch)
+}
+
+func startDaemonExecutable(configFile, executable string, runningUnderGoTest bool, launch func(string, []string) error) error {
+	if err := validateDaemonExecutable(executable, runningUnderGoTest); err != nil {
 		return err
 	}
 
+	return launch(executable, daemonStartArgs(configFile))
+}
+
+func launchDaemon(executable string, args []string) error {
 	devNull, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = devNull.Close() }()
 
-	args := daemonStartArgs(configFile)
-	cmd := exec.Command(self, args...)
+	cmd := exec.Command(executable, args...)
 	cmd.Stdin = devNull
 	cmd.Stdout = devNull
 	cmd.Stderr = devNull
@@ -142,8 +154,8 @@ func startDaemon(configFile string) error {
 	return cmd.Start()
 }
 
-func validateDaemonExecutable(path string) error {
-	if strings.HasSuffix(filepath.Base(path), ".test") {
+func validateDaemonExecutable(path string, runningUnderGoTest bool) error {
+	if runningUnderGoTest || strings.HasSuffix(filepath.Base(path), ".test") {
 		return fmt.Errorf("refusing to start daemon by re-executing Go test binary %q", path)
 	}
 
