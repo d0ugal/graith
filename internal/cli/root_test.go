@@ -157,6 +157,7 @@ func TestConfigFlagAllowedOutsideSession(t *testing.T) {
 	listConnectFn = func(*config.Config, config.Paths, string) (*client.Client, error) {
 		return nil, connectErr
 	}
+
 	t.Cleanup(func() { listConnectFn = origListConnectFn })
 
 	// The stubbed connection fails (expected), but the command should reach it
