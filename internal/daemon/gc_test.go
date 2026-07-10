@@ -162,9 +162,9 @@ func TestRunGCForceRemovesOrphans(t *testing.T) {
 	}
 }
 
-// TestRunGCSkipsUndeterminableWorktree is the regression test for the fail-open
-// bug: a git worktree whose dirty state can't be read must be preserved, not
-// force-removed.
+// TestRunGCSkipsUndeterminableWorktree is the regression test for fail-open
+// teardown: a git worktree whose dirty state can't be read must be preserved,
+// not force-removed.
 func TestRunGCSkipsUndeterminableWorktree(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
