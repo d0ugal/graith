@@ -1492,7 +1492,7 @@ func TestUpdate_RestartMenu_Stopped(t *testing.T) {
 		t.Fatalf("restartQueue = %v, want [s2]", om.restartQueue)
 	}
 
-	updated = drain(updated, cmd)
+	drain(updated, cmd)
 
 	if len(restarted) != 1 || restarted[0] != "s2" {
 		t.Errorf("restarted = %v, want [s2]", restarted)
@@ -1521,7 +1521,7 @@ func TestUpdate_RestartMenu_Outdated(t *testing.T) {
 		t.Fatalf("restartQueue = %v, want [s1]", om.restartQueue)
 	}
 
-	updated = drain(updated, cmd)
+	drain(updated, cmd)
 
 	if len(restarted) != 1 || restarted[0] != "s1" {
 		t.Errorf("restarted = %v, want [s1]", restarted)
@@ -1572,7 +1572,7 @@ func TestUpdate_RestartMenu_All(t *testing.T) {
 		t.Fatalf("restartQueue = %v, want all %d sessions", om.restartQueue, len(sessions))
 	}
 
-	updated = drain(updated, cmd)
+	drain(updated, cmd)
 
 	if len(restarted) != len(sessions) {
 		t.Errorf("restarted %d sessions, want %d", len(restarted), len(sessions))
@@ -1637,7 +1637,7 @@ func TestUpdate_RestartMenu_RespectsFilter(t *testing.T) {
 		t.Fatalf("restartQueue = %v, want [s1] (filter-scoped)", om.restartQueue)
 	}
 
-	updated = drain(updated, cmd)
+	drain(updated, cmd)
 
 	if len(restarted) != 1 || restarted[0] != "s1" {
 		t.Errorf("restarted = %v, want [s1]", restarted)
