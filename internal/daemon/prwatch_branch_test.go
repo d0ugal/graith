@@ -112,20 +112,24 @@ func TestReconcileBranch_SwitchBack(t *testing.T) {
 
 	// Move to the adopted branch — a change.
 	gitRun(t, repo, "checkout", "adopt-pr-42")
+
 	sm.prWatch.cursors["braw1"] = &prWatchCursor{number: 42, primed: true}
 	if got := sm.reconcileBranch("braw1", "main", repo); got != "adopt-pr-42" {
 		t.Fatalf("want adopt-pr-42, got %q", got)
 	}
+
 	if _, ok := sm.prWatch.cursors["braw1"]; ok {
 		t.Error("cursor should reset when moving to the adopted branch")
 	}
 
 	// Switch back to main — detected as another change against the last poll.
 	gitRun(t, repo, "checkout", "main")
+
 	sm.prWatch.cursors["braw1"] = &prWatchCursor{number: 42, primed: true}
 	if got := sm.reconcileBranch("braw1", "main", repo); got != "main" {
 		t.Fatalf("want main after switch-back, got %q", got)
 	}
+
 	if _, ok := sm.prWatch.cursors["braw1"]; ok {
 		t.Error("cursor should reset again on switch-back")
 	}
@@ -150,6 +154,7 @@ func TestReconcileBranch_NoChange(t *testing.T) {
 	if got := sm.reconcileBranch("braw1", "main", repo); got != "main" {
 		t.Fatalf("reconcileBranch = %q, want main", got)
 	}
+
 	if sm.prWatch.cursors["braw1"] != cur {
 		t.Error("cursor must be preserved on first observation with no drift")
 	}
@@ -158,6 +163,7 @@ func TestReconcileBranch_NoChange(t *testing.T) {
 	if got := sm.reconcileBranch("braw1", "main", repo); got != "main" {
 		t.Fatalf("reconcileBranch = %q, want main", got)
 	}
+
 	if sm.prWatch.cursors["braw1"] != cur {
 		t.Error("cursor must be preserved when the branch is unchanged")
 	}
@@ -201,6 +207,7 @@ func TestReconcileBranch_EmptyRecordedUsesLive(t *testing.T) {
 	if got := sm.reconcileBranch("braw1", "", repo); got != "main" {
 		t.Fatalf("empty recorded should resolve live HEAD, got %q", got)
 	}
+
 	if sm.prWatch.cursors["braw1"] != cur {
 		t.Error("empty-recorded first observation must not be treated as a change")
 	}
@@ -223,13 +230,16 @@ func TestNotePollBranch_Drift(t *testing.T) {
 
 	// Drift to a new branch: change, resets cursor + nextPoll.
 	sm.prWatch.cursors["braw"] = &prWatchCursor{number: 1}
+
 	sm.prWatch.nextPoll["braw"] = time.Now().Add(time.Hour)
 	if !sm.notePollBranch("braw", "main", "bonnie") {
 		t.Error("drift to a new branch should be reported as a change")
 	}
+
 	if _, ok := sm.prWatch.cursors["braw"]; ok {
 		t.Error("cursor should be cleared on drift")
 	}
+
 	if _, ok := sm.prWatch.nextPoll["braw"]; ok {
 		t.Error("nextPoll should be cleared on drift")
 	}
@@ -260,9 +270,11 @@ func TestPRWatchTargets_ReflectsBranchChange(t *testing.T) {
 	if len(targets) != 1 {
 		t.Fatalf("want 1 target, got %d", len(targets))
 	}
+
 	if targets[0].branch != "adopt-pr-42" {
 		t.Errorf("target branch = %q, want adopt-pr-42", targets[0].branch)
 	}
+
 	if sm.state.Sessions["braw1"].Branch != "main" {
 		t.Errorf("owned Branch must stay 'main', got %q", sm.state.Sessions["braw1"].Branch)
 	}
