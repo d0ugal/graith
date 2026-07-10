@@ -14,8 +14,10 @@ package client
 // byte — including mouse-wheel scroll events and other buttons — is passed
 // through untouched so existing mouse behavior is preserved.
 
-// Arrow-key escape sequences (application-normal cursor keys). These contain no
-// control bytes, so they flow through the prefix-key scanner unchanged.
+// Arrow-key escape sequences (normal-mode cursor keys). They begin with ESC but
+// contain no prefix byte for the default ctrl+b prefix, so they flow through the
+// prefix-key scanner unchanged. (A custom single-character prefix such as ESC or
+// a bare letter could collide; the default and any control-key prefix are safe.)
 var (
 	arrowUp    = []byte("\x1b[A")
 	arrowDown  = []byte("\x1b[B")
@@ -26,12 +28,18 @@ var (
 // SGR mouse button-code bits. The low two bits identify the button (0=left);
 // bit 5 (32) marks a motion/drag report; bit 6 (64) marks a wheel event.
 const (
-	mouseButtonMask = 0b11
-	mouseMotionBit  = 32
-	mouseWheelBit   = 64
+	mouseMotionBit = 32
+	mouseWheelBit  = 64
 )
 
 const defaultDragArrowThreshold = 2
+
+// maxMouseFieldDigits bounds the digit run parseUint will accept for a single
+// SGR field. Real terminal cell coordinates and button codes never approach
+// this, and the cap keeps parsing fail-closed: an overlong (potentially
+// int-overflowing) run makes the sequence malformed so it passes through
+// untranslated rather than wrapping to a bogus negative value.
+const maxMouseFieldDigits = 7
 
 // sgrMouseEvent is a parsed SGR (1006) mouse report: ESC [ < b ; col ; row (M|m).
 type sgrMouseEvent struct {
@@ -92,6 +100,10 @@ func parseUint(input []byte, i int) (int, int, bool) {
 	for i < len(input) && input[i] >= '0' && input[i] <= '9' {
 		val = val*10 + int(input[i]-'0')
 		i++
+
+		if i-start > maxMouseFieldDigits {
+			return 0, i, false
+		}
 	}
 
 	if i == start {
@@ -120,28 +132,33 @@ func newDragArrowState(threshold int) *dragArrowState {
 	return &dragArrowState{threshold: threshold}
 }
 
-// isLeftPress reports whether ev is a plain left-button press (no motion, no
-// wheel) — the start of a drag gesture.
+// isLeftPress reports whether ev is a plain, unmodified left-button press — the
+// start of a drag gesture. The button code must be exactly 0: no motion, no
+// wheel, and none of the modifier (shift/meta/ctrl) or extended-button bits set,
+// so a shift/ctrl/alt+left (still used by terminals to force text selection) and
+// any higher-numbered button pass through untouched.
 func (ev sgrMouseEvent) isLeftPress() bool {
-	return !ev.release &&
-		ev.button&mouseButtonMask == 0 &&
-		ev.button&mouseMotionBit == 0 &&
-		ev.button&mouseWheelBit == 0
+	return !ev.release && ev.button == 0
 }
 
-// isLeftDrag reports whether ev is a motion report with the left button held.
+// isLeftDrag reports whether ev is a motion report with only the left button
+// held — exactly the motion bit, no modifiers or extended-button bits.
 func (ev sgrMouseEvent) isLeftDrag() bool {
-	return !ev.release &&
-		ev.button&mouseMotionBit != 0 &&
-		ev.button&mouseWheelBit == 0 &&
-		ev.button&mouseButtonMask == 0
+	return !ev.release && ev.button == mouseMotionBit
+}
+
+// isLeftRelease reports whether ev is the release of a plain left button, which
+// ends an active gesture. Releases of other buttons are not consumed.
+func (ev sgrMouseEvent) isLeftRelease() bool {
+	return ev.release && ev.button == 0
 }
 
 // handles reports whether this event is part of the drag-arrow gesture and
 // should therefore be consumed (swallowed) rather than forwarded to the pane.
-// A left press, a left drag while active, and a release while active are all
-// consumed; everything else (wheel scroll, other buttons, motion without an
-// active gesture) is left untouched.
+// A left press, and (while active) a left drag or a left-button release, are
+// consumed; everything else — wheel scroll, other buttons, a non-left release,
+// motion without an active gesture — is left untouched (and, via process(),
+// clears any in-progress gesture).
 func (d *dragArrowState) handles(ev sgrMouseEvent) bool {
 	if ev.isLeftPress() {
 		return true
@@ -151,7 +168,7 @@ func (d *dragArrowState) handles(ev sgrMouseEvent) bool {
 		return false
 	}
 
-	return ev.release || ev.isLeftDrag()
+	return ev.isLeftRelease() || ev.isLeftDrag()
 }
 
 // feed advances the state machine with one mouse event and returns any arrow-key
@@ -165,7 +182,7 @@ func (d *dragArrowState) feed(ev sgrMouseEvent) []byte {
 
 		return nil
 
-	case ev.release:
+	case ev.isLeftRelease():
 		d.active = false
 
 		return nil
@@ -238,6 +255,12 @@ func (d *dragArrowState) emitFor(col, row int) []byte {
 // it maps to (often none) and leaving all other bytes untouched. It mirrors the
 // copy-on-first-match strategy of processKittyPrefix to avoid allocating when
 // there is nothing to translate.
+//
+// Like processKittyPrefix, process operates on a single read buffer and keeps no
+// carry buffer: an SGR report split across two reads fails to parse and passes
+// through untranslated (the pane sees the raw report). Terminals emit these
+// ~12-byte reports atomically well within the read size, so a mid-sequence split
+// is not expected in practice.
 func (d *dragArrowState) process(input []byte) []byte {
 	var out []byte
 

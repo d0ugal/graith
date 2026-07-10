@@ -103,6 +103,12 @@ func TestSGRMouseEventClassification(t *testing.T) {
 		{"right press not left", sgrMouseEvent{button: 2}, false, false},
 		{"right drag not left", sgrMouseEvent{button: mouseMotionBit | 2}, false, false},
 		{"no-button motion not drag", sgrMouseEvent{button: mouseMotionBit | 3}, false, false},
+		{"shift+left press ignored", sgrMouseEvent{button: 4}, false, false},
+		{"meta+left press ignored", sgrMouseEvent{button: 8}, false, false},
+		{"ctrl+left press ignored", sgrMouseEvent{button: 16}, false, false},
+		{"shift+left drag ignored", sgrMouseEvent{button: mouseMotionBit | 4}, false, false},
+		{"ctrl+left drag ignored", sgrMouseEvent{button: mouseMotionBit | 16}, false, false},
+		{"extended button not left", sgrMouseEvent{button: 128}, false, false},
 	}
 
 	for _, tt := range tests {
@@ -328,6 +334,109 @@ func TestProcessMultipleGesturesInOneBuffer(t *testing.T) {
 	want := "\x1b[C\x1b[C" + "\x1b[A"
 	if got := string(d.process([]byte(input))); got != want {
 		t.Errorf("process = %q, want %q", got, want)
+	}
+}
+
+// TestParseUintRejectsOverlongDigitRun ensures a pathological digit run is
+// rejected rather than silently overflowing int and wrapping negative, so the
+// whole SGR sequence is treated as malformed and passes through untranslated.
+func TestParseUintRejectsOverlongDigitRun(t *testing.T) {
+	// Within the cap: parses fine.
+	if v, _, ok := parseUint([]byte("1234567"), 0); !ok || v != 1234567 {
+		t.Errorf("parseUint(1234567) = (%d,%v), want (1234567,true)", v, ok)
+	}
+
+	// One digit past the cap: rejected.
+	if _, _, ok := parseUint([]byte("12345678"), 0); ok {
+		t.Error("parseUint should reject an overlong digit run")
+	}
+
+	// A full SGR report with an overlong field parses as malformed, so process
+	// leaves it untouched (no arrows, no wrapped coordinates).
+	d := newDragArrowState(2)
+
+	overlong := "\x1b[<0;99999999999999999999;1M"
+	if got := string(d.process([]byte(overlong))); got != overlong {
+		t.Errorf("process(overlong) = %q, want passthrough", got)
+	}
+
+	if d.active {
+		t.Error("malformed report must not start a gesture")
+	}
+}
+
+// TestProcessIgnoresModifiedLeftButton ensures shift/ctrl/alt+left drags pass
+// through untouched so the terminal's force-selection modifier still works.
+func TestProcessIgnoresModifiedLeftButton(t *testing.T) {
+	d := newDragArrowState(2)
+
+	// Shift+left press (button 4) then shift+left drag (button 36): both pass
+	// through and no gesture starts.
+	input := "\x1b[<4;10;5M\x1b[<36;10;9M"
+	if got := string(d.process([]byte(input))); got != input {
+		t.Errorf("process(modified) = %q, want passthrough", got)
+	}
+
+	if d.active {
+		t.Error("modified left button must not start a gesture")
+	}
+}
+
+// TestProcessPassesThroughNonLeftReleaseWhileActive ensures a right/middle
+// release during an active left gesture is forwarded (not swallowed) while still
+// clearing the gesture.
+func TestProcessPassesThroughNonLeftReleaseWhileActive(t *testing.T) {
+	d := newDragArrowState(2)
+
+	d.process([]byte("\x1b[<0;10;10M")) // start gesture
+
+	if !d.active {
+		t.Fatal("gesture should be active after left press")
+	}
+
+	// Right-button release (button 2, 'm'): passes through, clears the gesture.
+	rel := "\x1b[<2;10;10m"
+	if got := string(d.process([]byte(rel))); got != rel {
+		t.Errorf("non-left release = %q, want passthrough", got)
+	}
+
+	if d.active {
+		t.Error("non-left release should clear the active gesture")
+	}
+}
+
+// TestProcessSwallowsLeftClickOnly locks the documented contract that a bare
+// left click (press + release, no motion) is consumed and emits nothing.
+func TestProcessSwallowsLeftClickOnly(t *testing.T) {
+	d := newDragArrowState(2)
+
+	if got := string(d.process([]byte("\x1b[<0;7;7M\x1b[<0;7;7m"))); got != "" {
+		t.Errorf("left click = %q, want swallowed (empty)", got)
+	}
+
+	if d.active {
+		t.Error("gesture should be inactive after release")
+	}
+}
+
+// TestProcessSplitSequenceAcrossReads documents the known per-read limitation
+// (shared with processKittyPrefix): a report split across two process calls is
+// not reassembled — both fragments pass through untranslated.
+func TestProcessSplitSequenceAcrossReads(t *testing.T) {
+	d := newDragArrowState(2)
+
+	first := "\x1b[<0;10"
+	if got := string(d.process([]byte(first))); got != first {
+		t.Errorf("first fragment = %q, want passthrough", got)
+	}
+
+	if d.active {
+		t.Error("incomplete press must not start a gesture")
+	}
+
+	second := ";5M\x1b[<32;10;9M"
+	if got := string(d.process([]byte(second))); got != second {
+		t.Errorf("second fragment = %q, want passthrough (no arrows)", got)
 	}
 }
 

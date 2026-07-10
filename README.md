@@ -573,6 +573,8 @@ shell          = "s"                    # open a shell in the worktree
 # button then drag up/down/left/right to emit discrete arrow-key presses to the
 # focused pane. Off by default because it repurposes left-drag (otherwise used
 # for text selection); mouse-wheel scrolling always passes through unchanged.
+# Only translates drags when the focused app already has SGR mouse reporting on
+# (a mouse-tracking TUI or a touch/mobile terminal); graith won't enable it.
 drag_arrow_keys      = false            # enable the drag-to-arrow gesture
 drag_arrow_threshold = 2                # cells of drag per arrow press (min 1)
 
