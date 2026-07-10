@@ -130,6 +130,21 @@ func renderItem(sessions []protocol.SessionInfo, current string, index int) stri
 	return buf.String()
 }
 
+// drain runs queued tea.Cmds to completion, feeding each resulting message
+// back into the model, and returns the final model.
+func drain(m tea.Model, cmd tea.Cmd) tea.Model {
+	for cmd != nil {
+		msg := cmd()
+		if msg == nil {
+			break
+		}
+
+		m, cmd = m.Update(msg)
+	}
+
+	return m
+}
+
 // --- buildGroupedItems ---
 
 func TestBuildGroupedItems_GroupsByRepo(t *testing.T) {
@@ -1247,14 +1262,7 @@ func TestUpdate_RestartAll_Staggered(t *testing.T) {
 	}
 
 	// Execute commands one at a time until done
-	for cmd != nil {
-		msg := cmd()
-		if msg == nil {
-			break
-		}
-
-		updated, cmd = updated.Update(msg)
-	}
+	updated = drain(updated, cmd)
 
 	om = asOverlay(updated)
 	if om.state != stateList {
@@ -1314,14 +1322,7 @@ func TestUpdate_RestartAll_HandlesErrors(t *testing.T) {
 	updated, cmd := sendKey(updated, "a")
 
 	// Run all restarts to completion
-	for cmd != nil {
-		msg := cmd()
-		if msg == nil {
-			break
-		}
-
-		updated, cmd = updated.Update(msg)
-	}
+	updated = drain(updated, cmd)
 
 	om := asOverlay(updated)
 	if om.state != stateList {
@@ -1491,14 +1492,7 @@ func TestUpdate_RestartMenu_Stopped(t *testing.T) {
 		t.Fatalf("restartQueue = %v, want [s2]", om.restartQueue)
 	}
 
-	for cmd != nil {
-		msg := cmd()
-		if msg == nil {
-			break
-		}
-
-		updated, cmd = updated.Update(msg)
-	}
+	updated = drain(updated, cmd)
 
 	if len(restarted) != 1 || restarted[0] != "s2" {
 		t.Errorf("restarted = %v, want [s2]", restarted)
@@ -1527,14 +1521,7 @@ func TestUpdate_RestartMenu_Outdated(t *testing.T) {
 		t.Fatalf("restartQueue = %v, want [s1]", om.restartQueue)
 	}
 
-	for cmd != nil {
-		msg := cmd()
-		if msg == nil {
-			break
-		}
-
-		updated, cmd = updated.Update(msg)
-	}
+	updated = drain(updated, cmd)
 
 	if len(restarted) != 1 || restarted[0] != "s1" {
 		t.Errorf("restarted = %v, want [s1]", restarted)
@@ -1585,14 +1572,7 @@ func TestUpdate_RestartMenu_All(t *testing.T) {
 		t.Fatalf("restartQueue = %v, want all %d sessions", om.restartQueue, len(sessions))
 	}
 
-	for cmd != nil {
-		msg := cmd()
-		if msg == nil {
-			break
-		}
-
-		updated, cmd = updated.Update(msg)
-	}
+	updated = drain(updated, cmd)
 
 	if len(restarted) != len(sessions) {
 		t.Errorf("restarted %d sessions, want %d", len(restarted), len(sessions))
@@ -1657,14 +1637,7 @@ func TestUpdate_RestartMenu_RespectsFilter(t *testing.T) {
 		t.Fatalf("restartQueue = %v, want [s1] (filter-scoped)", om.restartQueue)
 	}
 
-	for cmd != nil {
-		msg := cmd()
-		if msg == nil {
-			break
-		}
-
-		updated, cmd = updated.Update(msg)
-	}
+	updated = drain(updated, cmd)
 
 	if len(restarted) != 1 || restarted[0] != "s1" {
 		t.Errorf("restarted = %v, want [s1]", restarted)
