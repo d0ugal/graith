@@ -2542,7 +2542,7 @@ func TestView_ShowsColumnHeaders(t *testing.T) {
 	updated, _ := sendWindowSize(m, 150, 40)
 	view := asOverlay(updated).View().Content
 
-	for _, header := range []string{"Session", "Status", "Summary", "Git", "Output"} {
+	for _, header := range []string{"Session", "Status", "Summary", "Git", "PR", "Output"} {
 		if !strings.Contains(view, header) {
 			t.Errorf("view should contain column header %q", header)
 		}
@@ -3269,9 +3269,11 @@ func TestPad(t *testing.T) {
 // --- columnWidths.totalWidth ---
 
 func TestColumnWidths_TotalWidth(t *testing.T) {
-	cw := columnWidths{name: 10, status: 8, summary: 15, git: 5, pr: 6, output: 4}
+	cw := columnWidths{name: 10, trailing: map[string]int{
+		"status": 8, "summary": 15, "git": 5, "pr": 6, "output": 4,
+	}}
 	got := cw.totalWidth()
-	// 9 + 10 + 2 + 8 + 2 + 15 + 2 + 5 + 2 + 6 + 2 + 4 + 4 = 71
+	// 9 + 10 + 4 + (2+8) + (2+15) + (2+5) + (2+6) + (2+4) = 71
 	if got != 71 {
 		t.Errorf("totalWidth() = %d, want 71", got)
 	}
@@ -4044,14 +4046,53 @@ func TestFormatPRSection(t *testing.T) {
 }
 
 func TestColumnWidths_TotalWidthIncludesPR(t *testing.T) {
-	// The PR separator is always present; widening cw.pr widens the total 1:1,
-	// proving the PR column is accounted for (the bug Claude/Codex caught).
-	a := columnWidths{name: 10, status: 6, summary: 7, git: 3, pr: 2, output: 6}
-	b := a
+	// The PR separator is always present; widening the PR column widens the
+	// total 1:1, proving the PR column is accounted for.
+	a := columnWidths{name: 10, trailing: map[string]int{
+		"status": 6, "summary": 7, "git": 3, "pr": 2, "output": 6,
+	}}
+	b := columnWidths{name: 10, trailing: map[string]int{
+		"status": 6, "summary": 7, "git": 3, "pr": 10, "output": 6,
+	}}
 
-	b.pr = 10
 	if b.totalWidth()-a.totalWidth() != 8 {
 		t.Errorf("totalWidth must grow by Δpr=8, got %d", b.totalWidth()-a.totalWidth())
+	}
+}
+
+// TestColumnWidths_TotalWidthCountsAllTUIColumns guards the registry invariant
+// that totalWidth accounts for every ShowTUI column, so a future column added
+// to the registry extends the panel width instead of being truncated.
+func TestColumnWidths_TotalWidthCountsAllTUIColumns(t *testing.T) {
+	widths := map[string]int{}
+	for _, c := range tuiColumns() {
+		widths[c.Key] = 5
+	}
+
+	base := columnWidths{name: 10, trailing: widths}
+
+	// Bump one column by 3 and confirm the total grows by exactly 3.
+	bumped := map[string]int{}
+	for k, v := range widths {
+		bumped[k] = v
+	}
+
+	bumped["git"] += 3
+	grown := columnWidths{name: 10, trailing: bumped}
+
+	if grown.totalWidth()-base.totalWidth() != 3 {
+		t.Errorf("total must grow by 3 when a TUI column widens, got %d", grown.totalWidth()-base.totalWidth())
+	}
+
+	// Every TUI column plus name and the fixed margins must be counted: the
+	// total is 9 + name + 4 + sum(2 + width) over all TUI columns.
+	want := 9 + base.name + 4
+	for range tuiColumns() {
+		want += 2 + 5
+	}
+
+	if base.totalWidth() != want {
+		t.Errorf("totalWidth = %d, want %d (all TUI columns counted)", base.totalWidth(), want)
 	}
 }
 

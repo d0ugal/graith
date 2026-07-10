@@ -179,11 +179,28 @@ type columnWidths struct {
 	git        int
 	pr         int
 	output     int
+	// trailing holds the computed width of every ShowTUI column keyed by
+	// SessionColumn.Key. The named fields above mirror the well-known columns
+	// for convenience (and test stability); trailing is the generic lookup the
+	// renderer uses so columns added to the registry are sized automatically.
+	trailing map[string]int
+}
+
+// col returns the computed TUI width for a registry column by key.
+func (cw columnWidths) col(key string) int {
+	return cw.trailing[key]
 }
 
 func (cw columnWidths) totalWidth() int {
-	// "  N ★▸● " (9) + treeIndent + name + "  " + status + "  " + summary + "  " + git + "  " + pr + "  " + output + margin(4)
-	return 9 + cw.treeIndent + cw.name + 2 + cw.status + 2 + cw.summary + 2 + cw.git + 2 + cw.pr + 2 + cw.output + 4
+	// "  N ★▸● " (9) + treeIndent + name, then "  " + width for every TUI column
+	// (sourced from the shared registry so a new ShowTUI column extends the
+	// panel automatically rather than being silently truncated), + margin(4).
+	width := 9 + cw.treeIndent + cw.name + 4
+	for _, c := range tuiColumns() {
+		width += 2 + cw.col(c.Key)
+	}
+
+	return width
 }
 
 func pad(s string, width int) string {
@@ -409,75 +426,60 @@ func buildMatchString(s protocol.SessionInfo) string {
 	return strings.Join(parts, " ")
 }
 
-func computeColumnWidths(sessions []protocol.SessionInfo, currentSessionID string) columnWidths {
-	var cw columnWidths
+func computeColumnWidths(sessions []protocol.SessionInfo, _ string) columnWidths {
+	tuiCols := tuiColumns()
+	widths := make(map[string]int, len(tuiCols))
+
+	var nameWidth int
+
 	for _, s := range sessions {
-		if n := lipgloss.Width(s.Name); n > cw.name {
-			cw.name = n
+		if n := lipgloss.Width(s.Name); n > nameWidth {
+			nameWidth = n
 		}
 
-		status := s.Status
-		if s.AgentStatus != "" && s.Status == "running" {
-			status = s.AgentStatus
-		}
-
-		if n := lipgloss.Width(status); n > cw.status {
-			cw.status = n
-		}
-
-		summary := displaySummary(s)
-		if n := lipgloss.Width(summary); n > cw.summary {
-			cw.summary = n
-		}
-
-		git := "—"
-		if !s.SharedWorktree {
-			git = displayGit(s.Dirty, s.UnpushedCount)
-		}
-
-		if n := lipgloss.Width(git); n > cw.git {
-			cw.git = n
-		}
-
-		if n := lipgloss.Width(displayPR(s)); n > cw.pr {
-			cw.pr = n
-		}
-
-		output := displayLastOutput(s)
-		if n := lipgloss.Width(output); n > cw.output {
-			cw.output = n
+		for _, c := range tuiCols {
+			if n := lipgloss.Width(c.TUIValue(s)); n > widths[c.Key] {
+				widths[c.Key] = n
+			}
 		}
 	}
 
-	if cw.name < 7 {
-		cw.name = 7
+	if nameWidth < 7 {
+		nameWidth = 7
 	}
 
-	if cw.status < 6 {
-		cw.status = 6
+	for _, c := range tuiCols {
+		if widths[c.Key] < c.MinWidth {
+			widths[c.Key] = c.MinWidth
+		}
+
+		if c.MaxWidth > 0 && widths[c.Key] > c.MaxWidth {
+			widths[c.Key] = c.MaxWidth
+		}
 	}
 
-	if cw.summary < 7 {
-		cw.summary = 7
+	return columnWidths{
+		name:     nameWidth,
+		status:   widths["status"],
+		summary:  widths["summary"],
+		git:      widths["git"],
+		pr:       widths["pr"],
+		output:   widths["output"],
+		trailing: widths,
+	}
+}
+
+// tuiColumns returns the registry columns shown in the TUI picker, in order.
+func tuiColumns() []SessionColumn {
+	var cols []SessionColumn
+
+	for _, c := range SessionColumns() {
+		if c.ShowTUI {
+			cols = append(cols, c)
+		}
 	}
 
-	if cw.git < 3 {
-		cw.git = 3
-	}
-
-	if cw.pr < 2 {
-		cw.pr = 2
-	}
-
-	if cw.output < 6 {
-		cw.output = 6
-	}
-
-	if cw.summary > maxSummaryWidth {
-		cw.summary = maxSummaryWidth
-	}
-
-	return cw
+	return cols
 }
 
 // compactDelegate renders each item on a single line with aligned columns.
@@ -568,54 +570,6 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	nameWidth := d.cols.treeIndent + d.cols.name - lipgloss.Width(si.treePrefix) - lipgloss.Width(collapseIndicator)
 	name := collapseIndicator + pad(nameText, nameWidth)
 
-	status := si.info.Status
-	if si.info.AgentStatus != "" && si.info.Status == "running" {
-		status = si.info.AgentStatus
-	}
-
-	statusRendered := pad(status, d.cols.status)
-	switch status {
-	case "active", "running":
-		statusRendered = lipgloss.NewStyle().Foreground(colorGreen).Render(statusRendered)
-	case "approval":
-		statusRendered = lipgloss.NewStyle().Foreground(colorRed).Bold(true).Render(statusRendered)
-	case "ready":
-		statusRendered = lipgloss.NewStyle().Foreground(colorBlue).Render(statusRendered)
-	case "errored":
-		statusRendered = lipgloss.NewStyle().Foreground(colorRed).Render(statusRendered)
-	default:
-		statusRendered = dim.Render(statusRendered)
-	}
-
-	summaryVal := displaySummary(si.info)
-
-	summaryRendered := pad(summaryVal, d.cols.summary)
-	if si.info.SummaryFaded {
-		summaryRendered = dim.Render(summaryRendered)
-	}
-
-	var gitRendered string
-	if si.info.SharedWorktree {
-		gitRendered = dim.Render(pad("—", d.cols.git))
-	} else {
-		gitVal := displayGit(si.info.Dirty, si.info.UnpushedCount)
-		if gitVal == "clean" {
-			gitRendered = dim.Render(pad(gitVal, d.cols.git))
-		} else {
-			gitRendered = pad(gitVal, d.cols.git)
-		}
-	}
-
-	var prRendered string
-	if si.info.PullRequest == nil {
-		prRendered = dim.Render(pad("—", d.cols.pr))
-	} else {
-		prRendered = lipgloss.NewStyle().Foreground(prColor(si.info)).Render(pad(displayPR(si.info), d.cols.pr))
-	}
-
-	outputVal := displayLastOutput(si.info)
-	outputRendered := dim.Render(pad(outputVal, d.cols.output))
-
 	sep := dim.Render("  ")
 
 	selPrefix := "  "
@@ -623,9 +577,25 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 		selPrefix = "> "
 	}
 
-	line := fmt.Sprintf("%s%s%s%s%s %s%s%s%s%s%s%s%s%s%s%s%s",
-		selPrefix, numberLabel, starredMark, currentMark, styledIndicator,
-		treePrefixRendered, name, sep, statusRendered, sep, summaryRendered, sep, gitRendered, sep, prRendered, sep, outputRendered)
+	// Render each TUI column from the shared registry so the CLI table and the
+	// picker stay in sync. Every trailing column contributes "  <cell>".
+	var b strings.Builder
+
+	b.WriteString(selPrefix)
+	b.WriteString(numberLabel)
+	b.WriteString(starredMark)
+	b.WriteString(currentMark)
+	b.WriteString(styledIndicator)
+	b.WriteString(" ")
+	b.WriteString(treePrefixRendered)
+	b.WriteString(name)
+
+	for _, c := range tuiColumns() {
+		b.WriteString(sep)
+		b.WriteString(c.TUIStyle(si.info).Render(pad(c.TUIValue(si.info), d.cols.col(c.Key))))
+	}
+
+	line := b.String()
 
 	if selected {
 		line = lipgloss.NewStyle().Bold(true).Render(line)
@@ -2044,25 +2014,31 @@ func (m overlayModel) View() tea.View {
 
 	headerPrefix := "         "
 	nameColWidth := m.cols.treeIndent + m.cols.name
-	headerLine := fmt.Sprintf("%s%s  %s  %s  %s  %s  %s",
-		headerPrefix,
-		pad("Session", nameColWidth),
-		pad("Status", m.cols.status),
-		pad("Summary", m.cols.summary),
-		pad("Git", m.cols.git),
-		pad("PR", m.cols.pr),
-		"Output")
+
+	// Build the header and separator rows from the shared column registry so
+	// they always match the cells rendered per row. The Session/name column is
+	// special (tree indentation), so it is prepended here; the trailing header
+	// is padded to its width except for the last column, which flows freely.
+	headerCells := []string{pad("Session", nameColWidth)}
+	sepCells := []string{strings.Repeat("─", nameColWidth)}
+
+	tuiCols := tuiColumns()
+	for i, c := range tuiCols {
+		w := m.cols.col(c.Key)
+		if i == len(tuiCols)-1 {
+			headerCells = append(headerCells, c.Header)
+		} else {
+			headerCells = append(headerCells, pad(c.Header, w))
+		}
+
+		sepCells = append(sepCells, strings.Repeat("─", w))
+	}
+
+	headerLine := headerPrefix + strings.Join(headerCells, "  ")
 	panelContent.WriteString(dim.Render(headerLine))
 	panelContent.WriteString("\n")
 
-	sepLine := fmt.Sprintf("%s%s  %s  %s  %s  %s  %s",
-		headerPrefix,
-		strings.Repeat("─", nameColWidth),
-		strings.Repeat("─", m.cols.status),
-		strings.Repeat("─", m.cols.summary),
-		strings.Repeat("─", m.cols.git),
-		strings.Repeat("─", m.cols.pr),
-		strings.Repeat("─", m.cols.output))
+	sepLine := headerPrefix + strings.Join(sepCells, "  ")
 	panelContent.WriteString(dim.Render(sepLine))
 	panelContent.WriteString("\n")
 
