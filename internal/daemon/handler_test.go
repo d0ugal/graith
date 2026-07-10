@@ -2761,14 +2761,46 @@ func TestCoverApprovalRespondRejectsAgent(t *testing.T) {
 	h.expectError(t, "not permitted for agent sessions")
 }
 
-func TestCoverApprovalRespondInvalidPayload(t *testing.T) {
-	h := newTestHarness(t)
+// TestInvalidPayloads exercises the per-case DecodePayload branch for every
+// control message that reports a specific "invalid <type>" error. Each row
+// sends a wrong-shape (but syntactically valid) payload as the local human so
+// it reaches the DecodePayload branch rather than an earlier auth short-circuit.
+func TestInvalidPayloads(t *testing.T) {
+	cases := []struct {
+		msgType string
+		wantErr string
+	}{
+		{"approval_respond", "invalid approval_respond"},
+		{"approval_request", "invalid approval_request"},
+		{"set_status", "invalid set_status message"},
+		{"status", "invalid status message"},
+		{"status_report", "invalid status_report"},
+		{"star", "invalid star message"},
+		{"unstar", "invalid unstar message"},
+		{"interrupt", "invalid interrupt message"},
+		{"restart", "invalid restart message"},
+		{"msg_conversation", "invalid msg_conversation message"},
+		{"fork", "invalid fork message"},
+		{"migrate", "invalid migrate message"},
+		{"mcp_connect", "invalid mcp_connect"},
+		{"scenario_start", "invalid scenario_start message"},
+		{"scenario_status", "invalid scenario_status message"},
+		{"scenario_stop", "invalid scenario_stop message"},
+		{"scenario_delete", "invalid scenario_delete message"},
+		{"scenario_resume", "invalid scenario_resume message"},
+		{"scenario_add", "invalid scenario_add message"},
+		{"scenario_task_done", "invalid scenario_task_done message"},
+	}
 
-	// Sent as the local human (no token) so it reaches the DecodePayload branch;
-	// an agent token would short-circuit at the authenticated check first.
-	h.sendWrongShapePayload(t, "approval_respond")
+	for _, tc := range cases {
+		t.Run(tc.msgType, func(t *testing.T) {
+			h := newTestHarness(t)
 
-	h.expectError(t, "invalid approval_respond")
+			h.sendWrongShapePayload(t, tc.msgType)
+
+			h.expectError(t, tc.wantErr)
+		})
+	}
 }
 
 func TestCoverApprovalRespondNotFound(t *testing.T) {
@@ -2782,23 +2814,7 @@ func TestCoverApprovalRespondNotFound(t *testing.T) {
 	h.expectError(t, "not found")
 }
 
-func TestCoverApprovalRequestInvalidPayload(t *testing.T) {
-	h := newTestHarness(t)
-
-	h.sendWrongShapePayload(t, "approval_request")
-
-	h.expectError(t, "invalid approval_request")
-}
-
 // --- set_status -----------------------------------------------------------
-
-func TestCoverSetStatusInvalidPayload(t *testing.T) {
-	h := newTestHarness(t)
-
-	h.sendWrongShapePayload(t, "set_status")
-
-	h.expectError(t, "invalid set_status message")
-}
 
 func TestCoverSetStatusSetAndClear(t *testing.T) {
 	h := newTestHarness(t)
@@ -2876,14 +2892,6 @@ func TestCoverSetStatusForcedToOwnSession(t *testing.T) {
 
 // --- status (session status query) ---------------------------------------
 
-func TestCoverStatusInvalidPayload(t *testing.T) {
-	h := newTestHarness(t)
-
-	h.sendWrongShapePayload(t, "status")
-
-	h.expectError(t, "invalid status message")
-}
-
 func TestCoverStatusNotFound(t *testing.T) {
 	h := newTestHarness(t)
 
@@ -2922,14 +2930,6 @@ func TestCoverStatusResponse(t *testing.T) {
 }
 
 // --- status_report --------------------------------------------------------
-
-func TestCoverStatusReportInvalidPayload(t *testing.T) {
-	h := newTestHarness(t)
-
-	h.sendWrongShapePayload(t, "status_report")
-
-	h.expectError(t, "invalid status_report")
-}
 
 func TestCoverStatusReport(t *testing.T) {
 	h := newTestHarness(t)
@@ -3013,31 +3013,7 @@ func TestCoverUnstarNotFound(t *testing.T) {
 	h.expectError(t, "not found")
 }
 
-func TestCoverStarInvalidPayload(t *testing.T) {
-	h := newTestHarness(t)
-
-	h.sendWrongShapePayload(t, "star")
-
-	h.expectError(t, "invalid star message")
-}
-
-func TestCoverUnstarInvalidPayload(t *testing.T) {
-	h := newTestHarness(t)
-
-	h.sendWrongShapePayload(t, "unstar")
-
-	h.expectError(t, "invalid unstar message")
-}
-
 // --- interrupt ------------------------------------------------------------
-
-func TestCoverInterruptInvalidPayload(t *testing.T) {
-	h := newTestHarness(t)
-
-	h.sendWrongShapePayload(t, "interrupt")
-
-	h.expectError(t, "invalid interrupt message")
-}
 
 func TestCoverInterruptNotFound(t *testing.T) {
 	h := newTestHarness(t)
@@ -3048,14 +3024,6 @@ func TestCoverInterruptNotFound(t *testing.T) {
 }
 
 // --- restart --------------------------------------------------------------
-
-func TestCoverRestartInvalidPayload(t *testing.T) {
-	h := newTestHarness(t)
-
-	h.sendWrongShapePayload(t, "restart")
-
-	h.expectError(t, "invalid restart message")
-}
 
 func TestCoverRestartNotFound(t *testing.T) {
 	h := newTestHarness(t)
@@ -3074,14 +3042,6 @@ func TestCoverRestartWithChildrenNotFound(t *testing.T) {
 }
 
 // --- msg_conversation -----------------------------------------------------
-
-func TestCoverMsgConversationInvalidPayload(t *testing.T) {
-	h := newTestHarness(t)
-
-	h.sendWrongShapePayload(t, "msg_conversation")
-
-	h.expectError(t, "invalid msg_conversation message")
-}
 
 func TestCoverMsgConversation(t *testing.T) {
 	h := newTestHarness(t)
@@ -3130,22 +3090,6 @@ func TestCoverMsgConversationOversizedLimit(t *testing.T) {
 
 // --- fork / migrate payload validation ------------------------------------
 
-func TestCoverForkInvalidPayload(t *testing.T) {
-	h := newTestHarness(t)
-
-	h.sendWrongShapePayload(t, "fork")
-
-	h.expectError(t, "invalid fork message")
-}
-
-func TestCoverMigrateInvalidPayload(t *testing.T) {
-	h := newTestHarness(t)
-
-	h.sendWrongShapePayload(t, "migrate")
-
-	h.expectError(t, "invalid migrate message")
-}
-
 // --- reload ---------------------------------------------------------------
 
 func TestCoverReloadLocalHuman(t *testing.T) {
@@ -3172,14 +3116,6 @@ func TestCoverReloadRejectsAgent(t *testing.T) {
 
 // --- mcp_connect guards ---------------------------------------------------
 
-func TestCoverMCPConnectInvalidPayload(t *testing.T) {
-	h := newTestHarness(t)
-
-	h.sendWrongShapePayload(t, "mcp_connect")
-
-	h.expectError(t, "invalid mcp_connect")
-}
-
 func TestCoverMCPConnectNoManager(t *testing.T) {
 	h := newTestHarness(t)
 
@@ -3200,28 +3136,12 @@ func TestCoverScenarioStartRequiresAuth(t *testing.T) {
 	h.expectError(t, "requires authentication")
 }
 
-func TestCoverScenarioStartInvalidPayload(t *testing.T) {
-	h := newTestHarness(t)
-
-	h.sendWrongShapePayload(t, "scenario_start")
-
-	h.expectError(t, "invalid scenario_start message")
-}
-
 func TestCoverScenarioStatusNotFound(t *testing.T) {
 	h := newTestHarness(t)
 
 	h.sendControl(t, "scenario_status", protocol.ScenarioStatusMsg{Name: "haar-strath"})
 
 	h.expectError(t, "not found")
-}
-
-func TestCoverScenarioStatusInvalidPayload(t *testing.T) {
-	h := newTestHarness(t)
-
-	h.sendWrongShapePayload(t, "scenario_status")
-
-	h.expectError(t, "invalid scenario_status message")
 }
 
 func TestCoverScenarioList(t *testing.T) {
@@ -3250,14 +3170,6 @@ func TestCoverScenarioStopNotFound(t *testing.T) {
 	h.expectError(t, "not found")
 }
 
-func TestCoverScenarioStopInvalidPayload(t *testing.T) {
-	h := newTestHarness(t)
-
-	h.sendWrongShapePayload(t, "scenario_stop")
-
-	h.expectError(t, "invalid scenario_stop message")
-}
-
 func TestCoverScenarioDeleteNotFound(t *testing.T) {
 	h := newTestHarness(t)
 
@@ -3266,28 +3178,12 @@ func TestCoverScenarioDeleteNotFound(t *testing.T) {
 	h.expectError(t, "not found")
 }
 
-func TestCoverScenarioDeleteInvalidPayload(t *testing.T) {
-	h := newTestHarness(t)
-
-	h.sendWrongShapePayload(t, "scenario_delete")
-
-	h.expectError(t, "invalid scenario_delete message")
-}
-
 func TestCoverScenarioResumeNotFound(t *testing.T) {
 	h := newTestHarness(t)
 
 	h.sendControl(t, "scenario_resume", protocol.ScenarioResumeMsg{Name: "haar-strath"})
 
 	h.expectError(t, "not found")
-}
-
-func TestCoverScenarioResumeInvalidPayload(t *testing.T) {
-	h := newTestHarness(t)
-
-	h.sendWrongShapePayload(t, "scenario_resume")
-
-	h.expectError(t, "invalid scenario_resume message")
 }
 
 func TestCoverScenarioAddIncompleteSession(t *testing.T) {
@@ -3304,14 +3200,6 @@ func TestCoverScenarioAddIncompleteSession(t *testing.T) {
 	h.expectError(t, "repo is required")
 }
 
-func TestCoverScenarioAddInvalidPayload(t *testing.T) {
-	h := newTestHarness(t)
-
-	h.sendWrongShapePayload(t, "scenario_add")
-
-	h.expectError(t, "invalid scenario_add message")
-}
-
 func TestCoverScenarioTaskDoneRequiresAuth(t *testing.T) {
 	h := newTestHarness(t)
 
@@ -3320,14 +3208,6 @@ func TestCoverScenarioTaskDoneRequiresAuth(t *testing.T) {
 	h.sendControl(t, "scenario_task_done", protocol.ScenarioTaskDoneMsg{Name: "strath"})
 
 	h.expectError(t, "authenticated session")
-}
-
-func TestCoverScenarioTaskDoneInvalidPayload(t *testing.T) {
-	h := newTestHarness(t)
-
-	h.sendWrongShapePayload(t, "scenario_task_done")
-
-	h.expectError(t, "invalid scenario_task_done message")
 }
 
 // --- session lifecycle with children -------------------------------------
