@@ -79,6 +79,18 @@ func assertErrContains(t *testing.T, err error, want string) {
 	}
 }
 
+// waitExit blocks until the PTY session's process has exited (its Done channel
+// closes) or fails the test after a timeout.
+func waitExit(t *testing.T, sess *grpty.Session) {
+	t.Helper()
+
+	select {
+	case <-sess.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for session to exit")
+	}
+}
+
 func TestGenerateID(t *testing.T) {
 	t.Run("length", func(t *testing.T) {
 		id := generateID()
@@ -2172,11 +2184,7 @@ func TestWatchSessionStaleAfterReplace(t *testing.T) {
 	newSess := newTestPTYSession(t, "sleep", "100")
 
 	// Wait for old process to exit so Done() is closed.
-	select {
-	case <-oldSess.Done():
-	case <-time.After(5 * time.Second):
-		t.Fatal("timeout waiting for old session to exit")
-	}
+	waitExit(t, oldSess)
 
 	// Replace session in the map before calling watchSession,
 	// simulating a Resume that happened while the old process was dying.
@@ -2206,11 +2214,7 @@ func TestWatchSessionCurrentUpdatesState(t *testing.T) {
 	sess := newTestPTYSession(t, "true")
 
 	// Wait for exit so Done() is closed.
-	select {
-	case <-sess.Done():
-	case <-time.After(5 * time.Second):
-		t.Fatal("timeout waiting for session to exit")
-	}
+	waitExit(t, sess)
 
 	sm.sessions[id] = sess
 
@@ -2246,11 +2250,7 @@ func TestWatchSessionClosesPTYHandles(t *testing.T) {
 
 	sess := newTestPTYSession(t, "true")
 
-	select {
-	case <-sess.Done():
-	case <-time.After(5 * time.Second):
-		t.Fatal("timeout waiting for session to exit")
-	}
+	waitExit(t, sess)
 
 	sm.sessions[id] = sess
 
@@ -2274,11 +2274,7 @@ func TestWatchSessionStaleClosesPTYHandles(t *testing.T) {
 	oldSess := newTestPTYSession(t, "true")
 	newSess := newTestPTYSession(t, "sleep", "100")
 
-	select {
-	case <-oldSess.Done():
-	case <-time.After(5 * time.Second):
-		t.Fatal("timeout waiting for old session to exit")
-	}
+	waitExit(t, oldSess)
 
 	// Simulate Resume replacing the PTY while the old process was exiting.
 	sm.sessions[id] = newSess
@@ -2307,11 +2303,7 @@ func TestWatchSessionDeletedSkipsPublish(t *testing.T) {
 
 	sess := newTestPTYSession(t, "true")
 
-	select {
-	case <-sess.Done():
-	case <-time.After(5 * time.Second):
-		t.Fatal("timeout waiting for session to exit")
-	}
+	waitExit(t, sess)
 
 	// Put the PTY in the sessions map (so the stale check passes)
 	// but do NOT put an entry in state.Sessions — simulating Delete
@@ -2397,11 +2389,7 @@ func TestResumeResetsIdleSince(t *testing.T) {
 	}
 
 	if ptySess != nil {
-		select {
-		case <-ptySess.Done():
-		case <-time.After(5 * time.Second):
-			t.Fatal("timeout waiting for session to exit")
-		}
+		waitExit(t, ptySess)
 
 		ptySess.Close()
 		sm.mu.Lock()
@@ -4207,11 +4195,7 @@ func TestWatchSessionWritesLifecycleSummary(t *testing.T) {
 	}
 
 	sess := newTestPTYSession(t, "true")
-	select {
-	case <-sess.Done():
-	case <-time.After(5 * time.Second):
-		t.Fatal("timeout waiting for session to exit")
-	}
+	waitExit(t, sess)
 
 	sm.sessions[id] = sess
 	sm.watchSession(id, sess)
@@ -4241,11 +4225,7 @@ func TestWatchSessionSkipsWhenStopAllAlreadyWrote(t *testing.T) {
 	}
 
 	sess := newTestPTYSession(t, "true")
-	select {
-	case <-sess.Done():
-	case <-time.After(5 * time.Second):
-		t.Fatal("timeout waiting for session to exit")
-	}
+	waitExit(t, sess)
 
 	sm.sessions[id] = sess
 	sm.watchSession(id, sess)
