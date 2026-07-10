@@ -135,28 +135,51 @@ func findOrphanWorktrees(repos []os.DirEntry, worktreesDir string, known map[str
 				}
 
 				sessDir := filepath.Join(hashDir, sess.Name())
-				o := GCOrphan{Type: GCOrphanWorktree, Path: sessDir, ID: sess.Name()}
-
-				if git.IsInsideGitRepo(sessDir) {
-					o.IsGitWorktree = true
-
-					// Fail closed: if the dirty state can't be determined (corrupt
-					// index, broken gitlink, transient git error), treat it as dirty
-					// so --force never deletes a worktree whose WIP we can't rule out.
-					dirty, err := gcHasUncommittedChanges(sessDir)
-					if err != nil || dirty {
-						o.HasDirtyFiles = true
-					}
-
-					o.dirtyUndetermined = err != nil
-				}
-
-				orphans = append(orphans, o)
+				orphans = append(orphans, classifyWorktreeOrphan(sessDir, sess.Name()))
 			}
 		}
 	}
 
 	return orphans
+}
+
+// classifyWorktreeOrphan decides whether an orphaned worktree directory is safe
+// to remove. It fails closed on any uncertainty: a directory is only removable
+// if it is affirmatively NOT a git repo, or is a git repo git can prove clean.
+//
+// Two fail-open traps are guarded here:
+//   - git.IsInsideGitRepo runs `git rev-parse` and collapses every error to
+//     false, so a worktree with damaged/unreadable git metadata would look like
+//     a plain directory. We therefore also stat the `.git` marker directly: a
+//     dir that has one but fails the rev-parse probe is a broken worktree, not a
+//     plain dir, and its WIP can't be ruled out — mark it undetermined (skip).
+//   - HasUncommittedChanges can itself error after detection succeeds; treat
+//     that as dirty too.
+func classifyWorktreeOrphan(sessDir, id string) GCOrphan {
+	o := GCOrphan{Type: GCOrphanWorktree, Path: sessDir, ID: id}
+
+	if git.IsInsideGitRepo(sessDir) {
+		o.IsGitWorktree = true
+
+		dirty, err := gcHasUncommittedChanges(sessDir)
+		if err != nil || dirty {
+			o.HasDirtyFiles = true
+		}
+
+		o.dirtyUndetermined = err != nil
+
+		return o
+	}
+
+	// Not a working git repo per rev-parse — but if a .git marker is present the
+	// worktree exists with broken metadata; we can't prove it clean, so preserve.
+	if _, err := os.Stat(filepath.Join(sessDir, ".git")); err == nil {
+		o.IsGitWorktree = true
+		o.HasDirtyFiles = true
+		o.dirtyUndetermined = true
+	}
+
+	return o
 }
 
 // RunGC finds orphaned directories and, when force is true, removes those that

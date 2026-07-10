@@ -208,6 +208,53 @@ func TestRunGCSkipsUndeterminableWorktree(t *testing.T) {
 	}
 }
 
+// TestRunGCSkipsBrokenGitWorktree covers the fail-open trap in repository
+// DETECTION (not just the dirty check): a worktree with a .git marker whose
+// rev-parse probe fails looks like a plain directory to git.IsInsideGitRepo,
+// but must still be preserved — its WIP can't be ruled out.
+func TestRunGCSkipsBrokenGitWorktree(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	sm := newTestSessionManager(t)
+	dataDir := sm.paths.DataDir
+
+	orphanWT := worktreeDir(dataDir, "croft", "/Code/croft", "brokengit")
+	if err := os.MkdirAll(orphanWT, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	// A .git gitlink pointing nowhere: `git rev-parse` fails (so IsInsideGitRepo
+	// returns false), but the marker proves this is a damaged worktree.
+	if err := os.WriteFile(filepath.Join(orphanWT, ".git"), []byte("gitdir: /nonexistent/scunner\n"), 0o600); err != nil {
+		t.Fatalf("write broken gitlink: %v", err)
+	}
+
+	old := time.Now().Add(-gcOrphanMinAge - time.Minute)
+	if err := os.Chtimes(orphanWT, old, old); err != nil {
+		t.Fatalf("chtimes: %v", err)
+	}
+
+	orphans := sm.RunGC(true, time.Now())
+	if len(orphans) != 1 {
+		t.Fatalf("found %d orphans, want 1", len(orphans))
+	}
+
+	o := orphans[0]
+	if !o.dirtyUndetermined {
+		t.Error("broken git worktree not flagged dirtyUndetermined")
+	}
+
+	if o.Removed || !o.Skipped {
+		t.Errorf("broken git worktree should be skipped, not removed: %+v", o)
+	}
+
+	if _, err := os.Stat(orphanWT); err != nil {
+		t.Errorf("broken git worktree deleted despite skip: %v", err)
+	}
+}
+
 func TestRunGCSkipsDirtyWorktree(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")

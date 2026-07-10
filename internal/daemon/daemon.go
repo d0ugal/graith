@@ -3163,20 +3163,29 @@ func (sm *SessionManager) Delete(id string) error {
 		sm.log.Error("failed to write delete tombstone; aborting delete", "id", id, "err", err)
 		sm.mu.Lock()
 		if s, ok := sm.state.Sessions[id]; ok {
-			if prevStatus == StatusRunning {
-				s.Status = StatusStopped
-			} else {
-				s.Status = prevStatus
+			s.Status = prevStatus
+			s.StatusChangedAt = time.Now()
+
+			// Restore manager ownership removed above: nothing has been killed or
+			// torn down on this path, so the session must return fully intact
+			// (still tracked, process still reachable) rather than a live agent
+			// orphaned from sm.sessions and shown as stopped.
+			if hasPTY {
+				sm.sessions[id] = ptySess
 			}
 
-			s.StatusChangedAt = time.Now()
+			if hasClient {
+				sm.attachedClients[id] = ac
+			}
+
 			_ = sm.saveState()
 		}
 		sm.mu.Unlock()
 
-		if hasClient {
-			ac.kick()
-		}
+		// writeTombstone can fail after the temp file was renamed into place (a
+		// dir-fsync error), leaving a marker on disk. Remove it so a later startup
+		// doesn't resume a delete we just reported as aborted.
+		sm.removeTombstone(id)
 
 		return fmt.Errorf("delete aborted: could not write recovery tombstone: %w", err)
 	}
@@ -3339,6 +3348,7 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 
 	type snapshot struct {
 		id           string
+		name         string
 		agent        string
 		repoPath     string
 		worktreePath string
@@ -3391,6 +3401,7 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 
 		s := snapshot{
 			id:           did,
+			name:         sess.Name,
 			agent:        sess.Agent,
 			repoPath:     sess.RepoPath,
 			worktreePath: sess.WorktreePath,
@@ -3513,6 +3524,7 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 
 			ls := snapshot{
 				id:           sid,
+				name:         sess.Name,
 				agent:        sess.Agent,
 				repoPath:     sess.RepoPath,
 				worktreePath: sess.WorktreePath,
@@ -3600,7 +3612,7 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 		// worktree with no way to resume the delete.
 		if err := sm.writeTombstone(tombstone{
 			teardownSpec: spec,
-			Name:         s.id,
+			Name:         s.name,
 			PID:          s.pid,
 			PIDStartTime: s.pidStartTime,
 			CreatedAt:    time.Now(),
