@@ -364,6 +364,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 
 			case "list":
 				var lm protocol.ListMsg
+
 				_ = protocol.DecodePayload(msg, &lm) // empty/legacy payload → live sessions
 
 				sessions := sm.List()

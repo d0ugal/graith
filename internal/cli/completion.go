@@ -122,6 +122,7 @@ func completeSessionOrDeletedNames(_ *cobra.Command, args []string, _ string) ([
 	defer c.Close()
 
 	names := make([]string, 0)
+
 	for _, deleted := range []bool{false, true} {
 		_ = c.SendControl("list", protocol.ListMsg{Deleted: deleted})
 

@@ -2748,6 +2748,7 @@ func (sm *SessionManager) SoftDeleteWithChildren(rootID string, excludeRoot bool
 
 			late = append(late, sid)
 		}
+
 		sm.mu.RUnlock()
 
 		if len(late) == 0 {
@@ -2937,6 +2938,7 @@ func (sm *SessionManager) purgeExpired(now time.Time) {
 			expired = append(expired, candidate{id: id, expiresAt: expiry})
 		}
 	}
+
 	sm.mu.RUnlock()
 
 	for _, c := range expired {
@@ -2952,6 +2954,7 @@ func (sm *SessionManager) purgeExpired(now time.Time) {
 			expiry, _ := sm.fallbackExpiryLocked(s, now)
 			stillExpired = expiry.Equal(c.expiresAt) && shouldPurge(s, now, expiry)
 		}
+
 		sm.mu.RUnlock()
 
 		if !stillExpired {
@@ -2988,6 +2991,7 @@ func (sm *SessionManager) reconcileSoftDeletedOrphans() {
 			orphans = append(orphans, orphan{id: id, pid: s.PID, startTime: s.PIDStartTime})
 		}
 	}
+
 	sm.mu.RUnlock()
 
 	for _, o := range orphans {
@@ -4058,10 +4062,12 @@ func (sm *SessionManager) StopWithChildren(rootID string, excludeRoot bool) ([]s
 // picking up the current agent and sandbox configuration.
 func (sm *SessionManager) Restart(id string, rows, cols uint16) (SessionState, error) {
 	sm.mu.RLock()
+
 	softDeleted := false
 	if s, ok := sm.state.Sessions[id]; ok {
 		softDeleted = s.IsSoftDeleted()
 	}
+
 	sm.mu.RUnlock()
 
 	if softDeleted {
@@ -4417,6 +4423,7 @@ func (sm *SessionManager) fleetSummary() protocol.FleetSummary {
 	defer sm.mu.RUnlock()
 
 	var f protocol.FleetSummary
+
 	for _, s := range sm.state.Sessions {
 		if s.IsSoftDeleted() {
 			continue
