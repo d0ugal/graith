@@ -16,7 +16,6 @@ import (
 	"github.com/d0ugal/graith/internal/client"
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/daemon"
-	"github.com/d0ugal/graith/internal/git"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/d0ugal/graith/internal/sandbox"
 	"github.com/d0ugal/graith/internal/version"
@@ -900,75 +899,76 @@ func (dc *doctorContext) checkStorage(diag *protocol.DiagnosticsMsg) {
 		}
 	}
 
-	// Check for orphaned worktree directories
-	orphanedWorktrees := dc.findOrphanedWorktrees(sessionIDs)
-	if len(orphanedWorktrees) > 0 {
+	// Check for orphaned worktree/scratch directories. Detection and removal are
+	// owned by the daemon (internal/daemon/gc.go), which snapshots the live
+	// session set under its lock — race-free against a concurrent create/delete.
+	// A dry run lists them; --autofix issues a second call that actually removes.
+	orphans, err := daemonGCFetch(false)
+	if err != nil {
+		dc.warnf("storage", "could not check orphaned worktree dirs: %v", err)
+	} else if len(orphans) > 0 {
+		sizes := make([]int64, len(orphans))
+
 		var totalSize int64
 
 		dirtyCount := 0
 
-		for _, wt := range orphanedWorktrees {
-			totalSize += wt.size
-			if wt.hasDirtyFiles {
+		for i, o := range orphans {
+			sizes[i] = orphanDirSize(o.Path)
+			totalSize += sizes[i]
+
+			if o.HasDirtyFiles {
 				dirtyCount++
 			}
 		}
 
 		if doctorDisk {
-			dc.warnf("storage", "%d orphaned worktree dir(s) (%s)", len(orphanedWorktrees), formatBytes(totalSize))
+			dc.warnf("storage", "%d orphaned worktree dir(s) (%s)", len(orphans), formatBytes(totalSize))
 		} else {
-			dc.warnf("storage", "%d orphaned worktree dir(s)", len(orphanedWorktrees))
+			dc.warnf("storage", "%d orphaned worktree dir(s)", len(orphans))
 			dc.suggestDisk = true
 		}
 
-		for _, wt := range orphanedWorktrees {
+		for i, o := range orphans {
 			extra := ""
-			if wt.hasDirtyFiles {
+			if o.HasDirtyFiles {
 				extra = " [has uncommitted changes]"
 			}
 
 			if doctorDisk {
-				dc.hintf("%s (%s)%s", wt.path, formatBytes(wt.size), extra)
+				dc.hintf("%s (%s)%s", o.Path, formatBytes(sizes[i]), extra)
 			} else {
-				dc.hintf("%s%s", wt.path, extra)
+				dc.hintf("%s%s", o.Path, extra)
 			}
 		}
 
 		if doctorAutofix {
-			removed := 0
-			skipped := 0
+			done, err := daemonGCFetch(true)
+			if err != nil {
+				dc.hintf("Cleanup failed: %v", err)
+			} else {
+				removed := 0
+				skipped := 0
 
-			for _, wt := range orphanedWorktrees {
-				if wt.hasDirtyFiles {
-					skipped++
-					continue
-				}
-
-				var repoRoot string
-				if wt.isGitWorktree {
-					repoRoot, _ = git.RepoRootFromWorktree(wt.path)
-				}
-
-				if os.RemoveAll(wt.path) == nil {
-					removed++
-
-					if repoRoot != "" {
-						_ = git.PruneWorktrees(repoRoot)
+				for _, o := range done {
+					switch {
+					case o.Removed:
+						removed++
+					case o.Skipped:
+						skipped++
 					}
 				}
-			}
 
-			dc.hintf("Removed %d orphaned worktree dir(s)", removed)
+				dc.hintf("Removed %d orphaned worktree dir(s)", removed)
 
-			if skipped > 0 {
-				dc.hintf("Skipped %d with uncommitted changes (inspect manually)", skipped)
+				if skipped > 0 {
+					dc.hintf("Skipped %d with uncommitted changes (inspect manually)", skipped)
+				}
 			}
+		} else if dirtyCount > 0 {
+			dc.hintf("Use --autofix to remove (%d with uncommitted changes will be skipped)", dirtyCount)
 		} else {
-			if dirtyCount > 0 {
-				dc.hintf("Use --autofix to remove (%d with uncommitted changes will be skipped)", dirtyCount)
-			} else {
-				dc.hintf("Use --autofix to remove")
-			}
+			dc.hintf("Use --autofix to remove")
 		}
 	}
 }
@@ -1047,110 +1047,45 @@ func (dc *doctorContext) checkTmpDir() {
 	}
 }
 
-type orphanedWorktree struct {
-	path          string
-	size          int64
-	isGitWorktree bool
-	hasDirtyFiles bool
-}
+// daemonGCFetch asks the daemon to garbage-collect orphaned worktree/scratch
+// directories. With force=false it is a dry-run listing; with force=true the
+// daemon removes what it safely can and each returned entry carries the
+// outcome. It is a package var so tests can stub the daemon round-trip.
+//
+// It uses ConnectFast, which dials the existing socket and does NOT auto-start
+// the daemon. checkStorage only runs when the daemon is already reachable (the
+// RunE gates it on a successful probe), so auto-start is never needed here — and
+// must be avoided: under `go test`, os.Executable() is the test binary, so an
+// auto-start would re-exec the test binary as a "daemon", re-running the whole
+// suite recursively (a fork bomb).
+var daemonGCFetch = func(force bool) ([]protocol.GCOrphanInfo, error) {
+	c, err := client.ConnectFast(paths)
+	if err != nil {
+		return nil, err
+	}
+	defer c.Close()
 
-const orphanMinAge = 5 * time.Minute
+	_ = c.SendControl("gc", protocol.GCMsg{Force: force})
 
-func (dc *doctorContext) findOrphanedWorktrees(sessionIDs map[string]bool) []orphanedWorktree {
-	var orphaned []orphanedWorktree
-
-	now := time.Now()
-
-	// Worktrees live at <DataDir>/worktrees/<repoName>/<repoHash>/<sessionID>
-	worktreesDir := filepath.Join(paths.DataDir, "worktrees")
-
-	repos, err := os.ReadDir(worktreesDir)
-	if err == nil {
-		orphaned = append(orphaned, findOrphanedInWorktrees(repos, worktreesDir, sessionIDs, now)...)
+	resp, err := c.ReadControlResponse()
+	if err != nil {
+		return nil, err
 	}
 
-	// Scratch dirs live at <DataDir>/scratch/<sessionID>
-	scratchDir := filepath.Join(paths.DataDir, "scratch")
+	if resp.Type == "error" {
+		var e protocol.ErrorMsg
 
-	scratches, err := os.ReadDir(scratchDir)
-	if err == nil {
-		for _, s := range scratches {
-			if !s.IsDir() {
-				continue
-			}
+		_ = protocol.DecodePayload(resp, &e)
 
-			if sessionIDs[s.Name()] {
-				continue
-			}
-
-			sDir := filepath.Join(scratchDir, s.Name())
-			if info, err := s.Info(); err == nil && now.Sub(info.ModTime()) < orphanMinAge {
-				continue
-			}
-
-			orphaned = append(orphaned, orphanedWorktree{path: sDir, size: orphanDirSize(sDir)})
-		}
+		return nil, fmt.Errorf("%s", e.Message)
 	}
 
-	return orphaned
-}
-
-func findOrphanedInWorktrees(repos []os.DirEntry, worktreesDir string, sessionIDs map[string]bool, now time.Time) []orphanedWorktree {
-	var orphaned []orphanedWorktree
-
-	for _, repo := range repos {
-		if !repo.IsDir() {
-			continue
-		}
-
-		repoDir := filepath.Join(worktreesDir, repo.Name())
-
-		hashes, err := os.ReadDir(repoDir)
-		if err != nil {
-			continue
-		}
-
-		for _, hash := range hashes {
-			if !hash.IsDir() {
-				continue
-			}
-
-			hashDir := filepath.Join(repoDir, hash.Name())
-
-			sessions, err := os.ReadDir(hashDir)
-			if err != nil {
-				continue
-			}
-
-			for _, sess := range sessions {
-				if !sess.IsDir() {
-					continue
-				}
-
-				if sessionIDs[sess.Name()] {
-					continue
-				}
-
-				sessDir := filepath.Join(hashDir, sess.Name())
-				if info, err := sess.Info(); err == nil && now.Sub(info.ModTime()) < orphanMinAge {
-					continue
-				}
-
-				wt := orphanedWorktree{path: sessDir, size: orphanDirSize(sessDir)}
-
-				if git.IsInsideGitRepo(sessDir) {
-					wt.isGitWorktree = true
-					if dirty, err := git.HasUncommittedChanges(sessDir); err == nil && dirty {
-						wt.hasDirtyFiles = true
-					}
-				}
-
-				orphaned = append(orphaned, wt)
-			}
-		}
+	var result protocol.GCResultMsg
+	if err := protocol.DecodePayload(resp, &result); err != nil {
+		return nil, err
 	}
 
-	return orphaned
+	return result.Orphans, nil
 }
 
 func formatBytes(b int64) string {

@@ -487,21 +487,27 @@ gr wait fix-overlay --contains "tests passed" --timeout 5m
 gr wait fix-overlay --status stopped
 gr wait fix-overlay --idle --timeout 10m
 
-# Check health
+# Check health (and, with --autofix, clean up orphans)
 gr doctor
-
-# Garbage-collect orphaned worktrees/scratch dirs (dry run by default)
-gr gc
-gr gc --force
+gr doctor --autofix
 ```
 
-`gr gc` reaps worktree and scratch directories under the data dir that have no
-matching session — typically left by a daemon crash mid-delete. It is a dry run
-by default; `--force` actually removes them. Worktrees with uncommitted changes
-are never removed. The daemon also runs this cleanup automatically on startup
-(alongside tombstone-based resume of interrupted deletes), so `gr gc` is mainly
-for reclaiming disk on demand. State writes (`state.json`, the document store)
-use a crash-safe temp→fsync→rename pattern via `internal/atomicfile`.
+## Crash-safety (issue #614)
+
+- **Atomic state writes** — `state.json` and the document store (`gr store
+  put/append`) are written via `internal/atomicfile` (temp → fsync → rename →
+  dir fsync), so a crash mid-write can't corrupt them.
+- **Delete tombstones** — before a session teardown starts, the daemon writes a
+  durable tombstone; on startup any leftover tombstone means a delete was
+  interrupted, and the daemon finishes it (reaps the orphan process, removes the
+  worktree, drops the session). If the tombstone can't be written the delete
+  fails closed rather than tearing down with no recovery marker.
+- **Orphan GC** — worktree/scratch directories with no matching session are
+  detected and removed by the daemon (`internal/daemon/gc.go`), surfaced through
+  `gr doctor` (listed) and `gr doctor --autofix` (removed). Worktrees with
+  uncommitted — or undeterminable — git state are never removed. The GC logic
+  lives on the daemon (authoritative live-session set under lock); `gr doctor`
+  calls it over the control protocol rather than scanning client-side.
 
 `gr wait` exits 0 as soon as the condition is met and non-zero on timeout, so
 orchestrators can gate on a session's output or state instead of polling
