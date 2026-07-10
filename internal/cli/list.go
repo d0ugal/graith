@@ -217,25 +217,35 @@ type sessionColumn struct {
 	value  func(s protocol.SessionInfo, now time.Time, colorOn bool) string
 }
 
-// trailingColumns returns every column after NAME in display order. The compact
-// default hides the wide columns (model, branch, attached); --wide shows all.
+// trailingColumns returns every column after NAME in display order, built from
+// the shared client.SessionColumns registry so `gr ls` and the TUI picker stay
+// in sync. Only registry columns flagged ShowCLI appear here; the compact
+// default hides the wide columns (model, branch, attached) and --wide shows
+// all. Cells with a CLIColor are colourised via colorize (which brackets the
+// escapes for tabwriter alignment).
 func trailingColumns() []sessionColumn {
-	return []sessionColumn{
-		{"REPO", false, func(s protocol.SessionInfo, _ time.Time, _ bool) string { return s.RepoName }},
-		{"AGENT", false, func(s protocol.SessionInfo, _ time.Time, _ bool) string { return s.Agent }},
-		{"STATUS", false, func(s protocol.SessionInfo, _ time.Time, colorOn bool) string {
-			return colorize(s.Status, client.StatusColor(s.Status), colorOn)
-		}},
-		{"ACTIVITY", false, func(s protocol.SessionInfo, _ time.Time, colorOn bool) string {
-			return formatAgentStatus(s, colorOn)
-		}},
-		{"MODEL", true, func(s protocol.SessionInfo, _ time.Time, _ bool) string { return formatModel(s) }},
-		{"BRANCH", true, func(s protocol.SessionInfo, _ time.Time, _ bool) string { return formatBranch(s) }},
-		{"GIT", false, func(s protocol.SessionInfo, _ time.Time, _ bool) string { return formatGitStatus(s) }},
-		{"PR", false, func(s protocol.SessionInfo, _ time.Time, _ bool) string { return formatPR(s) }},
-		{"AGE", false, func(s protocol.SessionInfo, now time.Time, _ bool) string { return formatAge(s, now) }},
-		{"ATTACHED", true, func(s protocol.SessionInfo, now time.Time, _ bool) string { return formatAttached(s, now) }},
+	var cols []sessionColumn
+
+	for _, c := range client.SessionColumns() {
+		if !c.ShowCLI {
+			continue
+		}
+
+		cols = append(cols, sessionColumn{
+			header: strings.ToUpper(c.Header),
+			wide:   c.Wide,
+			value: func(s protocol.SessionInfo, now time.Time, colorOn bool) string {
+				v := c.CLIValue(s, now)
+				if c.CLIColor != nil {
+					v = colorize(v, c.CLIColor(s), colorOn)
+				}
+
+				return v
+			},
+		})
 	}
+
+	return cols
 }
 
 // visibleColumns filters trailingColumns by the wide flag.
@@ -411,105 +421,6 @@ func descendantsOf(sessions []protocol.SessionInfo, parentID string) []protocol.
 	collect(parentID)
 
 	return result
-}
-
-func formatAgentStatus(s protocol.SessionInfo, colorOn bool) string {
-	agentStatus := s.AgentStatus
-	if s.Status != "running" {
-		return ""
-	}
-
-	if agentStatus == "" {
-		return ""
-	}
-
-	text := agentStatus
-	if agentStatus == "approval" {
-		text = "⚠ approval"
-	} else if agentStatus == "active" && s.ToolName != "" {
-		text = fmt.Sprintf("active (%s)", s.ToolName)
-	}
-
-	return colorize(text, client.AgentStatusColor(agentStatus), colorOn)
-}
-
-func formatModel(s protocol.SessionInfo) string {
-	return s.Model
-}
-
-func formatBranch(s protocol.SessionInfo) string {
-	branch := s.Branch
-	if branch != "" {
-		parts := strings.SplitN(branch, "/", 3)
-		if len(parts) == 3 {
-			branch = parts[2]
-		}
-	} else if s.InPlace {
-		branch = "(in-place)"
-	}
-
-	return branch
-}
-
-func formatPR(s protocol.SessionInfo) string {
-	if s.PullRequest == nil {
-		return ""
-	}
-
-	pr := s.PullRequest
-
-	out := fmt.Sprintf("#%d %s", pr.Number, pr.State)
-	if pr.Conflicting {
-		out += " conflict"
-	}
-
-	if s.CI != nil && s.CI.State != "" {
-		switch s.CI.State {
-		case "passing":
-			out += " CI:ok"
-		case "failing":
-			out += " CI:fail"
-		case "pending":
-			out += " CI:…"
-		}
-	}
-
-	return out
-}
-
-func formatGitStatus(s protocol.SessionInfo) string {
-	gitStatus := ""
-	if s.Dirty {
-		gitStatus = "dirty"
-	}
-
-	if s.UnpushedCount > 0 {
-		if gitStatus != "" {
-			gitStatus += ", "
-		}
-
-		gitStatus += fmt.Sprintf("%d ahead", s.UnpushedCount)
-	}
-
-	return gitStatus
-}
-
-func formatAge(s protocol.SessionInfo, now time.Time) string {
-	if t, err := time.Parse(time.RFC3339, s.CreatedAt); err == nil {
-		return client.ShortDuration(now.Sub(t))
-	}
-
-	return ""
-}
-
-func formatAttached(s protocol.SessionInfo, now time.Time) string {
-	if s.LastAttachedAt != "" {
-		if t, err := time.Parse(time.RFC3339, s.LastAttachedAt); err == nil {
-			return client.ShortDuration(now.Sub(t)) + " ago"
-		}
-	}
-
-	return ""
 }
 
 // registerListCmd registers this command on rootCmd. Called from registerCommands.
