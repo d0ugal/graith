@@ -89,6 +89,18 @@ func asOverlay(m tea.Model) overlayModel {
 	return m.(overlayModel)
 }
 
+// sizedModel builds an overlay model with the common nil callbacks and the
+// standard 120x40 dimensions used across most overlay tests.
+func sizedModel(t *testing.T, sessions []protocol.SessionInfo, current string) overlayModel {
+	t.Helper()
+
+	m := newOverlayModel(sessions, current, nil, nil, nil, nil)
+	m.width = 120
+	m.height = 40
+
+	return m
+}
+
 // --- buildGroupedItems ---
 
 func TestBuildGroupedItems_GroupsByRepo(t *testing.T) {
@@ -461,9 +473,7 @@ func TestOverlay_SpaceTogglesCollapse(t *testing.T) {
 		{ID: "child1", Name: "bairn-1", ParentID: "root", RepoName: "repo", Status: "running", CreatedAt: now},
 		{ID: "child2", Name: "bairn-2", ParentID: "root", RepoName: "repo", Status: "running", CreatedAt: now},
 	}
-	m := newOverlayModel(sessions, "", nil, nil, nil, nil)
-	m.width = 120
-	m.height = 40
+	m := sizedModel(t, sessions, "")
 
 	// Cursor should be on root (index 1, after header)
 	item := m.list.SelectedItem().(sessionItem)
@@ -501,9 +511,7 @@ func TestOverlay_SpaceOnLeafDoesNothing(t *testing.T) {
 	sessions := []protocol.SessionInfo{
 		{ID: "leaf", Name: "neep", RepoName: "repo", Status: "running", CreatedAt: now},
 	}
-	m := newOverlayModel(sessions, "", nil, nil, nil, nil)
-	m.width = 120
-	m.height = 40
+	m := sizedModel(t, sessions, "")
 
 	itemsBefore := len(m.list.Items())
 
@@ -524,9 +532,7 @@ func TestOverlay_CollapseAllExpandAll(t *testing.T) {
 		{ID: "c2", Name: "bairn-two", ParentID: "root2", RepoName: "repo", Status: "running", CreatedAt: now},
 		{ID: "leaf", Name: "neep", RepoName: "repo", Status: "running", CreatedAt: now},
 	}
-	m := newOverlayModel(sessions, "", nil, nil, nil, nil)
-	m.width = 120
-	m.height = 40
+	m := sizedModel(t, sessions, "")
 
 	// Press C to collapse all parents
 	updated, _ := sendKey(m, "C")
@@ -1083,9 +1089,7 @@ func TestUpdate_RefreshSessions_PreservesCursor(t *testing.T) {
 
 func TestUpdate_RefreshSessions_NilPreservesState(t *testing.T) {
 	sessions := overlayTestSessions()
-	m := newOverlayModel(sessions, "", nil, nil, nil, nil)
-	m.width = 120
-	m.height = 40
+	m := sizedModel(t, sessions, "")
 
 	updated, _ := m.Update(refreshSessionsMsg{sessions: nil})
 	om := asOverlay(updated)
@@ -1097,9 +1101,7 @@ func TestUpdate_RefreshSessions_NilPreservesState(t *testing.T) {
 
 func TestUpdate_RefreshSessions_UpdatesStatus(t *testing.T) {
 	sessions := overlayTestSessions()
-	m := newOverlayModel(sessions, "", nil, nil, nil, nil)
-	m.width = 120
-	m.height = 40
+	m := sizedModel(t, sessions, "")
 
 	// Change s1's status to stopped
 	changed := make([]protocol.SessionInfo, len(sessions))
@@ -1124,9 +1126,7 @@ func TestUpdate_RefreshSessions_UpdatesStatus(t *testing.T) {
 
 func TestUpdate_RefreshSkippedDuringConfirmDelete(t *testing.T) {
 	sessions := overlayTestSessions()
-	m := newOverlayModel(sessions, "", nil, nil, nil, nil)
-	m.width = 120
-	m.height = 40
+	m := sizedModel(t, sessions, "")
 	m.state = stateConfirmDelete
 
 	updated, _ := m.Update(refreshTickMsg{})
@@ -1143,9 +1143,7 @@ func TestUpdate_RefreshSkippedDuringConfirmDelete(t *testing.T) {
 
 func TestUpdate_RefreshSkippedDuringConfirmRestart(t *testing.T) {
 	sessions := overlayTestSessions()
-	m := newOverlayModel(sessions, "", nil, nil, nil, nil)
-	m.width = 120
-	m.height = 40
+	m := sizedModel(t, sessions, "")
 	m.state = stateConfirmRestart
 
 	updated, _ := m.Update(refreshTickMsg{})
@@ -1158,9 +1156,7 @@ func TestUpdate_RefreshSkippedDuringConfirmRestart(t *testing.T) {
 
 func TestUpdate_RefreshSessions_SelectedGone_FallsBack(t *testing.T) {
 	sessions := overlayTestSessions()
-	m := newOverlayModel(sessions, "", nil, nil, nil, nil)
-	m.width = 120
-	m.height = 40
+	m := sizedModel(t, sessions, "")
 
 	// Navigate to s2
 	for {
@@ -1199,10 +1195,8 @@ func TestUpdate_RestartAll_Staggered(t *testing.T) {
 		return nil
 	}
 
-	m := newOverlayModel(sessions, "", nil, nil, nil, nil)
+	m := sizedModel(t, sessions, "")
 	m.restartSession = restartFn
-	m.width = 120
-	m.height = 40
 
 	// Press R to open the restart menu, then choose "all"
 	updated, _ := sendKey(m, "R")
@@ -1247,10 +1241,8 @@ func TestUpdate_RestartAll_ShowsProgress(t *testing.T) {
 	sessions := overlayTestSessions()
 	restartFn := func(id string) error { return nil }
 
-	m := newOverlayModel(sessions, "", nil, nil, nil, nil)
+	m := sizedModel(t, sessions, "")
 	m.restartSession = restartFn
-	m.width = 120
-	m.height = 40
 
 	// Open restart menu and choose "all"
 	updated, _ := sendKey(m, "R")
@@ -1285,10 +1277,8 @@ func TestUpdate_RestartAll_HandlesErrors(t *testing.T) {
 		return nil
 	}
 
-	m := newOverlayModel(sessions, "", nil, nil, nil, nil)
+	m := sizedModel(t, sessions, "")
 	m.restartSession = restartFn
-	m.width = 120
-	m.height = 40
 
 	// Open restart menu and choose "all"
 	updated, _ := sendKey(m, "R")
@@ -1324,10 +1314,8 @@ func TestUpdate_RestartAll_EscCancelsRemaining(t *testing.T) {
 		return nil
 	}
 
-	m := newOverlayModel(sessions, "", nil, nil, nil, nil)
+	m := sizedModel(t, sessions, "")
 	m.restartSession = restartFn
-	m.width = 120
-	m.height = 40
 
 	// Start restart-all
 	updated, _ := sendKey(m, "R")
@@ -1387,10 +1375,8 @@ func TestUpdate_Stop_Confirm(t *testing.T) {
 		return nil
 	}
 
-	m := newOverlayModel(sessions, "", nil, nil, nil, nil)
+	m := sizedModel(t, sessions, "")
 	m.stopSession = stopFn
-	m.width = 120
-	m.height = 40
 	selected := m.list.SelectedItem().(sessionItem)
 
 	// Press S to confirm-stop, then y
@@ -1431,10 +1417,8 @@ func TestUpdate_Stop_Cancel(t *testing.T) {
 		return nil
 	}
 
-	m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil, nil)
+	m := sizedModel(t, overlayTestSessions(), "")
 	m.stopSession = stopFn
-	m.width = 120
-	m.height = 40
 
 	updated, _ := sendKey(m, "S")
 	updated, _ = sendKey(updated, "n")
@@ -1461,10 +1445,8 @@ func TestUpdate_RestartMenu_Stopped(t *testing.T) {
 		return nil
 	}
 
-	m := newOverlayModel(sessions, "", nil, nil, nil, nil)
+	m := sizedModel(t, sessions, "")
 	m.restartSession = restartFn
-	m.width = 120
-	m.height = 40
 
 	updated, _ := sendKey(m, "R")
 
@@ -1505,10 +1487,8 @@ func TestUpdate_RestartMenu_Outdated(t *testing.T) {
 		return nil
 	}
 
-	m := newOverlayModel(sessions, "", nil, nil, nil, nil)
+	m := sizedModel(t, sessions, "")
 	m.restartSession = restartFn
-	m.width = 120
-	m.height = 40
 
 	updated, _ := sendKey(m, "R")
 	updated, cmd := sendKey(updated, "o")
@@ -1539,10 +1519,8 @@ func TestUpdate_RestartMenu_Cancel(t *testing.T) {
 		return nil
 	}
 
-	m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil, nil)
+	m := sizedModel(t, overlayTestSessions(), "")
 	m.restartSession = restartFn
-	m.width = 120
-	m.height = 40
 
 	updated, _ := sendKey(m, "R")
 	updated, _ = sendSpecialKey(updated, tea.KeyEscape)
@@ -1567,10 +1545,8 @@ func TestUpdate_RestartMenu_All(t *testing.T) {
 		return nil
 	}
 
-	m := newOverlayModel(sessions, "", nil, nil, nil, nil)
+	m := sizedModel(t, sessions, "")
 	m.restartSession = restartFn
-	m.width = 120
-	m.height = 40
 
 	updated, _ := sendKey(m, "R")
 	updated, cmd := sendKey(updated, "a")
@@ -1602,10 +1578,8 @@ func TestUpdate_RestartMenu_EmptyQueue(t *testing.T) {
 		return nil
 	}
 
-	m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil, nil)
+	m := sizedModel(t, overlayTestSessions(), "")
 	m.restartSession = restartFn
-	m.width = 120
-	m.height = 40
 
 	updated, _ := sendKey(m, "R")
 	updated, cmd := sendKey(updated, "o")
@@ -1640,10 +1614,8 @@ func TestUpdate_RestartMenu_RespectsFilter(t *testing.T) {
 		return nil
 	}
 
-	m := newOverlayModel(sessions, "", nil, nil, nil, nil)
+	m := sizedModel(t, sessions, "")
 	m.restartSession = restartFn
-	m.width = 120
-	m.height = 40
 	// Filter to just the "braw-fix" session (s1).
 	m.filterInput.SetValue("braw")
 	m.rebuildForView()
@@ -1676,10 +1648,8 @@ func TestUpdate_Stop_Error(t *testing.T) {
 		return fmt.Errorf("stop failed")
 	}
 
-	m := newOverlayModel(sessions, "", nil, nil, nil, nil)
+	m := sizedModel(t, sessions, "")
 	m.stopSession = stopFn
-	m.width = 120
-	m.height = 40
 	selected := m.list.SelectedItem().(sessionItem)
 	origStatus := selected.info.Status
 
@@ -1708,10 +1678,8 @@ func TestUpdate_Stop_Current_SetsFlag(t *testing.T) {
 	stopFn := func(string) error { return nil }
 
 	// Attach context: current session is s1, and it is selected by default.
-	m := newOverlayModel(sessions, "s1", nil, nil, nil, nil)
+	m := sizedModel(t, sessions, "s1")
 	m.stopSession = stopFn
-	m.width = 120
-	m.height = 40
 
 	updated, _ := sendKey(m, "S")
 	updated, cmd := sendKey(updated, "y")
@@ -1736,9 +1704,7 @@ func TestUpdate_Stop_Current_SetsFlag(t *testing.T) {
 func TestUpdate_Stop_OnGroupHeader_NoOp(t *testing.T) {
 	// In the All view the first item is a group header; pressing S on it
 	// should not enter the confirm-stop state.
-	m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil, nil)
-	m.width = 120
-	m.height = 40
+	m := sizedModel(t, overlayTestSessions(), "")
 	m.list.Select(0) // group header
 
 	if _, ok := m.list.SelectedItem().(groupHeader); !ok {
@@ -1758,11 +1724,9 @@ func TestUpdate_Star_NotStop(t *testing.T) {
 	sessions := overlayTestSessions()
 	stopCalled := false
 	starCalled := false
-	m := newOverlayModel(sessions, "", nil, nil, nil, nil)
+	m := sizedModel(t, sessions, "")
 	m.stopSession = func(string) error { stopCalled = true; return nil }
 	m.toggleStar = func(string, bool) error { starCalled = true; return nil }
-	m.width = 120
-	m.height = 40
 	m.selectSessionByID("s1")
 
 	updated, cmd := sendKey(m, "s")
@@ -4406,9 +4370,7 @@ func TestBuildScenarioGroupedItems_FallsBackToScenarioID(t *testing.T) {
 // --- scenario view via the model ---
 
 func TestOverlay_ScenarioViewGroups(t *testing.T) {
-	m := newOverlayModel(scenarioSessions(), "", nil, nil, nil, nil)
-	m.width = 120
-	m.height = 40
+	m := sizedModel(t, scenarioSessions(), "")
 	m.view = viewScenario
 	m.rebuildForView()
 
@@ -4460,8 +4422,7 @@ func TestRefreshSessionsCmd_ProducesMsg(t *testing.T) {
 func TestRefreshTickMsg_TriggersRefresh(t *testing.T) {
 	sessions := overlayTestSessions()
 	fetched := false
-	m := newOverlayModel(sessions, "", nil, nil, nil, nil)
-	m.width, m.height = 120, 40
+	m := sizedModel(t, sessions, "")
 	m.refreshSessions = func() []protocol.SessionInfo {
 		fetched = true
 		return sessions
@@ -4505,8 +4466,7 @@ func TestSelectSessionByID_WalksToVisibleAncestor(t *testing.T) {
 }
 
 func TestSelectSessionByID_UnknownFallsToFirstSession(t *testing.T) {
-	m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil, nil)
-	m.width, m.height = 120, 40
+	m := sizedModel(t, overlayTestSessions(), "")
 
 	m.selectSessionByID("does-not-exist")
 	// Should not panic; selection should be a session item (skips header).
@@ -4602,12 +4562,11 @@ func TestUpdate_RestartSingleConfirm(t *testing.T) {
 
 	var restarted string
 
-	m := newOverlayModel(sessions, "", nil, nil, nil, nil)
+	m := sizedModel(t, sessions, "")
 	m.restartSession = func(id string) error {
 		restarted = id
 		return nil
 	}
-	m.width, m.height = 120, 40
 
 	selected := m.list.SelectedItem().(sessionItem)
 
@@ -4674,8 +4633,7 @@ func TestUpdate_DeleteResultLastSessionQuits(t *testing.T) {
 }
 
 func TestUpdate_DeleteResultErrorReturnsToList(t *testing.T) {
-	m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil, nil)
-	m.width, m.height = 120, 40
+	m := sizedModel(t, overlayTestSessions(), "")
 	m.state = stateConfirmDelete
 
 	updated, _ := m.Update(deleteResultMsg{sessionID: "s1", err: errFake})
@@ -4709,8 +4667,7 @@ func TestUpdate_StarResultUpdatesSession(t *testing.T) {
 // --- View: starred and scenario empty states ---
 
 func TestView_StarredEmptyState(t *testing.T) {
-	m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil, nil)
-	m.width, m.height = 120, 40
+	m := sizedModel(t, overlayTestSessions(), "")
 	m.view = viewStarred
 	m.rebuildForView()
 
@@ -4724,8 +4681,7 @@ func TestView_ActiveEmptyState(t *testing.T) {
 	sessions := []protocol.SessionInfo{
 		{ID: "s1", Name: "neep", RepoName: "repo", Status: "stopped", CreatedAt: time.Now().Format(time.RFC3339)},
 	}
-	m := newOverlayModel(sessions, "", nil, nil, nil, nil)
-	m.width, m.height = 120, 40
+	m := sizedModel(t, sessions, "")
 	m.view = viewActive
 	m.rebuildForView()
 
@@ -4736,8 +4692,7 @@ func TestView_ActiveEmptyState(t *testing.T) {
 }
 
 func TestView_ProfileShownInTitle(t *testing.T) {
-	m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil, nil)
-	m.width, m.height = 120, 40
+	m := sizedModel(t, overlayTestSessions(), "")
 	m.profile = "bothy"
 
 	out := m.View().Content
@@ -4748,9 +4703,8 @@ func TestView_ProfileShownInTitle(t *testing.T) {
 
 func TestView_RestartMenuShowsCounts(t *testing.T) {
 	// overlayTestSessions(): 3 sessions, one stopped (s2), none config-stale.
-	m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil, nil)
+	m := sizedModel(t, overlayTestSessions(), "")
 	m.restartSession = func(string) error { return nil }
-	m.width, m.height = 120, 40
 	m.state = stateRestartMenu
 
 	out := m.View().Content
