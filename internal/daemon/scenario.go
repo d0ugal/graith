@@ -125,6 +125,12 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 		}
 
 		for _, existing := range sm.state.Sessions {
+			// Soft-deleted sessions are hidden and scheduled for purge, so a
+			// scenario may reuse their name — trash must not block a new scenario.
+			if existing.IsSoftDeleted() {
+				continue
+			}
+
 			if existing.Name == s.Name {
 				sm.mu.Unlock()
 				return nil, fmt.Errorf("session name %q already exists", s.Name)
@@ -741,14 +747,25 @@ func (sm *SessionManager) ResumeScenario(name string, rows, cols uint16) ([]stri
 		sm.mu.RLock()
 		sess := sm.state.Sessions[id]
 
-		var status SessionStatus
+		var (
+			status      SessionStatus
+			softDeleted bool
+		)
+
 		if sess != nil {
 			status = sess.Status
+			softDeleted = sess.IsSoftDeleted()
 		}
 
 		sm.mu.RUnlock()
 
 		if sess == nil {
+			continue
+		}
+
+		// Skip soft-deleted members: they are hidden and scheduled for purge, so
+		// a bulk scenario resume must not relaunch them.
+		if softDeleted {
 			continue
 		}
 
@@ -854,6 +871,11 @@ func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSess
 	}
 
 	for _, existing := range sm.state.Sessions {
+		// Soft-deleted sessions don't block name reuse (see scenario start).
+		if existing.IsSoftDeleted() {
+			continue
+		}
+
 		if existing.Name == input.Name {
 			sm.mu.Unlock()
 			return nil, fmt.Errorf("session name %q already exists", input.Name)

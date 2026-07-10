@@ -3689,6 +3689,8 @@ func TestCoverDeleteWithChildren(t *testing.T) {
 	h := newTestHarness(t)
 	h.addPTYSession(t, "brae-root", "brae-parent")
 
+	// With the default retention, `gr delete --children` soft-deletes: the
+	// subtree is hidden but preserved, not removed from state.
 	h.sendControl(t, "delete", protocol.DeleteMsg{SessionID: "brae-root", Children: true})
 
 	env := h.readControlMsg(t)
@@ -3696,10 +3698,7 @@ func TestCoverDeleteWithChildren(t *testing.T) {
 		t.Fatalf("expected deleted, got %q", env.Type)
 	}
 
-	var resp struct {
-		SessionID string   `json:"session_id"`
-		Deleted   []string `json:"deleted"`
-	}
+	var resp protocol.DeleteResultMsg
 
 	_ = protocol.DecodePayload(env, &resp)
 
@@ -3707,13 +3706,30 @@ func TestCoverDeleteWithChildren(t *testing.T) {
 		t.Errorf("session_id = %q, want brae-root", resp.SessionID)
 	}
 
-	if !containsString(resp.Deleted, "brae-root") {
-		t.Errorf("deleted list %v does not include brae-root", resp.Deleted)
+	if !resp.Soft {
+		t.Error("expected soft delete with default retention")
 	}
 
-	// The session must actually be gone from state.
-	if _, ok := h.sm.Get("brae-root"); ok {
-		t.Error("expected brae-root to be removed from state after delete")
+	found := false
+
+	for _, a := range resp.Affected {
+		if a.SessionID == "brae-root" {
+			found = true
+		}
+	}
+
+	if !found {
+		t.Errorf("affected list %v does not include brae-root", resp.Affected)
+	}
+
+	// The session must still be present in state, marked soft-deleted.
+	s, ok := h.sm.Get("brae-root")
+	if !ok {
+		t.Fatal("expected brae-root to remain in state after soft delete")
+	}
+
+	if !s.IsSoftDeleted() {
+		t.Error("expected brae-root to be marked soft-deleted")
 	}
 }
 

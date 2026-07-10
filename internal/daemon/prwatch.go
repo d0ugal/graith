@@ -149,6 +149,12 @@ func (sm *SessionManager) prWatchTargets() []prWatchTarget {
 			continue
 		}
 
+		// Soft-deleted sessions are hidden and scheduled for purge — don't poll
+		// their PRs.
+		if s.IsSoftDeleted() {
+			continue
+		}
+
 		if s.RepoPath == "" || s.SharedWorktree || s.InPlace {
 			continue
 		}

@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -283,6 +284,94 @@ func TestMigrateV12ToV13PairedDevices(t *testing.T) {
 	// The pre-existing session must survive the migration untouched.
 	if s := loaded.Sessions["braw1"]; s == nil || s.Name != "bide-session" {
 		t.Error("braw1 session lost or altered during v12→v13 migration")
+	}
+}
+
+func TestMigrateV13ToV14SoftDelete(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+
+	// A v13 state with no deleted_at/expires_at fields.
+	data := []byte(`{"version":13,"sessions":{
+		"braw1":{"id":"braw1","name":"bide-session","status":"stopped"}
+	}}`)
+	if err := writeFileAtomic(path, data); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := LoadState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if loaded.Version != CurrentStateVersion {
+		t.Errorf("version = %d, want %d after migration", loaded.Version, CurrentStateVersion)
+	}
+
+	s := loaded.Sessions["braw1"]
+	if s == nil {
+		t.Fatal("braw1 session lost during v13→v14 migration")
+	}
+
+	if s.DeletedAt != nil || s.ExpiresAt != nil {
+		t.Error("v13 session should migrate to v14 with nil DeletedAt/ExpiresAt (live)")
+	}
+
+	if s.IsSoftDeleted() {
+		t.Error("migrated session should not be soft-deleted")
+	}
+}
+
+func TestLoadStateV14RoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+
+	// A v14 state with an explicit soft-deleted session.
+	data := []byte(`{"version":14,"sessions":{
+		"dreich1":{"id":"dreich1","name":"dreich","status":"stopped",
+			"deleted_at":"2026-07-10T06:53:00Z","expires_at":"2026-07-11T06:53:00Z"}
+	}}`)
+	if err := writeFileAtomic(path, data); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := LoadState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s := loaded.Sessions["dreich1"]
+	if s == nil || !s.IsSoftDeleted() {
+		t.Fatal("soft-deleted session did not round-trip through v14 load")
+	}
+
+	if s.ExpiresAt == nil {
+		t.Error("ExpiresAt lost on v14 load")
+	}
+}
+
+// TestLoadStateNewerVersionRejected is the downgrade fail-closed guard: a state
+// file newer than this binary must be rejected with a typed StateVersionError,
+// not silently discarded (which would orphan running agents).
+func TestLoadStateNewerVersionRejected(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+
+	data := []byte(`{"version":9999,"sessions":{}}`)
+	if err := writeFileAtomic(path, data); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := LoadState(path)
+	if err == nil {
+		t.Fatal("expected an error loading a newer-than-binary state file")
+	}
+
+	var ve *StateVersionError
+	if !errors.As(err, &ve) {
+		t.Fatalf("error %v is not a *StateVersionError", err)
+	}
+
+	if ve.FileVersion != 9999 || ve.BinaryVersion != CurrentStateVersion {
+		t.Errorf("StateVersionError = {file:%d binary:%d}, want {9999 %d}",
+			ve.FileVersion, ve.BinaryVersion, CurrentStateVersion)
 	}
 }
 

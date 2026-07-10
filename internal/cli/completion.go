@@ -74,6 +74,75 @@ func completeSessionNames(cmd *cobra.Command, args []string, toComplete string) 
 	return names, cobra.ShellCompDirectiveNoFileComp
 }
 
+// completeDeletedSessionNames completes against soft-deleted sessions, used by
+// `gr restore`.
+func completeDeletedSessionNames(_ *cobra.Command, args []string, _ string) ([]string, cobra.ShellCompDirective) {
+	if len(args) > 0 {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+
+	c, err := client.Connect(cfg, paths, cfgFile)
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	defer c.Close()
+
+	_ = c.SendControl("list", protocol.ListMsg{Deleted: true})
+
+	resp, err := c.ReadControlResponse()
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+
+	var list protocol.SessionListMsg
+	if err := protocol.DecodePayload(resp, &list); err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+
+	names := make([]string, 0, len(list.Sessions)*2)
+	for _, s := range list.Sessions {
+		names = append(names, s.Name, s.ID)
+	}
+
+	return names, cobra.ShellCompDirectiveNoFileComp
+}
+
+// completeSessionOrDeletedNames completes against both live and soft-deleted
+// sessions, used by `gr delete` so `--purge <TAB>` also offers deleted names
+// (a soft-deleted session can be purged by name).
+func completeSessionOrDeletedNames(_ *cobra.Command, args []string, _ string) ([]string, cobra.ShellCompDirective) {
+	if len(args) > 0 {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+
+	c, err := client.Connect(cfg, paths, cfgFile)
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	defer c.Close()
+
+	names := make([]string, 0)
+	for _, deleted := range []bool{false, true} {
+		_ = c.SendControl("list", protocol.ListMsg{Deleted: deleted})
+
+		resp, err := c.ReadControlResponse()
+		if err != nil {
+			return names, cobra.ShellCompDirectiveNoFileComp
+		}
+
+		var list protocol.SessionListMsg
+		if err := protocol.DecodePayload(resp, &list); err != nil {
+			return names, cobra.ShellCompDirectiveNoFileComp
+		}
+
+		for _, s := range list.Sessions {
+			names = append(names, s.Name, s.ID)
+		}
+	}
+
+	return names, cobra.ShellCompDirectiveNoFileComp
+}
+
 func completeAgentNames(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
 	if cfg == nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp

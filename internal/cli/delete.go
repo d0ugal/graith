@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/d0ugal/graith/internal/client"
 	"github.com/d0ugal/graith/internal/git"
@@ -16,12 +17,20 @@ import (
 var (
 	deleteBatch    batchFlags
 	deleteChildren bool
+	// deleteYesNoop keeps `gr delete -y` working as an accepted, inert alias
+	// (`--force` is provided by addBatchFlags and is likewise inert here). `gr
+	// delete` is always a recoverable soft delete now, so there is nothing to
+	// force or confirm — kept for backward compatibility with existing scripts.
+	deleteYesNoop bool
 )
 
 var deleteCmd = &cobra.Command{
 	Use:     "delete <name-or-id>",
 	Aliases: []string{"rm"},
-	Short:   "Delete a session by name or ID",
+	Short:   "Soft-delete a session (recoverable with `gr restore`)",
+	Long: "Soft-delete a session: stop its agent and hide it, but keep its worktree, branch, " +
+		"and state for the retention window so `gr restore` can recover it. Use `gr purge` to " +
+		"delete immediately and irrecoverably. With `retention = \"0\"`, delete is a hard delete.",
 	Args: func(cmd *cobra.Command, args []string) error {
 		if deleteChildren && deleteBatch.active() {
 			return fmt.Errorf("--children cannot be combined with batch filters")
@@ -39,8 +48,10 @@ var deleteCmd = &cobra.Command{
 	},
 	ValidArgsFunction: completeSessionNames,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		warnDeleteForceDeprecated(cmd)
+
 		if deleteBatch.active() {
-			return deleteBatchRun(cmd)
+			return deleteBatchRun(cmd, &deleteBatch, false)
 		}
 
 		c, err := client.Connect(cfg, paths, cfgFile)
@@ -49,74 +60,197 @@ var deleteCmd = &cobra.Command{
 		}
 		defer c.Close()
 
-		var (
-			sessionID   string
-			excludeRoot bool
-		)
-
-		if deleteChildren && len(args) == 0 {
-			sessionID = os.Getenv("GRAITH_SESSION_ID")
-			if sessionID == "" {
-				return fmt.Errorf("--children with no session arg requires GRAITH_SESSION_ID to be set")
-			}
-
-			excludeRoot = true
-		} else {
-			session, err := resolveSessionInfo(c, args[0])
-			if err != nil {
-				return err
-			}
-
-			sessionID = session.ID
-
-			if !deleteBatch.force && session.WorktreePath != "" && !session.InPlace {
-				confirmed, err := confirmDelete(session)
-				if err != nil {
-					return err
-				}
-
-				if !confirmed {
-					return nil
-				}
-			}
-		}
-
-		_ = c.SendControl("delete", protocol.DeleteMsg{
-			SessionID:   sessionID,
-			Children:    deleteChildren,
-			ExcludeRoot: excludeRoot,
-		})
-
-		resp, err := c.ReadControlResponse()
+		sessionID, excludeRoot, err := resolveDeleteTarget(c, args, deleteChildren)
 		if err != nil {
 			return err
 		}
 
-		if resp.Type == "error" {
-			var e protocol.ErrorMsg
-
-			_ = protocol.DecodePayload(resp, &e)
-
-			return fmt.Errorf("%s", e.Message)
-		}
-
-		if deleteChildren {
-			var result struct {
-				Deleted []string `json:"deleted"`
-			}
-
-			_ = protocol.DecodePayload(resp, &result)
-			out.Printf("Deleted %d sessions\n", len(result.Deleted))
-		} else {
-			out.Printf("Session deleted\n")
-		}
-
-		return nil
+		// gr delete is always a recoverable soft delete — the daemon rejects it
+		// when soft delete is disabled (retention=0) rather than destroying — so
+		// there is no unsaved-work prompt and Purge is never set.
+		return sendDelete(c, sessionID, deleteChildren, excludeRoot, false)
 	},
 }
 
+// warnDeleteForceDeprecated prints a one-line stderr deprecation notice when the
+// inert --force/-y aliases are passed to `gr delete`. They no longer do anything
+// (delete is always recoverable); the notice points users at `gr purge`.
+func warnDeleteForceDeprecated(cmd *cobra.Command) {
+	if deleteBatch.force || deleteYesNoop {
+		fmt.Fprintln(cmd.ErrOrStderr(),
+			"--force is deprecated: gr delete is now recoverable; use gr purge to remove immediately")
+	}
+}
+
+// resolveDeleteTarget resolves the target session ID (and excludeRoot) for a
+// single delete/purge, honouring `--children` with no positional arg
+// (auto-resolving from GRAITH_SESSION_ID).
+func resolveDeleteTarget(c *client.Client, args []string, children bool) (sessionID string, excludeRoot bool, err error) {
+	if children && len(args) == 0 {
+		sessionID = os.Getenv("GRAITH_SESSION_ID")
+		if sessionID == "" {
+			return "", false, fmt.Errorf("--children with no session arg requires GRAITH_SESSION_ID to be set")
+		}
+
+		return sessionID, true, nil
+	}
+
+	session, err := resolveDeletableSessionInfo(c, args[0])
+	if err != nil {
+		return "", false, err
+	}
+
+	return session.ID, false, nil
+}
+
+// sendDelete sends a delete control message (soft when purge is false, hard when
+// true) and renders the daemon's DeleteResultMsg response.
+func sendDelete(c *client.Client, sessionID string, children, excludeRoot, purge bool) error {
+	_ = c.SendControl("delete", protocol.DeleteMsg{
+		SessionID:   sessionID,
+		Children:    children,
+		ExcludeRoot: excludeRoot,
+		Purge:       purge,
+	})
+
+	resp, err := c.ReadControlResponse()
+	if err != nil {
+		return err
+	}
+
+	if resp.Type == "error" {
+		var e protocol.ErrorMsg
+
+		_ = protocol.DecodePayload(resp, &e)
+
+		return fmt.Errorf("%s", e.Message)
+	}
+
+	var result protocol.DeleteResultMsg
+
+	_ = protocol.DecodePayload(resp, &result)
+
+	if jsonOutput {
+		return out.JSON(result)
+	}
+
+	printDeleteResult(result, children)
+
+	return nil
+}
+
+// printDeleteResult renders the delete outcome: a soft delete shows the
+// recovery deadline and the commands to restore or purge; a hard delete (or
+// --children batch) reports counts.
+func printDeleteResult(r protocol.DeleteResultMsg, children bool) {
+	if children {
+		soft := 0
+
+		for _, c := range r.Affected {
+			if c.Soft {
+				soft++
+			}
+		}
+
+		if soft > 0 {
+			out.Printf("Soft-deleted %d sessions (recover with `gr restore --children`, purged after the retention window)\n", len(r.Affected))
+		} else {
+			out.Printf("Purged %d sessions (permanently)\n", len(r.Affected))
+		}
+
+		return
+	}
+
+	name := r.Name
+	if name == "" {
+		name = r.SessionID
+	}
+
+	// A non-soft result only ever comes from `gr purge` (gr delete is always soft
+	// or an error), so this is the purge success line.
+	if !r.Soft {
+		out.Printf("Purged %s (permanently)\n", name)
+		return
+	}
+
+	if expiry := formatDeleteDeadline(r.ExpiresAt); expiry != "" {
+		out.Printf("Soft-deleted %s. Recoverable until %s.\n", name, expiry)
+	} else {
+		out.Printf("Soft-deleted %s. Recoverable with `gr restore`.\n", name)
+	}
+
+	out.Printf("  gr restore %s   to bring it back\n", name)
+	out.Printf("  gr purge %s     to remove it now\n", name)
+}
+
+// formatDeleteDeadline renders an RFC3339 expiry as "2006-01-02 15:04 (in 23h)"
+// relative to now, or "" if the timestamp is empty/unparseable.
+func formatDeleteDeadline(expiresAt string) string {
+	if expiresAt == "" {
+		return ""
+	}
+
+	t, err := time.Parse(time.RFC3339, expiresAt)
+	if err != nil {
+		return ""
+	}
+
+	remaining := time.Until(t)
+	if remaining <= 0 {
+		return t.Format("2006-01-02 15:04")
+	}
+
+	return fmt.Sprintf("%s (in %s)", t.Format("2006-01-02 15:04"), client.ShortDuration(remaining))
+}
+
+// resolveDeletableSessionInfo finds a session by name or ID among both live and
+// soft-deleted sessions. `gr purge` needs to reach soft-deleted sessions so it
+// can hard-delete one that was already soft-deleted (empty one trash entry). If
+// the name is ambiguous across the combined set (e.g. a live session and a
+// soft-deleted one share a name), it requires an explicit ID.
+func resolveDeletableSessionInfo(c *client.Client, nameOrID string) (*protocol.SessionInfo, error) {
+	live, err := listSessions(c, false)
+	if err != nil {
+		return nil, err
+	}
+
+	deleted, err := listSessions(c, true)
+	if err != nil {
+		return nil, err
+	}
+
+	return resolveByNameOrID(nameOrID, append(live, deleted...))
+}
+
+// resolveDeletedSessionInfo finds a soft-deleted session by name or ID, with the
+// same ambiguity handling. Used by `gr restore`.
+func resolveDeletedSessionInfo(c *client.Client, nameOrID string) (*protocol.SessionInfo, error) {
+	deleted, err := listSessions(c, true)
+	if err != nil {
+		return nil, err
+	}
+
+	return resolveByNameOrID(nameOrID, deleted)
+}
+
 func resolveSessionInfo(c *client.Client, nameOrID string) (*protocol.SessionInfo, error) {
-	_ = c.SendControl("list", struct{}{})
+	return resolveSessionInfoFiltered(c, nameOrID, false)
+}
+
+// resolveSessionInfoFiltered looks up a session by name or ID. When deleted is
+// true it searches the soft-deleted sessions; otherwise the live ones.
+func resolveSessionInfoFiltered(c *client.Client, nameOrID string, deleted bool) (*protocol.SessionInfo, error) {
+	sessions, err := listSessions(c, deleted)
+	if err != nil {
+		return nil, err
+	}
+
+	return resolveByNameOrID(nameOrID, sessions)
+}
+
+// listSessions fetches the session list (live or soft-deleted) from the daemon.
+func listSessions(c *client.Client, deleted bool) ([]protocol.SessionInfo, error) {
+	_ = c.SendControl("list", protocol.ListMsg{Deleted: deleted})
 
 	resp, err := c.ReadControlResponse()
 	if err != nil {
@@ -128,13 +262,41 @@ func resolveSessionInfo(c *client.Client, nameOrID string) (*protocol.SessionInf
 		return nil, err
 	}
 
-	for _, s := range list.Sessions {
-		if s.Name == nameOrID || s.ID == nameOrID {
-			return &s, nil
+	return list.Sessions, nil
+}
+
+// resolveByNameOrID resolves nameOrID against a session list. An exact ID match is
+// unambiguous (IDs are unique) and wins immediately. Otherwise a name may match
+// more than one session (names are not unique — e.g. delete/recreate cycles);
+// in that case the caller must disambiguate with an explicit ID rather than
+// acting on an arbitrary first match.
+func resolveByNameOrID(nameOrID string, sessions []protocol.SessionInfo) (*protocol.SessionInfo, error) {
+	var byName []protocol.SessionInfo
+
+	for i := range sessions {
+		if sessions[i].ID == nameOrID {
+			return &sessions[i], nil
+		}
+
+		if sessions[i].Name == nameOrID {
+			byName = append(byName, sessions[i])
 		}
 	}
 
-	return nil, fmt.Errorf("session %q not found", nameOrID)
+	switch len(byName) {
+	case 0:
+		return nil, fmt.Errorf("session %q not found", nameOrID)
+	case 1:
+		return &byName[0], nil
+	default:
+		ids := make([]string, len(byName))
+		for i, s := range byName {
+			ids[i] = s.ID
+		}
+
+		return nil, fmt.Errorf("%q is ambiguous — matches %d sessions (%s); use an explicit ID",
+			nameOrID, len(byName), strings.Join(ids, ", "))
+	}
 }
 
 type repoStatus struct {
@@ -242,12 +404,11 @@ func confirmDelete(session *protocol.SessionInfo) (bool, error) {
 		return true, nil
 	}
 
-	if out.IsJSON() {
-		return false, fmt.Errorf("session %q has uncommitted changes or unpushed commits; use --force to delete", session.Name)
-	}
-
-	if !term.IsTerminal(int(os.Stdin.Fd())) {
-		return false, fmt.Errorf("session %q has uncommitted changes or unpushed commits; use --force to delete", session.Name)
+	// confirmDelete now guards `gr purge` (the destructive verb). Steer
+	// non-interactive callers toward the recoverable `gr delete` rather than
+	// forcing the irrecoverable purge.
+	if out.IsJSON() || !term.IsTerminal(int(os.Stdin.Fd())) {
+		return false, fmt.Errorf("session %q has uncommitted changes or unpushed commits; use `gr delete` to keep it recoverable, or `gr purge -y` to destroy it now", session.Name)
 	}
 
 	out.Printf("Session %q has unsaved work:\n\n", session.Name)
@@ -284,7 +445,7 @@ func confirmDelete(session *protocol.SessionInfo) (bool, error) {
 		out.Printf("\n")
 	}
 
-	out.Printf("Delete anyway? [y/N] ")
+	out.Printf("Purge anyway? [y/N] ")
 
 	reader := bufio.NewReader(os.Stdin)
 
@@ -302,16 +463,40 @@ func confirmDelete(session *protocol.SessionInfo) (bool, error) {
 	return true, nil
 }
 
-func deleteBatchRun(cmd *cobra.Command) error {
-	return runBatch(cmd, &deleteBatch, "delete", "deleted", "deleting", "delete",
+// deleteBatchRun runs a batch delete (purge=false) or batch purge (purge=true).
+// A soft batch delete never prompts (nothing is lost); a batch purge prompts
+// once for the whole batch unless the caller's --force/-y is set (runBatch reads
+// bf.force for that).
+func deleteBatchRun(cmd *cobra.Command, bf *batchFlags, purge bool) error {
+	verb := "delete"
+	if purge {
+		verb = "purge"
+	}
+
+	effective := bf
+	if !purge {
+		// Soft delete is not destructive, so skip the batch confirmation prompt
+		// regardless of --force.
+		cp := *bf
+		cp.force = true
+		effective = &cp
+	}
+
+	return runBatch(cmd, effective, verb, verb+"d", verb+"ing", verb,
 		func(sessionID string) any {
-			return protocol.DeleteMsg{SessionID: sessionID}
+			return protocol.DeleteMsg{SessionID: sessionID, Purge: purge}
 		}, nil)
 }
 
 // registerDeleteCmd registers this command on rootCmd. Called from registerCommands.
 func registerDeleteCmd() {
 	addBatchFlags(deleteCmd, &deleteBatch)
-	deleteCmd.Flags().BoolVar(&deleteChildren, "children", false, "also delete all descendant sessions")
+	deleteCmd.Flags().BoolVar(&deleteChildren, "children", false, "also soft-delete all descendant sessions")
+	// --force and --yes are accepted but inert: gr delete is always a recoverable
+	// soft delete, so there is nothing to force or confirm. Kept for backward
+	// compatibility with existing `gr delete --force` scripts (now a safety
+	// upgrade — soft instead of destroy).
+	deleteCmd.Flags().BoolVarP(&deleteYesNoop, "yes", "y", false, "deprecated no-op (gr delete is always recoverable)")
+	_ = deleteCmd.Flags().MarkHidden("yes")
 	rootCmd.AddCommand(deleteCmd)
 }
