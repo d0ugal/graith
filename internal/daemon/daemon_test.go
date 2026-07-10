@@ -74,6 +74,24 @@ func assertErrContains(t *testing.T, err error, want string) {
 	}
 }
 
+// assertCreateSharedWorktreeRejected seeds a running source session and asserts
+// that creating a session which shares its worktree is rejected because the
+// sandbox is not enabled.
+func assertCreateSharedWorktreeRejected(t *testing.T, sm *SessionManager) {
+	t.Helper()
+
+	sm.state.Sessions["src1"] = &SessionState{
+		ID:           "src1",
+		Name:         "braw-source",
+		Agent:        "claude",
+		WorktreePath: "/tmp/fake-worktree",
+		Status:       StatusRunning,
+	}
+
+	_, err := sm.Create("canny-reviewer", "claude", "", "", "", "", "", false, "braw-source", false, false, false, false, false, 24, 80)
+	assertErrContains(t, err, "requires sandbox")
+}
+
 // waitExit blocks until the PTY session's process has exited (its Done channel
 // closes) or fails the test after a timeout.
 func waitExit(t *testing.T, sess *grpty.Session) {
@@ -1658,19 +1676,7 @@ func TestStateSaveLoadSharedWorktree(t *testing.T) {
 }
 
 func TestShareWorktreeRequiresSandbox(t *testing.T) {
-	cfg := config.Default()
-	sm := newSMWithConfig(t, cfg)
-
-	sm.state.Sessions["src1"] = &SessionState{
-		ID:           "src1",
-		Name:         "braw-source",
-		Agent:        "claude",
-		WorktreePath: "/tmp/fake-worktree",
-		Status:       StatusRunning,
-	}
-
-	_, err := sm.Create("canny-reviewer", "claude", "", "", "", "", "", false, "braw-source", false, false, false, false, false, 24, 80)
-	assertErrContains(t, err, "requires sandbox")
+	assertCreateSharedWorktreeRejected(t, newSMWithConfig(t, config.Default()))
 }
 
 func TestShareWorktreeRequiresSandboxPerAgent(t *testing.T) {
@@ -1681,18 +1687,7 @@ func TestShareWorktreeRequiresSandboxPerAgent(t *testing.T) {
 	agent.Sandbox = config.SandboxConfig{Disabled: &disabled}
 	cfg.Agents["claude"] = agent
 
-	sm := newSMWithConfig(t, cfg)
-
-	sm.state.Sessions["src1"] = &SessionState{
-		ID:           "src1",
-		Name:         "braw-source",
-		Agent:        "claude",
-		WorktreePath: "/tmp/fake-worktree",
-		Status:       StatusRunning,
-	}
-
-	_, err := sm.Create("canny-reviewer", "claude", "", "", "", "", "", false, "braw-source", false, false, false, false, false, 24, 80)
-	assertErrContains(t, err, "requires sandbox")
+	assertCreateSharedWorktreeRejected(t, newSMWithConfig(t, cfg))
 }
 
 func TestResumeSharedWorktreeWithoutSandboxRejects(t *testing.T) {
