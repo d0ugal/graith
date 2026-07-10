@@ -36,6 +36,35 @@ func newTestSessionManager(t *testing.T) *SessionManager {
 	}, slog.Default())
 }
 
+// gitOut mirrors the package-level gitRun helper but returns the command's
+// combined output (trimmed), for callers that need to inspect it. It keeps the
+// -c commit.gpgsign=false override some git invocations rely on.
+func gitOut(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+
+	full := append([]string{"-c", "commit.gpgsign=false"}, args...)
+
+	cmd := exec.Command("git", full...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+
+	cmd.Env = append(os.Environ(),
+		"GIT_CONFIG_GLOBAL=/dev/null",
+		"GIT_AUTHOR_NAME=test",
+		"GIT_AUTHOR_EMAIL=test@test.com",
+		"GIT_COMMITTER_NAME=test",
+		"GIT_COMMITTER_EMAIL=test@test.com",
+	)
+
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v failed: %v\n%s", args, err, out)
+	}
+
+	return strings.TrimSpace(string(out))
+}
+
 func TestGenerateID(t *testing.T) {
 	t.Run("length", func(t *testing.T) {
 		id := generateID()
@@ -1304,28 +1333,14 @@ func TestDetectAgentStatuses_SharedWorktreeSkipsGit(t *testing.T) {
 	sm := newTestSessionManager(t)
 
 	repoDir := t.TempDir()
-	runGit := func(args ...string) {
-		t.Helper()
-
-		cmd := exec.Command("git", args...)
-		cmd.Dir = repoDir
-
-		cmd.Env = append(os.Environ(),
-			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
-			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
-		)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %s: %v", args, out, err)
-		}
-	}
-	runGit("init", "-b", "main")
+	gitRun(t, repoDir, "init", "-b", "main")
 
 	if err := os.WriteFile(filepath.Join(repoDir, "file.txt"), []byte("original"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	runGit("add", "file.txt")
-	runGit("commit", "-m", "init")
+	gitRun(t, repoDir, "add", "file.txt")
+	gitRun(t, repoDir, "commit", "-m", "init")
 
 	if err := os.WriteFile(filepath.Join(repoDir, "file.txt"), []byte("modified"), 0o600); err != nil {
 		t.Fatal(err)
@@ -2416,21 +2431,8 @@ func TestResumeResetsIdleSince(t *testing.T) {
 func initTempGitRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	run := func(args ...string) {
-		t.Helper()
-
-		cmd := exec.Command("git", args...)
-		cmd.Dir = dir
-
-		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test", "GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test")
-
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
-	}
-	run("init", "-b", "main")
-	run("commit", "--allow-empty", "-m", "init")
+	gitRun(t, dir, "init", "-b", "main")
+	gitRun(t, dir, "commit", "--allow-empty", "-m", "init")
 
 	return dir
 }
@@ -5173,56 +5175,35 @@ func sleeperSM(t *testing.T) *SessionManager {
 func TestFetchRemotesUpdatesTrackingRefs(t *testing.T) {
 	sm := sleeperSM(t)
 
-	runGit := func(dir string, args ...string) string {
-		t.Helper()
-
-		full := append([]string{"-c", "commit.gpgsign=false"}, args...)
-		env := append(os.Environ(),
-			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
-			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
-		)
-
-		cmd := exec.Command("git", full...)
-		cmd.Dir = dir
-		cmd.Env = env
-
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("git %v: %s: %v", args, out, err)
-		}
-
-		return strings.TrimSpace(string(out))
-	}
-
 	worktree := t.TempDir()
-	runGit(worktree, "init", "-b", "main")
+	gitOut(t, worktree, "init", "-b", "main")
 
 	if err := os.WriteFile(filepath.Join(worktree, "file.txt"), []byte("braw"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	runGit(worktree, "add", ".")
-	runGit(worktree, "commit", "-m", "init")
+	gitOut(t, worktree, "add", ".")
+	gitOut(t, worktree, "commit", "-m", "init")
 
 	origin := t.TempDir()
-	runGit(origin, "init", "--bare", "-b", "main")
-	runGit(worktree, "remote", "add", "origin", origin)
-	runGit(worktree, "push", "origin", "main")
-	runGit(worktree, "fetch", "origin")
+	gitOut(t, origin, "init", "--bare", "-b", "main")
+	gitOut(t, worktree, "remote", "add", "origin", origin)
+	gitOut(t, worktree, "push", "origin", "main")
+	gitOut(t, worktree, "fetch", "origin")
 
 	// Advance origin/main from a separate clone.
 	other := t.TempDir()
-	runGit(other, "clone", origin, ".")
+	gitOut(t, other, "clone", origin, ".")
 
 	if err := os.WriteFile(filepath.Join(other, "neep.txt"), []byte("neep"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	runGit(other, "add", ".")
-	runGit(other, "commit", "-m", "bonnie remote commit")
-	runGit(other, "push", "origin", "main")
+	gitOut(t, other, "add", ".")
+	gitOut(t, other, "commit", "-m", "bonnie remote commit")
+	gitOut(t, other, "push", "origin", "main")
 
-	remoteTip := runGit(other, "rev-parse", "HEAD")
+	remoteTip := gitOut(t, other, "rev-parse", "HEAD")
 
 	sm.state.Sessions["glen1"] = &SessionState{
 		ID: "glen1", Name: "glen", Agent: "sleeper",
@@ -5232,7 +5213,7 @@ func TestFetchRemotesUpdatesTrackingRefs(t *testing.T) {
 
 	sm.fetchRemotes(context.Background())
 
-	if after := runGit(worktree, "rev-parse", "origin/main"); after != remoteTip {
+	if after := gitOut(t, worktree, "rev-parse", "origin/main"); after != remoteTip {
 		t.Errorf("origin/main not updated by fetchRemotes: got %s, want %s", after, remoteTip)
 	}
 }
@@ -5244,32 +5225,14 @@ func TestFetchRemotesSkipsNonRunningAndShared(t *testing.T) {
 	sm := sleeperSM(t)
 
 	dir := t.TempDir()
-	runGit := func(args ...string) {
-		t.Helper()
-
-		full := append([]string{"-c", "commit.gpgsign=false"}, args...)
-		env := append(os.Environ(),
-			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
-			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
-		)
-
-		cmd := exec.Command("git", full...)
-		cmd.Dir = dir
-		cmd.Env = env
-
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %s: %v", args, out, err)
-		}
-	}
-
-	runGit("init", "-b", "main")
+	gitRun(t, dir, "init", "-b", "main")
 
 	if err := os.WriteFile(filepath.Join(dir, "file.txt"), []byte("braw"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	runGit("add", ".")
-	runGit("commit", "-m", "init")
+	gitRun(t, dir, "add", ".")
+	gitRun(t, dir, "commit", "-m", "init")
 
 	// Stopped session, shared session, and a running session with no remote —
 	// none should cause fetchRemotes to error out.
@@ -5640,32 +5603,14 @@ func TestDetectAgentStatusesGitBranchesCov2(t *testing.T) {
 	sm := sleeperSM(t)
 
 	repoDir := t.TempDir()
-	runGit := func(args ...string) {
-		t.Helper()
-
-		full := append([]string{"-c", "commit.gpgsign=false"}, args...)
-		env := append(os.Environ(),
-			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
-			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
-		)
-
-		cmd := exec.Command("git", full...)
-		cmd.Dir = repoDir
-		cmd.Env = env
-
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %s: %v", args, out, err)
-		}
-	}
-
-	runGit("init", "-b", "main")
+	gitRun(t, repoDir, "init", "-b", "main")
 
 	if err := os.WriteFile(filepath.Join(repoDir, "file.txt"), []byte("original"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	runGit("add", "file.txt")
-	runGit("commit", "-m", "init")
+	gitRun(t, repoDir, "add", "file.txt")
+	gitRun(t, repoDir, "commit", "-m", "init")
 
 	// Leave an uncommitted modification so HasUncommittedChanges reports dirty.
 	if err := os.WriteFile(filepath.Join(repoDir, "file.txt"), []byte("modified"), 0o600); err != nil {
