@@ -290,6 +290,41 @@ func TestStorePutGetListRmRoundTripCov(t *testing.T) {
 	}
 }
 
+func TestStoreRmRepairsExistingStoreConfig(t *testing.T) {
+	const key = "loch/skelf.md"
+
+	p := storeTestEnv(t, true, "")
+
+	if err := storePutCmd.RunE(storePutCmd, []string{key, "braw"}); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+
+	storePath := store.SharedStorePath(p.DataDir)
+	cmd := testutil.GitCommand("config", "--local", "commit.gpgsign", "true")
+	cmd.Dir = storePath
+
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("enable local signing: %v\n%s", err, out)
+	}
+
+	if err := storeRmCmd.RunE(storeRmCmd, []string{key}); err != nil {
+		t.Fatalf("rm: %v", err)
+	}
+
+	cmd = testutil.GitCommand("config", "--local", "--bool", "commit.gpgsign")
+	cmd.Dir = storePath
+	cmd.Env = testutil.GitEnv("GIT_CONFIG_COUNT=0")
+
+	value, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("read local signing config: %v", err)
+	}
+
+	if got := strings.TrimSpace(string(value)); got != "false" {
+		t.Errorf("local commit.gpgsign = %q, want false after rm", got)
+	}
+}
+
 func TestStoreGetCovNotFound(t *testing.T) {
 	storeTestEnv(t, true, "")
 

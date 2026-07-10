@@ -28,32 +28,41 @@ func Init(storePath string) error {
 		return fmt.Errorf("create store directory: %w", err)
 	}
 
-	// Idempotent: only initialise a new repository, but always refresh the local
-	// settings below. In particular, internal store commits must never inherit a
-	// developer's global commit.gpgsign=true and contact their SSH/GPG agent.
-	if _, err := os.Stat(filepath.Join(storePath, ".git")); os.IsNotExist(err) {
-		if err := git(storePath, "init", "--quiet"); err != nil {
-			return fmt.Errorf("git init: %w", err)
+	// Serialize repository creation and config migration with document writes.
+	// Git's own config.lock fails immediately under contention, whereas store.lock
+	// waits and prevents concurrent agents from racing these idempotent updates.
+	return withLock(storePath, func() error {
+		// Only initialise a new repository, but always refresh the local settings.
+		// In particular, internal store commits must never inherit a developer's
+		// global commit.gpgsign=true and contact their SSH/GPG agent.
+		if _, err := os.Stat(filepath.Join(storePath, ".git")); err != nil {
+			if !os.IsNotExist(err) {
+				return fmt.Errorf("inspect git repository: %w", err)
+			}
+
+			if err := git(storePath, "init", "--quiet"); err != nil {
+				return fmt.Errorf("git init: %w", err)
+			}
 		}
-	}
 
-	if err := git(storePath, "config", "user.name", "graith"); err != nil {
-		return fmt.Errorf("git config user.name: %w", err)
-	}
+		if err := git(storePath, "config", "user.name", "graith"); err != nil {
+			return fmt.Errorf("git config user.name: %w", err)
+		}
 
-	if err := git(storePath, "config", "user.email", "graith@localhost"); err != nil {
-		return fmt.Errorf("git config user.email: %w", err)
-	}
+		if err := git(storePath, "config", "user.email", "graith@localhost"); err != nil {
+			return fmt.Errorf("git config user.email: %w", err)
+		}
 
-	if err := git(storePath, "config", "core.autocrlf", "false"); err != nil {
-		return fmt.Errorf("git config core.autocrlf: %w", err)
-	}
+		if err := git(storePath, "config", "core.autocrlf", "false"); err != nil {
+			return fmt.Errorf("git config core.autocrlf: %w", err)
+		}
 
-	if err := git(storePath, "config", "commit.gpgsign", "false"); err != nil {
-		return fmt.Errorf("git config commit.gpgsign: %w", err)
-	}
+		if err := git(storePath, "config", "commit.gpgsign", "false"); err != nil {
+			return fmt.Errorf("git config commit.gpgsign: %w", err)
+		}
 
-	return nil
+		return nil
+	})
 }
 
 // git runs git with the given args in dir.
@@ -214,7 +223,7 @@ func Put(storePath, key, body string) error {
 		}
 
 		msg := CommitMessage("update", key)
-		if err := git(storePath, "commit", "-m", msg, "--", key); err != nil {
+		if err := git(storePath, "commit", "--no-gpg-sign", "-m", msg, "--", key); err != nil {
 			return fmt.Errorf("git commit: %w", err)
 		}
 
@@ -262,7 +271,7 @@ func Append(storePath, key, line string) error {
 		}
 
 		msg := CommitMessage("append", key)
-		if err := git(storePath, "commit", "-m", msg, "--", key); err != nil {
+		if err := git(storePath, "commit", "--no-gpg-sign", "-m", msg, "--", key); err != nil {
 			return fmt.Errorf("git commit: %w", err)
 		}
 
@@ -365,7 +374,7 @@ func Remove(storePath, key string) error {
 		}
 
 		msg := CommitMessage("remove", key)
-		if err := git(storePath, "commit", "-m", msg, "--", key); err != nil {
+		if err := git(storePath, "commit", "--no-gpg-sign", "-m", msg, "--", key); err != nil {
 			return fmt.Errorf("git commit: %w", err)
 		}
 

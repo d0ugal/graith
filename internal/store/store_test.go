@@ -4,7 +4,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/d0ugal/graith/internal/store"
 	"github.com/d0ugal/graith/internal/testutil"
@@ -188,6 +190,63 @@ func TestInit(t *testing.T) {
 	}
 }
 
+// TestInitUsesStoreLock verifies config migration is serialized with document
+// writes. Without this lock, concurrent Init calls race on .git/config.lock and
+// fail instead of waiting for one another.
+func TestInitUsesStoreLock(t *testing.T) {
+	dir := newTestStore(t)
+	lockPath := filepath.Join(dir, "store.lock")
+
+	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = lockFile.Close() }()
+
+	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- store.Init(dir) }()
+
+	select {
+	case err := <-done:
+		_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+
+		t.Fatalf("Init returned before store lock was released: %v", err)
+	case <-time.After(200 * time.Millisecond):
+		// Expected: Init is blocked on the store lock.
+	}
+
+	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Init after lock release: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Init remained blocked after store lock release")
+	}
+}
+
+func TestInitFailsClosedOnGitMarkerStatError(t *testing.T) {
+	testutil.IsolateGit(t)
+
+	dir := t.TempDir()
+	if err := os.Symlink(".git", filepath.Join(dir, ".git")); err != nil {
+		t.Fatal(err)
+	}
+
+	err := store.Init(dir)
+	if err == nil || !strings.Contains(err.Error(), "inspect git repository") {
+		t.Fatalf("Init error = %v, want inspect git repository error", err)
+	}
+}
+
 // TestInitRepairsInheritedCommitSigning is the regression test for store
 // commits inheriting a developer's global SSH signing configuration. Init is
 // called before each CLI store operation, so it must also repair stores created
@@ -242,6 +301,39 @@ func TestInitRepairsInheritedCommitSigning(t *testing.T) {
 
 	if got := strings.TrimSpace(string(out)); got != "false" {
 		t.Errorf("local commit.gpgsign = %q, want false", got)
+	}
+}
+
+// TestRemoveIgnoresInheritedCommitSigning verifies every committing operation
+// is safe even when a caller reaches Remove without first running Init.
+func TestRemoveIgnoresInheritedCommitSigning(t *testing.T) {
+	const key = "loch/skelf.md"
+
+	dir := newTestStore(t)
+
+	if err := store.Put(dir, key, "braw"); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+
+	for _, args := range [][]string{
+		{"config", "--local", "commit.gpgsign", "true"},
+		{"config", "--local", "gpg.format", "ssh"},
+		{"config", "--local", "user.signingkey", "/nonexistent/thrawn.pub"},
+	} {
+		cmd := testutil.GitCommand(args...)
+		cmd.Dir = dir
+
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	// Disable TestMain's command-scope signing override so this exercises the
+	// hostile repository-local config planted above.
+	t.Setenv("GIT_CONFIG_COUNT", "0")
+
+	if err := store.Remove(dir, key); err != nil {
+		t.Fatalf("Remove inherited signing config: %v", err)
 	}
 }
 
