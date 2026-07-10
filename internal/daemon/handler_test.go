@@ -210,10 +210,7 @@ func TestHandshake(t *testing.T) {
 		Cwd:          "/tmp",
 	})
 
-	env := h.readControlMsg(t)
-	if env.Type != "handshake_ok" {
-		t.Fatalf("expected handshake_ok, got %q", env.Type)
-	}
+	env := h.expectType(t, "handshake_ok")
 
 	var ok protocol.HandshakeOkMsg
 
@@ -234,10 +231,7 @@ func TestHandshakeVersionMismatch(t *testing.T) {
 		Cwd:          "/tmp",
 	})
 
-	env := h.readControlMsg(t)
-	if env.Type != "handshake_err" {
-		t.Fatalf("expected handshake_err, got %q", env.Type)
-	}
+	env := h.expectType(t, "handshake_err")
 
 	var errMsg protocol.HandshakeErrMsg
 	if err := protocol.DecodePayload(env, &errMsg); err != nil {
@@ -269,10 +263,7 @@ func TestHandshakeCompatibleMinorVersion(t *testing.T) {
 		Cwd:          "/tmp",
 	})
 
-	env := h.readControlMsg(t)
-	if env.Type != "handshake_ok" {
-		t.Fatalf("expected handshake_ok for compatible minor version, got %q", env.Type)
-	}
+	h.expectType(t, "handshake_ok")
 }
 
 func TestHandshakeInvalidPayload(t *testing.T) {
@@ -281,10 +272,7 @@ func TestHandshakeInvalidPayload(t *testing.T) {
 	raw, _ := json.Marshal(protocol.Envelope{Type: "handshake", Payload: json.RawMessage(`{"bad":`)})
 	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectType(t, "error")
 }
 
 func TestMalformedControlMessage(t *testing.T) {
@@ -292,10 +280,7 @@ func TestMalformedControlMessage(t *testing.T) {
 
 	_ = h.writer.WriteFrame(protocol.ChannelControl, []byte(`{not valid json`))
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	env := h.expectType(t, "error")
 
 	var errMsg protocol.ErrorMsg
 
@@ -322,10 +307,7 @@ func TestListSessions(t *testing.T) {
 
 	h.sendControl(t, "list", struct{}{})
 
-	env := h.readControlMsg(t)
-	if env.Type != "session_list" {
-		t.Fatalf("expected session_list, got %q", env.Type)
-	}
+	env := h.expectType(t, "session_list")
 
 	var list protocol.SessionListMsg
 
@@ -341,10 +323,7 @@ func TestListSessionsEmpty(t *testing.T) {
 
 	h.sendControl(t, "list", struct{}{})
 
-	env := h.readControlMsg(t)
-	if env.Type != "session_list" {
-		t.Fatalf("expected session_list, got %q", env.Type)
-	}
+	env := h.expectType(t, "session_list")
 
 	var list protocol.SessionListMsg
 
@@ -361,10 +340,7 @@ func TestDeleteSession(t *testing.T) {
 
 	h.sendControl(t, "delete", protocol.DeleteMsg{SessionID: "fash1"})
 
-	env := h.readControlMsg(t)
-	if env.Type != "deleted" {
-		t.Fatalf("expected deleted, got %q", env.Type)
-	}
+	h.expectType(t, "deleted")
 }
 
 func TestDeleteSessionNotFound(t *testing.T) {
@@ -372,10 +348,7 @@ func TestDeleteSessionNotFound(t *testing.T) {
 
 	h.sendControl(t, "delete", protocol.DeleteMsg{SessionID: "haar-mist"})
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectType(t, "error")
 }
 
 func TestDeleteInvalidPayload(t *testing.T) {
@@ -384,10 +357,7 @@ func TestDeleteInvalidPayload(t *testing.T) {
 	raw, _ := json.Marshal(protocol.Envelope{Type: "delete", Payload: json.RawMessage(`{bad`)})
 	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectType(t, "error")
 }
 
 func TestStopSession(t *testing.T) {
@@ -396,10 +366,7 @@ func TestStopSession(t *testing.T) {
 
 	h.sendControl(t, "stop", protocol.StopMsg{SessionID: "bide1"})
 
-	env := h.readControlMsg(t)
-	if env.Type != "stopped" {
-		t.Fatalf("expected stopped, got %q", env.Type)
-	}
+	h.expectType(t, "stopped")
 }
 
 func TestStopSessionNotFound(t *testing.T) {
@@ -407,10 +374,7 @@ func TestStopSessionNotFound(t *testing.T) {
 
 	h.sendControl(t, "stop", protocol.StopMsg{SessionID: "haar-mist"})
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectType(t, "error")
 }
 
 func TestStopInvalidPayload(t *testing.T) {
@@ -419,10 +383,7 @@ func TestStopInvalidPayload(t *testing.T) {
 	raw, _ := json.Marshal(protocol.Envelope{Type: "stop", Payload: json.RawMessage(`{bad`)})
 	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectType(t, "error")
 }
 
 func TestRenameSession(t *testing.T) {
@@ -437,10 +398,7 @@ func TestRenameSession(t *testing.T) {
 
 	h.sendControl(t, "rename", protocol.RenameMsg{SessionID: "auld1", NewName: "bonnie-kirk"})
 
-	env := h.readControlMsg(t)
-	if env.Type != "renamed" {
-		t.Fatalf("expected renamed, got %q", env.Type)
-	}
+	h.expectType(t, "renamed")
 
 	h.sm.mu.RLock()
 	name := h.sm.state.Sessions["auld1"].Name
@@ -456,10 +414,7 @@ func TestRenameSessionNotFound(t *testing.T) {
 
 	h.sendControl(t, "rename", protocol.RenameMsg{SessionID: "haar", NewName: "x"})
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectType(t, "error")
 }
 
 func TestRenameInvalidPayload(t *testing.T) {
@@ -468,10 +423,7 @@ func TestRenameInvalidPayload(t *testing.T) {
 	raw, _ := json.Marshal(protocol.Envelope{Type: "rename", Payload: json.RawMessage(`{bad`)})
 	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectType(t, "error")
 }
 
 func TestResumeInvalidPayload(t *testing.T) {
@@ -480,10 +432,7 @@ func TestResumeInvalidPayload(t *testing.T) {
 	raw, _ := json.Marshal(protocol.Envelope{Type: "resume", Payload: json.RawMessage(`{bad`)})
 	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectType(t, "error")
 }
 
 func TestResumeSessionNotFound(t *testing.T) {
@@ -491,10 +440,7 @@ func TestResumeSessionNotFound(t *testing.T) {
 
 	h.sendControl(t, "resume", protocol.ResumeMsg{SessionID: "haar"})
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectType(t, "error")
 }
 
 func TestCreateInvalidPayload(t *testing.T) {
@@ -503,10 +449,7 @@ func TestCreateInvalidPayload(t *testing.T) {
 	raw, _ := json.Marshal(protocol.Envelope{Type: "create", Payload: json.RawMessage(`{bad`)})
 	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectType(t, "error")
 }
 
 func TestResizeWhileAttached(t *testing.T) {
@@ -522,10 +465,7 @@ func TestResizeWhileAttached(t *testing.T) {
 
 	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "braw-rsz"})
 
-	env := h.readControlMsg(t)
-	if env.Type != "attached" {
-		t.Fatalf("expected attached, got %q", env.Type)
-	}
+	h.expectType(t, "attached")
 
 	h.sendControl(t, "resize", protocol.ResizeMsg{Cols: 200, Rows: 50})
 
@@ -533,10 +473,7 @@ func TestResizeWhileAttached(t *testing.T) {
 	// and confirming the handler is still alive.
 	h.sendControl(t, "list", struct{}{})
 
-	env = h.readControlMsg(t)
-	if env.Type != "session_list" {
-		t.Fatalf("expected session_list, got %q", env.Type)
-	}
+	h.expectType(t, "session_list")
 }
 
 func TestResizeWithoutAttach(t *testing.T) {
@@ -548,10 +485,7 @@ func TestResizeWithoutAttach(t *testing.T) {
 	// Confirm handler is still alive
 	h.sendControl(t, "list", struct{}{})
 
-	env := h.readControlMsg(t)
-	if env.Type != "session_list" {
-		t.Fatalf("expected session_list after no-op resize, got %q", env.Type)
-	}
+	h.expectType(t, "session_list")
 }
 
 func TestAttachAndDetach(t *testing.T) {
@@ -560,17 +494,11 @@ func TestAttachAndDetach(t *testing.T) {
 
 	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "braw-att"})
 
-	env := h.readControlMsg(t)
-	if env.Type != "attached" {
-		t.Fatalf("expected attached, got %q", env.Type)
-	}
+	env := h.expectType(t, "attached")
 
 	h.sendControl(t, "detach", struct{}{})
 
-	env = h.readControlMsg(t)
-	if env.Type != "detached" {
-		t.Fatalf("expected detached, got %q", env.Type)
-	}
+	env = h.expectType(t, "detached")
 
 	var detached protocol.DetachedMsg
 
@@ -586,10 +514,7 @@ func TestAttachNotFound(t *testing.T) {
 
 	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "haar"})
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectType(t, "error")
 }
 
 func TestAttachInvalidPayload(t *testing.T) {
@@ -598,10 +523,7 @@ func TestAttachInvalidPayload(t *testing.T) {
 	raw, _ := json.Marshal(protocol.Envelope{Type: "attach", Payload: json.RawMessage(`{bad`)})
 	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectType(t, "error")
 }
 
 func TestDetachWithoutAttach(t *testing.T) {
@@ -609,10 +531,7 @@ func TestDetachWithoutAttach(t *testing.T) {
 
 	h.sendControl(t, "detach", struct{}{})
 
-	env := h.readControlMsg(t)
-	if env.Type != "detached" {
-		t.Fatalf("expected detached, got %q", env.Type)
-	}
+	h.expectType(t, "detached")
 }
 
 func TestDataChannelForwarding(t *testing.T) {
@@ -631,10 +550,7 @@ func TestDataChannelForwarding(t *testing.T) {
 	// Confirm handler is still processing
 	h.sendControl(t, "list", struct{}{})
 
-	env := h.readControlMsg(t)
-	if env.Type != "session_list" {
-		t.Fatalf("expected session_list, got %q", env.Type)
-	}
+	h.expectType(t, "session_list")
 }
 
 func TestDataChannelWithoutAttach(t *testing.T) {
@@ -647,10 +563,7 @@ func TestDataChannelWithoutAttach(t *testing.T) {
 
 	h.sendControl(t, "list", struct{}{})
 
-	env := h.readControlMsg(t)
-	if env.Type != "session_list" {
-		t.Fatalf("expected session_list, got %q", env.Type)
-	}
+	h.expectType(t, "session_list")
 }
 
 func TestLogsNonFollow(t *testing.T) {
@@ -659,10 +572,7 @@ func TestLogsNonFollow(t *testing.T) {
 
 	h.sendControl(t, "logs", protocol.LogsMsg{SessionID: "braw-log", Lines: 100})
 
-	env := h.readControlMsg(t)
-	if env.Type != "logs_done" {
-		t.Fatalf("expected logs_done, got %q", env.Type)
-	}
+	h.expectType(t, "logs_done")
 }
 
 func TestLogsNotFound(t *testing.T) {
@@ -670,10 +580,7 @@ func TestLogsNotFound(t *testing.T) {
 
 	h.sendControl(t, "logs", protocol.LogsMsg{SessionID: "haar"})
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectType(t, "error")
 }
 
 // addStoppedSession registers a session in state with no live PTY, mimicking a
@@ -748,10 +655,7 @@ func TestLogsStoppedSessionNoOutput(t *testing.T) {
 
 	h.sendControl(t, "logs", protocol.LogsMsg{SessionID: "dreich-log"})
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	env := h.expectType(t, "error")
 
 	var e protocol.ErrorMsg
 	if err := protocol.DecodePayload(env, &e); err != nil {
@@ -773,10 +677,7 @@ func TestLogsInvalidPayload(t *testing.T) {
 	raw, _ := json.Marshal(protocol.Envelope{Type: "logs", Payload: json.RawMessage(`{bad`)})
 	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectType(t, "error")
 }
 
 func TestLogsDefaultLines(t *testing.T) {
@@ -786,10 +687,7 @@ func TestLogsDefaultLines(t *testing.T) {
 	// Lines=0 should default to 300 internally
 	h.sendControl(t, "logs", protocol.LogsMsg{SessionID: "neep-log", Lines: 0})
 
-	env := h.readControlMsg(t)
-	if env.Type != "logs_done" {
-		t.Fatalf("expected logs_done, got %q", env.Type)
-	}
+	h.expectType(t, "logs_done")
 }
 
 func TestLogsFollowThenDetach(t *testing.T) {
@@ -798,18 +696,12 @@ func TestLogsFollowThenDetach(t *testing.T) {
 
 	h.sendControl(t, "logs", protocol.LogsMsg{SessionID: "braw-logf", Follow: true})
 
-	env := h.readControlMsg(t)
-	if env.Type != "logs_following" {
-		t.Fatalf("expected logs_following, got %q", env.Type)
-	}
+	h.expectType(t, "logs_following")
 
 	// Send detach to stop following
 	h.sendControl(t, "detach", struct{}{})
 
-	env = h.readControlMsg(t)
-	if env.Type != "logs_done" {
-		t.Fatalf("expected logs_done, got %q", env.Type)
-	}
+	h.expectType(t, "logs_done")
 }
 
 func TestTypeMessage(t *testing.T) {
@@ -821,10 +713,7 @@ func TestTypeMessage(t *testing.T) {
 		Input:     "hello",
 	})
 
-	env := h.readControlMsg(t)
-	if env.Type != "typed" {
-		t.Fatalf("expected typed, got %q", env.Type)
-	}
+	h.expectType(t, "typed")
 }
 
 func TestTypeMessageNoNewline(t *testing.T) {
@@ -837,10 +726,7 @@ func TestTypeMessageNoNewline(t *testing.T) {
 		NoNewline: true,
 	})
 
-	env := h.readControlMsg(t)
-	if env.Type != "typed" {
-		t.Fatalf("expected typed, got %q", env.Type)
-	}
+	h.expectType(t, "typed")
 }
 
 func TestTypeSessionNotFound(t *testing.T) {
@@ -848,10 +734,7 @@ func TestTypeSessionNotFound(t *testing.T) {
 
 	h.sendControl(t, "type", protocol.TypeMsg{SessionID: "haar", Input: "x"})
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectType(t, "error")
 }
 
 func TestTypeInvalidPayload(t *testing.T) {
@@ -860,10 +743,7 @@ func TestTypeInvalidPayload(t *testing.T) {
 	raw, _ := json.Marshal(protocol.Envelope{Type: "type", Payload: json.RawMessage(`{bad`)})
 	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectType(t, "error")
 }
 
 func TestScreenPreview(t *testing.T) {
@@ -872,10 +752,7 @@ func TestScreenPreview(t *testing.T) {
 
 	h.sendControl(t, "screen_preview", protocol.ScreenPreviewMsg{SessionID: "braw-sp"})
 
-	env := h.readControlMsg(t)
-	if env.Type != "screen_preview_response" {
-		t.Fatalf("expected screen_preview_response, got %q", env.Type)
-	}
+	env := h.expectType(t, "screen_preview_response")
 
 	var resp protocol.ScreenPreviewResponseMsg
 
@@ -891,10 +768,7 @@ func TestScreenPreviewNotFound(t *testing.T) {
 
 	h.sendControl(t, "screen_preview", protocol.ScreenPreviewMsg{SessionID: "haar"})
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectType(t, "error")
 }
 
 func TestScreenPreviewInvalidPayload(t *testing.T) {
@@ -903,10 +777,7 @@ func TestScreenPreviewInvalidPayload(t *testing.T) {
 	raw, _ := json.Marshal(protocol.Envelope{Type: "screen_preview", Payload: json.RawMessage(`{bad`)})
 	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectType(t, "error")
 }
 
 func TestScreenSnapshot(t *testing.T) {
@@ -915,10 +786,7 @@ func TestScreenSnapshot(t *testing.T) {
 
 	h.sendControl(t, "screen_snapshot", protocol.ScreenSnapshotMsg{SessionID: "braw-ss"})
 
-	env := h.readControlMsg(t)
-	if env.Type != "screen_snapshot_response" {
-		t.Fatalf("expected screen_snapshot_response, got %q", env.Type)
-	}
+	env := h.expectType(t, "screen_snapshot_response")
 
 	var resp protocol.ScreenSnapshotResponseMsg
 
@@ -938,10 +806,7 @@ func TestScreenSnapshotNotFound(t *testing.T) {
 
 	h.sendControl(t, "screen_snapshot", protocol.ScreenSnapshotMsg{SessionID: "haar"})
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectType(t, "error")
 }
 
 func TestScreenSnapshotInvalidPayload(t *testing.T) {
@@ -950,10 +815,7 @@ func TestScreenSnapshotInvalidPayload(t *testing.T) {
 	raw, _ := json.Marshal(protocol.Envelope{Type: "screen_snapshot", Payload: json.RawMessage(`{bad`)})
 	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectType(t, "error")
 }
 
 func TestUpgrade(t *testing.T) {
@@ -961,10 +823,7 @@ func TestUpgrade(t *testing.T) {
 
 	h.sendControl(t, "upgrade", struct{}{})
 
-	env := h.readControlMsg(t)
-	if env.Type != "upgrading" {
-		t.Fatalf("expected upgrading, got %q", env.Type)
-	}
+	h.expectType(t, "upgrading")
 
 	// Handler returns after upgrade, so the done channel should close.
 	select {
@@ -982,10 +841,7 @@ func TestUpgradeSameVersion(t *testing.T) {
 		ClientVersion: version.Version,
 	})
 
-	env := h.readControlMsg(t)
-	if env.Type != "upgrading" {
-		t.Fatalf("expected upgrading for same-version request, got %q", env.Type)
-	}
+	h.expectType(t, "upgrading")
 
 	select {
 	case path := <-h.sm.upgradeCh:
@@ -1005,10 +861,7 @@ func TestUpgradeAlreadyInProgress(t *testing.T) {
 
 	h.sendControl(t, "upgrade", struct{}{})
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	env := h.expectType(t, "error")
 
 	var errMsg protocol.ErrorMsg
 
@@ -1036,10 +889,7 @@ func TestMsgPub(t *testing.T) {
 		Body:       "braw day",
 	})
 
-	env := h.readControlMsg(t)
-	if env.Type != "msg_published" {
-		t.Fatalf("expected msg_published, got %q", env.Type)
-	}
+	env := h.expectType(t, "msg_published")
 
 	var msg Message
 
@@ -1065,10 +915,7 @@ func TestMsgPubInboxNotifiesTarget(t *testing.T) {
 		Body:       "braw news frae anither tree",
 	})
 
-	env := h.readControlMsg(t)
-	if env.Type != "msg_published" {
-		t.Fatalf("expected msg_published, got %q", env.Type)
-	}
+	h.expectType(t, "msg_published")
 
 	// The daemon injects the notification asynchronously. Give the goroutine
 	// and PTY write a moment to propagate.
@@ -1106,10 +953,7 @@ func TestMsgPubInboxQuietSuppressesNotification(t *testing.T) {
 		Quiet:      true,
 	})
 
-	env := h.readControlMsg(t)
-	if env.Type != "msg_published" {
-		t.Fatalf("expected msg_published, got %q", env.Type)
-	}
+	h.expectType(t, "msg_published")
 
 	time.Sleep(100 * time.Millisecond)
 
@@ -1134,10 +978,7 @@ func TestMsgPubInvalidPayload(t *testing.T) {
 	raw, _ := json.Marshal(protocol.Envelope{Type: "msg_pub", Payload: json.RawMessage(`{bad`)})
 	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectType(t, "error")
 }
 
 func TestMsgSubReadAll(t *testing.T) {
@@ -1151,10 +992,7 @@ func TestMsgSubReadAll(t *testing.T) {
 		Stream: "blether1",
 	})
 
-	env := h.readControlMsg(t)
-	if env.Type != "msg_message" {
-		t.Fatalf("expected msg_message, got %q", env.Type)
-	}
+	env := h.expectType(t, "msg_message")
 
 	var m1 Message
 
@@ -1164,15 +1002,9 @@ func TestMsgSubReadAll(t *testing.T) {
 		t.Errorf("first message body = %q", m1.Body)
 	}
 
-	env = h.readControlMsg(t)
-	if env.Type != "msg_message" {
-		t.Fatalf("expected msg_message, got %q", env.Type)
-	}
+	env = h.expectType(t, "msg_message")
 
-	env = h.readControlMsg(t)
-	if env.Type != "msg_done" {
-		t.Fatalf("expected msg_done, got %q", env.Type)
-	}
+	env = h.expectType(t, "msg_done")
 }
 
 func TestMsgSubWithAck(t *testing.T) {
@@ -1196,10 +1028,7 @@ func TestMsgSubWithAck(t *testing.T) {
 		OnlyUnread: true,
 	})
 
-	env := h.readControlMsg(t)
-	if env.Type != "msg_done" {
-		t.Fatalf("expected msg_done (no unread messages), got %q", env.Type)
-	}
+	h.expectType(t, "msg_done")
 }
 
 func TestMsgSubOnlyUnreadWithAck(t *testing.T) {
@@ -1216,20 +1045,11 @@ func TestMsgSubOnlyUnreadWithAck(t *testing.T) {
 		Ack:        true,
 	})
 
-	env := h.readControlMsg(t)
-	if env.Type != "msg_message" {
-		t.Fatalf("first sub: expected msg_message, got %q", env.Type)
-	}
+	h.expectType(t, "msg_message")
 
-	env = h.readControlMsg(t)
-	if env.Type != "msg_message" {
-		t.Fatalf("first sub: expected second msg_message, got %q", env.Type)
-	}
+	h.expectType(t, "msg_message")
 
-	env = h.readControlMsg(t)
-	if env.Type != "msg_done" {
-		t.Fatalf("first sub: expected msg_done, got %q", env.Type)
-	}
+	h.expectType(t, "msg_done")
 
 	// Second read: same subscriber, OnlyUnread — should see nothing
 	h.sendControl(t, "msg_sub", protocol.MsgSubMsg{
@@ -1238,10 +1058,7 @@ func TestMsgSubOnlyUnreadWithAck(t *testing.T) {
 		OnlyUnread: true,
 	})
 
-	env = h.readControlMsg(t)
-	if env.Type != "msg_done" {
-		t.Fatalf("second sub: expected msg_done (no unread), got %q", env.Type)
-	}
+	h.expectType(t, "msg_done")
 }
 
 func TestMsgSubInvalidPayload(t *testing.T) {
@@ -1250,10 +1067,7 @@ func TestMsgSubInvalidPayload(t *testing.T) {
 	raw, _ := json.Marshal(protocol.Envelope{Type: "msg_sub", Payload: json.RawMessage(`{bad`)})
 	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectType(t, "error")
 }
 
 func TestMsgSubWaitWithExistingMessages(t *testing.T) {
@@ -1267,15 +1081,9 @@ func TestMsgSubWaitWithExistingMessages(t *testing.T) {
 		Wait:   true,
 	})
 
-	env := h.readControlMsg(t)
-	if env.Type != "msg_message" {
-		t.Fatalf("expected msg_message, got %q", env.Type)
-	}
+	h.expectType(t, "msg_message")
 
-	env = h.readControlMsg(t)
-	if env.Type != "msg_done" {
-		t.Fatalf("expected msg_done, got %q", env.Type)
-	}
+	h.expectType(t, "msg_done")
 }
 
 func TestMsgSubWaitForNewMessage(t *testing.T) {
@@ -1293,10 +1101,7 @@ func TestMsgSubWaitForNewMessage(t *testing.T) {
 		Wait:   true,
 	})
 
-	env := h.readControlMsg(t)
-	if env.Type != "msg_following" {
-		t.Fatalf("expected msg_following, got %q", env.Type)
-	}
+	env := h.expectType(t, "msg_following")
 
 	env, ok := h.readControlMsgTimeout(t, 2*time.Second)
 	if !ok {
@@ -1327,10 +1132,7 @@ func TestMsgAck(t *testing.T) {
 		Subscriber: "kirk1",
 	})
 
-	env := h.readControlMsg(t)
-	if env.Type != "msg_acked" {
-		t.Fatalf("expected msg_acked, got %q", env.Type)
-	}
+	h.expectType(t, "msg_acked")
 }
 
 func TestMsgAckInvalidPayload(t *testing.T) {
@@ -1339,10 +1141,7 @@ func TestMsgAckInvalidPayload(t *testing.T) {
 	raw, _ := json.Marshal(protocol.Envelope{Type: "msg_ack", Payload: json.RawMessage(`{bad`)})
 	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectType(t, "error")
 }
 
 func TestMsgTopics(t *testing.T) {
@@ -1353,10 +1152,7 @@ func TestMsgTopics(t *testing.T) {
 
 	h.sendControl(t, "msg_topics", protocol.MsgTopicsMsg{Subscriber: "kirk1"})
 
-	env := h.readControlMsg(t)
-	if env.Type != "msg_topics_list" {
-		t.Fatalf("expected msg_topics_list, got %q", env.Type)
-	}
+	env := h.expectType(t, "msg_topics_list")
 
 	var resp struct {
 		Streams []StreamInfo `json:"streams"`
@@ -1375,10 +1171,7 @@ func TestMsgTopicsInvalidPayload(t *testing.T) {
 	raw, _ := json.Marshal(protocol.Envelope{Type: "msg_topics", Payload: json.RawMessage(`{bad`)})
 	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectType(t, "error")
 }
 
 func TestAttachReplacesExistingClient(t *testing.T) {
@@ -1699,10 +1492,7 @@ func TestMsgSubFollowThreadFilter(t *testing.T) {
 		ThreadID: "thread-1",
 	})
 
-	env := h.readControlMsg(t)
-	if env.Type != "msg_message" {
-		t.Fatalf("expected msg_message, got %q", env.Type)
-	}
+	env := h.expectType(t, "msg_message")
 
 	var msg Message
 
@@ -1712,10 +1502,7 @@ func TestMsgSubFollowThreadFilter(t *testing.T) {
 		t.Errorf("thread_id = %q, want %q", msg.ThreadID, "thread-1")
 	}
 
-	env = h.readControlMsg(t)
-	if env.Type != "msg_done" {
-		t.Fatalf("expected msg_done, got %q", env.Type)
-	}
+	env = h.expectType(t, "msg_done")
 }
 
 func TestMsgPubWithThread(t *testing.T) {
@@ -1729,10 +1516,7 @@ func TestMsgPubWithThread(t *testing.T) {
 		ReplyTo:  "msg_abc",
 	})
 
-	env := h.readControlMsg(t)
-	if env.Type != "msg_published" {
-		t.Fatalf("expected msg_published, got %q", env.Type)
-	}
+	env := h.expectType(t, "msg_published")
 
 	var msg Message
 
@@ -1768,10 +1552,7 @@ func TestMsgPubUsesCurrentNameAfterRename(t *testing.T) {
 		Body:       "hello after rename",
 	})
 
-	env := h.readControlMsg(t)
-	if env.Type != "msg_published" {
-		t.Fatalf("expected msg_published, got %q", env.Type)
-	}
+	env := h.expectType(t, "msg_published")
 
 	var msg Message
 
@@ -1950,10 +1731,7 @@ func TestAttachSetsLastAttachedAt(t *testing.T) {
 
 	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "braw-ts"})
 
-	env := h.readControlMsg(t)
-	if env.Type != "attached" {
-		t.Fatalf("expected attached, got %q", env.Type)
-	}
+	h.expectType(t, "attached")
 
 	h.sm.mu.RLock()
 	s := h.sm.state.Sessions["braw-ts"]
@@ -1976,10 +1754,7 @@ func TestAttachPersistsLastAttachedAt(t *testing.T) {
 
 	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "bide-ts"})
 
-	env := h.readControlMsg(t)
-	if env.Type != "attached" {
-		t.Fatalf("expected attached, got %q", env.Type)
-	}
+	h.expectType(t, "attached")
 
 	h.sm.mu.RLock()
 	inMemory := h.sm.state.Sessions["bide-ts"].LastAttachedAt
@@ -2047,10 +1822,7 @@ func TestNullPayloadRejected(t *testing.T) {
 				Cwd:          "/tmp",
 			})
 
-			env := h.readControlMsg(t)
-			if env.Type != "handshake_ok" {
-				t.Fatalf("handshake: got %q", env.Type)
-			}
+			env := h.expectType(t, "handshake_ok")
 
 			nullEnvelope, _ := json.Marshal(protocol.Envelope{
 				Type:    tt.msgType,
@@ -2058,10 +1830,7 @@ func TestNullPayloadRejected(t *testing.T) {
 			})
 			_ = h.writer.WriteFrame(protocol.ChannelControl, nullEnvelope)
 
-			env = h.readControlMsg(t)
-			if env.Type != "error" {
-				t.Fatalf("expected error for null %s payload, got %q", tt.msgType, env.Type)
-			}
+			env = h.expectType(t, "error")
 
 			var errMsg protocol.ErrorMsg
 
@@ -2082,18 +1851,12 @@ func TestAttachSwitchSession(t *testing.T) {
 	// Attach to first session
 	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "braw-sw1"})
 
-	env := h.readControlMsg(t)
-	if env.Type != "attached" {
-		t.Fatalf("expected attached, got %q", env.Type)
-	}
+	env := h.expectType(t, "attached")
 
 	// Attach to second session (should detach from first)
 	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "braw-sw2"})
 
-	env = h.readControlMsg(t)
-	if env.Type != "attached" {
-		t.Fatalf("expected attached for second session, got %q", env.Type)
-	}
+	env = h.expectType(t, "attached")
 
 	var info protocol.SessionInfo
 
@@ -2121,10 +1884,7 @@ func TestDiagnostics(t *testing.T) {
 
 	h.sendControl(t, "diagnostics", struct{}{})
 
-	env := h.readControlMsg(t)
-	if env.Type != "diagnostics" {
-		t.Fatalf("expected diagnostics, got %q", env.Type)
-	}
+	env := h.expectType(t, "diagnostics")
 
 	var diag protocol.DiagnosticsMsg
 	if err := protocol.DecodePayload(env, &diag); err != nil {
@@ -2168,10 +1928,7 @@ func TestDiagnosticsEmpty(t *testing.T) {
 
 	h.sendControl(t, "diagnostics", struct{}{})
 
-	env := h.readControlMsg(t)
-	if env.Type != "diagnostics" {
-		t.Fatalf("expected diagnostics, got %q", env.Type)
-	}
+	env := h.expectType(t, "diagnostics")
 
 	var diag protocol.DiagnosticsMsg
 	if err := protocol.DecodePayload(env, &diag); err != nil {
@@ -2289,10 +2046,7 @@ func assertAttachAutoResumes(t *testing.T, name string, status SessionStatus) {
 
 	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "s1"})
 
-	env := h.readControlMsg(t)
-	if env.Type != "attached" {
-		t.Fatalf("expected attached after auto-resume, got %q", env.Type)
-	}
+	env := h.expectType(t, "attached")
 
 	var info protocol.SessionInfo
 
@@ -2336,10 +2090,7 @@ func TestAttachCreatingSessionReturnsStatusError(t *testing.T) {
 
 	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "s1"})
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	env := h.expectType(t, "error")
 
 	var e protocol.ErrorMsg
 
@@ -2365,10 +2116,7 @@ func TestAttachDeletingSessionReturnsStatusError(t *testing.T) {
 
 	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "s1"})
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	env := h.expectType(t, "error")
 
 	var e protocol.ErrorMsg
 
@@ -2465,10 +2213,7 @@ func TestMsgInboxReadUnread(t *testing.T) {
 		OnlyUnread: true,
 	}, "tok-bonnie")
 
-	env := h.readControlMsg(t)
-	if env.Type != "msg_message" {
-		t.Fatalf("expected msg_message, got %q", env.Type)
-	}
+	env := h.expectType(t, "msg_message")
 
 	var m Message
 
@@ -2478,10 +2223,7 @@ func TestMsgInboxReadUnread(t *testing.T) {
 		t.Errorf("body = %q, want %q", m.Body, "braw tidings")
 	}
 
-	env = h.readControlMsg(t)
-	if env.Type != "msg_done" {
-		t.Fatalf("expected msg_done, got %q", env.Type)
-	}
+	env = h.expectType(t, "msg_done")
 }
 
 func TestMsgInboxRequiresAuth(t *testing.T) {
@@ -2489,10 +2231,7 @@ func TestMsgInboxRequiresAuth(t *testing.T) {
 
 	h.sendControl(t, "msg_inbox", protocol.MsgInboxMsg{})
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	env := h.expectType(t, "error")
 
 	var e protocol.ErrorMsg
 
@@ -2521,10 +2260,7 @@ func TestMsgInboxWithAck(t *testing.T) {
 		OnlyUnread: true,
 	}, "tok-canny")
 
-	env := h.readControlMsg(t)
-	if env.Type != "msg_done" {
-		t.Fatalf("expected msg_done (no unread after ack), got %q", env.Type)
-	}
+	h.expectType(t, "msg_done")
 }
 
 func TestMsgSubRejectsInboxForAuthenticatedAgent(t *testing.T) {
@@ -2535,10 +2271,7 @@ func TestMsgSubRejectsInboxForAuthenticatedAgent(t *testing.T) {
 		Stream: "inbox:thrawn-sub",
 	}, "tok-thrawn")
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	env := h.expectType(t, "error")
 
 	var e protocol.ErrorMsg
 
@@ -2558,10 +2291,7 @@ func TestMsgAckRejectsInboxForAuthenticatedAgent(t *testing.T) {
 		Subscriber: "fash-ack",
 	}, "tok-fash")
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	env := h.expectType(t, "error")
 
 	var e protocol.ErrorMsg
 
@@ -2581,10 +2311,7 @@ func TestMsgTopicsFiltersInboxForAuthenticatedAgent(t *testing.T) {
 
 	h.sendControlWithToken(t, "msg_topics", protocol.MsgTopicsMsg{}, "tok-ken")
 
-	env := h.readControlMsg(t)
-	if env.Type != "msg_topics_list" {
-		t.Fatalf("expected msg_topics_list, got %q", env.Type)
-	}
+	env := h.expectType(t, "msg_topics_list")
 
 	var resp struct {
 		Streams []StreamInfo `json:"streams"`
@@ -2659,10 +2386,7 @@ func TestUpdateRejectsUnauthorizedReparent(t *testing.T) {
 		ParentID:  &parent,
 	}, "tok-thrawn")
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	env := h.expectType(t, "error")
 
 	var e protocol.ErrorMsg
 
@@ -2723,10 +2447,7 @@ func TestUpdateRejectsAdoptingUnrelatedParent(t *testing.T) {
 		ParentID:  &parent,
 	}, "tok-ben")
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	h.expectType(t, "error")
 
 	if got := h.parentOf(t, "bairn"); got != "ben" {
 		t.Errorf("bairn ParentID = %q, want unchanged (ben)", got)
@@ -2782,10 +2503,7 @@ func TestUpdateRejectsSelfOrphan(t *testing.T) {
 		ParentID:  &empty,
 	}, "tok-bairn")
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	env := h.expectType(t, "error")
 
 	var e protocol.ErrorMsg
 
@@ -2869,10 +2587,7 @@ func TestUpdateRejectsRenameOnlyUnrelated(t *testing.T) {
 		Name:      &newName,
 	}, "tok-thrawn")
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	env := h.expectType(t, "error")
 
 	var e protocol.ErrorMsg
 
@@ -2944,10 +2659,7 @@ func (h *testHarness) sendWrongShapePayload(t *testing.T, msgType string) {
 func (h *testHarness) expectError(t *testing.T, wantSubstr string) {
 	t.Helper()
 
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("expected error, got %q", env.Type)
-	}
+	env := h.expectType(t, "error")
 
 	var e protocol.ErrorMsg
 
@@ -2956,6 +2668,19 @@ func (h *testHarness) expectError(t *testing.T, wantSubstr string) {
 	if !strings.Contains(e.Message, wantSubstr) {
 		t.Fatalf("error message = %q, want substring %q", e.Message, wantSubstr)
 	}
+}
+
+// expectType reads the next control message, asserts its type matches want, and
+// returns the envelope so callers can decode the payload further.
+func (h *testHarness) expectType(t *testing.T, want string) protocol.Envelope {
+	t.Helper()
+
+	env := h.readControlMsg(t)
+	if env.Type != want {
+		t.Fatalf("expected %q, got %q", want, env.Type)
+	}
+
+	return env
 }
 
 // --- unsupported / fallthrough -------------------------------------------
@@ -2975,10 +2700,7 @@ func TestCoverRepoList(t *testing.T) {
 
 	h.sendControl(t, "repo_list", struct{}{})
 
-	env := h.readControlMsg(t)
-	if env.Type != "repo_list" {
-		t.Fatalf("expected repo_list, got %q", env.Type)
-	}
+	h.expectType(t, "repo_list")
 }
 
 // --- diagnostics ----------------------------------------------------------
@@ -2988,10 +2710,7 @@ func TestCoverDiagnostics(t *testing.T) {
 
 	h.sendControl(t, "diagnostics", struct{}{})
 
-	env := h.readControlMsg(t)
-	if env.Type != "diagnostics" {
-		t.Fatalf("expected diagnostics, got %q", env.Type)
-	}
+	env := h.expectType(t, "diagnostics")
 
 	var d protocol.DiagnosticsMsg
 
@@ -3009,10 +2728,7 @@ func TestCoverApprovalList(t *testing.T) {
 
 	h.sendControl(t, "approval_list", struct{}{})
 
-	env := h.readControlMsg(t)
-	if env.Type != "approval_notification" {
-		t.Fatalf("expected approval_notification, got %q", env.Type)
-	}
+	h.expectType(t, "approval_notification")
 }
 
 func TestCoverApprovalSubscribeLocalHuman(t *testing.T) {
@@ -3022,10 +2738,7 @@ func TestCoverApprovalSubscribeLocalHuman(t *testing.T) {
 	// allowed to subscribe and immediately receives the current pending set.
 	h.sendControl(t, "approval_subscribe", struct{}{})
 
-	env := h.readControlMsg(t)
-	if env.Type != "approval_notification" {
-		t.Fatalf("expected approval_notification, got %q", env.Type)
-	}
+	h.expectType(t, "approval_notification")
 }
 
 func TestCoverApprovalSubscribeRejectsAgent(t *testing.T) {
@@ -3100,10 +2813,7 @@ func TestCoverSetStatusSetAndClear(t *testing.T) {
 	// Set a summary.
 	h.sendControl(t, "set_status", protocol.SetStatusMsg{SessionID: "ken1", Text: "workin awa"})
 
-	env := h.readControlMsg(t)
-	if env.Type != "status_set" {
-		t.Fatalf("set: expected status_set, got %q", env.Type)
-	}
+	h.expectType(t, "status_set")
 
 	h.sm.mu.RLock()
 	got := h.sm.state.Sessions["ken1"].SummaryText
@@ -3116,10 +2826,7 @@ func TestCoverSetStatusSetAndClear(t *testing.T) {
 	// Clear it.
 	h.sendControl(t, "set_status", protocol.SetStatusMsg{SessionID: "ken1", Clear: true})
 
-	env = h.readControlMsg(t)
-	if env.Type != "status_set" {
-		t.Fatalf("clear: expected status_set, got %q", env.Type)
-	}
+	h.expectType(t, "status_set")
 
 	h.sm.mu.RLock()
 	got = h.sm.state.Sessions["ken1"].SummaryText
@@ -3156,10 +2863,7 @@ func TestCoverSetStatusForcedToOwnSession(t *testing.T) {
 		SessionID: "some-other", Text: "mine",
 	}, "tok-canny")
 
-	env := h.readControlMsg(t)
-	if env.Type != "status_set" {
-		t.Fatalf("expected status_set, got %q", env.Type)
-	}
+	h.expectType(t, "status_set")
 
 	h.sm.mu.RLock()
 	got := h.sm.state.Sessions["canny-own"].SummaryText
@@ -3202,10 +2906,7 @@ func TestCoverStatusResponse(t *testing.T) {
 
 	h.sendControl(t, "status", protocol.StatusRequestMsg{SessionID: "ken2"})
 
-	env := h.readControlMsg(t)
-	if env.Type != "status_response" {
-		t.Fatalf("expected status_response, got %q", env.Type)
-	}
+	env := h.expectType(t, "status_response")
 
 	var resp protocol.StatusResponseMsg
 
@@ -3242,10 +2943,7 @@ func TestCoverStatusReport(t *testing.T) {
 		ToolName:  "Edit",
 	}, "tok-kirk")
 
-	env := h.readControlMsg(t)
-	if env.Type != "status_reported" {
-		t.Fatalf("expected status_reported, got %q", env.Type)
-	}
+	h.expectType(t, "status_reported")
 
 	h.sm.mu.RLock()
 	sess := h.sm.state.Sessions["kirk-rep"]
@@ -3276,10 +2974,7 @@ func TestCoverStarUnstar(t *testing.T) {
 
 	h.sendControl(t, "star", protocol.StarMsg{SessionID: "bonnie-star"})
 
-	env := h.readControlMsg(t)
-	if env.Type != "starred" {
-		t.Fatalf("expected starred, got %q", env.Type)
-	}
+	h.expectType(t, "starred")
 
 	h.sm.mu.RLock()
 	starred := h.sm.state.Sessions["bonnie-star"].Starred
@@ -3291,10 +2986,7 @@ func TestCoverStarUnstar(t *testing.T) {
 
 	h.sendControl(t, "unstar", protocol.UnstarMsg{SessionID: "bonnie-star"})
 
-	env = h.readControlMsg(t)
-	if env.Type != "unstarred" {
-		t.Fatalf("expected unstarred, got %q", env.Type)
-	}
+	h.expectType(t, "unstarred")
 
 	h.sm.mu.RLock()
 	starred = h.sm.state.Sessions["bonnie-star"].Starred
@@ -3406,10 +3098,7 @@ func TestCoverMsgConversation(t *testing.T) {
 
 	h.sendControl(t, "msg_conversation", protocol.MsgConversationMsg{SessionID: "blether-sess"})
 
-	env := h.readControlMsg(t)
-	if env.Type != "msg_conversation_list" {
-		t.Fatalf("expected msg_conversation_list, got %q", env.Type)
-	}
+	env := h.expectType(t, "msg_conversation_list")
 
 	var resp protocol.MsgConversationListMsg
 
@@ -3436,10 +3125,7 @@ func TestCoverMsgConversationOversizedLimit(t *testing.T) {
 		SessionID: "skelf-sess", Limit: 999999,
 	})
 
-	env := h.readControlMsg(t)
-	if env.Type != "msg_conversation_list" {
-		t.Fatalf("expected msg_conversation_list, got %q", env.Type)
-	}
+	h.expectType(t, "msg_conversation_list")
 }
 
 // --- fork / migrate payload validation ------------------------------------
@@ -3472,10 +3158,7 @@ func TestCoverReloadLocalHuman(t *testing.T) {
 
 	h.sendControl(t, "reload", struct{}{})
 
-	env := h.readControlMsg(t)
-	if env.Type != "reloaded" {
-		t.Fatalf("expected reloaded, got %q", env.Type)
-	}
+	h.expectType(t, "reloaded")
 }
 
 func TestCoverReloadRejectsAgent(t *testing.T) {
@@ -3546,10 +3229,7 @@ func TestCoverScenarioList(t *testing.T) {
 
 	h.sendControl(t, "scenario_list", struct{}{})
 
-	env := h.readControlMsg(t)
-	if env.Type != "scenario_list" {
-		t.Fatalf("expected scenario_list, got %q", env.Type)
-	}
+	env := h.expectType(t, "scenario_list")
 
 	var resp protocol.ScenarioListResponse
 
@@ -3660,10 +3340,7 @@ func TestCoverStopWithChildren(t *testing.T) {
 	// handleSessionLifecycle and its multi-session response shape.
 	h.sendControl(t, "stop", protocol.StopMsg{SessionID: "ben-root", Children: true})
 
-	env := h.readControlMsg(t)
-	if env.Type != "stopped" {
-		t.Fatalf("expected stopped, got %q", env.Type)
-	}
+	env := h.expectType(t, "stopped")
 
 	var resp struct {
 		SessionID string   `json:"session_id"`
@@ -3693,10 +3370,7 @@ func TestCoverDeleteWithChildren(t *testing.T) {
 	// subtree is hidden but preserved, not removed from state.
 	h.sendControl(t, "delete", protocol.DeleteMsg{SessionID: "brae-root", Children: true})
 
-	env := h.readControlMsg(t)
-	if env.Type != "deleted" {
-		t.Fatalf("expected deleted, got %q", env.Type)
-	}
+	env := h.expectType(t, "deleted")
 
 	var resp protocol.DeleteResultMsg
 
@@ -3805,10 +3479,7 @@ func TestCoverHandshakeProfileMismatch(t *testing.T) {
 		TerminalSize: [2]uint16{80, 24},
 	})
 
-	env := h.readControlMsg(t)
-	if env.Type != "handshake_err" {
-		t.Fatalf("expected handshake_err for profile mismatch, got %q", env.Type)
-	}
+	env := h.expectType(t, "handshake_err")
 
 	var he protocol.HandshakeErrMsg
 	if err := protocol.DecodePayload(env, &he); err != nil {
@@ -3832,10 +3503,7 @@ func TestCoverHandshakeOkBaseline(t *testing.T) {
 		TerminalSize: [2]uint16{80, 24},
 	})
 
-	env := h.readControlMsg(t)
-	if env.Type != "handshake_ok" {
-		t.Fatalf("expected handshake_ok, got %q", env.Type)
-	}
+	env := h.expectType(t, "handshake_ok")
 
 	var ok protocol.HandshakeOkMsg
 	if err := protocol.DecodePayload(env, &ok); err != nil {
