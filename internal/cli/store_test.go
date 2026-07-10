@@ -10,12 +10,14 @@ import (
 	"github.com/d0ugal/graith/internal/git"
 	"github.com/d0ugal/graith/internal/output"
 	"github.com/d0ugal/graith/internal/store"
+	"github.com/d0ugal/graith/internal/testutil"
 )
 
 // storeTestEnv sets up the package globals the store subcommands rely on and
 // returns a cleanup that restores them.
 func storeTestEnv(t *testing.T, shared bool, repoFlag string) config.Paths {
 	t.Helper()
+	testutil.IsolateGit(t)
 
 	dataDir := t.TempDir()
 	p := config.Paths{DataDir: dataDir}
@@ -453,11 +455,11 @@ func captureStdout(t *testing.T, fn func()) string {
 	return result
 }
 
-// gitInitNoCommitCov2 initializes a bare-minimum git repo (no commit, so it
-// never touches the signing agent) — enough for `git rev-parse --show-toplevel`
-// to succeed.
+// gitInitNoCommitCov2 initializes a bare-minimum git repo, enough for
+// `git rev-parse --show-toplevel` to succeed.
 func gitInitNoCommitCov2(t *testing.T, dir string) {
 	t.Helper()
+	testutil.IsolateGit(t)
 
 	if _, err := git.RunOutput(dir, "init", "--quiet"); err != nil {
 		t.Fatalf("git init: %v", err)
@@ -465,9 +467,9 @@ func gitInitNoCommitCov2(t *testing.T, dir string) {
 }
 
 // seedStoreCov2 fabricates a store on disk (a repo-hash dir with a .git marker
-// and one document) without going through store.Init/Put — which would commit
-// and hit the signing agent. store.ListStores only requires the .git marker and
-// store.List merely walks files, so this is enough to exercise listAllStores.
+// and one document) without going through store.Init/Put. store.ListStores only
+// requires the .git marker and store.List merely walks files, so this is enough
+// to exercise listAllStores.
 func seedStoreCov2(t *testing.T, dataDir, storeName, key, body string) {
 	t.Helper()
 

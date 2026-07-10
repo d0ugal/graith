@@ -17,10 +17,12 @@ import (
 	"github.com/d0ugal/graith/internal/git"
 	"github.com/d0ugal/graith/internal/protocol"
 	grpty "github.com/d0ugal/graith/internal/pty"
+	"github.com/d0ugal/graith/internal/testutil"
 )
 
 func newTestSessionManager(t *testing.T) *SessionManager {
 	t.Helper()
+	testutil.IsolateGit(t)
 
 	// Approval gating is opt-in (disabled by default). These tests exercise
 	// the hook-generation and approval-queue mechanics, so enable it here.
@@ -33,24 +35,14 @@ func newTestSessionManager(t *testing.T) *SessionManager {
 
 // gitOut mirrors the package-level gitRun helper but returns the command's
 // combined output (trimmed), for callers that need to inspect it. It keeps the
-// -c commit.gpgsign=false override some git invocations rely on.
+// hermetic Git environment some git invocations rely on.
 func gitOut(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 
-	full := append([]string{"-c", "commit.gpgsign=false"}, args...)
-
-	cmd := exec.Command("git", full...)
+	cmd := testutil.GitCommand(args...)
 	if dir != "" {
 		cmd.Dir = dir
 	}
-
-	cmd.Env = append(os.Environ(),
-		"GIT_CONFIG_GLOBAL=/dev/null",
-		"GIT_AUTHOR_NAME=test",
-		"GIT_AUTHOR_EMAIL=test@test.com",
-		"GIT_COMMITTER_NAME=test",
-		"GIT_COMMITTER_EMAIL=test@test.com",
-	)
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -2595,7 +2587,7 @@ func TestForkUsesSourceBaseBranch(t *testing.T) {
 		}
 
 		if forked.WorktreePath != "" {
-			cmd := exec.Command("git", "worktree", "remove", "--force", forked.WorktreePath)
+			cmd := testutil.GitCommand("worktree", "remove", "--force", forked.WorktreePath)
 			cmd.Dir = repoDir
 			_ = cmd.Run()
 		}
@@ -2653,7 +2645,7 @@ func TestForkInheritsYolo(t *testing.T) {
 		}
 
 		if forked.WorktreePath != "" {
-			cmd := exec.Command("git", "worktree", "remove", "--force", forked.WorktreePath)
+			cmd := testutil.GitCommand("worktree", "remove", "--force", forked.WorktreePath)
 			cmd.Dir = repoDir
 			_ = cmd.Run()
 		}

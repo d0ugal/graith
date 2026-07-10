@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -17,6 +16,7 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/daemon"
 	"github.com/d0ugal/graith/internal/protocol"
+	"github.com/d0ugal/graith/internal/testutil"
 )
 
 type testEnv struct {
@@ -31,6 +31,7 @@ type testEnv struct {
 
 func setup(t *testing.T) *testEnv {
 	t.Helper()
+	testutil.IsolateGit(t)
 	tmpDir := t.TempDir()
 
 	repo := filepath.Join(tmpDir, "repo")
@@ -156,13 +157,8 @@ func handshake(t *testing.T, r *protocol.FrameReader, w *protocol.FrameWriter) {
 
 func gitRun(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	allArgs := append([]string{"-c", "commit.gpgsign=false"}, args...)
-	cmd := exec.Command("git", allArgs...)
+	cmd := testutil.GitCommand(args...)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(),
-		"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
-		"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
-	)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)

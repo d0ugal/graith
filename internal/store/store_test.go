@@ -2,12 +2,12 @@ package store_test
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/d0ugal/graith/internal/store"
+	"github.com/d0ugal/graith/internal/testutil"
 )
 
 func TestValidateKey(t *testing.T) {
@@ -164,6 +164,8 @@ func TestValidateKey(t *testing.T) {
 }
 
 func TestInit(t *testing.T) {
+	testutil.IsolateGit(t)
+
 	dir := filepath.Join(t.TempDir(), "store")
 
 	if err := store.Init(dir); err != nil {
@@ -186,8 +188,66 @@ func TestInit(t *testing.T) {
 	}
 }
 
+// TestInitRepairsInheritedCommitSigning is the regression test for store
+// commits inheriting a developer's global SSH signing configuration. Init is
+// called before each CLI store operation, so it must also repair stores created
+// by an older graith version rather than only configuring brand-new repos.
+func TestInitRepairsInheritedCommitSigning(t *testing.T) {
+	testutil.IsolateGit(t)
+
+	globalConfig := filepath.Join(t.TempDir(), "gitconfig")
+
+	configBody := "[commit]\n\tgpgsign = true\n[gpg]\n\tformat = ssh\n[user]\n\tsigningkey = /nonexistent/thrawn.pub\n"
+	if err := os.WriteFile(globalConfig, []byte(configBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("GIT_CONFIG_GLOBAL", globalConfig)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	t.Setenv("GIT_CONFIG_COUNT", "0")
+	t.Setenv("SSH_AUTH_SOCK", "")
+
+	dir := filepath.Join(t.TempDir(), "store")
+	if err := store.Init(dir); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	// Simulate a pre-fix store whose local config did not override the user's
+	// global commit.gpgsign=true setting.
+	cmd := testutil.GitCommand("config", "--local", "commit.gpgsign", "true")
+
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("enable local signing: %v\n%s", err, out)
+	}
+
+	if err := store.Init(dir); err != nil {
+		t.Fatalf("Init existing store: %v", err)
+	}
+
+	if err := store.Put(dir, "loch/braw.md", "bonnie"); err != nil {
+		t.Fatalf("Put inherited signing config: %v", err)
+	}
+
+	cmd = testutil.GitCommand("config", "--local", "--bool", "commit.gpgsign")
+	cmd.Dir = dir
+	// Disable the helper's command-scope commit.gpgsign=false so this assertion
+	// reads the repository-local value that Init persisted.
+	cmd.Env = testutil.GitEnv("GIT_CONFIG_COUNT=0")
+
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("read local signing config: %v", err)
+	}
+
+	if got := strings.TrimSpace(string(out)); got != "false" {
+		t.Errorf("local commit.gpgsign = %q, want false", got)
+	}
+}
+
 func newTestStore(t *testing.T) string {
 	t.Helper()
+	testutil.IsolateGit(t)
 
 	dir := filepath.Join(t.TempDir(), "store")
 	if err := store.Init(dir); err != nil {
@@ -314,7 +374,7 @@ func TestPutCreatesGitCommit(t *testing.T) {
 	}
 
 	// Check that a git commit was created with the right message.
-	cmd := exec.Command("git", "log", "--oneline", "-1")
+	cmd := testutil.GitCommand("log", "--oneline", "-1")
 	cmd.Dir = dir
 
 	out, err := cmd.Output()
@@ -626,6 +686,8 @@ func TestSharedStorePath(t *testing.T) {
 }
 
 func TestListStores(t *testing.T) {
+	testutil.IsolateGit(t)
+
 	dataDir := t.TempDir()
 
 	// Create two stores
@@ -711,7 +773,7 @@ func TestAppendMultipleLines(t *testing.T) {
 	}
 
 	// Each append should produce a git commit
-	cmd := exec.Command("git", "log", "--oneline")
+	cmd := testutil.GitCommand("log", "--oneline")
 	cmd.Dir = dir
 
 	out, err := cmd.Output()

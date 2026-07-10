@@ -13,23 +13,16 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/git"
 	grpty "github.com/d0ugal/graith/internal/pty"
+	"github.com/d0ugal/graith/internal/testutil"
 )
 
 func gitRun(t *testing.T, dir string, args ...string) {
 	t.Helper()
 
-	cmd := exec.Command("git", args...)
+	cmd := testutil.GitCommand(args...)
 	if dir != "" {
 		cmd.Dir = dir
 	}
-
-	cmd.Env = append(os.Environ(),
-		"GIT_CONFIG_GLOBAL=/dev/null",
-		"GIT_AUTHOR_NAME=test",
-		"GIT_AUTHOR_EMAIL=test@test.com",
-		"GIT_COMMITTER_NAME=test",
-		"GIT_COMMITTER_EMAIL=test@test.com",
-	)
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -39,6 +32,7 @@ func gitRun(t *testing.T, dir string, args ...string) {
 
 func setupTestRepo(t *testing.T) (bareDir, cloneDir string) {
 	t.Helper()
+	testutil.IsolateGit(t)
 	tmp := t.TempDir()
 
 	bareDir = filepath.Join(tmp, "remote.git")
@@ -679,17 +673,14 @@ func TestRunGitPullTick_PullsMaintenanceRepo_Cov(t *testing.T) {
 // gitCmdHome builds a git command with an overridden HOME so --global config
 // writes/reads land in the test's throwaway home.
 func gitCmdHome(home, dir string, args ...string) *exec.Cmd {
-	cmd := exec.Command("git", args...)
+	cmd := testutil.GitCommand(args...)
 	if dir != "" {
 		cmd.Dir = dir
 	}
 
-	cmd.Env = append(os.Environ(),
+	cmd.Env = testutil.GitEnv(
 		"HOME="+home,
-		"GIT_AUTHOR_NAME=test",
-		"GIT_AUTHOR_EMAIL=test@test.com",
-		"GIT_COMMITTER_NAME=test",
-		"GIT_COMMITTER_EMAIL=test@test.com",
+		"GIT_CONFIG_GLOBAL="+filepath.Join(home, ".gitconfig"),
 	)
 
 	return cmd

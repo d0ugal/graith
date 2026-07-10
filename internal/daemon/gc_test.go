@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/d0ugal/graith/internal/testutil"
 )
 
 // mkOrphanDir creates a directory and back-dates its mtime past gcOrphanMinAge
@@ -32,6 +34,7 @@ func worktreeDir(dataDir, repoName, repoPath, id string) string {
 // initGitRepo turns dir into a git repo so git.IsInsideGitRepo reports true.
 func initGitRepo(t *testing.T, dir string) {
 	t.Helper()
+	testutil.IsolateGit(t)
 
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatalf("mkdir %s: %v", dir, err)
@@ -42,7 +45,7 @@ func initGitRepo(t *testing.T, dir string) {
 		{"config", "user.email", "graith@localhost"},
 		{"config", "user.name", "graith"},
 	} {
-		cmd := exec.Command("git", args...)
+		cmd := testutil.GitCommand(args...)
 		cmd.Dir = dir
 
 		if out, err := cmd.CombinedOutput(); err != nil {
