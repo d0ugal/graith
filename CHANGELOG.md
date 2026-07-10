@@ -1,5 +1,64 @@
 # Changelog
 
+## [0.66.16](https://github.com/d0ugal/graith/compare/v0.66.15...v0.66.16) (2026-07-10)
+
+
+### Features
+
+* **client:** add hold-and-drag arrow keys ([1a3f517](https://github.com/d0ugal/graith/commit/1a3f517c2566ea2c4e943a4cd4564e25bab23acd))
+* **daemon:** crash-safe atomic persistence, delete tombstones, orphan GC ([83a8177](https://github.com/d0ugal/graith/commit/83a817760ae1171f4a224ddc9db871a5a355c462))
+* **delete:** soft delete with recovery window + gr purge/restore ([c2b998b](https://github.com/d0ugal/graith/commit/c2b998bcbf61be8396d029af93f619be123beed9)), closes [#994](https://github.com/d0ugal/graith/issues/994)
+* **overlay:** add Deleted view with restore action ([ea8294e](https://github.com/d0ugal/graith/commit/ea8294e5f52c76b8a638052d1b1c0608ef810761))
+
+
+### Bug Fixes
+
+* **client:** harden drag-arrow parsing and classification ([4278348](https://github.com/d0ugal/graith/commit/42783488f046bd6cc2cd30817eebea108c5c11f5))
+* **daemon:** address review findings on crash-safe delete + GC ([ef1d2e2](https://github.com/d0ugal/graith/commit/ef1d2e29ef8c384163606e009184d0319f530586))
+* **daemon:** address round-2 review findings on GC + delete ([548396d](https://github.com/d0ugal/graith/commit/548396df3f5cb218c6e7f7c7f71b4a730598f9e2))
+* **daemon:** detect worktree branch change and re-match PR ([de86ab1](https://github.com/d0ugal/graith/commit/de86ab19610bd4cdf8c399b6cb9f3c1b1417f5df)), closes [#1008](https://github.com/d0ugal/graith/issues/1008)
+* **daemon:** track PR-watch branch off-session to keep teardown safe ([277a4cf](https://github.com/d0ugal/graith/commit/277a4cfdc5b804496de76689ece99c206da1c946))
+* **delete:** address review findings ([a6c9f80](https://github.com/d0ugal/graith/commit/a6c9f805fa3e8beb0588b09b520c7b81557d81fd))
+* **test:** remove ineffectual assignments flagged by lint ([21f4d8e](https://github.com/d0ugal/graith/commit/21f4d8ecfdecc2494f6554e9308f0622156069f3))
+
+
+### Documentation
+
+* document soft delete, gr purge/restore, and the Deleted overlay view ([51b6a7a](https://github.com/d0ugal/graith/commit/51b6a7a255393ce44eebc40b2afa23478b9f0a11))
+
+
+### Code Refactoring
+
+* **cli:** fold orphan GC into gr doctor, drop gr gc command ([25c339f](https://github.com/d0ugal/graith/commit/25c339f00208c11c52795f687dba3d670b449c75))
+* **daemon:** extract authorizeScenarioOp helper ([1ea00f5](https://github.com/d0ugal/graith/commit/1ea00f56c7e1126eea83f2c05d33b706c55384cb))
+* **daemon:** extract authorizeTarget helper ([64b56c4](https://github.com/d0ugal/graith/commit/64b56c4bb5be6ae80ec349663a6b5422ae96f4b0))
+* **daemon:** extract decodePayload helper for control messages ([6891472](https://github.com/d0ugal/graith/commit/6891472a75381afd764c098b885241a868d5a228))
+
+
+### Tests
+
+* **client:** add compactDelegate render harness ([e06664e](https://github.com/d0ugal/graith/commit/e06664e9dace76c813c93b793913d140a7302ba9))
+* **client:** add countSessionItems helper ([31218b5](https://github.com/d0ugal/graith/commit/31218b5328c62651775c0f3dcc805145c3050c39))
+* **client:** add drain helper for queued tea.Cmds ([19a2aa0](https://github.com/d0ugal/graith/commit/19a2aa0c66b8eef32da27c57ea15e66d6ee69a84))
+* **client:** add sized overlay model fixture ([d81b8c0](https://github.com/d0ugal/graith/commit/d81b8c03e4570f8de46569c206b8f2b7a8d4a29b))
+* **daemon:** add assertErrContains helper ([54a583f](https://github.com/d0ugal/graith/commit/54a583f3951aecbcdd8d3885bb505519c35f24c3))
+* **daemon:** add expectType success-assertion helper ([04e5807](https://github.com/d0ugal/graith/commit/04e5807447239c4c570a537a49c844e8da49029a))
+* **daemon:** add initDirtyRepo fixture helper ([93ddc43](https://github.com/d0ugal/graith/commit/93ddc431676027acc915494845f7d192e40f4f73))
+* **daemon:** add newSMWithConfig helper ([d83f25d](https://github.com/d0ugal/graith/commit/d83f25de6715f077e2953adbe875f85e3c3e9076))
+* **daemon:** add stopAndClosePTY helper ([377a841](https://github.com/d0ugal/graith/commit/377a841a59ad3f36018be1748845d99068e67b2d))
+* **daemon:** add waitExit PTY helper ([8aa0614](https://github.com/d0ugal/graith/commit/8aa06143f1e2366ce413c4bf989eed608bc52185))
+* **daemon:** bind unix-socket tests under a short /tmp path ([2fbb2c6](https://github.com/d0ugal/graith/commit/2fbb2c6c8619bf685a0084ba1c4099a2c207e946))
+* **daemon:** reuse shared gitRun helper ([2a7f3da](https://github.com/d0ugal/graith/commit/2a7f3dac7a99ec0ac399cb22ca3457bf82556836))
+* **daemon:** route sleeperSM and newTestSessionManager through newSMWithConfig ([4f28e1b](https://github.com/d0ugal/graith/commit/4f28e1b332b33a98fd891edc740b12277328d1b9))
+* **daemon:** share the share-worktree rejection assertion ([d9d4b38](https://github.com/d0ugal/graith/commit/d9d4b387034784d782e0f0098b4cd3194d93d61b))
+* **daemon:** table-drive InvalidPayload cases ([baba4a1](https://github.com/d0ugal/graith/commit/baba4a1221a09f7fa009f979979202269d7237e3))
+* **daemon:** table-drive NotFound cases ([6e1f117](https://github.com/d0ugal/graith/commit/6e1f117d11aa11d05f314186948d0d359495aa96))
+
+
+### Dependencies
+
+* **lint:** satisfy golangci-lint (errcheck + wsl_v5 whitespace) ([350c2fd](https://github.com/d0ugal/graith/commit/350c2fde13cbbae4c287fb67515029b398590de1))
+
 ## [0.66.15](https://github.com/d0ugal/graith/compare/v0.66.14...v0.66.15) (2026-07-10)
 
 
