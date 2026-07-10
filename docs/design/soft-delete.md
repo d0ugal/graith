@@ -117,13 +117,28 @@ A soft-deleted session is marked by a new nullable timestamp on
 type SessionState struct {
     // ... existing fields ...
     DeletedAt *time.Time `json:"deleted_at,omitempty"` // nil = live; set = soft-deleted
+    ExpiresAt *time.Time `json:"expires_at,omitempty"` // purge deadline, frozen at delete time
 }
 ```
 
-`nil` means live; a non-nil value is the instant the soft delete happened. The
-purge deadline is `DeletedAt.Add(retention)`, computed from the *current* config
-at purge time (not frozen at delete time — see
-[Config](#config-delete-retention)).
+`DeletedAt == nil` means live. When a session is soft-deleted, `DeletedAt` records
+*when*, and **`ExpiresAt` is frozen to `DeletedAt + retention` at delete time** —
+using the retention value in effect at that moment. The purge deadline is
+`ExpiresAt`, **not** recomputed from current config on each sweep.
+
+This freezing is deliberate and load-bearing: the delete success line promises a
+concrete "Recoverable until `<ExpiresAt>`". If purge instead recomputed
+`DeletedAt + current_retention` every sweep, then lowering `retention` (or setting
+`"0"`) would retroactively shorten — or eliminate — a window the user was *already
+told* was safe, purging a session 30 seconds after they were promised 24h. Storing
+`ExpiresAt` means a config change only affects *future* deletes, exactly matching
+what was printed. This cuts **both** ways and is intentional: *raising* retention
+does **not** extend the window of an already-soft-deleted session either — its
+`ExpiresAt` is fixed at delete time. A session shows the deadline it was promised,
+no more and no less; this is a feature (predictability), not a bug to file. Both
+the purge predicate and `Restore`'s window check test `now >= ExpiresAt`, so they
+can never disagree (see
+[SoftDelete/Restore](#daemon-softdelete-restore-and-the-purge-loop)).
 
 Why a timestamp field and not a `StatusDeleted` enum value:
 
@@ -200,22 +215,42 @@ Soft-deleted braw. Recoverable until 2026-07-11 06:53 (in 24h).
 ```
 
 The existing **unsaved-work confirmation** is preserved: if the worktree has
-uncommitted or un-pushed work, `gr delete` still prompts `Delete anyway? [y/N]`
-unless `--force`. This is deliberately kept even for soft delete — it is
-protective regardless of whether the daemon ultimately soft- or hard-deletes
-(e.g. with `retention = "0"` a soft delete *is* a hard delete), and it costs
-nothing when there is no unsaved work. Because the CLI doesn't know the retention
-value, the prompt wording stays generic ("Delete …?"); the success line printed
-afterward reflects what actually happened, driven by the daemon's response — which
-means the delete response must carry the soft/hard outcome and, for a soft delete,
-the computed expiry (see [Control messages](#control-messages)). Today the delete
-handler replies with a bare `{session_id}`; that is not enough to render
-"Recoverable until …", so the response schema is extended.
+uncommitted or un-pushed work, `gr delete` prompts `Delete anyway? [y/N]`. Because
+the CLI doesn't know the retention value, the prompt wording stays generic
+("Delete …?"); the success line printed afterward reflects what actually happened,
+driven by the daemon's response — which means the delete response must carry the
+soft/hard outcome and, for a soft delete, the computed expiry (see
+[Control messages](#control-messages)). Today the delete handler replies with a
+bare `{session_id}`; that is not enough to render "Recoverable until …", so the
+response schema is extended.
+
+**Critical: the confirmation must not force agents onto a destructive path.**
+Today `confirmDelete` (`cli/delete.go`) errors with *"…use `--force` to delete"*
+whenever there is unsaved work **and** output is JSON **or** stdin is not a TTY.
+Agents auto-enable JSON mode, so under a naive design the feature's *primary
+audience* — an agent deleting a session with un-pushed work, which is the exact
+originating failure — would be offered only `--force`, and `--force` now escalates
+to immediate **hard** delete. That re-creates the data-loss footgun this feature
+exists to remove.
+
+The fix is to **split "skip the prompt" from "delete destructively":**
+
+- `--yes` / `-y` — skip the unsaved-work confirmation, but **still let the daemon
+  decide soft vs hard**. This is the non-interactive soft-safe path: an agent (or
+  script) that just wants the session gone gets a *recoverable* soft delete.
+- `--force` / `--purge` — hard-delete now (bypass the window). Destructive by
+  intent.
+
+In JSON / non-TTY mode with unsaved work, the error must recommend **`--yes`**
+(recoverable soft delete), and only mention `--purge` for the destroy-now case.
+The error string must **stop recommending `--force`** now that `--force` means
+destroy. With this split, the dangerous flag is never the one an agent is nudged
+toward by default.
 
 #### `gr delete --force` / `gr delete --purge`
 
 Both mean **hard-delete now, bypassing the window, and skip the confirmation
-prompt**. They are aliases with one nuance:
+prompt**:
 
 - `--force` retains its historical meaning ("don't prompt") and *additionally*
   now means "don't soft-delete". Existing scripts using `--force` keep working
@@ -225,14 +260,19 @@ prompt**. They are aliases with one nuance:
   on an already-soft-deleted session (empty the trash for one entry).
 
 They are equivalent flags; `--purge` is sugar. Supplying both is not an error.
+Note the three-way distinction, which is the crux of keeping delete safe by
+default: **`gr delete`** = prompt then soft-delete; **`gr delete --yes`** = no
+prompt, still soft-delete; **`gr delete --force`/`--purge`** = no prompt, hard
+delete. Only the last is destructive.
 
 **Batch delete must forward this too.** `gr delete` with batch filters (e.g.
 `gr delete --stopped`) goes through a separate code path (`deleteBatchRun`), where
 `--force` today skips the batch confirmation. That path must also set `Purge` on
 each `DeleteMsg` when `--force`/`--purge` is given — otherwise `gr delete
 --stopped --force` would *soft*-delete, silently breaking the backward-compat
-promise that `--force` means immediate hard delete. Batch delete without `--force`
-soft-deletes each matched session (subject to the daemon's retention).
+promise that `--force` means immediate hard delete. Batch delete without
+`--force`/`--purge` soft-deletes each matched session (subject to the daemon's
+retention); `--yes` skips the batch confirmation while staying soft.
 
 #### `gr restore <name>`
 
@@ -241,10 +281,13 @@ $ gr restore braw
 Restored braw (stopped). Resume it with: gr resume braw
 ```
 
-Restore clears `DeletedAt`, leaves `Status = stopped`, and returns the
+Restore clears `DeletedAt`/`ExpiresAt`, leaves `Status = stopped`, and returns the
 `SessionInfo`. Auth mirrors delete (`authSelfOrDescendant`). Shell completion for
 `gr restore` queries the **deleted** list (a new `completeDeletedSessionNames`),
-since live-name completion would never see soft-deleted sessions.
+since live-name completion would never see soft-deleted sessions. **`gr delete
+--purge <TAB>` must also offer deleted names** (the design explicitly supports
+purging an already-soft-deleted session by name), so `--purge` completion unions
+live + deleted names.
 
 #### `gr list --deleted`
 
@@ -264,8 +307,8 @@ there is no combined view by default, keeping the common case uncluttered.
 ### Server-side hiding via the `list` message
 
 All session listing funnels through the `list` control message, which today is
-sent with an empty `struct{}{}` by ~15 CLI callsites and the overlay. We add a
-request field:
+sent with an empty `struct{}{}` by ~22 CLI/overlay callsites. We add a request
+field:
 
 ```go
 type ListMsg struct {
@@ -278,9 +321,16 @@ The handler's `case "list"` filters `sm.state.Sessions` by `IsSoftDeleted()`:
 true` returns only soft-deleted ones. This covers `gr list`, the overlay, tree
 view, quiet mode, `--json`, shell completion, and CLI name resolution — every
 path that goes through the `list` message (`gr list`, completion, and
-`resolveSessionInfo`) and the ~22 callsites that send `struct{}{}` today (which
+`resolveSessionInfo`) and the callsites that send `struct{}{}` today (which
 decodes to `ListMsg{Deleted:false}` — backward compatible). Note the **MCP
 server**'s list paths (`internal/mcp/server.go`) must also stay live-only.
+
+**Version skew belt-and-braces.** An *old* daemon that predates `ListMsg` ignores
+`Deleted:true` and returns the **live** list — so a new `gr list --deleted` against
+a stale daemon would render live sessions in the trash view with nil expiry (a
+lying view). Cheap guard: the CLI additionally filters the rendered `--deleted`
+rows on `DeletedAt != nil` (it has the field). A stale daemon then yields an empty
+trash view rather than a misleading one.
 
 **But `list` is not the only place sessions are enumerated**, and this is a
 correctness requirement, not a nicety. Several daemon features iterate
@@ -337,18 +387,19 @@ CLI command):
 
   ```go
   type DeleteResultMsg struct {
-      SessionID string     `json:"session_id"`
-      Soft      bool       `json:"soft"`                 // true = soft-deleted, false = hard-purged
-      DeletedAt *time.Time `json:"deleted_at,omitempty"` // set when Soft
-      ExpiresAt *time.Time `json:"expires_at,omitempty"` // DeletedAt + retention, when Soft
-      Children  []DeleteResultMsg `json:"children,omitempty"` // per-descendant for --children
+      SessionID string           `json:"session_id"`
+      Soft      bool             `json:"soft"`                 // true = soft-deleted, false = hard-purged
+      DeletedAt *time.Time       `json:"deleted_at,omitempty"` // set when Soft
+      ExpiresAt *time.Time       `json:"expires_at,omitempty"` // frozen deadline, set when Soft
+      Affected  []DeleteResultMsg `json:"affected,omitempty"`  // FLAT list of descendants for --children
   }
   ```
 
   This is what lets the CLI print "Soft-deleted braw. Recoverable until … (in
-  24h)." vs "Deleted braw." for a purge, and drives `--json` for delete. The
-  `--children` path (single and batch) returns one entry per affected session so
-  the CLI can report soft vs purged per descendant.
+  24h)." vs "Deleted braw." for a purge, and drives `--json` for delete. `Affected`
+  is a **flat** list (one entry per affected descendant), mirroring
+  `DeleteWithChildren`'s existing flat `[]string` return — it is not a nested tree,
+  so a caller reads soft-vs-purged per session without recursing.
 - **`RestoreMsg { SessionID string }`** — new `restore` control message; handler
   `case "restore"` authorizes with `auth.checkTarget(..., authSelfOrDescendant)`
   and calls `sm.Restore(id)`, replying `restored` with a `SessionInfo` (mirrors
@@ -373,10 +424,15 @@ The design therefore adds an `IsSoftDeleted()` guard (returning a clear
 operation that would otherwise act on a stopped session:
 
 - **Reject**: `Resume`, `Restart`, the attach auto-resume branch, `scenario_resume`
-  (skip soft-deleted members), `rename`, `star`/`unstar`, `update`, `type`/shell
-  input, and `--share-worktree` sourcing.
+  (skip soft-deleted members), `fork` (a `fork` acts on a raw `SourceSessionID`; a
+  soft-deleted source has `Status=stopped` and would otherwise fork fine —
+  violating "only restore/purge act on the trash"), `rename`, `star`/`unstar`,
+  `update`, `type`/shell input, and `--share-worktree` sourcing.
 - **Allow** (these are the only ways to act on a soft-deleted session): `restore`,
-  `delete --purge`, `list --deleted`, and read-only diagnostics/`logs`.
+  `delete --purge`, `list --deleted`, and read-only `logs`/`wait`/`info`. Because
+  CLI name resolution is live-only, these read-only ops reach a soft-deleted
+  session **only by its raw ID** (copied from `gr list --deleted`), not by name —
+  the doc states this rather than implying `gr logs <name>` works on the trash.
 
 This is defense-in-depth: client-side hiding is the ergonomic layer, the daemon
 guards are the guarantee.
@@ -418,18 +474,29 @@ the git teardown and minus the final state removal**:
    PTY first preserves a critical invariant: `watchSession` treats a session as
    stale when it is no longer in `sm.sessions`, so the exit watcher will not race
    in and clobber `DeletedAt`/`Status` when the agent process exits.
-3. **Persist the marker *before* the blocking kill (crash-safety).** Set
-   `DeletedAt = now`, `Status = stopped`, `StatusChangedAt = now`, write a summary
-   ("Soft-deleted, recoverable until …"), and `saveState` **while still holding
-   the intent** — mirroring how hard `Delete` writes `StatusDeleting` before its
-   blocking teardown. If instead we killed first and saved `DeletedAt` after, a
-   daemon crash mid-kill would leave a session with no `DeletedAt`; `Reconcile`
-   would then find a dead PID and mark it a live stopped session, silently
-   *undoing* the delete. Persisting first means a crash leaves the session
+3. **Persist the marker *before* the blocking kill (crash-safety).** Read the
+   current `retention`, set `DeletedAt = now`, `ExpiresAt = now + retention` (frozen
+   here), `Status = stopped`, `StatusChangedAt = now`, write a summary
+   ("Soft-deleted, recoverable until `<ExpiresAt>`"), and `saveState` **while still
+   holding the intent** — mirroring how hard `Delete` writes `StatusDeleting`
+   before its blocking teardown. If instead we killed first and saved `DeletedAt`
+   after, a daemon crash mid-kill would leave a session with no `DeletedAt`;
+   `Reconcile` would then find a dead PID and mark it a live stopped session,
+   silently *undoing* the delete. Persisting first means a crash leaves the session
    correctly soft-deleted.
 4. **Off-lock**: run the agent-kill sequence. **Do not** touch the worktree or
    branch. No further state write is needed (the marker is already durable);
    record the exit if useful.
+
+**Crash between persist and kill.** There is a narrow window where step 3 has
+persisted `Status=stopped`+`DeletedAt` but the step-4 kill has not completed. If
+the daemon dies here, the agent process may still be alive, attached to a hidden
+(soft-deleted) session — and `Reconcile` only re-checks liveness for
+`StatusRunning`, so it will skip this stopped session and leave the orphan running
+and invisible. To close this, the **startup purge sweep re-kills any soft-deleted
+session that still has a live verified PID** (reusing `killVerifiedProcess`) before
+doing anything else. This is strictly better than the hard-delete analogue, which
+leaves the same orphan visible-but-stopped.
 
 The routing decision lives in the handler's delete path: if `Purge` is set or
 `retention == 0`, call `Delete`/`DeleteWithChildren` (hard); otherwise call
@@ -445,13 +512,16 @@ only good for `restore`/`--purge`/read-only ops until the session is restored.
 `Restore`:
 
 1. **Under lock**: look up the session; error if not found or not soft-deleted.
-   **Check the window**: if `now - DeletedAt >= retention` (the same rule purge
-   uses), the recovery window has closed — return a clear "expired, already
-   scheduled for purge" error rather than silently resurrecting a session past its
-   advertised deadline. (Within the coarse purge cadence a just-expired session
-   may still be in state; restore must not undelete it.)
-2. Clear `DeletedAt`, set `StatusChangedAt = now`, write a summary ("Restored —
-   resume to continue"); `saveState`. Status is already `stopped`.
+   **Check the window** with the *same* predicate purge uses —
+   `shouldPurge(session, now)` i.e. `now >= session.ExpiresAt` (see below). If it
+   returns true the window has closed — return a clear "expired, already scheduled
+   for purge" error rather than silently resurrecting a session past its advertised
+   deadline. (Within the coarse purge cadence a just-expired session may still be
+   in state; restore must not undelete it.) Sharing the one predicate guarantees
+   restore and purge can never disagree about whether a session is recoverable.
+2. Clear `DeletedAt` **and `ExpiresAt`**, set `StatusChangedAt = now`, write a
+   summary ("Restored — resume to continue"); `saveState`. Status is already
+   `stopped`.
 
 The worktree still exists on disk (soft delete never removed it), so a subsequent
 `gr resume` re-launches the agent in place with no worktree work — the normal
@@ -464,8 +534,9 @@ Modeled on `RunGitPullLoop` (startup handling + ticker, survives restarts):
 ```go
 func (sm *SessionManager) RunPurgeLoop(ctx context.Context) {
     // One sweep shortly after startup: catch windows that expired while the
-    // daemon was down. Then a coarse ticker — retention is measured in hours,
-    // so a 10-minute cadence is plenty precise and cheap.
+    // daemon was down, and re-kill any orphaned live agent on a soft-deleted
+    // session (see crash-safety above). Then a coarse ticker — expiry is frozen
+    // and measured in hours, so a 10-minute cadence is plenty precise and cheap.
     timer := time.NewTimer(purgeStartupDelay)
     defer timer.Stop()
     for {
@@ -480,26 +551,36 @@ func (sm *SessionManager) RunPurgeLoop(ctx context.Context) {
 }
 ```
 
-`purgeExpired` reads the current `retention` from config each pass (so config
-reloads take effect) and snapshots the expired soft-deleted sessions as
-`(id, deletedAt)` pairs under a read lock — `now - DeletedAt >= retention`. It
-then hard-deletes each via a **compare-and-delete** step, not a bare `Delete(id)`:
+The decision is a single pure function, injectable `now`, shared with `Restore`:
+
+```go
+func shouldPurge(s *SessionState, now time.Time) bool {
+    return s.IsSoftDeleted() && s.ExpiresAt != nil && !now.Before(*s.ExpiresAt)
+}
+```
+
+`purgeExpired` snapshots the sessions where `shouldPurge(s, now)` under a read lock
+as `(id, expiresAt)` pairs, then hard-deletes each via a **compare-and-delete**
+step, not a bare `Delete(id)`:
 
 - Re-acquire the write lock, re-read the session, and verify it is *still*
-  soft-deleted **and** its `DeletedAt` still equals the snapshot value and is
-  still expired. Only then proceed to `Delete`.
+  soft-deleted **and** its `ExpiresAt` still equals the snapshot value and
+  `shouldPurge` is still true. Only then proceed to `Delete`.
 
 This closes a race the naive "snapshot then `Delete`" has: between the snapshot
-and the hard delete, a concurrent `gr restore` could clear `DeletedAt` (or a
-delete/restore/re-delete could change it), and an unconditional `Delete` would
-then purge a session the user just recovered. The compare step makes purge a
+and the hard delete, a concurrent `gr restore` could clear the marker (or a
+delete/restore/re-delete could change `ExpiresAt`), and an unconditional `Delete`
+would then purge a session the user just recovered. The compare step makes purge a
 no-op for any session whose marker changed under it. `Delete` itself reuses all
 its teardown, reparenting, token cleanup, and error handling.
 
-If `retention == 0`, there should be no soft-deleted sessions to purge, but any
-that exist (created before a config change) are purged on the next sweep. Started
-alongside the other loops in the daemon's `Run`, so it stops cleanly on context
-cancel during graceful shutdown.
+Note purge keys off the **frozen `ExpiresAt`**, not current config — so lowering
+`retention` (or setting `"0"`) does *not* retroactively purge sessions before the
+deadline they were promised; it only affects future deletes. If `retention == 0`,
+no *new* soft deletes are created (delete goes hard), but any pre-existing
+soft-deleted sessions still purge on their own frozen schedule. Started alongside
+the other loops in the daemon's `Run`, so it stops cleanly on context cancel during
+graceful shutdown.
 
 Error handling and logging follow the existing loops: a failed `Delete` is logged
 (slog, JSON) and left in place; the next sweep retries. Because purge goes
@@ -609,16 +690,20 @@ Semantics, and the edge cases worth calling out explicitly:
   a typo must not silently turn off recovery, which would recreate the exact
   data-loss footgun this feature exists to remove.
 
-Retention is read fresh on each delete and each purge sweep, so `gr daemon
-restart`-free config reloads (SIGHUP → `ReloadConfig`) change the window for
-future deletes and future purges without affecting the recorded `DeletedAt` of
-already-deleted sessions.
+Retention is read **once, at delete time**, and frozen into the session's
+`ExpiresAt`. A `gr daemon restart`-free config reload (SIGHUP → `ReloadConfig`)
+therefore changes the window only for *future* deletes — it never moves the
+deadline of an already-soft-deleted session, so the "Recoverable until …" the user
+was shown always holds. (This is the fix for the otherwise-broken promise where a
+purge recomputing `DeletedAt + current_retention` could bin a session before its
+advertised time; see [State model](#state-model--migration).)
 
 ## State model & migration
 
-`state.json` gains one optional field (`SessionState.DeletedAt`, `omitempty`).
-This is additive and backward compatible: old state files simply have the field
-absent, which unmarshals to `nil` (= live), exactly the desired default.
+`state.json` gains two optional fields (`SessionState.DeletedAt` and
+`SessionState.ExpiresAt`, both `omitempty`). This is additive and backward
+compatible: old state files simply have them absent, which unmarshals to `nil`
+(= live), exactly the desired default.
 
 Following the established migration discipline, bump `CurrentStateVersion`
 `13 → 14` and add a `migrateV13ToV14` entry that is a **documented no-op** (the
@@ -656,9 +741,23 @@ Reconcile.
   pointing at `gr restore <name>` (to recover) or `gr delete <name> --purge` (to
   finish it off). `gr delete --purge` on an already-soft-deleted session hard
   deletes it (resolved via `resolveDeletableSessionInfo`).
+- **Delete with unsaved work, non-interactively.** An agent (JSON mode) or a piped
+  script deleting a session with un-pushed work is offered `--yes` (skip the prompt,
+  daemon still soft-deletes → recoverable) — **not** `--force`. This is the fix for
+  the primary-audience footgun: the non-interactive path defaults to *recoverable*,
+  and destruction (`--purge`/`--force`) is only ever explicit.
+- **`--yes` with `retention = "0"`.** When the operator has explicitly disabled
+  soft delete, `--yes` means "skip the prompt and hard-delete the dirty session",
+  because there is no soft state to fall back to. This is a deliberate, documented
+  consequence of the opt-out config, not a surprise: an admin who sets
+  `retention = "0"` has chosen destroy-on-delete globally. To keep it unmissable,
+  the success line is driven by `DeleteResultMsg.Soft`: a hard delete prints
+  **"Deleted braw (permanently)"**, never the "Recoverable until …" line — so even
+  a scripted caller's output makes the destructive outcome explicit.
 - **Restore after the window / restore a purged session.** Once purged the
-  session is gone from state; `gr restore` reports "not found". Within the
-  window, restore always succeeds.
+  session is gone from state; `gr restore` reports "not found". Before purge but
+  after `ExpiresAt`, restore is refused with an "expired" error (same predicate as
+  purge). Comfortably within the window, restore always succeeds.
 - **Restore when the base branch moved.** Restore does not touch git at all — it
   only clears a flag. The worktree and its branch are exactly as they were at
   delete time; the base branch having advanced on `origin` is irrelevant until
@@ -697,14 +796,21 @@ Reconcile.
   orphaned, and soft delete does no teardown. **But leaving a racing new child
   live under a hidden parent is surprising** (tree view would render it as a root
   because the parent is filtered out, and purge would later reparent it). Chosen
-  policy: keep a *lightweight* sweep — cheap because it only re-marks, not tears
-  down — so a child created mid-operation is also soft-deleted, keeping the subtree
-  coherent. **Restore must mirror this:** because a `--children` delete can hide a
-  whole subtree, restoring *only the parent* would leave the children hidden. The
-  design adds **`gr restore --children`** (and, symmetrically, restores the subtree
-  soft-deleted in the same operation). A bare `gr restore <parent>` restores just
-  that session and warns if it has soft-deleted descendants. (Reparenting on a
-  *purge* of an individual member is still handled by the existing `Delete`.)
+  policy: keep a *lightweight* sweep — cheap because it only **re-marks** (sets
+  `DeletedAt`/`ExpiresAt`), never tears down — so a child created mid-operation is
+  also soft-deleted, keeping the subtree coherent. **Restore must mirror this:**
+  because a `--children` delete can hide a whole subtree, restoring *only the
+  parent* would leave the children hidden. The design adds **`gr restore
+  --children`**, defined concretely as: *restore this session plus **all**
+  soft-deleted descendants of it, regardless of when each was deleted.* We do
+  **not** try to reconstruct "the same delete operation" — the data model carries
+  no delete-group id, and per-descendant `DeletedAt`/`ExpiresAt` values differ, so
+  "same operation" is not derivable. Restoring the whole soft-deleted subtree is
+  both well-defined from the data on hand and the behaviour a user expects. A bare
+  `gr restore <parent>` restores just that one session and warns if it has
+  soft-deleted descendants (pointing at `--children`). Each restored descendant is
+  re-checked against its own frozen `ExpiresAt`, so an already-expired child is
+  skipped rather than resurrected.
 - **Scenario teardown.** `gr scenario stop/delete` and two-phase rollback call
   `SessionManager.Delete` directly and stay **hard deletes** — scenario lifecycle
   owns and expects to reclaim its worktrees. Soft delete is reached *only* via
@@ -747,8 +853,19 @@ Reconcile.
   not-found/not-deleted, and **errors when the window has expired** (restore-after-
   expiry). `SoftDeleteWithChildren`/restore-with-children mark/clear the subtree.
 - **Unit — daemon guards.** `Resume`, `Restart`, the attach auto-resume path,
-  `rename`, `star`/`unstar`, `update`, and `--share-worktree` sourcing all reject
-  a soft-deleted session by raw ID; `scenario_resume` skips soft-deleted members.
+  `fork` (by raw `SourceSessionID`), `rename`, `star`/`unstar`, `update`, and
+  `--share-worktree` sourcing all reject a soft-deleted session by raw ID;
+  `scenario_resume` skips soft-deleted members.
+- **Unit — CLI flag split.** `gr delete` prompts then soft-deletes; `--yes` skips
+  the prompt and still soft-deletes; `--force`/`--purge` hard-delete. The
+  JSON/non-TTY unsaved-work error recommends `--yes`, **not** `--force`.
+- **Unit — frozen expiry.** `SoftDelete` sets `ExpiresAt = DeletedAt + retention`;
+  lowering retention (or `"0"`) afterward does **not** change an existing
+  `ExpiresAt`, and purge honours the frozen value (a session promised 24h is not
+  binned early). `Restore` clears both `DeletedAt` and `ExpiresAt`.
+- **Unit — crash re-kill.** A soft-deleted session with a live verified PID is
+  re-killed by the startup sweep (simulate: `DeletedAt` set, `Status=stopped`,
+  fake live PID).
 - **Unit — routing.** Handler chooses soft vs hard from `Purge` and retention:
   `retention>0 && !Purge` → soft; `Purge` → hard; `retention==0` → hard. Table
   test the four combinations, single **and batch** (`gr delete --stopped --force`
@@ -767,14 +884,15 @@ Reconcile.
   file is rejected by the newer-than-me guard **and the daemon `Run` refuses to
   start** (the downgrade fail-closed change) rather than coming up with empty
   state.
-- **Purge loop.** Extract the decision — `shouldPurge(session, retention, now)` —
-  as a pure function and unit-test it exhaustively (before/at/after the deadline,
-  nil `DeletedAt`, zero retention) with an **injected `now`**, so the loop itself
-  is a thin scheduler around tested logic (mirrors `checkIdleSession`). Test
-  `purgeExpired` against a state with mixed expired/unexpired sessions asserting
-  only the expired are `Delete`d, and the **compare-and-delete race**: a session
-  restored (or re-deleted with a new `DeletedAt`) between snapshot and delete is
-  **not** purged. Do not sleep on wall-clock in tests.
+- **Purge loop.** Test the shared pure predicate `shouldPurge(session, now)`
+  exhaustively (before/at/after `ExpiresAt`, nil `DeletedAt`, nil `ExpiresAt`) with
+  an **injected `now`**, and assert `Restore`'s window check calls the *same*
+  function (they can't drift). The loop is then a thin scheduler around tested
+  logic (mirrors `checkIdleSession`). Test `purgeExpired` against a state with
+  mixed expired/unexpired sessions asserting only the expired are `Delete`d, and
+  the **compare-and-delete race**: a session restored (or re-deleted with a new
+  `ExpiresAt`) between snapshot and delete is **not** purged. Do not sleep on
+  wall-clock in tests.
 - **Integration** (`internal/integration/`, real daemon): delete → session hidden
   from `gr list`, visible under `--deleted`, worktree still on disk; restore →
   reappears stopped, resume works; `--purge` → gone immediately; resume/restart by
