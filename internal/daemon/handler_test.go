@@ -2803,15 +2803,41 @@ func TestInvalidPayloads(t *testing.T) {
 	}
 }
 
-func TestCoverApprovalRespondNotFound(t *testing.T) {
-	h := newTestHarness(t)
+// TestNotFounds exercises the not-found error path for control messages that
+// target a nonexistent session or scenario. Each row is sent by the local
+// human (no token), which passes any authorization gate and reaches the
+// operation lookup, which then fails because the target does not exist.
+func TestNotFounds(t *testing.T) {
+	cases := []struct {
+		name    string
+		msgType string
+		payload any
+		wantErr string
+	}{
+		{"approval_respond", "approval_respond", protocol.ApprovalRespondMsg{RequestID: "haar-missing", Decision: "deny"}, "not found"},
+		{"set_status", "set_status", protocol.SetStatusMsg{SessionID: "haar", Text: "nae session"}, "not found"},
+		{"set_status_clear", "set_status", protocol.SetStatusMsg{SessionID: "haar", Clear: true}, "not found"},
+		{"status", "status", protocol.StatusRequestMsg{SessionID: "haar"}, "not found"},
+		{"star", "star", protocol.StarMsg{SessionID: "haar"}, "not found"},
+		{"unstar", "unstar", protocol.UnstarMsg{SessionID: "haar"}, "not found"},
+		{"interrupt", "interrupt", protocol.InterruptMsg{SessionID: "haar"}, "no live process to interrupt"},
+		{"restart", "restart", protocol.RestartMsg{SessionID: "haar"}, "not found"},
+		{"restart_children", "restart", protocol.RestartMsg{SessionID: "haar", Children: true}, "not found"},
+		{"scenario_status", "scenario_status", protocol.ScenarioStatusMsg{Name: "haar-strath"}, "not found"},
+		{"scenario_stop", "scenario_stop", protocol.ScenarioStopMsg{Name: "haar-strath"}, "not found"},
+		{"scenario_delete", "scenario_delete", protocol.ScenarioDeleteMsg{Name: "haar-strath"}, "not found"},
+		{"scenario_resume", "scenario_resume", protocol.ScenarioResumeMsg{Name: "haar-strath"}, "not found"},
+	}
 
-	// Local human responding to a request that does not exist.
-	h.sendControl(t, "approval_respond", protocol.ApprovalRespondMsg{
-		RequestID: "haar-missing", Decision: "deny",
-	})
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newTestHarness(t)
 
-	h.expectError(t, "not found")
+			h.sendControl(t, tc.msgType, tc.payload)
+
+			h.expectError(t, tc.wantErr)
+		})
+	}
 }
 
 // --- set_status -----------------------------------------------------------
@@ -2853,22 +2879,6 @@ func TestCoverSetStatusSetAndClear(t *testing.T) {
 	}
 }
 
-func TestCoverSetStatusNotFound(t *testing.T) {
-	h := newTestHarness(t)
-
-	h.sendControl(t, "set_status", protocol.SetStatusMsg{SessionID: "haar", Text: "nae session"})
-
-	h.expectError(t, "not found")
-}
-
-func TestCoverSetStatusClearNotFound(t *testing.T) {
-	h := newTestHarness(t)
-
-	h.sendControl(t, "set_status", protocol.SetStatusMsg{SessionID: "haar", Clear: true})
-
-	h.expectError(t, "not found")
-}
-
 func TestCoverSetStatusForcedToOwnSession(t *testing.T) {
 	h := newTestHarness(t)
 	h.addAuthenticatedSession(t, "canny-own", "canny", "tok-canny")
@@ -2891,14 +2901,6 @@ func TestCoverSetStatusForcedToOwnSession(t *testing.T) {
 }
 
 // --- status (session status query) ---------------------------------------
-
-func TestCoverStatusNotFound(t *testing.T) {
-	h := newTestHarness(t)
-
-	h.sendControl(t, "status", protocol.StatusRequestMsg{SessionID: "haar"})
-
-	h.expectError(t, "not found")
-}
 
 func TestCoverStatusResponse(t *testing.T) {
 	h := newTestHarness(t)
@@ -2997,49 +2999,9 @@ func TestCoverStarUnstar(t *testing.T) {
 	}
 }
 
-func TestCoverStarNotFound(t *testing.T) {
-	h := newTestHarness(t)
-
-	h.sendControl(t, "star", protocol.StarMsg{SessionID: "haar"})
-
-	h.expectError(t, "not found")
-}
-
-func TestCoverUnstarNotFound(t *testing.T) {
-	h := newTestHarness(t)
-
-	h.sendControl(t, "unstar", protocol.UnstarMsg{SessionID: "haar"})
-
-	h.expectError(t, "not found")
-}
-
 // --- interrupt ------------------------------------------------------------
 
-func TestCoverInterruptNotFound(t *testing.T) {
-	h := newTestHarness(t)
-
-	h.sendControl(t, "interrupt", protocol.InterruptMsg{SessionID: "haar"})
-
-	h.expectError(t, "no live process to interrupt")
-}
-
 // --- restart --------------------------------------------------------------
-
-func TestCoverRestartNotFound(t *testing.T) {
-	h := newTestHarness(t)
-
-	h.sendControl(t, "restart", protocol.RestartMsg{SessionID: "haar"})
-
-	h.expectError(t, "not found")
-}
-
-func TestCoverRestartWithChildrenNotFound(t *testing.T) {
-	h := newTestHarness(t)
-
-	h.sendControl(t, "restart", protocol.RestartMsg{SessionID: "haar", Children: true})
-
-	h.expectError(t, "not found")
-}
 
 // --- msg_conversation -----------------------------------------------------
 
@@ -3136,14 +3098,6 @@ func TestCoverScenarioStartRequiresAuth(t *testing.T) {
 	h.expectError(t, "requires authentication")
 }
 
-func TestCoverScenarioStatusNotFound(t *testing.T) {
-	h := newTestHarness(t)
-
-	h.sendControl(t, "scenario_status", protocol.ScenarioStatusMsg{Name: "haar-strath"})
-
-	h.expectError(t, "not found")
-}
-
 func TestCoverScenarioList(t *testing.T) {
 	h := newTestHarness(t)
 
@@ -3158,32 +3112,6 @@ func TestCoverScenarioList(t *testing.T) {
 	if len(resp.Scenarios) != 0 {
 		t.Errorf("expected no scenarios, got %d", len(resp.Scenarios))
 	}
-}
-
-func TestCoverScenarioStopNotFound(t *testing.T) {
-	h := newTestHarness(t)
-
-	// Local human passes the scenario-op authorization; the operation then fails
-	// because there is no such scenario.
-	h.sendControl(t, "scenario_stop", protocol.ScenarioStopMsg{Name: "haar-strath"})
-
-	h.expectError(t, "not found")
-}
-
-func TestCoverScenarioDeleteNotFound(t *testing.T) {
-	h := newTestHarness(t)
-
-	h.sendControl(t, "scenario_delete", protocol.ScenarioDeleteMsg{Name: "haar-strath"})
-
-	h.expectError(t, "not found")
-}
-
-func TestCoverScenarioResumeNotFound(t *testing.T) {
-	h := newTestHarness(t)
-
-	h.sendControl(t, "scenario_resume", protocol.ScenarioResumeMsg{Name: "haar-strath"})
-
-	h.expectError(t, "not found")
 }
 
 func TestCoverScenarioAddIncompleteSession(t *testing.T) {
