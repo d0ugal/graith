@@ -75,6 +75,39 @@ func TestGuardForkRejectsSoftDeleted(t *testing.T) {
 	assertSoftDeletedError(t, err)
 }
 
+func TestGuardMigrateRejectsSoftDeleted(t *testing.T) {
+	sm := newTestSessionManager(t)
+	s := addStoppedSession(t, sm, "clachan-id", "clachan")
+	s.Agent = "claude"
+
+	if _, err := sm.SoftDelete("clachan-id"); err != nil {
+		t.Fatalf("SoftDelete error = %v", err)
+	}
+
+	// Migrate must refuse before any transcript I/O or metadata mutation.
+	_, err := sm.Migrate("clachan-id", "codex", "", 24, 80)
+	assertSoftDeletedError(t, err)
+
+	// The soft-delete metadata must be untouched (no partial migration).
+	got, _ := sm.Get("clachan-id")
+	if got.MigratedFrom != nil || got.Agent != "claude" {
+		t.Errorf("migrate mutated a soft-deleted session: agent=%q migratedFrom=%v", got.Agent, got.MigratedFrom)
+	}
+}
+
+func TestGuardSetSummaryRejectsSoftDeleted(t *testing.T) {
+	sm := newSoftDeletedSession(t, "speir-id", "speir")
+
+	assertSoftDeletedError(t, sm.SetSummary("speir-id", "working", 0))
+	assertSoftDeletedError(t, sm.ClearSummary("speir-id"))
+
+	// The soft-delete summary must survive the rejected overwrite.
+	got, _ := sm.Get("speir-id")
+	if !strings.Contains(got.SummaryText, "Soft-deleted") {
+		t.Errorf("soft-delete summary was overwritten: %q", got.SummaryText)
+	}
+}
+
 // TestReconcileSoftDeletedOrphansClearsPID verifies the startup crash-recovery
 // sweep zeroes a stale PID left on a soft-deleted session (the process is long
 // gone, so killVerifiedProcess is a no-op, but the PID must be cleared).

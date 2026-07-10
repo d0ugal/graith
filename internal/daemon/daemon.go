@@ -2543,7 +2543,7 @@ func (sm *SessionManager) SoftDelete(id string) (SessionState, error) {
 
 	if sessState.IsSoftDeleted() {
 		sm.mu.Unlock()
-		return SessionState{}, fmt.Errorf("session %q is already deleted; use `gr restore` to recover it or `gr delete --purge` to remove it now", sessState.Name)
+		return SessionState{}, fmt.Errorf("session %q is already deleted; use `gr restore` to recover it or `gr purge` to remove it now", sessState.Name)
 	}
 
 	// Unlike Delete — which special-cases a mid-creation session by removing the
@@ -2559,20 +2559,6 @@ func (sm *SessionManager) SoftDelete(id string) (SessionState, error) {
 		return SessionState{}, fmt.Errorf("session %q is already being deleted", id)
 	}
 
-	ac, hasClient := sm.attachedClients[id]
-	if hasClient {
-		delete(sm.attachedClients, id)
-	}
-
-	// Remove the PTY from sm.sessions BEFORE killing it: watchSession treats a
-	// session as stale when it is no longer in the map, so the exit watcher
-	// won't race in and clobber DeletedAt/Status when the agent exits. Mirrors
-	// Delete.
-	ptySess, hasPTY := sm.sessions[id]
-	if hasPTY {
-		delete(sm.sessions, id)
-	}
-
 	orphanPID := sessState.PID
 	orphanStartTime := sessState.PIDStartTime
 
@@ -2584,6 +2570,12 @@ func (sm *SessionManager) SoftDelete(id string) (SessionState, error) {
 	// through this save: if we crash before the kill below completes, the startup
 	// sweep uses the recorded PID to re-kill the orphaned agent (Reconcile skips
 	// stopped sessions). It is zeroed only after the kill succeeds.
+	//
+	// The save is done BEFORE removing the PTY/client from the runtime maps and
+	// before killing, and its error is load-bearing: if it fails, the marker is
+	// not durable, so we roll back the in-memory fields and abort rather than
+	// kill the agent and report a delete that a crash could silently undo.
+	prevStatus := sessState.Status
 	now := time.Now()
 	retention := sm.cfg.Delete.RetentionDuration()
 	expiresAt := now.Add(retention)
@@ -2592,12 +2584,39 @@ func (sm *SessionManager) SoftDelete(id string) (SessionState, error) {
 	sessState.Status = StatusStopped
 	sessState.StatusChangedAt = now
 	applyLifecycleSummaryLocked(sessState, softDeleteSummary(expiresAt))
-	_ = sm.saveState()
+
+	if err := sm.saveState(); err != nil {
+		// Roll back: the session stays live and fully consistent (nothing has
+		// been removed from the runtime maps or killed yet).
+		sessState.DeletedAt = nil
+		sessState.ExpiresAt = nil
+		sessState.Status = prevStatus
+		sm.mu.Unlock()
+
+		return SessionState{}, fmt.Errorf("soft delete aborted: could not persist marker: %w", err)
+	}
+
+	// Marker is durable — now detach the client and remove the PTY from
+	// sm.sessions BEFORE killing it: watchSession treats a session as stale when
+	// it is no longer in the map, so the exit watcher won't race in and clobber
+	// DeletedAt/Status when the agent exits. Mirrors Delete.
+	ac, hasClient := sm.attachedClients[id]
+	if hasClient {
+		delete(sm.attachedClients, id)
+	}
+
+	ptySess, hasPTY := sm.sessions[id]
+	if hasPTY {
+		delete(sm.sessions, id)
+	}
+
 	sm.mu.Unlock()
 
 	// Stop the agent outside the lock using Delete's kill path (detach → kill →
 	// grace → force-kill → Close), NOT Stop's single SIGTERM. The marker is
 	// already durable, so a best-effort kill is fine.
+	killedOK := true
+
 	if hasPTY {
 		ptySess.Detach()
 
@@ -2614,16 +2633,23 @@ func (sm *SessionManager) SoftDelete(id string) (SessionState, error) {
 	} else if orphanPID > 0 {
 		if _, err := sm.killVerifiedProcess(orphanPID, orphanStartTime); err != nil {
 			sm.log.Warn("failed to kill process during soft delete", "id", id, "pid", orphanPID, "err", err)
+			// Keep the PID recorded so the startup orphan sweep can retry the
+			// kill; clearing it would strand a live, hidden agent unmanaged.
+			killedOK = false
 		}
 	}
 
-	// Now that the agent is dead, clear the recorded PID and snapshot the result.
+	// Snapshot the result. Clear the recorded PID only if the kill succeeded —
+	// otherwise leave it for reconcileSoftDeletedOrphans to re-kill on restart.
 	sm.mu.Lock()
 
 	snapshot := SessionState{ID: id}
 	if s, ok := sm.state.Sessions[id]; ok {
-		s.PID = 0
-		s.PIDStartTime = 0
+		if killedOK {
+			s.PID = 0
+			s.PIDStartTime = 0
+		}
+
 		_ = sm.saveState()
 		snapshot = cloneSessionState(s)
 	}
@@ -2874,9 +2900,19 @@ func (sm *SessionManager) sessionSnapshot(id string) SessionState {
 // has passed. It snapshots the expired sessions under a read lock, then
 // hard-deletes each via a compare-and-delete: it re-checks under a read lock
 // that the session is still soft-deleted with the *same* ExpiresAt and still
-// expired before calling Delete, so a concurrent gr restore (or
-// delete/restore/re-delete, which mints a new ExpiresAt) between snapshot and
-// delete can't cause purge to remove a session the user just recovered.
+// expired before calling Delete.
+//
+// Why this is race-free against a concurrent gr restore, even though the
+// re-check and Delete are not one atomic critical section: purge only ever
+// targets *expired* sessions, and Restore refuses to un-delete an expired
+// session using the *same* shouldPurge predicate (see restoreLocked). So a
+// session that qualifies for purge cannot be flipped back to live in the window
+// between the re-check and Delete — the only operation that could clear the
+// marker (Restore) is itself gated on the session NOT being expired. The
+// compare-and-delete then additionally guards the delete/restore/re-delete case
+// (a new ExpiresAt won't Equal the snapshot). This invariant is load-bearing:
+// any future change that lets Restore succeed on an expired session must also
+// make this delete atomic.
 func (sm *SessionManager) purgeExpired(now time.Time) {
 	sm.mu.RLock()
 
@@ -2958,11 +2994,17 @@ func (sm *SessionManager) reconcileSoftDeletedOrphans() {
 		sm.log.Info("re-killing orphaned process on soft-deleted session", "id", o.id, "pid", o.pid)
 
 		if _, err := sm.killVerifiedProcess(o.pid, o.startTime); err != nil {
+			// Leave the PID recorded so a later run can retry; clearing it would
+			// strand a live orphan with no handle to kill it.
 			sm.log.Warn("failed to re-kill orphan on soft-deleted session", "id", o.id, "pid", o.pid, "err", err)
+			continue
 		}
 
 		sm.mu.Lock()
-		if s, ok := sm.state.Sessions[o.id]; ok {
+		// Generation check: only clear if the session is still soft-deleted with
+		// the same PID we killed. A concurrent restore+resume could have replaced
+		// the process; we must not zero the new generation's PID.
+		if s, ok := sm.state.Sessions[o.id]; ok && s.IsSoftDeleted() && s.PID == o.pid {
 			s.PID = 0
 			s.PIDStartTime = 0
 			_ = sm.saveState()
@@ -4232,6 +4274,13 @@ func (sm *SessionManager) SetSummary(sessionID, text string, ttlSeconds int) err
 		return fmt.Errorf("session %q not found", sessionID)
 	}
 
+	// A soft-deleted session's summary is the "recoverable until …" trash marker;
+	// a lingering background `gr status` must not overwrite it and mask the
+	// session's deleted state in the overlay/logs.
+	if s.IsSoftDeleted() {
+		return errSoftDeleted(s.Name)
+	}
+
 	now := time.Now()
 	s.SummaryText = text
 	s.SummarySetAt = &now
@@ -4253,6 +4302,10 @@ func (sm *SessionManager) ClearSummary(sessionID string) error {
 	s, ok := sm.state.Sessions[sessionID]
 	if !ok {
 		return fmt.Errorf("session %q not found", sessionID)
+	}
+
+	if s.IsSoftDeleted() {
+		return errSoftDeleted(s.Name)
 	}
 
 	s.SummaryText = ""

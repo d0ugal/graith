@@ -334,8 +334,9 @@ const DefaultDeleteRetention = 24 * time.Hour
 // Delete configures the soft-delete behaviour of `gr delete`. When retention
 // is a positive duration, `gr delete` marks a session deleted and keeps its
 // worktree/state for the window; the daemon purges it after the window
-// elapses. A retention of "0" disables soft delete: `gr delete` always
-// hard-deletes immediately.
+// elapses. A retention of "0" disables soft delete: `gr delete` is then
+// rejected (with a message pointing at `gr purge`), since delete must never
+// destroy — `gr purge` remains the way to hard-delete immediately.
 type Delete struct {
 	Retention string `toml:"retention"`
 }

@@ -41,8 +41,18 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 	repoPath := sess.RepoPath
 	isOrchestrator := sess.SystemKind == SystemKindOrchestrator
 	status := sess.Status
+	softDeleted := sess.IsSoftDeleted()
+	name := sess.Name
 
 	sm.mu.RUnlock()
+
+	// A soft-deleted session is stopped-and-hidden; migrate re-launches the agent
+	// (like fork/resume), so it must refuse by raw ID rather than resurrect a
+	// hidden session or mutate its agent metadata. Guard before any transcript
+	// I/O or state mutation.
+	if softDeleted {
+		return SessionState{}, errSoftDeleted(name)
+	}
 
 	if status == StatusCreating || status == StatusDeleting {
 		return SessionState{}, fmt.Errorf("session %q is %s — cannot migrate now", id, status)

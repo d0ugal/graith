@@ -108,8 +108,8 @@ func completeDeletedSessionNames(_ *cobra.Command, args []string, _ string) ([]s
 }
 
 // completeSessionOrDeletedNames completes against both live and soft-deleted
-// sessions, used by `gr delete` so `--purge <TAB>` also offers deleted names
-// (a soft-deleted session can be purged by name).
+// sessions, used by `gr purge` so `gr purge <TAB>` offers trashed names too
+// (purge can empty a single already-soft-deleted session by name).
 func completeSessionOrDeletedNames(_ *cobra.Command, args []string, _ string) ([]string, cobra.ShellCompDirective) {
 	if len(args) > 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp

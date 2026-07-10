@@ -320,3 +320,29 @@ func TestPurgeSkipsRestored(t *testing.T) {
 		t.Error("restored session must not be purged")
 	}
 }
+
+// TestPurgeCandidateCannotBeRestored is the load-bearing invariant behind the
+// compare-and-delete safety argument: a session that qualifies for purge
+// (expired) cannot be restored, because Restore shares purge's shouldPurge
+// predicate and refuses expired sessions. This is why the non-atomic
+// re-check-then-Delete in purgeExpired cannot race a restore into data loss.
+func TestPurgeCandidateCannotBeRestored(t *testing.T) {
+	sm := newTestSessionManager(t)
+	now := time.Now()
+
+	s := addStoppedSession(t, sm, "haar-id", "haar")
+	dPast := now.Add(-48 * time.Hour)
+	ePast := now.Add(-time.Hour)
+	s.DeletedAt = &dPast
+	s.ExpiresAt = &ePast
+
+	// It is a purge candidate.
+	if !shouldPurge(s, now, now) {
+		t.Fatal("precondition: session should be purgeable")
+	}
+
+	// And Restore refuses it — so nothing can flip it live before purge acts.
+	if _, err := sm.Restore("haar-id"); err == nil {
+		t.Error("Restore must refuse an expired (purge-candidate) session")
+	}
+}
