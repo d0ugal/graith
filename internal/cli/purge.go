@@ -1,11 +1,14 @@
 package cli
 
 import (
+	"bufio"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/d0ugal/graith/internal/client"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 var (
@@ -59,13 +62,39 @@ var purgeCmd = &cobra.Command{
 			excludeRoot bool
 		)
 
-		if purgeChildren && len(args) == 0 {
-			sessionID = os.Getenv("GRAITH_SESSION_ID")
-			if sessionID == "" {
-				return fmt.Errorf("--children with no session arg requires GRAITH_SESSION_ID to be set")
+		if purgeChildren {
+			// A subtree purge destroys every descendant's worktree and branch. We
+			// can't cheaply per-session inspect the whole subtree here, so require
+			// an explicit confirmation for the whole operation (unless -y/--force).
+			rootLabel := "this session"
+
+			if len(args) == 0 {
+				sessionID = os.Getenv("GRAITH_SESSION_ID")
+				if sessionID == "" {
+					return fmt.Errorf("--children with no session arg requires GRAITH_SESSION_ID to be set")
+				}
+
+				excludeRoot = true
+			} else {
+				session, err := resolveDeletableSessionInfo(c, args[0])
+				if err != nil {
+					return err
+				}
+
+				sessionID = session.ID
+				rootLabel = session.Name
 			}
 
-			excludeRoot = true
+			if !skipPrompt {
+				confirmed, err := confirmPurgeSubtree(rootLabel)
+				if err != nil {
+					return err
+				}
+
+				if !confirmed {
+					return nil
+				}
+			}
 		} else {
 			session, err := resolveDeletableSessionInfo(c, args[0])
 			if err != nil {
@@ -75,9 +104,7 @@ var purgeCmd = &cobra.Command{
 			sessionID = session.ID
 
 			// Purge is irrecoverable, so prompt on unsaved work unless -y/--force.
-			// (Skipped for --children, which has no single session to inspect —
-			// mirrors the delete/stop --children behaviour.)
-			if !skipPrompt && !purgeChildren && session.WorktreePath != "" && !session.InPlace {
+			if !skipPrompt && session.WorktreePath != "" && !session.InPlace {
 				confirmed, err := confirmDelete(session)
 				if err != nil {
 					return err
@@ -91,6 +118,30 @@ var purgeCmd = &cobra.Command{
 
 		return sendDelete(c, sessionID, purgeChildren, excludeRoot, true)
 	},
+}
+
+// confirmPurgeSubtree asks for confirmation before a --children purge, which
+// destroys the worktree and branch of the root and every descendant with no
+// recovery. In JSON / non-TTY mode it errors (require -y) rather than prompting.
+func confirmPurgeSubtree(rootLabel string) (bool, error) {
+	if out.IsJSON() || !term.IsTerminal(int(os.Stdin.Fd())) {
+		return false, fmt.Errorf("purging %s and its descendants is irrecoverable; pass -y to confirm", rootLabel)
+	}
+
+	out.Printf("Purge %s and ALL its descendants? This is irrecoverable. [y/N] ", rootLabel)
+
+	answer, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if err != nil {
+		return false, err
+	}
+
+	answer = strings.TrimSpace(strings.ToLower(answer))
+	if answer != "y" && answer != "yes" {
+		out.Printf("Aborted\n")
+		return false, nil
+	}
+
+	return true, nil
 }
 
 // registerPurgeCmd registers this command on rootCmd. Called from registerCommands.

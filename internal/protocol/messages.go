@@ -109,11 +109,10 @@ type DeleteMsg struct {
 	Children    bool   `json:"children,omitempty"`
 	ExcludeRoot bool   `json:"exclude_root,omitempty"`
 	// Purge requests an immediate hard delete (worktree, branch, and state
-	// removed), bypassing the soft-delete retention window. Set by the CLI's
-	// --force/--purge. When false and soft delete is enabled, the session is
-	// marked deleted and kept for recovery. Named after the daemon-side
-	// predicate rather than the CLI's historical --force to avoid overloading
-	// "force" inside the daemon.
+	// removed), bypassing the soft-delete retention window. Set only by the
+	// `gr purge` verb; `gr delete` never sets it. When false and soft delete is
+	// enabled the session is marked deleted and kept for recovery; when false
+	// and retention is 0 the daemon rejects the request.
 	Purge bool `json:"purge,omitempty"`
 }
 
@@ -134,17 +133,21 @@ type RestoreMsg struct {
 // DeleteResultMsg is the daemon's response to a delete. Unlike the bare
 // {session_id} the shared lifecycle handler emits, it carries whether the
 // session was soft-deleted or hard-purged and, for a soft delete, the computed
-// expiry — so the CLI can render "Recoverable until …" vs "Deleted". The
-// --children path returns one entry per affected descendant.
+// expiry — so the CLI can render "Recoverable until …" vs "Deleted".
+//
+// For a single delete the top-level fields describe that session. For a
+// --children delete the top-level SessionID/Soft describe the *request* (the
+// requested root and whether the operation was soft or hard), and Affected is
+// the authoritative FLAT list of per-session outcomes (one entry per session
+// actually acted on — including the root unless --exclude-root was set), each
+// with its own Name/DeletedAt/ExpiresAt. It is not a nested tree.
 type DeleteResultMsg struct {
-	SessionID string `json:"session_id"`
-	Name      string `json:"name,omitempty"`
-	Soft      bool   `json:"soft"`
-	DeletedAt string `json:"deleted_at,omitempty"` // RFC3339, set when Soft
-	ExpiresAt string `json:"expires_at,omitempty"` // RFC3339, frozen deadline, when Soft
-	// Affected is a FLAT list of per-descendant results for a --children delete,
-	// mirroring DeleteWithChildren's flat []string — not a nested tree.
-	Affected []DeleteResultMsg `json:"affected,omitempty"`
+	SessionID string            `json:"session_id"`
+	Name      string            `json:"name,omitempty"`
+	Soft      bool              `json:"soft"`
+	DeletedAt string            `json:"deleted_at,omitempty"` // RFC3339, set when Soft
+	ExpiresAt string            `json:"expires_at,omitempty"` // RFC3339, frozen deadline, when Soft
+	Affected  []DeleteResultMsg `json:"affected,omitempty"`
 }
 
 // RestoreResultMsg is the daemon's response to a restore. Sessions holds the

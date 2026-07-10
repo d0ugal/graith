@@ -254,12 +254,32 @@ func trailingColumns() []sessionColumn {
 	// The Deleted view appends a soft-delete-only EXPIRES column (relative time
 	// until purge) not carried by the shared live-session registry.
 	if listDeleted {
-		cols = append(cols, sessionColumn{"EXPIRES", false, func(s protocol.SessionInfo, now time.Time, colorOn bool) string {
-			return formatDeleteExpiry(s, now, colorOn)
-		}})
+		cols = append(cols,
+			sessionColumn{"DELETED", false, func(s protocol.SessionInfo, now time.Time, _ bool) string {
+				return formatDeletedAt(s, now)
+			}},
+			sessionColumn{"EXPIRES", false, func(s protocol.SessionInfo, now time.Time, colorOn bool) string {
+				return formatDeleteExpiry(s, now, colorOn)
+			}},
+		)
 	}
 
 	return cols
+}
+
+// formatDeletedAt renders how long ago a session was soft-deleted (e.g. "3h
+// ago"), or "-" when unknown.
+func formatDeletedAt(s protocol.SessionInfo, now time.Time) string {
+	if s.DeletedAt == "" {
+		return "-"
+	}
+
+	t, err := time.Parse(time.RFC3339, s.DeletedAt)
+	if err != nil {
+		return "-"
+	}
+
+	return client.ShortDuration(now.Sub(t)) + " ago"
 }
 
 // formatDeleteExpiry renders when a soft-deleted session will be purged,

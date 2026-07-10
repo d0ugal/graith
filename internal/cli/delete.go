@@ -30,7 +30,8 @@ var deleteCmd = &cobra.Command{
 	Short:   "Soft-delete a session (recoverable with `gr restore`)",
 	Long: "Soft-delete a session: stop its agent and hide it, but keep its worktree, branch, " +
 		"and state for the retention window so `gr restore` can recover it. Use `gr purge` to " +
-		"delete immediately and irrecoverably. With `retention = \"0\"`, delete is a hard delete.",
+		"delete immediately and irrecoverably. When soft delete is disabled (`retention = \"0\"`), " +
+		"`gr delete` is rejected — use `gr purge`.",
 	Args: func(cmd *cobra.Command, args []string) error {
 		if deleteChildren && deleteBatch.active() {
 			return fmt.Errorf("--children cannot be combined with batch filters")
@@ -78,7 +79,7 @@ var deleteCmd = &cobra.Command{
 func warnDeleteForceDeprecated(cmd *cobra.Command) {
 	if deleteBatch.force || deleteYesNoop {
 		fmt.Fprintln(cmd.ErrOrStderr(),
-			"--force is deprecated: gr delete is now recoverable; use gr purge to remove immediately")
+			"--force/-y are deprecated: gr delete is now recoverable; use gr purge to remove immediately")
 	}
 }
 
@@ -95,7 +96,10 @@ func resolveDeleteTarget(c *client.Client, args []string, children bool) (sessio
 		return sessionID, true, nil
 	}
 
-	session, err := resolveDeletableSessionInfo(c, args[0])
+	// gr delete resolves live-only: a soft-deleted namesake must not make
+	// `gr delete <live>` ambiguous. Purging an already-trashed session is `gr
+	// purge`'s job (it unions live+deleted).
+	session, err := resolveSessionInfo(c, args[0])
 	if err != nil {
 		return "", false, err
 	}

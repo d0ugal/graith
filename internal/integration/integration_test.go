@@ -396,7 +396,9 @@ func TestDeleteNoRepoCleansScratchDir(t *testing.T) {
 
 	scratchDir := filepath.Join(env.tmpDir, "data", "scratch", info.ID)
 
-	sendControl(t, w, "delete", protocol.DeleteMsg{SessionID: info.ID})
+	// A default (soft) delete preserves the scratch dir for the recovery window;
+	// only a purge (hard delete) reclaims it. Purge here to assert teardown.
+	sendControl(t, w, "delete", protocol.DeleteMsg{SessionID: info.ID, Purge: true})
 	delResp := readControl(t, r)
 	if delResp.Type == "error" {
 		var e protocol.ErrorMsg
@@ -405,7 +407,74 @@ func TestDeleteNoRepoCleansScratchDir(t *testing.T) {
 	}
 
 	if _, err := os.Stat(scratchDir); !os.IsNotExist(err) {
-		t.Errorf("scratch dir %s should be removed after delete", scratchDir)
+		t.Errorf("scratch dir %s should be removed after purge", scratchDir)
+	}
+}
+
+// TestSoftDeletePreservesAndRestores exercises the recovery window end-to-end
+// through a real daemon: delete hides the session but keeps its scratch dir,
+// restore brings it back to the live list, and purge then reclaims it.
+func TestSoftDeletePreservesAndRestores(t *testing.T) {
+	env := setup(t)
+	defer env.teardown()
+
+	r, w := env.connect(t)
+	handshake(t, r, w)
+
+	sendControl(t, w, "create", protocol.CreateMsg{
+		Name: "bide", Agent: "echo", NoRepo: true,
+	})
+	var info protocol.SessionInfo
+	protocol.DecodePayload(readControl(t, r), &info)
+
+	scratchDir := filepath.Join(env.tmpDir, "data", "scratch", info.ID)
+
+	// Soft delete: hidden from the live list, scratch preserved.
+	sendControl(t, w, "delete", protocol.DeleteMsg{SessionID: info.ID})
+	if resp := readControl(t, r); resp.Type == "error" {
+		t.Fatalf("soft delete failed: %v", resp)
+	}
+
+	sendControl(t, w, "list", struct{}{})
+	var live protocol.SessionListMsg
+	protocol.DecodePayload(readControl(t, r), &live)
+	if len(live.Sessions) != 0 {
+		t.Errorf("soft-deleted session should be hidden from live list, got %d", len(live.Sessions))
+	}
+
+	if _, err := os.Stat(scratchDir); err != nil {
+		t.Errorf("scratch dir should be preserved after soft delete: %v", err)
+	}
+
+	// It shows up in the deleted list.
+	sendControl(t, w, "list", protocol.ListMsg{Deleted: true})
+	var deleted protocol.SessionListMsg
+	protocol.DecodePayload(readControl(t, r), &deleted)
+	if len(deleted.Sessions) != 1 || deleted.Sessions[0].ID != info.ID {
+		t.Fatalf("expected soft-deleted session in --deleted list, got %+v", deleted.Sessions)
+	}
+
+	// Restore: back in the live list.
+	sendControl(t, w, "restore", protocol.RestoreMsg{SessionID: info.ID})
+	if resp := readControl(t, r); resp.Type == "error" {
+		t.Fatalf("restore failed: %v", resp)
+	}
+
+	sendControl(t, w, "list", struct{}{})
+	var relive protocol.SessionListMsg
+	protocol.DecodePayload(readControl(t, r), &relive)
+	if len(relive.Sessions) != 1 || relive.Sessions[0].ID != info.ID {
+		t.Errorf("restored session should be back in the live list, got %+v", relive.Sessions)
+	}
+
+	// Purge: gone for good, scratch reclaimed.
+	sendControl(t, w, "delete", protocol.DeleteMsg{SessionID: info.ID, Purge: true})
+	if resp := readControl(t, r); resp.Type == "error" {
+		t.Fatalf("purge failed: %v", resp)
+	}
+
+	if _, err := os.Stat(scratchDir); !os.IsNotExist(err) {
+		t.Errorf("scratch dir %s should be removed after purge", scratchDir)
 	}
 }
 

@@ -95,8 +95,9 @@ interval = "1h"          # how often to pull (must be at least 1 minute)
 
 # Soft delete: `gr delete` marks a session deleted and keeps its worktree and
 # state for the retention window so it can be recovered with `gr restore`. The
-# daemon purges soft-deleted sessions after the window elapses. Set retention
-# to "0" to disable soft delete and always hard-delete immediately.
+# daemon purges soft-deleted sessions after the window elapses. `gr purge`
+# hard-deletes immediately. Set retention to "0" to disable soft delete — then
+# `gr delete` is rejected (use `gr purge` to remove sessions).
 [delete]
 retention = "24h"        # how long soft-deleted sessions are kept before purge
 
