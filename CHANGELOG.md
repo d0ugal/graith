@@ -1,5 +1,56 @@
 # Changelog
 
+## [0.66.15](https://github.com/d0ugal/graith/compare/v0.66.14...v0.66.15) (2026-07-10)
+
+
+### Features
+
+* **client:** wire rename_session and scroll_mode keybindings ([#919](https://github.com/d0ugal/graith/issues/919)) ([564a4ff](https://github.com/d0ugal/graith/commit/564a4ffe724eff0b8ed0a052e4ecfaf3aee2beb0))
+* **ios:** terminal scrollback scroll with momentum + bounce ([#984](https://github.com/d0ugal/graith/issues/984)) ([d0a7626](https://github.com/d0ugal/graith/commit/d0a7626188e8f6608e4d233b8492ce45e966c6fb))
+
+
+### Bug Fixes
+
+* **cli:** bound check-inbox read and surface decode errors ([e9b8a6a](https://github.com/d0ugal/graith/commit/e9b8a6a26b584cebaa706359534583f84b2814f1)), closes [#206](https://github.com/d0ugal/graith/issues/206)
+* **client:** address scroll_mode review findings ([3e50cd6](https://github.com/d0ugal/graith/commit/3e50cd6a31ef5674971b7bc06749ce3c4a89eada))
+* **cli:** treat only bare EOF as clean, preserve daemon error text ([4c331e8](https://github.com/d0ugal/graith/commit/4c331e8b94ebf89637aa8fab4263cbe4b05192fb))
+* detect custom-named Go test binaries ([537ebcc](https://github.com/d0ugal/graith/commit/537ebcc2a9fadbda5b85ca65abc996c08056e1dd))
+* **gui:** harden space-drag lifecycle and diagonal handling ([06984b0](https://github.com/d0ugal/graith/commit/06984b0047aa1aef9b8ff9a3acf4f0f817328b6a))
+* **gui:** iOS space-drag uses keyboard-style key repeat ([#979](https://github.com/d0ugal/graith/issues/979)) ([0321267](https://github.com/d0ugal/graith/commit/0321267b513a74d9aa8e65058cdfc3b1d55aacca))
+* **ios:** address review findings for terminal scroll ([dd8c796](https://github.com/d0ugal/graith/commit/dd8c796b9230d2ba1c7cacd608ce4fcbe26501b2))
+* **ios:** populate create repo picker from configured repos ([30f3ae4](https://github.com/d0ugal/graith/commit/30f3ae4679dc4e4e7859cb88a5f94db6c3c5a3a0)), closes [#896](https://github.com/d0ugal/graith/issues/896)
+* **ios:** scan configured repo roots and cover selection logic ([e551ba2](https://github.com/d0ugal/graith/commit/e551ba2633057e79c239a507c923023260ed275a))
+* **keybindings:** honour session_list/shell on remote attach ([c8918d0](https://github.com/d0ugal/graith/commit/c8918d0b47dea43961f9ee460d93d12029dd18ff))
+* **keybindings:** wire detach/session_list/shell and picker keys from config ([e09444b](https://github.com/d0ugal/graith/commit/e09444b3274e4e5049fac5520244fbd078d97132)), closes [#918](https://github.com/d0ugal/graith/issues/918)
+* prevent daemon autostart from test binaries ([7452486](https://github.com/d0ugal/graith/commit/7452486f3af4db57ce9fae6afd99f3efbfb6a136))
+
+
+### Documentation
+
+* address design-review findings on soft-delete doc ([d811010](https://github.com/d0ugal/graith/commit/d8110107bf24d08c2452bdb38a4f35ccd64d534d)), closes [#994](https://github.com/d0ugal/graith/issues/994)
+* address second design review (soft-delete doc) ([a78dcf9](https://github.com/d0ugal/graith/commit/a78dcf9dea2e7abdc17dd6969cfb04d913e53ce3)), closes [#994](https://github.com/d0ugal/graith/issues/994)
+* adopt two-verb CLI model for soft delete (delete + purge) ([1656964](https://github.com/d0ugal/graith/commit/1656964c3864f52f95fb486db1bd0e36e74f02b8)), closes [#994](https://github.com/d0ugal/graith/issues/994)
+* design doc for soft delete with recovery window ([5aa68f5](https://github.com/d0ugal/graith/commit/5aa68f5343a3e250f56d3bfda7617f5ca136e393)), closes [#994](https://github.com/d0ugal/graith/issues/994)
+* fix stale diagram + nil-ExpiresAt fallback (soft-delete) ([ce75d76](https://github.com/d0ugal/graith/commit/ce75d7665ab71ab2396c7e0688813176d690b285)), closes [#994](https://github.com/d0ugal/graith/issues/994)
+* make 'gr delete never destroys' unconditional (retention=0 rejects) ([04e3c73](https://github.com/d0ugal/graith/commit/04e3c737004653c71096104fa9e840728424fb34)), closes [#994](https://github.com/d0ugal/graith/issues/994)
+
+
+### Code Refactoring
+
+* share a SessionColumn registry between gr ls and the TUI picker ([81d5984](https://github.com/d0ugal/graith/commit/81d598400b5d0cdfa9673a88a4f80cff916eb563))
+
+
+### Tests
+
+* **client:** bind detach key in [#919](https://github.com/d0ugal/graith/issues/919) rename/scroll regression test ([b930bba](https://github.com/d0ugal/graith/commit/b930bba434f601f501963609f163fa85e772943f))
+* **client:** satisfy wsl_v5 whitespace lint in rename/scroll test ([0dea036](https://github.com/d0ugal/graith/commit/0dea036e63f01cd9befa55c0cd3f66c23c96f25d))
+* **daemon:** compare resolved repo paths; satisfy lint ([409b811](https://github.com/d0ugal/graith/commit/409b8118905cdfd2b4fb51638ad14f1eca42b739))
+
+
+### Dependencies
+
+* **deps:** update trufflesecurity/trufflehog action to v3.95.9 ([c4af0a1](https://github.com/d0ugal/graith/commit/c4af0a17e31865a0c7049626aa823f88a179cbdf))
+
 ## [0.66.14](https://github.com/d0ugal/graith/compare/v0.66.13...v0.66.14) (2026-07-09)
 
 
