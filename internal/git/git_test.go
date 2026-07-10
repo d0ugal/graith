@@ -3,25 +3,21 @@ package git
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/d0ugal/graith/internal/testutil"
 )
 
 func setupTestRepo(t *testing.T) string {
 	t.Helper()
-	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
-	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	testutil.IsolateGit(t)
 	dir := t.TempDir()
 	run := func(args ...string) {
-		cmd := exec.Command("git", args...)
+		cmd := testutil.GitCommand(args...)
 		cmd.Dir = dir
 
-		cmd.Env = append(os.Environ(),
-			"GIT_AUTHOR_NAME=braw", "GIT_AUTHOR_EMAIL=braw@croft.local",
-			"GIT_COMMITTER_NAME=braw", "GIT_COMMITTER_EMAIL=braw@croft.local",
-		)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
@@ -182,13 +178,9 @@ func TestUnpushedCommitSummaries(t *testing.T) {
 	}
 
 	run := func(args ...string) {
-		cmd := exec.Command("git", args...)
+		cmd := testutil.GitCommand(args...)
 		cmd.Dir = dir
 
-		cmd.Env = append(os.Environ(),
-			"GIT_AUTHOR_NAME=braw", "GIT_AUTHOR_EMAIL=braw@croft.local",
-			"GIT_COMMITTER_NAME=braw", "GIT_COMMITTER_EMAIL=braw@croft.local",
-		)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
@@ -216,13 +208,9 @@ func TestUnpushedCommitCount(t *testing.T) {
 	dir := setupTestRepo(t)
 
 	run := func(wd string, args ...string) {
-		cmd := exec.Command("git", args...)
+		cmd := testutil.GitCommand(args...)
 		cmd.Dir = wd
 
-		cmd.Env = append(os.Environ(),
-			"GIT_AUTHOR_NAME=braw", "GIT_AUTHOR_EMAIL=braw@croft.local",
-			"GIT_COMMITTER_NAME=braw", "GIT_COMMITTER_EMAIL=braw@croft.local",
-		)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
@@ -278,13 +266,8 @@ func TestFetchRemoteUpdatesTrackingRef(t *testing.T) {
 	dir := setupTestRepo(t)
 
 	run := func(wd string, args ...string) string {
-		cmd := exec.Command("git", args...)
+		cmd := testutil.GitCommand(args...)
 		cmd.Dir = wd
-
-		cmd.Env = append(os.Environ(),
-			"GIT_AUTHOR_NAME=braw", "GIT_AUTHOR_EMAIL=braw@croft.local",
-			"GIT_COMMITTER_NAME=braw", "GIT_COMMITTER_EMAIL=braw@croft.local",
-		)
 
 		out, err := cmd.CombinedOutput()
 		if err != nil {
@@ -363,13 +346,8 @@ func resolveT(t *testing.T, p string) string {
 func runGit(t *testing.T, dir string, args ...string) error {
 	t.Helper()
 
-	cmd := exec.Command("git", args...)
+	cmd := testutil.GitCommand(args...)
 	cmd.Dir = dir
-
-	cmd.Env = append(os.Environ(),
-		"GIT_AUTHOR_NAME=braw", "GIT_AUTHOR_EMAIL=braw@croft.local",
-		"GIT_COMMITTER_NAME=braw", "GIT_COMMITTER_EMAIL=braw@croft.local",
-	)
 
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Logf("git %v: %s", args, out)
@@ -607,13 +585,9 @@ func TestUnpushedCommitCountAfterMerge(t *testing.T) {
 	dir := setupTestRepo(t)
 
 	run := func(wd string, args ...string) {
-		cmd := exec.Command("git", args...)
+		cmd := testutil.GitCommand(args...)
 		cmd.Dir = wd
 
-		cmd.Env = append(os.Environ(),
-			"GIT_AUTHOR_NAME=braw", "GIT_AUTHOR_EMAIL=braw@croft.local",
-			"GIT_COMMITTER_NAME=braw", "GIT_COMMITTER_EMAIL=braw@croft.local",
-		)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
@@ -667,13 +641,9 @@ func TestUnpushedCommitCountNeverPushed(t *testing.T) {
 	dir := setupTestRepo(t)
 
 	run := func(wd string, args ...string) {
-		cmd := exec.Command("git", args...)
+		cmd := testutil.GitCommand(args...)
 		cmd.Dir = wd
 
-		cmd.Env = append(os.Environ(),
-			"GIT_AUTHOR_NAME=braw", "GIT_AUTHOR_EMAIL=braw@croft.local",
-			"GIT_COMMITTER_NAME=braw", "GIT_COMMITTER_EMAIL=braw@croft.local",
-		)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}

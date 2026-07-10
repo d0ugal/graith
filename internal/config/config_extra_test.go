@@ -7,6 +7,11 @@ import (
 )
 
 func TestLoadOrDefaultEmptyPath(t *testing.T) {
+	// An empty path means "resolve the configured profile", so isolate that
+	// lookup from the developer's real ~/.config/graith/config.toml.
+	t.Setenv("GRAITH_PROFILE", "canny")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
 	cfg, err := LoadOrDefault("")
 	if err != nil {
 		t.Fatalf("LoadOrDefault(\"\") error: %v", err)

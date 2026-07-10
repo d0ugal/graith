@@ -1794,6 +1794,7 @@ func TestCheckStorageAutofixPreservesSoftDeletedScrollback(t *testing.T) {
 	discardOut(t)
 
 	dataDir := t.TempDir()
+
 	logDir := filepath.Join(dataDir, "logs")
 	if err := os.Mkdir(logDir, 0o750); err != nil {
 		t.Fatal(err)

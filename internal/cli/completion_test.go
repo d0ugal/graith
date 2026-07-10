@@ -7,6 +7,7 @@ import (
 
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/git"
+	"github.com/d0ugal/graith/internal/testutil"
 	"github.com/spf13/cobra"
 )
 
@@ -208,6 +209,7 @@ func TestCompleteBranchNamesCovFallsBackToCwd(t *testing.T) {
 // branch (the default branch).
 func initBranchRepo(t *testing.T, dir string) {
 	t.Helper()
+	testutil.IsolateGit(t)
 
 	run := func(args ...string) {
 		if _, err := git.RunOutput(dir, args...); err != nil {

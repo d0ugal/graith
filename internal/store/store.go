@@ -20,20 +20,21 @@ type Entry struct {
 }
 
 // Init initialises the document store at storePath. It creates the directory
-// if it does not exist and sets up a bare git repository for versioning.
-// Calling Init on an already-initialised store is a no-op.
+// if it does not exist and sets up a git repository for versioning. Calling
+// Init on an already-initialised store refreshes graith's repository-local Git
+// settings so stores created by older versions do not inherit host settings.
 func Init(storePath string) error {
 	if err := os.MkdirAll(storePath, 0o700); err != nil {
 		return fmt.Errorf("create store directory: %w", err)
 	}
 
-	// Idempotent: skip git init if .git already exists.
-	if _, err := os.Stat(filepath.Join(storePath, ".git")); err == nil {
-		return nil
-	}
-
-	if err := git(storePath, "init", "--quiet"); err != nil {
-		return fmt.Errorf("git init: %w", err)
+	// Idempotent: only initialise a new repository, but always refresh the local
+	// settings below. In particular, internal store commits must never inherit a
+	// developer's global commit.gpgsign=true and contact their SSH/GPG agent.
+	if _, err := os.Stat(filepath.Join(storePath, ".git")); os.IsNotExist(err) {
+		if err := git(storePath, "init", "--quiet"); err != nil {
+			return fmt.Errorf("git init: %w", err)
+		}
 	}
 
 	if err := git(storePath, "config", "user.name", "graith"); err != nil {
@@ -46,6 +47,10 @@ func Init(storePath string) error {
 
 	if err := git(storePath, "config", "core.autocrlf", "false"); err != nil {
 		return fmt.Errorf("git config core.autocrlf: %w", err)
+	}
+
+	if err := git(storePath, "config", "commit.gpgsign", "false"); err != nil {
+		return fmt.Errorf("git config commit.gpgsign: %w", err)
 	}
 
 	return nil

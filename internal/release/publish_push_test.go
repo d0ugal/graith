@@ -11,6 +11,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/d0ugal/graith/internal/testutil"
 )
 
 // repoRoot returns the graith repository root, derived from this test file's
@@ -41,16 +43,8 @@ func publishPushScript(t *testing.T) string {
 func git(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 
-	cmd := exec.Command("git", args...)
+	cmd := testutil.GitCommand(args...)
 	cmd.Dir = dir
-	// Keep git deterministic and non-interactive regardless of the host env.
-	cmd.Env = append(os.Environ(),
-		"GIT_TERMINAL_PROMPT=0",
-		"GIT_AUTHOR_NAME=canny",
-		"GIT_AUTHOR_EMAIL=canny@example.com",
-		"GIT_COMMITTER_NAME=canny",
-		"GIT_COMMITTER_EMAIL=canny@example.com",
-	)
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -77,7 +71,7 @@ func runScript(t *testing.T, script, workDir, message string, extra ...string) (
 	args := append([]string{script, workDir, message}, extra...)
 	cmd := exec.Command("bash", args...)
 
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	cmd.Env = testutil.GitEnv()
 	out, err := cmd.CombinedOutput()
 
 	return string(out), err

@@ -3,9 +3,10 @@ package git
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/d0ugal/graith/internal/testutil"
 )
 
 func TestRepoRootPath(t *testing.T) {
@@ -75,17 +76,12 @@ func TestDiscoverDefaultBranchLocalOnly(t *testing.T) {
 }
 
 func TestDiscoverDefaultBranchLocalMaster(t *testing.T) {
-	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
-	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	testutil.IsolateGit(t)
 	dir := t.TempDir()
 	run := func(args ...string) {
-		cmd := exec.Command("git", args...)
+		cmd := testutil.GitCommand(args...)
 		cmd.Dir = dir
 
-		cmd.Env = append(os.Environ(),
-			"GIT_AUTHOR_NAME=braw", "GIT_AUTHOR_EMAIL=braw@croft.local",
-			"GIT_COMMITTER_NAME=braw", "GIT_COMMITTER_EMAIL=braw@croft.local",
-		)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
