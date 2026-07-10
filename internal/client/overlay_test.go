@@ -101,6 +101,20 @@ func sizedModel(t *testing.T, sessions []protocol.SessionInfo, current string) o
 	return m
 }
 
+// countSessionItems returns the number of sessionItem entries in the model's
+// list (excluding group headers and other item types).
+func countSessionItems(m overlayModel) int {
+	count := 0
+
+	for _, item := range m.list.Items() {
+		if _, ok := item.(sessionItem); ok {
+			count++
+		}
+	}
+
+	return count
+}
+
 // --- buildGroupedItems ---
 
 func TestBuildGroupedItems_GroupsByRepo(t *testing.T) {
@@ -2157,13 +2171,7 @@ func TestUpdate_FilterActuallyFilters(t *testing.T) {
 	om := asOverlay(updated)
 
 	// Should only show croft sessions
-	sessionCount := 0
-
-	for _, item := range om.list.Items() {
-		if _, ok := item.(sessionItem); ok {
-			sessionCount++
-		}
-	}
+	sessionCount := countSessionItems(om)
 
 	if sessionCount != 1 {
 		t.Errorf("filtering for 'croft' should show 1 session, got %d", sessionCount)
@@ -2303,13 +2311,7 @@ func TestUpdate_FilterEscRestoresFullList(t *testing.T) {
 	updated, _ = sendSpecialKey(asOverlay(updated), tea.KeyEscape)
 	om := asOverlay(updated)
 
-	sessionCount := 0
-
-	for _, item := range om.list.Items() {
-		if _, ok := item.(sessionItem); ok {
-			sessionCount++
-		}
-	}
+	sessionCount := countSessionItems(om)
 
 	if sessionCount != len(sessions) {
 		t.Errorf("esc should restore all %d sessions, got %d", len(sessions), sessionCount)
@@ -3568,13 +3570,7 @@ func TestOverlay_NeedsAttentionFiltersCorrectly(t *testing.T) {
 	updated, _ = sendKey(updated, "right")
 	om := asOverlay(updated)
 
-	sessionCount := 0
-
-	for _, item := range om.list.Items() {
-		if _, ok := item.(sessionItem); ok {
-			sessionCount++
-		}
-	}
+	sessionCount := countSessionItems(om)
 
 	if sessionCount != 1 {
 		t.Errorf("needs attention view has %d sessions, want 1", sessionCount)
@@ -3600,13 +3596,7 @@ func TestOverlay_ActiveViewShowsOnlyRunning(t *testing.T) {
 	updated, _ = sendKey(updated, "right")
 	om := asOverlay(updated)
 
-	sessionCount := 0
-
-	for _, item := range om.list.Items() {
-		if _, ok := item.(sessionItem); ok {
-			sessionCount++
-		}
-	}
+	sessionCount := countSessionItems(om)
 
 	if sessionCount != 2 {
 		t.Errorf("active view has %d sessions, want 2", sessionCount)
@@ -3644,13 +3634,7 @@ func TestOverlay_FilterRespectsView(t *testing.T) {
 	}
 
 	om = asOverlay(updated)
-	sessionCount := 0
-
-	for _, item := range om.list.Items() {
-		if _, ok := item.(sessionItem); ok {
-			sessionCount++
-		}
-	}
+	sessionCount := countSessionItems(om)
 	// Should only show thrawn-api (braw-api is active, not needing attention)
 	if sessionCount != 1 {
 		t.Errorf("filtered needs-attention has %d sessions, want 1", sessionCount)
@@ -3684,13 +3668,7 @@ func TestOverlay_FilterEscRebuildsView(t *testing.T) {
 		t.Errorf("view = %d after filter cancel, want viewNeedsAttention", om.view)
 	}
 
-	sessionCount := 0
-
-	for _, item := range om.list.Items() {
-		if _, ok := item.(sessionItem); ok {
-			sessionCount++
-		}
-	}
+	sessionCount := countSessionItems(om)
 
 	if sessionCount != 1 {
 		t.Errorf("after filter cancel: %d sessions, want 1 (only thrawn-blocked)", sessionCount)
