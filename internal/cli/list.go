@@ -26,6 +26,7 @@ var (
 	listQuiet    bool
 	listWide     bool
 	listNoColor  bool
+	listDeleted  bool
 )
 
 // listConnectFn lets command-validation tests fail before daemon auto-start.
@@ -93,7 +94,7 @@ var listCmd = &cobra.Command{
 		}
 		defer c.Close()
 
-		_ = c.SendControl("list", struct{}{})
+		_ = c.SendControl("list", protocol.ListMsg{Deleted: listDeleted})
 
 		resp, err := c.ReadControlResponse()
 		if err != nil {
@@ -149,7 +150,12 @@ var listCmd = &cobra.Command{
 		}
 
 		if len(list.Sessions) == 0 {
-			out.Printf("No sessions. Create one with: gr new <name>\n")
+			if listDeleted {
+				out.Printf("No deleted sessions.\n")
+			} else {
+				out.Printf("No sessions. Create one with: gr new <name>\n")
+			}
+
 			return nil
 		}
 
@@ -245,7 +251,36 @@ func trailingColumns() []sessionColumn {
 		})
 	}
 
+	// The Deleted view appends a soft-delete-only EXPIRES column (relative time
+	// until purge) not carried by the shared live-session registry.
+	if listDeleted {
+		cols = append(cols, sessionColumn{"EXPIRES", false, func(s protocol.SessionInfo, now time.Time, colorOn bool) string {
+			return formatDeleteExpiry(s, now, colorOn)
+		}})
+	}
+
 	return cols
+}
+
+// formatDeleteExpiry renders when a soft-deleted session will be purged,
+// relative to now (e.g. "in 23h", "expired"). Empty when the session carries
+// no expiry (retention disabled or not deleted).
+func formatDeleteExpiry(s protocol.SessionInfo, now time.Time, colorOn bool) string {
+	if s.DeleteExpiresAt == "" {
+		return "-"
+	}
+
+	expires, err := time.Parse(time.RFC3339, s.DeleteExpiresAt)
+	if err != nil {
+		return "-"
+	}
+
+	remaining := expires.Sub(now)
+	if remaining <= 0 {
+		return colorize("expired", client.StatusColor("errored"), colorOn)
+	}
+
+	return "in " + client.ShortDuration(remaining)
 }
 
 // visibleColumns filters trailingColumns by the wide flag.
@@ -433,6 +468,7 @@ func registerListCmd() {
 	listCmd.Flags().BoolVarP(&listQuiet, "quiet", "q", false, "output only session names (or IDs as JSON with --json)")
 	listCmd.Flags().BoolVar(&listWide, "wide", false, "show all columns (model, branch, attached)")
 	listCmd.Flags().BoolVar(&listNoColor, "no-color", false, "disable colored status output")
+	listCmd.Flags().BoolVar(&listDeleted, "deleted", false, "show soft-deleted sessions with their expiry time")
 
 	_ = listCmd.RegisterFlagCompletionFunc("repo", completeRepoPaths)
 	_ = listCmd.RegisterFlagCompletionFunc("children", completeSessionNames)

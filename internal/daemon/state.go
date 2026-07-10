@@ -16,7 +16,20 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 )
 
-const CurrentStateVersion = 13
+const CurrentStateVersion = 14
+
+// StateVersionError is returned by LoadState when the on-disk state file is
+// newer than this binary understands. The daemon treats this as fatal (refuses
+// to start) rather than starting with empty state, which would orphan running
+// agents and operate against the wrong picture — see Run.
+type StateVersionError struct {
+	FileVersion   int
+	BinaryVersion int
+}
+
+func (e *StateVersionError) Error() string {
+	return fmt.Sprintf("state file version %d is newer than this binary supports (%d) — upgrade graith", e.FileVersion, e.BinaryVersion)
+}
 
 type SessionStatus string
 
@@ -91,6 +104,30 @@ type SessionState struct {
 	ScenarioRole   string          `json:"scenario_role,omitempty"`
 	ScenarioGoal   string          `json:"scenario_goal,omitempty"`
 	MigratedFrom   *MigrationInfo  `json:"migrated_from,omitempty"`
+	// DeletedAt marks a session as soft-deleted. When set, the session is
+	// hidden from the default `gr list` and overlay, its worktree and state are
+	// preserved until ExpiresAt, and the daemon purges it (hard delete) once the
+	// window elapses. `gr restore` clears this field.
+	DeletedAt *time.Time `json:"deleted_at,omitempty"`
+	// ExpiresAt is the purge deadline, frozen to DeletedAt + retention at delete
+	// time. It is NOT recomputed from current config on each sweep, so a config
+	// change only affects future deletes and the "Recoverable until <time>" the
+	// user was promised never shifts under them. `gr restore` clears this too.
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+}
+
+// IsSoftDeleted reports whether the session has been soft-deleted and is
+// awaiting restore or purge.
+func (s *SessionState) IsSoftDeleted() bool {
+	return s.DeletedAt != nil
+}
+
+// errSoftDeleted is the standard error returned by ID-addressable operations
+// that refuse to act on a soft-deleted session. Filtering the session list
+// hides it from name resolution, but the daemon still accepts raw IDs, so these
+// guards are the actual guarantee that a hidden session can't be operated.
+func errSoftDeleted(name string) error {
+	return fmt.Errorf("session %q is soft-deleted; `gr restore` it first", name)
 }
 
 // MigrationInfo records the agent a session was migrated from, so a failed
@@ -253,7 +290,7 @@ func LoadState(path string) (*State, error) {
 	}
 
 	if state.Version > CurrentStateVersion {
-		return nil, fmt.Errorf("state file version %d is newer than this binary supports (%d) — upgrade graith", state.Version, CurrentStateVersion)
+		return nil, &StateVersionError{FileVersion: state.Version, BinaryVersion: CurrentStateVersion}
 	}
 
 	if err := migrateState(&state); err != nil {
@@ -289,6 +326,7 @@ var migrations = map[int]func(*State) error{
 	10: migrateV10ToV11,
 	11: migrateV11ToV12,
 	12: migrateV12ToV13,
+	13: migrateV13ToV14,
 }
 
 func generateToken() (string, error) {
@@ -425,6 +463,13 @@ func migrateV12ToV13(state *State) error {
 		state.PairedDevices = make(map[string]*PairedDevice)
 	}
 
+	return nil
+}
+
+// migrateV13ToV14 is a no-op: v14 adds the optional deleted_at and expires_at
+// fields for soft delete, which default to nil (not deleted) for existing
+// sessions. Kept to preserve the migration chain and the newer-than-me guard.
+func migrateV13ToV14(_ *State) error {
 	return nil
 }
 

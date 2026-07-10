@@ -363,11 +363,18 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				sendControl("repo_list", protocol.RepoListResponseMsg{Repos: sm.availableRepos()})
 
 			case "list":
+				var lm protocol.ListMsg
+				_ = protocol.DecodePayload(msg, &lm) // empty/legacy payload → live sessions
+
 				sessions := sm.List()
 				cfg := sm.Config()
 
 				infos := make([]protocol.SessionInfo, 0, len(sessions))
 				for _, s := range sessions {
+					if s.IsSoftDeleted() != lm.Deleted {
+						continue
+					}
+
 					infos = append(infos, toSessionInfo(s, cfg, sm.getHookReport(s.ID)))
 				}
 
@@ -564,9 +571,16 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					continue
 				}
 
-				handleSessionLifecycle(sm, auth, sendControl,
-					lifecycleRequest{SessionID: d.SessionID, Children: d.Children, ExcludeRoot: d.ExcludeRoot},
-					"deleted", "deleted", sm.DeleteWithChildren, sm.Delete)
+				handleDelete(sm, auth, sendControl, d)
+
+			case "restore":
+				var r protocol.RestoreMsg
+				if err := protocol.DecodePayload(msg, &r); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid restore message"})
+					continue
+				}
+
+				handleRestore(sm, auth, sendControl, r)
 
 			case "stop":
 				var s protocol.StopMsg
@@ -1740,6 +1754,153 @@ type lifecycleRequest struct {
 	ExcludeRoot bool
 }
 
+// handleDelete authorizes and dispatches a delete request. It chooses soft vs
+// hard delete on the daemon side (soft when !Purge and retention > 0) and
+// replies with a DeleteResultMsg carrying the soft/hard outcome and, for a soft
+// delete, the computed expiry — enough for the CLI to render "Recoverable
+// until …" vs "Deleted".
+func handleDelete(sm *SessionManager, auth authContext, sendControl func(string, any), d protocol.DeleteMsg) {
+	sm.mu.RLock()
+	authErr := auth.checkTarget(sm, d.SessionID, authSelfOrDescendant)
+	sm.mu.RUnlock()
+
+	if authErr != nil {
+		sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
+		return
+	}
+
+	// Three-way routing, owned by the daemon (the CLI only forwards intent via
+	// Purge):
+	//   Purge              -> hard delete (gr purge)
+	//   !Purge && ret > 0  -> soft delete (gr delete, recoverable)
+	//   !Purge && ret == 0 -> reject: gr delete never destroys, so with soft
+	//                         delete disabled there is nothing safe to do.
+	if !d.Purge && sm.Config().Delete.RetentionDuration() <= 0 {
+		sendControl("error", protocol.ErrorMsg{Message: "soft delete is disabled (retention=0); use gr purge"})
+		return
+	}
+
+	soft := !d.Purge
+
+	if d.Children {
+		handleDeleteChildren(sm, sendControl, d, soft)
+		return
+	}
+
+	if soft {
+		snap, err := sm.SoftDelete(d.SessionID)
+		if err != nil {
+			sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+			return
+		}
+
+		sendControl("deleted", softDeleteResult(snap))
+
+		return
+	}
+
+	// Hard delete (gr purge): capture the name before the session is removed.
+	name := sm.sessionName(d.SessionID)
+
+	if err := sm.Delete(d.SessionID); err != nil {
+		sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+		return
+	}
+
+	sendControl("deleted", protocol.DeleteResultMsg{SessionID: d.SessionID, Name: name, Soft: false})
+}
+
+// handleDeleteChildren runs the with-children delete (soft or hard) and replies
+// with a DeleteResultMsg whose Affected list carries the per-descendant outcome.
+func handleDeleteChildren(sm *SessionManager, sendControl func(string, any), d protocol.DeleteMsg, soft bool) {
+	var (
+		affected []string
+		err      error
+	)
+
+	if soft {
+		affected, err = sm.SoftDeleteWithChildren(d.SessionID, d.ExcludeRoot)
+	} else {
+		affected, err = sm.DeleteWithChildren(d.SessionID, d.ExcludeRoot)
+	}
+
+	if err != nil {
+		sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+		return
+	}
+
+	result := protocol.DeleteResultMsg{SessionID: d.SessionID, Soft: soft}
+	for _, id := range affected {
+		if soft {
+			result.Affected = append(result.Affected, softDeleteResult(sm.sessionSnapshot(id)))
+		} else {
+			result.Affected = append(result.Affected, protocol.DeleteResultMsg{SessionID: id, Soft: false})
+		}
+	}
+
+	sendControl("deleted", result)
+}
+
+// softDeleteResult builds the delete response for a soft-deleted session,
+// reading its frozen DeletedAt/ExpiresAt off the session state.
+func softDeleteResult(s SessionState) protocol.DeleteResultMsg {
+	r := protocol.DeleteResultMsg{SessionID: s.ID, Name: s.Name, Soft: true}
+	if s.DeletedAt != nil {
+		r.DeletedAt = s.DeletedAt.Format(time.RFC3339)
+	}
+
+	if s.ExpiresAt != nil {
+		r.ExpiresAt = s.ExpiresAt.Format(time.RFC3339)
+	}
+
+	return r
+}
+
+// handleRestore authorizes and dispatches a restore request, restoring either a
+// single soft-deleted session or (with Children) the whole soft-deleted subtree.
+func handleRestore(sm *SessionManager, auth authContext, sendControl func(string, any), r protocol.RestoreMsg) {
+	sm.mu.RLock()
+	authErr := auth.checkTarget(sm, r.SessionID, authSelfOrDescendant)
+	sm.mu.RUnlock()
+
+	if authErr != nil {
+		sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
+		return
+	}
+
+	cfg := sm.Config()
+
+	if r.Children {
+		sessions, err := sm.RestoreWithChildren(r.SessionID)
+		if err != nil {
+			sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+			return
+		}
+
+		result := protocol.RestoreResultMsg{}
+		for _, s := range sessions {
+			result.Sessions = append(result.Sessions, toSessionInfo(s, cfg, sm.getHookReport(s.ID)))
+		}
+
+		sendControl("restored", result)
+
+		return
+	}
+
+	sess, err := sm.Restore(r.SessionID)
+	if err != nil {
+		sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+		return
+	}
+
+	result := protocol.RestoreResultMsg{
+		Sessions:           []protocol.SessionInfo{toSessionInfo(sess, cfg, sm.getHookReport(sess.ID))},
+		DeletedDescendants: sm.softDeletedDescendantCount(sess.ID),
+	}
+
+	sendControl("restored", result)
+}
+
 // handleSessionLifecycle implements the shared stop/delete dispatch: authorize
 // the target, then run either the with-children batch operation or the single
 // operation and report the result. event is the success message type
@@ -1846,6 +2007,17 @@ func toSessionInfo(s SessionState, cfg *config.Config, hr *hookReport) protocol.
 	}
 	if s.MigratedFrom != nil {
 		info.MigratedFrom = s.MigratedFrom.Agent
+	}
+
+	if s.DeletedAt != nil {
+		info.DeletedAt = s.DeletedAt.Format(time.RFC3339)
+
+		// ExpiresAt is frozen at delete time; surface it verbatim rather than
+		// recomputing from current retention (which could disagree with the
+		// deadline the user was shown).
+		if s.ExpiresAt != nil {
+			info.DeleteExpiresAt = s.ExpiresAt.Format(time.RFC3339)
+		}
 	}
 
 	if s.LastAttachedAt != nil {

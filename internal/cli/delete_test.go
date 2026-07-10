@@ -1,9 +1,12 @@
 package cli
 
 import (
+	"bytes"
 	"errors"
 	"io"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/d0ugal/graith/internal/output"
 	"github.com/d0ugal/graith/internal/protocol"
@@ -200,6 +203,103 @@ func TestDeleteCmdArgsValidation(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestResolveByNameOrID covers name/ID resolution and the ambiguity guard that
+// keeps delete/purge/restore from acting on an arbitrary first match.
+func TestResolveByNameOrID(t *testing.T) {
+	sessions := []protocol.SessionInfo{
+		{ID: "id-braw", Name: "braw"},
+		{ID: "id-dreich-1", Name: "dreich"},
+		{ID: "id-dreich-2", Name: "dreich"}, // duplicate name (delete/recreate cycle)
+	}
+
+	t.Run("unique name resolves", func(t *testing.T) {
+		s, err := resolveByNameOrID("braw", sessions)
+		if err != nil || s.ID != "id-braw" {
+			t.Fatalf("resolve braw = %+v, %v", s, err)
+		}
+	})
+
+	t.Run("exact id wins even when name is duplicated", func(t *testing.T) {
+		s, err := resolveByNameOrID("id-dreich-2", sessions)
+		if err != nil || s.ID != "id-dreich-2" {
+			t.Fatalf("resolve id-dreich-2 = %+v, %v", s, err)
+		}
+	})
+
+	t.Run("ambiguous name requires explicit id", func(t *testing.T) {
+		_, err := resolveByNameOrID("dreich", sessions)
+		if err == nil || !strings.Contains(err.Error(), "ambiguous") {
+			t.Fatalf("expected ambiguity error, got %v", err)
+		}
+	})
+
+	t.Run("not found", func(t *testing.T) {
+		_, err := resolveByNameOrID("scunner", sessions)
+		if err == nil {
+			t.Fatal("expected not-found error")
+		}
+	})
+}
+
+func TestFormatDeleteDeadline(t *testing.T) {
+	t.Run("empty", func(t *testing.T) {
+		if got := formatDeleteDeadline(""); got != "" {
+			t.Errorf("formatDeleteDeadline(\"\") = %q, want empty", got)
+		}
+	})
+
+	t.Run("unparseable", func(t *testing.T) {
+		if got := formatDeleteDeadline("not-a-time"); got != "" {
+			t.Errorf("got %q, want empty for unparseable", got)
+		}
+	})
+
+	t.Run("future shows relative", func(t *testing.T) {
+		future := time.Now().Add(23 * time.Hour).Format(time.RFC3339)
+
+		got := formatDeleteDeadline(future)
+		if !strings.Contains(got, "in ") {
+			t.Errorf("got %q, want a relative '(in ...)' suffix", got)
+		}
+	})
+}
+
+// TestPrintDeleteResult covers the soft vs purge success lines.
+func TestPrintDeleteResult(t *testing.T) {
+	capture := func(r protocol.DeleteResultMsg, children bool) string {
+		orig := out
+
+		t.Cleanup(func() { out = orig })
+
+		var buf bytes.Buffer
+
+		out = output.NewWithWriter(false, &buf)
+		printDeleteResult(r, children)
+
+		return buf.String()
+	}
+
+	t.Run("soft single", func(t *testing.T) {
+		expires := time.Now().Add(24 * time.Hour).Format(time.RFC3339)
+
+		got := capture(protocol.DeleteResultMsg{
+			SessionID: "id", Name: "braw", Soft: true, ExpiresAt: expires,
+		}, false)
+
+		if !strings.Contains(got, "Soft-deleted braw") || !strings.Contains(got, "gr purge braw") {
+			t.Errorf("soft output missing expected text:\n%s", got)
+		}
+	})
+
+	t.Run("purge single", func(t *testing.T) {
+		got := capture(protocol.DeleteResultMsg{SessionID: "id", Name: "auld", Soft: false}, false)
+
+		if !strings.Contains(got, "Purged auld") {
+			t.Errorf("purge output = %q, want 'Purged auld'", got)
+		}
+	})
 }
 
 // TestConfirmDeleteAutoConfirmsWhenClean verifies a session with no dirty files

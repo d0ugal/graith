@@ -72,6 +72,7 @@ var remoteMessagePolicy = map[string]remotePolicy{
 	"type":               remoteHumanRW,
 	"create":             remoteHumanRW,
 	"delete":             remoteHumanRW,
+	"restore":            remoteHumanRW,
 	"stop":               remoteHumanRW,
 	"resume":             remoteHumanRW,
 	"restart":            remoteHumanRW,

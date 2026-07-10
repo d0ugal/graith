@@ -34,6 +34,7 @@ type Config struct {
 	Keybindings      Keybindings        `toml:"keybindings"`
 	Notifications    Notifications      `toml:"notifications"`
 	Messages         Messages           `toml:"messages"`
+	Delete           Delete             `toml:"delete"`
 	Sandbox          SandboxConfig      `toml:"sandbox"`
 	Approvals        Approvals          `toml:"approvals"`
 	Status           StatusConfig       `toml:"status"`
@@ -324,6 +325,36 @@ type StatusBar struct {
 type Messages struct {
 	MaxAge       string `toml:"max_age"`
 	MaxPerStream int    `toml:"max_per_stream"`
+}
+
+// DefaultDeleteRetention is the soft-delete retention window used when
+// [delete] retention is unset.
+const DefaultDeleteRetention = 24 * time.Hour
+
+// Delete configures the soft-delete behaviour of `gr delete`. When retention
+// is a positive duration, `gr delete` marks a session deleted and keeps its
+// worktree/state for the window; the daemon purges it after the window
+// elapses. A retention of "0" disables soft delete: `gr delete` always
+// hard-deletes immediately.
+type Delete struct {
+	Retention string `toml:"retention"`
+}
+
+// RetentionDuration resolves the configured soft-delete retention window. An
+// unset value defaults to DefaultDeleteRetention (24h); "0" (or any zero
+// duration) disables soft delete. An unparseable value falls back to the
+// default so a typo never silently turns off recovery.
+func (d Delete) RetentionDuration() time.Duration {
+	if d.Retention == "" {
+		return DefaultDeleteRetention
+	}
+
+	parsed, err := ParseDurationWithDays(d.Retention)
+	if err != nil {
+		return DefaultDeleteRetention
+	}
+
+	return parsed
 }
 
 func (m Messages) MaxAgeDuration() time.Duration {
@@ -1183,6 +1214,15 @@ func (c *Config) Validate() error {
 			errs = append(errs, fmt.Errorf("git_pull.interval %q: %w", c.GitPull.Interval, err))
 		} else if d < time.Minute {
 			errs = append(errs, fmt.Errorf("git_pull.interval %q: must be at least 1 minute", c.GitPull.Interval))
+		}
+	}
+
+	// A non-empty but unparseable retention must fail loudly rather than
+	// silently falling back to the 24h default (the accessor's fail-safe): a
+	// typo should tell the user, not quietly pick a window they didn't ask for.
+	if strings.TrimSpace(c.Delete.Retention) != "" {
+		if _, err := ParseDurationWithDays(c.Delete.Retention); err != nil {
+			errs = append(errs, fmt.Errorf("delete.retention %q: %w", c.Delete.Retention, err))
 		}
 	}
 
