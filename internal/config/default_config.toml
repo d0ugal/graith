@@ -173,6 +173,16 @@ scroll_mode = "["            # open a scrollable pager over the session's histor
 shell = "s"                  # open a shell in the session's worktree
 orchestrator_session = "o"   # jump to the orchestrator session
 
+# Terminal input gestures for the attach passthrough loop.
+[input]
+# Touch/hold-and-drag arrow keys: press-and-hold the left mouse
+# button then drag up/down/left/right to emit discrete arrow-key presses to the
+# focused pane. Off by default because it repurposes left-drag, which terminals
+# otherwise use for text selection; mouse-wheel scrolling always passes through.
+drag_arrow_keys = false
+# Cells of drag movement per emitted arrow-key press (values < 1 use the default).
+drag_arrow_threshold = 2
+
 # A special worktree-less session for coordinating other sessions (ctrl+b o).
 [orchestrator]
 enabled = false        # make an orchestrator session available

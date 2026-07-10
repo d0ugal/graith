@@ -228,6 +228,11 @@ type PassthroughOpts struct {
 	Info            *protocol.SessionInfo
 	StatusBar       *StatusBarCfg
 	AutoPopApproval bool
+	// DragArrowKeys enables the touch/hold-and-drag gesture that translates
+	// left-button mouse drags into arrow-key presses. Off by default.
+	DragArrowKeys bool
+	// DragArrowThreshold is the cells-per-arrow drag distance; <1 uses the default.
+	DragArrowThreshold int
 }
 
 type StatusBarCfg struct {
@@ -370,6 +375,11 @@ func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, s
 	prefixByte := keys.Prefix
 	hasKitty := kittyCtrlSeq(prefixByte) != nil
 
+	var dragArrow *dragArrowState
+	if opts.DragArrowKeys {
+		dragArrow = newDragArrowState(opts.DragArrowThreshold)
+	}
+
 	result := ResultQuit
 
 	var resultOnce sync.Once
@@ -465,6 +475,14 @@ func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, s
 			input := buf[:n]
 			if hasKitty {
 				input = processKittyPrefix(input, prefixByte)
+				n = len(input)
+			}
+
+			// Translate left-button drag gestures into arrow-key presses before
+			// the prefix scan. Emitted arrow sequences contain no prefix byte,
+			// and mouse-wheel/other events pass through untouched.
+			if dragArrow != nil {
+				input = dragArrow.process(input)
 				n = len(input)
 			}
 

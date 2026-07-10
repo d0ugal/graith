@@ -568,6 +568,14 @@ search         = "/"                    # filter sessions
 scroll_mode    = "["                    # enter scroll mode
 shell          = "s"                    # open a shell in the worktree
 
+[input]
+# Touch/hold-and-drag arrow keys: press-and-hold the left mouse
+# button then drag up/down/left/right to emit discrete arrow-key presses to the
+# focused pane. Off by default because it repurposes left-drag (otherwise used
+# for text selection); mouse-wheel scrolling always passes through unchanged.
+drag_arrow_keys      = false            # enable the drag-to-arrow gesture
+drag_arrow_threshold = 2                # cells of drag per arrow press (min 1)
+
 # Each agent is configured under [agents.<name>]. The five below ship by default.
 [agents.claude]
 command     = "claude"
