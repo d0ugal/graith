@@ -3233,9 +3233,7 @@ func (sm *SessionManager) Delete(id string) error {
 	}
 
 	// Attempt git teardown before removing the session from state.
-	teardownErr := sm.teardownArtifacts(spec)
-
-	if teardownErr != nil {
+	if teardownErr := sm.teardownArtifacts(spec); teardownErr != nil {
 		sm.log.Error("git teardown failed, session kept for retry",
 			"session_id", id, "err", teardownErr)
 		sm.mu.Lock()
