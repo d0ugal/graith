@@ -175,7 +175,7 @@ func TestHandlePurgeWorksWhenRetentionZero(t *testing.T) {
 		t.Error("purge with retention=0 should hard-delete")
 	}
 
-	// TODO(#994): a matching batch reject case (`gr delete --stopped` with
+	// Follow-up (#994): a matching batch reject case (`gr delete --stopped` with
 	// retention=0) belongs here once batch routing is exercised end-to-end; the
 	// single-session reject above pins the settled predicate.
 }

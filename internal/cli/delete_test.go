@@ -276,6 +276,7 @@ func TestPrintDeleteResult(t *testing.T) {
 		var buf bytes.Buffer
 
 		out = output.NewWithWriter(false, &buf)
+
 		printDeleteResult(r, children)
 
 		return buf.String()

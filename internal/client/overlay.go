@@ -2334,6 +2334,7 @@ func (m overlayModel) View() tea.View {
 		} else {
 			helpParts = append(helpParts, "enter attach", "n new", "◂▸ view", m.keySearch+" filter", "tab group", "s star", "space fold", "C fold-all", m.keyDelete+" delete", "S stop", "r/"+m.keyResume+" restart", "q quit")
 		}
+
 		panelContent.WriteString(helpStyle.Render(strings.Join(helpParts, "  ")))
 	}
 

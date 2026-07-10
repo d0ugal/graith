@@ -78,7 +78,7 @@ var deleteCmd = &cobra.Command{
 // (delete is always recoverable); the notice points users at `gr purge`.
 func warnDeleteForceDeprecated(cmd *cobra.Command) {
 	if deleteBatch.force || deleteYesNoop {
-		fmt.Fprintln(cmd.ErrOrStderr(),
+		_, _ = fmt.Fprintln(cmd.ErrOrStderr(),
 			"--force/-y are deprecated: gr delete is now recoverable; use gr purge to remove immediately")
 	}
 }
