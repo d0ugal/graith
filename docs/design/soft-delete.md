@@ -89,7 +89,8 @@ destroyed. Concretely:
   their window expires, catching up on restart for windows that elapsed while it
   was down.
 - Retention is configurable via `[delete] retention`, with `"0"` disabling soft
-  delete entirely (every `gr delete` is a hard delete).
+  delete entirely — in which case `gr delete` **refuses** (directing the user to
+  `gr purge`) rather than silently hard-deleting, so `gr delete` never destroys.
 - Backward compatible: existing `state.json` files load unchanged; existing
   `gr delete --force` scripts keep working — with a safety upgrade (they now
   soft-delete and stay recoverable rather than destroying immediately).
@@ -187,16 +188,28 @@ can loop back to `stopped`:
 - **`soft-deleted → gone`**: the purge loop (or `gr purge`) runs the existing hard
   `Delete`.
 - **`* → gone`**: `gr purge` and all non-CLI callers (scenarios) go straight to
-  hard `Delete`, unchanged. `gr delete` never lands here (unless `retention = 0`).
+  hard `Delete`. `gr delete` **never** lands here — see the routing rule below.
 
 #### Who decides: the daemon, not the CLI
 
-The daemon — not the CLI — decides soft vs hard, based on `!Purge && retention >
-0`. The CLI does not know the retention value (it lives in daemon-side config),
-so it simply forwards a single `Purge` bool — set **only** by the `gr purge`
-command. `gr delete` always sends `Purge = false`, so it soft-deletes whenever
-`retention > 0` and hard-deletes only when the operator has set `retention = 0`.
-The daemon-side predicate is named after the wire field (`Purge`), which maps
+The daemon — not the CLI — decides the outcome, from the `Purge` bool the CLI
+forwards (set **only** by `gr purge`; `gr delete` always sends `Purge = false`)
+and the daemon-side `retention`:
+
+```
+Purge            -> hard delete now
+!Purge && ret>0  -> soft delete
+!Purge && ret==0 -> REJECT: "soft delete is disabled (retention=0); use gr purge"
+```
+
+This three-way rule makes **"`gr delete` never destroys"** an *unconditional*
+invariant — not "unless retention=0". When soft delete is turned off, `gr delete`
+does not silently hard-destroy (which would be a regression versus today's
+delete, which at least prompts on unsaved work); it **refuses** and points the
+operator at the explicitly-destructive `gr purge` (which carries the unsaved-work
+confirmation). The CLI cannot make this call itself — it doesn't know `retention`
+before sending — so the daemon owns it and returns the rejection as a normal error
+the CLI prints. The predicate is named after the wire field (`Purge`), which maps
 one-to-one to the `gr purge` verb.
 
 **Hiding is not the same as unreachability.** Filtering `list` (below) removes
@@ -211,7 +224,9 @@ operations — see [Daemon-side guards](#daemon-side-guards-on-id-addressable-op
 The model is **two verbs plus restore**: `gr delete` trashes (recoverable),
 `gr purge` destroys (immediate), `gr restore` brings back. Destructiveness lives in
 the *verb*, not in a flag — so there is no dangerous flag to fat-finger and no
-overloaded `--force`.
+overloaded `--force`. The existing **`gr rm` alias follows `gr delete`** (soft) —
+`rm`-muscle-memory users get the recoverable behaviour, and the destructive path is
+never spelled `rm`.
 
 #### `gr delete` — always soft, one step
 
@@ -236,14 +251,25 @@ This is the payoff of the whole design: delete stops being the dangerous verb.
 deprecated aliases** — `gr delete` already does what they asked for, just
 recoverably. Existing `gr delete --force` scripts keep working and get a strict
 *safety upgrade*: where they used to destroy immediately, they now soft-delete and
-stay recoverable for the window (the only change being that disk is reclaimed at
-purge time, not instantly — the retention trade-off the feature is built on).
+stay recoverable for the window.
+
+There is one behaviour change these scripts should learn about: disk is reclaimed
+at purge time, not instantly (the retention trade-off the feature is built on). A
+cleanup cron or CI-teardown script that ran `gr delete --force` *specifically to
+reclaim disk* will now hold worktrees for the retention window. Because that is
+silent, `gr delete --force`/`-y` **emits a one-line stderr deprecation notice** —
+`"--force is deprecated: gr delete is now recoverable; use gr purge to remove
+immediately"` — so those callers discover `gr purge`. It is the only migration
+signal they will get, and it is cheap.
 
 The success line is driven by the daemon's response (see
 [Control messages](#control-messages)) — the delete handler's bare `{session_id}`
 reply is extended so the CLI can render "Recoverable until …". With
-`retention = "0"` the daemon hard-deletes and the line reads
-"Deleted braw (permanently)" instead (see [Config](#config-delete-retention)).
+`retention = "0"` `gr delete` does **not** hard-delete; it fails with
+*"soft delete is disabled (retention=0); use `gr purge`"* (see the routing rule in
+[Who decides](#who-decides-the-daemon-not-the-cli) and
+[Config](#config-delete-retention)). So `gr delete` only ever soft-deletes or
+refuses — it never destroys.
 
 #### `gr purge` — destroy now (the only dangerous verb)
 
@@ -265,8 +291,11 @@ does.
 
 **Batch follows the verbs.** Both commands accept the existing batch filters (e.g.
 `--stopped`) via `deleteBatchRun`. `gr delete --stopped` soft-deletes each match
-(recoverable, no prompt). `gr purge --stopped` hard-deletes each and prompts once
-for the batch (or errors in JSON/non-TTY) unless `-y`. `gr purge` sets
+(recoverable, no prompt). `gr purge --stopped` hard-deletes each; instead of
+today's per-session `confirmDelete` loop it shows **one aggregate prompt** — a
+per-session line for each match that has uncommitted or un-pushed work
+(`<name>: 3 dirty files, 2 unpushed`), then a single `Purge N sessions? [y/N]` —
+and `-y` skips it (JSON/non-TTY errors without `-y`). `gr purge` sets
 `Purge = true` on every `DeleteMsg` it sends; `gr delete` never does.
 
 #### `gr restore <name>`
@@ -495,10 +524,13 @@ session that still has a live verified PID** (reusing `killVerifiedProcess`) bef
 doing anything else. This is strictly better than the hard-delete analogue, which
 leaves the same orphan visible-but-stopped.
 
-The routing decision lives in the handler's delete path: if `Purge` is set or
-`retention == 0`, call `Delete`/`DeleteWithChildren` (hard); otherwise call
-`SoftDelete`/`SoftDeleteWithChildren`. Scenario teardown and rollback call
-`Delete` directly and are unaffected (always hard).
+The routing decision lives in the handler's delete path and follows the three-way
+rule from [Who decides](#who-decides-the-daemon-not-the-cli): `Purge` →
+`Delete`/`DeleteWithChildren` (hard); `!Purge && retention > 0` →
+`SoftDelete`/`SoftDeleteWithChildren`; `!Purge && retention == 0` → **reject** with
+"soft delete is disabled (retention=0); use `gr purge`". `gr delete` therefore
+never reaches the hard path. Scenario teardown and rollback call `Delete` directly
+and are unaffected (always hard).
 
 **Token handling.** Because state is preserved, the session's auth token stays in
 `tokenIndex` and remains valid — this is intentional, so `gr restore` (and the
@@ -656,7 +688,7 @@ in TOML, Go accessor with a default, parsed by `ParseDurationWithDays`):
 ```toml
 [delete]
 retention = "24h"   # how long soft-deleted sessions are kept before purge
-# retention = "0"   # disable soft delete: every `gr delete` is a hard delete
+# retention = "0"   # disable soft delete: gr delete refuses, use gr purge
 # retention = "7d"  # days are supported (ParseDurationWithDays)
 ```
 
@@ -685,12 +717,14 @@ Semantics, and the edge cases worth calling out explicitly:
   `retention = "24h"` in the embedded `default_config.toml` so the value is
   documented and visible, but the accessor's fallback is the true source of the
   default — a hand-edited config that omits the field still gets 24h.
-- **`"0"` (or `"0s"`)**: soft delete is **disabled** — every `gr delete` is a
-  hard delete. This is the one value that means "off", and it must be
-  distinguishable from "unset". Because unset → 24h, we cannot treat the Go zero
-  value as "off"; the parse of the literal string `"0"` yields a zero
-  `time.Duration`, and the daemon's soft-vs-hard test is `retention > 0`, so a
-  parsed zero correctly disables soft delete while an *unset* field takes the 24h
+- **`"0"` (or `"0s"`)**: soft delete is **disabled**. `gr delete` then **refuses**
+  (directing to `gr purge`) rather than hard-deleting — see the routing rule — so
+  the "delete never destroys" invariant holds even here; only `gr purge` destroys.
+  This is the one value that means "off", and it must be distinguishable from
+  "unset". Because unset → 24h, we cannot treat the Go zero value as "off"; the
+  parse of the literal string `"0"` yields a zero `time.Duration`, and the daemon's
+  routing test is `retention > 0`, so a parsed zero correctly disables soft delete
+  while an *unset* field takes the 24h
   default before ever reaching that test.
 - **Unparseable** (e.g. `retention = "banana"`): two layers, both fail-safe.
   First, `Config.Validate()` surfaces an unparseable non-empty value as a
@@ -764,15 +798,17 @@ Reconcile.
   default, and destruction (`gr purge`) is a different, explicit verb. The dirty-work
   confirmation lives on `gr purge`, which is the only thing that can actually lose
   it.
-- **`gr delete` with `retention = "0"`.** When the operator has explicitly disabled
-  soft delete, `gr delete` hard-deletes — there is no soft state to fall back to.
-  This is a deliberate, documented consequence of the opt-out config, not a
-  surprise: an admin who sets `retention = "0"` has chosen destroy-on-delete
-  globally. To keep it unmissable, the success line is driven by
-  `DeleteResultMsg.Soft`: a hard delete prints **"Deleted braw (permanently)"**,
-  never the "Recoverable until …" line — so even a scripted caller's output makes
-  the destructive outcome explicit. (This is the one case where `gr delete` is
-  destructive, and it is the operator's own configuration choice.)
+- **`gr delete` with `retention = "0"`.** When the operator has disabled soft
+  delete, `gr delete` **refuses** — it does *not* silently hard-delete. The daemon
+  returns "soft delete is disabled (retention=0); use `gr purge`", and the CLI
+  prints it. This keeps "delete never destroys" unconditional: turning soft delete
+  off does not turn `gr delete` into an unprompted `rm -rf` (which would be a
+  regression versus today's delete, which at least prompts on unsaved work). A
+  `retention=0` operator who wants a session gone uses `gr purge`, which carries the
+  unsaved-work confirmation. The one ergonomic cost — `retention=0` users type
+  `gr purge` instead of `gr delete` — is the price of the invariant, and it is the
+  operator's own opt-out. (The CLI can't decide this itself; it doesn't know
+  `retention` before sending, so the daemon returns the rejection.)
 - **Restore after the window / restore a purged session.** Once purged the
   session is gone from state; `gr restore` reports "not found". Before purge but
   after `ExpiresAt`, restore is refused with an "expired" error (same predicate as
@@ -887,10 +923,12 @@ Reconcile.
 - **Unit — crash re-kill.** A soft-deleted session with a live verified PID is
   re-killed by the startup sweep (simulate: `DeletedAt` set, `Status=stopped`,
   fake live PID).
-- **Unit — routing.** Handler chooses soft vs hard from `Purge` and retention:
-  `retention>0 && !Purge` → soft; `Purge` → hard; `retention==0` → hard. Table
-  test the four combinations, single **and batch** (`gr delete --stopped` soft;
-  `gr purge --stopped` hard).
+- **Unit — routing (three-way).** Handler resolves from `Purge` and retention:
+  `Purge` → hard; `!Purge && retention>0` → soft; `!Purge && retention==0` →
+  **reject** (error, not a hard delete). Assert the reject case explicitly — a
+  `gr delete` with `retention=0` must *error*, never destroy. Test single **and
+  batch** (`gr delete --stopped` soft; `gr purge --stopped` hard; `gr delete` with
+  `retention=0` errors).
 - **Unit — config.** `RetentionDuration()`: unset → 24h; `"0"` → 0 (disabled);
   `"7d"`/`"7d12h"` parse; `"banana"` → 24h (accessor fail-safe) *and*
   `Config.Validate()` returns an error for it (so load/reload fails loudly).
@@ -1029,8 +1067,10 @@ requirement, not a follow-up).
 ### Migration / rollout
 
 Ships behind config with a safe default: users who do nothing get a 24h recovery
-window (a strict safety improvement). Users who want the old behaviour set
-`[delete] retention = "0"`. State files are forward-migrated (v13→v14). Downgrade
+window (a strict safety improvement). Operators who want no soft delete set
+`[delete] retention = "0"`; note this does *not* reproduce the old
+`gr delete`-destroys behaviour — `gr delete` then refuses and they use `gr purge`.
+State files are forward-migrated (v13→v14). Downgrade
 safety **depends on the `Run` change** described in
 [State model & migration](#state-model--migration): today an old daemon reading a
 newer state file logs the error and starts with empty state, so this design
