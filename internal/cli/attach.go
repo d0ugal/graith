@@ -131,7 +131,7 @@ func runAttach(cmd *cobra.Command, name string) error {
 		repos := client.DiscoverRepos(cfg.AllowedRepoPaths, list.Sessions)
 		agents, defaultAgent := agentChoices()
 
-		result := client.RunOverlay(list.Sessions, "", previewFetcher(), sessionRefresher(), deleteSession, restartSession, stopSession, toggleStar, paths.Profile, nil, repos, cfg.Overlay.ShortcutKeys, agents, defaultAgent, overlayKeysFromConfig())
+		result := client.RunOverlay(list.Sessions, "", previewFetcher(), sessionRefresher(), deletedRefresher(), deleteSession, restartSession, stopSession, toggleStar, restoreSession, paths.Profile, nil, repos, cfg.Overlay.ShortcutKeys, agents, defaultAgent, overlayKeysFromConfig())
 		if result == nil || result.Action == "" {
 			return nil
 		}
@@ -246,7 +246,7 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 			repos := client.DiscoverRepos(cfg.AllowedRepoPaths, list.Sessions)
 			agents, defaultAgent := agentChoices()
 
-			overlayResult := client.RunOverlay(list.Sessions, sessionID, previewFetcher(), sessionRefresher(), deleteSession, restartSession, stopSession, toggleStar, paths.Profile, overlayCollapsed, repos, cfg.Overlay.ShortcutKeys, agents, defaultAgent, overlayKeysFromConfig())
+			overlayResult := client.RunOverlay(list.Sessions, sessionID, previewFetcher(), sessionRefresher(), deletedRefresher(), deleteSession, restartSession, stopSession, toggleStar, restoreSession, paths.Profile, overlayCollapsed, repos, cfg.Overlay.ShortcutKeys, agents, defaultAgent, overlayKeysFromConfig())
 			if overlayResult != nil {
 				overlayCollapsed = overlayResult.Collapsed
 			}
@@ -979,6 +979,59 @@ func sessionRefresher() func() []protocol.SessionInfo {
 
 		return list.Sessions
 	}
+}
+
+// deletedRefresher fetches the soft-deleted sessions for the overlay's Deleted
+// view (a live-list refresh with ListMsg{Deleted:true}).
+func deletedRefresher() func() []protocol.SessionInfo {
+	return func() []protocol.SessionInfo {
+		c, err := freshClient()
+		if err != nil {
+			return nil
+		}
+		defer c.Close()
+
+		_ = c.SendControl("list", protocol.ListMsg{Deleted: true})
+
+		resp, err := c.ReadControlResponse()
+		if err != nil || resp.Type == "error" {
+			return nil
+		}
+
+		var list protocol.SessionListMsg
+		if err := protocol.DecodePayload(resp, &list); err != nil {
+			return nil
+		}
+
+		return list.Sessions
+	}
+}
+
+// restoreSession un-deletes a soft-deleted session (the overlay Deleted view's
+// only action).
+func restoreSession(sessionID string) error {
+	sc, err := freshClient()
+	if err != nil {
+		return err
+	}
+	defer sc.Close()
+
+	_ = sc.SendControl("restore", protocol.RestoreMsg{SessionID: sessionID})
+
+	resp, err := sc.ReadControlResponse()
+	if err != nil {
+		return err
+	}
+
+	if resp.Type == "error" {
+		var e protocol.ErrorMsg
+
+		_ = protocol.DecodePayload(resp, &e)
+
+		return fmt.Errorf("%s", e.Message)
+	}
+
+	return nil
 }
 
 func conversationFetcher(sessionID string) func() ([]protocol.ConversationMessage, bool) {

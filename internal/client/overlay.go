@@ -39,9 +39,25 @@ const (
 	viewActive
 	viewStarred
 	viewScenario
+	viewDeleted
 )
 
-var viewNames = []string{"All", "Needs Attention", "Active", "Starred", "Scenarios"}
+var viewNames = []string{"All", "Needs Attention", "Active", "Starred", "Scenarios", "Deleted"}
+
+// sortDeleted orders soft-deleted sessions most-recently-deleted first.
+func sortDeleted(sessions []protocol.SessionInfo) []protocol.SessionInfo {
+	result := make([]protocol.SessionInfo, len(sessions))
+	copy(result, sessions)
+
+	sort.SliceStable(result, func(i, j int) bool {
+		ti, _ := time.Parse(time.RFC3339, result[i].DeletedAt)
+		tj, _ := time.Parse(time.RFC3339, result[j].DeletedAt)
+
+		return ti.After(tj)
+	})
+
+	return result
+}
 
 func (v viewMode) next() viewMode {
 	return (v + 1) % viewMode(len(viewNames))
@@ -639,10 +655,16 @@ type starResultMsg struct {
 	err       error
 }
 
+type restoreResultMsg struct {
+	sessionID string
+	err       error
+}
+
 type refreshTickMsg struct{}
 
 type refreshSessionsMsg struct {
 	sessions []protocol.SessionInfo
+	deleted  []protocol.SessionInfo
 }
 
 type overlayModel struct {
@@ -659,10 +681,13 @@ type overlayModel struct {
 	view             viewMode
 	fetchPreview     func(sessionID string) string
 	refreshSessions  func() []protocol.SessionInfo
+	refreshDeleted   func() []protocol.SessionInfo
 	deleteSession    func(sessionID string) error
 	restartSession   func(sessionID string) error
 	stopSession      func(sessionID string) error
 	toggleStar       func(sessionID string, star bool) error
+	restoreSession   func(sessionID string) error
+	deletedSessions  []protocol.SessionInfo
 	previewContent   string
 	previewSessionID string
 	profile          string
@@ -1139,9 +1164,15 @@ func (m overlayModel) refreshSessionsCmd() tea.Cmd {
 	}
 
 	fetch := m.refreshSessions
+	fetchDeleted := m.refreshDeleted
 
 	return func() tea.Msg {
-		return refreshSessionsMsg{sessions: fetch()}
+		msg := refreshSessionsMsg{sessions: fetch()}
+		if fetchDeleted != nil {
+			msg.deleted = fetchDeleted()
+		}
+
+		return msg
 	}
 }
 
@@ -1316,6 +1347,8 @@ func (m *overlayModel) sessionsForView() []protocol.SessionInfo {
 		return filterActive(m.allSessions)
 	case viewStarred:
 		return filterStarred(m.allSessions)
+	case viewDeleted:
+		return sortDeleted(m.deletedSessions)
 	default:
 		return m.allSessions
 	}
@@ -1358,6 +1391,24 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		return m, m.fetchPreviewCmd()
+
+	case restoreResultMsg:
+		if msg.err == nil {
+			// The session is no longer deleted; drop it from the deleted list and
+			// re-fetch so it reappears in the live views.
+			var remaining []protocol.SessionInfo
+
+			for _, s := range m.deletedSessions {
+				if s.ID != msg.sessionID {
+					remaining = append(remaining, s)
+				}
+			}
+
+			m.deletedSessions = remaining
+			m.rebuildForView()
+		}
+
+		return m, tea.Batch(m.fetchPreviewCmd(), m.refreshSessionsCmd())
 
 	case deleteResultMsg:
 		if msg.err != nil {
@@ -1478,6 +1529,7 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		m.allSessions = msg.sessions
+		m.deletedSessions = msg.deleted
 		m.rebuildForView()
 		m.resizeList()
 
@@ -1714,6 +1766,21 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.fetchPreviewCmd()
 
 			case "enter":
+				// In the Deleted view, the only action is restore — attaching to a
+				// trashed session makes no sense.
+				if m.view == viewDeleted {
+					if item, ok := m.list.SelectedItem().(sessionItem); ok && m.restoreSession != nil {
+						sid := item.info.ID
+						restoreFn := m.restoreSession
+
+						return m, func() tea.Msg {
+							return restoreResultMsg{sessionID: sid, err: restoreFn(sid)}
+						}
+					}
+
+					return m, nil
+				}
+
 				if item, ok := m.list.SelectedItem().(sessionItem); ok {
 					m.selected = &item.info
 				}
@@ -1725,6 +1792,12 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// an existing literal (e.g. search onto "q") gets whichever case
 			// appears first. Defaults (x/R//) don't collide with any literal.
 			case m.keyDelete:
+				// The Deleted view offers only restore (enter); destructive/mutating
+				// actions are disabled there.
+				if m.view == viewDeleted {
+					return m, nil
+				}
+
 				if _, ok := m.list.SelectedItem().(sessionItem); ok {
 					m.state = stateConfirmDelete
 					m.resizeList()
@@ -1733,6 +1806,10 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 
 			case "r":
+				if m.view == viewDeleted {
+					return m, nil
+				}
+
 				if _, ok := m.list.SelectedItem().(sessionItem); ok {
 					m.state = stateConfirmRestart
 					m.resizeList()
@@ -1741,12 +1818,20 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 
 			case m.keyResume:
+				if m.view == viewDeleted {
+					return m, nil
+				}
+
 				m.state = stateRestartMenu
 				m.resizeList()
 
 				return m, nil
 
 			case "S":
+				if m.view == viewDeleted {
+					return m, nil
+				}
+
 				if _, ok := m.list.SelectedItem().(sessionItem); ok {
 					m.state = stateConfirmStop
 					m.resizeList()
@@ -1755,6 +1840,10 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 
 			case "s":
+				if m.view == viewDeleted {
+					return m, nil
+				}
+
 				if item, ok := m.list.SelectedItem().(sessionItem); ok && m.toggleStar != nil {
 					sid := item.info.ID
 					newStarred := !item.info.Starred
@@ -2239,7 +2328,12 @@ func (m overlayModel) View() tea.View {
 			helpParts = append(helpParts, first+"-"+last+" jump")
 		}
 
-		helpParts = append(helpParts, "enter attach", "n new", "◂▸ view", m.keySearch+" filter", "tab group", "s star", "space fold", "C fold-all", m.keyDelete+" delete", "S stop", "r/"+m.keyResume+" restart", "q quit")
+		if m.view == viewDeleted {
+			// The Deleted view offers only restore.
+			helpParts = append(helpParts, "enter restore", "◂▸ view", m.keySearch+" filter", "q quit")
+		} else {
+			helpParts = append(helpParts, "enter attach", "n new", "◂▸ view", m.keySearch+" filter", "tab group", "s star", "space fold", "C fold-all", m.keyDelete+" delete", "S stop", "r/"+m.keyResume+" restart", "q quit")
+		}
 		panelContent.WriteString(helpStyle.Render(strings.Join(helpParts, "  ")))
 	}
 
@@ -2325,12 +2419,14 @@ func (m overlayModel) View() tea.View {
 // RunOverlay launches the bubbletea overlay listing sessions grouped by repo.
 // currentSessionID highlights the session the user was just attached to.
 // fetchPreview is called asynchronously to load scrollback for the selected session.
-func RunOverlay(sessions []protocol.SessionInfo, currentSessionID string, fetchPreview func(sessionID string) string, refreshSessions func() []protocol.SessionInfo, deleteSession func(sessionID string) error, restartSession func(sessionID string) error, stopSession func(sessionID string) error, toggleStar func(sessionID string, star bool) error, profile string, collapsed map[string]bool, repoSuggestions []RepoSuggestion, shortcutKeys string, agents []string, defaultAgent string, keys OverlayKeys) *OverlayResult {
+func RunOverlay(sessions []protocol.SessionInfo, currentSessionID string, fetchPreview func(sessionID string) string, refreshSessions func() []protocol.SessionInfo, refreshDeleted func() []protocol.SessionInfo, deleteSession func(sessionID string) error, restartSession func(sessionID string) error, stopSession func(sessionID string) error, toggleStar func(sessionID string, star bool) error, restoreSession func(sessionID string) error, profile string, collapsed map[string]bool, repoSuggestions []RepoSuggestion, shortcutKeys string, agents []string, defaultAgent string, keys OverlayKeys) *OverlayResult {
 	m := newOverlayModel(sessions, currentSessionID, fetchPreview, deleteSession, collapsed, []rune(shortcutKeys))
 	m.refreshSessions = refreshSessions
+	m.refreshDeleted = refreshDeleted
 	m.restartSession = restartSession
 	m.stopSession = stopSession
 	m.toggleStar = toggleStar
+	m.restoreSession = restoreSession
 	m.profile = profile
 	m.repoSuggestions = repoSuggestions
 	m.agents = agents

@@ -3437,15 +3437,20 @@ func TestViewModeCycling(t *testing.T) {
 	}
 
 	v = v.next()
+	if v != viewDeleted {
+		t.Errorf("Scenario.next() = %d, want viewDeleted", v)
+	}
+
+	v = v.next()
 	if v != viewAll {
-		t.Errorf("Scenario.next() = %d, want viewAll (wrap)", v)
+		t.Errorf("Deleted.next() = %d, want viewAll (wrap)", v)
 	}
 
 	v = viewAll
 
 	v = v.prev()
-	if v != viewScenario {
-		t.Errorf("All.prev() = %d, want viewScenario (wrap)", v)
+	if v != viewDeleted {
+		t.Errorf("All.prev() = %d, want viewDeleted (wrap)", v)
 	}
 }
 
@@ -3492,8 +3497,76 @@ func TestOverlay_RightArrowCyclesView(t *testing.T) {
 	updated, _ = sendKey(updated, "right")
 
 	om = asOverlay(updated)
+	if om.view != viewDeleted {
+		t.Errorf("after 5x right: view = %d, want viewDeleted", om.view)
+	}
+
+	updated, _ = sendKey(updated, "right")
+
+	om = asOverlay(updated)
 	if om.view != viewAll {
-		t.Errorf("after 5x right: view = %d, want viewAll (wrap)", om.view)
+		t.Errorf("after 6x right: view = %d, want viewAll (wrap)", om.view)
+	}
+}
+
+func TestSortDeletedMostRecentFirst(t *testing.T) {
+	sessions := []protocol.SessionInfo{
+		{ID: "auld", Name: "auld", DeletedAt: "2026-07-09T10:00:00Z"},
+		{ID: "bide", Name: "bide", DeletedAt: "2026-07-10T10:00:00Z"},
+		{ID: "canny", Name: "canny", DeletedAt: "2026-07-08T10:00:00Z"},
+	}
+
+	got := sortDeleted(sessions)
+
+	want := []string{"bide", "auld", "canny"}
+	for i, id := range want {
+		if got[i].ID != id {
+			t.Errorf("sortDeleted[%d] = %q, want %q", i, got[i].ID, id)
+		}
+	}
+}
+
+// TestOverlayDeletedViewShowsDeletedAndRestores verifies the Deleted view lists
+// soft-deleted sessions and that Enter invokes the restore hook.
+func TestOverlayDeletedViewShowsDeletedAndRestores(t *testing.T) {
+	m := newOverlayModel(overlayTestSessions(), "", noopFetchPreview, nil, nil, nil)
+	m.deletedSessions = []protocol.SessionInfo{
+		{ID: "dreich", Name: "dreich", Status: "stopped", DeletedAt: "2026-07-10T10:00:00Z", DeleteExpiresAt: "2026-07-11T10:00:00Z"},
+	}
+
+	var restored string
+
+	m.restoreSession = func(id string) error { restored = id; return nil }
+
+	updated, _ := sendWindowSize(m, 120, 40)
+
+	// Cycle to the Deleted view (left wraps to it).
+	updated, _ = sendKey(updated, "left")
+
+	om := asOverlay(updated)
+	if om.view != viewDeleted {
+		t.Fatalf("expected viewDeleted, got %d", om.view)
+	}
+
+	visible := om.sessionsForView()
+	if len(visible) != 1 || visible[0].ID != "dreich" {
+		t.Fatalf("deleted view sessions = %+v, want [dreich]", visible)
+	}
+
+	// Enter restores the selected deleted session (and does not attach).
+	updated, cmd := sendKey(om, "enter")
+	om = asOverlay(updated)
+
+	if om.selected != nil {
+		t.Error("enter in deleted view must not select/attach")
+	}
+
+	if cmd != nil {
+		cmd() // runs the restore closure
+	}
+
+	if restored != "dreich" {
+		t.Errorf("restore hook got %q, want dreich", restored)
 	}
 }
 
@@ -3507,8 +3580,8 @@ func TestOverlay_LeftArrowCyclesViewBackward(t *testing.T) {
 	updated, _ = sendKey(updated, "left")
 
 	om := asOverlay(updated)
-	if om.view != viewScenario {
-		t.Errorf("after left from All: view = %d, want viewScenario (wrap)", om.view)
+	if om.view != viewDeleted {
+		t.Errorf("after left from All: view = %d, want viewDeleted (wrap)", om.view)
 	}
 }
 
@@ -4470,12 +4543,12 @@ func TestUpdate_ViewSwitchWraps(t *testing.T) {
 	m := newOverlayModel(overlayTestSessions(), "", noopFetchPreview, nil, nil, nil)
 	m.width, m.height = 120, 40
 
-	// Left from viewAll wraps to the last view (viewScenario).
+	// Left from viewAll wraps to the last view (viewDeleted).
 	updated, _ := sendKey(m, "h")
 	om := asOverlay(updated)
 
-	if om.view != viewScenario {
-		t.Errorf("left from viewAll should wrap to viewScenario, got %v", om.view)
+	if om.view != viewDeleted {
+		t.Errorf("left from viewAll should wrap to viewDeleted, got %v", om.view)
 	}
 
 	// Right wraps back to viewAll.
