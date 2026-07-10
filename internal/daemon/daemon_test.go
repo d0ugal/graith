@@ -21,7 +21,6 @@ import (
 
 func newTestSessionManager(t *testing.T) *SessionManager {
 	t.Helper()
-	tmpDir := t.TempDir()
 
 	// Approval gating is opt-in (disabled by default). These tests exercise
 	// the hook-generation and approval-queue mechanics, so enable it here.
@@ -29,11 +28,7 @@ func newTestSessionManager(t *testing.T) *SessionManager {
 	enabled := true
 	cfg.Approvals.Enabled = &enabled
 
-	return NewSessionManager(cfg, config.Paths{
-		StateFile: filepath.Join(tmpDir, "state.json"),
-		DataDir:   tmpDir,
-		LogDir:    tmpDir,
-	}, slog.Default())
+	return newSMWithConfig(t, cfg)
 }
 
 // gitOut mirrors the package-level gitRun helper but returns the command's
@@ -4976,16 +4971,11 @@ func TestCovSetStores(t *testing.T) {
 // exercised without a real agent binary.
 func sleeperSM(t *testing.T) *SessionManager {
 	t.Helper()
-	tmp := t.TempDir()
 
 	cfg := config.Default()
 	cfg.Agents["sleeper"] = config.Agent{Command: "sleep", Args: []string{"300"}}
 
-	return NewSessionManager(cfg, config.Paths{
-		StateFile: filepath.Join(tmp, "state.json"),
-		DataDir:   tmp,
-		LogDir:    tmp,
-	}, slog.Default())
+	return newSMWithConfig(t, cfg)
 }
 
 // TestFetchRemotesUpdatesTrackingRefs verifies the periodic fetch pass advances
