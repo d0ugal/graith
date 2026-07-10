@@ -850,6 +850,9 @@ func (dc *doctorContext) checkStorage(diag *protocol.DiagnosticsMsg) {
 	for _, s := range diag.Sessions {
 		sessionIDs[s.ID] = true
 	}
+	for _, id := range diag.DeletedSessionIDs {
+		sessionIDs[id] = true
+	}
 
 	var (
 		orphanedCount int

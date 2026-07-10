@@ -4649,6 +4649,29 @@ func TestCovDiagnosticsReportsSessions(t *testing.T) {
 	}
 }
 
+// TestDiagnosticsReportsSoftDeletedOwnership verifies recoverable sessions stay
+// out of the live health report while still identifying their on-disk resources
+// as owned. Doctor consumes this separate ID list during orphan cleanup.
+func TestDiagnosticsReportsSoftDeletedOwnership(t *testing.T) {
+	sm := newTestSessionManager(t)
+	deletedAt := time.Now().UTC()
+
+	putSession(sm, &SessionState{ID: "braw1", Name: "braw", Status: StatusStopped})
+	putSession(sm, &SessionState{
+		ID: "bide1", Name: "bide", Status: StatusStopped, DeletedAt: &deletedAt,
+	})
+
+	d := sm.Diagnostics()
+
+	if d.Fleet.Total != 1 || len(d.Sessions) != 1 || d.Sessions[0].ID != "braw1" {
+		t.Errorf("live diagnostics include deleted session: fleet=%+v sessions=%+v", d.Fleet, d.Sessions)
+	}
+
+	if len(d.DeletedSessionIDs) != 1 || d.DeletedSessionIDs[0] != "bide1" {
+		t.Errorf("DeletedSessionIDs = %v, want [bide1]", d.DeletedSessionIDs)
+	}
+}
+
 func TestCovKillVerifiedProcess(t *testing.T) {
 	sm := newTestSessionManager(t)
 
