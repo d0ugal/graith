@@ -165,15 +165,15 @@ Soft delete slots into the existing lifecycle as a hidden terminal-ish state tha
 can loop back to `stopped`:
 
 ```
-                gr delete (retention > 0)
-  running ──stop agent──▶ stopped ──set DeletedAt──▶ [soft-deleted]
-     │                       ▲                            │  │
-     │                       │  gr restore (clear         │  │
-     │                       └─── DeletedAt)──────────────┘  │
-     │                                                       │ purge loop
-     │ gr delete --force / --purge                           │ (now-DeletedAt
-     ▼                                                       ▼  >= retention)
-  ─────────────────── hard delete (Delete) ───────────────────▶ gone
+              gr delete (retention > 0)
+  running ──stop agent──▶ stopped ──set DeletedAt+ExpiresAt──▶ [soft-deleted]
+     │                       ▲                                    │  │
+     │                       │  gr restore (clear DeletedAt       │  │
+     │                       └───  + ExpiresAt)───────────────────┘  │
+     │                                                               │ purge loop
+     │ gr delete --force / --purge                                   │ (now >=
+     ▼                                                               ▼  ExpiresAt)
+  ─────────────────────── hard delete (Delete) ───────────────────────▶ gone
 ```
 
 - **`running → soft-deleted`**: `gr delete` on a running session stops the agent
@@ -513,8 +513,8 @@ only good for `restore`/`--purge`/read-only ops until the session is restored.
 
 1. **Under lock**: look up the session; error if not found or not soft-deleted.
    **Check the window** with the *same* predicate purge uses —
-   `shouldPurge(session, now)` i.e. `now >= session.ExpiresAt` (see below). If it
-   returns true the window has closed — return a clear "expired, already scheduled
+   `shouldPurge(session, now, fallbackExpiry)` i.e. `now >= session.ExpiresAt` (see
+   below). If it returns true the window has closed — return a clear "expired, already scheduled
    for purge" error rather than silently resurrecting a session past its advertised
    deadline. (Within the coarse purge cadence a just-expired session may still be
    in state; restore must not undelete it.) Sharing the one predicate guarantees
@@ -554,12 +554,29 @@ func (sm *SessionManager) RunPurgeLoop(ctx context.Context) {
 The decision is a single pure function, injectable `now`, shared with `Restore`:
 
 ```go
-func shouldPurge(s *SessionState, now time.Time) bool {
-    return s.IsSoftDeleted() && s.ExpiresAt != nil && !now.Before(*s.ExpiresAt)
+func shouldPurge(s *SessionState, now, fallbackExpiry time.Time) bool {
+    if !s.IsSoftDeleted() {
+        return false
+    }
+    exp := fallbackExpiry            // corrupt/hand-edited state: DeletedAt set, ExpiresAt nil
+    if s.ExpiresAt != nil {
+        exp = *s.ExpiresAt
+    }
+    return !now.Before(exp)
 }
 ```
 
-`purgeExpired` snapshots the sessions where `shouldPurge(s, now)` under a read lock
+The `fallbackExpiry` guards a corner the naive `ExpiresAt != nil` check gets
+wrong: a soft-deleted session with `DeletedAt` set but `ExpiresAt` **nil** (a
+hand-edited or corrupt `state.json`, or an interrupted older delete) would
+otherwise be hidden *and* never purged — the trash silently accumulating
+unreachable entries. The sweep passes `fallbackExpiry = DeletedAt + current
+retention` (or, if `DeletedAt` is also nil, `now` — purge immediately), and logs
+that it fell back, so such a session is still eventually reaped and the anomaly is
+visible. `Restore` uses the same helper, so a nil-`ExpiresAt` session is treated
+consistently by both paths.
+
+`purgeExpired` snapshots the sessions where `shouldPurge(s, now, fallback)` under a read lock
 as `(id, expiresAt)` pairs, then hard-deletes each via a **compare-and-delete**
 step, not a bare `Delete(id)`:
 
@@ -884,10 +901,11 @@ Reconcile.
   file is rejected by the newer-than-me guard **and the daemon `Run` refuses to
   start** (the downgrade fail-closed change) rather than coming up with empty
   state.
-- **Purge loop.** Test the shared pure predicate `shouldPurge(session, now)`
-  exhaustively (before/at/after `ExpiresAt`, nil `DeletedAt`, nil `ExpiresAt`) with
-  an **injected `now`**, and assert `Restore`'s window check calls the *same*
-  function (they can't drift). The loop is then a thin scheduler around tested
+- **Purge loop.** Test the shared pure predicate
+  `shouldPurge(session, now, fallbackExpiry)` exhaustively (before/at/after
+  `ExpiresAt`; nil `DeletedAt`; **nil `ExpiresAt` → fallback used**, both with and
+  without `DeletedAt`) with an **injected `now`**, and assert `Restore`'s window
+  check calls the *same* function (they can't drift). The loop is then a thin scheduler around tested
   logic (mirrors `checkIdleSession`). Test `purgeExpired` against a state with
   mixed expired/unexpired sessions asserting only the expired are `Delete`d, and
   the **compare-and-delete race**: a session restored (or re-deleted with a new
