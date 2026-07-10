@@ -3133,14 +3133,16 @@ func (sm *SessionManager) Delete(id string) error {
 	orphanStartTime := sessState.PIDStartTime
 	sessState.Status = StatusDeleting
 	sessState.StatusChangedAt = time.Now()
-	sessState.PID = 0
-	sessState.PIDStartTime = 0
+	// The PID stays in state until the tombstone (which carries it) is durably
+	// written, so a crash before the tombstone lands still leaves a reap-able
+	// PID rather than a silently-orphaned process.
 	_ = sm.saveState()
 	sm.mu.Unlock()
 
 	// Write a tombstone before any teardown so a crash mid-delete is resumed on
-	// next startup (the session is already committed to removal). Best-effort:
-	// failing to write it only costs crash-resume for this one delete.
+	// next startup. This must be durable BEFORE the destructive teardown runs:
+	// if it can't be written, fail closed — revert the session and abort rather
+	// than tear down a worktree with no recovery marker.
 	spec := teardownSpec{
 		ID:           id,
 		RepoPath:     repoPath,
@@ -3158,8 +3160,36 @@ func (sm *SessionManager) Delete(id string) error {
 		PIDStartTime: orphanStartTime,
 		CreatedAt:    time.Now(),
 	}); err != nil {
-		sm.log.Warn("failed to write delete tombstone", "id", id, "err", err)
+		sm.log.Error("failed to write delete tombstone; aborting delete", "id", id, "err", err)
+		sm.mu.Lock()
+		if s, ok := sm.state.Sessions[id]; ok {
+			if prevStatus == StatusRunning {
+				s.Status = StatusStopped
+			} else {
+				s.Status = prevStatus
+			}
+
+			s.StatusChangedAt = time.Now()
+			_ = sm.saveState()
+		}
+		sm.mu.Unlock()
+
+		if hasClient {
+			ac.kick()
+		}
+
+		return fmt.Errorf("delete aborted: could not write recovery tombstone: %w", err)
 	}
+
+	// Tombstone is durable; the PID it carries lets resume reap the process, so
+	// drop the PID from live state now.
+	sm.mu.Lock()
+	if s, ok := sm.state.Sessions[id]; ok {
+		s.PID = 0
+		s.PIDStartTime = 0
+		_ = sm.saveState()
+	}
+	sm.mu.Unlock()
 
 	// Blocking operations outside the lock.
 	if hasPTY {
@@ -3257,9 +3287,12 @@ func (sm *SessionManager) Delete(id string) error {
 	err := sm.saveState()
 	sm.mu.Unlock()
 
-	// Teardown succeeded and the session is gone from state; the delete is
-	// fully committed, so the tombstone is no longer needed.
-	sm.removeTombstone(id)
+	// The removal-from-state save is the durable commit point. Only drop the
+	// tombstone once it succeeds; if it failed, keep the tombstone so startup
+	// finishes the delete (state.json may still list this now-torn-down session).
+	if err == nil {
+		sm.removeTombstone(id)
+	}
 
 	_ = os.Remove(filepath.Join(sm.paths.LogDir, id+".log"))
 	_ = os.Remove(sm.nonoProfilePath(id))
@@ -3564,13 +3597,21 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 		}
 
 		// Tombstone before teardown so a crash mid-delete is resumed on startup.
+		// Fail closed: if the recovery marker can't be written, skip this
+		// session's teardown and keep it for retry rather than tear down a
+		// worktree with no way to resume the delete.
 		if err := sm.writeTombstone(tombstone{
 			teardownSpec: spec,
+			Name:         s.id,
 			PID:          s.pid,
 			PIDStartTime: s.pidStartTime,
 			CreatedAt:    time.Now(),
 		}); err != nil {
-			sm.log.Warn("failed to write delete tombstone", "id", s.id, "err", err)
+			sm.log.Error("failed to write delete tombstone; keeping session for retry",
+				"id", s.id, "err", err)
+			teardownErrs = append(teardownErrs, fmt.Errorf("session %s: write tombstone: %w", s.id, err))
+
+			continue
 		}
 
 		if err := sm.teardownArtifacts(spec); err != nil {
@@ -3624,7 +3665,12 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 
 	for _, s := range snaps {
 		if succeeded[s.id] {
-			sm.removeTombstone(s.id)
+			// Only drop the tombstone once the removal-from-state save is durable;
+			// if it failed, keep the tombstone so startup finishes the delete.
+			if stateErr == nil {
+				sm.removeTombstone(s.id)
+			}
+
 			_ = os.Remove(filepath.Join(sm.paths.LogDir, s.id+".log"))
 			_ = os.Remove(sm.nonoProfilePath(s.id))
 			_ = os.Remove(sm.safehouseFragmentPath(s.id))

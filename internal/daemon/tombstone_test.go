@@ -131,6 +131,52 @@ func TestResumeTombstonesIgnoresCorruptFile(t *testing.T) {
 	}
 }
 
+// TestDeleteAbortsWhenTombstoneUnwritable is the regression test for fail-open
+// teardown: if the recovery tombstone can't be written, Delete must abort
+// before removing the worktree and keep the session for retry.
+func TestDeleteAbortsWhenTombstoneUnwritable(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	worktree := filepath.Join(sm.paths.DataDir, "worktrees", "croft", "hash", "fash0001")
+	if err := os.MkdirAll(worktree, 0o700); err != nil {
+		t.Fatalf("mkdir worktree: %v", err)
+	}
+
+	// Block tombstone creation by planting a regular file where the tombstones
+	// directory needs to be — MkdirAll then fails, so writeTombstone errors.
+	if err := os.WriteFile(sm.tombstoneDir(), []byte("thrawn"), 0o600); err != nil {
+		t.Fatalf("plant tombstone-dir file: %v", err)
+	}
+
+	sm.state.Sessions["fash0001"] = &SessionState{
+		ID:           "fash0001",
+		Name:         "fash",
+		WorktreePath: worktree,
+		Status:       StatusStopped,
+	}
+
+	err := sm.Delete("fash0001")
+	if err == nil {
+		t.Fatal("Delete succeeded; expected abort when tombstone unwritable")
+	}
+
+	sm.mu.RLock()
+	sess, ok := sm.state.Sessions["fash0001"]
+	sm.mu.RUnlock()
+
+	if !ok {
+		t.Fatal("session removed from state despite aborted delete")
+	}
+
+	if sess.Status != StatusStopped {
+		t.Errorf("session status = %q, want %q after abort", sess.Status, StatusStopped)
+	}
+
+	if _, err := os.Stat(worktree); err != nil {
+		t.Errorf("worktree torn down despite aborted delete: %v", err)
+	}
+}
+
 func TestTeardownArtifactsInPlaceIsNoop(t *testing.T) {
 	sm := newTestSessionManager(t)
 
