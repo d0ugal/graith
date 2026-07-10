@@ -115,6 +115,21 @@ func countSessionItems(m overlayModel) int {
 	return count
 }
 
+// renderItem builds a compactDelegate for the given sessions and renders the
+// item at index into a string, using the standard 120x10 list dimensions.
+func renderItem(sessions []protocol.SessionInfo, current string, index int) string {
+	cols := computeColumnWidths(sessions, current)
+	d := compactDelegate{cols: cols, currentSessionID: current}
+	items := buildGroupedItems(sessions, nil)
+	l := list.New(items, d, 120, 10)
+
+	var buf strings.Builder
+
+	d.Render(&buf, l, index, items[index])
+
+	return buf.String()
+}
+
 // --- buildGroupedItems ---
 
 func TestBuildGroupedItems_GroupsByRepo(t *testing.T) {
@@ -3023,15 +3038,8 @@ func TestCompactDelegate_RenderStatusIndicators(t *testing.T) {
 			sessions := []protocol.SessionInfo{
 				{ID: "s1", Name: "test", RepoName: "repo", Status: tt.status, Branch: "main", CreatedAt: time.Now().Format(time.RFC3339)},
 			}
-			cols := computeColumnWidths(sessions, "")
-			d := compactDelegate{cols: cols}
-			items := buildGroupedItems(sessions, nil)
-			l := list.New(items, d, 120, 10)
 
-			var buf strings.Builder
-			d.Render(&buf, l, 1, items[1])
-
-			if !strings.Contains(buf.String(), tt.indicator) {
+			if !strings.Contains(renderItem(sessions, "", 1), tt.indicator) {
 				t.Errorf("status %q should render indicator %q", tt.status, tt.indicator)
 			}
 		})
@@ -3046,29 +3054,15 @@ func TestCompactDelegate_RenderAgentStatusOverride(t *testing.T) {
 			Branch: "main", CreatedAt: time.Now().Format(time.RFC3339),
 		},
 	}
-	cols := computeColumnWidths(sessions, "")
-	d := compactDelegate{cols: cols}
-	items := buildGroupedItems(sessions, nil)
-	l := list.New(items, d, 120, 10)
 
-	var buf strings.Builder
-	d.Render(&buf, l, 1, items[1])
-
-	if !strings.Contains(buf.String(), "thinking") {
+	if !strings.Contains(renderItem(sessions, "", 1), "thinking") {
 		t.Error("should show agent status 'thinking' instead of 'running'")
 	}
 }
 
 func TestCompactDelegate_RenderGitStatus(t *testing.T) {
 	sessions := overlayTestSessionsWithGitStatus()
-	cols := computeColumnWidths(sessions, "")
-	d := compactDelegate{cols: cols}
-	items := buildGroupedItems(sessions, nil)
-	l := list.New(items, d, 120, 10)
-
-	var buf strings.Builder
-	d.Render(&buf, l, 1, items[1])
-	line := buf.String()
+	line := renderItem(sessions, "", 1)
 	// New format: "M" for dirty, "↑3" for unpushed
 	if !strings.Contains(line, "M") {
 		t.Error("should show 'M' for dirty sessions")
@@ -3090,15 +3084,8 @@ func TestCompactDelegate_RenderSharedWorktreeShowsDash(t *testing.T) {
 			CreatedAt:      time.Now().Format(time.RFC3339),
 		},
 	}
-	cols := computeColumnWidths(sessions, "")
-	d := compactDelegate{cols: cols}
-	items := buildGroupedItems(sessions, nil)
-	l := list.New(items, d, 120, 10)
 
-	var buf strings.Builder
-	d.Render(&buf, l, 1, items[1])
-
-	line := buf.String()
+	line := renderItem(sessions, "", 1)
 	if !strings.Contains(line, "—") {
 		t.Error("shared worktree session should show '—' in git column")
 	}
@@ -3141,15 +3128,8 @@ func TestCompactDelegate_RenderSummary(t *testing.T) {
 			CreatedAt: time.Now().Format(time.RFC3339),
 		},
 	}
-	cols := computeColumnWidths(sessions, "")
-	d := compactDelegate{cols: cols}
-	items := buildGroupedItems(sessions, nil)
-	l := list.New(items, d, 120, 10)
 
-	var buf strings.Builder
-	d.Render(&buf, l, 1, items[1])
-
-	if !strings.Contains(buf.String(), "fixing the bothy") {
+	if !strings.Contains(renderItem(sessions, "", 1), "fixing the bothy") {
 		t.Error("render should show summary text")
 	}
 }
