@@ -4541,15 +4541,19 @@ func (sm *SessionManager) Diagnostics() protocol.DiagnosticsMsg {
 	now := time.Now()
 
 	var (
-		sessions []protocol.SessionDiagnostic
-		sbDiag   protocol.ScrollbackDiagnostic
-		fleet    protocol.FleetSummary
+		sessions          []protocol.SessionDiagnostic
+		deletedSessionIDs []string
+		sbDiag            protocol.ScrollbackDiagnostic
+		fleet             protocol.FleetSummary
 	)
 
 	for id, s := range sm.state.Sessions {
 		// Soft-deleted sessions are hidden trash awaiting purge; exclude them from
 		// diagnostics and the fleet tally so `gr doctor` reflects live work only.
+		// Keep their IDs as a separate ownership signal so doctor's orphan cleanup
+		// does not destroy resources that remain recoverable until purge.
 		if s.IsSoftDeleted() {
+			deletedSessionIDs = append(deletedSessionIDs, id)
 			continue
 		}
 
@@ -4635,12 +4639,13 @@ func (sm *SessionManager) Diagnostics() protocol.DiagnosticsMsg {
 	}
 
 	return protocol.DiagnosticsMsg{
-		DaemonPID:    os.Getpid(),
-		DaemonUptime: now.Sub(sm.startedAt).Truncate(time.Second).String(),
-		Fleet:        fleet,
-		Sessions:     sessions,
-		Scrollback:   sbDiag,
-		Messages:     msgDiag,
+		DaemonPID:         os.Getpid(),
+		DaemonUptime:      now.Sub(sm.startedAt).Truncate(time.Second).String(),
+		Fleet:             fleet,
+		Sessions:          sessions,
+		DeletedSessionIDs: deletedSessionIDs,
+		Scrollback:        sbDiag,
+		Messages:          msgDiag,
 	}
 }
 

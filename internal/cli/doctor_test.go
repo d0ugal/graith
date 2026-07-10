@@ -1780,3 +1780,55 @@ func TestCheckStorageCov2OrphanScrollbackAutofix(t *testing.T) {
 		t.Errorf("live scrollback must be preserved, stat err = %v", err)
 	}
 }
+
+// TestCheckStorageAutofixPreservesSoftDeletedScrollback is the regression test
+// for doctor treating a recoverable session's scrollback as an orphan. Deleted
+// sessions are intentionally absent from the live diagnostics list, so their
+// IDs must be carried separately when doctor decides which logs it may remove.
+func TestCheckStorageAutofixPreservesSoftDeletedScrollback(t *testing.T) {
+	oldPaths := paths
+
+	t.Cleanup(func() { paths = oldPaths })
+
+	stubNoOrphans(t)
+	discardOut(t)
+
+	dataDir := t.TempDir()
+	logDir := filepath.Join(dataDir, "logs")
+	if err := os.Mkdir(logDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	liveLog := filepath.Join(logDir, "braw.log")
+	deletedLog := filepath.Join(logDir, "bide.log")
+	orphanLog := filepath.Join(logDir, "gane.log")
+
+	for _, p := range []string{liveLog, deletedLog, orphanLog} {
+		if err := os.WriteFile(p, []byte("scrollback"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	paths.DataDir = dataDir
+	paths.LogDir = logDir
+	paths.TmpDir = filepath.Join(dataDir, "tmp")
+	doctorAutofix = true // restored by discardOut
+
+	diag := &protocol.DiagnosticsMsg{
+		Sessions:          []protocol.SessionDiagnostic{{ID: "braw"}},
+		DeletedSessionIDs: []string{"bide"},
+	}
+
+	dc := newDoctorContext()
+	dc.checkStorage(diag)
+
+	for _, p := range []string{liveLog, deletedLog} {
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("owned scrollback %q must be preserved: %v", filepath.Base(p), err)
+		}
+	}
+
+	if _, err := os.Stat(orphanLog); !os.IsNotExist(err) {
+		t.Errorf("orphaned scrollback should be removed, stat err = %v", err)
+	}
+}
