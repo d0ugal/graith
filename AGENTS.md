@@ -88,8 +88,25 @@ message types by adding a struct in `protocol/messages.go` and handling the
 type string in `daemon/handler.go`.
 
 **Session lifecycle**: Create → worktree + branch → start agent process → attach.
-Delete → kill process → remove worktree → delete branch. Resume → restart
-process in existing worktree.
+Resume → restart process in existing worktree.
+
+**Delete is soft by default** (`SessionManager.SoftDelete`): `gr delete` stops the
+agent and marks the session deleted (a `DeletedAt`/`ExpiresAt` marker on
+`SessionState`), hiding it from `gr list` and the overlay but **keeping the
+worktree, branch, and state** for a retention window (default 24h, `[delete]
+retention`). `gr restore` clears the marker (back to `stopped`); `gr list
+--deleted` and the overlay's *Deleted* view show trashed sessions with their
+expiry. A background purge loop (`RunPurgeLoop`) hard-deletes sessions past their
+frozen `ExpiresAt`. `gr purge` is the only destructive verb: an immediate hard
+delete (`SessionManager.Delete` → kill process → remove worktree → delete branch),
+bypassing the window, and owns the unsaved-work confirmation. The daemon routes on
+the `DeleteMsg.Purge` flag: `Purge` → hard; `!Purge && retention>0` → soft;
+`!Purge && retention==0` → rejected (delete never destroys). Scenario teardown and
+other internal callers invoke `Delete` directly and are always hard. Because a
+soft-deleted session is a hidden `stopped` session that still holds its token,
+ID-addressable operations (resume, restart, rename, star, update, fork, migrate,
+set-summary) carry an `IsSoftDeleted()` guard so hiding can't be bypassed by raw
+ID; `gr delete --force`/`-y` are inert deprecated aliases.
 
 **Passthrough**: When attached, the client enters raw terminal mode and forwards
 stdin/stdout bytes directly to/from the daemon. A prefix key (default ctrl+b)
