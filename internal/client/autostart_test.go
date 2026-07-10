@@ -15,7 +15,7 @@ import (
 func TestValidateDaemonExecutableRejectsGoTestBinary(t *testing.T) {
 	testBinary := filepath.Join(t.TempDir(), "dreich.test")
 
-	err := validateDaemonExecutable(testBinary)
+	err := validateDaemonExecutable(testBinary, false)
 	if err == nil {
 		t.Fatal("expected Go test binary to be rejected")
 	}
@@ -25,31 +25,75 @@ func TestValidateDaemonExecutableRejectsGoTestBinary(t *testing.T) {
 	}
 }
 
+func TestValidateDaemonExecutableRejectsCustomNamedGoTestBinary(t *testing.T) {
+	testBinary := filepath.Join(t.TempDir(), "canny")
+
+	err := validateDaemonExecutable(testBinary, true)
+	if err == nil {
+		t.Fatal("expected custom-named Go test binary to be rejected")
+	}
+
+	if !strings.Contains(err.Error(), filepath.Base(testBinary)) {
+		t.Fatalf("expected error to identify rejected executable, got %q", err)
+	}
+}
+
 func TestValidateDaemonExecutableAllowsGraithBinary(t *testing.T) {
 	graithBinary := filepath.Join(t.TempDir(), "gr")
 
-	if err := validateDaemonExecutable(graithBinary); err != nil {
+	if err := validateDaemonExecutable(graithBinary, false); err != nil {
 		t.Fatalf("expected graith binary to be allowed, got %v", err)
 	}
 }
 
-func TestStartDaemonRejectsGoTestBinary(t *testing.T) {
+func TestStartDaemonRejectsGoTestBinaryWithoutLaunching(t *testing.T) {
 	executable, err := os.Executable()
 	if err != nil {
 		t.Fatalf("resolve test executable: %v", err)
 	}
 
-	if !strings.HasSuffix(filepath.Base(executable), ".test") {
-		t.Skipf("test executable %q does not use the Go .test suffix", executable)
-	}
+	launched := false
 
-	err = startDaemon("")
+	err = startDaemonWithLauncher("", func(string, []string) error {
+		launched = true
+		return nil
+	})
 	if err == nil {
 		t.Fatal("expected startDaemon to reject the Go test binary")
 	}
 
+	if launched {
+		t.Fatal("startDaemon launched a child process for a Go test binary")
+	}
+
 	if !strings.Contains(err.Error(), filepath.Base(executable)) {
 		t.Fatalf("expected error to identify rejected executable, got %q", err)
+	}
+}
+
+func TestStartDaemonExecutableLaunchesGraithBinary(t *testing.T) {
+	executable := filepath.Join(t.TempDir(), "gr")
+	launched := false
+
+	err := startDaemonExecutable("", executable, false, func(gotExecutable string, args []string) error {
+		launched = true
+
+		if gotExecutable != executable {
+			t.Errorf("launcher executable = %q, want %q", gotExecutable, executable)
+		}
+
+		if len(args) != 2 || args[0] != "daemon" || args[1] != "start" {
+			t.Errorf("launcher args = %v, want [daemon start]", args)
+		}
+
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("startDaemonExecutable returned error: %v", err)
+	}
+
+	if !launched {
+		t.Fatal("expected regular graith binary to be launched")
 	}
 }
 
