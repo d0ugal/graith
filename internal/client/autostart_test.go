@@ -4,12 +4,54 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/d0ugal/graith/internal/protocol"
 )
+
+func TestValidateDaemonExecutableRejectsGoTestBinary(t *testing.T) {
+	testBinary := filepath.Join(t.TempDir(), "dreich.test")
+
+	err := validateDaemonExecutable(testBinary)
+	if err == nil {
+		t.Fatal("expected Go test binary to be rejected")
+	}
+
+	if !strings.Contains(err.Error(), "Go test binary") {
+		t.Fatalf("expected clear Go test binary error, got %q", err)
+	}
+}
+
+func TestValidateDaemonExecutableAllowsGraithBinary(t *testing.T) {
+	graithBinary := filepath.Join(t.TempDir(), "gr")
+
+	if err := validateDaemonExecutable(graithBinary); err != nil {
+		t.Fatalf("expected graith binary to be allowed, got %v", err)
+	}
+}
+
+func TestStartDaemonRejectsGoTestBinary(t *testing.T) {
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatalf("resolve test executable: %v", err)
+	}
+
+	if !strings.HasSuffix(filepath.Base(executable), ".test") {
+		t.Skipf("test executable %q does not use the Go .test suffix", executable)
+	}
+
+	err = startDaemon("")
+	if err == nil {
+		t.Fatal("expected startDaemon to reject the Go test binary")
+	}
+
+	if !strings.Contains(err.Error(), filepath.Base(executable)) {
+		t.Fatalf("expected error to identify rejected executable, got %q", err)
+	}
+}
 
 func TestDaemonStartArgsStripsConfigInsideSession(t *testing.T) {
 	t.Setenv("GRAITH_SESSION_ID", "braw-session-123")

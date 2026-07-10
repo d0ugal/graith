@@ -6,6 +6,8 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -119,6 +121,9 @@ func startDaemon(configFile string) error {
 	if err != nil {
 		return err
 	}
+	if err := validateDaemonExecutable(self); err != nil {
+		return err
+	}
 
 	devNull, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
 	if err != nil {
@@ -134,6 +139,14 @@ func startDaemon(configFile string) error {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 
 	return cmd.Start()
+}
+
+func validateDaemonExecutable(path string) error {
+	if strings.HasSuffix(filepath.Base(path), ".test") {
+		return fmt.Errorf("refusing to start daemon by re-executing Go test binary %q", path)
+	}
+
+	return nil
 }
 
 func daemonStartArgs(configFile string) []string {

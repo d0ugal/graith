@@ -28,6 +28,9 @@ var (
 	listNoColor  bool
 )
 
+// listConnectFn lets command-validation tests fail before daemon auto-start.
+var listConnectFn = client.Connect
+
 // ansiSeqRe matches SGR (color) escape sequences so they can be bracketed with
 // tabwriter's Escape byte (0xff). Bracketing keeps tabwriter from counting the
 // invisible bytes toward column width, so colored cells stay aligned.
@@ -84,7 +87,7 @@ var listCmd = &cobra.Command{
 			updateCh <- version.CheckForUpdate(updateDataDir)
 		}()
 
-		c, err := client.Connect(cfg, paths, cfgFile)
+		c, err := listConnectFn(cfg, paths, cfgFile)
 		if err != nil {
 			return err
 		}

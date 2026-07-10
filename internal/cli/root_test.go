@@ -3,10 +3,16 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/adrg/xdg"
+	"github.com/d0ugal/graith/internal/client"
+	"github.com/d0ugal/graith/internal/config"
 )
 
 func TestExecuteJSONErrorFormat(t *testing.T) {
@@ -141,11 +147,24 @@ func TestConfigFlagAllowedOutsideSession(t *testing.T) {
 
 	t.Setenv("GR_AGENT_MODE", "0")
 
-	// This will fail to connect to the daemon (expected), but should NOT
-	// fail with the "not allowed inside a session" error.
-	err := executeWithArgs([]string{"--config", "/tmp/nonexistent.toml", "list"})
-	if err != nil && strings.Contains(err.Error(), "not allowed inside a graith session") {
-		t.Error("--config should be allowed outside a graith session")
+	origRuntimeDir := xdg.RuntimeDir
+	xdg.RuntimeDir = t.TempDir()
+	t.Cleanup(func() { xdg.RuntimeDir = origRuntimeDir })
+
+	configFile := filepath.Join(t.TempDir(), "dreich.toml")
+	connectErr := errors.New("dreich daemon unavailable")
+	origListConnectFn := listConnectFn
+	listConnectFn = func(*config.Config, config.Paths, string) (*client.Client, error) {
+		return nil, connectErr
+	}
+	t.Cleanup(func() { listConnectFn = origListConnectFn })
+
+	// The stubbed connection fails (expected), but the command should reach it
+	// rather than fail with the "not allowed inside a session" error. The
+	// temporary runtime directory also keeps the resolved socket isolated.
+	err := executeWithArgs([]string{"--config", configFile, "list"})
+	if !errors.Is(err, connectErr) {
+		t.Fatalf("expected isolated list connection error, got %v", err)
 	}
 }
 
