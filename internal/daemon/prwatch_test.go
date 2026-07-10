@@ -966,6 +966,10 @@ func TestPRWatchTargets_Cov(t *testing.T) {
 
 	gitRun(t, "", "init", "--initial-branch=main", cloneDir)
 	gitRun(t, cloneDir, "remote", "add", "origin", "git@github.com:croft/loch.git")
+	// Put the worktree HEAD on the recorded branch so reconcileBranch (which
+	// compares live HEAD against SessionState.Branch, #1008) is a no-op here and
+	// this test stays focused on eligibility filtering.
+	gitRun(t, cloneDir, "checkout", "-b", "canny-feature")
 
 	sm := newPRWatchCovSM()
 

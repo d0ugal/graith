@@ -132,9 +132,11 @@ func (sm *SessionManager) runPRWatchTick(ctx context.Context, cfg *configPRWatch
 // is ambiguous).
 //
 // The raw session fields are snapshotted under RLock; the branch is then
-// resolved OFF-lock, because effectiveBranch may shell out to git
-// (symbolic-ref) when SessionState.Branch is empty — running a subprocess under
-// sm.mu could stall gr list.
+// resolved OFF-lock, because reconcileBranch shells out to git (symbolic-ref)
+// to read the worktree's live HEAD — running a subprocess under sm.mu could
+// stall gr list. reconcileBranch also detects when the worktree has moved to a
+// different branch (e.g. the agent ran `gh pr checkout`) and updates the session
+// so PR matching re-runs against the branch the worktree is actually on (#1008).
 func (sm *SessionManager) prWatchTargets() []prWatchTarget {
 	type raw struct {
 		id, name, branch, worktreePath string
@@ -169,7 +171,7 @@ func (sm *SessionManager) prWatchTargets() []prWatchTarget {
 	var targets []prWatchTarget
 
 	for _, r := range rawTargets {
-		branch := effectiveBranch(r.branch, r.worktreePath)
+		branch := sm.reconcileBranch(r.id, r.branch, r.worktreePath)
 		if branch == "" {
 			continue
 		}
@@ -180,6 +182,86 @@ func (sm *SessionManager) prWatchTargets() []prWatchTarget {
 	}
 
 	return targets
+}
+
+// reconcileBranch resolves the branch to poll a PR against, detecting when the
+// worktree HEAD has moved to a different branch than the one recorded in
+// SessionState — e.g. the agent ran `gh pr checkout` to adopt an existing PR
+// (issue #1008). On a detected change it records the new branch on the session
+// (persisted) and clears the PR-watch cursor + forces an immediate re-poll, so
+// PR matching re-runs against the branch the worktree is actually on instead of
+// the stale one. Switching back to the original branch is just another change
+// and is detected the same way.
+//
+// It returns the live HEAD branch when it differs from the record, otherwise the
+// recorded branch (falling back to the live HEAD when the record is empty). An
+// empty return means the worktree has no branch to poll (detached HEAD with no
+// record) and the caller skips the session.
+//
+// Called from prWatchTargets OFF sm.mu: it shells out to git for the live HEAD,
+// and only re-takes sm.mu to persist an actual change.
+func (sm *SessionManager) reconcileBranch(id, recorded, worktreePath string) string {
+	// Live HEAD of the worktree; "" if detached, on error, or no worktree.
+	live := effectiveBranch("", worktreePath)
+
+	// No usable live branch (detached HEAD mid-rebase, git error, bare repo):
+	// don't clobber the recorded branch on a transient state — keep polling the
+	// record so a mid-rebase detach doesn't drop PR awareness.
+	if live == "" {
+		return recorded
+	}
+
+	// Live HEAD matches the record (or there is no record): nothing to reconcile.
+	if recorded == "" || live == recorded {
+		return live
+	}
+
+	// The worktree moved to a different branch. Record it and reset PR-watch
+	// bookkeeping so the next poll re-resolves the PR for the new branch from a
+	// clean baseline.
+	if sm.updateSessionBranch(id, live) {
+		sm.resetPRWatch(id)
+		sm.log.Info("pr-watch: worktree branch changed, re-matching PR",
+			"session", id, "from", recorded, "to", live)
+	}
+
+	return live
+}
+
+// updateSessionBranch persists a new branch for a session after its worktree
+// HEAD moved to a different branch. It returns true if the branch was actually
+// changed; false if the session is gone, soft-deleted, or already on that branch
+// (a concurrent update won the race). The read-modify-write and the persist both
+// hold sm.mu so a racing prWatchTargets from an overlapping tick can't
+// double-record.
+func (sm *SessionManager) updateSessionBranch(id, branch string) bool {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	s, ok := sm.state.Sessions[id]
+	if !ok || s.IsSoftDeleted() || s.Branch == branch {
+		return false
+	}
+
+	s.Branch = branch
+
+	if err := sm.saveState(); err != nil {
+		sm.log.Warn("pr-watch: persist branch change failed", "session", id, "err", err)
+	}
+
+	return true
+}
+
+// resetPRWatch clears a session's PR-watch cursor and forces its next poll to be
+// due immediately, so a branch change re-resolves the PR from a clean baseline
+// rather than diffing the new branch's PR against the previous branch's cursor.
+// lastSent/rateLog are left intact as anti-thrash backstops.
+func (sm *SessionManager) resetPRWatch(id string) {
+	sm.prWatch.mu.Lock()
+	defer sm.prWatch.mu.Unlock()
+
+	delete(sm.prWatch.cursors, id)
+	delete(sm.prWatch.nextPoll, id)
 }
 
 func (sm *SessionManager) pollSession(ctx context.Context, cfg *configPRWatch, t prWatchTarget) {
