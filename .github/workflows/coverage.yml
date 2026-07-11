@@ -62,6 +62,7 @@ jobs:
       pct: ${{ steps.cov.outputs.pct }}
       base: ${{ steps.cov.outputs.base }}
       delta: ${{ steps.cov.outputs.delta }}
+      table: ${{ steps.cov.outputs.table }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
@@ -75,6 +76,13 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
+          # Build the per-file report tool and read the module path from the PR
+          # head *before* checking out the base commit: the base may predate
+          # cmd/covreport, and go.mod's module path is what maps profile
+          # import-paths back to repo-relative files. The binary lives outside
+          # the worktree so it survives the base checkout.
+          go build -o "$RUNNER_TEMP/covreport" ./cmd/covreport
+          MODULE="$(awk '/^module / {print $2; exit}' go.mod)"
           # Emit the aggregate statement-coverage % for the current tree into a
           # profile. `|| true`: a flaky/failing package must not abort the
           # report — ci.yml is the authoritative test gate. Empty profile → 0.0.
@@ -99,10 +107,22 @@ jobs:
           else
             DELTA="$(awk -v a="$HEAD_PCT" -v b="$BASE_PCT" 'BEGIN{printf "%+.1f%%", a-b}')"
           fi
+          # Per-file breakdown sorted lowest-coverage-first, for the collapsed
+          # section of the PR comment. Run from the prebuilt binary (works
+          # regardless of the checked-out base tree); both profiles are untracked
+          # so they survived the base checkout. covreport treats an empty base
+          # profile as "base unavailable" on its own, so passing it is safe.
+          TABLE="$("$RUNNER_TEMP/covreport" -head cover.head.out -base cover.base.out -module "$MODULE")"
           {
             echo "pct=$HEAD_PCT"
             echo "base=$BASE_PCT"
             echo "delta=$DELTA"
+            # Multiline output via a heredoc delimiter (the table spans many
+            # lines). The delimiter is unlikely to collide with Markdown table
+            # content.
+            echo "table<<COVREPORT_EOF"
+            echo "$TABLE"
+            echo "COVREPORT_EOF"
           } >> "$GITHUB_OUTPUT"
 
   swift-coverage:
@@ -152,6 +172,7 @@ jobs:
           GO_PCT: ${{ needs.go-coverage.outputs.pct }}
           GO_BASE: ${{ needs.go-coverage.outputs.base }}
           GO_DELTA: ${{ needs.go-coverage.outputs.delta }}
+          GO_TABLE: ${{ needs.go-coverage.outputs.table }}
           GO_RESULT: ${{ needs.go-coverage.result }}
           GUI_CHANGED: ${{ needs.changes.outputs.gui }}
           SWIFT_PCT: ${{ needs.swift-coverage.outputs.pct }}
@@ -178,6 +199,26 @@ jobs:
             swift_row="| Swift (\`gui/shared\`) | not run (no \`gui/\` changes) | — |"
           fi
 
+          # Collapsed per-file Go breakdown. Only include it when Go coverage
+          # succeeded and produced a real table (not the empty-data placeholder),
+          # so the comment stays clean on a Go build failure. The inner heredoc
+          # keeps the same base indent as the body heredoc below so the block
+          # scalar de-indents both to column 0.
+          details=""
+          if [ "$GO_RESULT" = "success" ] && [ -n "${GO_TABLE:-}" ] \
+             && [ "$GO_TABLE" != "_No Go coverage data._" ]; then
+            details="$(cat <<DETAILS_EOF
+
+          <details>
+          <summary>Per-file Go coverage (lowest first) — click to expand</summary>
+
+          $GO_TABLE
+
+          </details>
+          DETAILS_EOF
+          )"
+          fi
+
           # Heredoc note: every line below must keep the block's base indent so
           # YAML's block-scalar de-indent lands $marker and the EOF terminator at
           # column 0 — the marker must start the comment body for startswith() to
@@ -190,8 +231,9 @@ jobs:
           |-----------|:--------:|:---------:|
           $go_row
           $swift_row
+          $details
 
-          <sub>Base coverage: Go \`${GO_BASE:-n/a}%\`. Swift shows an absolute % (no delta) to keep macOS CI light. Updated on every push.</sub>
+          <sub>Base coverage: Go \`${GO_BASE:-n/a}%\`. Per-file figures are statement coverage. Swift shows an absolute % (no delta) to keep macOS CI light. Updated on every push.</sub>
           EOF
           )"
 
