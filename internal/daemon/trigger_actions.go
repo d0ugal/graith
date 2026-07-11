@@ -38,7 +38,7 @@ func (sm *SessionManager) actionMessage(ctx context.Context, t *config.TriggerCo
 // scratch dir, so a command cannot mutate the tree it watches (the feedback-loop
 // guarantee) — the same mechanism --mirror uses.
 func (sm *SessionManager) actionCommand(ctx context.Context, t *config.TriggerConfig, fc fireContext) (string, error) {
-	execRoot := t.Action.Repo
+	execRoot := t.Action.RepoPath()
 	readOnlyRoot := false
 
 	if t.IsWatch() {
@@ -121,7 +121,7 @@ func (sm *SessionManager) actionCommand(ctx context.Context, t *config.TriggerCo
 	}
 
 	body := fmt.Sprintf("$ %s\n(exit %d)\n\n%s", cmdStr, exit, truncateOutput(out.String()))
-	sm.deliver(ctx, t.Action.Deliver, body, t.Action.Repo, sm.triggerVars(t, fc))
+	sm.deliver(ctx, t.Action.Deliver, body, t.Action.RepoPath(), sm.triggerVars(t, fc))
 
 	// A non-zero exit / timeout is surfaced as an error so it lands in LastError,
 	// even though the captured output is still delivered.
@@ -296,7 +296,7 @@ func (sm *SessionManager) actionSession(ctx context.Context, t *config.TriggerCo
 		}
 	}
 
-	repo := t.Action.Repo
+	repo := t.Action.RepoPath()
 
 	mirror := ""
 	if t.IsWatch() {

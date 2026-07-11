@@ -120,7 +120,34 @@ func generateMsgID() string {
 	return "msg_" + hex.EncodeToString(b)
 }
 
-func (s *MsgStore) Publish(stream, senderID, senderName, body, threadID, replyTo string) (Message, error) {
+// PublishOpts describes a message to publish to a stream. It replaces the six
+// consecutive positional string parameters of Publish — same-typed positional
+// strings are the highest-risk transposition case, and the trailing ThreadID /
+// ReplyTo are frequently empty, so a struct with named fields is both safer and
+// less noisy at the call site.
+type PublishOpts struct {
+	// Stream is the target stream (topic, inbox:<id>, or system stream).
+	Stream string
+	// SenderID is the sender's session ID (or a system sender ID).
+	SenderID string
+	// SenderName is the sender's human-readable name.
+	SenderName string
+	// Body is the message body.
+	Body string
+	// ThreadID groups the message into a conversation thread (optional).
+	ThreadID string
+	// ReplyTo is the stream this message replies to (optional).
+	ReplyTo string
+}
+
+func (s *MsgStore) Publish(opts PublishOpts) (Message, error) {
+	stream := opts.Stream
+	senderID := opts.SenderID
+	senderName := opts.SenderName
+	body := opts.Body
+	threadID := opts.ThreadID
+	replyTo := opts.ReplyTo
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

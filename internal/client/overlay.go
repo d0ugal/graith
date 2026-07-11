@@ -2417,22 +2417,62 @@ func (m overlayModel) View() tea.View {
 	return v
 }
 
+// RunOverlayOpts configures the session-picker overlay. It replaces the long
+// positional parameter list of RunOverlay — several of its fields are
+// structurally identical callbacks (five `func(sessionID string) error`) that
+// were trivially transposable when passed positionally.
+type RunOverlayOpts struct {
+	// Sessions is the initial list rendered in the overlay.
+	Sessions []protocol.SessionInfo
+	// CurrentSessionID highlights the session the user was just attached to.
+	CurrentSessionID string
+	// FetchPreview is called asynchronously to load scrollback for the
+	// selected session.
+	FetchPreview func(sessionID string) string
+	// RefreshSessions re-fetches the live session list.
+	RefreshSessions func() []protocol.SessionInfo
+	// RefreshDeleted re-fetches the soft-deleted session list.
+	RefreshDeleted func() []protocol.SessionInfo
+	// DeleteSession soft-deletes a session by ID.
+	DeleteSession func(sessionID string) error
+	// RestartSession restarts a stopped session by ID.
+	RestartSession func(sessionID string) error
+	// StopSession stops a running session by ID.
+	StopSession func(sessionID string) error
+	// ToggleStar stars or unstars a session by ID.
+	ToggleStar func(sessionID string, star bool) error
+	// RestoreSession restores a soft-deleted session by ID.
+	RestoreSession func(sessionID string) error
+	// Profile is the active configuration profile name.
+	Profile string
+	// Collapsed is the initial per-repo collapse state.
+	Collapsed map[string]bool
+	// RepoSuggestions seeds the create-session repo picker.
+	RepoSuggestions []RepoSuggestion
+	// ShortcutKeys is the set of quick-jump shortcut runes.
+	ShortcutKeys string
+	// Agents is the list of available agent types for create-session.
+	Agents []string
+	// DefaultAgent is the pre-selected agent for create-session.
+	DefaultAgent string
+	// Keys is the resolved overlay keybinding set.
+	Keys OverlayKeys
+}
+
 // RunOverlay launches the bubbletea overlay listing sessions grouped by repo.
-// currentSessionID highlights the session the user was just attached to.
-// fetchPreview is called asynchronously to load scrollback for the selected session.
-func RunOverlay(sessions []protocol.SessionInfo, currentSessionID string, fetchPreview func(sessionID string) string, refreshSessions func() []protocol.SessionInfo, refreshDeleted func() []protocol.SessionInfo, deleteSession func(sessionID string) error, restartSession func(sessionID string) error, stopSession func(sessionID string) error, toggleStar func(sessionID string, star bool) error, restoreSession func(sessionID string) error, profile string, collapsed map[string]bool, repoSuggestions []RepoSuggestion, shortcutKeys string, agents []string, defaultAgent string, keys OverlayKeys) *OverlayResult {
-	m := newOverlayModel(sessions, currentSessionID, fetchPreview, deleteSession, collapsed, []rune(shortcutKeys))
-	m.refreshSessions = refreshSessions
-	m.refreshDeleted = refreshDeleted
-	m.restartSession = restartSession
-	m.stopSession = stopSession
-	m.toggleStar = toggleStar
-	m.restoreSession = restoreSession
-	m.profile = profile
-	m.repoSuggestions = repoSuggestions
-	m.agents = agents
-	m.defaultAgent = defaultAgent
-	m.applyKeys(keys)
+func RunOverlay(opts RunOverlayOpts) *OverlayResult {
+	m := newOverlayModel(opts.Sessions, opts.CurrentSessionID, opts.FetchPreview, opts.DeleteSession, opts.Collapsed, []rune(opts.ShortcutKeys))
+	m.refreshSessions = opts.RefreshSessions
+	m.refreshDeleted = opts.RefreshDeleted
+	m.restartSession = opts.RestartSession
+	m.stopSession = opts.StopSession
+	m.toggleStar = opts.ToggleStar
+	m.restoreSession = opts.RestoreSession
+	m.profile = opts.Profile
+	m.repoSuggestions = opts.RepoSuggestions
+	m.agents = opts.Agents
+	m.defaultAgent = opts.DefaultAgent
+	m.applyKeys(opts.Keys)
 	p := tea.NewProgram(m)
 
 	final, err := p.Run()

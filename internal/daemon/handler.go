@@ -878,7 +878,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					continue
 				}
 
-				published, err := sm.messages.Publish(m.Stream, m.SenderID, m.SenderName, m.Body, m.ThreadID, m.ReplyTo)
+				published, err := sm.messages.Publish(PublishOpts{Stream: m.Stream, SenderID: m.SenderID, SenderName: m.SenderName, Body: m.Body, ThreadID: m.ThreadID, ReplyTo: m.ReplyTo})
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 				} else {

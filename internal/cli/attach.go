@@ -131,7 +131,25 @@ func runAttach(cmd *cobra.Command, name string) error {
 		repos := client.DiscoverRepos(cfg.AllowedRepoPaths, list.Sessions)
 		agents, defaultAgent := agentChoices()
 
-		result := client.RunOverlay(list.Sessions, "", previewFetcher(), sessionRefresher(), deletedRefresher(), deleteSession, restartSession, stopSession, toggleStar, restoreSession, paths.Profile, nil, repos, cfg.Overlay.ShortcutKeys, agents, defaultAgent, overlayKeysFromConfig())
+		result := client.RunOverlay(client.RunOverlayOpts{
+			Sessions:         list.Sessions,
+			CurrentSessionID: "",
+			FetchPreview:     previewFetcher(),
+			RefreshSessions:  sessionRefresher(),
+			RefreshDeleted:   deletedRefresher(),
+			DeleteSession:    deleteSession,
+			RestartSession:   restartSession,
+			StopSession:      stopSession,
+			ToggleStar:       toggleStar,
+			RestoreSession:   restoreSession,
+			Profile:          paths.Profile,
+			Collapsed:        nil,
+			RepoSuggestions:  repos,
+			ShortcutKeys:     cfg.Overlay.ShortcutKeys,
+			Agents:           agents,
+			DefaultAgent:     defaultAgent,
+			Keys:             overlayKeysFromConfig(),
+		})
 		if result == nil || result.Action == "" {
 			return nil
 		}
@@ -248,7 +266,25 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 			repos := client.DiscoverRepos(cfg.AllowedRepoPaths, list.Sessions)
 			agents, defaultAgent := agentChoices()
 
-			overlayResult := client.RunOverlay(list.Sessions, sessionID, previewFetcher(), sessionRefresher(), deletedRefresher(), deleteSession, restartSession, stopSession, toggleStar, restoreSession, paths.Profile, overlayCollapsed, repos, cfg.Overlay.ShortcutKeys, agents, defaultAgent, overlayKeysFromConfig())
+			overlayResult := client.RunOverlay(client.RunOverlayOpts{
+				Sessions:         list.Sessions,
+				CurrentSessionID: sessionID,
+				FetchPreview:     previewFetcher(),
+				RefreshSessions:  sessionRefresher(),
+				RefreshDeleted:   deletedRefresher(),
+				DeleteSession:    deleteSession,
+				RestartSession:   restartSession,
+				StopSession:      stopSession,
+				ToggleStar:       toggleStar,
+				RestoreSession:   restoreSession,
+				Profile:          paths.Profile,
+				Collapsed:        overlayCollapsed,
+				RepoSuggestions:  repos,
+				ShortcutKeys:     cfg.Overlay.ShortcutKeys,
+				Agents:           agents,
+				DefaultAgent:     defaultAgent,
+				Keys:             overlayKeysFromConfig(),
+			})
 			if overlayResult != nil {
 				overlayCollapsed = overlayResult.Collapsed
 			}

@@ -89,6 +89,22 @@ type ActionConfig struct {
 	Deliver DeliverConfig `toml:"deliver"`
 }
 
+// RepoPath returns the action's configured repo canonicalised the same way
+// sessions and the store CLI treat a repo path: a leading ~/ expanded, made
+// absolute, and symlinks resolved (via ResolvePath). This matters for repo-store
+// delivery, whose namespace is keyed off the repo path — a raw ~/... or a
+// symlinked spelling would otherwise scope to a different store than the one
+// agents read. It returns "" when no repo is set — unlike ResolvePath/ExpandPath,
+// which would resolve "" to the working directory — so callers can still
+// distinguish "unset" (shared store / no execution root) from a resolved path.
+func (a *ActionConfig) RepoPath() string {
+	if a.Repo == "" {
+		return ""
+	}
+
+	return ResolvePath(a.Repo)
+}
+
 // DeliverConfig routes action output. All fields are templated at fire time.
 type DeliverConfig struct {
 	Inbox string `toml:"inbox"` // session name, "orchestrator", or a template like "{session_name}"
