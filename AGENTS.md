@@ -162,6 +162,21 @@ task completion tracking (`gr scenario task-done`), and bulk resume
 changes or sessions resume. Scenario TOML files live in
 `~/.config/graith/scenarios/` and can be started by name.
 
+**PR & CI awareness**: The daemon's `pr_watch` loop (`internal/daemon/prwatch.go`,
+`ghpr.go`) resolves each session's GitHub PR via `gh`, polls CI checks and
+comments, and delivers structured notifications to the owning session's inbox
+(auto-resuming a stopped agent). Because comment bodies are free text from
+arbitrary GitHub users, comment notifications are gated by an **author-trust
+check**: a comment notifies only if its author's login is in an explicit
+allowlist (`comment_author_allowlist` — the way to trust bots/Apps, whose
+`author_association` is unreliable) **or** its `author_association` is in a
+trusted set (`trusted_author_associations`, default
+`OWNER`/`MEMBER`/`COLLABORATOR`). Untrusted authors are dropped from
+notifications (the comment cursor still advances) and surfaced once, as
+metadata only, to the orchestrator (`notify_untrusted_authors`, default on) so
+the human can allowlist them. See
+`docs/design/2026-07-11-pr-comment-author-trust-design.md`.
+
 ## Environment variables
 
 The daemon sets these in every agent process:
