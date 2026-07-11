@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/d0ugal/graith/internal/approvals"
+	"github.com/d0ugal/graith/internal/atomicfile"
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/detector"
 	"github.com/d0ugal/graith/internal/git"
@@ -66,6 +67,7 @@ type SessionManager struct {
 	hookReports        map[string]hookReport
 	pendingApprovals   map[string]*pendingApproval
 	tokenIndex         map[string]string              // token → session ID (reverse lookup)
+	humanToken         string                         // local human credential, loaded at startup
 	pendingPairings    map[string]*pendingPairing     // requestID → pending device pairing (in-memory; not persisted)
 	pairWaiters        map[string]chan pairApproval   // requestID → waiter for a blocked pair_request connection
 	approvalSubs       map[net.Conn]func(string, any) // conn → sendControl for approval subscribers (no attach)
@@ -271,6 +273,38 @@ func (sm *SessionManager) LoadState() error {
 	sm.rebuildDeviceTokenIndex()
 
 	return sm.saveState()
+}
+
+// loadOrCreateHumanToken loads the stable local-human credential, creating it
+// crash-safely on first startup. It must never silently replace an existing
+// credential, even when that credential cannot be read.
+func (sm *SessionManager) loadOrCreateHumanToken() error {
+	data, err := os.ReadFile(sm.paths.HumanTokenFile)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("read human token: %w", err)
+		}
+
+		token, genErr := generateToken()
+		if genErr != nil {
+			return genErr
+		}
+		if writeErr := atomicfile.Write(sm.paths.HumanTokenFile, []byte(token+"\n"), 0o600); writeErr != nil {
+			return fmt.Errorf("write human token: %w", writeErr)
+		}
+		data = []byte(token)
+	}
+
+	token := strings.TrimSpace(string(data))
+	if token == "" {
+		return fmt.Errorf("read human token: token is empty")
+	}
+
+	sm.mu.Lock()
+	sm.humanToken = token
+	sm.mu.Unlock()
+
+	return nil
 }
 
 func (sm *SessionManager) rebuildTokenIndex() {
@@ -5788,6 +5822,10 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 
 			log.Warn("failed to load state", "err", err)
 		}
+		if err := sm.loadOrCreateHumanToken(); err != nil {
+			_ = l.Close()
+			return fmt.Errorf("initialize human authentication: %w", err)
+		}
 
 		if err := sm.AdoptSessions(manifest); err != nil {
 			log.Warn("failed to adopt sessions", "err", err)
@@ -5819,6 +5857,11 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 			}
 
 			log.Warn("failed to load state", "err", err)
+		}
+		if err := sm.loadOrCreateHumanToken(); err != nil {
+			_ = l.Close()
+			ReleasePIDFile(paths.PIDFile)
+			return fmt.Errorf("initialize human authentication: %w", err)
 		}
 
 		// Finish any deletes interrupted mid-flight (crash/kill/power loss)

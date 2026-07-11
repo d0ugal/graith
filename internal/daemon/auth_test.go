@@ -21,39 +21,38 @@ func newTestSMWithSessions(sessions map[string]*SessionState) *SessionManager {
 	}
 }
 
-func TestResolveAuth_NoToken(t *testing.T) {
-	sm := newTestSMWithSessions(nil)
-
-	auth, err := resolveAuth(sm, "", ConnOrigin{}, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if auth.authenticated {
-		t.Error("expected unauthenticated for empty token")
-	}
-
-	if auth.sessionID != "" {
-		t.Error("expected empty session ID")
-	}
-}
-
-func TestResolveAuth_ValidToken(t *testing.T) {
+func TestResolveAuth_LocalTokens(t *testing.T) {
 	sm := newTestSMWithSessions(map[string]*SessionState{
 		"braw": {ID: "braw", Token: "tok-braw"},
 	})
+	sm.humanToken = "human-canny"
 
-	auth, err := resolveAuth(sm, "tok-braw", ConnOrigin{}, "")
-	if err != nil {
-		t.Fatal(err)
+	tests := []struct {
+		name      string
+		token     string
+		wantRole  authRole
+		wantID    string
+		wantError bool
+	}{
+		{name: "canny human token", token: "human-canny", wantRole: roleLocalHuman},
+		{name: "braw session token", token: "tok-braw", wantRole: roleSession, wantID: "braw"},
+		{name: "thrawn empty token", wantRole: roleNone, wantError: true},
+		{name: "dreich unknown token", token: "tok-dreich", wantRole: roleNone, wantError: true},
 	}
 
-	if !auth.authenticated {
-		t.Error("expected authenticated")
-	}
-
-	if auth.sessionID != "braw" {
-		t.Errorf("session = %q, want braw", auth.sessionID)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			auth, err := resolveAuth(sm, tt.token, ConnOrigin{}, "")
+			if (err != nil) != tt.wantError {
+				t.Fatalf("error = %v, wantError %v", err, tt.wantError)
+			}
+			if auth.role != tt.wantRole {
+				t.Errorf("role = %d, want %d", auth.role, tt.wantRole)
+			}
+			if auth.sessionID != tt.wantID {
+				t.Errorf("session = %q, want %q", auth.sessionID, tt.wantID)
+			}
+		})
 	}
 }
 
@@ -361,8 +360,9 @@ func TestParseInboxStream(t *testing.T) {
 
 func TestResolveAuth_LocalHumanRole(t *testing.T) {
 	sm := newTestSMWithSessions(nil)
+	sm.humanToken = "human-canny"
 
-	auth, err := resolveAuth(sm, "", ConnOrigin{Remote: false}, "")
+	auth, err := resolveAuth(sm, "human-canny", ConnOrigin{Remote: false}, "")
 	if err != nil {
 		t.Fatal(err)
 	}

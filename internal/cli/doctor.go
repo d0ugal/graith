@@ -115,6 +115,7 @@ var doctorCmd = &cobra.Command{
 
 		dc.checkVersion(probe)
 		dc.checkEnvironment()
+		dc.checkHumanToken()
 
 		diag := dc.checkDaemon(probe)
 		if diag != nil {
@@ -230,7 +231,8 @@ func (dc *doctorContext) probeDaemon() daemonProbe {
 	hs := client.BuildHandshake(paths, 0, 0, "")
 	hs.ClientID = "doctor"
 
-	hsData, _ := protocol.EncodeControl("handshake", hs)
+	token := localAuthToken()
+	hsData, _ := encodeLocalControl("handshake", hs, token)
 	if err := writer.WriteFrame(protocol.ChannelControl, hsData); err != nil {
 		return daemonProbe{reach: daemonReachDown, dialErr: err}
 	}
@@ -252,7 +254,7 @@ func (dc *doctorContext) probeDaemon() daemonProbe {
 	// Ask the daemon to gather diagnostics on the same connection. An older
 	// daemon that doesn't understand the message replies with an error (or
 	// nothing) — that's a "diagnostics unsupported", not a connectivity fault.
-	diagData, _ := protocol.EncodeControl("diagnostics", struct{}{})
+	diagData, _ := encodeLocalControl("diagnostics", struct{}{}, token)
 	if err := writer.WriteFrame(protocol.ChannelControl, diagData); err != nil {
 		return probe
 	}
@@ -284,6 +286,24 @@ func (dc *doctorContext) probeDaemon() daemonProbe {
 	probe.diag = &diag
 
 	return probe
+}
+
+func localAuthToken() string {
+	if token := os.Getenv("GRAITH_TOKEN"); token != "" {
+		return token
+	}
+	data, err := os.ReadFile(paths.HumanTokenFile)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+func encodeLocalControl(msgType string, payload any, token string) ([]byte, error) {
+	if token != "" {
+		return protocol.EncodeControlWithToken(msgType, payload, token)
+	}
+	return protocol.EncodeControl(msgType, payload)
 }
 
 func (dc *doctorContext) checkVersion(probe daemonProbe) {
@@ -651,6 +671,63 @@ func (dc *doctorContext) checkSandboxPaths() {
 		dc.passf("environment", "All sandbox grants usable (%d read dir, %d write dir, %d read file, %d write file)",
 			len(allReadDirs), len(allWriteDirs), len(allReadFiles), len(allWriteFiles))
 	}
+}
+
+func (dc *doctorContext) checkHumanToken() {
+	info, err := os.Stat(paths.HumanTokenFile)
+	if err != nil {
+		dc.failf("environment", "Human token unavailable: %s", paths.HumanTokenFile)
+		return
+	}
+	if !info.Mode().IsRegular() {
+		dc.failf("environment", "Human token is not a regular file: %s", paths.HumanTokenFile)
+		return
+	}
+	if info.Mode().Perm() != 0o600 {
+		dc.failf("environment", "Human token mode is %04o, want 0600: %s", info.Mode().Perm(), paths.HumanTokenFile)
+		return
+	}
+
+	if cfg.Sandbox.Enabled {
+		dirs := append([]string{}, cfg.Sandbox.ReadDirs...)
+		dirs = append(dirs, cfg.Sandbox.WriteDirs...)
+		for _, agent := range cfg.Agents {
+			dirs = append(dirs, agent.Sandbox.ReadDirs...)
+			dirs = append(dirs, agent.Sandbox.WriteDirs...)
+		}
+		for _, dir := range dirs {
+			for _, expanded := range expandDoctorGrant(dir) {
+				if pathWithin(paths.HumanTokenFile, expanded) {
+					dc.failf("environment", "Human token is exposed by sandbox directory grant %s", dir)
+					return
+				}
+			}
+		}
+	}
+
+	dc.passf("environment", "Human token exists with mode 0600")
+}
+
+func expandDoctorGrant(path string) []string {
+	path = config.ExpandPath(path)
+	if strings.ContainsAny(path, "*?[") {
+		matches, _ := filepath.Glob(path)
+		return matches
+	}
+	return []string{path}
+}
+
+func pathWithin(path, dir string) bool {
+	path, err := filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+	dir, err = filepath.Abs(dir)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(dir, path)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // checkDaemon reports on daemon health from the shared probe. The probe already

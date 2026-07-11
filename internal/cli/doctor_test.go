@@ -34,6 +34,61 @@ func writeStubExecutable(t *testing.T, dir, name string) string {
 	return name
 }
 
+func TestCheckHumanToken(t *testing.T) {
+	oldCfg, oldPaths, oldOut := cfg, paths, out
+	t.Cleanup(func() { cfg, paths, out = oldCfg, oldPaths, oldOut })
+	out = output.NewWithWriter(false, io.Discard)
+
+	dataDir := t.TempDir()
+	tokenPath := filepath.Join(dataDir, "human.token")
+	if err := os.WriteFile(tokenPath, []byte("canny-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	paths = config.Paths{HumanTokenFile: tokenPath}
+
+	t.Run("braw secure token", func(t *testing.T) {
+		cfg = &config.Config{}
+		dc := newDoctorContext()
+		dc.checkHumanToken()
+		if !dc.ok {
+			t.Fatalf("secure token failed checks: %+v", dc.checks)
+		}
+	})
+
+	t.Run("thrawn mode", func(t *testing.T) {
+		if err := os.Chmod(tokenPath, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(tokenPath, 0o600) })
+		cfg = &config.Config{}
+		dc := newDoctorContext()
+		dc.checkHumanToken()
+		if dc.ok {
+			t.Fatal("expected permissive token mode to fail")
+		}
+	})
+
+	t.Run("dreich sandbox exposure", func(t *testing.T) {
+		cfg = &config.Config{Sandbox: config.SandboxConfig{Enabled: true, ReadDirs: []string{dataDir}}}
+		dc := newDoctorContext()
+		dc.checkHumanToken()
+		if dc.ok {
+			t.Fatal("expected sandbox-readable token to fail")
+		}
+	})
+
+	t.Run("haar missing token", func(t *testing.T) {
+		paths.HumanTokenFile = filepath.Join(dataDir, "haar.token")
+		t.Cleanup(func() { paths.HumanTokenFile = tokenPath })
+		cfg = &config.Config{}
+		dc := newDoctorContext()
+		dc.checkHumanToken()
+		if dc.ok {
+			t.Fatal("expected missing token to fail")
+		}
+	})
+}
+
 // makeTmpRepo creates the <repo>/<hash> layout gr doctor's checkTmpDir expects
 // under root, writing a file of the given size so a size walk has something to
 // count. The caller points paths.TmpDir at root.
