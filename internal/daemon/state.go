@@ -16,7 +16,7 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 )
 
-const CurrentStateVersion = 15
+const CurrentStateVersion = 16
 
 // StateVersionError is returned by LoadState when the on-disk state file is
 // newer than this binary understands. The daemon treats this as fatal (refuses
@@ -372,6 +372,7 @@ var migrations = map[int]func(*State) error{
 	12: migrateV12ToV13,
 	13: migrateV13ToV14,
 	14: migrateV14ToV15,
+	15: migrateV15ToV16,
 }
 
 func generateToken() (string, error) {

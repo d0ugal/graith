@@ -456,7 +456,7 @@ func (sm *SessionManager) findReactor(triggerName, sourceSessionID string) strin
 
 	for id, s := range sm.state.Sessions {
 		if s.TriggerReactor && s.TriggerID == triggerName &&
-			s.SharedWorktreeSourceID == sourceSessionID && !s.IsSoftDeleted() {
+			s.MirrorSourceID == sourceSessionID && !s.IsSoftDeleted() {
 			return id
 		}
 	}
@@ -495,16 +495,16 @@ func (sm *SessionManager) createTriggerSession(req createTriggerReq) (SessionSta
 	}
 
 	sess, err := sm.Create(CreateOpts{
-		Name:          req.name,
-		AgentName:     agent,
-		RepoPath:      req.repo,
-		Prompt:        req.prompt,
-		Model:         req.model,
-		ParentID:      req.parentID,
-		ShareWorktree: req.shareWorktree,
-		AgentHooks:    true,
-		Rows:          24,
-		Cols:          80,
+		Name:       req.name,
+		AgentName:  agent,
+		RepoPath:   req.repo,
+		Prompt:     req.prompt,
+		Model:      req.model,
+		ParentID:   req.parentID,
+		Mirror:     req.shareWorktree,
+		AgentHooks: true,
+		Rows:       24,
+		Cols:       80,
 	})
 	if err != nil {
 		return SessionState{}, err

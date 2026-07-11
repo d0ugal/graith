@@ -552,7 +552,7 @@ func TestSessionDeliveryInstruction(t *testing.T) {
 func TestFindReactor(t *testing.T) {
 	sm := newTriggerTestSM(t)
 
-	sm.state.Sessions["r"] = &SessionState{ID: "r", TriggerReactor: true, TriggerID: "rev", SharedWorktreeSourceID: "src"}
+	sm.state.Sessions["r"] = &SessionState{ID: "r", TriggerReactor: true, TriggerID: "rev", MirrorSourceID: "src"}
 	if got := sm.findReactor("rev", "src"); got != "r" {
 		t.Errorf("findReactor = %q, want r", got)
 	}
