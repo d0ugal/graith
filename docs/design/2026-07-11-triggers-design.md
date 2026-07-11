@@ -2,7 +2,7 @@
 title: "Design Doc: Unified Triggers (Scheduled + File-Watch Actions)"
 authors: Dougal Matthews
 created: 2026-07-11
-status: Draft (merges #592 and #593; incorporates two review tribunals — see Consensus)
+status: Draft (merges #592 and #593; incorporates three review tribunals inc. a post-merge pass — see Consensus)
 reviewers: (none yet)
 informed: (TBD)
 issue: https://github.com/d0ugal/graith/issues/592, https://github.com/d0ugal/graith/issues/593
@@ -202,7 +202,14 @@ type ActionConfig struct {
     Type     string `toml:"type"` // command | session | scenario | message
     // command:
     Command  string `toml:"command"`
-    Repo     string `toml:"repo"`
+    Repo     string `toml:"repo"`     // REQUIRED for a schedule source; for a watch source
+                                       // the execution root is the bound session's worktree
+                                       // (repo is rejected) — see §command trust boundary
+    Timeout  string `toml:"timeout"`  // command: max run time; default 5m
+    Mutating bool   `toml:"mutating"` // command: may write its execution root; REJECTED in v1
+                                       // (watch commands are read-only in v1) — see §Feedback loops
+    Network  bool   `toml:"network"`  // command: allow network egress (default: blocked)
+    Trusted  bool   `toml:"trusted"`  // command: run unconfined (no sandbox) — explicit opt-in
     // session:
     Prompt   string `toml:"prompt"`
     Agent    string `toml:"agent"`
@@ -212,23 +219,35 @@ type ActionConfig struct {
     Scenario string `toml:"scenario"`
     // message:
     Body     string `toml:"body"`
-    // command trust escape hatch (see §command trust boundary):
-    Trusted  bool          `toml:"trusted"`
+
     Deliver  DeliverConfig `toml:"deliver"`
 }
 
 type DeliverConfig struct {
-    Inbox string `toml:"inbox"` // session name, or "orchestrator"
+    Inbox string `toml:"inbox"` // session name, "orchestrator", or a template like "{session_name}"
     Topic string `toml:"topic"` // pub/sub topic
     Store string `toml:"store"` // store key, templated (see Delivery)
     Wake  bool   `toml:"wake"`  // resume a non-orchestrator stopped inbox target
 }
 
 type TriggerPolicy struct {
-    CatchUp bool   `toml:"catch_up"` // default false: never backfill missed fires
-    Overlap string `toml:"overlap"`  // skip (default) | allow | queue
+    CatchUp   bool   `toml:"catch_up"`  // default false: never backfill missed fires
+    Overlap   string `toml:"overlap"`   // skip (default) | allow | queue(v2)
+    RateLimit string `toml:"rate_limit"`// max fires per window; default "5/30m" — the feedback backstop
 }
 ```
+
+The daemon-wide concurrency cap is a **separate top-level table**, not a key on
+the `[[trigger]]` array (TOML forbids the same key being both an array-of-tables
+and a table): `[triggers] max_concurrent = 4`.
+
+**`message` has an explicit destination via `deliver`.** A `message` action's
+`body` is routed by its `[trigger.action.deliver]` `inbox`/`topic` (exactly one
+required) — `deliver` is **not** rejected for `message` (an earlier draft's
+"deliver rejected on message" rule was a half-merge that left `message` with no
+destination). `store` is not valid for `message` (there's no captured output
+beyond the body, which `store` can hold — so `store` *is* allowed as an
+additional sink; only the "no destination at all" case is rejected).
 
 **Exactly one of `Schedule` / `Watch` must be set** per trigger (validation
 rejects both or neither). Both are **pointers** so an omitted source and an empty
@@ -302,19 +321,28 @@ composition** rather than a distinct type:
 
 | Type | What it does | In-process call |
 |------|--------------|-----------------|
-| `command` | Run a command in `repo`'s context, capture stdout/stderr, deliver the output. | new `runCommandAction` under a dedicated command-action sandbox profile (below) — **not** the bare `sh -c` of `sendNotification` (`notify.go:255`), which is unsandboxed and not a security model |
-| `session` | Spawn a session with `prompt`/`agent`/`model` in `repo`, parented to the orchestrator so it's addressable and lifecycle-managed. | `sm.Create(...)` (`daemon.go:502`) — see call-shape note |
+| `command` | Run a command, capture stdout/stderr, deliver the output. Execution root: `repo` (schedule) or the bound session's worktree (watch). | new `runCommandAction` under a dedicated command-action sandbox profile (below) — **not** the bare `sh -c` of `sendNotification` (`notify.go:255`), which is unsandboxed and not a security model |
+| `session` | Spawn a session with `prompt`/`agent`/`model` in `repo` (or the bound worktree for a watch `ensure`), parented to the orchestrator so it's addressable and lifecycle-managed. | `sm.Create(...)` — see call-shape note |
 | `scenario` | Start a named scenario from `~/.config/graith/scenarios/`. | a shared scenario loader/start service — **not** `sm.StartScenario` directly; see note |
-| `message` | Publish a fixed `body` to an inbox or topic. | `notifyFromDaemon` (inbox) / `messages.Publish` (topic) |
+| `message` | Route a fixed `body` to an inbox and/or topic via `deliver`. | `notifyFromDaemon`/bare `Publish` (inbox, per `wake`) / `messages.Publish` (topic) |
 
-**`session` call shape.** `Create` is a 16-positional-argument function
-(`daemon.go:502`) with `... prompt, model, parentID string, ... rows, cols
-uint16, envExtra ...map[string]string)` — there is no `Background` flag (sessions
-are inherently PTY-backed and detached; "background" is a client-attachment
-concern). A daemon-fired session has **no attached client to source `rows, cols`
-from**, so trigger-spawned sessions use **default headless dimensions of 80×24**;
-a later real resize supersedes them. `parentID` is the resolved orchestrator
-session ID.
+**`session` call shape.** `Create` (`daemon.go:502`) is a function with **17
+fixed positional parameters** (ending `... rows, cols uint16`) plus a variadic
+`envExtra ...map[string]string` — there is no `Background` flag (sessions are
+inherently PTY-backed and detached; "background" is a client-attachment concern),
+and no client to source `rows, cols` from, so trigger-spawned sessions use
+**default headless dimensions of 80×24** (a later real resize supersedes them),
+with `parentID` = the resolved orchestrator session ID.
+
+Because `Create` already generates and durably reserves its own session ID under
+`sm.mu`, and its fixed positional signature has **no slot for a trigger tag**,
+the `TriggerID`/`TriggerReactor` markers (State model) **cannot** be bolted on
+after `Create` returns (that leaves a crash window where a reactor exists
+un-tagged and a second fire would spawn a duplicate). This design therefore
+requires a small **create-options refactor** — a `CreateOptions` struct (or a
+dedicated `createTaggedSession` entry point) that installs the trigger tags in the
+*same* durable placeholder `Create` already reserves. This is a prerequisite for
+the atomic reactor reservation in §Duplicate avoidance, not an afterthought.
 
 **`scenario` dispatch is not a straight `sm.StartScenario` call.** Two obstacles,
 both confirmed against the code:
@@ -374,26 +402,46 @@ privileges**, and — unlike a session — a command has no agent identity to me
 sandbox config from and no session/worktree to key a nono profile on. So it is
 explicit, not "same as agents":
 
+- **Execution root differs by source.** A **schedule** `command` requires
+  `action.repo` and runs rooted there. A **watch** `command` runs rooted in the
+  **bound session's worktree** (the whole point — it must test *the change that
+  fired it*, not the canonical checkout); `action.repo` is **rejected** for a
+  watch command, and the sandbox profile is worktree-rooted, not repo-rooted. The
+  validation and the sandbox scoping both key off the source kind.
+- **v1 watch commands are enforceably read-only.** "Non-mutating" is not a
+  detectable property, so it is *enforced*, not assumed: a v1 watch `command`
+  mounts the bound worktree in the sandbox **`ReadDirs`** (read-only) and runs
+  with a **separate writable scratch cwd** for any output/cache — the exact same
+  read-only-source + writable-scratch shape the `ensure` reactor uses. A command
+  that tries to write the worktree fails at the sandbox, and — decisively — it
+  then **cannot enter the watched write stream at all**, collapsing feedback-loop
+  layer 2 into layer 1 (§Feedback loops). A **mutating** watch command
+  (`action.mutating = true`, writable worktree) is **rejected in v1** and deferred
+  to v2 with the generation-discard machinery; only then is generation-discard the
+  (best-effort, bounded) defence.
 - **A dedicated command-action sandbox profile.** Reuse the `internal/sandbox`
-  backend (`Wrap`) with a purpose-built scope: read+write on the action's `repo`
-  root, a minimal env allowlist (`PATH`/`HOME`/`GRAITH_*` only, no inherited
-  secrets), network blocked unless the trigger opts in, process-group kill on
-  cancel. A new profile shape (repo-rooted, session-less), not the existing
-  session-worktree profile.
+  backend (`Wrap`) with a purpose-built scope: read+write on the writable scratch
+  (schedule: `repo` root; watch: scratch cwd), the worktree in `ReadDirs` for a
+  watch command, a minimal env allowlist (`PATH`/`HOME`/`GRAITH_*` only, no
+  inherited secrets), and network **explicitly blocked by default** — note
+  `WrapOpts.Network == nil` means *unrestricted* (`sandbox.go`), so the profile
+  must construct an explicit blocking policy unless `action.network = true`.
 - **Fail closed on no enforcement.** A `command` trigger must **not** silently
   fall through to unsandboxed execution: either the sandbox is enabled and the
   backend can enforce (else the trigger is rejected at validation), or the operator
-  sets an explicit `action.trusted = true` acknowledging the command runs as
-  unconfined daemon-user code. There is no implicit unconfined path.
-- **Bounds.** A per-command `timeout` (default e.g. 5m) with context cancellation,
-  an output cap (like `prCommentMaxBody`, `prwatch.go:34`), process-group
-  termination on daemon shutdown, and — for a `command` that runs concurrently
-  with itself — per-trigger serialisation.
-- **Validation.** A `command` action with no `repo`, or a `repo` outside
-  `allowed_repo_paths` (`cfg.RepoPathAllowed`), is rejected at config load.
-- **File-watch nuance.** A `watch`-source `command` that *writes* the watched
-  worktree is the case the feedback-loop discard (§Feedback loops) exists for; a
-  watch-driven `command` should default to **non-mutating** in v1.
+  sets an explicit `action.trusted = true` acknowledging unconfined daemon-user
+  code. There is no implicit unconfined path.
+- **Bounds.** `action.timeout` (default **5m**) with context cancellation, an
+  output cap (`prCommentMaxBody`-style, `prwatch.go:34`), process-group
+  termination on daemon shutdown, and per-trigger (per-binding, for a watch
+  source) serialisation of concurrent runs.
+- **Validation.** A schedule `command` with no `repo`, or a `repo` outside a
+  configured `allowed_repo_paths`, is rejected at config load. Note
+  `RepoPathAllowed` returns `true` when `allowed_repo_paths` is **empty**
+  (`config.go`), so the repo allow-list only constrains when the operator has set
+  one; with it unset, a schedule `command` may target any repo (still subject to
+  the sandbox/`trusted` gate). The "fail-closed" guarantee is the *sandbox*, not
+  the repo allow-list.
 
 `notify.go:255` (`exec.Command("sh", "-c", command)` with inherited env) is
 **not** the model — it is cited only for the mechanical exec pattern.
@@ -404,16 +452,23 @@ explicit, not "same as agents":
 best-effort and independent (a store-write failure doesn't suppress the inbox
 message):
 
-- `inbox = "orchestrator"` (or any session name) — deliver via
-  `notifyFromDaemon(sessionID, body)` (`notify.go:73`), which publishes to the
-  inbox and, via `notifyInbox`/`resumeForInbox` (`notify.go:125`),
-  **auto-resumes a stopped target**. `"orchestrator"` resolves to the current
-  `SystemKindOrchestrator` session. Because auto-resume is broader than delivery,
-  soft-deleted targets are rejected (never woken), and auto-resume defaults **on
-  only for `inbox = "orchestrator"`**; for any other named session, delivery
-  publishes but does not resume unless `deliver.wake = true`. A report waking the
-  orchestrator is intended; a timer silently restarting a paused-for-a-reason
-  agent is not.
+- `inbox = "orchestrator"` (a named session, or a template like `{session_name}`
+  that resolves to the watch trigger's bound session). **The executor selects the
+  delivery primitive by target and `wake`, because `notifyFromDaemon` cannot gate
+  resume on its own** — `notifyFromDaemon` → `notifyInbox` → `resumeForInbox`
+  **unconditionally** resumes any `StatusStopped` target and has **no
+  soft-delete guard** (`notify.go`). So:
+  - `inbox = "orchestrator"`, or any target with `wake = true` → use
+    `notifyFromDaemon` (publish **and** auto-resume). A report waking the
+    orchestrator is intended.
+  - any other named session with `wake = false` (default) → use a **bare
+    `messages.Publish`** (deliver to the inbox, do **not** resume). A timer or a
+    file change silently restarting a paused-for-a-reason agent is not intended.
+  - in **all** cases the executor adds its own **soft-delete guard**
+    (`IsSoftDeleted`) before delivering — a soft-deleted session is a hidden
+    `stopped` session, and `notifyFromDaemon` would otherwise wake it. The helper
+    does not provide this guard, so delivery must.
+  - `"orchestrator"` resolves to the current `SystemKindOrchestrator` session.
 - `topic = "pr-reports"` — publish to a pub/sub topic via `messages.Publish`. No
   PTY notification (subscribers pull).
 - `store = "reports/pr/{date}.md"` — write a durable store doc via `store.Put`
@@ -435,16 +490,19 @@ a long-running agent's final answer synchronously:
   whatever it commits/pushes/messages.
 
 **Per-action delivery validity** is enforced: `command` delivers captured output
-(all three sinks valid); `session` delivery is the best-effort prompt injection;
-`message` has no separate delivery (the `body` *is* the payload — a `deliver`
-block on it is rejected); a `scenario` action produces no single output, so a
-`deliver` block on it is rejected.
+(all sinks valid); `session` delivery is the best-effort prompt injection;
+`message` **requires** a `deliver` with at least an `inbox` or `topic` (the `body`
+is the payload, `deliver` is its destination — see the model note); a `scenario`
+action produces no single output, so a `deliver` block on it is rejected.
 
-**Template variables** in `deliver.store`/`deliver.topic`, `message.body`, the
-injected `session` delivery instruction, and (for the watch source) message
-bodies: `{name}` (trigger), `{date}`, `{datetime}` (RFC3339), `{fire_time}`, and
-— for a `watch` source — `{session_name}`, `{worktree_path}`, `{changed_files}`,
-`{change_count}`. These need a **new, trigger-specific expander**: the existing
+**Template variables** in `deliver.inbox`/`deliver.topic`/`deliver.store`,
+`message.body`, and the injected `session` delivery instruction: `{name}`
+(trigger), `{date}`, `{datetime}` (RFC3339), `{fire_time}`, and — for a `watch`
+source — `{session_name}`, `{worktree_path}`, `{changed_files}`, `{change_count}`.
+`deliver.inbox` is templatable specifically so a repo/role-bound watch trigger can
+route output back to its bound session with `inbox = "{session_name}"` — without
+that, a policy trigger matching a runtime-discovered session has no way to name it.
+These need a **new, trigger-specific expander**: the existing
 `config.TemplateVars`/`Expand` (`internal/config/template.go`) is a *fixed struct*
 whose `Expand` **errors on any unknown variable name**, so these tokens can't pass
 through it. Follow its style (same `{token}` syntax, same unknown-token-is-error
@@ -494,7 +552,8 @@ documented as v2.
 
 **Global concurrency cap.** Per-trigger `skip` doesn't bound *aggregate* load —
 many triggers can come due on the same tick (or many watchers fire at once). A
-daemon-wide cap (`[trigger] max_concurrent`, default e.g. 4) bounds simultaneously
+daemon-wide cap (`[triggers] max_concurrent`, default e.g. 4 — a `[triggers]`
+table, distinct from the `[[trigger]]` array) bounds simultaneously
 running action goroutines; fires that would exceed it are treated as `skip`
 (logged), never queued unboundedly.
 
@@ -548,50 +607,98 @@ does almost nothing when nothing is due.
 Its source-specific mechanics (recursion, races, watch-set pruning, degradation)
 are in §Source: file-watch.
 
-**Locking discipline** (identical philosophy to prwatch): the loops share a
-mutex `triggerState.mu`, independent of `sm.mu`. Cursors, in-flight flags,
-watcher bookkeeping, the per-worktree feedback-loop generation counters, and
-pause state live under `triggerState.mu`. Action dispatch (`sm.Create`, the shared
-scenario-start service, sandboxed command exec, `store.Put`) runs in a detached
-goroutine holding neither lock, so a slow action never blocks `gr list`. State
-snapshots follow `RLock → copy → unlock → work` (`prwatch.go:150`).
+**Locking discipline** (identical philosophy to prwatch): the loops share a mutex
+`triggerState.mu`, independent of `sm.mu`. Definition cursors, per-binding
+in-flight flags, watcher bookkeeping, per-worktree generation counters, and pause
+state live under `triggerState.mu` — including each binding's `ReactorID`. Action
+dispatch (`sm.Create`, scenario-start, sandboxed command exec, `store.Put`) runs
+in a detached goroutine holding neither lock, so a slow action never blocks
+`gr list`. State snapshots follow `RLock → copy → unlock → work` (`prwatch.go:150`).
 
-### 5. State model
+**Lock ordering (the one cross-lock path).** The `ensure` reactor reservation
+(§Duplicate avoidance) must be atomic *with respect to* `sm.Create`'s own
+under-`sm.mu` reservation, so it takes both locks. The fixed order is
+**`triggerState.mu` → `sm.mu`** (never the reverse): under `triggerState.mu` the
+executor checks/sets the binding's `ReactorID` placeholder, then acquires `sm.mu`
+(via the create-options path) to durably reserve the session, then releases both.
+Every other trigger path takes only `triggerState.mu`. Stating the order keeps the
+`-race`-clean claim achievable rather than aspirational.
 
-A new persisted collection, mirroring how `ScenarioState` was added:
+**At-most-once requires a durable save, not just a mutex.** "Write
+`LastScheduledFireAt`/`NextScheduledFireAt` before dispatch" means a **successful
+durable `saveState`** before the action goroutine launches — advancing the cursor
+in memory and dispatching after a *failed* save would break the restart guarantee.
+So: persist the cursor+fire record successfully → then dispatch; if the save fails,
+do **not** dispatch, record `LastError`/degraded, and retry persistence without
+treating the instant as committed.
+
+### 5. State model — definition vs. binding
+
+The load-bearing correction from review: **a watch policy trigger (selected by
+`repo`/`role`) can bind to *many* live sessions at once** (two implementers on the
+same repo; the same role in two scenarios). So runtime state splits into two
+levels — a per-**definition** row and a per-**binding** row — rather than one row
+per trigger name (which could only ever hold one `ReactorID`, one in-flight flag,
+one debounce state, and would break the moment a policy matched two sessions).
 
 ```go
+// Per-DEFINITION — one per [[trigger]] block. Schedule triggers use only this.
 type TriggerRuntimeState struct {
-    Name                string      `json:"name"`
-    Fingerprint         string      `json:"fingerprint"`
-    LastScheduledFireAt *time.Time  `json:"last_scheduled_fire_at,omitempty"`
-    LastError           string      `json:"last_error,omitempty"`
+    Name                string      `json:"name"`         // namespaced: "config:<name>" | "scenario:<id>:<name>"
+    Fingerprint         string      `json:"fingerprint"`  // canonical hash(source+action+policy)
     Paused              bool        `json:"paused,omitempty"`
-    Degraded            string      `json:"degraded,omitempty"`   // watch: watcher failure/limit reason
-    ReactorID           string      `json:"reactor_id,omitempty"` // watch: owned ensure-reviewer session
+    ActivatedAt         *time.Time  `json:"activated_at,omitempty"`          // first reconcile — interval phase anchor
+    LastScheduledFireAt *time.Time  `json:"last_scheduled_fire_at,omitempty"`// schedule: at-most-once anchor
+    NextScheduledFireAt *time.Time  `json:"next_scheduled_fire_at,omitempty"`// schedule: restart-stable cursor
+    LastError           string      `json:"last_error,omitempty"`
     RunCount            int         `json:"run_count,omitempty"`
-    History             []RunRecord `json:"history,omitempty"`    // bounded ring (last N runs)
+    History             []RunRecord `json:"history,omitempty"`               // bounded ring (last ~20)
+}
+
+// Per-BINDING — one per (definition, bound source session). Watch triggers only.
+// Keyed by (Name, SourceSessionID). NOT persisted: rebuilt from live sessions on
+// start/reload (a binding is meaningless without its live session).
+type TriggerBinding struct {
+    Name            string    // owning definition (namespaced)
+    SourceSessionID string    // the bound session (resolved from repo/role)
+    ReactorID       string    // this binding's ensure-reviewer session (or reservation placeholder)
+    InFlight        bool      // this binding's overlap guard
+    Degraded        string    // this binding's watcher failure/limit reason
+    // debounce timer, per-worktree generation counter, changed-path batch — in-memory
 }
 
 type RunRecord struct {
-    ScheduledAt time.Time `json:"scheduled_at"`
-    Cause       string    `json:"cause"`  // "schedule" | "catch_up" | "manual" | "file"
-    Result      string    `json:"result"` // per action type
+    ScheduledAt     time.Time `json:"scheduled_at"`
+    SourceSessionID string    `json:"source_session_id,omitempty"` // which binding fired (watch)
+    Cause           string    `json:"cause"`  // "schedule" | "catch_up" | "manual" | "file"
+    Result          string    `json:"result"` // per action type
 }
 ```
 
-`LastScheduledFireAt` is the missed-run / at-most-once anchor and drives interval
-`nextFire`. `History` is a bounded ring (last ~20 runs). `Result` is defined **per
-action type**: `command` → exit code + truncated output; `session` → "spawned
-`<id>`" (**not** "delivered"); `scenario` → "started N sessions"; `message` →
-"published". Keyed by trigger `name` on `State`, alongside `Sessions`/`Scenarios`.
-The **definition** is *not* persisted here — it lives in config and is the source
-of truth; only mutable runtime facts persist. On load, rows for triggers no longer
-in config are pruned (like `prunePRWatchState`); new rows are created lazily.
-Everything derived (parsed `cron.Schedule`, cached `nextFire`, in-flight flags,
-`fsnotify` handles) is in-memory in a `triggerState` struct, rebuilt on each start
-and config reload. A state migration bumps `CurrentStateVersion` (no-op — the
-field defaults to an empty map).
+- **Interval anchoring is now restart-stable.** `ActivatedAt` (persisted at first
+  reconcile) is the interval phase anchor and `NextScheduledFireAt` is the
+  persisted cursor, so a daemon restarted more often than a long interval — even
+  *before* the first fire — cannot keep choosing a new "first-seen" time and starve
+  the trigger (a real gap in the earlier single-`LastScheduledFireAt` model).
+- **Per-binding isolation.** Each binding has its own `ReactorID`, in-flight guard,
+  debounce, generation counter, and degraded status — so `overlap = "skip"` on
+  worktree A never suppresses worktree B, one reactor is never reused across
+  unrelated sources, and one degraded watcher doesn't mark the whole policy down.
+  The atomic reservation (§Duplicate avoidance) reserves a real placeholder session
+  ID into *this binding's* `ReactorID`, keyed by `(Name, SourceSessionID)`.
+- **Naming/namespacing.** Definition names are namespaced by origin
+  (`config:<name>`, `scenario:<id>:<name>`) so two scenario instances of the same
+  file, or a config and scenario trigger sharing a `name`, don't collide.
+- `Result` is per action type: `command` → exit code + truncated output; `session`
+  → "spawned `<id>`" (**not** "delivered"); `scenario` → "started N sessions";
+  `message` → "published". `History` is a bounded ring (last ~20). The
+  **definition** (source/action/policy) is *not* persisted — it lives in config /
+  scenario TOML and is the source of truth; only mutable runtime facts persist.
+  Definition rows for triggers no longer declared are pruned on load (like
+  `prunePRWatchState`); binding rows are rebuilt from live sessions. Derived data
+  (parsed `cron.Schedule`, `fsnotify` handles, timers) is in-memory in a
+  `triggerState` struct. A state migration bumps `CurrentStateVersion` (no-op —
+  the maps default empty).
 
 Sessions also gain a marker so a watch trigger's spawned reactor can be found
 idempotently (mirroring the `ScenarioID` fields on `SessionState`):
@@ -654,7 +761,9 @@ Selected by which field is set on `[trigger.schedule]`:
 
 Exactly one of `cron`/`every` is required; validation rejects both-set,
 neither-set, and unparseable values at load, naming the offending trigger
-(fail-closed, same posture as sandbox config).
+(fail-closed, same posture as sandbox config). `timezone` is only meaningful with
+`cron` — setting it alongside `every` is a load error (not silently ignored),
+consistent with the fail-closed posture.
 
 **Time edge cases.** Cron `Next()` handles DST gaps (spring-forward runs at the
 next valid instant) and folds (fall-back fires once). Standard cron DOM/DOW union
@@ -758,11 +867,25 @@ genuinely want commit granularity.
 
 ### The daemon watch loop details
 
-`RunFileWatchLoop` reconciles active watch triggers (enabled, source `watch`,
-whose bound session is running and not soft-deleted) against live `fsnotify`
-watchers. Reconcile — don't poll — on startup, config reload (new wiring in
-`applyConfig`, which today doesn't manage triggers), session create/stop/delete,
-and `gr trigger` mutations. Recursion has races this must handle:
+`RunFileWatchLoop` reconciles the set of **watch bindings** — one per (active
+watch trigger, matching live session) — against live `fsnotify` watchers.
+Reconcile — don't poll — on startup, config reload (new wiring in `applyConfig`,
+which today doesn't manage triggers), session create/stop/delete, scenario
+membership changes, and `gr trigger` mutations. A `repo`/`role` policy that
+matches N sessions produces N bindings, each with its own watcher and per-binding
+state (§State model).
+
+**Binding lifecycle vs. session state.** A binding is created when a matching
+session starts and torn down when it stops or is soft-deleted (v1: **watch
+bindings are active only while their source session is running** — unlike PR-watch,
+which also polls stopped sessions, because a stopped agent isn't producing the
+work-in-progress a reviewer reacts to). Pending debounce events are dropped on
+stop; resuming the source rebuilds the binding and does a reconciliation scan
+(below). The owned `ensure` reactor is **not** torn down with the binding (it may
+still be delivering a final review); it is re-adopted by `TriggerID` when the
+source resumes.
+
+Recursion has races this must handle:
 
 - **Create-before-watch race.** Files can be created inside a new directory before
   its `Create` event registers the watch. On adding a watch for a new dir,
@@ -772,11 +895,15 @@ and `gr trigger` mutations. Recursion has races this must handle:
   `config/watcher.go` watches the containing dir); the matcher keys on the final
   path, so a rename-into-place counts as a write to that path.
 - **Watch-limit / overflow degradation.** `watcher.Add` can fail (inotify limit)
-  and fsnotify can drop events on overflow. On failure the trigger enters a
-  **degraded** status (recorded in `TriggerRuntimeState.Degraded`, surfaced in
-  `gr trigger status` and `gr doctor`) and **fails safe by disabling with a clear
-  reason** rather than watching a partial tree. Overflow triggers a full re-scan +
-  debounced fire so a dropped burst isn't missed.
+  and fsnotify can drop events on overflow (the `fsnotify.Error` channel / a
+  kernel-queue-overflow event, platform-specific). On `watcher.Add` failure the
+  **binding** enters a **degraded** status (`TriggerBinding.Degraded`, surfaced in
+  `gr trigger status` and `gr doctor`) and **fails safe by disabling that binding
+  with a clear reason** rather than watching a partial tree. On overflow, because a
+  bare re-scan has no prior snapshot to diff against, v1 **fires conservatively**
+  (a single debounced fire with `{changed_files}` reported as "unknown — watcher
+  overflow") rather than pretending to know the changed set; maintaining a bounded
+  path/mtime snapshot to diff is future work.
 
 ### Feedback loops: how the reactor's own writes don't re-trigger
 
@@ -785,68 +912,82 @@ is no *general* way to know "implementer or reactor?" from the event stream. The
 design closes the loop by construction for the case that matters and is honest that
 the other case is only bounded:
 
-1. **Reactors that cannot write the watched tree (the flagship case) — loop closed
-   by construction.** The continuous reviewer delivers feedback over **messaging**,
-   not edits, and — decisively — a `session` reactor with a shared worktree gets
-   its **own separate, writable scratch worktree** while the watched (source)
-   worktree is mounted **read-only** in its sandbox `ReadDirs` (`daemon.go`
-   requires the sandbox precisely so the shared worktree can be mounted read-only,
-   giving the reactor a distinct scratch `WorktreeDir`). A spawned agent reactor
-   **physically cannot write the files it watches**. For the motivating pattern the
-   loop cannot exist. This is the strongest layer and needs no approximation.
+**In v1, both watch action classes are structurally read-only on the watched
+tree, so the loop cannot exist — full stop.** `fsnotify` can't attribute a write
+to a process, so v1 does not *try* to tell reactor writes apart; it makes reactor
+writes to the watched tree **impossible**:
 
-2. **Reactors that *do* write the watched tree (`command` actions only).** A
-   watch-driven `command` (e.g. `gofmt`) runs against the source worktree, so its
-   writes land in the watched tree. Defence is **generation-based discard, not
-   deferral**: each fire that launches a `command` bumps a **per-worktree
-   generation counter**; the watcher **discards every event observed while that
-   command is in flight and until the next quiet window after it exits** —
-   attributed to the command, dropped, not coalesced into the next fire. Deferring
-   would re-fire on the command's own output (a real `gofmt` loop); discarding by
-   generation breaks it. **Honest tradeoff:** a *concurrent* implementer/human edit
-   made while the command runs is discarded too — sub-second for a fast formatter,
-   a real gap for a slow one. Hence watch-driven `command` actions are phased after
-   the read-only actions and default **non-mutating** in v1 (report via `deliver`,
-   don't edit), collapsing this case into layer 1.
+1. **`session` / `ensure` reactors.** The reviewer delivers feedback over
+   **messaging**, not edits, and — decisively — a `session` reactor with a shared
+   worktree gets its **own separate, writable sandbox scratch directory** (a
+   scratch `WorktreeDir`, *not* a second git checkout) while the watched (source)
+   worktree is mounted **read-only** in its sandbox `ReadDirs` (`daemon.go`
+   requires the sandbox precisely so the shared worktree can be mounted read-only).
+   A spawned agent reactor **physically cannot write the files it watches**.
+
+2. **`command` actions.** v1 watch commands are **enforced read-only** the same
+   way (§command trust boundary): the bound worktree is in `ReadDirs`, output/cache
+   goes to a separate writable scratch cwd. A command that tries to write the
+   worktree fails at the sandbox — so it, too, cannot enter the watched write
+   stream. `go test ./...` that only reads and writes to scratch never re-fires.
 
 3. **Debounce (quiet-window coalescing)** — §3. Coalesces bursts; does not
    distinguish causes.
 
-4. **Rate-limit backstop** — a rolling per-trigger limit (mirroring `prwatch.go`'s
-   `gate()` "N per 30 minutes"). It **bounds** damage; it does not by itself
-   *prevent* a loop, so it's a backstop, not the primary defence. A trip is recorded
-   in `gr trigger status`, not just logs.
+4. **Rate-limit backstop** — the `policy.rate_limit` rolling per-binding limit
+   (default `5/30m`, mirroring `prwatch.go`'s `gate()`), enforced in the executor.
+   It **bounds** damage; it does not by itself *prevent* a loop, so it's a
+   backstop. A trip is recorded in `gr trigger status`.
 
-**Cross-trigger interference.** The generation-discard state is keyed by
-**worktree, not trigger**, so a read-only trigger A doesn't spuriously fire on a
-sibling `command` trigger B's writes on the same worktree — writes attributed to
-*any* in-flight `command` on the worktree are suppressed. Bookkeeping, not a rules
-engine.
+**v2 — mutating commands (deferred, honest about being bounded not eliminated).**
+If `action.mutating = true` is ever allowed (v2), a command *can* write the
+watched tree, and the loop returns. The v2 defence is **generation-based discard**,
+which is temporal suppression, not attribution, so it must be specified precisely
+(and its guarantee weakened to "bounded, best-effort"):
+- Each in-flight mutating command adds its generation to a **per-worktree active
+  set** (a refcount/set, not a single bump — two commands can overlap on one
+  worktree). Events observed while the set is non-empty, and until a quiet window
+  after it empties, are discarded.
+- **Late kernel/user-space delivery** (fsnotify events arriving after the process
+  exits) can land after the set empties and the quiet window passes — this can
+  re-fire; the window bounds but doesn't eliminate it.
+- **Concurrent human edits** during the window are discarded too (a real gap).
+- **Cross-binding:** the active-set is keyed by **worktree**, so a mutating command
+  on worktree W suppresses re-fires for *every* binding watching W.
+- On daemon restart mid-command, the in-memory set is lost; the binding does a
+  reconciliation scan and fires conservatively.
 
-**Net:** the flagship read-only case has no loop at all; the write-capable case is
-bounded and, with the non-mutating-`command` v1 default, also collapses to no-loop.
-The design is explicit that generic source attribution isn't achievable from
-`fsnotify` alone (PID/process-accounting was considered and rejected — fsnotify
-can't attribute, and threading real attribution through the sandbox is heavy).
+**Net:** in v1 the loop cannot exist for either action class (both read-only by
+construction). v2 mutating commands are bounded, not eliminated, and the doc says
+so. Generic source attribution isn't achievable from `fsnotify` alone
+(PID/process-accounting was considered and rejected — fsnotify can't attribute,
+and threading real attribution through the sandbox is heavy).
 
 ### Duplicate avoidance (`ensure = true`)
 
-The "ensure a reviewer reacts" convenience (§1) must be idempotent. Reuse rules:
+The "ensure a reviewer reacts" convenience (§1) must be idempotent **per
+binding** — each bound source session has its own reactor (§State model), so a
+policy matching two implementers gets two reactors, never one shared across them.
+Reuse rules (against *this binding's* `ReactorID`):
 
-- tagged reactor exists and is **running or stopped** (not soft-deleted) →
-  `message` it (messaging **auto-resumes** a stopped one via `notifyFromDaemon`,
-  so this revives the existing reactor — spawning instead would strand a dead
-  session and duplicate on every reviewer exit);
-- tagged reactor is **soft-deleted or absent** → spawn a fresh one.
+- reactor exists and is **running or stopped** (not soft-deleted) → `message` it
+  (messaging **auto-resumes** a stopped one via `notifyFromDaemon`, so this revives
+  the existing reactor — spawning instead would strand a dead session and duplicate
+  on every reviewer exit);
+- reactor is **soft-deleted or absent** → spawn a fresh one, tagged
+  `TriggerID`/`TriggerReactor`.
 
 Dedup is by **ownership tagging** (`TriggerID`/`TriggerReactor` on `SessionState`,
 mirroring `ScenarioID`), robust against renames in a way name-guessing is not. A
-marker lookup alone is **not race-safe** — two fires could both see "no reactor"
-and both spawn — so the daemon **reserves** the reactor before creating it: under
-`sm.mu`, atomically set the trigger's `ReactorID` to a placeholder (or serialise
-per-trigger fires) so the second fire messages/waits instead of spawning, rolling
-back on `Create` failure. This mirrors how scenario start pre-reserves
-`StatusCreating` placeholders under lock before concurrent creation
+marker lookup alone is **not race-safe** — two fires of the same binding could both
+see "no reactor" and both spawn — so the daemon **reserves** the reactor before
+creating it. Reservation reserves a **real placeholder session** (a `StatusCreating`
+record with the trigger tags set in the *same* durable write, via the create-options
+path — not a string sentinel a second fire couldn't safely message) into the
+binding's `ReactorID`, taking `triggerState.mu` → `sm.mu` in that order (§Locking).
+The second fire sees the reservation and messages/waits instead of spawning; a
+`Create` failure rolls the reservation back. This mirrors how scenario start
+pre-reserves `StatusCreating` placeholders under `sm.mu` before concurrent creation
 (`scenario.go`).
 
 ### Opt-in granularity: a declaration never names a live session
@@ -864,13 +1005,48 @@ config-write time. Therefore:
   live match simply watches nothing until a matching session exists.
 - **Scenario TOML = the home for the flagship pair.** A scenario defines its own
   roles, so a scenario-level `watch → session (ensure)` trigger targets
-  `role = "implementer"` unambiguously; its lifetime is the scenario's.
+  `role = "implementer"` unambiguously; its lifetime is the scenario's. This needs
+  real lifecycle wiring, specified next — it is **not** just "extract a loader".
 - **`gr trigger add` (runtime) = the only place a literal session is named**,
   because at that moment it exists. The daemon resolves the name to a session **ID**
   at add-time so a later rename doesn't break the trigger. This is exactly why
   runtime authoring matters more for the watch source than the schedule source —
   but it stays gated behind the same v2 deferral as all CLI authoring (Proposal 2),
   not introduced in v1.
+
+#### Scenario-embedded trigger lifecycle (must be wired end-to-end)
+
+Scenario triggers are a first-class path, not a config afterthought. Today
+scenario TOML is parsed CLI-side with unknown fields rejected, and
+`protocol.ScenarioStartMsg` carries only caller/name/goal/sessions; `StartScenario`
+owns the two-phase reserve/rollback (`scenario.go`). Adding triggers means wiring
+*all* of:
+
+- **Schema:** a `[[trigger]]` array on the scenario-file model (same
+  `TriggerConfig`), decoded by the shared scenario loader — with a scenario trigger
+  restricted to `role` selectors (the roles the scenario defines) and forbidden
+  from naming a repo/session outside the scenario.
+- **Transport:** extend `ScenarioStartMsg` to carry the parsed triggers into the
+  daemon (they can't be re-read from disk at fire time — the file may change).
+- **Persistence / source of truth:** associate the triggers with `ScenarioState`
+  (namespaced `scenario:<id>:<name>`), so they survive restart with the scenario
+  even though the TOML isn't re-read.
+- **Activation ordering + rollback:** triggers activate **only after** the
+  scenario's two-phase session reservation succeeds; if start rolls back, the
+  triggers are discarded with it (no orphaned watchers).
+- **Teardown:** `scenario stop`/`delete` removes its triggers and their bindings
+  (and, per the reactor-lifetime open question, decides their reactors' fate).
+- **Membership changes:** `scenario resume`/`add` and shared-membership changes
+  **rebind** — a role that gains a new session gets a new binding; a removed
+  session's binding is torn down. This reuses the manifest-republish hook points
+  scenarios already have.
+- **Namespacing:** two running instances of the same scenario file must not collide
+  on trigger name — hence the `scenario:<id>:<name>` key.
+
+Either this is wired end-to-end, or scenario triggers (and the flagship `ensure`
+example) drop to v2 and v1 ships watch triggers via `config.toml` policies only.
+The design's recommendation is to wire it, because the flagship continuous-reviewer
+pattern is the whole motivation for the watch source.
 
 ### Config examples (file-watch)
 
@@ -978,6 +1154,39 @@ shared; maintaining them separately had already produced drift (a parallel actio
 vocabulary and a session-naming config schema in the #593 draft) that the shared
 model eliminates.
 
+**Post-merge review (2-judge, source-verified).** The *merged* doc was then
+reviewed for merge integrity. Both judges confirmed the grounding remained
+accurate across ~20 citations, the shared framework was coherent, and the
+maintainer decisions (no `respect_gitignore`, repo/role selectors, `ensure`
+reuse) were reflected consistently — but converged on real gaps in the shared
+runtime model, all now incorporated:
+
+- **Per-binding runtime state (the big one):** a `repo`/`role` policy can bind to
+  many live sessions, so runtime state splits into per-definition and per-binding
+  (`(name, source session id)`) rows — one `ReactorID`, in-flight guard, debounce,
+  generation counter, and degraded status *per binding* (§State model).
+- **Source-dependent `command` execution root:** schedule commands require `repo`;
+  watch commands run in the bound worktree and reject `repo` (§command trust
+  boundary).
+- **Enforceable read-only v1 watch commands:** "non-mutating" is enforced by the
+  sandbox (worktree in `ReadDirs` + writable scratch cwd), not assumed, so the
+  feedback-loop claim is actually true; `mutating` is a rejected-in-v1 flag
+  (§Feedback loops).
+- **`message` destination:** `message` routes via `deliver` (inbox/topic) — the
+  earlier "deliver rejected on message" left it with nowhere to go.
+- **`deliver.wake`/soft-delete:** delivery selects bare `Publish` vs
+  `notifyFromDaemon` per `wake` and adds its own soft-delete guard, since
+  `notifyFromDaemon` resumes unconditionally and has no such guard.
+- **Scenario-embedded trigger lifecycle:** now wired end-to-end (schema, transport
+  via `ScenarioStartMsg`, `ScenarioState` association, activation-after-two-phase,
+  rollback, teardown, rebinding, namespacing) rather than assumed.
+- **Smaller:** restart-stable interval anchor (`ActivatedAt`/`NextScheduledFireAt`),
+  durable-save-before-dispatch for at-most-once, `triggerState.mu → sm.mu` lock
+  order, create-options path for durable reactor tagging, `[triggers]
+  max_concurrent` (not `[trigger]`), explicit network-blocking policy,
+  conservative overflow firing, `timezone`-with-`every` rejection, and `Create`
+  corrected to 17-fixed-args.
+
 **Deferred to v2 (out of scope, noted in-line):** `overlap = "queue"`, lifetime-
 based session/scenario overlap with durable reconciliation, CLI-authored triggers
 (`gr trigger add`, incl. runtime `--session` targeting for the watch source),
@@ -1080,7 +1289,7 @@ design (mirroring prwatch) is what `-race` polices.
 | File | Change |
 |------|--------|
 | `go.mod` / `go.sum` | Add `github.com/robfig/cron/v3` (parser + `Next()`); vendor a small gitignore matcher. `fsnotify` already present. |
-| `internal/config/config.go` | Add `Triggers []TriggerConfig` (+ `[trigger] max_concurrent`); `TriggerConfig` (`*bool Enabled`, `*ScheduleConfig`, `*WatchConfig`), `ScheduleConfig`, `WatchConfig`, `ActionConfig`, `DeliverConfig`, `TriggerPolicy`; validation (exactly-one-source, one-action-type, cron/every parse, `every>0`, `queue`-rejected, repo allow-list, orchestrator-required-for-session/scenario, per-action delivery validity, `shared:`-required-for-repo-less store, watch repo/role selector never a session). `Default()` empty. |
+| `internal/config/config.go` | Add `Triggers []TriggerConfig` + a `[triggers] max_concurrent` table; `TriggerConfig` (`*bool Enabled`, `*ScheduleConfig`, `*WatchConfig`), `ScheduleConfig`, `WatchConfig`, `ActionConfig` (incl. `timeout`/`mutating`/`network`/`trusted`), `DeliverConfig`, `TriggerPolicy` (incl. `rate_limit`); validation (exactly-one-source, one-action-type, cron/every parse, `every>0`, `queue`/`mutating`-rejected-in-v1, `timezone` rejected with `every`, repo allow-list, schedule-command-requires-repo / watch-command-rejects-repo, orchestrator-required-for-session/scenario, `message`-requires-inbox-or-topic, per-action delivery validity, `shared:`-required-for-repo-less store, watch requires exactly one of repo/role and never a session). `Default()` empty. |
 | `internal/config/trigger_template.go` | New trigger-specific expander (`{name}`/`{date}`/`{datetime}`/`{fire_time}` + watch `{session_name}`/`{changed_files}`/`{change_count}`/`{worktree_path}`) — NOT `config.Expand`. |
 | `internal/daemon/scenario_loader.go` | Extract scenario-TOML loading from `internal/cli/scenario.go` into a shared, daemon-reachable package. |
 | `internal/daemon/trigger.go` | `RunTriggerLoop`, `runTriggerTick`, `dueTriggers` (atomic cursor advance + `LastScheduledFireAt` commit + in-flight under `triggerState.mu`), `fireTrigger`, per-type executors, delivery routing (+ `wake` gating), `triggerState` struct + mutex, `initTriggerSchedules` (fingerprint diff, catch_up), `max_concurrent` semaphore, bounded `History`, prune. |
@@ -1119,7 +1328,8 @@ design (mirroring prwatch) is what `-race` polices.
 - `internal/config/config.go` — top-level `Config`; `PRWatchConfig` as a rich
   per-feature config-section example; `ParseDurationWithDays`.
 - `internal/store/store.go:202` — `Put` / `:237` `Append` for delivery.
-- `internal/daemon/daemon.go:502` — `sm.Create` 16-arg shape; `:729` shared-worktree
+- `internal/daemon/daemon.go:502` — `sm.Create` 17-fixed-arg + variadic-env shape
+  (needs a create-options path to install trigger tags durably); `:729` shared-worktree
   read-only + sandbox-required invariant.
 - `go.mod` — `fsnotify` already vendored; `robfig/cron/v3` + gitignore matcher to be
   added.
