@@ -1,0 +1,9 @@
+{
+  "name": "graith-workflow-scripts",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Dependencies for the docs-preview diff step (see docs-diff.js). Version-pinned and integrity-locked (package-lock.json) so the write-token workflow installs a known artifact with `npm ci --ignore-scripts`, never whatever the registry serves at run time.",
+  "dependencies": {
+    "pngjs": "7.0.0"
+  }
+}
