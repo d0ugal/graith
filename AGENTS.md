@@ -440,6 +440,24 @@ struct field names, or test function names.
 - Errors: return `fmt.Errorf(...)`, don't use `log.Fatal` in library code
 - The daemon logs to `~/.local/share/graith/daemon.log` (slog, JSON format)
 
+## Design docs
+
+Non-trivial features get a design doc in `docs/design/` **before** they're
+built — it's the argument for a decision, kept afterwards as the record of why.
+
+- **Start from the template.** Copy [`docs/design/TEMPLATE.md`](docs/design/TEMPLATE.md)
+  to `docs/design/YYYY-MM-DD-<slug>.md` (date = the day you start it) and fill
+  it in. The template encodes the house style: the frontmatter block
+  (`title`/`authors`/`created`/`status`/`reviewers`/`informed`, optional
+  `issue`) and the section order — `Background → Problem → Goals` (with
+  `Non-Goals`) `→ Proposals → Consensus → Other Notes`.
+- **Lay out the options, not just the winner.** `## Proposals` is numbered,
+  starts with `Proposal 0: Do Nothing`, and marks the advocated one
+  `(Recommended)`. The rejected paths are the most valuable part later.
+- **Advance `status`** as the doc moves: `Draft → Accepted → Implemented`
+  (or `Implemented (v1)` when later phases are deferred). Add a `## Consensus`
+  section only after a review has actually happened.
+
 ## Using graith to work on graith
 
 graith can manage its own development sessions. This is the intended workflow
