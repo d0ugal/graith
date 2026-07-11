@@ -78,14 +78,18 @@ jobs:
             global=1
           fi
 
-          emit() { # path -> {"url","name"}
-            local f="$1" base
+          emit() { # path -> {"url","name","hasBase"}
+            local f="$1" base url name hasBase
             base="${f#website/content/docs/}"; base="${base%.md}"
             if [ "$base" = "_index" ]; then
-              echo '{"url":"/docs/","name":"docs-home"}'
+              url="/docs/"; name="docs-home"
             else
-              echo "{\"url\":\"/docs/${base}/\",\"name\":\"${base}\"}"
+              url="/docs/${base}/"; name="${base}"
             fi
+            # Does this page exist at the base commit? If not it's new in this
+            # PR — there's no baseline to diff against, so it renders in full.
+            if git cat-file -e "$BASE_SHA:$f" 2>/dev/null; then hasBase=true; else hasBase=false; fi
+            printf '{"url":"%s","name":"%s","hasBase":%s}\n' "$url" "$name" "$hasBase"
           }
 
           {
@@ -102,39 +106,72 @@ jobs:
           } | jq -s '.' > pages.json
 
           count="$(jq 'length' pages.json)"
-          echo "global=$global"     >> "$GITHUB_OUTPUT"
-          echo "count=$count"       >> "$GITHUB_OUTPUT"
-          echo "Pages to screenshot ($count):"; cat pages.json
+          basecount="$(jq '[.[] | select(.hasBase)] | length' pages.json)"
+          echo "global=$global"       >> "$GITHUB_OUTPUT"
+          echo "count=$count"         >> "$GITHUB_OUTPUT"
+          echo "basecount=$basecount" >> "$GITHUB_OUTPUT"
+          echo "Pages to screenshot ($count, $basecount with a baseline):"; cat pages.json
 
-      - name: Build site
+      # Build the site twice — once at the PR's base commit, once at its head —
+      # with the same pinned Hugo, so unchanged content renders identically and
+      # the row diff aligns. The base build is skipped when every changed page
+      # is new (no baseline to diff against).
+      - name: Build head + base sites
         if: steps.changed.outputs.count != '0'
-        working-directory: website
-        run: hugo --gc --minify --baseURL "${BASE_URL}/"
-
-      - name: Serve site
-        if: steps.changed.outputs.count != '0'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASECOUNT: ${{ steps.changed.outputs.basecount }}
         run: |
-          python3 -m http.server 8080 --directory website/public &
-          echo "SERVER_PID=$!" >> "$GITHUB_ENV"
-          for _ in $(seq 1 40); do
-            curl -sf "$BASE_URL/docs/" >/dev/null && break
-            sleep 0.5
-          done
+          hugo --gc --minify --baseURL "${BASE_URL}/" \
+            --source website --destination "$PWD/site-head"
+          if [ "$BASECOUNT" != "0" ]; then
+            git worktree add --detach /tmp/base-tree "$BASE_SHA"
+            hugo --gc --minify --baseURL "${BASE_URL}/" \
+              --source /tmp/base-tree/website --destination "$PWD/site-base"
+          fi
 
-      - name: Screenshot with k6 (Chromium)
+      - name: Screenshot head + base with k6 (Chromium)
         if: steps.changed.outputs.count != '0'
+        env:
+          BASECOUNT: ${{ steps.changed.outputs.basecount }}
         run: |
-          mkdir -p shots && chmod 777 shots
-          docker run --rm --network host \
-            -e K6_BROWSER_HEADLESS=true \
-            -e K6_BROWSER_ARGS=no-sandbox \
-            -e BASE_URL="$BASE_URL" \
-            -e PAGES="$(cat pages.json)" \
-            -v "$PWD/website/.ci/screenshot.js:/screenshot.js:ro" \
-            -v "$PWD/shots:/out" \
-            "$K6_IMAGE" run /screenshot.js
+          # Serve a built site and screenshot the given page set into $out.
+          # Always uses the head checkout's screenshot.js so both renders are
+          # captured identically regardless of what the base commit shipped.
+          shoot() { # $1=site dir  $2=out dir  $3=pages json
+            python3 -m http.server 8080 --directory "$1" &
+            local pid=$!
+            for _ in $(seq 1 40); do
+              curl -sf "$BASE_URL/docs/" >/dev/null && break
+              sleep 0.5
+            done
+            mkdir -p "$2" && chmod 777 "$2"
+            docker run --rm --network host \
+              -e K6_BROWSER_HEADLESS=true \
+              -e K6_BROWSER_ARGS=no-sandbox \
+              -e BASE_URL="$BASE_URL" \
+              -e PAGES="$(cat "$3")" \
+              -v "$PWD/website/.ci/screenshot.js:/screenshot.js:ro" \
+              -v "$2:/out" \
+              "$K6_IMAGE" run /screenshot.js
+            kill "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+          }
+          shoot "$PWD/site-head" "$PWD/shots/head" pages.json
+          if [ "$BASECOUNT" != "0" ]; then
+            jq '[.[] | select(.hasBase)]' pages.json > base-pages.json
+            shoot "$PWD/site-base" "$PWD/shots/base" base-pages.json
+          fi
           sudo chown -R "$(id -u):$(id -g)" shots
-          ls -la shots
+          ls -R shots
+
+      - name: Build diffs
+        if: steps.changed.outputs.count != '0'
+        run: |
+          npm install --no-save --no-package-lock pngjs
+          node .github/workflows/scripts/docs-diff-run.js \
+            pages.json "$PWD/shots/base" "$PWD/shots/head" "$PWD/shots/out"
+          echo "Published diff assets:"; ls -la shots/out
 
       - name: Publish screenshots and comment
         if: steps.changed.outputs.count != '0'
@@ -184,15 +221,35 @@ jobs:
             const ymd = new Date().toISOString().slice(0, 10).replace(/-/g, '');
             const dir = `pr-${pr}/${ymd}-${shortSha}-${runId}.${runAttempt}`;
 
-            const files = fs.readdirSync('shots').filter(f => f.endsWith('.png')).sort();
-            if (files.length === 0) { core.info('No screenshots produced.'); return; }
+            // The diff step (docs-diff-run.js) wrote the images to publish plus
+            // a manifest describing each page × viewport: kind `diff` (a
+            // base-|-head crop of the changed bands), `new` (full render of a
+            // page with no baseline), or `same` (renders identically — no image,
+            // just a note).
+            const outDir = path.join('shots', 'out');
+            let manifest = {};
+            try {
+              manifest = JSON.parse(fs.readFileSync(path.join(outDir, 'manifest.json'), 'utf8'));
+            } catch (e) {
+              core.info(`No diff manifest (${e.message}) — nothing to publish.`);
+              return;
+            }
+            const files = [
+              ...new Set(
+                Object.values(manifest)
+                  .flatMap(vps => Object.values(vps))
+                  .filter(v => v.file)
+                  .map(v => v.file),
+              ),
+            ].sort();
+            if (Object.keys(manifest).length === 0) { core.info('No changed pages.'); return; }
 
             // Build the blobs for the screenshots. Blobs are content-addressed,
             // so this is independent of the branch tip — done once, outside the
             // retry loop.
             const tree = [];
             for (const f of files) {
-              const content = fs.readFileSync(path.join('shots', f)).toString('base64');
+              const content = fs.readFileSync(path.join(outDir, f)).toString('base64');
               const blob = await github.rest.git.createBlob({ owner, repo, content, encoding: 'base64' });
               tree.push({ path: `${dir}/${f}`, mode: '100644', type: 'blob', sha: blob.data.sha });
             }
@@ -203,40 +260,48 @@ jobs:
             // a lost race so the commit always chains onto the re-read tip, and
             // only falls back to createRef on a genuine branch-absent case —
             // never by swallowing an unrelated updateRef failure.
-            await commitToBranch({
-              github, core, owner, repo,
-              createIfAbsent: true,
-              buildCommit: async (tip) => {
-                const treeObj = await github.rest.git.createTree({
-                  owner, repo, tree, base_tree: tip ? tip.treeSha : undefined,
-                });
-                const commit = await github.rest.git.createCommit({
-                  owner, repo,
-                  message: `docs preview: PR #${pr} @ ${shortSha}`,
-                  tree: treeObj.data.sha,
-                  parents: tip ? [tip.commitSha] : [],
-                });
-                return commit.data.sha;
-              },
-            });
-
-            // Group desktop/mobile per page into a comment.
-            const raw = f => `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${dir}/${f}`;
-            const pages = {};
-            for (const f of files) {
-              const m = f.match(/^(.*)-(desktop|mobile)\.png$/);
-              if (!m) continue;
-              (pages[m[1]] ||= {})[m[2]] = f;
+            // Only commit when there are actually images to push — a PR whose
+            // markdown edits produce no visual change (every page `same`) still
+            // gets a comment below, but nothing goes on the branch.
+            if (files.length > 0) {
+              await commitToBranch({
+                github, core, owner, repo,
+                createIfAbsent: true,
+                buildCommit: async (tip) => {
+                  const treeObj = await github.rest.git.createTree({
+                    owner, repo, tree, base_tree: tip ? tip.treeSha : undefined,
+                  });
+                  const commit = await github.rest.git.createCommit({
+                    owner, repo,
+                    message: `docs preview: PR #${pr} @ ${shortSha}`,
+                    tree: treeObj.data.sha,
+                    parents: tip ? [tip.commitSha] : [],
+                  });
+                  return commit.data.sha;
+                },
+              });
             }
+
+            // Render the comment from the manifest. `diff`/`new` entries show an
+            // image; `same` shows a note. A diff crop is base-|-head so it's
+            // roughly twice as wide as a single render — size the columns to fit.
+            const raw = f => `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${dir}/${f}`;
+            const cell = (v, width) => {
+              if (!v) return '—';
+              if (v.kind === 'same') return '_no visual change_';
+              return `<img src="${raw(v.file)}" width="${width}">`;
+            };
+            const names = Object.keys(manifest).sort();
+            const anyNew = names.some(n => Object.values(manifest[n]).some(v => v.kind === 'new'));
             let body = `<!-- docs-preview -->\n### 📸 Docs preview\n\n`;
-            body += `Rendered ${Object.keys(pages).length} changed page(s) at commit \`${shortSha}\`.\n\n`;
-            for (const name of Object.keys(pages).sort()) {
-              const p = pages[name];
+            body += `Diffed ${names.length} changed page(s) against \`${context.payload.pull_request.base.ref}\` at commit \`${shortSha}\`. `;
+            body += `Each image shows only the changed regions — **base │ head**, cropped with context.\n\n`;
+            if (anyNew) body += `_Pages with no baseline (new in this PR) are shown in full._\n\n`;
+            for (const name of names) {
+              const p = manifest[name];
               body += `<details><summary><b>${name}</b></summary>\n\n`;
               body += `| Desktop | Mobile |\n|---|---|\n`;
-              const d = p.desktop ? `<img src="${raw(p.desktop)}" width="420">` : '—';
-              const mob = p.mobile ? `<img src="${raw(p.mobile)}" width="200">` : '—';
-              body += `| ${d} | ${mob} |\n\n</details>\n\n`;
+              body += `| ${cell(p.desktop, 620)} | ${cell(p.mobile, 300)} |\n\n</details>\n\n`;
             }
             body += `_Screenshots stored on the [\`${branch}\`](https://github.com/${owner}/${repo}/tree/${branch}/${dir}) branch._`;
 
