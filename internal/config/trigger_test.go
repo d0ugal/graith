@@ -99,6 +99,11 @@ func TestValidateTriggers_Valid(t *testing.T) {
 			trig:         schedTrigger("bide-briefing", ScheduleConfig{Cron: "0 8 * * *"}, ActionConfig{Type: ActionSession, Prompt: "brief", AutoCleanup: false}),
 			orchestrator: true,
 		},
+		{
+			name:         "session idle_timeout",
+			trig:         schedTrigger("skelf-briefing", ScheduleConfig{Cron: "0 8 * * *"}, ActionConfig{Type: ActionSession, Prompt: "brief", AutoCleanup: true, IdleTimeout: "2m"}),
+			orchestrator: true,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -148,6 +153,9 @@ func TestValidateTriggers_Invalid(t *testing.T) {
 		{"auto_cleanup bad type", schedTrigger("scunner", ScheduleConfig{Cron: "@daily"}, ActionConfig{Type: ActionSession, Prompt: "hi", AutoCleanup: 7}), true, "auto_cleanup must be a boolean"},
 		{"auto_cleanup on command", schedTrigger("scunner", ScheduleConfig{Cron: "@daily"}, ActionConfig{Type: ActionCommand, Command: "x", Repo: "/tmp/x", AutoCleanup: true}), false, "only valid for a session action"},
 		{"auto_cleanup with ensure", watchTrigger("scunner", WatchConfig{Role: "impl"}, ActionConfig{Type: ActionSession, Ensure: true, Prompt: "hi", AutoCleanup: "always"}), true, "incompatible with ensure=true"},
+		{"bad idle_timeout", schedTrigger("scunner", ScheduleConfig{Cron: "@daily"}, ActionConfig{Type: ActionSession, Prompt: "hi", IdleTimeout: "soon"}), true, "action.idle_timeout"},
+		{"zero idle_timeout", schedTrigger("scunner", ScheduleConfig{Cron: "@daily"}, ActionConfig{Type: ActionSession, Prompt: "hi", IdleTimeout: "0s"}), true, "idle_timeout must be > 0"},
+		{"idle_timeout on command", schedTrigger("scunner", ScheduleConfig{Cron: "@daily"}, ActionConfig{Type: ActionCommand, Command: "x", Repo: "/tmp/x", IdleTimeout: "1m"}), false, "idle_timeout is only valid for a session action"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -293,6 +301,43 @@ func TestAutoCleanupDecodes(t *testing.T) {
 
 			if got != tc.want {
 				t.Fatalf("mode = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSessionIdleTimeout(t *testing.T) {
+	cases := []struct {
+		name    string
+		action  ActionConfig
+		want    time.Duration
+		wantErr bool
+	}{
+		{"explicit wins over always", ActionConfig{AutoCleanup: true, IdleTimeout: "5m"}, 5 * time.Minute, false},
+		{"explicit without cleanup", ActionConfig{IdleTimeout: "30s"}, 30 * time.Second, false},
+		{"always defaults to 1m", ActionConfig{AutoCleanup: "always"}, time.Minute, false},
+		{"true (=always) defaults to 1m", ActionConfig{AutoCleanup: true}, time.Minute, false},
+		{"on_success is not auto-idled", ActionConfig{AutoCleanup: "on_success"}, 0, false},
+		{"disabled has no override", ActionConfig{}, 0, false},
+		{"bad idle_timeout errors", ActionConfig{IdleTimeout: "soon"}, 0, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := tc.action.SessionIdleTimeout()
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got %v", got)
+				}
+
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if got != tc.want {
+				t.Fatalf("idle timeout = %v, want %v", got, tc.want)
 			}
 		})
 	}
