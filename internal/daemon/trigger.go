@@ -364,13 +364,16 @@ func (sm *SessionManager) fireSchedule(ctx context.Context, name, cause string) 
 	}
 	defer sm.releaseSlot()
 
-	result, err := sm.fireAction(ctx, t, fireContext{cause: cause, now: time.Now()})
+	fc := fireContext{cause: cause, now: time.Now()}
+	result, err := sm.fireAction(ctx, t, fc)
 	sm.recordTriggerRun(name, TriggerRun{ScheduledAt: time.Now(), Cause: cause, Result: result})
 
 	if err != nil {
 		sm.recordTriggerError(name, err.Error())
 		sm.log.Warn("trigger: action failed", "trigger", name, "err", err)
 	}
+
+	sm.notifyOnComplete(t, fc, err)
 }
 
 // fireContext carries per-fire data (source session, changed files) to the

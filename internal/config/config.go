@@ -500,6 +500,162 @@ type Notifications struct {
 	OnApproval bool   `toml:"on_approval"`
 	OnStopped  bool   `toml:"on_stopped"`
 	Command    string `toml:"command"`
+	// Backend selects how proactive `gr notify` push notifications are delivered:
+	// "macos" (osascript desktop notification; the default when unset) or
+	// "command" (run [notifications] command with GRAITH_NOTIFY_* env vars). Other
+	// backends (ntfy/pushover/slack) are planned follow-ups and rejected for now.
+	Backend string `toml:"backend"`
+	// MaxPerHour rate-limits low/normal push notifications over a rolling hour so a
+	// misbehaving trigger can't storm the user. <=0 uses DefaultNotifyMaxPerHour.
+	// High-priority notifications bypass this limit.
+	MaxPerHour int `toml:"max_per_hour"`
+	// QuietHoursStart / QuietHoursEnd define a daily window ("HH:MM", 24-hour) in
+	// which low/normal push notifications are suppressed. The window may wrap past
+	// midnight (start > end, e.g. 22:00-07:00). Both must be set to take effect.
+	// High-priority notifications bypass quiet hours.
+	QuietHoursStart string `toml:"quiet_hours_start"`
+	QuietHoursEnd   string `toml:"quiet_hours_end"`
+}
+
+// Notification priority levels for `gr notify`.
+const (
+	NotifyPriorityLow    = "low"
+	NotifyPriorityNormal = "normal"
+	NotifyPriorityHigh   = "high"
+)
+
+// DefaultNotifyMaxPerHour is the rolling-hour cap on low/normal push
+// notifications used when [notifications] max_per_hour is unset.
+const DefaultNotifyMaxPerHour = 12
+
+// NotifyBackendName returns the effective push-notification backend, defaulting
+// to "macos" when unset.
+func (n Notifications) NotifyBackendName() string {
+	if strings.TrimSpace(n.Backend) == "" {
+		return "macos"
+	}
+
+	return strings.TrimSpace(n.Backend)
+}
+
+// MaxPerHourValue returns the effective rolling-hour push-notification cap,
+// defaulting to DefaultNotifyMaxPerHour when unset (<=0).
+func (n Notifications) MaxPerHourValue() int {
+	if n.MaxPerHour <= 0 {
+		return DefaultNotifyMaxPerHour
+	}
+
+	return n.MaxPerHour
+}
+
+// NormalizeNotifyPriority resolves a user-supplied priority to a canonical
+// level, defaulting an empty value to "normal". It reports ok=false for an
+// unrecognised value so callers can reject it.
+func NormalizeNotifyPriority(p string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(p)) {
+	case "", NotifyPriorityNormal:
+		return NotifyPriorityNormal, true
+	case NotifyPriorityLow:
+		return NotifyPriorityLow, true
+	case NotifyPriorityHigh:
+		return NotifyPriorityHigh, true
+	default:
+		return "", false
+	}
+}
+
+// QuietHoursConfigured reports whether a quiet-hours window is fully set.
+func (n Notifications) QuietHoursConfigured() bool {
+	return strings.TrimSpace(n.QuietHoursStart) != "" && strings.TrimSpace(n.QuietHoursEnd) != ""
+}
+
+// parseClock parses a "HH:MM" 24-hour time into minutes-since-midnight.
+func parseClock(s string) (int, bool) {
+	s = strings.TrimSpace(s)
+
+	var h, m int
+	if _, err := fmt.Sscanf(s, "%d:%d", &h, &m); err != nil {
+		return 0, false
+	}
+
+	// Reject shapes fmt.Sscanf would tolerate but which aren't a valid clock.
+	if h < 0 || h > 23 || m < 0 || m > 59 {
+		return 0, false
+	}
+
+	return h*60 + m, true
+}
+
+// InQuietHours reports whether the local time t falls within the configured
+// quiet-hours window. It supports a window that wraps past midnight (start >
+// end). An unset or unparseable window returns false (fail-open: a typo mutes
+// nothing rather than everything — Validate rejects a malformed window at load).
+func (n Notifications) InQuietHours(t time.Time) bool {
+	if !n.QuietHoursConfigured() {
+		return false
+	}
+
+	start, ok1 := parseClock(n.QuietHoursStart)
+	end, ok2 := parseClock(n.QuietHoursEnd)
+
+	if !ok1 || !ok2 {
+		return false
+	}
+
+	cur := t.Hour()*60 + t.Minute()
+
+	if start == end {
+		// Degenerate zero-length window: never quiet.
+		return false
+	}
+
+	if start < end {
+		return cur >= start && cur < end
+	}
+
+	// Wrap-around window (e.g. 22:00-07:00): quiet if before end OR at/after start.
+	return cur >= start || cur < end
+}
+
+// knownNotifyBackend reports whether name is an implemented push backend.
+func knownNotifyBackend(name string) bool {
+	switch name {
+	case "macos", "command":
+		return true
+	default:
+		return false
+	}
+}
+
+// Validate checks the [notifications] block for static errors: an unknown push
+// backend, a malformed quiet-hours window, or a "command" backend with no
+// command set. It fails closed so a typo surfaces at config-load rather than as
+// a silent no-op notification.
+func (n Notifications) Validate() error {
+	backend := n.NotifyBackendName()
+	if !knownNotifyBackend(backend) {
+		return fmt.Errorf("[notifications] backend %q is not supported (want \"macos\" or \"command\"; ntfy/pushover/slack are not yet implemented)", backend)
+	}
+
+	if backend == "command" && strings.TrimSpace(n.Command) == "" {
+		return fmt.Errorf("[notifications] backend=\"command\" requires a non-empty command")
+	}
+
+	if strings.TrimSpace(n.QuietHoursStart) != "" || strings.TrimSpace(n.QuietHoursEnd) != "" {
+		if !n.QuietHoursConfigured() {
+			return fmt.Errorf("[notifications] quiet_hours_start and quiet_hours_end must both be set")
+		}
+
+		if _, ok := parseClock(n.QuietHoursStart); !ok {
+			return fmt.Errorf("[notifications] quiet_hours_start %q is invalid (want \"HH:MM\", 24-hour)", n.QuietHoursStart)
+		}
+
+		if _, ok := parseClock(n.QuietHoursEnd); !ok {
+			return fmt.Errorf("[notifications] quiet_hours_end %q is invalid (want \"HH:MM\", 24-hour)", n.QuietHoursEnd)
+		}
+	}
+
+	return nil
 }
 
 type Approvals struct {
@@ -1247,6 +1403,10 @@ func (c *Config) Validate() error {
 	// a missing dependency fails the session loudly without bricking daemon
 	// startup.
 	if err := c.Approvals.Validate(); err != nil {
+		errs = append(errs, err)
+	}
+
+	if err := c.Notifications.Validate(); err != nil {
 		errs = append(errs, err)
 	}
 

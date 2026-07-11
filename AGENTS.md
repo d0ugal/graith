@@ -642,6 +642,27 @@ The status auto-expires when the agent is actively producing output but hasn't
 updated it (default 5 minutes). When idle, it fades but persists — so "Done"
 on a stopped session stays visible.
 
+### Proactive notifications
+
+`gr notify` sends a desktop/push notification to the **human** (via the
+`[notifications]` backend), for things worth interrupting them over — a finished
+briefing, a CI failure, a review needed. Unlike an inbox message it proactively
+grabs attention rather than waiting to be read.
+
+```bash
+gr notify "Morning briefing ready" --priority low
+gr notify "CI failing on main after 3 retries" --priority high
+```
+
+Only the **orchestrator** session and the human may notify (plain agent sessions
+are rejected — don't try to route around it). Priority is `low`/`normal`/`high`;
+`high` plays a sound and bypasses quiet hours + the rate limit. Low/normal are
+rate-limited (default 12/hour) and suppressed during configured quiet hours, and
+identical notifications within 30s are coalesced — so use `notify` sparingly for
+genuinely attention-worthy events, not routine progress (that's what `gr status`
+is for). Triggers can fire one on completion via `notify_on_complete` /
+`notify_message` / `notify_priority` in `[trigger.action]`.
+
 ### Monitoring sessions
 
 ```bash

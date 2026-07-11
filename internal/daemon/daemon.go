@@ -91,6 +91,15 @@ type SessionManager struct {
 	prWatch            *prWatchState
 	triggers           *triggerState
 
+	// pushNotify guards proactive `gr notify` push-notification gating state:
+	// a rolling window of delivered timestamps (rate limit) and the last
+	// delivered key/time (coalescing of identical rapid-fire notifications).
+	pushMu       sync.Mutex
+	pushLog      []time.Time
+	lastPushKey  string
+	lastPushAt   time.Time
+	pushDispatch func(backend, title, message, priority string) error // overridable in tests
+
 	// approvalsWarnOnce guards the one-time [approvals] mode deprecation warning
 	// so it fires once per daemon lifetime, not per approval request.
 	approvalsWarnOnce sync.Once
@@ -103,7 +112,7 @@ type SessionManager struct {
 
 // NewSessionManager creates a SessionManager with the given config and paths.
 func NewSessionManager(cfg *config.Config, paths config.Paths, log *slog.Logger) *SessionManager {
-	return &SessionManager{
+	sm := &SessionManager{
 		state:              NewState(),
 		sessions:           make(map[string]*grpty.Session),
 		attachedClients:    make(map[string]*attachedClient),
@@ -124,6 +133,9 @@ func NewSessionManager(cfg *config.Config, paths config.Paths, log *slog.Logger)
 		log:                log,
 		startedAt:          time.Now(),
 	}
+	sm.pushDispatch = sm.newPushDispatch()
+
+	return sm
 }
 
 // Config returns a snapshot of the current config pointer, safe for use
