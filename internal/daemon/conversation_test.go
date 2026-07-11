@@ -7,7 +7,7 @@ import "testing"
 func publishDM(t *testing.T, s *MsgStore, from, to, body string) {
 	t.Helper()
 
-	if _, err := s.Publish("inbox:"+to, from, from, body, "", ""); err != nil {
+	if _, err := s.Publish(PublishOpts{Stream: "inbox:" + to, SenderID: from, SenderName: from, Body: body}); err != nil {
 		t.Fatalf("Publish %s->%s: %v", from, to, err)
 	}
 }
@@ -22,7 +22,7 @@ func TestConversationBothDirections(t *testing.T) {
 	publishDM(t, s, "bairn", "ben", "fixed")          // received by ben
 	publishDM(t, s, "whin", "clachan", "not for ben") // third-party DM
 
-	if _, err := s.Publish("blether", "ben", "ben", "topic chatter", "", ""); err != nil {
+	if _, err := s.Publish(PublishOpts{Stream: "blether", SenderID: "ben", SenderName: "ben", Body: "topic chatter"}); err != nil {
 		t.Fatalf("Publish topic: %v", err)
 	}
 
@@ -59,7 +59,7 @@ func TestConversationExcludesThirdPartyAndTopics(t *testing.T) {
 	publishDM(t, s, "canny", "braw", "hello braw")   // braw's conversation
 	publishDM(t, s, "dreich", "thrawn", "elsewhere") // unrelated DM
 
-	if _, err := s.Publish("blether", "braw", "braw", "broadcast", "", ""); err != nil {
+	if _, err := s.Publish(PublishOpts{Stream: "blether", SenderID: "braw", SenderName: "braw", Body: "broadcast"}); err != nil {
 		t.Fatalf("Publish topic: %v", err)
 	}
 

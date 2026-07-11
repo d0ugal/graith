@@ -16,7 +16,7 @@ func (sm *SessionManager) onAgentStatusChange(sessionID, sessionName, oldStatus,
 	if sm.messages != nil {
 		body := fmt.Sprintf("Session %q status changed: %s → %s", sessionName, oldStatus, newStatus)
 
-		_, err := sm.messages.Publish("_system.status", sessionID, sessionName, body, "", "")
+		_, err := sm.messages.Publish(PublishOpts{Stream: "_system.status", SenderID: sessionID, SenderName: sessionName, Body: body})
 		if err != nil {
 			sm.log.Error("failed to publish status change", "err", err)
 		}
@@ -81,7 +81,7 @@ func (sm *SessionManager) notifyFromDaemon(sessionID, body string) error {
 		return fmt.Errorf("no message store to publish notification to session %q", sessionID)
 	}
 
-	if _, err := sm.messages.Publish("inbox:"+sessionID, systemSenderID, systemSenderName, body, "", ""); err != nil {
+	if _, err := sm.messages.Publish(PublishOpts{Stream: "inbox:" + sessionID, SenderID: systemSenderID, SenderName: systemSenderName, Body: body}); err != nil {
 		sm.log.Error("failed to publish daemon notification", "session", sessionID, "err", err)
 		return err
 	}

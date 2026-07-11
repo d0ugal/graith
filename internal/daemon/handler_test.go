@@ -985,8 +985,8 @@ func TestMsgSubReadAll(t *testing.T) {
 	h := newTestHarness(t)
 
 	// Publish a message first
-	_, _ = h.sm.messages.Publish("blether1", "braw1", "Braw", "neep1", "", "")
-	_, _ = h.sm.messages.Publish("blether1", "canny1", "Canny", "neep2", "", "")
+	_, _ = h.sm.messages.Publish(PublishOpts{Stream: "blether1", SenderID: "braw1", SenderName: "Braw", Body: "neep1"})
+	_, _ = h.sm.messages.Publish(PublishOpts{Stream: "blether1", SenderID: "canny1", SenderName: "Canny", Body: "neep2"})
 
 	h.sendControl(t, "msg_sub", protocol.MsgSubMsg{
 		Stream: "blether1",
@@ -1010,7 +1010,7 @@ func TestMsgSubReadAll(t *testing.T) {
 func TestMsgSubWithAck(t *testing.T) {
 	h := newTestHarness(t)
 
-	_, _ = h.sm.messages.Publish("blether-ack", "braw1", "Braw", "neep1", "", "")
+	_, _ = h.sm.messages.Publish(PublishOpts{Stream: "blether-ack", SenderID: "braw1", SenderName: "Braw", Body: "neep1"})
 
 	h.sendControl(t, "msg_sub", protocol.MsgSubMsg{
 		Stream:     "blether-ack",
@@ -1034,8 +1034,8 @@ func TestMsgSubWithAck(t *testing.T) {
 func TestMsgSubOnlyUnreadWithAck(t *testing.T) {
 	h := newTestHarness(t)
 
-	_, _ = h.sm.messages.Publish("inbox:braw-sess", "braw-sender", "Ailsa", "braw-hello", "", "")
-	_, _ = h.sm.messages.Publish("inbox:braw-sess", "canny-sender", "Hamish", "bonnie-world", "", "")
+	_, _ = h.sm.messages.Publish(PublishOpts{Stream: "inbox:braw-sess", SenderID: "braw-sender", SenderName: "Ailsa", Body: "braw-hello"})
+	_, _ = h.sm.messages.Publish(PublishOpts{Stream: "inbox:braw-sess", SenderID: "canny-sender", SenderName: "Hamish", Body: "bonnie-world"})
 
 	// First read: OnlyUnread + Ack (mimics check-inbox hook)
 	h.sendControl(t, "msg_sub", protocol.MsgSubMsg{
@@ -1073,7 +1073,7 @@ func TestMsgSubInvalidPayload(t *testing.T) {
 func TestMsgSubWaitWithExistingMessages(t *testing.T) {
 	h := newTestHarness(t)
 
-	_, _ = h.sm.messages.Publish("blether-wait", "braw1", "Braw", "bide-msg", "", "")
+	_, _ = h.sm.messages.Publish(PublishOpts{Stream: "blether-wait", SenderID: "braw1", SenderName: "Braw", Body: "bide-msg"})
 
 	// --wait with existing messages should return immediately
 	h.sendControl(t, "msg_sub", protocol.MsgSubMsg{
@@ -1093,7 +1093,7 @@ func TestMsgSubWaitForNewMessage(t *testing.T) {
 	go func() {
 		time.Sleep(50 * time.Millisecond)
 
-		_, _ = h.sm.messages.Publish("blether-new", "braw1", "Braw", "braw-new", "", "")
+		_, _ = h.sm.messages.Publish(PublishOpts{Stream: "blether-new", SenderID: "braw1", SenderName: "Braw", Body: "braw-new"})
 	}()
 
 	h.sendControl(t, "msg_sub", protocol.MsgSubMsg{
@@ -1125,7 +1125,7 @@ func TestMsgSubWaitForNewMessage(t *testing.T) {
 func TestMsgAck(t *testing.T) {
 	h := newTestHarness(t)
 
-	_, _ = h.sm.messages.Publish("blether-ack-stream", "braw1", "Braw", "neep1", "", "")
+	_, _ = h.sm.messages.Publish(PublishOpts{Stream: "blether-ack-stream", SenderID: "braw1", SenderName: "Braw", Body: "neep1"})
 
 	h.sendControl(t, "msg_ack", protocol.MsgAckMsg{
 		Stream:     "blether-ack-stream",
@@ -1147,8 +1147,8 @@ func TestMsgAckInvalidPayload(t *testing.T) {
 func TestMsgTopics(t *testing.T) {
 	h := newTestHarness(t)
 
-	_, _ = h.sm.messages.Publish("blether-a", "braw1", "Braw", "neep1", "", "")
-	_, _ = h.sm.messages.Publish("blether-b", "canny1", "Canny", "neep2", "", "")
+	_, _ = h.sm.messages.Publish(PublishOpts{Stream: "blether-a", SenderID: "braw1", SenderName: "Braw", Body: "neep1"})
+	_, _ = h.sm.messages.Publish(PublishOpts{Stream: "blether-b", SenderID: "canny1", SenderName: "Canny", Body: "neep2"})
 
 	h.sendControl(t, "msg_topics", protocol.MsgTopicsMsg{Subscriber: "kirk1"})
 
@@ -1484,8 +1484,8 @@ func TestMsgSubFollowThreadFilter(t *testing.T) {
 	h := newTestHarness(t)
 
 	// Publish messages in different threads
-	_, _ = h.sm.messages.Publish("thread-topic", "s1", "Agent", "thread-msg", "thread-1", "")
-	_, _ = h.sm.messages.Publish("thread-topic", "s1", "Agent", "other-msg", "thread-2", "")
+	_, _ = h.sm.messages.Publish(PublishOpts{Stream: "thread-topic", SenderID: "s1", SenderName: "Agent", Body: "thread-msg", ThreadID: "thread-1"})
+	_, _ = h.sm.messages.Publish(PublishOpts{Stream: "thread-topic", SenderID: "s1", SenderName: "Agent", Body: "other-msg", ThreadID: "thread-2"})
 
 	h.sendControl(t, "msg_sub", protocol.MsgSubMsg{
 		Stream:   "thread-topic",
@@ -2207,7 +2207,7 @@ func TestMsgInboxReadUnread(t *testing.T) {
 	h := newTestHarness(t)
 	h.addAuthenticatedSession(t, "bonnie-inbox", "bonnie", "tok-bonnie")
 
-	_, _ = h.sm.messages.Publish("inbox:bonnie-inbox", "glen-sender", "Glen", "braw tidings", "", "")
+	_, _ = h.sm.messages.Publish(PublishOpts{Stream: "inbox:bonnie-inbox", SenderID: "glen-sender", SenderName: "Glen", Body: "braw tidings"})
 
 	h.sendControlWithToken(t, "msg_inbox", protocol.MsgInboxMsg{
 		OnlyUnread: true,
@@ -2246,7 +2246,7 @@ func TestMsgInboxWithAck(t *testing.T) {
 	h := newTestHarness(t)
 	h.addAuthenticatedSession(t, "canny-inbox", "canny", "tok-canny")
 
-	_, _ = h.sm.messages.Publish("inbox:canny-inbox", "sender", "Sender", "first blether", "", "")
+	_, _ = h.sm.messages.Publish(PublishOpts{Stream: "inbox:canny-inbox", SenderID: "sender", SenderName: "Sender", Body: "first blether"})
 
 	h.sendControlWithToken(t, "msg_inbox", protocol.MsgInboxMsg{
 		OnlyUnread: true,
@@ -2306,8 +2306,8 @@ func TestMsgTopicsFiltersInboxForAuthenticatedAgent(t *testing.T) {
 	h := newTestHarness(t)
 	h.addAuthenticatedSession(t, "ken-topics", "ken", "tok-ken")
 
-	_, _ = h.sm.messages.Publish("inbox:ken-topics", "sender", "Sender", "private", "", "")
-	_, _ = h.sm.messages.Publish("blether-public", "sender", "Sender", "public", "", "")
+	_, _ = h.sm.messages.Publish(PublishOpts{Stream: "inbox:ken-topics", SenderID: "sender", SenderName: "Sender", Body: "private"})
+	_, _ = h.sm.messages.Publish(PublishOpts{Stream: "blether-public", SenderID: "sender", SenderName: "Sender", Body: "public"})
 
 	h.sendControlWithToken(t, "msg_topics", protocol.MsgTopicsMsg{}, "tok-ken")
 
@@ -2912,7 +2912,7 @@ func TestCoverStatusResponse(t *testing.T) {
 	}
 	h.sm.mu.Unlock()
 
-	_, _ = h.sm.messages.Publish("inbox:ken2", "brae-sender", "Brae", "unread bide", "", "")
+	_, _ = h.sm.messages.Publish(PublishOpts{Stream: "inbox:ken2", SenderID: "brae-sender", SenderName: "Brae", Body: "unread bide"})
 
 	h.sendControl(t, "status", protocol.StatusRequestMsg{SessionID: "ken2"})
 
@@ -3016,7 +3016,7 @@ func TestCoverMsgConversation(t *testing.T) {
 	h.sm.mu.Unlock()
 
 	// A message in the session's inbox should appear in its conversation.
-	_, _ = h.sm.messages.Publish("inbox:blether-sess", "glen-sender", "Glen", "haud on", "", "")
+	_, _ = h.sm.messages.Publish(PublishOpts{Stream: "inbox:blether-sess", SenderID: "glen-sender", SenderName: "Glen", Body: "haud on"})
 
 	h.sendControl(t, "msg_conversation", protocol.MsgConversationMsg{SessionID: "blether-sess"})
 

@@ -561,7 +561,7 @@ func (sm *SessionManager) deliver(ctx context.Context, d config.DeliverConfig, b
 	if d.Topic != "" {
 		topic, err := config.ExpandTrigger(d.Topic, vars)
 		if err == nil && sm.messages != nil {
-			if _, perr := sm.messages.Publish(topic, systemSenderID, systemSenderName, body, "", ""); perr != nil {
+			if _, perr := sm.messages.Publish(PublishOpts{Stream: topic, SenderID: systemSenderID, SenderName: systemSenderName, Body: body}); perr != nil {
 				sm.log.Warn("trigger: topic publish failed", "topic", topic, "err", perr)
 			}
 		}
@@ -619,7 +619,7 @@ func (sm *SessionManager) deliverInbox(ctx context.Context, target, body string,
 		return
 	}
 
-	if _, err := sm.messages.Publish("inbox:"+id, systemSenderID, systemSenderName, body, "", ""); err != nil {
+	if _, err := sm.messages.Publish(PublishOpts{Stream: "inbox:" + id, SenderID: systemSenderID, SenderName: systemSenderName, Body: body}); err != nil {
 		sm.log.Warn("trigger: inbox publish failed", "session", id, "err", err)
 	}
 }

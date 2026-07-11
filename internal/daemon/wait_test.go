@@ -274,7 +274,7 @@ func TestWaitStatusTransition(t *testing.T) {
 	h.sm.mu.Unlock()
 
 	// Publishing to the status topic wakes the waiter to re-check.
-	if _, err := h.sm.messages.Publish("_system.status", "speir-wait", "speir-run", "stopped", "", ""); err != nil {
+	if _, err := h.sm.messages.Publish(PublishOpts{Stream: "_system.status", SenderID: "speir-wait", SenderName: "speir-run", Body: "stopped"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -341,7 +341,7 @@ func TestWaitIdleTransition(t *testing.T) {
 	h.sm.state.Sessions["whin-wait"].AgentStatus = "ready"
 	h.sm.mu.Unlock()
 
-	if _, err := h.sm.messages.Publish("_system.status", "whin-wait", "whin-active", "ready", "", ""); err != nil {
+	if _, err := h.sm.messages.Publish(PublishOpts{Stream: "_system.status", SenderID: "whin-wait", SenderName: "whin-active", Body: "ready"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -371,7 +371,7 @@ func TestWaitStatusSessionDeleted(t *testing.T) {
 	delete(h.sm.state.Sessions, "fash-gone")
 	h.sm.mu.Unlock()
 
-	if _, err := h.sm.messages.Publish("_system.status", "fash-gone", "fash-doomed", "gone", "", ""); err != nil {
+	if _, err := h.sm.messages.Publish(PublishOpts{Stream: "_system.status", SenderID: "fash-gone", SenderName: "fash-doomed", Body: "gone"}); err != nil {
 		t.Fatal(err)
 	}
 
