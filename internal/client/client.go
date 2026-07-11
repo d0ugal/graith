@@ -161,16 +161,19 @@ func probeDaemonVersion(sockPath string, paths config.Paths) string {
 
 	hs := BuildHandshake(paths, 0, 0, "")
 	hs.ClientID = fmt.Sprintf("upgrade-check-%d", os.Getpid())
+
 	token := os.Getenv("GRAITH_TOKEN")
 	if token == "" {
 		token = readHumanToken(paths)
 	}
+
 	var hsData []byte
 	if token != "" {
 		hsData, _ = protocol.EncodeControlWithToken("handshake", hs, token)
 	} else {
 		hsData, _ = protocol.EncodeControl("handshake", hs)
 	}
+
 	_ = writer.WriteFrame(protocol.ChannelControl, hsData)
 
 	frame, err := reader.ReadFrame()
@@ -274,6 +277,7 @@ func ConnectFast(paths config.Paths) (*Client, error) {
 	if c.token == "" {
 		c.token = readHumanToken(paths)
 	}
+
 	if err := c.Handshake(); err != nil {
 		c.Close()
 		return nil, err
@@ -338,6 +342,7 @@ func ConnectForApproval(paths config.Paths, approvalTimeout time.Duration) (*Cli
 	if c.token == "" {
 		c.token = readHumanToken(paths)
 	}
+
 	if err := c.Handshake(); err != nil {
 		c.Close()
 		return nil, err

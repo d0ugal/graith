@@ -18,14 +18,17 @@ func TestLoadOrCreateHumanToken(t *testing.T) {
 	if err := sm.loadOrCreateHumanToken(); err != nil {
 		t.Fatal(err)
 	}
+
 	first := sm.humanToken
 	if first == "" {
 		t.Fatal("created token is empty")
 	}
+
 	info, err := os.Stat(paths.HumanTokenFile)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if got := info.Mode().Perm(); got != 0o600 {
 		t.Errorf("mode = %o, want 600", got)
 	}
@@ -34,6 +37,7 @@ func TestLoadOrCreateHumanToken(t *testing.T) {
 	if err := sm2.loadOrCreateHumanToken(); err != nil {
 		t.Fatal(err)
 	}
+
 	if sm2.humanToken != first {
 		t.Errorf("restarted token = %q, want original %q", sm2.humanToken, first)
 	}
@@ -41,6 +45,7 @@ func TestLoadOrCreateHumanToken(t *testing.T) {
 
 func TestLoadOrCreateHumanTokenFailsClosedOnUnreadableExistingPath(t *testing.T) {
 	dataDir := t.TempDir()
+
 	tokenPath := filepath.Join(dataDir, "human.token")
 	if err := os.Mkdir(tokenPath, 0o700); err != nil {
 		t.Fatal(err)
@@ -50,6 +55,7 @@ func TestLoadOrCreateHumanTokenFailsClosedOnUnreadableExistingPath(t *testing.T)
 	if err := sm.loadOrCreateHumanToken(); err == nil {
 		t.Fatal("expected unreadable existing token path to fail closed")
 	}
+
 	if sm.humanToken != "" {
 		t.Fatal("human token populated after read failure")
 	}

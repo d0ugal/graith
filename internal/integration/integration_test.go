@@ -50,6 +50,8 @@ func setup(t *testing.T, mutators ...func(*config.Config)) *testEnv {
 		DataDir:    filepath.Join(tmpDir, "data"),
 		RuntimeDir: tmpDir,
 		MessagesDB: filepath.Join(tmpDir, "messages.db"),
+
+		HumanTokenFile: filepath.Join(tmpDir, "data", "human.token"),
 	}
 	os.MkdirAll(paths.LogDir, 0o750)
 	os.MkdirAll(paths.DataDir, 0o750)
@@ -73,6 +75,18 @@ func setup(t *testing.T, mutators ...func(*config.Config)) *testEnv {
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
 	sm := daemon.NewSessionManager(cfg, paths, log)
+
+	// Mirror what daemon.Run does at startup: provision the local human
+	// credential and remember it so the harness authenticates as the human
+	// (the real CLI reads this token and sends it on every control message).
+	if err := sm.EnsureHumanToken(); err != nil {
+		t.Fatalf("ensure human token: %v", err)
+	}
+	tokenBytes, err := os.ReadFile(paths.HumanTokenFile)
+	if err != nil {
+		t.Fatalf("read human token: %v", err)
+	}
+	integHumanToken = strings.TrimSpace(string(tokenBytes))
 
 	msgStore, err := daemon.NewMsgStore(paths.MessagesDB)
 	if err != nil {
@@ -122,9 +136,15 @@ func (e *testEnv) connect(t *testing.T) (*protocol.FrameReader, *protocol.FrameW
 	return protocol.NewFrameReader(conn), protocol.NewFrameWriter(conn)
 }
 
+// integHumanToken is the local human credential of the most recently created
+// test daemon. The harness runs sequentially (no t.Parallel), one daemon per
+// test, so a package-level value is safe and lets the pervasive free-function
+// sendControl authenticate as the human without threading a token everywhere.
+var integHumanToken string
+
 func sendControl(t *testing.T, w *protocol.FrameWriter, msgType string, payload any) {
 	t.Helper()
-	data, err := protocol.EncodeControl(msgType, payload)
+	data, err := protocol.EncodeControlWithToken(msgType, payload, integHumanToken)
 	if err != nil {
 		t.Fatalf("encode %s: %v", msgType, err)
 	}
