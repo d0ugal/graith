@@ -119,6 +119,8 @@ func TestCreateConcurrentSuppliedIDRace(t *testing.T) {
 
 	const wantID = "beefcafe"
 
+	names := []string{"whin-racer-yin", "whin-racer-twa"}
+
 	var (
 		wg      sync.WaitGroup
 		mu      sync.Mutex
@@ -126,15 +128,15 @@ func TestCreateConcurrentSuppliedIDRace(t *testing.T) {
 		errs    int
 	)
 
-	for i := 0; i < 2; i++ {
+	for i := 0; i < len(names); i++ {
 		wg.Add(1)
 
-		go func(n int) {
+		go func(name string) {
 			defer wg.Done()
 
 			_, err := sm.Create(CreateOpts{
 				ID:        wantID,
-				Name:      "whin-racer-" + string(rune('a'+n)),
+				Name:      name,
 				AgentName: "sleeper",
 				NoRepo:    true,
 				Rows:      24,
@@ -151,7 +153,7 @@ func TestCreateConcurrentSuppliedIDRace(t *testing.T) {
 			} else {
 				t.Errorf("unexpected error: %v", err)
 			}
-		}(i)
+		}(names[i])
 	}
 
 	wg.Wait()
