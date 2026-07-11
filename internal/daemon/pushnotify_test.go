@@ -36,10 +36,8 @@ func TestEvaluatePushGate_Coalesces(t *testing.T) {
 	in := pushGateInput{
 		cfg:            baseNotifications(),
 		priority:       config.NotifyPriorityNormal,
-		key:            "normal|graith|bide",
 		now:            now,
-		lastKey:        "normal|graith|bide",
-		lastAt:         now.Add(-5 * time.Second),
+		coalesceAt:     now.Add(-5 * time.Second),
 		coalesceWindow: pushCoalesceWindow,
 	}
 	if res := evaluatePushGate(in); res.deliver {
@@ -47,9 +45,15 @@ func TestEvaluatePushGate_Coalesces(t *testing.T) {
 	}
 
 	// Outside the window it delivers.
-	in.lastAt = now.Add(-2 * pushCoalesceWindow)
+	in.coalesceAt = now.Add(-2 * pushCoalesceWindow)
 	if res := evaluatePushGate(in); !res.deliver {
 		t.Fatal("identical notification outside window should deliver")
+	}
+
+	// No prior send for this key delivers.
+	in.coalesceAt = time.Time{}
+	if res := evaluatePushGate(in); !res.deliver {
+		t.Fatal("first send for a key should deliver")
 	}
 }
 
@@ -81,46 +85,53 @@ func TestEvaluatePushGate_RateLimit(t *testing.T) {
 	cfg := baseNotifications()
 	cfg.MaxPerHour = 2
 
-	// Two recent deliveries already; a normal one is rate limited.
-	log := []time.Time{now.Add(-10 * time.Minute), now.Add(-5 * time.Minute)}
+	// Two recent deliveries already (pruned window); a normal one is rate limited.
+	recent := []time.Time{now.Add(-10 * time.Minute), now.Add(-5 * time.Minute)}
 
 	res := evaluatePushGate(pushGateInput{
-		cfg: cfg, priority: config.NotifyPriorityNormal, now: now, log: log, coalesceWindow: pushCoalesceWindow,
+		cfg: cfg, priority: config.NotifyPriorityNormal, now: now, recent: recent, coalesceWindow: pushCoalesceWindow,
 	})
 	if res.deliver {
 		t.Fatal("normal notification over the hourly cap should be rate limited")
 	}
 
-	// High priority bypasses the cap and records its send.
+	// High priority bypasses the cap.
 	resHigh := evaluatePushGate(pushGateInput{
-		cfg: cfg, priority: config.NotifyPriorityHigh, now: now, log: log, coalesceWindow: pushCoalesceWindow,
+		cfg: cfg, priority: config.NotifyPriorityHigh, now: now, recent: recent, coalesceWindow: pushCoalesceWindow,
 	})
 	if !resHigh.deliver {
 		t.Fatal("high priority should bypass the rate limit")
 	}
+}
 
-	if len(resHigh.log) != 3 {
-		t.Fatalf("high-priority send should be recorded in the window, got len %d", len(resHigh.log))
+func TestPruneWindow(t *testing.T) {
+	now := time.Date(2026, 7, 11, 12, 0, 0, 0, time.UTC)
+	// One stale (>1h), one exactly 1h (expired), one fresh.
+	log := []time.Time{now.Add(-2 * time.Hour), now.Add(-time.Hour), now.Add(-5 * time.Minute)}
+
+	got := pruneWindow(log, now)
+	if len(got) != 1 {
+		t.Fatalf("expected only the fresh timestamp to survive, got len %d", len(got))
+	}
+
+	if !got[0].Equal(now.Add(-5 * time.Minute)) {
+		t.Errorf("unexpected surviving timestamp %v", got[0])
 	}
 }
 
-func TestEvaluatePushGate_PrunesOldTimestamps(t *testing.T) {
+func TestRemoveOneTimestamp(t *testing.T) {
 	now := time.Date(2026, 7, 11, 12, 0, 0, 0, time.UTC)
-	cfg := baseNotifications()
-	cfg.MaxPerHour = 2
+	a, b := now.Add(-time.Minute), now
+	log := []time.Time{a, b}
 
-	// Two old (>1h) timestamps should be pruned, so a fresh normal send delivers.
-	log := []time.Time{now.Add(-2 * time.Hour), now.Add(-90 * time.Minute)}
-
-	res := evaluatePushGate(pushGateInput{
-		cfg: cfg, priority: config.NotifyPriorityNormal, now: now, log: log, coalesceWindow: pushCoalesceWindow,
-	})
-	if !res.deliver {
-		t.Fatal("stale timestamps should be pruned, letting the send through")
+	got := removeOneTimestamp(log, b)
+	if len(got) != 1 || !got[0].Equal(a) {
+		t.Fatalf("expected b removed, got %v", got)
 	}
 
-	if len(res.log) != 1 {
-		t.Fatalf("pruned window should contain only the new send, got len %d", len(res.log))
+	// Removing an absent timestamp is a no-op.
+	if got := removeOneTimestamp([]time.Time{a}, b); len(got) != 1 {
+		t.Fatalf("removing absent timestamp should be a no-op, got len %d", len(got))
 	}
 }
 
@@ -212,12 +223,13 @@ func TestSendPushNotification_DispatchError(t *testing.T) {
 		t.Errorf("failed dispatch should not record a rate-limit entry, got len %d", len(sm.pushLog))
 	}
 
-	if sm.lastPushKey != "" {
-		t.Errorf("failed dispatch should not set a coalescing key, got %q", sm.lastPushKey)
+	if len(sm.pushCoalesce) != 0 {
+		t.Errorf("failed dispatch should not leave a coalescing entry, got %d", len(sm.pushCoalesce))
 	}
 
 	// The retry (dispatch now succeeds) should go through.
 	fd.err = nil
+
 	if ok, reason := sm.SendPushNotification(pushNotification{Message: "x"}); !ok {
 		t.Fatalf("retry after a failed dispatch should deliver, got suppressed: %s", reason)
 	}
@@ -242,6 +254,77 @@ func TestSendPushNotification_Coalesced(t *testing.T) {
 	}
 }
 
+func TestSendPushNotification_ConcurrentRespectsCap(t *testing.T) {
+	fd := &fakeDispatch{}
+	cfg := baseNotifications()
+	cfg.MaxPerHour = 5
+	sm := newPushSM(cfg, fd.fn)
+
+	// Fire 20 distinct normal notifications concurrently. Distinct messages so
+	// coalescing doesn't interfere — the rate-limit cap is what's under test.
+	const n = 20
+
+	var wg sync.WaitGroup
+
+	delivered := make([]bool, n)
+
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+
+		go func(i int) {
+			defer wg.Done()
+
+			ok, _ := sm.SendPushNotification(pushNotification{Message: fmt.Sprintf("bairn-%d", i)})
+			delivered[i] = ok
+		}(i)
+	}
+
+	wg.Wait()
+
+	count := 0
+
+	for _, d := range delivered {
+		if d {
+			count++
+		}
+	}
+
+	if count != 5 {
+		t.Fatalf("expected exactly 5 deliveries under the cap, got %d", count)
+	}
+
+	if len(fd.calls) != 5 {
+		t.Fatalf("expected exactly 5 dispatches, got %d", len(fd.calls))
+	}
+
+	if len(sm.pushLog) != 5 {
+		t.Fatalf("expected pushLog to hold exactly 5 entries, got %d", len(sm.pushLog))
+	}
+}
+
+func TestSendPushNotification_InterleavedCoalescing(t *testing.T) {
+	fd := &fakeDispatch{}
+	sm := newPushSM(baseNotifications(), fd.fn)
+
+	// A, B, then A again immediately: the second A must coalesce against the
+	// first A even though B was sent in between (per-key coalescing).
+	if ok, _ := sm.SendPushNotification(pushNotification{Message: "alpha"}); !ok {
+		t.Fatal("first A should deliver")
+	}
+
+	if ok, _ := sm.SendPushNotification(pushNotification{Message: "beta"}); !ok {
+		t.Fatal("B should deliver")
+	}
+
+	if ok, _ := sm.SendPushNotification(pushNotification{Message: "alpha"}); ok {
+		t.Fatal("second A should be coalesced against the first A, not delivered")
+	}
+
+	if len(fd.calls) != 2 {
+		t.Fatalf("expected 2 dispatches (A, B), got %d", len(fd.calls))
+	}
+}
+
 func TestOsaQuote(t *testing.T) {
 	cases := []struct {
 		in   string
@@ -250,6 +333,8 @@ func TestOsaQuote(t *testing.T) {
 		{"hello", `"hello"`},
 		{`say "hi"`, `"say \"hi\""`},
 		{`back\slash`, `"back\\slash"`},
+		{"line1\nline2", `"line1 line2"`}, // newline folded to space
+		{"a\tb\rc", `"a b c"`},            // tab + CR folded to spaces
 	}
 	for _, c := range cases {
 		if got := osaQuote(c.in); got != c.want {

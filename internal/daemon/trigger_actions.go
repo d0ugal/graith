@@ -349,11 +349,16 @@ func (sm *SessionManager) notifyOnComplete(t *config.TriggerConfig, fc fireConte
 		msg = fmt.Sprintf("Trigger %q completed", t.Name)
 	}
 
-	if expanded, err := config.ExpandTrigger(msg, vars); err == nil {
-		msg = expanded
-	} else {
-		sm.log.Warn("trigger: notify_message expansion failed", "trigger", t.Name, "err", err)
+	expanded, err := config.ExpandTrigger(msg, vars)
+	if err != nil {
+		// Suppress rather than push a half-expanded template (raw {unknown}
+		// tokens) at the human. Config validation should reject unknown vars, so
+		// this is defensive against reload/state drift.
+		sm.log.Warn("trigger: notify_message expansion failed, suppressing notification", "trigger", t.Name, "err", err)
+		return
 	}
+
+	msg = expanded
 
 	priority := t.Action.NotifyPriority
 	if priority == "" && actionErr != nil {

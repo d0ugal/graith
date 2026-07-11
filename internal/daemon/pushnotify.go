@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -25,23 +26,38 @@ type pushNotification struct {
 }
 
 // pushGateInput is the immutable state a push-notification gating decision reads.
+// recent is the rolling window ALREADY pruned to the last hour, and coalesceAt
+// is the last delivered time for this notification's key (zero if none). The
+// gate is a pure decision; the caller does the pruning and commits state.
 type pushGateInput struct {
 	cfg            config.Notifications
 	priority       string
-	key            string // coalescing key (priority|title|message)
 	now            time.Time
-	log            []time.Time // rolling window of prior *delivered* timestamps
-	lastKey        string
-	lastAt         time.Time
+	recent         []time.Time // pruned rolling window of prior delivered timestamps
+	coalesceAt     time.Time   // last delivered time for this key (zero if none)
 	coalesceWindow time.Duration
 }
 
-// pushGateResult is the outcome of a gating decision. When deliver is true, log
-// is the pruned+appended rolling window to persist.
+// pushGateResult is the outcome of a gating decision.
 type pushGateResult struct {
 	deliver bool
 	reason  string
-	log     []time.Time
+}
+
+// pruneWindow returns the timestamps in log that fall within the last hour of
+// now (a timestamp exactly one hour old is expired). Used for the rate-limit
+// rolling window.
+func pruneWindow(log []time.Time, now time.Time) []time.Time {
+	cutoff := now.Add(-time.Hour)
+	out := make([]time.Time, 0, len(log))
+
+	for _, ts := range log {
+		if ts.After(cutoff) {
+			out = append(out, ts)
+		}
+	}
+
+	return out
 }
 
 // evaluatePushGate is the pure gating decision for a push notification. It is
@@ -55,53 +71,33 @@ func evaluatePushGate(in pushGateInput) pushGateResult {
 		return pushGateResult{deliver: false, reason: "notifications are disabled ([notifications] enabled = false)"}
 	}
 
-	high := in.priority == config.NotifyPriorityHigh
-
-	// Coalesce identical rapid-fire notifications (all priorities).
-	if in.key == in.lastKey && !in.lastAt.IsZero() && in.now.Sub(in.lastAt) < in.coalesceWindow {
+	// Coalesce identical rapid-fire notifications (all priorities), keyed per
+	// notification so interleaved A/B/A duplicates each coalesce against their
+	// own last send.
+	if !in.coalesceAt.IsZero() && in.now.Sub(in.coalesceAt) < in.coalesceWindow {
 		return pushGateResult{deliver: false, reason: "coalesced (identical notification within the last 30s)"}
 	}
 
-	if !high {
-		if in.cfg.InQuietHours(in.now) {
-			return pushGateResult{
-				deliver: false,
-				reason:  fmt.Sprintf("suppressed by quiet hours (%s–%s); use --priority high to override", in.cfg.QuietHoursStart, in.cfg.QuietHoursEnd),
-			}
-		}
-
-		// Rate limit: prune the rolling window to the last hour, then compare.
-		cutoff := in.now.Add(-time.Hour)
-		recent := make([]time.Time, 0, len(in.log))
-
-		for _, ts := range in.log {
-			if ts.After(cutoff) {
-				recent = append(recent, ts)
-			}
-		}
-
-		if limit := in.cfg.MaxPerHourValue(); len(recent) >= limit {
-			return pushGateResult{
-				deliver: false,
-				reason:  fmt.Sprintf("rate limited (%d/hour reached); use --priority high to override", limit),
-			}
-		}
-
-		return pushGateResult{deliver: true, log: append(recent, in.now)}
+	if in.priority == config.NotifyPriorityHigh {
+		// High priority bypasses quiet hours + the rate limit.
+		return pushGateResult{deliver: true}
 	}
 
-	// High priority: bypass quiet hours + rate limit but still record the send so
-	// it counts toward the window (a later low/normal send sees it).
-	cutoff := in.now.Add(-time.Hour)
-	recent := make([]time.Time, 0, len(in.log))
-
-	for _, ts := range in.log {
-		if ts.After(cutoff) {
-			recent = append(recent, ts)
+	if in.cfg.InQuietHours(in.now) {
+		return pushGateResult{
+			deliver: false,
+			reason:  fmt.Sprintf("suppressed by quiet hours (%s–%s); use --priority high to override", in.cfg.QuietHoursStart, in.cfg.QuietHoursEnd),
 		}
 	}
 
-	return pushGateResult{deliver: true, log: append(recent, in.now)}
+	if limit := in.cfg.MaxPerHourValue(); len(in.recent) >= limit {
+		return pushGateResult{
+			deliver: false,
+			reason:  fmt.Sprintf("rate limited (%d/hour reached); use --priority high to override", limit),
+		}
+	}
+
+	return pushGateResult{deliver: true}
 }
 
 // SendPushNotification applies gating (enabled, coalescing, quiet hours, rate
@@ -130,26 +126,42 @@ func (sm *SessionManager) SendPushNotification(n pushNotification) (bool, string
 	key := priority + "|" + title + "|" + message
 	now := time.Now()
 
+	// Evaluate the gate AND reserve the delivery slot under one lock hold, so a
+	// burst of concurrent sends can't all read the same under-limit window and
+	// blow past the cap (the gate check and the commit must be atomic). The
+	// reservation is rolled back below if the backend dispatch fails.
 	sm.pushMu.Lock()
+
+	sm.pushLog = pruneWindow(sm.pushLog, now)
+
+	if sm.pushCoalesce == nil {
+		sm.pushCoalesce = make(map[string]time.Time)
+	}
+
+	prunePushCoalesce(sm.pushCoalesce, now, pushCoalesceWindow)
 
 	res := evaluatePushGate(pushGateInput{
 		cfg:            notifCfg,
 		priority:       priority,
-		key:            key,
 		now:            now,
-		log:            sm.pushLog,
-		lastKey:        sm.lastPushKey,
-		lastAt:         sm.lastPushAt,
+		recent:         sm.pushLog,
+		coalesceAt:     sm.pushCoalesce[key],
 		coalesceWindow: pushCoalesceWindow,
 	})
 
-	dispatch := sm.pushDispatch
-	sm.pushMu.Unlock()
-
 	if !res.deliver {
+		sm.pushMu.Unlock()
 		sm.log.Info("push notification suppressed", "reason", res.reason, "priority", priority)
+
 		return false, res.reason
 	}
+
+	// Reserve: record the send now so concurrent gate checks see it.
+	sm.pushLog = append(sm.pushLog, now)
+	prevCoalesce, hadCoalesce := sm.pushCoalesce[key]
+	sm.pushCoalesce[key] = now
+	dispatch := sm.pushDispatch
+	sm.pushMu.Unlock()
 
 	if dispatch == nil {
 		dispatch = defaultPushDispatch
@@ -159,24 +171,51 @@ func (sm *SessionManager) SendPushNotification(n pushNotification) (bool, string
 
 	sm.log.Info("sending push notification", "backend", backend, "priority", priority, "title", title)
 
-	// Dispatch BEFORE committing the coalescing/rate-limit state: a failed send
-	// must not consume rate-limit budget or start a 30s coalescing window (that
-	// would suppress the retry of a notification the user never actually got).
 	if err := dispatch(backend, title, message, priority); err != nil {
+		// Roll back the reservation: a failed send must not consume rate-limit
+		// budget or start a coalescing window (that would suppress the retry of a
+		// notification the user never actually got).
+		sm.pushMu.Lock()
+		sm.pushLog = removeOneTimestamp(sm.pushLog, now)
+
+		if cur, ok := sm.pushCoalesce[key]; ok && cur.Equal(now) {
+			if hadCoalesce {
+				sm.pushCoalesce[key] = prevCoalesce
+			} else {
+				delete(sm.pushCoalesce, key)
+			}
+		}
+		sm.pushMu.Unlock()
+
 		sm.log.Error("push notification dispatch failed", "backend", backend, "err", err)
+
 		return false, fmt.Sprintf("backend %q dispatch failed: %v", backend, err)
 	}
 
-	// Delivered — now record it so future sends coalesce/rate-limit against it.
-	// res.log was pruned to the last hour at gate time; appending `now` is
-	// equivalent to what evaluatePushGate computed for the delivering case.
-	sm.pushMu.Lock()
-	sm.pushLog = res.log
-	sm.lastPushKey = key
-	sm.lastPushAt = now
-	sm.pushMu.Unlock()
-
 	return true, ""
+}
+
+// prunePushCoalesce drops per-key coalescing entries older than the window so
+// the map can't grow without bound.
+func prunePushCoalesce(m map[string]time.Time, now time.Time, window time.Duration) {
+	for k, t := range m {
+		if now.Sub(t) >= window {
+			delete(m, k)
+		}
+	}
+}
+
+// removeOneTimestamp returns log with a single occurrence of t removed (used to
+// roll back a reserved rate-limit slot when dispatch fails). If t isn't present
+// the slice is returned unchanged.
+func removeOneTimestamp(log []time.Time, t time.Time) []time.Time {
+	for i, ts := range log {
+		if ts.Equal(t) {
+			return append(log[:i], log[i+1:]...)
+		}
+	}
+
+	return log
 }
 
 // defaultPushDispatch delivers a notification via the named backend. The
@@ -216,6 +255,11 @@ func (sm *SessionManager) newPushDispatch() func(backend, title, message, priori
 	}
 }
 
+// pushDispatchTimeout bounds a single backend dispatch. SendPushNotification is
+// called synchronously from the handler (and from trigger-completion
+// goroutines), so a hung osascript/command must not block the caller forever.
+const pushDispatchTimeout = 15 * time.Second
+
 // dispatchMacNotification shows a macOS desktop notification via osascript.
 // High-priority notifications play a sound. On non-darwin hosts it is a no-op
 // error so the caller reports the backend as unavailable rather than silently
@@ -230,7 +274,10 @@ func dispatchMacNotification(title, message, priority string) error {
 		script += " sound name " + osaQuote("Ping")
 	}
 
-	if err := exec.Command("osascript", "-e", script).Run(); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), pushDispatchTimeout)
+	defer cancel()
+
+	if err := exec.CommandContext(ctx, "osascript", "-e", script).Run(); err != nil {
 		return fmt.Errorf("osascript: %w", err)
 	}
 
@@ -240,8 +287,11 @@ func dispatchMacNotification(title, message, priority string) error {
 // osaQuote renders a Go string as an AppleScript string literal: wrap in double
 // quotes and backslash-escape backslashes and embedded quotes. This prevents a
 // message containing a quote from breaking out of the string (or injecting
-// further AppleScript).
+// further AppleScript). Raw newlines/tabs/carriage returns are folded to spaces
+// first — an AppleScript string literal in a one-line `-e` script can't span
+// them, so a multi-line body would otherwise fail to compile.
 func osaQuote(s string) string {
+	s = strings.NewReplacer("\n", " ", "\r", " ", "\t", " ").Replace(s)
 	s = strings.ReplaceAll(s, "\\", "\\\\")
 	s = strings.ReplaceAll(s, "\"", "\\\"")
 
@@ -249,9 +299,13 @@ func osaQuote(s string) string {
 }
 
 // dispatchCommandBackend runs the configured shell command with GRAITH_NOTIFY_*
-// env vars, mirroring the status-change custom-command escape hatch.
+// env vars, mirroring the status-change custom-command escape hatch. It is
+// bounded by pushDispatchTimeout so a hung command can't wedge the caller.
 func dispatchCommandBackend(command, title, message, priority string) error {
-	cmd := exec.Command("sh", "-c", command)
+	ctx, cancel := context.WithTimeout(context.Background(), pushDispatchTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "sh", "-c", command)
 
 	cmd.Env = append(os.Environ(),
 		"GRAITH_NOTIFY_TITLE="+title,

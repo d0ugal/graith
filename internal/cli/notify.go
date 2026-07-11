@@ -68,9 +68,15 @@ Examples:
 			return fmt.Errorf("%s", e.Message)
 		}
 
+		if resp.Type != "notify_response" {
+			return fmt.Errorf("unexpected response %q from daemon", resp.Type)
+		}
+
 		var r protocol.NotifyResponse
 
-		_ = protocol.DecodePayload(resp, &r)
+		if err := protocol.DecodePayload(resp, &r); err != nil {
+			return fmt.Errorf("decode notify response: %w", err)
+		}
 
 		if r.Delivered {
 			out.Printf("Notification sent\n")
