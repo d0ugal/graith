@@ -672,12 +672,15 @@ func (sm *SessionManager) triggerRecord(t *config.TriggerConfig) protocol.Trigge
 		rec.RunCount = rt.RunCount
 
 		rec.LastError = rt.LastError
-		if rt.LastScheduledFireAt != nil {
-			rec.LastRun = rt.LastScheduledFireAt.Format(time.RFC3339)
-		}
 
 		if len(rt.History) > 0 {
-			rec.LastResult = rt.History[len(rt.History)-1].Result
+			last := rt.History[len(rt.History)-1]
+			rec.LastResult = last.Result
+			// Use the actual last dispatch time — watch/manual runs never populate
+			// LastScheduledFireAt, so fall back to the history entry's timestamp.
+			rec.LastRun = last.ScheduledAt.Format(time.RFC3339)
+		} else if rt.LastScheduledFireAt != nil {
+			rec.LastRun = rt.LastScheduledFireAt.Format(time.RFC3339)
 		}
 	}
 

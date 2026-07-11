@@ -464,6 +464,47 @@ func TestActionCommand_Unsandboxed(t *testing.T) {
 	}
 }
 
+func TestMigrateV15ToV16(t *testing.T) {
+	dir := t.TempDir()
+
+	path := filepath.Join(dir, "state.json")
+	if err := os.WriteFile(path, []byte(`{"version":15,"sessions":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err := LoadState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if st.Version != CurrentStateVersion {
+		t.Errorf("version = %d, want %d", st.Version, CurrentStateVersion)
+	}
+
+	if st.TriggerRuntime == nil {
+		t.Error("trigger_runtime should be initialized after migration")
+	}
+}
+
+func TestActionCommand_ReadOnlyWatch_FailClosedAndScratch(t *testing.T) {
+	worktree := t.TempDir()
+	trig := config.TriggerConfig{
+		Name: "ro", Watch: &config.WatchConfig{Role: "impl"},
+		Action: config.ActionConfig{Type: config.ActionCommand, Command: "true"}, // sandbox default on
+	}
+	sm := newTriggerTestSM(t, trig)
+	sm.cfg.Sandbox.Enabled = false // can't enforce -> fail closed
+
+	_, err := sm.actionCommand(t.Context(), &trig, fireContext{now: time.Now(), worktree: worktree})
+	if err == nil {
+		t.Fatal("expected fail-closed error when sandbox unavailable for a watch command")
+	}
+	// Regression: the scratch parent must be created (was silently swallowed).
+	if _, statErr := os.Stat(filepath.Join(sm.paths.DataDir, "scratch")); statErr != nil {
+		t.Errorf("scratch parent not created: %v", statErr)
+	}
+}
+
 func TestActionCommand_NonZeroExit(t *testing.T) {
 	repo := t.TempDir()
 	trig := config.TriggerConfig{

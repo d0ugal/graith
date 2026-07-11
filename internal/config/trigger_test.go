@@ -92,6 +92,9 @@ func TestValidateTriggers_Invalid(t *testing.T) {
 		{"bad overlap", TriggerConfig{Name: "q", Schedule: &ScheduleConfig{Cron: "@daily"}, Action: ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}, Policy: TriggerPolicy{Overlap: "sometimes"}}, false, "is invalid"},
 		{"bad cron", schedTrigger("fash", ScheduleConfig{Cron: "not a cron"}, ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}), false, "cron"},
 		{"bad timezone", schedTrigger("fash", ScheduleConfig{Cron: "@daily", Timezone: "Europe/Londn"}, ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}), false, "timezone"},
+		{"zero debounce", watchTrigger("haar", WatchConfig{Repo: "/r", Debounce: "0s"}, ActionConfig{Type: ActionCommand, Command: "x"}), false, "debounce must be > 0"},
+		{"zero timeout", schedTrigger("haar", ScheduleConfig{Cron: "@daily"}, ActionConfig{Type: ActionCommand, Command: "x", Repo: "/tmp/x", Timeout: "0s"}), false, "timeout must be > 0"},
+		{"bad rate_limit", TriggerConfig{Name: "rl", Schedule: &ScheduleConfig{Cron: "@daily"}, Action: ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}, Policy: TriggerPolicy{RateLimit: "0/1h"}}, false, "rate_limit"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

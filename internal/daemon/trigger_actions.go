@@ -36,7 +36,7 @@ func (sm *SessionManager) actionMessage(ctx context.Context, t *config.TriggerCo
 // the bound worktree for watch), captures output, and delivers it. Watch
 // commands run with the worktree mounted read-only and a separate writable
 // scratch dir, so a command cannot mutate the tree it watches (the feedback-loop
-// guarantee) — the same mechanism --share-worktree uses.
+// guarantee) — the same mechanism --mirror uses.
 func (sm *SessionManager) actionCommand(ctx context.Context, t *config.TriggerConfig, fc fireContext) (string, error) {
 	execRoot := t.Action.Repo
 	readOnlyRoot := false
@@ -60,11 +60,20 @@ func (sm *SessionManager) actionCommand(ctx context.Context, t *config.TriggerCo
 	var scratch string
 
 	if readOnlyRoot {
-		s, err := os.MkdirTemp(filepath.Join(sm.paths.DataDir, "scratch"), "trigcmd-")
-		if err == nil {
-			scratch = s
-			defer func() { _ = os.RemoveAll(scratch) }()
+		scratchParent := filepath.Join(sm.paths.DataDir, "scratch")
+		if err := os.MkdirAll(scratchParent, 0o700); err != nil {
+			return "", fmt.Errorf("create scratch parent: %w", err)
 		}
+
+		s, err := os.MkdirTemp(scratchParent, "trigcmd-")
+		if err != nil {
+			// Fail closed: without a writable scratch dir the read-only guarantee
+			// can't be established, so don't run the command with a broken profile.
+			return "", fmt.Errorf("create command scratch dir: %w", err)
+		}
+
+		scratch = s
+		defer func() { _ = os.RemoveAll(scratch) }()
 	}
 
 	cfg := sm.Config()
@@ -177,7 +186,7 @@ func (sm *SessionManager) buildCommandSandbox(cfg *config.Config, a *config.Acti
 		// Read-only worktree, writable scratch: WorktreeDir (the read+write
 		// "workdir" grant) is the scratch dir, the worktree is granted read-only,
 		// and cwd stays in the worktree (set by the caller). Mirrors the
-		// --share-worktree mechanism.
+		// --mirror mechanism.
 		worktreeDir = cs.scratch
 		readDirs = append(append([]string{}, readDirs...), cs.worktree)
 		writeDirs = append(append([]string{}, writeDirs...), cs.scratch)
@@ -279,26 +288,26 @@ func (sm *SessionManager) actionSession(ctx context.Context, t *config.TriggerCo
 
 	repo := t.Action.Repo
 
-	shareWorktree := ""
+	mirror := ""
 	if t.IsWatch() {
-		// Reactor shares the bound session's worktree read-only.
-		shareWorktree = fc.sessionID
-		repo = "" // shared-worktree sessions don't create their own repo worktree
+		// The reactor mirrors the bound session's worktree read-only.
+		mirror = fc.sessionID
+		repo = "" // mirror sessions don't create their own repo worktree
 	}
 
 	name := triggerReactorName(t.Name, fc.sessionName)
 
 	//nolint:contextcheck // Create spawns a PTY-backed session that outlives the fire ctx (matches scenario start).
 	sess, err := sm.createTriggerSession(createTriggerReq{
-		name:          name,
-		agent:         agent,
-		repo:          repo,
-		prompt:        prompt,
-		model:         model,
-		parentID:      orchestratorID,
-		shareWorktree: shareWorktree,
-		triggerName:   t.Name,
-		reactor:       t.Action.Ensure && t.IsWatch(),
+		name:        name,
+		agent:       agent,
+		repo:        repo,
+		prompt:      prompt,
+		model:       model,
+		parentID:    orchestratorID,
+		mirror:      mirror,
+		triggerName: t.Name,
+		reactor:     t.Action.Ensure && t.IsWatch(),
 	})
 	if err != nil {
 		return "", err
@@ -474,52 +483,40 @@ func (sm *SessionManager) setBindingReactor(triggerName, sessionID, reactorID st
 }
 
 type createTriggerReq struct {
-	name          string
-	agent         string
-	repo          string
-	prompt        string
-	model         string
-	parentID      string
-	shareWorktree string
-	triggerName   string
-	reactor       bool
+	name        string
+	agent       string
+	repo        string
+	prompt      string
+	model       string
+	parentID    string
+	mirror      string
+	triggerName string
+	reactor     bool
 }
 
-// createTriggerSession creates a session via sm.Create and tags it with the
-// owning trigger. (The tag is applied immediately after creation; a full
-// create-options refactor to tag inside the durable reservation is a follow-up.)
+// createTriggerSession creates a session via sm.Create, tagging it with the
+// owning trigger inside the durable creation reservation (so reactor ownership
+// survives a crash between create and a separate tag-and-save).
 func (sm *SessionManager) createTriggerSession(req createTriggerReq) (SessionState, error) {
 	agent := req.agent
 	if agent == "" {
 		agent = sm.Config().DefaultAgent
 	}
 
-	sess, err := sm.Create(CreateOpts{
-		Name:       req.name,
-		AgentName:  agent,
-		RepoPath:   req.repo,
-		Prompt:     req.prompt,
-		Model:      req.model,
-		ParentID:   req.parentID,
-		Mirror:     req.shareWorktree,
-		AgentHooks: true,
-		Rows:       24,
-		Cols:       80,
+	return sm.Create(CreateOpts{
+		Name:           req.name,
+		AgentName:      agent,
+		RepoPath:       req.repo,
+		Prompt:         req.prompt,
+		Model:          req.model,
+		ParentID:       req.parentID,
+		Mirror:         req.mirror,
+		AgentHooks:     true,
+		TriggerID:      req.triggerName,
+		TriggerReactor: req.reactor,
+		Rows:           24,
+		Cols:           80,
 	})
-	if err != nil {
-		return SessionState{}, err
-	}
-
-	sm.mu.Lock()
-	if s, ok := sm.state.Sessions[sess.ID]; ok {
-		s.TriggerID = req.triggerName
-		s.TriggerReactor = req.reactor
-	}
-
-	_ = sm.saveState()
-	sm.mu.Unlock()
-
-	return sess, nil
 }
 
 // triggerNow is a small helper so watch fires share the schedule fire path's

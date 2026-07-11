@@ -514,6 +514,11 @@ type CreateOpts struct {
 	Rows                uint16
 	Cols                uint16
 	EnvExtra            []map[string]string
+	// TriggerID / TriggerReactor tag a session spawned by a trigger, applied in
+	// the same durable reservation as creation so reactor ownership survives a
+	// crash between Create and a separate tag-and-save.
+	TriggerID      string
+	TriggerReactor bool
 }
 
 // Create starts a new agent session, either in a git worktree, in-place
@@ -810,6 +815,8 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		InPlace:         inPlace,
 		AgentHooks:      agentHooks,
 		Yolo:            yolo,
+		TriggerID:       opts.TriggerID,
+		TriggerReactor:  opts.TriggerReactor,
 		Status:          StatusCreating,
 		CreatedAt:       time.Now().UTC(),
 		StatusChangedAt: time.Now().UTC(),
