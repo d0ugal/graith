@@ -80,7 +80,7 @@ func assertCreateSharedWorktreeRejected(t *testing.T, sm *SessionManager) {
 		Status:       StatusRunning,
 	}
 
-	_, err := sm.Create("canny-reviewer", "claude", "", "", "", "", "", false, "braw-source", false, false, false, false, false, 24, 80)
+	_, err := sm.Create(CreateOpts{Name: "canny-reviewer", AgentName: "claude", ShareWorktree: "braw-source", Rows: 24, Cols: 80})
 	assertErrContains(t, err, "requires sandbox")
 }
 
@@ -1710,7 +1710,7 @@ func TestCreateRollsBackOnSaveStateFailure(t *testing.T) {
 		LogDir:    tmpDir,
 	}, slog.Default())
 
-	_, err := sm.Create("braw-sess", "sleeper", "", "", "", "", "", true, "", false, false, false, false, false, 24, 80)
+	_, err := sm.Create(CreateOpts{Name: "braw-sess", AgentName: "sleeper", NoRepo: true, Rows: 24, Cols: 80})
 	if err == nil {
 		t.Fatal("expected error when saveState fails, got nil")
 	}
@@ -2369,7 +2369,7 @@ func TestCreateInPlaceRejectsUnconfiguredRepo(t *testing.T) {
 	sm := newTestSessionManager(t)
 	repoDir := initTempGitRepo(t)
 
-	_, err := sm.Create("braw", "claude", repoDir, "", "", "", "", false, "", false, true, false, false, false, 24, 80)
+	_, err := sm.Create(CreateOpts{Name: "braw", AgentName: "claude", RepoPath: repoDir, InPlace: true, Rows: 24, Cols: 80})
 	assertErrContains(t, err, "not configured in [[repos]]")
 }
 
@@ -2377,17 +2377,17 @@ func TestCreateInPlaceMutuallyExclusiveFlags(t *testing.T) {
 	sm := newTestSessionManager(t)
 
 	t.Run("in-place with no-repo", func(t *testing.T) {
-		_, err := sm.Create("braw", "claude", "", "", "", "", "", true, "", false, true, false, false, false, 24, 80)
+		_, err := sm.Create(CreateOpts{Name: "braw", AgentName: "claude", NoRepo: true, InPlace: true, Rows: 24, Cols: 80})
 		assertErrContains(t, err, "mutually exclusive")
 	})
 
 	t.Run("in-place with share-worktree", func(t *testing.T) {
-		_, err := sm.Create("braw", "claude", "", "", "", "", "", false, "some-session", false, true, false, false, false, 24, 80)
+		_, err := sm.Create(CreateOpts{Name: "braw", AgentName: "claude", ShareWorktree: "some-session", InPlace: true, Rows: 24, Cols: 80})
 		assertErrContains(t, err, "mutually exclusive")
 	})
 
 	t.Run("in-place with base", func(t *testing.T) {
-		_, err := sm.Create("braw", "claude", "/tmp/whatever", "main", "", "", "", false, "", false, true, false, false, false, 24, 80)
+		_, err := sm.Create(CreateOpts{Name: "braw", AgentName: "claude", RepoPath: "/tmp/whatever", BaseBranch: "main", InPlace: true, Rows: 24, Cols: 80})
 		assertErrContains(t, err, "mutually exclusive")
 	})
 }
@@ -2405,7 +2405,7 @@ func TestCreateInPlaceRejectsConcurrent(t *testing.T) {
 		Status:       StatusRunning,
 	}
 
-	_, err := sm.Create("canny-two", "claude", repoDir, "", "", "", "", false, "", false, true, false, false, false, 24, 80)
+	_, err := sm.Create(CreateOpts{Name: "canny-two", AgentName: "claude", RepoPath: repoDir, InPlace: true, Rows: 24, Cols: 80})
 	assertErrContains(t, err, "already running")
 }
 
@@ -2423,7 +2423,7 @@ func TestCreateInPlaceAllowConcurrentFlag(t *testing.T) {
 	}
 
 	// With --allow-concurrent, should pass the concurrent check (will fail later on agent start)
-	_, err := sm.Create("canny-two", "claude", repoDir, "", "", "", "", false, "", false, true, true, false, false, 24, 80)
+	_, err := sm.Create(CreateOpts{Name: "canny-two", AgentName: "claude", RepoPath: repoDir, InPlace: true, AllowConcurrent: true, Rows: 24, Cols: 80})
 	if err != nil && strings.Contains(err.Error(), "already running") {
 		t.Fatalf("--allow-concurrent should bypass concurrent check, got: %v", err)
 	}
@@ -2443,7 +2443,7 @@ func TestCreateInPlaceConfigAllowConcurrent(t *testing.T) {
 	}
 
 	// Config allow_concurrent should pass the concurrent check
-	_, err := sm.Create("canny-two", "claude", repoDir, "", "", "", "", false, "", false, true, false, false, false, 24, 80)
+	_, err := sm.Create(CreateOpts{Name: "canny-two", AgentName: "claude", RepoPath: repoDir, InPlace: true, Rows: 24, Cols: 80})
 	if err != nil && strings.Contains(err.Error(), "already running") {
 		t.Fatalf("config allow_concurrent should bypass concurrent check, got: %v", err)
 	}
@@ -2726,7 +2726,7 @@ func TestResumeInPlaceRejectsDeletedRepo(t *testing.T) {
 func TestCreateInPlaceBaseRejectedByDaemon(t *testing.T) {
 	sm := newTestSessionManager(t)
 
-	_, err := sm.Create("braw", "claude", "/tmp/whatever", "main", "", "", "", false, "", false, true, false, false, false, 24, 80)
+	_, err := sm.Create(CreateOpts{Name: "braw", AgentName: "claude", RepoPath: "/tmp/whatever", BaseBranch: "main", InPlace: true, Rows: 24, Cols: 80})
 	assertErrContains(t, err, "mutually exclusive")
 }
 
@@ -2795,7 +2795,7 @@ func TestSingletonBlocksCreateWhenRunning(t *testing.T) {
 		Status:   StatusRunning,
 	}
 
-	_, err := sm.Create("canny-two", "claude", repoDir, "main", "", "", "", false, "", false, false, false, false, false, 24, 80)
+	_, err := sm.Create(CreateOpts{Name: "canny-two", AgentName: "claude", RepoPath: repoDir, BaseBranch: "main", Rows: 24, Cols: 80})
 	assertErrContains(t, err, "singleton")
 }
 
@@ -2811,7 +2811,7 @@ func TestSingletonAllowsCreateWhenStopped(t *testing.T) {
 		Status:   StatusStopped,
 	}
 
-	_, err := sm.Create("canny-two", "claude", repoDir, "main", "", "", "", false, "", false, false, false, false, false, 24, 80)
+	_, err := sm.Create(CreateOpts{Name: "canny-two", AgentName: "claude", RepoPath: repoDir, BaseBranch: "main", Rows: 24, Cols: 80})
 	if err != nil && strings.Contains(err.Error(), "singleton") {
 		t.Fatalf("singleton should not block when existing session is stopped, got: %v", err)
 	}
@@ -2823,7 +2823,7 @@ func TestInPlaceRejectsRepoWithIncludes(t *testing.T) {
 	incDir := initTempGitRepo(t)
 	sm.cfg.Repos = []config.RepoConfig{{Path: repoDir, Includes: []string{incDir}}}
 
-	_, err := sm.Create("braw", "claude", repoDir, "", "", "", "", false, "", false, true, false, false, false, 24, 80)
+	_, err := sm.Create(CreateOpts{Name: "braw", AgentName: "claude", RepoPath: repoDir, InPlace: true, Rows: 24, Cols: 80})
 	assertErrContains(t, err, "includes configured")
 }
 
