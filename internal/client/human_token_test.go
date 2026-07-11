@@ -13,9 +13,11 @@ func TestReadHumanToken(t *testing.T) {
 	if err := os.WriteFile(path, []byte("canny-token\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+
 	if got := readHumanToken(config.Paths{HumanTokenFile: path}); got != "canny-token" {
 		t.Errorf("token = %q, want canny-token", got)
 	}
+
 	if got := readHumanToken(config.Paths{HumanTokenFile: filepath.Join(t.TempDir(), "dreich")}); got != "" {
 		t.Errorf("missing token = %q, want empty", got)
 	}

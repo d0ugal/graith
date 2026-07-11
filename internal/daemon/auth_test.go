@@ -46,9 +46,11 @@ func TestResolveAuth_LocalTokens(t *testing.T) {
 			if (err != nil) != tt.wantError {
 				t.Fatalf("error = %v, wantError %v", err, tt.wantError)
 			}
+
 			if auth.role != tt.wantRole {
 				t.Errorf("role = %d, want %d", auth.role, tt.wantRole)
 			}
+
 			if auth.sessionID != tt.wantID {
 				t.Errorf("session = %q, want %q", auth.sessionID, tt.wantID)
 			}
