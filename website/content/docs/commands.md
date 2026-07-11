@@ -198,6 +198,22 @@ Set a status summary for a session, visible in the session picker overlay and `g
 | `--clear` | Clear the status summary |
 | `--ttl <duration>` | Override TTL for this status update (e.g. `10m`, `1h`) |
 
+### `gr notify <message>`
+
+Send a proactive desktop/push notification via the configured `[notifications]` backend. Unlike an inbox message, a notification proactively gets the human's attention. Only the orchestrator session and the human may send notifications (plain agent sessions are rejected).
+
+| Flag | Description |
+|------|-------------|
+| `--title <text>` | Notification title (default `graith`) |
+| `--priority <level>` | `low`, `normal` (default), or `high`; `high` plays a sound and bypasses quiet hours and the rate limit |
+
+```bash
+gr notify "Morning briefing ready" --priority low
+gr notify "CI failing on main after 3 retries" --priority high
+```
+
+See [Configuration → Notifications](../configuration/#notifications) for backends, rate limiting, and quiet hours.
+
 ## Messaging
 
 See [Inter-Agent Messaging](messaging.md) for full details.

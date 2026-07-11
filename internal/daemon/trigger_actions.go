@@ -332,6 +332,37 @@ func (sm *SessionManager) actionSession(ctx context.Context, t *config.TriggerCo
 	return "spawned " + sess.ID, nil
 }
 
+// notifyOnComplete fires a proactive push notification after a trigger action
+// finishes, when the action opted in with notify_on_complete. The message is
+// templated with the trigger vars; priority defaults to normal, or high when the
+// action errored (so a failure is loud). Suppression by quiet hours / rate limit
+// is handled inside SendPushNotification.
+func (sm *SessionManager) notifyOnComplete(t *config.TriggerConfig, fc fireContext, actionErr error) {
+	if !t.Action.NotifyOnComplete {
+		return
+	}
+
+	vars := sm.triggerVars(t, fc)
+
+	msg := t.Action.NotifyMessage
+	if strings.TrimSpace(msg) == "" {
+		msg = fmt.Sprintf("Trigger %q completed", t.Name)
+	}
+
+	if expanded, err := config.ExpandTrigger(msg, vars); err == nil {
+		msg = expanded
+	} else {
+		sm.log.Warn("trigger: notify_message expansion failed", "trigger", t.Name, "err", err)
+	}
+
+	priority := t.Action.NotifyPriority
+	if priority == "" && actionErr != nil {
+		priority = config.NotifyPriorityHigh
+	}
+
+	sm.SendPushNotification(pushNotification{Title: "graith", Message: msg, Priority: priority})
+}
+
 func triggerReactorName(triggerName, sessionName string) string {
 	base := triggerName
 	if sessionName != "" {
@@ -706,4 +737,6 @@ func (sm *SessionManager) fireWatch(ctx context.Context, t *config.TriggerConfig
 		sm.recordTriggerError(t.Name, err.Error())
 		sm.log.Warn("trigger: watch action failed", "trigger", t.Name, "err", err)
 	}
+
+	sm.notifyOnComplete(t, fc, err)
 }

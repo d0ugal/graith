@@ -56,13 +56,47 @@ The status bar shows the session name, status, agent type, branch, git status, u
 
 ```toml
 [notifications]
-enabled     = true   # desktop notifications
+enabled     = true   # desktop notifications (status changes AND `gr notify`)
 on_approval = true   # notify when a session needs approval
 on_stopped  = false  # notify when a session stops
 command     = ""     # custom notification command (optional)
+
+# Proactive `gr notify` push notifications:
+backend           = "macos"   # "macos" (osascript) or "command"; default "macos"
+max_per_hour      = 12         # rolling-hour cap on low/normal pushes (high bypasses)
+quiet_hours_start = "22:00"    # suppress low/normal pushes in this window (24h "HH:MM")
+quiet_hours_end   = "07:00"    # window may wrap past midnight; high priority bypasses
 ```
 
-When `command` is set, graith executes it via `sh -c` instead of using the system notification API. The command receives context via environment variables: `GRAITH_SESSION_NAME`, `GRAITH_STATUS`, and `GRAITH_MESSAGE`.
+When `command` is set, graith executes it via `sh -c` instead of using the system notification API. For status-change notifications the command receives `GRAITH_SESSION_NAME`, `GRAITH_STATUS`, and `GRAITH_MESSAGE`; for `gr notify` push notifications (`backend = "command"`) it receives `GRAITH_NOTIFY_TITLE`, `GRAITH_NOTIFY_MESSAGE`, and `GRAITH_NOTIFY_PRIORITY`.
+
+### Proactive push notifications (`gr notify`)
+
+The orchestrator (and triggers) can proactively get your attention — a morning
+briefing, a CI failure, a review needed — rather than leaving it sitting silently
+in an inbox:
+
+```bash
+gr notify "Morning briefing ready" --priority low
+gr notify "CI failing on main after 3 retries" --priority high
+```
+
+Priority levels: `low`, `normal` (default), and `high`. `high` plays a sound and
+**bypasses quiet hours and the rate limit**; `low`/`normal` are subject to both.
+Only the orchestrator session and the human may send notifications — plain agent
+sessions are rejected to prevent spam. Identical notifications within 30s are
+coalesced. The `macos` backend uses `osascript`; other backends (ntfy, Pushover,
+Slack) are planned follow-ups.
+
+Triggers can fire a notification when their action completes:
+
+```toml
+[trigger.action]
+type               = "session"
+notify_on_complete = true
+notify_message     = "Morning briefing ready"   # templated; optional
+notify_priority    = "low"                        # low|normal|high; optional
+```
 
 ## Approvals
 

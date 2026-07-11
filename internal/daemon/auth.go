@@ -269,6 +269,25 @@ func (ac authContext) checkTriggerOp(sm *SessionManager) error {
 	return fmt.Errorf("not authorized: only the orchestrator or its descendants can manage triggers")
 }
 
+// checkNotifyOp authorizes a proactive push notification (`gr notify`). To stop
+// individual agents spamming the human, only a human operator or the system
+// orchestrator session may send one — a plain agent session is rejected. (Note
+// this is stricter than triggers, which also allow orchestrator descendants:
+// the whole point of push is that it is a scarce, human-facing channel.)
+// Triggers fire notifications daemon-internally and never reach this gate.
+// Must be called with sm.mu at least RLocked.
+func (ac authContext) checkNotifyOp(sm *SessionManager) error {
+	if ac.isHuman() {
+		return nil
+	}
+
+	if ac.isOrchestrator(sm) {
+		return nil
+	}
+
+	return fmt.Errorf("not authorized: only the orchestrator or the human may send notifications")
+}
+
 // isDescendantOf checks whether targetID is a transitive descendant of rootID.
 // Must be called with sm.mu at least RLocked.
 func (sm *SessionManager) isDescendantOf(targetID, rootID string) bool {

@@ -86,6 +86,15 @@ type ActionConfig struct {
 	// message:
 	Body string `toml:"body"`
 
+	// notify (any action type): when NotifyOnComplete is set, the daemon fires a
+	// proactive push notification (see [notifications]) once the action finishes
+	// firing. NotifyMessage is the body (templated with the trigger vars;
+	// defaults to a generic "<name> completed"); NotifyPriority is low/normal/high
+	// (defaults to normal, or high when the action errored).
+	NotifyOnComplete bool   `toml:"notify_on_complete"`
+	NotifyMessage    string `toml:"notify_message"`
+	NotifyPriority   string `toml:"notify_priority"`
+
 	Deliver DeliverConfig `toml:"deliver"`
 }
 
@@ -479,6 +488,12 @@ func (c *Config) validateAction(where string, t *TriggerConfig) []error {
 	// session/scenario actions need an orchestrator to own the spawned work.
 	if (a.Type == ActionSession || a.Type == ActionScenario) && !c.Orchestrator.Enabled {
 		errs = append(errs, fmt.Errorf("%s: %s action requires [orchestrator] enabled (it owns spawned sessions)", where, a.Type))
+	}
+
+	if a.NotifyPriority != "" {
+		if _, ok := NormalizeNotifyPriority(a.NotifyPriority); !ok {
+			errs = append(errs, fmt.Errorf("%s: action.notify_priority %q is invalid (want low|normal|high)", where, a.NotifyPriority))
+		}
 	}
 
 	return errs

@@ -351,6 +351,22 @@ type MsgConversationListMsg struct {
 	Messages []ConversationMessage `json:"messages"`
 }
 
+// NotifyMsg is a client request (`gr notify`) to send a proactive push
+// notification to the human via the configured [notifications] backend.
+type NotifyMsg struct {
+	Message  string `json:"message"`
+	Title    string `json:"title,omitempty"`
+	Priority string `json:"priority,omitempty"` // low | normal | high (default normal)
+}
+
+// NotifyResponse is the daemon's reply to a notify request. Delivered is false
+// when the notification was intentionally suppressed (disabled, quiet hours,
+// rate-limited, coalesced); Reason carries a human-readable explanation.
+type NotifyResponse struct {
+	Delivered bool   `json:"delivered"`
+	Reason    string `json:"reason,omitempty"`
+}
+
 // StatusReportMsg is sent by the client to the daemon to report hook events.
 type StatusReportMsg struct {
 	SessionID string `json:"session_id"`

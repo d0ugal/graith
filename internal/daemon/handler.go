@@ -1571,6 +1571,23 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					}{s.Name, s.Pause})
 				}
 
+			case "notify":
+				n, ok := decodePayload[protocol.NotifyMsg](msg, sendControl, "invalid notify message")
+				if !ok {
+					continue
+				}
+
+				if !auth.authorizeNotify(sm, sendControl) {
+					continue
+				}
+
+				delivered, reason := sm.SendPushNotification(pushNotification{
+					Title:    n.Title,
+					Message:  n.Message,
+					Priority: n.Priority,
+				})
+				sendControl("notify_response", protocol.NotifyResponse{Delivered: delivered, Reason: reason})
+
 			case "scenario_resume":
 				s, ok := decodePayload[protocol.ScenarioResumeMsg](msg, sendControl, "invalid scenario_resume message")
 				if !ok {
@@ -1727,6 +1744,20 @@ func (ac authContext) authorizeScenarioOp(sm *SessionManager, name string, send 
 func (ac authContext) authorizeTriggerOp(sm *SessionManager, send func(string, any)) bool {
 	sm.mu.RLock()
 	err := ac.checkTriggerOp(sm)
+	sm.mu.RUnlock()
+
+	if err != nil {
+		send("error", protocol.ErrorMsg{Message: err.Error()})
+
+		return false
+	}
+
+	return true
+}
+
+func (ac authContext) authorizeNotify(sm *SessionManager, send func(string, any)) bool {
+	sm.mu.RLock()
+	err := ac.checkNotifyOp(sm)
 	sm.mu.RUnlock()
 
 	if err != nil {

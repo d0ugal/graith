@@ -140,6 +140,7 @@ func registerCommands() {
 		registerMigrateCmd()
 		registerMsgCmd()
 		registerNewCmd()
+		registerNotifyCmd()
 		registerPathCmd()
 		registerRenameCmd()
 		registerReportStatusCmd()

@@ -146,10 +146,23 @@ notify_untrusted_authors = true  # message the orchestrator once per new untrust
 enabled = true       # show the status bar in attached sessions
 position = "bottom"  # where to render it: "top" or "bottom"
 
-# Desktop notifications for selected agent status changes (approval, stopped).
+# Desktop notifications for agent status changes (approval, stopped) and for
+# proactive `gr notify` push notifications sent by the orchestrator or triggers.
 [notifications]
-enabled = true      # master switch for status-change notifications
+enabled = true      # master switch for status-change and push notifications
 on_approval = true  # notify when a session enters the "approval" (waiting-for-human) state
+# backend selects how `gr notify` push notifications are delivered:
+#   "macos"   osascript desktop notification (default; high priority plays a sound)
+#   "command" run the [notifications] command with GRAITH_NOTIFY_{TITLE,MESSAGE,PRIORITY}
+# (ntfy/pushover/slack backends are planned follow-ups.)
+# backend = "macos"
+# max_per_hour rate-limits low/normal push notifications over a rolling hour
+# (high priority bypasses it). Defaults to 12.
+# max_per_hour = 12
+# quiet_hours_start / quiet_hours_end suppress low/normal push notifications in a
+# daily window (24-hour "HH:MM"; may wrap past midnight). High priority bypasses.
+# quiet_hours_start = "22:00"
+# quiet_hours_end = "07:00"
 
 [approvals]
 # enabled controls whether the PreToolUse approve-request gating hook is

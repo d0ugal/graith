@@ -61,13 +61,15 @@ var remoteMessagePolicy = map[string]remotePolicy{
 	"status_report":    remoteSessionOnly,
 
 	// Mutating / operator actions (paired human + sessions; not guests).
-	"msg_conversation":   remoteHumanRW, // reads private DMs — human, not guest
-	"scenario_status":    remoteHumanRW, // design denies scenario_* to guests
-	"scenario_list":      remoteHumanRW,
-	"trigger_list":       remoteHumanRW, // triggers gated to human + sessions, not guests
-	"trigger_status":     remoteHumanRW,
-	"trigger_run":        remoteHumanRW,
-	"trigger_pause":      remoteHumanRW,
+	"msg_conversation": remoteHumanRW, // reads private DMs — human, not guest
+	"scenario_status":  remoteHumanRW, // design denies scenario_* to guests
+	"scenario_list":    remoteHumanRW,
+	"trigger_list":     remoteHumanRW, // triggers gated to human + sessions, not guests
+	"trigger_status":   remoteHumanRW,
+	"trigger_run":      remoteHumanRW,
+	"trigger_pause":    remoteHumanRW,
+	"notify":           remoteHumanRW, // orchestrator/human only; the handler re-checks
+
 	"wait":               remoteHumanRW, // targets arbitrary sessions
 	"repo_list":          remoteHumanRW, // only useful for create, which guests can't do
 	"attach":             remoteHumanRW,
