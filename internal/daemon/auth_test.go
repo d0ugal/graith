@@ -491,6 +491,128 @@ func TestResolveAuth_RemoteWrongPoPDeviceIsRoleNone(t *testing.T) {
 	}
 }
 
+func TestAuthorizeScenarioOp(t *testing.T) {
+	sm := newTestSMWithSessions(map[string]*SessionState{
+		"ben":    {ID: "ben", SystemKind: SystemKindOrchestrator},
+		"thrawn": {ID: "thrawn"},
+	})
+	sm.state.Scenarios = map[string]*ScenarioState{
+		"strath": {Name: "strath", OrchestratorID: "ben"},
+	}
+
+	// Authorized: orchestrator, no error control message emitted.
+	var sentType string
+	send := func(typ string, _ any) { sentType = typ }
+	if ok := (authContext{sessionID: "ben", authenticated: true, role: roleOrchestrator}).authorizeScenarioOp(sm, "strath", send); !ok || sentType != "" {
+		t.Errorf("orchestrator: ok=%v sent=%q, want ok=true, no message", ok, sentType)
+	}
+
+	// Denied: unrelated session, an "error" control message is emitted.
+	sentType = ""
+	if ok := (authContext{sessionID: "thrawn", authenticated: true, role: roleSession}).authorizeScenarioOp(sm, "strath", send); ok || sentType != "error" {
+		t.Errorf("unrelated session: ok=%v sent=%q, want ok=false, error message", ok, sentType)
+	}
+}
+
+func TestAuthorizeTriggerOp(t *testing.T) {
+	sm := newTestSMWithSessions(map[string]*SessionState{
+		"ben":   {ID: "ben", SystemKind: SystemKindOrchestrator},
+		"other": {ID: "other"},
+	})
+
+	var sentType string
+	send := func(typ string, _ any) { sentType = typ }
+	if ok := (authContext{sessionID: "ben", authenticated: true, role: roleOrchestrator}).authorizeTriggerOp(sm, send); !ok || sentType != "" {
+		t.Errorf("orchestrator: ok=%v sent=%q, want ok=true, no message", ok, sentType)
+	}
+
+	sentType = ""
+	if ok := (authContext{sessionID: "other", authenticated: true, role: roleSession}).authorizeTriggerOp(sm, send); ok || sentType != "error" {
+		t.Errorf("unrelated session: ok=%v sent=%q, want ok=false, error message", ok, sentType)
+	}
+}
+
+func TestCheckTarget_UnknownRule(t *testing.T) {
+	sm := newTestSMWithSessions(nil)
+	// A rule value outside the known set must fail closed, not silently allow.
+	auth := authContext{sessionID: "braw", authenticated: true}
+	if err := auth.checkTarget(sm, "braw", authRule(99)); err == nil {
+		t.Error("expected an unknown auth rule to be rejected")
+	}
+}
+
+func TestCheckScenarioOp(t *testing.T) {
+	// A three-generation tree under the scenario's orchestrator, plus an
+	// unrelated session that must never be able to manage the scenario.
+	sm := newTestSMWithSessions(map[string]*SessionState{
+		"ben":       {ID: "ben", SystemKind: SystemKindOrchestrator},
+		"bairn":     {ID: "bairn", ParentID: "ben"},
+		"wee-bairn": {ID: "wee-bairn", ParentID: "bairn"},
+		"thrawn":    {ID: "thrawn"},
+	})
+	sm.state.Scenarios = map[string]*ScenarioState{
+		"strath": {Name: "strath", OrchestratorID: "ben"},
+	}
+
+	tests := []struct {
+		name     string
+		auth     authContext
+		scenario string
+		wantErr  bool
+	}{
+		{"local human may manage any scenario", authContext{role: roleLocalHuman}, "strath", false},
+		{"remote human may manage any scenario", authContext{role: roleRemoteHuman}, "strath", false},
+		{"scenario orchestrator allowed", authContext{sessionID: "ben", authenticated: true, role: roleOrchestrator}, "strath", false},
+		{"descendant of orchestrator allowed", authContext{sessionID: "wee-bairn", authenticated: true, role: roleSession}, "strath", false},
+		{"unrelated session rejected", authContext{sessionID: "thrawn", authenticated: true, role: roleSession}, "strath", true},
+		{"read-only guest rejected", authContext{role: roleRemoteGuest, deviceID: "dreich"}, "strath", true},
+		{"unpaired remote rejected", authContext{role: roleNone}, "strath", true},
+		{"unknown scenario rejected", authContext{sessionID: "ben", authenticated: true, role: roleOrchestrator}, "haar", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.auth.checkScenarioOp(sm, tt.scenario)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("checkScenarioOp(%q) err = %v, wantErr %v", tt.scenario, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestIsOrchestrator_Unauthenticated(t *testing.T) {
+	sm := newTestSMWithSessions(map[string]*SessionState{
+		"ben": {ID: "ben", SystemKind: SystemKindOrchestrator},
+	})
+	// An unauthenticated (human) caller is never the orchestrator session, even
+	// if it carries an orchestrator session ID.
+	if (authContext{sessionID: "ben"}).isOrchestrator(sm) {
+		t.Error("unauthenticated context must not be treated as orchestrator")
+	}
+}
+
+func TestIsOrchestrator_SessionNotInState(t *testing.T) {
+	sm := newTestSMWithSessions(map[string]*SessionState{
+		"ben": {ID: "ben", SystemKind: SystemKindOrchestrator},
+	})
+	// A token that resolved to a session ID no longer present in state must
+	// fail closed rather than panic or grant orchestrator rights.
+	if (authContext{sessionID: "haar", authenticated: true}).isOrchestrator(sm) {
+		t.Error("a session missing from state must not be treated as orchestrator")
+	}
+}
+
+func TestIsDescendantOf_CycleTerminates(t *testing.T) {
+	// A corrupted parent cycle (loch → ben → loch) must not loop forever; the
+	// visited-set guard returns false once a node repeats.
+	sm := newTestSMWithSessions(map[string]*SessionState{
+		"loch": {ID: "loch", ParentID: "ben"},
+		"ben":  {ID: "ben", ParentID: "loch"},
+	})
+	if sm.isDescendantOf("loch", "ghost") {
+		t.Error("cycle must terminate and report not-a-descendant of an absent root")
+	}
+}
+
 func TestResolveAuth_OrchestratorRole(t *testing.T) {
 	sm := newTestSMWithSessions(map[string]*SessionState{
 		"ben": {ID: "ben", Token: "tok-ben", SystemKind: SystemKindOrchestrator},

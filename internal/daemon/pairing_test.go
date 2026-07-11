@@ -317,6 +317,23 @@ func TestRevokeDeviceClosesLiveConnections(t *testing.T) {
 	}
 }
 
+func TestDeviceForTokenEmptyToken(t *testing.T) {
+	sm := newPairingSM(t)
+	// An empty token can never resolve a device — the guard fails closed before
+	// any index lookup.
+	if sm.DeviceForToken("") != nil {
+		t.Error("empty token must resolve to no device")
+	}
+}
+
+func TestRevokeDeviceUnknown(t *testing.T) {
+	sm := newPairingSM(t)
+	// Revoking a device that was never paired is an error, not a silent no-op.
+	if _, err := sm.RevokeDevice("nae-such-device"); err == nil {
+		t.Error("revoking an unknown device must return an error")
+	}
+}
+
 func TestUnregisterDeviceConn(t *testing.T) {
 	sm := newPairingSM(t)
 	c1, _ := net.Pipe()

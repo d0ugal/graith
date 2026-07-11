@@ -119,9 +119,21 @@ func TestRemoteAllowed(t *testing.T) {
 		{"session cannot upgrade", roleSession, "upgrade", false},
 		{"session cannot reload", roleSession, "reload", false},
 
+		// Remote orchestrator: same reach as a plain session (everything but local-only).
+		{"orchestrator can attach", roleOrchestrator, "attach", true},
+		{"orchestrator can status_report", roleOrchestrator, "status_report", true},
+		{"orchestrator can scenario_start", roleOrchestrator, "scenario_start", true},
+		{"orchestrator cannot upgrade", roleOrchestrator, "upgrade", false},
+
+		// roleLocalHuman is never gated by this table (the default branch fails
+		// closed here); the local 0700 socket is governed by the handler checks.
+		{"local human is not gated here (fails closed)", roleLocalHuman, "list", false},
+		{"local human fails closed on mutating too", roleLocalHuman, "create", false},
+
 		// Unknown message fails closed for everyone.
 		{"unknown denied for human", roleRemoteHuman, "wheesht", false},
 		{"unknown denied for none", roleNone, "wheesht", false},
+		{"unknown denied for orchestrator", roleOrchestrator, "wheesht", false},
 	}
 
 	for _, tt := range tests {

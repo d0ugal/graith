@@ -38,3 +38,19 @@ func TestCheckTriggerOp_NoOrchestrator(t *testing.T) {
 		t.Error("expected rejection when there is no orchestrator to authorize against")
 	}
 }
+
+func TestCheckTriggerOp_NonSessionRoleRejected(t *testing.T) {
+	sm := newTestSMWithSessions(map[string]*SessionState{
+		"orch": {ID: "orch", SystemKind: SystemKindOrchestrator},
+	})
+	// A paired read-only guest is neither a human nor a session, so it is
+	// rejected before any orchestrator lookup happens.
+	if err := (authContext{role: roleRemoteGuest, deviceID: "dreich"}).checkTriggerOp(sm); err == nil {
+		t.Error("read-only guest must not manage triggers")
+	}
+
+	// An unpaired remote connection likewise cannot manage triggers.
+	if err := (authContext{role: roleNone}).checkTriggerOp(sm); err == nil {
+		t.Error("unpaired remote must not manage triggers")
+	}
+}
