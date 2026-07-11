@@ -106,7 +106,11 @@ retention = "24h"        # how long soft-deleted sessions are kept before purge
 # transitions.
 [pr_watch]
 enabled = false                  # turn the PR/CI watch loop on
-notify_ci_failures = true        # notify when CI checks start failing (machine verdict, safe to act on)
+# notify_ci_failures: notify on CI failures (machine verdict, safe to act on).
+# Fires early — as soon as any check goes red, even while others are still
+# running, flagging the outstanding jobs — then sends a completion notice with
+# the final tally once every check finishes red.
+notify_ci_failures = true
 notify_merge_conflicts = true    # notify when the PR becomes CONFLICTING with its base
 notify_review_comments = true    # notify on new inline code-review comments (anchored to a file:line)
 # notify_pr_comments: regular conversation comments on the PR thread (issue-style,
