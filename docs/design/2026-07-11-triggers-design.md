@@ -2,7 +2,7 @@
 title: "Design Doc: Unified Triggers (Scheduled + File-Watch Actions)"
 authors: Dougal Matthews
 created: 2026-07-11
-status: Draft (merges #592 and #593; incorporates three review tribunals inc. a post-merge pass — see Consensus)
+status: Draft (merges #592 and #593; incorporates multiple independent reviews inc. a post-merge pass — see Consensus)
 reviewers: (none yet)
 informed: (TBD)
 issue: https://github.com/d0ugal/graith/issues/592, https://github.com/d0ugal/graith/issues/593
@@ -208,8 +208,11 @@ type ActionConfig struct {
     Timeout  string `toml:"timeout"`  // command: max run time; default 5m
     Mutating bool   `toml:"mutating"` // command: may write its execution root; REJECTED in v1
                                        // (watch commands are read-only in v1) — see §Feedback loops
-    Network  bool   `toml:"network"`  // command: allow network egress (default: blocked)
-    Trusted  bool   `toml:"trusted"`  // command: run unconfined (no sandbox) — explicit opt-in
+    // Sandbox for a `command` action, mirroring the MCP-server pattern
+    // (config.go: MCPServerConfig.Sandbox / .SandboxConfig) — NOT ad-hoc flags:
+    Sandbox       *bool          `toml:"sandbox"`        // default true; `sandbox = false` runs unconfined
+    SandboxConfig *SandboxConfig `toml:"sandbox_config"` // extra grants (read_dirs/write_dirs/network/…),
+                                                         // merged onto the base command profile like per-agent config
     // session:
     Prompt   string `toml:"prompt"`
     Agent    string `toml:"agent"`
@@ -231,8 +234,8 @@ type DeliverConfig struct {
 }
 
 type TriggerPolicy struct {
-    CatchUp   bool   `toml:"catch_up"`  // default false: never backfill missed fires
-    Overlap   string `toml:"overlap"`   // skip (default) | allow | queue(v2)
+    CatchUp   bool   `toml:"catch_up"`  // default false (zero value): never backfill missed fires
+    Overlap   string `toml:"overlap"`   // "" or "skip" (default) | "allow" | "queue"(v2)
     RateLimit string `toml:"rate_limit"`// max fires per window; default "5/30m" — the feedback backstop
 }
 ```
@@ -419,18 +422,32 @@ explicit, not "same as agents":
   (`action.mutating = true`, writable worktree) is **rejected in v1** and deferred
   to v2 with the generation-discard machinery; only then is generation-discard the
   (best-effort, bounded) defence.
-- **A dedicated command-action sandbox profile.** Reuse the `internal/sandbox`
-  backend (`Wrap`) with a purpose-built scope: read+write on the writable scratch
-  (schedule: `repo` root; watch: scratch cwd), the worktree in `ReadDirs` for a
-  watch command, a minimal env allowlist (`PATH`/`HOME`/`GRAITH_*` only, no
-  inherited secrets), and network **explicitly blocked by default** — note
-  `WrapOpts.Network == nil` means *unrestricted* (`sandbox.go`), so the profile
-  must construct an explicit blocking policy unless `action.network = true`.
+- **Sandbox config mirrors the MCP-server / agent pattern — no ad-hoc flags.**
+  A `command` action is sandboxed by default (`action.sandbox` is a `*bool`
+  defaulting to **true**, exactly like `MCPServerConfig.Sandbox`). Two knobs, both
+  matching existing config areas:
+  - `sandbox = false` — run the command **unconfined** (the explicit opt-out,
+    same shorthand as `[[mcp_servers]] sandbox = false`). Use for a command that
+    genuinely needs host resources the confined profile withholds (e.g. the Docker
+    socket).
+  - `[trigger.action.sandbox_config]` — a full `SandboxConfig` block (the same
+    type per-agent config uses: `read_dirs`, `write_dirs`, `read_files`,
+    `write_files`, a `[…sandbox_config.network]` egress block, env allowlist),
+    **merged onto** the base command profile via `SandboxConfig.Merge`. This is the
+    "stay sandboxed but grant a little more" path — preferred over `sandbox =
+    false` when you can name the extra access (e.g. `write_files =
+    ["/var/run/docker.sock"]`, or a network `allow_domains`).
+- **Base profile** (before any `sandbox_config` merge): read+write on the writable
+  scratch (schedule: `repo` root; watch: scratch cwd), the worktree in `ReadDirs`
+  for a watch command, a minimal env allowlist (`PATH`/`HOME`/`GRAITH_*`), and
+  network **explicitly blocked by default** — note `WrapOpts.Network == nil` means
+  *unrestricted* (`sandbox.go`), so the profile constructs an explicit blocking
+  policy unless a `sandbox_config.network` opens it.
 - **Fail closed on no enforcement.** A `command` trigger must **not** silently
   fall through to unsandboxed execution: either the sandbox is enabled and the
   backend can enforce (else the trigger is rejected at validation), or the operator
-  sets an explicit `action.trusted = true` acknowledging unconfined daemon-user
-  code. There is no implicit unconfined path.
+  sets an explicit `sandbox = false` acknowledging unconfined daemon-user code.
+  There is no implicit unconfined path.
 - **Bounds.** `action.timeout` (default **5m**) with context cancellation, an
   output cap (`prCommentMaxBody`-style, `prwatch.go:34`), process-group
   termination on daemon shutdown, and per-trigger (per-binding, for a watch
@@ -440,8 +457,8 @@ explicit, not "same as agents":
   `RepoPathAllowed` returns `true` when `allowed_repo_paths` is **empty**
   (`config.go`), so the repo allow-list only constrains when the operator has set
   one; with it unset, a schedule `command` may target any repo (still subject to
-  the sandbox/`trusted` gate). The "fail-closed" guarantee is the *sandbox*, not
-  the repo allow-list.
+  the sandbox gate). The "fail-closed" guarantee is the *sandbox*, not the repo
+  allow-list.
 
 `notify.go:255` (`exec.Command("sh", "-c", command)` with inherited env) is
 **not** the model — it is cited only for the mechanical exec pattern.
@@ -536,7 +553,7 @@ was down across scheduled fires:
 
 **Overlap — `overlap` (default `"skip"`).** When a fire is due but the previous
 run of the *same trigger* is still in flight:
-- `overlap = "skip"` (default): skip, log, advance.
+- `overlap = "skip"` (default, and the meaning of an unset/empty value): skip, log, advance.
 - `overlap = "allow"`: fire regardless.
 - `overlap = "queue"` (**deferred to v2**): a single-slot coalesced defer, the
   fiddliest to get right under `-race`; `queue` in config is rejected in v1.
@@ -1088,6 +1105,84 @@ agent  = "claude"
 prompt = "Review the changes since your last look; send feedback via gr msg."
 ```
 
+### Example: local CI with `act` ([nektos/act](https://github.com/nektos/act))
+
+`act` runs a repo's GitHub Actions workflows locally in Docker. It's a good
+stress-test of the `command` action because it has real-world needs the confined
+profile deliberately withholds: it talks to the **Docker socket** and pulls
+**runner images over the network**. Two ways to grant that, both matching how
+graith configures MCP-server / agent sandboxing:
+
+- `sandbox = false` — run `act` unconfined (simplest; broad).
+- `[trigger.action.sandbox_config]` — stay sandboxed but grant just what `act`
+  needs: write access to the Docker socket and network egress. Preferred when you
+  can name the access.
+
+**Schedule source — nightly local CI run, reported to the orchestrator (clean
+v1).** A schedule trigger has no feedback loop, so `act` writing the tree is a
+non-issue. This variant stays sandboxed and grants only the Docker socket +
+network:
+
+```toml
+[[trigger]]
+name = "nightly-local-ci"
+
+[trigger.schedule]
+cron     = "0 3 * * *"          # 03:00 daily
+timezone = "Europe/London"
+
+[trigger.action]
+type    = "command"
+command = "act push --job test" # run the `test` job of the push workflow
+repo    = "~/Code/graith"       # schedule commands require an execution root
+timeout = "20m"                 # local CI is slow
+
+[trigger.action.sandbox_config]  # stay sandboxed, grant just what act needs
+write_files = ["/var/run/docker.sock"]
+[trigger.action.sandbox_config.network]
+block = false                    # act pulls runner images
+
+[trigger.action.deliver]
+inbox = "orchestrator"          # captured stdout/stderr + exit code → orchestrator inbox
+store = "shared:ci/local/{date}.log"
+```
+
+**Watch source — run `act` on change (works, with a caveat).** Bind the same
+command to a watch source so local CI runs whenever the workflow or source
+changes. This variant just turns the sandbox off (`sandbox = false`):
+
+```toml
+[[trigger]]
+name = "local-ci-on-change"
+
+[trigger.watch]
+repo     = "~/Code/graith"
+paths    = [".github/workflows/**", "**/*.go"]
+debounce = "10s"               # coalesce a burst of edits; act is expensive
+
+[trigger.action]
+type    = "command"
+command = "act push --job test"
+sandbox = false                # act needs the Docker socket + network → unconfined
+timeout = "20m"
+
+[trigger.action.deliver]
+inbox = "{session_name}"       # results back to the session that changed the files
+```
+
+> **Caveat (stated honestly).** `sandbox = false` (and, equally, a
+> `sandbox_config` that grants worktree writes) **removes the sandbox
+> confinement**, so the v1 "watch commands are enforced read-only" guarantee
+> (§Feedback loops) does **not** apply here — if an `act` workflow writes into the
+> worktree (build artefacts, generated files), those writes *can* re-trigger. An
+> unconfined watch command therefore behaves like a v2 `mutating` command: it is
+> bounded by the `debounce` window and the `policy.rate_limit` backstop, **not**
+> loop-free by construction. For a workflow that only reads (lint/test that writes
+> nothing to the tree) there is no loop; for one that writes, prefer the schedule
+> variant above, or accept the bounded behaviour. The enforced-read-only guarantee
+> only holds for commands that keep the sandbox on (no `sandbox = false`, and a
+> `sandbox_config` that doesn't grant worktree writes).
+
 ## The `gr trigger` CLI (both sources)
 
 Control + observability, **not authoring**, in v1 (authoring is config/scenario
@@ -1132,13 +1227,14 @@ tree (read-only mount), so it never re-triggers.
 This design is the merge of two separately-drafted docs, each independently
 reviewed against the codebase before merging:
 
-- **#592 (schedule)** — reviewed by a 3-judge tribunal; grounding confirmed
-  accurate, all five open questions answered. Findings incorporated: the durable
-  **run-state machine** (at-most-once `LastScheduledFireAt` commit, restart-safe
-  interval anchoring, definition fingerprinting), the fail-closed **`command` trust
-  boundary**, the real `Create`/scenario-dispatch call shapes, a **trigger-specific
-  template expander**, and the precise `authorizeTriggerOp` owner model.
-- **#593 (watch)** — reviewed by a 2-judge source-verified tribunal, then hardened
+- **#592 (schedule)** — independently reviewed against the codebase; grounding
+  confirmed accurate, all five open questions answered. Findings incorporated: the
+  durable **run-state machine** (at-most-once `LastScheduledFireAt` commit,
+  restart-safe interval anchoring, definition fingerprinting), the fail-closed
+  **`command` trust boundary**, the real `Create`/scenario-dispatch call shapes, a
+  **trigger-specific template expander**, and the precise `authorizeTriggerOp`
+  owner model.
+- **#593 (watch)** — independently reviewed against the codebase, then hardened
   further during this merge in response to direct maintainer review. Findings
   incorporated: the **feedback-loop crux** (read-only reactors close the loop by
   construction; write-capable `command` actions use generation-based discard, and
@@ -1154,8 +1250,8 @@ shared; maintaining them separately had already produced drift (a parallel actio
 vocabulary and a session-naming config schema in the #593 draft) that the shared
 model eliminates.
 
-**Post-merge review (2-judge, source-verified).** The *merged* doc was then
-reviewed for merge integrity. Both judges confirmed the grounding remained
+**Post-merge review (independent, source-verified).** The *merged* doc was then
+reviewed for merge integrity. Reviewers confirmed the grounding remained
 accurate across ~20 citations, the shared framework was coherent, and the
 maintainer decisions (no `respect_gitignore`, repo/role selectors, `ensure`
 reuse) were reflected consistently — but converged on real gaps in the shared
@@ -1289,12 +1385,12 @@ design (mirroring prwatch) is what `-race` polices.
 | File | Change |
 |------|--------|
 | `go.mod` / `go.sum` | Add `github.com/robfig/cron/v3` (parser + `Next()`); vendor a small gitignore matcher. `fsnotify` already present. |
-| `internal/config/config.go` | Add `Triggers []TriggerConfig` + a `[triggers] max_concurrent` table; `TriggerConfig` (`*bool Enabled`, `*ScheduleConfig`, `*WatchConfig`), `ScheduleConfig`, `WatchConfig`, `ActionConfig` (incl. `timeout`/`mutating`/`network`/`trusted`), `DeliverConfig`, `TriggerPolicy` (incl. `rate_limit`); validation (exactly-one-source, one-action-type, cron/every parse, `every>0`, `queue`/`mutating`-rejected-in-v1, `timezone` rejected with `every`, repo allow-list, schedule-command-requires-repo / watch-command-rejects-repo, orchestrator-required-for-session/scenario, `message`-requires-inbox-or-topic, per-action delivery validity, `shared:`-required-for-repo-less store, watch requires exactly one of repo/role and never a session). `Default()` empty. |
+| `internal/config/config.go` | Add `Triggers []TriggerConfig` + a `[triggers] max_concurrent` table; `TriggerConfig` (`*bool Enabled`, `*ScheduleConfig`, `*WatchConfig`), `ScheduleConfig`, `WatchConfig`, `ActionConfig` (incl. `timeout`/`mutating`/`sandbox *bool`/`sandbox_config *SandboxConfig`, mirroring `MCPServerConfig`), `DeliverConfig`, `TriggerPolicy` (incl. `rate_limit`); validation (exactly-one-source, one-action-type, cron/every parse, `every>0`, `queue`/`mutating`-rejected-in-v1, `timezone` rejected with `every`, repo allow-list, schedule-command-requires-repo / watch-command-rejects-repo, orchestrator-required-for-session/scenario, `message`-requires-inbox-or-topic, per-action delivery validity, `shared:`-required-for-repo-less store, watch requires exactly one of repo/role and never a session). `Default()` empty. |
 | `internal/config/trigger_template.go` | New trigger-specific expander (`{name}`/`{date}`/`{datetime}`/`{fire_time}` + watch `{session_name}`/`{changed_files}`/`{change_count}`/`{worktree_path}`) — NOT `config.Expand`. |
 | `internal/daemon/scenario_loader.go` | Extract scenario-TOML loading from `internal/cli/scenario.go` into a shared, daemon-reachable package. |
 | `internal/daemon/trigger.go` | `RunTriggerLoop`, `runTriggerTick`, `dueTriggers` (atomic cursor advance + `LastScheduledFireAt` commit + in-flight under `triggerState.mu`), `fireTrigger`, per-type executors, delivery routing (+ `wake` gating), `triggerState` struct + mutex, `initTriggerSchedules` (fingerprint diff, catch_up), `max_concurrent` semaphore, bounded `History`, prune. |
 | `internal/daemon/filewatch.go` | `RunFileWatchLoop`, watcher reconcile, recursive add with ignore-pruning + scan-on-registration, debounce coalescer, per-worktree generation-discard, degradation status; funnels into `fireTrigger`. |
-| `internal/sandbox` | Command-action profile: repo-rooted, session-less, minimal env allowlist, network-off-by-default, process-group kill; fail-closed unless enforced or `action.trusted`. |
+| `internal/sandbox` | Command-action base profile: repo-/worktree-rooted, session-less, minimal env allowlist, network-off-by-default, process-group kill; merges `action.sandbox_config` via `SandboxConfig.Merge`; fail-closed unless enforced or `action.sandbox = false`. |
 | `internal/daemon/daemon.go` | `go sm.RunTriggerLoop(ctx)` + `go sm.RunFileWatchLoop(ctx)` at startup (near :5790); extend `applyConfig` to reconcile triggers/watchers. |
 | `internal/daemon/state.go` | Add `TriggerRuntime map[string]*TriggerRuntimeState` (Fingerprint, LastScheduledFireAt, Degraded, ReactorID, History); `TriggerID`/`TriggerReactor` on `SessionState`; migrate `CurrentStateVersion` (no-op); prune + fingerprint-reset on load. |
 | `internal/daemon/handler.go` | Handle `trigger_list`/`trigger_status`/`trigger_run`/`trigger_pause` (read-only vs orchestrator-or-descendant auth). |
