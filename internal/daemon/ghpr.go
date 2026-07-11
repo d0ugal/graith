@@ -44,12 +44,18 @@ type prData struct {
 }
 
 type ghComment struct {
-	ID      int64  `json:"id"`
-	User    ghUser `json:"user"`
-	Body    string `json:"body"`
-	Path    string `json:"path,omitempty"`
-	Line    int    `json:"line,omitempty"`
-	HTMLURL string `json:"html_url,omitempty"`
+	ID   int64  `json:"id"`
+	User ghUser `json:"user"`
+	Body string `json:"body"`
+	// AuthorAssociation is the commenter's relationship to the repo, as returned
+	// by the GitHub API (OWNER/MEMBER/COLLABORATOR/CONTRIBUTOR/FIRST_TIMER/
+	// FIRST_TIME_CONTRIBUTOR/MANNEQUIN/NONE). It drives the author-trust gate
+	// (see commentTrusted) and is already present in the API response, so reading
+	// it needs no extra request.
+	AuthorAssociation string `json:"author_association"`
+	Path              string `json:"path,omitempty"`
+	Line              int    `json:"line,omitempty"`
+	HTMLURL           string `json:"html_url,omitempty"`
 }
 
 type ghUser struct {

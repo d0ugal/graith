@@ -32,6 +32,21 @@ const (
 	prWatchBatchCap  = 3                // max sessions polled per tick
 	prNoPRNegCache   = 5 * time.Minute  // re-resolve a branch with no PR at most this often
 	prCommentMaxBody = 1024             // truncate each comment body to this many bytes
+
+	// prAuthorPromptRate / prAuthorPromptWindow bound the untrusted-author trust
+	// prompt: at most prAuthorPromptRate messages to the orchestrator per rolling
+	// window, so a busy public PR churning distinct drive-by commenters can't
+	// flood it. The persisted once-per-author dedup is the primary limiter; this
+	// is the anti-flood backstop.
+	prAuthorPromptRate   = 5
+	prAuthorPromptWindow = 30 * time.Minute
+
+	// maxPRWatchPromptedAuthors bounds the persisted set of surfaced authors so it
+	// can't grow without limit. Well above any plausible distinct-commenter count;
+	// once full, new authors are surfaced (rate-limited) but not recorded, so they
+	// may be re-surfaced — a bounded, self-limiting degradation rather than
+	// unbounded state growth.
+	maxPRWatchPromptedAuthors = 5000
 )
 
 // prWatchCursor records what the loop has already told a session, so it notifies
@@ -63,6 +78,10 @@ type prWatchState struct {
 	nextPoll   map[string]time.Time // sessionID → earliest next poll
 	pollBranch map[string]string    // sessionID → branch last polled against (worktree-HEAD drift detection)
 	rateLog    map[string][]time.Time
+	// authorPromptLog is the rolling send-times of untrusted-author trust prompts.
+	// Global (the prompt target is the single orchestrator), not per-session, so a
+	// flood across many sessions/PRs is still bounded. Guarded by mu.
+	authorPromptLog []time.Time
 }
 
 func newPRWatchState() *prWatchState {
@@ -629,13 +648,26 @@ func (sm *SessionManager) diffAndBuild(cfg *configPRWatch, t prWatchTarget, slug
 	// Inline (pulls/{n}/comments) and conversation (issues/{n}/comments) comments
 	// are gated independently: a user may want one without the other. Each has its
 	// own cursor, so notifying one never advances the other's baseline.
+	//
+	// Each surface's new comments pass the author-trust gate (commentTrusted)
+	// before reaching the body: untrusted comments are DROPPED from the
+	// notification (fail-closed for the prompt-injection vector — see the
+	// author-trust design doc / issue #1039) but their authors are collected to
+	// surface once to the orchestrator, and the per-surface cursor still advances
+	// past them so a later trusted comment isn't reported alongside the whole
+	// untrusted backlog.
+	var untrusted []ghComment
+
 	if cfg.NotifyReviewComments {
 		newReview := commentsAfter(d.ReviewComments, cur.lastReviewCommentID)
 		if len(newReview) > 0 {
-			if _, ok := sm.gate(cfg, t.id, cur, false); ok {
-				out = append(out, reviewCommentBody(t, d, newReview))
-				cur.lastReviewCommentID = maxInt64(cur.lastReviewCommentID, maxCommentID(d.ReviewComments))
-			}
+			trusted, dropped := partitionCommentsByTrust(cfg, newReview)
+			untrusted = append(untrusted, dropped...)
+			sm.logDroppedComments(t, d, "inline review", dropped)
+
+			cur.lastReviewCommentID = sm.deliverTrustedComments(
+				cfg, t, cur, &out, reviewCommentBody, d, trusted, dropped,
+				cur.lastReviewCommentID, maxCommentID(d.ReviewComments))
 		}
 	} else if d.CommentsOK {
 		// Keep the cursor current so flipping the gate on later doesn't dump history.
@@ -646,17 +678,346 @@ func (sm *SessionManager) diffAndBuild(cfg *configPRWatch, t prWatchTarget, slug
 	if cfg.NotifyPRComments {
 		newIssue := commentsAfter(d.IssueComments, cur.lastIssueCommentID)
 		if len(newIssue) > 0 {
-			if _, ok := sm.gate(cfg, t.id, cur, false); ok {
-				out = append(out, prCommentBody(t, d, newIssue))
-				cur.lastIssueCommentID = maxInt64(cur.lastIssueCommentID, maxCommentID(d.IssueComments))
-			}
+			trusted, dropped := partitionCommentsByTrust(cfg, newIssue)
+			untrusted = append(untrusted, dropped...)
+			sm.logDroppedComments(t, d, "conversation", dropped)
+
+			cur.lastIssueCommentID = sm.deliverTrustedComments(
+				cfg, t, cur, &out, prCommentBody, d, trusted, dropped,
+				cur.lastIssueCommentID, maxCommentID(d.IssueComments))
 		}
 	} else if d.CommentsOK {
 		// Keep the cursor current so flipping the gate on later doesn't dump history.
 		cur.lastIssueCommentID = maxInt64(cur.lastIssueCommentID, maxCommentID(d.IssueComments))
 	}
 
+	// Surface any newly-seen untrusted authors to the orchestrator (metadata only,
+	// batched across both surfaces, once ever per author). Held under prWatch.mu.
+	if len(untrusted) > 0 {
+		sm.promptUntrustedAuthors(cfg, t, d, untrusted)
+	}
+
 	return out
+}
+
+// deliverTrustedComments applies the notification gate to the trusted subset of
+// a comment batch and returns the new per-surface cursor value. It encodes the
+// cursor-advance rule for the author-trust gate:
+//
+//   - trusted present and the gate passes → deliver, advance past ALL new
+//     comments (trusted delivered + untrusted dropped);
+//   - trusted present but the gate rejects → deliver nothing, DON'T advance, so
+//     the trusted comments retry on a later poll (untrusted are re-dropped then,
+//     which is harmless — their authors are already recorded);
+//   - only untrusted (nothing to deliver) → advance past them so the drop is not
+//     re-evaluated every poll.
+func (sm *SessionManager) deliverTrustedComments(
+	cfg *configPRWatch, t prWatchTarget, cur *prWatchCursor, out *[]string,
+	body func(prWatchTarget, prData, []ghComment) string,
+	d prData, trusted, dropped []ghComment, cursor, maxNew int64,
+) int64 {
+	if len(trusted) > 0 {
+		if _, ok := sm.gate(cfg, t.id, cur, false); ok {
+			*out = append(*out, body(t, d, trusted))
+			return maxInt64(cursor, maxNew)
+		}
+
+		// Gate rejected: retry the trusted comments next poll.
+		return cursor
+	}
+
+	// Only untrusted comments in this batch: advance past them (they were dropped).
+	if len(dropped) > 0 {
+		return maxInt64(cursor, maxNew)
+	}
+
+	return cursor
+}
+
+// logDroppedComments records that untrusted comments were dropped from a surface,
+// so the drop is never silent in the logs. No-op when nothing was dropped.
+func (sm *SessionManager) logDroppedComments(t prWatchTarget, d prData, surface string, dropped []ghComment) {
+	if len(dropped) == 0 || sm.log == nil {
+		return
+	}
+
+	sm.log.Debug("pr-watch: dropped untrusted PR comments",
+		"session", t.id, "pr", d.Number, "surface", surface, "dropped", len(dropped))
+}
+
+// commentTrusted reports whether a PR comment's author is trusted for the
+// author-trust gate (issue #1039). An author is trusted when EITHER:
+//
+//   - their login is in cfg.CommentAuthorAllowlist (case-insensitive, matched
+//     against the full "<name>[bot]" string) — the ONLY way to trust a bot or
+//     GitHub App, whose author_association is unreliable; OR
+//   - their GitHub author_association is in the trusted set (default
+//     OWNER/MEMBER/COLLABORATOR; CONTRIBUTOR is deliberately excluded).
+func commentTrusted(cfg *configPRWatch, c ghComment) bool {
+	login := strings.ToLower(strings.TrimSpace(c.User.Login))
+	if login != "" {
+		for _, a := range cfg.CommentAuthorAllowlist {
+			if strings.ToLower(strings.TrimSpace(a)) == login {
+				return true
+			}
+		}
+	}
+
+	assoc := strings.ToUpper(strings.TrimSpace(c.AuthorAssociation))
+
+	return cfg.TrustedAssociationSet()[assoc]
+}
+
+// partitionCommentsByTrust splits a comment batch into the trusted subset (kept
+// for delivery) and the untrusted subset (dropped), preserving order.
+func partitionCommentsByTrust(cfg *configPRWatch, comments []ghComment) (trusted, untrusted []ghComment) {
+	for _, c := range comments {
+		if commentTrusted(cfg, c) {
+			trusted = append(trusted, c)
+		} else {
+			untrusted = append(untrusted, c)
+		}
+	}
+
+	return trusted, untrusted
+}
+
+// untrustedAuthor is the METADATA-ONLY summary of one untrusted comment author,
+// used to build the orchestrator trust prompt. It deliberately carries NO
+// comment body — inlining it would merely relocate the prompt-injection to the
+// orchestrator (itself an LLM). Login/type/association are safe: GitHub logins
+// are constrained to [a-z0-9-] (plus a "[bot]" suffix), no newlines or markdown.
+type untrustedAuthor struct {
+	login string
+	assoc string
+	isBot bool
+	count int
+}
+
+// aggregateUntrustedAuthors folds a batch of dropped comments into one metadata
+// record per distinct login (lower-cased key), preserving first-seen order and
+// tallying the per-author comment count. Comments with an empty login are
+// skipped (nothing to allowlist).
+func aggregateUntrustedAuthors(untrusted []ghComment) []untrustedAuthor {
+	byLogin := map[string]*untrustedAuthor{}
+
+	var order []string
+
+	for _, c := range untrusted {
+		key := strings.ToLower(strings.TrimSpace(c.User.Login))
+		if key == "" {
+			continue
+		}
+
+		a := byLogin[key]
+		if a == nil {
+			assoc := strings.ToUpper(strings.TrimSpace(c.AuthorAssociation))
+			if assoc == "" {
+				assoc = "NONE"
+			}
+
+			a = &untrustedAuthor{
+				login: strings.TrimSpace(c.User.Login),
+				assoc: assoc,
+				isBot: strings.HasSuffix(key, "[bot]"),
+			}
+			byLogin[key] = a
+			order = append(order, key)
+		}
+
+		a.count++
+	}
+
+	out := make([]untrustedAuthor, 0, len(order))
+	for _, key := range order {
+		out = append(out, *byLogin[key])
+	}
+
+	return out
+}
+
+// promptUntrustedAuthors surfaces newly-seen untrusted comment authors to the
+// orchestrator as a ONE-TIME, METADATA-ONLY message so the human can decide
+// whether to allowlist them. It NEVER includes the comment body (the
+// orchestrator is itself an LLM — inlining the body would relocate the
+// injection). Called from diffAndBuild holding sm.prWatch.mu.
+//
+// It no-ops when NotifyUntrustedAuthors is off, when there is no orchestrator
+// (logged), when every author was already surfaced (persisted dedup), or when
+// the anti-flood rate-limit trips (logged; authors are NOT recorded so they can
+// be surfaced on a later poll). New authors are recorded in the persisted set
+// and the state is saved so the once-per-author guarantee survives a restart.
+func (sm *SessionManager) promptUntrustedAuthors(cfg *configPRWatch, t prWatchTarget, d prData, untrusted []ghComment) {
+	if !cfg.NotifyUntrustedAuthors {
+		return
+	}
+
+	authors := aggregateUntrustedAuthors(untrusted)
+	if len(authors) == 0 {
+		return
+	}
+
+	orch := sm.orchestratorID()
+	if orch == "" {
+		if sm.log != nil {
+			sm.log.Debug("pr-watch: untrusted comment author(s) dropped; no orchestrator to prompt",
+				"session", t.id, "pr", d.Number, "authors", len(authors))
+		}
+
+		return
+	}
+
+	// Keep only authors not already surfaced (persisted dedup). Compute now but
+	// record only after a successful send, so a rate-limited or failed send
+	// re-surfaces them later.
+	fresh := sm.freshUntrustedAuthors(authors)
+	if len(fresh) == 0 {
+		return
+	}
+
+	if !sm.allowAuthorPrompt() {
+		if sm.log != nil {
+			sm.log.Debug("pr-watch: untrusted-author prompt rate-limited",
+				"session", t.id, "pr", d.Number, "authors", len(fresh))
+		}
+
+		return
+	}
+
+	sm.notifyFromDaemon(orch, untrustedAuthorPromptBody(t, d, fresh))
+	sm.recordPromptedAuthors(fresh)
+}
+
+// freshUntrustedAuthors returns the subset of authors not already in the
+// persisted prompted-authors set. Read under sm.mu.
+func (sm *SessionManager) freshUntrustedAuthors(authors []untrustedAuthor) []untrustedAuthor {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	if sm.state == nil {
+		return authors
+	}
+
+	var fresh []untrustedAuthor
+
+	for _, a := range authors {
+		if !sm.state.PRWatchPromptedAuthors[strings.ToLower(a.login)] {
+			fresh = append(fresh, a)
+		}
+	}
+
+	return fresh
+}
+
+// allowAuthorPrompt applies the rolling anti-flood rate-limit for trust prompts,
+// recording this send's timestamp on success. Held under sm.prWatch.mu.
+func (sm *SessionManager) allowAuthorPrompt() bool {
+	now := time.Now()
+	window := now.Add(-prAuthorPromptWindow)
+
+	var recent []time.Time
+
+	for _, ts := range sm.prWatch.authorPromptLog {
+		if ts.After(window) {
+			recent = append(recent, ts)
+		}
+	}
+
+	if len(recent) >= prAuthorPromptRate {
+		sm.prWatch.authorPromptLog = recent
+		return false
+	}
+
+	sm.prWatch.authorPromptLog = append(recent, now)
+
+	return true
+}
+
+// recordPromptedAuthors adds surfaced authors to the persisted set (bounded by
+// maxPRWatchPromptedAuthors) and saves the state, so the once-per-author prompt
+// survives a daemon restart. Written under sm.mu.
+func (sm *SessionManager) recordPromptedAuthors(authors []untrustedAuthor) {
+	sm.mu.Lock()
+
+	if sm.state == nil {
+		sm.mu.Unlock()
+		return
+	}
+
+	if sm.state.PRWatchPromptedAuthors == nil {
+		sm.state.PRWatchPromptedAuthors = make(map[string]bool)
+	}
+
+	recorded := false
+
+	for _, a := range authors {
+		if len(sm.state.PRWatchPromptedAuthors) >= maxPRWatchPromptedAuthors {
+			if sm.log != nil {
+				sm.log.Warn("pr-watch: prompted-authors set full; not recording (may re-surface)",
+					"cap", maxPRWatchPromptedAuthors)
+			}
+
+			break
+		}
+
+		key := strings.ToLower(a.login)
+		if !sm.state.PRWatchPromptedAuthors[key] {
+			sm.state.PRWatchPromptedAuthors[key] = true
+			recorded = true
+		}
+	}
+
+	sm.mu.Unlock()
+
+	if recorded {
+		if err := sm.saveState(); err != nil && sm.log != nil {
+			sm.log.Error("pr-watch: failed to persist prompted authors", "err", err)
+		}
+	}
+}
+
+// untrustedAuthorPromptBody renders the metadata-only orchestrator trust prompt.
+// HARD RULE: it must never include any comment body text — only the author
+// login, User/Bot type, author_association, PR number, per-author comment count,
+// and a `gh pr view` pointer for the human to read the content manually.
+func untrustedAuthorPromptBody(t prWatchTarget, d prData, authors []untrustedAuthor) string {
+	var b strings.Builder
+
+	fmt.Fprintf(&b, "Untrusted PR comment author(s) on PR #%d (%s) — %s dropped from the working "+
+		"agent's notifications as a prompt-injection precaution. The comment text was NOT delivered "+
+		"to the agent and is NOT included here. Decide whether to trust the author(s) below; to trust "+
+		"one, add their login to pr_watch.comment_author_allowlist and reload.",
+		d.Number, t.branch, pluralAuthors(len(authors)))
+
+	for _, a := range authors {
+		kind := "User"
+		if a.isBot {
+			kind = "Bot"
+		}
+
+		fmt.Fprintf(&b, "\n  • @%s (%s), association %s, %s", a.login, kind, a.assoc, pluralComments(a.count))
+	}
+
+	fmt.Fprintf(&b, "\n\nRead the comment content yourself: `gh pr view %d --comments`.", d.Number)
+
+	return b.String()
+}
+
+// pluralAuthors / pluralComments render human-readable counts for the prompt.
+func pluralAuthors(n int) string {
+	if n == 1 {
+		return "1 new untrusted author was"
+	}
+
+	return fmt.Sprintf("%d new untrusted authors were", n)
+}
+
+func pluralComments(n int) string {
+	if n == 1 {
+		return "1 new comment"
+	}
+
+	return fmt.Sprintf("%d new comments", n)
 }
 
 // gate applies the debounce, rolling rate-limit, and per-head-SHA cap. It must

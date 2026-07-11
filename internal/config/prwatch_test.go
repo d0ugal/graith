@@ -139,3 +139,132 @@ func TestPRWatchDurations(t *testing.T) {
 		t.Errorf("MaxNotifications = %d, want 3", got)
 	}
 }
+
+// TestTrustedAssociationSet covers the author-trust association accessor: the
+// default set when unset, upper-case normalisation of a hand-written config,
+// whitespace trimming, and that an all-empty configured list falls back to the
+// default rather than trusting nothing.
+func TestTrustedAssociationSet(t *testing.T) {
+	t.Run("unset defaults to owner/member/collaborator", func(t *testing.T) {
+		var pw PRWatchConfig
+		set := pw.TrustedAssociationSet()
+
+		for _, want := range []string{"OWNER", "MEMBER", "COLLABORATOR"} {
+			if !set[want] {
+				t.Errorf("default set should trust %q", want)
+			}
+		}
+
+		// CONTRIBUTOR is deliberately excluded (drive-by / bot association).
+		if set["CONTRIBUTOR"] {
+			t.Error("CONTRIBUTOR must not be trusted by default")
+		}
+
+		if len(set) != 3 {
+			t.Errorf("default set should have exactly 3 entries, got %d", len(set))
+		}
+	})
+
+	t.Run("configured values are upper-cased and trimmed", func(t *testing.T) {
+		pw := PRWatchConfig{TrustedAuthorAssociations: []string{" member ", "Owner"}}
+		set := pw.TrustedAssociationSet()
+
+		if !set["MEMBER"] || !set["OWNER"] {
+			t.Errorf("configured associations should normalise to upper-case, got %v", set)
+		}
+
+		if set["COLLABORATOR"] {
+			t.Error("a configured set must not include unlisted defaults")
+		}
+	})
+
+	t.Run("all-empty entries fall back to default", func(t *testing.T) {
+		pw := PRWatchConfig{TrustedAuthorAssociations: []string{"", "  "}}
+		set := pw.TrustedAssociationSet()
+
+		if !set["OWNER"] || !set["MEMBER"] || !set["COLLABORATOR"] {
+			t.Errorf("empty entries should fall back to the default set, got %v", set)
+		}
+	})
+}
+
+// TestPRWatchAuthorTrustParsing covers parsing the three author-trust keys from
+// TOML and the association default/normalisation on load.
+func TestPRWatchAuthorTrustParsing(t *testing.T) {
+	load := func(t *testing.T, body string) PRWatchConfig {
+		t.Helper()
+
+		dir := t.TempDir()
+		path := filepath.Join(dir, "config.toml")
+
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+
+		return cfg.PRWatch
+	}
+
+	t.Run("keys parse", func(t *testing.T) {
+		pw := load(t, "[pr_watch]\nenabled = true\n"+
+			"comment_author_allowlist = [\"github-actions[bot]\", \"coderabbitai[bot]\"]\n"+
+			"trusted_author_associations = [\"owner\", \"member\"]\n"+
+			"notify_untrusted_authors = false\n")
+
+		if len(pw.CommentAuthorAllowlist) != 2 || pw.CommentAuthorAllowlist[0] != "github-actions[bot]" {
+			t.Errorf("comment_author_allowlist not parsed, got %v", pw.CommentAuthorAllowlist)
+		}
+
+		if pw.NotifyUntrustedAuthors {
+			t.Error("notify_untrusted_authors=false should parse as false")
+		}
+
+		set := pw.TrustedAssociationSet()
+		if !set["OWNER"] || !set["MEMBER"] {
+			t.Errorf("trusted_author_associations should normalise to upper-case, got %v", set)
+		}
+
+		if set["COLLABORATOR"] {
+			t.Error("an explicit list must not include the unlisted default COLLABORATOR")
+		}
+	})
+
+	t.Run("defaults when unset", func(t *testing.T) {
+		// Master switch on, author-trust keys absent: allowlist empty, association
+		// default applies, notify_untrusted_authors follows the embedded default.
+		pw := load(t, "[pr_watch]\nenabled = true\n")
+
+		if len(pw.CommentAuthorAllowlist) != 0 {
+			t.Errorf("comment_author_allowlist should default empty, got %v", pw.CommentAuthorAllowlist)
+		}
+
+		set := pw.TrustedAssociationSet()
+		if !set["OWNER"] || !set["MEMBER"] || !set["COLLABORATOR"] {
+			t.Errorf("unset associations should default to owner/member/collaborator, got %v", set)
+		}
+	})
+}
+
+// TestPRWatchAuthorTrustDefaults asserts the embedded default_config.toml ships
+// the author-trust gate on: notify_untrusted_authors true and the default
+// trusted associations.
+func TestPRWatchAuthorTrustDefaults(t *testing.T) {
+	pw := Default().PRWatch
+
+	if !pw.NotifyUntrustedAuthors {
+		t.Error("notify_untrusted_authors should default true in the embedded config")
+	}
+
+	set := pw.TrustedAssociationSet()
+	if !set["OWNER"] || !set["MEMBER"] || !set["COLLABORATOR"] || set["CONTRIBUTOR"] {
+		t.Errorf("default trusted associations wrong: %v", set)
+	}
+
+	if len(pw.CommentAuthorAllowlist) != 0 {
+		t.Errorf("comment_author_allowlist should default empty, got %v", pw.CommentAuthorAllowlist)
+	}
+}

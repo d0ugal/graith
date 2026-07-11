@@ -283,6 +283,60 @@ type PRWatchConfig struct {
 	PollMerged            string `toml:"poll_merged"`
 	MaxNotificationsPerPR int    `toml:"max_notifications_per_pr"`
 	Debounce              string `toml:"debounce"`
+	// CommentAuthorAllowlist trusts individual comment authors by login,
+	// case-insensitively and matched against the full "<name>[bot]" string. It is
+	// the ONLY way to trust a bot or GitHub App (their author_association is
+	// unreliable — a bot can carry NONE or CONTRIBUTOR), and also covers named
+	// humans. Defaults empty; discovery is via the orchestrator trust prompt.
+	CommentAuthorAllowlist []string `toml:"comment_author_allowlist"`
+	// TrustedAuthorAssociations is the set of GitHub author_association values
+	// treated as trusted. Defaults to OWNER/MEMBER/COLLABORATOR when unset (the
+	// "has write access to, or is a member of the org that owns, the repo" tier);
+	// CONTRIBUTOR is deliberately excluded. Values are normalised to upper-case
+	// via TrustedAssociationSet.
+	TrustedAuthorAssociations []string `toml:"trusted_author_associations"`
+	// NotifyUntrustedAuthors, when true, sends a one-time metadata-only message to
+	// the orchestrator the first time a comment from a not-yet-trusted author is
+	// seen, so the human can decide whether to allowlist them. It NEVER carries
+	// the untrusted comment body. False disables the prompt entirely (silent drop,
+	// still logged).
+	NotifyUntrustedAuthors bool `toml:"notify_untrusted_authors"`
+}
+
+// DefaultTrustedAssociations is the trusted author_association set used when
+// pr_watch.trusted_author_associations is unset. It is the "has write access to,
+// or is a member of the org that owns, the repo" tier; CONTRIBUTOR is excluded
+// deliberately (on a public repo it means only "merged a commit once", and bots
+// can carry it — see the author-trust design doc).
+var DefaultTrustedAssociations = []string{"OWNER", "MEMBER", "COLLABORATOR"}
+
+// TrustedAssociationSet returns the resolved set of trusted author_association
+// values as an upper-cased lookup set. An unset TrustedAuthorAssociations
+// defaults to DefaultTrustedAssociations; a configured list is normalised to
+// upper-case (GitHub returns the enum upper-cased, but config is hand-written)
+// and empty/whitespace entries are dropped. An explicitly-empty but present
+// list would trust no association (allowlist-only) — but because go-toml can't
+// distinguish an explicit empty slice from unset here, an empty result falls
+// back to the default; operators disable association trust by setting the
+// allowlist and leaving associations at the default, or by scoping the
+// allowlist. See the design doc "Empty default allowlist" decision.
+func (p PRWatchConfig) TrustedAssociationSet() map[string]bool {
+	set := make(map[string]bool, len(p.TrustedAuthorAssociations))
+
+	for _, a := range p.TrustedAuthorAssociations {
+		a = strings.ToUpper(strings.TrimSpace(a))
+		if a != "" {
+			set[a] = true
+		}
+	}
+
+	if len(set) == 0 {
+		for _, a := range DefaultTrustedAssociations {
+			set[a] = true
+		}
+	}
+
+	return set
 }
 
 func parseDurationOr(s string, fallback time.Duration) time.Duration {
