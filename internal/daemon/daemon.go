@@ -497,6 +497,14 @@ func (sm *SessionManager) repoStoreDir(repoRoot string) (string, error) {
 // keeps call sites self-documenting and lets new options default to their
 // zero value without breaking existing callers.
 type CreateOpts struct {
+	// ID, when non-empty, is the session ID to use instead of generating a
+	// fresh one. It must match the generated ID format (8 lowercase hex chars)
+	// and not collide with an existing session — Create validates both and
+	// fails closed otherwise. Callers that must know the ID before Create
+	// returns (e.g. scenario reservation, where a placeholder ID would
+	// otherwise differ from the final session ID) supply it here. When empty,
+	// Create generates the ID as before.
+	ID                  string
 	Name                string
 	AgentName           string
 	RepoPath            string
@@ -612,10 +620,24 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		preUsername = "user"
 	}
 
+	// Validate a caller-supplied ID before taking the lock; uniqueness is
+	// checked under the lock below, atomically with the reservation.
+	if opts.ID != "" {
+		if err := validateSessionID(opts.ID); err != nil {
+			return SessionState{}, err
+		}
+	}
+
 	// --- Phase 1: Lock, validate state, reserve session ---
 	sm.mu.Lock()
 
-	id := generateID()
+	id := opts.ID
+	if id == "" {
+		id = generateID()
+	} else if _, exists := sm.state.Sessions[id]; exists {
+		sm.mu.Unlock()
+		return SessionState{}, fmt.Errorf("session id %q already in use", id)
+	}
 
 	token, err := generateToken()
 	if err != nil {

@@ -236,7 +236,11 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 	sm.mu.Unlock()
 
 	// --- Start phase: create each session concurrently ---
-	// Remove all placeholders first so Create can allocate its own IDs.
+	// Remove all placeholders first, then hand each reserved ID back to Create
+	// (via CreateOpts.ID) so the final session keeps the ID we reserved — the
+	// placeholder ID and the final session ID are one and the same, and
+	// ScenarioState.SessionIDs never has to be rewritten. The delete is still
+	// needed because Create reserves the ID itself and rejects a collision.
 	// Shared-reused sessions already have real IDs and don't need creation.
 	repoRoots := make([]string, len(msg.Sessions))
 
@@ -297,6 +301,7 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 			}
 
 			sess, err := sm.Create(CreateOpts{
+				ID:         sessionIDs[idx],
 				Name:       s.Name,
 				AgentName:  agentName,
 				RepoPath:   repoRoots[idx],
