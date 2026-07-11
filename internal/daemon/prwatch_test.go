@@ -655,6 +655,106 @@ func TestDiffAndBuild_GreenCompletionWhileCommentsDegraded(t *testing.T) {
 	}
 }
 
+// TestDiffAndBuild_RedCompletionRetriesAfterGatedReject locks the
+// cursor-advance-only-on-delivery invariant for the red completion notice: when
+// the completion is rejected by the debounce gate it must stay armed and re-fire
+// on a later poll, not be silently dropped. Uses a non-zero debounce so the
+// completion's gate call is rejected within the test's instant, then clears the
+// cooldown to let it through.
+func TestDiffAndBuild_RedCompletionRetriesAfterGatedReject(t *testing.T) {
+	sm := newPRWatchSM()
+	cfg := allOnConfig()
+	cfg.Debounce = "2m" // the early failure sets lastSent; the completion gate then debounces
+	t1 := prWatchTarget{id: "fash", branch: "fash"}
+
+	sm.diffAndBuild(cfg, t1, "croft/loch", prData{Number: 80, State: "open", HeadRefOid: "sha1", CIState: "passing", CommentsOK: true})
+
+	// Early failure while pending → notice sent, arms completion, sets lastSent.
+	if out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 80, State: "open", HeadRefOid: "sha1", CIState: "failing",
+		FailingChecks: []string{"build"}, CIPending: 2, CommentsOK: true,
+	}); len(out) != 1 {
+		t.Fatalf("early failure should notify, got %v", out)
+	}
+
+	// Checks finish red, but the completion is within the debounce window → gated.
+	if out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 80, State: "open", HeadRefOid: "sha1", CIState: "failing",
+		FailingChecks: []string{"build"}, CIPending: 0, CommentsOK: true,
+	}); len(out) != 0 {
+		t.Fatalf("completion within debounce window should be gated, got %v", out)
+	}
+
+	// Confirm it stayed armed (not silently dropped).
+	sm.prWatch.mu.Lock()
+	armed := sm.prWatch.cursors[t1.id].ciAwaitingFinal
+	sm.prWatch.mu.Unlock()
+
+	if !armed {
+		t.Fatal("a gated completion must stay armed to retry")
+	}
+
+	// Cooldown elapses → the completion re-fires.
+	sm.prWatch.mu.Lock()
+	delete(sm.prWatch.lastSent, t1.id)
+	sm.prWatch.mu.Unlock()
+
+	out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 80, State: "open", HeadRefOid: "sha1", CIState: "failing",
+		FailingChecks: []string{"build"}, CIPending: 0, CommentsOK: true,
+	})
+	if len(out) != 1 || !strings.Contains(out[0], "have finished") || !strings.Contains(out[0], "the build is red") {
+		t.Fatalf("gated red completion should re-fire once the cooldown elapses, got %v", out)
+	}
+}
+
+// TestDiffAndBuild_GreenCompletionRetriesAfterGatedReject is the green-outcome
+// counterpart: a green completion rejected by the debounce gate must stay armed
+// and re-fire later. Recovery is off so the passing branch can't confuse the
+// signal — only the completion path can produce a notice.
+func TestDiffAndBuild_GreenCompletionRetriesAfterGatedReject(t *testing.T) {
+	sm := newPRWatchSM()
+	cfg := allOnConfig()
+	cfg.Debounce = "2m"
+	cfg.NotifyCIRecovery = false
+	t1 := prWatchTarget{id: "scunner", branch: "scunner"}
+
+	sm.diffAndBuild(cfg, t1, "croft/loch", prData{Number: 81, State: "open", HeadRefOid: "sha1", CIState: "passing", CommentsOK: true})
+
+	if out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 81, State: "open", HeadRefOid: "sha1", CIState: "failing",
+		FailingChecks: []string{"build"}, CIPending: 1, CommentsOK: true,
+	}); len(out) != 1 {
+		t.Fatalf("early failure should notify, got %v", out)
+	}
+
+	// Finishes green within the debounce window → completion gated.
+	if out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 81, State: "open", HeadRefOid: "sha1", CIState: "passing", CIPending: 0, CommentsOK: true,
+	}); len(out) != 0 {
+		t.Fatalf("green completion within debounce window should be gated, got %v", out)
+	}
+
+	sm.prWatch.mu.Lock()
+	armed := sm.prWatch.cursors[t1.id].ciAwaitingFinal
+	sm.prWatch.mu.Unlock()
+
+	if !armed {
+		t.Fatal("a gated green completion must stay armed to retry")
+	}
+
+	sm.prWatch.mu.Lock()
+	delete(sm.prWatch.lastSent, t1.id)
+	sm.prWatch.mu.Unlock()
+
+	out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 81, State: "open", HeadRefOid: "sha1", CIState: "passing", CIPending: 0, CommentsOK: true,
+	})
+	if len(out) != 1 || !strings.Contains(out[0], "have finished") || !strings.Contains(out[0], "green") {
+		t.Fatalf("gated green completion should re-fire once the cooldown elapses, got %v", out)
+	}
+}
+
 // TestDiffAndBuild_NewSHAClearsPendingCompletion locks the head-SHA reset: an
 // armed completion notice on the old SHA must not fire against a new SHA after a
 // force-push, and the new SHA reports its own failure fresh.
