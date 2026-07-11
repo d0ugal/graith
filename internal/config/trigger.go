@@ -75,6 +75,19 @@ type ActionConfig struct {
 	Deliver DeliverConfig `toml:"deliver"`
 }
 
+// RepoPath returns the action's configured repo with a leading ~/ expanded to an
+// absolute path, matching how every other configured path (data_dir, sandbox
+// read_dirs/write_dirs, allowed_repo_paths) is treated. It returns "" when no
+// repo is set — unlike ExpandPath, which would resolve "" to the working
+// directory — so callers can still distinguish "unset" from a resolved path.
+func (a *ActionConfig) RepoPath() string {
+	if a.Repo == "" {
+		return ""
+	}
+
+	return ExpandPath(a.Repo)
+}
+
 // DeliverConfig routes action output. All fields are templated at fire time.
 type DeliverConfig struct {
 	Inbox string `toml:"inbox"` // session name, "orchestrator", or a template like "{session_name}"
