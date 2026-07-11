@@ -344,6 +344,18 @@ Transitions that notify:
   (review — they would wake an agent spuriously); `CANCELLED`/`cancel` is a
   non-directive state. Recovery (fail→pass) is informational — notify only if
   `notify_ci_recovery` (default on; see §7 update note).
+  - **Granular reporting (update).** The **first** failure fires as soon as any
+    check goes red, *even while other checks are still running*, so the agent can
+    start fixing immediately rather than waiting for the whole run. That early
+    notice carries the count of still-running checks (`prData.CIPending`) and
+    flags that the result is not yet final. Once every check reaches a terminal
+    state and the build is still red, a single **completion** notice delivers the
+    final failing tally (`ciCompleteBody`). Both are directives (they bypass the
+    per-SHA cap). If the first failure is already the final result (no checks
+    pending) there is no separate completion notice — the failure notice is the
+    complete report. A green finish is reported by the recovery path instead. The
+    completion follow-up is armed per head-SHA (`prWatchCursor.ciAwaitingFinal`)
+    and reset on a new SHA or a green build.
 - **Comments/reviews:** any item with `id` greater than the **matching
   per-surface cursor** (`LastIssueCommentID` / `LastReviewCommentID` /
   `LastReviewID`); advance only that surface's cursor.
