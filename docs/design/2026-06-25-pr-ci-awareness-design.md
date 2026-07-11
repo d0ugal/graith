@@ -349,13 +349,19 @@ Transitions that notify:
     start fixing immediately rather than waiting for the whole run. That early
     notice carries the count of still-running checks (`prData.CIPending`) and
     flags that the result is not yet final. Once every check reaches a terminal
-    state and the build is still red, a single **completion** notice delivers the
-    final failing tally (`ciCompleteBody`). Both are directives (they bypass the
+    state, a single **completion** notice delivers the final outcome
+    (`ciCompleteBody`) — the failing tally if still red, or a green confirmation
+    if the build recovered before all checks finished. This fulfils the early
+    notice's "a follow-up will confirm once all checks finish" promise regardless
+    of outcome or of `notify_ci_recovery`. Both are directives (they bypass the
     per-SHA cap). If the first failure is already the final result (no checks
     pending) there is no separate completion notice — the failure notice is the
-    complete report. A green finish is reported by the recovery path instead. The
-    completion follow-up is armed per head-SHA (`prWatchCursor.ciAwaitingFinal`)
-    and reset on a new SHA or a green build.
+    complete report. The completion follow-up is armed per head-SHA
+    (`prWatchCursor.ciAwaitingFinal`) only when an early failure was delivered
+    while checks were still pending, so an ordinary fail→pass recovery with no
+    early heads-up still goes through the recovery path; it is reset on a new SHA.
+    The completion is delivered from both the steady-state and the unprimed
+    (degraded-comments) paths so it is never lost while comment fetches degrade.
 - **Comments/reviews:** any item with `id` greater than the **matching
   per-surface cursor** (`LastIssueCommentID` / `LastReviewCommentID` /
   `LastReviewID`); advance only that surface's cursor.

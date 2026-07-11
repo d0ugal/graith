@@ -444,14 +444,27 @@ func (sm *SessionManager) diffAndBuild(cfg *configPRWatch, t prWatchTarget, slug
 		// bypass the per-SHA cap, only debounce/rate-limit would bound it. Advancing
 		// the cursor only on delivery keeps the send retryable if the gate rejects.
 		if d.CIState == "passing" {
-			// CI recovered while still unprimed: clear the dedup set so a genuine
-			// re-failure on the same SHA re-notifies (mirrors the steady-state
-			// reset), and disarm any pending completion notice (a green finish is
-			// not a red completion). No recovery notice is sent here — the unprimed
-			// branch only surfaces currently-broken state, not transitions back to
-			// green.
-			cur.failing = map[string]bool{}
-			cur.ciAwaitingFinal = false
+			if cfg.NotifyCIFailures && cur.ciAwaitingFinal {
+				// An early failure was delivered from this unprimed branch while
+				// checks were still running (arming ciAwaitingFinal), and the build
+				// has now finished green. Honour the promised completion follow-up
+				// here too — the steady-state green completion is unreachable until
+				// the session primes, and comment fetches may keep degrading. Disarm
+				// and clear the dedup set only on delivery; a rejected gate retries.
+				if _, ok := sm.gate(cfg, t.id, cur, true); ok {
+					cur.ciAwaitingFinal = false
+					cur.failing = map[string]bool{}
+
+					return []string{ciCompleteBody(t, slug, d)}
+				}
+			} else {
+				// CI recovered while still unprimed with nothing armed: clear the
+				// dedup set so a genuine re-failure on the same SHA re-notifies
+				// (mirrors the steady-state reset). No recovery notice is sent here —
+				// the unprimed branch only surfaces currently-broken state, not
+				// transitions back to green.
+				cur.failing = map[string]bool{}
+			}
 		}
 
 		if d.CIState == "failing" && cfg.NotifyCIFailures && !allFailingSeen(d.FailingChecks, cur.failing) {
@@ -525,23 +538,33 @@ func (sm *SessionManager) diffAndBuild(cfg *configPRWatch, t prWatchTarget, slug
 
 	// --- CI completion (directive) ---
 	// After an early-failure heads-up delivered while checks were still running,
-	// send a single completion notice once every check has finished and the build
-	// is still red — the final failing tally. A green finish is covered by the
-	// recovery path below (which resets the flag), so this only fires for a
-	// confirmed-red completion.
-	if cfg.NotifyCIFailures && cur.ciAwaitingFinal && d.CIState == "failing" && d.CIPending == 0 {
+	// send a single completion notice once every check has finished — the final
+	// outcome, red OR green. The early notice promises "a follow-up will confirm
+	// once all checks finish", so we honour it regardless of the outcome or of
+	// notify_ci_recovery. It fires only when armed (ciAwaitingFinal); an ordinary
+	// fail→pass recovery with no early heads-up still goes through the recovery
+	// path below. Advance (disarm) only on delivery so a rejected gate retries.
+	if cfg.NotifyCIFailures && cur.ciAwaitingFinal && d.CIPending == 0 &&
+		(d.CIState == "failing" || d.CIState == "passing") {
 		if _, ok := sm.gate(cfg, t.id, cur, true); ok {
 			out = append(out, ciCompleteBody(t, slug, d))
 			cur.ciAwaitingFinal = false
+
+			if d.CIState == "passing" {
+				// The green outcome has been reported by the completion notice;
+				// clear the dedup set so the passing branch below doesn't also emit
+				// a recovery notice for the same transition.
+				cur.failing = map[string]bool{}
+			}
 		}
 	}
 
 	switch d.CIState {
 	case "passing":
-		// Build is green: any armed completion notice is now moot — recovery (if
-		// enabled) is the "all finished" report.
-		cur.ciAwaitingFinal = false
-
+		// NB: an armed completion notice is handled above (it reports the green
+		// outcome and clears cur.failing on delivery). Deliberately do NOT disarm
+		// ciAwaitingFinal here — if the completion gate was rejected it must stay
+		// armed to retry next poll (cursor-advance-only-on-delivery).
 		if cfg.NotifyCIRecovery && len(cur.failing) > 0 {
 			// Only clear the failing set once the recovery notice is actually
 			// delivered; if the gate rejects it (debounce/cap/rate-limit),
@@ -750,8 +773,15 @@ func ciFailureBody(t prWatchTarget, slug string, d prData) string {
 
 // ciCompleteBody is the completion notice sent once every check has finished
 // following an early-failure heads-up (ciFailureBody with checks still pending).
-// It confirms the build is still red and gives the final failing tally.
+// It reports the final outcome: red with the failing tally, or green when the
+// build recovered before all checks finished.
 func ciCompleteBody(t prWatchTarget, slug string, d prData) string {
+	if d.CIState == "passing" {
+		return fmt.Sprintf("All CI checks have finished on PR #%d (%s) — the build is green. "+
+			"The earlier failure was not the final result; no action needed unless you were mid-change.",
+			d.Number, t.branch)
+	}
+
 	var b strings.Builder
 	fmt.Fprintf(&b, "All CI checks have finished on PR #%d (%s) — the build is red.", d.Number, t.branch)
 
