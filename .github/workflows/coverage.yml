@@ -212,11 +212,25 @@ jobs:
           set -euo pipefail
           marker='<!-- coverage-report -->'
 
-          # Go row.
-          if [ "$GO_RESULT" = "success" ] && [ -n "${GO_PCT:-}" ]; then
+          # Go row. Key off the presence of the measured % rather than the job
+          # result: the threshold gate can FAIL the go-coverage job *after* its
+          # outputs are written, and a coverage regression is exactly when the
+          # numbers matter most — so still show them.
+          if [ -n "${GO_PCT:-}" ]; then
             go_row="| Go (\`./...\`) | ${GO_PCT}% | ${GO_DELTA} |"
           else
             go_row="| Go (\`./...\`) | n/a | — |"
+          fi
+
+          # When the go-coverage job failed but produced numbers, the threshold
+          # gate tripped (a >5% drop): call it out above the table.
+          warning=""
+          if [ "$GO_RESULT" != "success" ] && [ -n "${GO_PCT:-}" ]; then
+            # Trailing newline so a blank line separates the blockquote from the
+            # table below (GFM needs it to parse the table). When empty, the
+            # heredoc line is just the one blank line already between heading and
+            # table.
+            warning="> ⚠️ **Coverage regressed by ${GO_DELTA} vs base**, exceeding the allowed 5% budget. Please add tests."$'\n'
           fi
 
           # Swift row: only meaningful when the PR touches gui/.
@@ -236,8 +250,7 @@ jobs:
           # keeps the same base indent as the body heredoc below so the block
           # scalar de-indents both to column 0.
           details=""
-          if [ "$GO_RESULT" = "success" ] && [ -n "${GO_TABLE:-}" ] \
-             && [ "$GO_TABLE" != "_No Go coverage data._" ]; then
+          if [ -n "${GO_TABLE:-}" ] && [ "$GO_TABLE" != "_No Go coverage data._" ]; then
             details="$(cat <<DETAILS_EOF
 
           <details>
@@ -257,7 +270,7 @@ jobs:
           body="$(cat <<EOF
           $marker
           ### 📊 Test coverage
-
+          $warning
           | Component | Coverage | Δ vs base |
           |-----------|:--------:|:---------:|
           $go_row
