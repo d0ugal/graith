@@ -53,6 +53,66 @@ gr msg send review-feature "ready for review"
 gr msg send implement-feature "found an issue in handler.go:45, missing error check"
 ```
 
+## Automated triggers
+
+The [code review pipeline](#code-review-pipeline) above is set up by hand. A
+**[trigger](../triggers/)** makes the daemon do it automatically — no attached
+orchestrator, surviving terminal close.
+
+**Continuous reviewer** — keep a reviewer reacting to an implementer's changes.
+A watch trigger with a `session` action (`ensure = true`) messages the owned
+reviewer if it exists (auto-resuming a stopped one), else spawns one mirroring
+the implementer's worktree read-only:
+
+```toml
+# config.toml
+[[trigger]]
+name = "review-go"
+[trigger.watch]
+role  = "implementer"          # binds to any session with this scenario role
+paths = ["**/*.go"]
+[trigger.action]
+type   = "session"
+ensure = true
+agent  = "claude"
+prompt = "Review the changes since your last look; send feedback via gr msg."
+```
+
+**Tests on change** — run the suite when source changes, results to the session's
+inbox:
+
+```toml
+[[trigger]]
+name = "test-on-change"
+[trigger.watch]
+repo  = "~/Code/graith"
+paths = ["**/*.go"]
+[trigger.action]
+type    = "command"
+command = "go test ./..."
+[trigger.action.deliver]
+inbox = "{session_name}"
+```
+
+**Scheduled report** — a daily PR summary posted to the orchestrator:
+
+```toml
+[[trigger]]
+name = "daily-pr-report"
+[trigger.schedule]
+cron = "0 9 * * *"
+[trigger.action]
+type   = "session"
+prompt = "Summarise open PRs and post to the orchestrator inbox."
+repo   = "~/Code/graith"
+agent  = "claude"
+[trigger.action.deliver]
+inbox = "orchestrator"
+```
+
+Inspect and control them with `gr trigger list/status/run/pause/resume`. See the
+[triggers docs](../triggers/) for the full model.
+
 ## Orchestrated multi-agent workflow
 
 Use the orchestrator to manage a fleet of agents:

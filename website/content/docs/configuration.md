@@ -119,6 +119,49 @@ When enabled, the daemon fetches and fast-forward merges the default branch of e
 
 Sessions run in their own worktrees on feature branches, which share only the object store with the source checkout, so fast-forwarding the default branch cannot disturb them — those sessions do **not** block the pull. A repo is only skipped when a session works directly on the source checkout (in-place) or has the default branch itself checked out in its worktree. This keeps default branches up to date for future session creation without ever pulling into an active worktree.
 
+## Triggers
+
+Daemon-fired automation: a trigger is `(source) → (action)`. Define them as
+`[[trigger]]` blocks (each with exactly one `[trigger.schedule]` or
+`[trigger.watch]` source and one `[trigger.action]`), plus an optional
+`[triggers]` table for daemon-wide settings.
+
+```toml
+[triggers]
+max_concurrent = 4          # cap on concurrently-running trigger actions
+
+# Schedule → command: run tests nightly and report to the orchestrator.
+[[trigger]]
+name = "nightly-tests"
+[trigger.schedule]
+cron = "0 3 * * *"          # 5-field cron / @daily; or: every = "15m"
+[trigger.action]
+type    = "command"
+command = "go test ./..."
+repo    = "~/Code/graith"
+[trigger.action.deliver]
+inbox = "orchestrator"
+
+# Watch → session: keep a reviewer reacting to an implementer's changes.
+[[trigger]]
+name = "review-go"
+[trigger.watch]
+role  = "implementer"       # policy selector: repo or role, never a live session
+paths = ["**/*.go"]
+debounce = "30s"
+[trigger.action]
+type   = "session"
+ensure = true               # message the owned reactor if it exists, else spawn
+agent  = "claude"
+prompt = "Review the changes since your last look; send feedback via gr msg."
+```
+
+Actions: `command` (sandboxed by default; `sandbox`/`sandbox_config` mirror
+MCP-server config), `session`, `scenario`, `message`. Delivery routes to
+`inbox`/`topic`/`store`. Policy: `catch_up` (default false), `overlap` (default
+`skip`), `rate_limit` (default `5/30m`). See [Triggers](triggers.md) for the full
+reference.
+
 ## Keybindings
 
 ```toml
