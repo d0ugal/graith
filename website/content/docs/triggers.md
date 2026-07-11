@@ -101,9 +101,10 @@ auto_cleanup = true            # delete the session once it stops
 | `true` / `"always"` | Soft-delete on any stop, clean exit or crash. |
 | `"on_success"` | Soft-delete only on a clean stop (agent exit code 0). |
 
-`"on_success"` means the agent completed and exited on its own with code 0 — a
-session killed by `gr stop`, an idle timeout, or a crash exits non-zero and is
-**not** treated as a success, so it is left in place.
+`"on_success"` means the agent completed and exited **on its own** with code 0.
+A session ended by `gr stop`, an idle timeout, a daemon shutdown, or a crash is
+never a success — not even if it happens to exit 0 (the stop reason, not just
+the exit code, decides) — so it is left in place.
 
 Cleanup is a **soft delete**, so the session stays recoverable with `gr restore`
 within the `[delete] retention` window before it is purged. It only applies to
@@ -131,12 +132,13 @@ auto_cleanup = true
 idle_timeout = "2m"            # override the 1m auto_cleanup default
 ```
 
-`idle_timeout` works on any `session` action (not just with `auto_cleanup`) and
-overrides the agent's default idle window. Note the default idle window is only
-applied for `"always"`: an `"on_success"` idle-stop is a non-zero exit that
-`"on_success"` won't clean up, so auto-idling it would just leave stopped
-clutter — it is left running until it exits cleanly on its own (or you set
-`idle_timeout` explicitly).
+`idle_timeout` works on any `session` action (not just with `auto_cleanup`),
+must be at least `1s`, and overrides the agent's default idle window. The
+1-minute default is only applied for `"always"`: an `"on_success"` session is
+never auto-idled, because an idle-stop is not a success and so wouldn't be
+cleaned up — idling it would just leave stopped clutter. Setting `idle_timeout`
+explicitly on an `"on_success"` session still only *stops* it; it does not clean
+it up (only a clean self-exit does).
 
 ### Ensure-reviewer (watch + session)
 

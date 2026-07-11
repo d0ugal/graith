@@ -426,11 +426,18 @@ func (c *Config) validateAction(where string, t *TriggerConfig) []error {
 			errs = append(errs, fmt.Errorf("%s: action.auto_cleanup is incompatible with ensure=true (reused reactors are not auto-deleted)", where))
 		}
 
+		// Unlike auto_cleanup, idle_timeout IS allowed with ensure=true: idle-
+		// stopping a reactor is recoverable (reuseReactor auto-resumes a stopped
+		// reactor on the next event), so it frees resources without defeating
+		// idempotent reuse the way a soft-delete would.
 		if a.IdleTimeout != "" {
 			if d, err := ParseDurationWithDays(a.IdleTimeout); err != nil {
 				errs = append(errs, fmt.Errorf("%s: action.idle_timeout %q: %w", where, a.IdleTimeout, err))
-			} else if d <= 0 {
-				errs = append(errs, fmt.Errorf("%s: action.idle_timeout must be > 0", where))
+			} else if d < time.Second {
+				// Idle stopping is second-granular (stored as whole seconds); a
+				// sub-second value would truncate to 0 and silently fall back to
+				// the agent default — the opposite of a tight timeout — so reject it.
+				errs = append(errs, fmt.Errorf("%s: action.idle_timeout must be at least 1s", where))
 			}
 		}
 	case ActionScenario:
