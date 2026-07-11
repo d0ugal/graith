@@ -471,37 +471,105 @@ func TestDiffAndBuild_FailureAllDoneNoCompletion(t *testing.T) {
 	}
 }
 
-// TestDiffAndBuild_GreenFinishNoRedCompletion verifies that if the build recovers
-// to green after an in-flight failure, the red completion notice does not fire —
-// the recovery path is the "all finished" report.
-func TestDiffAndBuild_GreenFinishNoRedCompletion(t *testing.T) {
+// TestDiffAndBuild_GreenFinishCompletion verifies that if the build finishes
+// green after an in-flight failure, the completion notice reports the green
+// outcome (fulfilling the "a follow-up will confirm once all checks finish"
+// promise) rather than a red completion or a duplicate recovery notice.
+func TestDiffAndBuild_GreenFinishCompletion(t *testing.T) {
 	sm := newPRWatchSM()
 	cfg := allOnConfig()
 	cfg.Debounce = "0s"
-	cfg.NotifyCIRecovery = true // the green-finish report comes from the recovery path
+	cfg.NotifyCIRecovery = true // even with recovery on, the completion subsumes it
 	t1 := prWatchTarget{id: "bonnie", branch: "bonnie"}
 
 	sm.diffAndBuild(cfg, t1, "croft/loch", prData{Number: 3, State: "open", HeadRefOid: "sha1", CIState: "passing", CommentsOK: true})
 
-	// Early failure while pending → arms a completion notice.
+	// Early failure while pending → arms the completion notice.
 	sm.diffAndBuild(cfg, t1, "croft/loch", prData{
 		Number: 3, State: "open", HeadRefOid: "sha1", CIState: "failing",
 		FailingChecks: []string{"build"}, CIPending: 1, CommentsOK: true,
 	})
 
-	// Everything finishes green (flaky check re-ran) → recovery notice, not a red
-	// completion.
+	// Everything finishes green (flaky check re-ran) → single green completion,
+	// not a red completion and not also a recovery notice.
 	out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
 		Number: 3, State: "open", HeadRefOid: "sha1", CIState: "passing", CIPending: 0, CommentsOK: true,
 	})
-	if len(out) != 1 || !strings.Contains(out[0], "green again") {
-		t.Fatalf("green finish should send the recovery notice, got %v", out)
+	if len(out) != 1 {
+		t.Fatalf("green finish should send exactly one notice, got %v", out)
 	}
 
-	for _, o := range out {
-		if strings.Contains(o, "the build is red") {
-			t.Errorf("green finish should not send a red completion notice, got: %s", o)
-		}
+	if !strings.Contains(out[0], "have finished") || !strings.Contains(out[0], "green") {
+		t.Errorf("green finish should report the green completion, got: %s", out[0])
+	}
+
+	if strings.Contains(out[0], "the build is red") || strings.Contains(out[0], "green again") {
+		t.Errorf("green finish should not send a red completion or a duplicate recovery notice, got: %s", out[0])
+	}
+
+	// Completion fires only once.
+	if out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 3, State: "open", HeadRefOid: "sha1", CIState: "passing", CIPending: 0, CommentsOK: true,
+	}); len(out) != 0 {
+		t.Fatalf("green completion should not re-fire, got %v", out)
+	}
+}
+
+// TestDiffAndBuild_GreenFinishCompletionRecoveryOff verifies the green completion
+// fires even when notify_ci_recovery is off: the early failure promised a
+// follow-up once checks finish, and that promise is independent of the recovery
+// gate.
+func TestDiffAndBuild_GreenFinishCompletionRecoveryOff(t *testing.T) {
+	sm := newPRWatchSM()
+	cfg := allOnConfig()
+	cfg.Debounce = "0s"
+	cfg.NotifyCIRecovery = false // recovery notices disabled entirely
+	t1 := prWatchTarget{id: "canny", branch: "canny"}
+
+	sm.diffAndBuild(cfg, t1, "croft/loch", prData{Number: 4, State: "open", HeadRefOid: "sha1", CIState: "passing", CommentsOK: true})
+
+	sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 4, State: "open", HeadRefOid: "sha1", CIState: "failing",
+		FailingChecks: []string{"build"}, CIPending: 2, CommentsOK: true,
+	})
+
+	out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 4, State: "open", HeadRefOid: "sha1", CIState: "passing", CIPending: 0, CommentsOK: true,
+	})
+	if len(out) != 1 || !strings.Contains(out[0], "green") || !strings.Contains(out[0], "have finished") {
+		t.Fatalf("green completion should fire even with recovery off, got %v", out)
+	}
+}
+
+// TestDiffAndBuild_UnarmedGreenUsesRecovery verifies that a fail→pass transition
+// with no early heads-up (the failure was already final, so no completion was
+// armed) still goes through the ordinary recovery path, not the completion path.
+func TestDiffAndBuild_UnarmedGreenUsesRecovery(t *testing.T) {
+	sm := newPRWatchSM()
+	cfg := allOnConfig()
+	cfg.Debounce = "0s"
+	cfg.NotifyCIRecovery = true
+	t1 := prWatchTarget{id: "dreich", branch: "dreich"}
+
+	sm.diffAndBuild(cfg, t1, "croft/loch", prData{Number: 5, State: "open", HeadRefOid: "sha1", CIState: "passing", CommentsOK: true})
+
+	// Failure that is already final (no pending) → notifies but does NOT arm a
+	// completion follow-up.
+	sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 5, State: "open", HeadRefOid: "sha1", CIState: "failing",
+		FailingChecks: []string{"build"}, CIPending: 0, CommentsOK: true,
+	})
+
+	// Later goes green → ordinary recovery notice, not a completion notice.
+	out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 5, State: "open", HeadRefOid: "sha1", CIState: "passing", CIPending: 0, CommentsOK: true,
+	})
+	if len(out) != 1 || !strings.Contains(out[0], "green again") {
+		t.Fatalf("unarmed fail→pass should use the recovery path, got %v", out)
+	}
+
+	if strings.Contains(out[0], "have finished") {
+		t.Errorf("unarmed recovery should not use the completion wording, got: %s", out[0])
 	}
 }
 
@@ -549,6 +617,41 @@ func TestDiffAndBuild_CompletionFiresWhileCommentsDegraded(t *testing.T) {
 		FailingChecks: []string{"build"}, CIPending: 0, CommentsOK: false,
 	}); len(out) != 0 {
 		t.Fatalf("unprimed completion should not re-fire, got %v", out)
+	}
+}
+
+// TestDiffAndBuild_GreenCompletionWhileCommentsDegraded verifies the green
+// completion also fires from the unprimed branch: an early failure delivered
+// while comments are degraded arms the follow-up, and a green finish (still
+// unprimed) must deliver the green completion rather than silently dropping the
+// promised notice.
+func TestDiffAndBuild_GreenCompletionWhileCommentsDegraded(t *testing.T) {
+	sm := newPRWatchSM()
+	cfg := allOnConfig()
+	cfg.Debounce = "0s"
+	t1 := prWatchTarget{id: "haar", branch: "haar"}
+
+	// Poll 1: unprimed, early failure while pending → arms the follow-up.
+	if out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 55, State: "open", HeadRefOid: "sha1", CIState: "failing",
+		FailingChecks: []string{"build"}, CIPending: 2, CommentsOK: false,
+	}); len(out) != 1 {
+		t.Fatalf("unprimed early failure should notify, got %v", out)
+	}
+
+	// Poll 2: finishes green while still unprimed → green completion fires.
+	out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 55, State: "open", HeadRefOid: "sha1", CIState: "passing", CIPending: 0, CommentsOK: false,
+	})
+	if len(out) != 1 || !strings.Contains(out[0], "have finished") || !strings.Contains(out[0], "green") {
+		t.Fatalf("unprimed green finish should deliver the green completion, got %v", out)
+	}
+
+	// Poll 3: no re-fire.
+	if out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 55, State: "open", HeadRefOid: "sha1", CIState: "passing", CIPending: 0, CommentsOK: false,
+	}); len(out) != 0 {
+		t.Fatalf("unprimed green completion should not re-fire, got %v", out)
 	}
 }
 
