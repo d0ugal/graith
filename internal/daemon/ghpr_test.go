@@ -82,10 +82,11 @@ func TestFetchChecksAggregate(t *testing.T) {
 	defer func() { ghRunner = orig }()
 
 	cases := []struct {
-		name      string
-		json      string
-		wantState string
-		wantFail  []string
+		name        string
+		json        string
+		wantState   string
+		wantFail    []string
+		wantPending int
 	}{
 		{
 			name:      "braw all pass",
@@ -99,14 +100,22 @@ func TestFetchChecksAggregate(t *testing.T) {
 			wantFail:  []string{"lint"},
 		},
 		{
+			name:        "thrawn fail while others still running",
+			json:        `[{"name":"build","bucket":"pending"},{"name":"lint","bucket":"fail"},{"name":"vet","bucket":"pending"}]`,
+			wantState:   "failing",
+			wantFail:    []string{"lint"},
+			wantPending: 2,
+		},
+		{
 			name:      "neep skipped is not a failure",
 			json:      `[{"name":"build","bucket":"pass"},{"name":"deploy","bucket":"skipping"}]`,
 			wantState: "passing",
 		},
 		{
-			name:      "haar pending",
-			json:      `[{"name":"build","bucket":"pending"}]`,
-			wantState: "pending",
+			name:        "haar pending",
+			json:        `[{"name":"build","bucket":"pending"}]`,
+			wantState:   "pending",
+			wantPending: 1,
 		},
 	}
 	for _, c := range cases {
@@ -115,13 +124,17 @@ func TestFetchChecksAggregate(t *testing.T) {
 				return c.json, nil
 			}
 
-			state, fail := fetchChecks(context.Background(), "croft/loch", 1, "")
+			state, fail, pending := fetchChecks(context.Background(), "croft/loch", 1, "")
 			if state != c.wantState {
 				t.Errorf("state = %q, want %q", state, c.wantState)
 			}
 
 			if len(fail) != len(c.wantFail) {
 				t.Errorf("failing = %v, want %v", fail, c.wantFail)
+			}
+
+			if pending != c.wantPending {
+				t.Errorf("pending = %d, want %d", pending, c.wantPending)
 			}
 		})
 	}
@@ -292,7 +305,7 @@ func TestFetchChecks_Degraded_Cov(t *testing.T) {
 		return "", errors.New("no checks")
 	}
 
-	if state, fail := fetchChecks(context.Background(), "croft/loch", 1, ""); state != "" || fail != nil {
+	if state, fail, _ := fetchChecks(context.Background(), "croft/loch", 1, ""); state != "" || fail != nil {
 		t.Errorf("error+empty output should give ('',nil), got (%q,%v)", state, fail)
 	}
 
@@ -301,7 +314,7 @@ func TestFetchChecks_Degraded_Cov(t *testing.T) {
 		return "{bad", nil
 	}
 
-	if state, _ := fetchChecks(context.Background(), "croft/loch", 1, ""); state != "" {
+	if state, _, _ := fetchChecks(context.Background(), "croft/loch", 1, ""); state != "" {
 		t.Errorf("malformed checks JSON should give '', got %q", state)
 	}
 
@@ -310,7 +323,7 @@ func TestFetchChecks_Degraded_Cov(t *testing.T) {
 		return "[]", nil
 	}
 
-	if state, fail := fetchChecks(context.Background(), "croft/loch", 1, ""); state != "" || fail != nil {
+	if state, fail, _ := fetchChecks(context.Background(), "croft/loch", 1, ""); state != "" || fail != nil {
 		t.Errorf("empty checks should give ('',nil), got (%q,%v)", state, fail)
 	}
 
@@ -319,7 +332,7 @@ func TestFetchChecks_Degraded_Cov(t *testing.T) {
 		return `[{"name":"build","bucket":"fail"}]`, errors.New("exit 1")
 	}
 
-	if state, fail := fetchChecks(context.Background(), "croft/loch", 1, ""); state != "failing" || len(fail) != 1 {
+	if state, fail, _ := fetchChecks(context.Background(), "croft/loch", 1, ""); state != "failing" || len(fail) != 1 {
 		t.Errorf("failing checks should still parse despite exit 1, got (%q,%v)", state, fail)
 	}
 }

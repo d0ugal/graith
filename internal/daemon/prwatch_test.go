@@ -376,6 +376,135 @@ func TestDiffAndBuild_CITransitionAndDedup(t *testing.T) {
 	}
 }
 
+// TestDiffAndBuild_FirstFailureWhilePendingThenCompletion covers the granular CI
+// reporting: an early failure fires as soon as one check goes red (even with
+// others still running) and flags the outstanding jobs, then a completion notice
+// with the final tally fires once every check has finished.
+func TestDiffAndBuild_FirstFailureWhilePendingThenCompletion(t *testing.T) {
+	sm := newPRWatchSM()
+	cfg := allOnConfig()
+	cfg.Debounce = "0s" // this test fires two CI directives; don't debounce within the test's instant
+	t1 := prWatchTarget{id: "thrawn", branch: "thrawn"}
+
+	// Prime: passing.
+	sm.diffAndBuild(cfg, t1, "croft/loch", prData{Number: 1, State: "open", HeadRefOid: "sha1", CIState: "passing", CommentsOK: true})
+
+	// First failure while two other checks are still running → notify, flagging
+	// the outstanding jobs so the agent knows it isn't the full picture.
+	out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 1, State: "open", HeadRefOid: "sha1", CIState: "failing",
+		FailingChecks: []string{"build"}, CIPending: 2, CommentsOK: true,
+	})
+	if len(out) != 1 {
+		t.Fatalf("first failure should notify once, got %v", out)
+	}
+
+	if !strings.Contains(out[0], "still running") || !strings.Contains(out[0], "2 other checks") {
+		t.Errorf("failure notice should flag outstanding jobs, got: %s", out[0])
+	}
+
+	if strings.Contains(out[0], "have finished") {
+		t.Errorf("an in-flight failure should not claim all checks finished, got: %s", out[0])
+	}
+
+	// A later poll while still pending, same failing set → no re-notify.
+	if out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 1, State: "open", HeadRefOid: "sha1", CIState: "failing",
+		FailingChecks: []string{"build"}, CIPending: 2, CommentsOK: true,
+	}); len(out) != 0 {
+		t.Fatalf("same failure while still pending should not re-notify, got %v", out)
+	}
+
+	// All checks finish, build still red → completion notice with the final tally.
+	out = sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 1, State: "open", HeadRefOid: "sha1", CIState: "failing",
+		FailingChecks: []string{"build"}, CIPending: 0, CommentsOK: true,
+	})
+	if len(out) != 1 {
+		t.Fatalf("completion should notify once when all checks finish, got %v", out)
+	}
+
+	if !strings.Contains(out[0], "have finished") {
+		t.Errorf("completion notice should announce all checks finished, got: %s", out[0])
+	}
+
+	// Completion fires only once.
+	if out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 1, State: "open", HeadRefOid: "sha1", CIState: "failing",
+		FailingChecks: []string{"build"}, CIPending: 0, CommentsOK: true,
+	}); len(out) != 0 {
+		t.Fatalf("completion should not re-fire, got %v", out)
+	}
+}
+
+// TestDiffAndBuild_FailureAllDoneNoCompletion verifies that when the first
+// failure is already the final result (no pending checks), there is no redundant
+// completion notice — the failure notice omits the outstanding-jobs flag and no
+// follow-up is armed.
+func TestDiffAndBuild_FailureAllDoneNoCompletion(t *testing.T) {
+	sm := newPRWatchSM()
+	cfg := allOnConfig()
+	cfg.Debounce = "0s"
+	t1 := prWatchTarget{id: "dreich", branch: "dreich"}
+
+	sm.diffAndBuild(cfg, t1, "croft/loch", prData{Number: 2, State: "open", HeadRefOid: "sha1", CIState: "passing", CommentsOK: true})
+
+	out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 2, State: "open", HeadRefOid: "sha1", CIState: "failing",
+		FailingChecks: []string{"build"}, CIPending: 0, CommentsOK: true,
+	})
+	if len(out) != 1 {
+		t.Fatalf("all-done failure should notify once, got %v", out)
+	}
+
+	if strings.Contains(out[0], "still running") {
+		t.Errorf("all-done failure should not flag outstanding jobs, got: %s", out[0])
+	}
+
+	// Same failing state, still no pending → no completion notice (would be a
+	// duplicate of the failure notice already sent).
+	if out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 2, State: "open", HeadRefOid: "sha1", CIState: "failing",
+		FailingChecks: []string{"build"}, CIPending: 0, CommentsOK: true,
+	}); len(out) != 0 {
+		t.Fatalf("no completion should fire for an already-final failure, got %v", out)
+	}
+}
+
+// TestDiffAndBuild_GreenFinishNoRedCompletion verifies that if the build recovers
+// to green after an in-flight failure, the red completion notice does not fire —
+// the recovery path is the "all finished" report.
+func TestDiffAndBuild_GreenFinishNoRedCompletion(t *testing.T) {
+	sm := newPRWatchSM()
+	cfg := allOnConfig()
+	cfg.Debounce = "0s"
+	cfg.NotifyCIRecovery = true // the green-finish report comes from the recovery path
+	t1 := prWatchTarget{id: "bonnie", branch: "bonnie"}
+
+	sm.diffAndBuild(cfg, t1, "croft/loch", prData{Number: 3, State: "open", HeadRefOid: "sha1", CIState: "passing", CommentsOK: true})
+
+	// Early failure while pending → arms a completion notice.
+	sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 3, State: "open", HeadRefOid: "sha1", CIState: "failing",
+		FailingChecks: []string{"build"}, CIPending: 1, CommentsOK: true,
+	})
+
+	// Everything finishes green (flaky check re-ran) → recovery notice, not a red
+	// completion.
+	out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 3, State: "open", HeadRefOid: "sha1", CIState: "passing", CIPending: 0, CommentsOK: true,
+	})
+	if len(out) != 1 || !strings.Contains(out[0], "green again") {
+		t.Fatalf("green finish should send the recovery notice, got %v", out)
+	}
+
+	for _, o := range out {
+		if strings.Contains(o, "the build is red") {
+			t.Errorf("green finish should not send a red completion notice, got: %s", o)
+		}
+	}
+}
+
 func TestDiffAndBuild_GatesCIvsComments(t *testing.T) {
 	// notify_ci_failures on, both comment gates off → CI notifies, comment does not.
 	sm := newPRWatchSM()

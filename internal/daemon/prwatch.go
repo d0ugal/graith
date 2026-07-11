@@ -48,6 +48,12 @@ type prWatchCursor struct {
 	lastReviewCommentID int64
 	notifyCount         int // per headRefOid (reset when head SHA changes)
 	primed              bool
+	// ciAwaitingFinal is set when a CI-failure notice was delivered while other
+	// checks were still running. It triggers a single completion notice once every
+	// check has reached a terminal state, giving the agent the final tally after an
+	// early-failure heads-up. Reset when the build goes green (recovery covers the
+	// green case) or when the head SHA changes.
+	ciAwaitingFinal bool
 }
 
 type prWatchState struct {
@@ -396,6 +402,7 @@ func (sm *SessionManager) diffAndBuild(cfg *configPRWatch, t prWatchTarget, slug
 		cur.headRefOid = d.HeadRefOid
 		cur.notifyCount = 0
 		cur.failing = map[string]bool{}
+		cur.ciAwaitingFinal = false
 	}
 
 	// Prime-on-first-observation: establish a baseline without re-notifying old
@@ -450,6 +457,8 @@ func (sm *SessionManager) diffAndBuild(cfg *configPRWatch, t prWatchTarget, slug
 					cur.failing[name] = true
 				}
 
+				cur.ciAwaitingFinal = d.CIPending > 0
+
 				return []string{ciFailureBody(t, slug, d)}
 			}
 		}
@@ -467,6 +476,10 @@ func (sm *SessionManager) diffAndBuild(cfg *configPRWatch, t prWatchTarget, slug
 	var out []string
 
 	// --- CI failures (directive) ---
+	// Report the first failure as soon as any check goes red — even while other
+	// checks are still running — so the agent can start fixing immediately. The
+	// body flags any still-running checks (d.CIPending), and a completion notice
+	// (below) delivers the final tally once every check has finished.
 	if cfg.NotifyCIFailures && d.CIState == "failing" {
 		var newlyFailing []string
 
@@ -483,12 +496,34 @@ func (sm *SessionManager) diffAndBuild(cfg *configPRWatch, t prWatchTarget, slug
 				}
 
 				out = append(out, ciFailureBody(t, slug, d))
+
+				// If checks are still running, arm a completion notice for when
+				// they finish. If none are pending, this failure notice already
+				// reflects the final result — no follow-up needed.
+				cur.ciAwaitingFinal = d.CIPending > 0
 			}
+		}
+	}
+
+	// --- CI completion (directive) ---
+	// After an early-failure heads-up delivered while checks were still running,
+	// send a single completion notice once every check has finished and the build
+	// is still red — the final failing tally. A green finish is covered by the
+	// recovery path below (which resets the flag), so this only fires for a
+	// confirmed-red completion.
+	if cfg.NotifyCIFailures && cur.ciAwaitingFinal && d.CIState == "failing" && d.CIPending == 0 {
+		if _, ok := sm.gate(cfg, t.id, cur, true); ok {
+			out = append(out, ciCompleteBody(t, slug, d))
+			cur.ciAwaitingFinal = false
 		}
 	}
 
 	switch d.CIState {
 	case "passing":
+		// Build is green: any armed completion notice is now moot — recovery (if
+		// enabled) is the "all finished" report.
+		cur.ciAwaitingFinal = false
+
 		if cfg.NotifyCIRecovery && len(cur.failing) > 0 {
 			// Only clear the failing set once the recovery notice is actually
 			// delivered; if the gate rejects it (debounce/cap/rate-limit),
@@ -683,10 +718,47 @@ func ciFailureBody(t prWatchTarget, slug string, d prData) string {
 		}
 	}
 
+	if d.CIPending > 0 {
+		fmt.Fprintf(&b, "\n%s still running — this is not the final result, so more failures may follow. "+
+			"You can start on these now; a follow-up will confirm once all checks finish.",
+			pluralChecks(d.CIPending))
+	}
+
 	fmt.Fprintf(&b, "\nGet logs: `gh pr checks %d --repo %s` or `gh run view --log-failed`. "+
 		"Fix the failures and push; CI will re-run.", d.Number, slug)
 
 	return b.String()
+}
+
+// ciCompleteBody is the completion notice sent once every check has finished
+// following an early-failure heads-up (ciFailureBody with checks still pending).
+// It confirms the build is still red and gives the final failing tally.
+func ciCompleteBody(t prWatchTarget, slug string, d prData) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "All CI checks have finished on PR #%d (%s) — the build is red.", d.Number, t.branch)
+
+	if len(d.FailingChecks) > 0 {
+		b.WriteString(" Failing checks:")
+
+		for _, name := range d.FailingChecks {
+			fmt.Fprintf(&b, "\n  • %s", name)
+		}
+	}
+
+	fmt.Fprintf(&b, "\nGet logs: `gh pr checks %d --repo %s` or `gh run view --log-failed`. "+
+		"Fix the failures and push; CI will re-run.", d.Number, slug)
+
+	return b.String()
+}
+
+// pluralChecks renders "1 other check is" / "N other checks are" for the
+// pending-checks note.
+func pluralChecks(n int) string {
+	if n == 1 {
+		return "1 other check is"
+	}
+
+	return fmt.Sprintf("%d other checks are", n)
 }
 
 func conflictBody(t prWatchTarget, d prData) string {

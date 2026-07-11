@@ -30,6 +30,11 @@ type prData struct {
 	Mergeable      string   // MERGEABLE | CONFLICTING | UNKNOWN (GitHub computes async)
 	CIState        string   // passing | failing | pending
 	FailingChecks  []string // human-readable "name" of each failing check
+	// CIPending is the number of checks still running when this poll was read.
+	// It is meaningful even when CIState is "failing" (a check can have failed
+	// while others are still in flight), so a failure notice can flag that the
+	// result is not yet complete and a completion notice can fire once it is.
+	CIPending      int
 	IssueComments  []ghComment
 	ReviewComments []ghComment
 	// CommentsOK is false if any comment fetch degraded (timeout/error), so the
@@ -176,7 +181,7 @@ func resolvePR(ctx context.Context, slug, branch, worktreePath string) (prData, 
 	// CI checks + comments — only meaningful while the PR is open.
 	d.CommentsOK = true
 	if d.State == "open" || d.State == "draft" {
-		d.CIState, d.FailingChecks = fetchChecks(ctx, slug, it.Number, worktreePath)
+		d.CIState, d.FailingChecks, d.CIPending = fetchChecks(ctx, slug, it.Number, worktreePath)
 
 		var issueOK, reviewOK bool
 
@@ -203,11 +208,16 @@ func normalizePRState(state string, isDraft bool) string {
 	}
 }
 
-// fetchChecks returns the aggregate CI state and the names of failing checks.
-// It uses `gh pr checks` whose `bucket` field is GitHub's own categorisation,
-// avoiding the heterogeneous statusCheckRollup union. NEUTRAL/SKIPPED are
-// pass-like and never counted as failures.
-func fetchChecks(ctx context.Context, slug string, number int, worktreePath string) (state string, failing []string) {
+// fetchChecks returns the aggregate CI state, the names of failing checks, and
+// the count of checks still pending. It uses `gh pr checks` whose `bucket` field
+// is GitHub's own categorisation, avoiding the heterogeneous statusCheckRollup
+// union. NEUTRAL/SKIPPED are pass-like and never counted as failures.
+//
+// The pending count is returned alongside "failing" (not just "pending"): a
+// check can fail while others are still in flight, and callers use the count to
+// flag a failure as not-yet-final and to fire a completion notice once every
+// check has finished.
+func fetchChecks(ctx context.Context, slug string, number int, worktreePath string) (state string, failing []string, pending int) {
 	cctx, cancel := context.WithTimeout(ctx, ghTimeout)
 	defer cancel()
 
@@ -218,37 +228,35 @@ func fetchChecks(ctx context.Context, slug string, number int, worktreePath stri
 		// gh pr checks exits non-zero when checks are failing; it still prints
 		// JSON on stdout, so try to parse what we got before giving up.
 		if out == "" {
-			return "", nil
+			return "", nil, 0
 		}
 	}
 
 	var checks []prCheck
 	if err := json.Unmarshal([]byte(out), &checks); err != nil {
-		return "", nil
+		return "", nil, 0
 	}
 
 	if len(checks) == 0 {
-		return "", nil
+		return "", nil, 0
 	}
-
-	anyPending := false
 
 	for _, c := range checks {
 		switch ciBucket(c) {
 		case "fail":
 			failing = append(failing, c.Name)
 		case "pending":
-			anyPending = true
+			pending++
 		}
 	}
 
 	switch {
 	case len(failing) > 0:
-		return "failing", failing
-	case anyPending:
-		return "pending", nil
+		return "failing", failing, pending
+	case pending > 0:
+		return "pending", nil, pending
 	default:
-		return "passing", nil
+		return "passing", nil, 0
 	}
 }
 
