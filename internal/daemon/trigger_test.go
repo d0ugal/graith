@@ -474,7 +474,7 @@ func TestActionCommand_ExpandsTildeRepo(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	bothy := filepath.Join(home, "bothy")
-	if err := os.MkdirAll(bothy, 0o755); err != nil {
+	if err := os.MkdirAll(bothy, 0o750); err != nil {
 		t.Fatal(err)
 	}
 
