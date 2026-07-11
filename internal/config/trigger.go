@@ -4,6 +4,15 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/robfig/cron/v3"
+)
+
+// cronSpecParser accepts 5-field cron expressions plus @-descriptors. It is the
+// same shape the daemon's firing loop uses, so config validation rejects exactly
+// what the runtime can't parse.
+var cronSpecParser = cron.NewParser(
+	cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor,
 )
 
 // TriggerConfig is one [[trigger]] block. A trigger is (source) -> (action):
@@ -226,6 +235,18 @@ func validateSchedule(where string, s *ScheduleConfig) []error {
 		errs = append(errs, fmt.Errorf("%s: [schedule] requires exactly one of cron or every (neither set)", where))
 	case s.Cron != "" && s.Every != "":
 		errs = append(errs, fmt.Errorf("%s: [schedule] requires exactly one of cron or every (both set)", where))
+	}
+
+	if s.Cron != "" {
+		if _, err := cronSpecParser.Parse(s.Cron); err != nil {
+			errs = append(errs, fmt.Errorf("%s: [schedule] cron %q: %w", where, s.Cron, err))
+		}
+
+		if s.Timezone != "" {
+			if _, err := time.LoadLocation(s.Timezone); err != nil {
+				errs = append(errs, fmt.Errorf("%s: [schedule] timezone %q: %w", where, s.Timezone, err))
+			}
+		}
 	}
 
 	if s.Every != "" {

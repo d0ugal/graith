@@ -33,11 +33,17 @@ func (sm *SessionManager) actionMessage(ctx context.Context, t *config.TriggerCo
 }
 
 // actionCommand runs a command rooted at its execution root (repo for schedule,
-// the bound worktree for watch), captures output, and delivers it.
+// the bound worktree for watch), captures output, and delivers it. Watch
+// commands run with the worktree mounted read-only and a separate writable
+// scratch dir, so a command cannot mutate the tree it watches (the feedback-loop
+// guarantee) — the same mechanism --share-worktree uses.
 func (sm *SessionManager) actionCommand(ctx context.Context, t *config.TriggerConfig, fc fireContext) (string, error) {
 	execRoot := t.Action.Repo
+	readOnlyRoot := false
+
 	if t.IsWatch() {
 		execRoot = fc.worktree
+		readOnlyRoot = true
 	}
 
 	if execRoot == "" {
@@ -47,9 +53,29 @@ func (sm *SessionManager) actionCommand(ctx context.Context, t *config.TriggerCo
 	cmdStr := t.Action.Command
 	name, args := "sh", []string{"-c", cmdStr}
 
+	// For a read-only watch command, writes go to a per-run scratch dir; the
+	// process still runs (cwd) in the worktree so it can read the code.
+	cwd := execRoot
+
+	var scratch string
+
+	if readOnlyRoot {
+		s, err := os.MkdirTemp(filepath.Join(sm.paths.DataDir, "scratch"), "trigcmd-")
+		if err == nil {
+			scratch = s
+			defer func() { _ = os.RemoveAll(scratch) }()
+		}
+	}
+
 	cfg := sm.Config()
+
 	if t.Action.Sandboxed() {
-		wrapped, wargs, ok, err := sm.buildCommandSandbox(cfg, &t.Action, execRoot, name, args)
+		wrapped, wargs, ok, err := sm.buildCommandSandbox(cfg, &t.Action, commandSandbox{
+			cwd:          cwd,
+			readOnlyRoot: readOnlyRoot,
+			worktree:     execRoot,
+			scratch:      scratch,
+		}, name, args)
 		if err != nil {
 			return "", fmt.Errorf("sandbox: %w", err)
 		}
@@ -66,8 +92,8 @@ func (sm *SessionManager) actionCommand(ctx context.Context, t *config.TriggerCo
 	defer cancel()
 
 	cmd := exec.CommandContext(runCtx, name, args...)
-	cmd.Dir = execRoot
-	cmd.Env = triggerCommandEnv()
+	cmd.Dir = cwd
+	cmd.Env = triggerCommandEnv(scratch)
 
 	var out bytes.Buffer
 
@@ -88,15 +114,40 @@ func (sm *SessionManager) actionCommand(ctx context.Context, t *config.TriggerCo
 	body := fmt.Sprintf("$ %s\n(exit %d)\n\n%s", cmdStr, exit, truncateOutput(out.String()))
 	sm.deliver(ctx, t.Action.Deliver, body, t.Action.Repo, sm.triggerVars(t, fc))
 
-	return fmt.Sprintf("exit %d", exit), nil
+	// A non-zero exit / timeout is surfaced as an error so it lands in LastError,
+	// even though the captured output is still delivered.
+	if exit != 0 {
+		return fmt.Sprintf("exit %d", exit), fmt.Errorf("command exited %d", exit)
+	}
+
+	return "exit 0", nil
 }
 
-// buildCommandSandbox wraps a command in the sandbox. Returns (cmd, args, ok,
-// err): ok=false means the sandbox couldn't be enforced (caller fails closed).
-func (sm *SessionManager) buildCommandSandbox(cfg *config.Config, a *config.ActionConfig, execRoot, name string, args []string) (string, []string, bool, error) {
-	merged := cfg.Sandbox
+// commandSandbox carries the resolved paths for a command action's sandbox.
+type commandSandbox struct {
+	cwd          string // process working directory
+	readOnlyRoot bool   // watch: worktree read-only + scratch writable
+	worktree     string // the read-only worktree (watch only)
+	scratch      string // the writable scratch dir (watch only)
+}
+
+// buildCommandSandbox wraps a command in a MINIMAL, dedicated command profile —
+// it does NOT inherit the global agent read/write grants, only the backend
+// selection, signal mode, and the action's own sandbox_config grants. Network is
+// blocked by default unless sandbox_config opens it. Returns ok=false when the
+// sandbox can't be enforced (caller fails closed).
+func (sm *SessionManager) buildCommandSandbox(cfg *config.Config, a *config.ActionConfig, cs commandSandbox, name string, args []string) (string, []string, bool, error) {
+	// Minimal base: enforcement selection only, not global agent grants.
+	base := config.SandboxConfig{
+		Enabled:    cfg.Sandbox.Enabled,
+		Backend:    cfg.Sandbox.Backend,
+		Command:    cfg.Sandbox.Command,
+		SignalMode: cfg.Sandbox.SignalMode,
+	}
+
+	merged := base
 	if a.SandboxConfig != nil {
-		merged = merged.Merge(*a.SandboxConfig)
+		merged = base.Merge(*a.SandboxConfig)
 	}
 
 	if !merged.Enabled {
@@ -118,17 +169,29 @@ func (sm *SessionManager) buildCommandSandbox(cfg *config.Config, a *config.Acti
 		netPolicy = &sandbox.NetworkPolicy{Block: true}
 	}
 
+	worktreeDir := cs.cwd
+	readDirs := merged.ReadDirs
+	writeDirs := merged.WriteDirs
+
+	if cs.readOnlyRoot {
+		// Read-only worktree, writable scratch: WorktreeDir (the read+write
+		// "workdir" grant) is the scratch dir, the worktree is granted read-only,
+		// and cwd stays in the worktree (set by the caller). Mirrors the
+		// --share-worktree mechanism.
+		worktreeDir = cs.scratch
+		readDirs = append(append([]string{}, readDirs...), cs.worktree)
+		writeDirs = append(append([]string{}, writeDirs...), cs.scratch)
+	}
+
 	opts := sandbox.WrapOpts{
 		Backend:        merged.Backend,
-		WorktreeDir:    execRoot,
-		ReadDirs:       merged.ReadDirs,
-		WriteDirs:      merged.WriteDirs,
+		WorktreeDir:    worktreeDir,
+		ReadDirs:       readDirs,
+		WriteDirs:      writeDirs,
 		ReadFiles:      merged.ReadFiles,
 		WriteFiles:     merged.WriteFiles,
-		Features:       merged.Features,
 		EnvKeys:        []string{"PATH", "HOME", "SHELL", "TERM", "LANG", "TMPDIR", "GRAITH_TMPDIR"},
 		SignalMode:     merged.SignalMode,
-		Profile:        merged.Profile,
 		Network:        netPolicy,
 		BackendCommand: merged.Command,
 	}
@@ -141,7 +204,7 @@ func (sm *SessionManager) buildCommandSandbox(cfg *config.Config, a *config.Acti
 	return cmd, wargs, true, nil
 }
 
-func triggerCommandEnv() []string {
+func triggerCommandEnv(scratch string) []string {
 	keep := map[string]bool{"PATH": true, "HOME": true, "SHELL": true, "TERM": true, "LANG": true, "TMPDIR": true, "GRAITH_TMPDIR": true}
 
 	var env []string
@@ -149,8 +212,18 @@ func triggerCommandEnv() []string {
 	for _, e := range os.Environ() {
 		k, _, ok := strings.Cut(e, "=")
 		if ok && keep[k] {
+			// Redirect TMPDIR to the writable scratch dir for read-only watch
+			// commands, so tool caches don't try to write the read-only worktree.
+			if k == "TMPDIR" && scratch != "" {
+				continue
+			}
+
 			env = append(env, e)
 		}
+	}
+
+	if scratch != "" {
+		env = append(env, "TMPDIR="+scratch)
 	}
 
 	return env
@@ -182,6 +255,15 @@ func (sm *SessionManager) actionSession(ctx context.Context, t *config.TriggerCo
 	if err != nil {
 		return "", err
 	}
+
+	// Session delivery is best-effort prompt injection: the daemon can't capture a
+	// long-running agent's answer, so it instructs the agent to deliver itself.
+	instr, err := sm.sessionDeliveryInstruction(t.Action.Deliver, vars)
+	if err != nil {
+		return "", err
+	}
+
+	prompt += instr
 
 	agent := t.Action.Agent
 	model := t.Action.Model
@@ -323,6 +405,65 @@ func (sm *SessionManager) reuseReactor(triggerName, sessionID string) string {
 	return ""
 }
 
+// sessionDeliveryInstruction builds the prompt suffix that tells a spawned
+// session how to deliver its result (best-effort, since the daemon can't capture
+// it). Empty when no deliver block is set. Templated keys are pre-expanded.
+func (sm *SessionManager) sessionDeliveryInstruction(d config.DeliverConfig, vars config.TriggerVars) (string, error) {
+	if d == (config.DeliverConfig{}) {
+		return "", nil
+	}
+
+	var b strings.Builder
+
+	b.WriteString("\n\nWhen you finish, deliver your result:")
+
+	if d.Inbox != "" {
+		target, err := config.ExpandTrigger(d.Inbox, vars)
+		if err != nil {
+			return "", err
+		}
+
+		fmt.Fprintf(&b, "\n- send it to the %q session's inbox with `gr msg send %s \"…\"`", target, target)
+	}
+
+	if d.Topic != "" {
+		topic, err := config.ExpandTrigger(d.Topic, vars)
+		if err != nil {
+			return "", err
+		}
+
+		fmt.Fprintf(&b, "\n- publish it to the %q topic with `gr msg pub --topic %s \"…\"`", topic, topic)
+	}
+
+	if d.Store != "" {
+		key, err := config.ExpandTrigger(d.Store, vars)
+		if err != nil {
+			return "", err
+		}
+
+		fmt.Fprintf(&b, "\n- write it to the store with `gr store put %s \"…\"`", key)
+	}
+
+	return b.String(), nil
+}
+
+// findReactor locates an existing ensure-reviewer reactor for a (trigger, source)
+// binding by its persisted TriggerID/TriggerReactor tags, so reuse survives a
+// daemon restart or binding recreation (not just the in-memory binding lifetime).
+func (sm *SessionManager) findReactor(triggerName, sourceSessionID string) string {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	for id, s := range sm.state.Sessions {
+		if s.TriggerReactor && s.TriggerID == triggerName &&
+			s.SharedWorktreeSourceID == sourceSessionID && !s.IsSoftDeleted() {
+			return id
+		}
+	}
+
+	return ""
+}
+
 func (sm *SessionManager) setBindingReactor(triggerName, sessionID, reactorID string) {
 	sm.triggers.mu.Lock()
 	defer sm.triggers.mu.Unlock()
@@ -353,11 +494,18 @@ func (sm *SessionManager) createTriggerSession(req createTriggerReq) (SessionSta
 		agent = sm.Config().DefaultAgent
 	}
 
-	sess, err := sm.Create(
-		req.name, agent, req.repo, "", req.prompt, req.model, req.parentID,
-		false, req.shareWorktree, true,
-		false, false, false, false, 24, 80,
-	)
+	sess, err := sm.Create(CreateOpts{
+		Name:          req.name,
+		AgentName:     agent,
+		RepoPath:      req.repo,
+		Prompt:        req.prompt,
+		Model:         req.model,
+		ParentID:      req.parentID,
+		ShareWorktree: req.shareWorktree,
+		AgentHooks:    true,
+		Rows:          24,
+		Cols:          80,
+	})
 	if err != nil {
 		return SessionState{}, err
 	}
@@ -383,6 +531,13 @@ func (sm *SessionManager) fireWatch(ctx context.Context, t *config.TriggerConfig
 		sm.log.Info("trigger: watch fire rate-limited", "trigger", t.Name, "session", fc.sessionID)
 		return
 	}
+
+	// Daemon-wide concurrency cap.
+	if !sm.acquireSlot() {
+		sm.log.Info("trigger: max_concurrent reached, skipping watch fire", "trigger", t.Name)
+		return
+	}
+	defer sm.releaseSlot()
 
 	result, err := sm.fireAction(ctx, t, fc)
 	sm.recordTriggerRun(t.Name, TriggerRun{ScheduledAt: time.Now(), SourceSessionID: fc.sessionID, Cause: causeFile, Result: result})

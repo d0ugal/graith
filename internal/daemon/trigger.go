@@ -172,7 +172,7 @@ func (sm *SessionManager) armSchedule(t *config.TriggerConfig, rt *TriggerRuntim
 
 	nextCopy := next
 
-	sm.updateTriggerRuntime(t.Name, func(r *TriggerRuntimeState) { r.NextScheduledFireAt = &nextCopy })
+	_ = sm.updateTriggerRuntime(t.Name, func(r *TriggerRuntimeState) { r.NextScheduledFireAt = &nextCopy })
 }
 
 // dueSchedules returns the names of schedule triggers due to fire now. It
@@ -214,33 +214,39 @@ func (sm *SessionManager) dueSchedules(now time.Time) []string {
 			sm.triggers.mu.Unlock()
 			continue
 		}
-		// overlap: skip (default) suppresses while a command run is in flight.
-		if t.Action.Type == config.ActionCommand && t.Policy.OverlapMode() == config.OverlapSkip && sm.triggers.inFlight[name] {
+		// overlap: skip (default) suppresses while a prior run is still in flight.
+		// The reservation covers ALL action types (not just command).
+		if !sm.reserveFireLocked(name, t.Policy.OverlapMode()) {
 			newNext := sm.advanceSchedule(name, t, now)
 			sm.triggers.mu.Unlock()
 
 			nn := newNext
 
-			sm.updateTriggerRuntime(name, func(r *TriggerRuntimeState) { r.NextScheduledFireAt = &nn })
+			_ = sm.updateTriggerRuntime(name, func(r *TriggerRuntimeState) { r.NextScheduledFireAt = &nn })
 			sm.log.Info("trigger: skipped (overlap)", "trigger", name)
 
 			continue
 		}
 
 		newNext := sm.advanceSchedule(name, t, now)
-		if t.Action.Type == config.ActionCommand {
-			sm.triggers.inFlight[name] = true
-		}
 		sm.triggers.mu.Unlock()
 
 		// Commit the fire durably BEFORE dispatch (at-most-once), together with
-		// the advanced cursor.
+		// the advanced cursor. If the save fails, do NOT dispatch — release the
+		// reservation and leave the cursor advanced (a missed fire, never a
+		// double-fire).
 		fireAt, nn := next, newNext
 
-		sm.updateTriggerRuntime(name, func(r *TriggerRuntimeState) {
+		if err := sm.updateTriggerRuntime(name, func(r *TriggerRuntimeState) {
 			r.LastScheduledFireAt = &fireAt
 			r.NextScheduledFireAt = &nn
-		})
+		}); err != nil {
+			sm.releaseFire(name)
+			sm.log.Warn("trigger: not dispatched, fire not durably recorded", "trigger", name, "err", err)
+
+			continue
+		}
+
 		due = append(due, name)
 	}
 
@@ -249,6 +255,8 @@ func (sm *SessionManager) dueSchedules(now time.Time) []string {
 
 // advanceSchedule moves the in-memory cursor forward and returns the new
 // next-fire time. Caller holds ts.mu; persistence is the caller's job (off-lock).
+// Intervals advance from the previous scheduled instant (not from now), so a
+// slow tick doesn't accumulate drift.
 func (sm *SessionManager) advanceSchedule(name string, t *config.TriggerConfig, now time.Time) time.Time {
 	var next time.Time
 
@@ -268,7 +276,12 @@ func (sm *SessionManager) advanceSchedule(name string, t *config.TriggerConfig, 
 			every = time.Minute
 		}
 
-		next = now.Add(every)
+		// Anchor on the previous scheduled instant so ticks don't drift; catch up
+		// past now if the daemon was slow/behind.
+		next = sm.triggers.nextFire[name].Add(every)
+		for !next.After(now) {
+			next = next.Add(every)
+		}
 	}
 
 	sm.triggers.nextFire[name] = next
@@ -276,19 +289,80 @@ func (sm *SessionManager) advanceSchedule(name string, t *config.TriggerConfig, 
 	return next
 }
 
-// fireSchedule runs a schedule trigger's action and records the run.
+// reserveFireLocked records a fire in-flight for overlap accounting. Under the
+// skip policy it returns false when a prior run is still in flight. Caller holds
+// ts.mu.
+func (sm *SessionManager) reserveFireLocked(name, overlap string) bool {
+	if overlap == config.OverlapSkip && sm.triggers.inFlight[name] > 0 {
+		return false
+	}
+
+	sm.triggers.inFlight[name]++
+
+	return true
+}
+
+// releaseFire ends a reserved fire.
+func (sm *SessionManager) releaseFire(name string) {
+	sm.triggers.mu.Lock()
+	defer sm.triggers.mu.Unlock()
+
+	if sm.triggers.inFlight[name] > 0 {
+		sm.triggers.inFlight[name]--
+	}
+
+	if sm.triggers.inFlight[name] <= 0 {
+		delete(sm.triggers.inFlight, name)
+	}
+}
+
+// acquireSlot reserves one of the daemon-wide max_concurrent action slots.
+func (sm *SessionManager) acquireSlot() bool {
+	maxc := sm.Config().TriggersRuntime.MaxConcurrentOr()
+
+	sm.triggers.mu.Lock()
+	defer sm.triggers.mu.Unlock()
+
+	if sm.triggers.running >= maxc {
+		return false
+	}
+
+	sm.triggers.running++
+
+	return true
+}
+
+func (sm *SessionManager) releaseSlot() {
+	sm.triggers.mu.Lock()
+	defer sm.triggers.mu.Unlock()
+
+	if sm.triggers.running > 0 {
+		sm.triggers.running--
+	}
+}
+
+// fireSchedule runs a schedule trigger's action and records the run. It always
+// releases the overlap reservation made by the caller (dueSchedules/TriggerRunNow)
+// and gates dispatch on the concurrency cap and rate limit.
 func (sm *SessionManager) fireSchedule(ctx context.Context, name, cause string) {
+	defer sm.releaseFire(name)
+
 	t := sm.triggerByName(name)
 	if t == nil {
 		return
 	}
-	defer func() {
-		if t.Action.Type == config.ActionCommand {
-			sm.triggers.mu.Lock()
-			delete(sm.triggers.inFlight, name)
-			sm.triggers.mu.Unlock()
-		}
-	}()
+
+	n, win := t.Policy.RateLimitParsed()
+	if sm.rateLimited(name, n, win, time.Now()) {
+		sm.log.Info("trigger: schedule fire rate-limited", "trigger", name)
+		return
+	}
+
+	if !sm.acquireSlot() {
+		sm.log.Info("trigger: max_concurrent reached, skipping", "trigger", name)
+		return
+	}
+	defer sm.releaseSlot()
 
 	result, err := sm.fireAction(ctx, t, fireContext{cause: cause, now: time.Now()})
 	sm.recordTriggerRun(name, TriggerRun{ScheduledAt: time.Now(), Cause: cause, Result: result})
@@ -369,7 +443,10 @@ func (sm *SessionManager) putTriggerRuntime(name string, rt *TriggerRuntimeState
 	}
 }
 
-func (sm *SessionManager) updateTriggerRuntime(name string, fn func(*TriggerRuntimeState)) {
+// updateTriggerRuntime applies fn and persists, returning any save error so a
+// caller that depends on durability (the at-most-once fire commit) can refuse to
+// dispatch when the fire was not durably recorded.
+func (sm *SessionManager) updateTriggerRuntime(name string, fn func(*TriggerRuntimeState)) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -383,15 +460,18 @@ func (sm *SessionManager) updateTriggerRuntime(name string, fn func(*TriggerRunt
 
 	if err := sm.saveState(); err != nil {
 		sm.log.Warn("trigger: save state failed", "trigger", name, "err", err)
+		return err
 	}
+
+	return nil
 }
 
 func (sm *SessionManager) recordTriggerError(name, msg string) {
-	sm.updateTriggerRuntime(name, func(r *TriggerRuntimeState) { r.LastError = msg })
+	_ = sm.updateTriggerRuntime(name, func(r *TriggerRuntimeState) { r.LastError = msg })
 }
 
 func (sm *SessionManager) recordTriggerRun(name string, run TriggerRun) {
-	sm.updateTriggerRuntime(name, func(r *TriggerRuntimeState) {
+	_ = sm.updateTriggerRuntime(name, func(r *TriggerRuntimeState) {
 		r.RunCount++
 
 		r.History = append(r.History, run)
@@ -638,6 +718,17 @@ func (sm *SessionManager) TriggerRunNow(ctx context.Context, name string) error 
 		return fmt.Errorf("trigger %q is a watch trigger; it fires on file changes, not on demand", name)
 	}
 
+	// Respect overlap: reserve through the same guard the scheduled path uses so a
+	// manual run and a scheduled run can't both run under overlap=skip. fireSchedule
+	// releases the reservation.
+	sm.triggers.mu.Lock()
+	reserved := sm.reserveFireLocked(name, t.Policy.OverlapMode())
+	sm.triggers.mu.Unlock()
+
+	if !reserved {
+		return fmt.Errorf("trigger %q is already running (overlap=skip)", name)
+	}
+
 	go sm.fireSchedule(context.WithoutCancel(ctx), name, causeManual)
 
 	return nil
@@ -655,7 +746,5 @@ func (sm *SessionManager) TriggerPause(name string, pause bool) error {
 		return fmt.Errorf("trigger %q is disabled in config; cannot resume", name)
 	}
 
-	sm.updateTriggerRuntime(name, func(r *TriggerRuntimeState) { r.Paused = pause })
-
-	return nil
+	return sm.updateTriggerRuntime(name, func(r *TriggerRuntimeState) { r.Paused = pause })
 }
