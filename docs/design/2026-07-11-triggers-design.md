@@ -194,7 +194,7 @@ type WatchConfig struct {
 
     Paths    []string `toml:"paths"`    // optional include globs (worktree-relative)
     Ignore   []string `toml:"ignore"`   // extra ignore globs (added to built-ins + .gitignore)
-    Debounce string   `toml:"debounce"` // quiet-window; default 3s
+    Debounce string   `toml:"debounce"` // quiet-window; default 30s (lower it for fast commands)
     // No respect_gitignore flag — .gitignore is always honoured (§Watch scope).
 }
 
@@ -574,12 +574,16 @@ table, distinct from the `[[trigger]]` array) bounds simultaneously
 running action goroutines; fires that would exceed it are treated as `skip`
 (logged), never queued unboundedly.
 
-**Debounce (watch source).** `watch.debounce` (default 3s) is the quiet-window
-coalescer: the watcher fires only after the worktree has been quiet for the
-window, so a multi-file edit or formatter pass produces one fire. This is the
-`config/watcher.go` model, and combined with `overlap = "skip"` it is the first
-line against re-trigger storms (the issue's "feedback loops" concern; the full
-answer is §Feedback loops).
+**Debounce (watch source).** `watch.debounce` (default **30s**) is the
+quiet-window coalescer: the watcher fires only after the worktree has been quiet
+for the window, so a multi-file edit or formatter pass produces one fire. The
+default is deliberately generous — the action may take minutes (a test run, a
+review, local CI), and firing while the implementer is still mid-edit wastes that
+work; 30s lets a burst of edits settle first. A **fast** action (a quick linter,
+a formatter check) can lower it — `debounce = "3s"` — since there's little cost to
+firing sooner. This is the `config/watcher.go` model, and combined with
+`overlap = "skip"` it is the first line against re-trigger storms (the issue's
+"feedback loops" concern; the full answer is §Feedback loops).
 
 ### 4. The firing loops
 
@@ -1078,7 +1082,7 @@ name = "test-on-change"
 repo     = "~/Code/graith"     # policy selector — binds to sessions on this repo
 paths    = ["**/*.go"]
 ignore   = ["**/*_test.go"]
-debounce = "3s"
+# debounce omitted → 30s default (tests can take a while; let edits settle)
 
 [trigger.action]
 type    = "command"
@@ -1086,6 +1090,55 @@ command = "go test ./..."
 
 [trigger.action.deliver]
 inbox = "{session_name}"       # or store = "builds/{session_name}.log"
+```
+
+Lint on change — a **fast, read-only** command, so it lowers the debounce and
+needs no extra sandbox access (it only reads the tree and reports findings):
+
+```toml
+# "Lint the Go source when it changes, and report findings to the session."
+[[trigger]]
+name = "lint-on-change"
+
+[trigger.watch]
+repo     = "~/Code/graith"
+paths    = ["**/*.go"]
+debounce = "3s"                # fast command — fire soon (overrides the 30s default)
+
+[trigger.action]
+type    = "command"
+command = "golangci-lint run"  # read-only: reports, doesn't edit — stays in the
+                               # enforced read-only sandbox, so it can't re-trigger
+
+[trigger.action.deliver]
+inbox = "{session_name}"       # lint output → the session that changed the files
+```
+
+Auto-format on change — an **auto-formatter writes the tree**, which is the
+mutating case the feedback machinery is about. A confined v1 watch command is
+read-only, so `gofmt -w` needs `sandbox = false` (it must write the worktree);
+that removes the read-only guarantee, so this is **bounded, not loop-free** — but
+because `gofmt` is idempotent, a second run after it formats produces no further
+writes, so the loop self-terminates within one extra debounced fire (and the
+`policy.rate_limit` backstop caps it regardless):
+
+```toml
+# "Run gofmt -w when Go source changes." (mutating; bounded by idempotency + rate limit)
+[[trigger]]
+name = "format-on-change"
+
+[trigger.watch]
+repo     = "~/Code/graith"
+paths    = ["**/*.go"]
+debounce = "5s"
+
+[trigger.action]
+type    = "command"
+command = "gofmt -w ."
+sandbox = false                # must write the worktree — see §Feedback loops caveat
+
+[trigger.action.deliver]
+inbox = "{session_name}"       # report what it reformatted
 ```
 
 Scenario-level (flagship continuous reviewer):
@@ -1214,7 +1267,7 @@ was down at 09:00 with `catch_up = false`, nothing fires late; a crash between t
 commit and the dispatch does not re-fire on restart.
 
 **Continuous reviewer (watch).** A scenario declares the `review-go` trigger.
-The implementer edits `handler.go`; after the 3s quiet window the watcher fires;
+The implementer edits `handler.go`; after the 30s quiet window (the default) the watcher fires;
 `ensure = true` finds no owned reactor, reserves one, and spawns a reviewer
 sharing the implementer's worktree read-only, tagged `TriggerID`. The reviewer
 reads the change and messages feedback. On the next edit, the watcher fires again;
@@ -1372,8 +1425,10 @@ design (mirroring prwatch) is what `-race` polices.
   of truth and defers `gr trigger add`. The watch source arguably needs runtime
   `--session` targeting sooner than the schedule source does — is that enough to
   pull a minimal `gr trigger add --session` into v1, or does it wait for full CRUD?
-- **Default watch debounce.** 3s is a guess: too short chases multi-file edits, too
-  long makes review feel laggy. Should it scale with `change_count`?
+- **Default watch debounce.** Set to 30s (generous, so a multi-minute action
+  isn't kicked off mid-edit; fast commands lower it). Open: should it also scale
+  automatically with `change_count`, or is a static default + per-trigger override
+  enough?
 - **Reactor lifetime.** When a watched source session ends, should its `ensure`
   reactor be stopped, soft-deleted, or left running to deliver a final review?
   (Leaning: left running.)
