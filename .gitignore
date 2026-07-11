@@ -5,3 +5,7 @@
 # XcodeGen-generated project user state
 gui/ios/graith-ios.xcodeproj/xcuserdata/
 gui/ios/graith-ios.xcodeproj/project.xcworkspace/xcuserdata/
+
+# Installed by the docs-preview workflow's `npm ci` (deps are pinned via
+# .github/workflows/scripts/package-lock.json, not vendored).
+.github/workflows/scripts/node_modules/

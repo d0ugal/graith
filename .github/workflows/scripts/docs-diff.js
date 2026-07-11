@@ -30,17 +30,21 @@
 // encode shell in renderDiff + main, which requires it lazily so the tests stay
 // dependency-free.
 
-// FNV-1a hash of one image row's RGBA bytes. Cheap, well-distributed, and
-// collision-resistant enough that two visually different rows practically never
-// share a hash — good enough to treat matching hashes as "identical row".
+// Hash of one image row's RGBA bytes, used to test rows for equality. Two
+// independent FNV-1a lanes (different seeds) combined into one ~64-bit string
+// key: a single 32-bit lane has a non-negligible birthday-collision chance on a
+// tall page (~0.4% of *some* colliding pair at ~6000 rows), and a collision
+// would make two visually-different rows compare equal and skew the alignment.
+// Two lanes drop that to negligible for a whole-number cost per row.
 function hashRow(data, start, end) {
-  let h = 0x811c9dc5;
+  let h1 = 0x811c9dc5;
+  let h2 = 0xc59d1c81;
   for (let i = start; i < end; i++) {
-    h ^= data[i];
-    // h *= 16777619, kept in 32-bit unsigned via Math.imul.
-    h = Math.imul(h, 0x01000193);
+    const b = data[i];
+    h1 = Math.imul(h1 ^ b, 0x01000193);
+    h2 = Math.imul(h2 ^ b, 0x85ebca77);
   }
-  return h >>> 0;
+  return `${(h1 >>> 0).toString(16)}${(h2 >>> 0).toString(16)}`;
 }
 
 // Hash every row of a decoded image ({ width, height, data }, data = RGBA
@@ -243,14 +247,15 @@ function buildHunks(segs, { baseHeight, headHeight, padding = 40 } = {}) {
   return merged;
 }
 
-// --- Image shell (needs pngjs) -------------------------------------------
+// --- Image compositing ---------------------------------------------------
 
-// Composite the hunks into a single PNG: for each hunk a base-|-head row band,
-// stacked top to bottom with a gutter between the two columns and a gap between
-// hunks. `basePng`/`headPng` are pngjs PNG instances (or any { width, height,
-// data } with an RGBA Buffer). Returns a new PNG instance.
+// Composite the hunks into a single RGBA image: for each hunk a base-|-head row
+// band, stacked top to bottom with a gutter between the two columns and a gap
+// between hunks. `basePng`/`headPng` are anything with { width, height, data }
+// (an RGBA Buffer) — a pngjs PNG instance, or a decoded fixture in a test.
+// Returns a plain { width, height, data } object (no pngjs dependency, so the
+// blit geometry is unit-testable); the caller wraps it in a PNG to encode.
 function renderDiff(basePng, headPng, hunks, { gutter = 12, gap = 20 } = {}) {
-  const { PNG } = require('pngjs');
   const colW = Math.max(basePng.width, headPng.width);
   const outW = colW * 2 + gutter;
 
@@ -259,9 +264,9 @@ function renderDiff(basePng, headPng, hunks, { gutter = 12, gap = 20 } = {}) {
     head: h.head,
     height: Math.max(h.base[1] - h.base[0], h.head[1] - h.head[0]),
   }));
-  const outH = bands.reduce((sum, b) => sum + b.height, 0) + gap * Math.max(0, bands.length - 1);
+  const outH = Math.max(1, bands.reduce((sum, b) => sum + b.height, 0) + gap * Math.max(0, bands.length - 1));
 
-  const out = new PNG({ width: outW, height: Math.max(1, outH) });
+  const out = { width: outW, height: outH, data: Buffer.alloc(outW * outH * 4) };
   // Fill background: light gutter/gap grey (#e2e2e2), opaque.
   for (let i = 0; i < out.data.length; i += 4) {
     out.data[i] = 0xe2;
@@ -292,6 +297,15 @@ function renderDiff(basePng, headPng, hunks, { gutter = 12, gap = 20 } = {}) {
   return out;
 }
 
+// Wrap a renderDiff result in a pngjs PNG and return the encoded bytes. The
+// only spot that touches pngjs on the render side, kept trivial.
+function encodePng(img) {
+  const { PNG } = require('pngjs');
+  const png = new PNG({ width: img.width, height: img.height });
+  img.data.copy(png.data);
+  return PNG.sync.write(png);
+}
+
 // CLI: node docs-diff.js <base.png> <head.png> <out.png>
 // Exit 0 and write the diff PNG when there are changes; exit 3 (and write
 // nothing) when the two renders are pixel-identical, so the caller can skip
@@ -310,7 +324,7 @@ function main(argv) {
   if (segs.length === 0) return 3; // identical (or only reflow jitter) — nothing to show
   const hunks = buildHunks(segs, { baseHeight: base.height, headHeight: head.height });
   const out = renderDiff(base, head, hunks);
-  fs.writeFileSync(outPath, PNG.sync.write(out));
+  fs.writeFileSync(outPath, encodePng(out));
   return 0;
 }
 
@@ -326,5 +340,6 @@ module.exports = {
   denoiseSegments,
   buildHunks,
   renderDiff,
+  encodePng,
   main,
 };

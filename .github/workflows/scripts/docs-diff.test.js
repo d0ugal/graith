@@ -10,7 +10,14 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { hashRows, myersOps, diffRows, denoiseSegments, buildHunks } = require('./docs-diff.js');
+const {
+  hashRows,
+  myersOps,
+  diffRows,
+  denoiseSegments,
+  buildHunks,
+  renderDiff,
+} = require('./docs-diff.js');
 
 // Build a fake decoded image of `rows.length` rows, each row a solid colour
 // given by its byte value, so distinct values hash to distinct rows.
@@ -18,7 +25,11 @@ function img(rows, width = 2) {
   const height = rows.length;
   const data = Buffer.alloc(width * height * 4);
   for (let y = 0; y < height; y++) {
-    data.fill(rows[y], y * width * 4, (y + 1) * width * 4);
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4;
+      data[i] = data[i + 1] = data[i + 2] = rows[y];
+      data[i + 3] = 255;
+    }
   }
   return { width, height, data };
 }
@@ -149,4 +160,47 @@ test('buildHunks keeps distant segments separate', () => {
 
 test('buildHunks on no segments returns nothing', () => {
   assert.deepEqual(buildHunks([], { baseHeight: 10, headHeight: 10 }), []);
+});
+
+test('hashRow key distinguishes visually different rows (two-lane hash)', () => {
+  const rows = hashRows(img([10, 20, 10]));
+  assert.equal(typeof rows[0], 'string');
+  assert.equal(rows[0], rows[2]);
+  assert.notEqual(rows[0], rows[1]);
+});
+
+// renderDiff is dependency-free (returns a plain RGBA object), so the blit
+// geometry and pixel placement are unit-testable without pngjs.
+test('renderDiff sizes the canvas and blits base-left / head-right per band', () => {
+  const colW = 4;
+  const base = img(new Array(30).fill(0).map((_, y) => (y % 2 ? 100 : 0)), colW);
+  const head = img(new Array(30).fill(0).map((_, y) => (y % 2 ? 200 : 0)), colW);
+  const hunks = [{ base: [5, 9], head: [5, 9] }]; // one 4-row band
+  const gutter = 12;
+  const gap = 20;
+  const out = renderDiff(base, head, hunks, { gutter, gap });
+
+  // width = 2 columns + gutter; height = single band height (no gap for 1 band).
+  assert.equal(out.width, colW * 2 + gutter);
+  assert.equal(out.height, 4);
+
+  const px = (x, y) => {
+    const i = (y * out.width + x) * 4;
+    return [out.data[i], out.data[i + 1], out.data[i + 2], out.data[i + 3]];
+  };
+  // Top band row 0 corresponds to base/head row 5 (odd → value 100/200).
+  assert.deepEqual(px(0, 0), [100, 100, 100, 255]); // base column
+  assert.deepEqual(px(colW + gutter, 0), [200, 200, 200, 255]); // head column
+  // The gutter between columns stays background grey.
+  assert.deepEqual(px(colW + 1, 0), [0xe2, 0xe2, 0xe2, 0xff]);
+});
+
+test('renderDiff pads a shorter column with background, not garbage', () => {
+  const base = img(new Array(10).fill(50), 3); // base band will be 2 rows
+  const head = img(new Array(10).fill(60), 3); // head band will be 5 rows
+  const out = renderDiff(base, head, [{ base: [0, 2], head: [0, 5] }], { gutter: 4, gap: 0 });
+  assert.equal(out.height, 5); // max of the two band heights
+  // Base column beyond its 2 rows (row 3) is background grey, not copied pixels.
+  const i = (3 * out.width + 0) * 4;
+  assert.deepEqual([out.data[i], out.data[i + 1], out.data[i + 2]], [0xe2, 0xe2, 0xe2]);
 });

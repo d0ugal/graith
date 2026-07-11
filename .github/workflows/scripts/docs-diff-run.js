@@ -5,11 +5,14 @@
 // the flat `shots/` dir the publish step reads, plus a `manifest.json`
 // describing each entry's kind:
 //
-//   diff  — the page existed at the base commit and changed visually: a
-//           base-|-head composite of just the changed bands (docs-diff.js).
-//   same  — existed at base but renders row-identical (a no-op markdown edit):
-//           no image, a note in the comment.
-//   new   — no base version (page added in this PR): the full head render.
+//   diff    — the page existed at the base commit and changed visually: a
+//             base-|-head composite of just the changed bands (docs-diff.js).
+//   same    — existed at base but renders row-identical (a no-op markdown edit):
+//             no image, a note in the comment.
+//   new     — no base version (page added in this PR): the full head render.
+//   deleted — removed in this PR (no head version): the full base render, so a
+//             deletion-only PR still refreshes the sticky comment rather than
+//             leaving a stale preview.
 //
 // I/O orchestration only; the diff logic it calls lives in docs-diff.js and is
 // unit-tested there. Run as:
@@ -18,7 +21,14 @@
 const fs = require('fs');
 const path = require('path');
 const { PNG } = require('pngjs');
-const { hashRows, diffRows, denoiseSegments, buildHunks, renderDiff } = require('./docs-diff.js');
+const {
+  hashRows,
+  diffRows,
+  denoiseSegments,
+  buildHunks,
+  renderDiff,
+  encodePng,
+} = require('./docs-diff.js');
 
 const VIEWPORTS = ['desktop', 'mobile'];
 
@@ -41,13 +51,24 @@ function main(argv) {
     for (const vp of VIEWPORTS) {
       const file = `${page.name}-${vp}.png`;
       const headPath = path.join(headDir, file);
-      if (!fs.existsSync(headPath)) continue; // page/viewport not shot
       const basePath = path.join(baseDir, file);
+      const outPath = path.join(outDir, file);
+
+      if (page.deleted) {
+        // Removed in this PR: show the full base render if we have one.
+        if (fs.existsSync(basePath)) {
+          fs.copyFileSync(basePath, outPath);
+          entry[vp] = { kind: 'deleted', file };
+        }
+        continue;
+      }
+
+      if (!fs.existsSync(headPath)) continue; // page/viewport not shot
       const hasBase = page.hasBase && fs.existsSync(basePath);
 
       if (!hasBase) {
         // New page (or missing baseline): show the full head render.
-        fs.copyFileSync(headPath, path.join(outDir, file));
+        fs.copyFileSync(headPath, outPath);
         entry[vp] = { kind: 'new', file };
         continue;
       }
@@ -62,7 +83,7 @@ function main(argv) {
       }
       const hunks = buildHunks(segs, { baseHeight: base.height, headHeight: head.height });
       const out = renderDiff(base, head, hunks);
-      fs.writeFileSync(path.join(outDir, file), PNG.sync.write(out));
+      fs.writeFileSync(outPath, encodePng(out));
       entry[vp] = { kind: 'diff', file };
     }
     if (Object.keys(entry).length > 0) manifest[page.name] = entry;

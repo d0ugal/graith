@@ -78,29 +78,42 @@ jobs:
             global=1
           fi
 
-          emit() { # path -> {"url","name","hasBase"}
-            local f="$1" base url name hasBase
-            base="${f#website/content/docs/}"; base="${base%.md}"
-            if [ "$base" = "_index" ]; then
+          emit() { # path, deleted -> {"url","name","hasBase","deleted"}
+            local f="$1" deleted="$2" rel url name hasBase
+            rel="${f#website/content/docs/}"; rel="${rel%.md}"
+            if [ "$rel" = "_index" ]; then
               url="/docs/"; name="docs-home"
             else
-              url="/docs/${base}/"; name="${base}"
+              # Flatten any nested path so the screenshot/diff filenames stay in
+              # a single flat dir (screenshot.js writes /out/<name>-<vp>.png and
+              # a `/` would need a subdir that isn't created).
+              url="/docs/${rel}/"; name="${rel//\//-}"
             fi
             # Does this page exist at the base commit? If not it's new in this
             # PR — there's no baseline to diff against, so it renders in full.
             if git cat-file -e "$BASE_SHA:$f" 2>/dev/null; then hasBase=true; else hasBase=false; fi
-            printf '{"url":"%s","name":"%s","hasBase":%s}\n' "$url" "$name" "$hasBase"
+            # jq -n --arg keeps the JSON well-formed even if a filename contains
+            # characters that would break a hand-built string.
+            jq -nc --arg url "$url" --arg name "$name" \
+              --argjson hasBase "$hasBase" --argjson deleted "$deleted" \
+              '{url:$url,name:$name,hasBase:$hasBase,deleted:$deleted}'
           }
 
           {
             if [ "$global" = 1 ]; then
-              for f in website/content/docs/*.md; do emit "$f"; done
+              for f in website/content/docs/*.md; do emit "$f" false; done
             else
               # `|| true` so a no-match grep doesn't abort the step under
               # `set -o pipefail` (e.g. a website/** change that touches no
               # doc page — the job should no-op, not fail).
               { echo "$changed" | grep -E '^website/content/docs/.*\.md$' || true; } | while read -r f; do
-                [ -n "$f" ] && [ -f "$f" ] && emit "$f"
+                [ -n "$f" ] || continue
+                if [ -f "$f" ]; then
+                  emit "$f" false
+                elif git cat-file -e "$BASE_SHA:$f" 2>/dev/null; then
+                  # Gone from head but present at base — deleted in this PR.
+                  emit "$f" true
+                fi
               done
             fi
           } | jq -s '.' > pages.json
@@ -157,7 +170,10 @@ jobs:
             kill "$pid" 2>/dev/null || true
             wait "$pid" 2>/dev/null || true
           }
-          shoot "$PWD/site-head" "$PWD/shots/head" pages.json
+          # Head render skips deleted pages (they 404 at head); base render
+          # covers everything with a baseline, including the deleted ones.
+          jq '[.[] | select(.deleted | not)]' pages.json > head-pages.json
+          shoot "$PWD/site-head" "$PWD/shots/head" head-pages.json
           if [ "$BASECOUNT" != "0" ]; then
             jq '[.[] | select(.hasBase)]' pages.json > base-pages.json
             shoot "$PWD/site-base" "$PWD/shots/base" base-pages.json
@@ -168,7 +184,11 @@ jobs:
       - name: Build diffs
         if: steps.changed.outputs.count != '0'
         run: |
-          npm install --no-save --no-package-lock pngjs
+          # Integrity-locked, script-free install of the pinned pngjs (see
+          # .github/workflows/scripts/package-lock.json) — this job holds a
+          # write-scoped token, so it must not run whatever the registry serves
+          # at run time. --ignore-scripts blocks dependency lifecycle hooks.
+          npm ci --prefix .github/workflows/scripts --ignore-scripts
           node .github/workflows/scripts/docs-diff-run.js \
             pages.json "$PWD/shots/base" "$PWD/shots/head" "$PWD/shots/out"
           echo "Published diff assets:"; ls -la shots/out
@@ -282,28 +302,38 @@ jobs:
               });
             }
 
-            // Render the comment from the manifest. `diff`/`new` entries show an
-            // image; `same` shows a note. A diff crop is base-|-head so it's
-            // roughly twice as wide as a single render — size the columns to fit.
+            // Render the comment from the manifest. `diff`/`new`/`deleted`
+            // entries show an image; `same` shows a note. A diff crop is
+            // base-|-head so it's ~twice as wide as a single render — size the
+            // columns to fit.
             const raw = f => `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${dir}/${f}`;
             const cell = (v, width) => {
               if (!v) return '—';
               if (v.kind === 'same') return '_no visual change_';
               return `<img src="${raw(v.file)}" width="${width}">`;
             };
+            const kinds = names => names.flatMap(n => Object.values(manifest[n]).map(v => v.kind));
             const names = Object.keys(manifest).sort();
-            const anyNew = names.some(n => Object.values(manifest[n]).some(v => v.kind === 'new'));
+            const allKinds = new Set(kinds(names));
             let body = `<!-- docs-preview -->\n### 📸 Docs preview\n\n`;
             body += `Diffed ${names.length} changed page(s) against \`${context.payload.pull_request.base.ref}\` at commit \`${shortSha}\`. `;
             body += `Each image shows only the changed regions — **base │ head**, cropped with context.\n\n`;
-            if (anyNew) body += `_Pages with no baseline (new in this PR) are shown in full._\n\n`;
+            if (allKinds.has('new')) body += `_Pages new in this PR (no baseline) are shown in full._\n\n`;
+            if (allKinds.has('deleted')) body += `_Pages removed in this PR are shown as their last render on \`${context.payload.pull_request.base.ref}\`._\n\n`;
             for (const name of names) {
               const p = manifest[name];
-              body += `<details><summary><b>${name}</b></summary>\n\n`;
+              const removed = p.desktop?.kind === 'deleted' || p.mobile?.kind === 'deleted';
+              body += `<details><summary><b>${name}</b>${removed ? ' — removed' : ''}</summary>\n\n`;
               body += `| Desktop | Mobile |\n|---|---|\n`;
               body += `| ${cell(p.desktop, 620)} | ${cell(p.mobile, 300)} |\n\n</details>\n\n`;
             }
-            body += `_Screenshots stored on the [\`${branch}\`](https://github.com/${owner}/${repo}/tree/${branch}/${dir}) branch._`;
+            // Only link the branch storage when we actually committed images —
+            // an all-`same` PR skips the commit, so <dir> never exists.
+            if (files.length > 0) {
+              body += `_Screenshots stored on the [\`${branch}\`](https://github.com/${owner}/${repo}/tree/${branch}/${dir}) branch._`;
+            } else {
+              body += `_No visual changes to preview._`;
+            }
 
             // Upsert a single sticky comment.
             const marker = '<!-- docs-preview -->';
