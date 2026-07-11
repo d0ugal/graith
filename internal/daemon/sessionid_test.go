@@ -2,7 +2,9 @@ package daemon
 
 import (
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/d0ugal/graith/internal/config"
 )
@@ -56,6 +58,108 @@ func TestCreateRejectsInUseID(t *testing.T) {
 
 	if got := sm.state.Sessions["abcdef12"].Name; got != "auld-session" {
 		t.Errorf("existing session was clobbered: name = %q, want %q", got, "auld-session")
+	}
+}
+
+// TestCreateRejectsSoftDeletedID checks that a supplied ID belonging to a
+// soft-deleted session is still rejected: the session retains its state entry
+// (its worktree/branch persist pending purge), so its ID must stay reserved.
+func TestCreateRejectsSoftDeletedID(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	deletedAt := time.Now().UTC()
+	expiresAt := deletedAt.Add(24 * time.Hour)
+
+	sm.mu.Lock()
+	sm.state.Sessions["deadbeef"] = &SessionState{
+		ID:        "deadbeef",
+		Name:      "dreich-session",
+		Status:    StatusStopped,
+		DeletedAt: &deletedAt,
+		ExpiresAt: &expiresAt,
+	}
+	sm.mu.Unlock()
+
+	if !sm.state.Sessions["deadbeef"].IsSoftDeleted() {
+		t.Fatal("seeded session should be soft-deleted")
+	}
+
+	_, err := sm.Create(CreateOpts{
+		ID:        "deadbeef",
+		Name:      "fash-session",
+		AgentName: "claude",
+		NoRepo:    true,
+		Rows:      24,
+		Cols:      80,
+	})
+	assertErrContains(t, err, "already in use")
+
+	if len(sm.state.Sessions) != 1 {
+		t.Errorf("collision with a soft-deleted session must not create one, got %d", len(sm.state.Sessions))
+	}
+
+	if got := sm.state.Sessions["deadbeef"].Name; got != "dreich-session" {
+		t.Errorf("soft-deleted session was clobbered: name = %q, want %q", got, "dreich-session")
+	}
+}
+
+// TestCreateConcurrentSuppliedIDRace checks that when two Create calls race on
+// the same supplied ID, exactly one wins and the other is rejected — the
+// collision check and reservation are atomic under sm.mu. Runs meaningfully
+// under -race.
+func TestCreateConcurrentSuppliedIDRace(t *testing.T) {
+	cfg := config.Default()
+	cfg.Sandbox = config.SandboxConfig{Enabled: false}
+	cfg.Agents["sleeper"] = config.Agent{
+		Command: "sleep",
+		Args:    []string{"60"},
+	}
+
+	sm := newSMWithConfig(t, cfg)
+
+	const wantID = "beefcafe"
+
+	var (
+		wg      sync.WaitGroup
+		mu      sync.Mutex
+		okCount int
+		errs    int
+	)
+
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+
+		go func(n int) {
+			defer wg.Done()
+
+			_, err := sm.Create(CreateOpts{
+				ID:        wantID,
+				Name:      "whin-racer-" + string(rune('a'+n)),
+				AgentName: "sleeper",
+				NoRepo:    true,
+				Rows:      24,
+				Cols:      80,
+			})
+
+			mu.Lock()
+			defer mu.Unlock()
+
+			if err == nil {
+				okCount++
+			} else if strings.Contains(err.Error(), "already in use") {
+				errs++
+			} else {
+				t.Errorf("unexpected error: %v", err)
+			}
+		}(i)
+	}
+
+	wg.Wait()
+
+	defer stopAndClosePTY(sm, wantID)
+
+	if okCount != 1 || errs != 1 {
+		t.Errorf("want exactly one success and one collision, got %d ok / %d collision", okCount, errs)
 	}
 }
 
