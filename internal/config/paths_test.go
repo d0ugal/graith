@@ -14,6 +14,9 @@ func TestResolvePaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolvePaths() error: %v", err)
 	}
+	if p.HumanTokenFile != filepath.Join(p.DataDir, "human.token") {
+		t.Errorf("HumanTokenFile = %q, want human.token under DataDir", p.HumanTokenFile)
+	}
 
 	if !strings.HasSuffix(p.ConfigFile, filepath.Join("graith", "config.toml")) {
 		t.Errorf("ConfigFile = %q, want suffix graith/config.toml", p.ConfigFile)
@@ -147,6 +150,10 @@ func TestWithDataDir(t *testing.T) {
 
 	if override.StateFile != filepath.Join("/tmp/graith-test-data", "state.json") {
 		t.Errorf("StateFile = %q, want state.json under new DataDir", override.StateFile)
+	}
+
+	if override.HumanTokenFile != filepath.Join("/tmp/graith-test-data", "human.token") {
+		t.Errorf("HumanTokenFile = %q, want human.token under new DataDir", override.HumanTokenFile)
 	}
 
 	if override.LogDir != filepath.Join("/tmp/graith-test-data", "logs") {

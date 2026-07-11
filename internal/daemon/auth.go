@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"crypto/subtle"
 	"fmt"
 	"strings"
 )
@@ -68,12 +69,9 @@ func resolveAuth(sm *SessionManager, token string, origin ConnOrigin, poppedDevi
 	}
 
 	if !origin.Remote {
-		// Local Unix socket — the 0700 trust boundary. Empty token = local human.
-		if token == "" {
+		if token != "" && sm.humanToken != "" && subtle.ConstantTimeCompare([]byte(token), []byte(sm.humanToken)) == 1 {
 			return authContext{role: roleLocalHuman, origin: origin}, nil
 		}
-		// A non-empty, non-session token is invalid locally: client/device
-		// tokens are only meaningful on remote connections.
 		return authContext{role: roleNone, origin: origin}, fmt.Errorf("invalid token")
 	}
 

@@ -15,18 +15,19 @@ const baseAppName = "graith"
 var validProfile = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
 
 type Paths struct {
-	Profile    string
-	AppName    string
-	ConfigFile string
-	DataDir    string
-	RuntimeDir string
-	SocketPath string
-	PIDFile    string
-	StateFile  string
-	LogDir     string
-	DaemonLog  string
-	MessagesDB string
-	TmpDir     string
+	Profile        string
+	AppName        string
+	ConfigFile     string
+	DataDir        string
+	RuntimeDir     string
+	SocketPath     string
+	PIDFile        string
+	StateFile      string
+	HumanTokenFile string
+	LogDir         string
+	DaemonLog      string
+	MessagesDB     string
+	TmpDir         string
 }
 
 func ResolveProfile() (profile string, appName string, err error) {
@@ -73,18 +74,19 @@ func ResolvePaths() (Paths, error) {
 	runtimeDir := runtimeDirForApp(appName)
 
 	return Paths{
-		Profile:    profile,
-		AppName:    appName,
-		ConfigFile: configFile,
-		DataDir:    dataDir,
-		RuntimeDir: runtimeDir,
-		SocketPath: filepath.Join(runtimeDir, "graith.sock"),
-		PIDFile:    filepath.Join(runtimeDir, "graith.pid"),
-		StateFile:  filepath.Join(dataDir, "state.json"),
-		LogDir:     filepath.Join(dataDir, "logs"),
-		DaemonLog:  filepath.Join(dataDir, "daemon.log"),
-		MessagesDB: filepath.Join(dataDir, "messages.sqlite"),
-		TmpDir:     filepath.Join(dataDir, "tmp"),
+		Profile:        profile,
+		AppName:        appName,
+		ConfigFile:     configFile,
+		DataDir:        dataDir,
+		RuntimeDir:     runtimeDir,
+		SocketPath:     filepath.Join(runtimeDir, "graith.sock"),
+		PIDFile:        filepath.Join(runtimeDir, "graith.pid"),
+		StateFile:      filepath.Join(dataDir, "state.json"),
+		HumanTokenFile: filepath.Join(dataDir, "human.token"),
+		LogDir:         filepath.Join(dataDir, "logs"),
+		DaemonLog:      filepath.Join(dataDir, "daemon.log"),
+		MessagesDB:     filepath.Join(dataDir, "messages.sqlite"),
+		TmpDir:         filepath.Join(dataDir, "tmp"),
 	}, nil
 }
 
@@ -101,6 +103,7 @@ func (p Paths) WithDataDir(dataDir string) Paths {
 	dataDir = ExpandPath(dataDir)
 	p.DataDir = dataDir
 	p.StateFile = filepath.Join(dataDir, "state.json")
+	p.HumanTokenFile = filepath.Join(dataDir, "human.token")
 	p.LogDir = filepath.Join(dataDir, "logs")
 	p.DaemonLog = filepath.Join(dataDir, "daemon.log")
 	p.MessagesDB = filepath.Join(dataDir, "messages.sqlite")

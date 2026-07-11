@@ -41,6 +41,9 @@ func New(cfg *config.Config, paths config.Paths, configFile string) (*Client, er
 		paths:  paths,
 		token:  os.Getenv("GRAITH_TOKEN"),
 	}
+	if c.token == "" {
+		c.token = readHumanToken(paths)
+	}
 
 	return c, nil
 }
@@ -158,7 +161,16 @@ func probeDaemonVersion(sockPath string, paths config.Paths) string {
 
 	hs := BuildHandshake(paths, 0, 0, "")
 	hs.ClientID = fmt.Sprintf("upgrade-check-%d", os.Getpid())
-	hsData, _ := protocol.EncodeControl("handshake", hs)
+	token := os.Getenv("GRAITH_TOKEN")
+	if token == "" {
+		token = readHumanToken(paths)
+	}
+	var hsData []byte
+	if token != "" {
+		hsData, _ = protocol.EncodeControlWithToken("handshake", hs, token)
+	} else {
+		hsData, _ = protocol.EncodeControl("handshake", hs)
+	}
 	_ = writer.WriteFrame(protocol.ChannelControl, hsData)
 
 	frame, err := reader.ReadFrame()
@@ -259,6 +271,9 @@ func ConnectFast(paths config.Paths) (*Client, error) {
 		paths:  paths,
 		token:  os.Getenv("GRAITH_TOKEN"),
 	}
+	if c.token == "" {
+		c.token = readHumanToken(paths)
+	}
 	if err := c.Handshake(); err != nil {
 		c.Close()
 		return nil, err
@@ -320,6 +335,9 @@ func ConnectForApproval(paths config.Paths, approvalTimeout time.Duration) (*Cli
 		paths:  paths,
 		token:  os.Getenv("GRAITH_TOKEN"),
 	}
+	if c.token == "" {
+		c.token = readHumanToken(paths)
+	}
 	if err := c.Handshake(); err != nil {
 		c.Close()
 		return nil, err
@@ -369,6 +387,15 @@ func approvalDeadline(approvalTimeout time.Duration) time.Duration {
 	}
 
 	return d
+}
+
+func readHumanToken(paths config.Paths) string {
+	data, err := os.ReadFile(paths.HumanTokenFile)
+	if err != nil {
+		return ""
+	}
+
+	return strings.TrimSpace(string(data))
 }
 
 func (c *Client) Close() {
