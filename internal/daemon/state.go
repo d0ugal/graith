@@ -16,7 +16,7 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 )
 
-const CurrentStateVersion = 14
+const CurrentStateVersion = 15
 
 // StateVersionError is returned by LoadState when the on-disk state file is
 // newer than this binary understands. The daemon treats this as fatal (refuses
@@ -49,38 +49,44 @@ type CreationConfig struct {
 }
 
 type SessionState struct {
-	ID               string                `json:"id"`
-	ParentID         string                `json:"parent_id,omitempty"`
-	Name             string                `json:"name"`
-	RepoPath         string                `json:"repo_path"`
-	RepoName         string                `json:"repo_name"`
-	WorktreePath     string                `json:"worktree_path"`
-	Branch           string                `json:"branch"`
-	BaseBranch       string                `json:"base_branch"`
-	Agent            string                `json:"agent"`
-	AgentSessionID   string                `json:"agent_session_id,omitempty"`
-	Model            string                `json:"model,omitempty"`
-	Status           SessionStatus         `json:"status"`
-	AgentStatus      string                `json:"agent_status,omitempty"`
-	StatusChangedAt  time.Time             `json:"status_changed_at"`
-	IdleSince        *time.Time            `json:"-"`
-	GitDirty         bool                  `json:"-"`
-	GitUnpushed      int                   `json:"-"`
-	PullRequest      PRStatus              `json:"-"`
-	CI               CIStatus              `json:"-"`
-	HookToolName     string                `json:"-"`
-	ExitCode         *int                  `json:"exit_code,omitempty"`
-	ExitSignal       string                `json:"exit_signal,omitempty"`
-	PID              int                   `json:"pid,omitempty"`
-	PIDStartTime     int64                 `json:"pid_start_time,omitempty"`
-	Sandboxed        bool                  `json:"sandboxed,omitempty"`
-	SandboxConfig    *config.SandboxConfig `json:"sandbox_config,omitempty"`
-	Mirror           bool                  `json:"mirror,omitempty"`
-	MirrorSourceID   string                `json:"mirror_source_id,omitempty"`
-	InPlace          bool                  `json:"in_place,omitempty"`
-	Includes         []IncludedRepoState   `json:"includes,omitempty"`
-	AgentHooks       bool                  `json:"agent_hooks,omitempty"`
-	ApprovalsEnabled bool                  `json:"approvals_enabled,omitempty"` // deprecated: migrated to AgentHooks in v4
+	ID              string                `json:"id"`
+	ParentID        string                `json:"parent_id,omitempty"`
+	Name            string                `json:"name"`
+	RepoPath        string                `json:"repo_path"`
+	RepoName        string                `json:"repo_name"`
+	WorktreePath    string                `json:"worktree_path"`
+	Branch          string                `json:"branch"`
+	BaseBranch      string                `json:"base_branch"`
+	Agent           string                `json:"agent"`
+	AgentSessionID  string                `json:"agent_session_id,omitempty"`
+	Model           string                `json:"model,omitempty"`
+	Status          SessionStatus         `json:"status"`
+	AgentStatus     string                `json:"agent_status,omitempty"`
+	StatusChangedAt time.Time             `json:"status_changed_at"`
+	IdleSince       *time.Time            `json:"-"`
+	GitDirty        bool                  `json:"-"`
+	GitUnpushed     int                   `json:"-"`
+	PullRequest     PRStatus              `json:"-"`
+	CI              CIStatus              `json:"-"`
+	HookToolName    string                `json:"-"`
+	ExitCode        *int                  `json:"exit_code,omitempty"`
+	ExitSignal      string                `json:"exit_signal,omitempty"`
+	PID             int                   `json:"pid,omitempty"`
+	PIDStartTime    int64                 `json:"pid_start_time,omitempty"`
+	Sandboxed       bool                  `json:"sandboxed,omitempty"`
+	SandboxConfig   *config.SandboxConfig `json:"sandbox_config,omitempty"`
+	Mirror          bool                  `json:"mirror,omitempty"`
+	MirrorSourceID  string                `json:"mirror_source_id,omitempty"`
+	// LegacyMirror / LegacyMirrorSourceID hold the pre-v15 persisted keys for
+	// Mirror / MirrorSourceID (issue #1021 renamed --share-worktree to
+	// --mirror). They exist only so migrateV14ToV15 can copy old state forward;
+	// they are cleared after migration and never written under the new binary.
+	LegacyMirror         bool                `json:"shared_worktree,omitempty"`           // deprecated: migrated to Mirror in v15
+	LegacyMirrorSourceID string              `json:"shared_worktree_source_id,omitempty"` // deprecated: migrated to MirrorSourceID in v15
+	InPlace              bool                `json:"in_place,omitempty"`
+	Includes             []IncludedRepoState `json:"includes,omitempty"`
+	AgentHooks           bool                `json:"agent_hooks,omitempty"`
+	ApprovalsEnabled     bool                `json:"approvals_enabled,omitempty"` // deprecated: migrated to AgentHooks in v4
 	// Yolo opts this session into auto-approve ("yolo") mode: the PreToolUse
 	// approval hook is installed and every request is auto-allowed via the
 	// "auto" approvals backend, regardless of the global [approvals] backend.
@@ -327,6 +333,7 @@ var migrations = map[int]func(*State) error{
 	11: migrateV11ToV12,
 	12: migrateV12ToV13,
 	13: migrateV13ToV14,
+	14: migrateV14ToV15,
 }
 
 func generateToken() (string, error) {
@@ -470,6 +477,29 @@ func migrateV12ToV13(state *State) error {
 // fields for soft delete, which default to nil (not deleted) for existing
 // sessions. Kept to preserve the migration chain and the newer-than-me guard.
 func migrateV13ToV14(_ *State) error {
+	return nil
+}
+
+// migrateV14ToV15 transfers the renamed mirror-session fields. Issue #1021
+// renamed --share-worktree to --mirror, which changed the persisted keys from
+// shared_worktree / shared_worktree_source_id to mirror / mirror_source_id.
+// Without this, an existing mirror session would load with Mirror=false and be
+// treated as an ordinary session — and because a mirror's WorktreePath points
+// at the source session's worktree, deleting it could remove the source's
+// worktree. Copy the legacy keys forward and clear them.
+func migrateV14ToV15(state *State) error {
+	for _, s := range state.Sessions {
+		if s.LegacyMirror {
+			s.Mirror = true
+			s.LegacyMirror = false
+		}
+
+		if s.LegacyMirrorSourceID != "" {
+			s.MirrorSourceID = s.LegacyMirrorSourceID
+			s.LegacyMirrorSourceID = ""
+		}
+	}
+
 	return nil
 }
 

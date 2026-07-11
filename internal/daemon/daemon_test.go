@@ -1655,6 +1655,65 @@ func TestStateSaveLoadMirror(t *testing.T) {
 	}
 }
 
+// TestMigrateV14ToV15MirrorKeys is a regression test for issue #1021: renaming
+// --share-worktree to --mirror changed the persisted keys from shared_worktree
+// / shared_worktree_source_id to mirror / mirror_source_id. Without the v15
+// migration, an existing mirror session would load with Mirror=false and be
+// treated as an ordinary session — deleting it could then remove the *source*
+// session's worktree. Load a raw v14 blob written with the old keys and assert
+// the renamed fields survive and the legacy fields are cleared.
+func TestMigrateV14ToV15MirrorKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+
+	// A v14 state file as the old binary would have written it: the mirror
+	// marker lives under the pre-rename keys.
+	raw := `{
+	  "version": 14,
+	  "sessions": {
+	    "bide": {
+	      "id": "bide",
+	      "name": "canny-reviewer",
+	      "agent": "claude",
+	      "status": "stopped",
+	      "worktree_path": "/bothy/source",
+	      "shared_worktree": true,
+	      "shared_worktree_source_id": "braw-source",
+	      "created_at": "2026-01-01T00:00:00Z",
+	      "status_changed_at": "2026-01-01T00:00:00Z"
+	    }
+	  }
+	}`
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := LoadState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if loaded.Version != CurrentStateVersion {
+		t.Errorf("version = %d, want %d after migration", loaded.Version, CurrentStateVersion)
+	}
+
+	s, ok := loaded.Sessions["bide"]
+	if !ok {
+		t.Fatal("session not found after load")
+	}
+
+	if !s.Mirror {
+		t.Error("Mirror = false, want true (shared_worktree not migrated)")
+	}
+
+	if s.MirrorSourceID != "braw-source" {
+		t.Errorf("MirrorSourceID = %q, want %q (shared_worktree_source_id not migrated)", s.MirrorSourceID, "braw-source")
+	}
+
+	if s.LegacyMirror || s.LegacyMirrorSourceID != "" {
+		t.Errorf("legacy fields not cleared: LegacyMirror=%v LegacyMirrorSourceID=%q", s.LegacyMirror, s.LegacyMirrorSourceID)
+	}
+}
+
 func TestMirrorRequiresSandbox(t *testing.T) {
 	assertCreateMirrorRejected(t, newSMWithConfig(t, config.Default()))
 }
