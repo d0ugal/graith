@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"text/tabwriter"
 
@@ -30,33 +31,18 @@ var triggerListCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+
 		var listResp protocol.TriggerListResponse
+
 		_ = protocol.DecodePayload(resp, &listResp)
 
 		if jsonOutput {
 			return out.JSON(listResp)
 		}
-		if len(listResp.Triggers) == 0 {
-			out.Printf("No triggers configured.\n")
-			return nil
-		}
-		w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-		fmt.Fprintln(w, "NAME\tSOURCE\tACTION\tWHEN\tSTATE\tRUNS")
-		for _, t := range listResp.Triggers {
-			when := t.Schedule
-			if t.Source == "watch" {
-				when = t.WatchScope
-			}
-			state := "enabled"
-			switch {
-			case !t.Enabled:
-				state = "disabled"
-			case t.Paused:
-				state = "paused"
-			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%d\n", t.Name, t.Source, t.Action, when, state, t.RunCount)
-		}
-		return w.Flush()
+
+		renderTriggerList(os.Stdout, listResp.Triggers)
+
+		return nil
 	},
 }
 
@@ -69,43 +55,17 @@ var triggerStatusCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+
 		var statusResp protocol.TriggerStatusResponse
+
 		_ = protocol.DecodePayload(resp, &statusResp)
-		t := statusResp.Trigger
 
 		if jsonOutput {
 			return out.JSON(statusResp)
 		}
-		out.Printf("Trigger: %s (%s → %s)\n", t.Name, t.Source, t.Action)
-		if t.Source == "schedule" {
-			out.Printf("Schedule: %s\n", t.Schedule)
-			if t.NextFire != "" {
-				out.Printf("Next fire: %s\n", t.NextFire)
-			}
-		} else {
-			out.Printf("Watch: %s (%d live binding(s))\n", t.WatchScope, t.Bindings)
-			if t.Degraded != "" {
-				out.Printf("Degraded: %s\n", t.Degraded)
-			}
-		}
-		state := "enabled"
-		switch {
-		case !t.Enabled:
-			state = "disabled (config)"
-		case t.Paused:
-			state = "paused"
-		}
-		out.Printf("State: %s\n", state)
-		out.Printf("Runs: %d\n", t.RunCount)
-		if t.LastRun != "" {
-			out.Printf("Last run: %s\n", t.LastRun)
-		}
-		if t.LastResult != "" {
-			out.Printf("Last result: %s\n", t.LastResult)
-		}
-		if t.LastError != "" {
-			out.Printf("Last error: %s\n", t.LastError)
-		}
+
+		renderTriggerStatus(os.Stdout, statusResp.Trigger)
+
 		return nil
 	},
 }
@@ -118,7 +78,9 @@ var triggerRunCmd = &cobra.Command{
 		if _, err := triggerRequest("trigger_run", protocol.TriggerRunMsg{Name: args[0]}); err != nil {
 			return err
 		}
+
 		out.Printf("Fired trigger %q.\n", args[0])
+
 		return nil
 	},
 }
@@ -131,7 +93,9 @@ var triggerPauseCmd = &cobra.Command{
 		if _, err := triggerRequest("trigger_pause", protocol.TriggerPauseMsg{Name: args[0], Pause: true}); err != nil {
 			return err
 		}
+
 		out.Printf("Paused trigger %q.\n", args[0])
+
 		return nil
 	},
 }
@@ -144,9 +108,84 @@ var triggerResumeCmd = &cobra.Command{
 		if _, err := triggerRequest("trigger_pause", protocol.TriggerPauseMsg{Name: args[0], Pause: false}); err != nil {
 			return err
 		}
+
 		out.Printf("Resumed trigger %q.\n", args[0])
+
 		return nil
 	},
+}
+
+// triggerStateLabel renders the human-readable state label for a trigger.
+func triggerStateLabel(t protocol.TriggerRecord, withConfig bool) string {
+	switch {
+	case !t.Enabled:
+		if withConfig {
+			return "disabled (config)"
+		}
+
+		return "disabled"
+	case t.Paused:
+		return "paused"
+	default:
+		return "enabled"
+	}
+}
+
+// renderTriggerList writes the human-readable trigger table.
+func renderTriggerList(w io.Writer, triggers []protocol.TriggerRecord) {
+	if len(triggers) == 0 {
+		_, _ = fmt.Fprintln(w, "No triggers configured.")
+		return
+	}
+
+	tw := tabwriter.NewWriter(w, 0, 2, 2, ' ', 0)
+	_, _ = fmt.Fprintln(tw, "NAME\tSOURCE\tACTION\tWHEN\tSTATE\tRUNS")
+
+	for _, t := range triggers {
+		when := t.Schedule
+		if t.Source == "watch" {
+			when = t.WatchScope
+		}
+
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%d\n",
+			t.Name, t.Source, t.Action, when, triggerStateLabel(t, false), t.RunCount)
+	}
+
+	_ = tw.Flush()
+}
+
+// renderTriggerStatus writes the human-readable detail for one trigger.
+func renderTriggerStatus(w io.Writer, t protocol.TriggerRecord) {
+	_, _ = fmt.Fprintf(w, "Trigger: %s (%s → %s)\n", t.Name, t.Source, t.Action)
+
+	if t.Source == "schedule" {
+		_, _ = fmt.Fprintf(w, "Schedule: %s\n", t.Schedule)
+
+		if t.NextFire != "" {
+			_, _ = fmt.Fprintf(w, "Next fire: %s\n", t.NextFire)
+		}
+	} else {
+		_, _ = fmt.Fprintf(w, "Watch: %s (%d live binding(s))\n", t.WatchScope, t.Bindings)
+
+		if t.Degraded != "" {
+			_, _ = fmt.Fprintf(w, "Degraded: %s\n", t.Degraded)
+		}
+	}
+
+	_, _ = fmt.Fprintf(w, "State: %s\n", triggerStateLabel(t, true))
+	_, _ = fmt.Fprintf(w, "Runs: %d\n", t.RunCount)
+
+	if t.LastRun != "" {
+		_, _ = fmt.Fprintf(w, "Last run: %s\n", t.LastRun)
+	}
+
+	if t.LastResult != "" {
+		_, _ = fmt.Fprintf(w, "Last result: %s\n", t.LastResult)
+	}
+
+	if t.LastError != "" {
+		_, _ = fmt.Fprintf(w, "Last error: %s\n", t.LastError)
+	}
 }
 
 // triggerRequest sends a control message and returns the reply, surfacing daemon
@@ -159,15 +198,20 @@ func triggerRequest(msgType string, payload any) (protocol.Envelope, error) {
 	defer c.Close()
 
 	_ = c.SendControl(msgType, payload)
+
 	resp, err := c.ReadControlResponse()
 	if err != nil {
 		return protocol.Envelope{}, err
 	}
+
 	if resp.Type == "error" {
 		var e protocol.ErrorMsg
+
 		_ = protocol.DecodePayload(resp, &e)
+
 		return protocol.Envelope{}, fmt.Errorf("%s", e.Message)
 	}
+
 	return resp, nil
 }
 

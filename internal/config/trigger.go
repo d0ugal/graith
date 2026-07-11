@@ -87,18 +87,22 @@ type TriggersRuntime struct {
 	MaxConcurrent int `toml:"max_concurrent"` // default 4
 }
 
+// Action type values for ActionConfig.Type.
 const (
-	// Action types.
 	ActionCommand  = "command"
 	ActionSession  = "session"
 	ActionScenario = "scenario"
 	ActionMessage  = "message"
+)
 
-	// Overlap policies.
+// Overlap policy values for TriggerPolicy.Overlap.
+const (
 	OverlapSkip  = "skip"
 	OverlapAllow = "allow"
 	OverlapQueue = "queue" // deferred to v2
+)
 
+const (
 	defaultDebounce      = 30 * time.Second
 	defaultCommandRun    = 5 * time.Minute
 	defaultMaxConcurrent = 4
@@ -135,26 +139,31 @@ func (p TriggerPolicy) OverlapMode() string {
 	if p.Overlap == "" {
 		return OverlapSkip
 	}
+
 	return p.Overlap
 }
 
-// RateLimit parses "N/duration" (e.g. "5/30m"), defaulting to 5 per 30m.
+// RateLimitParsed parses "N/duration" (e.g. "5/30m"), defaulting to 5 per 30m.
 func (p TriggerPolicy) RateLimitParsed() (int, time.Duration) {
 	if p.RateLimit == "" {
 		return defaultRateLimitN, defaultRateLimitWin
 	}
+
 	parts := strings.SplitN(p.RateLimit, "/", 2)
 	if len(parts) != 2 {
 		return defaultRateLimitN, defaultRateLimitWin
 	}
+
 	var n int
 	if _, err := fmt.Sscanf(strings.TrimSpace(parts[0]), "%d", &n); err != nil || n <= 0 {
 		return defaultRateLimitN, defaultRateLimitWin
 	}
+
 	win, err := ParseDurationWithDays(strings.TrimSpace(parts[1]))
 	if err != nil || win <= 0 {
 		return defaultRateLimitN, defaultRateLimitWin
 	}
+
 	return n, win
 }
 
@@ -163,6 +172,7 @@ func (r TriggersRuntime) MaxConcurrentOr() int {
 	if r.MaxConcurrent <= 0 {
 		return defaultMaxConcurrent
 	}
+
 	return r.MaxConcurrent
 }
 
@@ -172,8 +182,10 @@ func (c *Config) validateTriggers() []error {
 	var errs []error
 
 	seen := make(map[string]bool)
+
 	for i := range c.Triggers {
 		t := &c.Triggers[i]
+
 		where := fmt.Sprintf("trigger[%d]", i)
 		if t.Name != "" {
 			where = fmt.Sprintf("trigger %q", t.Name)
@@ -184,6 +196,7 @@ func (c *Config) validateTriggers() []error {
 		} else if seen[t.Name] {
 			errs = append(errs, fmt.Errorf("%s: duplicate trigger name", where))
 		}
+
 		seen[t.Name] = true
 
 		// Exactly one source.
@@ -207,12 +220,14 @@ func (c *Config) validateTriggers() []error {
 
 func validateSchedule(where string, s *ScheduleConfig) []error {
 	var errs []error
+
 	switch {
 	case s.Cron == "" && s.Every == "":
 		errs = append(errs, fmt.Errorf("%s: [schedule] requires exactly one of cron or every (neither set)", where))
 	case s.Cron != "" && s.Every != "":
 		errs = append(errs, fmt.Errorf("%s: [schedule] requires exactly one of cron or every (both set)", where))
 	}
+
 	if s.Every != "" {
 		d, err := ParseDurationWithDays(s.Every)
 		if err != nil {
@@ -220,31 +235,37 @@ func validateSchedule(where string, s *ScheduleConfig) []error {
 		} else if d <= 0 {
 			errs = append(errs, fmt.Errorf("%s: [schedule] every must be > 0", where))
 		}
+
 		if s.Timezone != "" {
 			errs = append(errs, fmt.Errorf("%s: [schedule] timezone is only valid with cron, not every", where))
 		}
 	}
+
 	return errs
 }
 
 func validateWatch(where string, w *WatchConfig) []error {
 	var errs []error
+
 	switch {
 	case w.Repo == "" && w.Role == "":
 		errs = append(errs, fmt.Errorf("%s: [watch] requires exactly one of repo or role (neither set)", where))
 	case w.Repo != "" && w.Role != "":
 		errs = append(errs, fmt.Errorf("%s: [watch] requires exactly one of repo or role (both set)", where))
 	}
+
 	if w.Debounce != "" {
 		if _, err := ParseDurationWithDays(w.Debounce); err != nil {
 			errs = append(errs, fmt.Errorf("%s: [watch] debounce %q: %w", where, w.Debounce, err))
 		}
 	}
+
 	return errs
 }
 
 func (c *Config) validateAction(where string, t *TriggerConfig) []error {
 	var errs []error
+
 	a := &t.Action
 
 	switch a.Type {
@@ -258,6 +279,7 @@ func (c *Config) validateAction(where string, t *TriggerConfig) []error {
 		if a.Scenario == "" {
 			errs = append(errs, fmt.Errorf("%s: scenario action requires action.scenario", where))
 		}
+
 		if a.Deliver != (DeliverConfig{}) {
 			errs = append(errs, fmt.Errorf("%s: scenario action does not support [action.deliver]", where))
 		}
@@ -265,6 +287,7 @@ func (c *Config) validateAction(where string, t *TriggerConfig) []error {
 		if a.Body == "" {
 			errs = append(errs, fmt.Errorf("%s: message action requires action.body", where))
 		}
+
 		if a.Deliver.Inbox == "" && a.Deliver.Topic == "" {
 			errs = append(errs, fmt.Errorf("%s: message action requires action.deliver.inbox or action.deliver.topic", where))
 		}
@@ -284,14 +307,17 @@ func (c *Config) validateAction(where string, t *TriggerConfig) []error {
 
 func (c *Config) validateCommandAction(where string, t *TriggerConfig) []error {
 	var errs []error
+
 	a := &t.Action
 
 	if a.Command == "" {
 		errs = append(errs, fmt.Errorf("%s: command action requires action.command", where))
 	}
+
 	if a.Mutating {
 		errs = append(errs, fmt.Errorf("%s: action.mutating is not supported in v1 (watch commands are read-only)", where))
 	}
+
 	if a.Timeout != "" {
 		if _, err := ParseDurationWithDays(a.Timeout); err != nil {
 			errs = append(errs, fmt.Errorf("%s: action.timeout %q: %w", where, a.Timeout, err))
@@ -308,11 +334,13 @@ func (c *Config) validateCommandAction(where string, t *TriggerConfig) []error {
 	} else if a.Repo != "" {
 		errs = append(errs, fmt.Errorf("%s: watch command action must not set action.repo (execution root is the bound worktree)", where))
 	}
+
 	return errs
 }
 
 func validatePolicy(where string, p *TriggerPolicy) []error {
 	var errs []error
+
 	switch p.Overlap {
 	case "", OverlapSkip, OverlapAllow:
 	case OverlapQueue:
@@ -320,10 +348,12 @@ func validatePolicy(where string, p *TriggerPolicy) []error {
 	default:
 		errs = append(errs, fmt.Errorf("%s: policy.overlap %q is invalid (want skip|allow)", where, p.Overlap))
 	}
+
 	if p.RateLimit != "" {
 		if !strings.Contains(p.RateLimit, "/") {
 			errs = append(errs, fmt.Errorf("%s: policy.rate_limit %q must be \"N/duration\" (e.g. 5/30m)", where, p.RateLimit))
 		}
 	}
+
 	return errs
 }

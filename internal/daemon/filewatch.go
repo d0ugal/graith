@@ -48,9 +48,11 @@ func (sm *SessionManager) reconcileBindings(ctx context.Context, cfg *config.Con
 		if !t.IsWatch() || !t.TriggerEnabled() {
 			continue
 		}
+
 		if rt := sm.getTriggerRuntime(t.Name); rt != nil && rt.Paused {
 			continue
 		}
+
 		for _, sess := range sm.matchingWatchSessions(t.Watch) {
 			desired[bindingKey(t.Name, sess.id)] = t
 		}
@@ -58,13 +60,16 @@ func (sm *SessionManager) reconcileBindings(ctx context.Context, cfg *config.Con
 
 	// Tear down bindings no longer desired.
 	sm.triggers.mu.Lock()
+
 	var toRemove []string
+
 	for key := range sm.triggers.bindings {
 		if _, ok := desired[key]; !ok {
 			toRemove = append(toRemove, key)
 		}
 	}
 	sm.triggers.mu.Unlock()
+
 	for _, key := range toRemove {
 		sm.teardownBinding(key)
 	}
@@ -74,13 +79,16 @@ func (sm *SessionManager) reconcileBindings(ctx context.Context, cfg *config.Con
 		sm.triggers.mu.Lock()
 		_, exists := sm.triggers.bindings[key]
 		sm.triggers.mu.Unlock()
+
 		if exists {
 			continue
 		}
+
 		sess := sm.sessionForBindingKey(key)
 		if sess.id == "" {
 			continue
 		}
+
 		sm.createBinding(ctx, t, sess)
 	}
 }
@@ -94,22 +102,28 @@ type watchSession struct {
 func (sm *SessionManager) matchingWatchSessions(w *config.WatchConfig) []watchSession {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
+
 	var out []watchSession
+
 	for id, s := range sm.state.Sessions {
 		if s.Status != StatusRunning || s.IsSoftDeleted() || s.WorktreePath == "" {
 			continue
 		}
+
 		match := false
+
 		switch {
 		case w.Repo != "":
 			match = config.ResolvePath(s.RepoPath) == config.ResolvePath(w.Repo)
 		case w.Role != "":
 			match = s.ScenarioRole == w.Role
 		}
+
 		if match {
 			out = append(out, watchSession{id: id, name: s.Name, worktree: s.WorktreePath})
 		}
 	}
+
 	return out
 }
 
@@ -118,13 +132,17 @@ func (sm *SessionManager) sessionForBindingKey(key string) watchSession {
 	if len(parts) != 2 {
 		return watchSession{}
 	}
+
 	id := parts[1]
+
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
+
 	s, ok := sm.state.Sessions[id]
 	if !ok || s.Status != StatusRunning || s.IsSoftDeleted() {
 		return watchSession{}
 	}
+
 	return watchSession{id: id, name: s.Name, worktree: s.WorktreePath}
 }
 
@@ -151,11 +169,13 @@ func (sm *SessionManager) createBinding(ctx context.Context, t *config.TriggerCo
 	if degraded != "" {
 		b.degraded = degraded
 		sm.log.Warn("trigger: watcher degraded, disabling binding", "trigger", t.Name, "reason", degraded)
+
 		_ = watcher.Close()
 		// Record the binding as degraded so status reflects it, but don't run it.
 		sm.triggers.mu.Lock()
 		sm.triggers.bindings[bindingKey(t.Name, sess.id)] = b
 		sm.triggers.mu.Unlock()
+
 		return
 	}
 
@@ -167,6 +187,7 @@ func (sm *SessionManager) createBinding(ctx context.Context, t *config.TriggerCo
 	sm.triggers.mu.Unlock()
 
 	go sm.runBinding(bctx, t.Name, b, matcher)
+
 	sm.log.Info("trigger: watching", "trigger", t.Name, "session", sess.name, "worktree", sess.worktree)
 }
 
@@ -183,11 +204,13 @@ func (sm *SessionManager) runBinding(ctx context.Context, triggerName string, b 
 			if !ok {
 				return
 			}
+
 			sm.handleWatchEvent(ctx, triggerName, b, matcher, ev, debounce)
 		case err, ok := <-b.watcher.Errors:
 			if !ok {
 				return
 			}
+
 			sm.log.Warn("trigger: watcher error", "trigger", triggerName, "err", err)
 		}
 	}
@@ -198,6 +221,7 @@ func (sm *SessionManager) bindingDebounce(triggerName string) time.Duration {
 	if t == nil || t.Watch == nil {
 		return 30 * time.Second
 	}
+
 	return t.Watch.DebounceDuration()
 }
 
@@ -210,6 +234,7 @@ func (sm *SessionManager) handleWatchEvent(ctx context.Context, triggerName stri
 				_ = b.watcher.Add(ev.Name)
 				sm.scanNewDir(b, matcher, ev.Name, debounce, triggerName, ctx)
 			}
+
 			return
 		}
 	}
@@ -217,10 +242,12 @@ func (sm *SessionManager) handleWatchEvent(ctx context.Context, triggerName stri
 	if ev.Op&(fsnotify.Write|fsnotify.Create|fsnotify.Rename|fsnotify.Remove) == 0 {
 		return
 	}
+
 	rel := matcher.rel(ev.Name)
 	if !matcher.fires(rel) {
 		return
 	}
+
 	sm.noteChange(ctx, triggerName, b, rel, debounce)
 }
 
@@ -229,15 +256,19 @@ func (sm *SessionManager) scanNewDir(b *watchBinding, matcher *watchMatcher, dir
 	if err != nil {
 		return
 	}
+
 	for _, e := range entries {
 		full := filepath.Join(dir, e.Name())
+
 		rel := matcher.rel(full)
 		if e.IsDir() {
 			if !matcher.ignoredDir(rel) {
 				_ = b.watcher.Add(full)
 			}
+
 			continue
 		}
+
 		if matcher.fires(rel) {
 			sm.noteChange(ctx, triggerName, b, rel, debounce)
 		}
@@ -248,10 +279,12 @@ func (sm *SessionManager) scanNewDir(b *watchBinding, matcher *watchMatcher, dir
 func (sm *SessionManager) noteChange(ctx context.Context, triggerName string, b *watchBinding, rel string, debounce time.Duration) {
 	b.bmu.Lock()
 	defer b.bmu.Unlock()
+
 	b.changed[rel] = true
 	if b.debounce != nil {
 		b.debounce.Stop()
 	}
+
 	b.debounce = time.AfterFunc(debounce, func() {
 		sm.watchFire(ctx, triggerName, b)
 	})
@@ -269,12 +302,15 @@ func (sm *SessionManager) watchFire(ctx context.Context, triggerName string, b *
 	if t.Action.Type == config.ActionCommand && t.Policy.OverlapMode() == config.OverlapSkip && b.inFlight {
 		b.bmu.Unlock()
 		sm.log.Info("trigger: watch skipped (overlap)", "trigger", triggerName)
+
 		return
 	}
+
 	changed := make([]string, 0, len(b.changed))
 	for p := range b.changed {
 		changed = append(changed, p)
 	}
+
 	b.changed = make(map[string]bool)
 	if t.Action.Type == config.ActionCommand {
 		b.inFlight = true
@@ -305,15 +341,19 @@ func (sm *SessionManager) teardownBinding(key string) {
 	b := sm.triggers.bindings[key]
 	delete(sm.triggers.bindings, key)
 	sm.triggers.mu.Unlock()
+
 	if b == nil {
 		return
 	}
+
 	if b.cancel != nil {
 		b.cancel()
 	}
+
 	if b.watcher != nil {
 		_ = b.watcher.Close()
 	}
+
 	b.bmu.Lock()
 	if b.debounce != nil {
 		b.debounce.Stop()
@@ -323,11 +363,13 @@ func (sm *SessionManager) teardownBinding(key string) {
 
 func (sm *SessionManager) teardownAllBindings() {
 	sm.triggers.mu.Lock()
+
 	keys := make([]string, 0, len(sm.triggers.bindings))
 	for k := range sm.triggers.bindings {
 		keys = append(keys, k)
 	}
 	sm.triggers.mu.Unlock()
+
 	for _, k := range keys {
 		sm.teardownBinding(k)
 	}
@@ -337,49 +379,58 @@ func (sm *SessionManager) teardownAllBindings() {
 // directory. Returns a non-empty degraded reason if it hits the watch limit.
 func addWatchRecursive(w *fsnotify.Watcher, root string, matcher *watchMatcher) string {
 	var degraded string
+
 	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil //nolint:nilerr // skip unreadable dirs, keep walking
 		}
+
 		if !d.IsDir() {
 			return nil
 		}
+
 		rel := matcher.rel(path)
 		if rel != "." && matcher.ignoredDir(rel) {
 			return filepath.SkipDir
 		}
+
 		if aerr := w.Add(path); aerr != nil {
 			degraded = "watcher.Add failed: " + aerr.Error()
 			return filepath.SkipDir
 		}
+
 		return nil
 	})
+
 	return degraded
 }
 
 // --- matching ---
 
 type watchMatcher struct {
-	root      string
-	git       *gitignore.GitIgnore
-	builtin   *gitignore.GitIgnore
-	userIgn   *gitignore.GitIgnore
-	include   *gitignore.GitIgnore // nil unless paths set
-	scratchRe string
+	root    string
+	git     *gitignore.GitIgnore
+	builtin *gitignore.GitIgnore
+	userIgn *gitignore.GitIgnore
+	include *gitignore.GitIgnore // nil unless paths set
 }
 
 func newWatchMatcher(root string, w *config.WatchConfig) *watchMatcher {
 	m := &watchMatcher{root: root}
+
 	m.builtin = gitignore.CompileIgnoreLines(builtinWatchIgnores...)
 	if gi, err := gitignore.CompileIgnoreFile(filepath.Join(root, ".gitignore")); err == nil {
 		m.git = gi
 	}
+
 	if len(w.Ignore) > 0 {
 		m.userIgn = gitignore.CompileIgnoreLines(w.Ignore...)
 	}
+
 	if len(w.Paths) > 0 {
 		m.include = gitignore.CompileIgnoreLines(w.Paths...)
 	}
+
 	return m
 }
 
@@ -388,6 +439,7 @@ func (m *watchMatcher) rel(path string) string {
 	if err != nil {
 		return path
 	}
+
 	return filepath.ToSlash(r)
 }
 
@@ -396,15 +448,19 @@ func (m *watchMatcher) ignoredDir(rel string) bool {
 	if rel == "" || rel == "." {
 		return false
 	}
+
 	if m.builtin.MatchesPath(rel) || m.builtin.MatchesPath(rel+"/") {
 		return true
 	}
+
 	if m.git != nil && (m.git.MatchesPath(rel) || m.git.MatchesPath(rel+"/")) {
 		return true
 	}
+
 	if m.userIgn != nil && (m.userIgn.MatchesPath(rel) || m.userIgn.MatchesPath(rel+"/")) {
 		return true
 	}
+
 	return false
 }
 
@@ -413,17 +469,22 @@ func (m *watchMatcher) fires(rel string) bool {
 	if rel == "" || rel == "." {
 		return false
 	}
+
 	if m.builtin.MatchesPath(rel) {
 		return false
 	}
+
 	if m.git != nil && m.git.MatchesPath(rel) {
 		return false
 	}
+
 	if m.userIgn != nil && m.userIgn.MatchesPath(rel) {
 		return false
 	}
+
 	if m.include != nil && !m.include.MatchesPath(rel) {
 		return false
 	}
+
 	return true
 }

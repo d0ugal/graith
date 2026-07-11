@@ -17,6 +17,7 @@ func newTriggerTestSM(t *testing.T, triggers ...config.TriggerConfig) *SessionMa
 	cfg := config.Default()
 	cfg.Triggers = triggers
 	cfg.Orchestrator.Enabled = true
+
 	return &SessionManager{
 		state:    NewState(),
 		cfg:      cfg,
@@ -28,17 +29,21 @@ func newTriggerTestSM(t *testing.T, triggers ...config.TriggerConfig) *SessionMa
 
 func TestTriggerFingerprint(t *testing.T) {
 	a := config.TriggerConfig{Name: "x", Schedule: &config.ScheduleConfig{Cron: "@daily"}, Action: config.ActionConfig{Type: config.ActionMessage, Body: "hi"}}
+
 	b := a
 	if triggerFingerprint(&a) != triggerFingerprint(&b) {
 		t.Error("identical triggers should share fingerprint")
 	}
+
 	c := a
+
 	c.Schedule = &config.ScheduleConfig{Cron: "@hourly"}
 	if triggerFingerprint(&a) == triggerFingerprint(&c) {
 		t.Error("changed schedule should change fingerprint")
 	}
 	// Name is NOT part of the fingerprint (only fire-affecting fields).
 	d := a
+
 	d.Name = "renamed"
 	if triggerFingerprint(&a) != triggerFingerprint(&d) {
 		t.Error("rename should not change fingerprint")
@@ -61,6 +66,7 @@ func TestTriggerRuntimePersistence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if loaded.TriggerRuntime["braw"] == nil || loaded.TriggerRuntime["braw"].RunCount != 2 {
 		t.Fatalf("not persisted: %+v", loaded.TriggerRuntime["braw"])
 	}
@@ -71,6 +77,7 @@ func TestTriggerHistoryBounded(t *testing.T) {
 	for i := 0; i < triggerHistoryMax+10; i++ {
 		sm.recordTriggerRun("dreich", TriggerRun{Cause: causeSchedule, ScheduledAt: time.Now()})
 	}
+
 	rt := sm.getTriggerRuntime("dreich")
 	if len(rt.History) != triggerHistoryMax {
 		t.Fatalf("history len = %d, want %d", len(rt.History), triggerHistoryMax)
@@ -110,6 +117,7 @@ func TestArmSchedule(t *testing.T) {
 	sm := newTriggerTestSM(t, interval)
 	rt := &TriggerRuntimeState{Name: "iv", ActivatedAt: ptrTime(now)}
 	sm.armSchedule(&interval, rt, now)
+
 	if next := sm.triggers.nextFire["iv"]; !next.After(now) {
 		t.Errorf("interval next %v should be after %v", next, now)
 	}
@@ -118,9 +126,11 @@ func TestArmSchedule(t *testing.T) {
 	cronTrig := config.TriggerConfig{Name: "cr", Schedule: &config.ScheduleConfig{Cron: "0 9 * * *"}, Action: config.ActionConfig{Type: config.ActionMessage, Body: "x", Deliver: config.DeliverConfig{Topic: "t"}}}
 	sm2 := newTriggerTestSM(t, cronTrig)
 	sm2.armSchedule(&cronTrig, &TriggerRuntimeState{Name: "cr"}, now)
+
 	if _, ok := sm2.triggers.cron["cr"]; !ok {
 		t.Error("cron schedule not parsed")
 	}
+
 	if sm2.triggers.nextFire["cr"].Before(now) {
 		t.Error("cron next fire should be in the future")
 	}
@@ -130,6 +140,7 @@ func TestArmSchedule(t *testing.T) {
 	sm3 := newTriggerTestSM(t, cu)
 	rt3 := &TriggerRuntimeState{Name: "cu", ActivatedAt: ptrTime(now.Add(-3 * time.Hour)), NextScheduledFireAt: ptrTime(now.Add(-time.Hour))}
 	sm3.armSchedule(&cu, rt3, now)
+
 	if next := sm3.triggers.nextFire["cu"]; next.After(now) {
 		t.Errorf("catch_up should arm at/before now, got %v", next)
 	}
@@ -140,6 +151,7 @@ func TestReconcileSchedules_Prune(t *testing.T) {
 	sm := newTriggerTestSM(t, trig)
 	now := time.Now()
 	sm.reconcileSchedules(sm.cfg, now)
+
 	if _, ok := sm.triggers.nextFire["keep"]; !ok {
 		t.Fatal("keep should be armed after reconcile")
 	}
@@ -149,6 +161,7 @@ func TestReconcileSchedules_Prune(t *testing.T) {
 	// reconcile returns early when no triggers; call the prune path with an empty set.
 	sm.cfg.Triggers = []config.TriggerConfig{{Name: "other", Schedule: &config.ScheduleConfig{Cron: "@daily"}, Action: config.ActionConfig{Type: config.ActionMessage, Body: "x", Deliver: config.DeliverConfig{Topic: "t"}}}}
 	sm.reconcileSchedules(sm.cfg, now)
+
 	if _, ok := sm.triggers.nextFire["keep"]; ok {
 		t.Error("keep should have been pruned")
 	}
@@ -156,18 +169,22 @@ func TestReconcileSchedules_Prune(t *testing.T) {
 
 func TestTriggerPause(t *testing.T) {
 	trig := config.TriggerConfig{Name: "bide", Schedule: &config.ScheduleConfig{Cron: "@daily"}, Action: config.ActionConfig{Type: config.ActionMessage, Body: "x", Deliver: config.DeliverConfig{Topic: "t"}}}
+
 	sm := newTriggerTestSM(t, trig)
 	if err := sm.TriggerPause("bide", true); err != nil {
 		t.Fatal(err)
 	}
+
 	if rt := sm.getTriggerRuntime("bide"); rt == nil || !rt.Paused {
 		t.Fatal("not paused")
 	}
+
 	if err := sm.TriggerPause("missing", true); err == nil {
 		t.Error("expected error for unknown trigger")
 	}
 	// A config-disabled trigger cannot be resumed.
 	dis := config.TriggerConfig{Name: "auld", Enabled: boolFalse(), Schedule: &config.ScheduleConfig{Cron: "@daily"}, Action: config.ActionConfig{Type: config.ActionMessage, Body: "x", Deliver: config.DeliverConfig{Topic: "t"}}}
+
 	sm2 := newTriggerTestSM(t, dis)
 	if err := sm2.TriggerPause("auld", false); err == nil {
 		t.Error("expected error resuming disabled trigger")
@@ -176,6 +193,7 @@ func TestTriggerPause(t *testing.T) {
 
 func TestTriggerRunNow_WatchRejected(t *testing.T) {
 	trig := config.TriggerConfig{Name: "watchy", Watch: &config.WatchConfig{Repo: "/r"}, Action: config.ActionConfig{Type: config.ActionCommand, Command: "x"}}
+
 	sm := newTriggerTestSM(t, trig)
 	if err := sm.TriggerRunNow(t.Context(), "watchy"); err == nil {
 		t.Error("expected watch trigger to reject manual run")
@@ -184,14 +202,17 @@ func TestTriggerRunNow_WatchRejected(t *testing.T) {
 
 func TestDeliverStorePath(t *testing.T) {
 	sm := newTriggerTestSM(t)
+
 	dir, key := sm.deliverStorePath("shared:reviews/x.md", "/repo")
 	if dir != store.SharedStorePath(sm.paths.DataDir) || key != "reviews/x.md" {
 		t.Errorf("shared: got %s %s", dir, key)
 	}
+
 	dir, key = sm.deliverStorePath("builds/x.log", "/repo")
 	if dir != store.StorePath(sm.paths.DataDir, "/repo") || key != "builds/x.log" {
 		t.Errorf("repo: got %s %s", dir, key)
 	}
+
 	dir, _ = sm.deliverStorePath("builds/x.log", "")
 	if dir != store.SharedStorePath(sm.paths.DataDir) {
 		t.Errorf("no-repo should be shared: got %s", dir)
@@ -201,11 +222,13 @@ func TestDeliverStorePath(t *testing.T) {
 func TestDeliverStore(t *testing.T) {
 	sm := newTriggerTestSM(t)
 	vars := config.TriggerVars{Date: "2026-07-11"}
-	sm.deliver(config.DeliverConfig{Store: "shared:reports/{date}.md"}, "hello", "", vars)
+	sm.deliver(t.Context(), config.DeliverConfig{Store: "shared:reports/{date}.md"}, "hello", "", vars)
+
 	got, err := store.Get(store.SharedStorePath(sm.paths.DataDir), "reports/2026-07-11.md")
 	if err != nil {
 		t.Fatalf("store get: %v", err)
 	}
+
 	if got != "hello" {
 		t.Errorf("store body = %q", got)
 	}
@@ -213,12 +236,14 @@ func TestDeliverStore(t *testing.T) {
 
 func TestRateLimited(t *testing.T) {
 	sm := newTriggerTestSM(t)
+
 	now := time.Now()
 	for i := 0; i < 3; i++ {
 		if sm.rateLimited("k", 3, time.Minute, now) {
 			t.Fatalf("fire %d unexpectedly limited", i)
 		}
 	}
+
 	if !sm.rateLimited("k", 3, time.Minute, now) {
 		t.Error("4th fire should be rate-limited")
 	}
@@ -242,13 +267,16 @@ func TestTriggerListAndStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if rec.Source != "schedule" || rec.Action != config.ActionMessage || rec.Schedule != "0 9 * * *" {
 		t.Errorf("braw record = %+v", rec)
 	}
+
 	wrec, _ := sm.TriggerStatus("canny")
 	if wrec.Source != "watch" || wrec.WatchScope != "role:implementer" {
 		t.Errorf("canny record = %+v", wrec)
 	}
+
 	if _, err := sm.TriggerStatus("ghost"); err == nil {
 		t.Error("expected error for unknown trigger")
 	}
@@ -264,6 +292,7 @@ func TestMatchingWatchSessions(t *testing.T) {
 	if len(byRepo) != 1 || byRepo[0].id != "s1" {
 		t.Errorf("byRepo = %+v", byRepo)
 	}
+
 	byRole := sm.matchingWatchSessions(&config.WatchConfig{Role: "implementer"})
 	if len(byRole) != 1 || byRole[0].id != "s2" {
 		t.Errorf("byRole = %+v", byRole)
@@ -281,6 +310,7 @@ func TestReuseReactor(t *testing.T) {
 	}
 	// Soft-deleted reactor is not reused.
 	now := time.Now()
+
 	sm.state.Sessions["r1"].DeletedAt = &now
 	if got := sm.reuseReactor("rev", "src"); got != "" {
 		t.Errorf("soft-deleted reactor should not be reused, got %q", got)
@@ -289,16 +319,18 @@ func TestReuseReactor(t *testing.T) {
 
 func TestActionSession_NoOrchestrator(t *testing.T) {
 	trig := config.TriggerConfig{Name: "s", Watch: &config.WatchConfig{Role: "r"}, Action: config.ActionConfig{Type: config.ActionSession, Prompt: "hi"}}
+
 	sm := newTriggerTestSM(t, trig)
-	if _, err := sm.actionSession(&trig, fireContext{now: time.Now()}); err == nil {
+	if _, err := sm.actionSession(t.Context(), &trig, fireContext{now: time.Now()}); err == nil {
 		t.Error("expected error when no orchestrator")
 	}
 }
 
 func TestActionScenario_NoOrchestrator(t *testing.T) {
 	trig := config.TriggerConfig{Name: "sc", Schedule: &config.ScheduleConfig{Cron: "@daily"}, Action: config.ActionConfig{Type: config.ActionScenario, Scenario: "x"}}
+
 	sm := newTriggerTestSM(t, trig)
-	if _, err := sm.actionScenario(&trig); err == nil {
+	if _, err := sm.actionScenario(t.Context(), &trig); err == nil {
 		t.Error("expected error when no orchestrator")
 	}
 }
@@ -307,8 +339,9 @@ func TestActionScenario_MissingFile(t *testing.T) {
 	trig := config.TriggerConfig{Name: "sc", Schedule: &config.ScheduleConfig{Cron: "@daily"}, Action: config.ActionConfig{Type: config.ActionScenario, Scenario: "ghost"}}
 	sm := newTriggerTestSM(t, trig)
 	sm.state.Sessions["o"] = &SessionState{ID: "o", SystemKind: SystemKindOrchestrator}
+
 	sm.paths.ConfigFile = filepath.Join(t.TempDir(), "config.toml")
-	if _, err := sm.actionScenario(&trig); err == nil {
+	if _, err := sm.actionScenario(t.Context(), &trig); err == nil {
 		t.Error("expected error for missing scenario file")
 	}
 }
@@ -318,12 +351,16 @@ func boolFalse() *bool               { b := false; return &b }
 
 func withMsgStore(t *testing.T, sm *SessionManager) *MsgStore {
 	t.Helper()
+
 	ms, err := NewMsgStore(filepath.Join(t.TempDir(), "msg.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	t.Cleanup(func() { _ = ms.Close() })
+
 	sm.messages = ms
+
 	return ms
 }
 
@@ -339,10 +376,12 @@ func TestActionMessage_Topic(t *testing.T) {
 	if err != nil || result != "published" {
 		t.Fatalf("fireAction = %q, %v", result, err)
 	}
+
 	msgs, err := ms.Read("kirk", "reader", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if len(msgs) != 1 || msgs[0].Body != "hail blether" {
 		t.Fatalf("topic messages = %+v", msgs)
 	}
@@ -355,10 +394,12 @@ func TestActionCommand_Unsandboxed(t *testing.T) {
 		Action: config.ActionConfig{Type: config.ActionCommand, Command: "echo hallo", Repo: repo, Sandbox: boolFalse()},
 	}
 	sm := newTriggerTestSM(t, trig)
+
 	result, err := sm.actionCommand(t.Context(), &trig, fireContext{now: time.Now()})
 	if err != nil {
 		t.Fatalf("actionCommand: %v", err)
 	}
+
 	if result != "exit 0" {
 		t.Errorf("result = %q, want exit 0", result)
 	}
@@ -372,6 +413,7 @@ func TestActionCommand_FailClosed(t *testing.T) {
 	}
 	sm := newTriggerTestSM(t, trig)
 	sm.cfg.Sandbox.Enabled = false // cannot enforce
+
 	_, err := sm.actionCommand(t.Context(), &trig, fireContext{now: time.Now()})
 	if err == nil {
 		t.Fatal("expected fail-closed error when sandbox unavailable")
@@ -383,11 +425,13 @@ func TestDeliverInbox(t *testing.T) {
 	ms := withMsgStore(t, sm)
 	sm.state.Sessions["s1"] = &SessionState{ID: "s1", Name: "ben", Status: StatusStopped}
 
-	sm.deliverInbox("ben", "wheesht", false) // bare publish, no wake
+	sm.deliverInbox(t.Context(), "ben", "wheesht", false) // bare publish, no wake
+
 	msgs, err := ms.Read("inbox:s1", "reader", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if len(msgs) != 1 || msgs[0].Body != "wheesht" {
 		t.Fatalf("inbox = %+v", msgs)
 	}
@@ -395,7 +439,8 @@ func TestDeliverInbox(t *testing.T) {
 	// Soft-deleted target is never delivered to.
 	now := time.Now()
 	sm.state.Sessions["s2"] = &SessionState{ID: "s2", Name: "gone", Status: StatusStopped, DeletedAt: &now}
-	sm.deliverInbox("gone", "x", true)
+	sm.deliverInbox(t.Context(), "gone", "x", true)
+
 	if m, _ := ms.Read("inbox:s2", "r", false, ""); len(m) != 0 {
 		t.Errorf("soft-deleted got %d messages", len(m))
 	}
@@ -405,6 +450,7 @@ func TestTriggerVars(t *testing.T) {
 	sm := newTriggerTestSM(t)
 	trig := config.TriggerConfig{Name: "canny", Watch: &config.WatchConfig{Role: "r"}}
 	now := time.Date(2026, 7, 11, 9, 0, 0, 0, time.UTC)
+
 	v := sm.triggerVars(&trig, fireContext{now: now, sessionName: "braw", worktree: "/wt", changedFiles: []string{"a.go", "b.go"}})
 	if v.Name != "canny" || v.Date != "2026-07-11" || v.SessionName != "braw" || v.ChangeCount != "2" || v.ChangedFiles != "a.go, b.go" {
 		t.Fatalf("vars = %+v", v)
@@ -415,6 +461,7 @@ func TestTriggerReactorName(t *testing.T) {
 	if got := triggerReactorName("rev", "braw"); got != "rev-braw" {
 		t.Errorf("got %q", got)
 	}
+
 	long := triggerReactorName("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbbbbbb")
 	if len(long) > 40 {
 		t.Errorf("name too long: %d", len(long))
@@ -429,6 +476,7 @@ func TestFireSchedule_RecordsRun(t *testing.T) {
 	sm := newTriggerTestSM(t, trig)
 	withMsgStore(t, sm)
 	sm.fireSchedule(t.Context(), "kirk", causeSchedule)
+
 	rt := sm.getTriggerRuntime("kirk")
 	if rt == nil || rt.RunCount != 1 || len(rt.History) != 1 || rt.History[0].Result != "published" {
 		t.Fatalf("runtime = %+v", rt)
@@ -443,9 +491,11 @@ func TestFireWatch_RateLimited(t *testing.T) {
 	}
 	sm := newTriggerTestSM(t, trig)
 	withMsgStore(t, sm)
+
 	fc := fireContext{now: time.Now(), sessionID: "src"}
 	sm.fireWatch(t.Context(), &trig, fc) // first fires
 	sm.fireWatch(t.Context(), &trig, fc) // second rate-limited
+
 	rt := sm.getTriggerRuntime("haar")
 	if rt == nil || rt.RunCount != 1 {
 		t.Fatalf("expected 1 run (2nd rate-limited), got %+v", rt)
@@ -457,12 +507,15 @@ func TestOrchestratorIDAndBindingReactor(t *testing.T) {
 	if sm.orchestratorID() != "" {
 		t.Error("no orchestrator expected")
 	}
+
 	sm.state.Sessions["o"] = &SessionState{ID: "o", SystemKind: SystemKindOrchestrator}
 	if sm.orchestratorID() != "o" {
 		t.Error("orchestrator not found")
 	}
+
 	sm.triggers.bindings[bindingKey("rev", "src")] = &watchBinding{triggerName: "rev", sessionID: "src"}
 	sm.setBindingReactor("rev", "src", "r1")
+
 	if sm.triggers.bindings[bindingKey("rev", "src")].reactorID != "r1" {
 		t.Error("reactor not set")
 	}
@@ -473,10 +526,12 @@ func TestTruncateOutput(t *testing.T) {
 	if short != "hi" {
 		t.Errorf("got %q", short)
 	}
+
 	long := make([]byte, triggerCommandOutputCap+100)
 	for i := range long {
 		long[i] = 'a'
 	}
+
 	if out := truncateOutput(string(long)); len(out) <= triggerCommandOutputCap || !contains(out, "truncated") {
 		t.Errorf("long output not truncated: len=%d", len(out))
 	}
@@ -489,5 +544,6 @@ func indexOf(s, sub string) int {
 			return i
 		}
 	}
+
 	return -1
 }
