@@ -118,8 +118,12 @@ type SessionState struct {
 	// when it stops: config.CleanupAlways on any stop, config.CleanupOnSuccess
 	// only on a clean (exit 0) stop. Empty disables it. Set only on
 	// trigger-spawned sessions, so cleanup never touches a manually created one.
-	AutoCleanup  string         `json:"auto_cleanup,omitempty"`
-	MigratedFrom *MigrationInfo `json:"migrated_from,omitempty"`
+	AutoCleanup string `json:"auto_cleanup,omitempty"`
+	// IdleTimeoutSecs overrides the agent-default idle-stop window for this
+	// session (seconds; 0 = use the agent default). Set on trigger-spawned
+	// sessions so an auto_cleanup briefing reaps itself promptly.
+	IdleTimeoutSecs int            `json:"idle_timeout_secs,omitempty"`
+	MigratedFrom    *MigrationInfo `json:"migrated_from,omitempty"`
 	// DeletedAt marks a session as soft-deleted. When set, the session is
 	// hidden from the default `gr list` and overlay, its worktree and state are
 	// preserved until ExpiresAt, and the daemon purges it (hard delete) once the

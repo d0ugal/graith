@@ -628,6 +628,9 @@ type CreateOpts struct {
 	// AutoCleanup marks a trigger-spawned session for soft-deletion when it
 	// stops (config.CleanupAlways / config.CleanupOnSuccess; empty disables).
 	AutoCleanup string
+	// IdleTimeoutSecs overrides the agent-default idle-stop window for this
+	// session (seconds; 0 = agent default).
+	IdleTimeoutSecs int
 }
 
 // Create starts a new agent session, either in a git worktree, in-place
@@ -941,6 +944,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		TriggerID:       opts.TriggerID,
 		TriggerReactor:  opts.TriggerReactor,
 		AutoCleanup:     opts.AutoCleanup,
+		IdleTimeoutSecs: opts.IdleTimeoutSecs,
 		Status:          StatusCreating,
 		CreatedAt:       time.Now().UTC(),
 		StatusChangedAt: time.Now().UTC(),
@@ -5312,9 +5316,15 @@ func (sm *SessionManager) checkIdleSession(s *SessionState) bool {
 
 	if s.IdleSince != nil {
 		var timeout time.Duration
-		if s.SystemKind == SystemKindOrchestrator {
+
+		switch {
+		case s.IdleTimeoutSecs > 0:
+			// Per-session override (trigger-spawned auto_cleanup / explicit
+			// idle_timeout) takes precedence over the agent default.
+			timeout = time.Duration(s.IdleTimeoutSecs) * time.Second
+		case s.SystemKind == SystemKindOrchestrator:
 			timeout = sm.cfg.Orchestrator.IdleTimeoutDuration()
-		} else {
+		default:
 			agentCfg := sm.cfg.Agents[s.Agent]
 			timeout = agentCfg.IdleTimeoutDuration()
 		}

@@ -282,6 +282,11 @@ func (sm *SessionManager) actionSession(ctx context.Context, t *config.TriggerCo
 		return "", err
 	}
 
+	idle, err := t.Action.SessionIdleTimeout()
+	if err != nil {
+		return "", err
+	}
+
 	// ensure-reviewer (watch): reuse the binding's existing reactor if alive.
 	if t.Action.Ensure && t.IsWatch() {
 		if existing := sm.reuseReactor(t.Name, fc.sessionID); existing != "" {
@@ -304,16 +309,17 @@ func (sm *SessionManager) actionSession(ctx context.Context, t *config.TriggerCo
 
 	//nolint:contextcheck // Create spawns a PTY-backed session that outlives the fire ctx (matches scenario start).
 	sess, err := sm.createTriggerSession(createTriggerReq{
-		name:        name,
-		agent:       agent,
-		repo:        repo,
-		prompt:      prompt,
-		model:       model,
-		parentID:    orchestratorID,
-		mirror:      mirror,
-		triggerName: t.Name,
-		reactor:     t.Action.Ensure && t.IsWatch(),
-		autoCleanup: cleanup,
+		name:            name,
+		agent:           agent,
+		repo:            repo,
+		prompt:          prompt,
+		model:           model,
+		parentID:        orchestratorID,
+		mirror:          mirror,
+		triggerName:     t.Name,
+		reactor:         t.Action.Ensure && t.IsWatch(),
+		autoCleanup:     cleanup,
+		idleTimeoutSecs: int(idle.Seconds()),
 	})
 	if err != nil {
 		return "", err
@@ -489,16 +495,17 @@ func (sm *SessionManager) setBindingReactor(triggerName, sessionID, reactorID st
 }
 
 type createTriggerReq struct {
-	name        string
-	agent       string
-	repo        string
-	prompt      string
-	model       string
-	parentID    string
-	mirror      string
-	triggerName string
-	reactor     bool
-	autoCleanup string
+	name            string
+	agent           string
+	repo            string
+	prompt          string
+	model           string
+	parentID        string
+	mirror          string
+	triggerName     string
+	reactor         bool
+	autoCleanup     string
+	idleTimeoutSecs int
 }
 
 // createTriggerSession creates a session via sm.Create, tagging it with the
@@ -511,19 +518,20 @@ func (sm *SessionManager) createTriggerSession(req createTriggerReq) (SessionSta
 	}
 
 	return sm.Create(CreateOpts{
-		Name:           req.name,
-		AgentName:      agent,
-		RepoPath:       req.repo,
-		Prompt:         req.prompt,
-		Model:          req.model,
-		ParentID:       req.parentID,
-		Mirror:         req.mirror,
-		AgentHooks:     true,
-		TriggerID:      req.triggerName,
-		TriggerReactor: req.reactor,
-		AutoCleanup:    req.autoCleanup,
-		Rows:           24,
-		Cols:           80,
+		Name:            req.name,
+		AgentName:       agent,
+		RepoPath:        req.repo,
+		Prompt:          req.prompt,
+		Model:           req.model,
+		ParentID:        req.parentID,
+		Mirror:          req.mirror,
+		AgentHooks:      true,
+		TriggerID:       req.triggerName,
+		TriggerReactor:  req.reactor,
+		AutoCleanup:     req.autoCleanup,
+		IdleTimeoutSecs: req.idleTimeoutSecs,
+		Rows:            24,
+		Cols:            80,
 	})
 }
 

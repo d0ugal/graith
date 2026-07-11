@@ -113,6 +113,31 @@ delete is disabled (`[delete] retention = "0"`) auto-cleanup is skipped rather
 than turned into an immediate hard delete, and a session interrupted by a daemon
 shutdown is preserved so `gr daemon restart` can resume it.
 
+#### Reaping the session promptly (`idle_timeout`)
+
+Cleanup only fires once the session actually stops. An interactive agent (e.g.
+Claude's TUI) doesn't exit when it finishes — it sits idle at its prompt — so
+the daemon has to idle-stop it first. To make that prompt, `auto_cleanup =
+true` / `"always"` gives the spawned session a **1-minute idle timeout** by
+default, so the chain runs quickly: finish → idle-stop → soft-delete. Override
+it with `idle_timeout` (a Go duration):
+
+```toml
+[trigger.action]
+type         = "session"
+agent        = "claude"
+prompt       = "Summarise open PRs and post to the orchestrator inbox."
+auto_cleanup = true
+idle_timeout = "2m"            # override the 1m auto_cleanup default
+```
+
+`idle_timeout` works on any `session` action (not just with `auto_cleanup`) and
+overrides the agent's default idle window. Note the default idle window is only
+applied for `"always"`: an `"on_success"` idle-stop is a non-zero exit that
+`"on_success"` won't clean up, so auto-idling it would just leave stopped
+clutter — it is left running until it exits cleanly on its own (or you set
+`idle_timeout` explicitly).
+
 ### Ensure-reviewer (watch + session)
 
 The flagship pattern — keep a reviewer reacting to an implementer's changes,

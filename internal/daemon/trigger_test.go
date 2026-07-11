@@ -904,6 +904,32 @@ func TestAutoCleanupStopped_SkipsStarred(t *testing.T) {
 	}
 }
 
+// TestCheckIdleSession_PerSessionOverride proves a trigger-spawned session's
+// IdleTimeoutSecs override drives the idle-stop decision, independent of the
+// agent default — the mechanism that makes an auto_cleanup briefing reap itself.
+func TestCheckIdleSession_PerSessionOverride(t *testing.T) {
+	sm := newTriggerTestSM(t)
+	past := time.Now().Add(-2 * time.Minute)
+
+	// Idle for 2m, override is 60s → elapsed → auto-stop.
+	s := &SessionState{ID: "braw", AgentStatus: "ready", IdleTimeoutSecs: 60, IdleSince: &past}
+	if !sm.checkIdleSession(s) {
+		t.Error("session idle past its 60s override should be auto-stopped")
+	}
+
+	// Same idle time, override 10m → not yet elapsed → keep running.
+	s2 := &SessionState{ID: "canny", AgentStatus: "ready", IdleTimeoutSecs: 600, IdleSince: &past}
+	if sm.checkIdleSession(s2) {
+		t.Error("session within its 10m override should not be auto-stopped")
+	}
+
+	// A busy (non-ready) session is never idle, override notwithstanding.
+	s3 := &SessionState{ID: "thrawn", AgentStatus: "busy", IdleTimeoutSecs: 1, IdleSince: &past}
+	if sm.checkIdleSession(s3) {
+		t.Error("a busy session must not be auto-stopped")
+	}
+}
+
 func TestTruncateOutput(t *testing.T) {
 	short := truncateOutput("  hi  ")
 	if short != "hi" {

@@ -72,6 +72,13 @@ type ActionConfig struct {
 	// Decoded as any so TOML can supply either a bool or the string enum; use
 	// AutoCleanupMode to normalise. Session action only.
 	AutoCleanup any `toml:"auto_cleanup"`
+	// IdleTimeout auto-stops the spawned session after it sits idle (agent at
+	// rest, no attached client) this long, overriding the agent default. A Go
+	// duration ("1m", "5m"). Session action only. When unset, an
+	// auto_cleanup="always" session defaults to a short idle window so a finished
+	// briefing reaps itself promptly (finish -> idle-stop -> soft-delete); see
+	// SessionIdleTimeout.
+	IdleTimeout string `toml:"idle_timeout"`
 
 	// scenario:
 	Scenario string `toml:"scenario"`
@@ -123,6 +130,11 @@ const (
 	CleanupAlways    = "always"     // delete on any stop
 	CleanupOnSuccess = "on_success" // delete only on a clean (exit 0) stop
 )
+
+// defaultAutoCleanupIdle is the idle window an auto_cleanup="always" session
+// gets when it doesn't set idle_timeout explicitly: short enough that a finished
+// briefing reaps itself promptly, long enough not to reap a brief mid-task rest.
+const defaultAutoCleanupIdle = time.Minute
 
 const (
 	defaultDebounce      = 30 * time.Second
@@ -185,6 +197,34 @@ func (a ActionConfig) AutoCleanupMode() (string, error) {
 	default:
 		return "", fmt.Errorf("auto_cleanup must be a boolean or one of %q/%q", CleanupAlways, CleanupOnSuccess)
 	}
+}
+
+// SessionIdleTimeout resolves the idle-stop window for a spawned session action.
+// An explicit idle_timeout always wins. Otherwise an auto_cleanup="always"
+// session gets defaultAutoCleanupIdle so it reaps itself promptly. "on_success"
+// is deliberately not auto-idled: an idle-stop is a non-zero (SIGTERM) exit that
+// "on_success" would not clean up, so idling it would just leave stopped clutter
+// — the very thing auto_cleanup avoids. 0 means "use the agent default".
+func (a ActionConfig) SessionIdleTimeout() (time.Duration, error) {
+	if a.IdleTimeout != "" {
+		d, err := ParseDurationWithDays(a.IdleTimeout)
+		if err != nil {
+			return 0, fmt.Errorf("idle_timeout %q: %w", a.IdleTimeout, err)
+		}
+
+		return d, nil
+	}
+
+	mode, err := a.AutoCleanupMode()
+	if err != nil {
+		return 0, err
+	}
+
+	if mode == CleanupAlways {
+		return defaultAutoCleanupIdle, nil
+	}
+
+	return 0, nil
 }
 
 // OverlapMode returns the effective overlap policy (empty => skip).
@@ -369,6 +409,14 @@ func (c *Config) validateAction(where string, t *TriggerConfig) []error {
 			// stop would defeat ensure's idempotent reuse.
 			errs = append(errs, fmt.Errorf("%s: action.auto_cleanup is incompatible with ensure=true (reused reactors are not auto-deleted)", where))
 		}
+
+		if a.IdleTimeout != "" {
+			if d, err := ParseDurationWithDays(a.IdleTimeout); err != nil {
+				errs = append(errs, fmt.Errorf("%s: action.idle_timeout %q: %w", where, a.IdleTimeout, err))
+			} else if d <= 0 {
+				errs = append(errs, fmt.Errorf("%s: action.idle_timeout must be > 0", where))
+			}
+		}
 	case ActionScenario:
 		if a.Scenario == "" {
 			errs = append(errs, fmt.Errorf("%s: scenario action requires action.scenario", where))
@@ -391,13 +439,17 @@ func (c *Config) validateAction(where string, t *TriggerConfig) []error {
 		errs = append(errs, fmt.Errorf("%s: unknown action.type %q", where, a.Type))
 	}
 
-	// auto_cleanup watches a spawned session's lifecycle, so it only makes sense
-	// for the session action.
+	// auto_cleanup and idle_timeout act on a spawned session's lifecycle, so they
+	// only make sense for the session action.
 	if a.Type != ActionSession && a.Type != "" {
 		if mode, err := a.AutoCleanupMode(); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", where, err))
 		} else if mode != "" {
 			errs = append(errs, fmt.Errorf("%s: action.auto_cleanup is only valid for a session action", where))
+		}
+
+		if a.IdleTimeout != "" {
+			errs = append(errs, fmt.Errorf("%s: action.idle_timeout is only valid for a session action", where))
 		}
 	}
 
