@@ -85,41 +85,57 @@ jobs:
           # import-paths back to repo-relative files. The binary lives outside
           # the worktree so it survives the base checkout.
           go build -o "$RUNNER_TEMP/covreport" ./cmd/covreport
-          MODULE="$(awk '/^module / {print $2; exit}' go.mod)"
-          # Emit the aggregate statement-coverage % for the current tree into a
-          # profile. `|| true`: a flaky/failing package must not abort the
-          # report — ci.yml is the authoritative test gate. Empty profile → 0.0.
-          measure() {
-            go test -coverprofile="$1" ./... >/dev/null 2>&1 || true
+          # `[[:space:]]` (not a literal space) so a tab- or multi-space-
+          # separated module directive still matches.
+          MODULE="$(awk '/^module[[:space:]]/ {print $2; exit}' go.mod)"
+          # Run tests into a coverage profile, then extract the aggregate %.
+          # Split into two helpers so the *test exit status* is observable: it's
+          # lost inside a `$(...)` substitution, and the threshold gate must know
+          # whether HEAD's tests actually passed before failing the build on a
+          # drop. A flaky/failing package must not abort the report itself
+          # (ci.yml is the authoritative test gate) — hence the empty-profile →
+          # 0.0 fallback stays.
+          run_cover() { go test -coverprofile="$1" ./... >/dev/null 2>&1; }
+          pct_of() {
             if [ -s "$1" ]; then
               go tool cover -func="$1" | awk '/^total:/ {gsub(/%/,"",$3); print $3}'
             else
               echo "0.0"
             fi
           }
-          HEAD_PCT="$(measure cover.head.out)"
+          HEAD_OK=1
+          run_cover cover.head.out || HEAD_OK=0
+          HEAD_PCT="$(pct_of cover.head.out)"
           # Measure the base commit the same way, then diff. Go's build cache
-          # makes the second pass much cheaper than the first.
+          # makes the second pass much cheaper than the first. A base test
+          # failure is folded into the "unavailable" handling below, so its exit
+          # status is intentionally ignored here.
           git checkout --quiet --force "$BASE_SHA"
-          BASE_PCT="$(measure cover.base.out)"
+          run_cover cover.base.out || true
+          BASE_PCT="$(pct_of cover.base.out)"
           # If the base failed to build/test (empty profile → 0.0) while HEAD
           # measured fine, a raw diff would report a nonsense delta (e.g.
-          # +87.3%). Report the delta as unavailable in that case.
+          # +87.3%). Report the delta — and the base % shown in the comment — as
+          # unavailable in that case rather than a misleading "0.0%".
           if [ "$BASE_PCT" = "0.0" ] && [ "$HEAD_PCT" != "0.0" ]; then
             DELTA="n/a"
+            BASE_OUT="n/a"
           else
             DELTA="$(awk -v a="$HEAD_PCT" -v b="$BASE_PCT" 'BEGIN{printf "%+.1f%%", a-b}')"
+            BASE_OUT="$BASE_PCT"
           fi
           # Per-file breakdown sorted lowest-coverage-first, for the collapsed
           # section of the PR comment. Run from the prebuilt binary (works
           # regardless of the checked-out base tree); both profiles are untracked
-          # so they survived the base checkout. covreport treats an empty base
-          # profile as "base unavailable" on its own, so passing it is safe.
+          # so they survived the base checkout. covreport treats a base profile
+          # with no coverage blocks (e.g. a failed base build's header-only
+          # profile) as "base unavailable" on its own, so passing it is safe.
           TABLE="$("$RUNNER_TEMP/covreport" -head cover.head.out -base cover.base.out -module "$MODULE")"
           {
             echo "pct=$HEAD_PCT"
-            echo "base=$BASE_PCT"
+            echo "base=$BASE_OUT"
             echo "delta=$DELTA"
+            echo "head_ok=$HEAD_OK"
             # Multiline output via a heredoc delimiter (the table spans many
             # lines). The delimiter is unlikely to collide with Markdown table
             # content.
@@ -136,14 +152,18 @@ jobs:
         env:
           DELTA: ${{ steps.cov.outputs.delta }}
           PCT: ${{ steps.cov.outputs.pct }}
+          HEAD_OK: ${{ steps.cov.outputs.head_ok }}
           MAX_DROP: "5.0"
         run: |
           set -euo pipefail
           # Not measurable → don't gate. "n/a" means the base failed to
-          # build/test; PCT "0.0" means HEAD did (ci.yml is the real test gate
-          # for that). Either way there's no trustworthy delta to enforce.
-          if [ "$DELTA" = "n/a" ] || [ "$PCT" = "0.0" ]; then
-            echo "Coverage delta not measurable (base or head build failed); skipping threshold check."
+          # build/test; PCT "0.0" means HEAD produced no profile; HEAD_OK != 1
+          # means HEAD's tests failed (a partial profile could still yield a
+          # non-zero % and a large negative delta — gating on that would fail the
+          # build for a flaky/failing test, which ci.yml is the real gate for).
+          # In all three cases there's no trustworthy delta to enforce.
+          if [ "$DELTA" = "n/a" ] || [ "$PCT" = "0.0" ] || [ "$HEAD_OK" != "1" ]; then
+            echo "Coverage delta not measurable (base or head build/test failed); skipping threshold check."
             exit 0
           fi
           # DELTA is formatted like "+0.3%" or "-6.2%"; strip the trailing %.
@@ -224,6 +244,14 @@ jobs:
 
           # When the go-coverage job failed but produced numbers, the threshold
           # gate tripped (a >5% drop): call it out above the table.
+          # Base % for the footnote. GO_BASE is "n/a" when the base was
+          # unmeasurable; show that verbatim rather than "n/a%".
+          if [ -z "${GO_BASE:-}" ] || [ "$GO_BASE" = "n/a" ]; then
+            base_display="n/a"
+          else
+            base_display="${GO_BASE}%"
+          fi
+
           warning=""
           if [ "$GO_RESULT" != "success" ] && [ -n "${GO_PCT:-}" ]; then
             # Trailing newline so a blank line separates the blockquote from the
@@ -244,11 +272,12 @@ jobs:
             swift_row="| Swift (\`gui/shared\`) | not run (no \`gui/\` changes) | — |"
           fi
 
-          # Collapsed per-file Go breakdown. Only include it when Go coverage
-          # succeeded and produced a real table (not the empty-data placeholder),
-          # so the comment stays clean on a Go build failure. The inner heredoc
-          # keeps the same base indent as the body heredoc below so the block
-          # scalar de-indents both to column 0.
+          # Collapsed per-file Go breakdown. Include it whenever a real table
+          # was produced (not the empty-data placeholder), independent of the job
+          # result — a threshold-gate failure still has a valid table, and that's
+          # exactly when the per-file numbers help most. The inner heredoc keeps
+          # the same base indent as the body heredoc below so the block scalar
+          # de-indents both to column 0.
           details=""
           if [ -n "${GO_TABLE:-}" ] && [ "$GO_TABLE" != "_No Go coverage data._" ]; then
             details="$(cat <<DETAILS_EOF
@@ -277,7 +306,7 @@ jobs:
           $swift_row
           $details
 
-          <sub>Base coverage: Go \`${GO_BASE:-n/a}%\`. Per-file figures are statement coverage. Swift shows an absolute % (no delta) to keep macOS CI light. Updated on every push.</sub>
+          <sub>Base coverage: Go \`${base_display}\`. Per-file figures are statement coverage. Swift shows an absolute % (no delta) to keep macOS CI light. Updated on every push.</sub>
           EOF
           )"
 

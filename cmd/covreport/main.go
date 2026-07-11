@@ -34,13 +34,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	head := fs.String("head", "", "path to the head coverage profile (required)")
 	base := fs.String("base", "", "path to the base coverage profile (optional)")
+
 	module := fs.String("module", "", "module path to strip (default: read from ./go.mod)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 
 	if *head == "" {
-		fmt.Fprintln(stderr, "covreport: -head is required")
+		_, _ = fmt.Fprintln(stderr, "covreport: -head is required")
 		return 2
 	}
 
@@ -51,28 +52,33 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	headCov, err := parseFile(*head, mod)
 	if err != nil {
-		fmt.Fprintf(stderr, "covreport: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "covreport: %v\n", err)
 		return 1
 	}
 
+	// A missing base profile is not an error: the base commit may have failed
+	// to build/test. Only a base that exists and is malformed is fatal. Base
+	// availability is decided by *parsed content*, not file size — a failed
+	// `go test -coverprofile` leaves a header-only ("mode: set\n") profile that
+	// is non-empty on disk but yields zero files; treating that as "available"
+	// would mislabel every head file "new" instead of "—".
 	var baseCov map[string]*covreport.FileCov
-	baseAvailable := false
-	// A missing or empty base profile is not an error: the base commit may have
-	// failed to build/test. Only a base that exists, is non-empty, and is
-	// malformed is fatal.
+
 	if *base != "" {
-		if info, statErr := os.Stat(*base); statErr == nil && info.Size() > 0 {
+		if _, statErr := os.Stat(*base); statErr == nil {
 			baseCov, err = parseFile(*base, mod)
 			if err != nil {
-				fmt.Fprintf(stderr, "covreport: %v\n", err)
+				_, _ = fmt.Fprintf(stderr, "covreport: %v\n", err)
 				return 1
 			}
-			baseAvailable = true
 		}
 	}
 
+	baseAvailable := len(baseCov) > 0
+
 	rows := covreport.BuildRows(headCov, baseCov)
-	fmt.Fprintln(stdout, covreport.RenderTable(rows, baseAvailable))
+	_, _ = fmt.Fprintln(stdout, covreport.RenderTable(rows, baseAvailable))
+
 	return 0
 }
 
@@ -81,6 +87,7 @@ func parseFile(path, module string) (map[string]*covreport.FileCov, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
+
 	return covreport.Parse(f, module)
 }
