@@ -35,6 +35,7 @@ func (f *FileCov) Pct() float64 {
 	if f.Total == 0 {
 		return 0
 	}
+
 	return 100 * float64(f.Covered) / float64(f.Total)
 }
 
@@ -54,12 +55,15 @@ func Parse(r io.Reader, module string) (map[string]*FileCov, error) {
 	// Coverage profiles can contain long lines; give the scanner room to grow
 	// past the default 64KiB token cap rather than fail on a wide file.
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
 	prefix := strings.TrimSuffix(module, "/") + "/"
+
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
 		if line == "" || strings.HasPrefix(line, "mode:") {
 			continue
 		}
+
 		fields := strings.Fields(line)
 		if len(fields) != 3 {
 			return nil, fmt.Errorf("malformed profile line: %q", line)
@@ -71,32 +75,45 @@ func Parse(r io.Reader, module string) (map[string]*FileCov, error) {
 		if colon < 0 {
 			return nil, fmt.Errorf("malformed profile line (no position): %q", line)
 		}
+
 		path := fields[0][:colon]
+
 		numStmt, err := strconv.Atoi(fields[1])
 		if err != nil {
 			return nil, fmt.Errorf("bad statement count in %q: %w", line, err)
 		}
+
 		count, err := strconv.Atoi(fields[2])
 		if err != nil {
 			return nil, fmt.Errorf("bad execution count in %q: %w", line, err)
 		}
+		// Go emits non-negative counts; negatives would produce nonsense
+		// covered/total sums, so reject them rather than silently propagate.
+		if numStmt < 0 || count < 0 {
+			return nil, fmt.Errorf("negative count in %q", line)
+		}
+
 		rel := path
 		if module != "" && strings.HasPrefix(path, prefix) {
 			rel = strings.TrimPrefix(path, prefix)
 		}
+
 		fc := files[rel]
 		if fc == nil {
 			fc = &FileCov{Path: rel}
 			files[rel] = fc
 		}
+
 		fc.Total += numStmt
 		if count > 0 {
 			fc.Covered += numStmt
 		}
 	}
+
 	if err := sc.Err(); err != nil {
 		return nil, err
 	}
+
 	return files, nil
 }
 
@@ -128,14 +145,18 @@ func BuildRows(head, base map[string]*FileCov) []Row {
 			row.InBase = true
 			row.Delta = fc.Pct() - b.Pct()
 		}
+
 		rows = append(rows, row)
 	}
+
 	sort.Slice(rows, func(i, j int) bool {
 		if rows[i].Pct != rows[j].Pct {
 			return rows[i].Pct < rows[j].Pct
 		}
+
 		return rows[i].Path < rows[j].Path
 	})
+
 	return rows
 }
 
@@ -148,11 +169,14 @@ func RenderTable(rows []Row, baseAvailable bool) string {
 	if len(rows) == 0 {
 		return "_No Go coverage data._"
 	}
+
 	var b strings.Builder
 	b.WriteString("| File | Coverage | Statements | Δ vs base |\n")
 	b.WriteString("|------|:--------:|:----------:|:---------:|\n")
+
 	for _, r := range rows {
 		var delta string
+
 		switch {
 		case !baseAvailable:
 			delta = "—"
@@ -161,9 +185,11 @@ func RenderTable(rows []Row, baseAvailable bool) string {
 		default:
 			delta = fmt.Sprintf("%+.1f%%", r.Delta)
 		}
+
 		fmt.Fprintf(&b, "| %s | %.1f%% | %d/%d | %s |\n",
 			r.Path, r.Pct, r.Covered, r.Total, delta)
 	}
+
 	return strings.TrimRight(b.String(), "\n")
 }
 
@@ -176,13 +202,18 @@ func ModulePath(gomod string) string {
 	if err != nil {
 		return ""
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
+
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
-		if rest, ok := strings.CutPrefix(line, "module"); ok {
+		// Require whitespace after the directive so a hypothetical `moduleXYZ`
+		// line can't false-match; mirrors the workflow's `^module[[:space:]]`.
+		rest, ok := strings.CutPrefix(line, "module")
+		if ok && rest != strings.TrimLeft(rest, " \t") {
 			return strings.TrimSpace(rest)
 		}
 	}
+
 	return ""
 }

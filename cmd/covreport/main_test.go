@@ -14,20 +14,25 @@ github.com/d0ugal/graith/internal/dreich/dreich.go:20.2,22.3 3 0
 
 func writeProfile(t *testing.T, name, content string) string {
 	t.Helper()
+
 	path := filepath.Join(t.TempDir(), name)
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
+
 	return path
 }
 
 func TestRunSuccessNoBase(t *testing.T) {
 	head := writeProfile(t, "cover.head.out", brawProfile)
+
 	var out, errBuf strings.Builder
+
 	code := run([]string{"-head", head, "-module", "github.com/d0ugal/graith"}, &out, &errBuf)
 	if code != 0 {
 		t.Fatalf("exit = %d, stderr=%q", code, errBuf.String())
 	}
+
 	got := out.String()
 	if !strings.Contains(got, "internal/dreich/dreich.go") {
 		t.Errorf("output missing dreich row:\n%s", got)
@@ -44,11 +49,14 @@ func TestRunWithBaseShowsDelta(t *testing.T) {
 	base := writeProfile(t, "cover.base.out", `mode: set
 github.com/d0ugal/graith/internal/dreich/dreich.go:20.2,22.3 3 1
 `)
+
 	var out, errBuf strings.Builder
+
 	code := run([]string{"-head", head, "-base", base, "-module", "github.com/d0ugal/graith"}, &out, &errBuf)
 	if code != 0 {
 		t.Fatalf("exit = %d, stderr=%q", code, errBuf.String())
 	}
+
 	got := out.String()
 	if !strings.Contains(got, "new") {
 		t.Errorf("braw (absent from base) should show 'new':\n%s", got)
@@ -60,6 +68,7 @@ func TestRunMissingHeadFlag(t *testing.T) {
 	if code := run(nil, &out, &errBuf); code != 2 {
 		t.Fatalf("exit = %d, want 2", code)
 	}
+
 	if !strings.Contains(errBuf.String(), "-head is required") {
 		t.Errorf("stderr = %q", errBuf.String())
 	}
@@ -74,6 +83,7 @@ func TestRunUnknownFlag(t *testing.T) {
 
 func TestRunMissingHeadFile(t *testing.T) {
 	var out, errBuf strings.Builder
+
 	code := run([]string{"-head", filepath.Join(t.TempDir(), "nae-such.out")}, &out, &errBuf)
 	if code != 1 {
 		t.Fatalf("exit = %d, want 1 for unreadable head", code)
@@ -82,6 +92,7 @@ func TestRunMissingHeadFile(t *testing.T) {
 
 func TestRunMalformedHead(t *testing.T) {
 	head := writeProfile(t, "cover.head.out", "mode: set\nthis is not a valid line\n")
+
 	var out, errBuf strings.Builder
 	if code := run([]string{"-head", head, "-module", "x"}, &out, &errBuf); code != 1 {
 		t.Fatalf("exit = %d, want 1 for malformed head", code)
@@ -91,19 +102,48 @@ func TestRunMalformedHead(t *testing.T) {
 func TestRunEmptyBaseTreatedAsUnavailable(t *testing.T) {
 	head := writeProfile(t, "cover.head.out", brawProfile)
 	base := writeProfile(t, "cover.base.out", "") // empty -> base unavailable, not an error
+
 	var out, errBuf strings.Builder
+
 	code := run([]string{"-head", head, "-base", base, "-module", "github.com/d0ugal/graith"}, &out, &errBuf)
 	if code != 0 {
 		t.Fatalf("exit = %d, stderr=%q", code, errBuf.String())
 	}
+
 	if !strings.Contains(out.String(), "| — |") {
 		t.Errorf("empty base should yield em-dash deltas:\n%s", out.String())
+	}
+}
+
+func TestRunHeaderOnlyBaseTreatedAsUnavailable(t *testing.T) {
+	// A failed `go test -coverprofile` leaves a non-empty but block-less
+	// profile (just the mode header). It parses to zero files, so the base must
+	// be treated as unavailable ("—" deltas), not "available with no files"
+	// (which would mislabel every head file "new").
+	head := writeProfile(t, "cover.head.out", brawProfile)
+	base := writeProfile(t, "cover.base.out", "mode: set\n")
+
+	var out, errBuf strings.Builder
+
+	code := run([]string{"-head", head, "-base", base, "-module", "github.com/d0ugal/graith"}, &out, &errBuf)
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr=%q", code, errBuf.String())
+	}
+
+	got := out.String()
+	if strings.Contains(got, "new") {
+		t.Errorf("header-only base should yield em-dash deltas, not 'new':\n%s", got)
+	}
+
+	if !strings.Contains(got, "| — |") {
+		t.Errorf("expected em-dash deltas for header-only base:\n%s", got)
 	}
 }
 
 func TestRunMalformedBaseIsFatal(t *testing.T) {
 	head := writeProfile(t, "cover.head.out", brawProfile)
 	base := writeProfile(t, "cover.base.out", "mode: set\ngarbage line here\n")
+
 	var out, errBuf strings.Builder
 	if code := run([]string{"-head", head, "-base", base, "-module", "x"}, &out, &errBuf); code != 1 {
 		t.Fatalf("exit = %d, want 1 for malformed base", code)
