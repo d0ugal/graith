@@ -392,7 +392,24 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				}
 
 				//nolint:contextcheck // session lifecycle is intentionally detached from the client connection: sessions must survive client disconnect (see architecture note), so Create uses its own bounded background timeouts rather than the request ctx.
-				sess, err := sm.Create(c.Name, agentName, c.RepoPath, c.Base, c.Prompt, c.Model, c.ParentID, c.NoRepo, c.ShareWorktree, c.AgentHooks, c.InPlace, c.AllowConcurrent, c.SkipModelValidation, c.Yolo, clientRows, clientCols)
+				sess, err := sm.Create(CreateOpts{
+					Name:                c.Name,
+					AgentName:           agentName,
+					RepoPath:            c.RepoPath,
+					BaseBranch:          c.Base,
+					Prompt:              c.Prompt,
+					Model:               c.Model,
+					ParentID:            c.ParentID,
+					NoRepo:              c.NoRepo,
+					ShareWorktree:       c.ShareWorktree,
+					AgentHooks:          c.AgentHooks,
+					InPlace:             c.InPlace,
+					AllowConcurrent:     c.AllowConcurrent,
+					SkipModelValidation: c.SkipModelValidation,
+					Yolo:                c.Yolo,
+					Rows:                clientRows,
+					Cols:                clientCols,
+				})
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 				} else {

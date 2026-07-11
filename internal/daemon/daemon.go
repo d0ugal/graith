@@ -491,6 +491,29 @@ func (sm *SessionManager) repoStoreDir(repoRoot string) (string, error) {
 	return dir, nil
 }
 
+// CreateOpts holds the parameters for SessionManager.Create. Using a struct
+// keeps call sites self-documenting and lets new options default to their
+// zero value without breaking existing callers.
+type CreateOpts struct {
+	Name                string
+	AgentName           string
+	RepoPath            string
+	BaseBranch          string
+	Prompt              string
+	Model               string
+	ParentID            string
+	NoRepo              bool
+	ShareWorktree       string
+	AgentHooks          bool
+	InPlace             bool
+	AllowConcurrent     bool
+	SkipModelValidation bool
+	Yolo                bool
+	Rows                uint16
+	Cols                uint16
+	EnvExtra            []map[string]string
+}
+
 // Create starts a new agent session, either in a git worktree, in-place
 // in an existing repo, or as a standalone scratch session (when noRepo is true).
 //
@@ -499,7 +522,26 @@ func (sm *SessionManager) repoStoreDir(repoRoot string) (string, error) {
 //  1. Lock: validate, reserve session as StatusCreating, unlock
 //  2. Git setup and PTY spawn (no lock held)
 //  3. Lock: commit to StatusRunning, unlock
-func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt, model, parentID string, noRepo bool, shareWorktree string, agentHooks bool, inPlace, allowConcurrent, skipModelValidation, yolo bool, rows, cols uint16, envExtra ...map[string]string) (SessionState, error) {
+func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
+	// Destructure into local names so the body below stays unchanged.
+	name := opts.Name
+	agentName := opts.AgentName
+	repoPath := opts.RepoPath
+	baseBranch := opts.BaseBranch
+	prompt := opts.Prompt
+	model := opts.Model
+	parentID := opts.ParentID
+	noRepo := opts.NoRepo
+	shareWorktree := opts.ShareWorktree
+	agentHooks := opts.AgentHooks
+	inPlace := opts.InPlace
+	allowConcurrent := opts.AllowConcurrent
+	skipModelValidation := opts.SkipModelValidation
+	yolo := opts.Yolo
+	rows := opts.Rows
+	cols := opts.Cols
+	envExtra := opts.EnvExtra
+
 	if err := ValidateSessionName(name); err != nil {
 		return SessionState{}, err
 	}

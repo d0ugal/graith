@@ -296,11 +296,19 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 				scenarioEnv["GRAITH_SCENARIO_GOAL"] = msg.Goal
 			}
 
-			sess, err := sm.Create(
-				s.Name, agentName, repoRoots[idx], s.Base, s.Task, s.Model,
-				msg.CallerSessionID, false, "", s.AgentHooks,
-				false, false, false, false, rows, cols, scenarioEnv,
-			)
+			sess, err := sm.Create(CreateOpts{
+				Name:       s.Name,
+				AgentName:  agentName,
+				RepoPath:   repoRoots[idx],
+				BaseBranch: s.Base,
+				Prompt:     s.Task,
+				Model:      s.Model,
+				ParentID:   msg.CallerSessionID,
+				AgentHooks: s.AgentHooks,
+				Rows:       rows,
+				Cols:       cols,
+				EnvExtra:   []map[string]string{scenarioEnv},
+			})
 			results[idx] = createResult{index: idx, sess: sess, err: err}
 		}(i, s)
 	}
@@ -897,11 +905,19 @@ func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSess
 
 	agentHooks := input.AgentHooks
 
-	sess, err := sm.Create(
-		input.Name, agentName, repoRoot, input.Base, input.Task, input.Model,
-		orchestratorID, false, "", agentHooks,
-		false, false, false, false, rows, cols, scenarioEnv,
-	)
+	sess, err := sm.Create(CreateOpts{
+		Name:       input.Name,
+		AgentName:  agentName,
+		RepoPath:   repoRoot,
+		BaseBranch: input.Base,
+		Prompt:     input.Task,
+		Model:      input.Model,
+		ParentID:   orchestratorID,
+		AgentHooks: agentHooks,
+		Rows:       rows,
+		Cols:       cols,
+		EnvExtra:   []map[string]string{scenarioEnv},
+	})
 	if err != nil {
 		return nil, fmt.Errorf("create session: %w", err)
 	}

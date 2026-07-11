@@ -92,7 +92,7 @@ func TestValidateSessionName(t *testing.T) {
 func TestCreateRejectsUnsafeName(t *testing.T) {
 	sm := newTestSessionManager(t)
 
-	_, err := sm.Create("bad;name", "claude", "/tmp", "", "", "", "", true, "", false, false, false, false, false, 24, 80)
+	_, err := sm.Create(CreateOpts{Name: "bad;name", AgentName: "claude", RepoPath: "/tmp", NoRepo: true, Rows: 24, Cols: 80})
 	if err == nil {
 		t.Fatal("Create with unsafe name should fail")
 	}
@@ -119,7 +119,7 @@ func TestCreateSkipModelValidation(t *testing.T) {
 	}
 
 	t.Run("validation rejects unknown model by default", func(t *testing.T) {
-		_, err := sm.Create("haar-reject", "claude", "", "", "", "model-z", "", true, "", false, false, false, false, false, 24, 80)
+		_, err := sm.Create(CreateOpts{Name: "haar-reject", AgentName: "claude", Model: "model-z", NoRepo: true, Rows: 24, Cols: 80})
 		if err == nil {
 			t.Fatal("expected validation error for unknown model")
 		}
@@ -130,7 +130,7 @@ func TestCreateSkipModelValidation(t *testing.T) {
 	})
 
 	t.Run("skip flag bypasses validation", func(t *testing.T) {
-		_, err := sm.Create("braw-skip", "claude", "", "", "", "model-z", "", true, "", false, false, false, true, false, 24, 80)
+		_, err := sm.Create(CreateOpts{Name: "braw-skip", AgentName: "claude", Model: "model-z", NoRepo: true, SkipModelValidation: true, Rows: 24, Cols: 80})
 		if err != nil && strings.Contains(err.Error(), "invalid model") {
 			t.Fatalf("--skip-model-validation should bypass model check, got: %v", err)
 		}
