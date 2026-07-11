@@ -1,10 +1,42 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
+
+// TestActionRepoPathExpandsTilde locks issue #1051: a leading ~/ in a trigger
+// action's repo must expand to the home directory, the same as every other
+// configured path. A raw ~/... reached the daemon and failed the git check
+// ("not inside a git repository: ~/...").
+func TestActionRepoPathExpandsTilde(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skipf("no home dir: %v", err)
+	}
+
+	want := filepath.Join(home, "Code", "croft")
+
+	a := ActionConfig{Type: ActionSession, Repo: "~/Code/croft"}
+	if got := a.RepoPath(); got != want {
+		t.Errorf("RepoPath() = %q, want %q", got, want)
+	}
+
+	// An unset repo stays empty (ExpandPath would resolve "" to the cwd).
+	empty := ActionConfig{Type: ActionCommand}
+	if got := empty.RepoPath(); got != "" {
+		t.Errorf("RepoPath() on empty repo = %q, want \"\"", got)
+	}
+
+	// An already-absolute path is preserved (cleaned).
+	abs := ActionConfig{Type: ActionCommand, Repo: "/glen/bothy"}
+	if got := abs.RepoPath(); got != "/glen/bothy" {
+		t.Errorf("RepoPath() = %q, want /glen/bothy", got)
+	}
+}
 
 func schedTrigger(name string, sched ScheduleConfig, action ActionConfig) TriggerConfig {
 	return TriggerConfig{Name: name, Schedule: &sched, Action: action}
