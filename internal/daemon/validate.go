@@ -8,6 +8,23 @@ import (
 
 var validSessionName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
 
+// validSessionID matches the shape produced by generateID: four random bytes
+// hex-encoded to eight lowercase hex characters. Caller-supplied IDs are held
+// to the generator's own format so nothing downstream (branch names, worktree
+// and scratch paths) ever sees an ID shape it wasn't built to handle.
+var validSessionID = regexp.MustCompile(`^[0-9a-f]{8}$`)
+
+// validateSessionID checks that a caller-supplied session ID matches the
+// format Create would otherwise generate. It does not check uniqueness —
+// Create does that under its lock, atomically with reserving the session.
+func validateSessionID(id string) error {
+	if !validSessionID.MatchString(id) {
+		return fmt.Errorf("session id %q is invalid: must be 8 lowercase hex characters", id)
+	}
+
+	return nil
+}
+
 const OrchestratorSessionName = "orchestrator"
 const SystemKindOrchestrator = "orchestrator"
 

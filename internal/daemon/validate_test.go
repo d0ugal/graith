@@ -89,6 +89,38 @@ func TestValidateSessionName(t *testing.T) {
 	}
 }
 
+func TestValidateSessionID(t *testing.T) {
+	valid := []string{
+		"abcdef12",
+		"00000000",
+		"ffffffff",
+		"0a1b2c3d",
+		generateID(),
+	}
+	for _, id := range valid {
+		if err := validateSessionID(id); err != nil {
+			t.Errorf("validateSessionID(%q) = %v, want nil", id, err)
+		}
+	}
+
+	invalid := []string{
+		"",           // empty
+		"abcdef1",    // too short
+		"abcdef123",  // too long
+		"ABCDEF12",   // uppercase not allowed
+		"abcdefg1",   // g is not hex
+		"abcd ef12",  // space
+		"abcd-ef12",  // hyphen
+		"0x1b2c3d",   // wrong shape
+		"../../etc0", // path-ish
+	}
+	for _, id := range invalid {
+		if err := validateSessionID(id); err == nil {
+			t.Errorf("validateSessionID(%q) = nil, want error", id)
+		}
+	}
+}
+
 func TestCreateRejectsUnsafeName(t *testing.T) {
 	sm := newTestSessionManager(t)
 
