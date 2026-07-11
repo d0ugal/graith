@@ -145,9 +145,16 @@ type PRWatchConfig struct {
 ```
 
 `trusted_author_associations` defaults to `["OWNER","MEMBER","COLLABORATOR"]`
-when unset, and associations are normalised to upper-case on load.
+when **unset** (nil), and associations are normalised to upper-case on load. A
+**present-but-empty** list (`trusted_author_associations = []`) is honoured as an
+explicit "trust no association" — allowlist-only mode, failing closed — and is
+**not** silently widened back to the default (go-toml/v2 decodes `= []` to a
+non-nil empty slice, so it is distinguishable from an absent key).
 `comment_author_allowlist` defaults **empty** — discovery is handled by the
-orchestrator prompt below, so no default trust needs to be guessed.
+orchestrator prompt below, so no default trust needs to be guessed. Because a
+bot's association is unreliable, a `"<slug>[bot]"` login is **never** trusted by
+association — an allowlist miss on a bot login is a hard reject, so the allowlist
+is the only path to trusting a bot/App.
 
 ## Orchestrator-in-the-loop trust prompt
 
