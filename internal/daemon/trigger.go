@@ -615,7 +615,7 @@ func (sm *SessionManager) deliverInbox(ctx context.Context, target, body string,
 	// notifyFromDaemon publishes AND auto-resumes; a bare Publish does not.
 	if orchestrator || wake {
 		//nolint:contextcheck // notifyFromDaemon detaches its auto-resume; it must outlive this call.
-		sm.notifyFromDaemon(id, body)
+		_ = sm.notifyFromDaemon(id, body)
 		return
 	}
 

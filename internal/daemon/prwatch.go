@@ -323,7 +323,7 @@ func (sm *SessionManager) pollSession(ctx context.Context, cfg *configPRWatch, t
 	notifications := sm.diffAndBuild(cfg, t, slug, d)
 	for _, body := range notifications {
 		//nolint:contextcheck // notifyFromDaemon spawns a detached goroutine that may auto-resume a stopped session; that work must outlive this poll iteration, so it deliberately does not inherit the poll ctx.
-		sm.notifyFromDaemon(t.id, body)
+		_ = sm.notifyFromDaemon(t.id, body)
 	}
 
 	sm.schedulePoll(t.id, pollIntervalFor(cfg, d.State, d.CIState))
@@ -763,9 +763,25 @@ func commentTrusted(cfg *configPRWatch, c ghComment) bool {
 		}
 	}
 
+	// Bots and GitHub Apps are trusted ONLY via the login allowlist above. Their
+	// author_association is unreliable and must NEVER confer trust (issue #1039):
+	// e.g. github-advanced-security[bot] carries CONTRIBUTOR and a bot could be
+	// reported with a trusted association, which would silently reopen the
+	// injection channel. An allowlist miss on a bot login is a hard reject.
+	if isBotLogin(login) {
+		return false
+	}
+
 	assoc := strings.ToUpper(strings.TrimSpace(c.AuthorAssociation))
 
 	return cfg.TrustedAssociationSet()[assoc]
+}
+
+// isBotLogin reports whether a GitHub login identifies a bot or GitHub App,
+// which appear as the "<app-slug>[bot]" user form. Matching the login suffix is
+// sufficient — no need to read user.type (design #1039).
+func isBotLogin(login string) bool {
+	return strings.HasSuffix(strings.ToLower(strings.TrimSpace(login)), "[bot]")
 }
 
 // partitionCommentsByTrust splits a comment batch into the trusted subset (kept
@@ -819,7 +835,7 @@ func aggregateUntrustedAuthors(untrusted []ghComment) []untrustedAuthor {
 			a = &untrustedAuthor{
 				login: strings.TrimSpace(c.User.Login),
 				assoc: assoc,
-				isBot: strings.HasSuffix(key, "[bot]"),
+				isBot: isBotLogin(key),
 			}
 			byLogin[key] = a
 			order = append(order, key)
@@ -884,7 +900,21 @@ func (sm *SessionManager) promptUntrustedAuthors(cfg *configPRWatch, t prWatchTa
 		return
 	}
 
-	sm.notifyFromDaemon(orch, untrustedAuthorPromptBody(t, d, fresh))
+	// Record the authors as surfaced ONLY after the prompt was actually
+	// published. If Publish fails (or no message store is wired), the
+	// orchestrator never sees the prompt, so we must not mark the authors
+	// surfaced — otherwise a transient failure would permanently suppress a
+	// security-relevant notification. Leaving them unrecorded re-surfaces them on
+	// a later poll (issue #1039).
+	if err := sm.notifyFromDaemon(orch, untrustedAuthorPromptBody(t, d, fresh)); err != nil {
+		if sm.log != nil {
+			sm.log.Error("pr-watch: failed to deliver untrusted-author prompt; will retry on a later poll",
+				"session", t.id, "pr", d.Number, "authors", len(fresh), "err", err)
+		}
+
+		return
+	}
+
 	sm.recordPromptedAuthors(fresh)
 }
 

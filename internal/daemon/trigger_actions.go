@@ -281,7 +281,7 @@ func (sm *SessionManager) actionSession(ctx context.Context, t *config.TriggerCo
 	if t.Action.Ensure && t.IsWatch() {
 		if existing := sm.reuseReactor(t.Name, fc.sessionID); existing != "" {
 			//nolint:contextcheck // notifyFromDaemon detaches its auto-resume; it must outlive this call.
-			sm.notifyFromDaemon(existing, prompt)
+			_ = sm.notifyFromDaemon(existing, prompt)
 			return "messaged " + existing, nil
 		}
 	}

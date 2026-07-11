@@ -70,16 +70,24 @@ func isSystemSender(senderID string) bool {
 // session). A bare MsgStore.Publish does NOT notify — only the handler send-path
 // and this helper wire Publish→notifyInbox. The full detail lives in the body;
 // the agent reads it via `gr msg inbox --all --ack`.
-func (sm *SessionManager) notifyFromDaemon(sessionID, body string) {
+//
+// It returns an error when the message could not be published (no message store
+// wired, or the store's Publish failed), so callers that must not treat an
+// undelivered notification as delivered — e.g. the once-per-author trust prompt,
+// which would otherwise mark an author surfaced and never retry — can react.
+// Fire-and-forget callers may ignore the return.
+func (sm *SessionManager) notifyFromDaemon(sessionID, body string) error {
 	if sm.messages == nil {
-		return
+		return fmt.Errorf("no message store to publish notification to session %q", sessionID)
 	}
 
 	if _, err := sm.messages.Publish("inbox:"+sessionID, systemSenderID, systemSenderName, body, "", ""); err != nil {
 		sm.log.Error("failed to publish daemon notification", "session", sessionID, "err", err)
-		return
+		return err
 	}
 	go sm.notifyInbox(sessionID, systemSenderID, systemSenderName)
+
+	return nil
 }
 
 // notifyInbox injects a notification into the target session's PTY when a

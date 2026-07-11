@@ -158,6 +158,42 @@ func TestFetchCommentsSlurpFlattensPages(t *testing.T) {
 	}
 }
 
+// TestFetchCommentsDecodesAuthorAssociation guards the single field the whole
+// author-trust gate depends on (issue #1039): if the `json:"author_association"`
+// struct tag ever drifts, the field decodes empty, every author is treated as
+// untrusted, and all comment delivery silently breaks. This proves the field
+// survives a realistic gh API payload.
+func TestFetchCommentsDecodesAuthorAssociation(t *testing.T) {
+	orig := ghRunner
+	defer func() { ghRunner = orig }()
+
+	ghRunner = func(ctx context.Context, dir string, args ...string) (string, error) {
+		// One --slurp page with the association field present, as the GitHub REST
+		// API returns it.
+		return `[[
+			{"id":1,"user":{"login":"canny"},"body":"looks braw","author_association":"MEMBER"},
+			{"id":2,"user":{"login":"scunner"},"body":"dreich","author_association":"NONE"}
+		]]`, nil
+	}
+
+	comments, ok := fetchComments(context.Background(), "croft/loch", 1, "", "issues")
+	if !ok {
+		t.Fatal("expected ok=true")
+	}
+
+	if len(comments) != 2 {
+		t.Fatalf("expected 2 comments, got %d", len(comments))
+	}
+
+	if comments[0].AuthorAssociation != "MEMBER" {
+		t.Errorf("author_association not decoded for comment 0: got %q, want MEMBER", comments[0].AuthorAssociation)
+	}
+
+	if comments[1].AuthorAssociation != "NONE" {
+		t.Errorf("author_association not decoded for comment 1: got %q, want NONE", comments[1].AuthorAssociation)
+	}
+}
+
 func TestFetchCommentsDegradedReportsNotOK(t *testing.T) {
 	orig := ghRunner
 	defer func() { ghRunner = orig }()
