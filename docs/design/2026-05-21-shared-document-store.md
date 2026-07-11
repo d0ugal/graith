@@ -16,7 +16,7 @@ strength — agents can work in parallel without stepping on each other — but 
 an agent writes that aren't committed to git are lost when the worktree is removed.
 
 Agents frequently produce artifacts that are valuable but shouldn't be committed: design
-documents, research notes, review tribunal reports, investigation findings, build analysis.
+documents, research notes, review reports, investigation findings, build analysis.
 Today, these artifacts are either committed to the repo (polluting git history) or lost when
 the session ends.
 
@@ -36,7 +36,7 @@ weren't pushed to a remote branch are permanently lost. This creates several pro
    messaging system works for short text but isn't suited for multi-paragraph documents or
    structured data.
 
-3. **No historical record**: Repeated operations (like review tribunal runs) produce results
+3. **No historical record**: Repeated operations (like review runs) produce results
    that would be valuable to compare over time, but there's no persistent store for them.
 
 4. **Git pollution**: The workaround — committing artifacts to the repo — clutters git history
@@ -55,7 +55,7 @@ weren't pushed to a remote branch are permanently lost. This creates several pro
 
 - **Version history**: The store does not track revisions. Overwriting a key replaces the
   previous value. If you need history, use timestamped keys (e.g.
-  `tribunal/2026-06-15T14:30`).
+  `reviews/2026-06-15T14:30`).
 - **Binary storage**: The store is text-only. Binary artifacts (images, compiled binaries)
   should use other mechanisms.
 - **Cross-repo sharing**: Documents are scoped to a single repo. There is no global namespace
@@ -77,7 +77,7 @@ worktree. Cross-session sharing happens via `gr msg` with body text pasted inlin
 
 **Cons:**
 - Artifacts continue to be lost or committed inappropriately.
-- The review tribunal and similar tools cannot build historical records.
+- The independent review and similar tools cannot build historical records.
 - Agents working in parallel have no shared document space.
 
 ### Proposal 1: SQLite-Backed Document Store via Daemon Protocol
@@ -93,7 +93,7 @@ Each document has:
 | Field | Type | Description |
 |-------|------|-------------|
 | `repo` | TEXT, PK part | Canonical repo path (e.g. `/Users/dev/Code/graith`) |
-| `key` | TEXT, PK part | Slash-separated identifier (e.g. `tribunal/2026-06-15T14:30`) |
+| `key` | TEXT, PK part | Slash-separated identifier (e.g. `reviews/2026-06-15T14:30`) |
 | `body` | TEXT | Document content (markdown or JSON) |
 | `content_type` | TEXT, required | MIME type — must be non-empty. `text/markdown` or `application/json` in practice |
 | `author_id` | TEXT | Session ID of the writer |
@@ -135,14 +135,14 @@ every other control operation.
 # Store a document (--type is required)
 gr store put design/api.md --type md --file ./api-design.md
 gr store put design/api.md --type md "# API Design\n\n..."
-echo '{"score": 85}' | gr store put tribunal/2026-06-15 --type json
+echo '{"score": 85}' | gr store put reviews/2026-06-15 --type json
 
 # Retrieve a document (prints body to stdout)
 gr store get design/api.md
 
 # List documents (optional prefix filter)
 gr store list
-gr store list tribunal/
+gr store list reviews/
 gr store ls design/
 
 # Remove a document
@@ -182,8 +182,8 @@ Two content types cover the expected use cases:
 - **`text/markdown`** — human-readable documents: design docs, research notes, plans.
   Key convention: descriptive names like `design/api.md`, `notes/findings.md`.
 
-- **`application/json`** — machine-readable structured data: tribunal reports, build results,
-  metrics. Key convention: timestamped entries like `tribunal/2026-06-15T14:30`,
+- **`application/json`** — machine-readable structured data: review reports, build results,
+  metrics. Key convention: timestamped entries like `reviews/2026-06-15T14:30`,
   `builds/2026-06-15-abc123`. Tools that produce repeated output use a common prefix with
   timestamp suffixes so `gr store list <prefix>/` shows history.
 

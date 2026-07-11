@@ -623,7 +623,7 @@ multi-repo rrweb orphan mutation fix scenario and have been addressed.
 13. **Redundant republish on empty resume** — `ResumeScenario` only calls
     `republishManifests` if at least one session was actually resumed.
 
-#### Authorization hardening (implemented — tribunal round 2)
+#### Authorization hardening (implemented — review round 2)
 
 14. **Auth checks on scenario mutation endpoints** — `scenario_stop`,
     `scenario_delete`, `scenario_resume`, and `scenario_add` now require the

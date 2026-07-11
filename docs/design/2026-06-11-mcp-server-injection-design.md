@@ -372,7 +372,7 @@ Proposal 1 is already shipped in v0.22.0. The migration to Proposal 2 is:
 
 **Proposal 2: Daemon-managed MCP servers with proxy.** The daemon manages MCP server processes (one per proxy connection, started lazily), proxies connections into agent sessions via `gr mcp-proxy`, and handles lifecycle centrally (crash recovery, sandbox wrapping, config reload, stderr capture). MCP servers are sandboxed by default (`sandbox = true`), with opt-out for servers that need to launch sub-processes (e.g., Chrome DevTools). True multiplexing (sharing one MCP server process across sessions) is explicitly rejected — MCP's per-client statefulness makes it a protocol-level challenge, not an engineering optimization. Proposal 1 (config injection, shipped in v0.22.0) will be replaced.
 
-## Review Tribunal Findings
+## Review Findings
 
 Proposal 2 was reviewed independently by Claude (Opus 4.6) and Cursor (Gemini 3.1 Pro). Both reviewers arrived at the same critical findings independently, giving high confidence in the conclusions.
 

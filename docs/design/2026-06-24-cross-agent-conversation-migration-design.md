@@ -11,7 +11,7 @@ informed: (TBD)
 
 > **Note on code references.** `file:line` citations are anchored to symbol
 > names and were written against this design branch; absolute line numbers
-> drift against `main`, so trust the symbol name. Two review tribunals verified
+> drift against `main`, so trust the symbol name. Two independent reviews verified
 > the substantive claims against the source (see Consensus).
 
 ## Background
@@ -463,7 +463,7 @@ rendered Markdown is retained until the session is deleted — so
 ### Proposal 2: Native Transcript Transplant (Rejected for v1)
 
 Translate the source transcript into the target's own session format and resume
-natively. Rejected, unanimously endorsed across both tribunals: signed Claude
+natively. Rejected, unanimously endorsed across both reviews: signed Claude
 `thinking` can't be ported; tool names/schemas differ; Codex can't be assigned a
 session id and its format is undocumented/compressed; Claude resume depends on
 `uuid`/`parentUuid` chains and provider metadata; and it needs an N×N per-pair
@@ -480,7 +480,7 @@ until there's demand for running both agents at once.
 
 ## Consensus
 
-Two six-model review tribunals (Claude Opus 4.8, Codex o3, and Cursor-hosted
+Two independent reviews (Claude Opus 4.8, Codex o3, and Cursor-hosted
 Composer 2.5, Gemini 3.1 Pro, GPT-5.5, Grok Build) reviewed the design. Round 1
 reviewed a fork-based draft; all endorsed render + reseed and the Proposal 2
 rejection. The design then pivoted to in-place take-over, which mooted round 1's

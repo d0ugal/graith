@@ -2,7 +2,7 @@
 title: "Design Doc: PR & CI Awareness with Agent Notifications"
 authors: Dougal Matthews
 created: 2026-06-25
-status: Draft (revised after a 5-judge source-verified review tribunal — see Consensus)
+status: Draft (revised after an independent review — see Consensus)
 reviewers: (none yet)
 informed: (TBD)
 ---
@@ -193,14 +193,14 @@ once from `git remote get-url origin`):
   `reviewDecision` ∈ `APPROVED|CHANGES_REQUESTED|REVIEW_REQUIRED|""`.
   `headRefOid` is the head commit SHA — **required** for the per-head-SHA
   notify cap (§4), so it is fetched here, not assumed.
-  **Known limitation — fork PRs (corrected by tribunal):** `--head <branch>`
+  **Known limitation — fork PRs (corrected by review):** `--head <branch>`
   matches the head branch *within the resolved repo*, so a PR opened from a
   **fork** may not resolve. Acceptable for v1 (graith self-dev pushes branches
   to the same repo). **Note:** `gh pr list --head` explicitly does **not**
   accept `<owner>:<branch>` syntax (verified against `gh` help), so the fork
   refinement must use `gh pr list --search "head:<branch>"` or the GraphQL
   `headRepositoryOwner` filter — not a qualified `--head`.
-- **CI check rollup — prefer `gh pr checks` (tribunal):**
+- **CI check rollup — prefer `gh pr checks` (review):**
   ```
   gh pr checks <number> --repo <owner/repo> \
      --json name,state,bucket,link
@@ -231,7 +231,7 @@ once from `git remote get-url origin`):
   ```
   Review *summaries* come from `repos/<owner>/<repo>/pulls/<n>/reviews`.
   **Use concrete `<owner>/<repo>` (or `gh`'s `{owner}/{repo}`) placeholders —
-  the `:o/:r` form is not real and returns 404** (tribunal). Each surface has an
+  the `:o/:r` form is not real and returns 404** (review). Each surface has an
   **independent numeric `id` namespace**, so dedup needs **per-surface cursors**
   (§3), not one global `LastCommentID`. Bot reviewers (e.g. `coderabbitai[bot]`)
   appear here like humans — no special-casing for detection, but they are
@@ -241,7 +241,7 @@ These are all `gh` invocations via `exec.CommandContext` with a short timeout
 (~5 s, cmux's `probeTimeout`) and `GH_PROMPT_DISABLED=1` (so the daemon's `gh`
 can never block on interactive auth), reusing the `internal/git` shell idiom.
 
-#### 1a. Effective-branch resolution (tribunal — material)
+#### 1a. Effective-branch resolution (review — material)
 
 The doc originally keyed on `SessionState.Branch`. All five judges verified that
 `Branch` is populated **only for normal worktree and fork sessions**
@@ -252,7 +252,7 @@ worktree). It is therefore not a universal session→PR key.
 
 Resolution at poll time: use `SessionState.Branch` when non-empty; otherwise
 discover the live branch with `git -C <WorktreePath> symbolic-ref --short HEAD`.
-**v1 eligibility** (conservative, per tribunal): only sessions with a resolvable
+**v1 eligibility** (conservative, per review): only sessions with a resolvable
 non-empty branch, a non-empty `RepoPath`, and **not** `SharedWorktree`/`InPlace`
 are watched; in-place and shared-worktree sessions are **display/notify
 unsupported in v1** and noted as such, until branch discovery (or source-branch
@@ -293,7 +293,7 @@ sm.notifyInbox(sessionID, daemonSenderID, "graith")  // <-- explicit; not automa
 - **Stopped session (precisely `StatusStopped`):** `resumeForInbox` →
   `resumeWithSummary` wakes the agent with summary "Resumed by inbox message
   from graith", and `notifyUnreadInbox` nudges it once started. **Note
-  (tribunal):** `resumeForInbox` early-returns unless `Status == StatusStopped`
+  (review):** `resumeForInbox` early-returns unless `Status == StatusStopped`
   — sessions in `StatusErrored`/`StatusCreating`/deleting do **not** auto-resume
   (the message is still durably stored and surfaces on next manual resume).
   This is the desired behavior (don't resume a mid-delete session); the doc just
@@ -327,7 +327,7 @@ type PRWatchCursor struct {
     ReviewDecision  string            // last-seen review decision
     CheckConclusion map[string]string // check name → last-seen conclusion/bucket
     // Per-surface comment cursors — GitHub IDs are NOT comparable across
-    // surfaces (tribunal); one global LastCommentID would skip/mis-order.
+    // surfaces (review); one global LastCommentID would skip/mis-order.
     LastIssueCommentID  int64
     LastReviewCommentID int64
     LastReviewID        int64
@@ -341,7 +341,7 @@ Transitions that notify:
 - **CI:** a check goes pass/pending → **fail-like** (`bucket=fail`, or
   `FAILURE|TIMED_OUT|ACTION_REQUIRED`), or any new fail-like check name not
   previously failing. **`NEUTRAL`/`SKIPPED` are pass-like and must not fire**
-  (tribunal — they would wake an agent spuriously); `CANCELLED`/`cancel` is a
+  (review — they would wake an agent spuriously); `CANCELLED`/`cancel` is a
   non-directive state. Recovery (fail→pass) is informational — notify only if
   `notify_ci_recovery` (default on; see §7 update note).
 - **Comments/reviews:** any item with `id` greater than the **matching
@@ -351,7 +351,7 @@ Transitions that notify:
   `reviewDecision`→`CHANGES_REQUESTED`/`APPROVED` (review intent — gated
   separately, see §7).
 
-**Cursor-advance invariant (tribunal — material, subtle).** Only advance a
+**Cursor-advance invariant (review — material, subtle).** Only advance a
 "delivered" cursor (`CheckConclusion`, the per-surface comment cursors,
 `HeadRefOid`) for events **actually included in a sent or coalesced
 notification**. If an event is observed while a notification is suppressed by
@@ -369,7 +369,7 @@ the visible-subagents design). Two mitigations, in order of preference:
 1. **Runtime cursor + restart priming (recommended for v1):** on the first poll
    after (re)start, **seed the cursor from current state without notifying** —
    treat the first observation as the baseline. Simple, no schema change, no
-   migration. **Tribunal caveat (material):** naive priming doesn't just lose
+   migration. **Review caveat (material):** naive priming doesn't just lose
    cosmetic re-notifies — it can **drop the exact failure that should wake a
    stopped agent**. Example: agent pushes → daemon restarts → CI fails *during*
    downtime → first post-restart poll primes the failing state silently → the
@@ -387,7 +387,7 @@ the visible-subagents design). Two mitigations, in order of preference:
 v1 ships option 1: runtime cursor, prime-on-first-poll **with the
 notify-on-current-failure mitigation above**.
 
-**Runtime field race (tribunal — material).** `GitDirty`/`GitUnpushed` are
+**Runtime field race (review — material).** `GitDirty`/`GitUnpushed` are
 value types, but the proposed `PullRequest *PRStatus` / `CI *CIStatus` are
 **pointers** (with a nested `FailingChecks []string` slice). `SessionManager.List`
 returns clones via `cloneSessionState`, which currently deep-copies only
@@ -436,7 +436,7 @@ The push→CI→notify→fix→push loop is the goal, but it must be bounded:
 - **Debounce:** after notifying a session, suppress further notifications to it
   for a cooldown (e.g. **≥ 2 min**), so a burst of check-run updates collapses
   into one nudge. **Use a SEPARATE map of the same shape (e.g. `lastPRNotifyAt`)
-  — NOT the existing `sm.lastInboxNotifyAt` (tribunal — material).** Sharing it
+  — NOT the existing `sm.lastInboxNotifyAt` (review — material).** Sharing it
   is an actual bug: `notifyFromDaemon` would write `lastInboxNotifyAt[id]` at
   publish time, and the auto-resume chain's own `notifyUnreadInbox` (which reads
   that same map with a 30 s window) would then **suppress the resume nudge** —
@@ -447,7 +447,7 @@ The push→CI→notify→fix→push loop is the goal, but it must be bounded:
   check the PR" message (and hold the events per the §3 cursor-advance invariant).
 - **Max-notify cap per PR head-SHA:** a hard ceiling (e.g. **10 per
   `headRefOid`**, reset when the head SHA changes — i.e. the agent pushed). Keyed
-  off the `headRefOid` now fetched in §1. **Honest framing (tribunal):** because
+  off the `headRefOid` now fetched in §1. **Honest framing (review):** because
   the cap **resets on every push**, the per-SHA cap alone does *not* bound a
   push-thrash loop (a broken-fix-per-round agent gets a fresh budget each SHA) —
   the **rate-limit is the real global backstop**, and **cursor-based dedup is the
@@ -489,7 +489,7 @@ A 20-session fleet on 5 repos issues a handful of `gh` calls/minute at steady
 state — well inside the authenticated 5000/h budget, and the loop is entirely
 off the `gr list` request path.
 
-**Lock discipline (tribunal — material; the one real way it could block
+**Lock discipline (review — material; the one real way it could block
 `gr list`).** All judges flagged that the cursor map "living under `sm.mu`" must
 not be read as holding the lock across the ~5 s `gh` exec. `gr list` takes
 `sm.mu` via `sm.List()`; and `notifyInbox`→`resumeForInbox`→`resumeWithSummary`
@@ -588,7 +588,7 @@ authority (§3a):**
   "address" every comment risks unwanted autonomous edits or the agent arguing
   with a reviewer. Whether on or off, the message is framed as awareness (§6),
   never an imperative.
-- **`notify_review_decisions`** (originally default off — tribunal fix; now
+- **`notify_review_decisions`** (originally default off — review fix; now
   default on — see §7 update note): the
   original doc folded `CHANGES_REQUESTED`/`APPROVED` into a single default-on
   `notify_state_changes`. But `CHANGES_REQUESTED` is **human review intent**, and
@@ -606,7 +606,7 @@ still fetches and shows the PR/CI badge (§8). All gating is **config-only** (no
 per-message CLI flag), so behavior is predictable. The master `enabled = false`
 turns the whole feature (including display) off.
 
-#### 7a. Untrusted PR content (tribunal — security)
+#### 7a. Untrusted PR content (review — security)
 
 Comment/review bodies and check names come from **GitHub and arbitrary
 commenters/bots** — on a public or fork-origin PR they are attacker-influenceable
@@ -674,7 +674,7 @@ CI          *CIStatus  // {State: passing|failing|pending, FailingChecks []strin
   interval apart; fork-origin PRs don't resolve (§1).
 - **Runtime cursor re-notify on restart** (v1) — bounded by prime-on-first-poll
   (§3); persisting the cursor is the fallback.
-- **Implementation has sharp edges (tribunal):** effective-branch resolution for
+- **Implementation has sharp edges (review):** effective-branch resolution for
   in-place/shared sessions, the `statusCheckRollup` union, per-surface comment
   cursors + pagination, off-lock `gh` discipline, and value/immutable PR/CI
   fields are all *must-get-right* details — material but addressable, none
@@ -722,8 +722,8 @@ at fleet scale or we need fields `gh` can't cheaply expose.
 
 ## Consensus
 
-A five-judge review tribunal (Claude Opus 4.8, Codex o3, and Cursor-hosted
-Opus 4.8 Thinking, Codex 5.3, Composer 2.5) reviewed this doc against the actual
+An independent review (Claude Opus 4.8, Codex o3, and Cursor-hosted
+Opus 4.8 Thinking, Codex 5.3, Composer 2.5) assessed this doc against the actual
 graith source in a shared read-only worktree. All five **verified every
 load-bearing source claim** (Claims 1–7) as accurate — `RunGitPullLoop`,
 `notifyInbox`/`resumeForInbox`/`resumeWithSummary`/`notifyUnreadInbox`,
@@ -733,9 +733,9 @@ the `gh` field sets all exist as described. **Crucially, the subtlest claim —
 that a daemon-internal `Publish` does NOT itself trigger `notifyInbox`, so the
 loop must call it explicitly — was confirmed correct by all five** (corroborated
 by `scenario.go`, which publishes to inboxes without notifying). No critical
-"phantom mechanism" errors (the failure mode a prior tribunal caught elsewhere).
+"phantom mechanism" errors (the failure mode a prior review caught elsewhere).
 
-The tribunal surfaced **two factual corrections** and a set of **material design
+The review surfaced **two factual corrections** and a set of **material design
 gaps**, all folded into this revision:
 
 - **Factual:** `gh pr list --head` does **not** accept `<owner>:<branch>` (the
@@ -762,7 +762,7 @@ gaps**, all folded into this revision:
   is a new sentinel (§2); `mergeable` unused (§1); `GH_PROMPT_DISABLED=1` (§1).
 
 No judge disputed the core architecture; all recommended "proceed after
-tightening." Results stored at `tribunal/2026-06-25T2143.json`.
+tightening." Results stored at `reviews/2026-06-25T2143.json`.
 
 ## Other Notes
 
