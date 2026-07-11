@@ -277,6 +277,11 @@ func (sm *SessionManager) actionSession(ctx context.Context, t *config.TriggerCo
 	agent := t.Action.Agent
 	model := t.Action.Model
 
+	cleanup, err := t.Action.AutoCleanupMode()
+	if err != nil {
+		return "", err
+	}
+
 	// ensure-reviewer (watch): reuse the binding's existing reactor if alive.
 	if t.Action.Ensure && t.IsWatch() {
 		if existing := sm.reuseReactor(t.Name, fc.sessionID); existing != "" {
@@ -308,6 +313,7 @@ func (sm *SessionManager) actionSession(ctx context.Context, t *config.TriggerCo
 		mirror:      mirror,
 		triggerName: t.Name,
 		reactor:     t.Action.Ensure && t.IsWatch(),
+		autoCleanup: cleanup,
 	})
 	if err != nil {
 		return "", err
@@ -492,6 +498,7 @@ type createTriggerReq struct {
 	mirror      string
 	triggerName string
 	reactor     bool
+	autoCleanup string
 }
 
 // createTriggerSession creates a session via sm.Create, tagging it with the
@@ -514,9 +521,62 @@ func (sm *SessionManager) createTriggerSession(req createTriggerReq) (SessionSta
 		AgentHooks:     true,
 		TriggerID:      req.triggerName,
 		TriggerReactor: req.reactor,
+		AutoCleanup:    req.autoCleanup,
 		Rows:           24,
 		Cols:           80,
 	})
+}
+
+// autoCleanupStopped soft-deletes a just-stopped trigger-spawned session when
+// its recorded auto_cleanup mode calls for it. It reads the mode and exit code
+// committed by the exit path, so it must run after the session's stopped status
+// is persisted. It is a no-op for a manually created session (AutoCleanup is
+// only ever set on trigger-spawned ones), an already-deleted session, or a stop
+// that doesn't match the mode. Soft delete (not purge) keeps the session
+// recoverable within the retention window.
+func (sm *SessionManager) autoCleanupStopped(id string) {
+	sm.mu.RLock()
+
+	s, ok := sm.state.Sessions[id]
+	if !ok || s.AutoCleanup == "" || s.IsSoftDeleted() {
+		sm.mu.RUnlock()
+		return
+	}
+
+	mode := s.AutoCleanup
+	name := s.Name
+	exitCode := 0
+
+	if s.ExitCode != nil {
+		exitCode = *s.ExitCode
+	}
+
+	sm.mu.RUnlock()
+
+	if !shouldAutoCleanup(mode, exitCode) {
+		return
+	}
+
+	if _, err := sm.SoftDelete(id); err != nil {
+		sm.log.Warn("trigger auto-cleanup soft-delete failed", "id", id, "name", name, "mode", mode, "err", err)
+		return
+	}
+
+	sm.log.Info("trigger auto-cleanup soft-deleted stopped session", "id", id, "name", name, "mode", mode)
+}
+
+// shouldAutoCleanup decides whether a stopped session should be cleaned up given
+// its auto_cleanup mode and the exit code it stopped with. "always" cleans up
+// unconditionally; "on_success" only on a clean (exit 0) stop.
+func shouldAutoCleanup(mode string, exitCode int) bool {
+	switch mode {
+	case config.CleanupAlways:
+		return true
+	case config.CleanupOnSuccess:
+		return exitCode == 0
+	default:
+		return false
+	}
 }
 
 // triggerNow is a small helper so watch fires share the schedule fire path's

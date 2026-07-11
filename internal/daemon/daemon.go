@@ -625,6 +625,9 @@ type CreateOpts struct {
 	// crash between Create and a separate tag-and-save.
 	TriggerID      string
 	TriggerReactor bool
+	// AutoCleanup marks a trigger-spawned session for soft-deletion when it
+	// stops (config.CleanupAlways / config.CleanupOnSuccess; empty disables).
+	AutoCleanup string
 }
 
 // Create starts a new agent session, either in a git worktree, in-place
@@ -937,6 +940,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		Yolo:            yolo,
 		TriggerID:       opts.TriggerID,
 		TriggerReactor:  opts.TriggerReactor,
+		AutoCleanup:     opts.AutoCleanup,
 		Status:          StatusCreating,
 		CreatedAt:       time.Now().UTC(),
 		StatusChangedAt: time.Now().UTC(),
@@ -1959,6 +1963,10 @@ func (sm *SessionManager) watchSession(id string, sess *grpty.Session) {
 	if isOrchestrator {
 		sm.notifyOrchestratorExit(id)
 	}
+
+	// A trigger-spawned session with auto_cleanup configured is soft-deleted now
+	// that it has stopped, so finished briefing/report sessions don't accumulate.
+	sm.autoCleanupStopped(id)
 }
 
 const (

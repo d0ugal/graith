@@ -305,7 +305,7 @@ machine, and one `gr trigger` CLI. See
 | Type | What it does |
 |------|--------------|
 | `command` | Run a command (schedule: in `repo`; watch: in the bound worktree), capture output, deliver it. Sandboxed by default; `sandbox = false` runs unconfined, `[trigger.action.sandbox_config]` grants extra access (mirrors MCP-server `sandbox`/`sandbox_config`). Watch commands are read-only in v1 (`mutating` rejected). |
-| `session` | Spawn a session parented to the orchestrator. Watch + `ensure = true` is the idempotent "ensure-reviewer": message the owned reactor if it exists (running/stopped — messaging auto-resumes), else spawn one sharing the bound worktree read-only. |
+| `session` | Spawn a session parented to the orchestrator. Watch + `ensure = true` is the idempotent "ensure-reviewer": message the owned reactor if it exists (running/stopped — messaging auto-resumes), else spawn one sharing the bound worktree read-only. `auto_cleanup` (`true`/`"always"`, `"on_success"`, or absent/`false`) soft-deletes the spawned session when it stops — respecting the `[delete]` retention window — so finished briefing sessions don't pile up; incompatible with `ensure = true`. |
 | `scenario` | Start a named scenario from `~/.config/graith/scenarios/` (orchestrator-owned). |
 | `message` | Route a fixed `body` to an inbox/topic (via `[trigger.action.deliver]`). |
 

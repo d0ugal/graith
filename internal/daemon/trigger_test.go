@@ -749,6 +749,106 @@ func TestOrchestratorIDAndBindingReactor(t *testing.T) {
 	}
 }
 
+func TestShouldAutoCleanup(t *testing.T) {
+	cases := []struct {
+		mode     string
+		exitCode int
+		want     bool
+	}{
+		{config.CleanupAlways, 0, true},
+		{config.CleanupAlways, 1, true},
+		{config.CleanupOnSuccess, 0, true},
+		{config.CleanupOnSuccess, 1, false},
+		{config.CleanupOnSuccess, -1, false},
+		{"", 0, false},
+		{"", 1, false},
+	}
+	for _, tc := range cases {
+		if got := shouldAutoCleanup(tc.mode, tc.exitCode); got != tc.want {
+			t.Errorf("shouldAutoCleanup(%q, %d) = %v, want %v", tc.mode, tc.exitCode, got, tc.want)
+		}
+	}
+}
+
+// stoppedTriggerSession stages a stopped, trigger-spawned session with the given
+// auto_cleanup mode and exit code, ready for autoCleanupStopped.
+func stoppedTriggerSession(mode string, exitCode int) *SessionState {
+	ec := exitCode
+
+	return &SessionState{
+		ID:          "reactor-braw",
+		Name:        "braw",
+		Status:      StatusStopped,
+		TriggerID:   "morning-briefing",
+		AutoCleanup: mode,
+		ExitCode:    &ec,
+	}
+}
+
+func TestAutoCleanupStopped(t *testing.T) {
+	cases := []struct {
+		name       string
+		mode       string
+		exitCode   int
+		wantDelete bool
+	}{
+		{"always clean exit", config.CleanupAlways, 0, true},
+		{"always error exit", config.CleanupAlways, 1, true},
+		{"on_success clean exit", config.CleanupOnSuccess, 0, true},
+		{"on_success error exit", config.CleanupOnSuccess, 1, false},
+		{"disabled", "", 0, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sm := newTriggerTestSM(t)
+			sess := stoppedTriggerSession(tc.mode, tc.exitCode)
+			sm.state.Sessions[sess.ID] = sess
+
+			sm.autoCleanupStopped(sess.ID)
+
+			got := sm.state.Sessions[sess.ID].IsSoftDeleted()
+			if got != tc.wantDelete {
+				t.Fatalf("IsSoftDeleted = %v, want %v", got, tc.wantDelete)
+			}
+
+			if tc.wantDelete && sm.state.Sessions[sess.ID].ExpiresAt == nil {
+				t.Error("soft-deleted session should have an ExpiresAt recovery deadline")
+			}
+		})
+	}
+}
+
+// TestAutoCleanupStopped_IgnoresManualSession proves cleanup never touches a
+// session that was not trigger-spawned (AutoCleanup empty), even at exit 0.
+func TestAutoCleanupStopped_IgnoresManualSession(t *testing.T) {
+	sm := newTriggerTestSM(t)
+	ec := 0
+	sm.state.Sessions["canny"] = &SessionState{ID: "canny", Name: "canny", Status: StatusStopped, ExitCode: &ec}
+
+	sm.autoCleanupStopped("canny")
+
+	if sm.state.Sessions["canny"].IsSoftDeleted() {
+		t.Error("manually created session must not be auto-cleaned")
+	}
+}
+
+// TestAutoCleanupStopped_AlreadyDeleted proves cleanup is a no-op on an
+// already soft-deleted session (idempotent; no double-delete error churn).
+func TestAutoCleanupStopped_AlreadyDeleted(t *testing.T) {
+	sm := newTriggerTestSM(t)
+	now := time.Now()
+	sess := stoppedTriggerSession(config.CleanupAlways, 0)
+	sess.DeletedAt = &now
+	sm.state.Sessions[sess.ID] = sess
+
+	// Should not panic or change the existing DeletedAt.
+	sm.autoCleanupStopped(sess.ID)
+
+	if got := sm.state.Sessions[sess.ID].DeletedAt; got == nil || !got.Equal(now) {
+		t.Errorf("DeletedAt changed: got %v, want %v", got, now)
+	}
+}
+
 func TestTruncateOutput(t *testing.T) {
 	short := truncateOutput("  hi  ")
 	if short != "hi" {
