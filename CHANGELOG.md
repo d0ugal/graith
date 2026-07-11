@@ -1,5 +1,47 @@
 # Changelog
 
+## [0.67.1](https://github.com/d0ugal/graith/compare/v0.67.0...v0.67.1) (2026-07-11)
+
+
+### Features
+
+* **auth:** require daemon-written human token ([7f34bee](https://github.com/d0ugal/graith/commit/7f34bee8eeef60516ea97a8e2dc0808f70f17a71))
+* **auth:** rotate session token on resume/restart ([c08d2dc](https://github.com/d0ugal/graith/commit/c08d2dcf4785964729622d66e6673ba7c63e8a5c))
+* **prwatch:** gate PR comments by author trust ([#1039](https://github.com/d0ugal/graith/issues/1039)) ([d4f6ee6](https://github.com/d0ugal/graith/commit/d4f6ee6284417587ca91afa577046dd97deff667))
+
+
+### Bug Fixes
+
+* **auth:** address review findings and Test-job fallout ([6d872db](https://github.com/d0ugal/graith/commit/6d872dbd7b2ce412ff0b301e3d939e511fd7fd1c))
+* **auth:** apply wsl_v5 whitespace fixes to auth/client tests ([079adfa](https://github.com/d0ugal/graith/commit/079adfab783e3ae7a3ace276c6515c8955cd409d))
+* **auth:** authenticate integration harness with human token; fix lint ([7c7470c](https://github.com/d0ugal/graith/commit/7c7470cfcea9c5f50e782bb95a7adcf44a4bc053))
+* **prwatch:** close author-trust gate bypasses found in review ([16eaae7](https://github.com/d0ugal/graith/commit/16eaae76d13472fcb739af200de9943106923099))
+
+
+### Documentation
+
+* add design-doc template and reference it in AGENTS.md ([d63b784](https://github.com/d0ugal/graith/commit/d63b7842763e7a7286da230268b3f12b7f0ffc1f))
+* **auth:** design for identity hardening beyond the cooperative token ([#1044](https://github.com/d0ugal/graith/issues/1044)) ([6838f0a](https://github.com/d0ugal/graith/commit/6838f0ac31fe42ac194e12f4aa27715f4968e0be))
+* **auth:** document human token + fail-closed default on the site; require site-doc updates ([b83da09](https://github.com/d0ugal/graith/commit/b83da090760e97336c841d89d38770c446acaf99))
+* **design:** PR-comment author-trust gate design ([#1039](https://github.com/d0ugal/graith/issues/1039)) ([4b1a69d](https://github.com/d0ugal/graith/commit/4b1a69d1f5eaf5382af7b88c7ba4a06077593877))
+* document allowlist-only association mode ([#1039](https://github.com/d0ugal/graith/issues/1039)) ([c5afa5e](https://github.com/d0ugal/graith/commit/c5afa5ec96eb7eff11afeca672edcc242198c944))
+* note PR-comment author-trust gate ([#1039](https://github.com/d0ugal/graith/issues/1039)) ([4996671](https://github.com/d0ugal/graith/commit/499667179ca2711ac204d2f4abb68b89dfdde24d))
+* **site:** document pr_watch, delete, overlay, input, remote config ([c94c02f](https://github.com/d0ugal/graith/commit/c94c02f620732677b5ff8bb35d2da0fff6fefcc7))
+
+
+### Code Refactoring
+
+* **daemon:** guarantee unique generated session IDs ([b72e00f](https://github.com/d0ugal/graith/commit/b72e00f6872f9c81f278056c32ddd1d79dea5360))
+* **daemon:** let Create accept a pre-generated session ID ([0ec35ea](https://github.com/d0ugal/graith/commit/0ec35eaf051e3333a2775d23652ce984d53fa386))
+
+
+### Tests
+
+* **auth:** close coverage gaps + fix durability/doctor issues found in review ([763deab](https://github.com/d0ugal/graith/commit/763deabebf751a84c1cd2ba24d40bb47dea7090f))
+* **daemon:** avoid gosec G115 int-to-rune conversion in race test ([c17ab66](https://github.com/d0ugal/graith/commit/c17ab662dc2e65bc53ef742d1a40f195c654cae4))
+* **daemon:** cover the full authorization surface ([f9e5671](https://github.com/d0ugal/graith/commit/f9e567179774468d5385b27ec66e04c7d47320d8))
+* **daemon:** lock pr_watch completion retry after a gated reject ([c078669](https://github.com/d0ugal/graith/commit/c0786692f805658e910fcf5fbf13b7f12a509d6b))
+
 ## [0.67.0](https://github.com/d0ugal/graith/compare/v0.66.16...v0.67.0) (2026-07-11)
 
 
