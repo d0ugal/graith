@@ -464,6 +464,36 @@ func TestActionCommand_Unsandboxed(t *testing.T) {
 	}
 }
 
+// TestActionCommand_ExpandsTildeRepo is the end-to-end regression for #1051:
+// a ~/ in a schedule command action's repo must be expanded before it becomes
+// the command's working directory. Against the buggy code cmd.Dir was the
+// literal "~/bothy" (a non-existent path), so the command failed to start
+// (exit -1) instead of running in the home-relative dir.
+func TestActionCommand_ExpandsTildeRepo(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	bothy := filepath.Join(home, "bothy")
+	if err := os.MkdirAll(bothy, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	trig := config.TriggerConfig{
+		Name: "brig", Schedule: &config.ScheduleConfig{Cron: "@daily"},
+		Action: config.ActionConfig{Type: config.ActionCommand, Command: "pwd", Repo: "~/bothy", Sandbox: boolFalse()},
+	}
+	sm := newTriggerTestSM(t, trig)
+
+	result, err := sm.actionCommand(t.Context(), &trig, fireContext{now: time.Now()})
+	if err != nil {
+		t.Fatalf("actionCommand with ~/ repo: %v", err)
+	}
+
+	if result != "exit 0" {
+		t.Fatalf("result = %q, want exit 0 (tilde repo not expanded to a real dir?)", result)
+	}
+}
+
 func TestMigrateV15ToV16(t *testing.T) {
 	dir := t.TempDir()
 
