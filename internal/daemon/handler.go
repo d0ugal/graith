@@ -1517,6 +1517,55 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					sendControl("scenario_status", protocol.ScenarioStatusResponse{Scenario: *record})
 				}
 
+			case "trigger_list":
+				// read-only: no auth gate (like scenario_list/status)
+				sendControl("trigger_list", protocol.TriggerListResponse{Triggers: sm.TriggerList()})
+
+			case "trigger_status":
+				s, ok := decodePayload[protocol.TriggerStatusMsg](msg, sendControl, "invalid trigger_status message")
+				if !ok {
+					continue
+				}
+				rec, err := sm.TriggerStatus(s.Name)
+				if err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+				} else {
+					sendControl("trigger_status", protocol.TriggerStatusResponse{Trigger: rec})
+				}
+
+			case "trigger_run":
+				s, ok := decodePayload[protocol.TriggerRunMsg](msg, sendControl, "invalid trigger_run message")
+				if !ok {
+					continue
+				}
+				if !auth.authorizeTriggerOp(sm, sendControl) {
+					continue
+				}
+				if err := sm.TriggerRunNow(ctx, s.Name); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+				} else {
+					sendControl("trigger_run", struct {
+						Name string `json:"name"`
+					}{s.Name})
+				}
+
+			case "trigger_pause":
+				s, ok := decodePayload[protocol.TriggerPauseMsg](msg, sendControl, "invalid trigger_pause message")
+				if !ok {
+					continue
+				}
+				if !auth.authorizeTriggerOp(sm, sendControl) {
+					continue
+				}
+				if err := sm.TriggerPause(s.Name, s.Pause); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+				} else {
+					sendControl("trigger_pause", struct {
+						Name  string `json:"name"`
+						Pause bool   `json:"pause"`
+					}{s.Name, s.Pause})
+				}
+
 			case "scenario_resume":
 				s, ok := decodePayload[protocol.ScenarioResumeMsg](msg, sendControl, "invalid scenario_resume message")
 				if !ok {
@@ -1659,6 +1708,20 @@ func (ac authContext) authorizeTarget(sm *SessionManager, id string, rule authRu
 func (ac authContext) authorizeScenarioOp(sm *SessionManager, name string, send func(string, any)) bool {
 	sm.mu.RLock()
 	err := ac.checkScenarioOp(sm, name)
+	sm.mu.RUnlock()
+
+	if err != nil {
+		send("error", protocol.ErrorMsg{Message: err.Error()})
+
+		return false
+	}
+
+	return true
+}
+
+func (ac authContext) authorizeTriggerOp(sm *SessionManager, send func(string, any)) bool {
+	sm.mu.RLock()
+	err := ac.checkTriggerOp(sm)
 	sm.mu.RUnlock()
 
 	if err != nil {

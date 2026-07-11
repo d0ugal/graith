@@ -109,7 +109,12 @@ type SessionState struct {
 	ScenarioName   string          `json:"scenario_name,omitempty"`
 	ScenarioRole   string          `json:"scenario_role,omitempty"`
 	ScenarioGoal   string          `json:"scenario_goal,omitempty"`
-	MigratedFrom   *MigrationInfo  `json:"migrated_from,omitempty"`
+	// TriggerID / TriggerReactor mark a session spawned by a trigger's
+	// ensure/session action, so the trigger can find and reuse it idempotently
+	// (mirroring the ScenarioID markers).
+	TriggerID      string         `json:"trigger_id,omitempty"`
+	TriggerReactor bool           `json:"trigger_reactor,omitempty"`
+	MigratedFrom   *MigrationInfo `json:"migrated_from,omitempty"`
 	// DeletedAt marks a session as soft-deleted. When set, the session is
 	// hidden from the default `gr list` and overlay, its worktree and state are
 	// preserved until ExpiresAt, and the daemon purges it (hard delete) once the
@@ -223,6 +228,34 @@ type State struct {
 	// PairingHMACKey is the key used to HMAC client tokens at rest. Generated
 	// lazily on first pairing via EnsurePairingHMACKey; never the token itself.
 	PairingHMACKey string `json:"pairing_hmac_key,omitempty"`
+	// TriggerRuntime holds per-trigger-definition runtime facts that must survive
+	// a daemon restart (at-most-once fire anchor, pause state, history). Keyed by
+	// the namespaced trigger name. The trigger *definition* lives in config and is
+	// not persisted here. Per-binding watch state is in-memory (rebuilt from live
+	// sessions) and is not persisted.
+	TriggerRuntime map[string]*TriggerRuntimeState `json:"trigger_runtime,omitempty"`
+}
+
+// TriggerRuntimeState is the persisted, per-definition runtime state for a
+// trigger. See docs/design/2026-07-11-triggers-design.md §State model.
+type TriggerRuntimeState struct {
+	Name                string       `json:"name"`
+	Fingerprint         string       `json:"fingerprint"`
+	Paused              bool         `json:"paused,omitempty"`
+	ActivatedAt         *time.Time   `json:"activated_at,omitempty"`
+	LastScheduledFireAt *time.Time   `json:"last_scheduled_fire_at,omitempty"`
+	NextScheduledFireAt *time.Time   `json:"next_scheduled_fire_at,omitempty"`
+	LastError           string       `json:"last_error,omitempty"`
+	RunCount            int          `json:"run_count,omitempty"`
+	History             []TriggerRun `json:"history,omitempty"`
+}
+
+// TriggerRun is one entry in a trigger's bounded run history.
+type TriggerRun struct {
+	ScheduledAt     time.Time `json:"scheduled_at"`
+	SourceSessionID string    `json:"source_session_id,omitempty"`
+	Cause           string    `json:"cause"`  // schedule | catch_up | manual | file
+	Result          string    `json:"result"` // per action type
 }
 
 // PairedDevice is a remote client device authorized via pairing (design §B.2).
@@ -260,10 +293,11 @@ func (s *State) EnsurePairingHMACKey() (string, error) {
 
 func NewState() *State {
 	return &State{
-		Version:       CurrentStateVersion,
-		Sessions:      make(map[string]*SessionState),
-		Scenarios:     make(map[string]*ScenarioState),
-		PairedDevices: make(map[string]*PairedDevice),
+		Version:        CurrentStateVersion,
+		Sessions:       make(map[string]*SessionState),
+		Scenarios:      make(map[string]*ScenarioState),
+		PairedDevices:  make(map[string]*PairedDevice),
+		TriggerRuntime: make(map[string]*TriggerRuntimeState),
 	}
 }
 
@@ -293,6 +327,10 @@ func LoadState(path string) (*State, error) {
 
 	if state.PairedDevices == nil {
 		state.PairedDevices = make(map[string]*PairedDevice)
+	}
+
+	if state.TriggerRuntime == nil {
+		state.TriggerRuntime = make(map[string]*TriggerRuntimeState)
 	}
 
 	if state.Version > CurrentStateVersion {
@@ -498,6 +536,18 @@ func migrateV14ToV15(state *State) error {
 			s.MirrorSourceID = s.LegacyMirrorSourceID
 			s.LegacyMirrorSourceID = ""
 		}
+	}
+
+	return nil
+}
+
+// migrateV15ToV16 is a no-op: v16 adds the optional trigger_runtime map and the
+// trigger_id/trigger_reactor session fields, all of which default to their zero
+// value for existing state. Kept to preserve the migration chain and the
+// newer-than-me guard.
+func migrateV15ToV16(state *State) error {
+	if state.TriggerRuntime == nil {
+		state.TriggerRuntime = make(map[string]*TriggerRuntimeState)
 	}
 
 	return nil

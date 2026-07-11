@@ -64,6 +64,10 @@ var remoteMessagePolicy = map[string]remotePolicy{
 	"msg_conversation":   remoteHumanRW, // reads private DMs — human, not guest
 	"scenario_status":    remoteHumanRW, // design denies scenario_* to guests
 	"scenario_list":      remoteHumanRW,
+	"trigger_list":       remoteHumanRW, // triggers gated to human + sessions, not guests
+	"trigger_status":     remoteHumanRW,
+	"trigger_run":        remoteHumanRW,
+	"trigger_pause":      remoteHumanRW,
 	"wait":               remoteHumanRW, // targets arbitrary sessions
 	"repo_list":          remoteHumanRW, // only useful for create, which guests can't do
 	"attach":             remoteHumanRW,
