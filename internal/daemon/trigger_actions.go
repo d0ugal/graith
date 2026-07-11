@@ -319,7 +319,7 @@ func (sm *SessionManager) actionSession(ctx context.Context, t *config.TriggerCo
 		triggerName:     t.Name,
 		reactor:         t.Action.Ensure && t.IsWatch(),
 		autoCleanup:     cleanup,
-		idleTimeoutSecs: int(idle.Seconds()),
+		idleTimeoutSecs: idleSeconds(idle),
 	})
 	if err != nil {
 		return "", err
@@ -594,7 +594,7 @@ func (sm *SessionManager) autoCleanupStopped(id string) {
 		exitCode = *s.ExitCode
 	}
 
-	if !shouldAutoCleanup(mode, exitCode) {
+	if !shouldAutoCleanup(mode, s.StopReason, exitCode) {
 		sm.mu.Unlock()
 		return
 	}
@@ -607,6 +607,15 @@ func (sm *SessionManager) autoCleanupStopped(id string) {
 		return
 	}
 
+	// Snapshot every field the marker mutates so a persistence failure can roll
+	// back to a genuinely consistent live (stopped) session — not just clear
+	// DeletedAt while leaving a "recoverable until…" summary and bumped
+	// StatusChangedAt behind.
+	prevSummary := s.SummaryText
+	prevSummarySetAt := s.SummarySetAt
+	prevSummaryTTL := s.SummaryTTL
+	prevStatusChangedAt := s.StatusChangedAt
+
 	now := time.Now()
 	expiresAt := now.Add(retention)
 	s.DeletedAt = &now
@@ -615,9 +624,14 @@ func (sm *SessionManager) autoCleanupStopped(id string) {
 	applyLifecycleSummaryLocked(s, softDeleteSummary(expiresAt))
 
 	if err := sm.saveState(); err != nil {
-		// Roll back: the session stays a live (stopped) session, fully consistent.
+		// Roll back to the pre-mark state: the session stays a live (stopped)
+		// session, fully consistent in memory as well as on disk.
 		s.DeletedAt = nil
 		s.ExpiresAt = nil
+		s.StatusChangedAt = prevStatusChangedAt
+		s.SummaryText = prevSummary
+		s.SummarySetAt = prevSummarySetAt
+		s.SummaryTTL = prevSummaryTTL
 		sm.mu.Unlock()
 		sm.log.Warn("trigger auto-cleanup soft-delete failed to persist", "id", id, "name", name, "err", err)
 
@@ -629,17 +643,43 @@ func (sm *SessionManager) autoCleanupStopped(id string) {
 }
 
 // shouldAutoCleanup decides whether a stopped session should be cleaned up given
-// its auto_cleanup mode and the exit code it stopped with. "always" cleans up
-// unconditionally; "on_success" only on a clean (exit 0) stop.
-func shouldAutoCleanup(mode string, exitCode int) bool {
+// its auto_cleanup mode, the reason it stopped, and its exit code. "always"
+// cleans up unconditionally.
+//
+// "on_success" means the session finished its work and exited on its own — so
+// it requires BOTH a clean exit code AND a self-exit stop reason. The exit
+// watcher tags a process that ended without the daemon asking (no prior reason)
+// as StopReasonCrash, so that bucket at exit 0 is a successful completion. A
+// user stop, idle timeout, or shutdown sets its own reason and is never
+// "success" — even if the agent trapped SIGTERM and exited 0 — which is why the
+// exit code alone is not sufficient.
+func shouldAutoCleanup(mode, stopReason string, exitCode int) bool {
 	switch mode {
 	case config.CleanupAlways:
 		return true
 	case config.CleanupOnSuccess:
-		return exitCode == 0
+		return stopReason == StopReasonCrash && exitCode == 0
 	default:
 		return false
 	}
+}
+
+// idleSeconds converts a resolved idle-timeout duration to whole seconds for
+// SessionState.IdleTimeoutSecs, rounding to the nearest second. Any positive
+// duration floors to 1s so a small-but-valid request can never truncate to 0 —
+// which would silently mean "use the agent default" (the opposite of intent).
+// 0 stays 0 (no override).
+func idleSeconds(d time.Duration) int {
+	if d <= 0 {
+		return 0
+	}
+
+	secs := int(d.Round(time.Second).Seconds())
+	if secs < 1 {
+		secs = 1
+	}
+
+	return secs
 }
 
 // triggerNow is a small helper so watch fires share the schedule fire path's

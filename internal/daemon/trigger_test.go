@@ -751,27 +751,54 @@ func TestOrchestratorIDAndBindingReactor(t *testing.T) {
 
 func TestShouldAutoCleanup(t *testing.T) {
 	cases := []struct {
-		mode     string
-		exitCode int
-		want     bool
+		name       string
+		mode       string
+		stopReason string
+		exitCode   int
+		want       bool
 	}{
-		{config.CleanupAlways, 0, true},
-		{config.CleanupAlways, 1, true},
-		{config.CleanupOnSuccess, 0, true},
-		{config.CleanupOnSuccess, 1, false},
-		{config.CleanupOnSuccess, -1, false},
-		{"", 0, false},
-		{"", 1, false},
+		{"always self-exit 0", config.CleanupAlways, StopReasonCrash, 0, true},
+		{"always crash", config.CleanupAlways, StopReasonCrash, 1, true},
+		{"always user stop", config.CleanupAlways, StopReasonUser, 143, true},
+		{"always idle stop", config.CleanupAlways, StopReasonIdle, 143, true},
+		{"on_success self-exit 0", config.CleanupOnSuccess, StopReasonCrash, 0, true},
+		{"on_success crash", config.CleanupOnSuccess, StopReasonCrash, 1, false},
+		// A user/idle stop is never success, even if the agent trapped SIGTERM
+		// and exited 0 — the reason gate rejects it.
+		{"on_success user stop exit 0", config.CleanupOnSuccess, StopReasonUser, 0, false},
+		{"on_success idle stop exit 0", config.CleanupOnSuccess, StopReasonIdle, 0, false},
+		{"disabled", "", StopReasonCrash, 0, false},
 	}
 	for _, tc := range cases {
-		if got := shouldAutoCleanup(tc.mode, tc.exitCode); got != tc.want {
-			t.Errorf("shouldAutoCleanup(%q, %d) = %v, want %v", tc.mode, tc.exitCode, got, tc.want)
+		if got := shouldAutoCleanup(tc.mode, tc.stopReason, tc.exitCode); got != tc.want {
+			t.Errorf("%s: shouldAutoCleanup(%q, %q, %d) = %v, want %v", tc.name, tc.mode, tc.stopReason, tc.exitCode, got, tc.want)
+		}
+	}
+}
+
+func TestIdleSeconds(t *testing.T) {
+	cases := []struct {
+		in   time.Duration
+		want int
+	}{
+		{0, 0},
+		{-5 * time.Second, 0},
+		{time.Minute, 60},
+		{90 * time.Second, 90},
+		{500 * time.Millisecond, 1},  // positive sub-second floors to 1s, never 0
+		{1500 * time.Millisecond, 2}, // rounds to nearest second
+	}
+	for _, tc := range cases {
+		if got := idleSeconds(tc.in); got != tc.want {
+			t.Errorf("idleSeconds(%v) = %d, want %d", tc.in, got, tc.want)
 		}
 	}
 }
 
 // stoppedTriggerSession stages a stopped, trigger-spawned session with the given
-// auto_cleanup mode and exit code, ready for autoCleanupStopped.
+// auto_cleanup mode and exit code, ready for autoCleanupStopped. StopReason is
+// StopReasonCrash — what the exit watcher records for a self-exit (the
+// "success" bucket for on_success); override it for user/idle/shutdown stops.
 func stoppedTriggerSession(mode string, exitCode int) *SessionState {
 	ec := exitCode
 
@@ -779,6 +806,7 @@ func stoppedTriggerSession(mode string, exitCode int) *SessionState {
 		ID:          "reactor-braw",
 		Name:        "braw",
 		Status:      StatusStopped,
+		StopReason:  StopReasonCrash,
 		TriggerID:   "morning-briefing",
 		AutoCleanup: mode,
 		ExitCode:    &ec,
@@ -789,19 +817,23 @@ func TestAutoCleanupStopped(t *testing.T) {
 	cases := []struct {
 		name       string
 		mode       string
+		stopReason string
 		exitCode   int
 		wantDelete bool
 	}{
-		{"always clean exit", config.CleanupAlways, 0, true},
-		{"always error exit", config.CleanupAlways, 1, true},
-		{"on_success clean exit", config.CleanupOnSuccess, 0, true},
-		{"on_success error exit", config.CleanupOnSuccess, 1, false},
-		{"disabled", "", 0, false},
+		{"always self-exit", config.CleanupAlways, StopReasonCrash, 0, true},
+		{"always crash", config.CleanupAlways, StopReasonCrash, 1, true},
+		{"always idle stop", config.CleanupAlways, StopReasonIdle, 143, true},
+		{"on_success self-exit", config.CleanupOnSuccess, StopReasonCrash, 0, true},
+		{"on_success crash", config.CleanupOnSuccess, StopReasonCrash, 1, false},
+		{"on_success idle stop exit 0", config.CleanupOnSuccess, StopReasonIdle, 0, false},
+		{"disabled", "", StopReasonCrash, 0, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			sm := newTriggerTestSM(t)
 			sess := stoppedTriggerSession(tc.mode, tc.exitCode)
+			sess.StopReason = tc.stopReason
 			sm.state.Sessions[sess.ID] = sess
 
 			sm.autoCleanupStopped(sess.ID)
@@ -931,6 +963,43 @@ func TestAutoCleanupStopped_SkipsStarred(t *testing.T) {
 
 	if sm.state.Sessions[sess.ID].IsSoftDeleted() {
 		t.Error("a starred session must not be auto-cleaned")
+	}
+}
+
+// TestAutoCleanupStopped_RollbackOnSaveFailure proves that when persisting the
+// soft-delete marker fails, the session rolls back to a fully consistent live
+// stopped session — not just DeletedAt cleared, but StatusChangedAt and the
+// summary too, so nothing claims "recoverable until…" for a session that wasn't
+// deleted.
+func TestAutoCleanupStopped_RollbackOnSaveFailure(t *testing.T) {
+	sm := newTriggerTestSM(t)
+	// Force the marker persist to fail, after it is applied in memory.
+	sm.saveStateFault = func() error { return errBoom }
+
+	sess := stoppedTriggerSession(config.CleanupAlways, 0)
+	prevTime := time.Now().Add(-time.Hour)
+	sess.SummaryText = "Exited"
+	sess.SummarySetAt = &prevTime
+	sess.StatusChangedAt = prevTime
+	sm.state.Sessions[sess.ID] = sess
+
+	sm.autoCleanupStopped(sess.ID)
+
+	got := sm.state.Sessions[sess.ID]
+	if got.IsSoftDeleted() {
+		t.Error("save failed: session must not be marked deleted")
+	}
+
+	if got.ExpiresAt != nil {
+		t.Error("save failed: ExpiresAt must be rolled back to nil")
+	}
+
+	if got.SummaryText != "Exited" {
+		t.Errorf("save failed: SummaryText not rolled back, got %q", got.SummaryText)
+	}
+
+	if !got.StatusChangedAt.Equal(prevTime) {
+		t.Errorf("save failed: StatusChangedAt not rolled back, got %v want %v", got.StatusChangedAt, prevTime)
 	}
 }
 

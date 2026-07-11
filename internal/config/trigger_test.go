@@ -154,7 +154,8 @@ func TestValidateTriggers_Invalid(t *testing.T) {
 		{"auto_cleanup on command", schedTrigger("scunner", ScheduleConfig{Cron: "@daily"}, ActionConfig{Type: ActionCommand, Command: "x", Repo: "/tmp/x", AutoCleanup: true}), false, "only valid for a session action"},
 		{"auto_cleanup with ensure", watchTrigger("scunner", WatchConfig{Role: "impl"}, ActionConfig{Type: ActionSession, Ensure: true, Prompt: "hi", AutoCleanup: "always"}), true, "incompatible with ensure=true"},
 		{"bad idle_timeout", schedTrigger("scunner", ScheduleConfig{Cron: "@daily"}, ActionConfig{Type: ActionSession, Prompt: "hi", IdleTimeout: "soon"}), true, "action.idle_timeout"},
-		{"zero idle_timeout", schedTrigger("scunner", ScheduleConfig{Cron: "@daily"}, ActionConfig{Type: ActionSession, Prompt: "hi", IdleTimeout: "0s"}), true, "idle_timeout must be > 0"},
+		{"zero idle_timeout", schedTrigger("scunner", ScheduleConfig{Cron: "@daily"}, ActionConfig{Type: ActionSession, Prompt: "hi", IdleTimeout: "0s"}), true, "idle_timeout must be at least 1s"},
+		{"sub-second idle_timeout", schedTrigger("scunner", ScheduleConfig{Cron: "@daily"}, ActionConfig{Type: ActionSession, Prompt: "hi", IdleTimeout: "500ms"}), true, "idle_timeout must be at least 1s"},
 		{"idle_timeout on command", schedTrigger("scunner", ScheduleConfig{Cron: "@daily"}, ActionConfig{Type: ActionCommand, Command: "x", Repo: "/tmp/x", IdleTimeout: "1m"}), false, "idle_timeout is only valid for a session action"},
 	}
 	for _, tc := range cases {
