@@ -678,7 +678,10 @@ func (dc *doctorContext) checkSandboxPaths() {
 }
 
 func (dc *doctorContext) checkHumanToken() {
-	info, err := os.Stat(paths.HumanTokenFile)
+	// Lstat, not Stat: the daemon opens the token with O_NOFOLLOW and rejects a
+	// symlink, so doctor must not follow one either (a symlink to a 0600 file
+	// would otherwise be reported healthy while startup rejects it).
+	info, err := os.Lstat(paths.HumanTokenFile)
 	if err != nil {
 		dc.failf("environment", "Human token unavailable: %s", paths.HumanTokenFile)
 		return

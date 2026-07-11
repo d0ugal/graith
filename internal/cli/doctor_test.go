@@ -99,6 +99,76 @@ func TestCheckHumanToken(t *testing.T) {
 			t.Fatal("expected missing token to fail")
 		}
 	})
+
+	t.Run("thrawn not a regular file", func(t *testing.T) {
+		dir := filepath.Join(dataDir, "not-a-file")
+		if err := os.Mkdir(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+
+		paths.HumanTokenFile = dir
+
+		t.Cleanup(func() { paths.HumanTokenFile = tokenPath })
+
+		cfg = &config.Config{}
+		dc := newDoctorContext()
+		dc.checkHumanToken()
+
+		if dc.ok {
+			t.Fatal("expected a non-regular token to fail")
+		}
+	})
+
+	// The daemon opens the token with O_NOFOLLOW and rejects a symlink; doctor
+	// must not follow one and report it healthy (it uses Lstat, not Stat).
+	t.Run("thrawn symlink", func(t *testing.T) {
+		realTok := filepath.Join(dataDir, "real-secure.token")
+		if err := os.WriteFile(realTok, []byte("bonnie-token\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		link := filepath.Join(dataDir, "linked.token")
+		if err := os.Symlink(realTok, link); err != nil {
+			t.Skipf("symlink unsupported: %v", err)
+		}
+
+		paths.HumanTokenFile = link
+
+		t.Cleanup(func() { paths.HumanTokenFile = tokenPath })
+
+		cfg = &config.Config{}
+		dc := newDoctorContext()
+		dc.checkHumanToken()
+
+		if dc.ok {
+			t.Fatal("expected a symlinked token to fail (daemon rejects it via O_NOFOLLOW)")
+		}
+	})
+
+	t.Run("dreich per-agent sandbox exposure", func(t *testing.T) {
+		cfg = &config.Config{
+			Sandbox: config.SandboxConfig{Enabled: true},
+			Agents: map[string]config.Agent{
+				"canny": {Sandbox: config.SandboxConfig{ReadDirs: []string{dataDir}}},
+			},
+		}
+		dc := newDoctorContext()
+		dc.checkHumanToken()
+
+		if dc.ok {
+			t.Fatal("expected a per-agent sandbox grant exposing the token to fail")
+		}
+	})
+
+	t.Run("bonnie sandbox enabled but token not exposed", func(t *testing.T) {
+		cfg = &config.Config{Sandbox: config.SandboxConfig{Enabled: true, ReadDirs: []string{t.TempDir()}}}
+		dc := newDoctorContext()
+		dc.checkHumanToken()
+
+		if !dc.ok {
+			t.Fatalf("expected a non-exposed token under an enabled sandbox to pass: %+v", dc.checks)
+		}
+	})
 }
 
 // makeTmpRepo creates the <repo>/<hash> layout gr doctor's checkTmpDir expects
