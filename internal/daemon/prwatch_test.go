@@ -505,6 +505,124 @@ func TestDiffAndBuild_GreenFinishNoRedCompletion(t *testing.T) {
 	}
 }
 
+// TestDiffAndBuild_CompletionFiresWhileCommentsDegraded is a regression test:
+// when the comment fetch stays degraded the session never primes, so every poll
+// re-enters the unprimed branch. An early failure delivered there arms the
+// completion follow-up, and once CI drains (CIPending == 0, still red) the final
+// tally must still fire — otherwise the "when they all finish" report is lost
+// whenever comments happen to be unreadable.
+func TestDiffAndBuild_CompletionFiresWhileCommentsDegraded(t *testing.T) {
+	sm := newPRWatchSM()
+	cfg := allOnConfig()
+	cfg.Debounce = "0s"
+	t1 := prWatchTarget{id: "haar", branch: "haar"}
+
+	// Poll 1: unprimed (CommentsOK false), first failure while checks still run.
+	out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 50, State: "open", HeadRefOid: "sha1", CIState: "failing",
+		FailingChecks: []string{"build"}, CIPending: 2, CommentsOK: false,
+	})
+	if len(out) != 1 || !strings.Contains(out[0], "still running") {
+		t.Fatalf("unprimed first failure should notify and flag outstanding jobs, got %v", out)
+	}
+
+	// Poll 2: still unprimed, still pending, same failing set → no re-notify.
+	if out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 50, State: "open", HeadRefOid: "sha1", CIState: "failing",
+		FailingChecks: []string{"build"}, CIPending: 2, CommentsOK: false,
+	}); len(out) != 0 {
+		t.Fatalf("unprimed same failure while pending should not re-notify, got %v", out)
+	}
+
+	// Poll 3: checks finish red while still unprimed → completion notice fires.
+	out = sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 50, State: "open", HeadRefOid: "sha1", CIState: "failing",
+		FailingChecks: []string{"build"}, CIPending: 0, CommentsOK: false,
+	})
+	if len(out) != 1 || !strings.Contains(out[0], "have finished") {
+		t.Fatalf("unprimed completion should fire the final tally, got %v", out)
+	}
+
+	// Poll 4: completion already delivered → no re-fire.
+	if out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 50, State: "open", HeadRefOid: "sha1", CIState: "failing",
+		FailingChecks: []string{"build"}, CIPending: 0, CommentsOK: false,
+	}); len(out) != 0 {
+		t.Fatalf("unprimed completion should not re-fire, got %v", out)
+	}
+}
+
+// TestDiffAndBuild_NewSHAClearsPendingCompletion locks the head-SHA reset: an
+// armed completion notice on the old SHA must not fire against a new SHA after a
+// force-push, and the new SHA reports its own failure fresh.
+func TestDiffAndBuild_NewSHAClearsPendingCompletion(t *testing.T) {
+	sm := newPRWatchSM()
+	cfg := allOnConfig()
+	cfg.Debounce = "0s"
+	t1 := prWatchTarget{id: "auld", branch: "auld"}
+
+	sm.diffAndBuild(cfg, t1, "croft/loch", prData{Number: 60, State: "open", HeadRefOid: "sha1", CIState: "passing", CommentsOK: true})
+
+	// Early failure on sha1 while pending → arms the completion follow-up.
+	if out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 60, State: "open", HeadRefOid: "sha1", CIState: "failing",
+		FailingChecks: []string{"build"}, CIPending: 1, CommentsOK: true,
+	}); len(out) != 1 {
+		t.Fatalf("early failure on sha1 should notify, got %v", out)
+	}
+
+	// New SHA pushed, checks pending → no stale red completion from sha1, and no
+	// premature failure (nothing failing yet on sha2).
+	if out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 60, State: "open", HeadRefOid: "sha2", CIState: "pending", CIPending: 3, CommentsOK: true,
+	}); len(out) != 0 {
+		t.Fatalf("new SHA should clear the armed completion, got %v", out)
+	}
+}
+
+// TestDiffAndBuild_NewFailureAsPendingDrainsSingleNotice locks the same-poll
+// no-double-notification property: when a fresh check goes red on the very poll
+// that drains the pending set, the agent gets one final failure notice (listing
+// the full failing set) rather than a failure notice plus a redundant completion.
+func TestDiffAndBuild_NewFailureAsPendingDrainsSingleNotice(t *testing.T) {
+	sm := newPRWatchSM()
+	cfg := allOnConfig()
+	cfg.Debounce = "0s"
+	t1 := prWatchTarget{id: "canny", branch: "canny"}
+
+	sm.diffAndBuild(cfg, t1, "croft/loch", prData{Number: 70, State: "open", HeadRefOid: "sha1", CIState: "passing", CommentsOK: true})
+
+	// build fails while lint + vet still run → arms completion.
+	if out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 70, State: "open", HeadRefOid: "sha1", CIState: "failing",
+		FailingChecks: []string{"build"}, CIPending: 2, CommentsOK: true,
+	}); len(out) != 1 {
+		t.Fatalf("first failure should notify, got %v", out)
+	}
+
+	// Final poll: vet also fails, nothing pending. Exactly one notice — the fresh
+	// failure listing build+vet — and no separate completion.
+	out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 70, State: "open", HeadRefOid: "sha1", CIState: "failing",
+		FailingChecks: []string{"build", "vet"}, CIPending: 0, CommentsOK: true,
+	})
+	if len(out) != 1 {
+		t.Fatalf("new failure as pending drains should yield exactly one notice, got %v", out)
+	}
+
+	if !strings.Contains(out[0], "vet") || strings.Contains(out[0], "have finished") {
+		t.Errorf("the single notice should be the fresh failure (listing vet), not a completion, got: %s", out[0])
+	}
+
+	// The completion was subsumed by the final failure notice → nothing left to fire.
+	if out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 70, State: "open", HeadRefOid: "sha1", CIState: "failing",
+		FailingChecks: []string{"build", "vet"}, CIPending: 0, CommentsOK: true,
+	}); len(out) != 0 {
+		t.Fatalf("no completion should fire after the final failure notice, got %v", out)
+	}
+}
+
 func TestDiffAndBuild_GatesCIvsComments(t *testing.T) {
 	// notify_ci_failures on, both comment gates off → CI notifies, comment does not.
 	sm := newPRWatchSM()

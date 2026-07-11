@@ -446,9 +446,12 @@ func (sm *SessionManager) diffAndBuild(cfg *configPRWatch, t prWatchTarget, slug
 		if d.CIState == "passing" {
 			// CI recovered while still unprimed: clear the dedup set so a genuine
 			// re-failure on the same SHA re-notifies (mirrors the steady-state
-			// reset). No recovery notice is sent here — the unprimed branch only
-			// surfaces currently-broken state, not transitions back to green.
+			// reset), and disarm any pending completion notice (a green finish is
+			// not a red completion). No recovery notice is sent here — the unprimed
+			// branch only surfaces currently-broken state, not transitions back to
+			// green.
 			cur.failing = map[string]bool{}
+			cur.ciAwaitingFinal = false
 		}
 
 		if d.CIState == "failing" && cfg.NotifyCIFailures && !allFailingSeen(d.FailingChecks, cur.failing) {
@@ -460,6 +463,21 @@ func (sm *SessionManager) diffAndBuild(cfg *configPRWatch, t prWatchTarget, slug
 				cur.ciAwaitingFinal = d.CIPending > 0
 
 				return []string{ciFailureBody(t, slug, d)}
+			}
+		}
+
+		// CI completion while still unprimed. The steady-state completion block is
+		// unreachable until comments read cleanly (cur.primed), so without this an
+		// early failure delivered here (arming ciAwaitingFinal) would never get its
+		// final-tally follow-up if comment fetches keep degrading — the whole point
+		// of the granular reporting is lost. CI is fetched separately from comments,
+		// so it can complete cleanly even while priming stays deferred. Same guards
+		// as the steady-state path: fire only when armed, red, and drained; advance
+		// (disarm) only on delivery so a rejected gate retries next poll.
+		if cfg.NotifyCIFailures && cur.ciAwaitingFinal && d.CIState == "failing" && d.CIPending == 0 {
+			if _, ok := sm.gate(cfg, t.id, cur, true); ok {
+				cur.ciAwaitingFinal = false
+				return []string{ciCompleteBody(t, slug, d)}
 			}
 		}
 
