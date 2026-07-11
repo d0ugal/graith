@@ -502,7 +502,9 @@ func TestAuthorizeScenarioOp(t *testing.T) {
 
 	// Authorized: orchestrator, no error control message emitted.
 	var sentType string
+
 	send := func(typ string, _ any) { sentType = typ }
+
 	if ok := (authContext{sessionID: "ben", authenticated: true, role: roleOrchestrator}).authorizeScenarioOp(sm, "strath", send); !ok || sentType != "" {
 		t.Errorf("orchestrator: ok=%v sent=%q, want ok=true, no message", ok, sentType)
 	}
@@ -521,7 +523,9 @@ func TestAuthorizeTriggerOp(t *testing.T) {
 	})
 
 	var sentType string
+
 	send := func(typ string, _ any) { sentType = typ }
+
 	if ok := (authContext{sessionID: "ben", authenticated: true, role: roleOrchestrator}).authorizeTriggerOp(sm, send); !ok || sentType != "" {
 		t.Errorf("orchestrator: ok=%v sent=%q, want ok=true, no message", ok, sentType)
 	}

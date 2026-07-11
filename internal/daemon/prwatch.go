@@ -320,6 +320,7 @@ func (sm *SessionManager) pollSession(ctx context.Context, cfg *configPRWatch, t
 	// Publish display state regardless of notifications.
 	sm.writePRState(t.id, d)
 
+	//nolint:contextcheck // diffAndBuild may surface an untrusted-author prompt via notifyFromDaemon, whose detached auto-resume deliberately does not inherit the poll ctx (must outlive this iteration).
 	notifications := sm.diffAndBuild(cfg, t, slug, d)
 	for _, body := range notifications {
 		//nolint:contextcheck // notifyFromDaemon spawns a detached goroutine that may auto-resume a stopped session; that work must outlive this poll iteration, so it deliberately does not inherit the poll ctx.
