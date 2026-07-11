@@ -1607,6 +1607,53 @@ func TestCommentTrusted(t *testing.T) {
 			comment: ghComment{User: ghUser{Login: "dreich"}, AuthorAssociation: "MEMBER"},
 			want:    false,
 		},
+		// --- bot association-bypass guard (issue #1039). A bot's association is
+		// unreliable and must NEVER confer trust; the login allowlist is the ONLY
+		// way to trust a bot. A non-allowlisted [bot] with a trusted association
+		// must still be rejected. Without this, an attacker-influenced bot
+		// carrying MEMBER/OWNER/COLLABORATOR would reopen the injection channel.
+		{
+			name:    "non-allowlisted bot with MEMBER association is NOT trusted",
+			cfg:     base,
+			comment: ghComment{User: ghUser{Login: "evil-app[bot]"}, AuthorAssociation: "MEMBER"},
+			want:    false,
+		},
+		{
+			name:    "non-allowlisted bot with OWNER association is NOT trusted",
+			cfg:     base,
+			comment: ghComment{User: ghUser{Login: "thrawn-bot[bot]"}, AuthorAssociation: "OWNER"},
+			want:    false,
+		},
+		{
+			name:    "non-allowlisted bot with COLLABORATOR association is NOT trusted",
+			cfg:     base,
+			comment: ghComment{User: ghUser{Login: "scunner-bot[bot]"}, AuthorAssociation: "COLLABORATOR"},
+			want:    false,
+		},
+		{
+			name:    "non-allowlisted bot with mixed-case [Bot] suffix + MEMBER is NOT trusted",
+			cfg:     base,
+			comment: ghComment{User: ghUser{Login: "Dreich-App[Bot]"}, AuthorAssociation: "MEMBER"},
+			want:    false,
+		},
+		{
+			name: "allowlisted bot IS trusted even with a trusted association",
+			cfg: func() *config.PRWatchConfig {
+				c := base()
+				c.CommentAuthorAllowlist = []string{"canny-bot[bot]"}
+				return c
+			},
+			comment: ghComment{User: ghUser{Login: "canny-bot[bot]"}, AuthorAssociation: "MEMBER"},
+			want:    true,
+		},
+		{
+			name: "a human login is still trusted by association (bot guard does not over-reach)",
+			cfg:  base,
+			// A normal human login must remain association-trusted; the bot guard
+			// must key strictly on the [bot] suffix.
+			comment: ghComment{User: ghUser{Login: "robotron"}, AuthorAssociation: "MEMBER"},
+			want:    true,
+		},
 	}
 
 	for _, tc := range cases {
@@ -1819,6 +1866,48 @@ func TestPromptUntrustedAuthors_NoRepeat(t *testing.T) {
 
 	if msgs := orchInbox(t, sm, orchID); len(msgs) != 1 {
 		t.Fatalf("same author should be surfaced once only, got %d messages", len(msgs))
+	}
+}
+
+// TestPromptUntrustedAuthors_NotRecordedWhenDeliveryFails: if the prompt cannot
+// be delivered (message store unavailable / publish fails), the author must NOT
+// be marked surfaced — otherwise a transient failure permanently suppresses the
+// security notification. A later poll, once delivery works, surfaces the author
+// exactly once. Regression for issue #1039.
+func TestPromptUntrustedAuthors_NotRecordedWhenDeliveryFails(t *testing.T) {
+	sm, orchID := newPromptSM(t)
+	cfg := promptConfig()
+	t1 := prWatchTarget{id: "wynd", branch: "wynd"}
+
+	// Prime the cursor.
+	sm.diffAndBuild(cfg, t1, "croft/loch", prData{Number: 5, State: "open", HeadRefOid: "sha1", CIState: "passing", CommentsOK: true})
+
+	// Break delivery, then present an untrusted comment.
+	ms := sm.messages
+	sm.messages = nil
+	sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 5, State: "open", HeadRefOid: "sha1", CIState: "passing", CommentsOK: true,
+		IssueComments: []ghComment{{ID: 50, User: ghUser{Login: "scunner"}, AuthorAssociation: "NONE", Body: "dreich"}},
+	})
+
+	if sm.state.PRWatchPromptedAuthors["scunner"] {
+		t.Fatal("author must NOT be recorded when prompt delivery failed (would suppress the retry forever)")
+	}
+
+	// Restore delivery; a later comment from the same author must now surface
+	// exactly one prompt and record the author.
+	sm.messages = ms
+	sm.diffAndBuild(cfg, t1, "croft/loch", prData{
+		Number: 5, State: "open", HeadRefOid: "sha1", CIState: "passing", CommentsOK: true,
+		IssueComments: []ghComment{{ID: 51, User: ghUser{Login: "scunner"}, AuthorAssociation: "NONE", Body: "dreich again"}},
+	})
+
+	if msgs := orchInbox(t, sm, orchID); len(msgs) != 1 {
+		t.Fatalf("author should surface exactly once after delivery recovers, got %d messages", len(msgs))
+	}
+
+	if !sm.state.PRWatchPromptedAuthors["scunner"] {
+		t.Fatal("author should be recorded after a successful (re-tried) delivery")
 	}
 }
 

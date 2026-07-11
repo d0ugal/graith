@@ -549,6 +549,9 @@ func TestCheckScenarioOp(t *testing.T) {
 		"bairn":     {ID: "bairn", ParentID: "ben"},
 		"wee-bairn": {ID: "wee-bairn", ParentID: "bairn"},
 		"thrawn":    {ID: "thrawn"},
+		// A SECOND, unrelated orchestrator: orchestrator elevation must not be
+		// global across trees — it may only manage its own scenario.
+		"ben-two": {ID: "ben-two", SystemKind: SystemKindOrchestrator},
 	})
 	sm.state.Scenarios = map[string]*ScenarioState{
 		"strath": {Name: "strath", OrchestratorID: "ben"},
@@ -565,6 +568,7 @@ func TestCheckScenarioOp(t *testing.T) {
 		{"scenario orchestrator allowed", authContext{sessionID: "ben", authenticated: true, role: roleOrchestrator}, "strath", false},
 		{"descendant of orchestrator allowed", authContext{sessionID: "wee-bairn", authenticated: true, role: roleSession}, "strath", false},
 		{"unrelated session rejected", authContext{sessionID: "thrawn", authenticated: true, role: roleSession}, "strath", true},
+		{"a different orchestrator cannot manage another's scenario", authContext{sessionID: "ben-two", authenticated: true, role: roleOrchestrator}, "strath", true},
 		{"read-only guest rejected", authContext{role: roleRemoteGuest, deviceID: "dreich"}, "strath", true},
 		{"unpaired remote rejected", authContext{role: roleNone}, "strath", true},
 		{"unknown scenario rejected", authContext{sessionID: "ben", authenticated: true, role: roleOrchestrator}, "haar", true},

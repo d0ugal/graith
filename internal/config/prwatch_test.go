@@ -178,12 +178,36 @@ func TestTrustedAssociationSet(t *testing.T) {
 		}
 	})
 
-	t.Run("all-empty entries fall back to default", func(t *testing.T) {
+	t.Run("nil (unset) falls back to default", func(t *testing.T) {
+		// A nil slice is the Go zero value / unset key: it must resolve to the
+		// default trusted tier.
+		pw := PRWatchConfig{}
+		set := pw.TrustedAssociationSet()
+
+		if !set["OWNER"] || !set["MEMBER"] || !set["COLLABORATOR"] || len(set) != 3 {
+			t.Errorf("nil associations should fall back to the default set, got %v", set)
+		}
+	})
+
+	t.Run("present-but-empty is honoured as trust-no-association (fail closed)", func(t *testing.T) {
+		// trusted_author_associations = [] is an explicit "allowlist-only" request
+		// and must NOT be silently widened back to the default (issue #1039).
+		pw := PRWatchConfig{TrustedAuthorAssociations: []string{}}
+		set := pw.TrustedAssociationSet()
+
+		if len(set) != 0 {
+			t.Errorf("an explicit empty list must trust no association, got %v", set)
+		}
+	})
+
+	t.Run("whitespace-only entries collapse to trust-no-association", func(t *testing.T) {
+		// A present list whose entries are all blank is malformed input; it fails
+		// closed (empty set), not open to the default.
 		pw := PRWatchConfig{TrustedAuthorAssociations: []string{"", "  "}}
 		set := pw.TrustedAssociationSet()
 
-		if !set["OWNER"] || !set["MEMBER"] || !set["COLLABORATOR"] {
-			t.Errorf("empty entries should fall back to the default set, got %v", set)
+		if len(set) != 0 {
+			t.Errorf("blank entries must not fall back to the default set, got %v", set)
 		}
 	})
 }
@@ -245,6 +269,20 @@ func TestPRWatchAuthorTrustParsing(t *testing.T) {
 		set := pw.TrustedAssociationSet()
 		if !set["OWNER"] || !set["MEMBER"] || !set["COLLABORATOR"] {
 			t.Errorf("unset associations should default to owner/member/collaborator, got %v", set)
+		}
+	})
+
+	t.Run("explicit empty list is honoured as allowlist-only (fail closed)", func(t *testing.T) {
+		// Writing `trusted_author_associations = []` is an operator asking to trust
+		// NO association and rely on the allowlist alone. It must not be silently
+		// widened back to the default three (issue #1039 review finding).
+		pw := load(t, "[pr_watch]\nenabled = true\n"+
+			"comment_author_allowlist = [\"canny-bot[bot]\"]\n"+
+			"trusted_author_associations = []\n")
+
+		set := pw.TrustedAssociationSet()
+		if len(set) != 0 {
+			t.Errorf("explicit empty list must trust no association through Load, got %v", set)
 		}
 	})
 }

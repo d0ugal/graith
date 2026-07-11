@@ -311,27 +311,38 @@ type PRWatchConfig struct {
 var DefaultTrustedAssociations = []string{"OWNER", "MEMBER", "COLLABORATOR"}
 
 // TrustedAssociationSet returns the resolved set of trusted author_association
-// values as an upper-cased lookup set. An unset TrustedAuthorAssociations
-// defaults to DefaultTrustedAssociations; a configured list is normalised to
+// values as an upper-cased lookup set. A configured list is normalised to
 // upper-case (GitHub returns the enum upper-cased, but config is hand-written)
-// and empty/whitespace entries are dropped. An explicitly-empty but present
-// list would trust no association (allowlist-only) — but because go-toml can't
-// distinguish an explicit empty slice from unset here, an empty result falls
-// back to the default; operators disable association trust by setting the
-// allowlist and leaving associations at the default, or by scoping the
-// allowlist. See the design doc "Empty default allowlist" decision.
+// and empty/whitespace entries are dropped.
+//
+// The nil vs present-but-empty distinction is load-bearing and fails CLOSED
+// (issue #1039):
+//
+//   - A NIL slice means "unset" (the Go zero value, or a config built without
+//     defaults) and falls back to DefaultTrustedAssociations. Load() seeds the
+//     field from default_config.toml, so an unset key in a real config resolves
+//     to the default three; nil here covers direct struct construction.
+//   - A PRESENT-but-empty slice (trusted_author_associations = []) is an
+//     explicit "trust no association" — allowlist-only mode — and is honoured
+//     as an empty set. go-toml/v2 decodes `= []` to a non-nil empty slice, so it
+//     is distinguishable from an absent key, and we must NOT silently widen it
+//     back to the default (that would fail open on an operator asking to lock
+//     the gate down).
 func (p PRWatchConfig) TrustedAssociationSet() map[string]bool {
+	if p.TrustedAuthorAssociations == nil {
+		set := make(map[string]bool, len(DefaultTrustedAssociations))
+		for _, a := range DefaultTrustedAssociations {
+			set[a] = true
+		}
+
+		return set
+	}
+
 	set := make(map[string]bool, len(p.TrustedAuthorAssociations))
 
 	for _, a := range p.TrustedAuthorAssociations {
 		a = strings.ToUpper(strings.TrimSpace(a))
 		if a != "" {
-			set[a] = true
-		}
-	}
-
-	if len(set) == 0 {
-		for _, a := range DefaultTrustedAssociations {
 			set[a] = true
 		}
 	}
