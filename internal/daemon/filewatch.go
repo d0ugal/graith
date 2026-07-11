@@ -303,9 +303,20 @@ func (sm *SessionManager) noteChange(ctx context.Context, triggerName string, b 
 // overlap guard, and run the action.
 func (sm *SessionManager) watchFire(ctx context.Context, triggerName string, b *watchBinding) {
 	t := sm.triggerByName(triggerName)
-	if t == nil || !t.IsWatch() {
+	if t == nil || !t.IsWatch() || !t.TriggerEnabled() {
 		return
 	}
+	// The trigger may have been paused during the up-to-2s reconcile window
+	// before its binding was torn down; don't fire a paused trigger.
+	if rt := sm.getTriggerRuntime(t.Name); rt != nil && rt.Paused {
+		return
+	}
+
+	// Serialise per-binding for actions where a concurrent fire would duplicate
+	// work or race: command runs, and ensure-reviewer (whose reactor
+	// reserve→create must not overlap).
+	serialise := t.Action.Type == config.ActionCommand ||
+		(t.Action.Type == config.ActionSession && t.Action.Ensure)
 
 	b.bmu.Lock()
 	// The binding may have been torn down after this timer fired but before it
@@ -315,9 +326,9 @@ func (sm *SessionManager) watchFire(ctx context.Context, triggerName string, b *
 		return
 	}
 
-	if t.Action.Type == config.ActionCommand && t.Policy.OverlapMode() == config.OverlapSkip && b.inFlight {
+	if serialise && b.inFlight {
 		b.bmu.Unlock()
-		sm.log.Info("trigger: watch skipped (overlap)", "trigger", triggerName)
+		sm.log.Info("trigger: watch skipped (in flight)", "trigger", triggerName)
 
 		return
 	}
@@ -335,13 +346,13 @@ func (sm *SessionManager) watchFire(ctx context.Context, triggerName string, b *
 	}
 
 	b.changed = make(map[string]bool)
-	if t.Action.Type == config.ActionCommand {
+	if serialise {
 		b.inFlight = true
 	}
 	b.bmu.Unlock()
 
 	defer func() {
-		if t.Action.Type == config.ActionCommand {
+		if serialise {
 			b.bmu.Lock()
 			b.inFlight = false
 			b.bmu.Unlock()

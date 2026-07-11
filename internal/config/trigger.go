@@ -176,6 +176,24 @@ func (p TriggerPolicy) RateLimitParsed() (int, time.Duration) {
 	return n, win
 }
 
+// validRateLimit reports whether s is a well-formed "N/duration" rate limit
+// with N>0 and a positive duration.
+func validRateLimit(s string) bool {
+	parts := strings.SplitN(s, "/", 2)
+	if len(parts) != 2 {
+		return false
+	}
+
+	var n int
+	if _, err := fmt.Sscanf(strings.TrimSpace(parts[0]), "%d", &n); err != nil || n <= 0 {
+		return false
+	}
+
+	d, err := ParseDurationWithDays(strings.TrimSpace(parts[1]))
+
+	return err == nil && d > 0
+}
+
 // MaxConcurrentOr returns the daemon-wide concurrency cap, defaulting to 4.
 func (r TriggersRuntime) MaxConcurrentOr() int {
 	if r.MaxConcurrent <= 0 {
@@ -276,8 +294,10 @@ func validateWatch(where string, w *WatchConfig) []error {
 	}
 
 	if w.Debounce != "" {
-		if _, err := ParseDurationWithDays(w.Debounce); err != nil {
+		if d, err := ParseDurationWithDays(w.Debounce); err != nil {
 			errs = append(errs, fmt.Errorf("%s: [watch] debounce %q: %w", where, w.Debounce, err))
+		} else if d <= 0 {
+			errs = append(errs, fmt.Errorf("%s: [watch] debounce must be > 0", where))
 		}
 	}
 
@@ -340,8 +360,10 @@ func (c *Config) validateCommandAction(where string, t *TriggerConfig) []error {
 	}
 
 	if a.Timeout != "" {
-		if _, err := ParseDurationWithDays(a.Timeout); err != nil {
+		if d, err := ParseDurationWithDays(a.Timeout); err != nil {
 			errs = append(errs, fmt.Errorf("%s: action.timeout %q: %w", where, a.Timeout, err))
+		} else if d <= 0 {
+			errs = append(errs, fmt.Errorf("%s: action.timeout must be > 0", where))
 		}
 	}
 	// Execution root: schedule commands require repo; watch commands derive it
@@ -371,8 +393,8 @@ func validatePolicy(where string, p *TriggerPolicy) []error {
 	}
 
 	if p.RateLimit != "" {
-		if !strings.Contains(p.RateLimit, "/") {
-			errs = append(errs, fmt.Errorf("%s: policy.rate_limit %q must be \"N/duration\" (e.g. 5/30m)", where, p.RateLimit))
+		if !validRateLimit(p.RateLimit) {
+			errs = append(errs, fmt.Errorf("%s: policy.rate_limit %q must be \"N/duration\" with N>0 (e.g. 5/30m)", where, p.RateLimit))
 		}
 	}
 
