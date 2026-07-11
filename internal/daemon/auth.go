@@ -69,7 +69,25 @@ func resolveAuth(sm *SessionManager, token string, origin ConnOrigin, poppedDevi
 	}
 
 	if !origin.Remote {
-		if token != "" && sm.humanToken != "" && subtle.ConstantTimeCompare([]byte(token), []byte(sm.humanToken)) == 1 {
+		// When a human credential is provisioned, the local caller must present
+		// it: this is the fail-closed boundary that stops a token-stripping agent
+		// from being treated as the human. A daemon started via Run always has one
+		// (startup fails closed if it cannot be established), so a serving
+		// production daemon is always in this branch.
+		if sm.humanToken != "" {
+			if token != "" && subtle.ConstantTimeCompare([]byte(token), []byte(sm.humanToken)) == 1 {
+				return authContext{role: roleLocalHuman, origin: origin}, nil
+			}
+
+			return authContext{role: roleNone, origin: origin}, fmt.Errorf("invalid token")
+		}
+
+		// No human credential provisioned. This is only reachable for a
+		// SessionManager constructed without startup provisioning (tests,
+		// embedders) — never a served production daemon. Preserve the legacy
+		// 0700-socket trust boundary: an empty token is the local human, a stray
+		// token is invalid.
+		if token == "" {
 			return authContext{role: roleLocalHuman, origin: origin}, nil
 		}
 

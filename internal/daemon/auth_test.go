@@ -58,6 +58,30 @@ func TestResolveAuth_LocalTokens(t *testing.T) {
 	}
 }
 
+// TestResolveAuth_LocalNoHumanTokenFallback documents that a SessionManager
+// with no provisioned human credential (only reachable for a non-Run test or
+// embedder daemon) preserves the legacy 0700-socket boundary: an empty local
+// token is the human, a stray token is rejected. A served production daemon
+// always has a human token (Run fails closed otherwise), so it never lands here.
+func TestResolveAuth_LocalNoHumanTokenFallback(t *testing.T) {
+	sm := newTestSMWithSessions(map[string]*SessionState{
+		"braw": {ID: "braw", Token: "tok-braw"},
+	})
+	// humanToken deliberately left empty.
+
+	if auth, err := resolveAuth(sm, "", ConnOrigin{}, ""); err != nil || auth.role != roleLocalHuman {
+		t.Errorf("empty local token: role=%d err=%v, want roleLocalHuman/nil", auth.role, err)
+	}
+
+	if auth, err := resolveAuth(sm, "tok-braw", ConnOrigin{}, ""); err != nil || auth.role != roleSession {
+		t.Errorf("session token still authenticates: role=%d err=%v", auth.role, err)
+	}
+
+	if auth, err := resolveAuth(sm, "tok-dreich", ConnOrigin{}, ""); err == nil || auth.role != roleNone {
+		t.Errorf("stray token: role=%d err=%v, want roleNone/error", auth.role, err)
+	}
+}
+
 func TestResolveAuth_InvalidToken(t *testing.T) {
 	sm := newTestSMWithSessions(map[string]*SessionState{
 		"braw": {ID: "braw", Token: "tok-braw"},
