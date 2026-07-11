@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.67.2](https://github.com/d0ugal/graith/compare/v0.67.1...v0.67.2) (2026-07-11)
+
+
+### Features
+
+* **notify:** orchestrator push notifications (macOS/command) ([6aea456](https://github.com/d0ugal/graith/commit/6aea45605f2f4c7600e7e0d6fe87a90c78d563c3)), closes [#1055](https://github.com/d0ugal/graith/issues/1055)
+* **triggers:** auto_cleanup for trigger-spawned sessions ([51644a5](https://github.com/d0ugal/graith/commit/51644a52d5a05b0d1b8e8795f1f19c8fe4e86a04)), closes [#1052](https://github.com/d0ugal/graith/issues/1052)
+* **triggers:** idle_timeout for session actions; reap auto_cleanup briefings ([66e033a](https://github.com/d0ugal/graith/commit/66e033a323884d7b51924f20281c0ab1f9f21940))
+
+
+### Bug Fixes
+
+* **notify:** address review findings ([5c75769](https://github.com/d0ugal/graith/commit/5c757690c14ced5b7873cd2b2e4b8d07bcfe2980))
+* **notify:** commit rate-limit/coalesce state only after successful dispatch ([aabdb44](https://github.com/d0ugal/graith/commit/aabdb4438ff09d90725cd8fb408cf0e5ccfdf26c))
+* **trigger:** expand ~ in action repo path ([c9db259](https://github.com/d0ugal/graith/commit/c9db259c3c5caa096849c9ae61f4dd08d2ead723)), closes [#1051](https://github.com/d0ugal/graith/issues/1051)
+* **triggers:** address round-2 review of auto_cleanup/idle_timeout ([cd51ab8](https://github.com/d0ugal/graith/commit/cd51ab83c7e985fffdc1212170ff56a427f9ec88))
+* **triggers:** make auto_cleanup atomic and non-destructive ([67e7c3b](https://github.com/d0ugal/graith/commit/67e7c3b0a16d16cd7cc0656cf05c43374863be15))
+
+
+### Code Refactoring
+
+* replace client.RunOverlay positional args with an opts struct ([a461199](https://github.com/d0ugal/graith/commit/a461199588c515425509702d8e1f67fc7484d387)), closes [#1018](https://github.com/d0ugal/graith/issues/1018)
+* replace MsgStore.Publish positional string args with an opts struct ([8827155](https://github.com/d0ugal/graith/commit/882715594fea446efbd8920ccfe5f3ab3dfab572)), closes [#1019](https://github.com/d0ugal/graith/issues/1019)
+
+
+### Tests
+
+* **trigger:** add end-to-end tilde regression + canonicalise repo store scope ([897193a](https://github.com/d0ugal/graith/commit/897193a0235411e82477027d539fe84708545250))
+* **trigger:** tighten test dir perms to 0750 (gosec G301) ([8e5f457](https://github.com/d0ugal/graith/commit/8e5f45766c14e9faf9de0a9c3611394f0478da1f))
+
 ## [0.67.1](https://github.com/d0ugal/graith/compare/v0.67.0...v0.67.1) (2026-07-11)
 
 
