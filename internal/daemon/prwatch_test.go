@@ -983,7 +983,7 @@ func TestPRWatchTargets_Cov(t *testing.T) {
 	// Ineligible: in-place.
 	sm.state.Sessions["inplace"] = &SessionState{ID: "inplace", Status: StatusRunning, RepoPath: cloneDir, InPlace: true}
 	// Ineligible: shared worktree.
-	sm.state.Sessions["shared"] = &SessionState{ID: "shared", Status: StatusRunning, RepoPath: cloneDir, SharedWorktree: true}
+	sm.state.Sessions["shared"] = &SessionState{ID: "shared", Status: StatusRunning, RepoPath: cloneDir, Mirror: true}
 	// Ineligible: errored status.
 	sm.state.Sessions["errored"] = &SessionState{ID: "errored", Status: StatusErrored, RepoPath: cloneDir}
 

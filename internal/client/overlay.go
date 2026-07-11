@@ -78,7 +78,7 @@ func filterNeedsAttention(sessions []protocol.SessionInfo) []protocol.SessionInf
 			result = append(result, s)
 		case s.Status == "running" && s.AgentStatus == "ready":
 			result = append(result, s)
-		case s.Status == "stopped" && !s.SharedWorktree && (s.Dirty || s.UnpushedCount > 0):
+		case s.Status == "stopped" && !s.Mirror && (s.Dirty || s.UnpushedCount > 0):
 			result = append(result, s)
 		}
 	}
@@ -426,7 +426,7 @@ func buildMatchString(s protocol.SessionInfo) string {
 		strings.ToLower(s.Agent),
 		strings.ToLower(s.SummaryText),
 	}
-	if !s.SharedWorktree {
+	if !s.Mirror {
 		parts = append(parts, strings.ToLower(s.Branch))
 		if s.Dirty {
 			parts = append(parts, "dirty", "modified")
@@ -2158,7 +2158,7 @@ func (m overlayModel) View() tea.View {
 
 		var line1 []string
 
-		if !s.SharedWorktree {
+		if !s.Mirror {
 			if s.Branch != "" {
 				branch := s.Branch
 				if p := strings.SplitN(branch, "/", 3); len(p) == 3 {
@@ -2235,7 +2235,7 @@ func (m overlayModel) View() tea.View {
 	case stateConfirmDelete:
 		if item, ok := m.list.SelectedItem().(sessionItem); ok {
 			s := item.info
-			if !s.SharedWorktree && (s.Dirty || s.UnpushedCount > 0) {
+			if !s.Mirror && (s.Dirty || s.UnpushedCount > 0) {
 				warnStyle := lipgloss.NewStyle().Foreground(colorRed).Bold(true)
 
 				panelContent.WriteString("\n")

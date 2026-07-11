@@ -129,7 +129,7 @@ func (sm *SessionManager) runPRWatchTick(ctx context.Context, cfg *configPRWatch
 }
 
 // prWatchTargets returns eligible sessions with a resolved branch. Eligible =
-// running or stopped, has a repo, not shared-worktree, not in-place. Shared/
+// running or stopped, has a repo, not mirror, not in-place. Shared/
 // in-place are excluded in v1 (their SessionState.Branch is empty and ownership
 // is ambiguous).
 //
@@ -160,7 +160,7 @@ func (sm *SessionManager) prWatchTargets() []prWatchTarget {
 			continue
 		}
 
-		if s.RepoPath == "" || s.SharedWorktree || s.InPlace {
+		if s.RepoPath == "" || s.Mirror || s.InPlace {
 			continue
 		}
 

@@ -264,7 +264,7 @@ start, and uses a **pre-start timestamp** (`since`).
 
 - **Stale-safe, *not* race-safe.** `LocateCodexSince` filters by `mtime ≥ since`
   and `cwd == worktree`, which defeats *stale* rollouts but **not** concurrent
-  sessions sharing one cwd. graith allows that via `--share-worktree` and
+  sessions sharing one cwd. graith allows that via `--mirror` and
   `--in-place --allow-concurrent`: two Codex starts in the same cwd within the
   ~3 s window both match and both pick newest-by-mtime, so they can **cross-
   assign or duplicate ids**. Either gate the scrape off for shared/in-place-
@@ -524,7 +524,7 @@ provenance is added to `SessionState`, bump `CurrentStateVersion` with a no-op
 | `internal/daemon/daemon_test.go` | `Create`/`Fork`/orchestrator all mint `AgentSessionID` for `opencode` (`braw`) and force `--session`; non-forceable agents (`thrawn` codex) leave it empty until scrape; resume of a `bide` codex session uses the captured id; empty-id resume inspects raw args and falls back to `agent.Args` (`dreich`), Codex empty-id falls back to `resume --last` (`haar`); capture **does not overwrite** a non-empty id (`bonnie`); a stale-generation capture goroutine cannot clobber a later start (`auld`) |
 | `internal/daemon/migrate_test.go` | generalized `captureNativeSessionID` for codex matches only files since `since` (`canny` race), times out cleanly (`fash`), and on **two same-cwd matches** refuses to guess (`haar`); honors `CODEX_HOME` set via `agents.codex.env`, not just daemon env (`glen`) |
 | `internal/config/config_test.go` | `codex.resume_args`/`opencode.args` expand `{agent_session_id}` to the captured id (`kirk`); empty id yields the documented fallback (`neep`) |
-| `internal/integration/integration_test.go` | **GATING — Codex id-pinning:** create `braw` codex → capture id → start a *second* unrelated codex run in the same cwd → **clean-restart the daemon (`gr daemon restart --force`, not the default which preserves sessions)** → resume must reattach the **`braw` id's** conversation, proving `codex resume <id>` ≠ `resume --last`. **GATING — OpenCode:** confirm `opencode --session <brand-new-uuid>` *creates* a conversation at first start AND accepts graith's UUID **format** (not only `ses_…`); then create → stop → restart → resume reattaches the same id. **Shared-worktree race:** two same-cwd Codex sessions (`--share-worktree`/`--in-place --allow-concurrent`) must each get their *own* id or fall back — never cross-assign (`thrawn`). Agent with empty `resume_args` (`neep`) starts fresh without error |
+| `internal/integration/integration_test.go` | **GATING — Codex id-pinning:** create `braw` codex → capture id → start a *second* unrelated codex run in the same cwd → **clean-restart the daemon (`gr daemon restart --force`, not the default which preserves sessions)** → resume must reattach the **`braw` id's** conversation, proving `codex resume <id>` ≠ `resume --last`. **GATING — OpenCode:** confirm `opencode --session <brand-new-uuid>` *creates* a conversation at first start AND accepts graith's UUID **format** (not only `ses_…`); then create → stop → restart → resume reattaches the same id. **Shared-worktree race:** two same-cwd Codex sessions (`--mirror`/`--in-place --allow-concurrent`) must each get their *own* id or fall back — never cross-assign (`thrawn`). Agent with empty `resume_args` (`neep`) starts fresh without error |
 
 Per repo convention, test fixture strings use old Scots words (e.g. `braw`,
 `bide`, `thrawn`, `dreich`, `canny`, `fash`, `kirk`, `haar`, `neep`, `bonnie`,

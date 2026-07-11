@@ -33,7 +33,7 @@ Create a new agent session.
 | `--no-repo` | Create session without a git repo or worktree |
 | `--in-place` | Run agent directly in the repo without creating a worktree |
 | `--allow-concurrent` | Allow multiple in-place sessions on the same repo (requires `--in-place`) |
-| `--share-worktree <session>` | Share another session's worktree (read-only; requires sandbox) |
+| `--mirror <session>` | Mount another session's worktree read-only (requires sandbox) |
 | `--background` | Create without attaching |
 | `-p, --prompt <text>` | Initial prompt for the agent |
 | `--prompt-file <path>` | Read initial prompt from file |

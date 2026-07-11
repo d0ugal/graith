@@ -61,7 +61,7 @@ public struct CreateMsg: Codable, Sendable {
     public var prompt: String?
     public var model: String?
     public var noRepo: Bool?
-    public var shareWorktree: String?
+    public var mirror: String?
     public var agentHooks: Bool?
     public var inPlace: Bool?
     public var allowConcurrent: Bool?
@@ -92,7 +92,7 @@ public struct CreateMsg: Codable, Sendable {
         case prompt
         case model
         case noRepo = "no_repo"
-        case shareWorktree = "share_worktree"
+        case mirror = "mirror"
         case agentHooks = "agent_hooks"
         case inPlace = "in_place"
         case allowConcurrent = "allow_concurrent"
@@ -261,7 +261,7 @@ public struct SessionInfo: Codable, Sendable, Identifiable, Hashable {
     public var dirty: Bool?
     public var unpushedCount: Int?
     public var sandboxed: Bool?
-    public var sharedWorktree: Bool?
+    public var mirror: Bool?
     public var inPlace: Bool?
     public var yolo: Bool?
     public var model: String?
@@ -303,7 +303,7 @@ public struct SessionInfo: Codable, Sendable, Identifiable, Hashable {
         case dirty
         case unpushedCount = "unpushed_count"
         case sandboxed
-        case sharedWorktree = "shared_worktree"
+        case mirror = "mirror"
         case inPlace = "in_place"
         case yolo
         case model

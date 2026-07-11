@@ -40,7 +40,7 @@ One agent writes code, another reviews it:
 
 ```bash
 gr new implement-feature --prompt "implement the user profile endpoint"
-gr new review-feature --share-worktree implement-feature --prompt "review the code changes in this worktree"
+gr new review-feature --mirror implement-feature --prompt "review the code changes in this worktree"
 ```
 
 The reviewer shares the implementer's worktree (read-only) and can see changes as they happen. Use messaging to coordinate:
@@ -316,7 +316,7 @@ Use when: validating designs, stress-testing plans, surfacing hidden assumptions
 
 ```bash
 gr new proposer --repo ~/Code/api --prompt "design the new caching layer"
-gr new devil --share-worktree proposer --background \
+gr new devil --mirror proposer --background \
   --prompt "read the proposed design, find 10 counterarguments and edge cases, publish to /topic challenge"
 
 # Proposer reads challenges
@@ -337,11 +337,11 @@ Use when: high-stakes code review, security audit, architectural decisions. Conv
 
 ```bash
 # Launch 3 independent reviewers sharing the same worktree
-gr new judge-bugs --share-worktree feature-branch --background \
+gr new judge-bugs --mirror feature-branch --background \
   --prompt "review for correctness and logic bugs, publish findings to /topic review-bugs"
-gr new judge-security --share-worktree feature-branch --background \
+gr new judge-security --mirror feature-branch --background \
   --prompt "review for security issues and input validation, publish to /topic review-security"
-gr new judge-perf --share-worktree feature-branch --background \
+gr new judge-perf --mirror feature-branch --background \
   --prompt "review for performance and scalability, publish to /topic review-perf"
 
 # Collect verdicts
@@ -362,7 +362,7 @@ Adversarial pairing. Red team tries to break the system. Blue team defends and p
 Use when: security hardening, robustness testing, finding edge cases in error handling.
 
 ```bash
-gr new red-team --share-worktree app --background \
+gr new red-team --mirror app --background \
   --prompt "attack the auth system, try SQL injection, token theft, session fixation, publish each finding to /topic red-findings"
 gr new blue-team --repo ~/Code/api \
   --prompt "subscribe to /topic red-findings, fix each vulnerability as reported, confirm fix to /topic blue-fixes"
@@ -407,7 +407,7 @@ gr new implementer --repo ~/Code/api --background \
 gr msg send implementer "design is ready at design/api.md, begin implementation"
 
 # Phase 3: tester validates
-gr new tester --share-worktree implementer --background \
+gr new tester --mirror implementer --background \
   --prompt "wait for message, then write tests for the new API"
 gr msg send tester "implementation complete, begin testing"
 ```
@@ -491,7 +491,7 @@ Use when: long implementation tasks, mentoring, real-time quality gates.
 
 ```bash
 gr new implementer --repo ~/Code/api --prompt "implement the user profile system"
-gr new reviewer --share-worktree implementer --background \
+gr new reviewer --mirror implementer --background \
   --prompt "continuously review changes as they appear, send feedback via messages"
 
 # Reviewer spots an issue and sends feedback

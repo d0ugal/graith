@@ -33,7 +33,7 @@ public struct SessionInfo: Codable, Identifiable, Hashable, Sendable {
     public let dirty: Bool?
     public let unpushedCount: Int?
     public let sandboxed: Bool?
-    public let sharedWorktree: Bool?
+    public let mirror: Bool?
     public let inPlace: Bool?
     public let yolo: Bool?
     public let model: String?
@@ -72,7 +72,7 @@ public struct SessionInfo: Codable, Identifiable, Hashable, Sendable {
         case dirty
         case unpushedCount = "unpushed_count"
         case sandboxed
-        case sharedWorktree = "shared_worktree"
+        case mirror = "mirror"
         case inPlace = "in_place"
         case yolo
         case model
@@ -112,7 +112,7 @@ public struct SessionInfo: Codable, Identifiable, Hashable, Sendable {
         status: String, agentStatus: String? = nil, exitCode: Int? = nil,
         exitSignal: String? = nil, createdAt: String = "", lastAttachedAt: String? = nil,
         statusChangedAt: String? = nil, dirty: Bool? = nil, unpushedCount: Int? = nil,
-        sandboxed: Bool? = nil, sharedWorktree: Bool? = nil, inPlace: Bool? = nil,
+        sandboxed: Bool? = nil, mirror: Bool? = nil, inPlace: Bool? = nil,
         yolo: Bool? = nil, model: String? = nil, toolName: String? = nil,
         includes: [IncludedRepoInfo]? = nil, configStale: Bool? = nil, starred: Bool? = nil,
         systemKind: String? = nil, scenarioID: String? = nil, scenarioName: String? = nil,
@@ -139,7 +139,7 @@ public struct SessionInfo: Codable, Identifiable, Hashable, Sendable {
         self.dirty = dirty
         self.unpushedCount = unpushedCount
         self.sandboxed = sandboxed
-        self.sharedWorktree = sharedWorktree
+        self.mirror = mirror
         self.inPlace = inPlace
         self.yolo = yolo
         self.model = model

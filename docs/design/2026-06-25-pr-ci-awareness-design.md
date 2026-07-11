@@ -246,15 +246,15 @@ can never block on interactive auth), reusing the `internal/git` shell idiom.
 The doc originally keyed on `SessionState.Branch`. All five judges verified that
 `Branch` is populated **only for normal worktree and fork sessions**
 (`daemon.go` create/fork paths) and is **empty for `--in-place`,
-`--share-worktree`, and `--no-repo` sessions**, and is **never refreshed** after
+`--mirror`, and `--no-repo` sessions**, and is **never refreshed** after
 creation (so it goes stale if the user checks out another branch in an in-place
 worktree). It is therefore not a universal session→PR key.
 
 Resolution at poll time: use `SessionState.Branch` when non-empty; otherwise
 discover the live branch with `git -C <WorktreePath> symbolic-ref --short HEAD`.
 **v1 eligibility** (conservative, per review): only sessions with a resolvable
-non-empty branch, a non-empty `RepoPath`, and **not** `SharedWorktree`/`InPlace`
-are watched; in-place and shared-worktree sessions are **display/notify
+non-empty branch, a non-empty `RepoPath`, and **not** `Mirror`/`InPlace`
+are watched; in-place and mirror sessions are **display/notify
 unsupported in v1** and noted as such, until branch discovery (or source-branch
 copy for shared worktrees) is added. This replaces the doc's earlier
 "notify each, or most-recently-active" hand-wave for shared branches, which is
@@ -846,7 +846,7 @@ backstop) + per-`headRefOid` cap. `gh` always runs off-lock.
 | File | Change |
 |------|--------|
 | `internal/daemon/ghpr_test.go` | owner/repo parse from `git@github.com:croft/loch.git` & `https://`; non-GitHub remote (`glen`) → skip; **`effectiveBranch` falls back to `git symbolic-ref` when `Branch` empty** (`bothy`); parse `gh pr checks --bucket` AND a `statusCheckRollup` **StatusContext** fixture (not only CheckRun); **`NEUTRAL`/`SKIPPED` classified pass-like, not failing** (`neep`); per-surface comment ids; `gh`-absent → graceful nil; fixtures `croft`, `loch`, `glen`, `bothy`, `neep` |
-| `internal/daemon/prwatch_test.go` | pass→fail notifies (`thrawn`), unchanged does not (`bide`); **per-surface comment cursors** don't cross-skip (`wynd`); **cursor not advanced for a debounce-suppressed event, delivered next window** (`fash`); CI message directive vs comment awareness phrasing; `notify_ci_failures=true`+`notify_review_comments=false`+`notify_review_decisions=false` → CI notifies, comment/CHANGES_REQUESTED do not (`canny`); prime-on-first-poll suppresses old baseline **but notifies a currently-failing CI on restart** (`haar`); rate-limit is the global bound (`fash`); `headRefOid` change resets per-SHA cap; in-place/shared-worktree session **skipped** (`scunner`); fixtures `braw`, `bide`, `thrawn`, `canny`, `haar`, `fash`, `wynd`, `scunner` |
+| `internal/daemon/prwatch_test.go` | pass→fail notifies (`thrawn`), unchanged does not (`bide`); **per-surface comment cursors** don't cross-skip (`wynd`); **cursor not advanced for a debounce-suppressed event, delivered next window** (`fash`); CI message directive vs comment awareness phrasing; `notify_ci_failures=true`+`notify_review_comments=false`+`notify_review_decisions=false` → CI notifies, comment/CHANGES_REQUESTED do not (`canny`); prime-on-first-poll suppresses old baseline **but notifies a currently-failing CI on restart** (`haar`); rate-limit is the global bound (`fash`); `headRefOid` change resets per-SHA cap; in-place/mirror session **skipped** (`scunner`); fixtures `braw`, `bide`, `thrawn`, `canny`, `haar`, `fash`, `wynd`, `scunner` |
 | `internal/daemon/notify_test.go` | `notifyFromDaemon` publishes to `inbox:<id>` (sender `graith`, full detail in body) **then** calls `notifyInbox`; **stopped session auto-resumes** (`canny`); **`StatusErrored` session does NOT auto-resume** but message is durable (`dreich`); live session gets PTY hint (`bonnie`); **does not touch `lastInboxNotifyAt`** |
 | `internal/daemon/race_test.go` (or `-race`) | concurrent `RunPRWatchLoop` write + `List()`/`toSessionInfo` read of PR/CI fields is race-free (`kirk`) |
 | `internal/config/config_test.go` | `PRWatchConfig` defaults (`notify_ci_failures=true`; `notify_review_comments`/`notify_review_decisions=false`; `notify_pr_lifecycle=true`); all `notify_*=false` → display-only; duration parse for `poll_pending`/`poll_terminal`/`debounce` |

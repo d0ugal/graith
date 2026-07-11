@@ -66,10 +66,10 @@ func assertErrContains(t *testing.T, err error, want string) {
 	}
 }
 
-// assertCreateSharedWorktreeRejected seeds a running source session and asserts
+// assertCreateMirrorRejected seeds a running source session and asserts
 // that creating a session which shares its worktree is rejected because the
 // sandbox is not enabled.
-func assertCreateSharedWorktreeRejected(t *testing.T, sm *SessionManager) {
+func assertCreateMirrorRejected(t *testing.T, sm *SessionManager) {
 	t.Helper()
 
 	sm.state.Sessions["src1"] = &SessionState{
@@ -80,7 +80,7 @@ func assertCreateSharedWorktreeRejected(t *testing.T, sm *SessionManager) {
 		Status:       StatusRunning,
 	}
 
-	_, err := sm.Create(CreateOpts{Name: "canny-reviewer", AgentName: "claude", ShareWorktree: "braw-source", Rows: 24, Cols: 80})
+	_, err := sm.Create(CreateOpts{Name: "canny-reviewer", AgentName: "claude", Mirror: "braw-source", Rows: 24, Cols: 80})
 	assertErrContains(t, err, "requires sandbox")
 }
 
@@ -1382,7 +1382,7 @@ func TestDetectAgentStatusesHookAuthority(t *testing.T) {
 	})
 }
 
-func TestDetectAgentStatuses_SharedWorktreeSkipsGit(t *testing.T) {
+func TestDetectAgentStatuses_MirrorSkipsGit(t *testing.T) {
 	sm := newTestSessionManager(t)
 
 	repoDir := initDirtyRepo(t)
@@ -1412,7 +1412,7 @@ func TestDetectAgentStatuses_SharedWorktreeSkipsGit(t *testing.T) {
 	sm.state.Sessions["shared1"] = &SessionState{
 		ID: "shared1", Name: "bothy-shared", Agent: "claude",
 		Status: StatusRunning, WorktreePath: repoDir, RepoPath: repoDir,
-		SharedWorktree: true,
+		Mirror: true,
 	}
 	sm.state.Sessions["normal1"] = &SessionState{
 		ID: "normal1", Name: "bothy-normal", Agent: "claude",
@@ -1563,32 +1563,32 @@ func TestReloadConfigInvalidFile(t *testing.T) {
 	}
 }
 
-func TestToSessionInfoSharedWorktree(t *testing.T) {
+func TestToSessionInfoMirror(t *testing.T) {
 	sess := SessionState{
-		ID:             "abc123",
-		Name:           "canny-reviewer",
-		WorktreePath:   "/shared/path",
-		Agent:          "claude",
-		Status:         StatusRunning,
-		SharedWorktree: true,
-		CreatedAt:      time.Now().UTC(),
+		ID:           "abc123",
+		Name:         "canny-reviewer",
+		WorktreePath: "/shared/path",
+		Agent:        "claude",
+		Status:       StatusRunning,
+		Mirror:       true,
+		CreatedAt:    time.Now().UTC(),
 	}
 
 	info := toSessionInfo(sess, config.Default(), nil)
 
-	if !info.SharedWorktree {
-		t.Error("SharedWorktree = false, want true")
+	if !info.Mirror {
+		t.Error("Mirror = false, want true")
 	}
 
-	sess.SharedWorktree = false
+	sess.Mirror = false
 
 	info = toSessionInfo(sess, config.Default(), nil)
-	if info.SharedWorktree {
-		t.Error("SharedWorktree = true, want false")
+	if info.Mirror {
+		t.Error("Mirror = true, want false")
 	}
 }
 
-func TestDeleteSharedWorktreeSkipsGitTeardown(t *testing.T) {
+func TestDeleteMirrorSkipsGitTeardown(t *testing.T) {
 	tmpDir := t.TempDir()
 	sm := NewSessionManager(config.Default(), config.Paths{
 		StateFile: filepath.Join(tmpDir, "state.json"),
@@ -1602,13 +1602,13 @@ func TestDeleteSharedWorktreeSkipsGitTeardown(t *testing.T) {
 	}
 
 	sm.state.Sessions["shared1"] = &SessionState{
-		ID:             "shared1",
-		Name:           "canny-reviewer",
-		RepoPath:       "/does/not/exist/repo",
-		WorktreePath:   "/does/not/exist/worktree",
-		Branch:         "some-branch",
-		SharedWorktree: true,
-		Status:         StatusStopped,
+		ID:           "shared1",
+		Name:         "canny-reviewer",
+		RepoPath:     "/does/not/exist/repo",
+		WorktreePath: "/does/not/exist/worktree",
+		Branch:       "some-branch",
+		Mirror:       true,
+		Status:       StatusStopped,
 	}
 
 	if err := sm.Delete("shared1"); err != nil {
@@ -1624,7 +1624,7 @@ func TestDeleteSharedWorktreeSkipsGitTeardown(t *testing.T) {
 	}
 }
 
-func TestStateSaveLoadSharedWorktree(t *testing.T) {
+func TestStateSaveLoadMirror(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
 
 	state := &State{
@@ -1632,7 +1632,7 @@ func TestStateSaveLoadSharedWorktree(t *testing.T) {
 			"s1": {
 				ID: "s1", Name: "canny-reviewer", WorktreePath: "/shared/path",
 				Agent: "claude", Status: StatusRunning,
-				SharedWorktree: true, CreatedAt: time.Now().UTC(),
+				Mirror: true, CreatedAt: time.Now().UTC(),
 			},
 		},
 	}
@@ -1650,16 +1650,16 @@ func TestStateSaveLoadSharedWorktree(t *testing.T) {
 		t.Fatal("session not found after load")
 	}
 
-	if !s.SharedWorktree {
-		t.Error("SharedWorktree not preserved across save/load")
+	if !s.Mirror {
+		t.Error("Mirror not preserved across save/load")
 	}
 }
 
-func TestShareWorktreeRequiresSandbox(t *testing.T) {
-	assertCreateSharedWorktreeRejected(t, newSMWithConfig(t, config.Default()))
+func TestMirrorRequiresSandbox(t *testing.T) {
+	assertCreateMirrorRejected(t, newSMWithConfig(t, config.Default()))
 }
 
-func TestShareWorktreeRequiresSandboxPerAgent(t *testing.T) {
+func TestMirrorRequiresSandboxPerAgent(t *testing.T) {
 	cfg := config.Default()
 	cfg.Sandbox.Enabled = true
 	disabled := true
@@ -1667,21 +1667,21 @@ func TestShareWorktreeRequiresSandboxPerAgent(t *testing.T) {
 	agent.Sandbox = config.SandboxConfig{Disabled: &disabled}
 	cfg.Agents["claude"] = agent
 
-	assertCreateSharedWorktreeRejected(t, newSMWithConfig(t, cfg))
+	assertCreateMirrorRejected(t, newSMWithConfig(t, cfg))
 }
 
-func TestResumeSharedWorktreeWithoutSandboxRejects(t *testing.T) {
+func TestResumeMirrorWithoutSandboxRejects(t *testing.T) {
 	cfg := config.Default()
 	sm := newSMWithConfig(t, cfg)
 
 	sm.state.Sessions["legacy1"] = &SessionState{
-		ID:             "legacy1",
-		Name:           "auld-reviewer",
-		Agent:          "claude",
-		WorktreePath:   "/tmp/fake-worktree",
-		SharedWorktree: true,
-		Sandboxed:      false,
-		Status:         StatusStopped,
+		ID:           "legacy1",
+		Name:         "auld-reviewer",
+		Agent:        "claude",
+		WorktreePath: "/tmp/fake-worktree",
+		Mirror:       true,
+		Sandboxed:    false,
+		Status:       StatusStopped,
 	}
 
 	_, err := sm.Resume("legacy1", 24, 80)
@@ -2381,8 +2381,8 @@ func TestCreateInPlaceMutuallyExclusiveFlags(t *testing.T) {
 		assertErrContains(t, err, "mutually exclusive")
 	})
 
-	t.Run("in-place with share-worktree", func(t *testing.T) {
-		_, err := sm.Create(CreateOpts{Name: "braw", AgentName: "claude", ShareWorktree: "some-session", InPlace: true, Rows: 24, Cols: 80})
+	t.Run("in-place with mirror", func(t *testing.T) {
+		_, err := sm.Create(CreateOpts{Name: "braw", AgentName: "claude", Mirror: "some-session", InPlace: true, Rows: 24, Cols: 80})
 		assertErrContains(t, err, "mutually exclusive")
 	})
 
@@ -5066,7 +5066,7 @@ func TestFetchRemotesSkipsNonRunningAndShared(t *testing.T) {
 		ID: "dreich1", Status: StatusStopped, WorktreePath: dir, BaseBranch: "main",
 	}
 	sm.state.Sessions["dreich2"] = &SessionState{
-		ID: "dreich2", Status: StatusRunning, SharedWorktree: true, WorktreePath: dir, BaseBranch: "main",
+		ID: "dreich2", Status: StatusRunning, Mirror: true, WorktreePath: dir, BaseBranch: "main",
 	}
 	sm.state.Sessions["braw1"] = &SessionState{
 		ID: "braw1", Status: StatusRunning, WorktreePath: dir, BaseBranch: "main",

@@ -173,7 +173,7 @@ func summaryStyle(s protocol.SessionInfo) lipgloss.Style {
 // tuiGit is the TUI git cell: a dash for shared worktrees (no per-session git
 // state), otherwise the compact dirty/ahead form.
 func tuiGit(s protocol.SessionInfo) string {
-	if s.SharedWorktree {
+	if s.Mirror {
 		return "—"
 	}
 
@@ -183,7 +183,7 @@ func tuiGit(s protocol.SessionInfo) string {
 // tuiGitStyle dims the git cell when there is nothing noteworthy (shared
 // worktree or a clean tree) and leaves dirty/ahead states at default colour.
 func tuiGitStyle(s protocol.SessionInfo) lipgloss.Style {
-	if s.SharedWorktree || tuiGit(s) == "clean" {
+	if s.Mirror || tuiGit(s) == "clean" {
 		return lipgloss.NewStyle().Foreground(colorDim)
 	}
 

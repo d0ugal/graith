@@ -210,7 +210,7 @@ func LocateCodexSinceIn(root, worktreePath string, since time.Time) (string, boo
 // CodexSessionIDSince returns the native session id of the Codex rollout for a
 // cwd created at/after `since`. Unlike LocateCodexSinceIn (newest-by-mtime), it
 // refuses to guess when the (since, cwd) window contains rollouts with two or
-// more DIFFERENT session ids — the concurrent shared-worktree / in-place case —
+// more DIFFERENT session ids — the concurrent mirror / in-place case —
 // returning ("", false) so the caller falls back to a non-pinned resume rather
 // than cross-assigning another session's conversation. Pass root "" for the
 // daemon default.

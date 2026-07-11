@@ -763,13 +763,13 @@ func TestNonoWrapArgvShapeAndAdversarialPaths(t *testing.T) {
 	}
 }
 
-// TestNonoWrapEmitsWorkdirForSharedWorktree proves nono.Wrap passes an explicit
+// TestNonoWrapEmitsWorkdirForMirror proves nono.Wrap passes an explicit
 // --workdir so nono resolves the workdir from opts.WorktreeDir (the read-write
-// scratch dir) rather than the process cwd. For a --share-worktree session the
+// scratch dir) rather than the process cwd. For a --mirror session the
 // PTY cwd is the read-only source worktree; without --workdir nono would apply
 // workdir.access = "readwrite" to the source, breaking the read-only guarantee
 // (issue #786).
-func TestNonoWrapEmitsWorkdirForSharedWorktree(t *testing.T) {
+func TestNonoWrapEmitsWorkdirForMirror(t *testing.T) {
 	tmp := t.TempDir()
 	profilePath := filepath.Join(tmp, "kirk.json")
 	scratch := "/tmp/scratch/braw"

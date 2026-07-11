@@ -334,13 +334,13 @@ type liveGitStatus struct {
 //   - Shared-worktree sessions: WorktreePath points at the source session's
 //     worktree, but deletion only removes the shared scratch dir — attributing
 //     the source's dirty/unpushed work here would be misleading. This matches
-//     the daemon refresh loop and the overlay's shared-worktree suppression.
+//     the daemon refresh loop and the overlay's mirror suppression.
 //   - No-repo sessions (empty RepoPath): the scratch worktree is not a git
 //     repo, so a git check would spuriously fail.
 func liveSessionStatus(s protocol.SessionInfo) liveGitStatus {
 	var st liveGitStatus
 
-	if s.InPlace || s.SharedWorktree || s.RepoPath == "" {
+	if s.InPlace || s.Mirror || s.RepoPath == "" {
 		return st
 	}
 

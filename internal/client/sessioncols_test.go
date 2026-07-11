@@ -187,10 +187,10 @@ func TestDisplayStatus(t *testing.T) {
 	}
 }
 
-// TestTuiGitAndStyle covers the shared-worktree dash, the clean/dim path, and
+// TestTuiGitAndStyle covers the mirror dash, the clean/dim path, and
 // the dirty default-colour path.
 func TestTuiGitAndStyle(t *testing.T) {
-	shared := protocol.SessionInfo{SharedWorktree: true, Dirty: true}
+	shared := protocol.SessionInfo{Mirror: true, Dirty: true}
 	if got := tuiGit(shared); got != "—" {
 		t.Errorf("shared worktree git = %q, want —", got)
 	}

@@ -87,8 +87,8 @@ func TestLiveSessionStatus(t *testing.T) {
 			want:    liveGitStatus{},
 		},
 		{
-			name:    "shared-worktree session reported clean",
-			session: protocol.SessionInfo{WorktreePath: "/bothy/shared", RepoPath: "/croft/shared", BaseBranch: "main", SharedWorktree: true},
+			name:    "mirror session reported clean",
+			session: protocol.SessionInfo{WorktreePath: "/bothy/shared", RepoPath: "/croft/shared", BaseBranch: "main", Mirror: true},
 			dirty:   map[string][]string{"/bothy/shared": {" M glen.go"}},
 			want:    liveGitStatus{},
 		},

@@ -154,7 +154,7 @@ brew install eugene1g/tools/agent-safehouse
 
 ### Shared worktree fails
 
-`--share-worktree` requires sandbox to be enabled. Without it, session creation fails closed.
+`--mirror` requires sandbox to be enabled. Without it, session creation fails closed.
 
 ```toml
 [sandbox]

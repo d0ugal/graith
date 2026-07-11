@@ -47,7 +47,7 @@ or an agent is actively pushing work through.
   on its own initiative:
 
   ```bash
-  gr new reviewer --share-worktree implementer --background \
+  gr new reviewer --mirror implementer --background \
     --prompt "continuously review changes as they appear, send feedback via messages"
   ```
 
@@ -1480,7 +1480,7 @@ design (mirroring prwatch) is what `-race` polices.
   per-feature config-section example; `ParseDurationWithDays`.
 - `internal/store/store.go:202` — `Put` / `:237` `Append` for delivery.
 - `internal/daemon/daemon.go:502` — `sm.Create` 17-fixed-arg + variadic-env shape
-  (needs a create-options path to install trigger tags durably); `:729` shared-worktree
+  (needs a create-options path to install trigger tags durably); `:729` mirror
   read-only + sandbox-required invariant.
 - `go.mod` — `fsnotify` already vendored; `robfig/cron/v3` + gitignore matcher to be
   added.

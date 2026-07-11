@@ -135,7 +135,7 @@ task = "Add a trace timeline overlay to the replay viewer that correlates with f
 
 Supported `[[sessions]]` fields: `name` (required), `repo` (required),
 `agent`, `model`, `base`, `role`, `task`, `agent_hooks`, `shared`. All other
-`CreateMsg` fields (`in_place`, `share_worktree`, `no_repo`,
+`CreateMsg` fields (`in_place`, `mirror`, `no_repo`,
 `allow_concurrent`, `skip_model_validation`) are explicitly unsupported in v1
 — the parser rejects unknown fields.
 
