@@ -2,7 +2,7 @@
 title: "Design Doc: Unified Triggers (Scheduled + File-Watch Actions)"
 authors: Dougal Matthews
 created: 2026-07-11
-status: Draft (merges #592 and #593; incorporates multiple independent reviews inc. a post-merge pass — see Consensus)
+status: Implemented (v1) — merges #592 and #593; incorporates multiple independent reviews (see Consensus)
 reviewers: (none yet)
 informed: (TBD)
 issue: https://github.com/d0ugal/graith/issues/592, https://github.com/d0ugal/graith/issues/593
