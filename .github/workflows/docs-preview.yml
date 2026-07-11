@@ -120,9 +120,11 @@ jobs:
 
           count="$(jq 'length' pages.json)"
           basecount="$(jq '[.[] | select(.hasBase)] | length' pages.json)"
-          echo "global=$global"       >> "$GITHUB_OUTPUT"
-          echo "count=$count"         >> "$GITHUB_OUTPUT"
-          echo "basecount=$basecount" >> "$GITHUB_OUTPUT"
+          {
+            echo "global=$global"
+            echo "count=$count"
+            echo "basecount=$basecount"
+          } >> "$GITHUB_OUTPUT"
           echo "Pages to screenshot ($count, $basecount with a baseline):"; cat pages.json
 
       # Build the site twice — once at the PR's base commit, once at its head —
