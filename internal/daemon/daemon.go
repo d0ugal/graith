@@ -503,7 +503,7 @@ type CreateOpts struct {
 	Model               string
 	ParentID            string
 	NoRepo              bool
-	ShareWorktree       string
+	Mirror              string
 	AgentHooks          bool
 	InPlace             bool
 	AllowConcurrent     bool
@@ -532,7 +532,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	model := opts.Model
 	parentID := opts.ParentID
 	noRepo := opts.NoRepo
-	shareWorktree := opts.ShareWorktree
+	mirror := opts.Mirror
 	agentHooks := opts.AgentHooks
 	inPlace := opts.InPlace
 	allowConcurrent := opts.AllowConcurrent
@@ -564,8 +564,8 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		return SessionState{}, fmt.Errorf("--in-place and --no-repo are mutually exclusive")
 	}
 
-	if inPlace && shareWorktree != "" {
-		return SessionState{}, fmt.Errorf("--in-place and --share-worktree are mutually exclusive")
+	if inPlace && mirror != "" {
+		return SessionState{}, fmt.Errorf("--in-place and --mirror are mutually exclusive")
 	}
 
 	if inPlace && baseBranch != "" {
@@ -576,7 +576,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	// These can involve network calls (gh api) and must not hold the mutex.
 	var preRepoRoot string
 
-	if !noRepo && shareWorktree == "" && repoPath != "" {
+	if !noRepo && mirror == "" && repoPath != "" {
 		if !git.IsInsideGitRepo(repoPath) {
 			if inPlace {
 				return SessionState{}, fmt.Errorf("not inside a git repository: %s", repoPath)
@@ -618,15 +618,15 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 
 	var (
 		repoRoot, repoName, worktreePath, branchName string
-		sharedWorktree                               bool
-		sharedWorktreeSourceID                       string
+		isMirror                                     bool
+		mirrorSourceID                               string
 		fetchOnCreate                                bool
 		rcIncludes                                   []string
 		sourceIncludes                               []IncludedRepoState
 	)
 
 	switch {
-	case shareWorktree != "":
+	case mirror != "":
 		var source *SessionState
 
 		// Skip soft-deleted sessions: a hidden session must not be pickable as a
@@ -636,7 +636,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 				continue
 			}
 
-			if s.Name == shareWorktree || s.ID == shareWorktree {
+			if s.Name == mirror || s.ID == mirror {
 				source = s
 				break
 			}
@@ -644,20 +644,20 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 
 		if source == nil {
 			sm.mu.Unlock()
-			return SessionState{}, fmt.Errorf("session %q not found for --share-worktree", shareWorktree)
+			return SessionState{}, fmt.Errorf("session %q not found for --mirror", mirror)
 		}
 
 		if source.WorktreePath == "" {
 			sm.mu.Unlock()
-			return SessionState{}, fmt.Errorf("session %q has no worktree to share", shareWorktree)
+			return SessionState{}, fmt.Errorf("session %q has no worktree to mirror", mirror)
 		}
 
 		worktreePath = source.WorktreePath
 		repoRoot = source.RepoPath
 		repoName = source.RepoName
 		baseBranch = source.BaseBranch
-		sharedWorktree = true
-		sharedWorktreeSourceID = source.ID
+		isMirror = true
+		mirrorSourceID = source.ID
 		sourceIncludes = make([]IncludedRepoState, len(source.Includes))
 		copy(sourceIncludes, source.Includes)
 	case noRepo:
@@ -766,9 +766,9 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		return SessionState{}, err
 	}
 
-	if sharedWorktree && !sandboxed {
+	if isMirror && !sandboxed {
 		sm.mu.Unlock()
-		return SessionState{}, fmt.Errorf("--share-worktree requires sandbox to be enabled so the shared worktree can be mounted read-only; set sandbox.enabled = true in config and ensure safehouse is installed (gr doctor)")
+		return SessionState{}, fmt.Errorf("--mirror requires sandbox to be enabled so the mirrored worktree can be mounted read-only; set sandbox.enabled = true in config and ensure safehouse is installed (gr doctor)")
 	}
 
 	// Yolo requires the PreToolUse approval hook to function, so it forces agent
@@ -792,26 +792,26 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	// Reserve the session with StatusCreating so concurrent operations
 	// (list, singleton checks) see it exists.
 	placeholder := &SessionState{
-		ID:                     id,
-		ParentID:               parentID,
-		Name:                   name,
-		RepoPath:               repoRoot,
-		RepoName:               repoName,
-		WorktreePath:           worktreePath,
-		Branch:                 branchName,
-		BaseBranch:             baseBranch,
-		Agent:                  agentName,
-		AgentSessionID:         agentSessionID,
-		Model:                  model,
-		SharedWorktree:         sharedWorktree,
-		SharedWorktreeSourceID: sharedWorktreeSourceID,
-		InPlace:                inPlace,
-		AgentHooks:             agentHooks,
-		Yolo:                   yolo,
-		Status:                 StatusCreating,
-		CreatedAt:              time.Now().UTC(),
-		StatusChangedAt:        time.Now().UTC(),
-		Token:                  token,
+		ID:              id,
+		ParentID:        parentID,
+		Name:            name,
+		RepoPath:        repoRoot,
+		RepoName:        repoName,
+		WorktreePath:    worktreePath,
+		Branch:          branchName,
+		BaseBranch:      baseBranch,
+		Agent:           agentName,
+		AgentSessionID:  agentSessionID,
+		Model:           model,
+		Mirror:          isMirror,
+		MirrorSourceID:  mirrorSourceID,
+		InPlace:         inPlace,
+		AgentHooks:      agentHooks,
+		Yolo:            yolo,
+		Status:          StatusCreating,
+		CreatedAt:       time.Now().UTC(),
+		StatusChangedAt: time.Now().UTC(),
+		Token:           token,
 	}
 
 	sm.state.Sessions[id] = placeholder
@@ -842,7 +842,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		_ = os.Remove(sm.nonoProfilePath(id))
 		_ = os.Remove(sm.safehouseFragmentPath(id))
 
-		if sharedWorktree || inPlace {
+		if isMirror || inPlace {
 			return
 		}
 
@@ -863,7 +863,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	}
 
 	// Git worktree setup (default path only — includes fetch which can block).
-	if repoRoot != "" && !sharedWorktree && !inPlace {
+	if repoRoot != "" && !isMirror && !inPlace {
 		gitCtx, gitCancel := context.WithTimeout(context.Background(), gitFetchTimeout)
 		defer gitCancel()
 
@@ -1023,7 +1023,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		env[config.IncludeEnvVarName(inc.RepoName)] = inc.WorktreePath
 	}
 
-	if sharedWorktree {
+	if isMirror {
 		for _, inc := range sourceIncludes {
 			env[config.IncludeEnvVarName(inc.RepoName)] = inc.WorktreePath
 		}
@@ -1097,7 +1097,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 			opts.WriteDirs = append(opts.WriteDirs, sm.deriveSandboxIncludesWriteDirs(includes)...)
 		}
 
-		if sharedWorktree {
+		if isMirror {
 			scratchDir = filepath.Join(sm.paths.DataDir, "scratch", id)
 			if err := os.MkdirAll(scratchDir, 0o700); err != nil {
 				cleanupOnError()
@@ -2023,9 +2023,9 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 		return SessionState{}, err
 	}
 
-	if sessState.SharedWorktree && !sandboxed {
+	if sessState.Mirror && !sandboxed {
 		sm.mu.Unlock()
-		return SessionState{}, fmt.Errorf("shared-worktree session %q requires sandbox but sandbox is not enabled in current config; enable sandbox to resume", id)
+		return SessionState{}, fmt.Errorf("mirror session %q requires sandbox but sandbox is not enabled in current config; enable sandbox to resume", id)
 	}
 
 	if sessState.SystemKind == SystemKindOrchestrator && !sandboxed {
@@ -2088,8 +2088,8 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	// Snapshot shared worktree source includes under lock.
 	var sharedSourceIncludes []IncludedRepoState
 
-	if sessState.SharedWorktree {
-		if source, ok := sm.state.Sessions[sessState.SharedWorktreeSourceID]; ok {
+	if sessState.Mirror {
+		if source, ok := sm.state.Sessions[sessState.MirrorSourceID]; ok {
 			sharedSourceIncludes = make([]IncludedRepoState, len(source.Includes))
 			copy(sharedSourceIncludes, source.Includes)
 		}
@@ -2141,7 +2141,7 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	sessIncludes := make([]IncludedRepoState, len(sessState.Includes))
 	copy(sessIncludes, sessState.Includes)
 	sessInPlace := sessState.InPlace
-	sessSharedWorktree := sessState.SharedWorktree
+	sessMirror := sessState.Mirror
 	sessSystemKind := sessState.SystemKind
 	sessFreshStart := sessState.FreshStart
 	sessToken := sessState.Token
@@ -2373,7 +2373,7 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 			opts.WriteDirs = append(opts.WriteDirs, sm.deriveSandboxIncludesWriteDirs(sessIncludes)...)
 		}
 
-		if sessSharedWorktree {
+		if sessMirror {
 			scratchDir := filepath.Join(sm.paths.DataDir, "scratch", id)
 			if err := os.MkdirAll(scratchDir, 0o700); err != nil {
 				rollbackState()
@@ -3138,7 +3138,7 @@ func (sm *SessionManager) Delete(id string) error {
 	repoPath := sessState.RepoPath
 	worktreePath := sessState.WorktreePath
 	branch := sessState.Branch
-	shared := sessState.SharedWorktree
+	shared := sessState.Mirror
 	inPlace := sessState.InPlace
 	agentName := sessState.Agent
 	sessSystemKind := sessState.SystemKind
@@ -3448,7 +3448,7 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 			repoPath:     sess.RepoPath,
 			worktreePath: sess.WorktreePath,
 			branch:       sess.Branch,
-			shared:       sess.SharedWorktree,
+			shared:       sess.Mirror,
 			inPlace:      sess.InPlace,
 			prevStatus:   sess.Status,
 			includes:     make([]IncludedRepoState, len(sess.Includes)),
@@ -3571,7 +3571,7 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 				repoPath:     sess.RepoPath,
 				worktreePath: sess.WorktreePath,
 				branch:       sess.Branch,
-				shared:       sess.SharedWorktree,
+				shared:       sess.Mirror,
 				inPlace:      sess.InPlace,
 				prevStatus:   sess.Status,
 				includes:     make([]IncludedRepoState, len(sess.Includes)),
@@ -4894,7 +4894,7 @@ func (sm *SessionManager) fetchRemotes(ctx context.Context) {
 	var dirs []string
 
 	for _, s := range sm.state.Sessions {
-		if s.Status != StatusRunning || s.SharedWorktree {
+		if s.Status != StatusRunning || s.Mirror {
 			continue
 		}
 
@@ -4942,16 +4942,16 @@ func (sm *SessionManager) detectAgentStatuses() {
 	sm.mu.RLock()
 
 	type target struct {
-		id             string
-		name           string
-		agent          string
-		prevStatus     string
-		pty            *grpty.Session
-		worktreePath   string
-		baseBranch     string
-		repoPath       string
-		includes       []IncludedRepoState
-		sharedWorktree bool
+		id           string
+		name         string
+		agent        string
+		prevStatus   string
+		pty          *grpty.Session
+		worktreePath string
+		baseBranch   string
+		repoPath     string
+		includes     []IncludedRepoState
+		mirror       bool
 	}
 
 	var targets []target
@@ -4967,7 +4967,7 @@ func (sm *SessionManager) detectAgentStatuses() {
 			targets = append(targets, target{
 				id: id, name: s.Name, agent: s.Agent, prevStatus: s.AgentStatus, pty: ptySess,
 				worktreePath: s.WorktreePath, baseBranch: s.BaseBranch, repoPath: s.RepoPath,
-				includes: inc, sharedWorktree: s.SharedWorktree,
+				includes: inc, mirror: s.Mirror,
 			})
 		}
 	}
@@ -5011,7 +5011,7 @@ func (sm *SessionManager) detectAgentStatuses() {
 			unpushed int
 		)
 
-		if !t.sharedWorktree {
+		if !t.mirror {
 			if t.worktreePath != "" && t.repoPath != "" {
 				if d, err := git.HasUncommittedChanges(t.worktreePath); err == nil {
 					dirty = d

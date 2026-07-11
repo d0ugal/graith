@@ -19,7 +19,7 @@ extension GraithClientAPI.SessionInfo {
             status: s.status, agentStatus: s.agentStatus, exitCode: s.exitCode,
             exitSignal: s.exitSignal, createdAt: s.createdAt, lastAttachedAt: s.lastAttachedAt,
             statusChangedAt: s.statusChangedAt, dirty: s.dirty, unpushedCount: s.unpushedCount,
-            sandboxed: s.sandboxed, sharedWorktree: s.sharedWorktree, inPlace: s.inPlace,
+            sandboxed: s.sandboxed, mirror: s.mirror, inPlace: s.inPlace,
             yolo: s.yolo, model: s.model, toolName: s.toolName,
             includes: s.includes.map { $0.map { GraithClientAPI.IncludedRepoInfo($0) } },
             configStale: s.configStale, starred: s.starred, systemKind: s.systemKind,

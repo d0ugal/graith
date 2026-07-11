@@ -579,7 +579,7 @@ state on restore failure.
 | `internal/agent/transcript/codex_test.go` | `developer`(→context)/`user`/`assistant`, `function_call` by `call_id`, `token_count`/`turn_context`/`reasoning` skipped, `.jsonl.zst`, cwd canonicalization, multi-rollout warning |
 | `internal/agent/transcript/render_test.go` | golden render: chronological order, truncation/elision markers |
 | `internal/daemon/daemon_test.go` | `Migrate`: same id/worktree/branch retained, agent/model swapped, `StatusCreating` reservation; **persist-on-success only**; **restore-on-failure** (status reset + field revert); **restore-fails terminal state**; Codex id-capture race (pre-start timestamp); **orchestrator migrate** keeps SystemKind + scratch cwd; hook cleanup on swap; reject `Creating`/`Deleting`; allow `Stopped` |
-| `internal/integration/integration_test.go` | **Claude→Codex and Codex→Claude** (gating: positional seed actually starts a seeded session), context file present **before** start, sandboxed target can **read** it (per-session dir), working tree unchanged across swap, shared-worktree session |
+| `internal/integration/integration_test.go` | **Claude→Codex and Codex→Claude** (gating: positional seed actually starts a seeded session), context file present **before** start, sandboxed target can **read** it (per-session dir), working tree unchanged across swap, mirror session |
 
 Per repo convention, test fixture strings use old Scots words (e.g. `braw`,
 `bide`, `thrawn`).

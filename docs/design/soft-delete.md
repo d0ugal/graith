@@ -367,7 +367,7 @@ deleted-only, or all-sessions:
   separately).
 - `availableRepos` (its comment already says "live sessions") → **exclude**.
 - `RunPRWatchLoop` targets (stopped sessions are polled) → **exclude**.
-- `--share-worktree` source lookup (iterates all sessions by name/id) → **exclude**
+- `--mirror` source lookup (iterates all sessions by name/id) → **exclude**
   soft-deleted sources, else a hidden session can be picked as a worktree source.
 - scenario create / `scenario add` name-uniqueness checks (see
   [name reuse](#edge-cases)) → decide explicitly.
@@ -453,7 +453,7 @@ operation that would otherwise act on a stopped session:
   (skip soft-deleted members), `fork` (a `fork` acts on a raw `SourceSessionID`; a
   soft-deleted source has `Status=stopped` and would otherwise fork fine —
   violating "only restore/purge act on the trash"), `rename`, `star`/`unstar`,
-  `update`, `type`/shell input, and `--share-worktree` sourcing.
+  `update`, `type`/shell input, and `--mirror` sourcing.
 - **Allow** (these are the only ways to act on a soft-deleted session): `restore`,
   `purge`, `list --deleted`, and read-only `logs`/`wait`/`info`. Because
   CLI name resolution is live-only, these read-only ops reach a soft-deleted
@@ -909,7 +909,7 @@ Reconcile.
   expiry). `SoftDeleteWithChildren`/restore-with-children mark/clear the subtree.
 - **Unit — daemon guards.** `Resume`, `Restart`, the attach auto-resume path,
   `fork` (by raw `SourceSessionID`), `rename`, `star`/`unstar`, `update`, and
-  `--share-worktree` sourcing all reject a soft-deleted session by raw ID;
+  `--mirror` sourcing all reject a soft-deleted session by raw ID;
   `scenario_resume` skips soft-deleted members.
 - **Unit — CLI verbs.** `gr delete` soft-deletes with **no prompt** even with
   unsaved work / a running agent (recoverable); `gr delete --force`/`-y` behave
@@ -1025,7 +1025,7 @@ test, `croft` for repo names.
   (concurrent-create sweep), `Stop`/`stopWithReason` (single SIGTERM — *not*
   SoftDelete's kill path), `Resume`, `Restart`, `Create`, `Run` (loop startup +
   `LoadState` error handling), `checkIdleSession`, `RunMessageCleanupLoop`,
-  `StopAll`, `fleetSummary`, `availableRepos`, `--share-worktree` source lookup.
+  `StopAll`, `fleetSummary`, `availableRepos`, `--mirror` source lookup.
 - `internal/daemon/gitpull.go` — `RunGitPullLoop` (the reaper template).
 - `internal/daemon/prwatch.go` — `RunPRWatchLoop` (a direct-iterator to audit).
 - `internal/daemon/scenario.go` — scenario name-uniqueness checks, `scenario_resume`.
@@ -1059,7 +1059,7 @@ and, critically, adds the items the design review surfaced that the spike did
 **not** yet cover: the daemon-side `IsSoftDeleted()` guards on ID-addressable
 operations, the `DeleteResultMsg` response contract, crash-safe marker ordering,
 restore-after-expiry, the purge compare-and-delete race guard, attached-client
-kicking, restore-with-children, scenario/share-worktree filtering, and the
+kicking, restore-with-children, scenario/mirror filtering, and the
 downgrade fail-closed change to `Run`. The spike should be reconciled to this doc
 before it ships, and the full test matrix above added (tests are a hard
 requirement, not a follow-up).

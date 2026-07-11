@@ -13,7 +13,7 @@ informed: (TBD)
 
 Graith supports "shared worktree" sessions — sessions that reuse the worktree
 of a parent session rather than creating their own. These are created with
-`--share-worktree` and require sandbox mode (read-only access). They are used
+`--mirror` and require sandbox mode (read-only access). They are used
 by multi-agent review workflows where multiple agents need to read the same
 codebase concurrently without modifications.
 
@@ -22,7 +22,7 @@ session: a "Git" column in the compact list showing dirty/unpushed state
 (`clean`, `M`, `↑N`), and branch/base details in the detail panel below the
 list.
 
-The `SharedWorktree` field is already present on `SessionInfo` in the protocol
+The `Mirror` field is already present on `SessionInfo` in the protocol
 (`protocol/messages.go`) and is populated by the daemon in `toSessionInfo()`
 (`daemon/handler.go`), so the client already knows which sessions share a
 worktree.
@@ -60,7 +60,7 @@ Shared worktree sessions display redundant git information in the overlay:
    the compact list's Git column nor in the detail panel's branch/base line.
 2. The daemon skips git status computation for shared worktree sessions,
    avoiding redundant filesystem operations.
-3. No protocol changes required — the existing `SharedWorktree` field on
+3. No protocol changes required — the existing `Mirror` field on
    `SessionInfo` provides everything the client needs.
 
 ### Non-Goals
@@ -79,7 +79,7 @@ Shared worktree sessions display redundant git information in the overlay:
 ### Proposal 0: Do Nothing
 
 The overlay continues showing identical git info for shared worktree sessions
-and their parents. Users of multi-agent review and other shared-worktree
+and their parents. Users of multi-agent review and other mirror
 features see duplicated branch/dirty/unpushed data across multiple rows. The
 daemon continues running redundant git operations on the same worktree path.
 Stopped shared sessions falsely appear in "Needs Attention" and show misleading
@@ -95,9 +95,9 @@ skip git status computation in the daemon for those sessions.
 
 #### Client-side changes (`internal/client/overlay.go`)
 
-Five locations need a `SharedWorktree` guard:
+Five locations need a `Mirror` guard:
 
-1. **`compactDelegate.Render()`** (line ~429): When `si.info.SharedWorktree`
+1. **`compactDelegate.Render()`** (line ~429): When `si.info.Mirror`
    is true, render the git column as `"—"` (em dash) instead of calling
    `displayGit()`. The dash signals "not applicable" rather than leaving it
    blank (which could look like a rendering bug).
@@ -107,17 +107,17 @@ Five locations need a `SharedWorktree` guard:
    contributes to the width calculation (the `"—"` string), but inherited
    git state does not inflate the column.
 
-3. **Detail panel** (lines ~1400-1410): When `s.SharedWorktree` is true,
+3. **Detail panel** (lines ~1400-1410): When `s.Mirror` is true,
    skip appending `branch:` and `base:` to the detail line. The agent type
    and worktree path are still shown (they remain useful).
 
-4. **`filterNeedsAttention()`** (line ~60): Add `!s.SharedWorktree` to the
+4. **`filterNeedsAttention()`** (line ~60): Add `!s.Mirror` to the
    `stopped && (Dirty || UnpushedCount > 0)` case. This prevents shared
    sessions from appearing in "Needs Attention" due to inherited git state.
    The daemon skip makes this largely redundant for running sessions, but the
    overlay guard protects against stale state on stopped sessions.
 
-5. **Delete confirmation** (lines ~1443-1458): When `s.SharedWorktree` is
+5. **Delete confirmation** (lines ~1443-1458): When `s.Mirror` is
    true, skip the "unsaved work" warning block. Deleting a shared session
    only removes scratch state — it never touches the shared worktree or
    branch.
@@ -146,7 +146,7 @@ Five locations need a `SharedWorktree` guard:
 ```mermaid
 graph TD
     subgraph "Daemon (detectAgentStatuses)"
-        A[For each tracked session] --> B{SharedWorktree?}
+        A[For each tracked session] --> B{Mirror?}
         B -->|Yes| C["Skip git operations<br/>(dirty=false, unpushed=0)<br/>Continue with status detection"]
         B -->|No| D[Run git status + unpushed count<br/>including repos loop]
         C --> E[Write AgentStatus, GitDirty,<br/>GitUnpushed, LastOutputAt to state]
@@ -154,7 +154,7 @@ graph TD
     end
 
     subgraph "Client (overlay rendering)"
-        F[For each SessionInfo] --> G{SharedWorktree?}
+        F[For each SessionInfo] --> G{Mirror?}
         G -->|Yes| H["Git column: '—'<br/>Detail: skip branch/base<br/>Search: exclude git terms<br/>Needs Attention: exclude<br/>Delete warn: skip"]
         G -->|No| I["Git column: displayGit()<br/>Detail: show branch/base<br/>Normal behavior"]
     end
@@ -163,7 +163,7 @@ graph TD
 #### Pros
 
 - Simple — seven small conditionals, no new fields or protocol changes
-- Uses the existing `SharedWorktree` field already on `SessionInfo`
+- Uses the existing `Mirror` field already on `SessionInfo`
 - Reduces visual noise in the overlay for review workflows
 - Fixes latent bugs: shared sessions no longer falsely appear in "Needs
   Attention" or show misleading "unsaved work" delete warnings
@@ -207,20 +207,20 @@ affected:
 Note: `gr delete` (CLI path) calls `git.DirtyFiles()` directly on the
 worktree rather than using protocol fields. It will still show the parent's
 dirty state when deleting a shared session. This is a separate concern from
-the overlay — the CLI could add a `SharedWorktree` guard in a follow-up.
+the overlay — the CLI could add a `Mirror` guard in a follow-up.
 
 ### References
 
 - `internal/client/overlay.go` — overlay rendering, column widths, detail panel,
   Needs Attention filter, delete confirmation
 - `internal/daemon/daemon.go` — `detectAgentStatuses()` git status loop
-- `protocol/messages.go` — `SessionInfo.SharedWorktree` field
-- `daemon/handler.go` — `toSessionInfo()` populates `SharedWorktree`
-- `daemon/state.go` — `SessionState.SharedWorktree` and `SharedWorktreeSourceID`
+- `protocol/messages.go` — `SessionInfo.Mirror` field
+- `daemon/handler.go` — `toSessionInfo()` populates `Mirror`
+- `daemon/state.go` — `SessionState.Mirror` and `MirrorSourceID`
 
 ### Implementation Notes
 
-- The `SharedWorktree` bool is already on `SessionInfo` and populated in
+- The `Mirror` bool is already on `SessionInfo` and populated in
   `toSessionInfo()` — no protocol or state changes needed
 - Add `sharedWorktree bool` to the local `target` struct in
   `detectAgentStatuses()`, populated during the initial `RLock` snapshot
@@ -237,13 +237,13 @@ the overlay — the CLI could add a `SharedWorktree` guard in a follow-up.
 ### Test Plan
 
 The overlay is extensively unit-tested in `internal/client/overlay_test.go`.
-The following tests need new shared-worktree cases:
+The following tests need new mirror cases:
 
-- `TestCompactDelegate_RenderGitStatus` — assert `SharedWorktree: true` +
+- `TestCompactDelegate_RenderGitStatus` — assert `Mirror: true` +
   `Dirty: true` renders `"—"`, not `"M"`
 - `TestComputeColumnWidths` — assert shared sessions contribute `"—"` width
 - `TestFilterSessions_GitTokens` — assert filtering by `"dirty"` does not
-  surface `SharedWorktree: true` sessions with inherited dirty state;
+  surface `Mirror: true` sessions with inherited dirty state;
   assert branch is also excluded from search
 - `TestView_ShowsDetailLine` — assert branch/base are omitted for shared
   sessions

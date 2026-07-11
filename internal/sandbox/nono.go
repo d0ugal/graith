@@ -397,7 +397,7 @@ func (nonoBackend) Wrap(command string, args []string, opts WrapOpts) (string, [
 	wrapped := []string{"run", "--profile", profilePath}
 
 	// Emit --workdir so nono resolves its workdir from opts.WorktreeDir rather
-	// than the process cwd. This matters for --share-worktree sessions: the PTY
+	// than the process cwd. This matters for --mirror sessions: the PTY
 	// is spawned with its cwd set to the read-only source worktree, but the
 	// read-write workdir is the scratch dir (opts.WorktreeDir). Without an
 	// explicit --workdir, nono would resolve the workdir from the cwd (the

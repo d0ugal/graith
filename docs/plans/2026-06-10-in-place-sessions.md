@@ -12,7 +12,7 @@
 - `[[repos]]` is a graith launch policy, not an OS-level sandbox. Document that unsandboxed agents can still write anywhere the user can.
 - Resume must re-validate against `[[repos]]` config (repo could have been removed).
 - Resume must also check the concurrent session guard (stop A, create B, resume A = two agents).
-- Flag combinations must be validated: reject `--in-place --no-repo`, `--in-place --share-worktree`, `--in-place --base`.
+- Flag combinations must be validated: reject `--in-place --no-repo`, `--in-place --mirror`, `--in-place --base`.
 - `cleanupOnError` in Create must not call `TeardownSession` for in-place sessions.
 - Skip `DiscoverDefaultBranch` for in-place (target repos may have no remote).
 - Leave `BaseBranch` empty so unpushed/dirty git detection is skipped gracefully.
@@ -181,7 +181,7 @@ AllowConcurrent bool  `json:"allow_concurrent,omitempty"`
 
 - [ ] **Step 2: Add `InPlace` to `SessionInfo`**
 
-In `internal/protocol/messages.go`, add to `SessionInfo` (after `SharedWorktree`):
+In `internal/protocol/messages.go`, add to `SessionInfo` (after `Mirror`):
 
 ```go
 InPlace        bool     `json:"in_place,omitempty"`
@@ -189,7 +189,7 @@ InPlace        bool     `json:"in_place,omitempty"`
 
 - [ ] **Step 3: Add `InPlace` to `SessionState`**
 
-In `internal/daemon/state.go`, add to `SessionState` (after `SharedWorktree`):
+In `internal/daemon/state.go`, add to `SessionState` (after `Mirror`):
 
 ```go
 InPlace            bool                  `json:"in_place,omitempty"`
@@ -256,8 +256,8 @@ if newAllowConcurrent && !newInPlace {
 if newInPlace && newNoRepo {
 	return fmt.Errorf("--in-place and --no-repo are mutually exclusive")
 }
-if newInPlace && newShareWorktree != "" {
-	return fmt.Errorf("--in-place and --share-worktree are mutually exclusive")
+if newInPlace && newMirror != "" {
+	return fmt.Errorf("--in-place and --mirror are mutually exclusive")
 }
 if newInPlace && newBase != "" {
 	return fmt.Errorf("--in-place and --base are mutually exclusive (in-place sessions don't create branches)")
@@ -333,7 +333,7 @@ func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt s
 In `internal/daemon/handler.go` (~line 99), update the call:
 
 ```go
-sess, err := sm.Create(c.Name, agentName, c.RepoPath, c.Base, c.Prompt, c.NoRepo, c.ShareWorktree, c.AgentHooks, c.InPlace, c.AllowConcurrent, clientRows, clientCols)
+sess, err := sm.Create(c.Name, agentName, c.RepoPath, c.Base, c.Prompt, c.NoRepo, c.Mirror, c.AgentHooks, c.InPlace, c.AllowConcurrent, clientRows, clientCols)
 ```
 
 - [ ] **Step 5: Add the in-place case to the switch in Create**
@@ -378,7 +378,7 @@ if inPlace && noRepo {
 	return SessionState{}, fmt.Errorf("--in-place and --no-repo are mutually exclusive")
 }
 if inPlace && shareWorktree != "" {
-	return SessionState{}, fmt.Errorf("--in-place and --share-worktree are mutually exclusive")
+	return SessionState{}, fmt.Errorf("--in-place and --mirror are mutually exclusive")
 }
 ```
 
@@ -899,7 +899,7 @@ func TestResumeInPlaceRejectsConcurrentRunning(t *testing.T) {
 
 - [ ] **Step 3: Add re-validation to Resume**
 
-In `internal/daemon/daemon.go`, in the `Resume` method, after the `sessState.SharedWorktree && !sessState.Sandboxed` check (~line 777), add:
+In `internal/daemon/daemon.go`, in the `Resume` method, after the `sessState.Mirror && !sessState.Sandboxed` check (~line 777), add:
 
 ```go
 if sessState.InPlace {

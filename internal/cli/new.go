@@ -20,7 +20,7 @@ var (
 	newModel               string
 	newRepo                string
 	newNoRepo              bool
-	newShareWorktree       string
+	newMirror              string
 	newInPlace             bool
 	newAllowConcurrent     bool
 	newSkipModelValidation bool
@@ -58,8 +58,8 @@ var newCmd = &cobra.Command{
 			return fmt.Errorf("--in-place and --no-repo are mutually exclusive")
 		}
 
-		if newInPlace && newShareWorktree != "" {
-			return fmt.Errorf("--in-place and --share-worktree are mutually exclusive")
+		if newInPlace && newMirror != "" {
+			return fmt.Errorf("--in-place and --mirror are mutually exclusive")
 		}
 
 		if newInPlace && newBase != "" {
@@ -96,7 +96,7 @@ var newCmd = &cobra.Command{
 			Prompt:              prompt,
 			Model:               newModel,
 			NoRepo:              newNoRepo,
-			ShareWorktree:       newShareWorktree,
+			Mirror:              newMirror,
 			AgentHooks:          true,
 			InPlace:             newInPlace,
 			AllowConcurrent:     newAllowConcurrent,
@@ -151,7 +151,7 @@ func registerNewCmd() {
 	newCmd.Flags().StringVarP(&newModel, "model", "m", "", "model for the agent to use (expands {model} in agent args)")
 	newCmd.Flags().StringVarP(&newRepo, "repo", "C", "", "path to git repo (default: cwd)")
 	newCmd.Flags().BoolVar(&newNoRepo, "no-repo", false, "create session without a git repo or worktree")
-	newCmd.Flags().StringVar(&newShareWorktree, "share-worktree", "", "share another session's worktree (read-only)")
+	newCmd.Flags().StringVar(&newMirror, "mirror", "", "mirror another session's worktree (read-only)")
 	newCmd.Flags().BoolVar(&newInPlace, "in-place", false, "run agent directly in the repo without creating a worktree")
 	newCmd.Flags().BoolVar(&newAllowConcurrent, "allow-concurrent", false, "allow multiple in-place sessions on the same repo")
 	newCmd.Flags().BoolVar(&newSkipModelValidation, "skip-model-validation", false, "skip validate_model check (use models not in the validation list)")
@@ -159,5 +159,5 @@ func registerNewCmd() {
 	_ = newCmd.RegisterFlagCompletionFunc("agent", completeAgentNames)
 	_ = newCmd.RegisterFlagCompletionFunc("repo", completeRepoPaths)
 	_ = newCmd.RegisterFlagCompletionFunc("base", completeBranchNames)
-	_ = newCmd.RegisterFlagCompletionFunc("share-worktree", completeSessionNames)
+	_ = newCmd.RegisterFlagCompletionFunc("mirror", completeSessionNames)
 }

@@ -448,13 +448,13 @@ session first or remove the singleton constraint.
 
 #### Lifecycle: Shared worktree
 
-`--share-worktree` with an includes session should share the entire session
+`--mirror` with an includes session should share the entire session
 directory (main + included worktrees), all read-only. The sharing session gets
 a scratch directory for writes, same as today.
 
 The sharing session's `SessionState` does NOT get its own `Includes` field —
-it references the source session via `SharedWorktreeSourceID` (a new field
-replacing the current `SharedWorktree` bool — storing the source session ID
+it references the source session via `MirrorSourceID` (a new field
+replacing the current `Mirror` bool — storing the source session ID
 enables reliable lookup after restarts and renames). The source session's
 `Includes` state is the authoritative record. When displaying dirty/unpushed
 status for the shared session (e.g., in the overlay), the daemon looks up the
@@ -615,7 +615,7 @@ sessions create worktrees. If a repo has `includes` configured and the user
 passes `--in-place`, the CLI should error with a clear message suggesting they
 drop `--in-place`.
 
-**Interaction with `--share-worktree`:** Sharing an includes session shares the
+**Interaction with `--mirror`:** Sharing an includes session shares the
 full session directory. The sharing session sees all included worktrees
 read-only.
 

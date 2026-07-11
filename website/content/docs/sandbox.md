@@ -92,7 +92,7 @@ to an allowlist, and gates `features`.
 **nono** generates a per-session JSON profile and runs
 `nono run --profile <file> --workdir <dir> -- <agent>` (the `--workdir` pins
 nono's read-write workdir to the session's worktree/scratch dir rather than
-resolving it from the process cwd — important for `--share-worktree`, where the
+resolving it from the process cwd — important for `--mirror`, where the
 cwd is the read-only source). The profile:
 
 - `extends: "default"` — inherits nono's audited deny groups (`deny_credentials`,

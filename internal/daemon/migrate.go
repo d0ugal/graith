@@ -311,7 +311,7 @@ func scrapesID(agent string) bool {
 // can be reused), so the start time disambiguates the generation.
 //
 // Concurrency note: two guards keep this from cross-assigning ids between
-// concurrent shared-worktree / in-place sessions. First, scrapeSessionID
+// concurrent mirror / in-place sessions. First, scrapeSessionID
 // refuses to guess when multiple distinct native ids match the (since, cwd)
 // window. That alone isn't enough — staggered rollout writes leave a window
 // where only a sibling's rollout exists and would be mis-assigned — so second,

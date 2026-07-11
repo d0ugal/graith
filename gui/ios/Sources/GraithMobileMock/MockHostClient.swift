@@ -262,7 +262,7 @@ extension SessionInfo {
             agentStatus: agentStatus ?? self.agentStatus,
             exitCode: exitCode, exitSignal: exitSignal, createdAt: createdAt,
             lastAttachedAt: lastAttachedAt, statusChangedAt: statusChangedAt, dirty: dirty,
-            unpushedCount: unpushedCount, sandboxed: sandboxed, sharedWorktree: sharedWorktree,
+            unpushedCount: unpushedCount, sandboxed: sandboxed, mirror: mirror,
             inPlace: inPlace, yolo: yolo, model: model, toolName: toolName, includes: includes,
             configStale: configStale, starred: starred ?? self.starred, systemKind: systemKind,
             scenarioID: scenarioID, scenarioName: scenarioName, summaryText: summaryText,

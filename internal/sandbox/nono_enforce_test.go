@@ -198,7 +198,7 @@ func TestNonoEnforcesFilesystemBoundary(t *testing.T) {
 	}
 }
 
-// TestNonoEnforcesSharedWorktreeReadOnly reproduces the --share-worktree layout
+// TestNonoEnforcesMirrorReadOnly reproduces the --mirror layout
 // (issue #786): the source worktree is added read-only, the scratch dir is the
 // read-write workdir, and the process is launched with its cwd set to the source
 // worktree (as the daemon does via the PTY). It proves nono pins the workdir to
@@ -206,7 +206,7 @@ func TestNonoEnforcesFilesystemBoundary(t *testing.T) {
 // succeed — even though the cwd is the source. Without the explicit --workdir in
 // nono.Wrap, nono would resolve the workdir from the cwd and make the source
 // writable.
-func TestNonoEnforcesSharedWorktreeReadOnly(t *testing.T) {
+func TestNonoEnforcesMirrorReadOnly(t *testing.T) {
 	mustEnforce(t)
 
 	// Build the fixture OUTSIDE /tmp/$TMPDIR (see nonWritableTempRoot). This is
@@ -279,7 +279,7 @@ func TestNonoEnforcesSharedWorktreeReadOnly(t *testing.T) {
 	}
 
 	// Writing into the source worktree must FAIL even though it is the cwd —
-	// this is the read-only guarantee the shared-worktree model depends on.
+	// this is the read-only guarantee the mirror model depends on.
 	blocked := filepath.Join(source, "tamper.txt")
 	cmd, args, err = Wrap("sh", []string{"-c", "echo thrawn > " + blocked}, opts)
 	if err != nil {

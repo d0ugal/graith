@@ -840,7 +840,7 @@ func TestFilterSessions_GitTokens(t *testing.T) {
 	}
 }
 
-func TestFilterSessions_SharedWorktreeExcludesGitTokens(t *testing.T) {
+func TestFilterSessions_MirrorExcludesGitTokens(t *testing.T) {
 	sessions := []protocol.SessionInfo{
 		{
 			ID: "s1", Name: "ben-session", RepoName: "graith",
@@ -852,8 +852,8 @@ func TestFilterSessions_SharedWorktreeExcludesGitTokens(t *testing.T) {
 			ID: "s2", Name: "braw-reviewer", RepoName: "graith",
 			Branch: "feature-branch", Status: "running",
 			Dirty: true, UnpushedCount: 1,
-			SharedWorktree: true,
-			CreatedAt:      time.Now().Format(time.RFC3339),
+			Mirror:    true,
+			CreatedAt: time.Now().Format(time.RFC3339),
 		},
 	}
 
@@ -870,7 +870,7 @@ func TestFilterSessions_SharedWorktreeExcludesGitTokens(t *testing.T) {
 	for _, token := range []string{"modified", "clean", "unpushed"} {
 		result := filterSessions(sessions, token)
 		for _, s := range result {
-			if s.SharedWorktree {
+			if s.Mirror {
 				t.Errorf("filtering %q should not return shared worktree session %q", token, s.Name)
 			}
 		}
@@ -925,13 +925,13 @@ func TestComputeColumnWidths_MinimumWidths(t *testing.T) {
 	}
 }
 
-func TestComputeColumnWidths_SharedWorktreeUsesDash(t *testing.T) {
+func TestComputeColumnWidths_MirrorUsesDash(t *testing.T) {
 	sessions := []protocol.SessionInfo{
 		{
 			ID: "s1", Name: "shared", Status: "running",
 			Dirty: true, UnpushedCount: 10,
-			SharedWorktree: true,
-			CreatedAt:      time.Now().Format(time.RFC3339),
+			Mirror:    true,
+			CreatedAt: time.Now().Format(time.RFC3339),
 		},
 	}
 	cw := computeColumnWidths(sessions, "")
@@ -2534,15 +2534,15 @@ func TestView_ShowsDetailLine(t *testing.T) {
 	}
 }
 
-func TestView_SharedWorktreeOmitsBranchAndBase(t *testing.T) {
+func TestView_MirrorOmitsBranchAndBase(t *testing.T) {
 	sessions := []protocol.SessionInfo{
 		{
 			ID: "s1", Name: "braw-reviewer", RepoName: "graith",
 			Branch: "refs/heads/feature", BaseBranch: "main",
 			Agent: "claude", Status: "running",
-			WorktreePath:   "/tmp/test-worktree",
-			SharedWorktree: true,
-			CreatedAt:      time.Now().Format(time.RFC3339),
+			WorktreePath: "/tmp/test-worktree",
+			Mirror:       true,
+			CreatedAt:    time.Now().Format(time.RFC3339),
 		},
 	}
 	m := newOverlayModel(sessions, "", nil, nil, nil, nil)
@@ -3046,15 +3046,15 @@ func TestCompactDelegate_RenderGitStatus(t *testing.T) {
 	}
 }
 
-func TestCompactDelegate_RenderSharedWorktreeShowsDash(t *testing.T) {
+func TestCompactDelegate_RenderMirrorShowsDash(t *testing.T) {
 	sessions := []protocol.SessionInfo{
 		{
 			ID: "s1", Name: "braw-reviewer", RepoName: "graith",
 			Branch: "d0ugal/graith/feature", Agent: "claude",
 			Status: "running", AgentStatus: "active",
 			Dirty: true, UnpushedCount: 5,
-			SharedWorktree: true,
-			CreatedAt:      time.Now().Format(time.RFC3339),
+			Mirror:    true,
+			CreatedAt: time.Now().Format(time.RFC3339),
 		},
 	}
 
@@ -3238,11 +3238,11 @@ func TestFilterNeedsAttention(t *testing.T) {
 	}
 }
 
-func TestFilterNeedsAttention_ExcludesSharedWorktree(t *testing.T) {
+func TestFilterNeedsAttention_ExcludesMirror(t *testing.T) {
 	sessions := []protocol.SessionInfo{
 		{ID: "s1", Name: "ben-dirty", Status: "stopped", Dirty: true},
-		{ID: "s2", Name: "braw-shared-dirty", Status: "stopped", Dirty: true, SharedWorktree: true},
-		{ID: "s3", Name: "braw-shared-unpushed", Status: "stopped", UnpushedCount: 3, SharedWorktree: true},
+		{ID: "s2", Name: "braw-shared-dirty", Status: "stopped", Dirty: true, Mirror: true},
+		{ID: "s3", Name: "braw-shared-unpushed", Status: "stopped", UnpushedCount: 3, Mirror: true},
 	}
 
 	result := filterNeedsAttention(sessions)
@@ -3260,14 +3260,14 @@ func TestFilterNeedsAttention_ExcludesSharedWorktree(t *testing.T) {
 	}
 }
 
-func TestView_SharedWorktreeDeleteNoUnsavedWarning(t *testing.T) {
+func TestView_MirrorDeleteNoUnsavedWarning(t *testing.T) {
 	sessions := []protocol.SessionInfo{
 		{
 			ID: "s1", Name: "braw-shared-dirty", RepoName: "graith",
 			Status: "running", Agent: "claude",
 			Dirty: true, UnpushedCount: 3,
-			SharedWorktree: true,
-			CreatedAt:      time.Now().Format(time.RFC3339),
+			Mirror:    true,
+			CreatedAt: time.Now().Format(time.RFC3339),
 		},
 	}
 	m := newOverlayModel(sessions, "", nil, nil, nil, nil)

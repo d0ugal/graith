@@ -81,7 +81,7 @@ type CreateMsg struct {
 	Prompt              string `json:"prompt,omitempty"`
 	Model               string `json:"model,omitempty"`
 	NoRepo              bool   `json:"no_repo,omitempty"`
-	ShareWorktree       string `json:"share_worktree,omitempty"`
+	Mirror              string `json:"mirror,omitempty"`
 	AgentHooks          bool   `json:"agent_hooks,omitempty"`
 	InPlace             bool   `json:"in_place,omitempty"`
 	AllowConcurrent     bool   `json:"allow_concurrent,omitempty"`
@@ -394,7 +394,7 @@ type SessionInfo struct {
 	Dirty           bool               `json:"dirty,omitempty"`
 	UnpushedCount   int                `json:"unpushed_count,omitempty"`
 	Sandboxed       bool               `json:"sandboxed,omitempty"`
-	SharedWorktree  bool               `json:"shared_worktree,omitempty"`
+	Mirror          bool               `json:"mirror,omitempty"`
 	InPlace         bool               `json:"in_place,omitempty"`
 	Yolo            bool               `json:"yolo,omitempty"`
 	Model           string             `json:"model,omitempty"`

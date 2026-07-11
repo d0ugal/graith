@@ -49,38 +49,38 @@ type CreationConfig struct {
 }
 
 type SessionState struct {
-	ID                     string                `json:"id"`
-	ParentID               string                `json:"parent_id,omitempty"`
-	Name                   string                `json:"name"`
-	RepoPath               string                `json:"repo_path"`
-	RepoName               string                `json:"repo_name"`
-	WorktreePath           string                `json:"worktree_path"`
-	Branch                 string                `json:"branch"`
-	BaseBranch             string                `json:"base_branch"`
-	Agent                  string                `json:"agent"`
-	AgentSessionID         string                `json:"agent_session_id,omitempty"`
-	Model                  string                `json:"model,omitempty"`
-	Status                 SessionStatus         `json:"status"`
-	AgentStatus            string                `json:"agent_status,omitempty"`
-	StatusChangedAt        time.Time             `json:"status_changed_at"`
-	IdleSince              *time.Time            `json:"-"`
-	GitDirty               bool                  `json:"-"`
-	GitUnpushed            int                   `json:"-"`
-	PullRequest            PRStatus              `json:"-"`
-	CI                     CIStatus              `json:"-"`
-	HookToolName           string                `json:"-"`
-	ExitCode               *int                  `json:"exit_code,omitempty"`
-	ExitSignal             string                `json:"exit_signal,omitempty"`
-	PID                    int                   `json:"pid,omitempty"`
-	PIDStartTime           int64                 `json:"pid_start_time,omitempty"`
-	Sandboxed              bool                  `json:"sandboxed,omitempty"`
-	SandboxConfig          *config.SandboxConfig `json:"sandbox_config,omitempty"`
-	SharedWorktree         bool                  `json:"shared_worktree,omitempty"`
-	SharedWorktreeSourceID string                `json:"shared_worktree_source_id,omitempty"`
-	InPlace                bool                  `json:"in_place,omitempty"`
-	Includes               []IncludedRepoState   `json:"includes,omitempty"`
-	AgentHooks             bool                  `json:"agent_hooks,omitempty"`
-	ApprovalsEnabled       bool                  `json:"approvals_enabled,omitempty"` // deprecated: migrated to AgentHooks in v4
+	ID               string                `json:"id"`
+	ParentID         string                `json:"parent_id,omitempty"`
+	Name             string                `json:"name"`
+	RepoPath         string                `json:"repo_path"`
+	RepoName         string                `json:"repo_name"`
+	WorktreePath     string                `json:"worktree_path"`
+	Branch           string                `json:"branch"`
+	BaseBranch       string                `json:"base_branch"`
+	Agent            string                `json:"agent"`
+	AgentSessionID   string                `json:"agent_session_id,omitempty"`
+	Model            string                `json:"model,omitempty"`
+	Status           SessionStatus         `json:"status"`
+	AgentStatus      string                `json:"agent_status,omitempty"`
+	StatusChangedAt  time.Time             `json:"status_changed_at"`
+	IdleSince        *time.Time            `json:"-"`
+	GitDirty         bool                  `json:"-"`
+	GitUnpushed      int                   `json:"-"`
+	PullRequest      PRStatus              `json:"-"`
+	CI               CIStatus              `json:"-"`
+	HookToolName     string                `json:"-"`
+	ExitCode         *int                  `json:"exit_code,omitempty"`
+	ExitSignal       string                `json:"exit_signal,omitempty"`
+	PID              int                   `json:"pid,omitempty"`
+	PIDStartTime     int64                 `json:"pid_start_time,omitempty"`
+	Sandboxed        bool                  `json:"sandboxed,omitempty"`
+	SandboxConfig    *config.SandboxConfig `json:"sandbox_config,omitempty"`
+	Mirror           bool                  `json:"mirror,omitempty"`
+	MirrorSourceID   string                `json:"mirror_source_id,omitempty"`
+	InPlace          bool                  `json:"in_place,omitempty"`
+	Includes         []IncludedRepoState   `json:"includes,omitempty"`
+	AgentHooks       bool                  `json:"agent_hooks,omitempty"`
+	ApprovalsEnabled bool                  `json:"approvals_enabled,omitempty"` // deprecated: migrated to AgentHooks in v4
 	// Yolo opts this session into auto-approve ("yolo") mode: the PreToolUse
 	// approval hook is installed and every request is auto-allowed via the
 	// "auto" approvals backend, regardless of the global [approvals] backend.

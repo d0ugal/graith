@@ -44,7 +44,7 @@ Steps:
 
 **In-place:** `gr new quick --in-place` runs the agent directly in the repo without creating a worktree. No branch is created. Use `--allow-concurrent` to permit multiple in-place sessions on the same repo.
 
-**Shared worktree:** `gr new observer --share-worktree my-session` creates a session that shares another session's worktree in read-only mode. Useful for observation or review. Requires sandbox to be enabled (`sandbox.enabled = true` in config).
+**Mirror:** `gr new observer --mirror my-session` creates a session that mounts another session's worktree read-only. Useful for observation or review. Requires sandbox to be enabled (`sandbox.enabled = true` in config).
 
 ## Attachment
 
