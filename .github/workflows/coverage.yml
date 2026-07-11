@@ -6,8 +6,11 @@ name: Coverage
 # commit (cheap on Linux; Swift shows an absolute % only to avoid doubling
 # expensive macOS runner minutes).
 #
-# NOT wired as a required status check: it only runs on pull_request and its
-# result is informational. See the required-check note in ci.yml.
+# The Go job also acts as a soft gate: it FAILS when statement coverage drops
+# by more than 5 points vs the base branch (a small budget for the occasional
+# refactor; coverage should otherwise never regress). The comment still posts
+# regardless. Whether that red X blocks merge is a branch-protection decision;
+# see the required-check note in ci.yml.
 on:
   pull_request:
 
@@ -124,6 +127,34 @@ jobs:
             echo "$TABLE"
             echo "COVREPORT_EOF"
           } >> "$GITHUB_OUTPUT"
+      - name: Enforce coverage threshold
+        # Hard gate: fail the job when statement coverage drops by more than
+        # MAX_DROP points vs the base branch. Coverage should never regress, but
+        # a small budget leaves room for error (e.g. a refactor that deletes
+        # well-covered code). This runs *after* the outputs are written, so the
+        # always() comment job can still post the numbers even when this fails.
+        env:
+          DELTA: ${{ steps.cov.outputs.delta }}
+          PCT: ${{ steps.cov.outputs.pct }}
+          MAX_DROP: "5.0"
+        run: |
+          set -euo pipefail
+          # Not measurable → don't gate. "n/a" means the base failed to
+          # build/test; PCT "0.0" means HEAD did (ci.yml is the real test gate
+          # for that). Either way there's no trustworthy delta to enforce.
+          if [ "$DELTA" = "n/a" ] || [ "$PCT" = "0.0" ]; then
+            echo "Coverage delta not measurable (base or head build failed); skipping threshold check."
+            exit 0
+          fi
+          # DELTA is formatted like "+0.3%" or "-6.2%"; strip the trailing %.
+          num="${DELTA%\%}"
+          # awk does the signed-float compare and exits 0 (→ then-branch) only
+          # when the drop exceeds the budget. Exactly -MAX_DROP is allowed.
+          if awk -v d="$num" -v max="$MAX_DROP" 'BEGIN{exit !(d < -max)}'; then
+            echo "::error::Coverage dropped by ${DELTA} vs base — exceeds the allowed ${MAX_DROP}% regression budget. Add tests to cover the new/changed code."
+            exit 1
+          fi
+          echo "Coverage delta ${DELTA} is within the allowed ${MAX_DROP}% regression budget."
 
   swift-coverage:
     name: Swift coverage
