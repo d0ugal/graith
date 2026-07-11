@@ -73,7 +73,7 @@ Key files by area:
 | Agent | `agent/agent.go` | Auto-detect agent environments, enable JSON output |
 | PTY | `pty/session.go` | PTY lifecycle, resize, I/O multiplexing |
 | PTY | `pty/scrollback.go` | Append-only scrollback file with tail reads |
-| Auth | `daemon/auth.go` | Per-session token auth: authorization rules, identity forcing, descendant checks |
+| Auth | `daemon/auth.go` | Per-session + human token auth: fail-closed local default, authorization rules, identity forcing, descendant checks |
 | Sandbox | `sandbox/sandbox.go`, `sandbox/safehouse.go`, `sandbox/nono.go` | Pluggable backends: Wrap dispatch, per-backend command/profile construction, availability |
 | Sandbox | `sandbox/why.go`, `cli/sandbox.go` | `gr sandbox why` — explain an allow/deny decision via nono's `nono why` oracle against graith's generated profile (nono backend only) |
 | Store | `store/store.go` | Flat-file git-backed document store with key validation, git commits |
@@ -177,7 +177,21 @@ The daemon sets these in every agent process:
 
 These are used by `gr msg pub/sub` to identify the sender automatically.
 `GRAITH_TOKEN` is used by the CLI to authenticate with the daemon — agents
-cannot impersonate other sessions when this token is present.
+cannot impersonate other sessions when this token is present. It is **rotated on
+every resume/restart**, so a leaked token is only valid for one agent lifetime.
+
+**Local auth is fail-closed** (`daemon/auth.go`, design doc
+`docs/design/2026-07-11-auth-identity-hardening.md`). On startup the daemon
+writes a **human token** to `human.token` in the data dir (mode 0600, alongside
+`state.json`, excluded from every agent sandbox) and reuses it across restarts.
+A local connection is treated as the human **only** if it presents a valid
+session token or that human token — a caller with no valid credential is
+rejected, not granted human access. The CLI handles this transparently: a
+session's `GRAITH_TOKEN` takes precedence, and outside a session `gr` reads
+`human.token` automatically. This means a sandboxed agent that strips
+`GRAITH_TOKEN` can no longer masquerade as the human (it cannot read
+`human.token`). The boundary is the sandbox: an *unsandboxed* agent can read
+either credential, so `gr doctor` warns when the sandbox is off.
 
 For scenario sessions, these additional env vars are set at creation and on
 resume/restart:

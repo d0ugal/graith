@@ -39,10 +39,7 @@ func New(cfg *config.Config, paths config.Paths, configFile string) (*Client, er
 		writer: protocol.NewFrameWriter(conn),
 		cfg:    cfg,
 		paths:  paths,
-		token:  os.Getenv("GRAITH_TOKEN"),
-	}
-	if c.token == "" {
-		c.token = readHumanToken(paths)
+		token:  resolveClientToken(paths),
 	}
 
 	return c, nil
@@ -162,10 +159,7 @@ func probeDaemonVersion(sockPath string, paths config.Paths) string {
 	hs := BuildHandshake(paths, 0, 0, "")
 	hs.ClientID = fmt.Sprintf("upgrade-check-%d", os.Getpid())
 
-	token := os.Getenv("GRAITH_TOKEN")
-	if token == "" {
-		token = readHumanToken(paths)
-	}
+	token := resolveClientToken(paths)
 
 	var hsData []byte
 	if token != "" {
@@ -272,10 +266,7 @@ func ConnectFast(paths config.Paths) (*Client, error) {
 		reader: protocol.NewFrameReader(conn),
 		writer: protocol.NewFrameWriter(conn),
 		paths:  paths,
-		token:  os.Getenv("GRAITH_TOKEN"),
-	}
-	if c.token == "" {
-		c.token = readHumanToken(paths)
+		token:  resolveClientToken(paths),
 	}
 
 	if err := c.Handshake(); err != nil {
@@ -337,10 +328,7 @@ func ConnectForApproval(paths config.Paths, approvalTimeout time.Duration) (*Cli
 		reader: protocol.NewFrameReader(conn),
 		writer: protocol.NewFrameWriter(conn),
 		paths:  paths,
-		token:  os.Getenv("GRAITH_TOKEN"),
-	}
-	if c.token == "" {
-		c.token = readHumanToken(paths)
+		token:  resolveClientToken(paths),
 	}
 
 	if err := c.Handshake(); err != nil {
@@ -401,6 +389,18 @@ func readHumanToken(paths config.Paths) string {
 	}
 
 	return strings.TrimSpace(string(data))
+}
+
+// resolveClientToken picks the credential the CLI presents to the daemon: an
+// in-session agent's GRAITH_TOKEN takes precedence, and only an unset/empty env
+// var falls back to the daemon-written human.token. This preserves cooperative
+// agent identity while letting the human CLI authenticate transparently.
+func resolveClientToken(paths config.Paths) string {
+	if t := os.Getenv("GRAITH_TOKEN"); t != "" {
+		return t
+	}
+
+	return readHumanToken(paths)
 }
 
 func (c *Client) Close() {

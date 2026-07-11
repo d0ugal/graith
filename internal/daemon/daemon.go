@@ -2290,7 +2290,12 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 				sm.tokenIndex[prevToken] = id
 			}
 
-			_ = sm.saveState()
+			// Re-persist so disk matches the rolled-back token (the first save may
+			// have committed the rotated one). Log rather than swallow: a failure
+			// here means durable state still holds a credential no process knows.
+			if err := sm.saveState(); err != nil {
+				sm.log.Warn("failed to persist token rollback on resume failure", "session_id", id, "err", err)
+			}
 		}
 		sm.mu.Unlock()
 	}
@@ -2617,6 +2622,15 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 		}
 
 		delete(sm.sessions, id)
+
+		// The first save already durably committed the rotated token, so restoring
+		// only in-memory would leave disk holding a credential no process knows.
+		// Best-effort re-persist the rolled-back state; if it also fails, startup
+		// reconciliation recovers from the divergence.
+		if saveErr := sm.saveState(); saveErr != nil {
+			sm.log.Warn("failed to persist rollback after resume save failure", "session_id", id, "err", saveErr)
+		}
+
 		sm.mu.Unlock()
 
 		_ = ptySess.Kill()

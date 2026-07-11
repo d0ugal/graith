@@ -201,6 +201,91 @@ func TestResumePostSpawnSaveFailureRollsBackToken(t *testing.T) {
 	if len(sm.tokenIndex) != 1 {
 		t.Errorf("token index has %d entries, want 1: %v", len(sm.tokenIndex), sm.tokenIndex)
 	}
+
+	if got := sm.state.Sessions["haar-id"].Status; got != StatusStopped {
+		t.Errorf("state status = %q, want %q", got, StatusStopped)
+	}
+
+	// The first save already committed the rotated token; the rollback must
+	// re-persist so DISK also holds the old token, not just memory.
+	persisted, err := LoadState(sm.paths.StateFile)
+	if err != nil {
+		t.Fatalf("LoadState() error = %v", err)
+	}
+
+	if got := persisted.Sessions["haar-id"].Token; got != oldToken {
+		t.Errorf("persisted token = %q, want durably rolled back to %q", got, oldToken)
+	}
+}
+
+func TestResumeFirstSaveFailureRollsBackToken(t *testing.T) {
+	sm, dir := newTokenRotationManager(t, "sleep", "60")
+
+	const oldToken = "auld-fash-token" //nolint:gosec // test fixture, not a real credential
+	seedStoppedSessionToken(t, sm, dir, "fash-id", oldToken)
+
+	// Fail the first saveState (the StatusCreating persist right after rotation,
+	// before any PTY spawn) to exercise the first-save rollback branch, which the
+	// post-spawn and spawn-failure tests do not reach.
+	sm.saveStateFault = func() error { return errBoom }
+
+	if _, err := sm.Resume("fash-id", 24, 80); err == nil {
+		t.Fatal("Resume() succeeded despite induced first-save failure")
+	}
+
+	sm.saveStateFault = nil
+
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	if got := sm.state.Sessions["fash-id"].Token; got != oldToken {
+		t.Errorf("state token = %q, want rolled back to %q", got, oldToken)
+	}
+
+	if got := sm.SessionForToken(oldToken); got != "fash-id" {
+		t.Errorf("old token resolves to %q, want fash-id", got)
+	}
+
+	if len(sm.tokenIndex) != 1 {
+		t.Errorf("token index has %d entries, want 1: %v", len(sm.tokenIndex), sm.tokenIndex)
+	}
+
+	// Status must be rolled back too, not left stuck at StatusCreating.
+	if got := sm.state.Sessions["fash-id"].Status; got != StatusStopped {
+		t.Errorf("state status = %q, want %q", got, StatusStopped)
+	}
+}
+
+func TestResumeRunningDoesNotRotateToken(t *testing.T) {
+	sm, dir := newTokenRotationManager(t, "sleep", "60")
+
+	const runningToken = "canny-running-token"
+	seedStoppedSessionToken(t, sm, dir, "canny-id", runningToken)
+
+	// Flip the seeded session to running: Resume must early-return before the
+	// rotation block, so a live agent's GRAITH_TOKEN is never invalidated.
+	sm.mu.Lock()
+	sm.state.Sessions["canny-id"].Status = StatusRunning
+	sm.mu.Unlock()
+
+	if _, err := sm.Resume("canny-id", 24, 80); err != nil {
+		t.Fatalf("Resume() of running session error = %v", err)
+	}
+
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	if got := sm.state.Sessions["canny-id"].Token; got != runningToken {
+		t.Errorf("running session token = %q, want unchanged %q", got, runningToken)
+	}
+
+	if got := sm.SessionForToken(runningToken); got != "canny-id" {
+		t.Errorf("running token resolves to %q, want canny-id", got)
+	}
+
+	if len(sm.tokenIndex) != 1 {
+		t.Errorf("token index has %d entries, want 1: %v", len(sm.tokenIndex), sm.tokenIndex)
+	}
 }
 
 var errBoom = errors.New("induced save failure")
