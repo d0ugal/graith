@@ -29,7 +29,7 @@ type testEnv struct {
 	conns  []net.Conn
 }
 
-func setup(t *testing.T) *testEnv {
+func setup(t *testing.T, mutators ...func(*config.Config)) *testEnv {
 	t.Helper()
 	testutil.IsolateGit(t)
 	tmpDir := t.TempDir()
@@ -66,6 +66,10 @@ func setup(t *testing.T) *testEnv {
 		Args:    []string{"-c", "trap 'read line; echo got:$line; exit' WINCH; echo ready; sleep 600 & wait"},
 	}
 
+	for _, m := range mutators {
+		m(cfg)
+	}
+
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
 	sm := daemon.NewSessionManager(cfg, paths, log)
@@ -88,6 +92,8 @@ func setup(t *testing.T) *testEnv {
 	}, log)
 	go srv.Serve(ctx)
 	go sm.RunDetectionLoop(ctx)
+	go sm.RunTriggerLoop(ctx)
+	go sm.RunFileWatchLoop(ctx)
 
 	return &testEnv{sm: sm, srv: srv, cancel: cancel, socket: socketPath, tmpDir: tmpDir, repo: repo}
 }

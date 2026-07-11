@@ -18,10 +18,14 @@ type triggerState struct {
 	// schedule source (keyed by trigger name)
 	cron     map[string]cron.Schedule // parsed cron schedule (cron triggers only)
 	nextFire map[string]time.Time     // in-memory next-fire cursor
-	inFlight map[string]bool          // schedule command action in flight (overlap guard)
+	inFlight map[string]int           // per-definition in-flight fire count (overlap guard)
 
 	// rate-limit log, keyed by name (schedule) or binding key (watch)
 	rateLog map[string][]time.Time
+
+	// running is the count of in-flight action dispatches, bounded by
+	// [triggers] max_concurrent.
+	running int
 
 	// watch source: bindings keyed by bindingKey(name, sessionID)
 	bindings map[string]*watchBinding
@@ -40,6 +44,7 @@ type watchBinding struct {
 	inFlight    bool            // command action in flight for this binding
 	reactorID   string          // ensure-reviewer session owned by this binding
 	degraded    string          // watcher failure/limit reason
+	canceled    bool            // set on teardown; a pending debounce callback checks it
 	cancel      func()          // stops the binding's event goroutine
 }
 
@@ -47,7 +52,7 @@ func newTriggerState() *triggerState {
 	return &triggerState{
 		cron:     make(map[string]cron.Schedule),
 		nextFire: make(map[string]time.Time),
-		inFlight: make(map[string]bool),
+		inFlight: make(map[string]int),
 		rateLog:  make(map[string][]time.Time),
 		bindings: make(map[string]*watchBinding),
 	}

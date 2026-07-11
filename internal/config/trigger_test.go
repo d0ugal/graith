@@ -90,6 +90,8 @@ func TestValidateTriggers_Invalid(t *testing.T) {
 		{"scenario rejects deliver", schedTrigger("scunner", ScheduleConfig{Cron: "@daily"}, ActionConfig{Type: ActionScenario, Scenario: "c", Deliver: DeliverConfig{Topic: "t"}}), true, "does not support [action.deliver]"},
 		{"queue overlap rejected", TriggerConfig{Name: "q", Schedule: &ScheduleConfig{Cron: "@daily"}, Action: ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}, Policy: TriggerPolicy{Overlap: "queue"}}, false, "not supported in v1"},
 		{"bad overlap", TriggerConfig{Name: "q", Schedule: &ScheduleConfig{Cron: "@daily"}, Action: ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}, Policy: TriggerPolicy{Overlap: "sometimes"}}, false, "is invalid"},
+		{"bad cron", schedTrigger("fash", ScheduleConfig{Cron: "not a cron"}, ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}), false, "cron"},
+		{"bad timezone", schedTrigger("fash", ScheduleConfig{Cron: "@daily", Timezone: "Europe/Londn"}, ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}), false, "timezone"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

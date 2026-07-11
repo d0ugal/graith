@@ -163,6 +163,10 @@ func (sm *SessionManager) createBinding(ctx context.Context, t *config.TriggerCo
 		worktree:    sess.worktree,
 		watcher:     watcher,
 		changed:     make(map[string]bool),
+		// Re-adopt an existing reactor (tagged TriggerID/TriggerReactor) so
+		// ensure-reviewer reuse survives a daemon restart or binding recreation
+		// instead of spawning a duplicate.
+		reactorID: sm.findReactor(t.Name, sess.id),
 	}
 
 	degraded := addWatchRecursive(watcher, sess.worktree, matcher)
@@ -232,7 +236,7 @@ func (sm *SessionManager) handleWatchEvent(ctx context.Context, triggerName stri
 			rel := matcher.rel(ev.Name)
 			if !matcher.ignoredDir(rel) {
 				_ = b.watcher.Add(ev.Name)
-				sm.scanNewDir(b, matcher, ev.Name, debounce, triggerName, ctx)
+				sm.scanNewDir(ctx, b, matcher, ev.Name, debounce, triggerName)
 			}
 
 			return
@@ -251,28 +255,33 @@ func (sm *SessionManager) handleWatchEvent(ctx context.Context, triggerName stri
 	sm.noteChange(ctx, triggerName, b, rel, debounce)
 }
 
-func (sm *SessionManager) scanNewDir(b *watchBinding, matcher *watchMatcher, dir string, debounce time.Duration, triggerName string, ctx context.Context) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return
-	}
+// scanNewDir handles a newly-created (or moved-in) directory: it registers
+// watches for the whole non-ignored subtree and notes any existing files as
+// changes, so a tool that atomically creates a nested tree isn't missed.
+func (sm *SessionManager) scanNewDir(ctx context.Context, b *watchBinding, matcher *watchMatcher, dir string, debounce time.Duration, triggerName string) {
+	_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil //nolint:nilerr // skip unreadable entries, keep walking
+		}
 
-	for _, e := range entries {
-		full := filepath.Join(dir, e.Name())
+		rel := matcher.rel(path)
 
-		rel := matcher.rel(full)
-		if e.IsDir() {
-			if !matcher.ignoredDir(rel) {
-				_ = b.watcher.Add(full)
+		if d.IsDir() {
+			if rel != "." && matcher.ignoredDir(rel) {
+				return filepath.SkipDir
 			}
 
-			continue
+			_ = b.watcher.Add(path)
+
+			return nil
 		}
 
 		if matcher.fires(rel) {
 			sm.noteChange(ctx, triggerName, b, rel, debounce)
 		}
-	}
+
+		return nil
+	})
 }
 
 // noteChange records a changed path and (re)arms the debounce timer.
@@ -299,10 +308,24 @@ func (sm *SessionManager) watchFire(ctx context.Context, triggerName string, b *
 	}
 
 	b.bmu.Lock()
+	// The binding may have been torn down after this timer fired but before it
+	// ran; don't fire for a canceled binding (stopped/soft-deleted source).
+	if b.canceled {
+		b.bmu.Unlock()
+		return
+	}
+
 	if t.Action.Type == config.ActionCommand && t.Policy.OverlapMode() == config.OverlapSkip && b.inFlight {
 		b.bmu.Unlock()
 		sm.log.Info("trigger: watch skipped (overlap)", "trigger", triggerName)
 
+		return
+	}
+
+	// Nothing coalesced (e.g. a superseded timer that already had its changes
+	// drained by an earlier fire) — don't fire an empty event.
+	if len(b.changed) == 0 {
+		b.bmu.Unlock()
 		return
 	}
 
@@ -355,6 +378,8 @@ func (sm *SessionManager) teardownBinding(key string) {
 	}
 
 	b.bmu.Lock()
+
+	b.canceled = true
 	if b.debounce != nil {
 		b.debounce.Stop()
 	}

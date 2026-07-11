@@ -52,7 +52,7 @@ func TestTriggerFingerprint(t *testing.T) {
 
 func TestTriggerRuntimePersistence(t *testing.T) {
 	sm := newTriggerTestSM(t)
-	sm.updateTriggerRuntime("braw", func(r *TriggerRuntimeState) { r.RunCount = 1 })
+	_ = sm.updateTriggerRuntime("braw", func(r *TriggerRuntimeState) { r.RunCount = 1 })
 	sm.recordTriggerRun("braw", TriggerRun{Cause: causeSchedule, Result: "published", ScheduledAt: time.Now()})
 	sm.recordTriggerError("braw", "boom")
 
@@ -402,6 +402,104 @@ func TestActionCommand_Unsandboxed(t *testing.T) {
 
 	if result != "exit 0" {
 		t.Errorf("result = %q, want exit 0", result)
+	}
+}
+
+func TestActionCommand_NonZeroExit(t *testing.T) {
+	repo := t.TempDir()
+	trig := config.TriggerConfig{
+		Name: "thrawn", Schedule: &config.ScheduleConfig{Cron: "@daily"},
+		Action: config.ActionConfig{Type: config.ActionCommand, Command: "exit 3", Repo: repo, Sandbox: boolFalse()},
+	}
+	sm := newTriggerTestSM(t, trig)
+
+	result, err := sm.actionCommand(t.Context(), &trig, fireContext{now: time.Now()})
+	if err == nil {
+		t.Error("non-zero exit should return an error (surfaces in LastError)")
+	}
+
+	if result != "exit 3" {
+		t.Errorf("result = %q, want exit 3", result)
+	}
+}
+
+func TestTriggerRunNow_RespectsOverlap(t *testing.T) {
+	trig := config.TriggerConfig{Name: "canny", Schedule: &config.ScheduleConfig{Cron: "@daily"}, Action: config.ActionConfig{Type: config.ActionCommand, Command: "sleep 1", Repo: t.TempDir(), Sandbox: boolFalse()}}
+	sm := newTriggerTestSM(t, trig)
+	sm.triggers.mu.Lock()
+	sm.triggers.inFlight["canny"] = 1
+	sm.triggers.mu.Unlock()
+
+	if err := sm.TriggerRunNow(t.Context(), "canny"); err == nil {
+		t.Error("manual run should be rejected while a run is in flight (overlap=skip)")
+	}
+}
+
+func TestAcquireSlot(t *testing.T) {
+	sm := newTriggerTestSM(t)
+
+	sm.cfg.TriggersRuntime.MaxConcurrent = 2
+	if !sm.acquireSlot() {
+		t.Fatal("first slot should acquire")
+	}
+
+	if !sm.acquireSlot() {
+		t.Fatal("second slot should acquire")
+	}
+
+	if sm.acquireSlot() {
+		t.Error("third slot should be refused at cap 2")
+	}
+
+	sm.releaseSlot()
+
+	if !sm.acquireSlot() {
+		t.Error("slot should acquire after release")
+	}
+}
+
+func TestAdvanceScheduleInterval_NoDrift(t *testing.T) {
+	trig := config.TriggerConfig{Name: "iv", Schedule: &config.ScheduleConfig{Every: "1h"}, Action: config.ActionConfig{Type: config.ActionMessage, Body: "x", Deliver: config.DeliverConfig{Topic: "t"}}}
+	sm := newTriggerTestSM(t, trig)
+	base := time.Now().Truncate(time.Hour)
+	sm.triggers.nextFire["iv"] = base
+
+	next := sm.advanceSchedule("iv", &trig, base.Add(90*time.Second))
+	if !next.Equal(base.Add(time.Hour)) {
+		t.Errorf("interval drifted: next=%v want=%v", next, base.Add(time.Hour))
+	}
+}
+
+func TestSessionDeliveryInstruction(t *testing.T) {
+	sm := newTriggerTestSM(t)
+
+	vars := config.TriggerVars{Date: "2026-07-11", SessionName: "ben"}
+	if got, _ := sm.sessionDeliveryInstruction(config.DeliverConfig{}, vars); got != "" {
+		t.Errorf("empty deliver should give no instruction, got %q", got)
+	}
+
+	got, err := sm.sessionDeliveryInstruction(config.DeliverConfig{Inbox: "orchestrator", Store: "reports/{date}.md"}, vars)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, want := range []string{"orchestrator", "gr store put reports/2026-07-11.md", "deliver your result"} {
+		if !contains(got, want) {
+			t.Errorf("instruction missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestFindReactor(t *testing.T) {
+	sm := newTriggerTestSM(t)
+
+	sm.state.Sessions["r"] = &SessionState{ID: "r", TriggerReactor: true, TriggerID: "rev", SharedWorktreeSourceID: "src"}
+	if got := sm.findReactor("rev", "src"); got != "r" {
+		t.Errorf("findReactor = %q, want r", got)
+	}
+
+	if got := sm.findReactor("rev", "other"); got != "" {
+		t.Errorf("findReactor for wrong source = %q, want empty", got)
 	}
 }
 
