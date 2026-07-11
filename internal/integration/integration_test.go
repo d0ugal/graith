@@ -311,6 +311,55 @@ func TestStopAndResume(t *testing.T) {
 	}
 }
 
+func TestResumeInvalidatesPreviousSessionToken(t *testing.T) {
+	env := setup(t)
+	defer env.teardown()
+
+	r, w := env.connect(t)
+	handshake(t, r, w)
+
+	sendControl(t, w, "create", protocol.CreateMsg{
+		Name: "bide-token", Agent: "echo", RepoPath: env.repo, Base: "main",
+	})
+	createResp := readControl(t, r)
+	var info protocol.SessionInfo
+	protocol.DecodePayload(createResp, &info)
+
+	created, ok := env.sm.Get(info.ID)
+	if !ok {
+		t.Fatalf("created session %q not found", info.ID)
+	}
+	oldToken := created.Token
+
+	sendControl(t, w, "stop", protocol.StopMsg{SessionID: info.ID})
+	if resp := readControl(t, r); resp.Type == "error" {
+		var e protocol.ErrorMsg
+		protocol.DecodePayload(resp, &e)
+		t.Fatalf("stop error: %s", e.Message)
+	}
+
+	sendControl(t, w, "resume", protocol.ResumeMsg{SessionID: info.ID})
+	if resp := readControl(t, r); resp.Type == "error" {
+		var e protocol.ErrorMsg
+		protocol.DecodePayload(resp, &e)
+		t.Fatalf("resume error: %s", e.Message)
+	}
+
+	resumed, ok := env.sm.Get(info.ID)
+	if !ok {
+		t.Fatalf("resumed session %q not found", info.ID)
+	}
+	if resumed.Token == "" || resumed.Token == oldToken {
+		t.Fatalf("token was not rotated: old=%q new=%q", oldToken, resumed.Token)
+	}
+	if got := env.sm.SessionForToken(oldToken); got != "" {
+		t.Errorf("pre-resume token resolves to %q, want rejected", got)
+	}
+	if got := env.sm.SessionForToken(resumed.Token); got != info.ID {
+		t.Errorf("new token resolves to %q, want %q", got, info.ID)
+	}
+}
+
 func TestRename(t *testing.T) {
 	env := setup(t)
 	defer env.teardown()

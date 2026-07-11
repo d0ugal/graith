@@ -2192,6 +2192,19 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	prevSummaryText := sessState.SummaryText
 	prevSummarySetAt := sessState.SummarySetAt
 	prevSummaryTTL := sessState.SummaryTTL
+	prevToken := sessState.Token
+
+	newToken, err := generateToken()
+	if err != nil {
+		sm.mu.Unlock()
+		return SessionState{}, fmt.Errorf("generate session token: %w", err)
+	}
+
+	if prevToken != "" {
+		delete(sm.tokenIndex, prevToken)
+	}
+	sessState.Token = newToken
+	sm.tokenIndex[newToken] = id
 
 	// Mark as creating so concurrent operations see it's busy.
 	prevStatusChangedAt := sessState.StatusChangedAt
@@ -2201,6 +2214,11 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	if err := sm.saveState(); err != nil {
 		sessState.Status = prevStatus
 		sessState.StatusChangedAt = prevStatusChangedAt
+		sessState.Token = prevToken
+		delete(sm.tokenIndex, newToken)
+		if prevToken != "" {
+			sm.tokenIndex[prevToken] = id
+		}
 		sm.mu.Unlock()
 
 		return SessionState{}, fmt.Errorf("persist session state: %w", err)
@@ -2223,7 +2241,7 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	sessMirror := sessState.Mirror
 	sessSystemKind := sessState.SystemKind
 	sessFreshStart := sessState.FreshStart
-	sessToken := sessState.Token
+	sessToken := newToken
 	sessScenarioID := sessState.ScenarioID
 	sessScenarioRole := sessState.ScenarioRole
 	sessScenarioGoal := sessState.ScenarioGoal
@@ -2247,6 +2265,11 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 			s.SummaryText = prevSummaryText
 			s.SummarySetAt = prevSummarySetAt
 			s.SummaryTTL = prevSummaryTTL
+			s.Token = prevToken
+			delete(sm.tokenIndex, newToken)
+			if prevToken != "" {
+				sm.tokenIndex[prevToken] = id
+			}
 			_ = sm.saveState()
 		}
 		sm.mu.Unlock()
