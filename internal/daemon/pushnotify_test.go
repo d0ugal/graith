@@ -205,6 +205,22 @@ func TestSendPushNotification_DispatchError(t *testing.T) {
 	if reason == "" {
 		t.Fatal("expected a failure reason")
 	}
+
+	// A failed dispatch must not consume rate-limit budget or open a coalescing
+	// window — the notification never reached the user, so a retry must be allowed.
+	if len(sm.pushLog) != 0 {
+		t.Errorf("failed dispatch should not record a rate-limit entry, got len %d", len(sm.pushLog))
+	}
+
+	if sm.lastPushKey != "" {
+		t.Errorf("failed dispatch should not set a coalescing key, got %q", sm.lastPushKey)
+	}
+
+	// The retry (dispatch now succeeds) should go through.
+	fd.err = nil
+	if ok, reason := sm.SendPushNotification(pushNotification{Message: "x"}); !ok {
+		t.Fatalf("retry after a failed dispatch should deliver, got suppressed: %s", reason)
+	}
 }
 
 func TestSendPushNotification_Coalesced(t *testing.T) {
