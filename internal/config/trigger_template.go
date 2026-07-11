@@ -37,19 +37,25 @@ func ExpandTrigger(s string, vars TriggerVars) (string, error) {
 	m := vars.toMap()
 
 	var expandErr error
+
 	out := varPattern.ReplaceAllStringFunc(s, func(match string) string {
 		key := match[1 : len(match)-1] // strip { }
+
 		val, ok := m[key]
 		if !ok {
 			if expandErr == nil {
 				expandErr = fmt.Errorf("unknown trigger template variable %q in %q", key, s)
 			}
+
 			return match
 		}
+
 		return val
 	})
+
 	if expandErr != nil {
 		return "", expandErr
 	}
+
 	return out, nil
 }

@@ -7,9 +7,8 @@ import (
 	"bytes"
 	"fmt"
 
-	toml "github.com/pelletier/go-toml/v2"
-
 	"github.com/d0ugal/graith/internal/protocol"
+	toml "github.com/pelletier/go-toml/v2"
 )
 
 // File is the on-disk scenario definition.
@@ -42,20 +41,26 @@ type Session struct {
 // rejected so typos surface as errors.
 func Parse(data []byte) (*File, error) {
 	var sf File
+
 	dec := toml.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
+
 	if err := dec.Decode(&sf); err != nil {
 		return nil, fmt.Errorf("parse scenario TOML: %w", err)
 	}
+
 	if sf.Version != 1 {
 		return nil, fmt.Errorf("unsupported scenario version %d (expected 1)", sf.Version)
 	}
+
 	if sf.Scenario.Name == "" {
 		return nil, fmt.Errorf("scenario.name is required")
 	}
+
 	if len(sf.Sessions) == 0 {
 		return nil, fmt.Errorf("at least one [[sessions]] entry is required")
 	}
+
 	return &sf, nil
 }
 
@@ -67,9 +72,11 @@ func SessionInputs(sf *File) ([]protocol.ScenarioSessionInput, error) {
 		if s.Name == "" {
 			return nil, fmt.Errorf("every [[sessions]] entry needs a name")
 		}
+
 		if s.Repo == "" && !s.Shared {
 			return nil, fmt.Errorf("session %q: repo is required (unless shared)", s.Name)
 		}
+
 		inputs = append(inputs, protocol.ScenarioSessionInput{
 			Name:       s.Name,
 			Repo:       s.Repo,
@@ -82,5 +89,6 @@ func SessionInputs(sf *File) ([]protocol.ScenarioSessionInput, error) {
 			Shared:     s.Shared,
 		})
 	}
+
 	return inputs, nil
 }

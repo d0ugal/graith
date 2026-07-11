@@ -244,6 +244,7 @@ func (ac authContext) checkTriggerOp(sm *SessionManager) error {
 	if orchID == "" {
 		return fmt.Errorf("not authorized: no orchestrator session to authorize against")
 	}
+
 	if ac.sessionID == orchID || sm.isDescendantOf(ac.sessionID, orchID) {
 		return nil
 	}

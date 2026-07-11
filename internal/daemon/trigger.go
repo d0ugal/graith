@@ -47,9 +47,10 @@ func (sm *SessionManager) RunTriggerLoop(ctx context.Context) {
 			if len(cfg.Triggers) == 0 {
 				continue
 			}
+
 			sm.reconcileSchedules(cfg, now)
+
 			for _, name := range sm.dueSchedules(now) {
-				//nolint:contextcheck // fired actions may spawn/auto-resume sessions that must outlive this tick's ctx.
 				go sm.fireSchedule(ctx, name, causeSchedule)
 			}
 		}
@@ -67,10 +68,12 @@ func (sm *SessionManager) reconcileSchedules(cfg *config.Config, now time.Time) 
 		if !t.IsSchedule() || !t.TriggerEnabled() {
 			continue
 		}
+
 		live[t.Name] = true
 		fp := triggerFingerprint(t)
 
 		rt := sm.getTriggerRuntime(t.Name)
+
 		changed := rt == nil || rt.Fingerprint != fp
 		if changed {
 			// New or redefined: reset the persisted cursor and re-anchor.
@@ -97,6 +100,7 @@ func (sm *SessionManager) reconcileSchedules(cfg *config.Config, now time.Time) 
 			delete(sm.triggers.cron, name)
 		}
 	}
+
 	for name := range sm.triggers.nextFire {
 		if !live[name] {
 			delete(sm.triggers.nextFire, name)
@@ -111,11 +115,13 @@ func (sm *SessionManager) reconcileSchedules(cfg *config.Config, now time.Time) 
 // honoring catch_up and any persisted NextScheduledFireAt.
 func (sm *SessionManager) armSchedule(t *config.TriggerConfig, rt *TriggerRuntimeState, now time.Time) {
 	sched := t.Schedule
+
 	var next time.Time
 
 	switch {
 	case sched.Cron != "":
 		loc := time.Local
+
 		if sched.Timezone != "" {
 			if l, err := time.LoadLocation(sched.Timezone); err == nil {
 				loc = l
@@ -123,14 +129,17 @@ func (sm *SessionManager) armSchedule(t *config.TriggerConfig, rt *TriggerRuntim
 				sm.log.Warn("trigger: bad timezone, using local", "trigger", t.Name, "tz", sched.Timezone, "err", err)
 			}
 		}
+
 		cs, err := cronParser.Parse(sched.Cron)
 		if err != nil {
 			sm.recordTriggerError(t.Name, fmt.Sprintf("bad cron %q: %v", sched.Cron, err))
 			return
 		}
+
 		sm.triggers.mu.Lock()
 		sm.triggers.cron[t.Name] = cs
 		sm.triggers.mu.Unlock()
+
 		next = cs.Next(now.In(loc))
 	case sched.Every != "":
 		every, err := config.ParseDurationWithDays(sched.Every)
@@ -138,12 +147,14 @@ func (sm *SessionManager) armSchedule(t *config.TriggerConfig, rt *TriggerRuntim
 			sm.recordTriggerError(t.Name, fmt.Sprintf("bad interval %q", sched.Every))
 			return
 		}
+
 		anchor := now
 		if rt.LastScheduledFireAt != nil {
 			anchor = *rt.LastScheduledFireAt
 		} else if rt.ActivatedAt != nil {
 			anchor = *rt.ActivatedAt
 		}
+
 		next = anchor.Add(every)
 		for !next.After(now) {
 			next = next.Add(every)
@@ -160,6 +171,7 @@ func (sm *SessionManager) armSchedule(t *config.TriggerConfig, rt *TriggerRuntim
 	sm.triggers.mu.Unlock()
 
 	nextCopy := next
+
 	sm.updateTriggerRuntime(t.Name, func(r *TriggerRuntimeState) { r.NextScheduledFireAt = &nextCopy })
 }
 
@@ -170,12 +182,14 @@ func (sm *SessionManager) dueSchedules(now time.Time) []string {
 	var due []string
 
 	cfg := sm.Config()
+
 	byName := make(map[string]*config.TriggerConfig, len(cfg.Triggers))
 	for i := range cfg.Triggers {
 		byName[cfg.Triggers[i].Name] = &cfg.Triggers[i]
 	}
 
 	sm.triggers.mu.Lock()
+
 	names := make([]string, 0, len(sm.triggers.nextFire))
 	for name := range sm.triggers.nextFire {
 		names = append(names, name)
@@ -187,12 +201,14 @@ func (sm *SessionManager) dueSchedules(now time.Time) []string {
 		if t == nil || !t.TriggerEnabled() {
 			continue
 		}
+
 		rt := sm.getTriggerRuntime(name)
 		if rt != nil && rt.Paused {
 			continue
 		}
 
 		sm.triggers.mu.Lock()
+
 		next, ok := sm.triggers.nextFire[name]
 		if !ok || now.Before(next) {
 			sm.triggers.mu.Unlock()
@@ -202,11 +218,15 @@ func (sm *SessionManager) dueSchedules(now time.Time) []string {
 		if t.Action.Type == config.ActionCommand && t.Policy.OverlapMode() == config.OverlapSkip && sm.triggers.inFlight[name] {
 			newNext := sm.advanceSchedule(name, t, now)
 			sm.triggers.mu.Unlock()
+
 			nn := newNext
+
 			sm.updateTriggerRuntime(name, func(r *TriggerRuntimeState) { r.NextScheduledFireAt = &nn })
 			sm.log.Info("trigger: skipped (overlap)", "trigger", name)
+
 			continue
 		}
+
 		newNext := sm.advanceSchedule(name, t, now)
 		if t.Action.Type == config.ActionCommand {
 			sm.triggers.inFlight[name] = true
@@ -216,6 +236,7 @@ func (sm *SessionManager) dueSchedules(now time.Time) []string {
 		// Commit the fire durably BEFORE dispatch (at-most-once), together with
 		// the advanced cursor.
 		fireAt, nn := next, newNext
+
 		sm.updateTriggerRuntime(name, func(r *TriggerRuntimeState) {
 			r.LastScheduledFireAt = &fireAt
 			r.NextScheduledFireAt = &nn
@@ -230,22 +251,28 @@ func (sm *SessionManager) dueSchedules(now time.Time) []string {
 // next-fire time. Caller holds ts.mu; persistence is the caller's job (off-lock).
 func (sm *SessionManager) advanceSchedule(name string, t *config.TriggerConfig, now time.Time) time.Time {
 	var next time.Time
+
 	if cs, ok := sm.triggers.cron[name]; ok {
 		loc := time.Local
+
 		if t.Schedule.Timezone != "" {
 			if l, err := time.LoadLocation(t.Schedule.Timezone); err == nil {
 				loc = l
 			}
 		}
+
 		next = cs.Next(now.In(loc))
 	} else {
 		every, err := config.ParseDurationWithDays(t.Schedule.Every)
 		if err != nil || every <= 0 {
 			every = time.Minute
 		}
+
 		next = now.Add(every)
 	}
+
 	sm.triggers.nextFire[name] = next
+
 	return next
 }
 
@@ -265,6 +292,7 @@ func (sm *SessionManager) fireSchedule(ctx context.Context, name, cause string) 
 
 	result, err := sm.fireAction(ctx, t, fireContext{cause: cause, now: time.Now()})
 	sm.recordTriggerRun(name, TriggerRun{ScheduledAt: time.Now(), Cause: cause, Result: result})
+
 	if err != nil {
 		sm.recordTriggerError(name, err.Error())
 		sm.log.Warn("trigger: action failed", "trigger", name, "err", err)
@@ -286,13 +314,13 @@ type fireContext struct {
 func (sm *SessionManager) fireAction(ctx context.Context, t *config.TriggerConfig, fc fireContext) (string, error) {
 	switch t.Action.Type {
 	case config.ActionMessage:
-		return sm.actionMessage(t, fc)
+		return sm.actionMessage(ctx, t, fc)
 	case config.ActionCommand:
 		return sm.actionCommand(ctx, t, fc)
 	case config.ActionSession:
-		return sm.actionSession(t, fc)
+		return sm.actionSession(ctx, t, fc)
 	case config.ActionScenario:
-		return sm.actionScenario(t)
+		return sm.actionScenario(ctx, t)
 	default:
 		return "", fmt.Errorf("unknown action type %q", t.Action.Type)
 	}
@@ -302,6 +330,7 @@ func (sm *SessionManager) fireAction(ctx context.Context, t *config.TriggerConfi
 
 func (sm *SessionManager) triggerVars(t *config.TriggerConfig, fc fireContext) config.TriggerVars {
 	changed := strings.Join(fc.changedFiles, ", ")
+
 	return config.TriggerVars{
 		Name:         t.Name,
 		Date:         fc.now.Format("2006-01-02"),
@@ -319,17 +348,21 @@ func (sm *SessionManager) triggerVars(t *config.TriggerConfig, fc fireContext) c
 func (sm *SessionManager) getTriggerRuntime(name string) *TriggerRuntimeState {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
+
 	rt, ok := sm.state.TriggerRuntime[name]
 	if !ok {
 		return nil
 	}
+
 	cp := *rt
+
 	return &cp
 }
 
 func (sm *SessionManager) putTriggerRuntime(name string, rt *TriggerRuntimeState) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
+
 	sm.state.TriggerRuntime[name] = rt
 	if err := sm.saveState(); err != nil {
 		sm.log.Warn("trigger: save state failed", "trigger", name, "err", err)
@@ -339,12 +372,15 @@ func (sm *SessionManager) putTriggerRuntime(name string, rt *TriggerRuntimeState
 func (sm *SessionManager) updateTriggerRuntime(name string, fn func(*TriggerRuntimeState)) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
+
 	rt, ok := sm.state.TriggerRuntime[name]
 	if !ok {
 		rt = &TriggerRuntimeState{Name: name}
 		sm.state.TriggerRuntime[name] = rt
 	}
+
 	fn(rt)
+
 	if err := sm.saveState(); err != nil {
 		sm.log.Warn("trigger: save state failed", "trigger", name, "err", err)
 	}
@@ -357,6 +393,7 @@ func (sm *SessionManager) recordTriggerError(name, msg string) {
 func (sm *SessionManager) recordTriggerRun(name string, run TriggerRun) {
 	sm.updateTriggerRuntime(name, func(r *TriggerRuntimeState) {
 		r.RunCount++
+
 		r.History = append(r.History, run)
 		if len(r.History) > triggerHistoryMax {
 			r.History = r.History[len(r.History)-triggerHistoryMax:]
@@ -374,6 +411,7 @@ func (sm *SessionManager) triggerByName(name string) *config.TriggerConfig {
 			return &t
 		}
 	}
+
 	return nil
 }
 
@@ -387,6 +425,7 @@ func triggerFingerprint(t *config.TriggerConfig) string {
 	}{t.Schedule, t.Watch, t.Action, t.Policy}
 	b, _ := json.Marshal(payload)
 	sum := sha256.Sum256(b)
+
 	return hex.EncodeToString(sum[:8])
 }
 
@@ -395,18 +434,24 @@ func triggerFingerprint(t *config.TriggerConfig) string {
 func (sm *SessionManager) rateLimited(key string, n int, window time.Duration, now time.Time) bool {
 	sm.triggers.mu.Lock()
 	defer sm.triggers.mu.Unlock()
+
 	cutoff := now.Add(-window)
+
 	var recent []time.Time
+
 	for _, ts := range sm.triggers.rateLog[key] {
 		if ts.After(cutoff) {
 			recent = append(recent, ts)
 		}
 	}
+
 	if len(recent) >= n {
 		sm.triggers.rateLog[key] = recent
 		return true
 	}
+
 	sm.triggers.rateLog[key] = append(recent, now)
+
 	return false
 }
 
@@ -416,20 +461,23 @@ func (sm *SessionManager) deliverStorePath(key, repo string) (dir, cleanKey stri
 	if strings.HasPrefix(key, "shared:") {
 		return store.SharedStorePath(sm.paths.DataDir), strings.TrimPrefix(key, "shared:")
 	}
+
 	if repo == "" {
 		return store.SharedStorePath(sm.paths.DataDir), key
 	}
+
 	return store.StorePath(sm.paths.DataDir, repo), key
 }
 
 // deliver routes body per the deliver block. repo scopes a repo-store key.
-func (sm *SessionManager) deliver(d config.DeliverConfig, body, repo string, vars config.TriggerVars) {
+func (sm *SessionManager) deliver(ctx context.Context, d config.DeliverConfig, body, repo string, vars config.TriggerVars) {
 	if d.Inbox != "" {
 		target, err := config.ExpandTrigger(d.Inbox, vars)
 		if err == nil {
-			sm.deliverInbox(target, body, d.Wake)
+			sm.deliverInbox(ctx, target, body, d.Wake)
 		}
 	}
+
 	if d.Topic != "" {
 		topic, err := config.ExpandTrigger(d.Topic, vars)
 		if err == nil && sm.messages != nil {
@@ -438,6 +486,7 @@ func (sm *SessionManager) deliver(d config.DeliverConfig, body, repo string, var
 			}
 		}
 	}
+
 	if d.Store != "" {
 		key, err := config.ExpandTrigger(d.Store, vars)
 		if err == nil {
@@ -453,9 +502,13 @@ func (sm *SessionManager) deliver(d config.DeliverConfig, body, repo string, var
 
 // deliverInbox delivers to a session inbox, resolving "orchestrator", gating
 // resume by wake, and never waking a soft-deleted session.
-func (sm *SessionManager) deliverInbox(target, body string, wake bool) {
+func (sm *SessionManager) deliverInbox(ctx context.Context, target, body string, wake bool) {
+	_ = ctx // reserved for future cancellation; notifyFromDaemon detaches by design
+
 	sm.mu.RLock()
+
 	var id string
+
 	orchestrator := target == "orchestrator"
 	if orchestrator {
 		id = sm.findOrchestratorID()
@@ -467,10 +520,12 @@ func (sm *SessionManager) deliverInbox(target, body string, wake bool) {
 			}
 		}
 	}
+
 	var softDeleted bool
 	if s, ok := sm.state.Sessions[id]; ok {
 		softDeleted = s.IsSoftDeleted()
 	}
+
 	sm.mu.RUnlock()
 
 	if id == "" || softDeleted || sm.messages == nil {
@@ -479,9 +534,11 @@ func (sm *SessionManager) deliverInbox(target, body string, wake bool) {
 
 	// notifyFromDaemon publishes AND auto-resumes; a bare Publish does not.
 	if orchestrator || wake {
+		//nolint:contextcheck // notifyFromDaemon detaches its auto-resume; it must outlive this call.
 		sm.notifyFromDaemon(id, body)
 		return
 	}
+
 	if _, err := sm.messages.Publish("inbox:"+id, systemSenderID, systemSenderName, body, "", ""); err != nil {
 		sm.log.Warn("trigger: inbox publish failed", "session", id, "err", err)
 	}
@@ -491,6 +548,7 @@ func (sm *SessionManager) deliverInbox(target, body string, wake bool) {
 
 func (sm *SessionManager) triggerRecord(t *config.TriggerConfig) protocol.TriggerRecord {
 	rt := sm.getTriggerRuntime(t.Name)
+
 	rec := protocol.TriggerRecord{
 		Name:    t.Name,
 		Action:  t.Action.Type,
@@ -503,6 +561,7 @@ func (sm *SessionManager) triggerRecord(t *config.TriggerConfig) protocol.Trigge
 		} else {
 			rec.Schedule = "every " + t.Schedule.Every
 		}
+
 		sm.triggers.mu.Lock()
 		if nf, ok := sm.triggers.nextFire[t.Name]; ok {
 			rec.NextFire = nf.Format(time.RFC3339)
@@ -515,6 +574,7 @@ func (sm *SessionManager) triggerRecord(t *config.TriggerConfig) protocol.Trigge
 		} else {
 			rec.WatchScope = "role:" + t.Watch.Role
 		}
+
 		sm.triggers.mu.Lock()
 		for _, b := range sm.triggers.bindings {
 			if b.triggerName == t.Name {
@@ -526,27 +586,33 @@ func (sm *SessionManager) triggerRecord(t *config.TriggerConfig) protocol.Trigge
 		}
 		sm.triggers.mu.Unlock()
 	}
+
 	if rt != nil {
 		rec.Paused = rt.Paused
 		rec.RunCount = rt.RunCount
+
 		rec.LastError = rt.LastError
 		if rt.LastScheduledFireAt != nil {
 			rec.LastRun = rt.LastScheduledFireAt.Format(time.RFC3339)
 		}
+
 		if len(rt.History) > 0 {
 			rec.LastResult = rt.History[len(rt.History)-1].Result
 		}
 	}
+
 	return rec
 }
 
 // TriggerList returns records for all configured triggers.
 func (sm *SessionManager) TriggerList() []protocol.TriggerRecord {
 	cfg := sm.Config()
+
 	out := make([]protocol.TriggerRecord, 0, len(cfg.Triggers))
 	for i := range cfg.Triggers {
 		out = append(out, sm.triggerRecord(&cfg.Triggers[i]))
 	}
+
 	return out
 }
 
@@ -556,6 +622,7 @@ func (sm *SessionManager) TriggerStatus(name string) (protocol.TriggerRecord, er
 	if t == nil {
 		return protocol.TriggerRecord{}, fmt.Errorf("trigger %q not found", name)
 	}
+
 	return sm.triggerRecord(t), nil
 }
 
@@ -566,11 +633,13 @@ func (sm *SessionManager) TriggerRunNow(ctx context.Context, name string) error 
 	if t == nil {
 		return fmt.Errorf("trigger %q not found", name)
 	}
+
 	if t.IsWatch() {
 		return fmt.Errorf("trigger %q is a watch trigger; it fires on file changes, not on demand", name)
 	}
-	//nolint:contextcheck // manual fire may spawn sessions that outlive the request ctx.
+
 	go sm.fireSchedule(context.WithoutCancel(ctx), name, causeManual)
+
 	return nil
 }
 
@@ -581,9 +650,12 @@ func (sm *SessionManager) TriggerPause(name string, pause bool) error {
 	if t == nil {
 		return fmt.Errorf("trigger %q not found", name)
 	}
+
 	if !pause && !t.TriggerEnabled() {
 		return fmt.Errorf("trigger %q is disabled in config; cannot resume", name)
 	}
+
 	sm.updateTriggerRuntime(name, func(r *TriggerRuntimeState) { r.Paused = pause })
+
 	return nil
 }

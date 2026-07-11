@@ -97,6 +97,7 @@ func TestValidateTriggers_Invalid(t *testing.T) {
 			if len(errs) == 0 {
 				t.Fatalf("expected error containing %q, got none", tc.wantContains)
 			}
+
 			joined := errorsString(errs)
 			if !strings.Contains(joined, tc.wantContains) {
 				t.Fatalf("expected error containing %q, got: %s", tc.wantContains, joined)
@@ -110,6 +111,7 @@ func TestValidateTriggers_DuplicateNames(t *testing.T) {
 		schedTrigger("bide", ScheduleConfig{Cron: "@daily"}, ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}),
 		schedTrigger("bide", ScheduleConfig{Cron: "@hourly"}, ActionConfig{Type: ActionMessage, Body: "y", Deliver: DeliverConfig{Topic: "t"}}),
 	}}
+
 	joined := errorsString(c.validateTriggers())
 	if !strings.Contains(joined, "duplicate trigger name") {
 		t.Fatalf("expected duplicate error, got %s", joined)
@@ -122,6 +124,7 @@ func errorsString(errs []error) string {
 		b.WriteString(e.Error())
 		b.WriteString("\n")
 	}
+
 	return b.String()
 }
 
@@ -129,30 +132,39 @@ func TestTriggerHelpers(t *testing.T) {
 	if !(TriggerConfig{}).TriggerEnabled() {
 		t.Error("nil Enabled should default true")
 	}
+
 	if (TriggerConfig{Enabled: boolPtr(false)}).TriggerEnabled() {
 		t.Error("explicit false should disable")
 	}
+
 	if got := (WatchConfig{}).DebounceDuration(); got != 30*time.Second {
 		t.Errorf("default debounce = %v, want 30s", got)
 	}
+
 	if got := (WatchConfig{Debounce: "3s"}).DebounceDuration(); got != 3*time.Second {
 		t.Errorf("debounce = %v, want 3s", got)
 	}
+
 	if got := (ActionConfig{}).TimeoutDuration(); got != 5*time.Minute {
 		t.Errorf("default timeout = %v, want 5m", got)
 	}
+
 	if !(ActionConfig{}).Sandboxed() {
 		t.Error("nil sandbox should default true")
 	}
+
 	if (ActionConfig{Sandbox: boolPtr(false)}).Sandboxed() {
 		t.Error("explicit false should be unsandboxed")
 	}
+
 	if got := (TriggerPolicy{}).OverlapMode(); got != OverlapSkip {
 		t.Errorf("default overlap = %q, want skip", got)
 	}
+
 	if got := (TriggerPolicy{Overlap: "allow"}).OverlapMode(); got != OverlapAllow {
 		t.Errorf("overlap = %q, want allow", got)
 	}
+
 	if got := (TriggersRuntime{}).MaxConcurrentOr(); got != 4 {
 		t.Errorf("default max_concurrent = %d, want 4", got)
 	}

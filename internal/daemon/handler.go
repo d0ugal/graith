@@ -1526,6 +1526,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				if !ok {
 					continue
 				}
+
 				rec, err := sm.TriggerStatus(s.Name)
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
@@ -1538,9 +1539,11 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				if !ok {
 					continue
 				}
+
 				if !auth.authorizeTriggerOp(sm, sendControl) {
 					continue
 				}
+
 				if err := sm.TriggerRunNow(ctx, s.Name); err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 				} else {
@@ -1554,9 +1557,11 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				if !ok {
 					continue
 				}
+
 				if !auth.authorizeTriggerOp(sm, sendControl) {
 					continue
 				}
+
 				if err := sm.TriggerPause(s.Name, s.Pause); err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 				} else {

@@ -19,13 +19,16 @@ role = "implementer"
 name = "bairn"
 shared = true
 `)
+
 	sf, err := Parse(data)
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
+
 	if sf.Scenario.Name != "strath" {
 		t.Errorf("name = %q", sf.Scenario.Name)
 	}
+
 	if len(sf.Sessions) != 2 {
 		t.Fatalf("sessions = %d", len(sf.Sessions))
 	}
@@ -34,15 +37,19 @@ shared = true
 	if err != nil {
 		t.Fatalf("SessionInputs: %v", err)
 	}
+
 	if len(inputs) != 2 {
 		t.Fatalf("inputs = %d", len(inputs))
 	}
+
 	if !inputs[0].AgentHooks {
 		t.Error("agent_hooks should default true")
 	}
+
 	if inputs[0].Role != "implementer" {
 		t.Errorf("role = %q", inputs[0].Role)
 	}
+
 	if !inputs[1].Shared {
 		t.Error("bairn should be shared")
 	}

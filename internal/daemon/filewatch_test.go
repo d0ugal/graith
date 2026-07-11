@@ -13,10 +13,12 @@ import (
 
 func mustWatcher(t *testing.T) *fsnotify.Watcher {
 	t.Helper()
+
 	w, err := fsnotify.NewWatcher()
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	return w
 }
 
@@ -49,9 +51,11 @@ func TestWatchMatcher_IncludeGlobs(t *testing.T) {
 	if !m.fires("glen/a.go") {
 		t.Error("*.go should fire with include **/*.go")
 	}
+
 	if m.fires("glen/a.ts") {
 		t.Error("*.ts should NOT fire with include **/*.go")
 	}
+
 	if m.fires("README.md") {
 		t.Error("non-go should NOT fire with include **/*.go")
 	}
@@ -62,20 +66,25 @@ func TestWatchMatcher_Gitignore(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("build/\n*.log\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+
 	m := newWatchMatcher(root, &config.WatchConfig{})
 
 	if m.fires("build/out.bin") {
 		t.Error("gitignored build/ should not fire")
 	}
+
 	if m.fires("run.log") {
 		t.Error("gitignored *.log should not fire")
 	}
+
 	if !m.fires("main.go") {
 		t.Error("tracked main.go should fire")
 	}
+
 	if !m.ignoredDir("build") {
 		t.Error("build/ should be pruned from the watch set")
 	}
+
 	if m.ignoredDir("src") {
 		t.Error("src should not be pruned")
 	}
@@ -88,7 +97,8 @@ func TestAddWatchRecursive(t *testing.T) {
 	mustMkdir(t, filepath.Join(root, ".git", "objects"))
 
 	w := mustWatcher(t)
-	defer w.Close()
+	defer func() { _ = w.Close() }()
+
 	m := newWatchMatcher(root, &config.WatchConfig{})
 	if degraded := addWatchRecursive(w, root, m); degraded != "" {
 		t.Fatalf("unexpected degraded: %s", degraded)
@@ -111,15 +121,18 @@ func TestFileWatch_EndToEnd(t *testing.T) {
 	if err := w.Add(worktree); err != nil {
 		t.Fatal(err)
 	}
+
 	b := &watchBinding{triggerName: "wf", sessionID: "src", worktree: worktree, watcher: w, changed: make(map[string]bool)}
 	matcher := newWatchMatcher(worktree, trig.Watch)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
 	go sm.runBinding(ctx, "wf", b, matcher)
 
 	// Give the watcher a moment, then write a matching file.
 	time.Sleep(50 * time.Millisecond)
+
 	if err := os.WriteFile(filepath.Join(worktree, "main.go"), []byte("package main\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -130,8 +143,10 @@ func TestFileWatch_EndToEnd(t *testing.T) {
 		if len(msgs) >= 1 {
 			return // fired
 		}
+
 		time.Sleep(50 * time.Millisecond)
 	}
+
 	t.Fatal("watch trigger did not fire within timeout")
 }
 
@@ -147,6 +162,7 @@ func TestReconcileBindings_Lifecycle(t *testing.T) {
 
 	ctx := context.Background()
 	sm.reconcileBindings(ctx, sm.cfg)
+
 	if len(sm.triggers.bindings) != 1 {
 		t.Fatalf("expected 1 binding, got %d", len(sm.triggers.bindings))
 	}
@@ -154,15 +170,18 @@ func TestReconcileBindings_Lifecycle(t *testing.T) {
 	// Session stops → binding is torn down.
 	sm.state.Sessions["src"].Status = StatusStopped
 	sm.reconcileBindings(ctx, sm.cfg)
+
 	if len(sm.triggers.bindings) != 0 {
 		t.Fatalf("expected binding torn down, got %d", len(sm.triggers.bindings))
 	}
+
 	sm.teardownAllBindings()
 }
 
 func mustMkdir(t *testing.T, p string) {
 	t.Helper()
-	if err := os.MkdirAll(p, 0o755); err != nil {
+
+	if err := os.MkdirAll(p, 0o750); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -172,6 +191,7 @@ func TestWatchMatcher_DotAndEmpty(t *testing.T) {
 	if m.fires(".") || m.fires("") {
 		t.Error("'.' and '' should never fire")
 	}
+
 	if m.ignoredDir(".") {
 		t.Error("root '.' is never an ignored dir")
 	}
