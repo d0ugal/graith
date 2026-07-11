@@ -23,7 +23,7 @@ data directory:
 │   └── api.md
 ├── research/
 │   └── findings.json
-└── tribunal/
+└── reviews/
     └── 2026-06-15.md
 ```
 

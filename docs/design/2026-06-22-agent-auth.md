@@ -2,7 +2,7 @@
 
 **Author:** Dougal Matthews
 **Date:** 2026-06-22
-**Status:** Draft (revised after 7-judge review tribunal)
+**Status:** Draft (revised after independent review)
 
 ## Problem
 

@@ -14,7 +14,7 @@ informed: (TBD)
 Graith supports "shared worktree" sessions — sessions that reuse the worktree
 of a parent session rather than creating their own. These are created with
 `--share-worktree` and require sandbox mode (read-only access). They are used
-by features like `/review-tribunal` where multiple agents need to read the same
+by multi-agent review workflows where multiple agents need to read the same
 codebase concurrently without modifications.
 
 The overlay (session picker, `ctrl+b w`) displays git information for every
@@ -79,13 +79,13 @@ Shared worktree sessions display redundant git information in the overlay:
 ### Proposal 0: Do Nothing
 
 The overlay continues showing identical git info for shared worktree sessions
-and their parents. Users of `/review-tribunal` and other shared-worktree
+and their parents. Users of multi-agent review and other shared-worktree
 features see duplicated branch/dirty/unpushed data across multiple rows. The
 daemon continues running redundant git operations on the same worktree path.
 Stopped shared sessions falsely appear in "Needs Attention" and show misleading
 "unsaved work" delete warnings.
 
-This is tolerable but adds visual clutter, especially when a tribunal spawns
+This is tolerable but adds visual clutter, especially when a multi-agent review spawns
 3-5 shared sessions that all mirror the parent.
 
 ### Proposal 1: Suppress Git Display and Skip Computation
@@ -164,7 +164,7 @@ graph TD
 
 - Simple — seven small conditionals, no new fields or protocol changes
 - Uses the existing `SharedWorktree` field already on `SessionInfo`
-- Reduces visual noise in the overlay for tribunal/review workflows
+- Reduces visual noise in the overlay for review workflows
 - Fixes latent bugs: shared sessions no longer falsely appear in "Needs
   Attention" or show misleading "unsaved work" delete warnings
 - Eliminates redundant git operations on the same worktree path
