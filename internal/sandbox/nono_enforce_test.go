@@ -29,7 +29,7 @@ import (
 // most hosts, which would make buildNonoProfile reject a read-only source placed
 // there (issue #789) — so Wrap would fail before this test could exercise
 // whether --workdir alone establishes the read-only guarantee (issue #786). Real
-// shared worktrees live under the repo dir / ~/.local/share/graith, never /tmp,
+// mirror sessions live under the repo dir / ~/.local/share/graith, never /tmp,
 // so we build the fixture under $HOME to reproduce that faithfully.
 func nonWritableTempRoot(t *testing.T) string {
 	t.Helper()

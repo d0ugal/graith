@@ -170,7 +170,7 @@ func summaryStyle(s protocol.SessionInfo) lipgloss.Style {
 	return lipgloss.NewStyle()
 }
 
-// tuiGit is the TUI git cell: a dash for shared worktrees (no per-session git
+// tuiGit is the TUI git cell: a dash for mirror sessions (no per-session git
 // state), otherwise the compact dirty/ahead form.
 func tuiGit(s protocol.SessionInfo) string {
 	if s.Mirror {

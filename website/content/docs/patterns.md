@@ -306,7 +306,7 @@ The orchestrator or user monitors progress in the session picker (`ctrl+b w`), w
 
 ## Multi-agent patterns
 
-These patterns compose graith's primitives (sessions, messaging, store, forking, shared worktrees) into structured multi-agent workflows. They are generic -- adapt them to your codebase and agents.
+These patterns compose graith's primitives (sessions, messaging, store, forking, mirrored worktrees) into structured multi-agent workflows. They are generic -- adapt them to your codebase and agents.
 
 ### Devil's advocate
 
@@ -485,7 +485,7 @@ gr msg send --children "rebase on main before pushing"
 
 ### Continuous reviewer
 
-A monitoring agent watches a primary agent's work in real time via a shared worktree and provides ongoing feedback through messages.
+A monitoring agent watches a primary agent's work in real time via a mirrored worktree and provides ongoing feedback through messages.
 
 Use when: long implementation tasks, mentoring, real-time quality gates.
 
