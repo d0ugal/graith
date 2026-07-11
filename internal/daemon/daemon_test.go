@@ -3204,7 +3204,7 @@ func TestRunMessageCleanupLoopReadsConfig(t *testing.T) {
 
 		sm.SetMsgStore(ms)
 
-		if _, err := ms.Publish("blether", "s1", "agent", "old msg", "", ""); err != nil {
+		if _, err := ms.Publish(PublishOpts{Stream: "blether", SenderID: "s1", SenderName: "agent", Body: "old msg"}); err != nil {
 			t.Fatal(err)
 		}
 

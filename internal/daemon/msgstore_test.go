@@ -29,7 +29,7 @@ func testStore(t *testing.T) *MsgStore {
 func TestPublishAndRead(t *testing.T) {
 	s := testStore(t)
 
-	msg, err := s.Publish("blether-topic", "braw-sess", "bonnie-a", "braw day", "", "")
+	msg, err := s.Publish(PublishOpts{Stream: "blether-topic", SenderID: "braw-sess", SenderName: "bonnie-a", Body: "braw day"})
 	if err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestPublishAndRead(t *testing.T) {
 		t.Errorf("stream = %q, want blether-topic", msg.Stream)
 	}
 
-	msg2, err := s.Publish("blether-topic", "canny-sess", "bonnie-b", "bonnie reply", "", "")
+	msg2, err := s.Publish(PublishOpts{Stream: "blether-topic", SenderID: "canny-sess", SenderName: "bonnie-b", Body: "bonnie reply"})
 	if err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestSystemMarkerDerivedFromSender(t *testing.T) {
 
 	// A daemon-authored notification is flagged system; an ordinary
 	// session-authored message is not. See issue #887.
-	sysMsg, err := s.Publish("inbox:braw-sess", systemSenderID, systemSenderName, "PR merged", "", "")
+	sysMsg, err := s.Publish(PublishOpts{Stream: "inbox:braw-sess", SenderID: systemSenderID, SenderName: systemSenderName, Body: "PR merged"})
 	if err != nil {
 		t.Fatalf("Publish system: %v", err)
 	}
@@ -83,7 +83,7 @@ func TestSystemMarkerDerivedFromSender(t *testing.T) {
 		t.Errorf("system notification: System = false, want true")
 	}
 
-	sessMsg, err := s.Publish("inbox:braw-sess", "canny-sess", "canny", "hullo", "", "")
+	sessMsg, err := s.Publish(PublishOpts{Stream: "inbox:braw-sess", SenderID: "canny-sess", SenderName: "canny", Body: "hullo"})
 	if err != nil {
 		t.Fatalf("Publish session: %v", err)
 	}
@@ -114,14 +114,14 @@ func TestSystemMarkerDerivedFromSender(t *testing.T) {
 func TestReadUnackedOnly(t *testing.T) {
 	s := testStore(t)
 
-	_, _ = s.Publish("blether", "braw1", "neep", "neep1", "", "")
-	_, _ = s.Publish("blether", "braw1", "neep", "neep2", "", "")
+	_, _ = s.Publish(PublishOpts{Stream: "blether", SenderID: "braw1", SenderName: "neep", Body: "neep1"})
+	_, _ = s.Publish(PublishOpts{Stream: "blether", SenderID: "braw1", SenderName: "neep", Body: "neep2"})
 
 	if err := s.AckLatest("blether", "kirk-reader1"); err != nil {
 		t.Fatalf("Ack: %v", err)
 	}
 
-	_, _ = s.Publish("blether", "braw1", "neep", "neep3", "", "")
+	_, _ = s.Publish(PublishOpts{Stream: "blether", SenderID: "braw1", SenderName: "neep", Body: "neep3"})
 
 	msgs, err := s.Read("blether", "kirk-reader1", true, "")
 	if err != nil {
@@ -140,8 +140,8 @@ func TestReadUnackedOnly(t *testing.T) {
 func TestReadAllIgnoresCursor(t *testing.T) {
 	s := testStore(t)
 
-	_, _ = s.Publish("blether", "braw1", "neep", "neep1", "", "")
-	_, _ = s.Publish("blether", "braw1", "neep", "neep2", "", "")
+	_, _ = s.Publish(PublishOpts{Stream: "blether", SenderID: "braw1", SenderName: "neep", Body: "neep1"})
+	_, _ = s.Publish(PublishOpts{Stream: "blether", SenderID: "braw1", SenderName: "neep", Body: "neep2"})
 	_ = s.AckLatest("blether", "kirk-reader1")
 
 	msgs, err := s.Read("blether", "kirk-reader1", false, "")
@@ -157,9 +157,9 @@ func TestReadAllIgnoresCursor(t *testing.T) {
 func TestThreadFiltering(t *testing.T) {
 	s := testStore(t)
 
-	msg1, _ := s.Publish("blether", "braw1", "neep", "kirk-start", "", "")
-	_, _ = s.Publish("blether", "braw1", "neep", "thrawn", "", "")
-	_, _ = s.Publish("blether", "canny1", "whin", "kirk-reply", msg1.ID, "")
+	msg1, _ := s.Publish(PublishOpts{Stream: "blether", SenderID: "braw1", SenderName: "neep", Body: "kirk-start"})
+	_, _ = s.Publish(PublishOpts{Stream: "blether", SenderID: "braw1", SenderName: "neep", Body: "thrawn"})
+	_, _ = s.Publish(PublishOpts{Stream: "blether", SenderID: "canny1", SenderName: "whin", Body: "kirk-reply", ThreadID: msg1.ID})
 
 	msgs, err := s.Read("blether", "", false, msg1.ID)
 	if err != nil {
@@ -178,9 +178,9 @@ func TestThreadFiltering(t *testing.T) {
 func TestListStreams(t *testing.T) {
 	s := testStore(t)
 
-	_, _ = s.Publish("braw-stream", "braw1", "neep", "wee-neep1", "", "")
-	_, _ = s.Publish("braw-stream", "braw1", "neep", "wee-neep2", "", "")
-	_, _ = s.Publish("canny-stream", "braw1", "neep", "wee-neep3", "", "")
+	_, _ = s.Publish(PublishOpts{Stream: "braw-stream", SenderID: "braw1", SenderName: "neep", Body: "wee-neep1"})
+	_, _ = s.Publish(PublishOpts{Stream: "braw-stream", SenderID: "braw1", SenderName: "neep", Body: "wee-neep2"})
+	_, _ = s.Publish(PublishOpts{Stream: "canny-stream", SenderID: "braw1", SenderName: "neep", Body: "wee-neep3"})
 	_ = s.AckLatest("braw-stream", "kirk-reader1")
 
 	streams, err := s.ListStreams("kirk-reader1", true)
@@ -222,7 +222,7 @@ func TestSubscribeReceivesPublished(t *testing.T) {
 	ch, unsub := s.Subscribe("kirk-events")
 	defer unsub()
 
-	_, _ = s.Publish("kirk-events", "braw1", "neep", "kirk-event1", "", "")
+	_, _ = s.Publish(PublishOpts{Stream: "kirk-events", SenderID: "braw1", SenderName: "neep", Body: "kirk-event1"})
 
 	select {
 	case msg := <-ch:
@@ -240,7 +240,7 @@ func TestSubscribeDoesNotReceiveOtherStreams(t *testing.T) {
 	ch, unsub := s.Subscribe("blether-braw")
 	defer unsub()
 
-	_, _ = s.Publish("blether-canny", "braw1", "neep", "thrawn stream", "", "")
+	_, _ = s.Publish(PublishOpts{Stream: "blether-canny", SenderID: "braw1", SenderName: "neep", Body: "thrawn stream"})
 
 	select {
 	case msg := <-ch:
@@ -255,7 +255,7 @@ func TestUnsubscribeStopsDelivery(t *testing.T) {
 	ch, unsub := s.Subscribe("kirk-events")
 	unsub()
 
-	_, _ = s.Publish("kirk-events", "braw1", "neep", "efter unsub", "", "")
+	_, _ = s.Publish(PublishOpts{Stream: "kirk-events", SenderID: "braw1", SenderName: "neep", Body: "efter unsub"})
 
 	select {
 	case msg := <-ch:
@@ -267,9 +267,9 @@ func TestUnsubscribeStopsDelivery(t *testing.T) {
 func TestSequencesArePerStream(t *testing.T) {
 	s := testStore(t)
 
-	m1, _ := s.Publish("blether-braw", "braw1", "neep", "braw-a1", "", "")
-	m2, _ := s.Publish("blether-canny", "braw1", "neep", "canny-b1", "", "")
-	m3, _ := s.Publish("blether-braw", "braw1", "neep", "braw-a2", "", "")
+	m1, _ := s.Publish(PublishOpts{Stream: "blether-braw", SenderID: "braw1", SenderName: "neep", Body: "braw-a1"})
+	m2, _ := s.Publish(PublishOpts{Stream: "blether-canny", SenderID: "braw1", SenderName: "neep", Body: "canny-b1"})
+	m3, _ := s.Publish(PublishOpts{Stream: "blether-braw", SenderID: "braw1", SenderName: "neep", Body: "braw-a2"})
 
 	if m1.Seq != 1 {
 		t.Errorf("blether-braw first msg seq = %d, want 1", m1.Seq)
@@ -293,7 +293,7 @@ func TestReopenDB(t *testing.T) {
 		t.Fatalf("NewMsgStore: %v", err)
 	}
 
-	_, _ = s1.Publish("blether", "braw1", "neep", "bide-msg", "", "")
+	_, _ = s1.Publish(PublishOpts{Stream: "blether", SenderID: "braw1", SenderName: "neep", Body: "bide-msg"})
 	_ = s1.Close()
 
 	s2, err := NewMsgStore(dbPath)
@@ -315,7 +315,7 @@ func TestReopenDB(t *testing.T) {
 		t.Errorf("body = %q", msgs[0].Body)
 	}
 
-	m, _ := s2.Publish("blether", "braw1", "neep", "efter reopen", "", "")
+	m, _ := s2.Publish(PublishOpts{Stream: "blether", SenderID: "braw1", SenderName: "neep", Body: "efter reopen"})
 	if m.Seq != 2 {
 		t.Errorf("seq after reopen = %d, want 2", m.Seq)
 	}
@@ -340,9 +340,9 @@ func TestDBFileCreated(t *testing.T) {
 func TestAckSpecificSeq(t *testing.T) {
 	s := testStore(t)
 
-	_, _ = s.Publish("blether", "braw1", "neep", "neep1", "", "")
-	_, _ = s.Publish("blether", "braw1", "neep", "neep2", "", "")
-	_, _ = s.Publish("blether", "braw1", "neep", "neep3", "", "")
+	_, _ = s.Publish(PublishOpts{Stream: "blether", SenderID: "braw1", SenderName: "neep", Body: "neep1"})
+	_, _ = s.Publish(PublishOpts{Stream: "blether", SenderID: "braw1", SenderName: "neep", Body: "neep2"})
+	_, _ = s.Publish(PublishOpts{Stream: "blether", SenderID: "braw1", SenderName: "neep", Body: "neep3"})
 
 	_ = s.Ack("blether", "kirk-reader1", 2)
 
@@ -363,9 +363,9 @@ func TestAckSpecificSeq(t *testing.T) {
 func TestAckDoesNotGoBackwards(t *testing.T) {
 	s := testStore(t)
 
-	_, _ = s.Publish("blether", "braw1", "neep", "neep1", "", "")
-	_, _ = s.Publish("blether", "braw1", "neep", "neep2", "", "")
-	_, _ = s.Publish("blether", "braw1", "neep", "neep3", "", "")
+	_, _ = s.Publish(PublishOpts{Stream: "blether", SenderID: "braw1", SenderName: "neep", Body: "neep1"})
+	_, _ = s.Publish(PublishOpts{Stream: "blether", SenderID: "braw1", SenderName: "neep", Body: "neep2"})
+	_, _ = s.Publish(PublishOpts{Stream: "blether", SenderID: "braw1", SenderName: "neep", Body: "neep3"})
 
 	_ = s.Ack("blether", "kirk-reader1", 3)
 	_ = s.Ack("blether", "kirk-reader1", 1)
@@ -383,9 +383,9 @@ func TestAckDoesNotGoBackwards(t *testing.T) {
 func TestIndependentCursorsPerSubscriber(t *testing.T) {
 	s := testStore(t)
 
-	_, _ = s.Publish("blether", "braw1", "neep", "neep1", "", "")
-	_, _ = s.Publish("blether", "braw1", "neep", "neep2", "", "")
-	_, _ = s.Publish("blether", "braw1", "neep", "neep3", "", "")
+	_, _ = s.Publish(PublishOpts{Stream: "blether", SenderID: "braw1", SenderName: "neep", Body: "neep1"})
+	_, _ = s.Publish(PublishOpts{Stream: "blether", SenderID: "braw1", SenderName: "neep", Body: "neep2"})
+	_, _ = s.Publish(PublishOpts{Stream: "blether", SenderID: "braw1", SenderName: "neep", Body: "neep3"})
 
 	_ = s.Ack("blether", "kirk-reader-a", 2)
 	_ = s.Ack("blether", "kirk-reader-b", 1)
@@ -431,7 +431,7 @@ func TestReadEmptyStreamUnread(t *testing.T) {
 func TestPublishStoresAllFields(t *testing.T) {
 	s := testStore(t)
 
-	msg, err := s.Publish("blether", "braw-sender", "Bonnie Alpha", "kirk-task", "kirk-42", "inbox:braw-sender")
+	msg, err := s.Publish(PublishOpts{Stream: "blether", SenderID: "braw-sender", SenderName: "Bonnie Alpha", Body: "kirk-task", ThreadID: "kirk-42", ReplyTo: "inbox:braw-sender"})
 	if err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
@@ -475,7 +475,7 @@ func TestPublishStoresAllFields(t *testing.T) {
 func TestPublishEmptyThreadAndReplyStoreAsEmpty(t *testing.T) {
 	s := testStore(t)
 
-	_, _ = s.Publish("blether", "braw1", "neep", "neep message", "", "")
+	_, _ = s.Publish(PublishOpts{Stream: "blether", SenderID: "braw1", SenderName: "neep", Body: "neep message"})
 
 	msgs, _ := s.Read("blether", "", false, "")
 	if msgs[0].ThreadID != "" {
@@ -503,8 +503,8 @@ func TestListStreamsEmpty(t *testing.T) {
 func TestListStreamsExcludesSystem(t *testing.T) {
 	s := testStore(t)
 
-	_, _ = s.Publish("braw-stream", "braw1", "neep", "wee-neep1", "", "")
-	_, _ = s.Publish("_system.status", "braw1", "neep", "braw change", "", "")
+	_, _ = s.Publish(PublishOpts{Stream: "braw-stream", SenderID: "braw1", SenderName: "neep", Body: "wee-neep1"})
+	_, _ = s.Publish(PublishOpts{Stream: "_system.status", SenderID: "braw1", SenderName: "neep", Body: "braw change"})
 
 	streams, err := s.ListStreams("", false)
 	if err != nil {
@@ -532,11 +532,11 @@ func TestListStreamsExcludesSystem(t *testing.T) {
 func TestTotalUnreadCountsOnlyInbox(t *testing.T) {
 	s := testStore(t)
 
-	_, _ = s.Publish("inbox:braw-sess", "whin", "whin", "braw message", "", "")
-	_, _ = s.Publish("inbox:braw-sess", "whin", "whin", "bonnie message", "", "")
-	_, _ = s.Publish("braw-stream", "braw1", "neep", "braw-cast", "", "")
-	_, _ = s.Publish("_system.status", "braw1", "neep", "braw change", "", "")
-	_, _ = s.Publish("inbox:canny-sess", "whin", "whin", "whin inbox", "", "")
+	_, _ = s.Publish(PublishOpts{Stream: "inbox:braw-sess", SenderID: "whin", SenderName: "whin", Body: "braw message"})
+	_, _ = s.Publish(PublishOpts{Stream: "inbox:braw-sess", SenderID: "whin", SenderName: "whin", Body: "bonnie message"})
+	_, _ = s.Publish(PublishOpts{Stream: "braw-stream", SenderID: "braw1", SenderName: "neep", Body: "braw-cast"})
+	_, _ = s.Publish(PublishOpts{Stream: "_system.status", SenderID: "braw1", SenderName: "neep", Body: "braw change"})
+	_, _ = s.Publish(PublishOpts{Stream: "inbox:canny-sess", SenderID: "whin", SenderName: "whin", Body: "whin inbox"})
 
 	count := s.TotalUnread("braw-sess")
 	if count != 2 {
@@ -557,8 +557,8 @@ func TestTotalUnreadCountsOnlyInbox(t *testing.T) {
 func TestListStreamsNoSubscriber(t *testing.T) {
 	s := testStore(t)
 
-	_, _ = s.Publish("braw-stream", "braw1", "neep", "wee-neep1", "", "")
-	_, _ = s.Publish("canny-stream", "braw1", "neep", "wee-neep2", "", "")
+	_, _ = s.Publish(PublishOpts{Stream: "braw-stream", SenderID: "braw1", SenderName: "neep", Body: "wee-neep1"})
+	_, _ = s.Publish(PublishOpts{Stream: "canny-stream", SenderID: "braw1", SenderName: "neep", Body: "wee-neep2"})
 
 	streams, err := s.ListStreams("", true)
 	if err != nil {
@@ -583,12 +583,12 @@ func TestListStreamsNoSubscriber(t *testing.T) {
 func TestAckLatest(t *testing.T) {
 	s := testStore(t)
 
-	_, _ = s.Publish("blether", "braw1", "neep", "neep1", "", "")
-	_, _ = s.Publish("blether", "braw1", "neep", "neep2", "", "")
+	_, _ = s.Publish(PublishOpts{Stream: "blether", SenderID: "braw1", SenderName: "neep", Body: "neep1"})
+	_, _ = s.Publish(PublishOpts{Stream: "blether", SenderID: "braw1", SenderName: "neep", Body: "neep2"})
 
 	_ = s.AckLatest("blether", "kirk-reader1")
 
-	_, _ = s.Publish("blether", "braw1", "neep", "neep3", "", "")
+	_, _ = s.Publish(PublishOpts{Stream: "blether", SenderID: "braw1", SenderName: "neep", Body: "neep3"})
 
 	msgs, _ := s.Read("blether", "kirk-reader1", true, "")
 	if len(msgs) != 1 {
@@ -621,7 +621,7 @@ func TestConcurrentPublish(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 
-			_, err := s.Publish("braw-concurrent", "braw1", "neep", "neep", "", "")
+			_, err := s.Publish(PublishOpts{Stream: "braw-concurrent", SenderID: "braw1", SenderName: "neep", Body: "neep"})
 			if err != nil {
 				t.Errorf("publish %d: %v", i, err)
 			}
@@ -654,7 +654,7 @@ func TestMultipleSubscribersOnSameStream(t *testing.T) {
 	ch2, unsub2 := s.Subscribe("kirk-events")
 	defer unsub2()
 
-	_, _ = s.Publish("kirk-events", "braw1", "neep", "braw-cast", "", "")
+	_, _ = s.Publish(PublishOpts{Stream: "kirk-events", SenderID: "braw1", SenderName: "neep", Body: "braw-cast"})
 
 	for _, ch := range []chan Message{ch1, ch2} {
 		select {
@@ -673,15 +673,15 @@ func TestCursorsSurviveReopen(t *testing.T) {
 	dbPath := filepath.Join(dir, "test.sqlite")
 
 	s1, _ := NewMsgStore(dbPath)
-	_, _ = s1.Publish("blether", "braw1", "neep", "neep1", "", "")
-	_, _ = s1.Publish("blether", "braw1", "neep", "neep2", "", "")
+	_, _ = s1.Publish(PublishOpts{Stream: "blether", SenderID: "braw1", SenderName: "neep", Body: "neep1"})
+	_, _ = s1.Publish(PublishOpts{Stream: "blether", SenderID: "braw1", SenderName: "neep", Body: "neep2"})
 	_ = s1.Ack("blether", "kirk-reader1", 1)
 	_ = s1.Close()
 
 	s2, _ := NewMsgStore(dbPath)
 	defer func() { _ = s2.Close() }()
 
-	_, _ = s2.Publish("blether", "braw1", "neep", "neep3", "", "")
+	_, _ = s2.Publish(PublishOpts{Stream: "blether", SenderID: "braw1", SenderName: "neep", Body: "neep3"})
 
 	msgs, _ := s2.Read("blether", "kirk-reader1", true, "")
 	if len(msgs) != 2 {
@@ -696,10 +696,10 @@ func TestCursorsSurviveReopen(t *testing.T) {
 func TestThreadFilterWithUnreadCursor(t *testing.T) {
 	s := testStore(t)
 
-	m1, _ := s.Publish("blether", "braw1", "neep", "kirk-begin", "", "")
-	_, _ = s.Publish("blether", "braw1", "neep", "thrawn-1", "", "")
-	_, _ = s.Publish("blether", "canny1", "whin", "kirk-reply", m1.ID, "")
-	_, _ = s.Publish("blether", "braw1", "neep", "thrawn-2", "", "")
+	m1, _ := s.Publish(PublishOpts{Stream: "blether", SenderID: "braw1", SenderName: "neep", Body: "kirk-begin"})
+	_, _ = s.Publish(PublishOpts{Stream: "blether", SenderID: "braw1", SenderName: "neep", Body: "thrawn-1"})
+	_, _ = s.Publish(PublishOpts{Stream: "blether", SenderID: "canny1", SenderName: "whin", Body: "kirk-reply", ThreadID: m1.ID})
+	_, _ = s.Publish(PublishOpts{Stream: "blether", SenderID: "braw1", SenderName: "neep", Body: "thrawn-2"})
 
 	_ = s.Ack("blether", "kirk-reader1", 2)
 
@@ -716,10 +716,10 @@ func TestThreadFilterWithUnreadCursor(t *testing.T) {
 func TestAckMessagesDoesNotSkipOtherThreads(t *testing.T) {
 	s := testStore(t)
 
-	m1, _ := s.Publish("blether", "braw1", "neep", "kirk-a-start", "", "")
-	_, _ = s.Publish("blether", "canny1", "whin", "kirk-b-msg", "", "")
-	_, _ = s.Publish("blether", "braw1", "neep", "kirk-a-reply", m1.ID, "")
-	_, _ = s.Publish("blether", "canny1", "whin", "haar-msg", "", "")
+	m1, _ := s.Publish(PublishOpts{Stream: "blether", SenderID: "braw1", SenderName: "neep", Body: "kirk-a-start"})
+	_, _ = s.Publish(PublishOpts{Stream: "blether", SenderID: "canny1", SenderName: "whin", Body: "kirk-b-msg"})
+	_, _ = s.Publish(PublishOpts{Stream: "blether", SenderID: "braw1", SenderName: "neep", Body: "kirk-a-reply", ThreadID: m1.ID})
+	_, _ = s.Publish(PublishOpts{Stream: "blether", SenderID: "canny1", SenderName: "whin", Body: "haar-msg"})
 
 	// Thread filter returns only the reply (seq 3); the root message has no
 	// thread_id set. Ack only the reply using per-message ack.
@@ -765,10 +765,10 @@ func TestAckMessagesEmpty(t *testing.T) {
 func TestAckMessagesCombinesWithCursor(t *testing.T) {
 	s := testStore(t)
 
-	_, _ = s.Publish("blether", "braw1", "neep", "neep1", "", "")
-	_, _ = s.Publish("blether", "braw1", "neep", "neep2", "", "")
-	_, _ = s.Publish("blether", "braw1", "neep", "neep3", "", "")
-	_, _ = s.Publish("blether", "braw1", "neep", "neep4", "", "")
+	_, _ = s.Publish(PublishOpts{Stream: "blether", SenderID: "braw1", SenderName: "neep", Body: "neep1"})
+	_, _ = s.Publish(PublishOpts{Stream: "blether", SenderID: "braw1", SenderName: "neep", Body: "neep2"})
+	_, _ = s.Publish(PublishOpts{Stream: "blether", SenderID: "braw1", SenderName: "neep", Body: "neep3"})
+	_, _ = s.Publish(PublishOpts{Stream: "blether", SenderID: "braw1", SenderName: "neep", Body: "neep4"})
 
 	// Advance cursor past seq 1.
 	_ = s.Ack("blether", "kirk-reader1", 1)
@@ -792,7 +792,7 @@ func TestAckMessagesCombinesWithCursor(t *testing.T) {
 func TestAckMessagesIdempotent(t *testing.T) {
 	s := testStore(t)
 
-	_, _ = s.Publish("blether", "braw1", "neep", "neep1", "", "")
+	_, _ = s.Publish(PublishOpts{Stream: "blether", SenderID: "braw1", SenderName: "neep", Body: "neep1"})
 
 	// Acking the same seq twice should not error.
 	if err := s.AckMessages("blether", "kirk-reader1", []int64{1}); err != nil {
@@ -855,11 +855,11 @@ func TestCleanupByMaxPerStream(t *testing.T) {
 	s := testStore(t)
 
 	for i := range 5 {
-		_, _ = s.Publish("blether-braw", "braw1", "neep", fmt.Sprintf("a-msg-%d", i+1), "", "")
+		_, _ = s.Publish(PublishOpts{Stream: "blether-braw", SenderID: "braw1", SenderName: "neep", Body: fmt.Sprintf("a-msg-%d", i+1)})
 	}
 
 	for i := range 3 {
-		_, _ = s.Publish("blether-canny", "braw1", "neep", fmt.Sprintf("b-msg-%d", i+1), "", "")
+		_, _ = s.Publish(PublishOpts{Stream: "blether-canny", SenderID: "braw1", SenderName: "neep", Body: fmt.Sprintf("b-msg-%d", i+1)})
 	}
 
 	deleted, err := s.Cleanup(0, 3)
@@ -904,7 +904,7 @@ func TestCleanupBothPolicies(t *testing.T) {
 	)
 
 	for i := range 3 {
-		_, _ = s.Publish("blether", "braw1", "neep", fmt.Sprintf("new%d", i+1), "", "")
+		_, _ = s.Publish(PublishOpts{Stream: "blether", SenderID: "braw1", SenderName: "neep", Body: fmt.Sprintf("new%d", i+1)})
 	}
 
 	deleted, err := s.Cleanup(24*time.Hour, 2)
@@ -925,7 +925,7 @@ func TestCleanupBothPolicies(t *testing.T) {
 func TestCleanupNoConfig(t *testing.T) {
 	s := testStore(t)
 
-	_, _ = s.Publish("blether", "braw1", "neep", "neep1", "", "")
+	_, _ = s.Publish(PublishOpts{Stream: "blether", SenderID: "braw1", SenderName: "neep", Body: "neep1"})
 
 	deleted, err := s.Cleanup(0, 0)
 	if err != nil {
@@ -945,9 +945,9 @@ func TestCleanupNoConfig(t *testing.T) {
 func TestCleanupPreservesHighWaterMark(t *testing.T) {
 	s := testStore(t)
 
-	_, _ = s.Publish("blether", "braw1", "neep", "neep1", "", "")
-	_, _ = s.Publish("blether", "braw1", "neep", "neep2", "", "")
-	_, _ = s.Publish("blether", "braw1", "neep", "neep3", "", "")
+	_, _ = s.Publish(PublishOpts{Stream: "blether", SenderID: "braw1", SenderName: "neep", Body: "neep1"})
+	_, _ = s.Publish(PublishOpts{Stream: "blether", SenderID: "braw1", SenderName: "neep", Body: "neep2"})
+	_, _ = s.Publish(PublishOpts{Stream: "blether", SenderID: "braw1", SenderName: "neep", Body: "neep3"})
 
 	_ = s.Ack("blether", "kirk-reader1", 3)
 
@@ -968,7 +968,7 @@ func TestCleanupPreservesHighWaterMark(t *testing.T) {
 		t.Fatalf("got %d messages, want 0 (all cleaned up)", len(msgs))
 	}
 
-	msg4, err := s.Publish("blether", "braw1", "neep", "neep4", "", "")
+	msg4, err := s.Publish(PublishOpts{Stream: "blether", SenderID: "braw1", SenderName: "neep", Body: "neep4"})
 	if err != nil {
 		t.Fatalf("Publish after cleanup: %v", err)
 	}
@@ -991,7 +991,7 @@ func TestCleanupByMaxPreservesHighWaterMark(t *testing.T) {
 	s := testStore(t)
 
 	for i := range 10 {
-		_, _ = s.Publish("blether", "braw1", "neep", fmt.Sprintf("msg-%d", i+1), "", "")
+		_, _ = s.Publish(PublishOpts{Stream: "blether", SenderID: "braw1", SenderName: "neep", Body: fmt.Sprintf("msg-%d", i+1)})
 	}
 
 	_ = s.Ack("blether", "kirk-reader1", 10)
@@ -1005,7 +1005,7 @@ func TestCleanupByMaxPreservesHighWaterMark(t *testing.T) {
 		t.Errorf("deleted = %d, want 7", deleted)
 	}
 
-	msg, err := s.Publish("blether", "braw1", "neep", "after-cleanup", "", "")
+	msg, err := s.Publish(PublishOpts{Stream: "blether", SenderID: "braw1", SenderName: "neep", Body: "after-cleanup"})
 	if err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
@@ -1081,7 +1081,7 @@ func TestCleanupAfterUpgradePreservesHWM(t *testing.T) {
 		t.Errorf("deleted = %d, want 5", deleted)
 	}
 
-	msg, err := s.Publish("blether", "braw1", "neep", "post-upgrade", "", "")
+	msg, err := s.Publish(PublishOpts{Stream: "blether", SenderID: "braw1", SenderName: "neep", Body: "post-upgrade"})
 	if err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
@@ -1121,7 +1121,7 @@ func TestCleanupRemovesStaleCursors(t *testing.T) {
 
 	// Publish a fresh message on the stream so it is NOT orphaned — this
 	// isolates the stale-cursor path from the orphan-cursor path.
-	_, _ = s.Publish("bonnie-stream", "braw1", "neep", "bonnie-recent", "", "")
+	_, _ = s.Publish(PublishOpts{Stream: "bonnie-stream", SenderID: "braw1", SenderName: "neep", Body: "bonnie-recent"})
 
 	// Insert a stale cursor on the same stream (old updated_at).
 	_, _ = s.db.Exec(
@@ -1167,8 +1167,8 @@ func TestCleanupRemovesOrphanedCursors(t *testing.T) {
 	s := testStore(t)
 
 	// Create messages on two streams.
-	_, _ = s.Publish("keep-stream", "s1", "a", "keep this", "", "")
-	_, _ = s.Publish("remove-stream", "s1", "a", "remove this", "", "")
+	_, _ = s.Publish(PublishOpts{Stream: "keep-stream", SenderID: "s1", SenderName: "a", Body: "keep this"})
+	_, _ = s.Publish(PublishOpts{Stream: "remove-stream", SenderID: "s1", SenderName: "a", Body: "remove this"})
 
 	// Create cursors for both streams.
 	_ = s.Ack("keep-stream", "reader1", 1)
