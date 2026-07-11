@@ -152,7 +152,7 @@ brew install eugene1g/tools/agent-safehouse
 
 `gr doctor` warns when configured sandbox read/write paths do not exist. Either create the directory or remove it from your config.
 
-### Shared worktree fails
+### Mirror session fails
 
 `--mirror` requires sandbox to be enabled. Without it, session creation fails closed.
 

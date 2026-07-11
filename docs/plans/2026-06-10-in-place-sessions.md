@@ -325,7 +325,7 @@ Expected: FAIL — wrong number of arguments to Create
 In `internal/daemon/daemon.go`, update the `Create` signature to add `inPlace` and `allowConcurrent` parameters:
 
 ```go
-func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt string, noRepo bool, shareWorktree string, agentHooks bool, inPlace bool, allowConcurrent bool, rows, cols uint16) (SessionState, error) {
+func (sm *SessionManager) Create(name, agentName, repoPath, baseBranch, prompt string, noRepo bool, mirror string, agentHooks bool, inPlace bool, allowConcurrent bool, rows, cols uint16) (SessionState, error) {
 ```
 
 - [ ] **Step 4: Update the handler to pass new fields from CreateMsg**
@@ -377,7 +377,7 @@ At the top of the `Create` method, before the switch, add:
 if inPlace && noRepo {
 	return SessionState{}, fmt.Errorf("--in-place and --no-repo are mutually exclusive")
 }
-if inPlace && shareWorktree != "" {
+if inPlace && mirror != "" {
 	return SessionState{}, fmt.Errorf("--in-place and --mirror are mutually exclusive")
 }
 ```
@@ -399,7 +399,7 @@ Update the closure (~line 366) to skip cleanup for in-place sessions (no worktre
 ```go
 cleanupOnError := func() {
 	sm.cleanupHooks(id)
-	if sharedWorktree || inPlace {
+	if mirror || inPlace {
 		return
 	}
 	if noRepo {

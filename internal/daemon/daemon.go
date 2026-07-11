@@ -2085,7 +2085,7 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 		mcpServers = sm.resolveMCPServers(sessState.Agent)
 	}
 
-	// Snapshot shared worktree source includes under lock.
+	// Snapshot mirror source includes under lock.
 	var sharedSourceIncludes []IncludedRepoState
 
 	if sessState.Mirror {
@@ -2377,7 +2377,7 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 			scratchDir := filepath.Join(sm.paths.DataDir, "scratch", id)
 			if err := os.MkdirAll(scratchDir, 0o700); err != nil {
 				rollbackState()
-				return SessionState{}, fmt.Errorf("create scratch dir for shared worktree resume: %w", err)
+				return SessionState{}, fmt.Errorf("create scratch dir for mirror resume: %w", err)
 			}
 
 			opts.ReadDirs = append(opts.ReadDirs, sessWorktreePath)

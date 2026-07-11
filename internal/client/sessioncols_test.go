@@ -192,7 +192,7 @@ func TestDisplayStatus(t *testing.T) {
 func TestTuiGitAndStyle(t *testing.T) {
 	shared := protocol.SessionInfo{Mirror: true, Dirty: true}
 	if got := tuiGit(shared); got != "—" {
-		t.Errorf("shared worktree git = %q, want —", got)
+		t.Errorf("mirror git = %q, want —", got)
 	}
 
 	clean := protocol.SessionInfo{}

@@ -131,10 +131,10 @@ Five locations need a `Mirror` guard:
 
 #### Daemon-side changes (`internal/daemon/daemon.go`)
 
-7. **`detectAgentStatuses()`** (lines ~2600-2624): Add `sharedWorktree bool`
+7. **`detectAgentStatuses()`** (lines ~2600-2624): Add `mirror bool`
    to the local `target` struct and populate it during the initial `RLock`
    snapshot (alongside `worktreePath`, `baseBranch`, etc.). When
-   `t.sharedWorktree` is true, skip *only* the git operations block — both
+   `t.mirror` is true, skip *only* the git operations block — both
    the main worktree check and the included repos loop (lines ~2612-2624).
    The `dirty` and `unpushed` variables remain at their zero values (`false`
    and `0`), which are written to state as usual. Agent status detection,
@@ -222,10 +222,10 @@ the overlay — the CLI could add a `Mirror` guard in a follow-up.
 
 - The `Mirror` bool is already on `SessionInfo` and populated in
   `toSessionInfo()` — no protocol or state changes needed
-- Add `sharedWorktree bool` to the local `target` struct in
+- Add `mirror bool` to the local `target` struct in
   `detectAgentStatuses()`, populated during the initial `RLock` snapshot
   (alongside `worktreePath`, `baseBranch`, `includes`). Gate only the git
-  operations block on `!t.sharedWorktree` — agent status, idle detection,
+  operations block on `!t.mirror` — agent status, idle detection,
   `LastOutputAt`, and state writes must still execute
 - The includes git loop (lines ~2612-2624) should also be skipped for shared
   sessions. Shared sessions currently have empty `Includes` in state (source

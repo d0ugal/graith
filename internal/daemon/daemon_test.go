@@ -1441,11 +1441,11 @@ func TestDetectAgentStatuses_MirrorSkipsGit(t *testing.T) {
 	normal := sm.state.Sessions["normal1"]
 
 	if shared.GitDirty {
-		t.Error("shared worktree session should have GitDirty=false (git ops skipped)")
+		t.Error("mirror session should have GitDirty=false (git ops skipped)")
 	}
 
 	if shared.GitUnpushed != 0 {
-		t.Errorf("shared worktree session GitUnpushed=%d, want 0", shared.GitUnpushed)
+		t.Errorf("mirror session GitUnpushed=%d, want 0", shared.GitUnpushed)
 	}
 
 	if normal.GitDirty != true {
@@ -5045,7 +5045,7 @@ func TestFetchRemotesUpdatesTrackingRefs(t *testing.T) {
 }
 
 // TestFetchRemotesSkipsNonRunningAndShared verifies fetchRemotes ignores
-// sessions that are not running and shared worktrees, and tolerates a worktree
+// sessions that are not running and mirror sessions, and tolerates a worktree
 // with no remote without error.
 func TestFetchRemotesSkipsNonRunningAndShared(t *testing.T) {
 	sm := sleeperSM(t)

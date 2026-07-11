@@ -871,7 +871,7 @@ func TestFilterSessions_MirrorExcludesGitTokens(t *testing.T) {
 		result := filterSessions(sessions, token)
 		for _, s := range result {
 			if s.Mirror {
-				t.Errorf("filtering %q should not return shared worktree session %q", token, s.Name)
+				t.Errorf("filtering %q should not return mirror session %q", token, s.Name)
 			}
 		}
 	}
@@ -938,11 +938,11 @@ func TestComputeColumnWidths_MirrorUsesDash(t *testing.T) {
 
 	expectedMax := lipgloss.Width(displayGit(true, 10))
 	if cw.git >= expectedMax {
-		t.Errorf("shared worktree should not inflate git column width: got %d, parent would be %d", cw.git, expectedMax)
+		t.Errorf("mirror should not inflate git column width: got %d, parent would be %d", cw.git, expectedMax)
 	}
 
 	if cw.git != 3 {
-		t.Errorf("shared worktree git column width should be minimum (3), got %d", cw.git)
+		t.Errorf("mirror git column width should be minimum (3), got %d", cw.git)
 	}
 }
 
@@ -2550,15 +2550,15 @@ func TestView_MirrorOmitsBranchAndBase(t *testing.T) {
 	view := asOverlay(updated).View().Content
 
 	if strings.Contains(view, "branch: feature") {
-		t.Error("shared worktree detail should not show branch")
+		t.Error("mirror detail should not show branch")
 	}
 
 	if strings.Contains(view, "base: main") {
-		t.Error("shared worktree detail should not show base branch")
+		t.Error("mirror detail should not show base branch")
 	}
 
 	if !strings.Contains(view, "agent: claude") {
-		t.Error("shared worktree detail should still show agent")
+		t.Error("mirror detail should still show agent")
 	}
 }
 
@@ -3060,12 +3060,12 @@ func TestCompactDelegate_RenderMirrorShowsDash(t *testing.T) {
 
 	line := renderItem(sessions, "", 1)
 	if !strings.Contains(line, "—") {
-		t.Error("shared worktree session should show '—' in git column")
+		t.Error("mirror session should show '—' in git column")
 	}
 
 	gitVal := displayGit(true, 5)
 	if strings.Contains(line, gitVal) {
-		t.Errorf("shared worktree session should not show %q even when dirty+unpushed", gitVal)
+		t.Errorf("mirror session should not show %q even when dirty+unpushed", gitVal)
 	}
 }
 
@@ -3276,11 +3276,11 @@ func TestView_MirrorDeleteNoUnsavedWarning(t *testing.T) {
 	view := asOverlay(updated).View().Content
 
 	if strings.Contains(view, "unsaved work") {
-		t.Error("shared worktree delete should not warn about unsaved work")
+		t.Error("mirror delete should not warn about unsaved work")
 	}
 
 	if strings.Contains(view, "Uncommitted changes") {
-		t.Error("shared worktree delete should not mention uncommitted changes")
+		t.Error("mirror delete should not mention uncommitted changes")
 	}
 }
 

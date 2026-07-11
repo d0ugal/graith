@@ -331,7 +331,7 @@ type liveGitStatus struct {
 //
 // Some sessions carry no deletion-relevant git state and are reported clean:
 //   - In-place sessions: deleting one never removes the worktree.
-//   - Shared-worktree sessions: WorktreePath points at the source session's
+//   - Mirror sessions: WorktreePath points at the source session's
 //     worktree, but deletion only removes the shared scratch dir — attributing
 //     the source's dirty/unpushed work here would be misleading. This matches
 //     the daemon refresh loop and the overlay's mirror suppression.
