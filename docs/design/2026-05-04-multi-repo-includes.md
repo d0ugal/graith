@@ -15,11 +15,11 @@ on `grafana` gets its own worktree and branch, sandboxed so it can only write
 to that worktree. This model works well for single-repo tasks.
 
 Some repositories are not standalone — they are **dev-env orchestrators** that
-compose multiple repos together. Examples at Grafana:
+compose multiple repos together. For example:
 
-- `~/Code/dem-dev` — Docker Compose-based local dev environment that mounts
-  `~/Code/grafana`, `~/Code/session-replay-examples`, and other repos
-- `~/Code/session-replay-examples` — references `~/Code/rrweb` and
+- `~/Code/devenv` — Docker Compose-based local dev environment that mounts
+  `~/Code/grafana`, `~/Code/examples`, and other repos
+- `~/Code/examples` — references `~/Code/rrweb` and
   `~/Code/faro-web-sdk`
 
 These orchestrators reference sibling repos by relative path (`../grafana`) or
@@ -35,7 +35,7 @@ it has two fundamental problems.
 
 When a graith agent works on `~/Code/grafana`, it works in a worktree at
 `~/.local/share/graith/worktrees/grafana/<hash>/<id>`. But an orchestrator
-running in `~/Code/dem-dev` references `~/Code/grafana` — the main checkout,
+running in `~/Code/devenv` references `~/Code/grafana` — the main checkout,
 not the worktree. The orchestrator sees unmodified code, not the agent's
 in-progress changes.
 
@@ -47,8 +47,8 @@ files, modify configs, and start services in those directories.
 
 ### 3. Singleton runtime resources
 
-Orchestrators like dem-dev manage Docker containers, networks, port bindings,
-and running processes. These are global resources — two instances of dem-dev
+Orchestrators like devenv manage Docker containers, networks, port bindings,
+and running processes. These are global resources — two instances of devenv
 cannot run simultaneously. Creating multiple worktrees for the orchestrator does
 not create multiple isolated runtimes.
 
@@ -74,7 +74,7 @@ not create multiple isolated runtimes.
   be built on top using `gr msg`, but is out of scope for this design)
 - Multi-agent concurrent access to the same orchestrator session
 - Automatically consuming another session's in-progress changes (e.g., a
-  dem-dev session seeing a standalone grafana agent's uncommitted work).
+  devenv session seeing a standalone grafana agent's uncommitted work).
   Includes sessions create fresh worktrees from the default branch. Cross-
   session verification is handled by the orchestrator-as-service pattern
   (future work) where the orchestrator checks out requested branches on
@@ -118,9 +118,9 @@ included repos, arranged as siblings under a shared parent directory. Add a
 
 ```toml
 [[repos]]
-path = "~/Code/dem-dev"
+path = "~/Code/devenv"
 singleton = true
-includes = ["~/Code/grafana", "~/Code/session-replay-examples"]
+includes = ["~/Code/grafana", "~/Code/examples"]
 
 [[repos]]
 path = "~/Code/faro-web-sdk"
@@ -155,7 +155,7 @@ at runtime (the included repo must still exist and be a git repo).
 graith sessions in separate worktrees at the same time. Git supports multiple
 worktrees per repo — each session gets its own branch and worktree directory.
 There is no conflict. For example, an agent working on `grafana` in a standalone
-session and a `dem-dev` includes session that also creates a `grafana` worktree
+session and a `devenv` includes session that also creates a `grafana` worktree
 are fully independent — different branches, different directories.
 
 Updated config struct:
@@ -208,16 +208,16 @@ worktrees:
   <includedRepo2>/         # git worktree for second included repo
 ```
 
-Concrete example for dem-dev:
+Concrete example for devenv:
 
 ```
-~/.local/share/graith/worktrees/dem-dev/<hash>/<sessionID>/
-  dem-dev/                        # git worktree for ~/Code/dem-dev
+~/.local/share/graith/worktrees/devenv/<hash>/<sessionID>/
+  devenv/                        # git worktree for ~/Code/devenv
   grafana/                        # git worktree for ~/Code/grafana
-  session-replay-examples/        # git worktree for ~/Code/session-replay-examples
+  examples/        # git worktree for ~/Code/examples
 ```
 
-The agent's working directory is set to `.../<sessionID>/dem-dev/`. From there,
+The agent's working directory is set to `.../<sessionID>/devenv/`. From there,
 `../grafana` resolves to the session's grafana worktree — the same relative
 path structure as `~/Code/`.
 
@@ -260,9 +260,9 @@ after all child worktrees are removed.
 Branch naming uses a sub-path for included repos to keep them visually grouped:
 
 ```
-dougal/graith/dem-dev-a1b2c3d4              # main repo branch
-dougal/graith/dem-dev-a1b2c3d4/grafana      # included repo branch
-dougal/graith/dem-dev-a1b2c3d4/session-replay-examples
+dougal/graith/devenv-a1b2c3d4              # main repo branch
+dougal/graith/devenv-a1b2c3d4/grafana      # included repo branch
+dougal/graith/devenv-a1b2c3d4/examples
 ```
 
 #### Sandbox permissions
@@ -399,16 +399,16 @@ across ALL repos (main + included), not just the main worktree. Display should
 group findings by repo:
 
 ```
-Session "dem-dev" has uncommitted changes:
+Session "devenv" has uncommitted changes:
 
-  dem-dev:
+  devenv:
     M docker-compose.yml
 
   grafana:
     M pkg/api/handler.go
     A pkg/api/new_endpoint.go
 
-  session-replay-examples:
+  examples:
     (clean)
 
 Delete anyway? [y/N]
@@ -489,17 +489,17 @@ uppercased, with hyphens and dots replaced by underscores:
 
 ```
 GRAITH_INCLUDE_GRAFANA_PATH=/.../<sessionDir>/grafana
-GRAITH_INCLUDE_SESSION_REPLAY_EXAMPLES_PATH=/.../<sessionDir>/session-replay-examples
+GRAITH_INCLUDE_EXAMPLES_PATH=/.../<sessionDir>/examples
 ```
 
 #### Architecture diagram
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│ Session directory: <data_dir>/worktrees/dem-dev/<hash>/<id>/    │
+│ Session directory: <data_dir>/worktrees/devenv/<hash>/<id>/    │
 │                                                                 │
 │  ┌─────────────┐  ┌─────────────┐  ┌──────────────────────┐    │
-│  │  dem-dev/    │  │  grafana/   │  │ session-replay-      │    │
+│  │  devenv/    │  │  grafana/   │  │ session-replay-      │    │
 │  │  (worktree)  │  │  (worktree) │  │ examples/ (worktree) │    │
 │  │             ◄────►           ◄────►                      │    │
 │  │  agent cwd   │  │  ../grafana │  │  ../session-replay-  │    │
@@ -511,9 +511,9 @@ GRAITH_INCLUDE_SESSION_REPLAY_EXAMPLES_PATH=/.../<sessionDir>/session-replay-exa
 └─────────────────────────────────────────────────────────────────┘
 
 Source repos (untouched):
-  ~/Code/dem-dev/
+  ~/Code/devenv/
   ~/Code/grafana/
-  ~/Code/session-replay-examples/
+  ~/Code/examples/
 ```
 
 **Pros:**
@@ -543,8 +543,8 @@ configured repos via sandbox `write_dirs`.
 
 ```toml
 [[repos]]
-path = "~/Code/dem-dev"
-write_dirs = ["~/Code/grafana", "~/Code/session-replay-examples"]
+path = "~/Code/devenv"
+write_dirs = ["~/Code/grafana", "~/Code/examples"]
 ```
 
 **Pros:**
@@ -622,7 +622,7 @@ read-only.
 **Interaction with `--no-repo`:** Mutually exclusive with `includes`.
 
 **Future work — orchestrator-as-service:** Once includes sessions work, the
-natural next step is an orchestrator-as-service pattern: the dem-dev session
+natural next step is an orchestrator-as-service pattern: the devenv session
 runs long-lived, and other agents send verification requests via `gr msg`. The
 orchestrator agent checks out requested branches in its included worktrees and
 runs tests. This requires no graith changes beyond what this proposal adds —
