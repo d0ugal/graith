@@ -569,16 +569,29 @@ func (n Notifications) QuietHoursConfigured() bool {
 	return strings.TrimSpace(n.QuietHoursStart) != "" && strings.TrimSpace(n.QuietHoursEnd) != ""
 }
 
-// parseClock parses a "HH:MM" 24-hour time into minutes-since-midnight.
+// parseClock parses a 24-hour "H:MM"/"HH:MM" time into minutes-since-midnight.
+// It requires exactly two colon-separated all-digit fields with no trailing
+// content, so "22:00:59", "09:00abc" and "7:5 " are rejected (fmt.Sscanf would
+// have silently accepted a prefix and ignored the rest). Non-zero-padded hours
+// (e.g. "9:00") are allowed for convenience.
 func parseClock(s string) (int, bool) {
 	s = strings.TrimSpace(s)
 
-	var h, m int
-	if _, err := fmt.Sscanf(s, "%d:%d", &h, &m); err != nil {
+	hh, mm, ok := strings.Cut(s, ":")
+	if !ok {
 		return 0, false
 	}
 
-	// Reject shapes fmt.Sscanf would tolerate but which aren't a valid clock.
+	h, err := strconv.Atoi(hh)
+	if err != nil {
+		return 0, false
+	}
+
+	m, err := strconv.Atoi(mm)
+	if err != nil {
+		return 0, false
+	}
+
 	if h < 0 || h > 23 || m < 0 || m > 59 {
 		return 0, false
 	}

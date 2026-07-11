@@ -89,17 +89,17 @@ func TestBuildOrchestratorPrompt_Cov(t *testing.T) {
 	sm := newOrchTestSM(t)
 
 	// Non-claude agent: prompt injection is claude-only.
-	if got := sm.buildOrchestratorPrompt("codex", config.OrchestratorConfig{Prompt: "ignored"}, nil); got != nil {
+	if got := sm.buildOrchestratorPrompt("codex", config.OrchestratorConfig{Prompt: "ignored"}, nil, false); got != nil {
 		t.Errorf("non-claude agent should return nil prompt args, got %v", got)
 	}
 
 	// Empty prompt and no file: nil.
-	if got := sm.buildOrchestratorPrompt("claude", config.OrchestratorConfig{}, nil); got != nil {
+	if got := sm.buildOrchestratorPrompt("claude", config.OrchestratorConfig{}, nil, false); got != nil {
 		t.Errorf("empty prompt should return nil, got %v", got)
 	}
 
 	// Inline prompt only.
-	got := sm.buildOrchestratorPrompt("claude", config.OrchestratorConfig{Prompt: "ken this"}, nil)
+	got := sm.buildOrchestratorPrompt("claude", config.OrchestratorConfig{Prompt: "ken this"}, nil, false)
 	if len(got) != 2 || got[0] != "--append-system-prompt" || got[1] != "ken this" {
 		t.Errorf("inline prompt args wrong: %v", got)
 	}
@@ -108,7 +108,7 @@ func TestBuildOrchestratorPrompt_Cov(t *testing.T) {
 	got = sm.buildOrchestratorPrompt("claude", config.OrchestratorConfig{
 		Prompt:     "bide",
 		PromptFile: filepath.Join(t.TempDir(), "does-not-exist.txt"),
-	}, nil)
+	}, nil, false)
 	if len(got) != 2 || got[1] != "bide" {
 		t.Errorf("missing prompt_file should keep inline prompt, got %v", got)
 	}
@@ -119,13 +119,13 @@ func TestBuildOrchestratorPrompt_Cov(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got = sm.buildOrchestratorPrompt("claude", config.OrchestratorConfig{Prompt: "bide", PromptFile: pf}, nil)
+	got = sm.buildOrchestratorPrompt("claude", config.OrchestratorConfig{Prompt: "bide", PromptFile: pf}, nil, false)
 	if len(got) != 2 || got[1] != "bide\n\nfrom the croft" {
 		t.Errorf("prompt_file should append after inline prompt, got %q", got[1])
 	}
 
 	// prompt_file only (no inline prompt).
-	got = sm.buildOrchestratorPrompt("claude", config.OrchestratorConfig{PromptFile: pf}, nil)
+	got = sm.buildOrchestratorPrompt("claude", config.OrchestratorConfig{PromptFile: pf}, nil, false)
 	if len(got) != 2 || got[1] != "from the croft" {
 		t.Errorf("prompt_file-only should use file contents, got %q", got)
 	}
@@ -138,7 +138,7 @@ func TestBuildOrchestratorPrompt_RepoPaths(t *testing.T) {
 
 	// Inline prompt plus configured repo paths: the repos section is appended
 	// after the base prompt, and each configured path is listed.
-	got := sm.buildOrchestratorPrompt("claude", config.OrchestratorConfig{Prompt: "ken this"}, repoPaths)
+	got := sm.buildOrchestratorPrompt("claude", config.OrchestratorConfig{Prompt: "ken this"}, repoPaths, false)
 	if len(got) != 2 || got[0] != "--append-system-prompt" {
 		t.Fatalf("expected append-system-prompt args, got %v", got)
 	}
@@ -160,19 +160,41 @@ func TestBuildOrchestratorPrompt_RepoPaths(t *testing.T) {
 
 	// No base prompt but repo paths configured: a prompt is still produced so
 	// the orchestrator learns which repos exist.
-	got = sm.buildOrchestratorPrompt("claude", config.OrchestratorConfig{}, repoPaths)
+	got = sm.buildOrchestratorPrompt("claude", config.OrchestratorConfig{}, repoPaths, false)
 	if len(got) != 2 || !strings.Contains(got[1], "/glen/croft") {
 		t.Errorf("repo paths alone should still produce a prompt, got %v", got)
 	}
 
 	// No base prompt and no repo paths: nil (empty case handled gracefully).
-	if got := sm.buildOrchestratorPrompt("claude", config.OrchestratorConfig{}, nil); got != nil {
+	if got := sm.buildOrchestratorPrompt("claude", config.OrchestratorConfig{}, nil, false); got != nil {
 		t.Errorf("empty prompt and no repo paths should return nil, got %v", got)
 	}
 
 	// Non-claude agent ignores repo paths too.
-	if got := sm.buildOrchestratorPrompt("codex", config.OrchestratorConfig{}, repoPaths); got != nil {
+	if got := sm.buildOrchestratorPrompt("codex", config.OrchestratorConfig{}, repoPaths, false); got != nil {
 		t.Errorf("non-claude agent should return nil even with repo paths, got %v", got)
+	}
+}
+
+func TestBuildOrchestratorPrompt_Notifications(t *testing.T) {
+	sm := newOrchTestSM(t)
+
+	// notifyEnabled appends a notifications section teaching the orchestrator
+	// about `gr notify`, even with no base prompt configured.
+	got := sm.buildOrchestratorPrompt("claude", config.OrchestratorConfig{}, nil, true)
+	if len(got) != 2 || !strings.Contains(got[1], "gr notify") {
+		t.Fatalf("notifications section should mention gr notify, got %v", got)
+	}
+
+	// When notifications are disabled the section is omitted.
+	if got := sm.buildOrchestratorPrompt("claude", config.OrchestratorConfig{}, nil, false); got != nil {
+		t.Errorf("no prompt, no repos, notifications off should be nil, got %v", got)
+	}
+
+	// It is appended after an inline prompt with a blank-line separator.
+	got = sm.buildOrchestratorPrompt("claude", config.OrchestratorConfig{Prompt: "ken this"}, nil, true)
+	if len(got) != 2 || !strings.HasPrefix(got[1], "ken this\n\n") || !strings.Contains(got[1], "Notifying the human") {
+		t.Errorf("notifications section should follow the base prompt, got %q", got[1])
 	}
 }
 

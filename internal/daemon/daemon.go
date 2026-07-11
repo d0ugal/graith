@@ -92,12 +92,13 @@ type SessionManager struct {
 	triggers           *triggerState
 
 	// pushNotify guards proactive `gr notify` push-notification gating state:
-	// a rolling window of delivered timestamps (rate limit) and the last
-	// delivered key/time (coalescing of identical rapid-fire notifications).
+	// a rolling window of delivered timestamps (rate limit) and a per-key map of
+	// the last delivered time (coalescing of identical rapid-fire notifications,
+	// so interleaved A/B/A duplicates are each coalesced against their own last
+	// send, not just the immediately-previous one).
 	pushMu       sync.Mutex
 	pushLog      []time.Time
-	lastPushKey  string
-	lastPushAt   time.Time
+	pushCoalesce map[string]time.Time
 	pushDispatch func(backend, title, message, priority string) error // overridable in tests
 
 	// approvalsWarnOnce guards the one-time [approvals] mode deprecation warning
@@ -2500,8 +2501,9 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 		sm.mu.RLock()
 		orchCfg := sm.cfg.Orchestrator
 		repoPaths := sm.cfg.AvailableRepoPaths()
+		notifyEnabled := sm.cfg.Notifications.Enabled
 		sm.mu.RUnlock()
-		promptArgs := sm.buildOrchestratorPrompt(sessAgent, orchCfg, repoPaths)
+		promptArgs := sm.buildOrchestratorPrompt(sessAgent, orchCfg, repoPaths, notifyEnabled)
 		expandedArgs = append(expandedArgs, promptArgs...)
 	} else if agent.PromptInjectionEnabled() {
 		promptArgs, err := sm.injectPrompt(sessAgent, sessWorktreePath)

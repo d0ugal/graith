@@ -152,7 +152,7 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 		return SessionState{}, fmt.Errorf("expand orchestrator agent args: %w", err)
 	}
 
-	promptArgs := sm.buildOrchestratorPrompt(agentName, orchCfg, cfgSnap.AvailableRepoPaths())
+	promptArgs := sm.buildOrchestratorPrompt(agentName, orchCfg, cfgSnap.AvailableRepoPaths(), cfgSnap.Notifications.Enabled)
 	expandedArgs = append(expandedArgs, promptArgs...)
 
 	logPath := filepath.Join(sm.paths.LogDir, id+".log")
@@ -284,7 +284,7 @@ func (sm *SessionManager) rollbackOrchestratorCreate(id string) {
 	_ = os.Remove(sm.safehouseFragmentPath(id))
 }
 
-func (sm *SessionManager) buildOrchestratorPrompt(agentName string, orchCfg config.OrchestratorConfig, repoPaths []string) []string {
+func (sm *SessionManager) buildOrchestratorPrompt(agentName string, orchCfg config.OrchestratorConfig, repoPaths []string, notifyEnabled bool) []string {
 	if agentName != "claude" {
 		return nil
 	}
@@ -314,11 +314,34 @@ func (sm *SessionManager) buildOrchestratorPrompt(agentName string, orchCfg conf
 		prompt += section
 	}
 
+	if notifyEnabled {
+		if prompt != "" {
+			prompt += "\n\n"
+		}
+
+		prompt += orchestratorNotificationsSection()
+	}
+
 	if prompt == "" {
 		return nil
 	}
 
 	return []string{"--append-system-prompt", prompt}
+}
+
+// orchestratorNotificationsSection tells the orchestrator it can proactively
+// get the human's attention with `gr notify`, and when it is (and isn't)
+// appropriate — the orchestrator is the primary sender, so this belongs in its
+// system prompt rather than being left for it to discover.
+func orchestratorNotificationsSection() string {
+	return "## Notifying the human\n\n" +
+		"You can send a desktop/push notification to the human with " +
+		"`gr notify \"<message>\" --priority low|normal|high`. Unlike an inbox " +
+		"message, this proactively interrupts them, so use it sparingly and only " +
+		"for things genuinely worth their attention — a finished briefing, a CI " +
+		"failure that needs a decision, a blocked task. Use `--priority high` " +
+		"(plays a sound, bypasses quiet hours and rate limits) only for urgent " +
+		"items. Routine progress belongs in `gr status`, not a notification."
 }
 
 // orchestratorRepoPathsSection renders the configured repo paths as a prompt

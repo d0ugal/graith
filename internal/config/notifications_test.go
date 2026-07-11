@@ -131,10 +131,14 @@ func TestParseClock(t *testing.T) {
 		{"00:00", 0, true},
 		{"07:30", 450, true},
 		{"23:59", 1439, true},
+		{"9:00", 540, true}, // non-zero-padded hour is allowed
 		{"24:00", 0, false},
 		{"12:60", 0, false},
 		{"noon", 0, false},
 		{"-1:00", 0, false},
+		{"22:00:59", 0, false}, // trailing field rejected
+		{"09:00abc", 0, false}, // trailing junk rejected
+		{"22", 0, false},       // no minute field
 	}
 
 	for _, c := range cases {
