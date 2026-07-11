@@ -107,6 +107,15 @@ ttl = "5m"  # default TTL for status updates
 
 When an agent sets a status via `gr status`, it auto-expires after this TTL if the agent produces new output without updating the status. Override per-update with `gr status --ttl <duration>`.
 
+## Delete retention
+
+```toml
+[delete]
+retention = "24h"  # how long soft-deleted sessions are kept before purge
+```
+
+`gr delete` is a soft delete: it stops the agent and hides the session but keeps its worktree, branch, and state for this window, so `gr restore` can bring it back. A background loop hard-deletes sessions once their retention expires. Setting `retention = "0"` makes soft delete keep sessions **forever** (never auto-purged) — it does not turn `gr delete` into a destructive delete. `gr purge` is the only immediate, destructive verb; it bypasses the window.
+
 ## Git pull
 
 ```toml
@@ -118,6 +127,49 @@ interval = "1h"   # how often to pull (minimum: 1 minute)
 When enabled, the daemon fetches and fast-forward merges the default branch of each repo registered with `git maintenance`. The first pull runs shortly after the daemon starts, then on the configured `interval` — so a daemon restart doesn't leave repos stale for a full interval before the next pull.
 
 Sessions run in their own worktrees on feature branches, which share only the object store with the source checkout, so fast-forwarding the default branch cannot disturb them — those sessions do **not** block the pull. A repo is only skipped when a session works directly on the source checkout (in-place) or has the default branch itself checked out in its worktree. This keeps default branches up to date for future session creation without ever pulling into an active worktree.
+
+## PR & CI awareness
+
+When enabled, the daemon resolves each session's GitHub PR via `gh`, polls its CI checks and comments, and delivers a structured notification to the session's inbox on a meaningful change — auto-resuming a stopped agent so it reacts to review feedback and CI results without you relaying them.
+
+```toml
+[pr_watch]
+enabled                  = false  # opt in to PR/CI awareness
+notify_ci_failures       = true   # notify on a CI transition to failing
+notify_pr_comments       = true   # notify on new PR conversation comments
+notify_review_comments   = true   # notify on new inline review comments
+poll_pending             = "1m"   # poll interval while checks are still running
+debounce                 = "2m"   # minimum cooldown between notifications to a session
+```
+
+### Comment author-trust gate
+
+PR comments are free text from arbitrary GitHub users. Because they reach the agent verbatim and can auto-resume a stopped session, an untrusted comment is a **prompt-injection vector**. graith gates comment notifications on the author's trust: a comment only notifies if its author is trusted.
+
+```toml
+[pr_watch]
+# Trust individual authors by login (case-insensitive). This is the ONLY way to
+# trust a bot or GitHub App — a bot's author_association is unreliable and never
+# confers trust on a "<slug>[bot]" login.
+comment_author_allowlist = ["github-actions[bot]", "coderabbitai[bot]"]
+
+# Trust anyone whose GitHub author_association is in this set. Omit the key to
+# keep the default tier below (CONTRIBUTOR is deliberately excluded — on a public
+# repo it only means "merged a commit once", and bots can carry it).
+trusted_author_associations = ["OWNER", "MEMBER", "COLLABORATOR"]
+
+# Surface a not-yet-trusted author to the orchestrator once, as metadata only
+# (login/type/association/PR + a `gh pr view` pointer) — NEVER the comment body,
+# so the human can decide whether to allowlist them.
+notify_untrusted_authors = true
+```
+
+An untrusted comment is **dropped** from notifications (the comment cursor still advances, so a later trusted comment isn't reported alongside the whole untrusted backlog). For the common case — an owner working on their own repos — every comment is from the owner, so behaviour is unchanged.
+
+Two trust knobs, fail-closed:
+
+- **`trusted_author_associations`** defaults to `OWNER`/`MEMBER`/`COLLABORATOR` when the key is **absent**. Setting it to an explicit empty list (`trusted_author_associations = []`) is honoured as **allowlist-only** mode — no association is trusted — and is *not* silently widened back to the default.
+- **`comment_author_allowlist`** is the only way to trust a bot/App. Allowlisting a bot login trusts that workflow to not echo untrusted PR text back into its comments; fine for a repo's own first-party CI, a documented caveat on public repos.
 
 ## Triggers
 
@@ -189,6 +241,25 @@ The prefix key accepts values like `ctrl+b`, `ctrl+x`, or a single character. gr
 
 See [Keybindings](keybindings.md) for the complete keybinding reference.
 
+## Overlay
+
+```toml
+[overlay]
+shortcut_keys = "1234567890"  # keys that jump straight to the Nth session in the picker
+```
+
+In the session picker (`ctrl+b w`), each of these keys jumps directly to the corresponding session — the 1st key selects session 1, the 2nd key session 2, and so on.
+
+## Input
+
+```toml
+[input]
+drag_arrow_keys      = false  # translate a left-click hold-and-drag into arrow-key presses
+drag_arrow_threshold = 2      # cells of drag movement per emitted arrow-key press (values < 1 use the default)
+```
+
+`drag_arrow_keys` lets you press-and-hold the left mouse button and drag up/down/left/right to emit discrete arrow-key presses to the focused pane — handy on touch/mobile terminals. It is off by default because it repurposes left-drag, which terminals otherwise use for text selection. Mouse-wheel scrolling always passes through unchanged. It only takes effect when the focused app has SGR mouse reporting enabled (e.g. a TUI tracking the mouse); graith translates those reports, it does not enable mouse tracking itself.
+
 ## Orchestrator
 
 ```toml
@@ -202,6 +273,29 @@ prompt_file  = ""       # or read from file
 ```
 
 See [Orchestrator](orchestrator.md) for details.
+
+## Remote access
+
+An optional control listener that lets you reach the daemon from another device over your [Tailscale](https://tailscale.com) tailnet. **Disabled by default and fail-closed**: when enabled, an invalid `[remote]` block is a hard config-load error rather than a silent downgrade.
+
+```toml
+[remote]
+enabled             = false          # expose the remote control listener over the tailnet
+mode                = "tsnet"         # transport: "tsnet" (embedded Tailscale) or "interface" (bind an existing tailnet IP)
+port                = 4823            # TCP port the listener binds
+require_pairing     = true           # require per-device pairing for human-level rights
+# hostname          = "graith"       # tsnet node name / MagicDNS label (tsnet mode)
+# auth_key_file     = "~/.config/graith/tsnet.key"  # tsnet auth key path (tsnet mode)
+# tags              = ["tag:graith"] # tsnet ACL tags applied to the node (tsnet mode)
+# allow_tailnet_users = ["you@example.com"]  # WhoIs allowlist; "tag:"-prefixed entries opt tagged nodes in
+# pair_request_rate = "5/min"        # anti-flood limit on pending pair requests ("<n>/<sec|min|hour>")
+```
+
+Access is gated in two layers: a WhoIs **allowlist** (`allow_tailnet_users` — who on the tailnet may connect at all) and per-device **pairing** (`require_pairing` — each device proves possession of a paired key before it gets human-level rights).
+
+> **Warning:** `require_pairing = false` is **UNSAFE** — it trusts the tailnet identity alone with no per-device proof, so it is restricted to **read-only** access. Leave pairing on for any device that should control sessions.
+
+The orchestrator can also be given extra filesystem access scoped to itself via `[orchestrator.sandbox]` (`read_dirs`/`write_dirs`), layered on top of the global and per-agent sandbox config. See [Authentication & remote access](auth.md) for the full authorization model, token lifecycle, and pairing flow.
 
 ## MCP servers
 
