@@ -227,6 +227,30 @@ func (ac authContext) checkScenarioOp(sm *SessionManager, scenarioName string) e
 	return fmt.Errorf("scenario %q not found", scenarioName)
 }
 
+// checkTriggerOp authorizes a mutating trigger op (run/pause/resume). Triggers
+// are daemon-owned (no per-trigger owner), so the rule is: the caller must be the
+// system orchestrator session or a descendant of it. Humans are always allowed.
+// Must be called with sm.mu at least RLocked.
+func (ac authContext) checkTriggerOp(sm *SessionManager) error {
+	if ac.isHuman() {
+		return nil
+	}
+
+	if ac.role != roleSession && ac.role != roleOrchestrator {
+		return fmt.Errorf("not authorized to manage triggers")
+	}
+
+	orchID := sm.findOrchestratorID()
+	if orchID == "" {
+		return fmt.Errorf("not authorized: no orchestrator session to authorize against")
+	}
+	if ac.sessionID == orchID || sm.isDescendantOf(ac.sessionID, orchID) {
+		return nil
+	}
+
+	return fmt.Errorf("not authorized: only the orchestrator or its descendants can manage triggers")
+}
+
 // isDescendantOf checks whether targetID is a transitive descendant of rootID.
 // Must be called with sm.mu at least RLocked.
 func (sm *SessionManager) isDescendantOf(targetID, rootID string) bool {

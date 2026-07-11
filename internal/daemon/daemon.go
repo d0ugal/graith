@@ -85,6 +85,7 @@ type SessionManager struct {
 	recentExits        []time.Time
 	lastInboxNotifyAt  map[string]time.Time
 	prWatch            *prWatchState
+	triggers           *triggerState
 
 	// approvalsWarnOnce guards the one-time [approvals] mode deprecation warning
 	// so it fires once per daemon lifetime, not per approval request.
@@ -113,6 +114,7 @@ func NewSessionManager(cfg *config.Config, paths config.Paths, log *slog.Logger)
 		orchestratorExitCh: make(chan string, 4),
 		lastInboxNotifyAt:  make(map[string]time.Time),
 		prWatch:            newPRWatchState(),
+		triggers:           newTriggerState(),
 		cfg:                cfg,
 		paths:              paths,
 		log:                log,
@@ -5834,6 +5836,8 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 	go sm.RunGitPullLoop(ctx)
 	go sm.RunPRWatchLoop(ctx)
 	go sm.RunPurgeLoop(ctx)
+	go sm.RunTriggerLoop(ctx)
+	go sm.RunFileWatchLoop(ctx)
 
 	go sm.orchestratorSupervisor(ctx, sm.orchestratorExitCh)
 	go sm.ensureOrchestrator(ctx)

@@ -660,6 +660,49 @@ type ScenarioListResponse struct {
 	Scenarios []ScenarioRecord `json:"scenarios"`
 }
 
+// --- Triggers (control messages: trigger_list/status/run/pause) ---
+
+type TriggerListMsg struct{}
+
+type TriggerStatusMsg struct {
+	Name string `json:"name"`
+}
+
+type TriggerRunMsg struct {
+	Name string `json:"name"`
+}
+
+type TriggerPauseMsg struct {
+	Name  string `json:"name"`
+	Pause bool   `json:"pause"`
+}
+
+// TriggerRecord is the per-trigger info returned to the client.
+type TriggerRecord struct {
+	Name       string `json:"name"`
+	Source     string `json:"source"` // schedule | watch
+	Action     string `json:"action"` // command | session | scenario | message
+	Enabled    bool   `json:"enabled"`
+	Paused     bool   `json:"paused,omitempty"`
+	Schedule   string `json:"schedule,omitempty"`    // cron/every summary (schedule)
+	WatchScope string `json:"watch_scope,omitempty"` // repo/role summary (watch)
+	NextFire   string `json:"next_fire,omitempty"`   // schedule
+	LastRun    string `json:"last_run,omitempty"`    // RFC3339 or ""
+	LastResult string `json:"last_result,omitempty"` // most recent run result
+	LastError  string `json:"last_error,omitempty"`
+	RunCount   int    `json:"run_count,omitempty"`
+	Bindings   int    `json:"bindings,omitempty"` // watch: live bound sessions
+	Degraded   string `json:"degraded,omitempty"` // watch: degraded binding reason
+}
+
+type TriggerListResponse struct {
+	Triggers []TriggerRecord `json:"triggers"`
+}
+
+type TriggerStatusResponse struct {
+	Trigger TriggerRecord `json:"trigger"`
+}
+
 type ScenarioResumeMsg struct {
 	Name string `json:"name"`
 }

@@ -46,6 +46,8 @@ type Config struct {
 	Remote           RemoteConfig       `toml:"remote"`
 	Input            InputConfig        `toml:"input"`
 	Agents           map[string]Agent   `toml:"agents"`
+	Triggers         []TriggerConfig    `toml:"trigger"`  // [[trigger]] array
+	TriggersRuntime  TriggersRuntime    `toml:"triggers"` // [triggers] table (daemon-wide settings)
 }
 
 type Overlay struct {
@@ -1258,6 +1260,8 @@ func (c *Config) Validate() error {
 			errs = append(errs, fmt.Errorf("%s %q: %w", f.name, f.val, err))
 		}
 	}
+
+	errs = append(errs, c.validateTriggers()...)
 
 	return errors.Join(errs...)
 }
