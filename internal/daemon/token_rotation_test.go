@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -160,6 +161,49 @@ func TestResumeSpawnFailureRollsBackSessionTokenIndex(t *testing.T) {
 		t.Errorf("persisted rolled-back token = %q, want %q", got, oldToken)
 	}
 }
+
+func TestResumePostSpawnSaveFailureRollsBackToken(t *testing.T) {
+	sm, dir := newTokenRotationManager(t, "sleep", "60")
+
+	const oldToken = "auld-haar-token" //nolint:gosec // test fixture, not a real credential
+	seedStoppedSessionToken(t, sm, dir, "haar-id", oldToken)
+
+	// Fail the second saveState within Resume — the post-spawn persist — so the
+	// first (StatusCreating) save and the PTY spawn both succeed. This exercises
+	// the rollback path that the earlier rollbackState/first-save tests do not.
+	calls := 0
+	sm.saveStateFault = func() error {
+		calls++
+		if calls == 2 {
+			return errBoom
+		}
+
+		return nil
+	}
+
+	if _, err := sm.Resume("haar-id", 24, 80); err == nil {
+		t.Fatal("Resume() succeeded despite induced post-spawn save failure")
+	}
+
+	sm.saveStateFault = nil
+
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	if got := sm.state.Sessions["haar-id"].Token; got != oldToken {
+		t.Errorf("state token = %q, want rolled back to %q", got, oldToken)
+	}
+
+	if got := sm.SessionForToken(oldToken); got != "haar-id" {
+		t.Errorf("old token resolves to %q, want haar-id", got)
+	}
+
+	if len(sm.tokenIndex) != 1 {
+		t.Errorf("token index has %d entries, want 1: %v", len(sm.tokenIndex), sm.tokenIndex)
+	}
+}
+
+var errBoom = errors.New("induced save failure")
 
 func dirForMissingCommand(t *testing.T) string {
 	t.Helper()

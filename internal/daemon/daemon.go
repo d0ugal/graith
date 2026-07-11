@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -68,6 +69,7 @@ type SessionManager struct {
 	pendingApprovals   map[string]*pendingApproval
 	tokenIndex         map[string]string              // token → session ID (reverse lookup)
 	humanToken         string                         // local human credential, loaded at startup
+	saveStateFault     func() error                   // test-only saveState fault injection; nil in production
 	pendingPairings    map[string]*pendingPairing     // requestID → pending device pairing (in-memory; not persisted)
 	pairWaiters        map[string]chan pairApproval   // requestID → waiter for a blocked pair_request connection
 	approvalSubs       map[net.Conn]func(string, any) // conn → sendControl for approval subscribers (no attach)
@@ -279,10 +281,15 @@ func (sm *SessionManager) LoadState() error {
 // crash-safely on first startup. It must never silently replace an existing
 // credential, even when that credential cannot be read.
 func (sm *SessionManager) loadOrCreateHumanToken() error {
-	data, err := os.ReadFile(sm.paths.HumanTokenFile)
+	// Open without following symlinks so the credential can't be redirected to a
+	// file an attacker controls; O_NOFOLLOW makes a symlink final component fail
+	// to open rather than silently resolving.
+	f, err := os.OpenFile(sm.paths.HumanTokenFile, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("read human token: %w", err)
+			// Includes ELOOP (symlink) and any other open failure: fail closed
+			// rather than fall back to permissive behaviour.
+			return fmt.Errorf("open human token: %w", err)
 		}
 
 		token, genErr := generateToken()
@@ -294,7 +301,31 @@ func (sm *SessionManager) loadOrCreateHumanToken() error {
 			return fmt.Errorf("write human token: %w", writeErr)
 		}
 
-		data = []byte(token)
+		sm.setHumanToken(token)
+
+		return nil
+	}
+	defer func() { _ = f.Close() }()
+
+	// The token is the roleLocalHuman bearer credential; its whole privilege
+	// boundary rests on it being a private regular file. Validate the metadata on
+	// the open descriptor (not a pre-open stat) so there is no check/use race.
+	info, err := f.Stat()
+	if err != nil {
+		return fmt.Errorf("stat human token: %w", err)
+	}
+
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("human token %s is not a regular file", sm.paths.HumanTokenFile)
+	}
+
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		return fmt.Errorf("human token %s has insecure mode %04o, want 0600", sm.paths.HumanTokenFile, perm)
+	}
+
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return fmt.Errorf("read human token: %w", err)
 	}
 
 	token := strings.TrimSpace(string(data))
@@ -302,11 +333,15 @@ func (sm *SessionManager) loadOrCreateHumanToken() error {
 		return fmt.Errorf("read human token: token is empty")
 	}
 
+	sm.setHumanToken(token)
+
+	return nil
+}
+
+func (sm *SessionManager) setHumanToken(token string) {
 	sm.mu.Lock()
 	sm.humanToken = token
 	sm.mu.Unlock()
-
-	return nil
 }
 
 // EnsureHumanToken loads or creates the local human credential. It is exported
@@ -383,6 +418,12 @@ func (sm *SessionManager) AdoptSessions(manifest *UpgradeManifest) error {
 }
 
 func (sm *SessionManager) saveState() error {
+	if sm.saveStateFault != nil {
+		if err := sm.saveStateFault(); err != nil {
+			return err
+		}
+	}
+
 	return SaveState(sm.paths.StateFile, sm.state)
 }
 
@@ -2600,6 +2641,16 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 		sessState.SummaryText = prevSummaryText
 		sessState.SummarySetAt = prevSummarySetAt
 		sessState.SummaryTTL = prevSummaryTTL
+
+		// Roll back the rotated token too, otherwise the session keeps a
+		// credential no surviving process knows (the new PTY is killed below).
+		sessState.Token = prevToken
+
+		delete(sm.tokenIndex, newToken)
+
+		if prevToken != "" {
+			sm.tokenIndex[prevToken] = id
+		}
 
 		delete(sm.sessions, id)
 		sm.mu.Unlock()
