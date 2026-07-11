@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -344,6 +345,64 @@ func TestActionScenario_MissingFile(t *testing.T) {
 	if _, err := sm.actionScenario(t.Context(), &trig); err == nil {
 		t.Error("expected error for missing scenario file")
 	}
+}
+
+func TestRunTriggerLoop_FiresMessage(t *testing.T) {
+	trig := config.TriggerConfig{
+		Name: "loop-tick", Schedule: &config.ScheduleConfig{Every: "1s"},
+		Action: config.ActionConfig{Type: config.ActionMessage, Body: "tick", Deliver: config.DeliverConfig{Topic: "loch"}},
+	}
+	sm := newTriggerTestSM(t, trig)
+	ms := withMsgStore(t, sm)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	go sm.RunTriggerLoop(ctx)
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if msgs, _ := ms.Read("loch", "r", false, ""); len(msgs) >= 1 {
+			return
+		}
+
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	t.Fatal("RunTriggerLoop did not fire the schedule trigger")
+}
+
+func TestRunFileWatchLoop_FiresMessage(t *testing.T) {
+	worktree := t.TempDir()
+	trig := config.TriggerConfig{
+		Name:   "wl",
+		Watch:  &config.WatchConfig{Role: "implementer", Debounce: "50ms"},
+		Action: config.ActionConfig{Type: config.ActionMessage, Body: "changed", Deliver: config.DeliverConfig{Topic: "brae"}},
+	}
+	sm := newTriggerTestSM(t, trig)
+	ms := withMsgStore(t, sm)
+	sm.state.Sessions["src"] = &SessionState{ID: "src", Name: "ben", Status: StatusRunning, ScenarioRole: "implementer", WorktreePath: worktree}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
+	defer cancel()
+
+	go sm.RunFileWatchLoop(ctx)
+
+	// Wait for the binding to be created (reconcile tick is 2s), then edit.
+	time.Sleep(2500 * time.Millisecond)
+
+	_ = os.WriteFile(filepath.Join(worktree, "x.go"), []byte("package x\n"), 0o600)
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if msgs, _ := ms.Read("brae", "r", false, ""); len(msgs) >= 1 {
+			return
+		}
+
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	t.Fatal("RunFileWatchLoop did not fire on the file change")
 }
 
 func ptrTime(t time.Time) *time.Time { return &t }
