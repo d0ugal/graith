@@ -1,5 +1,64 @@
 # Changelog
 
+## [0.67.0](https://github.com/d0ugal/graith/compare/v0.66.16...v0.67.0) (2026-07-11)
+
+
+### ⚠ BREAKING CHANGES
+
+* --share-worktree is renamed to --mirror with no alias. The persisted state keys shared_worktree / shared_worktree_source_id and the protocol field share_worktree / shared_worktree are renamed to mirror / mirror_source_id; existing sessions lose their mirror marker on upgrade.
+
+### Features
+
+* **ci:** add per-file breakdown to coverage PR comment ([16e2d15](https://github.com/d0ugal/graith/commit/16e2d154aff62762393613826cfe4e0684f2435a))
+* **ci:** fail coverage job when Go coverage drops &gt;5% vs base ([24f42e6](https://github.com/d0ugal/graith/commit/24f42e6c6913f5c9af3bfd2106fba4f0ea5e1eb3))
+* **daemon:** granular pr_watch CI reporting ([a66d122](https://github.com/d0ugal/graith/commit/a66d122037788878b2bd2437697bed7e0ea7f02f))
+* **daemon:** report pr_watch CI completion on a green finish too ([3c32d60](https://github.com/d0ugal/graith/commit/3c32d605d8a0581217ed3f3819a2a717c7e2dc92))
+* **docs-preview:** show cropped base-vs-head diffs instead of full-page shots ([7ca4f61](https://github.com/d0ugal/graith/commit/7ca4f612b9121179db43562af096bd5127ee7247))
+* rename --share-worktree to --mirror ([331bdc0](https://github.com/d0ugal/graith/commit/331bdc0c0736de32ab2f2df242b3b51c984f4ef8)), closes [#1021](https://github.com/d0ugal/graith/issues/1021)
+* **triggers:** implement v1 unified triggers engine ([a7d87e0](https://github.com/d0ugal/graith/commit/a7d87e0d17a62ba0c2d97dc4f5d5634db2de4f39))
+
+
+### Bug Fixes
+
+* address review findings + lint on coverage tooling ([b45577b](https://github.com/d0ugal/graith/commit/b45577bca1dde6b68b42e47948b88d956f5cf4a1))
+* **ci:** keep coverage numbers in comment when threshold gate fails ([540a0aa](https://github.com/d0ugal/graith/commit/540a0aa2ed804eeae1cd3c64e5b9a5012814c217))
+* **daemon:** deliver pr_watch CI completion notice while unprimed ([05caf58](https://github.com/d0ugal/graith/commit/05caf581116ffa733d026fc73dc412c5365838f3))
+* **daemon:** migrate persisted mirror-session state to v15 ([b8d1a54](https://github.com/d0ugal/graith/commit/b8d1a54665a5f9678c4a5e0840d88368ca9b6433))
+* **docs-preview:** address review findings ([427a710](https://github.com/d0ugal/graith/commit/427a71097cc2b4236f2908134f25220fd10a87d6))
+* **docs-preview:** group GITHUB_OUTPUT writes (shellcheck SC2129) ([d6d9625](https://github.com/d0ugal/graith/commit/d6d9625ad6860f66a90def97da9c863515954cd7))
+* **doctor:** preserve soft-deleted scrollback ([b742786](https://github.com/d0ugal/graith/commit/b7427867e4eb6d0354379c1add68dc1331650190))
+* **store:** serialize config migration ([74321b6](https://github.com/d0ugal/graith/commit/74321b6219b729d5bab9e514c542513d1b9a2d0d))
+* **triggers:** address all-model review findings ([2b1c7b1](https://github.com/d0ugal/graith/commit/2b1c7b1a0f39b40f4f2c55bd1f3e63fec420df10))
+* **triggers:** address final review findings ([27ed7a8](https://github.com/d0ugal/graith/commit/27ed7a8f123519cf03fc97f64ce80e93cbb50fbe))
+* **triggers:** lint fixes + testable CLI renderers + docs-site page ([973d671](https://github.com/d0ugal/graith/commit/973d671936e2b1e50f8a3add3ffb31b513bd5673))
+* **triggers:** rebase onto --mirror rename + v16 migration; more docs ([f911114](https://github.com/d0ugal/graith/commit/f911114cfb23befb0ba3c2c4e88c48198ee60496))
+
+
+### Documentation
+
+* address merge-review findings on unified triggers design ([2a38010](https://github.com/d0ugal/graith/commit/2a3801098afc866cf39271e9844dda1b4319cf9b))
+* address review findings on file-watcher triggers design ([781e5d9](https://github.com/d0ugal/graith/commit/781e5d901100601b371036cd7c0eff51d8e61bcd))
+* **config:** describe granular CI failure reporting in notify_ci_failures ([aecaeb4](https://github.com/d0ugal/graith/commit/aecaeb419d1097ac96922ab71c070eff6a3f3046))
+* default watch debounce to 30s; add lint/format examples ([c4f33c1](https://github.com/d0ugal/graith/commit/c4f33c14facf6d8de84689628ed8401474860355))
+* design doc for file-watcher triggers ([#593](https://github.com/d0ugal/graith/issues/593)) ([9760394](https://github.com/d0ugal/graith/commit/976039490ed5057bc117bf267031c45a062ad2d8))
+* merge [#592](https://github.com/d0ugal/graith/issues/592) (cron) and [#593](https://github.com/d0ugal/graith/issues/593) (file-watch) into one triggers design ([2068acc](https://github.com/d0ugal/graith/commit/2068accb9689f466875146fb352161d1cb1e66cd))
+* modernise terminology to 'mirror' in comments, tests, and docs ([3cc1671](https://github.com/d0ugal/graith/commit/3cc1671cfce96c1f23faab4d3e9aadcf79775004))
+* refine triggers command sandboxing and add act example ([7c97557](https://github.com/d0ugal/graith/commit/7c97557d670826ca5452022e627cd93a820ef918))
+* **triggers:** document triggers in AGENTS.md + config examples ([8651d24](https://github.com/d0ugal/graith/commit/8651d24415556b5300dd1a8fa0508084947958d9))
+* use neutral review terminology in design docs ([f5c3a31](https://github.com/d0ugal/graith/commit/f5c3a318299df9f0e9e24b8492087b636819e037))
+
+
+### Code Refactoring
+
+* **daemon:** replace SessionManager.Create positional args with CreateOpts struct ([56d9cd7](https://github.com/d0ugal/graith/commit/56d9cd7f8b8e2055cbedc4cc75a0fd4588bae071)), closes [#375](https://github.com/d0ugal/graith/issues/375)
+
+
+### Tests
+
+* isolate git fixtures from host environment ([cd7b04e](https://github.com/d0ugal/graith/commit/cd7b04ec528b5a9db568f1842bce82aa60f06f23))
+* **triggers:** cover the daemon loops + trigger auth ([af2b1da](https://github.com/d0ugal/graith/commit/af2b1dad6ff0d81032c0856c9ed0215e1b00e368))
+* **triggers:** unit + pipeline tests for triggers engine ([7f320e3](https://github.com/d0ugal/graith/commit/7f320e39f116d986d96fb4ecfcce140bd12693dd))
+
 ## [0.66.16](https://github.com/d0ugal/graith/compare/v0.66.15...v0.66.16) (2026-07-10)
 
 
