@@ -101,10 +101,17 @@ auto_cleanup = true            # delete the session once it stops
 | `true` / `"always"` | Soft-delete on any stop, clean exit or crash. |
 | `"on_success"` | Soft-delete only on a clean stop (agent exit code 0). |
 
+`"on_success"` means the agent completed and exited on its own with code 0 — a
+session killed by `gr stop`, an idle timeout, or a crash exits non-zero and is
+**not** treated as a success, so it is left in place.
+
 Cleanup is a **soft delete**, so the session stays recoverable with `gr restore`
 within the `[delete] retention` window before it is purged. It only applies to
 trigger-spawned sessions — never a manually created one — and is incompatible
-with `ensure = true` (a reused reactor is deliberately long-lived).
+with `ensure = true` (a reused reactor is deliberately long-lived). If soft
+delete is disabled (`[delete] retention = "0"`) auto-cleanup is skipped rather
+than turned into an immediate hard delete, and a session interrupted by a daemon
+shutdown is preserved so `gr daemon restart` can resume it.
 
 ### Ensure-reviewer (watch + session)
 

@@ -528,18 +528,53 @@ func (sm *SessionManager) createTriggerSession(req createTriggerReq) (SessionSta
 }
 
 // autoCleanupStopped soft-deletes a just-stopped trigger-spawned session when
-// its recorded auto_cleanup mode calls for it. It reads the mode and exit code
-// committed by the exit path, so it must run after the session's stopped status
-// is persisted. It is a no-op for a manually created session (AutoCleanup is
-// only ever set on trigger-spawned ones), an already-deleted session, or a stop
-// that doesn't match the mode. Soft delete (not purge) keeps the session
-// recoverable within the retention window.
+// its recorded auto_cleanup mode calls for it, so finished briefing/report
+// sessions don't accumulate. It must run after the exit path has committed the
+// stopped status + exit code.
+//
+// The whole decision-and-mark runs under a single write-lock hold, deliberately
+// NOT via the public SoftDelete: SoftDelete re-locks, which would open a
+// check→act race where a resume landing between the status check and the delete
+// (inbox wake, pr_watch auto-resume, manual `gr resume`) could soft-delete — and
+// kill — a session that is running again. Holding the lock across the guard and
+// the marker close that window. A genuinely-stopped session has no live PTY
+// (the exit watcher already dropped it from sm.sessions and zeroed the PID), so
+// none of SoftDelete's kill/detach machinery is needed here — only the marker.
+//
+// It is a no-op unless the session is (still) a stopped, non-deleted,
+// trigger-spawned session whose stop matches the mode; it also declines to run
+// when soft delete is disabled (retention <= 0), because turning cleanup into an
+// eventual hard purge would violate the "delete never destroys" invariant, and
+// when the stop was a daemon shutdown, so `gr daemon restart` preserves
+// in-flight sessions.
 func (sm *SessionManager) autoCleanupStopped(id string) {
-	sm.mu.RLock()
+	sm.mu.Lock()
 
 	s, ok := sm.state.Sessions[id]
-	if !ok || s.AutoCleanup == "" || s.IsSoftDeleted() {
-		sm.mu.RUnlock()
+	// AutoCleanup is only ever set on trigger-spawned sessions, and TriggerID is
+	// required as belt-and-braces so cleanup can never reach a manual session.
+	if !ok || s.AutoCleanup == "" || s.TriggerID == "" || s.IsSoftDeleted() {
+		sm.mu.Unlock()
+		return
+	}
+
+	// Status may have flipped back to running (resumed) since the exit path ran;
+	// only clean up a session that is actually still stopped.
+	if s.Status != StatusStopped {
+		sm.mu.Unlock()
+		return
+	}
+
+	// A shutdown-interrupted session didn't finish its work — leave it so restart
+	// resumes it, matching the documented restart-preserves-sessions guarantee.
+	if s.StopReason == StopReasonShutdown {
+		sm.mu.Unlock()
+		return
+	}
+
+	// Starred / system sessions are never auto-deleted (mirrors SoftDelete).
+	if s.Starred || IsSystemSession(s) {
+		sm.mu.Unlock()
 		return
 	}
 
@@ -551,17 +586,37 @@ func (sm *SessionManager) autoCleanupStopped(id string) {
 		exitCode = *s.ExitCode
 	}
 
-	sm.mu.RUnlock()
-
 	if !shouldAutoCleanup(mode, exitCode) {
+		sm.mu.Unlock()
 		return
 	}
 
-	if _, err := sm.SoftDelete(id); err != nil {
-		sm.log.Warn("trigger auto-cleanup soft-delete failed", "id", id, "name", name, "mode", mode, "err", err)
+	retention := sm.cfg.Delete.RetentionDuration()
+	if retention <= 0 {
+		sm.mu.Unlock()
+		sm.log.Info("trigger auto-cleanup skipped: soft delete disabled (retention=0)", "id", id, "name", name)
+
 		return
 	}
 
+	now := time.Now()
+	expiresAt := now.Add(retention)
+	s.DeletedAt = &now
+	s.ExpiresAt = &expiresAt
+	s.StatusChangedAt = now
+	applyLifecycleSummaryLocked(s, softDeleteSummary(expiresAt))
+
+	if err := sm.saveState(); err != nil {
+		// Roll back: the session stays a live (stopped) session, fully consistent.
+		s.DeletedAt = nil
+		s.ExpiresAt = nil
+		sm.mu.Unlock()
+		sm.log.Warn("trigger auto-cleanup soft-delete failed to persist", "id", id, "name", name, "err", err)
+
+		return
+	}
+
+	sm.mu.Unlock()
 	sm.log.Info("trigger auto-cleanup soft-deleted stopped session", "id", id, "name", name, "mode", mode)
 }
 
