@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/pelletier/go-toml/v2"
 )
 
 func schedTrigger(name string, sched ScheduleConfig, action ActionConfig) TriggerConfig {
@@ -48,6 +50,21 @@ func TestValidateTriggers_Valid(t *testing.T) {
 		{
 			name:         "schedule scenario",
 			trig:         schedTrigger("strath-fleet", ScheduleConfig{Cron: "@daily"}, ActionConfig{Type: ActionScenario, Scenario: "clachan"}),
+			orchestrator: true,
+		},
+		{
+			name:         "session auto_cleanup true",
+			trig:         schedTrigger("braw-briefing", ScheduleConfig{Cron: "0 8 * * *"}, ActionConfig{Type: ActionSession, Prompt: "brief", AutoCleanup: true}),
+			orchestrator: true,
+		},
+		{
+			name:         "session auto_cleanup on_success",
+			trig:         schedTrigger("canny-briefing", ScheduleConfig{Cron: "0 8 * * *"}, ActionConfig{Type: ActionSession, Prompt: "brief", AutoCleanup: "on_success"}),
+			orchestrator: true,
+		},
+		{
+			name:         "session auto_cleanup false",
+			trig:         schedTrigger("bide-briefing", ScheduleConfig{Cron: "0 8 * * *"}, ActionConfig{Type: ActionSession, Prompt: "brief", AutoCleanup: false}),
 			orchestrator: true,
 		},
 	}
@@ -95,6 +112,10 @@ func TestValidateTriggers_Invalid(t *testing.T) {
 		{"zero debounce", watchTrigger("haar", WatchConfig{Repo: "/r", Debounce: "0s"}, ActionConfig{Type: ActionCommand, Command: "x"}), false, "debounce must be > 0"},
 		{"zero timeout", schedTrigger("haar", ScheduleConfig{Cron: "@daily"}, ActionConfig{Type: ActionCommand, Command: "x", Repo: "/tmp/x", Timeout: "0s"}), false, "timeout must be > 0"},
 		{"bad rate_limit", TriggerConfig{Name: "rl", Schedule: &ScheduleConfig{Cron: "@daily"}, Action: ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}, Policy: TriggerPolicy{RateLimit: "0/1h"}}, false, "rate_limit"},
+		{"auto_cleanup bad string", schedTrigger("scunner", ScheduleConfig{Cron: "@daily"}, ActionConfig{Type: ActionSession, Prompt: "hi", AutoCleanup: "sometimes"}), true, "auto_cleanup \"sometimes\" is invalid"},
+		{"auto_cleanup bad type", schedTrigger("scunner", ScheduleConfig{Cron: "@daily"}, ActionConfig{Type: ActionSession, Prompt: "hi", AutoCleanup: 7}), true, "auto_cleanup must be a boolean"},
+		{"auto_cleanup on command", schedTrigger("scunner", ScheduleConfig{Cron: "@daily"}, ActionConfig{Type: ActionCommand, Command: "x", Repo: "/tmp/x", AutoCleanup: true}), false, "only valid for a session action"},
+		{"auto_cleanup with ensure", watchTrigger("scunner", WatchConfig{Role: "impl"}, ActionConfig{Type: ActionSession, Ensure: true, Prompt: "hi", AutoCleanup: "always"}), true, "incompatible with ensure=true"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -172,6 +193,76 @@ func TestTriggerHelpers(t *testing.T) {
 
 	if got := (TriggersRuntime{}).MaxConcurrentOr(); got != 4 {
 		t.Errorf("default max_concurrent = %d, want 4", got)
+	}
+}
+
+func TestAutoCleanupMode(t *testing.T) {
+	cases := []struct {
+		name    string
+		val     any
+		want    string
+		wantErr bool
+	}{
+		{"absent", nil, "", false},
+		{"bool true", true, CleanupAlways, false},
+		{"bool false", false, "", false},
+		{"empty string", "", "", false},
+		{"string true", "true", CleanupAlways, false},
+		{"string false", "false", "", false},
+		{"always", "always", CleanupAlways, false},
+		{"on_success", "on_success", CleanupOnSuccess, false},
+		{"bad string", "whiles", "", true},
+		{"bad type", int64(3), "", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := (ActionConfig{AutoCleanup: tc.val}).AutoCleanupMode()
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error for %v, got mode %q", tc.val, got)
+				}
+
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if got != tc.want {
+				t.Fatalf("mode = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestAutoCleanupDecodes proves the bool|string union survives TOML decoding
+// both ways, since AutoCleanup is typed as any specifically to accept either.
+func TestAutoCleanupDecodes(t *testing.T) {
+	cases := []struct {
+		name string
+		toml string
+		want string
+	}{
+		{"bool", `auto_cleanup = true`, CleanupAlways},
+		{"string", `auto_cleanup = "on_success"`, CleanupOnSuccess},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var a ActionConfig
+			if err := toml.Unmarshal([]byte(tc.toml), &a); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+
+			got, err := a.AutoCleanupMode()
+			if err != nil {
+				t.Fatalf("mode: %v", err)
+			}
+
+			if got != tc.want {
+				t.Fatalf("mode = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 

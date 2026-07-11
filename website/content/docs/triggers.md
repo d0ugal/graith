@@ -80,6 +80,32 @@ block = false                # allow network egress (blocked by default)
 
 Watch commands are read-only on the worktree in v1 (`mutating` is rejected).
 
+### Auto-cleanup (session)
+
+A `session` action can soft-delete the session it spawns once that session
+stops, so finished briefing/report sessions don't accumulate in `gr list`:
+
+```toml
+[trigger.action]
+type         = "session"
+agent        = "claude"
+prompt       = "Summarise open PRs and post to the orchestrator inbox."
+auto_cleanup = true            # delete the session once it stops
+```
+
+`auto_cleanup` accepts:
+
+| Value | Behaviour |
+|-------|-----------|
+| `false` / absent | No cleanup (default — the session is left stopped). |
+| `true` / `"always"` | Soft-delete on any stop, clean exit or crash. |
+| `"on_success"` | Soft-delete only on a clean stop (agent exit code 0). |
+
+Cleanup is a **soft delete**, so the session stays recoverable with `gr restore`
+within the `[delete] retention` window before it is purged. It only applies to
+trigger-spawned sessions — never a manually created one — and is incompatible
+with `ensure = true` (a reused reactor is deliberately long-lived).
+
 ### Ensure-reviewer (watch + session)
 
 The flagship pattern — keep a reviewer reacting to an implementer's changes,

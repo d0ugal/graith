@@ -112,9 +112,14 @@ type SessionState struct {
 	// TriggerID / TriggerReactor mark a session spawned by a trigger's
 	// ensure/session action, so the trigger can find and reuse it idempotently
 	// (mirroring the ScenarioID markers).
-	TriggerID      string         `json:"trigger_id,omitempty"`
-	TriggerReactor bool           `json:"trigger_reactor,omitempty"`
-	MigratedFrom   *MigrationInfo `json:"migrated_from,omitempty"`
+	TriggerID      string `json:"trigger_id,omitempty"`
+	TriggerReactor bool   `json:"trigger_reactor,omitempty"`
+	// AutoCleanup, when non-empty, soft-deletes this trigger-spawned session
+	// when it stops: config.CleanupAlways on any stop, config.CleanupOnSuccess
+	// only on a clean (exit 0) stop. Empty disables it. Set only on
+	// trigger-spawned sessions, so cleanup never touches a manually created one.
+	AutoCleanup  string         `json:"auto_cleanup,omitempty"`
+	MigratedFrom *MigrationInfo `json:"migrated_from,omitempty"`
 	// DeletedAt marks a session as soft-deleted. When set, the session is
 	// hidden from the default `gr list` and overlay, its worktree and state are
 	// preserved until ExpiresAt, and the daemon purges it (hard delete) once the

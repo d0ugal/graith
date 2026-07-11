@@ -65,6 +65,13 @@ type ActionConfig struct {
 	Agent  string `toml:"agent"`
 	Model  string `toml:"model"`
 	Ensure bool   `toml:"ensure"` // idempotent ensure-reviewer (watch source only)
+	// AutoCleanup soft-deletes a trigger-spawned session once it stops, so a
+	// finished briefing/report session doesn't clutter `gr list`. It is a union
+	// of bool and string: absent/false/"" disables it; true (or "always")
+	// deletes on any stop; "on_success" deletes only on a clean (exit 0) stop.
+	// Decoded as any so TOML can supply either a bool or the string enum; use
+	// AutoCleanupMode to normalise. Session action only.
+	AutoCleanup any `toml:"auto_cleanup"`
 
 	// scenario:
 	Scenario string `toml:"scenario"`
@@ -111,6 +118,12 @@ const (
 	OverlapQueue = "queue" // deferred to v2
 )
 
+// Auto-cleanup mode values for a session action's AutoCleanup.
+const (
+	CleanupAlways    = "always"     // delete on any stop
+	CleanupOnSuccess = "on_success" // delete only on a clean (exit 0) stop
+)
+
 const (
 	defaultDebounce      = 30 * time.Second
 	defaultCommandRun    = 5 * time.Minute
@@ -141,6 +154,37 @@ func (a ActionConfig) TimeoutDuration() time.Duration {
 // Sandboxed reports whether a command action runs sandboxed (nil => true).
 func (a ActionConfig) Sandboxed() bool {
 	return a.Sandbox == nil || *a.Sandbox
+}
+
+// AutoCleanupMode normalises the auto_cleanup union to "" (disabled),
+// CleanupAlways, or CleanupOnSuccess. true is shorthand for "always"; false and
+// an absent value are disabled. Any other value is a config error.
+func (a ActionConfig) AutoCleanupMode() (string, error) {
+	switch v := a.AutoCleanup.(type) {
+	case nil:
+		return "", nil
+	case bool:
+		if v {
+			return CleanupAlways, nil
+		}
+
+		return "", nil
+	case string:
+		switch v {
+		case "":
+			return "", nil
+		case "true":
+			return CleanupAlways, nil
+		case "false":
+			return "", nil
+		case CleanupAlways, CleanupOnSuccess:
+			return v, nil
+		default:
+			return "", fmt.Errorf("auto_cleanup %q is invalid (want true, false, %q, or %q)", v, CleanupAlways, CleanupOnSuccess)
+		}
+	default:
+		return "", fmt.Errorf("auto_cleanup must be a boolean or one of %q/%q", CleanupAlways, CleanupOnSuccess)
+	}
 }
 
 // OverlapMode returns the effective overlap policy (empty => skip).
@@ -316,6 +360,15 @@ func (c *Config) validateAction(where string, t *TriggerConfig) []error {
 		if a.Ensure && !t.IsWatch() {
 			errs = append(errs, fmt.Errorf("%s: action ensure=true is only valid for a [watch] source", where))
 		}
+
+		mode, err := a.AutoCleanupMode()
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", where, err))
+		} else if mode != "" && a.Ensure {
+			// A reused reactor is deliberately long-lived; deleting it on every
+			// stop would defeat ensure's idempotent reuse.
+			errs = append(errs, fmt.Errorf("%s: action.auto_cleanup is incompatible with ensure=true (reused reactors are not auto-deleted)", where))
+		}
 	case ActionScenario:
 		if a.Scenario == "" {
 			errs = append(errs, fmt.Errorf("%s: scenario action requires action.scenario", where))
@@ -336,6 +389,16 @@ func (c *Config) validateAction(where string, t *TriggerConfig) []error {
 		errs = append(errs, fmt.Errorf("%s: action.type is required (command|session|scenario|message)", where))
 	default:
 		errs = append(errs, fmt.Errorf("%s: unknown action.type %q", where, a.Type))
+	}
+
+	// auto_cleanup watches a spawned session's lifecycle, so it only makes sense
+	// for the session action.
+	if a.Type != ActionSession && a.Type != "" {
+		if mode, err := a.AutoCleanupMode(); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", where, err))
+		} else if mode != "" {
+			errs = append(errs, fmt.Errorf("%s: action.auto_cleanup is only valid for a session action", where))
+		}
 	}
 
 	// session/scenario actions need an orchestrator to own the spawned work.
