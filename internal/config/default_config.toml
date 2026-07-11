@@ -132,8 +132,13 @@ debounce = "2m"                  # minimum cooldown between notifications to one
 # comment_author_allowlist, or its GitHub author_association is in
 # trusted_author_associations. Untrusted comments are dropped from notifications
 # (the cursor still advances). Defaults trust org members/owners/collaborators
-# and no bots — allowlist bots/Apps by login (their association is unreliable).
+# and no bots — allowlist bots/Apps by login (their association is unreliable, so
+# it never confers trust on a "<slug>[bot]" login; the allowlist is the only way
+# to trust a bot).
 # comment_author_allowlist = ["github-actions[bot]", "coderabbitai[bot]"]
+# Omit trusted_author_associations to keep the default tier below. Set it to an
+# explicit empty list ([]) to trust NO association — allowlist-only mode (fails
+# closed); this is honoured, not silently widened back to the default.
 trusted_author_associations = ["OWNER", "MEMBER", "COLLABORATOR"]  # CONTRIBUTOR is deliberately excluded
 notify_untrusted_authors = true  # message the orchestrator once per new untrusted author (metadata only, never the comment body)
 
