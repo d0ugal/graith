@@ -186,7 +186,7 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 			return nil, fmt.Errorf("shared session %q: no running session with that name exists", s.Name)
 		}
 
-		id := generateID()
+		id := sm.uniqueSessionIDLocked()
 		sessionIDs[i] = id
 
 		sm.state.Sessions[id] = &SessionState{
@@ -237,11 +237,15 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 
 	// --- Start phase: create each session concurrently ---
 	// Remove all placeholders first, then hand each reserved ID back to Create
-	// (via CreateOpts.ID) so the final session keeps the ID we reserved — the
-	// placeholder ID and the final session ID are one and the same, and
-	// ScenarioState.SessionIDs never has to be rewritten. The delete is still
-	// needed because Create reserves the ID itself and rejects a collision.
-	// Shared-reused sessions already have real IDs and don't need creation.
+	// (via CreateOpts.ID) so the created session keeps the ID we reserved and
+	// ScenarioState.SessionIDs stays valid without a rewrite. The delete is
+	// still needed because Create re-reserves the ID itself and would reject an
+	// existing entry as a collision. This is not a held reservation across the
+	// gap: between the delete here and Create's re-reserve the ID is briefly
+	// free, so a concurrent Create using the same ID would win and this
+	// scenario's Create would fail and roll back — the same window that existed
+	// before IDs were made stable. Shared-reused sessions already have real IDs
+	// and don't need creation.
 	repoRoots := make([]string, len(msg.Sessions))
 
 	sm.mu.Lock()

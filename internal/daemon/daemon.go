@@ -459,6 +459,20 @@ func generateID() string {
 	return hex.EncodeToString(b)
 }
 
+// uniqueSessionIDLocked returns a freshly generated session ID that no current
+// session already holds. Soft-deleted sessions retain their state entry (their
+// worktree/branch persist pending purge), so their IDs are treated as taken.
+// The caller must hold sm.mu: the ID is only guaranteed unique until the lock
+// is released, so it must be reserved in the same critical section.
+func (sm *SessionManager) uniqueSessionIDLocked() string {
+	for {
+		id := generateID()
+		if _, exists := sm.state.Sessions[id]; !exists {
+			return id
+		}
+	}
+}
+
 func repoHash(repoPath string) string {
 	h := uint64(0)
 	for _, c := range repoPath {
@@ -633,7 +647,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 
 	id := opts.ID
 	if id == "" {
-		id = generateID()
+		id = sm.uniqueSessionIDLocked()
 	} else if _, exists := sm.state.Sessions[id]; exists {
 		sm.mu.Unlock()
 		return SessionState{}, fmt.Errorf("session id %q already in use", id)
