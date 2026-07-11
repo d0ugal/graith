@@ -79,6 +79,12 @@ Key files by area:
 | Store | `store/store.go` | Flat-file git-backed document store with key validation, git commits |
 | Scenario | `daemon/scenario.go` | Scenario lifecycle: start, stop, resume, delete, add, task-done, status, list |
 | Scenario | `cli/scenario.go` | `gr scenario start/stop/resume/delete/add/task-done/status/list` commands |
+| Scenario | `scenariofile/scenariofile.go` | Shared scenario-TOML loader (used by CLI + daemon trigger action) |
+| Trigger | `config/trigger.go` | `[[trigger]]` config types + validation |
+| Trigger | `daemon/trigger.go` | Schedule source (`RunTriggerLoop`), run-state machine, action dispatch, delivery, `gr trigger` status/control API |
+| Trigger | `daemon/trigger_actions.go` | Action executors: command (sandboxed), session/ensure-reviewer, scenario, message |
+| Trigger | `daemon/filewatch.go` | Watch source (`RunFileWatchLoop`): binding reconcile, recursive fsnotify + gitignore pruning, debounce |
+| Trigger | `cli/trigger.go` | `gr trigger list/status/run/pause/resume` commands |
 
 ## Architecture patterns
 
@@ -242,6 +248,108 @@ sandbox = false
 
 `--isolated` launches a fresh browser with an ephemeral debug port per process,
 and the templated `--user-data-dir` keeps each session's profile separate.
+
+## Triggers
+
+Daemon-fired automation: a **trigger** is `(source) → (action)`. The daemon fires
+triggers itself (no attached orchestrator needed), so they survive terminal
+close. Two source kinds share one action vocabulary, one executor, one run-state
+machine, and one `gr trigger` CLI. See
+`docs/design/2026-07-11-triggers-design.md`.
+
+**Sources** (exactly one per `[[trigger]]`):
+
+- `[trigger.schedule]` — time-driven (#592): `cron = "0 9 * * *"` (5-field +
+  `@hourly`/`@daily`/`@weekly`/`@monthly`, `timezone` optional) **or**
+  `every = "15m"` (Go duration, supports `7d`). Uses `robfig/cron/v3` (parser +
+  `Next()` only; the firing loop is ours). Runs in `RunTriggerLoop`
+  (`internal/daemon/trigger.go`).
+- `[trigger.watch]` — file-event-driven (#593): a **policy selector** by `repo`
+  or `role` (never a live session name) that binds to matching running sessions
+  and watches their worktrees via `fsnotify`. Honors `.gitignore` (always;
+  ignored subtrees are pruned from the watch set), plus optional `paths`/`ignore`
+  globs, coalesced by a `debounce` quiet-window (default **30s**). Runs in
+  `RunFileWatchLoop` (`internal/daemon/filewatch.go`).
+
+**Action vocabulary** (`[trigger.action] type = ...`):
+
+| Type | What it does |
+|------|--------------|
+| `command` | Run a command (schedule: in `repo`; watch: in the bound worktree), capture output, deliver it. Sandboxed by default; `sandbox = false` runs unconfined, `[trigger.action.sandbox_config]` grants extra access (mirrors MCP-server `sandbox`/`sandbox_config`). Watch commands are read-only in v1 (`mutating` rejected). |
+| `session` | Spawn a session parented to the orchestrator. Watch + `ensure = true` is the idempotent "ensure-reviewer": message the owned reactor if it exists (running/stopped — messaging auto-resumes), else spawn one sharing the bound worktree read-only. |
+| `scenario` | Start a named scenario from `~/.config/graith/scenarios/` (orchestrator-owned). |
+| `message` | Route a fixed `body` to an inbox/topic (via `[trigger.action.deliver]`). |
+
+**Delivery** (`[trigger.action.deliver]`): `inbox` (a session name,
+`"orchestrator"`, or a template like `{session_name}`; auto-resumes the
+orchestrator or any target with `wake = true`, never a soft-deleted session),
+`topic` (pub/sub), `store` (a doc key; `shared:` prefix for the shared store).
+Templated with a trigger-specific expander (`{name}`, `{date}`, `{datetime}`,
+`{fire_time}`, and for watch `{session_name}`, `{worktree_path}`,
+`{changed_files}`, `{change_count}`).
+
+**Policy** (`[trigger.policy]`): `catch_up` (default `false` — never backfill a
+burst of missed fires), `overlap` (default `skip` — skip if the previous run is
+in flight; `allow` permits concurrent; `queue` is v2), `rate_limit` (default
+`5/30m`). A daemon-wide `[triggers] max_concurrent` (default 4) bounds aggregate
+fan-out.
+
+**Run-state** is persisted per definition in `state.json`
+(`TriggerRuntimeState`): the at-most-once `LastScheduledFireAt` (committed
+durably *before* dispatch), a restart-stable interval anchor
+(`ActivatedAt`/`NextScheduledFireAt`), a `Fingerprint` that resets the cursor
+when a same-named definition changes, and a bounded run history. Per-binding
+watch state (reactor, in-flight, debounce, degraded) is in-memory, rebuilt from
+live sessions. Spawned reactors are tagged `TriggerID`/`TriggerReactor` on
+`SessionState` for idempotent reuse.
+
+**CLI** — definitions live in `config.toml` (v1; runtime authoring is v2). `gr
+trigger` observes and controls:
+
+```bash
+gr trigger list                 # all triggers: source, action, next fire / watch scope, state
+gr trigger status <name>        # detail: next fire, last run/result/error, bindings
+gr trigger run <name>           # fire a schedule trigger once now (respects overlap)
+gr trigger pause <name>         # pause (persists across restart)
+gr trigger resume <name>
+```
+
+**Authorization**: `list`/`status` are read-only; `run`/`pause`/`resume` require
+the caller to be the orchestrator or a descendant (`authorizeTriggerOp`).
+Fired `session`/`scenario` actions are parented to the orchestrator; `message`
+uses the `graith:system` sender; `command` runs under a dedicated sandbox
+profile, fail-closed unless `sandbox = false`.
+
+**Config example:**
+
+```toml
+# Daily PR report at 09:00, delivered to the orchestrator inbox and the store.
+[[trigger]]
+name = "daily-pr-report"
+[trigger.schedule]
+cron     = "0 9 * * *"
+timezone = "Europe/London"
+[trigger.action]
+type   = "session"
+prompt = "Summarise open PRs and post to the orchestrator inbox."
+repo   = "~/Code/graith"
+agent  = "claude"
+[trigger.action.deliver]
+inbox = "orchestrator"
+store = "reports/pr/{date}.md"
+
+# Run tests when Go source changes in any session on this repo.
+[[trigger]]
+name = "test-on-change"
+[trigger.watch]
+repo  = "~/Code/graith"
+paths = ["**/*.go"]
+[trigger.action]
+type    = "command"
+command = "go test ./..."
+[trigger.action.deliver]
+inbox = "{session_name}"
+```
 
 ## Testing
 

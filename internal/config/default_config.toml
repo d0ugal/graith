@@ -349,3 +349,53 @@ resume_args = ["--conversation", "{agent_session_id}"]
 [agents.agy.sandbox]
 read_dirs = ["~/.gemini"]
 write_dirs = ["~/.gemini"]
+
+# ── Triggers ────────────────────────────────────────────────────────────────
+# Daemon-fired automation: a trigger is (source) → (action). Exactly one source
+# ([trigger.schedule] or [trigger.watch]) per [[trigger]]. Commented out by
+# default. See docs/design/2026-07-11-triggers-design.md.
+#
+# Daemon-wide cap on concurrently-running trigger actions:
+# [triggers]
+# max_concurrent = 4
+#
+# Schedule → session: a daily PR report.
+# [[trigger]]
+# name = "daily-pr-report"
+# [trigger.schedule]
+# cron     = "0 9 * * *"        # or: every = "15m"
+# timezone = "Europe/London"
+# [trigger.action]
+# type   = "session"
+# prompt = "Summarise open PRs and post to the orchestrator inbox."
+# repo   = "~/Code/graith"
+# agent  = "claude"
+# [trigger.action.deliver]
+# inbox = "orchestrator"
+# store = "reports/pr/{date}.md"
+#
+# Watch → command: run tests when Go source changes (binds to any session on the
+# repo; a watch source selects by repo or role, never a live session name).
+# [[trigger]]
+# name = "test-on-change"
+# [trigger.watch]
+# repo     = "~/Code/graith"
+# paths    = ["**/*.go"]
+# debounce = "30s"             # lower for fast commands
+# [trigger.action]
+# type    = "command"
+# command = "go test ./..."
+# [trigger.action.deliver]
+# inbox = "{session_name}"
+#
+# Watch → ensure-reviewer: keep a reviewer reacting to an implementer's changes.
+# [[trigger]]
+# name = "review-go"
+# [trigger.watch]
+# role  = "implementer"
+# paths = ["**/*.go"]
+# [trigger.action]
+# type   = "session"
+# ensure = true
+# agent  = "claude"
+# prompt = "Review the changes since your last look; send feedback via gr msg."
