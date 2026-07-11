@@ -200,28 +200,35 @@ func (sm *SessionManager) dueSchedules(now time.Time) []string {
 		}
 		// overlap: skip (default) suppresses while a command run is in flight.
 		if t.Action.Type == config.ActionCommand && t.Policy.OverlapMode() == config.OverlapSkip && sm.triggers.inFlight[name] {
-			sm.advanceSchedule(name, t, now)
+			newNext := sm.advanceSchedule(name, t, now)
 			sm.triggers.mu.Unlock()
+			nn := newNext
+			sm.updateTriggerRuntime(name, func(r *TriggerRuntimeState) { r.NextScheduledFireAt = &nn })
 			sm.log.Info("trigger: skipped (overlap)", "trigger", name)
 			continue
 		}
-		sm.advanceSchedule(name, t, now)
+		newNext := sm.advanceSchedule(name, t, now)
 		if t.Action.Type == config.ActionCommand {
 			sm.triggers.inFlight[name] = true
 		}
 		sm.triggers.mu.Unlock()
 
-		// Commit the fire durably BEFORE dispatch (at-most-once).
-		fireAt := next
-		sm.updateTriggerRuntime(name, func(r *TriggerRuntimeState) { r.LastScheduledFireAt = &fireAt })
+		// Commit the fire durably BEFORE dispatch (at-most-once), together with
+		// the advanced cursor.
+		fireAt, nn := next, newNext
+		sm.updateTriggerRuntime(name, func(r *TriggerRuntimeState) {
+			r.LastScheduledFireAt = &fireAt
+			r.NextScheduledFireAt = &nn
+		})
 		due = append(due, name)
 	}
 
 	return due
 }
 
-// advanceSchedule moves the in-memory cursor forward. Caller holds ts.mu.
-func (sm *SessionManager) advanceSchedule(name string, t *config.TriggerConfig, now time.Time) {
+// advanceSchedule moves the in-memory cursor forward and returns the new
+// next-fire time. Caller holds ts.mu; persistence is the caller's job (off-lock).
+func (sm *SessionManager) advanceSchedule(name string, t *config.TriggerConfig, now time.Time) time.Time {
 	var next time.Time
 	if cs, ok := sm.triggers.cron[name]; ok {
 		loc := time.Local
@@ -239,10 +246,7 @@ func (sm *SessionManager) advanceSchedule(name string, t *config.TriggerConfig, 
 		next = now.Add(every)
 	}
 	sm.triggers.nextFire[name] = next
-	nextCopy := next
-	// Persist off the ts.mu-held path is avoided; record cursor without saveState
-	// here (LastScheduledFireAt commit in dueSchedules is the durable point).
-	go sm.updateTriggerRuntime(name, func(r *TriggerRuntimeState) { r.NextScheduledFireAt = &nextCopy })
+	return next
 }
 
 // fireSchedule runs a schedule trigger's action and records the run.

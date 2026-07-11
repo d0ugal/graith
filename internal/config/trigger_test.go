@@ -1,0 +1,180 @@
+package config
+
+import (
+	"strings"
+	"testing"
+	"time"
+)
+
+func schedTrigger(name string, sched ScheduleConfig, action ActionConfig) TriggerConfig {
+	return TriggerConfig{Name: name, Schedule: &sched, Action: action}
+}
+
+func watchTrigger(name string, watch WatchConfig, action ActionConfig) TriggerConfig {
+	return TriggerConfig{Name: name, Watch: &watch, Action: action}
+}
+
+func validateOne(t TriggerConfig, orchestrator bool) []error {
+	c := &Config{Orchestrator: OrchestratorConfig{Enabled: orchestrator}, Triggers: []TriggerConfig{t}}
+	return c.validateTriggers()
+}
+
+func TestValidateTriggers_Valid(t *testing.T) {
+	cases := []struct {
+		name         string
+		trig         TriggerConfig
+		orchestrator bool
+	}{
+		{
+			name: "schedule cron message",
+			trig: schedTrigger("braw-report", ScheduleConfig{Cron: "0 9 * * *"},
+				ActionConfig{Type: ActionMessage, Body: "morning", Deliver: DeliverConfig{Inbox: "orchestrator"}}),
+		},
+		{
+			name: "schedule interval command",
+			trig: schedTrigger("dreich-sweep", ScheduleConfig{Every: "15m"},
+				ActionConfig{Type: ActionCommand, Command: "go test ./...", Repo: "/tmp/croft"}),
+		},
+		{
+			name: "watch command no repo",
+			trig: watchTrigger("canny-lint", WatchConfig{Repo: "/tmp/croft", Paths: []string{"**/*.go"}},
+				ActionConfig{Type: ActionCommand, Command: "golangci-lint run"}),
+		},
+		{
+			name:         "watch ensure session by role",
+			trig:         watchTrigger("bonnie-review", WatchConfig{Role: "implementer"}, ActionConfig{Type: ActionSession, Ensure: true, Prompt: "review"}),
+			orchestrator: true,
+		},
+		{
+			name:         "schedule scenario",
+			trig:         schedTrigger("strath-fleet", ScheduleConfig{Cron: "@daily"}, ActionConfig{Type: ActionScenario, Scenario: "clachan"}),
+			orchestrator: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if errs := validateOne(tc.trig, tc.orchestrator); len(errs) != 0 {
+				t.Fatalf("expected valid, got %v", errs)
+			}
+		})
+	}
+}
+
+func TestValidateTriggers_Invalid(t *testing.T) {
+	cases := []struct {
+		name         string
+		trig         TriggerConfig
+		orchestrator bool
+		wantContains string
+	}{
+		{"no name", schedTrigger("", ScheduleConfig{Cron: "0 9 * * *"}, ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "blether"}}), false, "name is required"},
+		{"no source", TriggerConfig{Name: "haar", Action: ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}}, false, "exactly one of"},
+		{"both sources", TriggerConfig{Name: "haar", Schedule: &ScheduleConfig{Cron: "@daily"}, Watch: &WatchConfig{Repo: "/r"}, Action: ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}}, false, "both set"},
+		{"cron and every", schedTrigger("fash", ScheduleConfig{Cron: "@daily", Every: "5m"}, ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}), false, "exactly one of cron or every"},
+		{"neither cron nor every", schedTrigger("fash", ScheduleConfig{}, ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}), false, "neither set"},
+		{"timezone with every", schedTrigger("fash", ScheduleConfig{Every: "5m", Timezone: "Europe/London"}, ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}), false, "timezone is only valid with cron"},
+		{"zero interval", schedTrigger("fash", ScheduleConfig{Every: "0s"}, ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}), false, "every must be > 0"},
+		{"watch both selectors", watchTrigger("thrawn", WatchConfig{Repo: "/r", Role: "impl"}, ActionConfig{Type: ActionCommand, Command: "x"}), false, "exactly one of repo or role"},
+		{"watch no selector", watchTrigger("thrawn", WatchConfig{}, ActionConfig{Type: ActionCommand, Command: "x"}), false, "neither set"},
+		{"unknown action", schedTrigger("scunner", ScheduleConfig{Cron: "@daily"}, ActionConfig{Type: "explode"}), false, "unknown action.type"},
+		{"empty action", schedTrigger("scunner", ScheduleConfig{Cron: "@daily"}, ActionConfig{}), false, "action.type is required"},
+		{"command no command", schedTrigger("scunner", ScheduleConfig{Cron: "@daily"}, ActionConfig{Type: ActionCommand, Repo: "/tmp/x"}), false, "requires action.command"},
+		{"mutating rejected", watchTrigger("scunner", WatchConfig{Repo: "/r"}, ActionConfig{Type: ActionCommand, Command: "gofmt -w .", Mutating: true}), false, "not supported in v1"},
+		{"schedule command no repo", schedTrigger("scunner", ScheduleConfig{Cron: "@daily"}, ActionConfig{Type: ActionCommand, Command: "x"}), false, "requires action.repo"},
+		{"watch command with repo", watchTrigger("scunner", WatchConfig{Repo: "/r"}, ActionConfig{Type: ActionCommand, Command: "x", Repo: "/r"}), false, "must not set action.repo"},
+		{"session needs orchestrator", schedTrigger("scunner", ScheduleConfig{Cron: "@daily"}, ActionConfig{Type: ActionSession, Prompt: "hi"}), false, "requires [orchestrator] enabled"},
+		{"ensure on schedule", schedTrigger("scunner", ScheduleConfig{Cron: "@daily"}, ActionConfig{Type: ActionSession, Ensure: true}), true, "ensure=true is only valid for a [watch]"},
+		{"scenario needs name", schedTrigger("scunner", ScheduleConfig{Cron: "@daily"}, ActionConfig{Type: ActionScenario}), true, "requires action.scenario"},
+		{"message needs body", schedTrigger("scunner", ScheduleConfig{Cron: "@daily"}, ActionConfig{Type: ActionMessage, Deliver: DeliverConfig{Topic: "t"}}), false, "requires action.body"},
+		{"message needs destination", schedTrigger("scunner", ScheduleConfig{Cron: "@daily"}, ActionConfig{Type: ActionMessage, Body: "x"}), false, "requires action.deliver.inbox or action.deliver.topic"},
+		{"scenario rejects deliver", schedTrigger("scunner", ScheduleConfig{Cron: "@daily"}, ActionConfig{Type: ActionScenario, Scenario: "c", Deliver: DeliverConfig{Topic: "t"}}), true, "does not support [action.deliver]"},
+		{"queue overlap rejected", TriggerConfig{Name: "q", Schedule: &ScheduleConfig{Cron: "@daily"}, Action: ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}, Policy: TriggerPolicy{Overlap: "queue"}}, false, "not supported in v1"},
+		{"bad overlap", TriggerConfig{Name: "q", Schedule: &ScheduleConfig{Cron: "@daily"}, Action: ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}, Policy: TriggerPolicy{Overlap: "sometimes"}}, false, "is invalid"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			errs := validateOne(tc.trig, tc.orchestrator)
+			if len(errs) == 0 {
+				t.Fatalf("expected error containing %q, got none", tc.wantContains)
+			}
+			joined := errorsString(errs)
+			if !strings.Contains(joined, tc.wantContains) {
+				t.Fatalf("expected error containing %q, got: %s", tc.wantContains, joined)
+			}
+		})
+	}
+}
+
+func TestValidateTriggers_DuplicateNames(t *testing.T) {
+	c := &Config{Triggers: []TriggerConfig{
+		schedTrigger("bide", ScheduleConfig{Cron: "@daily"}, ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}),
+		schedTrigger("bide", ScheduleConfig{Cron: "@hourly"}, ActionConfig{Type: ActionMessage, Body: "y", Deliver: DeliverConfig{Topic: "t"}}),
+	}}
+	joined := errorsString(c.validateTriggers())
+	if !strings.Contains(joined, "duplicate trigger name") {
+		t.Fatalf("expected duplicate error, got %s", joined)
+	}
+}
+
+func errorsString(errs []error) string {
+	var b strings.Builder
+	for _, e := range errs {
+		b.WriteString(e.Error())
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+func TestTriggerHelpers(t *testing.T) {
+	if !(TriggerConfig{}).TriggerEnabled() {
+		t.Error("nil Enabled should default true")
+	}
+	if (TriggerConfig{Enabled: boolPtr(false)}).TriggerEnabled() {
+		t.Error("explicit false should disable")
+	}
+	if got := (WatchConfig{}).DebounceDuration(); got != 30*time.Second {
+		t.Errorf("default debounce = %v, want 30s", got)
+	}
+	if got := (WatchConfig{Debounce: "3s"}).DebounceDuration(); got != 3*time.Second {
+		t.Errorf("debounce = %v, want 3s", got)
+	}
+	if got := (ActionConfig{}).TimeoutDuration(); got != 5*time.Minute {
+		t.Errorf("default timeout = %v, want 5m", got)
+	}
+	if !(ActionConfig{}).Sandboxed() {
+		t.Error("nil sandbox should default true")
+	}
+	if (ActionConfig{Sandbox: boolPtr(false)}).Sandboxed() {
+		t.Error("explicit false should be unsandboxed")
+	}
+	if got := (TriggerPolicy{}).OverlapMode(); got != OverlapSkip {
+		t.Errorf("default overlap = %q, want skip", got)
+	}
+	if got := (TriggerPolicy{Overlap: "allow"}).OverlapMode(); got != OverlapAllow {
+		t.Errorf("overlap = %q, want allow", got)
+	}
+	if got := (TriggersRuntime{}).MaxConcurrentOr(); got != 4 {
+		t.Errorf("default max_concurrent = %d, want 4", got)
+	}
+}
+
+func TestRateLimitParsed(t *testing.T) {
+	cases := []struct {
+		in    string
+		wantN int
+		wantW time.Duration
+	}{
+		{"", 5, 30 * time.Minute},
+		{"10/1h", 10, time.Hour},
+		{"3/30m", 3, 30 * time.Minute},
+		{"garbage", 5, 30 * time.Minute},
+		{"0/5m", 5, 30 * time.Minute},
+		{"5/notaduration", 5, 30 * time.Minute},
+	}
+	for _, tc := range cases {
+		n, w := (TriggerPolicy{RateLimit: tc.in}).RateLimitParsed()
+		if n != tc.wantN || w != tc.wantW {
+			t.Errorf("RateLimitParsed(%q) = (%d,%v), want (%d,%v)", tc.in, n, w, tc.wantN, tc.wantW)
+		}
+	}
+}
