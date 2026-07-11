@@ -321,6 +321,65 @@ func TestMigrateV13ToV14SoftDelete(t *testing.T) {
 	}
 }
 
+// TestMigrateV16ToV17PromptedAuthors covers the author-trust gate's persisted
+// set (issue #1039): a v16 state with no pr_watch_prompted_authors field must
+// migrate to an initialised empty map, leaving pre-existing sessions untouched.
+func TestMigrateV16ToV17PromptedAuthors(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+
+	// A v16 state with no pr_watch_prompted_authors field.
+	data := []byte(`{"version":16,"sessions":{
+		"braw1":{"id":"braw1","name":"bide-session","status":"running"}
+	}}`)
+	if err := writeFileAtomic(path, data); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := LoadState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if loaded.Version != CurrentStateVersion {
+		t.Errorf("version = %d, want %d after migration", loaded.Version, CurrentStateVersion)
+	}
+
+	if loaded.PRWatchPromptedAuthors == nil {
+		t.Fatal("PRWatchPromptedAuthors is nil after migration; want an initialized map")
+	}
+
+	if len(loaded.PRWatchPromptedAuthors) != 0 {
+		t.Errorf("PRWatchPromptedAuthors has %d entries, want 0", len(loaded.PRWatchPromptedAuthors))
+	}
+
+	if s := loaded.Sessions["braw1"]; s == nil || s.Name != "bide-session" {
+		t.Error("braw1 session lost or altered during v16→v17 migration")
+	}
+}
+
+// TestLoadStatePromptedAuthorsRoundTrip asserts a populated prompted-authors set
+// survives a save/load cycle.
+func TestLoadStatePromptedAuthorsRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+
+	st := NewState()
+	st.PRWatchPromptedAuthors["scunner"] = true
+	st.PRWatchPromptedAuthors["dreich"] = true
+
+	if err := SaveState(path, st); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := LoadState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !loaded.PRWatchPromptedAuthors["scunner"] || !loaded.PRWatchPromptedAuthors["dreich"] {
+		t.Errorf("prompted authors should round-trip, got %v", loaded.PRWatchPromptedAuthors)
+	}
+}
+
 func TestLoadStateV14RoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
 

@@ -127,6 +127,15 @@ poll_terminal = "5m"             # poll interval once all checks are terminal bu
 poll_merged = "15m"              # sweep interval for merged/closed PRs
 max_notifications_per_pr = 10    # cap on informational notices per PR head SHA (CI-failure/conflict directives bypass it)
 debounce = "2m"                  # minimum cooldown between notifications to one session
+# Author-trust gate for PR comments (prompt-injection defence). A comment is
+# only delivered if its author is trusted: either its login is in
+# comment_author_allowlist, or its GitHub author_association is in
+# trusted_author_associations. Untrusted comments are dropped from notifications
+# (the cursor still advances). Defaults trust org members/owners/collaborators
+# and no bots — allowlist bots/Apps by login (their association is unreliable).
+# comment_author_allowlist = ["github-actions[bot]", "coderabbitai[bot]"]
+trusted_author_associations = ["OWNER", "MEMBER", "COLLABORATOR"]  # CONTRIBUTOR is deliberately excluded
+notify_untrusted_authors = true  # message the orchestrator once per new untrusted author (metadata only, never the comment body)
 
 [status_bar]
 enabled = true       # show the status bar in attached sessions

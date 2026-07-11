@@ -16,7 +16,7 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 )
 
-const CurrentStateVersion = 16
+const CurrentStateVersion = 17
 
 // StateVersionError is returned by LoadState when the on-disk state file is
 // newer than this binary understands. The daemon treats this as fatal (refuses
@@ -234,6 +234,13 @@ type State struct {
 	// not persisted here. Per-binding watch state is in-memory (rebuilt from live
 	// sessions) and is not persisted.
 	TriggerRuntime map[string]*TriggerRuntimeState `json:"trigger_runtime,omitempty"`
+	// PRWatchPromptedAuthors is the set of untrusted PR-comment author logins the
+	// PR-watch loop has already surfaced to the orchestrator (the trust prompt),
+	// so a given author is surfaced at most once ever. Keyed by lower-cased login,
+	// global (matching the global comment allowlist). Persisted so the once-only
+	// guarantee survives a daemon restart. Bounded (see maxPRWatchPromptedAuthors)
+	// so it can't grow without limit on a busy public repo.
+	PRWatchPromptedAuthors map[string]bool `json:"pr_watch_prompted_authors,omitempty"`
 }
 
 // TriggerRuntimeState is the persisted, per-definition runtime state for a
@@ -293,11 +300,12 @@ func (s *State) EnsurePairingHMACKey() (string, error) {
 
 func NewState() *State {
 	return &State{
-		Version:        CurrentStateVersion,
-		Sessions:       make(map[string]*SessionState),
-		Scenarios:      make(map[string]*ScenarioState),
-		PairedDevices:  make(map[string]*PairedDevice),
-		TriggerRuntime: make(map[string]*TriggerRuntimeState),
+		Version:                CurrentStateVersion,
+		Sessions:               make(map[string]*SessionState),
+		Scenarios:              make(map[string]*ScenarioState),
+		PairedDevices:          make(map[string]*PairedDevice),
+		TriggerRuntime:         make(map[string]*TriggerRuntimeState),
+		PRWatchPromptedAuthors: make(map[string]bool),
 	}
 }
 
@@ -331,6 +339,10 @@ func LoadState(path string) (*State, error) {
 
 	if state.TriggerRuntime == nil {
 		state.TriggerRuntime = make(map[string]*TriggerRuntimeState)
+	}
+
+	if state.PRWatchPromptedAuthors == nil {
+		state.PRWatchPromptedAuthors = make(map[string]bool)
 	}
 
 	if state.Version > CurrentStateVersion {
@@ -373,6 +385,7 @@ var migrations = map[int]func(*State) error{
 	13: migrateV13ToV14,
 	14: migrateV14ToV15,
 	15: migrateV15ToV16,
+	16: migrateV16ToV17,
 }
 
 func generateToken() (string, error) {
@@ -549,6 +562,17 @@ func migrateV14ToV15(state *State) error {
 func migrateV15ToV16(state *State) error {
 	if state.TriggerRuntime == nil {
 		state.TriggerRuntime = make(map[string]*TriggerRuntimeState)
+	}
+
+	return nil
+}
+
+// migrateV16ToV17 initialises the pr_watch_prompted_authors set for the
+// author-trust gate (issue #1039). Older state has none; the map is created
+// empty so the once-per-author orchestrator prompt starts from a clean slate.
+func migrateV16ToV17(state *State) error {
+	if state.PRWatchPromptedAuthors == nil {
+		state.PRWatchPromptedAuthors = make(map[string]bool)
 	}
 
 	return nil
