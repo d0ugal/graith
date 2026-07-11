@@ -849,6 +849,91 @@ func TestAutoCleanupStopped_AlreadyDeleted(t *testing.T) {
 	}
 }
 
+// TestAutoCleanupStopped_SkipsRunning is the regression guard for the resume
+// race: a session that flipped back to running (e.g. an inbox wake resumed it
+// in the gap between the exit path and cleanup) must NOT be soft-deleted, since
+// SoftDelete would kill the freshly resumed agent.
+func TestAutoCleanupStopped_SkipsRunning(t *testing.T) {
+	sm := newTriggerTestSM(t)
+	sess := stoppedTriggerSession(config.CleanupAlways, 0)
+	sess.Status = StatusRunning
+	sess.ExitCode = nil // resume clears the exit code
+	sm.state.Sessions[sess.ID] = sess
+
+	sm.autoCleanupStopped(sess.ID)
+
+	if sm.state.Sessions[sess.ID].IsSoftDeleted() {
+		t.Error("a resumed (running) session must not be auto-cleaned")
+	}
+}
+
+// TestAutoCleanupStopped_SkipsShutdown proves a session interrupted by a daemon
+// shutdown is preserved (not cleaned), so `gr daemon restart` can resume it.
+func TestAutoCleanupStopped_SkipsShutdown(t *testing.T) {
+	sm := newTriggerTestSM(t)
+	sess := stoppedTriggerSession(config.CleanupAlways, 137) // SIGKILL-ish exit
+	sess.StopReason = StopReasonShutdown
+	sm.state.Sessions[sess.ID] = sess
+
+	sm.autoCleanupStopped(sess.ID)
+
+	if sm.state.Sessions[sess.ID].IsSoftDeleted() {
+		t.Error("a shutdown-interrupted session must not be auto-cleaned")
+	}
+}
+
+// TestAutoCleanupStopped_ZeroRetention proves cleanup declines when soft delete
+// is disabled, rather than marking the session for an immediate hard purge —
+// preserving the "delete never destroys" invariant.
+func TestAutoCleanupStopped_ZeroRetention(t *testing.T) {
+	sm := newTriggerTestSM(t)
+	sm.cfg.Delete.Retention = "0"
+	sess := stoppedTriggerSession(config.CleanupAlways, 0)
+	sm.state.Sessions[sess.ID] = sess
+
+	sm.autoCleanupStopped(sess.ID)
+
+	got := sm.state.Sessions[sess.ID]
+	if got.IsSoftDeleted() {
+		t.Error("cleanup must not soft-delete when retention is disabled")
+	}
+
+	if got.ExpiresAt != nil {
+		t.Error("no ExpiresAt should be set when cleanup is skipped")
+	}
+}
+
+// TestAutoCleanupStopped_RequiresTriggerID proves the belt-and-braces guard:
+// even a session carrying an AutoCleanup mode is left alone if it is not
+// trigger-tagged, so cleanup can never reach a manually created session.
+func TestAutoCleanupStopped_RequiresTriggerID(t *testing.T) {
+	sm := newTriggerTestSM(t)
+	sess := stoppedTriggerSession(config.CleanupAlways, 0)
+	sess.TriggerID = ""
+	sm.state.Sessions[sess.ID] = sess
+
+	sm.autoCleanupStopped(sess.ID)
+
+	if sm.state.Sessions[sess.ID].IsSoftDeleted() {
+		t.Error("a session without a TriggerID must not be auto-cleaned")
+	}
+}
+
+// TestAutoCleanupStopped_SkipsStarred proves a starred trigger session is
+// preserved, mirroring SoftDelete's starred guard.
+func TestAutoCleanupStopped_SkipsStarred(t *testing.T) {
+	sm := newTriggerTestSM(t)
+	sess := stoppedTriggerSession(config.CleanupAlways, 0)
+	sess.Starred = true
+	sm.state.Sessions[sess.ID] = sess
+
+	sm.autoCleanupStopped(sess.ID)
+
+	if sm.state.Sessions[sess.ID].IsSoftDeleted() {
+		t.Error("a starred session must not be auto-cleaned")
+	}
+}
+
 func TestTruncateOutput(t *testing.T) {
 	short := truncateOutput("  hi  ")
 	if short != "hi" {
