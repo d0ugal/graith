@@ -137,7 +137,7 @@ func TestNotifyFromDaemon_PublishesSystemNotification(t *testing.T) {
 	h := newTestHarness(t)
 	h.addPTYSession(t, "braw-sess", "braw-session")
 
-	h.sm.notifyFromDaemon("braw-sess", "PR #884 was merged. No further action needed.")
+	_ = h.sm.notifyFromDaemon("braw-sess", "PR #884 was merged. No further action needed.")
 
 	msgs, err := h.sm.messages.Read("inbox:braw-sess", "", false, "")
 	if err != nil {

@@ -141,12 +141,14 @@ func TestPRWatchDurations(t *testing.T) {
 }
 
 // TestTrustedAssociationSet covers the author-trust association accessor: the
-// default set when unset, upper-case normalisation of a hand-written config,
-// whitespace trimming, and that an all-empty configured list falls back to the
-// default rather than trusting nothing.
+// default set when a nil (unset) list, upper-case normalisation of a
+// hand-written config, whitespace trimming, and that a present-but-empty list
+// is honoured as trust-no-association (fail closed) rather than widened to the
+// default.
 func TestTrustedAssociationSet(t *testing.T) {
 	t.Run("unset defaults to owner/member/collaborator", func(t *testing.T) {
 		var pw PRWatchConfig
+
 		set := pw.TrustedAssociationSet()
 
 		for _, want := range []string{"OWNER", "MEMBER", "COLLABORATOR"} {

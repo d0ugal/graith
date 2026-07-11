@@ -1566,6 +1566,7 @@ func TestCommentTrusted(t *testing.T) {
 			cfg: func() *config.PRWatchConfig {
 				c := base()
 				c.CommentAuthorAllowlist = []string{"github-actions[bot]"}
+
 				return c
 			},
 			comment: ghComment{User: ghUser{Login: "github-actions[bot]"}, AuthorAssociation: "NONE"},
@@ -1582,6 +1583,7 @@ func TestCommentTrusted(t *testing.T) {
 			cfg: func() *config.PRWatchConfig {
 				c := base()
 				c.CommentAuthorAllowlist = []string{"CodeRabbitAI[Bot]"}
+
 				return c
 			},
 			comment: ghComment{User: ghUser{Login: "coderabbitai[bot]"}, AuthorAssociation: "NONE"},
@@ -1592,6 +1594,7 @@ func TestCommentTrusted(t *testing.T) {
 			cfg: func() *config.PRWatchConfig {
 				c := base()
 				c.CommentAuthorAllowlist = []string{""}
+
 				return c
 			},
 			comment: ghComment{User: ghUser{Login: ""}, AuthorAssociation: "NONE"},
@@ -1602,6 +1605,7 @@ func TestCommentTrusted(t *testing.T) {
 			cfg: func() *config.PRWatchConfig {
 				c := base()
 				c.TrustedAuthorAssociations = []string{"OWNER"}
+
 				return c
 			},
 			comment: ghComment{User: ghUser{Login: "dreich"}, AuthorAssociation: "MEMBER"},
@@ -1641,6 +1645,7 @@ func TestCommentTrusted(t *testing.T) {
 			cfg: func() *config.PRWatchConfig {
 				c := base()
 				c.CommentAuthorAllowlist = []string{"canny-bot[bot]"}
+
 				return c
 			},
 			comment: ghComment{User: ghUser{Login: "canny-bot[bot]"}, AuthorAssociation: "MEMBER"},
@@ -1735,6 +1740,7 @@ func TestDiffAndBuild_AllUntrustedNoNotifyCursorAdvances(t *testing.T) {
 // trusted association still gets a comment through.
 func TestDiffAndBuild_EmptyAllowlistFallsBackToAssociations(t *testing.T) {
 	sm := newPRWatchSM()
+
 	cfg := allOnConfig()
 	if len(cfg.CommentAuthorAllowlist) != 0 {
 		t.Fatal("precondition: allowlist should be empty")
@@ -1961,6 +1967,7 @@ func TestPromptUntrustedAuthors_NoOrchestrator(t *testing.T) {
 	t1 := prWatchTarget{id: "haar", branch: "haar"}
 
 	sm.diffAndBuild(cfg, t1, "croft/loch", prData{Number: 5, State: "open", HeadRefOid: "sha1", CIState: "passing", CommentsOK: true})
+
 	out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
 		Number: 5, State: "open", HeadRefOid: "sha1", CIState: "passing", CommentsOK: true,
 		IssueComments: []ghComment{{ID: 50, User: ghUser{Login: "scunner"}, AuthorAssociation: "NONE", Body: "x"}},
@@ -2039,6 +2046,7 @@ func TestPromptUntrustedAuthors_RateLimited(t *testing.T) {
 
 	// Pre-fill the prompt log to the limit within the window.
 	sm.prWatch.mu.Lock()
+
 	now := time.Now()
 	for i := 0; i < prAuthorPromptRate; i++ {
 		sm.prWatch.authorPromptLog = append(sm.prWatch.authorPromptLog, now)
