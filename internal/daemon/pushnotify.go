@@ -143,18 +143,13 @@ func (sm *SessionManager) SendPushNotification(n pushNotification) (bool, string
 		coalesceWindow: pushCoalesceWindow,
 	})
 
-	if !res.deliver {
-		sm.pushMu.Unlock()
-		sm.log.Info("push notification suppressed", "reason", res.reason, "priority", priority)
-
-		return false, res.reason
-	}
-
-	sm.pushLog = res.log
-	sm.lastPushKey = key
-	sm.lastPushAt = now
 	dispatch := sm.pushDispatch
 	sm.pushMu.Unlock()
+
+	if !res.deliver {
+		sm.log.Info("push notification suppressed", "reason", res.reason, "priority", priority)
+		return false, res.reason
+	}
 
 	if dispatch == nil {
 		dispatch = defaultPushDispatch
@@ -164,10 +159,22 @@ func (sm *SessionManager) SendPushNotification(n pushNotification) (bool, string
 
 	sm.log.Info("sending push notification", "backend", backend, "priority", priority, "title", title)
 
+	// Dispatch BEFORE committing the coalescing/rate-limit state: a failed send
+	// must not consume rate-limit budget or start a 30s coalescing window (that
+	// would suppress the retry of a notification the user never actually got).
 	if err := dispatch(backend, title, message, priority); err != nil {
 		sm.log.Error("push notification dispatch failed", "backend", backend, "err", err)
 		return false, fmt.Sprintf("backend %q dispatch failed: %v", backend, err)
 	}
+
+	// Delivered — now record it so future sends coalesce/rate-limit against it.
+	// res.log was pruned to the last hour at gate time; appending `now` is
+	// equivalent to what evaluatePushGate computed for the delivering case.
+	sm.pushMu.Lock()
+	sm.pushLog = res.log
+	sm.lastPushKey = key
+	sm.lastPushAt = now
+	sm.pushMu.Unlock()
 
 	return true, ""
 }
