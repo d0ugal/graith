@@ -289,9 +289,11 @@ func (sm *SessionManager) loadOrCreateHumanToken() error {
 		if genErr != nil {
 			return genErr
 		}
+
 		if writeErr := atomicfile.Write(sm.paths.HumanTokenFile, []byte(token+"\n"), 0o600); writeErr != nil {
 			return fmt.Errorf("write human token: %w", writeErr)
 		}
+
 		data = []byte(token)
 	}
 
@@ -305,6 +307,13 @@ func (sm *SessionManager) loadOrCreateHumanToken() error {
 	sm.mu.Unlock()
 
 	return nil
+}
+
+// EnsureHumanToken loads or creates the local human credential. It is exported
+// for tests and embedders that construct a SessionManager without going through
+// Run (which calls loadOrCreateHumanToken during startup).
+func (sm *SessionManager) EnsureHumanToken() error {
+	return sm.loadOrCreateHumanToken()
 }
 
 func (sm *SessionManager) rebuildTokenIndex() {
@@ -2203,6 +2212,7 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	if prevToken != "" {
 		delete(sm.tokenIndex, prevToken)
 	}
+
 	sessState.Token = newToken
 	sm.tokenIndex[newToken] = id
 
@@ -2215,7 +2225,9 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 		sessState.Status = prevStatus
 		sessState.StatusChangedAt = prevStatusChangedAt
 		sessState.Token = prevToken
+
 		delete(sm.tokenIndex, newToken)
+
 		if prevToken != "" {
 			sm.tokenIndex[prevToken] = id
 		}
@@ -2266,10 +2278,13 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 			s.SummarySetAt = prevSummarySetAt
 			s.SummaryTTL = prevSummaryTTL
 			s.Token = prevToken
+
 			delete(sm.tokenIndex, newToken)
+
 			if prevToken != "" {
 				sm.tokenIndex[prevToken] = id
 			}
+
 			_ = sm.saveState()
 		}
 		sm.mu.Unlock()
@@ -5845,6 +5860,7 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 
 			log.Warn("failed to load state", "err", err)
 		}
+
 		if err := sm.loadOrCreateHumanToken(); err != nil {
 			_ = l.Close()
 			return fmt.Errorf("initialize human authentication: %w", err)
@@ -5881,9 +5897,12 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 
 			log.Warn("failed to load state", "err", err)
 		}
+
 		if err := sm.loadOrCreateHumanToken(); err != nil {
 			_ = l.Close()
+
 			ReleasePIDFile(paths.PIDFile)
+
 			return fmt.Errorf("initialize human authentication: %w", err)
 		}
 

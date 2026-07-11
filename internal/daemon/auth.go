@@ -72,6 +72,7 @@ func resolveAuth(sm *SessionManager, token string, origin ConnOrigin, poppedDevi
 		if token != "" && sm.humanToken != "" && subtle.ConstantTimeCompare([]byte(token), []byte(sm.humanToken)) == 1 {
 			return authContext{role: roleLocalHuman, origin: origin}, nil
 		}
+
 		return authContext{role: roleNone, origin: origin}, fmt.Errorf("invalid token")
 	}
 

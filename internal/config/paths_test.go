@@ -14,6 +14,7 @@ func TestResolvePaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolvePaths() error: %v", err)
 	}
+
 	if p.HumanTokenFile != filepath.Join(p.DataDir, "human.token") {
 		t.Errorf("HumanTokenFile = %q, want human.token under DataDir", p.HumanTokenFile)
 	}

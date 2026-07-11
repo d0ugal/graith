@@ -232,6 +232,7 @@ func (dc *doctorContext) probeDaemon() daemonProbe {
 	hs.ClientID = "doctor"
 
 	token := localAuthToken()
+
 	hsData, _ := encodeLocalControl("handshake", hs, token)
 	if err := writer.WriteFrame(protocol.ChannelControl, hsData); err != nil {
 		return daemonProbe{reach: daemonReachDown, dialErr: err}
@@ -292,10 +293,12 @@ func localAuthToken() string {
 	if token := os.Getenv("GRAITH_TOKEN"); token != "" {
 		return token
 	}
+
 	data, err := os.ReadFile(paths.HumanTokenFile)
 	if err != nil {
 		return ""
 	}
+
 	return strings.TrimSpace(string(data))
 }
 
@@ -303,6 +306,7 @@ func encodeLocalControl(msgType string, payload any, token string) ([]byte, erro
 	if token != "" {
 		return protocol.EncodeControlWithToken(msgType, payload, token)
 	}
+
 	return protocol.EncodeControl(msgType, payload)
 }
 
@@ -679,10 +683,12 @@ func (dc *doctorContext) checkHumanToken() {
 		dc.failf("environment", "Human token unavailable: %s", paths.HumanTokenFile)
 		return
 	}
+
 	if !info.Mode().IsRegular() {
 		dc.failf("environment", "Human token is not a regular file: %s", paths.HumanTokenFile)
 		return
 	}
+
 	if info.Mode().Perm() != 0o600 {
 		dc.failf("environment", "Human token mode is %04o, want 0600: %s", info.Mode().Perm(), paths.HumanTokenFile)
 		return
@@ -690,11 +696,13 @@ func (dc *doctorContext) checkHumanToken() {
 
 	if cfg.Sandbox.Enabled {
 		dirs := append([]string{}, cfg.Sandbox.ReadDirs...)
+
 		dirs = append(dirs, cfg.Sandbox.WriteDirs...)
 		for _, agent := range cfg.Agents {
 			dirs = append(dirs, agent.Sandbox.ReadDirs...)
 			dirs = append(dirs, agent.Sandbox.WriteDirs...)
 		}
+
 		for _, dir := range dirs {
 			for _, expanded := range expandDoctorGrant(dir) {
 				if pathWithin(paths.HumanTokenFile, expanded) {
@@ -714,6 +722,7 @@ func expandDoctorGrant(path string) []string {
 		matches, _ := filepath.Glob(path)
 		return matches
 	}
+
 	return []string{path}
 }
 
@@ -722,11 +731,14 @@ func pathWithin(path, dir string) bool {
 	if err != nil {
 		return false
 	}
+
 	dir, err = filepath.Abs(dir)
 	if err != nil {
 		return false
 	}
+
 	rel, err := filepath.Rel(dir, path)
+
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
