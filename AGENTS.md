@@ -487,7 +487,21 @@ built — it's the argument for a decision, kept afterwards as the record of why
   (or `Implemented (v1)` when later phases are deferred). Add a `## Consensus`
   section only after a review has actually happened.
 
-## Using graith to work on graith
+## Documentation
+
+The published docs site lives in `website/` (Hugo) and is served at
+<https://d0ugal.github.io/graith/> via `.github/workflows/docs.yml`. The pages
+are Markdown under `website/content/docs/` (e.g. `auth.md`, `sandbox.md`,
+`configuration.md`, `commands.md`).
+
+**When a change alters user-facing behaviour — a command, flag, config key,
+env var, auth/security model, or lifecycle — update the matching page under
+`website/content/docs/` in the same PR.** A design doc in `docs/design/` records
+*why* a thing was built; it does not replace the user-facing site docs, and the
+two drift apart if you only update one. Updating `AGENTS.md` (agent-facing
+reference) is likewise not a substitute for the site docs. If you're unsure a
+change is user-visible, check whether an existing page would now be wrong — if
+so, fix it.
 
 graith can manage its own development sessions. This is the intended workflow
 for working on graith itself:
