@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
 )
 
@@ -41,8 +42,14 @@ var startDaemonFn = startDaemon
 // deliberately does not unlink the socket itself: doing so could orphan a
 // live-but-slow daemon that merely lost the probe race — its socket would be
 // gone but the PID guard would then block the replacement from rebinding.
-func EnsureDaemon(sockPath, configFile string) (net.Conn, error) {
-	if daemonResponds(sockPath) {
+func EnsureDaemon(paths config.Paths, configFile string) (net.Conn, error) {
+	sockPath := paths.SocketPath
+	// Present the caller's credential (session token or human token) in the
+	// probe so it passes the daemon's fail-closed local-auth gate, matching the
+	// real handshake and the other probes (probeDaemonVersion, doctor).
+	token := resolveClientToken(paths)
+
+	if daemonResponds(sockPath, token) {
 		if conn, err := net.DialTimeout("unix", sockPath, daemonDialTimeout); err == nil {
 			return conn, nil
 		}
@@ -56,7 +63,7 @@ func EnsureDaemon(sockPath, configFile string) (net.Conn, error) {
 	defer cancel()
 
 	for {
-		if daemonResponds(sockPath) {
+		if daemonResponds(sockPath, token) {
 			if conn, err := net.DialTimeout("unix", sockPath, daemonDialTimeout); err == nil {
 				return conn, nil
 			}
@@ -72,13 +79,19 @@ func EnsureDaemon(sockPath, configFile string) (net.Conn, error) {
 
 // daemonResponds reports whether a live graith daemon is listening on sockPath.
 // It dials with a short timeout and performs a throwaway handshake under a
-// deadline. A socket that accepts the connection but never completes a graith
+// deadline, presenting token so it clears the daemon's fail-closed local-auth
+// gate. A socket that accepts the connection but never completes a graith
 // handshake — a stale socket from a stuck process, or a non-graith server — is
 // reported as not responding, so callers treat it as stale instead of blocking
-// on it forever. A protocol-level rejection (handshake_err, e.g. a profile or
-// version mismatch) still proves a graith daemon is present, so it counts as
-// responding.
-func daemonResponds(sockPath string) bool {
+// on it forever.
+//
+// Any decodable graith control reply proves a graith daemon is present, so
+// handshake_ok, handshake_err (a protocol-level rejection, e.g. profile or
+// version mismatch), and error (an auth rejection) all count as responding. A
+// non-graith server fails DecodeControl and is reported as not responding.
+// Accepting error is what keeps a tokenless probe from misreading a live,
+// auth-gating daemon as dead and triggering a doomed autostart.
+func daemonResponds(sockPath, token string) bool {
 	conn, err := net.DialTimeout("unix", sockPath, daemonDialTimeout)
 	if err != nil {
 		return false
@@ -95,7 +108,13 @@ func daemonResponds(sockPath string) bool {
 		ClientID: fmt.Sprintf("probe-%d", os.Getpid()),
 	}
 
-	data, err := protocol.EncodeControl("handshake", hs)
+	var data []byte
+	if token != "" {
+		data, err = protocol.EncodeControlWithToken("handshake", hs, token)
+	} else {
+		data, err = protocol.EncodeControl("handshake", hs)
+	}
+
 	if err != nil {
 		return false
 	}
@@ -114,7 +133,7 @@ func daemonResponds(sockPath string) bool {
 		return false
 	}
 
-	return env.Type == "handshake_ok" || env.Type == "handshake_err"
+	return env.Type == "handshake_ok" || env.Type == "handshake_err" || env.Type == "error"
 }
 
 func startDaemon(configFile string) error {

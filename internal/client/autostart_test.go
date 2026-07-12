@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
 )
 
@@ -213,7 +214,7 @@ func TestDaemonRespondsFalseWhenNothingListening(t *testing.T) {
 
 	sockPath := shortSockPath(t, "graith.sock")
 
-	if daemonResponds(sockPath) {
+	if daemonResponds(sockPath, "") {
 		t.Fatal("expected daemonResponds to be false when nothing is listening")
 	}
 }
@@ -236,7 +237,7 @@ func TestDaemonRespondsFalseOnStuckSocket(t *testing.T) {
 
 	start := time.Now()
 
-	if daemonResponds(sockPath) {
+	if daemonResponds(sockPath, "") {
 		t.Fatal("expected daemonResponds to be false for a socket that never replies")
 	}
 
@@ -263,7 +264,7 @@ func TestDaemonRespondsFalseOnForeignSocket(t *testing.T) {
 		_, _ = conn.Write([]byte("HTTP/1.1 200 OK\r\n\r\ngarbage"))
 	})
 
-	if daemonResponds(sockPath) {
+	if daemonResponds(sockPath, "") {
 		t.Fatal("expected daemonResponds to be false for a non-graith server")
 	}
 }
@@ -277,7 +278,7 @@ func TestDaemonRespondsTrueOnHandshakeOK(t *testing.T) {
 		writeHandshakeResponse(t, conn, "handshake_ok")
 	})
 
-	if !daemonResponds(sockPath) {
+	if !daemonResponds(sockPath, "") {
 		t.Fatal("expected daemonResponds to be true for a graith daemon replying handshake_ok")
 	}
 }
@@ -292,8 +293,73 @@ func TestDaemonRespondsTrueOnHandshakeErr(t *testing.T) {
 		writeHandshakeResponse(t, conn, "handshake_err")
 	})
 
-	if !daemonResponds(sockPath) {
+	if !daemonResponds(sockPath, "") {
 		t.Fatal("expected daemonResponds to be true for a daemon replying handshake_err")
+	}
+}
+
+func TestDaemonRespondsTrueOnAuthError(t *testing.T) {
+	shortenHandshakeTimeout(t, 2*time.Second)
+
+	sockPath := shortSockPath(t, "fash.sock")
+
+	// A fail-closed daemon rejects a tokenless handshake at the auth gate with a
+	// generic "error" frame (not handshake_err). That reply still proves a graith
+	// daemon is present, so the probe must report it as alive — otherwise every
+	// CLI command would treat the live daemon as dead and autostart a doomed
+	// second daemon (the v0.67.1 regression this fix closes).
+	serveHandshake(t, sockPath, func(conn net.Conn) {
+		writeHandshakeResponse(t, conn, "error")
+	})
+
+	if !daemonResponds(sockPath, "") {
+		t.Fatal("expected daemonResponds to be true for a daemon replying error (auth rejection)")
+	}
+}
+
+func TestDaemonRespondsSendsToken(t *testing.T) {
+	shortenHandshakeTimeout(t, 2*time.Second)
+
+	sockPath := shortSockPath(t, "ken.sock")
+
+	gotToken := make(chan string, 1)
+
+	// The daemon records the token the probe presents, then replies handshake_ok.
+	serveHandshake(t, sockPath, func(conn net.Conn) {
+		reader := protocol.NewFrameReader(conn)
+		writer := protocol.NewFrameWriter(conn)
+
+		frame, err := reader.ReadFrame()
+		if err != nil {
+			return
+		}
+
+		env, err := protocol.DecodeControl(frame.Payload)
+		if err != nil {
+			return
+		}
+
+		gotToken <- env.Token
+
+		data, err := protocol.EncodeControl("handshake_ok", protocol.HandshakeOkMsg{Version: protocol.Version})
+		if err != nil {
+			return
+		}
+
+		_ = writer.WriteFrame(protocol.ChannelControl, data)
+	})
+
+	if !daemonResponds(sockPath, "human-braw") {
+		t.Fatal("expected daemonResponds to be true when the daemon replies handshake_ok")
+	}
+
+	select {
+	case tok := <-gotToken:
+		if tok != "human-braw" {
+			t.Fatalf("probe presented token %q, want %q", tok, "human-braw")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("daemon never received the probe handshake")
 	}
 }
 
@@ -314,6 +380,8 @@ func writeHandshakeResponse(t *testing.T, conn net.Conn, respType string) {
 	switch respType {
 	case "handshake_ok":
 		payload = protocol.HandshakeOkMsg{Version: protocol.Version}
+	case "error":
+		payload = protocol.ErrorMsg{Message: "invalid token"}
 	default:
 		payload = protocol.HandshakeErrMsg{Reason: "thrawn"}
 	}
@@ -371,7 +439,7 @@ func TestEnsureDaemonStartsFreshWhenSocketStale(t *testing.T) {
 		return nil
 	})
 
-	_, err := EnsureDaemon(sockPath, "")
+	_, err := EnsureDaemon(config.Paths{SocketPath: sockPath}, "")
 	if err == nil {
 		t.Fatal("expected EnsureDaemon to fail when no real daemon starts")
 	}
@@ -401,7 +469,7 @@ func TestEnsureDaemonReusesLiveDaemon(t *testing.T) {
 		return nil
 	})
 
-	conn, err := EnsureDaemon(sockPath, "")
+	conn, err := EnsureDaemon(config.Paths{SocketPath: sockPath}, "")
 	if err != nil {
 		t.Fatalf("EnsureDaemon returned error for a live daemon: %v", err)
 	}

@@ -221,6 +221,60 @@ func TestHandshake(t *testing.T) {
 	}
 }
 
+func TestHandshakeTokenlessLocalAllowedWithHumanToken(t *testing.T) {
+	h := newTestHarness(t)
+
+	// A served daemon always has a human token. A tokenless LOCAL handshake must
+	// still get handshake_ok: the handshake is protocol negotiation and confers
+	// no authority (auth is enforced per-operation below). The fail-closed gate
+	// used to reject it with a generic "error" frame, which wedged EnsureDaemon's
+	// tokenless liveness probe and broke every CLI command except `gr doctor`
+	// (v0.67.1 regression).
+	h.sm.mu.Lock()
+	h.sm.humanToken = "human-canny"
+	h.sm.mu.Unlock()
+
+	h.sendControl(t, "handshake", protocol.HandshakeMsg{
+		Version:      protocol.Version,
+		ClientID:     "braw-probe",
+		TerminalSize: [2]uint16{80, 24},
+		Cwd:          "/tmp",
+	})
+
+	env := h.expectType(t, "handshake_ok")
+
+	var ok protocol.HandshakeOkMsg
+
+	_ = protocol.DecodePayload(env, &ok)
+
+	if ok.Version != protocol.Version {
+		t.Errorf("version = %q, want %q", ok.Version, protocol.Version)
+	}
+}
+
+func TestTokenlessLocalOpStillRejectedWithHumanToken(t *testing.T) {
+	h := newTestHarness(t)
+
+	// The handshake exemption must be surgical: every non-handshake message still
+	// runs the fail-closed auth gate, so a tokenless privileged op is rejected
+	// with an "error" even though the handshake itself is allowed through.
+	h.sm.mu.Lock()
+	h.sm.humanToken = "human-canny"
+	h.sm.mu.Unlock()
+
+	h.sendControl(t, "list", struct{}{})
+
+	env := h.expectType(t, "error")
+
+	var errMsg protocol.ErrorMsg
+
+	_ = protocol.DecodePayload(env, &errMsg)
+
+	if !strings.Contains(errMsg.Message, "invalid token") {
+		t.Errorf("error message = %q, want it to mention invalid token", errMsg.Message)
+	}
+}
+
 func TestHandshakeVersionMismatch(t *testing.T) {
 	h := newTestHarness(t)
 

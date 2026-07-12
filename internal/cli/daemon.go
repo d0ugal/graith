@@ -80,7 +80,7 @@ var daemonReloadCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		c, err := client.Connect(cfg, paths, cfgFile)
 		if err != nil {
-			conn, startErr := client.EnsureDaemon(paths.SocketPath, cfgFile)
+			conn, startErr := client.EnsureDaemon(paths, cfgFile)
 			if startErr != nil {
 				return fmt.Errorf("start daemon: %w", startErr)
 			}
@@ -222,7 +222,7 @@ func restartClean() error {
 
 	_ = os.Remove(paths.SocketPath)
 
-	conn, err := client.EnsureDaemon(paths.SocketPath, cfgFile)
+	conn, err := client.EnsureDaemon(paths, cfgFile)
 	if err != nil {
 		return fmt.Errorf("restart daemon: %w", err)
 	}
