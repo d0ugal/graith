@@ -695,6 +695,15 @@ gr doctor --autofix
 - **Atomic state writes** — `state.json` and the document store (`gr store
   put/append`) are written via `internal/atomicfile` (temp → fsync → rename →
   dir fsync), so a crash mid-write can't corrupt them.
+- **Pre-migration state backup** (issue #1065) — before a newer daemon migrates
+  an older `state.json` forward in place, `LoadState` copies the pre-migration
+  file to `state.json.v<oldVersion>.bak` (via `atomicfile`, alongside
+  `state.json`). Only the most recent pre-migration backup is kept — an earlier
+  one is pruned once the new one is durable. This makes a binary downgrade
+  recoverable (restore the backup, start the older binary) and gives a rescue
+  point if a forward migration corrupts state. The backup is best-effort: a
+  write failure is logged, not fatal. `gr doctor` lists available backups;
+  `daemon.ListStateBackups` / `daemon.StateBackupPath` are the helpers.
 - **Delete tombstones** — before a session teardown starts, the daemon writes a
   durable tombstone; on startup any leftover tombstone means a delete was
   interrupted, and the daemon finishes it (reaps the orphan process, removes the

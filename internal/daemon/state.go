@@ -9,6 +9,9 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
+	"sort"
+	"strings"
 	"syscall"
 	"time"
 
@@ -358,6 +361,18 @@ func LoadState(path string) (*State, error) {
 		return nil, &StateVersionError{FileVersion: state.Version, BinaryVersion: CurrentStateVersion}
 	}
 
+	if state.Version < CurrentStateVersion {
+		// Back up the pre-migration state before overwriting it in place, so a
+		// binary downgrade (whose older daemon can't read forward-migrated
+		// state) or a state-corrupting migration can be recovered. The backup
+		// is a recovery aid, not required for correctness — a failure to write
+		// it must not stop the daemon from starting, so we log and continue.
+		if err := backupStateBeforeMigration(path, state.Version, data); err != nil {
+			slog.Warn("failed to back up state before migration",
+				"path", path, "old_version", state.Version, "err", err)
+		}
+	}
+
 	if err := migrateState(&state); err != nil {
 		slog.Warn("state migration failed, starting fresh", "path", path, "err", err)
 		return NewState(), nil
@@ -592,6 +607,96 @@ func migrateV16ToV17(state *State) error {
 // writer in the daemon and store uses the same primitive.
 func writeFileAtomic(path string, data []byte) error {
 	return atomicfile.Write(path, data, 0o600)
+}
+
+// StateBackupPath returns the pre-migration backup path for a state file at a
+// given on-disk version. Backups sit next to the state file as
+// "<state>.v<version>.bak" so a human recovering a downgrade can see which
+// schema version a backup holds without opening it.
+func StateBackupPath(statePath string, version int) string {
+	return fmt.Sprintf("%s.v%d.bak", statePath, version)
+}
+
+// backupStateBeforeMigration writes the pre-migration state bytes to
+// StateBackupPath(statePath, oldVersion) so a binary downgrade or a
+// state-corrupting migration can be recovered by restoring the backup. Only the
+// most recent pre-migration backup is kept: any backup left by an earlier
+// migration is removed once the new one is durably written. The write uses
+// atomicfile, so a crash mid-write can't leave a truncated backup.
+func backupStateBeforeMigration(statePath string, oldVersion int, data []byte) error {
+	backupPath := StateBackupPath(statePath, oldVersion)
+
+	if err := atomicfile.Write(backupPath, data, 0o600); err != nil {
+		return fmt.Errorf("write state backup: %w", err)
+	}
+
+	// Prune backups from earlier migrations so they don't accumulate. Done
+	// after the fresh backup is durable, so a crash mid-prune leaves an extra
+	// (harmless) backup rather than none. Prune failures are non-fatal: the
+	// backup that matters is already on disk.
+	for _, p := range ListStateBackups(statePath) {
+		if p == backupPath {
+			continue
+		}
+
+		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+			slog.Warn("failed to remove stale state backup", "path", p, "err", err)
+		}
+	}
+
+	return nil
+}
+
+// ListStateBackups returns the sorted paths of every pre-migration backup
+// sitting next to statePath (files named "<base>.v<N>.bak"). It reads the
+// directory rather than globbing so glob metacharacters in statePath can't
+// break the match. Returns nil if the directory can't be read.
+func ListStateBackups(statePath string) []string {
+	dir := filepath.Dir(statePath)
+	base := filepath.Base(statePath)
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+
+	var backups []string
+
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+
+		if isStateBackupName(base, e.Name()) {
+			backups = append(backups, filepath.Join(dir, e.Name()))
+		}
+	}
+
+	sort.Strings(backups)
+
+	return backups
+}
+
+// isStateBackupName reports whether name is a "<base>.v<N>.bak" backup file
+// (N a non-empty run of digits).
+func isStateBackupName(base, name string) bool {
+	prefix := base + ".v"
+	if !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, ".bak") {
+		return false
+	}
+
+	digits := name[len(prefix) : len(name)-len(".bak")]
+	if digits == "" {
+		return false
+	}
+
+	for _, r := range digits {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+
+	return true
 }
 
 func (s *State) Reconcile() {

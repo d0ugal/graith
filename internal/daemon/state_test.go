@@ -1,9 +1,12 @@
 package daemon
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -685,5 +688,197 @@ func TestSandboxConfigNilBackwardCompat(t *testing.T) {
 
 	if s.SandboxConfig != nil {
 		t.Error("SandboxConfig should be nil for pre-existing state without the field")
+	}
+}
+
+// oldStateData builds a state file JSON at the given version with one session,
+// for exercising the pre-migration backup.
+func oldStateData(t *testing.T, version int) []byte {
+	t.Helper()
+
+	data, err := json.Marshal(map[string]any{
+		"version": version,
+		"sessions": map[string]any{
+			"braw1": map[string]any{
+				"id":     "braw1",
+				"name":   "auld-kirk",
+				"status": "stopped",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return data
+}
+
+func TestLoadStateBacksUpBeforeMigration(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+
+	oldVersion := CurrentStateVersion - 1
+	before := oldStateData(t, oldVersion)
+
+	if err := writeFileAtomic(path, before); err != nil {
+		t.Fatal(err)
+	}
+
+	state, err := LoadState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if state.Version != CurrentStateVersion {
+		t.Fatalf("loaded version = %d, want %d after migration", state.Version, CurrentStateVersion)
+	}
+
+	backup := StateBackupPath(path, oldVersion)
+
+	got, err := os.ReadFile(backup)
+	if err != nil {
+		t.Fatalf("backup not written at %s: %v", backup, err)
+	}
+
+	if !bytes.Equal(got, before) {
+		t.Errorf("backup content = %q, want the pre-migration bytes %q", got, before)
+	}
+
+	// The backup must hold the OLD version, not the migrated one.
+	var backedUp State
+	if err := json.Unmarshal(got, &backedUp); err != nil {
+		t.Fatal(err)
+	}
+
+	if backedUp.Version != oldVersion {
+		t.Errorf("backup version = %d, want %d (pre-migration)", backedUp.Version, oldVersion)
+	}
+}
+
+func TestLoadStateNoBackupWhenCurrent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+
+	data := oldStateData(t, CurrentStateVersion)
+	if err := writeFileAtomic(path, data); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := LoadState(path); err != nil {
+		t.Fatal(err)
+	}
+
+	if backups := ListStateBackups(path); len(backups) != 0 {
+		t.Errorf("no backup expected when state is already current, got %v", backups)
+	}
+}
+
+func TestLoadStateNoBackupWhenMissing(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+
+	if _, err := LoadState(path); err != nil {
+		t.Fatal(err)
+	}
+
+	if backups := ListStateBackups(path); len(backups) != 0 {
+		t.Errorf("no backup expected for a missing state file, got %v", backups)
+	}
+}
+
+func TestLoadStateReplacesStaleBackup(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+
+	// A leftover backup from an earlier migration.
+	staleVersion := CurrentStateVersion - 3
+	stale := StateBackupPath(path, staleVersion)
+
+	if err := writeFileAtomic(stale, []byte(`{"version":1,"stale":true}`)); err != nil {
+		t.Fatal(err)
+	}
+
+	oldVersion := CurrentStateVersion - 1
+	if err := writeFileAtomic(path, oldStateData(t, oldVersion)); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := LoadState(path); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Errorf("stale backup %s should have been removed, stat err = %v", stale, err)
+	}
+
+	backups := ListStateBackups(path)
+	if len(backups) != 1 {
+		t.Fatalf("want exactly one backup after migration, got %v", backups)
+	}
+
+	if backups[0] != StateBackupPath(path, oldVersion) {
+		t.Errorf("kept backup = %s, want %s", backups[0], StateBackupPath(path, oldVersion))
+	}
+}
+
+func TestLoadStateBackupCrashSafe(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+
+	oldVersion := CurrentStateVersion - 1
+	if err := writeFileAtomic(path, oldStateData(t, oldVersion)); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := LoadState(path); err != nil {
+		t.Fatal(err)
+	}
+
+	// atomicfile must leave no stray temp files behind in the data dir.
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".tmp-") {
+			t.Errorf("stray temp file left behind: %s", e.Name())
+		}
+	}
+}
+
+func TestListStateBackupsMatching(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+
+	// Files that should be recognised as backups...
+	good := []string{
+		StateBackupPath(path, 0),
+		StateBackupPath(path, 16),
+	}
+	// ...and files that should not.
+	bad := []string{
+		filepath.Join(dir, "state.json"),
+		filepath.Join(dir, "state.json.bak"),      // no version segment
+		filepath.Join(dir, "state.json.vfoo.bak"), // non-numeric
+		filepath.Join(dir, "state.json.v16.txt"),  // wrong suffix
+		filepath.Join(dir, "other.json.v1.bak"),   // different base
+	}
+
+	for _, p := range append(append([]string{}, good...), bad...) {
+		if err := writeFileAtomic(p, []byte("x")); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got := ListStateBackups(path)
+	if len(got) != len(good) {
+		t.Fatalf("ListStateBackups = %v, want %v", got, good)
+	}
+
+	for i, want := range good {
+		if got[i] != want {
+			t.Errorf("backup[%d] = %s, want %s", i, got[i], want)
+		}
 	}
 }
