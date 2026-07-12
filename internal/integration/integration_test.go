@@ -36,13 +36,15 @@ func setup(t *testing.T, mutators ...func(*config.Config)) *testEnv {
 	tmpDir := t.TempDir()
 
 	repo := filepath.Join(tmpDir, "repo")
-	os.MkdirAll(repo, 0o750)
+	_ = os.MkdirAll(repo, 0o750)
 	gitRun(t, repo, "init", "-b", "main")
 	gitRun(t, repo, "commit", "--allow-empty", "-m", "init")
 
 	// Use /tmp for the socket to stay under macOS 104-byte path limit.
 	socketDir, _ := os.MkdirTemp("/tmp", "graith-test-*")
-	t.Cleanup(func() { os.RemoveAll(socketDir) })
+
+	t.Cleanup(func() { _ = os.RemoveAll(socketDir) })
+
 	socketPath := filepath.Join(socketDir, "gr.sock")
 	paths := config.Paths{
 		SocketPath: socketPath,
@@ -54,8 +56,8 @@ func setup(t *testing.T, mutators ...func(*config.Config)) *testEnv {
 
 		HumanTokenFile: filepath.Join(tmpDir, "data", "human.token"),
 	}
-	os.MkdirAll(paths.LogDir, 0o750)
-	os.MkdirAll(paths.DataDir, 0o750)
+	_ = os.MkdirAll(paths.LogDir, 0o750)
+	_ = os.MkdirAll(paths.DataDir, 0o750)
 
 	cfg := config.Default()
 	cfg.FetchOnCreate = false
@@ -83,17 +85,20 @@ func setup(t *testing.T, mutators ...func(*config.Config)) *testEnv {
 	if err := sm.EnsureHumanToken(); err != nil {
 		t.Fatalf("ensure human token: %v", err)
 	}
+
 	tokenBytes, err := os.ReadFile(paths.HumanTokenFile)
 	if err != nil {
 		t.Fatalf("read human token: %v", err)
 	}
+
 	integHumanToken = strings.TrimSpace(string(tokenBytes))
 
 	msgStore, err := daemon.NewMsgStore(paths.MessagesDB)
 	if err != nil {
 		t.Fatalf("open message store: %v", err)
 	}
-	t.Cleanup(func() { msgStore.Close() })
+
+	t.Cleanup(func() { _ = msgStore.Close() })
 	sm.SetMsgStore(msgStore)
 
 	l, err := net.Listen("unix", socketPath)
@@ -102,10 +107,11 @@ func setup(t *testing.T, mutators ...func(*config.Config)) *testEnv {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+
 	srv := daemon.NewServer(l, func(ctx context.Context, conn net.Conn) {
 		daemon.HandleConnection(ctx, conn, daemon.ConnOrigin{}, sm, log)
 	}, log)
-	go srv.Serve(ctx)
+	go func() { _ = srv.Serve(ctx) }()
 	go sm.RunDetectionLoop(ctx)
 	go sm.RunTriggerLoop(ctx)
 	go sm.RunFileWatchLoop(ctx)
@@ -115,9 +121,11 @@ func setup(t *testing.T, mutators ...func(*config.Config)) *testEnv {
 
 func (e *testEnv) teardown() {
 	e.cancel()
+
 	for _, c := range e.conns {
-		c.Close()
+		_ = c.Close()
 	}
+
 	e.srv.Shutdown()
 	// Stop all sessions and wait for their exit watchers to finish. Without
 	// this, a watcher launched on session exit can still be writing state or
@@ -129,11 +137,14 @@ func (e *testEnv) teardown() {
 
 func (e *testEnv) connect(t *testing.T) (*protocol.FrameReader, *protocol.FrameWriter) {
 	t.Helper()
+
 	conn, err := net.Dial("unix", e.socket)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
+
 	e.conns = append(e.conns, conn)
+
 	return protocol.NewFrameReader(conn), protocol.NewFrameWriter(conn)
 }
 
@@ -145,10 +156,12 @@ var integHumanToken string
 
 func sendControl(t *testing.T, w *protocol.FrameWriter, msgType string, payload any) {
 	t.Helper()
+
 	data, err := protocol.EncodeControlWithToken(msgType, payload, integHumanToken)
 	if err != nil {
 		t.Fatalf("encode %s: %v", msgType, err)
 	}
+
 	if err := w.WriteFrame(protocol.ChannelControl, data); err != nil {
 		t.Fatalf("write %s: %v", msgType, err)
 	}
@@ -156,16 +169,19 @@ func sendControl(t *testing.T, w *protocol.FrameWriter, msgType string, payload 
 
 func readControl(t *testing.T, r *protocol.FrameReader) protocol.Envelope {
 	t.Helper()
+
 	for {
 		frame, err := r.ReadFrame()
 		if err != nil {
 			t.Fatalf("read frame: %v", err)
 		}
+
 		if frame.Channel == protocol.ChannelControl {
 			env, err := protocol.DecodeControl(frame.Payload)
 			if err != nil {
 				t.Fatalf("decode control: %v", err)
 			}
+
 			return env
 		}
 	}
@@ -176,6 +192,7 @@ func handshake(t *testing.T, r *protocol.FrameReader, w *protocol.FrameWriter) {
 	sendControl(t, w, "handshake", protocol.HandshakeMsg{
 		Version: "1.0", ClientID: "test", TerminalSize: [2]uint16{80, 24},
 	})
+
 	resp := readControl(t, r)
 	if resp.Type != "handshake_ok" {
 		t.Fatalf("expected handshake_ok, got %s", resp.Type)
@@ -184,8 +201,10 @@ func handshake(t *testing.T, r *protocol.FrameReader, w *protocol.FrameWriter) {
 
 func gitRun(t *testing.T, dir string, args ...string) {
 	t.Helper()
+
 	cmd := testutil.GitCommand(args...)
 	cmd.Dir = dir
+
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
@@ -202,35 +221,46 @@ func TestCreateAndList(t *testing.T) {
 	sendControl(t, w, "create", protocol.CreateMsg{
 		Name: "braw", Agent: "echo", RepoPath: env.repo, Base: "main",
 	})
+
 	resp := readControl(t, r)
 	if resp.Type == "error" {
 		var e protocol.ErrorMsg
-		protocol.DecodePayload(resp, &e)
+
+		_ = protocol.DecodePayload(resp, &e)
 		t.Fatalf("create error: %s", e.Message)
 	}
+
 	if resp.Type != "created" {
 		t.Fatalf("expected created, got %s", resp.Type)
 	}
 
 	var info protocol.SessionInfo
-	protocol.DecodePayload(resp, &info)
+
+	_ = protocol.DecodePayload(resp, &info)
+
 	if info.Name != "braw" {
 		t.Errorf("name = %q, want %q", info.Name, "braw")
 	}
+
 	if info.Agent != "echo" {
 		t.Errorf("agent = %q, want %q", info.Agent, "echo")
 	}
+
 	if info.Status != "running" {
 		t.Errorf("status = %q, want %q", info.Status, "running")
 	}
 
 	sendControl(t, w, "list", struct{}{})
 	listResp := readControl(t, r)
+
 	var list protocol.SessionListMsg
-	protocol.DecodePayload(listResp, &list)
+
+	_ = protocol.DecodePayload(listResp, &list)
+
 	if len(list.Sessions) != 1 {
 		t.Fatalf("expected 1 session, got %d", len(list.Sessions))
 	}
+
 	if list.Sessions[0].Name != "braw" {
 		t.Errorf("list name = %q, want %q", list.Sessions[0].Name, "braw")
 	}
@@ -246,21 +276,27 @@ func TestCreateNoRepo(t *testing.T) {
 	sendControl(t, w, "create", protocol.CreateMsg{
 		Name: "kirk", Agent: "echo", NoRepo: true,
 	})
+
 	resp := readControl(t, r)
 	if resp.Type == "error" {
 		var e protocol.ErrorMsg
-		protocol.DecodePayload(resp, &e)
+
+		_ = protocol.DecodePayload(resp, &e)
 		t.Fatalf("create error: %s", e.Message)
 	}
 
 	var info protocol.SessionInfo
-	protocol.DecodePayload(resp, &info)
+
+	_ = protocol.DecodePayload(resp, &info)
+
 	if info.Name != "kirk" {
 		t.Errorf("name = %q, want %q", info.Name, "kirk")
 	}
+
 	if info.RepoName != "" {
 		t.Errorf("repo_name = %q, want empty", info.RepoName)
 	}
+
 	if info.Branch != "" {
 		t.Errorf("branch = %q, want empty", info.Branch)
 	}
@@ -276,6 +312,7 @@ func TestCreateWithoutRepoFails(t *testing.T) {
 	sendControl(t, w, "create", protocol.CreateMsg{
 		Name: "fash", Agent: "echo", RepoPath: env.tmpDir,
 	})
+
 	resp := readControl(t, r)
 	if resp.Type != "error" {
 		t.Fatalf("expected error for non-git dir, got %s", resp.Type)
@@ -293,15 +330,19 @@ func TestStopAndResume(t *testing.T) {
 		Name: "bide", Agent: "echo", RepoPath: env.repo, Base: "main",
 	})
 	createResp := readControl(t, r)
+
 	var info protocol.SessionInfo
-	protocol.DecodePayload(createResp, &info)
+
+	_ = protocol.DecodePayload(createResp, &info)
 	sessionID := info.ID
 
 	sendControl(t, w, "stop", protocol.StopMsg{SessionID: sessionID})
+
 	stopResp := readControl(t, r)
 	if stopResp.Type == "error" {
 		var e protocol.ErrorMsg
-		protocol.DecodePayload(stopResp, &e)
+
+		_ = protocol.DecodePayload(stopResp, &e)
 		t.Fatalf("stop error: %s", e.Message)
 	}
 
@@ -309,8 +350,11 @@ func TestStopAndResume(t *testing.T) {
 
 	sendControl(t, w, "list", struct{}{})
 	listResp := readControl(t, r)
+
 	var list protocol.SessionListMsg
-	protocol.DecodePayload(listResp, &list)
+
+	_ = protocol.DecodePayload(listResp, &list)
+
 	for _, s := range list.Sessions {
 		if s.ID == sessionID && s.Status != "stopped" {
 			t.Errorf("expected stopped, got %s", s.Status)
@@ -318,15 +362,19 @@ func TestStopAndResume(t *testing.T) {
 	}
 
 	sendControl(t, w, "resume", protocol.ResumeMsg{SessionID: sessionID})
+
 	resumeResp := readControl(t, r)
 	if resumeResp.Type == "error" {
 		var e protocol.ErrorMsg
-		protocol.DecodePayload(resumeResp, &e)
+
+		_ = protocol.DecodePayload(resumeResp, &e)
 		t.Fatalf("resume error: %s", e.Message)
 	}
 
 	var resumed protocol.SessionInfo
-	protocol.DecodePayload(resumeResp, &resumed)
+
+	_ = protocol.DecodePayload(resumeResp, &resumed)
+
 	if resumed.Status != "running" {
 		t.Errorf("resumed status = %q, want %q", resumed.Status, "running")
 	}
@@ -343,26 +391,33 @@ func TestResumeInvalidatesPreviousSessionToken(t *testing.T) {
 		Name: "bide-token", Agent: "echo", RepoPath: env.repo, Base: "main",
 	})
 	createResp := readControl(t, r)
+
 	var info protocol.SessionInfo
-	protocol.DecodePayload(createResp, &info)
+
+	_ = protocol.DecodePayload(createResp, &info)
 
 	created, ok := env.sm.Get(info.ID)
 	if !ok {
 		t.Fatalf("created session %q not found", info.ID)
 	}
+
 	oldToken := created.Token
 
 	sendControl(t, w, "stop", protocol.StopMsg{SessionID: info.ID})
+
 	if resp := readControl(t, r); resp.Type == "error" {
 		var e protocol.ErrorMsg
-		protocol.DecodePayload(resp, &e)
+
+		_ = protocol.DecodePayload(resp, &e)
 		t.Fatalf("stop error: %s", e.Message)
 	}
 
 	sendControl(t, w, "resume", protocol.ResumeMsg{SessionID: info.ID})
+
 	if resp := readControl(t, r); resp.Type == "error" {
 		var e protocol.ErrorMsg
-		protocol.DecodePayload(resp, &e)
+
+		_ = protocol.DecodePayload(resp, &e)
 		t.Fatalf("resume error: %s", e.Message)
 	}
 
@@ -370,12 +425,15 @@ func TestResumeInvalidatesPreviousSessionToken(t *testing.T) {
 	if !ok {
 		t.Fatalf("resumed session %q not found", info.ID)
 	}
+
 	if resumed.Token == "" || resumed.Token == oldToken {
 		t.Fatalf("token was not rotated: old=%q new=%q", oldToken, resumed.Token)
 	}
+
 	if got := env.sm.SessionForToken(oldToken); got != "" {
 		t.Errorf("pre-resume token resolves to %q, want rejected", got)
 	}
+
 	if got := env.sm.SessionForToken(resumed.Token); got != info.ID {
 		t.Errorf("new token resolves to %q, want %q", got, info.ID)
 	}
@@ -392,30 +450,40 @@ func TestRename(t *testing.T) {
 		Name: "auld", Agent: "echo", RepoPath: env.repo, Base: "main",
 	})
 	createResp := readControl(t, r)
+
 	var info protocol.SessionInfo
-	protocol.DecodePayload(createResp, &info)
+
+	_ = protocol.DecodePayload(createResp, &info)
 
 	sendControl(t, w, "rename", protocol.RenameMsg{SessionID: info.ID, NewName: "bonnie"})
+
 	renameResp := readControl(t, r)
 	if renameResp.Type == "error" {
 		var e protocol.ErrorMsg
-		protocol.DecodePayload(renameResp, &e)
+
+		_ = protocol.DecodePayload(renameResp, &e)
 		t.Fatalf("rename error: %s", e.Message)
 	}
 
 	sendControl(t, w, "list", struct{}{})
 	listResp := readControl(t, r)
+
 	var list protocol.SessionListMsg
-	protocol.DecodePayload(listResp, &list)
+
+	_ = protocol.DecodePayload(listResp, &list)
+
 	found := false
+
 	for _, s := range list.Sessions {
 		if s.ID == info.ID {
 			found = true
+
 			if s.Name != "bonnie" {
 				t.Errorf("name = %q, want %q", s.Name, "bonnie")
 			}
 		}
 	}
+
 	if !found {
 		t.Error("session not found after rename")
 	}
@@ -432,21 +500,28 @@ func TestDelete(t *testing.T) {
 		Name: "dreich", Agent: "echo", RepoPath: env.repo, Base: "main",
 	})
 	createResp := readControl(t, r)
+
 	var info protocol.SessionInfo
-	protocol.DecodePayload(createResp, &info)
+
+	_ = protocol.DecodePayload(createResp, &info)
 
 	sendControl(t, w, "delete", protocol.DeleteMsg{SessionID: info.ID})
+
 	delResp := readControl(t, r)
 	if delResp.Type == "error" {
 		var e protocol.ErrorMsg
-		protocol.DecodePayload(delResp, &e)
+
+		_ = protocol.DecodePayload(delResp, &e)
 		t.Fatalf("delete error: %s", e.Message)
 	}
 
 	sendControl(t, w, "list", struct{}{})
 	listResp := readControl(t, r)
+
 	var list protocol.SessionListMsg
-	protocol.DecodePayload(listResp, &list)
+
+	_ = protocol.DecodePayload(listResp, &list)
+
 	if len(list.Sessions) != 0 {
 		t.Errorf("expected 0 sessions after delete, got %d", len(list.Sessions))
 	}
@@ -463,18 +538,22 @@ func TestDeleteNoRepoCleansScratchDir(t *testing.T) {
 		Name: "skelf", Agent: "echo", NoRepo: true,
 	})
 	createResp := readControl(t, r)
+
 	var info protocol.SessionInfo
-	protocol.DecodePayload(createResp, &info)
+
+	_ = protocol.DecodePayload(createResp, &info)
 
 	scratchDir := filepath.Join(env.tmpDir, "data", "scratch", info.ID)
 
 	// A default (soft) delete preserves the scratch dir for the recovery window;
 	// only a purge (hard delete) reclaims it. Purge here to assert teardown.
 	sendControl(t, w, "delete", protocol.DeleteMsg{SessionID: info.ID, Purge: true})
+
 	delResp := readControl(t, r)
 	if delResp.Type == "error" {
 		var e protocol.ErrorMsg
-		protocol.DecodePayload(delResp, &e)
+
+		_ = protocol.DecodePayload(delResp, &e)
 		t.Fatalf("delete error: %s", e.Message)
 	}
 
@@ -496,20 +575,26 @@ func TestSoftDeletePreservesAndRestores(t *testing.T) {
 	sendControl(t, w, "create", protocol.CreateMsg{
 		Name: "bide", Agent: "echo", NoRepo: true,
 	})
+
 	var info protocol.SessionInfo
-	protocol.DecodePayload(readControl(t, r), &info)
+
+	_ = protocol.DecodePayload(readControl(t, r), &info)
 
 	scratchDir := filepath.Join(env.tmpDir, "data", "scratch", info.ID)
 
 	// Soft delete: hidden from the live list, scratch preserved.
 	sendControl(t, w, "delete", protocol.DeleteMsg{SessionID: info.ID})
+
 	if resp := readControl(t, r); resp.Type == "error" {
 		t.Fatalf("soft delete failed: %v", resp)
 	}
 
 	sendControl(t, w, "list", struct{}{})
+
 	var live protocol.SessionListMsg
-	protocol.DecodePayload(readControl(t, r), &live)
+
+	_ = protocol.DecodePayload(readControl(t, r), &live)
+
 	if len(live.Sessions) != 0 {
 		t.Errorf("soft-deleted session should be hidden from live list, got %d", len(live.Sessions))
 	}
@@ -520,27 +605,35 @@ func TestSoftDeletePreservesAndRestores(t *testing.T) {
 
 	// It shows up in the deleted list.
 	sendControl(t, w, "list", protocol.ListMsg{Deleted: true})
+
 	var deleted protocol.SessionListMsg
-	protocol.DecodePayload(readControl(t, r), &deleted)
+
+	_ = protocol.DecodePayload(readControl(t, r), &deleted)
+
 	if len(deleted.Sessions) != 1 || deleted.Sessions[0].ID != info.ID {
 		t.Fatalf("expected soft-deleted session in --deleted list, got %+v", deleted.Sessions)
 	}
 
 	// Restore: back in the live list.
 	sendControl(t, w, "restore", protocol.RestoreMsg{SessionID: info.ID})
+
 	if resp := readControl(t, r); resp.Type == "error" {
 		t.Fatalf("restore failed: %v", resp)
 	}
 
 	sendControl(t, w, "list", struct{}{})
+
 	var relive protocol.SessionListMsg
-	protocol.DecodePayload(readControl(t, r), &relive)
+
+	_ = protocol.DecodePayload(readControl(t, r), &relive)
+
 	if len(relive.Sessions) != 1 || relive.Sessions[0].ID != info.ID {
 		t.Errorf("restored session should be back in the live list, got %+v", relive.Sessions)
 	}
 
 	// Purge: gone for good, scratch reclaimed.
 	sendControl(t, w, "delete", protocol.DeleteMsg{SessionID: info.ID, Purge: true})
+
 	if resp := readControl(t, r); resp.Type == "error" {
 		t.Fatalf("purge failed: %v", resp)
 	}
@@ -560,10 +653,12 @@ func TestMessaging(t *testing.T) {
 	sendControl(t, w, "msg_pub", protocol.MsgPubMsg{
 		Stream: "blether", Body: "hello from test", SenderName: "test",
 	})
+
 	pubResp := readControl(t, r)
 	if pubResp.Type == "error" {
 		var e protocol.ErrorMsg
-		protocol.DecodePayload(pubResp, &e)
+
+		_ = protocol.DecodePayload(pubResp, &e)
 		t.Fatalf("pub error: %s", e.Message)
 	}
 
@@ -575,24 +670,29 @@ func TestMessaging(t *testing.T) {
 	sendControl(t, w, "msg_sub", protocol.MsgSubMsg{
 		Stream: "blether",
 	})
+
 	msg1 := readControl(t, r)
 	if msg1.Type != "msg_message" {
 		t.Fatalf("expected msg_message, got %s", msg1.Type)
 	}
+
 	msg2 := readControl(t, r)
 	if msg2.Type != "msg_message" {
 		t.Fatalf("expected msg_message, got %s", msg2.Type)
 	}
+
 	done := readControl(t, r)
 	if done.Type != "msg_done" {
 		t.Fatalf("expected msg_done, got %s", done.Type)
 	}
 
 	sendControl(t, w, "msg_topics", protocol.MsgTopicsMsg{})
+
 	topicsResp := readControl(t, r)
 	if topicsResp.Type == "error" {
 		var e protocol.ErrorMsg
-		protocol.DecodePayload(topicsResp, &e)
+
+		_ = protocol.DecodePayload(topicsResp, &e)
 		t.Fatalf("topics error: %s", e.Message)
 	}
 }
@@ -609,18 +709,23 @@ func TestMultipleSessions(t *testing.T) {
 			Name: fmt.Sprintf("croft-%c", rune('a'+i)), Agent: "echo",
 			RepoPath: env.repo, Base: "main",
 		})
+
 		resp := readControl(t, r)
 		if resp.Type == "error" {
 			var e protocol.ErrorMsg
-			protocol.DecodePayload(resp, &e)
+
+			_ = protocol.DecodePayload(resp, &e)
 			t.Fatalf("create %d error: %s", i, e.Message)
 		}
 	}
 
 	sendControl(t, w, "list", struct{}{})
 	listResp := readControl(t, r)
+
 	var list protocol.SessionListMsg
-	protocol.DecodePayload(listResp, &list)
+
+	_ = protocol.DecodePayload(listResp, &list)
+
 	if len(list.Sessions) != 3 {
 		t.Errorf("expected 3 sessions, got %d", len(list.Sessions))
 	}
@@ -637,16 +742,22 @@ func TestResumeAlreadyRunning(t *testing.T) {
 		Name: "canny", Agent: "echo", RepoPath: env.repo, Base: "main",
 	})
 	createResp := readControl(t, r)
+
 	var info protocol.SessionInfo
-	protocol.DecodePayload(createResp, &info)
+
+	_ = protocol.DecodePayload(createResp, &info)
 
 	sendControl(t, w, "resume", protocol.ResumeMsg{SessionID: info.ID})
+
 	resumeResp := readControl(t, r)
 	if resumeResp.Type == "error" {
 		t.Fatal("resume of running session should succeed (no-op)")
 	}
+
 	var resumed protocol.SessionInfo
-	protocol.DecodePayload(resumeResp, &resumed)
+
+	_ = protocol.DecodePayload(resumeResp, &resumed)
+
 	if resumed.Status != "running" {
 		t.Errorf("status = %q, want running", resumed.Status)
 	}
@@ -660,6 +771,7 @@ func TestDeleteNonexistent(t *testing.T) {
 	handshake(t, r, w)
 
 	sendControl(t, w, "delete", protocol.DeleteMsg{SessionID: "nonexistent"})
+
 	resp := readControl(t, r)
 	if resp.Type != "error" {
 		t.Errorf("expected error for nonexistent delete, got %s", resp.Type)
@@ -674,6 +786,7 @@ func TestStopNonexistent(t *testing.T) {
 	handshake(t, r, w)
 
 	sendControl(t, w, "stop", protocol.StopMsg{SessionID: "nonexistent"})
+
 	resp := readControl(t, r)
 	if resp.Type != "error" {
 		t.Errorf("expected error for nonexistent stop, got %s", resp.Type)
@@ -691,21 +804,27 @@ func TestAttachAndDetach(t *testing.T) {
 		Name: "neep", Agent: "echo", RepoPath: env.repo, Base: "main",
 	})
 	createResp := readControl(t, r)
+
 	var info protocol.SessionInfo
-	protocol.DecodePayload(createResp, &info)
+
+	_ = protocol.DecodePayload(createResp, &info)
 
 	sendControl(t, w, "attach", protocol.AttachMsg{SessionID: info.ID})
+
 	attachResp := readControl(t, r)
 	if attachResp.Type == "error" {
 		var e protocol.ErrorMsg
-		protocol.DecodePayload(attachResp, &e)
+
+		_ = protocol.DecodePayload(attachResp, &e)
 		t.Fatalf("attach error: %s", e.Message)
 	}
+
 	if attachResp.Type != "attached" {
 		t.Fatalf("expected attached, got %s", attachResp.Type)
 	}
 
 	sendControl(t, w, "detach", struct{}{})
+
 	detachResp := readControl(t, r)
 	if detachResp.Type != "detached" {
 		t.Fatalf("expected detached, got %s", detachResp.Type)
@@ -723,10 +842,13 @@ func TestAttachKicksPreviousClient(t *testing.T) {
 		Name: "whin", Agent: "echo", RepoPath: env.repo, Base: "main",
 	})
 	createResp := readControl(t, r1)
+
 	var info protocol.SessionInfo
-	protocol.DecodePayload(createResp, &info)
+
+	_ = protocol.DecodePayload(createResp, &info)
 
 	sendControl(t, w1, "attach", protocol.AttachMsg{SessionID: info.ID})
+
 	attachResp := readControl(t, r1)
 	if attachResp.Type != "attached" {
 		t.Fatalf("expected attached, got %s", attachResp.Type)
@@ -740,8 +862,11 @@ func TestAttachKicksPreviousClient(t *testing.T) {
 	if kickResp.Type != "detached" {
 		t.Fatalf("expected old client to get detached, got %s", kickResp.Type)
 	}
+
 	var d protocol.DetachedMsg
-	protocol.DecodePayload(kickResp, &d)
+
+	_ = protocol.DecodePayload(kickResp, &d)
+
 	if d.Reason != "replaced" {
 		t.Errorf("detach reason = %q, want %q", d.Reason, "replaced")
 	}
@@ -762,21 +887,27 @@ func TestTypeDeliversInput(t *testing.T) {
 	sendControl(t, w, "create", protocol.CreateMsg{
 		Name: "speir", Agent: "echo", RepoPath: env.repo, Base: "main",
 	})
+
 	createResp := readControl(t, r)
 	if createResp.Type == "error" {
 		var e protocol.ErrorMsg
-		protocol.DecodePayload(createResp, &e)
+
+		_ = protocol.DecodePayload(createResp, &e)
 		t.Fatalf("create error: %s", e.Message)
 	}
+
 	var info protocol.SessionInfo
-	protocol.DecodePayload(createResp, &info)
+
+	_ = protocol.DecodePayload(createResp, &info)
 
 	// Wait for the echo agent ("echo 'ready'; exec cat") to start.
 	ptySess, ok := env.sm.GetPTY(info.ID)
 	if !ok {
 		t.Fatal("PTY session not found")
 	}
+
 	ready := false
+
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if tail, err := ptySess.Scrollback.TailBytes(4096); err == nil {
@@ -785,8 +916,10 @@ func TestTypeDeliversInput(t *testing.T) {
 				break
 			}
 		}
+
 		time.Sleep(50 * time.Millisecond)
 	}
+
 	if !ready {
 		t.Fatal("timed out waiting for echo agent to become ready")
 	}
@@ -796,18 +929,22 @@ func TestTypeDeliversInput(t *testing.T) {
 		SessionID: info.ID,
 		Input:     "hello-from-speir",
 	})
+
 	typeResp := readControl(t, r)
 	if typeResp.Type == "error" {
 		var e protocol.ErrorMsg
-		protocol.DecodePayload(typeResp, &e)
+
+		_ = protocol.DecodePayload(typeResp, &e)
 		t.Fatalf("type error: %s", e.Message)
 	}
+
 	if typeResp.Type != "typed" {
 		t.Fatalf("expected typed, got %s", typeResp.Type)
 	}
 
 	// Verify the text appears in the scrollback (echoed by cat).
 	found := false
+
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if tail, err := ptySess.Scrollback.TailBytes(4096); err == nil {
@@ -816,8 +953,10 @@ func TestTypeDeliversInput(t *testing.T) {
 				break
 			}
 		}
+
 		time.Sleep(50 * time.Millisecond)
 	}
+
 	if !found {
 		t.Error("typed text not found in scrollback — input was not delivered to the session")
 	}
@@ -835,20 +974,26 @@ func TestTypeWakesSleepingAgent(t *testing.T) {
 	sendControl(t, w, "create", protocol.CreateMsg{
 		Name: "bothy", Agent: "sleeper", NoRepo: true,
 	})
+
 	createResp := readControl(t, r)
 	if createResp.Type == "error" {
 		var e protocol.ErrorMsg
-		protocol.DecodePayload(createResp, &e)
+
+		_ = protocol.DecodePayload(createResp, &e)
 		t.Fatalf("create error: %s", e.Message)
 	}
+
 	var info protocol.SessionInfo
-	protocol.DecodePayload(createResp, &info)
+
+	_ = protocol.DecodePayload(createResp, &info)
 
 	ptySess, ok := env.sm.GetPTY(info.ID)
 	if !ok {
 		t.Fatal("PTY session not found")
 	}
+
 	ready := false
+
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if tail, err := ptySess.Scrollback.TailBytes(4096); err == nil {
@@ -857,8 +1002,10 @@ func TestTypeWakesSleepingAgent(t *testing.T) {
 				break
 			}
 		}
+
 		time.Sleep(50 * time.Millisecond)
 	}
+
 	if !ready {
 		t.Fatal("timed out waiting for sleeper agent to become ready")
 	}
@@ -867,6 +1014,7 @@ func TestTypeWakesSleepingAgent(t *testing.T) {
 		SessionID: info.ID,
 		Input:     "bothy-input",
 	})
+
 	typeResp := readControl(t, r)
 	if typeResp.Type != "typed" {
 		t.Fatalf("expected typed, got %s", typeResp.Type)
@@ -875,6 +1023,7 @@ func TestTypeWakesSleepingAgent(t *testing.T) {
 	// The sleeper only reads stdin in its SIGWINCH trap. If the Poke
 	// didn't send SIGWINCH, the input would never appear in output.
 	found := false
+
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if tail, err := ptySess.Scrollback.TailBytes(4096); err == nil {
@@ -883,8 +1032,10 @@ func TestTypeWakesSleepingAgent(t *testing.T) {
 				break
 			}
 		}
+
 		time.Sleep(50 * time.Millisecond)
 	}
+
 	if !found {
 		t.Error("sleeper agent did not read input — SIGWINCH poke failed to wake the process")
 	}
@@ -910,15 +1061,19 @@ func TestTypeExitedSessionFails(t *testing.T) {
 		Name: "haar", Agent: "echo", RepoPath: env.repo, Base: "main",
 	})
 	createResp := readControl(t, r)
+
 	var info protocol.SessionInfo
-	protocol.DecodePayload(createResp, &info)
+
+	_ = protocol.DecodePayload(createResp, &info)
 
 	// Stop the session so the process exits.
 	sendControl(t, w, "stop", protocol.StopMsg{SessionID: info.ID})
+
 	stopResp := readControl(t, r)
 	if stopResp.Type == "error" {
 		var e protocol.ErrorMsg
-		protocol.DecodePayload(stopResp, &e)
+
+		_ = protocol.DecodePayload(stopResp, &e)
 		t.Fatalf("stop error: %s", e.Message)
 	}
 
@@ -939,6 +1094,7 @@ func TestTypeExitedSessionFails(t *testing.T) {
 		SessionID: info.ID,
 		Input:     "fash",
 	})
+
 	typeResp := readControl(t, r)
 	if typeResp.Type != "error" {
 		t.Errorf("expected error for type into exited session, got %s", typeResp.Type)
@@ -955,6 +1111,7 @@ func TestUnknownAgent(t *testing.T) {
 	sendControl(t, w, "create", protocol.CreateMsg{
 		Name: "thrawn", Agent: "nonexistent-agent", RepoPath: env.repo, Base: "main",
 	})
+
 	resp := readControl(t, r)
 	if resp.Type != "error" {
 		t.Fatalf("expected error for unknown agent, got %s", resp.Type)
