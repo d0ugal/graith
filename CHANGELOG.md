@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.67.4](https://github.com/d0ugal/graith/compare/v0.67.3...v0.67.4) (2026-07-12)
+
+
+### Features
+
+* **daemon:** back up state.json before migrating it forward ([ed9c827](https://github.com/d0ugal/graith/commit/ed9c82766b4ebb3f581150f9796c1ea6d4d42a1b)), closes [#1065](https://github.com/d0ugal/graith/issues/1065)
+
+
+### Tests
+
+* **auth:** harden the tokenless liveness probe fix with follow-ups ([2384596](https://github.com/d0ugal/graith/commit/23845968cec1d53ba0f4ce6136bcd1cd87c5b890))
+* **daemon:** cover backup error paths and migration ordering ([b936a56](https://github.com/d0ugal/graith/commit/b936a569df03f5a37d233a838f21d9c9fbe7ba13))
+
+
+### Dependencies
+
+* **lint:** lint //go:build integration files in CI ([ee040f2](https://github.com/d0ugal/graith/commit/ee040f25e67ef45a22db870516a9f0300c2742a5))
+
 ## [0.67.3](https://github.com/d0ugal/graith/compare/v0.67.2...v0.67.3) (2026-07-12)
 
 
