@@ -1118,15 +1118,21 @@ func TestUnknownAgent(t *testing.T) {
 	}
 }
 
-// TestEnsureDaemonReachesFailClosedDaemon is the composed regression test for
-// PR #1066. The unit tests cover the two halves of the fix separately (the
-// daemon handshake exemption and the client probe's accept-error/present-token
-// behaviour); this drives the real client.EnsureDaemon against a real
-// HandleConnection running behind a Unix listener with a human token
-// provisioned — the exact interaction the v0.67.1 regression wedged. With the
-// fix, the probe recognises the live fail-closed daemon and returns its
-// connection; without it, EnsureDaemon would misread the auth reply as "no
-// daemon" and try (and, under go test, fail) to autostart a second one.
+// TestEnsureDaemonReachesFailClosedDaemon is the composed end-to-end regression
+// test for PR #1066: it drives the real client.EnsureDaemon against a real
+// HandleConnection running behind a Unix listener with a human token provisioned
+// — the exact cross-layer interaction the v0.67.1 regression wedged, which the
+// per-layer unit tests only exercise in halves.
+//
+// It validates the combined post-fix behaviour: the probe recognises the live
+// fail-closed daemon and returns its connection instead of trying (and, under
+// go test, failing) to autostart a doomed second one. It does NOT isolate either
+// half of the fix — the two protections are complementary, so with a human token
+// present the probe still passes if only one is removed (handshake_ok covers the
+// daemon exemption; error-as-alive covers the client side). Each half is locked
+// independently by the unit tests (TestHandshakeTokenlessLocalAllowedWithHumanToken
+// on the daemon, TestDaemonRespondsTrueOnAuthError on the client); this test
+// guards their end-to-end composition.
 func TestEnsureDaemonReachesFailClosedDaemon(t *testing.T) {
 	env := setup(t)
 	defer env.teardown()

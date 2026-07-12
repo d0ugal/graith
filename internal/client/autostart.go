@@ -45,11 +45,14 @@ var startDaemonFn = startDaemon
 func EnsureDaemon(paths config.Paths, configFile string) (net.Conn, error) {
 	sockPath := paths.SocketPath
 	// Present the caller's credential (session token or human token) in the
-	// probe so it passes the daemon's fail-closed local-auth gate, matching the
-	// real handshake and the other probes (probeDaemonVersion, doctor). Send the
-	// caller's profile too so a daemon on a non-default profile answers
-	// handshake_ok rather than a spurious handshake_err (which still counts as
-	// alive, but is noisier and diverges from the real handshake).
+	// probe, matching the real handshake and the other probes (probeDaemonVersion,
+	// doctor). A current daemon exempts the handshake from its fail-closed auth
+	// gate (PR #1066), so the token is not needed to reach one — but a pre-#1066
+	// daemon still auth-gates the handshake, so presenting it keeps the probe
+	// working against those versions during an upgrade. Send the caller's profile
+	// too so a daemon on a non-default profile answers handshake_ok rather than a
+	// spurious handshake_err (which still counts as alive, but is noisier and
+	// diverges from the real handshake).
 	token := resolveClientToken(paths)
 
 	if daemonResponds(sockPath, token, paths.Profile) {
@@ -82,11 +85,12 @@ func EnsureDaemon(paths config.Paths, configFile string) (net.Conn, error) {
 
 // daemonResponds reports whether a live graith daemon is listening on sockPath.
 // It dials with a short timeout and performs a throwaway handshake under a
-// deadline, presenting token and profile so it clears the daemon's fail-closed
-// local-auth gate and profile check. A socket that accepts the connection but
-// never completes a graith handshake — a stale socket from a stuck process, or
-// a non-graith server — is reported as not responding, so callers treat it as
-// stale instead of blocking on it forever.
+// deadline, presenting token and profile to match the real handshake (a current
+// daemon exempts the handshake from its auth gate, but a pre-#1066 daemon does
+// not, so the token keeps the probe working against those older versions). A
+// socket that accepts the connection but never completes a graith handshake — a
+// stale socket from a stuck process, or a non-graith server — is reported as not
+// responding, so callers treat it as stale instead of blocking on it forever.
 //
 // The reply type is matched against an explicit allowlist, NOT "any decodable
 // control frame": handshake_ok, handshake_err (a protocol-level rejection, e.g.
