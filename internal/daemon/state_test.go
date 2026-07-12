@@ -882,3 +882,100 @@ func TestListStateBackupsMatching(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadStateNoBackupOnCorruptedJSON(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+
+	// Invalid JSON is handled before the version/backup block: LoadState starts
+	// fresh and writes no backup. Documents (and guards) that deliberate order —
+	// the backup call must never move above the unmarshal.
+	if err := writeFileAtomic(path, []byte("not json")); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := LoadState(path); err != nil {
+		t.Fatal(err)
+	}
+
+	if backups := ListStateBackups(path); len(backups) != 0 {
+		t.Errorf("no backup expected for corrupted state, got %v", backups)
+	}
+}
+
+func TestLoadStateBackupFailureNonFatal(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+
+	oldVersion := CurrentStateVersion - 1
+	if err := writeFileAtomic(path, oldStateData(t, oldVersion)); err != nil {
+		t.Fatal(err)
+	}
+
+	// A read-only data dir lets LoadState read state.json but makes the sibling
+	// backup write fail (atomicfile can't create its temp file). LoadState must
+	// still migrate and return successfully — the backup is best-effort.
+	if err := os.Chmod(dir, 0o500); err != nil { //nolint:gosec // G302: read-only dir is the point of this failure test
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o750) }) //nolint:gosec // G302: restore perms so t.TempDir cleanup can traverse
+
+	state, err := LoadState(path)
+	if err != nil {
+		t.Fatalf("LoadState must not fail when the backup can't be written: %v", err)
+	}
+
+	if state.Version != CurrentStateVersion {
+		t.Errorf("version = %d, want %d — migration must still run", state.Version, CurrentStateVersion)
+	}
+
+	if s, ok := state.Sessions["braw1"]; !ok || s.Name != "auld-kirk" {
+		t.Error("session lost when backup failed")
+	}
+
+	if backups := ListStateBackups(path); len(backups) != 0 {
+		t.Errorf("no backup expected after a failed backup write, got %v", backups)
+	}
+}
+
+func TestLoadStateBackupPreservedWhenMigrationFails(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+
+	oldVersion := CurrentStateVersion - 1
+	before := oldStateData(t, oldVersion)
+
+	if err := writeFileAtomic(path, before); err != nil {
+		t.Fatal(err)
+	}
+
+	// Force the migration for this version to fail. Because the backup is
+	// written BEFORE migrateState runs, the pre-migration state must survive on
+	// disk even though LoadState starts fresh — this is the "rescue point if a
+	// forward migration corrupts state" guarantee, and it locks the ordering.
+	orig := migrations[oldVersion]
+	migrations[oldVersion] = func(*State) error { return errors.New("dreich migration") }
+
+	t.Cleanup(func() { migrations[oldVersion] = orig })
+
+	state, err := LoadState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A failed migration starts fresh (empty state at the current version).
+	if len(state.Sessions) != 0 {
+		t.Errorf("expected fresh empty state after failed migration, got %d sessions", len(state.Sessions))
+	}
+
+	// ...but the backup preserves the exact pre-migration bytes.
+	got, err := os.ReadFile(StateBackupPath(path, oldVersion))
+	if err != nil {
+		t.Fatalf("backup should survive a failed migration: %v", err)
+	}
+
+	if !bytes.Equal(got, before) {
+		t.Errorf("backup content = %q, want pre-migration bytes %q", got, before)
+	}
+}
