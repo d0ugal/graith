@@ -46,10 +46,13 @@ func EnsureDaemon(paths config.Paths, configFile string) (net.Conn, error) {
 	sockPath := paths.SocketPath
 	// Present the caller's credential (session token or human token) in the
 	// probe so it passes the daemon's fail-closed local-auth gate, matching the
-	// real handshake and the other probes (probeDaemonVersion, doctor).
+	// real handshake and the other probes (probeDaemonVersion, doctor). Send the
+	// caller's profile too so a daemon on a non-default profile answers
+	// handshake_ok rather than a spurious handshake_err (which still counts as
+	// alive, but is noisier and diverges from the real handshake).
 	token := resolveClientToken(paths)
 
-	if daemonResponds(sockPath, token) {
+	if daemonResponds(sockPath, token, paths.Profile) {
 		if conn, err := net.DialTimeout("unix", sockPath, daemonDialTimeout); err == nil {
 			return conn, nil
 		}
@@ -63,7 +66,7 @@ func EnsureDaemon(paths config.Paths, configFile string) (net.Conn, error) {
 	defer cancel()
 
 	for {
-		if daemonResponds(sockPath, token) {
+		if daemonResponds(sockPath, token, paths.Profile) {
 			if conn, err := net.DialTimeout("unix", sockPath, daemonDialTimeout); err == nil {
 				return conn, nil
 			}
@@ -79,19 +82,23 @@ func EnsureDaemon(paths config.Paths, configFile string) (net.Conn, error) {
 
 // daemonResponds reports whether a live graith daemon is listening on sockPath.
 // It dials with a short timeout and performs a throwaway handshake under a
-// deadline, presenting token so it clears the daemon's fail-closed local-auth
-// gate. A socket that accepts the connection but never completes a graith
-// handshake — a stale socket from a stuck process, or a non-graith server — is
-// reported as not responding, so callers treat it as stale instead of blocking
-// on it forever.
+// deadline, presenting token and profile so it clears the daemon's fail-closed
+// local-auth gate and profile check. A socket that accepts the connection but
+// never completes a graith handshake — a stale socket from a stuck process, or
+// a non-graith server — is reported as not responding, so callers treat it as
+// stale instead of blocking on it forever.
 //
-// Any decodable graith control reply proves a graith daemon is present, so
-// handshake_ok, handshake_err (a protocol-level rejection, e.g. profile or
-// version mismatch), and error (an auth rejection) all count as responding. A
-// non-graith server fails DecodeControl and is reported as not responding.
-// Accepting error is what keeps a tokenless probe from misreading a live,
-// auth-gating daemon as dead and triggering a doomed autostart.
-func daemonResponds(sockPath, token string) bool {
+// The reply type is matched against an explicit allowlist, NOT "any decodable
+// control frame": handshake_ok, handshake_err (a protocol-level rejection, e.g.
+// profile or version mismatch), and error (an auth rejection) each prove a live
+// graith daemon and count as responding. A non-graith server fails DecodeControl
+// and is reported as not responding. The allowlist is deliberately narrow — it
+// mirrors exactly the first-frame replies the daemon's handshake case can emit
+// (see internal/daemon/handler.go), so a stray/unexpected control type is still
+// treated as not-alive rather than masking a broken daemon. Accepting error is
+// what keeps a tokenless probe from misreading a live, auth-gating daemon as
+// dead and triggering a doomed autostart.
+func daemonResponds(sockPath, token, profile string) bool {
 	conn, err := net.DialTimeout("unix", sockPath, daemonDialTimeout)
 	if err != nil {
 		return false
@@ -106,6 +113,7 @@ func daemonResponds(sockPath, token string) bool {
 	hs := protocol.HandshakeMsg{
 		Version:  protocol.Version,
 		ClientID: fmt.Sprintf("probe-%d", os.Getpid()),
+		Profile:  profile,
 	}
 
 	var data []byte

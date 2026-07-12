@@ -241,6 +241,36 @@ func TestRemoteRoleNoneGateADenies(t *testing.T) {
 	}
 }
 
+// TestRemoteHandshakeUnaffectedByAuthGateExemption locks the invariant that makes
+// PR #1066's Fix A safe: the handshake auth-gate exemption
+// (`authErr != nil && msg.Type != "handshake"`) is a strict no-op on the remote
+// path. resolveAuth never returns a non-nil error for a remote connection (an
+// unpaired remote is roleNone with a nil error), so a remote tokenless handshake
+// must still get handshake_ok + auth_challenge — exactly as before the exemption
+// — even when a human token is provisioned (which a served daemon always has).
+// If a future refactor made resolveAuth error on the remote path, the exemption
+// would silently become load-bearing for remote; this test would catch that by
+// failing with a generic "error" frame instead of handshake_ok.
+func TestRemoteHandshakeUnaffectedByAuthGateExemption(t *testing.T) {
+	sm := newPairingSM(t)
+
+	sm.mu.Lock()
+	sm.humanToken = "human-thrawn"
+	sm.mu.Unlock()
+
+	rc := newRemoteConn(t, sm, TailnetIdentity{User: "speir@example.com", Node: "ben"})
+
+	rc.send(t, "handshake", protocol.HandshakeMsg{Version: protocol.Version, Profile: sm.paths.Profile}, "")
+
+	if env := rc.read(t); env.Type != "handshake_ok" {
+		t.Fatalf("remote tokenless handshake with a human token set: expected handshake_ok, got %q", env.Type)
+	}
+
+	if env := rc.read(t); env.Type != "auth_challenge" {
+		t.Fatalf("remote handshake: expected auth_challenge second frame, got %q", env.Type)
+	}
+}
+
 func TestApprovalSubscriberReceivesAndUnsubscribes(t *testing.T) {
 	sm := newPairingSM(t)
 	got := make(chan string, 4)
