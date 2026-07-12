@@ -3,6 +3,11 @@ version: "2"
 run:
   timeout: 5m
   go: "1.26.4"
+  # Compile and lint build-tagged files too (e.g. the //go:build integration
+  # test suite). Without this, golangci-lint skips them entirely and lint drift
+  # in the integration tests goes unnoticed in CI.
+  build-tags:
+    - integration
 
 linters:
   # Use fast linters for better performance

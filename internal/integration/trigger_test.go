@@ -37,12 +37,14 @@ func TestScheduleTriggerFires(t *testing.T) {
 		sendControl(t, w, "msg_sub", protocol.MsgSubMsg{Stream: "kirk"})
 
 		got := false
+
 		for {
 			resp := readControl(t, r)
 			if resp.Type == "msg_message" {
 				got = true
 				continue
 			}
+
 			if resp.Type == "msg_done" || resp.Type == "error" {
 				break
 			}
@@ -73,17 +75,20 @@ func TestTriggerListControl(t *testing.T) {
 	handshake(t, r, w)
 
 	sendControl(t, w, "trigger_list", protocol.TriggerListMsg{})
+
 	resp := readControl(t, r)
 	if resp.Type != "trigger_list" {
 		t.Fatalf("expected trigger_list, got %s", resp.Type)
 	}
 
 	var listResp protocol.TriggerListResponse
-	protocol.DecodePayload(resp, &listResp)
+
+	_ = protocol.DecodePayload(resp, &listResp)
 
 	if len(listResp.Triggers) != 1 || listResp.Triggers[0].Name != "canny-report" {
 		t.Fatalf("unexpected triggers: %+v", listResp.Triggers)
 	}
+
 	if listResp.Triggers[0].Source != "schedule" {
 		t.Errorf("source = %q, want schedule", listResp.Triggers[0].Source)
 	}
