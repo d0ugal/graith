@@ -157,6 +157,13 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 
 			switch msg.Type {
 			case "handshake":
+				// NOTE: the client's liveness probe (client.daemonResponds) treats a
+				// handshake reply as proof a graith daemon is present, but only for an
+				// explicit allowlist of first-frame reply types: handshake_ok,
+				// handshake_err, and the generic auth "error". If this case ever grows
+				// a new first-frame reply type, add it to that allowlist too, or the
+				// probe will misread a live daemon as dead and trigger a doomed
+				// autostart (the v0.67.1 regression fixed in PR #1066).
 				h, ok := decodePayload[protocol.HandshakeMsg](msg, sendControl, "invalid handshake")
 				if !ok {
 					continue

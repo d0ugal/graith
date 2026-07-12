@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/d0ugal/graith/internal/client"
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/daemon"
 	"github.com/d0ugal/graith/internal/protocol"
@@ -958,4 +959,63 @@ func TestUnknownAgent(t *testing.T) {
 	if resp.Type != "error" {
 		t.Fatalf("expected error for unknown agent, got %s", resp.Type)
 	}
+}
+
+// TestEnsureDaemonReachesFailClosedDaemon is the composed regression test for
+// PR #1066. The unit tests cover the two halves of the fix separately (the
+// daemon handshake exemption and the client probe's accept-error/present-token
+// behaviour); this drives the real client.EnsureDaemon against a real
+// HandleConnection running behind a Unix listener with a human token
+// provisioned — the exact interaction the v0.67.1 regression wedged. With the
+// fix, the probe recognises the live fail-closed daemon and returns its
+// connection; without it, EnsureDaemon would misread the auth reply as "no
+// daemon" and try (and, under go test, fail) to autostart a second one.
+func TestEnsureDaemonReachesFailClosedDaemon(t *testing.T) {
+	env := setup(t)
+	defer env.teardown()
+
+	// Isolate from any ambient session token so resolveClientToken exercises the
+	// human-token fallback (the human-CLI path).
+	t.Setenv("GRAITH_TOKEN", "")
+
+	// A served daemon always has a human token (setup provisions one), so this is
+	// the production shape of the regression.
+	t.Run("human token present", func(t *testing.T) {
+		paths := config.Paths{
+			SocketPath:     env.socket,
+			HumanTokenFile: filepath.Join(env.tmpDir, "data", "human.token"),
+		}
+
+		conn, err := client.EnsureDaemon(paths, "")
+		if err != nil {
+			t.Fatalf("EnsureDaemon against a live fail-closed daemon: %v", err)
+		}
+
+		if conn == nil {
+			t.Fatal("EnsureDaemon returned a nil connection for a live daemon")
+		}
+
+		_ = conn.Close()
+	})
+
+	// A sandboxed agent that can read neither GRAITH_TOKEN nor human.token probes
+	// tokenless. Fix A (handshake exempt from the auth gate) means the daemon
+	// still answers handshake_ok, so the probe reaches it rather than wedging.
+	t.Run("tokenless probe", func(t *testing.T) {
+		paths := config.Paths{
+			SocketPath:     env.socket,
+			HumanTokenFile: filepath.Join(env.tmpDir, "data", "absent.token"),
+		}
+
+		conn, err := client.EnsureDaemon(paths, "")
+		if err != nil {
+			t.Fatalf("tokenless EnsureDaemon against a live fail-closed daemon: %v", err)
+		}
+
+		if conn == nil {
+			t.Fatal("EnsureDaemon returned a nil connection for a live daemon")
+		}
+
+		_ = conn.Close()
+	})
 }

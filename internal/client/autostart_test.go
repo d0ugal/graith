@@ -214,7 +214,7 @@ func TestDaemonRespondsFalseWhenNothingListening(t *testing.T) {
 
 	sockPath := shortSockPath(t, "graith.sock")
 
-	if daemonResponds(sockPath, "") {
+	if daemonResponds(sockPath, "", "") {
 		t.Fatal("expected daemonResponds to be false when nothing is listening")
 	}
 }
@@ -237,7 +237,7 @@ func TestDaemonRespondsFalseOnStuckSocket(t *testing.T) {
 
 	start := time.Now()
 
-	if daemonResponds(sockPath, "") {
+	if daemonResponds(sockPath, "", "") {
 		t.Fatal("expected daemonResponds to be false for a socket that never replies")
 	}
 
@@ -264,7 +264,7 @@ func TestDaemonRespondsFalseOnForeignSocket(t *testing.T) {
 		_, _ = conn.Write([]byte("HTTP/1.1 200 OK\r\n\r\ngarbage"))
 	})
 
-	if daemonResponds(sockPath, "") {
+	if daemonResponds(sockPath, "", "") {
 		t.Fatal("expected daemonResponds to be false for a non-graith server")
 	}
 }
@@ -278,7 +278,7 @@ func TestDaemonRespondsTrueOnHandshakeOK(t *testing.T) {
 		writeHandshakeResponse(t, conn, "handshake_ok")
 	})
 
-	if !daemonResponds(sockPath, "") {
+	if !daemonResponds(sockPath, "", "") {
 		t.Fatal("expected daemonResponds to be true for a graith daemon replying handshake_ok")
 	}
 }
@@ -293,7 +293,7 @@ func TestDaemonRespondsTrueOnHandshakeErr(t *testing.T) {
 		writeHandshakeResponse(t, conn, "handshake_err")
 	})
 
-	if !daemonResponds(sockPath, "") {
+	if !daemonResponds(sockPath, "", "") {
 		t.Fatal("expected daemonResponds to be true for a daemon replying handshake_err")
 	}
 }
@@ -312,7 +312,7 @@ func TestDaemonRespondsTrueOnAuthError(t *testing.T) {
 		writeHandshakeResponse(t, conn, "error")
 	})
 
-	if !daemonResponds(sockPath, "") {
+	if !daemonResponds(sockPath, "", "") {
 		t.Fatal("expected daemonResponds to be true for a daemon replying error (auth rejection)")
 	}
 }
@@ -349,7 +349,7 @@ func TestDaemonRespondsSendsToken(t *testing.T) {
 		_ = writer.WriteFrame(protocol.ChannelControl, data)
 	})
 
-	if !daemonResponds(sockPath, "human-braw") {
+	if !daemonResponds(sockPath, "human-braw", "") {
 		t.Fatal("expected daemonResponds to be true when the daemon replies handshake_ok")
 	}
 
@@ -357,6 +357,60 @@ func TestDaemonRespondsSendsToken(t *testing.T) {
 	case tok := <-gotToken:
 		if tok != "human-braw" {
 			t.Fatalf("probe presented token %q, want %q", tok, "human-braw")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("daemon never received the probe handshake")
+	}
+}
+
+func TestDaemonRespondsSendsProfile(t *testing.T) {
+	shortenHandshakeTimeout(t, 2*time.Second)
+
+	sockPath := shortSockPath(t, "kirk.sock")
+
+	gotProfile := make(chan string, 1)
+
+	// The daemon records the profile the probe presents in its handshake, then
+	// replies handshake_ok. A daemon on a non-default profile checks this field,
+	// so the probe must forward it to get handshake_ok instead of a spurious
+	// handshake_err.
+	serveHandshake(t, sockPath, func(conn net.Conn) {
+		reader := protocol.NewFrameReader(conn)
+		writer := protocol.NewFrameWriter(conn)
+
+		frame, err := reader.ReadFrame()
+		if err != nil {
+			return
+		}
+
+		env, err := protocol.DecodeControl(frame.Payload)
+		if err != nil {
+			return
+		}
+
+		var hs protocol.HandshakeMsg
+		if err := protocol.DecodePayload(env, &hs); err != nil {
+			return
+		}
+
+		gotProfile <- hs.Profile
+
+		data, err := protocol.EncodeControl("handshake_ok", protocol.HandshakeOkMsg{Version: protocol.Version})
+		if err != nil {
+			return
+		}
+
+		_ = writer.WriteFrame(protocol.ChannelControl, data)
+	})
+
+	if !daemonResponds(sockPath, "", "bothy") {
+		t.Fatal("expected daemonResponds to be true when the daemon replies handshake_ok")
+	}
+
+	select {
+	case prof := <-gotProfile:
+		if prof != "bothy" {
+			t.Fatalf("probe presented profile %q, want %q", prof, "bothy")
 		}
 	case <-time.After(time.Second):
 		t.Fatal("daemon never received the probe handshake")
