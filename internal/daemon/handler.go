@@ -1417,7 +1417,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 
 				// Read frames from proxy and write to MCP server stdin.
 				func() {
-					defer sm.mcpManager.Disconnect(proxyID)
+					defer sm.mcpManager.Disconnect(proxyID, proc)
 
 					for {
 						f, err := reader.ReadFrame()
