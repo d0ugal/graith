@@ -68,3 +68,27 @@ disabled = true    # disable for this agent
 [agents.codex.mcp_servers.extra-tools]
 command = "/path/to/extra-tools"
 ```
+
+## Managing MCP servers
+
+The daemon supervises one MCP server process per proxy connection, started
+lazily when a session first connects. Because these processes are daemon-owned,
+you can inspect and control them without touching the agents themselves:
+
+```bash
+# List configured servers with sandbox state, source, live connections, uptime
+gr mcp list
+
+# Restart a server: stops its running processes so proxies reconnect and the
+# daemon starts fresh ones with the current config (no session restart needed)
+gr mcp restart my-tools
+
+# Show a server's captured stderr (one section per proxy connection)
+gr mcp logs my-tools
+gr mcp logs my-tools -n 50
+```
+
+Each server's stderr is captured to `<state-dir>/mcp/<name>-<proxy-id>.log`;
+`gr mcp logs` reads those files. `gr mcp list` and `gr mcp logs` are read-only.
+`gr mcp restart` is a management action, restricted to the human, the
+orchestrator, or its descendant sessions.

@@ -68,6 +68,9 @@ var remoteMessagePolicy = map[string]remotePolicy{
 	"trigger_status":   remoteHumanRW,
 	"trigger_run":      remoteHumanRW,
 	"trigger_pause":    remoteHumanRW,
+	"mcp_list":         remoteHumanRW, // daemon-level MCP management: human + sessions, not guests
+	"mcp_restart":      remoteHumanRW, // mutating; the handler re-checks via authorizeTriggerOp
+	"mcp_logs":         remoteHumanRW, // MCP stderr may carry sensitive output
 	"notify":           remoteHumanRW, // orchestrator/human only; the handler re-checks
 
 	"wait":               remoteHumanRW, // targets arbitrary sessions

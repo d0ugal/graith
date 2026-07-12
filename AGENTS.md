@@ -259,6 +259,14 @@ session-less proxies (e.g. the auto-injected `graith` server, which templates
 nothing). Literal `{name}` tokens are reserved as template syntax — an unknown
 name is a hard error.
 
+`gr mcp list/restart/logs` inspect and control these daemon-managed processes
+(`internal/daemon/mcpmanager.go` — `List`/`Restart`/`LogFiles`; handler cases
+`mcp_list`/`mcp_restart`/`mcp_logs`; CLI in `internal/cli/mcp.go`). `list` and
+`logs` are read-only; `restart` (stops a server's processes so proxies reconnect
+with fresh ones) is gated by `authorizeTriggerOp`. Every new handler case needs
+a matching `remoteMessagePolicy` row in `daemon/authmatrix.go` or
+`TestRemoteMatrixCompleteness` fails.
+
 This matters for stateful servers like `chrome-devtools-mcp`, which otherwise
 default to a single shared Chrome profile and debug port — every session would
 control the same browser. Give each session its own profile:

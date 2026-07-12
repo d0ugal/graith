@@ -9,20 +9,26 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/d0ugal/graith/internal/sandbox"
 )
 
 // MCPProcess represents a running MCP server process for a single proxy connection.
 type MCPProcess struct {
-	cmd    *exec.Cmd
-	stdin  io.WriteCloser
-	stdout *bufio.Reader
-	stderr *os.File
-	done   chan struct{}
+	serverName string
+	proxyID    string
+	startedAt  time.Time
+	cmd        *exec.Cmd
+	stdin      io.WriteCloser
+	stdout     *bufio.Reader
+	stderr     *os.File
+	done       chan struct{}
 }
 
 // MCPManager manages MCP server processes. Each proxy connection gets its own
@@ -200,6 +206,240 @@ func (m *MCPManager) HasServer(name string) bool {
 	return ok
 }
 
+// isRunning reports whether the process has not yet exited.
+func (p *MCPProcess) isRunning() bool {
+	select {
+	case <-p.done:
+		return false
+	default:
+		return true
+	}
+}
+
+// List returns the status of every configured MCP server, including any live
+// proxy processes. Auto-injected servers (e.g. graith) are flagged.
+func (m *MCPManager) List() []protocol.MCPServerStatus {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	autoInjected := make(map[string]bool, len(m.extraSvrs))
+	for _, s := range m.extraSvrs {
+		autoInjected[s.Name] = true
+	}
+
+	// Group live processes by server name.
+	byServer := make(map[string][]protocol.MCPConnectionInfo)
+
+	for _, proc := range m.processes {
+		pid := 0
+		if proc.cmd.Process != nil {
+			pid = proc.cmd.Process.Pid
+		}
+
+		uptime := time.Since(proc.startedAt).Round(time.Second)
+		byServer[proc.serverName] = append(byServer[proc.serverName], protocol.MCPConnectionInfo{
+			ProxyID:   proc.proxyID,
+			PID:       pid,
+			Running:   proc.isRunning(),
+			Uptime:    uptime.String(),
+			UptimeSec: int(uptime.Seconds()),
+		})
+	}
+
+	statuses := make([]protocol.MCPServerStatus, 0, len(m.servers))
+
+	for name, cfg := range m.servers {
+		sandboxed := true
+		if cfg.Sandbox != nil {
+			sandboxed = *cfg.Sandbox
+		}
+
+		conns := byServer[name]
+		sort.Slice(conns, func(i, j int) bool { return conns[i].ProxyID < conns[j].ProxyID })
+
+		statuses = append(statuses, protocol.MCPServerStatus{
+			Name:         name,
+			Sandboxed:    sandboxed,
+			AutoInjected: autoInjected[name],
+			Connections:  conns,
+		})
+	}
+
+	sort.Slice(statuses, func(i, j int) bool { return statuses[i].Name < statuses[j].Name })
+
+	return statuses
+}
+
+// Restart stops all running processes for the named server. Proxies detect the
+// broken connection and reconnect, at which point the daemon starts fresh
+// processes with the current config. It returns the number of processes
+// stopped, or an error if the server is not configured.
+func (m *MCPManager) Restart(name string) (int, error) {
+	m.mu.Lock()
+
+	if _, ok := m.servers[name]; !ok {
+		m.mu.Unlock()
+		return 0, fmt.Errorf("unknown MCP server %q", name)
+	}
+
+	killed := make([]*MCPProcess, 0)
+
+	for proxyID, proc := range m.processes {
+		if proc.serverName == name {
+			killed = append(killed, proc)
+
+			delete(m.processes, proxyID)
+		}
+	}
+
+	m.mu.Unlock()
+
+	for _, proc := range killed {
+		m.killProcess(proc)
+		m.log.Info("MCP server stopped (restart)", "server", name, "proxy_id", proc.proxyID)
+	}
+
+	return len(killed), nil
+}
+
+// LogFiles returns the captured stderr for the named server. It reads every
+// per-proxy log file for that server (both live and historical), returning the
+// last `lines` lines of each. It errors if the server is not configured.
+func (m *MCPManager) LogFiles(name string, lines int) ([]protocol.MCPLogFile, error) {
+	m.mu.Lock()
+	_, ok := m.servers[name]
+	// Snapshot the other configured server names so we can disambiguate
+	// prefix collisions (e.g. "graith" vs "graith-x") without holding the lock
+	// during file I/O.
+	longerNames := make([]string, 0, len(m.servers))
+
+	for n := range m.servers {
+		if n != name && len(n) > len(name) {
+			longerNames = append(longerNames, n)
+		}
+	}
+
+	m.mu.Unlock()
+
+	if !ok {
+		return nil, fmt.Errorf("unknown MCP server %q", name)
+	}
+
+	if lines <= 0 {
+		lines = 300
+	}
+
+	mcpLogDir := filepath.Join(m.logDir, "mcp")
+
+	entries, err := os.ReadDir(mcpLogDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+
+		return nil, fmt.Errorf("read MCP log dir: %w", err)
+	}
+
+	prefix := name + "-"
+
+	files := make([]protocol.MCPLogFile, 0)
+
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+
+		base := e.Name()
+		if !strings.HasSuffix(base, ".log") || !strings.HasPrefix(base, prefix) {
+			continue
+		}
+
+		// The filename is "<server>-<proxyID>.log". If another configured
+		// server has a longer name that also prefixes this file, the log
+		// belongs to that server, not this one.
+		if belongsToOther(base, longerNames) {
+			continue
+		}
+
+		trimmed := strings.TrimSuffix(base, ".log")
+		path := filepath.Join(mcpLogDir, base)
+
+		content, rerr := tailFile(path, lines)
+		if rerr != nil {
+			return nil, fmt.Errorf("read MCP log %s: %w", base, rerr)
+		}
+
+		files = append(files, protocol.MCPLogFile{
+			ProxyID: strings.TrimPrefix(trimmed, prefix),
+			Path:    path,
+			Content: content,
+		})
+	}
+
+	sort.Slice(files, func(i, j int) bool { return files[i].ProxyID < files[j].ProxyID })
+
+	return files, nil
+}
+
+// belongsToOther reports whether the log filename is prefixed by one of the
+// given (longer) server names, meaning it belongs to that server rather than a
+// shorter-named one that also prefixes it.
+func belongsToOther(base string, longerNames []string) bool {
+	for _, other := range longerNames {
+		if strings.HasPrefix(base, other+"-") {
+			return true
+		}
+	}
+
+	return false
+}
+
+// tailFile returns the last n lines of the file at path. To bound memory it
+// reads at most the final 1 MiB of the file before splitting into lines.
+func tailFile(path string, n int) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = f.Close() }()
+
+	info, err := f.Stat()
+	if err != nil {
+		return "", err
+	}
+
+	const maxRead = 1 << 20 // 1 MiB
+
+	size := info.Size()
+	start := int64(0)
+
+	if size > maxRead {
+		start = size - maxRead
+	}
+
+	if _, err := f.Seek(start, io.SeekStart); err != nil {
+		return "", err
+	}
+
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return "", err
+	}
+
+	text := string(data)
+
+	linesArr := strings.Split(strings.TrimRight(text, "\n"), "\n")
+	if len(linesArr) == 1 && linesArr[0] == "" {
+		return "", nil
+	}
+
+	if len(linesArr) > n {
+		linesArr = linesArr[len(linesArr)-n:]
+	}
+
+	return strings.Join(linesArr, "\n") + "\n", nil
+}
+
 func (m *MCPManager) startProcess(serverCfg config.MCPServerConfig, proxyID string, vars config.TemplateVars) (*MCPProcess, error) {
 	mcpLogDir := filepath.Join(m.logDir, "mcp")
 	if err := os.MkdirAll(mcpLogDir, 0o700); err != nil {
@@ -350,11 +590,14 @@ func (m *MCPManager) startProcess(serverCfg config.MCPServerConfig, proxyID stri
 	}
 
 	proc := &MCPProcess{
-		cmd:    cmd,
-		stdin:  stdinPipe,
-		stdout: bufio.NewReader(stdoutPipe),
-		stderr: stderrFile,
-		done:   make(chan struct{}),
+		serverName: serverCfg.Name,
+		proxyID:    proxyID,
+		startedAt:  time.Now(),
+		cmd:        cmd,
+		stdin:      stdinPipe,
+		stdout:     bufio.NewReader(stdoutPipe),
+		stderr:     stderrFile,
+		done:       make(chan struct{}),
 	}
 
 	go func() {

@@ -1442,6 +1442,55 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 
 				return
 
+			case "mcp_list":
+				// read-only: no auth gate (like trigger_list/scenario_list)
+				if sm.mcpManager == nil {
+					sendControl("mcp_list", protocol.MCPListResponse{})
+					continue
+				}
+
+				sendControl("mcp_list", protocol.MCPListResponse{Servers: sm.mcpManager.List()})
+
+			case "mcp_restart":
+				mr, ok := decodePayload[protocol.MCPRestartMsg](msg, sendControl, "invalid mcp_restart message")
+				if !ok {
+					continue
+				}
+
+				if !auth.authorizeTriggerOp(sm, sendControl) {
+					continue
+				}
+
+				if sm.mcpManager == nil {
+					sendControl("error", protocol.ErrorMsg{Message: "MCP manager not initialized"})
+					continue
+				}
+
+				stopped, err := sm.mcpManager.Restart(mr.Name)
+				if err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+				} else {
+					sendControl("mcp_restart", protocol.MCPRestartResponse{Name: mr.Name, Stopped: stopped})
+				}
+
+			case "mcp_logs":
+				ml, ok := decodePayload[protocol.MCPLogsMsg](msg, sendControl, "invalid mcp_logs message")
+				if !ok {
+					continue
+				}
+
+				if sm.mcpManager == nil {
+					sendControl("error", protocol.ErrorMsg{Message: "MCP manager not initialized"})
+					continue
+				}
+
+				files, err := sm.mcpManager.LogFiles(ml.Name, ml.Lines)
+				if err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+				} else {
+					sendControl("mcp_logs", protocol.MCPLogsResponse{Name: ml.Name, Files: files})
+				}
+
 			case "scenario_start":
 				s, ok := decodePayload[protocol.ScenarioStartMsg](msg, sendControl, "invalid scenario_start message")
 				if !ok {
