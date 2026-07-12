@@ -18,8 +18,9 @@ type Server struct {
 	wg       sync.WaitGroup
 	log      *slog.Logger
 
-	mu    sync.Mutex
-	conns map[net.Conn]struct{}
+	mu     sync.Mutex
+	conns  map[net.Conn]struct{}
+	closed bool
 }
 
 func Listen(sockPath string) (net.Listener, error) {
@@ -47,10 +48,24 @@ func NewServer(l net.Listener, handler func(ctx context.Context, conn net.Conn),
 	return &Server{listener: l, handler: handler, log: log, conns: make(map[net.Conn]struct{})}
 }
 
-func (s *Server) trackConn(c net.Conn) {
+// trackConn registers an accepted connection and enrolls it in the wait group,
+// unless a shutdown has already begun. It returns false when the server is
+// shutting down, in which case the caller must not run the handler: the
+// wg.Add here is serialized under the same mutex Shutdown takes before it calls
+// wg.Wait, so Add can never race with Wait (concurrent Add/Wait is a WaitGroup
+// misuse the race detector flags).
+func (s *Server) trackConn(c net.Conn) bool {
 	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.closed {
+		return false
+	}
+
 	s.conns[c] = struct{}{}
-	s.mu.Unlock()
+	s.wg.Add(1)
+
+	return true
 }
 
 func (s *Server) untrackConn(c net.Conn) {
@@ -80,9 +95,13 @@ func (s *Server) Serve(ctx context.Context) error {
 			continue
 		}
 
-		s.trackConn(conn)
+		// Enroll the connection under the mutex. If Shutdown has already begun,
+		// don't start a handler (and don't wg.Add) — just drop the connection.
+		if !s.trackConn(conn) {
+			_ = conn.Close()
+			return ctx.Err()
+		}
 
-		s.wg.Add(1)
 		go func(c net.Conn) {
 			defer s.wg.Done()
 			defer func() { _ = c.Close() }()
@@ -99,7 +118,13 @@ func (s *Server) Shutdown() {
 	// Give handlers a short window to finish gracefully.
 	deadline := time.Now().Add(5 * time.Second)
 
+	// Mark closed under the mutex before waiting on the group. This is the write
+	// half of the barrier with trackConn: once closed is set, no further wg.Add
+	// can happen (Serve's trackConn returns false), so the wg.Wait below cannot
+	// race a concurrent wg.Add.
 	s.mu.Lock()
+	s.closed = true
+
 	for c := range s.conns {
 		_ = c.SetDeadline(deadline)
 	}
