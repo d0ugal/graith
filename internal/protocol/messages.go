@@ -545,6 +545,66 @@ type MCPConnectOkMsg struct {
 	Channel byte   `json:"channel"`
 }
 
+// MCP management messages (gr mcp list/restart/logs)
+
+// MCPListMsg requests the status of all configured MCP servers.
+type MCPListMsg struct{}
+
+// MCPConnectionInfo describes a single running MCP server process (one per
+// active proxy connection).
+type MCPConnectionInfo struct {
+	ProxyID   string `json:"proxy_id"`
+	PID       int    `json:"pid"`
+	Running   bool   `json:"running"`
+	Uptime    string `json:"uptime"`
+	UptimeSec int    `json:"uptime_seconds"`
+}
+
+// MCPServerStatus describes a configured MCP server and its live processes.
+type MCPServerStatus struct {
+	Name         string              `json:"name"`
+	Sandboxed    bool                `json:"sandboxed"`
+	AutoInjected bool                `json:"auto_injected,omitempty"`
+	Connections  []MCPConnectionInfo `json:"connections,omitempty"`
+}
+
+// MCPListResponse carries the configured MCP servers and their status.
+type MCPListResponse struct {
+	Servers []MCPServerStatus `json:"servers"`
+}
+
+// MCPRestartMsg requests that all running processes for a named MCP server be
+// stopped so proxies reconnect and get fresh processes.
+type MCPRestartMsg struct {
+	Name string `json:"name"`
+}
+
+// MCPRestartResponse reports how many processes were stopped by a restart.
+type MCPRestartResponse struct {
+	Name    string `json:"name"`
+	Stopped int    `json:"stopped"`
+}
+
+// MCPLogsMsg requests the captured stderr for a named MCP server. Lines caps
+// the number of trailing lines returned per log file (0 = a sensible default).
+type MCPLogsMsg struct {
+	Name  string `json:"name"`
+	Lines int    `json:"lines"`
+}
+
+// MCPLogFile is one captured stderr log for an MCP server proxy.
+type MCPLogFile struct {
+	ProxyID string `json:"proxy_id"`
+	Path    string `json:"path"`
+	Content string `json:"content"`
+}
+
+// MCPLogsResponse carries the captured stderr logs for an MCP server.
+type MCPLogsResponse struct {
+	Name  string       `json:"name"`
+	Files []MCPLogFile `json:"files"`
+}
+
 type StatusRequestMsg struct {
 	SessionID string `json:"session_id"`
 }

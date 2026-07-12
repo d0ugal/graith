@@ -416,6 +416,18 @@ Write built-in defaults to the config file.
 
 Run graith as an MCP (Model Context Protocol) server over stdio. See [MCP Server](mcp.md).
 
+Subcommands inspect and control the daemon-managed MCP servers declared under
+`[[mcp_servers]]`:
+
+| Command | Description |
+|---------|-------------|
+| `gr mcp list` | List configured MCP servers with sandbox state, source (config/auto), live connection count, and uptime |
+| `gr mcp restart <name>` | Stop the running processes for a server; agent proxies reconnect and the daemon starts fresh processes with the current config |
+| `gr mcp logs <name>` | Show the captured stderr for a server (one section per proxy connection). Use `-n/--lines` to cap the lines shown |
+
+`gr mcp list` and `gr mcp logs` are read-only; `gr mcp restart` requires the
+caller to be the human, the orchestrator, or one of its descendants.
+
 ### `gr completion <shell>`
 
 Generate a shell completion script. Supported shells: `bash`, `zsh`, `fish`, `powershell`.

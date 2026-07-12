@@ -3405,3 +3405,134 @@ func TestCoverExitDescriptionSignalPrecedence(t *testing.T) {
 		t.Errorf("describeSessionExit precedence = %q, want signal to win", got)
 	}
 }
+
+// setupMCPHarness attaches an MCPManager (config server + auto-injected graith)
+// to the harness's SessionManager for the mcp_* control-message tests.
+func setupMCPHarness(t *testing.T, h *testHarness, servers []config.MCPServerConfig) *MCPManager {
+	t.Helper()
+
+	cfg := &config.Config{MCPServers: servers}
+	mm := NewMCPManager(cfg, []config.MCPServerConfig{graithMCPServer()}, h.sm.paths.LogDir, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	t.Cleanup(mm.Shutdown)
+	h.sm.SetMCPManager(mm)
+
+	return mm
+}
+
+func TestHandlerMCPList(t *testing.T) {
+	h := newTestHarness(t)
+	setupMCPHarness(t, h, []config.MCPServerConfig{{Name: "braw", Command: "cat"}})
+
+	h.sendControl(t, "mcp_list", protocol.MCPListMsg{})
+
+	env := h.readControlMsg(t)
+	if env.Type != "mcp_list" {
+		t.Fatalf("response type = %q, want mcp_list", env.Type)
+	}
+
+	var resp protocol.MCPListResponse
+
+	_ = protocol.DecodePayload(env, &resp)
+
+	names := make(map[string]bool)
+	for _, s := range resp.Servers {
+		names[s.Name] = true
+	}
+
+	if !names["braw"] || !names["graith"] {
+		t.Errorf("expected braw + graith in list, got %+v", resp.Servers)
+	}
+}
+
+func TestHandlerMCPListNoManager(t *testing.T) {
+	h := newTestHarness(t)
+	// Do not set an MCP manager.
+
+	h.sendControl(t, "mcp_list", protocol.MCPListMsg{})
+
+	env := h.readControlMsg(t)
+	if env.Type != "mcp_list" {
+		t.Fatalf("response type = %q, want mcp_list", env.Type)
+	}
+
+	var resp protocol.MCPListResponse
+
+	_ = protocol.DecodePayload(env, &resp)
+
+	if len(resp.Servers) != 0 {
+		t.Errorf("expected empty list with no manager, got %+v", resp.Servers)
+	}
+}
+
+func TestHandlerMCPRestart(t *testing.T) {
+	h := newTestHarness(t)
+	setupMCPHarness(t, h, []config.MCPServerConfig{{Name: "thrawn", Command: "cat"}})
+
+	h.sendControl(t, "mcp_restart", protocol.MCPRestartMsg{Name: "thrawn"})
+
+	env := h.readControlMsg(t)
+	if env.Type != "mcp_restart" {
+		t.Fatalf("response type = %q, want mcp_restart", env.Type)
+	}
+
+	var resp protocol.MCPRestartResponse
+
+	_ = protocol.DecodePayload(env, &resp)
+
+	if resp.Name != "thrawn" || resp.Stopped != 0 {
+		t.Errorf("restart of idle server: got %+v, want {thrawn 0}", resp)
+	}
+}
+
+func TestHandlerMCPRestartUnknown(t *testing.T) {
+	h := newTestHarness(t)
+	setupMCPHarness(t, h, nil)
+
+	h.sendControl(t, "mcp_restart", protocol.MCPRestartMsg{Name: "dreich"})
+
+	env := h.readControlMsg(t)
+	if env.Type != "error" {
+		t.Fatalf("response type = %q, want error", env.Type)
+	}
+}
+
+func TestHandlerMCPLogs(t *testing.T) {
+	h := newTestHarness(t)
+	setupMCPHarness(t, h, []config.MCPServerConfig{{Name: "ken", Command: "cat"}})
+
+	mcpDir := filepath.Join(h.sm.paths.LogDir, "mcp")
+	if err := os.MkdirAll(mcpDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(mcpDir, "ken-sess1-ken.log"), []byte("speir the daemon\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	h.sendControl(t, "mcp_logs", protocol.MCPLogsMsg{Name: "ken"})
+
+	env := h.readControlMsg(t)
+	if env.Type != "mcp_logs" {
+		t.Fatalf("response type = %q, want mcp_logs", env.Type)
+	}
+
+	var resp protocol.MCPLogsResponse
+
+	_ = protocol.DecodePayload(env, &resp)
+
+	if len(resp.Files) != 1 || !strings.Contains(resp.Files[0].Content, "speir the daemon") {
+		t.Errorf("unexpected logs response: %+v", resp)
+	}
+}
+
+func TestHandlerMCPLogsUnknown(t *testing.T) {
+	h := newTestHarness(t)
+	setupMCPHarness(t, h, nil)
+
+	h.sendControl(t, "mcp_logs", protocol.MCPLogsMsg{Name: "fash"})
+
+	env := h.readControlMsg(t)
+	if env.Type != "error" {
+		t.Fatalf("response type = %q, want error", env.Type)
+	}
+}

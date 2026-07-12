@@ -1,8 +1,10 @@
 package daemon
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -711,5 +713,302 @@ func TestMCPManagerDeletedCwd(t *testing.T) {
 	case <-proc.done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("process should be done after disconnect")
+	}
+}
+
+func TestMCPManagerList(t *testing.T) {
+	logDir := t.TempDir()
+	cfg := &config.Config{
+		MCPServers: []config.MCPServerConfig{
+			{Name: "braw", Command: "cat"},
+			{Name: "canny", Command: "cat", Sandbox: boolPtr(false)},
+		},
+	}
+	extra := []config.MCPServerConfig{
+		{Name: "graith", Command: "cat"},
+	}
+
+	mgr := NewMCPManager(cfg, extra, logDir, slog.Default())
+	defer mgr.Shutdown()
+
+	if _, err := mgr.Connect("braw", "sess1-braw", config.TemplateVars{}); err != nil {
+		t.Fatalf("Connect() error = %v", err)
+	}
+
+	servers := mgr.List()
+	if len(servers) != 3 {
+		t.Fatalf("expected 3 servers, got %d", len(servers))
+	}
+
+	// Sorted by name: braw, canny, graith.
+	byName := make(map[string]int)
+	for i, s := range servers {
+		byName[s.Name] = i
+	}
+
+	braw := servers[byName["braw"]]
+	if len(braw.Connections) != 1 {
+		t.Errorf("braw should have 1 connection, got %d", len(braw.Connections))
+	}
+
+	if !braw.Sandboxed {
+		t.Error("braw should default to sandboxed=true")
+	}
+
+	if braw.Connections[0].PID == 0 || !braw.Connections[0].Running {
+		t.Errorf("braw connection should be running with a PID, got %+v", braw.Connections[0])
+	}
+
+	canny := servers[byName["canny"]]
+	if canny.Sandboxed {
+		t.Error("canny has Sandbox=false, should report sandboxed=false")
+	}
+
+	if len(canny.Connections) != 0 {
+		t.Errorf("canny should have no connections, got %d", len(canny.Connections))
+	}
+
+	graith := servers[byName["graith"]]
+	if !graith.AutoInjected {
+		t.Error("graith is an extra server, should be flagged auto_injected")
+	}
+}
+
+func TestMCPManagerRestart(t *testing.T) {
+	logDir := t.TempDir()
+	cfg := &config.Config{
+		MCPServers: []config.MCPServerConfig{
+			{Name: "thrawn", Command: "cat"},
+			{Name: "bide", Command: "cat"},
+		},
+	}
+
+	mgr := NewMCPManager(cfg, nil, logDir, slog.Default())
+	defer mgr.Shutdown()
+
+	p1, err := mgr.Connect("thrawn", "sess1-thrawn", config.TemplateVars{})
+	if err != nil {
+		t.Fatalf("Connect(sess1) error = %v", err)
+	}
+
+	p2, err := mgr.Connect("thrawn", "sess2-thrawn", config.TemplateVars{})
+	if err != nil {
+		t.Fatalf("Connect(sess2) error = %v", err)
+	}
+
+	other, err := mgr.Connect("bide", "sess1-bide", config.TemplateVars{})
+	if err != nil {
+		t.Fatalf("Connect(bide) error = %v", err)
+	}
+
+	stopped, err := mgr.Restart("thrawn")
+	if err != nil {
+		t.Fatalf("Restart() error = %v", err)
+	}
+
+	if stopped != 2 {
+		t.Errorf("expected 2 thrawn processes stopped, got %d", stopped)
+	}
+
+	for _, p := range []*MCPProcess{p1, p2} {
+		select {
+		case <-p.done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("restarted process should be stopped")
+		}
+	}
+
+	// The other server's process must be untouched.
+	select {
+	case <-other.done:
+		t.Fatal("bide process should not be affected by restarting thrawn")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	// Restarting again with no live processes reports zero.
+	stopped, err = mgr.Restart("thrawn")
+	if err != nil {
+		t.Fatalf("second Restart() error = %v", err)
+	}
+
+	if stopped != 0 {
+		t.Errorf("expected 0 stopped on second restart, got %d", stopped)
+	}
+}
+
+func TestMCPManagerRestartUnknown(t *testing.T) {
+	mgr := NewMCPManager(&config.Config{}, nil, t.TempDir(), slog.Default())
+	defer mgr.Shutdown()
+
+	if _, err := mgr.Restart("dreich"); err == nil {
+		t.Fatal("expected error restarting an unknown server")
+	}
+}
+
+func TestMCPManagerLogFiles(t *testing.T) {
+	logDir := t.TempDir()
+	cfg := &config.Config{
+		MCPServers: []config.MCPServerConfig{
+			{Name: "ken", Command: "cat"},
+		},
+	}
+
+	mgr := NewMCPManager(cfg, nil, logDir, slog.Default())
+	defer mgr.Shutdown()
+
+	mcpDir := filepath.Join(logDir, "mcp")
+	if err := os.MkdirAll(mcpDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(mcpDir, "ken-sess1-ken.log"), []byte("speir line 1\nspeir line 2\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	files, err := mgr.LogFiles("ken", 0)
+	if err != nil {
+		t.Fatalf("LogFiles() error = %v", err)
+	}
+
+	if len(files) != 1 {
+		t.Fatalf("expected 1 log file, got %d", len(files))
+	}
+
+	if files[0].ProxyID != "sess1-ken" {
+		t.Errorf("ProxyID = %q, want %q", files[0].ProxyID, "sess1-ken")
+	}
+
+	if !strings.Contains(files[0].Content, "speir line 2") {
+		t.Errorf("content missing expected line: %q", files[0].Content)
+	}
+}
+
+// TestMCPManagerLogFilesPrefixCollision: a server whose name is a prefix of
+// another's ("graith" vs "graith-x") must not pick up the other's logs.
+func TestMCPManagerLogFilesPrefixCollision(t *testing.T) {
+	logDir := t.TempDir()
+	cfg := &config.Config{
+		MCPServers: []config.MCPServerConfig{
+			{Name: "graith", Command: "cat"},
+			{Name: "graith-x", Command: "cat"},
+		},
+	}
+
+	mgr := NewMCPManager(cfg, nil, logDir, slog.Default())
+	defer mgr.Shutdown()
+
+	mcpDir := filepath.Join(logDir, "mcp")
+	if err := os.MkdirAll(mcpDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(mcpDir, "graith-sess1-graith.log"), []byte("plain graith\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(mcpDir, "graith-x-sess1-graith-x.log"), []byte("graith x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	files, err := mgr.LogFiles("graith", 0)
+	if err != nil {
+		t.Fatalf("LogFiles() error = %v", err)
+	}
+
+	if len(files) != 1 {
+		t.Fatalf("expected only graith's own log, got %d files: %+v", len(files), files)
+	}
+
+	if !strings.Contains(files[0].Content, "plain graith") {
+		t.Errorf("wrong file matched: %q", files[0].Content)
+	}
+
+	xfiles, err := mgr.LogFiles("graith-x", 0)
+	if err != nil {
+		t.Fatalf("LogFiles(graith-x) error = %v", err)
+	}
+
+	if len(xfiles) != 1 || !strings.Contains(xfiles[0].Content, "graith x") {
+		t.Fatalf("graith-x should match its own log, got %+v", xfiles)
+	}
+}
+
+func TestMCPManagerLogFilesUnknown(t *testing.T) {
+	mgr := NewMCPManager(&config.Config{}, nil, t.TempDir(), slog.Default())
+	defer mgr.Shutdown()
+
+	if _, err := mgr.LogFiles("fash", 0); err == nil {
+		t.Fatal("expected error for unknown server")
+	}
+}
+
+func TestMCPManagerLogFilesNoDir(t *testing.T) {
+	cfg := &config.Config{
+		MCPServers: []config.MCPServerConfig{{Name: "haar", Command: "cat"}},
+	}
+
+	mgr := NewMCPManager(cfg, nil, t.TempDir(), slog.Default())
+	defer mgr.Shutdown()
+
+	// No process has ever run, so the mcp log dir does not exist yet.
+	files, err := mgr.LogFiles("haar", 0)
+	if err != nil {
+		t.Fatalf("LogFiles() with no log dir should not error, got %v", err)
+	}
+
+	if len(files) != 0 {
+		t.Errorf("expected no files, got %d", len(files))
+	}
+}
+
+func TestTailFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "loch.log")
+
+	var sb strings.Builder
+	for i := 1; i <= 10; i++ {
+		fmt.Fprintf(&sb, "line %d\n", i)
+	}
+
+	if err := os.WriteFile(path, []byte(sb.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := tailFile(path, 3)
+	if err != nil {
+		t.Fatalf("tailFile() error = %v", err)
+	}
+
+	want := "line 8\nline 9\nline 10\n"
+	if got != want {
+		t.Errorf("tailFile(3) = %q, want %q", got, want)
+	}
+
+	// Asking for more lines than exist returns everything.
+	all, err := tailFile(path, 100)
+	if err != nil {
+		t.Fatalf("tailFile(100) error = %v", err)
+	}
+
+	if strings.Count(all, "\n") != 10 {
+		t.Errorf("expected 10 lines, got %d", strings.Count(all, "\n"))
+	}
+}
+
+func TestTailFileEmpty(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "empty.log")
+
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := tailFile(path, 10)
+	if err != nil {
+		t.Fatalf("tailFile() error = %v", err)
+	}
+
+	if got != "" {
+		t.Errorf("empty file should tail to empty string, got %q", got)
 	}
 }
