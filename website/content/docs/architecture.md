@@ -120,6 +120,8 @@ The daemon (`SessionManager`) is the central component:
 
 Runtime-only state (hook reports, attached clients, pending approvals, in-memory caches) is not persisted and is rebuilt from PTY state on restart.
 
+**State-version backups.** The state file carries a schema version, and a newer daemon migrates an older `state.json` forward in place. Because a downgraded (older) binary refuses to start against forward-migrated state, the daemon writes a crash-safe copy of the pre-migration file to `state.json.v<oldVersion>.bak` (alongside `state.json`) *before* migrating. Only the most recent pre-migration backup is kept — an earlier one is removed once the new backup is durable. To recover a downgrade, stop the daemon, restore the backup over `state.json` (e.g. `mv state.json.v16.bak state.json`), and start the older binary. `gr doctor` lists any available backups.
+
 ### Session manager locking
 
 The `SessionManager` uses a `sync.RWMutex` for concurrent access. Read operations (list, info) take a read lock. Mutations (create, delete, stop) take a write lock. The handler dispatches all control messages through the session manager.

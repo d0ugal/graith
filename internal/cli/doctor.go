@@ -398,6 +398,13 @@ func (dc *doctorContext) checkEnvironment() {
 		dc.passf("environment", "State file: %s", paths.StateFile)
 	}
 
+	for _, backup := range daemon.ListStateBackups(paths.StateFile) {
+		if info, err := os.Stat(backup); err == nil {
+			dc.passf("environment", "State backup: %s (%s) — restore over %s to downgrade",
+				backup, formatBytes(info.Size()), paths.StateFile)
+		}
+	}
+
 	if info, err := os.Stat(paths.MessagesDB); err == nil {
 		dc.passf("environment", "Messages DB: %s (%s)", paths.MessagesDB, formatBytes(info.Size()))
 	} else {
