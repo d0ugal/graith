@@ -241,17 +241,20 @@ func TestRemoteRoleNoneGateADenies(t *testing.T) {
 	}
 }
 
-// TestRemoteHandshakeUnaffectedByAuthGateExemption locks the invariant that makes
-// PR #1066's Fix A safe: the handshake auth-gate exemption
-// (`authErr != nil && msg.Type != "handshake"`) is a strict no-op on the remote
-// path. resolveAuth never returns a non-nil error for a remote connection (an
-// unpaired remote is roleNone with a nil error), so a remote tokenless handshake
-// must still get handshake_ok + auth_challenge — exactly as before the exemption
-// — even when a human token is provisioned (which a served daemon always has).
-// If a future refactor made resolveAuth error on the remote path, the exemption
-// would silently become load-bearing for remote; this test would catch that by
-// failing with a generic "error" frame instead of handshake_ok.
-func TestRemoteHandshakeUnaffectedByAuthGateExemption(t *testing.T) {
+// TestRemoteHandshakePairingUnaffectedByHumanToken checks that provisioning a
+// human token — which a served daemon always has, and which is what triggers
+// PR #1066's local handshake auth-gate exemption — does not disturb the remote
+// pairing handshake: a remote tokenless handshake still gets handshake_ok +
+// auth_challenge, exactly as before.
+//
+// Note this asserts the observable remote wire behaviour, not the underlying
+// reason it is safe. The handshake exemption at handler.go
+// (`authErr != nil && msg.Type != "handshake"`) applies regardless of origin, so
+// it is a no-op for remote only because resolveAuth never returns a non-nil error
+// for a remote connection. That narrower invariant is locked directly by
+// TestResolveAuth_RemoteNoPoPIsRoleNone (and the remote-mismatch cases) in
+// auth_test.go, which assert err == nil for an unpaired remote.
+func TestRemoteHandshakePairingUnaffectedByHumanToken(t *testing.T) {
 	sm := newPairingSM(t)
 
 	sm.mu.Lock()
