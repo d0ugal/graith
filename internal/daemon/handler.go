@@ -130,7 +130,16 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 			auth, authErr := resolveAuth(sm, msg.Token, origin, poppedDeviceID)
 			sm.mu.RUnlock()
 
-			if authErr != nil {
+			// The handshake is protocol negotiation and confers no authority —
+			// every privileged message re-runs resolveAuth on its own token in
+			// the cases below, so a client that authenticates here still cannot
+			// act without a valid credential. It must therefore always receive a
+			// handshake_ok/handshake_err, never the generic auth "error" frame.
+			// Gating it broke the tokenless liveness probe in EnsureDaemon
+			// (daemonResponds), which read the "error" reply as "not a graith
+			// daemon" and triggered a doomed autostart — wedging every CLI
+			// command except `gr doctor` once a human token was provisioned.
+			if authErr != nil && msg.Type != "handshake" {
 				sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
 				continue
 			}
