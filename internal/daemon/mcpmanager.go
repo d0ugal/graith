@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"io"
 	"log/slog"
@@ -102,18 +103,27 @@ func (m *MCPManager) Connect(serverName, proxyID string, vars config.TemplateVar
 	return proc, nil
 }
 
-// Disconnect kills the MCP server process for the given proxy.
-func (m *MCPManager) Disconnect(proxyID string) {
+// Disconnect kills the MCP server process for the given proxy. It is
+// identity-checked against proc: it only removes and kills the process still
+// registered under proxyID if it is the *same* process the caller owns. This
+// prevents an ABA race where Restart/Reload kills a process, the proxy
+// reconnects and Connect installs a replacement under the same deterministic
+// proxyID, and this (stale) deferred cleanup would otherwise kill the fresh
+// replacement.
+func (m *MCPManager) Disconnect(proxyID string, proc *MCPProcess) {
 	m.mu.Lock()
 
-	proc, ok := m.processes[proxyID]
-	if ok {
+	current, ok := m.processes[proxyID]
+	if ok && (proc == nil || current == proc) {
 		delete(m.processes, proxyID)
+	} else {
+		ok = false
 	}
+
 	m.mu.Unlock()
 
 	if ok {
-		m.killProcess(proc)
+		m.killProcess(current)
 		m.log.Info("MCP server stopped", "proxy_id", proxyID)
 	}
 }
@@ -249,10 +259,18 @@ func (m *MCPManager) List() []protocol.MCPServerStatus {
 	statuses := make([]protocol.MCPServerStatus, 0, len(m.servers))
 
 	for name, cfg := range m.servers {
-		sandboxed := true
+		// Report the *effective* sandbox state, not the per-server config
+		// intent: a process is only confined when the global sandbox is enabled
+		// AND the per-server flag is on (see startProcess, which wraps only when
+		// `sbxEnabled && m.globalSbx.Enabled`). Reporting the raw per-server flag
+		// would tell an operator a tool is sandboxed when the global sandbox is
+		// off and it actually runs unconfined.
+		perServer := true
 		if cfg.Sandbox != nil {
-			sandboxed = *cfg.Sandbox
+			perServer = *cfg.Sandbox
 		}
+
+		sandboxed := m.globalSbx.Enabled && perServer
 
 		conns := byServer[name]
 		sort.Slice(conns, func(i, j int) bool { return conns[i].ProxyID < conns[j].ProxyID })
@@ -308,17 +326,6 @@ func (m *MCPManager) Restart(name string) (int, error) {
 func (m *MCPManager) LogFiles(name string, lines int) ([]protocol.MCPLogFile, error) {
 	m.mu.Lock()
 	_, ok := m.servers[name]
-	// Snapshot the other configured server names so we can disambiguate
-	// prefix collisions (e.g. "graith" vs "graith-x") without holding the lock
-	// during file I/O.
-	longerNames := make([]string, 0, len(m.servers))
-
-	for n := range m.servers {
-		if n != name && len(n) > len(name) {
-			longerNames = append(longerNames, n)
-		}
-	}
-
 	m.mu.Unlock()
 
 	if !ok {
@@ -340,7 +347,15 @@ func (m *MCPManager) LogFiles(name string, lines int) ([]protocol.MCPLogFile, er
 		return nil, fmt.Errorf("read MCP log dir: %w", err)
 	}
 
+	// startProcess names each log "<server>-<proxyID>.log", and the daemon
+	// always builds proxyID as "<sessionID>-<server>" (handler.go). So a log for
+	// this server both starts with "<name>-" and ends with "-<name>". Requiring
+	// both is a structural, config-independent test: it disambiguates a
+	// prefix-colliding sibling (e.g. "graith" vs "graith-x") and — unlike a check
+	// against the current config — still attributes historical logs correctly
+	// after a colliding server is removed from config.
 	prefix := name + "-"
+	suffix := "-" + name
 
 	files := make([]protocol.MCPLogFile, 0)
 
@@ -354,14 +369,11 @@ func (m *MCPManager) LogFiles(name string, lines int) ([]protocol.MCPLogFile, er
 			continue
 		}
 
-		// The filename is "<server>-<proxyID>.log". If another configured
-		// server has a longer name that also prefixes this file, the log
-		// belongs to that server, not this one.
-		if belongsToOther(base, longerNames) {
+		trimmed := strings.TrimSuffix(base, ".log")
+		if !strings.HasSuffix(trimmed, suffix) {
 			continue
 		}
 
-		trimmed := strings.TrimSuffix(base, ".log")
 		path := filepath.Join(mcpLogDir, base)
 
 		content, rerr := tailFile(path, lines)
@@ -379,19 +391,6 @@ func (m *MCPManager) LogFiles(name string, lines int) ([]protocol.MCPLogFile, er
 	sort.Slice(files, func(i, j int) bool { return files[i].ProxyID < files[j].ProxyID })
 
 	return files, nil
-}
-
-// belongsToOther reports whether the log filename is prefixed by one of the
-// given (longer) server names, meaning it belongs to that server rather than a
-// shorter-named one that also prefixes it.
-func belongsToOther(base string, longerNames []string) bool {
-	for _, other := range longerNames {
-		if strings.HasPrefix(base, other+"-") {
-			return true
-		}
-	}
-
-	return false
 }
 
 // tailFile returns the last n lines of the file at path. To bound memory it
@@ -424,6 +423,16 @@ func tailFile(path string, n int) (string, error) {
 	data, err := io.ReadAll(f)
 	if err != nil {
 		return "", err
+	}
+
+	// After a non-zero seek the read almost certainly starts mid-line; drop that
+	// partial leading fragment so we never present it as a whole log line.
+	if start > 0 {
+		if nl := bytes.IndexByte(data, '\n'); nl >= 0 {
+			data = data[nl+1:]
+		} else {
+			data = nil
+		}
 	}
 
 	text := string(data)

@@ -35,7 +35,7 @@ func TestMCPManagerConnectDisconnect(t *testing.T) {
 	default:
 	}
 
-	mgr.Disconnect("proxy-1")
+	mgr.Disconnect("proxy-1", nil)
 
 	// Verify process is gone.
 	select {
@@ -92,7 +92,7 @@ func TestMCPManagerSandboxDisabledNoBackendNeeded(t *testing.T) {
 		t.Fatalf("Connect() with sandbox disabled should not require a backend, got: %v", err)
 	}
 
-	mgr.Disconnect("proxy-1")
+	mgr.Disconnect("proxy-1", nil)
 }
 
 func TestMCPManagerConnectUnknownServer(t *testing.T) {
@@ -222,7 +222,7 @@ func TestMCPManagerStderrCapture(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	mgr.Disconnect("proxy-1")
+	mgr.Disconnect("proxy-1", nil)
 
 	if len(data) == 0 {
 		t.Fatal("stderr log should have content")
@@ -263,7 +263,7 @@ func TestMCPManagerExpandsTemplateVars(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 
-	mgr.Disconnect("proxy-braw")
+	mgr.Disconnect("proxy-braw", nil)
 
 	if len(data) == 0 {
 		t.Fatalf("expected file %q with expanded session id", wantPath)
@@ -305,7 +305,7 @@ func TestMCPManagerEmptySessionFallsBackToProxyID(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 
-	mgr.Disconnect("proxy-haar")
+	mgr.Disconnect("proxy-haar", nil)
 
 	if got := string(data); got != "proxy-haar\n" {
 		t.Errorf("fallback content = %q, want %q", got, "proxy-haar\n")
@@ -348,7 +348,7 @@ func TestMCPManagerExpandsEnvValues(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 
-	mgr.Disconnect("proxy-canny")
+	mgr.Disconnect("proxy-canny", nil)
 
 	if got := string(data); got != "chrome-bonnie-7\n" {
 		t.Errorf("expanded env = %q, want %q", got, "chrome-bonnie-7\n")
@@ -381,7 +381,7 @@ func TestMCPManagerExpandsCommand(t *testing.T) {
 
 	_ = proc
 
-	mgr.Disconnect("proxy-1")
+	mgr.Disconnect("proxy-1", nil)
 }
 
 func TestMCPManagerReloadDetectsEnvChange(t *testing.T) {
@@ -707,7 +707,7 @@ func TestMCPManagerDeletedCwd(t *testing.T) {
 	case <-time.After(500 * time.Millisecond):
 	}
 
-	mgr.Disconnect("proxy-haar")
+	mgr.Disconnect("proxy-haar", nil)
 
 	select {
 	case <-proc.done:
@@ -751,8 +751,10 @@ func TestMCPManagerList(t *testing.T) {
 		t.Errorf("braw should have 1 connection, got %d", len(braw.Connections))
 	}
 
-	if !braw.Sandboxed {
-		t.Error("braw should default to sandboxed=true")
+	// Global sandbox is off, so even a per-server-default server is not
+	// effectively sandboxed.
+	if braw.Sandboxed {
+		t.Error("braw should report sandboxed=false when the global sandbox is off")
 	}
 
 	if braw.Connections[0].PID == 0 || !braw.Connections[0].Running {
@@ -771,6 +773,170 @@ func TestMCPManagerList(t *testing.T) {
 	graith := servers[byName["graith"]]
 	if !graith.AutoInjected {
 		t.Error("graith is an extra server, should be flagged auto_injected")
+	}
+}
+
+// TestMCPManagerListEffectiveSandbox pins that List reports the *effective*
+// sandbox state (global enabled AND per-server enabled), not the raw per-server
+// config intent. List does not start processes, so an unavailable backend does
+// not matter here.
+func TestMCPManagerListEffectiveSandbox(t *testing.T) {
+	base := []config.MCPServerConfig{
+		{Name: "braw", Command: "cat"},                           // per-server default (true)
+		{Name: "canny", Command: "cat", Sandbox: boolPtr(false)}, // per-server opt-out
+	}
+
+	// Global sandbox enabled: braw effective true, canny effective false.
+	on := NewMCPManager(&config.Config{
+		Sandbox:    config.SandboxConfig{Enabled: true, Backend: "nono"},
+		MCPServers: base,
+	}, nil, t.TempDir(), slog.Default())
+	defer on.Shutdown()
+
+	got := make(map[string]bool)
+	for _, s := range on.List() {
+		got[s.Name] = s.Sandboxed
+	}
+
+	if !got["braw"] {
+		t.Error("braw should be sandboxed when global sandbox is on and per-server defaults to true")
+	}
+
+	if got["canny"] {
+		t.Error("canny opts out per-server, should be sandboxed=false even with global on")
+	}
+
+	// Global sandbox off: nothing is effectively sandboxed.
+	off := NewMCPManager(&config.Config{MCPServers: base}, nil, t.TempDir(), slog.Default())
+	defer off.Shutdown()
+
+	for _, s := range off.List() {
+		if s.Sandboxed {
+			t.Errorf("%s should be sandboxed=false when the global sandbox is off", s.Name)
+		}
+	}
+}
+
+// TestMCPManagerDisconnectIdentity pins that an identity-checked Disconnect does
+// not kill a replacement process that reused the same proxy ID — the ABA case
+// that arises when Restart kills a process and the proxy reconnects before the
+// old connection's deferred cleanup runs.
+func TestMCPManagerDisconnectIdentity(t *testing.T) {
+	cfg := &config.Config{
+		MCPServers: []config.MCPServerConfig{{Name: "bide", Command: "cat"}},
+	}
+
+	mgr := NewMCPManager(cfg, nil, t.TempDir(), slog.Default())
+	defer mgr.Shutdown()
+
+	p1, err := mgr.Connect("bide", "sess1-bide", config.TemplateVars{})
+	if err != nil {
+		t.Fatalf("Connect(p1) error = %v", err)
+	}
+
+	// Simulate a restart of p1, then a reconnect installing p2 under the same ID.
+	if _, err := mgr.Restart("bide"); err != nil {
+		t.Fatalf("Restart() error = %v", err)
+	}
+
+	p2, err := mgr.Connect("bide", "sess1-bide", config.TemplateVars{})
+	if err != nil {
+		t.Fatalf("Connect(p2) error = %v", err)
+	}
+
+	// The old connection's deferred cleanup fires with p1's identity: it must
+	// NOT touch p2, which now owns the proxy ID.
+	mgr.Disconnect("sess1-bide", p1)
+
+	select {
+	case <-p2.done:
+		t.Fatal("p2 must survive a stale Disconnect keyed on p1's identity")
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	// A correctly-identified Disconnect does stop p2.
+	mgr.Disconnect("sess1-bide", p2)
+
+	select {
+	case <-p2.done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("p2 should stop when Disconnect is keyed on its own identity")
+	}
+
+	_ = p1
+}
+
+// TestMCPManagerLogFilesRemovedCollidingServer pins that log attribution is
+// config-independent: a shorter-named server does not pick up a longer-named
+// sibling's historical logs even after that sibling is removed from config.
+func TestMCPManagerLogFilesRemovedCollidingServer(t *testing.T) {
+	logDir := t.TempDir()
+	// Only "graith" is configured now; "graith-x" was removed.
+	cfg := &config.Config{
+		MCPServers: []config.MCPServerConfig{{Name: "graith", Command: "cat"}},
+	}
+
+	mgr := NewMCPManager(cfg, nil, logDir, slog.Default())
+	defer mgr.Shutdown()
+
+	mcpDir := filepath.Join(logDir, "mcp")
+	if err := os.MkdirAll(mcpDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	// Historical log from the removed "graith-x" server, named per the daemon's
+	// "<server>-<sessionID>-<server>.log" convention.
+	if err := os.WriteFile(filepath.Join(mcpDir, "graith-x-abc123-graith-x.log"), []byte("removed sibling\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(mcpDir, "graith-abc123-graith.log"), []byte("mine\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	files, err := mgr.LogFiles("graith", 0)
+	if err != nil {
+		t.Fatalf("LogFiles() error = %v", err)
+	}
+
+	if len(files) != 1 || !strings.Contains(files[0].Content, "mine") {
+		t.Fatalf("graith should not pick up removed graith-x logs, got %+v", files)
+	}
+}
+
+func TestTailFileLargeDropsPartialFirstLine(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "big.log")
+
+	// Build a file well over 1 MiB. Each line is uniquely numbered so we can
+	// assert the first returned line is whole (not a mid-line fragment).
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	line := strings.Repeat("x", 200)
+	for i := 0; i < 20000; i++ {
+		if _, err := fmt.Fprintf(f, "%06d-%s\n", i, line); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	_ = f.Close()
+
+	got, err := tailFile(path, 5)
+	if err != nil {
+		t.Fatalf("tailFile() error = %v", err)
+	}
+
+	first := strings.SplitN(got, "\n", 2)[0]
+	// A whole line is exactly "NNNNNN-" followed by 200 x's = 207 chars.
+	if len(first) != 207 || !strings.HasSuffix(first, line) {
+		t.Errorf("first returned line looks truncated: len=%d %q", len(first), first)
+	}
+
+	if strings.Count(strings.TrimRight(got, "\n"), "\n")+1 != 5 {
+		t.Errorf("expected 5 lines, got %q", got)
 	}
 }
 
