@@ -192,6 +192,75 @@ func TestCoverServeAndShutdownTCP(t *testing.T) {
 	}
 }
 
+// TestServeShutdownNoRaceWithConcurrentAccepts is a regression test for a data
+// race between Serve's accept loop and Shutdown: Serve enrolled each accepted
+// connection with s.wg.Add(1) while Shutdown called s.wg.Wait() concurrently —
+// a WaitGroup Add/Wait misuse the race detector flags. It surfaced as a flaky
+// -race failure whenever a connection was being accepted as the server shut
+// down. This test hammers the listener with dials right up to (and past) the
+// Shutdown call so an Accept/trackConn overlaps Wait; run under -race it fails
+// on the old code and passes now that trackConn's Add is serialized with
+// Shutdown's closed flag under the mutex. It also asserts Shutdown drains cleanly.
+func TestServeShutdownNoRaceWithConcurrentAccepts(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Handlers return immediately so connections churn quickly through the wait
+	// group, maximizing the chance an Add overlaps Shutdown's Wait.
+	handler := func(ctx context.Context, conn net.Conn) {}
+
+	srv := NewServer(l, handler, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() { _ = srv.Serve(ctx) }()
+
+	addr := l.Addr().String()
+
+	var (
+		stop    atomic.Bool
+		dialers sync.WaitGroup
+	)
+
+	// Several goroutines dial continuously so connections are still being
+	// accepted when Shutdown runs.
+	for range 4 {
+		dialers.Add(1)
+
+		go func() {
+			defer dialers.Done()
+
+			for !stop.Load() {
+				c, derr := net.Dial("tcp", addr)
+				if derr != nil {
+					return
+				}
+
+				_ = c.Close()
+			}
+		}()
+	}
+
+	// Let the dial storm ramp up, then shut down while accepts are in flight.
+	time.Sleep(50 * time.Millisecond)
+	srv.Shutdown()
+
+	stop.Store(true)
+	dialers.Wait()
+
+	// Shutdown drained: no connection remains tracked.
+	srv.mu.Lock()
+	remaining := len(srv.conns)
+	srv.mu.Unlock()
+
+	if remaining != 0 {
+		t.Errorf("after shutdown %d connections still tracked, want 0", remaining)
+	}
+}
+
 // TestCoverServeContextCancelReturns verifies Serve unblocks and returns the
 // context error once the context is cancelled (the accept loop's ErrClosed
 // path).
