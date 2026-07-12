@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.67.5](https://github.com/d0ugal/graith/compare/v0.67.4...v0.67.5) (2026-07-12)
+
+
+### Bug Fixes
+
+* **daemon:** stop Server.Shutdown racing the accept loop's wg.Add ([9681ec9](https://github.com/d0ugal/graith/commit/9681ec940b2445e76e95938521afa66eae488d86))
+
+
+### Tests
+
+* **auth:** tighten comments to match what the tests actually guard ([af36177](https://github.com/d0ugal/graith/commit/af361776b4b4849ef5296f0def0affadae3db99e))
+
 ## [0.67.4](https://github.com/d0ugal/graith/compare/v0.67.3...v0.67.4) (2026-07-12)
 
 
