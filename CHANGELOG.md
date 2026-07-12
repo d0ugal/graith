@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.67.3](https://github.com/d0ugal/graith/compare/v0.67.2...v0.67.3) (2026-07-12)
+
+
+### Features
+
+* **mcp:** add gr mcp list/restart/logs management commands ([4b80b6c](https://github.com/d0ugal/graith/commit/4b80b6c3d191232fcf4b73b43ccc12c902d3334d))
+
+
+### Bug Fixes
+
+* **auth:** let the tokenless liveness probe reach a fail-closed daemon ([bf6bf87](https://github.com/d0ugal/graith/commit/bf6bf8724f2871913cbd428d8b6ffd317af75551))
+* **mcp:** address review findings for management commands ([9de5e26](https://github.com/d0ugal/graith/commit/9de5e26a490ac742108ca5f38119c0d4ae417bc7))
+
 ## [0.67.2](https://github.com/d0ugal/graith/compare/v0.67.1...v0.67.2) (2026-07-11)
 
 
