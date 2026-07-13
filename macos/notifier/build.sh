@@ -18,7 +18,16 @@
 # Darwin guard is reached (issue #1094 review).
 set -eu
 
+here="$(cd "$(dirname "$0")" && pwd)"
+out_dir="${1:-$here/../build}"
+app="$out_dir/GraithNotifier.app"
+macos_dir="$app/Contents/MacOS"
+
 if [ "$(uname -s)" != "Darwin" ]; then
+	# Remove any stale bundle left by a prior macOS build so a Linux `--snapshot`
+	# in a shared checkout can't package an old app (issue #1101 review); then
+	# skip — swiftc/codesign are macOS only.
+	rm -rf "$app"
 	echo "build.sh: skipping — the notifier app is macOS only" >&2
 	exit 0
 fi
@@ -28,28 +37,41 @@ if ! command -v swiftc >/dev/null 2>&1; then
 	exit 1
 fi
 
-here="$(cd "$(dirname "$0")" && pwd)"
-out_dir="${1:-$here/../build}"
-app="$out_dir/GraithNotifier.app"
-macos_dir="$app/Contents/MacOS"
-
 rm -rf "$app"
 mkdir -p "$macos_dir"
 
 cp "$here/Info.plist" "$app/Contents/Info.plist"
 
-# Pin the deployment target to match LSMinimumSystemVersion in Info.plist —
-# without an explicit -target, swiftc stamps the build host's OS version, so a
-# bundle built on a newer macOS would refuse to launch on older ones despite
-# the plist claiming compatibility (issue #1094 review). Built for the host
-# arch; a distributed universal build would compile + `lipo` both arches.
-arch="$(uname -m)"
+# Build a universal (arm64 + x86_64) binary so one bundle works on both Apple
+# Silicon and Intel Macs. The release compiles the helper once on a single
+# runner arch but ships it into both the darwin_arm64 and darwin_amd64 archives,
+# so a host-arch-only build would leave the notifier broken on the other arch
+# (issue #1101 review). Compile each slice (swiftc cross-compiles via the macOS
+# SDK), then combine with lipo. The deployment target is pinned to match
+# LSMinimumSystemVersion in Info.plist — without an explicit -target, swiftc
+# stamps the build host's OS version, so a bundle built on a newer macOS would
+# refuse to launch on older ones despite the plist claiming compatibility.
+bin="$macos_dir/graith-notifier"
+slice_dir="$(mktemp -d)"
+arm_slice="$slice_dir/arm64"
+x86_slice="$slice_dir/x86_64"
+trap 'rm -rf "$slice_dir"' EXIT
+
 swiftc -O \
-	-target "${arch}-apple-macosx11.0" \
+	-target arm64-apple-macosx11.0 \
 	-framework Foundation \
 	-framework UserNotifications \
-	-o "$macos_dir/graith-notifier" \
+	-o "$arm_slice" \
 	"$here/main.swift"
+
+swiftc -O \
+	-target x86_64-apple-macosx11.0 \
+	-framework Foundation \
+	-framework UserNotifications \
+	-o "$x86_slice" \
+	"$here/main.swift"
+
+lipo -create -output "$bin" "$arm_slice" "$x86_slice"
 
 # Code signature. UNUserNotificationCenter refuses to deliver from an unsigned
 # bundle, so signing is required — a failure here is fatal, not a warning, so a

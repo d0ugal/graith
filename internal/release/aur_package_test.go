@@ -61,9 +61,12 @@ func TestAURPackageSourcesAreArchived(t *testing.T) {
 		t.Fatal("no archives block in .goreleaser.yaml")
 	}
 
+	// The AUR -bin package builds from the Linux archive (aurs.ids: [linux]).
+	linuxFiles := archiveByID(t, cfg, "linux")
+
 	archived := make(map[string]bool)
-	for _, f := range cfg.Archives[0].Files {
-		archived[f] = true
+	for _, f := range linuxFiles {
+		archived[f.path()] = true
 	}
 
 	for _, inst := range aurPackageInstalls(t, cfg.Aurs[0].Package) {
@@ -74,8 +77,8 @@ func TestAURPackageSourcesAreArchived(t *testing.T) {
 		}
 
 		if !archived[inst.src] {
-			t.Errorf("AUR package() installs %q but it is not in the archive files: %v",
-				inst.src, cfg.Archives[0].Files)
+			t.Errorf("AUR package() installs %q but it is not in the Linux archive files: %v",
+				inst.src, linuxFiles)
 		}
 	}
 }
@@ -94,8 +97,14 @@ func TestAURPackageShipsManTree(t *testing.T) {
 
 	const manGlob = "man/*.1.gz"
 
-	if !slices.Contains(cfg.Archives[0].Files, manGlob) {
-		t.Errorf("archive files does not ship the man tree glob %q; found: %v", manGlob, cfg.Archives[0].Files)
+	// The AUR -bin package builds from the Linux archive (aurs.ids: [linux]).
+	linuxFiles := archiveByID(t, cfg, "linux")
+
+	hasManGlob := slices.ContainsFunc(linuxFiles, func(f archiveFile) bool {
+		return f.path() == manGlob
+	})
+	if !hasManGlob {
+		t.Errorf("Linux archive files does not ship the man tree glob %q; found: %v", manGlob, linuxFiles)
 	}
 
 	pkg := cfg.Aurs[0].Package
