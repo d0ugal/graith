@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	creackpty "github.com/creack/pty"
 	"github.com/d0ugal/graith/internal/config"
 	grpty "github.com/d0ugal/graith/internal/pty"
 )
@@ -103,6 +105,7 @@ func TestRestartCapturesScrollback(t *testing.T) {
 		DataDir:    dir,
 		LogDir:     dir,
 		RuntimeDir: dir,
+		TmpDir:     filepath.Join(dir, "tmp"),
 	}, slog.Default())
 
 	created, err := sm.Create(CreateOpts{
@@ -137,6 +140,18 @@ func TestRestartCapturesScrollback(t *testing.T) {
 
 	// The live PTY's scrollback must capture output produced after restart.
 	waitForScrollback(t, sm, id, "RESUME-OUTPUT")
+
+	// The reconstructed screen model must also show the post-restart output.
+	// This is the terminal state a fresh attach replays, so asserting it here
+	// (not just the raw scrollback bytes) exercises the actual blank-screen
+	// surface from #1087 rather than only the on-disk log.
+	if ptySess, ok := sm.GetPTY(id); ok {
+		if screen := ptySess.ScreenPreview(); !strings.Contains(screen, "RESUME-OUTPUT") {
+			t.Errorf("rendered screen missing post-restart output; got:\n%s", screen)
+		}
+	} else {
+		t.Fatal("no live PTY after restart")
+	}
 
 	// The on-disk scrollback log (what `gr logs` reads for a session) must also
 	// contain the post-restart output.
@@ -178,6 +193,7 @@ func TestRestartRunningSessionCapturesScrollback(t *testing.T) {
 		DataDir:    dir,
 		LogDir:     dir,
 		RuntimeDir: dir,
+		TmpDir:     filepath.Join(dir, "tmp"),
 	}, slog.Default())
 
 	created, err := sm.Create(CreateOpts{
@@ -240,6 +256,12 @@ func TestCheckSilentSessionWarnsOnce(t *testing.T) {
 	ptySess := newSilentPTY(t, dir, "dreich")
 	t.Cleanup(func() { _ = ptySess.Kill(); <-ptySess.Done(); ptySess.Close() })
 
+	// The diagnostic only warns for the PTY currently installed for the id, so
+	// register it as the live session PTY.
+	sm.mu.Lock()
+	sm.sessions["dreich"] = ptySess
+	sm.mu.Unlock()
+
 	// Let the PTY age past the (tiny) test threshold.
 	time.Sleep(30 * time.Millisecond)
 
@@ -295,5 +317,112 @@ func TestCheckSilentSessionQuietWhenOutput(t *testing.T) {
 
 	if got := logs.String(); strings.Contains(got, "producing no PTY output") {
 		t.Fatalf("did not expect a silent-session warning:\n%s", got)
+	}
+}
+
+// TestCheckSilentSessionIgnoresStalePTY verifies the diagnostic does not warn
+// for a PTY that is no longer the session's live PTY — the situation after a
+// concurrent restart swaps in a new PTY. A stale snapshot warning would both
+// mislead and consume the new PTY's once-per-lifetime slot.
+func TestCheckSilentSessionIgnoresStalePTY(t *testing.T) {
+	dir := t.TempDir()
+
+	var logs syncBuffer
+
+	log := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	sm := NewSessionManager(config.Default(), config.Paths{
+		StateFile: filepath.Join(dir, "state.json"), DataDir: dir, LogDir: dir, RuntimeDir: dir,
+	}, log)
+
+	stale := newSilentPTY(t, dir, "thrawn-old")
+	t.Cleanup(func() { _ = stale.Kill(); <-stale.Done(); stale.Close() })
+
+	fresh := newSilentPTY(t, dir, "thrawn-new")
+	t.Cleanup(func() { _ = fresh.Kill(); <-fresh.Done(); fresh.Close() })
+
+	// A restart has installed the fresh PTY as the session's live PTY.
+	sm.mu.Lock()
+	sm.sessions["thrawn"] = fresh
+	sm.mu.Unlock()
+
+	time.Sleep(30 * time.Millisecond)
+
+	// Checking the stale PTY (a leftover detection snapshot) must not warn.
+	sm.checkSilentSessionWithThreshold("thrawn", "thrawn-sess", "claude", stale, 10*time.Millisecond)
+
+	if got := logs.String(); strings.Contains(got, "producing no PTY output") {
+		t.Fatalf("stale PTY must not warn:\n%s", got)
+	}
+
+	// The fresh (installed) PTY still gets its warning.
+	sm.checkSilentSessionWithThreshold("thrawn", "thrawn-sess", "claude", fresh, 10*time.Millisecond)
+
+	if got := logs.String(); !strings.Contains(got, "producing no PTY output") {
+		t.Fatalf("installed PTY should warn:\n%s", got)
+	}
+}
+
+// TestCheckSilentSessionExemptsAdopted verifies an adopted PTY (daemon-upgrade
+// re-attach) is never flagged silent: it starts at zero bytes even though the
+// agent likely rendered before the upgrade, so zero-output there does not mean
+// "never rendered" (issue #1087).
+func TestCheckSilentSessionExemptsAdopted(t *testing.T) {
+	dir := t.TempDir()
+
+	var logs syncBuffer
+
+	log := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	sm := NewSessionManager(config.Default(), config.Paths{
+		StateFile: filepath.Join(dir, "state.json"), DataDir: dir, LogDir: dir, RuntimeDir: dir,
+	}, log)
+
+	// A real pty master fd to adopt, and a definitively-dead PID so the adopted
+	// wait loop tears down promptly.
+	ptmx, tty, err := creackpty.Open()
+	if err != nil {
+		t.Fatalf("open pty: %v", err)
+	}
+
+	dead := exec.Command("true")
+	if err := dead.Run(); err != nil {
+		t.Fatalf("run dead process: %v", err)
+	}
+
+	adopted, err := grpty.AdoptSession(grpty.AdoptOpts{
+		ID:         "bide",
+		Fd:         ptmx.Fd(),
+		PID:        dead.Process.Pid,
+		LogPath:    filepath.Join(dir, "bide.log"),
+		MaxLogSize: 1 << 20,
+		Logger:     log,
+	})
+	if err != nil {
+		t.Fatalf("adopt: %v", err)
+	}
+
+	// Teardown: close the slave first so the master read returns EOF and the
+	// read loop exits (calling ptmx.Fd() above put the fd in blocking mode, so
+	// Close alone can't interrupt a blocked read), then close the session.
+	t.Cleanup(func() {
+		_ = tty.Close()
+		adopted.Close()
+		_ = ptmx.Close()
+	})
+
+	if !adopted.WasAdopted() {
+		t.Fatal("expected WasAdopted() to be true")
+	}
+
+	sm.mu.Lock()
+	sm.sessions["bide"] = adopted
+	sm.mu.Unlock()
+
+	time.Sleep(30 * time.Millisecond)
+
+	// Even well past the threshold with zero output, an adopted PTY must not warn.
+	sm.checkSilentSessionWithThreshold("bide", "bide-sess", "claude", adopted, time.Nanosecond)
+
+	if got := logs.String(); strings.Contains(got, "producing no PTY output") {
+		t.Fatalf("adopted session must be exempt from the silent warning:\n%s", got)
 	}
 }

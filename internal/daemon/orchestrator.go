@@ -213,6 +213,7 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 		Cols:       80,
 		LogPath:    logPath,
 		MaxLogSize: 100 * 1024 * 1024,
+		Logger:     sm.log,
 	})
 	if err != nil {
 		sm.rollbackOrchestratorCreate(id)
