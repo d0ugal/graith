@@ -150,6 +150,31 @@ func SharedStorePath(dataDir string) string {
 	return filepath.Join(dataDir, "store", "shared")
 }
 
+// Exists reports whether storePath is an initialised store (i.e. it has a
+// .git directory). A path that does not yet hold a store returns false.
+func Exists(storePath string) bool {
+	_, err := os.Stat(filepath.Join(storePath, ".git"))
+	return err == nil
+}
+
+// StorePathByID resolves a repo ID as printed by ListStores (the
+// <reponame>-<hash> store directory name) to its on-disk store directory,
+// reporting whether a store with that ID exists. The ID must be a single path
+// segment so it cannot escape the store root. This lets an ID discovered via
+// `gr store ls -a` round-trip back into `--repo`.
+func StorePathByID(dataDir, id string) (string, bool) {
+	if id == "" || id == "shared" || strings.ContainsAny(id, `/\`) || strings.Contains(id, "..") {
+		return "", false
+	}
+
+	sp := filepath.Join(dataDir, "store", id)
+	if !Exists(sp) {
+		return "", false
+	}
+
+	return sp, true
+}
+
 // withLock acquires an exclusive flock on a lock file in storePath and runs fn.
 func withLock(storePath string, fn func() error) error {
 	lockPath := filepath.Join(storePath, "store.lock")

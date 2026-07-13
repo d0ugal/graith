@@ -820,6 +820,74 @@ func TestListStores(t *testing.T) {
 	}
 }
 
+func TestExists(t *testing.T) {
+	testutil.IsolateGit(t)
+
+	dataDir := t.TempDir()
+	sp := store.StorePath(dataDir, "/hame/user/croft")
+
+	if store.Exists(sp) {
+		t.Error("Exists = true for an uninitialised store")
+	}
+
+	if err := store.Init(sp); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	if !store.Exists(sp) {
+		t.Error("Exists = false after Init")
+	}
+}
+
+func TestStorePathByID(t *testing.T) {
+	testutil.IsolateGit(t)
+
+	dataDir := t.TempDir()
+
+	// The repo ID is the store directory's base name, exactly as ListStores /
+	// `gr store ls -a` reports it.
+	sp := store.StorePath(dataDir, "/hame/user/croft")
+	id := filepath.Base(sp)
+
+	if _, ok := store.StorePathByID(dataDir, id); ok {
+		t.Error("StorePathByID resolved an ID before the store was initialised")
+	}
+
+	if err := store.Init(sp); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	got, ok := store.StorePathByID(dataDir, id)
+	if !ok {
+		t.Fatalf("StorePathByID(%q) not found after Init", id)
+	}
+
+	if got != sp {
+		t.Errorf("StorePathByID = %q, want %q", got, sp)
+	}
+}
+
+func TestStorePathByIDRejectsUnknownAndTraversal(t *testing.T) {
+	testutil.IsolateGit(t)
+
+	dataDir := t.TempDir()
+
+	cases := []string{
+		"",                // empty
+		"shared",          // the shared store is not a repo ID
+		"dreich-deadbeef", // no such store
+		"../escape",       // traversal
+		"nested/haar",     // multi-segment
+		`back\slash`,      // backslash
+	}
+
+	for _, id := range cases {
+		if _, ok := store.StorePathByID(dataDir, id); ok {
+			t.Errorf("StorePathByID(%q) = ok, want rejected", id)
+		}
+	}
+}
+
 func TestAppendCreatesFile(t *testing.T) {
 	dir := newTestStore(t)
 

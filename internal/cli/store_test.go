@@ -159,6 +159,103 @@ func TestResolveStorePathCovRepo(t *testing.T) {
 	}
 }
 
+// TestResolveStorePathAcceptsRepoID checks that a repo ID (as printed by
+// `gr store ls -a`) resolves to the same store as the underlying repo path.
+func TestResolveStorePathAcceptsRepoID(t *testing.T) {
+	p := storeTestEnv(t, false, "")
+
+	repo := t.TempDir()
+	resolved := config.ResolvePath(repo)
+	sp := store.StorePath(p.DataDir, resolved)
+
+	if err := store.Init(sp); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	id := filepath.Base(sp)
+	storeRepoFlag = id
+
+	got, label, err := resolveStorePath()
+	if err != nil {
+		t.Fatalf("resolveStorePath by ID: %v", err)
+	}
+
+	if got != sp {
+		t.Errorf("store path = %q, want %q", got, sp)
+	}
+
+	if label != id {
+		t.Errorf("label = %q, want %q", label, id)
+	}
+}
+
+// TestStoreGetByRepoIDRoundTrip is the end-to-end fix for issue #1088: a
+// document stored under a repo path is retrievable via the repo ID surfaced by
+// `gr store ls -a`, and the path form still works.
+func TestStoreGetByRepoIDRoundTrip(t *testing.T) {
+	p := storeTestEnv(t, false, "")
+
+	repo := t.TempDir()
+	resolved := config.ResolvePath(repo)
+	sp := store.StorePath(p.DataDir, resolved)
+
+	if err := store.Init(sp); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	key := "notes/bonnie.md"
+	body := "# canny notes\n"
+
+	if err := store.Put(sp, key, body); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+
+	// Retrieve by the repo ID (the value `gr store ls -a` prints as "repo").
+	id := filepath.Base(sp)
+	storeRepoFlag = id
+
+	got := captureStdout(t, func() {
+		if err := storeGetCmd.RunE(storeGetCmd, []string{key}); err != nil {
+			t.Fatalf("get by ID: %v", err)
+		}
+	})
+
+	if got != body {
+		t.Errorf("get by ID returned %q, want %q", got, body)
+	}
+
+	// The filesystem path form must still work (backward compatible).
+	storeRepoFlag = repo
+
+	got = captureStdout(t, func() {
+		if err := storeGetCmd.RunE(storeGetCmd, []string{key}); err != nil {
+			t.Fatalf("get by path: %v", err)
+		}
+	})
+
+	if got != body {
+		t.Errorf("get by path returned %q, want %q", got, body)
+	}
+}
+
+// TestStoreGetUnknownRepoClearError checks that an unresolvable --repo value
+// produces a clear "unknown repo" error rather than a misleading
+// "document not found".
+func TestStoreGetUnknownRepoClearError(t *testing.T) {
+	storeTestEnv(t, false, "")
+
+	storeRepoFlag = "nae-such-croft-deadbeef1234"
+
+	err := storeGetCmd.RunE(storeGetCmd, []string{"notes/haar.md"})
+	if err == nil {
+		t.Fatal("expected error for unknown repo")
+	}
+
+	if !strings.Contains(err.Error(), "unknown repo") {
+		t.Errorf("error %q should mention 'unknown repo'", err)
+	}
+}
+
 func TestResolveCurrentRepoCovEnv(t *testing.T) {
 	repo := t.TempDir()
 	t.Setenv("GRAITH_REPO_PATH", repo)
