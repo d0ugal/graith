@@ -41,6 +41,10 @@ type Session struct {
 	userInputCond    *sync.Cond
 	adoptedAt        time.Time
 	createdAt        time.Time
+	// log routes this session's diagnostics to the daemon's logger. It is set
+	// once at construction and only read, so it needs no lock. Never nil (falls
+	// back to slog.Default()).
+	log *slog.Logger
 }
 
 type SessionOpts struct {
@@ -52,6 +56,9 @@ type SessionOpts struct {
 	Rows, Cols uint16
 	LogPath    string
 	MaxLogSize int64
+	// Logger routes this session's PTY/scrollback diagnostics to the daemon's
+	// logger. Nil falls back to slog.Default(). See the Session.log field.
+	Logger *slog.Logger
 }
 
 func NewSession(opts SessionOpts) (*Session, error) {
@@ -77,14 +84,28 @@ func NewSession(opts SessionOpts) (*Session, error) {
 		return nil, fmt.Errorf("scrollback: %w", err)
 	}
 
+	log := opts.Logger
+	if log == nil {
+		log = slog.Default()
+	}
+
+	sb.SetLogger(log)
+
 	s := &Session{
 		ID: opts.ID, Cmd: cmd, Ptmx: ptmx, Scrollback: sb,
 		screen:    vt10x.New(vt10x.WithSize(int(opts.Cols), int(opts.Rows))),
 		done:      make(chan struct{}),
 		readDone:  make(chan struct{}),
 		createdAt: time.Now(),
+		log:       log,
 	}
 	s.userInputCond = sync.NewCond(&sync.Mutex{})
+
+	// The inherited scrollback size distinguishes a fresh log from one reopened
+	// (append) on resume/restart — the append case is the restart path in #1087.
+	written, _, _ := sb.Stats()
+	log.Debug("scrollback writer initialized", "session", opts.ID,
+		"path", opts.LogPath, "existing_bytes", written, "max_size", opts.MaxLogSize)
 
 	go s.readLoop()
 	go s.waitLoop()
@@ -98,6 +119,9 @@ type AdoptOpts struct {
 	PID        int
 	LogPath    string
 	MaxLogSize int64
+	// Logger routes this session's diagnostics to the daemon's logger. Nil
+	// falls back to slog.Default().
+	Logger *slog.Logger
 }
 
 func AdoptSession(opts AdoptOpts) (*Session, error) {
@@ -106,10 +130,17 @@ func AdoptSession(opts AdoptOpts) (*Session, error) {
 		return nil, fmt.Errorf("invalid fd %d for session %s", opts.Fd, opts.ID)
 	}
 
+	log := opts.Logger
+	if log == nil {
+		log = slog.Default()
+	}
+
 	sb, err := NewScrollback(opts.LogPath, opts.MaxLogSize)
 	if err != nil {
 		return nil, fmt.Errorf("open scrollback: %w", err)
 	}
+
+	sb.SetLogger(log)
 
 	cols, rows := 80, 24
 	if ws, err := pty.GetsizeFull(ptmx); err == nil && ws.Cols > 0 && ws.Rows > 0 {
@@ -118,7 +149,7 @@ func AdoptSession(opts AdoptOpts) (*Session, error) {
 
 	startTime, stErr := ProcessStartTime(opts.PID)
 	if stErr != nil {
-		slog.Warn("could not capture process start time for adopted session; PID reuse detection degraded",
+		log.Warn("could not capture process start time for adopted session; PID reuse detection degraded",
 			"session", opts.ID, "pid", opts.PID, "error", stErr)
 	}
 
@@ -133,6 +164,7 @@ func AdoptSession(opts AdoptOpts) (*Session, error) {
 		adoptedStartTime: startTime,
 		adoptedAt:        time.Now(),
 		createdAt:        time.Now(),
+		log:              log,
 	}
 	s.userInputCond = sync.NewCond(&sync.Mutex{})
 
@@ -256,7 +288,7 @@ func (s *Session) readLoop() {
 			// attach shows nothing. Logging the first output makes "did the agent
 			// ever produce anything?" answerable from the daemon log.
 			if first {
-				slog.Info("pty first output", "session", s.ID, "bytes", n)
+				s.log.Info("pty first output", "session", s.ID, "bytes", n)
 			}
 
 			for _, w := range writers {
@@ -269,16 +301,17 @@ func (s *Session) readLoop() {
 		if err != nil {
 			s.mu.RLock()
 			total := s.bytesRead
+			adopted := !s.adoptedAt.IsZero()
 			s.mu.RUnlock()
 
-			// A read loop ending with zero total output means the agent produced
-			// nothing at all this lifetime — surfaced at Warn so a silent session
-			// (issue #1087) is visible in the log rather than a mystery.
-			if total == 0 {
-				slog.Warn("pty read loop ended with no output", "session", s.ID, "error", err)
-			} else {
-				slog.Debug("pty read loop ended", "session", s.ID, "total_bytes", total, "error", err)
-			}
+			// Record total output at loop end. Zero output is the silent-session
+			// signature (issue #1087), but a loop can also end at zero for benign
+			// reasons — a session stopped/killed before it rendered, an adopted
+			// PTY that stayed quiet after a daemon upgrade, or a command agent
+			// that emits nothing — so this stays at Info (the actionable
+			// diagnostic is the daemon's 20s silent-session Warn, not this).
+			s.log.Info("pty read loop ended",
+				"session", s.ID, "total_bytes", total, "adopted", adopted, "error", err)
 
 			return
 		}
@@ -528,6 +561,13 @@ func (s *Session) BytesRead() int64 { s.mu.RLock(); defer s.mu.RUnlock(); return
 // CreatedAt returns when this PTY session object was constructed (spawned or
 // adopted). Used to age a silent session for the zero-output diagnostic.
 func (s *Session) CreatedAt() time.Time { s.mu.RLock(); defer s.mu.RUnlock(); return s.createdAt }
+
+// WasAdopted reports whether this session was adopted from a prior daemon (a
+// daemon upgrade re-attaching to a surviving agent) rather than freshly
+// spawned. An adopted PTY starts at zero bytes read even though the agent may
+// have rendered before the upgrade, so the silent-session diagnostic can't
+// treat its zero-output as "never rendered" (issue #1087).
+func (s *Session) WasAdopted() bool { s.mu.RLock(); defer s.mu.RUnlock(); return !s.adoptedAt.IsZero() }
 
 // RecentlyAdopted returns true if the session was adopted (daemon restart)
 // within the last duration and has not yet received fresh PTY output.

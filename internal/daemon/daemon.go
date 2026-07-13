@@ -408,6 +408,7 @@ func (sm *SessionManager) AdoptSessions(manifest *UpgradeManifest) error {
 			PID:        us.PID,
 			LogPath:    logPath,
 			MaxLogSize: 100 * 1024 * 1024,
+			Logger:     sm.log,
 		})
 		if err != nil {
 			sm.log.Warn("failed to adopt session", "id", us.ID, "err", err)
@@ -1308,6 +1309,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		Cols:       cols,
 		LogPath:    logPath,
 		MaxLogSize: 100 * 1024 * 1024,
+		Logger:     sm.log,
 	})
 	if err != nil {
 		cleanupOnError()
@@ -1795,6 +1797,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 		Cols:       cols,
 		LogPath:    logPath,
 		MaxLogSize: 100 * 1024 * 1024,
+		Logger:     sm.log,
 	})
 	if err != nil {
 		forkCleanup()
@@ -2729,6 +2732,7 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 		Cols:       cols,
 		LogPath:    logPath,
 		MaxLogSize: 100 * 1024 * 1024,
+		Logger:     sm.log,
 	})
 	if err != nil {
 		rollbackState()
@@ -5319,8 +5323,6 @@ const silentSessionThreshold = 20 * time.Second
 // was missing when #1087 (blank screen after restart) was diagnosed: the agent
 // process was alive and writing its transcript, but nothing reached the PTY, so
 // scrollback stayed empty and attach showed nothing — with no trace in the log.
-// A recently-adopted session is exempt: after a daemon upgrade the PTY object
-// is new but the agent is mid-run and may legitimately be quiet.
 func (sm *SessionManager) checkSilentSession(id, name, agent string, pty *grpty.Session) {
 	sm.checkSilentSessionWithThreshold(id, name, agent, pty, silentSessionThreshold)
 }
@@ -5332,16 +5334,30 @@ func (sm *SessionManager) checkSilentSessionWithThreshold(id, name, agent string
 		return
 	}
 
+	// An adopted PTY (daemon upgrade re-attaching to a surviving agent) starts
+	// at zero bytes even though the agent likely rendered before the upgrade, so
+	// zero-output can't be read as "never rendered" — exempt it outright rather
+	// than emit a false diagnosis for every idle adopted session (issue #1087).
+	if pty.WasAdopted() {
+		return
+	}
+
 	created := pty.CreatedAt()
 	if created.IsZero() || time.Since(created) < threshold {
 		return
 	}
 
-	if pty.RecentlyAdopted(threshold) {
+	// Mark-and-warn under the lock, and only for the PTY still installed for
+	// this id. A concurrent restart may have swapped in a new PTY and cleared
+	// silentWarned between the snapshot and here; without the identity check a
+	// stale snapshot of the old PTY could warn spuriously and consume the new
+	// PTY's once-per-lifetime slot.
+	sm.mu.Lock()
+	if sm.sessions[id] != pty {
+		sm.mu.Unlock()
 		return
 	}
 
-	sm.mu.Lock()
 	warned := sm.silentWarned[id]
 	sm.silentWarned[id] = true
 	sm.mu.Unlock()

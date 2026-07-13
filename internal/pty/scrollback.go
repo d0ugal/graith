@@ -18,6 +18,7 @@ type Scrollback struct {
 	maxSize   int64
 	written   int64
 	saturated bool
+	log       *slog.Logger
 }
 
 func NewScrollback(path string, maxSize int64) (*Scrollback, error) {
@@ -33,15 +34,22 @@ func NewScrollback(path string, maxSize int64) (*Scrollback, error) {
 		written = info.Size()
 	}
 
-	// Log writer initialisation so the scrollback pipeline is traceable — a
-	// blank-screen-on-restart bug (issue #1087) was hard to diagnose because
-	// nothing recorded whether the writer was opened or what it inherited from
-	// a prior run. The existing size distinguishes a fresh log from one being
-	// reopened (append) on resume/restart.
-	slog.Debug("scrollback writer initialized",
-		"path", path, "existing_bytes", written, "max_size", maxSize)
+	return &Scrollback{file: f, path: path, maxSize: maxSize, written: written, log: slog.Default()}, nil
+}
 
-	return &Scrollback{file: f, path: path, maxSize: maxSize, written: written}, nil
+// SetLogger routes the scrollback writer's diagnostics to the daemon's logger.
+// The daemon never calls slog.SetDefault and runs with stderr sent to
+// /dev/null, so without this the writer's logs would be discarded (issue
+// #1087). A nil logger is ignored (keeps the slog.Default() fallback set at
+// construction).
+func (s *Scrollback) SetLogger(log *slog.Logger) {
+	if log == nil {
+		return
+	}
+
+	s.mu.Lock()
+	s.log = log
+	s.mu.Unlock()
 }
 
 func (s *Scrollback) Write(data []byte) (int, error) {
@@ -51,7 +59,7 @@ func (s *Scrollback) Write(data []byte) (int, error) {
 	if s.maxSize > 0 && s.written >= s.maxSize {
 		if !s.saturated {
 			s.saturated = true
-			slog.Warn("scrollback full, further output will not be recorded", "path", s.path, "max_size", s.maxSize)
+			s.log.Warn("scrollback full, further output will not be recorded", "path", s.path, "max_size", s.maxSize)
 		}
 
 		return len(data), nil
