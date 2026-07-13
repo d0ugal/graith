@@ -90,6 +90,7 @@ type SessionManager struct {
 	lastInboxNotifyAt  map[string]time.Time
 	prWatch            *prWatchState
 	triggers           *triggerState
+	tokens             *tokenCache
 
 	// pushNotify guards proactive `gr notify` push-notification gating state:
 	// a rolling window of delivered timestamps (rate limit) and a per-key map of
@@ -129,6 +130,7 @@ func NewSessionManager(cfg *config.Config, paths config.Paths, log *slog.Logger)
 		lastInboxNotifyAt:  make(map[string]time.Time),
 		prWatch:            newPRWatchState(),
 		triggers:           newTriggerState(),
+		tokens:             newTokenCache(),
 		cfg:                cfg,
 		paths:              paths,
 		log:                log,
@@ -6063,6 +6065,7 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 	go sm.RunPurgeLoop(ctx)
 	go sm.RunTriggerLoop(ctx)
 	go sm.RunFileWatchLoop(ctx)
+	go sm.RunTokenLoop(ctx)
 
 	go sm.orchestratorSupervisor(ctx, sm.orchestratorExitCh)
 	go sm.ensureOrchestrator(ctx)

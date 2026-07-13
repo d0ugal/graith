@@ -117,6 +117,10 @@ func SessionColumns() []SessionColumn {
 			},
 		},
 		{
+			Key: "tokens", Header: "Tokens", ShowCLI: true, Wide: true,
+			CLIValue: func(s protocol.SessionInfo, _ time.Time) string { return cliTokens(s) },
+		},
+		{
 			Key: "age", Header: "Age", ShowCLI: true,
 			CLIValue: cliAge,
 		},
@@ -271,6 +275,53 @@ func cliGit(s protocol.SessionInfo) string {
 	}
 
 	return out
+}
+
+// cliTokens is the plain-text token cell for `gr ls --wide`: the compact total,
+// an empty string when unknown (never observed / unsupported agent), and a
+// trailing "~" when the count is approximate (parse conflicts / no-id records).
+func cliTokens(s protocol.SessionInfo) string {
+	if s.Tokens == nil {
+		return ""
+	}
+
+	out := CompactCount(s.Tokens.Total)
+	if s.Tokens.Degraded {
+		out += "~"
+	}
+
+	return out
+}
+
+// CompactCount renders a token count compactly: 0, 3.4k, 847k, 1.2M, 5B. It
+// keeps one decimal below 10 of a unit (1.2M) and drops it above (12M).
+func CompactCount(n int64) string {
+	if n < 0 {
+		return "0"
+	}
+
+	switch {
+	case n < 1000:
+		return fmt.Sprintf("%d", n)
+	case n < 1_000_000:
+		return compactUnit(n, 1000, "k")
+	case n < 1_000_000_000:
+		return compactUnit(n, 1_000_000, "M")
+	default:
+		return compactUnit(n, 1_000_000_000, "B")
+	}
+}
+
+func compactUnit(n, unit int64, suffix string) string {
+	whole := n / unit
+	if whole < 10 {
+		frac := (n % unit) * 10 / unit
+		if frac > 0 {
+			return fmt.Sprintf("%d.%d%s", whole, frac, suffix)
+		}
+	}
+
+	return fmt.Sprintf("%d%s", whole, suffix)
 }
 
 // cliAge is the plain-text age cell for `gr ls`, derived from the created-at

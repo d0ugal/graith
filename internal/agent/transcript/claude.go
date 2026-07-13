@@ -64,6 +64,22 @@ type claudeRecord struct {
 type claudeMessage struct {
 	Role    string          `json:"role"`
 	Content json.RawMessage `json:"content"`
+	// ID is the "msg_..." identifier. Claude writes one JSONL line per content
+	// block, all sharing this id and carrying an identical usage object, so it
+	// is the dedup key for token counting (see usage below).
+	ID    string       `json:"id"`
+	Model string       `json:"model"` // kept for the cost follow-up
+	Usage *claudeUsage `json:"usage"` // nil on user records
+}
+
+// claudeUsage mirrors Claude's per-response usage object. The four fields are
+// mutually exclusive: input_tokens is the fresh (uncached) input, with cache
+// reads/writes counted separately.
+type claudeUsage struct {
+	InputTokens              int64 `json:"input_tokens"`
+	OutputTokens             int64 `json:"output_tokens"`
+	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
 }
 
 type claudeBlock struct {
@@ -138,6 +154,133 @@ func (claudeReader) read(path string) ([]Turn, int, error) {
 	}
 
 	return turns, dropped, nil
+}
+
+// usage sums token usage across every assistant record in the file — including
+// sidechains and abandoned branches, whose tokens were still spent — rather than
+// walking the active chain like read. Claude writes one JSONL line per content
+// block, all sharing message.id with an identical usage object, so counting is
+// deduplicated by message.id (a naive sum inflates counts ~2-3×).
+func (claudeReader) usage(path string) (Usage, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return Usage{}, err
+	}
+	defer func() { _ = f.Close() }()
+
+	var u Usage
+
+	// seen records the usage already counted for a message id, so a duplicate
+	// with differing values can be reconciled deterministically rather than
+	// double-counted.
+	seen := make(map[string]claudeUsage)
+
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+
+	for sc.Scan() {
+		line := bytes.TrimSpace(sc.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+
+		var rec claudeRecord
+		if err := json.Unmarshal(line, &rec); err != nil {
+			u.Dropped++ // partial trailing line / format drift
+			continue
+		}
+
+		if rec.Type != "assistant" || len(rec.Message) == 0 {
+			continue
+		}
+
+		var msg claudeMessage
+		if err := json.Unmarshal(rec.Message, &msg); err != nil {
+			u.Dropped++
+			continue
+		}
+
+		if msg.Usage == nil {
+			continue // user-authored assistant record without usage; nothing to count
+		}
+
+		countClaudeUsage(&u, seen, msg)
+	}
+
+	if err := sc.Err(); err != nil {
+		u.Dropped++ // long unterminated final line on a live file
+	}
+
+	return u, nil
+}
+
+// countClaudeUsage folds one assistant message's usage into u, deduplicating by
+// message id. A record with no id can't be deduped, so it is counted but flags
+// the total as approximate (Dropped). A duplicate id whose usage differs from
+// the first occurrence keeps the larger per-field value (guarding against a
+// partial live write) and is flagged.
+func countClaudeUsage(u *Usage, seen map[string]claudeUsage, msg claudeMessage) {
+	cu := *msg.Usage
+	u.Found = true
+
+	if msg.ID == "" {
+		addClaudeUsage(u, cu)
+		u.Dropped++ // un-deduplicatable: total is approximate
+
+		return
+	}
+
+	prev, dup := seen[msg.ID]
+	if !dup {
+		seen[msg.ID] = cu
+		addClaudeUsage(u, cu)
+
+		return
+	}
+
+	if cu == prev {
+		return // identical repeat of an already-counted response — the common case
+	}
+
+	// Same id, different numbers: reconcile to the larger per-field value and
+	// flag the conflict rather than trusting either occurrence.
+	merged := maxClaudeUsage(prev, cu)
+	adjustClaudeUsage(u, prev, merged)
+	seen[msg.ID] = merged
+	u.Dropped++
+}
+
+func addClaudeUsage(u *Usage, cu claudeUsage) {
+	u.Input += cu.InputTokens
+	u.Output += cu.OutputTokens
+	u.CacheCreation += cu.CacheCreationInputTokens
+	u.CacheRead += cu.CacheReadInputTokens
+}
+
+// adjustClaudeUsage replaces a previously-counted usage with a new one by
+// applying the per-field delta.
+func adjustClaudeUsage(u *Usage, from, to claudeUsage) {
+	u.Input += to.InputTokens - from.InputTokens
+	u.Output += to.OutputTokens - from.OutputTokens
+	u.CacheCreation += to.CacheCreationInputTokens - from.CacheCreationInputTokens
+	u.CacheRead += to.CacheReadInputTokens - from.CacheReadInputTokens
+}
+
+func maxClaudeUsage(a, b claudeUsage) claudeUsage {
+	return claudeUsage{
+		InputTokens:              maxInt64(a.InputTokens, b.InputTokens),
+		OutputTokens:             maxInt64(a.OutputTokens, b.OutputTokens),
+		CacheCreationInputTokens: maxInt64(a.CacheCreationInputTokens, b.CacheCreationInputTokens),
+		CacheReadInputTokens:     maxInt64(a.CacheReadInputTokens, b.CacheReadInputTokens),
+	}
+}
+
+func maxInt64(a, b int64) int64 {
+	if a > b {
+		return a
+	}
+
+	return b
 }
 
 // activeLeaf picks the last non-sidechain user/assistant record in file order.

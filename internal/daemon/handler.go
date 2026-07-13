@@ -2081,6 +2081,7 @@ func toSessionInfo(s SessionState, cfg *config.Config, hr *hookReport) protocol.
 		UnpushedCount:  s.GitUnpushed,
 		PullRequest:    prInfo(s.PullRequest),
 		CI:             ciInfo(s.CI),
+		Tokens:         tokenInfo(s.Tokens),
 		Sandboxed:      s.Sandboxed,
 		Mirror:         s.Mirror,
 		InPlace:        s.InPlace,
