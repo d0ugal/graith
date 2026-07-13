@@ -17,7 +17,14 @@ env:
 
 jobs:
   goreleaser:
-    runs-on: ubuntu-latest
+    # Runs on macOS so the release can build the Swift notification helper
+    # (GraithNotifier.app) with swiftc and bundle it into the Darwin archive
+    # (issue #1101). A macOS runner still cross-compiles the Linux Go binaries
+    # (CGO_ENABLED=0) and builds the deb/rpm/apk (nfpm is pure Go), so the whole
+    # `goreleaser release` — Linux packages included — happens here; only the
+    # apt/yum repo publishing (which needs apt-only tooling) stays on Linux in
+    # the publish-repo job below.
+    runs-on: macos-latest
     # Creates the GitHub Release + uploads artifacts to this repo.
     permissions:
       contents: write
