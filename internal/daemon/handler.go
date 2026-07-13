@@ -1678,6 +1678,9 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					continue
 				}
 
+				sm.log.Debug("control request",
+					"op", "scenario_delete", "caller", auth.describe(), "scenario", s.Name)
+
 				if !auth.authorizeScenarioOp(sm, s.Name, sendControl) {
 					continue
 				}

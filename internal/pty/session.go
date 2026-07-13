@@ -71,6 +71,12 @@ func NewSession(opts SessionOpts) (*Session, error) {
 
 	size := &pty.Winsize{Rows: opts.Rows, Cols: opts.Cols}
 
+	// Stamp the launch instant *before* the process starts so the launch→first-
+	// output and launch→active durations (issue #1104) include PTY and
+	// scrollback setup — otherwise a fast agent can emit output before the epoch
+	// is recorded, under-reporting the true startup time.
+	launchedAt := time.Now()
+
 	ptmx, err := pty.StartWithSize(cmd, size)
 	if err != nil {
 		return nil, fmt.Errorf("start pty: %w", err)
@@ -78,6 +84,24 @@ func NewSession(opts SessionOpts) (*Session, error) {
 
 	sb, err := NewScrollback(opts.LogPath, opts.MaxLogSize)
 	if err != nil {
+		// The process is already running; kill it so a scrollback-open failure
+		// doesn't leak an unmanaged agent. No "session spawned"/"session exited"
+		// record will ever be emitted for this pid, so log the rollback kill here
+		// (issue #1104).
+		rollbackLog := opts.Logger
+		if rollbackLog == nil {
+			rollbackLog = slog.Default()
+		}
+
+		pid := 0
+		if cmd.Process != nil {
+			pid = cmd.Process.Pid
+		}
+
+		rollbackLog.Info("stopping session",
+			"id", opts.ID, "reason", "rollback", "initiator", "pty-scrollback-failure",
+			"pid", pid, "pgid", pid, "err", err)
+
 		_ = ptmx.Close()
 		_ = cmd.Process.Kill()
 
@@ -96,7 +120,7 @@ func NewSession(opts SessionOpts) (*Session, error) {
 		screen:    vt10x.New(vt10x.WithSize(int(opts.Cols), int(opts.Rows))),
 		done:      make(chan struct{}),
 		readDone:  make(chan struct{}),
-		createdAt: time.Now(),
+		createdAt: launchedAt,
 		log:       log,
 	}
 	s.userInputCond = sync.NewCond(&sync.Mutex{})
@@ -260,12 +284,14 @@ func (s *Session) ProcessPID() int {
 	return s.adoptedPID
 }
 
-// Pgid returns the process-group id graith signals on Kill/ForceKill. Sessions
-// are started with Setsid (see NewSession), so the child is a session/group
-// leader and its PGID equals its PID; Kill/ForceKill target the whole group via
-// -pid. Logging pid+pgid together (issue #1104) makes an OS-level signal trace
-// (e.g. `kill -0 -<pgid>`) possible from the daemon log alone. Returns 0 when
-// the pid is unknown.
+// Pgid returns the process-group id graith signals on Kill/ForceKill. For
+// graith-spawned sessions (started with Setsid, see NewSession) the child is a
+// session/group leader and its PGID equals its PID. For adopted sessions graith
+// did not set Setsid, so PGID may differ from the reported pid — but Kill/
+// ForceKill signal -pid regardless, so this remains an honest report of "the
+// group graith signals". Logging pid+pgid together (issue #1104) makes an
+// OS-level signal trace (e.g. `kill -0 -<pgid>`) possible from the daemon log
+// alone. Returns 0 when the pid is unknown.
 func (s *Session) Pgid() int {
 	return s.ProcessPID()
 }

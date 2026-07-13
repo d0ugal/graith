@@ -204,6 +204,16 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 	if startErr != nil {
 		// Ensure the (likely dead) target process is fully stopped before restore.
 		if p, ok := sm.GetPTY(id); ok && !p.Exited() {
+			// Record the reason on state before the kill so the "session exited"
+			// line agrees with the "stopping session" line — a successful target
+			// start cleared StopReason, so without this the exit would default to
+			// crash while the stop line says user (issue #1104).
+			sm.mu.Lock()
+			if s, ok := sm.state.Sessions[id]; ok {
+				s.StopReason = StopReasonUser
+			}
+			sm.mu.Unlock()
+
 			sm.logStopping(id, sm.sessionName(id), StopReasonUser, "migrate-revert", p)
 			_ = p.Kill()
 			<-p.Done()

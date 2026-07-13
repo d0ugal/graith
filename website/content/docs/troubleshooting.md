@@ -229,14 +229,16 @@ the log alone:
   `since_launch_ms` is the launch→active gap. A large gap here with output
   flowing is a slow start; no `session active` at all is a stuck start.
 - **`stopping session`** — emitted the instant before a daemon-initiated
-  SIGTERM, carrying `reason` (`user`, `idle`, `shutdown`, `delete`, …),
-  `initiator` (the code path: `idle-loop`, `user-stop`, `restart`, `shutdown`,
-  `delete`, …), and `pid`/`pgid`.
+  SIGTERM, carrying `reason` (`user`, `idle`, `shutdown`, `delete`, `watchdog`,
+  …), `initiator` (the code path: `idle-loop`, `user-stop`, `restart`,
+  `watchdog-restart`, `shutdown`, `delete`, …), and `pid`/`pgid`. Orphaned-
+  process reaps (a recorded PID with no live PTY, e.g. after a daemon restart)
+  log the same line with an `-orphan` initiator suffix.
 - **`session exited`** — the process is gone. `stop_reason` attributes the exit
-  (`crash`, `user`, `idle`, `shutdown`), and `pid`/`pgid` support OS-level
-  signal forensics. When present, `peak_rss_mb` is labelled with `peak_rss_proc`
-  (`agent` or `sandbox-wrapper`) so a small wrapper RSS isn't mistaken for the
-  agent's footprint.
+  (`crash`, `user`, `idle`, `shutdown`, `watchdog`), and `pid`/`pgid` support
+  OS-level signal forensics. When present, `peak_rss_mb` is labelled with
+  `peak_rss_proc` (`agent` or `sandbox-wrapper`) so a small wrapper RSS isn't
+  mistaken for the agent's footprint.
 
 Trace one session end to end:
 
@@ -245,9 +247,10 @@ jq 'select(.id == "<session-id>" or .session_id == "<session-id>")' \
   ~/.local/share/graith/daemon.log
 ```
 
-Control requests (`stop`, `delete`, `restart`, `scenario_stop`) log the
-authenticated caller identity at **debug** level (`control request`), so raise
-the log level if you need to see who issued a stop.
+Control requests (`stop`, `delete`, `restart`, `scenario_stop`,
+`scenario_delete`) log the authenticated caller identity at **debug** level
+(`control request`), before the authorization check, so raise the log level if
+you need to see who issued (or attempted) a stop.
 
 ### Reset config to defaults
 
