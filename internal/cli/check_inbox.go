@@ -86,7 +86,7 @@ var checkInboxCmd = &cobra.Command{
 			previewStr = previewStr[:1000] + "..."
 		}
 
-		context := fmt.Sprintf(
+		contextBody := fmt.Sprintf(
 			"You have %d unread message(s) in your graith inbox. Read with: gr msg inbox --all\n\n%s",
 			len(messages), previewStr,
 		)
@@ -95,7 +95,7 @@ var checkInboxCmd = &cobra.Command{
 		// context must go through hookSpecificOutput.additionalContext to reach
 		// the model; a top-level systemMessage is user-facing only (issue #1072).
 		agent := os.Getenv("GRAITH_AGENT_TYPE")
-		fmt.Println(hookoutput.InboxContext(agent, "SessionStart", context))
+		fmt.Println(hookoutput.InboxContext(agent, "SessionStart", contextBody))
 
 		return nil
 	},
