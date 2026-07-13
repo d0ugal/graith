@@ -319,6 +319,111 @@ func TestCaptureNativeSessionIDSkipsIDAlreadyClaimed(t *testing.T) {
 	}
 }
 
+// claudeAgentConfig is the default Claude agent shape: a fresh start pins a
+// client-supplied id (--session-id), a resume replays it (--resume).
+func claudeAgentConfig() config.Agent {
+	return config.Agent{
+		Args:       []string{"--session-id", "{agent_session_id}"},
+		ResumeArgs: []string{"--resume", "{agent_session_id}"},
+	}
+}
+
+// braeLine is a minimal Claude user record used to stand up a transcript file.
+const braeLine = `{"type":"user","message":{"role":"user","content":"hae"}}`
+
+func TestForcedIDConversationExists(t *testing.T) {
+	// No transcript on disk → no conversation. Point the locator at an empty dir
+	// so the glob can't stray into the real ~/.claude.
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+
+	if forcedIDConversationExists("claude", "dreich-id", t.TempDir()) {
+		t.Error("no transcript on disk should report no conversation")
+	}
+
+	// Transcript present → conversation exists.
+	writeClaudeTranscript(t, "bide-id", braeLine)
+
+	if !forcedIDConversationExists("claude", "bide-id", t.TempDir()) {
+		t.Error("on-disk transcript should report a conversation")
+	}
+}
+
+// TestResolveForcedIDFreshStart covers the #1091 fix: resuming a Claude session
+// whose captured id never persisted a conversation must fall back to a fresh
+// start instead of a doomed `claude --resume <id>`, and the following resume
+// (once the conversation exists) must use native --resume again.
+func TestResolveForcedIDFreshStart(t *testing.T) {
+	const minted = "canny-fresh-id"
+
+	mint := func() string { return minted }
+	claude := claudeAgentConfig()
+
+	freshArgs := []string{"--session-id", "{agent_session_id}"}
+	resumeArgs := []string{"--resume", "{agent_session_id}"}
+
+	t.Run("existing transcript resumes native", func(t *testing.T) {
+		writeClaudeTranscript(t, "bide-id", braeLine)
+
+		id, fresh, fellBack := resolveForcedIDFreshStart("claude", "bide-id", t.TempDir(), false, mint)
+		if id != "bide-id" || fresh || fellBack {
+			t.Fatalf("got (%q,%v,%v); want (bide-id,false,false)", id, fresh, fellBack)
+		}
+
+		if got, _ := resolveResumeArgs(claude, "claude", id, fresh); !reflect.DeepEqual(got, resumeArgs) {
+			t.Fatalf("args = %#v; want %#v (--resume)", got, resumeArgs)
+		}
+	})
+
+	t.Run("missing transcript mints fresh id", func(t *testing.T) {
+		t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir()) // empty → no conversation
+
+		id, fresh, fellBack := resolveForcedIDFreshStart("claude", "dreich-id", t.TempDir(), false, mint)
+		if id != minted || !fresh || !fellBack {
+			t.Fatalf("got (%q,%v,%v); want (%q,true,true)", id, fresh, fellBack, minted)
+		}
+
+		if got, _ := resolveResumeArgs(claude, "claude", id, fresh); !reflect.DeepEqual(got, freshArgs) {
+			t.Fatalf("args = %#v; want %#v (fresh --session-id)", got, freshArgs)
+		}
+	})
+
+	t.Run("after fallback next resume uses native --resume", func(t *testing.T) {
+		// The freshly-minted conversation now has a transcript and FreshStart was
+		// cleared on the successful start, so the next resume replays it natively.
+		writeClaudeTranscript(t, minted, braeLine)
+
+		id, fresh, fellBack := resolveForcedIDFreshStart("claude", minted, t.TempDir(), false, mint)
+		if id != minted || fresh || fellBack {
+			t.Fatalf("got (%q,%v,%v); want (%q,false,false)", id, fresh, fellBack, minted)
+		}
+
+		if got, _ := resolveResumeArgs(claude, "claude", id, fresh); !reflect.DeepEqual(got, resumeArgs) {
+			t.Fatalf("args = %#v; want %#v (--resume)", got, resumeArgs)
+		}
+	})
+
+	t.Run("freshStart already set is left alone", func(t *testing.T) {
+		id, fresh, fellBack := resolveForcedIDFreshStart("claude", "bide-id", t.TempDir(), true, mint)
+		if id != "bide-id" || !fresh || fellBack {
+			t.Fatalf("got (%q,%v,%v); want (bide-id,true,false)", id, fresh, fellBack)
+		}
+	})
+
+	t.Run("non-forced agent skips the check", func(t *testing.T) {
+		id, fresh, fellBack := resolveForcedIDFreshStart("codex", "braw-id", t.TempDir(), false, mint)
+		if id != "braw-id" || fresh || fellBack {
+			t.Fatalf("got (%q,%v,%v); want (braw-id,false,false)", id, fresh, fellBack)
+		}
+	})
+
+	t.Run("empty id skips the check", func(t *testing.T) {
+		id, fresh, fellBack := resolveForcedIDFreshStart("claude", "", t.TempDir(), false, mint)
+		if id != "" || fresh || fellBack {
+			t.Fatalf("got (%q,%v,%v); want (\"\",false,false)", id, fresh, fellBack)
+		}
+	})
+}
+
 func TestArgsNeedForkSourceID(t *testing.T) {
 	if !argsNeedForkSourceID([]string{"fork", "{fork_source_agent_session_id}"}) {
 		t.Error("expected fork-source token to be detected")

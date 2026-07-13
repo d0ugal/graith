@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/d0ugal/graith/internal/agent/transcript"
 	"github.com/d0ugal/graith/internal/approvals"
 	"github.com/d0ugal/graith/internal/atomicfile"
 	"github.com/d0ugal/graith/internal/config"
@@ -2070,6 +2071,36 @@ func resolveResumeArgs(agent config.Agent, sessAgent, sessAgentSessionID string,
 	return resumeArgs, ""
 }
 
+// forcedIDConversationExists reports whether a forced-id agent (Claude) has an
+// on-disk transcript for the given session id. Resuming such an agent uses
+// `--resume <id>`, which fails hard ("No conversation found with session ID")
+// when no conversation was ever persisted for that id — e.g. the first launch
+// was killed before the transcript hit disk. Any locate error (including no
+// match) is treated as "no conversation". Callers gate on forcesID, so the
+// agent is always transcript-supported here.
+func forcedIDConversationExists(agent, agentSessionID, worktreePath string) bool {
+	sources, err := transcript.Locate(agent, agentSessionID, worktreePath)
+	return err == nil && len(sources) > 0
+}
+
+// resolveForcedIDFreshStart decides whether a resume of a forced-id agent must
+// fall back to a fresh conversation because its captured session id has no
+// on-disk transcript. When a fallback is needed it mints a new session id (via
+// mint) and forces a fresh start; otherwise it returns the inputs unchanged.
+// The returned bool reports whether a fallback fired, so the caller can persist
+// the new id and clear the one-shot FreshStart flag once the start succeeds.
+func resolveForcedIDFreshStart(agent, agentSessionID, worktreePath string, freshStart bool, mint func() string) (newID string, fresh, fellBack bool) {
+	if freshStart || !forcesID(agent) || agentSessionID == "" {
+		return agentSessionID, freshStart, false
+	}
+
+	if forcedIDConversationExists(agent, agentSessionID, worktreePath) {
+		return agentSessionID, freshStart, false
+	}
+
+	return mint(), true, true
+}
+
 // Resume restarts a stopped session using the agent's resume_args.
 //
 // Uses two-phase locking: the GitHub username discovery happens before the lock,
@@ -2270,6 +2301,35 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	prevSummarySetAt := sessState.SummarySetAt
 	prevSummaryTTL := sessState.SummaryTTL
 	prevToken := sessState.Token
+	prevAgentSessionID := sessState.AgentSessionID
+	prevFreshStart := sessState.FreshStart
+
+	// For a forced-id agent (Claude), a captured session id with no on-disk
+	// conversation would make `--resume <id>` fail permanently. Detect that and
+	// mint a fresh id + fresh start so the session recovers instead of wedging.
+	// FreshStart is one-shot: it's cleared once the start succeeds (below), so
+	// the next resume of the now-populated conversation uses native --resume.
+	forcedFreshFallback := false
+
+	if forcesID(sessState.Agent) && sessState.AgentSessionID != "" && !sessState.FreshStart {
+		oldID := sessState.AgentSessionID
+		newID, fresh, fellBack := resolveForcedIDFreshStart(sessState.Agent, oldID, sessState.WorktreePath, sessState.FreshStart, newAgentSessionID)
+		// Within this guard the helper's other early-returns can't fire, so
+		// fellBack is exactly "no on-disk conversation for the captured id".
+		sm.log.Info("resume transcript lookup",
+			"session_id", id, "agent", sessState.Agent,
+			"agent_session_id", oldID, "conversation_exists", !fellBack)
+
+		if fellBack {
+			sm.log.Info("resume decision: fresh-start (no conversation found for forced-id session)",
+				"session_id", id, "agent", sessState.Agent,
+				"old_agent_session_id", oldID, "new_agent_session_id", newID)
+
+			sessState.AgentSessionID = newID
+			sessState.FreshStart = fresh
+			forcedFreshFallback = true
+		}
+	}
 
 	newToken, err := generateToken()
 	if err != nil {
@@ -2347,6 +2407,12 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 			s.SummaryTTL = prevSummaryTTL
 			s.Token = prevToken
 
+			// Undo the forced-id fresh fallback: the StatusCreating save already
+			// committed the minted id + FreshStart, so restore the originals to keep
+			// rollback meaning "this attempt changed nothing".
+			s.AgentSessionID = prevAgentSessionID
+			s.FreshStart = prevFreshStart
+
 			delete(sm.tokenIndex, newToken)
 
 			if prevToken != "" {
@@ -2367,6 +2433,11 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	if resumeNote != "" {
 		sm.log.Info(resumeNote, "session_id", id, "agent", sessAgent)
 	}
+
+	sm.log.Info("resume decision",
+		"session_id", id, "agent", sessAgent,
+		"agent_session_id", sessAgentSessionID, "fresh_start", sessFreshStart,
+		"forced_id_fresh_fallback", forcedFreshFallback, "args", resumeArgs)
 
 	vars := config.TemplateVars{
 		Username:       preUsername,
@@ -2654,6 +2725,12 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	if seedPrompt != "" {
 		sessState.FreshStart = false
 	}
+	// A forced-id fresh fallback minted a new id and started clean; the
+	// conversation now exists under that id, so clear the one-shot FreshStart so
+	// the next resume uses native --resume.
+	if forcedFreshFallback {
+		sessState.FreshStart = false
+	}
 
 	sm.sessions[id] = ptySess
 
@@ -2678,6 +2755,10 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 		// Roll back the rotated token too, otherwise the session keeps a
 		// credential no surviving process knows (the new PTY is killed below).
 		sessState.Token = prevToken
+
+		// Roll back the forced-id fresh fallback (minted id + FreshStart).
+		sessState.AgentSessionID = prevAgentSessionID
+		sessState.FreshStart = prevFreshStart
 
 		delete(sm.tokenIndex, newToken)
 
