@@ -9,11 +9,12 @@ func TestApproval(t *testing.T) {
 		reason   string
 		want     string
 	}{
-		{"claude", "allow", "", `{"decision":"approve"}`},
-		{"claude", "block", "", `{"decision":"block"}`},
-		{"claude", "deny", "", `{"decision":"block"}`},
-		{"claude", "allow", "braw-approved", `{"decision":"approve","reason":"braw-approved"}`},
-		{"claude", "block", "neep-forbidden", `{"decision":"block","reason":"neep-forbidden"}`},
+		{"claude", "allow", "", `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow"}}`},
+		{"claude", "block", "", `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny"}}`},
+		{"claude", "deny", "", `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny"}}`},
+		{"claude", "defer", "", `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask"}}`},
+		{"claude", "allow", "braw-approved", `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"braw-approved"}}`},
+		{"claude", "block", "neep-forbidden", `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"neep-forbidden"}}`},
 		{"codex", "allow", "", `{"decision":"allow"}`},
 		{"codex", "deny", "", `{"decision":"deny"}`},
 		{"codex", "block", "", `{"decision":"deny"}`},
@@ -33,8 +34,9 @@ func TestApproval(t *testing.T) {
 }
 
 func TestAllowAll(t *testing.T) {
-	if got := AllowAll("claude"); got != `{"decision":"approve"}` {
-		t.Errorf("AllowAll(claude) = %s, want approve", got)
+	want := `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow"}}`
+	if got := AllowAll("claude"); got != want {
+		t.Errorf("AllowAll(claude) = %s, want %s", got, want)
 	}
 
 	if got := AllowAll("codex"); got != `{"decision":"allow"}` {
