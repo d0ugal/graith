@@ -124,6 +124,8 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 		}
 		sm.mu.Unlock()
 
+		sm.logStopping(id, sm.sessionName(id), StopReasonUser, "migrate", ptySess)
+
 		if err := ptySess.Kill(); err != nil {
 			_ = os.RemoveAll(contextDir)
 			return SessionState{}, fmt.Errorf("stop source agent: %w", err)
@@ -202,6 +204,7 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 	if startErr != nil {
 		// Ensure the (likely dead) target process is fully stopped before restore.
 		if p, ok := sm.GetPTY(id); ok && !p.Exited() {
+			sm.logStopping(id, sm.sessionName(id), StopReasonUser, "migrate-revert", p)
 			_ = p.Kill()
 			<-p.Done()
 		}

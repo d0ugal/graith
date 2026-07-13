@@ -260,6 +260,16 @@ func (s *Session) ProcessPID() int {
 	return s.adoptedPID
 }
 
+// Pgid returns the process-group id graith signals on Kill/ForceKill. Sessions
+// are started with Setsid (see NewSession), so the child is a session/group
+// leader and its PGID equals its PID; Kill/ForceKill target the whole group via
+// -pid. Logging pid+pgid together (issue #1104) makes an OS-level signal trace
+// (e.g. `kill -0 -<pgid>`) possible from the daemon log alone. Returns 0 when
+// the pid is unknown.
+func (s *Session) Pgid() int {
+	return s.ProcessPID()
+}
+
 func (s *Session) Fd() uintptr {
 	return s.Ptmx.Fd()
 }
@@ -294,9 +304,18 @@ func (s *Session) readLoop() {
 			// of the blank-screen-on-restart bug (issue #1087): the agent process
 			// is alive but never rendered anything, so scrollback stays empty and
 			// attach shows nothing. Logging the first output makes "did the agent
-			// ever produce anything?" answerable from the daemon log.
+			// ever produce anything?" answerable from the daemon log. The
+			// launch→first-output duration (issue #1104) distinguishes a slow
+			// starter from a stuck one: a large gap means the agent booted but took
+			// a long time to render, not that it hung.
 			if first {
-				s.log.Info("pty first output", "session", s.ID, "bytes", n)
+				s.mu.RLock()
+				sinceLaunch := time.Since(s.createdAt)
+				s.mu.RUnlock()
+
+				s.log.Info("pty first output",
+					"session", s.ID, "bytes", n,
+					"since_launch_ms", sinceLaunch.Milliseconds())
 			}
 
 			for _, w := range writers {

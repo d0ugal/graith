@@ -27,6 +27,7 @@ import (
 type SessionDriver interface { //nolint:interfacebloat // deliberately the full current *pty.Session call surface, so introducing the interface is a no-behaviour-change refactor; the capability split lands with the headless-driver phase.
 	// Lifecycle / identity.
 	ProcessPID() int
+	Pgid() int
 	Fd() uintptr
 	Done() <-chan struct{}
 	Exited() bool

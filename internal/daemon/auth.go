@@ -50,6 +50,29 @@ func (ac authContext) isLocalHuman() bool {
 	return ac.role == roleLocalHuman
 }
 
+// describe renders the caller's identity for audit logging (issue #1104): the
+// privilege class plus the session or device id that scopes it. It never
+// includes the token itself. Used by the lifecycle handlers to make "who asked
+// for this stop/delete/restart?" answerable from the daemon log.
+func (ac authContext) describe() string {
+	switch ac.role {
+	case roleLocalHuman:
+		return "local-human"
+	case roleRemoteHuman:
+		return "remote-human(" + ac.deviceID + ")"
+	case roleRemoteGuest:
+		return "remote-guest(" + ac.deviceID + ")"
+	case roleOrchestrator:
+		return "orchestrator(" + ac.sessionID + ")"
+	case roleSession:
+		return "session(" + ac.sessionID + ")"
+	case roleNone:
+		return "unauthenticated"
+	default:
+		return "unknown"
+	}
+}
+
 // resolveAuth resolves the connection's role from its token, origin, and — for
 // remote connections — the device ID proven via proof-of-possession on this
 // connection (poppedDeviceID, empty until a valid auth_proof).

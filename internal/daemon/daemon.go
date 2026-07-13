@@ -243,6 +243,18 @@ func (sm *SessionManager) HandleHookReport(sr protocol.StatusReportMsg) {
 		"session_id", sr.SessionID, "event", sr.Event,
 		"status", status, "tool_name", sr.ToolName)
 
+	// SessionStart is the agent's first sign of life after a launch, so the
+	// launch→active gap tells a slow-but-healthy start apart from a stuck one
+	// (issue #1104). The PTY's createdAt is the spawn instant; a fresh PTY is
+	// created on every start/resume, so this measures the current launch.
+	if sr.Event == "SessionStart" {
+		if sess, ok := sm.GetPTY(sr.SessionID); ok {
+			sm.log.Info("session active",
+				"session_id", sr.SessionID, "name", name,
+				"since_launch_ms", time.Since(sess.CreatedAt()).Milliseconds())
+		}
+	}
+
 	if changed {
 		sm.onAgentStatusChange(sr.SessionID, name, oldStatus, status)
 	}
@@ -1404,6 +1416,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	if _, ok := sm.state.Sessions[id]; !ok {
 		sm.mu.Unlock()
 
+		sm.logStopping(id, name, "rollback", "create-rollback", ptySess)
 		_ = ptySess.Kill()
 		ptySess.Close()
 		cleanupOnError()
@@ -1450,6 +1463,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		delete(sm.tokenIndex, token)
 		sm.mu.Unlock()
 
+		sm.logStopping(id, name, "rollback", "create-rollback", ptySess)
 		_ = ptySess.Kill()
 		ptySess.Close()
 		cleanupOnError()
@@ -1467,6 +1481,14 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 
 	result := cloneSessionState(sessState)
 	sm.mu.Unlock()
+
+	// Record the fresh-session spawn symmetrically with "resume: pty spawned"
+	// (issue #1104): pid/pgid for OS-level signal forensics, sandboxed so a
+	// later peak-RSS reading can be interpreted against the wrapper.
+	sm.log.Info("session spawned",
+		"id", id, "name", name, "agent", agentName,
+		"pid", result.PID, "pgid", ptySess.Pgid(), "sandboxed", sandboxed,
+		"scrollback_path", logPath)
 
 	sm.startWatcher(id, ptySess)
 
@@ -1899,6 +1921,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 	if _, ok := sm.state.Sessions[id]; !ok {
 		sm.mu.Unlock()
 
+		sm.logStopping(id, name, "rollback", "fork-rollback", ptySess)
 		_ = ptySess.Kill()
 		ptySess.Close()
 		forkCleanup()
@@ -1938,6 +1961,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 		delete(sm.tokenIndex, token)
 		sm.mu.Unlock()
 
+		sm.logStopping(id, name, "rollback", "fork-rollback", ptySess)
 		_ = ptySess.Kill()
 		ptySess.Close()
 		forkCleanup()
@@ -1949,6 +1973,12 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 
 	result := cloneSessionState(sessState)
 	sm.mu.Unlock()
+
+	// Symmetric with Create/resume spawn logging (issue #1104).
+	sm.log.Info("session spawned",
+		"id", id, "name", name, "agent", agentName, "forked", true,
+		"pid", result.PID, "pgid", ptySess.Pgid(), "sandboxed", sandboxed,
+		"scrollback_path", logPath)
 
 	sm.startWatcher(id, ptySess)
 
@@ -1987,6 +2017,8 @@ func (sm *SessionManager) watchSession(id string, sess SessionDriver) {
 		name           string
 		deleted        bool
 		isOrchestrator bool
+		stopReason     string
+		sandboxed      bool
 	)
 
 	if !stale {
@@ -2030,6 +2062,12 @@ func (sm *SessionManager) watchSession(id string, sess SessionDriver) {
 				s.ExitSignal = sig.String()
 			}
 
+			// Capture the finalized reason + sandbox flag under the lock so the
+			// "session exited" log below can attribute the stop and label the
+			// peak-RSS source without racing a concurrent resume (issue #1104).
+			stopReason = s.StopReason
+			sandboxed = s.Sandboxed
+
 			if !watchdogGaveUp && (s.StopReason != StopReasonShutdown || s.SummaryText == "") {
 				text := formatStopSummary(s.StopReason, s.ExitCode, s.ExitSignal, prevSummary, prevSetAt, prevTTL)
 				applyLifecycleSummaryLocked(s, text)
@@ -2068,17 +2106,28 @@ func (sm *SessionManager) watchSession(id string, sess SessionDriver) {
 		return
 	}
 
+	if stopReason == "" {
+		stopReason = StopReasonCrash
+	}
+
 	logAttrs := []any{
 		"id", id,
 		"name", name,
+		"stop_reason", stopReason,
 		"exit_code", sess.ExitCode(),
+		"pid", sess.ProcessPID(),
+		"pgid", sess.Pgid(),
 	}
 	if sig := sess.ExitSignal(); sig != 0 {
 		logAttrs = append(logAttrs, "signal", sig.String())
 	}
 
 	if rss := sess.PeakRSSBytes(); rss > 0 && sess.ExitCode() != 0 {
-		logAttrs = append(logAttrs, "peak_rss_mb", rss/(1024*1024))
+		// peak_rss_mb comes from the waited child's rusage, which is the direct
+		// child graith spawned — the sandbox wrapper when sandboxed, not the
+		// agent underneath it. Labelling the source (issue #1104) stops a
+		// single-digit wrapper RSS from being read as the agent's footprint.
+		logAttrs = append(logAttrs, "peak_rss_mb", rss/(1024*1024), "peak_rss_proc", peakRSSProcLabel(sandboxed))
 	}
 
 	sm.log.Info("session exited", logAttrs...)
@@ -2862,6 +2911,7 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	if _, ok := sm.state.Sessions[id]; !ok {
 		sm.mu.Unlock()
 
+		sm.logStopping(id, sm.sessionName(id), "rollback", "resume-rollback", ptySess)
 		_ = ptySess.Kill()
 		ptySess.Close()
 
@@ -2954,6 +3004,7 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 
 		sm.mu.Unlock()
 
+		sm.logStopping(id, sm.sessionName(id), "rollback", "resume-rollback", ptySess)
 		_ = ptySess.Kill()
 		ptySess.Close()
 
@@ -2974,7 +3025,7 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	// diagnosable from the daemon log alone.
 	sm.log.Info("resume: pty spawned",
 		"session_id", id, "summary", lifecycleSummary, "agent", sessAgent,
-		"pid", result.PID, "scrollback_path", logPath)
+		"pid", result.PID, "pgid", ptySess.Pgid(), "scrollback_path", logPath)
 
 	sm.startWatcher(id, ptySess)
 	go sm.notifyUnreadInbox(id)
@@ -3140,6 +3191,8 @@ func (sm *SessionManager) SoftDelete(id string) (SessionState, error) {
 		ptySess.Detach()
 
 		if !ptySess.Exited() {
+			sm.logStopping(id, sm.sessionName(id), StopReasonDelete, "soft-delete", ptySess)
+
 			_ = ptySess.Kill()
 			select {
 			case <-ptySess.Done():
@@ -3724,6 +3777,8 @@ func (sm *SessionManager) Delete(id string) error {
 		ptySess.Detach()
 
 		if !ptySess.Exited() {
+			sm.logStopping(id, sm.sessionName(id), StopReasonDelete, "delete", ptySess)
+
 			_ = ptySess.Kill()
 			select {
 			case <-ptySess.Done():
@@ -3965,6 +4020,8 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 			s.ptySess.Detach()
 
 			if !s.ptySess.Exited() {
+				sm.logStopping(s.id, s.name, StopReasonDelete, "delete-children", s.ptySess)
+
 				_ = s.ptySess.Kill()
 				select {
 				case <-s.ptySess.Done():
@@ -4088,6 +4145,8 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 				s.ptySess.Detach()
 
 				if !s.ptySess.Exited() {
+					sm.logStopping(s.id, s.name, StopReasonDelete, "delete-children-sweep", s.ptySess)
+
 					_ = s.ptySess.Kill()
 					select {
 					case <-s.ptySess.Done():
@@ -4406,12 +4465,42 @@ func (sm *SessionManager) cleanupOrphanedProcesses() {
 	}
 }
 
-// Stop sends SIGTERM to a session's process without removing the session or worktree.
-func (sm *SessionManager) Stop(id string) error {
-	return sm.stopWithReason(id, StopReasonUser)
+// peakRSSProcLabel names which process the peak_rss_mb reading belongs to
+// (issue #1104). The value is the waited child's rusage — the sandbox wrapper
+// when the session is sandboxed, otherwise the agent itself.
+func peakRSSProcLabel(sandboxed bool) string {
+	if sandboxed {
+		return "sandbox-wrapper"
+	}
+
+	return "agent"
 }
 
-func (sm *SessionManager) stopWithReason(id, reason string) error {
+// logStopping records a daemon-initiated stop on the daemon log the instant
+// before the SIGTERM is sent, so every kill is attributable from the log alone
+// (issue #1104). reason is the StopReason category being applied; initiator
+// names the code path that requested the stop (idle-loop, user-stop, delete,
+// restart, shutdown, …). pid/pgid come from the live PTY (nil-safe) and enable
+// OS-level signal forensics. Paired with the "session exited" line, this closes
+// the "which subsystem killed this session, and when?" gap.
+func (sm *SessionManager) logStopping(id, name, reason, initiator string, sess SessionDriver) {
+	pid, pgid := 0, 0
+	if sess != nil {
+		pid = sess.ProcessPID()
+		pgid = sess.Pgid()
+	}
+
+	sm.log.Info("stopping session",
+		"id", id, "name", name, "reason", reason, "initiator", initiator,
+		"pid", pid, "pgid", pgid)
+}
+
+// Stop sends SIGTERM to a session's process without removing the session or worktree.
+func (sm *SessionManager) Stop(id string) error {
+	return sm.stopWithReason(id, StopReasonUser, "user-stop")
+}
+
+func (sm *SessionManager) stopWithReason(id, reason, initiator string) error {
 	sm.mu.Lock()
 	sessState, ok := sm.state.Sessions[id]
 
@@ -4430,12 +4519,15 @@ func (sm *SessionManager) stopWithReason(id, reason string) error {
 		return fmt.Errorf("session %q is not running", id)
 	}
 
+	name := sessState.Name
 	sessState.StopReason = reason
 	_ = sm.saveState()
 	sm.mu.Unlock()
 
 	ptySess, ok := sm.GetPTY(id)
 	if ok {
+		sm.logStopping(id, name, reason, initiator, ptySess)
+
 		if err := ptySess.Kill(); err != nil {
 			return fmt.Errorf("send SIGTERM: %w", err)
 		}
@@ -4531,6 +4623,7 @@ func (sm *SessionManager) StopWithChildren(rootID string, excludeRoot bool) ([]s
 		}
 
 		sess.StopReason = StopReasonUser
+		name := sess.Name
 		pid := sess.PID
 		startTime := sess.PIDStartTime
 		_ = sm.saveState()
@@ -4538,6 +4631,8 @@ func (sm *SessionManager) StopWithChildren(rootID string, excludeRoot bool) ([]s
 
 		ptySess, ok := sm.GetPTY(id)
 		if ok {
+			sm.logStopping(id, name, StopReasonUser, "stop-children", ptySess)
+
 			if err := ptySess.Kill(); err != nil {
 				sm.log.Warn("stop child failed", "session_id", id, "error", err)
 				continue
@@ -4643,6 +4738,8 @@ func (sm *SessionManager) StopWithChildren(rootID string, excludeRoot bool) ([]s
 				continue
 			}
 
+			sm.logStopping(lid, sm.sessionName(lid), StopReasonUser, "stop-children-sweep", ptySess)
+
 			if err := ptySess.Kill(); err != nil {
 				sm.log.Warn("stop late child failed", "session_id", lid, "error", err)
 				continue
@@ -4687,6 +4784,8 @@ func (sm *SessionManager) Restart(id string, rows, cols uint16) (SessionState, e
 			s.StopReason = StopReasonUser
 		}
 		sm.mu.Unlock()
+
+		sm.logStopping(id, sm.sessionName(id), StopReasonUser, "restart", ptySess)
 
 		if err := ptySess.Kill(); err != nil {
 			return SessionState{}, fmt.Errorf("stop session: %w", err)
@@ -5252,18 +5351,24 @@ func (sm *SessionManager) StopAll(ctx context.Context) {
 
 	type snapshot struct {
 		id   string
+		name string
 		sess SessionDriver
 	}
 
 	sessions := make([]snapshot, 0, len(sm.sessions))
 	for id, sess := range sm.sessions {
-		sessions = append(sessions, snapshot{id, sess})
+		name := ""
+		if s, ok := sm.state.Sessions[id]; ok {
+			name = s.Name
+		}
+
+		sessions = append(sessions, snapshot{id, name, sess})
 	}
 	sm.mu.Unlock()
 
 	for _, s := range sessions {
 		if !s.sess.Exited() {
-			sm.log.Info("stopping session", "id", s.id)
+			sm.logStopping(s.id, s.name, StopReasonShutdown, "shutdown", s.sess)
 			_ = s.sess.Kill()
 		}
 	}
@@ -5661,7 +5766,7 @@ func (sm *SessionManager) detectAgentStatuses() {
 
 		sm.log.Info("auto-stopping idle session", "session", name, "id", id, "idle_duration", idleDur.Round(time.Second))
 
-		if err := sm.stopWithReason(id, StopReasonIdle); err != nil {
+		if err := sm.stopWithReason(id, StopReasonIdle, "idle-loop"); err != nil {
 			sm.log.Error("failed to auto-stop session", "id", id, "err", err)
 		}
 	}
@@ -5852,7 +5957,7 @@ func (sm *SessionManager) applyConfig(newCfg *config.Config) {
 
 				return sm.findOrchestratorID()
 			}(); orchID != "" {
-				_ = sm.stopWithReason(orchID, StopReasonUser)
+				_ = sm.stopWithReason(orchID, StopReasonUser, "orchestrator-disabled")
 			}
 		}
 	}
