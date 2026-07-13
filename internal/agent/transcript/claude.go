@@ -215,12 +215,21 @@ func (claudeReader) usage(path string) (Usage, error) {
 }
 
 // countClaudeUsage folds one assistant message's usage into u, deduplicating by
-// message id. A record with no id can't be deduped, so it is counted but flags
-// the total as approximate (Dropped). A duplicate id whose usage differs from
-// the first occurrence keeps the larger per-field value (guarding against a
-// partial live write) and is flagged.
+// message id. A record with a negative counter is corrupt and is skipped
+// (flagged). A record with no id can't be deduped, so it is counted but flags
+// the total as approximate. A duplicate id whose usage differs from the first
+// occurrence is reconciled by keeping the single occurrence with the greater
+// total — NOT a per-field max, which could synthesize a total larger than either
+// occurrence and double-count one message — and is flagged.
 func countClaudeUsage(u *Usage, seen map[string]claudeUsage, msg claudeMessage) {
 	cu := *msg.Usage
+
+	if cu.InputTokens < 0 || cu.OutputTokens < 0 ||
+		cu.CacheCreationInputTokens < 0 || cu.CacheReadInputTokens < 0 {
+		u.Dropped++ // corrupt counter — don't let it poison the total
+		return
+	}
+
 	u.Found = true
 
 	if msg.ID == "" {
@@ -242,19 +251,24 @@ func countClaudeUsage(u *Usage, seen map[string]claudeUsage, msg claudeMessage) 
 		return // identical repeat of an already-counted response — the common case
 	}
 
-	// Same id, different numbers: reconcile to the larger per-field value and
-	// flag the conflict rather than trusting either occurrence.
-	merged := maxClaudeUsage(prev, cu)
-	adjustClaudeUsage(u, prev, merged)
-	seen[msg.ID] = merged
+	// Same id, different numbers (e.g. a partial live write vs the full record):
+	// keep the single occurrence with the greater total, replacing the one
+	// already counted, and flag the conflict. Deterministic tie-break: prev wins.
+	chosen := prev
+	if claudeUsageTotal(cu) > claudeUsageTotal(prev) {
+		chosen = cu
+	}
+
+	adjustClaudeUsage(u, prev, chosen)
+	seen[msg.ID] = chosen
 	u.Dropped++
 }
 
 func addClaudeUsage(u *Usage, cu claudeUsage) {
-	u.Input += cu.InputTokens
-	u.Output += cu.OutputTokens
-	u.CacheCreation += cu.CacheCreationInputTokens
-	u.CacheRead += cu.CacheReadInputTokens
+	u.Input = addSat(u.Input, cu.InputTokens)
+	u.Output = addSat(u.Output, cu.OutputTokens)
+	u.CacheCreation = addSat(u.CacheCreation, cu.CacheCreationInputTokens)
+	u.CacheRead = addSat(u.CacheRead, cu.CacheReadInputTokens)
 }
 
 // adjustClaudeUsage replaces a previously-counted usage with a new one by
@@ -266,13 +280,8 @@ func adjustClaudeUsage(u *Usage, from, to claudeUsage) {
 	u.CacheRead += to.CacheReadInputTokens - from.CacheReadInputTokens
 }
 
-func maxClaudeUsage(a, b claudeUsage) claudeUsage {
-	return claudeUsage{
-		InputTokens:              maxInt64(a.InputTokens, b.InputTokens),
-		OutputTokens:             maxInt64(a.OutputTokens, b.OutputTokens),
-		CacheCreationInputTokens: maxInt64(a.CacheCreationInputTokens, b.CacheCreationInputTokens),
-		CacheReadInputTokens:     maxInt64(a.CacheReadInputTokens, b.CacheReadInputTokens),
-	}
+func claudeUsageTotal(cu claudeUsage) int64 {
+	return addSat(cu.InputTokens, cu.OutputTokens, cu.CacheCreationInputTokens, cu.CacheReadInputTokens)
 }
 
 func maxInt64(a, b int64) int64 {

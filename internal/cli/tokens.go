@@ -123,7 +123,10 @@ func printTokenTable(cmd *cobra.Command, rows []tokenRow) {
 
 	_, _ = fmt.Fprintln(tw, "SESSION\tAGENT\tINPUT\tOUTPUT\tCACHE-R\tCACHE-W\tOTHER\tTOTAL")
 
-	var sum tokenRow
+	var (
+		sum      tokenRow
+		degraded bool
+	)
 
 	for _, r := range rows {
 		_, _ = fmt.Fprintln(tw, tokenTableRow(r))
@@ -135,13 +138,23 @@ func printTokenTable(cmd *cobra.Command, rows []tokenRow) {
 			sum.CacheCreation += r.CacheCreation
 			sum.Unclassified += r.Unclassified
 			sum.Total += r.Total
+
+			if r.Degraded {
+				degraded = true
+			}
 		}
 	}
 
 	if len(rows) > 1 {
+		// The aggregate is approximate if any contributing row was.
+		total := withCommas(sum.Total)
+		if degraded {
+			total += "~"
+		}
+
 		_, _ = fmt.Fprintf(tw, "TOTAL\t\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			withCommas(sum.Input), withCommas(sum.Output), withCommas(sum.CacheRead),
-			withCommas(sum.CacheCreation), withCommas(sum.Unclassified), withCommas(sum.Total))
+			withCommas(sum.CacheCreation), withCommas(sum.Unclassified), total)
 	}
 }
 

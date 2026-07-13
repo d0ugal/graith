@@ -7,6 +7,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/d0ugal/graith/internal/agent/transcript"
 )
 
 // newTokenTestSM builds a SessionManager with a token cache and the given
@@ -164,6 +166,76 @@ func TestTokenCachePrunesPurged(t *testing.T) {
 
 	if _, ok := c.get("braw"); !ok {
 		t.Error("live session cache entry wrongly pruned")
+	}
+}
+
+func TestTokenLoopIncludesMirrorAndStopped(t *testing.T) {
+	writeClaudeTranscript(t, "sess-glen", asstLine("msg_1", 4, 6))
+
+	sm := newTokenTestSM(map[string]*SessionState{
+		// Mirror sessions run their own agent/transcript — tokens are real.
+		"glen": {ID: "glen", Agent: "claude", AgentSessionID: "sess-glen", Status: StatusStopped, Mirror: true},
+	})
+
+	sm.runTokenTick(context.Background())
+
+	if sm.state.Sessions["glen"].Tokens == nil {
+		t.Error("mirror+stopped session should be counted")
+	}
+}
+
+func TestTokenLoopKnownZeroVsUnknown(t *testing.T) {
+	// A transcript with a real zero-usage record is a KNOWN zero (Tokens set,
+	// Total 0); a transcript with no usage records stays unknown (Tokens nil).
+	writeClaudeTranscript(t, "sess-neep",
+		`{"type":"assistant","uuid":"u1","message":{"id":"m1","role":"assistant","usage":{"input_tokens":0,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0},"content":[{"type":"text","text":"x"}]}}`,
+	)
+
+	sm := newTokenTestSM(map[string]*SessionState{
+		"neep": {ID: "neep", Agent: "claude", AgentSessionID: "sess-neep", Status: StatusRunning},
+	})
+
+	sm.runTokenTick(context.Background())
+
+	got := sm.state.Sessions["neep"].Tokens
+	if got == nil || got.Total != 0 {
+		t.Errorf("known-zero: Tokens = %+v, want non-nil total 0", got)
+	}
+}
+
+func TestSetTokenStatsIdentityGuard(t *testing.T) {
+	// If the session's agent identity changes between the off-lock parse and the
+	// write-back, the stale parse must NOT be published (migration mislabel).
+	sm := newTokenTestSM(map[string]*SessionState{
+		"braw": {ID: "braw", Agent: "codex", AgentSessionID: "new-id", WorktreePath: "/w"},
+	})
+
+	// Snapshot taken while the session was still on claude/old-id.
+	stale := tokenTarget{id: "braw", agent: "claude", agentSessionID: "old-id", worktreePath: "/w"}
+	sm.setTokenStats(stale, &TokenStats{Total: 999})
+
+	if sm.state.Sessions["braw"].Tokens != nil {
+		t.Error("stale parse published despite identity change — migration mislabel")
+	}
+
+	// A matching snapshot publishes normally.
+	fresh := tokenTarget{id: "braw", agent: "codex", agentSessionID: "new-id", worktreePath: "/w"}
+	sm.setTokenStats(fresh, &TokenStats{Total: 42})
+
+	if got := sm.state.Sessions["braw"].Tokens; got == nil || got.Total != 42 {
+		t.Errorf("matching identity should publish: %+v", got)
+	}
+}
+
+func TestTokenFingerprintIncludesIdentity(t *testing.T) {
+	// A migration (agent/id change) must change the fingerprint so the cache
+	// can't serve a stale count for the new agent.
+	src := []transcript.Source{{Path: "/p", Size: 10}}
+	a := tokenFingerprint(tokenTarget{agent: "claude", agentSessionID: "id1", worktreePath: "/w"}, src)
+	b := tokenFingerprint(tokenTarget{agent: "codex", agentSessionID: "id2", worktreePath: "/w"}, src)
+
+	if a == b {
+		t.Error("fingerprint should differ when the agent identity differs")
 	}
 }
 

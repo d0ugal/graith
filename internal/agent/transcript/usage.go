@@ -33,24 +33,68 @@ type Usage struct {
 	Dropped int
 }
 
-// Total is the grand total across the exclusive categories.
+// Total is the grand total across the exclusive categories, saturating at
+// MaxInt64 rather than wrapping to a negative (which the CLI would then render
+// as a confident "0").
 func (u Usage) Total() int64 {
-	return u.Input + u.Output + u.CacheCreation + u.CacheRead + u.Unclassified
+	return addSat(u.Input, u.Output, u.CacheCreation, u.CacheRead, u.Unclassified)
 }
 
-// add merges another Usage into u, summing counters and OR-ing Found. Used to
-// combine multiple source files for one session.
+// add merges another Usage into u, saturating counters and OR-ing Found. Used
+// to combine multiple source files for one session.
 func (u *Usage) add(o Usage) {
-	u.Input += o.Input
-	u.Output += o.Output
-	u.CacheCreation += o.CacheCreation
-	u.CacheRead += o.CacheRead
-	u.Unclassified += o.Unclassified
+	u.Input = addSat(u.Input, o.Input)
+	u.Output = addSat(u.Output, o.Output)
+	u.CacheCreation = addSat(u.CacheCreation, o.CacheCreation)
+	u.CacheRead = addSat(u.CacheRead, o.CacheRead)
+	u.Unclassified = addSat(u.Unclassified, o.Unclassified)
 	u.Dropped += o.Dropped
 
 	if o.Found {
 		u.Found = true
 	}
+}
+
+// addChecked sums non-negative-leaning int64s and reports ok=false on overflow.
+// Used to validate provider totals without a wrapped comparison silently passing.
+func addChecked(vals ...int64) (int64, bool) {
+	var sum int64
+
+	for _, v := range vals {
+		s := sum + v
+		if (v > 0 && s < sum) || (v < 0 && s > sum) {
+			return 0, false
+		}
+
+		sum = s
+	}
+
+	return sum, true
+}
+
+// addSat sums int64s, saturating at MaxInt64 on positive overflow (negative
+// operands aren't expected for token counts; they saturate at MinInt64).
+func addSat(vals ...int64) int64 {
+	const maxInt64 = int64(^uint64(0) >> 1)
+
+	const minInt64 = -maxInt64 - 1
+
+	var sum int64
+
+	for _, v := range vals {
+		s := sum + v
+		if v > 0 && s < sum {
+			return maxInt64
+		}
+
+		if v < 0 && s > sum {
+			return minInt64
+		}
+
+		sum = s
+	}
+
+	return sum
 }
 
 // Source is one on-disk transcript file contributing to a session's usage,
