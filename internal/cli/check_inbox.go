@@ -10,6 +10,7 @@ import (
 
 	"github.com/d0ugal/graith/internal/client"
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/hookoutput"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/spf13/cobra"
 )
@@ -27,7 +28,7 @@ type frameReader interface {
 
 var checkInboxCmd = &cobra.Command{
 	Use:    "check-inbox",
-	Short:  "Check for unread inbox messages and output systemMessage (used by hooks)",
+	Short:  "Check for unread inbox messages and inject them as hook context (used by hooks)",
 	Hidden: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		sessionID := os.Getenv("GRAITH_SESSION_ID")
@@ -85,15 +86,16 @@ var checkInboxCmd = &cobra.Command{
 			previewStr = previewStr[:1000] + "..."
 		}
 
-		systemMsg := fmt.Sprintf(
+		context := fmt.Sprintf(
 			"You have %d unread message(s) in your graith inbox. Read with: gr msg inbox --all\n\n%s",
 			len(messages), previewStr,
 		)
 
-		out, _ := json.Marshal(map[string]string{
-			"systemMessage": systemMsg,
-		})
-		fmt.Println(string(out))
+		// check-inbox only fires from the SessionStart hook. For Claude Code the
+		// context must go through hookSpecificOutput.additionalContext to reach
+		// the model; a top-level systemMessage is user-facing only (issue #1072).
+		agent := os.Getenv("GRAITH_AGENT_TYPE")
+		fmt.Println(hookoutput.InboxContext(agent, "SessionStart", context))
 
 		return nil
 	},

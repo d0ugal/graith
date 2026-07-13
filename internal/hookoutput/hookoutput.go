@@ -39,6 +39,42 @@ func AllowAll(agent string) string {
 	return Approval(agent, "allow", "")
 }
 
+// claudeHookOutput is Claude Code's hook stdout envelope for injecting model
+// context. The nested hookSpecificOutput.additionalContext becomes a
+// hook_additional_context attachment fed to the model; a top-level
+// systemMessage (which graith emitted previously) is only a user-facing warning
+// banner and never reaches the model. hookEventName is required and must match
+// the firing event exactly. See claude-code src/utils/hooks.ts.
+type claudeHookOutput struct {
+	HookSpecificOutput struct {
+		HookEventName     string `json:"hookEventName"`
+		AdditionalContext string `json:"additionalContext"`
+	} `json:"hookSpecificOutput"`
+}
+
+// InboxContext returns the hook stdout JSON that surfaces unread inbox messages
+// to an agent at a lifecycle event (e.g. "SessionStart"). For Claude Code the
+// context must be delivered via hookSpecificOutput.additionalContext so it
+// actually reaches the model — a plain systemMessage is shown to the human only.
+// Other agents keep the systemMessage form they already consume.
+func InboxContext(agent, event, context string) string {
+	switch agent {
+	case "claude":
+		var resp claudeHookOutput
+
+		resp.HookSpecificOutput.HookEventName = event
+		resp.HookSpecificOutput.AdditionalContext = context
+
+		out, _ := json.Marshal(resp)
+
+		return string(out)
+	default:
+		out, _ := json.Marshal(map[string]string{"systemMessage": context})
+
+		return string(out)
+	}
+}
+
 func mapDecision(agent, internal string) string {
 	switch agent {
 	case "claude":

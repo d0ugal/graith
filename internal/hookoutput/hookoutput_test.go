@@ -1,6 +1,10 @@
 package hookoutput
 
-import "testing"
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
 
 func TestApproval(t *testing.T) {
 	tests := []struct {
@@ -39,5 +43,69 @@ func TestAllowAll(t *testing.T) {
 
 	if got := AllowAll("codex"); got != `{"decision":"allow"}` {
 		t.Errorf("AllowAll(codex) = %s, want allow", got)
+	}
+}
+
+// TestInboxContextClaude is the regression test for issue #1072: Claude Code
+// inbox context must go through hookSpecificOutput.additionalContext (which
+// reaches the model), not a top-level systemMessage (which is user-facing only).
+func TestInboxContextClaude(t *testing.T) {
+	body := "You have 1 unread message(s). From braw: hello"
+
+	got := InboxContext("claude", "SessionStart", body)
+
+	// Decode into the documented Claude hook contract shape.
+	var parsed struct {
+		SystemMessage      string `json:"systemMessage"`
+		HookSpecificOutput struct {
+			HookEventName     string `json:"hookEventName"`
+			AdditionalContext string `json:"additionalContext"`
+		} `json:"hookSpecificOutput"`
+	}
+	if err := json.Unmarshal([]byte(got), &parsed); err != nil {
+		t.Fatalf("InboxContext(claude) produced invalid JSON %q: %v", got, err)
+	}
+
+	if parsed.HookSpecificOutput.HookEventName != "SessionStart" {
+		t.Errorf("hookEventName = %q, want SessionStart", parsed.HookSpecificOutput.HookEventName)
+	}
+
+	if parsed.HookSpecificOutput.AdditionalContext != body {
+		t.Errorf("additionalContext = %q, want %q", parsed.HookSpecificOutput.AdditionalContext, body)
+	}
+
+	// The buggy behaviour emitted the body as systemMessage; guard against a
+	// regression to that (systemMessage never reaches the model).
+	if parsed.SystemMessage != "" {
+		t.Errorf("systemMessage = %q, want empty (context must use additionalContext)", parsed.SystemMessage)
+	}
+
+	if strings.Contains(got, `"systemMessage"`) {
+		t.Errorf("output %q must not carry the message body as systemMessage", got)
+	}
+}
+
+// TestInboxContextOtherAgents checks non-Claude agents keep the systemMessage
+// form they already consume, so this fix doesn't regress Codex/Cursor.
+func TestInboxContextOtherAgents(t *testing.T) {
+	body := "unread message from canny"
+
+	for _, agent := range []string{"codex", "cursor", "agy", ""} {
+		got := InboxContext(agent, "SessionStart", body)
+
+		var parsed struct {
+			SystemMessage string `json:"systemMessage"`
+		}
+		if err := json.Unmarshal([]byte(got), &parsed); err != nil {
+			t.Fatalf("InboxContext(%q) produced invalid JSON %q: %v", agent, got, err)
+		}
+
+		if parsed.SystemMessage != body {
+			t.Errorf("InboxContext(%q) systemMessage = %q, want %q", agent, parsed.SystemMessage, body)
+		}
+
+		if strings.Contains(got, "hookSpecificOutput") {
+			t.Errorf("InboxContext(%q) = %q, non-Claude agents should not emit hookSpecificOutput", agent, got)
+		}
 	}
 }
