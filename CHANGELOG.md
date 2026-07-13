@@ -1,5 +1,42 @@
 # Changelog
 
+## [0.67.7](https://github.com/d0ugal/graith/compare/v0.67.6...v0.67.7) (2026-07-13)
+
+
+### Features
+
+* **daemon:** throttle concurrent launches + startup watchdog ([#1092](https://github.com/d0ugal/graith/issues/1092)) ([e36ca03](https://github.com/d0ugal/graith/commit/e36ca03e69cc65a0eefbe4b698efe88faf93e353))
+* **notify:** macOS notifier .app bundle so graith appears in Notification Settings ([092e809](https://github.com/d0ugal/graith/commit/092e809b577a5cd2f953f0ebd0ab2fa008b2325f)), closes [#1094](https://github.com/d0ugal/graith/issues/1094)
+* **release:** build & ship GraithNotifier.app in Darwin release archives ([681cd61](https://github.com/d0ugal/graith/commit/681cd61985b912f33951fd3317c2c87d74ea4505)), closes [#1101](https://github.com/d0ugal/graith/issues/1101)
+
+
+### Bug Fixes
+
+* **cli:** align gr ls columns by visible width ([#1093](https://github.com/d0ugal/graith/issues/1093)) ([c72d323](https://github.com/d0ugal/graith/commit/c72d323ee241347efb2333500aa7770386bc0d4e))
+* **daemon:** address review findings — route pty logs to daemon.log, harden diagnostics ([2a7367b](https://github.com/d0ugal/graith/commit/2a7367b5929eb47440fa55fc028b0599f78eb824))
+* **daemon:** address review findings on launch throttle + watchdog ([a9376d6](https://github.com/d0ugal/graith/commit/a9376d610b18915f633587e6f19b1375ef38f921))
+* **daemon:** diagnose blank-screen-on-restart via scrollback pipeline logging ([#1087](https://github.com/d0ugal/graith/issues/1087)) ([e4227c2](https://github.com/d0ugal/graith/commit/e4227c26275201242e89e7f0928af522a2fc3768))
+* **ls:** suppress stale PR badges on terminal states in gr ls ([08e746e](https://github.com/d0ugal/graith/commit/08e746e6a021a34aa1de640f0354717a66a0ec4b))
+* **ls:** surface PR review_decision in gr ls and overlay ([cd65ae4](https://github.com/d0ugal/graith/commit/cd65ae43fb9eb69a5ea22dbd87a1f4d053852cd6)), closes [#1096](https://github.com/d0ugal/graith/issues/1096)
+* **notify:** address review findings on the macOS notifier ([4b51129](https://github.com/d0ugal/graith/commit/4b51129ccb3b64a28e0b3b23e26e01e962af6cf8))
+* **release:** address review findings on the macOS release runner ([5ff76d4](https://github.com/d0ugal/graith/commit/5ff76d46561f7386aac0b5fa7cbfaa4234b5ef42))
+* **resume:** address review findings on forced-id fresh fallback ([556a975](https://github.com/d0ugal/graith/commit/556a9752d278a567178049337c7c50351e2a9352))
+* **resume:** fall back to fresh start when forced-id session has no transcript ([5dc1a34](https://github.com/d0ugal/graith/commit/5dc1a348610bea85b6e2df0b74edba56b99df25f)), closes [#1091](https://github.com/d0ugal/graith/issues/1091)
+* **store:** accept repo ID or path for --repo ([ea94dd3](https://github.com/d0ugal/graith/commit/ea94dd3c23552cd72dcc7247a0f18010bb4c1dd2)), closes [#1088](https://github.com/d0ugal/graith/issues/1088)
+
+
+### Documentation
+
+* **design:** address review findings on token accounting ([58169e3](https://github.com/d0ugal/graith/commit/58169e361720cdf1d44cca65123dfea05bfcd236)), closes [#644](https://github.com/d0ugal/graith/issues/644)
+* **design:** address tribunal findings on headless design ([167a1f2](https://github.com/d0ugal/graith/commit/167a1f2d43029117287141a1a2edde86c855648d))
+* **design:** headless stream-json mode for fire-and-forget sessions ([7169d35](https://github.com/d0ugal/graith/commit/7169d358692fd2a2a31f84ec03bfe93f0f03801e))
+* **design:** per-session token accounting ([#644](https://github.com/d0ugal/graith/issues/644)) ([b126cf0](https://github.com/d0ugal/graith/commit/b126cf060bbf31151402e055872cdf997fde4200))
+
+
+### Tests
+
+* **cli:** address review findings for [#1093](https://github.com/d0ugal/graith/issues/1093) ([2168994](https://github.com/d0ugal/graith/commit/21689946d7cb2ffc11260a893287fb6bfc7a633e))
+
 ## [0.67.6](https://github.com/d0ugal/graith/compare/v0.67.5...v0.67.6) (2026-07-13)
 
 
