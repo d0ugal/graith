@@ -257,8 +257,9 @@ func displayGit(dirty bool, unpushed int) string {
 	return strings.Join(parts, " ")
 }
 
-// displayPR is the compact per-row PR/CI token for the overlay list, e.g.
-// "#56 ✗" (CI failing), "#56 ⚠" (conflict), "#1615 ✓" (passing), "#583 merged".
+// displayPR is the compact per-row PR/CI/review token for the overlay list,
+// e.g. "#56 ✗" (CI failing), "#56 ⚠" (conflict), "#1615 ✓ a" (passing,
+// approved), "#583 merged". A trailing a/c/r marks the review decision.
 func displayPR(s protocol.SessionInfo) string {
 	if s.PullRequest == nil {
 		return "—"
@@ -276,22 +277,42 @@ func displayPR(s protocol.SessionInfo) string {
 		out += "d"
 	}
 
+	// The review letter (a/c/r) trails the CI/conflict signal so an open PR
+	// shows both at a glance, e.g. "#56 ✓ a" (passing, approved).
+	rev := reviewLetter(pr.ReviewDecision)
+
 	if pr.Conflicting {
-		return out + " ⚠" // merge conflict — highest-priority signal
+		return out + " ⚠" + rev // merge conflict — highest-priority signal
 	}
 
 	if s.CI != nil {
 		switch s.CI.State {
 		case "passing":
-			return out + " ✓"
+			return out + " ✓" + rev
 		case "failing":
-			return out + " ✗"
+			return out + " ✗" + rev
 		case "pending":
-			return out + " ·"
+			return out + " ·" + rev
 		}
 	}
 
-	return out
+	return out + rev
+}
+
+// reviewLetter is the compact per-row review-decision suffix for the overlay,
+// with a leading space: " a" (approved), " c" (changes requested),
+// " r" (review required), or "" when there is no decision yet.
+func reviewLetter(decision string) string {
+	switch decision {
+	case "approved":
+		return " a"
+	case "changes_requested":
+		return " c"
+	case "review_required":
+		return " r"
+	default:
+		return ""
+	}
 }
 
 // prColor returns the color for a PR token by its worst signal.

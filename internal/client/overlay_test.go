@@ -3943,6 +3943,11 @@ func TestDisplayPR(t *testing.T) {
 		{"open failing", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 56, State: "open"}, CI: &protocol.CIInfo{State: "failing"}}, "#56 ✗"},
 		{"conflict beats CI", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 56, State: "open", Conflicting: true}, CI: &protocol.CIInfo{State: "passing"}}, "#56 ⚠"},
 		{"draft pending", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 9, State: "draft"}, CI: &protocol.CIInfo{State: "pending"}}, "#9d ·"},
+		{"approved trails CI", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 56, State: "open", ReviewDecision: "approved"}, CI: &protocol.CIInfo{State: "passing"}}, "#56 ✓ a"},
+		{"changes requested trails CI", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 56, State: "open", ReviewDecision: "changes_requested"}, CI: &protocol.CIInfo{State: "failing"}}, "#56 ✗ c"},
+		{"review required, no CI", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 56, State: "open", ReviewDecision: "review_required"}}, "#56 r"},
+		{"review trails conflict", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 56, State: "open", Conflicting: true, ReviewDecision: "changes_requested"}, CI: &protocol.CIInfo{State: "passing"}}, "#56 ⚠ c"},
+		{"merged ignores review", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 583, State: "merged", ReviewDecision: "approved"}}, "#583 merged"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

@@ -110,6 +110,11 @@ func TestCliPR(t *testing.T) {
 		{"CI pending", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 3, State: "open"}, CI: &protocol.CIInfo{State: "pending"}}, "#3 open CI:…"},
 		{"CI empty adds nothing", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 4, State: "merged"}, CI: &protocol.CIInfo{State: ""}}, "#4 merged"},
 		{"conflict and CI combine", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 5, State: "open", Conflicting: true}, CI: &protocol.CIInfo{State: "failing"}}, "#5 open conflict CI:fail"},
+		{"review approved", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 6, State: "open", ReviewDecision: "approved"}}, "#6 open review:ok"},
+		{"review changes requested", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 7, State: "open", ReviewDecision: "changes_requested"}}, "#7 open review:changes"},
+		{"review required", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 8, State: "draft", ReviewDecision: "review_required"}}, "#8 draft review:needed"},
+		{"CI and review combine", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 9, State: "open", ReviewDecision: "approved"}, CI: &protocol.CIInfo{State: "passing"}}, "#9 open CI:ok review:ok"},
+		{"unknown review decision ignored", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 10, State: "open", ReviewDecision: "dismissed"}}, "#10 open"},
 	}
 
 	for _, tt := range tests {

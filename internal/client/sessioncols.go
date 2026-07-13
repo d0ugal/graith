@@ -230,8 +230,8 @@ func cliBranch(s protocol.SessionInfo) string {
 	return ""
 }
 
-// cliPR is the plain-text PR/CI cell for `gr ls`, e.g. "#42 open",
-// "#7 open conflict", "#1 open CI:ok".
+// cliPR is the plain-text PR/CI/review cell for `gr ls`, e.g. "#42 open",
+// "#7 open conflict", "#1 open CI:ok review:ok".
 func cliPR(s protocol.SessionInfo) string {
 	if s.PullRequest == nil {
 		return ""
@@ -253,6 +253,15 @@ func cliPR(s protocol.SessionInfo) string {
 		case "pending":
 			out += " CI:…"
 		}
+	}
+
+	switch pr.ReviewDecision {
+	case "approved":
+		out += " review:ok"
+	case "changes_requested":
+		out += " review:changes"
+	case "review_required":
+		out += " review:needed"
 	}
 
 	return out
