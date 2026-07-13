@@ -1058,6 +1058,96 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 
 				sendControl("msg_conversation_list", protocol.MsgConversationListMsg{Messages: out})
 
+			case "msg_jail_list":
+				m, ok := decodePayload[protocol.MsgJailListMsg](msg, sendControl, "invalid msg_jail_list message")
+				if !ok {
+					continue
+				}
+
+				if sm.messages == nil {
+					sendControl("msg_jail_list", protocol.MsgJailListResponse{})
+					continue
+				}
+
+				jailed, err := sm.messages.ListJailed(m.IncludeReleased)
+				if err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+					continue
+				}
+
+				sendControl("msg_jail_list", protocol.MsgJailListResponse{Jailed: jailedToWire(jailed)})
+
+			case "msg_jail_show":
+				m, ok := decodePayload[protocol.MsgJailShowMsg](msg, sendControl, "invalid msg_jail_show message")
+				if !ok {
+					continue
+				}
+
+				if sm.messages == nil {
+					sendControl("error", protocol.ErrorMsg{Message: "no jailed comments"})
+					continue
+				}
+
+				j, found, err := sm.messages.GetJailed(m.ID)
+				if err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+					continue
+				}
+
+				if !found {
+					sendControl("error", protocol.ErrorMsg{Message: "no jailed comment with id " + m.ID})
+					continue
+				}
+
+				sendControl("msg_jail_show", protocol.MsgJailShowResponse{Jailed: jailedOneToWire(j)})
+
+			case "msg_jail_release":
+				m, ok := decodePayload[protocol.MsgJailReleaseMsg](msg, sendControl, "invalid msg_jail_release message")
+				if !ok {
+					continue
+				}
+
+				// Release delivers quarantined untrusted content to a working
+				// agent, so it is restricted to a human operator or the
+				// orchestrator — a plain agent session is rejected (issue #1082).
+				if !auth.authorizeJailRelease(sm, sendControl) {
+					continue
+				}
+
+				var (
+					released []JailedComment
+					err      error
+				)
+
+				switch {
+				case m.All:
+					if m.Author == "" {
+						sendControl("error", protocol.ErrorMsg{Message: "--all requires --author <login>"})
+						continue
+					}
+
+					//nolint:contextcheck // ReleaseJailed(ByAuthor) delivers via notifyFromDaemon, whose auto-resume is detached and must outlive this request, so it deliberately does not inherit the connection ctx.
+					released, err = sm.ReleaseJailedByAuthor(m.Author)
+				case m.ID != "":
+					var one JailedComment
+
+					//nolint:contextcheck // ReleaseJailed delivers via notifyFromDaemon, whose auto-resume is detached and must outlive this request, so it deliberately does not inherit the connection ctx.
+					one, err = sm.ReleaseJailed(m.ID)
+					if err == nil {
+						released = []JailedComment{one}
+					}
+				default:
+					sendControl("error", protocol.ErrorMsg{Message: "specify a jail id, or --all --author <login>"})
+					continue
+				}
+
+				if err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+					continue
+				}
+
+				sendControl("msg_jail_release", protocol.MsgJailReleaseResponse{Released: jailedToWire(released)})
+
 			case "approval_request":
 				req, ok := decodePayload[protocol.ApprovalRequestMsg](msg, sendControl, "invalid approval_request")
 				if !ok {
@@ -1823,6 +1913,20 @@ func (ac authContext) authorizeTriggerOp(sm *SessionManager, send func(string, a
 func (ac authContext) authorizeNotify(sm *SessionManager, send func(string, any)) bool {
 	sm.mu.RLock()
 	err := ac.checkNotifyOp(sm)
+	sm.mu.RUnlock()
+
+	if err != nil {
+		send("error", protocol.ErrorMsg{Message: err.Error()})
+
+		return false
+	}
+
+	return true
+}
+
+func (ac authContext) authorizeJailRelease(sm *SessionManager, send func(string, any)) bool {
+	sm.mu.RLock()
+	err := ac.checkJailRelease(sm)
 	sm.mu.RUnlock()
 
 	if err != nil {

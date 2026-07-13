@@ -271,6 +271,27 @@ List streams with total and unread message counts.
 |------|-------------|
 | `--system` | Include `_system.*` streams |
 
+### `gr msg jail list`
+
+List PR comments quarantined by the author-trust gate (see [Comment author-trust gate](configuration.md#comment-author-trust-gate)).
+
+| Flag | Description |
+|------|-------------|
+| `--released` | Include already-released comments |
+
+### `gr msg jail show <id>`
+
+Show a single quarantined comment, including its body.
+
+### `gr msg jail release [id]`
+
+Release a quarantined comment — deliver its content to the target session's inbox. **Restricted to the human or the orchestrator**; a plain agent session is rejected.
+
+| Flag | Description |
+|------|-------------|
+| `--all` | Release all jailed comments from an author (requires `--author`) |
+| `--author <login>` | Author login to release (with `--all`) |
+
 ## Document store
 
 See [Document Store](store.md) for full details.

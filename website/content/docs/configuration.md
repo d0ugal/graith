@@ -198,7 +198,22 @@ trusted_author_associations = ["OWNER", "MEMBER", "COLLABORATOR"]
 notify_untrusted_authors = true
 ```
 
-An untrusted comment is **dropped** from notifications (the comment cursor still advances, so a later trusted comment isn't reported alongside the whole untrusted backlog). For the common case — an owner working on their own repos — every comment is from the owner, so behaviour is unchanged.
+An untrusted comment is **held (jailed)**, not discarded: its full content is quarantined in a store the agent can't release, and the comment cursor advances so a later trusted comment isn't reported alongside the whole untrusted backlog. For the common case — an owner working on their own repos — every comment is from the owner, so behaviour is unchanged.
+
+### Comment jail
+
+Jailed comments can be inspected and released with `gr msg jail`:
+
+```bash
+gr msg jail list                              # quarantined comments
+gr msg jail show <id>                          # one comment, including its body
+gr msg jail release <id>                        # deliver it to its target session
+gr msg jail release --all --author <login>      # release everything from an author
+```
+
+**Releasing is restricted to the human or the orchestrator** — a plain agent session is rejected. Releasing delivers previously-untrusted content to a working agent, so allowing an agent to release its own quarantined comment would defeat the point. `list`/`show` are readable by agents; only `release` is gated.
+
+When you add an author to `comment_author_allowlist` (or widen `trusted_author_associations`) and reload the config, their jailed comments are **released automatically** — the reload is a local-human action, so it's implicitly authorized. Jailed comments respect the `[messages] max_age` retention window and don't accumulate forever.
 
 Two trust knobs, fail-closed:
 

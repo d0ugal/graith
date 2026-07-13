@@ -351,6 +351,66 @@ type MsgConversationListMsg struct {
 	Messages []ConversationMessage `json:"messages"`
 }
 
+// --- PR-comment jail (issue #1082) ---
+
+// JailedCommentInfo is the wire form of a quarantined PR comment. It mirrors the
+// daemon's JailedComment. The body is included for `show`/`list`; a client may
+// choose to elide it in list output.
+type JailedCommentInfo struct {
+	ID            string `json:"id"`
+	CommentID     int64  `json:"comment_id"`
+	Surface       string `json:"surface"`
+	PRNumber      int    `json:"pr_number"`
+	RepoSlug      string `json:"repo_slug,omitempty"`
+	Branch        string `json:"branch,omitempty"`
+	Author        string `json:"author"`
+	Association   string `json:"association,omitempty"`
+	IsBot         bool   `json:"is_bot,omitempty"`
+	Path          string `json:"path,omitempty"`
+	Line          int    `json:"line,omitempty"`
+	Body          string `json:"body"`
+	TargetSession string `json:"target_session"`
+	TargetName    string `json:"target_name,omitempty"`
+	JailedAt      string `json:"jailed_at"`
+	ReleasedAt    string `json:"released_at,omitempty"`
+}
+
+// MsgJailListMsg requests the list of jailed PR comments (read-only). When
+// IncludeReleased is true, already-released entries are included too.
+type MsgJailListMsg struct {
+	IncludeReleased bool `json:"include_released,omitempty"`
+}
+
+// MsgJailListResponse is the daemon's reply to msg_jail_list.
+type MsgJailListResponse struct {
+	Jailed []JailedCommentInfo `json:"jailed"`
+}
+
+// MsgJailShowMsg requests a single jailed comment by ID (read-only).
+type MsgJailShowMsg struct {
+	ID string `json:"id"`
+}
+
+// MsgJailShowResponse is the daemon's reply to msg_jail_show.
+type MsgJailShowResponse struct {
+	Jailed JailedCommentInfo `json:"jailed"`
+}
+
+// MsgJailReleaseMsg releases a jailed comment (or all from an author). Gated to
+// the human or the orchestrator — a plain agent session is rejected. Exactly one
+// of ID, or (All && Author), is expected.
+type MsgJailReleaseMsg struct {
+	ID     string `json:"id,omitempty"`
+	All    bool   `json:"all,omitempty"`
+	Author string `json:"author,omitempty"`
+}
+
+// MsgJailReleaseResponse is the daemon's reply to msg_jail_release. Released
+// carries the entries that were delivered to their target sessions.
+type MsgJailReleaseResponse struct {
+	Released []JailedCommentInfo `json:"released"`
+}
+
 // NotifyMsg is a client request (`gr notify`) to send a proactive push
 // notification to the human via the configured [notifications] backend.
 type NotifyMsg struct {

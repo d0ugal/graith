@@ -665,6 +665,7 @@ func (sm *SessionManager) diffAndBuild(cfg *configPRWatch, t prWatchTarget, slug
 			trusted, dropped := partitionCommentsByTrust(cfg, newReview)
 			untrusted = append(untrusted, dropped...)
 			sm.logDroppedComments(t, d, "inline review", dropped)
+			sm.jailDroppedComments(t, slug, d, "inline review", dropped)
 
 			cur.lastReviewCommentID = sm.deliverTrustedComments(
 				cfg, t, cur, &out, reviewCommentBody, d, trusted, dropped,
@@ -682,6 +683,7 @@ func (sm *SessionManager) diffAndBuild(cfg *configPRWatch, t prWatchTarget, slug
 			trusted, dropped := partitionCommentsByTrust(cfg, newIssue)
 			untrusted = append(untrusted, dropped...)
 			sm.logDroppedComments(t, d, "conversation", dropped)
+			sm.jailDroppedComments(t, slug, d, "conversation", dropped)
 
 			cur.lastIssueCommentID = sm.deliverTrustedComments(
 				cfg, t, cur, &out, prCommentBody, d, trusted, dropped,
@@ -1014,10 +1016,12 @@ func (sm *SessionManager) recordPromptedAuthors(authors []untrustedAuthor) {
 func untrustedAuthorPromptBody(t prWatchTarget, d prData, authors []untrustedAuthor) string {
 	var b strings.Builder
 
-	fmt.Fprintf(&b, "Untrusted PR comment author(s) on PR #%d (%s) — %s dropped from the working "+
-		"agent's notifications as a prompt-injection precaution. The comment text was NOT delivered "+
-		"to the agent and is NOT included here. Decide whether to trust the author(s) below; to trust "+
-		"one, add their login to pr_watch.comment_author_allowlist and reload.",
+	fmt.Fprintf(&b, "Untrusted PR comment author(s) on PR #%d (%s) — %s held (not delivered) from the "+
+		"working agent's notifications as a prompt-injection precaution. The comment text was NOT "+
+		"delivered to the agent and is NOT included here — it is jailed (quarantined), not discarded. "+
+		"Decide whether to trust the author(s) below; to trust one, add their login to "+
+		"pr_watch.comment_author_allowlist and reload (jailed comments from a newly-trusted author are "+
+		"released automatically on reload).",
 		d.Number, t.branch, pluralAuthors(len(authors)))
 
 	for _, a := range authors {
@@ -1029,7 +1033,10 @@ func untrustedAuthorPromptBody(t prWatchTarget, d prData, authors []untrustedAut
 		fmt.Fprintf(&b, "\n  • @%s (%s), association %s, %s", a.login, kind, a.assoc, pluralComments(a.count))
 	}
 
-	fmt.Fprintf(&b, "\n\nRead the comment content yourself: `gh pr view %d --comments`.", d.Number)
+	fmt.Fprintf(&b, "\n\nInspect the jailed comments: `gr msg jail list`, then `gr msg jail show <id>`. "+
+		"Release one: `gr msg jail release <id>`. Release all from an author: "+
+		"`gr msg jail release --all --author <login>`. Or read on GitHub: `gh pr view %d --comments`.",
+		d.Number)
 
 	return b.String()
 }

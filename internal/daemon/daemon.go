@@ -5452,6 +5452,17 @@ func (sm *SessionManager) applyConfig(newCfg *config.Config) {
 		sm.log.Info("MCP manager config reloaded")
 	}
 
+	// If the PR-comment author-trust config changed, re-evaluate jailed comments
+	// against the new config and auto-release any whose author is now trusted
+	// (issue #1082). A config reload is a local-human action, so this release is
+	// implicitly human-authorized. Run detached: it hits the message DB and may
+	// auto-resume stopped sessions, which must outlive the reload request.
+	if prWatchTrustChanged(old.PRWatch, newCfg.PRWatch) {
+		sm.log.Info("config changed", "key", "pr_watch.comment_trust")
+
+		go sm.autoReleaseNewlyTrusted(newCfg)
+	}
+
 	if old.Orchestrator.Enabled != newCfg.Orchestrator.Enabled {
 		sm.log.Info("config changed", "key", "orchestrator.enabled", "old", old.Orchestrator.Enabled, "new", newCfg.Orchestrator.Enabled)
 

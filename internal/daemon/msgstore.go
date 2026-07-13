@@ -105,6 +105,34 @@ func initSchema(db *sql.DB) error {
 
 		INSERT OR IGNORE INTO stream_hwm (stream, max_seq)
 		SELECT stream, MAX(seq) FROM messages GROUP BY stream;
+
+		-- jailed_comments holds PR comments that pr_watch blocked as untrusted
+		-- (issue #1082). Rather than discard the content, it is quarantined here
+		-- with its metadata so the human/orchestrator can inspect and release it.
+		-- The UNIQUE(comment_id, surface, target_session) constraint makes jailing
+		-- idempotent: a re-fetch of the same comment (e.g. a degraded re-prime)
+		-- can't create a duplicate row.
+		CREATE TABLE IF NOT EXISTS jailed_comments (
+			id             TEXT PRIMARY KEY,
+			comment_id     INTEGER NOT NULL,
+			surface        TEXT NOT NULL,
+			pr_number      INTEGER NOT NULL,
+			repo_slug      TEXT NOT NULL DEFAULT '',
+			branch         TEXT NOT NULL DEFAULT '',
+			author         TEXT NOT NULL DEFAULT '',
+			association    TEXT NOT NULL DEFAULT '',
+			is_bot         INTEGER NOT NULL DEFAULT 0,
+			path           TEXT NOT NULL DEFAULT '',
+			line           INTEGER NOT NULL DEFAULT 0,
+			body           TEXT NOT NULL DEFAULT '',
+			target_session TEXT NOT NULL DEFAULT '',
+			target_name    TEXT NOT NULL DEFAULT '',
+			jailed_at      TEXT NOT NULL,
+			released_at    TEXT NOT NULL DEFAULT '',
+			UNIQUE(comment_id, surface, target_session)
+		);
+		CREATE INDEX IF NOT EXISTS idx_jailed_author ON jailed_comments(author);
+		CREATE INDEX IF NOT EXISTS idx_jailed_jailed_at ON jailed_comments(jailed_at);
 	`)
 	if err != nil {
 		return fmt.Errorf("init messages schema: %w", err)
@@ -500,6 +528,16 @@ func (s *MsgStore) Cleanup(maxAge time.Duration, maxPerStream int) (int64, error
 
 		n, _ := res.RowsAffected()
 		total += n
+
+		// Jailed PR comments respect the same age retention (issue #1082) so a
+		// quarantine store can't grow without bound. Keyed on jailed_at.
+		jres, err := s.db.Exec("DELETE FROM jailed_comments WHERE jailed_at < ?", ageCutoff)
+		if err != nil {
+			return total, fmt.Errorf("cleanup jailed by age: %w", err)
+		}
+
+		jn, _ := jres.RowsAffected()
+		total += jn
 	}
 
 	if maxPerStream > 0 {
