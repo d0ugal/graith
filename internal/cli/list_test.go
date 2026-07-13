@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/d0ugal/graith/internal/client"
 	"github.com/d0ugal/graith/internal/output"
 	"github.com/d0ugal/graith/internal/protocol"
@@ -320,7 +321,7 @@ func TestColorize(t *testing.T) {
 		}
 	})
 
-	t.Run("enabled wraps ANSI bracketed by tabwriter escape bytes", func(t *testing.T) {
+	t.Run("enabled wraps text in ANSI with visible width unchanged", func(t *testing.T) {
 		got := colorize("running", green, true)
 
 		if !strings.Contains(got, "\x1b[") {
@@ -331,16 +332,15 @@ func TestColorize(t *testing.T) {
 			t.Errorf("expected visible text preserved in %q", got)
 		}
 
-		// Every ANSI sequence must be bracketed by the tabwriter Escape byte so
-		// a StripEscape tabwriter aligns columns by visible width.
-		if !strings.Contains(got, "\xff\x1b[") || !strings.Contains(got, "m\xff") {
-			t.Errorf("ANSI not bracketed by escape bytes: %q", got)
+		// No tabwriter Escape (0xff) bytes: renderRows aligns by visible width
+		// (ansi.StringWidth), so the bracketing that tabwriter needed is gone.
+		if strings.ContainsRune(got, '\xff') {
+			t.Errorf("colored output must not contain tabwriter escape bytes: %q", got)
 		}
 
-		// Stripping the escape bytes and ANSI sequences leaves the plain text.
-		stripped := ansiSeqRe.ReplaceAllString(strings.ReplaceAll(got, "\xff", ""), "")
-		if stripped != "running" {
-			t.Errorf("stripped %q, want %q", stripped, "running")
+		// The visible width matches the plain text, so alignment is unaffected.
+		if w := ansi.StringWidth(got); w != len("running") {
+			t.Errorf("visible width = %d, want %d (%q)", w, len("running"), got)
 		}
 	})
 }
@@ -662,4 +662,95 @@ func TestPrintFlatGoldenWide(t *testing.T) {
 	if got := buf.String(); got != want {
 		t.Errorf("wide table mismatch:\n--- got ---\n%q\n--- want ---\n%q", got, want)
 	}
+}
+
+// columnStarts returns the visible (display-cell) offset at which each cell's
+// content begins on a rendered line, given the original (possibly ANSI-coloured)
+// cells for that row. It mirrors renderRows' padding rule so a test can assert
+// that a rendered line places every column at the offset renderRows promises.
+func columnStarts(cells []string, widths []int) []int {
+	starts := make([]int, len(cells))
+	off := 0
+
+	for i := range cells {
+		starts[i] = off
+		off += widths[i] + 2 // cell padded to its column width + the 2-space gap
+	}
+
+	return starts
+}
+
+// TestRenderRowsAlignsColoredAndWideCells is the regression test for issue
+// #1093: coloured cells and cells containing wide runes (⚠, the ★ marker) must
+// not throw off column alignment. Against the old text/tabwriter renderer this
+// failed — tabwriter counted the bytes of the bracketed ANSI escape toward the
+// column width, so coloured cells were padded short and every following column
+// drifted (worse for longer truecolor sequences). renderRows measures visible
+// width instead, so each column starts at the same display offset on every row.
+func TestRenderRowsAlignsColoredAndWideCells(t *testing.T) {
+	green := client.StatusColor("running")
+
+	rows := [][]string{
+		{"NAME", "STATUS", "ACTIVITY", "GIT", "AGE"},
+		{"braw", colorize("running", green, true), "⚠ approval", colorize("dirty, 1 ahead", green, true), "1h"},
+		{"a-much-longer-session-name", colorize("stopped", green, true), "", "", "2h"},
+		{"★ canny", colorize("errored", green, true), "active (Bash)", "3 ahead", "2d"},
+	}
+
+	// Column widths as renderRows computes them: the max visible width per column.
+	widths := make([]int, len(rows[0]))
+
+	for _, r := range rows {
+		for i, cell := range r {
+			if w := ansi.StringWidth(cell); w > widths[i] {
+				widths[i] = w
+			}
+		}
+	}
+
+	var buf bytes.Buffer
+
+	renderRows(&buf, rows)
+
+	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
+	if len(lines) != len(rows) {
+		t.Fatalf("rendered %d lines, want %d:\n%s", len(lines), len(rows), buf.String())
+	}
+
+	for li, line := range lines {
+		visible := ansi.Strip(line)
+		starts := columnStarts(rows[li], widths)
+
+		for c, cell := range rows[li] {
+			plain := ansi.Strip(cell)
+			if plain == "" {
+				continue
+			}
+
+			// The cell's visible content must begin exactly at its column's
+			// display offset — this is the alignment the old renderer broke.
+			seg := displaySlice(visible, starts[c])
+			if !strings.HasPrefix(seg, plain) {
+				t.Errorf("row %d col %d: content %q not at display offset %d\n  line=%q\n  from=%q",
+					li, c, plain, starts[c], visible, seg)
+			}
+		}
+	}
+}
+
+// displaySlice returns the suffix of s that begins at the given display-cell
+// offset. Used to check that a cell's visible content lands at its column start.
+func displaySlice(s string, displayOff int) string {
+	off := 0
+	runes := []rune(s)
+
+	for i, r := range runes {
+		if off >= displayOff {
+			return string(runes[i:])
+		}
+
+		off += ansi.StringWidth(string(r))
+	}
+
+	return ""
 }
