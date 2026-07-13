@@ -12,7 +12,6 @@ import (
 
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/git"
-	grpty "github.com/d0ugal/graith/internal/pty"
 	"github.com/d0ugal/graith/internal/testutil"
 )
 
@@ -65,7 +64,7 @@ func newTestSM(t *testing.T) *SessionManager {
 
 	return &SessionManager{
 		state:    NewState(),
-		sessions: make(map[string]*grpty.Session),
+		sessions: make(map[string]SessionDriver),
 		cfg: &config.Config{
 			GitPull: config.GitPullConfig{
 				Enabled:  true,

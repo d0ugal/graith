@@ -64,7 +64,7 @@ type hookReport struct {
 type SessionManager struct {
 	mu                 sync.RWMutex
 	state              *State
-	sessions           map[string]*grpty.Session
+	sessions           map[string]SessionDriver
 	attachedClients    map[string]*attachedClient
 	hookReports        map[string]hookReport
 	pendingApprovals   map[string]*pendingApproval
@@ -128,7 +128,7 @@ type SessionManager struct {
 func NewSessionManager(cfg *config.Config, paths config.Paths, log *slog.Logger) *SessionManager {
 	sm := &SessionManager{
 		state:              NewState(),
-		sessions:           make(map[string]*grpty.Session),
+		sessions:           make(map[string]SessionDriver),
 		attachedClients:    make(map[string]*attachedClient),
 		hookReports:        make(map[string]hookReport),
 		pendingApprovals:   make(map[string]*pendingApproval),
@@ -1916,7 +1916,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 // startWatcher launches watchSession in a tracked goroutine. The watcher is
 // registered with sm.watchers so StopAll can wait for its post-exit work
 // (state writes, status publish) to finish during shutdown.
-func (sm *SessionManager) startWatcher(id string, sess *grpty.Session) {
+func (sm *SessionManager) startWatcher(id string, sess SessionDriver) {
 	sm.watchers.Add(1)
 	go func() {
 		defer sm.watchers.Done()
@@ -1928,7 +1928,7 @@ func (sm *SessionManager) startWatcher(id string, sess *grpty.Session) {
 // watchSession waits for a PTY session to exit and updates state accordingly.
 // If the session has been replaced (e.g. by Resume) or removed (e.g. by Delete),
 // the watcher is stale and skips the state update and status event.
-func (sm *SessionManager) watchSession(id string, sess *grpty.Session) {
+func (sm *SessionManager) watchSession(id string, sess SessionDriver) {
 	<-sess.Done()
 
 	sm.mu.Lock()
@@ -3818,7 +3818,7 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 		inPlace      bool
 		prevStatus   SessionStatus
 		includes     []IncludedRepoState
-		ptySess      *grpty.Session
+		ptySess      SessionDriver
 		client       *attachedClient
 		pid          int
 		pidStartTime int64
@@ -5085,7 +5085,7 @@ func (sm *SessionManager) Diagnostics() protocol.DiagnosticsMsg {
 		}
 
 		if ptySess, ok := sm.sessions[id]; ok {
-			written, maxSize, saturated := ptySess.Scrollback.Stats()
+			written, maxSize, saturated := ptySess.ScrollbackFile().Stats()
 			sd.ScrollbackBytes = written
 			sd.ScrollbackMax = maxSize
 			sd.Saturated = saturated
@@ -5145,8 +5145,9 @@ func (sm *SessionManager) scrollbackLogPath(id string) string {
 	return filepath.Join(sm.paths.LogDir, id+".log")
 }
 
-// GetPTY returns the live PTY session by ID.
-func (sm *SessionManager) GetPTY(id string) (*grpty.Session, bool) {
+// GetPTY returns the live session driver by ID. Named for its historic
+// PTY-only past; today it may return any SessionDriver implementation.
+func (sm *SessionManager) GetPTY(id string) (SessionDriver, bool) {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 
@@ -5192,7 +5193,7 @@ func (sm *SessionManager) StopAll(ctx context.Context) {
 
 	type snapshot struct {
 		id   string
-		sess *grpty.Session
+		sess SessionDriver
 	}
 
 	sessions := make([]snapshot, 0, len(sm.sessions))
@@ -5211,7 +5212,7 @@ func (sm *SessionManager) StopAll(ctx context.Context) {
 	var wg sync.WaitGroup
 	for _, s := range sessions {
 		wg.Add(1)
-		go func(id string, sess *grpty.Session) {
+		go func(id string, sess SessionDriver) {
 			defer wg.Done()
 
 			select {
@@ -5442,7 +5443,7 @@ func (sm *SessionManager) detectAgentStatuses() {
 		name         string
 		agent        string
 		prevStatus   string
-		pty          *grpty.Session
+		pty          SessionDriver
 		worktreePath string
 		baseBranch   string
 		repoPath     string
