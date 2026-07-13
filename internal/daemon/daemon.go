@@ -2071,31 +2071,63 @@ func resolveResumeArgs(agent config.Agent, sessAgent, sessAgentSessionID string,
 	return resumeArgs, ""
 }
 
-// forcedIDConversationExists reports whether a forced-id agent (Claude) has an
-// on-disk transcript for the given session id. Resuming such an agent uses
-// `--resume <id>`, which fails hard ("No conversation found with session ID")
-// when no conversation was ever persisted for that id — e.g. the first launch
-// was killed before the transcript hit disk. Any locate error (including no
-// match) is treated as "no conversation". Callers gate on forcesID, so the
-// agent is always transcript-supported here.
+// forcedIDConversationExists reports whether a forced-id agent (Claude) has a
+// non-empty on-disk transcript for the given session id. Resuming such an agent
+// uses `--resume <id>`, which fails hard ("No conversation found with session
+// ID") when no conversation was ever persisted for that id — e.g. the first
+// launch was killed before (or mid-) writing the transcript. A zero-byte
+// transcript is that same wedge (the file was created but nothing written), so
+// it counts as "no conversation". Any locate error (including no match) is
+// likewise treated as "no conversation".
+//
+// Note: the locator resolves Claude's config root from the daemon's own
+// environment (CLAUDE_CONFIG_DIR / ~/.claude), matching the token-accounting
+// loop (pollTokens). A per-agent `[agents.claude.env] CLAUDE_CONFIG_DIR`
+// override is not threaded through here yet — that's a shared limitation of the
+// transcript subsystem, tracked separately.
 func forcedIDConversationExists(agent, agentSessionID, worktreePath string) bool {
 	sources, err := transcript.Locate(agent, agentSessionID, worktreePath)
-	return err == nil && len(sources) > 0
+	if err != nil {
+		return false
+	}
+
+	for _, s := range sources {
+		if s.Size > 0 {
+			return true
+		}
+	}
+
+	return false
 }
 
-// resolveForcedIDFreshStart decides whether a resume of a forced-id agent must
-// fall back to a fresh conversation because its captured session id has no
-// on-disk transcript. When a fallback is needed it mints a new session id (via
-// mint) and forces a fresh start; otherwise it returns the inputs unchanged.
-// The returned bool reports whether a fallback fired, so the caller can persist
-// the new id and clear the one-shot FreshStart flag once the start succeeds.
-func resolveForcedIDFreshStart(agent, agentSessionID, worktreePath string, freshStart bool, mint func() string) (newID string, fresh, fellBack bool) {
-	if freshStart || !forcesID(agent) || agentSessionID == "" {
+// resolveForcedIDResume decides how to resume a forced-id agent (Claude) based
+// solely on whether a conversation exists on disk for its session id — the
+// stored freshStart flag is deliberately NOT trusted as the primary signal:
+//
+//   - conversation exists → native --resume (fresh=false), even if a stale
+//     freshStart=true was left behind by a fresh start that crashed between
+//     persisting the minted id and clearing the flag. Safe because a forced-id
+//     freshStart id is always freshly minted, so a transcript under it means the
+//     fresh start already ran far enough to write one.
+//   - no conversation, not already fresh → the #1091 wedge: mint a new id and
+//     start fresh so `claude --resume <id>` can't fail with "No conversation
+//     found". Reported via fellBack so the caller clears the one-shot flag once
+//     the start succeeds.
+//   - no conversation, already fresh (migration seed / a prior pending fallback)
+//     → keep the minted id and the pending fresh start unchanged.
+//
+// Non-forced agents and empty ids are returned unchanged.
+func resolveForcedIDResume(agent, agentSessionID, worktreePath string, freshStart bool, mint func() string) (id string, fresh, fellBack bool) {
+	if !forcesID(agent) || agentSessionID == "" {
 		return agentSessionID, freshStart, false
 	}
 
 	if forcedIDConversationExists(agent, agentSessionID, worktreePath) {
-		return agentSessionID, freshStart, false
+		return agentSessionID, false, false
+	}
+
+	if freshStart {
+		return agentSessionID, true, false
 	}
 
 	return mint(), true, true
@@ -2304,30 +2336,38 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	prevAgentSessionID := sessState.AgentSessionID
 	prevFreshStart := sessState.FreshStart
 
-	// For a forced-id agent (Claude), a captured session id with no on-disk
-	// conversation would make `--resume <id>` fail permanently. Detect that and
-	// mint a fresh id + fresh start so the session recovers instead of wedging.
-	// FreshStart is one-shot: it's cleared once the start succeeds (below), so
-	// the next resume of the now-populated conversation uses native --resume.
+	// For a forced-id agent (Claude), the resume command is decided by whether a
+	// conversation exists on disk for the captured id (see resolveForcedIDResume):
+	// a missing/empty transcript would make `--resume <id>` fail permanently, so
+	// mint a fresh id + fresh start instead; and a stale FreshStart left by an
+	// interrupted fresh start is corrected back to native --resume once its
+	// transcript exists. Applied to the shared *sessState so the StatusCreating
+	// save below persists it before the PTY spawn.
 	forcedFreshFallback := false
 
-	if forcesID(sessState.Agent) && sessState.AgentSessionID != "" && !sessState.FreshStart {
+	if forcesID(sessState.Agent) && sessState.AgentSessionID != "" {
 		oldID := sessState.AgentSessionID
-		newID, fresh, fellBack := resolveForcedIDFreshStart(sessState.Agent, oldID, sessState.WorktreePath, sessState.FreshStart, newAgentSessionID)
-		// Within this guard the helper's other early-returns can't fire, so
-		// fellBack is exactly "no on-disk conversation for the captured id".
+		oldFresh := sessState.FreshStart
+		newID, fresh, fellBack := resolveForcedIDResume(sessState.Agent, oldID, sessState.WorktreePath, oldFresh, newAgentSessionID)
+
+		// For a forced-id agent the helper returns fresh=false only via the
+		// conversation-exists branch, so !fresh is exactly "conversation exists".
 		sm.log.Info("resume transcript lookup",
 			"session_id", id, "agent", sessState.Agent,
-			"agent_session_id", oldID, "conversation_exists", !fellBack)
+			"agent_session_id", oldID, "conversation_exists", !fresh)
 
-		if fellBack {
+		sessState.AgentSessionID = newID
+		sessState.FreshStart = fresh
+		forcedFreshFallback = fellBack
+
+		switch {
+		case fellBack:
 			sm.log.Info("resume decision: fresh-start (no conversation found for forced-id session)",
 				"session_id", id, "agent", sessState.Agent,
 				"old_agent_session_id", oldID, "new_agent_session_id", newID)
-
-			sessState.AgentSessionID = newID
-			sessState.FreshStart = fresh
-			forcedFreshFallback = true
+		case oldFresh && !fresh:
+			sm.log.Info("resume decision: native --resume (conversation exists; cleared stale fresh-start left by an interrupted start)",
+				"session_id", id, "agent", sessState.Agent, "agent_session_id", newID)
 		}
 	}
 
@@ -2353,6 +2393,12 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 		sessState.Status = prevStatus
 		sessState.StatusChangedAt = prevStatusChangedAt
 		sessState.Token = prevToken
+
+		// This save is the first to commit a forced-id fresh fallback (minted id +
+		// FreshStart), so undo it here too — otherwise memory holds the minted id
+		// while disk still has the original, and a later restart re-wedges.
+		sessState.AgentSessionID = prevAgentSessionID
+		sessState.FreshStart = prevFreshStart
 
 		delete(sm.tokenIndex, newToken)
 
