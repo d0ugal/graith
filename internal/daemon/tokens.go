@@ -22,11 +22,12 @@ const (
 	tokenBatchCap = 8
 )
 
-// tokenCacheEntry caches the last parse for a session, keyed by a fingerprint of
-// its source files so an unchanged transcript is skipped without re-reading.
+// tokenCacheEntry caches the fingerprint of a session's last successful parse so
+// an unchanged transcript (same source identity + size + mtime) is skipped
+// without re-reading. The fingerprint includes the agent identity, so a
+// migration changes it and forces a re-parse for the new agent.
 type tokenCacheEntry struct {
 	fingerprint string
-	stats       *TokenStats
 }
 
 // tokenCache is the in-memory, non-persisted parse cache for RunTokenLoop.
@@ -53,6 +54,15 @@ func (c *tokenCache) put(id string, e tokenCacheEntry) {
 	defer c.mu.Unlock()
 
 	c.entries[id] = e
+}
+
+// evict drops a session's cache entry, forcing the next tick to re-parse. Used
+// when a session's transcript identity changes under it (e.g. migration).
+func (c *tokenCache) evict(id string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	delete(c.entries, id)
 }
 
 // prune drops cache entries for sessions no longer present (purged), bounding
@@ -176,7 +186,7 @@ func (sm *SessionManager) pollTokens(t tokenTarget) bool {
 		return false
 	}
 
-	fp := tokenFingerprint(sources)
+	fp := tokenFingerprint(t, sources)
 
 	if e, ok := sm.tokens.get(t.id); ok && e.fingerprint == fp {
 		return false // unchanged since last successful parse
@@ -187,11 +197,20 @@ func (sm *SessionManager) pollTokens(t tokenTarget) bool {
 		return false
 	}
 
+	// Re-stat after the read: if the sources changed while we were parsing, the
+	// parse may be inconsistent — don't cache it under the (now stale) pre-read
+	// fingerprint, so the next tick re-reads. (Publishing the value is still
+	// safe; it just isn't cached as authoritative.)
+	post, err := transcript.Locate(t.agent, t.agentSessionID, t.worktreePath)
+	stable := err == nil && tokenFingerprint(t, post) == fp
+
 	if !u.Found {
 		// Parsed cleanly but no usage records — cache the fingerprint so we don't
 		// re-parse an unchanged empty transcript, but don't publish a stats value
 		// (unknown, not a confident zero).
-		sm.tokens.put(t.id, tokenCacheEntry{fingerprint: fp})
+		if stable {
+			sm.tokens.put(t.id, tokenCacheEntry{fingerprint: fp})
+		}
 
 		return true
 	}
@@ -207,28 +226,44 @@ func (sm *SessionManager) pollTokens(t tokenTarget) bool {
 		CountedAt:     time.Now(),
 	}
 
-	sm.tokens.put(t.id, tokenCacheEntry{fingerprint: fp, stats: stats})
-	sm.setTokenStats(t.id, stats)
+	if stable {
+		sm.tokens.put(t.id, tokenCacheEntry{fingerprint: fp})
+	}
+
+	sm.setTokenStats(t, stats)
 
 	return true
 }
 
-// setTokenStats publishes freshly-built stats onto a session under the lock.
-// The pointer is never mutated after publication, so off-lock clones are safe.
-func (sm *SessionManager) setTokenStats(id string, stats *TokenStats) {
+// setTokenStats publishes freshly-built stats onto a session under the lock,
+// but ONLY if the session's transcript identity still matches the snapshot the
+// parse was based on. A migration (or any agent/id/worktree change) between the
+// off-lock parse and this write-back would otherwise mislabel the previous
+// agent's usage as the current agent's. The pointer is never mutated after
+// publication, so off-lock clones are safe.
+func (sm *SessionManager) setTokenStats(t tokenTarget, stats *TokenStats) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
-	if s, ok := sm.state.Sessions[id]; ok {
-		s.Tokens = stats
+	s, ok := sm.state.Sessions[t.id]
+	if !ok {
+		return
 	}
+
+	if s.Agent != t.agent || s.AgentSessionID != t.agentSessionID || s.WorktreePath != t.worktreePath {
+		return // identity changed under us — the parse describes a stale agent
+	}
+
+	s.Tokens = stats
 }
 
-// tokenFingerprint hashes the source files' size+mtime (not mtime alone) so a
-// grown, rotated, or re-pointed transcript forces a re-read while an untouched
-// one is skipped.
-func tokenFingerprint(sources []transcript.Source) string {
-	var b []byte
+// tokenFingerprint hashes the transcript identity plus each source file's
+// size+mtime (not mtime alone). Identity is included so a migration — which
+// swaps agent/agentSessionID — invalidates the cache and forces a re-parse for
+// the new agent, and a grown/rotated/re-pointed file forces a re-read while an
+// untouched one is skipped.
+func tokenFingerprint(t tokenTarget, sources []transcript.Source) string {
+	b := []byte(t.agent + "\x00" + t.agentSessionID + "\x00" + t.worktreePath + "\x00")
 	for _, s := range sources {
 		b = append(b, s.Path...)
 		b = append(b, byte(0))

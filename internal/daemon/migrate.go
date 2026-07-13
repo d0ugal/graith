@@ -165,6 +165,12 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 	s.Agent = targetAgent
 	s.Model = targetModel
 
+	// The token count describes the session's CURRENT agent. Migration swaps the
+	// agent, so the source agent's usage no longer applies — clear it (and evict
+	// the parse cache) so the token loop re-derives from the new agent's
+	// transcript rather than mislabelling the old count as the new agent's.
+	s.Tokens = nil
+
 	s.FreshStart = true // force a fresh start (agent.Args + seed), not resume_args
 	if forcesID(targetAgent) {
 		s.AgentSessionID = newAgentSessionID()
@@ -174,6 +180,10 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 
 	saveErr := sm.saveState()
 	sm.mu.Unlock()
+
+	if sm.tokens != nil {
+		sm.tokens.evict(id)
+	}
 
 	if saveErr != nil {
 		return SessionState{}, fmt.Errorf("persist migration swap: %w", saveErr)

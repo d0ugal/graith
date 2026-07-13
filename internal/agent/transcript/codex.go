@@ -371,11 +371,11 @@ type codexTokenInfo struct {
 // naive additive mapping double-counts, so usage derives an exclusive breakdown
 // and validates it against total_tokens.
 type codexTokenUsage struct {
-	InputTokens           int64 `json:"input_tokens"`
-	CachedInputTokens     int64 `json:"cached_input_tokens"`
-	OutputTokens          int64 `json:"output_tokens"`
-	ReasoningOutputTokens int64 `json:"reasoning_output_tokens"`
-	TotalTokens           int64 `json:"total_tokens"`
+	InputTokens           int64  `json:"input_tokens"`
+	CachedInputTokens     int64  `json:"cached_input_tokens"`
+	OutputTokens          int64  `json:"output_tokens"`
+	ReasoningOutputTokens int64  `json:"reasoning_output_tokens"`
+	TotalTokens           *int64 `json:"total_tokens"` // pointer: distinguish missing from explicit 0
 }
 
 type codexReader struct{}
@@ -414,91 +414,116 @@ func (codexReader) usage(path string) (Usage, error) {
 			continue
 		}
 
-		tc, ok, degraded := codexUsageFromPayload(line.Payload)
+		tc, ok := codexUsageFromPayload(line.Payload)
 		if !ok {
 			continue // not a token_count payload
 		}
 
 		last = tc
 		havany = true
-
-		if degraded {
-			u.Dropped++
-		}
 	}
 
+	scanErr := 0
 	if err := sc.Err(); err != nil {
-		u.Dropped++
+		scanErr = 1
 	}
 
 	if havany {
-		last.Dropped = u.Dropped
+		// Degradation reflects the FINAL (winning) snapshot's own validation
+		// plus any scan error — not a running sum over superseded snapshots,
+		// which would falsely flag a clean final total.
+		last.Dropped += scanErr
 		last.Found = true
 
 		return last, nil
 	}
 
+	u.Dropped = scanErr
+
 	return u, nil
 }
 
 // codexUsageFromPayload parses a token_count payload into an exclusive Usage.
-// The second return reports whether the payload was a token_count at all; the
-// third reports whether the modern breakdown failed validation and fell back to
-// an unclassified total.
-func codexUsageFromPayload(raw json.RawMessage) (u Usage, ok, degraded bool) {
+// A degraded breakdown carries Dropped=1 in the returned Usage. The second
+// return reports whether the payload was a token_count at all.
+func codexUsageFromPayload(raw json.RawMessage) (Usage, bool) {
 	if len(raw) == 0 {
-		return Usage{}, false, false
+		return Usage{}, false
 	}
 
 	var p codexTokenCountPayload
 	if err := json.Unmarshal(raw, &p); err != nil {
-		return Usage{}, false, false
+		return Usage{}, false
 	}
 
 	// A wrapped event_msg payload announces its own type; an unwrapped
 	// token_count record carries total/info directly.
 	if p.Type != "" && p.Type != "token_count" {
-		return Usage{}, false, false
+		return Usage{}, false
 	}
 
 	if p.Info != nil && p.Info.TotalTokenUsage != nil {
-		return codexUsageFromTotals(*p.Info.TotalTokenUsage)
+		return codexUsageFromTotals(*p.Info.TotalTokenUsage), true
 	}
 
 	if p.Total != nil {
-		// Legacy aggregate with no breakdown → Unclassified, never Output.
-		return Usage{Unclassified: *p.Total, Found: true}, true, false
+		// Legacy aggregate with no breakdown → Unclassified, never Output. A
+		// negative aggregate is corrupt: clamp to 0 and flag degraded.
+		if *p.Total < 0 {
+			return Usage{Found: true, Dropped: 1}, true
+		}
+
+		return Usage{Unclassified: *p.Total, Found: true}, true
 	}
 
-	return Usage{}, false, false
+	return Usage{}, false
 }
 
 // codexUsageFromTotals maps Codex's overlapping cumulative fields to an
-// exclusive breakdown and validates it against total_tokens. On any violation
-// (negative subset or a sum that disagrees with total_tokens) it falls back to
-// an unclassified total and reports degraded, so drift degrades to an honest
-// total rather than a wrong breakdown. reasoning_output_tokens is deliberately
-// NOT added to Output (it is a subset of output_tokens).
-func codexUsageFromTotals(t codexTokenUsage) (u Usage, ok, degraded bool) {
+// exclusive breakdown and validates it. reasoning_output_tokens is deliberately
+// NOT added to Output (it is a subset of output_tokens). On any violation —
+// negative field, cached not a subset of input, reasoning not a subset of
+// output, or (when a provider total is present, incl. an explicit 0) a sum that
+// disagrees with total_tokens — it falls back to an unclassified provider total
+// and flags Dropped, so drift degrades to an honest total rather than a wrong
+// breakdown.
+func codexUsageFromTotals(t codexTokenUsage) Usage {
 	cacheRead := t.CachedInputTokens
 	input := t.InputTokens - t.CachedInputTokens
 	output := t.OutputTokens
 
-	valid := input >= 0 && cacheRead >= 0 && output >= 0
-	if valid && t.TotalTokens != 0 && input+cacheRead+output != t.TotalTokens {
-		valid = false
+	valid := t.InputTokens >= 0 && t.CachedInputTokens >= 0 && t.OutputTokens >= 0 &&
+		t.ReasoningOutputTokens >= 0 &&
+		input >= 0 && // cached_input ⊆ input
+		t.ReasoningOutputTokens <= t.OutputTokens // reasoning_output ⊆ output
+
+	if valid && t.TotalTokens != nil {
+		if sum, ok := addChecked(input, cacheRead, output); !ok || sum != *t.TotalTokens {
+			valid = false
+		}
 	}
 
 	if !valid {
-		total := t.TotalTokens
-		if total == 0 {
-			total = t.InputTokens + t.OutputTokens
-		}
-
-		return Usage{Unclassified: total, Found: true}, true, true
+		return Usage{Unclassified: codexFallbackTotal(t), Found: true, Dropped: 1}
 	}
 
-	return Usage{Input: input, CacheRead: cacheRead, Output: output, Found: true}, true, false
+	return Usage{Input: input, CacheRead: cacheRead, Output: output, Found: true}
+}
+
+// codexFallbackTotal is the honest total to report when the breakdown fails
+// validation: the provider total when present and non-negative, else the
+// (checked, non-negative) sum of raw input+output, else 0.
+func codexFallbackTotal(t codexTokenUsage) int64 {
+	if t.TotalTokens != nil && *t.TotalTokens >= 0 {
+		return *t.TotalTokens
+	}
+
+	sum, ok := addChecked(maxInt64(t.InputTokens, 0), maxInt64(t.OutputTokens, 0))
+	if !ok || sum < 0 {
+		return 0
+	}
+
+	return sum
 }
 
 func (codexReader) read(path string) ([]Turn, int, error) {

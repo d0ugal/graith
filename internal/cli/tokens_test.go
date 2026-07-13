@@ -95,3 +95,22 @@ func TestPrintTokenTable(t *testing.T) {
 		t.Errorf("missing totals row (330): %q", out)
 	}
 }
+
+func TestPrintTokenTableAggregateDegraded(t *testing.T) {
+	var buf bytes.Buffer
+
+	cmd := &cobra.Command{}
+	cmd.SetOut(&buf)
+
+	rows := []tokenRow{
+		{Name: "braw", Agent: "claude", Supported: true, Known: true, Total: 100},
+		{Name: "canny", Agent: "codex", Supported: true, Known: true, Total: 30, Degraded: true},
+	}
+
+	printTokenTable(cmd, rows)
+
+	// The aggregate is approximate because one row is: 130~.
+	if !strings.Contains(buf.String(), "130~") {
+		t.Errorf("aggregate should be marked approximate: %q", buf.String())
+	}
+}
