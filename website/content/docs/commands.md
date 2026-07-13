@@ -38,6 +38,9 @@ Create a new agent session.
 | `-p, --prompt <text>` | Initial prompt for the agent |
 | `--prompt-file <path>` | Read initial prompt from file |
 | `-m, --model <name>` | Model for the agent (expands `{model}` in agent args) |
+| `--headless` | Run the agent headless (stream-json) instead of an interactive PTY, for fire-and-forget sessions (experimental; Claude only) |
+
+The `--headless` flag runs the agent in Claude Code's stream-json mode rather than an interactive terminal — suited to sessions no human will attach to (tribunal judges, trigger briefings, mirror sessions). It gives graith structured status, live cost/token usage, and clean interrupts. It is **experimental** and inert unless `[headless] experimental = true` is set in config; it is Claude-only in v1, and asking for `--headless` on an agent that can't do it is an error, not a silent downgrade to PTY. See [Configuration → Headless sessions](configuration.md#headless-sessions) and [Session Lifecycle → Headless sessions](sessions.md#headless-sessions).
 
 When a session is created:
 
@@ -50,6 +53,12 @@ When a session is created:
 ### `gr attach [name-or-id]` (alias: `a`)
 
 Attach to a session. If no name is given, opens the session picker overlay.
+
+A **headless** session has no PTY to stream, so `gr attach` on one is not
+supported yet — graith directs you to `gr logs -f <name>`, which streams its
+rendered output read-only. Convert-to-interactive on attach (relaunching the
+agent in a PTY via `claude --resume <session-id>`, preserving history) is a
+planned follow-up (issue #1075).
 
 ### `gr stop <name-or-id>`
 

@@ -161,6 +161,22 @@ ttl = "5m"  # default TTL for status updates
 
 When an agent sets a status via `gr status`, it auto-expires after this TTL if the agent produces new output without updating the status. Override per-update with `gr status --ttl <duration>`.
 
+## Headless sessions
+
+**Experimental.** A headless session runs the agent in Claude Code's stream-json mode instead of an interactive PTY, giving graith structured status, live cost/token usage, and clean interrupts — for fire-and-forget sessions no human will attach to (tribunal judges, trigger briefings, mirror sessions).
+
+```toml
+[headless]
+experimental = false  # master gate: headless is inert unless this is on
+default      = false  # once enabled, whether new sessions go headless by default
+```
+
+`experimental` is the master switch. While it is off, headless is inert: `gr new --headless` and `[trigger.action] headless = true` have no effect. It is gated because the underlying control protocol is undocumented and may change between Claude Code releases.
+
+v1 is **Claude-only** and **one-shot** (one prompt, run to completion, exit). Only agents marked `headless_capable = true` can run headless — see [Agent definitions](#agent-definitions). Requesting headless for an agent that can't do it is an error, not a silent fallback to PTY.
+
+`gr attach` on a headless session is not supported yet; use `gr logs -f` to inspect one read-only (see [Session Lifecycle → Headless sessions](sessions.md#headless-sessions)). Convert-to-interactive on attach is planned.
+
 ## Delete retention
 
 ```toml
@@ -302,6 +318,11 @@ MCP-server config), `session`, `scenario`, `message`. Delivery routes to
 `skip`), `rate_limit` (default `5/30m`). See [Triggers](triggers.md) for the full
 reference.
 
+Letting a `session`-type action spawn its session in [headless mode](#headless-sessions)
+via `[trigger.action] headless = true` — a natural fit for fire-and-forget
+briefings and cleanup reactors — is planned (issue #1075). For now, create
+headless sessions with `gr new --headless`.
+
 ## Keybindings
 
 ```toml
@@ -415,7 +436,10 @@ env            = {}             # extra environment variables
 idle_timeout   = ""             # auto-stop after idle (default: 1h when resume_args is set, 0 otherwise)
 inject_prompt  = true           # inject agent_prompt into the session
 validate_model = ""             # command to validate --model values
+headless_capable = false        # agent can run in headless (stream-json) mode (experimental)
 ```
+
+`headless_capable` marks whether an agent supports [headless mode](#headless-sessions). Only Claude supports it in v1; a session can't be asked to go headless on an agent that isn't capable.
 
 ### Template variables
 

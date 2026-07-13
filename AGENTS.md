@@ -98,6 +98,21 @@ type string in `daemon/handler.go`.
 **Session lifecycle**: Create → worktree + branch → start agent process → attach.
 Resume → restart process in existing worktree.
 
+**Headless sessions** (experimental): a session's transport is a persisted
+`DriverKind` (`"pty"` | `"headless"`), resolved once at creation. `headless = true`
+/ `gr new --headless` runs the agent via Claude Code's stream-json mode
+(`claude -p --output-format stream-json`) instead of an interactive PTY, for
+fire-and-forget sessions no human will attach to (tribunal judges, trigger
+briefings, mirror sessions) — giving structured status, live cost/token usage, and
+a clean control-protocol `interrupt`. Gated behind `[headless] experimental` (inert
+unless on); `[headless] default` and per-agent `[agents.<name>] headless_capable`
+are the other inputs. v1 is Claude-only and one-shot; the headless engine lives in
+`internal/headless` and satisfies `daemon.SessionDriver`. `gr attach` on a headless
+session is refused with a pointer to `gr logs -f` (read-only). Planned follow-ups
+(issue #1075): convert-to-interactive on attach (`claude --resume` in a PTY),
+control-protocol interrupt/approvals wiring, cost/usage enrichment, and
+`[trigger.action] headless`. See `docs/design/2026-07-13-headless-stream-json-design.md`.
+
 **Delete is soft by default** (`SessionManager.SoftDelete`): `gr delete` stops the
 agent and marks the session deleted (a `DeletedAt`/`ExpiresAt` marker on
 `SessionState`), hiding it from `gr list` and the overlay but **keeping the
