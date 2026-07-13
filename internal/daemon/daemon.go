@@ -1953,8 +1953,17 @@ func (sm *SessionManager) watchSession(id string, sess *grpty.Session) {
 				prevTTL = time.Duration(s.SummaryTTL) * time.Second
 			}
 
+			// A watchdog give-up (StopReasonWatchdog) has already set StatusErrored
+			// and a descriptive summary before killing the PTY; preserve both so
+			// budget exhaustion stays distinguishable from an ordinary stop/crash.
+			watchdogGaveUp := s.StopReason == StopReasonWatchdog
+
 			exitCode := sess.ExitCode()
-			s.Status = StatusStopped
+
+			if !watchdogGaveUp {
+				s.Status = StatusStopped
+			}
+
 			s.StatusChangedAt = time.Now()
 			s.ExitCode = &exitCode
 			s.PID = 0
@@ -1972,7 +1981,7 @@ func (sm *SessionManager) watchSession(id string, sess *grpty.Session) {
 				s.ExitSignal = sig.String()
 			}
 
-			if s.StopReason != StopReasonShutdown || s.SummaryText == "" {
+			if !watchdogGaveUp && (s.StopReason != StopReasonShutdown || s.SummaryText == "") {
 				text := formatStopSummary(s.StopReason, s.ExitCode, s.ExitSignal, prevSummary, prevSetAt, prevTTL)
 				applyLifecycleSummaryLocked(s, text)
 			}
@@ -2823,12 +2832,6 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	}
 	if isOrchestrator {
 		sessState.LastStartedAt = time.Now()
-		sessState.FreshStart = false
-	}
-	// A seeded (migration) start used agent.Args; clear FreshStart so future
-	// resumes use the new agent's native resume_args.
-	if seedPrompt != "" {
-		sessState.FreshStart = false
 	}
 	// A forced-id fresh fallback minted a new id and started clean; the
 	// conversation now exists under that id, so clear the one-shot FreshStart so
@@ -2836,6 +2839,15 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	if forcedFreshFallback {
 		sessState.FreshStart = false
 	}
+
+	// Clear FreshStart unconditionally once a start has consumed it. resolveResumeArgs
+	// (above) already read sessFreshStart to pick the args for THIS start; leaving the
+	// flag set would silently route every FUTURE user resume around --resume too,
+	// discarding conversation history. Callers that need another fresh start (the
+	// orchestrator supervisor, migration, and the startup watchdog) re-set FreshStart
+	// on each attempt, so consecutive recoveries still start fresh — only stray later
+	// resumes are corrected. This generalises the previous orchestrator/seed-only clears.
+	sessState.FreshStart = false
 
 	sm.sessions[id] = ptySess
 
@@ -5657,6 +5669,13 @@ func (sm *SessionManager) applyConfig(newCfg *config.Config) {
 	sm.mu.Lock()
 	old := sm.cfg
 	sm.cfg = newCfg
+	// Resize the launch throttle under the same lock that publishes the config so
+	// the two can't diverge if two reloads (fsnotify + SIGHUP) interleave — the
+	// live limit always matches the currently-published cfg. resize only takes the
+	// throttle's own mutex, so the sm.mu -> launch.mu order introduces no cycle.
+	if sm.launch != nil {
+		sm.launch.resize(newCfg.Launch.MaxConcurrentOrDefault())
+	}
 	sm.mu.Unlock()
 
 	if old.DefaultAgent != newCfg.DefaultAgent {
@@ -5705,13 +5724,18 @@ func (sm *SessionManager) applyConfig(newCfg *config.Config) {
 		sm.log.Info("config changed", "key", "git_pull.interval", "old", old.GitPull.Interval, "new", newCfg.GitPull.Interval)
 	}
 
+	// The throttle was already resized atomically with the cfg swap above; here we
+	// only log the change for observability.
 	if oldMax, newMax := old.Launch.MaxConcurrentOrDefault(), newCfg.Launch.MaxConcurrentOrDefault(); oldMax != newMax {
 		sm.log.Info("config changed", "key", "launch.max_concurrent", "old", oldMax, "new", newMax)
-		sm.launch.resize(newMax)
 	}
 
 	if old.Launch.StartupTimeout != newCfg.Launch.StartupTimeout {
 		sm.log.Info("config changed", "key", "launch.startup_timeout", "old", old.Launch.StartupTimeout, "new", newCfg.Launch.StartupTimeout)
+	}
+
+	if old.Launch.SettleTimeout != newCfg.Launch.SettleTimeout {
+		sm.log.Info("config changed", "key", "launch.settle_timeout", "old", old.Launch.SettleTimeout, "new", newCfg.Launch.SettleTimeout)
 	}
 
 	if old.Sandbox.Enabled != newCfg.Sandbox.Enabled {

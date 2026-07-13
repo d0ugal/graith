@@ -398,6 +398,31 @@ func TestStuckLaunchCandidatesSkipsSessionWithOutput(t *testing.T) {
 	}
 }
 
+// TestStuckLaunchCandidatesHistoricalOutput is the regression test for the
+// resume blind spot: a session that emitted output in an earlier process life
+// carries a non-nil persisted SessionState.LastOutputAt, but if its current
+// (resumed) PTY is silent and stuck it must still be a watchdog candidate. The
+// live PTY — not the persisted timestamp — is the source of truth.
+func TestStuckLaunchCandidatesHistoricalOutput(t *testing.T) {
+	sm := newLaunchTestSM(t, config.LaunchConfig{StartupTimeout: "2m"})
+
+	old := time.Now().Add(-5 * time.Minute)
+	past := time.Now().Add(-1 * time.Hour)
+
+	silentPty := startSleeper(t, sm, "thrawn")
+	sm.state.Sessions["thrawn"] = &SessionState{
+		ID: "thrawn", Name: "thrawn", Status: StatusRunning,
+		AgentStatus: "unknown", StatusChangedAt: old,
+		LastOutputAt: &past, // produced output in a PREVIOUS process life
+	}
+	sm.sessions["thrawn"] = silentPty
+
+	got := sm.stuckLaunchCandidates(time.Now(), 2*time.Minute)
+	if len(got) != 1 || got[0].id != "thrawn" {
+		t.Fatalf("session with historical (but not live) output must still be stuck, got %+v", got)
+	}
+}
+
 func TestCheckStuckLaunchesDisabled(t *testing.T) {
 	sm := newLaunchTestSM(t, config.LaunchConfig{StartupTimeout: "0"})
 
@@ -462,10 +487,6 @@ func TestCheckStuckLaunchesRestartsAndMarksFresh(t *testing.T) {
 	if s.StuckRestarts != 1 {
 		t.Errorf("StuckRestarts = %d, want 1", s.StuckRestarts)
 	}
-
-	if s.StopReason != StopReasonWatchdog {
-		t.Errorf("StopReason = %q, want %q", s.StopReason, StopReasonWatchdog)
-	}
 }
 
 func TestRecoverStuckLaunchBudgetExhausted(t *testing.T) {
@@ -497,6 +518,46 @@ func TestRecoverStuckLaunchBudgetExhausted(t *testing.T) {
 	if s.SummaryText == "" {
 		t.Error("budget-exhausted session should carry a lifecycle summary")
 	}
+
+	if s.Status != StatusErrored {
+		t.Errorf("Status = %q, want %q for budget-exhausted session", s.Status, StatusErrored)
+	}
+
+	if s.StopReason != StopReasonWatchdog {
+		t.Errorf("StopReason = %q, want %q", s.StopReason, StopReasonWatchdog)
+	}
+}
+
+// TestRecoverStuckLaunchSkipsWhenPTYReplaced covers the TOCTOU guard: if the
+// live PTY has been swapped for a different (healthy) one between candidate
+// selection and recovery, the watchdog must not act on the stale snapshot.
+func TestRecoverStuckLaunchSkipsWhenPTYReplaced(t *testing.T) {
+	sm := newLaunchTestSM(t, config.LaunchConfig{StartupTimeout: "2m"})
+
+	restarted := false
+	sm.restartStuck = func(string, uint16, uint16) error { restarted = true; return nil }
+
+	stalePty := startSleeper(t, sm, "thrawn-stale")
+	livePty := startSleeper(t, sm, "thrawn-live")
+
+	sm.state.Sessions["thrawn"] = &SessionState{
+		ID: "thrawn", Name: "thrawn", Status: StatusRunning,
+		AgentStatus: "unknown", StatusChangedAt: time.Now().Add(-5 * time.Minute),
+	}
+	// The manager now holds a DIFFERENT pty than the one snapshotted.
+	sm.sessions["thrawn"] = livePty
+
+	sm.recoverStuckLaunch(stuckSession{
+		id: "thrawn", name: "thrawn", attempts: 0, pty: stalePty,
+	}, 2*time.Minute)
+
+	if restarted {
+		t.Fatal("watchdog must not restart when the live PTY differs from the snapshot")
+	}
+
+	if s := sm.state.Sessions["thrawn"]; s.FreshStart || s.StuckRestarts != 0 {
+		t.Errorf("stale-snapshot recovery must not mutate state: FreshStart=%v StuckRestarts=%d", s.FreshStart, s.StuckRestarts)
+	}
 }
 
 func TestResetStuckRestartsLocked(t *testing.T) {
@@ -505,6 +566,69 @@ func TestResetStuckRestartsLocked(t *testing.T) {
 
 	if s.StuckRestarts != 0 {
 		t.Fatalf("StuckRestarts = %d after reset, want 0", s.StuckRestarts)
+	}
+}
+
+// TestResumeClearsFreshStart is the regression test for the watchdog FreshStart
+// leak: the watchdog sets FreshStart on a plain session to force a fresh
+// recovery start, but the flag must be cleared once a start consumes it, or
+// every later user resume would silently start fresh and discard conversation
+// history. Before the fix, FreshStart was only cleared for orchestrator/seed
+// resumes, so a watchdog-set flag on a plain session leaked forever.
+func TestResumeClearsFreshStart(t *testing.T) {
+	// os.MkdirTemp (not t.TempDir): writeFileAtomic's syncDir can leave a
+	// recently-closed dir fd that races t.TempDir's strict RemoveAll on macOS.
+	tmpDir, err := os.MkdirTemp("", "TestResumeClearsFreshStart")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer func() {
+		for range 5 {
+			if err := os.RemoveAll(tmpDir); err == nil {
+				return
+			}
+
+			time.Sleep(50 * time.Millisecond)
+		}
+	}()
+
+	cfg := config.Default()
+	cfg.Agents["claude"] = config.Agent{
+		Command:    "true",
+		Args:       []string{},
+		ResumeArgs: []string{},
+	}
+
+	sm := NewSessionManager(cfg, config.Paths{
+		StateFile: filepath.Join(tmpDir, "state.json"),
+		DataDir:   tmpDir,
+		LogDir:    tmpDir,
+	}, quietLogger())
+
+	id := "bide-fresh"
+	sm.state.Sessions[id] = &SessionState{
+		ID: id, Name: "bide-fresh", Status: StatusStopped, Agent: "claude",
+		WorktreePath: tmpDir,
+		FreshStart:   true, // as the watchdog would leave it before recovery
+	}
+
+	if _, rerr := sm.Resume(id, 24, 80); rerr != nil {
+		t.Fatalf("Resume() error = %v", rerr)
+	}
+
+	sm.mu.RLock()
+	fresh := sm.state.Sessions[id].FreshStart
+	ptySess := sm.sessions[id]
+	sm.mu.RUnlock()
+
+	if fresh {
+		t.Error("FreshStart must be cleared after a resume consumes it, else future resumes discard history")
+	}
+
+	if ptySess != nil {
+		<-ptySess.Done()
+		ptySess.Close()
 	}
 }
 

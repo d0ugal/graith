@@ -65,12 +65,15 @@ func (lt *launchThrottle) resize(maxConcurrent int) {
 }
 
 // launchSlot is a held throttle slot. Callers must eventually call release
-// exactly once (it is idempotent). inflight/capacity/waited capture the state at
-// acquire time for logging.
+// exactly once (it is idempotent). The remaining fields capture state at acquire
+// time for logging: inflight/capacity are the slots held/total, queued is how
+// many launches were waiting for a slot (including this one) at the moment it
+// blocked, and waited is how long the acquire blocked.
 type launchSlot struct {
 	release  func()
 	inflight int
 	capacity int
+	queued   int
 	waited   time.Duration
 }
 
@@ -81,6 +84,7 @@ func (lt *launchThrottle) acquire(ctx context.Context) (launchSlot, error) {
 	lt.mu.Lock()
 	sem := lt.sem
 	lt.waiting++
+	queued := lt.waiting // how many are waiting for a slot right now (incl. us)
 	lt.mu.Unlock()
 
 	start := time.Now()
@@ -111,6 +115,7 @@ func (lt *launchThrottle) acquire(ctx context.Context) (launchSlot, error) {
 		},
 		inflight: inflight,
 		capacity: capacity,
+		queued:   queued,
 		waited:   waited,
 	}, nil
 }
@@ -134,7 +139,7 @@ func (sm *SessionManager) acquireLaunchSlot(ctx context.Context, id, name string
 	sm.log.Info("launch slot acquired",
 		"id", id, "name", name,
 		"inflight", slot.inflight, "capacity", slot.capacity,
-		"waited_ms", slot.waited.Milliseconds())
+		"queued", slot.queued, "waited_ms", slot.waited.Milliseconds())
 
 	return slot, nil
 }
@@ -155,10 +160,12 @@ func (sm *SessionManager) releaseLaunchSlotWhenSettled(slot launchSlot, id, name
 	// swaps the global (and restores it via cleanup) never races the reader.
 	poll := launchSlotPollInterval
 
-	sm.watchers.Add(1)
-
+	// Deliberately NOT tracked by sm.watchers: this goroutine only releases a
+	// throttle slot and logs — no post-exit state work — and it always
+	// self-terminates (first output / Exited / Done / settle deadline). Keeping
+	// it out of the shutdown WaitGroup avoids an Add-during-Wait race with
+	// StopAll and prevents a large settle_timeout from extending shutdown.
 	go func() {
-		defer sm.watchers.Done()
 		defer slot.release()
 
 		start := time.Now()
@@ -270,16 +277,14 @@ func (sm *SessionManager) stuckLaunchCandidates(now time.Time, timeout time.Dura
 			continue
 		}
 
-		// Only sessions that have never emitted output are launch-stuck. A session
-		// that produced output and later went quiet is idle, not stuck.
-		if s.LastOutputAt != nil {
-			continue
-		}
-
 		if s.AgentStatus != "" && s.AgentStatus != string(detector.StatusUnknown) {
 			continue
 		}
 
+		// StatusChangedAt is the age reference. For a genuinely stuck launch the
+		// agent status settles at "unknown" and stops changing, so this measures
+		// from roughly the first detection tick — well within a minutes-scale
+		// timeout.
 		if now.Sub(s.StatusChangedAt) < timeout {
 			continue
 		}
@@ -289,8 +294,11 @@ func (sm *SessionManager) stuckLaunchCandidates(now time.Time, timeout time.Dura
 			continue // no live process to babysit; the watcher will handle exit
 		}
 
-		// The live PTY is the source of truth: skip if it has actually produced
-		// output that the detection loop hasn't folded into state yet.
+		// The LIVE PTY is the source of truth for "this launch produced output".
+		// The persisted SessionState.LastOutputAt is deliberately NOT used: it
+		// survives across resumes, so a session that emitted output in an earlier
+		// process life but is now stuck on a fresh silent PTY must still be caught
+		// (#1092 — the watchdog's own recovery path resumes, so this matters).
 		if !ptySess.LastOutputAt().IsZero() {
 			continue
 		}
@@ -311,7 +319,14 @@ func (sm *SessionManager) stuckLaunchCandidates(now time.Time, timeout time.Dura
 }
 
 // recoverStuckLaunch kills a stuck session and restarts it fresh, or marks it
-// errored if it has already exhausted its restart budget.
+// errored (and kills it) if it has already exhausted its restart budget.
+//
+// The candidate was snapshotted under a prior RLock and this runs under a later
+// Lock, so it re-validates the full stuck predicate — including PTY-pointer
+// identity — before acting. Between snapshot and action the session may have
+// produced output, been stopped by the user, or been restarted onto a different
+// (healthy) PTY; without the recheck the watchdog could kill a now-healthy
+// process.
 func (sm *SessionManager) recoverStuckLaunch(st stuckSession, timeout time.Duration) {
 	logCtx := []any{
 		"id", st.id,
@@ -324,20 +339,45 @@ func (sm *SessionManager) recoverStuckLaunch(st stuckSession, timeout time.Durat
 		"startup_timeout", timeout.String(),
 	}
 
-	if st.attempts >= maxStuckRestarts {
-		sm.mu.Lock()
+	// Claim the recovery atomically: re-check the predicate under the lock and
+	// commit the state mutation in the same critical section. If it no longer
+	// holds, the session recovered or changed on its own — leave it alone.
+	sm.mu.Lock()
 
-		if s, ok := sm.state.Sessions[st.id]; ok && s.Status == StatusRunning {
-			applyLifecycleSummaryLocked(s, "Stuck on launch and exceeded watchdog restart budget")
-
-			_ = sm.saveState()
-		}
-
+	s, ok := sm.state.Sessions[st.id]
+	if !ok || s.Status != StatusRunning || sm.sessions[st.id] != st.pty ||
+		st.pty.Exited() || !st.pty.LastOutputAt().IsZero() ||
+		(s.AgentStatus != "" && s.AgentStatus != string(detector.StatusUnknown)) {
 		sm.mu.Unlock()
+		sm.log.Info("startup watchdog: stuck session recovered or changed before action, skipping", "id", st.id)
 
+		return
+	}
+
+	giveUp := s.StuckRestarts >= maxStuckRestarts
+	if giveUp {
+		s.StopReason = StopReasonWatchdog
+		s.Status = StatusErrored
+		s.StatusChangedAt = time.Now()
+		applyLifecycleSummaryLocked(s, "Stuck on launch and exceeded watchdog restart budget")
+	} else {
+		// Mark for a fresh start so a forced-id agent (Claude) uses --session-id
+		// rather than --resume against a conversation that was never persisted —
+		// dovetailing with the resume-fallback fix (#1091). No StopReason is set:
+		// Restart sets its own, and a stale StopReasonWatchdog here would just be
+		// overwritten.
+		s.FreshStart = true
+		s.StuckRestarts++
+	}
+
+	_ = sm.saveState()
+	sm.mu.Unlock()
+
+	if giveUp {
 		sm.log.Warn("startup watchdog giving up on stuck session (restart budget exhausted)", logCtx...)
 
-		// Kill the zombie so it doesn't linger; the watcher records the exit.
+		// Kill the zombie so it doesn't linger. StopReasonWatchdog is already set,
+		// so watchSession preserves the errored status and summary above.
 		if err := st.pty.Kill(); err != nil {
 			sm.log.Error("failed to kill stuck session after giving up", "id", st.id, "err", err)
 		}
@@ -346,20 +386,6 @@ func (sm *SessionManager) recoverStuckLaunch(st stuckSession, timeout time.Durat
 	}
 
 	sm.log.Warn("startup watchdog restarting stuck session", logCtx...)
-
-	// Mark for a fresh start so a forced-id agent (Claude) uses --session-id
-	// rather than --resume against a conversation that was never persisted —
-	// dovetailing with the resume-fallback fix (#1091).
-	sm.mu.Lock()
-
-	if s, ok := sm.state.Sessions[st.id]; ok {
-		s.FreshStart = true
-		s.StuckRestarts++
-		s.StopReason = StopReasonWatchdog
-		_ = sm.saveState()
-	}
-
-	sm.mu.Unlock()
 
 	// Restart kills the live PTY, waits for exit, then resumes. Use a small
 	// default geometry; the client resizes on attach.
