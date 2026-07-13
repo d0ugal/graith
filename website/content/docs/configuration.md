@@ -62,7 +62,7 @@ on_stopped  = false  # notify when a session stops
 command     = ""     # custom notification command (optional)
 
 # Proactive `gr notify` push notifications:
-backend           = "macos"   # "macos" (osascript) or "command"; default "macos"
+backend           = "macos"   # "macos" (helper app, falls back to osascript) or "command"; default "macos"
 max_per_hour      = 12         # rolling-hour cap on low/normal pushes (high bypasses)
 quiet_hours_start = "22:00"    # suppress low/normal pushes in this window (24h "HH:MM")
 quiet_hours_end   = "07:00"    # window may wrap past midnight; high priority bypasses
@@ -101,9 +101,12 @@ alongside the `gr` binary, under `<prefix>/libexec/graith/` or
 `<prefix>/share/graith/`, in `/Applications`, or in `~/Applications`. Set
 `GRAITH_NOTIFIER_APP` to override the location explicitly.
 
-If the helper isn't installed, graith falls back to `osascript`, whose
-notifications work but appear under "Script Editor" (and can't be configured
-per-app) — the reason the helper exists.
+If the helper isn't installed — or is installed but fails to launch — graith
+falls back to `osascript`, whose notifications work but appear under "Script
+Editor" (and can't be configured per-app) — the reason the helper exists. The
+one exception is when you've explicitly turned off notifications for "Graith" in
+System Settings: graith honours that and does **not** route around it via
+`osascript`.
 
 Triggers can fire a notification when their action completes:
 

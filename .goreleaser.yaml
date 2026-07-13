@@ -49,12 +49,15 @@ builds:
       - amd64
       - arm64
     # The macOS notification helper (GraithNotifier.app, issue #1094) is NOT
-    # built here: it is a Swift .app bundle that needs `swiftc` + code signing,
-    # which this Linux release pipeline (CGO_ENABLED=0 cross-compile) can't
-    # produce. It is built on demand with `make notifier` and shipped separately
-    # (e.g. via Homebrew or the macOS GUI app) as a follow-up. `gr notify`
-    # gracefully falls back to osascript when the helper isn't installed, so the
-    # released binary is fully functional without it.
+    # built or shipped here: it is a Swift .app bundle that needs `swiftc` + code
+    # signing, which this Linux release pipeline (CGO_ENABLED=0 cross-compile)
+    # can't produce. Shipping it in Darwin archives requires a macOS release
+    # runner to compile + sign the bundle — tracked as a follow-up. Until then it
+    # is built on demand with `make notifier`. `gr notify` still works on a
+    # released install: it gracefully falls back to osascript when the helper
+    # isn't present — but those notifications appear under "Script Editor", so
+    # release-channel users don't yet get the "Graith" Notification Settings
+    # entry that #1094 is ultimately about.
 
 archives:
   - format: tar.gz

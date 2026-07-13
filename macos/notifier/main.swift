@@ -11,20 +11,29 @@
 // Usage: graith-notifier <title> <message> [priority]
 //   priority "high" plays the default sound; anything else is silent.
 //
-// It exits 0 on success and non-zero on any failure (bad args, authorization
-// denied, delivery error, timeout) so the Go caller can fall back to osascript.
+// Exit codes (read by the Go caller in internal/daemon/pushnotify.go):
+//   0  success
+//   2  usage error
+//   3  the user has explicitly disabled notifications for Graith — the caller
+//      MUST honour this and must NOT fall back to osascript (which would route
+//      the notification around the user's opt-out via "Script Editor")
+//   1  any other failure (permission not yet determined, delivery error,
+//      timeout) — the caller may fall back to osascript
 
 import Foundation
 import UserNotifications
 
-func fail(_ message: String) -> Never {
+// exitDenied signals an explicit user opt-out; see the exit-code table above.
+let exitDenied: Int32 = 3
+
+func fail(_ message: String, code: Int32 = 1) -> Never {
     FileHandle.standardError.write(Data("graith-notifier: \(message)\n".utf8))
-    exit(1)
+    exit(code)
 }
 
 let args = CommandLine.arguments
 guard args.count >= 3 else {
-    fail("usage: graith-notifier <title> <message> [priority]")
+    fail("usage: graith-notifier <title> <message> [priority]", code: 2)
 }
 
 let title = args[1]
@@ -33,17 +42,26 @@ let priority = args.count >= 4 ? args[3] : "normal"
 
 let center = UNUserNotificationCenter.current()
 let done = DispatchSemaphore(value: 0)
-var failure: String?
+var failure: (message: String, code: Int32)?
 
 center.requestAuthorization(options: [.alert, .sound]) { granted, error in
     if let error = error {
-        failure = "authorization error: \(error.localizedDescription)"
+        failure = ("authorization error: \(error.localizedDescription)", 1)
         done.signal()
         return
     }
     guard granted else {
-        failure = "notification permission not granted"
-        done.signal()
+        // Distinguish an explicit user opt-out (.denied) from a merely
+        // not-yet-determined state so the Go caller can honour the former
+        // instead of falling back to osascript.
+        center.getNotificationSettings { settings in
+            if settings.authorizationStatus == .denied {
+                failure = ("notifications are disabled for Graith", exitDenied)
+            } else {
+                failure = ("notification permission not granted", 1)
+            }
+            done.signal()
+        }
         return
     }
 
@@ -60,7 +78,7 @@ center.requestAuthorization(options: [.alert, .sound]) { granted, error in
         identifier: UUID().uuidString, content: content, trigger: nil)
     center.add(request) { error in
         if let error = error {
-            failure = "delivery error: \(error.localizedDescription)"
+            failure = ("delivery error: \(error.localizedDescription)", 1)
         }
         done.signal()
     }
@@ -73,5 +91,5 @@ if done.wait(timeout: .now() + 10) == .timedOut {
 }
 
 if let failure = failure {
-    fail(failure)
+    fail(failure.message, code: failure.code)
 }

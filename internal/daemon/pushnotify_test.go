@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -378,6 +379,88 @@ func TestResolveNotifierExecutable(t *testing.T) {
 
 	if _, ok := resolveNotifierExecutable(emptyApp); ok {
 		t.Error("a .app without its inner executable should not resolve")
+	}
+
+	// A trailing-slash bundle path (e.g. from shell completion) still resolves
+	// as a bundle, not a bare executable.
+	if got, ok := resolveNotifierExecutable(filepath.Join(dir, "GraithNotifier.app") + "/"); !ok || got != appExe {
+		t.Errorf("trailing-slash bundle: got (%q, %v), want (%q, true)", got, ok, appExe)
+	}
+
+	// A regular file without the executable bit is not runnable and must not
+	// resolve — otherwise a stale non-executable candidate would shadow a valid
+	// later one during discovery.
+	nonExec := filepath.Join(dir, "scunner", "graith-notifier")
+	if err := os.MkdirAll(filepath.Dir(nonExec), 0o750); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	if err := os.WriteFile(nonExec, []byte("not executable"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	if got, ok := resolveNotifierExecutable(nonExec); ok {
+		t.Errorf("non-executable file should not resolve, got %q", got)
+	}
+}
+
+// notifierStub writes a shell script that records its argv to argsFile and
+// exits with the given code, then returns its path — a stand-in for the real
+// notifier executable so dispatchViaNotifierApp can be tested without swiftc.
+func notifierStub(t *testing.T, exitCode int, argsFile string) string {
+	t.Helper()
+
+	dir := t.TempDir()
+	stub := filepath.Join(dir, "graith-notifier")
+	script := fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' \"$@\" > %q\nexit %d\n", argsFile, exitCode)
+
+	if err := os.WriteFile(stub, []byte(script), 0o755); err != nil { //nolint:gosec // G306: stub must be executable
+		t.Fatalf("write stub: %v", err)
+	}
+
+	return stub
+}
+
+func TestDispatchViaNotifierApp_SuccessPassesArgs(t *testing.T) {
+	argsFile := filepath.Join(t.TempDir(), "args")
+	stub := notifierStub(t, 0, argsFile)
+
+	if err := dispatchViaNotifierApp(stub, "Braw title", "hello bothy", "high"); err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+
+	got, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("read args: %v", err)
+	}
+
+	want := "Braw title\nhello bothy\nhigh\n"
+	if string(got) != want {
+		t.Errorf("argv = %q, want %q", got, want)
+	}
+}
+
+func TestDispatchViaNotifierApp_DeniedExitCode(t *testing.T) {
+	argsFile := filepath.Join(t.TempDir(), "args")
+	stub := notifierStub(t, notifierDeniedExitCode, argsFile)
+
+	err := dispatchViaNotifierApp(stub, "t", "m", "normal")
+	if !errors.Is(err, errNotifierPermissionDenied) {
+		t.Fatalf("exit %d should map to errNotifierPermissionDenied, got %v", notifierDeniedExitCode, err)
+	}
+}
+
+func TestDispatchViaNotifierApp_GenericFailure(t *testing.T) {
+	argsFile := filepath.Join(t.TempDir(), "args")
+	stub := notifierStub(t, 1, argsFile)
+
+	err := dispatchViaNotifierApp(stub, "t", "m", "normal")
+	if err == nil {
+		t.Fatal("exit 1 should be an error")
+	}
+
+	if errors.Is(err, errNotifierPermissionDenied) {
+		t.Fatal("a generic exit-1 failure must not be treated as permission-denied")
 	}
 }
 
