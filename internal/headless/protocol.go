@@ -1,13 +1,18 @@
 // Package headless drives a Claude Code agent in headless stream-json mode
-// (`claude -p --output-format stream-json --input-format stream-json`) instead
-// of an interactive PTY. It parses the typed event stream for status, cost and
-// token usage, and speaks the control protocol (initialize, interrupt,
-// can_use_tool approvals) on stdin/stdout. See
-// docs/design/2026-07-13-headless-stream-json-design.md (issue #1075).
+// (`claude -p --output-format stream-json`) instead of an interactive PTY. It
+// parses the typed event stream for status and the terminal result cost/usage
+// envelope. See docs/design/2026-07-13-headless-stream-json-design.md (#1075).
 //
-// The control protocol on stdin is an SDK-internal contract, not a documented
-// CLI API, so everything here is written defensively (unknown message types are
-// ignored, malformed data lines skipped) and the feature is gated behind an
+// v1 runs the validated one-shot form: a positional `-p <prompt>` with
+// stream-json output, which Claude runs to a terminal result and exits.
+// The reader (event → status, result envelope, scrollback rendering) is the
+// live v1 surface. The stdin *control protocol* here (interrupt,
+// get_context_usage, can_use_tool approvals) additionally requires
+// `--input-format stream-json`, which v1 does not pass — so those control paths
+// are present but dormant until the deferred bidirectional-control phase wires
+// them. The control protocol is an SDK-internal contract, not a documented CLI
+// API, so everything is written defensively (unknown message types ignored,
+// malformed data lines skipped) and the whole feature is gated behind an
 // experimental flag by the daemon.
 package headless
 

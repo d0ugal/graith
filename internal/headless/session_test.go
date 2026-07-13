@@ -164,10 +164,14 @@ func TestMarkDegradedAndTouch(t *testing.T) {
 	}
 
 	before := s.LastOutputAt()
-	s.touch()
+	s.touch(7)
 
 	if !s.LastOutputAt().After(before) && s.LastOutputAt().IsZero() {
 		t.Fatal("touch did not update lastOutputAt")
+	}
+
+	if s.BytesRead() != 7 {
+		t.Fatalf("BytesRead = %d, want 7", s.BytesRead())
 	}
 }
 
@@ -290,10 +294,13 @@ func TestControlAfterExitErrors(t *testing.T) {
 		exited:   true,
 	}
 
-	if err := s.Interrupt(1, time.Second); err == nil {
-		t.Fatal("Interrupt after exit should error")
+	// Interrupt is a best-effort SIGINT to the process group. With no process
+	// (ProcessPID == 0) it is a harmless no-op, not an error.
+	if err := s.Interrupt(1, time.Second); err != nil {
+		t.Fatalf("Interrupt with no process should be a no-op, got %v", err)
 	}
 
+	// ContextUsage is a stdin control request and must fail once exited.
 	if _, err := s.ContextUsage(); err == nil {
 		t.Fatal("ContextUsage after exit should error")
 	}

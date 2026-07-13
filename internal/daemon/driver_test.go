@@ -1,11 +1,35 @@
 package daemon
 
 import (
+	"io"
+	"log/slog"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/d0ugal/graith/internal/config"
 )
+
+// TestResumeRefusesHeadless locks in that a one-shot headless session cannot be
+// resumed (issue #1075): resuming it would silently relaunch an interactive PTY
+// while leaving DriverKind=headless, which the attach guard would then lock out.
+func TestResumeRefusesHeadless(t *testing.T) {
+	sm := &SessionManager{
+		state: NewState(),
+		cfg:   &config.Config{GitHubUsername: "ken"}, // non-empty: skip git discovery
+		log:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+	sm.state.Sessions["braw"] = &SessionState{
+		ID:         "braw",
+		Name:       "braw",
+		Status:     StatusStopped,
+		DriverKind: DriverHeadless,
+	}
+
+	if _, err := sm.Resume("braw", 24, 80); err == nil || !strings.Contains(err.Error(), "headless") {
+		t.Fatalf("Resume of a headless session should be refused, got err=%v", err)
+	}
+}
 
 func TestResolveDriverKind(t *testing.T) {
 	capable := config.Agent{HeadlessCapable: boolPtr(true)}
