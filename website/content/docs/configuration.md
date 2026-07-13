@@ -182,6 +182,23 @@ When enabled, the daemon fetches and fast-forward merges the default branch of e
 
 Sessions run in their own worktrees on feature branches, which share only the object store with the source checkout, so fast-forwarding the default branch cannot disturb them — those sessions do **not** block the pull. A repo is only skipped when a session works directly on the source checkout (in-place) or has the default branch itself checked out in its worktree. This keeps default branches up to date for future session creation without ever pulling into an active worktree.
 
+## Launch throttle & startup watchdog
+
+Launching several sessions at once can overwhelm the machine: heavyweight agent runtimes (Claude Code loads a ~400MB Node process) all initialise simultaneously and the tail of the burst can stall for minutes — or hang indefinitely at ~9MB RSS (only the sandbox wrapper loaded), producing no output and never connecting. The `[launch]` block bounds this and recovers stuck launches automatically.
+
+```toml
+[launch]
+max_concurrent  = 3      # max agent spawns in their startup window at once (< 1 => default 3)
+startup_timeout = "3m"   # kill + restart a session stuck with no output past this ("0" disables the watchdog)
+settle_timeout  = "10s"  # how long a launch holds its throttle slot waiting for first output ("0" => release right after spawn)
+```
+
+**Throttle.** A launch acquires one of `max_concurrent` slots just before spawning the agent and holds it across the risky startup window, releasing it as soon as the session produces its first output or `settle_timeout` elapses (whichever comes first). This bounds how many agents are *initialising* at once — the actual source of the stampede — so a burst starts cleanly in sequence rather than all at once. `gr new` still returns promptly; the slot is released in the background.
+
+**Watchdog.** A background loop looks for sessions that are running but have never produced output, sit at `agent_status: unknown`, and have been up longer than `startup_timeout`. Each is killed and restarted fresh (the restart uses a fresh `--session-id` rather than resuming a conversation that was never persisted). A per-session cap prevents restart storms for a permanently-broken session; the counter resets once the session produces output. Set `startup_timeout = "0"` to disable the watchdog entirely.
+
+`max_concurrent` and `startup_timeout` are re-read on config reload (`SIGHUP` / edit-and-save), so you can tune them without restarting the daemon.
+
 ## PR & CI awareness
 
 When enabled, the daemon resolves each session's GitHub PR via `gh`, polls its CI checks and comments, and delivers a structured notification to the session's inbox on a meaningful change — auto-resuming a stopped agent so it reacts to review feedback and CI results without you relaying them.

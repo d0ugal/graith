@@ -39,6 +39,7 @@ type Config struct {
 	Approvals        Approvals          `toml:"approvals"`
 	Status           StatusConfig       `toml:"status"`
 	GitPull          GitPullConfig      `toml:"git_pull"`
+	Launch           LaunchConfig       `toml:"launch"`
 	PRWatch          PRWatchConfig      `toml:"pr_watch"`
 	MCPServers       []MCPServerConfig  `toml:"mcp_servers"`
 	Overlay          Overlay            `toml:"overlay"`
@@ -224,6 +225,73 @@ func (o OrchestratorConfig) AgentName() string {
 	}
 
 	return "claude"
+}
+
+// LaunchConfig bounds concurrent agent-session startup and recovers sessions
+// that stall during launch (issue #1092). Bursts of `gr new` otherwise let many
+// heavyweight agent runtimes initialise at once, and the tail can stall for
+// minutes or hang forever at ~9MB RSS (sandbox wrapper only, agent never loaded).
+type LaunchConfig struct {
+	// MaxConcurrent bounds how many agent spawns may be in their startup window
+	// at once. Values < 1 fall back to the default (LaunchMaxConcurrentDefault).
+	MaxConcurrent int `toml:"max_concurrent"`
+	// StartupTimeout is how long a session may stay running with no output before
+	// the startup watchdog kills and restarts it fresh. "0" disables the
+	// watchdog; empty uses the default (LaunchStartupTimeoutDefault).
+	StartupTimeout string `toml:"startup_timeout"`
+	// SettleTimeout caps how long a launch holds its throttle slot waiting for
+	// the session's first output before releasing it anyway. Empty uses the
+	// default (LaunchSettleTimeoutDefault); "0" releases immediately after spawn.
+	SettleTimeout string `toml:"settle_timeout"`
+}
+
+// Launch tuning defaults. MaxConcurrent defaults to 3 because the #1092
+// evidence showed ~4 concurrent startups completing fine while the 5th stalled.
+const (
+	LaunchMaxConcurrentDefault  = 3
+	LaunchStartupTimeoutDefault = 3 * time.Minute
+	LaunchSettleTimeoutDefault  = 10 * time.Second
+)
+
+// MaxConcurrentOrDefault returns the configured concurrency, clamped to a
+// sensible minimum. A non-positive value means "use the default".
+func (l LaunchConfig) MaxConcurrentOrDefault() int {
+	if l.MaxConcurrent < 1 {
+		return LaunchMaxConcurrentDefault
+	}
+
+	return l.MaxConcurrent
+}
+
+// StartupTimeoutDuration returns the watchdog threshold. Empty uses the default;
+// an explicit "0" (or any non-positive parse) disables the watchdog.
+func (l LaunchConfig) StartupTimeoutDuration() time.Duration {
+	if l.StartupTimeout == "" {
+		return LaunchStartupTimeoutDefault
+	}
+
+	d, err := ParseDurationWithDays(l.StartupTimeout)
+	if err != nil || d < 0 {
+		return LaunchStartupTimeoutDefault
+	}
+
+	return d
+}
+
+// SettleTimeoutDuration returns how long a slot waits for first output. Empty
+// uses the default; an explicit "0" releases the slot as soon as the spawn
+// returns.
+func (l LaunchConfig) SettleTimeoutDuration() time.Duration {
+	if l.SettleTimeout == "" {
+		return LaunchSettleTimeoutDefault
+	}
+
+	d, err := ParseDurationWithDays(l.SettleTimeout)
+	if err != nil || d < 0 {
+		return LaunchSettleTimeoutDefault
+	}
+
+	return d
 }
 
 type GitPullConfig struct {

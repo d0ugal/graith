@@ -573,4 +573,5 @@ const (
 	StopReasonIdle     = "idle"
 	StopReasonUser     = "user"
 	StopReasonShutdown = "shutdown"
+	StopReasonWatchdog = "watchdog"
 )

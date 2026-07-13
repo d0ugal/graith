@@ -62,6 +62,7 @@ Key files by area:
 | Protocol | `protocol/frame.go`, `protocol/messages.go` | 5-byte framed multiplexing, JSON control envelope |
 | Daemon | `daemon/handler.go` | Main message dispatch loop (all control message types) |
 | Daemon | `daemon/daemon.go` | SessionManager: create, delete, resume, worktree lifecycle |
+| Daemon | `daemon/launch.go` | Launch throttle (semaphore bounding concurrent agent spawns) + startup watchdog (restarts sessions stuck in `unknown`/no-output past `[launch] startup_timeout`) |
 | Daemon | `daemon/state.go` | Persistent state (JSON file) |
 | Daemon | `daemon/msgstore.go` | Inter-agent pub/sub messaging (SQLite-backed) |
 | Client | `client/passthrough.go` | Raw PTY passthrough with prefix key handling |

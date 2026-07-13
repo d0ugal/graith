@@ -99,12 +99,17 @@ type SessionState struct {
 	// Yolo opts this session into auto-approve ("yolo") mode: the PreToolUse
 	// approval hook is installed and every request is auto-allowed via the
 	// "auto" approvals backend, regardless of the global [approvals] backend.
-	Yolo           bool            `json:"yolo,omitempty"`
-	Starred        bool            `json:"starred,omitempty"`
-	SystemKind     string          `json:"system_kind,omitempty"`
-	StopReason     string          `json:"stop_reason,omitempty"`
-	BackoffLevel   int             `json:"backoff_level,omitempty"`
-	FreshStart     bool            `json:"fresh_start,omitempty"`
+	Yolo         bool   `json:"yolo,omitempty"`
+	Starred      bool   `json:"starred,omitempty"`
+	SystemKind   string `json:"system_kind,omitempty"`
+	StopReason   string `json:"stop_reason,omitempty"`
+	BackoffLevel int    `json:"backoff_level,omitempty"`
+	FreshStart   bool   `json:"fresh_start,omitempty"`
+	// StuckRestarts counts consecutive startup-watchdog restarts for this session
+	// (#1092). It caps restart storms for a permanently-broken session and is
+	// reset to 0 once the session produces output. Runtime-recovery state, but
+	// persisted so the cap survives a daemon restart mid-storm.
+	StuckRestarts  int             `json:"stuck_restarts,omitempty"`
 	LastStartedAt  time.Time       `json:"last_started_at,omitempty"`
 	SummaryText    string          `json:"summary_text,omitempty"`
 	SummarySetAt   *time.Time      `json:"summary_set_at,omitempty"`

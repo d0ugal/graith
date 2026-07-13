@@ -97,6 +97,12 @@ type SessionManager struct {
 	prWatch      *prWatchState
 	triggers     *triggerState
 	tokens       *tokenCache
+	launch       *launchThrottle
+
+	// restartStuck is the startup watchdog's recovery action; nil in production
+	// (falls back to Restart). Tests override it to observe watchdog decisions
+	// without driving a full session respawn.
+	restartStuck func(id string, rows, cols uint16) error
 
 	// pushNotify guards proactive `gr notify` push-notification gating state:
 	// a rolling window of delivered timestamps (rate limit) and a per-key map of
@@ -138,6 +144,7 @@ func NewSessionManager(cfg *config.Config, paths config.Paths, log *slog.Logger)
 		prWatch:            newPRWatchState(),
 		triggers:           newTriggerState(),
 		tokens:             newTokenCache(),
+		launch:             newLaunchThrottle(cfg.Launch.MaxConcurrentOrDefault()),
 		cfg:                cfg,
 		paths:              paths,
 		log:                log,
@@ -1295,6 +1302,22 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 			"features", opts.Features, "workdir", opts.WorktreeDir)
 	}
 
+	// Throttle concurrent launches so a burst doesn't stampede (#1092). The slot
+	// is held across the agent's startup window and released on first output or a
+	// settle timeout (releaseLaunchSlotWhenSettled), or immediately on spawn error.
+	slot, err := sm.acquireLaunchSlot(context.Background(), id, name)
+	if err != nil {
+		cleanupOnError()
+
+		if scratchDir != "" {
+			_ = os.RemoveAll(scratchDir)
+		}
+
+		rollbackState()
+
+		return SessionState{}, fmt.Errorf("acquire launch slot: %w", err)
+	}
+
 	// Record the pre-spawn time so native session-id capture only matches
 	// transcript files this start creates (race-safe against stale rollouts).
 	startedAt := time.Now()
@@ -1312,6 +1335,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		Logger:     sm.log,
 	})
 	if err != nil {
+		slot.release()
 		cleanupOnError()
 
 		if scratchDir != "" {
@@ -1322,6 +1346,8 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 
 		return SessionState{}, fmt.Errorf("start pty session: %w", err)
 	}
+
+	sm.releaseLaunchSlotWhenSettled(slot, id, name, ptySess)
 
 	// --- Phase 3: Lock, commit to running ---
 	sm.mu.Lock()
@@ -1784,6 +1810,15 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 			"features", opts.Features, "workdir", opts.WorktreeDir)
 	}
 
+	// Throttle concurrent launches (#1092); see Create for the slot lifecycle.
+	slot, err := sm.acquireLaunchSlot(context.Background(), id, name)
+	if err != nil {
+		forkCleanup()
+		rollbackState()
+
+		return SessionState{}, fmt.Errorf("acquire launch slot: %w", err)
+	}
+
 	// Pre-spawn time for native session-id capture (see Create).
 	startedAt := time.Now()
 
@@ -1800,11 +1835,14 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 		Logger:     sm.log,
 	})
 	if err != nil {
+		slot.release()
 		forkCleanup()
 		rollbackState()
 
 		return SessionState{}, fmt.Errorf("start pty session: %w", err)
 	}
+
+	sm.releaseLaunchSlotWhenSettled(slot, id, name, ptySess)
 
 	// --- Phase 3: Lock, commit ---
 	sm.mu.Lock()
@@ -2719,6 +2757,13 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 			"features", opts.Features, "workdir", opts.WorktreeDir)
 	}
 
+	// Throttle concurrent launches (#1092); see Create for the slot lifecycle.
+	slot, err := sm.acquireLaunchSlot(context.Background(), id, sessName)
+	if err != nil {
+		rollbackState()
+		return SessionState{}, fmt.Errorf("acquire launch slot: %w", err)
+	}
+
 	// Pre-spawn time for native session-id capture (see Create).
 	startedAt := time.Now()
 
@@ -2735,9 +2780,13 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 		Logger:     sm.log,
 	})
 	if err != nil {
+		slot.release()
 		rollbackState()
+
 		return SessionState{}, fmt.Errorf("start pty session: %w", err)
 	}
+
+	sm.releaseLaunchSlotWhenSettled(slot, id, sessName, ptySess)
 
 	// --- Phase 3: Lock, commit to running ---
 	sm.mu.Lock()
@@ -5493,6 +5542,10 @@ func (sm *SessionManager) detectAgentStatuses() {
 			s.GitUnpushed = unpushed
 			if lastOut := t.pty.LastOutputAt(); !lastOut.IsZero() {
 				s.LastOutputAt = &lastOut
+				// The session is producing output, so it launched successfully:
+				// clear any startup-watchdog restart count so the cap only bounds
+				// *consecutive* stuck restarts (#1092).
+				resetStuckRestartsLocked(s)
 			}
 
 			for i := range s.Includes {
@@ -5650,6 +5703,15 @@ func (sm *SessionManager) applyConfig(newCfg *config.Config) {
 
 	if old.GitPull.Interval != newCfg.GitPull.Interval {
 		sm.log.Info("config changed", "key", "git_pull.interval", "old", old.GitPull.Interval, "new", newCfg.GitPull.Interval)
+	}
+
+	if oldMax, newMax := old.Launch.MaxConcurrentOrDefault(), newCfg.Launch.MaxConcurrentOrDefault(); oldMax != newMax {
+		sm.log.Info("config changed", "key", "launch.max_concurrent", "old", oldMax, "new", newMax)
+		sm.launch.resize(newMax)
+	}
+
+	if old.Launch.StartupTimeout != newCfg.Launch.StartupTimeout {
+		sm.log.Info("config changed", "key", "launch.startup_timeout", "old", old.Launch.StartupTimeout, "new", newCfg.Launch.StartupTimeout)
 	}
 
 	if old.Sandbox.Enabled != newCfg.Sandbox.Enabled {
@@ -6299,6 +6361,7 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 	}
 
 	go sm.RunDetectionLoop(ctx)
+	go sm.RunStartupWatchdogLoop(ctx)
 	go sm.RunMessageCleanupLoop(ctx)
 	go sm.RunGitPullLoop(ctx)
 	go sm.RunPRWatchLoop(ctx)
