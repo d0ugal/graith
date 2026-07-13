@@ -910,7 +910,7 @@ func TestTypeDeliversInput(t *testing.T) {
 
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if tail, err := ptySess.Scrollback.TailBytes(4096); err == nil {
+		if tail, err := ptySess.ScrollbackFile().TailBytes(4096); err == nil {
 			if strings.Contains(string(tail), "ready") {
 				ready = true
 				break
@@ -947,7 +947,7 @@ func TestTypeDeliversInput(t *testing.T) {
 
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if tail, err := ptySess.Scrollback.TailBytes(4096); err == nil {
+		if tail, err := ptySess.ScrollbackFile().TailBytes(4096); err == nil {
 			if strings.Contains(string(tail), "hello-from-speir") {
 				found = true
 				break
@@ -996,7 +996,7 @@ func TestTypeWakesSleepingAgent(t *testing.T) {
 
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if tail, err := ptySess.Scrollback.TailBytes(4096); err == nil {
+		if tail, err := ptySess.ScrollbackFile().TailBytes(4096); err == nil {
 			if strings.Contains(string(tail), "ready") {
 				ready = true
 				break
@@ -1026,7 +1026,7 @@ func TestTypeWakesSleepingAgent(t *testing.T) {
 
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if tail, err := ptySess.Scrollback.TailBytes(4096); err == nil {
+		if tail, err := ptySess.ScrollbackFile().TailBytes(4096); err == nil {
 			if strings.Contains(string(tail), "got:bothy-input") {
 				found = true
 				break
