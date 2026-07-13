@@ -397,7 +397,7 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 		sm.mu.Unlock()
 
 		for _, id := range startedIDs {
-			if err := sm.stopWithReason(id, StopReasonUser); err != nil {
+			if err := sm.stopWithReason(id, StopReasonUser, "scenario-rollback"); err != nil {
 				sm.log.Warn("scenario deleted during creation: stop failed", "session", id, "err", err)
 			}
 
@@ -586,7 +586,7 @@ func (sm *SessionManager) StopScenario(name string) ([]string, error) {
 			continue
 		}
 
-		if err := sm.stopWithReason(id, StopReasonUser); err != nil {
+		if err := sm.stopWithReason(id, StopReasonUser, "scenario-stop"); err != nil {
 			sm.log.Warn("failed to stop scenario session", "session", id, "err", err)
 			continue
 		}
@@ -647,7 +647,7 @@ func (sm *SessionManager) DeleteScenario(name string) ([]string, error) {
 		sm.mu.RUnlock()
 
 		if sess != nil && status == StatusRunning {
-			_ = sm.stopWithReason(id, StopReasonUser)
+			_ = sm.stopWithReason(id, StopReasonUser, "scenario-delete")
 		}
 	}
 

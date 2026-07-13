@@ -224,6 +224,7 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 	if _, ok := sm.state.Sessions[id]; !ok {
 		sm.mu.Unlock()
 
+		sm.logStopping(id, "", "rollback", "orchestrator-rollback", ptySess)
 		_ = ptySess.Kill()
 		ptySess.Close()
 
@@ -256,6 +257,7 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 		delete(sm.tokenIndex, token)
 		sm.mu.Unlock()
 
+		sm.logStopping(id, "", "rollback", "orchestrator-rollback", ptySess)
 		_ = ptySess.Kill()
 		ptySess.Close()
 
@@ -267,7 +269,8 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 
 	go sm.watchSession(id, ptySess)
 
-	sm.log.Info("orchestrator session created", "id", id)
+	sm.log.Info("orchestrator session created",
+		"id", id, "pid", result.PID, "pgid", ptySess.Pgid())
 
 	return result, nil
 }
@@ -574,4 +577,9 @@ const (
 	StopReasonUser     = "user"
 	StopReasonShutdown = "shutdown"
 	StopReasonWatchdog = "watchdog"
+	// StopReasonDelete labels a daemon-initiated kill that is part of a
+	// delete/purge teardown. It is used only for the "stopping session" audit
+	// line (issue #1104); a deleted session is removed from state, so its exit
+	// is ignored and never reaches the "session exited" log path.
+	StopReasonDelete = "delete"
 )

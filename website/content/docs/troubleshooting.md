@@ -216,6 +216,39 @@ tail -f ~/.local/share/graith/daemon.log | jq .
 
 If the log file grows large, `gr doctor --autofix` truncates it to ~1 MB.
 
+#### Diagnosing why a session stopped
+
+Every session lifecycle transition is logged so a stop is fully diagnosable from
+the log alone:
+
+- **`session spawned`** / **`resume: pty spawned`** — a session (re)started.
+  Includes `pid`, `pgid` (the process group graith signals), and `sandboxed`.
+- **`pty first output`** — the agent produced its first byte;
+  `since_launch_ms` is the launch→first-output gap.
+- **`session active`** — the agent reported it is running (hook `SessionStart`);
+  `since_launch_ms` is the launch→active gap. A large gap here with output
+  flowing is a slow start; no `session active` at all is a stuck start.
+- **`stopping session`** — emitted the instant before a daemon-initiated
+  SIGTERM, carrying `reason` (`user`, `idle`, `shutdown`, `delete`, …),
+  `initiator` (the code path: `idle-loop`, `user-stop`, `restart`, `shutdown`,
+  `delete`, …), and `pid`/`pgid`.
+- **`session exited`** — the process is gone. `stop_reason` attributes the exit
+  (`crash`, `user`, `idle`, `shutdown`), and `pid`/`pgid` support OS-level
+  signal forensics. When present, `peak_rss_mb` is labelled with `peak_rss_proc`
+  (`agent` or `sandbox-wrapper`) so a small wrapper RSS isn't mistaken for the
+  agent's footprint.
+
+Trace one session end to end:
+
+```bash
+jq 'select(.id == "<session-id>" or .session_id == "<session-id>")' \
+  ~/.local/share/graith/daemon.log
+```
+
+Control requests (`stop`, `delete`, `restart`, `scenario_stop`) log the
+authenticated caller identity at **debug** level (`control request`), so raise
+the log level if you need to see who issued a stop.
+
 ### Reset config to defaults
 
 ```bash

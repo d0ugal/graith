@@ -377,6 +377,8 @@ func (sm *SessionManager) recoverStuckLaunch(st stuckSession, timeout time.Durat
 
 		// Kill the zombie so it doesn't linger. StopReasonWatchdog is already set,
 		// so watchSession preserves the errored status and summary above.
+		sm.logStopping(st.id, st.name, StopReasonWatchdog, "watchdog-giveup", st.pty)
+
 		if err := st.pty.Kill(); err != nil {
 			sm.log.Error("failed to kill stuck session after giving up", "id", st.id, "err", err)
 		}

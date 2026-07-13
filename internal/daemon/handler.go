@@ -607,6 +607,10 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					continue
 				}
 
+				sm.log.Debug("control request",
+					"op", "stop", "caller", auth.describe(),
+					"target", s.SessionID, "children", s.Children)
+
 				handleSessionLifecycle(sm, auth, sendControl,
 					lifecycleRequest{SessionID: s.SessionID, Children: s.Children, ExcludeRoot: s.ExcludeRoot},
 					"stopped", "stopped", sm.StopWithChildren, sm.Stop)
@@ -761,6 +765,10 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				if !ok {
 					continue
 				}
+
+				sm.log.Debug("control request",
+					"op", "restart", "caller", auth.describe(),
+					"target", r.SessionID, "children", r.Children)
 
 				if !auth.authorizeTarget(sm, r.SessionID, authSelfOrDescendant, sendControl) {
 					continue
@@ -1647,6 +1655,9 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					continue
 				}
 
+				sm.log.Debug("control request",
+					"op", "scenario_stop", "caller", auth.describe(), "scenario", s.Name)
+
 				if !auth.authorizeScenarioOp(sm, s.Name, sendControl) {
 					continue
 				}
@@ -1985,6 +1996,10 @@ type lifecycleRequest struct {
 // delete, the computed expiry — enough for the CLI to render "Recoverable
 // until …" vs "Deleted".
 func handleDelete(sm *SessionManager, auth authContext, sendControl func(string, any), d protocol.DeleteMsg) {
+	sm.log.Debug("control request",
+		"op", "delete", "caller", auth.describe(),
+		"target", d.SessionID, "children", d.Children, "purge", d.Purge)
+
 	sm.mu.RLock()
 	authErr := auth.checkTarget(sm, d.SessionID, authSelfOrDescendant)
 	sm.mu.RUnlock()
