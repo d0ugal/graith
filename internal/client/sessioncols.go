@@ -16,8 +16,8 @@ import (
 // surfaces — flip ShowCLI/ShowTUI to control where it shows up and the two
 // views stay in sync automatically.
 //
-// The two surfaces render very differently: the CLI uses a tabwriter with
-// plain-text cells (optionally colorised), while the TUI uses lipgloss
+// The two surfaces render very differently: the CLI aligns plain-text cells
+// (optionally colorised) by visible width, while the TUI uses lipgloss
 // fixed-width cells with unicode glyphs and per-cell styling. So each column
 // carries a value formatter (and styling) for each surface rather than a single
 // shared string.
@@ -48,8 +48,8 @@ type SessionColumn struct {
 	// time for age/attached columns; other columns ignore it.
 	CLIValue func(s protocol.SessionInfo, now time.Time) string
 	// CLIColor returns the foreground colour for the CLI cell, or nil for none.
-	// The list command applies it via colorize (which brackets the escapes for
-	// tabwriter alignment).
+	// The list command applies it via colorize; the renderer measures cells with
+	// ansi.StringWidth so the colour escapes don't disturb column alignment.
 	CLIColor func(s protocol.SessionInfo) color.Color
 
 	// TUIValue returns the cell text for the TUI picker. It may include "—"
