@@ -93,6 +93,14 @@ Run `gr --help` for the full command list.\
 enabled = false          # run the background pull loop
 interval = "1h"          # how often to pull (must be at least 1 minute)
 
+# Launch throttle & startup watchdog: bounds concurrent agent-session startup so
+# a burst of `gr new` doesn't stampede, and recovers sessions that stall during
+# launch (never produce output, sit at agent_status "unknown"). See issue #1092.
+[launch]
+max_concurrent = 3       # max agent spawns in their startup window at once (< 1 => default 3)
+startup_timeout = "3m"   # kill+restart a session stuck with no output past this ("0" disables the watchdog)
+settle_timeout = "10s"   # how long a launch holds its slot waiting for first output ("0" => release right after spawn)
+
 # Soft delete: `gr delete` marks a session deleted and keeps its worktree and
 # state for the retention window so it can be recovered with `gr restore`. The
 # daemon purges soft-deleted sessions after the window elapses. `gr purge`
