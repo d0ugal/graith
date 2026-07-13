@@ -24,7 +24,7 @@ import (
 // an optional interactiveDriver so headless doesn't have to no-op them
 // (see docs/design/2026-07-13-headless-stream-json-design.md). Keeping one
 // interface here means zero call-site churn in this first slice.
-type SessionDriver interface {
+type SessionDriver interface { //nolint:interfacebloat // deliberately the full current *pty.Session call surface, so introducing the interface is a no-behaviour-change refactor; the capability split lands with the headless-driver phase.
 	// Lifecycle / identity.
 	ProcessPID() int
 	Fd() uintptr

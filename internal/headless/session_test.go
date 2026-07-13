@@ -21,6 +21,7 @@ func newBareSession(t *testing.T) *Session {
 	if err != nil {
 		t.Fatalf("NewScrollback: %v", err)
 	}
+
 	t.Cleanup(func() { _ = sb.Close() })
 
 	return &Session{
@@ -38,6 +39,7 @@ func startFake(t *testing.T, script string, onPerm func(PermissionRequest) Permi
 	t.Helper()
 
 	dir := t.TempDir()
+
 	s, err := New(Opts{
 		ID:           "braw",
 		Command:      "sh",
@@ -49,6 +51,7 @@ func startFake(t *testing.T, script string, onPerm func(PermissionRequest) Permi
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
+
 	t.Cleanup(s.Close)
 
 	return s
@@ -72,12 +75,14 @@ func TestSetStatusKeepsToolName(t *testing.T) {
 	s := newBareSession(t)
 
 	s.setStatus(StatusApproval, "Bash")
+
 	if snap := s.Snapshot(); snap.Status != StatusApproval || snap.ToolName != "Bash" {
 		t.Fatalf("after setStatus: %+v", snap)
 	}
 
 	// An empty tool name must not clobber the retained one.
 	s.setStatus(StatusReady, "")
+
 	if snap := s.Snapshot(); snap.Status != StatusReady || snap.ToolName != "Bash" {
 		t.Fatalf("after second setStatus: %+v", snap)
 	}
@@ -91,8 +96,12 @@ func TestSetResult(t *testing.T) {
 	isErr := true
 	cost := 1.5
 	turns := 4
-	var dms int64 = 1200
-	var dapi int64 = 900
+
+	var (
+		dms  int64 = 1200
+		dapi int64 = 900
+	)
+
 	ev := event{
 		Type:        "result",
 		IsError:     &isErr,
@@ -110,12 +119,15 @@ func TestSetResult(t *testing.T) {
 	if res == nil {
 		t.Fatal("Result is nil")
 	}
+
 	if !res.IsError || res.TotalCost != 1.5 || res.NumTurns != 4 || res.DurationMS != 1200 || res.DurationAPI != 900 {
 		t.Fatalf("result mismatch: %+v", res)
 	}
+
 	if res.Text != "bide" || string(res.Usage) != `{"input_tokens":10}` {
 		t.Fatalf("result text/usage mismatch: %+v", res)
 	}
+
 	if res.At.IsZero() {
 		t.Fatal("result At not set")
 	}
@@ -131,6 +143,7 @@ func TestSetResultDefaultsForNilPointers(t *testing.T) {
 	if res == nil {
 		t.Fatal("Result is nil")
 	}
+
 	if res.IsError || res.TotalCost != 0 || res.NumTurns != 0 || res.DurationMS != 0 || res.DurationAPI != 0 {
 		t.Fatalf("expected zero-valued result, got %+v", res)
 	}
@@ -145,12 +158,14 @@ func TestMarkDegradedAndTouch(t *testing.T) {
 	}
 
 	s.markDegraded()
+
 	if !s.Snapshot().Degraded {
 		t.Fatal("expected degraded after markDegraded")
 	}
 
 	before := s.LastOutputAt()
 	s.touch()
+
 	if !s.LastOutputAt().After(before) && s.LastOutputAt().IsZero() {
 		t.Fatal("touch did not update lastOutputAt")
 	}
@@ -171,9 +186,11 @@ func TestAppendScrollbackFansToWriters(t *testing.T) {
 	if w1.String() != want || w2.String() != want {
 		t.Fatalf("attached writers: w1=%q w2=%q, want %q", w1.String(), w2.String(), want)
 	}
+
 	if got := s.ScreenPreview(); !strings.Contains(got, "session started (braw)") {
 		t.Fatalf("ScreenPreview = %q", got)
 	}
+
 	if frame := s.ScreenSnapshot().Frame; !strings.Contains(frame, "session started (braw)") {
 		t.Fatalf("ScreenSnapshot frame = %q", frame)
 	}
@@ -194,6 +211,7 @@ func TestDetachWriterRemovesOne(t *testing.T) {
 	if w1.Len() != 0 {
 		t.Fatalf("detached writer w1 still got %q", w1.String())
 	}
+
 	if w2.String() != "dreich banner\n" {
 		t.Fatalf("w2 = %q", w2.String())
 	}
@@ -209,6 +227,7 @@ func TestDetachClearsAllWriters(t *testing.T) {
 	s.Detach()
 
 	s.appendScrollback([]byte("dreich banner"))
+
 	if w.Len() != 0 {
 		t.Fatalf("detached writer still got %q", w.String())
 	}
@@ -244,6 +263,7 @@ func TestDeliverResponseEmptyIDMarksDegraded(t *testing.T) {
 
 	s := newBareSession(t)
 	s.deliverResponse("", json.RawMessage(`{}`))
+
 	if !s.Snapshot().Degraded {
 		t.Fatal("empty request id should mark the session degraded")
 	}
@@ -254,6 +274,7 @@ func TestDeliverResponseUnmatchedIDTolerated(t *testing.T) {
 
 	s := newBareSession(t)
 	s.deliverResponse("nae-such", json.RawMessage(`{}`)) // must not panic
+
 	if s.Snapshot().Degraded {
 		t.Fatal("an unmatched id is tolerated, not degraded")
 	}
@@ -272,6 +293,7 @@ func TestControlAfterExitErrors(t *testing.T) {
 	if err := s.Interrupt(1, time.Second); err == nil {
 		t.Fatal("Interrupt after exit should error")
 	}
+
 	if _, err := s.ContextUsage(); err == nil {
 		t.Fatal("ContextUsage after exit should error")
 	}
@@ -285,6 +307,7 @@ func TestWriteInputAfterExitErrors(t *testing.T) {
 	if err := s.WriteInput([]byte("bide")); err == nil {
 		t.Fatal("WriteInput after exit should error")
 	}
+
 	if err := s.WriteInputAndSubmit([]byte("bide")); err == nil {
 		t.Fatal("WriteInputAndSubmit after exit should error")
 	}
@@ -298,18 +321,23 @@ func TestNoOpAndConstantSurfaces(t *testing.T) {
 	if s.ProcessPID() != 0 {
 		t.Fatalf("ProcessPID = %d, want 0", s.ProcessPID())
 	}
+
 	if s.Fd() != 0 {
 		t.Fatalf("Fd = %d, want 0", s.Fd())
 	}
+
 	if s.PeakRSSBytes() != 0 {
 		t.Fatalf("PeakRSSBytes = %d, want 0", s.PeakRSSBytes())
 	}
+
 	if s.RecentlyAdopted(time.Minute) {
 		t.Fatal("RecentlyAdopted should be false")
 	}
+
 	if err := s.Resize(80, 24); err != nil {
 		t.Fatalf("Resize should be a no-op, got %v", err)
 	}
+
 	if !s.WaitForUserIdle(time.Second, time.Second) {
 		t.Fatal("WaitForUserIdle should return true")
 	}
@@ -337,12 +365,15 @@ func TestEndToEndReady(t *testing.T) {
 	if snap.Status != StatusReady {
 		t.Fatalf("status = %q, want ready", snap.Status)
 	}
+
 	if snap.Degraded {
 		t.Fatal("clean stream should not be degraded")
 	}
+
 	if snap.Result == nil {
 		t.Fatal("result envelope not captured")
 	}
+
 	if snap.Result.IsError || snap.Result.TotalCost != 0.1234 || snap.Result.NumTurns != 3 {
 		t.Fatalf("result envelope mismatch: %+v", snap.Result)
 	}
@@ -350,6 +381,7 @@ func TestEndToEndReady(t *testing.T) {
 	if s.ExitCode() != 0 {
 		t.Fatalf("ExitCode = %d, want 0", s.ExitCode())
 	}
+
 	if !s.Exited() {
 		t.Fatal("Exited should be true")
 	}
@@ -373,9 +405,11 @@ func TestEndToEndErroredResult(t *testing.T) {
 	if res == nil {
 		t.Fatal("result envelope not captured")
 	}
+
 	if !res.IsError {
 		t.Fatal("envelope.IsError should be true for an errored result")
 	}
+
 	if preview := s.ScreenPreview(); !strings.Contains(preview, "[error]") {
 		t.Fatalf("scrollback missing error flag:\n%s", preview)
 	}
@@ -398,9 +432,11 @@ func TestEndToEndMalformedLineSkipped(t *testing.T) {
 	if snap.Status != StatusReady {
 		t.Fatalf("status = %q, want ready (later valid lines must still parse)", snap.Status)
 	}
+
 	if snap.Result == nil || snap.Result.NumTurns != 2 {
 		t.Fatalf("result after malformed line not captured: %+v", snap.Result)
 	}
+
 	if preview := s.ScreenPreview(); !strings.Contains(preview, "this is not json at all") {
 		t.Fatalf("malformed line missing from scrollback:\n%s", preview)
 	}
@@ -439,6 +475,7 @@ func TestEndToEndPermissionApprovedRoundTrip(t *testing.T) {
 		if req.RequestID != "ctl-1" {
 			t.Fatalf("request id = %q, want ctl-1", req.RequestID)
 		}
+
 		if req.ToolName != "Bash" {
 			t.Fatalf("tool name = %q, want Bash", req.ToolName)
 		}
@@ -452,9 +489,11 @@ func TestEndToEndPermissionApprovedRoundTrip(t *testing.T) {
 	if !strings.Contains(preview, `"behavior":"allow"`) {
 		t.Fatalf("expected an allow control_response in scrollback:\n%s", preview)
 	}
+
 	if !strings.Contains(preview, `"request_id":"ctl-1"`) {
 		t.Fatalf("control_response missing request id:\n%s", preview)
 	}
+
 	if s.Snapshot().Degraded {
 		t.Fatal("a well-formed approval round-trip should not be degraded")
 	}
@@ -474,9 +513,11 @@ func TestEndToEndPermissionFailClosed(t *testing.T) {
 	if !strings.Contains(preview, `"behavior":"deny"`) {
 		t.Fatalf("expected a deny control_response in scrollback:\n%s", preview)
 	}
+
 	if !strings.Contains(preview, "no approval backend") {
 		t.Fatalf("expected the fail-closed reason in scrollback:\n%s", preview)
 	}
+
 	if s.Snapshot().Status != StatusApproval {
 		t.Fatalf("status = %q, want approval", s.Snapshot().Status)
 	}
@@ -511,6 +552,7 @@ func TestEndToEndControlRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ContextUsage: %v", err)
 	}
+
 	if !strings.Contains(string(resp), "42") {
 		t.Fatalf("control response = %s, want it to contain 42", resp)
 	}
@@ -534,6 +576,7 @@ func TestKillAndForceKillNoProcessAreNoops(t *testing.T) {
 	if err := s.Kill(); err != nil {
 		t.Fatalf("Kill with no process = %v, want nil", err)
 	}
+
 	if err := s.ForceKill(); err != nil {
 		t.Fatalf("ForceKill with no process = %v, want nil", err)
 	}
@@ -563,6 +606,7 @@ func TestKillTerminatesRunningProcess(t *testing.T) {
 	if err := s.Kill(); err != nil {
 		t.Fatalf("Kill: %v", err)
 	}
+
 	waitDone(t, s, 10*time.Second)
 
 	if !s.Exited() {
@@ -578,6 +622,7 @@ func TestForceKillTerminatesRunningProcess(t *testing.T) {
 	if err := s.ForceKill(); err != nil {
 		t.Fatalf("ForceKill: %v", err)
 	}
+
 	waitDone(t, s, 10*time.Second)
 
 	if !s.Exited() {
