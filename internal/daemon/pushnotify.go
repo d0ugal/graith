@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -277,10 +278,20 @@ func dispatchMacNotification(title, message, priority string) error {
 	}
 
 	if exe, ok := findMacNotifierApp(); ok {
-		if err := dispatchViaNotifierApp(exe, title, message, priority); err == nil {
+		err := dispatchViaNotifierApp(exe, title, message, priority)
+		if err == nil {
 			return nil
 		}
-		// Helper present but failed to post; fall through to osascript so the
+
+		if errors.Is(err, errNotifierPermissionDenied) {
+			// The user has explicitly disabled notifications for Graith. Honour
+			// that — do NOT fall back to osascript, which would show the same
+			// notification under "Script Editor" and defeat the per-app control
+			// this feature exists to provide (issue #1094 review).
+			return nil
+		}
+		// Helper present but failed for another reason (not installed correctly,
+		// launch error, delivery error); fall through to osascript so the
 		// notification still reaches the user.
 	}
 
@@ -290,6 +301,16 @@ func dispatchMacNotification(title, message, priority string) error {
 // macNotifierExecutable is the path, relative to the .app bundle root, of the
 // notifier executable built by macos/notifier/build.sh.
 const macNotifierExecutable = "Contents/MacOS/graith-notifier"
+
+// notifierDeniedExitCode is the exit status the helper uses to signal that the
+// user has explicitly disabled notifications for Graith. It must match
+// exitDenied in macos/notifier/main.swift.
+const notifierDeniedExitCode = 3
+
+// errNotifierPermissionDenied is returned by dispatchViaNotifierApp when the
+// helper reports the user has turned off Graith's notifications. The caller
+// suppresses the osascript fallback in that case.
+var errNotifierPermissionDenied = errors.New("notifications disabled for Graith by the user")
 
 // findMacNotifierApp locates the bundled macOS notification helper and returns
 // the path to its inner executable. Search order: an explicit override
@@ -330,14 +351,18 @@ func findMacNotifierApp() (string, bool) {
 // resolveNotifierExecutable maps a candidate path to a runnable notifier
 // executable. A ".app" path is resolved to its inner executable; any other path
 // is treated as the executable itself. It reports ok=false unless the resolved
-// path exists and is a regular file.
+// path exists, is a regular file, and is executable — so a non-executable stale
+// candidate is skipped rather than selected (letting findMacNotifierApp fall
+// through to a valid later candidate, issue #1094 review). The path is cleaned
+// first so a trailing-slash override (e.g. ".../GraithNotifier.app/") still
+// resolves as a bundle.
 func resolveNotifierExecutable(path string) (string, bool) {
-	exe := path
-	if strings.HasSuffix(path, ".app") {
-		exe = filepath.Join(path, macNotifierExecutable)
+	exe := filepath.Clean(path)
+	if strings.HasSuffix(exe, ".app") {
+		exe = filepath.Join(exe, macNotifierExecutable)
 	}
 
-	if info, err := os.Stat(exe); err == nil && info.Mode().IsRegular() { //nolint:gosec // G703: exe is an operator-controlled install location (env override / gr binary dir / /Applications), not attacker input
+	if info, err := os.Stat(exe); err == nil && info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0 {
 		return exe, true
 	}
 
@@ -345,16 +370,25 @@ func resolveNotifierExecutable(path string) (string, bool) {
 }
 
 // dispatchViaNotifierApp runs the notifier helper with the notification
-// content. The helper exits non-zero on any failure so the caller can fall back.
+// content. The helper exits non-zero on any failure so the caller can fall
+// back; the dedicated notifierDeniedExitCode is mapped to
+// errNotifierPermissionDenied so the caller can suppress the fallback for an
+// explicit user opt-out.
 func dispatchViaNotifierApp(exe, title, message, priority string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), pushDispatchTimeout)
 	defer cancel()
 
-	if err := exec.CommandContext(ctx, exe, title, message, priority).Run(); err != nil {
-		return fmt.Errorf("notifier app: %w", err)
+	err := exec.CommandContext(ctx, exe, title, message, priority).Run()
+	if err == nil {
+		return nil
 	}
 
-	return nil
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == notifierDeniedExitCode {
+		return errNotifierPermissionDenied
+	}
+
+	return fmt.Errorf("notifier app: %w", err)
 }
 
 // dispatchViaOsascript shows a notification via osascript. High-priority
