@@ -235,7 +235,7 @@ func (sm *SessionManager) handleWaitContains(
 	defer ptySess.DetachWriter(mw)
 
 	// Catch a pattern already visible in scrollback before following.
-	if tail, terr := ptySess.Scrollback.Tail(waitScrollbackLines); terr == nil {
+	if tail, terr := ptySess.ScrollbackFile().Tail(waitScrollbackLines); terr == nil {
 		if line, matched := scanForMatch(re, tail); matched {
 			sendControl("wait_matched", protocol.WaitMatchedMsg{MatchedLine: line})
 			return false

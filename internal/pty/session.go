@@ -264,6 +264,14 @@ func (s *Session) Fd() uintptr {
 	return s.Ptmx.Fd()
 }
 
+// ScrollbackFile returns the session's scrollback buffer. It exists so a
+// SessionDriver interface can expose the scrollback via a method (interfaces
+// can't have fields), while the exported Scrollback field stays for direct
+// concrete use within this package.
+func (s *Session) ScrollbackFile() *Scrollback {
+	return s.Scrollback
+}
+
 func (s *Session) readLoop() {
 	defer close(s.readDone)
 

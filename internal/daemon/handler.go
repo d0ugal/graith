@@ -554,7 +554,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				sess, _ := sm.Get(a.SessionID)
 				sendControl("attached", toSessionInfo(sess, sm.Config(), sm.getHookReport(sess.ID)))
 
-				if tail, err := ptySess.Scrollback.Tail(300); err == nil && len(tail) > 0 {
+				if tail, err := ptySess.ScrollbackFile().Tail(300); err == nil && len(tail) > 0 {
 					_ = writer.WriteFrame(protocol.ChannelData, tail)
 				}
 
@@ -819,7 +819,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					continue
 				}
 
-				if tail, err := ptySess.Scrollback.Tail(lines); err == nil && len(tail) > 0 {
+				if tail, err := ptySess.ScrollbackFile().Tail(lines); err == nil && len(tail) > 0 {
 					_ = writer.WriteFrame(protocol.ChannelData, tail)
 				}
 
