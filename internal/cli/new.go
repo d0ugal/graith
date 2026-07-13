@@ -25,6 +25,7 @@ var (
 	newAllowConcurrent     bool
 	newSkipModelValidation bool
 	newYolo                bool
+	newHeadless            bool
 )
 
 var newCmd = &cobra.Command{
@@ -102,6 +103,7 @@ var newCmd = &cobra.Command{
 			AllowConcurrent:     newAllowConcurrent,
 			SkipModelValidation: newSkipModelValidation,
 			Yolo:                newYolo,
+			Headless:            newHeadless,
 		})
 
 		resp, err := c.ReadControlResponse()
@@ -156,6 +158,7 @@ func registerNewCmd() {
 	newCmd.Flags().BoolVar(&newAllowConcurrent, "allow-concurrent", false, "allow multiple in-place sessions on the same repo")
 	newCmd.Flags().BoolVar(&newSkipModelValidation, "skip-model-validation", false, "skip validate_model check (use models not in the validation list)")
 	newCmd.Flags().BoolVar(&newYolo, "yolo", false, "auto-approve all tool requests for this session (no approval prompts)")
+	newCmd.Flags().BoolVar(&newHeadless, "headless", false, "run as a headless stream-json session instead of an interactive PTY (experimental; Claude only)")
 	_ = newCmd.RegisterFlagCompletionFunc("agent", completeAgentNames)
 	_ = newCmd.RegisterFlagCompletionFunc("repo", completeRepoPaths)
 	_ = newCmd.RegisterFlagCompletionFunc("base", completeBranchNames)

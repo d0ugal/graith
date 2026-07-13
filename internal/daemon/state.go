@@ -19,7 +19,7 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 )
 
-const CurrentStateVersion = 17
+const CurrentStateVersion = 18
 
 // StateVersionError is returned by LoadState when the on-disk state file is
 // newer than this binary understands. The daemon treats this as fatal (refuses
@@ -52,16 +52,20 @@ type CreationConfig struct {
 }
 
 type SessionState struct {
-	ID              string        `json:"id"`
-	ParentID        string        `json:"parent_id,omitempty"`
-	Name            string        `json:"name"`
-	RepoPath        string        `json:"repo_path"`
-	RepoName        string        `json:"repo_name"`
-	WorktreePath    string        `json:"worktree_path"`
-	Branch          string        `json:"branch"`
-	BaseBranch      string        `json:"base_branch"`
-	Agent           string        `json:"agent"`
-	AgentSessionID  string        `json:"agent_session_id,omitempty"`
+	ID             string `json:"id"`
+	ParentID       string `json:"parent_id,omitempty"`
+	Name           string `json:"name"`
+	RepoPath       string `json:"repo_path"`
+	RepoName       string `json:"repo_name"`
+	WorktreePath   string `json:"worktree_path"`
+	Branch         string `json:"branch"`
+	BaseBranch     string `json:"base_branch"`
+	Agent          string `json:"agent"`
+	AgentSessionID string `json:"agent_session_id,omitempty"`
+	// DriverKind is the session's transport: DriverPTY (interactive PTY) or
+	// DriverHeadless (headless stream-json, issue #1075). Resolved once at
+	// creation and never re-derived from config. Empty is treated as DriverPTY.
+	DriverKind      string        `json:"driver_kind,omitempty"`
 	Model           string        `json:"model,omitempty"`
 	Status          SessionStatus `json:"status"`
 	AgentStatus     string        `json:"agent_status,omitempty"`
@@ -439,6 +443,7 @@ var migrations = map[int]func(*State) error{
 	14: migrateV14ToV15,
 	15: migrateV15ToV16,
 	16: migrateV16ToV17,
+	17: migrateV17ToV18,
 }
 
 func generateToken() (string, error) {
@@ -626,6 +631,20 @@ func migrateV15ToV16(state *State) error {
 func migrateV16ToV17(state *State) error {
 	if state.PRWatchPromptedAuthors == nil {
 		state.PRWatchPromptedAuthors = make(map[string]bool)
+	}
+
+	return nil
+}
+
+// migrateV17ToV18 stamps every existing session with the PTY driver kind
+// (issue #1075). DriverKind is authoritative, so existing sessions — all
+// interactive PTYs — are marked explicitly rather than relying on an empty
+// value.
+func migrateV17ToV18(state *State) error {
+	for _, s := range state.Sessions {
+		if s.DriverKind == "" {
+			s.DriverKind = DriverPTY
+		}
 	}
 
 	return nil

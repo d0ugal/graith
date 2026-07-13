@@ -360,6 +360,34 @@ func TestMigrateV16ToV17PromptedAuthors(t *testing.T) {
 	}
 }
 
+func TestMigrateV17ToV18DriverKind(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+
+	// A v17 state with no driver_kind field — every existing session is a PTY.
+	data := []byte(`{"version":17,"sessions":{
+		"braw1":{"id":"braw1","name":"bide-session","status":"running"},
+		"canny2":{"id":"canny2","name":"ken-session","status":"stopped"}
+	}}`)
+	if err := writeFileAtomic(path, data); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := LoadState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if loaded.Version != CurrentStateVersion {
+		t.Errorf("version = %d, want %d after migration", loaded.Version, CurrentStateVersion)
+	}
+
+	for id, s := range loaded.Sessions {
+		if s.DriverKind != DriverPTY {
+			t.Errorf("session %q DriverKind = %q, want %q after v17→v18 migration", id, s.DriverKind, DriverPTY)
+		}
+	}
+}
+
 // TestLoadStatePromptedAuthorsRoundTrip asserts a populated prompted-authors set
 // survives a save/load cycle.
 func TestLoadStatePromptedAuthorsRoundTrip(t *testing.T) {

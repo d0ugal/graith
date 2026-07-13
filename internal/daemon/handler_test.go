@@ -1019,7 +1019,7 @@ func TestNotifyInboxSystemSenderOmitsReplyPath(t *testing.T) {
 		t.Fatal("target PTY session not found")
 	}
 
-	tail, err := ptySess.Scrollback.Tail(500)
+	tail, err := ptySess.ScrollbackFile().Tail(500)
 	if err != nil {
 		t.Fatalf("scrollback tail: %v", err)
 	}

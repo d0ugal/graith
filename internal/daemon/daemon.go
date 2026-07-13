@@ -24,6 +24,7 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/detector"
 	"github.com/d0ugal/graith/internal/git"
+	"github.com/d0ugal/graith/internal/headless"
 	"github.com/d0ugal/graith/internal/protocol"
 	grpty "github.com/d0ugal/graith/internal/pty"
 	"github.com/d0ugal/graith/internal/sandbox"
@@ -647,9 +648,14 @@ type CreateOpts struct {
 	AllowConcurrent     bool
 	SkipModelValidation bool
 	Yolo                bool
-	Rows                uint16
-	Cols                uint16
-	EnvExtra            []map[string]string
+	// Headless requests a headless stream-json session instead of an
+	// interactive PTY (issue #1075). Honoured only when the agent is
+	// headless_capable and [headless] experimental is enabled; otherwise Create
+	// fails closed rather than silently downgrading. See resolveDriverKind.
+	Headless bool
+	Rows     uint16
+	Cols     uint16
+	EnvExtra []map[string]string
 	// TriggerID / TriggerReactor tag a session spawned by a trigger, applied in
 	// the same durable reservation as creation so reactor ownership survives a
 	// crash between Create and a separate tag-and-save.
@@ -1126,7 +1132,24 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		return SessionState{}, fmt.Errorf("expand agent args: %w", err)
 	}
 
-	if prompt != "" {
+	driverKind, err := resolveDriverKind(opts.Headless, agent, cfgSnapshot.Headless, sandboxed)
+	if err != nil {
+		cleanupOnError()
+		rollbackState()
+
+		return SessionState{}, err
+	}
+
+	if driverKind == DriverHeadless {
+		if prompt == "" {
+			cleanupOnError()
+			rollbackState()
+
+			return SessionState{}, fmt.Errorf("headless session requires a prompt")
+		}
+
+		expandedArgs = headlessArgs(expandedArgs, prompt)
+	} else if prompt != "" {
 		expandedArgs = append(expandedArgs, prompt)
 	}
 
@@ -1202,7 +1225,10 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		}
 	}
 
-	if agentHooks {
+	// Headless sessions skip graith's generated status/approval hooks: the typed
+	// stream is the status/approval feed. (v1 also skips MCP-config injection,
+	// which currently rides the hook path — see the design doc's Phase 0.)
+	if agentHooks && driverKind != DriverHeadless {
 		hookArgs, hookEnv, err := sm.injectHooks(agentName, id, worktreePath, yolo, mcpServers)
 		if err != nil {
 			cleanupOnError()
@@ -1218,7 +1244,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		}
 	}
 
-	if agent.PromptInjectionEnabled() {
+	if agent.PromptInjectionEnabled() && driverKind != DriverHeadless {
 		promptArgs, err := sm.injectPrompt(agentName, worktreePath)
 		if err != nil {
 			sm.log.Warn("failed to inject prompt", "session_id", id, "err", err)
@@ -1322,18 +1348,33 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	// transcript files this start creates (race-safe against stale rollouts).
 	startedAt := time.Now()
 
-	ptySess, err := grpty.NewSession(grpty.SessionOpts{
-		ID:         id,
-		Command:    command,
-		Args:       finalArgs,
-		Dir:        worktreePath,
-		Env:        env,
-		Rows:       rows,
-		Cols:       cols,
-		LogPath:    logPath,
-		MaxLogSize: 100 * 1024 * 1024,
-		Logger:     sm.log,
-	})
+	var ptySess SessionDriver
+
+	if driverKind == DriverHeadless {
+		ptySess, err = headless.New(headless.Opts{
+			ID:         id,
+			Command:    command,
+			Args:       finalArgs,
+			Dir:        worktreePath,
+			Env:        env,
+			LogPath:    logPath,
+			MaxLogSize: 100 * 1024 * 1024,
+		})
+	} else {
+		ptySess, err = grpty.NewSession(grpty.SessionOpts{
+			ID:         id,
+			Command:    command,
+			Args:       finalArgs,
+			Dir:        worktreePath,
+			Env:        env,
+			Rows:       rows,
+			Cols:       cols,
+			LogPath:    logPath,
+			MaxLogSize: 100 * 1024 * 1024,
+			Logger:     sm.log,
+		})
+	}
+
 	if err != nil {
 		slot.release()
 		cleanupOnError()
@@ -1344,7 +1385,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 
 		rollbackState()
 
-		return SessionState{}, fmt.Errorf("start pty session: %w", err)
+		return SessionState{}, fmt.Errorf("start %s session: %w", driverKind, err)
 	}
 
 	sm.releaseLaunchSlotWhenSettled(slot, id, name, ptySess)
@@ -1373,10 +1414,11 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	sessState.Sandboxed = sandboxed
 	sessState.SandboxConfig = mergedSandbox
 	sessState.Includes = includes
+	sessState.DriverKind = driverKind
 	sessState.Status = StatusRunning
 	sessState.StatusChangedAt = time.Now()
 
-	sessState.PID = ptySess.Cmd.Process.Pid
+	sessState.PID = ptySess.ProcessPID()
 	if st, err := grpty.ProcessStartTime(sessState.PID); err == nil {
 		sessState.PIDStartTime = st
 	}
