@@ -157,6 +157,7 @@ func registerCommands() {
 		registerStatusSummaryCmd()
 		registerStopCmd()
 		registerStoreCmd()
+		registerTokensCmd()
 		registerTypeCmd()
 		registerUpdateCmd()
 		registerVersionCmd()

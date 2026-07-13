@@ -129,6 +129,32 @@ List all sessions with status.
 | `--tree` | Show parent-child hierarchy |
 | `--children <name-or-id>` | Filter to descendants of a session |
 | `--starred` | Show only starred sessions |
+| `--wide` | Show all columns, including per-session token usage |
+
+The `--wide` view adds a **Tokens** column with the compact total token usage
+for each session's current agent (a trailing `~` marks an approximate count).
+See `gr tokens` for the full breakdown.
+
+### `gr tokens [session]`
+
+Show per-session token usage — input, output, and cache tokens — extracted from
+each agent's on-disk transcript. With no argument it lists every session and a
+grand total; with a session name or ID it shows just that session.
+
+Counts reflect the session's **current agent** and are updated by a background
+poll, so they lag by up to ~30 seconds. Agents without a transcript reader
+(currently anything other than Claude Code and Codex) show `—` / `(unsupported)`;
+a session that hasn't been observed yet shows `(unknown)`, distinct from a real
+zero. USD cost is not shown (a planned opt-in via a user-supplied price table).
+
+```
+$ gr tokens
+SESSION   AGENT   INPUT    OUTPUT   CACHE-R    CACHE-W   OTHER   TOTAL
+braw      claude  12,431   48,209   1,204,882  96,004    0       1,361,526
+canny     codex   69,131   3,517    756,224    0         0       828,872
+```
+
+Use `--json` (implied in agent mode) for a structured per-session projection.
 
 ### `gr logs <name-or-id>` (alias: `l`)
 

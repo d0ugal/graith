@@ -52,34 +52,40 @@ type CreationConfig struct {
 }
 
 type SessionState struct {
-	ID              string                `json:"id"`
-	ParentID        string                `json:"parent_id,omitempty"`
-	Name            string                `json:"name"`
-	RepoPath        string                `json:"repo_path"`
-	RepoName        string                `json:"repo_name"`
-	WorktreePath    string                `json:"worktree_path"`
-	Branch          string                `json:"branch"`
-	BaseBranch      string                `json:"base_branch"`
-	Agent           string                `json:"agent"`
-	AgentSessionID  string                `json:"agent_session_id,omitempty"`
-	Model           string                `json:"model,omitempty"`
-	Status          SessionStatus         `json:"status"`
-	AgentStatus     string                `json:"agent_status,omitempty"`
-	StatusChangedAt time.Time             `json:"status_changed_at"`
-	IdleSince       *time.Time            `json:"-"`
-	GitDirty        bool                  `json:"-"`
-	GitUnpushed     int                   `json:"-"`
-	PullRequest     PRStatus              `json:"-"`
-	CI              CIStatus              `json:"-"`
-	HookToolName    string                `json:"-"`
-	ExitCode        *int                  `json:"exit_code,omitempty"`
-	ExitSignal      string                `json:"exit_signal,omitempty"`
-	PID             int                   `json:"pid,omitempty"`
-	PIDStartTime    int64                 `json:"pid_start_time,omitempty"`
-	Sandboxed       bool                  `json:"sandboxed,omitempty"`
-	SandboxConfig   *config.SandboxConfig `json:"sandbox_config,omitempty"`
-	Mirror          bool                  `json:"mirror,omitempty"`
-	MirrorSourceID  string                `json:"mirror_source_id,omitempty"`
+	ID              string        `json:"id"`
+	ParentID        string        `json:"parent_id,omitempty"`
+	Name            string        `json:"name"`
+	RepoPath        string        `json:"repo_path"`
+	RepoName        string        `json:"repo_name"`
+	WorktreePath    string        `json:"worktree_path"`
+	Branch          string        `json:"branch"`
+	BaseBranch      string        `json:"base_branch"`
+	Agent           string        `json:"agent"`
+	AgentSessionID  string        `json:"agent_session_id,omitempty"`
+	Model           string        `json:"model,omitempty"`
+	Status          SessionStatus `json:"status"`
+	AgentStatus     string        `json:"agent_status,omitempty"`
+	StatusChangedAt time.Time     `json:"status_changed_at"`
+	IdleSince       *time.Time    `json:"-"`
+	GitDirty        bool          `json:"-"`
+	GitUnpushed     int           `json:"-"`
+	PullRequest     PRStatus      `json:"-"`
+	CI              CIStatus      `json:"-"`
+	// Tokens is the runtime-derived token usage for the session's current agent,
+	// re-derived from the on-disk transcript by RunTokenLoop. Like PR/CI it is
+	// NOT persisted (repopulates within one tick after a restart) and is always
+	// replaced with a freshly-built pointer under the lock, never mutated in
+	// place, so an off-lock cloneSessionState is race-free. Nil = never observed.
+	Tokens         *TokenStats           `json:"-"`
+	HookToolName   string                `json:"-"`
+	ExitCode       *int                  `json:"exit_code,omitempty"`
+	ExitSignal     string                `json:"exit_signal,omitempty"`
+	PID            int                   `json:"pid,omitempty"`
+	PIDStartTime   int64                 `json:"pid_start_time,omitempty"`
+	Sandboxed      bool                  `json:"sandboxed,omitempty"`
+	SandboxConfig  *config.SandboxConfig `json:"sandbox_config,omitempty"`
+	Mirror         bool                  `json:"mirror,omitempty"`
+	MirrorSourceID string                `json:"mirror_source_id,omitempty"`
 	// LegacyMirror / LegacyMirrorSourceID hold the pre-v15 persisted keys for
 	// Mirror / MirrorSourceID (issue #1021 renamed --share-worktree to
 	// --mirror). They exist only so migrateV14ToV15 can copy old state forward;
@@ -191,6 +197,24 @@ type PRStatus struct {
 type CIStatus struct {
 	State         string // passing | failing | pending | "" (unknown)
 	FailingChecks []string
+}
+
+// TokenStats is the runtime-only token usage for a session's current agent,
+// aggregated from its on-disk transcript. The four categories plus Unclassified
+// are mutually exclusive, so Total is a real total. Built fresh each poll and
+// assigned whole (never mutated in place) so off-lock clones are race-free.
+type TokenStats struct {
+	Input         int64
+	Output        int64
+	CacheCreation int64
+	CacheRead     int64
+	Unclassified  int64
+	Total         int64
+	// Degraded reports that the count was parsed but with conflicts or
+	// un-deduplicatable records, so it is approximate.
+	Degraded bool
+	// CountedAt is the time of the last successful observation, for staleness.
+	CountedAt time.Time
 }
 
 func cloneSessionState(s *SessionState) SessionState {

@@ -487,6 +487,10 @@ type SessionInfo struct {
 	MigratedFrom    string             `json:"migrated_from,omitempty"`
 	PullRequest     *PRInfo            `json:"pull_request,omitempty"`
 	CI              *CIInfo            `json:"ci,omitempty"`
+	// Tokens is the aggregated token usage for the session's current agent, or
+	// nil when unknown (never parsed, unsupported agent, or unreadable). Absent
+	// via omitempty so older clients and pre-token daemons project nothing.
+	Tokens *TokenInfo `json:"tokens,omitempty"`
 	// DeletedAt is set (RFC3339) when the session has been soft-deleted.
 	DeletedAt string `json:"deleted_at,omitempty"`
 	// DeleteExpiresAt is the RFC3339 time at which a soft-deleted session will
@@ -507,6 +511,22 @@ type PRInfo struct {
 type CIInfo struct {
 	State         string   `json:"state"` // passing | failing | pending
 	FailingChecks []string `json:"failing_checks,omitempty"`
+}
+
+// TokenInfo is the aggregated token usage for a session's current agent. The
+// four categories plus Unclassified are mutually exclusive, so Total is a real
+// total. A present TokenInfo means at least one usage record was observed.
+type TokenInfo struct {
+	Input         int64 `json:"input"`
+	Output        int64 `json:"output"`
+	CacheCreation int64 `json:"cache_creation,omitempty"`
+	CacheRead     int64 `json:"cache_read,omitempty"`
+	Unclassified  int64 `json:"unclassified,omitempty"`
+	Total         int64 `json:"total"`
+	// Degraded marks an approximate count (parse conflicts / un-dedupable records).
+	Degraded bool `json:"degraded,omitempty"`
+	// CountedAt is the RFC3339 time of the last successful observation.
+	CountedAt string `json:"counted_at,omitempty"`
 }
 
 type IncludedRepoInfo struct {

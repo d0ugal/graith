@@ -497,7 +497,7 @@ func TestTrailingColumnsFromRegistry(t *testing.T) {
 		gotWide = append(gotWide, c.header)
 	}
 
-	wantWide := []string{"REPO", "AGENT", "STATUS", "ACTIVITY", "MODEL", "BRANCH", "GIT", "PR", "AGE", "ATTACHED"}
+	wantWide := []string{"REPO", "AGENT", "STATUS", "ACTIVITY", "MODEL", "BRANCH", "GIT", "PR", "TOKENS", "AGE", "ATTACHED"}
 	if len(gotWide) != len(wantWide) {
 		t.Fatalf("wide columns = %v, want %v", gotWide, wantWide)
 	}
@@ -655,9 +655,9 @@ func TestPrintFlatGoldenWide(t *testing.T) {
 	printFlat(cmd, goldenFlatSessions(now), now)
 
 	want := "" +
-		"NAME    REPO   AGENT   STATUS   ACTIVITY       MODEL  BRANCH  GIT             PR              AGE    ATTACHED\n" +
-		"braw    croft  claude  running  active (Bash)                 dirty, 2 ahead  #42 open CI:ok  1h30m  \n" +
-		"thrawn  croft  codex   stopped                                                                1h30m  \n"
+		"NAME    REPO   AGENT   STATUS   ACTIVITY       MODEL  BRANCH  GIT             PR              TOKENS  AGE    ATTACHED\n" +
+		"braw    croft  claude  running  active (Bash)                 dirty, 2 ahead  #42 open CI:ok          1h30m  \n" +
+		"thrawn  croft  codex   stopped                                                                        1h30m  \n"
 
 	if got := buf.String(); got != want {
 		t.Errorf("wide table mismatch:\n--- got ---\n%q\n--- want ---\n%q", got, want)

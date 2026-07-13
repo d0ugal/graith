@@ -353,7 +353,153 @@ func CodexRolloutID(path string) (string, bool) {
 	return "", false
 }
 
+// codexTokenCountPayload is the payload of a token_count record, in either the
+// legacy shape (a bare `total` int) or the modern shape (`info.total_token_usage`).
+type codexTokenCountPayload struct {
+	Type  string          `json:"type"` // "token_count" when wrapped in event_msg
+	Total *int64          `json:"total"`
+	Info  *codexTokenInfo `json:"info"`
+}
+
+type codexTokenInfo struct {
+	TotalTokenUsage *codexTokenUsage `json:"total_token_usage"`
+}
+
+// codexTokenUsage is Codex's cumulative usage object. Its fields OVERLAP:
+// cached_input_tokens is a subset of input_tokens, reasoning_output_tokens a
+// subset of output_tokens, and total_tokens == input_tokens + output_tokens. A
+// naive additive mapping double-counts, so usage derives an exclusive breakdown
+// and validates it against total_tokens.
+type codexTokenUsage struct {
+	InputTokens           int64 `json:"input_tokens"`
+	CachedInputTokens     int64 `json:"cached_input_tokens"`
+	OutputTokens          int64 `json:"output_tokens"`
+	ReasoningOutputTokens int64 `json:"reasoning_output_tokens"`
+	TotalTokens           int64 `json:"total_tokens"`
+}
+
 type codexReader struct{}
+
+// usage returns the token usage for a Codex rollout. token_count records are
+// CUMULATIVE running totals, so the last valid one wins (not a sum). Both the
+// legacy `total` int and the modern `info.total_token_usage` object are handled.
+func (codexReader) usage(path string) (Usage, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return Usage{}, err
+	}
+	defer func() { _ = f.Close() }()
+
+	var (
+		u      Usage
+		last   Usage // most recent cumulative token_count seen
+		havany bool
+	)
+
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+
+	for sc.Scan() {
+		raw := bytes.TrimSpace(sc.Bytes())
+		if len(raw) == 0 {
+			continue
+		}
+
+		var line codexLine
+		if err := json.Unmarshal(raw, &line); err != nil {
+			continue // non-token lines are irrelevant here; don't count as dropped
+		}
+
+		if line.Type != "event_msg" && line.Type != "token_count" {
+			continue
+		}
+
+		tc, ok, degraded := codexUsageFromPayload(line.Payload)
+		if !ok {
+			continue // not a token_count payload
+		}
+
+		last = tc
+		havany = true
+
+		if degraded {
+			u.Dropped++
+		}
+	}
+
+	if err := sc.Err(); err != nil {
+		u.Dropped++
+	}
+
+	if havany {
+		last.Dropped = u.Dropped
+		last.Found = true
+
+		return last, nil
+	}
+
+	return u, nil
+}
+
+// codexUsageFromPayload parses a token_count payload into an exclusive Usage.
+// The second return reports whether the payload was a token_count at all; the
+// third reports whether the modern breakdown failed validation and fell back to
+// an unclassified total.
+func codexUsageFromPayload(raw json.RawMessage) (u Usage, ok, degraded bool) {
+	if len(raw) == 0 {
+		return Usage{}, false, false
+	}
+
+	var p codexTokenCountPayload
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return Usage{}, false, false
+	}
+
+	// A wrapped event_msg payload announces its own type; an unwrapped
+	// token_count record carries total/info directly.
+	if p.Type != "" && p.Type != "token_count" {
+		return Usage{}, false, false
+	}
+
+	if p.Info != nil && p.Info.TotalTokenUsage != nil {
+		return codexUsageFromTotals(*p.Info.TotalTokenUsage)
+	}
+
+	if p.Total != nil {
+		// Legacy aggregate with no breakdown → Unclassified, never Output.
+		return Usage{Unclassified: *p.Total, Found: true}, true, false
+	}
+
+	return Usage{}, false, false
+}
+
+// codexUsageFromTotals maps Codex's overlapping cumulative fields to an
+// exclusive breakdown and validates it against total_tokens. On any violation
+// (negative subset or a sum that disagrees with total_tokens) it falls back to
+// an unclassified total and reports degraded, so drift degrades to an honest
+// total rather than a wrong breakdown. reasoning_output_tokens is deliberately
+// NOT added to Output (it is a subset of output_tokens).
+func codexUsageFromTotals(t codexTokenUsage) (u Usage, ok, degraded bool) {
+	cacheRead := t.CachedInputTokens
+	input := t.InputTokens - t.CachedInputTokens
+	output := t.OutputTokens
+
+	valid := input >= 0 && cacheRead >= 0 && output >= 0
+	if valid && t.TotalTokens != 0 && input+cacheRead+output != t.TotalTokens {
+		valid = false
+	}
+
+	if !valid {
+		total := t.TotalTokens
+		if total == 0 {
+			total = t.InputTokens + t.OutputTokens
+		}
+
+		return Usage{Unclassified: total, Found: true}, true, true
+	}
+
+	return Usage{Input: input, CacheRead: cacheRead, Output: output, Found: true}, true, false
+}
 
 func (codexReader) read(path string) ([]Turn, int, error) {
 	f, err := os.Open(path)
