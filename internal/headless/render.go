@@ -36,17 +36,18 @@ func (s *Session) ScreenSnapshot() grpty.ScreenCapture {
 
 // readLine reads one newline-terminated line from r, accumulating across the
 // buffer boundary (ReadSlice returns ErrBufferFull for lines longer than the
-// buffer). Lines longer than max are truncated to max bytes and the remainder
-// discarded, so a pathological line can't exhaust memory. The trailing CR/LF is
-// stripped. The returned error (e.g. io.EOF) accompanies any final partial line.
-func readLine(r *bufio.Reader, max int) ([]byte, error) {
+// buffer). Lines longer than limit are truncated to limit bytes and the
+// remainder discarded, so a pathological line can't exhaust memory. The trailing
+// CR/LF is stripped. The returned error (e.g. io.EOF) accompanies any final
+// partial line.
+func readLine(r *bufio.Reader, limit int) ([]byte, error) {
 	var buf []byte
 
 	for {
 		frag, err := r.ReadSlice('\n')
 
-		if len(buf) < max {
-			room := max - len(buf)
+		if len(buf) < limit {
+			room := limit - len(buf)
 			if room >= len(frag) {
 				buf = append(buf, frag...)
 			} else {
@@ -86,6 +87,7 @@ func renderLine(line []byte) []byte {
 		if txt := assistantText(ev); txt != "" {
 			return appendNL([]byte(txt))
 		}
+
 		if tool := toolNameOf(ev); tool != "" {
 			return []byte(fmt.Sprintf("● tool: %s\n", tool))
 		}
@@ -125,6 +127,7 @@ func assistantText(ev event) string {
 	}
 
 	var out bytes.Buffer
+
 	for _, c := range msg.Content {
 		if c.Type == "text" {
 			out.WriteString(c.Text)

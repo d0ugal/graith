@@ -257,7 +257,15 @@ func (s *Session) control(request any) (json.RawMessage, error) {
 	case resp := <-ch:
 		return resp, nil
 	case <-s.done:
-		return nil, fmt.Errorf("headless session exited before control response")
+		// The response and process-exit can become ready together (the read loop
+		// delivers on ch just before waitLoop closes done). Prefer a response
+		// that already arrived over reporting the exit.
+		select {
+		case resp := <-ch:
+			return resp, nil
+		default:
+			return nil, fmt.Errorf("headless session exited before control response")
+		}
 	case <-time.After(controlTimeout):
 		return nil, fmt.Errorf("timeout waiting for control response %q", id)
 	}
@@ -461,6 +469,7 @@ func (s *Session) Snapshot() Snapshot {
 
 func (s *Session) setStatus(st Status, tool string) {
 	s.mu.Lock()
+
 	s.status = st
 	if tool != "" {
 		s.toolName = tool
@@ -478,12 +487,15 @@ func (s *Session) setResult(ev event) {
 	if ev.IsError != nil {
 		res.IsError = *ev.IsError
 	}
+
 	if ev.TotalCost != nil {
 		res.TotalCost = *ev.TotalCost
 	}
+
 	if ev.DurationMS != nil {
 		res.DurationMS = *ev.DurationMS
 	}
+
 	if ev.DurationAPI != nil {
 		res.DurationAPI = *ev.DurationAPI
 	}
@@ -540,11 +552,18 @@ func (s *Session) drainStderr(stderr io.Reader) {
 }
 
 func (s *Session) waitLoop() {
-	err := s.cmd.Wait()
+	// Wait for the read loop to drain stdout to EOF *before* calling cmd.Wait:
+	// Wait closes the StdoutPipe when the process exits, and the os/exec docs
+	// warn it is incorrect to call Wait before all reads from the pipe complete
+	// (it would race the reader and truncate the final lines — e.g. the terminal
+	// `result`). The process closes its stdout on exit, so readLoop reaches EOF
+	// on its own; only then is it safe to reap.
 	<-s.readDone
+	err := s.cmd.Wait()
 
 	s.exitMu.Lock()
 	s.exited = true
+
 	if err != nil {
 		var exitErr *exec.ExitError
 		if ok := asExitError(err, &exitErr); ok {

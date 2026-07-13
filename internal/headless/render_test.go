@@ -152,10 +152,12 @@ func TestReadLine(t *testing.T) {
 			t.Parallel()
 
 			r := bufio.NewReaderSize(strings.NewReader(tt.input), tt.bufSize)
+
 			got, err := readLine(r, tt.max)
 			if string(got) != tt.want {
 				t.Fatalf("readLine got = %q, want %q", got, tt.want)
 			}
+
 			if tt.wantErr == nil {
 				if err != nil {
 					t.Fatalf("readLine err = %v, want nil", err)
@@ -181,6 +183,7 @@ func TestReadLineMaxLineBytesNoHang(t *testing.T) {
 	if err != nil {
 		t.Fatalf("readLine err = %v, want nil", err)
 	}
+
 	if string(got) != long {
 		t.Fatalf("readLine returned %d bytes, want %d", len(got), len(long))
 	}
@@ -328,6 +331,7 @@ func TestAppendNL(t *testing.T) {
 	src := []byte("loch")
 	out := appendNL(src)
 	out[0] = 'X'
+
 	if string(src) != "loch" {
 		t.Fatalf("appendNL mutated its input: %q", src)
 	}

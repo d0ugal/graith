@@ -79,9 +79,11 @@ func TestStatusForEvent(t *testing.T) {
 			if ok != tt.wantOK {
 				t.Fatalf("statusForEvent ok = %v, want %v", ok, tt.wantOK)
 			}
+
 			if ok && got != tt.wantStatus {
 				t.Fatalf("statusForEvent status = %q, want %q", got, tt.wantStatus)
 			}
+
 			if !ok && got != "" {
 				t.Fatalf("statusForEvent returned status %q with ok=false, want empty", got)
 			}
