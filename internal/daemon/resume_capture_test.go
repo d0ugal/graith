@@ -348,11 +348,13 @@ func TestForcedIDConversationExists(t *testing.T) {
 	}
 }
 
-// TestResolveForcedIDFreshStart covers the #1091 fix: resuming a Claude session
-// whose captured id never persisted a conversation must fall back to a fresh
-// start instead of a doomed `claude --resume <id>`, and the following resume
-// (once the conversation exists) must use native --resume again.
-func TestResolveForcedIDFreshStart(t *testing.T) {
+// TestResolveForcedIDResume covers the #1091 fix and its crash-recovery
+// robustness: resuming a Claude session whose captured id never persisted a
+// conversation must fall back to a fresh start instead of a doomed
+// `claude --resume <id>`; once the conversation exists the next resume must use
+// native --resume again; and a stale FreshStart left by an interrupted fresh
+// start must be corrected back to --resume once the transcript exists.
+func TestResolveForcedIDResume(t *testing.T) {
 	const minted = "canny-fresh-id"
 
 	mint := func() string { return minted }
@@ -364,7 +366,7 @@ func TestResolveForcedIDFreshStart(t *testing.T) {
 	t.Run("existing transcript resumes native", func(t *testing.T) {
 		writeClaudeTranscript(t, "bide-id", braeLine)
 
-		id, fresh, fellBack := resolveForcedIDFreshStart("claude", "bide-id", t.TempDir(), false, mint)
+		id, fresh, fellBack := resolveForcedIDResume("claude", "bide-id", t.TempDir(), false, mint)
 		if id != "bide-id" || fresh || fellBack {
 			t.Fatalf("got (%q,%v,%v); want (bide-id,false,false)", id, fresh, fellBack)
 		}
@@ -377,7 +379,7 @@ func TestResolveForcedIDFreshStart(t *testing.T) {
 	t.Run("missing transcript mints fresh id", func(t *testing.T) {
 		t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir()) // empty → no conversation
 
-		id, fresh, fellBack := resolveForcedIDFreshStart("claude", "dreich-id", t.TempDir(), false, mint)
+		id, fresh, fellBack := resolveForcedIDResume("claude", "dreich-id", t.TempDir(), false, mint)
 		if id != minted || !fresh || !fellBack {
 			t.Fatalf("got (%q,%v,%v); want (%q,true,true)", id, fresh, fellBack, minted)
 		}
@@ -387,12 +389,23 @@ func TestResolveForcedIDFreshStart(t *testing.T) {
 		}
 	})
 
+	t.Run("empty transcript file is treated as no conversation", func(t *testing.T) {
+		// A zero-byte transcript is the same wedge (file created, nothing written
+		// before the kill) — must mint fresh, not attempt a doomed --resume.
+		writeClaudeTranscript(t, "haar-id") // no lines → 0 bytes
+
+		id, fresh, fellBack := resolveForcedIDResume("claude", "haar-id", t.TempDir(), false, mint)
+		if id != minted || !fresh || !fellBack {
+			t.Fatalf("got (%q,%v,%v); want (%q,true,true)", id, fresh, fellBack, minted)
+		}
+	})
+
 	t.Run("after fallback next resume uses native --resume", func(t *testing.T) {
 		// The freshly-minted conversation now has a transcript and FreshStart was
 		// cleared on the successful start, so the next resume replays it natively.
 		writeClaudeTranscript(t, minted, braeLine)
 
-		id, fresh, fellBack := resolveForcedIDFreshStart("claude", minted, t.TempDir(), false, mint)
+		id, fresh, fellBack := resolveForcedIDResume("claude", minted, t.TempDir(), false, mint)
 		if id != minted || fresh || fellBack {
 			t.Fatalf("got (%q,%v,%v); want (%q,false,false)", id, fresh, fellBack, minted)
 		}
@@ -402,26 +415,171 @@ func TestResolveForcedIDFreshStart(t *testing.T) {
 		}
 	})
 
-	t.Run("freshStart already set is left alone", func(t *testing.T) {
-		id, fresh, fellBack := resolveForcedIDFreshStart("claude", "bide-id", t.TempDir(), true, mint)
+	t.Run("stale fresh-start with transcript corrects to native resume", func(t *testing.T) {
+		// A fresh start crashed between persisting the minted id and clearing
+		// FreshStart, but Claude did write the transcript. The next resume must
+		// clear the stale flag and replay natively rather than re-run --session-id
+		// on an existing conversation (which would re-wedge).
+		writeClaudeTranscript(t, minted, braeLine)
+
+		id, fresh, fellBack := resolveForcedIDResume("claude", minted, t.TempDir(), true, mint)
+		if id != minted || fresh || fellBack {
+			t.Fatalf("got (%q,%v,%v); want (%q,false,false)", id, fresh, fellBack, minted)
+		}
+
+		if got, _ := resolveResumeArgs(claude, "claude", id, fresh); !reflect.DeepEqual(got, resumeArgs) {
+			t.Fatalf("args = %#v; want %#v (--resume)", got, resumeArgs)
+		}
+	})
+
+	t.Run("pending fresh-start with no transcript is left alone", func(t *testing.T) {
+		// Migration seed / a first fresh start not yet run: freshStart stays true
+		// and the id is untouched (no re-mint), so the seeded fresh start proceeds.
+		t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir()) // empty → no conversation
+
+		id, fresh, fellBack := resolveForcedIDResume("claude", "bide-id", t.TempDir(), true, mint)
 		if id != "bide-id" || !fresh || fellBack {
 			t.Fatalf("got (%q,%v,%v); want (bide-id,true,false)", id, fresh, fellBack)
 		}
 	})
 
 	t.Run("non-forced agent skips the check", func(t *testing.T) {
-		id, fresh, fellBack := resolveForcedIDFreshStart("codex", "braw-id", t.TempDir(), false, mint)
+		id, fresh, fellBack := resolveForcedIDResume("codex", "braw-id", t.TempDir(), false, mint)
 		if id != "braw-id" || fresh || fellBack {
 			t.Fatalf("got (%q,%v,%v); want (braw-id,false,false)", id, fresh, fellBack)
 		}
 	})
 
 	t.Run("empty id skips the check", func(t *testing.T) {
-		id, fresh, fellBack := resolveForcedIDFreshStart("claude", "", t.TempDir(), false, mint)
+		id, fresh, fellBack := resolveForcedIDResume("claude", "", t.TempDir(), false, mint)
 		if id != "" || fresh || fellBack {
 			t.Fatalf("got (%q,%v,%v); want (\"\",false,false)", id, fresh, fellBack)
 		}
 	})
+}
+
+// newForcedIDResumeSM builds a manager with a forced-id ("claude") agent backed
+// by `sleep` (so the spawn stays alive) and one stopped session, ready to
+// Resume. The transcript root is left to the caller via CLAUDE_CONFIG_DIR.
+func newForcedIDResumeSM(t *testing.T, agentSessionID string, freshStart bool) *SessionManager {
+	t.Helper()
+
+	cfg := config.Default()
+	cfg.Sandbox = config.SandboxConfig{Enabled: false}
+	cfg.Agents["claude"] = config.Agent{
+		Command:    "sleep",
+		Args:       []string{"60"},
+		ResumeArgs: []string{"60"},
+	}
+
+	sm := newSMWithConfig(t, cfg)
+	sm.state.Sessions["bide"] = &SessionState{
+		ID: "bide", Name: "braw", Agent: "claude",
+		AgentSessionID: agentSessionID, FreshStart: freshStart,
+		Status: StatusStopped, WorktreePath: t.TempDir(),
+	}
+
+	if err := sm.saveState(); err != nil {
+		t.Fatalf("saveState: %v", err)
+	}
+
+	return sm
+}
+
+// TestResumeForcedIDFreshFallbackWiring drives the real resume path: a Claude
+// session whose captured id has no on-disk conversation must mint a fresh id,
+// start fresh, clear FreshStart on success, and persist all of that durably.
+func TestResumeForcedIDFreshFallbackWiring(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir()) // empty → no conversation
+
+	sm := newForcedIDResumeSM(t, "dreich-id", false)
+
+	sess, err := sm.Resume("bide", 24, 80)
+	if err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+
+	defer stopAndClosePTY(sm, "bide")
+
+	if sess.AgentSessionID == "dreich-id" || sess.AgentSessionID == "" {
+		t.Fatalf("AgentSessionID = %q; want a freshly minted id (not the transcript-less original)", sess.AgentSessionID)
+	}
+
+	if sess.FreshStart {
+		t.Error("FreshStart should be cleared after a successful fresh fallback")
+	}
+
+	minted := sess.AgentSessionID
+
+	// The minted id + cleared flag must be durable, not just in-memory.
+	loaded, err := LoadState(sm.paths.StateFile)
+	if err != nil {
+		t.Fatalf("LoadState: %v", err)
+	}
+
+	if got := loaded.Sessions["bide"]; got.AgentSessionID != minted || got.FreshStart {
+		t.Fatalf("persisted state: AgentSessionID=%q FreshStart=%v; want %q,false", got.AgentSessionID, got.FreshStart, minted)
+	}
+}
+
+// TestResumeForcedIDStaleFreshStartWiring covers the crash-recovery case: a
+// fresh start persisted a minted id + FreshStart=true then was interrupted
+// before clearing the flag, but Claude did write the transcript. The next resume
+// must clear the stale flag and replay natively (not re-run --session-id on an
+// existing conversation).
+func TestResumeForcedIDStaleFreshStartWiring(t *testing.T) {
+	writeClaudeTranscript(t, "canny-id", braeLine) // sets CLAUDE_CONFIG_DIR
+
+	sm := newForcedIDResumeSM(t, "canny-id", true)
+
+	sess, err := sm.Resume("bide", 24, 80)
+	if err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+
+	defer stopAndClosePTY(sm, "bide")
+
+	if sess.AgentSessionID != "canny-id" {
+		t.Fatalf("AgentSessionID = %q; want canny-id unchanged (conversation exists)", sess.AgentSessionID)
+	}
+
+	if sess.FreshStart {
+		t.Error("stale FreshStart should be cleared once the conversation exists")
+	}
+}
+
+// TestResumeForcedIDFirstSaveRollback is the regression test for the review
+// finding: when the first (StatusCreating) saveState fails after the fresh
+// fallback mutated the shared state, the error path must restore the original
+// AgentSessionID and FreshStart so memory doesn't diverge from disk.
+func TestResumeForcedIDFirstSaveRollback(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir()) // empty → no conversation
+
+	sm := newForcedIDResumeSM(t, "dreich-id", false)
+
+	// Break the state-file path so the first saveState (StatusCreating) fails.
+	blocker := filepath.Join(t.TempDir(), "block")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	sm.paths.StateFile = filepath.Join(blocker, "sub", "state.json")
+
+	if _, err := sm.Resume("bide", 24, 80); err == nil {
+		t.Fatal("expected error when first saveState fails, got nil")
+	}
+
+	sm.mu.RLock()
+	s := sm.state.Sessions["bide"]
+	sm.mu.RUnlock()
+
+	if s.AgentSessionID != "dreich-id" {
+		t.Errorf("AgentSessionID = %q; want dreich-id restored after save failure", s.AgentSessionID)
+	}
+
+	if s.FreshStart {
+		t.Error("FreshStart should be rolled back to false after save failure")
+	}
 }
 
 func TestArgsNeedForkSourceID(t *testing.T) {
