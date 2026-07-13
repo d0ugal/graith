@@ -384,6 +384,14 @@ func (s *Session) ProcessPID() int {
 	return 0
 }
 
+// Pgid returns the process-group id graith signals on Kill/ForceKill. Like
+// *pty.Session, a headless session is started with Setsid, so the child is a
+// group leader and its PGID equals its PID. Returns 0 when the pid is unknown.
+// Part of the SessionDriver interface (issue #1104).
+func (s *Session) Pgid() int {
+	return s.ProcessPID()
+}
+
 // Fd has no meaning for a pipe-backed session (there is no ptmx). It returns 0;
 // the daemon's upgrade FD-handoff skips sessions it can't hand off.
 func (s *Session) Fd() uintptr { return 0 }
