@@ -3,14 +3,14 @@ package cli
 import (
 	"fmt"
 	"image/color"
+	"io"
 	"os"
-	"regexp"
 	"sort"
 	"strings"
-	"text/tabwriter"
 	"time"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/d0ugal/graith/internal/client"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/d0ugal/graith/internal/version"
@@ -32,23 +32,17 @@ var (
 // listConnectFn lets command-validation tests fail before daemon auto-start.
 var listConnectFn = client.Connect
 
-// ansiSeqRe matches SGR (color) escape sequences so they can be bracketed with
-// tabwriter's Escape byte (0xff). Bracketing keeps tabwriter from counting the
-// invisible bytes toward column width, so colored cells stay aligned.
-var ansiSeqRe = regexp.MustCompile("\x1b\\[[0-9;]*m")
-
 // colorize wraps text in the given foreground color for terminal output. When
 // coloring is disabled (or the text is empty) it returns the text unchanged.
-// The emitted escape sequences are bracketed with tabwriter.Escape bytes so a
-// tabwriter created with tabwriter.StripEscape aligns columns by visible width.
+// The returned string may contain ANSI escape sequences; column alignment is
+// handled by renderRows, which measures cells with ansi.StringWidth (escapes
+// excluded) rather than relying on tabwriter's byte counting.
 func colorize(text string, c color.Color, enabled bool) string {
 	if !enabled || text == "" {
 		return text
 	}
 
-	rendered := lipgloss.NewStyle().Foreground(c).Render(text)
-
-	return ansiSeqRe.ReplaceAllString(rendered, "\xff$0\xff")
+	return lipgloss.NewStyle().Foreground(c).Render(text)
 }
 
 // shouldColor decides whether colored output is appropriate. Colors are
@@ -227,8 +221,8 @@ type sessionColumn struct {
 // the shared client.SessionColumns registry so `gr ls` and the TUI picker stay
 // in sync. Only registry columns flagged ShowCLI appear here; the compact
 // default hides the wide columns (model, branch, attached) and --wide shows
-// all. Cells with a CLIColor are colourised via colorize (which brackets the
-// escapes for tabwriter alignment).
+// all. Cells with a CLIColor are colourised via colorize; renderRows keeps the
+// coloured cells aligned by measuring visible width.
 func trailingColumns() []sessionColumn {
 	var cols []sessionColumn
 
@@ -321,8 +315,8 @@ func visibleColumns(wide bool) []sessionColumn {
 	return visible
 }
 
-// headerRow builds the tab-separated header line for the given columns.
-func headerRow(cols []sessionColumn) string {
+// headerCells builds the header cells for the given columns (NAME first).
+func headerCells(cols []sessionColumn) []string {
 	cells := make([]string, 0, len(cols)+1)
 	cells = append(cells, "NAME")
 
@@ -330,12 +324,12 @@ func headerRow(cols []sessionColumn) string {
 		cells = append(cells, c.header)
 	}
 
-	return strings.Join(cells, "\t")
+	return cells
 }
 
-// dataRow builds the tab-separated data line for a session. The name cell is
-// supplied by the caller so callers can prepend tree prefixes.
-func dataRow(name string, s protocol.SessionInfo, cols []sessionColumn, now time.Time, colorOn bool) string {
+// dataCells builds the data cells for a session. The name cell is supplied by
+// the caller so callers can prepend tree prefixes and star markers.
+func dataCells(name string, s protocol.SessionInfo, cols []sessionColumn, now time.Time, colorOn bool) []string {
 	cells := make([]string, 0, len(cols)+1)
 	cells = append(cells, name)
 
@@ -343,7 +337,56 @@ func dataRow(name string, s protocol.SessionInfo, cols []sessionColumn, now time
 		cells = append(cells, c.value(s, now, colorOn))
 	}
 
-	return strings.Join(cells, "\t")
+	return cells
+}
+
+// renderRows writes a column-aligned table to w. Each column's width is the
+// maximum *display* width of its cells, measured with ansi.StringWidth, which
+// ignores ANSI colour escapes and accounts for wide runes (emoji, East-Asian
+// glyphs, the ⚠/★ markers). Every column except the last is padded to its width
+// plus a two-space gap; the last column is written unpadded.
+//
+// This replaces text/tabwriter: tabwriter measures cells by counting runes and
+// its Escape (0xff) bracketing only protects tabs and strips the bracket bytes —
+// it still counts the bracketed ANSI sequence's own runes toward the column
+// width, so coloured cells were padded short and every following column drifted
+// (issue #1093). Measuring visible width sidesteps that and fixes wide runes too.
+func renderRows(w io.Writer, rows [][]string) {
+	ncol := 0
+
+	for _, r := range rows {
+		if len(r) > ncol {
+			ncol = len(r)
+		}
+	}
+
+	widths := make([]int, ncol)
+
+	for _, r := range rows {
+		for i, cell := range r {
+			if cw := ansi.StringWidth(cell); cw > widths[i] {
+				widths[i] = cw
+			}
+		}
+	}
+
+	const gap = 2
+
+	var b strings.Builder
+
+	for _, r := range rows {
+		for i, cell := range r {
+			b.WriteString(cell)
+
+			if i < len(r)-1 {
+				b.WriteString(strings.Repeat(" ", widths[i]-ansi.StringWidth(cell)+gap))
+			}
+		}
+
+		b.WriteByte('\n')
+	}
+
+	_, _ = io.WriteString(w, b.String())
 }
 
 func printFlat(cmd *cobra.Command, sessions []protocol.SessionInfo, now time.Time) {
@@ -358,8 +401,8 @@ func printFlat(cmd *cobra.Command, sessions []protocol.SessionInfo, now time.Tim
 	colorOn := listColorEnabled(cmd)
 	cols := visibleColumns(listWide)
 
-	tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', tabwriter.StripEscape)
-	_, _ = fmt.Fprintln(tw, headerRow(cols))
+	rows := make([][]string, 0, len(sessions)+1)
+	rows = append(rows, headerCells(cols))
 
 	for _, s := range sessions {
 		name := s.Name
@@ -367,10 +410,10 @@ func printFlat(cmd *cobra.Command, sessions []protocol.SessionInfo, now time.Tim
 			name = "★ " + name
 		}
 
-		_, _ = fmt.Fprintln(tw, dataRow(name, s, cols, now, colorOn))
+		rows = append(rows, dataCells(name, s, cols, now, colorOn))
 	}
 
-	_ = tw.Flush()
+	renderRows(cmd.OutOrStdout(), rows)
 }
 
 func printTree(cmd *cobra.Command, sessions []protocol.SessionInfo, now time.Time) {
@@ -409,8 +452,7 @@ func printTree(cmd *cobra.Command, sessions []protocol.SessionInfo, now time.Tim
 	colorOn := listColorEnabled(cmd)
 	cols := visibleColumns(listWide)
 
-	tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', tabwriter.StripEscape)
-	_, _ = fmt.Fprintln(tw, headerRow(cols))
+	rows := [][]string{headerCells(cols)}
 
 	var walk func(s protocol.SessionInfo, prefix, childPrefix string)
 
@@ -420,7 +462,7 @@ func printTree(cmd *cobra.Command, sessions []protocol.SessionInfo, now time.Tim
 			name = "★ " + name
 		}
 
-		_, _ = fmt.Fprintln(tw, dataRow(prefix+name, s, cols, now, colorOn))
+		rows = append(rows, dataCells(prefix+name, s, cols, now, colorOn))
 
 		kids := children[s.ID]
 		for i, kid := range kids {
@@ -436,7 +478,7 @@ func printTree(cmd *cobra.Command, sessions []protocol.SessionInfo, now time.Tim
 		walk(root, "", "")
 	}
 
-	_ = tw.Flush()
+	renderRows(cmd.OutOrStdout(), rows)
 }
 
 func findSession(sessions []protocol.SessionInfo, nameOrID string) *protocol.SessionInfo {
