@@ -27,11 +27,18 @@ gr store get --shared prompts/review.md
 gr store ls --shared
 ```
 
-Use `--repo <path>` to explicitly specify the repo (useful when running outside a session):
+Use `--repo` to explicitly specify the repo (useful when running outside a session).
+It accepts **either** a filesystem path **or** a repo ID — the `<name>-<hash>`
+identifier that `gr store ls -a` prints in its `repo` column — so a value
+discovered via `ls -a` round-trips straight back into `--repo`:
 
 ```bash
-gr store list --repo ~/Code/my-project
+gr store list --repo ~/Code/my-project      # filesystem path
+gr store get notes/example.txt --repo my-project-a1b2c3d4   # repo ID from `ls -a`
 ```
+
+An unresolvable `--repo` value (neither a repo path nor a known ID) fails with a
+clear `unknown repo` error rather than a misleading `document not found`.
 
 ## Operations
 

@@ -61,6 +61,25 @@ func resolveStorePath() (storePath string, label string, err error) {
 		return sp, "shared", nil
 	}
 
+	// An explicit --repo value may be either a filesystem path or a repo ID as
+	// printed by `gr store ls -a` (<reponame>-<hash>). Prefer the path
+	// interpretation (existing behaviour), then fall back to a repo-ID match so
+	// an ID discovered via ls -a round-trips into --repo. If neither store
+	// exists yet, fall back to the path-derived location (e.g. a first write to
+	// a new repo).
+	if storeRepoFlag != "" {
+		repoPath := config.ResolvePath(storeRepoFlag)
+		if sp := store.StorePath(paths.DataDir, repoPath); store.Exists(sp) {
+			return sp, repoPath, nil
+		}
+
+		if sp, ok := store.StorePathByID(paths.DataDir, storeRepoFlag); ok {
+			return sp, storeRepoFlag, nil
+		}
+
+		return store.StorePath(paths.DataDir, repoPath), repoPath, nil
+	}
+
 	repo, err := resolveStoreRepoPath()
 	if err != nil {
 		return "", "", err
@@ -166,6 +185,10 @@ var storeGetCmd = &cobra.Command{
 		body, err := store.Get(storePath, key)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
+				if storeRepoFlag != "" && !store.Exists(storePath) {
+					return fmt.Errorf("unknown repo %q: not a repo path or ID (see `gr store ls -a`)", storeRepoFlag)
+				}
+
 				return fmt.Errorf("document %q not found", key)
 			}
 
