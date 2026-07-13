@@ -5460,7 +5460,9 @@ func (sm *SessionManager) applyConfig(newCfg *config.Config) {
 	if prWatchTrustChanged(old.PRWatch, newCfg.PRWatch) {
 		sm.log.Info("config changed", "key", "pr_watch.comment_trust")
 
-		go sm.autoReleaseNewlyTrusted(newCfg)
+		// autoReleaseNewlyTrusted reads the current config itself (sm.cfg was set
+		// above), so a later reload that tightens trust wins over this worker.
+		go sm.autoReleaseNewlyTrusted()
 	}
 
 	if old.Orchestrator.Enabled != newCfg.Orchestrator.Enabled {

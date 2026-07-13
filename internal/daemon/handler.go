@@ -1075,7 +1075,11 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					continue
 				}
 
-				sendControl("msg_jail_list", protocol.MsgJailListResponse{Jailed: jailedToWire(jailed)})
+				// list is a metadata-only summary — the raw untrusted body is
+				// never included here (even for the human), so an agent that
+				// merely lists the jail can't be injected via a body dump. The
+				// body is fetched deliberately via `show`, gated below.
+				sendControl("msg_jail_list", protocol.MsgJailListResponse{Jailed: jailedToWire(jailed, false)})
 
 			case "msg_jail_show":
 				m, ok := decodePayload[protocol.MsgJailShowMsg](msg, sendControl, "invalid msg_jail_show message")
@@ -1099,7 +1103,11 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					continue
 				}
 
-				sendControl("msg_jail_show", protocol.MsgJailShowResponse{Jailed: jailedOneToWire(j)})
+				// The raw body is quarantined untrusted content: reveal it only
+				// to a release-authorized role (human/orchestrator). An ordinary
+				// agent/guest gets the metadata with the body withheld, so `show`
+				// can never be used to inject the payload the trust gate blocked.
+				sendControl("msg_jail_show", protocol.MsgJailShowResponse{Jailed: jailedOneToWire(j, auth.mayReadJailBody(sm))})
 
 			case "msg_jail_release":
 				m, ok := decodePayload[protocol.MsgJailReleaseMsg](msg, sendControl, "invalid msg_jail_release message")
@@ -1146,7 +1154,11 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					continue
 				}
 
-				sendControl("msg_jail_release", protocol.MsgJailReleaseResponse{Released: jailedToWire(released)})
+				// A release is authorized to see bodies (it's the human/
+				// orchestrator) and echoes back what was delivered — include the
+				// body. --all is best-effort (ReleaseJailedByAuthor continues past
+				// a per-item failure), so Released reflects exactly what went out.
+				sendControl("msg_jail_release", protocol.MsgJailReleaseResponse{Released: jailedToWire(released, true)})
 
 			case "approval_request":
 				req, ok := decodePayload[protocol.ApprovalRequestMsg](msg, sendControl, "invalid approval_request")
@@ -1936,6 +1948,17 @@ func (ac authContext) authorizeJailRelease(sm *SessionManager, send func(string,
 	}
 
 	return true
+}
+
+// mayReadJailBody reports whether the caller may see a jailed comment's raw
+// body — the same release-authorized set (human/orchestrator). An ordinary
+// agent or a read-only guest gets metadata with the body withheld.
+func (ac authContext) mayReadJailBody(sm *SessionManager) bool {
+	sm.mu.RLock()
+	err := ac.checkJailRelease(sm)
+	sm.mu.RUnlock()
+
+	return err == nil
 }
 
 // lifecycleRequest holds the fields shared by the stop and delete control

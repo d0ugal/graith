@@ -107,15 +107,19 @@ func scanJailed(rows *sql.Rows) (JailedComment, error) {
 	return j, nil
 }
 
-// ListJailed returns quarantined comments, newest first. When
-// includeReleased is false, already-released entries are excluded.
+// ListJailed returns quarantined comments, newest first, capped at 2000 rows so
+// a long-running daemon with retention disabled can't be made to serialize an
+// unbounded result set (mirrors the msg_conversation clamp; newest-first, so the
+// cap drops the oldest). When includeReleased is false, already-released entries
+// are excluded.
 func (s *MsgStore) ListJailed(includeReleased bool) ([]JailedComment, error) {
 	q := `SELECT ` + jailCols + ` FROM jailed_comments`
 	if !includeReleased {
 		q += ` WHERE released_at = ''`
 	}
 
-	q += ` ORDER BY jailed_at DESC, id DESC`
+	// LIMIT is a compile-time constant literal — no user input in the SQL.
+	q += ` ORDER BY jailed_at DESC, id DESC LIMIT 2000`
 
 	rows, err := s.db.Query(q)
 	if err != nil {
@@ -176,6 +180,23 @@ func (s *MsgStore) MarkReleased(id string) (JailedComment, bool, error) {
 	}
 
 	return j, true, nil
+}
+
+// Unrelease reverts a release stamp back to unreleased. Used to un-claim a
+// release whose delivery failed, so it stays retryable rather than stuck
+// released-but-undelivered. Returns ok=true if a row was actually reverted.
+func (s *MsgStore) Unrelease(id string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	res, err := s.db.Exec(`UPDATE jailed_comments SET released_at = '' WHERE id = ? AND released_at <> ''`, id)
+	if err != nil {
+		return false, fmt.Errorf("unrelease: %w", err)
+	}
+
+	n, _ := res.RowsAffected()
+
+	return n > 0, nil
 }
 
 // getJailedLocked is GetJailed without taking the mutex (caller holds it).
