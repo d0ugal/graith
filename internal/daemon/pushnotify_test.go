@@ -464,6 +464,41 @@ func TestDispatchViaNotifierApp_GenericFailure(t *testing.T) {
 	}
 }
 
+func TestNotifierCandidatesForExe_HomebrewSymlink(t *testing.T) {
+	// Simulate a Homebrew layout: gr lives in the Cellar and the .app is under
+	// the Cellar's libexec/graith, but gr is invoked via a symlink in
+	// <prefix>/bin (which is all os.Executable may report). Discovery must
+	// resolve the symlink to find the bundle.
+	root := t.TempDir()
+	cellarBin := filepath.Join(root, "Cellar", "graith", "1.0", "bin")
+	realGr := writeExecutable(t, filepath.Join(cellarBin, "gr"))
+	appExe := writeExecutable(t, filepath.Join(root, "Cellar", "graith", "1.0", "libexec", "graith", "GraithNotifier.app", macNotifierExecutable))
+
+	optBin := filepath.Join(root, "bin")
+	if err := os.MkdirAll(optBin, 0o750); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	symGr := filepath.Join(optBin, "gr")
+	if err := os.Symlink(realGr, symGr); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	// Resolve candidates as if gr were launched via the <prefix>/bin symlink.
+	var found string
+
+	for _, c := range notifierCandidatesForExe(symGr) {
+		if exe, ok := resolveNotifierExecutable(c); ok {
+			found = exe
+			break
+		}
+	}
+
+	if found != appExe {
+		t.Errorf("expected discovery via the resolved Cellar path to find %q, got %q", appExe, found)
+	}
+}
+
 func TestFindMacNotifierApp_OverrideBundle(t *testing.T) {
 	dir := t.TempDir()
 	app := filepath.Join(dir, "GraithNotifier.app")

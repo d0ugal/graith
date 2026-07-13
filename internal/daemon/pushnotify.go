@@ -325,12 +325,7 @@ func findMacNotifierApp() (string, bool) {
 	}
 
 	if exe, err := os.Executable(); err == nil {
-		dir := filepath.Dir(exe)
-		candidates = append(candidates,
-			filepath.Join(dir, "GraithNotifier.app"),
-			filepath.Join(dir, "..", "libexec", "graith", "GraithNotifier.app"),
-			filepath.Join(dir, "..", "share", "graith", "GraithNotifier.app"),
-		)
+		candidates = append(candidates, notifierCandidatesForExe(exe)...)
 	}
 
 	candidates = append(candidates, "/Applications/GraithNotifier.app")
@@ -346,6 +341,45 @@ func findMacNotifierApp() (string, bool) {
 	}
 
 	return "", false
+}
+
+// notifierCandidatesForExe returns the bundle locations to probe relative to the
+// gr executable at exe. It searches relative to both the executable's directory
+// and its symlink-resolved directory: Homebrew installs gr as a symlink in
+// <prefix>/bin pointing into the Cellar and drops GraithNotifier.app under the
+// Cellar's libexec/graith, which is only reachable via the resolved path
+// (<prefix>/libexec isn't symlinked, issue #1101).
+func notifierCandidatesForExe(exe string) []string {
+	var candidates []string
+
+	seen := make(map[string]bool)
+
+	for _, p := range []string{exe, resolveSymlink(exe)} {
+		dir := filepath.Dir(p)
+		if dir == "" || seen[dir] {
+			continue
+		}
+
+		seen[dir] = true
+
+		candidates = append(candidates,
+			filepath.Join(dir, "GraithNotifier.app"),
+			filepath.Join(dir, "..", "libexec", "graith", "GraithNotifier.app"),
+			filepath.Join(dir, "..", "share", "graith", "GraithNotifier.app"),
+		)
+	}
+
+	return candidates
+}
+
+// resolveSymlink returns path with symlinks resolved, or path unchanged if it
+// can't be resolved (e.g. the path doesn't exist).
+func resolveSymlink(path string) string {
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return resolved
+	}
+
+	return path
 }
 
 // resolveNotifierExecutable maps a candidate path to a runnable notifier

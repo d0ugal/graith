@@ -27,12 +27,25 @@ before:
     - mkdir -p man
     - sh -c 'SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) && export SOURCE_DATE_EPOCH && go run ./cmd/graith man man'
     - sh -c 'gzip -9 -n -f man/*.1'
+    # Build the macOS notification helper .app bundle (issue #1101). The release
+    # runs on a macOS runner (see .github/workflows/goreleaser.yml) so swiftc is
+    # available and this produces macos/build/GraithNotifier.app, which the
+    # Darwin archive below bundles. The script is a no-op on non-macOS hosts, so
+    # this hook stays harmless on a Linux `--snapshot` run — note that on Linux
+    # the bundle isn't produced, so a Linux snapshot can't build the darwin
+    # archive; real releases run on macOS.
+    - sh -c 'make notifier'
 
+# The build is split by OS into two ids (gr-linux / gr-darwin) producing the
+# same `gr` binary, so the archives below can be split too: only the Darwin
+# archive bundles the macOS notification helper .app (issue #1101), keeping it
+# out of the Linux tarball. Reproducible builds: strip local paths, pure-Go
+# static binary, and stamp object timestamps from the commit rather than
+# wall-clock time.
 builds:
-  - main: ./cmd/graith
+  - id: gr-linux
+    main: ./cmd/graith
     binary: gr
-    # Reproducible builds: strip local paths, pure-Go static binary, and stamp
-    # object timestamps from the commit rather than wall-clock time.
     env:
       - CGO_ENABLED=0
     flags:
@@ -44,29 +57,42 @@ builds:
       - -X github.com/d0ugal/graith/internal/version.CommitSHA={{.Commit}}
     goos:
       - linux
+    goarch:
+      - amd64
+      - arm64
+  - id: gr-darwin
+    main: ./cmd/graith
+    binary: gr
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    ldflags:
+      - -s -w
+      - -X github.com/d0ugal/graith/internal/version.Version={{.Version}}
+      - -X github.com/d0ugal/graith/internal/version.CommitSHA={{.Commit}}
+    goos:
       - darwin
     goarch:
       - amd64
       - arm64
-    # The macOS notification helper (GraithNotifier.app, issue #1094) is NOT
-    # built or shipped here: it is a Swift .app bundle that needs `swiftc` + code
-    # signing, which this Linux release pipeline (CGO_ENABLED=0 cross-compile)
-    # can't produce. Shipping it in Darwin archives requires a macOS release
-    # runner to compile + sign the bundle — tracked as a follow-up. Until then it
-    # is built on demand with `make notifier`. `gr notify` still works on a
-    # released install: it gracefully falls back to osascript when the helper
-    # isn't present — but those notifications appear under "Script Editor", so
-    # release-channel users don't yet get the "Graith" Notification Settings
-    # entry that #1094 is ultimately about.
 
+# Two archives, one per OS build id, so the Darwin tarball can bundle the macOS
+# notification helper .app without it leaking into the Linux tarball (issue
+# #1101). Both ship the generated completions and man page inside the archive so
+# the AUR `package()` (below) can install them: graith-bin is a `-bin` package
+# that builds from these prebuilt binary tarballs, not from source. Specifying
+# `files` replaces GoReleaser's default set, so the LICENSE, README, and
+# CHANGELOG that used to be included implicitly are re-listed explicitly (issue
+# #777). The man `files` entry ships the whole gzipped man tree (gr.1.gz plus
+# every gr-*.1.gz subcommand page) so the root page's SEE ALSO cross-references
+# resolve for AUR users too, matching the nfpm contents glob (issue #779).
 archives:
-  - format: tar.gz
-    # Ship the generated completions and man page inside the release archive so
-    # the AUR `package()` (below) can install them: graith-bin is a `-bin`
-    # package that builds from these prebuilt binary tarballs, not from source.
-    # Specifying `files` replaces GoReleaser's default set, so the LICENSE,
-    # README, and CHANGELOG that used to be included implicitly are re-listed
-    # here explicitly (issue #777).
+  - id: linux
+    ids:
+      - gr-linux
+    format: tar.gz
     files:
       - LICENSE
       - README.md
@@ -74,14 +100,41 @@ archives:
       - completions/gr.bash
       - completions/gr.zsh
       - completions/gr.fish
-      # Ship the whole gzipped man tree (gr.1.gz plus every gr-*.1.gz subcommand
-      # page) so the root page's SEE ALSO cross-references resolve for AUR users
-      # too, matching the nfpm contents glob (issue #779).
       - man/*.1.gz
+  - id: darwin
+    ids:
+      - gr-darwin
+    format: tar.gz
+    files:
+      - LICENSE
+      - README.md
+      - CHANGELOG.md
+      - completions/gr.bash
+      - completions/gr.zsh
+      - completions/gr.fish
+      - man/*.1.gz
+      # The macOS notification helper bundle (issue #1094/#1101), Darwin-only.
+      # Built by the `make notifier` before-hook on the macOS release runner and
+      # bundled at the archive root as GraithNotifier.app/Contents/… (tree + exec
+      # bit preserved) so the Homebrew formula below can install it where the
+      # daemon looks for it.
+      #
+      # dst is GraithNotifier.app/Contents (not …/GraithNotifier.app): GoReleaser
+      # strips the longest common directory prefix of the matched files before
+      # applying dst, and every file in a .app lives under Contents/, so that
+      # prefix is Contents/. Pointing dst one level deeper restores the required
+      # GraithNotifier.app/Contents/{Info.plist,MacOS/…,_CodeSignature/…} layout;
+      # verified with `goreleaser release --snapshot`.
+      - src: macos/build/GraithNotifier.app/**/*
+        dst: GraithNotifier.app/Contents
 
 nfpms:
   - id: graith
     package_name: graith
+    # Package only the Linux build's binaries; the darwin build id has no linux
+    # artifacts, but pin it explicitly now that the build is split (issue #1101).
+    ids:
+      - gr-linux
     vendor: Dougal Matthews
     homepage: https://github.com/d0ugal/graith
     maintainer: Dougal Matthews <dougal@dougalmatthews.com>
@@ -149,17 +202,32 @@ brews:
       # homebrew-tap is a separate repo; the default GITHUB_TOKEN can't push to
       # it, so use a PAT with contents:write on homebrew-tap.
       token: "{{ .Env.RELEASE_TOKEN }}"
+    # Keep both OS archives in the formula (don't pin ids to darwin) so
+    # Homebrew-on-Linux still works; only the macOS archive carries the .app, and
+    # the install guards on macOS accordingly (issue #1101).
     homepage: https://github.com/d0ugal/graith
     description: Terminal session manager for AI coding agents
     license: MIT
     install: |
       bin.install "gr"
+      # Install the macOS notification helper so `gr notify` appears under
+      # "Graith" in System Settings > Notifications (issue #1094/#1101). It lands
+      # in libexec/graith, one of the locations the daemon's findMacNotifierApp
+      # searches relative to the resolved gr binary. Guarded on macOS — the Linux
+      # archive doesn't carry the bundle.
+      on_macos do
+        (libexec/"graith").install "GraithNotifier.app"
+      end
     caveats: |
       To restart the graith daemon after upgrading:
         gr daemon restart
 
 aurs:
   - name: graith-bin
+    # Build from the Linux archive now that archives are split by OS (issue
+    # #1101); the AUR -bin package installs the prebuilt Linux binary + assets.
+    ids:
+      - linux
     homepage: https://github.com/d0ugal/graith
     description: Terminal session manager for AI coding agents
     license: MIT
