@@ -49,3 +49,31 @@ func TestPrintSuppressedInJSONMode(t *testing.T) {
 		t.Errorf("Print should be suppressed in JSON mode, got %q", buf.String())
 	}
 }
+
+// TestJSONLineWritesInJSONMode: unlike Printf, JSONLine must emit even under
+// --json (it is how streaming NDJSON output reaches stdout), producing one
+// compact object per line.
+func TestJSONLineWritesInJSONMode(t *testing.T) {
+	var buf bytes.Buffer
+
+	w := &Writer{jsonMode: true, out: &buf, errOut: &buf}
+
+	type row struct {
+		Ben string `json:"ben"`
+	}
+
+	if err := w.JSONLine(row{Ben: "nevis"}); err != nil {
+		t.Fatalf("JSONLine() error = %v", err)
+	}
+
+	if err := w.JSONLine(row{Ben: "lomond"}); err != nil {
+		t.Fatalf("JSONLine() error = %v", err)
+	}
+
+	got := buf.String()
+	want := "{\"ben\":\"nevis\"}\n{\"ben\":\"lomond\"}\n"
+
+	if got != want {
+		t.Errorf("JSONLine() output = %q, want %q", got, want)
+	}
+}

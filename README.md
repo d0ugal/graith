@@ -441,18 +441,28 @@ signal_mode = "isolated"                    # "isolated" | "allow_same_sandbox" 
 
 Setting `signal_mode = "isolated"` makes graith's `process-control` feature meaningful under nono (the process can no longer signal anything outside its own sandbox). Leaving it unset inherits nono's base-profile default (`allow_same_sandbox`). `safehouse` ignores this field.
 
-### Debugging denials: `gr sandbox why`
+### Debugging denials: `gr sandbox explain` / `gr sandbox watch`
 
-`gr sandbox why` explains whether a given access would be allowed or denied under your configured policy, without launching an agent. It builds the nono profile graith would generate and asks nono's policy oracle:
+Two subcommands, split by the question you're asking:
+
+**`gr sandbox explain`** — *would* an access be allowed? A predictive check against the profile graith would generate, via the backend's policy oracle (the `nono` backend; on `safehouse` it errors and points you at `watch`):
 
 ```bash
-gr sandbox why --path ~/.ssh/id_rsa --op read     # denied (deny_credentials)
-gr sandbox why --path ~/Code/shared --op write    # denied if read-only read_dir
-gr sandbox why --host github.com --port 443        # network reachability
-gr sandbox why --agent codex --path /etc/hosts --op read   # merged per-agent policy
+gr sandbox explain --path ~/.ssh/id_rsa --op read     # denied (deny_credentials)
+gr sandbox explain --path ~/Code/shared --op write    # denied if read-only read_dir
+gr sandbox explain --host github.com --port 443        # network reachability
+gr sandbox explain --agent codex --path /etc/hosts --op read   # merged per-agent policy
 ```
 
-`--op` is `read`, `write`, or `readwrite`; add `--json` for machine-readable output. This targets the **`nono` backend only** (the sole backend with a policy oracle).
+`--op` is `read`, `write`, or `readwrite`; add `--json` for machine-readable output.
+
+**`gr sandbox watch`** — what *did* the sandbox deny? Reads real macOS Seatbelt denials from the unified log — live-tail by default, or a recent aggregated window with `--recent`. macOS-only; run it from your normal shell (not inside a sandboxed session):
+
+```bash
+gr sandbox watch                 # live-tail denials (Ctrl-C to stop)
+gr sandbox watch --recent --since 1h
+gr sandbox watch my-session --proc node   # scope to a session's process tree
+```
 
 ### Per-agent overrides
 
