@@ -69,7 +69,7 @@ func isSystemSender(senderID string) bool {
 // and then explicitly triggers notifyInbox (which auto-resumes a stopped
 // session). A bare MsgStore.Publish does NOT notify — only the handler send-path
 // and this helper wire Publish→notifyInbox. The full detail lives in the body;
-// the agent reads it via `gr msg inbox --all --ack`.
+// the agent reads it via `gr msg inbox --ack`.
 //
 // It returns an error when the message could not be published (no message store
 // wired, or the store's Publish failed), so callers that must not treat an
@@ -112,9 +112,9 @@ func (sm *SessionManager) notifyInbox(targetID, senderID, senderName string) {
 	// "no session named ..." — issue #887.
 	var hint string
 	if isSystemSender(senderID) {
-		hint = fmt.Sprintf("Automated notification from %s (not a session — nothing to reply to). Read: gr msg inbox --all --ack", sender)
+		hint = "System notice. Read: gr msg inbox --ack"
 	} else {
-		hint = fmt.Sprintf("New message from %s. Read: gr msg inbox --all --ack | Reply: gr msg send %s \"<reply>\"", sender, sender)
+		hint = fmt.Sprintf("New message from %s. Read: gr msg inbox --ack | Reply: gr msg send %s \"<reply>\"", sender, sender)
 	}
 
 	if sm.HasAttachedClient(targetID) {
@@ -190,7 +190,7 @@ func (sm *SessionManager) notifyUnreadInbox(sessionID string) {
 		return
 	}
 
-	hint := fmt.Sprintf("You have %d unread inbox message(s). Read: gr msg inbox --all --ack", count)
+	hint := fmt.Sprintf("You have %d unread inbox message(s). Read: gr msg inbox --ack", count)
 	if err := ptySess.WriteInputAndSubmit([]byte(hint)); err != nil {
 		sm.log.Debug("unread inbox notification write failed", "session", sessionID, "err", err)
 	}

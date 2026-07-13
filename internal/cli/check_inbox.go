@@ -75,7 +75,7 @@ var checkInboxCmd = &cobra.Command{
 			}
 
 			if m.System {
-				fmt.Fprintf(&preview, "Automated notification from %s: %s\n", sender, m.Body)
+				fmt.Fprintf(&preview, "System notice: %s\n", m.Body)
 			} else {
 				fmt.Fprintf(&preview, "From %s: %s\n", sender, m.Body)
 			}
