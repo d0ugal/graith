@@ -17,8 +17,9 @@ type cursorApprovalResponse struct {
 // claudeApprovalResponse models Claude Code's current PreToolUse hook-output
 // contract, which carries the permission decision under hookSpecificOutput
 // rather than the legacy top-level "decision" field (still accepted by Claude,
-// but deprecated). See claude-code/src/utils/hooks.ts and
-// permissions/permissions.ts.
+// but deprecated). See the PreToolUse decision-control section of
+// https://docs.claude.com/en/docs/claude-code/hooks (source:
+// claude-code/src/utils/hooks.ts, permissions/permissions.ts).
 type claudeApprovalResponse struct {
 	HookSpecificOutput claudeHookSpecificOutput `json:"hookSpecificOutput"`
 }

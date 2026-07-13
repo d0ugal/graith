@@ -13,6 +13,8 @@ func TestApproval(t *testing.T) {
 		{"claude", "block", "", `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny"}}`},
 		{"claude", "deny", "", `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny"}}`},
 		{"claude", "defer", "", `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask"}}`},
+		{"claude", "ask", "", `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask"}}`},
+		{"claude", "haar", "", `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"haar"}}`},
 		{"claude", "allow", "braw-approved", `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"braw-approved"}}`},
 		{"claude", "block", "neep-forbidden", `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"neep-forbidden"}}`},
 		{"codex", "allow", "", `{"decision":"allow"}`},
