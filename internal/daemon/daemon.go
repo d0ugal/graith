@@ -247,7 +247,11 @@ func (sm *SessionManager) HandleHookReport(sr protocol.StatusReportMsg) {
 	// launch→active gap tells a slow-but-healthy start apart from a stuck one
 	// (issue #1104). The PTY's createdAt is the spawn instant; a fresh PTY is
 	// created on every start/resume, so this measures the current launch.
-	if sr.Event == "SessionStart" {
+	// Gate on oldStatus == "" so only the first activation is timed: create
+	// leaves AgentStatus unset and resume clears it, whereas a mid-session
+	// SessionStart (Claude's /clear or /compact) has a non-empty prior status
+	// and would otherwise log a huge, misleading duration against the old PTY.
+	if sr.Event == "SessionStart" && oldStatus == "" {
 		if sess, ok := sm.GetPTY(sr.SessionID); ok {
 			sm.log.Info("session active",
 				"session_id", sr.SessionID, "name", name,
@@ -3025,7 +3029,8 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	// diagnosable from the daemon log alone.
 	sm.log.Info("resume: pty spawned",
 		"session_id", id, "summary", lifecycleSummary, "agent", sessAgent,
-		"pid", result.PID, "pgid", ptySess.Pgid(), "scrollback_path", logPath)
+		"pid", result.PID, "pgid", ptySess.Pgid(), "sandboxed", sandboxed,
+		"scrollback_path", logPath)
 
 	sm.startWatcher(id, ptySess)
 	go sm.notifyUnreadInbox(id)
@@ -3203,6 +3208,8 @@ func (sm *SessionManager) SoftDelete(id string) (SessionState, error) {
 
 		ptySess.Close()
 	} else if orphanPID > 0 {
+		sm.logStoppingPID(id, sm.sessionName(id), StopReasonDelete, "soft-delete-orphan", orphanPID, orphanPID)
+
 		if _, err := sm.killVerifiedProcess(orphanPID, orphanStartTime); err != nil {
 			sm.log.Warn("failed to kill process during soft delete", "id", id, "pid", orphanPID, "err", err)
 			// Keep the PID recorded so the startup orphan sweep can retry the
@@ -3789,6 +3796,8 @@ func (sm *SessionManager) Delete(id string) error {
 
 		ptySess.Close()
 	} else if orphanPID > 0 {
+		sm.logStoppingPID(id, sm.sessionName(id), StopReasonDelete, "delete-orphan", orphanPID, orphanPID)
+
 		if _, err := sm.killVerifiedProcess(orphanPID, orphanStartTime); err != nil {
 			sm.log.Warn("failed to kill orphaned process during delete", "id", id, "pid", orphanPID, "err", err)
 			sm.mu.Lock()
@@ -4032,6 +4041,8 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 
 			s.ptySess.Close()
 		} else if s.pid > 0 {
+			sm.logStoppingPID(s.id, s.name, StopReasonDelete, "delete-children-orphan", s.pid, s.pid)
+
 			if _, err := sm.killVerifiedProcess(s.pid, s.pidStartTime); err != nil {
 				sm.log.Warn("failed to kill orphaned process during delete", "id", s.id, "pid", s.pid, "err", err)
 				sm.mu.Lock()
@@ -4490,6 +4501,14 @@ func (sm *SessionManager) logStopping(id, name, reason, initiator string, sess S
 		pgid = sess.Pgid()
 	}
 
+	sm.logStoppingPID(id, name, reason, initiator, pid, pgid)
+}
+
+// logStoppingPID is logStopping for the orphan-reap paths where there is no live
+// PTY, only a recorded pid (killVerifiedProcess signals the process group via
+// -pid, so pgid == pid). Keeping these on the same "stopping session" line means
+// `grep "stopping session"` is a complete daemon-kill audit (issue #1104).
+func (sm *SessionManager) logStoppingPID(id, name, reason, initiator string, pid, pgid int) {
 	sm.log.Info("stopping session",
 		"id", id, "name", name, "reason", reason, "initiator", initiator,
 		"pid", pid, "pgid", pgid)
@@ -4539,6 +4558,8 @@ func (sm *SessionManager) stopWithReason(id, reason, initiator string) error {
 	pid := sessState.PID
 	startTime := sessState.PIDStartTime
 	sm.mu.Unlock()
+
+	sm.logStoppingPID(id, name, reason, initiator+"-orphan", pid, pid)
 
 	killed, err := sm.killVerifiedProcess(pid, startTime)
 
@@ -4642,6 +4663,8 @@ func (sm *SessionManager) StopWithChildren(rootID string, excludeRoot bool) ([]s
 
 			continue
 		}
+
+		sm.logStoppingPID(id, name, StopReasonUser, "stop-children-orphan", pid, pid)
 
 		killed, killErr := sm.killVerifiedProcess(pid, startTime)
 		sm.mu.Lock()
@@ -4757,8 +4780,16 @@ func (sm *SessionManager) StopWithChildren(rootID string, excludeRoot bool) ([]s
 }
 
 // Restart stops a running session (or no-ops if already stopped) and resumes it,
-// picking up the current agent and sandbox configuration.
+// picking up the current agent and sandbox configuration. A plain user restart
+// attributes the teardown to StopReasonUser; internal callers use
+// restartWithReason to preserve the true subsystem (e.g. the startup watchdog).
 func (sm *SessionManager) Restart(id string, rows, cols uint16) (SessionState, error) {
+	return sm.restartWithReason(id, rows, cols, StopReasonUser, "restart")
+}
+
+// restartWithReason is Restart with an explicit stop attribution so a watchdog
+// recovery isn't logged as an authenticated user restart (issue #1104).
+func (sm *SessionManager) restartWithReason(id string, rows, cols uint16, stopReason, initiator string) (SessionState, error) {
 	sm.mu.RLock()
 
 	softDeleted := false
@@ -4781,11 +4812,11 @@ func (sm *SessionManager) Restart(id string, rows, cols uint16) (SessionState, e
 	if hasPTY && !ptySess.Exited() {
 		sm.mu.Lock()
 		if s, ok := sm.state.Sessions[id]; ok {
-			s.StopReason = StopReasonUser
+			s.StopReason = stopReason
 		}
 		sm.mu.Unlock()
 
-		sm.logStopping(id, sm.sessionName(id), StopReasonUser, "restart", ptySess)
+		sm.logStopping(id, sm.sessionName(id), stopReason, initiator, ptySess)
 
 		if err := ptySess.Kill(); err != nil {
 			return SessionState{}, fmt.Errorf("stop session: %w", err)
@@ -4822,7 +4853,10 @@ func (sm *SessionManager) Restart(id string, rows, cols uint16) (SessionState, e
 		if ok && sess.Status == StatusRunning && sess.PID > 0 {
 			pid := sess.PID
 			startTime := sess.PIDStartTime
+			name := sess.Name
 			sm.mu.Unlock()
+
+			sm.logStoppingPID(id, name, stopReason, initiator+"-orphan", pid, pid)
 
 			killed, killErr := sm.killVerifiedProcess(pid, startTime)
 

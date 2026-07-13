@@ -276,3 +276,90 @@ func TestSessionActiveLaunchTiming(t *testing.T) {
 		t.Error("session active record missing since_launch_ms")
 	}
 }
+
+// TestSessionActiveOnlyFirstActivation guards the fix for the /clear and
+// /compact case: a mid-session SessionStart (prior status non-empty) must NOT
+// emit a "session active" line, since since_launch_ms would be measured against
+// a launch that happened long ago.
+func TestSessionActiveOnlyFirstActivation(t *testing.T) {
+	sm, buf := newLogCapturingManager(t)
+
+	id := "braw-reclear"
+	sm.state.Sessions[id] = &SessionState{
+		ID: id, Name: "braw", Status: StatusRunning, Agent: "claude",
+		AgentStatus: "ready", // already active earlier this session
+	}
+
+	sess := newTestPTYSession(t, "sleep", "100")
+	sm.sessions[id] = sess
+
+	sm.HandleHookReport(protocol.StatusReportMsg{SessionID: id, Event: "SessionStart"})
+
+	if rec := findRecord(logRecords(t, buf), "session active"); rec != nil {
+		t.Error("mid-session SessionStart should not emit \"session active\"")
+	}
+}
+
+// TestWatchdogRestartAttribution is the regression test for the tribunal's major
+// finding: a startup-watchdog restart must attribute the teardown to the
+// watchdog, not to an authenticated user restart. It drives the production
+// doRestartStuck path (restartStuck seam nil).
+func TestWatchdogRestartAttribution(t *testing.T) {
+	repo := initTempGitRepo(t)
+	dir := t.TempDir()
+
+	buf := &syncBuffer{}
+	log := slog.New(slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	cfg := config.Default()
+	cfg.FetchOnCreate = false
+	cfg.Agents["echo"] = config.Agent{
+		Command:    "sh",
+		Args:       []string{"-c", "echo FRESH-OUTPUT; exec cat"},
+		ResumeArgs: []string{"-c", "echo RESUME-OUTPUT; exec cat"},
+	}
+
+	sm := NewSessionManager(cfg, config.Paths{
+		StateFile:  filepath.Join(dir, "state.json"),
+		DataDir:    dir,
+		LogDir:     dir,
+		RuntimeDir: dir,
+		TmpDir:     filepath.Join(dir, "tmp"),
+	}, log)
+
+	created, err := sm.Create(CreateOpts{
+		Name: "canny", AgentName: "echo", RepoPath: repo, BaseBranch: "main", Rows: 24, Cols: 80,
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	id := created.ID
+
+	t.Cleanup(func() { stopAndClosePTY(sm, id) })
+
+	waitForScrollback(t, sm, id, "FRESH-OUTPUT")
+
+	// Drive the production watchdog restart seam.
+	if err := sm.doRestartStuck(id, 24, 80); err != nil {
+		t.Fatalf("doRestartStuck() error = %v", err)
+	}
+
+	waitForScrollback(t, sm, id, "RESUME-OUTPUT")
+
+	var found bool
+
+	for _, rec := range logRecords(t, buf) {
+		if rec["msg"] == "stopping session" && rec["initiator"] == "watchdog-restart" {
+			found = true
+
+			if rec["reason"] != StopReasonWatchdog {
+				t.Errorf("reason = %v, want %q", rec["reason"], StopReasonWatchdog)
+			}
+		}
+	}
+
+	if !found {
+		t.Errorf("watchdog restart did not emit a watchdog-restart \"stopping session\" line; log = %s", buf.String())
+	}
+}

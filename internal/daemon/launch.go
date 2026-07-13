@@ -405,7 +405,10 @@ func (sm *SessionManager) doRestartStuck(id string, rows, cols uint16) error {
 		return sm.restartStuck(id, rows, cols)
 	}
 
-	_, err := sm.Restart(id, rows, cols)
+	// Attribute the teardown to the watchdog, not a user restart, so the
+	// "stopping session"/"session exited" lines identify the subsystem that
+	// killed the session (issue #1104).
+	_, err := sm.restartWithReason(id, rows, cols, StopReasonWatchdog, "watchdog-restart")
 
 	return err
 }
