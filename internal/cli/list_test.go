@@ -681,12 +681,18 @@ func columnStarts(cells []string, widths []int) []int {
 }
 
 // TestRenderRowsAlignsColoredAndWideCells is the regression test for issue
-// #1093: coloured cells and cells containing wide runes (⚠, the ★ marker) must
-// not throw off column alignment. Against the old text/tabwriter renderer this
-// failed — tabwriter counted the bytes of the bracketed ANSI escape toward the
-// column width, so coloured cells were padded short and every following column
-// drifted (worse for longer truecolor sequences). renderRows measures visible
-// width instead, so each column starts at the same display offset on every row.
+// #1093: coloured cells and cells containing wide runes must not throw off
+// column alignment. Against the old text/tabwriter renderer this failed —
+// tabwriter counted the bytes of the bracketed ANSI escape toward the column
+// width (and measured wide runes as a single cell), so coloured/wide cells were
+// mis-padded and every following column drifted (worse for longer truecolor
+// sequences). renderRows measures visible width via ansi.StringWidth, so each
+// column starts at the same display offset on every row.
+//
+// The fixture deliberately mixes: an ANSI-coloured cell, the ⚠ approval marker
+// and ★ star prefix (both ambiguous width-1), a genuinely width-2 CJK glyph
+// ("编辑", four display cells for two runes — which tabwriter's rune count would
+// get wrong), empty interior cells, and a long name.
 func TestRenderRowsAlignsColoredAndWideCells(t *testing.T) {
 	green := client.StatusColor("running")
 
@@ -694,7 +700,7 @@ func TestRenderRowsAlignsColoredAndWideCells(t *testing.T) {
 		{"NAME", "STATUS", "ACTIVITY", "GIT", "AGE"},
 		{"braw", colorize("running", green, true), "⚠ approval", colorize("dirty, 1 ahead", green, true), "1h"},
 		{"a-much-longer-session-name", colorize("stopped", green, true), "", "", "2h"},
-		{"★ canny", colorize("errored", green, true), "active (Bash)", "3 ahead", "2d"},
+		{"★ canny", colorize("errored", green, true), "编辑 (Bash)", "3 ahead", "2d"},
 	}
 
 	// Column widths as renderRows computes them: the max visible width per column.
