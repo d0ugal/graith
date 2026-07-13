@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.67.6](https://github.com/d0ugal/graith/compare/v0.67.5...v0.67.6) (2026-07-13)
+
+
+### Features
+
+* **pr-watch:** jail blocked PR comments for later release ([b0d1d01](https://github.com/d0ugal/graith/commit/b0d1d0173eb09015d378d76890aee5a89c81d28b)), closes [#1082](https://github.com/d0ugal/graith/issues/1082)
+* **tokens:** per-session token accounting from transcripts ([#644](https://github.com/d0ugal/graith/issues/644)) ([6bd9794](https://github.com/d0ugal/graith/commit/6bd9794822d26f1237653563c3854d56df0971c0))
+
+
+### Bug Fixes
+
+* **cli:** deliver check-inbox context via additionalContext for Claude ([f379fe7](https://github.com/d0ugal/graith/commit/f379fe733fe18c9f67a7aee9b7380bffaa296396)), closes [#1072](https://github.com/d0ugal/graith/issues/1072)
+* **cli:** keep --all in the check-inbox hint (messages are pre-acked) ([6744b23](https://github.com/d0ugal/graith/commit/6744b23cf883d2ae28ae2ab9d256315019f364a0))
+* **daemon:** trim inbox notification hints to "System notice" + drop --all ([c33e2d1](https://github.com/d0ugal/graith/commit/c33e2d100012557ce92b7b10863f0b329436a243))
+* **hookoutput:** emit hookSpecificOutput.permissionDecision for Claude ([d3f3602](https://github.com/d0ugal/graith/commit/d3f360295a7a7ba9734e90aa933cccd821bf36b7)), closes [#1074](https://github.com/d0ugal/graith/issues/1074)
+* **pr-watch:** address jail review findings ([b6aa969](https://github.com/d0ugal/graith/commit/b6aa969df5d1e1d90a041245bf14e8419ad0886e))
+* **tokens:** address review findings ([04b401e](https://github.com/d0ugal/graith/commit/04b401eef10bce1628583e7b4448eed26a8c5d88)), closes [#644](https://github.com/d0ugal/graith/issues/644)
+* update github.com/charmbracelet/ultraviolet digest to 4bee191 ([216f659](https://github.com/d0ugal/graith/commit/216f65990e4e45571e987493708fccdddc1ed1f8))
+
+
+### Code Refactoring
+
+* **cli:** rename check-inbox context var off the loaded 'context' name ([cb04c79](https://github.com/d0ugal/graith/commit/cb04c793fe705b2b2b84d06bb5c06179e10f240b))
+
+
+### Tests
+
+* **cli:** extract and cover jail command rendering/validation ([909dc75](https://github.com/d0ugal/graith/commit/909dc75ecc7efb4ba660b21a0b424e1b23a7d11f))
+* **daemon:** handler-level tests for the jail control messages ([ea65dad](https://github.com/d0ugal/graith/commit/ea65dada010af03e650f8fcf48bec38d6ec2d494))
+* **hookoutput:** cover ask/default claude branches; cite public docs ([29aa689](https://github.com/d0ugal/graith/commit/29aa6892132f070a750353c1d2172e8d202c76c5))
+
 ## [0.67.5](https://github.com/d0ugal/graith/compare/v0.67.4...v0.67.5) (2026-07-12)
 
 
