@@ -5,6 +5,7 @@
 
 ### Features
 
+* **daemon:** make session stops fully diagnosable from logs ([#1104](https://github.com/d0ugal/graith/issues/1104)) ([9e7543d](https://github.com/d0ugal/graith/commit/9e7543da83bae8873fabe1886bdf1f55e0234f9a))
 * **daemon:** SessionDriver interface + PTY adapter (headless phase 1) ([6d81988](https://github.com/d0ugal/graith/commit/6d819881e704fe5f282c405f550f5d14389c1b32))
 * **headless:** config + launch selection for headless sessions ([d50670f](https://github.com/d0ugal/graith/commit/d50670f713c9ed5eac63c7118248ffdfcf146bf3))
 * **headless:** refuse interactive attach; align docs to v1 scope ([b35e9f7](https://github.com/d0ugal/graith/commit/b35e9f7b7707831d79d7d5525e9a667f6404ab4b))
@@ -13,6 +14,7 @@
 
 ### Bug Fixes
 
+* **daemon:** address review findings for [#1104](https://github.com/d0ugal/graith/issues/1104) lifecycle logging ([1820d83](https://github.com/d0ugal/graith/commit/1820d83512ab6ae25cbe040dbd00eb9ac2e045af))
 * **headless:** address tribunal findings + reconcile with [#1087](https://github.com/d0ugal/graith/issues/1087) ([5cd593e](https://github.com/d0ugal/graith/commit/5cd593e309c5537fca8b765541668b6a745fb7cc))
 * **headless:** drain stdout before cmd.Wait; prefer arrived control response ([c35fa93](https://github.com/d0ugal/graith/commit/c35fa9370da654e01af2e2d7f3be09c3cdd8afb6))
 * **headless:** reconcile with [#1092](https://github.com/d0ugal/graith/issues/1092) launch throttle; CLI + doc corrections ([011efe3](https://github.com/d0ugal/graith/commit/011efe319e74ec46404278f6197250db99dacea3))
@@ -22,6 +24,11 @@
 
 * **headless:** cover the stream-json driver (94% statements) ([29d21cb](https://github.com/d0ugal/graith/commit/29d21cb38c181a5d101d5daa14f1f8a63555017d))
 * **integration:** use ScrollbackFile() accessor on SessionDriver ([5ace598](https://github.com/d0ugal/graith/commit/5ace598759a9cc4088505694850c96d9c824de49))
+
+
+### Dependencies
+
+* **headless:** implement Pgid on headless.Session for SessionDriver ([#1104](https://github.com/d0ugal/graith/issues/1104)) ([d7cbec0](https://github.com/d0ugal/graith/commit/d7cbec0d07447465bbd99736dba8ded648e59426))
 
 ## [0.67.7](https://github.com/d0ugal/graith/compare/v0.67.6...v0.67.7) (2026-07-13)
 
