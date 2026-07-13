@@ -77,7 +77,8 @@ Key files by area:
 | PTY | `pty/scrollback.go` | Append-only scrollback file with tail reads |
 | Auth | `daemon/auth.go` | Per-session + human token auth: fail-closed local default, authorization rules, identity forcing, descendant checks |
 | Sandbox | `sandbox/sandbox.go`, `sandbox/safehouse.go`, `sandbox/nono.go` | Pluggable backends: Wrap dispatch, per-backend command/profile construction, availability |
-| Sandbox | `sandbox/why.go`, `cli/sandbox.go` | `gr sandbox why` — explain an allow/deny decision via nono's `nono why` oracle against graith's generated profile (nono backend only) |
+| Sandbox | `sandbox/why.go`, `cli/sandbox.go` | `gr sandbox explain` — predictive allow/deny via a policy oracle (`nono why`) against graith's generated profile (nono only; safehouse errors → points at `watch`) |
+| Sandbox | `sandbox/denials.go`, `cli/sandbox.go` | `gr sandbox watch [session]` — retrospective: live-tail (default) or `--recent` window of macOS Seatbelt denials from the unified log; `--proc`/`[session]` scoping (macOS-only; covers both backends on macOS) |
 | Store | `store/store.go` | Flat-file git-backed document store with key validation, git commits |
 | Scenario | `daemon/scenario.go` | Scenario lifecycle: start, stop, resume, delete, add, task-done, status, list |
 | Scenario | `cli/scenario.go` | `gr scenario start/stop/resume/delete/add/task-done/status/list` commands |

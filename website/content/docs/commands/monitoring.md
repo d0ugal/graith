@@ -78,9 +78,9 @@ By default `gr doctor` avoids walking the data dir to measure on-disk sizes — 
 | `--autofix` | Automatically fix issues |
 | `--disk` | Measure on-disk sizes (walks the data dir; can be slow on large installs) |
 
-### `gr sandbox why`
+### `gr sandbox explain`
 
-Explain whether the configured sandbox would allow or deny a filesystem or network access, without launching an agent. Builds the nono profile graith would generate from config and queries nono's policy oracle. Requires the `nono` backend.
+Explain, predictively, whether the configured sandbox would allow or deny a filesystem or network access, without launching an agent. Builds the profile graith would generate from config and queries the backend's policy oracle. Needs an oracle → the `nono` backend (on a `safehouse` config it errors and points at `gr sandbox watch`).
 
 | Flag | Description |
 |------|-------------|
@@ -91,8 +91,29 @@ Explain whether the configured sandbox would allow or deny a filesystem or netwo
 | `--agent <name>` | Resolve the merged (global + per-agent) policy for this agent |
 
 ```bash
-gr sandbox why --path ~/.ssh/id_rsa --op read
-gr sandbox why --host github.com --port 443
+gr sandbox explain --path ~/.ssh/id_rsa --op read
+gr sandbox explain --host github.com --port 443
+```
+
+### `gr sandbox watch [session]`
+
+Show the sandbox denials the OS actually recorded — live-tail by default, or a recent window with `--recent`. Reads the macOS unified log (Seatbelt), so it works for both the `safehouse` and `nono` backends on macOS. macOS-only; run it from your normal shell (not inside a sandboxed session — `/usr/bin/log` refuses to run sandboxed).
+
+| Flag | Description |
+|------|-------------|
+| `--recent` | Show a recent aggregated window instead of live-tailing |
+| `--follow`, `-f` | Force a live tail even when output is piped or in `--json` mode |
+| `--since <dur>` | Window for `--recent` (a `log show --last` duration, e.g. `5m`, `1h`); implies `--recent` |
+| `--proc <substr>` | Filter denials to processes whose name contains this substring |
+
+Live-tail is the default on a terminal; when output is piped or in `--json` (agent) mode it defaults to `--recent` so it can't hang — pass `--follow` to override.
+
+An optional `[session]` positional scopes denials to that session's process tree. See [Diagnostics & limitations]({{< relref "/docs/sandbox/debugging.md" >}}) for the full guide.
+
+```bash
+gr sandbox watch                 # live-tail
+gr sandbox watch --recent --since 1h
+gr sandbox watch my-session --proc node
 ```
 
 ## Remote interaction

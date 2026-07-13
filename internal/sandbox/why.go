@@ -162,7 +162,7 @@ func execNono(command string, args []string) (string, string, error) {
 
 // WhyForProfile answers a WhyQuery by shelling out to `nono why` against a
 // graith-generated profile. It is the introspection primitive behind
-// `gr sandbox why`. command overrides the nono binary ("" uses the default).
+// `gr sandbox explain`. command overrides the nono binary ("" uses the default).
 //
 // nono emits its JSON decision on stdout and exits 0 for both allow and deny;
 // a decode failure (or non-empty stderr with no JSON) is reported as an error
@@ -203,7 +203,7 @@ func whyForProfile(command, profilePath string, q WhyQuery, run nonoRunner) (Why
 
 // BuildQueryProfile compiles a graith policy (opts) into a nono profile and
 // writes it to a temp file for use as `nono why` query context. It reuses the
-// same profile emitter as the run path, so `gr sandbox why` answers reflect the
+// same profile emitter as the run path, so `gr sandbox explain` answers reflect the
 // exact profile a real session would run under. The caller must remove the
 // returned path; warnings mirror those the run path would emit.
 func BuildQueryProfile(opts WrapOpts) (path string, warnings []string, err error) {

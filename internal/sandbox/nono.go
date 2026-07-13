@@ -434,7 +434,7 @@ func (opts WrapOpts) profileName() string {
 // it returns on success. The caller owns removal: the daemon deletes the stable
 // profile on session teardown (e.g. SessionManager.Delete; see nonoProfilePath
 // for all the sites), and temp-file callers
-// that receive the path back (e.g. `gr sandbox why`) must remove it themselves.
+// that receive the path back (e.g. `gr sandbox explain`) must remove it themselves.
 // Note that callers reaching writeNonoProfile via sandbox.Wrap with an empty
 // ProfilePath (e.g. sandboxed MCP-server processes) do not get the temp path
 // back — it lives only inside the generated argv — and so cannot clean it up;

@@ -140,6 +140,49 @@ Direct `gr stop` still works on starred sessions -- the protection applies to `g
 
 ## Sandbox issues
 
+Sandbox denials are one of the most confusing failures to debug — an agent (or a
+command it runs) fails with a bare "permission denied" and no hint about *which*
+path or operation the kernel refused. Two commands turn that guesswork into a
+concrete answer. Run them from your **normal shell** — `/usr/bin/log` refuses to
+run inside a sandboxed session. See [Diagnostics &
+limitations]({{< relref "/docs/sandbox/debugging.md" >}}) for the full guide.
+
+### See what the sandbox actually blocked (`gr sandbox watch`, macOS)
+
+`gr sandbox watch` taps the macOS unified log and shows the real Seatbelt
+denials — the exact path and operation that were refused. Reproduce the failure
+while it live-tails, or ask for what was just denied:
+
+```bash
+# What did the sandbox deny in the last few minutes? (aggregated, most frequent first)
+gr sandbox watch --recent
+
+# Live-tail while you reproduce the failure (Ctrl-C to stop)
+gr sandbox watch
+
+# Narrow to one session's process tree, or a process name
+gr sandbox watch my-session
+gr sandbox watch --proc node
+```
+
+A typical line — `42× file-read-data /Users/you/.aws/credentials [node]` — tells
+you exactly what to grant (or deliberately keep denied). This works for both the
+`safehouse` and `nono` backends on macOS.
+
+### Check whether an access would be allowed (`gr sandbox explain`, nono)
+
+When you're about to change the policy and want to confirm the effect *before*
+launching an agent, `gr sandbox explain` asks the backend's policy oracle:
+
+```bash
+gr sandbox explain --path ~/.ssh/id_rsa --op read     # denied (deny_credentials)
+gr sandbox explain --path ~/Code/shared --op write    # denied on a read-only grant
+gr sandbox explain --host github.com --port 443        # network reachability
+```
+
+This needs a policy oracle, which today only the `nono` backend has; on a
+`safehouse` config it points you at `gr sandbox watch` instead.
+
 ### "safehouse not found"
 
 Sandbox requires `safehouse` on PATH. Install it:

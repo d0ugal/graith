@@ -34,6 +34,20 @@ func (w *Writer) JSON(v any) error {
 	return enc.Encode(v)
 }
 
+// JSONLine writes v as a single compact JSON object followed by a newline,
+// regardless of mode. It is for streaming (NDJSON) output where one object per
+// line is emitted incrementally rather than a single document at the end.
+func (w *Writer) JSONLine(v any) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	_, err = fmt.Fprintf(w.out, "%s\n", b)
+
+	return err
+}
+
 func (w *Writer) Error(err error) {
 	if w.jsonMode {
 		type jsonErr struct {
