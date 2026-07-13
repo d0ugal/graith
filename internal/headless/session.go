@@ -56,12 +56,15 @@ type Session struct {
 
 	writeMu sync.Mutex // serialises all writes to stdin (NDJSON lines)
 
+	createdAt time.Time // set once at New; immutable
+
 	mu           sync.RWMutex
 	status       Status
 	toolName     string
 	result       *ResultEnvelope
 	degraded     bool
 	lastOutputAt time.Time
+	bytesRead    int64
 	writers      []io.Writer
 
 	exitMu     sync.RWMutex
@@ -73,41 +76,69 @@ type Session struct {
 	reqSeq  int
 	pending map[string]chan json.RawMessage // request_id -> response body
 
-	done     chan struct{}
-	readDone chan struct{}
+	done       chan struct{}
+	readDone   chan struct{}
+	stderrDone chan struct{}
 }
 
 // New launches a headless session: starts the process with piped
-// stdin/stdout/stderr, performs the initialize handshake, and starts the read
-// loop. It returns an error if the process fails to start or initialize.
+// stdin/stdout/stderr and starts the read/stderr/wait goroutines. It returns an
+// error if the process fails to start. (v1 one-shot mode does not perform an
+// initialize handshake — that belongs to the deferred bidirectional control
+// phase.)
 func New(opts Opts) (*Session, error) {
 	cmd := exec.Command(opts.Command, opts.Args...)
 	cmd.Dir = opts.Dir
 	cmd.Env = buildEnv(opts.Env)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 
+	// Track pipes/scrollback acquired so far so any pre-start failure closes
+	// them instead of leaking fds. Disarmed once ownership passes to the
+	// running session's goroutines.
+	var closers []io.Closer
+
+	cleanup := func() {
+		for i := len(closers) - 1; i >= 0; i-- {
+			_ = closers[i].Close()
+		}
+	}
+
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, fmt.Errorf("stdin pipe: %w", err)
 	}
 
+	closers = append(closers, stdin)
+
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		cleanup()
+
 		return nil, fmt.Errorf("stdout pipe: %w", err)
 	}
 
+	closers = append(closers, stdout)
+
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
+		cleanup()
+
 		return nil, fmt.Errorf("stderr pipe: %w", err)
 	}
 
+	closers = append(closers, stderr)
+
 	sb, err := grpty.NewScrollback(opts.LogPath, opts.MaxLogSize)
 	if err != nil {
+		cleanup()
+
 		return nil, fmt.Errorf("scrollback: %w", err)
 	}
 
+	closers = append(closers, sb)
+
 	if err := cmd.Start(); err != nil {
-		_ = sb.Close()
+		cleanup()
 
 		return nil, fmt.Errorf("start headless process: %w", err)
 	}
@@ -119,9 +150,11 @@ func New(opts Opts) (*Session, error) {
 		scrollback:   sb,
 		onPermission: opts.OnPermission,
 		status:       StatusActive,
+		createdAt:    time.Now(),
 		pending:      make(map[string]chan json.RawMessage),
 		done:         make(chan struct{}),
 		readDone:     make(chan struct{}),
+		stderrDone:   make(chan struct{}),
 	}
 
 	go s.drainStderr(stderr)
@@ -155,11 +188,12 @@ func (s *Session) readLoop(stdout io.Reader) {
 }
 
 // handleLine decodes and dispatches a single stream-json line. A non-JSON line
-// is written to scrollback verbatim (surfaces early crash banners); a malformed
-// control frame marks the session degraded.
+// is written to scrollback verbatim (surfaces early crash banners) and skipped;
+// a control_response with no request id (a malformed control frame) marks the
+// session degraded via deliverResponse.
 func (s *Session) handleLine(line []byte) {
 	s.appendScrollback(line)
-	s.touch()
+	s.touch(len(line))
 
 	var ev event
 	if err := json.Unmarshal(line, &ev); err != nil {
@@ -215,13 +249,20 @@ func (s *Session) handlePermission(ev event) {
 
 // --- control protocol -------------------------------------------------------
 
-// Interrupt sends an `interrupt` control request. The count/delay arguments
-// exist for SessionDriver compatibility; headless needs neither (the control
-// request is acknowledged), so it sends exactly one.
+// Interrupt interrupts the running agent. In v1 one-shot mode the CLI is
+// launched without `--input-format stream-json`, so there is no stdin control
+// channel to carry an `interrupt` control request (it would just time out) —
+// Interrupt therefore sends SIGINT to the process group. The count/delay
+// arguments exist only for SessionDriver compatibility. (When the bidirectional
+// control channel is enabled in a later phase, this becomes a control request —
+// see sendControlInterrupt.)
 func (s *Session) Interrupt(_ int, _ time.Duration) error {
-	_, err := s.control(controlSubtype{Subtype: "interrupt"})
+	pid := s.ProcessPID()
+	if pid == 0 {
+		return nil
+	}
 
-	return err
+	return syscall.Kill(-pid, syscall.SIGINT)
 }
 
 // ContextUsage issues a get_context_usage control request and returns the raw
@@ -404,7 +445,10 @@ func (s *Session) ForceKill() error {
 
 func (s *Session) Close() {
 	_ = s.stdin.Close()
+	// Wait for both output drains before closing scrollback, so a late stderr
+	// banner can't race scrollback.Close (drainStderr writes to it).
 	<-s.readDone
+	<-s.stderrDone
 	_ = s.scrollback.Close()
 }
 
@@ -511,11 +555,27 @@ func (s *Session) markDegraded() {
 	s.mu.Unlock()
 }
 
-func (s *Session) touch() {
+func (s *Session) touch(n int) {
 	s.mu.Lock()
 	s.lastOutputAt = time.Now()
+	s.bytesRead += int64(n)
 	s.mu.Unlock()
 }
+
+// BytesRead reports total stream-json output bytes consumed this session.
+func (s *Session) BytesRead() int64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return s.bytesRead
+}
+
+// WasAdopted is always false: headless sessions are not adopted across daemon
+// restart (their stdout pipe can't be re-read).
+func (s *Session) WasAdopted() bool { return false }
+
+// CreatedAt returns when this headless session was launched.
+func (s *Session) CreatedAt() time.Time { return s.createdAt }
 
 // appendScrollback renders a line to the scrollback file and fans it to any
 // attached read-only writers.
@@ -536,6 +596,8 @@ func (s *Session) appendScrollback(line []byte) {
 }
 
 func (s *Session) drainStderr(stderr io.Reader) {
+	defer close(s.stderrDone)
+
 	r := bufio.NewReader(stderr)
 	for {
 		line, err := readLine(r, maxLineBytes)
@@ -557,8 +619,10 @@ func (s *Session) waitLoop() {
 	// warn it is incorrect to call Wait before all reads from the pipe complete
 	// (it would race the reader and truncate the final lines — e.g. the terminal
 	// `result`). The process closes its stdout on exit, so readLoop reaches EOF
-	// on its own; only then is it safe to reap.
+	// on its own; only then is it safe to reap. The same StdoutPipe rule applies
+	// to StderrPipe, so wait for both drains before Wait.
 	<-s.readDone
+	<-s.stderrDone
 	err := s.cmd.Wait()
 
 	s.exitMu.Lock()

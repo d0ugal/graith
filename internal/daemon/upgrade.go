@@ -10,6 +10,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	grpty "github.com/d0ugal/graith/internal/pty"
 )
 
 type UpgradeManifest struct {
@@ -54,6 +56,15 @@ func (sm *SessionManager) PrepareUpgrade(listenerFd uintptr, configFile string) 
 
 	for id, sess := range sm.sessions {
 		if sess.Exited() {
+			continue
+		}
+
+		// Only interactive PTY sessions can be handed off by fd across an
+		// upgrade. A headless (pipe-backed) session has no adoptable PTY fd
+		// (Fd() == 0), so skip it — otherwise the new daemon would mis-adopt
+		// fd 0 (its own stdin) as a terminal (issue #1075).
+		if _, ok := sess.(*grpty.Session); !ok {
+			sm.log.Info("skipping non-PTY session for upgrade fd handoff", "id", id)
 			continue
 		}
 

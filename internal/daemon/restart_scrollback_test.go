@@ -71,7 +71,7 @@ func waitForScrollback(t *testing.T, sm *SessionManager, id, want string) {
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if ptySess, ok := sm.GetPTY(id); ok {
-			if tail, err := ptySess.Scrollback.TailBytes(64 * 1024); err == nil && strings.Contains(string(tail), want) {
+			if tail, err := ptySess.ScrollbackFile().TailBytes(64 * 1024); err == nil && strings.Contains(string(tail), want) {
 				return
 			}
 		}

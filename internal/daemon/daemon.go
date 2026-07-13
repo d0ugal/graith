@@ -1140,14 +1140,21 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		return SessionState{}, err
 	}
 
-	if driverKind == DriverHeadless {
-		if prompt == "" {
+	// A headless session needs a prompt to run one-shot. An explicit --headless
+	// without one is an error; a headless preference coming only from [headless]
+	// default yields to PTY (matching resolveDriverKind's soft-preference rule).
+	if driverKind == DriverHeadless && prompt == "" {
+		if opts.Headless {
 			cleanupOnError()
 			rollbackState()
 
-			return SessionState{}, fmt.Errorf("headless session requires a prompt")
+			return SessionState{}, fmt.Errorf("headless session requires a prompt (-p)")
 		}
 
+		driverKind = DriverPTY
+	}
+
+	if driverKind == DriverHeadless {
 		expandedArgs = headlessArgs(expandedArgs, prompt)
 	} else if prompt != "" {
 		expandedArgs = append(expandedArgs, prompt)
@@ -2288,6 +2295,16 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	if !ok {
 		sm.mu.Unlock()
 		return SessionState{}, fmt.Errorf("session %q not found", id)
+	}
+
+	// A headless session is one-shot (issue #1075): it ran its prompt to a
+	// terminal result and exited. The resume path only knows how to relaunch an
+	// interactive PTY, which would silently change the transport while leaving
+	// DriverKind=headless (and the attach guard would then lock it out). Refuse
+	// rather than convert; convert-to-interactive on attach is a planned phase.
+	if sessState.DriverKind == DriverHeadless {
+		sm.mu.Unlock()
+		return SessionState{}, fmt.Errorf("session %q is headless (one-shot) and cannot be resumed; create a new session", id)
 	}
 
 	if sessState.Status == StatusDeleting {
@@ -5427,13 +5444,13 @@ const silentSessionThreshold = 20 * time.Second
 // was missing when #1087 (blank screen after restart) was diagnosed: the agent
 // process was alive and writing its transcript, but nothing reached the PTY, so
 // scrollback stayed empty and attach showed nothing — with no trace in the log.
-func (sm *SessionManager) checkSilentSession(id, name, agent string, pty *grpty.Session) {
+func (sm *SessionManager) checkSilentSession(id, name, agent string, pty SessionDriver) {
 	sm.checkSilentSessionWithThreshold(id, name, agent, pty, silentSessionThreshold)
 }
 
 // checkSilentSessionWithThreshold is checkSilentSession with an injectable
 // threshold so tests don't have to wait out the production window.
-func (sm *SessionManager) checkSilentSessionWithThreshold(id, name, agent string, pty *grpty.Session, threshold time.Duration) {
+func (sm *SessionManager) checkSilentSessionWithThreshold(id, name, agent string, pty SessionDriver, threshold time.Duration) {
 	if pty.BytesRead() > 0 {
 		return
 	}

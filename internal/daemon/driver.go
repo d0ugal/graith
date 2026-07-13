@@ -35,6 +35,9 @@ type SessionDriver interface { //nolint:interfacebloat // deliberately the full 
 	PeakRSSBytes() int64
 	LastOutputAt() time.Time
 	RecentlyAdopted(grace time.Duration) bool
+	BytesRead() int64
+	WasAdopted() bool
+	CreatedAt() time.Time
 	Kill() error
 	ForceKill() error
 	Close()
