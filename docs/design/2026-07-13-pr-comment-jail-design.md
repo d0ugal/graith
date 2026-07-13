@@ -93,11 +93,20 @@ delivers the body via the existing `notifyFromDaemon` path (which auto-resumes a
 stopped agent). Retention hooks into the existing `Cleanup`.
 
 Authorization reuses the established pattern: `gr msg jail list|show` are
-read-only control messages (readable by agents — they can see *what* is jailed,
-just not release it); `gr msg jail release` is a mutating message gated by a new
-`checkJailRelease` that mirrors `checkNotifyOp` — human or orchestrator only, a
-plain agent is rejected. The remote auth matrix classifies list/show as
+read-only control messages; `gr msg jail release` is a mutating message gated by
+a new `checkJailRelease` that mirrors `checkNotifyOp` — human or orchestrator
+only, a plain agent is rejected. The remote auth matrix classifies list/show as
 `remoteReadOnly` and release as `remoteHumanRW`.
+
+**Body visibility is gated, not just release.** An independent review flagged
+that letting an ordinary agent read the quarantined *body* via `list`/`show`
+would relocate the very prompt-injection the trust gate blocks (especially
+`list` in agent mode, which auto-enables JSON and would dump every body). So the
+raw body is only ever served to a release-authorized role (`mayReadJailBody` =
+human/orchestrator): `list` is metadata-only for everyone, and `show` withholds
+the body (returns a placeholder) for agents and read-only guests. An agent can
+still see *what* is jailed (PR, author, association) — it just can't be fed the
+untrusted content through a graith channel.
 
 Auto-release re-evaluates every unreleased jailed comment against the *new*
 config on reload using the same `commentTrusted` predicate over the stored

@@ -665,11 +665,17 @@ func (sm *SessionManager) diffAndBuild(cfg *configPRWatch, t prWatchTarget, slug
 			trusted, dropped := partitionCommentsByTrust(cfg, newReview)
 			untrusted = append(untrusted, dropped...)
 			sm.logDroppedComments(t, d, "inline review", dropped)
-			sm.jailDroppedComments(t, slug, d, "inline review", dropped)
 
-			cur.lastReviewCommentID = sm.deliverTrustedComments(
-				cfg, t, cur, &out, reviewCommentBody, d, trusted, dropped,
-				cur.lastReviewCommentID, maxCommentID(d.ReviewComments))
+			// Only advance the cursor once the dropped comments are durably
+			// jailed. If jailing failed (transient store error), hold the cursor
+			// and retry the whole batch next poll — advancing now would lose the
+			// untrusted body (neither jailed nor delivered). Jailing is idempotent,
+			// so re-processing the batch is safe.
+			if sm.jailDroppedComments(t, slug, d, "inline review", dropped) {
+				cur.lastReviewCommentID = sm.deliverTrustedComments(
+					cfg, t, cur, &out, reviewCommentBody, d, trusted, dropped,
+					cur.lastReviewCommentID, maxCommentID(d.ReviewComments))
+			}
 		}
 	} else if d.CommentsOK {
 		// Keep the cursor current so flipping the gate on later doesn't dump history.
@@ -683,11 +689,14 @@ func (sm *SessionManager) diffAndBuild(cfg *configPRWatch, t prWatchTarget, slug
 			trusted, dropped := partitionCommentsByTrust(cfg, newIssue)
 			untrusted = append(untrusted, dropped...)
 			sm.logDroppedComments(t, d, "conversation", dropped)
-			sm.jailDroppedComments(t, slug, d, "conversation", dropped)
 
-			cur.lastIssueCommentID = sm.deliverTrustedComments(
-				cfg, t, cur, &out, prCommentBody, d, trusted, dropped,
-				cur.lastIssueCommentID, maxCommentID(d.IssueComments))
+			// See the inline-review surface above: hold the cursor if jailing the
+			// dropped comments failed, so a transient store error can't lose them.
+			if sm.jailDroppedComments(t, slug, d, "conversation", dropped) {
+				cur.lastIssueCommentID = sm.deliverTrustedComments(
+					cfg, t, cur, &out, prCommentBody, d, trusted, dropped,
+					cur.lastIssueCommentID, maxCommentID(d.IssueComments))
+			}
 		}
 	} else if d.CommentsOK {
 		// Keep the cursor current so flipping the gate on later doesn't dump history.

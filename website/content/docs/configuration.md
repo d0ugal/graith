@@ -211,7 +211,9 @@ gr msg jail release <id>                        # deliver it to its target sessi
 gr msg jail release --all --author <login>      # release everything from an author
 ```
 
-**Releasing is restricted to the human or the orchestrator** — a plain agent session is rejected. Releasing delivers previously-untrusted content to a working agent, so allowing an agent to release its own quarantined comment would defeat the point. `list`/`show` are readable by agents; only `release` is gated.
+**Releasing is restricted to the human or the orchestrator** — a plain agent session is rejected. Releasing delivers previously-untrusted content to a working agent, so allowing an agent to release its own quarantined comment would defeat the point.
+
+The **raw comment body is only ever shown to the human or the orchestrator**. `list` is a metadata-only summary (never carries a body); `show` returns the full body only to a release-authorized caller — an agent or a read-only remote guest sees the metadata with the body withheld. This keeps the prompt-injection boundary intact: an agent can see *what* is jailed (PR, author, association) but can't be fed the untrusted content through a graith channel.
 
 When you add an author to `comment_author_allowlist` (or widen `trusted_author_associations`) and reload the config, their jailed comments are **released automatically** — the reload is a local-human action, so it's implicitly authorized. Jailed comments respect the `[messages] max_age` retention window and don't accumulate forever.
 

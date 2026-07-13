@@ -153,6 +153,100 @@ func TestCheckJailRelease_Gating(t *testing.T) {
 	}
 }
 
+// --- body is only revealed to release-authorized roles ---
+
+func TestJailedWire_BodyWithheld(t *testing.T) {
+	j := JailedComment{ID: "jail_x", Author: "scunner", Body: "INJECT: rm -rf"}
+
+	// Release-authorized caller: full body.
+	if w := jailedOneToWire(j, true); w.Body != "INJECT: rm -rf" {
+		t.Fatalf("authorized wire should carry the real body, got %q", w.Body)
+	}
+
+	// Unauthorized caller: body withheld, no leak of the untrusted content.
+	w := jailedOneToWire(j, false)
+	if strings.Contains(w.Body, "INJECT") {
+		t.Fatalf("SECURITY: withheld wire leaked the body: %q", w.Body)
+	}
+
+	if w.Body != bodyWithheld {
+		t.Fatalf("withheld body should be the placeholder, got %q", w.Body)
+	}
+
+	// Metadata is still present so agents can see WHAT is jailed.
+	if w.Author != "scunner" || w.ID != "jail_x" {
+		t.Fatalf("metadata should survive body withholding: %+v", w)
+	}
+}
+
+func TestMayReadJailBody(t *testing.T) {
+	sm := newTestSMWithSessions(map[string]*SessionState{
+		"orch":   {ID: "orch", SystemKind: SystemKindOrchestrator},
+		"thrawn": {ID: "thrawn"},
+	})
+
+	if !(authContext{role: roleLocalHuman}).mayReadJailBody(sm) {
+		t.Error("human should be allowed to read jailed bodies")
+	}
+
+	if !(authContext{sessionID: "orch", authenticated: true, role: roleOrchestrator}).mayReadJailBody(sm) {
+		t.Error("orchestrator should be allowed to read jailed bodies")
+	}
+
+	if (authContext{sessionID: "thrawn", authenticated: true, role: roleSession}).mayReadJailBody(sm) {
+		t.Error("plain agent session must NOT be allowed to read jailed bodies")
+	}
+}
+
+// --- delivery-failure & store-error handling ---
+
+func TestUnrelease(t *testing.T) {
+	s := testStore(t)
+
+	id, _, _ := s.Jail(JailedComment{CommentID: 1, Surface: "conversation", PRNumber: 1, Author: "fash", TargetSession: "dreich"})
+
+	if _, ok, _ := s.MarkReleased(id); !ok {
+		t.Fatal("MarkReleased should succeed")
+	}
+
+	ok, err := s.Unrelease(id)
+	if err != nil || !ok {
+		t.Fatalf("Unrelease: ok=%v err=%v", ok, err)
+	}
+
+	// Back in the unreleased list and re-releasable.
+	if list, _ := s.ListJailed(false); len(list) != 1 {
+		t.Fatalf("un-released comment should reappear in the unreleased list, got %d", len(list))
+	}
+
+	if _, ok, _ := s.MarkReleased(id); !ok {
+		t.Fatal("a re-released comment should claim again after Unrelease")
+	}
+
+	// Unrelease of an already-unreleased row is a no-op.
+	if ok, _ := s.Unrelease(id + "-missing"); ok {
+		t.Fatal("Unrelease of a missing id should report ok=false")
+	}
+}
+
+func TestJailDroppedComments_HoldsCursorOnStoreError(t *testing.T) {
+	sm, _ := newPromptSM(t)
+	// Force Jail to fail by closing the store's DB.
+	_ = sm.messages.Close()
+
+	t1 := prWatchTarget{id: "wynd", branch: "wynd", name: "wynd"}
+	dropped := []ghComment{{ID: 1, User: ghUser{Login: "scunner"}, AuthorAssociation: "NONE", Body: "x"}}
+
+	if sm.jailDroppedComments(t1, "croft/loch", prData{Number: 5}, "conversation", dropped) {
+		t.Fatal("jailDroppedComments must return false when the store errors, so the cursor is held")
+	}
+
+	// An empty batch is trivially "all persisted".
+	if !sm.jailDroppedComments(t1, "croft/loch", prData{Number: 5}, "conversation", nil) {
+		t.Fatal("an empty dropped batch should return true")
+	}
+}
+
 // --- prwatch integration: dropped comments are jailed, not discarded ---
 
 func TestJail_DroppedCommentsAreJailed(t *testing.T) {
@@ -276,10 +370,11 @@ func TestAutoReleaseNewlyTrusted_Allowlist(t *testing.T) {
 		Association: "NONE", Body: "was untrusted", TargetSession: "wynd",
 	})
 
-	// New config allowlists scunner.
-	newCfg := &config.Config{PRWatch: config.PRWatchConfig{CommentAuthorAllowlist: []string{"scunner"}}}
+	// New config allowlists scunner (set as the live config, as applyConfig does
+	// before launching the auto-release worker).
+	sm.cfg = &config.Config{PRWatch: config.PRWatchConfig{CommentAuthorAllowlist: []string{"scunner"}}}
 
-	if n := sm.autoReleaseNewlyTrusted(newCfg); n != 1 {
+	if n := sm.autoReleaseNewlyTrusted(); n != 1 {
 		t.Fatalf("expected 1 auto-released comment, got %d", n)
 	}
 
@@ -302,9 +397,9 @@ func TestAutoReleaseNewlyTrusted_AssociationLeftJailedWhenStillUntrusted(t *test
 	})
 
 	// A config that trusts CONTRIBUTOR does not trust a NONE author.
-	newCfg := &config.Config{PRWatch: config.PRWatchConfig{TrustedAuthorAssociations: []string{"OWNER", "CONTRIBUTOR"}}}
+	sm.cfg = &config.Config{PRWatch: config.PRWatchConfig{TrustedAuthorAssociations: []string{"OWNER", "CONTRIBUTOR"}}}
 
-	if n := sm.autoReleaseNewlyTrusted(newCfg); n != 0 {
+	if n := sm.autoReleaseNewlyTrusted(); n != 0 {
 		t.Fatalf("NONE author must stay jailed, got %d released", n)
 	}
 }

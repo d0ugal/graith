@@ -179,7 +179,11 @@ cursor still advances, and the author is surfaced once, as metadata only, to
 the orchestrator (`notify_untrusted_authors`, default on). The human or
 orchestrator inspects and releases via `gr msg jail list/show/release`
 (release gated to `roleHuman`/`roleOrchestrator` by `checkJailRelease`; a
-plain agent is denied). Adding an author to `comment_author_allowlist` (or
+plain agent is denied). The raw comment **body** is likewise only served to
+that release-authorized set (`mayReadJailBody`): `list` is metadata-only and
+`show` withholds the body from agents/guests, so the quarantined content can't
+be fed to an agent through a graith channel. Adding an author to
+`comment_author_allowlist` (or
 widening `trusted_author_associations`) and reloading auto-releases their
 jailed comments; jailed rows respect `[messages] max_age` retention. See
 `docs/design/2026-07-11-pr-comment-author-trust-design.md` and
