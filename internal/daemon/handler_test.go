@@ -990,8 +990,54 @@ func TestMsgPubInboxNotifiesTarget(t *testing.T) {
 		t.Errorf("notification not found in scrollback; got:\n%s", scrollback)
 	}
 
-	if !strings.Contains(scrollback, "gr msg inbox --all --ack") {
+	if !strings.Contains(scrollback, "gr msg inbox --ack") {
 		t.Errorf("notification should reference gr msg inbox command; got:\n%s", scrollback)
+	}
+
+	// The hint must not carry the noisy --all flag: a fresh notification wants
+	// unread-only, not a dump of the whole (already-read) inbox history.
+	if strings.Contains(scrollback, "--all") {
+		t.Errorf("notification should not include --all; got:\n%s", scrollback)
+	}
+}
+
+// TestNotifyInboxSystemSenderOmitsReplyPath guards issue #887: an automated
+// system notification must not dangle a reply path to a session that does not
+// exist, and should use the terse "System notice" wording with the unread-only
+// (no --all) read command.
+func TestNotifyInboxSystemSenderOmitsReplyPath(t *testing.T) {
+	h := newTestHarness(t)
+	h.addPTYSession(t, "kirk-target", "kirk-session")
+
+	h.sm.notifyInbox("kirk-target", systemSenderID, systemSenderName)
+
+	// The PTY write lands in scrollback via the async read loop.
+	time.Sleep(200 * time.Millisecond)
+
+	ptySess, ok := h.sm.GetPTY("kirk-target")
+	if !ok {
+		t.Fatal("target PTY session not found")
+	}
+
+	tail, err := ptySess.Scrollback.Tail(500)
+	if err != nil {
+		t.Fatalf("scrollback tail: %v", err)
+	}
+
+	scrollback := string(tail)
+
+	if !strings.Contains(scrollback, "System notice. Read: gr msg inbox --ack") {
+		t.Errorf("system notification missing expected hint; got:\n%s", scrollback)
+	}
+
+	// No reply path: replying would fail with "no session named ...".
+	if strings.Contains(scrollback, "Reply:") {
+		t.Errorf("system notification should not offer a reply path; got:\n%s", scrollback)
+	}
+
+	// No --all: a fresh notice wants unread-only, not the whole inbox.
+	if strings.Contains(scrollback, "--all") {
+		t.Errorf("system notification should not include --all; got:\n%s", scrollback)
 	}
 }
 
