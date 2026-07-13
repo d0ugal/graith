@@ -33,6 +33,14 @@ func NewScrollback(path string, maxSize int64) (*Scrollback, error) {
 		written = info.Size()
 	}
 
+	// Log writer initialisation so the scrollback pipeline is traceable — a
+	// blank-screen-on-restart bug (issue #1087) was hard to diagnose because
+	// nothing recorded whether the writer was opened or what it inherited from
+	// a prior run. The existing size distinguishes a fresh log from one being
+	// reopened (append) on resume/restart.
+	slog.Debug("scrollback writer initialized",
+		"path", path, "existing_bytes", written, "max_size", maxSize)
+
 	return &Scrollback{file: f, path: path, maxSize: maxSize, written: written}, nil
 }
 

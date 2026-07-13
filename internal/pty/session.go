@@ -32,6 +32,7 @@ type Session struct {
 	exitCode         int
 	exitSignal       syscall.Signal
 	peakRSSBytes     int64
+	bytesRead        int64
 	exited           bool
 	adoptedPID       int
 	adoptedStartTime int64
@@ -39,6 +40,7 @@ type Session struct {
 	lastUserInputAt  time.Time
 	userInputCond    *sync.Cond
 	adoptedAt        time.Time
+	createdAt        time.Time
 }
 
 type SessionOpts struct {
@@ -77,9 +79,10 @@ func NewSession(opts SessionOpts) (*Session, error) {
 
 	s := &Session{
 		ID: opts.ID, Cmd: cmd, Ptmx: ptmx, Scrollback: sb,
-		screen:   vt10x.New(vt10x.WithSize(int(opts.Cols), int(opts.Rows))),
-		done:     make(chan struct{}),
-		readDone: make(chan struct{}),
+		screen:    vt10x.New(vt10x.WithSize(int(opts.Cols), int(opts.Rows))),
+		done:      make(chan struct{}),
+		readDone:  make(chan struct{}),
+		createdAt: time.Now(),
 	}
 	s.userInputCond = sync.NewCond(&sync.Mutex{})
 
@@ -129,6 +132,7 @@ func AdoptSession(opts AdoptOpts) (*Session, error) {
 		adoptedPID:       opts.PID,
 		adoptedStartTime: startTime,
 		adoptedAt:        time.Now(),
+		createdAt:        time.Now(),
 	}
 	s.userInputCond = sync.NewCond(&sync.Mutex{})
 
@@ -240,9 +244,20 @@ func (s *Session) readLoop() {
 			s.mu.Lock()
 			_, _ = s.screen.Write(chunk)
 			s.lastOutputAt = time.Now()
+			first := s.bytesRead == 0
+			s.bytesRead += int64(n)
 			writers := make([]io.Writer, len(s.writers))
 			copy(writers, s.writers)
 			s.mu.Unlock()
+
+			// Record the first byte of PTY output. Its absence is the signature
+			// of the blank-screen-on-restart bug (issue #1087): the agent process
+			// is alive but never rendered anything, so scrollback stays empty and
+			// attach shows nothing. Logging the first output makes "did the agent
+			// ever produce anything?" answerable from the daemon log.
+			if first {
+				slog.Info("pty first output", "session", s.ID, "bytes", n)
+			}
 
 			for _, w := range writers {
 				if w != nil {
@@ -252,6 +267,19 @@ func (s *Session) readLoop() {
 		}
 
 		if err != nil {
+			s.mu.RLock()
+			total := s.bytesRead
+			s.mu.RUnlock()
+
+			// A read loop ending with zero total output means the agent produced
+			// nothing at all this lifetime — surfaced at Warn so a silent session
+			// (issue #1087) is visible in the log rather than a mystery.
+			if total == 0 {
+				slog.Warn("pty read loop ended with no output", "session", s.ID, "error", err)
+			} else {
+				slog.Debug("pty read loop ended", "session", s.ID, "total_bytes", total, "error", err)
+			}
+
 			return
 		}
 	}
@@ -491,6 +519,15 @@ func (s *Session) DetachWriter(w io.Writer) {
 }
 func (s *Session) Done() <-chan struct{}   { return s.done }
 func (s *Session) LastOutputAt() time.Time { s.mu.RLock(); defer s.mu.RUnlock(); return s.lastOutputAt }
+
+// BytesRead returns the total number of PTY output bytes read this session
+// lifetime. Zero on a running session that has been up for a while is the
+// signature of a silent agent (issue #1087) — alive but rendering nothing.
+func (s *Session) BytesRead() int64 { s.mu.RLock(); defer s.mu.RUnlock(); return s.bytesRead }
+
+// CreatedAt returns when this PTY session object was constructed (spawned or
+// adopted). Used to age a silent session for the zero-output diagnostic.
+func (s *Session) CreatedAt() time.Time { s.mu.RLock(); defer s.mu.RUnlock(); return s.createdAt }
 
 // RecentlyAdopted returns true if the session was adopted (daemon restart)
 // within the last duration and has not yet received fresh PTY output.

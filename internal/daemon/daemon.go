@@ -89,9 +89,14 @@ type SessionManager struct {
 	orchestratorExitCh chan string
 	recentExits        []time.Time
 	lastInboxNotifyAt  map[string]time.Time
-	prWatch            *prWatchState
-	triggers           *triggerState
-	tokens             *tokenCache
+	// silentWarned tracks session IDs already flagged by the silent-session
+	// diagnostic (running with a live PTY but zero output past the threshold),
+	// so the Warn fires once per PTY lifetime rather than every detection tick.
+	// Cleared when a session (re)spawns a PTY so a restart can warn afresh.
+	silentWarned map[string]bool
+	prWatch      *prWatchState
+	triggers     *triggerState
+	tokens       *tokenCache
 
 	// pushNotify guards proactive `gr notify` push-notification gating state:
 	// a rolling window of delivered timestamps (rate limit) and a per-key map of
@@ -129,6 +134,7 @@ func NewSessionManager(cfg *config.Config, paths config.Paths, log *slog.Logger)
 		connsByDevice:      make(map[string][]net.Conn),
 		orchestratorExitCh: make(chan string, 4),
 		lastInboxNotifyAt:  make(map[string]time.Time),
+		silentWarned:       make(map[string]bool),
 		prWatch:            newPRWatchState(),
 		triggers:           newTriggerState(),
 		tokens:             newTokenCache(),
@@ -2831,10 +2837,20 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	}
 
 	delete(sm.hookReports, id)
+	delete(sm.silentWarned, id)
 
 	scenarioIDForRepublish := sessState.ScenarioID
 	result := cloneSessionState(sessState)
 	sm.mu.Unlock()
+
+	// Record the resume spawn with the scrollback wiring so the restart pipeline
+	// is traceable end to end (issue #1087): which PID now owns the session and
+	// which log the fresh PTY appends to. Paired with the pty package's
+	// "pty first output" / "no output" logs, this makes a blank-screen restart
+	// diagnosable from the daemon log alone.
+	sm.log.Info("resume: pty spawned",
+		"session_id", id, "summary", lifecycleSummary, "agent", sessAgent,
+		"pid", result.PID, "scrollback_path", logPath)
 
 	sm.startWatcher(id, ptySess)
 	go sm.notifyUnreadInbox(id)
@@ -3659,6 +3675,7 @@ func (sm *SessionManager) Delete(id string) error {
 	sm.reparentChildrenLocked(id, parentID)
 	delete(sm.state.Sessions, id)
 	delete(sm.hookReports, id)
+	delete(sm.silentWarned, id)
 
 	if sessToken != "" {
 		delete(sm.tokenIndex, sessToken)
@@ -4535,6 +4552,11 @@ func (sm *SessionManager) Restart(id string, rows, cols uint16) (SessionState, e
 	}
 
 	ptySess, hasPTY := sm.GetPTY(id)
+
+	sm.log.Info("restart requested", "session_id", id, "has_live_pty", hasPTY,
+		"pty_exited", hasPTY && ptySess.Exited(),
+		"scrollback_path", sm.scrollbackLogPath(id))
+
 	if hasPTY && !ptySess.Exited() {
 		sm.mu.Lock()
 		if s, ok := sm.state.Sessions[id]; ok {
@@ -4547,6 +4569,16 @@ func (sm *SessionManager) Restart(id string, rows, cols uint16) (SessionState, e
 		}
 
 		<-ptySess.Done()
+
+		// Close the old PTY so its Ptmx fd and scrollback file handle are
+		// released promptly at restart time. The stale watcher for this PTY also
+		// closes it once it observes the exit (watchSession documents double-close
+		// as safe), but closing here makes the release deterministic. The new PTY
+		// (spawned by resume below) reopens the same scrollback log in append
+		// mode, so post-restart output is preserved.
+		sm.log.Info("restart: old pty stopped, closing", "session_id", id,
+			"old_output_bytes", ptySess.BytesRead())
+		ptySess.Close()
 
 		sm.mu.Lock()
 		if s, ok := sm.state.Sessions[id]; ok && s.Status == StatusRunning {
@@ -5275,6 +5307,56 @@ func (sm *SessionManager) fetchRemotes(ctx context.Context) {
 	}
 }
 
+// silentSessionThreshold is how long a running session's PTY may produce zero
+// output before the daemon flags it as silent. Interactive agents (Claude,
+// Codex, …) render their UI within a second or two of starting, so a session
+// still at zero bytes well past this window is almost certainly stuck — blocked
+// on a pre-render prompt, or otherwise not writing to its PTY (issue #1087).
+const silentSessionThreshold = 20 * time.Second
+
+// checkSilentSession warns once per PTY lifetime when a running session has
+// produced no PTY output past silentSessionThreshold. This is the signal that
+// was missing when #1087 (blank screen after restart) was diagnosed: the agent
+// process was alive and writing its transcript, but nothing reached the PTY, so
+// scrollback stayed empty and attach showed nothing — with no trace in the log.
+// A recently-adopted session is exempt: after a daemon upgrade the PTY object
+// is new but the agent is mid-run and may legitimately be quiet.
+func (sm *SessionManager) checkSilentSession(id, name, agent string, pty *grpty.Session) {
+	sm.checkSilentSessionWithThreshold(id, name, agent, pty, silentSessionThreshold)
+}
+
+// checkSilentSessionWithThreshold is checkSilentSession with an injectable
+// threshold so tests don't have to wait out the production window.
+func (sm *SessionManager) checkSilentSessionWithThreshold(id, name, agent string, pty *grpty.Session, threshold time.Duration) {
+	if pty.BytesRead() > 0 {
+		return
+	}
+
+	created := pty.CreatedAt()
+	if created.IsZero() || time.Since(created) < threshold {
+		return
+	}
+
+	if pty.RecentlyAdopted(threshold) {
+		return
+	}
+
+	sm.mu.Lock()
+	warned := sm.silentWarned[id]
+	sm.silentWarned[id] = true
+	sm.mu.Unlock()
+
+	if warned {
+		return
+	}
+
+	sm.log.Warn("session running but producing no PTY output",
+		"session_id", id, "name", name, "agent", agent,
+		"running_for", time.Since(created).Round(time.Second),
+		"scrollback_path", sm.scrollbackLogPath(id),
+		"hint", "agent is alive but has rendered nothing — likely blocked on a pre-render prompt or not writing to the PTY (issue #1087)")
+}
+
 func (sm *SessionManager) detectAgentStatuses() {
 	sm.mu.RLock()
 
@@ -5314,6 +5396,8 @@ func (sm *SessionManager) detectAgentStatuses() {
 	var toAutoStop []string
 
 	for _, t := range targets {
+		sm.checkSilentSession(t.id, t.name, t.agent, t.pty)
+
 		var status string
 
 		// Check if we have an authoritative hook report for this session
