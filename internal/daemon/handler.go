@@ -423,6 +423,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					AllowConcurrent:     c.AllowConcurrent,
 					SkipModelValidation: c.SkipModelValidation,
 					Yolo:                c.Yolo,
+					Headless:            c.Headless,
 					Rows:                clientRows,
 					Cols:                clientCols,
 				})

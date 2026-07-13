@@ -49,6 +49,17 @@ type Config struct {
 	Agents           map[string]Agent   `toml:"agents"`
 	Triggers         []TriggerConfig    `toml:"trigger"`  // [[trigger]] array
 	TriggersRuntime  TriggersRuntime    `toml:"triggers"` // [triggers] table (daemon-wide settings)
+	Headless         HeadlessConfig     `toml:"headless"` // [headless] table (issue #1075)
+}
+
+// HeadlessConfig is the [headless] block gating headless stream-json sessions
+// (issue #1075). Headless is inert unless Experimental is true — the control
+// protocol it uses is an SDK-internal contract, so v1 is opt-in and
+// experimental. Default, when Experimental is on, decides whether new sessions
+// go headless without an explicit --headless.
+type HeadlessConfig struct {
+	Experimental bool `toml:"experimental"`
+	Default      bool `toml:"default"`
 }
 
 type Overlay struct {
@@ -1083,6 +1094,17 @@ type Agent struct {
 	// (count 1, delay 0). See issue #620.
 	InterruptCount   *int `json:"interrupt_count,omitempty"    toml:"interrupt_count"`
 	InterruptDelayMs *int `json:"interrupt_delay_ms,omitempty" toml:"interrupt_delay_ms"`
+	// HeadlessCapable marks an agent as supporting headless stream-json mode
+	// (issue #1075). Unset means not capable — only agents explicitly flagged
+	// (Claude Code in v1) may run headless, so a --headless request against an
+	// unsupported agent fails closed rather than silently downgrading.
+	HeadlessCapable *bool `json:"headless_capable,omitempty" toml:"headless_capable"`
+}
+
+// HeadlessCapableEnabled reports whether this agent may run in headless
+// stream-json mode. Defaults to false when unset.
+func (a Agent) HeadlessCapableEnabled() bool {
+	return a.HeadlessCapable != nil && *a.HeadlessCapable
 }
 
 func (a Agent) PromptInjectionEnabled() bool {

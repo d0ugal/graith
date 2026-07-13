@@ -327,11 +327,20 @@ require_pairing = true    # require per-device pairing for human-level rights; f
 # block = false
 # allow_domains = []
 
+# Headless stream-json sessions (issue #1075, EXPERIMENTAL). When enabled,
+# fire-and-forget sessions (tribunal judges, trigger briefings, mirrors) can run
+# a headless Claude process (`claude -p --output-format stream-json`) instead of
+# an interactive PTY, giving graith structured status and cost/token usage.
+# Inert unless experimental = true. Per-agent support is `headless_capable`.
+# [headless]
+# experimental = false   # master gate; headless does nothing unless true
+# default      = false   # once enabled, whether new sessions go headless by default
+
 # Agent definitions. The map key (e.g. "claude") is the agent type name.
 # Each agent needs at minimum: command, args
 # Optional: resume_args, fork_args, env, idle_timeout, sandbox, mcp_servers,
 #   validate_model, interrupt_count, interrupt_delay_ms, inject_prompt,
-#   pre_trust_workspace
+#   pre_trust_workspace, headless_capable
 
 [agents.claude]
 command = "claude"                                    # binary to launch
@@ -343,6 +352,9 @@ fork_args = ["--resume", "{fork_source_agent_session_id}", "--fork-session", "--
 # apart) to actually interrupt. Other agents default to a single Ctrl-C.
 interrupt_count = 2
 interrupt_delay_ms = 200
+# Claude Code supports headless stream-json mode (issue #1075), so it may run as
+# a fire-and-forget headless session when [headless] experimental is enabled.
+headless_capable = true
 
 # Extra sandbox grants for this agent, merged on top of the global [sandbox]
 # config. Only take effect when the sandbox is enabled. "write" means read+write.

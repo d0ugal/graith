@@ -1,10 +1,12 @@
 package daemon
 
 import (
+	"fmt"
 	"io"
 	"syscall"
 	"time"
 
+	"github.com/d0ugal/graith/internal/config"
 	grpty "github.com/d0ugal/graith/internal/pty"
 )
 
@@ -55,6 +57,61 @@ type SessionDriver interface {
 	ScreenPreview() string
 	ScreenSnapshot() grpty.ScreenCapture
 	ScrollbackFile() *grpty.Scrollback
+}
+
+// Driver-kind identifiers persisted on SessionState.DriverKind (issue #1075).
+const (
+	DriverPTY      = "pty"
+	DriverHeadless = "headless"
+)
+
+// resolveDriverKind decides a session's transport at creation (issue #1075).
+// It never silently downgrades an *explicit* --headless request: if headless is
+// asked for but can't be honoured, it returns an error. A headless preference
+// coming only from [headless] default yields gracefully to the same
+// constraints (returns DriverPTY, no error), because a global default is a soft
+// preference, not a demand.
+//
+// v1 constraints: headless requires the experimental gate, an agent flagged
+// headless_capable, and a non-sandboxed session (headless + sandbox is not
+// supported yet — see the design doc).
+func resolveDriverKind(explicit bool, agent config.Agent, hc config.HeadlessConfig, sandboxed bool) (string, error) {
+	if !explicit && !hc.Default {
+		return DriverPTY, nil
+	}
+
+	reject := func(reason string) (string, error) {
+		if explicit {
+			return "", fmt.Errorf("cannot create headless session: %s", reason)
+		}
+
+		return DriverPTY, nil
+	}
+
+	switch {
+	case !hc.Experimental:
+		return reject("[headless] experimental is not enabled")
+	case !agent.HeadlessCapableEnabled():
+		return reject("agent is not headless_capable")
+	case sandboxed:
+		return reject("headless is not supported with the sandbox in v1")
+	default:
+		return DriverHeadless, nil
+	}
+}
+
+// headlessArgs builds the argv for a v1 one-shot headless launch:
+//
+//	claude -p <prompt> --output-format stream-json --verbose <agentArgs...>
+//
+// This is the empirically-validated one-shot form (positional prompt, no
+// --input-format / control protocol): Claude runs the prompt to a terminal
+// result and exits, emitting the typed event stream graith parses. agentArgs
+// carries the agent's own template-expanded args (e.g. --session-id <id>).
+func headlessArgs(agentArgs []string, prompt string) []string {
+	args := []string{"-p", prompt, "--output-format", "stream-json", "--verbose"}
+
+	return append(args, agentArgs...)
 }
 
 // Compile-time assertion that the PTY session satisfies the driver interface.
