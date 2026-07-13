@@ -288,6 +288,25 @@ func (ac authContext) checkNotifyOp(sm *SessionManager) error {
 	return fmt.Errorf("not authorized: only the orchestrator or the human may send notifications")
 }
 
+// checkJailRelease authorizes releasing a jailed PR comment (issue #1082).
+// Releasing delivers quarantined, untrusted content to a working agent, so it
+// must be restricted to a human operator or the system orchestrator — a plain
+// agent session is rejected. If it weren't, a compromised agent could release
+// its own prompt-injection payload out of the jail, defeating the quarantine.
+// (This mirrors checkNotifyOp: human or orchestrator only, no descendants.)
+// Must be called with sm.mu at least RLocked.
+func (ac authContext) checkJailRelease(sm *SessionManager) error {
+	if ac.isHuman() {
+		return nil
+	}
+
+	if ac.isOrchestrator(sm) {
+		return nil
+	}
+
+	return fmt.Errorf("not authorized: only the orchestrator or the human may release jailed comments")
+}
+
 // isDescendantOf checks whether targetID is a transitive descendant of rootID.
 // Must be called with sm.mu at least RLocked.
 func (sm *SessionManager) isDescendantOf(targetID, rootID string) bool {

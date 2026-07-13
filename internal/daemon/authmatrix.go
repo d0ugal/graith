@@ -61,7 +61,10 @@ var remoteMessagePolicy = map[string]remotePolicy{
 	"status_report":    remoteSessionOnly,
 
 	// Mutating / operator actions (paired human + sessions; not guests).
-	"msg_conversation": remoteHumanRW, // reads private DMs — human, not guest
+	"msg_conversation": remoteHumanRW,  // reads private DMs — human, not guest
+	"msg_jail_list":    remoteReadOnly, // inspect quarantined comments — agents may see, not release
+	"msg_jail_show":    remoteReadOnly,
+	"msg_jail_release": remoteHumanRW, // releasing untrusted content: human/orchestrator only (handler re-checks)
 	"scenario_status":  remoteHumanRW, // design denies scenario_* to guests
 	"scenario_list":    remoteHumanRW,
 	"trigger_list":     remoteHumanRW, // triggers gated to human + sessions, not guests

@@ -370,6 +370,215 @@ var msgTopicsCmd = &cobra.Command{
 	},
 }
 
+// --- gr msg jail ---
+
+var msgJailCmd = &cobra.Command{
+	Use:   "jail",
+	Short: "Inspect and release quarantined PR comments",
+	Long: "PR comments from untrusted authors are quarantined (\"jailed\") instead of\n" +
+		"discarded. Inspect them with list/show; release them (deliver to the target\n" +
+		"session) with release. Release is restricted to the human or the orchestrator.",
+}
+
+var msgJailListReleased bool
+
+var msgJailListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List quarantined PR comments",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c, err := client.Connect(cfg, paths, cfgFile)
+		if err != nil {
+			return err
+		}
+		defer c.Close()
+
+		_ = c.SendControl("msg_jail_list", protocol.MsgJailListMsg{IncludeReleased: msgJailListReleased})
+
+		resp, err := c.ReadControlResponse()
+		if err != nil {
+			return err
+		}
+
+		if resp.Type == "error" {
+			return decodeErr(resp)
+		}
+
+		var list protocol.MsgJailListResponse
+
+		_ = protocol.DecodePayload(resp, &list)
+
+		if jsonOutput {
+			return out.JSON(list)
+		}
+
+		if len(list.Jailed) == 0 {
+			out.Printf("No jailed comments.\n")
+			return nil
+		}
+
+		tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		_, _ = fmt.Fprintln(tw, "ID\tPR\tAUTHOR\tASSOC\tSURFACE\tTARGET\tJAILED\tSTATUS")
+
+		for _, j := range list.Jailed {
+			status := "jailed"
+			if j.ReleasedAt != "" {
+				status = "released"
+			}
+
+			target := j.TargetName
+			if target == "" {
+				target = j.TargetSession
+			}
+
+			_, _ = fmt.Fprintf(tw, "%s\t#%d\t@%s\t%s\t%s\t%s\t%s\t%s\n",
+				j.ID, j.PRNumber, j.Author, j.Association, j.Surface, target, j.JailedAt, status)
+		}
+
+		_ = tw.Flush()
+
+		return nil
+	},
+}
+
+var msgJailShowCmd = &cobra.Command{
+	Use:   "show <id>",
+	Short: "Show a quarantined PR comment (including its body)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c, err := client.Connect(cfg, paths, cfgFile)
+		if err != nil {
+			return err
+		}
+		defer c.Close()
+
+		_ = c.SendControl("msg_jail_show", protocol.MsgJailShowMsg{ID: args[0]})
+
+		resp, err := c.ReadControlResponse()
+		if err != nil {
+			return err
+		}
+
+		if resp.Type == "error" {
+			return decodeErr(resp)
+		}
+
+		var show protocol.MsgJailShowResponse
+
+		_ = protocol.DecodePayload(resp, &show)
+
+		if jsonOutput {
+			return out.JSON(show)
+		}
+
+		j := show.Jailed
+		status := "jailed"
+
+		if j.ReleasedAt != "" {
+			status = "released at " + j.ReleasedAt
+		}
+
+		target := j.TargetName
+		if target == "" {
+			target = j.TargetSession
+		}
+
+		out.Printf("ID:        %s\n", j.ID)
+		out.Printf("PR:        #%d (%s)\n", j.PRNumber, j.Branch)
+		out.Printf("Author:    @%s (association %s)\n", j.Author, j.Association)
+		out.Printf("Surface:   %s\n", j.Surface)
+
+		if j.Path != "" {
+			out.Printf("Location:  %s:%d\n", j.Path, j.Line)
+		}
+
+		out.Printf("Target:    %s\n", target)
+		out.Printf("Jailed at: %s\n", j.JailedAt)
+		out.Printf("Status:    %s\n", status)
+		out.Printf("\n%s\n", j.Body)
+
+		return nil
+	},
+}
+
+var (
+	msgJailReleaseAll    bool
+	msgJailReleaseAuthor string
+)
+
+var msgJailReleaseCmd = &cobra.Command{
+	Use:   "release [id]",
+	Short: "Release a quarantined comment to its target session (human/orchestrator only)",
+	Args:  cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		var m protocol.MsgJailReleaseMsg
+
+		switch {
+		case msgJailReleaseAll:
+			if msgJailReleaseAuthor == "" {
+				return fmt.Errorf("--all requires --author <login>")
+			}
+
+			m.All = true
+			m.Author = strings.TrimPrefix(msgJailReleaseAuthor, "@")
+		case len(args) == 1:
+			m.ID = args[0]
+		default:
+			return fmt.Errorf("specify a jail id, or --all --author <login>")
+		}
+
+		c, err := client.Connect(cfg, paths, cfgFile)
+		if err != nil {
+			return err
+		}
+		defer c.Close()
+
+		_ = c.SendControl("msg_jail_release", m)
+
+		resp, err := c.ReadControlResponse()
+		if err != nil {
+			return err
+		}
+
+		if resp.Type == "error" {
+			return decodeErr(resp)
+		}
+
+		var rel protocol.MsgJailReleaseResponse
+
+		_ = protocol.DecodePayload(resp, &rel)
+
+		if jsonOutput {
+			return out.JSON(rel)
+		}
+
+		if len(rel.Released) == 0 {
+			out.Printf("No jailed comments released.\n")
+			return nil
+		}
+
+		out.Printf("Released %d comment(s):\n", len(rel.Released))
+
+		for _, j := range rel.Released {
+			target := j.TargetName
+			if target == "" {
+				target = j.TargetSession
+			}
+
+			out.Printf("  %s — PR #%d from @%s → %s\n", j.ID, j.PRNumber, j.Author, target)
+		}
+
+		return nil
+	},
+}
+
+func decodeErr(resp protocol.Envelope) error {
+	var e protocol.ErrorMsg
+
+	_ = protocol.DecodePayload(resp, &e)
+
+	return fmt.Errorf("%s", e.Message)
+}
+
 // registerMsgCmd registers this command on rootCmd. Called from registerCommands.
 func registerMsgCmd() {
 	rootCmd.AddCommand(msgCmd)
@@ -412,6 +621,14 @@ func registerMsgCmd() {
 
 	msgCmd.AddCommand(msgTopicsCmd)
 	msgTopicsCmd.Flags().BoolVar(&msgTopicsSystem, "system", false, "include _system.* streams")
+
+	msgCmd.AddCommand(msgJailCmd)
+	msgJailCmd.AddCommand(msgJailListCmd)
+	msgJailListCmd.Flags().BoolVar(&msgJailListReleased, "released", false, "include already-released comments")
+	msgJailCmd.AddCommand(msgJailShowCmd)
+	msgJailCmd.AddCommand(msgJailReleaseCmd)
+	msgJailReleaseCmd.Flags().BoolVar(&msgJailReleaseAll, "all", false, "release all jailed comments from an author")
+	msgJailReleaseCmd.Flags().StringVar(&msgJailReleaseAuthor, "author", "", "author login (with --all)")
 }
 
 func detectSender() (id, name string) {

@@ -69,7 +69,8 @@ Key files by area:
 | Client | `client/client.go` | Connection, handshake, scrollback preview (vt10x) |
 | CLI | `cli/attach.go` | Attach loop: passthrough ↔ overlay ↔ reconnect |
 | CLI | `cli/new.go` | Session creation with worktree setup |
-| CLI | `cli/msg.go` | `gr msg pub/sub/send/ack/topics` — inter-agent messaging |
+| CLI | `cli/msg.go` | `gr msg pub/sub/send/ack/topics` + `gr msg jail list/show/release` — inter-agent messaging & PR-comment quarantine |
+| Jail | `daemon/jail.go`, `daemon/jailstore.go` | PR-comment quarantine: jail dropped untrusted comments, list/show, release (human/orchestrator), auto-release on trust-config reload |
 | Agent | `agent/agent.go` | Auto-detect agent environments, enable JSON output |
 | PTY | `pty/session.go` | PTY lifecycle, resize, I/O multiplexing |
 | PTY | `pty/scrollback.go` | Append-only scrollback file with tail reads |
@@ -171,11 +172,18 @@ check**: a comment notifies only if its author's login is in an explicit
 allowlist (`comment_author_allowlist` — the way to trust bots/Apps, whose
 `author_association` is unreliable) **or** its `author_association` is in a
 trusted set (`trusted_author_associations`, default
-`OWNER`/`MEMBER`/`COLLABORATOR`). Untrusted authors are dropped from
-notifications (the comment cursor still advances) and surfaced once, as
-metadata only, to the orchestrator (`notify_untrusted_authors`, default on) so
-the human can allowlist them. See
-`docs/design/2026-07-11-pr-comment-author-trust-design.md`.
+`OWNER`/`MEMBER`/`COLLABORATOR`). Untrusted comments are **jailed** — the
+content is quarantined in the msgstore's `jailed_comments` table
+(`daemon/jail.go`, `daemon/jailstore.go`) instead of discarded — the comment
+cursor still advances, and the author is surfaced once, as metadata only, to
+the orchestrator (`notify_untrusted_authors`, default on). The human or
+orchestrator inspects and releases via `gr msg jail list/show/release`
+(release gated to `roleHuman`/`roleOrchestrator` by `checkJailRelease`; a
+plain agent is denied). Adding an author to `comment_author_allowlist` (or
+widening `trusted_author_associations`) and reloading auto-releases their
+jailed comments; jailed rows respect `[messages] max_age` retention. See
+`docs/design/2026-07-11-pr-comment-author-trust-design.md` and
+`docs/design/2026-07-13-pr-comment-jail-design.md` (issue #1082).
 
 ## Environment variables
 
