@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.67.8](https://github.com/d0ugal/graith/compare/v0.67.7...v0.67.8) (2026-07-13)
+
+
+### Features
+
+* **daemon:** SessionDriver interface + PTY adapter (headless phase 1) ([6d81988](https://github.com/d0ugal/graith/commit/6d819881e704fe5f282c405f550f5d14389c1b32))
+* **headless:** config + launch selection for headless sessions ([d50670f](https://github.com/d0ugal/graith/commit/d50670f713c9ed5eac63c7118248ffdfcf146bf3))
+* **headless:** refuse interactive attach; align docs to v1 scope ([b35e9f7](https://github.com/d0ugal/graith/commit/b35e9f7b7707831d79d7d5525e9a667f6404ab4b))
+* **headless:** stream-json session driver core (headless phase 2) ([95d8c3e](https://github.com/d0ugal/graith/commit/95d8c3eb07522ac80fdb1078d5aa928e057b281b))
+
+
+### Bug Fixes
+
+* **headless:** address tribunal findings + reconcile with [#1087](https://github.com/d0ugal/graith/issues/1087) ([5cd593e](https://github.com/d0ugal/graith/commit/5cd593e309c5537fca8b765541668b6a745fb7cc))
+* **headless:** drain stdout before cmd.Wait; prefer arrived control response ([c35fa93](https://github.com/d0ugal/graith/commit/c35fa9370da654e01af2e2d7f3be09c3cdd8afb6))
+* **headless:** reconcile with [#1092](https://github.com/d0ugal/graith/issues/1092) launch throttle; CLI + doc corrections ([011efe3](https://github.com/d0ugal/graith/commit/011efe319e74ec46404278f6197250db99dacea3))
+
+
+### Tests
+
+* **headless:** cover the stream-json driver (94% statements) ([29d21cb](https://github.com/d0ugal/graith/commit/29d21cb38c181a5d101d5daa14f1f8a63555017d))
+* **integration:** use ScrollbackFile() accessor on SessionDriver ([5ace598](https://github.com/d0ugal/graith/commit/5ace598759a9cc4088505694850c96d9c824de49))
+
 ## [0.67.7](https://github.com/d0ugal/graith/compare/v0.67.6...v0.67.7) (2026-07-13)
 
 
