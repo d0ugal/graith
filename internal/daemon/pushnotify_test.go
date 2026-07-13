@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -322,6 +324,107 @@ func TestSendPushNotification_InterleavedCoalescing(t *testing.T) {
 
 	if len(fd.calls) != 2 {
 		t.Fatalf("expected 2 dispatches (A, B), got %d", len(fd.calls))
+	}
+}
+
+// writeExecutable creates a regular, executable file at path (with parent dirs)
+// and returns path, for exercising notifier-app discovery.
+func writeExecutable(t *testing.T, path string) string {
+	t.Helper()
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil { //nolint:gosec // G301: test fixture
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil { //nolint:gosec // G306: notifier stub must be executable
+		t.Fatalf("write executable: %v", err)
+	}
+
+	return path
+}
+
+func TestResolveNotifierExecutable(t *testing.T) {
+	dir := t.TempDir()
+
+	// A ".app" bundle resolves to its inner executable.
+	appExe := writeExecutable(t, filepath.Join(dir, "GraithNotifier.app", macNotifierExecutable))
+
+	if got, ok := resolveNotifierExecutable(filepath.Join(dir, "GraithNotifier.app")); !ok || got != appExe {
+		t.Errorf("app bundle: got (%q, %v), want (%q, true)", got, ok, appExe)
+	}
+
+	// A plain executable path is used directly.
+	bare := writeExecutable(t, filepath.Join(dir, "bothy", "graith-notifier"))
+
+	if got, ok := resolveNotifierExecutable(bare); !ok || got != bare {
+		t.Errorf("bare executable: got (%q, %v), want (%q, true)", got, ok, bare)
+	}
+
+	// A missing path is not resolved.
+	if got, ok := resolveNotifierExecutable(filepath.Join(dir, "haar", "nope")); ok {
+		t.Errorf("missing path should not resolve, got %q", got)
+	}
+
+	// A directory (not a .app, no inner executable) is not a runnable file.
+	if got, ok := resolveNotifierExecutable(dir); ok {
+		t.Errorf("directory should not resolve as an executable, got %q", got)
+	}
+
+	// A .app whose inner executable is absent does not resolve.
+	emptyApp := filepath.Join(dir, "Dreich.app")
+	if err := os.MkdirAll(emptyApp, 0o755); err != nil { //nolint:gosec // G301: test fixture
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	if _, ok := resolveNotifierExecutable(emptyApp); ok {
+		t.Error("a .app without its inner executable should not resolve")
+	}
+}
+
+func TestFindMacNotifierApp_OverrideBundle(t *testing.T) {
+	dir := t.TempDir()
+	app := filepath.Join(dir, "GraithNotifier.app")
+	exe := writeExecutable(t, filepath.Join(app, macNotifierExecutable))
+
+	t.Setenv("GRAITH_NOTIFIER_APP", app)
+
+	got, ok := findMacNotifierApp()
+	if !ok {
+		t.Fatal("expected the override bundle to be found")
+	}
+
+	if got != exe {
+		t.Errorf("got %q, want inner executable %q", got, exe)
+	}
+}
+
+func TestFindMacNotifierApp_OverrideExecutable(t *testing.T) {
+	dir := t.TempDir()
+	exe := writeExecutable(t, filepath.Join(dir, "graith-notifier"))
+
+	t.Setenv("GRAITH_NOTIFIER_APP", exe)
+
+	got, ok := findMacNotifierApp()
+	if !ok || got != exe {
+		t.Fatalf("got (%q, %v), want (%q, true)", got, ok, exe)
+	}
+}
+
+func TestFindMacNotifierApp_OverrideMissingFallsThrough(t *testing.T) {
+	// An override pointing at a nonexistent path must not resolve to it; the
+	// search falls through to the remaining candidates (none of which exist in
+	// the test's temp home), so discovery reports not-found deterministically.
+	missing := filepath.Join(t.TempDir(), "GraithNotifier.app")
+	t.Setenv("GRAITH_NOTIFIER_APP", missing)
+	t.Setenv("HOME", t.TempDir())
+
+	if got, ok := findMacNotifierApp(); ok {
+		// A real GraithNotifier.app installed next to the test binary or in
+		// /Applications would legitimately be found; only fail if it wrongly
+		// returned the missing override path.
+		if got == filepath.Join(missing, macNotifierExecutable) {
+			t.Errorf("missing override should not resolve, got %q", got)
+		}
 	}
 }
 

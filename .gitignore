@@ -2,6 +2,9 @@
 /gr
 /graith
 
+# Built macOS notifier .app bundle (issue #1094)
+/macos/build/
+
 # XcodeGen-generated project user state
 gui/ios/graith-ios.xcodeproj/xcuserdata/
 gui/ios/graith-ios.xcodeproj/project.xcworkspace/xcuserdata/

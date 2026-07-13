@@ -1,9 +1,16 @@
 GOLANGCI_LINT_VERSION := v2.12.2
 
-.PHONY: build test lint lint-only lint-darwin fmt clean
+.PHONY: build test lint lint-only lint-darwin fmt clean notifier
 
 build:
 	go build -v -ldflags="-s -w" -o gr ./cmd/graith
+
+# Build the macOS notification helper .app bundle (issue #1094). macOS only —
+# the build script skips itself on non-Darwin hosts, so this is safe to run on
+# Linux (it just prints a skip message and does nothing). Output lands in
+# macos/build/GraithNotifier.app.
+notifier:
+	sh macos/notifier/build.sh
 
 test:
 	go test -v -race ./...
@@ -24,3 +31,4 @@ fmt:
 
 clean:
 	rm -f gr
+	rm -rf macos/build
