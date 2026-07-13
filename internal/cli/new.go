@@ -134,7 +134,13 @@ var newCmd = &cobra.Command{
 
 		out.Printf("Created session %s (%s) in %s\n", info.Name, info.ID, location)
 
-		if newBackground {
+		// A headless session has no interactive PTY to attach to, so --headless
+		// implies --background (attaching would only hit the "headless" refusal).
+		if newBackground || newHeadless {
+			if newHeadless && !newBackground {
+				out.Printf("(headless session — watch it with `gr logs -f %s`)\n", info.Name)
+			}
+
 			return nil
 		}
 

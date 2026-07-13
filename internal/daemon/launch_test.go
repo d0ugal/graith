@@ -27,7 +27,7 @@ func newLaunchTestSM(t *testing.T, launch config.LaunchConfig) *SessionManager {
 
 	return &SessionManager{
 		state:    NewState(),
-		sessions: make(map[string]*grpty.Session),
+		sessions: make(map[string]SessionDriver),
 		cfg:      cfg,
 		log:      quietLogger(),
 		launch:   newLaunchThrottle(launch.MaxConcurrentOrDefault()),
