@@ -66,39 +66,50 @@ var checkInboxCmd = &cobra.Command{
 			return nil
 		}
 
-		var preview strings.Builder
-
-		for _, m := range messages {
-			sender := m.SenderName
-			if sender == "" {
-				sender = m.SenderID
-			}
-
-			if m.System {
-				fmt.Fprintf(&preview, "System notice: %s\n", m.Body)
-			} else {
-				fmt.Fprintf(&preview, "From %s: %s\n", sender, m.Body)
-			}
-		}
-
-		previewStr := preview.String()
-		if len(previewStr) > 1000 {
-			previewStr = previewStr[:1000] + "..."
-		}
-
-		contextBody := fmt.Sprintf(
-			"You have %d unread message(s) in your graith inbox. Read with: gr msg inbox --all\n\n%s",
-			len(messages), previewStr,
-		)
-
 		// check-inbox only fires from the SessionStart hook. For Claude Code the
 		// context must go through hookSpecificOutput.additionalContext to reach
 		// the model; a top-level systemMessage is user-facing only (issue #1072).
 		agent := os.Getenv("GRAITH_AGENT_TYPE")
-		fmt.Println(hookoutput.InboxContext(agent, "SessionStart", contextBody))
+		fmt.Println(hookoutput.InboxContext(agent, "SessionStart", formatInboxSystemMessage(messages)))
 
 		return nil
 	},
+}
+
+// formatInboxSystemMessage builds the SessionStart-hook context body announcing
+// unread inbox messages, with a truncated preview.
+//
+// The recommended read command is `gr msg inbox --all` (NOT `--ack`): the hook
+// itself already acknowledged these messages when it fetched them with
+// Ack: true (see the msg_inbox request above), so they are no longer unread by
+// the time the agent acts on this hint. `gr msg inbox --ack` reads unread-only
+// and would return nothing; `--all` shows the full history, which is the only
+// way to recover content dropped by the 1000-byte preview truncation.
+func formatInboxSystemMessage(messages []inboxMessage) string {
+	var preview strings.Builder
+
+	for _, m := range messages {
+		sender := m.SenderName
+		if sender == "" {
+			sender = m.SenderID
+		}
+
+		if m.System {
+			fmt.Fprintf(&preview, "System notice: %s\n", m.Body)
+		} else {
+			fmt.Fprintf(&preview, "From %s: %s\n", sender, m.Body)
+		}
+	}
+
+	previewStr := preview.String()
+	if len(previewStr) > 1000 {
+		previewStr = previewStr[:1000] + "..."
+	}
+
+	return fmt.Sprintf(
+		"You have %d unread message(s) in your graith inbox. Read with: gr msg inbox --all\n\n%s",
+		len(messages), previewStr,
+	)
 }
 
 // readInboxMessages reads control frames from fr until it sees msg_done, an
