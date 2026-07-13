@@ -62,12 +62,13 @@ layer today:
 | Value    | Meaning                                   | Produced by                          |
 |----------|-------------------------------------------|--------------------------------------|
 | `allow`  | let the tool run                          | overlay, external command, timeouts-not |
-| `block`  | refuse (Claude `block`, Codex/Cursor `deny`) | overlay, timeout                  |
+| `block`  | refuse (Claude `deny`, Codex/Cursor `deny`) | overlay, timeout                  |
 | `deny`   | refuse (synonym of block at the agent edge) | external command                    |
 | `defer`  | "I have no opinion — ask the human"       | external command (`""`/`defer`)      |
 
 `internal/hookoutput` maps these to each agent's schema (Claude
-`allow→approve`, `deny/block→block`; Codex/Cursor `block→deny`). The
+`hookSpecificOutput.permissionDecision`: `allow→allow`, `deny/block→deny`,
+`defer→ask`; Codex/Cursor `block→deny`). The
 interactive overlay (`internal/client/approval_overlay.go`) only ever emits
 `allow` and `block`. `defer` exists purely to let an automated decider hand a
 request back to the human queue.
