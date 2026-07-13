@@ -23,6 +23,40 @@ func TestCheckInboxCov2NoSessionIsNoOp(t *testing.T) {
 	}
 }
 
+// TestFormatInboxSystemMessageRecommendsAll guards against a regression where
+// the check-inbox hint recommended `gr msg inbox --ack`. The hook fetches
+// messages with Ack: true, so they are already read by the time the agent acts
+// on the hint; an unread-only `--ack` read would return nothing. The hint must
+// therefore recommend `--all`, and the system-message preview uses the terse
+// "System notice:" prefix.
+func TestFormatInboxSystemMessageRecommendsAll(t *testing.T) {
+	msg := formatInboxSystemMessage([]inboxMessage{
+		{SenderName: "Ailsa", Body: "braw news"},
+		{SenderName: "graith notifications", Body: "CI is green", System: true},
+	})
+
+	if !strings.Contains(msg, "gr msg inbox --all") {
+		t.Errorf("hint must recommend --all (messages are pre-acked by the hook); got:\n%s", msg)
+	}
+
+	// A bare --ack read (unread-only) would surface nothing here.
+	if strings.Contains(msg, "inbox --ack") {
+		t.Errorf("hint must not recommend --ack on the pre-acked hook path; got:\n%s", msg)
+	}
+
+	if !strings.Contains(msg, "System notice: CI is green") {
+		t.Errorf("system message should use the terse 'System notice:' prefix; got:\n%s", msg)
+	}
+
+	if !strings.Contains(msg, "From Ailsa: braw news") {
+		t.Errorf("non-system message should keep the sender prefix; got:\n%s", msg)
+	}
+
+	if !strings.Contains(msg, "2 unread message(s)") {
+		t.Errorf("count should reflect number of messages; got:\n%s", msg)
+	}
+}
+
 // fakeFrameReader feeds a scripted sequence of frames (and optional terminal
 // error) to readInboxMessages so the read loop can be tested without a daemon.
 type fakeFrameReader struct {
