@@ -35,6 +35,12 @@ before:
     # the bundle isn't produced, so a Linux snapshot can't build the darwin
     # archive; real releases run on macOS.
     - sh -c 'make notifier'
+    # Fail closed if the darwin release runner didn't actually produce the
+    # notifier bundle the darwin archive globs for: GoReleaser treats an empty
+    # file glob as non-fatal, so without this a drift between build output and
+    # the archive src would silently ship a darwin tarball with no helper (issue
+    # #1101 review). No-op on non-macOS, where the bundle isn't built.
+    - sh -c 'test "$(uname -s)" != Darwin || test -x macos/build/GraithNotifier.app/Contents/MacOS/graith-notifier'
 
 # The build is split by OS into two ids (gr-linux / gr-darwin) producing the
 # same `gr` binary, so the archives below can be split too: only the Darwin
@@ -213,9 +219,10 @@ brews:
       # Install the macOS notification helper so `gr notify` appears under
       # "Graith" in System Settings > Notifications (issue #1094/#1101). It lands
       # in libexec/graith, one of the locations the daemon's findMacNotifierApp
-      # searches relative to the resolved gr binary. Guarded on macOS — the Linux
-      # archive doesn't carry the bundle.
-      on_macos do
+      # searches relative to the resolved gr binary. Guarded with `if OS.mac?`
+      # (not the `on_macos` DSL, which the Homebrew Cookbook says not to use
+      # inside `def install`) — the Linux archive doesn't carry the bundle.
+      if OS.mac?
         (libexec/"graith").install "GraithNotifier.app"
       end
     caveats: |

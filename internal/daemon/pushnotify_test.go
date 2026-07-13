@@ -469,7 +469,16 @@ func TestNotifierCandidatesForExe_HomebrewSymlink(t *testing.T) {
 	// the Cellar's libexec/graith, but gr is invoked via a symlink in
 	// <prefix>/bin (which is all os.Executable may report). Discovery must
 	// resolve the symlink to find the bundle.
-	root := t.TempDir()
+	// Resolve the temp root's own symlinks up front: on macOS t.TempDir() lives
+	// under /var, which is itself a symlink to /private/var. Discovery resolves
+	// symlinks (resolveSymlink), so the paths it returns are under /private/var;
+	// comparing against unresolved /var paths would spuriously fail (the
+	// /var→/private/var trap). Anchor every constructed path on the resolved root.
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("resolve temp root: %v", err)
+	}
+
 	cellarBin := filepath.Join(root, "Cellar", "graith", "1.0", "bin")
 	realGr := writeExecutable(t, filepath.Join(cellarBin, "gr"))
 	appExe := writeExecutable(t, filepath.Join(root, "Cellar", "graith", "1.0", "libexec", "graith", "GraithNotifier.app", macNotifierExecutable))

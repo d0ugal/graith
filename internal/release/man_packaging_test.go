@@ -15,6 +15,44 @@ func goreleaserConfigPath() string {
 	return filepath.Join("..", "..", ".goreleaser.yaml")
 }
 
+// archiveFile models a single entry of an archive's `files:` list. GoReleaser
+// accepts both a bare string (a path/glob) and a `{src, dst}` mapping (used for
+// the Darwin GraithNotifier.app bundle, issue #1101), so this decodes either
+// form; path() returns the archive-source path in both cases.
+type archiveFile struct {
+	Value string // bare-string form, e.g. "man/*.1.gz"
+	Src   string // src of the {src, dst} mapping form
+	Dst   string // dst of the {src, dst} mapping form
+}
+
+func (a *archiveFile) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind == yaml.ScalarNode {
+		return node.Decode(&a.Value)
+	}
+
+	var m struct {
+		Src string `yaml:"src"`
+		Dst string `yaml:"dst"`
+	}
+	if err := node.Decode(&m); err != nil {
+		return err
+	}
+
+	a.Src, a.Dst = m.Src, m.Dst
+
+	return nil
+}
+
+// path returns the archive-source path this entry references — the bare-string
+// value, or the src of the {src, dst} mapping form.
+func (a archiveFile) path() string {
+	if a.Value != "" {
+		return a.Value
+	}
+
+	return a.Src
+}
+
 // goreleaserConfig is the slice of .goreleaser.yaml the release tests care
 // about, shared across this package: the before-hooks (which gzip the generated
 // man tree), the nfpm contents (which map files into the deb/rpm), the archive
@@ -31,11 +69,30 @@ type goreleaserConfig struct {
 		} `yaml:"contents"`
 	} `yaml:"nfpms"`
 	Archives []struct {
-		Files []string `yaml:"files"`
+		ID    string        `yaml:"id"`
+		Files []archiveFile `yaml:"files"`
 	} `yaml:"archives"`
 	Aurs []struct {
 		Package string `yaml:"package"`
 	} `yaml:"aurs"`
+}
+
+// archiveByID returns the archive with the given id. Archives are split by OS
+// (issue #1101), so tests that care about a specific tarball (e.g. the Linux
+// archive the AUR package builds from) select it by id rather than assuming an
+// order.
+func archiveByID(t *testing.T, cfg goreleaserConfig, id string) []archiveFile {
+	t.Helper()
+
+	for _, a := range cfg.Archives {
+		if a.ID == id {
+			return a.Files
+		}
+	}
+
+	t.Fatalf("no archive with id %q in .goreleaser.yaml", id)
+
+	return nil
 }
 
 func loadGoreleaserConfig(t *testing.T) goreleaserConfig {
