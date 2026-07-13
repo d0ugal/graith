@@ -328,10 +328,12 @@ require_pairing = true    # require per-device pairing for human-level rights; f
 # allow_domains = []
 
 # Headless stream-json sessions (issue #1075, EXPERIMENTAL). When enabled,
-# fire-and-forget sessions (tribunal judges, trigger briefings, mirrors) can run
-# a headless Claude process (`claude -p --output-format stream-json`) instead of
-# an interactive PTY, giving graith structured status and cost/token usage.
-# Inert unless experimental = true. Per-agent support is `headless_capable`.
+# fire-and-forget sessions (tribunal judges, trigger briefings) can run a
+# headless Claude process (`claude -p --output-format stream-json`) instead of an
+# interactive PTY; graith parses the typed event stream for status and captures
+# the run's cost/token usage. v1 is one-shot, requires a prompt, and is
+# incompatible with the sandbox. Inert unless experimental = true. Per-agent
+# support is `headless_capable`.
 # [headless]
 # experimental = false   # master gate; headless does nothing unless true
 # default      = false   # once enabled, whether new sessions go headless by default

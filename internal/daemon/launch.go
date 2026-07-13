@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/d0ugal/graith/internal/detector"
-	grpty "github.com/d0ugal/graith/internal/pty"
 )
 
 // maxStuckRestarts caps how many consecutive startup-watchdog restarts a single
@@ -149,7 +148,7 @@ func (sm *SessionManager) acquireLaunchSlot(ctx context.Context, id, name string
 // configured settle timeout elapses — whichever comes first. It runs in the
 // background so Create/Resume return promptly. The time-to-first-output is
 // logged so slow startups are visible.
-func (sm *SessionManager) releaseLaunchSlotWhenSettled(slot launchSlot, id, name string, sess *grpty.Session) {
+func (sm *SessionManager) releaseLaunchSlotWhenSettled(slot launchSlot, id, name string, sess SessionDriver) {
 	settle := sm.Config().Launch.SettleTimeoutDuration()
 	if settle <= 0 {
 		slot.release()
@@ -234,7 +233,7 @@ type stuckSession struct {
 	status   string
 	pid      int
 	attempts int
-	pty      *grpty.Session
+	pty      SessionDriver
 }
 
 // checkStuckLaunches finds and recovers sessions stuck in startup.

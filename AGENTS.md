@@ -103,15 +103,18 @@ Resume → restart process in existing worktree.
 / `gr new --headless` runs the agent via Claude Code's stream-json mode
 (`claude -p --output-format stream-json`) instead of an interactive PTY, for
 fire-and-forget sessions no human will attach to (tribunal judges, trigger
-briefings, mirror sessions) — giving structured status, live cost/token usage, and
-a clean control-protocol `interrupt`. Gated behind `[headless] experimental` (inert
-unless on); `[headless] default` and per-agent `[agents.<name>] headless_capable`
-are the other inputs. v1 is Claude-only and one-shot; the headless engine lives in
-`internal/headless` and satisfies `daemon.SessionDriver`. `gr attach` on a headless
-session is refused with a pointer to `gr logs -f` (read-only). Planned follow-ups
-(issue #1075): convert-to-interactive on attach (`claude --resume` in a PTY),
-control-protocol interrupt/approvals wiring, cost/usage enrichment, and
-`[trigger.action] headless`. See `docs/design/2026-07-13-headless-stream-json-design.md`.
+briefings) — graith parses the typed event stream for status and captures the
+run's cost/token usage from the result envelope (surfacing to `gr list` is a
+planned follow-up). v1 is Claude-only and one-shot: it requires a prompt, is
+incompatible with the sandbox, implies `--background`, and cannot be resumed once
+it exits. Gated behind `[headless] experimental` (inert unless on); `[headless]
+default` and per-agent `[agents.<name>] headless_capable` are the other inputs.
+The headless engine lives in `internal/headless` and satisfies
+`daemon.SessionDriver`. `gr attach` on a headless session is refused with a
+pointer to `gr logs -f` (read-only). Planned follow-ups (issue #1075):
+convert-to-interactive on attach (`claude --resume` in a PTY), control-protocol
+interrupt/approvals wiring, cost/usage enrichment, and `[trigger.action]
+headless`. See `docs/design/2026-07-13-headless-stream-json-design.md`.
 
 **Delete is soft by default** (`SessionManager.SoftDelete`): `gr delete` stops the
 agent and marks the session deleted (a `DeletedAt`/`ExpiresAt` marker on

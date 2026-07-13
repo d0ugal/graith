@@ -163,7 +163,7 @@ When an agent sets a status via `gr status`, it auto-expires after this TTL if t
 
 ## Headless sessions
 
-**Experimental.** A headless session runs the agent in Claude Code's stream-json mode instead of an interactive PTY, giving graith structured status, live cost/token usage, and clean interrupts — for fire-and-forget sessions no human will attach to (tribunal judges, trigger briefings, mirror sessions).
+**Experimental.** A headless session runs the agent in Claude Code's stream-json mode instead of an interactive PTY — for fire-and-forget sessions no human will attach to (tribunal judges, trigger briefings). graith parses the typed event stream, so `gr logs -f` renders it and the run's cost/token usage is captured from the result envelope. v1 is Claude-only, one-shot, requires a prompt, and is **incompatible with the sandbox** (headless requires `sandbox.enabled = false`, or a per-agent sandbox that resolves to disabled).
 
 ```toml
 [headless]
