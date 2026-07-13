@@ -115,6 +115,9 @@ func TestCliPR(t *testing.T) {
 		{"review required", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 8, State: "draft", ReviewDecision: "review_required"}}, "#8 draft review:needed"},
 		{"CI and review combine", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 9, State: "open", ReviewDecision: "approved"}, CI: &protocol.CIInfo{State: "passing"}}, "#9 open CI:ok review:ok"},
 		{"unknown review decision ignored", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 10, State: "open", ReviewDecision: "dismissed"}}, "#10 open"},
+		{"conflict and review combine", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 11, State: "open", Conflicting: true, ReviewDecision: "changes_requested"}}, "#11 open conflict review:changes"},
+		{"merged suppresses stale review and CI", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 12, State: "merged", ReviewDecision: "approved"}, CI: &protocol.CIInfo{State: "passing"}}, "#12 merged"},
+		{"closed suppresses stale review", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 13, State: "closed", ReviewDecision: "changes_requested"}}, "#13 closed"},
 	}
 
 	for _, tt := range tests {

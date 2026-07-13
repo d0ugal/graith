@@ -240,6 +240,16 @@ func cliPR(s protocol.SessionInfo) string {
 	pr := s.PullRequest
 
 	out := fmt.Sprintf("#%d %s", pr.Number, pr.State)
+
+	// A merged/closed PR is terminal: its conflict/CI/review badges are stale
+	// (resolvePR keeps the last-known values once a PR leaves open/draft), so
+	// suppress them and show only the state — mirroring displayPR and prColor
+	// (issue #773). Without this, a merged PR whose ReviewDecision is still
+	// "approved" would print "#583 merged review:ok".
+	if pr.State == "merged" || pr.State == "closed" {
+		return out
+	}
+
 	if pr.Conflicting {
 		out += " conflict"
 	}
