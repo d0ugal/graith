@@ -543,3 +543,95 @@ func TestResolveBodyCov2FileBeatsStdin(t *testing.T) {
 		t.Errorf("got %q, want the file body", got)
 	}
 }
+
+// --- gr msg jail helpers ---
+
+func TestBuildJailReleaseMsg(t *testing.T) {
+	// A positional id.
+	if m, err := buildJailReleaseMsg([]string{"jail_abc"}, false, ""); err != nil || m.ID != "jail_abc" || m.All {
+		t.Fatalf("id form: %+v err=%v", m, err)
+	}
+
+	// --all --author (with a leading @ trimmed).
+	m, err := buildJailReleaseMsg(nil, true, "@scunner")
+	if err != nil || !m.All || m.Author != "scunner" {
+		t.Fatalf("all form: %+v err=%v", m, err)
+	}
+
+	// --all without --author is an error.
+	if _, err := buildJailReleaseMsg(nil, true, ""); err == nil {
+		t.Fatal("--all without --author should error")
+	}
+
+	// Neither id nor --all is an error.
+	if _, err := buildJailReleaseMsg(nil, false, ""); err == nil {
+		t.Fatal("no id and no --all should error")
+	}
+}
+
+func TestRenderJailList(t *testing.T) {
+	var b strings.Builder
+
+	renderJailList(&b, []protocol.JailedCommentInfo{
+		{ID: "jail_1", PRNumber: 5, Author: "scunner", Association: "NONE", Surface: "conversation", TargetName: "wynd", JailedAt: "t0"},
+		{ID: "jail_2", PRNumber: 6, Author: "fash", Surface: "inline review", TargetSession: "sid-only", ReleasedAt: "t1"},
+	})
+
+	got := b.String()
+	for _, want := range []string{"jail_1", "@scunner", "#5", "conversation", "wynd", "jailed", "jail_2", "sid-only", "released"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("list output missing %q; got:\n%s", want, got)
+		}
+	}
+
+	// The list must never carry a body column.
+	if strings.Contains(got, "BODY") {
+		t.Errorf("list should not have a body column, got:\n%s", got)
+	}
+}
+
+func TestRenderJailShow(t *testing.T) {
+	got := renderJailShow(protocol.JailedCommentInfo{
+		ID: "jail_1", PRNumber: 5, Branch: "wynd", Author: "scunner", Association: "NONE",
+		Surface: "inline review", Path: "main.go", Line: 42, TargetName: "wynd",
+		JailedAt: "t0", Body: "the comment body",
+	})
+
+	for _, want := range []string{"jail_1", "#5 (wynd)", "@scunner", "main.go:42", "the comment body", "jailed"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("show output missing %q; got:\n%s", want, got)
+		}
+	}
+
+	// A released comment shows its release time.
+	rel := renderJailShow(protocol.JailedCommentInfo{ID: "jail_2", ReleasedAt: "t9", Body: "x"})
+	if !strings.Contains(rel, "released at t9") {
+		t.Errorf("released show should note the release time, got:\n%s", rel)
+	}
+}
+
+func TestRenderJailReleased(t *testing.T) {
+	if got := renderJailReleased(nil); !strings.Contains(got, "No jailed comments released") {
+		t.Errorf("empty release should say none released, got %q", got)
+	}
+
+	got := renderJailReleased([]protocol.JailedCommentInfo{
+		{ID: "jail_1", PRNumber: 5, Author: "scunner", TargetName: "wynd"},
+		{ID: "jail_2", PRNumber: 5, Author: "scunner", TargetSession: "sid"},
+	})
+	for _, want := range []string{"Released 2 comment(s)", "jail_1", "@scunner", "wynd", "jail_2", "sid"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("released output missing %q; got:\n%s", want, got)
+		}
+	}
+}
+
+func TestJailTargetFallback(t *testing.T) {
+	if got := jailTarget(protocol.JailedCommentInfo{TargetName: "wynd", TargetSession: "sid"}); got != "wynd" {
+		t.Errorf("prefer name, got %q", got)
+	}
+
+	if got := jailTarget(protocol.JailedCommentInfo{TargetSession: "sid"}); got != "sid" {
+		t.Errorf("fall back to session id, got %q", got)
+	}
+}

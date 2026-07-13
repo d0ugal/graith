@@ -416,28 +416,42 @@ var msgJailListCmd = &cobra.Command{
 			return nil
 		}
 
-		tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		_, _ = fmt.Fprintln(tw, "ID\tPR\tAUTHOR\tASSOC\tSURFACE\tTARGET\tJAILED\tSTATUS")
-
-		for _, j := range list.Jailed {
-			status := "jailed"
-			if j.ReleasedAt != "" {
-				status = "released"
-			}
-
-			target := j.TargetName
-			if target == "" {
-				target = j.TargetSession
-			}
-
-			_, _ = fmt.Fprintf(tw, "%s\t#%d\t@%s\t%s\t%s\t%s\t%s\t%s\n",
-				j.ID, j.PRNumber, j.Author, j.Association, j.Surface, target, j.JailedAt, status)
-		}
-
-		_ = tw.Flush()
+		renderJailList(os.Stdout, list.Jailed)
 
 		return nil
 	},
+}
+
+// jailTarget returns the display target for a jailed comment (name, falling back
+// to the session id).
+func jailTarget(j protocol.JailedCommentInfo) string {
+	if j.TargetName != "" {
+		return j.TargetName
+	}
+
+	return j.TargetSession
+}
+
+// jailStatus returns "jailed" or "released" for the list table.
+func jailStatus(j protocol.JailedCommentInfo) string {
+	if j.ReleasedAt != "" {
+		return "released"
+	}
+
+	return "jailed"
+}
+
+// renderJailList writes the jailed-comment table (metadata only — never a body).
+func renderJailList(w io.Writer, jailed []protocol.JailedCommentInfo) {
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	_, _ = fmt.Fprintln(tw, "ID\tPR\tAUTHOR\tASSOC\tSURFACE\tTARGET\tJAILED\tSTATUS")
+
+	for _, j := range jailed {
+		_, _ = fmt.Fprintf(tw, "%s\t#%d\t@%s\t%s\t%s\t%s\t%s\t%s\n",
+			j.ID, j.PRNumber, j.Author, j.Association, j.Surface, jailTarget(j), j.JailedAt, jailStatus(j))
+	}
+
+	_ = tw.Flush()
 }
 
 var msgJailShowCmd = &cobra.Command{
@@ -470,34 +484,38 @@ var msgJailShowCmd = &cobra.Command{
 			return out.JSON(show)
 		}
 
-		j := show.Jailed
-		status := "jailed"
-
-		if j.ReleasedAt != "" {
-			status = "released at " + j.ReleasedAt
-		}
-
-		target := j.TargetName
-		if target == "" {
-			target = j.TargetSession
-		}
-
-		out.Printf("ID:        %s\n", j.ID)
-		out.Printf("PR:        #%d (%s)\n", j.PRNumber, j.Branch)
-		out.Printf("Author:    @%s (association %s)\n", j.Author, j.Association)
-		out.Printf("Surface:   %s\n", j.Surface)
-
-		if j.Path != "" {
-			out.Printf("Location:  %s:%d\n", j.Path, j.Line)
-		}
-
-		out.Printf("Target:    %s\n", target)
-		out.Printf("Jailed at: %s\n", j.JailedAt)
-		out.Printf("Status:    %s\n", status)
-		out.Printf("\n%s\n", j.Body)
+		out.Printf("%s", renderJailShow(show.Jailed))
 
 		return nil
 	},
+}
+
+// renderJailShow formats a single jailed comment's detail block for the human,
+// ending with the body (which the daemon only supplies to a release-authorized
+// caller; otherwise it's the withheld placeholder).
+func renderJailShow(j protocol.JailedCommentInfo) string {
+	status := "jailed"
+	if j.ReleasedAt != "" {
+		status = "released at " + j.ReleasedAt
+	}
+
+	var b strings.Builder
+
+	fmt.Fprintf(&b, "ID:        %s\n", j.ID)
+	fmt.Fprintf(&b, "PR:        #%d (%s)\n", j.PRNumber, j.Branch)
+	fmt.Fprintf(&b, "Author:    @%s (association %s)\n", j.Author, j.Association)
+	fmt.Fprintf(&b, "Surface:   %s\n", j.Surface)
+
+	if j.Path != "" {
+		fmt.Fprintf(&b, "Location:  %s:%d\n", j.Path, j.Line)
+	}
+
+	fmt.Fprintf(&b, "Target:    %s\n", jailTarget(j))
+	fmt.Fprintf(&b, "Jailed at: %s\n", j.JailedAt)
+	fmt.Fprintf(&b, "Status:    %s\n", status)
+	fmt.Fprintf(&b, "\n%s\n", j.Body)
+
+	return b.String()
 }
 
 var (
@@ -510,20 +528,9 @@ var msgJailReleaseCmd = &cobra.Command{
 	Short: "Release a quarantined comment to its target session (human/orchestrator only)",
 	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		var m protocol.MsgJailReleaseMsg
-
-		switch {
-		case msgJailReleaseAll:
-			if msgJailReleaseAuthor == "" {
-				return fmt.Errorf("--all requires --author <login>")
-			}
-
-			m.All = true
-			m.Author = strings.TrimPrefix(msgJailReleaseAuthor, "@")
-		case len(args) == 1:
-			m.ID = args[0]
-		default:
-			return fmt.Errorf("specify a jail id, or --all --author <login>")
+		m, err := buildJailReleaseMsg(args, msgJailReleaseAll, msgJailReleaseAuthor)
+		if err != nil {
+			return err
 		}
 
 		c, err := client.Connect(cfg, paths, cfgFile)
@@ -551,24 +558,49 @@ var msgJailReleaseCmd = &cobra.Command{
 			return out.JSON(rel)
 		}
 
-		if len(rel.Released) == 0 {
-			out.Printf("No jailed comments released.\n")
-			return nil
-		}
-
-		out.Printf("Released %d comment(s):\n", len(rel.Released))
-
-		for _, j := range rel.Released {
-			target := j.TargetName
-			if target == "" {
-				target = j.TargetSession
-			}
-
-			out.Printf("  %s — PR #%d from @%s → %s\n", j.ID, j.PRNumber, j.Author, target)
-		}
+		out.Printf("%s", renderJailReleased(rel.Released))
 
 		return nil
 	},
+}
+
+// buildJailReleaseMsg validates the release args/flags and builds the request.
+// Exactly one of a positional id, or (--all with --author), is required.
+func buildJailReleaseMsg(args []string, all bool, author string) (protocol.MsgJailReleaseMsg, error) {
+	var m protocol.MsgJailReleaseMsg
+
+	switch {
+	case all:
+		if author == "" {
+			return m, fmt.Errorf("--all requires --author <login>")
+		}
+
+		m.All = true
+		m.Author = strings.TrimPrefix(author, "@")
+	case len(args) == 1:
+		m.ID = args[0]
+	default:
+		return m, fmt.Errorf("specify a jail id, or --all --author <login>")
+	}
+
+	return m, nil
+}
+
+// renderJailReleased formats the outcome of a release for the human.
+func renderJailReleased(released []protocol.JailedCommentInfo) string {
+	if len(released) == 0 {
+		return "No jailed comments released.\n"
+	}
+
+	var b strings.Builder
+
+	fmt.Fprintf(&b, "Released %d comment(s):\n", len(released))
+
+	for _, j := range released {
+		fmt.Fprintf(&b, "  %s — PR #%d from @%s → %s\n", j.ID, j.PRNumber, j.Author, jailTarget(j))
+	}
+
+	return b.String()
 }
 
 func decodeErr(resp protocol.Envelope) error {
