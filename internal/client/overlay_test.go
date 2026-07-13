@@ -3948,6 +3948,9 @@ func TestDisplayPR(t *testing.T) {
 		{"review required, no CI", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 56, State: "open", ReviewDecision: "review_required"}}, "#56 r"},
 		{"review trails conflict", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 56, State: "open", Conflicting: true, ReviewDecision: "changes_requested"}, CI: &protocol.CIInfo{State: "passing"}}, "#56 ⚠ c"},
 		{"merged ignores review", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 583, State: "merged", ReviewDecision: "approved"}}, "#583 merged"},
+		{"closed ignores review", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 584, State: "closed", ReviewDecision: "changes_requested"}}, "#584 closed"},
+		{"draft carries review letter", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 9, State: "draft", ReviewDecision: "review_required"}, CI: &protocol.CIInfo{State: "pending"}}, "#9d · r"},
+		{"unknown decision renders nothing", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 12, State: "open", ReviewDecision: "dismissed"}, CI: &protocol.CIInfo{State: "passing"}}, "#12 ✓"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
