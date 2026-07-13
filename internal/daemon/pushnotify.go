@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -260,15 +261,106 @@ func (sm *SessionManager) newPushDispatch() func(backend, title, message, priori
 // goroutines), so a hung osascript/command must not block the caller forever.
 const pushDispatchTimeout = 15 * time.Second
 
-// dispatchMacNotification shows a macOS desktop notification via osascript.
-// High-priority notifications play a sound. On non-darwin hosts it is a no-op
-// error so the caller reports the backend as unavailable rather than silently
-// succeeding.
+// dispatchMacNotification shows a macOS desktop notification. On non-darwin
+// hosts it is a no-op error so the caller reports the backend as unavailable
+// rather than silently succeeding.
+//
+// It prefers the bundled graith-notifier .app, which posts via
+// UNUserNotificationCenter under graith's own bundle identifier so
+// notifications appear (and can be configured) under "Graith" in System
+// Settings > Notifications. If the helper isn't installed — or is installed but
+// fails — it falls back to osascript, whose notifications show up under "Script
+// Editor" but still reach the user (graceful degradation, issue #1094).
 func dispatchMacNotification(title, message, priority string) error {
 	if runtime.GOOS != "darwin" {
 		return fmt.Errorf("macos backend requires macOS (running on %s)", runtime.GOOS)
 	}
 
+	if exe, ok := findMacNotifierApp(); ok {
+		if err := dispatchViaNotifierApp(exe, title, message, priority); err == nil {
+			return nil
+		}
+		// Helper present but failed to post; fall through to osascript so the
+		// notification still reaches the user.
+	}
+
+	return dispatchViaOsascript(title, message, priority)
+}
+
+// macNotifierExecutable is the path, relative to the .app bundle root, of the
+// notifier executable built by macos/notifier/build.sh.
+const macNotifierExecutable = "Contents/MacOS/graith-notifier"
+
+// findMacNotifierApp locates the bundled macOS notification helper and returns
+// the path to its inner executable. Search order: an explicit override
+// (GRAITH_NOTIFIER_APP), next to the running binary, common Homebrew/libexec
+// layouts, then the standard /Applications directories. A candidate may be
+// either a GraithNotifier.app bundle or the inner executable directly.
+func findMacNotifierApp() (string, bool) {
+	var candidates []string
+
+	if override := strings.TrimSpace(os.Getenv("GRAITH_NOTIFIER_APP")); override != "" {
+		candidates = append(candidates, override)
+	}
+
+	if exe, err := os.Executable(); err == nil {
+		dir := filepath.Dir(exe)
+		candidates = append(candidates,
+			filepath.Join(dir, "GraithNotifier.app"),
+			filepath.Join(dir, "..", "libexec", "graith", "GraithNotifier.app"),
+			filepath.Join(dir, "..", "share", "graith", "GraithNotifier.app"),
+		)
+	}
+
+	candidates = append(candidates, "/Applications/GraithNotifier.app")
+
+	if home, err := os.UserHomeDir(); err == nil {
+		candidates = append(candidates, filepath.Join(home, "Applications", "GraithNotifier.app"))
+	}
+
+	for _, c := range candidates {
+		if exe, ok := resolveNotifierExecutable(c); ok {
+			return exe, true
+		}
+	}
+
+	return "", false
+}
+
+// resolveNotifierExecutable maps a candidate path to a runnable notifier
+// executable. A ".app" path is resolved to its inner executable; any other path
+// is treated as the executable itself. It reports ok=false unless the resolved
+// path exists and is a regular file.
+func resolveNotifierExecutable(path string) (string, bool) {
+	exe := path
+	if strings.HasSuffix(path, ".app") {
+		exe = filepath.Join(path, macNotifierExecutable)
+	}
+
+	if info, err := os.Stat(exe); err == nil && info.Mode().IsRegular() { //nolint:gosec // G703: exe is an operator-controlled install location (env override / gr binary dir / /Applications), not attacker input
+		return exe, true
+	}
+
+	return "", false
+}
+
+// dispatchViaNotifierApp runs the notifier helper with the notification
+// content. The helper exits non-zero on any failure so the caller can fall back.
+func dispatchViaNotifierApp(exe, title, message, priority string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), pushDispatchTimeout)
+	defer cancel()
+
+	if err := exec.CommandContext(ctx, exe, title, message, priority).Run(); err != nil {
+		return fmt.Errorf("notifier app: %w", err)
+	}
+
+	return nil
+}
+
+// dispatchViaOsascript shows a notification via osascript. High-priority
+// notifications play a sound. This is the fallback when the bundled helper
+// isn't available.
+func dispatchViaOsascript(title, message, priority string) error {
 	script := fmt.Sprintf("display notification %s with title %s", osaQuote(message), osaQuote(title))
 	if priority == config.NotifyPriorityHigh {
 		script += " sound name " + osaQuote("Ping")

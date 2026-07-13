@@ -85,8 +85,25 @@ Priority levels: `low`, `normal` (default), and `high`. `high` plays a sound and
 **bypasses quiet hours and the rate limit**; `low`/`normal` are subject to both.
 Only the orchestrator session and the human may send notifications — plain agent
 sessions are rejected to prevent spam. Identical notifications within 30s are
-coalesced. The `macos` backend uses `osascript`; other backends (ntfy, Pushover,
-Slack) are planned follow-ups.
+coalesced. Other backends (ntfy, Pushover, Slack) are planned follow-ups.
+
+#### The `macos` backend
+
+The `macos` backend prefers a small bundled helper app (`GraithNotifier.app`,
+bundle identifier `com.graith.notifier`) that posts via
+`UNUserNotificationCenter`. This makes graith appear as **"Graith"** in *System
+Settings > Notifications*, so you can configure its notification style, sounds,
+and Do-Not-Disturb behaviour like any other app.
+
+Build the helper with `make notifier` (macOS only — a no-op on Linux) and place
+the resulting `macos/build/GraithNotifier.app` where graith can find it:
+alongside the `gr` binary, under `<prefix>/libexec/graith/` or
+`<prefix>/share/graith/`, in `/Applications`, or in `~/Applications`. Set
+`GRAITH_NOTIFIER_APP` to override the location explicitly.
+
+If the helper isn't installed, graith falls back to `osascript`, whose
+notifications work but appear under "Script Editor" (and can't be configured
+per-app) — the reason the helper exists.
 
 Triggers can fire a notification when their action completes:
 
