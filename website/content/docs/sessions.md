@@ -46,6 +46,15 @@ Steps:
 
 **Mirror:** `gr new observer --mirror my-session` creates a session that mounts another session's worktree read-only. Useful for observation or review. Requires sandbox to be enabled (`sandbox.enabled = true` in config).
 
+### Headless sessions
+
+**Experimental.** `gr new observer --headless` runs the agent in Claude Code's stream-json mode instead of an interactive PTY. Headless sessions are **non-interactive**: they are meant for fire-and-forget work no human will attach to (tribunal judges, trigger briefings, mirror sessions), and give graith structured status, live cost/token usage, and clean interrupts. v1 is Claude-only and one-shot (one prompt, run to completion, exit), and the whole path is inert unless `[headless] experimental = true` is set. See [Configuration → Headless sessions](configuration.md#headless-sessions).
+
+Because there is no PTY to stream, `gr attach` on a headless session is not
+supported yet — use `gr logs -f` to watch it read-only. Convert-to-interactive
+on attach (relaunching in a PTY via `claude --resume <session-id>`, preserving
+history) is a planned follow-up (issue #1075).
+
 ## Attachment
 
 ```bash

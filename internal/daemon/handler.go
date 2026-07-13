@@ -487,6 +487,15 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					}
 				}
 
+				// Headless sessions have no interactive TUI to stream. Convert-on-
+				// attach (stop → `claude --resume` in a PTY) is a planned follow-up
+				// (issue #1075); until then, direct the user to read-only logs
+				// rather than attaching to a stream they can't drive.
+				if sess, exists := sm.Get(a.SessionID); exists && sess.DriverKind == DriverHeadless {
+					sendControl("error", protocol.ErrorMsg{Message: "session is headless; interactive attach is not yet supported — use `gr logs -f " + sess.Name + "` to watch it read-only"})
+					continue
+				}
+
 				ptySess, ok := sm.GetPTY(a.SessionID)
 				if !ok {
 					sess, exists := sm.Get(a.SessionID)
