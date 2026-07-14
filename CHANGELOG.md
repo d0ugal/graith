@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.67.9](https://github.com/d0ugal/graith/compare/v0.67.8...v0.67.9) (2026-07-14)
+
+
+### Features
+
+* **hooks:** make Notification subtype-aware (idle_prompt -&gt; ready) ([264ba61](https://github.com/d0ugal/graith/commit/264ba61a22ec3e4f527efb8919559a0c32e154fd))
+* **hooks:** wire PreCompact/PostCompact + Subagent tracking ([c597e57](https://github.com/d0ugal/graith/commit/c597e574c22ac016b6fd772770aff8727474317e))
+* **hooks:** wire SessionEnd lifecycle + Stop last_assistant_message capture ([2e91e85](https://github.com/d0ugal/graith/commit/2e91e8535adfcf2a6933f06fc24ccccb8ee19329))
+
+
+### Performance Improvements
+
+* **hooks:** scope Claude PreToolUse hook to skip read-only tools ([2a2f798](https://github.com/d0ugal/graith/commit/2a2f798773163b81a1e3a7e666562ed495937141))
+
+
+### Documentation
+
+* **design:** address review findings on hook-events doc ([057d78c](https://github.com/d0ugal/graith/commit/057d78ca9f39690a9ee1f4b905ebf147e0f21f31))
+* **design:** wire missing Claude Code hook events ([#1073](https://github.com/d0ugal/graith/issues/1073)) ([a2385b8](https://github.com/d0ugal/graith/commit/a2385b8f9ce7ce674d8f833fd21744f0fef95d92))
+* **website:** address review findings on sandbox config ([0f655c1](https://github.com/d0ugal/graith/commit/0f655c1041d0722f23716330001fbd2ff344db0e))
+* **website:** split long doc pages into Hugo sections ([10b329f](https://github.com/d0ugal/graith/commit/10b329f1885e36e19fc7462fc9e658985b04c026))
+
+
+### Dependencies
+
+* **main:** release 0.67.8 ([52300b8](https://github.com/d0ugal/graith/commit/52300b8ab72487723d0c461ef0b1ac935c21ee73))
+
 ## [0.67.8](https://github.com/d0ugal/graith/compare/v0.67.7...v0.67.8) (2026-07-13)
 
 
