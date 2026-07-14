@@ -8,6 +8,18 @@ on:
 permissions:
   contents: read
 
+# Serialise runs. This workflow destructively replaces a single shared `dev`
+# release and rewrites one tap formula, so two overlapping runs (from two close
+# pushes to main) could interleave — e.g. publish assets from one build while
+# pushing a formula whose checksums describe another, leaving the tap referring
+# to bytes that fail Homebrew's SHA-256 verification. We queue rather than
+# cancel-in-progress: cancelling could interrupt the delete→recreate→push
+# sequence after the old release is already gone. GitHub keeps only the newest
+# pending run, so a burst of pushes still converges on the latest commit.
+concurrency:
+  group: dev-release
+  cancel-in-progress: false
+
 jobs:
   dev-release:
     runs-on: ubuntu-latest
@@ -46,15 +58,21 @@ jobs:
             --notes "Built from main at $(git rev-parse --short HEAD). Install: \`brew install d0ugal/tap/graith-dev\`"
 
       - name: Update Homebrew tap
+        # Explicit bash so the step runs with `-o pipefail`; GitHub's implicit
+        # shell is `bash -e {0}` (no pipefail), under which a failed
+        # `sha256sum | cut` would still exit 0 and silently emit an empty sha.
+        shell: bash
         env:
           RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
           # metadata.json is a flat object, and its `.version` field carries the
-          # snapshot version (e.g. 0.68.3-dev.<commit-timestamp>) — unique and
+          # snapshot version (e.g. 0.68.3-dev.<build-timestamp>) — unique and
           # monotonic per build. The old `.[0].tag` both failed to index the
           # object and pinned every dev build to the last released semver, so
-          # `brew upgrade` never saw a newer graith-dev.
-          VERSION=$(jq -r '.version' dist/metadata.json)
+          # `brew upgrade` never saw a newer graith-dev. `-e` with the string
+          # filter fails the step closed on missing/empty/non-string version
+          # rather than writing `version "null"` into the formula.
+          VERSION=$(jq -er '.version | select(type == "string" and length > 0)' dist/metadata.json)
           DARWIN_AMD64_SHA=$(sha256sum dist/graith-dev_darwin_amd64.tar.gz | cut -d' ' -f1)
           DARWIN_ARM64_SHA=$(sha256sum dist/graith-dev_darwin_arm64.tar.gz | cut -d' ' -f1)
           LINUX_AMD64_SHA=$(sha256sum dist/graith-dev_linux_amd64.tar.gz | cut -d' ' -f1)

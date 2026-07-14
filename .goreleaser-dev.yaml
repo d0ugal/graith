@@ -26,8 +26,11 @@ changelog:
 
 # The version must be monotonically increasing so `brew upgrade` recognises each
 # main push as newer than the last. A git short-SHA suffix sorts arbitrarily
-# (Homebrew tokenises and compares versions), so we use the commit timestamp,
-# which always advances. The commit SHA is still embedded in the binary via
-# ldflags and printed in the GitHub release notes.
+# (Homebrew tokenises and compares versions), so we use `.Timestamp` — the Unix
+# time of the build itself. Unlike `.CommitTimestamp` (a caller-controlled commit
+# date that can repeat or move backwards), the build time always advances between
+# runs, and the workflow's concurrency group serialises them so no two dev builds
+# share a timestamp. The commit SHA is still embedded in the binary via ldflags
+# and printed in the GitHub release notes.
 snapshot:
-  version_template: "{{ incpatch .Version }}-dev.{{ .CommitTimestamp }}"
+  version_template: "{{ incpatch .Version }}-dev.{{ .Timestamp }}"
