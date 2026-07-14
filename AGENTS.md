@@ -90,6 +90,7 @@ Key files by area:
 | Trigger | `daemon/trigger_actions.go` | Action executors: command (sandboxed), session/ensure-reviewer, scenario, message |
 | Trigger | `daemon/filewatch.go` | Watch source (`RunFileWatchLoop`): binding reconcile, recursive fsnotify + gitignore pruning, debounce |
 | Trigger | `cli/trigger.go` | `gr trigger list/status/run/pause/resume` commands |
+| Capabilities | `capabilities/capabilities.go`, `capabilities/capabilities.json` | CLI/iOS/macOS capability matrix: hand-maintained JSON manifest (source of truth) + loader/validator/renderer; a drift test keeps `website/content/docs/capabilities.md` in sync |
 
 ## Architecture patterns
 
@@ -571,6 +572,28 @@ two drift apart if you only update one. Updating `AGENTS.md` (agent-facing
 reference) is likewise not a substitute for the site docs. If you're unsure a
 change is user-visible, check whether an existing page would now be wrong — if
 so, fix it.
+
+### Capability matrix
+
+`internal/capabilities/capabilities.json` is a **hand-maintained** manifest —
+the source of truth for which capabilities each frontend (CLI, iOS, macOS)
+supports. **When a frontend gains or loses a capability, update its state in the
+JSON**, then regenerate the docs page and commit both together:
+
+```bash
+go test ./internal/capabilities -run TestDocMatchesManifest -update
+```
+
+`-update` rewrites only the marker-delimited region of
+`website/content/docs/capabilities.md` from the manifest (via the same
+`ReplaceRegion` code the check uses, so regen and check can't diverge).
+`TestDocMatchesManifest` runs under `go test ./...` in CI and fails if the doc
+and manifest disagree — so a JSON edit without a regen is caught. But the check
+only verifies **doc ↔ manifest**, *not* **manifest ↔ actual code**: nothing
+auto-detects that a frontend quietly wired a capability, so the manifest's
+accuracy depends on you keeping it current. `supported`/`planned`/`n/a` — and
+especially the `planned` (intended gap) vs `n/a` (deliberately not applicable)
+distinction — are human judgments, not derivable from the source.
 
 graith can manage its own development sessions. This is the intended workflow
 for working on graith itself:
