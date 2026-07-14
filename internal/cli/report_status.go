@@ -23,6 +23,31 @@ type hookStdin struct {
 	NotificationType string `json:"notification_type"`
 }
 
+// buildStatusReport assembles the status_report message from the flags and the
+// parsed hook stdin. The CLI forwards the raw notification subtype (empty when
+// stdin didn't parse within the budget) and no longer decides what a subtype
+// means — the daemon routes it (idle_prompt -> ready, permission_prompt ->
+// approval, everything else -> no status change). This is deliberately coupled
+// with the daemon's subtype-aware switch: an empty/unparsed subtype must map to
+// no status change there, not to approval.
+func buildStatusReport(sessionID, event, toolFlag string, stdin hookStdin, parsed bool) protocol.StatusReportMsg {
+	msg := protocol.StatusReportMsg{
+		SessionID: sessionID,
+		Event:     event,
+		ToolName:  toolFlag,
+	}
+
+	if parsed {
+		msg.NotificationType = stdin.NotificationType
+
+		if stdin.ToolName != "" && msg.ToolName == "" {
+			msg.ToolName = stdin.ToolName
+		}
+	}
+
+	return msg
+}
+
 var reportStatusCmd = &cobra.Command{
 	Use:    "report-status",
 	Short:  "Report agent status to daemon (used by hooks)",
@@ -65,22 +90,7 @@ var reportStatusCmd = &cobra.Command{
 		case <-time.After(100 * time.Millisecond):
 		}
 
-		// Filter Notification events: only permission_prompt maps to approval
-		if event == "Notification" && stdin.parsed && stdin.data.NotificationType != "permission_prompt" {
-			return nil
-		}
-
-		msg := protocol.StatusReportMsg{
-			SessionID: sessionID,
-			Event:     event,
-			ToolName:  reportTool,
-		}
-
-		if stdin.parsed {
-			if stdin.data.ToolName != "" && msg.ToolName == "" {
-				msg.ToolName = stdin.data.ToolName
-			}
-		}
+		msg := buildStatusReport(sessionID, event, reportTool, stdin.data, stdin.parsed)
 
 		hookPaths, err := config.ResolvePaths()
 		if err != nil {

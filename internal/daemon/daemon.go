@@ -190,7 +190,31 @@ func (sm *SessionManager) HandleHookReport(sr protocol.StatusReportMsg) {
 	case "UserPromptSubmit", "PreToolUse", "PostToolUse":
 		status = "active"
 		staleness = 30 * time.Second
-	case "Notification", "PermissionRequest":
+	case "Notification":
+		// A Claude Notification's meaning is in its subtype. The CLI forwards
+		// the raw notification_type (empty when stdin didn't parse); the daemon
+		// decides. Only idle_prompt (agent awaiting input) and permission_prompt
+		// (approval needed) change status. Everything else — auth_success,
+		// elicitation_*, and crucially an empty/unknown/unparsed subtype — is
+		// logged without touching AgentStatus, so a parse timeout can no longer
+		// spuriously flag a session as needing attention (the pre-subtype code
+		// mapped every Notification to approval).
+		switch sr.NotificationType {
+		case "idle_prompt":
+			status = "ready"
+			staleness = 30 * time.Minute
+		case "permission_prompt":
+			status = "approval"
+			staleness = 30 * time.Minute
+		default:
+			sm.log.Info("ignoring notification subtype",
+				"event", sr.Event, "notification_type", sr.NotificationType,
+				"session_id", sr.SessionID)
+
+			return
+		}
+	case "PermissionRequest":
+		// Codex's PreToolUse approval hook; not subtype-carrying.
 		status = "approval"
 		staleness = 30 * time.Minute
 	case "Stop":
