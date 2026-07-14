@@ -480,7 +480,10 @@ class SessionStore: ObservableObject {
     /// Path is the final tiebreak because Swift's sort isn't stable and two
     /// repos can share a (case-insensitive) name; without it the result would
     /// still depend on input order for same-named entries.
-    static func orderedRepos(_ repos: [RepoEntry]) -> [RepoEntry] {
+    ///
+    /// `nonisolated` — it's pure (no access to `SessionStore`'s state), so it can
+    /// be called off the main actor (e.g. from a synchronous test context).
+    nonisolated static func orderedRepos(_ repos: [RepoEntry]) -> [RepoEntry] {
         repos.sorted { lhs, rhs in
             let lRecent = lhs.recent ?? false
             let rRecent = rhs.recent ?? false
