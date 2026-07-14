@@ -65,8 +65,8 @@ type SessionColumn struct {
 // unless --wide is set) and renders the survivors in this order. The order is
 // chosen so that the two filtered subsets each match their historical layout:
 //
-//	CLI: Repo Agent Status Activity [Model Branch] Git PR Age [Attached]
-//	TUI: Status Summary Git PR Output
+//	CLI: Repo Agent Status Activity [Model Branch] Git PR Review Age [Attached]
+//	TUI: Status Summary Git PR Review Output
 func SessionColumns() []SessionColumn {
 	return []SessionColumn{
 		{
@@ -114,6 +114,23 @@ func SessionColumns() []SessionColumn {
 			TUIValue: displayPR,
 			TUIStyle: func(s protocol.SessionInfo) lipgloss.Style {
 				return lipgloss.NewStyle().Foreground(prColor(s))
+			},
+		},
+		{
+			// Review decision is its own column so it carries a colour driven by the
+			// decision (approved=green, changes_requested=red, review_required=dim)
+			// rather than inheriting the PR/CI token colour — a review_required "r"
+			// under a green build must not itself read as green.
+			Key: "review", Header: "Review", ShowCLI: true, ShowTUI: true, MinWidth: 1,
+			CLIValue: func(s protocol.SessionInfo, _ time.Time) string { return cliReview(s) },
+			CLIColor: reviewColor,
+			TUIValue: displayReview,
+			TUIStyle: func(s protocol.SessionInfo) lipgloss.Style {
+				if c := reviewColor(s); c != nil {
+					return lipgloss.NewStyle().Foreground(c)
+				}
+
+				return lipgloss.NewStyle()
 			},
 		},
 		{
@@ -230,8 +247,9 @@ func cliBranch(s protocol.SessionInfo) string {
 	return ""
 }
 
-// cliPR is the plain-text PR/CI/review cell for `gr ls`, e.g. "#42 open",
-// "#7 open conflict", "#1 open CI:ok review:ok".
+// cliPR is the plain-text PR/CI cell for `gr ls`, e.g. "#42 open",
+// "#7 open conflict", "#1 open CI:ok". The review decision is a separate column
+// (cliReview) so it can be coloured independently of the CI/conflict signal.
 func cliPR(s protocol.SessionInfo) string {
 	if s.PullRequest == nil {
 		return ""
@@ -241,11 +259,10 @@ func cliPR(s protocol.SessionInfo) string {
 
 	out := fmt.Sprintf("#%d %s", pr.Number, pr.State)
 
-	// A merged/closed PR is terminal: its conflict/CI/review badges are stale
+	// A merged/closed PR is terminal: its conflict/CI badges are stale
 	// (resolvePR keeps the last-known values once a PR leaves open/draft), so
 	// suppress them and show only the state — mirroring displayPR and prColor
-	// (issue #773). Without this, a merged PR whose ReviewDecision is still
-	// "approved" would print "#583 merged review:ok".
+	// (issue #773).
 	if pr.State == "merged" || pr.State == "closed" {
 		return out
 	}
@@ -265,16 +282,23 @@ func cliPR(s protocol.SessionInfo) string {
 		}
 	}
 
-	switch pr.ReviewDecision {
-	case "approved":
-		out += " review:ok"
-	case "changes_requested":
-		out += " review:changes"
-	case "review_required":
-		out += " review:needed"
-	}
-
 	return out
+}
+
+// cliReview is the plain-text review-decision cell for `gr ls`: "approved",
+// "changes", "needed", or "" when there is no live decision. Coloured by
+// reviewColor so review_required reads dim, not green.
+func cliReview(s protocol.SessionInfo) string {
+	switch reviewActiveDecision(s) {
+	case "approved":
+		return "approved"
+	case "changes_requested":
+		return "changes"
+	case "review_required":
+		return "needed"
+	default:
+		return ""
+	}
 }
 
 // cliGit is the plain-text git cell for `gr ls`, e.g. "dirty", "3 ahead",

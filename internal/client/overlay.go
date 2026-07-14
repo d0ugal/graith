@@ -257,9 +257,10 @@ func displayGit(dirty bool, unpushed int) string {
 	return strings.Join(parts, " ")
 }
 
-// displayPR is the compact per-row PR/CI/review token for the overlay list,
-// e.g. "#56 ✗" (CI failing), "#56 ⚠" (conflict), "#1615 ✓ a" (passing,
-// approved), "#583 merged". A trailing a/c/r marks the review decision.
+// displayPR is the compact per-row PR/CI token for the overlay list, e.g.
+// "#56 ✗" (CI failing), "#56 ⚠" (conflict), "#1615 ✓" (passing), "#583 merged".
+// The review decision is a separate column (displayReview) so it can carry its
+// own colour independent of the CI/conflict signal.
 func displayPR(s protocol.SessionInfo) string {
 	if s.PullRequest == nil {
 		return "—"
@@ -277,41 +278,66 @@ func displayPR(s protocol.SessionInfo) string {
 		out += "d"
 	}
 
-	// The review letter (a/c/r) trails the CI/conflict signal so an open PR
-	// shows both at a glance, e.g. "#56 ✓ a" (passing, approved).
-	rev := reviewLetter(pr.ReviewDecision)
-
 	if pr.Conflicting {
-		return out + " ⚠" + rev // merge conflict — highest-priority signal
+		return out + " ⚠" // merge conflict — highest-priority signal
 	}
 
 	if s.CI != nil {
 		switch s.CI.State {
 		case "passing":
-			return out + " ✓" + rev
+			return out + " ✓"
 		case "failing":
-			return out + " ✗" + rev
+			return out + " ✗"
 		case "pending":
-			return out + " ·" + rev
+			return out + " ·"
 		}
 	}
 
-	return out + rev
+	return out
 }
 
-// reviewLetter is the compact per-row review-decision suffix for the overlay,
-// with a leading space: " a" (approved), " c" (changes requested),
-// " r" (review required), or "" when there is no decision yet.
-func reviewLetter(decision string) string {
-	switch decision {
-	case "approved":
-		return " a"
-	case "changes_requested":
-		return " c"
-	case "review_required":
-		return " r"
-	default:
+// reviewActiveDecision returns a PR's review decision only while it is live (an
+// open/draft PR). A merged/closed PR's decision is stale and suppressed, mirroring
+// displayPR/prColor (issue #773). Empty when there is no PR or no decision.
+func reviewActiveDecision(s protocol.SessionInfo) string {
+	pr := s.PullRequest
+	if pr == nil || pr.State == "merged" || pr.State == "closed" {
 		return ""
+	}
+
+	return pr.ReviewDecision
+}
+
+// displayReview is the compact TUI review-decision glyph: "a" (approved),
+// "c" (changes requested), "r" (review required), or "—" when there is no live
+// decision. Its colour comes from reviewColor, not prColor.
+func displayReview(s protocol.SessionInfo) string {
+	switch reviewActiveDecision(s) {
+	case "approved":
+		return "a"
+	case "changes_requested":
+		return "c"
+	case "review_required":
+		return "r"
+	default:
+		return "—"
+	}
+}
+
+// reviewColor colours the review indicator by decision, independent of the PR/CI
+// token colour: approved = green, changes_requested = red, review_required =
+// dim/grey (not yet reviewed — deliberately NOT green, which reads as "good").
+// Returns nil when there is no live decision.
+func reviewColor(s protocol.SessionInfo) color.Color {
+	switch reviewActiveDecision(s) {
+	case "approved":
+		return colorGreen
+	case "changes_requested":
+		return colorRed
+	case "review_required":
+		return colorDim
+	default:
+		return nil
 	}
 }
 
