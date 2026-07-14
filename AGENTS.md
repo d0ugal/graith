@@ -523,6 +523,18 @@ struct field names, or test function names.
 - Errors: return `fmt.Errorf(...)`, don't use `log.Fatal` in library code
 - The daemon logs to `~/.local/share/graith/daemon.log` (slog, JSON format)
 
+### Leave files better than you found them
+
+When you touch a file, look for opportunities to improve it — don't just add to
+the pile. Prefer **small, single-purpose functions**: if you're extending a long
+function, consider splitting it; if you spot duplicated logic (here or in a
+sibling file), extract a shared helper rather than copy-pasting. Rename an
+unclear variable, delete dead code, tighten a comment that's now wrong. Keep
+these cleanups small and in scope — a focused refactor alongside the change is
+welcome, but don't let it balloon into an unrelated rewrite that muddies the
+diff. The goal is that every file is a little cleaner each time it's edited, not
+that any single PR fixes everything.
+
 ## Design docs
 
 Non-trivial features get a design doc in `docs/design/` **before** they're
