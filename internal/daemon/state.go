@@ -94,7 +94,21 @@ type SessionState struct {
 	// only, cleared on SessionStart and resume/restart. Never mutated in place:
 	// each SubagentStart/Stop replaces it with a fresh map so an off-lock
 	// cloneSessionState is race-free (mirrors the Tokens discipline above).
-	SubAgents      map[string]string     `json:"-"`
+	SubAgents map[string]string `json:"-"`
+	// SessionEndReason is Claude's raw SessionEnd reason (clear/resume/logout/
+	// prompt_input_exit/other). Runtime-only (never persisted): a daemon restart
+	// forgets it and hooks re-establish the picture. It is distinct from
+	// StopReason — the process-exit path maps only process-ending reasons onto a
+	// StopReason (see mapSessionEndReason). Cleared on SessionStart and on
+	// resume/restart so a stale reason can't outlive its turn.
+	SessionEndReason string `json:"-"`
+	// SessionEndReasonGen binds SessionEndReason to the process generation
+	// (PIDStartTime) that produced it, so the exit path consumes it only for the
+	// same process — a reason recorded against an older generation is ignored.
+	SessionEndReasonGen int64 `json:"-"`
+	// LastMessage is the truncated last_assistant_message from the most recent
+	// Stop event. Runtime-only; kept off the guest-visible SessionInfo unredacted.
+	LastMessage    string                `json:"-"`
 	ExitCode       *int                  `json:"exit_code,omitempty"`
 	ExitSignal     string                `json:"exit_signal,omitempty"`
 	PID            int                   `json:"pid,omitempty"`

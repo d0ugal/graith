@@ -56,6 +56,7 @@ func TestGenerateClaudeSettings(t *testing.T) {
 
 	expectedEvents := []string{
 		"SessionStart",
+		"SessionEnd",
 		"UserPromptSubmit",
 		"PreToolUse",
 		"PostToolUse",
@@ -1031,7 +1032,7 @@ func TestGenerateClaudeSettingsApprovalsDisabled(t *testing.T) {
 	}
 
 	// The other lifecycle hooks must still be installed.
-	for _, event := range []string{"SessionStart", "UserPromptSubmit", "PostToolUse", "Notification", "Stop"} {
+	for _, event := range []string{"SessionStart", "SessionEnd", "UserPromptSubmit", "PostToolUse", "Notification", "Stop"} {
 		if _, ok := parsed.Hooks[event]; !ok {
 			t.Errorf("event %q missing when approvals disabled, want present", event)
 		}

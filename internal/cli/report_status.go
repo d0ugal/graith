@@ -26,6 +26,26 @@ type hookStdin struct {
 	// AgentID / AgentType identify a Claude sub-agent on SubagentStart/Stop.
 	AgentID   string `json:"agent_id"`
 	AgentType string `json:"agent_type"`
+	// Reason is Claude's SessionEnd reason (clear/resume/logout/prompt_input_exit/other).
+	Reason string `json:"reason"`
+	// LastAssistantMsg is the agent's final message on Stop; truncated before send.
+	LastAssistantMsg string `json:"last_assistant_message"`
+}
+
+// maxLastMessageRunes bounds the last_assistant_message the CLI forwards to the
+// daemon. It's the agent's full final output — we want a snippet, not an
+// unbounded control frame — so truncate it before it hits the wire.
+const maxLastMessageRunes = 2000
+
+// truncateRunes returns s bounded to at most maxRunes runes, cutting on a rune
+// boundary so a multi-byte character is never split.
+func truncateRunes(s string, maxRunes int) string {
+	r := []rune(s)
+	if len(r) <= maxRunes {
+		return s
+	}
+
+	return string(r[:maxRunes])
 }
 
 // buildStatusReport assembles the status_report message from the flags and the
@@ -55,6 +75,16 @@ func buildStatusReport(sessionID, event, toolFlag string, stdin hookStdin, parse
 		msg.Trigger = stdin.Trigger
 		msg.AgentID = stdin.AgentID
 		msg.AgentType = stdin.AgentType
+
+		// SessionEnd reason and the (truncated) Stop final message (issue #1073,
+		// tier 1). The daemon records the raw reason and maps only process-ending
+		// reasons onto a StopReason; the final message is bounded here so it never
+		// hits the wire unbounded.
+		msg.Reason = stdin.Reason
+
+		if stdin.LastAssistantMsg != "" {
+			msg.LastMessage = truncateRunes(stdin.LastAssistantMsg, maxLastMessageRunes)
+		}
 	}
 
 	return msg

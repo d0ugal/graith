@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -117,4 +118,84 @@ func TestBuildStatusReportUnparsedDropsNewFields(t *testing.T) {
 	if msg.Trigger != "" || msg.AgentID != "" || msg.AgentType != "" {
 		t.Errorf("unparsed stdin leaked fields: %+v", msg)
 	}
+}
+
+func TestTruncateRunes(t *testing.T) {
+	t.Run("short string unchanged", func(t *testing.T) {
+		in := "braw wee message"
+		if got := truncateRunes(in, maxLastMessageRunes); got != in {
+			t.Errorf("truncateRunes(%q) = %q, want unchanged", in, got)
+		}
+	})
+
+	t.Run("long string truncated to bound", func(t *testing.T) {
+		in := strings.Repeat("a", maxLastMessageRunes+500)
+
+		got := truncateRunes(in, maxLastMessageRunes)
+		if len([]rune(got)) != maxLastMessageRunes {
+			t.Errorf("truncated length = %d runes, want %d", len([]rune(got)), maxLastMessageRunes)
+		}
+	})
+
+	t.Run("cuts on a rune boundary", func(t *testing.T) {
+		// Multi-byte runes must never be split mid-character.
+		in := strings.Repeat("thrawn✓", 1000) // ✓ is 3 bytes
+
+		got := truncateRunes(in, 10)
+		if len([]rune(got)) != 10 {
+			t.Errorf("truncated length = %d runes, want 10", len([]rune(got)))
+		}
+
+		if !json.Valid([]byte(`"` + got + `"`)) {
+			t.Errorf("truncated output %q is not a valid JSON string (split a rune)", got)
+		}
+	})
+}
+
+// TestHookStdinParse verifies the SessionEnd reason and Stop last_assistant_message
+// fields decode off the hook JSON payload, and that an over-long final message is
+// truncated before it would hit the wire.
+func TestHookStdinParse(t *testing.T) {
+	t.Run("SessionEnd reason", func(t *testing.T) {
+		var parsed hookStdin
+		if err := json.Unmarshal([]byte(`{"reason":"logout"}`), &parsed); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+
+		if parsed.Reason != "logout" {
+			t.Errorf("Reason = %q, want %q", parsed.Reason, "logout")
+		}
+	})
+
+	t.Run("Stop last_assistant_message truncated", func(t *testing.T) {
+		long := strings.Repeat("dreich ", maxLastMessageRunes) // well over the bound
+
+		payload, err := json.Marshal(map[string]string{"last_assistant_message": long})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var parsed hookStdin
+		if err := json.Unmarshal(payload, &parsed); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+
+		if parsed.LastAssistantMsg != long {
+			t.Fatal("parse did not round-trip last_assistant_message")
+		}
+
+		out := truncateRunes(parsed.LastAssistantMsg, maxLastMessageRunes)
+		if len([]rune(out)) != maxLastMessageRunes {
+			t.Errorf("forwarded message = %d runes, want capped at %d", len([]rune(out)), maxLastMessageRunes)
+		}
+	})
+
+	t.Run("Stop message via buildStatusReport is truncated", func(t *testing.T) {
+		long := strings.Repeat("x", maxLastMessageRunes+123)
+		msg := buildStatusReport("braw", "Stop", "", hookStdin{LastAssistantMsg: long}, true)
+
+		if len([]rune(msg.LastMessage)) != maxLastMessageRunes {
+			t.Errorf("LastMessage = %d runes, want capped at %d", len([]rune(msg.LastMessage)), maxLastMessageRunes)
+		}
+	})
 }
