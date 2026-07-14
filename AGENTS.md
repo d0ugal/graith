@@ -64,6 +64,8 @@ Key files by area:
 | Daemon | `daemon/daemon.go` | SessionManager: create, delete, resume, worktree lifecycle |
 | Daemon | `daemon/launch.go` | Launch throttle (semaphore bounding concurrent agent spawns) + startup watchdog (restarts sessions stuck in `unknown`/no-output past `[launch] startup_timeout`) |
 | Daemon | `daemon/state.go` | Persistent state (JSON file) |
+| Daemon | `daemon/prwatch.go`, `daemon/ghpr.go` | PR/CI poll loop, `gh` reader, comment author-trust gate, notification cursor/diff |
+| Daemon | `daemon/prrefwatch.go` | git-refs fsnotify watch that kicks an immediate PR poll on push/commit/checkout (near-instant detection; poll is fallback) |
 | Daemon | `daemon/msgstore.go` | Inter-agent pub/sub messaging (SQLite-backed) |
 | Client | `client/passthrough.go` | Raw PTY passthrough with prefix key handling |
 | Client | `client/overlay.go` | Session picker UI (bubbletea), view modes (All/Needs Attention/Active), preview rendering |
@@ -186,7 +188,19 @@ changes or sessions resume. Scenario TOML files live in
 **PR & CI awareness**: The daemon's `pr_watch` loop (`internal/daemon/prwatch.go`,
 `ghpr.go`) resolves each session's GitHub PR via `gh`, polls CI checks and
 comments, and delivers structured notifications to the owning session's inbox
-(auto-resuming a stopped agent). Because comment bodies are free text from
+(auto-resuming a stopped agent). Detection is made near-instant by a git-refs
+file watch (`internal/daemon/prrefwatch.go`): each running session's worktree
+git dirs (`HEAD` + `refs/` + reflogs in the per-worktree gitdir and the common
+dir, never `objects/`) are watched with fsnotify, and a push/commit/checkout
+sends the session ID to the poll loop's `kick` channel, which polls that session
+immediately (bypassing the tick/batch-cap/negative-cache, bounded by a
+per-session `prKickCooldown`). The timer poll stays the always-on fallback; the
+watch is a pure accelerator, fail-open, gated by the same `[pr_watch] enabled`.
+On first discovery of a PR the loop backfills currently-broken **mechanical**
+state (failing CI, merge conflict) so a rediscovered PR doesn't strand a stopped
+agent, but deliberately does NOT replay pre-discovery comments/reviews (priming
+baselines them to avoid dumping a backlog). See
+`docs/design/2026-07-14-pr-ref-watch-design.md`. Because comment bodies are free text from
 arbitrary GitHub users, comment notifications are gated by an **author-trust
 check**: a comment notifies only if its author's login is in an explicit
 allowlist (`comment_author_allowlist` — the way to trust bots/Apps, whose

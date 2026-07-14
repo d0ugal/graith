@@ -96,6 +96,7 @@ type SessionManager struct {
 	// Cleared when a session (re)spawns a PTY so a restart can warn afresh.
 	silentWarned map[string]bool
 	prWatch      *prWatchState
+	prRefWatch   *prRefWatchState
 	triggers     *triggerState
 	tokens       *tokenCache
 	launch       *launchThrottle
@@ -143,6 +144,7 @@ func NewSessionManager(cfg *config.Config, paths config.Paths, log *slog.Logger)
 		lastInboxNotifyAt:  make(map[string]time.Time),
 		silentWarned:       make(map[string]bool),
 		prWatch:            newPRWatchState(),
+		prRefWatch:         newPRRefWatchState(),
 		triggers:           newTriggerState(),
 		tokens:             newTokenCache(),
 		launch:             newLaunchThrottle(cfg.Launch.MaxConcurrentOrDefault()),
