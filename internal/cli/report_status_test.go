@@ -62,3 +62,59 @@ func TestBuildStatusReport(t *testing.T) {
 		}
 	})
 }
+
+// decodeHookStdin mirrors the non-blocking stdin parse in report-status: it
+// decodes a raw Claude/Codex hook payload into hookStdin.
+func decodeHookStdin(t *testing.T, raw string) hookStdin {
+	t.Helper()
+
+	var data hookStdin
+	if err := json.Unmarshal([]byte(raw), &data); err != nil {
+		t.Fatalf("unmarshal hook payload: %v", err)
+	}
+
+	return data
+}
+
+func TestBuildStatusReportCompaction(t *testing.T) {
+	// PreCompact carries a trigger; it must flow onto the message unchanged.
+	data := decodeHookStdin(t, `{"trigger":"auto"}`)
+
+	msg := buildStatusReport("braw", "PreCompact", "", data, true)
+
+	if msg.Event != "PreCompact" {
+		t.Errorf("Event = %q, want PreCompact", msg.Event)
+	}
+
+	if msg.Trigger != "auto" {
+		t.Errorf("Trigger = %q, want auto", msg.Trigger)
+	}
+
+	if msg.AgentID != "" || msg.AgentType != "" {
+		t.Errorf("agent fields set for compaction: id=%q type=%q", msg.AgentID, msg.AgentType)
+	}
+}
+
+func TestBuildStatusReportSubagent(t *testing.T) {
+	data := decodeHookStdin(t, `{"agent_id":"bairn-1","agent_type":"canny"}`)
+
+	msg := buildStatusReport("braw", "SubagentStart", "", data, true)
+
+	if msg.AgentID != "bairn-1" {
+		t.Errorf("AgentID = %q, want bairn-1", msg.AgentID)
+	}
+
+	if msg.AgentType != "canny" {
+		t.Errorf("AgentType = %q, want canny", msg.AgentType)
+	}
+}
+
+func TestBuildStatusReportUnparsedDropsNewFields(t *testing.T) {
+	// When stdin didn't parse within the 100ms budget, the compaction/sub-agent
+	// fields stay empty (nothing to carry).
+	msg := buildStatusReport("braw", "PostCompact", "", hookStdin{}, false)
+
+	if msg.Trigger != "" || msg.AgentID != "" || msg.AgentType != "" {
+		t.Errorf("unparsed stdin leaked fields: %+v", msg)
+	}
+}

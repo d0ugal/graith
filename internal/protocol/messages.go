@@ -439,6 +439,13 @@ type StatusReportMsg struct {
 	// forwards it verbatim (empty when stdin didn't parse) and the daemon
 	// decides what it means — see HandleHookReport.
 	NotificationType string `json:"notification_type,omitempty"`
+	// Trigger carries the compaction trigger ("manual" | "auto") for
+	// Pre/PostCompact events.
+	Trigger string `json:"trigger,omitempty"`
+	// AgentID / AgentType identify a Claude sub-agent for SubagentStart /
+	// SubagentStop events.
+	AgentID   string `json:"agent_id,omitempty"`
+	AgentType string `json:"agent_type,omitempty"`
 }
 
 // HandshakeOkMsg is the daemon's response to a successful handshake.
@@ -502,6 +509,13 @@ type SessionInfo struct {
 	// DeleteExpiresAt is the RFC3339 time at which a soft-deleted session will
 	// be purged (DeletedAt + retention). Empty when the session is not deleted.
 	DeleteExpiresAt string `json:"delete_expires_at,omitempty"`
+	// ContextPressure is true when the session is compacting or has signalled
+	// context pressure (Claude's PreCompact, cleared by PostCompact). Runtime
+	// only — a daemon restart forgets it until the next compaction signal.
+	ContextPressure bool `json:"context_pressure,omitempty"`
+	// SubAgentCount is the number of Claude sub-agents currently running under
+	// this session (SubagentStart/SubagentStop). Runtime only.
+	SubAgentCount int `json:"sub_agent_count,omitempty"`
 }
 
 // PRInfo is the linked GitHub pull request for a session's branch.

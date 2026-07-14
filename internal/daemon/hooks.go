@@ -102,6 +102,14 @@ func (sm *SessionManager) generateClaudeSettings(sessionID string, yolo bool) (s
 		"PostToolUse",
 		"Notification",
 		"Stop",
+		// Context-pressure signals (issue #1073, tier 1): Claude fires these
+		// around a compaction with a `trigger` (manual|auto).
+		"PreCompact",
+		"PostCompact",
+		// Sub-agent lifecycle (issue #1073, tier 2): Claude spawns its own
+		// sub-agents and reports agent_id/agent_type.
+		"SubagentStart",
+		"SubagentStop",
 	}
 
 	type hookHandler struct {

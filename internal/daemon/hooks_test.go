@@ -61,6 +61,10 @@ func TestGenerateClaudeSettings(t *testing.T) {
 		"PostToolUse",
 		"Notification",
 		"Stop",
+		"PreCompact",
+		"PostCompact",
+		"SubagentStart",
+		"SubagentStop",
 	}
 
 	for _, event := range expectedEvents {
