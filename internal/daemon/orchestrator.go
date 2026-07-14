@@ -583,3 +583,25 @@ const (
 	// is ignored and never reaches the "session exited" log path.
 	StopReasonDelete = "delete"
 )
+
+// mapSessionEndReason maps Claude's raw SessionEnd reason onto one of graith's
+// StopReason constants, returning ok=false when the reason is not proof of a
+// clean process exit. Only process-ending reasons map:
+//
+//   - logout / prompt_input_exit -> StopReasonUser (the human ended the session)
+//   - clear / resume             -> ("", false): these are logical-session
+//     transitions that do NOT terminate the PTY process, so they set no reason
+//   - other / anything else      -> ("", false): not proof of a clean exit, so
+//     the process-exit path falls back to StopReasonCrash
+//
+// A raw Claude string must never be assigned to StopReason directly — that field
+// also drives restart suppression, stop-summary text, and trigger auto-cleanup,
+// so a reason may only become a StopReason through this explicit mapping.
+func mapSessionEndReason(reason string) (string, bool) {
+	switch reason {
+	case "logout", "prompt_input_exit":
+		return StopReasonUser, true
+	default:
+		return "", false
+	}
+}

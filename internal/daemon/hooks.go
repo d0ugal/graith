@@ -97,6 +97,7 @@ func (sm *SessionManager) generateClaudeSettings(sessionID string, yolo bool) (s
 
 	events := []string{
 		"SessionStart",
+		"SessionEnd",
 		"UserPromptSubmit",
 		"PreToolUse",
 		"PostToolUse",

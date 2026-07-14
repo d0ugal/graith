@@ -188,6 +188,30 @@ func (sm *SessionManager) HandleHookReport(sr protocol.StatusReportMsg) {
 		return
 	}
 
+	// SessionEnd is logical-session metadata, not a process-exit reason, and must
+	// never touch AgentStatus (Claude fires it on /clear and interactive /resume
+	// without terminating the PTY). Record the raw reason bound to the current
+	// process generation; the process-exit path maps only process-ending reasons
+	// onto a StopReason (mapSessionEndReason), and SessionStart/resume clears it
+	// so a stale reason can't outlive its turn.
+	if sr.Event == "SessionEnd" {
+		sm.mu.Lock()
+		if sess, ok := sm.state.Sessions[sr.SessionID]; ok {
+			sess.SessionEndReason = sr.Reason
+			sess.SessionEndReasonGen = sess.PIDStartTime
+		} else {
+			sm.mu.Unlock()
+			sm.log.Info("session end for unknown session", "session_id", sr.SessionID)
+
+			return
+		}
+		sm.mu.Unlock()
+
+		sm.log.Info("session end reported", "session_id", sr.SessionID, "reason", sr.Reason)
+
+		return
+	}
+
 	var (
 		status    string
 		staleness time.Duration
@@ -272,14 +296,25 @@ func (sm *SessionManager) HandleHookReport(sr protocol.StatusReportMsg) {
 
 	sess.HookToolName = report.ToolName
 
+	// Stop carries the agent's final message (already truncated by the CLI). Keep
+	// it runtime-only; it is not placed on the guest-visible SessionInfo unredacted.
+	if sr.Event == "Stop" && sr.LastMessage != "" {
+		sess.LastMessage = sr.LastMessage
+	}
+
 	// A fresh SessionStart (a new turn, or Claude's /clear) resets the runtime
-	// context-pressure and sub-agent signals — the previous turn's state does
-	// not carry over (issue #1073). SubAgents is replaced (nil'd) rather than
-	// mutated in place so an off-lock cloneSessionState stays race-free.
+	// signals that don't carry across a turn: context-pressure and sub-agents
+	// (issue #1073), plus any pending SessionEnd reason + its generation and the
+	// captured final message, so a stale reason can't outlive the turn that
+	// produced it. SubAgents is replaced (nil'd) rather than mutated in place so
+	// an off-lock cloneSessionState stays race-free.
 	if sr.Event == "SessionStart" {
 		sess.ContextPressure = false
 		sess.ContextPressureAt = time.Time{}
 		sess.SubAgents = nil
+		sess.SessionEndReason = ""
+		sess.SessionEndReasonGen = 0
+		sess.LastMessage = ""
 	}
 
 	sm.mu.Unlock()
@@ -2163,9 +2198,22 @@ func (sm *SessionManager) watchSession(id string, sess SessionDriver) {
 			s.ExitCode = &exitCode
 			s.PID = 0
 
+			// Capture the exiting process generation before zeroing it so a
+			// pending SessionEnd reason is consumed only for the same process.
+			exitingGen := s.PIDStartTime
 			s.PIDStartTime = 0
+
 			if s.StopReason == "" {
-				s.StopReason = StopReasonCrash
+				// Precedence: an already-set StopReason (e.g. an explicit gr stop)
+				// has already skipped this block. Otherwise a process-ending
+				// SessionEnd reason bound to THIS generation maps to a StopReason;
+				// otherwise fall back to crash (a hard crash never emits SessionEnd,
+				// and clear/resume/other leave no clean-exit reason).
+				if mapped, ok := mapSessionEndReason(s.SessionEndReason); ok && s.SessionEndReasonGen == exitingGen {
+					s.StopReason = mapped
+				} else {
+					s.StopReason = StopReasonCrash
+				}
 			}
 
 			if lastOut := sess.LastOutputAt(); !lastOut.IsZero() {
@@ -3046,12 +3094,17 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	sessState.AgentStatus = ""
 	sessState.IdleSince = nil
 	sessState.StopReason = ""
-	// Runtime context-pressure and sub-agent signals belong to the previous
-	// agent generation; a resume/restart starts clean and hooks re-establish
-	// the picture as they fire (issue #1073).
+	// Runtime signals belong to the previous agent generation; a resume/restart
+	// starts clean and hooks re-establish the picture as they fire (issue #1073):
+	// context-pressure + sub-agents, plus any pending SessionEnd reason (and its
+	// generation binding) and the captured final message, so none of them leak
+	// across into the new process's lifecycle.
 	sessState.ContextPressure = false
 	sessState.ContextPressureAt = time.Time{}
 	sessState.SubAgents = nil
+	sessState.SessionEndReason = ""
+	sessState.SessionEndReasonGen = 0
+	sessState.LastMessage = ""
 	sessState.Sandboxed = sandboxed
 	sessState.SandboxConfig = mergedSandbox
 

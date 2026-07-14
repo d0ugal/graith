@@ -446,6 +446,13 @@ type StatusReportMsg struct {
 	// SubagentStop events.
 	AgentID   string `json:"agent_id,omitempty"`
 	AgentType string `json:"agent_type,omitempty"`
+	// Reason carries Claude's SessionEnd reason (clear/resume/logout/
+	// prompt_input_exit/other). It is logical-session metadata, mapped to a
+	// StopReason only for process-ending reasons — see mapSessionEndReason.
+	Reason string `json:"reason,omitempty"`
+	// LastMessage carries the (already CLI-truncated) last_assistant_message
+	// from a Stop event. It is captured runtime-only and never persisted.
+	LastMessage string `json:"last_message,omitempty"`
 }
 
 // HandshakeOkMsg is the daemon's response to a successful handshake.

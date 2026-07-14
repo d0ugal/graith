@@ -1754,6 +1754,266 @@ func TestToSessionInfoContextSubagent(t *testing.T) {
 	}
 }
 
+func TestMapSessionEndReason(t *testing.T) {
+	cases := []struct {
+		reason  string
+		want    string
+		wantOK  bool
+		comment string
+	}{
+		{"logout", StopReasonUser, true, "human logged out"},
+		{"prompt_input_exit", StopReasonUser, true, "human exited the prompt"},
+		{"clear", "", false, "/clear is not a process exit"},
+		{"resume", "", false, "/resume is not a process exit"},
+		{"other", "", false, "other is not proof of a clean exit"},
+		{"", "", false, "empty reason maps to nothing"},
+		{"future_reason", "", false, "unknown reason is not a clean exit"},
+	}
+
+	for _, c := range cases {
+		got, ok := mapSessionEndReason(c.reason)
+		if got != c.want || ok != c.wantOK {
+			t.Errorf("mapSessionEndReason(%q) = (%q, %v), want (%q, %v) — %s",
+				c.reason, got, ok, c.want, c.wantOK, c.comment)
+		}
+	}
+}
+
+func TestHandleHookReportSessionEnd(t *testing.T) {
+	t.Run("records reason bound to generation without touching AgentStatus", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.state.Sessions["sess1"] = &SessionState{
+			ID: "sess1", Name: "braw", Status: StatusRunning,
+			AgentStatus: "active", PIDStartTime: 4242,
+		}
+
+		sm.HandleHookReport(protocol.StatusReportMsg{
+			SessionID: "sess1",
+			Event:     "SessionEnd",
+			Reason:    "logout",
+		})
+
+		sm.mu.RLock()
+		sess := sm.state.Sessions["sess1"]
+		endReason := sess.SessionEndReason
+		gen := sess.SessionEndReasonGen
+		agentStatus := sess.AgentStatus
+		status := sess.Status
+		stopReason := sess.StopReason
+		_, hasReport := sm.hookReports["sess1"]
+		sm.mu.RUnlock()
+
+		if endReason != "logout" {
+			t.Errorf("SessionEndReason = %q, want %q", endReason, "logout")
+		}
+
+		if gen != 4242 {
+			t.Errorf("SessionEndReasonGen = %d, want 4242 (bound to PIDStartTime)", gen)
+		}
+
+		if agentStatus != "active" {
+			t.Errorf("AgentStatus = %q, want it left as %q (SessionEnd must not touch it)", agentStatus, "active")
+		}
+
+		if status != StatusRunning {
+			t.Errorf("Status = %q, want %q — SessionEnd(resume/clear) must not stop the session", status, StatusRunning)
+		}
+
+		if stopReason != "" {
+			t.Errorf("StopReason = %q, want empty — SessionEnd must not set it directly", stopReason)
+		}
+
+		if hasReport {
+			t.Error("SessionEnd must not create a hookReport")
+		}
+	})
+
+	t.Run("unknown session is a no-op", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+
+		// Must not panic.
+		sm.HandleHookReport(protocol.StatusReportMsg{
+			SessionID: "dreich-nonexistent",
+			Event:     "SessionEnd",
+			Reason:    "logout",
+		})
+	})
+
+	t.Run("SessionStart clears a pending reason and last message", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.state.Sessions["sess1"] = &SessionState{
+			ID: "sess1", Name: "braw", Status: StatusRunning,
+			SessionEndReason: "clear", SessionEndReasonGen: 7, LastMessage: "auld output",
+		}
+
+		sm.HandleHookReport(protocol.StatusReportMsg{
+			SessionID: "sess1",
+			Event:     "SessionStart",
+		})
+
+		sm.mu.RLock()
+		sess := sm.state.Sessions["sess1"]
+		endReason := sess.SessionEndReason
+		gen := sess.SessionEndReasonGen
+		lastMsg := sess.LastMessage
+
+		sm.mu.RUnlock()
+
+		if endReason != "" || gen != 0 {
+			t.Errorf("after SessionStart: reason=%q gen=%d, want cleared", endReason, gen)
+		}
+
+		if lastMsg != "" {
+			t.Errorf("after SessionStart: LastMessage = %q, want cleared", lastMsg)
+		}
+	})
+}
+
+func TestHandleHookReportStopCapturesLastMessage(t *testing.T) {
+	sm := newTestSessionManager(t)
+	sm.state.Sessions["sess1"] = &SessionState{
+		ID: "sess1", Name: "braw", Status: StatusRunning,
+	}
+
+	sm.HandleHookReport(protocol.StatusReportMsg{
+		SessionID:   "sess1",
+		Event:       "Stop",
+		LastMessage: "the bonnie result is ready",
+	})
+
+	sm.mu.RLock()
+	sess := sm.state.Sessions["sess1"]
+	lastMsg := sess.LastMessage
+	agentStatus := sess.AgentStatus
+
+	sm.mu.RUnlock()
+
+	if lastMsg != "the bonnie result is ready" {
+		t.Errorf("LastMessage = %q, want captured final message", lastMsg)
+	}
+
+	if agentStatus != "ready" {
+		t.Errorf("AgentStatus = %q, want %q (Stop still maps to ready)", agentStatus, "ready")
+	}
+}
+
+// watchSessionExit drives a session through a real PTY exit and returns the
+// finalized StopReason. The caller pre-populates state.Sessions[id] (including
+// any pending SessionEndReason) to model what the hooks had recorded.
+func watchSessionExit(t *testing.T, sm *SessionManager, id string) string {
+	t.Helper()
+
+	sess := newTestPTYSession(t, "true")
+	waitExit(t, sess)
+	sm.sessions[id] = sess
+	sm.watchSession(id, sess)
+
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	return sm.state.Sessions[id].StopReason
+}
+
+// TestSessionEndCleanShutdownLabelling is the regression test for the
+// clean-vs-crash mislabelling: a SessionEnd(logout) recorded before the PTY
+// exits must yield StopReasonUser, not StopReasonCrash. It fails against the old
+// exit seam (which defaulted straight to crash) and passes with the mapping.
+func TestSessionEndCleanShutdownLabelling(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	id := "sess-logout"
+	sm.state.Sessions[id] = &SessionState{
+		ID: id, Name: "braw", Status: StatusRunning, Agent: "claude",
+		SessionEndReason: "logout", // gen 0 matches the manual state's PIDStartTime 0
+	}
+
+	if got := watchSessionExit(t, sm, id); got != StopReasonUser {
+		t.Errorf("StopReason = %q, want %q — clean logout must not be labelled a crash", got, StopReasonUser)
+	}
+}
+
+func TestSessionEndExitMappingAdverse(t *testing.T) {
+	t.Run("clear then SessionStart then crash yields crash", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+
+		id := "sess-clear"
+		sm.state.Sessions[id] = &SessionState{
+			ID: id, Name: "canny", Status: StatusRunning, Agent: "claude",
+		}
+
+		// Claude fires SessionEnd(clear) on /clear WITHOUT exiting, then a fresh
+		// SessionStart, then — much later — the process actually crashes.
+		sm.HandleHookReport(protocol.StatusReportMsg{SessionID: id, Event: "SessionEnd", Reason: "clear"})
+		sm.HandleHookReport(protocol.StatusReportMsg{SessionID: id, Event: "SessionStart"})
+
+		if got := watchSessionExit(t, sm, id); got != StopReasonCrash {
+			t.Errorf("StopReason = %q, want %q — a stale clear reason must not label the later crash clean", got, StopReasonCrash)
+		}
+	})
+
+	t.Run("resume reason falls back to crash on exit", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+
+		id := "sess-resume"
+		sm.state.Sessions[id] = &SessionState{
+			ID: id, Name: "bide", Status: StatusRunning, Agent: "claude",
+			SessionEndReason: "resume",
+		}
+
+		if got := watchSessionExit(t, sm, id); got != StopReasonCrash {
+			t.Errorf("StopReason = %q, want %q — resume is not a process-ending reason", got, StopReasonCrash)
+		}
+	})
+
+	t.Run("other reason falls back to crash", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+
+		id := "sess-other"
+		sm.state.Sessions[id] = &SessionState{
+			ID: id, Name: "haar", Status: StatusRunning, Agent: "claude",
+			SessionEndReason: "other",
+		}
+
+		if got := watchSessionExit(t, sm, id); got != StopReasonCrash {
+			t.Errorf("StopReason = %q, want %q", got, StopReasonCrash)
+		}
+	})
+
+	t.Run("explicit gr stop takes precedence over a pending reason", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+
+		id := "sess-thrawn"
+		sm.state.Sessions[id] = &SessionState{
+			ID: id, Name: "thrawn", Status: StatusRunning, Agent: "claude",
+			// A gr stop already set a reason; a pending SessionEnd(logout) must
+			// NOT overwrite it at the exit seam (already-set wins).
+			StopReason:       StopReasonShutdown,
+			SessionEndReason: "logout",
+		}
+
+		if got := watchSessionExit(t, sm, id); got != StopReasonShutdown {
+			t.Errorf("StopReason = %q, want %q — an already-set reason must win over a pending SessionEnd", got, StopReasonShutdown)
+		}
+	})
+
+	t.Run("stale generation reason is ignored", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+
+		id := "sess-stale-gen"
+		sm.state.Sessions[id] = &SessionState{
+			ID: id, Name: "haar", Status: StatusRunning, Agent: "claude",
+			SessionEndReason: "logout",
+			// Recorded against a different process generation than the one exiting
+			// (PIDStartTime is 0 for this manual state) — must not be consumed.
+			SessionEndReasonGen: 99999,
+		}
+
+		if got := watchSessionExit(t, sm, id); got != StopReasonCrash {
+			t.Errorf("StopReason = %q, want %q — a reason from a stale generation must be ignored", got, StopReasonCrash)
+		}
+	})
+}
+
 func TestDetectAgentStatusesHookAuthority(t *testing.T) {
 	// Test that a valid hook report takes precedence over scraping.
 	// We can't easily test the full detectAgentStatuses (needs real PTY),

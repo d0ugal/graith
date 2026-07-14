@@ -238,7 +238,11 @@ the log alone:
   (`crash`, `user`, `idle`, `shutdown`, `watchdog`), and `pid`/`pgid` support
   OS-level signal forensics. When present, `peak_rss_mb` is labelled with
   `peak_rss_proc` (`agent` or `sandbox-wrapper`) so a small wrapper RSS isn't
-  mistaken for the agent's footprint.
+  mistaken for the agent's footprint. When Claude reports a clean shutdown via
+  its `SessionEnd` hook, a process-ending reason (`logout` / `prompt_input_exit`)
+  is attributed as `user` rather than falling back to `crash`; `/clear` and
+  `/resume` are logical-session transitions that don't end the process, and any
+  other (or unobserved) reason still falls back to `crash`.
 
 Trace one session end to end:
 
