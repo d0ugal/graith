@@ -80,8 +80,21 @@ type SessionState struct {
 	// NOT persisted (repopulates within one tick after a restart) and is always
 	// replaced with a freshly-built pointer under the lock, never mutated in
 	// place, so an off-lock cloneSessionState is race-free. Nil = never observed.
-	Tokens         *TokenStats           `json:"-"`
-	HookToolName   string                `json:"-"`
+	Tokens       *TokenStats `json:"-"`
+	HookToolName string      `json:"-"`
+	// ContextPressure / ContextPressureAt track Claude's compaction signal:
+	// PreCompact sets the flag + timestamp, PostCompact clears the flag. Runtime
+	// only (json:"-"), so a daemon restart forgets them and the next Pre/PostCompact
+	// re-establishes the picture. Cleared on SessionStart and on resume/restart.
+	ContextPressure   bool      `json:"-"`
+	ContextPressureAt time.Time `json:"-"`
+	// SubAgents maps a Claude sub-agent's agent_id -> agent_type; len() is the
+	// live count. A map (not a counter) so a duplicate or missing SubagentStop
+	// can't underflow or strand a count — a stop is an idempotent delete. Runtime
+	// only, cleared on SessionStart and resume/restart. Never mutated in place:
+	// each SubagentStart/Stop replaces it with a fresh map so an off-lock
+	// cloneSessionState is race-free (mirrors the Tokens discipline above).
+	SubAgents      map[string]string     `json:"-"`
 	ExitCode       *int                  `json:"exit_code,omitempty"`
 	ExitSignal     string                `json:"exit_signal,omitempty"`
 	PID            int                   `json:"pid,omitempty"`

@@ -21,6 +21,11 @@ var (
 type hookStdin struct {
 	ToolName         string `json:"tool_name"`
 	NotificationType string `json:"notification_type"`
+	// Trigger is the compaction trigger ("manual" | "auto") on Pre/PostCompact.
+	Trigger string `json:"trigger"`
+	// AgentID / AgentType identify a Claude sub-agent on SubagentStart/Stop.
+	AgentID   string `json:"agent_id"`
+	AgentType string `json:"agent_type"`
 }
 
 // buildStatusReport assembles the status_report message from the flags and the
@@ -43,6 +48,13 @@ func buildStatusReport(sessionID, event, toolFlag string, stdin hookStdin, parse
 		if stdin.ToolName != "" && msg.ToolName == "" {
 			msg.ToolName = stdin.ToolName
 		}
+
+		// Compaction (Pre/PostCompact) and sub-agent (Subagent*) metadata; empty
+		// for every other event (issue #1073). The daemon routes on the event
+		// name, so carrying these unconditionally is harmless.
+		msg.Trigger = stdin.Trigger
+		msg.AgentID = stdin.AgentID
+		msg.AgentType = stdin.AgentType
 	}
 
 	return msg

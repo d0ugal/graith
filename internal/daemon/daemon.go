@@ -178,6 +178,16 @@ func (sm *SessionManager) SetMCPManager(mm *MCPManager) {
 // in-memory hookReports map and the session's AgentStatus. This is the
 // authoritative source of agent status when hooks are active.
 func (sm *SessionManager) HandleHookReport(sr protocol.StatusReportMsg) {
+	// Context-pressure and sub-agent events are runtime signals that must NOT
+	// change AgentStatus — a compacting agent, or one that spawned a sub-agent,
+	// is still active, and clobbering an approval/ready status here would be a
+	// regression. They update runtime-only fields and return early (issue #1073).
+	switch sr.Event {
+	case "PreCompact", "PostCompact", "SubagentStart", "SubagentStop":
+		sm.handleContextSubagentReport(sr)
+		return
+	}
+
 	var (
 		status    string
 		staleness time.Duration
@@ -261,6 +271,17 @@ func (sm *SessionManager) HandleHookReport(sr protocol.StatusReportMsg) {
 	}
 
 	sess.HookToolName = report.ToolName
+
+	// A fresh SessionStart (a new turn, or Claude's /clear) resets the runtime
+	// context-pressure and sub-agent signals — the previous turn's state does
+	// not carry over (issue #1073). SubAgents is replaced (nil'd) rather than
+	// mutated in place so an off-lock cloneSessionState stays race-free.
+	if sr.Event == "SessionStart" {
+		sess.ContextPressure = false
+		sess.ContextPressureAt = time.Time{}
+		sess.SubAgents = nil
+	}
+
 	sm.mu.Unlock()
 
 	sm.log.Info("hook report processed",
@@ -286,6 +307,71 @@ func (sm *SessionManager) HandleHookReport(sr protocol.StatusReportMsg) {
 	if changed {
 		sm.onAgentStatusChange(sr.SessionID, name, oldStatus, status)
 	}
+}
+
+// handleContextSubagentReport processes the PreCompact/PostCompact and
+// SubagentStart/SubagentStop hook events (issue #1073). These update runtime-only
+// signals on the session and deliberately do NOT touch AgentStatus: a compacting
+// agent, or one that has spawned a sub-agent, is still whatever it was before
+// (active / approval / ready). The SubAgents map is replaced, never mutated in
+// place, so an off-lock cloneSessionState reading len() is race-free.
+func (sm *SessionManager) handleContextSubagentReport(sr protocol.StatusReportMsg) {
+	sm.mu.Lock()
+
+	sess, ok := sm.state.Sessions[sr.SessionID]
+	if !ok {
+		sm.mu.Unlock()
+		sm.log.Info("hook report for unknown session", "session_id", sr.SessionID)
+
+		return
+	}
+
+	now := time.Now()
+
+	switch sr.Event {
+	case "PreCompact":
+		sess.ContextPressure = true
+		sess.ContextPressureAt = now
+	case "PostCompact":
+		sess.ContextPressure = false
+		sess.ContextPressureAt = now
+	case "SubagentStart":
+		// A sub-agent with no id is unusable for idempotent stop tracking; skip it
+		// rather than key an entry we could never delete.
+		if sr.AgentID != "" {
+			next := make(map[string]string, len(sess.SubAgents)+1)
+			for k, v := range sess.SubAgents {
+				next[k] = v
+			}
+
+			next[sr.AgentID] = sr.AgentType
+			sess.SubAgents = next
+		}
+	case "SubagentStop":
+		// Idempotent: a duplicate or missing stop is a no-op, so the count never
+		// underflows. Only rebuild the map when the id is actually present.
+		if _, present := sess.SubAgents[sr.AgentID]; present {
+			next := make(map[string]string, len(sess.SubAgents))
+			for k, v := range sess.SubAgents {
+				if k == sr.AgentID {
+					continue
+				}
+
+				next[k] = v
+			}
+
+			sess.SubAgents = next
+		}
+	}
+
+	contextPressure := sess.ContextPressure
+	subAgents := len(sess.SubAgents)
+	sm.mu.Unlock()
+
+	sm.log.Info("hook report processed (runtime signal)",
+		"session_id", sr.SessionID, "event", sr.Event,
+		"context_pressure", contextPressure, "sub_agents", subAgents,
+		"agent_id", sr.AgentID, "agent_type", sr.AgentType)
 }
 
 func (sm *SessionManager) KickAttachedClient(sessionID string) {
@@ -2960,6 +3046,12 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	sessState.AgentStatus = ""
 	sessState.IdleSince = nil
 	sessState.StopReason = ""
+	// Runtime context-pressure and sub-agent signals belong to the previous
+	// agent generation; a resume/restart starts clean and hooks re-establish
+	// the picture as they fire (issue #1073).
+	sessState.ContextPressure = false
+	sessState.ContextPressureAt = time.Time{}
+	sessState.SubAgents = nil
 	sessState.Sandboxed = sandboxed
 	sessState.SandboxConfig = mergedSandbox
 

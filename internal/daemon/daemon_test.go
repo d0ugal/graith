@@ -1478,6 +1478,282 @@ func TestHandleHookReport(t *testing.T) {
 	})
 }
 
+func TestHandleHookReportContextPressure(t *testing.T) {
+	t.Run("PreCompact sets pressure and leaves status active", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.state.Sessions["sess1"] = &SessionState{
+			ID: "sess1", Name: "braw", Status: StatusRunning,
+			AgentStatus: "active",
+		}
+
+		sm.HandleHookReport(protocol.StatusReportMsg{
+			SessionID: "sess1",
+			Event:     "PreCompact",
+			Trigger:   "auto",
+		})
+
+		sm.mu.RLock()
+		sess := sm.state.Sessions["sess1"]
+		pressure := sess.ContextPressure
+		pressureAt := sess.ContextPressureAt
+		agentStatus := sess.AgentStatus
+		_, hasReport := sm.hookReports["sess1"]
+		sm.mu.RUnlock()
+
+		if !pressure {
+			t.Error("ContextPressure = false, want true after PreCompact")
+		}
+
+		if pressureAt.IsZero() {
+			t.Error("ContextPressureAt not set after PreCompact")
+		}
+
+		if agentStatus != "active" {
+			t.Errorf("AgentStatus = %q, want active (PreCompact must not change it)", agentStatus)
+		}
+
+		if hasReport {
+			t.Error("PreCompact should not write a hookReport (runtime-signal only)")
+		}
+	})
+
+	t.Run("PostCompact clears pressure", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.state.Sessions["sess1"] = &SessionState{
+			ID: "sess1", Name: "braw", Status: StatusRunning,
+			AgentStatus:     "approval",
+			ContextPressure: true,
+		}
+
+		sm.HandleHookReport(protocol.StatusReportMsg{
+			SessionID: "sess1",
+			Event:     "PostCompact",
+			Trigger:   "manual",
+		})
+
+		sm.mu.RLock()
+		sess := sm.state.Sessions["sess1"]
+		pressure := sess.ContextPressure
+		agentStatus := sess.AgentStatus
+
+		sm.mu.RUnlock()
+
+		if pressure {
+			t.Error("ContextPressure = true, want false after PostCompact")
+		}
+
+		// PostCompact must not clobber a pending approval.
+		if agentStatus != "approval" {
+			t.Errorf("AgentStatus = %q, want approval (PostCompact must not change it)", agentStatus)
+		}
+	})
+
+	t.Run("SessionStart clears pressure and sub-agents", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.state.Sessions["sess1"] = &SessionState{
+			ID: "sess1", Name: "braw", Status: StatusRunning,
+			ContextPressure: true,
+			SubAgents:       map[string]string{"bairn-1": "canny"},
+		}
+
+		sm.HandleHookReport(protocol.StatusReportMsg{
+			SessionID: "sess1",
+			Event:     "SessionStart",
+		})
+
+		sm.mu.RLock()
+		sess := sm.state.Sessions["sess1"]
+		sm.mu.RUnlock()
+
+		if sess.ContextPressure {
+			t.Error("ContextPressure not cleared on SessionStart")
+		}
+
+		if len(sess.SubAgents) != 0 {
+			t.Errorf("SubAgents len = %d, want 0 after SessionStart", len(sess.SubAgents))
+		}
+	})
+
+	t.Run("unknown session does not panic", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+
+		sm.HandleHookReport(protocol.StatusReportMsg{
+			SessionID: "dreich",
+			Event:     "PreCompact",
+		})
+	})
+}
+
+func TestHandleHookReportSubagents(t *testing.T) {
+	t.Run("start then stop updates the map", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.state.Sessions["sess1"] = &SessionState{
+			ID: "sess1", Name: "braw", Status: StatusRunning,
+			AgentStatus: "active",
+		}
+
+		sm.HandleHookReport(protocol.StatusReportMsg{
+			SessionID: "sess1", Event: "SubagentStart",
+			AgentID: "bairn-1", AgentType: "canny",
+		})
+		sm.HandleHookReport(protocol.StatusReportMsg{
+			SessionID: "sess1", Event: "SubagentStart",
+			AgentID: "bairn-2", AgentType: "thrawn",
+		})
+
+		sm.mu.RLock()
+		sess := sm.state.Sessions["sess1"]
+		count := len(sess.SubAgents)
+		typ := sess.SubAgents["bairn-1"]
+		status := sess.AgentStatus
+
+		sm.mu.RUnlock()
+
+		if count != 2 {
+			t.Fatalf("SubAgents len = %d, want 2", count)
+		}
+
+		if typ != "canny" {
+			t.Errorf("SubAgents[bairn-1] = %q, want canny", typ)
+		}
+
+		if status != "active" {
+			t.Errorf("AgentStatus = %q, want active (subagent events must not change it)", status)
+		}
+
+		sm.HandleHookReport(protocol.StatusReportMsg{
+			SessionID: "sess1", Event: "SubagentStop", AgentID: "bairn-1",
+		})
+
+		sm.mu.RLock()
+		count = len(sm.state.Sessions["sess1"].SubAgents)
+		sm.mu.RUnlock()
+
+		if count != 1 {
+			t.Errorf("SubAgents len = %d, want 1 after one stop", count)
+		}
+	})
+
+	t.Run("duplicate stop does not underflow", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.state.Sessions["sess1"] = &SessionState{
+			ID: "sess1", Name: "braw", Status: StatusRunning,
+			SubAgents: map[string]string{"bairn-1": "canny"},
+		}
+
+		sm.HandleHookReport(protocol.StatusReportMsg{
+			SessionID: "sess1", Event: "SubagentStop", AgentID: "bairn-1",
+		})
+		// Duplicate stop for the same id — idempotent no-op.
+		sm.HandleHookReport(protocol.StatusReportMsg{
+			SessionID: "sess1", Event: "SubagentStop", AgentID: "bairn-1",
+		})
+
+		sm.mu.RLock()
+		count := len(sm.state.Sessions["sess1"].SubAgents)
+		sm.mu.RUnlock()
+
+		if count != 0 {
+			t.Errorf("SubAgents len = %d, want 0 (duplicate stop must not underflow/strand)", count)
+		}
+	})
+
+	t.Run("stop for missing id is a no-op", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.state.Sessions["sess1"] = &SessionState{
+			ID: "sess1", Name: "braw", Status: StatusRunning,
+			SubAgents: map[string]string{"bairn-1": "canny"},
+		}
+
+		sm.HandleHookReport(protocol.StatusReportMsg{
+			SessionID: "sess1", Event: "SubagentStop", AgentID: "haar-unknown",
+		})
+
+		sm.mu.RLock()
+		sess := sm.state.Sessions["sess1"]
+		count := len(sess.SubAgents)
+		still := sess.SubAgents["bairn-1"]
+
+		sm.mu.RUnlock()
+
+		if count != 1 {
+			t.Errorf("SubAgents len = %d, want 1 (missing-id stop must not strand)", count)
+		}
+
+		if still != "canny" {
+			t.Errorf("SubAgents[bairn-1] = %q, want canny (untouched)", still)
+		}
+	})
+
+	t.Run("start with empty agent_id is skipped", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.state.Sessions["sess1"] = &SessionState{
+			ID: "sess1", Name: "braw", Status: StatusRunning,
+		}
+
+		sm.HandleHookReport(protocol.StatusReportMsg{
+			SessionID: "sess1", Event: "SubagentStart", AgentType: "canny",
+		})
+
+		sm.mu.RLock()
+		count := len(sm.state.Sessions["sess1"].SubAgents)
+		sm.mu.RUnlock()
+
+		if count != 0 {
+			t.Errorf("SubAgents len = %d, want 0 (id-less start is unusable, skipped)", count)
+		}
+	})
+
+	t.Run("subagent events preserve ready status", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.state.Sessions["sess1"] = &SessionState{
+			ID: "sess1", Name: "braw", Status: StatusRunning,
+			AgentStatus: "ready",
+		}
+
+		sm.HandleHookReport(protocol.StatusReportMsg{
+			SessionID: "sess1", Event: "SubagentStart",
+			AgentID: "bairn-1", AgentType: "canny",
+		})
+
+		sm.mu.RLock()
+		status := sm.state.Sessions["sess1"].AgentStatus
+		sm.mu.RUnlock()
+
+		if status != "ready" {
+			t.Errorf("AgentStatus = %q, want ready (subagent start must not clobber it)", status)
+		}
+	})
+}
+
+func TestToSessionInfoContextSubagent(t *testing.T) {
+	sess := SessionState{
+		ID: "sess1", Name: "braw", Status: StatusRunning,
+		ContextPressure: true,
+		SubAgents:       map[string]string{"bairn-1": "canny", "bairn-2": "thrawn"},
+	}
+
+	info := toSessionInfo(sess, config.Default(), nil)
+
+	if !info.ContextPressure {
+		t.Error("SessionInfo.ContextPressure = false, want true")
+	}
+
+	if info.SubAgentCount != 2 {
+		t.Errorf("SessionInfo.SubAgentCount = %d, want 2", info.SubAgentCount)
+	}
+
+	// A clean session projects zero-values (omitempty on the wire).
+	clean := toSessionInfo(SessionState{ID: "canny", Status: StatusRunning}, config.Default(), nil)
+	if clean.ContextPressure {
+		t.Error("clean SessionInfo.ContextPressure = true, want false")
+	}
+
+	if clean.SubAgentCount != 0 {
+		t.Errorf("clean SessionInfo.SubAgentCount = %d, want 0", clean.SubAgentCount)
+	}
+}
+
 func TestDetectAgentStatusesHookAuthority(t *testing.T) {
 	// Test that a valid hook report takes precedence over scraping.
 	// We can't easily test the full detectAgentStatuses (needs real PTY),
