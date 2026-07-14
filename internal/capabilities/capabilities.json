@@ -1,0 +1,233 @@
+{
+  "version": 1,
+  "surfaces": [
+    { "id": "cli", "name": "CLI", "description": "The `gr` command-line client." },
+    { "id": "ios", "name": "iOS", "description": "The GraithMobile iOS app." },
+    { "id": "macos", "name": "macOS", "description": "The GraithGUI macOS app." }
+  ],
+  "states": [
+    { "id": "supported", "symbol": "✅", "description": "Wired end-to-end and usable on this surface." },
+    { "id": "planned", "symbol": "🚧", "description": "Not yet wired on this surface; a gap we intend to close." },
+    { "id": "n/a", "symbol": "—", "description": "Deliberately not applicable to this surface." }
+  ],
+  "capabilities": [
+    {
+      "id": "session.list",
+      "category": "Session lifecycle",
+      "name": "List sessions",
+      "cli": "supported", "ios": "supported", "macos": "supported"
+    },
+    {
+      "id": "session.create",
+      "category": "Session lifecycle",
+      "name": "Create session",
+      "cli": "supported", "ios": "supported", "macos": "supported"
+    },
+    {
+      "id": "session.stop",
+      "category": "Session lifecycle",
+      "name": "Stop session",
+      "cli": "supported", "ios": "supported", "macos": "supported"
+    },
+    {
+      "id": "session.resume",
+      "category": "Session lifecycle",
+      "name": "Resume session",
+      "cli": "supported", "ios": "supported", "macos": "supported"
+    },
+    {
+      "id": "session.restart",
+      "category": "Session lifecycle",
+      "name": "Restart session",
+      "cli": "supported", "ios": "supported", "macos": "supported"
+    },
+    {
+      "id": "session.delete",
+      "category": "Session lifecycle",
+      "name": "Delete session (soft)",
+      "cli": "supported", "ios": "supported", "macos": "supported"
+    },
+    {
+      "id": "session.restore",
+      "category": "Session lifecycle",
+      "name": "Restore a soft-deleted session",
+      "cli": "supported", "ios": "planned", "macos": "planned"
+    },
+    {
+      "id": "session.purge",
+      "category": "Session lifecycle",
+      "name": "Purge (hard delete)",
+      "cli": "supported", "ios": "planned", "macos": "planned"
+    },
+    {
+      "id": "session.rename",
+      "category": "Session lifecycle",
+      "name": "Rename session",
+      "cli": "supported", "ios": "supported", "macos": "supported"
+    },
+    {
+      "id": "session.star",
+      "category": "Session lifecycle",
+      "name": "Star / unstar session",
+      "cli": "supported", "ios": "supported", "macos": "supported"
+    },
+    {
+      "id": "session.fork",
+      "category": "Session lifecycle",
+      "name": "Fork session",
+      "cli": "supported", "ios": "supported", "macos": "supported"
+    },
+    {
+      "id": "session.migrate",
+      "category": "Session lifecycle",
+      "name": "Migrate session to another agent",
+      "cli": "supported", "ios": "supported", "macos": "supported"
+    },
+    {
+      "id": "session.set-status",
+      "category": "Session lifecycle",
+      "name": "Set session status summary",
+      "cli": "supported", "ios": "planned", "macos": "planned"
+    },
+    {
+      "id": "session.wait",
+      "category": "Session lifecycle",
+      "name": "Block until a session matches a condition",
+      "cli": "supported", "ios": "n/a", "macos": "n/a",
+      "notes": "A scripting/automation gate; the GUIs surface live state instead."
+    },
+    {
+      "id": "session.repo-list",
+      "category": "Session lifecycle",
+      "name": "List available repositories for new sessions",
+      "cli": "supported", "ios": "supported", "macos": "planned"
+    },
+    {
+      "id": "terminal.attach",
+      "category": "Terminal I/O",
+      "name": "Attach to a session PTY",
+      "cli": "supported", "ios": "supported", "macos": "supported"
+    },
+    {
+      "id": "terminal.input",
+      "category": "Terminal I/O",
+      "name": "Send input / keystrokes",
+      "cli": "supported", "ios": "supported", "macos": "supported"
+    },
+    {
+      "id": "terminal.resize",
+      "category": "Terminal I/O",
+      "name": "Resize the terminal",
+      "cli": "supported", "ios": "supported", "macos": "supported"
+    },
+    {
+      "id": "terminal.detach",
+      "category": "Terminal I/O",
+      "name": "Detach from a session",
+      "cli": "supported", "ios": "supported", "macos": "supported"
+    },
+    {
+      "id": "terminal.logs",
+      "category": "Terminal I/O",
+      "name": "View logs / scrollback",
+      "cli": "supported", "ios": "supported", "macos": "planned"
+    },
+    {
+      "id": "terminal.screen-snapshot",
+      "category": "Terminal I/O",
+      "name": "Render a screen snapshot / preview",
+      "cli": "supported", "ios": "supported", "macos": "planned"
+    },
+    {
+      "id": "terminal.remote-type",
+      "category": "Terminal I/O",
+      "name": "Type into another session remotely",
+      "cli": "supported", "ios": "n/a", "macos": "n/a",
+      "notes": "An attached GUI types directly; the standalone remote-type command is a CLI convenience."
+    },
+    {
+      "id": "approvals.subscribe",
+      "category": "Approvals & pairing",
+      "name": "View pending tool approvals",
+      "cli": "supported", "ios": "supported", "macos": "supported"
+    },
+    {
+      "id": "approvals.respond",
+      "category": "Approvals & pairing",
+      "name": "Respond to a tool approval",
+      "cli": "supported", "ios": "supported", "macos": "planned"
+    },
+    {
+      "id": "pairing.request",
+      "category": "Approvals & pairing",
+      "name": "Request device pairing",
+      "cli": "supported", "ios": "supported", "macos": "planned"
+    },
+    {
+      "id": "pairing.manage",
+      "category": "Approvals & pairing",
+      "name": "List / approve / revoke paired devices",
+      "cli": "supported", "ios": "planned", "macos": "planned"
+    },
+    {
+      "id": "messaging.send",
+      "category": "Messaging",
+      "name": "Send / publish inter-agent messages",
+      "cli": "supported", "ios": "planned", "macos": "planned"
+    },
+    {
+      "id": "messaging.read",
+      "category": "Messaging",
+      "name": "Read inbox / subscribe to topics",
+      "cli": "supported", "ios": "planned", "macos": "planned"
+    },
+    {
+      "id": "messaging.jail",
+      "category": "Messaging",
+      "name": "Inspect / release jailed PR comments",
+      "cli": "supported", "ios": "planned", "macos": "planned"
+    },
+    {
+      "id": "scenarios.manage",
+      "category": "Scenarios",
+      "name": "Start / stop / resume / inspect scenarios",
+      "cli": "supported", "ios": "planned", "macos": "planned"
+    },
+    {
+      "id": "triggers.manage",
+      "category": "Triggers",
+      "name": "List / status / run / pause / resume triggers",
+      "cli": "supported", "ios": "planned", "macos": "planned"
+    },
+    {
+      "id": "mcp.manage",
+      "category": "MCP servers",
+      "name": "List / restart / inspect MCP servers",
+      "cli": "supported", "ios": "planned", "macos": "planned"
+    },
+    {
+      "id": "store.access",
+      "category": "Document store",
+      "name": "Put / get / list / append / remove documents",
+      "cli": "supported", "ios": "planned", "macos": "planned"
+    },
+    {
+      "id": "notify.send",
+      "category": "Notifications",
+      "name": "Send a desktop / push notification to the human",
+      "cli": "supported", "ios": "planned", "macos": "planned"
+    },
+    {
+      "id": "sandbox.introspect",
+      "category": "Sandbox introspection",
+      "name": "Explain / watch sandbox policy and denials",
+      "cli": "supported", "ios": "planned", "macos": "planned"
+    },
+    {
+      "id": "doctor.diagnostics",
+      "category": "Diagnostics",
+      "name": "Health check / doctor / orphan GC",
+      "cli": "supported", "ios": "planned", "macos": "planned"
+    }
+  ]
+}
