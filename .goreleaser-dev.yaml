@@ -24,5 +24,10 @@ checksum:
 changelog:
   disable: true
 
+# The version must be monotonically increasing so `brew upgrade` recognises each
+# main push as newer than the last. A git short-SHA suffix sorts arbitrarily
+# (Homebrew tokenises and compares versions), so we use the commit timestamp,
+# which always advances. The commit SHA is still embedded in the binary via
+# ldflags and printed in the GitHub release notes.
 snapshot:
-  version_template: "{{ incpatch .Version }}-dev.{{ .ShortCommit }}"
+  version_template: "{{ incpatch .Version }}-dev.{{ .CommitTimestamp }}"
