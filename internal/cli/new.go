@@ -26,6 +26,7 @@ var (
 	newSkipModelValidation bool
 	newYolo                bool
 	newHeadless            bool
+	newNoFetch             bool
 )
 
 var newCmd = &cobra.Command{
@@ -104,6 +105,7 @@ var newCmd = &cobra.Command{
 			SkipModelValidation: newSkipModelValidation,
 			Yolo:                newYolo,
 			Headless:            newHeadless,
+			NoFetch:             newNoFetch,
 		})
 
 		resp, err := c.ReadControlResponse()
@@ -165,6 +167,7 @@ func registerNewCmd() {
 	newCmd.Flags().BoolVar(&newSkipModelValidation, "skip-model-validation", false, "skip validate_model check (use models not in the validation list)")
 	newCmd.Flags().BoolVar(&newYolo, "yolo", false, "auto-approve all tool requests for this session (no approval prompts)")
 	newCmd.Flags().BoolVar(&newHeadless, "headless", false, "run as a headless stream-json session instead of an interactive PTY (experimental; Claude only)")
+	newCmd.Flags().BoolVar(&newNoFetch, "no-fetch", false, "skip git fetch origin and create the worktree from local repo state (use when SSH auth is unavailable or offline)")
 	_ = newCmd.RegisterFlagCompletionFunc("agent", completeAgentNames)
 	_ = newCmd.RegisterFlagCompletionFunc("repo", completeRepoPaths)
 	_ = newCmd.RegisterFlagCompletionFunc("base", completeBranchNames)

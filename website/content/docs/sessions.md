@@ -29,7 +29,7 @@ gr new fix-auth-bug
 
 Steps:
 
-1. **Fetch** -- runs `git fetch origin` (when `fetch_on_create = true`)
+1. **Fetch** -- runs `git fetch origin` (when `fetch_on_create = true`; skipped by `--no-fetch`, e.g. when SSH auth is unavailable or offline)
 2. **Branch** -- creates `<branch_prefix>/<session-name>-<session-id>` from the base branch (default: repo's default branch, override with `--base`)
 3. **Worktree** -- creates a git worktree at `<data_dir>/worktrees/<repo-name>/<repo-hash>/<session-id>/`
 4. **Environment** -- sets `GRAITH_SESSION_ID`, `GRAITH_SESSION_NAME`, `GRAITH_AGENT_TYPE`, `GRAITH_WORKTREE_PATH`, `GRAITH_REPO_PATH`, `GRAITH_TMPDIR`, `TMPDIR`

@@ -88,6 +88,10 @@ type CreateMsg struct {
 	SkipModelValidation bool   `json:"skip_model_validation,omitempty"`
 	Yolo                bool   `json:"yolo,omitempty"`
 	Headless            bool   `json:"headless,omitempty"`
+	// NoFetch skips the `git fetch origin` that normally runs before the
+	// worktree is created (issue #1012). Lets sessions be created from local
+	// repo state when SSH auth is unavailable (Secretive/biometric, offline).
+	NoFetch bool `json:"no_fetch,omitempty"`
 }
 
 type ForkMsg struct {
