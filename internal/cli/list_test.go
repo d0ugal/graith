@@ -497,7 +497,7 @@ func TestTrailingColumnsFromRegistry(t *testing.T) {
 		gotWide = append(gotWide, c.header)
 	}
 
-	wantWide := []string{"REPO", "AGENT", "STATUS", "ACTIVITY", "MODEL", "BRANCH", "GIT", "PR", "TOKENS", "AGE", "ATTACHED"}
+	wantWide := []string{"REPO", "AGENT", "STATUS", "ACTIVITY", "MODEL", "BRANCH", "GIT", "PR", "REVIEW", "TOKENS", "AGE", "ATTACHED"}
 	if len(gotWide) != len(wantWide) {
 		t.Fatalf("wide columns = %v, want %v", gotWide, wantWide)
 	}
@@ -514,7 +514,7 @@ func TestTrailingColumnsFromRegistry(t *testing.T) {
 		gotCompact = append(gotCompact, c.header)
 	}
 
-	wantCompact := []string{"REPO", "AGENT", "STATUS", "ACTIVITY", "GIT", "PR", "AGE"}
+	wantCompact := []string{"REPO", "AGENT", "STATUS", "ACTIVITY", "GIT", "PR", "REVIEW", "AGE"}
 	if strings.Join(gotCompact, ",") != strings.Join(wantCompact, ",") {
 		t.Errorf("compact columns = %v, want %v", gotCompact, wantCompact)
 	}
@@ -600,7 +600,7 @@ func goldenFlatSessions(now time.Time) []protocol.SessionInfo {
 			Name: "braw", RepoName: "croft", Agent: "claude",
 			Status: "running", AgentStatus: "active", ToolName: "Bash",
 			Dirty: true, UnpushedCount: 2,
-			PullRequest: &protocol.PRInfo{Number: 42, State: "open"},
+			PullRequest: &protocol.PRInfo{Number: 42, State: "open", ReviewDecision: "approved"},
 			CI:          &protocol.CIInfo{State: "passing"},
 			CreatedAt:   created,
 		},
@@ -628,9 +628,9 @@ func TestPrintFlatGoldenCompact(t *testing.T) {
 	printFlat(cmd, goldenFlatSessions(now), now)
 
 	want := "" +
-		"NAME    REPO   AGENT   STATUS   ACTIVITY       GIT             PR              AGE\n" +
-		"braw    croft  claude  running  active (Bash)  dirty, 2 ahead  #42 open CI:ok  1h30m\n" +
-		"thrawn  croft  codex   stopped                                                 1h30m\n"
+		"NAME    REPO   AGENT   STATUS   ACTIVITY       GIT             PR              REVIEW    AGE\n" +
+		"braw    croft  claude  running  active (Bash)  dirty, 2 ahead  #42 open CI:ok  approved  1h30m\n" +
+		"thrawn  croft  codex   stopped                                                           1h30m\n"
 
 	if got := buf.String(); got != want {
 		t.Errorf("compact table mismatch:\n--- got ---\n%q\n--- want ---\n%q", got, want)
@@ -655,9 +655,9 @@ func TestPrintFlatGoldenWide(t *testing.T) {
 	printFlat(cmd, goldenFlatSessions(now), now)
 
 	want := "" +
-		"NAME    REPO   AGENT   STATUS   ACTIVITY       MODEL  BRANCH  GIT             PR              TOKENS  AGE    ATTACHED\n" +
-		"braw    croft  claude  running  active (Bash)                 dirty, 2 ahead  #42 open CI:ok          1h30m  \n" +
-		"thrawn  croft  codex   stopped                                                                        1h30m  \n"
+		"NAME    REPO   AGENT   STATUS   ACTIVITY       MODEL  BRANCH  GIT             PR              REVIEW    TOKENS  AGE    ATTACHED\n" +
+		"braw    croft  claude  running  active (Bash)                 dirty, 2 ahead  #42 open CI:ok  approved          1h30m  \n" +
+		"thrawn  croft  codex   stopped                                                                                  1h30m  \n"
 
 	if got := buf.String(); got != want {
 		t.Errorf("wide table mismatch:\n--- got ---\n%q\n--- want ---\n%q", got, want)

@@ -3189,12 +3189,12 @@ func TestPad(t *testing.T) {
 
 func TestColumnWidths_TotalWidth(t *testing.T) {
 	cw := columnWidths{name: 10, trailing: map[string]int{
-		"status": 8, "summary": 15, "git": 5, "pr": 6, "output": 4,
+		"status": 8, "summary": 15, "git": 5, "pr": 6, "review": 6, "output": 4,
 	}}
 	got := cw.totalWidth()
-	// 9 + 10 + 4 + (2+8) + (2+15) + (2+5) + (2+6) + (2+4) = 71
-	if got != 71 {
-		t.Errorf("totalWidth() = %d, want 71", got)
+	// 9 + 10 + 4 + (2+8) + (2+15) + (2+5) + (2+6) + (2+6) + (2+4) = 79
+	if got != 79 {
+		t.Errorf("totalWidth() = %d, want 79", got)
 	}
 }
 
@@ -3943,14 +3943,15 @@ func TestDisplayPR(t *testing.T) {
 		{"open failing", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 56, State: "open"}, CI: &protocol.CIInfo{State: "failing"}}, "#56 ✗"},
 		{"conflict beats CI", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 56, State: "open", Conflicting: true}, CI: &protocol.CIInfo{State: "passing"}}, "#56 ⚠"},
 		{"draft pending", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 9, State: "draft"}, CI: &protocol.CIInfo{State: "pending"}}, "#9d ·"},
-		{"approved trails CI", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 56, State: "open", ReviewDecision: "approved"}, CI: &protocol.CIInfo{State: "passing"}}, "#56 ✓ a"},
-		{"changes requested trails CI", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 56, State: "open", ReviewDecision: "changes_requested"}, CI: &protocol.CIInfo{State: "failing"}}, "#56 ✗ c"},
-		{"review required, no CI", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 56, State: "open", ReviewDecision: "review_required"}}, "#56 r"},
-		{"review trails conflict", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 56, State: "open", Conflicting: true, ReviewDecision: "changes_requested"}, CI: &protocol.CIInfo{State: "passing"}}, "#56 ⚠ c"},
-		{"merged ignores review", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 583, State: "merged", ReviewDecision: "approved"}}, "#583 merged"},
-		{"closed ignores review", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 584, State: "closed", ReviewDecision: "changes_requested"}}, "#584 closed"},
-		{"draft carries review letter", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 9, State: "draft", ReviewDecision: "review_required"}, CI: &protocol.CIInfo{State: "pending"}}, "#9d · r"},
-		{"unknown decision renders nothing", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 12, State: "open", ReviewDecision: "dismissed"}, CI: &protocol.CIInfo{State: "passing"}}, "#12 ✓"},
+		// The review decision is now its own column (displayReview); displayPR must
+		// NOT append it, so the PR/CI token colour never bleeds onto the review glyph.
+		{"review omitted from PR token (approved)", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 56, State: "open", ReviewDecision: "approved"}, CI: &protocol.CIInfo{State: "passing"}}, "#56 ✓"},
+		{"review omitted from PR token (changes)", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 56, State: "open", ReviewDecision: "changes_requested"}, CI: &protocol.CIInfo{State: "failing"}}, "#56 ✗"},
+		{"review omitted, no CI", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 56, State: "open", ReviewDecision: "review_required"}}, "#56"},
+		{"review omitted with conflict", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 56, State: "open", Conflicting: true, ReviewDecision: "changes_requested"}, CI: &protocol.CIInfo{State: "passing"}}, "#56 ⚠"},
+		{"merged", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 583, State: "merged", ReviewDecision: "approved"}}, "#583 merged"},
+		{"closed", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 584, State: "closed", ReviewDecision: "changes_requested"}}, "#584 closed"},
+		{"draft omits review", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 9, State: "draft", ReviewDecision: "review_required"}, CI: &protocol.CIInfo{State: "pending"}}, "#9d ·"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

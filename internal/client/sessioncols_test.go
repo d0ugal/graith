@@ -25,8 +25,8 @@ func TestSessionColumnsOrder(t *testing.T) {
 		}
 	}
 
-	wantCLI := []string{"repo", "agent", "status", "activity", "model", "branch", "git", "pr", "tokens", "age", "attached"}
-	wantTUI := []string{"status", "summary", "git", "pr", "output"}
+	wantCLI := []string{"repo", "agent", "status", "activity", "model", "branch", "git", "pr", "review", "tokens", "age", "attached"}
+	wantTUI := []string{"status", "summary", "git", "pr", "review", "output"}
 
 	if join(cli) != join(wantCLI) {
 		t.Errorf("CLI columns = %v, want %v", cli, wantCLI)
@@ -110,14 +110,15 @@ func TestCliPR(t *testing.T) {
 		{"CI pending", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 3, State: "open"}, CI: &protocol.CIInfo{State: "pending"}}, "#3 open CI:…"},
 		{"CI empty adds nothing", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 4, State: "merged"}, CI: &protocol.CIInfo{State: ""}}, "#4 merged"},
 		{"conflict and CI combine", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 5, State: "open", Conflicting: true}, CI: &protocol.CIInfo{State: "failing"}}, "#5 open conflict CI:fail"},
-		{"review approved", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 6, State: "open", ReviewDecision: "approved"}}, "#6 open review:ok"},
-		{"review changes requested", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 7, State: "open", ReviewDecision: "changes_requested"}}, "#7 open review:changes"},
-		{"review required", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 8, State: "draft", ReviewDecision: "review_required"}}, "#8 draft review:needed"},
-		{"CI and review combine", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 9, State: "open", ReviewDecision: "approved"}, CI: &protocol.CIInfo{State: "passing"}}, "#9 open CI:ok review:ok"},
-		{"unknown review decision ignored", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 10, State: "open", ReviewDecision: "dismissed"}}, "#10 open"},
-		{"conflict and review combine", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 11, State: "open", Conflicting: true, ReviewDecision: "changes_requested"}}, "#11 open conflict review:changes"},
-		{"merged suppresses stale review and CI", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 12, State: "merged", ReviewDecision: "approved"}, CI: &protocol.CIInfo{State: "passing"}}, "#12 merged"},
-		{"closed suppresses stale review", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 13, State: "closed", ReviewDecision: "changes_requested"}}, "#13 closed"},
+		// The review decision is now a separate column (cliReview); the PR cell must
+		// NOT carry it, so CI/conflict colour never bleeds onto the review indicator.
+		{"review not in PR cell (approved)", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 6, State: "open", ReviewDecision: "approved"}}, "#6 open"},
+		{"review not in PR cell (changes)", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 7, State: "open", ReviewDecision: "changes_requested"}}, "#7 open"},
+		{"review not in PR cell (required)", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 8, State: "draft", ReviewDecision: "review_required"}}, "#8 draft"},
+		{"CI shown, review omitted", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 9, State: "open", ReviewDecision: "approved"}, CI: &protocol.CIInfo{State: "passing"}}, "#9 open CI:ok"},
+		{"conflict shown, review omitted", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 11, State: "open", Conflicting: true, ReviewDecision: "changes_requested"}}, "#11 open conflict"},
+		{"merged suppresses stale CI", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 12, State: "merged", ReviewDecision: "approved"}, CI: &protocol.CIInfo{State: "passing"}}, "#12 merged"},
+		{"closed", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 13, State: "closed", ReviewDecision: "changes_requested"}}, "#13 closed"},
 	}
 
 	for _, tt := range tests {
@@ -126,6 +127,70 @@ func TestCliPR(t *testing.T) {
 				t.Errorf("cliPR = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestReviewCellValues covers both review-column value formatters together — the
+// CLI text (cliReview) and the TUI glyph (displayReview) — including the
+// unknown-decision case and merged/closed suppression of a stale decision.
+func TestReviewCellValues(t *testing.T) {
+	pr := func(state, decision string) protocol.SessionInfo {
+		return protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 1, State: state, ReviewDecision: decision}}
+	}
+
+	cases := []struct {
+		in       protocol.SessionInfo
+		cli      string
+		tuiGlyph string
+	}{
+		{protocol.SessionInfo{}, "", "—"},
+		{pr("open", ""), "", "—"},
+		{pr("open", "approved"), "approved", "a"},
+		{pr("open", "changes_requested"), "changes", "c"},
+		{pr("draft", "review_required"), "needed", "r"},
+		{pr("open", "dismissed"), "", "—"},
+		{pr("merged", "approved"), "", "—"},
+		{pr("closed", "changes_requested"), "", "—"},
+	}
+
+	for _, c := range cases {
+		if got := cliReview(c.in); got != c.cli {
+			t.Errorf("cliReview(%+v) = %q, want %q", c.in.PullRequest, got, c.cli)
+		}
+
+		if got := displayReview(c.in); got != c.tuiGlyph {
+			t.Errorf("displayReview(%+v) = %q, want %q", c.in.PullRequest, got, c.tuiGlyph)
+		}
+	}
+}
+
+// TestReviewColor pins the decision→colour mapping — the whole point of the split
+// is that review_required is dim/grey, NOT the green a passing-CI PR cell uses.
+func TestReviewColor(t *testing.T) {
+	pr := func(state, decision string) protocol.SessionInfo {
+		return protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 1, State: state, ReviewDecision: decision}}
+	}
+
+	if got := reviewColor(pr("open", "")); got != nil {
+		t.Errorf("no decision should have no colour, got %v", got)
+	}
+
+	if got := reviewColor(pr("open", "approved")); got != colorGreen {
+		t.Errorf("approved should be green, got %v", got)
+	}
+
+	if got := reviewColor(pr("open", "changes_requested")); got != colorRed {
+		t.Errorf("changes_requested should be red, got %v", got)
+	}
+
+	// The bug this split fixes: review_required must be dim, not the green a
+	// passing-CI PR cell would otherwise lend it.
+	if got := reviewColor(pr("open", "review_required")); got != colorDim {
+		t.Errorf("review_required should be dim, got %v", got)
+	}
+
+	if got := reviewColor(pr("merged", "approved")); got != nil {
+		t.Errorf("merged should suppress the stale review colour, got %v", got)
 	}
 }
 
@@ -302,8 +367,9 @@ func TestTUIColumnCellsGolden(t *testing.T) {
 		deterministic.WriteString(ansi.Strip(cell))
 	}
 
-	// status="active"(6) summary="fixing bothy"(12) git="M ↑2"(4) pr="#42 ✓"(5).
-	want := "  active  fixing bothy  M ↑2  #42 ✓"
+	// status="active"(6) summary="fixing bothy"(12) git="M ↑2"(4) pr="#42 ✓"(5)
+	// review="—"(1) — no review decision on this PR, so the placeholder glyph.
+	want := "  active  fixing bothy  M ↑2  #42 ✓  —"
 	if got := deterministic.String(); got != want {
 		t.Errorf("TUI column cells mismatch:\n got %q\nwant %q", got, want)
 	}
