@@ -44,4 +44,18 @@ final class RepoOrderingTests: XCTestCase {
         // `kail` has no `recent` key → not recent → sorts after the recent `neep`.
         XCTAssertEqual(SessionStore.orderedRepos(input).map(\.name), ["neep", "kail"])
     }
+
+    func testSameNameDifferentPathsAreDeterministicByPath() throws {
+        // Two repos share a basename (daemon dedupes by path, not name). Order
+        // must be stable by path regardless of input order — Swift's sort isn't
+        // stable, so the name-only comparator would otherwise leave it to chance.
+        let forward = try repos("""
+        [{"path":"/y/whin","name":"whin"},{"path":"/x/whin","name":"whin"}]
+        """)
+        let reversed = try repos("""
+        [{"path":"/x/whin","name":"whin"},{"path":"/y/whin","name":"whin"}]
+        """)
+        XCTAssertEqual(SessionStore.orderedRepos(forward).map(\.path), ["/x/whin", "/y/whin"])
+        XCTAssertEqual(SessionStore.orderedRepos(reversed).map(\.path), ["/x/whin", "/y/whin"])
+    }
 }

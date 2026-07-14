@@ -441,17 +441,28 @@ class SessionStore: ObservableObject {
 
     // MARK: - Read-only peeks (logs, screen snapshot, repo list)
 
+    /// The client that *strictly* owns `sessionID` — no local-daemon fallback.
+    /// `client(for:)` falls back to local so a lifecycle action still has a
+    /// client to error against; the read-only peeks must not, or a removed
+    /// remote session id would be sent to the local daemon (a misleading
+    /// "not found", or in the worst case another daemon's identically-numbered
+    /// session's output).
+    private func ownerClient(for sessionID: String) -> GraithProtocolClient? {
+        let hostID = hostBySession[sessionID] ?? "local"
+        return clients[hostID]
+    }
+
     /// Fetch the tail of a session's scrollback as plain text (a non-attaching
-    /// peek). Routes to the session's owning host client.
+    /// peek). Routes strictly to the session's owning host client.
     func fetchLogs(_ session: Session, lines: Int = 500) async throws -> String {
-        guard let client = client(for: session.id) else { throw SessionStoreError.hostUnavailable }
+        guard let client = ownerClient(for: session.id) else { throw SessionStoreError.hostUnavailable }
         return try await client.logs(sessionID: session.id, lines: lines)
     }
 
     /// Fetch a one-shot render of a session's current screen (no attach, no
-    /// desktop kick).
+    /// desktop kick). Routes strictly to the session's owning host client.
     func fetchSnapshot(_ session: Session) async throws -> ScreenSnapshotResponseMsg {
-        guard let client = client(for: session.id) else { throw SessionStoreError.hostUnavailable }
+        guard let client = ownerClient(for: session.id) else { throw SessionStoreError.hostUnavailable }
         return try await client.screenSnapshot(sessionID: session.id)
     }
 
@@ -464,14 +475,21 @@ class SessionStore: ObservableObject {
         return Self.orderedRepos(repos)
     }
 
-    /// Order repos recent-first, then alphabetically by name — a stable order
-    /// for the picker regardless of how the daemon returned them.
+    /// Order repos recent-first, then alphabetically by name, then by path — a
+    /// fully-deterministic order regardless of how the daemon returned them.
+    /// Path is the final tiebreak because Swift's sort isn't stable and two
+    /// repos can share a (case-insensitive) name; without it the result would
+    /// still depend on input order for same-named entries.
     static func orderedRepos(_ repos: [RepoEntry]) -> [RepoEntry] {
         repos.sorted { lhs, rhs in
             let lRecent = lhs.recent ?? false
             let rRecent = rhs.recent ?? false
             if lRecent != rRecent { return lRecent }
-            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+            switch lhs.name.localizedCaseInsensitiveCompare(rhs.name) {
+            case .orderedAscending: return true
+            case .orderedDescending: return false
+            case .orderedSame: return lhs.path < rhs.path
+            }
         }
     }
 

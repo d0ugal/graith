@@ -71,4 +71,36 @@ final class ApprovalQueueTests: XCTestCase {
         // A bare request id would collapse these to one; the composite keeps both.
         XCTAssertEqual(q.keys(order: ["ben", "brae"]), ["ben:dup", "brae:dup"])
     }
+
+    func testApplySnapshotSuppressesInFlightRequest() throws {
+        // The human answered "a1" (optimistically removed, now in-flight). A
+        // stream snapshot that still lists a1 must not resurrect it — but must
+        // still surface the genuinely-new a2.
+        var q = ApprovalQueue()
+        let snapshot = [try approval("a1"), try approval("a2")]
+        q.applySnapshot(snapshot, host: "ben", suppressing: ["ben:a1"])
+        XCTAssertEqual(q.merged(order: ["ben"]).map(\.requestID), ["a2"])
+    }
+
+    func testApplySnapshotSuppressionIsHostScoped() throws {
+        // Suppressing ben:dup must not hide brae's own dup.
+        var q = ApprovalQueue()
+        q.applySnapshot([try approval("dup")], host: "brae", suppressing: ["ben:dup"])
+        XCTAssertEqual(q.merged(order: ["brae"]).map(\.requestID), ["dup"])
+    }
+
+    func testAddRestoresARolledBackRequest() throws {
+        // A failed respond rolls the row back via add().
+        var q = ApprovalQueue()
+        q.set([try approval("a2")], host: "ben")
+        q.add(try approval("a1"), host: "ben")
+        XCTAssertEqual(Set(q.merged(order: ["ben"]).map(\.requestID)), ["a1", "a2"])
+    }
+
+    func testAddIsIdempotent() throws {
+        var q = ApprovalQueue()
+        q.set([try approval("a1")], host: "ben")
+        q.add(try approval("a1"), host: "ben") // already present — no duplicate
+        XCTAssertEqual(q.merged(order: ["ben"]).map(\.requestID), ["a1"])
+    }
 }

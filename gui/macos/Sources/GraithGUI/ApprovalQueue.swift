@@ -29,6 +29,24 @@ struct ApprovalQueue {
         byHost[host] = pending
     }
 
+    /// Apply a fresh stream snapshot for `host`, dropping any request whose
+    /// composite key is in `suppressing`. Used to keep an in-flight (answered
+    /// but not-yet-acknowledged) approval from being resurrected by a snapshot
+    /// that still lists it — which would re-fire a banner and let the human
+    /// answer it twice.
+    mutating func applySnapshot(_ pending: [ApprovalInfo], host: String, suppressing inFlight: Set<String>) {
+        byHost[host] = pending.filter { !inFlight.contains("\(host):\($0.requestID)") }
+    }
+
+    /// Re-insert a single approval for `host` (a rollback after a failed
+    /// respond). No-op if it's already present.
+    mutating func add(_ approval: ApprovalInfo, host: String) {
+        var list = byHost[host] ?? []
+        guard !list.contains(where: { $0.requestID == approval.requestID }) else { return }
+        list.append(approval)
+        byHost[host] = list
+    }
+
     /// Forget a host entirely (its subscription ended / it was removed).
     mutating func clear(host: String) {
         byHost[host] = nil
