@@ -26,8 +26,29 @@ func (sm *SessionManager) hookDir(sessionID string) string {
 }
 
 // resolveGrBin finds the gr binary path for hook scripts.
+//
+// It resolves the name this daemon was invoked as (os.Args[0]) rather than a
+// hardcoded "gr", so a dev build launched as "gr-dev" wires hooks to itself
+// instead of an unrelated production "gr" that happens to be on PATH. Hooks are
+// shell scripts run in the user's environment, so the invocation name is the
+// right signal: it names the command the environment actually exposes. (This
+// deliberately differs from resolveExecutable, which upgrades the real binary
+// and so derives its name from os.Executable.)
+//
+// The PATH entry is preferred over os.Executable() because the former is
+// typically a stable symlink, whereas os.Executable() resolves through to the
+// upgrade-versioned install path (e.g. a Homebrew Cellar dir) that breaks the
+// next time the binary is upgraded.
 func resolveGrBin() string {
-	if p, err := exec.LookPath("gr"); err == nil {
+	name := "gr"
+
+	if len(os.Args) > 0 {
+		if base := filepath.Base(os.Args[0]); base != "" && base != "." && base != string(filepath.Separator) {
+			name = base
+		}
+	}
+
+	if p, err := exec.LookPath(name); err == nil {
 		return p
 	}
 
@@ -35,7 +56,7 @@ func resolveGrBin() string {
 		return p
 	}
 
-	return "gr"
+	return name
 }
 
 // preToolUseExemptTools is the explicit set of read-only Claude tools excluded

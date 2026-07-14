@@ -218,6 +218,41 @@ func TestResolveGrBin(t *testing.T) {
 	}
 }
 
+// TestResolveGrBinUsesInvocationName is a regression test for a dev build
+// wiring hooks to an unrelated production "gr" on PATH instead of itself. A
+// daemon launched as "gr-dev" must resolve its own name, not the hardcoded
+// "gr", even when a different "gr" binary is present on PATH.
+func TestResolveGrBinUsesInvocationName(t *testing.T) {
+	binDir := filepath.Join(t.TempDir(), "bin")
+	if err := os.MkdirAll(binDir, 0o750); err != nil {
+		t.Fatalf("create bin dir: %v", err)
+	}
+
+	// Plant both a production "gr" and the dev "gr-dev" on PATH. The dev daemon
+	// must pick gr-dev — the bug picked gr.
+	grBin := filepath.Join(binDir, "gr")
+	devBin := filepath.Join(binDir, "gr-dev")
+
+	for _, p := range []string{grBin, devBin} {
+		if err := os.WriteFile(p, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil { //nolint:gosec // G306: must be executable
+			t.Fatalf("write %q: %v", p, err)
+		}
+	}
+
+	t.Setenv("PATH", binDir)
+
+	// Simulate being launched as gr-dev.
+	origArgs := os.Args
+
+	t.Cleanup(func() { os.Args = origArgs })
+
+	os.Args = []string{devBin, "daemon", "start"}
+
+	if got := resolveGrBin(); got != devBin {
+		t.Errorf("resolveGrBin() = %q, want %q (must resolve its own invocation name, not the planted %q)", got, devBin, grBin)
+	}
+}
+
 func TestInjectCodexHooks(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 	sessionID := "kirk-codex-01"
@@ -455,8 +490,15 @@ func TestCodexHookScriptsEscapeSingleQuotes(t *testing.T) {
 		t.Fatalf("write fake binary: %v", err)
 	}
 
-	// Override PATH so resolveGrBin finds our fake binary.
+	// Override PATH so resolveGrBin finds our fake binary, and simulate being
+	// launched as "gr" so it looks up that name (resolveGrBin uses os.Args[0]).
 	t.Setenv("PATH", fakeDir+":"+os.Getenv("PATH"))
+
+	origArgs := os.Args
+
+	t.Cleanup(func() { os.Args = origArgs })
+
+	os.Args = []string{fakeBin, "daemon", "start"}
 
 	sm := newTestSessionManagerWithDataDir(t)
 	sessionID := "kirk-codex-quote"
@@ -963,6 +1005,13 @@ func TestClaudeSettingsEscapeSingleQuotes(t *testing.T) {
 	}
 
 	t.Setenv("PATH", fakeDir+":"+os.Getenv("PATH"))
+	// Simulate being launched as "gr" so resolveGrBin (which uses os.Args[0])
+	// looks up that name and finds the planted binary above.
+	origArgs := os.Args
+
+	t.Cleanup(func() { os.Args = origArgs })
+
+	os.Args = []string{fakeBin, "daemon", "start"}
 
 	sm := newTestSessionManagerWithDataDir(t)
 	sessionID := "kirk-claude-quote"
