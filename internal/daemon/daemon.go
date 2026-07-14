@@ -1317,6 +1317,17 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		driverKind = DriverPTY
 	}
 
+	// Make each included repo's co-located worktree visible to the agent via
+	// --add-dir. For a mirror session the includes live on the source session
+	// (git setup is skipped locally), so use those. Appended before the prompt
+	// so the agent parses them as flags, not a positional prompt argument.
+	effectiveIncludes := includes
+	if isMirror {
+		effectiveIncludes = sourceIncludes
+	}
+
+	expandedArgs = append(expandedArgs, includeAddDirArgs(effectiveIncludes)...)
+
 	if driverKind == DriverHeadless {
 		expandedArgs = headlessArgs(expandedArgs, prompt)
 	} else if prompt != "" {
@@ -1906,6 +1917,10 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 
 		return SessionState{}, fmt.Errorf("expand fork args: %w", err)
 	}
+
+	// Make each included repo's forked worktree visible to the agent via
+	// --add-dir (a fork re-creates the source's includes as forkIncludes).
+	expandedArgs = append(expandedArgs, includeAddDirArgs(forkIncludes)...)
 
 	logPath := filepath.Join(sm.paths.LogDir, id+".log")
 
@@ -2929,6 +2944,11 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 
 		env[config.IncludeEnvVarName(inc.RepoName)] = inc.WorktreePath
 	}
+
+	// Re-add each included worktree via --add-dir on resume so the flag persists
+	// across restarts (resume_args don't carry it). Appended before hooks and any
+	// prompt so the agent parses them as flags.
+	expandedArgs = append(expandedArgs, includeAddDirArgs(sessIncludes)...)
 
 	if sessAgentHooks {
 		hookArgs, hookEnv, err := sm.injectHooks(sessAgent, id, sessWorktreePath, sessYolo, mcpServers)
@@ -6209,6 +6229,28 @@ func (sm *SessionManager) deriveSandboxIncludesWriteDirs(includes []IncludedRepo
 	}
 
 	return dirs
+}
+
+// includeAddDirArgs builds the `--add-dir <worktree>` flags that make each
+// included repo's co-located worktree visible to the agent at launch. Claude,
+// Codex and Cursor all accept `--add-dir`, so the same flag works for every
+// agent graith drives; agents that don't take includes get no extra args.
+// Worktrees without a path are skipped defensively.
+func includeAddDirArgs(includes []IncludedRepoState) []string {
+	if len(includes) == 0 {
+		return nil
+	}
+
+	args := make([]string, 0, len(includes)*2)
+	for _, inc := range includes {
+		if inc.WorktreePath == "" {
+			continue
+		}
+
+		args = append(args, "--add-dir", inc.WorktreePath)
+	}
+
+	return args
 }
 
 func (sm *SessionManager) resolveSandbox(agentName string) (bool, error) {

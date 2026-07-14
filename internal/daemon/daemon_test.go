@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"syscall"
 	"testing"
@@ -3573,6 +3574,167 @@ func TestInPlaceRejectsRepoWithIncludes(t *testing.T) {
 
 	_, err := sm.Create(CreateOpts{Name: "braw", AgentName: "claude", RepoPath: repoDir, InPlace: true, Rows: 24, Cols: 80})
 	assertErrContains(t, err, "includes configured")
+}
+
+func TestIncludeAddDirArgs(t *testing.T) {
+	tests := []struct {
+		name     string
+		includes []IncludedRepoState
+		want     []string
+	}{
+		{
+			name:     "nil includes yields no args",
+			includes: nil,
+			want:     nil,
+		},
+		{
+			name:     "empty includes yields no args",
+			includes: []IncludedRepoState{},
+			want:     nil,
+		},
+		{
+			name: "single include yields one flag pair",
+			includes: []IncludedRepoState{
+				{RepoName: "bairn", WorktreePath: "/glen/bothy/bairn"},
+			},
+			want: []string{"--add-dir", "/glen/bothy/bairn"},
+		},
+		{
+			name: "multiple includes preserve order",
+			includes: []IncludedRepoState{
+				{RepoName: "bairn", WorktreePath: "/glen/bothy/bairn"},
+				{RepoName: "whin", WorktreePath: "/glen/bothy/whin"},
+			},
+			want: []string{"--add-dir", "/glen/bothy/bairn", "--add-dir", "/glen/bothy/whin"},
+		},
+		{
+			name: "include without a worktree path is skipped",
+			includes: []IncludedRepoState{
+				{RepoName: "haar", WorktreePath: ""},
+				{RepoName: "bairn", WorktreePath: "/glen/bothy/bairn"},
+			},
+			want: []string{"--add-dir", "/glen/bothy/bairn"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := includeAddDirArgs(tt.includes)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("includeAddDirArgs() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestIncludesPassAddDirOnLaunchAndResume drives a real session whose agent
+// records the argv it was launched with, and asserts --add-dir <worktree> is
+// passed for each included repo on both the initial launch and on resume.
+func TestIncludesPassAddDirOnLaunchAndResume(t *testing.T) {
+	repoDir := initTempGitRepo(t)
+	incDir := initTempGitRepo(t)
+
+	dir := t.TempDir()
+	recordPath := filepath.Join(dir, "argv.txt")
+
+	// The agent script records its own argv (flags graith appended land in
+	// $0/$@) to a file, then blocks so the PTY stays alive. Same for resume.
+	script := `printf '%s\n' "$0" "$@" > "$GRAITH_ARGS_RECORD"; exec cat`
+
+	cfg := config.Default()
+	cfg.FetchOnCreate = false
+	cfg.Agents["recorder"] = config.Agent{
+		Command:    "sh",
+		Args:       []string{"-c", script},
+		ResumeArgs: []string{"-c", script},
+		Env:        map[string]string{"GRAITH_ARGS_RECORD": recordPath},
+	}
+	cfg.Repos = []config.RepoConfig{{Path: repoDir, Includes: []string{incDir}}}
+
+	sm := NewSessionManager(cfg, config.Paths{
+		StateFile:  filepath.Join(dir, "state.json"),
+		DataDir:    dir,
+		LogDir:     dir,
+		RuntimeDir: dir,
+		TmpDir:     filepath.Join(dir, "tmp"),
+	}, slog.Default())
+
+	created, err := sm.Create(CreateOpts{
+		Name: "canny", AgentName: "recorder", RepoPath: repoDir, BaseBranch: "main", Rows: 24, Cols: 80,
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	id := created.ID
+
+	t.Cleanup(func() { stopAndClosePTY(sm, id) })
+
+	if len(created.Includes) != 1 {
+		t.Fatalf("created.Includes = %v, want one include", created.Includes)
+	}
+
+	incWorktree := created.Includes[0].WorktreePath
+
+	waitForRecordedArg(t, recordPath, "--add-dir", incWorktree)
+
+	// Restart exercises the resume path; the flag must be re-added even though
+	// resume_args don't carry it.
+	if err := os.Remove(recordPath); err != nil {
+		t.Fatalf("remove record before resume: %v", err)
+	}
+
+	if err := sm.Stop(id); err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+
+	waitForStatus(t, sm, id, StatusStopped)
+
+	if _, err := sm.Restart(id, 24, 80); err != nil {
+		t.Fatalf("Restart() error = %v", err)
+	}
+
+	waitForRecordedArg(t, recordPath, "--add-dir", incWorktree)
+}
+
+// waitForRecordedArg polls the argv-record file until it contains every want
+// token (each on its own line), failing the test if it does not appear in time.
+func waitForRecordedArg(t *testing.T, recordPath string, want ...string) {
+	t.Helper()
+
+	deadline := time.Now().Add(10 * time.Second)
+
+	var last string
+
+	for time.Now().Before(deadline) {
+		data, err := os.ReadFile(recordPath)
+		if err == nil {
+			last = string(data)
+			lines := strings.Split(last, "\n")
+
+			seen := make(map[string]bool, len(lines))
+			for _, ln := range lines {
+				seen[ln] = true
+			}
+
+			all := true
+
+			for _, w := range want {
+				if !seen[w] {
+					all = false
+					break
+				}
+			}
+
+			if all {
+				return
+			}
+		}
+
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	t.Fatalf("recorded argv never contained %v; last content:\n%s", want, last)
 }
 
 func TestForkSingletonRejects(t *testing.T) {
