@@ -95,6 +95,25 @@ Forking:
 
 Use forking to explore alternative approaches from the same git state.
 
+### Cross-agent fork
+
+```bash
+gr fork fix-auth-bug auth-codex --agent codex
+```
+
+Pass `--agent <target>` to fork into a **different agent**. Because the target
+can't natively resume the source's conversation, graith renders the source's
+history to a neutral context file (the same reader/renderer `gr migrate` uses)
+and seeds the new agent with it. The original session keeps running, so both
+agents work in parallel.
+
+Unlike `gr migrate` (which keeps the worktree in place), a fork branches a new
+worktree from the base branch — so the source's changes (**uncommitted edits and
+any commits on its branch**) are not carried over. Re-apply any code changes you
+still need in the new session.
+Claude and Codex are supported as fork *sources*; any configured agent can be a
+*target*. Use `--model` to override the target agent's model.
+
 ## Migrate to a different agent
 
 ```bash

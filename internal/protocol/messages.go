@@ -97,6 +97,14 @@ type CreateMsg struct {
 type ForkMsg struct {
 	Name            string `json:"name"`
 	SourceSessionID string `json:"source_session_id"`
+	// Agent, when set and different from the source's agent, forks into a NEW
+	// worktree under a different agent, seeding it with the source's rendered
+	// conversation history. Empty (or equal to the source agent) is a native
+	// same-agent fork.
+	Agent string `json:"agent,omitempty"`
+	// Model overrides the target agent's model for a cross-agent fork. Ignored
+	// for a same-agent fork (which inherits the source model).
+	Model string `json:"model,omitempty"`
 }
 
 type MigrateMsg struct {

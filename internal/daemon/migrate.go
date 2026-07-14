@@ -157,6 +157,14 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 		return SessionState{}, fmt.Errorf("session %q deleted during migrate", id)
 	}
 
+	// Overwriting MigratedFrom drops the only pointer to any previously-staged
+	// context dir (e.g. a cross-agent fork's fork-<id> dir, whose path differs
+	// from this migrate's migrate-<id> dir). Remove the prior one first so it
+	// isn't orphaned on disk. A no-op when the path is the same or empty.
+	if s.MigratedFrom != nil && s.MigratedFrom.RenderedPath != contextPath {
+		sm.removeMigrationContext(s)
+	}
+
 	s.MigratedFrom = &MigrationInfo{
 		Agent:          srcAgent,
 		Model:          srcModel,

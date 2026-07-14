@@ -195,8 +195,11 @@ func errSoftDeleted(name string) error {
 	return fmt.Errorf("session %q is soft-deleted; `gr restore` it first", name)
 }
 
-// MigrationInfo records the agent a session was migrated from, so a failed
-// migration can be reverted and the user can migrate back later.
+// MigrationInfo records the agent a session's conversation came from. For an
+// in-place migration it enables reverting a failed migrate and migrating back
+// later. It is also set on a CROSS-AGENT FORK (which has a live ParentID),
+// where it records provenance and — via RenderedPath — owns the staged context
+// file so it is cleaned up on delete. Distinguish the two by ParentID.
 type MigrationInfo struct {
 	Agent          string    `json:"agent"`
 	Model          string    `json:"model,omitempty"`

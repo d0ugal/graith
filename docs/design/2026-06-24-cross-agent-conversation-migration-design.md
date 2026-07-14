@@ -470,13 +470,23 @@ session id and its format is undocumented/compressed; Claude resume depends on
 translator. Revisit only as a Claude↔Codex fidelity upgrade, gated on stable
 session ids + fixture-based replay tests, if render + reseed proves insufficient.
 
-### Future: cross-agent fork (separate worktree)
+### Cross-agent fork (separate worktree) — implemented (#1043)
 
-A later addition can offer cross-agent **fork** — a *new* session/worktree under
-a different agent while the original keeps running — reusing this design's
-reader/renderer. That path reintroduces the git-state question (a fork branches
-from base, so the new worktree wouldn't carry uncommitted edits) and is deferred
-until there's demand for running both agents at once.
+Cross-agent **fork** — a *new* session/worktree under a different agent while
+the original keeps running — is now available as `gr fork <src> <name> --agent
+<target>`, reusing this design's reader/renderer. It renders the source's
+conversation to a neutral context file and seeds the target agent with it (via
+`transcript.BuildForkSeedPrompt`), while the source session is left untouched.
+
+The git-state question resolves as noted: like any fork, the new worktree
+branches from the base branch, so the source's uncommitted edits are **not**
+carried over. The fork seed prompt states this explicitly (unlike migrate's
+in-place seed, which promises the working tree is intact) so the target agent
+re-applies changes it still needs rather than assuming they exist on disk. The
+target starts fresh (`agent.Args`, not `fork_args`) since it cannot natively
+resume the source's conversation, and provenance is recorded in `MigratedFrom`
+(which also drives cleanup of the rendered file on delete). See
+`SessionManager.ForkWithAgent` in `internal/daemon/daemon.go`.
 
 ## Consensus
 

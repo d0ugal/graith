@@ -445,7 +445,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				}
 
 				//nolint:contextcheck // session lifecycle is intentionally detached from the client connection: forked sessions must survive client disconnect, so Fork uses its own bounded background timeouts rather than the request ctx.
-				sess, err := sm.Fork(f.Name, f.SourceSessionID, clientRows, clientCols)
+				sess, err := sm.ForkWithAgent(f.Name, f.SourceSessionID, f.Agent, f.Model, clientRows, clientCols)
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 				} else {
