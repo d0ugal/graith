@@ -530,8 +530,11 @@ built — it's the argument for a decision, kept afterwards as the record of why
 
 The published docs site lives in `website/` (Hugo) and is served at
 <https://d0ugal.github.io/graith/> via `.github/workflows/docs.yml`. The pages
-are Markdown under `website/content/docs/` (e.g. `auth.md`, `sandbox.md`,
-`configuration.md`, `commands.md`).
+are Markdown under `website/content/docs/`. Larger topics are Hugo section
+directories with an `_index.md` landing page plus focused sub-pages ordered by
+`weight` (e.g. `configuration/`, `commands/`, `sandbox/`, `patterns/`); smaller
+topics stay single files (e.g. `auth.md`, `triggers.md`). Cross-page links use
+the `{{< relref >}}` shortcode so a broken reference fails the Hugo build.
 
 **When a change alters user-facing behaviour — a command, flag, config key,
 env var, auth/security model, or lifecycle — update the matching page under
