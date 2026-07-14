@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.68.0](https://github.com/d0ugal/graith/compare/v0.67.9...v0.68.0) (2026-07-14)
+
+
+### ⚠ BREAKING CHANGES
+
+* **sandbox:** `gr sandbox why` is removed. Use `gr sandbox explain` for the predictive policy-oracle check (the direct replacement for `--path`/`--host`/`--op`/`--agent`, nono only) or `gr sandbox watch` for the retrospective macOS denial log. The old command survives only as a hidden tombstone that errors with a pointer to the replacements.
+
+### Features
+
+* **sandbox:** debug denials with `gr sandbox explain` + `gr sandbox watch` ([d0523b4](https://github.com/d0ugal/graith/commit/d0523b4b5977608f9b97052f8ae29dbed4aa9182))
+
+
+### Bug Fixes
+
+* **hooks:** resolve agent-hook binary by invocation name, not hardcoded "gr" ([bd3896e](https://github.com/d0ugal/graith/commit/bd3896ef781992540bbd7fc974713041093b3423))
+
+
+### Dependencies
+
+* **deps:** update dependency zizmorcore/zizmor to v1.27.0 ([f5ec3a1](https://github.com/d0ugal/graith/commit/f5ec3a1615148e0a66e834eab8d7cfbba87bc5f2))
+* **deps:** update dependency zizmorcore/zizmor to v1.27.0 ([8858973](https://github.com/d0ugal/graith/commit/8858973f2d5fa02448f56837ec82bc44d7fd5972))
+
 ## [0.67.9](https://github.com/d0ugal/graith/compare/v0.67.8...v0.67.9) (2026-07-14)
 
 
