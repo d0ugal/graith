@@ -29,7 +29,10 @@ let package = Package(
         ),
         .testTarget(
             name: "GraithGUITests",
-            dependencies: ["GraithGUI"]
+            dependencies: [
+                "GraithGUI",
+                .product(name: "GraithProtocol", package: "shared"),
+            ]
         ),
     ]
 )

@@ -106,6 +106,8 @@ struct SessionRow: View {
                     if session.starred == true { Image(systemName: "star.fill").font(.caption2).foregroundStyle(.yellow) }
                     if session.isYolo { Image(systemName: "bolt.fill").font(.caption2).foregroundStyle(.orange) }
                     if session.sandboxed == true { Image(systemName: "shield.lefthalf.filled").font(.caption2).foregroundStyle(.secondary) }
+                    if session.isScenarioMember { Image(systemName: "square.stack.3d.up.fill").font(.caption2).foregroundStyle(.purple) }
+                    if session.configStale == true { Image(systemName: "exclamationmark.triangle.fill").font(.caption2).foregroundStyle(.yellow) }
                 }
                 if let summary = session.summaryText, !summary.isEmpty {
                     Text(summary)

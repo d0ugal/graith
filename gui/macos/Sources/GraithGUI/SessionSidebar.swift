@@ -494,6 +494,33 @@ struct SessionRow: View {
                         .padding(.vertical, 1)
                         .background(agentColor.opacity(0.12))
                         .clipShape(RoundedRectangle(cornerRadius: 3))
+
+                    // Mode/membership indicators (issue #901): YOLO, sandboxed,
+                    // scenario membership, and a config-stale warning.
+                    if session.isYolo {
+                        Image(systemName: "bolt.fill")
+                            .foregroundStyle(Theme.peach)
+                            .font(.system(size: 8))
+                            .help("YOLO mode \u{2014} approvals bypassed")
+                    }
+                    if session.isSandboxed {
+                        Image(systemName: "shield.lefthalf.filled")
+                            .foregroundStyle(Theme.teal)
+                            .font(.system(size: 8))
+                            .help("Sandboxed")
+                    }
+                    if session.isScenarioMember {
+                        Image(systemName: "square.stack.3d.up.fill")
+                            .foregroundStyle(Theme.mauve)
+                            .font(.system(size: 8))
+                            .help("Scenario: \(session.scenarioName ?? "member")")
+                    }
+                    if session.isConfigStale {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(Theme.yellow)
+                            .font(.system(size: 8))
+                            .help("Config changed since launch \u{2014} restart to apply")
+                    }
                 }
 
                 // Status / summary line
@@ -504,12 +531,18 @@ struct SessionRow: View {
                         .lineLimit(1)
                 }
 
-                // Metadata subtitle (cost, dirty, ahead)
-                if !metadataSubtitle.isEmpty {
-                    Text(metadataSubtitle)
-                        .font(.system(.caption2, design: .monospaced))
-                        .foregroundStyle(Theme.overlay0)
-                        .lineLimit(1)
+                // Metadata line: PR/CI badges (issue #901) plus dirty/ahead.
+                if session.pullRequest != nil || session.ci != nil || !metadataSubtitle.isEmpty {
+                    HStack(spacing: 6) {
+                        if let pr = session.pullRequest { PRBadge(pr: pr) }
+                        if let ci = session.ci { CIBadge(ci: ci) }
+                        if !metadataSubtitle.isEmpty {
+                            Text(metadataSubtitle)
+                                .font(.system(.caption2, design: .monospaced))
+                                .foregroundStyle(Theme.overlay0)
+                                .lineLimit(1)
+                        }
+                    }
                 }
             }
 
