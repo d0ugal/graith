@@ -13,63 +13,43 @@ let package = Package(
         .macOS(.v14),
     ],
     products: [
-        .library(name: "GraithClientAPI", targets: ["GraithClientAPI"]),
-        .library(name: "GraithMobileKit", targets: ["GraithMobileKit"]),
         .library(name: "GraithMobileUI", targets: ["GraithMobileUI"]),
         .library(name: "GraithTerminalUIKit", targets: ["GraithTerminalUIKit"]),
         .library(name: "GraithMobileMock", targets: ["GraithMobileMock"]),
-        .library(name: "GraithMobileReal", targets: ["GraithMobileReal"]),
         .library(name: "GraithMobileRealTerminal", targets: ["GraithMobileRealTerminal"]),
         .executable(name: "GraithMobileApp", targets: ["GraithMobileApp"]),
     ],
     dependencies: [
-        // The shared cross-platform core (../shared): GraithProtocol (transport +
-        // wire client) and GraithTerminalCore (libghostty-vt wrapper). The real
-        // adapters below bridge this tree's GraithClientAPI boundary onto it.
+        // The shared cross-platform core (../shared). The session/feature layer
+        // (`GraithSessionKit`, #1131) now provides the capability boundary,
+        // per-host connection view-model, multi-host FleetModel, and the real
+        // client wrapping GraithProtocolClient — all previously duplicated in
+        // this tree's GraithClientAPI / GraithMobileKit / GraithMobileReal
+        // targets, which are folded away. Host/pairing/identity live in
+        // GraithRemoteKit; the VT wrapper in GraithTerminalCore.
         .package(path: "../shared"),
     ],
     targets: [
-        // The boundary re-homes DeviceKeySigner onto GraithProtocol's (design
-        // §B.2.4): the two protocols are identical, so a typealias unifies them
-        // and lets DeviceIdentity be injected straight into GraithProtocolClient.
-        .target(
-            name: "GraithClientAPI",
-            dependencies: [.product(name: "GraithProtocol", package: "shared")]
-        ),
-        .target(
-            name: "GraithMobileKit",
-            dependencies: ["GraithClientAPI"]
-        ),
         .target(
             name: "GraithTerminalUIKit",
-            dependencies: ["GraithClientAPI"]
+            dependencies: [.product(name: "GraithSessionKit", package: "shared")]
         ),
         .target(
             name: "GraithMobileMock",
-            dependencies: ["GraithClientAPI", "GraithMobileKit"]
-        ),
-        // Real adapters bridging the GraithClientAPI boundary onto the shared
-        // GraithProtocolClient: RealHostClientFactory / RealHostClient (wraps the
-        // actor), RealAttachSession (wraps AttachSession), RealPairing, and the
-        // wire-model mapping (GraithProtocol.* -> GraithClientAPI.*). Depends only
-        // on GraithProtocol (pure Foundation+Network), so it — and the app that
-        // links it — compile for both host and the iOS-simulator SDK without
-        // libghostty. See NEEDS-IOS-VALIDATION.md.
-        .target(
-            name: "GraithMobileReal",
             dependencies: [
-                "GraithClientAPI",
+                .product(name: "GraithSessionKit", package: "shared"),
+                .product(name: "GraithRemoteKit", package: "shared"),
                 .product(name: "GraithProtocol", package: "shared"),
             ]
         ),
         // The real TerminalCoreDriving adapter, backed by GraithTerminalCore's
-        // GhosttyTerminalState. Now linked into the app: the SHA-pinned
-        // libghostty-vt.xcframework (../shared) provides the ios-arm64-simulator
-        // slice, so GraithTerminalCore links on iOS (Task 13 done).
+        // GhosttyTerminalState. The SHA-pinned libghostty-vt.xcframework
+        // (../shared) provides the ios-arm64-simulator slice, so
+        // GraithTerminalCore links on iOS (Task 13 done).
         .target(
             name: "GraithMobileRealTerminal",
             dependencies: [
-                "GraithClientAPI",
+                .product(name: "GraithSessionKit", package: "shared"),
                 "GraithTerminalUIKit",
                 .product(name: "GraithTerminalCore", package: "shared"),
             ]
@@ -77,15 +57,12 @@ let package = Package(
         .target(
             name: "GraithMobileUI",
             dependencies: [
-                "GraithClientAPI", "GraithMobileKit", "GraithTerminalUIKit",
-                "GraithMobileRealTerminal",
+                .product(name: "GraithSessionKit", package: "shared"),
+                .product(name: "GraithRemoteKit", package: "shared"),
+                "GraithTerminalUIKit", "GraithMobileRealTerminal",
                 .product(name: "GraithDesign", package: "shared"),
                 .product(name: "GraithTerminalCore", package: "shared"),
             ]
-        ),
-        .testTarget(
-            name: "GraithMobileKitTests",
-            dependencies: ["GraithMobileKit", "GraithMobileMock"]
         ),
         .testTarget(
             name: "GraithTerminalUIKitTests",
@@ -97,8 +74,9 @@ let package = Package(
         // lets us actually exercise the logic here via `swift run`.
         .executableTarget(
             name: "GraithMobileSmoke",
-            dependencies: ["GraithClientAPI", "GraithMobileKit", "GraithMobileMock",
-                           "GraithMobileUI", "GraithTerminalUIKit", "GraithMobileReal",
+            dependencies: ["GraithMobileMock", "GraithMobileUI", "GraithTerminalUIKit",
+                           .product(name: "GraithSessionKit", package: "shared"),
+                           .product(name: "GraithRemoteKit", package: "shared"),
                            .product(name: "GraithProtocol", package: "shared")]
         ),
         // The launchable iOS app. @main SwiftUI App presenting the shared
@@ -106,8 +84,9 @@ let package = Package(
         // build-ios-app.sh / `make run` (see NEEDS-IOS-VALIDATION.md).
         .executableTarget(
             name: "GraithMobileApp",
-            dependencies: ["GraithClientAPI", "GraithMobileKit", "GraithMobileMock",
-                           "GraithMobileUI", "GraithMobileReal", "GraithMobileRealTerminal"]
+            dependencies: ["GraithMobileMock", "GraithMobileUI", "GraithMobileRealTerminal",
+                           .product(name: "GraithSessionKit", package: "shared"),
+                           .product(name: "GraithRemoteKit", package: "shared")]
         ),
     ]
 )

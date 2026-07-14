@@ -1,7 +1,7 @@
 import Foundation
 import Combine
-import GraithClientAPI
-import GraithMobileKit
+import GraithProtocol
+import GraithRemoteKit
 
 /// A `MainActor` view-model wrapping one host's `GraithHostClient`: owns the
 /// connection lifecycle, the session list, and the approval subscription for
@@ -15,7 +15,7 @@ public final class HostConnection: ObservableObject, Identifiable {
         case failed(String)
     }
 
-    public let entry: HostEntry
+    public let entry: Host
     public nonisolated var id: String { entry.id }
 
     @Published public private(set) var state: ConnectionState = .idle
@@ -29,9 +29,21 @@ public final class HostConnection: ObservableObject, Identifiable {
     /// The underlying host client — used to build a terminal attach view-model.
     public var hostClient: any GraithHostClient { client }
 
-    public init(entry: HostEntry, client: any GraithHostClient) {
+    /// The raw `GraithProtocolClient` when this connection is backed by the real
+    /// transport (nil for mock clients). The macOS terminal view attaches
+    /// through this directly for its richer AppKit terminal chrome.
+    public var protocolClient: GraithProtocolClient? { (client as? RealHostClient)?.protocolClient }
+
+    /// Whether this connection owns the approval subscription. iOS aggregates
+    /// approvals through `FleetModel` (default true); macOS runs its own
+    /// `ApprovalMonitor` presenter subscribing via the raw clients, so it opts
+    /// out here (false) to avoid a redundant second event subscription per host.
+    private let ownsApprovals: Bool
+
+    public init(entry: Host, client: any GraithHostClient, subscribeApprovals: Bool = true) {
         self.entry = entry
         self.client = client
+        self.ownsApprovals = subscribeApprovals
     }
 
     // MARK: - Lifecycle
@@ -45,7 +57,7 @@ public final class HostConnection: ObservableObject, Identifiable {
             try await client.connect()
             state = .connected
             await refresh()
-            startApprovalSubscription()
+            if ownsApprovals { startApprovalSubscription() }
         } catch {
             state = .failed(Self.describe(error))
             lastError = Self.describe(error)
@@ -173,7 +185,7 @@ public final class HostConnection: ObservableObject, Identifiable {
     }
 
     static func describe(_ error: Error) -> String {
-        if let e = error as? GraithClientError { return PairingCoordinator.describe(e) }
+        if let e = error as? GraithClientError { return e.userMessage }
         return error.localizedDescription
     }
 }

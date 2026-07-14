@@ -1,7 +1,7 @@
 import SwiftUI
 import Foundation
-import GraithClientAPI
-import GraithMobileKit
+import GraithSessionKit
+import GraithRemoteKit
 import GraithMobileUI
 // The client factory + pairing are now the REAL adapters (GraithMobileReal) onto
 // ../shared's GraithProtocolClient, so the app connects to a live daemon over the
@@ -11,11 +11,10 @@ import GraithMobileUI
 // tests/previews. The live libghostty terminal (GhosttyTerminalDriver /
 // GhosttyMetalRenderer) is wired into SessionDetailView's Terminal tab and links
 // the pinned libghostty-vt.xcframework — Task 13 is done and renders on the sim.
-import GraithMobileReal
 // InMemorySecretStore fallback for the unsigned dev bundle (no Keychain entitlement).
 import GraithMobileMock
 
-/// The iOS/universal app entry point (#628). Builds the real `AppModel` and
+/// The iOS/universal app entry point (#628). Builds the real `FleetModel` and
 /// presents the shared `RootView`.
 @main
 struct GraithMobileApp: App {
@@ -35,14 +34,22 @@ struct GraithMobileApp: App {
         }
     }
 
-    private static func makeModel() -> AppModel {
+    private static func makeModel() -> FleetModel {
         let (store, identity) = makeIdentity()
-        return AppModel(
-            registry: HostRegistry(keychain: store),
+        // Remote-only registry: iOS has no local daemon (the shared registry
+        // seeds a local host only when one is supplied).
+        let registry = HostRegistry(keychain: store)
+        let pairing = PairingCoordinator(
+            pairing: RealPairing(clientID: "graith-ios"),
+            identity: identity,
+            registry: registry
+        )
+        return FleetModel(
+            registry: registry,
             identity: identity,
             reachability: TailnetReachability(),
-            factory: RealHostClientFactory(),
-            pairingBackend: RealPairing()
+            factory: RealHostClientFactory(clientID: "graith-ios"),
+            pairing: pairing
         )
     }
 
@@ -53,7 +60,9 @@ struct GraithMobileApp: App {
     /// (errSecMissingEntitlement -34018), so fall back to an in-memory store —
     /// identity is ephemeral in that dev/demo build but the app runs.
     private static func makeIdentity() -> (SecretStore, DeviceIdentity) {
-        let keychain = KeychainStore()
+        // Preserve iOS's Keychain namespace (the shared default is
+        // "com.graith.app"; iOS items were stored under "com.graith.mobile").
+        let keychain = KeychainStore(service: "com.graith.mobile")
         do {
             let identity = try DeviceIdentity(keychain: keychain)
             return (keychain, identity)

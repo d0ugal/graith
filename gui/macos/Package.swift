@@ -19,6 +19,10 @@ let package = Package(
             dependencies: [
                 .product(name: "GraithProtocol", package: "shared"),
                 .product(name: "GraithRemoteKit", package: "shared"),
+                // The shared session/feature layer (#1131): FleetModel,
+                // HostConnection, the capability boundary, and the real client.
+                // The macOS SessionStore is now a thin FleetModel subclass.
+                .product(name: "GraithSessionKit", package: "shared"),
                 .product(name: "GraithTerminalCore", package: "shared"),
                 .product(name: "CGhosttyVT", package: "shared"),
                 .product(name: "GraithDesign", package: "shared"),
@@ -32,6 +36,7 @@ let package = Package(
             dependencies: [
                 "GraithGUI",
                 .product(name: "GraithProtocol", package: "shared"),
+                .product(name: "GraithSessionKit", package: "shared"),
             ]
         ),
     ]

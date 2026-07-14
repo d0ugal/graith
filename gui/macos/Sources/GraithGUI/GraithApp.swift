@@ -31,16 +31,17 @@ struct GraithApp: App {
         let identity = (try? DeviceIdentity(keychain: secrets))
             ?? (try! DeviceIdentity(keychain: InMemorySecretStore()))
         let registry = HostRegistry(keychain: secrets, localHost: GraithLocalSocket.localHost())
-        let store = SessionStore(registry: registry, identity: identity)
+        let pairing = PairingCoordinator(
+            pairing: RealPairing(clientID: "graith-macos"),
+            identity: identity,
+            registry: registry
+        )
+        let store = SessionStore(registry: registry, identity: identity, pairing: pairing)
 
         _store = StateObject(wrappedValue: store)
         _registry = StateObject(wrappedValue: registry)
         _approvals = StateObject(wrappedValue: ApprovalMonitor(store: store))
-        _pairing = StateObject(wrappedValue: PairingCoordinator(
-            pairing: RealPairing(clientID: "graith-macos"),
-            identity: identity,
-            registry: registry
-        ))
+        _pairing = StateObject(wrappedValue: pairing)
     }
 
     var body: some Scene {

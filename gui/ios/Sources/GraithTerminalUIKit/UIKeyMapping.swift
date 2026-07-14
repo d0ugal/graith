@@ -1,6 +1,6 @@
 #if canImport(UIKit)
 import UIKit
-import GraithClientAPI
+import GraithSessionKit
 
 // Maps UIKit hardware-keyboard events to the logical `TerminalKey` /
 // `TerminalModifiers` the VT core encodes. iOS hardware-key input arrives via

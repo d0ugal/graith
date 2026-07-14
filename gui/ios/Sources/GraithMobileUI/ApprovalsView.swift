@@ -1,11 +1,11 @@
 import SwiftUI
-import GraithClientAPI
+import GraithSessionKit
 
 /// The aggregated approvals queue across all hosts (design §C.6). Subscribes via
 /// each `HostConnection`'s approval stream — no attach, no desktop kick. Shows
 /// the tool + input and lets the user allow/deny with an optional reason.
 struct ApprovalsView: View {
-    @ObservedObject var model: AppModel
+    @ObservedObject var model: FleetModel
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {

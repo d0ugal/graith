@@ -1,9 +1,13 @@
 import Foundation
 import GraithProtocol
+import GraithRemoteKit
 
-// The boundary contract between the iOS app (this subtree) and the shared
-// transport package `GraithProtocolClient` (macOS track). Agreed with the
-// macOS agent on topic `apple-track-628`:
+// The capability boundary for the shared session/feature layer (#1131): the one
+// definition of "what a session app can do." Both the macOS and iOS SwiftUI
+// apps bind to the protocols below, so a new capability is wired once here and
+// appears on both platforms. Originally the iOS-only `GraithClientAPI` boundary
+// (topic `apple-track-628`), now retyped onto the canonical `GraithProtocol`
+// wire models + `GraithRemoteKit` host types and lifted into `gui/shared`:
 //
 //   - `GraithProtocolClient` is an `actor` with an async/await public API and
 //     owns multiple connections per host (control / attach / event).
@@ -18,37 +22,12 @@ import GraithProtocol
 // change above the boundary.
 
 // MARK: - Transport + host identity
+//
+// `GraithTransport` and `HostCredentials` are the canonical shared types
+// (`GraithProtocol.GraithTransport`, `GraithRemoteKit.HostCredentials`) — the
+// boundary used to redeclare local copies; they are folded away here (#1131).
 
-/// How to reach a daemon (mirrors the macOS agent's `GraithTransport`).
-public enum GraithTransport: Sendable, Hashable {
-    /// Local daemon over its Unix socket (macOS only; never used on iOS).
-    case unix(path: String)
-    /// Remote daemon over the tailnet: MagicDNS host + port, TLS SPKI pin.
-    case remote(host: String, port: UInt16, tlsPinSPKI: String?)
-
-    public var isRemote: Bool {
-        if case .remote = self { return true }
-        return false
-    }
-}
-
-/// Credentials presented on every connection to a remote daemon. `nil` when
-/// pairing has not completed (the client may then only `pair`).
-public struct HostCredentials: Sendable, Hashable {
-    public var clientToken: String
-    public var deviceID: String
-    public var daemonProfile: String
-    public var tlsPinSPKI: String
-
-    public init(clientToken: String, deviceID: String, daemonProfile: String, tlsPinSPKI: String) {
-        self.clientToken = clientToken
-        self.deviceID = deviceID
-        self.daemonProfile = daemonProfile
-        self.tlsPinSPKI = tlsPinSPKI
-    }
-}
-
-// MARK: - Device key signer (owned by the iOS app, injected into the client)
+// MARK: - Device key signer (owned by the app, injected into the client)
 
 /// The device's ed25519 signer for pairing + proof-of-possession.
 ///
@@ -182,45 +161,32 @@ public protocol TerminalAttachSession: Actor {
 }
 
 // MARK: - Pairing
-
-/// The one-time pairing handshake for a new device (design §B.2). The transport
-/// opens a pre-auth connection (Gate-1 only), sends `pair_request` with the
-/// device label + public key, and awaits the local human's `gr pair approve`,
-/// which returns a `PairResponse` once.
-public protocol GraithPairing: Sendable {
-    /// - Parameter profile: the daemon profile to handshake as. A daemon running
-    ///   a named profile rejects the pairing handshake unless the client sends a
-    ///   matching profile, so this must be threaded through for named-profile
-    ///   daemons. Empty string = the default profile.
-    func requestPairing(
-        transport: GraithTransport,
-        deviceLabel: String,
-        profile: String,
-        signer: DeviceKeySigner
-    ) async throws -> PairResponse
-}
-
-public extension GraithPairing {
-    /// Convenience overload defaulting to the daemon's default profile.
-    func requestPairing(
-        transport: GraithTransport,
-        deviceLabel: String,
-        signer: DeviceKeySigner
-    ) async throws -> PairResponse {
-        try await requestPairing(transport: transport, deviceLabel: deviceLabel, profile: "", signer: signer)
-    }
-}
+//
+// The one-time pairing handshake lives canonically in `GraithRemoteKit`
+// (`GraithPairing`, `RealPairing`, `PairingCoordinator`); GraithSessionKit does
+// not redeclare it. `RealHostClientFactory` above and the app composition roots
+// wire `GraithRemoteKit.RealPairing` into `PairingCoordinator`.
 
 // MARK: - Client factory
 
-/// Produces a `GraithHostClient` for a given transport + credentials. The app
-/// obtains all its clients through a factory so the concrete transport
-/// (`GraithProtocolClient`, macOS track) stays behind the boundary and the mock
-/// can be swapped in for previews/tests.
+/// Produces a `GraithHostClient` for a host. The app obtains all its clients
+/// through a factory so the concrete transport (`GraithProtocolClient`) stays
+/// behind the boundary and the mock can be swapped in for previews/tests.
 public protocol HostClientFactory: Sendable {
+    /// A client for a **remote** daemon, authenticated with the paired
+    /// credentials + a proof-of-possession signer.
     func makeClient(
         transport: GraithTransport,
         credentials: HostCredentials,
         signer: DeviceKeySigner
+    ) -> any GraithHostClient
+
+    /// A client for the **local** daemon over its Unix socket. The desktop app
+    /// is the local human: it owns the 0700 socket trust boundary and connects
+    /// tokenless (no PoP), so no credentials/signer are presented. Never used on
+    /// iOS (no local daemon).
+    func makeLocalClient(
+        transport: GraithTransport,
+        profile: String
     ) -> any GraithHostClient
 }

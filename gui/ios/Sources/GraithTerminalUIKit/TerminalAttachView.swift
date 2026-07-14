@@ -1,5 +1,5 @@
 import SwiftUI
-import GraithClientAPI
+import GraithSessionKit
 #if canImport(UIKit)
 import UIKit
 #endif

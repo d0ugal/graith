@@ -1,5 +1,6 @@
 import XCTest
 import GraithProtocol
+import GraithSessionKit
 @testable import GraithGUI
 
 /// Covers the sidebar metadata badges (issue #901): the daemon sends

@@ -16,6 +16,11 @@ options:
 packages:
   GraithMobile:
     path: .
+  # The shared cross-platform core (../shared). Since #1131 the session/feature
+  # layer (GraithSessionKit) + host/pairing substrate (GraithRemoteKit) that the
+  # @main sources import live here, not in the folded-away iOS-local targets.
+  GraithShared:
+    path: ../shared
 targets:
   graith:
     type: application
@@ -26,15 +31,13 @@ targets:
       - package: GraithMobile
         product: GraithMobileUI
       - package: GraithMobile
-        product: GraithMobileReal
-      - package: GraithMobile
         product: GraithMobileRealTerminal
       - package: GraithMobile
-        product: GraithMobileKit
-      - package: GraithMobile
-        product: GraithClientAPI
-      - package: GraithMobile
         product: GraithMobileMock
+      - package: GraithShared
+        product: GraithSessionKit
+      - package: GraithShared
+        product: GraithRemoteKit
     info:
       path: graith-Info.plist
       properties:

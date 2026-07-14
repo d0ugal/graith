@@ -1,5 +1,6 @@
 import SwiftUI
 import GraithProtocol
+import GraithSessionKit
 
 // Small, compact metadata badges shown on each sidebar row (issue #901). The
 // daemon already sends these fields on the wire (sandboxed, yolo, config_stale,
@@ -9,16 +10,9 @@ import GraithProtocol
 // into pure functions/enums so it can be unit-tested without driving SwiftUI —
 // `Color` values are opaque in tests, the style buckets are not.
 
-extension SessionInfo {
-    /// YOLO mode — the agent runs with approvals bypassed.
-    var isYolo: Bool { yolo == true }
-    /// Agent process is confined by the OS sandbox.
-    var isSandboxed: Bool { sandboxed == true }
-    /// Session belongs to a scenario (multi-session orchestration).
-    var isScenarioMember: Bool { !(scenarioID ?? "").isEmpty }
-    /// Config changed since the session launched — restart to pick it up.
-    var isConfigStale: Bool { configStale == true }
-}
+// The `isYolo`/`isSandboxed`/`isScenarioMember`/`isConfigStale` conveniences now
+// live once in the shared `GraithSessionKit` (SessionInfo extension) so both
+// apps share them (#1131). Import GraithSessionKit where they're consumed.
 
 /// Visual style buckets for the PR badge, derived from the PR state (plus the
 /// merge-conflict flag). Kept separate from the SwiftUI `Color` so it is testable.

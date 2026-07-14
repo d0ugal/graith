@@ -20,7 +20,10 @@ public final class HostRegistry: ObservableObject {
     @Published public private(set) var hosts: [Host] = []
 
     private let keychain: SecretStore
-    private let localHost: Host
+    /// The local daemon entry, or nil on platforms with no local daemon (iOS,
+    /// which only ever talks to remote hosts over the tailnet). When present it
+    /// is always kept first and never removable.
+    private let localHost: Host?
     private let storeURL: URL
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
@@ -34,6 +37,16 @@ public final class HostRegistry: ObservableObject {
     public init(keychain: SecretStore, localHost: Host, storeURL: URL? = nil) {
         self.keychain = keychain
         self.localHost = localHost
+        self.storeURL = storeURL ?? HostRegistry.defaultStoreURL()
+        load()
+    }
+
+    /// Remote-only registry for platforms with no local daemon (iOS). Identical
+    /// to the designated init but seeds no local host, so `hosts` is exactly the
+    /// persisted set of paired remotes.
+    public init(keychain: SecretStore, storeURL: URL? = nil) {
+        self.keychain = keychain
+        self.localHost = nil
         self.storeURL = storeURL ?? HostRegistry.defaultStoreURL()
         load()
     }
@@ -77,7 +90,7 @@ public final class HostRegistry: ObservableObject {
     /// Add or replace a host entry (metadata only; token set separately at
     /// pairing). The local host cannot be replaced through here.
     public func upsert(_ host: Host) {
-        guard host.id != localHost.id else { return }
+        guard host.id != localHost?.id else { return }
         if let idx = hosts.firstIndex(where: { $0.id == host.id }) {
             hosts[idx] = host
         } else {
@@ -114,7 +127,7 @@ public final class HostRegistry: ObservableObject {
     /// Remove a host and wipe its client token from the store. The local host is
     /// never removed.
     public func remove(hostID: String) {
-        guard hostID != localHost.id else { return }
+        guard hostID != localHost?.id else { return }
         hosts.removeAll { $0.id == hostID }
         try? keychain.remove(Self.tokenAccount(hostID))
         persist()
@@ -128,8 +141,8 @@ public final class HostRegistry: ObservableObject {
            let decoded = try? decoder.decode([Host].self, from: data) {
             remotes = decoded.filter { $0.kind == .remote }
         }
-        // Local host always first, then persisted remotes.
-        hosts = [localHost] + remotes
+        // Local host always first (when present), then persisted remotes.
+        hosts = [localHost].compactMap { $0 } + remotes
     }
 
     private func persist() {

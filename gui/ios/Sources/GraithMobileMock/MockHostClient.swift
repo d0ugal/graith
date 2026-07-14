@@ -1,5 +1,5 @@
 import Foundation
-import GraithClientAPI
+import GraithSessionKit
 
 /// An in-memory `GraithHostClient` for SwiftUI previews and unit tests. Serves
 /// canned sessions, repos, approvals, and screen snapshots without any network.

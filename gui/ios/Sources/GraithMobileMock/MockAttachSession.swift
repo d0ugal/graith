@@ -1,5 +1,5 @@
 import Foundation
-import GraithClientAPI
+import GraithSessionKit
 
 /// A mock attach session. Echoes sent bytes back on the output stream (so the
 /// UIKit terminal view can be exercised without a daemon) and records resizes.

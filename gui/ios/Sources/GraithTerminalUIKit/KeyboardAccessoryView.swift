@@ -1,7 +1,7 @@
 #if canImport(UIKit)
 import QuartzCore
 import UIKit
-import GraithClientAPI
+import GraithSessionKit
 
 /// Delegate for the on-screen key row. `sticky` reports the current sticky
 /// modifier set (so the terminal view applies them to the next character), and

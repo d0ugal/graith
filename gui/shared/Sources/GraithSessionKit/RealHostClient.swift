@@ -1,11 +1,12 @@
 import Foundation
-import GraithClientAPI
 import GraithProtocol
 
-/// The real `GraithHostClient`, wrapping the shared `GraithProtocolClient` actor
-/// and mapping its shared wire models onto the boundary value types. This is the
-/// production replacement for `GraithMobileMock.MockHostClient`; the UI above the
-/// boundary is unchanged.
+/// The production `GraithHostClient`, wrapping the shared `GraithProtocolClient`
+/// actor. Since the boundary now speaks the canonical `GraithProtocol` wire
+/// models directly (#1131), the old `GraithProtocol.* → GraithClientAPI.*`
+/// translation is gone — this adapter now only reshapes the API surface the
+/// boundary needs (a non-throwing `approvalStream`, a `status` synthesized from
+/// `list`, `ApprovalDecision` typing) and normalises errors.
 public actor RealHostClient: GraithHostClient {
     private let inner: GraithProtocolClient
     private var connected = false
@@ -15,6 +16,13 @@ public actor RealHostClient: GraithHostClient {
     }
 
     public var isConnected: Bool { connected }
+
+    /// The wrapped `GraithProtocolClient`. Exposed for platform-specific
+    /// terminal-attach chrome (the macOS AppKit terminal view attaches through
+    /// the raw client's richer `AttachSession`, which carries the control-event
+    /// stream the boundary's `TerminalAttachSession` intentionally omits). `let`
+    /// is immutable so this is safe to read off the actor.
+    public nonisolated var protocolClient: GraithProtocolClient { inner }
 
     // MARK: - Lifecycle
 
@@ -35,9 +43,9 @@ public actor RealHostClient: GraithHostClient {
 
     // MARK: - Reads
 
-    public func listSessions() async throws -> [GraithClientAPI.SessionInfo] {
+    public func listSessions() async throws -> [SessionInfo] {
         do {
-            return try await inner.list().map { GraithClientAPI.SessionInfo($0) }
+            return try await inner.list()
         } catch {
             throw RealClientError.map(error)
         }
@@ -47,7 +55,7 @@ public actor RealHostClient: GraithHostClient {
     /// does not call this directly — synthesize it from `list` to satisfy the
     /// boundary (session + a fleet summary derived from the full list).
     public func status(sessionID: String) async throws -> StatusResponse {
-        let sessions: [GraithProtocol.SessionInfo]
+        let sessions: [SessionInfo]
         do {
             sessions = try await inner.list()
         } catch {
@@ -56,13 +64,12 @@ public actor RealHostClient: GraithHostClient {
         guard let target = sessions.first(where: { $0.id == sessionID }) else {
             throw GraithClientError.daemon("session not found: \(sessionID)")
         }
-        return StatusResponse(session: GraithClientAPI.SessionInfo(target), unreadCount: 0,
-                              fleet: Self.fleet(from: sessions))
+        return StatusResponse(session: target, unreadCount: 0, fleet: Self.fleet(from: sessions))
     }
 
-    public func repoList() async throws -> [GraithClientAPI.RepoEntry] {
+    public func repoList() async throws -> [RepoEntry] {
         do {
-            return try await inner.repoList().map { GraithClientAPI.RepoEntry($0) }
+            return try await inner.repoList()
         } catch {
             throw RealClientError.map(error)
         }
@@ -78,7 +85,7 @@ public actor RealHostClient: GraithHostClient {
 
     public func screenSnapshot(sessionID: String) async throws -> ScreenSnapshot {
         do {
-            return ScreenSnapshot(try await inner.screenSnapshot(sessionID: sessionID))
+            return try await inner.screenSnapshot(sessionID: sessionID)
         } catch {
             throw RealClientError.map(error)
         }
@@ -88,7 +95,7 @@ public actor RealHostClient: GraithHostClient {
 
     public func create(_ request: CreateRequest) async throws {
         do {
-            _ = try await inner.create(GraithProtocol.CreateMsg(request))
+            _ = try await inner.create(request)
         } catch {
             throw RealClientError.map(error)
         }
@@ -115,7 +122,7 @@ public actor RealHostClient: GraithHostClient {
 
     /// Bridge the shared `subscribeApprovals()` (async/throws) into the boundary's
     /// synchronous stream: a producer task establishes the subscription and
-    /// forwards each mapped pending set.
+    /// forwards each pending set.
     ///
     /// Contract: **a finished stream means the subscription has ended**, never
     /// "no approvals". Because the boundary stream is non-throwing, a failure to
@@ -124,13 +131,13 @@ public actor RealHostClient: GraithHostClient {
     /// completes instead of hanging. When the consumer stops iterating, the
     /// producer task is cancelled, which tears down the shared subscription and
     /// its connection.
-    public func approvalStream() -> AsyncStream<[GraithClientAPI.ApprovalInfo]> {
+    public func approvalStream() -> AsyncStream<[ApprovalInfo]> {
         AsyncStream { continuation in
             let task = Task {
                 do {
                     let shared = try await inner.subscribeApprovals()
                     for await pending in shared {
-                        continuation.yield(pending.map { GraithClientAPI.ApprovalInfo($0) })
+                        continuation.yield(pending)
                     }
                 } catch {
                     // Failed to establish the subscription — fall through to
@@ -151,13 +158,12 @@ public actor RealHostClient: GraithHostClient {
         }
     }
 
-    // MARK: - Attach (Task 20)
+    // MARK: - Attach
 
     public func attach(sessionID: String) async throws -> any TerminalAttachSession {
         do {
-            // Best-guess 80x24 initial size; `BaseTerminalUIView` sends the real
-            // geometry via `resize()` from `layoutSubviews` after attach
-            // (confirmed with apple-macos on topic apple-track-628).
+            // Best-guess 80x24 initial size; the terminal view sends the real
+            // geometry via `resize()` after attach.
             let session = try await inner.attach(sessionID: sessionID, cols: 80, rows: 24)
             return RealAttachSession(inner: session)
         } catch {
@@ -172,7 +178,7 @@ public actor RealHostClient: GraithHostClient {
         catch { throw RealClientError.map(error) }
     }
 
-    private static func fleet(from sessions: [GraithProtocol.SessionInfo]) -> FleetSummary {
+    private static func fleet(from sessions: [SessionInfo]) -> FleetSummary {
         FleetSummary(
             total: sessions.count,
             active: sessions.filter { $0.agentStatus == "active" }.count,

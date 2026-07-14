@@ -1,6 +1,6 @@
 import CoreGraphics
 import XCTest
-import GraithClientAPI
+import GraithSessionKit
 @testable import GraithTerminalUIKit
 
 /// Covers the space-drag → arrow-key state machine (issue #979). This is the

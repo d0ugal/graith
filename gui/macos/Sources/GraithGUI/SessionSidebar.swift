@@ -1,5 +1,6 @@
 import SwiftUI
 import GraithRemoteKit
+import GraithSessionKit
 
 struct SessionSidebar: View {
     @EnvironmentObject var store: SessionStore
@@ -182,7 +183,7 @@ struct HostSection: View {
                     .font(.system(.caption2, design: .monospaced))
                     .foregroundStyle(Theme.overlay0)
                 if host.kind != .local {
-                    Button(action: { store.removeHost(host) }) {
+                    Button(action: { Task { await store.removeHost(host) } }) {
                         Image(systemName: "minus.circle")
                             .font(.system(size: 11))
                             .foregroundStyle(Theme.overlay0)

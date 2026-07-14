@@ -1,6 +1,5 @@
 import Foundation
 import Combine
-import GraithClientAPI
 
 /// Drives a live interactive attach (Task 20), independent of UIKit so it can be
 /// unit-tested off-device:
@@ -209,7 +208,7 @@ public final class TerminalAttachViewModel: ObservableObject {
     }
 }
 
-/// Small helper so this file needn't import `GraithMobileKit`.
+/// Small helper describing a `GraithClientError` for the attach UI.
 enum HostErrorText {
     static func describe(_ error: Error) -> String {
         if let e = error as? GraithClientError {

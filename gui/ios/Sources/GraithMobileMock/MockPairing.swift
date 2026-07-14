@@ -1,5 +1,5 @@
 import Foundation
-import GraithClientAPI
+import GraithSessionKit
 
 /// A mock `GraithPairing` that immediately "approves" and returns a canned
 /// `PairResponse`, exercising the pairing coordinator without a daemon.

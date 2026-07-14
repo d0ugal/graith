@@ -1,11 +1,10 @@
 import Foundation
-import GraithClientAPI
 import GraithProtocol
 
 // Translate the shared transport/control errors into the boundary's
 // `GraithClientError` so the UI (PairingCoordinator / HostConnection) renders
 // the friendly, case-specific messages it already knows how to describe.
-enum RealClientError {
+public enum RealClientError {
     static func map(_ error: Error) -> GraithClientError {
         if let e = error as? GraithClientError { return e }
         if let e = error as? ControlError {

@@ -3,36 +3,31 @@
 This subtree holds the **iOS-specific** work for the universal (iOS + macOS)
 app: Tasks 18–20 of `docs/plans/2026-07-07-universal-app-remote-control.md`.
 
-It is deliberately **isolated** from the shared core (`gui/shared`) and the
-macOS app (`gui/macos`, owned by the macOS track, Phases 2–3) so the two
-tracks can move in parallel without merge conflicts. Everything here depends on
-a small, documented **boundary protocol** (`GraithClientAPI`) rather than on the
-macOS agent's concrete `GraithProtocolClient` / `GraithTerminalCore`. When those
-shared packages land, we replace the mock adapters in `GraithMobileMock` with
-thin adapters onto the real types — the UI and app logic above the boundary do
-not change.
-
-## Why a boundary protocol
-
-Per the plan (Phase 4/5 depend on the shared package from Phase 2):
-
-> Until the shared API stabilizes, build the iOS-specific, independent pieces
-> first ... against a small documented protocol interface you agree with the
-> macOS agent; integrate with the real shared package as it lands.
-
-`GraithClientAPI` is that interface. It is transport-agnostic and mirrors the
-graith framed-protocol message set (`internal/protocol/messages.go`) for exactly
-the subset the mobile app needs. See `Sources/GraithClientAPI/Boundary.swift`.
+Originally this subtree was **isolated** from the shared core behind a local
+boundary protocol (`GraithClientAPI`) plus local copies of the RemoteKit types
+(`GraithMobileKit`) and the real client (`GraithMobileReal`), so the iOS and
+macOS tracks could move in parallel. **As of #1131 that boundary, the RemoteKit
+copies, and the real client have been folded into `gui/shared`** — the
+session/feature layer both apps bind to now lives once in
+`shared/GraithSessionKit` (built on `GraithProtocol` + `GraithRemoteKit`). iOS
+is a thin consumer: it keeps only genuinely UIKit-specific code.
 
 ## Modules
 
 | Module | Owns | Depends on |
 |--------|------|-----------|
-| `GraithClientAPI` | The boundary contract: `GraithHostClient`, `TerminalAttachSession`, `GraithPairing`, wire-message Codables, `TerminalCoreDriving` | — |
-| `GraithMobileKit` | `HostRegistry`, Keychain store, ed25519 `DeviceIdentity`, pairing flow, tailnet reachability, multi-host aggregation store | `GraithClientAPI` |
-| `GraithMobileUI` | SwiftUI universal shell: host→repo→session sidebar, create picker, approval prompt, log tail, screen peek | `GraithClientAPI`, `GraithMobileKit` |
-| `GraithTerminalUIKit` | Task 20: `BaseTerminalUIView` (`UIKeyInput`/`UITextInput`), on-screen key accessory row, attach view-model | `GraithClientAPI` |
-| `GraithMobileMock` | In-memory mock `GraithHostClient` + `TerminalCoreDriving` for SwiftUI previews and tests | `GraithClientAPI` |
+| `GraithMobileApp` | `@main` SwiftUI App; composition root (builds the real `FleetModel`) | shared + the below |
+| `GraithMobileUI` | SwiftUI shell: host→repo→session sidebar, create picker, approval prompt, pairing, session detail | `GraithSessionKit`, `GraithRemoteKit` (shared) |
+| `GraithTerminalUIKit` | `BaseTerminalUIView` (`UIKeyInput`/`UITextInput`), on-screen key accessory row | `GraithSessionKit` (shared) |
+| `GraithMobileRealTerminal` | libghostty `TerminalCoreDriving` adapter + Metal renderer (iOS) | `GraithSessionKit`, `GraithTerminalCore` |
+| `GraithMobileMock` | In-memory mock `GraithHostClient` + `TerminalCoreDriving` for previews/tests | `GraithSessionKit`, `GraithRemoteKit` |
+
+The capability boundary (`GraithHostClient`, `TerminalAttachSession`,
+`HostClientFactory`), the per-host `HostConnection`, the multi-host `FleetModel`,
+`AttachRegistry`, `TerminalAttachViewModel`, `TailnetReachability`, and the real
+client (`RealHostClient`) all live in `shared/GraithSessionKit`. Host / pairing /
+identity live in `shared/GraithRemoteKit`. See
+`docs/design/2026-07-14-shared-session-feature-layer.md`.
 
 ## Build / validation
 

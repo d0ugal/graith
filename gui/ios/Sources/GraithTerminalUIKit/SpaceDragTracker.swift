@@ -1,5 +1,5 @@
 import CoreGraphics
-import GraithClientAPI
+import GraithSessionKit
 
 /// Pure state machine that turns a drag on the on-screen space key into arrow-key
 /// emissions (issue #979). Kept free of UIKit so it can be unit-tested off-device
