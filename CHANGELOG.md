@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.68.1](https://github.com/d0ugal/graith/compare/v0.68.0...v0.68.1) (2026-07-14)
+
+
+### Bug Fixes
+
+* **sandbox:** guard gr-bin read-dir grant on absolute path ([3fde59e](https://github.com/d0ugal/graith/commit/3fde59e231ae2e5f15608e5079c4a3af16d4ad74))
+
 ## [0.68.0](https://github.com/d0ugal/graith/compare/v0.67.9...v0.68.0) (2026-07-14)
 
 
