@@ -59,6 +59,12 @@ jobs:
       - name: Shared logic tests
         run: swift test --package-path gui/shared
 
+      # macOS app logic suites: window-state, session-store attach ownership,
+      # sidebar badge styling, approvals queue, repo-picker ordering. Host XCTest
+      # (AppKit/SwiftUI types are opaque, but the pure view-model logic is not).
+      - name: macOS app logic tests
+        run: swift test --package-path gui/macos
+
       # SDK-neutral logic checks (pairing confirmation gate, host registry,
       # attach ownership, reachability, error mapping).
       - name: Smoke checks

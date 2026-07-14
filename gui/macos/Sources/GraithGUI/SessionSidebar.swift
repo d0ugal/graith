@@ -3,8 +3,10 @@ import GraithRemoteKit
 
 struct SessionSidebar: View {
     @EnvironmentObject var store: SessionStore
+    @EnvironmentObject var approvals: ApprovalMonitor
     @Binding var showNewSession: Bool
     @State private var showAddHost = false
+    @State private var showApprovals = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -24,6 +26,32 @@ struct SessionSidebar: View {
                     .padding(.vertical, 2)
                     .background(Theme.surface0)
                     .clipShape(Capsule())
+
+                // Approvals button — surfaces the pending count and opens the
+                // panel to allow/deny (#1130). Always visible so it's
+                // discoverable; badged only when something is waiting.
+                Button(action: { showApprovals = true }) {
+                    ZStack(alignment: .topTrailing) {
+                        Image(systemName: approvals.pending.isEmpty ? "bell" : "bell.badge.fill")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(approvals.pending.isEmpty ? Theme.subtext0 : Theme.yellow)
+                            .frame(width: 22, height: 22)
+                            .background(Theme.surface0)
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                        if !approvals.pending.isEmpty {
+                            Text("\(approvals.pending.count)")
+                                .font(.system(size: 8, weight: .bold, design: .monospaced))
+                                .foregroundStyle(Theme.crust)
+                                .padding(.horizontal, 3)
+                                .padding(.vertical, 1)
+                                .background(Theme.yellow)
+                                .clipShape(Capsule())
+                                .offset(x: 4, y: -4)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                .help("Pending approvals")
 
                 // Add host button
                 Button(action: { showAddHost = true }) {
@@ -118,6 +146,9 @@ struct SessionSidebar: View {
         .background(Theme.mantle)
         .sheet(isPresented: $showAddHost) {
             AddHostSheet()
+        }
+        .sheet(isPresented: $showApprovals) {
+            ApprovalsSheet()
         }
     }
 }
@@ -303,6 +334,8 @@ struct SessionRow: View {
     @State private var showMigrate = false
     @State private var migrateAgent = "claude"
     @State private var showDeleteConfirm = false
+    @State private var showLogs = false
+    @State private var showSnapshot = false
 
     private let migrateAgents = ["claude", "codex", "agy", "opencode"]
 
@@ -378,6 +411,8 @@ struct SessionRow: View {
                 selectedAgent: $migrateAgent
             ) { store.migrateSession(session, agent: $0) }
         }
+        .sheet(isPresented: $showLogs) { LogsSheet(session: session) }
+        .sheet(isPresented: $showSnapshot) { SnapshotSheet(session: session) }
         .confirmationDialog(
             "Delete session \u{201c}\(session.name)\u{201d}?",
             isPresented: $showDeleteConfirm,
@@ -608,6 +643,9 @@ struct SessionRow: View {
                 migrateAgent = session.agent
                 showMigrate = true
             }
+            Divider()
+            Button("View Logs…") { showLogs = true }
+            Button("Screen Snapshot…") { showSnapshot = true }
             Divider()
             Button("Copy name") {
                 NSPasteboard.general.clearContents()

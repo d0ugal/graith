@@ -3,6 +3,7 @@ import Combine
 import AppKit
 import UserNotifications
 import GraithProtocol
+import GraithRemoteKit
 
 /// Subscribes to the daemon's pending-approval stream and surfaces it through
 /// native macOS affordances:
@@ -21,9 +22,9 @@ final class ApprovalMonitor: ObservableObject {
     /// One subscription task per host, keyed by host id.
     private var tasks: [String: Task<Void, Never>] = [:]
     private var monitorTask: Task<Void, Never>?
-    /// The latest pending list from each host, keyed by host id, merged into
-    /// `pending` for the Dock badge + banners.
-    private var pendingByHost: [String: [ApprovalInfo]] = [:]
+    /// The latest pending list from each host, merged into `pending` for the
+    /// Dock badge, banners, and the in-app approvals panel.
+    private var queue = ApprovalQueue()
     /// Request IDs we've already notified about, so re-emitted lists don't
     /// re-fire banners.
     private var notified = Set<String>()
@@ -66,7 +67,7 @@ final class ApprovalMonitor: ObservableObject {
         for (hostID, task) in tasks where current[hostID] == nil {
             task.cancel()
             tasks[hostID] = nil
-            pendingByHost[hostID] = nil
+            queue.clear(host: hostID)
         }
         // Add subscriptions for new hosts.
         for (hostID, client) in current where tasks[hostID] == nil {
@@ -90,7 +91,7 @@ final class ApprovalMonitor: ObservableObject {
     }
 
     private func handle(_ pending: [ApprovalInfo], host hostID: String) {
-        pendingByHost[hostID] = pending
+        queue.set(pending, host: hostID)
         recomputePending()
     }
 
@@ -100,23 +101,51 @@ final class ApprovalMonitor: ObservableObject {
     /// the same one, and a bare-requestID key would let one host's approval
     /// suppress the other's banner (and collide as a SwiftUI id).
     private func recomputePending() {
-        var merged: [ApprovalInfo] = []
+        let order = store.hostClients.map { $0.host.id }
         var currentKeys = Set<String>()
         var fresh: [(hostID: String, approval: ApprovalInfo)] = []
         for entry in store.hostClients {
             let hostID = entry.host.id
-            for approval in pendingByHost[hostID] ?? [] {
-                merged.append(approval)
+            for approval in queue.byHost[hostID] ?? [] {
                 let key = "\(hostID):\(approval.requestID)"
                 currentKeys.insert(key)
                 if !notified.contains(key) { fresh.append((hostID, approval)) }
             }
         }
+        let merged = queue.merged(order: order)
         self.pending = merged
         updateDockBadge(count: merged.count)
         notified = currentKeys
         for item in fresh {
             postNotification(for: item.approval, hostID: item.hostID)
+        }
+    }
+
+    // MARK: - Responding (design §C.6)
+
+    /// Pending approvals grouped by host, in registry order, for the approvals
+    /// panel. Hosts with nothing pending are dropped so the panel shows only the
+    /// daemons that actually need a decision.
+    var grouped: [(host: Host, approvals: [ApprovalInfo])] {
+        store.hostClients.compactMap { entry in
+            let items = queue.byHost[entry.host.id] ?? []
+            return items.isEmpty ? nil : (entry.host, items)
+        }
+    }
+
+    /// Answer a pending approval on its owning host. The row is removed
+    /// optimistically so the UI updates the instant the human decides; the next
+    /// stream push reconciles (and re-adds it if the daemon rejected the call).
+    func respond(_ approval: ApprovalInfo, host hostID: String, decision: ApprovalDecision, reason: String? = nil) {
+        guard let client = store.client(forHost: hostID) else { return }
+        queue.remove(requestID: approval.requestID, host: hostID)
+        recomputePending()
+        Task {
+            try? await client.respondApproval(
+                requestID: approval.requestID,
+                decision: decision.rawValue,
+                reason: reason
+            )
         }
     }
 
