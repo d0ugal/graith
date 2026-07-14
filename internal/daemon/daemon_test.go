@@ -3579,28 +3579,33 @@ func TestInPlaceRejectsRepoWithIncludes(t *testing.T) {
 func TestIncludeAddDirArgs(t *testing.T) {
 	tests := []struct {
 		name     string
+		agent    string
 		includes []IncludedRepoState
 		want     []string
 	}{
 		{
 			name:     "nil includes yields no args",
+			agent:    "claude",
 			includes: nil,
 			want:     nil,
 		},
 		{
 			name:     "empty includes yields no args",
+			agent:    "claude",
 			includes: []IncludedRepoState{},
 			want:     nil,
 		},
 		{
-			name: "single include yields one flag pair",
+			name:  "single include yields one flag pair",
+			agent: "claude",
 			includes: []IncludedRepoState{
 				{RepoName: "bairn", WorktreePath: "/glen/bothy/bairn"},
 			},
 			want: []string{"--add-dir", "/glen/bothy/bairn"},
 		},
 		{
-			name: "multiple includes preserve order",
+			name:  "multiple includes preserve order",
+			agent: "codex",
 			includes: []IncludedRepoState{
 				{RepoName: "bairn", WorktreePath: "/glen/bothy/bairn"},
 				{RepoName: "whin", WorktreePath: "/glen/bothy/whin"},
@@ -3608,48 +3613,102 @@ func TestIncludeAddDirArgs(t *testing.T) {
 			want: []string{"--add-dir", "/glen/bothy/bairn", "--add-dir", "/glen/bothy/whin"},
 		},
 		{
-			name: "include without a worktree path is skipped",
+			name:  "include without a worktree path is skipped",
+			agent: "cursor",
 			includes: []IncludedRepoState{
 				{RepoName: "haar", WorktreePath: ""},
 				{RepoName: "bairn", WorktreePath: "/glen/bothy/bairn"},
 			},
 			want: []string{"--add-dir", "/glen/bothy/bairn"},
 		},
+		{
+			name:  "all worktree paths empty yields nil not empty slice",
+			agent: "claude",
+			includes: []IncludedRepoState{
+				{RepoName: "haar", WorktreePath: ""},
+			},
+			want: nil,
+		},
+		{
+			name:  "unsupported agent gets no flags even with includes",
+			agent: "opencode",
+			includes: []IncludedRepoState{
+				{RepoName: "bairn", WorktreePath: "/glen/bothy/bairn"},
+			},
+			want: nil,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := includeAddDirArgs(tt.includes)
+			got := includeAddDirArgs(tt.agent, tt.includes)
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("includeAddDirArgs() = %v, want %v", got, tt.want)
+				t.Errorf("includeAddDirArgs(%q, ...) = %v, want %v", tt.agent, got, tt.want)
 			}
 		})
 	}
 }
 
-// TestIncludesPassAddDirOnLaunchAndResume drives a real session whose agent
-// records the argv it was launched with, and asserts --add-dir <worktree> is
-// passed for each included repo on both the initial launch and on resume.
-func TestIncludesPassAddDirOnLaunchAndResume(t *testing.T) {
-	repoDir := initTempGitRepo(t)
-	incDir := initTempGitRepo(t)
+// TestResumeIncludeSet locks the mirror-resume fix: a resuming mirror session
+// must take the source session's includes (sharedSourceIncludes), not its own
+// (always empty for a mirror), so --add-dir and GRAITH_INCLUDE_* survive a
+// restart. A non-mirror session uses its own includes.
+func TestResumeIncludeSet(t *testing.T) {
+	own := []IncludedRepoState{{RepoName: "bairn", WorktreePath: "/glen/own/bairn"}}
+	shared := []IncludedRepoState{{RepoName: "whin", WorktreePath: "/glen/source/whin"}}
+
+	t.Run("non-mirror uses its own includes", func(t *testing.T) {
+		if got := resumeIncludeSet(false, own, shared); !reflect.DeepEqual(got, own) {
+			t.Errorf("resumeIncludeSet(false) = %v, want %v", got, own)
+		}
+	})
+
+	t.Run("mirror uses source includes not its empty own", func(t *testing.T) {
+		// A mirror's persisted includes are empty; the bug was using them.
+		if got := resumeIncludeSet(true, nil, shared); !reflect.DeepEqual(got, shared) {
+			t.Errorf("resumeIncludeSet(true) = %v, want %v", got, shared)
+		}
+	})
+}
+
+func TestAgentSupportsAddDir(t *testing.T) {
+	supported := []string{"claude", "codex", "cursor"}
+	for _, a := range supported {
+		if !agentSupportsAddDir(a) {
+			t.Errorf("agentSupportsAddDir(%q) = false, want true", a)
+		}
+	}
+
+	for _, a := range []string{"opencode", "agy", "", "Claude", "gemini"} {
+		if agentSupportsAddDir(a) {
+			t.Errorf("agentSupportsAddDir(%q) = true, want false", a)
+		}
+	}
+}
+
+// newRecorderManager builds a SessionManager whose "cursor" agent (a
+// --add-dir-capable type) is a shell script that records its own launch argv to
+// recordPath, one arg per line, then blocks so the PTY stays alive. The repo is
+// configured with the given includes. It returns the manager and record path.
+func newRecorderManager(t *testing.T, repoDir string, includes []string) (*SessionManager, string) {
+	t.Helper()
 
 	dir := t.TempDir()
 	recordPath := filepath.Join(dir, "argv.txt")
 
-	// The agent script records its own argv (flags graith appended land in
-	// $0/$@) to a file, then blocks so the PTY stays alive. Same for resume.
+	// $0/$@ are exactly the flags graith appends after the "-c" script string.
 	script := `printf '%s\n' "$0" "$@" > "$GRAITH_ARGS_RECORD"; exec cat`
 
 	cfg := config.Default()
 	cfg.FetchOnCreate = false
-	cfg.Agents["recorder"] = config.Agent{
+	cfg.Agents["cursor"] = config.Agent{
 		Command:    "sh",
 		Args:       []string{"-c", script},
 		ResumeArgs: []string{"-c", script},
+		ForkArgs:   []string{"-c", script},
 		Env:        map[string]string{"GRAITH_ARGS_RECORD": recordPath},
 	}
-	cfg.Repos = []config.RepoConfig{{Path: repoDir, Includes: []string{incDir}}}
+	cfg.Repos = []config.RepoConfig{{Path: repoDir, Includes: includes}}
 
 	sm := NewSessionManager(cfg, config.Paths{
 		StateFile:  filepath.Join(dir, "state.json"),
@@ -3659,8 +3718,25 @@ func TestIncludesPassAddDirOnLaunchAndResume(t *testing.T) {
 		TmpDir:     filepath.Join(dir, "tmp"),
 	}, slog.Default())
 
+	return sm, recordPath
+}
+
+// TestIncludesPassAddDirOnLaunchAndResume drives a real session whose agent
+// records the argv it was launched with, and asserts --add-dir <worktree> is
+// passed for each included repo — after the positional prompt — on both the
+// initial launch and on resume.
+func TestIncludesPassAddDirOnLaunchAndResume(t *testing.T) {
+	repoDir := initTempGitRepo(t)
+	incA := initTempGitRepo(t)
+	incB := initTempGitRepo(t)
+
+	sm, recordPath := newRecorderManager(t, repoDir, []string{incA, incB})
+
+	const prompt = "speir at the bairns"
+
 	created, err := sm.Create(CreateOpts{
-		Name: "canny", AgentName: "recorder", RepoPath: repoDir, BaseBranch: "main", Rows: 24, Cols: 80,
+		Name: "canny", AgentName: "cursor", RepoPath: repoDir, BaseBranch: "main",
+		Prompt: prompt, Rows: 24, Cols: 80,
 	})
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
@@ -3670,13 +3746,14 @@ func TestIncludesPassAddDirOnLaunchAndResume(t *testing.T) {
 
 	t.Cleanup(func() { stopAndClosePTY(sm, id) })
 
-	if len(created.Includes) != 1 {
-		t.Fatalf("created.Includes = %v, want one include", created.Includes)
+	if len(created.Includes) != 2 {
+		t.Fatalf("created.Includes = %v, want two includes", created.Includes)
 	}
 
-	incWorktree := created.Includes[0].WorktreePath
+	incWorktrees := []string{created.Includes[0].WorktreePath, created.Includes[1].WorktreePath}
 
-	waitForRecordedArg(t, recordPath, "--add-dir", incWorktree)
+	argv := waitForRecordedArgv(t, recordPath, "--add-dir")
+	assertAddDirLayout(t, argv, prompt, incWorktrees)
 
 	// Restart exercises the resume path; the flag must be re-added even though
 	// resume_args don't carry it.
@@ -3694,12 +3771,53 @@ func TestIncludesPassAddDirOnLaunchAndResume(t *testing.T) {
 		t.Fatalf("Restart() error = %v", err)
 	}
 
-	waitForRecordedArg(t, recordPath, "--add-dir", incWorktree)
+	argv = waitForRecordedArgv(t, recordPath, "--add-dir")
+	for _, wt := range incWorktrees {
+		assertContiguousPair(t, argv, "--add-dir", wt)
+	}
 }
 
-// waitForRecordedArg polls the argv-record file until it contains every want
-// token (each on its own line), failing the test if it does not appear in time.
-func waitForRecordedArg(t *testing.T, recordPath string, want ...string) {
+// TestForkPassesAddDir asserts a forked session's agent is launched with
+// --add-dir for each included worktree the fork re-created.
+func TestForkPassesAddDir(t *testing.T) {
+	repoDir := initTempGitRepo(t)
+	incDir := initTempGitRepo(t)
+
+	sm, recordPath := newRecorderManager(t, repoDir, []string{incDir})
+
+	source, err := sm.Create(CreateOpts{
+		Name: "braw", AgentName: "cursor", RepoPath: repoDir, BaseBranch: "main", Rows: 24, Cols: 80,
+	})
+	if err != nil {
+		t.Fatalf("Create() source error = %v", err)
+	}
+
+	t.Cleanup(func() { stopAndClosePTY(sm, source.ID) })
+
+	// Clear the source's record so the assertion reads the fork's argv.
+	if err := os.Remove(recordPath); err != nil {
+		t.Fatalf("remove record before fork: %v", err)
+	}
+
+	forked, err := sm.Fork("bairn", source.ID, 24, 80)
+	if err != nil {
+		t.Fatalf("Fork() error = %v", err)
+	}
+
+	t.Cleanup(func() { stopAndClosePTY(sm, forked.ID) })
+
+	if len(forked.Includes) != 1 {
+		t.Fatalf("forked.Includes = %v, want one include", forked.Includes)
+	}
+
+	argv := waitForRecordedArgv(t, recordPath, "--add-dir")
+	assertContiguousPair(t, argv, "--add-dir", forked.Includes[0].WorktreePath)
+}
+
+// waitForRecordedArgv polls the argv-record file until it contains needle (as
+// one line), then returns the full recorded argv as a slice (one element per
+// line, trailing blank dropped). Fails the test on timeout.
+func waitForRecordedArgv(t *testing.T, recordPath, needle string) []string {
 	t.Helper()
 
 	deadline := time.Now().Add(10 * time.Second)
@@ -3710,31 +3828,70 @@ func waitForRecordedArg(t *testing.T, recordPath string, want ...string) {
 		data, err := os.ReadFile(recordPath)
 		if err == nil {
 			last = string(data)
-			lines := strings.Split(last, "\n")
+			lines := strings.Split(strings.TrimRight(last, "\n"), "\n")
 
-			seen := make(map[string]bool, len(lines))
 			for _, ln := range lines {
-				seen[ln] = true
-			}
-
-			all := true
-
-			for _, w := range want {
-				if !seen[w] {
-					all = false
-					break
+				if ln == needle {
+					return lines
 				}
-			}
-
-			if all {
-				return
 			}
 		}
 
 		time.Sleep(20 * time.Millisecond)
 	}
 
-	t.Fatalf("recorded argv never contained %v; last content:\n%s", want, last)
+	t.Fatalf("recorded argv never contained %q; last content:\n%s", needle, last)
+
+	return nil
+}
+
+// assertContiguousPair fails unless flag appears in argv immediately followed by
+// value — i.e. `--add-dir <path>` was emitted as an adjacent pair, not split.
+func assertContiguousPair(t *testing.T, argv []string, flag, value string) {
+	t.Helper()
+
+	for i := 0; i < len(argv)-1; i++ {
+		if argv[i] == flag && argv[i+1] == value {
+			return
+		}
+	}
+
+	t.Errorf("argv missing contiguous %q %q pair; got %v", flag, value, argv)
+}
+
+// assertAddDirLayout checks the prompt-swallow guarantee: the positional prompt
+// appears before the first --add-dir (so Claude's variadic flag can't consume
+// it), and every include worktree is emitted as a contiguous --add-dir pair.
+func assertAddDirLayout(t *testing.T, argv []string, prompt string, worktrees []string) {
+	t.Helper()
+
+	promptIdx, firstFlagIdx := -1, -1
+
+	for i, a := range argv {
+		if a == prompt && promptIdx == -1 {
+			promptIdx = i
+		}
+
+		if a == "--add-dir" && firstFlagIdx == -1 {
+			firstFlagIdx = i
+		}
+	}
+
+	if promptIdx == -1 {
+		t.Errorf("prompt %q not found in argv %v", prompt, argv)
+	}
+
+	if firstFlagIdx == -1 {
+		t.Fatalf("no --add-dir in argv %v", argv)
+	}
+
+	if promptIdx != -1 && promptIdx > firstFlagIdx {
+		t.Errorf("prompt (index %d) must precede first --add-dir (index %d) so it isn't swallowed; argv %v", promptIdx, firstFlagIdx, argv)
+	}
+
+	for _, wt := range worktrees {
+		assertContiguousPair(t, argv, "--add-dir", wt)
+	}
 }
 
 func TestForkSingletonRejects(t *testing.T) {

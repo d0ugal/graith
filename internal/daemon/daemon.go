@@ -1317,17 +1317,6 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		driverKind = DriverPTY
 	}
 
-	// Make each included repo's co-located worktree visible to the agent via
-	// --add-dir. For a mirror session the includes live on the source session
-	// (git setup is skipped locally), so use those. Appended before the prompt
-	// so the agent parses them as flags, not a positional prompt argument.
-	effectiveIncludes := includes
-	if isMirror {
-		effectiveIncludes = sourceIncludes
-	}
-
-	expandedArgs = append(expandedArgs, includeAddDirArgs(effectiveIncludes)...)
-
 	if driverKind == DriverHeadless {
 		expandedArgs = headlessArgs(expandedArgs, prompt)
 	} else if prompt != "" {
@@ -1433,6 +1422,18 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 			expandedArgs = append(expandedArgs, promptArgs...)
 		}
 	}
+
+	// Make each included repo's co-located worktree visible to the agent via
+	// --add-dir. For a mirror session the includes live on the source session
+	// (its own git setup is skipped), so use those. Appended last — after any
+	// positional prompt — because Claude's --add-dir is variadic and would
+	// otherwise swallow a following prompt argument as another directory.
+	effectiveIncludes := includes
+	if isMirror {
+		effectiveIncludes = sourceIncludes
+	}
+
+	expandedArgs = append(expandedArgs, includeAddDirArgs(agentName, effectiveIncludes)...)
 
 	command := agent.Command
 	finalArgs := expandedArgs
@@ -1918,10 +1919,6 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 		return SessionState{}, fmt.Errorf("expand fork args: %w", err)
 	}
 
-	// Make each included repo's forked worktree visible to the agent via
-	// --add-dir (a fork re-creates the source's includes as forkIncludes).
-	expandedArgs = append(expandedArgs, includeAddDirArgs(forkIncludes)...)
-
 	logPath := filepath.Join(sm.paths.LogDir, id+".log")
 
 	env := make(map[string]string, len(agent.Env)+6)
@@ -1996,6 +1993,11 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 			expandedArgs = append(expandedArgs, promptArgs...)
 		}
 	}
+
+	// Make each included repo's forked worktree visible to the agent via
+	// --add-dir (a fork re-creates the source's includes as forkIncludes).
+	// Appended last, after any injected prompt (see Create for why).
+	expandedArgs = append(expandedArgs, includeAddDirArgs(agentName, forkIncludes)...)
 
 	command := agent.Command
 	finalArgs := expandedArgs
@@ -2936,7 +2938,13 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 		}
 	}
 
-	for _, inc := range sessIncludes {
+	// A mirror session persists no includes of its own (its git setup is
+	// skipped); its siblings live on the source session, snapshotted above as
+	// sharedSourceIncludes. Use those so a mirror keeps sibling visibility across
+	// a restart, matching how Create seeds a mirror from sourceIncludes.
+	resumeIncludes := resumeIncludeSet(sessMirror, sessIncludes, sharedSourceIncludes)
+
+	for _, inc := range resumeIncludes {
 		if !git.IsInsideGitRepo(inc.WorktreePath) {
 			rollbackState()
 			return SessionState{}, fmt.Errorf("included worktree %q (%s) is no longer a valid git repo — delete and recreate the session", inc.WorktreePath, inc.RepoName)
@@ -2944,11 +2952,6 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 
 		env[config.IncludeEnvVarName(inc.RepoName)] = inc.WorktreePath
 	}
-
-	// Re-add each included worktree via --add-dir on resume so the flag persists
-	// across restarts (resume_args don't carry it). Appended before hooks and any
-	// prompt so the agent parses them as flags.
-	expandedArgs = append(expandedArgs, includeAddDirArgs(sessIncludes)...)
 
 	if sessAgentHooks {
 		hookArgs, hookEnv, err := sm.injectHooks(sessAgent, id, sessWorktreePath, sessYolo, mcpServers)
@@ -2986,6 +2989,11 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	if seedPrompt != "" {
 		expandedArgs = append(expandedArgs, seedPrompt)
 	}
+
+	// Re-add each included worktree via --add-dir so it persists across restarts
+	// (resume_args don't carry it). Appended after every prompt — including the
+	// migration seed — so Claude's variadic --add-dir can't swallow the prompt.
+	expandedArgs = append(expandedArgs, includeAddDirArgs(sessAgent, resumeIncludes)...)
 
 	command := agent.Command
 	finalArgs := expandedArgs
@@ -6232,12 +6240,15 @@ func (sm *SessionManager) deriveSandboxIncludesWriteDirs(includes []IncludedRepo
 }
 
 // includeAddDirArgs builds the `--add-dir <worktree>` flags that make each
-// included repo's co-located worktree visible to the agent at launch. Claude,
-// Codex and Cursor all accept `--add-dir`, so the same flag works for every
-// agent graith drives; agents that don't take includes get no extra args.
-// Worktrees without a path are skipped defensively.
-func includeAddDirArgs(includes []IncludedRepoState) []string {
-	if len(includes) == 0 {
+// included repo's co-located worktree visible to the agent at launch. Only the
+// agents graith knows accept the flag get it (see agentSupportsAddDir), so a
+// repo's includes never inject an unknown flag into an agent that would reject
+// it and fail to launch. Included worktrees are still exposed via the
+// GRAITH_INCLUDE_*_PATH env vars for every agent regardless. Worktrees without a
+// path are skipped defensively; the result is nil (not an empty slice) when
+// nothing is emitted.
+func includeAddDirArgs(agentType string, includes []IncludedRepoState) []string {
+	if !agentSupportsAddDir(agentType) || len(includes) == 0 {
 		return nil
 	}
 
@@ -6250,7 +6261,38 @@ func includeAddDirArgs(includes []IncludedRepoState) []string {
 		args = append(args, "--add-dir", inc.WorktreePath)
 	}
 
+	if len(args) == 0 {
+		return nil
+	}
+
 	return args
+}
+
+// resumeIncludeSet picks the includes a resuming session should re-grant (both
+// as GRAITH_INCLUDE_*_PATH env vars and --add-dir flags). A mirror session
+// persists none of its own — its git setup is skipped at create — so it takes
+// the source session's includes (snapshotted as sharedSourceIncludes). Every
+// other session uses its own. This keeps a mirror's sibling visibility across a
+// restart, matching how Create seeds a mirror from the source's includes.
+func resumeIncludeSet(mirror bool, sessIncludes, sharedSourceIncludes []IncludedRepoState) []IncludedRepoState {
+	if mirror {
+		return sharedSourceIncludes
+	}
+
+	return sessIncludes
+}
+
+// agentSupportsAddDir reports whether the named agent's CLI accepts the
+// `--add-dir <path>` flag graith uses to grant included-repo worktrees. Claude,
+// Codex, and Cursor all do; other agents (e.g. opencode, agy, or a custom
+// command) may reject an unknown flag, so they are left without it.
+func agentSupportsAddDir(agentType string) bool {
+	switch agentType {
+	case "claude", "codex", "cursor":
+		return true
+	default:
+		return false
+	}
 }
 
 func (sm *SessionManager) resolveSandbox(agentName string) (bool, error) {

@@ -130,7 +130,7 @@ GRAITH_INCLUDE_<BASENAME>_PATH=/path/to/included/worktree
 
 The basename is uppercased, with `-` and `.` replaced by `_`. For example, `~/Code/shared-lib` becomes `GRAITH_INCLUDE_SHARED_LIB_PATH`.
 
-The daemon also passes `--add-dir <worktree>` for each included repo when launching the agent, so Claude, Codex, and Cursor can read and edit the sibling worktrees without an extra prompt to grant access. The flag is re-added on resume, so it survives restarts.
+The daemon also passes `--add-dir <worktree>` for each included repo when launching the agent, so it can access the sibling worktrees without an extra prompt to grant them. This is applied only for agents whose CLI accepts the flag — `claude`, `codex`, and `cursor`; other agents rely on the environment variables above. The flag is re-added on resume and fork, so it survives restarts.
 
 Validation rules:
 - A repo cannot include itself
