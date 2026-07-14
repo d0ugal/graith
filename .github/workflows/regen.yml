@@ -1,0 +1,85 @@
+# Auto-regenerate committed generated artifacts on a PR.
+#
+# Two files in this repo are mechanical outputs of `go test ... -update`:
+#   - internal/protocol/.../Fixtures/protocol_manifest.json  (from messages.go)
+#   - website/content/docs/capabilities.md                   (from capabilities.json)
+#
+# `TestManifestUpToDate` / `TestDocMatchesManifest` in the normal Test job already
+# FAIL when either is stale — that gate stays the source of truth. This workflow is
+# a convenience layer on top: when a PR changes the inputs but forgets the `-update`
+# step, it regenerates the outputs and commits them back to the PR branch, so a
+# contributor never has to re-run the command by hand.
+#
+# Notes:
+#   - The hand-authored inputs are NOT touched here. A newly added wire struct that
+#     isn't registered/classified fails `TestManifestRegistryComplete`, which this
+#     job cannot and must not auto-fix — so auto-regen can't paper over a real
+#     decision, only mechanical churn (e.g. an added optional field).
+#   - Same-repo PRs only: fork PRs get a read-only GITHUB_TOKEN, so a push would 403
+#     (same guard the docs-preview workflow uses). Forks still get the failing gate
+#     in the Test job, just no auto-fix.
+#   - A push made with GITHUB_TOKEN does not itself re-trigger workflows, so there is
+#     no loop. The job verifies the regenerated content in-place before pushing, so
+#     the bot commit is correct-by-construction even though it won't get its own run.
+name: Regenerate
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: regen-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  regen:
+    name: Regenerate generated files
+    # Skip forks: their token is read-only and the push would fail. The Test job
+    # still runs the up-to-date gate for them.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          # Check out the PR's head branch (not the detached merge ref) so the
+          # commit lands back on the branch, and keep the persisted GITHUB_TOKEN
+          # credentials so `git push` authenticates.
+          ref: ${{ github.head_ref }}
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+
+      - name: Regenerate generated files
+        run: |
+          go test ./internal/protocol -run TestManifestUpToDate -update
+          go test ./internal/capabilities -run TestDocMatchesManifest -update
+
+      - name: Verify regenerated content
+        # Prove the outputs are consistent within this job, since the commit-back
+        # below won't re-trigger the full suite on the bot commit.
+        run: |
+          go test ./internal/protocol -run TestManifestUpToDate
+          go test ./internal/capabilities -run 'TestDocMatchesManifest|TestManifestLoads'
+
+      - name: Commit back if changed
+        # HEAD_REF is passed via env, never interpolated into the script body:
+        # a branch name is attacker-controllable, so `${{ github.head_ref }}`
+        # inline in a run block is a template-injection sink (zizmor, medium+).
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo "Generated files already up to date — nothing to commit."
+            exit 0
+          fi
+          echo "Generated files were stale; committing regenerated output."
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "chore(generated): regenerate manifest + capabilities doc [skip ci]"
+          git push origin "HEAD:$HEAD_REF"
