@@ -1,6 +1,6 @@
 import SwiftUI
-import GraithClientAPI
-import GraithMobileKit
+import GraithSessionKit
+import GraithRemoteKit
 #if os(iOS)
 import UIKit
 #endif
@@ -10,7 +10,7 @@ import UIKit
 /// `gr pair approve`; on success the SPKI fingerprint is shown for TOFU
 /// confirmation against `gr pair`'s local output.
 struct PairingView: View {
-    @ObservedObject var model: AppModel
+    @ObservedObject var model: FleetModel
     @Environment(\.dismiss) private var dismiss
 
     @State private var label = ""
@@ -21,7 +21,7 @@ struct PairingView: View {
     // Observe the shared pairing coordinator.
     @ObservedObject private var pairing: PairingCoordinator
 
-    init(model: AppModel) {
+    init(model: FleetModel) {
         self.model = model
         self.pairing = model.pairing
     }
@@ -101,7 +101,7 @@ struct PairingView: View {
     // eyeballs the SPKI fingerprint against `gr pair`'s local output and either
     // trusts it (persists the token/pin) or rejects it (discards, nothing
     // written). This is the TOFU gate — see PairingCoordinator.confirmPairing.
-    private func confirmationSection(_ entry: HostEntry) -> some View {
+    private func confirmationSection(_ entry: Host) -> some View {
         Section("Confirm the daemon's key") {
             Text("\(entry.label) replied. Before trusting it, check this TLS key fingerprint matches what `gr pair` printed on the daemon host.")
                 .font(.footnote).foregroundStyle(.secondary)
@@ -126,7 +126,7 @@ struct PairingView: View {
         }
     }
 
-    private func pairedSection(_ entry: HostEntry) -> some View {
+    private func pairedSection(_ entry: Host) -> some View {
         Section("Paired") {
             Label("\(entry.label) is paired", systemImage: "checkmark.seal.fill")
                 .foregroundStyle(.green)
@@ -167,7 +167,7 @@ struct PairingView: View {
         #if os(iOS)
         return UIDevice.current.name
         #else
-        return Host.current().localizedName ?? "graith device"
+        return Foundation.Host.current().localizedName ?? "graith device"
         #endif
     }
 }

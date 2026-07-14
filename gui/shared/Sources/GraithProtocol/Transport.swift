@@ -6,7 +6,7 @@ import Network
 /// The protocol is identical over both; only the underlying socket differs —
 /// this is the transport abstraction that lets the same client serve the
 /// local macOS daemon and remote tailnet daemons.
-public enum GraithTransport: Sendable, Equatable {
+public enum GraithTransport: Sendable, Equatable, Hashable {
     /// The local daemon's Unix domain socket (macOS only). No TLS — the `0700`
     /// socket is the trust boundary, exactly as the `gr` CLI relies on.
     case unix(path: String)

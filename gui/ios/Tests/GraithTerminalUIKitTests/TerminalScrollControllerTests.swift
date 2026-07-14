@@ -1,6 +1,6 @@
 import CoreGraphics
 import XCTest
-import GraithClientAPI
+import GraithSessionKit
 @testable import GraithTerminalUIKit
 
 /// Covers the pure scroll physics/state behind the iOS two-finger scrollback

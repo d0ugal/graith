@@ -122,7 +122,7 @@ struct HostsSettings: View {
                         Spacer()
                         if host.kind != .local {
                             Button(role: .destructive) {
-                                store.removeHost(host)
+                                Task { await store.removeHost(host) }
                             } label: {
                                 Image(systemName: "minus.circle")
                             }

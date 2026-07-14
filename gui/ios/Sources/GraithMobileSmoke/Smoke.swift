@@ -1,11 +1,10 @@
 import Foundation
 import CryptoKit
-import GraithClientAPI
-import GraithMobileKit
+import GraithSessionKit
+import GraithRemoteKit
 import GraithMobileMock
 import GraithMobileUI
 import GraithTerminalUIKit
-import GraithMobileReal
 import GraithProtocol
 
 // A runnable smoke check for the SDK-neutral logic (see Package.swift). Mirrors
@@ -72,7 +71,7 @@ func testHostRegistry() throws {
         .appendingPathComponent("hosts.json")
     let registry = HostRegistry(keychain: secrets, storeURL: url)
 
-    registry.upsert(HostEntry(id: "ben", label: "ben", magicDNSName: "graith-ben.ts.net"))
+    registry.upsert(Host(id: "ben", label: "ben", kind: .remote, magicDNSName: "graith-ben.ts.net"))
     check(registry.hosts.count == 1, "upsert adds a host")
     check(registry.credentials(for: registry.host(id: "ben")!) == nil, "no creds before pairing")
 
@@ -137,7 +136,7 @@ func testMockClient() async throws {
     check(sessions.contains { $0.needsApproval }, "a session needs approval")
 
     let repos = try await client.repoList()
-    check(repos.contains { $0.recent }, "repo_list marks a recent repo")
+    check(repos.contains { $0.isRecent }, "repo_list marks a recent repo")
 
     try await client.create(CreateRequest(name: "bonnie", agent: "claude", repoPath: "/Users/x/Code/croft"))
     check(try await client.listSessions().count == 4, "create adds a session")
@@ -205,7 +204,7 @@ func testMockClientSessionActions() async throws {
 func testHostConnectionActions() async throws {
     section("HostConnection — action wiring (#899)")
     let client = MockHostClient()
-    let entry = HostEntry(id: "ben", label: "ben", magicDNSName: "graith-ben.ts.net")
+    let entry = Host(id: "ben", label: "ben", kind: .remote, magicDNSName: "graith-ben.ts.net")
     let conn = HostConnection(entry: entry, client: client)
     await conn.connect()
     check(conn.state == .connected, "connection is connected")
@@ -236,11 +235,11 @@ func testHostConnectionActions() async throws {
     check(!conn.sessions.contains { $0.id == "braw0001" }, "delete removes via the connection")
 }
 
-// MARK: - AppModel multi-host aggregation (Task 19)
+// MARK: - FleetModel multi-host aggregation (Task 19)
 
 @MainActor
 func testAppModel() async throws {
-    section("AppModel — multi-host aggregation")
+    section("FleetModel — multi-host aggregation")
     let secrets = InMemorySecretStore()
     let identity = try DeviceIdentity(keychain: secrets)
     let registry = HostRegistry(keychain: secrets, storeURL:
@@ -250,15 +249,16 @@ func testAppModel() async throws {
     // Two paired hosts: ben + brae. Each records its own daemon-assigned device
     // ID on its entry (F4) — pairing brae must not clobber ben's.
     for id in ["ben", "brae"] {
-        registry.upsert(HostEntry(id: id, label: id, magicDNSName: "graith-\(id).ts.net"))
+        registry.upsert(Host(id: id, label: id, kind: .remote, magicDNSName: "graith-\(id).ts.net"))
         try registry.completePairing(hostID: id, response:
             PairResponse(deviceID: "dev-multi", clientToken: "tok-\(id)",
                          daemonProfile: "default", tlsPinSPKI: "cGlu"))
     }
 
-    let model = AppModel(
+    let model = FleetModel(
         registry: registry, identity: identity, reachability: TailnetReachability(),
-        factory: MockClientFactory(), pairingBackend: MockPairing())
+        factory: MockClientFactory(),
+        pairing: PairingCoordinator(pairing: MockPairing(), identity: identity, registry: registry))
     check(model.connections.count == 2, "one connection per paired host")
 
     await model.connectAll()
@@ -324,34 +324,34 @@ func testAttach() async throws {
     await vm3.detach()
 }
 
-// MARK: - Real adapters (GraithMobileReal): wire-model mapping + factory
+// MARK: - Real adapters (GraithSessionKit): canonical wire models + factory
 
 func testRealAdapters() async throws {
-    section("GraithMobileReal — shared→boundary mapping + factory")
+    section("GraithSessionKit — canonical wire models + real factory")
     let decoder = JSONDecoder()
 
-    // Decode a shared wire SessionInfo and map it to the boundary type. This
-    // exercises the real decode path + the 1:1 field mapping in one shot.
+    // The boundary now speaks the canonical GraithProtocol wire models directly
+    // (#1131 folded away the GraithClientAPI mirrors + ModelMapping), so a
+    // decoded SessionInfo IS the app model — this just exercises decode + the
+    // shared conveniences.
     let sessionJSON = """
     {"id":"braw0001","name":"braw","repo_path":"/Users/x/Code/croft","repo_name":"croft",
      "worktree_path":"/wt","branch":"user/graith/braw-braw0001","base_branch":"main",
      "agent":"claude","status":"running","agent_status":"active","created_at":"2026-07-08T07:00:00Z",
      "pull_request":{"number":7,"state":"open"},"ci":{"state":"passing"}}
     """
-    let shared = try decoder.decode(GraithProtocol.SessionInfo.self, from: Data(sessionJSON.utf8))
-    let mapped = GraithClientAPI.SessionInfo(shared)
-    check(mapped.id == "braw0001", "SessionInfo id maps")
-    check(mapped.isRunning, "SessionInfo status maps (running)")
-    check(!mapped.needsApproval, "SessionInfo agentStatus maps (active ⇒ no approval)")
-    check(mapped.shortBranch == "braw-braw0001", "SessionInfo shortBranch derives")
-    check(mapped.pullRequest?.number == 7, "nested PRInfo maps")
-    check(mapped.ci?.state == "passing", "nested CIInfo maps")
+    let session = try decoder.decode(SessionInfo.self, from: Data(sessionJSON.utf8))
+    check(session.id == "braw0001", "SessionInfo id decodes")
+    check(session.isRunning, "SessionInfo status convenience (running)")
+    check(!session.needsApproval, "SessionInfo agentStatus convenience (active ⇒ no approval)")
+    check(session.shortBranch == "braw-braw0001", "SessionInfo shortBranch derives")
+    check(session.pullRequest?.number == 7, "nested PRInfo decodes")
+    check(session.ci?.state == "passing", "nested CIInfo decodes")
 
-    // Map a pair response.
+    // Decode a pair response.
     let pairJSON = #"{"device_id":"dev-bairn","client_token":"tok-canny","daemon_profile":"default","tls_pin_spki":"cGlu"}"#
-    let pairMsg = try decoder.decode(GraithProtocol.PairResponseMsg.self, from: Data(pairJSON.utf8))
-    let pairResp = GraithClientAPI.PairResponse(pairMsg)
-    check(pairResp.clientToken == "tok-canny", "PairResponse maps client token")
+    let pairResp = try decoder.decode(PairResponse.self, from: Data(pairJSON.utf8))
+    check(pairResp.clientToken == "tok-canny", "PairResponse decodes client token")
 
     // The real factory builds a (disconnected) client without touching the network.
     let factory = RealHostClientFactory()

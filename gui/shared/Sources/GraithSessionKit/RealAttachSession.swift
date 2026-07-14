@@ -1,5 +1,4 @@
 import Foundation
-import GraithClientAPI
 import GraithProtocol
 
 /// The real `TerminalAttachSession`, wrapping the shared `AttachSession`.

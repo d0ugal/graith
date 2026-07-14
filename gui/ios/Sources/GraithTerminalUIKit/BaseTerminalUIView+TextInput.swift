@@ -1,6 +1,6 @@
 #if canImport(UIKit)
 import UIKit
-import GraithClientAPI
+import GraithSessionKit
 
 /// A `UITextPosition` backed by an integer offset into the composition buffer.
 final class IndexedPosition: UITextPosition {

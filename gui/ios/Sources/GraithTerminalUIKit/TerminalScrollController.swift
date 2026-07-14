@@ -1,6 +1,6 @@
 import Foundation
 import CoreGraphics
-import GraithClientAPI
+import GraithSessionKit
 
 /// Pure scroll physics + state for the iOS terminal surface (issue #984). UIKit-
 /// free so it unit-tests off-device, following the `SpaceDragTracker` precedent

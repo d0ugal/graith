@@ -19,17 +19,34 @@ gui/
   shared/   Cross-platform core, consumed by both apps:
               GraithProtocol      transport-abstract framed-protocol client
                                   (TLS + SPKI pinning, PoP, wire messages)
+              GraithRemoteKit     Host model, HostRegistry, DeviceIdentity,
+                                  Keychain/SecretStore, PairingCoordinator
+              GraithSessionKit    the session/feature view-model layer both apps
+                                  bind to (#1131): the capability boundary
+                                  (GraithHostClient et al.), HostConnection,
+                                  the multi-host FleetModel, TerminalAttach*,
+                                  TailnetReachability, and the real client
+                                  wrapping GraithProtocolClient
               GraithTerminalCore  libghostty-vt wrapper + Metal renderer + keymap
-              CGhosttyVT          C shim over libghostty-vt (Libraries/*.a)
-  macos/    GraithGUI — the macOS app (AppKit/SwiftUI + Metal). Depends on ../shared.
-  ios/      The iOS app + modules. Depends (soon) on ../shared:
+              GraithDesign        shared design language (palette, type, states)
+              CGhosttyVT          C shim over libghostty-vt (xcframework)
+  macos/    GraithGUI — the macOS app (AppKit/SwiftUI + Metal). Depends on ../shared;
+            SessionStore is a thin FleetModel subclass (terminal-presentation
+            state + the AppKit terminal-attach client accessor only).
+  ios/      The iOS app + modules. Depends on ../shared:
               GraithMobileApp     @main SwiftUI App (the launchable app)
               GraithMobileUI      RootView, sidebar, session detail, pairing, approvals
-              GraithMobileKit     device identity, host registry, tailnet reachability, Keychain
               GraithTerminalUIKit UIKit terminal surface (UITextInput/IME, key accessory)
-              GraithClientAPI     boundary protocol (to be unified onto ../shared — see below)
+              GraithMobileRealTerminal  libghostty TerminalCoreDriving adapter (iOS)
               GraithMobileMock    in-memory mocks for previews/tests/dev
 ```
+
+> Parity note (#1131): everything above the protocol used to be written twice.
+> The session/feature layer now lives once in `shared/GraithSessionKit`, and the
+> iOS-local `GraithClientAPI` / `GraithMobileKit` / `GraithMobileReal` targets
+> (which duplicated the boundary, the RemoteKit types, and the real client) have
+> been folded away. A new capability is wired once in shared and appears on both
+> platforms. See `docs/design/2026-07-14-shared-session-feature-layer.md`.
 
 ## Build & run
 

@@ -47,15 +47,16 @@ targets:
       - package: GraithMobile
         product: GraithMobileUI
       - package: GraithMobile
-        product: GraithMobileReal
-      - package: GraithMobile
         product: GraithMobileRealTerminal
       - package: GraithMobile
-        product: GraithMobileKit
-      - package: GraithMobile
-        product: GraithClientAPI
-      - package: GraithMobile
         product: GraithMobileMock
+      # The session/feature layer + host/pairing substrate now live in ../shared
+      # (#1131): the iOS-local GraithClientAPI / GraithMobileKit / GraithMobileReal
+      # targets were folded away. The @main sources import these directly.
+      - package: GraithShared
+        product: GraithSessionKit
+      - package: GraithShared
+        product: GraithRemoteKit
     info:
       path: ios/graith-Info.plist
       properties:
@@ -90,6 +91,8 @@ targets:
         product: GraithProtocol
       - package: GraithShared
         product: GraithRemoteKit
+      - package: GraithShared
+        product: GraithSessionKit
       - package: GraithShared
         product: GraithTerminalCore
       - package: GraithShared

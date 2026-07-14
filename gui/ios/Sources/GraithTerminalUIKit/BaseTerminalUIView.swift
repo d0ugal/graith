@@ -1,6 +1,6 @@
 #if canImport(UIKit)
 import UIKit
-import GraithClientAPI
+import GraithSessionKit
 
 /// The iOS interactive terminal surface (Task 20). A `UIView` that:
 ///

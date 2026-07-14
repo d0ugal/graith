@@ -1,5 +1,5 @@
 import Foundation
-import GraithClientAPI
+import GraithSessionKit
 
 /// A `HostClientFactory` that hands out `MockHostClient`s. Optionally keyed by
 /// the transport's host so previews can show different sessions per daemon.
@@ -23,5 +23,9 @@ public struct MockClientFactory: HostClientFactory {
         case .unix(let p): host = p
         }
         return clientForHost(host)
+    }
+
+    public func makeLocalClient(transport: GraithTransport, profile: String) -> any GraithHostClient {
+        clientForHost("local")
     }
 }

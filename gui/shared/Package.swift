@@ -12,10 +12,17 @@ let package = Package(
         .library(name: "GraithProtocol", targets: ["GraithProtocol"]),
         // Cross-platform remote/pairing substrate over GraithProtocol: device
         // identity (Keychain + ed25519), the host registry, and the pairing
-        // coordinator. The macOS app consumes it to gain the multi-host remote
-        // experience iOS already has (#885); iOS keeps its GraithMobileKit copies
-        // for now (a future task can unify them onto this).
+        // coordinator. Both apps consume it directly — the iOS-local
+        // GraithMobileKit copies were folded away here in #1131.
         .library(name: "GraithRemoteKit", targets: ["GraithRemoteKit"]),
+        // The shared session/feature view-model layer (#1131): the capability
+        // boundary (GraithHostClient et al.), the per-host connection view-model,
+        // the multi-host FleetModel aggregator, single-attach + approvals
+        // aggregation, and the production RealHostClient wrapping
+        // GraithProtocolClient. Built on GraithProtocol + GraithRemoteKit only
+        // (no libghostty), so both the macOS and iOS apps bind to one definition
+        // of "what a session app can do" — parity by construction, not review.
+        .library(name: "GraithSessionKit", targets: ["GraithSessionKit"]),
         .library(name: "GraithTerminalCore", targets: ["GraithTerminalCore"]),
         .library(name: "CGhosttyVT", targets: ["CGhosttyVT"]),
         // Shared design language (Catppuccin palette, monospace type, GRAITH
@@ -44,6 +51,14 @@ let package = Package(
         .testTarget(
             name: "GraithRemoteKitTests",
             dependencies: ["GraithRemoteKit", "GraithProtocol"]
+        ),
+        .target(
+            name: "GraithSessionKit",
+            dependencies: ["GraithProtocol", "GraithRemoteKit"]
+        ),
+        .testTarget(
+            name: "GraithSessionKitTests",
+            dependencies: ["GraithSessionKit", "GraithProtocol", "GraithRemoteKit"]
         ),
         .target(
             name: "GraithTerminalCore",

@@ -1,5 +1,5 @@
 import Foundation
-import GraithClientAPI
+import GraithSessionKit
 
 /// A mock `TerminalCoreDriving` for exercising `BaseTerminalUIView` without
 /// `libghostty-vt`. It records fed output and encodes strokes to a simple,

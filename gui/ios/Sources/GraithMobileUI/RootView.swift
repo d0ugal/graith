@@ -1,18 +1,18 @@
 import SwiftUI
-import GraithClientAPI
-import GraithMobileKit
+import GraithSessionKit
+import GraithRemoteKit
 import GraithDesign
 
 /// The app's top-level universal shell: a `NavigationSplitView` with the
 /// multi-host session sidebar and a session detail pane, plus the
 /// not-connected-to-tailnet banner, an approvals entry point, and add-host.
 public struct RootView: View {
-    @ObservedObject var model: AppModel
+    @ObservedObject var model: FleetModel
     @State private var showingAddHost = false
     @State private var showingApprovals = false
     @State private var showingNewSession = false
 
-    public init(model: AppModel) {
+    public init(model: FleetModel) {
         self.model = model
     }
 
@@ -26,7 +26,7 @@ public struct RootView: View {
         .preferredColorScheme(.dark)
         .tint(GraithDesign.accent)
         .task {
-            model.reachability.start()
+            model.reachability?.start()
             await model.connectAll()
         }
         .sheet(isPresented: $showingAddHost) {
@@ -44,8 +44,8 @@ public struct RootView: View {
 
     private var sidebar: some View {
         VStack(spacing: 0) {
-            if model.reachability.state != .onTailnet {
-                TailnetBanner(state: model.reachability.state)
+            if let reachState = model.reachability?.state, reachState != .onTailnet {
+                TailnetBanner(state: reachState)
             }
             SessionSidebar(model: model)
         }

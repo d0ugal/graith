@@ -1,5 +1,5 @@
 import Foundation
-import GraithClientAPI
+import GraithSessionKit
 import GraithTerminalCore
 
 // The real `TerminalCoreDriving`, backed by the shared VT core

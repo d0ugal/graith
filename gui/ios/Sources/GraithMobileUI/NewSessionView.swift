@@ -1,10 +1,10 @@
 import SwiftUI
-import GraithClientAPI
+import GraithSessionKit
 
 /// Remote session creation. There is no local cwd on a phone, so the repo comes
 /// from a `repo_list`-backed picker (design §C.4), scoped to a chosen host.
 struct NewSessionView: View {
-    @ObservedObject var model: AppModel
+    @ObservedObject var model: FleetModel
     @Environment(\.dismiss) private var dismiss
 
     @State private var hostID: String = ""
@@ -40,7 +40,7 @@ struct NewSessionView: View {
                             ForEach(repos) { repo in
                                 HStack {
                                     Text(repo.name)
-                                    if repo.recent { Text("recent").font(.caption2).foregroundStyle(.secondary) }
+                                    if repo.isRecent { Text("recent").font(.caption2).foregroundStyle(.secondary) }
                                 }.tag(repo.path)
                             }
                         }
@@ -125,7 +125,7 @@ public enum RepoPickerLogic {
     /// disabled (#896).
     public static func resolveSelection(repos: [RepoEntry], current: String) -> String {
         if repos.contains(where: { $0.path == current }) { return current }
-        return repos.first(where: { $0.recent })?.path ?? repos.first?.path ?? ""
+        return repos.first(where: { $0.isRecent })?.path ?? repos.first?.path ?? ""
     }
 }
 

@@ -1,11 +1,11 @@
 import SwiftUI
-import GraithClientAPI
+import GraithSessionKit
 import GraithDesign
 
 /// The aggregated multi-host sidebar: host → repo → session tree (design §C.4).
 /// Session IDs are per-daemon, so selection is namespaced by `SessionRef`.
 struct SessionSidebar: View {
-    @ObservedObject var model: AppModel
+    @ObservedObject var model: FleetModel
 
     var body: some View {
         List(selection: $model.selection) {

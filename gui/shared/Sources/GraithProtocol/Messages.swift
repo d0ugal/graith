@@ -282,6 +282,37 @@ public struct SessionInfo: Codable, Sendable, Identifiable, Hashable {
     public static func == (lhs: SessionInfo, rhs: SessionInfo) -> Bool { lhs.id == rhs.id }
     public func hash(into hasher: inout Hasher) { hasher.combine(id) }
 
+    // Public memberwise init so the SwiftUI apps' mocks/previews/tests can build
+    // fixtures by hand (the synthesized memberwise init is internal). The daemon
+    // path decodes these from JSON and never calls this.
+    public init(
+        id: String, parentID: String? = nil, name: String, repoPath: String = "",
+        repoName: String = "", worktreePath: String = "", branch: String = "",
+        baseBranch: String = "", agent: String = "claude", agentSessionID: String? = nil,
+        status: String, agentStatus: String? = nil, exitCode: Int? = nil,
+        exitSignal: String? = nil, createdAt: String = "", lastAttachedAt: String? = nil,
+        statusChangedAt: String? = nil, dirty: Bool? = nil, unpushedCount: Int? = nil,
+        sandboxed: Bool? = nil, mirror: Bool? = nil, inPlace: Bool? = nil,
+        yolo: Bool? = nil, model: String? = nil, toolName: String? = nil,
+        includes: [IncludedRepoInfo]? = nil, configStale: Bool? = nil, starred: Bool? = nil,
+        systemKind: String? = nil, scenarioID: String? = nil, scenarioName: String? = nil,
+        summaryText: String? = nil, summaryFaded: Bool? = nil, lastOutputAt: String? = nil,
+        migratedFrom: String? = nil, pullRequest: PRInfo? = nil, ci: CIInfo? = nil
+    ) {
+        self.id = id; self.parentID = parentID; self.name = name; self.repoPath = repoPath
+        self.repoName = repoName; self.worktreePath = worktreePath; self.branch = branch
+        self.baseBranch = baseBranch; self.agent = agent; self.agentSessionID = agentSessionID
+        self.status = status; self.agentStatus = agentStatus; self.exitCode = exitCode
+        self.exitSignal = exitSignal; self.createdAt = createdAt; self.lastAttachedAt = lastAttachedAt
+        self.statusChangedAt = statusChangedAt; self.dirty = dirty; self.unpushedCount = unpushedCount
+        self.sandboxed = sandboxed; self.mirror = mirror; self.inPlace = inPlace; self.yolo = yolo
+        self.model = model; self.toolName = toolName; self.includes = includes
+        self.configStale = configStale; self.starred = starred; self.systemKind = systemKind
+        self.scenarioID = scenarioID; self.scenarioName = scenarioName; self.summaryText = summaryText
+        self.summaryFaded = summaryFaded; self.lastOutputAt = lastOutputAt; self.migratedFrom = migratedFrom
+        self.pullRequest = pullRequest; self.ci = ci
+    }
+
     enum CodingKeys: String, CodingKey {
         case id
         case parentID = "parent_id"
@@ -329,6 +360,11 @@ public struct PRInfo: Codable, Sendable, Hashable {
     public var url: String?
     public var reviewDecision: String?
     public var conflicting: Bool?
+    public init(number: Int, state: String, url: String? = nil,
+                reviewDecision: String? = nil, conflicting: Bool? = nil) {
+        self.number = number; self.state = state; self.url = url
+        self.reviewDecision = reviewDecision; self.conflicting = conflicting
+    }
     enum CodingKeys: String, CodingKey {
         case number, state, url
         case reviewDecision = "review_decision"
@@ -339,6 +375,9 @@ public struct PRInfo: Codable, Sendable, Hashable {
 public struct CIInfo: Codable, Sendable, Hashable {
     public var state: String
     public var failingChecks: [String]?
+    public init(state: String, failingChecks: [String]? = nil) {
+        self.state = state; self.failingChecks = failingChecks
+    }
     enum CodingKeys: String, CodingKey {
         case state
         case failingChecks = "failing_checks"
@@ -352,6 +391,11 @@ public struct IncludedRepoInfo: Codable, Sendable, Hashable {
     public var baseBranch: String
     public var dirty: Bool?
     public var unpushed: Int?
+    public init(repoName: String, worktreePath: String, branch: String,
+                baseBranch: String, dirty: Bool? = nil, unpushed: Int? = nil) {
+        self.repoName = repoName; self.worktreePath = worktreePath; self.branch = branch
+        self.baseBranch = baseBranch; self.dirty = dirty; self.unpushed = unpushed
+    }
     enum CodingKeys: String, CodingKey {
         case repoName = "repo_name"
         case worktreePath = "worktree_path"
@@ -393,6 +437,11 @@ public struct ScreenSnapshotResponseMsg: Codable, Sendable {
     public var cursorVisible: Bool
     public var cols: Int
     public var rows: Int
+    public init(sessionID: String, frame: String, cursorX: Int = 0, cursorY: Int = 0,
+                cursorVisible: Bool = false, cols: Int = 0, rows: Int = 0) {
+        self.sessionID = sessionID; self.frame = frame; self.cursorX = cursorX
+        self.cursorY = cursorY; self.cursorVisible = cursorVisible; self.cols = cols; self.rows = rows
+    }
     enum CodingKeys: String, CodingKey {
         case sessionID = "session_id"
         case frame
@@ -406,7 +455,7 @@ public struct ScreenSnapshotResponseMsg: Codable, Sendable {
 
 // MARK: - Approvals
 
-public struct ApprovalInfo: Codable, Sendable, Identifiable {
+public struct ApprovalInfo: Codable, Sendable, Identifiable, Hashable {
     public var requestID: String
     public var sessionID: String
     public var sessionName: String
@@ -417,6 +466,14 @@ public struct ApprovalInfo: Codable, Sendable, Identifiable {
     public var requestedAt: String
 
     public var id: String { requestID }
+
+    public init(requestID: String, sessionID: String, sessionName: String,
+                toolName: String, toolInput: String? = nil, agent: String = "",
+                repoName: String = "", requestedAt: String = "") {
+        self.requestID = requestID; self.sessionID = sessionID; self.sessionName = sessionName
+        self.toolName = toolName; self.toolInput = toolInput; self.agent = agent
+        self.repoName = repoName; self.requestedAt = requestedAt
+    }
 
     enum CodingKeys: String, CodingKey {
         case requestID = "request_id"
@@ -477,6 +534,10 @@ public struct PairResponseMsg: Codable, Sendable {
     public var clientToken: String
     public var daemonProfile: String
     public var tlsPinSPKI: String
+    public init(deviceID: String, clientToken: String, daemonProfile: String, tlsPinSPKI: String) {
+        self.deviceID = deviceID; self.clientToken = clientToken
+        self.daemonProfile = daemonProfile; self.tlsPinSPKI = tlsPinSPKI
+    }
     enum CodingKeys: String, CodingKey {
         case deviceID = "device_id"
         case clientToken = "client_token"
@@ -568,11 +629,14 @@ public struct RepoListResponseMsg: Codable, Sendable {
     public var repos: [RepoEntry]
 }
 
-public struct RepoEntry: Codable, Sendable, Identifiable {
+public struct RepoEntry: Codable, Sendable, Identifiable, Hashable {
     public var path: String
     public var name: String
     public var recent: Bool?
     public var id: String { path }
+    public init(path: String, name: String, recent: Bool? = nil) {
+        self.path = path; self.name = name; self.recent = recent
+    }
 }
 
 // MARK: - Empty-payload requests

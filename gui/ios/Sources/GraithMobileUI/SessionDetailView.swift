@@ -1,5 +1,5 @@
 import SwiftUI
-import GraithClientAPI
+import GraithSessionKit
 import GraithTerminalUIKit
 import GraithMobileRealTerminal
 import GraithTerminalCore
