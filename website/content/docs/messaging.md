@@ -151,4 +151,4 @@ Both are optional. When unset, messages are kept indefinitely.
 
 ## Patterns
 
-See [Patterns and Recipes](patterns.md) for detailed messaging patterns including pub/sub broadcast, request/reply, coordination barriers, and hierarchical agent communication.
+See [Agent-to-agent communication]({{< relref "patterns/communication.md" >}}) for detailed messaging patterns including pub/sub broadcast, request/reply, coordination barriers, and hierarchical agent communication.

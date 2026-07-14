@@ -1,0 +1,131 @@
+---
+weight: 420
+title: "Monitoring & interaction"
+description: "Inspect sessions and drive a running session remotely."
+icon: "monitoring"
+toc: true
+draft: false
+---
+
+## Information and monitoring
+
+### `gr list` (alias: `ls`)
+
+List all sessions with status.
+
+| Flag | Description |
+|------|-------------|
+| `--repo <path>` | Filter by repo path |
+| `--tree` | Show parent-child hierarchy |
+| `--children <name-or-id>` | Filter to descendants of a session |
+| `--starred` | Show only starred sessions |
+| `--wide` | Show all columns, including per-session token usage |
+
+The `--wide` view adds a **Tokens** column with the compact total token usage
+for each session's current agent (a trailing `~` marks an approximate count).
+See `gr tokens` for the full breakdown.
+
+### `gr tokens [session]`
+
+Show per-session token usage — input, output, and cache tokens — extracted from
+each agent's on-disk transcript. With no argument it lists every session and a
+grand total; with a session name or ID it shows just that session.
+
+Counts reflect the session's **current agent** and are updated by a background
+poll, so they lag by up to ~30 seconds. Agents without a transcript reader
+(currently anything other than Claude Code and Codex) show `—` / `(unsupported)`;
+a session that hasn't been observed yet shows `(unknown)`, distinct from a real
+zero. USD cost is not shown (a planned opt-in via a user-supplied price table).
+
+```
+$ gr tokens
+SESSION   AGENT   INPUT    OUTPUT   CACHE-R    CACHE-W   OTHER   TOTAL
+braw      claude  12,431   48,209   1,204,882  96,004    0       1,361,526
+canny     codex   69,131   3,517    756,224    0         0       828,872
+```
+
+Use `--json` (implied in agent mode) for a structured per-session projection.
+
+### `gr logs <name-or-id>` (alias: `l`)
+
+Show session output without attaching.
+
+| Flag | Description |
+|------|-------------|
+| `-f, --follow` | Follow output (like `tail -f`) |
+| `-n, --lines <num>` | Number of lines to show (default: 300) |
+
+### `gr info`
+
+Show info for the current session. Auto-detects the session by matching the current working directory against session worktree paths.
+
+### `gr dashboard`
+
+Live-updating TUI dashboard of all sessions. Supports inline attach, stop, delete, and resume.
+
+### `gr approvals`
+
+List sessions waiting for approval.
+
+### `gr doctor` (alias: `doc`)
+
+Run health checks and diagnostics. Checks daemon status, safehouse availability, orphaned worktrees, oversized scrollback files, and stale PID files.
+
+By default `gr doctor` avoids walking the data dir to measure on-disk sizes — that walk can take tens of seconds on a large install (worktrees full of `node_modules` and `.git` objects), so it's opt-in. Pass `--disk` to report the size of the data dir, tmp repos, and orphaned worktrees. When it finds leftover artifacts whose size is worth knowing (orphaned worktrees, a legacy directory), the default run recommends re-running with `--disk`. In `--json` output, the `disk_measured` field indicates whether sizes were computed.
+
+| Flag | Description |
+|------|-------------|
+| `--autofix` | Automatically fix issues |
+| `--disk` | Measure on-disk sizes (walks the data dir; can be slow on large installs) |
+
+### `gr sandbox why`
+
+Explain whether the configured sandbox would allow or deny a filesystem or network access, without launching an agent. Builds the nono profile graith would generate from config and queries nono's policy oracle. Requires the `nono` backend.
+
+| Flag | Description |
+|------|-------------|
+| `--path <p>` | Filesystem path to check (use with `--op`) |
+| `--op <read\|write\|readwrite>` | Operation for `--path` |
+| `--host <h>` | Network host to check (e.g. `github.com`) |
+| `--port <n>` | Network port for `--host` (default 443) |
+| `--agent <name>` | Resolve the merged (global + per-agent) policy for this agent |
+
+```bash
+gr sandbox why --path ~/.ssh/id_rsa --op read
+gr sandbox why --host github.com --port 443
+```
+
+## Remote interaction
+
+### `gr type <name-or-id> <text>` (alias: `t`)
+
+Type text into a session's PTY stdin. Appends a newline by default.
+
+| Flag | Description |
+|------|-------------|
+| `--no-newline` | Do not append a newline after the text |
+
+### `gr status [session] <message>`
+
+Set a status summary for a session, visible in the session picker overlay and `gr list`. When run inside a graith session, the session is auto-detected.
+
+| Flag | Description |
+|------|-------------|
+| `--clear` | Clear the status summary |
+| `--ttl <duration>` | Override TTL for this status update (e.g. `10m`, `1h`) |
+
+### `gr notify <message>`
+
+Send a proactive desktop/push notification via the configured `[notifications]` backend. Unlike an inbox message, a notification proactively gets the human's attention. Only the orchestrator session and the human may send notifications (plain agent sessions are rejected).
+
+| Flag | Description |
+|------|-------------|
+| `--title <text>` | Notification title (default `graith`) |
+| `--priority <level>` | `low`, `normal` (default), or `high`; `high` plays a sound and bypasses quiet hours and the rate limit |
+
+```bash
+gr notify "Morning briefing ready" --priority low
+gr notify "CI failing on main after 3 retries" --priority high
+```
+
+See [Configuration → Notifications]({{< relref "/docs/configuration/notifications.md#notifications" >}}) for backends, rate limiting, and quiet hours.

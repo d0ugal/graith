@@ -68,7 +68,7 @@ This closes the token-stripping gap: a sandboxed agent that unsets `GRAITH_TOKEN
 
 ## Interaction with sandbox
 
-Token auth and [sandbox](sandbox.md) are complementary:
+Token auth and [sandbox]({{< relref "sandbox" >}}) are complementary:
 
 - **Token auth** prevents impersonation at the protocol level — an agent with a valid token can only act as itself or its descendants
 - **Sandbox** prevents filesystem access — a sandboxed agent cannot read `state.json` (which contains all tokens) or other sessions' worktrees
