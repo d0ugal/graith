@@ -19,6 +19,28 @@ struct ApprovalsSheet: View {
 
             Divider().background(Theme.surface0)
 
+            if let error = approvals.lastError {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(Theme.red)
+                        .font(.system(size: 11))
+                    Text(error)
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundStyle(Theme.red)
+                        .lineLimit(2)
+                    Spacer()
+                    Button(action: { approvals.lastError = nil }) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 9))
+                            .foregroundStyle(Theme.overlay0)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 8)
+                .background(Theme.red.opacity(0.1))
+            }
+
             if approvals.pending.isEmpty {
                 emptyState
             } else {
@@ -101,7 +123,6 @@ struct ApprovalCard: View {
     let approval: ApprovalInfo
     let hostID: String
     @EnvironmentObject var approvals: ApprovalMonitor
-    @State private var busy = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -140,7 +161,7 @@ struct ApprovalCard: View {
                     .foregroundStyle(Theme.overlay0)
                     .lineLimit(1)
                 Spacer()
-                Button(action: { respond(.deny) }) {
+                Button(action: { approvals.respond(approval, host: hostID, decision: .deny) }) {
                     Text("Deny")
                         .foregroundStyle(Theme.red)
                         .padding(.horizontal, 14)
@@ -149,9 +170,8 @@ struct ApprovalCard: View {
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
                 .buttonStyle(.plain)
-                .disabled(busy)
 
-                Button(action: { respond(.allow) }) {
+                Button(action: { approvals.respond(approval, host: hostID, decision: .allow) }) {
                     Text("Allow")
                         .foregroundStyle(Theme.base)
                         .padding(.horizontal, 14)
@@ -160,16 +180,10 @@ struct ApprovalCard: View {
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
                 .buttonStyle(.plain)
-                .disabled(busy)
             }
         }
         .padding(12)
         .background(Theme.surface0.opacity(0.4))
         .clipShape(RoundedRectangle(cornerRadius: 8))
-    }
-
-    private func respond(_ decision: ApprovalDecision) {
-        busy = true
-        approvals.respond(approval, host: hostID, decision: decision)
     }
 }

@@ -13,10 +13,15 @@ struct LogsSheet: View {
     @State private var text = ""
     @State private var loading = true
     @State private var error: String?
+    /// Bumped per load so a slow response from an earlier fetch can't overwrite
+    /// a newer one (the shared logs RPC isn't cancellation-aware).
+    @State private var generation = 0
 
     var body: some View {
         VStack(spacing: 0) {
-            PeekHeader(title: "Logs", subtitle: session.name, reload: { Task { await load() } }) { dismiss() }
+            PeekHeader(title: "Logs", subtitle: session.name,
+                       reloadDisabled: loading,
+                       reload: { Task { await load() } }) { dismiss() }
 
             Divider().background(Theme.surface0)
 
@@ -49,11 +54,16 @@ struct LogsSheet: View {
     }
 
     private func load() async {
+        generation += 1
+        let gen = generation
         loading = true
         error = nil
         do {
-            text = try await store.fetchLogs(session)
+            let loaded = try await store.fetchLogs(session)
+            guard gen == generation else { return } // superseded by a newer load
+            text = loaded
         } catch {
+            guard gen == generation else { return }
             self.error = error.localizedDescription
         }
         loading = false
@@ -70,10 +80,14 @@ struct SnapshotSheet: View {
     @State private var snapshot: ScreenSnapshotResponseMsg?
     @State private var loading = true
     @State private var error: String?
+    /// Bumped per load so a stale response can't overwrite a newer one.
+    @State private var generation = 0
 
     var body: some View {
         VStack(spacing: 0) {
-            PeekHeader(title: "Screen Snapshot", subtitle: session.name, reload: { Task { await load() } }) { dismiss() }
+            PeekHeader(title: "Screen Snapshot", subtitle: session.name,
+                       reloadDisabled: loading,
+                       reload: { Task { await load() } }) { dismiss() }
 
             Divider().background(Theme.surface0)
 
@@ -117,11 +131,16 @@ struct SnapshotSheet: View {
     }
 
     private func load() async {
+        generation += 1
+        let gen = generation
         loading = true
         error = nil
         do {
-            snapshot = try await store.fetchSnapshot(session)
+            let loaded = try await store.fetchSnapshot(session)
+            guard gen == generation else { return } // superseded by a newer load
+            snapshot = loaded
         } catch {
+            guard gen == generation else { return }
             self.error = error.localizedDescription
         }
         loading = false
@@ -135,6 +154,7 @@ struct SnapshotSheet: View {
 struct PeekHeader: View {
     let title: String
     let subtitle: String
+    var reloadDisabled: Bool = false
     let reload: () -> Void
     let close: () -> Void
 
@@ -152,10 +172,11 @@ struct PeekHeader: View {
             Spacer()
             Button(action: reload) {
                 Image(systemName: "arrow.clockwise")
-                    .foregroundStyle(Theme.subtext0)
+                    .foregroundStyle(reloadDisabled ? Theme.overlay0 : Theme.subtext0)
                     .font(.system(size: 14))
             }
             .buttonStyle(.plain)
+            .disabled(reloadDisabled)
             .help("Reload")
             Button(action: close) {
                 Image(systemName: "xmark.circle.fill")

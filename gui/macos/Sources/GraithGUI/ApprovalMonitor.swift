@@ -17,6 +17,9 @@ import GraithRemoteKit
 @MainActor
 final class ApprovalMonitor: ObservableObject {
     @Published private(set) var pending: [ApprovalInfo] = []
+    /// The last respond failure, surfaced in the approvals panel. Cleared when
+    /// the human dismisses it or a subsequent respond succeeds.
+    @Published var lastError: String?
 
     private let store: SessionStore
     /// One subscription task per host, keyed by host id.
@@ -28,6 +31,11 @@ final class ApprovalMonitor: ObservableObject {
     /// Request IDs we've already notified about, so re-emitted lists don't
     /// re-fire banners.
     private var notified = Set<String>()
+    /// Composite `host:request` keys for approvals we've optimistically removed
+    /// and are awaiting the daemon's acknowledgement for. A stream snapshot that
+    /// still lists one is suppressed (see ``ApprovalQueue/applySnapshot``) so it
+    /// can't reappear + re-fire a banner + be answered twice mid-flight.
+    private var inFlight = Set<String>()
     private var notificationsReady = false
 
     /// Notifications need a bundle identifier; the SPM `swift run` binary has
@@ -91,7 +99,9 @@ final class ApprovalMonitor: ObservableObject {
     }
 
     private func handle(_ pending: [ApprovalInfo], host hostID: String) {
-        queue.set(pending, host: hostID)
+        // Suppress any request we've answered but not yet had acknowledged, so a
+        // snapshot mid-flight can't resurrect it.
+        queue.applySnapshot(pending, host: hostID, suppressing: inFlight)
         recomputePending()
     }
 
@@ -102,14 +112,17 @@ final class ApprovalMonitor: ObservableObject {
     /// suppress the other's banner (and collide as a SwiftUI id).
     private func recomputePending() {
         let order = store.hostClients.map { $0.host.id }
-        var currentKeys = Set<String>()
+        // The set of composite keys currently pending — derived from the same
+        // helper the unit tests exercise, so the shipped keying can't drift from
+        // what's tested.
+        let currentKeys = Set(queue.keys(order: order))
+        // The subset that's newly arrived (never notified) — needs the host +
+        // approval pair to build a banner, so it stays an explicit loop.
         var fresh: [(hostID: String, approval: ApprovalInfo)] = []
         for entry in store.hostClients {
             let hostID = entry.host.id
-            for approval in queue.byHost[hostID] ?? [] {
-                let key = "\(hostID):\(approval.requestID)"
-                currentKeys.insert(key)
-                if !notified.contains(key) { fresh.append((hostID, approval)) }
+            for approval in queue.byHost[hostID] ?? [] where !notified.contains("\(hostID):\(approval.requestID)") {
+                fresh.append((hostID, approval))
             }
         }
         let merged = queue.merged(order: order)
@@ -134,18 +147,38 @@ final class ApprovalMonitor: ObservableObject {
     }
 
     /// Answer a pending approval on its owning host. The row is removed
-    /// optimistically so the UI updates the instant the human decides; the next
-    /// stream push reconciles (and re-adds it if the daemon rejected the call).
+    /// optimistically so the UI updates the instant the human decides, and the
+    /// request is marked in-flight so a mid-flight stream snapshot can't
+    /// resurrect it. The daemon only re-broadcasts on *success* (a rejected
+    /// `approval_respond` just returns an error), so on failure we roll the row
+    /// back ourselves and surface the error rather than leaving it hidden.
     func respond(_ approval: ApprovalInfo, host hostID: String, decision: ApprovalDecision, reason: String? = nil) {
-        guard let client = store.client(forHost: hostID) else { return }
+        guard let client = store.client(forHost: hostID) else {
+            lastError = SessionStore.SessionStoreError.hostUnavailable.localizedDescription
+            return
+        }
+        let key = "\(hostID):\(approval.requestID)"
+        lastError = nil
+        inFlight.insert(key)
         queue.remove(requestID: approval.requestID, host: hostID)
         recomputePending()
         Task {
-            try? await client.respondApproval(
-                requestID: approval.requestID,
-                decision: decision.rawValue,
-                reason: reason
-            )
+            do {
+                try await client.respondApproval(
+                    requestID: approval.requestID,
+                    decision: decision.rawValue,
+                    reason: reason
+                )
+                // Accepted — the daemon's follow-up broadcast is authoritative;
+                // stop suppressing so it reconciles.
+                inFlight.remove(key)
+            } catch {
+                // Rejected — restore the row so the human can retry, and say why.
+                inFlight.remove(key)
+                queue.add(approval, host: hostID)
+                recomputePending()
+                lastError = "\(approval.toolName): \(error.localizedDescription)"
+            }
         }
     }
 

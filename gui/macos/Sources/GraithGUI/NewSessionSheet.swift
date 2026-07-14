@@ -22,6 +22,12 @@ struct NewSessionSheet: View {
 
     let agents = ["claude", "codex", "agy", "opencode"]
 
+    /// Repo names that appear more than once (same basename, different path), so
+    /// the picker knows to spell out the full path for those entries.
+    private var duplicateNames: Set<String> {
+        Dictionary(grouping: repos, by: \.name).filter { $0.value.count > 1 }.keys.reduce(into: Set()) { $0.insert($1) }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             // Header
@@ -84,10 +90,18 @@ struct NewSessionSheet: View {
                                         Button {
                                             repoPath = repo.path
                                         } label: {
+                                            // The daemon dedupes by path, not
+                                            // name, so two repos can share a
+                                            // basename — show the path to
+                                            // disambiguate those, and mark recent
+                                            // ones with a clock.
+                                            let label = duplicateNames.contains(repo.name)
+                                                ? "\(repo.name) — \(repo.path)"
+                                                : repo.name
                                             if repo.recent ?? false {
-                                                Label(repo.name, systemImage: "clock")
+                                                Label(label, systemImage: "clock")
                                             } else {
-                                                Text(repo.name)
+                                                Text(label)
                                             }
                                         }
                                     }
@@ -187,9 +201,18 @@ struct NewSessionSheet: View {
 
     /// Load the selected host's repo list for the picker. Failures leave `repos`
     /// empty, so the form silently falls back to the free-text path field.
+    ///
+    /// A slow `repo_list` for one host must not overwrite another's menu after a
+    /// quick host switch: the shared RPC's reply continuation isn't cancelled by
+    /// task cancellation, so we snapshot the requested host and drop a late
+    /// response that no longer matches the selection (mirrors the iOS guard).
     private func loadRepos() async {
+        let requestedHostID = selectedHostID
+        repos = [] // clear stale entries so none can be picked mid-load
         loadingRepos = true
-        repos = await store.fetchRepos(hostID: selectedHostID)
+        let loaded = await store.fetchRepos(hostID: requestedHostID)
+        guard requestedHostID == selectedHostID else { return }
+        repos = loaded
         loadingRepos = false
     }
 
