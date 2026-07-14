@@ -38,6 +38,44 @@ func resolveGrBin() string {
 	return "gr"
 }
 
+// preToolUseExemptTools is the explicit set of read-only Claude tools excluded
+// from the PreToolUse approval hook. Keep it small and known-safe.
+var preToolUseExemptTools = []string{"Read", "Glob", "Grep", "LS", "NotebookRead"}
+
+// preToolUseMatcher builds the Claude hook matcher for the PreToolUse group.
+//
+// It is an anchored negative lookahead that fires the hook for every tool
+// EXCEPT preToolUseExemptTools. This is deliberately an EXCLUSION, not an
+// allowlist, so it fails CLOSED: any tool not named here — a new or renamed
+// Claude tool, every mutating tool (Bash/Write/Edit/MultiEdit/NotebookEdit/
+// WebFetch/WebSearch/Task), and every MCP tool (mcp__*) — still routes to the
+// daemon's approve-request round-trip, keeping the approval backend and the
+// yolo dangerous-command blocklist in force for anything unrecognised.
+// TodoWrite is NOT exempt: it mutates state.
+//
+// The leading ^ anchor and trailing . are both load-bearing. Claude evaluates
+// the matcher as a JS regex with search-anywhere (.test) semantics, not a
+// full-string anchored match. The ^ pins the negative lookahead to position 0,
+// and the trailing . forces the match to consume the first character there — so
+// the only strings that fail to match are exactly the exempt names (the
+// lookahead rejects them). Without the anchor the zero-width lookahead would
+// succeed at a later offset and fire (fail-open) even for an exempt tool.
+//
+// SAFETY: this scoping is correct only while approval policy is tool-name
+// based. If a backend ever grows path-aware rules (e.g. "deny Read of
+// ~/.ssh/**"), excluding Read here would silently bypass them — revisit the
+// exclusion set if approval policy becomes path-aware.
+//
+// No *Claude* hook sends a PreToolUse report-status (Claude's PreToolUse only
+// runs approve-request), so scoping loses no Claude "active" signal —
+// PostToolUse drives the per-tool active heartbeat. (Codex DOES send a
+// pre-tool-use report-status, and HandleHookReport is agent-agnostic, so that
+// mapping stays live for Codex.) Don't "restore" a match-all matcher thinking
+// status needs it.
+func preToolUseMatcher() string {
+	return "^(?!(" + strings.Join(preToolUseExemptTools, "|") + ")$)."
+}
+
 // generateClaudeSettings writes a Claude Code settings JSON file that registers
 // hooks for all relevant lifecycle events. Returns the path to the settings file.
 // All supported hooks are generated including PreToolUse (approve-request) and
@@ -87,12 +125,17 @@ func (sm *SessionManager) generateClaudeSettings(sessionID string, yolo bool) (s
 	for _, event := range events {
 		var handlers []hookHandler
 
+		// Default to a match-all (empty) matcher; PreToolUse narrows it to
+		// exclude the known read-only tools (fail-closed — see preToolUseMatcher).
+		matcher := ""
+
 		switch event {
 		case "PreToolUse":
 			if !hookEnabled {
 				continue
 			}
 
+			matcher = preToolUseMatcher()
 			handlers = []hookHandler{
 				{Type: "command", Command: fmt.Sprintf("%s approve-request", quoted)},
 			}
@@ -109,7 +152,7 @@ func (sm *SessionManager) generateClaudeSettings(sessionID string, yolo bool) (s
 
 		settings.Hooks[event] = []matcherGroup{
 			{
-				Matcher: "",
+				Matcher: matcher,
 				Hooks:   handlers,
 			},
 		}

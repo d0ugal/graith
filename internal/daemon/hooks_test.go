@@ -75,8 +75,15 @@ func TestGenerateClaudeSettings(t *testing.T) {
 			continue
 		}
 
-		if matchers[0].Matcher != "" {
-			t.Errorf("event %q matcher = %q, want empty (match-all)", event, matchers[0].Matcher)
+		// PreToolUse is scoped to exclude read-only tools (fail-closed); every
+		// other event stays match-all (empty matcher).
+		wantMatcher := ""
+		if event == "PreToolUse" {
+			wantMatcher = preToolUseMatcher()
+		}
+
+		if matchers[0].Matcher != wantMatcher {
+			t.Errorf("event %q matcher = %q, want %q", event, matchers[0].Matcher, wantMatcher)
 		}
 
 		for _, hook := range matchers[0].Hooks {
@@ -1179,5 +1186,114 @@ func TestInjectCursorHooksApprovalsDisabled(t *testing.T) {
 
 	if strings.Contains(string(data), "approve-request") {
 		t.Error("cursor hooks contain approve-request when approvals disabled")
+	}
+}
+
+// TestPreToolUseMatcher verifies the PreToolUse approval hook is scoped to
+// exclude a known read-only set (fail-closed): the matcher is an anchored
+// negative lookahead over exactly that set, and every other tool — mutating,
+// MCP, or unknown/new — still routes to the daemon.
+func TestPreToolUseMatcher(t *testing.T) {
+	// Exact string: guards the anchor (^), the trailing "." and the exact
+	// exempt set all at once. Dropping the anchor or widening the set would be
+	// a fail-open regression, so pin the literal.
+	want := `^(?!(Read|Glob|Grep|LS|NotebookRead)$).`
+	if got := preToolUseMatcher(); got != want {
+		t.Fatalf("preToolUseMatcher() = %q, want %q", got, want)
+	}
+
+	// The matcher semantic is "fire for every tool NOT exactly in the exempt
+	// set". Membership in preToolUseExemptTools is that semantic; this table
+	// documents which tools skip the round-trip and, crucially, that mutating,
+	// MCP, and unknown tools do not.
+	inExempt := func(name string) bool {
+		for _, e := range preToolUseExemptTools {
+			if e == name {
+				return true
+			}
+		}
+
+		return false
+	}
+
+	cases := []struct {
+		tool         string
+		wantExcluded bool
+	}{
+		// Read-only set: excluded (hook skipped).
+		{"Read", true},
+		{"Glob", true},
+		{"Grep", true},
+		{"LS", true},
+		{"NotebookRead", true},
+		// Mutating tools: still route.
+		{"Bash", false},
+		{"Write", false},
+		{"Edit", false},
+		{"MultiEdit", false},
+		{"NotebookEdit", false},
+		{"WebFetch", false},
+		{"WebSearch", false},
+		{"Task", false},
+		// TodoWrite mutates state — explicitly NOT exempt.
+		{"TodoWrite", false},
+		// MCP tools always route (fail-closed).
+		{"mcp__memory__create", false},
+		{"mcp__chrome-devtools__click", false},
+		// Unknown / renamed tools route (fail-closed).
+		{"SomeFutureTool", false},
+		{"ReadFile", false}, // superstring of Read must not be excluded
+	}
+
+	for _, tc := range cases {
+		if got := inExempt(tc.tool); got != tc.wantExcluded {
+			t.Errorf("tool %q excluded = %v, want %v", tc.tool, got, tc.wantExcluded)
+		}
+	}
+}
+
+// TestGenerateClaudeSettingsPreToolUseScoped verifies the generated settings
+// file carries the scoped matcher on the PreToolUse group.
+func TestGenerateClaudeSettingsPreToolUseScoped(t *testing.T) {
+	sm := newTestSessionManagerWithDataDir(t)
+
+	settingsPath, err := sm.generateClaudeSettings("canny-scope", false)
+	if err != nil {
+		t.Fatalf("generateClaudeSettings() error = %v", err)
+	}
+
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("read settings: %v", err)
+	}
+
+	var parsed struct {
+		Hooks map[string][]struct {
+			Matcher string `json:"matcher"`
+		} `json:"hooks"`
+	}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("unmarshal settings: %v", err)
+	}
+
+	pre, ok := parsed.Hooks["PreToolUse"]
+	if !ok || len(pre) != 1 {
+		t.Fatalf("PreToolUse group = %v, want exactly one", pre)
+	}
+
+	if pre[0].Matcher != preToolUseMatcher() {
+		t.Errorf("PreToolUse matcher = %q, want %q", pre[0].Matcher, preToolUseMatcher())
+	}
+
+	// Every other event stays match-all (empty matcher).
+	for _, event := range []string{"SessionStart", "UserPromptSubmit", "PostToolUse", "Notification", "Stop"} {
+		g, ok := parsed.Hooks[event]
+		if !ok || len(g) != 1 {
+			t.Fatalf("event %q group = %v, want exactly one", event, g)
+		}
+
+		if g[0].Matcher != "" {
+			t.Errorf("event %q matcher = %q, want empty", event, g[0].Matcher)
+		}
 	}
 }
