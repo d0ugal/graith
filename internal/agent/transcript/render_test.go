@@ -94,3 +94,47 @@ func TestBuildSeedPrompt(t *testing.T) {
 		t.Error("seed prompt should frame content as historical")
 	}
 }
+
+// TestRenderForkHeader verifies the fork framing differs from migrate: it must
+// NOT claim the working tree already contains prior changes (a fork branches
+// from base), and must tell the agent the worktree is fresh.
+func TestRenderForkHeader(t *testing.T) {
+	c := &Conversation{
+		SrcAgent: "claude",
+		Turns:    []Turn{{Role: RoleUser, Text: "fix the bothy"}},
+	}
+
+	fork := c.Render(RenderOptions{Kind: RenderFork})
+	if !strings.Contains(fork, "Forked conversation context") {
+		t.Error("fork render missing fork header")
+	}
+
+	if strings.Contains(fork, "working tree already contains") {
+		t.Error("fork render must not claim the working tree contains prior changes")
+	}
+
+	if !strings.Contains(fork, "FRESH worktree") {
+		t.Error("fork render should tell the agent the worktree is fresh")
+	}
+
+	// The default (migrate) render keeps its own framing.
+	migrate := c.Render(RenderOptions{})
+	if !strings.Contains(migrate, "migrated to a different agent") {
+		t.Error("default render should keep the migrate header")
+	}
+}
+
+func TestBuildForkSeedPrompt(t *testing.T) {
+	p := BuildForkSeedPrompt("codex", "/tmp/x/fork-abc/context.md")
+	if !strings.Contains(p, "codex") || !strings.Contains(p, "/tmp/x/fork-abc/context.md") {
+		t.Errorf("fork seed prompt missing details: %q", p)
+	}
+
+	if !strings.Contains(p, "NOT present on disk") {
+		t.Error("fork seed prompt must warn that prior code changes are absent")
+	}
+
+	if !strings.Contains(p, "past context") {
+		t.Error("fork seed prompt should frame content as historical")
+	}
+}

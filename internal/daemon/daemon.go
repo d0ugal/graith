@@ -1671,12 +1671,30 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	return result, nil
 }
 
-// Fork creates a new session that branches from an existing session's git state
-// and uses the agent's fork_args to carry over the conversation history.
-//
-// Uses three-phase locking like Create to avoid holding the mutex during
-// git fetch and PTY spawn.
+// Fork creates a new session/worktree that natively continues the source
+// agent's conversation (same agent type), using the agent's fork_args to carry
+// over the history. It is a thin wrapper over ForkWithAgent with no override.
 func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) (SessionState, error) {
+	return sm.ForkWithAgent(name, sourceSessionID, "", "", rows, cols)
+}
+
+// ForkWithAgent forks a session into a new worktree. When targetAgent is empty
+// or equal to the source's agent, this is a native same-agent fork (the source
+// agent's conversation is resumed via fork_args). When targetAgent differs, it
+// is a CROSS-AGENT fork: the source's on-disk conversation is rendered to a
+// neutral Markdown file and the new agent is seeded with it (reusing the
+// migration reader/renderer), while the source session keeps running.
+//
+// Git state: like any fork, the new worktree branches from the base branch, so
+// the source's uncommitted edits are dropped. For a cross-agent fork the seed
+// prompt says so explicitly (BuildForkSeedPrompt).
+//
+// Uses three-phase locking like Create to avoid holding the mutex during git
+// fetch and PTY spawn.
+//
+// See docs/design/2026-06-24-cross-agent-conversation-migration-design.md
+// ("Future: cross-agent fork").
+func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targetModel string, rows, cols uint16) (SessionState, error) {
 	if err := ValidateSessionName(name); err != nil {
 		return SessionState{}, err
 	}
@@ -1686,12 +1704,37 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 	cfgSnapshot := sm.cfg
 	source, sourceOk := sm.state.Sessions[sourceSessionID]
 
-	var sourceRepoPath string
+	var (
+		sourceRepoPath string
+		srcAgentPre    string
+	)
+
 	if sourceOk {
 		sourceRepoPath = source.RepoPath
+		srcAgentPre = source.Agent
 	}
 
 	sm.mu.RUnlock()
+
+	// Validate the target model outside the lock — validateModel may exec an
+	// external validator (up to a 10s timeout), and holding sm.mu across it would
+	// freeze the whole control plane (Create/Migrate validate pre-lock too). The
+	// cheap agent/transcript checks are re-done under the lock below.
+	crossAgentPre := targetAgent != "" && sourceOk && targetAgent != srcAgentPre
+	if targetModel != "" && !crossAgentPre {
+		return SessionState{}, fmt.Errorf("--model requires forking to a different agent (--agent); it is ignored for a same-agent fork")
+	}
+
+	if crossAgentPre && targetModel != "" {
+		tgtCfg, ok := cfgSnapshot.Agents[targetAgent]
+		if !ok {
+			return SessionState{}, fmt.Errorf("unknown target agent %q", targetAgent)
+		}
+
+		if err := validateModel(tgtCfg, targetModel); err != nil {
+			return SessionState{}, err
+		}
+	}
 
 	preUsername := cfgSnapshot.GitHubUsername
 	if preUsername == "" && sourceRepoPath != "" {
@@ -1741,12 +1784,36 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 		return SessionState{}, fmt.Errorf("cannot fork session %q: repo %q has singleton = true — stop the source session first or remove the singleton constraint", source.Name, source.RepoPath)
 	}
 
-	agentName := source.Agent
+	srcAgent := source.Agent
+	srcWorktree := source.WorktreePath
+
+	// A cross-agent fork changes the agent type; empty or equal to the source is
+	// a native same-agent fork.
+	crossAgent := targetAgent != "" && targetAgent != srcAgent
+
+	agentName := srcAgent
+	if crossAgent {
+		agentName = targetAgent
+	}
 
 	agent, ok := sm.cfg.Agents[agentName]
 	if !ok {
 		sm.mu.Unlock()
+
+		if crossAgent {
+			return SessionState{}, fmt.Errorf("unknown target agent %q", agentName)
+		}
+
 		return SessionState{}, fmt.Errorf("unknown agent %q", agentName)
+	}
+
+	if crossAgent {
+		// The source's conversation must be readable to seed the new agent.
+		// (targetModel was validated pre-lock to avoid exec under sm.mu.)
+		if !transcript.Supported(srcAgent) {
+			sm.mu.Unlock()
+			return SessionState{}, fmt.Errorf("cannot fork session %q to agent %q: forking from %q is not supported (no transcript reader)", source.Name, targetAgent, srcAgent)
+		}
 	}
 
 	id := generateID()
@@ -1760,7 +1827,15 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 	repoRoot := source.RepoPath
 	repoName := source.RepoName
 	baseBranch := source.BaseBranch
+	// A same-agent fork inherits the source model; a cross-agent fork uses the
+	// requested target model (empty = the target agent's default).
 	sourceModel := source.Model
+
+	effectiveModel := sourceModel
+	if crossAgent {
+		effectiveModel = targetModel
+	}
+
 	sourceAgentSessionID := source.AgentSessionID
 	sourceYolo := source.Yolo
 	// Yolo forces agent hooks on (see Create) so a forked yolo session always
@@ -1816,7 +1891,7 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 		BaseBranch:      baseBranch,
 		Agent:           agentName,
 		AgentSessionID:  agentSessionID,
-		Model:           sourceModel,
+		Model:           effectiveModel,
 		AgentHooks:      sourceAgentHooks,
 		Yolo:            sourceYolo,
 		Status:          StatusCreating,
@@ -1838,6 +1913,15 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 	// --- Phase 2: Git setup and PTY spawn (no lock) ---
 	var forkIncludes []IncludedRepoState
 
+	// Cross-agent fork: rendered source conversation + its staging dir + the
+	// seed prompt pointing the new agent at it. Empty for a same-agent fork.
+	var (
+		forkContextDir       string
+		forkContextPath      string
+		seedPrompt           string
+		forkContextCommitted bool
+	)
+
 	forkCleanup := func() {
 		sm.cleanupHooks(id, agentName, worktreePath)
 		// See cleanupOnError in Create: remove any nono profile Wrap wrote
@@ -1856,6 +1940,57 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 		delete(sm.state.Sessions, id)
 		_ = sm.saveState()
 		sm.mu.Unlock()
+	}
+
+	// Guarantee the staged context dir is removed on ANY early return before the
+	// Phase 3 commit — not every failure path calls forkCleanup (git-setup errors
+	// call only rollbackState), and a leaked dir holds the full source
+	// conversation. Disarmed only once the swap is persisted (forkContextCommitted).
+	defer func() {
+		if forkContextDir != "" && !forkContextCommitted {
+			_ = os.RemoveAll(forkContextDir)
+		}
+	}()
+
+	// --- Phase 1.5: render + stage the source transcript (cross-agent only) ---
+	// Done before the (expensive) git worktree setup so a doomed cross-agent
+	// fork — unsupported/missing/empty source transcript — fails fast. The
+	// source session keeps running throughout; we only read its on-disk history.
+	if crossAgent {
+		conv, err := transcript.Read(srcAgent, sourceAgentSessionID, srcWorktree)
+		if err != nil {
+			rollbackState()
+			return SessionState{}, fmt.Errorf("read source transcript: %w", err)
+		}
+
+		rendered := conv.Render(transcript.RenderOptions{Kind: transcript.RenderFork})
+
+		tmpDir, err := sm.repoTmpDir(repoRoot)
+		if err != nil {
+			rollbackState()
+			return SessionState{}, err
+		}
+
+		// Staged in a per-session subdir under the repo tmp dir (already on the
+		// new session's sandbox write-list, so the target can read it). NOTE: this
+		// does NOT isolate the file from sibling sessions on the same repo — they
+		// share GRAITH_TMPDIR and run as the same user, so 0o700/0o600 don't gate
+		// them. The subdir is for tidy per-session cleanup, not confidentiality.
+		// Same trade-off as Migrate's migrate-<id> dir; true isolation would need
+		// a per-session grant outside the shared root (tracked separately).
+		forkContextDir = filepath.Join(tmpDir, "fork-"+id)
+		if err := os.MkdirAll(forkContextDir, 0o700); err != nil {
+			rollbackState()
+			return SessionState{}, fmt.Errorf("create fork context dir: %w", err)
+		}
+
+		forkContextPath = filepath.Join(forkContextDir, "context.md")
+		if err := writeFileAtomic(forkContextPath, []byte(rendered)); err != nil {
+			rollbackState()
+			return SessionState{}, fmt.Errorf("write fork context: %w", err)
+		}
+
+		seedPrompt = transcript.BuildForkSeedPrompt(srcAgent, forkContextPath)
 	}
 
 	gitCtx, gitCancel := context.WithTimeout(context.Background(), gitFetchTimeout)
@@ -1894,26 +2029,42 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 		}
 	}
 
+	// For a cross-agent fork the source's native id belongs to a different agent
+	// and is meaningless to the target, so it never templates into the target's
+	// args; the model is the requested target model.
+	forkSourceID := sourceAgentSessionID
+	if crossAgent {
+		forkSourceID = ""
+	}
+
 	vars := config.TemplateVars{
 		Username:                 preUsername,
 		AgentSessionID:           agentSessionID,
 		SessionName:              name,
 		SessionID:                id,
 		WorktreePath:             worktreePath,
-		ForkSourceAgentSessionID: sourceAgentSessionID,
-		Model:                    sourceModel,
+		ForkSourceAgentSessionID: forkSourceID,
+		Model:                    effectiveModel,
 	}
 
-	args := agent.ForkArgs
-	if len(args) == 0 {
+	var args []string
+	if crossAgent {
+		// A cross-agent fork cannot natively resume the source's conversation, so
+		// start the target fresh (agent.Args, not fork_args) and seed it with the
+		// rendered history via seedPrompt below.
 		args = agent.Args
-	}
-	// Empty-source guard: if fork_args templates the source's native id but the
-	// source never captured one (e.g. a pre-feature or capture-timed-out Codex
-	// session), expanding would emit a literal empty arg (`codex fork ""`).
-	// Start a fresh conversation instead; capture below records the new id.
-	if argsNeedForkSourceID(args) && sourceAgentSessionID == "" {
-		args = agent.Args
+	} else {
+		args = agent.ForkArgs
+		if len(args) == 0 {
+			args = agent.Args
+		}
+		// Empty-source guard: if fork_args templates the source's native id but the
+		// source never captured one (e.g. a pre-feature or capture-timed-out Codex
+		// session), expanding would emit a literal empty arg (`codex fork ""`).
+		// Start a fresh conversation instead; capture below records the new id.
+		if argsNeedForkSourceID(args) && sourceAgentSessionID == "" {
+			args = agent.Args
+		}
 	}
 
 	expandedArgs, err := config.ExpandSlice(args, vars)
@@ -1997,6 +2148,14 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 		} else {
 			expandedArgs = append(expandedArgs, promptArgs...)
 		}
+	}
+
+	// Cross-agent fork seed: the rendered-history pointer is delivered as the new
+	// agent's opening positional prompt (like `gr new --prompt`). Appended after
+	// any injected prompt but before includeAddDirArgs, because Claude's variadic
+	// --add-dir would otherwise swallow it as another directory (see Create).
+	if seedPrompt != "" {
+		expandedArgs = append(expandedArgs, seedPrompt)
 	}
 
 	// Make each included repo's forked worktree visible to the agent via
@@ -2121,6 +2280,20 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 		SandboxConfig: cfgSnapshot.Sandbox.Merge(agent.Sandbox),
 	}
 
+	// Record cross-agent provenance (surfaced via SessionInfo.MigratedFrom) and,
+	// crucially, the RenderedPath so the staged context file is cleaned up on
+	// delete (removeMigrationContext keys off it). MigrationInfo is shared with
+	// Migrate; a fork is distinguished by having a live ParentID.
+	if crossAgent {
+		sessState.MigratedFrom = &MigrationInfo{
+			Agent:          srcAgent,
+			Model:          sourceModel,
+			AgentSessionID: sourceAgentSessionID,
+			RenderedPath:   forkContextPath,
+			At:             time.Now().UTC(),
+		}
+	}
+
 	sm.sessions[id] = ptySess
 	sm.tokenIndex[token] = id
 
@@ -2143,6 +2316,10 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 
 		return SessionState{}, fmt.Errorf("persist session state: %w", err)
 	}
+
+	// The swap is persisted: the staged context is now owned by the session
+	// (cleaned up on delete), so disarm the early-return cleanup guard.
+	forkContextCommitted = true
 
 	result := cloneSessionState(sessState)
 	sm.mu.Unlock()

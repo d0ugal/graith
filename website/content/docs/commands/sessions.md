@@ -85,10 +85,14 @@ Delete a session. Kills the agent process, removes the worktree, and deletes the
 
 ## `gr fork <source-session> <new-name>`
 
-Fork a session. Creates a new worktree (from the source session's branch), a new branch, and a new agent process. If the agent has `fork_args` configured, the new agent inherits the source agent's conversation history.
+Fork a session. Creates a new worktree, a new branch, and a new agent process while the original session keeps running. If the agent has `fork_args` configured, the new agent inherits the source agent's conversation history.
+
+With `--agent <target>` this becomes a **cross-agent fork**: the source's conversation is rendered to a neutral context file (reusing the migration reader/renderer) and the new agent — a *different* agent type — is seeded with it. Unlike `gr migrate` (which swaps the agent in place, keeping the worktree), a fork creates a new worktree branched from the base branch, so the source's changes — **uncommitted edits and any commits on its branch — are not carried over**. Claude and Codex are supported as fork *sources*; any configured agent can be a *target*.
 
 | Flag | Description |
 |------|-------------|
+| `--agent <name>` | Fork into a different agent, seeding it with the source's conversation history (cross-agent fork) |
+| `--model <model>` | Model for the target agent (cross-agent fork only; default: the target's default) |
 | `--background` | Fork without attaching |
 
 ## `gr migrate <name-or-id>`
