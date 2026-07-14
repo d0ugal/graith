@@ -424,6 +424,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					SkipModelValidation: c.SkipModelValidation,
 					Yolo:                c.Yolo,
 					Headless:            c.Headless,
+					NoFetch:             c.NoFetch,
 					Rows:                clientRows,
 					Cols:                clientCols,
 				})

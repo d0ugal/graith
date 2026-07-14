@@ -816,6 +816,11 @@ type CreateOpts struct {
 	// headless_capable and [headless] experimental is enabled; otherwise Create
 	// fails closed rather than silently downgrading. See resolveDriverKind.
 	Headless bool
+	// NoFetch skips the `git fetch origin` that normally runs before the
+	// worktree is created (issue #1012), so a session can be created from local
+	// repo state when SSH auth is unavailable (Secretive/biometric, offline).
+	// It overrides fetch_on_create for this one creation only.
+	NoFetch  bool
 	Rows     uint16
 	Cols     uint16
 	EnvExtra []map[string]string
@@ -1069,7 +1074,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 			worktreePath = sessionDir
 		}
 
-		fetchOnCreate = sm.cfg.FetchOnCreate
+		fetchOnCreate = sm.cfg.FetchOnCreate && !opts.NoFetch
 	}
 
 	agentSessionID := ""

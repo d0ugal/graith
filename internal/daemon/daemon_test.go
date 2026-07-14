@@ -130,6 +130,11 @@ func newSMWithConfig(t *testing.T, cfg *config.Config) *SessionManager {
 		DataDir:    dir,
 		LogDir:     dir,
 		RuntimeDir: dir,
+		// TmpDir must be a real path under the test's temp root — an empty
+		// TmpDir makes repoTmpDir join to a relative "repoName/hash" path off
+		// the process cwd, which pollutes the source tree in a writable
+		// checkout and fails "operation not permitted" in a read-only one.
+		TmpDir: filepath.Join(dir, "tmp"),
 	}, slog.Default())
 }
 
@@ -3196,6 +3201,59 @@ func TestCreateInPlaceConfigAllowConcurrent(t *testing.T) {
 	if err != nil && strings.Contains(err.Error(), "already running") {
 		t.Fatalf("config allow_concurrent should bypass concurrent check, got: %v", err)
 	}
+}
+
+// TestCreateNoFetchSkipsFetch is the regression test for #1012: `gr new
+// --no-fetch` must skip the `git fetch origin` that normally runs before the
+// worktree is created, so a session can be created from local repo state when
+// SSH auth is unavailable (Secretive/biometric, offline). The repo has an
+// origin remote pointing at a path that can't be fetched, so a real fetch
+// fails — proving the flag is what let creation through.
+func TestCreateNoFetchSkipsFetch(t *testing.T) {
+	repoDir := initTempGitRepo(t)
+
+	// A remote that exists (so HasRemote(origin) is true) but can't be fetched.
+	gitRun(t, repoDir, "remote", "add", "origin", filepath.Join(t.TempDir(), "nonexistent.git"))
+
+	cfg := config.Default()
+	cfg.FetchOnCreate = true // fetch is on; only --no-fetch should suppress it
+	cfg.Agents["sleeper"] = config.Agent{
+		Command: "sleep",
+		Args:    []string{"60"},
+	}
+
+	t.Run("no-fetch skips the failing fetch", func(t *testing.T) {
+		sm := newSMWithConfig(t, cfg)
+
+		sess, err := sm.Create(CreateOpts{Name: "braw", AgentName: "sleeper", RepoPath: repoDir, NoFetch: true, Rows: 24, Cols: 80})
+		if err != nil {
+			t.Fatalf("Create with NoFetch should skip the fetch and succeed, got: %v", err)
+		}
+
+		t.Cleanup(func() {
+			sm.mu.RLock()
+			live, ok := sm.sessions[sess.ID]
+			sm.mu.RUnlock()
+
+			if ok {
+				_ = live.Kill()
+				live.Close()
+			}
+
+			if sess.WorktreePath != "" {
+				cmd := testutil.GitCommand("worktree", "remove", "--force", sess.WorktreePath)
+				cmd.Dir = repoDir
+				_ = cmd.Run()
+			}
+		})
+	})
+
+	t.Run("without no-fetch the fetch runs and fails", func(t *testing.T) {
+		sm := newSMWithConfig(t, cfg)
+
+		_, err := sm.Create(CreateOpts{Name: "dreich", AgentName: "sleeper", RepoPath: repoDir, Rows: 24, Cols: 80})
+		assertErrContains(t, err, "fetch")
+	})
 }
 
 func TestDeleteInPlaceLeavesState(t *testing.T) {

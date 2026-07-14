@@ -25,12 +25,15 @@ Create a new agent session.
 | `--prompt-file <path>` | Read initial prompt from file |
 | `-m, --model <name>` | Model for the agent (expands `{model}` in agent args) |
 | `--headless` | Run the agent headless (stream-json) instead of an interactive PTY, for fire-and-forget sessions (experimental; Claude only) |
+| `--no-fetch` | Skip `git fetch origin` and create the worktree from local repo state |
+
+The `--no-fetch` flag skips the `git fetch origin` step that normally runs before the worktree is created, overriding `fetch_on_create` for that one session. Use it when SSH auth is unavailable (e.g. a biometric/Secretive agent that can't sign non-interactively) or when you're offline — the worktree is then created from whatever the local repo already has.
 
 The `--headless` flag runs the agent in Claude Code's stream-json mode rather than an interactive terminal — suited to fire-and-forget sessions no human will attach to (tribunal judges, trigger briefings). graith parses the typed event stream, so `gr logs -f` shows rendered output and the run's cost/token usage is captured from the result envelope. It is **experimental** and inert unless `[headless] experimental = true` is set in config; it is Claude-only in v1, requires a prompt (`-p`), runs one-shot (one prompt, run to completion, exit), and is **incompatible with the sandbox** in v1 (a `--headless` request with the sandbox enabled is an error). Asking for `--headless` on an agent that can't do it is an error, not a silent downgrade to PTY. Because a headless session can't be attached, `--headless` implies `--background`. See [Configuration → Headless sessions]({{< relref "/docs/configuration/sessions.md#headless-sessions" >}}) and [Session Lifecycle → Headless sessions]({{< relref "/docs/sessions.md#headless-sessions" >}}).
 
 When a session is created:
 
-1. Fetches origin (if `fetch_on_create` is true)
+1. Fetches origin (if `fetch_on_create` is true and `--no-fetch` was not given)
 2. Creates branch `<branch_prefix>/<session-name>-<session-id>` from the base branch
 3. Creates a worktree at `<data_dir>/worktrees/<repo-name>/<repo-hash>/<session-id>/`
 4. Starts the agent process in the worktree
