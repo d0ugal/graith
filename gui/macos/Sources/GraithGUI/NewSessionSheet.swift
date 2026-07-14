@@ -1,4 +1,5 @@
 import SwiftUI
+import GraithProtocol
 
 struct NewSessionSheet: View {
     @EnvironmentObject var store: SessionStore
@@ -14,6 +15,10 @@ struct NewSessionSheet: View {
     @State private var isCreating = false
     @State private var error: String?
     @State private var selectedHostID = "local"
+    /// Repos the selected host offers (design §C.4). Populated on appear / host
+    /// change; the free-text field remains for paths the daemon didn't list.
+    @State private var repos: [RepoEntry] = []
+    @State private var loadingRepos = false
 
     let agents = ["claude", "codex", "agy", "opencode"]
 
@@ -62,12 +67,40 @@ struct NewSessionSheet: View {
                 }
 
                 FormField(label: "Repository") {
-                    TextField("~/Code/project (default: cwd)", text: $repoPath)
-                        .textFieldStyle(.plain)
-                        .font(.system(.body, design: .monospaced))
-                        .padding(8)
-                        .background(Theme.crust)
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 8) {
+                            TextField("~/Code/project (default: cwd)", text: $repoPath)
+                                .textFieldStyle(.plain)
+                                .font(.system(.body, design: .monospaced))
+                                .padding(8)
+                                .background(Theme.crust)
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+
+                            if loadingRepos {
+                                ProgressView().controlSize(.small)
+                            } else if !repos.isEmpty {
+                                Menu {
+                                    ForEach(repos) { repo in
+                                        Button {
+                                            repoPath = repo.path
+                                        } label: {
+                                            if repo.recent ?? false {
+                                                Label(repo.name, systemImage: "clock")
+                                            } else {
+                                                Text(repo.name)
+                                            }
+                                        }
+                                    }
+                                } label: {
+                                    Image(systemName: "folder")
+                                        .font(.system(size: 13))
+                                }
+                                .menuStyle(.borderlessButton)
+                                .frame(width: 28)
+                                .help("Pick a repository the daemon knows about")
+                            }
+                        }
+                    }
                 }
 
                 FormField(label: "Agent") {
@@ -149,6 +182,15 @@ struct NewSessionSheet: View {
         .frame(width: 480, height: 520)
         .background(Theme.mantle)
         .onAppear { agent = defaultAgent }
+        .task(id: selectedHostID) { await loadRepos() }
+    }
+
+    /// Load the selected host's repo list for the picker. Failures leave `repos`
+    /// empty, so the form silently falls back to the free-text path field.
+    private func loadRepos() async {
+        loadingRepos = true
+        repos = await store.fetchRepos(hostID: selectedHostID)
+        loadingRepos = false
     }
 
     func createSession() {

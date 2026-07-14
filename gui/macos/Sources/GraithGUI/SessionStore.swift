@@ -439,6 +439,42 @@ class SessionStore: ObservableObject {
         }
     }
 
+    // MARK: - Read-only peeks (logs, screen snapshot, repo list)
+
+    /// Fetch the tail of a session's scrollback as plain text (a non-attaching
+    /// peek). Routes to the session's owning host client.
+    func fetchLogs(_ session: Session, lines: Int = 500) async throws -> String {
+        guard let client = client(for: session.id) else { throw SessionStoreError.hostUnavailable }
+        return try await client.logs(sessionID: session.id, lines: lines)
+    }
+
+    /// Fetch a one-shot render of a session's current screen (no attach, no
+    /// desktop kick).
+    func fetchSnapshot(_ session: Session) async throws -> ScreenSnapshotResponseMsg {
+        guard let client = client(for: session.id) else { throw SessionStoreError.hostUnavailable }
+        return try await client.screenSnapshot(sessionID: session.id)
+    }
+
+    /// The repositories a host offers for session creation, recent-first
+    /// (design §C.4 — the app can't pass a local cwd). Failures surface as an
+    /// empty list so the create form falls back to the free-text path field.
+    func fetchRepos(hostID: String = "local") async -> [RepoEntry] {
+        guard let client = clients[hostID] else { return [] }
+        let repos = (try? await client.repoList()) ?? []
+        return Self.orderedRepos(repos)
+    }
+
+    /// Order repos recent-first, then alphabetically by name — a stable order
+    /// for the picker regardless of how the daemon returned them.
+    static func orderedRepos(_ repos: [RepoEntry]) -> [RepoEntry] {
+        repos.sorted { lhs, rhs in
+            let lRecent = lhs.recent ?? false
+            let rRecent = rhs.recent ?? false
+            if lRecent != rRecent { return lRecent }
+            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+        }
+    }
+
     // MARK: - Font Size
 
     func increaseFontSize() {
