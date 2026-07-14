@@ -485,6 +485,9 @@ struct SessionRow: View {
                         .font(.system(.body, design: .monospaced))
                         .foregroundStyle(isHighlighted ? Theme.text : Theme.subtext1)
                         .lineLimit(1)
+                        // Keep the name from being squeezed by the trailing
+                        // agent badge + mode glyphs in a narrow sidebar.
+                        .layoutPriority(1)
 
                     // Agent type badge (compact, inline)
                     Text(session.agent)
@@ -532,10 +535,11 @@ struct SessionRow: View {
                 }
 
                 // Metadata line: PR/CI badges (issue #901) plus dirty/ahead.
-                if session.pullRequest != nil || session.ci != nil || !metadataSubtitle.isEmpty {
+                let showsCI = shouldShowCI(pr: session.pullRequest, ci: session.ci)
+                if session.pullRequest != nil || showsCI || !metadataSubtitle.isEmpty {
                     HStack(spacing: 6) {
                         if let pr = session.pullRequest { PRBadge(pr: pr) }
-                        if let ci = session.ci { CIBadge(ci: ci) }
+                        if let ci = session.ci, showsCI { CIBadge(ci: ci) }
                         if !metadataSubtitle.isEmpty {
                             Text(metadataSubtitle)
                                 .font(.system(.caption2, design: .monospaced))

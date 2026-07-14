@@ -23,16 +23,35 @@ extension SessionInfo {
 /// Visual style buckets for the PR badge, derived from the PR state (plus the
 /// merge-conflict flag). Kept separate from the SwiftUI `Color` so it is testable.
 enum PRBadgeStyle: Equatable {
-    case merged, closed, draft, conflicting, open
+    case merged, closed, draft, conflicting, draftConflicting, open
 }
 
 func prBadgeStyle(for pr: PRInfo) -> PRBadgeStyle {
+    // Merged/closed are terminal states: the daemon stops checking, so they win
+    // outright (matching the terminal overlay's `#56 merged`).
     switch pr.state {
     case "merged": return .merged
     case "closed": return .closed
-    case "draft": return .draft
-    default: return pr.conflicting == true ? .conflicting : .open
+    default: break
     }
+    // For an open/draft PR a merge conflict is the highest-priority, actionable
+    // signal — it must not be swallowed by the draft styling. This mirrors the
+    // terminal overlay, which shows a draft *and* a conflict together (`#56d ⚠`).
+    if pr.conflicting == true {
+        return pr.state == "draft" ? .draftConflicting : .conflicting
+    }
+    return pr.state == "draft" ? .draft : .open
+}
+
+/// Whether the CI badge should be shown alongside a PR. The daemon keeps the
+/// last-known CI value even after a PR is merged/closed (it no longer polls
+/// checks), so — matching the terminal overlay, which drops CI for terminal PR
+/// states — suppress the CI badge for merged/closed PRs to avoid showing stale
+/// results. CI is still shown for open/draft PRs and for sessions with no PR.
+func shouldShowCI(pr: PRInfo?, ci: CIInfo?) -> Bool {
+    guard ci != nil else { return false }
+    if let pr, pr.state == "merged" || pr.state == "closed" { return false }
+    return true
 }
 
 /// Visual style buckets for the CI badge.
@@ -67,7 +86,8 @@ struct PRBadge: View {
         case .merged: return Theme.mauve
         case .closed: return Theme.red
         case .draft: return Theme.overlay0
-        case .conflicting: return Theme.peach
+        // A conflict is actionable regardless of draft-ness — colour it the same.
+        case .conflicting, .draftConflicting: return Theme.peach
         case .open: return Theme.blue
         }
     }
@@ -78,6 +98,7 @@ struct PRBadge: View {
         case .closed: return "PR #\(pr.number) closed"
         case .draft: return "PR #\(pr.number) (draft)"
         case .conflicting: return "PR #\(pr.number) has merge conflicts"
+        case .draftConflicting: return "PR #\(pr.number) (draft) has merge conflicts"
         case .open: return "PR #\(pr.number) open"
         }
     }

@@ -118,7 +118,13 @@ struct SessionRow: View {
                 HStack(spacing: 6) {
                     Text(session.agent).font(.caption2).foregroundStyle(.secondary)
                     if let pr = session.pullRequest { PRBadge(pr: pr) }
-                    if let ci = session.ci { CIBadge(ci: ci) }
+                    // The daemon keeps the last-known CI after a PR merges/closes
+                    // (it stops polling), so suppress the badge for those terminal
+                    // states to avoid showing a stale result.
+                    if let ci = session.ci, session.pullRequest?.state != "merged",
+                       session.pullRequest?.state != "closed" {
+                        CIBadge(ci: ci)
+                    }
                 }
             }
             Spacer()
@@ -335,9 +341,12 @@ struct PRBadge: View {
         switch pr.state {
         case "merged": return .purple
         case "closed": return .red
-        case "draft": return .secondary
-        default: return pr.conflicting == true ? .orange : .blue
+        default: break
         }
+        // A merge conflict is the actionable signal — surface it even on a
+        // draft (matches the terminal overlay and the macOS badge).
+        if pr.conflicting == true { return .orange }
+        return pr.state == "draft" ? .secondary : .blue
     }
 }
 
