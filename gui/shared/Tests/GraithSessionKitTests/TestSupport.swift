@@ -51,15 +51,30 @@ actor MockHostClient: GraithHostClient {
     private(set) var connected = false
     var sessions: [SessionInfo]
     var pending: [ApprovalInfo]
+    var repos: [RepoEntry]
     var failConnect: GraithClientError?
+    var failList: GraithClientError?
+    /// Records the last `migrate` call so tests can assert the model is forwarded.
+    private(set) var lastMigrate: (agent: String, model: String?)?
+    /// Blocks `listSessions()` until `releaseList()` — used to hold a refresh in
+    /// flight across poll ticks and assert the overlap guard.
+    private var listGate: CheckedContinuation<Void, Never>?
+    private var gateList = false
 
-    init(sessions: [SessionInfo] = [], pending: [ApprovalInfo] = [], failConnect: GraithClientError? = nil) {
+    init(sessions: [SessionInfo] = [], pending: [ApprovalInfo] = [],
+         repos: [RepoEntry] = [], failConnect: GraithClientError? = nil) {
         self.sessions = sessions
         self.pending = pending
+        self.repos = repos
         self.failConnect = failConnect
     }
 
     var isConnected: Bool { connected }
+
+    func appendSession(_ s: SessionInfo) { sessions.append(s) }
+    func setFailList(_ e: GraithClientError?) { failList = e }
+    func setGateList(_ on: Bool) { gateList = on }
+    func releaseList() { listGate?.resume(); listGate = nil }
 
     func connect() async throws {
         if let failConnect { throw failConnect }
@@ -67,14 +82,18 @@ actor MockHostClient: GraithHostClient {
     }
     func disconnect() async { connected = false }
 
-    func listSessions() async throws -> [SessionInfo] { sessions }
+    func listSessions() async throws -> [SessionInfo] {
+        if gateList { await withCheckedContinuation { listGate = $0 } }
+        if let failList { throw failList }
+        return sessions
+    }
     func status(sessionID: String) async throws -> StatusResponse {
         guard let s = sessions.first(where: { $0.id == sessionID }) else {
             throw GraithClientError.daemon("not found")
         }
         return StatusResponse(session: s, unreadCount: 0, fleet: FleetSummary())
     }
-    func repoList() async throws -> [RepoEntry] { [] }
+    func repoList() async throws -> [RepoEntry] { repos }
     func logs(sessionID: String, lines: Int) async throws -> String { "" }
     func screenSnapshot(sessionID: String) async throws -> ScreenSnapshot {
         // swiftlint:disable:next force_try
@@ -92,7 +111,9 @@ actor MockHostClient: GraithHostClient {
     func star(sessionID: String) async throws {}
     func unstar(sessionID: String) async throws {}
     func fork(name: String, sourceSessionID: String) async throws {}
-    func migrate(sessionID: String, agent: String, model: String?) async throws {}
+    func migrate(sessionID: String, agent: String, model: String?) async throws {
+        lastMigrate = (agent, model)
+    }
 
     func approvalStream() -> AsyncStream<[ApprovalInfo]> {
         let snapshot = pending
@@ -105,9 +126,97 @@ actor MockHostClient: GraithHostClient {
         pending.removeAll { $0.requestID == requestID }
     }
 
+    var failAttach: GraithClientError?
+    func setFailAttach(_ e: GraithClientError?) { failAttach = e }
+
     func attach(sessionID: String) async throws -> any TerminalAttachSession {
-        throw GraithClientError.daemon("attach not supported in mock")
+        if let failAttach { throw failAttach }
+        return MockAttachSession(sessionID: sessionID)
     }
+}
+
+/// A controllable `TerminalAttachSession`: tracks sent bytes / resizes and lets
+/// a test drive the output stream and its EOF.
+actor MockAttachSession: TerminalAttachSession {
+    nonisolated let sessionID: String
+    nonisolated let output: AsyncStream<Data>
+    private let cont: AsyncStream<Data>.Continuation
+    private(set) var sent: [Data] = []
+    private(set) var lastResize: (cols: UInt16, rows: UInt16)?
+    private(set) var detached = false
+
+    init(sessionID: String) {
+        self.sessionID = sessionID
+        var c: AsyncStream<Data>.Continuation!
+        self.output = AsyncStream { c = $0 }
+        self.cont = c
+    }
+
+    func send(_ data: Data) async { sent.append(data) }
+    func resize(cols: UInt16, rows: UInt16) async { lastResize = (cols, rows) }
+    func detach() async { detached = true; cont.finish() }
+    func emit(_ data: Data) { cont.yield(data) }
+    func finish() { cont.finish() }
+}
+
+/// A minimal `TerminalCoreDriving` for driving `TerminalAttachViewModel` off the
+/// GPU: records fed output + encoded strokes, answers geometry from stored cols/rows.
+final class MockTerminalCore: TerminalCoreDriving, @unchecked Sendable {
+    private(set) var fed: [Data] = []
+    var cols: UInt16 = 80
+    var rows: UInt16 = 24
+    var isMouseTrackingActive = false
+    var isBracketedPasteEnabled = false
+    var atBottom = true
+
+    func feedOutput(_ data: Data) { fed.append(data) }
+    func encode(_ stroke: TerminalKeyStroke) -> Data? { Data("k".utf8) }
+    func resize(cols: UInt16, rows: UInt16, cellWidth: UInt32, cellHeight: UInt32) {
+        self.cols = cols; self.rows = rows
+    }
+    func scrollViewport(byRows delta: Int) {}
+    func scrollToBottom() {}
+    var isViewportAtBottom: Bool { atBottom }
+    func scrollMetrics() -> ScrollMetrics { ScrollMetrics(total: 0, offset: 0, len: Int(rows)) }
+    func encodeScrollWheel(ticks: Int, surfaceX: Double, surfaceY: Double,
+                           screenWidth: UInt32, screenHeight: UInt32,
+                           cellWidth: UInt32, cellHeight: UInt32) -> [Data] { [] }
+    func beginSelection(at cell: ViewportCell, surfaceX: Double, surfaceY: Double, timeNs: UInt64) {}
+    func dragSelection(to cell: ViewportCell, surfaceX: Double, surfaceY: Double,
+                       columns: UInt32, cellWidth: UInt32, screenHeight: UInt32) {}
+    func endSelection(at cell: ViewportCell) {}
+    func clearSelection() {}
+    func selectedText() -> String? { nil }
+}
+
+/// Build a `FleetModel` over a remote-only registry with one **paired** host
+/// backed by `mock`, so tests can exercise the connected connection paths.
+@MainActor
+func makeFleetWithRemote(
+    sessions: [SessionInfo] = [],
+    pending: [ApprovalInfo] = [],
+    repos: [RepoEntry] = [],
+    subscribeApprovals: Bool = true
+) -> (fleet: FleetModel, mock: MockHostClient) {
+    let secrets = InMemorySecretStore()
+    let identity = try! DeviceIdentity(keychain: secrets)
+    let registry = HostRegistry(
+        keychain: secrets,
+        storeURL: FileManager.default.temporaryDirectory
+            .appendingPathComponent("graith-fleet-remote-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("hosts.json")
+    )
+    registry.upsert(Host(id: "ben", label: "Ben Nevis", kind: .remote, magicDNSName: "ben.tail", isPaired: false))
+    // swiftlint:disable:next force_try
+    try! registry.completePairing(hostID: "ben", response: PairResponseMsg(
+        deviceID: "dev-ben", clientToken: "tok-ben", daemonProfile: "", tlsPinSPKI: "cGlu"))
+    let mock = MockHostClient(sessions: sessions, pending: pending, repos: repos)
+    let factory = MockFactory(clients: ["tok-ben": mock])
+    let pairing = PairingCoordinator(pairing: StubPairing(), identity: identity, registry: registry)
+    let fleet = FleetModel(
+        registry: registry, identity: identity, reachability: nil,
+        factory: factory, pairing: pairing, subscribeApprovals: subscribeApprovals)
+    return (fleet, mock)
 }
 
 /// A factory that hands out a preconfigured `MockHostClient` per host id.

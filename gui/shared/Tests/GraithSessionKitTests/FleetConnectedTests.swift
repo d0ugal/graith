@@ -1,0 +1,191 @@
+import Testing
+import Foundation
+import Combine
+import GraithProtocol
+import GraithRemoteKit
+@testable import GraithSessionKit
+
+// Exercises the FleetModel + HostConnection paths that only run against a
+// connected host: rebuildConnections (remote/paired branch), the aggregations,
+// the mutation surface, refresh guarding + error handling, and the observable
+// single-attach takeover.
+
+@Suite("FleetModel — connected remote host")
+@MainActor
+struct FleetConnectedTests {
+    private func sampleSessions() -> [SessionInfo] {
+        [
+            makeSession(id: "braw0001", name: "braw", status: "running", agentStatus: "active", repoName: "croft"),
+            makeSession(id: "canny002", name: "canny", status: "running", agentStatus: "approval", repoName: "croft"),
+            makeSession(id: "bide0003", name: "bide", status: "stopped", repoName: "glen"),
+        ]
+    }
+
+    @Test func connectBuildsConnectionAndAggregates() async {
+        let (fleet, _) = makeFleetWithRemote(sessions: sampleSessions(), subscribeApprovals: false)
+        #expect(fleet.connections.count == 1)
+        #expect(fleet.hasRemoteHosts)
+        await fleet.connectAll()
+        #expect(fleet.connections.first?.state == .connected)
+        #expect(Set(fleet.sessions.map(\.id)) == ["braw0001", "canny002", "bide0003"])
+        #expect(fleet.allSessions.count == 3)
+        #expect(fleet.allSessions.allSatisfy { $0.host.id == "ben" })
+        // Grouped by repo, then by host→repo.
+        #expect(fleet.sessionsByRepo.map(\.repo) == ["croft", "glen"])
+        #expect(fleet.sessionsByHost.count == 1)
+        #expect(fleet.sessionsByHost[0].groups.first?.repo == "croft")
+    }
+
+    @Test func disconnectAndReconnect() async {
+        let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions(), subscribeApprovals: false)
+        await fleet.connectAll()
+        #expect(fleet.connections.first?.state == .connected)
+        await fleet.disconnectAll()
+        #expect(fleet.connections.first?.state == .idle)
+        let live = await mock.isConnected
+        #expect(!live)
+        await fleet.reconnectAll()
+        #expect(fleet.connections.first?.state == .connected)
+    }
+
+    @Test func mutationsDelegateToOwningConnection() async {
+        let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions(), subscribeApprovals: false)
+        await fleet.connectAll()
+        let conn = fleet.connections[0]
+        let target = conn.sessions.first { $0.id == "braw0001" }!
+        // Delete removes it from the mock; refresh then drops it from the list.
+        await conn.delete(target)
+        #expect(conn.sessions.first { $0.id == "braw0001" } == nil)
+        #expect(conn.lastError == nil)
+        // The other lifecycle wrappers just round-trip without error.
+        let other = conn.sessions.first { $0.id == "canny002" }!
+        await conn.stop(other); await conn.resume(other); await conn.restart(other)
+        await conn.interrupt(other); await conn.rename(other, to: "renamed"); await conn.toggleStar(other)
+        await conn.fork(other, name: "forked")
+        #expect(conn.lastError == nil)
+    }
+
+    @Test func migrateForwardsModelToClient() async {
+        let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions(), subscribeApprovals: false)
+        await fleet.connectAll()
+        let conn = fleet.connections[0]
+        let target = conn.sessions.first { $0.id == "braw0001" }!
+        await conn.migrate(target, agent: "codex", model: "o3")
+        let m = await mock.lastMigrate
+        #expect(m?.agent == "codex")
+        #expect(m?.model == "o3")
+    }
+
+    @Test func fleetMigrateNormalisesBlankModelToNil() async {
+        let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions(), subscribeApprovals: false)
+        await fleet.connectAll()
+        let target = fleet.sessions.first { $0.id == "braw0001" }!
+        fleet.migrateSession(target, agent: "codex", model: "   ")
+        // migrateSession fires a detached Task; poll briefly for the delegate.
+        for _ in 0..<50 {
+            if await mock.lastMigrate != nil { break }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        let m = await mock.lastMigrate
+        #expect(m?.agent == "codex")
+        #expect(m?.model == nil)  // whitespace-only model trimmed to nil
+    }
+
+    @Test func createSessionReportsCreated() async {
+        let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions(),
+                                                repos: [RepoEntry(path: "/tmp/croft", name: "croft", recent: true)],
+                                                subscribeApprovals: false)
+        await fleet.connectAll()
+        // The mock's `create` is a no-op, so seed the session it should surface.
+        await mock.appendSession(makeSession(id: "new9", name: "bonnie", repoName: "croft"))
+        var created: SessionInfo?
+        await withCheckedContinuation { cont in
+            fleet.createSession(name: "bonnie", agent: "claude", repoPath: "/tmp/croft",
+                                model: "", prompt: "", hostID: "ben") { result in
+                created = try? result.get()
+                cont.resume()
+            }
+        }
+        #expect(created?.name == "bonnie")
+    }
+
+    @Test func createSessionUnknownHostFails() async {
+        let (fleet, _) = makeFleetWithRemote(subscribeApprovals: false)
+        await fleet.connectAll()
+        var failed = false
+        await withCheckedContinuation { cont in
+            fleet.createSession(name: "x", agent: "claude", repoPath: "/tmp", model: "", prompt: "", hostID: "nope") { result in
+                if case .failure = result { failed = true }
+                cont.resume()
+            }
+        }
+        #expect(failed)
+    }
+
+    @Test func listFailureSurfacesAsHostErrorThenClears() async {
+        let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions(), subscribeApprovals: false)
+        await fleet.connectAll()
+        let conn = fleet.connections[0]
+        await mock.setFailList(.daemon("list broke"))
+        await conn.refresh()
+        // Still .connected, but the error surfaces via hostErrors + the footer.
+        #expect(conn.state == .connected)
+        #expect(fleet.hostErrors["ben"] == "list broke")
+        #expect(fleet.error == "list broke")
+        // A subsequent good list clears it.
+        await mock.setFailList(nil)
+        await conn.refresh()
+        #expect(fleet.hostErrors.isEmpty)
+        #expect(fleet.error == nil)
+    }
+
+    @Test func refreshGuardSkipsWhileOneIsInFlight() async {
+        let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions(), subscribeApprovals: false)
+        await fleet.connectAll()
+        let conn = fleet.connections[0]
+        await mock.setGateList(true)
+        // First refresh blocks on the gate (isRefreshing == true).
+        let first = Task { await conn.refresh() }
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        // Second refresh must return immediately (guarded), not queue behind it.
+        await conn.refresh()
+        await mock.releaseList()
+        await first.value
+        #expect(conn.state == .connected)
+    }
+
+    @Test func removeHostTearsDownConnection() async {
+        let (fleet, _) = makeFleetWithRemote(sessions: sampleSessions(), subscribeApprovals: false)
+        await fleet.connectAll()
+        #expect(fleet.connections.count == 1)
+        let host = fleet.connections[0].entry
+        await fleet.removeHost(host)
+        #expect(fleet.connections.isEmpty)
+        #expect(!fleet.hasRemoteHosts)
+    }
+
+    @Test func approvalsAggregateAcrossConnection() async {
+        let approval = try! JSONDecoder().decode(ApprovalInfo.self, from: Data(
+            "{\"request_id\":\"r1\",\"session_id\":\"canny002\",\"session_name\":\"canny\",\"tool_name\":\"Bash\",\"agent\":\"codex\",\"repo_name\":\"croft\",\"requested_at\":\"\"}".utf8))
+        let (fleet, _) = makeFleetWithRemote(sessions: sampleSessions(), pending: [approval], subscribeApprovals: true)
+        await fleet.connectAll()
+        for _ in 0..<60 where fleet.totalPendingApprovals == 0 { try? await Task.sleep(nanoseconds: 5_000_000) }
+        #expect(fleet.totalPendingApprovals == 1)
+        #expect(fleet.allApprovals.first?.host.id == "ben")
+        #expect(fleet.allApprovals.first?.approval.requestID == "r1")
+        await fleet.disconnectAll()  // stop the retry loop
+    }
+
+    @Test func forceClaimAttachPublishesChange() {
+        final class Owner {}
+        let (fleet, _) = makeFleetWithRemote(subscribeApprovals: false)
+        let a = Owner(); let b = Owner()
+        fleet.claimAttach("s1", owner: a)
+        var fired = false
+        let c = fleet.objectWillChange.sink { fired = true }
+        fleet.forceClaimAttach("s1", owner: b)
+        #expect(fired)  // @Published attachOwners → takeover is observable
+        #expect(fleet.isAttachedElsewhere("s1", owner: a))
+        c.cancel()
+    }
+}

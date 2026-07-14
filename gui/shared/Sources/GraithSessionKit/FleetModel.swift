@@ -62,11 +62,17 @@ open class FleetModel: ObservableObject {
         self.pairing = pairing
         self.subscribeApprovals = subscribeApprovals
         rebuildConnections()
-        // Rebuild whenever the set of hosts changes (a pairing completes or a
-        // host is removed), then reconnect the new set.
+        // Rebuild + reconnect when the *membership* changes (a pairing completes
+        // or a host is removed). Gated on the set of host ids — a display-only
+        // mutation like `markSeen` (same ids, new `lastSeen`) must NOT tear down
+        // and re-dial every connection.
+        var knownHostIDs = Set(registry.hosts.map(\.id))
         registryObserver = registry.$hosts
             .dropFirst()
-            .sink { [weak self] _ in
+            .sink { [weak self] hosts in
+                let ids = Set(hosts.map(\.id))
+                guard ids != knownHostIDs else { return }
+                knownHostIDs = ids
                 Task { @MainActor in
                     guard let self else { return }
                     self.rebuildConnections()
@@ -84,12 +90,17 @@ open class FleetModel: ObservableObject {
 
     // MARK: - Connections
 
-    /// (Re)create `HostConnection`s from the registry. Preserves existing
-    /// connections for hosts that are unchanged.
+    /// (Re)create `HostConnection`s from the registry. Preserves an existing
+    /// connection whenever its *connection-relevant* host fields are unchanged
+    /// (ignoring display-only fields like `label`/`lastSeen`), and disconnects
+    /// any connection that is dropped or replaced so it can't leak an open
+    /// client socket + approval task.
     public func rebuildConnections() {
         let existing = Dictionary(uniqueKeysWithValues: connections.map { ($0.id, $0) })
-        connections = registry.hosts.compactMap { entry -> HostConnection? in
-            if let conn = existing[entry.id], conn.entry == entry { return conn }
+        let next: [HostConnection] = registry.hosts.compactMap { entry -> HostConnection? in
+            if let conn = existing[entry.id], Self.connectionUnchanged(conn.entry, entry) {
+                return conn
+            }
             switch entry.kind {
             case .local:
                 let client = factory.makeLocalClient(transport: entry.transport, profile: entry.daemonProfile)
@@ -100,9 +111,25 @@ open class FleetModel: ObservableObject {
                 return HostConnection(entry: entry, client: client, subscribeApprovals: subscribeApprovals)
             }
         }
+        // Tear down connections that went away or were replaced by a fresh client.
+        for conn in connections where !next.contains(where: { $0 === conn }) {
+            Task { await conn.disconnect() }
+        }
+        connections = next
         connectionObservers = connections.map { conn in
             conn.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
         }
+    }
+
+    /// Whether two host records describe the *same connection*, so a cached
+    /// connection can be reused. Ignores display-only fields (`label`,
+    /// `lastSeen`) — otherwise a `markSeen` tick would tear down and re-dial
+    /// every client.
+    private static func connectionUnchanged(_ a: Host, _ b: Host) -> Bool {
+        a.id == b.id && a.kind == b.kind && a.socketPath == b.socketPath
+            && a.magicDNSName == b.magicDNSName && a.port == b.port
+            && a.daemonProfile == b.daemonProfile && a.tlsPinSPKI == b.tlsPinSPKI
+            && a.deviceID == b.deviceID && a.isPaired == b.isPaired
     }
 
     /// Connect all hosts (called on appear / on returning to foreground).
@@ -202,17 +229,23 @@ open class FleetModel: ObservableObject {
         }
     }
 
-    /// The primary (local daemon) error, for the sidebar footer.
+    /// The primary error for the sidebar footer: the local daemon's if it has
+    /// one, else the first host reporting any error (a `.failed` connection *or*
+    /// a connected host whose `list` is failing).
     public var error: String? {
-        connections.first { $0.entry.kind == .local }?.lastError
-            ?? connections.first?.lastError
+        if let local = connections.first(where: { $0.entry.kind == .local }), let e = local.lastError {
+            return e
+        }
+        return connections.compactMap { $0.lastError }.first
     }
 
     /// Per-host connection error, keyed by host id (shown in host headers).
+    /// Any non-nil `lastError` counts — a host that handshook and then had its
+    /// `list` fail stays `.connected` but must still surface as degraded.
     public var hostErrors: [String: String] {
         var errors: [String: String] = [:]
         for conn in connections {
-            if let e = conn.lastError, case .failed = conn.state { errors[conn.id] = e }
+            if let e = conn.lastError { errors[conn.id] = e }
         }
         return errors
     }
@@ -278,7 +311,9 @@ open class FleetModel: ObservableObject {
     public func toggleStar(_ session: SessionInfo) { act(session) { await $0.toggleStar(session) } }
     public func forkSession(_ session: SessionInfo, name: String) { act(session) { await $0.fork(session, name: name) } }
     public func migrateSession(_ session: SessionInfo, agent: String, model: String? = nil) {
-        act(session) { await $0.migrate(session, agent: agent) }
+        let trimmed = model?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalized = (trimmed?.isEmpty ?? true) ? nil : trimmed
+        act(session) { await $0.migrate(session, agent: agent, model: normalized) }
     }
 
     /// Run an action against the session's owning connection, then refresh.
@@ -360,7 +395,12 @@ open class FleetModel: ObservableObject {
         weak var owner: AnyObject?
         init(_ owner: AnyObject) { self.owner = owner }
     }
-    private var attachOwners: [String: AttachOwnerRef] = [:]
+    /// `@Published` so a takeover ("Open Here" → `forceClaimAttach`) publishes a
+    /// change: SwiftUI re-renders, the new owner swaps its placeholder for a
+    /// terminal, and the prior owner sees `isAttachedElsewhere` flip true and
+    /// tears its attach down. A plain stored dict would leave the takeover
+    /// control inert until some unrelated later render.
+    @Published private var attachOwners: [String: AttachOwnerRef] = [:]
 
     /// Claim a session's attach for `owner` if currently unowned.
     public func claimAttach(_ sessionID: String, owner: AnyObject) {

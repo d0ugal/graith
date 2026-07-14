@@ -105,11 +105,15 @@ final class SessionStore: FleetModel {
     // MARK: - Raw client accessors (macOS AppKit chrome)
 
     /// The raw protocol client owning `sessionID`, used by the AppKit terminal
-    /// view to open a rich attach connection. Falls back to the local connection
-    /// when the session isn't yet in a list (a lifecycle action still needs a
-    /// client to error against).
+    /// view to open a rich attach connection. Resolves the session's owning
+    /// connection strictly — a bare local fallback is only safe when the local
+    /// daemon is the *only* one configured; with remotes present, falling back
+    /// to local could attach a remote daemon-local session id to the wrong
+    /// daemon (ids are unique only per daemon).
     func client(for sessionID: String) -> GraithProtocolClient? {
-        (connection(ownerOf: sessionID) ?? connections.first)?.protocolClient
+        if let owner = connection(ownerOf: sessionID) { return owner.protocolClient }
+        guard !hasRemoteHosts else { return nil }
+        return connections.first?.protocolClient
     }
 
     /// The raw protocol client for a host id.
