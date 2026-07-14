@@ -53,8 +53,16 @@ const (
 )
 
 // FieldType is a language-neutral description of a wire field's type. Kind is
-// one of: string, int, bool, raw, map, array, object. array carries Elem;
-// object carries Ref (the name of another manifest type).
+// one of: string, int, float, bool, raw (a `json.RawMessage` opaque blob), map,
+// array, object. array carries Elem; object carries Ref (the name of another
+// manifest type).
+//
+// Known fidelity limits (none exercised by messages.go today, guarded so they
+// can't silently appear): map loses its key/value types (kind "map" only); a
+// fixed-length array loses its length (kind "array"); and describeFields rejects
+// embedded/anonymous struct fields outright rather than mis-modelling
+// encoding/json's field promotion. A plain `[]byte` is reported as "string"
+// (encoding/json base64-encodes it), distinct from `json.RawMessage` ("raw").
 type FieldType struct {
 	Kind string     `json:"kind"`
 	Elem *FieldType `json:"elem,omitempty"`
@@ -239,10 +247,11 @@ type swiftAnnotation struct {
 // default to nothing (a compile-and-test failure) rather than silently
 // "planned", so the choice of required/planned/na is always reviewed.
 var swiftAnnotations = map[string]swiftAnnotation{
-	// Transport envelope — Swift handles this in Control.swift (ControlEnvelope),
-	// not as a modelled payload struct, so it is out of scope for payload
-	// conformance.
-	"Envelope": {SwiftNA, ""},
+	// Transport envelope — Swift models it as ControlEnvelope in Control.swift
+	// (not Messages.swift), with custom raw-payload handling. It wraps every
+	// control message, so a rename of type/payload/token would break the wire:
+	// the Swift conformance test registers a dedicated decodeControl-based probe.
+	"Envelope": {SwiftRequired, "ControlEnvelope"},
 
 	// Handshake.
 	"HandshakeMsg":    {SwiftRequired, "HandshakeMsg"},
@@ -397,11 +406,19 @@ var rawMessageType = reflect.TypeOf(json.RawMessage(nil))
 // stable, diff-friendly fixture; fields keep declaration order.
 func BuildManifest() (Manifest, error) {
 	types := make([]ManifestType, 0, len(registeredTypes))
+	seen := make(map[string]bool, len(registeredTypes))
+
 	for _, v := range registeredTypes {
 		rt := reflect.TypeOf(v)
 		if rt.Kind() != reflect.Struct {
 			return Manifest{}, fmt.Errorf("registered type %s is not a struct", rt.Name())
 		}
+
+		if seen[rt.Name()] {
+			return Manifest{}, fmt.Errorf("type %s is registered more than once in registeredTypes", rt.Name())
+		}
+
+		seen[rt.Name()] = true
 
 		ann, ok := swiftAnnotations[rt.Name()]
 		if !ok {
@@ -440,6 +457,13 @@ func describeFields(rt reflect.Type) ([]ManifestField, error) {
 		f := rt.Field(i)
 		if f.PkgPath != "" {
 			continue // unexported
+		}
+
+		if f.Anonymous {
+			// encoding/json promotes an untagged embedded struct's fields inline,
+			// which describeFields does not model. Reject rather than emit a
+			// misleading nested object. None exist today; this keeps it honest.
+			return nil, fmt.Errorf("embedded/anonymous field %s is not supported by the manifest generator", f.Name)
 		}
 
 		name, omitempty, skip := jsonKey(f)
@@ -516,7 +540,9 @@ func describeType(t reflect.Type) (FieldType, error) {
 		return FieldType{Kind: "float"}, nil
 	case reflect.Slice:
 		if t.Elem().Kind() == reflect.Uint8 {
-			return FieldType{Kind: "raw"}, nil // []byte
+			// A plain []byte (that isn't json.RawMessage, handled above) is
+			// base64-encoded as a JSON string by encoding/json.
+			return FieldType{Kind: "string"}, nil
 		}
 
 		elem, err := describeType(t.Elem())

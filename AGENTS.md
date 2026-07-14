@@ -109,13 +109,21 @@ you add or change a wire struct in `messages.go`, register it in
 `registeredTypes`, classify it in `swiftAnnotations`
 (`required`/`planned`/`na`), and regenerate the fixture:**
 `go test ./internal/protocol -run TestManifestUpToDate -update`.
-`TestManifestRegistryComplete` fails closed if a struct is unregistered or
-unclassified (same discipline as `remoteMessagePolicy`); `TestManifestUpToDate`
-runs on every PR (Go CI has no paths filter) and fails if the fixture is stale.
-On the Swift side, `ManifestConformanceTests` decodes the same fixture and fails
-if any `required` type isn't modelled in `Messages.swift` — so a Go PR that adds
-a client-facing message can't merge while Swift is behind. Because the fixture
-lives under `gui/`, regenerating it also trips the paths-filtered gui/ Swift CI.
+`TestManifestRegistryComplete` fails closed if a struct is unregistered,
+unclassified, or double-registered (same discipline as `remoteMessagePolicy`);
+`TestManifestUpToDate` runs on every PR (Go CI has no paths filter) and fails if
+the fixture is stale. On the Swift side, `ManifestConformanceTests` decodes the
+same fixture and fails if any `required` type isn't modelled in `Messages.swift`
+(or if a modelled type can't decode a synthesized instance). Swift deliberately
+models a *subset* of each Go type, so conformance means: every required type is
+present and decodable, Swift's required-field set is a subset of Go's (checked
+via a full-fields and a required-fields-only synthesis pass), array element and
+nested-object shapes decode, and the probe's Swift type matches the manifest's
+`swift_type` — not that Swift mirrors every Go field. Because the fixture lives
+under `gui/`, regenerating it touches a `gui/` file, so the paths-filtered gui/
+Swift CI runs and goes red when `Messages.swift` is behind (that job is not a
+required status check, so it surfaces the failure rather than hard-blocking the
+merge).
 
 **Session lifecycle**: Create → worktree + branch → start agent process → attach.
 Resume → restart process in existing worktree.

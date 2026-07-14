@@ -152,7 +152,11 @@ func TestBuildManifestSucceeds(t *testing.T) {
 }
 
 // exportedStructsInMessagesGo returns the set of exported struct type names
-// declared in messages.go (the wire-protocol source of truth).
+// declared in messages.go (the wire-protocol source of truth). It deliberately
+// parses only messages.go: other files in the package hold non-payload structs
+// (frame.go's Frame/FrameWriter/FrameReader) that are not wire messages and are
+// not registered. A new wire struct must therefore live in messages.go to be
+// caught here — the convention this whole file assumes.
 func exportedStructsInMessagesGo(t *testing.T) map[string]bool {
 	t.Helper()
 

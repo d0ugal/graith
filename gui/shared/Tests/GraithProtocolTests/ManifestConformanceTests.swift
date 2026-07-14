@@ -10,15 +10,28 @@ import Testing
 // wire struct, its JSON fields, and — per type — whether Swift is expected to
 // model it (`required` / `planned` / `na`).
 //
-// These tests decode that fixture and prove Messages.swift satisfies every
-// `required` type: a decoder is registered for it, and it accepts a JSON
-// instance synthesized from the manifest's field list. When Go adds a new
-// `required` message (or renames/retypes a required field), this suite goes red
-// until Messages.swift catches up — the drift guard the issue asks for.
+// These tests decode that fixture and check Messages.swift against every
+// `required` type. Swift deliberately models a *subset* of each Go type (only
+// the fields the apps use, and several Go types consolidate onto one Swift shape
+// — SessionScopeMsg / SessionIDMsg / EmptyMsg — see Messages.swift:9). So
+// conformance here means, precisely:
 //
-// The Go-side TestManifestUpToDate is the complementary guard: it fails on
-// *every* Go PR if messages.go changed without regenerating the fixture, so a
-// Go-only change can't slip past the paths-filtered gui/ Swift CI.
+//   1. Every `required` Go type has a registered Swift decoder (whole-type
+//      ratchet — a new required message goes red until Messages.swift adds it).
+//   2. That decoder accepts a *fully-populated* instance synthesized from the
+//      manifest (so a Swift-required field the wire never sends fails), and a
+//      *required-only* instance with every optional key omitted (so a field Go
+//      marks `omitempty` but Swift models non-optional fails — a real runtime
+//      decode bug). Array elements are synthesized, so array element-type drift
+//      is exercised too.
+//   3. The Swift decoder's type name matches the manifest's `swift_type`.
+//
+// It does NOT assert Swift models every Go field: Swift tolerates unknown keys
+// by design, and the subset is deliberate. What it guarantees is that Swift's
+// required-field set is a subset of Go's, that no whole required type is missing,
+// and that array/nested-object shapes decode. The Go-side TestManifestUpToDate
+// is the complementary guard: it fails on every Go PR if messages.go changed
+// without regenerating the fixture.
 
 // MARK: - Manifest DTOs (decode the committed fixture)
 
@@ -81,13 +94,18 @@ private enum ConformanceError: Error, CustomStringConvertible {
 
 // MARK: - Swift decoder registry
 
-/// A type-erased "can this JSON decode into the Swift type?" probe.
+/// A type-erased "can this JSON decode into the Swift type?" probe. `typeName`
+/// is the Swift type it decodes into, cross-checked against the manifest's
+/// `swift_type` so a wrong annotation fails.
 private struct DecodeProbe {
+    let typeName: String
     let decode: (Data) throws -> Void
 }
 
 private func probe<T: Decodable>(_ type: T.Type) -> DecodeProbe {
-    DecodeProbe { data in _ = try JSONDecoder().decode(T.self, from: data) }
+    DecodeProbe(typeName: String(describing: T.self)) { data in
+        _ = try JSONDecoder().decode(T.self, from: data)
+    }
 }
 
 /// Maps each Go wire-type name the manifest marks `required` to the Swift type
@@ -96,6 +114,12 @@ private func probe<T: Decodable>(_ type: T.Type) -> DecodeProbe {
 /// `required` rows of `swiftAnnotations` in internal/protocol/manifest.go — the
 /// tests below cross-check both directions so a mismatch fails loudly.
 private let swiftDecoders: [String: DecodeProbe] = [
+    // Transport envelope — modelled as ControlEnvelope with custom raw-payload
+    // handling, so it needs a decodeControl-based probe, not plain Codable.
+    "Envelope": DecodeProbe(typeName: "ControlEnvelope") { data in
+        _ = try decodeControl(data)
+    },
+
     // Handshake.
     "HandshakeMsg": probe(HandshakeMsg.self),
     "HandshakeOkMsg": probe(HandshakeOkMsg.self),
@@ -171,12 +195,20 @@ private let swiftDecoders: [String: DecodeProbe] = [
 
 // MARK: - JSON synthesis from the manifest
 
-/// Builds a JSON instance for `type` from the manifest's field list. All fields
-/// (optional and required) are populated with placeholder values so every wire
-/// key is present — this exercises a Swift type's required properties and its
-/// coding keys. Empty arrays and recursively-synthesized objects keep it valid
-/// without needing real data.
-private func synthesize(_ typeName: String, in typesByName: [String: ManifestTypeDTO], visiting: Set<String> = []) -> [String: Any] {
+/// Which fields to include when synthesizing an instance.
+private enum SynthMode {
+    /// Every field (optional + required). Exercises Swift-required-but-wire-absent.
+    case full
+    /// Only non-optional fields. Exercises Go-optional-but-Swift-required (a
+    /// missing-key runtime decode bug).
+    case requiredOnly
+}
+
+/// Builds a JSON instance for `type` from the manifest's field list. Array
+/// elements are synthesized (one each) so element-type drift is exercised;
+/// nested objects recurse (guarded against cycles).
+private func synthesize(_ typeName: String, in typesByName: [String: ManifestTypeDTO],
+                        mode: SynthMode, visiting: Set<String> = []) -> [String: Any] {
     guard let t = typesByName[typeName], !visiting.contains(typeName) else {
         return [:]
     }
@@ -185,20 +217,24 @@ private func synthesize(_ typeName: String, in typesByName: [String: ManifestTyp
 
     var obj: [String: Any] = [:]
     for field in t.fields {
-        obj[field.name] = value(for: field.type, in: typesByName, visiting: next)
+        if mode == .requiredOnly && field.optional { continue }
+        obj[field.name] = value(for: field.type, in: typesByName, mode: mode, visiting: next)
     }
     return obj
 }
 
-private func value(for ft: FieldTypeDTO, in typesByName: [String: ManifestTypeDTO], visiting: Set<String>) -> Any {
+private func value(for ft: FieldTypeDTO, in typesByName: [String: ManifestTypeDTO],
+                   mode: SynthMode, visiting: Set<String>) -> Any {
     switch ft.kind {
     case "string": return "x"
     case "int": return 1
     case "float": return 1.0
     case "bool": return true
     case "raw", "map": return [String: Any]()
-    case "array": return [Any]() // empty array decodes into any [T]
-    case "object": return synthesize(ft.ref ?? "", in: typesByName, visiting: visiting)
+    case "array":
+        guard let elem = ft.elem else { return [Any]() }
+        return [value(for: elem, in: typesByName, mode: mode, visiting: visiting)]
+    case "object": return synthesize(ft.ref ?? "", in: typesByName, mode: mode, visiting: visiting)
     default: return NSNull()
     }
 }
@@ -206,10 +242,12 @@ private func value(for ft: FieldTypeDTO, in typesByName: [String: ManifestTypeDT
 // MARK: - Tests
 
 struct ManifestConformanceTests {
-    /// Every `required` Go type must have a registered Swift decoder, and a JSON
-    /// instance synthesized from the manifest must decode into it. This is the
-    /// guard that turns red when Go adds a required message (or a required field)
-    /// Messages.swift doesn't yet satisfy.
+    /// Every `required` Go type must have a registered Swift decoder whose type
+    /// matches the manifest's `swift_type`, and JSON instances synthesized from
+    /// the manifest (both fully-populated and required-fields-only) must decode
+    /// into it. This is the guard that turns red when Go adds a required message,
+    /// renames a field Swift models non-optionally, or marks a Swift-required
+    /// field optional.
     @Test func requiredTypesDecodeFromManifest() throws {
         let manifest = try loadManifest()
         let typesByName = Dictionary(uniqueKeysWithValues: manifest.types.map { ($0.name, $0) })
@@ -225,23 +263,32 @@ struct ManifestConformanceTests {
                 continue
             }
 
-            let obj = synthesize(t.name, in: typesByName)
-            let data: Data
-            do {
-                data = try JSONSerialization.data(withJSONObject: obj)
-            } catch {
-                Issue.record("Failed to synthesize JSON for `\(t.name)`: \(error)")
-                continue
+            if let want = t.swiftType, !want.isEmpty, decoder.typeName != want {
+                Issue.record("""
+                    Go type `\(t.name)` is annotated swift_type=`\(want)` but its registered probe \
+                    decodes into `\(decoder.typeName)` — the annotation and the probe disagree.
+                    """)
             }
 
-            do {
-                try decoder.decode(data)
-            } catch {
-                Issue.record("""
-                    Swift decoder for Go type `\(t.name)` (\(t.swiftType ?? "?")) rejected a manifest-\
-                    synthesized instance: \(error). A required field likely diverged — reconcile \
-                    Messages.swift with messages.go.
-                    """)
+            for mode in [SynthMode.full, .requiredOnly] {
+                let obj = synthesize(t.name, in: typesByName, mode: mode)
+                let data: Data
+                do {
+                    data = try JSONSerialization.data(withJSONObject: obj)
+                } catch {
+                    Issue.record("Failed to synthesize \(mode) JSON for `\(t.name)`: \(error)")
+                    continue
+                }
+
+                do {
+                    try decoder.decode(data)
+                } catch {
+                    Issue.record("""
+                        Swift decoder for Go type `\(t.name)` (\(t.swiftType ?? "?")) rejected a \
+                        manifest-synthesized \(mode) instance: \(error). A required field likely \
+                        diverged — reconcile Messages.swift with messages.go.
+                        """)
+                }
             }
             checked += 1
         }

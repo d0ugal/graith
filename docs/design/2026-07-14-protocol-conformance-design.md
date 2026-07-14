@@ -65,8 +65,13 @@ caught on the Go side, which runs on every PR.
   `SessionScopeMsg` for stop/delete/restart, etc.). Out of scope; the manifest
   is a conformance check, not a code generator.
 - **Byte-level encoder equivalence.** We check that Swift can *decode* a
-  manifest-shaped instance of each required type, not that Go and Swift produce
-  identical bytes for every value. Decodability is what the clients actually need.
+  manifest-shaped instance of each required type (including a required-only form),
+  not that Go and Swift produce identical bytes for every value. This structural
+  decode check is a strong proxy — matching field names/types/optionality — but
+  it does not exercise a divergent *custom encoder* on an outbound message. A
+  full encode-round-trip assertion is a reasonable future strengthening; the
+  hand-written Swift structs use synthesized `Codable` today, so decode symmetry
+  covers them in practice.
 - **Runtime protocol negotiation.** The manifest is a build/test-time artifact,
   not shipped or exchanged at runtime.
 
@@ -101,25 +106,45 @@ Three guards:
    the committed fixture; `-update` rewrites it. Go CI has no paths filter, so
    this runs on every PR — closing the gui-CI-is-gated gap.
 3. **`ManifestConformanceTests`** (Swift) decodes the same fixture and, for every
-   `required` type, verifies a Swift decoder is registered and accepts a JSON
-   instance synthesized from the manifest's fields. A reverse check flags a Swift
-   decoder whose type is no longer `required`.
+   `required` type, verifies a Swift decoder is registered, that its Swift type
+   matches the manifest's `swift_type`, and that it accepts two JSON instances
+   synthesized from the manifest: a *full* one (every field present — catches a
+   Swift-required field the wire never sends) and a *required-only* one (optional
+   keys omitted — catches a field Go marks `omitempty` but Swift models
+   non-optional, a real runtime decode bug). Array elements and nested objects
+   are synthesized, so element-type drift is exercised. A reverse check flags a
+   Swift decoder whose type is no longer `required`.
+
+**What conformance means (and doesn't).** Swift deliberately models a *subset* of
+each Go type — only the fields the apps use, and several Go types consolidate
+onto one Swift shape (`Messages.swift:9`). So the guard does **not** assert Swift
+mirrors every Go field (Swift tolerates unknown keys by design); a Go-only
+optional field like `DeleteMsg.purge` is fine. What it guarantees is: no whole
+`required` type is missing, Swift's required-field set is a subset of Go's, and
+array/nested-object shapes decode. Field *additions* to an existing required type
+are not ratcheted — promoting a `planned` type to `required` is. The `Envelope`
+is `required` (Swift's `ControlEnvelope`) with a dedicated `decodeControl`-based
+probe, since a rename of its `type`/`payload`/`token` would break every message.
 
 **Why the fixture lives under `gui/`, read by Go via a relative path.** A single
 committed copy avoids two-files-drift. SwiftPM can only bundle a test resource
 that lives inside the test target's directory, so the fixture must live under
-`gui/`; the Go test reaches it by relative path (Go test CWD is always the
-package dir). A happy side effect: regenerating the fixture from a Go change
-*touches a `gui/` file*, which trips the paths-filtered gui/ Swift CI — so a Go
-PR that adds a `required` message can't merge green while `Messages.swift` is
-behind, even though the Swift job is normally skipped on Go-only PRs.
+`gui/`; the Go test reaches it by a path relative to its package dir (which
+`go test` sets as the working directory). A happy side effect: regenerating the
+fixture from a Go change *touches a `gui/` file*, which trips the paths-filtered
+gui/ Swift CI — so on a Go PR that adds a `required` message the Swift job runs
+and goes red while `Messages.swift` is behind, even though that job is normally
+skipped on Go-only PRs. (gui-ci is deliberately *not* a required status check —
+see `gui-ci.yml` — so this surfaces the failure rather than hard-blocking the
+merge; the always-on Go `TestManifestUpToDate` is the real gate.)
 
 **Consolidation.** Several Go types map to one Swift type (`SessionScopeMsg` for
 stop/delete/restart; `SessionIDMsg` for the bare `{session_id}` requests;
-`EmptyMsg` for no-payload requests). The conformance test synthesizes *all* wire
+`EmptyMsg` for no-payload requests). The conformance test synthesizes wire
 fields and decodes; since Swift models optionals leniently, a Go-only optional
-field (e.g. `DeleteMsg.purge`) doesn't break conformance — only a genuinely
-missing *required* field or a whole missing type does.
+field (e.g. `DeleteMsg.purge`) doesn't break conformance — only a whole missing
+type, a Swift-required field the wire never sends, or a Go-optional field Swift
+models non-optional does.
 
 Trade-offs: the `swiftAnnotations` map and the Swift decoder registry are
 hand-maintained, but both are guarded (a new type fails the Go completeness test;
@@ -136,12 +161,13 @@ would be a new dependency. The bespoke manifest is smaller and purpose-fit.
 
 ### Current gaps (2026-07-14)
 
-Of 119 wire types: **52 required** (all satisfied by `Messages.swift` today),
-**53 planned** (client-relevant, not yet modelled — messaging, scenarios,
-triggers, MCP management, jail, notify, tokens, and various response types), and
-**14 n/a** (hook-CLI↔daemon, MCP proxy transport, local-only doctor/diagnostics/
-upgrade). The `planned` set is the reviewable backlog the parity effort works
-through; promoting one to `required` (and modelling it in Swift) is the ratchet.
+Of 119 wire types: **53 required** (all satisfied by `Messages.swift` /
+`ControlEnvelope` today), **53 planned** (client-relevant, not yet modelled —
+messaging, scenarios, triggers, MCP management, jail, notify, tokens, and various
+response types), and **13 n/a** (hook-CLI↔daemon, MCP proxy transport, local-only
+doctor/diagnostics/upgrade). The `planned` set is the reviewable backlog the
+parity effort works through; promoting one to `required` (and modelling it in
+Swift) is the ratchet.
 
 ### References
 
