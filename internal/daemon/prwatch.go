@@ -47,6 +47,25 @@ const (
 	// may be re-surfaced — a bounded, self-limiting degradation rather than
 	// unbounded state growth.
 	maxPRWatchPromptedAuthors = 5000
+
+	// prKickCooldown is the minimum interval between git-refs-triggered immediate
+	// polls of one session. A push/commit can churn several ref files in quick
+	// succession; the ref watcher already debounces, and this is the belt-and-braces
+	// backstop so a burst can't drive repeated gh invocations for one session. Well
+	// below any poll cadence, so it only suppresses truly back-to-back kicks.
+	prKickCooldown = 3 * time.Second
+
+	// prKickChanCap bounds the buffered kick channel. Kicks are best-effort (a
+	// dropped kick just means the ordinary poll cadence catches the change), so a
+	// full channel is a non-blocking drop, not a stall.
+	prKickChanCap = 64
+
+	// prKickedNoPRBackoff is the re-poll delay after a *kicked* poll finds no PR
+	// (vs prNoPRNegCache for a timer-driven miss). A kick fires right after a push,
+	// which is typically moments before `gh pr create`, so the PR usually appears
+	// within seconds; a short backoff lets the timer catch it instead of parking the
+	// session on the multi-minute negative cache.
+	prKickedNoPRBackoff = 20 * time.Second
 )
 
 // prWatchCursor records what the loop has already told a session, so it notifies
@@ -82,6 +101,14 @@ type prWatchState struct {
 	// Global (the prompt target is the single orchestrator), not per-session, so a
 	// flood across many sessions/PRs is still bounded. Guarded by mu.
 	authorPromptLog []time.Time
+	// lastKick records the last git-refs-triggered immediate poll per session, for
+	// the prKickCooldown backstop. Guarded by mu.
+	lastKick map[string]time.Time
+	// kick carries session IDs whose git refs just changed (push/commit/checkout),
+	// so RunPRWatchLoop polls them immediately instead of on the next tick. Fed by
+	// the ref watcher (prrefwatch.go). Buffered + written non-blocking, so a full
+	// channel drops the kick (the poll cadence is the fallback).
+	kick chan string
 }
 
 func newPRWatchState() *prWatchState {
@@ -91,6 +118,8 @@ func newPRWatchState() *prWatchState {
 		nextPoll:   make(map[string]time.Time),
 		pollBranch: make(map[string]string),
 		rateLog:    make(map[string][]time.Time),
+		lastKick:   make(map[string]time.Time),
+		kick:       make(chan string, prKickChanCap),
 	}
 }
 
@@ -110,20 +139,99 @@ func (sm *SessionManager) RunPRWatchLoop(ctx context.Context) {
 		sm.log.Info("pr-watch: gh not found on PATH, PR/CI awareness disabled")
 	}
 
+	// The git-refs watch (prrefwatch.go) accelerates detection by kicking an
+	// immediate poll when a session's refs change (push/commit/checkout). It shares
+	// this loop's lifecycle and the same gh availability gate; the poll below is the
+	// always-on fallback, so a degraded watch never drops PR awareness. The nil
+	// guard keeps the accelerator optional — a SessionManager built without it (some
+	// unit tests) still runs the poll loop.
+	if ghOK && sm.prRefWatch != nil {
+		go sm.RunPRRefWatchLoop(ctx)
+	}
+
+	ticker := time.NewTicker(prWatchTick)
+	defer ticker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(prWatchTick):
-		}
+		case <-ticker.C:
+			cfg := sm.Config()
+			if !cfg.PRWatch.Enabled || !ghOK {
+				continue
+			}
 
-		cfg := sm.Config()
-		if !cfg.PRWatch.Enabled || !ghOK {
-			continue
-		}
+			sm.runPRWatchTick(ctx, &cfg.PRWatch)
+		case id := <-sm.prWatch.kick:
+			cfg := sm.Config()
+			if !cfg.PRWatch.Enabled || !ghOK {
+				continue
+			}
 
-		sm.runPRWatchTick(ctx, &cfg.PRWatch)
+			sm.pollKicked(ctx, &cfg.PRWatch, id)
+		}
 	}
+}
+
+// pollKicked runs an immediate, targeted poll for one session in response to a
+// git-refs change, bypassing the batch cap and nextPoll gating that pace the
+// ordinary tick. It re-snapshots the session off-lock, reconciles the poll branch
+// (so a fresh checkout is matched right away), and funnels through the unchanged
+// pollSession — so a kick only changes WHEN a poll happens, never WHAT it does.
+// A per-session cooldown (prKickCooldown) collapses a burst of ref writes into a
+// single poll.
+func (sm *SessionManager) pollKicked(ctx context.Context, cfg *configPRWatch, id string) {
+	if !sm.allowKick(id) {
+		return
+	}
+
+	t, ok := sm.prWatchTarget(id)
+	if !ok {
+		return
+	}
+
+	sm.pollSession(ctx, cfg, t, true)
+}
+
+// allowKick applies the per-session kick cooldown, recording the time on success.
+func (sm *SessionManager) allowKick(id string) bool {
+	sm.prWatch.mu.Lock()
+	defer sm.prWatch.mu.Unlock()
+
+	now := time.Now()
+	if last, ok := sm.prWatch.lastKick[id]; ok && now.Sub(last) < prKickCooldown {
+		return false
+	}
+
+	sm.prWatch.lastKick[id] = now
+
+	return true
+}
+
+// prWatchTarget resolves a single eligible session to a poll target, mirroring
+// prWatchTargets' eligibility rules and off-lock branch reconciliation. ok is
+// false when the session is gone, ineligible, or has no branch to poll.
+func (sm *SessionManager) prWatchTarget(id string) (prWatchTarget, bool) {
+	sm.mu.RLock()
+
+	s, ok := sm.state.Sessions[id]
+	if !ok || (s.Status != StatusRunning && s.Status != StatusStopped) ||
+		s.IsSoftDeleted() || s.RepoPath == "" || s.Mirror || s.InPlace {
+		sm.mu.RUnlock()
+		return prWatchTarget{}, false
+	}
+
+	name, branch, worktreePath := s.Name, s.Branch, s.WorktreePath
+
+	sm.mu.RUnlock()
+
+	poll := sm.reconcileBranch(id, branch, worktreePath)
+	if poll == "" {
+		return prWatchTarget{}, false
+	}
+
+	return prWatchTarget{id: id, name: name, branch: poll, worktreePath: worktreePath}, true
 }
 
 func (sm *SessionManager) runPRWatchTick(ctx context.Context, cfg *configPRWatch) {
@@ -149,7 +257,7 @@ func (sm *SessionManager) runPRWatchTick(ctx context.Context, cfg *configPRWatch
 
 		polled++
 
-		sm.pollSession(ctx, cfg, t)
+		sm.pollSession(ctx, cfg, t, false)
 	}
 }
 
@@ -295,7 +403,7 @@ func (sm *SessionManager) notePollBranch(id, recorded, poll string) bool {
 	return true
 }
 
-func (sm *SessionManager) pollSession(ctx context.Context, cfg *configPRWatch, t prWatchTarget) {
+func (sm *SessionManager) pollSession(ctx context.Context, cfg *configPRWatch, t prWatchTarget, kicked bool) {
 	slug, ok := repoSlug(t.worktreePath)
 	if !ok {
 		// Non-GitHub remote — back off hard (negative cache).
@@ -312,7 +420,18 @@ func (sm *SessionManager) pollSession(ctx context.Context, cfg *configPRWatch, t
 
 	if !found {
 		sm.clearPRState(t.id)
-		sm.schedulePoll(t.id, prNoPRNegCache)
+		// A ref change kicked this poll, but the branch has no PR *yet*. The common
+		// agent flow is `git push` (a ref change → this kick) immediately followed by
+		// `gh pr create` (a GitHub API call with no local ref write → no kick), so the
+		// PR appears seconds after the kick. Backing off for the full negative-cache
+		// window here would strand the session until it expires — worse than the tick
+		// baseline. Use a short backoff so the timer re-checks promptly and catches the
+		// just-created PR; a timer-driven miss still uses the full negative cache.
+		if kicked {
+			sm.schedulePoll(t.id, prKickedNoPRBackoff)
+		} else {
+			sm.schedulePoll(t.id, prNoPRNegCache)
+		}
 
 		return
 	}
@@ -385,6 +504,12 @@ func (sm *SessionManager) prunePRWatchState() {
 	for id := range sm.prWatch.rateLog {
 		if !live[id] {
 			delete(sm.prWatch.rateLog, id)
+		}
+	}
+
+	for id := range sm.prWatch.lastKick {
+		if !live[id] {
+			delete(sm.prWatch.lastKick, id)
 		}
 	}
 }

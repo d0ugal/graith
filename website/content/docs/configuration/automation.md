@@ -21,6 +21,12 @@ poll_pending             = "1m"   # poll interval while checks are still running
 debounce                 = "2m"   # minimum cooldown between notifications to a session
 ```
 
+### Near-instant detection
+
+The GitHub poll runs on a timer, so on its own a freshly pushed PR would only be picked up on the next tick. To make detection near-instant, the daemon also puts a lightweight local file watch on each running session's git refs (`HEAD`, `refs/`, and the reflogs — never the object store). When a `git push`, commit, or checkout touches them, it triggers an immediate PR re-check for that session instead of waiting for the poll. The poll stays on as the always-on fallback, so a push from outside the worktree — or a platform where the file watch degrades — is still caught on the next cycle. There is nothing to configure: the watch turns on and off with `[pr_watch] enabled` and needs no extra permissions.
+
+When graith first associates a PR, it surfaces any **currently-broken mechanical state** — a failing CI build or a merge conflict — so a session that was stopped (or a daemon that restarted) doesn't strand an agent on a red PR. It deliberately does **not** replay pre-existing review comments, PR comments, or review decisions from before it noticed the PR: those are baselined silently to avoid dumping a whole backlog when re-discovering an old PR. Near-instant detection keeps that pre-association window down to about a second, so little is missed in practice.
+
 ### Comment author-trust gate
 
 PR comments are free text from arbitrary GitHub users. Because they reach the agent verbatim and can auto-resume a stopped session, an untrusted comment is a **prompt-injection vector**. graith gates comment notifications on the author's trust: a comment only notifies if its author is trusted.

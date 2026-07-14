@@ -16,8 +16,9 @@ import (
 
 func newPRWatchSM() *SessionManager {
 	return &SessionManager{
-		prWatch: newPRWatchState(),
-		log:     slog.New(slog.NewTextHandler(io.Discard, nil)),
+		prWatch:    newPRWatchState(),
+		prRefWatch: newPRRefWatchState(),
+		log:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 }
 
@@ -1308,7 +1309,7 @@ func TestPollSession_NonGitHubBacksOff_Cov(t *testing.T) {
 	cfg := &config.PRWatchConfig{Enabled: true}
 	tgt := prWatchTarget{id: "haar", branch: "main", worktreePath: cloneDir}
 
-	sm.pollSession(context.Background(), cfg, tgt)
+	sm.pollSession(context.Background(), cfg, tgt, false)
 
 	sm.prWatch.mu.Lock()
 	next, ok := sm.prWatch.nextPoll["haar"]
@@ -1351,7 +1352,7 @@ func TestPollSession_FoundPRWritesState_Cov(t *testing.T) {
 	cfg := &config.PRWatchConfig{Enabled: true, PollTerminal: "10m", PollPending: "1m", PollMerged: "1h"}
 	tgt := prWatchTarget{id: "bonnie", branch: "bide", worktreePath: cloneDir}
 
-	sm.pollSession(context.Background(), cfg, tgt)
+	sm.pollSession(context.Background(), cfg, tgt, false)
 
 	if sm.state.Sessions["bonnie"].PullRequest.Number != 9 {
 		t.Errorf("pollSession should write PR #9, got %+v", sm.state.Sessions["bonnie"].PullRequest)
@@ -1393,7 +1394,7 @@ func TestPollSession_NoPRClearsState_Cov(t *testing.T) {
 
 	before := time.Now()
 
-	sm.pollSession(context.Background(), cfg, tgt)
+	sm.pollSession(context.Background(), cfg, tgt, false)
 
 	s := sm.state.Sessions["ken"]
 	if s.PullRequest.Number != 0 {
