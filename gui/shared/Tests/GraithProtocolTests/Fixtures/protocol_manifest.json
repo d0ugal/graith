@@ -621,7 +621,8 @@
     },
     {
       "name": "Envelope",
-      "swift": "na",
+      "swift": "required",
+      "swift_type": "ControlEnvelope",
       "fields": [
         {
           "name": "type",
