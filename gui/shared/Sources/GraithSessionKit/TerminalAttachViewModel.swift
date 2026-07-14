@@ -117,6 +117,10 @@ public final class TerminalAttachViewModel: ObservableObject {
     public func reattach() async {
         readTask?.cancel()
         session = nil
+        // Release the slot explicitly rather than relying on the detached stream
+        // to do it, so a reattach that races stream termination can't leave a
+        // stale claim that then blocks the fresh attach.
+        releaseClaim()
         phase = .idle
         await attach()
     }

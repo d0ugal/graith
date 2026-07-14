@@ -25,6 +25,8 @@ public final class HostConnection: ObservableObject, Identifiable {
 
     private let client: any GraithHostClient
     private var approvalTask: Task<Void, Never>?
+    /// Guards `refresh()` against overlapping list() calls piling up.
+    private var isRefreshing = false
 
     /// The underlying host client — used to build a terminal attach view-model.
     public var hostClient: any GraithHostClient { client }
@@ -71,11 +73,17 @@ public final class HostConnection: ObservableObject, Identifiable {
         state = .idle
     }
 
-    /// Reload the session list.
+    /// Reload the session list. Guarded against overlap: the desktop 2s poll
+    /// (or a burst of refresh() calls) skips a tick while a `list` is still in
+    /// flight, so a slow/hung host can't pile up queued RPCs on its single
+    /// control connection. A successful list clears a prior error.
     public func refresh() async {
-        guard state == .connected else { return }
+        guard state == .connected, !isRefreshing else { return }
+        isRefreshing = true
+        defer { isRefreshing = false }
         do {
             sessions = try await client.listSessions()
+            lastError = nil
         } catch {
             lastError = Self.describe(error)
         }
@@ -172,8 +180,8 @@ public final class HostConnection: ObservableObject, Identifiable {
         await run { try await self.client.fork(name: trimmed, sourceSessionID: session.id) }
     }
 
-    public func migrate(_ session: SessionInfo, agent: String) async {
-        await run { try await self.client.migrate(sessionID: session.id, agent: agent, model: nil) }
+    public func migrate(_ session: SessionInfo, agent: String, model: String? = nil) async {
+        await run { try await self.client.migrate(sessionID: session.id, agent: agent, model: model) }
     }
 
     /// Expose the underlying client for the attach path (Task 20).

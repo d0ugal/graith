@@ -3,15 +3,15 @@ import Foundation
 import GraithSessionKit
 import GraithRemoteKit
 import GraithMobileUI
-// The client factory + pairing are now the REAL adapters (GraithMobileReal) onto
-// ../shared's GraithProtocolClient, so the app connects to a live daemon over the
-// tailnet and drives real sessions. Device identity, the host registry, tailnet
-// reachability and the Keychain store are the real GraithMobileKit
-// implementations. The mocks (GraithMobileMock) remain available for
-// tests/previews. The live libghostty terminal (GhosttyTerminalDriver /
-// GhosttyMetalRenderer) is wired into SessionDetailView's Terminal tab and links
-// the pinned libghostty-vt.xcframework — Task 13 is done and renders on the sim.
-// InMemorySecretStore fallback for the unsigned dev bundle (no Keychain entitlement).
+// The session/feature layer, real client factory + pairing, host registry,
+// device identity, tailnet reachability, and Keychain store all come from
+// ../shared now (GraithSessionKit + GraithRemoteKit) — the iOS-local
+// GraithClientAPI / GraithMobileKit / GraithMobileReal targets were folded away
+// in #1131. The mocks (GraithMobileMock) remain available for tests/previews.
+// The live libghostty terminal (GhosttyTerminalDriver / GhosttyMetalRenderer) is
+// wired into SessionDetailView's Terminal tab and links the pinned
+// libghostty-vt.xcframework. InMemorySecretStore is the fallback for the
+// unsigned dev bundle (no Keychain entitlement).
 import GraithMobileMock
 
 /// The iOS/universal app entry point (#628). Builds the real `FleetModel` and
