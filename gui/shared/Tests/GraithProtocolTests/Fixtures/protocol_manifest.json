@@ -727,6 +727,20 @@
             "kind": "string"
           },
           "optional": false
+        },
+        {
+          "name": "agent",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "model",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
         }
       ]
     },
