@@ -60,7 +60,7 @@ state instead).
 | Migrate session to another agent | ✅ | ✅ | ✅ |
 | Set session status summary | ✅ | 🚧 | 🚧 |
 | Block until a session matches a condition <sup>1</sup> | ✅ | — | — |
-| List available repositories for new sessions | ✅ | ✅ | 🚧 |
+| List available repositories for new sessions | ✅ | ✅ | ✅ |
 
 <sup>1</sup> Block until a session matches a condition: A scripting/automation gate; the GUIs surface live state instead.
 
@@ -72,8 +72,8 @@ state instead).
 | Send input / keystrokes | ✅ | ✅ | ✅ |
 | Resize the terminal | ✅ | ✅ | ✅ |
 | Detach from a session | ✅ | ✅ | ✅ |
-| View logs / scrollback | ✅ | ✅ | 🚧 |
-| Render a screen snapshot / preview | ✅ | ✅ | 🚧 |
+| View logs / scrollback | ✅ | ✅ | ✅ |
+| Render a screen snapshot / preview | ✅ | ✅ | ✅ |
 | Type into another session remotely <sup>1</sup> | ✅ | — | — |
 
 <sup>1</sup> Type into another session remotely: An attached GUI types directly; the standalone remote-type command is a CLI convenience.
@@ -83,8 +83,8 @@ state instead).
 | Capability | CLI | iOS | macOS |
 |------------|:---:|:---:|:---:|
 | View pending tool approvals | ✅ | ✅ | ✅ |
-| Respond to a tool approval | ✅ | ✅ | 🚧 |
-| Request device pairing | ✅ | ✅ | 🚧 |
+| Respond to a tool approval | ✅ | ✅ | ✅ |
+| Request device pairing | ✅ | ✅ | ✅ |
 | List / approve / revoke paired devices | ✅ | 🚧 | 🚧 |
 
 ### Messaging

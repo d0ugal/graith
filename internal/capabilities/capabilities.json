@@ -100,7 +100,7 @@
       "id": "session.repo-list",
       "category": "Session lifecycle",
       "name": "List available repositories for new sessions",
-      "cli": "supported", "ios": "supported", "macos": "planned"
+      "cli": "supported", "ios": "supported", "macos": "supported"
     },
     {
       "id": "terminal.attach",
@@ -130,13 +130,13 @@
       "id": "terminal.logs",
       "category": "Terminal I/O",
       "name": "View logs / scrollback",
-      "cli": "supported", "ios": "supported", "macos": "planned"
+      "cli": "supported", "ios": "supported", "macos": "supported"
     },
     {
       "id": "terminal.screen-snapshot",
       "category": "Terminal I/O",
       "name": "Render a screen snapshot / preview",
-      "cli": "supported", "ios": "supported", "macos": "planned"
+      "cli": "supported", "ios": "supported", "macos": "supported"
     },
     {
       "id": "terminal.remote-type",
@@ -155,13 +155,13 @@
       "id": "approvals.respond",
       "category": "Approvals & pairing",
       "name": "Respond to a tool approval",
-      "cli": "supported", "ios": "supported", "macos": "planned"
+      "cli": "supported", "ios": "supported", "macos": "supported"
     },
     {
       "id": "pairing.request",
       "category": "Approvals & pairing",
       "name": "Request device pairing",
-      "cli": "supported", "ios": "supported", "macos": "planned"
+      "cli": "supported", "ios": "supported", "macos": "supported"
     },
     {
       "id": "pairing.manage",
