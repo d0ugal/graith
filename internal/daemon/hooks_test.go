@@ -253,6 +253,88 @@ func TestResolveGrBinUsesInvocationName(t *testing.T) {
 	}
 }
 
+// TestResolveGrBinEdgeCases exercises the basename guard and the fallback chain.
+// Degenerate os.Args[0] values (empty, ".", "/", empty argv) must collapse to
+// the default "gr", a bare invocation name must be looked up on PATH, and a name
+// absent from PATH must fall through to os.Executable().
+func TestResolveGrBinEdgeCases(t *testing.T) {
+	binDir := filepath.Join(t.TempDir(), "bin")
+	if err := os.MkdirAll(binDir, 0o750); err != nil {
+		t.Fatalf("create bin dir: %v", err)
+	}
+
+	grBin := filepath.Join(binDir, "gr")
+	devBin := filepath.Join(binDir, "gr-dev")
+
+	for _, p := range []string{grBin, devBin} {
+		if err := os.WriteFile(p, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil { //nolint:gosec // G306: must be executable
+			t.Fatalf("write %q: %v", p, err)
+		}
+	}
+
+	t.Setenv("PATH", binDir)
+
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+
+	origArgs := os.Args
+
+	t.Cleanup(func() { os.Args = origArgs })
+
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"empty argv", []string{}, grBin},                   // guard: len(os.Args)==0 -> "gr"
+		{"empty string", []string{""}, grBin},               // Base("")=="." -> rejected -> "gr"
+		{"dot", []string{"."}, grBin},                       // Base(".")=="." -> rejected -> "gr"
+		{"separator", []string{"/"}, grBin},                 // Base("/")=="/" -> rejected -> "gr"
+		{"bare name", []string{"gr-dev"}, devBin},           // basename looked up on PATH
+		{"absolute path", []string{devBin}, devBin},         // directory stripped, basename on PATH
+		{"not on PATH", []string{"gr-nae-sic-thing"}, self}, // LookPath miss -> os.Executable()
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			os.Args = tc.args
+			if got := resolveGrBin(); got != tc.want {
+				t.Errorf("resolveGrBin() with os.Args=%q = %q, want %q", tc.args, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestGrBinReadDir is a regression test for the sandbox read-dir grant. The
+// former guard (grBin != "gr") admitted any non-"gr" name — so a bare "gr-dev"
+// fallback would grant read on filepath.Dir("gr-dev") == "." (the cwd). The
+// grant must apply only to absolute resolved paths.
+func TestGrBinReadDir(t *testing.T) {
+	cases := []struct {
+		name    string
+		grBin   string
+		wantDir string
+		wantOK  bool
+	}{
+		{"absolute path", "/usr/local/bin/gr", "/usr/local/bin", true},
+		{"absolute dev path", "/opt/braw/gr-dev", "/opt/braw", true},
+		{"bare gr fallback", "gr", "", false},
+		{"bare dev-name fallback", "gr-dev", "", false},
+		{"dot", ".", "", false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir, ok := grBinReadDir(tc.grBin)
+			if ok != tc.wantOK || dir != tc.wantDir {
+				t.Errorf("grBinReadDir(%q) = (%q, %v), want (%q, %v)", tc.grBin, dir, ok, tc.wantDir, tc.wantOK)
+			}
+		})
+	}
+}
+
 func TestInjectCodexHooks(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 	sessionID := "kirk-codex-01"

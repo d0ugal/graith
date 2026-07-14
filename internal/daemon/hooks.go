@@ -27,11 +27,14 @@ func (sm *SessionManager) hookDir(sessionID string) string {
 
 // resolveGrBin finds the gr binary path for hook scripts.
 //
-// It resolves the name this daemon was invoked as (os.Args[0]) rather than a
-// hardcoded "gr", so a dev build launched as "gr-dev" wires hooks to itself
-// instead of an unrelated production "gr" that happens to be on PATH. Hooks are
-// shell scripts run in the user's environment, so the invocation name is the
-// right signal: it names the command the environment actually exposes. (This
+// It derives the lookup name from the basename of os.Args[0] rather than a
+// hardcoded "gr", so a dev build launched as "gr-dev" wires hooks to "gr-dev"
+// instead of an unrelated production "gr" that happens to be on PATH. Note that
+// os.Args[0] is not always the literal command the user typed: in the autostart
+// and upgrade paths the daemon is exec'd with argv[0] set to the parent's
+// resolved os.Executable() path, so we take its basename. That basename is
+// still the right signal for hooks, which are shell scripts run in the user's
+// environment and so want the command name that environment exposes. (This
 // deliberately differs from resolveExecutable, which upgrades the real binary
 // and so derives its name from os.Executable.)
 //
@@ -57,6 +60,22 @@ func resolveGrBin() string {
 	}
 
 	return name
+}
+
+// grBinReadDir returns the directory to grant sandbox read access for the
+// resolved gr binary, and whether such a grant applies. It applies only when
+// grBin is an absolute path. resolveGrBin's bare-name fallback (reached only if
+// both the PATH lookup and os.Executable fail) has no meaningful directory:
+// filepath.Dir would yield "." and grant sandbox read on the daemon's cwd, a
+// fail-open over-share. Guarding on absoluteness — rather than the stale
+// grBin != "gr" sentinel — keeps a non-"gr" invocation name (e.g. "gr-dev")
+// from slipping through.
+func grBinReadDir(grBin string) (string, bool) {
+	if filepath.IsAbs(grBin) {
+		return filepath.Dir(grBin), true
+	}
+
+	return "", false
 }
 
 // preToolUseExemptTools is the explicit set of read-only Claude tools excluded

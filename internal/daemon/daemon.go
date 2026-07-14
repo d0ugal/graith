@@ -6383,8 +6383,8 @@ func (sm *SessionManager) sandboxOptsFromConfig(merged config.SandboxConfig, ses
 	}
 
 	readDirs = append(readDirs, filepath.Dir(sm.paths.ConfigFile))
-	if grBin := resolveGrBin(); grBin != "gr" {
-		readDirs = append(readDirs, filepath.Dir(grBin))
+	if dir, ok := grBinReadDir(resolveGrBin()); ok {
+		readDirs = append(readDirs, dir)
 	}
 
 	readDirs = append(readDirs, sm.paths.RuntimeDir)
