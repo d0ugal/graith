@@ -69,8 +69,37 @@ final class SessionBadgesTests: XCTestCase {
     }
 
     func testPRBadgeMergedIgnoresConflictFlag() {
-        // Only an otherwise-open PR is downgraded to conflicting.
+        // Merged/closed are terminal — the stale conflict bit must not win.
         XCTAssertEqual(prBadgeStyle(for: pr(state: "merged", conflicting: true)), .merged)
+        XCTAssertEqual(prBadgeStyle(for: pr(state: "closed", conflicting: true)), .closed)
+    }
+
+    func testPRBadgeDraftConflictDoesNotHideConflict() {
+        // Regression: a draft PR with a merge conflict must surface the conflict,
+        // not be swallowed by the draft styling (matches the terminal overlay's
+        // `#56d ⚠`). A plain draft stays a draft.
+        XCTAssertEqual(prBadgeStyle(for: pr(state: "draft", conflicting: true)), .draftConflicting)
+        XCTAssertEqual(prBadgeStyle(for: pr(state: "draft")), .draft)
+    }
+
+    // MARK: - CI visibility
+
+    func testCIShownForOpenPRAndNoPR() {
+        XCTAssertTrue(shouldShowCI(pr: pr(state: "open"), ci: ci(state: "passing")))
+        XCTAssertTrue(shouldShowCI(pr: pr(state: "draft"), ci: ci(state: "failing")))
+        XCTAssertTrue(shouldShowCI(pr: nil, ci: ci(state: "passing")))
+    }
+
+    func testCIHiddenForTerminalPRStates() {
+        // The daemon keeps the last-known CI after a PR merges/closes; the badge
+        // must not render that stale value beside a merged/closed PR.
+        XCTAssertFalse(shouldShowCI(pr: pr(state: "merged"), ci: ci(state: "failing")))
+        XCTAssertFalse(shouldShowCI(pr: pr(state: "closed"), ci: ci(state: "passing")))
+    }
+
+    func testCIHiddenWhenAbsent() {
+        XCTAssertFalse(shouldShowCI(pr: pr(state: "open"), ci: nil))
+        XCTAssertFalse(shouldShowCI(pr: nil, ci: nil))
     }
 
     // MARK: - CI badge style
