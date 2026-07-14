@@ -1187,8 +1187,9 @@ func TestHandleHookReport(t *testing.T) {
 		}
 
 		sm.HandleHookReport(protocol.StatusReportMsg{
-			SessionID: "sess1",
-			Event:     "Notification",
+			SessionID:        "sess1",
+			Event:            "Notification",
+			NotificationType: "permission_prompt",
 		})
 
 		sm.mu.RLock()
@@ -1206,6 +1207,32 @@ func TestHandleHookReport(t *testing.T) {
 		untilDelta := time.Until(report.AuthoritativeUntil)
 		if untilDelta < 29*time.Minute || untilDelta > 31*time.Minute {
 			t.Errorf("AuthoritativeUntil delta = %v, want ~30m", untilDelta)
+		}
+	})
+
+	// PermissionRequest is Codex's approval hook and must keep mapping to
+	// approval (it carries no subtype).
+	t.Run("PermissionRequest maps to approval", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.state.Sessions["speir"] = &SessionState{
+			ID: "speir", Name: "speir", Status: StatusRunning,
+		}
+
+		sm.HandleHookReport(protocol.StatusReportMsg{
+			SessionID: "speir",
+			Event:     "PermissionRequest",
+		})
+
+		sm.mu.RLock()
+		report, ok := sm.hookReports["speir"]
+		sm.mu.RUnlock()
+
+		if !ok {
+			t.Fatal("hookReport not found for speir")
+		}
+
+		if report.Status != "approval" {
+			t.Errorf("Status = %q, want %q", report.Status, "approval")
 		}
 	})
 
@@ -1321,6 +1348,132 @@ func TestHandleHookReport(t *testing.T) {
 
 		if sess.HookToolName != "Bash" {
 			t.Errorf("sess.HookToolName = %q, want %q", sess.HookToolName, "Bash")
+		}
+	})
+
+	// Notification is now subtype-aware: idle_prompt -> ready, permission_prompt
+	// -> approval, and every other subtype (including empty/unparsed) leaves the
+	// status untouched. The empty case is the regression guard — the pre-subtype
+	// code mapped every Notification to approval, so a timed-out/unparsed hook
+	// spuriously flagged a session as needing attention.
+	t.Run("notification idle_prompt maps to ready", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.state.Sessions["ken"] = &SessionState{
+			ID: "ken", Name: "ken", Status: StatusRunning, AgentStatus: "active",
+		}
+
+		sm.HandleHookReport(protocol.StatusReportMsg{
+			SessionID:        "ken",
+			Event:            "Notification",
+			NotificationType: "idle_prompt",
+		})
+
+		sm.mu.RLock()
+		report, ok := sm.hookReports["ken"]
+		agentStatus := sm.state.Sessions["ken"].AgentStatus
+		sm.mu.RUnlock()
+
+		if !ok {
+			t.Fatal("hookReport not found for ken")
+		}
+
+		if report.Status != "ready" {
+			t.Errorf("Status = %q, want %q", report.Status, "ready")
+		}
+
+		if agentStatus != "ready" {
+			t.Errorf("AgentStatus = %q, want %q", agentStatus, "ready")
+		}
+		// idle_prompt is sticky like Stop (~30m).
+		untilDelta := time.Until(report.AuthoritativeUntil)
+		if untilDelta < 29*time.Minute || untilDelta > 31*time.Minute {
+			t.Errorf("AuthoritativeUntil delta = %v, want ~30m", untilDelta)
+		}
+	})
+
+	t.Run("notification permission_prompt maps to approval", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.state.Sessions["haar"] = &SessionState{
+			ID: "haar", Name: "haar", Status: StatusRunning, AgentStatus: "active",
+		}
+
+		sm.HandleHookReport(protocol.StatusReportMsg{
+			SessionID:        "haar",
+			Event:            "Notification",
+			NotificationType: "permission_prompt",
+		})
+
+		sm.mu.RLock()
+		agentStatus := sm.state.Sessions["haar"].AgentStatus
+		sm.mu.RUnlock()
+
+		if agentStatus != "approval" {
+			t.Errorf("AgentStatus = %q, want %q", agentStatus, "approval")
+		}
+	})
+
+	// Informational and unparsed subtypes must not touch status — no hookReport
+	// is stored and AgentStatus is left as-is.
+	noChangeSubtypes := map[string]string{
+		"auth_success":       "auth_success",
+		"elicitation_start":  "elicitation_start",
+		"elicitation_finish": "elicitation_finish",
+		"empty (unparsed)":   "",
+	}
+	for name, subtype := range noChangeSubtypes {
+		t.Run("notification "+name+" leaves status unchanged", func(t *testing.T) {
+			sm := newTestSessionManager(t)
+			sm.state.Sessions["thrawn"] = &SessionState{
+				ID: "thrawn", Name: "thrawn", Status: StatusRunning, AgentStatus: "active",
+			}
+
+			sm.HandleHookReport(protocol.StatusReportMsg{
+				SessionID:        "thrawn",
+				Event:            "Notification",
+				NotificationType: subtype,
+			})
+
+			sm.mu.RLock()
+			_, reported := sm.hookReports["thrawn"]
+			agentStatus := sm.state.Sessions["thrawn"].AgentStatus
+			sm.mu.RUnlock()
+
+			if reported {
+				t.Errorf("subtype %q created a hookReport, want none", subtype)
+			}
+
+			if agentStatus != "active" {
+				t.Errorf("subtype %q: AgentStatus = %q, want unchanged %q", subtype, agentStatus, "active")
+			}
+		})
+	}
+
+	// Regression: a timed-out/unparsed Notification arrives with an empty
+	// subtype. It must NOT become approval (the old code path mapped every
+	// Notification to approval, so an idle session with a slow hook flipped to
+	// "needs attention").
+	t.Run("empty notification does not become approval (regression)", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.state.Sessions["dreich"] = &SessionState{
+			ID: "dreich", Name: "dreich", Status: StatusRunning, AgentStatus: "ready",
+		}
+
+		sm.HandleHookReport(protocol.StatusReportMsg{
+			SessionID: "dreich",
+			Event:     "Notification",
+			// NotificationType intentionally empty (stdin didn't parse).
+		})
+
+		sm.mu.RLock()
+		agentStatus := sm.state.Sessions["dreich"].AgentStatus
+		sm.mu.RUnlock()
+
+		if agentStatus == "approval" {
+			t.Fatal("empty Notification became approval; regressed to pre-subtype behaviour")
+		}
+
+		if agentStatus != "ready" {
+			t.Errorf("AgentStatus = %q, want unchanged %q", agentStatus, "ready")
 		}
 	})
 }

@@ -434,6 +434,11 @@ type StatusReportMsg struct {
 	Event     string `json:"event"`
 	Status    string `json:"status,omitempty"`
 	ToolName  string `json:"tool_name,omitempty"`
+	// NotificationType carries the Claude Notification subtype (e.g.
+	// idle_prompt, permission_prompt) raw from the hook payload. The CLI
+	// forwards it verbatim (empty when stdin didn't parse) and the daemon
+	// decides what it means — see HandleHookReport.
+	NotificationType string `json:"notification_type,omitempty"`
 }
 
 // HandshakeOkMsg is the daemon's response to a successful handshake.
