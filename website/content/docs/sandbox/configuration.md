@@ -41,7 +41,7 @@ write_files = ["~/.claude.json", "~/.claude.json.lock", "~/.claude.lock"]  # log
 disabled = true               # force-disable for this agent
 ```
 
-### Merge behavior
+## Merge behavior
 
 - `features`, `read_dirs`, `write_dirs`, `read_files`, and `write_files` are merged (global + agent, deduplicated)
 - `backend`, `command`, and `signal_mode` are overridable per-agent (agent takes precedence)
@@ -77,7 +77,7 @@ egress policy, mapped onto nono's profile `network` section:
   proxy and only these hosts / URL globs are reachable.
 
 Network filtering requires **Landlock ABI v4 (Linux kernel 6.7+)**. A network
-policy on an older kernel fails closed (see the fail-closed table). `safehouse`
+policy on an older kernel fails closed (see the [fail-closed table]({{< relref "how-it-works.md#fail-closed" >}})). `safehouse`
 has no network primitive, so a network policy with `backend = "safehouse"` also
 fails closed — use `nono` for egress control.
 
