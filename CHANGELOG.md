@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.68.2](https://github.com/d0ugal/graith/compare/v0.68.1...v0.68.2) (2026-07-14)
+
+
+### Features
+
+* **gui:** surface session metadata badges in the sidebar ([c9dc718](https://github.com/d0ugal/graith/commit/c9dc718ce9479f9e29d876788e8ceaa40850573e)), closes [#901](https://github.com/d0ugal/graith/issues/901)
+* **includes:** pass --add-dir for each included repo worktree ([1bc326c](https://github.com/d0ugal/graith/commit/1bc326ca3729a274e0517e9adc993923984b5b7d))
+* **prwatch:** near-instant PR detection via a git-refs file watch ([6759471](https://github.com/d0ugal/graith/commit/6759471ecb324fe76407fc6cfa34eb65dff1f3c4))
+
+
+### Bug Fixes
+
+* **gui:** don't hide merge conflicts on drafts or show stale CI ([7528c7c](https://github.com/d0ugal/graith/commit/7528c7cadd3abb677994bdf52e460612541d4056))
+* **includes:** gate --add-dir per agent, place after prompt, fix mirror resume ([771446c](https://github.com/d0ugal/graith/commit/771446c203ed2094003db225bf86cfd80ab2cc84))
+* **overlay:** colour the PR review decision independently of CI ([070c4bf](https://github.com/d0ugal/graith/commit/070c4bf27e0b5844094987fbed88bfa404056feb))
+* update module github.com/gaissmai/bart to v0.28.1 ([582fb12](https://github.com/d0ugal/graith/commit/582fb12db999bdf6fecf441a41bc697cff242908))
+
+
+### Dependencies
+
+* **deps:** update dependency nolabs-ai/nono to v0.68.0 ([d2c8843](https://github.com/d0ugal/graith/commit/d2c884375c2dfb100127ec2f67f6a1742d72086b))
+
 ## [0.68.1](https://github.com/d0ugal/graith/compare/v0.68.0...v0.68.1) (2026-07-14)
 
 
