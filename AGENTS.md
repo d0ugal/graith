@@ -60,6 +60,7 @@ Key files by area:
 | Area | Files | What they do |
 |------|-------|-------------|
 | Protocol | `protocol/frame.go`, `protocol/messages.go` | 5-byte framed multiplexing, JSON control envelope |
+| Protocol | `protocol/manifest.go` | Cross-language conformance: reflects every wire struct into a language-neutral manifest (fixture) the Swift client asserts against (#1129) |
 | Daemon | `daemon/handler.go` | Main message dispatch loop (all control message types) |
 | Daemon | `daemon/daemon.go` | SessionManager: create, delete, resume, worktree lifecycle |
 | Daemon | `daemon/launch.go` | Launch throttle (semaphore bounding concurrent agent spawns) + startup watchdog (restarts sessions stuck in `unknown`/no-output past `[launch] startup_timeout`) |
@@ -98,6 +99,24 @@ Key files by area:
 Control messages use an envelope `{"type":"...", "payload":{...}}`. Add new
 message types by adding a struct in `protocol/messages.go` and handling the
 type string in `daemon/handler.go`.
+
+**Protocol conformance (Go ↔ Swift, #1129)**: the wire protocol is defined
+twice — Go `protocol/messages.go` and the hand-written Swift
+`gui/shared/Sources/GraithProtocol/Messages.swift`. `protocol/manifest.go`
+reflects every wire struct into a language-neutral manifest committed as a
+fixture at
+`gui/shared/Tests/GraithProtocolTests/Fixtures/protocol_manifest.json`. **When
+you add or change a wire struct in `messages.go`, register it in
+`registeredTypes`, classify it in `swiftAnnotations`
+(`required`/`planned`/`na`), and regenerate the fixture:**
+`go test ./internal/protocol -run TestManifestUpToDate -update`.
+`TestManifestRegistryComplete` fails closed if a struct is unregistered or
+unclassified (same discipline as `remoteMessagePolicy`); `TestManifestUpToDate`
+runs on every PR (Go CI has no paths filter) and fails if the fixture is stale.
+On the Swift side, `ManifestConformanceTests` decodes the same fixture and fails
+if any `required` type isn't modelled in `Messages.swift` — so a Go PR that adds
+a client-facing message can't merge while Swift is behind. Because the fixture
+lives under `gui/`, regenerating it also trips the paths-filtered gui/ Swift CI.
 
 **Session lifecycle**: Create → worktree + branch → start agent process → attach.
 Resume → restart process in existing worktree.
