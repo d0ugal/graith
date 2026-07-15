@@ -10,7 +10,7 @@ import GraithRemoteKit
 // the mutation surface, refresh guarding + error handling, and the observable
 // single-attach takeover.
 
-@Suite("FleetModel — connected remote host")
+@Suite("FleetModel — connected remote host", .timeLimit(.minutes(1)))
 @MainActor
 struct FleetConnectedTests {
     private func sampleSessions() -> [SessionInfo] {
@@ -206,19 +206,31 @@ struct FleetConnectedTests {
         #expect(fleet.error == nil)
     }
 
-    @Test func refreshGuardSkipsWhileOneIsInFlight() async {
+    @Test func refreshCoalescesOverlappingCallIntoOneFollowUp() async {
         let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions(), subscribeApprovals: false)
-        await fleet.connectAll()
+        await fleet.connectAll()  // one refresh already ran (list call #1)
         let conn = fleet.connections[0]
         await mock.setGateList(true)
-        // First refresh blocks on the gate (isRefreshing == true).
+        // First refresh blocks in flight on the gate (isRefreshing == true).
         let first = Task { await conn.refresh() }
-        try? await Task.sleep(nanoseconds: 20_000_000)
-        // Second refresh must return immediately (guarded), not queue behind it.
+        // Wait until it has actually entered listSessions (call #2) so the
+        // overlapping refresh below is guaranteed to land while one is in flight
+        // — deterministic, no sleep-and-hope.
+        for _ in 0..<200 where await mock.listCallCount < 2 {
+            try? await Task.sleep(nanoseconds: 2_000_000)
+        }
+        #expect(await mock.listCallCount == 2)
+        // A refresh while one is in flight does NOT run concurrently: it sets the
+        // queued flag and returns immediately, so the in-flight refresh loops
+        // exactly once more when released.
         await conn.refresh()
         await mock.releaseList()
         await first.value
         #expect(conn.state == .connected)
+        // The gated call (#2) plus a single coalesced loop-around (#3) — no more
+        // (would mean the queue flag stuck on and it kept looping), no fewer
+        // (would mean the overlapping refresh was silently dropped).
+        #expect(await mock.listCallCount == 3)
     }
 
     @Test func removeHostTearsDownConnection() async {

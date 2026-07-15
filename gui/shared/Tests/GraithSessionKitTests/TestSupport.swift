@@ -75,9 +75,13 @@ actor MockHostClient: GraithHostClient {
     /// Records the last `set_status` call so tests can assert the text/clear flag.
     private(set) var lastSetStatus: (text: String, ttlSeconds: Int?, clear: Bool)?
     /// Blocks `listSessions()` until `releaseList()` — used to hold a refresh in
-    /// flight across poll ticks and assert the overlap guard.
+    /// flight while a second, coalesced refresh queues behind it, then assert the
+    /// in-flight refresh loops exactly once more.
     private var listGate: CheckedContinuation<Void, Never>?
     private var gateList = false
+    /// Number of `listSessions()` calls, so a test can assert the in-flight
+    /// refresh's single coalesced follow-up actually fired (and only once).
+    private(set) var listCallCount = 0
 
     init(sessions: [SessionInfo] = [], pending: [ApprovalInfo] = [],
          repos: [RepoEntry] = [], scenarios: [ScenarioRecord] = [],
@@ -95,15 +99,32 @@ actor MockHostClient: GraithHostClient {
     func setFailList(_ e: GraithClientError?) { failList = e }
     func setFailSetStatus(_ e: GraithClientError?) { failSetStatus = e }
     func setGateList(_ on: Bool) { gateList = on }
-    func releaseList() { listGate?.resume(); listGate = nil }
+    /// Release a gated `listSessions()`. Clears the gate *before* resuming so the
+    /// coalesced follow-up call (the in-flight refresh looping once more) runs to
+    /// completion instead of re-blocking on a fresh, never-resumed continuation —
+    /// the deadlock this test guards against.
+    func releaseList() {
+        gateList = false
+        listGate?.resume()
+        listGate = nil
+    }
 
     func connect() async throws {
         if let failConnect { throw failConnect }
         connected = true
     }
-    func disconnect() async { connected = false }
+    func disconnect() async {
+        connected = false
+        // Resume any refresh still blocked on the gate so teardown can't strand
+        // the continuation (and the swift-testing runner) if a test fails or
+        // returns mid-gate.
+        gateList = false
+        listGate?.resume()
+        listGate = nil
+    }
 
     func listSessions() async throws -> [SessionInfo] {
+        listCallCount += 1
         if gateList { await withCheckedContinuation { listGate = $0 } }
         if let failList { throw failList }
         return sessions
