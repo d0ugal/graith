@@ -1,0 +1,6 @@
+# Go-generated fixtures are committed and byte-compared by their staleness
+# tests (TestGUIFixtureUpToDate, TestManifestUpToDate). A CRLF checkout would
+# fail the byte comparison even when the content is identical, so pin them to
+# LF regardless of platform / core.autocrlf.
+gui/shared/Tests/GraithSessionKitTests/Fixtures/capability_manifest.json text eol=lf
+gui/shared/Tests/GraithProtocolTests/Fixtures/protocol_manifest.json text eol=lf

@@ -632,27 +632,49 @@ edit without a regen goes red; and because the fixture lives under `gui/`, the
 regenerated file trips the paths-filtered gui/ Swift CI. On the Swift side,
 `CapabilityConformanceTests` (in `GraithSessionKitTests`) decodes that fixture
 and cross-checks it against **`sharedAffordances()`** — a *compile-anchored*
-registry of the capabilities the shared `GraithSessionKit` layer actually wires
+registry of the capabilities the shared `GraithSessionKit` layer wires
 (`FleetModel` / `HostConnection` / `TerminalAttachViewModel` / the
 `GraithHostClient` boundary). Each entry references the real symbol behind it,
 so renaming or deleting the wiring stops the test file compiling. The check
 fails when:
 
 - a capability is wired in `sharedAffordances()` but the manifest marks it
-  anything but `supported` on a GUI (the #1143 incident — code shipped, manifest
-  still said `planned` — as a red test);
+  anything but `supported` on a GUI (the #1143 direction — code ahead of the
+  manifest — as a red test, for capabilities registered here);
 - a capability is `supported` on a GUI with no backing affordance (and not in
   the explicit `viewOnlyCapabilities` allowlist);
 - iOS and macOS states diverge without a declared `knownDivergences` exception
-  (view-level drift — the shared layer is parity-by-construction, #1147).
+  (the shared layer is parity-by-construction, #1147);
+- a declared exception goes stale (a `knownDivergences` id whose states no
+  longer diverge, or a `viewOnlyCapabilities` id that became shared or dropped
+  below `supported`).
+
+**Scope — what this proves, and what it doesn't.** The guard makes the manifest
+unable to over- or under-claim relative to the shared *model* surface, and
+rot-proofs each registered row. It does **not** verify that each app's *views*
+surface a capability: the shared layer is the model both apps bind to, not the
+SwiftUI/AppKit views they own on top of it, and surfacing is sometimes a
+semantic judgment (e.g. iOS surfaces `terminal.logs` / `terminal.screen-snapshot`
+through the live attach view, not a dedicated sheet — a view-type anchor would
+false-positive there). Two more things stay manual: adding a *new* shared
+affordance requires adding its `sharedAffordances()` row (the anchor keeps an
+existing row honest; it can't discover unregistered wiring), and the
+`supported`/`planned`/`n/a` judgment for the CLI column and un-wired GUI gaps —
+especially `planned` (intended gap) vs `n/a` (deliberately not applicable).
+
+**Per-app view surfacing is a reviewed checklist.** Because view wiring can't be
+soundly reflected today, treat a change to which capabilities an app's *UI*
+surfaces as a deliberate manifest decision, reviewed against the actual app
+views (`gui/macos/Sources/GraithGUI`, `gui/ios/Sources/GraithMobileUI`), not a
+silent hand-edit. An automated per-app view-anchor guard (compile-anchored to
+each app's view types, accounting for the covered-by-attach cases above) is a
+sensible follow-up but is not part of this guard.
 
 So when a GUI gains or loses a capability: wire it in `sharedAffordances()` (or
 declare a reviewed `viewOnlyCapabilities` / `knownDivergences` exception),
-update `capabilities.json`, and regenerate **both** the docs page and the GUI
-fixture. What the checks still *can't* derive is the `supported`/`planned`/`n/a`
-judgment for the CLI column and for un-wired GUI gaps — and especially the
-`planned` (intended gap) vs `n/a` (deliberately not applicable) distinction.
-Those stay human judgments you keep current by hand.
+update `capabilities.json`, confirm the app views match, and regenerate **both**
+the docs page and the GUI fixture (`go test ./internal/capabilities -update`
+does both at once).
 
 graith can manage its own development sessions. This is the intended workflow
 for working on graith itself:
