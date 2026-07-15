@@ -35,26 +35,11 @@ public enum ApprovalDecision: String, Codable, Sendable {
     case deny
 }
 
-/// Aggregate fleet counts, derived app-side from the session list (the daemon
-/// has no dedicated `status` RPC over the remote boundary).
-public struct FleetSummary: Codable, Hashable, Sendable {
-    public let total: Int
-    public let active: Int
-    public let approval: Int
-    public let ready: Int
-    public let errored: Int
-    public let stopped: Int
-
-    public init(total: Int = 0, active: Int = 0, approval: Int = 0,
-                ready: Int = 0, errored: Int = 0, stopped: Int = 0) {
-        self.total = total
-        self.active = active
-        self.approval = approval
-        self.ready = ready
-        self.errored = errored
-        self.stopped = stopped
-    }
-}
+// `FleetSummary` moved to `GraithProtocol` (Messages.swift) — it is a wire type
+// (embedded in `DiagnosticsMsg` and the Go `StatusResponseMsg`), and the
+// diagnostics panel (#904) needs it in the module the conformance test imports.
+// GraithSessionKit re-exports GraithProtocol, so every consumer here still sees
+// it unqualified.
 
 /// The reply to a per-session `status` request: the session plus its unread
 /// count and a fleet summary. Synthesized from `list` by `RealHostClient`.

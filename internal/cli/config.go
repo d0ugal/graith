@@ -5,9 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/aymanbagabas/go-udiff"
 	"github.com/d0ugal/graith/internal/config"
-	"github.com/pelletier/go-toml/v2"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -149,19 +147,10 @@ var configDiffCmd = &cobra.Command{
 			return fmt.Errorf("parse config: %w", err)
 		}
 
-		defaultCfg := config.Default()
-
-		defaultBytes, err := toml.Marshal(defaultCfg)
+		text, err := config.DiffFromDefaults(userCfg, target)
 		if err != nil {
-			return fmt.Errorf("marshal defaults: %w", err)
+			return err
 		}
-
-		userBytes, err := toml.Marshal(userCfg)
-		if err != nil {
-			return fmt.Errorf("marshal user config: %w", err)
-		}
-
-		text := udiff.Unified("defaults", target, string(defaultBytes), string(userBytes))
 
 		if text == "" {
 			return nil
@@ -187,9 +176,9 @@ var configShowCmd = &cobra.Command{
 			return fmt.Errorf("load config: %w", err)
 		}
 
-		data, err := toml.Marshal(effectiveCfg)
+		data, err := config.EffectiveTOML(effectiveCfg)
 		if err != nil {
-			return fmt.Errorf("marshal config: %w", err)
+			return err
 		}
 
 		fmt.Print(string(data))

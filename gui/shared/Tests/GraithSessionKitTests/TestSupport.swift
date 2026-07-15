@@ -71,6 +71,8 @@ actor MockHostClient: GraithHostClient {
     var failConnect: GraithClientError?
     var failList: GraithClientError?
     var failSetStatus: GraithClientError?
+    var failConfig: GraithClientError?
+    var failDiagnostics: GraithClientError?
     /// Records the last `migrate` call so tests can assert the model is forwarded.
     private(set) var lastMigrate: (agent: String, model: String?)?
     /// Records the last `create` request so tests can assert the advanced options
@@ -105,6 +107,8 @@ actor MockHostClient: GraithHostClient {
     func appendSession(_ s: SessionInfo) { sessions.append(s) }
     func setFailList(_ e: GraithClientError?) { failList = e }
     func setFailSetStatus(_ e: GraithClientError?) { failSetStatus = e }
+    func setFailConfig(_ e: GraithClientError?) { failConfig = e }
+    func setFailDiagnostics(_ e: GraithClientError?) { failDiagnostics = e }
     func setGateList(_ on: Bool) { gateList = on }
     /// Release a gated `listSessions()`. Clears the gate *before* resuming so the
     /// coalesced follow-up call (the in-flight refresh looping once more) runs to
@@ -155,6 +159,29 @@ actor MockHostClient: GraithHostClient {
         if let failStore { throw failStore }
         guard let body = storeBodies[key] else { throw GraithClientError.daemon("not found: \(key)") }
         return StoreGetResponseMsg(key: key, repo: repo ?? (shared ? "shared" : ""), body: body)
+    }
+    func config() async throws -> ConfigResponseMsg {
+        if let failConfig { throw failConfig }
+        return ConfigResponseMsg(
+            effectiveTOML: "[sandbox]\nenabled = true\n",
+            diffFromDefaults: "--- defaults\n+++ effective\n@@ -1 +1 @@\n-enabled = false\n+enabled = true\n",
+            configPath: "/hame/.config/graith/config.toml", configExists: true)
+    }
+    func diagnostics() async throws -> DiagnosticsMsg {
+        if let failDiagnostics { throw failDiagnostics }
+        return DiagnosticsMsg(
+            daemonPID: 4242, daemonVersion: "dev", daemonUptime: "1h",
+            fleet: FleetSummary(total: sessions.count),
+            sessions: sessions.map {
+                SessionDiagnostic(id: $0.id, name: $0.name, status: $0.status,
+                                  agentStatus: $0.agentStatus, pid: 1, pidAlive: true, hasPTY: true,
+                                  worktreePath: $0.worktreePath, worktreeExists: true,
+                                  configStale: false, hookStale: false,
+                                  scrollbackBytes: 1, scrollbackMax: 100, saturated: false, hasToken: true)
+            },
+            deletedSessionIDs: deleted.map(\.id),
+            scrollback: ScrollbackDiagnostic(totalFiles: sessions.count, totalBytes: 1, saturatedCount: 0),
+            messages: MessagesDiagnostic(totalStreams: 0, totalMessages: 0))
     }
     func logs(sessionID: String, lines: Int) async throws -> String { "" }
     func screenSnapshot(sessionID: String) async throws -> ScreenSnapshot {

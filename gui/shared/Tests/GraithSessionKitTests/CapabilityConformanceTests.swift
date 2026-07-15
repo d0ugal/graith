@@ -151,6 +151,12 @@ private func sharedAffordances() -> Set<String> {
         _ = ControlType.scenarioList
     }
 
+    // Host introspection — config viewer + diagnostics panel (#904). FleetModel
+    // fetches both over the control protocol; the shared HealthReport derives
+    // the doctor-style findings both apps render.
+    wire("config.view") { _ = FleetModel.config }
+    wire("doctor.diagnostics") { _ = FleetModel.diagnostics; _ = HealthReport.findings }
+
     return ids
 }
 

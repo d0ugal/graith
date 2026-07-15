@@ -72,6 +72,8 @@ public enum ControlType {
     public static let scenarioDelete = "scenario_delete"
     public static let storeList = "store_list"
     public static let storeGet = "store_get"
+    public static let config = "config"
+    public static let diagnostics = "diagnostics"
     public static let approvalList = "approval_list"
     public static let approvalSubscribe = "approval_subscribe"
     public static let approvalRespond = "approval_respond"
@@ -138,6 +140,11 @@ public protocol GraithHostClient: Actor {
     func storeList(repo: String?, shared: Bool, prefix: String?) async throws -> [StoreEntryInfo]
     /// Fetch a single document body from the store (#902).
     func storeGet(repo: String?, shared: Bool, key: String) async throws -> StoreGetResponseMsg
+    /// The daemon's effective configuration + diff-vs-defaults for the read-only
+    /// config viewer in Settings (#904).
+    func config() async throws -> ConfigResponseMsg
+    /// The daemon's health snapshot for the diagnostics panel (#904).
+    func diagnostics() async throws -> DiagnosticsMsg
 
     // Mutations (roleRemoteHuman only).
     func create(_ request: CreateRequest) async throws

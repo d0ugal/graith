@@ -115,9 +115,25 @@ public actor RealHostClient: GraithHostClient {
         }
     }
 
+    public func config() async throws -> ConfigResponseMsg {
+        do {
+            return try await inner.config()
+        } catch {
+            throw RealClientError.map(error)
+        }
+    }
+
     public func storeGet(repo: String?, shared: Bool, key: String) async throws -> StoreGetResponseMsg {
         do {
             return try await inner.storeGet(repo: repo, shared: shared, key: key)
+        } catch {
+            throw RealClientError.map(error)
+        }
+    }
+
+    public func diagnostics() async throws -> DiagnosticsMsg {
+        do {
+            return try await inner.diagnostics()
         } catch {
             throw RealClientError.map(error)
         }

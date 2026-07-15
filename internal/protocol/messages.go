@@ -735,6 +735,30 @@ type StatusRequestMsg struct {
 	SessionID string `json:"session_id"`
 }
 
+// Config viewer (client -> daemon: "config"; daemon -> client: "config_response").
+// The GUI's read-only config viewer uses this to show the effective (merged)
+// configuration and how it differs from the built-in defaults, without reading
+// the daemon host's filesystem itself (so it works over a remote connection).
+
+// ConfigMsg is the (empty) request for the daemon's effective configuration.
+type ConfigMsg struct{}
+
+// ConfigResponseMsg carries the daemon's effective configuration rendered as
+// TOML plus a unified diff against the built-in defaults.
+type ConfigResponseMsg struct {
+	// EffectiveTOML is the fully-merged configuration (defaults overlaid with the
+	// user's file) rendered as TOML — what `gr config show` prints.
+	EffectiveTOML string `json:"effective_toml"`
+	// DiffFromDefaults is a unified diff (defaults → effective). Empty when the
+	// effective config is identical to the built-in defaults.
+	DiffFromDefaults string `json:"diff_from_defaults"`
+	// ConfigPath is the config file the daemon loaded (informational).
+	ConfigPath string `json:"config_path,omitempty"`
+	// ConfigExists reports whether a config file was present at ConfigPath; when
+	// false the daemon is running on pure defaults.
+	ConfigExists bool `json:"config_exists"`
+}
+
 // Diagnostics types (daemon -> client, in response to "diagnostics" message)
 
 type DiagnosticsMsg struct {

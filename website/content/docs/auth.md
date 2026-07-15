@@ -28,7 +28,7 @@ When a valid token is present, the daemon enforces these rules:
 
 | Rule | Message types | Effect |
 |------|--------------|--------|
-| Always allowed | `handshake`, `list`, `diagnostics`, `detach`, `resize`, `approval_list` | No restriction |
+| Always allowed | `handshake`, `list`, `diagnostics`, `config`, `detach`, `resize`, `approval_list` | No restriction |
 | Self only | `set_status`, `status_report`, `approval_request`, `mcp_connect` | Agent can only target its own session |
 | Self or descendant | `fork`, `attach`, `stop`, `delete`, `type`, `resume`, `restart`, `rename`, `star`, `unstar`, `logs`, `screen_preview`, `screen_snapshot`, `status` | Agent can target itself or any session it created (including transitive children) |
 | Human only | `reload`, `upgrade`, `approval_respond` | Rejected when a token is present; reserved for human operators |

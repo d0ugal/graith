@@ -192,6 +192,18 @@ public final class HostConnection: ObservableObject, Identifiable {
         try await client.storeGet(repo: repo, shared: shared, key: key)
     }
 
+    /// Fetch the daemon's effective configuration + diff-vs-defaults for the
+    /// read-only config viewer (#904). Throws so the view can distinguish a
+    /// fetch failure (offline host, permission denied) from an empty config.
+    public func config() async throws -> ConfigResponseMsg {
+        try await client.config()
+    }
+
+    /// Fetch the daemon's health snapshot for the diagnostics panel (#904).
+    public func diagnostics() async throws -> DiagnosticsMsg {
+        try await client.diagnostics()
+    }
+
     public func create(_ request: CreateRequest) async -> Bool {
         do {
             try await client.create(request)
@@ -319,7 +331,6 @@ public final class HostConnection: ObservableObject, Identifiable {
     }
 
     static func describe(_ error: Error) -> String {
-        if let e = error as? GraithClientError { return e.userMessage }
-        return error.localizedDescription
+        FleetModel.describeError(error)
     }
 }

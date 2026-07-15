@@ -266,6 +266,47 @@
       ]
     },
     {
+      "name": "ConfigMsg",
+      "swift": "required",
+      "swift_type": "EmptyMsg",
+      "fields": []
+    },
+    {
+      "name": "ConfigResponseMsg",
+      "swift": "required",
+      "swift_type": "ConfigResponseMsg",
+      "fields": [
+        {
+          "name": "effective_toml",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "diff_from_defaults",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "config_path",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "config_exists",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": false
+        }
+      ]
+    },
+    {
       "name": "ConversationMessage",
       "swift": "required",
       "swift_type": "ConversationMessage",
@@ -564,7 +605,8 @@
     },
     {
       "name": "DiagnosticsMsg",
-      "swift": "na",
+      "swift": "required",
+      "swift_type": "DiagnosticsMsg",
       "fields": [
         {
           "name": "daemon_pid",
@@ -689,7 +731,8 @@
     },
     {
       "name": "FleetSummary",
-      "swift": "planned",
+      "swift": "required",
+      "swift_type": "FleetSummary",
       "fields": [
         {
           "name": "total",
@@ -1427,7 +1470,8 @@
     },
     {
       "name": "MessagesDiagnostic",
-      "swift": "na",
+      "swift": "required",
+      "swift_type": "MessagesDiagnostic",
       "fields": [
         {
           "name": "total_streams",
@@ -2785,7 +2829,8 @@
     },
     {
       "name": "ScrollbackDiagnostic",
-      "swift": "na",
+      "swift": "required",
+      "swift_type": "ScrollbackDiagnostic",
       "fields": [
         {
           "name": "total_files",
@@ -2812,7 +2857,8 @@
     },
     {
       "name": "SessionDiagnostic",
-      "swift": "na",
+      "swift": "required",
+      "swift_type": "SessionDiagnostic",
       "fields": [
         {
           "name": "id",

@@ -178,6 +178,23 @@ public actor GraithProtocolClient {
         return try decodePayload(reply, as: RepoListResponseMsg.self).repos
     }
 
+    /// `config` — the daemon's effective (merged) configuration as TOML plus a
+    /// unified diff against the built-in defaults, for the read-only config
+    /// viewer in Settings (#904).
+    public func config() async throws -> ConfigResponseMsg {
+        let conn = try await controlConnection()
+        let reply = try await conn.request("config", payload: EmptyMsg())
+        return try decodePayload(reply, as: ConfigResponseMsg.self)
+    }
+
+    /// `diagnostics` — the daemon's health snapshot for the diagnostics panel
+    /// (the `gr doctor` equivalent, #904).
+    public func diagnostics() async throws -> DiagnosticsMsg {
+        let conn = try await controlConnection()
+        let reply = try await conn.request("diagnostics", payload: EmptyMsg())
+        return try decodePayload(reply, as: DiagnosticsMsg.self)
+    }
+
     /// `screen_snapshot` — a non-attaching peek at a session's current screen.
     public func screenSnapshot(sessionID: String) async throws -> ScreenSnapshotResponseMsg {
         let conn = try await controlConnection()

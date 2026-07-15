@@ -2,10 +2,12 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net"
+	"os"
 	"reflect"
 	"sync"
 	"time"
@@ -1473,6 +1475,40 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				diag := sm.Diagnostics()
 				diag.DaemonVersion = version.Version
 				sendControl("diagnostics", diag)
+
+			case "config":
+				// Redact env-map secrets before rendering: this payload can cross
+				// the tailnet to a paired human and is readable by any local
+				// session (incl. a sandboxed agent that can't read the file
+				// itself), so raw MCP/agent env values must not leave the daemon.
+				cfg := config.RedactSecrets(sm.Config())
+
+				tomlBytes, err := config.EffectiveTOML(cfg)
+				if err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "render config: " + err.Error()})
+					continue
+				}
+
+				diff, err := config.DiffFromDefaults(cfg, "effective")
+				if err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "diff config: " + err.Error()})
+					continue
+				}
+
+				configPath := sm.paths.ConfigFile
+
+				// Only treat the config as absent on an explicit "does not exist".
+				// Any other stat error (e.g. EACCES) means we can't tell — the
+				// daemon did load a config, so don't claim it's running on defaults.
+				_, statErr := os.Stat(configPath)
+				configExists := statErr == nil || !errors.Is(statErr, os.ErrNotExist)
+
+				sendControl("config_response", protocol.ConfigResponseMsg{
+					EffectiveTOML:    string(tomlBytes),
+					DiffFromDefaults: diff,
+					ConfigPath:       configPath,
+					ConfigExists:     configExists,
+				})
 
 			case "gc":
 				var g protocol.GCMsg
