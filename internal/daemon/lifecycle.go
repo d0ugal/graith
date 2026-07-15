@@ -22,6 +22,42 @@ func applyLifecycleSummaryLocked(s *SessionState, text string) {
 	s.SummaryTTL = 0
 }
 
+// hookDerivedStatus returns the on-the-fly "Using <tool>" status a hook report
+// yields, or "" when the report carries no tool name or is no longer
+// authoritative at now. This mirrors the fallback in toSessionInfo so a session
+// whose only visible status was hook-derived (never stored in SummaryText)
+// keeps that context — e.g. in a stop summary's "(was: …)" suffix.
+func hookDerivedStatus(hr hookReport, now time.Time) string {
+	if hr.ToolName == "" || !now.Before(hr.AuthoritativeUntil) {
+		return ""
+	}
+
+	return "Using " + hr.ToolName
+}
+
+// prevStopSummaryLocked resolves the previous visible status (and the time it
+// was set) to thread into a session's stop summary as "(was: …)" context. It
+// prefers the stored SummaryText, but a session whose only visible status was
+// hook-derived (e.g. "Using Bash", computed on the fly and never stored) has an
+// empty SummaryText — so it falls back to the current hook report, preserving
+// that context on stop (issue #1034). Because the hook report is freshness-
+// checked here, the fallback's set-at time is now, so the stop-summary TTL gate
+// always admits it. Caller must hold sm.mu.
+func (sm *SessionManager) prevStopSummaryLocked(s *SessionState, id string) (string, *time.Time) {
+	if s.SummaryText != "" {
+		return s.SummaryText, s.SummarySetAt
+	}
+
+	if hr, ok := sm.hookReports[id]; ok {
+		now := time.Now()
+		if derived := hookDerivedStatus(hr, now); derived != "" {
+			return derived, &now
+		}
+	}
+
+	return "", s.SummarySetAt
+}
+
 func formatStopSummary(reason string, exitCode *int, exitSignal string, prev string, prevSetAt *time.Time, ttl time.Duration) string {
 	var base string
 

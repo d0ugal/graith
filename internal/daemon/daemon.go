@@ -2376,8 +2376,7 @@ func (sm *SessionManager) watchSession(id string, sess SessionDriver) {
 			name = s.Name
 			isOrchestrator = s.SystemKind == SystemKindOrchestrator
 
-			prevSummary := s.SummaryText
-			prevSetAt := s.SummarySetAt
+			prevSummary, prevSetAt := sm.prevStopSummaryLocked(s, id)
 
 			prevTTL := sm.cfg.Status.TTLDuration()
 			if s.SummaryTTL > 0 {
@@ -5746,10 +5745,9 @@ func (sm *SessionManager) getHookReport(sessionID string) *hookReport {
 // time is bounded by the slowest session, not the sum.
 func (sm *SessionManager) StopAll(ctx context.Context) {
 	sm.mu.Lock()
-	for _, s := range sm.state.Sessions {
+	for id, s := range sm.state.Sessions {
 		if s.Status == StatusRunning {
-			prevSummary := s.SummaryText
-			prevSetAt := s.SummarySetAt
+			prevSummary, prevSetAt := sm.prevStopSummaryLocked(s, id)
 
 			prevTTL := sm.cfg.Status.TTLDuration()
 			if s.SummaryTTL > 0 {

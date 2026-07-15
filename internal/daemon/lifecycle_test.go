@@ -170,6 +170,119 @@ func TestFormatStopSummary_CustomTTL(t *testing.T) {
 	}
 }
 
+func TestHookDerivedStatus(t *testing.T) {
+	future := time.Now().Add(30 * time.Minute)
+	past := time.Now().Add(-30 * time.Minute)
+
+	tests := []struct {
+		name     string
+		report   hookReport
+		expected string
+	}{
+		{
+			name:     "authoritative_with_tool",
+			report:   hookReport{ToolName: "Bash", AuthoritativeUntil: future},
+			expected: "Using Bash",
+		},
+		{
+			name:     "expired_with_tool",
+			report:   hookReport{ToolName: "Bash", AuthoritativeUntil: past},
+			expected: "",
+		},
+		{
+			name:     "no_tool_name",
+			report:   hookReport{ToolName: "", AuthoritativeUntil: future},
+			expected: "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := hookDerivedStatus(tt.report, time.Now())
+			if got != tt.expected {
+				t.Errorf("hookDerivedStatus() = %q, want %q", got, tt.expected)
+			}
+		})
+	}
+}
+
+// TestPrevStopSummaryLocked covers the #1034 fix: a session whose only visible
+// status was hook-derived (never stored in SummaryText) still supplies a
+// "(was: …)" context to its stop summary, while a stored SummaryText always
+// wins.
+func TestPrevStopSummaryLocked(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	t.Run("stored summary wins over hook", func(t *testing.T) {
+		s := &SessionState{SummaryText: "Waiting for CI"}
+		sm.mu.Lock()
+		sm.hookReports["braw"] = hookReport{
+			ToolName:           "Bash",
+			ReportedAt:         time.Now(),
+			AuthoritativeUntil: time.Now().Add(30 * time.Minute),
+		}
+		prev, _ := sm.prevStopSummaryLocked(s, "braw")
+		sm.mu.Unlock()
+
+		if prev != "Waiting for CI" {
+			t.Errorf("prev = %q, want stored %q", prev, "Waiting for CI")
+		}
+	})
+
+	t.Run("empty summary falls back to authoritative hook", func(t *testing.T) {
+		s := &SessionState{}
+		sm.mu.Lock()
+		sm.hookReports["canny"] = hookReport{
+			ToolName:           "Bash",
+			ReportedAt:         time.Now(),
+			AuthoritativeUntil: time.Now().Add(30 * time.Minute),
+		}
+		prev, at := sm.prevStopSummaryLocked(s, "canny")
+		sm.mu.Unlock()
+
+		if prev != "Using Bash" {
+			t.Errorf("prev = %q, want %q", prev, "Using Bash")
+		}
+
+		if at == nil {
+			t.Fatal("set-at time should not be nil for hook fallback")
+		}
+
+		// The fallback must survive formatStopSummary's freshness gate, so the
+		// "(was: …)" suffix is actually emitted — this is the bug in #1034.
+		got := formatStopSummary(StopReasonUser, nil, "", prev, at, 5*time.Minute)
+		if got != "Stopped (was: Using Bash)" {
+			t.Errorf("stop summary = %q, want %q", got, "Stopped (was: Using Bash)")
+		}
+	})
+
+	t.Run("empty summary + expired hook yields nothing", func(t *testing.T) {
+		s := &SessionState{}
+		sm.mu.Lock()
+		sm.hookReports["dreich"] = hookReport{
+			ToolName:           "Edit",
+			ReportedAt:         time.Now().Add(-1 * time.Hour),
+			AuthoritativeUntil: time.Now().Add(-30 * time.Minute),
+		}
+		prev, _ := sm.prevStopSummaryLocked(s, "dreich")
+		sm.mu.Unlock()
+
+		if prev != "" {
+			t.Errorf("expired hook: prev = %q, want empty", prev)
+		}
+	})
+
+	t.Run("empty summary + missing report yields nothing", func(t *testing.T) {
+		s := &SessionState{}
+		sm.mu.Lock()
+		prev, _ := sm.prevStopSummaryLocked(s, "haar")
+		sm.mu.Unlock()
+
+		if prev != "" {
+			t.Errorf("missing report: prev = %q, want empty", prev)
+		}
+	})
+}
+
 func TestFormatSignalSummary(t *testing.T) {
 	tests := []struct {
 		signal   string
