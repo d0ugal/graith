@@ -616,6 +616,17 @@
             "ref": "MessagesDiagnostic"
           },
           "optional": false
+        },
+        {
+          "name": "triggers",
+          "type": {
+            "kind": "array",
+            "elem": {
+              "kind": "object",
+              "ref": "TriggerDiagnostic"
+            }
+          },
+          "optional": true
         }
       ]
     },
@@ -3478,6 +3489,54 @@
       ]
     },
     {
+      "name": "TriggerDiagnostic",
+      "swift": "na",
+      "fields": [
+        {
+          "name": "name",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "session_id",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "session_name",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "degraded",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "retry_count",
+          "type": {
+            "kind": "int"
+          },
+          "optional": true
+        },
+        {
+          "name": "next_retry_at",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        }
+      ]
+    },
+    {
       "name": "TriggerListMsg",
       "swift": "required",
       "swift_type": "EmptyMsg",
@@ -3617,6 +3676,20 @@
         },
         {
           "name": "degraded",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "degraded_retry_count",
+          "type": {
+            "kind": "int"
+          },
+          "optional": true
+        },
+        {
+          "name": "degraded_retry_at",
           "type": {
             "kind": "string"
           },

@@ -29,6 +29,7 @@ import (
 	grpty "github.com/d0ugal/graith/internal/pty"
 	"github.com/d0ugal/graith/internal/sandbox"
 	"github.com/d0ugal/graith/internal/store"
+	"github.com/fsnotify/fsnotify"
 )
 
 const (
@@ -105,6 +106,12 @@ type SessionManager struct {
 	// (falls back to Restart). Tests override it to observe watchdog decisions
 	// without driving a full session respawn.
 	restartStuck func(id string, rows, cols uint16) error
+
+	// watchAdd overrides fsnotify directory registration for watch-trigger
+	// bindings; nil in production (uses the watcher's Add). Tests set it to
+	// simulate an exhausted watch limit (fs.inotify.max_user_watches) and its
+	// subsequent recovery.
+	watchAdd func(w *fsnotify.Watcher, path string) error
 
 	// pushNotify guards proactive `gr notify` push-notification gating state:
 	// a rolling window of delivered timestamps (rate limit) and a per-key map of
@@ -5707,7 +5714,47 @@ func (sm *SessionManager) Diagnostics() protocol.DiagnosticsMsg {
 		DeletedSessionIDs: deletedSessionIDs,
 		Scrollback:        sbDiag,
 		Messages:          msgDiag,
+		Triggers:          sm.degradedTriggerDiagnostics(),
 	}
+}
+
+// degradedTriggerDiagnostics reports the currently-degraded watch-trigger
+// bindings for gr doctor. Binding facts are snapshotted under triggers.mu, then
+// session names are resolved after releasing it (sessionName takes sm.mu) to
+// avoid holding both locks at once.
+func (sm *SessionManager) degradedTriggerDiagnostics() []protocol.TriggerDiagnostic {
+	sm.triggers.mu.Lock()
+
+	out := make([]protocol.TriggerDiagnostic, 0)
+
+	for _, b := range sm.triggers.bindings {
+		if b.degraded == "" {
+			continue
+		}
+
+		td := protocol.TriggerDiagnostic{
+			Name:       b.triggerName,
+			SessionID:  b.sessionID,
+			Degraded:   b.degraded,
+			RetryCount: b.retryCount,
+		}
+		if !b.nextRetryAt.IsZero() {
+			td.NextRetryAt = b.nextRetryAt.Format(time.RFC3339)
+		}
+
+		out = append(out, td)
+	}
+	sm.triggers.mu.Unlock()
+
+	for i := range out {
+		out[i].SessionName = sm.sessionName(out[i].SessionID)
+	}
+
+	if len(out) == 0 {
+		return nil
+	}
+
+	return out
 }
 
 // Get returns a copy of a session state by ID.

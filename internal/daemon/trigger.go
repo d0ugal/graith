@@ -664,6 +664,11 @@ func (sm *SessionManager) triggerRecord(t *config.TriggerConfig) protocol.Trigge
 				rec.Bindings++
 				if b.degraded != "" {
 					rec.Degraded = b.degraded
+					rec.DegradedRetryCount = b.retryCount
+
+					if !b.nextRetryAt.IsZero() {
+						rec.DegradedRetryAt = b.nextRetryAt.Format(time.RFC3339)
+					}
 				}
 			}
 		}

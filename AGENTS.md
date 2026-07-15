@@ -89,7 +89,7 @@ Key files by area:
 | Trigger | `config/trigger.go` | `[[trigger]]` config types + validation |
 | Trigger | `daemon/trigger.go` | Schedule source (`RunTriggerLoop`), run-state machine, action dispatch, delivery, `gr trigger` status/control API |
 | Trigger | `daemon/trigger_actions.go` | Action executors: command (sandboxed), session/ensure-reviewer, scenario, message |
-| Trigger | `daemon/filewatch.go` | Watch source (`RunFileWatchLoop`): binding reconcile, recursive fsnotify + gitignore pruning, debounce |
+| Trigger | `daemon/filewatch.go` | Watch source (`RunFileWatchLoop`): binding reconcile, recursive fsnotify + gitignore pruning, debounce, degraded-binding backoff retry/recovery (#1029) |
 | Trigger | `cli/trigger.go` | `gr trigger list/status/run/pause/resume` commands |
 | Capabilities | `capabilities/capabilities.go`, `capabilities/capabilities.json` | CLI/iOS/macOS capability matrix: hand-maintained JSON manifest (source of truth) + loader/validator/renderer; drift tests keep `website/content/docs/capabilities.md` (doc ↔ manifest) and the GUI fixture (manifest ↔ shared Swift affordance registry, #1149) in sync |
 
