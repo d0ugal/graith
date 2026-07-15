@@ -34,12 +34,21 @@ name: Sandbox
 #                        this is a fail-closed condition once the backend ships.
 
 on:
-  # No path filter: both enforcement jobs are REQUIRED status checks in branch
-  # protection, so they must run and report on every PR. A required check that
-  # is skipped on some PRs (via path filtering) leaves those PRs "waiting" for a
-  # status that never arrives, which — with enforce_admins — blocks all merges.
-  # The jobs are fast and self-contained (they don't depend on the PR's diff),
-  # so running them everywhere is cheap and keeps auto-merge honest.
+  # No workflow-level path filter: both enforcement jobs are REQUIRED status
+  # checks in branch protection, so this workflow must run and report on every
+  # PR. A workflow skipped by path filtering never creates its required
+  # contexts, leaving those PRs "waiting" for a status that never arrives —
+  # with enforce_admins, that blocks all merges.
+  #
+  # The Linux/nono job is cheap and always runs. The macOS/safehouse job burns
+  # scarce, ~10x-costlier macOS runner minutes, so it is gated per-JOB via `if:`
+  # on the `changes` job below: it runs only when the sandbox code it exercises
+  # (internal/sandbox, darwin-specific safehouse/Seatbelt) or this workflow
+  # changes. A job skipped by `if:` still reports a "skipped" conclusion, which
+  # branch protection treats as success — so the required
+  # `macOS (safehouse / Seatbelt)` context is satisfied on unrelated PRs without
+  # spinning up a macOS runner. Only workflow-level skips strand a required
+  # check; job-level skips do not. See issue #1174.
   pull_request:
   workflow_dispatch:
 
@@ -47,6 +56,61 @@ permissions:
   contents: read
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # Decide whether the macOS/safehouse enforcement job needs to run. It tests
+  # darwin-specific sandbox code (safehouse/Seatbelt), so it only matters when
+  # internal/sandbox, the module graph (go.mod/go.sum — a dep/toolchain bump can
+  # break the darwin build alone), or this workflow changes — a gui/ or
+  # unrelated-Go PR gets no value from a macOS runner re-proving Seatbelt.
+  #
+  # Uses the PR files API rather than a local `git diff`: the checked-out
+  # pull_request merge ref can be built against an older base than base.sha, so
+  # a local diff surfaces the base branch's own commits and spuriously flips the
+  # filter true. The API returns exactly the PR's changed files (same approach
+  # as coverage.yml / ci.yml) and needs no checkout.
+  # ---------------------------------------------------------------------------
+  changes:
+    name: Detect sandbox-relevant changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      macos: ${{ steps.filter.outputs.macos }}
+    steps:
+      - id: filter
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          # Non-PR events (workflow_dispatch) always run the macOS job: there's
+          # no PR file list, and workflow_dispatch exists to validate it. Written
+          # generically so any future non-PR trigger fails safe toward running.
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "macos=true" >> "$GITHUB_OUTPUT"
+            echo "Non-PR event ($EVENT): running macOS enforcement job."
+            exit 0
+          fi
+          # Fail safe toward running: if the file list can't be fetched, run the
+          # job rather than silently skip a required check.
+          if ! files="$(gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[].filename')"; then
+            echo "macos=true" >> "$GITHUB_OUTPUT"
+            echo "Could not list PR files; running macOS enforcement job to be safe."
+            exit 0
+          fi
+          # here-string (not a pipe) so an early grep match can't SIGPIPE-fail an
+          # upstream command under pipefail.
+          if grep -Eq '^internal/sandbox/|^go\.mod$|^go\.sum$|^\.github/workflows/sandbox\.yml$' <<<"$files"; then
+            echo "macos=true" >> "$GITHUB_OUTPUT"
+            echo "Sandbox-relevant files changed: running macOS enforcement job."
+          else
+            echo "macos=false" >> "$GITHUB_OUTPUT"
+            echo "No sandbox changes: skipping macOS enforcement job."
+          fi
+
   # ---------------------------------------------------------------------------
   # Linux / nono — the important one. Answers the Landlock-on-GH-runner
   # question and proves the runner can enforce a deny-by-default policy.
@@ -267,6 +331,16 @@ jobs:
   # ---------------------------------------------------------------------------
   macos-safehouse:
     name: macOS (safehouse / Seatbelt)
+    needs: changes
+    # Run when the detector says the sandbox changed — but also when the detector
+    # itself did NOT cleanly succeed. With `needs:` and a custom `if:` lacking a
+    # status function, a *failed* `changes` job would skip this job, and a skipped
+    # REQUIRED check counts as success — a silent merge-gate bypass. Failing safe
+    # toward running closes that hole. `!cancelled()` still lets a superseded run
+    # bow out (the newer run re-checks).
+    if: >-
+      !cancelled() &&
+      (needs.changes.result != 'success' || needs.changes.outputs.macos == 'true')
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
