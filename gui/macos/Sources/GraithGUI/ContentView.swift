@@ -1,6 +1,25 @@
 import SwiftUI
 import AppKit
 
+enum SessionUserActivity {
+    static let activityType = "com.graith.session"
+    static let sessionURLKey = "sessionURL"
+
+    static func configure(_ activity: NSUserActivity, for session: Session) {
+        let sessionURL = "graith://local/\(session.id)"
+
+        activity.title = session.name
+        activity.userInfo = [
+            "sessionID": session.id,
+            "sessionName": session.name,
+            "repoName": session.repoName,
+            sessionURLKey: sessionURL,
+        ]
+        activity.targetContentIdentifier = sessionURL
+        activity.isEligibleForHandoff = true
+    }
+}
+
 struct ContentView: View {
     @EnvironmentObject var store: SessionStore
     /// Per-window selection/split state (see WindowState.swift). Each window
@@ -48,7 +67,7 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .openSessionURL)) { note in
             if let url = note.object as? URL { handleURL(url) }
         }
-        .userActivity(Self.sessionActivityType, isActive: window.selectedSessionID != nil) { activity in
+        .userActivity(SessionUserActivity.activityType, isActive: window.selectedSessionID != nil) { activity in
             advertiseCurrentSession(activity)
         }
     }
@@ -162,18 +181,9 @@ struct ContentView: View {
 
     // MARK: - Handoff (NSUserActivity)
 
-    static let sessionActivityType = "com.graith.session"
-
     private func advertiseCurrentSession(_ activity: NSUserActivity) {
         guard let session = window.selectedSession(in: store.sessions) else { return }
-        activity.title = session.name
-        activity.userInfo = [
-            "sessionID": session.id,
-            "sessionName": session.name,
-            "repoName": session.repoName,
-        ]
-        activity.isEligibleForHandoff = true
-        activity.webpageURL = URL(string: "graith://local/\(session.id)")
+        SessionUserActivity.configure(activity, for: session)
     }
 }
 
