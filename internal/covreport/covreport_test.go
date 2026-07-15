@@ -112,11 +112,16 @@ func TestParseErrors(t *testing.T) {
 	}
 }
 
-func TestBuildRowsSortsLowestFirst(t *testing.T) {
+func TestBuildRowsSortsMostUncoveredFirst(t *testing.T) {
+	// Coverage percentage and uncovered-statement count disagree here, so the
+	// full ordering is only correct under the uncovered-count key: braw has the
+	// highest percentage yet the most untested code, and fash the lowest
+	// percentage yet the least. A percentage sort would produce fash, dreich,
+	// braw — the exact reverse of the head/tail asserted below.
 	head := map[string]*FileCov{
-		"internal/braw/braw.go":     {Path: "internal/braw/braw.go", Covered: 3, Total: 3},     // 100%
-		"internal/dreich/dreich.go": {Path: "internal/dreich/dreich.go", Covered: 3, Total: 6}, // 50%
-		"internal/fash/fash.go":     {Path: "internal/fash/fash.go", Covered: 1, Total: 10},    // 10%
+		"internal/braw/braw.go":     {Path: "internal/braw/braw.go", Covered: 90, Total: 100},   // 90%, 10 uncovered
+		"internal/dreich/dreich.go": {Path: "internal/dreich/dreich.go", Covered: 1, Total: 10}, // 10%, 9 uncovered
+		"internal/fash/fash.go":     {Path: "internal/fash/fash.go", Covered: 3, Total: 6},      // 50%, 3 uncovered
 	}
 
 	rows := BuildRows(head, nil)
@@ -124,24 +129,71 @@ func TestBuildRowsSortsLowestFirst(t *testing.T) {
 		t.Fatalf("want 3 rows, got %d", len(rows))
 	}
 
-	if rows[0].Path != "internal/fash/fash.go" {
-		t.Errorf("first row = %s, want lowest-coverage fash.go", rows[0].Path)
+	if rows[0].Path != "internal/braw/braw.go" {
+		t.Errorf("first row = %s, want most-uncovered braw.go (10 uncovered)", rows[0].Path)
 	}
 
-	if rows[2].Path != "internal/braw/braw.go" {
-		t.Errorf("last row = %s, want highest-coverage braw.go", rows[2].Path)
+	if rows[2].Path != "internal/fash/fash.go" {
+		t.Errorf("last row = %s, want least-uncovered fash.go (3 uncovered)", rows[2].Path)
+	}
+}
+
+// Regression: the sort key is uncovered statement count, not coverage
+// percentage. A big, mostly-covered file has more untested code than a tiny,
+// poorly-covered one and must sort first — a percentage sort would invert this.
+func TestBuildRowsRanksByUncoveredNotPercentage(t *testing.T) {
+	head := map[string]*FileCov{
+		// 50% coverage but only 2 uncovered statements — low percentage.
+		"internal/skelf/skelf.go": {Path: "internal/skelf/skelf.go", Covered: 2, Total: 4},
+		// 90% coverage but 10 uncovered statements — high percentage, more debt.
+		"internal/strath/strath.go": {Path: "internal/strath/strath.go", Covered: 90, Total: 100},
+	}
+
+	rows := BuildRows(head, nil)
+	if len(rows) != 2 {
+		t.Fatalf("want 2 rows, got %d", len(rows))
+	}
+
+	// A percentage sort would put skelf (50%) first; the uncovered-count sort
+	// puts strath (10 uncovered) first.
+	if rows[0].Path != "internal/strath/strath.go" {
+		t.Errorf("first row = %s, want most-uncovered strath.go (10 uncovered) ahead of skelf.go (2 uncovered)", rows[0].Path)
 	}
 }
 
 func TestBuildRowsTieBreaksByPath(t *testing.T) {
+	// Both files have 2 uncovered statements but different percentages, and the
+	// lexically-first path is the higher-percentage one — so a percentage sort
+	// would order z.go (50%) before a.go (80%). Equal uncovered counts must fall
+	// through to path order (a.go then z.go), proving the tie-break is on path,
+	// not percentage.
 	head := map[string]*FileCov{
-		"internal/wynd/z.go": {Path: "internal/wynd/z.go", Covered: 1, Total: 2},
-		"internal/wynd/a.go": {Path: "internal/wynd/a.go", Covered: 1, Total: 2},
+		"internal/wynd/a.go": {Path: "internal/wynd/a.go", Covered: 8, Total: 10}, // 80%, 2 uncovered
+		"internal/wynd/z.go": {Path: "internal/wynd/z.go", Covered: 2, Total: 4},  // 50%, 2 uncovered
 	}
 
 	rows := BuildRows(head, nil)
 	if rows[0].Path != "internal/wynd/a.go" || rows[1].Path != "internal/wynd/z.go" {
-		t.Errorf("equal coverage not tie-broken by path: %s then %s", rows[0].Path, rows[1].Path)
+		t.Errorf("equal uncovered count not tie-broken by path: %s then %s", rows[0].Path, rows[1].Path)
+	}
+}
+
+// A file with no statements has no untested code, so it sorts to the bottom
+// (0 uncovered) rather than the top. Under the old percentage key its Pct() of
+// 0 sorted it up with the worst-covered files — the opposite, and unhelpful.
+func TestBuildRowsZeroStatementFileSortsLast(t *testing.T) {
+	head := map[string]*FileCov{
+		"internal/neep/neep.go": {Path: "internal/neep/neep.go", Covered: 0, Total: 0}, // no statements
+		"internal/fash/fash.go": {Path: "internal/fash/fash.go", Covered: 1, Total: 5}, // 4 uncovered
+	}
+
+	rows := BuildRows(head, nil)
+	if len(rows) != 2 {
+		t.Fatalf("want 2 rows, got %d", len(rows))
+	}
+
+	if rows[len(rows)-1].Path != "internal/neep/neep.go" {
+		t.Errorf("zero-statement file = %s at bottom, want internal/neep/neep.go", rows[len(rows)-1].Path)
 	}
 }
 
@@ -273,7 +325,7 @@ func TestModulePathNoModuleLine(t *testing.T) {
 }
 
 // End-to-end: parse two profiles and render, confirming module stripping and
-// lowest-first ordering hold through the whole pipeline.
+// most-uncovered-first ordering hold through the whole pipeline.
 func TestParseBuildRenderPipeline(t *testing.T) {
 	head, err := Parse(strings.NewReader(brawProfile), module)
 	if err != nil {
@@ -282,7 +334,7 @@ func TestParseBuildRenderPipeline(t *testing.T) {
 
 	rows := BuildRows(head, nil)
 	out := RenderTable(rows, false)
-	// dreich (50%) must precede braw (100%) in the output.
+	// dreich (3 uncovered) must precede braw (0 uncovered) in the output.
 	di := strings.Index(out, "dreich")
 
 	bi := strings.Index(out, "braw")

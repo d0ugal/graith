@@ -4,8 +4,9 @@
 // Go's `go tool cover -func` reports per-function statement coverage and an
 // aggregate total, but not a per-file covered/total breakdown. This package
 // parses the raw profile itself — summing statement counts per file — so the
-// coverage comment can show which files are least covered (sorted lowest
-// first, the most actionable) with a delta measured against the PR base.
+// coverage comment can show which files have the most untested code (sorted by
+// uncovered statement count, most first, the most actionable) with a delta
+// measured against the PR base.
 //
 // Coverage in Go is statement-based, not line-based, so the counts here are
 // statements. The rendered table labels them accordingly rather than claiming
@@ -129,9 +130,13 @@ type Row struct {
 }
 
 // BuildRows joins head and base per-file coverage into table rows, sorted by
-// lowest coverage first (ties broken by path for stable output). Only files
-// present in head are listed — a file that existed at base but was deleted in
-// the PR no longer has coverage to report.
+// most uncovered statements first (ties broken by path for stable output).
+// Ordering by absolute uncovered statement count — not coverage percentage —
+// surfaces the files where writing tests buys the most: a 90%-covered
+// 500-statement file has more untested code (and more risk) than a 50%-covered
+// 4-statement file, yet a percentage sort would bury it. Only files present in
+// head are listed — a file that existed at base but was deleted in the PR no
+// longer has coverage to report.
 func BuildRows(head, base map[string]*FileCov) []Row {
 	rows := make([]Row, 0, len(head))
 	for path, fc := range head {
@@ -150,8 +155,11 @@ func BuildRows(head, base map[string]*FileCov) []Row {
 	}
 
 	sort.Slice(rows, func(i, j int) bool {
-		if rows[i].Pct != rows[j].Pct {
-			return rows[i].Pct < rows[j].Pct
+		ui := rows[i].Total - rows[i].Covered
+		uj := rows[j].Total - rows[j].Covered
+
+		if ui != uj {
+			return ui > uj
 		}
 
 		return rows[i].Path < rows[j].Path
