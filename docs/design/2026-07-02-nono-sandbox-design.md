@@ -541,7 +541,8 @@ Rules (each gets a fixture in §C1/testing):
 >   unchanged, and graith emits a hint (not a silent drop) telling the user how
 >   to gate signalling. Documented cross-backend divergence.
 > - **`ssh` = agent socket only** (`filesystem.unix_socket` for `$SSH_AUTH_SOCK`);
->   the `ssh-keys` (`~/.ssh` read) token is deferred.
+>   the `ssh-keys` (`~/.ssh` read) token is now shipped (issue #1040) as the
+>   opt-in companion for agents that use raw key files.
 > - **Old-kernel `NotEnforced` is a hard error** (never a warning) — the
 >   fail-open guard is enforced.
 > - **Verb mapping:** `write_dirs` + worktree → `filesystem.allow` (read+write),
@@ -574,7 +575,8 @@ Rules (each gets a fixture in §C1/testing):
   is a flat list, so "also read `~/.ssh`" needs either a new token
   (e.g. `ssh-keys`) or a config field. Recommendation: `ssh` = agent-socket only
   (most agents use the agent, not raw keys); add `ssh-keys` later if needed.
-  Needs a call on the token surface.
+  Needs a call on the token surface. **Resolved (issue #1040):** shipped the
+  `ssh-keys` token → `filesystem.read: ["~/.ssh"]`, `ssh` stays socket-only.
 - **Old-kernel behaviour (§B2).** Confirm the hard-error posture for
   `NotEnforced` (recommended) — this is the fail-open guard and should not be a
   warning.

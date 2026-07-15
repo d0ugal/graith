@@ -50,6 +50,8 @@ cwd is the read-only source). The profile:
   the launched command's location (only system paths like `/usr/bin`), so graith
   resolves the agent command via `$PATH` and grants read on its directory.
 - feature `ssh` → `filesystem.unix_socket` for `$SSH_AUTH_SOCK` (agent socket)
+- feature `ssh-keys` → `filesystem.read` for `~/.ssh` (read-only raw key-file
+  access; opt-in on top of `ssh`, which stays agent-socket-only)
 
 The profile is written under graith's runtime dir (readable inside the sandbox)
 and lives for the session's lifetime, including resume.
