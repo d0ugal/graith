@@ -68,7 +68,17 @@ struct NewSessionView: View {
                     Toggle("Yolo mode", isOn: $yolo)
                     Toggle("Run in place", isOn: $inPlace)
                     Toggle("Agent hooks", isOn: $agentHooks)
+                        .disabled(yolo)
+                    if yolo {
+                        Text("Yolo mode requires agent hooks, so they stay on.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                 }
+                // Base doesn't apply in-place (no branch created); clear the stale
+                // value rather than leaving it to fail validation on Create.
+                .onChange(of: inPlace) { on in if on { base = "" } }
+                // Yolo forces agent hooks on daemon-side; mirror that in the UI.
+                .onChange(of: yolo) { on in if on { agentHooks = true } }
                 if let error {
                     Text(error).foregroundStyle(.red).font(.footnote)
                 }
@@ -111,8 +121,12 @@ struct NewSessionView: View {
 
     private func create() async {
         guard let conn = model.connections.first(where: { $0.id == hostID }) else { return }
+        // Normalise once so validation and the wire agree that a whitespace-only
+        // base is absent (otherwise it slips past the guard and the daemon rejects
+        // it after a round-trip).
+        let trimmedBase = base.trimmingCharacters(in: .whitespacesAndNewlines)
         // Surface mutually-exclusive options before a daemon round-trip.
-        if let invalid = FleetModel.validateCreateOptions(base: base, inPlace: inPlace) {
+        if let invalid = FleetModel.validateCreateOptions(base: trimmedBase, inPlace: inPlace) {
             error = invalid
             return
         }
@@ -122,9 +136,10 @@ struct NewSessionView: View {
             name: name.trimmingCharacters(in: .whitespaces),
             agent: agent,
             repoPath: selectedRepo,
-            base: base.isEmpty ? nil : base,
+            base: trimmedBase.isEmpty ? nil : trimmedBase,
             prompt: prompt.isEmpty ? nil : prompt,
-            agentHooks: agentHooks,
+            // Yolo forces agent hooks on daemon-side; send the effective value.
+            agentHooks: agentHooks || yolo,
             inPlace: inPlace ? true : nil,
             yolo: yolo ? true : nil
         )

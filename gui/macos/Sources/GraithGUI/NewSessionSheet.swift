@@ -23,7 +23,7 @@ struct NewSessionSheet: View {
     @State private var yolo = false
     @State private var inPlace = false
     @State private var agentHooks = true
-    @State private var background = false
+    @State private var createInBackground = false
     /// Repos the selected host offers (design §C.4). Populated on appear / host
     /// change; the free-text field remains for paths the daemon didn't list.
     @State private var repos: [RepoEntry] = []
@@ -240,11 +240,21 @@ struct NewSessionSheet: View {
                 advancedToggle("Run in place", isOn: $inPlace,
                                help: "Run the agent directly in the repo without creating a worktree")
                 advancedToggle("Agent hooks", isOn: $agentHooks,
-                               help: "Enable agent hooks (check-inbox, etc.)")
-                advancedToggle("Create in background", isOn: $background,
+                               help: yolo
+                                   ? "Yolo mode requires agent hooks, so they're always on for a yolo session"
+                                   : "Enable agent hooks (check-inbox, etc.)")
+                    .disabled(yolo)
+                advancedToggle("Create in background", isOn: $createInBackground,
                                help: "Create the session without switching to it")
             }
             .padding(.top, 10)
+            // Base doesn't apply to an in-place session (no branch is created),
+            // so clear any stale value rather than leaving it in the now-disabled
+            // field to fail validation later.
+            .onChange(of: inPlace) { _, isOn in if isOn { base = "" } }
+            // Yolo forces agent hooks on daemon-side; reflect that in the UI so the
+            // toggle isn't showing a state the session won't actually run with.
+            .onChange(of: yolo) { _, isOn in if isOn { agentHooks = true } }
         } label: {
             Text("ADVANCED")
                 .font(.system(.caption2, design: .monospaced))
@@ -277,6 +287,7 @@ struct NewSessionSheet: View {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
             prompt = try String(contentsOf: url, encoding: .utf8)
+            error = nil  // clear any stale read error from a prior failed pick
         } catch {
             self.error = "Couldn't read prompt file: \(error.localizedDescription)"
         }
@@ -321,7 +332,7 @@ struct NewSessionSheet: View {
             case .success(let session):
                 // "Create in background" creates the session without switching
                 // the window to it (mirrors `gr new --background`).
-                if let session, !background {
+                if let session, !createInBackground {
                     window.selectSession(session)
                 }
                 dismiss()
