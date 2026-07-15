@@ -285,6 +285,12 @@ type ScenarioState struct {
 	Sessions       []ScenarioSession `json:"sessions"`
 	CreatedAt      time.Time         `json:"created_at"`
 	SourceFileHash string            `json:"source_file_hash,omitempty"`
+	// Triggers are the scenario-embedded [[trigger]] blocks (issue #1027). They
+	// are set only once the two-phase start succeeds, so a rolled-back scenario
+	// never activates them. Enumerated (namespaced scenario:<id>:<name>) by
+	// SessionManager.allTriggers while the scenario has a running member, so they
+	// survive a daemon restart with the scenario without re-reading the TOML.
+	Triggers []config.TriggerConfig `json:"triggers,omitempty"`
 }
 
 type ScenarioSession struct {

@@ -135,6 +135,11 @@ type TriggersRuntime struct {
 	MaxConcurrent int `toml:"max_concurrent"` // default 4
 }
 
+// ReservedTriggerNamePrefix is reserved for the daemon's namespaced
+// scenario-embedded trigger names (scenario:<id>:<name>). A config-origin
+// trigger name must not use it, or it would be misrouted to a scenario lookup.
+const ReservedTriggerNamePrefix = "scenario:"
+
 // Action type values for ActionConfig.Type.
 const (
 	ActionCommand  = "command"
@@ -331,25 +336,42 @@ func (c *Config) validateTriggers() []error {
 			errs = append(errs, fmt.Errorf("%s: name is required", where))
 		} else if seen[t.Name] {
 			errs = append(errs, fmt.Errorf("%s: duplicate trigger name", where))
+		} else if strings.HasPrefix(t.Name, ReservedTriggerNamePrefix) {
+			errs = append(errs, fmt.Errorf("%s: name must not start with the reserved %q prefix", where, ReservedTriggerNamePrefix))
 		}
 
 		seen[t.Name] = true
 
-		// Exactly one source.
-		switch {
-		case t.Schedule == nil && t.Watch == nil:
-			errs = append(errs, fmt.Errorf("%s: exactly one of [schedule] or [watch] is required (neither set)", where))
-		case t.Schedule != nil && t.Watch != nil:
-			errs = append(errs, fmt.Errorf("%s: exactly one of [schedule] or [watch] is required (both set)", where))
-		case t.Schedule != nil:
-			errs = append(errs, validateSchedule(where, t.Schedule)...)
-		case t.Watch != nil:
-			errs = append(errs, validateWatch(where, t.Watch)...)
-		}
-
-		errs = append(errs, c.validateAction(where, t)...)
-		errs = append(errs, validatePolicy(where, &t.Policy)...)
+		errs = append(errs, ValidateTriggerStructure(where, t)...)
+		errs = append(errs, c.validateActionConfigDeps(where, t)...)
 	}
+
+	return errs
+}
+
+// ValidateTriggerStructure runs the config-independent structural validation for
+// a single trigger: exactly one source, the source's own rules, the action's
+// shape, and the policy. Config-dependent checks (allowed_repo_paths and
+// [orchestrator] enabled) are layered on separately by validateActionConfigDeps.
+// It is exported so the scenario-file loader can hold scenario-embedded
+// [[trigger]] blocks to the same shape rules without a full *Config.
+func ValidateTriggerStructure(where string, t *TriggerConfig) []error {
+	var errs []error
+
+	// Exactly one source.
+	switch {
+	case t.Schedule == nil && t.Watch == nil:
+		errs = append(errs, fmt.Errorf("%s: exactly one of [schedule] or [watch] is required (neither set)", where))
+	case t.Schedule != nil && t.Watch != nil:
+		errs = append(errs, fmt.Errorf("%s: exactly one of [schedule] or [watch] is required (both set)", where))
+	case t.Schedule != nil:
+		errs = append(errs, validateSchedule(where, t.Schedule)...)
+	case t.Watch != nil:
+		errs = append(errs, validateWatch(where, t.Watch)...)
+	}
+
+	errs = append(errs, validateActionStructure(where, t)...)
+	errs = append(errs, validatePolicy(where, &t.Policy)...)
 
 	return errs
 }
@@ -413,14 +435,18 @@ func validateWatch(where string, w *WatchConfig) []error {
 	return errs
 }
 
-func (c *Config) validateAction(where string, t *TriggerConfig) []error {
+// validateActionStructure checks an action's shape independent of any *Config:
+// the action-type switch, cleanup/idle placement, and notify priority. The two
+// config-dependent checks (allowed_repo_paths, [orchestrator] enabled) live in
+// validateActionConfigDeps.
+func validateActionStructure(where string, t *TriggerConfig) []error {
 	var errs []error
 
 	a := &t.Action
 
 	switch a.Type {
 	case ActionCommand:
-		errs = append(errs, c.validateCommandAction(where, t)...)
+		errs = append(errs, validateCommandActionStructure(where, t)...)
 	case ActionSession:
 		if a.Ensure && !t.IsWatch() {
 			errs = append(errs, fmt.Errorf("%s: action ensure=true is only valid for a [watch] source", where))
@@ -485,11 +511,6 @@ func (c *Config) validateAction(where string, t *TriggerConfig) []error {
 		}
 	}
 
-	// session/scenario actions need an orchestrator to own the spawned work.
-	if (a.Type == ActionSession || a.Type == ActionScenario) && !c.Orchestrator.Enabled {
-		errs = append(errs, fmt.Errorf("%s: %s action requires [orchestrator] enabled (it owns spawned sessions)", where, a.Type))
-	}
-
 	if a.NotifyPriority != "" {
 		if _, ok := NormalizeNotifyPriority(a.NotifyPriority); !ok {
 			errs = append(errs, fmt.Errorf("%s: action.notify_priority %q is invalid (want low|normal|high)", where, a.NotifyPriority))
@@ -499,7 +520,32 @@ func (c *Config) validateAction(where string, t *TriggerConfig) []error {
 	return errs
 }
 
-func (c *Config) validateCommandAction(where string, t *TriggerConfig) []error {
+// validateActionConfigDeps holds the two trigger-action checks that need the
+// full *Config: a schedule command's repo must be an allowed repo path, and
+// session/scenario actions need an orchestrator to own the spawned work. Applied
+// on config load but deliberately NOT by the scenario-file loader — a scenario
+// is always orchestrator-owned, and scenario triggers forbid an external repo
+// (see scenariofile.ValidateScenarioTriggers).
+func (c *Config) validateActionConfigDeps(where string, t *TriggerConfig) []error {
+	var errs []error
+
+	a := &t.Action
+
+	if a.Type == ActionCommand && t.IsSchedule() && a.Repo != "" && !c.RepoPathAllowed(a.Repo) {
+		errs = append(errs, fmt.Errorf("%s: action.repo %q is not in allowed_repo_paths", where, a.Repo))
+	}
+
+	if (a.Type == ActionSession || a.Type == ActionScenario) && !c.Orchestrator.Enabled {
+		errs = append(errs, fmt.Errorf("%s: %s action requires [orchestrator] enabled (it owns spawned sessions)", where, a.Type))
+	}
+
+	return errs
+}
+
+// validateCommandActionStructure checks a command action's shape independent of
+// any *Config. The allowed_repo_paths check for a schedule command lives in
+// validateActionConfigDeps.
+func validateCommandActionStructure(where string, t *TriggerConfig) []error {
 	var errs []error
 
 	a := &t.Action
@@ -524,8 +570,6 @@ func (c *Config) validateCommandAction(where string, t *TriggerConfig) []error {
 	if t.IsSchedule() {
 		if a.Repo == "" {
 			errs = append(errs, fmt.Errorf("%s: schedule command action requires action.repo", where))
-		} else if !c.RepoPathAllowed(a.Repo) {
-			errs = append(errs, fmt.Errorf("%s: action.repo %q is not in allowed_repo_paths", where, a.Repo))
 		}
 	} else if a.Repo != "" {
 		errs = append(errs, fmt.Errorf("%s: watch command action must not set action.repo (execution root is the bound worktree)", where))

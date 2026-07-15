@@ -61,19 +61,18 @@ func (sm *SessionManager) RunFileWatchLoop(ctx context.Context) {
 			sm.teardownAllBindings()
 			return
 		case <-ticker.C:
-			cfg := sm.Config()
-			sm.reconcileBindings(ctx, cfg, time.Now())
+			sm.reconcileBindings(ctx, sm.allTriggers(), time.Now())
 		}
 	}
 }
 
 // reconcileBindings ensures one binding per (enabled watch trigger, matching
 // running session) and tears down bindings whose session is gone/stopped.
-func (sm *SessionManager) reconcileBindings(ctx context.Context, cfg *config.Config, now time.Time) {
+func (sm *SessionManager) reconcileBindings(ctx context.Context, triggers []config.TriggerConfig, now time.Time) {
 	desired := make(map[string]*config.TriggerConfig) // bindingKey -> trigger
 
-	for i := range cfg.Triggers {
-		t := &cfg.Triggers[i]
+	for i := range triggers {
+		t := &triggers[i]
 		if !t.IsWatch() || !t.TriggerEnabled() {
 			continue
 		}
@@ -82,7 +81,11 @@ func (sm *SessionManager) reconcileBindings(ctx context.Context, cfg *config.Con
 			continue
 		}
 
-		for _, sess := range sm.matchingWatchSessions(t.Watch) {
+		// A scenario-embedded trigger only binds to sessions within its own
+		// scenario; a config-origin role trigger matches globally (scenarioID "").
+		scenarioID, _, _ := parseScenarioTriggerName(t.Name)
+
+		for _, sess := range sm.matchingWatchSessions(t.Watch, scenarioID) {
 			desired[bindingKey(t.Name, sess.id)] = t
 		}
 	}
@@ -155,8 +158,10 @@ type watchSession struct {
 }
 
 // matchingWatchSessions returns running, non-soft-deleted sessions matching the
-// watch selector (repo or role).
-func (sm *SessionManager) matchingWatchSessions(w *config.WatchConfig) []watchSession {
+// watch selector (repo or role). A non-empty scenarioID additionally scopes a
+// role match to that scenario's members, so a scenario-embedded role trigger
+// only binds inside its own scenario (config-origin triggers pass "").
+func (sm *SessionManager) matchingWatchSessions(w *config.WatchConfig, scenarioID string) []watchSession {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 
@@ -173,7 +178,7 @@ func (sm *SessionManager) matchingWatchSessions(w *config.WatchConfig) []watchSe
 		case w.Repo != "":
 			match = config.ResolvePath(s.RepoPath) == config.ResolvePath(w.Repo)
 		case w.Role != "":
-			match = s.ScenarioRole == w.Role
+			match = s.ScenarioRole == w.Role && (scenarioID == "" || s.ScenarioID == scenarioID)
 		}
 
 		if match {

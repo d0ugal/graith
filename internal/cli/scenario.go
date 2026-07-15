@@ -13,14 +13,16 @@ import (
 	"github.com/d0ugal/graith/internal/client"
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
+	"github.com/d0ugal/graith/internal/scenariofile"
 	toml "github.com/pelletier/go-toml/v2"
 	"github.com/spf13/cobra"
 )
 
 type scenarioFile struct {
-	Version  int                   `toml:"version"`
-	Scenario scenarioFileMeta      `toml:"scenario"`
-	Sessions []scenarioFileSession `toml:"sessions"`
+	Version  int                    `toml:"version"`
+	Scenario scenarioFileMeta       `toml:"scenario"`
+	Sessions []scenarioFileSession  `toml:"sessions"`
+	Triggers []config.TriggerConfig `toml:"trigger"`
 }
 
 type scenarioFileMeta struct {
@@ -96,6 +98,26 @@ func parseScenarioFile(data []byte) (*scenarioFile, error) {
 
 	if len(sf.Sessions) == 0 {
 		return nil, fmt.Errorf("at least one [[sessions]] entry is required")
+	}
+
+	roles := make(map[string]bool, len(sf.Sessions))
+	members := make(map[string]bool, len(sf.Sessions))
+
+	for _, s := range sf.Sessions {
+		// Shared members can't be watch-bound (they keep their own scenario
+		// identity), so their role is not selectable; they remain valid delivery
+		// targets by name.
+		if s.Role != "" && !s.Shared {
+			roles[s.Role] = true
+		}
+
+		if s.Name != "" {
+			members[s.Name] = true
+		}
+	}
+
+	if err := scenariofile.ValidateScenarioTriggers(sf.Triggers, roles, members); err != nil {
+		return nil, err
 	}
 
 	return &sf, nil
@@ -223,6 +245,7 @@ The source can be:
 			Name:            sf.Scenario.Name,
 			Goal:            sf.Scenario.Goal,
 			Sessions:        sessions,
+			Triggers:        sf.Triggers,
 		})
 
 		resp, err := c.ReadControlResponse()

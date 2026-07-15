@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/d0ugal/graith/internal/config"
 )
 
 const Version = "1.0"
@@ -814,6 +816,13 @@ type ScenarioStartMsg struct {
 	Name            string                 `json:"name"`
 	Goal            string                 `json:"goal"`
 	Sessions        []ScenarioSessionInput `json:"sessions"`
+	// Triggers are the scenario-embedded [[trigger]] blocks parsed from the
+	// scenario TOML. They are carried on the start message (rather than re-read
+	// from disk at fire time, since the file may change) and associated with the
+	// scenario once its two-phase start succeeds. See issue #1027 and
+	// docs/design/2026-07-11-triggers-design.md §"Scenario-embedded trigger
+	// lifecycle".
+	Triggers []config.TriggerConfig `json:"triggers,omitempty"`
 }
 
 type ScenarioSessionInput struct {

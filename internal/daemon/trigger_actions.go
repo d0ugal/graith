@@ -413,6 +413,7 @@ func (sm *SessionManager) actionScenario(ctx context.Context, t *config.TriggerC
 		Name:            sf.Scenario.Name,
 		Goal:            sf.Scenario.Goal,
 		Sessions:        inputs,
+		Triggers:        sf.Triggers,
 	}
 	//nolint:contextcheck // StartScenario runs its own session lifecycle, detached from the fire ctx.
 	st, err := sm.StartScenario(msg, 24, 80)
