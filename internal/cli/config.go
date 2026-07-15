@@ -5,9 +5,9 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/aymanbagabas/go-udiff"
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/pelletier/go-toml/v2"
-	"github.com/pmezard/go-difflib/difflib"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -161,18 +161,7 @@ var configDiffCmd = &cobra.Command{
 			return fmt.Errorf("marshal user config: %w", err)
 		}
 
-		diff := difflib.UnifiedDiff{
-			A:        difflib.SplitLines(string(defaultBytes)),
-			B:        difflib.SplitLines(string(userBytes)),
-			FromFile: "defaults",
-			ToFile:   target,
-			Context:  3,
-		}
-
-		text, err := difflib.GetUnifiedDiffString(diff)
-		if err != nil {
-			return fmt.Errorf("compute diff: %w", err)
-		}
+		text := udiff.Unified("defaults", target, string(defaultBytes), string(userBytes))
 
 		if text == "" {
 			return nil
