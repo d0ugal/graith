@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/aymanbagabas/go-udiff"
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/pelletier/go-toml/v2"
-	"github.com/pmezard/go-difflib/difflib"
 	"github.com/spf13/cobra"
 )
 
@@ -84,18 +84,7 @@ func TestConfigDiffNoChanges(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	diff := difflib.UnifiedDiff{
-		A:        difflib.SplitLines(string(defaultBytes)),
-		B:        difflib.SplitLines(string(defaultBytes)),
-		FromFile: "defaults",
-		ToFile:   "user",
-		Context:  3,
-	}
-
-	text, err := difflib.GetUnifiedDiffString(diff)
-	if err != nil {
-		t.Fatal(err)
-	}
+	text := udiff.Unified("defaults", "user", string(defaultBytes), string(defaultBytes))
 
 	if text != "" {
 		t.Errorf("expected empty diff for identical configs, got:\n%s", text)
@@ -117,21 +106,18 @@ func TestConfigDiffShowsChanges(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	diff := difflib.UnifiedDiff{
-		A:        difflib.SplitLines(string(defaultBytes)),
-		B:        difflib.SplitLines(string(userBytes)),
-		FromFile: "defaults",
-		ToFile:   "user",
-		Context:  3,
-	}
-
-	text, err := difflib.GetUnifiedDiffString(diff)
-	if err != nil {
-		t.Fatal(err)
-	}
+	text := udiff.Unified("defaults", "user", string(defaultBytes), string(userBytes))
 
 	if text == "" {
-		t.Error("expected non-empty diff for changed config")
+		t.Fatal("expected non-empty diff for changed config")
+	}
+
+	// Assert the label direction so a reversed old/new argument order is caught:
+	// defaults (old) → user (new), with the agent change shown as -claude/+codex.
+	for _, want := range []string{"--- defaults", "+++ user", "-default_agent = 'claude'", "+default_agent = 'codex'"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("diff missing %q; got:\n%s", want, text)
+		}
 	}
 }
 
