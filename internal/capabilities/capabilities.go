@@ -449,6 +449,46 @@ func (m *Manifest) Coverage() map[string]map[string]int {
 	return out
 }
 
+// GUICapability is one capability projected for the GUI conformance check: its
+// id and its state on the two GUI surfaces. The CLI column is deliberately
+// dropped — the Swift check only reasons about iOS/macOS, and coupling the GUI
+// fixture to CLI churn would make it stale for no reason.
+type GUICapability struct {
+	ID    string `json:"id"`
+	IOS   string `json:"ios"`
+	MacOS string `json:"macos"`
+}
+
+// GUIFixture is the language-neutral projection the Swift GraithSessionKit
+// conformance test reads (issue #1149). It mirrors the #1129/#1144 protocol
+// fixture: the Go manifest is the source of truth, this is committed under
+// gui/ so SwiftPM can bundle it, and a staleness test keeps the two in step.
+type GUIFixture struct {
+	Version      int             `json:"version"`
+	Capabilities []GUICapability `json:"capabilities"`
+}
+
+// GUIFixture projects the manifest to the GUI-facing fixture, in manifest order.
+func (m *Manifest) GUIFixture() GUIFixture {
+	caps := make([]GUICapability, 0, len(m.Capabilities))
+	for _, c := range m.Capabilities {
+		caps = append(caps, GUICapability{ID: c.ID, IOS: c.IOS, MacOS: c.MacOS})
+	}
+
+	return GUIFixture{Version: m.Version, Capabilities: caps}
+}
+
+// MarshalGUIFixture renders the GUI fixture as indented JSON with a trailing
+// newline, so the committed file is diff-friendly and byte-stable.
+func (m *Manifest) MarshalGUIFixture() ([]byte, error) {
+	out, err := json.MarshalIndent(m.GUIFixture(), "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("marshal gui capability fixture: %w", err)
+	}
+
+	return append(out, '\n'), nil
+}
+
 // SurfaceIDs returns surface IDs in manifest order.
 func (m *Manifest) SurfaceIDs() []string {
 	ids := make([]string, 0, len(m.Surfaces))
