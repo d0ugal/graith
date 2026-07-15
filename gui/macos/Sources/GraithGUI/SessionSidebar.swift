@@ -365,6 +365,12 @@ struct HostSection: View {
     private var sessionCount: Int { groups.reduce(0) { $0 + $1.sessions.count } }
     private var errorText: String? { store.hostErrors[host.id] }
 
+    /// Unfiltered session count for this host — lets the empty line distinguish
+    /// "this host has no sessions" from "the filter hid them all" (#906 parity).
+    private var unfilteredCount: Int {
+        store.connections.first { $0.id == host.id }?.sessions.count ?? 0
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
@@ -406,7 +412,11 @@ struct HostSection: View {
                     .padding(.horizontal, 16)
                     .padding(.bottom, 4)
             } else if sessionCount == 0 {
-                Text(host.isPaired ? "No sessions" : "Pairing…")
+                // Distinguish a filtered-to-empty host from a genuinely empty
+                // one so the message isn't misleading while a filter is active.
+                Text(unfilteredCount > 0
+                    ? "No sessions match"
+                    : (host.isPaired ? "No sessions" : "Pairing…"))
                     .font(.system(.caption2, design: .monospaced))
                     .foregroundStyle(Theme.overlay0)
                     .padding(.horizontal, 16)
@@ -425,10 +435,10 @@ struct FleetSummaryBar: View {
     let sessions: [Session]
 
     var running: Int { sessions.filter { $0.isRunning }.count }
+    // Reuse the canonical shared predicate so the summary count can't drift
+    // from what the "Needs Attention" view mode actually lists (#906).
     var needsAttention: Int {
-        sessions.filter { $0.needsApproval || $0.isErrored ||
-            ($0.isStopped && ($0.dirty ?? false || ($0.unpushedCount ?? 0) > 0))
-        }.count
+        sessions.filter(SidebarFilter.needsAttention).count
     }
 
     var body: some View {

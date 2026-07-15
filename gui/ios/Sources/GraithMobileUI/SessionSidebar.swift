@@ -73,6 +73,15 @@ private struct SidebarFilterControls: View {
                         .lineLimit(1)
                 }
                 .disabled(model.availableRepos.isEmpty)
+
+                if model.isFilterActive {
+                    Button {
+                        model.clearFilters()
+                    } label: {
+                        Label("Clear", systemImage: "xmark.circle")
+                    }
+                    .tint(.secondary)
+                }
             }
             .font(.footnote)
             .listRowBackground(Color.clear)
@@ -96,7 +105,10 @@ private struct HostSection: View {
                     .foregroundStyle(.red)
                     .font(.footnote)
             case .idle, .connected:
-                if repoGroups.isEmpty && criteria.isActive {
+                // Only say "No sessions match" when the host actually has
+                // sessions the filter hid — a genuinely empty host renders its
+                // existing empty section rather than a misleading filter hint.
+                if repoGroups.isEmpty && criteria.isActive && !connection.sessions.isEmpty {
                     Label("No sessions match", systemImage: "line.3.horizontal.decrease.circle")
                         .foregroundStyle(.secondary)
                         .font(.footnote)

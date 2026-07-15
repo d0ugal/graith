@@ -321,9 +321,11 @@ open class FleetModel: ObservableObject {
 
     /// The distinct repo names across all sessions, sorted — for the repo
     /// quick-filter menu. Ignores the current repo filter so the menu can
-    /// always switch to any repo.
+    /// always switch to any repo. Derived from `allSessions` (every connection)
+    /// rather than the id-deduplicated `sessions`, so a repo isn't dropped from
+    /// the menu when two hosts happen to share a per-daemon session id.
     public var availableRepos: [String] {
-        Set(sessions.map(\.repoName)).sorted()
+        Set(allSessions.map(\.session.repoName)).sorted()
     }
 
     /// Reset every filter to its default (used by a "clear filters" action).

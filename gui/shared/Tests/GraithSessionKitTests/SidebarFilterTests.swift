@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import GraithProtocol
+import GraithRemoteKit
 @testable import GraithSessionKit
 
 // Exercises the shared sidebar filter/search/view-mode logic (#906): the pure
@@ -222,4 +223,51 @@ struct FleetModelFilterTests {
         // keeps all sessions regardless of the active filter.
         #expect(fleet.allSessionsByRepo.flatMap { $0.sessions }.count == 3)
     }
+
+    /// Regression: two hosts sharing a per-daemon session id must not drop a
+    /// repo from the quick-filter menu. `availableRepos` derives from
+    /// `allSessions` (every connection), not the id-deduplicated `sessions`.
+    @Test func availableReposSpansHostsWithCollidingIDs() async {
+        // Both hosts use session id "shared01" but in different repos.
+        let benSessions = [makeSession(id: "shared01", name: "ben-braw", status: "running", repoName: "croft")]
+        let braeSessions = [makeSession(id: "shared01", name: "brae-braw", status: "running", repoName: "glen")]
+        let fleet = makeTwoHostFleet(hostA: benSessions, hostB: braeSessions)
+        await fleet.connectAll()
+
+        // The id-deduplicated merge drops one of the colliding sessions…
+        #expect(fleet.sessions.count == 1)
+        // …but the repo menu still offers both repos.
+        #expect(fleet.availableRepos == ["croft", "glen"])
+    }
+}
+
+/// Build a `FleetModel` over two paired remote hosts, each backed by its own
+/// `MockHostClient`. Used to exercise cross-host aggregation edge cases.
+@MainActor
+private func makeTwoHostFleet(hostA: [SessionInfo], hostB: [SessionInfo]) -> FleetModel {
+    let secrets = InMemorySecretStore()
+    // swiftlint:disable:next force_try
+    let identity = try! DeviceIdentity(keychain: secrets)
+    let registry = HostRegistry(
+        keychain: secrets,
+        storeURL: FileManager.default.temporaryDirectory
+            .appendingPathComponent("graith-two-host-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("hosts.json")
+    )
+    registry.upsert(Host(id: "ben", label: "Ben Nevis", kind: .remote, magicDNSName: "ben.tail", isPaired: false))
+    registry.upsert(Host(id: "brae", label: "Brae", kind: .remote, magicDNSName: "brae.tail", isPaired: false))
+    // swiftlint:disable force_try
+    try! registry.completePairing(hostID: "ben", response: PairResponseMsg(
+        deviceID: "dev-ben", clientToken: "tok-ben", daemonProfile: "", tlsPinSPKI: "cGlu"))
+    try! registry.completePairing(hostID: "brae", response: PairResponseMsg(
+        deviceID: "dev-brae", clientToken: "tok-brae", daemonProfile: "", tlsPinSPKI: "cGlu"))
+    // swiftlint:enable force_try
+    let factory = MockFactory(clients: [
+        "tok-ben": MockHostClient(sessions: hostA),
+        "tok-brae": MockHostClient(sessions: hostB),
+    ])
+    let pairing = PairingCoordinator(pairing: StubPairing(), identity: identity, registry: registry)
+    return FleetModel(
+        registry: registry, identity: identity, reachability: nil,
+        factory: factory, pairing: pairing, subscribeApprovals: false)
 }
