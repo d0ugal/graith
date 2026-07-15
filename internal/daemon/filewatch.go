@@ -74,14 +74,25 @@ func (sm *SessionManager) reconcileBindings(ctx context.Context, cfg *config.Con
 		sm.teardownBinding(key)
 	}
 
-	// Create newly desired bindings.
+	// Create newly desired bindings, and recreate any whose definition changed.
 	for key, t := range desired {
+		fp := triggerFingerprint(t)
+
 		sm.triggers.mu.Lock()
-		_, exists := sm.triggers.bindings[key]
+		existing, exists := sm.triggers.bindings[key]
 		sm.triggers.mu.Unlock()
 
 		if exists {
-			continue
+			// A same-named watch trigger whose fire-affecting definition
+			// (paths/ignore/debounce/action/policy) changed leaves the binding
+			// key matching, so a plain existence check would keep the stale
+			// matcher and debounce. Tear it down and recreate on fingerprint
+			// change (mirrors reconcileSchedules' fingerprint reset).
+			if existing.fingerprint == fp {
+				continue
+			}
+
+			sm.teardownBinding(key)
 		}
 
 		sess := sm.sessionForBindingKey(key)
@@ -161,6 +172,7 @@ func (sm *SessionManager) createBinding(ctx context.Context, t *config.TriggerCo
 		triggerName: t.Name,
 		sessionID:   sess.id,
 		worktree:    sess.worktree,
+		fingerprint: triggerFingerprint(t),
 		watcher:     watcher,
 		changed:     make(map[string]bool),
 		// Re-adopt an existing reactor (tagged TriggerID/TriggerReactor) so
