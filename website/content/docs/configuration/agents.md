@@ -132,6 +132,17 @@ The basename is uppercased, with `-` and `.` replaced by `_`. For example, `~/Co
 
 The daemon also passes `--add-dir <worktree>` for each included repo when launching the agent, so it can access the sibling worktrees without an extra prompt to grant them. This is applied only for agents whose CLI accepts the flag — `claude`, `codex`, and `cursor`; other agents rely on the environment variables above. The flag is re-added on resume and fork, so it survives restarts.
 
+#### Config path rewriting
+
+Relative references between repos (`../shared-lib`) resolve correctly because the worktrees are arranged as siblings. Absolute references (`~/Code/shared-lib` or `/Users/you/Code/shared-lib`) do not — they still point at your main checkout, not the session's worktree.
+
+To help, after creating the worktrees the daemon rewrites known orchestrator config files in each worktree, substituting each source repo path with its session worktree path:
+
+- `.env.local`
+- `docker-compose.override.yml`
+
+Both the resolved absolute path and its `~/`-relative form are matched, at path boundaries only — so `~/Code/grafana` is rewritten while a sibling such as `~/Code/grafana-enterprise` is left untouched. A path that continues into the repo (`~/Code/grafana/conf`) keeps its suffix. Only files present in the worktree are touched; a file that is gitignored (and so absent from a fresh checkout) is skipped, and the `GRAITH_INCLUDE_*_PATH` env vars remain the mitigation for those cases. Rewriting is best-effort — a read or write failure is logged, never fatal to session creation.
+
 Validation rules:
 - A repo cannot include itself
 - Included repo basenames must be unique
