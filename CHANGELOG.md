@@ -1,5 +1,71 @@
 # Changelog
 
+## [0.68.3](https://github.com/d0ugal/graith/compare/v0.68.2...v0.68.3) (2026-07-15)
+
+
+### Features
+
+* **capabilities:** guard the GUI manifest against code drift ([#1149](https://github.com/d0ugal/graith/issues/1149)) ([c349ec1](https://github.com/d0ugal/graith/commit/c349ec1465e2f2ca8e9e75391eec420d760a1ba3))
+* **daemon:** rewrite absolute repo paths in orchestrator config files ([#1033](https://github.com/d0ugal/graith/issues/1033)) ([47299ce](https://github.com/d0ugal/graith/commit/47299ce2c3624a1eb76fb7b0ddb31e6eb6ff1d37))
+* **docs:** capability matrix + machine-readable manifest ([#1128](https://github.com/d0ugal/graith/issues/1128)) ([6a2e68f](https://github.com/d0ugal/graith/commit/6a2e68f0f48d6a9b2752458e43faa758b95b525f))
+* **fork:** cross-agent fork into a new worktree ([#1043](https://github.com/d0ugal/graith/issues/1043)) ([cab6dcf](https://github.com/d0ugal/graith/commit/cab6dcfc2c9be772f77c855c4a2675856b9b7a71))
+* **gui:** add Advanced options to New Session sheet ([#900](https://github.com/d0ugal/graith/issues/900)) ([1a0f285](https://github.com/d0ugal/graith/commit/1a0f2857b52be808963e5c98dd84f9ffca3b3025))
+* **gui:** add scenarios view (macOS + iOS) ([e3f3e17](https://github.com/d0ugal/graith/commit/e3f3e17db52567ab268f4b99fcf39e49966706f6))
+* **gui:** close macOS UI parity gaps (approvals, logs, snapshot, repo picker) ([6bdfba2](https://github.com/d0ugal/graith/commit/6bdfba264a731b7a4e09dca8048dc2f857975d49))
+* **gui:** close restore/purge/set-status GUI↔CLI parity gaps ([#1148](https://github.com/d0ugal/graith/issues/1148)) ([cada774](https://github.com/d0ugal/graith/commit/cada774fe9330ca73c875775814c0d81a3b56e69))
+* **gui:** shared session/feature layer (GraithSessionKit) for iOS+macOS parity ([08961d4](https://github.com/d0ugal/graith/commit/08961d4c773de2433340511aa2af2cf3e0624d21))
+* **gui:** sidebar filter, search & view modes ([#906](https://github.com/d0ugal/graith/issues/906)) ([a0b1a9b](https://github.com/d0ugal/graith/commit/a0b1a9bbf003083e92e5f134184f72eaaa0b0201))
+* **new:** add --no-fetch to skip git fetch on session create ([2d292e5](https://github.com/d0ugal/graith/commit/2d292e5ae55f398bfdb729e5116d46a157a18027)), closes [#1012](https://github.com/d0ugal/graith/issues/1012)
+* **protocol:** cross-language conformance test (Go manifest ↔ Swift fixture) ([3b0be08](https://github.com/d0ugal/graith/commit/3b0be080743de0c91a2480daa186ed51db8ee7ee)), closes [#1129](https://github.com/d0ugal/graith/issues/1129)
+* **sandbox:** add nono ssh-keys feature token ([8a4d829](https://github.com/d0ugal/graith/commit/8a4d829add6da5ae207032778a2431955fef3954)), closes [#1040](https://github.com/d0ugal/graith/issues/1040)
+
+
+### Bug Fixes
+
+* **capabilities:** address review — narrow guard claims, harden exceptions ([7681797](https://github.com/d0ugal/graith/commit/76817970193823ce1032a04a379ea7f82d0cf555))
+* **capabilities:** harden manifest validation and matrix rendering ([d6aaadf](https://github.com/d0ugal/graith/commit/d6aaadf6a5d84250047c14fdfc8a3a52be082a60))
+* **capabilities:** mark macOS parity gaps closed by [#1143](https://github.com/d0ugal/graith/issues/1143) ([3426e3b](https://github.com/d0ugal/graith/commit/3426e3b4050ba8e71412fe7b9cb851fdc5c7291e))
+* **daemon:** address review — nested repos, symlinks, fork, dirty worktree ([23ae797](https://github.com/d0ugal/graith/commit/23ae797df6cf1ed1441decadb2434e3ec41b94b8))
+* **daemon:** guard watch hot-reload against stale-generation fires ([d9e3b6b](https://github.com/d0ugal/graith/commit/d9e3b6b64fc60758cad1e6af91468e44143e7acd))
+* **daemon:** hot-reload watch trigger bindings on config change ([9bad39a](https://github.com/d0ugal/graith/commit/9bad39a17591b24e09b166f8ac19657b18d6cd69)), closes [#1028](https://github.com/d0ugal/graith/issues/1028)
+* **daemon:** preserve hook-derived status in stop summary ([3c65df1](https://github.com/d0ugal/graith/commit/3c65df1f88c4d4f142c08b0f049615f565d403f9)), closes [#1034](https://github.com/d0ugal/graith/issues/1034)
+* **dev-release:** address review — serialise runs, monotonic build time, fail closed ([2034410](https://github.com/d0ugal/graith/commit/20344106e56f17e6dad6cd810e344b261a3e09d4))
+* **dev-release:** give graith-dev a monotonic version so brew upgrades ([a2c080d](https://github.com/d0ugal/graith/commit/a2c080d6ee8730bc96c88c6f1ca4b26c374693db))
+* **gui:** address review — await deleted-view mutations, model restore in conformance manifest ([62b3a83](https://github.com/d0ugal/graith/commit/62b3a83d43c757297b1d5b8b74df5c1dcec3f500))
+* **gui:** address review — observable attach takeover, refresh guard, connection cleanup, migrate model; raise shared coverage ([9574448](https://github.com/d0ugal/graith/commit/957444849fe478b619598abcfe3aa7bacfbd0f40))
+* **gui:** address review findings on New Session advanced options ([ea00863](https://github.com/d0ugal/graith/commit/ea00863a81cc2f61d1e39c489c8489cd13765513))
+* **gui:** address scenarios review findings ([af31839](https://github.com/d0ugal/graith/commit/af31839937173359fa96da34c0556617a64b09d4))
+* **gui:** align socket resolution with Darwin XDG ([7e2082d](https://github.com/d0ugal/graith/commit/7e2082d6865960b79b002afa2585c748e2315b92))
+* **gui:** avoid custom handoff webpage URL ([de572f7](https://github.com/d0ugal/graith/commit/de572f7dd255f195037ffc5191173e6668a78c9d))
+* **gui:** clear reused handoff metadata ([576ccf6](https://github.com/d0ugal/graith/commit/576ccf6b771da44eb7ccff3f06cd3873fa3e9bfa))
+* **gui:** harden macOS approval response, repo picker, and peek reloads ([149ce5b](https://github.com/d0ugal/graith/commit/149ce5bb328248746d59f894ba30440ce18a270b))
+* **gui:** make orderedRepos nonisolated so tests can call it off the main actor ([96f3560](https://github.com/d0ugal/graith/commit/96f3560982817101e9cf4758666cbec0631701b4))
+* **gui:** resolve macOS daemon socket from config ([4c04631](https://github.com/d0ugal/graith/commit/4c04631007a1d3cd356865deda159019fa4783db))
+* **gui:** sidebar filter parity follow-up ([#906](https://github.com/d0ugal/graith/issues/906)) ([1ad9bbe](https://github.com/d0ugal/graith/commit/1ad9bbe78a220b7b3046e390a52848f0d2070e92))
+* **gui:** sync capability fixture ([a7430b8](https://github.com/d0ugal/graith/commit/a7430b8255d8bd1fcba4eb6f3c9cd4bc7039caf7))
+* **protocol:** regenerate stale manifest fixture (ForkMsg agent/model) ([0b38086](https://github.com/d0ugal/graith/commit/0b380869db8edc0d8b92644c4d3bb3566c6620f9))
+* **protocol:** strengthen conformance guard and reflection fidelity ([8e2785f](https://github.com/d0ugal/graith/commit/8e2785f1e6966cac7eff76774953c9616f270bd8))
+* **sandbox:** make ssh-keys actually grant ~/.ssh under nono ([0a8ef3f](https://github.com/d0ugal/graith/commit/0a8ef3fa409f6ec9109847f793e5b7b19dd3b266))
+* **triggers:** recover degraded watch bindings via backoff retry ([8799ead](https://github.com/d0ugal/graith/commit/8799ead67ba22e81deef261ce55de6a22feec5aa)), closes [#1029](https://github.com/d0ugal/graith/issues/1029)
+
+
+### Documentation
+
+* **agents:** add 'leave files better than you found them' guidance ([6716d64](https://github.com/d0ugal/graith/commit/6716d64bc74a756235494c022e15461e7689d413))
+* **agents:** document the hand-maintained capability manifest ([14bf170](https://github.com/d0ugal/graith/commit/14bf1707dc111dda393b0bbf9ae0500b1259fae0))
+
+
+### Tests
+
+* **daemon:** lock [#1034](https://github.com/d0ugal/graith/issues/1034) fix at watchSession/StopAll call sites ([ad867f6](https://github.com/d0ugal/graith/commit/ad867f6f2e1268fb3a5f241a29eeeaa21f2a2646))
+* **daemon:** wait for fork source recorder ([3891743](https://github.com/d0ugal/graith/commit/3891743b3a1a56fb238059b98cf3bccecfd92ad5))
+
+
+### Continuous Integration
+
+* auto-regenerate committed generated artifacts on PRs ([59f9b25](https://github.com/d0ugal/graith/commit/59f9b25c305066116072ae8d1f1a577c1e3da19b))
+* skip macOS jobs on Go-only PRs via per-job path filter ([#1174](https://github.com/d0ugal/graith/issues/1174)) ([613cc58](https://github.com/d0ugal/graith/commit/613cc583f4c394ace5a2ac743d879c796ad4818f))
+
 ## [0.68.2](https://github.com/d0ugal/graith/compare/v0.68.1...v0.68.2) (2026-07-14)
 
 
