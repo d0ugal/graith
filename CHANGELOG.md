@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.68.4](https://github.com/d0ugal/graith/compare/v0.68.3...v0.68.4) (2026-07-15)
+
+
+### Features
+
+* **cli:** add --self flag to gr delete, stop, and purge ([6b6c620](https://github.com/d0ugal/graith/commit/6b6c620766c6940c21a1abce51ff098dc3452306))
+* **overlay:** show CI check counts (16/22) while CI runs ([63089ef](https://github.com/d0ugal/graith/commit/63089efbec5eece551e4d1a5e6703bec9525c7a9))
+
+
+### Bug Fixes
+
+* **covreport:** sort per-file coverage by uncovered statements ([f2bf07b](https://github.com/d0ugal/graith/commit/f2bf07b11774b00dc291da89f7254d120a062a9f))
+* **renovate:** stop erroring on golangci-lint digest pin ([103bb5e](https://github.com/d0ugal/graith/commit/103bb5eb1782ddcd517f7f980b383f983b84445f))
+* **renovate:** stop proposing parent-pinned transitive dep bumps ([08d4171](https://github.com/d0ugal/graith/commit/08d4171088d0fa744cec419f62ee202dc882e54d))
+
 ## [0.68.3](https://github.com/d0ugal/graith/compare/v0.68.2...v0.68.3) (2026-07-15)
 
 
