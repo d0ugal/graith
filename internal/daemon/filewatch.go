@@ -92,6 +92,17 @@ func (sm *SessionManager) reconcileBindings(ctx context.Context, cfg *config.Con
 				continue
 			}
 
+			// Don't tear down mid-serialised-action: a fire on the recreated
+			// binding (which starts with a cleared inFlight guard) could
+			// double-spawn an ensure-reviewer reactor while the old fire is
+			// still inside its reserve→create. Defer the recreate to a later
+			// tick; the fingerprint guard in watchFire keeps the stale binding
+			// from firing the new definition in the meantime, so inFlight only
+			// clears (never re-arms) and this converges once the fire finishes.
+			if existing.actionInFlight() {
+				continue
+			}
+
 			sm.teardownBinding(key)
 		}
 
@@ -321,6 +332,15 @@ func (sm *SessionManager) watchFire(ctx context.Context, triggerName string, b *
 	// The trigger may have been paused during the up-to-2s reconcile window
 	// before its binding was torn down; don't fire a paused trigger.
 	if rt := sm.getTriggerRuntime(t.Name); rt != nil && rt.Paused {
+		return
+	}
+	// The binding captured its matcher and debounce for one definition
+	// generation. If the definition changed under it (a hot-reload landed but
+	// reconcile hasn't recreated the binding yet), don't fire the new action
+	// from an event the old matcher collected — the recreated binding takes
+	// over. This also stops the stale binding starting a fresh serialised
+	// action, so its inFlight guard can only clear (see reconcileBindings).
+	if triggerFingerprint(t) != b.fingerprint {
 		return
 	}
 
