@@ -76,7 +76,10 @@ actor MockHostClient: GraithHostClient {
     private(set) var lastSetStatus: (text: String, ttlSeconds: Int?, clear: Bool)?
     /// Blocks `listSessions()` until `releaseList()` — used to hold a refresh in
     /// flight while a second, coalesced refresh queues behind it, then assert the
-    /// in-flight refresh loops exactly once more.
+    /// in-flight refresh loops exactly once more. Holds a single continuation:
+    /// `HostConnection.refresh()`'s in-flight guard means at most one gated
+    /// `listSessions()` exists per connection at a time, so this never overwrites
+    /// (and leaks) a live waiter.
     private var listGate: CheckedContinuation<Void, Never>?
     private var gateList = false
     /// Number of `listSessions()` calls, so a test can assert the in-flight

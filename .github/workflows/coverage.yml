@@ -202,10 +202,16 @@ jobs:
           # Wrap the coverage run in `timeout` (or coreutils `gtimeout`) for a
           # fast step-level kill if a suite hangs; falls back to unwrapped if
           # neither is present (timeout-minutes is the hard backstop either way).
-          # `--show-codecov-path` re-runs nothing (results are cached), so it
-          # needs no wrapping.
-          TIMEOUT="$(command -v timeout || command -v gtimeout || true)"
-          ${TIMEOUT:+"$TIMEOUT" 300} swift test --package-path gui/shared --enable-code-coverage
+          # An explicit branch, not `${VAR:+…}` word-splitting, which isn't
+          # portable across bash versions. `--show-codecov-path` re-runs nothing
+          # (results are cached), so it needs no wrapping. 600s (not 300) because
+          # the coverage-instrumented build compiles first and runs slower than a
+          # plain `swift test`; still well under the 15m job cap.
+          if TIMEOUT="$(command -v timeout || command -v gtimeout)"; then
+            "$TIMEOUT" 600 swift test --package-path gui/shared --enable-code-coverage
+          else
+            swift test --package-path gui/shared --enable-code-coverage
+          fi
           COV_JSON="$(swift test --package-path gui/shared --show-codecov-path | tail -n1)"
           # `-er` + `numbers`: fail closed if the field is missing or non-numeric
           # (SwiftPM format drift, malformed JSON) rather than silently emit 0.0.

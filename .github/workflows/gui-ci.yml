@@ -62,18 +62,26 @@ jobs:
       - name: Shared logic tests
         # Wrap in `timeout` (or coreutils `gtimeout`) for a fast step-level kill
         # if a suite hangs; falls back to unwrapped if neither is present (the
-        # job-level timeout-minutes is the hard backstop either way).
+        # job-level timeout-minutes is the hard backstop either way). An explicit
+        # branch, not `${VAR:+…}` word-splitting, which isn't portable across
+        # bash versions.
         run: |
-          TIMEOUT="$(command -v timeout || command -v gtimeout || true)"
-          ${TIMEOUT:+"$TIMEOUT" 300} swift test --package-path gui/shared
+          if TIMEOUT="$(command -v timeout || command -v gtimeout)"; then
+            "$TIMEOUT" 300 swift test --package-path gui/shared
+          else
+            swift test --package-path gui/shared
+          fi
 
       # macOS app logic suites: window-state, session-store attach ownership,
       # sidebar badge styling, approvals queue, repo-picker ordering. Host XCTest
       # (AppKit/SwiftUI types are opaque, but the pure view-model logic is not).
       - name: macOS app logic tests
         run: |
-          TIMEOUT="$(command -v timeout || command -v gtimeout || true)"
-          ${TIMEOUT:+"$TIMEOUT" 300} swift test --package-path gui/macos
+          if TIMEOUT="$(command -v timeout || command -v gtimeout)"; then
+            "$TIMEOUT" 300 swift test --package-path gui/macos
+          else
+            swift test --package-path gui/macos
+          fi
 
       # SDK-neutral logic checks (pairing confirmation gate, host registry,
       # attach ownership, reachability, error mapping).
