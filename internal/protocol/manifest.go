@@ -269,11 +269,14 @@ var swiftAnnotations = map[string]swiftAnnotation{
 	"ResizeMsg":    {SwiftRequired, "ResizeMsg"},
 	"LogsMsg":      {SwiftRequired, "LogsMsg"},
 
-	// stop/delete/restart share Swift's SessionScopeMsg (session_id + children +
-	// exclude_root). DeleteMsg's extra `purge` is optional and Go-only for now.
+	// stop/delete/restart/restore share Swift's SessionScopeMsg (session_id +
+	// children + exclude_root + purge). DeleteMsg's `purge` is now settable in
+	// Swift (the `gr purge` GUI path, #1148); RestoreMsg carries only the
+	// session_id + children subset SessionScopeMsg already models.
 	"StopMsg":    {SwiftRequired, "SessionScopeMsg"},
 	"DeleteMsg":  {SwiftRequired, "SessionScopeMsg"},
 	"RestartMsg": {SwiftRequired, "SessionScopeMsg"},
+	"RestoreMsg": {SwiftRequired, "SessionScopeMsg"},
 
 	// Bare {session_id} requests share Swift's SessionIDMsg.
 	"InterruptMsg":      {SwiftRequired, "SessionIDMsg"},
@@ -328,7 +331,6 @@ var swiftAnnotations = map[string]swiftAnnotation{
 	"RepoEntry":           {SwiftRequired, "RepoEntry"},
 
 	// --- Planned: client-relevant, not modelled in Swift yet (known gaps). ---
-	"RestoreMsg":             {SwiftPlanned, ""},
 	"DeleteResultMsg":        {SwiftPlanned, ""},
 	"RestoreResultMsg":       {SwiftPlanned, ""},
 	"UpdateMsg":              {SwiftPlanned, ""},

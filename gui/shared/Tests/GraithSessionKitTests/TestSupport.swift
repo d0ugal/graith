@@ -57,6 +57,7 @@ actor MockHostClient: GraithHostClient {
     var repos: [RepoEntry]
     var failConnect: GraithClientError?
     var failList: GraithClientError?
+    var failSetStatus: GraithClientError?
     /// Records the last `migrate` call so tests can assert the model is forwarded.
     private(set) var lastMigrate: (agent: String, model: String?)?
     /// Records the last `set_status` call so tests can assert the text/clear flag.
@@ -78,6 +79,7 @@ actor MockHostClient: GraithHostClient {
 
     func appendSession(_ s: SessionInfo) { sessions.append(s) }
     func setFailList(_ e: GraithClientError?) { failList = e }
+    func setFailSetStatus(_ e: GraithClientError?) { failSetStatus = e }
     func setGateList(_ on: Bool) { gateList = on }
     func releaseList() { listGate?.resume(); listGate = nil }
 
@@ -132,6 +134,7 @@ actor MockHostClient: GraithHostClient {
         deleted.removeAll { $0.id == sessionID }
     }
     func setStatus(sessionID: String, text: String, ttlSeconds: Int?, clear: Bool) async throws {
+        if let failSetStatus { throw failSetStatus }
         lastSetStatus = (text, ttlSeconds, clear)
     }
     func rename(sessionID: String, newName: String) async throws {}

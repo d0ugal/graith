@@ -2199,7 +2199,8 @@
     },
     {
       "name": "RestoreMsg",
-      "swift": "planned",
+      "swift": "required",
+      "swift_type": "SessionScopeMsg",
       "fields": [
         {
           "name": "session_id",

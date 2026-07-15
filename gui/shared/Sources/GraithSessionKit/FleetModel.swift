@@ -347,16 +347,20 @@ open class FleetModel: ObservableObject {
     }
 
     /// Restore a soft-deleted session on `hostID` (inverse of a soft delete).
-    public func restore(_ session: SessionInfo, hostID: String) {
+    /// `async` so the Deleted view can await it and only then re-list — a
+    /// fire-and-forget Task would race the re-fetch and leave a stale row on a
+    /// slow link.
+    public func restore(_ session: SessionInfo, hostID: String) async {
         guard let conn = connections.first(where: { $0.id == hostID }) else { return }
-        Task { await conn.restore(session) }
+        await conn.restore(session)
     }
 
     /// Hard-delete a session on `hostID` (`gr purge`). Works whether the session
-    /// is live or already soft-deleted; callers confirm first.
-    public func purge(_ session: SessionInfo, hostID: String) {
+    /// is live or already soft-deleted; callers confirm first. `async` for the
+    /// same await-then-relist reason as `restore`.
+    public func purge(_ session: SessionInfo, hostID: String) async {
         guard let conn = connections.first(where: { $0.id == hostID }) else { return }
-        Task { await conn.purge(session) }
+        await conn.purge(session)
     }
 
     /// Create a session on `hostID` and report the created session (found by

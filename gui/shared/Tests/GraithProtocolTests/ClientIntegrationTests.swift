@@ -273,6 +273,114 @@ struct ClientIntegrationTests {
         _ = await server.result
         await client.close()
     }
+
+    // MARK: - Restore / purge / set-status / deleted-list wire shapes (#1148)
+
+    /// Small decoder for the deleted-`list` request body (`{deleted:true}`),
+    /// which has no `session_id` so it can't reuse SessionScopeMsg.
+    private struct ListProbe: Decodable { let deleted: Bool? }
+
+    /// `list(deleted:)` sends type `list` with `{"deleted": true}`; the default
+    /// live `list` stays payload-free (asserted by `protocolClientListLocal`).
+    @Test func listDeletedSendsDeletedFlag() async throws {
+        let (clientStream, serverStream) = InMemoryByteStream.makePair()
+        let daemon = MockDaemon(stream: serverStream)
+        let server = Task {
+            _ = try await daemon.readControl()
+            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "1.0", daemonVersion: "dev"))
+            let req = try await daemon.readControl()
+            #expect(req.type == "list")
+            #expect(try decodePayload(req, as: ListProbe.self).deleted == true)
+            try await daemon.writeControl("session_list", SessionListMsg(sessions: [makeSession(id: "bide", name: "bide")]))
+        }
+        let stream = clientStream
+        let client = GraithProtocolClient(
+            transport: .unix(path: "/tmp/graith.sock"),
+            profile: "", clientID: "app", token: nil, signer: nil,
+            streamFactory: { _ in stream }
+        )
+        let sessions = try await client.list(deleted: true)
+        #expect(sessions.map(\.name) == ["bide"])
+        _ = await server.result
+        await client.close()
+    }
+
+    /// `restore` sends type `restore` with the session_id (+ children) subset.
+    @Test func restoreSendsRestoreType() async throws {
+        let (clientStream, serverStream) = InMemoryByteStream.makePair()
+        let daemon = MockDaemon(stream: serverStream)
+        let server = Task {
+            _ = try await daemon.readControl()
+            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "1.0", daemonVersion: "dev"))
+            let req = try await daemon.readControl()
+            #expect(req.type == "restore")
+            let scope = try decodePayload(req, as: SessionScopeMsg.self)
+            #expect(scope.sessionID == "braw")
+            #expect(scope.purge == nil)  // restore never sets the delete-only flag
+            try await daemon.writeControl("restored", EmptyMsg())
+        }
+        let stream = clientStream
+        let client = GraithProtocolClient(
+            transport: .unix(path: "/tmp/graith.sock"),
+            profile: "", clientID: "app", token: nil, signer: nil,
+            streamFactory: { _ in stream }
+        )
+        try await client.restore(sessionID: "braw")
+        _ = await server.result
+        await client.close()
+    }
+
+    /// `purge` is sent as a `delete` with `purge: true` (the `gr purge` verb).
+    @Test func purgeSendsDeleteWithPurgeFlag() async throws {
+        let (clientStream, serverStream) = InMemoryByteStream.makePair()
+        let daemon = MockDaemon(stream: serverStream)
+        let server = Task {
+            _ = try await daemon.readControl()
+            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "1.0", daemonVersion: "dev"))
+            let req = try await daemon.readControl()
+            #expect(req.type == "delete")
+            let scope = try decodePayload(req, as: SessionScopeMsg.self)
+            #expect(scope.sessionID == "canny")
+            #expect(scope.purge == true)
+            try await daemon.writeControl("deleted", EmptyMsg())
+        }
+        let stream = clientStream
+        let client = GraithProtocolClient(
+            transport: .unix(path: "/tmp/graith.sock"),
+            profile: "", clientID: "app", token: nil, signer: nil,
+            streamFactory: { _ in stream }
+        )
+        try await client.purge(sessionID: "canny")
+        _ = await server.result
+        await client.close()
+    }
+
+    /// `setStatus` sends type `set_status` carrying text, ttl_seconds, and clear.
+    @Test func setStatusSendsSetStatusPayload() async throws {
+        let (clientStream, serverStream) = InMemoryByteStream.makePair()
+        let daemon = MockDaemon(stream: serverStream)
+        let server = Task {
+            _ = try await daemon.readControl()
+            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "1.0", daemonVersion: "dev"))
+            let req = try await daemon.readControl()
+            #expect(req.type == "set_status")
+            let msg = try decodePayload(req, as: SetStatusMsg.self)
+            #expect(msg.sessionID == "braw")
+            #expect(msg.text == "building the bonnie feature")
+            #expect(msg.ttlSeconds == 600)
+            #expect(msg.clear == false)
+            try await daemon.writeControl("status_set", EmptyMsg())
+        }
+        let stream = clientStream
+        let client = GraithProtocolClient(
+            transport: .unix(path: "/tmp/graith.sock"),
+            profile: "", clientID: "app", token: nil, signer: nil,
+            streamFactory: { _ in stream }
+        )
+        try await client.setStatus(sessionID: "braw", text: "building the bonnie feature", ttlSeconds: 600, clear: false)
+        _ = await server.result
+        await client.close()
+    }
 }
 
     /// CRITICAL regression: the token-less pairing lane must consume the

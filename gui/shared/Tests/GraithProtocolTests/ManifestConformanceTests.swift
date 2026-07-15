@@ -140,6 +140,7 @@ private let swiftDecoders: [String: DecodeProbe] = [
     "StopMsg": probe(SessionScopeMsg.self),
     "DeleteMsg": probe(SessionScopeMsg.self),
     "RestartMsg": probe(SessionScopeMsg.self),
+    "RestoreMsg": probe(SessionScopeMsg.self),
 
     // Bare {session_id} requests → SessionIDMsg.
     "InterruptMsg": probe(SessionIDMsg.self),
