@@ -181,6 +181,9 @@ jobs:
     needs: changes
     if: needs.changes.outputs.gui == 'true'
     runs-on: macos-latest
+    # Cap scarce macOS runner minutes: a hung suite can't hold one for GitHub's
+    # 6h default. Well above the normal coverage runtime.
+    timeout-minutes: 15
     outputs:
       pct: ${{ steps.cov.outputs.pct }}
     steps:
@@ -196,7 +199,13 @@ jobs:
         # JSON produced by the coverage-enabled run above.
         run: |
           set -euo pipefail
-          swift test --package-path gui/shared --enable-code-coverage
+          # Wrap the coverage run in `timeout` (or coreutils `gtimeout`) for a
+          # fast step-level kill if a suite hangs; falls back to unwrapped if
+          # neither is present (timeout-minutes is the hard backstop either way).
+          # `--show-codecov-path` re-runs nothing (results are cached), so it
+          # needs no wrapping.
+          TIMEOUT="$(command -v timeout || command -v gtimeout || true)"
+          ${TIMEOUT:+"$TIMEOUT" 300} swift test --package-path gui/shared --enable-code-coverage
           COV_JSON="$(swift test --package-path gui/shared --show-codecov-path | tail -n1)"
           # `-er` + `numbers`: fail closed if the field is missing or non-numeric
           # (SwiftPM format drift, malformed JSON) rather than silently emit 0.0.
