@@ -27,6 +27,27 @@
       matchPackageNames: ['gvisor.dev/gvisor'],
       enabled: false,
     },
+    {
+      // These modules are transitive dependencies whose versions are pinned by
+      // their parents — go-proxyproto, rtnetlink and wireguard-go by
+      // tailscale.com, and libc by modernc.org/sqlite. graith does not import
+      // any of them directly (`go mod why` traces every one through
+      // tailscale.com or modernc.org/sqlite). Bumping them independently
+      // overrides the exact version the parent was tested against, and the only
+      // updates on offer are breaking majors/digests that risk breaking the
+      // parent's own compilation: go-proxyproto v0.15 changes the PROXY-protocol
+      // spec (2.3→3.4), rtnetlink v2 changes the LinkDriver API, and libc v2 is
+      // a new module path. Let these pins track the parent instead, mirroring
+      // the gvisor.dev/gvisor rule above. See closed PRs #960 (go-proxyproto),
+      // #932 (rtnetlink), #659 (libc) and dependency dashboard #90.
+      matchPackageNames: [
+        'github.com/pires/go-proxyproto',
+        'github.com/jsimonetti/rtnetlink',
+        'github.com/tailscale/wireguard-go',
+        'modernc.org/libc',
+      ],
+      enabled: false,
+    },
   ],
   customManagers: [
     {
