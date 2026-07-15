@@ -7,6 +7,11 @@
       "macos": "supported"
     },
     {
+      "id": "session.filter",
+      "ios": "supported",
+      "macos": "supported"
+    },
+    {
       "id": "session.create",
       "ios": "supported",
       "macos": "supported"

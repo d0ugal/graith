@@ -9,15 +9,72 @@ struct SessionSidebar: View {
 
     var body: some View {
         List(selection: $model.selection) {
+            // View-mode + quick filters (#906). Search is the navigation-bar
+            // search field below; the mode/starred/repo controls live inline so
+            // they're reachable without a toolbar overflow menu.
+            SidebarFilterControls(model: model)
+
             ForEach(model.connections) { conn in
-                HostSection(connection: conn)
+                HostSection(connection: conn, criteria: model.filterCriteria)
             }
         }
         .scrollContentBackground(.hidden)
         .background(GraithDesign.sidebarBackground)
         .font(GraithDesign.mono(.callout))
+        .searchable(text: $model.searchQuery, placement: .automatic, prompt: "Filter sessions")
         .refreshable {
             await model.connectAll()
+        }
+    }
+}
+
+/// Inline view-mode segmented picker plus starred and repo quick filters (#906).
+/// All state lives on the shared `FleetModel`.
+private struct SidebarFilterControls: View {
+    @ObservedObject var model: FleetModel
+
+    var body: some View {
+        Section {
+            Picker("View", selection: $model.viewMode) {
+                ForEach(SidebarViewMode.allCases) { mode in
+                    Text(mode.displayName).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .listRowBackground(Color.clear)
+
+            HStack {
+                Toggle(isOn: $model.starredOnly) {
+                    Label("Starred only", systemImage: "star")
+                }
+                .toggleStyle(.button)
+                .buttonStyle(.bordered)
+                .tint(model.starredOnly ? .yellow : .secondary)
+
+                Spacer()
+
+                Menu {
+                    Button("All repos") { model.repoFilter = nil }
+                    Divider()
+                    ForEach(model.availableRepos, id: \.self) { repo in
+                        Button {
+                            model.repoFilter = repo
+                        } label: {
+                            if model.repoFilter == repo {
+                                Label(repo, systemImage: "checkmark")
+                            } else {
+                                Text(repo)
+                            }
+                        }
+                    }
+                } label: {
+                    Label(model.repoFilter ?? "All repos", systemImage: "folder")
+                        .lineLimit(1)
+                }
+                .disabled(model.availableRepos.isEmpty)
+            }
+            .font(.footnote)
+            .listRowBackground(Color.clear)
         }
     }
 }
@@ -25,6 +82,7 @@ struct SessionSidebar: View {
 /// One host's section: connection state header + repo groups.
 private struct HostSection: View {
     @ObservedObject var connection: HostConnection
+    let criteria: SidebarFilter.Criteria
 
     var body: some View {
         Section {
@@ -37,8 +95,14 @@ private struct HostSection: View {
                     .foregroundStyle(.red)
                     .font(.footnote)
             case .idle, .connected:
-                ForEach(repoGroups, id: \.repo) { group in
-                    RepoGroup(repo: group.repo, sessions: group.sessions, connection: connection)
+                if repoGroups.isEmpty && criteria.isActive {
+                    Label("No sessions match", systemImage: "line.3.horizontal.decrease.circle")
+                        .foregroundStyle(.secondary)
+                        .font(.footnote)
+                } else {
+                    ForEach(repoGroups, id: \.repo) { group in
+                        RepoGroup(repo: group.repo, sessions: group.sessions, connection: connection)
+                    }
                 }
             }
         } header: {
@@ -52,7 +116,8 @@ private struct HostSection: View {
     }
 
     private var repoGroups: [(repo: String, sessions: [SessionInfo])] {
-        let grouped = Dictionary(grouping: connection.sessions) { $0.repoName.isEmpty ? "—" : $0.repoName }
+        let filtered = SidebarFilter.apply(connection.sessions, criteria)
+        let grouped = Dictionary(grouping: filtered) { $0.repoName.isEmpty ? "—" : $0.repoName }
         return grouped
             .map { (repo: $0.key, sessions: $0.value.sorted { $0.name < $1.name }) }
             .sorted { $0.repo < $1.repo }

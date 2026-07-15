@@ -96,6 +96,8 @@ private func sharedAffordances() -> Set<String> {
 
     // Session lifecycle — FleetModel routes every action to the owning host.
     wire("session.list") { _ = \FleetModel.sessions }
+    // Sidebar filter/search/view-mode (#906) — shared filter state + pure logic.
+    wire("session.filter") { _ = FleetModel.filtered }
     wire("session.create") { _ = FleetModel.createSession }
     wire("session.stop") { _ = FleetModel.stopSession }
     wire("session.resume") { _ = FleetModel.resumeSession }
