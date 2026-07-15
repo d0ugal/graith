@@ -21,6 +21,7 @@ public final class HostConnection: ObservableObject, Identifiable {
     @Published public private(set) var state: ConnectionState = .idle
     @Published public private(set) var sessions: [SessionInfo] = []
     @Published public private(set) var approvals: [ApprovalInfo] = []
+    @Published public private(set) var scenarios: [ScenarioRecord] = []
     @Published public private(set) var lastError: String?
 
     private let client: any GraithHostClient
@@ -86,6 +87,19 @@ public final class HostConnection: ObservableObject, Identifiable {
             lastError = nil
         } catch {
             lastError = Self.describe(error)
+        }
+        await refreshScenarios()
+    }
+
+    /// Reload this host's running scenarios. Best-effort: a scenario failure is
+    /// swallowed (the scenario surface degrades to empty) rather than marking the
+    /// whole connection errored — the session list is the primary signal, and a
+    /// daemon that can list sessions but hiccups on scenarios shouldn't paint the
+    /// host red. Only runs while connected.
+    private func refreshScenarios() async {
+        guard state == .connected else { return }
+        if let fetched = try? await client.listScenarios() {
+            scenarios = fetched
         }
     }
 
@@ -206,6 +220,12 @@ public final class HostConnection: ObservableObject, Identifiable {
     public func migrate(_ session: SessionInfo, agent: String, model: String? = nil) async {
         await run { try await self.client.migrate(sessionID: session.id, agent: agent, model: model) }
     }
+
+    // MARK: - Scenario lifecycle (#903)
+
+    public func stopScenario(_ name: String) async { await run { try await self.client.stopScenario(name: name) } }
+    public func resumeScenario(_ name: String) async { await run { try await self.client.resumeScenario(name: name) } }
+    public func deleteScenario(_ name: String) async { await run { try await self.client.deleteScenario(name: name) } }
 
     /// Expose the underlying client for the attach path (Task 20).
     public var underlyingClient: any GraithHostClient { client }

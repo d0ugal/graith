@@ -66,6 +66,10 @@ public enum ControlType {
     public static let screenSnapshot = "screen_snapshot"
     public static let screenPreview = "screen_preview"
     public static let repoList = "repo_list"
+    public static let scenarioList = "scenario_list"
+    public static let scenarioStop = "scenario_stop"
+    public static let scenarioResume = "scenario_resume"
+    public static let scenarioDelete = "scenario_delete"
     public static let approvalList = "approval_list"
     public static let approvalSubscribe = "approval_subscribe"
     public static let approvalRespond = "approval_respond"
@@ -122,6 +126,8 @@ public protocol GraithHostClient: Actor {
     func repoList() async throws -> [RepoEntry]
     func logs(sessionID: String, lines: Int) async throws -> String
     func screenSnapshot(sessionID: String) async throws -> ScreenSnapshot
+    /// Multi-session scenarios running on this daemon (`gr scenario list`).
+    func listScenarios() async throws -> [ScenarioRecord]
 
     // Mutations (roleRemoteHuman only).
     func create(_ request: CreateRequest) async throws
@@ -144,6 +150,15 @@ public protocol GraithHostClient: Actor {
     func fork(name: String, sourceSessionID: String) async throws
     /// Migrate `sessionID` to a different `agent` (and optionally `model`).
     func migrate(sessionID: String, agent: String, model: String?) async throws
+
+    // Scenario lifecycle (#903). Human-authorized on the daemon; start/task-done
+    // are orchestrator-session-scoped and intentionally absent from the boundary.
+    /// Stop every session in the named scenario.
+    func stopScenario(name: String) async throws
+    /// Resume every stopped/errored session in the named scenario.
+    func resumeScenario(name: String) async throws
+    /// Delete the scenario and all its sessions/worktrees.
+    func deleteScenario(name: String) async throws
 
     // Approvals — event connection.
     /// Subscribe to approval notifications without attaching to any session.

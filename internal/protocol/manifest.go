@@ -365,16 +365,21 @@ var swiftAnnotations = map[string]swiftAnnotation{
 	"MCPLogsMsg":             {SwiftPlanned, ""},
 	"MCPLogFile":             {SwiftPlanned, ""},
 	"MCPLogsResponse":        {SwiftPlanned, ""},
+	// Scenario reads + lifecycle wired into the GUI (#903). The `{name}` requests
+	// (stop/resume/delete) consolidate onto Swift's ScenarioNameMsg, like the
+	// SessionIDMsg pattern. start/task-done/add stay planned — they are
+	// orchestrator-session-scoped, not human-client operations.
+	"ScenarioStopMsg":      {SwiftRequired, "ScenarioNameMsg"},
+	"ScenarioResumeMsg":    {SwiftRequired, "ScenarioNameMsg"},
+	"ScenarioDeleteMsg":    {SwiftRequired, "ScenarioNameMsg"},
+	"ScenarioRecord":       {SwiftRequired, "ScenarioRecord"},
+	"ScenarioSessionInfo":  {SwiftRequired, "ScenarioSessionInfo"},
+	"ScenarioListResponse": {SwiftRequired, "ScenarioListResponse"},
+
 	"ScenarioStartMsg":       {SwiftPlanned, ""},
 	"ScenarioSessionInput":   {SwiftPlanned, ""},
-	"ScenarioStopMsg":        {SwiftPlanned, ""},
-	"ScenarioDeleteMsg":      {SwiftPlanned, ""},
 	"ScenarioStatusMsg":      {SwiftPlanned, ""},
-	"ScenarioRecord":         {SwiftPlanned, ""},
-	"ScenarioSessionInfo":    {SwiftPlanned, ""},
 	"ScenarioStatusResponse": {SwiftPlanned, ""},
-	"ScenarioListResponse":   {SwiftPlanned, ""},
-	"ScenarioResumeMsg":      {SwiftPlanned, ""},
 	"ScenarioTaskDoneMsg":    {SwiftPlanned, ""},
 	"ScenarioAddMsg":         {SwiftPlanned, ""},
 	"TriggerStatusMsg":       {SwiftPlanned, ""},

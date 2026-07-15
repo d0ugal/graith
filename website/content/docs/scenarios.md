@@ -204,6 +204,24 @@ gr msg send --parent "backend work complete, ready for review"
 gr msg inbox --all --ack
 ```
 
+## In the GUI
+
+The macOS and iOS apps surface running scenarios through the shared session
+layer:
+
+- **Scenarios view** — a toolbar button (badged with the running-scenario count)
+  opens a list of every scenario on the connected daemons, showing each one's
+  goal, status, and member sessions with their role, task, and task-done state.
+- **Sidebar grouping** — a **SCENARIOS** section at the top of the sidebar groups
+  each scenario's member sessions together, so a fleet reads as a unit rather
+  than scattered across repo groups. Tapping a member selects it.
+- **Lifecycle actions** — the human-authorized **stop**, **resume**, and
+  **delete** actions are available from the scenarios view and the sidebar
+  context menu.
+
+`start`, `add`, and `task-done` stay CLI-only: the daemon scopes them to the
+scenario's orchestrator *session*, which the GUI (a human client) is not.
+
 ## Constraints
 
 - **Orchestrator only:** Only the orchestrator session (`system_kind: orchestrator`) can start scenarios

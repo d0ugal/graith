@@ -153,8 +153,8 @@
     },
     {
       "id": "scenarios.manage",
-      "ios": "planned",
-      "macos": "planned"
+      "ios": "supported",
+      "macos": "supported"
     },
     {
       "id": "triggers.manage",

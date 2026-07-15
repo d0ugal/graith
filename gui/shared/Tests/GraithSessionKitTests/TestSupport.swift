@@ -61,6 +61,9 @@ actor MockHostClient: GraithHostClient {
     private(set) var deleted: [SessionInfo] = []
     var pending: [ApprovalInfo]
     var repos: [RepoEntry]
+    var scenarios: [ScenarioRecord]
+    /// Records the last scenario lifecycle call so tests can assert routing.
+    private(set) var lastScenarioOp: (op: String, name: String)?
     var failConnect: GraithClientError?
     var failList: GraithClientError?
     var failSetStatus: GraithClientError?
@@ -74,10 +77,12 @@ actor MockHostClient: GraithHostClient {
     private var gateList = false
 
     init(sessions: [SessionInfo] = [], pending: [ApprovalInfo] = [],
-         repos: [RepoEntry] = [], failConnect: GraithClientError? = nil) {
+         repos: [RepoEntry] = [], scenarios: [ScenarioRecord] = [],
+         failConnect: GraithClientError? = nil) {
         self.sessions = sessions
         self.pending = pending
         self.repos = repos
+        self.scenarios = scenarios
         self.failConnect = failConnect
     }
 
@@ -149,6 +154,17 @@ actor MockHostClient: GraithHostClient {
     func fork(name: String, sourceSessionID: String) async throws {}
     func migrate(sessionID: String, agent: String, model: String?) async throws {
         lastMigrate = (agent, model)
+    }
+
+    func listScenarios() async throws -> [ScenarioRecord] {
+        if let failList { throw failList }
+        return scenarios
+    }
+    func stopScenario(name: String) async throws { lastScenarioOp = ("stop", name) }
+    func resumeScenario(name: String) async throws { lastScenarioOp = ("resume", name) }
+    func deleteScenario(name: String) async throws {
+        lastScenarioOp = ("delete", name)
+        scenarios.removeAll { $0.name == name }
     }
 
     func approvalStream() -> AsyncStream<[ApprovalInfo]> {
@@ -232,6 +248,7 @@ func makeFleetWithRemote(
     sessions: [SessionInfo] = [],
     pending: [ApprovalInfo] = [],
     repos: [RepoEntry] = [],
+    scenarios: [ScenarioRecord] = [],
     subscribeApprovals: Bool = true
 ) -> (fleet: FleetModel, mock: MockHostClient) {
     let secrets = InMemorySecretStore()
@@ -246,7 +263,7 @@ func makeFleetWithRemote(
     // swiftlint:disable:next force_try
     try! registry.completePairing(hostID: "ben", response: PairResponseMsg(
         deviceID: "dev-ben", clientToken: "tok-ben", daemonProfile: "", tlsPinSPKI: "cGlu"))
-    let mock = MockHostClient(sessions: sessions, pending: pending, repos: repos)
+    let mock = MockHostClient(sessions: sessions, pending: pending, repos: repos, scenarios: scenarios)
     let factory = MockFactory(clients: ["tok-ben": mock])
     let pairing = PairingCoordinator(pairing: StubPairing(), identity: identity, registry: registry)
     let fleet = FleetModel(

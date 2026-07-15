@@ -645,6 +645,93 @@ public struct RepoEntry: Codable, Sendable, Identifiable, Hashable {
     }
 }
 
+// MARK: - Scenarios (multi-session orchestration, #903)
+//
+// The GUI surfaces the human-accessible slice of `gr scenario`: inspect (list +
+// per-scenario status), and the stop/resume/delete lifecycle actions the daemon
+// authorizes for a human. `start`/`task-done`/`add` stay CLI-only — they are
+// orchestrator-*session*-scoped (the daemon requires the caller to be the
+// scenario's orchestrator session, which a human client is not), so they are not
+// modelled here.
+
+/// A scenario lifecycle request keyed by scenario name. One Swift shape for the
+/// wire-identical `{name}` requests (`scenario_stop` / `scenario_resume` /
+/// `scenario_delete`), mirroring the `SessionIDMsg` consolidation.
+public struct ScenarioNameMsg: Codable, Sendable {
+    public var name: String
+    public init(name: String) { self.name = name }
+}
+
+/// One member session of a scenario, as reported in a `ScenarioRecord`. Only
+/// `name` and `session_id` are always present; the rest are `omitempty` on the
+/// wire and therefore optional here (the conformance guard requires Swift's
+/// required-field set to be a subset of Go's).
+public struct ScenarioSessionInfo: Codable, Sendable, Identifiable, Hashable {
+    public var name: String
+    public var sessionID: String
+    public var role: String?
+    public var task: String?
+    public var taskDone: Bool?
+    public var repo: String?
+    public var agent: String?
+    public var model: String?
+    public var status: String?
+    public var shared: Bool?
+
+    public var id: String { sessionID }
+
+    public init(name: String, sessionID: String, role: String? = nil, task: String? = nil,
+                taskDone: Bool? = nil, repo: String? = nil, agent: String? = nil,
+                model: String? = nil, status: String? = nil, shared: Bool? = nil) {
+        self.name = name; self.sessionID = sessionID; self.role = role; self.task = task
+        self.taskDone = taskDone; self.repo = repo; self.agent = agent; self.model = model
+        self.status = status; self.shared = shared
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case name
+        case sessionID = "session_id"
+        case role, task
+        case taskDone = "task_done"
+        case repo, agent, model, status, shared
+    }
+}
+
+/// A running scenario and its member sessions (`gr scenario list` / `status`).
+public struct ScenarioRecord: Codable, Sendable, Identifiable, Hashable {
+    public var id: String
+    public var name: String
+    public var orchestratorID: String
+    public var goal: String
+    public var status: String
+    public var sessionIDs: [String]
+    public var sessions: [ScenarioSessionInfo]
+    public var createdAt: String
+
+    public init(id: String, name: String, orchestratorID: String, goal: String,
+                status: String, sessionIDs: [String], sessions: [ScenarioSessionInfo],
+                createdAt: String) {
+        self.id = id; self.name = name; self.orchestratorID = orchestratorID; self.goal = goal
+        self.status = status; self.sessionIDs = sessionIDs; self.sessions = sessions
+        self.createdAt = createdAt
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, name
+        case orchestratorID = "orchestrator_id"
+        case goal, status
+        case sessionIDs = "session_ids"
+        case sessions
+        case createdAt = "created_at"
+    }
+}
+
+/// The reply to `scenario_list`: every running scenario on the daemon.
+public struct ScenarioListResponse: Codable, Sendable {
+    public var scenarios: [ScenarioRecord]
+    public init(scenarios: [ScenarioRecord]) { self.scenarios = scenarios }
+}
+
 // MARK: - Empty-payload requests
 
 /// `list` takes no payload. Used as an explicit "no payload" marker.

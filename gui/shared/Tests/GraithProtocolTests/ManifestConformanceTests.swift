@@ -192,6 +192,14 @@ private let swiftDecoders: [String: DecodeProbe] = [
     "RepoListMsg": probe(RepoListMsg.self),
     "RepoListResponseMsg": probe(RepoListResponseMsg.self),
     "RepoEntry": probe(RepoEntry.self),
+
+    // Scenarios (#903). stop/resume/delete → ScenarioNameMsg.
+    "ScenarioStopMsg": probe(ScenarioNameMsg.self),
+    "ScenarioResumeMsg": probe(ScenarioNameMsg.self),
+    "ScenarioDeleteMsg": probe(ScenarioNameMsg.self),
+    "ScenarioRecord": probe(ScenarioRecord.self),
+    "ScenarioSessionInfo": probe(ScenarioSessionInfo.self),
+    "ScenarioListResponse": probe(ScenarioListResponse.self),
 ]
 
 // MARK: - JSON synthesis from the manifest

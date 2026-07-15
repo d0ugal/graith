@@ -102,7 +102,9 @@ state instead).
 
 | Capability | CLI | iOS | macOS |
 |------------|:---:|:---:|:---:|
-| Start / stop / resume / inspect scenarios | ✅ | 🚧 | 🚧 |
+| Start / stop / resume / inspect scenarios <sup>1</sup> | ✅ | ✅ | ✅ |
+
+<sup>1</sup> Start / stop / resume / inspect scenarios: The GUIs list scenarios, show per-session role/task/done status, group scenario members in the sidebar, and run the human-authorized stop/resume/delete actions; `start`/`add`/`task-done` stay CLI-only (they are orchestrator-session-scoped, not human-client operations).
 
 ### Triggers
 

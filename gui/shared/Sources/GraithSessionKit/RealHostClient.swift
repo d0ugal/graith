@@ -99,6 +99,14 @@ public actor RealHostClient: GraithHostClient {
         }
     }
 
+    public func listScenarios() async throws -> [ScenarioRecord] {
+        do {
+            return try await inner.listScenarios()
+        } catch {
+            throw RealClientError.map(error)
+        }
+    }
+
     // MARK: - Mutations
 
     public func create(_ request: CreateRequest) async throws {
@@ -130,6 +138,12 @@ public actor RealHostClient: GraithHostClient {
     public func migrate(sessionID: String, agent: String, model: String?) async throws {
         try await run { _ = try await self.inner.migrate(sessionID: sessionID, agent: agent, model: model) }
     }
+
+    // MARK: - Scenarios (#903)
+
+    public func stopScenario(name: String) async throws { try await run { try await self.inner.stopScenario(name: name) } }
+    public func resumeScenario(name: String) async throws { try await run { try await self.inner.resumeScenario(name: name) } }
+    public func deleteScenario(name: String) async throws { try await run { try await self.inner.deleteScenario(name: name) } }
 
     // MARK: - Approvals (event connection)
 

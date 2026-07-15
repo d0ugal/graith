@@ -237,6 +237,30 @@ open class FleetModel: ObservableObject {
         connections.reduce(0) { $0 + $1.approvals.count }
     }
 
+    /// Every running scenario across hosts, tagged with its host (scenarios are
+    /// per-daemon), sorted by host order then scenario name.
+    public var hostedScenarios: [HostedScenario] {
+        connections.flatMap { conn in
+            conn.scenarios
+                .sorted { $0.name < $1.name }
+                .map { HostedScenario(host: conn.entry, scenario: $0) }
+        }
+    }
+
+    /// The host-agnostic scenario list (single-host rendering path).
+    public var scenarios: [ScenarioRecord] {
+        hostedScenarios.map(\.scenario)
+    }
+
+    /// The member `SessionInfo`s of a scenario, resolved from the owning host's
+    /// live session list (a member may be soft-deleted/absent, so this filters to
+    /// what's currently live), in the scenario's declared order.
+    public func sessions(in scenario: HostedScenario) -> [SessionInfo] {
+        guard let conn = connections.first(where: { $0.id == scenario.host.id }) else { return [] }
+        let byID = Dictionary(uniqueKeysWithValues: conn.sessions.map { ($0.id, $0) })
+        return scenario.scenario.sessions.compactMap { byID[$0.sessionID] }
+    }
+
     /// Every pending approval across hosts, tagged with its host.
     public var allApprovals: [HostedApproval] {
         connections.flatMap { conn in
@@ -388,6 +412,25 @@ open class FleetModel: ObservableObject {
     /// Run an action against the session's owning connection, then refresh.
     private func act(_ session: SessionInfo, _ op: @escaping (HostConnection) async -> Void) {
         guard let conn = connection(ownerOf: session.id) else { return }
+        Task { await op(conn) }
+    }
+
+    // MARK: - Scenario actions (#903)
+    //
+    // Scenarios are per-daemon, so an action is routed to the owning host. Only
+    // the human-authorized lifecycle verbs are exposed (stop/resume/delete);
+    // start and task-done are orchestrator-session-scoped and stay CLI-only.
+
+    public func stopScenario(name: String, hostID: String) { actScenario(hostID) { await $0.stopScenario(name) } }
+    public func resumeScenario(name: String, hostID: String) { actScenario(hostID) { await $0.resumeScenario(name) } }
+    public func deleteScenario(name: String, hostID: String) { actScenario(hostID) { await $0.deleteScenario(name) } }
+
+    public func stopScenario(_ scenario: HostedScenario) { stopScenario(name: scenario.scenario.name, hostID: scenario.host.id) }
+    public func resumeScenario(_ scenario: HostedScenario) { resumeScenario(name: scenario.scenario.name, hostID: scenario.host.id) }
+    public func deleteScenario(_ scenario: HostedScenario) { deleteScenario(name: scenario.scenario.name, hostID: scenario.host.id) }
+
+    private func actScenario(_ hostID: String, _ op: @escaping (HostConnection) async -> Void) {
+        guard let conn = connections.first(where: { $0.id == hostID }) else { return }
         Task { await op(conn) }
     }
 
@@ -557,4 +600,15 @@ public struct HostedApproval: Identifiable, Hashable, Sendable {
     public let host: Host
     public let approval: ApprovalInfo
     public var id: String { "\(host.id)/\(approval.requestID)" }
+}
+
+/// A scenario paired with the host it belongs to (scenarios are per-daemon).
+public struct HostedScenario: Identifiable, Hashable, Sendable {
+    public let host: Host
+    public let scenario: ScenarioRecord
+    public var id: String { "\(host.id)/\(scenario.id)" }
+    public init(host: Host, scenario: ScenarioRecord) {
+        self.host = host
+        self.scenario = scenario
+    }
 }

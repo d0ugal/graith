@@ -335,6 +335,35 @@ public actor GraithProtocolClient {
         _ = try await conn.request(type, payload: SessionScopeMsg(sessionID: sessionID, children: children))
     }
 
+    // MARK: - Scenarios (#903)
+
+    /// `scenario_list` — every running scenario on this daemon, each with its
+    /// member sessions. Read-only; the daemon does not gate it.
+    public func listScenarios() async throws -> [ScenarioRecord] {
+        let conn = try await controlConnection()
+        let reply = try await conn.request("scenario_list", payload: EmptyMsg())
+        return try decodePayload(reply, as: ScenarioListResponse.self).scenarios
+    }
+
+    /// `scenario_stop` — stop every session in the named scenario. The daemon
+    /// replies `scenario_stopped`; the GUI re-lists, so the body is ignored.
+    public func stopScenario(name: String) async throws {
+        let conn = try await controlConnection()
+        _ = try await conn.request("scenario_stop", payload: ScenarioNameMsg(name: name))
+    }
+
+    /// `scenario_resume` — resume every stopped/errored session in the scenario.
+    public func resumeScenario(name: String) async throws {
+        let conn = try await controlConnection()
+        _ = try await conn.request("scenario_resume", payload: ScenarioNameMsg(name: name))
+    }
+
+    /// `scenario_delete` — delete the scenario and all its sessions/worktrees.
+    public func deleteScenario(name: String) async throws {
+        let conn = try await controlConnection()
+        _ = try await conn.request("scenario_delete", payload: ScenarioNameMsg(name: name))
+    }
+
     // MARK: - Attach
 
     /// Open a dedicated attach connection for `sessionID`.
