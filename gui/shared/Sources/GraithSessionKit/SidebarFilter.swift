@@ -83,8 +83,11 @@ public enum SidebarFilter {
         return false
     }
 
-    /// Whether a session matches a free-text query (case-insensitive substring
-    /// over name + repo name), mirroring the overlay's `FilterValue`.
+    /// Whether a session matches a free-text query: a case-insensitive
+    /// contiguous substring over name + repo name. This is a deliberate subset
+    /// of the CLI overlay's search (which also matches status/agent/branch/
+    /// summary tokens and ANDs whitespace-separated terms); the GUI v1 searches
+    /// only the two fields shown in the row.
     public static func matchesSearch(_ session: SessionInfo, query: String) -> Bool {
         let trimmed = query.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return true }
