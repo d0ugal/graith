@@ -109,6 +109,52 @@ struct FleetConnectedTests {
         #expect(created?.name == "bonnie")
     }
 
+    @Test func createSessionForwardsAdvancedOptions() async {
+        let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions(),
+                                                repos: [RepoEntry(path: "/tmp/croft", name: "croft", recent: true)],
+                                                subscribeApprovals: false)
+        await fleet.connectAll()
+        await withCheckedContinuation { cont in
+            fleet.createSession(name: "canny", agent: "claude", repoPath: "/tmp/croft",
+                                model: "", prompt: "", base: "auld-main", yolo: true,
+                                inPlace: false, agentHooks: false, hostID: "ben") { _ in
+                cont.resume()
+            }
+        }
+        let req = await mock.lastCreate
+        #expect(req?.base == "auld-main")
+        #expect(req?.yolo == true)
+        #expect(req?.agentHooks == false)
+        #expect(req?.inPlace == nil)  // false collapses to nil (omitted on the wire)
+    }
+
+    @Test func createSessionRejectsInPlaceWithBase() async {
+        let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions(),
+                                                repos: [RepoEntry(path: "/tmp/croft", name: "croft", recent: true)],
+                                                subscribeApprovals: false)
+        await fleet.connectAll()
+        var failed = false
+        await withCheckedContinuation { cont in
+            fleet.createSession(name: "thrawn", agent: "claude", repoPath: "/tmp/croft",
+                                model: "", prompt: "", base: "main", inPlace: true,
+                                hostID: "ben") { result in
+                if case .failure = result { failed = true }
+                cont.resume()
+            }
+        }
+        #expect(failed)
+        // Rejected before any daemon round-trip.
+        let req = await mock.lastCreate
+        #expect(req == nil)
+    }
+
+    @Test func validateCreateOptionsGuardsInPlaceBase() {
+        #expect(FleetModel.validateCreateOptions(base: "main", inPlace: true) != nil)
+        #expect(FleetModel.validateCreateOptions(base: "  ", inPlace: true) == nil)
+        #expect(FleetModel.validateCreateOptions(base: "main", inPlace: false) == nil)
+        #expect(FleetModel.validateCreateOptions(base: "", inPlace: false) == nil)
+    }
+
     @Test func createSessionUnknownHostFails() async {
         let (fleet, _) = makeFleetWithRemote(subscribeApprovals: false)
         await fleet.connectAll()

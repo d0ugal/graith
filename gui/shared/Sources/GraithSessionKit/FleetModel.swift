@@ -468,17 +468,39 @@ open class FleetModel: ObservableObject {
         await conn.purge(session)
     }
 
+    /// Client-side mirror of `gr new`'s mutual-exclusion checks, so a New Session
+    /// form can surface the error before a daemon round-trip. Returns nil when the
+    /// options are valid. Kept pure (static, no state) so it's directly testable
+    /// and callable from either GUI's form.
+    public static func validateCreateOptions(base: String, inPlace: Bool) -> String? {
+        if inPlace && !base.trimmingCharacters(in: .whitespaces).isEmpty {
+            return "In-place sessions run in the repo without a branch, so a base branch can't be set."
+        }
+        return nil
+    }
+
     /// Create a session on `hostID` and report the created session (found by
     /// name after the connection refreshes) so the caller can select it.
+    ///
+    /// The advanced options (`base`, `yolo`, `inPlace`, `agentHooks`) mirror the
+    /// matching `gr new` flags and are shared by both GUIs' New Session forms.
     public func createSession(
         name: String,
         agent: String,
         repoPath: String,
         model: String,
         prompt: String,
+        base: String = "",
+        yolo: Bool = false,
+        inPlace: Bool = false,
+        agentHooks: Bool = true,
         hostID: String = "local",
         completion: @escaping (Result<SessionInfo?, Error>) -> Void
     ) {
+        if let invalid = Self.validateCreateOptions(base: base, inPlace: inPlace) {
+            completion(.failure(FleetError.invalidOptions(invalid)))
+            return
+        }
         guard let conn = connections.first(where: { $0.id == hostID }) else {
             completion(.failure(FleetError.hostUnavailable))
             return
@@ -487,9 +509,12 @@ open class FleetModel: ObservableObject {
             name: name,
             agent: agent,
             repoPath: repoPath,
+            base: base.isEmpty ? nil : base,
             prompt: prompt.isEmpty ? nil : prompt,
             model: model.isEmpty ? nil : model,
-            agentHooks: true
+            agentHooks: agentHooks,
+            inPlace: inPlace ? true : nil,
+            yolo: yolo ? true : nil
         )
         Task {
             let ok = await conn.create(request)
@@ -504,10 +529,12 @@ open class FleetModel: ObservableObject {
     public enum FleetError: LocalizedError {
         case hostUnavailable
         case createFailed(String)
+        case invalidOptions(String)
         public var errorDescription: String? {
             switch self {
             case .hostUnavailable: return "That host isn't connected."
             case let .createFailed(m): return m
+            case let .invalidOptions(m): return m
             }
         }
     }
