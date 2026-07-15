@@ -2,14 +2,24 @@ package daemon
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
+func needles(subs []pathSubstitution) []string {
+	out := make([]string, len(subs))
+	for i, s := range subs {
+		out[i] = s.needle
+	}
+
+	return out
+}
+
 func TestBuildIncludePathRewrites(t *testing.T) {
 	home := "/hame/dougal"
-	rewrites := buildIncludePathRewrites(
+	subs := buildIncludePathRewrites(
 		home,
 		"/hame/dougal/Code/devenv",
 		"/data/worktrees/devenv/abc/id/devenv",
@@ -19,63 +29,73 @@ func TestBuildIncludePathRewrites(t *testing.T) {
 		},
 	)
 
-	if len(rewrites) != 3 {
-		t.Fatalf("want 3 rewrites, got %d", len(rewrites))
+	// 2 forms for each home-relative repo (devenv, grafana) + 1 for the
+	// out-of-home repo (examples).
+	if len(subs) != 5 {
+		t.Fatalf("want 5 substitutions, got %d: %v", len(subs), needles(subs))
 	}
 
-	// Main repo under home: both absolute and tilde forms.
-	if got := rewrites[0].sourceForms; len(got) != 2 ||
-		got[0] != "/hame/dougal/Code/devenv" || got[1] != "~/Code/devenv" {
-		t.Errorf("main repo forms = %v", got)
+	// Every substitution must be sorted longest-needle-first.
+	for i := 1; i < len(subs); i++ {
+		if len(subs[i-1].needle) < len(subs[i].needle) {
+			t.Errorf("not sorted longest-first: %v", needles(subs))
+			break
+		}
 	}
 
-	// Included repo under home: tilde form derived.
-	if got := rewrites[1].sourceForms; len(got) != 2 ||
-		got[1] != "~/Code/grafana" {
-		t.Errorf("grafana forms = %v", got)
+	// Tilde forms are derived for home-relative repos.
+	byNeedle := map[string]string{}
+	for _, s := range subs {
+		byNeedle[s.needle] = s.worktree
 	}
 
-	// Included repo NOT under home: absolute form only.
-	if got := rewrites[2].sourceForms; len(got) != 1 || got[0] != "/opt/croft/examples" {
-		t.Errorf("examples forms = %v (want absolute only)", got)
+	if byNeedle["~/Code/grafana"] != "/data/worktrees/devenv/abc/id/grafana" {
+		t.Errorf("grafana tilde form missing/wrong: %v", byNeedle)
+	}
+
+	if byNeedle["/hame/dougal/Code/grafana"] != "/data/worktrees/devenv/abc/id/grafana" {
+		t.Errorf("grafana absolute form missing/wrong: %v", byNeedle)
+	}
+
+	// Out-of-home repo has only the absolute form (no tilde spelling exists).
+	if _, ok := byNeedle["/opt/croft/examples"]; !ok {
+		t.Errorf("examples absolute form missing: %v", byNeedle)
+	}
+
+	for n := range byNeedle {
+		if strings.HasPrefix(n, "~/") && strings.Contains(n, "examples") {
+			t.Errorf("unexpected tilde form for out-of-home repo: %q", n)
+		}
 	}
 }
 
 func TestBuildIncludePathRewritesNoHome(t *testing.T) {
-	rewrites := buildIncludePathRewrites(
-		"",
-		"/hame/dougal/Code/devenv",
-		"/wt/devenv",
-		nil,
-	)
-
-	if len(rewrites) != 1 {
-		t.Fatalf("want 1 rewrite, got %d", len(rewrites))
+	subs := buildIncludePathRewrites("", "/hame/dougal/Code/devenv", "/wt/devenv", nil)
+	if len(subs) != 1 {
+		t.Fatalf("want 1 substitution (absolute only), got %d: %v", len(subs), needles(subs))
 	}
 
-	if got := rewrites[0].sourceForms; len(got) != 1 {
-		t.Errorf("want absolute form only with empty home, got %v", got)
+	if subs[0].needle != "/hame/dougal/Code/devenv" {
+		t.Errorf("needle = %q", subs[0].needle)
 	}
 }
 
 func TestBuildIncludePathRewritesSkipsEmpty(t *testing.T) {
-	rewrites := buildIncludePathRewrites("/hame", "", "", nil)
-	if len(rewrites) != 0 {
-		t.Fatalf("want 0 rewrites for empty main paths, got %d", len(rewrites))
+	subs := buildIncludePathRewrites("/hame", "", "", nil)
+	if len(subs) != 0 {
+		t.Fatalf("want 0 substitutions for empty main paths, got %d", len(subs))
 	}
 }
 
 func TestRewritePathsInContent(t *testing.T) {
-	rewrites := []pathRewrite{
-		{
-			worktree:    "/data/wt/grafana",
-			sourceForms: []string{"/hame/dougal/Code/grafana", "~/Code/grafana"},
+	subs := buildIncludePathRewrites(
+		"/hame/dougal",
+		"/hame/dougal/Code/devenv", "/data/wt/devenv",
+		[]IncludedRepoState{
+			{RepoPath: "/hame/dougal/Code/grafana", WorktreePath: "/data/wt/grafana"},
+			{RepoPath: "/hame/dougal/Code/examples", WorktreePath: "/data/wt/examples"},
 		},
-		{
-			worktree:    "/data/wt/examples",
-			sourceForms: []string{"/hame/dougal/Code/examples", "~/Code/examples"},
-		},
-	}
+	)
 
 	tests := []struct {
 		name        string
@@ -96,7 +116,7 @@ func TestRewritePathsInContent(t *testing.T) {
 			wantChanged: true,
 		},
 		{
-			name:        "docker-compose bind mount preserves suffix",
+			name:        "docker-compose bind mount preserves suffix and colon",
 			in:          "    volumes:\n      - ~/Code/grafana/conf:/etc/grafana\n",
 			want:        "    volumes:\n      - /data/wt/grafana/conf:/etc/grafana\n",
 			wantChanged: true,
@@ -114,7 +134,7 @@ func TestRewritePathsInContent(t *testing.T) {
 			wantChanged: true,
 		},
 		{
-			name:        "prefix collision left untouched",
+			name:        "hyphen sibling left untouched",
 			in:          "PATH=~/Code/grafana-enterprise\n",
 			want:        "PATH=~/Code/grafana-enterprise\n",
 			wantChanged: false,
@@ -123,6 +143,18 @@ func TestRewritePathsInContent(t *testing.T) {
 			name:        "dotted sibling left untouched",
 			in:          "PATH=~/Code/grafana.bak\n",
 			want:        "PATH=~/Code/grafana.bak\n",
+			wantChanged: false,
+		},
+		{
+			name:        "plus sibling left untouched",
+			in:          "PATH=~/Code/grafana+ent\n",
+			want:        "PATH=~/Code/grafana+ent\n",
+			wantChanged: false,
+		},
+		{
+			name:        "at sibling left untouched",
+			in:          "PATH=~/Code/grafana@next\n",
+			want:        "PATH=~/Code/grafana@next\n",
 			wantChanged: false,
 		},
 		{
@@ -153,7 +185,7 @@ func TestRewritePathsInContent(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, changed := rewritePathsInContent(tt.in, rewrites)
+			got, changed := rewritePathsInContent(tt.in, subs)
 			if got != tt.want {
 				t.Errorf("content:\n got %q\nwant %q", got, tt.want)
 			}
@@ -162,6 +194,32 @@ func TestRewritePathsInContent(t *testing.T) {
 				t.Errorf("changed = %v, want %v", changed, tt.wantChanged)
 			}
 		})
+	}
+}
+
+// TestRewritePathsInContentNestedRepo is the regression test for a nested
+// included repo: the main repo path is an ancestor of an included repo's path.
+// The included (more specific) path must win, not be captured by its parent.
+func TestRewritePathsInContentNestedRepo(t *testing.T) {
+	subs := buildIncludePathRewrites(
+		"/hame/dougal",
+		"/hame/dougal/Code/monorepo", "/data/wt/monorepo",
+		[]IncludedRepoState{
+			{RepoPath: "/hame/dougal/Code/monorepo/tools/widget", WorktreePath: "/data/wt/widget"},
+		},
+	)
+
+	// Reference to the nested repo must resolve to the nested worktree.
+	got, changed := rewritePathsInContent("P=~/Code/monorepo/tools/widget/x\n", subs)
+	if !changed || got != "P=/data/wt/widget/x\n" {
+		t.Errorf("nested repo: got %q changed=%v, want %q true", got, changed, "P=/data/wt/widget/x\n")
+	}
+
+	// A reference to the parent (not into the nested repo) still resolves to the
+	// parent worktree.
+	got, changed = rewritePathsInContent("P=~/Code/monorepo/pkg\n", subs)
+	if !changed || got != "P=/data/wt/monorepo/pkg\n" {
+		t.Errorf("parent repo: got %q changed=%v, want %q true", got, changed, "P=/data/wt/monorepo/pkg\n")
 	}
 }
 
@@ -180,8 +238,8 @@ func TestRewriteIncludeConfigPaths(t *testing.T) {
 	mainWt := t.TempDir()
 	incWt := t.TempDir()
 
-	rewrites := []pathRewrite{
-		{worktree: "/data/wt/grafana", sourceForms: []string{"~/Code/grafana"}},
+	subs := []pathSubstitution{
+		{needle: "~/Code/grafana", worktree: "/data/wt/grafana"},
 	}
 
 	// docker-compose.override.yml in the main worktree references the sibling.
@@ -207,7 +265,7 @@ func TestRewriteIncludeConfigPaths(t *testing.T) {
 	}
 
 	sm := newTestSM(t)
-	sm.rewriteIncludeConfigPaths([]string{mainWt, incWt}, rewrites)
+	sm.rewriteIncludeConfigPaths([]string{mainWt, incWt}, subs)
 
 	got, err := os.ReadFile(overridePath)
 	if err != nil {
@@ -239,7 +297,7 @@ func TestRewriteIncludeConfigPathsPreservesMode(t *testing.T) {
 	sm := newTestSM(t)
 	sm.rewriteIncludeConfigPaths(
 		[]string{wt},
-		[]pathRewrite{{worktree: "/wt/grafana", sourceForms: []string{"~/Code/grafana"}}},
+		[]pathSubstitution{{needle: "~/Code/grafana", worktree: "/wt/grafana"}},
 	)
 
 	info, err := os.Stat(path)
@@ -256,6 +314,48 @@ func TestRewriteIncludeConfigPathsPreservesMode(t *testing.T) {
 	}
 }
 
+// TestRewriteIncludeConfigPathsSkipsSymlink is the regression test for the
+// symlink-disclosure finding: a config symlink pointing at an external file must
+// not be read (its contents disclosed into the worktree) nor replaced.
+func TestRewriteIncludeConfigPathsSkipsSymlink(t *testing.T) {
+	wt := t.TempDir()
+	externalDir := t.TempDir()
+
+	// An external "secret" that happens to contain a matching source path.
+	secret := filepath.Join(externalDir, "secret.env")
+	externalBody := "PRIVATE=neep\nP=~/Code/grafana\n"
+
+	if err := os.WriteFile(secret, []byte(externalBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	link := filepath.Join(wt, ".env.local")
+	if err := os.Symlink(secret, link); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+
+	sm := newTestSM(t)
+	sm.rewriteIncludeConfigPaths(
+		[]string{wt},
+		[]pathSubstitution{{needle: "~/Code/grafana", worktree: "/wt/grafana"}},
+	)
+
+	// The link is still a symlink (not replaced by a regular file).
+	info, err := os.Lstat(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Errorf(".env.local symlink was replaced by a regular file")
+	}
+
+	// The external secret is untouched.
+	if b, _ := os.ReadFile(secret); string(b) != externalBody {
+		t.Errorf("external secret modified: %q", b)
+	}
+}
+
 func TestRewriteIncludeConfigPathsNoOpCases(t *testing.T) {
 	sm := newTestSM(t)
 
@@ -266,10 +366,68 @@ func TestRewriteIncludeConfigPathsNoOpCases(t *testing.T) {
 	wt := t.TempDir()
 	sm.rewriteIncludeConfigPaths(
 		[]string{wt, ""},
-		[]pathRewrite{{worktree: "/wt/x", sourceForms: []string{"~/Code/x"}}},
+		[]pathSubstitution{{needle: "~/Code/x", worktree: "/wt/x"}},
 	)
 
 	if entries, _ := os.ReadDir(wt); len(entries) != 0 {
 		t.Errorf("expected no files created, got %d", len(entries))
+	}
+}
+
+// TestRewriteIncludeConfigPathsSkipWorktree checks that a rewritten tracked file
+// is marked skip-worktree so its session-specific path won't be committed and
+// the worktree doesn't report dirty.
+func TestRewriteIncludeConfigPathsSkipWorktree(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	repo := t.TempDir()
+	runGit := func(args ...string) {
+		t.Helper()
+
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repo
+
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	runGit("init", "-q")
+	runGit("config", "user.email", "bide@example.com")
+	runGit("config", "user.name", "Bide")
+
+	// A committed (tracked) override referencing the sibling.
+	path := filepath.Join(repo, "docker-compose.override.yml")
+	if err := os.WriteFile(path, []byte("volumes:\n  - ~/Code/grafana:/app\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	runGit("add", "docker-compose.override.yml")
+	runGit("commit", "-q", "-m", "add override")
+
+	sm := newTestSM(t)
+	sm.rewriteIncludeConfigPaths(
+		[]string{repo},
+		[]pathSubstitution{{needle: "~/Code/grafana", worktree: "/data/wt/grafana"}},
+	)
+
+	// File was rewritten on disk.
+	if b, _ := os.ReadFile(path); !strings.Contains(string(b), "/data/wt/grafana:/app") {
+		t.Fatalf("override not rewritten: %q", b)
+	}
+
+	// git status must report it clean — the local edit is skipped.
+	cmd := exec.Command("git", "status", "--porcelain")
+	cmd.Dir = repo
+
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git status: %v\n%s", err, out)
+	}
+
+	if strings.TrimSpace(string(out)) != "" {
+		t.Errorf("worktree dirty after rewrite, want clean; status:\n%s", out)
 	}
 }
