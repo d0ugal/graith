@@ -101,10 +101,13 @@ private func sharedAffordances() -> Set<String> {
     wire("session.resume") { _ = FleetModel.resumeSession }
     wire("session.restart") { _ = FleetModel.restartSession }
     wire("session.delete") { _ = FleetModel.deleteSession }
+    wire("session.restore") { _ = FleetModel.restore }
+    wire("session.purge") { _ = FleetModel.purge }
     wire("session.rename") { _ = FleetModel.renameSession }
     wire("session.star") { _ = FleetModel.toggleStar }
     wire("session.fork") { _ = FleetModel.forkSession }
     wire("session.migrate") { _ = FleetModel.migrateSession }
+    wire("session.set-status") { _ = FleetModel.setStatus }
     wire("session.repo-list") { _ = HostConnection.repoList }
 
     // Terminal I/O — the shared attach view-model drives attach/input/resize/detach.

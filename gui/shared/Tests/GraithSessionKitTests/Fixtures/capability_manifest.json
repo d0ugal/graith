@@ -33,13 +33,13 @@
     },
     {
       "id": "session.restore",
-      "ios": "planned",
-      "macos": "planned"
+      "ios": "supported",
+      "macos": "supported"
     },
     {
       "id": "session.purge",
-      "ios": "planned",
-      "macos": "planned"
+      "ios": "supported",
+      "macos": "supported"
     },
     {
       "id": "session.rename",
@@ -63,8 +63,8 @@
     },
     {
       "id": "session.set-status",
-      "ios": "planned",
-      "macos": "planned"
+      "ios": "supported",
+      "macos": "supported"
     },
     {
       "id": "session.wait",
