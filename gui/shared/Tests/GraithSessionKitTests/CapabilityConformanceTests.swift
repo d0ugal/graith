@@ -127,9 +127,19 @@ private func sharedAffordances() -> Set<String> {
     wire("approvals.respond") { _ = HostConnection.respond }
     wire("pairing.request") { _ = ControlType.pairRequest }
 
-    // Scenarios — FleetModel aggregates per-host scenarios and routes the
-    // human-authorized lifecycle actions to the owning host (#903).
-    wire("scenarios.manage") { _ = \FleetModel.hostedScenarios; _ = FleetModel.stopScenario(name:hostID:) }
+    // Scenarios — FleetModel aggregates per-host scenarios and routes each
+    // human-authorized lifecycle action to the owning host (#903). Anchor the
+    // full shared surface (list transport + all three verbs) so removing any of
+    // them trips this guard, not just the representative one.
+    wire("scenarios.manage") {
+        _ = \FleetModel.hostedScenarios
+        _ = FleetModel.sessions(in:)
+        _ = FleetModel.stopScenario(name:hostID:)
+        _ = FleetModel.resumeScenario(name:hostID:)
+        _ = FleetModel.deleteScenario(name:hostID:)
+        _ = HostConnection.stopScenario
+        _ = ControlType.scenarioList
+    }
 
     return ids
 }

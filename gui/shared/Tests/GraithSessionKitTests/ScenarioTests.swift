@@ -116,26 +116,23 @@ struct ScenarioFleetTests {
         #expect(fleet.sessions(in: fleet.hostedScenarios[0]).map(\.id) == ["braw0001"])
     }
 
-    @Test func stopRoutesToOwningHost() async {
+    // The HostConnection-level actions are awaited, so these prove the RPC fires
+    // with the right name deterministically (no timing guesses).
+    @Test func connectionStopSendsNamedRPC() async {
         let (fleet, mock) = makeFleetWithRemote(
             sessions: sampleSessions(), scenarios: [makeScenario()], subscribeApprovals: false)
         await fleet.connectAll()
-        fleet.stopScenario(fleet.hostedScenarios[0])
-        // Give the detached Task a turn to run against the actor.
-        await Task.yield()
-        try? await Task.sleep(nanoseconds: 50_000_000)
+        await fleet.connections[0].stopScenario("strath")
         let op = await mock.lastScenarioOp
         #expect(op?.op == "stop")
         #expect(op?.name == "strath")
     }
 
-    @Test func resumeRoutesToOwningHost() async {
+    @Test func connectionResumeSendsNamedRPC() async {
         let (fleet, mock) = makeFleetWithRemote(
             sessions: sampleSessions(), scenarios: [makeScenario()], subscribeApprovals: false)
         await fleet.connectAll()
-        fleet.resumeScenario(name: "strath", hostID: "ben")
-        await Task.yield()
-        try? await Task.sleep(nanoseconds: 50_000_000)
+        await fleet.connections[0].resumeScenario("strath")
         let op = await mock.lastScenarioOp
         #expect(op?.op == "resume")
     }
@@ -149,14 +146,78 @@ struct ScenarioFleetTests {
         #expect(fleet.hostedScenarios.isEmpty)
     }
 
-    @Test func actionOnUnknownHostIsNoOp() async {
-        let (fleet, mock) = makeFleetWithRemote(
-            sessions: sampleSessions(), scenarios: [makeScenario()], subscribeApprovals: false)
+    // FleetModel routing: with two hosts each owning a same-named scenario, the
+    // action must reach ONLY the owning host. A single-host test can't prove
+    // this (routing to the sole connection would pass even if host were ignored).
+    @Test func fleetActionRoutesToOwningHostOnly() async {
+        let (fleet, ben, canny) = makeTwoHostFleet(
+            benScenarios: [makeScenario(name: "strath")],
+            cannyScenarios: [makeScenario(name: "strath")])
+        await fleet.connectAll()
+        // Two hosts, each with a scenario named "strath".
+        let cannyScenario = fleet.hostedScenarios.first { $0.host.id == "canny" }!
+        fleet.stopScenario(cannyScenario)
+        #expect(await waitUntil { await canny.lastScenarioOp != nil })
+        let benOp = await ben.lastScenarioOp
+        let cannyOp = await canny.lastScenarioOp
+        #expect(cannyOp?.op == "stop")
+        #expect(benOp == nil, "the action must not reach the non-owning host")
+    }
+
+    @Test func fleetActionOnUnknownHostIsNoOp() async {
+        let (fleet, ben, canny) = makeTwoHostFleet(
+            benScenarios: [makeScenario()], cannyScenarios: [])
         await fleet.connectAll()
         fleet.stopScenario(name: "strath", hostID: "no-such-host")
-        await Task.yield()
-        try? await Task.sleep(nanoseconds: 30_000_000)
-        let op = await mock.lastScenarioOp
-        #expect(op == nil)
+        // Yield generously; nothing should ever be recorded on either host.
+        for _ in 0..<50 { await Task.yield() }
+        #expect(await ben.lastScenarioOp == nil)
+        #expect(await canny.lastScenarioOp == nil)
     }
+}
+
+/// Poll a condition across actor-hops without a fixed sleep: yields up to
+/// `maxYields` times, returning true as soon as it holds. Deterministic under a
+/// loaded runner (unlike `Task.sleep`), since it only advances when the executor
+/// makes progress.
+@MainActor
+private func waitUntil(maxYields: Int = 500, _ cond: () async -> Bool) async -> Bool {
+    for _ in 0..<maxYields {
+        if await cond() { return true }
+        await Task.yield()
+    }
+    return await cond()
+}
+
+/// A two-remote-host fleet ("ben" + "canny"), each backed by its own mock, so a
+/// test can prove cross-host action routing.
+@MainActor
+private func makeTwoHostFleet(
+    benScenarios: [ScenarioRecord] = [],
+    cannyScenarios: [ScenarioRecord] = []
+) -> (fleet: FleetModel, ben: MockHostClient, canny: MockHostClient) {
+    let secrets = InMemorySecretStore()
+    // swiftlint:disable:next force_try
+    let identity = try! DeviceIdentity(keychain: secrets)
+    let registry = HostRegistry(
+        keychain: secrets,
+        storeURL: FileManager.default.temporaryDirectory
+            .appendingPathComponent("graith-two-host-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("hosts.json"))
+    registry.upsert(Host(id: "ben", label: "Ben Nevis", kind: .remote, magicDNSName: "ben.tail", isPaired: false))
+    registry.upsert(Host(id: "canny", label: "Canny", kind: .remote, magicDNSName: "canny.tail", isPaired: false))
+    // swiftlint:disable:next force_try
+    try! registry.completePairing(hostID: "ben", response: PairResponseMsg(
+        deviceID: "dev-ben", clientToken: "tok-ben", daemonProfile: "", tlsPinSPKI: "cGlu"))
+    // swiftlint:disable:next force_try
+    try! registry.completePairing(hostID: "canny", response: PairResponseMsg(
+        deviceID: "dev-canny", clientToken: "tok-canny", daemonProfile: "", tlsPinSPKI: "cGlu"))
+    let ben = MockHostClient(scenarios: benScenarios)
+    let canny = MockHostClient(scenarios: cannyScenarios)
+    let factory = MockFactory(clients: ["tok-ben": ben, "tok-canny": canny])
+    let pairing = PairingCoordinator(pairing: StubPairing(), identity: identity, registry: registry)
+    let fleet = FleetModel(
+        registry: registry, identity: identity, reachability: nil,
+        factory: factory, pairing: pairing, subscribeApprovals: false)
+    return (fleet, ben, canny)
 }

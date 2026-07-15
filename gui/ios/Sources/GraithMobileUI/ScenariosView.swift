@@ -82,7 +82,7 @@ struct ScenariosView: View {
                     GraithEmptyState(
                         systemImage: "square.stack.3d.up",
                         title: "No running scenarios",
-                        subtitle: "Start one from the CLI with `gr scenario start`.",
+                        subtitle: "Start one from the CLI with gr scenario start.",
                         actionTitle: nil,
                         action: nil
                     )
