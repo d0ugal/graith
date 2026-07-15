@@ -629,6 +629,96 @@ func TestBuildNonoProfileSSHFeature(t *testing.T) {
 	}
 }
 
+// TestBuildNonoProfileSSHKeysFeature covers the "ssh-keys" token (issue #1040):
+// it grants read-only access to ~/.ssh so agents that use raw key files (not the
+// agent socket) can read them. The path is resolved against $HOME here so nono
+// sees an absolute path, never a literal "~" it cannot expand.
+func TestBuildNonoProfileSSHKeysFeature(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	opts := WrapOpts{Backend: BackendNono, WorktreeDir: "/hame/bothy", Features: []string{"ssh-keys"}}
+
+	p, warnings, err := buildNonoProfile("graith-bothy", opts, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(warnings) != 0 {
+		t.Errorf("unexpected warnings for ssh-keys with HOME set: %v", warnings)
+	}
+
+	wantSSHDir := filepath.Join(home, ".ssh")
+	if !slices.Contains(p.Filesystem.Read, wantSSHDir) {
+		t.Errorf("ssh-keys feature did not grant read on %q: %v", wantSSHDir, p.Filesystem.Read)
+	}
+
+	// ssh-keys is read-only: it must not appear in any write grant.
+	for name, list := range map[string][]string{
+		"allow":      p.Filesystem.Allow,
+		"allow_file": p.Filesystem.AllowFile,
+		"write":      p.Filesystem.Write,
+	} {
+		if slices.Contains(list, wantSSHDir) {
+			t.Errorf("ssh-keys wrongly granted write via filesystem.%s: %v", name, list)
+		}
+	}
+}
+
+// TestBuildNonoProfileSSHKeysSeparateFromSSH is the regression for #1040: the
+// plain "ssh" feature stays agent-socket-only and must NOT grant ~/.ssh, and
+// "ssh-keys" grants ~/.ssh without implying an agent socket. The two tokens are
+// independent.
+func TestBuildNonoProfileSSHKeysSeparateFromSSH(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	sshDir := filepath.Join(home, ".ssh")
+
+	// "ssh" alone: socket granted (if present), ~/.ssh NOT granted.
+	sshOnly := WrapOpts{Backend: BackendNono, WorktreeDir: "/hame/bothy", Features: []string{"ssh"}}
+
+	p, _, err := buildNonoProfile("graith-bothy", sshOnly, "/run/user/1000/ssh-agent.sock")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if slices.Contains(p.Filesystem.Read, sshDir) {
+		t.Errorf("plain \"ssh\" feature wrongly granted ~/.ssh read: %v", p.Filesystem.Read)
+	}
+
+	// "ssh-keys" alone: ~/.ssh granted, no agent socket.
+	keysOnly := WrapOpts{Backend: BackendNono, WorktreeDir: "/hame/bothy", Features: []string{"ssh-keys"}}
+
+	p, _, err = buildNonoProfile("graith-bothy", keysOnly, "/run/user/1000/ssh-agent.sock")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !slices.Contains(p.Filesystem.Read, sshDir) {
+		t.Errorf("ssh-keys feature did not grant ~/.ssh read: %v", p.Filesystem.Read)
+	}
+
+	if len(p.Filesystem.UnixSocket) != 0 {
+		t.Errorf("ssh-keys must not grant an agent socket: %v", p.Filesystem.UnixSocket)
+	}
+
+	// Both tokens together: socket AND ~/.ssh.
+	both := WrapOpts{Backend: BackendNono, WorktreeDir: "/hame/bothy", Features: []string{"ssh", "ssh-keys"}}
+
+	p, _, err = buildNonoProfile("graith-bothy", both, "/run/user/1000/ssh-agent.sock")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !slices.Contains(p.Filesystem.Read, sshDir) {
+		t.Errorf("ssh+ssh-keys did not grant ~/.ssh read: %v", p.Filesystem.Read)
+	}
+
+	if !slices.Contains(p.Filesystem.UnixSocket, "/run/user/1000/ssh-agent.sock") {
+		t.Errorf("ssh+ssh-keys did not grant the agent socket: %v", p.Filesystem.UnixSocket)
+	}
+}
+
 // TestBuildNonoProfileUnixSockets is the nono half of the daemon-socket
 // regression: UnixSockets (the graith daemon socket) must map to
 // filesystem.unix_socket so a sandboxed agent can connect() to the daemon,

@@ -55,7 +55,8 @@ disabled = true               # force-disable for this agent
 
 | Feature | safehouse | nono |
 |---------|-----------|------|
-| `ssh` | grants `SSH_AUTH_SOCK` access | grants the `$SSH_AUTH_SOCK` Unix socket (agent socket only; raw `~/.ssh` key access is not granted in v1). Warns if `SSH_AUTH_SOCK` is unset. |
+| `ssh` | grants `SSH_AUTH_SOCK` access | grants the `$SSH_AUTH_SOCK` Unix socket (agent socket only; raw `~/.ssh` key access is not granted). Warns if `SSH_AUTH_SOCK` is unset. |
+| `ssh-keys` | (n/a — use safehouse's own key handling) | grants **read-only** access to `~/.ssh` for agents that use raw key files instead of the agent socket. Opt-in companion to `ssh`, which stays agent-socket-only. Warns if the home directory can't be resolved. |
 | `process-control` | allows signal sending | **no-op on its own** — nono's default already permits same-sandbox signals. Set `signal_mode = "isolated"` (below) to make it actually gate signalling under nono. Documented cross-backend divergence. |
 | anything else (e.g. `clipboard`) | passed to safehouse | **not mapped** — nono has no equivalent; graith warns and ignores it rather than silently dropping it. |
 

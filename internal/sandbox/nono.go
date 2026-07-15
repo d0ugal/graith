@@ -186,6 +186,8 @@ func isWithinAny(path string, prefixes []string) bool {
 //     nono inherit ALL of the daemon's env (fail-open), so an empty allowlist
 //     (scrub everything) is the fail-closed default.
 //   - feature "ssh"       -> filesystem.unix_socket [$SSH_AUTH_SOCK] (agent socket only)
+//   - feature "ssh-keys"  -> filesystem.read [~/.ssh] (raw key-file read access;
+//     opt-in on top of "ssh", which stays agent-socket-only — see design §C4)
 //   - feature "process-control" -> no-op unless SignalMode is set; see below
 //   - SignalMode          -> security.signal_mode (Phase 2: opt-in isolation)
 //   - Network             -> network.block / network.allow_domain (Phase 2 egress)
@@ -303,6 +305,21 @@ func buildNonoProfile(name string, opts WrapOpts, sshAuthSock string) (nonoProfi
 			}
 
 			p.Filesystem.UnixSocket = append(p.Filesystem.UnixSocket, sshAuthSock)
+		case "ssh-keys":
+			// Grant read-only access to ~/.ssh for agents that use raw key
+			// files rather than the agent socket. This is the opt-in companion
+			// to "ssh" (which stays agent-socket-only, design §C4). Resolve the
+			// home dir here rather than emit a literal "~" nono cannot expand;
+			// if HOME is unset we can't locate ~/.ssh, so warn and grant
+			// nothing rather than emit a broken path.
+			home, err := os.UserHomeDir()
+			if err != nil {
+				warnings = append(warnings, "feature \"ssh-keys\" requested but the home directory could not be resolved; ~/.ssh not granted")
+
+				continue
+			}
+
+			p.Filesystem.Read = append(p.Filesystem.Read, filepath.Join(home, ".ssh"))
 		case "process-control":
 			// No-op on its own under nono: the default signal_mode already
 			// permits same-sandbox signals. To actually gate signalling, set
