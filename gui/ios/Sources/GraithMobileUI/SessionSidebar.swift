@@ -170,7 +170,7 @@ struct SessionRow: View {
             Button("Delete Permanently", role: .destructive) { Task { await connection.purge(session) } }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This bypasses the recovery window — the worktree, branch, and history are removed immediately. This cannot be undone.")
+            Text("This bypasses the recovery window — the agent is stopped and the worktree, branch, and history are removed immediately. This cannot be undone.")
         }
         .sheet(isPresented: $showSetStatus) {
             SessionTextPromptSheet(

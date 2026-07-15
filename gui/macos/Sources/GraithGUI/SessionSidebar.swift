@@ -68,6 +68,7 @@ struct SessionSidebar: View {
                 }
                 .buttonStyle(.plain)
                 .help("Recently deleted sessions")
+                .disabled(store.connections.isEmpty)
 
                 // Add host button
                 Button(action: { showAddHost = true }) {
@@ -253,20 +254,17 @@ struct DeletedSessionsSheet: View {
     }
 
     private func restore(_ row: HostedSession) {
-        store.restore(row.session, hostID: row.host.id)
-        Task { await reloadAfterMutation() }
+        Task {
+            await store.restore(row.session, hostID: row.host.id)
+            await reload()
+        }
     }
 
     private func purge(_ row: HostedSession) {
-        store.purge(row.session, hostID: row.host.id)
-        Task { await reloadAfterMutation() }
-    }
-
-    /// The mutation fires a detached Task on the connection; give the daemon a
-    /// brief beat to apply it before re-listing so the row drops out.
-    private func reloadAfterMutation() async {
-        try? await Task.sleep(nanoseconds: 250_000_000)
-        await reload()
+        Task {
+            await store.purge(row.session, hostID: row.host.id)
+            await reload()
+        }
     }
 }
 

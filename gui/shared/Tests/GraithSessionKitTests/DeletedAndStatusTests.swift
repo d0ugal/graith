@@ -86,6 +86,16 @@ struct DeletedAndStatusTests {
         #expect(conn.lastError == nil)
     }
 
+    @Test func setStatusFailureSurfacesOnConnection() async {
+        let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions(), subscribeApprovals: false)
+        await fleet.connectAll()
+        let conn = fleet.connections[0]
+        let target = conn.sessions.first { $0.id == "braw0001" }!
+        await mock.setFailSetStatus(.daemon("status rpc broke"))
+        await conn.setStatus(target, text: "thrawn attempt")
+        #expect(conn.lastError == "status rpc broke")
+    }
+
     @Test func deletedSessionsFailureSurfacesAsHostError() async {
         let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions(), subscribeApprovals: false)
         await fleet.connectAll()
@@ -118,12 +128,9 @@ struct DeletedAndStatusTests {
         let deleted = await fleet.deletedSessions()
         let row = deleted.first!
 
-        fleet.restore(row.session, hostID: row.host.id)
-        // restore fires a detached Task; poll until the mock has moved it back.
-        for _ in 0..<50 {
-            if await mock.sessions.contains(where: { $0.id == "braw0001" }) { break }
-            try? await Task.sleep(nanoseconds: 5_000_000)
-        }
+        // restore awaits the connection op, so the mock has moved it back by the
+        // time it returns — no polling needed.
+        await fleet.restore(row.session, hostID: row.host.id)
         #expect(await mock.sessions.contains { $0.id == "braw0001" })
     }
 
@@ -131,9 +138,10 @@ struct DeletedAndStatusTests {
         let (fleet, _) = makeFleetWithRemote(sessions: sampleSessions(), subscribeApprovals: false)
         await fleet.connectAll()
         let target = fleet.sessions.first { $0.id == "braw0001" }!
-        // Unknown host id: nothing to act on, must not crash or mutate.
-        fleet.purge(target, hostID: "nope")
-        fleet.restore(target, hostID: "nope")
+        // Unknown host id (thrawn — a stubborn miss): nothing to act on, must not
+        // crash or mutate.
+        await fleet.purge(target, hostID: "thrawn")
+        await fleet.restore(target, hostID: "thrawn")
         #expect(fleet.sessions.contains { $0.id == "braw0001" })
     }
 

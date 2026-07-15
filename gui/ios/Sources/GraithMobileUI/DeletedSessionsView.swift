@@ -82,19 +82,16 @@ struct DeletedSessionsView: View {
     }
 
     private func restore(_ row: HostedSession) {
-        model.restore(row.session, hostID: row.host.id)
-        Task { await reloadAfterMutation() }
+        Task {
+            await model.restore(row.session, hostID: row.host.id)
+            await reload()
+        }
     }
 
     private func purge(_ row: HostedSession) {
-        model.purge(row.session, hostID: row.host.id)
-        Task { await reloadAfterMutation() }
-    }
-
-    /// The mutation fires a detached Task on the connection; give the daemon a
-    /// brief beat to apply it before re-listing so the row drops out.
-    private func reloadAfterMutation() async {
-        try? await Task.sleep(nanoseconds: 250_000_000)
-        await reload()
+        Task {
+            await model.purge(row.session, hostID: row.host.id)
+            await reload()
+        }
     }
 }
