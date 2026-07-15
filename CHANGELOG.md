@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.68.5](https://github.com/d0ugal/graith/compare/v0.68.4...v0.68.5) (2026-07-15)
+
+
+### Features
+
+* **gui:** add document store browser ([#902](https://github.com/d0ugal/graith/issues/902)) ([ba0b120](https://github.com/d0ugal/graith/commit/ba0b120eb87a3d6effeded0e8e167985484c5e82))
+* **gui:** add inter-agent messaging & inbox support ([#898](https://github.com/d0ugal/graith/issues/898)) ([85a6519](https://github.com/d0ugal/graith/commit/85a651932565af8eb3a308ec7ffcb9a8ed3a548c))
+* **gui:** config viewer + diagnostics panel ([#904](https://github.com/d0ugal/graith/issues/904)) ([127a6b9](https://github.com/d0ugal/graith/commit/127a6b9a6523ff2b2b58c6e1c58080c178990f9c))
+* **gui:** show CI check counts (16/22) in sidebar ([510322a](https://github.com/d0ugal/graith/commit/510322afe040753b6d2a5b3a5b09611d02d944b5))
+* **triggers:** scenario-embedded [[trigger]] blocks ([#1027](https://github.com/d0ugal/graith/issues/1027)) ([d03210c](https://github.com/d0ugal/graith/commit/d03210c3c61e1ef208cf5cca16b7813668c71a11))
+
+
+### Bug Fixes
+
+* **deps:** replace abandoned go-difflib with go-udiff ([8655bd5](https://github.com/d0ugal/graith/commit/8655bd5aa1a7f209073bf7492f3b983234cdce2c))
+* **gui:** break macOS CI deadlock in FleetConnectedTests + cap runner minutes ([92f417a](https://github.com/d0ugal/graith/commit/92f417af5db0b066d520b0e8b9758a95b49c7317)), closes [#1177](https://github.com/d0ugal/graith/issues/1177)
+* **gui:** harden deadlock test cleanup and CI timeout wrapper ([fb654c4](https://github.com/d0ugal/graith/commit/fb654c4bf5cafd9d427caeb52f6c9279a3a6dab0))
+
 ## [0.68.4](https://github.com/d0ugal/graith/compare/v0.68.3...v0.68.4) (2026-07-15)
 
 
