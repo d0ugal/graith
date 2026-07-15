@@ -383,12 +383,21 @@ public struct PRInfo: Codable, Sendable, Hashable {
 public struct CIInfo: Codable, Sendable, Hashable {
     public var state: String
     public var failingChecks: [String]?
-    public init(state: String, failingChecks: [String]? = nil) {
+    /// Pass-like and total check counts, letting the sidebar show progress
+    /// ("16/22") while CI runs. `total == 0`/nil means no count is available and
+    /// callers fall back to the plain state glyph (mirrors the terminal overlay).
+    public var passed: Int?
+    public var total: Int?
+    public init(state: String, failingChecks: [String]? = nil,
+                passed: Int? = nil, total: Int? = nil) {
         self.state = state; self.failingChecks = failingChecks
+        self.passed = passed; self.total = total
     }
     enum CodingKeys: String, CodingKey {
         case state
         case failingChecks = "failing_checks"
+        case passed
+        case total
     }
 }
 
