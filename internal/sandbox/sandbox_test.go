@@ -629,13 +629,19 @@ func TestBuildNonoProfileSSHFeature(t *testing.T) {
 	}
 }
 
+// sshKeysTestHome is a fixed, absolute home dir used by the ssh-keys tests. It
+// must NOT be a real temp dir (t.TempDir() lives under $TMPDIR, which the
+// read-only-under-writable guard now rejects) — buildNonoProfile only joins the
+// path lexically, so a fake home that exists nowhere is exactly right.
+const sshKeysTestHome = "/hame/braw"
+
 // TestBuildNonoProfileSSHKeysFeature covers the "ssh-keys" token (issue #1040):
 // it grants read-only access to ~/.ssh so agents that use raw key files (not the
 // agent socket) can read them. The path is resolved against $HOME here so nono
-// sees an absolute path, never a literal "~" it cannot expand.
+// sees an absolute path, never a literal "~" it cannot expand, and ~/.ssh is
+// added to bypass_protection so it survives the required deny_credentials group.
 func TestBuildNonoProfileSSHKeysFeature(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	t.Setenv("HOME", sshKeysTestHome)
 
 	opts := WrapOpts{Backend: BackendNono, WorktreeDir: "/hame/bothy", Features: []string{"ssh-keys"}}
 
@@ -648,9 +654,16 @@ func TestBuildNonoProfileSSHKeysFeature(t *testing.T) {
 		t.Errorf("unexpected warnings for ssh-keys with HOME set: %v", warnings)
 	}
 
-	wantSSHDir := filepath.Join(home, ".ssh")
+	wantSSHDir := filepath.Join(sshKeysTestHome, ".ssh")
 	if !slices.Contains(p.Filesystem.Read, wantSSHDir) {
 		t.Errorf("ssh-keys feature did not grant read on %q: %v", wantSSHDir, p.Filesystem.Read)
+	}
+
+	// The read grant alone is a no-op: ~/.ssh is denied by the required
+	// deny_credentials group. bypass_protection must relax that deny, or the
+	// feature silently grants nothing under nono.
+	if !slices.Contains(p.Filesystem.BypassProtection, wantSSHDir) {
+		t.Errorf("ssh-keys did not add %q to bypass_protection (deny_credentials would still block it): %v", wantSSHDir, p.Filesystem.BypassProtection)
 	}
 
 	// ssh-keys is read-only: it must not appear in any write grant.
@@ -665,14 +678,76 @@ func TestBuildNonoProfileSSHKeysFeature(t *testing.T) {
 	}
 }
 
+// TestBuildNonoProfileSSHKeysNoHomeWarns covers the fail-closed branch: when the
+// home dir can't be resolved (empty $HOME on unix makes os.UserHomeDir error),
+// ssh-keys grants nothing and warns rather than emitting a broken path.
+func TestBuildNonoProfileSSHKeysNoHomeWarns(t *testing.T) {
+	t.Setenv("HOME", "")
+
+	opts := WrapOpts{Backend: BackendNono, WorktreeDir: "/hame/bothy", Features: []string{"ssh-keys"}}
+
+	p, warnings, err := buildNonoProfile("graith-bothy", opts, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(p.Filesystem.Read) != 0 || len(p.Filesystem.BypassProtection) != 0 {
+		t.Errorf("ssh-keys must grant nothing when HOME is unresolvable: read=%v bypass=%v", p.Filesystem.Read, p.Filesystem.BypassProtection)
+	}
+
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "ssh-keys") {
+		t.Errorf("expected a single ssh-keys warning when HOME is unresolvable, got %v", warnings)
+	}
+}
+
+// TestBuildNonoProfileSSHKeysRejectsHomeUnderTmp covers the read-only-under-
+// writable guard for the feature-synthesized ~/.ssh path: if $HOME sits under a
+// nono default-writable prefix ($TMPDIR here), the read grant can't be enforced
+// read-only, so buildNonoProfile fails closed rather than emit a grant that lies.
+func TestBuildNonoProfileSSHKeysRejectsHomeUnderTmp(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
+	t.Setenv("HOME", filepath.Join(tmp, "braw"))
+
+	opts := WrapOpts{Backend: BackendNono, WorktreeDir: "/hame/bothy", Features: []string{"ssh-keys"}}
+
+	_, _, err := buildNonoProfile("graith-bothy", opts, "")
+	if err == nil {
+		t.Fatal("expected an error when HOME (hence ~/.ssh) is under $TMPDIR, got nil")
+	}
+}
+
+// TestBuildNonoProfileSSHKeysRejectsRelativeHome covers the non-absolute / bare-
+// root home guard: os.UserHomeDir returns $HOME verbatim on unix, so a relative
+// or "/" value must warn and grant nothing rather than emit a broken path.
+func TestBuildNonoProfileSSHKeysRejectsRelativeHome(t *testing.T) {
+	for _, home := range []string{"dreich", "/"} {
+		t.Setenv("HOME", home)
+
+		opts := WrapOpts{Backend: BackendNono, WorktreeDir: "/hame/bothy", Features: []string{"ssh-keys"}}
+
+		p, warnings, err := buildNonoProfile("graith-bothy", opts, "")
+		if err != nil {
+			t.Fatalf("HOME=%q: unexpected error: %v", home, err)
+		}
+
+		if len(p.Filesystem.Read) != 0 || len(p.Filesystem.BypassProtection) != 0 {
+			t.Errorf("HOME=%q: ssh-keys must grant nothing for an unusable home: read=%v bypass=%v", home, p.Filesystem.Read, p.Filesystem.BypassProtection)
+		}
+
+		if len(warnings) != 1 || !strings.Contains(warnings[0], "ssh-keys") {
+			t.Errorf("HOME=%q: expected a single ssh-keys warning, got %v", home, warnings)
+		}
+	}
+}
+
 // TestBuildNonoProfileSSHKeysSeparateFromSSH is the regression for #1040: the
 // plain "ssh" feature stays agent-socket-only and must NOT grant ~/.ssh, and
 // "ssh-keys" grants ~/.ssh without implying an agent socket. The two tokens are
 // independent.
 func TestBuildNonoProfileSSHKeysSeparateFromSSH(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	sshDir := filepath.Join(home, ".ssh")
+	t.Setenv("HOME", sshKeysTestHome)
+	sshDir := filepath.Join(sshKeysTestHome, ".ssh")
 
 	// "ssh" alone: socket granted (if present), ~/.ssh NOT granted.
 	sshOnly := WrapOpts{Backend: BackendNono, WorktreeDir: "/hame/bothy", Features: []string{"ssh"}}
