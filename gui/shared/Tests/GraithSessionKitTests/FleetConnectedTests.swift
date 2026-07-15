@@ -216,13 +216,24 @@ struct FleetConnectedTests {
         // Wait until it has actually entered listSessions (call #2) so the
         // overlapping refresh below is guaranteed to land while one is in flight
         // — deterministic, no sleep-and-hope.
-        for _ in 0..<200 where await mock.listCallCount < 2 {
+        for _ in 0..<500 where await mock.listCallCount < 2 {
             try? await Task.sleep(nanoseconds: 2_000_000)
         }
-        #expect(await mock.listCallCount == 2)
+        // If scheduling starved the in-flight refresh so it never entered
+        // listSessions, the overlapping `conn.refresh()` below would itself
+        // become the gated call and block — the very hang this test guards
+        // against. Release + drain and fail cleanly instead of leaning on the
+        // suite time-limit to unstick it.
+        guard await mock.listCallCount == 2 else {
+            await mock.releaseList()
+            await first.value
+            Issue.record("in-flight refresh did not enter listSessions within the poll window")
+            return
+        }
         // A refresh while one is in flight does NOT run concurrently: it sets the
-        // queued flag and returns immediately, so the in-flight refresh loops
-        // exactly once more when released.
+        // queued flag and returns immediately (guaranteed non-blocking now that
+        // call #2 is confirmed in flight), so the in-flight refresh loops exactly
+        // once more when released.
         await conn.refresh()
         await mock.releaseList()
         await first.value
