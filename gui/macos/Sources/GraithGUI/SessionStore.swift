@@ -11,32 +11,168 @@ typealias Host = GraithRemoteKit.Host
 /// Resolves the local daemon's Unix socket path, mirroring the Go client's
 /// `config.ResolvePaths` on macOS.
 ///
-/// On macOS `adrg/xdg` maps the (unset) `XDG_RUNTIME_DIR` to
-/// `~/Library/Application Support`, and the daemon puts its socket at
-/// `<runtimeDir>/<appName>/graith.sock` where `<appName>` is `graith` (default
-/// profile) or `graith-<profile>`.
+/// This follows the active profile, XDG overrides, and the top-level `data_dir`
+/// in that profile's config. Explicit profile/config/socket settings provide an
+/// escape hatch for unusual development setups.
 enum GraithLocalSocket {
-    static func defaultPath() -> String {
-        let env = ProcessInfo.processInfo.environment
-        let profile = env["GRAITH_PROFILE"] ?? ""
-        let appName = profile.isEmpty ? "graith" : "graith-\(profile)"
+    static let profileOverrideKey = "localDaemon.profileOverride"
+    static let configPathOverrideKey = "localDaemon.configPathOverride"
+    static let socketPathOverrideKey = "localDaemon.socketPathOverride"
 
-        // Mirror the daemon's runtimeDirForApp() (internal/config/paths.go):
-        // when XDG_RUNTIME_DIR is set the socket is <runtimeDir>/<app>/graith.sock;
-        // otherwise it is <dataHome>/<app>/run/graith.sock — note the "run"
-        // component, which the daemon appends only in the fallback case.
-        if let xdg = env["XDG_RUNTIME_DIR"], !xdg.isEmpty {
-            return "\(xdg)/\(appName)/graith.sock"
-        }
-
-        return "\(NSHomeDirectory())/Library/Application Support/\(appName)/run/graith.sock"
+    enum ResolutionSource: Equatable {
+        case override
+        case config
+        case environment
+        case `default`
     }
 
-    static var profile: String { ProcessInfo.processInfo.environment["GRAITH_PROFILE"] ?? "" }
+    struct Resolution: Equatable {
+        let profile: String
+        let configPath: String
+        let socketPath: String
+        let source: ResolutionSource
+    }
+
+    /// Resolve the local daemon exactly as the CLI does, with explicit settings
+    /// overrides as an escape hatch. The daemon historically put a configured
+    /// data directory's socket directly at `<data_dir>/graith.sock`; current
+    /// builds use `<data_dir>/run/graith.sock`. Prefer the legacy path only when
+    /// it actually exists so upgrades naturally move to the current layout.
+    static func resolve(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        profileOverride: String? = nil,
+        configPathOverride: String? = nil,
+        socketPathOverride: String? = nil,
+        fileManager: FileManager = .default
+    ) -> Resolution {
+        let home = environment["HOME"].flatMap { $0.isEmpty ? nil : $0 }
+            ?? NSHomeDirectory()
+        let profile = nonEmpty(profileOverride) ?? environment["GRAITH_PROFILE"] ?? ""
+        let appName = profile.isEmpty ? "graith" : "graith-\(profile)"
+        let configRoot = environment["XDG_CONFIG_HOME"].flatMap { $0.isEmpty ? nil : $0 }
+            ?? URL(fileURLWithPath: home).appendingPathComponent(".config").path
+        let automaticConfigPath = URL(fileURLWithPath: configRoot)
+            .appendingPathComponent(appName)
+            .appendingPathComponent("config.toml").path
+        let configPath = expandPath(nonEmpty(configPathOverride) ?? automaticConfigPath, home: home)
+
+        if let explicit = nonEmpty(socketPathOverride) {
+            return Resolution(
+                profile: profile,
+                configPath: configPath,
+                socketPath: expandPath(explicit, home: home),
+                source: .override
+            )
+        }
+
+        // XDG_RUNTIME_DIR is independent of data_dir in the Go resolver and
+        // therefore wins whenever it is explicitly present.
+        if let runtimeRoot = environment["XDG_RUNTIME_DIR"].flatMap({ $0.isEmpty ? nil : $0 }) {
+            let socket = URL(fileURLWithPath: runtimeRoot)
+                .appendingPathComponent(appName)
+                .appendingPathComponent("graith.sock").path
+            return Resolution(profile: profile, configPath: configPath, socketPath: socket, source: .environment)
+        }
+
+        if let configured = configuredDataDir(at: configPath, home: home) {
+            let legacy = URL(fileURLWithPath: configured).appendingPathComponent("graith.sock").path
+            let current = URL(fileURLWithPath: configured)
+                .appendingPathComponent("run")
+                .appendingPathComponent("graith.sock").path
+            return Resolution(
+                profile: profile,
+                configPath: configPath,
+                socketPath: fileManager.fileExists(atPath: legacy) ? legacy : current,
+                source: .config
+            )
+        }
+
+        let dataRoot = environment["XDG_DATA_HOME"].flatMap { $0.isEmpty ? nil : $0 }
+            ?? URL(fileURLWithPath: home).appendingPathComponent("Library/Application Support").path
+        let socket = URL(fileURLWithPath: dataRoot)
+            .appendingPathComponent(appName)
+            .appendingPathComponent("run/graith.sock").path
+        return Resolution(profile: profile, configPath: configPath, socketPath: socket, source: .default)
+    }
+
+    static func defaultPath() -> String {
+        let defaults = UserDefaults.standard
+        return resolve(
+            profileOverride: defaults.string(forKey: profileOverrideKey),
+            configPathOverride: defaults.string(forKey: configPathOverrideKey),
+            socketPathOverride: defaults.string(forKey: socketPathOverrideKey)
+        ).socketPath
+    }
+
+    static var profile: String {
+        nonEmpty(UserDefaults.standard.string(forKey: profileOverrideKey))
+            ?? ProcessInfo.processInfo.environment["GRAITH_PROFILE"] ?? ""
+    }
 
     /// The local daemon host entry for this machine.
     static func localHost() -> Host {
         Host.local(socketPath: defaultPath(), profile: profile)
+    }
+
+    private static func configuredDataDir(at configPath: String, home: String) -> String? {
+        guard let contents = try? String(contentsOfFile: configPath, encoding: .utf8) else {
+            return nil
+        }
+        for rawLine in contents.split(whereSeparator: \Character.isNewline) {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("[") { break } // data_dir is a top-level TOML key.
+            guard !line.hasPrefix("#"),
+                  let equals = line.firstIndex(of: "=") else { continue }
+            let key = line[..<equals].trimmingCharacters(in: .whitespaces)
+            guard key == "data_dir" else { continue }
+            let value = line[line.index(after: equals)...].trimmingCharacters(in: .whitespaces)
+            guard let parsed = parseTOMLString(value), !parsed.isEmpty else { return nil }
+            return expandPath(parsed, home: home)
+        }
+        return nil
+    }
+
+    /// Parse the quoted TOML strings accepted for config paths. Path settings
+    /// are deliberately constrained by the Go config validator to quoted
+    /// strings, so a complete TOML parser would add considerable weight for no
+    /// additional valid input here.
+    private static func parseTOMLString(_ value: String) -> String? {
+        guard let quote = value.first, quote == "\"" || quote == "'" else { return nil }
+        var result = ""
+        var escaped = false
+        for character in value.dropFirst() {
+            if quote == "\"", escaped {
+                switch character {
+                case "\"", "\\": result.append(character)
+                case "n": result.append("\n")
+                case "r": result.append("\r")
+                case "t": result.append("\t")
+                default: return nil
+                }
+                escaped = false
+            } else if quote == "\"", character == "\\" {
+                escaped = true
+            } else if character == quote {
+                return result
+            } else {
+                result.append(character)
+            }
+        }
+        return nil
+    }
+
+    private static func expandPath(_ path: String, home: String) -> String {
+        if path == "~" { return home }
+        if path.hasPrefix("~/") {
+            return URL(fileURLWithPath: home)
+                .appendingPathComponent(String(path.dropFirst(2))).path
+        }
+        return path
+    }
+
+    private static func nonEmpty(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
     }
 }
 
