@@ -38,6 +38,7 @@ type watchBinding struct {
 	triggerName string
 	sessionID   string
 	worktree    string
+	fingerprint string // definition fingerprint; a change recreates the binding
 	watcher     *fsnotify.Watcher
 	debounce    *time.Timer
 	changed     map[string]bool // coalesced changed paths since last fire

@@ -178,6 +178,76 @@ func TestReconcileBindings_Lifecycle(t *testing.T) {
 	sm.teardownAllBindings()
 }
 
+// TestReconcileBindings_HotReload asserts that editing a watch trigger's
+// definition (paths/ignore/debounce) under the same name recreates the binding
+// — the matcher and debounce are captured at creation, so a stale binding must
+// be torn down and rebuilt when the fingerprint changes (issue #1028). An
+// unchanged reconcile must leave the binding in place.
+func TestReconcileBindings_HotReload(t *testing.T) {
+	worktree := t.TempDir()
+	trig := config.TriggerConfig{
+		Name:   "bide",
+		Watch:  &config.WatchConfig{Role: "implementer", Paths: []string{"**/*.go"}, Debounce: "50ms"},
+		Action: config.ActionConfig{Type: config.ActionMessage, Body: "x", Deliver: config.DeliverConfig{Topic: "blether"}},
+	}
+	sm := newTriggerTestSM(t, trig)
+	sm.state.Sessions["src"] = &SessionState{ID: "src", Name: "canny", Status: StatusRunning, ScenarioRole: "implementer", WorktreePath: worktree}
+
+	ctx := context.Background()
+	sm.reconcileBindings(ctx, sm.cfg)
+
+	key := bindingKey("bide", "src")
+	first := sm.triggers.bindings[key]
+
+	if first == nil {
+		t.Fatalf("expected binding after first reconcile")
+	}
+
+	// Reconcile again with no change: the same binding must be kept.
+	sm.reconcileBindings(ctx, sm.cfg)
+
+	if got := sm.triggers.bindings[key]; got != first {
+		t.Fatalf("unchanged reconcile recreated the binding")
+	}
+
+	// Edit the watch definition under the same name — paths + debounce change.
+	// A real config reload swaps sm.cfg for a fresh *config.Config under the
+	// lock (a new WatchConfig), so mimic that rather than mutating the shared
+	// struct in place (which would race the running binding goroutine).
+	reloaded := config.TriggerConfig{
+		Name:   "bide",
+		Watch:  &config.WatchConfig{Role: "implementer", Paths: []string{"**/*.md"}, Debounce: "200ms"},
+		Action: config.ActionConfig{Type: config.ActionMessage, Body: "x", Deliver: config.DeliverConfig{Topic: "blether"}},
+	}
+
+	sm.mu.Lock()
+	newCfg := *sm.cfg
+	newCfg.Triggers = []config.TriggerConfig{reloaded}
+	sm.cfg = &newCfg
+	sm.mu.Unlock()
+
+	sm.reconcileBindings(ctx, sm.Config())
+
+	second := sm.triggers.bindings[key]
+	if second == nil {
+		t.Fatalf("expected binding after hot reload")
+	}
+
+	if second == first {
+		t.Fatalf("changed definition did not recreate the binding")
+	}
+
+	if second.fingerprint == first.fingerprint {
+		t.Fatalf("recreated binding kept the stale fingerprint")
+	}
+
+	if want := triggerFingerprint(&reloaded); second.fingerprint != want {
+		t.Fatalf("binding fingerprint = %q, want %q", second.fingerprint, want)
+	}
+
+	sm.teardownAllBindings()
+}
+
 func mustMkdir(t *testing.T, p string) {
 	t.Helper()
 
