@@ -14,9 +14,73 @@ struct SettingsView: View {
                 .tabItem { Label("General", systemImage: "gearshape") }
             HostsSettings()
                 .tabItem { Label("Hosts", systemImage: "server.rack") }
+            LocalDaemonSettings()
+                .tabItem { Label("Advanced", systemImage: "wrench.and.screwdriver") }
         }
-        .frame(width: 460, height: 320)
+        .frame(width: 560, height: 360)
         .preferredColorScheme(.dark)
+    }
+}
+
+// MARK: - Local daemon
+
+struct LocalDaemonSettings: View {
+    @AppStorage(GraithLocalSocket.profileOverrideKey) private var profileOverride = ""
+    @AppStorage(GraithLocalSocket.configPathOverrideKey) private var configPathOverride = ""
+    @AppStorage(GraithLocalSocket.socketPathOverrideKey) private var socketPathOverride = ""
+
+    private var resolution: GraithLocalSocket.Resolution {
+        GraithLocalSocket.resolve(
+            profileOverride: profileOverride,
+            configPathOverride: configPathOverride,
+            socketPathOverride: socketPathOverride
+        )
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                TextField("Profile override", text: $profileOverride)
+                    .textFieldStyle(.roundedBorder)
+                TextField("Config file override", text: $configPathOverride)
+                    .textFieldStyle(.roundedBorder)
+                TextField("Socket path override", text: $socketPathOverride)
+                    .textFieldStyle(.roundedBorder)
+            } header: {
+                Text("Local daemon")
+            } footer: {
+                Text("Leave fields empty to discover them automatically. Tilde-prefixed paths are supported.")
+                    .font(.caption)
+                    .foregroundStyle(Theme.overlay0)
+            }
+
+            Section {
+                LabeledContent("Profile") {
+                    Text(resolution.profile.isEmpty ? "default" : resolution.profile)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                }
+                LabeledContent("Config") {
+                    Text(resolution.configPath)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                        .lineLimit(2)
+                }
+                LabeledContent("Socket") {
+                    Text(resolution.socketPath)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                        .lineLimit(2)
+                }
+            } header: {
+                Text("Effective paths")
+            } footer: {
+                Text("Restart the macOS app after changing an override so the local connection is rebuilt.")
+                    .font(.caption)
+                    .foregroundStyle(Theme.yellow)
+            }
+        }
+        .formStyle(.grouped)
     }
 }
 
