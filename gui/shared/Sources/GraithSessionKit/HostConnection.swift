@@ -172,6 +172,26 @@ public final class HostConnection: ObservableObject, Identifiable {
         (try? await client.repoList()) ?? []
     }
 
+    /// List document-store keys for the browser (#902). Errors surface on
+    /// `lastError` and yield an empty list (never throws up to the view).
+    public func storeList(repo: String? = nil, shared: Bool = false, prefix: String? = nil) async -> [StoreEntryInfo] {
+        guard state == .connected else { return [] }
+        do {
+            let entries = try await client.storeList(repo: repo, shared: shared, prefix: prefix)
+            lastError = nil
+            return entries
+        } catch {
+            lastError = Self.describe(error)
+            return []
+        }
+    }
+
+    /// Fetch a single document body (#902). Throws so the viewer can distinguish
+    /// a missing document from an empty one (mirrors macOS `fetchSnapshot`).
+    public func storeGet(repo: String?, shared: Bool, key: String) async throws -> StoreGetResponseMsg {
+        try await client.storeGet(repo: repo, shared: shared, key: key)
+    }
+
     public func create(_ request: CreateRequest) async -> Bool {
         do {
             try await client.create(request)

@@ -163,3 +163,14 @@ Fix: use sync.Once or a mutex around the refresh call.
 EOF
 )"
 ```
+
+## Browsing in the apps
+
+The macOS and iOS apps include a read-only **document store browser**. Open it
+from the toolbar (the document icon): it lists every document the connected
+daemon knows about — per-repo stores plus the shared store — grouped by store,
+and shows a selected document's body. On macOS with more than one paired host,
+pick the host from the store browser's Host selector.
+
+The browser is read-only for now: use `gr store put` / `rm` / `append` from the
+CLI to write. Writing from the apps is a planned follow-up.

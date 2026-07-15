@@ -107,6 +107,22 @@ public actor RealHostClient: GraithHostClient {
         }
     }
 
+    public func storeList(repo: String?, shared: Bool, prefix: String?) async throws -> [StoreEntryInfo] {
+        do {
+            return try await inner.storeList(repo: repo, shared: shared, prefix: prefix)
+        } catch {
+            throw RealClientError.map(error)
+        }
+    }
+
+    public func storeGet(repo: String?, shared: Bool, key: String) async throws -> StoreGetResponseMsg {
+        do {
+            return try await inner.storeGet(repo: repo, shared: shared, key: key)
+        } catch {
+            throw RealClientError.map(error)
+        }
+    }
+
     // MARK: - Mutations
 
     public func create(_ request: CreateRequest) async throws {

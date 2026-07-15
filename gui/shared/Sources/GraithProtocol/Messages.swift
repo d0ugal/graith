@@ -734,6 +734,64 @@ public struct ScenarioListResponse: Codable, Sendable {
     public init(scenarios: [ScenarioRecord]) { self.scenarios = scenarios }
 }
 
+// MARK: - Document store browser (#902)
+
+/// `store_list` requests document keys. Target resolution mirrors the CLI:
+/// `shared` (or `repo == "shared"`) lists the shared store; a non-empty `repo`
+/// lists that store (a path or an ID from `gr store ls -a`); both empty lists
+/// every store the daemon knows about. `prefix` restricts to keys under a path.
+public struct StoreListMsg: Codable, Sendable {
+    public var repo: String?
+    public var shared: Bool?
+    public var prefix: String?
+    public init(repo: String? = nil, shared: Bool? = nil, prefix: String? = nil) {
+        self.repo = repo; self.shared = shared; self.prefix = prefix
+    }
+}
+
+/// One document in the store. `repo` is the round-trippable store ID ("shared"
+/// or "<reponame>-<hash>"), fed back into ``StoreGetMsg`` to fetch the body.
+public struct StoreEntryInfo: Codable, Sendable, Identifiable, Hashable {
+    public var key: String
+    public var repo: String
+    public var updatedAt: String
+    public var id: String { "\(repo)/\(key)" }
+    public init(key: String, repo: String, updatedAt: String) {
+        self.key = key; self.repo = repo; self.updatedAt = updatedAt
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case key
+        case repo
+        case updatedAt = "updated_at"
+    }
+}
+
+public struct StoreListResponseMsg: Codable, Sendable {
+    public var entries: [StoreEntryInfo]
+    public init(entries: [StoreEntryInfo]) { self.entries = entries }
+}
+
+/// `store_get` fetches a single document body. `repo`/`shared` identify the
+/// store exactly as in ``StoreListMsg``; `key` is the document key.
+public struct StoreGetMsg: Codable, Sendable {
+    public var repo: String?
+    public var shared: Bool?
+    public var key: String
+    public init(repo: String? = nil, shared: Bool? = nil, key: String) {
+        self.repo = repo; self.shared = shared; self.key = key
+    }
+}
+
+public struct StoreGetResponseMsg: Codable, Sendable {
+    public var key: String
+    public var repo: String
+    public var body: String
+    public init(key: String, repo: String, body: String) {
+        self.key = key; self.repo = repo; self.body = body
+    }
+}
+
 // MARK: - Empty-payload requests
 
 /// `list` takes no payload. Used as an explicit "no payload" marker.

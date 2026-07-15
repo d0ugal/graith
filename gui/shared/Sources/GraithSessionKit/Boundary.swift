@@ -70,6 +70,8 @@ public enum ControlType {
     public static let scenarioStop = "scenario_stop"
     public static let scenarioResume = "scenario_resume"
     public static let scenarioDelete = "scenario_delete"
+    public static let storeList = "store_list"
+    public static let storeGet = "store_get"
     public static let approvalList = "approval_list"
     public static let approvalSubscribe = "approval_subscribe"
     public static let approvalRespond = "approval_respond"
@@ -128,6 +130,11 @@ public protocol GraithHostClient: Actor {
     func screenSnapshot(sessionID: String) async throws -> ScreenSnapshot
     /// Multi-session scenarios running on this daemon (`gr scenario list`).
     func listScenarios() async throws -> [ScenarioRecord]
+    /// List document-store keys for the browser (#902). `repo` is a store ID or
+    /// path (nil with `shared` for the shared store; both nil lists every store).
+    func storeList(repo: String?, shared: Bool, prefix: String?) async throws -> [StoreEntryInfo]
+    /// Fetch a single document body from the store (#902).
+    func storeGet(repo: String?, shared: Bool, key: String) async throws -> StoreGetResponseMsg
 
     // Mutations (roleRemoteHuman only).
     func create(_ request: CreateRequest) async throws

@@ -13,6 +13,8 @@ public actor MockHostClient: GraithHostClient {
     private var pending: [ApprovalInfo]
     private var scenarios: [ScenarioRecord]
     private var snapshotFrame: String
+    /// Canned store documents keyed by "<repo>/<key>" → body (#902 browser).
+    private var storeDocs: [String: String]
     private var connected = false
 
     private var approvalContinuations: [UUID: AsyncStream<[ApprovalInfo]>.Continuation] = [:]
@@ -25,13 +27,15 @@ public actor MockHostClient: GraithHostClient {
         repos: [RepoEntry] = MockHostClient.defaultRepos,
         pending: [ApprovalInfo] = MockHostClient.defaultApprovals,
         scenarios: [ScenarioRecord] = MockHostClient.defaultScenarios,
-        snapshotFrame: String = "braw session — screen peek\n$ █"
+        snapshotFrame: String = "braw session — screen peek\n$ █",
+        storeDocs: [String: String] = MockHostClient.defaultStoreDocs
     ) {
         self.sessions = sessions
         self.repos = repos
         self.pending = pending
         self.scenarios = scenarios
         self.snapshotFrame = snapshotFrame
+        self.storeDocs = storeDocs
     }
 
     public var isConnected: Bool { connected }
@@ -82,6 +86,30 @@ public actor MockHostClient: GraithHostClient {
         try check(ControlType.screenSnapshot)
         return ScreenSnapshot(sessionID: sessionID, frame: snapshotFrame,
                               cursorX: 2, cursorY: 1, cursorVisible: true, cols: 80, rows: 24)
+    }
+
+    public func storeList(repo: String?, shared: Bool, prefix: String?) async throws -> [StoreEntryInfo] {
+        try check(ControlType.storeList)
+        // The mock keys docs as "<repo>/<key>"; the target repo is "shared" when
+        // `shared`, else the given `repo` (nil → list all stores).
+        let target = shared ? "shared" : repo
+        return storeDocs.keys.compactMap { composite -> StoreEntryInfo? in
+            guard let slash = composite.firstIndex(of: "/") else { return nil }
+            let docRepo = String(composite[..<slash])
+            let key = String(composite[composite.index(after: slash)...])
+            if let target, docRepo != target { return nil }
+            if let prefix, !prefix.isEmpty, !key.hasPrefix(prefix) { return nil }
+            return StoreEntryInfo(key: key, repo: docRepo, updatedAt: "2026-07-15T09:00:00Z")
+        }.sorted { $0.id < $1.id }
+    }
+
+    public func storeGet(repo: String?, shared: Bool, key: String) async throws -> StoreGetResponseMsg {
+        try check(ControlType.storeGet)
+        let target = shared ? "shared" : (repo ?? "")
+        guard let body = storeDocs["\(target)/\(key)"] else {
+            throw GraithClientError.daemon("document not found: \(key)")
+        }
+        return StoreGetResponseMsg(key: key, repo: target, body: body)
     }
 
     // MARK: - Mutations
@@ -290,6 +318,13 @@ extension MockHostClient {
         RepoEntry(path: "/Users/x/Code/croft", name: "croft", recent: true),
         RepoEntry(path: "/Users/x/Code/glen", name: "glen"),
         RepoEntry(path: "/Users/x/Code/strath", name: "strath"),
+    ]
+
+    /// Canned store documents keyed by "<repo>/<key>" (#902 browser).
+    public static let defaultStoreDocs: [String: String] = [
+        "croft-abcdef012345/design/api.md": "# API Design\n\nEndpoints for the bonnie service.",
+        "croft-abcdef012345/notes/braw.md": "A wee note in the croft store.",
+        "shared/prompts/review.md": "Review this code with a canny eye.",
     ]
 
     public static let defaultApprovals: [ApprovalInfo] = [

@@ -3441,6 +3441,136 @@
       ]
     },
     {
+      "name": "StoreEntryInfo",
+      "swift": "required",
+      "swift_type": "StoreEntryInfo",
+      "fields": [
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "repo",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "updated_at",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        }
+      ]
+    },
+    {
+      "name": "StoreGetMsg",
+      "swift": "required",
+      "swift_type": "StoreGetMsg",
+      "fields": [
+        {
+          "name": "repo",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "shared",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": true
+        },
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        }
+      ]
+    },
+    {
+      "name": "StoreGetResponseMsg",
+      "swift": "required",
+      "swift_type": "StoreGetResponseMsg",
+      "fields": [
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "repo",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "body",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        }
+      ]
+    },
+    {
+      "name": "StoreListMsg",
+      "swift": "required",
+      "swift_type": "StoreListMsg",
+      "fields": [
+        {
+          "name": "repo",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "shared",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": true
+        },
+        {
+          "name": "prefix",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "StoreListResponseMsg",
+      "swift": "required",
+      "swift_type": "StoreListResponseMsg",
+      "fields": [
+        {
+          "name": "entries",
+          "type": {
+            "kind": "array",
+            "elem": {
+              "kind": "object",
+              "ref": "StoreEntryInfo"
+            }
+          },
+          "optional": false
+        }
+      ]
+    },
+    {
       "name": "TokenInfo",
       "swift": "planned",
       "fields": [

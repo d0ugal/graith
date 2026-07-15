@@ -10,6 +10,7 @@ struct SessionSidebar: View {
     @State private var showApprovals = false
     @State private var showDeleted = false
     @State private var showScenarios = false
+    @State private var showStore = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -96,6 +97,20 @@ struct SessionSidebar: View {
                 }
                 .buttonStyle(.plain)
                 .help("Recently deleted sessions")
+                .disabled(store.connections.isEmpty)
+
+                // Document store browser — list and read documents from the
+                // git-backed store (`gr store`, #902).
+                Button(action: { showStore = true }) {
+                    Image(systemName: "doc.on.doc")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Theme.subtext0)
+                        .frame(width: 22, height: 22)
+                        .background(Theme.surface0)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                }
+                .buttonStyle(.plain)
+                .help("Browse the document store")
                 .disabled(store.connections.isEmpty)
 
                 // Add host button
@@ -225,6 +240,9 @@ struct SessionSidebar: View {
         }
         .sheet(isPresented: $showScenarios) {
             ScenariosSheet()
+        }
+        .sheet(isPresented: $showStore) {
+            StoreBrowserSheet()
         }
     }
 }

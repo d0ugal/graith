@@ -220,6 +220,12 @@
       "cli": "supported", "ios": "planned", "macos": "planned"
     },
     {
+      "id": "store.browse",
+      "category": "Document store",
+      "name": "Browse and read documents (list keys, view a document body)",
+      "cli": "supported", "ios": "supported", "macos": "supported"
+    },
+    {
       "id": "notify.send",
       "category": "Notifications",
       "name": "Send a desktop / push notification to the human",

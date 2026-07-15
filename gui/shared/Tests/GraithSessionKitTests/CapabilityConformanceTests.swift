@@ -112,6 +112,12 @@ private func sharedAffordances() -> Set<String> {
     wire("session.set-status") { _ = FleetModel.setStatus }
     wire("session.repo-list") { _ = HostConnection.repoList }
 
+    // Document store browser (#902) — shared HostConnection reads.
+    wire("store.browse") {
+        _ = HostConnection.storeList
+        _ = HostConnection.storeGet
+    }
+
     // Terminal I/O — the shared attach view-model drives attach/input/resize/detach.
     wire("terminal.attach") { _ = TerminalAttachViewModel.attach }
     wire("terminal.input") { _ = TerminalAttachViewModel.sendRaw }

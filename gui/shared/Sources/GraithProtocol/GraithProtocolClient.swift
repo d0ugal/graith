@@ -185,6 +185,23 @@ public actor GraithProtocolClient {
         return try decodePayload(reply, as: ScreenSnapshotResponseMsg.self)
     }
 
+    /// `store_list` — list document keys in the git-backed store (#902).
+    /// See ``StoreListMsg`` for target resolution.
+    public func storeList(repo: String?, shared: Bool, prefix: String?) async throws -> [StoreEntryInfo] {
+        let conn = try await controlConnection()
+        let reply = try await conn.request("store_list",
+                                           payload: StoreListMsg(repo: repo, shared: shared ? true : nil, prefix: prefix))
+        return try decodePayload(reply, as: StoreListResponseMsg.self).entries
+    }
+
+    /// `store_get` — fetch a single document body from the store (#902).
+    public func storeGet(repo: String?, shared: Bool, key: String) async throws -> StoreGetResponseMsg {
+        let conn = try await controlConnection()
+        let reply = try await conn.request("store_get",
+                                           payload: StoreGetMsg(repo: repo, shared: shared ? true : nil, key: key))
+        return try decodePayload(reply, as: StoreGetResponseMsg.self)
+    }
+
     /// `logs` — fetch the last `lines` of a session's scrollback as text.
     ///
     /// The daemon streams the tail on the data channel (0x01) and terminates

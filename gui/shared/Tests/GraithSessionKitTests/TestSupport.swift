@@ -64,6 +64,10 @@ actor MockHostClient: GraithHostClient {
     var scenarios: [ScenarioRecord]
     /// Records the last scenario lifecycle call so tests can assert routing.
     private(set) var lastScenarioOp: (op: String, name: String)?
+    /// Canned store entries + document bodies for the browser (#902).
+    var storeEntries: [StoreEntryInfo] = []
+    var storeBodies: [String: String] = [:]
+    var failStore: GraithClientError?
     var failConnect: GraithClientError?
     var failList: GraithClientError?
     var failSetStatus: GraithClientError?
@@ -143,6 +147,15 @@ actor MockHostClient: GraithHostClient {
         return StatusResponse(session: s, unreadCount: 0, fleet: FleetSummary())
     }
     func repoList() async throws -> [RepoEntry] { repos }
+    func storeList(repo: String?, shared: Bool, prefix: String?) async throws -> [StoreEntryInfo] {
+        if let failStore { throw failStore }
+        return storeEntries
+    }
+    func storeGet(repo: String?, shared: Bool, key: String) async throws -> StoreGetResponseMsg {
+        if let failStore { throw failStore }
+        guard let body = storeBodies[key] else { throw GraithClientError.daemon("not found: \(key)") }
+        return StoreGetResponseMsg(key: key, repo: repo ?? (shared ? "shared" : ""), body: body)
+    }
     func logs(sessionID: String, lines: Int) async throws -> String { "" }
     func screenSnapshot(sessionID: String) async throws -> ScreenSnapshot {
         // swiftlint:disable:next force_try
