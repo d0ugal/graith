@@ -248,6 +248,20 @@
             }
           },
           "optional": true
+        },
+        {
+          "name": "passed",
+          "type": {
+            "kind": "int"
+          },
+          "optional": true
+        },
+        {
+          "name": "total",
+          "type": {
+            "kind": "int"
+          },
+          "optional": true
         }
       ]
     },

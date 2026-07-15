@@ -248,8 +248,11 @@ func cliBranch(s protocol.SessionInfo) string {
 }
 
 // cliPR is the plain-text PR/CI cell for `gr ls`, e.g. "#42 open",
-// "#7 open conflict", "#1 open CI:ok". The review decision is a separate column
-// (cliReview) so it can be coloured independently of the CI/conflict signal.
+// "#7 open conflict", "#1 open CI:ok", "#1 open CI:16/22" (running),
+// "#1 open CI:19/22 1✗" (failing). While CI runs/fails the passed/total count
+// replaces the bare "CI:…"/"CI:fail" badge; it falls back when no count is
+// available. The review decision is a separate column (cliReview) so it can be
+// coloured independently of the CI/conflict signal.
 func cliPR(s protocol.SessionInfo) string {
 	if s.PullRequest == nil {
 		return ""
@@ -272,13 +275,22 @@ func cliPR(s protocol.SessionInfo) string {
 	}
 
 	if s.CI != nil {
+		counts, haveCounts := ciCounts(s.CI)
 		switch s.CI.State {
 		case "passing":
 			out += " CI:ok"
 		case "failing":
-			out += " CI:fail"
+			if haveCounts && len(s.CI.FailingChecks) > 0 {
+				out += fmt.Sprintf(" CI:%s %d✗", counts, len(s.CI.FailingChecks))
+			} else {
+				out += " CI:fail"
+			}
 		case "pending":
-			out += " CI:…"
+			if haveCounts {
+				out += " CI:" + counts
+			} else {
+				out += " CI:…"
+			}
 		}
 	}
 

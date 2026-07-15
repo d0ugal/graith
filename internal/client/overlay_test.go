@@ -2476,6 +2476,65 @@ func TestView_RendersSessionList(t *testing.T) {
 	}
 }
 
+// TestView_PreviewPanelCICounts covers the selected-session preview PR line:
+// a live PR shows the passed/total progress count, while a merged/closed PR
+// suppresses the (now stale) CI badge entirely — matching displayPR/cliPR and
+// the #773 terminal-state invariant, so the preview can't show
+// "PR #7 merged  CI: pending 16/22".
+func TestView_PreviewPanelCICounts(t *testing.T) {
+	cases := []struct {
+		name        string
+		pr          *protocol.PRInfo
+		ci          *protocol.CIInfo
+		wantContain []string
+		wantAbsent  []string
+	}{
+		{
+			name:        "open pending shows counts",
+			pr:          &protocol.PRInfo{Number: 7, State: "open"},
+			ci:          &protocol.CIInfo{State: "pending", Passed: 16, Total: 22},
+			wantContain: []string{"PR #7 open", "CI: pending 16/22"},
+		},
+		{
+			name:        "open failing shows counts and fail glyph",
+			pr:          &protocol.PRInfo{Number: 8, State: "open"},
+			ci:          &protocol.CIInfo{State: "failing", FailingChecks: []string{"build"}, Passed: 19, Total: 22},
+			wantContain: []string{"PR #8 open", "CI: failing 19/22 1✗"},
+		},
+		{
+			name:        "merged suppresses stale CI counts",
+			pr:          &protocol.PRInfo{Number: 9, State: "merged"},
+			ci:          &protocol.CIInfo{State: "pending", Passed: 16, Total: 22},
+			wantContain: []string{"PR #9 merged"},
+			wantAbsent:  []string{"CI: pending", "16/22"},
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			sessions := []protocol.SessionInfo{{
+				ID: "s1", Name: "braw", RepoName: "croft", Status: "running",
+				PullRequest: c.pr, CI: c.ci,
+			}}
+			m := newOverlayModel(sessions, "", nil, nil, nil, nil)
+			updated, _ := sendWindowSize(m, 150, 40)
+			view := asOverlay(updated).View().Content
+
+			for _, want := range c.wantContain {
+				if !strings.Contains(view, want) {
+					t.Errorf("preview should contain %q\n---\n%s", want, view)
+				}
+			}
+
+			for _, absent := range c.wantAbsent {
+				if strings.Contains(view, absent) {
+					t.Errorf("preview should NOT contain %q (stale CI on terminal PR)\n---\n%s", absent, view)
+				}
+			}
+		})
+	}
+}
+
 func TestView_ShowsGroupHeaders(t *testing.T) {
 	m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil, nil)
 	updated, _ := sendWindowSize(m, 120, 40)
@@ -3952,6 +4011,14 @@ func TestDisplayPR(t *testing.T) {
 		{"merged", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 583, State: "merged", ReviewDecision: "approved"}}, "#583 merged"},
 		{"closed", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 584, State: "closed", ReviewDecision: "changes_requested"}}, "#584 closed"},
 		{"draft omits review", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 9, State: "draft", ReviewDecision: "review_required"}, CI: &protocol.CIInfo{State: "pending"}}, "#9d ·"},
+		// Counts: while CI runs/fails, show passed/total progress in place of the
+		// bare indicator, falling back when no count is available (Total == 0).
+		{"pending with counts", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 56, State: "open"}, CI: &protocol.CIInfo{State: "pending", Passed: 16, Total: 22}}, "#56 16/22"},
+		{"failing with counts", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 56, State: "open"}, CI: &protocol.CIInfo{State: "failing", FailingChecks: []string{"build"}, Passed: 19, Total: 22}}, "#56 19/22 1✗"},
+		{"failing with multiple failures", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 56, State: "open"}, CI: &protocol.CIInfo{State: "failing", FailingChecks: []string{"build", "lint"}, Passed: 18, Total: 22}}, "#56 18/22 2✗"},
+		{"failing counts but no names falls back", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 56, State: "open"}, CI: &protocol.CIInfo{State: "failing", Passed: 19, Total: 22}}, "#56 ✗"},
+		{"pending no counts falls back to dot", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 56, State: "open"}, CI: &protocol.CIInfo{State: "pending"}}, "#56 ·"},
+		{"passing keeps check even with counts", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 56, State: "open"}, CI: &protocol.CIInfo{State: "passing", Passed: 22, Total: 22}}, "#56 ✓"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

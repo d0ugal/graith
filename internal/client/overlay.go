@@ -257,10 +257,26 @@ func displayGit(dirty bool, unpushed int) string {
 	return strings.Join(parts, " ")
 }
 
+// ciCounts formats the "<passed>/<total>" progress fragment for a CI badge,
+// reporting false when no count is available (Total == 0) so callers fall back
+// to a plain indicator. A live poll that resolves a pending/failing state always
+// carries a count, so this fallback is the defensive path (no CI badge recorded
+// yet, or a badge set without counts).
+func ciCounts(ci *protocol.CIInfo) (string, bool) {
+	if ci == nil || ci.Total <= 0 {
+		return "", false
+	}
+
+	return fmt.Sprintf("%d/%d", ci.Passed, ci.Total), true
+}
+
 // displayPR is the compact per-row PR/CI token for the overlay list, e.g.
-// "#56 ✗" (CI failing), "#56 ⚠" (conflict), "#1615 ✓" (passing), "#583 merged".
-// The review decision is a separate column (displayReview) so it can carry its
-// own colour independent of the CI/conflict signal.
+// "#56 19/22 1✗" (CI failing), "#56 16/22" (CI running), "#56 ⚠" (conflict),
+// "#1615 ✓" (passing), "#583 merged". While CI is running/failing the count of
+// passed vs total checks replaces the bare indicator so progress is visible;
+// it falls back to "·"/"✗" when no count is available. The review decision is a
+// separate column (displayReview) so it can carry its own colour independent of
+// the CI/conflict signal.
 func displayPR(s protocol.SessionInfo) string {
 	if s.PullRequest == nil {
 		return "—"
@@ -283,12 +299,21 @@ func displayPR(s protocol.SessionInfo) string {
 	}
 
 	if s.CI != nil {
+		counts, haveCounts := ciCounts(s.CI)
 		switch s.CI.State {
 		case "passing":
 			return out + " ✓"
 		case "failing":
+			if haveCounts && len(s.CI.FailingChecks) > 0 {
+				return fmt.Sprintf("%s %s %d✗", out, counts, len(s.CI.FailingChecks))
+			}
+
 			return out + " ✗"
 		case "pending":
+			if haveCounts {
+				return out + " " + counts
+			}
+
 			return out + " ·"
 		}
 	}
@@ -2240,18 +2265,35 @@ func (m overlayModel) View() tea.View {
 			prLine := fmt.Sprintf("PR #%d %s", pr.Number, pr.State)
 			lineColor := lipgloss.NewStyle().Foreground(prColor(s))
 
-			if pr.Conflicting {
-				prLine += "  ⚠ merge conflict"
-			}
+			// A merged/closed PR is terminal: its conflict/CI badges are stale
+			// (resolvePR stops fetching checks once a PR leaves open/draft and
+			// writePRState keeps the last-known values), so suppress them here just
+			// as displayPR/cliPR do — otherwise the preview shows a stale
+			// "CI: pending 16/22" on a PR the row already reports as merged (#773).
+			if pr.State != "merged" && pr.State != "closed" {
+				if pr.Conflicting {
+					prLine += "  ⚠ merge conflict"
+				}
 
-			if s.CI != nil {
-				switch s.CI.State {
-				case "passing":
-					prLine += "  CI: passing"
-				case "failing":
-					prLine += "  CI: failing"
-				case "pending":
-					prLine += "  CI: pending"
+				if s.CI != nil {
+					counts, haveCounts := ciCounts(s.CI)
+					switch s.CI.State {
+					case "passing":
+						prLine += "  CI: passing"
+					case "failing":
+						prLine += "  CI: failing"
+						if haveCounts {
+							prLine += " " + counts
+							if len(s.CI.FailingChecks) > 0 {
+								prLine += fmt.Sprintf(" %d✗", len(s.CI.FailingChecks))
+							}
+						}
+					case "pending":
+						prLine += "  CI: pending"
+						if haveCounts {
+							prLine += " " + counts
+						}
+					}
 				}
 			}
 

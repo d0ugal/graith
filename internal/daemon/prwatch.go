@@ -1264,7 +1264,12 @@ func (sm *SessionManager) writePRState(id string, d prData) {
 	// An empty CIState means the checks read degraded (timeout/parse error) — keep
 	// the last-known CI badge rather than flickering it off on a transient failure.
 	if d.CIState != "" {
-		s.CI = CIStatus{State: d.CIState, FailingChecks: slices.Clone(d.FailingChecks)}
+		s.CI = CIStatus{
+			State:         d.CIState,
+			FailingChecks: slices.Clone(d.FailingChecks),
+			Passed:        d.CIPassed,
+			Total:         d.CITotal,
+		}
 	}
 }
 
@@ -1489,5 +1494,10 @@ func ciInfo(c CIStatus) *protocol.CIInfo {
 		return nil
 	}
 
-	return &protocol.CIInfo{State: c.State, FailingChecks: c.FailingChecks}
+	return &protocol.CIInfo{
+		State:         c.State,
+		FailingChecks: c.FailingChecks,
+		Passed:        c.Passed,
+		Total:         c.Total,
+	}
 }

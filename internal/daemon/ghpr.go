@@ -34,7 +34,12 @@ type prData struct {
 	// It is meaningful even when CIState is "failing" (a check can have failed
 	// while others are still in flight), so a failure notice can flag that the
 	// result is not yet complete and a completion notice can fire once it is.
-	CIPending      int
+	CIPending int
+	// CIPassed and CITotal are the pass-like and total check counts for the poll,
+	// surfaced so the overlay/`gr ls` can show progress ("16/22") while CI runs
+	// rather than a bare indicator. CITotal == 0 means no count is available.
+	CIPassed       int
+	CITotal        int
 	IssueComments  []ghComment
 	ReviewComments []ghComment
 	// CommentsOK is false if any comment fetch degraded (timeout/error), so the
@@ -187,7 +192,7 @@ func resolvePR(ctx context.Context, slug, branch, worktreePath string) (prData, 
 	// CI checks + comments — only meaningful while the PR is open.
 	d.CommentsOK = true
 	if d.State == "open" || d.State == "draft" {
-		d.CIState, d.FailingChecks, d.CIPending = fetchChecks(ctx, slug, it.Number, worktreePath)
+		d.CIState, d.FailingChecks, d.CIPending, d.CIPassed, d.CITotal = fetchChecks(ctx, slug, it.Number, worktreePath)
 
 		var issueOK, reviewOK bool
 
@@ -214,16 +219,19 @@ func normalizePRState(state string, isDraft bool) string {
 	}
 }
 
-// fetchChecks returns the aggregate CI state, the names of failing checks, and
-// the count of checks still pending. It uses `gh pr checks` whose `bucket` field
-// is GitHub's own categorisation, avoiding the heterogeneous statusCheckRollup
-// union. NEUTRAL/SKIPPED are pass-like and never counted as failures.
+// fetchChecks returns the aggregate CI state, the names of failing checks, the
+// count of checks still pending, and the pass-like/total counts. It uses
+// `gh pr checks` whose `bucket` field is GitHub's own categorisation, avoiding
+// the heterogeneous statusCheckRollup union. NEUTRAL/SKIPPED are pass-like and
+// never counted as failures.
 //
 // The pending count is returned alongside "failing" (not just "pending"): a
 // check can fail while others are still in flight, and callers use the count to
 // flag a failure as not-yet-final and to fire a completion notice once every
-// check has finished.
-func fetchChecks(ctx context.Context, slug string, number int, worktreePath string) (state string, failing []string, pending int) {
+// check has finished. passed/total are surfaced so the display can show
+// progress ("16/22"); total == 0 means no count is available (degraded read or
+// no checks).
+func fetchChecks(ctx context.Context, slug string, number int, worktreePath string) (state string, failing []string, pending, passed, total int) {
 	cctx, cancel := context.WithTimeout(ctx, ghTimeout)
 	defer cancel()
 
@@ -234,17 +242,17 @@ func fetchChecks(ctx context.Context, slug string, number int, worktreePath stri
 		// gh pr checks exits non-zero when checks are failing; it still prints
 		// JSON on stdout, so try to parse what we got before giving up.
 		if out == "" {
-			return "", nil, 0
+			return "", nil, 0, 0, 0
 		}
 	}
 
 	var checks []prCheck
 	if err := json.Unmarshal([]byte(out), &checks); err != nil {
-		return "", nil, 0
+		return "", nil, 0, 0, 0
 	}
 
 	if len(checks) == 0 {
-		return "", nil, 0
+		return "", nil, 0, 0, 0
 	}
 
 	for _, c := range checks {
@@ -256,13 +264,16 @@ func fetchChecks(ctx context.Context, slug string, number int, worktreePath stri
 		}
 	}
 
+	total = len(checks)
+	passed = total - pending - len(failing)
+
 	switch {
 	case len(failing) > 0:
-		return "failing", failing, pending
+		return "failing", failing, pending, passed, total
 	case pending > 0:
-		return "pending", nil, pending
+		return "pending", nil, pending, passed, total
 	default:
-		return "passing", nil, 0
+		return "passing", nil, 0, passed, total
 	}
 }
 

@@ -550,6 +550,11 @@ type PRInfo struct {
 type CIInfo struct {
 	State         string   `json:"state"` // passing | failing | pending
 	FailingChecks []string `json:"failing_checks,omitempty"`
+	// Passed and Total are the pass-like and total check counts, letting the
+	// overlay/`gr ls` show progress ("16/22") while CI runs. Total == 0 means no
+	// count is available and callers fall back to the plain state indicator.
+	Passed int `json:"passed,omitempty"`
+	Total  int `json:"total,omitempty"`
 }
 
 // TokenInfo is the aggregated token usage for a session's current agent. The

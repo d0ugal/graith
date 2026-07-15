@@ -87,17 +87,23 @@ func TestFetchChecksAggregate(t *testing.T) {
 		wantState   string
 		wantFail    []string
 		wantPending int
+		wantPassed  int
+		wantTotal   int
 	}{
 		{
-			name:      "braw all pass",
-			json:      `[{"name":"build","bucket":"pass"},{"name":"lint","bucket":"pass"}]`,
-			wantState: "passing",
+			name:       "braw all pass",
+			json:       `[{"name":"build","bucket":"pass"},{"name":"lint","bucket":"pass"}]`,
+			wantState:  "passing",
+			wantPassed: 2,
+			wantTotal:  2,
 		},
 		{
-			name:      "thrawn one fail",
-			json:      `[{"name":"build","bucket":"pass"},{"name":"lint","bucket":"fail"}]`,
-			wantState: "failing",
-			wantFail:  []string{"lint"},
+			name:       "thrawn one fail",
+			json:       `[{"name":"build","bucket":"pass"},{"name":"lint","bucket":"fail"}]`,
+			wantState:  "failing",
+			wantFail:   []string{"lint"},
+			wantPassed: 1,
+			wantTotal:  2,
 		},
 		{
 			name:        "thrawn fail while others still running",
@@ -105,17 +111,23 @@ func TestFetchChecksAggregate(t *testing.T) {
 			wantState:   "failing",
 			wantFail:    []string{"lint"},
 			wantPending: 2,
+			wantPassed:  0,
+			wantTotal:   3,
 		},
 		{
-			name:      "neep skipped is not a failure",
-			json:      `[{"name":"build","bucket":"pass"},{"name":"deploy","bucket":"skipping"}]`,
-			wantState: "passing",
+			name:       "neep skipped is not a failure",
+			json:       `[{"name":"build","bucket":"pass"},{"name":"deploy","bucket":"skipping"}]`,
+			wantState:  "passing",
+			wantPassed: 2,
+			wantTotal:  2,
 		},
 		{
 			name:        "haar pending",
-			json:        `[{"name":"build","bucket":"pending"}]`,
+			json:        `[{"name":"build","bucket":"pending"},{"name":"lint","bucket":"pass"}]`,
 			wantState:   "pending",
 			wantPending: 1,
+			wantPassed:  1,
+			wantTotal:   2,
 		},
 	}
 	for _, c := range cases {
@@ -124,7 +136,7 @@ func TestFetchChecksAggregate(t *testing.T) {
 				return c.json, nil
 			}
 
-			state, fail, pending := fetchChecks(context.Background(), "croft/loch", 1, "")
+			state, fail, pending, passed, total := fetchChecks(context.Background(), "croft/loch", 1, "")
 			if state != c.wantState {
 				t.Errorf("state = %q, want %q", state, c.wantState)
 			}
@@ -135,6 +147,14 @@ func TestFetchChecksAggregate(t *testing.T) {
 
 			if pending != c.wantPending {
 				t.Errorf("pending = %d, want %d", pending, c.wantPending)
+			}
+
+			if passed != c.wantPassed {
+				t.Errorf("passed = %d, want %d", passed, c.wantPassed)
+			}
+
+			if total != c.wantTotal {
+				t.Errorf("total = %d, want %d", total, c.wantTotal)
 			}
 		})
 	}
@@ -341,8 +361,8 @@ func TestFetchChecks_Degraded_Cov(t *testing.T) {
 		return "", errors.New("no checks")
 	}
 
-	if state, fail, _ := fetchChecks(context.Background(), "croft/loch", 1, ""); state != "" || fail != nil {
-		t.Errorf("error+empty output should give ('',nil), got (%q,%v)", state, fail)
+	if state, fail, _, _, total := fetchChecks(context.Background(), "croft/loch", 1, ""); state != "" || fail != nil || total != 0 {
+		t.Errorf("error+empty output should give ('',nil,total=0), got (%q,%v,total=%d)", state, fail, total)
 	}
 
 	// Malformed JSON → ('',nil).
@@ -350,7 +370,7 @@ func TestFetchChecks_Degraded_Cov(t *testing.T) {
 		return "{bad", nil
 	}
 
-	if state, _, _ := fetchChecks(context.Background(), "croft/loch", 1, ""); state != "" {
+	if state, _, _, _, _ := fetchChecks(context.Background(), "croft/loch", 1, ""); state != "" {
 		t.Errorf("malformed checks JSON should give '', got %q", state)
 	}
 
@@ -359,8 +379,8 @@ func TestFetchChecks_Degraded_Cov(t *testing.T) {
 		return "[]", nil
 	}
 
-	if state, fail, _ := fetchChecks(context.Background(), "croft/loch", 1, ""); state != "" || fail != nil {
-		t.Errorf("empty checks should give ('',nil), got (%q,%v)", state, fail)
+	if state, fail, _, _, total := fetchChecks(context.Background(), "croft/loch", 1, ""); state != "" || fail != nil || total != 0 {
+		t.Errorf("empty checks should give ('',nil,total=0), got (%q,%v,total=%d)", state, fail, total)
 	}
 
 	// Non-zero exit but JSON still on stdout (gh pr checks does this when red).
@@ -368,8 +388,8 @@ func TestFetchChecks_Degraded_Cov(t *testing.T) {
 		return `[{"name":"build","bucket":"fail"}]`, errors.New("exit 1")
 	}
 
-	if state, fail, _ := fetchChecks(context.Background(), "croft/loch", 1, ""); state != "failing" || len(fail) != 1 {
-		t.Errorf("failing checks should still parse despite exit 1, got (%q,%v)", state, fail)
+	if state, fail, _, passed, total := fetchChecks(context.Background(), "croft/loch", 1, ""); state != "failing" || len(fail) != 1 || passed != 0 || total != 1 {
+		t.Errorf("failing checks should still parse despite exit 1, got (%q,%v,passed=%d,total=%d)", state, fail, passed, total)
 	}
 }
 
