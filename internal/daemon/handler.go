@@ -373,6 +373,55 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				// offer a picker (it has no local cwd — design §C.4).
 				sendControl("repo_list", protocol.RepoListResponseMsg{Repos: sm.availableRepos()})
 
+			case "store_list":
+				// Read-only document-store listing for the GUI browser (#902).
+				// Human-only: the matrix (remoteHumanRW) admits sessions, but a
+				// session must not use the unsandboxed daemon to read across the
+				// per-repo store isolation the sandbox enforces (agents read their
+				// own store via the filesystem, not this RPC). isHuman() also
+				// excludes read-only guests. Mirrors approval_subscribe/notify.
+				if !auth.isHuman() {
+					sendControl("error", protocol.ErrorMsg{Message: "store browsing requires a human operator"})
+					continue
+				}
+
+				sl, ok := decodePayload[protocol.StoreListMsg](msg, sendControl, "invalid store_list message")
+				if !ok {
+					continue
+				}
+
+				entries, err := listStoreEntries(sm.paths.DataDir, sl.Repo, sl.Shared, sl.Prefix)
+				if err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+					continue
+				}
+
+				sendControl("store_list", protocol.StoreListResponseMsg{Entries: entries})
+
+			case "store_get":
+				// Read-only document fetch for the GUI browser (#902). Human-only
+				// for the same reason as store_list — a session token must not be
+				// able to read another repo's store (or, via a planted symlink in
+				// a writable store, arbitrary daemon-readable files) through the
+				// unsandboxed daemon.
+				if !auth.isHuman() {
+					sendControl("error", protocol.ErrorMsg{Message: "store browsing requires a human operator"})
+					continue
+				}
+
+				sg, ok := decodePayload[protocol.StoreGetMsg](msg, sendControl, "invalid store_get message")
+				if !ok {
+					continue
+				}
+
+				resp, err := getStoreDocument(sm.paths.DataDir, sg.Repo, sg.Shared, sg.Key)
+				if err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+					continue
+				}
+
+				sendControl("store_get", resp)
+
 			case "list":
 				var lm protocol.ListMsg
 

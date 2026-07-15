@@ -78,6 +78,8 @@ var remoteMessagePolicy = map[string]remotePolicy{
 
 	"wait":               remoteHumanRW, // targets arbitrary sessions
 	"repo_list":          remoteHumanRW, // only useful for create, which guests can't do
+	"store_list":         remoteHumanRW, // store contents may be sensitive: human + sessions, not guests
+	"store_get":          remoteHumanRW, // reads a document body; same sensitivity as store_list
 	"attach":             remoteHumanRW,
 	"detach":             remoteHumanRW,
 	"resize":             remoteHumanRW,

@@ -13,6 +13,7 @@ public struct RootView: View {
     @State private var showingNewSession = false
     @State private var showingDeleted = false
     @State private var showingScenarios = false
+    @State private var showingStore = false
 
     public init(model: FleetModel) {
         self.model = model
@@ -45,6 +46,9 @@ public struct RootView: View {
         }
         .sheet(isPresented: $showingScenarios) {
             ScenariosView(model: model)
+        }
+        .sheet(isPresented: $showingStore) {
+            StoreBrowserView(model: model)
         }
     }
 
@@ -95,6 +99,13 @@ public struct RootView: View {
                     showingDeleted = true
                 } label: {
                     Label("Recently Deleted", systemImage: "trash")
+                }
+                .disabled(model.connections.isEmpty)
+
+                Button {
+                    showingStore = true
+                } label: {
+                    Label("Document Store", systemImage: "doc.on.doc")
                 }
                 .disabled(model.connections.isEmpty)
             }

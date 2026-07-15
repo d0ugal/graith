@@ -97,6 +97,54 @@ struct RealHostClientTests {
         await client.disconnect()
     }
 
+    @Test func storeListMaps() async throws {
+        let (client, server) = make { d in
+            try await self.handshake(d)
+            let req = try await d.readControl()
+            #expect(req.type == "store_list")
+            try await d.writeControl("store_list", StoreListResponseMsg(entries: [
+                StoreEntryInfo(key: "design/api.md", repo: "croft-abc", updatedAt: "2026-07-15T09:00:00Z"),
+                StoreEntryInfo(key: "blether.md", repo: "shared", updatedAt: "2026-07-15T10:00:00Z"),
+            ]))
+        }
+        try await client.connect()
+        let entries = try await client.storeList(repo: nil, shared: false, prefix: nil)
+        #expect(entries.map(\.key) == ["design/api.md", "blether.md"])
+        #expect(entries.last?.repo == "shared")
+        _ = await server.result
+        await client.disconnect()
+    }
+
+    @Test func storeGetMaps() async throws {
+        let (client, server) = make { d in
+            try await self.handshake(d)
+            let req = try await d.readControl()
+            #expect(req.type == "store_get")
+            try await d.writeControl("store_get",
+                                     StoreGetResponseMsg(key: "design/api.md", repo: "croft-abc", body: "still waters"))
+        }
+        try await client.connect()
+        let doc = try await client.storeGet(repo: "croft-abc", shared: false, key: "design/api.md")
+        #expect(doc.body == "still waters")
+        #expect(doc.repo == "croft-abc")
+        _ = await server.result
+        await client.disconnect()
+    }
+
+    @Test func storeGetMapsDaemonError() async throws {
+        let (client, server) = make { d in
+            try await self.handshake(d)
+            _ = try await d.readControl()
+            try await d.writeControl("error", ErrorMsg(message: "unknown store \"thrawn\""))
+        }
+        try await client.connect()
+        await #expect(throws: GraithClientError.self) {
+            _ = try await client.storeGet(repo: "thrawn", shared: false, key: "haar.md")
+        }
+        _ = await server.result
+        await client.disconnect()
+    }
+
     @Test func stopMutationRoundTrips() async throws {
         let (client, server) = make { d in
             try await self.handshake(d)

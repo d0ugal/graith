@@ -172,6 +172,11 @@
       "macos": "planned"
     },
     {
+      "id": "store.browse",
+      "ios": "supported",
+      "macos": "supported"
+    },
+    {
       "id": "notify.send",
       "ios": "planned",
       "macos": "planned"

@@ -1052,3 +1052,53 @@ type RepoEntry struct {
 	Name   string `json:"name"`
 	Recent bool   `json:"recent,omitempty"`
 }
+
+// Document store browser messages (issue #902). These let a GUI client browse
+// the git-backed document store (`gr store`) without shell access: list keys
+// (per-repo or shared) and read a document body.
+
+// StoreListMsg requests store entries. Target resolution mirrors the CLI:
+//   - Shared (or Repo == "shared") lists the shared store.
+//   - A non-empty Repo lists that store, given either as a filesystem path or as
+//     a store ID (the "<reponame>-<hash>" directory name from `gr store ls -a`).
+//   - Both empty lists every store the daemon knows about (all repo stores plus
+//     the shared store), flattened into one entry list.
+//
+// Prefix, when set, restricts the listing to keys under that path prefix.
+type StoreListMsg struct {
+	Repo   string `json:"repo,omitempty"`
+	Shared bool   `json:"shared,omitempty"`
+	Prefix string `json:"prefix,omitempty"`
+}
+
+// StoreEntryInfo is one document in the store. Repo is the store's ID (the
+// "<reponame>-<hash>" directory name, or "shared" for the shared store); it
+// round-trips back into StoreListMsg.Repo / StoreGetMsg.Repo so a client can
+// fetch the entry's body without any path knowledge.
+type StoreEntryInfo struct {
+	Key       string `json:"key"`
+	Repo      string `json:"repo"`
+	UpdatedAt string `json:"updated_at"`
+}
+
+// StoreListResponseMsg is the daemon's response to store_list.
+type StoreListResponseMsg struct {
+	Entries []StoreEntryInfo `json:"entries"`
+}
+
+// StoreGetMsg requests the body of a single document. Repo/Shared identify the
+// store exactly as in StoreListMsg (a bare Repo must resolve to an existing
+// store — a path or an ID); Key is the document key within it.
+type StoreGetMsg struct {
+	Repo   string `json:"repo,omitempty"`
+	Shared bool   `json:"shared,omitempty"`
+	Key    string `json:"key"`
+}
+
+// StoreGetResponseMsg carries a single document's body. Repo echoes the
+// resolved store ID (or "shared").
+type StoreGetResponseMsg struct {
+	Key  string `json:"key"`
+	Repo string `json:"repo"`
+	Body string `json:"body"`
+}

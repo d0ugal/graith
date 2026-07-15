@@ -200,6 +200,13 @@ private let swiftDecoders: [String: DecodeProbe] = [
     "ScenarioRecord": probe(ScenarioRecord.self),
     "ScenarioSessionInfo": probe(ScenarioSessionInfo.self),
     "ScenarioListResponse": probe(ScenarioListResponse.self),
+
+    // Document store browser (#902).
+    "StoreListMsg": probe(StoreListMsg.self),
+    "StoreEntryInfo": probe(StoreEntryInfo.self),
+    "StoreListResponseMsg": probe(StoreListResponseMsg.self),
+    "StoreGetMsg": probe(StoreGetMsg.self),
+    "StoreGetResponseMsg": probe(StoreGetResponseMsg.self),
 ]
 
 // MARK: - JSON synthesis from the manifest

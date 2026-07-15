@@ -123,6 +123,7 @@ state instead).
 | Capability | CLI | iOS | macOS |
 |------------|:---:|:---:|:---:|
 | Put / get / list / append / remove documents | ✅ | 🚧 | 🚧 |
+| Browse and read documents (list keys, view a document body) | ✅ | ✅ | ✅ |
 
 ### Notifications
 

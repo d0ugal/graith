@@ -228,6 +228,11 @@ var registeredTypes = []any{
 	RepoListMsg{},
 	RepoListResponseMsg{},
 	RepoEntry{},
+	StoreListMsg{},
+	StoreEntryInfo{},
+	StoreListResponseMsg{},
+	StoreGetMsg{},
+	StoreGetResponseMsg{},
 }
 
 // swiftAnnotation pairs a Swift expectation with the Swift type that satisfies
@@ -330,6 +335,13 @@ var swiftAnnotations = map[string]swiftAnnotation{
 	"RepoListMsg":         {SwiftRequired, "RepoListMsg"},
 	"RepoListResponseMsg": {SwiftRequired, "RepoListResponseMsg"},
 	"RepoEntry":           {SwiftRequired, "RepoEntry"},
+
+	// Document store browser (#902).
+	"StoreListMsg":         {SwiftRequired, "StoreListMsg"},
+	"StoreEntryInfo":       {SwiftRequired, "StoreEntryInfo"},
+	"StoreListResponseMsg": {SwiftRequired, "StoreListResponseMsg"},
+	"StoreGetMsg":          {SwiftRequired, "StoreGetMsg"},
+	"StoreGetResponseMsg":  {SwiftRequired, "StoreGetResponseMsg"},
 
 	// --- Planned: client-relevant, not modelled in Swift yet (known gaps). ---
 	"DeleteResultMsg":        {SwiftPlanned, ""},
