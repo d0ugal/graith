@@ -5345,6 +5345,65 @@ func TestStopAllWritesShutdownSummary(t *testing.T) {
 	}
 }
 
+// TestWatchSessionPreservesHookDerivedStopSummary is the #1034 regression test
+// at the real call site: a session whose only visible status was hook-derived
+// (empty SummaryText, fresh hook report) must keep that "(was: …)" context when
+// watchSession finalizes its stop summary. Fails against pre-fix code, where
+// watchSession read s.SummaryText directly and produced a bare "Exited".
+func TestWatchSessionPreservesHookDerivedStopSummary(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	id := "sess-hook-only"
+	sm.state.Sessions[id] = &SessionState{
+		ID: id, Name: "canny", Status: StatusRunning, Agent: "claude",
+		// SummaryText intentionally empty — the only visible status was
+		// hook-derived ("Using Bash"), computed on the fly and never stored.
+	}
+	sm.hookReports[id] = hookReport{
+		ToolName:           "Bash",
+		ReportedAt:         time.Now(),
+		AuthoritativeUntil: time.Now().Add(30 * time.Minute),
+	}
+
+	sess := newTestPTYSession(t, "true")
+	waitExit(t, sess)
+
+	sm.sessions[id] = sess
+	sm.watchSession(id, sess)
+
+	sm.mu.RLock()
+	summary := sm.state.Sessions[id].SummaryText
+	sm.mu.RUnlock()
+
+	if summary != "Exited (was: Using Bash)" {
+		t.Errorf("SummaryText = %q, want %q", summary, "Exited (was: Using Bash)")
+	}
+}
+
+// TestStopAllPreservesHookDerivedStopSummary is the #1034 regression test for
+// the shutdown path: StopAll must fall back to the hook report for a hook-only
+// session. Fails against pre-fix code (bare "Stopped by shutdown").
+func TestStopAllPreservesHookDerivedStopSummary(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	id := "hook-only-worker"
+	sm.state.Sessions[id] = &SessionState{
+		ID: id, Name: "canny-worker", Status: StatusRunning, Agent: "claude",
+	}
+	sm.hookReports[id] = hookReport{
+		ToolName:           "Bash",
+		ReportedAt:         time.Now(),
+		AuthoritativeUntil: time.Now().Add(30 * time.Minute),
+	}
+
+	sm.StopAll(context.Background())
+
+	s := sm.state.Sessions[id]
+	if s.SummaryText != "Stopped by shutdown (was: Using Bash)" {
+		t.Errorf("SummaryText = %q, want %q", s.SummaryText, "Stopped by shutdown (was: Using Bash)")
+	}
+}
+
 func TestStopAllWaitsConcurrently(t *testing.T) {
 	sm := newTestSessionManager(t)
 
