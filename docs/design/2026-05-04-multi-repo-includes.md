@@ -478,13 +478,19 @@ Mitigations included in this proposal:
 
 Follow-up mitigations:
 
-- **Path rewriting** (shipped, #1033): a post-creation hook rewrites known
-  config files (`.env.local`, `docker-compose.override.yml`) present in each
-  worktree, substituting source repo paths (absolute and `~/`-relative forms)
-  with the session worktree paths, matched at path boundaries so a sibling
-  repo whose name is a prefix (`grafana` vs `grafana-enterprise`) is not
-  clobbered. Best-effort — gitignored/absent files are skipped and a write
-  failure is logged, not fatal. See `internal/daemon/pathrewrite.go`.
+- **Path rewriting** (shipped, #1033): a post-worktree hook (run on both create
+  and fork) rewrites known config files (`.env.local`,
+  `docker-compose.override.yml`) present in each worktree, substituting source
+  repo paths (absolute and `~/`-relative forms) with the session worktree
+  paths. Substitution is a single longest-match pass at path boundaries: a
+  sibling whose name is a prefix (`grafana` vs `grafana-enterprise`) is not
+  clobbered, a nested included repo wins over its ancestor, and boundaries use
+  an explicit config-delimiter allowlist (erring toward leaving text alone).
+  Symlinks are skipped (never read or replaced, to avoid disclosing an external
+  file into the worktree); rewritten tracked files are marked `--skip-worktree`
+  so the session-specific path can't be committed by accident. Best-effort —
+  gitignored/absent files are skipped and read/write failures are logged, not
+  fatal. See `internal/daemon/pathrewrite.go`.
 - **Documentation**: guide users to configure orchestrators to use relative
   paths where possible.
 
