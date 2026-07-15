@@ -3856,6 +3856,7 @@ func TestForkPassesAddDir(t *testing.T) {
 	// to have run. Wait for its first write before clearing it so the fork owns
 	// the next record deterministically.
 	waitForRecordedArgv(t, recordPath, "--add-dir")
+
 	if err := os.Remove(recordPath); err != nil {
 		t.Fatalf("remove record before fork: %v", err)
 	}
