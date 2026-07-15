@@ -497,7 +497,11 @@ open class FleetModel: ObservableObject {
         hostID: String = "local",
         completion: @escaping (Result<SessionInfo?, Error>) -> Void
     ) {
-        if let invalid = Self.validateCreateOptions(base: base, inPlace: inPlace) {
+        // Normalise once so validation and the wire agree on what "empty" means:
+        // a whitespace-only base must be treated as absent on both sides, or it
+        // slips past the guard and the daemon rejects it after a round-trip.
+        let trimmedBase = base.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let invalid = Self.validateCreateOptions(base: trimmedBase, inPlace: inPlace) {
             completion(.failure(FleetError.invalidOptions(invalid)))
             return
         }
@@ -509,10 +513,12 @@ open class FleetModel: ObservableObject {
             name: name,
             agent: agent,
             repoPath: repoPath,
-            base: base.isEmpty ? nil : base,
+            base: trimmedBase.isEmpty ? nil : trimmedBase,
             prompt: prompt.isEmpty ? nil : prompt,
             model: model.isEmpty ? nil : model,
-            agentHooks: agentHooks,
+            // Yolo forces the approval hook on daemon-side (agentHooks || yolo),
+            // so send the effective value the session will actually run with.
+            agentHooks: agentHooks || yolo,
             inPlace: inPlace ? true : nil,
             yolo: yolo ? true : nil
         )
