@@ -3,23 +3,118 @@ name: CI
 on:
   push:
     branches: [main, 'release-please--branches--main']
-  # No paths-ignore: Lint / Test (ubuntu) / Test (macos) are REQUIRED status
-  # checks, so this workflow must run and report on every PR. Skipping it for
-  # CHANGELOG-only PRs (e.g. the changelog-regeneration PR) leaves those
-  # required contexts permanently "expected" and blocks the PR — with
-  # enforce_admins, unmergeably. The jobs are cheap; run them everywhere.
+  # No workflow-level paths filter: Lint / Test (ubuntu-latest) /
+  # Test (macos-latest) are REQUIRED status checks, so this workflow must run
+  # and report on every PR. A workflow skipped by path filtering never creates
+  # its required contexts, leaving them permanently "expected" and blocking the
+  # PR — with enforce_admins, unmergeably.
+  #
+  # macOS runner minutes are ~10x Linux and the hosted macOS pool is scarce, so
+  # the macOS legs (Build/Test/Integration on macos-latest) are instead gated
+  # per-JOB via `if:` on the `changes` job below. A job skipped by `if:` still
+  # reports a "skipped" conclusion, which branch protection treats as success —
+  # so the required `Test (macos-latest)` context is satisfied on Go-only PRs
+  # without spinning up a macOS runner. Only workflow-level skips strand a
+  # required check; job-level skips do not. See issue #1174.
   pull_request:
 
 permissions:
   contents: read
 
 jobs:
+  # Decide whether the macOS legs need to run. These jobs run `go build` /
+  # `go test -race ./...` on darwin, so they matter when a change can compile or
+  # behave differently on macOS:
+  #   - darwin-only-compiled Go: internal/pty (procstart_darwin.go) and
+  #     internal/sandbox (safehouse/Seatbelt) — a Linux build never compiles
+  #     these, so they'd otherwise get zero pre-merge coverage;
+  #   - the protocol/capability packages whose shapes the Swift conformance
+  #     tests under gui/ validate, plus any Swift/GUI code;
+  #   - the module graph (go.mod/go.sum) — a dependency or toolchain bump can
+  #     break the darwin build alone;
+  #   - this workflow itself.
+  #
+  # Deliberately NOT gated: high-churn Go packages whose only macOS-specific code
+  # is *runtime* `runtime.GOOS == "darwin"` branches (internal/daemon,
+  # internal/cli, internal/store, internal/config, internal/covreport, …). Those
+  # compile on Linux, so the Linux build/test still catches compile breaks; only
+  # the darwin runtime *behaviour* goes unexercised pre-merge. That's an accepted
+  # trade-off to keep scarce macOS minutes off the common Go-only PR — the
+  # push-to-main run below (macos=true) is the safety net that turns main red if a
+  # darwin-only regression slips through.
+  #
+  # Uses the PR files API rather than a local `git diff`: the checked-out
+  # pull_request merge ref can be built against an older base than base.sha, so
+  # a local diff surfaces the base branch's own commits and spuriously flips the
+  # filter true. The API returns exactly the PR's changed files (same approach
+  # as coverage.yml) and needs no checkout.
+  changes:
+    name: Detect macOS-relevant changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      macos: ${{ steps.filter.outputs.macos }}
+    steps:
+      - id: filter
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          # Non-PR events (push to main) always run macOS: main must stay fully
+          # green and there's no PR file list to inspect. Written generically so
+          # any future non-PR trigger fails safe toward running.
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "macos=true" >> "$GITHUB_OUTPUT"
+            echo "Non-PR event ($EVENT): running macOS jobs."
+            exit 0
+          fi
+          # Fail safe toward running macOS: if the file list can't be fetched,
+          # run the jobs rather than silently skip a required check.
+          if ! files="$(gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[].filename')"; then
+            echo "macos=true" >> "$GITHUB_OUTPUT"
+            echo "Could not list PR files; running macOS jobs to be safe."
+            exit 0
+          fi
+          # here-string (not a pipe) so an early grep match can't SIGPIPE-fail an
+          # upstream command under pipefail.
+          if grep -Eq '^gui/|^internal/protocol/|^internal/capabilities/|^internal/pty/|^internal/sandbox/|^go\.mod$|^go\.sum$|\.swift$|^\.github/workflows/ci\.yml$' <<<"$files"; then
+            echo "macos=true" >> "$GITHUB_OUTPUT"
+            echo "macOS-relevant files changed: running macOS jobs."
+          else
+            echo "macos=false" >> "$GITHUB_OUTPUT"
+            echo "Go-only change: skipping macOS jobs."
+          fi
+
   build:
-    name: Build
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+    name: Build (ubuntu-latest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+      - run: go build -v ./cmd/graith
+
+  build-macos:
+    name: Build (macos-latest)
+    needs: changes
+    # Run when the detector says macOS is relevant — but also when the detector
+    # itself did NOT cleanly succeed (failed/timed out). With `needs:` and a
+    # custom `if:` lacking a status function, a *failed* `changes` job would
+    # otherwise skip this job, and a skipped REQUIRED check counts as success —
+    # a silent merge-gate bypass. Failing safe toward running closes that hole.
+    # `!cancelled()` still lets a superseded run bow out (the newer run re-checks).
+    if: >-
+      !cancelled() &&
+      (needs.changes.result != 'success' || needs.changes.outputs.macos == 'true')
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
@@ -30,11 +125,30 @@ jobs:
       - run: go build -v ./cmd/graith
 
   test:
-    name: Test
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+    name: Test (ubuntu-latest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+      - run: go test -v -race -count=1 ./...
+
+  test-macos:
+    name: Test (macos-latest)
+    needs: changes
+    # Run when the detector says macOS is relevant — but also when the detector
+    # itself did NOT cleanly succeed (failed/timed out). With `needs:` and a
+    # custom `if:` lacking a status function, a *failed* `changes` job would
+    # otherwise skip this job, and a skipped REQUIRED check counts as success —
+    # a silent merge-gate bypass. Failing safe toward running closes that hole.
+    # `!cancelled()` still lets a superseded run bow out (the newer run re-checks).
+    if: >-
+      !cancelled() &&
+      (needs.changes.result != 'success' || needs.changes.outputs.macos == 'true')
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
@@ -45,11 +159,30 @@ jobs:
       - run: go test -v -race -count=1 ./...
 
   integration:
-    name: Integration
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+    name: Integration (ubuntu-latest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+      - run: go test -v -race -count=1 -tags=integration ./internal/integration/...
+
+  integration-macos:
+    name: Integration (macos-latest)
+    needs: changes
+    # Run when the detector says macOS is relevant — but also when the detector
+    # itself did NOT cleanly succeed (failed/timed out). With `needs:` and a
+    # custom `if:` lacking a status function, a *failed* `changes` job would
+    # otherwise skip this job, and a skipped REQUIRED check counts as success —
+    # a silent merge-gate bypass. Failing safe toward running closes that hole.
+    # `!cancelled()` still lets a superseded run bow out (the newer run re-checks).
+    if: >-
+      !cancelled() &&
+      (needs.changes.result != 'success' || needs.changes.outputs.macos == 'true')
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
