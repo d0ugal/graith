@@ -15,6 +15,7 @@ enum SessionUserActivity {
             "repoName": session.repoName,
             sessionURLKey: sessionURL,
         ]
+        activity.webpageURL = nil
         activity.targetContentIdentifier = sessionURL
         activity.isEligibleForHandoff = true
     }
