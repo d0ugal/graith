@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import GraithSessionKit
 
-// Capability manifest ↔ code conformance (issue #1149).
+// Capability manifest ↔ shared-layer conformance (issue #1149).
 //
 // `internal/capabilities/capabilities.json` is the hand-maintained source of
 // truth for which capabilities each frontend surfaces. The Go side already
@@ -15,17 +15,37 @@ import Testing
 //     carrying each capability's iOS + macOS state.
 //   - This test decodes that fixture and cross-checks it against
 //     `sharedAffordances()` — the set of capabilities the shared
-//     `GraithSessionKit` layer actually wires. Since #1147 both apps bind to
-//     that one layer (`FleetModel` / `HostConnection` / `TerminalAttachViewModel`
-//     / the `GraithHostClient` boundary), so a capability wired there is, by
-//     construction, available to both GUIs.
+//     `GraithSessionKit` layer wires. Since #1147 both apps bind to that one
+//     layer (`FleetModel` / `HostConnection` / `TerminalAttachViewModel` / the
+//     `GraithHostClient` boundary), so a capability wired there is *available*
+//     to both GUIs.
 //
 // The registry is *compile-anchored*: each entry references the real shared
 // symbol behind it, so renaming or deleting the wiring stops this file from
-// compiling — the registry can't outlive its code. That closes the gap that
-// bit us in #1143 (macOS code shipped, manifest still said `planned`): a wired
-// affordance the manifest calls anything but `supported` is now a red test, and
-// a manifest that claims `supported` without a backing affordance is too.
+// compiling — a registered row can't outlive its code.
+//
+// SCOPE — what this proves, and what it does not (deliberately narrow, cf. the
+// #1149 review):
+//
+//   - Guaranteed: the manifest cannot over- or under-claim relative to the
+//     *shared* capability surface. A capability the manifest marks `supported`
+//     on a GUI must have a backing shared affordance (or a declared view-only
+//     exception); a wired affordance the manifest marks anything but
+//     `supported` is a red test; iOS/macOS must stay at parity. A registered
+//     row is rot-proof against renames/removals via the compile anchor.
+//   - NOT guaranteed: that each app's *views* actually surface the capability.
+//     The shared layer is the model surface, not the SwiftUI/AppKit views the
+//     apps own on top of it — and surfacing is sometimes a semantic judgment
+//     (e.g. iOS surfaces `terminal.logs` / `terminal.screen-snapshot` through
+//     the live attach view rather than a dedicated sheet). Per-app view
+//     surfacing therefore stays a *reviewed* decision, tracked by the checklist
+//     documented in AGENTS.md — a naive view-type anchor would false-positive
+//     on the covered-by-attach cases. An automated per-app view-anchor guard is
+//     a follow-up, not part of this pass.
+//   - Also manual: adding a *new* shared affordance requires adding its row
+//     here. The anchor keeps an existing row honest; it cannot discover wiring
+//     that was never registered. This is the same discipline as the manifest it
+//     guards, now with a compile tripwire on the registered set.
 
 // MARK: - Fixture DTOs
 
@@ -129,7 +149,8 @@ struct CapabilityConformanceTests {
         let shared = sharedAffordances()
 
         // Reverse-lie: everything the shared layer wires must be a manifest id
-        // and `supported` on both GUIs. This is the #1143 incident as a red test.
+        // and `supported` on both GUIs — the #1143 direction (code ahead of the
+        // manifest) as a red test, for the capabilities registered here.
         for id in shared.sorted() {
             guard let c = byID[id] else {
                 Issue.record("shared affordance `\(id)` is not a capability in the manifest — fix the id in sharedAffordances() or add it to capabilities.json")
@@ -176,16 +197,44 @@ struct CapabilityConformanceTests {
         #expect(manifest.version == 1, "capability fixture version \(manifest.version) — the conformance check models version 1")
     }
 
-    /// Guards against a stale exception outliving its need: every declared
-    /// view-only / divergence id must still be a real capability in the manifest.
-    @Test func exceptionsReferenceRealCapabilities() throws {
+    /// Guards against a stale exception outliving its need. An escape hatch that
+    /// no longer describes reality is worse than none — it launders a drift as
+    /// "known". So each exception must be a real capability *and* still meet the
+    /// condition it exempts:
+    ///   - a `knownDivergences` id must actually diverge (iOS != macOS) — once
+    ///     parity is restored the exception is stale and must be removed;
+    ///   - a `viewOnlyCapabilities` id must still be GUI-`supported` yet have no
+    ///     shared affordance — once it becomes shared (or drops to planned/n/a)
+    ///     the exception is stale.
+    @MainActor @Test func exceptionsAreStillNeeded() throws {
         let manifest = try loadCapabilityManifest()
-        let ids = Set(manifest.capabilities.map(\.id))
-        for id in viewOnlyCapabilities {
-            #expect(ids.contains(id), "viewOnlyCapabilities has stale id `\(id)` — not in the manifest")
-        }
+        let byID = Dictionary(uniqueKeysWithValues: manifest.capabilities.map { ($0.id, $0) })
+        let shared = sharedAffordances()
+
         for id in knownDivergences {
-            #expect(ids.contains(id), "knownDivergences has stale id `\(id)` — not in the manifest")
+            guard let c = byID[id] else {
+                Issue.record("knownDivergences has stale id `\(id)` — not in the manifest")
+                continue
+            }
+            #expect(
+                c.ios != c.macos,
+                "knownDivergences lists `\(id)` but iOS==macOS==\(c.ios) — parity holds, so the exception is stale; remove it"
+            )
+        }
+
+        for id in viewOnlyCapabilities {
+            guard let c = byID[id] else {
+                Issue.record("viewOnlyCapabilities has stale id `\(id)` — not in the manifest")
+                continue
+            }
+            #expect(
+                c.ios == "supported" || c.macos == "supported",
+                "viewOnlyCapabilities lists `\(id)` but it is not GUI-`supported` (iOS=\(c.ios), macOS=\(c.macos)) — the exception is stale; remove it"
+            )
+            #expect(
+                !shared.contains(id),
+                "viewOnlyCapabilities lists `\(id)` but it now has a shared affordance — drop the exception and rely on the shared registry"
+            )
         }
     }
 }
