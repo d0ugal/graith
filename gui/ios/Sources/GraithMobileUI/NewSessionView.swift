@@ -17,6 +17,12 @@ struct NewSessionView: View {
     @State private var submitting = false
     @State private var error: String?
 
+    // Advanced options (mirror `gr new` flags).
+    @State private var base: String = ""
+    @State private var yolo = false
+    @State private var inPlace = false
+    @State private var agentHooks = true
+
     private let agents = ["claude", "codex", "cursor", "opencode"]
 
     var body: some View {
@@ -54,6 +60,14 @@ struct NewSessionView: View {
                     }
                     TextField("Prompt (optional)", text: $prompt, axis: .vertical)
                         .lineLimit(3, reservesSpace: true)
+                }
+                Section("Advanced") {
+                    TextField("Base branch (optional)", text: $base)
+                        .textFieldStyleCompat()
+                        .disabled(inPlace)
+                    Toggle("Yolo mode", isOn: $yolo)
+                    Toggle("Run in place", isOn: $inPlace)
+                    Toggle("Agent hooks", isOn: $agentHooks)
                 }
                 if let error {
                     Text(error).foregroundStyle(.red).font(.footnote)
@@ -97,13 +111,22 @@ struct NewSessionView: View {
 
     private func create() async {
         guard let conn = model.connections.first(where: { $0.id == hostID }) else { return }
+        // Surface mutually-exclusive options before a daemon round-trip.
+        if let invalid = FleetModel.validateCreateOptions(base: base, inPlace: inPlace) {
+            error = invalid
+            return
+        }
         submitting = true
         defer { submitting = false }
         let req = CreateRequest(
             name: name.trimmingCharacters(in: .whitespaces),
             agent: agent,
             repoPath: selectedRepo,
-            prompt: prompt.isEmpty ? nil : prompt
+            base: base.isEmpty ? nil : base,
+            prompt: prompt.isEmpty ? nil : prompt,
+            agentHooks: agentHooks,
+            inPlace: inPlace ? true : nil,
+            yolo: yolo ? true : nil
         )
         if await conn.create(req) {
             dismiss()

@@ -60,6 +60,9 @@ actor MockHostClient: GraithHostClient {
     var failSetStatus: GraithClientError?
     /// Records the last `migrate` call so tests can assert the model is forwarded.
     private(set) var lastMigrate: (agent: String, model: String?)?
+    /// Records the last `create` request so tests can assert the advanced options
+    /// (base/yolo/in-place/agent-hooks) are forwarded to the wire message.
+    private(set) var lastCreate: CreateRequest?
     /// Records the last `set_status` call so tests can assert the text/clear flag.
     private(set) var lastSetStatus: (text: String, ttlSeconds: Int?, clear: Bool)?
     /// Blocks `listSessions()` until `releaseList()` — used to hold a refresh in
@@ -112,7 +115,7 @@ actor MockHostClient: GraithHostClient {
             "{\"session_id\":\"\(sessionID)\",\"frame\":\"\",\"cursor_x\":0,\"cursor_y\":0,\"cursor_visible\":false,\"cols\":80,\"rows\":24}".utf8))
     }
 
-    func create(_ request: CreateRequest) async throws {}
+    func create(_ request: CreateRequest) async throws { lastCreate = request }
     func stop(sessionID: String) async throws {}
     func resume(sessionID: String) async throws {}
     func restart(sessionID: String) async throws {}

@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import GraithProtocol
 
 struct NewSessionSheet: View {
@@ -15,6 +16,14 @@ struct NewSessionSheet: View {
     @State private var isCreating = false
     @State private var error: String?
     @State private var selectedHostID = "local"
+
+    // Advanced options (mirror `gr new` flags; hidden behind a disclosure group).
+    @State private var showAdvanced = false
+    @State private var base = ""
+    @State private var yolo = false
+    @State private var inPlace = false
+    @State private var agentHooks = true
+    @State private var background = false
     /// Repos the selected host offers (design §C.4). Populated on appear / host
     /// change; the free-text field remains for paths the daemon didn't list.
     @State private var repos: [RepoEntry] = []
@@ -49,7 +58,7 @@ struct NewSessionSheet: View {
             Divider().background(Theme.surface0)
 
             // Form
-            VStack(alignment: .leading, spacing: 16) {
+            ScrollView { VStack(alignment: .leading, spacing: 16) {
                 if store.hasRemoteHosts {
                     FormField(label: "Host") {
                         HStack(spacing: 8) {
@@ -138,14 +147,26 @@ struct NewSessionSheet: View {
                 }
 
                 FormField(label: "Prompt (optional)") {
-                    TextEditor(text: $prompt)
-                        .font(.system(.body, design: .monospaced))
-                        .scrollContentBackground(.hidden)
-                        .padding(8)
-                        .frame(minHeight: 60, maxHeight: 120)
-                        .background(Theme.crust)
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                    VStack(alignment: .leading, spacing: 6) {
+                        TextEditor(text: $prompt)
+                            .font(.system(.body, design: .monospaced))
+                            .scrollContentBackground(.hidden)
+                            .padding(8)
+                            .frame(minHeight: 60, maxHeight: 120)
+                            .background(Theme.crust)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+
+                        Button(action: loadPromptFromFile) {
+                            Label("Load from file…", systemImage: "doc.text")
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundStyle(Theme.subtext0)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Read the initial prompt from a file (--prompt-file)")
+                    }
                 }
+
+                advancedSection
 
                 if let error {
                     HStack(spacing: 6) {
@@ -157,9 +178,7 @@ struct NewSessionSheet: View {
                     }
                 }
             }
-            .padding(20)
-
-            Spacer()
+            .padding(20) }
 
             Divider().background(Theme.surface0)
 
@@ -193,10 +212,74 @@ struct NewSessionSheet: View {
             }
             .padding(20)
         }
-        .frame(width: 480, height: 520)
+        .frame(width: 480, height: 560)
         .background(Theme.mantle)
         .onAppear { agent = defaultAgent }
         .task(id: selectedHostID) { await loadRepos() }
+    }
+
+    /// Collapsible "Advanced" group exposing the less-common `gr new` options.
+    /// Collapsed by default so the common case (name/repo/agent/prompt) stays
+    /// uncluttered.
+    private var advancedSection: some View {
+        DisclosureGroup(isExpanded: $showAdvanced) {
+            VStack(alignment: .leading, spacing: 14) {
+                FormField(label: "Base branch (optional)") {
+                    TextField("default: repo's default branch", text: $base)
+                        .textFieldStyle(.plain)
+                        .font(.system(.body, design: .monospaced))
+                        .padding(8)
+                        .background(Theme.crust)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                        .disabled(inPlace)
+                        .opacity(inPlace ? 0.5 : 1)
+                }
+
+                advancedToggle("Yolo mode", isOn: $yolo,
+                               help: "Auto-approve all tool requests (no approval prompts)")
+                advancedToggle("Run in place", isOn: $inPlace,
+                               help: "Run the agent directly in the repo without creating a worktree")
+                advancedToggle("Agent hooks", isOn: $agentHooks,
+                               help: "Enable agent hooks (check-inbox, etc.)")
+                advancedToggle("Create in background", isOn: $background,
+                               help: "Create the session without switching to it")
+            }
+            .padding(.top, 10)
+        } label: {
+            Text("ADVANCED")
+                .font(.system(.caption2, design: .monospaced))
+                .fontWeight(.semibold)
+                .foregroundStyle(Theme.overlay0)
+        }
+        .tint(Theme.subtext0)
+    }
+
+    /// A labelled toggle row styled to match the monospaced form aesthetic.
+    private func advancedToggle(_ title: String, isOn: Binding<Bool>, help: String) -> some View {
+        Toggle(isOn: isOn) {
+            Text(title)
+                .font(.system(.body, design: .monospaced))
+                .foregroundStyle(Theme.text)
+        }
+        .toggleStyle(.switch)
+        .tint(Theme.green)
+        .help(help)
+    }
+
+    /// Present an open panel and load the chosen file's contents into `prompt`
+    /// (the GUI equivalent of `gr new --prompt-file`).
+    private func loadPromptFromFile() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.message = "Choose a file to use as the initial prompt"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            prompt = try String(contentsOf: url, encoding: .utf8)
+        } catch {
+            self.error = "Couldn't read prompt file: \(error.localizedDescription)"
+        }
     }
 
     /// Load the selected host's repo list for the picker. Failures leave `repos`
@@ -227,12 +310,18 @@ struct NewSessionSheet: View {
             repoPath: repoPath,
             model: model,
             prompt: prompt,
+            base: base,
+            yolo: yolo,
+            inPlace: inPlace,
+            agentHooks: agentHooks,
             hostID: selectedHostID
         ) { result in
             isCreating = false
             switch result {
             case .success(let session):
-                if let session {
+                // "Create in background" creates the session without switching
+                // the window to it (mirrors `gr new --background`).
+                if let session, !background {
                     window.selectSession(session)
                 }
                 dismiss()

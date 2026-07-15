@@ -70,7 +70,8 @@ public struct CreateMsg: Codable, Sendable {
 
     public init(name: String, agent: String, repoPath: String, base: String? = nil,
                 prompt: String? = nil, model: String? = nil, parentID: String? = nil,
-                noRepo: Bool? = nil, agentHooks: Bool? = nil, yolo: Bool? = nil) {
+                noRepo: Bool? = nil, agentHooks: Bool? = nil, inPlace: Bool? = nil,
+                yolo: Bool? = nil) {
         self.name = name
         self.agent = agent
         self.repoPath = repoPath
@@ -80,6 +81,7 @@ public struct CreateMsg: Codable, Sendable {
         self.parentID = parentID
         self.noRepo = noRepo
         self.agentHooks = agentHooks
+        self.inPlace = inPlace
         self.yolo = yolo
     }
 
