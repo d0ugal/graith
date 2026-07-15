@@ -35,6 +35,76 @@ func (bf *batchFlags) active() bool {
 	return bf.repo != "" || bf.stopped || bf.stale != ""
 }
 
+// selfSessionRef returns a name-or-id reference for the current session from the
+// environment, backing the `--self` flag on gr delete/stop/purge. It prefers
+// the canonical GRAITH_SESSION_ID and falls back to GRAITH_SESSION_NAME. It
+// errors when neither is set — i.e. `--self` was used outside a graith session.
+func selfSessionRef() (string, error) {
+	if id := os.Getenv("GRAITH_SESSION_ID"); id != "" {
+		return id, nil
+	}
+
+	if name := os.Getenv("GRAITH_SESSION_NAME"); name != "" {
+		return name, nil
+	}
+
+	return "", fmt.Errorf("--self requires GRAITH_SESSION_ID or GRAITH_SESSION_NAME to be set; run it from inside a graith session")
+}
+
+// selfArgs resolves the positional args for a `--self` invocation. When self is
+// set it discards any positional args (the Args validator has already rejected
+// them) and substitutes the current session reference from the environment, so
+// the caller's normal name-or-id resolution targets the calling session. When
+// self is unset it returns args unchanged. Shared by gr delete/stop/purge so
+// the substitution — and its outside-a-session error — lives in one tested spot.
+func selfArgs(self bool, args []string) ([]string, error) {
+	if !self {
+		return args, nil
+	}
+
+	ref, err := selfSessionRef()
+	if err != nil {
+		return nil, err
+	}
+
+	return []string{ref}, nil
+}
+
+// selfChildrenBatchArgs builds the shared positional-args validator for the
+// destructive session verbs (delete/stop/purge), which all expose the same
+// --self / --children / batch-filter surface. The flag values are read through
+// pointers so the returned validator reflects them at parse time. Precedence:
+//   - --self is exclusive with --children and batch filters, and takes no arg;
+//   - --children with a batch filter is rejected;
+//   - a batch filter takes no positional arg;
+//   - --children allows zero or one arg (zero auto-resolves the current session);
+//   - otherwise exactly one name-or-id is required.
+func selfChildrenBatchArgs(self, children *bool, bf *batchFlags) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		if *self {
+			if *children || bf.active() {
+				return fmt.Errorf("--self cannot be combined with --children or batch filters")
+			}
+
+			return cobra.NoArgs(cmd, args)
+		}
+
+		if *children && bf.active() {
+			return fmt.Errorf("--children cannot be combined with batch filters")
+		}
+
+		if bf.active() {
+			return cobra.NoArgs(cmd, args)
+		}
+
+		if *children {
+			return cobra.MaximumNArgs(1)(cmd, args)
+		}
+
+		return cobra.ExactArgs(1)(cmd, args)
+	}
+}
+
 var dayPattern = regexp.MustCompile(`(\d+)d`)
 
 func parseStaleDuration(s string) (time.Duration, error) {

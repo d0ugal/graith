@@ -55,6 +55,7 @@ Stop a running session. The agent process is killed but the worktree and branch 
 
 | Flag | Description |
 |------|-------------|
+| `--self` | Stop the current session (resolved from `GRAITH_SESSION_ID`/`GRAITH_SESSION_NAME`) |
 | `--children` | Also stop all descendant sessions |
 | `--repo <name>` | Filter by repo name (batch mode) |
 | `--stopped` | Match stopped and errored sessions (batch mode) |
@@ -62,6 +63,8 @@ Stop a running session. The agent process is killed but the worktree and branch 
 | `-f, --force` | Skip confirmation prompt (batch mode) |
 
 When `--children` is used without a positional argument inside a graith session, it auto-resolves the current session from `GRAITH_SESSION_ID` and excludes it from the stop.
+
+`--self` targets the session it is run from — handy for an agent that wants to stop itself without knowing its own name (`gr stop --self`). It takes no positional argument and cannot be combined with `--children` or the batch filters; outside a graith session (no `GRAITH_SESSION_ID`/`GRAITH_SESSION_NAME`) it errors.
 
 ## `gr restart <name-or-id>`
 
@@ -77,11 +80,14 @@ Delete a session. Kills the agent process, removes the worktree, and deletes the
 
 | Flag | Description |
 |------|-------------|
+| `--self` | Soft-delete the current session (resolved from `GRAITH_SESSION_ID`/`GRAITH_SESSION_NAME`) |
 | `--children` | Also delete all descendant sessions |
 | `-f, --force` | Skip confirmation prompt |
 | `--repo <name>` | Filter by repo name (batch mode) |
 | `--stopped` | Match stopped and errored sessions (batch mode) |
 | `--stale <duration>` | Match sessions not attached for this duration (batch mode) |
+
+`--self` targets the session it is run from, so an agent can clean itself up after its work is merged with `gr delete --self` — no need to interpolate `$GRAITH_SESSION_NAME`. It takes no positional argument and cannot be combined with `--children` or the batch filters; outside a graith session it errors. `gr purge --self` does the same for an immediate, irrecoverable purge.
 
 ## `gr fork <source-session> <new-name>`
 

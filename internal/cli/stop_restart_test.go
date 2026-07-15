@@ -79,6 +79,38 @@ func TestStopArgsCov2DefaultRequiresExactlyOne(t *testing.T) {
 	})
 }
 
+func TestStopArgsSelf(t *testing.T) {
+	prevSelf := stopSelf
+	stopSelf = true
+
+	defer func() { stopSelf = prevSelf }()
+
+	// --self alone: no positional arg allowed.
+	withStopFlagsCov2(t, false, batchFlags{}, func() {
+		if err := stopCmd.Args(stopCmd, nil); err != nil {
+			t.Errorf("--self with no arg should be allowed: %v", err)
+		}
+
+		if err := stopCmd.Args(stopCmd, []string{"braw"}); err == nil {
+			t.Error("--self with a positional arg should be rejected")
+		}
+	})
+
+	// --self with --children is contradictory.
+	withStopFlagsCov2(t, true, batchFlags{}, func() {
+		if err := stopCmd.Args(stopCmd, nil); err == nil {
+			t.Error("--self with --children should be rejected")
+		}
+	})
+
+	// --self with a batch filter is contradictory.
+	withStopFlagsCov2(t, false, batchFlags{stopped: true}, func() {
+		if err := stopCmd.Args(stopCmd, nil); err == nil {
+			t.Error("--self with a batch filter should be rejected")
+		}
+	})
+}
+
 func TestRestartArgsCov2ChildrenAllowsZeroOrOne(t *testing.T) {
 	withRestartChildrenCov2(t, true, func() {
 		if err := restartCmd.Args(restartCmd, nil); err != nil {

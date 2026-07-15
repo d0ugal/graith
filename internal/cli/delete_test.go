@@ -164,15 +164,18 @@ func setDiscardOutForDelete(t *testing.T, jsonMode bool) {
 func TestDeleteCmdArgsValidation(t *testing.T) {
 	origChildren := deleteChildren
 	origBatch := deleteBatch
+	origSelf := deleteSelf
 
 	t.Cleanup(func() {
 		deleteChildren = origChildren
 		deleteBatch = origBatch
+		deleteSelf = origSelf
 	})
 
 	tests := []struct {
 		name     string
 		children bool
+		self     bool
 		batch    batchFlags
 		args     []string
 		wantErr  bool
@@ -186,12 +189,17 @@ func TestDeleteCmdArgsValidation(t *testing.T) {
 		{name: "plain requires exactly one arg", args: []string{"braw"}, wantErr: false},
 		{name: "plain rejects zero args", args: nil, wantErr: true},
 		{name: "plain rejects two args", args: []string{"braw", "canny"}, wantErr: true},
+		{name: "self takes no args", self: true, args: nil, wantErr: false},
+		{name: "self rejects positional arg", self: true, args: []string{"braw"}, wantErr: true},
+		{name: "self with children rejected", self: true, children: true, args: nil, wantErr: true},
+		{name: "self with batch filter rejected", self: true, batch: batchFlags{stopped: true}, args: nil, wantErr: true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			deleteChildren = tt.children
 			deleteBatch = tt.batch
+			deleteSelf = tt.self
 
 			err := deleteCmd.Args(deleteCmd, tt.args)
 			if tt.wantErr && err == nil {

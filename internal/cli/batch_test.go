@@ -605,3 +605,95 @@ func TestPrintBatchSummary(t *testing.T) {
 		}
 	}
 }
+
+func TestSelfSessionRef(t *testing.T) {
+	tests := []struct {
+		name    string
+		id      string
+		session string
+		want    string
+		wantErr bool
+	}{
+		{name: "prefers id", id: "braw-id", session: "braw", want: "braw-id"},
+		{name: "falls back to name", id: "", session: "canny", want: "canny"},
+		{name: "id wins over name", id: "ben-id", session: "glen", want: "ben-id"},
+		{name: "neither set errors", id: "", session: "", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("GRAITH_SESSION_ID", tt.id)
+			t.Setenv("GRAITH_SESSION_NAME", tt.session)
+
+			got, err := selfSessionRef()
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got nil (ref %q)", got)
+				}
+
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if got != tt.want {
+				t.Errorf("selfSessionRef() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSelfArgs(t *testing.T) {
+	t.Run("self off returns args unchanged", func(t *testing.T) {
+		t.Setenv("GRAITH_SESSION_ID", "")
+		t.Setenv("GRAITH_SESSION_NAME", "")
+
+		got, err := selfArgs(false, []string{"braw"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if len(got) != 1 || got[0] != "braw" {
+			t.Errorf("selfArgs(false, [braw]) = %v, want [braw]", got)
+		}
+	})
+
+	t.Run("self on substitutes session id", func(t *testing.T) {
+		t.Setenv("GRAITH_SESSION_ID", "canny-id")
+		t.Setenv("GRAITH_SESSION_NAME", "canny")
+
+		got, err := selfArgs(true, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if len(got) != 1 || got[0] != "canny-id" {
+			t.Errorf("selfArgs(true, nil) = %v, want [canny-id]", got)
+		}
+	})
+
+	t.Run("self on falls back to session name", func(t *testing.T) {
+		t.Setenv("GRAITH_SESSION_ID", "")
+		t.Setenv("GRAITH_SESSION_NAME", "ben")
+
+		got, err := selfArgs(true, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if len(got) != 1 || got[0] != "ben" {
+			t.Errorf("selfArgs(true, nil) = %v, want [ben]", got)
+		}
+	})
+
+	t.Run("self on outside a session errors", func(t *testing.T) {
+		t.Setenv("GRAITH_SESSION_ID", "")
+		t.Setenv("GRAITH_SESSION_NAME", "")
+
+		if _, err := selfArgs(true, nil); err == nil {
+			t.Fatal("expected error when neither env var is set")
+		}
+	})
+}
