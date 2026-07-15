@@ -48,6 +48,7 @@ private struct ScenarioSidebarBlock: View {
     let scenario: HostedScenario
     @EnvironmentObject var store: SessionStore
     @EnvironmentObject var window: WindowState
+    @State private var showDeleteConfirm = false
 
     private var record: ScenarioRecord { scenario.scenario }
 
@@ -71,18 +72,36 @@ private struct ScenarioSidebarBlock: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 4)
             .contentShape(Rectangle())
-            .contextMenu { ScenarioActionMenu(scenario: scenario) }
+            .contextMenu {
+                ScenarioActionMenu(scenario: scenario, onDelete: { showDeleteConfirm = true })
+            }
 
             ForEach(record.sessions) { member in
                 ScenarioMemberRow(member: member, onSelect: { select(member) })
             }
         }
+        .confirmationDialog(
+            "Delete scenario \u{201c}\(record.name)\u{201d}?",
+            isPresented: $showDeleteConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) { store.deleteScenario(scenario) }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This stops and removes every session in the scenario, along with their worktrees.")
+        }
     }
 
+    /// Resolve the member's live session from its **owning host's** connection —
+    /// session IDs are unique only per daemon, so the merged `store.sessions`
+    /// (de-duplicated by bare id) could resolve a colliding id to the wrong host.
+    /// (WindowState still stores a bare `selectedSessionID`; full host-qualified
+    /// selection end-to-end on macOS is a pre-existing limitation shared by the
+    /// repo-grouped rows, tracked separately.)
     private func select(_ member: ScenarioSessionInfo) {
-        if let session = store.sessions.first(where: { $0.id == member.sessionID }) {
-            window.selectSession(session)
-        }
+        guard let conn = store.connections.first(where: { $0.id == scenario.host.id }),
+              let session = conn.sessions.first(where: { $0.id == member.sessionID }) else { return }
+        window.selectSession(session)
     }
 }
 
@@ -170,7 +189,7 @@ struct ScenariosSheet: View {
                     Text("No running scenarios")
                         .font(.system(.body, design: .monospaced))
                         .foregroundStyle(Theme.overlay0)
-                    Text("Start one with `gr scenario start`.")
+                    Text("Start one from the CLI with gr scenario start.")
                         .font(.system(.caption, design: .monospaced))
                         .foregroundStyle(Theme.overlay0)
                 }
@@ -289,16 +308,19 @@ struct ScenarioStatusPill: View {
     }
 }
 
-/// The stop / resume / delete context-menu items for a scenario.
+/// The stop / resume / delete context-menu items for a scenario. Delete is
+/// routed through `onDelete` so the caller can require confirmation before the
+/// destructive (hard) delete — the menu item must not delete on a stray click.
 struct ScenarioActionMenu: View {
     let scenario: HostedScenario
+    let onDelete: () -> Void
     @EnvironmentObject var store: SessionStore
 
     var body: some View {
         Button("Stop All") { store.stopScenario(scenario) }
         Button("Resume All") { store.resumeScenario(scenario) }
         Divider()
-        Button("Delete Scenario…", role: .destructive) { store.deleteScenario(scenario) }
+        Button("Delete Scenario…", role: .destructive) { onDelete() }
     }
 }
 

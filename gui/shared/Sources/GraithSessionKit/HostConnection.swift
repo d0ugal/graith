@@ -28,6 +28,12 @@ public final class HostConnection: ObservableObject, Identifiable {
     private var approvalTask: Task<Void, Never>?
     /// Guards `refresh()` against overlapping list() calls piling up.
     private var isRefreshing = false
+    /// Set when a refresh is requested while one is already in flight, so the
+    /// coalescing is *lossless*: the in-flight refresh loops once more instead of
+    /// dropping the request. Without this, a mutation's post-action refresh that
+    /// lands during a poll's in-flight `list` is silently discarded, leaving
+    /// published state stale — indefinitely on iOS, which doesn't poll.
+    private var refreshQueued = false
 
     /// The underlying host client — used to build a terminal attach view-model.
     public var hostClient: any GraithHostClient { client }
@@ -74,28 +80,38 @@ public final class HostConnection: ObservableObject, Identifiable {
         state = .idle
     }
 
-    /// Reload the session list. Guarded against overlap: the desktop 2s poll
-    /// (or a burst of refresh() calls) skips a tick while a `list` is still in
-    /// flight, so a slow/hung host can't pile up queued RPCs on its single
-    /// control connection. A successful list clears a prior error.
+    /// Reload the session list (and scenarios). Overlapping calls coalesce
+    /// *losslessly*: while a `list` is in flight, a further `refresh()` sets a
+    /// pending flag instead of running concurrently, and the in-flight refresh
+    /// loops once more when it finishes. This keeps a slow/hung host from piling
+    /// up concurrent RPCs on its single control connection while guaranteeing a
+    /// post-mutation refresh is never dropped. A successful list clears a prior
+    /// error.
     public func refresh() async {
-        guard state == .connected, !isRefreshing else { return }
+        guard state == .connected else { return }
+        if isRefreshing {
+            refreshQueued = true
+            return
+        }
         isRefreshing = true
         defer { isRefreshing = false }
-        do {
-            sessions = try await client.listSessions()
-            lastError = nil
-        } catch {
-            lastError = Self.describe(error)
-        }
-        await refreshScenarios()
+        repeat {
+            refreshQueued = false
+            do {
+                sessions = try await client.listSessions()
+                lastError = nil
+            } catch {
+                lastError = Self.describe(error)
+            }
+            await refreshScenarios()
+        } while refreshQueued && state == .connected
     }
 
-    /// Reload this host's running scenarios. Best-effort: a scenario failure is
-    /// swallowed (the scenario surface degrades to empty) rather than marking the
-    /// whole connection errored — the session list is the primary signal, and a
-    /// daemon that can list sessions but hiccups on scenarios shouldn't paint the
-    /// host red. Only runs while connected.
+    /// Reload this host's running scenarios. Best-effort: on failure the
+    /// last-known scenarios are **retained** (not cleared) and the error is not
+    /// surfaced on `lastError` — the session list is the primary health signal,
+    /// and a daemon that lists sessions but hiccups on scenarios shouldn't blank
+    /// the fleet view or paint the host red. Only runs while connected.
     private func refreshScenarios() async {
         guard state == .connected else { return }
         if let fetched = try? await client.listScenarios() {
