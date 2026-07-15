@@ -144,6 +144,7 @@ state instead).
 
 | Capability | CLI | iOS | macOS |
 |------------|:---:|:---:|:---:|
-| Health check / doctor / orphan GC | ✅ | 🚧 | 🚧 |
+| View effective config + diff-vs-defaults | ✅ | ✅ | ✅ |
+| Health check / doctor diagnostics (orphan GC stays CLI-only) | ✅ | ✅ | ✅ |
 
 <!-- END GENERATED CAPABILITY MATRIX -->

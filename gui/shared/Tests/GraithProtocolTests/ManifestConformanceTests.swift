@@ -157,6 +157,15 @@ private let swiftDecoders: [String: DecodeProbe] = [
     "ScenarioListMsg": probe(EmptyMsg.self),
     "TriggerListMsg": probe(EmptyMsg.self),
     "PairListMsg": probe(EmptyMsg.self),
+    "ConfigMsg": probe(EmptyMsg.self),
+
+    // Config viewer + diagnostics panel (#904).
+    "ConfigResponseMsg": probe(ConfigResponseMsg.self),
+    "DiagnosticsMsg": probe(DiagnosticsMsg.self),
+    "SessionDiagnostic": probe(SessionDiagnostic.self),
+    "ScrollbackDiagnostic": probe(ScrollbackDiagnostic.self),
+    "MessagesDiagnostic": probe(MessagesDiagnostic.self),
+    "FleetSummary": probe(FleetSummary.self),
 
     // Session model (daemon -> client).
     "SessionListMsg": probe(SessionListMsg.self),

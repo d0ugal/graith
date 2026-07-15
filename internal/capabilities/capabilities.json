@@ -240,10 +240,16 @@
       "cli": "supported", "ios": "planned", "macos": "planned"
     },
     {
+      "id": "config.view",
+      "category": "Diagnostics",
+      "name": "View effective config + diff-vs-defaults",
+      "cli": "supported", "ios": "supported", "macos": "supported"
+    },
+    {
       "id": "doctor.diagnostics",
       "category": "Diagnostics",
-      "name": "Health check / doctor / orphan GC",
-      "cli": "supported", "ios": "planned", "macos": "planned"
+      "name": "Health check / doctor diagnostics (orphan GC stays CLI-only)",
+      "cli": "supported", "ios": "supported", "macos": "supported"
     }
   ]
 }

@@ -562,6 +562,13 @@ open class FleetModel: ObservableObject {
         }
     }
 
+    /// A friendly, UI-facing string for any client error. Shared by the views
+    /// (config viewer / diagnostics panel) that surface a fetch failure.
+    public static func describeError(_ error: Error) -> String {
+        if let e = error as? GraithClientError { return e.userMessage }
+        return error.localizedDescription
+    }
+
     public enum FleetError: LocalizedError {
         case hostUnavailable
         case createFailed(String)
@@ -573,6 +580,27 @@ open class FleetModel: ObservableObject {
             case let .invalidOptions(m): return m
             }
         }
+    }
+
+    // MARK: - Host introspection (config viewer + diagnostics, #904)
+
+    /// Fetch a host's effective configuration + diff-vs-defaults for the
+    /// read-only config viewer. Defaults to the local daemon. Throws so the view
+    /// can show a fetch error distinctly from an empty/default config.
+    public func config(hostID: String = "local") async throws -> ConfigResponseMsg {
+        guard let conn = connections.first(where: { $0.id == hostID }) else {
+            throw FleetError.hostUnavailable
+        }
+        return try await conn.config()
+    }
+
+    /// Fetch a host's health snapshot for the diagnostics panel. Defaults to the
+    /// local daemon.
+    public func diagnostics(hostID: String = "local") async throws -> DiagnosticsMsg {
+        guard let conn = connections.first(where: { $0.id == hostID }) else {
+            throw FleetError.hostUnavailable
+        }
+        return try await conn.diagnostics()
     }
 
     // MARK: - Refresh / polling

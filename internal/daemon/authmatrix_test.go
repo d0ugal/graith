@@ -105,7 +105,11 @@ func TestRemoteAllowed(t *testing.T) {
 		{"human cannot upgrade", roleRemoteHuman, "upgrade", false},
 		{"human cannot reload", roleRemoteHuman, "reload", false},
 		{"human cannot mcp_connect", roleRemoteHuman, "mcp_connect", false},
-		{"human cannot diagnostics (until redaction)", roleRemoteHuman, "diagnostics", false},
+		// #904: the GUI config viewer + diagnostics panel — paired human only.
+		{"human can diagnostics", roleRemoteHuman, "diagnostics", true},
+		{"human can config", roleRemoteHuman, "config", true},
+		{"guest cannot diagnostics", roleRemoteGuest, "diagnostics", false},
+		{"guest cannot config", roleRemoteGuest, "config", false},
 		// Session-originated: a human must NOT be able to impersonate a session.
 		{"human cannot approval_request", roleRemoteHuman, "approval_request", false},
 		{"human cannot status_report", roleRemoteHuman, "status_report", false},

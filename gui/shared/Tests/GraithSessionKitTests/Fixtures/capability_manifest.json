@@ -187,9 +187,14 @@
       "macos": "planned"
     },
     {
+      "id": "config.view",
+      "ios": "supported",
+      "macos": "supported"
+    },
+    {
       "id": "doctor.diagnostics",
-      "ios": "planned",
-      "macos": "planned"
+      "ios": "supported",
+      "macos": "supported"
     }
   ]
 }

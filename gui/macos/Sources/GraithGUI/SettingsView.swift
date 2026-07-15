@@ -1,6 +1,7 @@
 import SwiftUI
 import GraithProtocol
 import GraithRemoteKit
+import GraithSessionKit
 
 /// The ⌘, preferences window. SwiftUI's `Settings` scene wires up the menu item
 /// and a standard preferences window automatically; this is its content. Styled
@@ -14,10 +15,14 @@ struct SettingsView: View {
                 .tabItem { Label("General", systemImage: "gearshape") }
             HostsSettings()
                 .tabItem { Label("Hosts", systemImage: "server.rack") }
+            ConfigSettings()
+                .tabItem { Label("Config", systemImage: "doc.text") }
+            DiagnosticsSettings()
+                .tabItem { Label("Diagnostics", systemImage: "stethoscope") }
             LocalDaemonSettings()
                 .tabItem { Label("Advanced", systemImage: "wrench.and.screwdriver") }
         }
-        .frame(width: 560, height: 360)
+        .frame(width: 620, height: 460)
         .preferredColorScheme(.dark)
     }
 }
@@ -232,5 +237,266 @@ struct HostsSettings: View {
             return "Remote · \(endpoint) · \(err)"
         }
         return host.isPaired ? "Remote · \(endpoint)" : "Remote · \(endpoint) · pairing…"
+    }
+}
+
+// MARK: - Host picker (shared by Config + Diagnostics)
+
+/// A small host selector shown when more than one host is connected. When only
+/// the local daemon is present it renders nothing (and the caller uses "local").
+private struct HostPicker: View {
+    @EnvironmentObject var store: SessionStore
+    @Binding var hostID: String
+
+    var body: some View {
+        if store.connections.count > 1 {
+            Picker("Host", selection: $hostID) {
+                ForEach(store.connections) { conn in
+                    Text(conn.entry.label).tag(conn.id)
+                }
+            }
+            .pickerStyle(.menu)
+        }
+    }
+}
+
+// MARK: - Config viewer (#904)
+
+/// Read-only viewer for the daemon's effective configuration and how it differs
+/// from the built-in defaults. Fetched over the control protocol so it works
+/// against a remote host too (the app never reads the daemon host's filesystem).
+struct ConfigSettings: View {
+    @EnvironmentObject var store: SessionStore
+    @State private var hostID = "local"
+    @State private var mode: Mode = .effective
+    @State private var response: ConfigResponseMsg?
+    @State private var error: String?
+    @State private var loading = false
+
+    private enum Mode: String, CaseIterable { case effective = "Effective", diff = "Diff vs defaults" }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                HostPicker(hostID: $hostID)
+                Picker("", selection: $mode) {
+                    ForEach(Mode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                Spacer()
+                Button { Task { await load() } } label: {
+                    Label("Reload", systemImage: "arrow.clockwise")
+                }
+                .disabled(loading)
+            }
+
+            if let response, response.configExists == false {
+                Label("No config file — the daemon is running on built-in defaults.",
+                      systemImage: "info.circle")
+                    .font(.caption)
+                    .foregroundStyle(Theme.overlay0)
+            } else if let path = response?.configPath, !path.isEmpty {
+                Text(path)
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(Theme.overlay0)
+                    .textSelection(.enabled)
+                    .lineLimit(1)
+            }
+
+            content
+        }
+        .padding(16)
+        .task(id: hostID) { await load() }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if let error {
+            ContentMessage(systemImage: "exclamationmark.triangle.fill",
+                           text: error, tint: Theme.red)
+        } else if loading && response == nil {
+            ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if let response {
+            let text = mode == .effective ? response.effectiveTOML : response.diffFromDefaults
+            if mode == .diff && text.isEmpty {
+                ContentMessage(systemImage: "checkmark.seal",
+                               text: "Configuration matches the built-in defaults.",
+                               tint: Theme.green)
+            } else {
+                ScrollView([.vertical, .horizontal]) {
+                    Text(text.isEmpty ? "(empty)" : text)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(8)
+                }
+                .background(Theme.mantle)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+        } else {
+            Spacer()
+        }
+    }
+
+    private func load() async {
+        loading = true
+        defer { loading = false }
+        do {
+            response = try await store.config(hostID: hostID)
+            error = nil
+        } catch {
+            self.error = FleetModel.describeError(error)
+        }
+    }
+}
+
+// MARK: - Diagnostics panel (#904)
+
+/// The `gr doctor` equivalent: the daemon's health snapshot rendered as findings
+/// grouped by section, most severe first. Findings are derived by the shared
+/// `HealthReport`, so macOS and iOS surface the same checks.
+struct DiagnosticsSettings: View {
+    @EnvironmentObject var store: SessionStore
+    @State private var hostID = "local"
+    @State private var diag: DiagnosticsMsg?
+    @State private var error: String?
+    @State private var loading = false
+
+    private var findings: [HealthFinding] {
+        guard let diag else { return [] }
+        return HealthReport.findings(from: diag).sorted { ($0.level, $0.section) < ($1.level, $1.section) }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                HostPicker(hostID: $hostID)
+                if let diag {
+                    SummaryBadge(healthy: !HealthReport.hasFailures(findings),
+                                 fleet: diag.fleet)
+                }
+                Spacer()
+                Button { Task { await load() } } label: {
+                    Label("Reload", systemImage: "arrow.clockwise")
+                }
+                .disabled(loading)
+            }
+
+            if let error {
+                ContentMessage(systemImage: "exclamationmark.triangle.fill",
+                               text: error, tint: Theme.red)
+            } else if loading && diag == nil {
+                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List {
+                    ForEach(sections, id: \.self) { section in
+                        Section(section) {
+                            ForEach(findings.filter { $0.section == section }) { finding in
+                                FindingRow(finding: finding)
+                            }
+                        }
+                    }
+                }
+                .listStyle(.inset)
+
+                Text("Covers daemon, session and storage checks. Run `gr doctor` for host-level checks (sandbox, config keys, disk).")
+                    .font(.caption2)
+                    .foregroundStyle(Theme.overlay0)
+            }
+        }
+        .padding(16)
+        .task(id: hostID) { await load() }
+    }
+
+    private var sections: [String] {
+        var seen = Set<String>()
+        return findings.compactMap { seen.insert($0.section).inserted ? $0.section : nil }
+    }
+
+    private func load() async {
+        loading = true
+        defer { loading = false }
+        do {
+            diag = try await store.diagnostics(hostID: hostID)
+            error = nil
+        } catch {
+            self.error = FleetModel.describeError(error)
+        }
+    }
+}
+
+private struct SummaryBadge: View {
+    let healthy: Bool
+    let fleet: FleetSummary
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: healthy ? "checkmark.circle.fill" : "xmark.octagon.fill")
+                .foregroundStyle(healthy ? Theme.green : Theme.red)
+            Text(healthy ? "No daemon/session issues" : "Issues found")
+                .font(.caption)
+            Text("· \(fleet.total) session(s)")
+                .font(.caption)
+                .foregroundStyle(Theme.overlay0)
+        }
+    }
+}
+
+private struct FindingRow: View {
+    let finding: HealthFinding
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: icon)
+                .foregroundStyle(tint)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(finding.message)
+                    .font(.system(.caption, design: .monospaced))
+                    .textSelection(.enabled)
+                if let hint = finding.hint {
+                    Text("→ \(hint)")
+                        .font(.caption2)
+                        .foregroundStyle(Theme.overlay0)
+                }
+            }
+        }
+        .padding(.vertical, 1)
+    }
+
+    private var icon: String {
+        switch finding.level {
+        case .fail: "xmark.circle.fill"
+        case .warn: "exclamationmark.triangle.fill"
+        case .ok: "checkmark.circle"
+        }
+    }
+
+    private var tint: Color {
+        switch finding.level {
+        case .fail: Theme.red
+        case .warn: Theme.yellow
+        case .ok: Theme.green
+        }
+    }
+}
+
+/// A centered icon + message used for empty/error/clean states.
+private struct ContentMessage: View {
+    let systemImage: String
+    let text: String
+    let tint: Color
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Image(systemName: systemImage)
+                .font(.title)
+                .foregroundStyle(tint)
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(Theme.subtext0)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

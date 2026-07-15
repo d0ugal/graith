@@ -47,7 +47,7 @@ const (
 	// visible and reviewable.
 	SwiftPlanned SwiftExpectation = "planned"
 	// SwiftNA: a type a GUI/remote client never needs — hook-CLI↔daemon
-	// internals, MCP proxy transport, or local-only (doctor/diagnostics/upgrade)
+	// internals, MCP proxy transport, or local-only (doctor orphan-GC / upgrade)
 	// messages. Not modelled by Swift, and never expected to be.
 	SwiftNA SwiftExpectation = "na"
 )
@@ -187,6 +187,8 @@ var registeredTypes = []any{
 	MCPLogFile{},
 	MCPLogsResponse{},
 	StatusRequestMsg{},
+	ConfigMsg{},
+	ConfigResponseMsg{},
 	DiagnosticsMsg{},
 	SessionDiagnostic{},
 	TriggerDiagnostic{},
@@ -299,6 +301,7 @@ var swiftAnnotations = map[string]swiftAnnotation{
 	"MCPListMsg":      {SwiftRequired, "EmptyMsg"},
 	"ScenarioListMsg": {SwiftRequired, "EmptyMsg"},
 	"TriggerListMsg":  {SwiftRequired, "EmptyMsg"},
+	"ConfigMsg":       {SwiftRequired, "EmptyMsg"}, // config viewer request (#904)
 	"PairListMsg":     {SwiftRequired, "EmptyMsg"},
 
 	// Session model (daemon -> client).
@@ -368,7 +371,8 @@ var swiftAnnotations = map[string]swiftAnnotation{
 	"NotifyMsg":              {SwiftPlanned, ""},
 	"NotifyResponse":         {SwiftPlanned, ""},
 	"TokenInfo":              {SwiftPlanned, ""},
-	"FleetSummary":           {SwiftPlanned, ""},
+	"FleetSummary":           {SwiftRequired, "FleetSummary"},      // GUI diagnostics panel (#904)
+	"ConfigResponseMsg":      {SwiftRequired, "ConfigResponseMsg"}, // GUI config viewer (#904)
 	"StatusResponseMsg":      {SwiftPlanned, ""},
 	"MCPConnectionInfo":      {SwiftPlanned, ""},
 	"MCPServerStatus":        {SwiftPlanned, ""},
@@ -403,20 +407,20 @@ var swiftAnnotations = map[string]swiftAnnotation{
 	"TriggerStatusResponse":  {SwiftPlanned, ""},
 
 	// --- Not applicable: a GUI/remote client never decodes these. ---
-	"StatusReportMsg":      {SwiftNA, ""}, // hook CLI -> daemon
-	"ApprovalRequestMsg":   {SwiftNA, ""}, // hook CLI -> daemon
-	"ApprovalDecisionMsg":  {SwiftNA, ""}, // daemon -> hook CLI
-	"MCPConnectMsg":        {SwiftNA, ""}, // MCP proxy transport
-	"MCPConnectOkMsg":      {SwiftNA, ""}, // MCP proxy transport
-	"UpgradeMsg":           {SwiftNA, ""}, // local-only
-	"GCMsg":                {SwiftNA, ""}, // local-only (doctor)
-	"GCOrphanInfo":         {SwiftNA, ""}, // local-only (doctor)
-	"GCResultMsg":          {SwiftNA, ""}, // local-only (doctor)
-	"DiagnosticsMsg":       {SwiftNA, ""}, // local-only
-	"SessionDiagnostic":    {SwiftNA, ""}, // local-only
-	"TriggerDiagnostic":    {SwiftNA, ""}, // local-only (doctor)
-	"ScrollbackDiagnostic": {SwiftNA, ""}, // local-only
-	"MessagesDiagnostic":   {SwiftNA, ""}, // local-only
+	"StatusReportMsg":      {SwiftNA, ""},                           // hook CLI -> daemon
+	"ApprovalRequestMsg":   {SwiftNA, ""},                           // hook CLI -> daemon
+	"ApprovalDecisionMsg":  {SwiftNA, ""},                           // daemon -> hook CLI
+	"MCPConnectMsg":        {SwiftNA, ""},                           // MCP proxy transport
+	"MCPConnectOkMsg":      {SwiftNA, ""},                           // MCP proxy transport
+	"UpgradeMsg":           {SwiftNA, ""},                           // local-only
+	"GCMsg":                {SwiftNA, ""},                           // local-only (doctor)
+	"GCOrphanInfo":         {SwiftNA, ""},                           // local-only (doctor)
+	"GCResultMsg":          {SwiftNA, ""},                           // local-only (doctor)
+	"DiagnosticsMsg":       {SwiftRequired, "DiagnosticsMsg"},       // GUI diagnostics panel (#904)
+	"SessionDiagnostic":    {SwiftRequired, "SessionDiagnostic"},    // GUI diagnostics panel (#904)
+	"TriggerDiagnostic":    {SwiftNA, ""},                           // local-only (doctor)
+	"ScrollbackDiagnostic": {SwiftRequired, "ScrollbackDiagnostic"}, // GUI diagnostics panel (#904)
+	"MessagesDiagnostic":   {SwiftRequired, "MessagesDiagnostic"},   // GUI diagnostics panel (#904)
 }
 
 // rawMessageType is encoding/json.RawMessage, treated as an opaque JSON blob.

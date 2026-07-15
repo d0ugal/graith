@@ -14,6 +14,7 @@ public struct RootView: View {
     @State private var showingDeleted = false
     @State private var showingScenarios = false
     @State private var showingStore = false
+    @State private var showingInspector = false
 
     public init(model: FleetModel) {
         self.model = model
@@ -49,6 +50,9 @@ public struct RootView: View {
         }
         .sheet(isPresented: $showingStore) {
             StoreBrowserView(model: model)
+        }
+        .sheet(isPresented: $showingInspector) {
+            HostInspectorView(model: model)
         }
     }
 
@@ -106,6 +110,13 @@ public struct RootView: View {
                     showingStore = true
                 } label: {
                     Label("Document Store", systemImage: "doc.on.doc")
+                }
+                .disabled(model.connections.isEmpty)
+
+                Button {
+                    showingInspector = true
+                } label: {
+                    Label("Host Diagnostics", systemImage: "stethoscope")
                 }
                 .disabled(model.connections.isEmpty)
             }

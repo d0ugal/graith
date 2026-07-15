@@ -112,6 +112,35 @@ public actor MockHostClient: GraithHostClient {
         return StoreGetResponseMsg(key: key, repo: target, body: body)
     }
 
+    public func config() async throws -> ConfigResponseMsg {
+        try check(ControlType.config)
+        return ConfigResponseMsg(
+            effectiveTOML: MockHostClient.mockEffectiveTOML,
+            diffFromDefaults: MockHostClient.mockConfigDiff,
+            configPath: "/Users/x/.config/graith/config.toml",
+            configExists: true
+        )
+    }
+
+    public func diagnostics() async throws -> DiagnosticsMsg {
+        try check(ControlType.diagnostics)
+        let diags = sessions.map { s in
+            SessionDiagnostic(
+                id: s.id, name: s.name, status: s.status, agentStatus: s.agentStatus,
+                pid: 4242, pidAlive: s.status == "running", hasPTY: s.status == "running",
+                worktreePath: s.worktreePath, worktreeExists: true,
+                configStale: s.configStale ?? false, hookStale: false,
+                scrollbackBytes: 12_000, scrollbackMax: 5_000_000, saturated: false, hasToken: true
+            )
+        }
+        return DiagnosticsMsg(
+            daemonPID: 4242, daemonVersion: "dev", daemonUptime: "1h23m",
+            fleet: fleet(), sessions: diags, deletedSessionIDs: deleted.map(\.id),
+            scrollback: ScrollbackDiagnostic(totalFiles: sessions.count, totalBytes: 36_000, saturatedCount: 0),
+            messages: MessagesDiagnostic(totalStreams: 3, totalMessages: 17)
+        )
+    }
+
     // MARK: - Mutations
 
     public func create(_ request: CreateRequest) async throws {
@@ -396,6 +425,29 @@ extension MockHostClient {
             ],
             createdAt: "2026-07-14T09:00:00Z"),
     ]
+
+    /// Canned effective-config TOML for the config viewer preview (#904).
+    public static let mockEffectiveTOML = """
+    [sandbox]
+    enabled = true
+    backend = "nono"
+
+    [pr_watch]
+    enabled = true
+
+    [delete]
+    retention = "24h"
+    """
+
+    /// Canned diff-vs-defaults for the config viewer preview (#904).
+    public static let mockConfigDiff = """
+    --- defaults
+    +++ effective
+    @@ -1,2 +1,2 @@
+     [sandbox]
+    -enabled = false
+    +enabled = true
+    """
 }
 
 extension SessionInfo {

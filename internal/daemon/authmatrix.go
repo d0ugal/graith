@@ -76,6 +76,14 @@ var remoteMessagePolicy = map[string]remotePolicy{
 	"mcp_logs":         remoteHumanRW, // MCP stderr may carry sensitive output
 	"notify":           remoteHumanRW, // orchestrator/human only; the handler re-checks
 
+	// Read-only host introspection for the paired human/sessions only (not a
+	// read-only guest). diagnostics carries only host-shaped detail (PIDs,
+	// worktree paths, token-*presence*, never token values). config's secret
+	// env-map values are redacted before they cross the wire (config.RedactSecrets),
+	// so neither serves a guest a secret the human/guest split would need to guard.
+	"config":      remoteHumanRW, // effective config (env secrets redacted) + diff (GUI config viewer, #904)
+	"diagnostics": remoteHumanRW, // health/doctor payload for the GUI diagnostics panel (#904)
+
 	"wait":               remoteHumanRW, // targets arbitrary sessions
 	"repo_list":          remoteHumanRW, // only useful for create, which guests can't do
 	"store_list":         remoteHumanRW, // store contents may be sensitive: human + sessions, not guests
@@ -120,7 +128,6 @@ var remoteMessagePolicy = map[string]remotePolicy{
 	"pair_approve": remoteDenied, // pairing approval is an out-of-band local human action
 	"pair_list":    remoteDenied,
 	"pair_revoke":  remoteDenied,
-	"diagnostics":  remoteDenied, // deferred (#628): may later allow paired humans a redacted payload (design §B.4)
 }
 
 // remoteAllowed reports whether a control message of type msgType may be

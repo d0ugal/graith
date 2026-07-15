@@ -922,6 +922,192 @@ public struct MsgAckMsg: Codable, Sendable {
     }
 }
 
+// MARK: - Config viewer (#904)
+
+/// `config_response` — the daemon's effective (merged) configuration rendered as
+/// TOML plus a unified diff against the built-in defaults, for the read-only
+/// config viewer in the GUI Settings. `config` itself has no payload (EmptyMsg).
+public struct ConfigResponseMsg: Codable, Sendable {
+    /// The fully-merged configuration as TOML (what `gr config show` prints).
+    public var effectiveTOML: String
+    /// Unified diff (defaults → effective). Empty when the config matches defaults.
+    public var diffFromDefaults: String
+    /// The config file the daemon loaded (informational; may be absent).
+    public var configPath: String?
+    /// Whether a config file was present; false means running on pure defaults.
+    public var configExists: Bool
+
+    public init(effectiveTOML: String, diffFromDefaults: String,
+                configPath: String? = nil, configExists: Bool) {
+        self.effectiveTOML = effectiveTOML
+        self.diffFromDefaults = diffFromDefaults
+        self.configPath = configPath
+        self.configExists = configExists
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case effectiveTOML = "effective_toml"
+        case diffFromDefaults = "diff_from_defaults"
+        case configPath = "config_path"
+        case configExists = "config_exists"
+    }
+}
+
+// MARK: - Diagnostics / health (#904)
+
+/// Aggregate fleet counts. On the Go side (`FleetSummary`) this is embedded in
+/// both `DiagnosticsMsg` and `StatusResponseMsg`; the remote boundary also
+/// derives it app-side from the session list (the daemon has no dedicated
+/// per-session `status` RPC over the wire), hence the defaulted initializer.
+public struct FleetSummary: Codable, Hashable, Sendable {
+    public var total: Int
+    public var active: Int
+    public var approval: Int
+    public var ready: Int
+    public var errored: Int
+    public var stopped: Int
+
+    public init(total: Int = 0, active: Int = 0, approval: Int = 0,
+                ready: Int = 0, errored: Int = 0, stopped: Int = 0) {
+        self.total = total
+        self.active = active
+        self.approval = approval
+        self.ready = ready
+        self.errored = errored
+        self.stopped = stopped
+    }
+}
+
+/// `diagnostics` — the daemon's health snapshot for the GUI diagnostics panel
+/// (the doctor-equivalent). `diagnostics` itself has no request payload.
+public struct DiagnosticsMsg: Codable, Sendable {
+    public var daemonPID: Int
+    public var daemonVersion: String?
+    public var daemonUptime: String
+    public var fleet: FleetSummary
+    public var sessions: [SessionDiagnostic]
+    public var deletedSessionIDs: [String]?
+    public var scrollback: ScrollbackDiagnostic
+    public var messages: MessagesDiagnostic
+
+    public init(daemonPID: Int, daemonVersion: String? = nil, daemonUptime: String,
+                fleet: FleetSummary, sessions: [SessionDiagnostic],
+                deletedSessionIDs: [String]? = nil,
+                scrollback: ScrollbackDiagnostic, messages: MessagesDiagnostic) {
+        self.daemonPID = daemonPID
+        self.daemonVersion = daemonVersion
+        self.daemonUptime = daemonUptime
+        self.fleet = fleet
+        self.sessions = sessions
+        self.deletedSessionIDs = deletedSessionIDs
+        self.scrollback = scrollback
+        self.messages = messages
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case daemonPID = "daemon_pid"
+        case daemonVersion = "daemon_version"
+        case daemonUptime = "daemon_uptime"
+        case fleet
+        case sessions
+        case deletedSessionIDs = "deleted_session_ids"
+        case scrollback
+        case messages
+    }
+}
+
+/// Per-session health facts the diagnostics panel derives findings from.
+public struct SessionDiagnostic: Codable, Sendable, Identifiable, Hashable {
+    public var id: String
+    public var name: String
+    public var status: String
+    public var agentStatus: String?
+    public var pid: Int?
+    public var pidAlive: Bool
+    public var hasPTY: Bool?
+    public var worktreePath: String?
+    public var worktreeExists: Bool
+    public var configStale: Bool
+    public var hookStale: Bool
+    public var scrollbackBytes: Int
+    public var scrollbackMax: Int
+    public var saturated: Bool
+    public var hasToken: Bool
+
+    public init(id: String, name: String, status: String, agentStatus: String? = nil,
+                pid: Int? = nil, pidAlive: Bool, hasPTY: Bool? = nil,
+                worktreePath: String? = nil, worktreeExists: Bool,
+                configStale: Bool, hookStale: Bool,
+                scrollbackBytes: Int, scrollbackMax: Int, saturated: Bool, hasToken: Bool) {
+        self.id = id
+        self.name = name
+        self.status = status
+        self.agentStatus = agentStatus
+        self.pid = pid
+        self.pidAlive = pidAlive
+        self.hasPTY = hasPTY
+        self.worktreePath = worktreePath
+        self.worktreeExists = worktreeExists
+        self.configStale = configStale
+        self.hookStale = hookStale
+        self.scrollbackBytes = scrollbackBytes
+        self.scrollbackMax = scrollbackMax
+        self.saturated = saturated
+        self.hasToken = hasToken
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case status
+        case agentStatus = "agent_status"
+        case pid
+        case pidAlive = "pid_alive"
+        case hasPTY = "has_pty"
+        case worktreePath = "worktree_path"
+        case worktreeExists = "worktree_exists"
+        case configStale = "config_stale"
+        case hookStale = "hook_stale"
+        case scrollbackBytes = "scrollback_bytes"
+        case scrollbackMax = "scrollback_max"
+        case saturated
+        case hasToken = "has_token"
+    }
+}
+
+public struct ScrollbackDiagnostic: Codable, Sendable, Hashable {
+    public var totalFiles: Int
+    public var totalBytes: Int
+    public var saturatedCount: Int
+
+    public init(totalFiles: Int, totalBytes: Int, saturatedCount: Int) {
+        self.totalFiles = totalFiles
+        self.totalBytes = totalBytes
+        self.saturatedCount = saturatedCount
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case totalFiles = "total_files"
+        case totalBytes = "total_bytes"
+        case saturatedCount = "saturated_count"
+    }
+}
+
+public struct MessagesDiagnostic: Codable, Sendable, Hashable {
+    public var totalStreams: Int
+    public var totalMessages: Int
+
+    public init(totalStreams: Int, totalMessages: Int) {
+        self.totalStreams = totalStreams
+        self.totalMessages = totalMessages
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case totalStreams = "total_streams"
+        case totalMessages = "total_messages"
+    }
+}
+
 // MARK: - Empty-payload requests
 
 /// `list` takes no payload. Used as an explicit "no payload" marker.
