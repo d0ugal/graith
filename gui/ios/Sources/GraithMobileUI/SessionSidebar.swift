@@ -14,6 +14,7 @@ struct SessionSidebar: View {
             // they're reachable without a toolbar overflow menu.
             SidebarFilterControls(model: model)
 
+            ScenarioSidebarSection(model: model)
             ForEach(model.connections) { conn in
                 HostSection(connection: conn, criteria: model.filterCriteria)
             }

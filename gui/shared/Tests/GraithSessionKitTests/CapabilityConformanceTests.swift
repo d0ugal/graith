@@ -127,6 +127,10 @@ private func sharedAffordances() -> Set<String> {
     wire("approvals.respond") { _ = HostConnection.respond }
     wire("pairing.request") { _ = ControlType.pairRequest }
 
+    // Scenarios — FleetModel aggregates per-host scenarios and routes the
+    // human-authorized lifecycle actions to the owning host (#903).
+    wire("scenarios.manage") { _ = \FleetModel.hostedScenarios; _ = FleetModel.stopScenario(name:hostID:) }
+
     return ids
 }
 

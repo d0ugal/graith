@@ -198,7 +198,8 @@
       "id": "scenarios.manage",
       "category": "Scenarios",
       "name": "Start / stop / resume / inspect scenarios",
-      "cli": "supported", "ios": "planned", "macos": "planned"
+      "cli": "supported", "ios": "supported", "macos": "supported",
+      "notes": "The GUIs list scenarios, show per-session role/task/done status, group scenario members in the sidebar, and run the human-authorized stop/resume/delete actions; `start`/`add`/`task-done` stay CLI-only (they are orchestrator-session-scoped, not human-client operations)."
     },
     {
       "id": "triggers.manage",

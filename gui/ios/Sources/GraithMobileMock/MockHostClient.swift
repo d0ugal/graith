@@ -11,6 +11,7 @@ public actor MockHostClient: GraithHostClient {
     private var deleted: [SessionInfo] = []
     private var repos: [RepoEntry]
     private var pending: [ApprovalInfo]
+    private var scenarios: [ScenarioRecord]
     private var snapshotFrame: String
     private var connected = false
 
@@ -23,11 +24,13 @@ public actor MockHostClient: GraithHostClient {
         sessions: [SessionInfo] = MockHostClient.defaultSessions,
         repos: [RepoEntry] = MockHostClient.defaultRepos,
         pending: [ApprovalInfo] = MockHostClient.defaultApprovals,
+        scenarios: [ScenarioRecord] = MockHostClient.defaultScenarios,
         snapshotFrame: String = "braw session — screen peek\n$ █"
     ) {
         self.sessions = sessions
         self.repos = repos
         self.pending = pending
+        self.scenarios = scenarios
         self.snapshotFrame = snapshotFrame
     }
 
@@ -181,6 +184,26 @@ public actor MockHostClient: GraithHostClient {
         mutate(sessionID) { $0 = $0.with(agent: agent) }
     }
 
+    // MARK: - Scenarios
+
+    public func listScenarios() async throws -> [ScenarioRecord] {
+        try check(ControlType.scenarioList)
+        return scenarios
+    }
+
+    public func stopScenario(name: String) async throws {
+        try check(ControlType.scenarioStop)
+    }
+
+    public func resumeScenario(name: String) async throws {
+        try check(ControlType.scenarioResume)
+    }
+
+    public func deleteScenario(name: String) async throws {
+        try check(ControlType.scenarioDelete)
+        scenarios.removeAll { $0.name == name }
+    }
+
     // MARK: - Approvals
 
     public func approvalStream() -> AsyncStream<[ApprovalInfo]> {
@@ -273,6 +296,28 @@ extension MockHostClient {
         ApprovalInfo(requestID: "req-canny-1", sessionID: "canny002", sessionName: "canny",
                      toolName: "Bash", toolInput: "rm -rf build/", agent: "codex",
                      repoName: "croft", requestedAt: "2026-07-08T07:00:00Z"),
+    ]
+
+    public static let defaultScenarios: [ScenarioRecord] = [
+        ScenarioRecord(
+            id: "sc-strath1",
+            name: "strath",
+            orchestratorID: "orch0001",
+            goal: "Wire distributed tracing end to end",
+            status: "running",
+            sessionIDs: ["braw0001", "canny002", "bide0003"],
+            sessions: [
+                ScenarioSessionInfo(name: "braw", sessionID: "braw0001", role: "Backend engineer",
+                                    task: "Add tracing ingest endpoint", taskDone: false,
+                                    repo: "croft", agent: "claude", status: "running"),
+                ScenarioSessionInfo(name: "canny", sessionID: "canny002", role: "Frontend developer",
+                                    task: "Add trace export UI", taskDone: false,
+                                    repo: "croft", agent: "codex", status: "running"),
+                ScenarioSessionInfo(name: "bide", sessionID: "bide0003", role: "Reviewer",
+                                    task: "Review the pipeline", taskDone: true,
+                                    repo: "glen", agent: "claude", status: "stopped"),
+            ],
+            createdAt: "2026-07-14T09:00:00Z"),
     ]
 }
 

@@ -2279,7 +2279,8 @@
     },
     {
       "name": "ScenarioDeleteMsg",
-      "swift": "planned",
+      "swift": "required",
+      "swift_type": "ScenarioNameMsg",
       "fields": [
         {
           "name": "name",
@@ -2298,7 +2299,8 @@
     },
     {
       "name": "ScenarioListResponse",
-      "swift": "planned",
+      "swift": "required",
+      "swift_type": "ScenarioListResponse",
       "fields": [
         {
           "name": "scenarios",
@@ -2315,7 +2317,8 @@
     },
     {
       "name": "ScenarioRecord",
-      "swift": "planned",
+      "swift": "required",
+      "swift_type": "ScenarioRecord",
       "fields": [
         {
           "name": "id",
@@ -2384,7 +2387,8 @@
     },
     {
       "name": "ScenarioResumeMsg",
-      "swift": "planned",
+      "swift": "required",
+      "swift_type": "ScenarioNameMsg",
       "fields": [
         {
           "name": "name",
@@ -2397,7 +2401,8 @@
     },
     {
       "name": "ScenarioSessionInfo",
-      "swift": "planned",
+      "swift": "required",
+      "swift_type": "ScenarioSessionInfo",
       "fields": [
         {
           "name": "name",
@@ -2607,7 +2612,8 @@
     },
     {
       "name": "ScenarioStopMsg",
-      "swift": "planned",
+      "swift": "required",
+      "swift_type": "ScenarioNameMsg",
       "fields": [
         {
           "name": "name",

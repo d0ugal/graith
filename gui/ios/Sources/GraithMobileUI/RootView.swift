@@ -12,6 +12,7 @@ public struct RootView: View {
     @State private var showingApprovals = false
     @State private var showingNewSession = false
     @State private var showingDeleted = false
+    @State private var showingScenarios = false
 
     public init(model: FleetModel) {
         self.model = model
@@ -41,6 +42,9 @@ public struct RootView: View {
         }
         .sheet(isPresented: $showingDeleted) {
             DeletedSessionsView(model: model)
+        }
+        .sheet(isPresented: $showingScenarios) {
+            ScenariosView(model: model)
         }
     }
 
@@ -78,6 +82,14 @@ public struct RootView: View {
                 } label: {
                     Label("Add Host", systemImage: "externaldrive.badge.plus")
                 }
+
+                Button {
+                    showingScenarios = true
+                } label: {
+                    Label("Scenarios", systemImage: "square.stack.3d.up")
+                }
+                .badgeCompat(model.hostedScenarios.count)
+                .disabled(model.connections.isEmpty)
 
                 Button {
                     showingDeleted = true
