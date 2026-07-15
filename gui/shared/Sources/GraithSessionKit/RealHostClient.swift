@@ -161,6 +161,30 @@ public actor RealHostClient: GraithHostClient {
     public func resumeScenario(name: String) async throws { try await run { try await self.inner.resumeScenario(name: name) } }
     public func deleteScenario(name: String) async throws { try await run { try await self.inner.deleteScenario(name: name) } }
 
+    // MARK: - Messaging (gr msg)
+
+    public func sendMessage(toSessionID sessionID: String, body: String) async throws -> ConversationMessage {
+        do {
+            // Label local-human sends "human" so the recipient sees a sensible
+            // sender; a remote human's identity is forced daemon-side regardless.
+            return try await inner.sendMessage(toSessionID: sessionID, body: body, senderName: "human")
+        } catch {
+            throw RealClientError.map(error)
+        }
+    }
+
+    public func conversation(sessionID: String, limit: Int) async throws -> [ConversationMessage] {
+        do {
+            return try await inner.conversation(sessionID: sessionID, limit: limit)
+        } catch {
+            throw RealClientError.map(error)
+        }
+    }
+
+    public func ackInbox(sessionID: String) async throws {
+        try await run { try await self.inner.ackInbox(sessionID: sessionID) }
+    }
+
     // MARK: - Approvals (event connection)
 
     /// Bridge the shared `subscribeApprovals()` (async/throws) into the boundary's

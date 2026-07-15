@@ -687,6 +687,7 @@ struct SessionRow: View {
     @State private var statusText = ""
     @State private var showLogs = false
     @State private var showSnapshot = false
+    @State private var showMessages = false
 
     private let migrateAgents = ["claude", "codex", "agy", "opencode"]
 
@@ -764,6 +765,7 @@ struct SessionRow: View {
         }
         .sheet(isPresented: $showLogs) { LogsSheet(session: session) }
         .sheet(isPresented: $showSnapshot) { SnapshotSheet(session: session) }
+        .sheet(isPresented: $showMessages) { MessagesSheet(session: session) }
         .sheet(isPresented: $showSetStatus) {
             SessionTextPromptSheet(
                 title: "Set Status",
@@ -1025,6 +1027,7 @@ struct SessionRow: View {
                 Button("Clear Status") { store.setStatus(session, text: "", clear: true) }
             }
             Divider()
+            Button("Messages…") { showMessages = true }
             Button("View Logs…") { showLogs = true }
             Button("Screen Snapshot…") { showSnapshot = true }
             Divider()

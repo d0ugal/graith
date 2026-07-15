@@ -138,13 +138,13 @@
     },
     {
       "id": "messaging.send",
-      "ios": "planned",
-      "macos": "planned"
+      "ios": "supported",
+      "macos": "supported"
     },
     {
       "id": "messaging.read",
-      "ios": "planned",
-      "macos": "planned"
+      "ios": "supported",
+      "macos": "supported"
     },
     {
       "id": "messaging.jail",

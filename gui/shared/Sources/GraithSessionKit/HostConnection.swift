@@ -263,6 +263,53 @@ public final class HostConnection: ObservableObject, Identifiable {
     public func resumeScenario(_ name: String) async { await run { try await self.client.resumeScenario(name: name) } }
     public func deleteScenario(_ name: String) async { await run { try await self.client.deleteScenario(name: name) } }
 
+    // MARK: - Messaging (gr msg)
+
+    /// Send a direct message to `session`'s inbox. Returns true on success; a
+    /// failure surfaces on `lastError` (the compose UI shows it). Does not
+    /// refresh the session list — messaging doesn't change it.
+    @discardableResult
+    public func sendMessage(to session: SessionInfo, body: String) async -> Bool {
+        let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        do {
+            _ = try await client.sendMessage(toSessionID: session.id, body: trimmed)
+            lastError = nil
+            return true
+        } catch {
+            lastError = Self.describe(error)
+            return false
+        }
+    }
+
+    /// Fetch the full direct-message conversation (both directions) for
+    /// `session`. A failure surfaces on `lastError` and yields an empty list.
+    public func conversation(for session: SessionInfo, limit: Int = 0) async -> [ConversationMessage] {
+        do {
+            let messages = try await client.conversation(sessionID: session.id, limit: limit)
+            lastError = nil
+            return messages
+        } catch {
+            lastError = Self.describe(error)
+            return []
+        }
+    }
+
+    /// Mark `session`'s inbox read (clears its unread count). Returns true on
+    /// success; a failure surfaces on `lastError` and returns false so the UI can
+    /// tell the user rather than silently appearing to succeed.
+    @discardableResult
+    public func ackInbox(for session: SessionInfo) async -> Bool {
+        do {
+            try await client.ackInbox(sessionID: session.id)
+            lastError = nil
+            return true
+        } catch {
+            lastError = Self.describe(error)
+            return false
+        }
+    }
+
     /// Expose the underlying client for the attach path (Task 20).
     public var underlyingClient: any GraithHostClient { client }
 

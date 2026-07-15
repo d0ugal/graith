@@ -180,13 +180,15 @@
       "id": "messaging.send",
       "category": "Messaging",
       "name": "Send / publish inter-agent messages",
-      "cli": "supported", "ios": "planned", "macos": "planned"
+      "cli": "supported", "ios": "supported", "macos": "supported",
+      "notes": "GUIs compose a direct message to a session's inbox (msg send) from the session context menu; topic publish (msg pub) stays CLI-only for now."
     },
     {
       "id": "messaging.read",
       "category": "Messaging",
       "name": "Read inbox / subscribe to topics",
-      "cli": "supported", "ios": "planned", "macos": "planned"
+      "cli": "supported", "ios": "supported", "macos": "supported",
+      "notes": "GUIs show a session's direct-message conversation (inbox view) with mark-as-read (ack); topic subscribe/follow stays CLI-only for now."
     },
     {
       "id": "messaging.jail",

@@ -267,7 +267,8 @@
     },
     {
       "name": "ConversationMessage",
-      "swift": "planned",
+      "swift": "required",
+      "swift_type": "ConversationMessage",
       "fields": [
         {
           "name": "id",
@@ -1474,7 +1475,8 @@
     },
     {
       "name": "MsgAckMsg",
-      "swift": "planned",
+      "swift": "required",
+      "swift_type": "MsgAckMsg",
       "fields": [
         {
           "name": "stream",
@@ -1494,7 +1496,8 @@
     },
     {
       "name": "MsgConversationListMsg",
-      "swift": "planned",
+      "swift": "required",
+      "swift_type": "MsgConversationListMsg",
       "fields": [
         {
           "name": "messages",
@@ -1511,7 +1514,8 @@
     },
     {
       "name": "MsgConversationMsg",
-      "swift": "planned",
+      "swift": "required",
+      "swift_type": "MsgConversationMsg",
       "fields": [
         {
           "name": "session_id",
@@ -1673,7 +1677,8 @@
     },
     {
       "name": "MsgPubMsg",
-      "swift": "planned",
+      "swift": "required",
+      "swift_type": "MsgPubMsg",
       "fields": [
         {
           "name": "stream",
