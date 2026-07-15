@@ -15,6 +15,7 @@ var (
 	purgeBatch    batchFlags
 	purgeChildren bool
 	purgeYes      bool
+	purgeSelf     bool
 )
 
 var purgeCmd = &cobra.Command{
@@ -23,21 +24,7 @@ var purgeCmd = &cobra.Command{
 	Long: "Hard-delete a session immediately: remove its worktree, branch, and state with no " +
 		"recovery. Works on a live session or one already soft-deleted (to empty a single trash " +
 		"entry). This is the destructive verb — use `gr delete` for a recoverable soft delete.",
-	Args: func(cmd *cobra.Command, args []string) error {
-		if purgeChildren && purgeBatch.active() {
-			return fmt.Errorf("--children cannot be combined with batch filters")
-		}
-
-		if purgeBatch.active() {
-			return cobra.NoArgs(cmd, args)
-		}
-
-		if purgeChildren {
-			return cobra.MaximumNArgs(1)(cmd, args)
-		}
-
-		return cobra.ExactArgs(1)(cmd, args)
-	},
+	Args:              selfChildrenBatchArgs(&purgeSelf, &purgeChildren, &purgeBatch),
 	ValidArgsFunction: completeSessionOrDeletedNames,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		skipPrompt := purgeBatch.force || purgeYes
@@ -49,6 +36,11 @@ var purgeCmd = &cobra.Command{
 			bf.force = skipPrompt
 
 			return deleteBatchRun(cmd, &bf, true)
+		}
+
+		args, err := selfArgs(purgeSelf, args)
+		if err != nil {
+			return err
 		}
 
 		c, err := client.Connect(cfg, paths, cfgFile)
@@ -148,6 +140,7 @@ func confirmPurgeSubtree(rootLabel string) (bool, error) {
 func registerPurgeCmd() {
 	addBatchFlags(purgeCmd, &purgeBatch)
 	purgeCmd.Flags().BoolVar(&purgeChildren, "children", false, "also purge all descendant sessions")
+	purgeCmd.Flags().BoolVar(&purgeSelf, "self", false, "purge the current session (from GRAITH_SESSION_ID/NAME)")
 	purgeCmd.Flags().BoolVarP(&purgeYes, "yes", "y", false, "skip the unsaved-work confirmation prompt")
 	rootCmd.AddCommand(purgeCmd)
 }

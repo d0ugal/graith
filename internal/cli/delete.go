@@ -17,6 +17,7 @@ import (
 var (
 	deleteBatch    batchFlags
 	deleteChildren bool
+	deleteSelf     bool
 	// deleteYesNoop keeps `gr delete -y` working as an accepted, inert alias
 	// (`--force` is provided by addBatchFlags and is likewise inert here). `gr
 	// delete` is always a recoverable soft delete now, so there is nothing to
@@ -32,27 +33,18 @@ var deleteCmd = &cobra.Command{
 		"and state for the retention window so `gr restore` can recover it. Use `gr purge` to " +
 		"delete immediately and irrecoverably. When soft delete is disabled (`retention = \"0\"`), " +
 		"`gr delete` is rejected — use `gr purge`.",
-	Args: func(cmd *cobra.Command, args []string) error {
-		if deleteChildren && deleteBatch.active() {
-			return fmt.Errorf("--children cannot be combined with batch filters")
-		}
-
-		if deleteBatch.active() {
-			return cobra.NoArgs(cmd, args)
-		}
-
-		if deleteChildren {
-			return cobra.MaximumNArgs(1)(cmd, args)
-		}
-
-		return cobra.ExactArgs(1)(cmd, args)
-	},
+	Args:              selfChildrenBatchArgs(&deleteSelf, &deleteChildren, &deleteBatch),
 	ValidArgsFunction: completeSessionNames,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		warnDeleteForceDeprecated(cmd)
 
 		if deleteBatch.active() {
 			return deleteBatchRun(cmd, &deleteBatch, false)
+		}
+
+		args, err := selfArgs(deleteSelf, args)
+		if err != nil {
+			return err
 		}
 
 		c, err := client.Connect(cfg, paths, cfgFile)
@@ -496,6 +488,7 @@ func deleteBatchRun(cmd *cobra.Command, bf *batchFlags, purge bool) error {
 func registerDeleteCmd() {
 	addBatchFlags(deleteCmd, &deleteBatch)
 	deleteCmd.Flags().BoolVar(&deleteChildren, "children", false, "also soft-delete all descendant sessions")
+	deleteCmd.Flags().BoolVar(&deleteSelf, "self", false, "soft-delete the current session (from GRAITH_SESSION_ID/NAME)")
 	// --force and --yes are accepted but inert: gr delete is always a recoverable
 	// soft delete, so there is nothing to force or confirm. Kept for backward
 	// compatibility with existing `gr delete --force` scripts (now a safety

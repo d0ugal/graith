@@ -12,30 +12,22 @@ import (
 var (
 	stopBatch    batchFlags
 	stopChildren bool
+	stopSelf     bool
 )
 
 var stopCmd = &cobra.Command{
-	Use:   "stop <name-or-id>",
-	Short: "Stop a running session without deleting it",
-	Args: func(cmd *cobra.Command, args []string) error {
-		if stopChildren && stopBatch.active() {
-			return fmt.Errorf("--children cannot be combined with batch filters")
-		}
-
-		if stopBatch.active() {
-			return cobra.NoArgs(cmd, args)
-		}
-
-		if stopChildren {
-			return cobra.MaximumNArgs(1)(cmd, args)
-		}
-
-		return cobra.ExactArgs(1)(cmd, args)
-	},
+	Use:               "stop <name-or-id>",
+	Short:             "Stop a running session without deleting it",
+	Args:              selfChildrenBatchArgs(&stopSelf, &stopChildren, &stopBatch),
 	ValidArgsFunction: completeSessionNames,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if stopBatch.active() {
 			return stopBatchRun(cmd)
+		}
+
+		args, err := selfArgs(stopSelf, args)
+		if err != nil {
+			return err
 		}
 
 		c, err := client.Connect(cfg, paths, cfgFile)
@@ -138,5 +130,6 @@ func stopBatchRun(cmd *cobra.Command) error {
 func registerStopCmd() {
 	addBatchFlags(stopCmd, &stopBatch)
 	stopCmd.Flags().BoolVar(&stopChildren, "children", false, "also stop all descendant sessions")
+	stopCmd.Flags().BoolVar(&stopSelf, "self", false, "stop the current session (from GRAITH_SESSION_ID/NAME)")
 	rootCmd.AddCommand(stopCmd)
 }

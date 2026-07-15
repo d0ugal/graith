@@ -302,6 +302,12 @@ or `GR_AGENT_MODE=1` to force. The `--agent-mode` flag also forces it on.
 - `gr stop --children` / `gr delete --children` — operate on all descendant
   sessions. When run without a positional arg, auto-resolves from
   `GRAITH_SESSION_ID` and excludes the calling session.
+- `gr stop --self` / `gr delete --self` / `gr purge --self` — operate on the
+  calling session itself, resolved from `GRAITH_SESSION_ID` (falling back to
+  `GRAITH_SESSION_NAME`). Lets an agent clean itself up (e.g. `gr delete --self`
+  after its PR merges) without interpolating its own name. Takes no positional
+  arg; not combinable with `--children` or the batch filters; errors outside a
+  session.
 - `gr msg send --children "body"` — send to all descendant sessions' inboxes.
 - `gr msg send --parent "body"` — send to the parent session's inbox.
 
