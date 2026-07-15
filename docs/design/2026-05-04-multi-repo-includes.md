@@ -476,10 +476,15 @@ Mitigations included in this proposal:
   `GRAITH_INCLUDE_<NAME>_PATH` for each included repo. Orchestrators that
   support env-based path configuration can use these.
 
-Future mitigations (not part of this proposal):
+Follow-up mitigations:
 
-- **Path rewriting**: a post-creation hook that rewrites known config files
-  (e.g., `.env.local`, `docker-compose.override.yml`) to use worktree paths.
+- **Path rewriting** (shipped, #1033): a post-creation hook rewrites known
+  config files (`.env.local`, `docker-compose.override.yml`) present in each
+  worktree, substituting source repo paths (absolute and `~/`-relative forms)
+  with the session worktree paths, matched at path boundaries so a sibling
+  repo whose name is a prefix (`grafana` vs `grafana-enterprise`) is not
+  clobbered. Best-effort — gitignored/absent files are skipped and a write
+  failure is logged, not fatal. See `internal/daemon/pathrewrite.go`.
 - **Documentation**: guide users to configure orchestrators to use relative
   paths where possible.
 
@@ -628,7 +633,10 @@ orchestrator agent checks out requested branches in its included worktrees and
 runs tests. This requires no graith changes beyond what this proposal adds —
 it's a convention built on `includes` + `gr msg`.
 
-**Future work — path rewriting:** A post-creation hook system that rewrites
-config files (`.env.local`, `docker-compose.override.yml`) to replace source
-paths with worktree paths. This would solve the absolute path problem for
-orchestrators that can't use environment variables.
+**Path rewriting (shipped, #1033):** A post-creation hook rewrites config files
+(`.env.local`, `docker-compose.override.yml`) to replace source paths with
+worktree paths, for orchestrators that can't use environment variables. It
+rewrites files already present in the worktrees (so committed overrides are
+handled; gitignored ones absent from a fresh checkout are skipped, where the
+`GRAITH_INCLUDE_*_PATH` env vars remain the mitigation). Implemented in
+`internal/daemon/pathrewrite.go`.

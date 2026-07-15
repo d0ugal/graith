@@ -1280,6 +1280,26 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 				return SessionState{}, fmt.Errorf("setup git session: %w", err)
 			}
 		}
+
+		// Post-create hook: rewrite absolute source-repo paths in known
+		// orchestrator config files to the session's worktree paths, so an
+		// includes orchestrator that hard-codes sibling paths (and can't use the
+		// GRAITH_INCLUDE_*_PATH env vars) sees the session's code, not the main
+		// checkout (#1033). Only tracked config files present in the worktrees
+		// are touched; best-effort and never fatal.
+		if len(includes) > 0 {
+			home, _ := os.UserHomeDir()
+			rewrites := buildIncludePathRewrites(home, repoRoot, worktreePath, includes)
+
+			roots := make([]string, 0, len(includes)+1)
+			roots = append(roots, worktreePath)
+
+			for _, inc := range includes {
+				roots = append(roots, inc.WorktreePath)
+			}
+
+			sm.rewriteIncludeConfigPaths(roots, rewrites)
+		}
 	}
 
 	// Build template vars, env, args, hooks, sandbox — all fast, no lock needed.
