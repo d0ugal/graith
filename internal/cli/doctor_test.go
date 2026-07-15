@@ -413,6 +413,72 @@ func TestCheckApprovalsBackendFailClosed(t *testing.T) {
 	}
 }
 
+// TestCheckTriggersDegraded verifies gr doctor surfaces a degraded watch-trigger
+// binding (issue #1029) as a warning naming the trigger, session, reason, and
+// the scheduled retry — so the operator knows the watch is temporarily blind and
+// that it recovers on its own.
+func TestCheckTriggersDegraded(t *testing.T) {
+	oldOut := out
+
+	t.Cleanup(func() { out = oldOut })
+
+	var buf bytes.Buffer
+
+	out = output.NewWithWriter(false, &buf)
+
+	diag := &protocol.DiagnosticsMsg{
+		Triggers: []protocol.TriggerDiagnostic{{
+			Name:        "test-on-change",
+			SessionID:   "abc123",
+			SessionName: "ben",
+			Degraded:    "watcher.Add failed: no space left on device",
+			RetryCount:  2,
+			NextRetryAt: "2026-07-15T10:00:00Z",
+		}},
+	}
+
+	dc := newDoctorContext()
+	dc.checkTriggers(diag)
+
+	warned := strings.Join(checkResults(dc, "warn"), "\n")
+	for _, want := range []string{"test-on-change", "ben", "no space left on device"} {
+		if !strings.Contains(warned, want) {
+			t.Errorf("expected degraded warning to contain %q, got: %q", want, warned)
+		}
+	}
+
+	// The retry schedule is printed as a hint (not stored in checks), so assert it
+	// against the rendered output.
+	rendered := buf.String()
+	for _, want := range []string{"next attempt at 2026-07-15T10:00:00Z", "Retried 2 time(s)"} {
+		if !strings.Contains(rendered, want) {
+			t.Errorf("expected doctor output to contain %q, got:\n%s", want, rendered)
+		}
+	}
+
+	// A degraded binding is recoverable, so it must not fail the overall report.
+	if !dc.ok {
+		t.Error("degraded trigger should warn, not fail the report")
+	}
+}
+
+// TestCheckTriggersHealthy verifies gr doctor stays quiet about triggers when no
+// binding is degraded — no Triggers section noise on a healthy daemon.
+func TestCheckTriggersHealthy(t *testing.T) {
+	oldOut := out
+
+	t.Cleanup(func() { out = oldOut })
+
+	out = output.NewWithWriter(false, io.Discard)
+
+	dc := newDoctorContext()
+	dc.checkTriggers(&protocol.DiagnosticsMsg{})
+
+	if len(dc.checks) != 0 {
+		t.Errorf("expected no checks for healthy triggers, got %d", len(dc.checks))
+	}
+}
+
 // TestNonoInstallHintNotPipedShell verifies gr doctor's nono install guidance
 // never recommends the `curl … | sh` piped-shell pattern the project moved away
 // from in commit 0fa84fa / #697 — emitting that advice from a security-focused

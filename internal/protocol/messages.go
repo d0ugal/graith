@@ -742,6 +742,20 @@ type DiagnosticsMsg struct {
 	DeletedSessionIDs []string             `json:"deleted_session_ids,omitempty"`
 	Scrollback        ScrollbackDiagnostic `json:"scrollback"`
 	Messages          MessagesDiagnostic   `json:"messages"`
+	// Triggers lists watch-trigger bindings that are currently degraded (e.g. the
+	// inotify watch limit was exhausted). Healthy bindings are omitted; the slice
+	// is empty when nothing is degraded.
+	Triggers []TriggerDiagnostic `json:"triggers,omitempty"`
+}
+
+// TriggerDiagnostic reports a degraded watch-trigger binding for gr doctor.
+type TriggerDiagnostic struct {
+	Name        string `json:"name"`
+	SessionID   string `json:"session_id,omitempty"`
+	SessionName string `json:"session_name,omitempty"`
+	Degraded    string `json:"degraded"`
+	RetryCount  int    `json:"retry_count,omitempty"`
+	NextRetryAt string `json:"next_retry_at,omitempty"`
 }
 
 type SessionDiagnostic struct {
@@ -888,6 +902,11 @@ type TriggerRecord struct {
 	RunCount   int    `json:"run_count,omitempty"`
 	Bindings   int    `json:"bindings,omitempty"` // watch: live bound sessions
 	Degraded   string `json:"degraded,omitempty"` // watch: degraded binding reason
+	// DegradedRetryCount/DegradedRetryAt describe the automatic recovery of the
+	// degraded binding reported in Degraded: how many recreation attempts have
+	// been made and when the next one is due (RFC3339). Zero/empty when healthy.
+	DegradedRetryCount int    `json:"degraded_retry_count,omitempty"`
+	DegradedRetryAt    string `json:"degraded_retry_at,omitempty"`
 }
 
 type TriggerListResponse struct {

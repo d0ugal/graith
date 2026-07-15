@@ -123,6 +123,7 @@ var doctorCmd = &cobra.Command{
 
 			dc.checkSessions(diag)
 			dc.checkStorage(diag)
+			dc.checkTriggers(diag)
 		}
 
 		report.OK = dc.ok
@@ -1078,6 +1079,34 @@ func (dc *doctorContext) checkStorage(diag *protocol.DiagnosticsMsg) {
 			dc.hintf("Use --autofix to remove")
 		}
 	}
+}
+
+// checkTriggers surfaces watch-trigger bindings that are currently degraded
+// (e.g. the inotify watch limit was exhausted). A degraded binding retries on a
+// backoff and recovers on its own once the limit clears (issue #1029), so this
+// is a warning, not a failure — it tells the operator the watch is temporarily
+// blind and when the next retry is due.
+func (dc *doctorContext) checkTriggers(diag *protocol.DiagnosticsMsg) {
+	if len(diag.Triggers) == 0 {
+		return
+	}
+
+	dc.section("Triggers")
+
+	for _, t := range diag.Triggers {
+		who := t.SessionName
+		if who == "" {
+			who = t.SessionID
+		}
+
+		dc.warnf("triggers", "Watch trigger %q degraded on session %q: %s", t.Name, who, t.Degraded)
+
+		if t.NextRetryAt != "" {
+			dc.hintf("Retried %d time(s); next attempt at %s (recovers automatically when the watch limit clears)", t.RetryCount, t.NextRetryAt)
+		}
+	}
+
+	dc.hintf("If this persists, raise fs.inotify.max_user_watches (Linux) or reduce the watched tree with [trigger.watch] ignore/paths")
 }
 
 func (dc *doctorContext) checkTmpDir() {

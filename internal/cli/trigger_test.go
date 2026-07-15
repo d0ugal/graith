@@ -66,11 +66,12 @@ func TestRenderTriggerStatus(t *testing.T) {
 	buf.Reset()
 	renderTriggerStatus(&buf, protocol.TriggerRecord{
 		Name: "canny", Source: "watch", Action: "command", WatchScope: "repo:/croft",
-		Enabled: true, Bindings: 2, Degraded: "watcher.Add failed", LastError: "boom",
+		Enabled: true, Bindings: 2, Degraded: "watcher.Add failed",
+		DegradedRetryCount: 2, DegradedRetryAt: "2026-07-15T10:00:00Z", LastError: "boom",
 	})
 	out = buf.String()
 
-	for _, want := range []string{"Watch: repo:/croft", "2 live binding", "Degraded:", "Last error: boom"} {
+	for _, want := range []string{"Watch: repo:/croft", "2 live binding", "Degraded:", "Next retry: 2026-07-15T10:00:00Z", "2 attempt", "Last error: boom"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("watch status output missing %q:\n%s", want, out)
 		}

@@ -48,6 +48,12 @@ debounce = "30s"             # quiet-window; lower for fast commands
 - `.gitignore` is always honoured (ignored directories are pruned from the watch
   set, so `node_modules/` etc. don't exhaust the watcher).
 - A burst of edits is coalesced by the `debounce` quiet-window into one fire.
+- If a binding can't register its watch (e.g. the OS watch limit
+  `fs.inotify.max_user_watches` is exhausted) it is marked **degraded** and
+  retried on an exponential backoff (5s, 10s, 20s, … capped at 5m). It recovers
+  on its own once the limit clears — no session restart needed.
+  `gr trigger status <name>` and `gr doctor` surface the degraded state and the
+  next retry time.
 
 ## Actions
 

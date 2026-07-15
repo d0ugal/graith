@@ -189,6 +189,7 @@ var registeredTypes = []any{
 	StatusRequestMsg{},
 	DiagnosticsMsg{},
 	SessionDiagnostic{},
+	TriggerDiagnostic{},
 	ScrollbackDiagnostic{},
 	MessagesDiagnostic{},
 	FleetSummary{},
@@ -396,6 +397,7 @@ var swiftAnnotations = map[string]swiftAnnotation{
 	"GCResultMsg":          {SwiftNA, ""}, // local-only (doctor)
 	"DiagnosticsMsg":       {SwiftNA, ""}, // local-only
 	"SessionDiagnostic":    {SwiftNA, ""}, // local-only
+	"TriggerDiagnostic":    {SwiftNA, ""}, // local-only (doctor)
 	"ScrollbackDiagnostic": {SwiftNA, ""}, // local-only
 	"MessagesDiagnostic":   {SwiftNA, ""}, // local-only
 }

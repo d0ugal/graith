@@ -14,6 +14,35 @@ import (
 
 const fileWatchReconcileTick = 2 * time.Second
 
+const (
+	// watchRetryBaseBackoff is the delay before the first retry of a degraded
+	// binding (e.g. one that hit fs.inotify.max_user_watches). Subsequent
+	// retries back off exponentially from here.
+	watchRetryBaseBackoff = 5 * time.Second
+	// watchRetryMaxBackoff caps the exponential backoff so a persistently
+	// degraded binding keeps retrying periodically — the moment the watch limit
+	// clears, the next reconcile recreates the binding without a session restart.
+	watchRetryMaxBackoff = 5 * time.Minute
+)
+
+// watchRetryBackoff returns the delay before the retry-th recreation attempt of
+// a degraded binding: 5s, 10s, 20s, 40s, … capped at watchRetryMaxBackoff.
+func watchRetryBackoff(retry int) time.Duration {
+	if retry < 1 {
+		retry = 1
+	}
+
+	d := watchRetryBaseBackoff
+	for i := 1; i < retry; i++ {
+		d *= 2
+		if d >= watchRetryMaxBackoff {
+			return watchRetryMaxBackoff
+		}
+	}
+
+	return d
+}
+
 // builtinWatchIgnores are always applied and never overridable: watching these
 // is never useful and they are prime feedback-loop / churn sources.
 var builtinWatchIgnores = []string{".git/", ".git", ".hg/", ".svn/", "*.swp", "*.swx", "4913", ".DS_Store"}
@@ -33,14 +62,14 @@ func (sm *SessionManager) RunFileWatchLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			cfg := sm.Config()
-			sm.reconcileBindings(ctx, cfg)
+			sm.reconcileBindings(ctx, cfg, time.Now())
 		}
 	}
 }
 
 // reconcileBindings ensures one binding per (enabled watch trigger, matching
 // running session) and tears down bindings whose session is gone/stopped.
-func (sm *SessionManager) reconcileBindings(ctx context.Context, cfg *config.Config) {
+func (sm *SessionManager) reconcileBindings(ctx context.Context, cfg *config.Config, now time.Time) {
 	desired := make(map[string]*config.TriggerConfig) // bindingKey -> trigger
 
 	for i := range cfg.Triggers {
@@ -74,20 +103,26 @@ func (sm *SessionManager) reconcileBindings(ctx context.Context, cfg *config.Con
 		sm.teardownBinding(key)
 	}
 
-	// Create newly desired bindings, and recreate any whose definition changed.
+	// Create newly desired bindings; recreate any whose definition changed; and
+	// retry degraded ones whose backoff has elapsed. A degraded binding (e.g. one
+	// that hit the inotify watch limit) stays in the map so its status surfaces,
+	// but is recreated once its nextRetryAt passes — so it recovers on its own
+	// when the limit clears, without a source-session restart (issue #1029).
 	for key, t := range desired {
 		fp := triggerFingerprint(t)
 
 		sm.triggers.mu.Lock()
 		existing, exists := sm.triggers.bindings[key]
+		retryDue := exists && existing.degraded != "" && !existing.nextRetryAt.IsZero() && !now.Before(existing.nextRetryAt)
 		sm.triggers.mu.Unlock()
 
-		if exists {
+		if exists && !retryDue {
 			// A same-named watch trigger whose fire-affecting definition
 			// (paths/ignore/debounce/action/policy) changed leaves the binding
 			// key matching, so a plain existence check would keep the stale
 			// matcher and debounce. Tear it down and recreate on fingerprint
-			// change (mirrors reconcileSchedules' fingerprint reset).
+			// change (mirrors reconcileSchedules' fingerprint reset). A healthy or
+			// backoff-waiting binding whose definition is unchanged stays put.
 			if existing.fingerprint == fp {
 				continue
 			}
@@ -111,7 +146,7 @@ func (sm *SessionManager) reconcileBindings(ctx context.Context, cfg *config.Con
 			continue
 		}
 
-		sm.createBinding(ctx, t, sess)
+		sm.createBinding(ctx, t, sess, now)
 	}
 }
 
@@ -169,15 +204,43 @@ func (sm *SessionManager) sessionForBindingKey(key string) watchSession {
 }
 
 // createBinding sets up a recursive fsnotify watcher for a binding and starts
-// its event goroutine.
-func (sm *SessionManager) createBinding(ctx context.Context, t *config.TriggerConfig, sess watchSession) {
+// its event goroutine. If the watcher degrades (e.g. the inotify watch limit is
+// exhausted) the binding is recorded as degraded with a backoff-scheduled retry
+// rather than running; the reconcile loop recreates it once nextRetryAt passes.
+// now is injected so the retry schedule is testable.
+func (sm *SessionManager) createBinding(ctx context.Context, t *config.TriggerConfig, sess watchSession, now time.Time) {
+	key := bindingKey(t.Name, sess.id)
 	matcher := newWatchMatcher(sess.worktree, t.Watch)
 
+	// Carry forward the retry count from a prior degraded binding for this key so
+	// the backoff keeps growing across repeated failures instead of resetting on
+	// each retry attempt.
+	sm.triggers.mu.Lock()
+
+	prevRetries := 0
+	if prev, ok := sm.triggers.bindings[key]; ok {
+		prevRetries = prev.retryCount
+	}
+	sm.triggers.mu.Unlock()
+
+	// A watcher we can't even allocate (e.g. the inotify *instance* limit) is a
+	// degraded outcome like a failed Add — record it with a backoff so a retry
+	// doesn't busy-loop on every reconcile tick.
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
-		sm.log.Warn("trigger: fsnotify unavailable", "trigger", t.Name, "err", err)
+		sm.recordDegradedBinding(key, t, sess, "fsnotify.NewWatcher failed: "+err.Error(), prevRetries+1, now)
 		return
 	}
+
+	if degraded := addWatchRecursive(sm.watchAddFunc(watcher), sess.worktree, matcher); degraded != "" {
+		_ = watcher.Close()
+
+		sm.recordDegradedBinding(key, t, sess, degraded, prevRetries+1, now)
+
+		return
+	}
+
+	bctx, cancel := context.WithCancel(ctx)
 
 	b := &watchBinding{
 		triggerName: t.Name,
@@ -186,36 +249,62 @@ func (sm *SessionManager) createBinding(ctx context.Context, t *config.TriggerCo
 		fingerprint: triggerFingerprint(t),
 		watcher:     watcher,
 		changed:     make(map[string]bool),
+		cancel:      cancel,
 		// Re-adopt an existing reactor (tagged TriggerID/TriggerReactor) so
 		// ensure-reviewer reuse survives a daemon restart or binding recreation
 		// instead of spawning a duplicate.
 		reactorID: sm.findReactor(t.Name, sess.id),
 	}
 
-	degraded := addWatchRecursive(watcher, sess.worktree, matcher)
-	if degraded != "" {
-		b.degraded = degraded
-		sm.log.Warn("trigger: watcher degraded, disabling binding", "trigger", t.Name, "reason", degraded)
-
-		_ = watcher.Close()
-		// Record the binding as degraded so status reflects it, but don't run it.
-		sm.triggers.mu.Lock()
-		sm.triggers.bindings[bindingKey(t.Name, sess.id)] = b
-		sm.triggers.mu.Unlock()
-
-		return
-	}
-
-	bctx, cancel := context.WithCancel(ctx)
-	b.cancel = cancel
-
 	sm.triggers.mu.Lock()
-	sm.triggers.bindings[bindingKey(t.Name, sess.id)] = b
+	sm.triggers.bindings[key] = b
 	sm.triggers.mu.Unlock()
 
 	go sm.runBinding(bctx, t.Name, b, matcher)
 
 	sm.log.Info("trigger: watching", "trigger", t.Name, "session", sess.name, "worktree", sess.worktree)
+}
+
+// recordDegradedBinding stores (replacing any prior one) a degraded binding for
+// key with a backoff-scheduled retry. It holds no live watcher or goroutine — a
+// prior degraded binding already closed its watcher and never started one, and a
+// prior healthy binding for this key is only ever recreated after teardown — so
+// the reconcile loop simply recreates this entry once nextRetryAt passes.
+func (sm *SessionManager) recordDegradedBinding(key string, t *config.TriggerConfig, sess watchSession, reason string, attempt int, now time.Time) {
+	b := &watchBinding{
+		triggerName: t.Name,
+		sessionID:   sess.id,
+		worktree:    sess.worktree,
+		// Record the current fingerprint so an unchanged-definition degraded
+		// binding is recreated by the backoff path (retryDue), not the
+		// definition-changed path — otherwise an empty fingerprint would read as
+		// "definition changed" and recreate immediately, bypassing the backoff.
+		fingerprint: triggerFingerprint(t),
+		changed:     make(map[string]bool),
+		reactorID:   sm.findReactor(t.Name, sess.id),
+		degraded:    reason,
+		retryCount:  attempt,
+		nextRetryAt: now.Add(watchRetryBackoff(attempt)),
+	}
+
+	sm.log.Warn("trigger: watcher degraded, will retry",
+		"trigger", t.Name, "reason", reason,
+		"attempt", attempt, "retry_at", b.nextRetryAt.Format(time.RFC3339))
+
+	sm.triggers.mu.Lock()
+	sm.triggers.bindings[key] = b
+	sm.triggers.mu.Unlock()
+}
+
+// watchAddFunc returns the directory-registration function used when building a
+// binding's watch set. It normally delegates to the fsnotify watcher; tests
+// override sm.watchAdd to simulate an exhausted watch limit.
+func (sm *SessionManager) watchAddFunc(w *fsnotify.Watcher) func(string) error {
+	if sm.watchAdd != nil {
+		return func(path string) error { return sm.watchAdd(w, path) }
+	}
+
+	return w.Add
 }
 
 // runBinding is the per-binding event loop: filter events, coalesce with a
@@ -258,6 +347,10 @@ func (sm *SessionManager) handleWatchEvent(ctx context.Context, triggerName stri
 		if info, err := os.Stat(ev.Name); err == nil && info.IsDir() {
 			rel := matcher.rel(ev.Name)
 			if !matcher.ignoredDir(rel) {
+				// Best-effort: a post-creation Add failure (e.g. the watch limit
+				// exhausted only after a healthy start) is not routed through the
+				// degraded/retry path — that covers creation-time degradation only
+				// (#1029). Runtime subtree-add recovery is a separate follow-up.
 				_ = b.watcher.Add(ev.Name)
 				sm.scanNewDir(ctx, b, matcher, ev.Name, debounce, triggerName)
 			}
@@ -444,8 +537,10 @@ func (sm *SessionManager) teardownAllBindings() {
 }
 
 // addWatchRecursive walks the worktree and adds a watch per non-ignored
-// directory. Returns a non-empty degraded reason if it hits the watch limit.
-func addWatchRecursive(w *fsnotify.Watcher, root string, matcher *watchMatcher) string {
+// directory via add. Returns a non-empty degraded reason if it hits the watch
+// limit. add is a seam (normally the fsnotify watcher's Add) so the degraded
+// path is testable without exhausting fs.inotify.max_user_watches for real.
+func addWatchRecursive(add func(string) error, root string, matcher *watchMatcher) string {
 	var degraded string
 
 	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
@@ -462,7 +557,7 @@ func addWatchRecursive(w *fsnotify.Watcher, root string, matcher *watchMatcher) 
 			return filepath.SkipDir
 		}
 
-		if aerr := w.Add(path); aerr != nil {
+		if aerr := add(path); aerr != nil {
 			degraded = "watcher.Add failed: " + aerr.Error()
 			return filepath.SkipDir
 		}

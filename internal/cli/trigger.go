@@ -169,6 +169,10 @@ func renderTriggerStatus(w io.Writer, t protocol.TriggerRecord) {
 
 		if t.Degraded != "" {
 			_, _ = fmt.Fprintf(w, "Degraded: %s\n", t.Degraded)
+
+			if t.DegradedRetryAt != "" {
+				_, _ = fmt.Fprintf(w, "Next retry: %s (after %d attempt(s); recovers automatically when the watch limit clears)\n", t.DegradedRetryAt, t.DegradedRetryCount)
+			}
 		}
 	}
 
