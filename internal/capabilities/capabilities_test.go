@@ -1,6 +1,7 @@
 package capabilities
 
 import (
+	"bytes"
 	"flag"
 	"os"
 	"path/filepath"
@@ -8,13 +9,28 @@ import (
 	"testing"
 )
 
-// update rewrites the generated region of the docs page from the manifest.
-// Run: go test ./internal/capabilities -run TestDocMatchesManifest -update
-var update = flag.Bool("update", false, "regenerate the capability matrix docs page")
+// update rewrites the generated region of the docs page from the manifest and
+// regenerates the GUI conformance fixture. Run:
+//
+//	go test ./internal/capabilities -update
+var update = flag.Bool("update", false, "regenerate the capability docs page and GUI fixture")
 
 // docPath is the docs page rendered from the manifest, relative to this
 // package directory (internal/capabilities).
 const docPath = "../../website/content/docs/capabilities.md"
+
+// guiFixturePath is the single committed copy of the GUI-facing capability
+// fixture (issue #1149). It lives in the GraithSessionKit test target so
+// SwiftPM can bundle it as a resource; the Go test reaches it by relative path
+// from this package. Both sides read the same bytes — no second copy to drift.
+//
+// Because it lives under gui/, regenerating it from a manifest change touches a
+// gui/ file and trips the paths-filtered gui/ Swift CI, surfacing a stale
+// affordance registry — while the always-on Go suite catches a manifest edit
+// that forgot to regenerate.
+var guiFixturePath = filepath.Join(
+	"..", "..", "gui", "shared", "Tests", "GraithSessionKitTests", "Fixtures", "capability_manifest.json",
+)
 
 func TestManifestLoads(t *testing.T) {
 	m, err := Load()
@@ -286,6 +302,91 @@ func TestDocMatchesManifest(t *testing.T) {
 		t.Errorf("docs page capability matrix is out of date.\n"+
 			"Run: go test ./internal/capabilities -run TestDocMatchesManifest -update\n\n"+
 			"--- got (doc) ---\n%s\n\n--- want (manifest) ---\n%s", got, want)
+	}
+}
+
+// TestGUIFixtureUpToDate is the manifest↔code bridge (issue #1149): it keeps
+// the committed GUI fixture in step with the manifest. It runs on every PR (the
+// Go suite has no paths filter), so a manifest edit that isn't regenerated
+// fails here — and the regenerated fixture, living under gui/, then trips the
+// Swift GraithSessionKit conformance check that compares it against the shared
+// affordance registry. Regenerate with -update.
+func TestGUIFixtureUpToDate(t *testing.T) {
+	m, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	got, err := m.MarshalGUIFixture()
+	if err != nil {
+		t.Fatalf("MarshalGUIFixture: %v", err)
+	}
+
+	if *update {
+		if err := os.MkdirAll(filepath.Dir(guiFixturePath), 0o750); err != nil {
+			t.Fatalf("mkdir fixture dir: %v", err)
+		}
+
+		// guiFixturePath is a fixed package var, not user input; generator-only
+		// write. Same rationale as the docs-page write above.
+		if err := os.WriteFile(guiFixturePath, got, 0o600); err != nil {
+			t.Fatalf("write fixture: %v", err)
+		}
+
+		t.Logf("wrote %s", filepath.Clean(guiFixturePath))
+
+		return
+	}
+
+	want, err := os.ReadFile(guiFixturePath)
+	if err != nil {
+		t.Fatalf("read committed GUI fixture (%s): %v\nregenerate with: go test ./internal/capabilities -run TestGUIFixtureUpToDate -update", guiFixturePath, err)
+	}
+
+	if !bytes.Equal(got, want) {
+		t.Errorf("GUI capability fixture is stale vs the manifest.\n"+
+			"Regenerate and commit it (then reconcile the GraithSessionKit affordance registry):\n"+
+			"  go test ./internal/capabilities -run TestGUIFixtureUpToDate -update\n"+
+			"Fixture: %s", guiFixturePath)
+	}
+}
+
+// TestGUIFixtureProjection guards the projection itself: one entry per
+// capability, in manifest order, carrying only the two GUI surface states.
+func TestGUIFixtureProjection(t *testing.T) {
+	m, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	fx := m.GUIFixture()
+	if fx.Version != m.Version {
+		t.Errorf("fixture version %d, want %d", fx.Version, m.Version)
+	}
+
+	if len(fx.Capabilities) != len(m.Capabilities) {
+		t.Fatalf("fixture has %d capabilities, manifest has %d", len(fx.Capabilities), len(m.Capabilities))
+	}
+
+	for i, c := range m.Capabilities {
+		got := fx.Capabilities[i]
+		if got.ID != c.ID || got.IOS != c.IOS || got.MacOS != c.MacOS {
+			t.Errorf("capability %d = %+v, want id=%q ios=%q macos=%q", i, got, c.ID, c.IOS, c.MacOS)
+		}
+	}
+	// The projection must be deterministic so the fixture is diff-stable.
+	a, err := m.MarshalGUIFixture()
+	if err != nil {
+		t.Fatalf("MarshalGUIFixture: %v", err)
+	}
+
+	b, err := m.MarshalGUIFixture()
+	if err != nil {
+		t.Fatalf("MarshalGUIFixture: %v", err)
+	}
+
+	if !bytes.Equal(a, b) {
+		t.Error("MarshalGUIFixture is not deterministic")
 	}
 }
 

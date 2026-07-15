@@ -1,0 +1,185 @@
+{
+  "version": 1,
+  "capabilities": [
+    {
+      "id": "session.list",
+      "ios": "supported",
+      "macos": "supported"
+    },
+    {
+      "id": "session.create",
+      "ios": "supported",
+      "macos": "supported"
+    },
+    {
+      "id": "session.stop",
+      "ios": "supported",
+      "macos": "supported"
+    },
+    {
+      "id": "session.resume",
+      "ios": "supported",
+      "macos": "supported"
+    },
+    {
+      "id": "session.restart",
+      "ios": "supported",
+      "macos": "supported"
+    },
+    {
+      "id": "session.delete",
+      "ios": "supported",
+      "macos": "supported"
+    },
+    {
+      "id": "session.restore",
+      "ios": "planned",
+      "macos": "planned"
+    },
+    {
+      "id": "session.purge",
+      "ios": "planned",
+      "macos": "planned"
+    },
+    {
+      "id": "session.rename",
+      "ios": "supported",
+      "macos": "supported"
+    },
+    {
+      "id": "session.star",
+      "ios": "supported",
+      "macos": "supported"
+    },
+    {
+      "id": "session.fork",
+      "ios": "supported",
+      "macos": "supported"
+    },
+    {
+      "id": "session.migrate",
+      "ios": "supported",
+      "macos": "supported"
+    },
+    {
+      "id": "session.set-status",
+      "ios": "planned",
+      "macos": "planned"
+    },
+    {
+      "id": "session.wait",
+      "ios": "n/a",
+      "macos": "n/a"
+    },
+    {
+      "id": "session.repo-list",
+      "ios": "supported",
+      "macos": "supported"
+    },
+    {
+      "id": "terminal.attach",
+      "ios": "supported",
+      "macos": "supported"
+    },
+    {
+      "id": "terminal.input",
+      "ios": "supported",
+      "macos": "supported"
+    },
+    {
+      "id": "terminal.resize",
+      "ios": "supported",
+      "macos": "supported"
+    },
+    {
+      "id": "terminal.detach",
+      "ios": "supported",
+      "macos": "supported"
+    },
+    {
+      "id": "terminal.logs",
+      "ios": "supported",
+      "macos": "supported"
+    },
+    {
+      "id": "terminal.screen-snapshot",
+      "ios": "supported",
+      "macos": "supported"
+    },
+    {
+      "id": "terminal.remote-type",
+      "ios": "n/a",
+      "macos": "n/a"
+    },
+    {
+      "id": "approvals.subscribe",
+      "ios": "supported",
+      "macos": "supported"
+    },
+    {
+      "id": "approvals.respond",
+      "ios": "supported",
+      "macos": "supported"
+    },
+    {
+      "id": "pairing.request",
+      "ios": "supported",
+      "macos": "supported"
+    },
+    {
+      "id": "pairing.manage",
+      "ios": "planned",
+      "macos": "planned"
+    },
+    {
+      "id": "messaging.send",
+      "ios": "planned",
+      "macos": "planned"
+    },
+    {
+      "id": "messaging.read",
+      "ios": "planned",
+      "macos": "planned"
+    },
+    {
+      "id": "messaging.jail",
+      "ios": "planned",
+      "macos": "planned"
+    },
+    {
+      "id": "scenarios.manage",
+      "ios": "planned",
+      "macos": "planned"
+    },
+    {
+      "id": "triggers.manage",
+      "ios": "planned",
+      "macos": "planned"
+    },
+    {
+      "id": "mcp.manage",
+      "ios": "planned",
+      "macos": "planned"
+    },
+    {
+      "id": "store.access",
+      "ios": "planned",
+      "macos": "planned"
+    },
+    {
+      "id": "notify.send",
+      "ios": "planned",
+      "macos": "planned"
+    },
+    {
+      "id": "sandbox.introspect",
+      "ios": "planned",
+      "macos": "planned"
+    },
+    {
+      "id": "doctor.diagnostics",
+      "ios": "planned",
+      "macos": "planned"
+    }
+  ]
+}

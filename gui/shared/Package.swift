@@ -58,7 +58,13 @@ let package = Package(
         ),
         .testTarget(
             name: "GraithSessionKitTests",
-            dependencies: ["GraithSessionKit", "GraithProtocol", "GraithRemoteKit"]
+            dependencies: ["GraithSessionKit", "GraithProtocol", "GraithRemoteKit"],
+            // The capability manifest fixture (issue #1149) is projected by the
+            // Go side and committed here so it can be bundled as a test resource.
+            // CapabilityConformanceTests asserts the manifest agrees with the
+            // shared affordance registry. Regenerate with:
+            //   go test ./internal/capabilities -run TestGUIFixtureUpToDate -update
+            resources: [.copy("Fixtures/capability_manifest.json")]
         ),
         .target(
             name: "GraithTerminalCore",
