@@ -42,6 +42,11 @@ struct LocalDaemonSettings: View {
             Section {
                 TextField("Profile override", text: $profileOverride)
                     .textFieldStyle(.roundedBorder)
+                if let profileError = resolution.profileError {
+                    Label(profileError, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(Theme.red)
+                }
                 TextField("Config file override", text: $configPathOverride)
                     .textFieldStyle(.roundedBorder)
                 TextField("Socket path override", text: $socketPathOverride)
