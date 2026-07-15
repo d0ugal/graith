@@ -20,7 +20,10 @@ func makeSession(
     parentID: String? = nil,
     starred: Bool? = nil,
     yolo: Bool? = nil,
-    scenarioID: String? = nil
+    scenarioID: String? = nil,
+    dirty: Bool? = nil,
+    unpushedCount: Int? = nil,
+    mirror: Bool? = nil
 ) -> SessionInfo {
     var fields: [String: String] = [
         "\"id\"": "\"\(id)\"",
@@ -39,6 +42,9 @@ func makeSession(
     if let starred { fields["\"starred\""] = starred ? "true" : "false" }
     if let yolo { fields["\"yolo\""] = yolo ? "true" : "false" }
     if let scenarioID { fields["\"scenario_id\""] = "\"\(scenarioID)\"" }
+    if let dirty { fields["\"dirty\""] = dirty ? "true" : "false" }
+    if let unpushedCount { fields["\"unpushed_count\""] = "\(unpushedCount)" }
+    if let mirror { fields["\"mirror\""] = mirror ? "true" : "false" }
     let body = fields.map { "\($0.key): \($0.value)" }.joined(separator: ", ")
     let json = "{ \(body) }"
     // swiftlint:disable:next force_try

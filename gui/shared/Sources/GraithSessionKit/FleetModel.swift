@@ -33,6 +33,21 @@ open class FleetModel: ObservableObject {
     /// Session ids whose subtree is collapsed in the sidebar tree.
     @Published public var collapsedSessions: Set<String> = []
 
+    // MARK: - Sidebar filter state (#906)
+    //
+    // The selected filter is model state (shared by both GUIs) so it survives
+    // view rebuilds and drives the same grouping helpers the sidebars already
+    // bind to. The actual filtering is the pure `SidebarFilter`.
+
+    /// Selected view mode (All / Needs Attention / Active).
+    @Published public var viewMode: SidebarViewMode = .all
+    /// Free-text search over session name + repo.
+    @Published public var searchQuery: String = ""
+    /// Quick filter: show starred sessions only.
+    @Published public var starredOnly: Bool = false
+    /// Quick filter: restrict to a single repo (`repoName`); nil = all repos.
+    @Published public var repoFilter: String?
+
     /// Forward each connection's changes up so views bound to derived,
     /// cross-connection state (`sessions`, `allSessions`, `error`, …) refresh.
     private var connectionObservers: [AnyCancellable] = []
@@ -256,6 +271,45 @@ open class FleetModel: ObservableObject {
         registry.hosts.contains { $0.kind == .remote }
     }
 
+    // MARK: - Sidebar filter (#906)
+
+    /// The currently-selected filter criteria, assembled from the published
+    /// filter state. Passed to the pure `SidebarFilter`.
+    public var filterCriteria: SidebarFilter.Criteria {
+        SidebarFilter.Criteria(
+            viewMode: viewMode,
+            searchQuery: searchQuery,
+            starredOnly: starredOnly,
+            repo: repoFilter
+        )
+    }
+
+    /// Whether any filter is actively narrowing the session list (drives the
+    /// sidebar's "clear filters" affordance and empty state).
+    public var isFilterActive: Bool { filterCriteria.isActive }
+
+    /// Apply the current filter criteria to an arbitrary session list. iOS
+    /// renders per-connection, so it filters each `HostConnection.sessions`
+    /// through this; macOS filters via the grouping helpers below.
+    public func filtered(_ sessions: [SessionInfo]) -> [SessionInfo] {
+        SidebarFilter.apply(sessions, filterCriteria)
+    }
+
+    /// The distinct repo names across all sessions, sorted — for the repo
+    /// quick-filter menu. Ignores the current repo filter so the menu can
+    /// always switch to any repo.
+    public var availableRepos: [String] {
+        Set(sessions.map(\.repoName)).sorted()
+    }
+
+    /// Reset every filter to its default (used by a "clear filters" action).
+    public func clearFilters() {
+        viewMode = .all
+        searchQuery = ""
+        starredOnly = false
+        repoFilter = nil
+    }
+
     // MARK: - Sidebar grouping
 
     private func groups(for sessions: [SessionInfo]) -> [(repo: String, sessions: [SessionInfo])] {
@@ -264,16 +318,24 @@ open class FleetModel: ObservableObject {
             .map { (repo: $0.key, sessions: $0.value.sorted { $0.name < $1.name }) }
     }
 
-    /// Sessions grouped by repo (flat, host-agnostic).
+    /// Sessions grouped by repo (flat, host-agnostic), filtered by the current
+    /// sidebar criteria (#906).
     public var sessionsByRepo: [(repo: String, sessions: [SessionInfo])] {
-        groups(for: sessions)
+        groups(for: filtered(sessions))
     }
 
-    /// Sessions grouped by host, then repo — for the multi-host sidebar. Every
-    /// configured host appears even with no sessions, so its connection state is
-    /// visible.
+    /// Sessions grouped by host, then repo — for the multi-host sidebar, with
+    /// the current sidebar filter applied per host (#906). Every configured host
+    /// still appears even with no (matching) sessions, so its connection state
+    /// stays visible.
     public var sessionsByHost: [(host: Host, groups: [(repo: String, sessions: [SessionInfo])])] {
-        connections.map { conn in (host: conn.entry, groups: groups(for: conn.sessions)) }
+        connections.map { conn in (host: conn.entry, groups: groups(for: filtered(conn.sessions))) }
+    }
+
+    /// Unfiltered repo grouping — used where the raw list is wanted regardless
+    /// of the sidebar filter.
+    public var allSessionsByRepo: [(repo: String, sessions: [SessionInfo])] {
+        groups(for: sessions)
     }
 
     public func roots(in sessions: [SessionInfo]) -> [SessionInfo] {

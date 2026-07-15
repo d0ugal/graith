@@ -18,6 +18,12 @@
       "cli": "supported", "ios": "supported", "macos": "supported"
     },
     {
+      "id": "session.filter",
+      "category": "Session lifecycle",
+      "name": "Filter, search & view-mode sessions",
+      "cli": "supported", "ios": "supported", "macos": "supported"
+    },
+    {
       "id": "session.create",
       "category": "Session lifecycle",
       "name": "Create session",

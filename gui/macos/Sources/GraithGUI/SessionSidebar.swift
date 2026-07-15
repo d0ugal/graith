@@ -106,10 +106,17 @@ struct SessionSidebar: View {
                 FleetSummaryBar(sessions: store.sessions)
             }
 
+            // Filter / search / view-mode controls (#906)
+            if !store.sessions.isEmpty {
+                SidebarFilterBar()
+            }
+
             // Session list
             if store.hasRemoteHosts {
                 // Multi-host: group by host, then repo, so every daemon (and its
-                // connection state) is visible in one sidebar.
+                // connection state) is visible in one sidebar — host sections
+                // always render (even filtered to empty) so pairing/connection
+                // status stays visible.
                 ScrollView {
                     LazyVStack(spacing: 0) {
                         ForEach(store.sessionsByHost, id: \.host.id) { entry in
@@ -128,6 +135,22 @@ struct SessionSidebar: View {
                         .font(.system(.body, design: .monospaced))
                         .foregroundStyle(Theme.overlay0)
                     Button("Create session") { showNewSession = true }
+                        .buttonStyle(.plain)
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(Theme.blue)
+                }
+                Spacer()
+            } else if store.sessionsByRepo.isEmpty {
+                // Sessions exist but none match the active filter.
+                Spacer()
+                VStack(spacing: 8) {
+                    Image(systemName: "line.3.horizontal.decrease.circle")
+                        .font(.system(size: 28))
+                        .foregroundStyle(Theme.overlay0)
+                    Text("No sessions match")
+                        .font(.system(.body, design: .monospaced))
+                        .foregroundStyle(Theme.overlay0)
+                    Button("Clear filters") { store.clearFilters() }
                         .buttonStyle(.plain)
                         .font(.system(.caption, design: .monospaced))
                         .foregroundStyle(Theme.blue)
@@ -396,6 +419,124 @@ struct FleetSummaryBar: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 6)
         .background(Theme.crust)
+    }
+}
+
+/// Search + view-mode + quick-filter controls for the sidebar (#906). All
+/// state lives on the shared `FleetModel`, so the same filtering drives macOS
+/// and iOS.
+struct SidebarFilterBar: View {
+    @EnvironmentObject var store: SessionStore
+
+    var body: some View {
+        VStack(spacing: 6) {
+            // Search field
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Theme.overlay0)
+                TextField("Filter sessions…", text: $store.searchQuery)
+                    .textFieldStyle(.plain)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(Theme.text)
+                if !store.searchQuery.isEmpty {
+                    Button(action: { store.searchQuery = "" }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 10))
+                            .foregroundStyle(Theme.overlay0)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Clear search")
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(Theme.crust)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+
+            // View-mode segmented control + quick filters
+            HStack(spacing: 6) {
+                ForEach(SidebarViewMode.allCases) { mode in
+                    ViewModeChip(
+                        mode: mode,
+                        isSelected: store.viewMode == mode
+                    ) { store.viewMode = mode }
+                }
+
+                Spacer(minLength: 0)
+
+                // Starred-only toggle
+                Button(action: { store.starredOnly.toggle() }) {
+                    Image(systemName: store.starredOnly ? "star.fill" : "star")
+                        .font(.system(size: 10))
+                        .foregroundStyle(store.starredOnly ? Theme.yellow : Theme.overlay0)
+                        .frame(width: 20, height: 18)
+                        .background(store.starredOnly ? Theme.surface0 : Color.clear)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                }
+                .buttonStyle(.plain)
+                .help("Show starred sessions only")
+
+                // Repo quick filter
+                Menu {
+                    Button("All repos") { store.repoFilter = nil }
+                    Divider()
+                    ForEach(store.availableRepos, id: \.self) { repo in
+                        Button(action: { store.repoFilter = repo }) {
+                            if store.repoFilter == repo {
+                                Label(repo, systemImage: "checkmark")
+                            } else {
+                                Text(repo)
+                            }
+                        }
+                    }
+                } label: {
+                    Image(systemName: "folder")
+                        .font(.system(size: 10))
+                        .foregroundStyle(store.repoFilter == nil ? Theme.overlay0 : Theme.blue)
+                        .frame(width: 20, height: 18)
+                        .background(store.repoFilter == nil ? Color.clear : Theme.surface0)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("Filter by repository")
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Theme.mantle)
+    }
+}
+
+/// A single view-mode toggle chip in the sidebar filter bar.
+private struct ViewModeChip: View {
+    let mode: SidebarViewMode
+    let isSelected: Bool
+    let action: () -> Void
+
+    /// Compact label — the full names are long for a narrow sidebar.
+    private var shortLabel: String {
+        switch mode {
+        case .all: return "All"
+        case .needsAttention: return "Attn"
+        case .active: return "Active"
+        }
+    }
+
+    var body: some View {
+        Button(action: action) {
+            Text(shortLabel)
+                .font(.system(size: 10, weight: isSelected ? .semibold : .regular, design: .monospaced))
+                .foregroundStyle(isSelected ? Theme.text : Theme.overlay0)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(isSelected ? Theme.surface1 : Theme.surface0.opacity(0.4))
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+        }
+        .buttonStyle(.plain)
+        .help(mode.displayName)
     }
 }
 

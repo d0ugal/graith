@@ -47,6 +47,7 @@ state instead).
 | Capability | CLI | iOS | macOS |
 |------------|:---:|:---:|:---:|
 | List sessions | ✅ | ✅ | ✅ |
+| Filter, search & view-mode sessions | ✅ | ✅ | ✅ |
 | Create session | ✅ | ✅ | ✅ |
 | Stop session | ✅ | ✅ | ✅ |
 | Resume session | ✅ | ✅ | ✅ |
