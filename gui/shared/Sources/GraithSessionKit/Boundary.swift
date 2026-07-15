@@ -51,6 +51,8 @@ public enum ControlType {
     public static let resume = "resume"
     public static let restart = "restart"
     public static let delete = "delete"
+    public static let restore = "restore"
+    public static let setStatus = "set_status"
     public static let interrupt = "interrupt"
     public static let rename = "rename"
     public static let star = "star"
@@ -113,6 +115,9 @@ public protocol GraithHostClient: Actor {
 
     // Read RPCs (roleRemoteHuman / roleRemoteGuest).
     func listSessions() async throws -> [SessionInfo]
+    /// The soft-deleted sessions kept within the daemon's retention window, for
+    /// the Deleted/restore surface (`gr list --deleted`).
+    func listDeletedSessions() async throws -> [SessionInfo]
     func status(sessionID: String) async throws -> StatusResponse
     func repoList() async throws -> [RepoEntry]
     func logs(sessionID: String, lines: Int) async throws -> String
@@ -125,6 +130,13 @@ public protocol GraithHostClient: Actor {
     func restart(sessionID: String) async throws
     func interrupt(sessionID: String) async throws
     func delete(sessionID: String) async throws
+    /// Restore a soft-deleted session (inverse of a soft `delete`).
+    func restore(sessionID: String) async throws
+    /// Hard-delete a session immediately (`gr purge`), bypassing the soft-delete
+    /// retention window — removes the worktree, branch, and state.
+    func purge(sessionID: String) async throws
+    /// Set (or clear) a session's status summary (`gr status`).
+    func setStatus(sessionID: String, text: String, ttlSeconds: Int?, clear: Bool) async throws
     func rename(sessionID: String, newName: String) async throws
     func star(sessionID: String) async throws
     func unstar(sessionID: String) async throws

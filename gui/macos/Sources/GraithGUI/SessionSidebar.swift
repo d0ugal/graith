@@ -8,6 +8,7 @@ struct SessionSidebar: View {
     @Binding var showNewSession: Bool
     @State private var showAddHost = false
     @State private var showApprovals = false
+    @State private var showDeleted = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -53,6 +54,20 @@ struct SessionSidebar: View {
                 }
                 .buttonStyle(.plain)
                 .help("Pending approvals")
+
+                // Deleted sessions button — recover (restore) or permanently
+                // remove (purge) soft-deleted sessions within the retention
+                // window (#1148).
+                Button(action: { showDeleted = true }) {
+                    Image(systemName: "trash")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Theme.subtext0)
+                        .frame(width: 22, height: 22)
+                        .background(Theme.surface0)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                }
+                .buttonStyle(.plain)
+                .help("Recently deleted sessions")
 
                 // Add host button
                 Button(action: { showAddHost = true }) {
@@ -151,6 +166,138 @@ struct SessionSidebar: View {
         .sheet(isPresented: $showApprovals) {
             ApprovalsSheet()
         }
+        .sheet(isPresented: $showDeleted) {
+            DeletedSessionsSheet()
+        }
+    }
+}
+
+/// Recently-deleted (soft-deleted) sessions, with per-row Restore and permanent
+/// Delete (purge) actions. Fetched on appear and re-fetched after each action —
+/// deleted sessions live outside the polled live list (#1148).
+struct DeletedSessionsSheet: View {
+    @EnvironmentObject var store: SessionStore
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var rows: [HostedSession] = []
+    @State private var loading = true
+    @State private var purgeTarget: HostedSession?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Recently Deleted")
+                    .font(.system(.title3, design: .monospaced))
+                    .fontWeight(.semibold)
+                    .foregroundStyle(Theme.text)
+                Spacer()
+                Button("Done") { dismiss() }
+                    .keyboardShortcut(.defaultAction)
+            }
+            .padding(20)
+
+            Divider().background(Theme.surface0)
+
+            if loading {
+                Spacer()
+                ProgressView().padding(20)
+                Spacer()
+            } else if rows.isEmpty {
+                Spacer()
+                VStack(spacing: 8) {
+                    Image(systemName: "trash")
+                        .font(.system(size: 28))
+                        .foregroundStyle(Theme.overlay0)
+                    Text("No recently deleted sessions")
+                        .font(.system(.body, design: .monospaced))
+                        .foregroundStyle(Theme.overlay0)
+                }
+                Spacer()
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(rows) { row in
+                            DeletedSessionRow(
+                                row: row,
+                                onRestore: { restore(row) },
+                                onPurge: { purgeTarget = row }
+                            )
+                            Divider().background(Theme.surface0)
+                        }
+                    }
+                }
+            }
+        }
+        .frame(width: 420, height: 360)
+        .background(Theme.mantle)
+        .task { await reload() }
+        .confirmationDialog(
+            "Permanently delete \u{201c}\(purgeTarget?.session.name ?? "")\u{201d}?",
+            isPresented: Binding(get: { purgeTarget != nil }, set: { if !$0 { purgeTarget = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Delete Permanently", role: .destructive) {
+                if let row = purgeTarget { purge(row) }
+                purgeTarget = nil
+            }
+            Button("Cancel", role: .cancel) { purgeTarget = nil }
+        } message: {
+            Text("This removes the worktree, branch, and history immediately. This cannot be undone.")
+        }
+    }
+
+    private func reload() async {
+        loading = true
+        rows = await store.deletedSessions()
+        loading = false
+    }
+
+    private func restore(_ row: HostedSession) {
+        store.restore(row.session, hostID: row.host.id)
+        Task { await reloadAfterMutation() }
+    }
+
+    private func purge(_ row: HostedSession) {
+        store.purge(row.session, hostID: row.host.id)
+        Task { await reloadAfterMutation() }
+    }
+
+    /// The mutation fires a detached Task on the connection; give the daemon a
+    /// brief beat to apply it before re-listing so the row drops out.
+    private func reloadAfterMutation() async {
+        try? await Task.sleep(nanoseconds: 250_000_000)
+        await reload()
+    }
+}
+
+/// One row in the Recently-Deleted sheet.
+struct DeletedSessionRow: View {
+    let row: HostedSession
+    let onRestore: () -> Void
+    let onPurge: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(row.session.name)
+                    .font(.system(.body, design: .monospaced))
+                    .foregroundStyle(Theme.text)
+                Text(row.session.repoName)
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(Theme.overlay0)
+            }
+            Spacer()
+            Button("Restore") { onRestore() }
+                .buttonStyle(.plain)
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(Theme.blue)
+            Button("Delete", role: .destructive) { onPurge() }
+                .buttonStyle(.plain)
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(Theme.red)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 10)
     }
 }
 
@@ -335,6 +482,9 @@ struct SessionRow: View {
     @State private var showMigrate = false
     @State private var migrateAgent = "claude"
     @State private var showDeleteConfirm = false
+    @State private var showPurgeConfirm = false
+    @State private var showSetStatus = false
+    @State private var statusText = ""
     @State private var showLogs = false
     @State private var showSnapshot = false
 
@@ -414,6 +564,16 @@ struct SessionRow: View {
         }
         .sheet(isPresented: $showLogs) { LogsSheet(session: session) }
         .sheet(isPresented: $showSnapshot) { SnapshotSheet(session: session) }
+        .sheet(isPresented: $showSetStatus) {
+            SessionTextPromptSheet(
+                title: "Set Status",
+                fieldLabel: "Status summary",
+                placeholder: "what this session is doing…",
+                initialText: session.summaryText ?? "",
+                confirmLabel: "Set",
+                text: $statusText
+            ) { store.setStatus(session, text: $0) }
+        }
         .confirmationDialog(
             "Delete session \u{201c}\(session.name)\u{201d}?",
             isPresented: $showDeleteConfirm,
@@ -426,6 +586,19 @@ struct SessionRow: View {
             Button("Cancel", role: .cancel) { closeSwipe() }
         } message: {
             Text("This session is running. Deleting it stops the agent and removes its worktree.")
+        }
+        .confirmationDialog(
+            "Permanently delete \u{201c}\(session.name)\u{201d}?",
+            isPresented: $showPurgeConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Permanently", role: .destructive) {
+                closeSwipe()
+                store.purgeSession(session)
+            }
+            Button("Cancel", role: .cancel) { closeSwipe() }
+        } message: {
+            Text("This bypasses the recovery window — the agent is stopped and the worktree, branch, and history are removed immediately. This cannot be undone.")
         }
     }
 
@@ -644,6 +817,13 @@ struct SessionRow: View {
                 migrateAgent = session.agent
                 showMigrate = true
             }
+            Button("Set Status…") {
+                statusText = session.summaryText ?? ""
+                showSetStatus = true
+            }
+            if let summary = session.summaryText, !summary.isEmpty {
+                Button("Clear Status") { store.setStatus(session, text: "", clear: true) }
+            }
             Divider()
             Button("View Logs…") { showLogs = true }
             Button("Screen Snapshot…") { showSnapshot = true }
@@ -658,6 +838,7 @@ struct SessionRow: View {
             }
             Divider()
             Button("Delete", role: .destructive) { requestDelete() }
+            Button("Delete Permanently…", role: .destructive) { showPurgeConfirm = true }
         }
     }
 

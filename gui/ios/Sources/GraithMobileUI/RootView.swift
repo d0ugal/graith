@@ -11,6 +11,7 @@ public struct RootView: View {
     @State private var showingAddHost = false
     @State private var showingApprovals = false
     @State private var showingNewSession = false
+    @State private var showingDeleted = false
 
     public init(model: FleetModel) {
         self.model = model
@@ -37,6 +38,9 @@ public struct RootView: View {
         }
         .sheet(isPresented: $showingNewSession) {
             NewSessionView(model: model)
+        }
+        .sheet(isPresented: $showingDeleted) {
+            DeletedSessionsView(model: model)
         }
     }
 
@@ -74,6 +78,13 @@ public struct RootView: View {
                 } label: {
                     Label("Add Host", systemImage: "externaldrive.badge.plus")
                 }
+
+                Button {
+                    showingDeleted = true
+                } label: {
+                    Label("Recently Deleted", systemImage: "trash")
+                }
+                .disabled(model.connections.isEmpty)
             }
         }
     }

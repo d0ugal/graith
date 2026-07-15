@@ -52,13 +52,13 @@ state instead).
 | Resume session | ✅ | ✅ | ✅ |
 | Restart session | ✅ | ✅ | ✅ |
 | Delete session (soft) | ✅ | ✅ | ✅ |
-| Restore a soft-deleted session | ✅ | 🚧 | 🚧 |
-| Purge (hard delete) | ✅ | 🚧 | 🚧 |
+| Restore a soft-deleted session | ✅ | ✅ | ✅ |
+| Purge (hard delete) | ✅ | ✅ | ✅ |
 | Rename session | ✅ | ✅ | ✅ |
 | Star / unstar session | ✅ | ✅ | ✅ |
 | Fork session | ✅ | ✅ | ✅ |
 | Migrate session to another agent | ✅ | ✅ | ✅ |
-| Set session status summary | ✅ | 🚧 | 🚧 |
+| Set session status summary | ✅ | ✅ | ✅ |
 | Block until a session matches a condition <sup>1</sup> | ✅ | — | — |
 | List available repositories for new sessions | ✅ | ✅ | ✅ |
 
@@ -85,7 +85,9 @@ state instead).
 | View pending tool approvals | ✅ | ✅ | ✅ |
 | Respond to a tool approval | ✅ | ✅ | ✅ |
 | Request device pairing | ✅ | ✅ | ✅ |
-| List / approve / revoke paired devices | ✅ | 🚧 | 🚧 |
+| List / approve / revoke paired devices <sup>1</sup> | ✅ | 🚧 | 🚧 |
+
+<sup>1</sup> List / approve / revoke paired devices: Listing/approving/revoking devices is gated to the local human on the daemon (remote-denied), so it stays CLI-only for now; the GUIs pair *with* a daemon (pairing.request) but don't manage its device list.
 
 ### Messaging
 

@@ -6,6 +6,9 @@ import GraithSessionKit
 /// Fixture strings use old Scots words per the project convention.
 public actor MockHostClient: GraithHostClient {
     private var sessions: [SessionInfo]
+    /// Soft-deleted sessions: `delete` moves a session here, `restore` moves it
+    /// back, `purge` removes it permanently — models the retention window.
+    private var deleted: [SessionInfo] = []
     private var repos: [RepoEntry]
     private var pending: [ApprovalInfo]
     private var snapshotFrame: String
@@ -48,6 +51,11 @@ public actor MockHostClient: GraithHostClient {
     public func listSessions() async throws -> [SessionInfo] {
         try check(ControlType.list)
         return sessions
+    }
+
+    public func listDeletedSessions() async throws -> [SessionInfo] {
+        try check(ControlType.list)
+        return deleted
     }
 
     public func status(sessionID: String) async throws -> StatusResponse {
@@ -110,7 +118,30 @@ public actor MockHostClient: GraithHostClient {
 
     public func delete(sessionID: String) async throws {
         try check(ControlType.delete)
+        // Soft delete: move into the deleted list.
+        if let idx = sessions.firstIndex(where: { $0.id == sessionID }) {
+            deleted.append(sessions.remove(at: idx))
+        }
+    }
+
+    public func restore(sessionID: String) async throws {
+        try check(ControlType.restore)
+        if let idx = deleted.firstIndex(where: { $0.id == sessionID }) {
+            sessions.append(deleted.remove(at: idx))
+        }
+    }
+
+    public func purge(sessionID: String) async throws {
+        try check(ControlType.delete)
+        // Hard delete: gone from both lists.
         sessions.removeAll { $0.id == sessionID }
+        deleted.removeAll { $0.id == sessionID }
+    }
+
+    public func setStatus(sessionID: String, text: String, ttlSeconds: Int?, clear: Bool) async throws {
+        try check(ControlType.setStatus)
+        // `.some(nil)` clears the summary; `.some(text)` sets it.
+        mutate(sessionID) { $0 = $0.with(summaryText: clear ? .some(nil) : .some(text)) }
     }
 
     public func rename(sessionID: String, newName: String) async throws {
@@ -253,7 +284,8 @@ extension SessionInfo {
         agentStatus: String? = nil,
         name: String? = nil,
         agent: String? = nil,
-        starred: Bool? = nil
+        starred: Bool? = nil,
+        summaryText: String?? = nil
     ) -> SessionInfo {
         SessionInfo(
             id: id, parentID: parentID, name: name ?? self.name, repoPath: repoPath, repoName: repoName,
@@ -265,7 +297,8 @@ extension SessionInfo {
             unpushedCount: unpushedCount, sandboxed: sandboxed, mirror: mirror,
             inPlace: inPlace, yolo: yolo, model: model, toolName: toolName, includes: includes,
             configStale: configStale, starred: starred ?? self.starred, systemKind: systemKind,
-            scenarioID: scenarioID, scenarioName: scenarioName, summaryText: summaryText,
+            scenarioID: scenarioID, scenarioName: scenarioName,
+            summaryText: summaryText ?? self.summaryText,
             summaryFaded: summaryFaded, lastOutputAt: lastOutputAt, migratedFrom: migratedFrom,
             pullRequest: pullRequest, ci: ci
         )

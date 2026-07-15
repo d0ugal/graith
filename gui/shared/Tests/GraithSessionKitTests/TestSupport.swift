@@ -50,12 +50,17 @@ func makeSession(
 actor MockHostClient: GraithHostClient {
     private(set) var connected = false
     var sessions: [SessionInfo]
+    /// Soft-deleted sessions (moved here by `delete`, restored by `restore`,
+    /// removed permanently by `purge`) — models the daemon's retention window.
+    private(set) var deleted: [SessionInfo] = []
     var pending: [ApprovalInfo]
     var repos: [RepoEntry]
     var failConnect: GraithClientError?
     var failList: GraithClientError?
     /// Records the last `migrate` call so tests can assert the model is forwarded.
     private(set) var lastMigrate: (agent: String, model: String?)?
+    /// Records the last `set_status` call so tests can assert the text/clear flag.
+    private(set) var lastSetStatus: (text: String, ttlSeconds: Int?, clear: Bool)?
     /// Blocks `listSessions()` until `releaseList()` — used to hold a refresh in
     /// flight across poll ticks and assert the overlap guard.
     private var listGate: CheckedContinuation<Void, Never>?
@@ -87,6 +92,10 @@ actor MockHostClient: GraithHostClient {
         if let failList { throw failList }
         return sessions
     }
+    func listDeletedSessions() async throws -> [SessionInfo] {
+        if let failList { throw failList }
+        return deleted
+    }
     func status(sessionID: String) async throws -> StatusResponse {
         guard let s = sessions.first(where: { $0.id == sessionID }) else {
             throw GraithClientError.daemon("not found")
@@ -106,7 +115,25 @@ actor MockHostClient: GraithHostClient {
     func resume(sessionID: String) async throws {}
     func restart(sessionID: String) async throws {}
     func interrupt(sessionID: String) async throws {}
-    func delete(sessionID: String) async throws { sessions.removeAll { $0.id == sessionID } }
+    func delete(sessionID: String) async throws {
+        // Soft delete: move out of the live list into the deleted list.
+        if let idx = sessions.firstIndex(where: { $0.id == sessionID }) {
+            deleted.append(sessions.remove(at: idx))
+        }
+    }
+    func restore(sessionID: String) async throws {
+        if let idx = deleted.firstIndex(where: { $0.id == sessionID }) {
+            sessions.append(deleted.remove(at: idx))
+        }
+    }
+    func purge(sessionID: String) async throws {
+        // Hard delete: gone from both lists.
+        sessions.removeAll { $0.id == sessionID }
+        deleted.removeAll { $0.id == sessionID }
+    }
+    func setStatus(sessionID: String, text: String, ttlSeconds: Int?, clear: Bool) async throws {
+        lastSetStatus = (text, ttlSeconds, clear)
+    }
     func rename(sessionID: String, newName: String) async throws {}
     func star(sessionID: String) async throws {}
     func unstar(sessionID: String) async throws {}

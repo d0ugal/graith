@@ -307,6 +307,13 @@ open class FleetModel: ObservableObject {
     public func restartSession(_ session: SessionInfo) { act(session) { await $0.restart(session) } }
     public func interruptSession(_ session: SessionInfo) { act(session) { await $0.interrupt(session) } }
     public func deleteSession(_ session: SessionInfo) { act(session) { await $0.delete(session) } }
+    /// Hard-delete a live session (`gr purge`). Callers surface the destructive
+    /// confirmation before invoking this.
+    public func purgeSession(_ session: SessionInfo) { act(session) { await $0.purge(session) } }
+    /// Set (or clear) a live session's status summary (`gr status`).
+    public func setStatus(_ session: SessionInfo, text: String, ttlSeconds: Int? = nil, clear: Bool = false) {
+        act(session) { await $0.setStatus(session, text: text, ttlSeconds: ttlSeconds, clear: clear) }
+    }
     public func renameSession(_ session: SessionInfo, to newName: String) { act(session) { await $0.rename(session, to: newName) } }
     public func toggleStar(_ session: SessionInfo) { act(session) { await $0.toggleStar(session) } }
     public func forkSession(_ session: SessionInfo, name: String) { act(session) { await $0.fork(session, name: name) } }
@@ -320,6 +327,36 @@ open class FleetModel: ObservableObject {
     private func act(_ session: SessionInfo, _ op: @escaping (HostConnection) async -> Void) {
         guard let conn = connection(ownerOf: session.id) else { return }
         Task { await op(conn) }
+    }
+
+    // MARK: - Deleted sessions (restore / purge)
+    //
+    // A soft-deleted session is absent from every connection's live `sessions`,
+    // so `act()` (which resolves the owner via `connection(ownerOf:)`) can't
+    // reach it. The Deleted surface therefore carries the host explicitly.
+
+    /// Every host's soft-deleted sessions, tagged with their host, for the
+    /// Deleted/restore view. Fetched on demand (not polled).
+    public func deletedSessions() async -> [HostedSession] {
+        var result: [HostedSession] = []
+        for conn in connections {
+            let deleted = await conn.deletedSessions()
+            result.append(contentsOf: deleted.map { HostedSession(host: conn.entry, session: $0) })
+        }
+        return result
+    }
+
+    /// Restore a soft-deleted session on `hostID` (inverse of a soft delete).
+    public func restore(_ session: SessionInfo, hostID: String) {
+        guard let conn = connections.first(where: { $0.id == hostID }) else { return }
+        Task { await conn.restore(session) }
+    }
+
+    /// Hard-delete a session on `hostID` (`gr purge`). Works whether the session
+    /// is live or already soft-deleted; callers confirm first.
+    public func purge(_ session: SessionInfo, hostID: String) {
+        guard let conn = connections.first(where: { $0.id == hostID }) else { return }
+        Task { await conn.purge(session) }
     }
 
     /// Create a session on `hostID` and report the created session (found by

@@ -158,6 +158,29 @@ public final class HostConnection: ObservableObject, Identifiable {
     public func restart(_ session: SessionInfo) async { await run { try await self.client.restart(sessionID: session.id) } }
     public func interrupt(_ session: SessionInfo) async { await run { try await self.client.interrupt(sessionID: session.id) } }
     public func delete(_ session: SessionInfo) async { await run { try await self.client.delete(sessionID: session.id) } }
+    public func restore(_ session: SessionInfo) async { await run { try await self.client.restore(sessionID: session.id) } }
+    public func purge(_ session: SessionInfo) async { await run { try await self.client.purge(sessionID: session.id) } }
+
+    /// Set (or clear) a session's status summary. A non-empty `text` sets it; the
+    /// UI passes `clear: true` (with empty text) to remove it.
+    public func setStatus(_ session: SessionInfo, text: String, ttlSeconds: Int? = nil, clear: Bool = false) async {
+        await run { try await self.client.setStatus(sessionID: session.id, text: text, ttlSeconds: ttlSeconds, clear: clear) }
+    }
+
+    /// Fetch this host's soft-deleted sessions for the Deleted/restore surface.
+    /// A failure surfaces on `lastError` and yields an empty list (never throws
+    /// up to the view).
+    public func deletedSessions() async -> [SessionInfo] {
+        guard state == .connected else { return [] }
+        do {
+            let deleted = try await client.listDeletedSessions()
+            lastError = nil
+            return deleted
+        } catch {
+            lastError = Self.describe(error)
+            return []
+        }
+    }
 
     public func rename(_ session: SessionInfo, to newName: String) async {
         let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)

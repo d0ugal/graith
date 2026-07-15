@@ -51,6 +51,14 @@ public actor RealHostClient: GraithHostClient {
         }
     }
 
+    public func listDeletedSessions() async throws -> [SessionInfo] {
+        do {
+            return try await inner.list(deleted: true)
+        } catch {
+            throw RealClientError.map(error)
+        }
+    }
+
     /// `GraithProtocolClient` has no dedicated `status` RPC, and the mobile UI
     /// does not call this directly — synthesize it from `list` to satisfy the
     /// boundary (session + a fleet summary derived from the full list).
@@ -106,6 +114,11 @@ public actor RealHostClient: GraithHostClient {
     public func restart(sessionID: String) async throws { try await run { try await self.inner.restart(sessionID: sessionID) } }
     public func interrupt(sessionID: String) async throws { try await run { try await self.inner.interrupt(sessionID: sessionID) } }
     public func delete(sessionID: String) async throws { try await run { try await self.inner.delete(sessionID: sessionID) } }
+    public func restore(sessionID: String) async throws { try await run { try await self.inner.restore(sessionID: sessionID) } }
+    public func purge(sessionID: String) async throws { try await run { try await self.inner.purge(sessionID: sessionID) } }
+    public func setStatus(sessionID: String, text: String, ttlSeconds: Int?, clear: Bool) async throws {
+        try await run { try await self.inner.setStatus(sessionID: sessionID, text: text, ttlSeconds: ttlSeconds, clear: clear) }
+    }
     public func rename(sessionID: String, newName: String) async throws {
         try await run { try await self.inner.rename(sessionID: sessionID, newName: newName) }
     }

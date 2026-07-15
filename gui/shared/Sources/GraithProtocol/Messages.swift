@@ -136,20 +136,26 @@ public struct AttachMsg: Codable, Sendable {
     enum CodingKeys: String, CodingKey { case sessionID = "session_id" }
 }
 
-/// Shared shape for `stop` / `delete` / `restart` (all optionally recurse).
+/// Shared shape for `stop` / `delete` / `restart` / `restore` (all optionally
+/// recurse). `purge` is a `delete`-only flag requesting an immediate hard delete
+/// (worktree + branch + state) rather than a recoverable soft delete; it is nil
+/// for stop/restart/restore, whose Go structs have no such field.
 public struct SessionScopeMsg: Codable, Sendable {
     public var sessionID: String
     public var children: Bool?
     public var excludeRoot: Bool?
-    public init(sessionID: String, children: Bool? = nil, excludeRoot: Bool? = nil) {
+    public var purge: Bool?
+    public init(sessionID: String, children: Bool? = nil, excludeRoot: Bool? = nil, purge: Bool? = nil) {
         self.sessionID = sessionID
         self.children = children
         self.excludeRoot = excludeRoot
+        self.purge = purge
     }
     enum CodingKeys: String, CodingKey {
         case sessionID = "session_id"
         case children
         case excludeRoot = "exclude_root"
+        case purge
     }
 }
 
