@@ -11,8 +11,11 @@ Triggers let the daemon run actions **on its own** — on a time schedule or whe
 files change in a session worktree — so automation survives terminal close and
 needs no attached orchestrator. A trigger is `(source) → (action)`.
 
-Triggers are defined in `config.toml` as `[[trigger]]` blocks. Exactly one
-**source** (`[trigger.schedule]` or `[trigger.watch]`) and one **action**
+Triggers are defined as `[[trigger]]` blocks — in `config.toml` for global
+automation, or inside a scenario TOML for
+[scenario-embedded triggers]({{< relref "scenarios.md#trigger-blocks-scenario-embedded-triggers" >}})
+that activate with the scenario. Each block has exactly one **source**
+(`[trigger.schedule]` or `[trigger.watch]`) and one **action**
 (`[trigger.action]`).
 
 ## Sources
@@ -45,6 +48,10 @@ debounce = "30s"             # quiet-window; lower for fast commands
 - A watch trigger is a **policy selector** by `repo` or `role` — never a live
   session name. It binds to matching running sessions and watches their
   worktrees.
+- A `role` selector matches any running session with that scenario role. It is
+  also how a scenario ships its own automation: a
+  [scenario-embedded trigger]({{< relref "scenarios.md#trigger-blocks-scenario-embedded-triggers" >}})
+  uses a `role` its scenario defines and binds only inside that scenario.
 - `.gitignore` is always honoured (ignored directories are pruned from the watch
   set, so `node_modules/` etc. don't exhaust the watcher).
 - A burst of edits is coalesced by the `debounce` quiet-window into one fire.

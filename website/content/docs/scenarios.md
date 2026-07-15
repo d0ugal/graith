@@ -80,6 +80,66 @@ session instead of creating a new one. The named session must already be
 running. Shared sessions participate in the scenario (receive manifests, appear
 in status) but are never stopped or deleted by scenario lifecycle operations.
 
+### `[[trigger]]` blocks (scenario-embedded triggers)
+
+A scenario can ship its own automation: add `[[trigger]]` blocks to the scenario
+TOML and they activate with the scenario. This is how a scenario wires in a
+continuous reviewer — a watch trigger that spawns (or reuses) a reviewer session
+whenever an implementer's files change. See [Triggers]({{< relref "triggers.md" >}})
+for the full trigger vocabulary; scenario-embedded triggers use the same
+`[trigger.schedule]`/`[trigger.watch]` sources and `[trigger.action]` verbs, with
+these extra restrictions:
+
+- **Watch triggers select by `role` only** — never `repo` — and the role must be
+  one a `[[sessions]]` entry in the same scenario declares. The trigger binds
+  only to sessions **within its own scenario**, so two running instances of the
+  same scenario file never cross-fire.
+- **No external references.** A scenario trigger cannot start another scenario
+  (`type = "scenario"`), and a `command` action must use a `[trigger.watch]`
+  source (a schedule `command` would name a repo outside the scenario).
+
+```toml
+version = 1
+
+[scenario]
+name = "review-pipeline"
+goal = "Implement the feature with a continuous reviewer"
+
+[[sessions]]
+name = "impl"
+repo = "~/Code/graith"
+role = "implementer"
+task = "Implement the feature."
+
+# Whenever the implementer changes Go source, ensure a reviewer session exists
+# (reusing it if it does) and ask it to review the latest changes.
+[[trigger]]
+name = "review-go"
+[trigger.watch]
+role  = "implementer"      # a role this scenario defines
+paths = ["**/*.go"]
+[trigger.action]
+type   = "session"
+ensure = true
+agent  = "claude"
+prompt = "Review the changes since your last look; send feedback via gr msg."
+```
+
+**Lifecycle.** Embedded triggers activate only **after** the scenario's
+two-phase start succeeds — if the start rolls back, the triggers are discarded
+with it, so there are never orphaned watchers. They are stored on the scenario
+(namespaced `scenario:<id>:<name>`) and survive a daemon restart. `gr scenario
+stop` tears down their watchers; `gr scenario resume` and `gr scenario add`
+rebind them to the scenario's running sessions; `gr scenario delete` removes them
+entirely. They appear in `gr trigger list` alongside config-origin triggers.
+
+Note that a session/reactor a trigger *spawns* (e.g. an `ensure = true`
+reviewer) is parented to the **orchestrator**, not owned by the scenario — like
+any [session action]({{< relref "triggers.md" >}}) reactor. `gr scenario delete`
+removes the scenario and its own sessions but does **not** stop such a reactor;
+manage it with `gr stop`/`gr delete`, or give the trigger an
+`idle_timeout`/`auto_cleanup` so it reaps itself.
+
 ## CLI commands
 
 ### `gr scenario start <file>`

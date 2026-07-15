@@ -11,6 +11,7 @@ import (
 
 	"github.com/d0ugal/graith/internal/git"
 	"github.com/d0ugal/graith/internal/protocol"
+	"github.com/d0ugal/graith/internal/scenariofile"
 	"github.com/d0ugal/graith/internal/store"
 )
 
@@ -80,6 +81,30 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 		if s.Repo == "" {
 			return nil, fmt.Errorf("session %q: repo is required", s.Name)
 		}
+	}
+
+	// Validate scenario-embedded triggers against the roles this scenario defines
+	// (issue #1027). Done authoritatively here — before any filesystem work — so a
+	// client can't bypass the CLI's check. They are only associated with the
+	// scenario once the two-phase start below succeeds.
+	definedRoles := make(map[string]bool, len(msg.Sessions))
+	definedMembers := make(map[string]bool, len(msg.Sessions))
+
+	for _, s := range msg.Sessions {
+		// Shared members keep their original scenario identity, so a watch trigger
+		// can never bind to them — exclude their role from the selectable set (a
+		// shared member is still a valid delivery target by name).
+		if s.Role != "" && !s.Shared {
+			definedRoles[s.Role] = true
+		}
+
+		if s.Name != "" {
+			definedMembers[s.Name] = true
+		}
+	}
+
+	if err := scenariofile.ValidateScenarioTriggers(msg.Triggers, definedRoles, definedMembers); err != nil {
+		return nil, err
 	}
 
 	// Preflight: validate repos exist and are git repos.
@@ -408,6 +433,11 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 	}
 
 	scenario.SessionIDs = sessionIDs
+	// Activate scenario-embedded triggers only now that the two-phase start has
+	// succeeded — a rolled-back scenario never reaches here, so its triggers are
+	// discarded with it (no orphaned watchers). The reconcile loops pick them up
+	// on the next tick and bind to the scenario's running sessions.
+	scenario.Triggers = msg.Triggers
 	_ = sm.saveState()
 	sm.mu.Unlock()
 
@@ -541,12 +571,15 @@ func (sm *SessionManager) StopScenario(name string) ([]string, error) {
 	var (
 		sessionIDs []string
 		sharedSet  map[int]bool
+		scenarioID string
 	)
 
-	for _, sc := range sm.state.Scenarios {
+	for id, sc := range sm.state.Scenarios {
 		if sc.Name == name {
 			sessionIDs = make([]string, len(sc.SessionIDs))
 			copy(sessionIDs, sc.SessionIDs)
+
+			scenarioID = id
 
 			sharedSet = make(map[int]bool, len(sc.Sessions))
 			for i, ss := range sc.Sessions {
@@ -564,6 +597,11 @@ func (sm *SessionManager) StopScenario(name string) ([]string, error) {
 	if sessionIDs == nil {
 		return nil, fmt.Errorf("scenario %q not found", name)
 	}
+
+	// Tear down any scenario-embedded trigger watchers up front — the sessions
+	// they bind to are about to stop. The definitions stay on ScenarioState so a
+	// later resume rebinds them.
+	sm.teardownScenarioTriggerBindings(scenarioID)
 
 	var stopped []string
 
@@ -630,6 +668,12 @@ func (sm *SessionManager) DeleteScenario(name string) ([]string, error) {
 		return nil, fmt.Errorf("scenario %q not found", name)
 	}
 
+	// Tear down the scenario's trigger watchers up front (as StopScenario does),
+	// so a live binding on a still-running member can't fire mid-teardown while
+	// sessions are stopped one at a time. pruneScenarioTriggerState at the end is
+	// idempotent over an already-empty binding set.
+	sm.teardownScenarioTriggerBindings(scenarioID)
+
 	// Stop running sessions first (skip shared sessions).
 	for i, id := range sessionIDs {
 		if sharedSet[i] {
@@ -688,13 +732,21 @@ func (sm *SessionManager) DeleteScenario(name string) ([]string, error) {
 	}
 
 	// Only remove the scenario record if all sessions were cleaned up.
+	recordRemoved := len(deleteErrors) == 0
+
 	sm.mu.Lock()
-	if len(deleteErrors) == 0 {
+	if recordRemoved {
 		delete(sm.state.Scenarios, scenarioID)
 	}
 
 	_ = sm.saveState()
 	sm.mu.Unlock()
+
+	// Drop the scenario's trigger bindings and persisted runtime once its record
+	// is gone, so scenario churn can't leak trigger state.
+	if recordRemoved {
+		sm.pruneScenarioTriggerState(scenarioID)
+	}
 
 	if len(deleteErrors) > 0 {
 		return deleted, fmt.Errorf("failed to delete %d session(s): %v — scenario record kept for retry", len(deleteErrors), deleteErrors)

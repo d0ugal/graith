@@ -2605,6 +2605,17 @@
             }
           },
           "optional": false
+        },
+        {
+          "name": "triggers",
+          "type": {
+            "kind": "array",
+            "elem": {
+              "kind": "object",
+              "ref": "TriggerConfig"
+            }
+          },
+          "optional": true
         }
       ]
     },

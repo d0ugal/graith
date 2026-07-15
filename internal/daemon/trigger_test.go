@@ -151,17 +151,17 @@ func TestReconcileSchedules_Prune(t *testing.T) {
 	trig := config.TriggerConfig{Name: "keep", Schedule: &config.ScheduleConfig{Cron: "@daily"}, Action: config.ActionConfig{Type: config.ActionMessage, Body: "x", Deliver: config.DeliverConfig{Topic: "t"}}}
 	sm := newTriggerTestSM(t, trig)
 	now := time.Now()
-	sm.reconcileSchedules(sm.cfg, now)
+	sm.reconcileSchedules(sm.allTriggers(), now)
 
 	if _, ok := sm.triggers.nextFire["keep"]; !ok {
 		t.Fatal("keep should be armed after reconcile")
 	}
 	// Remove from config and reconcile: pruned.
 	sm.cfg.Triggers = nil
-	sm.reconcileSchedules(sm.cfg, now)
+	sm.reconcileSchedules(sm.allTriggers(), now)
 	// reconcile returns early when no triggers; call the prune path with an empty set.
 	sm.cfg.Triggers = []config.TriggerConfig{{Name: "other", Schedule: &config.ScheduleConfig{Cron: "@daily"}, Action: config.ActionConfig{Type: config.ActionMessage, Body: "x", Deliver: config.DeliverConfig{Topic: "t"}}}}
-	sm.reconcileSchedules(sm.cfg, now)
+	sm.reconcileSchedules(sm.allTriggers(), now)
 
 	if _, ok := sm.triggers.nextFire["keep"]; ok {
 		t.Error("keep should have been pruned")
@@ -289,12 +289,12 @@ func TestMatchingWatchSessions(t *testing.T) {
 	sm.state.Sessions["s2"] = &SessionState{ID: "s2", Name: "two", Status: StatusRunning, ScenarioRole: "implementer", WorktreePath: "/wt/2"}
 	sm.state.Sessions["s3"] = &SessionState{ID: "s3", Name: "gone", Status: StatusStopped, RepoPath: "/repo/a", WorktreePath: "/wt/3"}
 
-	byRepo := sm.matchingWatchSessions(&config.WatchConfig{Repo: "/repo/a"})
+	byRepo := sm.matchingWatchSessions(&config.WatchConfig{Repo: "/repo/a"}, "")
 	if len(byRepo) != 1 || byRepo[0].id != "s1" {
 		t.Errorf("byRepo = %+v", byRepo)
 	}
 
-	byRole := sm.matchingWatchSessions(&config.WatchConfig{Role: "implementer"})
+	byRole := sm.matchingWatchSessions(&config.WatchConfig{Role: "implementer"}, "")
 	if len(byRole) != 1 || byRole[0].id != "s2" {
 		t.Errorf("byRole = %+v", byRole)
 	}

@@ -43,12 +43,12 @@ func (sm *SessionManager) RunTriggerLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case now := <-ticker.C:
-			cfg := sm.Config()
-			if len(cfg.Triggers) == 0 {
-				continue
-			}
-
-			sm.reconcileSchedules(cfg, now)
+			// Always reconcile, even with no live triggers: reconcileSchedules is
+			// what prunes an in-memory next-fire cursor when its trigger goes away
+			// (e.g. a scenario stops and its schedule trigger leaves allTriggers).
+			// Skipping it would strand a stale cursor and fire an overdue run on
+			// resume even under catch_up=false.
+			sm.reconcileSchedules(sm.allTriggers(), now)
 
 			for _, name := range sm.dueSchedules(now) {
 				go sm.fireSchedule(ctx, name, causeSchedule)
@@ -60,11 +60,11 @@ func (sm *SessionManager) RunTriggerLoop(ctx context.Context) {
 // reconcileSchedules (re)parses schedule triggers, handles fingerprint resets
 // and catch_up, and prunes runtime state for removed triggers. Cheap enough to
 // run every tick.
-func (sm *SessionManager) reconcileSchedules(cfg *config.Config, now time.Time) {
+func (sm *SessionManager) reconcileSchedules(triggers []config.TriggerConfig, now time.Time) {
 	live := make(map[string]bool)
 
-	for i := range cfg.Triggers {
-		t := &cfg.Triggers[i]
+	for i := range triggers {
+		t := &triggers[i]
 		if !t.IsSchedule() || !t.TriggerEnabled() {
 			continue
 		}
@@ -181,11 +181,11 @@ func (sm *SessionManager) armSchedule(t *config.TriggerConfig, rt *TriggerRuntim
 func (sm *SessionManager) dueSchedules(now time.Time) []string {
 	var due []string
 
-	cfg := sm.Config()
+	triggers := sm.allTriggers()
 
-	byName := make(map[string]*config.TriggerConfig, len(cfg.Triggers))
-	for i := range cfg.Triggers {
-		byName[cfg.Triggers[i].Name] = &cfg.Triggers[i]
+	byName := make(map[string]*config.TriggerConfig, len(triggers))
+	for i := range triggers {
+		byName[triggers[i].Name] = &triggers[i]
 	}
 
 	sm.triggers.mu.Lock()
@@ -440,6 +440,13 @@ func (sm *SessionManager) putTriggerRuntime(name string, rt *TriggerRuntimeState
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
+	// Don't resurrect runtime for a scenario trigger whose scenario is gone: a
+	// stale reconcile snapshot or an in-flight action could otherwise re-persist
+	// a scenario:<deleted-id>:... entry that pruneScenarioTriggerState just removed.
+	if sm.scenarioTriggerOrphanedLocked(name) {
+		return
+	}
+
 	sm.state.TriggerRuntime[name] = rt
 	if err := sm.saveState(); err != nil {
 		sm.log.Warn("trigger: save state failed", "trigger", name, "err", err)
@@ -452,6 +459,12 @@ func (sm *SessionManager) putTriggerRuntime(name string, rt *TriggerRuntimeState
 func (sm *SessionManager) updateTriggerRuntime(name string, fn func(*TriggerRuntimeState)) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
+
+	// A scenario trigger whose scenario has been deleted must not resurrect its
+	// runtime entry (see putTriggerRuntime).
+	if sm.scenarioTriggerOrphanedLocked(name) {
+		return nil
+	}
 
 	rt, ok := sm.state.TriggerRuntime[name]
 	if !ok {
@@ -487,6 +500,12 @@ func (sm *SessionManager) recordTriggerRun(name string, run TriggerRun) {
 // --- helpers ---
 
 func (sm *SessionManager) triggerByName(name string) *config.TriggerConfig {
+	// Scenario-embedded triggers carry a namespaced name and live on the owning
+	// ScenarioState, not in config.
+	if scenarioID, bare, ok := parseScenarioTriggerName(name); ok {
+		return sm.scenarioTriggerByName(scenarioID, bare, name)
+	}
+
 	cfg := sm.Config()
 	for i := range cfg.Triggers {
 		if cfg.Triggers[i].Name == name {
@@ -697,11 +716,11 @@ func (sm *SessionManager) triggerRecord(t *config.TriggerConfig) protocol.Trigge
 
 // TriggerList returns records for all configured triggers.
 func (sm *SessionManager) TriggerList() []protocol.TriggerRecord {
-	cfg := sm.Config()
+	triggers := sm.allTriggers()
 
-	out := make([]protocol.TriggerRecord, 0, len(cfg.Triggers))
-	for i := range cfg.Triggers {
-		out = append(out, sm.triggerRecord(&cfg.Triggers[i]))
+	out := make([]protocol.TriggerRecord, 0, len(triggers))
+	for i := range triggers {
+		out = append(out, sm.triggerRecord(&triggers[i]))
 	}
 
 	return out

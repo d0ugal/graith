@@ -162,7 +162,7 @@ func TestReconcileBindings_Lifecycle(t *testing.T) {
 	sm.state.Sessions["src"] = &SessionState{ID: "src", Name: "ben", Status: StatusRunning, ScenarioRole: "implementer", WorktreePath: worktree}
 
 	ctx := context.Background()
-	sm.reconcileBindings(ctx, sm.cfg, time.Now())
+	sm.reconcileBindings(ctx, sm.allTriggers(), time.Now())
 
 	if len(sm.triggers.bindings) != 1 {
 		t.Fatalf("expected 1 binding, got %d", len(sm.triggers.bindings))
@@ -170,7 +170,7 @@ func TestReconcileBindings_Lifecycle(t *testing.T) {
 
 	// Session stops → binding is torn down.
 	sm.state.Sessions["src"].Status = StatusStopped
-	sm.reconcileBindings(ctx, sm.cfg, time.Now())
+	sm.reconcileBindings(ctx, sm.allTriggers(), time.Now())
 
 	if len(sm.triggers.bindings) != 0 {
 		t.Fatalf("expected binding torn down, got %d", len(sm.triggers.bindings))
@@ -195,7 +195,7 @@ func TestReconcileBindings_HotReload(t *testing.T) {
 	sm.state.Sessions["src"] = &SessionState{ID: "src", Name: "canny", Status: StatusRunning, ScenarioRole: "implementer", WorktreePath: worktree}
 
 	ctx := context.Background()
-	sm.reconcileBindings(ctx, sm.cfg, time.Now())
+	sm.reconcileBindings(ctx, sm.allTriggers(), time.Now())
 
 	key := bindingKey("bide", "src")
 	first := sm.triggers.bindings[key]
@@ -205,7 +205,7 @@ func TestReconcileBindings_HotReload(t *testing.T) {
 	}
 
 	// Reconcile again with no change: the same binding must be kept.
-	sm.reconcileBindings(ctx, sm.cfg, time.Now())
+	sm.reconcileBindings(ctx, sm.allTriggers(), time.Now())
 
 	if got := sm.triggers.bindings[key]; got != first {
 		t.Fatalf("unchanged reconcile recreated the binding")
@@ -227,7 +227,7 @@ func TestReconcileBindings_HotReload(t *testing.T) {
 	sm.cfg = &newCfg
 	sm.mu.Unlock()
 
-	sm.reconcileBindings(ctx, sm.Config(), time.Now())
+	sm.reconcileBindings(ctx, sm.allTriggers(), time.Now())
 
 	second := sm.triggers.bindings[key]
 	if second == nil {
@@ -313,7 +313,7 @@ func TestReconcileBindings_DefersRecreateWhileInFlight(t *testing.T) {
 	sm.state.Sessions["src"] = &SessionState{ID: "src", Name: "canny", Status: StatusRunning, ScenarioRole: "implementer", WorktreePath: worktree}
 
 	ctx := context.Background()
-	sm.reconcileBindings(ctx, sm.cfg, time.Now())
+	sm.reconcileBindings(ctx, sm.allTriggers(), time.Now())
 
 	key := bindingKey("bide", "src")
 	first := sm.triggers.bindings[key]
@@ -340,7 +340,7 @@ func TestReconcileBindings_DefersRecreateWhileInFlight(t *testing.T) {
 	sm.cfg = &newCfg
 	sm.mu.Unlock()
 
-	sm.reconcileBindings(ctx, sm.Config(), time.Now())
+	sm.reconcileBindings(ctx, sm.allTriggers(), time.Now())
 
 	if got := sm.triggers.bindings[key]; got != first {
 		t.Fatalf("recreated the binding while an action was in flight")
@@ -351,7 +351,7 @@ func TestReconcileBindings_DefersRecreateWhileInFlight(t *testing.T) {
 	first.inFlight = false
 	first.bmu.Unlock()
 
-	sm.reconcileBindings(ctx, sm.Config(), time.Now())
+	sm.reconcileBindings(ctx, sm.allTriggers(), time.Now())
 
 	second := sm.triggers.bindings[key]
 	if second == first {
@@ -406,7 +406,7 @@ func TestReconcileBindings_DegradedRecovers(t *testing.T) {
 	key := bindingKey("dreich", "src")
 
 	t0 := time.Now()
-	sm.reconcileBindings(ctx, sm.cfg, t0)
+	sm.reconcileBindings(ctx, sm.allTriggers(), t0)
 
 	b := sm.triggers.bindings[key]
 	if b == nil || b.degraded == "" {
@@ -425,14 +425,14 @@ func TestReconcileBindings_DegradedRecovers(t *testing.T) {
 	// 2s tick while the limit is still exhausted).
 	firstRetry := b.nextRetryAt
 
-	sm.reconcileBindings(ctx, sm.cfg, t0.Add(time.Second))
+	sm.reconcileBindings(ctx, sm.allTriggers(), t0.Add(time.Second))
 
 	if got := sm.triggers.bindings[key]; got.retryCount != 1 {
 		t.Fatalf("expected no retry before backoff, retryCount=%d", got.retryCount)
 	}
 
 	// Still exhausted at the scheduled retry time → retry fires, backoff grows.
-	sm.reconcileBindings(ctx, sm.cfg, firstRetry.Add(time.Millisecond))
+	sm.reconcileBindings(ctx, sm.allTriggers(), firstRetry.Add(time.Millisecond))
 
 	b2 := sm.triggers.bindings[key]
 	if b2.retryCount != 2 {
@@ -446,7 +446,7 @@ func TestReconcileBindings_DegradedRecovers(t *testing.T) {
 	// Watch limit clears → the next reconcile after the backoff recreates a
 	// healthy binding, with no session restart.
 	sm.watchAdd = nil
-	sm.reconcileBindings(ctx, sm.cfg, b2.nextRetryAt.Add(time.Millisecond))
+	sm.reconcileBindings(ctx, sm.allTriggers(), b2.nextRetryAt.Add(time.Millisecond))
 
 	healthy := sm.triggers.bindings[key]
 	if healthy == nil {
@@ -500,14 +500,14 @@ func TestRecordDegradedBinding_Recovers(t *testing.T) {
 	}
 
 	// Before the backoff, reconcile must not thrash.
-	sm.reconcileBindings(context.Background(), sm.cfg, t0.Add(time.Second))
+	sm.reconcileBindings(context.Background(), sm.allTriggers(), t0.Add(time.Second))
 
 	if got := sm.triggers.bindings[key]; got.watcher != nil {
 		t.Fatal("expected no recreation before backoff elapses")
 	}
 
 	// After the backoff, and with watcher construction working, it recovers.
-	sm.reconcileBindings(context.Background(), sm.cfg, b.nextRetryAt.Add(time.Millisecond))
+	sm.reconcileBindings(context.Background(), sm.allTriggers(), b.nextRetryAt.Add(time.Millisecond))
 
 	healthy := sm.triggers.bindings[key]
 	if healthy == nil || healthy.degraded != "" || healthy.watcher == nil || healthy.cancel == nil {
@@ -535,7 +535,7 @@ func TestDegradedTriggerDiagnostics(t *testing.T) {
 	sm.watchAdd = func(_ *fsnotify.Watcher, _ string) error {
 		return errors.New("too many open files")
 	}
-	sm.reconcileBindings(context.Background(), sm.cfg, time.Now())
+	sm.reconcileBindings(context.Background(), sm.allTriggers(), time.Now())
 
 	diag := sm.degradedTriggerDiagnostics()
 	if len(diag) != 1 {

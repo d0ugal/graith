@@ -949,6 +949,20 @@ manifests and appear in `gr scenario status` but are never stopped or deleted
 by scenario lifecycle operations. This is useful for including the orchestrator
 itself or long-running service sessions in a scenario.
 
+**Scenario-embedded triggers (#1027):** A scenario TOML may carry `[[trigger]]`
+blocks (same shape as config triggers — see the Triggers section). They ride the
+`ScenarioStartMsg` into the daemon (parsed by the shared `scenariofile` loader,
+validated by `scenariofile.ValidateScenarioTriggers`), and are stored on
+`ScenarioState.Triggers` and enumerated by `SessionManager.allTriggers` under a
+namespaced name (`scenario:<id>:<name>`). Restrictions vs config triggers: a
+watch source must select by a `role` the scenario defines (never `repo`, and
+scoped to the scenario's own sessions); a `command` action must use a `[watch]`
+source; and `type = "scenario"` is forbidden. Lifecycle: they activate only
+after the two-phase start succeeds (discarded on rollback), are enumerated while
+the scenario has a running non-shared member (so `stop` deactivates them and
+`resume`/`add` rebind via the reconcile loops), and `delete` prunes their
+bindings and persisted runtime.
+
 **Scenario file location:** Place scenario TOML files in
 `~/.config/graith/scenarios/` (next to `config.toml`). Files in this
 directory can be started by name: `gr scenario start tracing-pipeline`

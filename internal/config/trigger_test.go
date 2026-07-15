@@ -185,6 +185,17 @@ func TestValidateTriggers_DuplicateNames(t *testing.T) {
 	}
 }
 
+func TestValidateTriggers_ReservedScenarioPrefix(t *testing.T) {
+	c := &Config{Triggers: []TriggerConfig{
+		schedTrigger("scenario:sc-x:daily", ScheduleConfig{Cron: "@daily"}, ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}),
+	}}
+
+	joined := errorsString(c.validateTriggers())
+	if !strings.Contains(joined, "reserved") {
+		t.Fatalf("expected reserved-prefix error, got %s", joined)
+	}
+}
+
 func errorsString(errs []error) string {
 	var b strings.Builder
 	for _, e := range errs {
