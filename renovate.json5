@@ -7,6 +7,18 @@
     { matchManagers: ['gomod'], postUpdateOptions: ['gomodTidy'] },
     { matchManagers: ['gomod'], commitMessagePrefix: 'fix:', commitMessageAction: 'update' },
     {
+      // config:best-practices enables docker:pinDigests, but the golangci-lint
+      // image tag lives in a Makefile variable (GOLANGCI_LINT_VERSION := vX.Y.Z)
+      // and is referenced as golangci/golangci-lint:$(GOLANGCI_LINT_VERSION) in
+      // several commands. A digest can't be written into that variable
+      // reference — the custom regex manager only captures the version — so the
+      // pin-dependencies branch errors with "update failure". Track this image
+      // by version only. See dependency dashboard #90.
+      matchDepNames: ['golangci/golangci-lint'],
+      matchDatasources: ['docker'],
+      pinDigests: false,
+    },
+    {
       // gvisor.dev/gvisor is a transitive dependency of tailscale.com, which
       // pins the exact revision it needs. gvisor's repo is Bazel-structured, so
       // arbitrary upstream commits don't compile with `go build` (e.g. a stray
