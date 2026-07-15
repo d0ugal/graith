@@ -69,6 +69,13 @@ type nonoProfileFS struct {
 	ReadFile   []string `json:"read_file,omitempty"`
 	AllowFile  []string `json:"allow_file,omitempty"`
 	UnixSocket []string `json:"unix_socket,omitempty"`
+	// BypassProtection lists paths exempted from nono's group-level deny rules
+	// (e.g. the required deny_credentials group, which denies ~/.ssh). Per nono
+	// v0.66.0 it ONLY removes the deny — each path must ALSO appear in a grant
+	// (allow/read/write) to actually be accessible, so graith always emits the
+	// matching read/allow entry alongside it. Used by the "ssh-keys" feature to
+	// punch ~/.ssh through deny_credentials; empty otherwise.
+	BypassProtection []string `json:"bypass_protection,omitempty"`
 }
 
 type nonoProfileEnv struct {
@@ -186,8 +193,12 @@ func isWithinAny(path string, prefixes []string) bool {
 //     nono inherit ALL of the daemon's env (fail-open), so an empty allowlist
 //     (scrub everything) is the fail-closed default.
 //   - feature "ssh"       -> filesystem.unix_socket [$SSH_AUTH_SOCK] (agent socket only)
-//   - feature "ssh-keys"  -> filesystem.read [~/.ssh] (raw key-file read access;
-//     opt-in on top of "ssh", which stays agent-socket-only — see design §C4)
+//   - feature "ssh-keys"  -> filesystem.read [~/.ssh] + filesystem.bypass_protection
+//     [~/.ssh] (raw key-file read access; opt-in on top of "ssh", which stays
+//     agent-socket-only — see design §C4). ~/.ssh is denied by the required
+//     deny_credentials group, so read alone is a no-op: bypass_protection is
+//     required to relax that deny (and only relaxes it — the read grant is what
+//     actually grants access).
 //   - feature "process-control" -> no-op unless SignalMode is set; see below
 //   - SignalMode          -> security.signal_mode (Phase 2: opt-in isolation)
 //   - Network             -> network.block / network.allow_domain (Phase 2 egress)
@@ -309,9 +320,7 @@ func buildNonoProfile(name string, opts WrapOpts, sshAuthSock string) (nonoProfi
 			// Grant read-only access to ~/.ssh for agents that use raw key
 			// files rather than the agent socket. This is the opt-in companion
 			// to "ssh" (which stays agent-socket-only, design §C4). Resolve the
-			// home dir here rather than emit a literal "~" nono cannot expand;
-			// if HOME is unset we can't locate ~/.ssh, so warn and grant
-			// nothing rather than emit a broken path.
+			// home dir here rather than emit a literal "~" nono cannot expand.
 			home, err := os.UserHomeDir()
 			if err != nil {
 				warnings = append(warnings, "feature \"ssh-keys\" requested but the home directory could not be resolved; ~/.ssh not granted")
@@ -319,7 +328,31 @@ func buildNonoProfile(name string, opts WrapOpts, sshAuthSock string) (nonoProfi
 				continue
 			}
 
-			p.Filesystem.Read = append(p.Filesystem.Read, filepath.Join(home, ".ssh"))
+			// os.UserHomeDir returns $HOME verbatim on unix, so it can be
+			// relative or the bare root. A relative path would resolve against
+			// nono's cwd, and "/.ssh" is not a real key dir — either is a broken
+			// grant, so warn and grant nothing rather than emit it (fail-closed).
+			if !filepath.IsAbs(home) || filepath.Clean(home) == "/" {
+				warnings = append(warnings, fmt.Sprintf("feature \"ssh-keys\" requested but home directory %q is not a usable absolute path; ~/.ssh not granted", home))
+
+				continue
+			}
+
+			sshDir := filepath.Join(home, ".ssh")
+
+			// Same /tmp/$TMPDIR read-only guard the config read paths get: nono
+			// cannot make a subpath of a default-writable prefix read-only, so a
+			// read grant there would silently be writable. Fail closed rather
+			// than emit a grant that lies (matches read_dirs/read_files above).
+			if underDefaultWritable(sshDir) {
+				return nonoProfile{}, warnings, readOnlyUnderWritableErr("ssh-keys read path", sshDir)
+			}
+
+			// ~/.ssh is denied by the required deny_credentials group, so a plain
+			// read grant is a no-op: bypass_protection relaxes the deny, and the
+			// read grant is what actually grants (read-only) access. Emit both.
+			p.Filesystem.Read = append(p.Filesystem.Read, sshDir)
+			p.Filesystem.BypassProtection = append(p.Filesystem.BypassProtection, sshDir)
 		case "process-control":
 			// No-op on its own under nono: the default signal_mode already
 			// permits same-sandbox signals. To actually gate signalling, set
