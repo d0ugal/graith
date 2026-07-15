@@ -236,6 +236,11 @@ type PRStatus struct {
 type CIStatus struct {
 	State         string // passing | failing | pending | "" (unknown)
 	FailingChecks []string
+	// Passed and Total are the pass-like and total check counts, letting the
+	// overlay/`gr ls` show progress ("16/22") while CI runs. Total == 0 means no
+	// count is available.
+	Passed int
+	Total  int
 }
 
 // TokenStats is the runtime-only token usage for a session's current agent,

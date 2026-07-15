@@ -119,6 +119,12 @@ func TestCliPR(t *testing.T) {
 		{"conflict shown, review omitted", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 11, State: "open", Conflicting: true, ReviewDecision: "changes_requested"}}, "#11 open conflict"},
 		{"merged suppresses stale CI", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 12, State: "merged", ReviewDecision: "approved"}, CI: &protocol.CIInfo{State: "passing"}}, "#12 merged"},
 		{"closed", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 13, State: "closed", ReviewDecision: "changes_requested"}}, "#13 closed"},
+		// Counts: while CI runs/fails, show passed/total progress in place of the
+		// bare CI:… / CI:fail badge, falling back when no count is available.
+		{"CI pending with counts", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 14, State: "open"}, CI: &protocol.CIInfo{State: "pending", Passed: 16, Total: 22}}, "#14 open CI:16/22"},
+		{"CI failing with counts", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 15, State: "open"}, CI: &protocol.CIInfo{State: "failing", FailingChecks: []string{"build"}, Passed: 19, Total: 22}}, "#15 open CI:19/22 1✗"},
+		{"CI failing counts but no names falls back", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 16, State: "open"}, CI: &protocol.CIInfo{State: "failing", Passed: 19, Total: 22}}, "#16 open CI:fail"},
+		{"CI pending no counts falls back", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 17, State: "open"}, CI: &protocol.CIInfo{State: "pending"}}, "#17 open CI:…"},
 	}
 
 	for _, tt := range tests {

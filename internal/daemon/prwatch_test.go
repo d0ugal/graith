@@ -1295,6 +1295,13 @@ func TestPRInfoAndCIInfo_Cov(t *testing.T) {
 	if ci == nil || ci.State != "passing" {
 		t.Errorf("ciInfo wrong: %+v", ci)
 	}
+
+	// Passed/Total counts flow through to the protocol struct so the overlay and
+	// `gr ls` can show progress ("16/22") while CI runs.
+	pending := ciInfo(CIStatus{State: "pending", Passed: 16, Total: 22})
+	if pending == nil || pending.Passed != 16 || pending.Total != 22 {
+		t.Errorf("ciInfo should carry passed/total counts, got %+v", pending)
+	}
 }
 
 // TestPollSession_NonGitHubBacksOff verifies pollSession negative-caches a
