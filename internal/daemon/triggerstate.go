@@ -49,6 +49,16 @@ type watchBinding struct {
 	cancel      func()          // stops the binding's event goroutine
 }
 
+// actionInFlight reports whether a serialised action (command or
+// ensure-reviewer) is currently executing for this binding. Reconcile consults
+// it to avoid recreating a binding out from under an in-flight reserve→create.
+func (b *watchBinding) actionInFlight() bool {
+	b.bmu.Lock()
+	defer b.bmu.Unlock()
+
+	return b.inFlight
+}
+
 func newTriggerState() *triggerState {
 	return &triggerState{
 		cron:     make(map[string]cron.Schedule),

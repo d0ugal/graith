@@ -122,7 +122,7 @@ func TestFileWatch_EndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	b := &watchBinding{triggerName: "wf", sessionID: "src", worktree: worktree, watcher: w, changed: make(map[string]bool)}
+	b := &watchBinding{triggerName: "wf", sessionID: "src", worktree: worktree, fingerprint: triggerFingerprint(&trig), watcher: w, changed: make(map[string]bool)}
 	matcher := newWatchMatcher(worktree, trig.Watch)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -243,6 +243,122 @@ func TestReconcileBindings_HotReload(t *testing.T) {
 
 	if want := triggerFingerprint(&reloaded); second.fingerprint != want {
 		t.Fatalf("binding fingerprint = %q, want %q", second.fingerprint, want)
+	}
+
+	sm.teardownAllBindings()
+}
+
+// TestWatchFire_StaleGenerationDoesNotFire asserts the generation guard: a
+// binding whose stored fingerprint no longer matches the current definition
+// must not fire the (new) action from events the old matcher collected. Without
+// the guard, a hot-reload landing between an event and the debounce firing
+// would dispatch the reloaded action against a stale change set (#1028).
+func TestWatchFire_StaleGenerationDoesNotFire(t *testing.T) {
+	worktree := t.TempDir()
+	trig := config.TriggerConfig{
+		Name:   "thrawn",
+		Watch:  &config.WatchConfig{Role: "implementer", Paths: []string{"**/*.go"}, Debounce: "10ms"},
+		Action: config.ActionConfig{Type: config.ActionMessage, Body: "x", Deliver: config.DeliverConfig{Topic: "fash"}},
+	}
+	sm := newTriggerTestSM(t, trig)
+	ms := withMsgStore(t, sm)
+
+	// A binding stamped with a fingerprint that does NOT match the live config
+	// stands in for a stale generation mid-reload.
+	b := &watchBinding{
+		triggerName: "thrawn",
+		sessionID:   "src",
+		worktree:    worktree,
+		fingerprint: "stalegeneration",
+		changed:     map[string]bool{"main.go": true},
+	}
+
+	sm.watchFire(context.Background(), "thrawn", b)
+
+	if msgs, _ := ms.Read("fash", "reader", false, ""); len(msgs) != 0 {
+		t.Fatalf("stale-generation binding fired the action (%d messages)", len(msgs))
+	}
+
+	// A matching fingerprint fires as normal.
+	b.fingerprint = triggerFingerprint(&trig)
+	b.changed = map[string]bool{"main.go": true}
+	sm.watchFire(context.Background(), "thrawn", b)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if msgs, _ := ms.Read("fash", "reader", false, ""); len(msgs) >= 1 {
+			return
+		}
+
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	t.Fatal("current-generation binding did not fire")
+}
+
+// TestReconcileBindings_DefersRecreateWhileInFlight asserts that a fingerprint
+// change does not tear the binding down while a serialised action is in flight
+// — recreating it then would let a fire on the fresh binding double-spawn an
+// ensure-reviewer reactor (the new binding starts with a cleared inFlight
+// guard). The recreate must wait for the in-flight fire to clear (#1028).
+func TestReconcileBindings_DefersRecreateWhileInFlight(t *testing.T) {
+	worktree := t.TempDir()
+	trig := config.TriggerConfig{
+		Name:   "bide",
+		Watch:  &config.WatchConfig{Role: "implementer", Paths: []string{"**/*.go"}},
+		Action: config.ActionConfig{Type: config.ActionCommand, Command: "true"},
+	}
+	sm := newTriggerTestSM(t, trig)
+	sm.state.Sessions["src"] = &SessionState{ID: "src", Name: "canny", Status: StatusRunning, ScenarioRole: "implementer", WorktreePath: worktree}
+
+	ctx := context.Background()
+	sm.reconcileBindings(ctx, sm.cfg)
+
+	key := bindingKey("bide", "src")
+	first := sm.triggers.bindings[key]
+
+	if first == nil {
+		t.Fatalf("expected binding after first reconcile")
+	}
+
+	// Simulate a serialised action mid-flight on the current binding.
+	first.bmu.Lock()
+	first.inFlight = true
+	first.bmu.Unlock()
+
+	// Reload the definition (paths change → new fingerprint) while in flight.
+	reloaded := config.TriggerConfig{
+		Name:   "bide",
+		Watch:  &config.WatchConfig{Role: "implementer", Paths: []string{"**/*.md"}},
+		Action: config.ActionConfig{Type: config.ActionCommand, Command: "true"},
+	}
+
+	sm.mu.Lock()
+	newCfg := *sm.cfg
+	newCfg.Triggers = []config.TriggerConfig{reloaded}
+	sm.cfg = &newCfg
+	sm.mu.Unlock()
+
+	sm.reconcileBindings(ctx, sm.Config())
+
+	if got := sm.triggers.bindings[key]; got != first {
+		t.Fatalf("recreated the binding while an action was in flight")
+	}
+
+	// Action finishes → next reconcile recreates the binding.
+	first.bmu.Lock()
+	first.inFlight = false
+	first.bmu.Unlock()
+
+	sm.reconcileBindings(ctx, sm.Config())
+
+	second := sm.triggers.bindings[key]
+	if second == first {
+		t.Fatalf("binding not recreated after in-flight action cleared")
+	}
+
+	if want := triggerFingerprint(&reloaded); second.fingerprint != want {
+		t.Fatalf("recreated binding fingerprint = %q, want %q", second.fingerprint, want)
 	}
 
 	sm.teardownAllBindings()
