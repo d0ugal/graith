@@ -2310,8 +2310,8 @@ func toSessionInfo(s SessionState, cfg *config.Config, hr *hookReport) protocol.
 	}
 
 	// Fallback to hook-derived status when explicit is absent/expired
-	if info.SummaryText == "" && hr != nil && hr.ToolName != "" && time.Now().Before(hr.AuthoritativeUntil) {
-		info.SummaryText = "Using " + hr.ToolName
+	if info.SummaryText == "" && hr != nil {
+		info.SummaryText = hookDerivedStatus(*hr, time.Now())
 	}
 
 	// LastOutputAt — use runtime value, fall back to StatusChangedAt
