@@ -151,11 +151,23 @@ public actor GraithProtocolClient {
 
     // MARK: - Read RPCs
 
-    /// `list` — all sessions on this daemon.
-    public func list() async throws -> [SessionInfo] {
+    /// `list` — sessions on this daemon. When `deleted` is true, returns the
+    /// soft-deleted sessions (for the GUI's Deleted/restore surface) instead of
+    /// the live ones. The daemon's `ListMsg` carries an optional `deleted` flag;
+    /// the empty request (default) returns only non-deleted sessions.
+    public func list(deleted: Bool = false) async throws -> [SessionInfo] {
         let conn = try await controlConnection()
-        let reply = try await conn.request("list")
+        let reply = deleted
+            ? try await conn.request("list", payload: ListRequest(deleted: true))
+            : try await conn.request("list")
         return try decodePayload(reply, as: SessionListMsg.self).sessions
+    }
+
+    /// The wire payload for a deleted-session `list`. Kept private: the shared
+    /// `ListMsg` maps to `EmptyMsg` in the conformance manifest (Messages.swift),
+    /// so a live `list` still sends no body — only the deleted variant needs this.
+    private struct ListRequest: Encodable {
+        let deleted: Bool
     }
 
     /// `repo_list` — repositories the daemon offers for session creation
@@ -242,6 +254,24 @@ public actor GraithProtocolClient {
 
     public func restart(sessionID: String, children: Bool = false) async throws {
         try await lifecycle("restart", sessionID: sessionID, children: children)
+    }
+
+    /// `restore` — un-delete a soft-deleted session (inverse of a soft `delete`),
+    /// returning it to `stopped`. The daemon replies `restored` with a
+    /// `RestoreResultMsg`; the GUI only needs the side effect and re-lists, so the
+    /// reply body is ignored here. `RestoreMsg` is wire-identical to
+    /// `SessionScopeMsg` (`{session_id, children}`), so the latter is reused.
+    public func restore(sessionID: String, children: Bool = false) async throws {
+        let conn = try await controlConnection()
+        _ = try await conn.request("restore", payload: SessionScopeMsg(sessionID: sessionID, children: children))
+    }
+
+    /// `purge` — an immediate **hard** delete (worktree + branch + state removed),
+    /// bypassing the soft-delete retention window. Sent as a `delete` with the
+    /// `purge` flag set, matching the `gr purge` verb.
+    public func purge(sessionID: String, children: Bool = false) async throws {
+        let conn = try await controlConnection()
+        _ = try await conn.request("delete", payload: SessionScopeMsg(sessionID: sessionID, children: children, purge: true))
     }
 
     public func resume(sessionID: String) async throws {

@@ -93,7 +93,10 @@ struct SessionRow: View {
     @State private var showFork = false
     @State private var forkName = ""
     @State private var showMigrate = false
+    @State private var showSetStatus = false
+    @State private var statusText = ""
     @State private var showDeleteConfirm = false
+    @State private var showPurgeConfirm = false
 
     private let migrateAgents = ["claude", "codex", "agy", "opencode"]
 
@@ -159,6 +162,22 @@ struct SessionRow: View {
         } message: {
             Text("This session is running. Deleting it stops the agent and removes its worktree.")
         }
+        .confirmationDialog(
+            "Permanently delete \u{201c}\(session.name)\u{201d}?",
+            isPresented: $showPurgeConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Permanently", role: .destructive) { Task { await connection.purge(session) } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This bypasses the recovery window — the worktree, branch, and history are removed immediately. This cannot be undone.")
+        }
+        .sheet(isPresented: $showSetStatus) {
+            SessionTextPromptSheet(
+                title: "Set Status", fieldLabel: "Status summary",
+                placeholder: "what this session is doing…", confirmLabel: "Set", text: $statusText
+            ) { text in Task { await connection.setStatus(session, text: text) } }
+        }
         .sheet(isPresented: $showRename) {
             SessionTextPromptSheet(
                 title: "Rename Session", fieldLabel: "New name",
@@ -195,8 +214,17 @@ struct SessionRow: View {
         }
         Button { forkName = "\(session.name)-fork"; showFork = true } label: { Label("Fork…", systemImage: "arrow.triangle.branch") }
         Button { showMigrate = true } label: { Label("Migrate…", systemImage: "arrow.left.arrow.right") }
+        Button { statusText = session.summaryText ?? ""; showSetStatus = true } label: {
+            Label("Set Status…", systemImage: "text.bubble")
+        }
+        if let summary = session.summaryText, !summary.isEmpty {
+            Button { Task { await connection.setStatus(session, text: "", clear: true) } } label: {
+                Label("Clear Status", systemImage: "text.badge.xmark")
+            }
+        }
         Divider()
         Button(role: .destructive) { requestDelete() } label: { Label("Delete", systemImage: "trash") }
+        Button(role: .destructive) { showPurgeConfirm = true } label: { Label("Delete Permanently…", systemImage: "trash.slash") }
     }
 
     /// Confirm when running, delete immediately when stopped.
