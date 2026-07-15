@@ -214,6 +214,7 @@ func TestPrevStopSummaryLocked(t *testing.T) {
 
 	t.Run("stored summary wins over hook", func(t *testing.T) {
 		s := &SessionState{SummaryText: "Waiting for CI"}
+
 		sm.mu.Lock()
 		sm.hookReports["braw"] = hookReport{
 			ToolName:           "Bash",
@@ -230,6 +231,7 @@ func TestPrevStopSummaryLocked(t *testing.T) {
 
 	t.Run("empty summary falls back to authoritative hook", func(t *testing.T) {
 		s := &SessionState{}
+
 		sm.mu.Lock()
 		sm.hookReports["canny"] = hookReport{
 			ToolName:           "Bash",
@@ -257,6 +259,7 @@ func TestPrevStopSummaryLocked(t *testing.T) {
 
 	t.Run("empty summary + expired hook yields nothing", func(t *testing.T) {
 		s := &SessionState{}
+
 		sm.mu.Lock()
 		sm.hookReports["dreich"] = hookReport{
 			ToolName:           "Edit",
@@ -273,6 +276,7 @@ func TestPrevStopSummaryLocked(t *testing.T) {
 
 	t.Run("empty summary + missing report yields nothing", func(t *testing.T) {
 		s := &SessionState{}
+
 		sm.mu.Lock()
 		prev, _ := sm.prevStopSummaryLocked(s, "haar")
 		sm.mu.Unlock()
