@@ -9,6 +9,7 @@ import GraithTerminalCore
 struct SessionDetailView: View {
     @ObservedObject var connection: HostConnection
     let session: SessionInfo
+    @State private var showMessages = false
 
     var body: some View {
         // Full-bleed content (terminal fills the screen); the lifecycle actions
@@ -18,6 +19,9 @@ struct SessionDetailView: View {
             .navigationTitle(session.name)
             .compactInlineTitle()
             .toolbar { ToolbarItem(placement: .primaryAction) { sessionMenu } }
+            .sheet(isPresented: $showMessages) {
+                MessagesView(connection: connection, session: session)
+            }
     }
 
     // MARK: - Hamburger menu
@@ -38,6 +42,10 @@ struct SessionDetailView: View {
             }
             Button { Task { await connection.restart(session) } } label: {
                 Label("Restart", systemImage: "arrow.clockwise")
+            }
+            Divider()
+            Button { showMessages = true } label: {
+                Label("Messages", systemImage: "bubble.left.and.bubble.right")
             }
             Divider()
             Section {

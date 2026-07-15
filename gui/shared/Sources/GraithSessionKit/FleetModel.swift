@@ -436,6 +436,34 @@ open class FleetModel: ObservableObject {
         Task { await op(conn) }
     }
 
+    // MARK: - Messaging (gr msg)
+    //
+    // Routed to the session's owning connection. These are `async` (unlike the
+    // fire-and-forget lifecycle actions above) so the compose/inbox UI can await
+    // the result — a send reports success/failure, a fetch returns the messages.
+
+    /// Send a direct message to `session`'s inbox. Returns true on success.
+    @discardableResult
+    public func sendMessage(to session: SessionInfo, body: String) async -> Bool {
+        guard let conn = connection(ownerOf: session.id) else { return false }
+        return await conn.sendMessage(to: session, body: body)
+    }
+
+    /// Fetch `session`'s direct-message conversation (both directions), oldest
+    /// first. `limit > 0` returns only the most recent `limit` messages.
+    public func conversation(for session: SessionInfo, limit: Int = 0) async -> [ConversationMessage] {
+        guard let conn = connection(ownerOf: session.id) else { return [] }
+        return await conn.conversation(for: session, limit: limit)
+    }
+
+    /// Mark `session`'s inbox read (clears its unread count). Returns true on
+    /// success, false if the host is unavailable or the ack failed.
+    @discardableResult
+    public func ackInbox(for session: SessionInfo) async -> Bool {
+        guard let conn = connection(ownerOf: session.id) else { return false }
+        return await conn.ackInbox(for: session)
+    }
+
     // MARK: - Deleted sessions (restore / purge)
     //
     // A soft-deleted session is absent from every connection's live `sessions`,

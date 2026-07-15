@@ -128,6 +128,10 @@ private func sharedAffordances() -> Set<String> {
     wire("terminal.logs") { _ = ControlType.logs }
     wire("terminal.screen-snapshot") { _ = ControlType.screenSnapshot }
 
+    // Messaging — FleetModel routes send/read/ack to the owning host.
+    wire("messaging.send") { _ = FleetModel.sendMessage }
+    wire("messaging.read") { _ = FleetModel.conversation }
+
     // Approvals & pairing.
     wire("approvals.subscribe") { _ = \FleetModel.allApprovals }
     wire("approvals.respond") { _ = HostConnection.respond }

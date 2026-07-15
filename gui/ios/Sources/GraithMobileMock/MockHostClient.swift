@@ -232,6 +232,33 @@ public actor MockHostClient: GraithHostClient {
         scenarios.removeAll { $0.name == name }
     }
 
+    // MARK: - Messaging (gr msg)
+
+    /// Per-session inbox, keyed by session id. Seeded with a canned conversation
+    /// so previews show a populated inbox; a send appends to it.
+    private var inbox: [String: [ConversationMessage]] = MockHostClient.defaultInbox
+
+    public func sendMessage(toSessionID sessionID: String, body: String) async throws -> ConversationMessage {
+        try check(ControlType.msgPub)
+        let existing = inbox[sessionID] ?? []
+        let msg = ConversationMessage(
+            id: "msg-\(sessionID)-\(existing.count)", seq: Int64(existing.count + 1),
+            stream: "inbox:\(sessionID)", senderID: "human", senderName: "human",
+            body: body, createdAt: "2026-07-08T09:00:00Z")
+        inbox[sessionID] = existing + [msg]
+        return msg
+    }
+
+    public func conversation(sessionID: String, limit: Int) async throws -> [ConversationMessage] {
+        try check(ControlType.msgConversation)
+        let all = inbox[sessionID] ?? []
+        return limit > 0 ? Array(all.suffix(limit)) : all
+    }
+
+    public func ackInbox(sessionID: String) async throws {
+        try check(ControlType.msgAck)
+    }
+
     // MARK: - Approvals
 
     public func approvalStream() -> AsyncStream<[ApprovalInfo]> {
@@ -325,6 +352,21 @@ extension MockHostClient {
         "croft-abcdef012345/design/api.md": "# API Design\n\nEndpoints for the bonnie service.",
         "croft-abcdef012345/notes/braw.md": "A wee note in the croft store.",
         "shared/prompts/review.md": "Review this code with a canny eye.",
+    ]
+
+    /// A canned inbox for the `braw` session so the messaging preview isn't
+    /// empty — a sibling message plus an automated PR notice.
+    public static let defaultInbox: [String: [ConversationMessage]] = [
+        "braw0001": [
+            ConversationMessage(id: "msg-braw-0", seq: 1, stream: "inbox:braw0001",
+                                senderID: "canny002", senderName: "canny",
+                                body: "Landed the ingest endpoint — ready for you to wire the UI.",
+                                createdAt: "2026-07-08T08:30:00Z"),
+            ConversationMessage(id: "msg-braw-1", seq: 2, stream: "inbox:braw0001",
+                                senderID: "graith:system", senderName: "pr-watch",
+                                body: "PR #42 checks passed.",
+                                createdAt: "2026-07-08T08:45:00Z", system: true),
+        ],
     ]
 
     public static let defaultApprovals: [ApprovalInfo] = [

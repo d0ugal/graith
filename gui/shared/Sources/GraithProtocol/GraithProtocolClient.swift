@@ -381,6 +381,42 @@ public actor GraithProtocolClient {
         _ = try await conn.request("scenario_delete", payload: ScenarioNameMsg(name: name))
     }
 
+    // MARK: - Inter-agent messaging (gr msg)
+
+    /// Send a direct message to `sessionID`'s inbox (`gr msg send`).
+    ///
+    /// Publishes to the `inbox:<session-id>` stream and returns the published
+    /// message the daemon echoes back (`msg_published`). The daemon forces the
+    /// sender identity by role: a local human's `senderName` is honoured, a
+    /// remote human's is replaced with its device identity.
+    @discardableResult
+    public func sendMessage(toSessionID sessionID: String, body: String,
+                            senderName: String? = nil) async throws -> ConversationMessage {
+        let conn = try await controlConnection()
+        let reply = try await conn.request("msg_pub", payload: MsgPubMsg(
+            stream: "inbox:" + sessionID, body: body, senderName: senderName))
+        return try decodePayload(reply, as: ConversationMessage.self)
+    }
+
+    /// The full direct-message conversation (both directions) for `sessionID`
+    /// (`gr msg` inbox view). Ordered oldest-to-newest; when `limit > 0` only
+    /// the most recent `limit` messages are returned.
+    public func conversation(sessionID: String, limit: Int = 0) async throws -> [ConversationMessage] {
+        let conn = try await controlConnection()
+        let reply = try await conn.request("msg_conversation",
+                                           payload: MsgConversationMsg(sessionID: sessionID,
+                                                                       limit: limit > 0 ? limit : nil))
+        return try decodePayload(reply, as: MsgConversationListMsg.self).messages
+    }
+
+    /// Mark `sessionID`'s inbox read (`gr msg inbox --ack` / `gr msg ack`),
+    /// acking on the session's behalf so its unread count clears.
+    public func ackInbox(sessionID: String) async throws {
+        let conn = try await controlConnection()
+        _ = try await conn.request("msg_ack",
+                                   payload: MsgAckMsg(stream: "inbox:" + sessionID, subscriber: sessionID))
+    }
+
     // MARK: - Attach
 
     /// Open a dedicated attach connection for `sessionID`.

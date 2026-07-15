@@ -207,6 +207,46 @@ actor MockHostClient: GraithHostClient {
         scenarios.removeAll { $0.name == name }
     }
 
+    // MARK: - Messaging
+
+    /// Per-session inbox contents, keyed by session id — a send appends here and
+    /// a conversation fetch returns it, so tests can round-trip messaging.
+    private(set) var inbox: [String: [ConversationMessage]] = [:]
+    /// Session ids acked via `ackInbox`, for assertions.
+    private(set) var acked: [String] = []
+    var failSend: GraithClientError?
+    var failConversation: GraithClientError?
+    var failAck: GraithClientError?
+    func setFailSend(_ e: GraithClientError?) { failSend = e }
+    func setFailConversation(_ e: GraithClientError?) { failConversation = e }
+    func setFailAck(_ e: GraithClientError?) { failAck = e }
+    /// Seed a session's conversation (e.g. inbound messages) for fetch tests.
+    func seedConversation(_ sessionID: String, _ messages: [ConversationMessage]) {
+        inbox[sessionID] = messages
+    }
+
+    func sendMessage(toSessionID sessionID: String, body: String) async throws -> ConversationMessage {
+        if let failSend { throw failSend }
+        let existing = inbox[sessionID] ?? []
+        let msg = ConversationMessage(
+            id: "msg_\(existing.count)", seq: Int64(existing.count + 1),
+            stream: "inbox:\(sessionID)", senderID: "human", senderName: "human",
+            body: body, createdAt: "2026-07-14T00:00:00Z")
+        inbox[sessionID] = existing + [msg]
+        return msg
+    }
+
+    func conversation(sessionID: String, limit: Int) async throws -> [ConversationMessage] {
+        if let failConversation { throw failConversation }
+        let all = inbox[sessionID] ?? []
+        return limit > 0 ? Array(all.suffix(limit)) : all
+    }
+
+    func ackInbox(sessionID: String) async throws {
+        if let failAck { throw failAck }
+        acked.append(sessionID)
+    }
+
     func approvalStream() -> AsyncStream<[ApprovalInfo]> {
         let snapshot = pending
         return AsyncStream { continuation in

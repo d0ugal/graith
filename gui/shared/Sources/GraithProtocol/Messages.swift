@@ -792,6 +792,127 @@ public struct StoreGetResponseMsg: Codable, Sendable {
     }
 }
 
+// MARK: - Inter-agent messaging (gr msg)
+
+/// `msg_pub` — publish a message to a stream. The GUI addresses a session's
+/// inbox via `inbox:<session-id>`; the daemon forces the sender identity by
+/// role, so `senderID`/`senderName` are hints the local human may set and a
+/// remote human's are overridden server-side. Mirrors `protocol.MsgPubMsg`.
+public struct MsgPubMsg: Codable, Sendable {
+    public var stream: String
+    public var body: String
+    public var senderID: String?
+    public var senderName: String?
+    public var threadID: String?
+    public var replyTo: String?
+    /// When true, don't type a notification into the target session.
+    public var quiet: Bool?
+
+    public init(stream: String, body: String, senderID: String? = nil,
+                senderName: String? = nil, threadID: String? = nil,
+                replyTo: String? = nil, quiet: Bool? = nil) {
+        self.stream = stream
+        self.body = body
+        self.senderID = senderID
+        self.senderName = senderName
+        self.threadID = threadID
+        self.replyTo = replyTo
+        self.quiet = quiet
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case stream
+        case body
+        case senderID = "sender_id"
+        case senderName = "sender_name"
+        case threadID = "thread_id"
+        case replyTo = "reply_to"
+        case quiet
+    }
+}
+
+/// `msg_conversation` — request the full direct-message conversation (both
+/// directions) for a session. Authorised by the self-or-descendant rule, so the
+/// local/remote human may read it. Mirrors `protocol.MsgConversationMsg`.
+public struct MsgConversationMsg: Codable, Sendable {
+    public var sessionID: String
+    /// When > 0, return only the most recent `limit` messages.
+    public var limit: Int?
+    public init(sessionID: String, limit: Int? = nil) {
+        self.sessionID = sessionID
+        self.limit = limit
+    }
+    enum CodingKeys: String, CodingKey {
+        case sessionID = "session_id"
+        case limit
+    }
+}
+
+/// A single message in a conversation / inbox. Mirrors
+/// `protocol.ConversationMessage` (the daemon's stored message shape on the
+/// wire). `Identifiable`/`Hashable` so SwiftUI lists can render it directly.
+public struct ConversationMessage: Codable, Sendable, Identifiable, Hashable {
+    public var id: String
+    public var seq: Int64
+    public var stream: String
+    public var senderID: String
+    public var senderName: String?
+    public var body: String
+    public var threadID: String?
+    public var replyTo: String?
+    public var createdAt: String
+    /// Marks an automated daemon-authored notification (PR/CI notices) rather
+    /// than a session/human message (issue #887).
+    public var system: Bool?
+
+    public init(id: String, seq: Int64, stream: String, senderID: String,
+                senderName: String? = nil, body: String, threadID: String? = nil,
+                replyTo: String? = nil, createdAt: String, system: Bool? = nil) {
+        self.id = id
+        self.seq = seq
+        self.stream = stream
+        self.senderID = senderID
+        self.senderName = senderName
+        self.body = body
+        self.threadID = threadID
+        self.replyTo = replyTo
+        self.createdAt = createdAt
+        self.system = system
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case seq
+        case stream
+        case senderID = "sender_id"
+        case senderName = "sender_name"
+        case body
+        case threadID = "thread_id"
+        case replyTo = "reply_to"
+        case createdAt = "created_at"
+        case system
+    }
+}
+
+/// `msg_conversation_list` — the daemon's reply to `msg_conversation`.
+/// Mirrors `protocol.MsgConversationListMsg`.
+public struct MsgConversationListMsg: Codable, Sendable {
+    public var messages: [ConversationMessage]
+    public init(messages: [ConversationMessage] = []) { self.messages = messages }
+}
+
+/// `msg_ack` — acknowledge (mark read) all messages in a stream for a
+/// subscriber. The GUI acks a session's inbox on the session's behalf
+/// (`stream: "inbox:<id>"`, `subscriber: <id>`). Mirrors `protocol.MsgAckMsg`.
+public struct MsgAckMsg: Codable, Sendable {
+    public var stream: String
+    public var subscriber: String
+    public init(stream: String, subscriber: String) {
+        self.stream = stream
+        self.subscriber = subscriber
+    }
+}
+
 // MARK: - Empty-payload requests
 
 /// `list` takes no payload. Used as an explicit "no payload" marker.

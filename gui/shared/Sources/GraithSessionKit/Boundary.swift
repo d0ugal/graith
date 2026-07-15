@@ -76,6 +76,9 @@ public enum ControlType {
     public static let approvalSubscribe = "approval_subscribe"
     public static let approvalRespond = "approval_respond"
     public static let approvalNotification = "approval_notification"
+    public static let msgPub = "msg_pub"
+    public static let msgConversation = "msg_conversation"
+    public static let msgAck = "msg_ack"
     public static let pairRequest = "pair_request"
     public static let pairResponse = "pair_response"
     public static let authChallenge = "auth_challenge"
@@ -166,6 +169,15 @@ public protocol GraithHostClient: Actor {
     func resumeScenario(name: String) async throws
     /// Delete the scenario and all its sessions/worktrees.
     func deleteScenario(name: String) async throws
+
+    // Messaging (gr msg).
+    /// Send a direct message to `sessionID`'s inbox; returns the published message.
+    func sendMessage(toSessionID sessionID: String, body: String) async throws -> ConversationMessage
+    /// The full direct-message conversation (both directions) for `sessionID`.
+    /// `limit > 0` returns only the most recent `limit` messages.
+    func conversation(sessionID: String, limit: Int) async throws -> [ConversationMessage]
+    /// Mark `sessionID`'s inbox read (acks up to the latest message).
+    func ackInbox(sessionID: String) async throws
 
     // Approvals — event connection.
     /// Subscribe to approval notifications without attaching to any session.

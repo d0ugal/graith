@@ -137,6 +137,23 @@ In JSON output (`--json` or agent mode), messages have this structure:
 }
 ```
 
+## From the GUI
+
+The macOS and iOS apps can send to and read a session's inbox without dropping
+to the CLI:
+
+- **macOS** — right-click a session in the sidebar and choose **Messages…**.
+- **iOS** — open a session and pick **Messages** from the toolbar menu.
+
+The Messages view shows the session's direct-message conversation (both the
+messages it received and the ones it sent), a compose field to send a new
+message to its inbox, and a **mark-as-read** action that acks the inbox. System
+notices (PR/CI notifications) are marked *automated* so they read distinctly
+from session/human messages.
+
+Topic publish/subscribe (`gr msg pub` / `gr msg sub`) stays CLI-only for now —
+the GUI covers direct session messaging.
+
 ## Retention
 
 Configure message retention in `config.toml`:

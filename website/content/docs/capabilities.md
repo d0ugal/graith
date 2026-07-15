@@ -94,9 +94,12 @@ state instead).
 
 | Capability | CLI | iOS | macOS |
 |------------|:---:|:---:|:---:|
-| Send / publish inter-agent messages | ✅ | 🚧 | 🚧 |
-| Read inbox / subscribe to topics | ✅ | 🚧 | 🚧 |
+| Send / publish inter-agent messages <sup>1</sup> | ✅ | ✅ | ✅ |
+| Read inbox / subscribe to topics <sup>2</sup> | ✅ | ✅ | ✅ |
 | Inspect / release jailed PR comments | ✅ | 🚧 | 🚧 |
+
+<sup>1</sup> Send / publish inter-agent messages: GUIs compose a direct message to a session's inbox (msg send) from the session context menu; topic publish (msg pub) stays CLI-only for now.
+<sup>2</sup> Read inbox / subscribe to topics: GUIs show a session's direct-message conversation (inbox view) with mark-as-read (ack); topic subscribe/follow stays CLI-only for now.
 
 ### Scenarios
 

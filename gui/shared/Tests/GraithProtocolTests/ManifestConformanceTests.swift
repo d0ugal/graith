@@ -207,6 +207,13 @@ private let swiftDecoders: [String: DecodeProbe] = [
     "StoreListResponseMsg": probe(StoreListResponseMsg.self),
     "StoreGetMsg": probe(StoreGetMsg.self),
     "StoreGetResponseMsg": probe(StoreGetResponseMsg.self),
+
+    // Inter-agent messaging (gr msg) — issue #898.
+    "MsgPubMsg": probe(MsgPubMsg.self),
+    "MsgConversationMsg": probe(MsgConversationMsg.self),
+    "ConversationMessage": probe(ConversationMessage.self),
+    "MsgConversationListMsg": probe(MsgConversationListMsg.self),
+    "MsgAckMsg": probe(MsgAckMsg.self),
 ]
 
 // MARK: - JSON synthesis from the manifest
