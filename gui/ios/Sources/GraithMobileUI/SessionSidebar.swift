@@ -201,9 +201,9 @@ struct SessionRow: View {
                     if let pr = session.pullRequest { PRBadge(pr: pr) }
                     // The daemon keeps the last-known CI after a PR merges/closes
                     // (it stops polling), so suppress the badge for those terminal
-                    // states to avoid showing a stale result.
-                    if let ci = session.ci, session.pullRequest?.state != "merged",
-                       session.pullRequest?.state != "closed" {
+                    // states to avoid showing a stale result (shared with macOS via
+                    // GraithSessionKit's shouldShowCI, #1173).
+                    if let ci = session.ci, shouldShowCI(pr: session.pullRequest, ci: ci) {
                         CIBadge(ci: ci)
                     }
                 }
@@ -456,23 +456,34 @@ struct PRBadge: View {
     }
 }
 
+/// Compact CI status badge: a coloured glyph plus the passed/total check count
+/// ("16/22") while CI runs/fails, falling back to the bare glyph when no count
+/// is available; passing shows only the ✓ (#1173). Style/count logic is shared
+/// with macOS via `GraithSessionKit` (`ciBadgeStyle`, `CIInfo.badgeCountText`).
 struct CIBadge: View {
     let ci: CIInfo
     var body: some View {
-        Image(systemName: icon).font(.caption2).foregroundStyle(color)
+        HStack(spacing: 2) {
+            Image(systemName: icon)
+            if let count = ci.badgeCountText {
+                Text(count).monospaced()
+            }
+        }
+        .font(.caption2)
+        .foregroundStyle(color)
     }
     private var icon: String {
-        switch ci.state {
-        case "passing": return "checkmark.circle.fill"
-        case "failing": return "xmark.circle.fill"
-        default: return "clock.fill"
+        switch ciBadgeStyle(for: ci) {
+        case .passing: return "checkmark.circle.fill"
+        case .failing: return "xmark.circle.fill"
+        case .pending: return "clock.fill"
         }
     }
     private var color: Color {
-        switch ci.state {
-        case "passing": return .green
-        case "failing": return .red
-        default: return .yellow
+        switch ciBadgeStyle(for: ci) {
+        case .passing: return .green
+        case .failing: return .red
+        case .pending: return .yellow
         }
     }
 }

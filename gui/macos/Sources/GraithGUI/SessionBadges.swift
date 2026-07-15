@@ -37,29 +37,9 @@ func prBadgeStyle(for pr: PRInfo) -> PRBadgeStyle {
     return pr.state == "draft" ? .draft : .open
 }
 
-/// Whether the CI badge should be shown alongside a PR. The daemon keeps the
-/// last-known CI value even after a PR is merged/closed (it no longer polls
-/// checks), so — matching the terminal overlay, which drops CI for terminal PR
-/// states — suppress the CI badge for merged/closed PRs to avoid showing stale
-/// results. CI is still shown for open/draft PRs and for sessions with no PR.
-func shouldShowCI(pr: PRInfo?, ci: CIInfo?) -> Bool {
-    guard ci != nil else { return false }
-    if let pr, pr.state == "merged" || pr.state == "closed" { return false }
-    return true
-}
-
-/// Visual style buckets for the CI badge.
-enum CIBadgeStyle: Equatable {
-    case passing, failing, pending
-}
-
-func ciBadgeStyle(for ci: CIInfo) -> CIBadgeStyle {
-    switch ci.state {
-    case "passing": return .passing
-    case "failing": return .failing
-    default: return .pending
-    }
-}
+// The CI style buckets, visibility rule, and progress-count text now live once
+// in the shared `GraithSessionKit` (`CIBadgeStyle`, `ciBadgeStyle`,
+// `shouldShowCI`, `CIInfo.badgeCountText`) so both apps share them (#1173).
 
 /// Compact pull-request badge: pull-request glyph + `#number`, coloured by state.
 struct PRBadge: View {
@@ -98,15 +78,23 @@ struct PRBadge: View {
     }
 }
 
-/// Compact CI status badge: a single coloured glyph (pass / fail / pending).
+/// Compact CI status badge: a coloured glyph, plus the passed/total check count
+/// ("16/22") while CI is running/failing so progress is visible; the count falls
+/// back to the bare glyph when unavailable, and passing shows only the ✓ (a
+/// "22/22" adds nothing once done). Colours track the CI state (#1173).
 struct CIBadge: View {
     let ci: CIInfo
 
     var body: some View {
-        Image(systemName: icon)
-            .font(.system(size: 9))
-            .foregroundStyle(color)
-            .help(helpText)
+        HStack(spacing: 2) {
+            Image(systemName: icon)
+            if let count = ci.badgeCountText {
+                Text(count)
+            }
+        }
+        .font(.system(size: 9, design: .monospaced))
+        .foregroundStyle(color)
+        .help(helpText)
     }
 
     private var icon: String {
@@ -130,8 +118,12 @@ struct CIBadge: View {
         case .passing: return "CI passing"
         case .failing:
             let failing = ci.failingChecks ?? []
-            return failing.isEmpty ? "CI failing" : "CI failing: \(failing.joined(separator: ", "))"
-        case .pending: return "CI running"
+            let base = failing.isEmpty ? "CI failing" : "CI failing: \(failing.joined(separator: ", "))"
+            if let count = ci.progressText { return "\(base) (\(count))" }
+            return base
+        case .pending:
+            if let count = ci.progressText { return "CI running (\(count))" }
+            return "CI running"
         }
     }
 }
