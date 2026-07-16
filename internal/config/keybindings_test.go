@@ -38,10 +38,16 @@ func TestDefaultOverlayKeybindings(t *testing.T) {
 	cases := map[string]string{
 		"up":                ov.Up,
 		"down":              ov.Down,
+		"confirm":           ov.Confirm,
+		"cancel":            ov.Cancel,
 		"dashboard_attach":  ov.DashboardAttach,
 		"approval_allow":    ov.ApprovalAllow,
 		"message_pin":       ov.MessagePin,
 		"message_next_conv": ov.MessageNextConv,
+	}
+
+	if ov.Confirm != "y Y" {
+		t.Errorf("Keybindings.Overlay.confirm = %q, want y/Y without Enter so [y/N] stays safe", ov.Confirm)
 	}
 	for name, got := range cases {
 		if got == "" {
@@ -108,6 +114,51 @@ func TestKeybindingsConflicts(t *testing.T) {
 			t.Errorf("empty bindings reported as conflicting: %v", got)
 		}
 	})
+
+	t.Run("action colliding with prefix is detected", func(t *testing.T) {
+		k := Keybindings{Prefix: "d", Detach: "d"}
+		got := k.Conflicts()
+		if len(got) != 1 || !strings.Contains(got[0], "prefix") || !strings.Contains(got[0], "detach") {
+			t.Fatalf("Conflicts() = %v, want prefix/detach precedence collision", got)
+		}
+	})
+}
+
+func TestPassthroughKeybindingShapeValidation(t *testing.T) {
+	valid := []Keybindings{
+		{Prefix: "ctrl+b", Messages: "m"},
+		{Prefix: "x", Messages: ""}, // empty explicitly disables the action
+	}
+	for _, bindings := range valid {
+		if err := bindings.Validate(); err != nil {
+			t.Errorf("valid bindings %+v rejected: %v", bindings, err)
+		}
+	}
+
+	tests := []struct {
+		name string
+		keys Keybindings
+		want string
+	}{
+		{"multi-character", Keybindings{Messages: "dd"}, "messages"},
+		{"multibyte", Keybindings{Messages: "é"}, "messages"},
+		{"NUL", Keybindings{Messages: "\x00"}, "messages"},
+		{"control byte", Keybindings{Messages: "\x1b"}, "messages"},
+		{"invalid prefix", Keybindings{Prefix: "ctrl+1"}, "prefix"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.keys.Validate()
+			if err == nil {
+				t.Fatalf("Validate() accepted unsupported bindings %+v", tt.keys)
+			}
+
+			if !strings.Contains(err.Error(), tt.want) || !strings.Contains(err.Error(), "printable ASCII") {
+				t.Errorf("Validate() error = %q, want actionable %q printable-ASCII error", err, tt.want)
+			}
+		})
+	}
 }
 
 // TestLoadPopulatesKeybindingConflictWarnings verifies a conflicting config

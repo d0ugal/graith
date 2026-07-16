@@ -4,18 +4,22 @@ import "testing"
 
 func TestParseKeyByte(t *testing.T) {
 	tests := []struct {
-		input string
-		want  byte
+		name        string
+		input       string
+		want        byte
+		wantEnabled bool
 	}{
-		{"n", 'n'},
-		{"p", 'p'},
-		{"", 0},
+		{"single ASCII", "n", 'n', true},
+		{"empty disables", "", 0, false},
+		{"multi-character disables", "dd", 0, false},
+		{"multibyte disables", "é", 0, false},
+		{"NUL disables", "\x00", 0, false},
 	}
 	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			got := parseKeyByte(tt.input)
-			if got != tt.want {
-				t.Errorf("parseKeyByte(%q) = %#x, want %#x", tt.input, got, tt.want)
+		t.Run(tt.name, func(t *testing.T) {
+			got, enabled := parseKeyByte(tt.input).Byte()
+			if got != tt.want || enabled != tt.wantEnabled {
+				t.Errorf("parseKeyByte(%q) = (%#x, %v), want (%#x, %v)", tt.input, got, enabled, tt.want, tt.wantEnabled)
 			}
 		})
 	}

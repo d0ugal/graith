@@ -67,7 +67,7 @@ func DefaultDashboardKeys() DashboardKeys {
 		Stop:    []string{"s"},
 		Delete:  []string{"x", "d"},
 		Resume:  []string{"r"},
-		Confirm: []string{"enter", "y"},
+		Confirm: []string{"y", "Y"},
 		Cancel:  []string{"q", "esc", "ctrl+c"},
 	}
 }

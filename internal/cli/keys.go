@@ -1,13 +1,17 @@
 package cli
 
-import "strings"
+import (
+	"strings"
 
-func parseKeyByte(s string) byte {
-	if len(s) == 0 {
-		return 0
+	"github.com/d0ugal/graith/internal/client"
+)
+
+func parseKeyByte(s string) client.PassthroughBinding {
+	if len(s) != 1 || s[0] < 0x20 || s[0] >= 0x7f {
+		return client.PassthroughBinding{}
 	}
 
-	return s[0]
+	return client.NewPassthroughBinding(s[0])
 }
 
 func parsePrefixKey(s string) byte {

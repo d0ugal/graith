@@ -159,14 +159,13 @@ func processKittyPrefix(input []byte, prefixByte byte) []byte {
 	return append(out, input[copied:]...)
 }
 
-// keyLabel renders a keybinding byte for display in the help bar. Printable
-// ASCII bytes show as themselves; anything else (unset or control) shows "?".
-func keyLabel(b byte) string {
-	if b >= 0x20 && b < 0x7f {
-		return string(b)
+// keyLabel renders an enabled keybinding for display in the help bar.
+func keyLabel(binding PassthroughBinding) string {
+	if binding.enabled && binding.key >= 0x20 && binding.key < 0x7f {
+		return string(binding.key)
 	}
 
-	return "?"
+	return "-"
 }
 
 // showHelpBar renders a one-line help bar at the bottom of the screen using
@@ -212,20 +211,42 @@ func (sw *syncWriter) Write(p []byte) (int, error) {
 
 type PassthroughKeys struct {
 	Prefix              byte
-	Detach              byte
-	SessionList         byte
-	Shell               byte
-	NextSession         byte
-	PrevSession         byte
-	LastSession         byte
-	NewSession          byte
-	ForkSession         byte
-	OrchestratorSession byte
-	RenameSession       byte
-	ScrollMode          byte
-	Messages            byte
-	Approvals           byte
-	RestartSession      byte
+	Detach              PassthroughBinding
+	SessionList         PassthroughBinding
+	Shell               PassthroughBinding
+	NextSession         PassthroughBinding
+	PrevSession         PassthroughBinding
+	LastSession         PassthroughBinding
+	NewSession          PassthroughBinding
+	ForkSession         PassthroughBinding
+	OrchestratorSession PassthroughBinding
+	RenameSession       PassthroughBinding
+	ScrollMode          PassthroughBinding
+	Messages            PassthroughBinding
+	Approvals           PassthroughBinding
+	RestartSession      PassthroughBinding
+}
+
+// PassthroughBinding distinguishes an intentionally disabled prefix action
+// from byte zero. Its zero value is disabled, so prefix+NUL is forwarded unless
+// an explicitly enabled binding matches (NUL is not a supported config value).
+type PassthroughBinding struct {
+	key     byte
+	enabled bool
+}
+
+// NewPassthroughBinding returns an enabled binding for key.
+func NewPassthroughBinding(key byte) PassthroughBinding {
+	return PassthroughBinding{key: key, enabled: true}
+}
+
+// Byte returns the effective byte and whether this action is enabled.
+func (b PassthroughBinding) Byte() (byte, bool) {
+	return b.key, b.enabled
+}
+
+func (b PassthroughBinding) matches(key byte) bool {
+	return b.enabled && b.key == key
 }
 
 type PassthroughOpts struct {
@@ -543,49 +564,49 @@ func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, s
 
 					clearHelpBar(stdout)
 
-					switch key {
-					case prefixByte:
+					switch {
+					case key == prefixByte:
 						sendInput([]byte{prefixByte})
-					case keys.Detach:
+					case keys.Detach.matches(key):
 						setResult(ResultDetached)
 						return
-					case keys.Approvals:
+					case keys.Approvals.matches(key):
 						setResult(ResultApprovalOverlay)
 						return
-					case keys.SessionList, 0:
+					case keys.SessionList.matches(key):
 						setResult(ResultOverlay)
 						return
-					case keys.Messages:
+					case keys.Messages.matches(key):
 						setResult(ResultMessageOverlay)
 						return
-					case keys.Shell:
+					case keys.Shell.matches(key):
 						setResult(ResultShell)
 						return
-					case keys.NextSession:
+					case keys.NextSession.matches(key):
 						setResult(ResultNextSession)
 						return
-					case keys.PrevSession:
+					case keys.PrevSession.matches(key):
 						setResult(ResultPrevSession)
 						return
-					case keys.RestartSession:
+					case keys.RestartSession.matches(key):
 						setResult(ResultRestart)
 						return
-					case keys.LastSession:
+					case keys.LastSession.matches(key):
 						setResult(ResultLastSession)
 						return
-					case keys.NewSession:
+					case keys.NewSession.matches(key):
 						setResult(ResultNewSession)
 						return
-					case keys.ForkSession:
+					case keys.ForkSession.matches(key):
 						setResult(ResultForkSession)
 						return
-					case keys.OrchestratorSession:
+					case keys.OrchestratorSession.matches(key):
 						setResult(ResultOrchestratorSession)
 						return
-					case keys.RenameSession:
+					case keys.RenameSession.matches(key):
 						setResult(ResultRenameSession)
 						return
-					case keys.ScrollMode:
+					case keys.ScrollMode.matches(key):
 						setResult(ResultScrollMode)
 						return
 					default:

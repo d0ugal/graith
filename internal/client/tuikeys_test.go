@@ -138,6 +138,49 @@ func TestOverlayCancelCtrlCExitsFromShippedConfig(t *testing.T) {
 	})
 }
 
+// TestDashboardEnterDeclinesDestructiveConfirmation is the safe-default
+// regression for #1233. The prompt says [y/N], so the shipped overlay.confirm
+// binding must make Enter decline both stop and delete rather than execute the
+// destructive action. Explicit y and Y remain confirmations.
+func TestDashboardEnterDeclinesDestructiveConfirmation(t *testing.T) {
+	confirm := SplitKeys(config.Default().Keybindings.Overlay.Confirm)
+	if matchKey(confirm, "enter") {
+		t.Fatalf("shipped overlay.confirm = %v includes enter despite [y/N] prompt", confirm)
+	}
+
+	for _, tc := range []struct {
+		name  string
+		state dashboardState
+	}{
+		{"delete", dashStateConfirmDelete},
+		{"stop", dashStateConfirmStop},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := NewDashboardModel(dashboardTestSessions(), nil)
+			m.width, m.height = 120, 40
+			m.state = tc.state
+			m.confirmSessionID = "s1"
+			m.keys.Confirm = confirm
+
+			updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+			dm := updated.(*DashboardModel)
+			if dm.result != nil || cmd != nil {
+				t.Fatalf("Enter executed %s confirmation: result=%+v cmd=%v", tc.name, dm.result, cmd)
+			}
+
+			if dm.state != dashStateNormal || dm.confirmSessionID != "" {
+				t.Fatalf("Enter did not decline %s confirmation: state=%v id=%q", tc.name, dm.state, dm.confirmSessionID)
+			}
+		})
+	}
+
+	for _, key := range []string{"y", "Y"} {
+		if !matchKey(confirm, key) {
+			t.Errorf("shipped overlay.confirm = %v, want explicit %q confirmation", confirm, key)
+		}
+	}
+}
+
 // TestDashboardKeysRemapped confirms the dashboard honours a remapped attach key
 // and ignores the old default once rebound (issue #1233).
 func TestDashboardKeysRemapped(t *testing.T) {

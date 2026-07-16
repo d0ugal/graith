@@ -2543,16 +2543,8 @@ type Keybindings struct {
 	Overlay OverlayKeybindings `toml:"overlay"`
 }
 
-// Conflicts reports keybinding collisions among the prefix-action commands —
-// the keys pressed after the prefix while attached to a session. Two commands
-// bound to the same key mean only the first (in the passthrough switch order)
-// ever fires, so the config is almost certainly a mistake. Picker/overlay keys
-// operate in a separate mode and may legitimately reuse a prefix-command key,
-// so they are not compared here. Each returned string names one collision; an
-// empty slice means no conflicts. The result feeds a warning, not an error, so
-// a misconfiguration is surfaced without refusing to start (issue #1233).
-func (k Keybindings) Conflicts() []string {
-	binds := []struct{ label, key string }{
+func (k Keybindings) passthroughActions() []struct{ label, key string } {
+	return []struct{ label, key string }{
 		{"detach", k.Detach},
 		{"session_list", k.SessionList},
 		{"shell", k.Shell},
@@ -2568,33 +2560,96 @@ func (k Keybindings) Conflicts() []string {
 		{"approvals", k.Approvals},
 		{"restart_session", k.RestartSession},
 	}
+}
 
-	seen := map[string][]string{}
+// parsePassthroughByte accepts the documented action-key shape: empty disables
+// an action; otherwise exactly one printable ASCII byte is required. Keeping
+// this byte-oriented is deliberate because the attached terminal loop consumes
+// raw bytes, not runes or Bubble Tea key names.
+func parsePassthroughByte(raw string) (byte, bool) {
+	if len(raw) != 1 || raw[0] < 0x20 || raw[0] >= 0x7f {
+		return 0, false
+	}
 
-	for _, b := range binds {
-		if b.key == "" {
+	return raw[0], true
+}
+
+func parsePrefixByte(raw string) (byte, bool) {
+	s := strings.TrimSpace(strings.ToLower(raw))
+	if s == "" {
+		return 0x02, true // empty keeps the historical ctrl+b default
+	}
+
+	if strings.HasPrefix(s, "ctrl+") && len(s) == 6 {
+		ch := s[5]
+		if ch >= 'a' && ch <= 'z' {
+			return ch - 'a' + 1, true
+		}
+	}
+
+	return parsePassthroughByte(s)
+}
+
+// Validate rejects passthrough bindings that the byte-oriented runtime cannot
+// represent faithfully. Empty action values remain valid and explicitly
+// disable that action; malformed, multi-character, multibyte, control, and NUL
+// values fail at config load rather than being silently reduced to s[0].
+func (k Keybindings) Validate() error {
+	var errs []error
+
+	if _, ok := parsePrefixByte(k.Prefix); !ok {
+		errs = append(errs, fmt.Errorf("keybindings.prefix %q: must be ctrl+a through ctrl+z or exactly one printable ASCII byte", k.Prefix))
+	}
+
+	for _, binding := range k.passthroughActions() {
+		if binding.key == "" {
 			continue
 		}
 
-		seen[b.key] = append(seen[b.key], b.label)
+		if _, ok := parsePassthroughByte(binding.key); !ok {
+			errs = append(errs, fmt.Errorf("keybindings.%s %q: must be empty (disabled) or exactly one printable ASCII byte", binding.label, binding.key))
+		}
+	}
+
+	return errors.Join(errs...)
+}
+
+// Conflicts reports collisions on the parsed bytes consumed by the attach
+// loop, including an action that collides with a single-byte prefix (the prefix
+// wins because pressing it twice sends a literal prefix). Picker/overlay keys
+// operate in a separate mode and are intentionally not compared here. Invalid
+// shapes are handled by Validate; conflicts remain non-fatal load warnings.
+func (k Keybindings) Conflicts() []string {
+	seen := map[byte][]string{}
+	if prefix, ok := parsePrefixByte(k.Prefix); ok {
+		seen[prefix] = append(seen[prefix], "prefix")
+	}
+
+	for _, binding := range k.passthroughActions() {
+		key, ok := parsePassthroughByte(binding.key)
+		if !ok {
+			continue
+		}
+
+		seen[key] = append(seen[key], binding.label)
 	}
 
 	// Sort the keys so the warning order is deterministic.
-	keys := make([]string, 0, len(seen))
+	keys := make([]int, 0, len(seen))
 	for key := range seen {
-		keys = append(keys, key)
+		keys = append(keys, int(key))
 	}
 
-	sort.Strings(keys)
+	sort.Ints(keys)
 
 	var conflicts []string
 
 	for _, key := range keys {
-		labels := seen[key]
+		labels := seen[byte(key)]
 		if len(labels) > 1 {
 			conflicts = append(conflicts, fmt.Sprintf(
-				"keybinding %q is bound to multiple prefix commands: %s",
-				key, strings.Join(labels, ", ")))
+				"keybinding byte %q is bound to multiple prefix commands: %s (prefix and earlier actions take precedence)",
+				string(rune(key)), strings.Join(labels, ", ")))
 		}
 	}
 
@@ -4287,6 +4342,10 @@ func (c *Config) Validate() error {
 	}
 
 	if err := c.Notifications.Validate(); err != nil {
+		errs = append(errs, err)
+	}
+
+	if err := c.Keybindings.Validate(); err != nil {
 		errs = append(errs, err)
 	}
 

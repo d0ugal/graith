@@ -174,18 +174,18 @@ func TestPassthroughKeysFromConfig(t *testing.T) {
 
 	want := client.PassthroughKeys{
 		Prefix:              0x01, // ctrl+a
-		Detach:              'q',
-		SessionList:         'z',
-		Shell:               'v',
-		NextSession:         'n',
-		PrevSession:         'p',
-		LastSession:         'l',
-		NewSession:          'c',
-		ForkSession:         'f',
-		OrchestratorSession: 'o',
-		Messages:            'm',
-		Approvals:           'a',
-		RestartSession:      'r',
+		Detach:              client.NewPassthroughBinding('q'),
+		SessionList:         client.NewPassthroughBinding('z'),
+		Shell:               client.NewPassthroughBinding('v'),
+		NextSession:         client.NewPassthroughBinding('n'),
+		PrevSession:         client.NewPassthroughBinding('p'),
+		LastSession:         client.NewPassthroughBinding('l'),
+		NewSession:          client.NewPassthroughBinding('c'),
+		ForkSession:         client.NewPassthroughBinding('f'),
+		OrchestratorSession: client.NewPassthroughBinding('o'),
+		Messages:            client.NewPassthroughBinding('m'),
+		Approvals:           client.NewPassthroughBinding('a'),
+		RestartSession:      client.NewPassthroughBinding('r'),
 	}
 	if keys != want {
 		t.Errorf("passthroughKeysFromConfig() = %+v, want %+v", keys, want)
@@ -296,16 +296,17 @@ func TestRemotePassthroughKeysFromConfig(t *testing.T) {
 
 	keys := remotePassthroughKeysFromConfig()
 
-	if keys.SessionList != 'w' {
-		t.Errorf("remote SessionList = %q, want 'w'", keys.SessionList)
+	if key, enabled := keys.SessionList.Byte(); !enabled || key != 'w' {
+		t.Errorf("remote SessionList = (%q, %v), want ('w', true)", key, enabled)
 	}
 
-	if keys.Shell != 's' {
-		t.Errorf("remote Shell = %q, want 's'", keys.Shell)
+	if key, enabled := keys.Shell.Byte(); !enabled || key != 's' {
+		t.Errorf("remote Shell = (%q, %v), want ('s', true)", key, enabled)
 	}
 
-	if keys.Detach != 'd' || keys.Prefix != 0x02 {
-		t.Errorf("remote Detach/Prefix = %q/%#x, want 'd'/0x02", keys.Detach, keys.Prefix)
+	key, enabled := keys.Detach.Byte()
+	if !enabled || key != 'd' || keys.Prefix != 0x02 {
+		t.Errorf("remote Detach/Prefix = (%q, %v)/%#x, want ('d', true)/0x02", key, enabled, keys.Prefix)
 	}
 }
 

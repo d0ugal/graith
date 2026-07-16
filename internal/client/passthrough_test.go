@@ -13,8 +13,12 @@ import (
 	"github.com/d0ugal/graith/internal/protocol"
 )
 
+func boundKey(key byte) PassthroughBinding {
+	return NewPassthroughBinding(key)
+}
+
 var testOpts = PassthroughOpts{
-	Keys: PassthroughKeys{Prefix: 0x02, Detach: 'd', SessionList: 'w', Shell: 's', NextSession: 'n', PrevSession: 'p'},
+	Keys: PassthroughKeys{Prefix: 0x02, Detach: boundKey('d'), SessionList: boundKey('w'), Shell: boundKey('s'), NextSession: boundKey('n'), PrevSession: boundKey('p')},
 }
 
 type lockedWriter struct {
@@ -815,20 +819,20 @@ func TestEscapeSequenceNotPrefixIsForwarded(t *testing.T) {
 var prefixKeyOpts = PassthroughOpts{
 	Keys: PassthroughKeys{
 		Prefix:              0x02, // ctrl+b
-		Detach:              'd',
-		SessionList:         'w',
-		Shell:               's',
-		NextSession:         'n',
-		PrevSession:         'p',
-		LastSession:         'l',
-		NewSession:          'c',
-		ForkSession:         'f',
-		OrchestratorSession: 'o',
-		RenameSession:       ',',
-		ScrollMode:          '[',
-		Messages:            'm',
-		Approvals:           'a',
-		RestartSession:      'r',
+		Detach:              boundKey('d'),
+		SessionList:         boundKey('w'),
+		Shell:               boundKey('s'),
+		NextSession:         boundKey('n'),
+		PrevSession:         boundKey('p'),
+		LastSession:         boundKey('l'),
+		NewSession:          boundKey('c'),
+		ForkSession:         boundKey('f'),
+		OrchestratorSession: boundKey('o'),
+		RenameSession:       boundKey(','),
+		ScrollMode:          boundKey('['),
+		Messages:            boundKey('m'),
+		Approvals:           boundKey('a'),
+		RestartSession:      boundKey('r'),
 	},
 }
 
@@ -944,9 +948,9 @@ func runPrefixSequenceWithOpts(t *testing.T, opts PassthroughOpts, keys []byte) 
 func TestPrefixKeyConfigurable(t *testing.T) {
 	opts := PassthroughOpts{Keys: PassthroughKeys{
 		Prefix:      0x02,
-		Detach:      'q',
-		SessionList: 'z',
-		Shell:       'v',
+		Detach:      boundKey('q'),
+		SessionList: boundKey('z'),
+		Shell:       boundKey('v'),
 	}}
 
 	cases := []struct {
@@ -972,7 +976,7 @@ func TestPrefixKeyConfigurable(t *testing.T) {
 // detach mapped to 'q' forwards the byte and takes no action (ResultQuit via the
 // context deadline).
 func TestPrefixKeyOldLiteralIgnoredAfterRemap(t *testing.T) {
-	opts := PassthroughOpts{Keys: PassthroughKeys{Prefix: 0x02, Detach: 'q'}}
+	opts := PassthroughOpts{Keys: PassthroughKeys{Prefix: 0x02, Detach: boundKey('q')}}
 
 	if got := runPrefixSequenceWithOpts(t, opts, []byte{'d'}); got == ResultDetached {
 		t.Fatal("prefix+'d' should not detach when detach is remapped to 'q'")
@@ -985,20 +989,20 @@ func TestShowHelpBarReflectsConfiguredKeys(t *testing.T) {
 	var buf bytes.Buffer
 
 	showHelpBar(&buf, PassthroughKeys{
-		Detach:              'Q',
-		SessionList:         'Z',
-		Shell:               'V',
-		OrchestratorSession: 'O',
-		LastSession:         'L',
-		NextSession:         'N',
-		PrevSession:         'P',
-		NewSession:          'C',
-		ForkSession:         'F',
-		RenameSession:       'M',
-		ScrollMode:          'B',
-		Messages:            'G',
-		Approvals:           'A',
-		RestartSession:      'R',
+		Detach:              boundKey('Q'),
+		SessionList:         boundKey('Z'),
+		Shell:               boundKey('V'),
+		OrchestratorSession: boundKey('O'),
+		LastSession:         boundKey('L'),
+		NextSession:         boundKey('N'),
+		PrevSession:         boundKey('P'),
+		NewSession:          boundKey('C'),
+		ForkSession:         boundKey('F'),
+		RenameSession:       boundKey('M'),
+		ScrollMode:          boundKey('B'),
+		Messages:            boundKey('G'),
+		Approvals:           boundKey('A'),
+		RestartSession:      boundKey('R'),
 	})
 
 	got := buf.String()
@@ -1017,9 +1021,9 @@ func TestPrefixRenameScrollHonorConfiguredKeys(t *testing.T) {
 	opts := PassthroughOpts{
 		Keys: PassthroughKeys{
 			Prefix:        0x02,
-			Detach:        'd', // detach is config-driven (#918); bind it so the trailing prefix+d ends the loop
-			RenameSession: 'R',
-			ScrollMode:    'S',
+			Detach:        boundKey('d'), // detach is config-driven (#918); bind it so the trailing prefix+d ends the loop
+			RenameSession: boundKey('R'),
+			ScrollMode:    boundKey('S'),
 		},
 	}
 
@@ -1191,6 +1195,62 @@ func TestPrefixKeyUnknownForwardsBoth2(t *testing.T) {
 			}
 		case <-timeout:
 			t.Fatal("did not observe prefix+Z forwarded to daemon")
+		}
+	}
+}
+
+// TestDisabledBindingsDoNotCaptureNUL proves the zero value of every action
+// binding means disabled, not byte zero. With only detach enabled, prefix+NUL
+// must be forwarded to the agent and the loop must continue until prefix+d.
+func TestDisabledBindingsDoNotCaptureNUL(t *testing.T) {
+	opts := PassthroughOpts{Keys: PassthroughKeys{
+		Prefix: 0x02,
+		Detach: boundKey('d'),
+	}}
+
+	clientConn, daemonConn := net.Pipe()
+	defer func() { _ = daemonConn.Close() }()
+
+	c := newTestClient(clientConn)
+	got := make(chan []byte, 4)
+
+	go func() {
+		r := protocol.NewFrameReader(daemonConn)
+		for {
+			frame, err := r.ReadFrame()
+			if err != nil {
+				return
+			}
+
+			if frame.Channel == protocol.ChannelData {
+				got <- append([]byte(nil), frame.Payload...)
+			}
+		}
+	}()
+
+	stdinR, stdinW := io.Pipe()
+	stdout := &lockedWriter{}
+
+	go func() {
+		time.Sleep(30 * time.Millisecond)
+		_, _ = stdinW.Write([]byte{0x02, 0x00})
+		time.Sleep(30 * time.Millisecond)
+		_, _ = stdinW.Write([]byte{0x02, 'd'})
+	}()
+
+	if result := c.runPassthroughLoop(context.Background(), opts, stdinR, stdout, nil); result != ResultDetached {
+		t.Fatalf("result = %v, want detach after forwarded NUL", result)
+	}
+
+	timeout := time.After(time.Second)
+	for {
+		select {
+		case payload := <-got:
+			if bytes.Contains(payload, []byte{0x02, 0x00}) {
+				return
+			}
+		case <-timeout:
+			t.Fatal("prefix+NUL was captured instead of forwarded")
 		}
 	}
 }

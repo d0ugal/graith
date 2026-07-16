@@ -32,15 +32,19 @@ restart_session      = "r"       # restart (resume) the current session
 ```
 
 Every key above is read from config. The prefix key accepts values like
-`ctrl+b`, `ctrl+x`, or a single character; the rest are single characters pressed
-after the prefix (or, for `delete_session`/`resume_session`/`search`, inside the
-session picker). graith handles both raw control bytes and Kitty keyboard
+`ctrl+b`, `ctrl+x`, or a single printable ASCII character. Prefix-action fields
+(`detach`, `messages`, and the other commands pressed after the prefix) accept
+exactly one printable ASCII byte; an empty value disables that action. A
+multi-character, multibyte, control, or NUL value is rejected at config load
+rather than being reduced to its first byte. The picker-only
+`delete_session`/`resume_session`/`search` fields are interpreted inside the
+session picker. graith handles both raw control bytes and Kitty keyboard
 protocol sequences, so it works in terminals like Ghostty that use the extended
 protocol.
 
-If two prefix commands are bound to the same key, graith prints a warning at
-load time and starts anyway (only the first command in the passthrough order
-would fire).
+If two prefix commands resolve to the same byte, or a command uses the literal
+prefix byte, graith prints a warning at load time and starts anyway. The prefix
+and then the first command in passthrough order take precedence.
 
 ### Overlay keys
 
@@ -63,7 +67,7 @@ page_up   = "pgup ctrl+u ctrl+b"
 page_down = "pgdown space ctrl+d ctrl+f"
 top       = "g home"
 bottom    = "G end"
-confirm   = "enter y"                  # confirm a prompt (e.g. delete/stop)
+confirm   = "y Y"                      # confirm destructive prompts; Enter declines [y/N]
 cancel    = "q esc ctrl+c"             # close the overlay / cancel
 # Dashboard actions.
 dashboard_attach = "enter a"
@@ -83,6 +87,12 @@ message_prev_conversation = "h left shift+tab"
 ```
 
 See [Keybindings]({{< relref "/docs/keybindings.md" >}}) for the complete keybinding reference.
+
+Dashboard stop/delete prompts use the conventional safe `[y/N]` behavior with
+the shipped bindings: `y` or `Y` confirms, while Enter, Escape, and every other
+key decline and return to the dashboard. If you override `confirm`, the listed
+keys replace `y Y`; do not add `enter` unless you deliberately want Enter to
+confirm destructive prompts.
 
 ## Overlay
 

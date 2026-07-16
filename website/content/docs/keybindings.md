@@ -41,9 +41,12 @@ Every prefix-action key is configurable via the matching `keybindings.*` field
 The help bar appears at the bottom of the screen when the prefix key is pressed,
 showing the currently-configured commands. It disappears after the next keypress.
 
-If two prefix commands are bound to the same key, graith starts anyway but prints
-a warning at load time (only the first command in the passthrough order would
-fire), so pick distinct keys.
+Each prefix-action field accepts exactly one printable ASCII byte, or an empty
+value to disable that action. Multi-character, multibyte, control, and NUL
+values are rejected at config load. If two commands resolve to the same byte,
+or an action collides with a single-byte prefix, graith starts anyway but prints
+an actionable warning. Prefix handling and then the first command in
+passthrough order take precedence, so pick distinct keys.
 
 ### Literal prefix
 
@@ -126,7 +129,11 @@ The dashboard (`gr dashboard`) is a live-updating TUI similar to the session pic
 | `s` | Stop session (with confirmation) | `overlay.dashboard_stop` |
 | `x` / `d` | Delete session (with confirmation) | `overlay.dashboard_delete` |
 | `r` | Resume a stopped session | `overlay.dashboard_resume` |
-| `q` / `ctrl+c` | Quit | `overlay.cancel` |
+| `q` / Esc / `ctrl+c` | Quit | `overlay.cancel` |
+
+Stop and delete show `[y/N]`: `y` or `Y` confirms, while Enter, Escape, and any
+other key decline and return to the dashboard. These confirmation keys come
+from `overlay.confirm`; the shipped value is `"y Y"`.
 
 ## Message viewer, approvals, and scroll pager
 
@@ -136,9 +143,9 @@ action keys.
 
 | Overlay | Keys | Config keys |
 |---------|------|-------------|
-| Message viewer | `j`/`k` move · `pgdn`/`pgup` scroll · `g`/`G` first/last · `h`/`l` conversation · `enter` pin · `O`/`C` expand/collapse all · `q` close | `overlay.up`/`down`, `overlay.page_down`/`page_up`, `overlay.top`/`bottom`, `overlay.message_prev_conversation`/`message_next_conversation`, `overlay.message_pin`, `overlay.message_expand_all`/`message_collapse_all`, `overlay.cancel` |
-| Approvals | `y` allow · `n`/`x` deny · `a` allow-all · `q` cancel | `overlay.approval_allow`, `overlay.approval_deny`, `overlay.approval_allow_all`, `overlay.cancel` |
-| Scroll pager | `g`/`G` top/bottom · `q` quit (up/down/page keys are handled by the pager) | `overlay.top`/`bottom`, `overlay.cancel` |
+| Message viewer | `j`/`k` move · `pgdn`/`pgup` scroll · `g`/`G` first/last · `h`/`l` conversation · `enter` pin · `O`/`C` expand/collapse all · `q`/Esc/`ctrl+c` close | `overlay.up`/`down`, `overlay.page_down`/`page_up`, `overlay.top`/`bottom`, `overlay.message_prev_conversation`/`message_next_conversation`, `overlay.message_pin`, `overlay.message_expand_all`/`message_collapse_all`, `overlay.cancel` |
+| Approvals | `y` allow · `n`/`x` deny · `a` allow-all · `q`/Esc/`ctrl+c` cancel | `overlay.approval_allow`, `overlay.approval_deny`, `overlay.approval_allow_all`, `overlay.cancel` |
+| Scroll pager | `g`/`G` top/bottom · `q`/Esc/`ctrl+c` quit (up/down/page keys are handled by the pager) | `overlay.top`/`bottom`, `overlay.cancel` |
 
 ## Configuring overlay keys
 
