@@ -106,8 +106,9 @@ type pairApproval struct {
 // deadline stored on the pending request. A config reload therefore cannot
 // retime one side of an in-flight pairing without the other.
 type pairWaiter struct {
-	approval  chan pairApproval
-	expiresAt time.Time
+	approval     chan pairApproval
+	expiresAt    time.Time
+	disconnected <-chan struct{}
 }
 
 // unregisterPairWaiter removes a pair_request waiter (on timeout/disconnect).
@@ -161,7 +162,7 @@ func (sm *SessionManager) expirePendingLocked(now time.Time) {
 // the same lock that creates the pending entry, so an approval can never race
 // ahead of the waiter and drop the delivery. The caller reads it (with its own
 // timeout / disconnect handling) and must unregisterPairWaiter when done.
-func (sm *SessionManager) AddPendingPairing(label, pubKey string, id TailnetIdentity, now time.Time) (string, *pairWaiter, error) {
+func (sm *SessionManager) AddPendingPairing(label, pubKey string, id TailnetIdentity, now time.Time, disconnected ...<-chan struct{}) (string, *pairWaiter, error) {
 	if !validEd25519PubKey(pubKey) {
 		return "", nil, errors.New("invalid device public key")
 	}
@@ -210,9 +211,15 @@ func (sm *SessionManager) AddPendingPairing(label, pubKey string, id TailnetIden
 
 	// Register the waiter atomically with the pending entry (closes the
 	// approve-before-waiter race).
+	var disconnectedCh <-chan struct{}
+	if len(disconnected) > 0 {
+		disconnectedCh = disconnected[0]
+	}
+
 	waiter := &pairWaiter{
-		approval:  make(chan pairApproval, 1),
-		expiresAt: expiresAt,
+		approval:     make(chan pairApproval, 1),
+		expiresAt:    expiresAt,
+		disconnected: disconnectedCh,
 	}
 	sm.pairWaiters[rid] = waiter
 
@@ -243,6 +250,15 @@ func (sm *SessionManager) ApprovePairing(requestID string, readOnly bool, now ti
 		// live recipient for the unhashed token and the device would be stranded.
 		delete(sm.pendingPairings, requestID)
 		return "", "", fmt.Errorf("pairing request %q no longer has a live requester", requestID)
+	}
+	if waiter.disconnected != nil {
+		select {
+		case <-waiter.disconnected:
+			delete(sm.pairWaiters, requestID)
+			delete(sm.pendingPairings, requestID)
+			return "", "", fmt.Errorf("pairing request %q disconnected before approval", requestID)
+		default:
+		}
 	}
 
 	key, err := sm.state.EnsurePairingHMACKey()

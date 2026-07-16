@@ -359,6 +359,29 @@ func TestApprovePairingRejectsMissingWaiter(t *testing.T) {
 	}
 }
 
+func TestApprovePairingRejectsDisconnectedWaiterBeforeCleanup(t *testing.T) {
+	sm := newPairingSM(t)
+	now := time.Now()
+	disconnected := make(chan struct{})
+	rid, _, err := sm.AddPendingPairing("bairn", testPubKey(t), TailnetIdentity{}, now, disconnected)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Model connDone closing before the waiter goroutine gets scheduled to call
+	// unregisterPairWaiter. Approval must observe the connection signal itself,
+	// rather than relying on cleanup timing.
+	close(disconnected)
+
+	if _, _, err := sm.ApprovePairing(rid, false, now); err == nil {
+		t.Fatal("approval after requester disconnect should fail")
+	}
+
+	if pending, paired := sm.ListPairings(); len(pending) != 0 || len(paired) != 0 {
+		t.Fatalf("pairings after requester disconnect = pending:%d paired:%d, want both zero", len(pending), len(paired))
+	}
+}
+
 func TestExpirePendingPairing(t *testing.T) {
 	sm := newPairingSM(t)
 	sm.cfg.Remote.PairRequestRate = "1000/min"

@@ -265,7 +265,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					identity = *origin.Identity
 				}
 
-				rid, waiter, err := sm.AddPendingPairing(pr.DeviceLabel, pr.DevicePubKey, identity, time.Now())
+				rid, waiter, err := sm.AddPendingPairing(pr.DeviceLabel, pr.DevicePubKey, identity, time.Now(), connDone)
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 					continue
