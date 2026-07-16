@@ -549,6 +549,31 @@ func TestTriggersAdvancedOverrides(t *testing.T) {
 	}
 }
 
+// TestTriggersTickerCadencesRejectNonPositive proves the two advanced trigger
+// cadences that feed time.NewTicker fall back to their defaults for "0", "0s",
+// and negative durations, so the scheduler and file-watch reconcile loops can
+// never construct a non-positive ticker (issue #1285).
+func TestTriggersTickerCadencesRejectNonPositive(t *testing.T) {
+	for _, bad := range []string{"0", "0s", "-1s", "-2m"} {
+		r := TriggersRuntime{Advanced: TriggersAdvancedConfig{
+			SchedulerTick:          bad,
+			WatchReconcileInterval: bad,
+		}}
+
+		if got := r.SchedulerTickDuration(); got != defaultSchedulerTick {
+			t.Errorf("SchedulerTickDuration(%q) = %v, want %v default", bad, got, defaultSchedulerTick)
+		}
+
+		if got := r.WatchReconcileIntervalDuration(); got != defaultWatchReconcile {
+			t.Errorf("WatchReconcileIntervalDuration(%q) = %v, want %v default", bad, got, defaultWatchReconcile)
+		}
+
+		if r.SchedulerTickDuration() <= 0 || r.WatchReconcileIntervalDuration() <= 0 {
+			t.Errorf("cadence for %q resolved non-positive; time.NewTicker would panic", bad)
+		}
+	}
+}
+
 // TestWatchBuiltinIgnoresCopy verifies the accessor returns a fresh slice so a
 // caller can't mutate the shared default.
 func TestWatchBuiltinIgnoresCopy(t *testing.T) {

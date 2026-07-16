@@ -997,6 +997,75 @@ command = "auld-claude"
 	}
 }
 
+// TestValidateDefaultAgent covers default_agent membership validation against
+// the final merged agent map (issue #1288): a typo'd or removed default fails
+// load with a field-specific error, while a valid default (built-in or
+// user-defined) loads, and sparse/default merging is preserved.
+func TestValidateDefaultAgent(t *testing.T) {
+	write := func(t *testing.T, body string) string {
+		t.Helper()
+
+		p := filepath.Join(t.TempDir(), "config.toml")
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		return p
+	}
+
+	t.Run("unknown default_agent rejected at load", func(t *testing.T) {
+		_, err := Load(write(t, `default_agent = "ghaist"`+"\n"))
+		if err == nil {
+			t.Fatal("expected load to fail for unknown default_agent")
+		}
+
+		if !strings.Contains(err.Error(), "default_agent") || !strings.Contains(err.Error(), "ghaist") {
+			t.Errorf("error %q must name default_agent and the unknown value", err)
+		}
+	})
+
+	t.Run("built-in default_agent loads", func(t *testing.T) {
+		if _, err := Load(write(t, `default_agent = "codex"`+"\n")); err != nil {
+			t.Fatalf("codex is a built-in agent; load should succeed: %v", err)
+		}
+	})
+
+	t.Run("user-defined default_agent loads", func(t *testing.T) {
+		body := "default_agent = \"bespoke\"\n\n[agents.bespoke]\ncommand = \"my-agent\"\n"
+		if _, err := Load(write(t, body)); err != nil {
+			t.Fatalf("user-defined default agent should load: %v", err)
+		}
+	})
+
+	t.Run("removing the user-defined default fails on reload", func(t *testing.T) {
+		// First generation: default points at a user-defined agent and loads.
+		withAgent := "default_agent = \"bespoke\"\n\n[agents.bespoke]\ncommand = \"my-agent\"\n"
+		if _, err := Load(write(t, withAgent)); err != nil {
+			t.Fatalf("initial load should succeed: %v", err)
+		}
+
+		// Reload after the [agents.bespoke] block is removed: mergeAgents no longer
+		// carries it (built-ins union back, but a user agent does not), so the now
+		// dangling default must fail loudly.
+		withoutAgent := "default_agent = \"bespoke\"\n"
+
+		_, err := Load(write(t, withoutAgent))
+		if err == nil {
+			t.Fatal("expected reload to fail once the referenced agent was removed")
+		}
+
+		if !strings.Contains(err.Error(), "default_agent") || !strings.Contains(err.Error(), "bespoke") {
+			t.Errorf("error %q must name default_agent and the missing value", err)
+		}
+	})
+
+	t.Run("empty default_agent is accepted", func(t *testing.T) {
+		if _, err := Load(write(t, `default_agent = ""`+"\n")); err != nil {
+			t.Fatalf("empty default_agent must remain valid: %v", err)
+		}
+	})
+}
+
 func TestLoadAgentExplicitEmptyArgs(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.toml")

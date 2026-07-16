@@ -262,6 +262,31 @@ func TestPRWatchAdvancedParsing(t *testing.T) {
 	}
 }
 
+// TestPRWatchTickerCadencesRejectNonPositive proves the two advanced cadences
+// that feed time.NewTicker fall back to their defaults for "0", "0s", and
+// negative durations, so a valid-parsing but non-positive config can never make
+// the daemon construct a non-positive ticker (issue #1285).
+func TestPRWatchTickerCadencesRejectNonPositive(t *testing.T) {
+	for _, bad := range []string{"0", "0s", "-1s", "-5m"} {
+		p := PRWatchConfig{Advanced: PRWatchAdvancedConfig{
+			BaseTick:             bad,
+			RefReconcileInterval: bad,
+		}}
+
+		if got := p.BaseTickDuration(); got != 15*time.Second {
+			t.Errorf("BaseTickDuration(%q) = %v, want 15s default", bad, got)
+		}
+
+		if got := p.RefReconcileIntervalDuration(); got != 2*time.Second {
+			t.Errorf("RefReconcileIntervalDuration(%q) = %v, want 2s default", bad, got)
+		}
+
+		if p.BaseTickDuration() <= 0 || p.RefReconcileIntervalDuration() <= 0 {
+			t.Errorf("cadence for %q resolved non-positive; time.NewTicker would panic", bad)
+		}
+	}
+}
+
 // TestTrustedAssociationSet covers the author-trust association accessor: the
 // default set when a nil (unset) list, upper-case normalisation of a
 // hand-written config, whitespace trimming, and that a present-but-empty list
