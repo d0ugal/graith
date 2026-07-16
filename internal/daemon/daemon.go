@@ -2766,20 +2766,19 @@ func resolveForcedIDResume(agent, agentSessionID, worktreePath string, freshStar
 	return mint(), true, true
 }
 
-// Resume restarts a stopped session using the agent's resume_args.
-//
-// Uses two-phase locking: the GitHub username discovery happens before the lock,
-// and the PTY spawn happens after releasing the lock to avoid blocking the daemon.
-// convertSettleTimeout bounds how long ConvertToInteractive waits for a
-// SIGINT-interrupted headless process to settle and exit before escalating to
-// SIGTERM. A one-shot headless agent normally winds down its current turn and
-// exits promptly on interrupt; the escalation guards against one that ignores
-// it (a wedged tool call, a signal-swallowing wrapper). Vars (not consts) so
-// tests can shrink them.
+// convertSettleTimeout bounds how long ConvertToInteractive waits for an
+// interrupted headless process to settle and exit before escalating to SIGTERM.
+// A one-shot headless agent normally winds down its current turn and exits
+// promptly on interrupt; the escalation guards against one that ignores it (a
+// wedged tool call, a signal-swallowing wrapper). Vars (not consts) so tests can
+// shrink them.
 var (
 	convertSettleTimeout = 5 * time.Second
 	// convertKillTimeout bounds the SIGTERM step before the final SIGKILL.
 	convertKillTimeout = 3 * time.Second
+	// convertForceKillTimeout bounds the final wait after SIGKILL so a process
+	// whose Done() never closes can't stall the convert forever.
+	convertForceKillTimeout = 3 * time.Second
 )
 
 // ConvertToInteractive turns a headless (one-shot stream-json) session into an
@@ -2811,6 +2810,14 @@ func (sm *SessionManager) ConvertToInteractive(id string, rows, cols uint16) (Se
 		return SessionState{}, fmt.Errorf("session %q not found", id)
 	}
 
+	// A soft-deleted session is hidden; ID-addressable lifecycle ops reject it.
+	// Checked before the idempotent early return so a raw attach_convert against
+	// a soft-deleted (even already-interactive) session is refused, not "converted".
+	if sessState.IsSoftDeleted() {
+		sm.mu.Unlock()
+		return SessionState{}, errSoftDeleted(sessState.Name)
+	}
+
 	// Already interactive — nothing to convert. Idempotent so a racing second
 	// convert (or a client that retries) sees success, not an error.
 	if sessState.DriverKind != DriverHeadless {
@@ -2818,11 +2825,6 @@ func (sm *SessionManager) ConvertToInteractive(id string, rows, cols uint16) (Se
 		sm.mu.Unlock()
 
 		return result, nil
-	}
-
-	if sessState.IsSoftDeleted() {
-		sm.mu.Unlock()
-		return SessionState{}, errSoftDeleted(sessState.Name)
 	}
 
 	if sessState.Status == StatusDeleting || sessState.Status == StatusCreating {
@@ -2864,13 +2866,20 @@ func (sm *SessionManager) ConvertToInteractive(id string, rows, cols uint16) (Se
 
 	sm.mu.Unlock()
 
-	// Stop the headless process outside the lock: interrupt (SIGINT) first so a
-	// mid-turn tool call is cancelled cleanly, then settle, escalating to
-	// SIGTERM/SIGKILL if it refuses to exit.
+	// Stop the headless process outside the lock: interrupt first (a control-
+	// protocol `interrupt` request when the channel is live, falling back to
+	// SIGINT — see headless.Session.Interrupt) so a mid-turn tool call is
+	// cancelled cleanly, then settle, escalating to SIGTERM/SIGKILL if it refuses
+	// to exit. We do NOT call driver.Close() here:
+	// the launch-time exit watcher (startWatcher) closes the driver's handles
+	// when it exits (watchSession always Close()s, staling out on the map
+	// removal above), so closing here too would double-close and — worse — block
+	// the convert if a SIGKILL-surviving grandchild keeps an inherited pipe open
+	// (Close waits on the stdout/stderr drains). Leaving Close to the watcher
+	// keeps ConvertToInteractive bounded even in that pathological case.
 	if running {
 		sm.logStopping(id, name, StopReasonConvert, "convert", driver)
 		sm.stopDriverForConvert(driver)
-		driver.Close()
 	}
 
 	// Commit the driver flip: the session is now a stopped PTY session the resume
@@ -2901,31 +2910,45 @@ func (sm *SessionManager) ConvertToInteractive(id string, rows, cols uint16) (Se
 	return sm.resumeWithSummary(id, rows, cols, "Converted from headless to interactive")
 }
 
-// stopDriverForConvert stops a live headless driver for conversion: SIGINT to
-// cancel the current turn, then escalate to SIGTERM and finally SIGKILL if the
-// process ignores gentler signals, bounded so a wedged agent can't stall the
-// convert forever.
+// stopDriverForConvert stops a live headless driver for conversion: an interrupt
+// (control-protocol `interrupt` request, or SIGINT fallback) to cancel the
+// current turn, then escalate to SIGTERM and finally SIGKILL if the process
+// ignores gentler stops. Every wait — including the final one after SIGKILL — is
+// bounded, so a process whose Done() never closes (e.g. a group-escaping
+// grandchild that keeps an inherited pipe open past a group SIGKILL) can't stall
+// the convert forever. The exit watcher still reaps and closes the driver if it
+// ever exits.
 func (sm *SessionManager) stopDriverForConvert(driver SessionDriver) {
 	_ = driver.Interrupt(1, 0)
 
-	select {
-	case <-driver.Done():
+	if waitDriverDone(driver, convertSettleTimeout) {
 		return
-	case <-time.After(convertSettleTimeout):
 	}
 
 	_ = driver.Kill()
 
-	select {
-	case <-driver.Done():
+	if waitDriverDone(driver, convertKillTimeout) {
 		return
-	case <-time.After(convertKillTimeout):
 	}
 
 	_ = driver.ForceKill()
-	<-driver.Done()
+	_ = waitDriverDone(driver, convertForceKillTimeout)
 }
 
+// waitDriverDone reports whether driver.Done() closed within d.
+func waitDriverDone(driver SessionDriver, d time.Duration) bool {
+	select {
+	case <-driver.Done():
+		return true
+	case <-time.After(d):
+		return false
+	}
+}
+
+// Resume restarts a stopped session using the agent's resume_args.
+//
+// Uses two-phase locking: the GitHub username discovery happens before the lock,
+// and the PTY spawn happens after releasing the lock to avoid blocking the daemon.
 func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, error) {
 	return sm.resumeWithSummary(id, rows, cols, "Resumed")
 }
