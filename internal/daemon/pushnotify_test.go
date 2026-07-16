@@ -60,6 +60,35 @@ func TestEvaluatePushGate_Coalesces(t *testing.T) {
 	}
 }
 
+func TestEvaluatePushGate_CoalesceReasonUsesEffectiveWindow(t *testing.T) {
+	now := time.Date(2026, 7, 11, 12, 0, 0, 0, time.UTC)
+	res := evaluatePushGate(pushGateInput{
+		cfg:            baseNotifications(),
+		priority:       config.NotifyPriorityNormal,
+		now:            now,
+		coalesceAt:     now.Add(-5 * time.Second),
+		coalesceWindow: 45 * time.Second,
+	})
+
+	if res.deliver {
+		t.Fatal("identical notification within window should be coalesced")
+	}
+	if want := "coalesced (identical notification within the last 45s)"; res.reason != want {
+		t.Fatalf("reason = %q, want %q", res.reason, want)
+	}
+
+	res = evaluatePushGate(pushGateInput{
+		cfg:            baseNotifications(),
+		priority:       config.NotifyPriorityNormal,
+		now:            now,
+		coalesceAt:     now,
+		coalesceWindow: 0,
+	})
+	if !res.deliver {
+		t.Fatalf("zero coalescing window should be disabled, got %q", res.reason)
+	}
+}
+
 func TestEvaluatePushGate_QuietHours(t *testing.T) {
 	cfg := baseNotifications()
 	cfg.QuietHoursStart = "22:00"

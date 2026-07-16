@@ -88,6 +88,7 @@ type pendingPairing struct {
 	PubKey      string
 	Identity    TailnetIdentity
 	RequestedAt time.Time
+	ExpiresAt   time.Time
 }
 
 // pairApproval is delivered to a blocked pair_request connection when its
@@ -101,10 +102,19 @@ type pairApproval struct {
 	TLSPin   string
 }
 
+// pairWaiter binds the credential delivery channel to the same immutable
+// deadline stored on the pending request. A config reload therefore cannot
+// retime one side of an in-flight pairing without the other.
+type pairWaiter struct {
+	approval  chan pairApproval
+	expiresAt time.Time
+}
+
 // unregisterPairWaiter removes a pair_request waiter (on timeout/disconnect).
 func (sm *SessionManager) unregisterPairWaiter(requestID string) {
 	sm.mu.Lock()
 	delete(sm.pairWaiters, requestID)
+	delete(sm.pendingPairings, requestID)
 	sm.mu.Unlock()
 }
 
@@ -127,23 +137,18 @@ func (sm *SessionManager) pairRate() config.PairRate {
 	return sm.cfg.Remote.PairFallbackRate()
 }
 
-// pendingPairingTTL is how long an unapproved pair request lives, from config.
-func (sm *SessionManager) pendingPairingTTL() time.Duration {
-	return sm.cfg.Remote.PendingPairingTTLDuration()
-}
-
 // maxPendingPairings is the outstanding pending-request cap, from config.
 func (sm *SessionManager) maxPendingPairings() int {
 	return sm.cfg.Remote.MaxPendingPairingsOrDefault()
 }
 
-// expirePendingLocked drops pending pairings older than the configured TTL.
+// expirePendingLocked drops pending pairings whose immutable deadline passed.
 // Must be called with sm.mu held.
 func (sm *SessionManager) expirePendingLocked(now time.Time) {
-	ttl := sm.pendingPairingTTL()
 	for rid, p := range sm.pendingPairings {
-		if now.Sub(p.RequestedAt) > ttl {
+		if !now.Before(p.ExpiresAt) {
 			delete(sm.pendingPairings, rid)
+			delete(sm.pairWaiters, rid)
 		}
 	}
 }
@@ -156,7 +161,7 @@ func (sm *SessionManager) expirePendingLocked(now time.Time) {
 // the same lock that creates the pending entry, so an approval can never race
 // ahead of the waiter and drop the delivery. The caller reads it (with its own
 // timeout / disconnect handling) and must unregisterPairWaiter when done.
-func (sm *SessionManager) AddPendingPairing(label, pubKey string, id TailnetIdentity, now time.Time) (string, chan pairApproval, error) {
+func (sm *SessionManager) AddPendingPairing(label, pubKey string, id TailnetIdentity, now time.Time) (string, *pairWaiter, error) {
 	if !validEd25519PubKey(pubKey) {
 		return "", nil, errors.New("invalid device public key")
 	}
@@ -192,18 +197,23 @@ func (sm *SessionManager) AddPendingPairing(label, pubKey string, id TailnetIden
 		return "", nil, err
 	}
 
+	expiresAt := now.Add(sm.cfg.Remote.PendingPairingTTLDuration())
 	sm.pendingPairings[rid] = &pendingPairing{
 		RequestID:   rid,
 		DeviceLabel: label,
 		PubKey:      pubKey,
 		Identity:    id,
 		RequestedAt: now,
+		ExpiresAt:   expiresAt,
 	}
 	sm.pairReqTimes = append(sm.pairReqTimes, now)
 
 	// Register the waiter atomically with the pending entry (closes the
 	// approve-before-waiter race).
-	waiter := make(chan pairApproval, 1)
+	waiter := &pairWaiter{
+		approval:  make(chan pairApproval, 1),
+		expiresAt: expiresAt,
+	}
 	sm.pairWaiters[rid] = waiter
 
 	return rid, waiter, nil
@@ -224,6 +234,15 @@ func (sm *SessionManager) ApprovePairing(requestID string, readOnly bool, now ti
 	p, ok := sm.pendingPairings[requestID]
 	if !ok {
 		return "", "", fmt.Errorf("no pending pairing with id %q (unknown or expired)", requestID)
+	}
+
+	waiter, ok := sm.pairWaiters[requestID]
+	if !ok {
+		// Pairing credentials are one-time delivery material. Refuse to persist a
+		// device after its requesting connection has gone away: there would be no
+		// live recipient for the unhashed token and the device would be stranded.
+		delete(sm.pendingPairings, requestID)
+		return "", "", fmt.Errorf("pairing request %q no longer has a live requester", requestID)
 	}
 
 	key, err := sm.state.EnsurePairingHMACKey()
@@ -270,11 +289,8 @@ func (sm *SessionManager) ApprovePairing(requestID string, readOnly bool, now ti
 	// Hand the credentials to a blocked pair_request connection, if one is
 	// waiting, so the device receives its token over its open connection. The
 	// channel is buffered (cap 1), so this never blocks under the lock.
-	if ch, ok := sm.pairWaiters[requestID]; ok {
-		ch <- pairApproval{DeviceID: deviceID, Token: clientToken, Profile: sm.paths.Profile, TLSPin: sm.remoteTLSPin}
-
-		delete(sm.pairWaiters, requestID)
-	}
+	waiter.approval <- pairApproval{DeviceID: deviceID, Token: clientToken, Profile: sm.paths.Profile, TLSPin: sm.remoteTLSPin}
+	delete(sm.pairWaiters, requestID)
 
 	return deviceID, clientToken, nil
 }

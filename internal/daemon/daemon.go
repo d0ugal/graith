@@ -61,7 +61,7 @@ type SessionManager struct {
 	humanToken         string                         // local human credential, loaded at startup
 	saveStateFault     func() error                   // test-only saveState fault injection; nil in production
 	pendingPairings    map[string]*pendingPairing     // requestID → pending device pairing (in-memory; not persisted)
-	pairWaiters        map[string]chan pairApproval   // requestID → waiter for a blocked pair_request connection
+	pairWaiters        map[string]*pairWaiter         // requestID → waiter for a blocked pair_request connection
 	approvalSubs       map[net.Conn]func(string, any) // conn → sendControl for approval subscribers (no attach)
 	remoteTLSPin       string                         // SPKI pin of the remote listener's cert (set once at startup; "" if remote disabled)
 	deviceTokenIndex   map[string]string              // client-token HMAC → device ID (reverse lookup)
@@ -153,7 +153,7 @@ func NewSessionManager(cfg *config.Config, paths config.Paths, log *slog.Logger)
 		headlessEscalated:  make(map[string]bool),
 		tokenIndex:         make(map[string]string),
 		pendingPairings:    make(map[string]*pendingPairing),
-		pairWaiters:        make(map[string]chan pairApproval),
+		pairWaiters:        make(map[string]*pairWaiter),
 		approvalSubs:       make(map[net.Conn]func(string, any)),
 		deviceTokenIndex:   make(map[string]string),
 		connsByDevice:      make(map[string][]net.Conn),

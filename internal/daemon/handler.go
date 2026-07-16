@@ -265,7 +265,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					identity = *origin.Identity
 				}
 
-				rid, waitCh, err := sm.AddPendingPairing(pr.DeviceLabel, pr.DevicePubKey, identity, time.Now())
+				rid, waiter, err := sm.AddPendingPairing(pr.DeviceLabel, pr.DevicePubKey, identity, time.Now())
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 					continue
@@ -273,22 +273,19 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 
 				log.Info("pairing requested", "request_id", rid, "label", pr.DeviceLabel, "tailnet_user", identity.User)
 
-				// Snapshot the TTL before the detached waiter goroutine: reading
-				// sm.cfg from inside the goroutine's select would race a config
-				// reload (issue #1287). pendingPairingTTL itself reads sm.cfg
-				// directly for its in-lock callers, so it can't be used here.
-				pairTTL := sm.Config().Remote.PendingPairingTTLDuration()
-
 				go func() {
+					timer := time.NewTimer(time.Until(waiter.expiresAt))
+					defer timer.Stop()
+
 					select {
-					case appr := <-waitCh:
+					case appr := <-waiter.approval:
 						sendControl("pair_response", protocol.PairResponseMsg{
 							DeviceID:      appr.DeviceID,
 							ClientToken:   appr.Token,
 							DaemonProfile: appr.Profile,
 							TLSPinSPKI:    appr.TLSPin,
 						})
-					case <-time.After(pairTTL):
+					case <-timer.C:
 						sm.unregisterPairWaiter(rid)
 						sendControl("error", protocol.ErrorMsg{Message: "pairing request timed out"})
 					case <-connDone:

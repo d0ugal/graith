@@ -264,6 +264,101 @@ func TestExpirePendingPairingConfigurableTTL(t *testing.T) {
 	}
 }
 
+func TestPendingPairingTTLIsImmutableAcrossReload(t *testing.T) {
+	base := time.Now()
+
+	tests := []struct {
+		name        string
+		initialTTL  string
+		reloadedTTL string
+		approveAt   time.Duration
+		wantApprove bool
+	}{
+		{
+			name:        "shortening does not expire old request early",
+			initialTTL:  "10m",
+			reloadedTTL: "2m",
+			approveAt:   3 * time.Minute,
+			wantApprove: true,
+		},
+		{
+			name:        "lengthening does not extend old request",
+			initialTTL:  "2m",
+			reloadedTTL: "10m",
+			approveAt:   3 * time.Minute,
+			wantApprove: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sm := newPairingSM(t)
+			sm.cfg.Remote.PairRequestRate = "1000/min"
+			sm.cfg.Remote.PendingPairingTTL = tt.initialTTL
+
+			rid, waiter, err := sm.AddPendingPairing("bairn", testPubKey(t), TailnetIdentity{}, base)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			initialDuration, err := time.ParseDuration(tt.initialTTL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want := base.Add(initialDuration); !waiter.expiresAt.Equal(want) {
+				t.Fatalf("waiter expiry = %v, want %v", waiter.expiresAt, want)
+			}
+
+			reloaded := *sm.Config()
+			reloaded.Remote.PendingPairingTTL = tt.reloadedTTL
+			sm.applyConfig(&reloaded)
+
+			deviceID, token, err := sm.ApprovePairing(rid, false, base.Add(tt.approveAt))
+			if !tt.wantApprove {
+				if err == nil {
+					t.Fatal("approval succeeded after the request's original deadline")
+				}
+				if _, paired := sm.ListPairings(); len(paired) != 0 {
+					t.Fatal("expired request persisted a paired device")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("approval before the original deadline: %v", err)
+			}
+
+			select {
+			case delivered := <-waiter.approval:
+				if delivered.DeviceID != deviceID || delivered.Token != token || token == "" {
+					t.Fatalf("delivered credentials = %+v, want device=%q token=%q", delivered, deviceID, token)
+				}
+			default:
+				t.Fatal("approved device was persisted without delivering its one-time token")
+			}
+		})
+	}
+}
+
+func TestApprovePairingRejectsMissingWaiter(t *testing.T) {
+	sm := newPairingSM(t)
+	now := time.Now()
+	rid, _, err := sm.AddPendingPairing("bairn", testPubKey(t), TailnetIdentity{}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sm.unregisterPairWaiter(rid)
+
+	if _, _, err := sm.ApprovePairing(rid, false, now); err == nil {
+		t.Fatal("approval without a live requester should fail")
+	}
+
+	if pending, paired := sm.ListPairings(); len(pending) != 0 || len(paired) != 0 {
+		t.Fatalf("pairings after requester disconnect = pending:%d paired:%d, want both zero", len(pending), len(paired))
+	}
+}
+
 func TestExpirePendingPairing(t *testing.T) {
 	sm := newPairingSM(t)
 	sm.cfg.Remote.PairRequestRate = "1000/min"

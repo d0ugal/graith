@@ -73,7 +73,10 @@ func evaluatePushGate(in pushGateInput) pushGateResult {
 	// notification so interleaved A/B/A duplicates each coalesce against their
 	// own last send.
 	if !in.coalesceAt.IsZero() && in.now.Sub(in.coalesceAt) < in.coalesceWindow {
-		return pushGateResult{deliver: false, reason: "coalesced (identical notification within the last 30s)"}
+		return pushGateResult{
+			deliver: false,
+			reason:  fmt.Sprintf("coalesced (identical notification within the last %s)", in.coalesceWindow),
+		}
 	}
 
 	if in.priority == config.NotifyPriorityHigh {
