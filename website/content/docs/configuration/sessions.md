@@ -198,7 +198,7 @@ interval   = "1h"            # how long a cached result stays fresh
 timeout    = "5s"            # HTTP request timeout for the release check
 ```
 
-Setting `enabled = false` disables all update-check network activity: `gr list` skips it silently and `gr doctor` reports the check as disabled rather than claiming you are up to date. The check never runs for a `dev` build regardless of this setting. Point `repository` at a fork to track its releases instead. An empty `interval` or `timeout` falls back to the built-in defaults (1h and 5s); a value that is set but unparseable, or a `repository` not in `owner/repo` form, is rejected at config load.
+Setting `enabled = false` disables all update-check network activity: `gr list` skips it silently and `gr doctor` reports the check as disabled rather than claiming you are up to date. The check never runs for a `dev` build regardless of this setting. Point `repository` at a fork to track its releases instead. An empty `interval` or `timeout` falls back to the built-in defaults (1h and 5s); a value that is set but unparseable, or a `repository` not in `owner/repo` form, is rejected at config load. The cached result is scoped to the repository that produced it, so changing `repository` takes effect on the next check rather than serving the previous fork's release for the rest of the interval.
 
 ## External tool executables
 

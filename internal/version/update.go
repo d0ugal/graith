@@ -42,6 +42,11 @@ type UpdateSettings struct {
 type UpdateCache struct {
 	LatestVersion string    `json:"latest_version"`
 	CheckedAt     time.Time `json:"checked_at"`
+	// Repository records the effective "owner/repo" that produced LatestVersion,
+	// so a cached result is only reused for the repository still configured
+	// (issue #1290). Legacy cache files written before this field existed omit it;
+	// see cacheRepository for the conservative interpretation of an empty value.
+	Repository string `json:"repository,omitempty"`
 }
 
 type UpdateResult struct {
@@ -63,15 +68,25 @@ func CheckForUpdate(cacheDir string, settings UpdateSettings) *UpdateResult {
 		interval = DefaultCheckInterval
 	}
 
+	// Resolve the effective repository once: it is both the cache-identity key and
+	// (via fetchLatestVersion) the release source, so they can never disagree.
+	repository := settings.Repository
+	if repository == "" {
+		repository = DefaultRepository
+	}
+
 	cachePath := filepath.Join(cacheDir, "update-check.json")
 
 	if info, err := readUpdateCache(cachePath); err == nil {
-		if time.Since(info.CheckedAt) < interval {
+		// A fresh entry is only reused when it was produced by the repository still
+		// configured; otherwise a `[updates].repository` change would keep serving
+		// the previous project's release for the whole interval (issue #1290).
+		if cacheRepository(info) == repository && time.Since(info.CheckedAt) < interval {
 			return buildResult(info.LatestVersion)
 		}
 	}
 
-	latest, err := fetchLatestVersion(settings.Repository, settings.Timeout)
+	latest, err := fetchLatest(repository, settings.Timeout)
 	if err != nil {
 		return nil
 	}
@@ -79,9 +94,23 @@ func CheckForUpdate(cacheDir string, settings UpdateSettings) *UpdateResult {
 	writeUpdateCache(cachePath, &UpdateCache{
 		LatestVersion: latest,
 		CheckedAt:     time.Now(),
+		Repository:    repository,
 	})
 
 	return buildResult(latest)
+}
+
+// cacheRepository resolves the repository a cache entry belongs to. A legacy
+// entry written before the Repository field existed has an empty value; it is
+// mapped to DefaultRepository because older binaries only ever queried the
+// canonical repo, so that is the only repository such an entry can safely be
+// reused for (issue #1290).
+func cacheRepository(info *UpdateCache) string {
+	if info.Repository == "" {
+		return DefaultRepository
+	}
+
+	return info.Repository
 }
 
 func buildResult(latest string) *UpdateResult {
@@ -118,6 +147,11 @@ func writeUpdateCache(path string, info *UpdateCache) {
 	_ = os.MkdirAll(filepath.Dir(path), 0o700)
 	_ = os.WriteFile(path, data, 0o600)
 }
+
+// fetchLatest is the release lookup, indirected through a package variable so a
+// test can exercise CheckForUpdate's cache-scoping logic without real network
+// I/O (issue #1290).
+var fetchLatest = fetchLatestVersion
 
 func fetchLatestVersion(repository string, timeout time.Duration) (string, error) {
 	if repository == "" {

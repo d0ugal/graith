@@ -259,6 +259,137 @@ func TestCheckForUpdate_IntervalControlsCacheFreshness(t *testing.T) {
 	}
 }
 
+// TestCheckForUpdate_CacheScopedToRepository is the regression for issue #1290:
+// a fresh cache produced by repository A must not be served when a different
+// repository B is now configured. Before the fix the cache carried no repository
+// and any fresh entry was reused for the whole interval regardless of source.
+func TestCheckForUpdate_CacheScopedToRepository(t *testing.T) {
+	origVersion := Version
+	defer func() { Version = origVersion }()
+
+	Version = "v0.2.0"
+
+	origFetch := fetchLatest
+	defer func() { fetchLatest = origFetch }()
+
+	dir := t.TempDir()
+	cachePath := filepath.Join(dir, "update-check.json")
+
+	// A FRESH cache produced by repository A, advertising a newer release.
+	cache := &UpdateCache{
+		LatestVersion: "v9.9.9",
+		CheckedAt:     time.Now(),
+		Repository:    "owner-a/repo-a",
+	}
+
+	data, err := json.Marshal(cache)
+	if err != nil {
+		t.Fatalf("marshal cache: %v", err)
+	}
+
+	if err := os.WriteFile(cachePath, data, 0o600); err != nil {
+		t.Fatalf("write cache: %v", err)
+	}
+
+	// Checking repository B must not reuse A's entry; capture which repo the fetch
+	// path is asked about instead of touching the network.
+	var fetched string
+
+	fetchLatest = func(repo string, _ time.Duration) (string, error) {
+		fetched = repo
+
+		return "v0.4.0", nil
+	}
+
+	result := CheckForUpdate(dir, UpdateSettings{Repository: "owner-b/repo-b"})
+
+	if fetched != "owner-b/repo-b" {
+		t.Fatalf("expected a fresh fetch for repository B, got fetched=%q", fetched)
+	}
+
+	if result == nil || result.LatestVersion != "v0.4.0" {
+		t.Fatalf("expected repository B's freshly fetched result v0.4.0, got %+v", result)
+	}
+
+	if result.LatestVersion == "v9.9.9" {
+		t.Fatal("repository A's cached result must not be served for repository B")
+	}
+
+	// The cache is rewritten and now scoped to repository B.
+	got, err := readUpdateCache(cachePath)
+	if err != nil {
+		t.Fatalf("read cache: %v", err)
+	}
+
+	if got.Repository != "owner-b/repo-b" || got.LatestVersion != "v0.4.0" {
+		t.Errorf("cache after B check = %+v; want repo owner-b/repo-b, version v0.4.0", got)
+	}
+}
+
+// TestCheckForUpdate_LegacyCacheTreatedAsDefaultRepository pins the conservative
+// compatibility behavior for legacy cache files with no repository field: they
+// are reused only for the default repository (all an older binary ever queried),
+// and re-fetched for any other configured repository.
+func TestCheckForUpdate_LegacyCacheTreatedAsDefaultRepository(t *testing.T) {
+	origVersion := Version
+	defer func() { Version = origVersion }()
+
+	Version = "v0.2.0"
+
+	origFetch := fetchLatest
+	defer func() { fetchLatest = origFetch }()
+
+	writeLegacy := func(t *testing.T) string {
+		t.Helper()
+
+		dir := t.TempDir()
+		// A legacy record: latest_version + checked_at, no repository field.
+		body := `{"latest_version":"v0.3.0","checked_at":"` + time.Now().Format(time.RFC3339Nano) + `"}`
+		if err := os.WriteFile(filepath.Join(dir, "update-check.json"), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		return dir
+	}
+
+	t.Run("default repo reuses legacy entry", func(t *testing.T) {
+		dir := writeLegacy(t)
+
+		fetchLatest = func(string, time.Duration) (string, error) {
+			t.Fatal("must not fetch: a legacy entry maps to the default repository")
+
+			return "", nil
+		}
+
+		result := CheckForUpdate(dir, UpdateSettings{})
+		if result == nil || result.LatestVersion != "v0.3.0" {
+			t.Fatalf("expected reused legacy result v0.3.0, got %+v", result)
+		}
+	})
+
+	t.Run("non-default repo ignores legacy entry", func(t *testing.T) {
+		dir := writeLegacy(t)
+
+		var fetched string
+
+		fetchLatest = func(repo string, _ time.Duration) (string, error) {
+			fetched = repo
+
+			return "v0.5.0", nil
+		}
+
+		result := CheckForUpdate(dir, UpdateSettings{Repository: "owner-b/repo-b"})
+
+		if fetched != "owner-b/repo-b" {
+			t.Fatalf("expected a fetch for the non-default repository, got fetched=%q", fetched)
+		}
+
+		if result == nil || result.LatestVersion != "v0.5.0" {
+			t.Fatalf("expected freshly fetched v0.5.0, got %+v", result)
+		}
+	})
+}
+
 func TestCheckForUpdate_NoCache(t *testing.T) {
 	origVersion := Version
 	defer func() { Version = origVersion }()
