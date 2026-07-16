@@ -238,13 +238,25 @@ func (sm *SessionManager) HandleHookReport(sr protocol.StatusReportMsg) {
 		staleness time.Duration
 	)
 
+	// Hook-authority windows are configurable via [detection] (issue #1241);
+	// snapshot them under the read lock before classifying the event.
+	sm.mu.RLock()
+	det := sm.cfg.Detection
+	sm.mu.RUnlock()
+
+	var (
+		hookStartWindow    = det.HookStartWindowDuration()
+		hookActivityWindow = det.HookActivityWindowDuration()
+		hookTerminalWindow = det.HookTerminalWindowDuration()
+	)
+
 	switch sr.Event {
 	case "SessionStart":
 		status = "active"
-		staleness = 5 * time.Second
+		staleness = hookStartWindow
 	case "UserPromptSubmit", "PreToolUse", "PostToolUse":
 		status = "active"
-		staleness = 30 * time.Second
+		staleness = hookActivityWindow
 	case "Notification":
 		// A Claude Notification's meaning is in its subtype. The CLI forwards
 		// the raw notification_type (empty when stdin didn't parse); the daemon
@@ -257,10 +269,10 @@ func (sm *SessionManager) HandleHookReport(sr protocol.StatusReportMsg) {
 		switch sr.NotificationType {
 		case "idle_prompt":
 			status = "ready"
-			staleness = 30 * time.Minute
+			staleness = hookTerminalWindow
 		case "permission_prompt":
 			status = "approval"
-			staleness = 30 * time.Minute
+			staleness = hookTerminalWindow
 		default:
 			sm.log.Info("ignoring notification subtype",
 				"event", sr.Event, "notification_type", sr.NotificationType,
@@ -271,10 +283,10 @@ func (sm *SessionManager) HandleHookReport(sr protocol.StatusReportMsg) {
 	case "PermissionRequest":
 		// Codex's PreToolUse approval hook; not subtype-carrying.
 		status = "approval"
-		staleness = 30 * time.Minute
+		staleness = hookTerminalWindow
 	case "Stop":
 		status = "ready"
-		staleness = 30 * time.Minute
+		staleness = hookTerminalWindow
 	default:
 		sm.log.Info("ignoring unknown hook event", "event", sr.Event, "session_id", sr.SessionID)
 		return

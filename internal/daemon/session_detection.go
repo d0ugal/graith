@@ -12,11 +12,15 @@ import (
 // status (active/ready) for all running sessions. Approval status comes from
 // hooks or the daemon approval queue, not PTY text.
 func (sm *SessionManager) RunDetectionLoop(ctx context.Context) {
-	ticker := sm.loopTicker(500 * time.Millisecond)
+	sm.mu.RLock()
+	det := sm.cfg.Detection
+	sm.mu.RUnlock()
+
+	ticker := sm.loopTicker(det.ScanIntervalDuration())
 	// The detection tick is far too frequent to fetch on (network I/O). A
 	// slower fetch keeps origin/<base> reasonably fresh so the fallback
 	// diverged-from-base count doesn't go stale after remote merges (#197).
-	fetchTicker := sm.loopTicker(fetchInterval)
+	fetchTicker := sm.loopTicker(det.FetchIntervalDuration())
 	runDetectionLoop(ctx, ticker, fetchTicker, sm.detectAgentStatuses, sm.fetchRemotes)
 }
 
@@ -41,19 +45,14 @@ func runDetectionLoop(
 	}
 }
 
-// fetchInterval is how often the detection loop refreshes remote tracking refs.
-const fetchInterval = 5 * time.Minute
-
-// fetchPerRepoTimeout bounds a single `git fetch` so a slow or hung remote
-// can't stall the fetch pass for other sessions.
-const fetchPerRepoTimeout = 30 * time.Second
-
 // fetchRemotes runs a best-effort `git fetch` for every running session's
 // worktree (and included repos) so remote tracking refs stay fresh. Failures
 // are logged at debug level and otherwise ignored — a session may be offline
 // or have no remote.
 func (sm *SessionManager) fetchRemotes(ctx context.Context) {
 	sm.mu.RLock()
+
+	fetchPerRepoTimeout := sm.cfg.Detection.FetchTimeoutDuration()
 
 	seen := make(map[string]struct{})
 
@@ -104,20 +103,23 @@ func (sm *SessionManager) fetchRemotes(ctx context.Context) {
 	}
 }
 
-// silentSessionThreshold is how long a running session's PTY may produce zero
-// output before the daemon flags it as silent. Interactive agents (Claude,
-// Codex, …) render their UI within a second or two of starting, so a session
-// still at zero bytes well past this window is almost certainly stuck — blocked
-// on a pre-render prompt, or otherwise not writing to its PTY (issue #1087).
-const silentSessionThreshold = 20 * time.Second
-
 // checkSilentSession warns once per PTY lifetime when a running session has
-// produced no PTY output past silentSessionThreshold. This is the signal that
-// was missing when #1087 (blank screen after restart) was diagnosed: the agent
-// process was alive and writing its transcript, but nothing reached the PTY, so
-// scrollback stayed empty and attach showed nothing — with no trace in the log.
+// produced no PTY output past the configured silent threshold (issue #1087;
+// window configurable via [detection] silent_threshold, #1241). This is the
+// signal that was missing when #1087 (blank screen after restart) was
+// diagnosed: the agent process was alive and writing its transcript, but
+// nothing reached the PTY, so scrollback stayed empty and attach showed
+// nothing — with no trace in the log.
+//
+// Interactive agents (Claude, Codex, …) render their UI within a second or two
+// of starting, so a session still at zero bytes well past this window is almost
+// certainly stuck — blocked on a pre-render prompt, or not writing to its PTY.
 func (sm *SessionManager) checkSilentSession(id, name, agent string, pty SessionDriver) {
-	sm.checkSilentSessionWithThreshold(id, name, agent, pty, silentSessionThreshold)
+	sm.mu.RLock()
+	threshold := sm.cfg.Detection.SilentThresholdDuration()
+	sm.mu.RUnlock()
+
+	sm.checkSilentSessionWithThreshold(id, name, agent, pty, threshold)
 }
 
 // checkSilentSessionWithThreshold is checkSilentSession with an injectable
@@ -168,6 +170,8 @@ func (sm *SessionManager) checkSilentSessionWithThreshold(id, name, agent string
 
 func (sm *SessionManager) detectAgentStatuses() {
 	sm.mu.RLock()
+
+	det := sm.cfg.Detection
 
 	type target struct {
 		id           string
@@ -229,9 +233,9 @@ func (sm *SessionManager) detectAgentStatuses() {
 			}
 
 			d := detector.New(t.agent)
-			status = string(d.Detect(content, outputAge))
+			status = string(d.DetectWithRecentWindow(content, outputAge, det.RecentOutputWindowDuration()))
 
-			if status == string(detector.StatusUnknown) && t.prevStatus != "" && t.pty.RecentlyAdopted(60*time.Second) {
+			if status == string(detector.StatusUnknown) && t.prevStatus != "" && t.pty.RecentlyAdopted(det.AdoptedGraceDuration()) {
 				status = t.prevStatus
 			}
 		}

@@ -79,6 +79,31 @@ settle_timeout  = "10s"  # how long a launch holds its throttle slot waiting for
 
 `max_concurrent` and `startup_timeout` are re-read on config reload (`SIGHUP` / edit-and-save), so you can tune them without restarting the daemon.
 
+## Detection & status classification
+
+The daemon decides each session's `agent_status` (`active`, `ready`, `approval`, `unknown`) from two sources: authoritative reports from agent hooks, and, when no fresh hook report exists, a periodic scrape of the PTY scrollback. The `[detection]` block exposes the timing policy behind both so you can tune how often the daemon looks and how long each signal is trusted.
+
+```toml
+[detection]
+scan_interval        = "500ms"  # how often PTY scrollback is scanned for agent status
+fetch_interval       = "5m"     # how often `git fetch` refreshes remote tracking refs
+fetch_timeout        = "30s"    # per-repo `git fetch` timeout (a slow remote can't stall the pass)
+silent_threshold     = "20s"    # zero PTY output past this warns the session is silent
+adopted_grace        = "60s"    # after a daemon upgrade, keep the prior status this long ("0" disables)
+recent_output_window = "3s"     # recent PTY output alone implies "active" when scraping is inconclusive ("0" disables)
+hook_start_window    = "5s"     # a SessionStart hook stays authoritative this long
+hook_activity_window = "30s"    # tool-use hooks (prompt / pre / post) stay authoritative this long
+hook_terminal_window = "30m"    # ready / approval hooks (Stop, idle, permission) stay authoritative this long
+```
+
+**Scanning.** `scan_interval` is the scrollback poll cadence — the shortest window in which a status change can be noticed from PTY text. `fetch_interval` governs the much slower background `git fetch` that keeps `origin/<base>` fresh so the diverged-from-base count doesn't go stale after remote merges, and `fetch_timeout` bounds each repo's fetch so one slow remote can't stall the pass for other sessions.
+
+**Hook authority.** When an agent hook reports a status, that report is trusted over PTY scraping until its window elapses. `hook_start_window`, `hook_activity_window`, and `hook_terminal_window` are the windows for start, tool-use, and terminal (ready/approval) events respectively — longer for terminal states, which are stable, and short for the noisy activity events.
+
+**Scraping fallbacks.** `silent_threshold` is how long a running session may produce zero PTY output before the daemon logs a "silent session" warning. `recent_output_window` treats a session that produced output very recently as `active` even when the scraped text is inconclusive; `adopted_grace` keeps a session's previous status for a short window after a daemon upgrade re-attaches to a surviving agent, so a freshly adopted PTY isn't misread as `unknown`. Setting either window to `"0"` disables that fallback.
+
+Empty or non-positive values fall back to the defaults shown above. These values are read live on each detection pass (and each hook report), so a config reload (`SIGHUP` / edit-and-save) takes effect without restarting the daemon; `scan_interval` and `fetch_interval` set the loop tickers at startup, so changing those two requires a `gr daemon restart`.
+
 ## Update check
 
 `gr list` and `gr doctor` check GitHub for a newer graith release and cache the result. The `[updates]` block makes this configurable — turn it off for downstream forks, packaged or offline installs, or if you simply don't want the network call.
