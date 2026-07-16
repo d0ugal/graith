@@ -4,26 +4,6 @@ import (
 	"github.com/d0ugal/graith/internal/protocol"
 )
 
-// maxConversationLimit caps the number of messages a single msg_conversation
-// request may sort, so a client can't ask the daemon to sort an unbounded
-// result set (a local perf/DoS footgun).
-const maxConversationLimit = 2000
-
-// clampConversationLimit normalizes a client-supplied conversation limit:
-// non-positive values default to a sensible page size, and large values are
-// capped at maxConversationLimit.
-func clampConversationLimit(limit int) int {
-	if limit <= 0 {
-		return 500
-	}
-
-	if limit > maxConversationLimit {
-		return maxConversationLimit
-	}
-
-	return limit
-}
-
 // filterInboxStreams drops inbox streams from a stream listing. An authenticated
 // session must not discover other sessions' private inbox streams via msg_topics
 // (it reads its own inbox with gr msg inbox instead).
@@ -169,7 +149,7 @@ func handleMsgConversation(sm *SessionManager, auth authContext, send func(strin
 		return
 	}
 
-	convo, err := sm.messages.Conversation(m.SessionID, clampConversationLimit(m.Limit))
+	convo, err := sm.messages.Conversation(m.SessionID, sm.Config().Messages.ClampConversationLimit(m.Limit))
 	if err != nil {
 		send("error", protocol.ErrorMsg{Message: err.Error()})
 

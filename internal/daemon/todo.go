@@ -12,22 +12,22 @@ import (
 	"github.com/d0ugal/graith/internal/store"
 )
 
-// todoSweepInterval is how often the lease/retention sweeps run.
-const todoSweepInterval = time.Minute
-
 // errNoTodoStore is returned when a todo operation is attempted before the store
 // is wired (e.g. in a unit test using a bare SessionManager).
 var errNoTodoStore = errors.New("todo store not available")
 
 // RunTodoSweepLoop periodically reclaims stranded claims (the lease) and sweeps
 // aged-out done items (retention). Both windows come from [todo] config; a zero
-// window disables that sweep. Runs until ctx is cancelled.
+// window disables that sweep. The sweep cadence ([todo] sweep_interval) is read
+// once here, so a change to it takes effect on the next daemon (re)start; the
+// lease/retention windows it applies are re-read each tick, so they are
+// reloadable. Runs until ctx is cancelled.
 func (sm *SessionManager) RunTodoSweepLoop(ctx context.Context) {
 	if sm.todos == nil {
 		return
 	}
 
-	ticker := time.NewTicker(todoSweepInterval)
+	ticker := time.NewTicker(sm.Config().Todo.SweepIntervalDuration())
 	defer ticker.Stop()
 
 	for {

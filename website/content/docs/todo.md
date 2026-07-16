@@ -209,7 +209,28 @@ emit_events = "scenario"   # "scenario" (default) | "all" | "off"
 claim_lease = "30m"        # reopen an in-progress item after this long with no progress
                            # ("0" disables the lease — stop-based reclaim only)
 retention   = "7d"         # sweep done items older than this
+
+# Operational limits (all optional; default shown):
+max_title      = 500       # max todo title length in bytes (may only tighten below the 500 hard ceiling)
+max_note       = 2000      # max todo note length in bytes (may only tighten below the 2000 hard ceiling)
+list_limit     = 2000      # max items a single list returns (ceiling 100000)
+sweep_interval = "1m"      # how often the lease/retention sweep runs
+busy_timeout   = "5s"      # SQLite busy/operation timeout for the todos DB (max 5m)
 ```
 
-All fields are optional. `claim_lease` and `retention` are Go durations (e.g.
-`30m`, `7d`).
+All fields are optional. `claim_lease`, `retention`, `sweep_interval`, and
+`busy_timeout` are Go durations (e.g. `30m`, `7d`).
+
+`max_title` and `max_note` are the enforced length limits. Their `500`/`2000`
+defaults are also the **hard ceilings** baked into the database schema — config
+may tighten them below the ceiling but never raise them past it, so a configured
+limit can never exceed what the database will accept. `list_limit` bounds a
+single list query. Over-limit values are rejected at config load.
+
+Reloadability: the `claim_lease` and `retention` windows the sweep applies are
+re-read each tick, so they take effect on the next `gr daemon reload`. The
+`sweep_interval` cadence, `list_limit`, and `busy_timeout` are fixed when the
+sweep loop starts and the database opens, so they are **restart-only** — change
+them and run `gr daemon restart`. `max_title`/`max_note` are re-read per
+operation (reloadable). `busy_timeout` is load-bearing for the claim contract:
+it lets a contended writer wait for the lock instead of failing immediately.

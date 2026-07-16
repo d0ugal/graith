@@ -49,6 +49,64 @@ func TestEmbeddedDefaultsCarryPolicyValues(t *testing.T) {
 		}
 	})
 
+	t.Run("messages limits", func(t *testing.T) {
+		m := d.Messages
+		if m.ConversationPageSize != MessagesConversationPageSizeDefault {
+			t.Errorf("Default().Messages.ConversationPageSize = %d, want %d", m.ConversationPageSize, MessagesConversationPageSizeDefault)
+		}
+
+		if m.ConversationMaxLimit != MessagesConversationMaxLimitDefault {
+			t.Errorf("Default().Messages.ConversationMaxLimit = %d, want %d", m.ConversationMaxLimit, MessagesConversationMaxLimitDefault)
+		}
+
+		if m.JailListLimit != MessagesJailListLimitDefault {
+			t.Errorf("Default().Messages.JailListLimit = %d, want %d", m.JailListLimit, MessagesJailListLimitDefault)
+		}
+
+		if m.SubscriberBuffer != MessagesSubscriberBufferDefault {
+			t.Errorf("Default().Messages.SubscriberBuffer = %d, want %d", m.SubscriberBuffer, MessagesSubscriberBufferDefault)
+		}
+
+		if m.BusyTimeout != "5s" {
+			t.Errorf("Default().Messages.BusyTimeout = %q, want %q", m.BusyTimeout, "5s")
+		}
+
+		if got := m.BusyTimeoutDuration(); got != MessagesBusyTimeoutDefault {
+			t.Errorf("Default().Messages.BusyTimeoutDuration() = %v, want %v", got, MessagesBusyTimeoutDefault)
+		}
+	})
+
+	t.Run("todo limits", func(t *testing.T) {
+		tc := d.Todo
+		if tc.MaxTitle != TodoMaxTitleDefault {
+			t.Errorf("Default().Todo.MaxTitle = %d, want %d", tc.MaxTitle, TodoMaxTitleDefault)
+		}
+
+		if tc.MaxNote != TodoMaxNoteDefault {
+			t.Errorf("Default().Todo.MaxNote = %d, want %d", tc.MaxNote, TodoMaxNoteDefault)
+		}
+
+		if tc.ListLimit != TodoListLimitDefault {
+			t.Errorf("Default().Todo.ListLimit = %d, want %d", tc.ListLimit, TodoListLimitDefault)
+		}
+
+		if tc.SweepInterval != "1m" {
+			t.Errorf("Default().Todo.SweepInterval = %q, want %q", tc.SweepInterval, "1m")
+		}
+
+		if got := tc.SweepIntervalDuration(); got != TodoSweepIntervalDefault {
+			t.Errorf("Default().Todo.SweepIntervalDuration() = %v, want %v", got, TodoSweepIntervalDefault)
+		}
+
+		if tc.BusyTimeout != "5s" {
+			t.Errorf("Default().Todo.BusyTimeout = %q, want %q", tc.BusyTimeout, "5s")
+		}
+
+		if got := tc.BusyTimeoutDuration(); got != TodoBusyTimeoutDefault {
+			t.Errorf("Default().Todo.BusyTimeoutDuration() = %v, want %v", got, TodoBusyTimeoutDefault)
+		}
+	})
+
 	t.Run("notifications", func(t *testing.T) {
 		if d.Notifications.Backend != "macos" {
 			t.Errorf("Default().Notifications.Backend = %q, want %q", d.Notifications.Backend, "macos")

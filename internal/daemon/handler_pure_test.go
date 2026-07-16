@@ -79,28 +79,33 @@ func TestCreateOptsFromMsgNilCodex(t *testing.T) {
 	}
 }
 
-// TestClampConversationLimit exercises the pure limit-normalisation logic
-// extracted from the msg_conversation handler: non-positive defaults, the
-// pass-through band, and the upper cap.
+// TestClampConversationLimit exercises the config-driven limit-normalisation
+// used by the msg_conversation handler: non-positive defaults to the page size,
+// the pass-through band, and the upper cap. Uses the default [messages] values.
 func TestClampConversationLimit(t *testing.T) {
+	m := config.Default().Messages
+
+	pageSize := config.MessagesConversationPageSizeDefault
+	maxLimit := config.MessagesConversationMaxLimitDefault
+
 	tests := []struct {
 		name string
 		in   int
 		want int
 	}{
-		{"zero defaults to page size", 0, 500},
-		{"negative defaults to page size", -7, 500},
+		{"zero defaults to page size", 0, pageSize},
+		{"negative defaults to page size", -7, pageSize},
 		{"one passes through", 1, 1},
 		{"mid passes through", 750, 750},
-		{"exactly max passes through", maxConversationLimit, maxConversationLimit},
-		{"above max is capped", maxConversationLimit + 1, maxConversationLimit},
-		{"huge is capped", 1 << 20, maxConversationLimit},
+		{"exactly max passes through", maxLimit, maxLimit},
+		{"above max is capped", maxLimit + 1, maxLimit},
+		{"huge is capped", 1 << 20, maxLimit},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := clampConversationLimit(tc.in); got != tc.want {
-				t.Errorf("clampConversationLimit(%d) = %d, want %d", tc.in, got, tc.want)
+			if got := m.ClampConversationLimit(tc.in); got != tc.want {
+				t.Errorf("ClampConversationLimit(%d) = %d, want %d", tc.in, got, tc.want)
 			}
 		})
 	}

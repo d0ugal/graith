@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"time"
+
+	"github.com/d0ugal/graith/internal/config"
 )
 
 // JailedComment is a PR comment that pr_watch blocked as untrusted and
@@ -107,19 +109,25 @@ func scanJailed(rows *sql.Rows) (JailedComment, error) {
 	return j, nil
 }
 
-// ListJailed returns quarantined comments, newest first, capped at 2000 rows so
-// a long-running daemon with retention disabled can't be made to serialize an
-// unbounded result set (mirrors the msg_conversation clamp; newest-first, so the
-// cap drops the oldest). When includeReleased is false, already-released entries
-// are excluded.
+// ListJailed returns quarantined comments, newest first, capped at the
+// configured jail list limit (default 2000) so a long-running daemon with
+// retention disabled can't be made to serialize an unbounded result set (mirrors
+// the msg_conversation clamp; newest-first, so the cap drops the oldest). When
+// includeReleased is false, already-released entries are excluded.
 func (s *MsgStore) ListJailed(includeReleased bool) ([]JailedComment, error) {
+	limit := s.jailListLimit
+	if limit < 1 {
+		limit = config.MessagesJailListLimitDefault
+	}
+
 	q := `SELECT ` + jailCols + ` FROM jailed_comments`
 	if !includeReleased {
 		q += ` WHERE released_at = ''`
 	}
 
-	// LIMIT is a compile-time constant literal — no user input in the SQL.
-	q += ` ORDER BY jailed_at DESC, id DESC LIMIT 2000`
+	// The limit is a config-resolved integer (Validate caps it at the ceiling),
+	// never user input, so formatting it into the SQL is safe.
+	q += fmt.Sprintf(` ORDER BY jailed_at DESC, id DESC LIMIT %d`, limit) //nolint:gosec // G202: LIMIT is a config-resolved int, not user input
 
 	rows, err := s.db.Query(q)
 	if err != nil {

@@ -211,13 +211,39 @@ purge_interval = "10m"       # how often the purge sweep runs thereafter (coarse
 [gc]
 orphan_min_age = "5m"        # minimum age before an orphaned worktree/scratch dir is GC-eligible
 
+# Message log (`gr msg`) storage and operational limits. max_age/max_per_stream
+# bound retention of the on-disk log (both default off — kept forever). The rest
+# were fixed literals before issue #1249: the conversation paging bounds, the
+# jail listing cap, the pub/sub subscriber buffer, and the SQLite busy/operation
+# timeout. conversation_page_size must not exceed conversation_max_limit.
+# subscriber_buffer and busy_timeout are fixed at daemon start (restart-only);
+# the paging bounds and jail cap are read per-request (reloadable).
+[messages]
+# max_age = "30d"          # delete messages older than this ("" or "0" keeps them forever)
+# max_per_stream = 5000    # keep at most this many messages per stream (0 keeps all)
+conversation_page_size = 500   # page size when a conversation request omits a limit (< 1 => 500; <= max limit)
+conversation_max_limit = 2000  # hard cap on messages a single conversation sorts (< 1 => 2000; ceiling 100000)
+jail_list_limit = 2000         # max quarantined comments a jail listing returns (< 1 => 2000; ceiling 100000)
+subscriber_buffer = 64         # per-subscriber pub/sub channel capacity (< 1 => 64; ceiling 65536)
+busy_timeout = "5s"            # SQLite busy_timeout for the messages DB ("" or non-positive => 5s; max 5m)
+
 # First-class shared todo list (`gr todo`). emit_events controls task-event
 # emission, claim_lease reopens an in-progress item whose owner has gone quiet,
-# and retention sweeps done items once they age past the window.
+# and retention sweeps done items once they age past the window. The operational
+# limits (max_title/max_note/list_limit/sweep_interval/busy_timeout) were fixed
+# literals before issue #1249. max_title/max_note may only be tightened below the
+# 500/2000 hard ceiling baked into the database CHECK constraints. sweep_interval,
+# list_limit, and busy_timeout are fixed at daemon start (restart-only); the lease
+# and retention windows they sweep stay reloadable.
 [todo]
 emit_events = "scenario"  # emit task events for: "scenario" (default) | "all" | "off"
 claim_lease = "30m"       # reopen an in-progress item after this long with no progress ("0" disables)
 retention   = "0"         # sweep done items older than this ("0" keeps them forever)
+max_title     = 500       # max todo title length in bytes (<= 500 hard DB ceiling; < 1 => default 500)
+max_note      = 2000      # max todo note length in bytes (<= 2000 hard DB ceiling; < 1 => default 2000)
+list_limit    = 2000      # max items a single list returns (< 1 => default 2000; hard ceiling 100000)
+sweep_interval = "1m"     # how often the lease/retention sweep runs ("" or non-positive => 1m)
+busy_timeout  = "5s"      # SQLite busy_timeout for the todos DB ("" or non-positive => 5s; max 5m)
 
 # PR & CI awareness loop: resolves eligible worktree sessions' GitHub PRs via the
 # gh CLI, polls their checks/reviews, and notifies the owning session's inbox on

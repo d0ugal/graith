@@ -92,7 +92,11 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 	sm.configFile = configFile
 	sm.upgradeCh = make(chan string, 1)
 
-	msgStore, err := NewMsgStore(paths.MessagesDB)
+	msgStore, err := NewMsgStore(paths.MessagesDB, MsgStoreSettings{
+		BusyTimeout:      cfg.Messages.BusyTimeoutDuration(),
+		SubscriberBuffer: cfg.Messages.SubscriberBufferOrDefault(),
+		JailListLimit:    cfg.Messages.JailListLimitOrDefault(),
+	})
 	if err != nil {
 		return fmt.Errorf("open message store: %w", err)
 	}
@@ -100,7 +104,12 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 
 	sm.messages = msgStore
 
-	todoStore, err := NewTodoStore(paths.TodosDB)
+	todoStore, err := NewTodoStore(paths.TodosDB, TodoStoreSettings{
+		BusyTimeout: cfg.Todo.BusyTimeoutDuration(),
+		MaxTitle:    cfg.Todo.MaxTitleOrDefault(),
+		MaxNote:     cfg.Todo.MaxNoteOrDefault(),
+		ListLimit:   cfg.Todo.ListLimitOrDefault(),
+	})
 	if err != nil {
 		return fmt.Errorf("open todo store: %w", err)
 	}

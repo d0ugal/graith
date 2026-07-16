@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/d0ugal/graith/internal/config"
 	_ "modernc.org/sqlite"
 )
 
@@ -41,14 +42,56 @@ type MsgStore struct {
 	db   *sql.DB
 	mu   sync.Mutex
 	subs map[string][]chan Message
+	// subscriberBuffer is the capacity of each per-subscriber channel; jailListLimit
+	// bounds a jail listing. Both are resolved from config at open time (issue #1249).
+	subscriberBuffer int
+	jailListLimit    int
 }
 
-func NewMsgStore(dbPath string) (*MsgStore, error) {
+// MsgStoreSettings carries the config-derived operational limits for the message
+// store. A zero value resolves each field to its built-in default, so tests and
+// other callers that don't tune these can pass MsgStoreSettings{} (or nothing).
+type MsgStoreSettings struct {
+	BusyTimeout      time.Duration
+	SubscriberBuffer int
+	JailListLimit    int
+}
+
+func (s MsgStoreSettings) resolved() MsgStoreSettings {
+	if s.BusyTimeout <= 0 {
+		s.BusyTimeout = config.MessagesBusyTimeoutDefault
+	}
+
+	if s.SubscriberBuffer < 1 {
+		s.SubscriberBuffer = config.MessagesSubscriberBufferDefault
+	}
+
+	if s.JailListLimit < 1 {
+		s.JailListLimit = config.MessagesJailListLimitDefault
+	}
+
+	return s
+}
+
+// NewMsgStore opens (creating if needed) the message database at dbPath. An
+// optional MsgStoreSettings tunes the SQLite busy timeout, the per-subscriber
+// channel buffer, and the jail listing cap; omit it (or pass a zero value) to
+// use the built-in defaults. Only the first settings value is used.
+func NewMsgStore(dbPath string, settings ...MsgStoreSettings) (*MsgStore, error) {
+	var st MsgStoreSettings
+	if len(settings) > 0 {
+		st = settings[0]
+	}
+
+	st = st.resolved()
+
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
 		return nil, fmt.Errorf("create messages db dir: %w", err)
 	}
 
-	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(wal)&_pragma=busy_timeout(5000)")
+	dsn := fmt.Sprintf("%s?_pragma=journal_mode(wal)&_pragma=busy_timeout(%d)", dbPath, st.BusyTimeout.Milliseconds())
+
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open messages db: %w", err)
 	}
@@ -59,8 +102,10 @@ func NewMsgStore(dbPath string) (*MsgStore, error) {
 	}
 
 	return &MsgStore{
-		db:   db,
-		subs: make(map[string][]chan Message),
+		db:               db,
+		subs:             make(map[string][]chan Message),
+		subscriberBuffer: st.SubscriberBuffer,
+		jailListLimit:    st.JailListLimit,
 	}, nil
 }
 
@@ -487,7 +532,12 @@ func (s *MsgStore) TotalUnread(subscriber string) int {
 }
 
 func (s *MsgStore) Subscribe(stream string) (chan Message, func()) {
-	ch := make(chan Message, 64)
+	buffer := s.subscriberBuffer
+	if buffer < 1 {
+		buffer = config.MessagesSubscriberBufferDefault
+	}
+
+	ch := make(chan Message, buffer)
 
 	s.mu.Lock()
 	s.subs[stream] = append(s.subs[stream], ch)
