@@ -29,9 +29,10 @@ your default config (not triggers, repos, or MCP servers); set
 `GRAITH_DEMO_SRC_CONFIG` to copy from a different file. It prints the sandbox
 posture it detected and **warns loudly** if the copied config leaves the agents
 unsandboxed; if no agent/sandbox config is found at all it falls back to
-unsandboxed `claude`/`codex`. Safety guardrails: the fixed `demo` profile is
-protected by an ownership marker, so the harness refuses to purge or delete a
-`~/.config/graith-demo` it didn't create.
+unsandboxed `claude`/`codex`. Safety guardrails: the fixed `demo` profile's
+config, data, and runtime directories carry matching per-run ownership markers.
+The harness refuses setup and teardown if any target is pre-existing, unmarked,
+or mismatched, and it never contacts an unowned `demo` daemon.
 
 ## Re-recording
 
