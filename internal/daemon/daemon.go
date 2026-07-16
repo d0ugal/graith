@@ -105,6 +105,7 @@ type SessionManager struct {
 	resourceMu      sync.Mutex
 	resourceSamples map[string][]ResourceSample
 	resourceKick    chan struct{}
+	signalRequests  map[string]signalRequest
 
 	// restartStuck is the startup watchdog's recovery action; nil in production
 	// (falls back to Restart). Tests override it to observe watchdog decisions
@@ -162,6 +163,7 @@ func NewSessionManager(cfg *config.Config, paths config.Paths, log *slog.Logger)
 		launch:             newLaunchThrottle(cfg.Launch.MaxConcurrentOrDefault()),
 		resourceSamples:    make(map[string][]ResourceSample),
 		resourceKick:       make(chan struct{}, 1),
+		signalRequests:     make(map[string]signalRequest),
 		cfg:                cfg,
 		paths:              paths,
 		log:                log,
@@ -2516,6 +2518,8 @@ func (sm *SessionManager) watchSession(id string, sess SessionDriver) {
 
 	sm.mu.Lock()
 	stale := sm.sessions[id] != sess
+	stateAtExit, stateExists := sm.state.Sessions[id]
+	stateDeleted := !stateExists || stateAtExit.IsSoftDeleted()
 
 	var (
 		name           string
@@ -2611,13 +2615,22 @@ func (sm *SessionManager) watchSession(id string, sess SessionDriver) {
 	// or removed (deleted). Double-close is safe: os.File.Close returns
 	// ErrClosed (ignored) and readDone is a closed channel (instant receive).
 	sess.Close()
+	signalRequest := sm.takeSignalRequest(id, sess.ProcessPID())
 
 	if stale {
+		// A hard delete removes both state and the live-driver map entry before
+		// this watcher observes exit. Discard its bounded resource history; a
+		// stale watcher for a replacement generation must leave the replacement's
+		// samples intact.
+		if stateDeleted {
+			sm.discardResourceSamples(id)
+		}
 		sm.log.Info("ignoring stale session exit", "id", id, "exit_code", sess.ExitCode())
 		return
 	}
 
 	if deleted {
+		sm.discardResourceSamples(id)
 		sm.log.Info("ignoring exit for deleted session", "id", id, "exit_code", sess.ExitCode())
 		return
 	}
@@ -2637,8 +2650,14 @@ func (sm *SessionManager) watchSession(id string, sess SessionDriver) {
 	if sig := sess.ExitSignal(); sig != 0 {
 		logAttrs = append(logAttrs, "signal", sig.String())
 	}
-	category, signalSource := classifyExit(stopReason, sess.ExitCode(), sess.ExitSignal())
+	category, signalSource := classifyExit(sess.ExitCode(), sess.ExitSignal(), signalRequest)
 	logAttrs = append(logAttrs, "exit_category", category, "signal_source", signalSource)
+	if signalRequest != nil {
+		logAttrs = append(logAttrs,
+			"signal_request", signalRequest.Signal.String(),
+			"signal_request_initiator", signalRequest.Initiator,
+			"signal_request_at", signalRequest.At)
+	}
 
 	if rss := sess.PeakRSSBytes(); rss > 0 && sess.ExitCode() != 0 {
 		// peak_rss_mb comes from the waited child's rusage, which is the direct
@@ -2649,7 +2668,7 @@ func (sm *SessionManager) watchSession(id string, sess SessionDriver) {
 	}
 
 	sm.log.Info("session exited", logAttrs...)
-	sm.logAbnormalExitReport(id, name, stopReason, sess)
+	sm.logAbnormalExitReport(id, name, stopReason, sess, signalRequest)
 
 	sm.onAgentStatusChange(id, name, "running", "stopped")
 
@@ -5238,6 +5257,7 @@ func (sm *SessionManager) logStopping(id, name, reason, initiator string, sess S
 		pid = sess.ProcessPID()
 		pgid = sess.Pgid()
 	}
+	sm.recordSignalRequest(id, pid, syscall.SIGTERM, initiator)
 
 	sm.logStoppingPID(id, name, reason, initiator, pid, pgid)
 }
