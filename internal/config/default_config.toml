@@ -101,6 +101,15 @@ max_concurrent = 3       # max agent spawns in their startup window at once (< 1
 startup_timeout = "3m"   # kill+restart a session stuck with no output past this ("0" disables the watchdog)
 settle_timeout = "10s"   # how long a launch holds its slot waiting for first output ("0" => release right after spawn)
 
+# Update check: `gr list` and `gr doctor` query GitHub for a newer graith release
+# and cache the result. Disable for downstream forks, packaged/offline installs,
+# or to avoid the network call entirely. Never runs for a "dev" build.
+[updates]
+enabled = true              # check GitHub for newer graith releases
+repository = "d0ugal/graith" # GitHub "owner/repo" whose latest release is checked
+interval = "1h"             # how long a cached result stays fresh
+timeout = "5s"              # HTTP request timeout for the release check
+
 # Soft delete: `gr delete` marks a session deleted and keeps its worktree and
 # state for the retention window so it can be recovered with `gr restore`. The
 # daemon purges soft-deleted sessions after the window elapses. `gr purge`

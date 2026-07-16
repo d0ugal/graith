@@ -78,3 +78,17 @@ settle_timeout  = "10s"  # how long a launch holds its throttle slot waiting for
 **Watchdog.** A background loop looks for sessions that are running but have never produced output, sit at `agent_status: unknown`, and have been up longer than `startup_timeout`. Each is killed and restarted fresh (the restart uses a fresh `--session-id` rather than resuming a conversation that was never persisted). A per-session cap prevents restart storms for a permanently-broken session; the counter resets once the session produces output. Set `startup_timeout = "0"` to disable the watchdog entirely.
 
 `max_concurrent` and `startup_timeout` are re-read on config reload (`SIGHUP` / edit-and-save), so you can tune them without restarting the daemon.
+
+## Update check
+
+`gr list` and `gr doctor` check GitHub for a newer graith release and cache the result. The `[updates]` block makes this configurable — turn it off for downstream forks, packaged or offline installs, or if you simply don't want the network call.
+
+```toml
+[updates]
+enabled    = true            # check GitHub for newer graith releases
+repository = "d0ugal/graith"  # GitHub "owner/repo" whose latest release is checked
+interval   = "1h"            # how long a cached result stays fresh
+timeout    = "5s"            # HTTP request timeout for the release check
+```
+
+Setting `enabled = false` disables all update-check network activity: `gr list` skips it silently and `gr doctor` reports the check as disabled rather than claiming you are up to date. The check never runs for a `dev` build regardless of this setting. Point `repository` at a fork to track its releases instead. An empty `interval` or `timeout` falls back to the built-in defaults (1h and 5s); a value that is set but unparseable, or a `repository` not in `owner/repo` form, is rejected at config load.

@@ -22,6 +22,22 @@ var (
 	out        *output.Writer
 )
 
+// updateSettings translates the [updates] config block into the settings the
+// version package's checker consumes. A nil config yields the zero value, which
+// reproduces the historical enabled/canonical-repo/1h/5s behaviour.
+func updateSettings(c *config.Config) version.UpdateSettings {
+	if c == nil {
+		return version.UpdateSettings{}
+	}
+
+	return version.UpdateSettings{
+		Disabled:   !c.Updates.Enabled,
+		Repository: c.Updates.Repository,
+		Interval:   c.Updates.IntervalDuration(),
+		Timeout:    c.Updates.TimeoutDuration(),
+	}
+}
+
 var rootCmd = &cobra.Command{
 	Use:           "gr",
 	Short:         "graith — AI agent session manager",

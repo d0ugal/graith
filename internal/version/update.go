@@ -11,11 +11,33 @@ import (
 	"time"
 )
 
+// Defaults for the update check. These reproduce the historical hard-coded
+// behaviour and back-fill any UpdateSettings field left unset.
 const (
-	checkInterval = time.Hour
-	githubRepo    = "d0ugal/graith"
-	httpTimeout   = 5 * time.Second
+	DefaultCheckInterval = time.Hour
+	DefaultRepository    = "d0ugal/graith"
+	DefaultHTTPTimeout   = 5 * time.Second
 )
+
+// UpdateSettings configures a single CheckForUpdate call. The zero value is
+// valid and reproduces the historical behaviour: enabled, the canonical
+// repository, a one-hour cadence, and a five-second request timeout. This keeps
+// the version package a leaf (it never imports config); callers translate their
+// [updates] block into these fields.
+type UpdateSettings struct {
+	// Disabled short-circuits the check: when true, CheckForUpdate returns nil
+	// without touching the cache or the network.
+	Disabled bool
+	// Repository is the "owner/repo" whose latest release is queried. Empty uses
+	// DefaultRepository.
+	Repository string
+	// Interval is how long a cached result stays fresh. Non-positive uses
+	// DefaultCheckInterval.
+	Interval time.Duration
+	// Timeout bounds the release HTTP request. Non-positive uses
+	// DefaultHTTPTimeout.
+	Timeout time.Duration
+}
 
 type UpdateCache struct {
 	LatestVersion string    `json:"latest_version"`
@@ -27,20 +49,29 @@ type UpdateResult struct {
 	CurrentVersion string
 }
 
-func CheckForUpdate(cacheDir string) *UpdateResult {
+func CheckForUpdate(cacheDir string, settings UpdateSettings) *UpdateResult {
+	if settings.Disabled {
+		return nil
+	}
+
 	if Version == "dev" {
 		return nil
+	}
+
+	interval := settings.Interval
+	if interval <= 0 {
+		interval = DefaultCheckInterval
 	}
 
 	cachePath := filepath.Join(cacheDir, "update-check.json")
 
 	if info, err := readUpdateCache(cachePath); err == nil {
-		if time.Since(info.CheckedAt) < checkInterval {
+		if time.Since(info.CheckedAt) < interval {
 			return buildResult(info.LatestVersion)
 		}
 	}
 
-	latest, err := fetchLatestVersion()
+	latest, err := fetchLatestVersion(settings.Repository, settings.Timeout)
 	if err != nil {
 		return nil
 	}
@@ -88,9 +119,17 @@ func writeUpdateCache(path string, info *UpdateCache) {
 	_ = os.WriteFile(path, data, 0o600)
 }
 
-func fetchLatestVersion() (string, error) {
-	url := fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", githubRepo)
-	client := &http.Client{Timeout: httpTimeout}
+func fetchLatestVersion(repository string, timeout time.Duration) (string, error) {
+	if repository == "" {
+		repository = DefaultRepository
+	}
+
+	if timeout <= 0 {
+		timeout = DefaultHTTPTimeout
+	}
+
+	url := fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", repository)
+	client := &http.Client{Timeout: timeout}
 
 	resp, err := client.Get(url)
 	if err != nil {
