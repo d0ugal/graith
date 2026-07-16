@@ -140,7 +140,7 @@ func TestInjectClaudeHooks(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 	sessionID := "kirk-braw-03"
 
-	extraArgs, extraEnv, err := sm.injectClaudeHooks(sessionID, false, nil)
+	extraArgs, extraEnv, err := sm.injectClaudeHooks(sessionID, false)
 	if err != nil {
 		t.Fatalf("injectClaudeHooks() error = %v", err)
 	}
@@ -464,7 +464,7 @@ func TestInjectHooksSupported(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	sm := newTestSessionManagerWithDataDir(t)
 
-	args, env, err := sm.injectHooks("claude", "kirk-claude", "", false, nil)
+	args, env, err := sm.injectHooks("claude", "kirk-claude", "", false)
 	if err != nil {
 		t.Fatalf("injectHooks(claude) error = %v", err)
 	}
@@ -477,7 +477,7 @@ func TestInjectHooksSupported(t *testing.T) {
 		t.Errorf("injectHooks(claude) returned unexpected env: %v", env)
 	}
 
-	args, env, err = sm.injectHooks("codex", "kirk-codex", "", false, nil)
+	args, env, err = sm.injectHooks("codex", "kirk-codex", "", false)
 	if err != nil {
 		t.Fatalf("injectHooks(codex) error = %v", err)
 	}
@@ -492,7 +492,7 @@ func TestInjectHooksSupported(t *testing.T) {
 
 	worktree := t.TempDir()
 
-	args, env, err = sm.injectHooks("cursor", "kirk-cursor-sup", worktree, false, nil)
+	args, env, err = sm.injectHooks("cursor", "kirk-cursor-sup", worktree, false)
 	if err != nil {
 		t.Fatalf("injectHooks(cursor) error = %v", err)
 	}
@@ -515,7 +515,7 @@ func TestInjectHooksUnsupportedIsNoop(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 
 	for _, agent := range []string{"agy", "opencode", "custom-agent"} {
-		args, env, err := sm.injectHooks(agent, "haar-unsupported", "", false, nil)
+		args, env, err := sm.injectHooks(agent, "haar-unsupported", "", false)
 		if err != nil {
 			t.Errorf("injectHooks(%q) unexpected error: %v", agent, err)
 		}
@@ -672,16 +672,14 @@ func TestGenerateMCPConfig(t *testing.T) {
 	}
 }
 
-func TestInjectClaudeHooksWithMCPServers(t *testing.T) {
+// TestInjectClaudeHooksExcludesMCP proves the #1135 decoupling: injectClaudeHooks
+// only ever emits the --settings (hook) arg, never --mcp-config, regardless of
+// what MCP servers are configured. MCP config is injectMCPConfig's job now.
+func TestInjectClaudeHooksExcludesMCP(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 	sessionID := "kirk-mcp-inject"
 
-	servers := []config.MCPServerConfig{
-		{Name: "graith", Command: "/usr/bin/gr", Args: []string{"mcp"}},
-		{Name: "chrome", Command: "npx", Args: []string{"chrome-mcp"}},
-	}
-
-	args, env, err := sm.injectClaudeHooks(sessionID, false, servers)
+	args, env, err := sm.injectClaudeHooks(sessionID, false)
 	if err != nil {
 		t.Fatalf("injectClaudeHooks() error = %v", err)
 	}
@@ -690,27 +688,91 @@ func TestInjectClaudeHooksWithMCPServers(t *testing.T) {
 		t.Errorf("unexpected env: %v", env)
 	}
 
-	if len(args) != 4 {
-		t.Fatalf("args = %v, want 4 elements [--settings path --mcp-config path]", args)
+	if len(args) != 2 {
+		t.Fatalf("args = %v, want 2 elements [--settings path]", args)
 	}
 
 	if args[0] != "--settings" {
 		t.Errorf("args[0] = %q, want --settings", args[0])
 	}
 
-	if args[2] != "--mcp-config" {
-		t.Errorf("args[2] = %q, want --mcp-config", args[2])
+	for _, a := range args {
+		if a == "--mcp-config" {
+			t.Errorf("injectClaudeHooks must not emit --mcp-config; args = %v", args)
+		}
+	}
+}
+
+// TestInjectMCPConfig proves MCP config injection is independent of the hook
+// path: it produces --mcp-config args for Claude given servers, and a readable
+// config file, without touching the settings/hook file (#1135).
+func TestInjectMCPConfig(t *testing.T) {
+	sm := newTestSessionManagerWithDataDir(t)
+	sessionID := "kirk-mcp-inject"
+
+	servers := []config.MCPServerConfig{
+		{Name: "graith", Command: "/usr/bin/gr", Args: []string{"mcp"}},
+		{Name: "chrome", Command: "npx", Args: []string{"chrome-mcp"}},
 	}
 
-	mcpConfigPath := args[3]
-
-	data, err := os.ReadFile(mcpConfigPath)
+	args, err := sm.injectMCPConfig("claude", sessionID, servers)
 	if err != nil {
-		t.Fatalf("read mcp config at %q: %v", mcpConfigPath, err)
+		t.Fatalf("injectMCPConfig() error = %v", err)
+	}
+
+	if len(args) != 2 {
+		t.Fatalf("args = %v, want 2 elements [--mcp-config path]", args)
+	}
+
+	if args[0] != "--mcp-config" {
+		t.Errorf("args[0] = %q, want --mcp-config", args[0])
+	}
+
+	data, err := os.ReadFile(args[1])
+	if err != nil {
+		t.Fatalf("read mcp config at %q: %v", args[1], err)
 	}
 
 	if !strings.Contains(string(data), "mcpServers") {
 		t.Error("mcp config file should contain mcpServers")
+	}
+}
+
+// TestInjectMCPConfigNoServers verifies that no servers means no args and no
+// generated file — nothing to inject.
+func TestInjectMCPConfigNoServers(t *testing.T) {
+	sm := newTestSessionManagerWithDataDir(t)
+
+	args, err := sm.injectMCPConfig("claude", "kirk-mcp-empty", nil)
+	if err != nil {
+		t.Fatalf("injectMCPConfig() error = %v", err)
+	}
+
+	if args != nil {
+		t.Errorf("args = %v, want nil for no servers", args)
+	}
+}
+
+// TestInjectMCPConfigNonClaude verifies only Claude gets --mcp-config args;
+// other agents get nothing even when servers are configured (matches the
+// pre-decoupling behaviour where generateMCPConfig was only reached via the
+// Claude hook path).
+func TestInjectMCPConfigNonClaude(t *testing.T) {
+	sm := newTestSessionManagerWithDataDir(t)
+
+	servers := []config.MCPServerConfig{
+		{Name: "graith", Command: "/usr/bin/gr", Args: []string{"mcp"}},
+	}
+
+	for _, agent := range []string{"codex", "cursor", "opencode"} {
+		args, err := sm.injectMCPConfig(agent, "haar-"+agent, servers)
+		if err != nil {
+			t.Errorf("injectMCPConfig(%q) error = %v", agent, err)
+		}
+
+		if args != nil {
+			t.Errorf("injectMCPConfig(%q) = %v, want nil", agent, args)
+		}
 	}
 }
 

@@ -263,29 +263,47 @@ func (sm *SessionManager) generateMCPConfig(sessionID string, mcpServers []confi
 	return mcpConfigPath, nil
 }
 
-// injectClaudeHooks generates hook files for a Claude session and returns
-// the extra args and env vars to add to the agent launch.
-func (sm *SessionManager) injectClaudeHooks(sessionID string, yolo bool, mcpServers []config.MCPServerConfig) (extraArgs []string, extraEnv map[string]string, err error) {
+// injectClaudeHooks generates the Claude Code settings (lifecycle hook) file for
+// a session and returns the extra args to add to the agent launch.
+//
+// MCP `--mcp-config` generation is deliberately NOT bundled here — it lives in
+// injectMCPConfig so MCP availability can be decided independently of whether
+// generated hooks are installed. A headless session skips generated hooks (the
+// typed stream is its status/approval feed) but still needs its MCP servers, so
+// the two concerns must not ride the same branch. See issue #1135.
+func (sm *SessionManager) injectClaudeHooks(sessionID string, yolo bool) (extraArgs []string, extraEnv map[string]string, err error) {
 	settingsPath, err := sm.generateClaudeSettings(sessionID, yolo)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	extraArgs = []string{"--settings", settingsPath}
+	sm.log.Info("injected claude hooks", "session_id", sessionID, "settings", settingsPath)
 
-	if len(mcpServers) > 0 {
-		mcpConfigPath, err := sm.generateMCPConfig(sessionID, mcpServers)
-		if err != nil {
-			return nil, nil, err
-		}
+	return []string{"--settings", settingsPath}, nil, nil
+}
 
-		extraArgs = append(extraArgs, "--mcp-config", mcpConfigPath)
-		sm.log.Info("injected claude hooks", "session_id", sessionID, "settings", settingsPath, "mcp_config", mcpConfigPath, "mcp_servers", len(mcpServers))
-	} else {
-		sm.log.Info("injected claude hooks", "session_id", sessionID, "settings", settingsPath, "mcp_servers", 0)
+// injectMCPConfig generates the MCP config file for a session and returns the
+// `--mcp-config` args to add to the agent launch. It is independent of
+// lifecycle-hook injection (injectHooks): MCP availability must not ride on
+// whether generated hooks are installed, so a headless session — which skips
+// hook generation — can still be given its MCP servers.
+//
+// Only Claude consumes `--mcp-config`; other agents get no args (any MCP wiring
+// they have is handled elsewhere), matching the pre-decoupling behaviour where
+// generateMCPConfig was only ever reached via the Claude hook path.
+func (sm *SessionManager) injectMCPConfig(agentName, sessionID string, mcpServers []config.MCPServerConfig) (extraArgs []string, err error) {
+	if len(mcpServers) == 0 || agentName != "claude" {
+		return nil, nil
 	}
 
-	return extraArgs, nil, nil
+	mcpConfigPath, err := sm.generateMCPConfig(sessionID, mcpServers)
+	if err != nil {
+		return nil, err
+	}
+
+	sm.log.Info("injected mcp config", "session_id", sessionID, "mcp_config", mcpConfigPath, "mcp_servers", len(mcpServers))
+
+	return []string{"--mcp-config", mcpConfigPath}, nil
 }
 
 // injectCodexHooks generates per-event hook scripts for a Codex session and
@@ -502,12 +520,14 @@ func (sm *SessionManager) injectCursorHooks(sessionID, worktreePath string, yolo
 	return nil, nil, nil
 }
 
-// injectHooks dispatches hook injection to the agent-specific implementation.
-// Returns nil for agents that don't support hooks.
-func (sm *SessionManager) injectHooks(agentName, sessionID, worktreePath string, yolo bool, mcpServers []config.MCPServerConfig) (extraArgs []string, extraEnv map[string]string, err error) {
+// injectHooks dispatches lifecycle-hook injection to the agent-specific
+// implementation. It does NOT handle MCP config — that is injectMCPConfig's job,
+// kept separate so MCP can be injected without hooks (see issue #1135). Returns
+// nil for agents that don't support hooks.
+func (sm *SessionManager) injectHooks(agentName, sessionID, worktreePath string, yolo bool) (extraArgs []string, extraEnv map[string]string, err error) {
 	switch agentName {
 	case "claude":
-		return sm.injectClaudeHooks(sessionID, yolo, mcpServers)
+		return sm.injectClaudeHooks(sessionID, yolo)
 	case "codex":
 		return sm.injectCodexHooks(sessionID, yolo)
 	case "cursor":
