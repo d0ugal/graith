@@ -25,7 +25,7 @@ func TestSessionColumnsOrder(t *testing.T) {
 		}
 	}
 
-	wantCLI := []string{"repo", "agent", "status", "activity", "model", "branch", "git", "pr", "review", "tokens", "age", "attached"}
+	wantCLI := []string{"repo", "agent", "status", "activity", "model", "branch", "git", "pr", "review", "tokens", "todo", "age", "attached"}
 	wantTUI := []string{"status", "summary", "git", "pr", "review", "output"}
 
 	if join(cli) != join(wantCLI) {

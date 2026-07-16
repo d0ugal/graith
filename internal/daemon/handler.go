@@ -441,6 +441,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					infos = append(infos, toSessionInfo(s, cfg, sm.getHookReport(s.ID)))
 				}
 
+				sm.fillTodoCounts(infos)
 				sendControl("session_list", protocol.SessionListMsg{Sessions: infos})
 
 			case "create":
@@ -1906,28 +1907,100 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					}{s.Name, resumed})
 				}
 
-			case "scenario_task_done":
-				s, ok := decodePayload[protocol.ScenarioTaskDoneMsg](msg, sendControl, "invalid scenario_task_done message")
+			case "todo_add":
+				m, ok := decodePayload[protocol.TodoAddMsg](msg, sendControl, "invalid todo_add message")
 				if !ok {
 					continue
 				}
 
-				callerID := ""
-				if auth.authenticated {
-					callerID = auth.sessionID
+				if item, err := sm.TodoAddOp(auth, m); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+				} else {
+					sendControl("todo", protocol.TodoResponse{Item: item})
 				}
 
-				if callerID == "" {
-					sendControl("error", protocol.ErrorMsg{Message: "scenario task-done requires an authenticated session"})
+			case "todo_list":
+				m, ok := decodePayload[protocol.TodoListMsg](msg, sendControl, "invalid todo_list message")
+				if !ok {
 					continue
 				}
 
-				if err := sm.ScenarioTaskDone(s.Name, callerID); err != nil {
+				if items, err := sm.TodoListOp(auth, m); err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 				} else {
-					sendControl("scenario_task_done", struct {
-						Name string `json:"name"`
-					}{s.Name})
+					sendControl("todo_list", protocol.TodoListResponse{Items: items})
+				}
+
+			case "todo_claim":
+				m, ok := decodePayload[protocol.TodoClaimMsg](msg, sendControl, "invalid todo_claim message")
+				if !ok {
+					continue
+				}
+
+				if resp, err := sm.TodoClaimOp(auth, m); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+				} else {
+					sendControl("todo_claim", resp)
+				}
+
+			case "todo_transition":
+				m, ok := decodePayload[protocol.TodoTransitionMsg](msg, sendControl, "invalid todo_transition message")
+				if !ok {
+					continue
+				}
+
+				if item, err := sm.TodoTransitionOp(auth, m); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+				} else {
+					sendControl("todo", protocol.TodoResponse{Item: item})
+				}
+
+			case "todo_update":
+				m, ok := decodePayload[protocol.TodoUpdateMsg](msg, sendControl, "invalid todo_update message")
+				if !ok {
+					continue
+				}
+
+				if item, err := sm.TodoUpdateOp(auth, m); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+				} else {
+					sendControl("todo", protocol.TodoResponse{Item: item})
+				}
+
+			case "todo_assign":
+				m, ok := decodePayload[protocol.TodoAssignMsg](msg, sendControl, "invalid todo_assign message")
+				if !ok {
+					continue
+				}
+
+				if item, err := sm.TodoAssignOp(auth, m); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+				} else {
+					sendControl("todo", protocol.TodoResponse{Item: item})
+				}
+
+			case "todo_remove":
+				m, ok := decodePayload[protocol.TodoRemoveMsg](msg, sendControl, "invalid todo_remove message")
+				if !ok {
+					continue
+				}
+
+				if err := sm.TodoRemoveOp(auth, m); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+				} else {
+					sendControl("todo_removed", protocol.TodoRemoveMsg{ID: m.ID})
+				}
+
+			case "todo_export":
+				m, ok := decodePayload[protocol.TodoExportMsg](msg, sendControl, "invalid todo_export message")
+				if !ok {
+					continue
+				}
+
+				if key, err := sm.TodoExportOp(auth, m); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+				} else {
+					sendControl("todo_export", protocol.TodoExportResponse{Key: key})
 				}
 
 			case "scenario_add":

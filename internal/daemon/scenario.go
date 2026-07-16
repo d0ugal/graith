@@ -460,6 +460,11 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 	_ = sm.saveState()
 	sm.mu.Unlock()
 
+	// Seed one assigned todo item per member from its task (issue #591): this
+	// replaces the old task-done boolean — a member marks progress by completing
+	// its assigned items, and `gr scenario status` derives completion from them.
+	sm.seedScenarioTodos(scenarioID, sessionIDs, scenarioSessions)
+
 	// --- Manifest phase: build and publish manifest to each session's inbox ---
 	repos := make([]string, len(scenarioSessions))
 	for i, ss := range scenarioSessions {
@@ -870,41 +875,6 @@ func (sm *SessionManager) ResumeScenario(name string, rows, cols uint16) ([]stri
 	return resumed, nil
 }
 
-func (sm *SessionManager) ScenarioTaskDone(scenarioName, sessionID string) error {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-
-	var scenario *ScenarioState
-
-	for _, sc := range sm.state.Scenarios {
-		if sc.Name == scenarioName {
-			scenario = sc
-			break
-		}
-	}
-
-	if scenario == nil {
-		return fmt.Errorf("scenario %q not found", scenarioName)
-	}
-
-	idx := -1
-
-	for i, id := range scenario.SessionIDs {
-		if id == sessionID {
-			idx = i
-			break
-		}
-	}
-
-	if idx < 0 {
-		return fmt.Errorf("session %q is not part of scenario %q", sessionID, scenarioName)
-	}
-
-	scenario.Sessions[idx].TaskDone = true
-
-	return sm.saveState()
-}
-
 func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSessionInput, rows, cols uint16) (*SessionState, error) {
 	if err := ValidateSessionName(input.Name); err != nil {
 		return nil, err
@@ -1032,9 +1002,40 @@ func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSess
 	_ = sm.saveState()
 	sm.mu.Unlock()
 
+	// Seed the added member's task as an assigned todo (issue #591).
+	sm.seedScenarioTodos(scenarioID, []string{sess.ID}, []ScenarioSession{{Name: input.Name, Task: input.Task}})
+
 	sm.republishManifests(scenarioID)
 
 	return &sess, nil
+}
+
+// seedScenarioTodos creates one assigned todo item per member with a non-empty
+// task, in the scenario scope. This is how a scenario member's work is tracked
+// now that task-done is gone: completion is derived from these assigned items.
+func (sm *SessionManager) seedScenarioTodos(scenarioID string, sessionIDs []string, sessions []ScenarioSession) {
+	if sm.todos == nil {
+		return
+	}
+
+	scope := "scenario:" + scenarioID
+
+	for i, ss := range sessions {
+		if i >= len(sessionIDs) {
+			break
+		}
+
+		task := strings.TrimSpace(ss.Task)
+		if task == "" {
+			continue
+		}
+
+		if _, err := sm.todos.Add(TodoAdd{
+			Scope: scope, Title: task, Assignee: sessionIDs[i], CreatedBy: scope,
+		}); err != nil {
+			sm.log.Error("failed to seed scenario todo", "scenario", scenarioID, "member", ss.Name, "err", err)
+		}
+	}
 }
 
 func (sm *SessionManager) republishManifests(scenarioID string) {
@@ -1117,21 +1118,42 @@ func (sm *SessionManager) republishManifests(scenarioID string) {
 func (sm *SessionManager) buildScenarioRecord(sc *ScenarioState) *protocol.ScenarioRecord {
 	sessions := make([]protocol.ScenarioSessionInfo, len(sc.Sessions))
 
-	var running, stopped, errored int
+	// Per-member progress is derived from the todo items assigned to each member
+	// (issue #591), keyed by session ID — this replaces the old TaskDone bool.
+	var progress map[string][2]int
+	if sm.todos != nil {
+		progress, _ = sm.todos.AssigneeProgress("scenario:" + sc.ID)
+	}
+
+	var running, stopped, errored, tracked, completeMembers int
 
 	for i, ss := range sc.Sessions {
 		sessions[i] = protocol.ScenarioSessionInfo{
-			Name:     ss.Name,
-			Role:     ss.Role,
-			Task:     ss.Task,
-			TaskDone: ss.TaskDone,
-			Repo:     ss.Repo,
-			Agent:    ss.Agent,
-			Model:    ss.Model,
-			Shared:   ss.Shared,
+			Name:   ss.Name,
+			Role:   ss.Role,
+			Task:   ss.Task,
+			Repo:   ss.Repo,
+			Agent:  ss.Agent,
+			Model:  ss.Model,
+			Shared: ss.Shared,
 		}
 		if i < len(sc.SessionIDs) {
 			sessions[i].SessionID = sc.SessionIDs[i]
+			if p, ok := progress[sc.SessionIDs[i]]; ok {
+				sessions[i].TodoDone = p[0]
+				sessions[i].TodoTotal = p[1]
+			}
+
+			// A member with tracked work is complete when all assigned items are
+			// done — this is the todo-derived replacement for the old task-done.
+			if sessions[i].TodoTotal > 0 {
+				tracked++
+
+				if sessions[i].TodoDone == sessions[i].TodoTotal {
+					completeMembers++
+				}
+			}
+
 			if sess, ok := sm.state.Sessions[sc.SessionIDs[i]]; ok {
 				sessions[i].Status = string(sess.Status)
 				switch sess.Status {
@@ -1151,6 +1173,12 @@ func (sm *SessionManager) buildScenarioRecord(sc *ScenarioState) *protocol.Scena
 	var status string
 
 	switch {
+	// Completion is derived from the todo work: when every member that has
+	// tracked work has finished it (and nothing errored), the scenario is
+	// complete regardless of process state — the work, not the process, defines
+	// done. This is the semantic replacement for `gr scenario task-done`.
+	case errored == 0 && tracked > 0 && completeMembers == tracked:
+		status = "complete"
 	case running == total:
 		status = "running"
 	case stopped == total:

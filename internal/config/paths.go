@@ -27,6 +27,7 @@ type Paths struct {
 	LogDir         string
 	DaemonLog      string
 	MessagesDB     string
+	TodosDB        string
 	TmpDir         string
 }
 
@@ -86,6 +87,7 @@ func ResolvePaths() (Paths, error) {
 		LogDir:         filepath.Join(dataDir, "logs"),
 		DaemonLog:      filepath.Join(dataDir, "daemon.log"),
 		MessagesDB:     filepath.Join(dataDir, "messages.sqlite"),
+		TodosDB:        filepath.Join(dataDir, "todos.sqlite"),
 		TmpDir:         filepath.Join(dataDir, "tmp"),
 	}, nil
 }
@@ -107,6 +109,7 @@ func (p Paths) WithDataDir(dataDir string) Paths {
 	p.LogDir = filepath.Join(dataDir, "logs")
 	p.DaemonLog = filepath.Join(dataDir, "daemon.log")
 	p.MessagesDB = filepath.Join(dataDir, "messages.sqlite")
+	p.TodosDB = filepath.Join(dataDir, "todos.sqlite")
 
 	p.TmpDir = filepath.Join(dataDir, "tmp")
 	if strings.HasPrefix(p.RuntimeDir, oldDataDir+string(filepath.Separator)) || p.RuntimeDir == oldDataDir {

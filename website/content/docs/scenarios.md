@@ -180,7 +180,9 @@ Show the status of each session in a scenario.
 gr scenario status tracing-pipeline
 ```
 
-Output includes session names, IDs, status, agent, and role.
+Output includes session names, IDs, status, agent, role, and each member's
+`done/total` task progress — derived from its assigned
+[todo items]({{< relref "todo.md#in-scenarios" >}}) (see below).
 
 ### `gr scenario list`
 
@@ -280,6 +282,26 @@ gr msg send --parent "backend work complete, ready for review"
 gr msg inbox --all --ack
 ```
 
+## Task tracking
+
+Per-member progress is tracked through the [todo list]({{< relref "todo.md" >}}),
+not a per-session boolean. At start, each member with a `task` is seeded **one
+assigned todo item** in the scenario's shared scope; a member breaks its task down
+by adding sub-items. A member is *complete* once every item assigned to it is
+`done`, and the scenario as a whole is complete once every member with tracked work
+is. `gr scenario status` renders per-member `done/total` from that real item state.
+
+So instead of flipping a single flag, a member signals it has finished by marking
+its task item done:
+
+```bash
+gr todo done <its-task-item>       # from the member session
+gr todo list --scenario tracing-pipeline   # see the shared backlog
+```
+
+See [Todo list — in scenarios]({{< relref "todo.md#in-scenarios" >}}) for the full
+model.
+
 ## In the GUI
 
 The macOS and iOS apps surface running scenarios through the shared session
@@ -287,7 +309,8 @@ layer:
 
 - **Scenarios view** — a toolbar button (badged with the running-scenario count)
   opens a list of every scenario on the connected daemons, showing each one's
-  goal, status, and member sessions with their role, task, and task-done state.
+  goal, status, and member sessions with their role, task, and `done/total`
+  progress.
 - **Sidebar grouping** — a **SCENARIOS** section at the top of the sidebar groups
   each scenario's member sessions together, so a fleet reads as a unit rather
   than scattered across repo groups. Tapping a member selects it.
@@ -295,8 +318,8 @@ layer:
   **delete** actions are available from the scenarios view and the sidebar
   context menu.
 
-`start`, `add`, and `task-done` stay CLI-only: the daemon scopes them to the
-scenario's orchestrator *session*, which the GUI (a human client) is not.
+`start` and `add` stay CLI-only: the daemon scopes them to the scenario's
+orchestrator *session*, which the GUI (a human client) is not.
 
 ## Constraints
 

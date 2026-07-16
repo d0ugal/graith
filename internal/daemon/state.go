@@ -309,14 +309,13 @@ type ScenarioState struct {
 }
 
 type ScenarioSession struct {
-	Name     string `json:"name"`
-	Role     string `json:"role"`
-	Task     string `json:"task"`
-	TaskDone bool   `json:"task_done,omitempty"`
-	Repo     string `json:"repo"`
-	Agent    string `json:"agent"`
-	Model    string `json:"model,omitempty"`
-	Shared   bool   `json:"shared,omitempty"`
+	Name   string `json:"name"`
+	Role   string `json:"role"`
+	Task   string `json:"task"`
+	Repo   string `json:"repo"`
+	Agent  string `json:"agent"`
+	Model  string `json:"model,omitempty"`
+	Shared bool   `json:"shared,omitempty"`
 }
 
 type State struct {

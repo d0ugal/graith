@@ -94,6 +94,14 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 
 	sm.messages = msgStore
 
+	todoStore, err := NewTodoStore(paths.TodosDB)
+	if err != nil {
+		return fmt.Errorf("open todo store: %w", err)
+	}
+	defer func() { _ = todoStore.Close() }()
+
+	sm.todos = todoStore
+
 	mcpMgr := NewMCPManager(cfg, []config.MCPServerConfig{graithMCPServer()}, paths.LogDir, log)
 
 	sm.mcpManager = mcpMgr
@@ -235,6 +243,7 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 	go sm.RunGitPullLoop(ctx)
 	go sm.RunPRWatchLoop(ctx)
 	go sm.RunPurgeLoop(ctx)
+	go sm.RunTodoSweepLoop(ctx)
 	go sm.RunTriggerLoop(ctx)
 	go sm.RunFileWatchLoop(ctx)
 	go sm.RunTokenLoop(ctx)

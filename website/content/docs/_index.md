@@ -37,3 +37,5 @@ The wire protocol uses 5-byte framed multiplexing: `[channel:1][length:4][payloa
 **Messaging** enables inter-agent communication via a SQLite-backed pub/sub system. Sessions can publish to topics, send direct messages, and subscribe to streams.
 
 **The store** persists documents across sessions. It is a flat-file, git-backed key-value store scoped per-repo (or global with `--shared`).
+
+**The todo list** is a durable, queryable list of work, shared across a session subtree or a scenario, with atomic claiming so parallel agents draining one list never double-work an item.

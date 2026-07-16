@@ -2875,7 +2875,14 @@ func TestInvalidPayloads(t *testing.T) {
 		{"scenario_delete", "invalid scenario_delete message"},
 		{"scenario_resume", "invalid scenario_resume message"},
 		{"scenario_add", "invalid scenario_add message"},
-		{"scenario_task_done", "invalid scenario_task_done message"},
+		{"todo_add", "invalid todo_add message"},
+		{"todo_list", "invalid todo_list message"},
+		{"todo_claim", "invalid todo_claim message"},
+		{"todo_transition", "invalid todo_transition message"},
+		{"todo_update", "invalid todo_update message"},
+		{"todo_assign", "invalid todo_assign message"},
+		{"todo_remove", "invalid todo_remove message"},
+		{"todo_export", "invalid todo_export message"},
 	}
 
 	for _, tc := range cases {
@@ -3214,14 +3221,15 @@ func TestCoverScenarioAddIncompleteSession(t *testing.T) {
 	h.expectError(t, "repo is required")
 }
 
-func TestCoverScenarioTaskDoneRequiresAuth(t *testing.T) {
+func TestCoverTodoAddRequiresScope(t *testing.T) {
 	h := newTestHarness(t)
+	h.sm.todos = newTestTodoStore(t)
 
-	// Unauthenticated (local human) task-done is rejected — there is no session
-	// whose task could be marked done.
-	h.sendControl(t, "scenario_task_done", protocol.ScenarioTaskDoneMsg{Name: "strath"})
+	// A local human with no session and no scope hint cannot resolve a target
+	// list.
+	h.sendControl(t, "todo_add", protocol.TodoAddMsg{Title: "orphan"})
 
-	h.expectError(t, "authenticated session")
+	h.expectError(t, "specify --session or --scenario")
 }
 
 // --- session lifecycle with children -------------------------------------
@@ -3301,15 +3309,27 @@ func TestCoverDeleteWithChildren(t *testing.T) {
 	}
 }
 
-func TestCoverScenarioTaskDoneUnknownScenario(t *testing.T) {
+func TestCoverTodoAddAndListRoundTrip(t *testing.T) {
 	h := newTestHarness(t)
+	h.sm.todos = newTestTodoStore(t)
 	h.addAuthenticatedSession(t, "strath-sess", "strath", "tok-strath")
 
-	h.sendControlWithToken(t, "scenario_task_done", protocol.ScenarioTaskDoneMsg{
-		Name: "haar-strath",
-	}, "tok-strath")
+	// An authenticated session adds an item to its own subtree scope, then lists.
+	h.sendControlWithToken(t, "todo_add", protocol.TodoAddMsg{Title: "forge the brig"}, "tok-strath")
+	h.expectType(t, "todo")
 
-	h.expectError(t, "not found")
+	h.sendControlWithToken(t, "todo_list", protocol.TodoListMsg{}, "tok-strath")
+
+	env := h.expectType(t, "todo_list")
+
+	var resp protocol.TodoListResponse
+	if err := protocol.DecodePayload(env, &resp); err != nil {
+		t.Fatalf("decode todo_list: %v", err)
+	}
+
+	if len(resp.Items) != 1 || resp.Items[0].Title != "forge the brig" {
+		t.Fatalf("unexpected list: %+v", resp.Items)
+	}
 }
 
 func containsString(ss []string, want string) bool {

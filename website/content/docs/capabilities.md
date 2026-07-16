@@ -107,7 +107,15 @@ state instead).
 |------------|:---:|:---:|:---:|
 | Start / stop / resume / inspect scenarios <sup>1</sup> | ✅ | ✅ | ✅ |
 
-<sup>1</sup> Start / stop / resume / inspect scenarios: The GUIs list scenarios, show per-session role/task/done status, group scenario members in the sidebar, and run the human-authorized stop/resume/delete actions; `start`/`add`/`task-done` stay CLI-only (they are orchestrator-session-scoped, not human-client operations).
+<sup>1</sup> Start / stop / resume / inspect scenarios: The GUIs list scenarios, show per-session role/task and todo-derived progress (per-member completion is derived from assigned todo items), group scenario members in the sidebar, and run the human-authorized stop/resume/delete actions; `start`/`add` stay CLI-only (they are orchestrator-session-scoped, not human-client operations).
+
+### Todo list
+
+| Capability | CLI | iOS | macOS |
+|------------|:---:|:---:|:---:|
+| Todo list <sup>1</sup> | ✅ | 🚧 | 🚧 |
+
+<sup>1</sup> Todo list: A durable, shared todo list with atomic claim of items across sessions; the `gr todo` CLI ships now, GUI surfacing is a planned follow-up (issue #591).
 
 ### Triggers
 

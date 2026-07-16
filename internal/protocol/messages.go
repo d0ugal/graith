@@ -561,6 +561,12 @@ type SessionInfo struct {
 	// SubAgentCount is the number of Claude sub-agents currently running under
 	// this session (SubagentStart/SubagentStop). Runtime only.
 	SubAgentCount int `json:"sub_agent_count,omitempty"`
+	// TodoDone / TodoTotal summarise the session's own subtree todo list
+	// (issue #591): done vs total item counts, surfaced as an opt-in `done/total`
+	// column. Runtime only — derived by the daemon after each todo mutation and
+	// on demand, never persisted.
+	TodoDone  int `json:"todo_done,omitempty"`
+	TodoTotal int `json:"todo_total,omitempty"`
 }
 
 // PRInfo is the linked GitHub pull request for a session's branch.
@@ -920,7 +926,12 @@ type ScenarioSessionInfo struct {
 	SessionID string `json:"session_id"`
 	Role      string `json:"role,omitempty"`
 	Task      string `json:"task,omitempty"`
-	TaskDone  bool   `json:"task_done,omitempty"`
+	// TodoDone / TodoTotal report the member's progress derived from the todo
+	// items assigned to it (issue #591). They replace the former one-bit
+	// `task_done`: a member is complete when TodoTotal > 0 and TodoDone ==
+	// TodoTotal; TodoTotal == 0 means "no tracked work".
+	TodoDone  int    `json:"todo_done,omitempty"`
+	TodoTotal int    `json:"todo_total,omitempty"`
 	Repo      string `json:"repo,omitempty"`
 	Agent     string `json:"agent,omitempty"`
 	Model     string `json:"model,omitempty"`
@@ -988,13 +999,119 @@ type ScenarioResumeMsg struct {
 	Name string `json:"name"`
 }
 
-type ScenarioTaskDoneMsg struct {
-	Name string `json:"name"`
-}
-
 type ScenarioAddMsg struct {
 	Name    string               `json:"name"`
 	Session ScenarioSessionInput `json:"session"`
+}
+
+// --- Todo list (issue #591) ---
+
+// TodoItemInfo is the wire representation of a todo item.
+type TodoItemInfo struct {
+	ID        string   `json:"id"`
+	Title     string   `json:"title"`
+	Status    string   `json:"status"`
+	Scope     string   `json:"scope"`
+	Owner     string   `json:"owner,omitempty"`
+	Assignee  string   `json:"assignee,omitempty"`
+	ParentID  string   `json:"parent_id,omitempty"`
+	Note      string   `json:"note,omitempty"`
+	Tags      []string `json:"tags,omitempty"`
+	CreatedBy string   `json:"created_by,omitempty"`
+	CreatedAt string   `json:"created_at,omitempty"`
+	UpdatedAt string   `json:"updated_at,omitempty"`
+	Revision  int64    `json:"revision,omitempty"`
+	Position  int64    `json:"position,omitempty"`
+}
+
+// TodoScope selects which list a todo op targets. All fields optional: if
+// Scenario is set it names a scenario; else if Session is set it anchors to that
+// session's subtree; else the caller's own subtree is used. All spans every
+// scope (human/orchestrator reads only).
+type TodoScope struct {
+	Scenario string `json:"scenario,omitempty"`
+	Session  string `json:"session,omitempty"`
+	All      bool   `json:"all,omitempty"`
+}
+
+// TodoAddMsg creates an item.
+type TodoAddMsg struct {
+	Scope    TodoScope `json:"scope"`
+	Title    string    `json:"title"`
+	Tags     []string  `json:"tags,omitempty"`
+	ParentID string    `json:"parent_id,omitempty"`
+	Note     string    `json:"note,omitempty"`
+	Assignee string    `json:"assignee,omitempty"`
+}
+
+// TodoListMsg queries items.
+type TodoListMsg struct {
+	Scope  TodoScope `json:"scope"`
+	Status string    `json:"status,omitempty"`
+	Tag    string    `json:"tag,omitempty"`
+}
+
+// TodoListResponse returns queried items.
+type TodoListResponse struct {
+	Items []TodoItemInfo `json:"items"`
+}
+
+// TodoClaimMsg claims an item. When ID is empty it claims the next unclaimed
+// item in Scope (claim-next). The owner is always the calling session,
+// server-derived — never taken from the payload.
+type TodoClaimMsg struct {
+	ID    string    `json:"id,omitempty"`
+	Scope TodoScope `json:"scope"`
+}
+
+// TodoClaimResponse reports the outcome of a claim.
+type TodoClaimResponse struct {
+	Claimed bool         `json:"claimed"`
+	Item    TodoItemInfo `json:"item"`
+}
+
+// TodoUpdateMsg edits mutable presentation fields. Nil pointers are unchanged;
+// it can never mutate status, scope, or owner.
+type TodoUpdateMsg struct {
+	ID       string    `json:"id"`
+	Title    *string   `json:"title,omitempty"`
+	Note     *string   `json:"note,omitempty"`
+	Tags     *[]string `json:"tags,omitempty"`
+	Position *int64    `json:"position,omitempty"`
+}
+
+// TodoTransitionMsg performs a guarded status change (done / blocked / todo).
+type TodoTransitionMsg struct {
+	ID     string `json:"id"`
+	Status string `json:"status"`
+	Note   string `json:"note,omitempty"`
+}
+
+// TodoAssignMsg sets an item's assignee (override authority / human).
+type TodoAssignMsg struct {
+	ID       string `json:"id"`
+	Assignee string `json:"assignee"`
+}
+
+// TodoRemoveMsg deletes an item (and its sub-items).
+type TodoRemoveMsg struct {
+	ID string `json:"id"`
+}
+
+// TodoExportMsg dumps a scope to the document store for archival.
+type TodoExportMsg struct {
+	Scope  TodoScope `json:"scope"`
+	Format string    `json:"format,omitempty"` // "md" (default) | "json"
+}
+
+// TodoExportResponse names the store key the export was written to.
+type TodoExportResponse struct {
+	Key string `json:"key"`
+}
+
+// TodoResponse wraps a single item reply.
+type TodoResponse struct {
+	Item TodoItemInfo `json:"item"`
 }
 
 // Pairing protocol messages (see design §B.2)

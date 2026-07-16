@@ -1,7 +1,7 @@
 ---
 weight: 440
-title: "Scenarios & triggers"
-description: "Multi-session scenario and daemon trigger commands."
+title: "Scenarios, triggers & todos"
+description: "Multi-session scenario, daemon trigger, and todo-list commands."
 icon: "playlist_add_check"
 toc: true
 draft: false
@@ -60,3 +60,56 @@ Fire a schedule trigger once, now (respects the overlap policy).
 
 Pause a trigger (persists across restart) or resume a paused one. Requires the
 orchestrator or a descendant.
+
+## Todo list
+
+A durable, claimable list of work shared across a session subtree or a scenario.
+See [Todo list]({{< relref "/docs/todo.md" >}}) for the full model.
+
+### `gr todo add <title>`
+
+Add an item to your subtree's list (or a scenario's).
+
+| Flag | Description |
+|------|-------------|
+| `--tag <tag>` | Add a tag (repeatable) |
+| `--parent <id>` | Make it a sub-item of another item (one level) |
+| `--note <text>` | An optional one-line note |
+| `--scenario <name>` | Add to a scenario's shared list |
+| `--session <id>` | Anchor to a specific session subtree instead of the auto-anchor |
+
+### `gr todo list`
+
+List items, grouped by status.
+
+| Flag | Description |
+|------|-------------|
+| `--status <s>` | Filter by status (`todo`/`in-progress`/`done`/`blocked`) |
+| `--tag <tag>` | Filter by tag |
+| `--scenario <name>` | List a scenario's shared list |
+| `-a, --all` | Fleet-wide, across every scope (human/orchestrator) |
+
+### `gr todo claim <id>` / `gr todo next` / `gr todo start <id>`
+
+Atomically claim an item (→ `in-progress`, owned by you). `next` claims the next
+unclaimed item in your scope; `start` is an alias for `claim`.
+
+### `gr todo done <id>`
+
+Mark a claimed item done.
+
+### `gr todo block <id> <note>`
+
+Mark a claimed item blocked, with a note.
+
+### `gr todo reopen <id>`
+
+Return an item to `todo` and clear its owner.
+
+### `gr todo rm <id>`
+
+Remove an item (and any sub-items).
+
+### `gr todo export <scope>`
+
+Dump a scope to a markdown/JSON document in the store for archival.

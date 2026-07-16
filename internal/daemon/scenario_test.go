@@ -409,8 +409,13 @@ func TestBuildManifest(t *testing.T) {
 	}
 }
 
-func TestScenarioTaskDone(t *testing.T) {
+// TestScenarioProgressDerivedFromTodos verifies scenario member progress is
+// derived from assigned todo items (the task-done replacement, issue #591): a
+// completed assigned item shows as done/total, and a member with no assigned
+// items reports "no tracked work" (0/0).
+func TestScenarioProgressDerivedFromTodos(t *testing.T) {
 	sm := newTestSessionManager(t)
+	sm.todos = newTestTodoStore(t)
 
 	sm.mu.Lock()
 	sm.state.Scenarios["sc-braw"] = &ScenarioState{
@@ -426,50 +431,34 @@ func TestScenarioTaskDone(t *testing.T) {
 	sm.state.Sessions["bonnie-s2"] = &SessionState{ID: "bonnie-s2", Name: "bonnie-loom", Status: StatusRunning, ScenarioID: "sc-braw"}
 	sm.mu.Unlock()
 
-	if err := sm.ScenarioTaskDone("strath-kirk", "braw-s1"); err != nil {
+	// braw-s1 gets two assigned items and completes one; bonnie-s2 gets none.
+	item, err := sm.todos.Add(TodoAdd{Scope: "scenario:sc-braw", Title: "forge braw API", Assignee: "braw-s1", CreatedBy: "orch"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := sm.todos.Add(TodoAdd{Scope: "scenario:sc-braw", Title: "second", Assignee: "braw-s1", CreatedBy: "orch"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, err := sm.todos.Claim(item.ID, "braw-s1"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := sm.todos.Transition(item.ID, TodoStatusDone, "braw-s1", false); err != nil {
 		t.Fatal(err)
 	}
 
 	sm.mu.RLock()
-
-	sc := sm.state.Scenarios["sc-braw"]
-	if !sc.Sessions[0].TaskDone {
-		t.Error("session 0 should be marked as task done")
-	}
-
-	if sc.Sessions[1].TaskDone {
-		t.Error("session 1 should not be marked as task done")
-	}
-
+	record := sm.buildScenarioRecord(sm.state.Scenarios["sc-braw"])
 	sm.mu.RUnlock()
 
-	if err := sm.ScenarioTaskDone("strath-kirk", "haar-glen"); err == nil {
-		t.Error("expected error for nonexistent session")
+	if record.Sessions[0].TodoDone != 1 || record.Sessions[0].TodoTotal != 2 {
+		t.Errorf("member 0 progress: got %d/%d, want 1/2", record.Sessions[0].TodoDone, record.Sessions[0].TodoTotal)
 	}
 
-	if err := sm.ScenarioTaskDone("haar-strath", "braw-s1"); err == nil {
-		t.Error("expected error for nonexistent scenario")
-	}
-}
-
-func TestScenarioTaskDoneInRecord(t *testing.T) {
-	sm := newTestSessionManager(t)
-
-	sm.mu.Lock()
-	sm.state.Scenarios["sc-braw"] = &ScenarioState{
-		ID:         "sc-braw",
-		Name:       "strath-kirk",
-		SessionIDs: []string{"braw-s1"},
-		Sessions: []ScenarioSession{
-			{Name: "braw-forge", Task: "forge braw API", TaskDone: true},
-		},
-	}
-	sm.state.Sessions["braw-s1"] = &SessionState{ID: "braw-s1", Name: "braw-forge", Status: StatusRunning}
-	record := sm.buildScenarioRecord(sm.state.Scenarios["sc-braw"])
-	sm.mu.Unlock()
-
-	if !record.Sessions[0].TaskDone {
-		t.Error("record should reflect task_done")
+	if record.Sessions[1].TodoTotal != 0 {
+		t.Errorf("member 1 should have no tracked work, got total %d", record.Sessions[1].TodoTotal)
 	}
 }
 
@@ -1441,5 +1430,51 @@ func TestStartScenarioRollbackDeletesStarredMember(t *testing.T) {
 		if s.Name == "braw-mason" || s.Name == "dreich-hand" {
 			t.Errorf("scenario session %q (%s, starred=%v) should have been deleted in rollback", s.Name, id, s.Starred)
 		}
+	}
+}
+
+// TestScenarioCompleteDerivedFromTodos verifies the scenario reports "complete"
+// once every member with tracked work has finished its assigned items — the
+// derived replacement for the removed task-done completion.
+func TestScenarioCompleteDerivedFromTodos(t *testing.T) {
+	sm := newTestSessionManager(t)
+	sm.todos = newTestTodoStore(t)
+
+	sm.mu.Lock()
+	sm.state.Scenarios["sc-braw"] = &ScenarioState{
+		ID: "sc-braw", Name: "strath-kirk",
+		SessionIDs: []string{"braw-s1"},
+		Sessions:   []ScenarioSession{{Name: "braw-forge", Task: "forge"}},
+	}
+	sm.state.Sessions["braw-s1"] = &SessionState{ID: "braw-s1", Status: StatusRunning, ScenarioID: "sc-braw"}
+	sm.mu.Unlock()
+
+	item, err := sm.todos.Add(TodoAdd{Scope: "scenario:sc-braw", Title: "forge", Assignee: "braw-s1", CreatedBy: "orch"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sm.mu.RLock()
+	rec := sm.buildScenarioRecord(sm.state.Scenarios["sc-braw"])
+	sm.mu.RUnlock()
+
+	if rec.Status == "complete" {
+		t.Fatal("scenario should not be complete before the item is done")
+	}
+
+	if _, _, err := sm.todos.Claim(item.ID, "braw-s1"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := sm.todos.Transition(item.ID, TodoStatusDone, "braw-s1", false); err != nil {
+		t.Fatal(err)
+	}
+
+	sm.mu.RLock()
+	rec = sm.buildScenarioRecord(sm.state.Scenarios["sc-braw"])
+	sm.mu.RUnlock()
+
+	if rec.Status != "complete" {
+		t.Errorf("scenario status: got %q, want complete", rec.Status)
 	}
 }
