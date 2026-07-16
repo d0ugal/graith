@@ -118,6 +118,20 @@ func resolveAuth(sm *SessionManager, token string, origin ConnOrigin, poppedDevi
 		return authContext{role: roleNone, origin: origin}, errors.New("invalid token")
 	}
 
+	// With pairing disabled, Gate 1 (the live WhoIs allowlist enforced by the
+	// remote connection boundary) is the whole human-authentication policy. It
+	// deliberately grants only the read-only guest role, even to a device that
+	// was previously paired for human read/write access. Re-enabling pairing
+	// restores that device's recorded role on its next message/connection.
+	requirePairing := true
+	if sm.cfg != nil {
+		requirePairing = sm.cfg.Remote.RequirePairing
+	}
+
+	if !requirePairing {
+		return authContext{role: roleRemoteGuest, origin: origin}, nil
+	}
+
 	// Remote connection: require proof-of-possession AND a client token that
 	// resolves to that same device, whose recorded tailnet identity matches the
 	// current WhoIs. Anything short of that is roleNone (Gate A restricts

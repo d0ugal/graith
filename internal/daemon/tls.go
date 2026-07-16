@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"slices"
 	"time"
 )
 
@@ -84,6 +85,41 @@ func loadOrCreateRemoteTLS(certPath, keyPath, hostname string, now time.Time) (t
 			leaf, perr := x509.ParseCertificate(cert.Certificate[0])
 			if perr != nil {
 				return tls.Certificate{}, "", fmt.Errorf("parse tls cert: %w", perr)
+			}
+
+			wantDNS := []string(nil)
+			if hostname != "" {
+				wantDNS = []string{hostname}
+			}
+
+			// Hostname is listener-derived TLS state. Reissue the certificate
+			// from the persisted private key when it changes (or the leaf has
+			// expired), preserving the SPKI pin while applying the new SAN.
+			if !slices.Equal(leaf.DNSNames, wantDNS) || now.Before(leaf.NotBefore) || !now.Before(leaf.NotAfter) {
+				key, ok := cert.PrivateKey.(*ecdsa.PrivateKey)
+				if !ok {
+					return tls.Certificate{}, "", fmt.Errorf("reload tls certificate: persisted private key is %T, want ECDSA", cert.PrivateKey)
+				}
+
+				der, rerr := selfSignedCert(key, hostname, now)
+				if rerr != nil {
+					return tls.Certificate{}, "", fmt.Errorf("reissue tls certificate: %w", rerr)
+				}
+
+				certPEM = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+				if werr := os.WriteFile(certPath, certPEM, 0o600); werr != nil {
+					return tls.Certificate{}, "", fmt.Errorf("write reissued cert: %w", werr)
+				}
+
+				cert, cerr = tls.X509KeyPair(certPEM, keyPEM)
+				if cerr != nil {
+					return tls.Certificate{}, "", fmt.Errorf("load reissued tls keypair: %w", cerr)
+				}
+
+				leaf, rerr = x509.ParseCertificate(cert.Certificate[0])
+				if rerr != nil {
+					return tls.Certificate{}, "", fmt.Errorf("parse reissued tls cert: %w", rerr)
+				}
 			}
 
 			pin, perr := computeSPKIPin(leaf.PublicKey)

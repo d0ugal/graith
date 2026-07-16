@@ -33,6 +33,12 @@ apply immediately or on the next operation, some apply only to newly launched
 sessions, and loop cadences or constructed stores may require a daemon restart.
 Each configuration section below documents its settings' exact reload contract.
 
+A reload is published only after runtime-backed settings have applied. If a
+replacement runtime cannot be prepared (for example, a changed remote listener
+cannot bind), manual reload reports the error and the file watcher logs it; the
+previous effective config remains visible. Security-sensitive runtimes fail
+closed while you correct the file and reload again.
+
 > **Full default config.** The complete, annotated set of defaults lives in
 > [`internal/config/default_config.toml`](https://github.com/d0ugal/graith/blob/main/internal/config/default_config.toml)
 > — the same file `gr config reset` writes. Run `gr config reset` to drop a copy

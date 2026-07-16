@@ -29,7 +29,10 @@ After rebuilding `gr`, run `gr daemon restart` to pick up the new daemon binary.
 
 ### `gr daemon reload`
 
-Reload configuration without restarting the daemon.
+Reload configuration without restarting the daemon. The command returns an
+error if a runtime-backed change cannot be applied; failed remote-listener
+replacement leaves remote access disabled instead of restoring the previous
+listener.
 
 ## Other commands
 

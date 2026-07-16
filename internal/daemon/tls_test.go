@@ -98,3 +98,33 @@ func TestLoadOrCreateRemoteTLS(t *testing.T) {
 		t.Error("remoteTLSConfig did not produce a usable server config")
 	}
 }
+
+func TestLoadOrCreateRemoteTLSReissuesHostnameWithStablePin(t *testing.T) {
+	dir := t.TempDir()
+	certPath := filepath.Join(dir, "remote.crt")
+	keyPath := filepath.Join(dir, "remote.key")
+	now := time.Now()
+
+	_, pin1, err := loadOrCreateRemoteTLS(certPath, keyPath, "ben", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cert2, pin2, err := loadOrCreateRemoteTLS(certPath, keyPath, "canny", now.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if pin2 != pin1 {
+		t.Errorf("hostname reissue changed SPKI pin: %q != %q", pin2, pin1)
+	}
+
+	leaf, err := x509.ParseCertificate(cert2.Certificate[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(leaf.DNSNames) != 1 || leaf.DNSNames[0] != "canny" {
+		t.Errorf("reissued DNSNames = %v, want [canny]", leaf.DNSNames)
+	}
+}

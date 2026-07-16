@@ -19,6 +19,9 @@ func newPairingSM(t *testing.T) *SessionManager {
 	t.Helper()
 
 	cfg := config.Default()
+	cfg.Remote.Enabled = true
+	cfg.Remote.RequirePairing = true
+	cfg.Remote.AllowTailnetUsers = []string{"speir@example.com"}
 	paths := config.Paths{StateFile: filepath.Join(t.TempDir(), "state.json")}
 
 	sm := NewSessionManager(cfg, paths, slog.New(slog.NewTextHandler(io.Discard, nil)))

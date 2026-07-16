@@ -51,6 +51,7 @@ type hookReport struct {
 // SessionManager orchestrates PTY sessions, state persistence, and git worktrees.
 type SessionManager struct {
 	mu                 sync.RWMutex
+	configApplyMu      sync.Mutex // serializes config publication and runtime reconciliation
 	state              *State
 	sessions           map[string]SessionDriver
 	attachedClients    map[string]*attachedClient
@@ -63,7 +64,8 @@ type SessionManager struct {
 	pendingPairings    map[string]*pendingPairing     // requestID → pending device pairing (in-memory; not persisted)
 	pairWaiters        map[string]*pairWaiter         // requestID → waiter for a blocked pair_request connection
 	approvalSubs       map[net.Conn]func(string, any) // conn → sendControl for approval subscribers (no attach)
-	remoteTLSPin       string                         // SPKI pin of the remote listener's cert (set once at startup; "" if remote disabled)
+	remoteTLSPin       string                         // SPKI pin of the active remote listener's cert; guarded by mu
+	remoteRuntime      *remoteRuntime                 // listener generation owner; mutated under configApplyMu
 	deviceTokenIndex   map[string]string              // client-token HMAC → device ID (reverse lookup)
 	connsByDevice      map[string][]net.Conn          // device ID → live remote connections (for revocation)
 	pairReqTimes       []time.Time                    // recent pair_request timestamps (rate limiting)

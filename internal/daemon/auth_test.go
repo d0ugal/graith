@@ -1,6 +1,8 @@
 package daemon
 
 import (
+	"crypto/ed25519"
+	"encoding/base64"
 	"sync"
 	"testing"
 	"time"
@@ -474,6 +476,59 @@ func TestResolveAuth_RemoteGuestReadOnly(t *testing.T) {
 
 	if auth.isHuman() {
 		t.Error("roleRemoteGuest is read-only, not a full human")
+	}
+}
+
+func TestResolveAuthRequirePairingReloadForExistingDevices(t *testing.T) {
+	sm := newPairingSM(t)
+	pub, _, _ := ed25519.GenerateKey(nil)
+	id := TailnetIdentity{User: "speir@example.com", Node: "ben"}
+
+	rid, _, err := sm.AddPendingPairing("canny-device", base64.StdEncoding.EncodeToString(pub), id, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	deviceID, token, err := sm.ApprovePairing(rid, false, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	origin := ConnOrigin{Remote: true, Identity: &id}
+
+	sm.mu.RLock()
+	auth, err := resolveAuth(sm, token, origin, deviceID)
+	sm.mu.RUnlock()
+	if err != nil || auth.role != roleRemoteHuman {
+		t.Fatalf("paired device with require_pairing=true = role %d, err %v; want remote human", auth.role, err)
+	}
+
+	sm.mu.Lock()
+	sm.cfg.Remote.RequirePairing = false
+	sm.mu.Unlock()
+
+	// Pairing-off is WhoIs-only: no token or PoP is needed, but the result is
+	// always the read-only guest role. A formerly-full device is downgraded too.
+	sm.mu.RLock()
+	guest, err := resolveAuth(sm, "", origin, "")
+	pairedGuest, pairedErr := resolveAuth(sm, token, origin, deviceID)
+	sm.mu.RUnlock()
+	if err != nil || guest.role != roleRemoteGuest {
+		t.Errorf("WhoIs-only auth = role %d, err %v; want remote guest", guest.role, err)
+	}
+	if pairedErr != nil || pairedGuest.role != roleRemoteGuest {
+		t.Errorf("existing paired auth while disabled = role %d, err %v; want remote guest", pairedGuest.role, pairedErr)
+	}
+
+	sm.mu.Lock()
+	sm.cfg.Remote.RequirePairing = true
+	sm.mu.Unlock()
+
+	sm.mu.RLock()
+	restored, err := resolveAuth(sm, token, origin, deviceID)
+	sm.mu.RUnlock()
+	if err != nil || restored.role != roleRemoteHuman {
+		t.Errorf("re-enabled pairing = role %d, err %v; want restored remote human", restored.role, err)
 	}
 }
 

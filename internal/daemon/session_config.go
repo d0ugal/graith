@@ -27,23 +27,36 @@ func (sm *SessionManager) ReloadConfig() error {
 		return err
 	}
 
-	sm.mu.RLock()
-	oldDataDir := sm.cfg.DataDir
-	sm.mu.RUnlock()
-
-	if cfg.DataDir != oldDataDir {
-		return fmt.Errorf("data_dir changed from %q to %q: run 'gr daemon restart' to apply", oldDataDir, cfg.DataDir)
-	}
-
-	sm.applyConfig(cfg)
-
-	return nil
+	return sm.applyConfig(cfg)
 }
 
-func (sm *SessionManager) applyConfig(newCfg *config.Config) {
-	sm.mu.Lock()
+func (sm *SessionManager) applyConfig(newCfg *config.Config) error {
+	// Manual reload and the fsnotify watcher can fire together. Serialize the
+	// complete reserve/prepare/publish sequence so neither can prepare a remote
+	// generation against a stale old config and then overwrite the other.
+	sm.configApplyMu.Lock()
+	defer sm.configApplyMu.Unlock()
+
+	sm.mu.RLock()
 	old := sm.cfg
+	sm.mu.RUnlock()
+
+	if newCfg.DataDir != old.DataDir {
+		return fmt.Errorf("data_dir changed from %q to %q: run 'gr daemon restart' to apply", old.DataDir, newCfg.DataDir)
+	}
+
+	// Remote transport preparation performs network/filesystem work without
+	// sm.mu. It first closes the old generation, then synchronously binds the
+	// replacement. A failure leaves the remote surface off and aborts config
+	// publication, so config introspection never advertises an unapplied runtime.
+	remoteChange, err := sm.prepareRemoteConfig(old.Remote, newCfg.Remote)
+	if err != nil {
+		return err
+	}
+
+	sm.mu.Lock()
 	sm.cfg = newCfg
+	remoteChange.publishLocked(sm)
 	// Resize the launch throttle under the same lock that publishes the config so
 	// the two can't diverge if two reloads (fsnotify + SIGHUP) interleave — the
 	// live limit always matches the currently-published cfg. resize only takes the
@@ -52,6 +65,8 @@ func (sm *SessionManager) applyConfig(newCfg *config.Config) {
 		sm.launch.resize(newCfg.Launch.MaxConcurrentOrDefault())
 	}
 	sm.mu.Unlock()
+
+	remoteChange.commit(sm, newCfg.Remote)
 
 	// Re-install the external-tool resolver so a changed [tools] block takes
 	// effect on reload without a daemon restart (git timeouts are read live from
@@ -264,6 +279,8 @@ func (sm *SessionManager) applyConfig(newCfg *config.Config) {
 			}
 		}
 	}
+
+	return nil
 }
 
 func (sm *SessionManager) teardownIncludes(mainRepoPath, mainWorktreePath, mainBranch string, includes []IncludedRepoState) error {

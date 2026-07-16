@@ -66,4 +66,27 @@ Access is gated in two layers: a WhoIs **allowlist** (`allow_tailnet_users` — 
 
 > **Warning:** `require_pairing = false` is **UNSAFE** — it trusts the tailnet identity alone with no per-device proof, so it is restricted to **read-only** access. Leave pairing on for any device that should control sessions.
 
+Remote policy is enforced live. Saving the config or running `gr daemon reload`
+immediately applies `enabled` and `allow_tailnet_users` to already-open
+connections as well as new ones: disabling remote access closes the listener and
+all remote connections, and removing an identity closes that identity's active
+connections. Expanding the allowlist admits matching future connections without
+disconnecting identities that remain allowed.
+
+Changes to listener-derived settings (`mode`, `hostname`, `port`,
+`auth_key_file`, and `tags`) replace the remote listener generation. The daemon
+closes the old listener and its connections before it binds the replacement. If
+TLS, Tailscale, or bind setup fails, the reload is rejected and remote access
+stays off rather than falling back to the old exposure; fix the setting and
+reload again. A hostname change reissues the persisted TLS certificate while
+preserving its SPKI pin.
+
+Changing `require_pairing` also disconnects remote clients so their role is
+re-evaluated. While it is `false`, every allowlisted human connection is a
+read-only guest, including devices previously paired for read/write access.
+Turning it back on restores read/write access for those full paired devices.
+A device enrolled while pairing was off remains read-only after pairing is
+re-enabled and must be paired again to gain read/write rights. Remote session
+tokens keep their normal session-scoped authorization.
+
 The orchestrator can also be given extra filesystem access scoped to itself via `[orchestrator.sandbox]` (`read_dirs`/`write_dirs`), layered on top of the global and per-agent sandbox config. See [Authentication & remote access]({{< relref "/docs/auth.md" >}}) for the full authorization model, token lifecycle, and pairing flow.

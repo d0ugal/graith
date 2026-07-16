@@ -81,6 +81,10 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 		// challengeNonce is the per-connection PoP nonce issued after a remote
 		// handshake; the client must sign it in auth_proof. Single-use.
 		challengeNonce string
+		// attachedAuth records the role that authorized the current attach. Data
+		// frames carry no token, so the live remote-policy backstop uses this to
+		// re-check write authority after a pairing-policy reload.
+		attachedAuth authContext
 	)
 
 	// connDone is closed when this connection's handler returns (for any
@@ -133,6 +137,15 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 			}
 
 			return // deferred cleanup handles attach/device/subscriber teardown
+		}
+
+		// Gate 1 is live policy, not a listener-generation snapshot. Check every
+		// inbound frame (control and raw terminal data) so disabling remote access
+		// or removing this WhoIs identity revokes an already-open connection at
+		// its next message even if generation shutdown is racing the read loop.
+		if origin.Remote && !sm.remotePolicyAllows(origin.Identity) {
+			sendControl("error", protocol.ErrorMsg{Message: "remote access disabled or tailnet identity no longer allowed"})
+			return
 		}
 
 		switch frame.Channel {
@@ -236,9 +249,10 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 
 				sm.mu.RLock()
 				dev := sm.DeviceForToken(msg.Token)
+				remoteTLSPin := sm.remoteTLSPin
 				sm.mu.RUnlock()
 
-				if dev == nil || challengeNonce == "" || !verifyPoP(dev.PubKey, challengeNonce, sm.remoteTLSPin, ap.Signature) ||
+				if dev == nil || challengeNonce == "" || !verifyPoP(dev.PubKey, challengeNonce, remoteTLSPin, ap.Signature) ||
 					(origin.Remote && !identityMatchesDevice(origin.Identity, dev)) {
 					sendControl("error", protocol.ErrorMsg{Message: "proof of possession failed"})
 					continue
@@ -395,6 +409,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				attachedSessionID = a.SessionID
 				attachedDataWriter = &frameDataWriter{writer: writer}
 				attachedReadOnly = a.ReadOnly
+				attachedAuth = auth
 
 				sm.KickAttachedClient(a.SessionID)
 				sm.SetAttachedClient(a.SessionID, conn,
@@ -447,6 +462,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					attachedSessionID = ""
 					attachedDataWriter = nil
 					attachedReadOnly = false
+					attachedAuth = authContext{}
 				}
 
 				sendControl("detached", protocol.DetachedMsg{Reason: "user"})
@@ -971,6 +987,11 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 			}
 
 		case protocol.ChannelData:
+			if origin.Remote && !sm.remoteInputAllowed(attachedAuth) {
+				sendControl("error", protocol.ErrorMsg{Message: "remote connection no longer authorized for terminal input"})
+				return
+			}
+
 			// Read-only attaches never inject input — drop the frame outright so a
 			// read-only observer cannot mutate the session even if a client fails to
 			// gate input locally (issue #31).

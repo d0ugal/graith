@@ -497,3 +497,65 @@ func TestRevokeDropsLiveRemoteConnection(t *testing.T) {
 		t.Error("expected the revoked connection to be force-closed (read should error)")
 	}
 }
+
+func TestLiveRemotePolicyRevokesOpenHandlerConnection(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*config.Config)
+	}{
+		{
+			name: "disabled",
+			mutate: func(cfg *config.Config) {
+				cfg.Remote.Enabled = false
+			},
+		},
+		{
+			name: "allowlist tightened",
+			mutate: func(cfg *config.Config) {
+				cfg.Remote.AllowTailnetUsers = []string{"canny@example.com"}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sm := newPairingSM(t)
+			id := TailnetIdentity{User: "speir@example.com", Node: "ben"}
+			rc := newRemoteConn(t, sm, id)
+			rc.handshake(t, sm)
+
+			next := *sm.Config()
+			next.Remote = sm.Config().Remote
+			tt.mutate(&next)
+			if err := sm.applyConfig(&next); err != nil {
+				t.Fatal(err)
+			}
+
+			rc.send(t, "handshake", protocol.HandshakeMsg{Version: protocol.Version, Profile: sm.paths.Profile}, "")
+			if env := rc.read(t); env.Type != "error" {
+				t.Fatalf("post-revocation message = %q, want error", env.Type)
+			}
+		})
+	}
+}
+
+func TestLiveRemotePolicyAlsoGatesDataFrames(t *testing.T) {
+	sm := newPairingSM(t)
+	id := TailnetIdentity{User: "speir@example.com", Node: "ben"}
+	rc := newRemoteConn(t, sm, id)
+	rc.handshake(t, sm)
+
+	next := *sm.Config()
+	next.Remote = sm.Config().Remote
+	next.Remote.AllowTailnetUsers = []string{"canny@example.com"}
+	if err := sm.applyConfig(&next); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := rc.writer.WriteFrame(protocol.ChannelData, []byte("dreich input")); err != nil {
+		t.Fatal(err)
+	}
+	if env := rc.read(t); env.Type != "error" {
+		t.Fatalf("post-revocation data frame = %q, want error", env.Type)
+	}
+}
