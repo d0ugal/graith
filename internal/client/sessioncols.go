@@ -139,6 +139,12 @@ func SessionColumns() []SessionColumn {
 			CLIValue: func(s protocol.SessionInfo, _ time.Time) string { return cliTokens(s) },
 		},
 		{
+			// Done/total for the session's subtree task list (issue #591). Wide so
+			// it stays out of the default table but appears with `gr list --wide`.
+			Key: "todo", Header: "Todo", ShowCLI: true, Wide: true,
+			CLIValue: func(s protocol.SessionInfo, _ time.Time) string { return cliTodo(s) },
+		},
+		{
 			Key: "age", Header: "Age", ShowCLI: true,
 			CLIValue: cliAge,
 		},
@@ -331,6 +337,16 @@ func cliGit(s protocol.SessionInfo) string {
 	}
 
 	return out
+}
+
+// cliTodo renders the session's subtree todo progress as done/total, or "" when
+// the session has no tracked items.
+func cliTodo(s protocol.SessionInfo) string {
+	if s.TodoTotal == 0 {
+		return ""
+	}
+
+	return fmt.Sprintf("%d/%d", s.TodoDone, s.TodoTotal)
 }
 
 // cliTokens is the plain-text token cell for `gr ls --wide`: the compact total,

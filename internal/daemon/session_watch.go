@@ -151,9 +151,14 @@ func (sm *SessionManager) watchSession(id string, sess SessionDriver) {
 	if deleted {
 		sm.discardResourceSamples(id)
 		sm.log.Info("ignoring exit for deleted session", "id", id, "exit_code", sess.ExitCode())
+		sm.reopenTodosForSession(id)
 
 		return
 	}
+
+	// A stopped/crashed owner must not strand its claimed todo items: reopen them
+	// so a sibling can pick the work up (issue #591).
+	sm.reopenTodosForSession(id)
 
 	if stopReason == "" {
 		stopReason = StopReasonCrash

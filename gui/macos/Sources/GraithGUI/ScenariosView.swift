@@ -141,11 +141,18 @@ private struct ScenarioMemberRow: View {
                 }
             }
             Spacer()
-            if member.taskDone == true {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 9))
-                    .foregroundStyle(Theme.green)
-                    .help("Task marked done")
+            if member.todoTotal > 0 {
+                HStack(spacing: 3) {
+                    if member.isTodoComplete {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 9))
+                            .foregroundStyle(Theme.green)
+                    }
+                    Text("\(member.todoDone)/\(member.todoTotal)")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(Theme.overlay0)
+                }
+                .help("Todo progress: \(member.todoDone) of \(member.todoTotal) done")
             }
         }
         .padding(.horizontal, 16)
@@ -278,10 +285,17 @@ private struct ScenarioCard: View {
                         .foregroundStyle(Theme.overlay0)
                         .lineLimit(1)
                     Spacer()
-                    if member.taskDone == true {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 10))
-                            .foregroundStyle(Theme.green)
+                    if member.todoTotal > 0 {
+                        HStack(spacing: 3) {
+                            if member.isTodoComplete {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(Theme.green)
+                            }
+                            Text("\(member.todoDone)/\(member.todoTotal)")
+                                .font(.system(.caption2, design: .monospaced))
+                                .foregroundStyle(Theme.overlay0)
+                        }
                     }
                 }
             }

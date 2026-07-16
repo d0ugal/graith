@@ -816,6 +816,48 @@ Use `gr store append` with `.jsonl` keys for log-style data (e.g. tribunal
 results, build history) where each entry is one JSON line. Use `--shared` for
 artifacts that span repos (e.g. prompt templates, cross-project config).
 
+### Todo list
+
+A daemon-owned, durable todo list — plan work that survives your context window,
+resume, and daemon restart, and drain a shared backlog with sibling agents without
+double-working an item. Items are scoped to your **session subtree** by default
+(anchored at the topmost ancestor, so a parent and its children share one list) or
+to a **scenario** with `--scenario <name>`.
+
+```bash
+# Plan durably (adds to my subtree's list)
+gr todo add "Wire the claim CAS" --tag backend
+gr todo add "Write the regression test" --parent td-abc123   # one-level sub-item
+
+# See the list, grouped by status
+gr todo list
+gr todo list --status blocked
+gr todo list --scenario tracing-pipeline
+
+# Claim work atomically, then progress it
+gr todo claim td-abc123        # → in-progress, owned by me (atomic CAS)
+gr todo next                   # claim the next unclaimed item in my scope
+gr todo done td-abc123
+gr todo block td-abc123 "waiting on API review"
+gr todo reopen td-abc123       # → todo, clears the owner
+gr todo rm td-abc123
+```
+
+**Claim is an atomic compare-and-set**: two agents racing to claim the same item —
+or `gr todo next` over a shared list — never double-claim; exactly one wins and the
+loser is told "already claimed". `owner` is set server-side to the calling session,
+so you can't claim on another session's behalf. Only the **owner**, an **override
+authority** (subtree anchor root / scenario orchestrator), or the **human** may
+transition a claimed item (done/block/reopen/edit/remove) — don't try to close a
+sibling's in-progress item. Stranded items auto-reopen when their owner session
+stops. State changes can emit pub/sub on `todo:<scope>` (config `[todo]
+emit_events`), so a reviewer can `gr msg sub --topic todo:scenario:<id> --follow`.
+
+**Scenarios** track progress through this list, not a boolean: each member's `task`
+seeds one assigned todo item, and a member is complete once its assigned items are
+`done` (this replaces the removed `gr scenario task-done` — signal completion with
+`gr todo done <its-task-item>`).
+
 ### Typing into sessions remotely
 
 ```bash

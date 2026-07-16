@@ -65,6 +65,41 @@ func (s *Server) Run(ctx context.Context) error {
 		Description: "Wait for the next message on a topic. Blocks until a message arrives. Cannot subscribe to inbox streams — use read_inbox instead.",
 	}, s.subscribe)
 
+	gomcp.AddTool(srv, &gomcp.Tool{
+		Name:        "todo_list",
+		Description: "List items on the durable, shared todo list. Scope defaults to this session's own subtree; pass scenario or session to target another scope. Optionally filter by status (todo/in-progress/done/blocked) or tag.",
+	}, s.todoList)
+
+	gomcp.AddTool(srv, &gomcp.Tool{
+		Name:        "todo_add",
+		Description: "Add an item to the durable, shared todo list. The list persists across sessions and is visible to every agent in scope. Optionally attach tags, a parent item, a note, or target a different scenario/session scope.",
+	}, s.todoAdd)
+
+	gomcp.AddTool(srv, &gomcp.Tool{
+		Name:        "todo_claim",
+		Description: "Atomically claim a todo item so no other agent can take it — claims never double-assign across parallel agents. Pass an id to claim a specific item, or leave it empty to claim the next unclaimed item in scope. Returns claimed=false when there is nothing to claim.",
+	}, s.todoClaim)
+
+	gomcp.AddTool(srv, &gomcp.Tool{
+		Name:        "todo_done",
+		Description: "Mark a claimed todo item as done on the durable, shared todo list.",
+	}, s.todoDone)
+
+	gomcp.AddTool(srv, &gomcp.Tool{
+		Name:        "todo_block",
+		Description: "Mark a todo item as blocked on the durable, shared todo list, with an optional note explaining what it is waiting on.",
+	}, s.todoBlock)
+
+	gomcp.AddTool(srv, &gomcp.Tool{
+		Name:        "todo_reopen",
+		Description: "Reopen a done or blocked todo item, moving it back to todo and clearing its owner so any agent can claim it again.",
+	}, s.todoReopen)
+
+	gomcp.AddTool(srv, &gomcp.Tool{
+		Name:        "todo_update",
+		Description: "Edit a todo item's presentation fields (title and/or note) without changing its status, scope, or owner.",
+	}, s.todoUpdate)
+
 	return srv.Run(ctx, &gomcp.StdioTransport{})
 }
 
@@ -182,6 +217,68 @@ type ReadInboxInput struct {
 	All      bool   `json:"all,omitempty"       jsonschema:"Read all messages instead of only unread"`
 	ThreadID string `json:"thread_id,omitempty" jsonschema:"Filter to a specific thread"`
 	Ack      bool   `json:"ack,omitempty"       jsonschema:"Acknowledge messages after reading"`
+}
+
+type TodoItemOutput struct {
+	ID       string   `json:"id"`
+	Title    string   `json:"title"`
+	Status   string   `json:"status"`
+	Scope    string   `json:"scope,omitempty"`
+	Owner    string   `json:"owner,omitempty"`
+	Assignee string   `json:"assignee,omitempty"`
+	ParentID string   `json:"parent_id,omitempty"`
+	Note     string   `json:"note,omitempty"`
+	Tags     []string `json:"tags,omitempty"`
+}
+
+type TodoListInput struct {
+	Scenario string `json:"scenario,omitempty" jsonschema:"Target a named scenario's list instead of this session's subtree"`
+	Session  string `json:"session,omitempty"  jsonschema:"Target a specific session's subtree instead of this session's own"`
+	Status   string `json:"status,omitempty"   jsonschema:"Filter by status (todo, in-progress, done, blocked)"`
+	Tag      string `json:"tag,omitempty"      jsonschema:"Filter to items carrying this tag"`
+}
+
+type TodoListOutput struct {
+	Items []TodoItemOutput `json:"items"`
+}
+
+type TodoAddInput struct {
+	Title    string   `json:"title"               jsonschema:"Short description of the work item"`
+	Tags     []string `json:"tags,omitempty"      jsonschema:"Optional tags to categorise the item"`
+	ParentID string   `json:"parent_id,omitempty" jsonschema:"Optional parent item ID to nest this under"`
+	Note     string   `json:"note,omitempty"      jsonschema:"Optional freeform note with more detail"`
+	Scenario string   `json:"scenario,omitempty"  jsonschema:"Add to a named scenario's list instead of this session's subtree"`
+	Session  string   `json:"session,omitempty"   jsonschema:"Add to a specific session's subtree instead of this session's own"`
+}
+
+type TodoClaimInput struct {
+	ID       string `json:"id,omitempty"       jsonschema:"Item ID to claim. Leave empty to claim the next unclaimed item in scope."`
+	Scenario string `json:"scenario,omitempty" jsonschema:"Claim from a named scenario's list instead of this session's subtree"`
+	Session  string `json:"session,omitempty"  jsonschema:"Claim from a specific session's subtree instead of this session's own"`
+}
+
+type TodoClaimOutput struct {
+	Claimed bool           `json:"claimed"`
+	Item    TodoItemOutput `json:"item"`
+}
+
+type TodoDoneInput struct {
+	ID string `json:"id" jsonschema:"Item ID to mark done"`
+}
+
+type TodoBlockInput struct {
+	ID   string `json:"id"             jsonschema:"Item ID to mark blocked"`
+	Note string `json:"note,omitempty" jsonschema:"Optional note describing what the item is blocked on"`
+}
+
+type TodoReopenInput struct {
+	ID string `json:"id" jsonschema:"Item ID to reopen (move back to todo)"`
+}
+
+type TodoUpdateInput struct {
+	ID    string `json:"id"              jsonschema:"Item ID to update"`
+	Title string `json:"title,omitempty" jsonschema:"New title for the item"`
+	Note  string `json:"note,omitempty"  jsonschema:"New note for the item"`
 }
 
 // Tool handlers
@@ -531,6 +628,166 @@ func (s *Server) readInbox(_ context.Context, _ *gomcp.CallToolRequest, input Re
 	}
 }
 
+func (s *Server) todoList(_ context.Context, _ *gomcp.CallToolRequest, input TodoListInput) (*gomcp.CallToolResult, TodoListOutput, error) {
+	c, err := s.connect()
+	if err != nil {
+		return nil, TodoListOutput{}, fmt.Errorf("connect to daemon: %w", err)
+	}
+	defer c.Close()
+
+	if err := c.SendControl("todo_list", protocol.TodoListMsg{
+		Scope:  protocol.TodoScope{Scenario: input.Scenario, Session: input.Session},
+		Status: input.Status,
+		Tag:    input.Tag,
+	}); err != nil {
+		return nil, TodoListOutput{}, fmt.Errorf("send todo_list: %w", err)
+	}
+
+	resp, err := c.ReadControlResponse()
+	if err != nil {
+		return nil, TodoListOutput{}, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.Type == "error" {
+		return nil, TodoListOutput{}, decodeError(resp)
+	}
+
+	var list protocol.TodoListResponse
+	if err := protocol.DecodePayload(resp, &list); err != nil {
+		return nil, TodoListOutput{}, fmt.Errorf("decode todo list: %w", err)
+	}
+
+	out := TodoListOutput{Items: make([]TodoItemOutput, len(list.Items))}
+	for i, it := range list.Items {
+		out.Items[i] = todoItemToOutput(it)
+	}
+
+	return nil, out, nil
+}
+
+func (s *Server) todoAdd(_ context.Context, _ *gomcp.CallToolRequest, input TodoAddInput) (*gomcp.CallToolResult, TodoItemOutput, error) {
+	c, err := s.connect()
+	if err != nil {
+		return nil, TodoItemOutput{}, fmt.Errorf("connect to daemon: %w", err)
+	}
+	defer c.Close()
+
+	if err := c.SendControl("todo_add", protocol.TodoAddMsg{
+		Scope:    protocol.TodoScope{Scenario: input.Scenario, Session: input.Session},
+		Title:    input.Title,
+		Tags:     input.Tags,
+		ParentID: input.ParentID,
+		Note:     input.Note,
+	}); err != nil {
+		return nil, TodoItemOutput{}, fmt.Errorf("send todo_add: %w", err)
+	}
+
+	return s.readTodoItem(c)
+}
+
+func (s *Server) todoClaim(_ context.Context, _ *gomcp.CallToolRequest, input TodoClaimInput) (*gomcp.CallToolResult, TodoClaimOutput, error) {
+	c, err := s.connect()
+	if err != nil {
+		return nil, TodoClaimOutput{}, fmt.Errorf("connect to daemon: %w", err)
+	}
+	defer c.Close()
+
+	if err := c.SendControl("todo_claim", protocol.TodoClaimMsg{
+		ID:    input.ID,
+		Scope: protocol.TodoScope{Scenario: input.Scenario, Session: input.Session},
+	}); err != nil {
+		return nil, TodoClaimOutput{}, fmt.Errorf("send todo_claim: %w", err)
+	}
+
+	resp, err := c.ReadControlResponse()
+	if err != nil {
+		return nil, TodoClaimOutput{}, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.Type == "error" {
+		return nil, TodoClaimOutput{}, decodeError(resp)
+	}
+
+	var claim protocol.TodoClaimResponse
+	if err := protocol.DecodePayload(resp, &claim); err != nil {
+		return nil, TodoClaimOutput{}, fmt.Errorf("decode todo claim: %w", err)
+	}
+
+	return nil, TodoClaimOutput{Claimed: claim.Claimed, Item: todoItemToOutput(claim.Item)}, nil
+}
+
+func (s *Server) todoDone(_ context.Context, _ *gomcp.CallToolRequest, input TodoDoneInput) (*gomcp.CallToolResult, TodoItemOutput, error) {
+	return s.todoTransition(input.ID, "done", "")
+}
+
+func (s *Server) todoBlock(_ context.Context, _ *gomcp.CallToolRequest, input TodoBlockInput) (*gomcp.CallToolResult, TodoItemOutput, error) {
+	return s.todoTransition(input.ID, "blocked", input.Note)
+}
+
+func (s *Server) todoReopen(_ context.Context, _ *gomcp.CallToolRequest, input TodoReopenInput) (*gomcp.CallToolResult, TodoItemOutput, error) {
+	return s.todoTransition(input.ID, "todo", "")
+}
+
+func (s *Server) todoUpdate(_ context.Context, _ *gomcp.CallToolRequest, input TodoUpdateInput) (*gomcp.CallToolResult, TodoItemOutput, error) {
+	c, err := s.connect()
+	if err != nil {
+		return nil, TodoItemOutput{}, fmt.Errorf("connect to daemon: %w", err)
+	}
+	defer c.Close()
+
+	msg := protocol.TodoUpdateMsg{ID: input.ID}
+	if input.Title != "" {
+		msg.Title = &input.Title
+	}
+
+	if input.Note != "" {
+		msg.Note = &input.Note
+	}
+
+	if err := c.SendControl("todo_update", msg); err != nil {
+		return nil, TodoItemOutput{}, fmt.Errorf("send todo_update: %w", err)
+	}
+
+	return s.readTodoItem(c)
+}
+
+func (s *Server) todoTransition(id, status, note string) (*gomcp.CallToolResult, TodoItemOutput, error) {
+	c, err := s.connect()
+	if err != nil {
+		return nil, TodoItemOutput{}, fmt.Errorf("connect to daemon: %w", err)
+	}
+	defer c.Close()
+
+	if err := c.SendControl("todo_transition", protocol.TodoTransitionMsg{
+		ID:     id,
+		Status: status,
+		Note:   note,
+	}); err != nil {
+		return nil, TodoItemOutput{}, fmt.Errorf("send todo_transition: %w", err)
+	}
+
+	return s.readTodoItem(c)
+}
+
+// readTodoItem reads a single "todo" reply carrying a TodoResponse.
+func (s *Server) readTodoItem(c *client.Client) (*gomcp.CallToolResult, TodoItemOutput, error) {
+	resp, err := c.ReadControlResponse()
+	if err != nil {
+		return nil, TodoItemOutput{}, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.Type == "error" {
+		return nil, TodoItemOutput{}, decodeError(resp)
+	}
+
+	var tr protocol.TodoResponse
+	if err := protocol.DecodePayload(resp, &tr); err != nil {
+		return nil, TodoItemOutput{}, fmt.Errorf("decode todo item: %w", err)
+	}
+
+	return nil, todoItemToOutput(tr.Item), nil
+}
+
 // Helpers
 
 func decodeError(env protocol.Envelope) error {
@@ -559,5 +816,19 @@ func sessionInfoToOutput(si protocol.SessionInfo) SessionInfoOutput {
 		LastAttachedAt: si.LastAttachedAt,
 		Dirty:          si.Dirty,
 		UnpushedCount:  si.UnpushedCount,
+	}
+}
+
+func todoItemToOutput(it protocol.TodoItemInfo) TodoItemOutput {
+	return TodoItemOutput{
+		ID:       it.ID,
+		Title:    it.Title,
+		Status:   it.Status,
+		Scope:    it.Scope,
+		Owner:    it.Owner,
+		Assignee: it.Assignee,
+		ParentID: it.ParentID,
+		Note:     it.Note,
+		Tags:     it.Tags,
 	}
 }

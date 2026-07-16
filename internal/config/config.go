@@ -35,6 +35,7 @@ type Config struct {
 	Notifications    Notifications      `toml:"notifications"`
 	Messages         Messages           `toml:"messages"`
 	Delete           Delete             `toml:"delete"`
+	Todo             TodoConfig         `toml:"todo"`
 	Sandbox          SandboxConfig      `toml:"sandbox"`
 	Approvals        Approvals          `toml:"approvals"`
 	Status           StatusConfig       `toml:"status"`
@@ -525,6 +526,64 @@ func (m Messages) MaxAgeDuration() time.Duration {
 	}
 
 	d, _ := ParseDurationWithDays(m.MaxAge)
+
+	return d
+}
+
+// Emit-events modes for the task-list subsystem.
+const (
+	TodoEmitScenario = "scenario" // emit only for scenario-scoped lists (default)
+	TodoEmitAll      = "all"      // emit for every scope
+	TodoEmitOff      = "off"      // never emit
+)
+
+// DefaultTodoClaimLease is the default claim-lease window: an in-progress item
+// whose owner has made no progress for this long is auto-reopened. 0 disables.
+const DefaultTodoClaimLease = 30 * time.Minute
+
+// TodoConfig is the [todo] block. It governs the first-class todo subsystem
+// (issue #591): event emission on state change, the claim lease that reclaims
+// stranded in-progress items, and the retention window that sweeps done items.
+type TodoConfig struct {
+	EmitEvents string `toml:"emit_events"` // "scenario" (default) | "all" | "off"
+	ClaimLease string `toml:"claim_lease"` // Go duration; "" = 30m default; "0" disables
+	Retention  string `toml:"retention"`   // Go duration; "" or "0" = keep done items forever
+}
+
+// EmitMode resolves the emit-events mode, defaulting to "scenario".
+func (t TodoConfig) EmitMode() string {
+	switch t.EmitEvents {
+	case TodoEmitAll, TodoEmitOff:
+		return t.EmitEvents
+	default:
+		return TodoEmitScenario
+	}
+}
+
+// ClaimLeaseDuration resolves the claim-lease window. Unset (or, as a fail-safe,
+// unparseable — though Validate rejects that at startup) defaults to 30m; an
+// explicit "0" disables the lease sweep.
+func (t TodoConfig) ClaimLeaseDuration() time.Duration {
+	if t.ClaimLease == "" {
+		return DefaultTodoClaimLease
+	}
+
+	d, err := ParseDurationWithDays(t.ClaimLease)
+	if err != nil {
+		return DefaultTodoClaimLease
+	}
+
+	return d
+}
+
+// RetentionDuration resolves the done-item retention window. Unset or zero
+// keeps done items indefinitely (returns 0).
+func (t TodoConfig) RetentionDuration() time.Duration {
+	if t.Retention == "" {
+		return 0
+	}
+
+	d, _ := ParseDurationWithDays(t.Retention)
 
 	return d
 }
@@ -1616,6 +1675,24 @@ func (c *Config) Validate() error {
 	if strings.TrimSpace(c.Delete.Retention) != "" {
 		if _, err := ParseDurationWithDays(c.Delete.Retention); err != nil {
 			errs = append(errs, fmt.Errorf("delete.retention %q: %w", c.Delete.Retention, err))
+		}
+	}
+
+	// [todo]: reject an unknown emit_events mode and an unparseable duration so a
+	// typo surfaces at startup rather than silently changing retention/lease
+	// behaviour (mirrors delete.retention).
+	if m := strings.TrimSpace(c.Todo.EmitEvents); m != "" && m != TodoEmitScenario && m != TodoEmitAll && m != TodoEmitOff {
+		errs = append(errs, fmt.Errorf("todo.emit_events %q: must be one of %q, %q, %q", m, TodoEmitScenario, TodoEmitAll, TodoEmitOff))
+	}
+
+	for _, f := range []struct{ name, val string }{
+		{"todo.claim_lease", c.Todo.ClaimLease},
+		{"todo.retention", c.Todo.Retention},
+	} {
+		if strings.TrimSpace(f.val) != "" {
+			if _, err := ParseDurationWithDays(f.val); err != nil {
+				errs = append(errs, fmt.Errorf("%s %q: %w", f.name, f.val, err))
+			}
 		}
 	}
 

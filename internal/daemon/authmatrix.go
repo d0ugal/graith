@@ -119,7 +119,20 @@ var remoteMessagePolicy = map[string]remotePolicy{
 	"scenario_delete":    remoteHumanRW,
 	"scenario_resume":    remoteHumanRW,
 	"scenario_add":       remoteHumanRW,
-	"scenario_task_done": remoteHumanRW,
+
+	// Task-list ops (issue #591). Reads and mutations carry item bodies (free text
+	// that may name sensitive work), so like store bodies they are human+session,
+	// never a read-only guest. Claiming is session-initiated (a session grabbing
+	// work), so it is remoteSessionOnly — a remote human cannot claim as a
+	// session; the handler re-checks scope/ownership for every caller.
+	"todo_add":        remoteHumanRW,
+	"todo_list":       remoteHumanRW,
+	"todo_claim":      remoteSessionOnly,
+	"todo_transition": remoteHumanRW,
+	"todo_update":     remoteHumanRW,
+	"todo_assign":     remoteHumanRW,
+	"todo_remove":     remoteHumanRW,
+	"todo_export":     remoteHumanRW,
 
 	// Local-only — never over the network, for any remote role.
 	"upgrade":      remoteDenied,

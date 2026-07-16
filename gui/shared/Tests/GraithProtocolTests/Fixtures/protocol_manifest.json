@@ -2548,9 +2548,16 @@
           "optional": true
         },
         {
-          "name": "task_done",
+          "name": "todo_done",
           "type": {
-            "kind": "bool"
+            "kind": "int"
+          },
+          "optional": true
+        },
+        {
+          "name": "todo_total",
+          "type": {
+            "kind": "int"
           },
           "optional": true
         },
@@ -2757,19 +2764,6 @@
       "name": "ScenarioStopMsg",
       "swift": "required",
       "swift_type": "ScenarioNameMsg",
-      "fields": [
-        {
-          "name": "name",
-          "type": {
-            "kind": "string"
-          },
-          "optional": false
-        }
-      ]
-    },
-    {
-      "name": "ScenarioTaskDoneMsg",
-      "swift": "planned",
       "fields": [
         {
           "name": "name",
@@ -3330,6 +3324,20 @@
             "kind": "int"
           },
           "optional": true
+        },
+        {
+          "name": "todo_done",
+          "type": {
+            "kind": "int"
+          },
+          "optional": true
+        },
+        {
+          "name": "todo_total",
+          "type": {
+            "kind": "int"
+          },
+          "optional": true
         }
       ]
     },
@@ -3687,6 +3695,431 @@
             }
           },
           "optional": false
+        }
+      ]
+    },
+    {
+      "name": "TodoAddMsg",
+      "swift": "planned",
+      "fields": [
+        {
+          "name": "scope",
+          "type": {
+            "kind": "object",
+            "ref": "TodoScope"
+          },
+          "optional": false
+        },
+        {
+          "name": "title",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "tags",
+          "type": {
+            "kind": "array",
+            "elem": {
+              "kind": "string"
+            }
+          },
+          "optional": true
+        },
+        {
+          "name": "parent_id",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "note",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "assignee",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "TodoAssignMsg",
+      "swift": "planned",
+      "fields": [
+        {
+          "name": "id",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "assignee",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        }
+      ]
+    },
+    {
+      "name": "TodoClaimMsg",
+      "swift": "planned",
+      "fields": [
+        {
+          "name": "id",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "scope",
+          "type": {
+            "kind": "object",
+            "ref": "TodoScope"
+          },
+          "optional": false
+        }
+      ]
+    },
+    {
+      "name": "TodoClaimResponse",
+      "swift": "planned",
+      "fields": [
+        {
+          "name": "claimed",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": false
+        },
+        {
+          "name": "item",
+          "type": {
+            "kind": "object",
+            "ref": "TodoItemInfo"
+          },
+          "optional": false
+        }
+      ]
+    },
+    {
+      "name": "TodoExportMsg",
+      "swift": "planned",
+      "fields": [
+        {
+          "name": "scope",
+          "type": {
+            "kind": "object",
+            "ref": "TodoScope"
+          },
+          "optional": false
+        },
+        {
+          "name": "format",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "TodoExportResponse",
+      "swift": "planned",
+      "fields": [
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        }
+      ]
+    },
+    {
+      "name": "TodoItemInfo",
+      "swift": "planned",
+      "fields": [
+        {
+          "name": "id",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "title",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "status",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "scope",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "owner",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "assignee",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "parent_id",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "note",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "tags",
+          "type": {
+            "kind": "array",
+            "elem": {
+              "kind": "string"
+            }
+          },
+          "optional": true
+        },
+        {
+          "name": "created_by",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "created_at",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "updated_at",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "revision",
+          "type": {
+            "kind": "int"
+          },
+          "optional": true
+        },
+        {
+          "name": "position",
+          "type": {
+            "kind": "int"
+          },
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "TodoListMsg",
+      "swift": "planned",
+      "fields": [
+        {
+          "name": "scope",
+          "type": {
+            "kind": "object",
+            "ref": "TodoScope"
+          },
+          "optional": false
+        },
+        {
+          "name": "status",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "tag",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "TodoListResponse",
+      "swift": "planned",
+      "fields": [
+        {
+          "name": "items",
+          "type": {
+            "kind": "array",
+            "elem": {
+              "kind": "object",
+              "ref": "TodoItemInfo"
+            }
+          },
+          "optional": false
+        }
+      ]
+    },
+    {
+      "name": "TodoRemoveMsg",
+      "swift": "planned",
+      "fields": [
+        {
+          "name": "id",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        }
+      ]
+    },
+    {
+      "name": "TodoResponse",
+      "swift": "planned",
+      "fields": [
+        {
+          "name": "item",
+          "type": {
+            "kind": "object",
+            "ref": "TodoItemInfo"
+          },
+          "optional": false
+        }
+      ]
+    },
+    {
+      "name": "TodoScope",
+      "swift": "planned",
+      "fields": [
+        {
+          "name": "scenario",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "session",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "all",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "TodoTransitionMsg",
+      "swift": "planned",
+      "fields": [
+        {
+          "name": "id",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "status",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "note",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "TodoUpdateMsg",
+      "swift": "planned",
+      "fields": [
+        {
+          "name": "id",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "title",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "note",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "tags",
+          "type": {
+            "kind": "array",
+            "elem": {
+              "kind": "string"
+            }
+          },
+          "optional": true
+        },
+        {
+          "name": "position",
+          "type": {
+            "kind": "int"
+          },
+          "optional": true
         }
       ]
     },

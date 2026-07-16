@@ -59,8 +59,15 @@ private struct ScenarioMemberRow: View {
                 }
             }
             Spacer()
-            if member.taskDone == true {
-                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).font(.caption)
+            if member.todoTotal > 0 {
+                HStack(spacing: 4) {
+                    if member.isTodoComplete {
+                        Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).font(.caption)
+                    }
+                    Text("\(member.todoDone)/\(member.todoTotal)")
+                        .font(.caption2).foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
             }
         }
     }
@@ -144,8 +151,15 @@ private struct ScenarioCard: View {
                         }
                     }
                     Spacer()
-                    if member.taskDone == true {
-                        Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                    if member.todoTotal > 0 {
+                        HStack(spacing: 4) {
+                            if member.isTodoComplete {
+                                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                            }
+                            Text("\(member.todoDone)/\(member.todoTotal)")
+                                .font(.caption2).foregroundStyle(.secondary)
+                                .monospacedDigit()
+                        }
                     }
                 }
             }

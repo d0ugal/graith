@@ -201,7 +201,14 @@
       "category": "Scenarios",
       "name": "Start / stop / resume / inspect scenarios",
       "cli": "supported", "ios": "supported", "macos": "supported",
-      "notes": "The GUIs list scenarios, show per-session role/task/done status, group scenario members in the sidebar, and run the human-authorized stop/resume/delete actions; `start`/`add`/`task-done` stay CLI-only (they are orchestrator-session-scoped, not human-client operations)."
+      "notes": "The GUIs list scenarios, show per-session role/task and todo-derived progress (per-member completion is derived from assigned todo items), group scenario members in the sidebar, and run the human-authorized stop/resume/delete actions; `start`/`add` stay CLI-only (they are orchestrator-session-scoped, not human-client operations)."
+    },
+    {
+      "id": "todo.manage",
+      "category": "Todo list",
+      "name": "Todo list",
+      "cli": "supported", "ios": "planned", "macos": "planned",
+      "notes": "A durable, shared todo list with atomic claim of items across sessions; the `gr todo` CLI ships now, GUI surfacing is a planned follow-up (issue #591)."
     },
     {
       "id": "triggers.manage",

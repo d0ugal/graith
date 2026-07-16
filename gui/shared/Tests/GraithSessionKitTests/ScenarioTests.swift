@@ -13,9 +13,9 @@ private func makeScenario(
     status: String = "running",
     sessions: [ScenarioSessionInfo] = [
         ScenarioSessionInfo(name: "braw", sessionID: "braw0001", role: "Backend",
-                            task: "ingest", taskDone: false, repo: "croft", agent: "claude", status: "running"),
+                            task: "ingest", todoDone: 1, todoTotal: 3, repo: "croft", agent: "claude", status: "running"),
         ScenarioSessionInfo(name: "bide", sessionID: "bide0003", role: "Reviewer",
-                            task: "review", taskDone: true, repo: "glen", agent: "claude", status: "stopped"),
+                            task: "review", todoDone: 2, todoTotal: 2, repo: "glen", agent: "claude", status: "stopped"),
     ]
 ) -> ScenarioRecord {
     ScenarioRecord(
@@ -33,7 +33,7 @@ struct ScenarioDecodingTests {
         {"scenarios":[{"id":"sc-abc","name":"strath","orchestrator_id":"orch0001",
         "goal":"g","status":"running","session_ids":["s1"],
         "sessions":[{"name":"braw","session_id":"s1","role":"Backend","task":"t",
-        "task_done":true,"repo":"croft","agent":"claude","model":"opus","status":"running","shared":true}],
+        "todo_done":3,"todo_total":3,"repo":"croft","agent":"claude","model":"opus","status":"running","shared":true}],
         "created_at":"2026-07-14T09:00:00Z"}]}
         """
         let resp = try JSONDecoder().decode(ScenarioListResponse.self, from: Data(json.utf8))
@@ -45,7 +45,9 @@ struct ScenarioDecodingTests {
         let member = sc.sessions[0]
         #expect(member.sessionID == "s1")
         #expect(member.role == "Backend")
-        #expect(member.taskDone == true)
+        #expect(member.todoDone == 3)
+        #expect(member.todoTotal == 3)
+        #expect(member.isTodoComplete)
         #expect(member.shared == true)
     }
 
@@ -60,7 +62,9 @@ struct ScenarioDecodingTests {
         let resp = try JSONDecoder().decode(ScenarioListResponse.self, from: Data(json.utf8))
         let member = resp.scenarios[0].sessions[0]
         #expect(member.role == nil)
-        #expect(member.taskDone == nil)
+        #expect(member.todoDone == 0)
+        #expect(member.todoTotal == 0)
+        #expect(!member.isTodoComplete)
         #expect(member.shared == nil)
     }
 }

@@ -78,6 +78,7 @@ type SessionManager struct {
 	configFile         string
 	upgradeCh          chan string
 	messages           *MsgStore
+	todos              *TodoStore
 	mcpManager         *MCPManager
 	startedAt          time.Time
 	orchestratorExitCh chan string

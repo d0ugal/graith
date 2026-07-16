@@ -453,12 +453,14 @@ var scenarioStatusCmd = &cobra.Command{
 		out.Printf("Goal: %s\n\n", sc.Goal)
 
 		tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-		_, _ = fmt.Fprintf(tw, "NAME\tSESSION\tSTATUS\tAGENT\tROLE\tTASK DONE\tSHARED\n")
+		_, _ = fmt.Fprintf(tw, "NAME\tSESSION\tSTATUS\tAGENT\tROLE\tPROGRESS\tSHARED\n")
 
 		for _, s := range sc.Sessions {
-			done := ""
-			if s.TaskDone {
-				done = "yes"
+			// Progress is derived from the member's assigned todo items (issue
+			// #591): done/total, or "—" when the member has no tracked work.
+			progress := "—"
+			if s.TodoTotal > 0 {
+				progress = fmt.Sprintf("%d/%d", s.TodoDone, s.TodoTotal)
 			}
 
 			shared := ""
@@ -466,46 +468,10 @@ var scenarioStatusCmd = &cobra.Command{
 				shared = "yes"
 			}
 
-			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", s.Name, s.SessionID, s.Status, s.Agent, s.Role, done, shared)
+			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", s.Name, s.SessionID, s.Status, s.Agent, s.Role, progress, shared)
 		}
 
 		_ = tw.Flush()
-
-		return nil
-	},
-}
-
-var scenarioTaskDoneCmd = &cobra.Command{
-	Use:   "task-done <scenario-name>",
-	Short: "Mark this session's task as complete in the scenario",
-	Args:  cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		c, err := client.Connect(cfg, paths, cfgFile)
-		if err != nil {
-			return err
-		}
-		defer c.Close()
-
-		_ = c.SendControl("scenario_task_done", protocol.ScenarioTaskDoneMsg{Name: args[0]})
-
-		resp, err := c.ReadControlResponse()
-		if err != nil {
-			return err
-		}
-
-		if resp.Type == "error" {
-			var e protocol.ErrorMsg
-
-			_ = protocol.DecodePayload(resp, &e)
-
-			return fmt.Errorf("%s", e.Message)
-		}
-
-		if jsonOutput {
-			return out.JSON(resp.Payload)
-		}
-
-		out.Printf("Task marked as done in scenario %q\n", args[0])
 
 		return nil
 	},
@@ -669,7 +635,6 @@ func registerScenarioCmd() {
 	scenarioCmd.AddCommand(scenarioResumeCmd)
 	scenarioCmd.AddCommand(scenarioDeleteCmd)
 	scenarioCmd.AddCommand(scenarioStatusCmd)
-	scenarioCmd.AddCommand(scenarioTaskDoneCmd)
 	scenarioCmd.AddCommand(scenarioAddCmd)
 	scenarioCmd.AddCommand(scenarioListCmd)
 

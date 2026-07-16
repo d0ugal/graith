@@ -682,7 +682,8 @@ public struct ScenarioSessionInfo: Codable, Sendable, Identifiable, Hashable {
     public var sessionID: String
     public var role: String?
     public var task: String?
-    public var taskDone: Bool?
+    public var todoDone: Int
+    public var todoTotal: Int
     public var repo: String?
     public var agent: String?
     public var model: String?
@@ -692,10 +693,11 @@ public struct ScenarioSessionInfo: Codable, Sendable, Identifiable, Hashable {
     public var id: String { sessionID }
 
     public init(name: String, sessionID: String, role: String? = nil, task: String? = nil,
-                taskDone: Bool? = nil, repo: String? = nil, agent: String? = nil,
+                todoDone: Int = 0, todoTotal: Int = 0, repo: String? = nil, agent: String? = nil,
                 model: String? = nil, status: String? = nil, shared: Bool? = nil) {
         self.name = name; self.sessionID = sessionID; self.role = role; self.task = task
-        self.taskDone = taskDone; self.repo = repo; self.agent = agent; self.model = model
+        self.todoDone = todoDone; self.todoTotal = todoTotal
+        self.repo = repo; self.agent = agent; self.model = model
         self.status = status; self.shared = shared
     }
 
@@ -703,9 +705,29 @@ public struct ScenarioSessionInfo: Codable, Sendable, Identifiable, Hashable {
         case name
         case sessionID = "session_id"
         case role, task
-        case taskDone = "task_done"
+        case todoDone = "todo_done"
+        case todoTotal = "todo_total"
         case repo, agent, model, status, shared
     }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = try c.decode(String.self, forKey: .name)
+        sessionID = try c.decode(String.self, forKey: .sessionID)
+        role = try c.decodeIfPresent(String.self, forKey: .role)
+        task = try c.decodeIfPresent(String.self, forKey: .task)
+        todoDone = try c.decodeIfPresent(Int.self, forKey: .todoDone) ?? 0
+        todoTotal = try c.decodeIfPresent(Int.self, forKey: .todoTotal) ?? 0
+        repo = try c.decodeIfPresent(String.self, forKey: .repo)
+        agent = try c.decodeIfPresent(String.self, forKey: .agent)
+        model = try c.decodeIfPresent(String.self, forKey: .model)
+        status = try c.decodeIfPresent(String.self, forKey: .status)
+        shared = try c.decodeIfPresent(Bool.self, forKey: .shared)
+    }
+
+    /// A member is complete when it has tracked todo work and all of it is done.
+    /// `todoTotal == 0` means "no tracked work" (not complete).
+    public var isTodoComplete: Bool { todoTotal > 0 && todoDone == todoTotal }
 }
 
 /// A running scenario and its member sessions (`gr scenario list` / `status`).
