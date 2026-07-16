@@ -5,14 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/robfig/cron/v3"
-)
-
-// cronSpecParser accepts 5-field cron expressions plus @-descriptors. It is the
-// same shape the daemon's firing loop uses, so config validation rejects exactly
-// what the runtime can't parse.
-var cronSpecParser = cron.NewParser(
-	cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor,
+	"github.com/d0ugal/graith/internal/cronx"
 )
 
 // TriggerConfig is one [[trigger]] block. A trigger is (source) -> (action):
@@ -487,7 +480,7 @@ func validateSchedule(where string, s *ScheduleConfig) []error {
 	}
 
 	if s.Cron != "" {
-		if _, err := cronSpecParser.Parse(s.Cron); err != nil {
+		if err := cronx.Validate(s.Cron); err != nil {
 			errs = append(errs, fmt.Errorf("%s: [schedule] cron %q: %w", where, s.Cron, err))
 		}
 

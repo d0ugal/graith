@@ -35,6 +35,39 @@ timezone = "Europe/London"
   backfilled unless `policy.catch_up = true` (which fires at most once on
   startup).
 
+#### Cron grammar
+
+graith accepts a **five-field** expression, or one of four descriptors —
+nothing else. Config validation and the daemon share a single parser
+(`internal/cronx`), so what config validation accepts is exactly what the
+runtime can fire.
+
+```
+┌───────────── minute        (0-59)
+│ ┌─────────── hour          (0-23)
+│ │ ┌───────── day-of-month  (1-31)
+│ │ │ ┌─────── month         (1-12 or JAN-DEC)
+│ │ │ │ ┌───── day-of-week   (0-6 or SUN-SAT; 0 = Sunday)
+│ │ │ │ │
+* * * * *
+```
+
+Each field supports `*` (any), lists (`1,15`), ranges (`1-5`), and steps
+(`*/15`, `0-30/10`). Month and day-of-week accept three-letter English names.
+When both day-of-month and day-of-week are restricted they combine with **OR**
+(the standard cron union).
+
+Descriptors: `@hourly`, `@daily`, `@weekly`, `@monthly`.
+
+Deliberately **not** accepted (some parsers allow these; graith rejects them
+with a clear error):
+
+- seconds or year fields (six/seven-field forms)
+- `@yearly`, `@annually`, `@midnight`, `@reboot`, `@every <duration>` — use
+  `every = "..."` for interval scheduling
+- Quartz-style extensions: `?`, `L`, `W`, `#`
+- Sunday as `7` — use `0`
+
 ### Watch (file-event-driven)
 
 ```toml

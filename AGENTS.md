@@ -410,8 +410,18 @@ machine, and one `gr trigger` CLI. See
 
 - `[trigger.schedule]` — time-driven (#592): `cron = "0 9 * * *"` (5-field +
   `@hourly`/`@daily`/`@weekly`/`@monthly`, `timezone` optional) **or**
-  `every = "15m"` (Go duration, supports `7d`). Uses `robfig/cron/v3` (parser +
-  `Next()` only; the firing loop is ours). Runs in `RunTriggerLoop`
+  `every = "15m"` (Go duration, supports `7d`). Cron parsing lives in one place,
+  `internal/cronx` (#1213): a single graith-owned abstraction that enforces the
+  documented grammar (tightened — no seconds/year fields, no undocumented
+  `@yearly`/`@midnight`/`@every`, no Quartz `?LW#`; Sunday is `0`) and is used by
+  **both** config validation (`cronx.Validate`) and the daemon (`cronx.Parse` +
+  `Schedule.Next`), so they can't accept different grammars. The engine
+  underneath is `robfig/cron/v3` (parser + `Next()` only; the firing loop is
+  ours) — we evaluated `adhocore/gronx` and kept robfig because gronx v1.20.0
+  mis-fires on day-of-month 29/30/31, leap-day Feb 29, and DST fall-back; the
+  differential corpus (`internal/cronx/cronx_diff_test.go`) pins that evidence
+  and acts as a re-evaluation tripwire. See
+  `docs/design/2026-07-16-cron-parser-evaluation.md`. Runs in `RunTriggerLoop`
   (`internal/daemon/trigger.go`).
 - `[trigger.watch]` — file-event-driven (#593): a **policy selector** by `repo`
   or `role` (never a live session name) that binds to matching running sessions

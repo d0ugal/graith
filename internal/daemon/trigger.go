@@ -11,17 +11,12 @@ import (
 	"time"
 
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/cronx"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/d0ugal/graith/internal/store"
-	"github.com/robfig/cron/v3"
 )
 
 const triggerTick = 1 * time.Second // coarse; cron granularity is 1 minute
-
-// cronParser accepts 5-field expressions plus @hourly/@daily/@weekly/@monthly.
-var cronParser = cron.NewParser(
-	cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor,
-)
 
 // fireCause labels a run in the history.
 const (
@@ -131,7 +126,7 @@ func (sm *SessionManager) armSchedule(t *config.TriggerConfig, rt *TriggerRuntim
 			}
 		}
 
-		cs, err := cronParser.Parse(sched.Cron)
+		cs, err := cronx.Parse(sched.Cron)
 		if err != nil {
 			sm.recordTriggerError(t.Name, fmt.Sprintf("bad cron %q: %v", sched.Cron, err))
 			return
@@ -142,6 +137,12 @@ func (sm *SessionManager) armSchedule(t *config.TriggerConfig, rt *TriggerRuntim
 		sm.triggers.mu.Unlock()
 
 		next = cs.Next(now.In(loc))
+		if next.IsZero() {
+			// An impossible date (e.g. "0 0 30 2 *") has no reachable next fire.
+			// Record it and leave the cursor zero: dueSchedules treats a zero next
+			// as dormant, so the trigger never fires rather than fire-storming.
+			sm.recordTriggerError(t.Name, fmt.Sprintf("cron %q has no reachable next fire time; trigger is dormant", sched.Cron))
+		}
 	case sched.Every != "":
 		every, err := config.ParseDurationWithDays(sched.Every)
 		if err != nil || every <= 0 {
@@ -211,7 +212,9 @@ func (sm *SessionManager) dueSchedules(now time.Time) []string {
 		sm.triggers.mu.Lock()
 
 		next, ok := sm.triggers.nextFire[name]
-		if !ok || now.Before(next) {
+		if !ok || next.IsZero() || now.Before(next) {
+			// A zero cursor marks a dormant schedule (an unreachable cron, set by
+			// armSchedule); never treat it as due.
 			sm.triggers.mu.Unlock()
 			continue
 		}

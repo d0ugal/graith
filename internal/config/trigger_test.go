@@ -158,6 +158,8 @@ func TestValidateTriggers_Invalid(t *testing.T) {
 		{"queue overlap rejected", TriggerConfig{Name: "q", Schedule: &ScheduleConfig{Cron: "@daily"}, Action: ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}, Policy: TriggerPolicy{Overlap: "queue"}}, false, "not supported in v1"},
 		{"bad overlap", TriggerConfig{Name: "q", Schedule: &ScheduleConfig{Cron: "@daily"}, Action: ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}, Policy: TriggerPolicy{Overlap: "sometimes"}}, false, "is invalid"},
 		{"bad cron", schedTrigger("fash", ScheduleConfig{Cron: "not a cron"}, ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}), false, "cron"},
+		{"tightened descriptor rejected", schedTrigger("fash", ScheduleConfig{Cron: "@yearly"}, ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}), false, "unsupported descriptor"},
+		{"seconds field rejected", schedTrigger("fash", ScheduleConfig{Cron: "0 0 9 * * *"}, ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}), false, "must have exactly 5 fields"},
 		{"bad timezone", schedTrigger("fash", ScheduleConfig{Cron: "@daily", Timezone: "Europe/Londn"}, ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}), false, "timezone"},
 		{"zero debounce", watchTrigger("haar", WatchConfig{Repo: "/r", Debounce: "0s"}, ActionConfig{Type: ActionCommand, Command: "x"}), false, "debounce must be > 0"},
 		{"zero timeout", schedTrigger("haar", ScheduleConfig{Cron: "@daily"}, ActionConfig{Type: ActionCommand, Command: "x", Repo: "/tmp/x", Timeout: "0s"}), false, "timeout must be > 0"},
