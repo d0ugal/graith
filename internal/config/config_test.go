@@ -2103,6 +2103,81 @@ write_dirs = ["~/.config/graith", "/tmp/extra"]
 	})
 }
 
+func TestOrchestratorAgentName(t *testing.T) {
+	t.Run("explicit orchestrator agent wins over default_agent", func(t *testing.T) {
+		o := OrchestratorConfig{Agent: "codex"}
+		if got := o.AgentName("cursor"); got != "codex" {
+			t.Errorf("AgentName = %q, want codex", got)
+		}
+	})
+
+	t.Run("inherits default_agent when orchestrator agent is unset", func(t *testing.T) {
+		o := OrchestratorConfig{}
+		if got := o.AgentName("codex"); got != "codex" {
+			t.Errorf("AgentName = %q, want codex", got)
+		}
+	})
+
+	t.Run("falls back to claude when neither is set", func(t *testing.T) {
+		o := OrchestratorConfig{}
+		if got := o.AgentName(""); got != "claude" {
+			t.Errorf("AgentName = %q, want claude", got)
+		}
+	})
+}
+
+// TestOrchestratorInheritsDefaultAgent is a regression test for the orchestrator
+// hardcoding "claude" instead of inheriting the top-level default_agent: a config
+// that sets default_agent but leaves [orchestrator] agent unset must resolve the
+// orchestrator to the default agent, not claude.
+func TestOrchestratorInheritsDefaultAgent(t *testing.T) {
+	t.Run("default_agent inherited when orchestrator agent absent", func(t *testing.T) {
+		dir := t.TempDir()
+		cfgPath := filepath.Join(dir, "config.toml")
+		_ = os.WriteFile(cfgPath, []byte(`
+default_agent = "codex"
+[orchestrator]
+enabled = true
+`), 0o600)
+
+		cfg, err := Load(cfgPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if got := cfg.Orchestrator.AgentName(cfg.DefaultAgent); got != "codex" {
+			t.Errorf("orchestrator AgentName = %q, want codex", got)
+		}
+	})
+
+	t.Run("explicit orchestrator agent overrides default_agent", func(t *testing.T) {
+		dir := t.TempDir()
+		cfgPath := filepath.Join(dir, "config.toml")
+		_ = os.WriteFile(cfgPath, []byte(`
+default_agent = "codex"
+[orchestrator]
+enabled = true
+agent = "cursor"
+`), 0o600)
+
+		cfg, err := Load(cfgPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if got := cfg.Orchestrator.AgentName(cfg.DefaultAgent); got != "cursor" {
+			t.Errorf("orchestrator AgentName = %q, want cursor", got)
+		}
+	})
+
+	t.Run("bare default config resolves orchestrator to claude", func(t *testing.T) {
+		cfg := Default()
+		if got := cfg.Orchestrator.AgentName(cfg.DefaultAgent); got != "claude" {
+			t.Errorf("orchestrator AgentName = %q, want claude", got)
+		}
+	})
+}
+
 func TestOrchestratorSandboxIgnoresDangerousKeys(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.toml")

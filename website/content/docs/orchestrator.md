@@ -21,12 +21,14 @@ enabled = true
 
 [orchestrator]
 enabled      = true
-agent        = "claude"
+agent        = ""          # agent to run as; empty inherits the top-level default_agent
 model        = ""
 idle_timeout = "30m"
 prompt       = "..."       # custom prompt (optional)
 prompt_file  = ""          # or read from file
 ```
+
+When `[orchestrator] agent` is left empty, the orchestrator inherits the top-level `default_agent` (falling back to `claude` only if that is unset too). Set it explicitly to run the orchestrator as a different agent than your session default.
 
 When enabled, the orchestrator session is created automatically and accessible via `ctrl+b o`.
 

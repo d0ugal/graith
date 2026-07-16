@@ -231,9 +231,17 @@ func (o OrchestratorConfig) IdleTimeoutDuration() time.Duration {
 	return d
 }
 
-func (o OrchestratorConfig) AgentName() string {
+// AgentName resolves the agent type the orchestrator session runs as. An
+// explicit [orchestrator] agent wins; otherwise it inherits the top-level
+// default_agent (passed in by the caller, which has access to the full
+// config), falling back to "claude" only when neither is set.
+func (o OrchestratorConfig) AgentName(defaultAgent string) string {
 	if o.Agent != "" {
 		return o.Agent
+	}
+
+	if defaultAgent != "" {
+		return defaultAgent
 	}
 
 	return "claude"
