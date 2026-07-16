@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,9 +11,10 @@ import (
 type promptInjectionMethod int
 
 const (
-	promptInjectionNone               promptInjectionMethod = iota
-	promptInjectionAppendSystemPrompt                       // --append-system-prompt (Claude)
-	promptInjectionCursorRules                              // .cursor/rules/graith.mdc (Cursor)
+	promptInjectionNone                  promptInjectionMethod = iota
+	promptInjectionAppendSystemPrompt                          // --append-system-prompt (Claude)
+	promptInjectionCursorRules                                 // .cursor/rules/graith.mdc (Cursor)
+	promptInjectionDeveloperInstructions                       // -c developer_instructions=... (Codex)
 )
 
 func detectPromptInjection(agentName string) promptInjectionMethod {
@@ -21,6 +23,8 @@ func detectPromptInjection(agentName string) promptInjectionMethod {
 		return promptInjectionAppendSystemPrompt
 	case "cursor":
 		return promptInjectionCursorRules
+	case "codex":
+		return promptInjectionDeveloperInstructions
 	default:
 		return promptInjectionNone
 	}
@@ -38,9 +42,27 @@ func (sm *SessionManager) injectPrompt(agentName, worktreePath string) (extraArg
 		return []string{"--append-system-prompt", prompt}, nil
 	case promptInjectionCursorRules:
 		return nil, writeCursorRule(worktreePath, prompt)
+	case promptInjectionDeveloperInstructions:
+		return codexDeveloperInstructionsArgs(prompt), nil
 	default:
 		return nil, nil
 	}
+}
+
+// codexDeveloperInstructionsArgs builds the Codex config-override args that
+// inject the graith operating instructions as Codex's `developer_instructions`
+// (a top-level config key surfaced to the model as a separate developer
+// message). Codex parses the `-c key=value` value as TOML, falling back to a
+// bare string; we JSON-encode the prompt so a multi-line body — or one that
+// would otherwise parse as a TOML scalar (e.g. a lone number or `[...]`) — is
+// always carried verbatim as a quoted string. A JSON-encoded string is also a
+// valid TOML basic string, so Codex's TOML parse decodes it back to the exact
+// prompt.
+func codexDeveloperInstructionsArgs(prompt string) []string {
+	// json.Marshal of a string never fails.
+	encoded, _ := json.Marshal(prompt)
+
+	return []string{"-c", "developer_instructions=" + string(encoded)}
 }
 
 func writeCursorRule(worktreePath, prompt string) error {

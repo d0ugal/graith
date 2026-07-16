@@ -48,7 +48,7 @@ allowed_repo_paths = []                   # restrict which repo paths the daemon
 
 ### `agent_prompt`
 
-A multiline string injected into the agent's environment. For Claude, it is passed via `--append-system-prompt`. For Cursor, it is written to `.cursor/rules/graith.mdc`. Other agents (Codex, OpenCode, Agy) do not currently support prompt injection. Teaches agents how to use `gr status`, `gr msg`, `gr store`, and other graith primitives. Set `inject_prompt = false` on a per-agent basis to disable.
+A multiline string injected into the agent's environment. For Claude, it is passed via `--append-system-prompt`. For Cursor, it is written to `.cursor/rules/graith.mdc`. For Codex, it is passed as a per-session `-c developer_instructions=...` config override (never written to a repository `AGENTS.md`). Other agents (OpenCode, Agy) do not currently support prompt injection. Teaches agents how to use `gr status`, `gr msg`, `gr store`, and other graith primitives. Set `inject_prompt = false` on a per-agent basis to disable.
 
 ### `allowed_repo_paths`
 

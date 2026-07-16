@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,7 +17,7 @@ func TestDetectPromptInjection(t *testing.T) {
 	}{
 		{"claude", promptInjectionAppendSystemPrompt},
 		{"cursor", promptInjectionCursorRules},
-		{"codex", promptInjectionNone},
+		{"codex", promptInjectionDeveloperInstructions},
 		{"opencode", promptInjectionNone},
 		{"agy", promptInjectionNone},
 		{"", promptInjectionNone},
@@ -89,13 +90,90 @@ func TestInjectPrompt_Cursor(t *testing.T) {
 func TestInjectPrompt_Unknown(t *testing.T) {
 	sm := testSessionManager()
 
-	args, err := sm.injectPrompt("codex", "")
+	// "opencode" has no prompt-injection method (agy/opencode both fall through).
+	args, err := sm.injectPrompt("opencode", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	if len(args) != 0 {
 		t.Errorf("expected no args for unknown agent, got %d", len(args))
+	}
+}
+
+// TestInjectPrompt_Codex is the regression test for #1185: Codex sessions were
+// silently getting no graith operating instructions because detectPromptInjection
+// returned promptInjectionNone. They must now receive the prompt via a
+// `-c developer_instructions=<json>` config override.
+func TestInjectPrompt_Codex(t *testing.T) {
+	sm := testSessionManager()
+
+	args, err := sm.injectPrompt("codex", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(args) != 2 {
+		t.Fatalf("expected 2 args, got %d: %v", len(args), args)
+	}
+
+	if args[0] != "-c" {
+		t.Errorf("args[0] = %q, want -c", args[0])
+	}
+
+	const prefix = "developer_instructions="
+	if !strings.HasPrefix(args[1], prefix) {
+		t.Fatalf("args[1] = %q, want prefix %q", args[1], prefix)
+	}
+
+	// The value must be a JSON-encoded string that decodes back to a prompt
+	// mentioning graith's commands (verbatim, incl. newlines).
+	encoded := strings.TrimPrefix(args[1], prefix)
+
+	var decoded string
+	if err := json.Unmarshal([]byte(encoded), &decoded); err != nil {
+		t.Fatalf("value after %q is not valid JSON: %v (%q)", prefix, err, encoded)
+	}
+
+	if !strings.Contains(decoded, "gr status") {
+		t.Error("decoded developer_instructions should mention gr status")
+	}
+
+	if decoded != sm.Config().AgentPrompt {
+		t.Error("decoded developer_instructions should equal the configured agent prompt verbatim")
+	}
+}
+
+// TestCodexDeveloperInstructionsArgs_RoundTrip guards the JSON-encoding choice:
+// a prompt that would otherwise be misparsed by Codex's TOML-first `-c` parser
+// (a lone scalar, an array-looking line, embedded quotes/newlines) must survive
+// verbatim as a quoted string.
+func TestCodexDeveloperInstructionsArgs_RoundTrip(t *testing.T) {
+	prompts := []string{
+		"42",
+		"true",
+		"[not, an, array]",
+		"line one\nline two\twith tab",
+		`he said "braw" and 'canny'`,
+		"trailing space and =equals= signs",
+	}
+
+	for _, prompt := range prompts {
+		args := codexDeveloperInstructionsArgs(prompt)
+		if len(args) != 2 || args[0] != "-c" {
+			t.Fatalf("codexDeveloperInstructionsArgs(%q) = %v", prompt, args)
+		}
+
+		encoded := strings.TrimPrefix(args[1], "developer_instructions=")
+
+		var decoded string
+		if err := json.Unmarshal([]byte(encoded), &decoded); err != nil {
+			t.Fatalf("value for %q is not valid JSON: %v", prompt, err)
+		}
+
+		if decoded != prompt {
+			t.Errorf("round-trip mismatch: got %q, want %q", decoded, prompt)
+		}
 	}
 }
 
