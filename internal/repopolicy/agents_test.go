@@ -23,6 +23,7 @@ func TestRootAgentsSizeBudget(t *testing.T) {
 	}
 
 	path := filepath.Join(filepath.Dir(thisFile), "..", "..", "AGENTS.md")
+
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read root AGENTS.md: %v", err)
