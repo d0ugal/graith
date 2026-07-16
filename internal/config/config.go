@@ -216,6 +216,165 @@ type OrchestratorConfig struct {
 	Prompt      string                    `toml:"prompt"`
 	PromptFile  string                    `toml:"prompt_file"`
 	Sandbox     OrchestratorSandboxConfig `toml:"sandbox"`
+	Restart     OrchestratorRestartConfig `toml:"restart"`
+}
+
+// OrchestratorRestartConfig tunes how the daemon auto-restarts the orchestrator
+// after it exits unexpectedly (crash/watchdog, not a user/idle/shutdown stop).
+//
+// Two backoff modes are supported. When Schedule is non-empty it wins: it is the
+// explicit list of per-attempt delays, and the final entry repeats for every
+// attempt beyond its length. When Schedule is empty a geometric backoff is
+// computed as InitialBackoff × Multiplier^level, capped at MaxBackoff.
+type OrchestratorRestartConfig struct {
+	// InitialBackoff is the first restart delay in geometric mode (Schedule empty).
+	// Empty uses OrchestratorInitialBackoffDefault.
+	InitialBackoff string `toml:"initial_backoff"`
+	// MaxBackoff caps the restart delay in geometric mode. Empty uses
+	// OrchestratorMaxBackoffDefault.
+	MaxBackoff string `toml:"max_backoff"`
+	// Multiplier grows the delay each attempt in geometric mode. Values <= 1 fall
+	// back to OrchestratorMultiplierDefault.
+	Multiplier float64 `toml:"multiplier"`
+	// Schedule is an explicit list of per-attempt delays. When set it overrides
+	// the geometric knobs; the last entry repeats for attempts beyond its length.
+	Schedule []string `toml:"schedule"`
+	// StableReset is how long a run must last before its exit resets the backoff
+	// level to 0. Empty uses OrchestratorStableResetDefault.
+	StableReset string `toml:"stable_reset"`
+	// FreshStartThreshold is the number of consecutive restarts after which the
+	// orchestrator is relaunched fresh (new agent session id). Values < 1 fall
+	// back to OrchestratorFreshStartThresholdDefault.
+	FreshStartThreshold int `toml:"fresh_start_threshold"`
+}
+
+// Orchestrator restart defaults. The default schedule preserves graith's
+// historical backoff curve exactly; the geometric defaults apply only when a
+// user clears Schedule to opt into computed backoff.
+const (
+	OrchestratorInitialBackoffDefault      = 2 * time.Second
+	OrchestratorMaxBackoffDefault          = 300 * time.Second
+	OrchestratorMultiplierDefault          = 2.0
+	OrchestratorStableResetDefault         = 60 * time.Second
+	OrchestratorFreshStartThresholdDefault = 3
+)
+
+var orchestratorDefaultSchedule = []time.Duration{
+	2 * time.Second,
+	4 * time.Second,
+	8 * time.Second,
+	16 * time.Second,
+	32 * time.Second,
+	60 * time.Second,
+	300 * time.Second,
+}
+
+// parsedSchedule parses the explicit Schedule entries, dropping any that fail to
+// parse or are negative. It returns nil when Schedule is empty or nothing valid
+// survives, signalling geometric mode to callers.
+func (r OrchestratorRestartConfig) parsedSchedule() []time.Duration {
+	if len(r.Schedule) == 0 {
+		return nil
+	}
+
+	out := make([]time.Duration, 0, len(r.Schedule))
+
+	for _, s := range r.Schedule {
+		d, err := ParseDurationWithDays(s)
+		if err != nil || d < 0 {
+			continue
+		}
+
+		out = append(out, d)
+	}
+
+	if len(out) == 0 {
+		return nil
+	}
+
+	return out
+}
+
+// DelayForLevel returns the restart delay for a given (0-based) backoff level.
+// An explicit Schedule wins, with its final entry repeating past its length;
+// otherwise the delay is computed geometrically. With no restart config at all
+// this reproduces graith's historical schedule (2s,4s,8s,16s,32s,60s,300s).
+func (r OrchestratorRestartConfig) DelayForLevel(level int) time.Duration {
+	if level < 0 {
+		level = 0
+	}
+
+	if sched := r.parsedSchedule(); sched != nil {
+		if level >= len(sched) {
+			level = len(sched) - 1
+		}
+
+		return sched[level]
+	}
+
+	// Nothing configured at all: preserve the historical schedule exactly rather
+	// than the (subtly different) geometric curve.
+	if r.InitialBackoff == "" && r.MaxBackoff == "" && r.Multiplier == 0 {
+		idx := level
+		if idx >= len(orchestratorDefaultSchedule) {
+			idx = len(orchestratorDefaultSchedule) - 1
+		}
+
+		return orchestratorDefaultSchedule[idx]
+	}
+
+	initial := durationOrDefault(r.InitialBackoff, OrchestratorInitialBackoffDefault)
+	maxDelay := durationOrDefault(r.MaxBackoff, OrchestratorMaxBackoffDefault)
+
+	mult := r.Multiplier
+	if mult <= 1 {
+		mult = OrchestratorMultiplierDefault
+	}
+
+	delay := float64(initial)
+	for i := 0; i < level; i++ {
+		delay *= mult
+		if delay >= float64(maxDelay) {
+			return maxDelay
+		}
+	}
+
+	if d := time.Duration(delay); d < maxDelay {
+		return d
+	}
+
+	return maxDelay
+}
+
+// StableResetDuration is how long a run must last before its exit resets the
+// backoff level. Empty or unparseable uses OrchestratorStableResetDefault.
+func (r OrchestratorRestartConfig) StableResetDuration() time.Duration {
+	return durationOrDefault(r.StableReset, OrchestratorStableResetDefault)
+}
+
+// FreshStartThresholdOrDefault returns the consecutive-restart count that
+// triggers a fresh start. Non-positive values fall back to the default.
+func (r OrchestratorRestartConfig) FreshStartThresholdOrDefault() int {
+	if r.FreshStartThreshold < 1 {
+		return OrchestratorFreshStartThresholdDefault
+	}
+
+	return r.FreshStartThreshold
+}
+
+// durationOrDefault parses a duration string, returning def when it is empty,
+// unparseable, or negative.
+func durationOrDefault(s string, def time.Duration) time.Duration {
+	if s == "" {
+		return def
+	}
+
+	d, err := ParseDurationWithDays(s)
+	if err != nil || d < 0 {
+		return def
+	}
+
+	return d
 }
 
 type OrchestratorSandboxConfig struct {
@@ -1725,6 +1884,29 @@ func (c *Config) Validate() error {
 
 		if _, err := ParseDurationWithDays(f.val); err != nil {
 			errs = append(errs, fmt.Errorf("%s %q: %w", f.name, f.val, err))
+		}
+	}
+
+	// [orchestrator.restart]: a non-empty but unparseable duration must fail
+	// loudly rather than silently falling back to the accessor default (mirrors
+	// delete.retention). Schedule entries are validated too; a bad entry is
+	// otherwise silently skipped by parsedSchedule.
+	rc := c.Orchestrator.Restart
+	for _, f := range []struct{ name, val string }{
+		{"orchestrator.restart.initial_backoff", rc.InitialBackoff},
+		{"orchestrator.restart.max_backoff", rc.MaxBackoff},
+		{"orchestrator.restart.stable_reset", rc.StableReset},
+	} {
+		if strings.TrimSpace(f.val) != "" {
+			if _, err := ParseDurationWithDays(f.val); err != nil {
+				errs = append(errs, fmt.Errorf("%s %q: %w", f.name, f.val, err))
+			}
+		}
+	}
+
+	for i, s := range rc.Schedule {
+		if _, err := ParseDurationWithDays(s); err != nil {
+			errs = append(errs, fmt.Errorf("orchestrator.restart.schedule[%d] %q: %w", i, s, err))
 		}
 	}
 

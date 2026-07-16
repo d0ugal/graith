@@ -15,19 +15,6 @@ import (
 	"github.com/d0ugal/graith/internal/store"
 )
 
-var orchestratorBackoffDelays = []time.Duration{
-	2 * time.Second,
-	4 * time.Second,
-	8 * time.Second,
-	16 * time.Second,
-	32 * time.Second,
-	60 * time.Second,
-	300 * time.Second,
-}
-
-const orchestratorStableThreshold = 60 * time.Second
-const orchestratorFreshStartThreshold = 3
-
 func (sm *SessionManager) orchestratorScratchDir() string {
 	return filepath.Join(sm.paths.DataDir, "orchestrator", "scratch")
 }
@@ -478,6 +465,7 @@ func (sm *SessionManager) handleOrchestratorExit(ctx context.Context, id string)
 	stopReason := sess.StopReason
 	backoffLevel := sess.BackoffLevel
 	lastStarted := sess.LastStartedAt
+	restartCfg := sm.cfg.Orchestrator.Restart
 
 	sm.mu.RUnlock()
 
@@ -486,7 +474,7 @@ func (sm *SessionManager) handleOrchestratorExit(ctx context.Context, id string)
 		return
 	}
 
-	if time.Since(lastStarted) >= orchestratorStableThreshold {
+	if time.Since(lastStarted) >= restartCfg.StableResetDuration() {
 		sm.mu.Lock()
 		if s, ok := sm.state.Sessions[id]; ok {
 			s.BackoffLevel = 0
@@ -498,12 +486,7 @@ func (sm *SessionManager) handleOrchestratorExit(ctx context.Context, id string)
 		backoffLevel = 0
 	}
 
-	delayIdx := backoffLevel
-	if delayIdx >= len(orchestratorBackoffDelays) {
-		delayIdx = len(orchestratorBackoffDelays) - 1
-	}
-
-	delay := orchestratorBackoffDelays[delayIdx]
+	delay := restartCfg.DelayForLevel(backoffLevel)
 
 	sm.mu.Lock()
 	if s, ok := sm.state.Sessions[id]; ok {
@@ -540,7 +523,7 @@ func (sm *SessionManager) handleOrchestratorExit(ctx context.Context, id string)
 		return
 	}
 
-	if backoffLevel+1 >= orchestratorFreshStartThreshold {
+	if backoffLevel+1 >= restartCfg.FreshStartThresholdOrDefault() {
 		sm.mu.Lock()
 		if s, ok := sm.state.Sessions[id]; ok && forcesID(s.Agent) {
 			s.AgentSessionID = newAgentSessionID()

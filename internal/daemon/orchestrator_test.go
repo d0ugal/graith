@@ -297,11 +297,49 @@ func TestHandleOrchestratorExit_BackoffScheduling_Cov(t *testing.T) {
 	// Started long ago: the stable-threshold branch resets backoff to 0 first,
 	// then increments to 1.
 	sm.state.Sessions["ben"].BackoffLevel = 5
-	sm.state.Sessions["ben"].LastStartedAt = time.Now().Add(-2 * orchestratorStableThreshold)
+	sm.state.Sessions["ben"].LastStartedAt = time.Now().Add(-2 * config.OrchestratorStableResetDefault)
 	sm.handleOrchestratorExit(ctx, "ben")
 
 	if got := sm.state.Sessions["ben"].BackoffLevel; got != 1 {
 		t.Errorf("stable-threshold reset then increment should yield 1, got %d", got)
+	}
+}
+
+// TestHandleOrchestratorExit_RestartConfig is a regression test for the restart
+// policy being configurable (#1239): a custom stable_reset window and a custom
+// fresh-start threshold must drive the backoff/reset behaviour instead of the
+// hardcoded 60s / 3 that preceded the config.
+func TestHandleOrchestratorExit_RestartConfig(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // skip the sleep; we only assert the pre-delay bookkeeping
+
+	// A run started 2m ago resets backoff under a 1m window but not under a 1h
+	// window — proving stable_reset is read from config, not hardcoded to 60s.
+	cases := []struct {
+		name        string
+		stableReset string
+		want        int // BackoffLevel after the exit is handled
+	}{
+		{"window longer than run keeps backoff", "1h", 5},   // no reset: 4 -> 5
+		{"window shorter than run resets backoff", "1m", 1}, // reset to 0 -> 1
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sm := newOrchTestSM(t)
+			sm.cfg.Orchestrator.Restart.StableReset = tc.stableReset
+			sm.state.Sessions["ben"] = &SessionState{
+				ID:            "ben",
+				SystemKind:    SystemKindOrchestrator,
+				StopReason:    StopReasonCrash,
+				BackoffLevel:  4,
+				LastStartedAt: time.Now().Add(-2 * time.Minute),
+			}
+			sm.handleOrchestratorExit(ctx, "ben")
+
+			if got := sm.state.Sessions["ben"].BackoffLevel; got != tc.want {
+				t.Errorf("stable_reset=%s: BackoffLevel = %d, want %d", tc.stableReset, got, tc.want)
+			}
+		})
 	}
 }
 
