@@ -532,6 +532,14 @@
             "kind": "bool"
           },
           "optional": true
+        },
+        {
+          "name": "codex",
+          "type": {
+            "kind": "object",
+            "ref": "CodexOptions"
+          },
+          "optional": true
         }
       ]
     },

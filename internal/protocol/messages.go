@@ -94,6 +94,10 @@ type CreateMsg struct {
 	// worktree is created (issue #1012). Lets sessions be created from local
 	// repo state when SSH auth is unavailable (Secretive/biometric, offline).
 	NoFetch bool `json:"no_fetch,omitempty"`
+	// Codex carries typed per-session Codex CLI options (profile, reasoning
+	// effort, service tier, web search, approval policy — issue #1186). Nil when
+	// none were set; only meaningful for `--agent codex`.
+	Codex *config.CodexOptions `json:"codex,omitempty"`
 }
 
 type ForkMsg struct {

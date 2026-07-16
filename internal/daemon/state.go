@@ -65,16 +65,20 @@ type SessionState struct {
 	// DriverKind is the session's transport: DriverPTY (interactive PTY) or
 	// DriverHeadless (headless stream-json, issue #1075). Resolved once at
 	// creation and never re-derived from config. Empty is treated as DriverPTY.
-	DriverKind      string        `json:"driver_kind,omitempty"`
-	Model           string        `json:"model,omitempty"`
-	Status          SessionStatus `json:"status"`
-	AgentStatus     string        `json:"agent_status,omitempty"`
-	StatusChangedAt time.Time     `json:"status_changed_at"`
-	IdleSince       *time.Time    `json:"-"`
-	GitDirty        bool          `json:"-"`
-	GitUnpushed     int           `json:"-"`
-	PullRequest     PRStatus      `json:"-"`
-	CI              CIStatus      `json:"-"`
+	DriverKind string `json:"driver_kind,omitempty"`
+	Model      string `json:"model,omitempty"`
+	// Codex holds typed per-session Codex CLI options (issue #1186), persisted so
+	// a resume/fork replays the same flags. Nil for non-codex sessions or when no
+	// option was set. No migration needed: an older state simply has nil here.
+	Codex           *config.CodexOptions `json:"codex,omitempty"`
+	Status          SessionStatus        `json:"status"`
+	AgentStatus     string               `json:"agent_status,omitempty"`
+	StatusChangedAt time.Time            `json:"status_changed_at"`
+	IdleSince       *time.Time           `json:"-"`
+	GitDirty        bool                 `json:"-"`
+	GitUnpushed     int                  `json:"-"`
+	PullRequest     PRStatus             `json:"-"`
+	CI              CIStatus             `json:"-"`
 	// Tokens is the runtime-derived token usage for the session's current agent,
 	// re-derived from the on-disk transcript by RunTokenLoop. Like PR/CI it is
 	// NOT persisted (repopulates within one tick after a restart) and is always

@@ -1101,6 +1101,54 @@ type Agent struct {
 	HeadlessCapable *bool `json:"headless_capable,omitempty" toml:"headless_capable"`
 }
 
+// CodexOptions holds typed per-session options for the Codex CLI (issue #1186).
+// Each maps to a Codex flag or `-c` config override and is emitted only when set,
+// so an unset field leaves Codex's own default untouched. The session model is
+// tracked separately (SessionState.Model / CreateOpts.Model) and is not repeated
+// here. These are Codex-specific: setting any against a non-codex agent is an
+// error rather than a silent no-op. Reasoning effort and service tier are passed
+// as `-c model_reasoning_effort=…` / `-c service_tier=…` because Codex has no
+// dedicated flag for them; profile, web search, and approval policy have flags.
+type CodexOptions struct {
+	Profile         string `json:"profile,omitempty"`
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	ServiceTier     string `json:"service_tier,omitempty"`
+	WebSearch       bool   `json:"web_search,omitempty"`
+	ApprovalPolicy  string `json:"approval_policy,omitempty"`
+}
+
+// IsZero reports whether no Codex option is set.
+func (o CodexOptions) IsZero() bool {
+	return o == CodexOptions{}
+}
+
+// Allowed values for the enumerated Codex options. Codex itself validates the
+// underlying config, but graith checks here so a typo fails session creation
+// with a clear message instead of a confusing Codex startup error.
+var (
+	codexReasoningEfforts = map[string]bool{"minimal": true, "low": true, "medium": true, "high": true, "xhigh": true}
+	codexServiceTiers     = map[string]bool{"auto": true, "default": true, "flex": true, "priority": true}
+	codexApprovalPolicies = map[string]bool{"untrusted": true, "on-request": true, "never": true}
+)
+
+// ValidateCodexOptions rejects out-of-range enumerated values. Empty strings are
+// always valid (the option is simply not passed).
+func ValidateCodexOptions(o CodexOptions) error {
+	if o.ReasoningEffort != "" && !codexReasoningEfforts[o.ReasoningEffort] {
+		return fmt.Errorf("invalid codex reasoning effort %q (want one of: minimal, low, medium, high, xhigh)", o.ReasoningEffort)
+	}
+
+	if o.ServiceTier != "" && !codexServiceTiers[o.ServiceTier] {
+		return fmt.Errorf("invalid codex service tier %q (want one of: auto, default, flex, priority)", o.ServiceTier)
+	}
+
+	if o.ApprovalPolicy != "" && !codexApprovalPolicies[o.ApprovalPolicy] {
+		return fmt.Errorf("invalid codex approval policy %q (want one of: untrusted, on-request, never)", o.ApprovalPolicy)
+	}
+
+	return nil
+}
+
 // HeadlessCapableEnabled reports whether this agent may run in headless
 // stream-json mode. Defaults to false when unset.
 func (a Agent) HeadlessCapableEnabled() bool {
