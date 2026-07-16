@@ -3,12 +3,14 @@ package headless
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -38,7 +40,10 @@ type Opts struct {
 
 	// Prompt is the initial turn, sent as a stream-json user message on stdin
 	// right after launch (the control-channel launch takes no positional
-	// prompt). Empty is allowed but a one-shot run then has nothing to do.
+	// prompt). It should be non-empty: with the control channel and no
+	// positional prompt, an empty prompt gives the CLI no turn to run, so it
+	// blocks on stdin and never reaches a result (the daemon guards against this
+	// at session creation).
 	Prompt string
 
 	// Control reports whether the process was launched with the stdin control
@@ -49,8 +54,10 @@ type Opts struct {
 
 	// OnPermission is invoked for each inbound can_use_tool request. If nil,
 	// every tool request is denied (fail-closed — a headless session must not
-	// block on a human that will never answer). The callback must not block
-	// indefinitely; it runs on the read loop's goroutine via a worker.
+	// block on a human that will never answer). It runs on a dedicated goroutine
+	// per request (not the read loop), so a slow backend can't stall reading —
+	// but it still must not block indefinitely, as the CLI blocks its turn on the
+	// decision.
 	OnPermission func(PermissionRequest) PermissionDecision
 }
 
@@ -66,9 +73,9 @@ type Session struct {
 	controlEnabled bool // launched with the stdin control channel
 	onPermission   func(PermissionRequest) PermissionDecision
 
-	writeMu        sync.Mutex // serialises all writes to stdin (NDJSON lines)
-	stdinClosed    bool       // set under writeMu once stdin is closed
-	stdinCloseOnce sync.Once  // one-shot: close stdin on the terminal result
+	writeMu        sync.Mutex  // serialises all writes to stdin (NDJSON lines)
+	stdinClosed    atomic.Bool // set once stdin is closed; new writes bail
+	stdinCloseOnce sync.Once   // one-shot: close stdin on the terminal result
 
 	createdAt time.Time // set once at New; immutable
 
@@ -255,8 +262,12 @@ func (s *Session) handleLine(line []byte) {
 // tool input back as updatedInput; a deny carries a human-readable message.
 func (s *Session) handlePermission(ev event) {
 	var body canUseToolRequest
-
-	_ = json.Unmarshal(ev.Request, &body) // tolerate absence; fields default
+	if err := json.Unmarshal(ev.Request, &body); err != nil {
+		// Tolerate a malformed body (fields default), but surface it: the
+		// protocol is pinned to a specific claude version and will drift
+		// silently, so a decode failure here is the first sign of shape drift.
+		s.scrollbackBanner("[graith] malformed can_use_tool request body: " + err.Error())
+	}
 
 	decision := PermissionDecision{Allow: false, Reason: "headless: no approval backend"}
 	if s.onPermission != nil {
@@ -321,14 +332,20 @@ func (s *Session) Interrupt(_ int, _ time.Duration) error {
 }
 
 // signalInterrupt sends SIGINT to the process group (the SessionDriver fallback
-// and the non-control path).
+// and the non-control path). Interrupting an already-exited session is a no-op,
+// not an error: ESRCH (or a known exit) means the intent — stop the agent — is
+// already satisfied.
 func (s *Session) signalInterrupt() error {
 	pid := s.ProcessPID()
-	if pid == 0 {
+	if pid == 0 || s.Exited() {
 		return nil
 	}
 
-	return syscall.Kill(-pid, syscall.SIGINT)
+	if err := syscall.Kill(-pid, syscall.SIGINT); err != nil && !errors.Is(err, syscall.ESRCH) {
+		return err
+	}
+
+	return nil
 }
 
 // ContextUsage issues a get_context_usage control request and returns the raw
@@ -422,12 +439,26 @@ func (s *Session) deliverControlResponse(raw json.RawMessage) {
 		return // unmatched/duplicate id — tolerated, not fatal
 	}
 
+	// Only a literal "success" subtype is a real acknowledgement. The protocol
+	// is SDK-internal and version-pinned, so an "error" — or any unknown/empty
+	// subtype — must fail the waiter with an error (never a nil-payload success),
+	// so e.g. Interrupt falls back to SIGINT rather than falsely reporting the
+	// interrupt acknowledged. An unexpected subtype also marks the session
+	// degraded.
 	res := controlResult{payload: cr.Payload}
-	if cr.Subtype == "error" {
+
+	switch cr.Subtype {
+	case "success":
+		// ok
+	case "error":
 		res.errMsg = cr.Error
 		if res.errMsg == "" {
 			res.errMsg = "control request returned error"
 		}
+	default:
+		s.markDegraded()
+
+		res.errMsg = fmt.Sprintf("unexpected control response subtype %q", cr.Subtype)
 	}
 
 	select {
@@ -471,7 +502,7 @@ func (s *Session) writeJSON(v any) error {
 		return fmt.Errorf("headless session has exited")
 	}
 
-	if s.stdinClosed {
+	if s.stdinClosed.Load() {
 		return fmt.Errorf("headless session stdin is closed")
 	}
 
@@ -480,24 +511,33 @@ func (s *Session) writeJSON(v any) error {
 	return err
 }
 
-// closeStdinAfterResult closes stdin exactly once, on the terminal result, so
-// the one-shot CLI sees EOF and exits. It is a no-op when there is no control
-// channel (stdin was never a message channel) or no stdin handle. The close is
-// serialised under writeMu so it can't race an in-flight control/permission
-// write, and stdinClosed makes subsequent writes fail cleanly rather than
-// erroring on a closed pipe.
-func (s *Session) closeStdinAfterResult() {
-	if !s.controlEnabled || s.stdin == nil {
+// closeStdin closes stdin exactly once. It deliberately does NOT hold writeMu:
+// a writer blocked in a full-pipe s.stdin.Write() holds writeMu, and taking it
+// here would deadlock (the close that would unblock that write could never run).
+// Closing the fd concurrently is safe for an *os.File and unblocks any in-flight
+// Write with an error, which is the whole point — it breaks a wedged CLI out of
+// a stuck write. The atomic stdinClosed flag (set first) makes subsequent writes
+// bail cleanly instead of racing the close.
+func (s *Session) closeStdin() {
+	if s.stdin == nil {
 		return
 	}
 
 	s.stdinCloseOnce.Do(func() {
-		s.writeMu.Lock()
-		defer s.writeMu.Unlock()
-
-		s.stdinClosed = true
+		s.stdinClosed.Store(true)
 		_ = s.stdin.Close()
 	})
+}
+
+// closeStdinAfterResult closes stdin on the terminal result so the one-shot CLI
+// sees EOF and exits. No-op without the control channel (stdin was never a
+// message channel).
+func (s *Session) closeStdinAfterResult() {
+	if !s.controlEnabled {
+		return
+	}
+
+	s.closeStdin()
 }
 
 // scrollbackBanner writes a graith-authored line verbatim to the scrollback (and
@@ -585,17 +625,10 @@ func (s *Session) ForceKill() error {
 }
 
 func (s *Session) Close() {
-	// Close stdin under the same serialisation as closeStdinAfterResult so a
-	// teardown can't race an in-flight control write or double-close the pipe.
-	s.stdinCloseOnce.Do(func() {
-		s.writeMu.Lock()
-		defer s.writeMu.Unlock()
-
-		s.stdinClosed = true
-		if s.stdin != nil {
-			_ = s.stdin.Close()
-		}
-	})
+	// Close stdin (idempotent, shared with closeStdinAfterResult). This does not
+	// hold writeMu, so a teardown of a session with a writer stuck on a full
+	// pipe still completes — the close unblocks that write.
+	s.closeStdin()
 	// Wait for both output drains before closing scrollback, so a late stderr
 	// banner can't race scrollback.Close (drainStderr writes to it).
 	<-s.readDone

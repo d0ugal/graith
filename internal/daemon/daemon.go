@@ -4376,6 +4376,7 @@ func (sm *SessionManager) Delete(id string) error {
 	delete(sm.state.Sessions, id)
 	delete(sm.hookReports, id)
 	delete(sm.silentWarned, id)
+	delete(sm.headlessEscalated, id)
 
 	if sessToken != "" {
 		delete(sm.tokenIndex, sessToken)

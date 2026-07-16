@@ -3,8 +3,10 @@ package headless
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -292,6 +294,29 @@ func TestDeliverControlResponseErrorSubtype(t *testing.T) {
 	res := <-ch
 	if _, err := res.unwrap(); err == nil {
 		t.Fatal("error subtype should unwrap to an error")
+	}
+}
+
+func TestDeliverControlResponseUnknownSubtypeErrorsAndDegrades(t *testing.T) {
+	t.Parallel()
+
+	s := newBareSession(t)
+
+	ch := make(chan controlResult, 1)
+	s.pending["req-1"] = ch
+
+	// An unknown/empty subtype must NOT unwrap as a nil-payload success (which
+	// would make e.g. Interrupt falsely report success and skip its SIGINT
+	// fallback). It must error the waiter and mark the session degraded.
+	s.deliverControlResponse(json.RawMessage(`{"request_id":"req-1","response":{}}`))
+
+	res := <-ch
+	if _, err := res.unwrap(); err == nil {
+		t.Fatal("missing/unknown subtype should unwrap to an error")
+	}
+
+	if !s.Snapshot().Degraded {
+		t.Fatal("unknown subtype should mark the session degraded")
 	}
 }
 
@@ -678,6 +703,68 @@ func TestInterruptFallsBackToSignalWithoutControl(t *testing.T) {
 
 	if !s.Exited() {
 		t.Fatal("session should have exited after a SIGINT interrupt")
+	}
+}
+
+// blockingWriteCloser blocks in Write until Close is called, then that Write
+// returns an error — mirroring how an *os.File pipe write unblocks when the fd
+// is closed from another goroutine.
+type blockingWriteCloser struct {
+	release chan struct{}
+	once    sync.Once
+}
+
+func (b *blockingWriteCloser) Write(p []byte) (int, error) {
+	<-b.release // block until Close
+
+	return 0, errors.New("closed")
+}
+
+func (b *blockingWriteCloser) Close() error {
+	b.once.Do(func() { close(b.release) })
+
+	return nil
+}
+
+// TestCloseStdinUnblocksStuckWriter is the regression test for the close-on-
+// result deadlock: a writer stuck in s.stdin.Write holds writeMu; closing stdin
+// must not itself need writeMu (or it would deadlock), and must unblock the
+// stuck write. Both closeStdinAfterResult and Close go through the same path.
+func TestCloseStdinUnblocksStuckWriter(t *testing.T) {
+	t.Parallel()
+
+	bw := &blockingWriteCloser{release: make(chan struct{})}
+	s := &Session{
+		stdin:          bw,
+		controlEnabled: true,
+		pending:        make(map[string]chan controlResult),
+		done:           make(chan struct{}),
+	}
+
+	writeErr := make(chan error, 1)
+	go func() { writeErr <- s.WriteInput([]byte("bide")) }() // blocks holding writeMu
+
+	// Give the writer time to enter Write and hold the mutex.
+	time.Sleep(100 * time.Millisecond)
+
+	// This must return promptly (not block on writeMu) and unblock the writer.
+	done := make(chan struct{})
+
+	go func() { s.closeStdinAfterResult(); close(done) }()
+
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("closeStdinAfterResult deadlocked behind the stuck writer")
+	}
+
+	select {
+	case err := <-writeErr:
+		if err == nil {
+			t.Fatal("the stuck write should have returned an error once stdin closed")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("the stuck write was never unblocked by the close")
 	}
 }
 
