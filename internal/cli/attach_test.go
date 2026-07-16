@@ -254,7 +254,7 @@ func TestSortedSessionIDsCov(t *testing.T) {
 		{ID: "n1", Name: "naught", RepoName: ""},
 	}
 
-	got := sortedSessionIDs(sessions, "b2")
+	got := sortedSessionIDs(sessions)
 
 	// "(no repo)" sorts first (paren < letters), then bothy, then croft.
 	// Within bothy: running (alpha=b2) before stopped (zephyr=b1).
@@ -265,7 +265,7 @@ func TestSortedSessionIDsCov(t *testing.T) {
 }
 
 func TestSortedSessionIDsEmptyCov(t *testing.T) {
-	if got := sortedSessionIDs(nil, ""); got != nil {
+	if got := sortedSessionIDs(nil); got != nil {
 		t.Errorf("expected nil for empty input, got %v", got)
 	}
 }

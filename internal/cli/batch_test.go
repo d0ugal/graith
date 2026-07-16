@@ -388,7 +388,7 @@ func okEnvelope() protocol.Envelope {
 	return protocol.Envelope{Type: "ok"}
 }
 
-// fakeBatchConn is a scripted batchConn: each ReadControlResponse call returns
+// fakeBatchConn is a scripted controlConn: each ReadControlResponse call returns
 // the next queued response (or read error). It records the control types sent
 // so tests can assert every non-skipped session was contacted.
 type fakeBatchConn struct {
