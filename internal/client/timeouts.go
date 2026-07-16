@@ -1,6 +1,15 @@
 package client
 
-import "time"
+import (
+	"net"
+	"time"
+)
+
+// dialLocalDaemon dials the local daemon Unix socket. It is a package var (not a
+// direct net.DialTimeout call) so tests can observe the timeout the fast-connect
+// paths pass and prove ConnectFast/ConnectForApproval honour the configured
+// daemonDialTimeout rather than a literal (issue #1286).
+var dialLocalDaemon = net.DialTimeout
 
 // Connection deadlines and retry cadence for talking to a daemon (issue #1242).
 // These are package vars rather than consts so ConfigureConnection can install

@@ -1,8 +1,12 @@
 package client
 
 import (
+	"errors"
+	"net"
 	"testing"
 	"time"
+
+	"github.com/d0ugal/graith/internal/config"
 )
 
 // saveConnectionTimeouts snapshots the package-level connection vars and
@@ -85,4 +89,56 @@ func TestConfigureConnectionIgnoresNonPositive(t *testing.T) {
 	if remotePairingTimeout != 9*time.Minute {
 		t.Errorf("negative RemotePairing changed remotePairingTimeout to %v, want unchanged", remotePairingTimeout)
 	}
+}
+
+// TestFastPathsHonourConfiguredDialTimeout proves ConnectFast and
+// ConnectForApproval dial with the configured local dial timeout rather than a
+// hard-coded literal. The test installs a non-default duration via
+// ConfigureConnection and captures the timeout each path passes to the dialer
+// through the dialLocalDaemon seam (issue #1286).
+func TestFastPathsHonourConfiguredDialTimeout(t *testing.T) {
+	saveConnectionTimeouts(t)
+
+	const configured = 1234 * time.Millisecond
+
+	ConfigureConnection(ConnectionTimeouts{Dial: configured})
+
+	origDial := dialLocalDaemon
+
+	t.Cleanup(func() { dialLocalDaemon = origDial })
+
+	var captured time.Duration
+
+	dialLocalDaemon = func(_, _ string, timeout time.Duration) (net.Conn, error) {
+		captured = timeout
+		// Fail the dial so the handshake path is never reached; only the dial
+		// timeout is under test here.
+		return nil, errors.New("dial refused (test seam)")
+	}
+
+	paths := config.Paths{SocketPath: "/nonexistent/graith-test.sock"}
+
+	t.Run("ConnectFast", func(t *testing.T) {
+		captured = 0
+
+		if _, err := ConnectFast(paths); err == nil {
+			t.Fatal("ConnectFast with a failing dialer = nil error, want error")
+		}
+
+		if captured != configured {
+			t.Errorf("ConnectFast dial timeout = %v, want configured %v", captured, configured)
+		}
+	})
+
+	t.Run("ConnectForApproval", func(t *testing.T) {
+		captured = 0
+
+		if _, err := ConnectForApproval(paths, 30*time.Second); err == nil {
+			t.Fatal("ConnectForApproval with a failing dialer = nil error, want error")
+		}
+
+		if captured != configured {
+			t.Errorf("ConnectForApproval dial timeout = %v, want configured %v", captured, configured)
+		}
+	})
 }
