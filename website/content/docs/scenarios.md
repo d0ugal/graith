@@ -87,6 +87,10 @@ session (the same mechanism as the repo-level `includes` config), so an agent
 can see and edit sibling repos. Paths are merged with — and deduplicated
 against — any includes configured on the repo's `[[repos]]` entry.
 
+`includes` and `star` only apply to sessions the scenario creates. A
+`shared = true` session reuses an already-running session as-is, so those two
+fields are ignored for it.
+
 **Starred sessions:** `star = true` creates the session already starred. A
 starred session is protected from an accidental manual `gr delete` (and bulk
 sweeps). Note `shared = true` only shields a session from scenario

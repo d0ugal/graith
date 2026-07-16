@@ -792,9 +792,6 @@ func (sm *SessionManager) repoStoreDir(repoRoot string) (string, error) {
 	return dir, nil
 }
 
-// CreateOpts holds the parameters for SessionManager.Create. Using a struct
-// keeps call sites self-documenting and lets new options default to their
-// zero value without breaking existing callers.
 // mergeIncludes combines the repo-config includes with any per-session extra
 // includes (e.g. from a scenario file), preserving order and dropping
 // duplicates that resolve to the same path. Repo-config includes come first.
@@ -820,6 +817,9 @@ func mergeIncludes(repoIncludes, extra []string) []string {
 	return merged
 }
 
+// CreateOpts holds the parameters for SessionManager.Create. Using a struct
+// keeps call sites self-documenting and lets new options default to their
+// zero value without breaking existing callers.
 type CreateOpts struct {
 	// ID, when non-empty, is the session ID to use instead of generating a
 	// fresh one. It must match the generated ID format (8 lowercase hex chars)
@@ -1106,6 +1106,16 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		sessionDir := filepath.Join(sm.paths.DataDir, "worktrees", repoName, repoHash(repoRoot), id)
 
 		rcIncludes = mergeIncludes(rc.Includes, opts.Includes)
+
+		// Per-session includes (e.g. from a scenario) don't go through
+		// RepoConfig.Validate, so validate the merged set here for the same
+		// collisions (self-include, duplicate basename, env-var clash) — otherwise
+		// they'd surface as a confusing low-level git error mid worktree setup.
+		if err := config.ValidateIncludes(repoRoot, rcIncludes); err != nil {
+			sm.mu.Unlock()
+			return SessionState{}, fmt.Errorf("invalid includes: %w", err)
+		}
+
 		if len(rcIncludes) > 0 {
 			worktreePath = filepath.Join(sessionDir, repoName)
 		} else {

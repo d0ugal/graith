@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/d0ugal/graith/internal/config"
@@ -83,6 +84,50 @@ func TestCreateOptsIncludesAttachExtraWorktree(t *testing.T) {
 
 	if created.Includes[0].RepoName != filepath.Base(incDir) {
 		t.Errorf("included repo name = %q, want %q", created.Includes[0].RepoName, filepath.Base(incDir))
+	}
+}
+
+// TestCreateOptsIncludesCollisionRejected asserts that per-session includes are
+// run through the same collision validation as repo-config includes (#1046): an
+// include that resolves to the main repo is rejected up front with a clear
+// error, rather than failing with a low-level git error mid worktree setup.
+func TestCreateOptsIncludesCollisionRejected(t *testing.T) {
+	repoDir := initTempGitRepo(t)
+
+	sm, _ := newRecorderManager(t, repoDir, nil)
+
+	_, err := sm.Create(CreateOpts{
+		Name: "dreich", AgentName: "cursor", RepoPath: repoDir, BaseBranch: "main",
+		Includes: []string{repoDir}, Rows: 24, Cols: 80,
+	})
+	if err == nil {
+		t.Fatal("expected Create to reject an include that is the main repo")
+	}
+
+	if !strings.Contains(err.Error(), "invalid includes") {
+		t.Errorf("error = %q, want an invalid-includes complaint", err.Error())
+	}
+}
+
+// TestCreateOptsIncludesInPlaceRejected asserts the in-place path rejects
+// per-session includes (#1046) — an in-place session has no worktree layout to
+// attach siblings to.
+func TestCreateOptsIncludesInPlaceRejected(t *testing.T) {
+	repoDir := initTempGitRepo(t)
+	incDir := initTempGitRepo(t)
+
+	sm, _ := newRecorderManager(t, repoDir, nil)
+
+	_, err := sm.Create(CreateOpts{
+		Name: "dreich", AgentName: "cursor", RepoPath: repoDir, InPlace: true,
+		Includes: []string{incDir}, Rows: 24, Cols: 80,
+	})
+	if err == nil {
+		t.Fatal("expected Create to reject --in-place with includes")
+	}
+
+	if !strings.Contains(err.Error(), "in-place") {
+		t.Errorf("error = %q, want an in-place complaint", err.Error())
 	}
 }
 

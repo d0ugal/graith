@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/d0ugal/graith/internal/store"
 )
@@ -1312,5 +1313,144 @@ func TestRepublishManifestsFullPath_Cov2(t *testing.T) {
 
 	if _, err := os.Stat(storeDir); err != nil {
 		t.Fatalf("shared store dir missing: %v", err)
+	}
+}
+
+// newScenarioOrchestrator builds a SessionManager whose default agent is a
+// sleeper (a real process that keeps the PTY alive so Create succeeds), plus a
+// running orchestrator session and a message store — ready to drive
+// StartScenario through real (non-shared) session creation. Spawned PTYs are
+// torn down on cleanup.
+func newScenarioOrchestrator(t *testing.T) (*SessionManager, string) {
+	t.Helper()
+
+	cfg := config.Default()
+	cfg.FetchOnCreate = false
+	cfg.DefaultAgent = "sleeper"
+	cfg.Agents["sleeper"] = config.Agent{Command: "sleep", Args: []string{"60"}}
+
+	sm := newSMWithConfig(t, cfg)
+
+	msgStore, err := NewMsgStore(filepath.Join(t.TempDir(), "messages.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() { _ = msgStore.Close() })
+	sm.SetMsgStore(msgStore)
+
+	const orchID = "ben-orch"
+
+	sm.mu.Lock()
+	sm.state.Sessions[orchID] = &SessionState{
+		ID: orchID, Name: OrchestratorSessionName,
+		SystemKind: SystemKindOrchestrator, Status: StatusRunning,
+	}
+	sm.mu.Unlock()
+
+	t.Cleanup(func() {
+		sm.mu.RLock()
+
+		ids := make([]string, 0, len(sm.sessions))
+		for id := range sm.sessions {
+			ids = append(ids, id)
+		}
+
+		sm.mu.RUnlock()
+
+		for _, id := range ids {
+			stopAndClosePTY(sm, id)
+		}
+	})
+
+	return sm, orchID
+}
+
+// TestStartScenarioStarredAndIncludes drives StartScenario through real session
+// creation and asserts the per-session star / includes fields (#1046) reach the
+// created SessionState: the session is starred and carries the extra worktree.
+func TestStartScenarioStarredAndIncludes(t *testing.T) {
+	sm, orchID := newScenarioOrchestrator(t)
+
+	repo := initScenarioGitRepo(t)
+	inc := initScenarioGitRepo(t)
+
+	scenario, err := sm.StartScenario(protocol.ScenarioStartMsg{
+		CallerSessionID: orchID,
+		Name:            "strath-brig",
+		Goal:            "raise the brig",
+		Sessions: []protocol.ScenarioSessionInput{
+			// No task/prompt: the sleeper agent stays alive so we can inspect the
+			// running session's state without racing an async crash-triggered save.
+			{Name: "braw-mason", Repo: repo, Role: "mason",
+				Includes: []string{inc}, Star: true},
+		},
+	}, 24, 80)
+	if err != nil {
+		t.Fatalf("StartScenario() error = %v", err)
+	}
+
+	if len(scenario.SessionIDs) != 1 {
+		t.Fatalf("SessionIDs = %v, want one", scenario.SessionIDs)
+	}
+
+	id := scenario.SessionIDs[0]
+
+	sm.mu.RLock()
+
+	created := sm.state.Sessions[id]
+	starred := created.Starred
+	includes := created.Includes
+
+	sm.mu.RUnlock()
+
+	if !starred {
+		t.Error("scenario session should be starred (star = true)")
+	}
+
+	if len(includes) != 1 || includes[0].RepoName != filepath.Base(inc) {
+		t.Errorf("includes = %+v, want the extra worktree %q", includes, filepath.Base(inc))
+	}
+}
+
+// TestStartScenarioRollbackDeletesStarredMember is the regression test for the
+// rollback bug (#1046): a starred member that succeeds while a sibling fails to
+// start must still be torn down. Delete refuses starred sessions, so without the
+// unstar-before-delete in the rollback path the starred member is stranded and
+// the scenario record is retained. The failing sibling uses a non-existent base
+// branch (passes preflight, fails in Create).
+func TestStartScenarioRollbackDeletesStarredMember(t *testing.T) {
+	sm, orchID := newScenarioOrchestrator(t)
+
+	goodRepo := initScenarioGitRepo(t)
+	badRepo := initScenarioGitRepo(t)
+
+	_, err := sm.StartScenario(protocol.ScenarioStartMsg{
+		CallerSessionID: orchID,
+		Name:            "strath-thrawn",
+		Sessions: []protocol.ScenarioSessionInput{
+			{Name: "braw-mason", Repo: goodRepo, Star: true},
+			{Name: "dreich-hand", Repo: badRepo, Base: "no-such-branch"},
+		},
+	}, 24, 80)
+	if err == nil {
+		t.Fatal("expected StartScenario to fail when a sibling cannot start")
+	}
+
+	// The scenario record must be fully rolled back — a stranded starred member
+	// would have left rollbackErrors non-empty and kept the record.
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	for _, sc := range sm.state.Scenarios {
+		if sc.Name == "strath-thrawn" {
+			t.Errorf("scenario record %q should have been rolled back, still present with sessions %v", sc.Name, sc.SessionIDs)
+		}
+	}
+
+	for id, s := range sm.state.Sessions {
+		if s.Name == "braw-mason" || s.Name == "dreich-hand" {
+			t.Errorf("scenario session %q (%s, starred=%v) should have been deleted in rollback", s.Name, id, s.Starred)
+		}
 	}
 }

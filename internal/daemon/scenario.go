@@ -33,6 +33,22 @@ func ValidateScenarioName(name string) error {
 	return nil
 }
 
+// unstarAndDelete clears a session's Starred flag, then hard-deletes it.
+// Scenario teardown and rollback/cleanup paths must use this rather than calling
+// Delete directly: a scenario session may be created with star = true (issue
+// #1046), and Delete refuses starred sessions. Without the unstar, a rollback
+// after a sibling fails — or a scenario deleted mid-create — would strand the
+// starred member as an orphan and leave a partial scenario record.
+func (sm *SessionManager) unstarAndDelete(id string) error {
+	sm.mu.Lock()
+	if s, ok := sm.state.Sessions[id]; ok {
+		s.Starred = false
+	}
+	sm.mu.Unlock()
+
+	return sm.Delete(id)
+}
+
 func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, cols uint16) (*ScenarioState, error) {
 	if err := ValidateScenarioName(msg.Name); err != nil {
 		return nil, err
@@ -399,7 +415,7 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 				sm.log.Warn("scenario rollback: stop failed", "session", id, "err", err)
 			}
 
-			if err := sm.Delete(id); err != nil {
+			if err := sm.unstarAndDelete(id); err != nil {
 				sm.log.Warn("scenario rollback: delete failed", "session", id, "err", err)
 				rollbackErrors = append(rollbackErrors, id)
 			}
@@ -428,7 +444,7 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 				sm.log.Warn("scenario deleted during creation: stop failed", "session", id, "err", err)
 			}
 
-			_ = sm.Delete(id)
+			_ = sm.unstarAndDelete(id)
 		}
 
 		return nil, fmt.Errorf("scenario %q was deleted during session creation", msg.Name)
@@ -716,14 +732,8 @@ func (sm *SessionManager) DeleteScenario(name string) ([]string, error) {
 			deleted = append(deleted, id)
 			continue
 		}
-		// Unstar before deleting (Delete refuses starred sessions).
-		sm.mu.Lock()
-		if s, ok := sm.state.Sessions[id]; ok {
-			s.Starred = false
-		}
-		sm.mu.Unlock()
 
-		if err := sm.Delete(id); err != nil {
+		if err := sm.unstarAndDelete(id); err != nil {
 			sm.log.Warn("failed to delete scenario session", "session", id, "err", err)
 			deleteErrors = append(deleteErrors, id)
 
@@ -997,7 +1007,7 @@ func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSess
 			sm.log.Warn("failed to stop orphaned session after scenario deletion", "session", sess.ID, "err", stopErr)
 		}
 
-		_ = sm.Delete(sess.ID)
+		_ = sm.unstarAndDelete(sess.ID)
 
 		return nil, fmt.Errorf("scenario %q was deleted during session creation", name)
 	}
