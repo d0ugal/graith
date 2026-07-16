@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### ⚠ Migration note
+
+* **approvals:** backend execution timeouts now validate fail-closed against the
+  human approval timeout. A subprocess-backend config with `approvals.timeout`
+  less than or equal to the effective `5s` backend timeout may stop loading
+  after upgrade. Raise `approvals.timeout` above `5s`, or explicitly configure a
+  shorter `command_timeout` / `localmost_timeout`.
+
 ## [0.69.0](https://github.com/d0ugal/graith/compare/v0.68.9...v0.69.0) (2026-07-16)
 
 

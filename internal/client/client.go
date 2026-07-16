@@ -314,17 +314,22 @@ func ConnectFast(paths config.Paths) (*Client, error) {
 	return c, nil
 }
 
-// ConnectForApproval is like ConnectFast but with a long deadline suitable
-// for blocking on approval responses. The socket deadline is set to
-// approvalTimeout plus a one-minute grace period (minimum one minute total)
-// so the connection outlives the daemon's approval timer.
-func ConnectForApproval(paths config.Paths, approvalTimeout time.Duration) (*Client, error) {
+// ConnectForApproval is like ConnectFast but keeps distinct deadlines for its
+// two phases. Dialing uses daemonDialTimeout. The handshake uses the configured
+// daemonHandshakeTimeout. Once handshake_ok is decoded, a fresh nonzero socket
+// deadline spans the complete server-side approval bound (backend execution +
+// human wait, supplied by the caller) plus response-delivery grace. It is not
+// cleared: a daemon that handshakes and then stalls cannot wedge a hook forever.
+func ConnectForApproval(paths config.Paths, serverTimeout time.Duration) (*Client, error) {
 	conn, err := dialLocalDaemon("unix", paths.SocketPath, daemonDialTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("daemon not reachable: %w", err)
 	}
 
-	_ = conn.SetDeadline(time.Now().Add(approvalDeadline(approvalTimeout)))
+	if err := conn.SetDeadline(time.Now().Add(daemonHandshakeTimeout)); err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("set approval handshake deadline: %w", err)
+	}
 
 	c := &Client{
 		conn:   conn,
@@ -371,18 +376,35 @@ func ConnectForApproval(paths config.Paths, approvalTimeout time.Duration) (*Cli
 		return nil, fmt.Errorf("protocol version mismatch: server=%s, client=%s; try: gr daemon restart", hsOk.Version, protocol.Version)
 	}
 
-	_ = conn.SetDeadline(time.Time{})
+	if err := conn.SetDeadline(time.Now().Add(ApprovalOperationTimeout(serverTimeout))); err != nil {
+		c.Close()
+		return nil, fmt.Errorf("set approval operation deadline: %w", err)
+	}
 
 	return c, nil
 }
 
-func approvalDeadline(approvalTimeout time.Duration) time.Duration {
-	d := approvalTimeout + time.Minute
-	if d < time.Minute {
-		d = time.Minute
+// ApprovalOperationTimeout adds transport response grace to the daemon's full
+// backend+human server bound. It is exported for doctor output, so operators see
+// the same effective hierarchy the connection actually uses.
+func ApprovalOperationTimeout(serverTimeout time.Duration) time.Duration {
+	if serverTimeout < 0 {
+		serverTimeout = 0
 	}
 
-	return d
+	grace := approvalResponseGrace
+	if grace <= 0 {
+		grace = time.Minute
+	}
+
+	// Saturate rather than overflow to a negative duration (which would set an
+	// already-expired deadline) for a pathological but parseable configuration.
+	const maxDuration = time.Duration(1<<63 - 1)
+	if serverTimeout > maxDuration-grace {
+		return maxDuration
+	}
+
+	return serverTimeout + grace
 }
 
 func readHumanToken(paths config.Paths) string {

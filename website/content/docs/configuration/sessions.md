@@ -258,7 +258,7 @@ remote_pairing_timeout   = "11m"    # wait for the remote human to approve `gr p
 
 An unset field keeps its built-in default (shown above). A value that is set but unparseable, or that is zero or negative, is rejected at config load. The `remote_*` fields apply only to remote-daemon connections (see [Orchestrator & remote access]({{< relref "/docs/configuration/access.md" >}})); the others apply to the local daemon and attach recovery.
 
-`dial_timeout` governs every local Unix-socket dial, including hook/status/inbox helpers, approval helpers, `gr doctor`, and daemon restart/version probes. `handshake_timeout` governs normal local handshakes plus the doctor and daemon control probes. Two operation-specific deadlines deliberately remain separate: the hook fast path uses a short two-second post-dial handshake so an agent hook fails promptly, while an approval connection stays open for the configured approval timeout plus grace because it waits for the approval result after handshaking. Changing `handshake_timeout` does not shorten that approval-operation wait.
+`dial_timeout` governs every local Unix-socket dial, including hook/status/inbox helpers, approval helpers, `gr doctor`, and daemon restart/version probes. `handshake_timeout` governs normal local handshakes plus the doctor and daemon control probes. The hook fast path deliberately uses a short two-second post-dial handshake so an agent hook fails promptly. Approval hooks instead keep three phases separate: `dial_timeout` bounds the Unix-socket dial, `handshake_timeout` bounds the handshake, and a successful handshake installs an approval-operation deadline equal to the configured backend-execution bound plus the full human approval wait plus one minute of response-delivery grace. Changing `handshake_timeout` does not shorten that operation wait. See [Notifications & approvals]({{< relref "notifications.md#backend-execution-timeouts" >}}) for the full hierarchy and timeout policy.
 
 ## Migration
 
@@ -269,7 +269,7 @@ An unset field keeps its built-in default (shown above). A value that is set but
 health_window = "1.5s"  # startup-health confirmation window for the migrated-to agent
 ```
 
-An empty, unparseable, or non-positive value falls back to the default (1.5s); a set-but-unparseable or non-positive value is rejected at config load.
+An unset value uses the default (1.5s); a value that is set but unparseable, zero, or negative is rejected at config load.
 
 ## Transcript reading
 

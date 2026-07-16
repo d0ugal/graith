@@ -75,6 +75,10 @@ func (commandBackend) Decide(ctx context.Context, req Request, cfg Config) (Deci
 
 	out, err := cmd.Output()
 	if err != nil {
+		if errors.Is(cmdCtx.Err(), context.DeadlineExceeded) {
+			return Decision{Decision: DecisionDefer}, fmt.Errorf("command backend execution deadline (%s) expired: %w", cfg.execTimeout(), cmdCtx.Err())
+		}
+
 		return Decision{Decision: DecisionDefer}, fmt.Errorf("approvals command %q failed: %w", command, err)
 	}
 

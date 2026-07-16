@@ -401,7 +401,7 @@ func TestApprovalsValidate(t *testing.T) {
 		{"command_timeout negative", Approvals{Backend: "command", Command: "x", CommandTimeout: "-1s"}, true},
 		{"command_timeout over max", Approvals{Backend: "command", Command: "x", CommandTimeout: "2m"}, true},
 		{"localmost_timeout over max", Approvals{Backend: "localmost", LocalmostTimeout: "90s"}, true},
-		// A backend timeout at or above the enclosing approval timeout is incoherent.
+		// A backend timeout at or above the configured approval timeout is incoherent.
 		{"command_timeout >= enclosing", Approvals{Backend: "command", Command: "x", Timeout: "5s", CommandTimeout: "5s"}, true},
 		{"command_timeout above enclosing", Approvals{Backend: "command", Command: "x", Timeout: "3s", CommandTimeout: "10s"}, true},
 		// Timeout fields are validated for their syntax even when the resolved
@@ -420,6 +420,29 @@ func TestApprovalsValidate(t *testing.T) {
 				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestApprovalsServerTimeoutIncludesBackendThenHumanPhases(t *testing.T) {
+	command := Approvals{Backend: "command", Command: "canny", Timeout: "30s", CommandTimeout: "5s"}
+	if got := command.BackendPhaseTimeoutDuration(); got != 5*time.Second {
+		t.Errorf("command backend phase = %v, want 5s", got)
+	}
+	if got := command.ServerTimeoutDuration(); got != 35*time.Second {
+		t.Errorf("command server bound = %v, want backend 5s + human 30s", got)
+	}
+
+	prompt := Approvals{Backend: "prompt", Timeout: "30s"}
+	if got := prompt.BackendPhaseTimeoutDuration(); got != 0 {
+		t.Errorf("prompt backend phase = %v, want 0", got)
+	}
+	if got := prompt.ServerTimeoutDuration(); got != 30*time.Second {
+		t.Errorf("prompt server bound = %v, want human wait 30s", got)
+	}
+
+	overflow := Approvals{Backend: "command", Timeout: "2562047h47m16.854775807s", CommandTimeout: "5s"}
+	if got := overflow.ServerTimeoutDuration(); got != time.Duration(1<<63-1) {
+		t.Errorf("overflowing server bound = %v, want saturated duration", got)
 	}
 }
 

@@ -24,6 +24,7 @@ func saveConnectionTimeouts(t *testing.T) {
 		RemoteHandshake: remoteHandshakeTimeout,
 		RemotePairing:   remotePairingTimeout,
 	}
+	origApprovalGrace := approvalResponseGrace
 
 	t.Cleanup(func() {
 		daemonDialTimeout = orig.Dial
@@ -33,6 +34,7 @@ func saveConnectionTimeouts(t *testing.T) {
 		remoteDialTimeout = orig.RemoteDial
 		remoteHandshakeTimeout = orig.RemoteHandshake
 		remotePairingTimeout = orig.RemotePairing
+		approvalResponseGrace = origApprovalGrace
 	})
 }
 

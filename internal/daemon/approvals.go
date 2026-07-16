@@ -98,10 +98,12 @@ func (sm *SessionManager) SubmitApproval(ctx context.Context, req protocol.Appro
 		return decision
 	case <-time.After(timeout):
 		sm.cancelApproval(req.RequestID)
+		sm.log.Warn("approval human wait deadline expired",
+			"request_id", req.RequestID, "session", req.SessionID, "timeout", timeout)
 
 		return protocol.ApprovalDecisionMsg{
 			Decision: "block",
-			Reason:   "approval request timed out",
+			Reason:   fmt.Sprintf("human approval wait timed out after %s", timeout),
 		}
 	case <-ctx.Done():
 		sm.cancelApproval(req.RequestID)

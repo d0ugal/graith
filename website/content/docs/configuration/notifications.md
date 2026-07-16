@@ -136,9 +136,13 @@ The approval system integrates with agent hooks. When an agent requests approval
 
 ### Backend execution timeouts
 
-An automated backend's decision runs *inside* the enclosing approval deadline: for an interactive session that decision precedes the human-queue wait; for a headless session it is bounded by the caller-side `timeout`. The `command`/`external` and `localmost` backends spawn a subprocess to make that decision, and `command_timeout` / `localmost_timeout` bound a single such invocation.
+For an interactive session, an automated backend runs first and may then defer to the human queue. The worst-case server bound is therefore **backend execution + human wait**: `command_timeout` or `localmost_timeout`, followed by up to `timeout`. For a headless session the backend is instead enclosed by the caller-side `timeout`. The `command`/`external` and `localmost` backends spawn a subprocess to make their decision; the other backends decide in-process.
 
-Both default to `5s` when unset. Each must be a positive duration, at most `60s`, and **strictly shorter** than the enclosing `timeout` — a backend timeout at or above the approval deadline is rejected at config load, because a hung backend that outlives its enclosing deadline is exactly the kind of mismatch that has caused approval-behaviour bugs in the past. The other backends (`prompt`, `builtin`, `auto`) decide in-process and have no execution timeout. `gr doctor` prints the effective hierarchy (`backend execution <timeout> < approval timeout <timeout>`) so a tight configuration is visible before it bites.
+Both backend timeouts default to `5s` when unset. Each must be a positive duration, at most `60s`, and **strictly shorter** than the human `timeout` — a backend timeout at or above that main policy is rejected at config load, because mismatched approval deadlines have caused approval-behaviour bugs in the past. `gr doctor` prints the complete effective hierarchy: backend execution + human wait = server bound < hook operation deadline.
+
+The hook connection uses `[connection] handshake_timeout` only for its handshake. After `handshake_ok` it installs a fresh, nonzero operation deadline equal to the complete server bound plus one minute of response-delivery grace; this is separate from `dial_timeout`. A human-wait expiry is a daemon decision and blocks the tool with a reason naming that deadline. If the connection itself fails or its operation deadline expires, the longstanding hook-edge policy remains fail-open, but the allow result now includes a visible reason naming the failed phase instead of silently allowing.
+
+> **Upgrade note (v0.69.1):** the timeout hierarchy is validated fail-closed. A previously loadable command/localmost configuration with `timeout <= 5s` may now be rejected because the effective default backend timeout is `5s`. Raise `timeout` above `5s`, or explicitly choose a shorter `command_timeout` / `localmost_timeout`.
 
 ## Messages
 
