@@ -45,9 +45,9 @@ func keyPress(s string) tea.KeyPressMsg {
 	}
 }
 
-func updateModel(m createSessionModel, msg tea.Msg) createSessionModel {
+func updateModel(m *createSessionModel, msg tea.Msg) *createSessionModel {
 	result, _ := m.Update(msg)
-	return result.(createSessionModel)
+	return result.(*createSessionModel)
 }
 
 func mkdirAll(t *testing.T, path string) {

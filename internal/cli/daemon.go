@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -216,7 +217,7 @@ func restartClean() error {
 	if _, err := os.Stat(paths.SocketPath); err == nil {
 		if conn, err := net.DialTimeout("unix", paths.SocketPath, 500*time.Millisecond); err == nil {
 			_ = conn.Close()
-			return fmt.Errorf("daemon is still running, cannot restart cleanly")
+			return errors.New("daemon is still running, cannot restart cleanly")
 		}
 	}
 

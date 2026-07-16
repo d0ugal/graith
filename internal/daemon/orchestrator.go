@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -78,7 +79,7 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 	}
 
 	if !sandboxed {
-		return SessionState{}, fmt.Errorf("orchestrator requires sandbox but sandbox is not available — install safehouse and enable sandbox in config")
+		return SessionState{}, errors.New("orchestrator requires sandbox but sandbox is not available — install safehouse and enable sandbox in config")
 	}
 
 	scratchDir := sm.orchestratorScratchDir()
@@ -228,7 +229,7 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 		_ = ptySess.Kill()
 		ptySess.Close()
 
-		return SessionState{}, fmt.Errorf("orchestrator session deleted during creation")
+		return SessionState{}, errors.New("orchestrator session deleted during creation")
 	}
 
 	sess := sm.state.Sessions[id]

@@ -208,7 +208,7 @@ func TestSendPushNotification_EmptyMessage(t *testing.T) {
 }
 
 func TestSendPushNotification_DispatchError(t *testing.T) {
-	fd := &fakeDispatch{err: fmt.Errorf("boom")}
+	fd := &fakeDispatch{err: errors.New("boom")}
 	sm := newPushSM(baseNotifications(), fd.fn)
 
 	ok, reason := sm.SendPushNotification(pushNotification{Message: "x"})

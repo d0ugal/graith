@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -106,7 +107,7 @@ func (s *RemoteHostStore) EnsureDeviceKey() (ed25519.PrivateKey, string, error) 
 	if s.DeviceKey != "" {
 		raw, err := base64.StdEncoding.DecodeString(s.DeviceKey)
 		if err != nil || len(raw) != ed25519.PrivateKeySize {
-			return nil, "", fmt.Errorf("corrupt device key in remote-hosts store")
+			return nil, "", errors.New("corrupt device key in remote-hosts store")
 		}
 
 		priv := ed25519.PrivateKey(raw)

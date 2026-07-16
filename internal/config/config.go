@@ -183,11 +183,11 @@ func (r RemoteConfig) Validate() error {
 
 	if r.Mode == "interface" {
 		if strings.TrimSpace(r.AuthKeyFile) != "" {
-			return fmt.Errorf("[remote] auth_key_file is a tsnet-only field and cannot be set in interface mode")
+			return errors.New("[remote] auth_key_file is a tsnet-only field and cannot be set in interface mode")
 		}
 
 		if len(r.Tags) > 0 {
-			return fmt.Errorf("[remote] tags is a tsnet-only field and cannot be set in interface mode")
+			return errors.New("[remote] tags is a tsnet-only field and cannot be set in interface mode")
 		}
 	}
 
@@ -550,7 +550,7 @@ func ParseDurationWithDays(s string) (time.Duration, error) {
 	}
 
 	if total < 0 {
-		return 0, fmt.Errorf("negative duration not allowed")
+		return 0, errors.New("negative duration not allowed")
 	}
 
 	return total, nil
@@ -730,12 +730,12 @@ func (n Notifications) Validate() error {
 	}
 
 	if backend == "command" && strings.TrimSpace(n.Command) == "" {
-		return fmt.Errorf("[notifications] backend=\"command\" requires a non-empty command")
+		return errors.New("[notifications] backend=\"command\" requires a non-empty command")
 	}
 
 	if strings.TrimSpace(n.QuietHoursStart) != "" || strings.TrimSpace(n.QuietHoursEnd) != "" {
 		if !n.QuietHoursConfigured() {
-			return fmt.Errorf("[notifications] quiet_hours_start and quiet_hours_end must both be set")
+			return errors.New("[notifications] quiet_hours_start and quiet_hours_end must both be set")
 		}
 
 		if _, ok := parseClock(n.QuietHoursStart); !ok {
@@ -993,10 +993,9 @@ func (a Approvals) Validate() error {
 	// inline TOML — never both. A conflict is a hard error (mirrors mode vs
 	// backend) rather than a silent precedence rule.
 	if strings.TrimSpace(a.Builtin.Config) != "" && a.Builtin.HasInline() {
-		return fmt.Errorf(
-			"[approvals.builtin] config (external file) and inline rules " +
-				"(allow/deny/allowSafeXargs/askNoninteractive) are both set; " +
-				"use one or the other")
+		return errors.New("[approvals.builtin] config (external file) and inline rules " +
+			"(allow/deny/allowSafeXargs/askNoninteractive) are both set; " +
+			"use one or the other")
 	}
 
 	// Compile the inline ruleset now so a malformed rule fails at config-load
@@ -1510,7 +1509,7 @@ func ValidateIncludes(mainRepoPath string, includes []string) error {
 	for _, inc := range includes {
 		resolved := ResolvePath(inc)
 		if resolved == mainResolved {
-			return fmt.Errorf("cannot include itself")
+			return errors.New("cannot include itself")
 		}
 
 		base := strings.ToLower(filepath.Base(resolved))
@@ -1577,7 +1576,7 @@ func (c *Config) Validate() error {
 	for _, s := range c.MCPServers {
 		switch {
 		case s.Name == "":
-			errs = append(errs, fmt.Errorf("mcp_servers: entry with empty name"))
+			errs = append(errs, errors.New("mcp_servers: entry with empty name"))
 		case seen[s.Name]:
 			errs = append(errs, fmt.Errorf("mcp_servers: duplicate name %q", s.Name))
 		default:

@@ -3,6 +3,7 @@ package cli
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -108,7 +109,7 @@ func overlayKeysFromConfig() client.OverlayKeys {
 
 func runAttach(cmd *cobra.Command, name string) error {
 	if isInsideGraith() {
-		return fmt.Errorf("cannot attach from inside a graith session (nested sessions are not supported)")
+		return errors.New("cannot attach from inside a graith session (nested sessions are not supported)")
 	}
 
 	c, err := client.Connect(cfg, paths, cfgFile)
@@ -336,7 +337,7 @@ func reattachAfterOverlayFailure(nc *client.Client, sessionID, verb string, resp
 
 func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[string]bool) error {
 	if isInsideGraith() {
-		return fmt.Errorf("cannot attach from inside a graith session (nested sessions are not supported)")
+		return errors.New("cannot attach from inside a graith session (nested sessions are not supported)")
 	}
 
 	info, attached, err := attachWithConvert(c, sessionID)
@@ -1424,5 +1425,5 @@ func reconnectToSession(sessionID string) (*client.Client, protocol.Envelope, er
 		return c, resp, nil
 	}
 
-	return nil, protocol.Envelope{}, fmt.Errorf("timed out after 10s")
+	return nil, protocol.Envelope{}, errors.New("timed out after 10s")
 }

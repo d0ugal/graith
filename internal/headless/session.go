@@ -284,7 +284,7 @@ func (s *Session) handlePermission(ev event) {
 		// updatedInput is required on allow; echo the original input back
 		// unchanged (graith does not rewrite tool arguments).
 		if len(body.Input) > 0 {
-			inner["updatedInput"] = json.RawMessage(body.Input)
+			inner["updatedInput"] = body.Input
 		} else {
 			inner["updatedInput"] = map[string]any{}
 		}
@@ -365,7 +365,7 @@ func (s *Session) control(request any) (json.RawMessage, error) {
 // on protocol-level failure (subtype=="error"), timeout, or process exit.
 func (s *Session) controlWithTimeout(request any, timeout time.Duration) (json.RawMessage, error) {
 	if s.Exited() {
-		return nil, fmt.Errorf("headless session has exited")
+		return nil, errors.New("headless session has exited")
 	}
 
 	s.reqMu.Lock()
@@ -396,7 +396,7 @@ func (s *Session) controlWithTimeout(request any, timeout time.Duration) (json.R
 		case res := <-ch:
 			return res.unwrap()
 		default:
-			return nil, fmt.Errorf("headless session exited before control response")
+			return nil, errors.New("headless session exited before control response")
 		}
 	case <-time.After(timeout):
 		return nil, fmt.Errorf("timeout waiting for control response %q", id)
@@ -499,11 +499,11 @@ func (s *Session) writeJSON(v any) error {
 	defer s.writeMu.Unlock()
 
 	if s.Exited() {
-		return fmt.Errorf("headless session has exited")
+		return errors.New("headless session has exited")
 	}
 
 	if s.stdinClosed.Load() {
-		return fmt.Errorf("headless session stdin is closed")
+		return errors.New("headless session stdin is closed")
 	}
 
 	_, err = s.stdin.Write(b)

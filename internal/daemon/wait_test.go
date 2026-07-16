@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"encoding/json"
 	"path/filepath"
 	"regexp"
 	"testing"
@@ -431,7 +430,7 @@ func TestWaitSessionNotFound(t *testing.T) {
 func TestWaitInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
-	raw, _ := json.Marshal(protocol.Envelope{Type: "wait", Payload: json.RawMessage(`{bad`)})
+	raw := []byte(`{"type":"wait","payload":{bad}`)
 	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
 
 	env := h.readWaitOutcome(t)

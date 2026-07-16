@@ -186,12 +186,12 @@ func (sm *SessionManager) generateClaudeSettings(sessionID string, yolo bool) (s
 
 			matcher = preToolUseMatcher()
 			handlers = []hookHandler{
-				{Type: "command", Command: fmt.Sprintf("%s approve-request", quoted)},
+				{Type: "command", Command: quoted + " approve-request"},
 			}
 		case "SessionStart":
 			handlers = []hookHandler{
 				{Type: "command", Command: fmt.Sprintf("%s report-status --event %s", quoted, event)},
-				{Type: "command", Command: fmt.Sprintf("%s check-inbox", quoted)},
+				{Type: "command", Command: quoted + " check-inbox"},
 			}
 		default:
 			handlers = []hookHandler{
@@ -422,23 +422,23 @@ func (sm *SessionManager) injectCodexHooks(sessionID string, yolo bool) (extraAr
 
 	events := []codexHookEvent{
 		{event: "SessionStart", commands: []string{
-			fmt.Sprintf("%s report-status --event SessionStart", grBin),
-			fmt.Sprintf("%s check-inbox", grBin),
+			grBin + " report-status --event SessionStart",
+			grBin + " check-inbox",
 		}},
 		{event: "UserPromptSubmit", commands: []string{
-			fmt.Sprintf("%s report-status --event UserPromptSubmit", grBin),
+			grBin + " report-status --event UserPromptSubmit",
 		}},
 		{event: "PreToolUse", commands: []string{
-			fmt.Sprintf("%s report-status --event PreToolUse", grBin),
+			grBin + " report-status --event PreToolUse",
 		}},
 		{event: "PostToolUse", commands: []string{
-			fmt.Sprintf("%s report-status --event PostToolUse", grBin),
+			grBin + " report-status --event PostToolUse",
 		}},
 		{event: "PermissionRequest", approval: true, commands: []string{
-			fmt.Sprintf("%s approve-request", grBin),
+			grBin + " approve-request",
 		}},
 		{event: "Stop", commands: []string{
-			fmt.Sprintf("%s report-status --event Stop", grBin),
+			grBin + " report-status --event Stop",
 		}},
 	}
 
@@ -644,21 +644,21 @@ func (sm *SessionManager) injectCursorHooks(sessionID, worktreePath string, yolo
 		Version: 1,
 		Hooks: map[string][]hookEntry{
 			"sessionStart": {
-				{Command: fmt.Sprintf("%s report-status --event SessionStart", quoted)},
-				{Command: fmt.Sprintf("%s check-inbox", quoted)},
+				{Command: quoted + " report-status --event SessionStart"},
+				{Command: quoted + " check-inbox"},
 			},
 			"postToolUse": {
-				{Command: fmt.Sprintf("%s report-status --event PostToolUse", quoted)},
+				{Command: quoted + " report-status --event PostToolUse"},
 			},
 			"stop": {
-				{Command: fmt.Sprintf("%s report-status --event Stop", quoted)},
+				{Command: quoted + " report-status --event Stop"},
 			},
 		},
 	}
 
 	if sm.cfg.Approvals.HookEnabled() || yolo {
 		hooks.Hooks["preToolUse"] = []hookEntry{
-			{Command: fmt.Sprintf("%s approve-request", quoted)},
+			{Command: quoted + " approve-request"},
 		}
 	}
 

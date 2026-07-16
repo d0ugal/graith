@@ -136,7 +136,7 @@ type createSessionModel struct {
 	dropdownIdx  int
 }
 
-func newCreateSessionModel(defaultRepo string, repos []RepoSuggestion, agents []string, defaultAgent string) createSessionModel {
+func newCreateSessionModel(defaultRepo string, repos []RepoSuggestion, agents []string, defaultAgent string) *createSessionModel {
 	ni := textinput.New()
 	ni.Placeholder = "session-name"
 	ni.Focus()
@@ -171,12 +171,12 @@ func newCreateSessionModel(defaultRepo string, repos []RepoSuggestion, agents []
 	}
 	m.updateFiltered()
 
-	return m
+	return &m
 }
 
 // lastField returns the index of the final focusable field. The agent field is
 // only present when there are agents to choose from.
-func (m createSessionModel) lastField() int {
+func (m *createSessionModel) lastField() int {
 	if len(m.agents) == 0 {
 		return createFieldRepo
 	}
@@ -219,7 +219,7 @@ func (m *createSessionModel) trySubmit() tea.Cmd {
 }
 
 // selectedAgent returns the currently chosen agent name, or "" if none.
-func (m createSessionModel) selectedAgent() string {
+func (m *createSessionModel) selectedAgent() string {
 	if m.agentIdx < 0 || m.agentIdx >= len(m.agents) {
 		return ""
 	}
@@ -248,11 +248,11 @@ func (m *createSessionModel) updateFiltered() {
 	}
 }
 
-func (m createSessionModel) Init() tea.Cmd {
+func (m *createSessionModel) Init() tea.Cmd {
 	return textinput.Blink
 }
 
-func (m createSessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *createSessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -400,7 +400,7 @@ func (m createSessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m createSessionModel) View() tea.View {
+func (m *createSessionModel) View() tea.View {
 	w := m.width
 
 	h := m.height
@@ -559,7 +559,7 @@ func RunCreateInput(defaultRepo string, repos []RepoSuggestion, agents []string,
 		return "", "", ""
 	}
 
-	result, ok := final.(createSessionModel)
+	result, ok := final.(*createSessionModel)
 	if !ok || !result.done {
 		return "", "", ""
 	}

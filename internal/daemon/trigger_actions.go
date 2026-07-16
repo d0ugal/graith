@@ -3,6 +3,7 @@ package daemon
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -47,7 +48,7 @@ func (sm *SessionManager) actionCommand(ctx context.Context, t *config.TriggerCo
 	}
 
 	if execRoot == "" {
-		return "", fmt.Errorf("command action has no execution root")
+		return "", errors.New("command action has no execution root")
 	}
 
 	cmdStr := t.Action.Command
@@ -91,7 +92,7 @@ func (sm *SessionManager) actionCommand(ctx context.Context, t *config.TriggerCo
 
 		if !ok {
 			// Fail closed: sandbox requested but not enforceable.
-			return "", fmt.Errorf("command sandbox not available; set action.sandbox = false to run unconfined")
+			return "", errors.New("command sandbox not available; set action.sandbox = false to run unconfined")
 		}
 
 		name, args = wrapped, wargs
@@ -113,7 +114,8 @@ func (sm *SessionManager) actionCommand(ctx context.Context, t *config.TriggerCo
 	exit := 0
 
 	if runErr != nil {
-		if ee, ok := runErr.(*exec.ExitError); ok {
+		ee := &exec.ExitError{}
+		if errors.As(runErr, &ee) {
 			exit = ee.ExitCode()
 		} else {
 			exit = -1
@@ -255,7 +257,7 @@ func (sm *SessionManager) actionSession(ctx context.Context, t *config.TriggerCo
 
 	orchestratorID := sm.orchestratorID()
 	if orchestratorID == "" {
-		return "", fmt.Errorf("no orchestrator session; cannot own spawned session")
+		return "", errors.New("no orchestrator session; cannot own spawned session")
 	}
 
 	vars := sm.triggerVars(t, fc)
@@ -387,7 +389,7 @@ func (sm *SessionManager) actionScenario(ctx context.Context, t *config.TriggerC
 
 	orchestratorID := sm.orchestratorID()
 	if orchestratorID == "" {
-		return "", fmt.Errorf("no orchestrator session; cannot start scenario")
+		return "", errors.New("no orchestrator session; cannot start scenario")
 	}
 
 	dir := filepath.Join(filepath.Dir(sm.paths.ConfigFile), "scenarios")

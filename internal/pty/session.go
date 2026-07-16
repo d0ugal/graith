@@ -149,7 +149,7 @@ type AdoptOpts struct {
 }
 
 func AdoptSession(opts AdoptOpts) (*Session, error) {
-	ptmx := os.NewFile(opts.Fd, fmt.Sprintf("ptmx-%s", opts.ID))
+	ptmx := os.NewFile(opts.Fd, "ptmx-"+opts.ID)
 	if ptmx == nil {
 		return nil, fmt.Errorf("invalid fd %d for session %s", opts.Fd, opts.ID)
 	}
@@ -494,7 +494,7 @@ func (s *Session) writeInputLocked(data []byte) error {
 	s.mu.RUnlock()
 
 	if exited {
-		return fmt.Errorf("session process has exited")
+		return errors.New("session process has exited")
 	}
 
 	n, err := s.Ptmx.Write(data)

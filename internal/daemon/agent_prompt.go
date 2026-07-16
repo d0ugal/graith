@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -59,8 +60,12 @@ func (sm *SessionManager) injectPrompt(agentName, worktreePath string) (extraArg
 // valid TOML basic string, so Codex's TOML parse decodes it back to the exact
 // prompt.
 func codexDeveloperInstructionsArgs(prompt string) []string {
-	// json.Marshal of a string never fails.
-	encoded, _ := json.Marshal(prompt)
+	// json.Marshal of a string never fails; the error check satisfies the
+	// linter and strconv.Quote is an unreachable, equivalent fallback.
+	encoded, err := json.Marshal(prompt)
+	if err != nil {
+		encoded = []byte(strconv.Quote(prompt))
+	}
 
 	return []string{"-c", "developer_instructions=" + string(encoded)}
 }

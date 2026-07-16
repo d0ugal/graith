@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -48,7 +49,7 @@ func selfSessionRef() (string, error) {
 		return name, nil
 	}
 
-	return "", fmt.Errorf("--self requires GRAITH_SESSION_ID or GRAITH_SESSION_NAME to be set; run it from inside a graith session")
+	return "", errors.New("--self requires GRAITH_SESSION_ID or GRAITH_SESSION_NAME to be set; run it from inside a graith session")
 }
 
 // selfArgs resolves the positional args for a `--self` invocation. When self is
@@ -83,14 +84,14 @@ func selfChildrenBatchArgs(self, children *bool, bf *batchFlags) cobra.Positiona
 	return func(cmd *cobra.Command, args []string) error {
 		if *self {
 			if *children || bf.active() {
-				return fmt.Errorf("--self cannot be combined with --children or batch filters")
+				return errors.New("--self cannot be combined with --children or batch filters")
 			}
 
 			return cobra.NoArgs(cmd, args)
 		}
 
 		if *children && bf.active() {
-			return fmt.Errorf("--children cannot be combined with batch filters")
+			return errors.New("--children cannot be combined with batch filters")
 		}
 
 		if bf.active() {

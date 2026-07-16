@@ -1177,7 +1177,7 @@ func maxTreeIndentFromItems(items []list.Item) int {
 	return maxIndent
 }
 
-func newOverlayModel(sessions []protocol.SessionInfo, currentSessionID string, fetchPreview func(sessionID string) string, deleteSession func(sessionID string) error, collapsed map[string]bool, shortcutKeys []rune) overlayModel {
+func newOverlayModel(sessions []protocol.SessionInfo, currentSessionID string, fetchPreview func(sessionID string) string, deleteSession func(sessionID string) error, collapsed map[string]bool, shortcutKeys []rune) *overlayModel {
 	if collapsed == nil {
 		collapsed = make(map[string]bool)
 	}
@@ -1254,7 +1254,7 @@ func newOverlayModel(sessions []protocol.SessionInfo, currentSessionID string, f
 	fi.CharLimit = 64
 	fi.SetWidth(contentWidth)
 
-	return overlayModel{
+	return &overlayModel{
 		list:             l,
 		filterInput:      fi,
 		state:            stateList,
@@ -1272,17 +1272,17 @@ func newOverlayModel(sessions []protocol.SessionInfo, currentSessionID string, f
 	}
 }
 
-func (m overlayModel) Init() tea.Cmd {
+func (m *overlayModel) Init() tea.Cmd {
 	return tea.Batch(m.fetchPreviewCmd(), m.refreshTickCmd())
 }
 
-func (m overlayModel) refreshTickCmd() tea.Cmd {
+func (m *overlayModel) refreshTickCmd() tea.Cmd {
 	return tea.Tick(2*time.Second, func(time.Time) tea.Msg {
 		return refreshTickMsg{}
 	})
 }
 
-func (m overlayModel) refreshSessionsCmd() tea.Cmd {
+func (m *overlayModel) refreshSessionsCmd() tea.Cmd {
 	if m.refreshSessions == nil {
 		return nil
 	}
@@ -1303,7 +1303,7 @@ func (m overlayModel) refreshSessionsCmd() tea.Cmd {
 // beginRestartQueue builds a restart queue from the current view, keeping only
 // sessions for which match returns true, and starts processing it. If nothing
 // matches or restart is unavailable, it returns to the list.
-func (m overlayModel) beginRestartQueue(match func(protocol.SessionInfo) bool) (tea.Model, tea.Cmd) {
+func (m *overlayModel) beginRestartQueue(match func(protocol.SessionInfo) bool) (tea.Model, tea.Cmd) {
 	if m.restartSession != nil {
 		var queue []string
 
@@ -1335,7 +1335,7 @@ func (m overlayModel) beginRestartQueue(match func(protocol.SessionInfo) bool) (
 	return m, nil
 }
 
-func (m overlayModel) restartNextCmd() tea.Cmd {
+func (m *overlayModel) restartNextCmd() tea.Cmd {
 	if m.restartIdx >= len(m.restartQueue) {
 		return nil
 	}
@@ -1349,7 +1349,7 @@ func (m overlayModel) restartNextCmd() tea.Cmd {
 	}
 }
 
-func (m overlayModel) fetchPreviewCmd() tea.Cmd {
+func (m *overlayModel) fetchPreviewCmd() tea.Cmd {
 	if m.fetchPreview == nil {
 		return nil
 	}
@@ -1490,7 +1490,7 @@ func (m *overlayModel) visibleSessions() []protocol.SessionInfo {
 	return sessions
 }
 
-func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case previewMsg:
 		if item, ok := m.list.SelectedItem().(sessionItem); ok && item.info.ID == msg.sessionID {
@@ -1679,7 +1679,7 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.state == stateCreate && m.createModel != nil {
 		updated, cmd := m.createModel.Update(msg)
 
-		cm, ok := updated.(createSessionModel)
+		cm, ok := updated.(*createSessionModel)
 		if !ok {
 			m.createModel = nil
 			m.state = stateList
@@ -1688,7 +1688,7 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.fetchPreviewCmd()
 		}
 
-		m.createModel = &cm
+		m.createModel = cm
 		if cm.done {
 			m.createName = strings.TrimSpace(cm.nameInput.Value())
 
@@ -2141,7 +2141,7 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cm := newCreateSessionModel(defaultRepo, m.repoSuggestions, m.agents, m.defaultAgent)
 				cm.width = m.width
 				cm.height = m.height
-				m.createModel = &cm
+				m.createModel = cm
 				m.state = stateCreate
 
 				return m, textinput.Blink
@@ -2175,7 +2175,7 @@ func (m overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m overlayModel) View() tea.View {
+func (m *overlayModel) View() tea.View {
 	w := m.width
 
 	h := m.height
@@ -2621,7 +2621,7 @@ func RunOverlay(opts RunOverlayOpts) *OverlayResult {
 		return nil
 	}
 
-	result, ok := final.(overlayModel)
+	result, ok := final.(*overlayModel)
 	if !ok {
 		return nil
 	}

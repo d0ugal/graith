@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -135,9 +136,8 @@ var sandboxWhyCmd = &cobra.Command{
 	Hidden:             true,
 	DisableFlagParsing: true,
 	RunE: func(_ *cobra.Command, _ []string) error {
-		return fmt.Errorf(
-			"`gr sandbox why` has been split: use `gr sandbox explain` (would an access be allowed?) " +
-				"or `gr sandbox watch` (what did the sandbox actually deny?)")
+		return errors.New("`gr sandbox why` has been split: use `gr sandbox explain` (would an access be allowed?) " +
+			"or `gr sandbox watch` (what did the sandbox actually deny?)")
 	},
 }
 
@@ -301,7 +301,7 @@ func resolveWatchRecent(recentFlag, followFlag, sinceChanged, stdoutTTY bool) (b
 	recent := recentFlag || sinceChanged
 
 	if followFlag && recent {
-		return false, fmt.Errorf("--follow cannot be combined with --recent/--since")
+		return false, errors.New("--follow cannot be combined with --recent/--since")
 	}
 
 	if followFlag {

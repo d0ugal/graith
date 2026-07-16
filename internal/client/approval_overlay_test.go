@@ -359,7 +359,12 @@ func TestFormatToolDetailVariants2(t *testing.T) {
 func TestFormatToolDetailWriteTruncatesManyLines2(t *testing.T) {
 	// JSON-encode the content so the embedded newlines are valid.
 	content := strings.TrimRight(strings.Repeat("x\n", 30), "\n")
-	encoded, _ := json.Marshal(map[string]string{"file_path": "/f", "content": content})
+
+	encoded, err := json.Marshal(map[string]string{"file_path": "/f", "content": content})
+	if err != nil {
+		t.Fatalf("marshal tool input: %v", err)
+	}
+
 	info := protocol.ApprovalInfo{SessionName: "loch", ToolName: "Write", ToolInput: string(encoded)}
 
 	got := formatToolDetail(info, 80)

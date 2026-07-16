@@ -3,10 +3,12 @@ package daemon
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/d0ugal/graith/internal/config"
@@ -137,7 +139,7 @@ func newInterfaceListener(ctx context.Context, cfg config.RemoteConfig) (*interf
 	}
 
 	if st.Self == nil || len(st.Self.TailscaleIPs) == 0 {
-		return nil, fmt.Errorf("no tailnet IP available (interface mode requires a running tailscaled)")
+		return nil, errors.New("no tailnet IP available (interface mode requires a running tailscaled)")
 	}
 
 	// Prefer IPv4, and NEVER fall back to a wildcard bind.
@@ -150,7 +152,7 @@ func newInterfaceListener(ctx context.Context, cfg config.RemoteConfig) (*interf
 		}
 	}
 
-	return &interfaceListener{lc: lc, addr: net.JoinHostPort(ip, fmt.Sprintf("%d", cfg.Port))}, nil
+	return &interfaceListener{lc: lc, addr: net.JoinHostPort(ip, strconv.Itoa(cfg.Port))}, nil
 }
 
 func (l *interfaceListener) Listen() (net.Listener, error) {

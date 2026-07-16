@@ -306,17 +306,7 @@ func TestStatusStyle(t *testing.T) {
 }
 
 func join(ss []string) string {
-	out := ""
-
-	for i, s := range ss {
-		if i > 0 {
-			out += ","
-		}
-
-		out += s
-	}
-
-	return out
+	return strings.Join(ss, ",")
 }
 
 // TestTUIColumnCellsGolden pins the exact ANSI-stripped bytes of the TUI

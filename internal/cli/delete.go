@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -82,7 +83,7 @@ func resolveDeleteTarget(c *client.Client, args []string, children bool) (sessio
 	if children && len(args) == 0 {
 		sessionID = os.Getenv("GRAITH_SESSION_ID")
 		if sessionID == "" {
-			return "", false, fmt.Errorf("--children with no session arg requires GRAITH_SESSION_ID to be set")
+			return "", false, errors.New("--children with no session arg requires GRAITH_SESSION_ID to be set")
 		}
 
 		return sessionID, true, nil

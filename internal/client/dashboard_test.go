@@ -34,14 +34,14 @@ func dashboardTestSessions() []protocol.SessionInfo {
 	}
 }
 
-func updateDash(m DashboardModel, key string) DashboardModel {
+func updateDash(m *DashboardModel, key string) *DashboardModel {
 	result, _ := m.Update(tea.KeyPressMsg{Code: rune(key[0]), Text: key})
-	return result.(DashboardModel)
+	return result.(*DashboardModel)
 }
 
-func updateDashKey(m DashboardModel, k rune) (DashboardModel, tea.Cmd) {
+func updateDashKey(m *DashboardModel, k rune) (*DashboardModel, tea.Cmd) {
 	result, cmd := m.Update(tea.KeyPressMsg{Code: k})
-	return result.(DashboardModel), cmd
+	return result.(*DashboardModel), cmd
 }
 
 func TestDashboardNavigation(t *testing.T) {
@@ -225,7 +225,7 @@ func TestDashboardRefresh(t *testing.T) {
 
 	result, _ := m.Update(refreshMsg{sessions: newSessions})
 
-	dm := result.(DashboardModel)
+	dm := result.(*DashboardModel)
 	if len(dm.sessions) != 3 {
 		t.Errorf("sessions count = %d, want 3", len(dm.sessions))
 	}
@@ -239,7 +239,7 @@ func TestDashboardRefreshNilPreservesState(t *testing.T) {
 
 	result, _ := m.Update(refreshMsg{sessions: nil})
 
-	dm := result.(DashboardModel)
+	dm := result.(*DashboardModel)
 	if len(dm.sessions) != 2 {
 		t.Errorf("sessions count = %d, want 2 (preserved on nil refresh)", len(dm.sessions))
 	}
@@ -269,7 +269,7 @@ func TestDashboardCursorPreservedOnRefresh(t *testing.T) {
 
 	result, _ := dm.Update(refreshMsg{sessions: dashboardTestSessions()})
 
-	dm = result.(DashboardModel)
+	dm = result.(*DashboardModel)
 	if dm.cursor != 1 {
 		t.Errorf("cursor after refresh = %d, want 1 (preserved)", dm.cursor)
 	}
@@ -365,7 +365,7 @@ func TestDashboardDeleteConfirmTargetsOriginalSession(t *testing.T) {
 		sessions[1],
 	}
 	result, _ := dm.Update(refreshMsg{sessions: newSessions})
-	dm = result.(DashboardModel)
+	dm = result.(*DashboardModel)
 
 	// s1 disappeared — confirmation should be cancelled
 	if dm.state != dashStateNormal {
@@ -408,7 +408,7 @@ func assertConfirmSurvivesRefreshWithTarget(t *testing.T, triggerKey string, wan
 		sessions[1],
 	}
 	result, _ := dm.Update(refreshMsg{sessions: newSessions})
-	dm = result.(DashboardModel)
+	dm = result.(*DashboardModel)
 
 	// Confirmation should still be active targeting s1
 	if dm.state != wantState {
@@ -451,7 +451,7 @@ func TestDashboardStopConfirmTargetsOriginalSession(t *testing.T) {
 
 	// Refresh removes s1
 	result, _ := dm.Update(refreshMsg{sessions: []protocol.SessionInfo{sessions[1]}})
-	dm = result.(DashboardModel)
+	dm = result.(*DashboardModel)
 
 	if dm.state != dashStateNormal {
 		t.Errorf("state = %d, want dashStateNormal (confirm cancelled)", dm.state)
@@ -479,7 +479,7 @@ func TestDashboardStopConfirmCancelledWhenTargetStops(t *testing.T) {
 	stoppedSessions[0].Status = "stopped"
 
 	result, _ := dm.Update(refreshMsg{sessions: stoppedSessions})
-	dm = result.(DashboardModel)
+	dm = result.(*DashboardModel)
 
 	if dm.state != dashStateNormal {
 		t.Errorf("state = %d, want dashStateNormal (stop cancelled because target stopped)", dm.state)
@@ -586,7 +586,7 @@ func TestDashboardRefreshRepositionsCursorToSelectedID2(t *testing.T) {
 	}
 
 	res, _ := m.Update(refreshMsg{sessions: reordered})
-	dm := res.(DashboardModel)
+	dm := res.(*DashboardModel)
 
 	if dm.sessions[dm.cursor].ID != "s1" {
 		t.Fatalf("cursor should track s1 after reorder, landed on %q", dm.sessions[dm.cursor].ID)
@@ -601,7 +601,7 @@ func TestDashboardRefreshClearsConfirmWhenTargetGone2(t *testing.T) {
 
 	// Refresh without s2.
 	res, _ := m.Update(refreshMsg{sessions: []protocol.SessionInfo{richDashSessions()[0]}})
-	dm := res.(DashboardModel)
+	dm := res.(*DashboardModel)
 
 	if dm.state != dashStateNormal || dm.confirmSessionID != "" {
 		t.Fatalf("confirm should clear when target vanishes: state=%d id=%q", dm.state, dm.confirmSessionID)
@@ -619,7 +619,7 @@ func TestDashboardRefreshClearsStopConfirmWhenTargetStopped2(t *testing.T) {
 	stopped[0].Status = "stopped"
 
 	res, _ := m.Update(refreshMsg{sessions: stopped})
-	dm := res.(DashboardModel)
+	dm := res.(*DashboardModel)
 
 	if dm.state != dashStateNormal {
 		t.Fatalf("stop-confirm should clear when target stops, state=%d", dm.state)
@@ -633,7 +633,7 @@ func TestDashboardConfirmStopThenCancelWithAnyKey2(t *testing.T) {
 	m.confirmSessionID = "s1"
 
 	res, _ := m.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
-	dm := res.(DashboardModel)
+	dm := res.(*DashboardModel)
 
 	if dm.state != dashStateNormal || dm.confirmSessionID != "" {
 		t.Fatalf("any non-y key should cancel stop confirm: state=%d", dm.state)
@@ -647,7 +647,7 @@ func TestDashboardConfirmStopYieldsResult2(t *testing.T) {
 	m.confirmSessionID = "s1"
 
 	res, cmd := m.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
-	dm := res.(DashboardModel)
+	dm := res.(*DashboardModel)
 
 	if dm.result == nil || dm.result.Action != "stop" || dm.result.SessionID != "s1" {
 		t.Fatalf("stop confirm y should yield stop result: %+v", dm.result)
@@ -664,7 +664,7 @@ func TestDashboardStopKeyOnlyForRunning2(t *testing.T) {
 	m.cursor = 1 // s2 is stopped
 
 	res, _ := m.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
-	dm := res.(DashboardModel)
+	dm := res.(*DashboardModel)
 
 	if dm.state != dashStateNormal {
 		t.Errorf("s on a stopped session should not enter stop-confirm, state=%d", dm.state)
@@ -677,14 +677,14 @@ func TestDashboardResumeKeyOnlyForStopped2(t *testing.T) {
 
 	// cursor 0 (running) — r does nothing.
 	res, _ := m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
-	if res.(DashboardModel).result != nil {
+	if res.(*DashboardModel).result != nil {
 		t.Error("r on running session should not resume")
 	}
 
 	// cursor 1 (stopped) — r resumes.
 	m.cursor = 1
 	res, cmd := m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
-	dm := res.(DashboardModel)
+	dm := res.(*DashboardModel)
 
 	if dm.result == nil || dm.result.Action != "resume" || dm.result.SessionID != "s2" {
 		t.Fatalf("r on stopped session should resume: %+v", dm.result)
@@ -707,7 +707,7 @@ func TestDashboardQuitKeys2(t *testing.T) {
 func TestDashboardWindowSizeScrolls2(t *testing.T) {
 	m := NewDashboardModel(richDashSessions(), nil)
 	res, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
-	dm := res.(DashboardModel)
+	dm := res.(*DashboardModel)
 
 	if dm.width != 100 || dm.height != 20 {
 		t.Fatalf("window size not applied: w=%d h=%d", dm.width, dm.height)

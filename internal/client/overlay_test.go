@@ -1,6 +1,7 @@
 package client
 
 import (
+	"errors"
 	"fmt"
 	"image/color"
 	"strings"
@@ -85,13 +86,13 @@ func sendWindowSize(m tea.Model, w, h int) (tea.Model, tea.Cmd) {
 	return m.Update(tea.WindowSizeMsg{Width: w, Height: h})
 }
 
-func asOverlay(m tea.Model) overlayModel {
-	return m.(overlayModel)
+func asOverlay(m tea.Model) *overlayModel {
+	return m.(*overlayModel)
 }
 
 // sizedModel builds an overlay model with the common nil callbacks and the
 // standard 120x40 dimensions used across most overlay tests.
-func sizedModel(t *testing.T, sessions []protocol.SessionInfo, current string) overlayModel {
+func sizedModel(t *testing.T, sessions []protocol.SessionInfo, current string) *overlayModel {
 	t.Helper()
 
 	m := newOverlayModel(sessions, current, nil, nil, nil, nil)
@@ -103,7 +104,7 @@ func sizedModel(t *testing.T, sessions []protocol.SessionInfo, current string) o
 
 // countSessionItems returns the number of sessionItem entries in the model's
 // list (excluding group headers and other item types).
-func countSessionItems(m overlayModel) int {
+func countSessionItems(m *overlayModel) int {
 	count := 0
 
 	for _, item := range m.list.Items() {
@@ -527,7 +528,7 @@ func TestOverlay_SpaceTogglesCollapse(t *testing.T) {
 
 	// Press space to collapse
 	updated, _ := sendKey(m, " ")
-	m = updated.(overlayModel)
+	m = updated.(*overlayModel)
 
 	if !m.collapsed["root"] {
 		t.Fatal("root should be collapsed after space")
@@ -539,7 +540,7 @@ func TestOverlay_SpaceTogglesCollapse(t *testing.T) {
 
 	// Press space again to expand
 	updated, _ = sendKey(m, " ")
-	m = updated.(overlayModel)
+	m = updated.(*overlayModel)
 
 	if m.collapsed["root"] {
 		t.Fatal("root should be expanded after second space")
@@ -560,7 +561,7 @@ func TestOverlay_SpaceOnLeafDoesNothing(t *testing.T) {
 	itemsBefore := len(m.list.Items())
 
 	updated, _ := sendKey(m, " ")
-	m = updated.(overlayModel)
+	m = updated.(*overlayModel)
 
 	if len(m.list.Items()) != itemsBefore {
 		t.Error("space on leaf should not change item count")
@@ -580,7 +581,7 @@ func TestOverlay_CollapseAllExpandAll(t *testing.T) {
 
 	// Press C to collapse all parents
 	updated, _ := sendKey(m, "C")
-	m = updated.(overlayModel)
+	m = updated.(*overlayModel)
 
 	if !m.collapsed["root1"] || !m.collapsed["root2"] {
 		t.Fatal("all parents should be collapsed")
@@ -592,7 +593,7 @@ func TestOverlay_CollapseAllExpandAll(t *testing.T) {
 
 	// Press C again to expand all
 	updated, _ = sendKey(m, "C")
-	m = updated.(overlayModel)
+	m = updated.(*overlayModel)
 
 	if m.collapsed["root1"] || m.collapsed["root2"] {
 		t.Fatal("all parents should be expanded")
@@ -1308,7 +1309,7 @@ func TestUpdate_RestartAll_HandlesErrors(t *testing.T) {
 	restartFn := func(id string) error {
 		callCount++
 		if callCount == 2 {
-			return fmt.Errorf("restart failed")
+			return errors.New("restart failed")
 		}
 
 		return nil
@@ -1359,7 +1360,6 @@ func TestUpdate_RestartAll_EscCancelsRemaining(t *testing.T) {
 	// Execute first restart
 	msg := cmd()
 	updated, cmd = updated.Update(msg)
-	om = asOverlay(updated)
 
 	if len(restarted) != 1 {
 		t.Fatalf("restarted = %d, want 1 after first result", len(restarted))
@@ -1647,7 +1647,7 @@ func TestUpdate_RestartMenu_RespectsFilter(t *testing.T) {
 func TestUpdate_Stop_Error(t *testing.T) {
 	sessions := overlayTestSessions()
 	stopFn := func(string) error {
-		return fmt.Errorf("stop failed")
+		return errors.New("stop failed")
 	}
 
 	m := sizedModel(t, sessions, "")
@@ -2890,7 +2890,7 @@ func TestFetchPreviewCmd_GroupHeaderSelected(t *testing.T) {
 
 // --- OverlayResult construction ---
 
-func overlayResultFromModel(om overlayModel) *OverlayResult {
+func overlayResultFromModel(om *overlayModel) *OverlayResult {
 	if om.selected != nil {
 		action := "attach"
 		if om.state == stateConfirmDelete {

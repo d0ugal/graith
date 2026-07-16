@@ -413,7 +413,7 @@ func (c *Client) Close() {
 func BuildHandshake(paths config.Paths, cols, rows uint16, cwd string) protocol.HandshakeMsg {
 	return protocol.HandshakeMsg{
 		Version:      protocol.Version,
-		ClientID:     fmt.Sprintf("%d", os.Getpid()),
+		ClientID:     strconv.Itoa(os.Getpid()),
 		TerminalSize: [2]uint16{cols, rows},
 		Cwd:          cwd,
 		Profile:      paths.Profile,

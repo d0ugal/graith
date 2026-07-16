@@ -1,7 +1,7 @@
 package cli
 
 import (
-	"fmt"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -37,7 +37,7 @@ var infoCmd = &cobra.Command{
 
 		best := matchSession(cwd, list.Sessions)
 		if best == nil {
-			return fmt.Errorf("not inside a graith session worktree")
+			return errors.New("not inside a graith session worktree")
 		}
 
 		if jsonOutput {

@@ -54,7 +54,11 @@ func (w *Writer) Error(err error) {
 			Error string `json:"error"`
 		}
 
-		_ = json.NewEncoder(w.errOut).Encode(jsonErr{Error: err.Error()})
+		if encErr := json.NewEncoder(w.errOut).Encode(jsonErr{Error: err.Error()}); encErr != nil {
+			// The JSON encode can only fail on a write error to errOut; fall
+			// back to a plain-text line so the error is still surfaced.
+			_, _ = fmt.Fprintf(w.errOut, "error: %v\n", err)
+		}
 
 		return
 	}

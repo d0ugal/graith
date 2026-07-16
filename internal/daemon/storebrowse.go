@@ -46,7 +46,7 @@ func resolveStoreTarget(dataDir, repo string, shared bool) (storeTarget, error) 
 	// malformed request targets nothing instead of a surprising store. A bare
 	// repo == "shared" is the reserved shared-store round-trip, not a conflict.
 	if shared && repo != "" && repo != "shared" {
-		return storeTarget{}, fmt.Errorf("shared and repo are mutually exclusive")
+		return storeTarget{}, errors.New("shared and repo are mutually exclusive")
 	}
 
 	if shared || repo == "shared" {
@@ -54,7 +54,7 @@ func resolveStoreTarget(dataDir, repo string, shared bool) (storeTarget, error) 
 	}
 
 	if repo == "" {
-		return storeTarget{}, fmt.Errorf("store target required: set repo or shared")
+		return storeTarget{}, errors.New("store target required: set repo or shared")
 	}
 
 	// Prefer the path interpretation (existing CLI behaviour), then fall back to

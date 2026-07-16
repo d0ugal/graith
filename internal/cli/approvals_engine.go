@@ -1,7 +1,7 @@
 package cli
 
 import (
-	"fmt"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -81,7 +81,7 @@ func approvalsEngine(flag string) (engine *localmost.Engine, source string, err 
 
 	path := approvalsConfigPath(flag)
 	if path == "" {
-		return nil, "", fmt.Errorf("no approvals config: set [approvals.builtin] config, add inline rules, or pass --config")
+		return nil, "", errors.New("no approvals config: set [approvals.builtin] config, add inline rules, or pass --config")
 	}
 
 	eng, lerr := localmost.Load(path)

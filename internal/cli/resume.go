@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/d0ugal/graith/internal/client"
@@ -17,7 +18,7 @@ var resumeCmd = &cobra.Command{
 	ValidArgsFunction: completeSessionNames,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if resumeAttach && jsonOutput {
-			return fmt.Errorf("--attach cannot be combined with --json (attach enters interactive passthrough)")
+			return errors.New("--attach cannot be combined with --json (attach enters interactive passthrough)")
 		}
 
 		c, err := client.Connect(cfg, paths, cfgFile)

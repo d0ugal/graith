@@ -3,6 +3,7 @@ package client
 import (
 	"fmt"
 	"image/color"
+	"strconv"
 	"strings"
 	"time"
 
@@ -357,7 +358,7 @@ func CompactCount(n int64) string {
 
 	switch {
 	case n < 1000:
-		return fmt.Sprintf("%d", n)
+		return strconv.FormatInt(n, 10)
 	case n < 1_000_000:
 		return compactUnit(n, 1000, "k")
 	case n < 1_000_000_000:

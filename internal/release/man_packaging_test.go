@@ -45,7 +45,7 @@ func (a *archiveFile) UnmarshalYAML(node *yaml.Node) error {
 
 // path returns the archive-source path this entry references — the bare-string
 // value, or the src of the {src, dst} mapping form.
-func (a archiveFile) path() string {
+func (a *archiveFile) path() string {
 	if a.Value != "" {
 		return a.Value
 	}

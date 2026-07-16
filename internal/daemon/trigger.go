@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -418,7 +419,7 @@ func (sm *SessionManager) triggerVars(t *config.TriggerConfig, fc fireContext) c
 		SessionName:  fc.sessionName,
 		WorktreePath: fc.worktree,
 		ChangedFiles: changed,
-		ChangeCount:  fmt.Sprintf("%d", len(fc.changedFiles)),
+		ChangeCount:  strconv.Itoa(len(fc.changedFiles)),
 	}
 }
 
@@ -527,7 +528,15 @@ func triggerFingerprint(t *config.TriggerConfig) string {
 		Action   config.ActionConfig
 		Policy   config.TriggerPolicy
 	}{t.Schedule, t.Watch, t.Action, t.Policy}
-	b, _ := json.Marshal(payload)
+
+	b, err := json.Marshal(payload)
+	if err != nil {
+		// The only dynamically-typed field (Action.AutoCleanup) is always a
+		// bool or string, so this is unreachable; hash the name defensively
+		// rather than collapse every definition to the same empty hash.
+		b = []byte(t.Name)
+	}
+
 	sum := sha256.Sum256(b)
 
 	return hex.EncodeToString(sum[:8])

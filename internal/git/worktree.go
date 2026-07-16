@@ -144,7 +144,7 @@ func TeardownSession(repoPath, worktreePath, branchName string) error {
 				// (broken .git link, etc). Remove the directory ourselves and
 				// prune the now-stale registration.
 				if rmErr := os.RemoveAll(worktreePath); rmErr != nil {
-					errs = append(errs, fmt.Errorf("remove worktree: %w (git worktree remove: %v)", rmErr, err))
+					errs = append(errs, fmt.Errorf("remove worktree: %w (git worktree remove: %w)", rmErr, err))
 				}
 
 				_ = PruneWorktrees(repoPath)

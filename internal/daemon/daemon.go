@@ -532,7 +532,7 @@ func (sm *SessionManager) loadOrCreateHumanToken() error {
 
 	token := strings.TrimSpace(string(data))
 	if token == "" {
-		return fmt.Errorf("read human token: token is empty")
+		return errors.New("read human token: token is empty")
 	}
 
 	sm.setHumanToken(token)
@@ -941,15 +941,15 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 
 	// Early validation that doesn't require the lock.
 	if inPlace && noRepo {
-		return SessionState{}, fmt.Errorf("--in-place and --no-repo are mutually exclusive")
+		return SessionState{}, errors.New("--in-place and --no-repo are mutually exclusive")
 	}
 
 	if inPlace && mirror != "" {
-		return SessionState{}, fmt.Errorf("--in-place and --mirror are mutually exclusive")
+		return SessionState{}, errors.New("--in-place and --mirror are mutually exclusive")
 	}
 
 	if inPlace && baseBranch != "" {
-		return SessionState{}, fmt.Errorf("--in-place and --base are mutually exclusive (in-place sessions don't create branches)")
+		return SessionState{}, errors.New("--in-place and --base are mutually exclusive (in-place sessions don't create branches)")
 	}
 
 	// --- Pre-lock: resolve repo root and discover GitHub username ---
@@ -1171,7 +1171,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 
 	if isMirror && !sandboxed {
 		sm.mu.Unlock()
-		return SessionState{}, fmt.Errorf("--mirror requires sandbox to be enabled so the mirrored worktree can be mounted read-only; set sandbox.enabled = true in config and ensure safehouse is installed (gr doctor)")
+		return SessionState{}, errors.New("--mirror requires sandbox to be enabled so the mirrored worktree can be mounted read-only; set sandbox.enabled = true in config and ensure safehouse is installed (gr doctor)")
 	}
 
 	// Yolo requires the PreToolUse approval hook to function, so it forces agent
@@ -1398,7 +1398,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 			cleanupOnError()
 			rollbackState()
 
-			return SessionState{}, fmt.Errorf("headless session requires a prompt (-p)")
+			return SessionState{}, errors.New("headless session requires a prompt (-p)")
 		}
 
 		driverKind = DriverPTY
@@ -1704,7 +1704,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 
 		_ = os.Remove(logPath)
 
-		return SessionState{}, fmt.Errorf("session was deleted during creation")
+		return SessionState{}, errors.New("session was deleted during creation")
 	}
 
 	sessState := sm.state.Sessions[id]
@@ -1835,7 +1835,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 	// cheap agent/transcript checks are re-done under the lock below.
 	crossAgentPre := targetAgent != "" && sourceOk && targetAgent != srcAgentPre
 	if targetModel != "" && !crossAgentPre {
-		return SessionState{}, fmt.Errorf("--model requires forking to a different agent (--agent); it is ignored for a same-agent fork")
+		return SessionState{}, errors.New("--model requires forking to a different agent (--agent); it is ignored for a same-agent fork")
 	}
 
 	if crossAgentPre && targetModel != "" {
@@ -2403,7 +2403,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 
 		_ = os.Remove(logPath)
 
-		return SessionState{}, fmt.Errorf("session was deleted during creation")
+		return SessionState{}, errors.New("session was deleted during creation")
 	}
 
 	sessState := sm.state.Sessions[id]
@@ -3097,7 +3097,7 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 
 	if sessState.SystemKind == SystemKindOrchestrator && !sandboxed {
 		sm.mu.Unlock()
-		return SessionState{}, fmt.Errorf("orchestrator requires sandbox but sandbox is not available — install safehouse and enable sandbox in config")
+		return SessionState{}, errors.New("orchestrator requires sandbox but sandbox is not available — install safehouse and enable sandbox in config")
 	}
 
 	if sessState.RepoPath != "" {
@@ -3631,7 +3631,7 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 		_ = ptySess.Kill()
 		ptySess.Close()
 
-		return SessionState{}, fmt.Errorf("session was deleted during resume")
+		return SessionState{}, errors.New("session was deleted during resume")
 	}
 
 	sessState = sm.state.Sessions[id]
@@ -3968,7 +3968,7 @@ func (sm *SessionManager) SoftDelete(id string) (SessionState, error) {
 // softDeleteSummary builds the lifecycle summary shown in the overlay/logs for a
 // soft-deleted session, including the frozen recovery deadline.
 func softDeleteSummary(expiresAt time.Time) string {
-	return fmt.Sprintf("Soft-deleted, recoverable until %s", expiresAt.Format("2006-01-02 15:04"))
+	return "Soft-deleted, recoverable until " + expiresAt.Format("2006-01-02 15:04")
 }
 
 // softDeletableLocked reports whether a session is a candidate for soft delete
@@ -5742,7 +5742,7 @@ func sanitizeSummaryText(text string) string {
 func (sm *SessionManager) SetSummary(sessionID, text string, ttlSeconds int) error {
 	text = sanitizeSummaryText(text)
 	if len(text) > 100 {
-		return fmt.Errorf("summary text exceeds 100 bytes")
+		return errors.New("summary text exceeds 100 bytes")
 	}
 
 	sm.mu.Lock()
@@ -5851,7 +5851,7 @@ func (sm *SessionManager) Update(id string, name *string, parentID *string) erro
 			newParentValue = ""
 		} else {
 			if newParent == id {
-				return fmt.Errorf("cannot set session as its own parent")
+				return errors.New("cannot set session as its own parent")
 			}
 
 			if _, ok := sm.state.Sessions[newParent]; !ok {
@@ -7563,7 +7563,7 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 			unixL, ok := l.(*net.UnixListener)
 			if !ok {
 				log.Error("listener is not a unix listener, cannot upgrade")
-				return fmt.Errorf("upgrade failed: listener type mismatch")
+				return errors.New("upgrade failed: listener type mismatch")
 			}
 
 			listenerFile, err := unixL.File()

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -41,7 +42,7 @@ var msgPubCmd = &cobra.Command{
 		}
 
 		if msgPubStream == "" {
-			return fmt.Errorf("--topic is required")
+			return errors.New("--topic is required")
 		}
 
 		senderID, senderName := detectSender()
@@ -75,7 +76,7 @@ var msgPubCmd = &cobra.Command{
 		}
 
 		if jsonOutput {
-			return out.JSON(json.RawMessage(resp.Payload))
+			return out.JSON(resp.Payload)
 		}
 
 		out.Printf("Published to %s\n", msgPubStream)
@@ -165,7 +166,7 @@ var msgSendCmd = &cobra.Command{
 		}
 
 		if jsonOutput {
-			return out.JSON(json.RawMessage(resp.Payload))
+			return out.JSON(resp.Payload)
 		}
 
 		out.Printf("Sent to %s\n", args[0])
@@ -190,7 +191,7 @@ var msgSubCmd = &cobra.Command{
 	Short: "Read messages from a stream",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if msgSubStream == "" {
-			return fmt.Errorf("--topic is required")
+			return errors.New("--topic is required")
 		}
 
 		senderID, _ := detectSender()
@@ -235,7 +236,7 @@ var msgAckCmd = &cobra.Command{
 	Short: "Acknowledge all messages in a stream",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if msgAckStream == "" {
-			return fmt.Errorf("--topic is required")
+			return errors.New("--topic is required")
 		}
 
 		senderID, _ := detectSender()
@@ -539,7 +540,7 @@ func buildJailReleaseMsg(args []string, all bool, author string) (protocol.MsgJa
 	switch {
 	case all:
 		if author == "" {
-			return m, fmt.Errorf("--all requires --author <login>")
+			return m, errors.New("--all requires --author <login>")
 		}
 
 		m.All = true
@@ -547,7 +548,7 @@ func buildJailReleaseMsg(args []string, all bool, author string) (protocol.MsgJa
 	case len(args) == 1:
 		m.ID = args[0]
 	default:
-		return m, fmt.Errorf("specify a jail id, or --all --author <login>")
+		return m, errors.New("specify a jail id, or --all --author <login>")
 	}
 
 	return m, nil
@@ -665,7 +666,7 @@ func resolveBody(args []string, filePath string) (string, error) {
 		return string(data), nil
 	}
 
-	return "", fmt.Errorf("message body required (as argument, --file, or stdin)")
+	return "", errors.New("message body required (as argument, --file, or stdin)")
 }
 
 func resolveSession(c *client.Client, nameOrID string) (string, error) {
@@ -693,7 +694,7 @@ func resolveSession(c *client.Client, nameOrID string) (string, error) {
 func resolveCurrentSessionInfo(c *client.Client) (*protocol.SessionInfo, error) {
 	currentID := os.Getenv("GRAITH_SESSION_ID")
 	if currentID == "" {
-		return nil, fmt.Errorf("GRAITH_SESSION_ID is not set; run this from inside a graith session")
+		return nil, errors.New("GRAITH_SESSION_ID is not set; run this from inside a graith session")
 	}
 
 	_ = c.SendControl("list", struct{}{})
@@ -733,7 +734,7 @@ func msgSendChildrenRun(args []string) error {
 
 	currentID := os.Getenv("GRAITH_SESSION_ID")
 	if currentID == "" {
-		return fmt.Errorf("--children requires GRAITH_SESSION_ID to be set")
+		return errors.New("--children requires GRAITH_SESSION_ID to be set")
 	}
 
 	_ = c.SendControl("list", struct{}{})
@@ -750,7 +751,7 @@ func msgSendChildrenRun(args []string) error {
 
 	descendants := descendantsOf(list.Sessions, currentID)
 	if len(descendants) == 0 {
-		return fmt.Errorf("no descendant sessions found")
+		return errors.New("no descendant sessions found")
 	}
 
 	var sentTo []string
@@ -814,7 +815,7 @@ func msgSendParentRun(args []string) error {
 	}
 
 	if current.ParentID == "" {
-		return fmt.Errorf("current session has no parent")
+		return errors.New("current session has no parent")
 	}
 
 	_ = c.SendControl("msg_pub", protocol.MsgPubMsg{
@@ -841,7 +842,7 @@ func msgSendParentRun(args []string) error {
 	}
 
 	if jsonOutput {
-		return out.JSON(json.RawMessage(resp.Payload))
+		return out.JSON(resp.Payload)
 	}
 
 	out.Printf("Sent to parent session\n")

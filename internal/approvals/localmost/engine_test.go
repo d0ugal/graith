@@ -1,6 +1,7 @@
 package localmost
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -486,12 +487,7 @@ func evalWithWatchdog(t *testing.T, eng *Engine, command string) Policy {
 }
 
 func longCommand(name string, args int) string {
-	cmd := name
-	for range args {
-		cmd += " x"
-	}
-
-	return cmd
+	return name + strings.Repeat(" x", args)
 }
 
 // TestBacktrackingBudgetDenyFailsClosed is the critical fail-open case both

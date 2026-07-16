@@ -33,7 +33,7 @@ func sessionLabel(s SessionState) string {
 func describeSessionExit(s SessionState) string {
 	switch {
 	case s.ExitSignal != "":
-		return fmt.Sprintf("killed by signal %s", s.ExitSignal)
+		return "killed by signal " + s.ExitSignal
 	case s.ExitCode != nil:
 		return fmt.Sprintf("exited with code %d", *s.ExitCode)
 	default:
@@ -728,7 +728,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				if authErr == nil && u.ParentID != nil {
 					if *u.ParentID == "" {
 						if auth.authenticated && !auth.isOrchestrator(sm) {
-							authErr = fmt.Errorf("not authorized: only the orchestrator may orphan a session")
+							authErr = errors.New("not authorized: only the orchestrator may orphan a session")
 						}
 					} else {
 						authErr = auth.checkTarget(sm, *u.ParentID, authSelfOrDescendant)

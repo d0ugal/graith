@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -236,7 +237,7 @@ func fetchChecks(ctx context.Context, slug string, number int, worktreePath stri
 	defer cancel()
 
 	out, err := ghRunner(cctx, worktreePath,
-		"pr", "checks", fmt.Sprintf("%d", number), "--repo", slug,
+		"pr", "checks", strconv.Itoa(number), "--repo", slug,
 		"--json", "name,state,bucket,link")
 	if err != nil {
 		// gh pr checks exits non-zero when checks are failing; it still prints

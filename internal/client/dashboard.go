@@ -43,8 +43,8 @@ type DashboardModel struct {
 	refresh          func() []protocol.SessionInfo
 }
 
-func NewDashboardModel(sessions []protocol.SessionInfo, refresh func() []protocol.SessionInfo) DashboardModel {
-	return DashboardModel{
+func NewDashboardModel(sessions []protocol.SessionInfo, refresh func() []protocol.SessionInfo) *DashboardModel {
+	return &DashboardModel{
 		sessions: sessions,
 		refresh:  refresh,
 	}
@@ -56,7 +56,7 @@ func tickCmd() tea.Cmd {
 	})
 }
 
-func (m DashboardModel) doRefresh() tea.Cmd {
+func (m *DashboardModel) doRefresh() tea.Cmd {
 	refresh := m.refresh
 
 	return func() tea.Msg {
@@ -64,14 +64,14 @@ func (m DashboardModel) doRefresh() tea.Cmd {
 	}
 }
 
-func (m DashboardModel) Init() tea.Cmd {
+func (m *DashboardModel) Init() tea.Cmd {
 	return tickCmd()
 }
 
 // visibleRows returns how many session rows fit in the viewport.
 // Reserves lines for: header (2), column header (1), separator (1),
 // confirmation prompt (2 when active), footer (2).
-func (m DashboardModel) visibleRows() int {
+func (m *DashboardModel) visibleRows() int {
 	reserved := 6
 	if m.state != dashStateNormal {
 		reserved += 2
@@ -100,7 +100,7 @@ func (m *DashboardModel) scrollToCursor() {
 	}
 }
 
-func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tickMsg:
 		return m, tea.Batch(tickCmd(), m.doRefresh())
@@ -231,7 +231,7 @@ func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m DashboardModel) View() tea.View {
+func (m *DashboardModel) View() tea.View {
 	if m.width == 0 || m.height == 0 {
 		return tea.NewView("")
 	}
@@ -364,7 +364,7 @@ func (dc dashCols) totalDashWidth() int {
 	return 2 + dc.name + 2 + dc.repo + 2 + dc.agent + 2 + dc.status + 2 + dc.activity + 2 + dc.branch + 2 + dc.git + 2 + dc.age + 2 + dc.attached + 2
 }
 
-func (m DashboardModel) computeDashCols() dashCols {
+func (m *DashboardModel) computeDashCols() dashCols {
 	dc := dashCols{
 		name:     4,
 		repo:     4,
@@ -449,7 +449,7 @@ func (m DashboardModel) computeDashCols() dashCols {
 	return dc
 }
 
-func (m DashboardModel) renderRow(s protocol.SessionInfo, cols dashCols, now time.Time, selected bool, dimStyle, selectedStyle lipgloss.Style) string {
+func (m *DashboardModel) renderRow(s protocol.SessionInfo, cols dashCols, now time.Time, selected bool, dimStyle, selectedStyle lipgloss.Style) string {
 	indicator := "●"
 	indicatorColor := lipgloss.Color("#00ff87")
 
@@ -531,7 +531,7 @@ func (m DashboardModel) renderRow(s protocol.SessionInfo, cols dashCols, now tim
 	return line
 }
 
-func (m DashboardModel) selectedSession() *protocol.SessionInfo {
+func (m *DashboardModel) selectedSession() *protocol.SessionInfo {
 	if m.cursor >= 0 && m.cursor < len(m.sessions) {
 		return &m.sessions[m.cursor]
 	}
@@ -539,7 +539,7 @@ func (m DashboardModel) selectedSession() *protocol.SessionInfo {
 	return nil
 }
 
-func (m DashboardModel) sessionByID(id string) *protocol.SessionInfo {
+func (m *DashboardModel) sessionByID(id string) *protocol.SessionInfo {
 	for i, s := range m.sessions {
 		if s.ID == id {
 			return &m.sessions[i]
@@ -549,7 +549,7 @@ func (m DashboardModel) sessionByID(id string) *protocol.SessionInfo {
 	return nil
 }
 
-func (m DashboardModel) selectedSessionID() string {
+func (m *DashboardModel) selectedSessionID() string {
 	if s := m.selectedSession(); s != nil {
 		return s.ID
 	}
@@ -582,7 +582,7 @@ func RunDashboard(sessions []protocol.SessionInfo, refresh func() []protocol.Ses
 		return nil
 	}
 
-	result, ok := final.(DashboardModel)
+	result, ok := final.(*DashboardModel)
 	if !ok {
 		return nil
 	}

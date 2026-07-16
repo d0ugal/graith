@@ -114,7 +114,7 @@ type ActionConfig struct {
 // agents read. It returns "" when no repo is set — unlike ResolvePath/ExpandPath,
 // which would resolve "" to the working directory — so callers can still
 // distinguish "unset" (shared store / no execution root) from a resolved path.
-func (a *ActionConfig) RepoPath() string {
+func (a ActionConfig) RepoPath() string {
 	if a.Repo == "" {
 		return ""
 	}

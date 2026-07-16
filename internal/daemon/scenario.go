@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"regexp"
@@ -19,7 +20,7 @@ var validScenarioName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
 func ValidateScenarioName(name string) error {
 	if name == "" {
-		return fmt.Errorf("scenario name must not be empty")
+		return errors.New("scenario name must not be empty")
 	}
 
 	if len(name) > 128 {
@@ -55,7 +56,7 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 	}
 
 	if len(msg.Sessions) == 0 {
-		return nil, fmt.Errorf("scenario must define at least one session")
+		return nil, errors.New("scenario must define at least one session")
 	}
 
 	// Validate caller is orchestrator (snapshot under lock).
@@ -74,7 +75,7 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 	}
 
 	if callerSystemKind != SystemKindOrchestrator {
-		return nil, fmt.Errorf("only the orchestrator session can start scenarios")
+		return nil, errors.New("only the orchestrator session can start scenarios")
 	}
 
 	// Validate session definitions.
@@ -910,7 +911,7 @@ func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSess
 	}
 
 	if input.Repo == "" {
-		return nil, fmt.Errorf("repo is required")
+		return nil, errors.New("repo is required")
 	}
 
 	cfg := sm.Config()

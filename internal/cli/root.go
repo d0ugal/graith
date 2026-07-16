@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -101,7 +102,7 @@ func insideSession() bool {
 
 func rejectConfigInsideSession(cmd *cobra.Command) error {
 	if cmd.Flags().Changed("config") && insideSession() {
-		return fmt.Errorf("--config is not allowed inside a graith session (sandbox policy)")
+		return errors.New("--config is not allowed inside a graith session (sandbox policy)")
 	}
 
 	return nil

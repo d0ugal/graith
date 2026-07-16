@@ -2,7 +2,7 @@ package git
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"strings"
 )
 
@@ -27,7 +27,7 @@ func DiscoverDefaultBranch(repoPath string) (string, error) {
 		}
 	}
 
-	return "", fmt.Errorf("cannot determine default branch; use --base to specify one")
+	return "", errors.New("cannot determine default branch; use --base to specify one")
 }
 
 func CreateBranch(repoPath, branchName, fromRef string) error {
