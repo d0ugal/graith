@@ -18,10 +18,11 @@ make -C gui ios-app
 make -C gui build
 ```
 
-`shared-test`, simulator, and run targets call Xcode tooling and may need a
-normal terminal or a graith session with sandboxing disabled. Full Xcode is
-required for iOS work. `gui/project.yml` is the source for the generated Xcode
-project; do not commit the generated project.
+Shared build/test and app-build targets are sandbox-safe. iOS XCTest, simulator,
+and run targets call `xcodebuild`/`simctl` and need a normal terminal or a graith
+session with sandboxing disabled. Full Xcode is required for iOS work.
+`gui/project.yml` is the source for the generated Xcode project; do not commit
+the generated project.
 
 ## Protocol changes
 
@@ -38,7 +39,8 @@ Regenerate it from the repository root:
 go test ./internal/protocol -run TestManifestUpToDate -update
 ```
 
-Read `internal/protocol/AGENTS.md` when changing Swift protocol models.
+From the repository root, read `internal/protocol/AGENTS.md` when changing Swift
+protocol models.
 
 ## Capabilities and parity
 
@@ -57,5 +59,6 @@ Do not hand-edit the generated capability fixture. Prefer iOS/macOS parity in
 the shared layer; declare a `knownDivergences` entry only when the difference is
 intentional and reviewed.
 
-See `internal/capabilities/AGENTS.md`, `gui/README.md`, and
-`docs/design/2026-07-14-shared-session-feature-layer.md` for details.
+From the repository root, see `internal/capabilities/AGENTS.md`,
+`gui/README.md`, and `docs/design/2026-07-14-shared-session-feature-layer.md`
+for details.

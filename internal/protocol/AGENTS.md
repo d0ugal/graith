@@ -20,7 +20,8 @@ Control messages use `{"type":"...","payload":{...}}`. Go wire structs live in
 For every added or changed exported wire struct:
 
 1. Make the JSON shape and optionality explicit in `messages.go`.
-2. Add a new struct to `registeredTypes` in `manifest.go`.
+2. Ensure every exported wire struct is registered in `manifest.go`; add new
+   types to `registeredTypes`.
 3. Classify it in `swiftAnnotations`:
    - `required`: Swift models it now;
    - `planned`: client-relevant but not implemented in Swift yet;
@@ -42,13 +43,14 @@ For every added or changed exported wire struct:
    ```
 
    Run relevant integration tests for routing or lifecycle changes. If the
-   Swift-required surface changed, run `make -C gui shared-test` outside a
-   sandbox that blocks Xcode tooling.
+   Swift-required surface changed, run `make -C gui shared-test`; shared Swift
+   tests are safe inside the graith sandbox when full Xcode is available.
 
 Never hand-edit
 `gui/shared/Tests/GraithProtocolTests/Fixtures/protocol_manifest.json`.
-`TestManifestRegistryComplete` intentionally fails closed for missing,
-duplicate, stale, or unclassified types.
+The manifest test suite intentionally fails closed: registry completeness
+catches missing, stale, and unclassified types, while manifest generation
+catches duplicates and unsupported shapes.
 
 The manifest describes conformance, not identical Go and Swift structs: Swift
 may model a subset of fields, but it must decode synthesized required shapes

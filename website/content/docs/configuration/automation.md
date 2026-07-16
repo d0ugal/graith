@@ -116,6 +116,8 @@ MCP-server config), `session`, `scenario`, `message`. Delivery routes to
 `skip`), `rate_limit` (default `5/30m`). See [Triggers]({{< relref "/docs/triggers.md" >}}) for the full
 reference.
 
+### Headless session actions (planned)
+
 Letting a `session`-type action spawn its session in [headless mode]({{< relref "sessions.md#headless-sessions" >}})
 via `[trigger.action] headless = true` — a natural fit for fire-and-forget
 briefings and cleanup reactors — is planned (issue #1075). For now, create

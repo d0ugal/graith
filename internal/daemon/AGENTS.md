@@ -43,6 +43,8 @@ token rotation, descendant checks, and jail-body/release restrictions.
 - `SoftDelete` hides and stops a session while retaining its worktree/branch
   until expiry. `Delete`/purge is destructive. ID-addressable operations must
   reject soft-deleted sessions unless they explicitly implement restore/purge.
+- When retention is zero, user-facing `gr delete` must reject the operation;
+  only explicit `gr purge` may become destructive.
 - Internal teardown may hard-delete; do not accidentally route user-facing
   `gr delete` through it.
 - Sandbox selection and enforcement fail closed. Unsupported backend, version,
@@ -50,8 +52,10 @@ token rotation, descendant checks, and jail-body/release restrictions.
 - GitHub comment bodies and similar external text are untrusted. Preserve the
   author allowlist/association check and quarantine path; only authorized
   humans/orchestrators may read or release jailed bodies.
-- New state teardown paths must preserve crash recovery, tombstones, and
-  uncommitted-work protections.
+- Write delete tombstones durably before destructive teardown and fail closed if
+  the tombstone cannot be written.
+- Preserve pre-migration state backups and the atomic-file write path.
+- Orphan GC must never remove dirty or indeterminate worktrees.
 
 Relevant design records include:
 
@@ -61,6 +65,10 @@ Relevant design records include:
 - `docs/design/2026-07-13-headless-stream-json-design.md`
 - `docs/design/2026-07-11-pr-comment-author-trust-design.md`
 - `docs/design/2026-07-13-pr-comment-jail-design.md`
+- `docs/design/2026-07-11-triggers-design.md`
+- `docs/design/2026-07-16-tracker-poll-action.md`
+- `docs/design/2026-07-14-pr-ref-watch-design.md`
+- `docs/design/2026-06-22-scenarios.md`
 
 ## Verification
 
