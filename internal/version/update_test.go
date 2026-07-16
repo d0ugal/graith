@@ -109,7 +109,7 @@ func TestCheckForUpdate_SkipsDev(t *testing.T) {
 
 	Version = "dev"
 
-	result := CheckForUpdate(t.TempDir())
+	result := CheckForUpdate(t.TempDir(), UpdateSettings{})
 	if result != nil {
 		t.Errorf("expected nil result for dev version, got %+v", result)
 	}
@@ -137,7 +137,7 @@ func TestCheckForUpdate_UsesCache(t *testing.T) {
 		t.Fatalf("write cache: %v", err)
 	}
 
-	result := CheckForUpdate(dir)
+	result := CheckForUpdate(dir, UpdateSettings{})
 	if result == nil {
 		t.Fatal("expected non-nil result from cache")
 	}
@@ -169,7 +169,7 @@ func TestCheckForUpdate_CacheUpToDate(t *testing.T) {
 		t.Fatalf("write cache: %v", err)
 	}
 
-	result := CheckForUpdate(dir)
+	result := CheckForUpdate(dir, UpdateSettings{})
 	if result != nil {
 		t.Errorf("expected nil result when up to date, got %+v", result)
 	}
@@ -200,6 +200,65 @@ func TestUpdateCache_ReadWrite(t *testing.T) {
 	}
 }
 
+func TestCheckForUpdate_Disabled(t *testing.T) {
+	origVersion := Version
+	defer func() { Version = origVersion }()
+
+	Version = "v0.2.0"
+	dir := t.TempDir()
+	cachePath := filepath.Join(dir, "update-check.json")
+
+	// A fresh cache with a newer version would normally produce a result; the
+	// Disabled switch must short-circuit before any cache/network read.
+	cache := &UpdateCache{LatestVersion: "v0.3.0", CheckedAt: time.Now()}
+
+	data, err := json.Marshal(cache)
+	if err != nil {
+		t.Fatalf("marshal cache: %v", err)
+	}
+
+	if err := os.WriteFile(cachePath, data, 0o600); err != nil {
+		t.Fatalf("write cache: %v", err)
+	}
+
+	result := CheckForUpdate(dir, UpdateSettings{Disabled: true})
+	if result != nil {
+		t.Errorf("expected nil result when disabled, got %+v", result)
+	}
+}
+
+func TestCheckForUpdate_IntervalControlsCacheFreshness(t *testing.T) {
+	origVersion := Version
+	defer func() { Version = origVersion }()
+
+	Version = "v0.2.0"
+	dir := t.TempDir()
+	cachePath := filepath.Join(dir, "update-check.json")
+
+	// Cache is two hours old: stale under the 1h default (which would then hit
+	// the network) but fresh under an explicit 3h interval, so the cached newer
+	// version is returned without any network access.
+	cache := &UpdateCache{LatestVersion: "v0.3.0", CheckedAt: time.Now().Add(-2 * time.Hour)}
+
+	data, err := json.Marshal(cache)
+	if err != nil {
+		t.Fatalf("marshal cache: %v", err)
+	}
+
+	if err := os.WriteFile(cachePath, data, 0o600); err != nil {
+		t.Fatalf("write cache: %v", err)
+	}
+
+	result := CheckForUpdate(dir, UpdateSettings{Interval: 3 * time.Hour})
+	if result == nil {
+		t.Fatal("expected cached result with a wide interval")
+	}
+
+	if result.LatestVersion != "v0.3.0" {
+		t.Errorf("LatestVersion = %q, want v0.3.0", result.LatestVersion)
+	}
+}
+
 func TestCheckForUpdate_NoCache(t *testing.T) {
 	origVersion := Version
 	defer func() { Version = origVersion }()
@@ -209,7 +268,7 @@ func TestCheckForUpdate_NoCache(t *testing.T) {
 
 	// With no cache and a version newer than any release, result should be nil
 	// (whether the fetch succeeds or fails, there's no newer version)
-	result := CheckForUpdate(dir)
+	result := CheckForUpdate(dir, UpdateSettings{})
 	if result != nil {
 		t.Errorf("expected nil result for version newer than any release, got %+v", result)
 	}

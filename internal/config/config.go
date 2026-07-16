@@ -51,6 +51,58 @@ type Config struct {
 	Triggers         []TriggerConfig    `toml:"trigger"`  // [[trigger]] array
 	TriggersRuntime  TriggersRuntime    `toml:"triggers"` // [triggers] table (daemon-wide settings)
 	Headless         HeadlessConfig     `toml:"headless"` // [headless] table (issue #1075)
+	Updates          UpdatesConfig      `toml:"updates"`  // [updates] table (issue #1253)
+}
+
+// UpdatesConfig is the [updates] block controlling the GitHub release check
+// (issue #1253). It makes the previously hard-coded checker configurable for
+// downstream forks, packaged/offline deployments, and users who don't want
+// network update checks. Enabled defaults to true (set in the embedded default
+// config) to preserve the historical opt-out behaviour; the remaining fields
+// fall back to the version package defaults when empty.
+type UpdatesConfig struct {
+	// Enabled turns the update check on. Defaults to true via the embedded
+	// default config; set false to disable all update-check network I/O.
+	Enabled bool `toml:"enabled"`
+	// Repository is the "owner/repo" whose latest release is queried. Empty uses
+	// the canonical d0ugal/graith repository.
+	Repository string `toml:"repository"`
+	// Interval is how often the check refreshes (cached between checks). Empty
+	// uses the 1h default; must parse as a duration.
+	Interval string `toml:"interval"`
+	// Timeout bounds the release HTTP request. Empty uses the 5s default; must
+	// parse as a duration.
+	Timeout string `toml:"timeout"`
+}
+
+// IntervalDuration returns the configured cache cadence, or 0 when unset/invalid
+// so the version package applies its own default.
+func (u UpdatesConfig) IntervalDuration() time.Duration {
+	if u.Interval == "" {
+		return 0
+	}
+
+	d, err := ParseDurationWithDays(u.Interval)
+	if err != nil || d <= 0 {
+		return 0
+	}
+
+	return d
+}
+
+// TimeoutDuration returns the configured HTTP timeout, or 0 when unset/invalid
+// so the version package applies its own default.
+func (u UpdatesConfig) TimeoutDuration() time.Duration {
+	if u.Timeout == "" {
+		return 0
+	}
+
+	d, err := ParseDurationWithDays(u.Timeout)
+	if err != nil || d <= 0 {
+		return 0
+	}
+
+	return d
 }
 
 // HeadlessConfig is the [headless] block gating headless stream-json sessions
@@ -2046,6 +2098,32 @@ func (c *Config) Validate() error {
 	for i, s := range rc.Schedule {
 		if _, err := ParseDurationWithDays(s); err != nil {
 			errs = append(errs, fmt.Errorf("orchestrator.restart.schedule[%d] %q: %w", i, s, err))
+		}
+	}
+
+	// [updates]: a non-empty but unparseable interval/timeout must fail loudly
+	// rather than silently falling back to the accessor default (mirrors
+	// git_pull.interval and delete.retention). A repository that is set but not
+	// in "owner/repo" form is rejected so a typo can't send the check at a
+	// URL the user didn't intend.
+	for _, f := range []struct{ name, val string }{
+		{"updates.interval", c.Updates.Interval},
+		{"updates.timeout", c.Updates.Timeout},
+	} {
+		if strings.TrimSpace(f.val) == "" {
+			continue
+		}
+
+		if d, err := ParseDurationWithDays(f.val); err != nil {
+			errs = append(errs, fmt.Errorf("%s %q: %w", f.name, f.val, err))
+		} else if d <= 0 {
+			errs = append(errs, fmt.Errorf("%s %q: must be greater than zero", f.name, f.val))
+		}
+	}
+
+	if repo := strings.TrimSpace(c.Updates.Repository); repo != "" {
+		if owner, name, ok := strings.Cut(repo, "/"); !ok || owner == "" || name == "" || strings.Contains(name, "/") {
+			errs = append(errs, fmt.Errorf("updates.repository %q: must be in \"owner/repo\" form", c.Updates.Repository))
 		}
 	}
 

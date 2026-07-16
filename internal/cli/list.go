@@ -77,9 +77,10 @@ var listCmd = &cobra.Command{
 		// Snapshot the data dir before the goroutine so it doesn't read the
 		// mutable package-global `paths` after RunE returns (data race under -race).
 		updateDataDir := paths.DataDir
+		updateCfg := updateSettings(cfg)
 
 		go func() {
-			updateCh <- version.CheckForUpdate(updateDataDir)
+			updateCh <- version.CheckForUpdate(updateDataDir, updateCfg)
 		}()
 
 		c, err := listConnectFn(cfg, paths, cfgFile)

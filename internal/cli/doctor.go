@@ -346,7 +346,17 @@ func (dc *doctorContext) checkVersion(probe daemonProbe) {
 		// Daemon not running; the Daemon section already says so. No version line.
 	}
 
-	updateResult := version.CheckForUpdate(paths.DataDir)
+	// A disabled [updates] block means we never checked, so reporting "up to
+	// date" would be misleading — say the check is off instead.
+	if cfg != nil && !cfg.Updates.Enabled {
+		if version.Version != "dev" {
+			dc.passf("version", "Update check disabled ([updates] enabled = false); current %s", version.Version)
+		}
+
+		return
+	}
+
+	updateResult := version.CheckForUpdate(paths.DataDir, updateSettings(cfg))
 	if updateResult != nil {
 		dc.failf("version", "Update available: %s → %s", updateResult.CurrentVersion, updateResult.LatestVersion)
 		dc.hintf("Run: brew upgrade graith")
