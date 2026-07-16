@@ -48,17 +48,17 @@ Steps:
 
 ### Headless sessions
 
-**Experimental.** `gr new watcher --headless -p "…"` runs the agent in Claude Code's stream-json mode instead of an interactive PTY. Headless sessions are **non-interactive**: they are meant for fire-and-forget work such as review judges and one-shot helpers. graith parses the typed event stream (so `gr logs -f` renders it and the run's cost/token usage is captured from the result envelope). v1 is Claude-only, one-shot (one prompt, run to completion, exit), requires a prompt, is **incompatible with the sandbox**, and implies `--background`; the whole path is inert unless `[headless] experimental = true` is set. A headless session is one-shot, so once it exits it cannot be resumed as headless. See [Configuration → Headless sessions]({{< relref "configuration/sessions.md#headless-sessions" >}}).
+**Experimental.** `gr new watcher --headless -p "…"` runs a `headless_capable` agent through graith's pinned Claude-compatible stream-json contract instead of an interactive PTY. Headless sessions are **non-interactive**: they are meant for fire-and-forget work such as review judges and one-shot helpers. Built-in Claude is verified; compatible wrappers may opt in through agent configuration. graith parses the typed event stream (so `gr logs -f` renders it and the run's cost/token usage is captured from the result envelope). v1 is one-shot (one prompt, run to completion, exit), requires a prompt, is **incompatible with the sandbox**, and implies `--background`; the whole path is inert unless `[headless] experimental = true` is set. A headless session is one-shot, so once it exits it cannot be resumed as headless. See [Configuration → Headless sessions]({{< relref "configuration/sessions.md#headless-sessions" >}}).
 
 Because there is no PTY to stream, `gr attach` on a headless session
 **converts it to interactive**: it stops the headless process and relaunches
-the session in a real PTY via `claude --resume <session-id>`, preserving the
+the session in a real PTY via its configured `resume_args`, preserving the
 conversation, worktree, branch, and env. Because this restarts the agent, attach
 prompts you to confirm first (any in-flight tool call is cancelled, not resumed);
 pass `-y`/`--yes` to skip the prompt. To watch a headless session read-only
 *without* converting it, use `gr logs -f` instead.
 
-**Interrupts and approvals.** A headless session runs over Claude Code's stdin
+**Interrupts and approvals.** A headless session runs over the pinned stdin
 control protocol, so graith can cleanly `interrupt` an in-flight turn (rather
 than firing terminal signals) and answer tool-permission prompts inline. Because
 a headless session has no human to answer, its approval policy must be

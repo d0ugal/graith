@@ -3434,8 +3434,8 @@ type Agent struct {
 	InterruptCount   *int `json:"interrupt_count,omitempty"    toml:"interrupt_count"`
 	InterruptDelayMs *int `json:"interrupt_delay_ms,omitempty" toml:"interrupt_delay_ms"`
 	// HeadlessCapable marks an agent as supporting headless stream-json mode
-	// (issue #1075). Unset means not capable — only agents explicitly flagged
-	// (Claude Code in v1) may run headless, so a --headless request against an
+	// (issue #1075). Unset means not capable. Built-in Claude is flagged; a custom
+	// protocol-speaking wrapper may opt in too, so a --headless request against an
 	// unsupported agent fails closed rather than silently downgrading.
 	HeadlessCapable *bool `json:"headless_capable,omitempty" toml:"headless_capable"`
 	// AddDirArgs is the flag template graith uses to grant the agent access to an
@@ -3559,12 +3559,42 @@ type AgentMCPConfig struct {
 	ServerArgs []string `json:"server_args,omitempty" toml:"server_args,omitempty"`
 }
 
-// validateAdapters checks the agent's hook/MCP/prompt-injection adapter config
-// (issue #1236): mechanisms must be known enum values, and each argv template may
-// only reference the placeholders that context binds. A bad template is rejected
-// at config load rather than failing a launch.
+var sessionLaunchTemplateVars = []string{
+	"username", "agent_session_id", "session_name", "session_id",
+	"worktree_path", "fork_source_agent_session_id", "model",
+}
+
+var optionArgTemplateVars = []string{
+	"username", "agent_session_id", "session_name", "session_id",
+	"worktree_path", "fork_source_agent_session_id", "model",
+	"profile", "reasoning_effort", "service_tier", "approval_policy", "web_search",
+}
+
+var addDirTemplateVars = []string{
+	"username", "agent_session_id", "session_name", "session_id",
+	"worktree_path", "fork_source_agent_session_id", "model", "dir",
+}
+
+// validateAdapters checks every agent launch-template context (issue #1236):
+// mechanisms must be known enum values, and argv fields may only reference the
+// placeholders actually bound at their expansion site. A bad template is
+// rejected at config load rather than later on create/resume/fork/include or a
+// conditional headless launch.
 func (a Agent) validateAdapters(name string) []error {
 	var errs []error
+	field := func(s string) string { return "agents." + name + "." + s }
+
+	errs = appendTemplateErrs(errs, field("args"), a.Args, sessionLaunchTemplateVars...)
+	errs = appendTemplateErrs(errs, field("resume_args"), a.ResumeArgs, sessionLaunchTemplateVars...)
+	errs = appendTemplateErrs(errs, field("fork_args"), a.ForkArgs, sessionLaunchTemplateVars...)
+	errs = appendTemplateErrs(errs, field("headless_args"), a.HeadlessArgs, sessionLaunchTemplateVars...)
+	errs = appendTemplateErrs(errs, field("empty_id_resume_args"), a.EmptyIDResumeArgs, sessionLaunchTemplateVars...)
+	errs = appendTemplateErrs(errs, field("add_dir_args"), a.AddDirArgs, addDirTemplateVars...)
+	for i, opt := range a.OptionArgs {
+		errs = appendTemplateErrs(errs,
+			fmt.Sprintf("agents.%s.option_args[%d].args", name, i),
+			opt.Args, optionArgTemplateVars...)
+	}
 
 	if a.Hooks != nil {
 		switch a.Hooks.Mechanism {
@@ -3574,9 +3604,9 @@ func (a Agent) validateAdapters(name string) []error {
 				name, a.Hooks.Mechanism, HookMechanismClaudeSettings, HookMechanismCodexConfig, HookMechanismCursorProject))
 		}
 
-		errs = appendTemplateErrs(errs, "agents."+name+".hooks.settings_args", a.Hooks.SettingsArgs, "path")
-		errs = appendTemplateErrs(errs, "agents."+name+".hooks.event_args", a.Hooks.EventArgs, "hook_event", "hook_value")
-		errs = appendTemplateErrs(errs, "agents."+name+".hooks.trust_args", a.Hooks.TrustArgs)
+		errs = appendTemplateErrs(errs, field("hooks.settings_args"), a.Hooks.SettingsArgs, "path")
+		errs = appendTemplateErrs(errs, field("hooks.event_args"), a.Hooks.EventArgs, "hook_event", "hook_value")
+		errs = appendTemplateErrs(errs, field("hooks.trust_args"), a.Hooks.TrustArgs)
 	}
 
 	if a.MCP != nil {
@@ -3587,11 +3617,11 @@ func (a Agent) validateAdapters(name string) []error {
 				name, a.MCP.Mechanism, MCPMechanismClaudeConfig, MCPMechanismCodexConfig))
 		}
 
-		errs = appendTemplateErrs(errs, "agents."+name+".mcp.config_args", a.MCP.ConfigArgs, "path")
-		errs = appendTemplateErrs(errs, "agents."+name+".mcp.server_args", a.MCP.ServerArgs, "mcp_name", "mcp_command", "mcp_args")
+		errs = appendTemplateErrs(errs, field("mcp.config_args"), a.MCP.ConfigArgs, "path")
+		errs = appendTemplateErrs(errs, field("mcp.server_args"), a.MCP.ServerArgs, "mcp_name", "mcp_command", "mcp_args")
 	}
 
-	errs = appendTemplateErrs(errs, "agents."+name+".prompt_injection_args", a.PromptInjectionArgs, "prompt")
+	errs = appendTemplateErrs(errs, field("prompt_injection_args"), a.PromptInjectionArgs, "prompt")
 
 	return errs
 }

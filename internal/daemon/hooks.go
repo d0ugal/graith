@@ -652,16 +652,20 @@ func preTrustCursorWorkspace(worktreePath string) error {
 // injectCursorHooks generates a .cursor/hooks.json in the worktree for a
 // Cursor session. Returns no extra args or env — cursor reads hooks from the
 // project directory automatically.
-func (sm *SessionManager) injectCursorHooks(sessionID, worktreePath string, yolo bool) (extraArgs []string, extraEnv map[string]string, err error) {
+func (sm *SessionManager) injectCursorHooks(
+	sessionID, worktreePath string,
+	yolo bool,
+	agent config.Agent,
+	approvalHooksEnabled bool,
+) (extraArgs []string, extraEnv map[string]string, err error) {
 	if worktreePath == "" {
 		return nil, nil, nil
 	}
 
-	// Snapshot the config once so hook generation reads a single generation and
-	// can't race a concurrent applyConfig (issue #1287).
-	cfg := sm.Config()
-
-	if agent, ok := cfg.Agents["cursor"]; !ok || agent.PreTrustWorkspaceEnabled() {
+	// The caller supplies the already-selected agent and approval policy from one
+	// config snapshot. A custom cursor_project adapter must never inherit the
+	// built-in cursor entry's trust policy (issues #1236, #1287).
+	if agent.PreTrustWorkspaceEnabled() {
 		if err := preTrustCursorWorkspace(worktreePath); err != nil {
 			sm.log.Warn("failed to pre-trust cursor workspace", "session_id", sessionID, "err", err)
 		}
@@ -701,7 +705,7 @@ func (sm *SessionManager) injectCursorHooks(sessionID, worktreePath string, yolo
 		},
 	}
 
-	if cfg.Approvals.HookEnabled() || yolo {
+	if approvalHooksEnabled || yolo {
 		hooks.Hooks["preToolUse"] = []hookEntry{
 			{Command: quoted + " approve-request"},
 		}
@@ -726,7 +730,8 @@ func (sm *SessionManager) injectCursorHooks(sessionID, worktreePath string, yolo
 // kept separate so MCP can be injected without hooks (see issue #1135). Returns
 // nil for agents that don't support hooks.
 func (sm *SessionManager) injectHooks(agentName, sessionID, worktreePath string, yolo bool) (extraArgs []string, extraEnv map[string]string, err error) {
-	agent := sm.Config().Agents[agentName]
+	cfg := sm.Config()
+	agent := cfg.Agents[agentName]
 
 	switch agent.HookMechanism() {
 	case config.HookMechanismClaudeSettings:
@@ -734,7 +739,7 @@ func (sm *SessionManager) injectHooks(agentName, sessionID, worktreePath string,
 	case config.HookMechanismCodexConfig:
 		return sm.injectCodexHooks(sessionID, yolo, agent)
 	case config.HookMechanismCursorProject:
-		return sm.injectCursorHooks(sessionID, worktreePath, yolo)
+		return sm.injectCursorHooks(sessionID, worktreePath, yolo, agent, cfg.Approvals.HookEnabled())
 	default:
 		sm.log.Info("agent does not support hooks, skipping", "agent", agentName, "session_id", sessionID)
 		return nil, nil, nil
@@ -742,15 +747,17 @@ func (sm *SessionManager) injectHooks(agentName, sessionID, worktreePath string,
 }
 
 // cleanupHooks removes generated hook files for a session.
-// For cursor sessions, also removes .cursor/hooks.json and the graith rule
-// from the worktree since they're not in the data dir.
+// For any agent configured with cursor_project hooks, also removes
+// .cursor/hooks.json. Dispatch by mechanism rather than the literal agent name
+// so custom adapters clean up the artifact they created.
 func (sm *SessionManager) cleanupHooks(sessionID, agentName, worktreePath string) {
 	dir := sm.hookDir(sessionID)
 	if err := os.RemoveAll(dir); err != nil {
 		sm.log.Warn("failed to cleanup hooks", "session_id", sessionID, "err", err)
 	}
 
-	if agentName == "cursor" && worktreePath != "" {
+	agent := sm.Config().Agents[agentName]
+	if agent.HookMechanism() == config.HookMechanismCursorProject && worktreePath != "" {
 		hooksPath := filepath.Join(worktreePath, ".cursor", "hooks.json")
 		_ = os.Remove(hooksPath)
 	}

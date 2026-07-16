@@ -29,6 +29,17 @@ func newTestSessionManagerWithDataDir(t *testing.T) *SessionManager {
 	}, slog.Default())
 }
 
+func injectDefaultCursorHooks(sm *SessionManager, sessionID, worktreePath string, yolo bool) ([]string, map[string]string, error) {
+	cfg := sm.Config()
+	return sm.injectCursorHooks(
+		sessionID,
+		worktreePath,
+		yolo,
+		cfg.Agents["cursor"],
+		cfg.Approvals.HookEnabled(),
+	)
+}
+
 func TestGenerateClaudeSettings(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 	sessionID := "kirk-braw-02"
@@ -196,7 +207,7 @@ func TestCleanupCursorHooks(t *testing.T) {
 	sessionID := "kirk-cursor"
 	worktree := t.TempDir()
 
-	_, _, err := sm.injectCursorHooks(sessionID, worktree, false)
+	_, _, err := injectDefaultCursorHooks(sm, sessionID, worktree, false)
 	if err != nil {
 		t.Fatalf("injectCursorHooks() error = %v", err)
 	}
@@ -784,6 +795,46 @@ func TestInjectHooksCustomAgentAdoptsMechanism(t *testing.T) {
 	}
 }
 
+// A custom cursor_project adapter must use its own trust policy and must remove
+// the project hook artifact during teardown. The built-in cursor defaults to
+// pre-trust=true, so this catches accidental name-based policy lookup.
+func TestInjectHooksCustomCursorUsesSelectedConfigAndCleansUp(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	sm := newTestSessionManagerWithDataDir(t)
+	disabled := false
+	sm.cfg.Agents["thrawn"] = config.Agent{
+		Command:           "thrawn-cursor-wrapper",
+		PreTrustWorkspace: &disabled,
+		Hooks: &config.AgentHookConfig{
+			Mechanism: config.HookMechanismCursorProject,
+		},
+	}
+
+	worktree := t.TempDir()
+	if _, _, err := sm.injectHooks("thrawn", "bairn-custom-cursor", worktree, false); err != nil {
+		t.Fatalf("injectHooks(custom cursor) error = %v", err)
+	}
+
+	sentinel := filepath.Join(
+		home, ".cursor", "projects", cursorProjectKey(worktree), ".workspace-trusted",
+	)
+	if _, err := os.Stat(sentinel); !os.IsNotExist(err) {
+		t.Errorf("custom pre_trust_workspace=false created sentinel, err = %v", err)
+	}
+
+	hooksPath := filepath.Join(worktree, ".cursor", "hooks.json")
+	if _, err := os.Stat(hooksPath); err != nil {
+		t.Fatalf("custom cursor hooks.json not created: %v", err)
+	}
+
+	sm.cleanupHooks("bairn-custom-cursor", "thrawn", worktree)
+	if _, err := os.Stat(hooksPath); !os.IsNotExist(err) {
+		t.Errorf("custom cursor hooks.json still exists after cleanup: err = %v", err)
+	}
+}
+
 // TestInjectMCPConfigCustomAgentAdoptsMechanism is the #1236 opt-in for MCP: a
 // custom agent adopts the codex-style per-server override mechanism with its own
 // argv spelling, with the Go-built server values bound to the template.
@@ -1270,7 +1321,7 @@ func TestInjectCursorHooks(t *testing.T) {
 	sessionID := "kirk-cursor-01"
 	worktree := t.TempDir()
 
-	extraArgs, extraEnv, err := sm.injectCursorHooks(sessionID, worktree, false)
+	extraArgs, extraEnv, err := injectDefaultCursorHooks(sm, sessionID, worktree, false)
 	if err != nil {
 		t.Fatalf("injectCursorHooks() error = %v", err)
 	}
@@ -1328,7 +1379,7 @@ func TestInjectCursorHooksContent(t *testing.T) {
 	sessionID := "kirk-cursor-02"
 	worktree := t.TempDir()
 
-	_, _, err := sm.injectCursorHooks(sessionID, worktree, false)
+	_, _, err := injectDefaultCursorHooks(sm, sessionID, worktree, false)
 	if err != nil {
 		t.Fatalf("injectCursorHooks() error = %v", err)
 	}
@@ -1426,7 +1477,7 @@ func TestPreTrustCursorWorkspaceDisabled(t *testing.T) {
 
 	worktree := t.TempDir()
 
-	_, _, err := sm.injectCursorHooks("haar-no-trust", worktree, false)
+	_, _, err := injectDefaultCursorHooks(sm, "haar-no-trust", worktree, false)
 	if err != nil {
 		t.Fatalf("injectCursorHooks() error = %v", err)
 	}
@@ -1456,7 +1507,7 @@ func TestPreTrustCursorWorkspaceIdempotent(t *testing.T) {
 func TestInjectCursorHooksEmptyWorktree(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 
-	args, env, err := sm.injectCursorHooks("haar-no-worktree", "", false)
+	args, env, err := injectDefaultCursorHooks(sm, "haar-no-worktree", "", false)
 	if err != nil {
 		t.Fatalf("injectCursorHooks() error = %v", err)
 	}
@@ -1651,7 +1702,7 @@ func TestInjectCursorHooksYoloInstallsPreToolUse(t *testing.T) {
 
 	worktree := t.TempDir()
 
-	if _, _, err := sm.injectCursorHooks("bonnie-cursor-yolo", worktree, true); err != nil {
+	if _, _, err := injectDefaultCursorHooks(sm, "bonnie-cursor-yolo", worktree, true); err != nil {
 		t.Fatalf("injectCursorHooks() error = %v", err)
 	}
 
@@ -1696,7 +1747,7 @@ func TestInjectCursorHooksApprovalsDisabled(t *testing.T) {
 	sm.cfg.Approvals.Enabled = &disabled
 	worktree := t.TempDir()
 
-	_, _, err := sm.injectCursorHooks("thrawn-cursor-no-approve", worktree, false)
+	_, _, err := injectDefaultCursorHooks(sm, "thrawn-cursor-no-approve", worktree, false)
 	if err != nil {
 		t.Fatalf("injectCursorHooks() error = %v", err)
 	}

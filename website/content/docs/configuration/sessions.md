@@ -9,7 +9,7 @@ draft: false
 
 ## Headless sessions
 
-**Experimental.** A headless session runs the agent in Claude Code's stream-json mode instead of an interactive PTY — for fire-and-forget work such as review judges and one-shot helpers. graith parses the typed event stream, so `gr logs -f` renders it and the run's cost/token usage is captured from the result envelope. v1 is Claude-only, one-shot, requires a prompt, and is **incompatible with the sandbox** (headless requires `sandbox.enabled = false`, or a per-agent sandbox that resolves to disabled).
+**Experimental.** A headless session runs an agent through graith's pinned Claude-compatible stream-json control contract instead of an interactive PTY — for fire-and-forget work such as review judges and one-shot helpers. graith parses the typed event stream, so `gr logs -f` renders it and the run's cost/token usage is captured from the result envelope. Built-in Claude is the verified implementation; a custom protocol-speaking wrapper can opt in. v1 is one-shot, requires a prompt, and is **incompatible with the sandbox** (headless requires `sandbox.enabled = false`, or a per-agent sandbox that resolves to disabled).
 
 ```toml
 [headless]
@@ -23,7 +23,7 @@ preview_bytes = 16384       # scrollback tail rendered by the overlay / screen_p
 
 `experimental` is the master switch. While it is off, headless is inert and sessions use the PTY driver. It is gated because the underlying control protocol is undocumented and may change between Claude Code releases. Trigger-spawned headless sessions are not implemented yet; see [Automation → Headless session actions]({{< relref "automation.md#headless-session-actions-planned" >}}).
 
-v1 is **Claude-only** and **one-shot** (one prompt, run to completion, exit). Only agents marked `headless_capable = true` can run headless — see [Agent definitions]({{< relref "agents.md#agent-definitions" >}}). Requesting headless for an agent that can't do it is an error, not a silent fallback to PTY.
+v1 is **one-shot** (one prompt, run to completion, exit). Only agents marked `headless_capable = true` can run headless — see [Agent definitions]({{< relref "agents.md#agent-definitions" >}}). Built-in Claude pins the verified CLI prefix in `headless_args`; a compatible wrapper may supply a different prefix or leave it empty if its base args already select the protocol. Requesting headless for an agent that can't do it is an error, not a silent fallback to PTY.
 
 `gr attach` on a headless session offers to convert it to an interactive PTY,
 preserving the conversation, worktree, branch, and environment. Pass `--yes` to
@@ -32,7 +32,7 @@ without converting it (see [Session Lifecycle → Headless sessions]({{< relref 
 
 The remaining keys are processing limits that rarely need tuning. `max_line_bytes` caps a single stream-json line (large tool outputs and base64 images exceed the 64 KiB scanner default). `control_timeout` bounds how long a synchronous control request waits for its response; `interrupt_timeout` is the much shorter interrupt round-trip before graith falls back to SIGINT. `preview_bytes` bounds the scrollback tail rendered by the overlay preview and the `screen_preview` control message. A zero or non-positive value falls back to the default shown.
 
-A headless session drives Claude Code over its stdin control protocol, giving graith a clean interrupt and inline tool-approval handling. It has no human to answer prompts, so its approval policy must be **non-blocking**: `yolo` auto-allows, a non-blocking `[approvals]` backend decides, and anything that would queue for a human is denied (escalated once to the orchestrator inbox). See [Session Lifecycle → Headless sessions]({{< relref "/docs/sessions.md#headless-sessions" >}}).
+A headless session drives the selected capable agent over the pinned stdin control protocol, giving graith a clean interrupt and inline tool-approval handling. It has no human to answer prompts, so its approval policy must be **non-blocking**: `yolo` auto-allows, a non-blocking `[approvals]` backend decides, and anything that would queue for a human is denied (escalated once to the orchestrator inbox). See [Session Lifecycle → Headless sessions]({{< relref "/docs/sessions.md#headless-sessions" >}}).
 
 ## Delete retention
 

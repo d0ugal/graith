@@ -45,7 +45,7 @@ fork_args      = ["--resume", "{fork_source_agent_session_id}", "--fork-session"
 env            = {}             # extra environment variables
 idle_timeout   = ""             # auto-stop after idle (default: 1h when resume_args is set, 0 otherwise)
 inject_prompt  = true           # inject agent_prompt into the session
-prompt_injection = ""           # how to inject: append_system_prompt | cursor_rules | developer_instructions | none
+prompt_injection = "append_system_prompt" # built-ins set their mechanism explicitly; custom agents may choose one
 validate_model = ""             # command to validate --model values
 headless_capable = false        # agent can run in headless (stream-json) mode (experimental)
 add_dir_args   = ["--add-dir", "{dir}"]  # flag for granting an extra directory (see Includes)
@@ -54,12 +54,12 @@ prompt_injection_args = ["--append-system-prompt", "{prompt}"]  # how the prompt
 empty_id_resume_args  = []      # resume fallback when no native id was captured (see below)
 ```
 
-`headless_capable` marks whether an agent supports [headless mode]({{< relref "sessions.md#headless-sessions" >}}). Only Claude supports it in v1; a session can't be asked to go headless on an agent that isn't capable.
+`headless_capable` marks whether an agent supports [headless mode]({{< relref "sessions.md#headless-sessions" >}}). Built-in Claude is enabled; a custom wrapper may opt in only when it speaks the same pinned stream-json control contract. A session can't be asked to go headless on an agent that isn't capable.
 
 Every agent-specific flag graith appends is defined here, so a custom agent can adopt (or drop) each pattern from config alone rather than waiting on a graith release:
 
 - **`add_dir_args`** — the flag template graith uses to grant the agent an extra directory (each [included repo](#includes)'s co-located worktree). It is expanded once per directory with `{dir}` bound to that path. Leave it unset for an agent whose CLI has no such flag; those agents rely on the `GRAITH_INCLUDE_*_PATH` environment variables instead.
-- **`headless_args`** — the control-channel argv prefix graith prepends when launching the agent in [headless mode]({{< relref "sessions.md#headless-sessions" >}}); the agent's own args follow it. Claude's default is `["-p", "--output-format", "stream-json", "--input-format", "stream-json", "--verbose", "--permission-prompt-tool", "stdio"]`.
+- **`headless_args`** — the control-channel argv prefix graith prepends when launching the agent in [headless mode]({{< relref "sessions.md#headless-sessions" >}}); the agent's own args follow it. Claude's default is `["-p", "--output-format", "stream-json", "--input-format", "stream-json", "--verbose", "--permission-prompt-tool", "stdio"]`. It may be empty for a `headless_capable` wrapper whose base command/args already speak the pinned control-channel protocol.
 - **`option_args`** — conditional flag groups appended on every launch. Each group is emitted only when its `when` template variable is set, so an unset option leaves the agent's own default untouched (see [Conditional option flags](#conditional-option-flags)).
 - **`prompt_injection_args`** — the argv template graith uses to deliver the operating prompt, with `{prompt}` bound to it, for the `append_system_prompt` and `developer_instructions` mechanisms (see below). Unset falls back to the built-in spelling for the selected mechanism.
 - **`empty_id_resume_args`** — the fallback resume argv used when `resume_args` templates `{agent_session_id}` but graith never captured a native session id. Codex's default is `["resume", "--last"]` (cwd-scoped, best-effort); unset means start fresh.
@@ -67,7 +67,7 @@ Every agent-specific flag graith appends is defined here, so a custom agent can 
 
 Dynamic values — the generated settings/MCP files, the encoded prompt, the Codex hook TOML — are still built by graith; only the capability declaration and argv spelling live in config, and the security checks (e.g. skipping an MCP server whose name isn't a valid Codex config key) stay in graith.
 
-`inject_prompt` is the on/off switch for the generic top-level `agent_prompt`; `prompt_injection` selects the *delivery mechanism*. The separate orchestrator role prompt is always delivered through that mechanism when the agent is used as the orchestrator, even when `inject_prompt = false`. When `prompt_injection` is empty (the default), graith picks the mechanism from the agent name — `claude` → `append_system_prompt`, `cursor` → `cursor_rules`, `codex` → `developer_instructions`, and any other name → `none`. Set it explicitly to override that mapping or, most usefully, to give a [custom agent](#custom-agents) a mechanism it would otherwise not get. The values are:
+`inject_prompt` is the on/off switch for the generic top-level `agent_prompt`; `prompt_injection` selects the *delivery mechanism*. The separate orchestrator role prompt is always delivered through that mechanism when the agent is used as the orchestrator, even when `inject_prompt = false`. The embedded built-ins set the mechanism explicitly (`claude` → `append_system_prompt`, `cursor` → `cursor_rules`, `codex` → `developer_instructions`, OpenCode/Agy → `none`), so `gr config show` reports the effective adapter. An empty mechanism retains name-based compatibility for partial overrides; a custom agent with an empty value resolves to `none`. Set it explicitly to give a [custom agent](#custom-agents) a supported mechanism. The values are:
 
 | Value | Mechanism |
 |-------|-----------|
@@ -80,7 +80,8 @@ An unknown value is rejected at config load. This applies to ordinary sessions a
 
 ### Template variables
 
-These are substituted in `args`, `resume_args`, `fork_args`, and `headless_args`:
+These are substituted in `args`, `resume_args`, `fork_args`, `headless_args`,
+and `empty_id_resume_args`:
 
 | Variable | Expands to |
 |----------|-----------|
@@ -94,9 +95,9 @@ These are substituted in `args`, `resume_args`, `fork_args`, and `headless_args`
 
 Only `{username}` is available in `branch_prefix`.
 
-Two more variables are scoped to specific fields. `{dir}` is available only in `add_dir_args`, bound to each granted directory in turn. The Codex option values — `{profile}`, `{reasoning_effort}`, `{service_tier}`, `{approval_policy}`, and `{web_search}` (a boolean rendering as `true`/empty) — are available in `option_args`, alongside `{model}`.
+Two more variable groups are scoped to specific fields. `{dir}` is available only in `add_dir_args`, bound to each granted directory in turn; that field also receives the session variables above. The option values — `{profile}`, `{reasoning_effort}`, `{service_tier}`, `{approval_policy}`, and `{web_search}` (a boolean rendering as `true`/empty) — are available only in `option_args`, alongside the session variables above (except `{dir}`).
 
-The adapter templates each bind their own values: `{prompt}` in `prompt_injection_args`; `{path}` in `hooks.settings_args` and `mcp.config_args`; `{hook_event}`/`{hook_value}` in `hooks.event_args`; and `{mcp_name}`/`{mcp_command}`/`{mcp_args}` in `mcp.server_args`. A template that references any other variable is rejected at config load.
+The adapter templates each bind their own values: `{prompt}` in `prompt_injection_args`; `{path}` in `hooks.settings_args` and `mcp.config_args`; `{hook_event}`/`{hook_value}` in `hooks.event_args`; and `{mcp_name}`/`{mcp_command}`/`{mcp_args}` in `mcp.server_args`. Every launch-template field is checked against its context at config load, including `option_args[].args`, `add_dir_args`, and `headless_args`; an unsupported placeholder prevents the daemon from starting or reloading that config rather than failing only when the conditional path launches.
 
 ### Conditional option flags
 

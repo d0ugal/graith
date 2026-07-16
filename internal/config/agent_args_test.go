@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -283,6 +285,51 @@ func TestValidateAgentAdapters(t *testing.T) {
 		wantSubst string
 	}{
 		{
+			name:      "base args context rejects add-dir placeholder",
+			mutate:    func(a *Agent) { a.Args = []string{"--dir", "{dir}"} },
+			wantSubst: "agents.codex.args",
+		},
+		{
+			name:      "resume args unknown placeholder rejected",
+			mutate:    func(a *Agent) { a.ResumeArgs = []string{"--resume", "{bogus}"} },
+			wantSubst: "agents.codex.resume_args",
+		},
+		{
+			name:      "fork args unknown placeholder rejected",
+			mutate:    func(a *Agent) { a.ForkArgs = []string{"fork", "{bogus}"} },
+			wantSubst: "agents.codex.fork_args",
+		},
+		{
+			name:      "empty-id resume args unknown placeholder rejected",
+			mutate:    func(a *Agent) { a.EmptyIDResumeArgs = []string{"resume", "{bogus}"} },
+			wantSubst: "agents.codex.empty_id_resume_args",
+		},
+		{
+			name:      "option args unknown placeholder rejected",
+			mutate:    func(a *Agent) { a.OptionArgs = []AgentOptionArg{{Args: []string{"--model", "{bogus}"}}} },
+			wantSubst: "agents.codex.option_args[0].args",
+		},
+		{
+			name:      "option args context rejects add-dir placeholder",
+			mutate:    func(a *Agent) { a.OptionArgs = []AgentOptionArg{{Args: []string{"--dir", "{dir}"}}} },
+			wantSubst: "agents.codex.option_args[0].args",
+		},
+		{
+			name:      "add-dir args unknown placeholder rejected",
+			mutate:    func(a *Agent) { a.AddDirArgs = []string{"--add-dir", "{bogus}"} },
+			wantSubst: "agents.codex.add_dir_args",
+		},
+		{
+			name:      "add-dir args context rejects option placeholder",
+			mutate:    func(a *Agent) { a.AddDirArgs = []string{"--profile", "{profile}"} },
+			wantSubst: "agents.codex.add_dir_args",
+		},
+		{
+			name:      "headless args unknown placeholder rejected",
+			mutate:    func(a *Agent) { a.HeadlessArgs = []string{"--protocol", "{bogus}"} },
+			wantSubst: "agents.codex.headless_args",
+		},
+		{
 			name:      "unknown hook mechanism rejected",
 			mutate:    func(a *Agent) { a.Hooks = &AgentHookConfig{Mechanism: "telepathy"} },
 			wantSubst: "hooks.mechanism",
@@ -323,6 +370,75 @@ func TestValidateAgentAdapters(t *testing.T) {
 			err := cfg.Validate()
 			if err == nil || !strings.Contains(err.Error(), tt.wantSubst) {
 				t.Fatalf("Validate() = %v, want error containing %q", err, tt.wantSubst)
+			}
+		})
+	}
+}
+
+// A wrapper can speak graith's verified stream-json control contract without
+// needing any extra CLI prefix. Headless capability must not imply non-empty
+// headless_args; the wrapper's base args may be sufficient.
+func TestValidateHeadlessCapableAllowsEmptyHeadlessArgs(t *testing.T) {
+	cfg := Default()
+	enabled := true
+	cfg.Agents["bothy-wrapper"] = Agent{
+		Command:         "bothy-wrapper",
+		HeadlessCapable: &enabled,
+		HeadlessArgs:    []string{},
+	}
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() with empty headless_args = %v, want nil", err)
+	}
+}
+
+func TestLoadRejectsBadLaunchTemplatePlaceholders(t *testing.T) {
+	tests := []struct {
+		name      string
+		body      string
+		wantField string
+	}{
+		{
+			name: "option args",
+			body: `
+[agents.bothy]
+command = "bothy"
+[[agents.bothy.option_args]]
+args = ["--model", "{bogus}"]
+`,
+			wantField: "agents.bothy.option_args[0].args",
+		},
+		{
+			name: "add dir args",
+			body: `
+[agents.bothy]
+command = "bothy"
+add_dir_args = ["--add-dir", "{bogus}"]
+`,
+			wantField: "agents.bothy.add_dir_args",
+		},
+		{
+			name: "headless args",
+			body: `
+[agents.bothy]
+command = "bothy"
+headless_capable = true
+headless_args = ["--stream", "{bogus}"]
+`,
+			wantField: "agents.bothy.headless_args",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.toml")
+			if err := os.WriteFile(path, []byte(tt.body), 0o600); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+
+			_, err := Load(path)
+			if err == nil || !strings.Contains(err.Error(), tt.wantField) {
+				t.Fatalf("Load() = %v, want error containing %q", err, tt.wantField)
 			}
 		})
 	}

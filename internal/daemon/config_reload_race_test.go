@@ -84,7 +84,11 @@ func TestConcurrentConfigReloadVsHookAndStoreReaders(t *testing.T) {
 				return
 			}
 
-			if _, _, err := sm.injectCursorHooks("sess-hook", worktree, false); err != nil {
+			cfg := sm.Config()
+			if _, _, err := sm.injectCursorHooks(
+				"sess-hook", worktree, false,
+				cfg.Agents["cursor"], cfg.Approvals.HookEnabled(),
+			); err != nil {
 				t.Errorf("injectCursorHooks: %v", err)
 				return
 			}
