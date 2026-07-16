@@ -602,21 +602,21 @@ open class FleetModel: ObservableObject {
     }
 
     /// The configured agent catalog + default_agent for a host's New Session /
-    /// Settings pickers (#1234). Returns the daemon's catalog once fetched, or
-    /// the built-in fallback while it's still nil (connecting / old daemon), so
-    /// the picker is never empty. Defaults to the local daemon.
-    public func agentCatalog(hostID: String = "local") -> AgentCatalogResponseMsg {
-        connections.first(where: { $0.id == hostID })?.agentCatalog ?? AgentCatalog.fallback
+    /// Settings pickers (#1234), with explicit loading/unavailable state and no
+    /// client-side catalog. Defaults to the local daemon.
+    public func agentCatalog(hostID: String = "local") -> AgentCatalogState {
+        connections.first(where: { $0.id == hostID })?.agentCatalogState
+            ?? .unavailable("That host isn't connected.")
     }
 
     /// Fetch a host's agent catalog on demand for the New Session / Settings
-    /// pickers (#1234), refreshing the cached value. Non-throwing: an offline or
-    /// old daemon yields the built-in fallback so the picker is never empty.
-    public func fetchAgentCatalog(hostID: String = "local") async -> AgentCatalogResponseMsg {
+    /// pickers (#1234), refreshing the cached availability state. Non-throwing:
+    /// an offline or old daemon yields `.unavailable`.
+    public func fetchAgentCatalog(hostID: String = "local") async -> AgentCatalogState {
         guard let conn = connections.first(where: { $0.id == hostID }) else {
-            return AgentCatalog.fallback
+            return .unavailable("That host isn't connected.")
         }
-        return await conn.fetchAgentCatalog() ?? AgentCatalog.fallback
+        return await conn.fetchAgentCatalog()
     }
 
     /// Fetch a host's health snapshot for the diagnostics panel. Defaults to the

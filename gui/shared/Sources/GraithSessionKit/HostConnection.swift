@@ -22,10 +22,9 @@ public final class HostConnection: ObservableObject, Identifiable {
     @Published public private(set) var sessions: [SessionInfo] = []
     @Published public private(set) var approvals: [ApprovalInfo] = []
     @Published public private(set) var scenarios: [ScenarioRecord] = []
-    /// The daemon's configured agent catalog + default_agent (#1234). Nil until
-    /// the first successful fetch; the UI falls back to a built-in default list
-    /// while nil so the New Session sheet is never empty on a slow/old host.
-    @Published public private(set) var agentCatalog: AgentCatalogResponseMsg?
+    /// The daemon's configured agent catalog + default_agent (#1234), including
+    /// explicit loading/unavailable states. No client-side catalog is invented.
+    @Published public private(set) var agentCatalogState: AgentCatalogState = .loading
     @Published public private(set) var lastError: String?
 
     private let client: any GraithHostClient
@@ -65,6 +64,7 @@ public final class HostConnection: ObservableObject, Identifiable {
     public func connect() async {
         guard state != .connecting else { return }
         state = .connecting
+        agentCatalogState = .loading
         lastError = nil
         do {
             try await client.connect()
@@ -74,6 +74,7 @@ public final class HostConnection: ObservableObject, Identifiable {
             if ownsApprovals { startApprovalSubscription() }
         } catch {
             state = .failed(Self.describe(error))
+            agentCatalogState = .unavailable(Self.describe(error))
             lastError = Self.describe(error)
         }
     }
@@ -83,6 +84,7 @@ public final class HostConnection: ObservableObject, Identifiable {
         approvalTask = nil
         await client.disconnect()
         state = .idle
+        agentCatalogState = .unavailable("Host is disconnected.")
     }
 
     /// Reload the session list (and scenarios). Overlapping calls coalesce
@@ -124,14 +126,15 @@ public final class HostConnection: ObservableObject, Identifiable {
         }
     }
 
-    /// Reload this host's configured agent catalog. Best-effort like scenarios:
-    /// on failure the last-known catalog is retained (an old daemon that predates
-    /// the `agent_catalog` RPC just leaves it nil, and the UI falls back to the
-    /// built-in default list). Only runs while connected.
+    /// Reload this host's configured agent catalog. Failure is explicit so the
+    /// UI cannot confuse an old/offline daemon with a daemon-owned empty list.
     private func refreshAgentCatalog() async {
         guard state == .connected else { return }
-        if let fetched = try? await client.agentCatalog() {
-            agentCatalog = fetched
+        agentCatalogState = .loading
+        do {
+            agentCatalogState = .available(try await client.agentCatalog())
+        } catch {
+            agentCatalogState = .unavailable(Self.describe(error))
         }
     }
 
@@ -220,16 +223,22 @@ public final class HostConnection: ObservableObject, Identifiable {
         try await client.diagnostics()
     }
 
-    /// Fetch the daemon's agent catalog on demand (#1234), updating the published
-    /// `agentCatalog` on success. Best-effort: on failure the last-known catalog
-    /// (possibly nil for an old daemon) is retained and returned, so the caller
-    /// can fall back to the built-in default list.
+    /// Fetch the daemon's agent catalog on demand (#1234), updating and returning
+    /// the explicit loading/available/unavailable state.
     @discardableResult
-    public func fetchAgentCatalog() async -> AgentCatalogResponseMsg? {
-        if let fetched = try? await client.agentCatalog() {
-            agentCatalog = fetched
+    public func fetchAgentCatalog() async -> AgentCatalogState {
+        guard state == .connected else {
+            let unavailable = AgentCatalogState.unavailable("Host is not connected.")
+            agentCatalogState = unavailable
+            return unavailable
         }
-        return agentCatalog
+        agentCatalogState = .loading
+        do {
+            agentCatalogState = .available(try await client.agentCatalog())
+        } catch {
+            agentCatalogState = .unavailable(Self.describe(error))
+        }
+        return agentCatalogState
     }
 
     public func create(_ request: CreateRequest) async -> Bool {

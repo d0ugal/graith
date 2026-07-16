@@ -129,11 +129,11 @@ struct AgentCatalogTests {
             defaultAgent: "strath"))
         await fleet.connectAll()
 
-        let catalog = fleet.agentCatalog(hostID: "ben")
-        #expect(catalog.names == ["croft", "strath"])
-        #expect(catalog.defaultAgent == "strath")
+        let catalog = fleet.agentCatalog(hostID: "ben").catalog
+        #expect(catalog?.names == ["croft", "strath"])
+        #expect(catalog?.defaultAgent == "strath")
         // A custom agent the old hardcoded list never had is offered.
-        #expect(catalog.names.contains("croft"))
+        #expect(catalog?.names.contains("croft") == true)
     }
 
     @MainActor @Test func resolvedDefaultMatchesConfiguredDefault() async throws {
@@ -142,26 +142,23 @@ struct AgentCatalogTests {
             agents: [AgentCatalogEntry(name: "claude"), AgentCatalogEntry(name: "codex")],
             defaultAgent: "codex"))
         await fleet.connectAll()
-        #expect(fleet.agentCatalog(hostID: "ben").resolvedDefault == "codex")
+        #expect(fleet.agentCatalog(hostID: "ben").catalog?.resolvedDefault == "codex")
     }
 
-    @MainActor @Test func fallbackUsedBeforeAnyFetch() {
+    @MainActor @Test func unknownHostHasNoInventedCatalog() {
         let fleet = makeEmptyFleet()
-        // No connections → the built-in fallback keeps the picker non-empty.
-        let catalog = fleet.agentCatalog(hostID: "nae-sic-host")
-        #expect(!catalog.names.isEmpty)
-        #expect(catalog.names == AgentCatalog.fallback.names)
-        #expect(catalog.resolvedDefault == "claude")
+        let state = fleet.agentCatalog(hostID: "nae-sic-host")
+        #expect(state.catalog == nil)
+        #expect(state.unavailableReason != nil)
     }
 
-    @MainActor @Test func fetchFailureFallsBackWithoutThrowing() async {
+    @MainActor @Test func fetchFailureExposesUnavailableWithoutCatalog() async {
         let (fleet, mock) = makeFleetWithRemote()
         await fleet.connectAll()
         await mock.setFailAgentCatalog(.daemon("old daemon: no agent_catalog"))
-        // A daemon that can't answer must not throw here — the picker degrades to
-        // the last-known catalog (the one fetched on connect), never empty.
-        let catalog = await fleet.fetchAgentCatalog(hostID: "ben")
-        #expect(!catalog.names.isEmpty)
+        let state = await fleet.fetchAgentCatalog(hostID: "ben")
+        #expect(state.catalog == nil)
+        #expect(state.unavailableReason?.contains("old daemon") == true)
     }
 
     @Test func resolvedDefaultFallsBackToFirstWhenDefaultMissing() {

@@ -48,6 +48,15 @@ struct ControlAndMessageTests {
         #expect(json.contains("\"profile\":\"kirk\""))
     }
 
+    @Test func createOmitsEmptyAgentForDaemonDefaultCompatibility() throws {
+        let msg = CreateMsg(name: "braw", agent: "", repoPath: "/croft")
+        let data = try JSONEncoder().encode(msg)
+        let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(object["agent"] == nil)
+        #expect(object["name"] as? String == "braw")
+        #expect(object["repo_path"] as? String == "/croft")
+    }
+
     @Test func sessionInfoIgnoresRetiredFieldsKeepsPRCI() throws {
         // cost_usd/context_percent are NOT on the wire model; a payload
         // carrying them must still decode (extra keys ignored). PR/CI decode.

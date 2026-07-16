@@ -27,6 +27,15 @@ MCP servers can be overridden or disabled per-agent (see agent config below).
 
 Each agent is configured under `[agents.<name>]`. Five agents ship by default: `claude`, `codex`, `opencode`, `cursor`, and `agy`.
 
+The macOS and iOS New Session forms fetch this effective catalog and
+`default_agent` from the selected host. Catalogs are host-scoped: switching hosts
+can change both the available names and the default. On macOS, a locally saved
+preference overrides the daemon default only when that host still offers the
+agent; a fresh profile and a removed preference follow the daemon default. If a
+catalog is still loading or unavailable (including from an older daemon), the
+apps do not invent built-in names. They leave the agent unspecified so the
+daemon resolves its own default.
+
 ```toml
 [agents.claude]
 command        = "claude"

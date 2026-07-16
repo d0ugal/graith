@@ -152,34 +152,59 @@ struct AppearanceSettings: View {
 
 struct GeneralSettings: View {
     @EnvironmentObject var store: SessionStore
-    /// Default agent pre-selected in the New Session sheet.
-    @AppStorage("defaultAgent") private var defaultAgent = "claude"
-    /// The local daemon's configured agent catalog (#1234), replacing the old
-    /// hardcoded list. Starts on the built-in fallback until the daemon replies.
-    @State private var catalog: AgentCatalogResponseMsg = AgentCatalog.fallback
-
-    /// Selectable agents: the daemon catalog, plus the saved default if the
-    /// daemon no longer offers it, so a previously-chosen value isn't dropped.
-    private var agents: [String] {
-        var names = catalog.names
-        if !defaultAgent.isEmpty, !names.contains(defaultAgent) { names.append(defaultAgent) }
-        return names
-    }
+    /// Empty means "follow this host's daemon default". Unlike an AppStorage
+    /// literal, it cannot mask a non-Claude default on a fresh profile.
+    @State private var selectedPreference = ""
+    @State private var catalogState: AgentCatalogState = .loading
 
     var body: some View {
         Form {
             Section {
-                Picker("Default agent", selection: $defaultAgent) {
-                    ForEach(agents, id: \.self) { Text($0).tag($0) }
+                switch catalogState {
+                case .loading:
+                    ProgressView("Loading agent catalog…")
+                case let .available(catalog):
+                    Picker("Default agent", selection: Binding(
+                        get: { selectedPreference },
+                        set: {
+                            selectedPreference = $0
+                            AgentPreference.store($0.isEmpty ? nil : $0)
+                        }
+                    )) {
+                        Text("Daemon default (\(catalog.resolvedDefault))").tag("")
+                        ForEach(catalog.names, id: \.self) { Text($0).tag($0) }
+                    }
+                case let .unavailable(reason):
+                    LabeledContent("Default agent") {
+                        Text("Managed by daemon")
+                            .foregroundStyle(Theme.yellow)
+                    }
+                    Text("Agent catalog unavailable: \(reason)")
+                        .font(.caption)
+                        .foregroundStyle(Theme.overlay0)
                 }
             } footer: {
-                Text("New sessions start with this agent selected. Agents come from the daemon configuration.")
+                Text("Each host supplies its own catalog and default. A local override is used only when that host offers it.")
                     .font(.caption)
                     .foregroundStyle(Theme.overlay0)
             }
         }
         .formStyle(.grouped)
-        .task { catalog = await store.fetchAgentCatalog() }
+        .task {
+            let explicit = AgentPreference.explicitAgent()
+            let loaded = await store.fetchAgentCatalog()
+            catalogState = loaded
+            if let catalog = loaded.catalog,
+               let explicit,
+               catalog.names.contains(explicit) {
+                selectedPreference = explicit
+            } else {
+                selectedPreference = ""
+                // A successful daemon response proves this stored value was
+                // removed; clear it so it cannot unexpectedly reappear later.
+                if loaded.catalog != nil, explicit != nil { AgentPreference.store(nil) }
+            }
+        }
     }
 }
 

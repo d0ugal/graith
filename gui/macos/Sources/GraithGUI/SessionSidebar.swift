@@ -680,7 +680,7 @@ struct SessionRow: View {
     @State private var showFork = false
     @State private var forkName = ""
     @State private var showMigrate = false
-    @State private var migrateAgent = "claude"
+    @State private var migrateAgent = ""
     @State private var showDeleteConfirm = false
     @State private var showPurgeConfirm = false
     @State private var showSetStatus = false
@@ -689,14 +689,13 @@ struct SessionRow: View {
     @State private var showSnapshot = false
     @State private var showMessages = false
 
-    /// The session host's agent catalog, driven by daemon config (#1234). Loaded
-    /// when the Migrate sheet is opened; starts on the built-in fallback.
-    @State private var migrateCatalog = AgentCatalog.fallback
+    /// The session host's daemon-authoritative agent catalog (#1234).
+    @State private var migrateCatalogState: AgentCatalogState = .loading
 
     /// Agents offered in the Migrate sheet: the daemon catalog plus the session's
     /// current agent (so it's always shown even if the config later dropped it).
     private var migrateAgents: [String] {
-        var names = migrateCatalog.names
+        var names = migrateCatalogState.catalog?.names ?? []
         if !session.agent.isEmpty, !names.contains(session.agent) { names.append(session.agent) }
         return names
     }
@@ -1028,9 +1027,10 @@ struct SessionRow: View {
             Button("Migrate…") {
                 migrateAgent = session.agent
                 showMigrate = true
+                migrateCatalogState = .loading
                 Task {
-                    migrateCatalog = await store.connection(ownerOf: session.id)?
-                        .fetchAgentCatalog() ?? AgentCatalog.fallback
+                    migrateCatalogState = await store.connection(ownerOf: session.id)?
+                        .fetchAgentCatalog() ?? .unavailable("That host isn't connected.")
                 }
             }
             Button("Set Status…") {

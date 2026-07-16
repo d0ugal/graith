@@ -101,6 +101,26 @@ public struct CreateMsg: Codable, Sendable {
         case skipModelValidation = "skip_model_validation"
         case yolo
     }
+
+    /// Leave an empty agent off the wire so an older daemon can apply its own
+    /// `default_agent` without the GUI inventing a catalog entry (#1234).
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(name, forKey: .name)
+        try container.encodeIfPresent(parentID, forKey: .parentID)
+        if !agent.isEmpty { try container.encode(agent, forKey: .agent) }
+        try container.encode(repoPath, forKey: .repoPath)
+        try container.encodeIfPresent(base, forKey: .base)
+        try container.encodeIfPresent(prompt, forKey: .prompt)
+        try container.encodeIfPresent(model, forKey: .model)
+        try container.encodeIfPresent(noRepo, forKey: .noRepo)
+        try container.encodeIfPresent(mirror, forKey: .mirror)
+        try container.encodeIfPresent(agentHooks, forKey: .agentHooks)
+        try container.encodeIfPresent(inPlace, forKey: .inPlace)
+        try container.encodeIfPresent(allowConcurrent, forKey: .allowConcurrent)
+        try container.encodeIfPresent(skipModelValidation, forKey: .skipModelValidation)
+        try container.encodeIfPresent(yolo, forKey: .yolo)
+    }
 }
 
 public struct ForkMsg: Codable, Sendable {

@@ -24,12 +24,11 @@ struct NewSessionView: View {
     @State private var inPlace = false
     @State private var agentHooks = true
 
-    /// The selected host's agent catalog, driven by daemon config (#1234). Starts
-    /// on the built-in fallback and is replaced once the daemon responds.
-    @State private var catalog: AgentCatalogResponseMsg = AgentCatalog.fallback
+    /// The selected host's daemon-authoritative agent catalog (#1234).
+    @State private var catalogState: AgentCatalogState = .loading
 
     /// Agent names the daemon offers for the selected host.
-    private var agents: [String] { catalog.names }
+    private var agents: [String] { catalogState.catalog?.names ?? [] }
 
     var body: some View {
         NavigationStack {
@@ -61,8 +60,18 @@ struct NewSessionView: View {
                 Section("Session") {
                     TextField("Name", text: $name)
                         .textFieldStyleCompat()
-                    Picker("Agent", selection: $agent) {
-                        ForEach(agents, id: \.self) { Text($0).tag($0) }
+                    switch catalogState {
+                    case .loading:
+                        ProgressView("Loading agents…")
+                    case .available:
+                        Picker("Agent", selection: $agent) {
+                            ForEach(agents, id: \.self) { Text($0).tag($0) }
+                        }
+                    case let .unavailable(reason):
+                        VStack(alignment: .leading) {
+                            Text("The daemon will choose its default agent.")
+                            Text(reason).font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                     TextField("Prompt (optional)", text: $prompt, axis: .vertical)
                         .lineLimit(3, reservesSpace: true)
@@ -131,12 +140,12 @@ struct NewSessionView: View {
     /// from, and (re)seeds only when the current pick isn't in the new catalog.
     private func loadCatalog() async {
         let requestedHostID = hostID
+        catalogState = .loading
+        agent = ""
         let loaded = await model.fetchAgentCatalog(hostID: requestedHostID)
         guard requestedHostID == hostID else { return }
-        catalog = loaded
-        if agent.isEmpty || !loaded.names.contains(agent) {
-            agent = loaded.resolvedDefault
-        }
+        catalogState = loaded
+        agent = loaded.catalog?.resolvedDefault ?? ""
     }
 
     private func create() async {

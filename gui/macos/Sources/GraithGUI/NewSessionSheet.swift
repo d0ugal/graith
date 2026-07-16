@@ -8,7 +8,6 @@ struct NewSessionSheet: View {
     @EnvironmentObject var window: WindowState
     @Environment(\.dismiss) private var dismiss
 
-    @AppStorage("defaultAgent") private var defaultAgent = "claude"
     @State private var name = ""
     @State private var repoPath = ""
     @State private var agent = ""
@@ -29,12 +28,11 @@ struct NewSessionSheet: View {
     /// change; the free-text field remains for paths the daemon didn't list.
     @State private var repos: [RepoEntry] = []
     @State private var loadingRepos = false
-    /// The selected host's agent catalog, driven by daemon config (#1234). Starts
-    /// on the built-in fallback and is replaced once the daemon responds.
-    @State private var catalog: AgentCatalogResponseMsg = AgentCatalog.fallback
+    /// The selected host's daemon-authoritative agent catalog (#1234).
+    @State private var catalogState: AgentCatalogState = .loading
 
     /// Agent names the daemon offers for the selected host.
-    private var agents: [String] { catalog.names }
+    private var agents: [String] { catalogState.catalog?.names ?? [] }
 
     /// Repo names that appear more than once (same basename, different path), so
     /// the picker knows to spell out the full path for those entries.
@@ -132,13 +130,32 @@ struct NewSessionSheet: View {
                 }
 
                 FormField(label: "Agent") {
-                    HStack(spacing: 8) {
-                        ForEach(agents, id: \.self) { a in
-                            AgentChip(name: a, isSelected: agent == a) {
-                                agent = a
-                            }
+                    switch catalogState {
+                    case .loading:
+                        HStack(spacing: 8) {
+                            ProgressView().controlSize(.small)
+                            Text("Loading this host's agents…")
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundStyle(Theme.overlay0)
                         }
-                        Spacer()
+                    case .available:
+                        HStack(spacing: 8) {
+                            ForEach(agents, id: \.self) { a in
+                                AgentChip(name: a, isSelected: agent == a) {
+                                    agent = a
+                                }
+                            }
+                            Spacer()
+                        }
+                    case let .unavailable(reason):
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Agent catalog unavailable — the daemon will choose its default.")
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundStyle(Theme.yellow)
+                            Text(reason)
+                                .font(.system(.caption2, design: .monospaced))
+                                .foregroundStyle(Theme.overlay0)
+                        }
                     }
                 }
 
@@ -323,14 +340,14 @@ struct NewSessionSheet: View {
     /// deliberate user choice.
     private func loadCatalog() async {
         let requestedHostID = selectedHostID
+        catalogState = .loading
+        agent = ""
         let loaded = await store.fetchAgentCatalog(hostID: requestedHostID)
         guard requestedHostID == selectedHostID else { return }
-        catalog = loaded
-        if agent.isEmpty || !loaded.names.contains(agent) {
-            // Honour the user's saved default when the daemon offers it; otherwise
-            // fall back to the daemon's configured default_agent.
-            agent = loaded.names.contains(defaultAgent) ? defaultAgent : loaded.resolvedDefault
-        }
+        catalogState = loaded
+        agent = AgentPreference.resolve(
+            explicit: AgentPreference.explicitAgent(),
+            catalog: loaded.catalog)
     }
 
     func createSession() {

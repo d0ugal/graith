@@ -1,27 +1,27 @@
 import Foundation
 import GraithProtocol
 
-/// The agent catalog the GUI presents in its New Session / Settings pickers.
+/// Loading/result state for the daemon-authoritative agent catalog (#1234).
 ///
-/// The source of truth is the daemon: `HostConnection.agentCatalog` is populated
-/// from the `agent_catalog` RPC on connect (#1234). This type only supplies a
-/// built-in fallback for the window before that fetch lands — or when talking to
-/// an older daemon that predates the RPC — so a picker is never empty.
-public enum AgentCatalog {
-    /// Built-in fallback matching the daemon's default `[agents.*]` set, sorted
-    /// by name like the daemon returns them. Used only until the real catalog is
-    /// fetched; once the daemon replies, its list (including any custom agents)
-    /// replaces this.
-    public static let fallback = AgentCatalogResponseMsg(
-        agents: [
-            AgentCatalogEntry(name: "agy"),
-            AgentCatalogEntry(name: "claude"),
-            AgentCatalogEntry(name: "codex"),
-            AgentCatalogEntry(name: "cursor"),
-            AgentCatalogEntry(name: "opencode"),
-        ],
-        defaultAgent: "claude"
-    )
+/// There is intentionally no Swift fallback catalog. Before the RPC completes,
+/// the UI shows loading; if it fails (including against an older daemon), the UI
+/// shows unavailable and leaves the create request's agent empty so the daemon
+/// resolves its own default. This prevents a client-side list from drifting from
+/// the selected host's effective `[agents.*]` configuration.
+public enum AgentCatalogState: Sendable {
+    case loading
+    case available(AgentCatalogResponseMsg)
+    case unavailable(String)
+
+    public var catalog: AgentCatalogResponseMsg? {
+        guard case let .available(catalog) = self else { return nil }
+        return catalog
+    }
+
+    public var unavailableReason: String? {
+        guard case let .unavailable(reason) = self else { return nil }
+        return reason
+    }
 }
 
 public extension AgentCatalogResponseMsg {
