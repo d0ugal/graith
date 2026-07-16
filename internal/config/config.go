@@ -81,6 +81,13 @@ type InputConfig struct {
 	DragArrowThreshold int `toml:"drag_arrow_threshold"`
 }
 
+// DefaultRemotePort is the TCP port the tailnet control listener binds when
+// [remote] port is unset, and the default the `gr remote pair` client dials.
+// It is the single source of truth for the port on the Go side; the embedded
+// default_config.toml carries the same value (kept in lockstep by a test) and
+// the Swift clients mirror it via GraithTransport.defaultRemotePort.
+const DefaultRemotePort = 4823
+
 // RemoteConfig is the optional, off-by-default [remote] block that exposes a
 // tailnet-facing control listener (see the native-app design doc §A.4/§B). It
 // is fail-closed: when Enabled, an invalid block is a hard config-load error

@@ -7,6 +7,11 @@ import Network
 /// this is the transport abstraction that lets the same client serve the
 /// local macOS daemon and remote tailnet daemons.
 public enum GraithTransport: Sendable, Equatable, Hashable {
+    /// The default TCP port a remote daemon's tailnet control listener binds,
+    /// and the default the pairing/add-host flows dial. Single source of truth
+    /// for the port on the Swift side; it mirrors the Go `config.DefaultRemotePort`.
+    public static let defaultRemotePort: UInt16 = 4823
+
     /// The local daemon's Unix domain socket (macOS only). No TLS — the `0700`
     /// socket is the trust boundary, exactly as the `gr` CLI relies on.
     case unix(path: String)
@@ -178,7 +183,7 @@ public final class NWByteStream: ByteStream, PinCapturingByteStream, @unchecked 
             // valid daemon port; fall back to the default rather than crash.
             let endpoint = NWEndpoint.hostPort(
                 host: NWEndpoint.Host(host),
-                port: NWEndpoint.Port(rawValue: port) ?? NWEndpoint.Port(rawValue: 4823)!
+                port: NWEndpoint.Port(rawValue: port) ?? NWEndpoint.Port(rawValue: GraithTransport.defaultRemotePort)!
             )
             // With no pin yet (first contact / pairing) capture the presented
             // leaf SPKI for TOFU binding; once pinned, enforce the pin instead.

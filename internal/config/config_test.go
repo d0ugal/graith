@@ -2581,8 +2581,11 @@ func TestRemoteConfigValidation(t *testing.T) {
 			t.Errorf("default remote.mode = %q, want tsnet", r.Mode)
 		}
 
-		if r.Port != 4823 {
-			t.Errorf("default remote.port = %d, want 4823", r.Port)
+		// The embedded default_config.toml must stay in lockstep with the
+		// DefaultRemotePort constant — that constant is the single source of
+		// truth the CLI flag and Swift clients also mirror.
+		if r.Port != DefaultRemotePort {
+			t.Errorf("default remote.port = %d, want DefaultRemotePort (%d)", r.Port, DefaultRemotePort)
 		}
 
 		if !r.RequirePairing {
