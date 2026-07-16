@@ -417,6 +417,67 @@ func TestNotePRRefChange_CanceledSuppressesKick(t *testing.T) {
 	}
 }
 
+func TestPRRefDebounceReloadRetimesPendingEvent(t *testing.T) {
+	tests := []struct {
+		name      string
+		initial   string
+		reloaded  string
+		noKickFor time.Duration
+		kickBy    time.Duration
+	}{
+		{
+			name:     "shorten",
+			initial:  "500ms",
+			reloaded: "20ms",
+			kickBy:   250 * time.Millisecond,
+		},
+		{
+			name:      "lengthen",
+			initial:   "40ms",
+			reloaded:  "180ms",
+			noKickFor: 80 * time.Millisecond,
+			kickBy:    350 * time.Millisecond,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sm := newTestSessionManager(t)
+			sm.cfg.PRWatch.Advanced.RefDebounce = tt.initial
+
+			w := &prRefWatcher{
+				sessionID:   "braw1",
+				debounceDur: sm.cfg.PRWatch.RefDebounceDuration(),
+			}
+			sm.prRefWatch.mu.Lock()
+			sm.prRefWatch.watchers[w.sessionID] = w
+			sm.prRefWatch.mu.Unlock()
+			t.Cleanup(func() { sm.teardownAllPRRefWatchers() })
+
+			sm.notePRRefChange(w)
+			time.Sleep(10 * time.Millisecond)
+
+			reloaded := *sm.Config()
+			reloaded.PRWatch.Advanced.RefDebounce = tt.reloaded
+			sm.applyConfig(&reloaded)
+
+			if tt.noKickFor > 0 {
+				if id, ok := waitForKick(t, sm, tt.noKickFor); ok {
+					t.Fatalf("pending event fired too early after lengthening: %q", id)
+				}
+			}
+
+			if id, ok := waitForKick(t, sm, tt.kickBy); !ok || id != "braw1" {
+				t.Fatalf("pending event was lost during debounce reload: id=%q ok=%v", id, ok)
+			}
+
+			if id, ok := waitForKick(t, sm, 50*time.Millisecond); ok {
+				t.Fatalf("debounce reload produced a duplicate kick for %q", id)
+			}
+		})
+	}
+}
+
 // TestKickPRWatch_DropClearsNextPoll: when the kick channel is saturated, the
 // dropped kick clears the session's nextPoll so the next tick re-polls it rather
 // than leaving it parked on a long negative cache.

@@ -521,11 +521,13 @@ func (r TriggersRuntime) WatchRetryMaxBackoffDuration() time.Duration {
 // ".git"/".git/" regardless of this list. A fresh copy is returned so callers
 // cannot mutate the shared default slice.
 func (r TriggersRuntime) WatchBuiltinIgnores() []string {
-	if len(r.Advanced.WatchBuiltinIgnores) == 0 {
+	if r.Advanced.WatchBuiltinIgnores == nil {
 		return append([]string(nil), DefaultWatchBuiltinIgnores...)
 	}
 
-	return append([]string(nil), r.Advanced.WatchBuiltinIgnores...)
+	// Preserve present-empty as a non-nil slice for consumers that distinguish
+	// it from an omitted policy.
+	return append([]string{}, r.Advanced.WatchBuiltinIgnores...)
 }
 
 // CommandOutputCap is the command-action output truncation cap in bytes.

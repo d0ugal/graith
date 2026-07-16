@@ -75,7 +75,8 @@ func (sm *SessionManager) RunFileWatchLoop(ctx context.Context) {
 			sm.teardownAllBindings()
 			return
 		case <-ticker.C:
-			sm.reconcileBindings(ctx, sm.allTriggers(), time.Now())
+			cfgSnapshot := sm.Config()
+			sm.reconcileBindingsWithConfig(ctx, sm.allTriggersFromConfig(cfgSnapshot), time.Now(), cfgSnapshot)
 		}
 	}
 }
@@ -83,6 +84,12 @@ func (sm *SessionManager) RunFileWatchLoop(ctx context.Context) {
 // reconcileBindings ensures one binding per (enabled watch trigger, matching
 // running session) and tears down bindings whose session is gone/stopped.
 func (sm *SessionManager) reconcileBindings(ctx context.Context, triggers []config.TriggerConfig, now time.Time) {
+	sm.reconcileBindingsWithConfig(ctx, triggers, now, sm.Config())
+}
+
+func (sm *SessionManager) reconcileBindingsWithConfig(ctx context.Context, triggers []config.TriggerConfig, now time.Time, cfgSnapshot *config.Config) {
+	builtinIgnores := cfgSnapshot.TriggersRuntime.WatchBuiltinIgnores()
+	builtinFP := watchBuiltinFingerprint(builtinIgnores)
 	desired := make(map[string]*config.TriggerConfig) // bindingKey -> trigger
 
 	for i := range triggers {
@@ -134,13 +141,17 @@ func (sm *SessionManager) reconcileBindings(ctx context.Context, triggers []conf
 		sm.triggers.mu.Unlock()
 
 		if exists && !retryDue {
+			existingFP, existingBuiltinFP := existing.fingerprints()
 			// A same-named watch trigger whose fire-affecting definition
 			// (paths/ignore/debounce/action/policy) changed leaves the binding
 			// key matching, so a plain existence check would keep the stale
 			// matcher and debounce. Tear it down and recreate on fingerprint
 			// change (mirrors reconcileSchedules' fingerprint reset). A healthy or
 			// backoff-waiting binding whose definition is unchanged stays put.
-			if existing.fingerprint == fp {
+			if existingFP == fp {
+				if existingBuiltinFP != builtinFP {
+					sm.updateWatchBindingBuiltinIgnores(cfgSnapshot, existing, builtinIgnores, builtinFP)
+				}
 				continue
 			}
 
@@ -163,7 +174,7 @@ func (sm *SessionManager) reconcileBindings(ctx context.Context, triggers []conf
 			continue
 		}
 
-		sm.createBinding(ctx, t, sess, now)
+		sm.createBinding(ctx, t, sess, now, cfgSnapshot, builtinIgnores, builtinFP)
 	}
 }
 
@@ -227,9 +238,9 @@ func (sm *SessionManager) sessionForBindingKey(key string) watchSession {
 // exhausted) the binding is recorded as degraded with a backoff-scheduled retry
 // rather than running; the reconcile loop recreates it once nextRetryAt passes.
 // now is injected so the retry schedule is testable.
-func (sm *SessionManager) createBinding(ctx context.Context, t *config.TriggerConfig, sess watchSession, now time.Time) {
+func (sm *SessionManager) createBinding(ctx context.Context, t *config.TriggerConfig, sess watchSession, now time.Time, cfgSnapshot *config.Config, builtinIgnores []string, builtinFP string) {
 	key := bindingKey(t.Name, sess.id)
-	matcher := newWatchMatcher(sess.worktree, t.Watch, sm.Config().TriggersRuntime.WatchBuiltinIgnores())
+	matcher := newWatchMatcher(sess.worktree, t.Watch, builtinIgnores)
 
 	// Carry forward the retry count from a prior degraded binding for this key so
 	// the backoff keeps growing across repeated failures instead of resetting on
@@ -247,14 +258,14 @@ func (sm *SessionManager) createBinding(ctx context.Context, t *config.TriggerCo
 	// doesn't busy-loop on every reconcile tick.
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
-		sm.recordDegradedBinding(key, t, sess, "fsnotify.NewWatcher failed: "+err.Error(), prevRetries+1, now)
+		sm.recordDegradedBinding(key, t, sess, "fsnotify.NewWatcher failed: "+err.Error(), prevRetries+1, now, cfgSnapshot, builtinFP)
 		return
 	}
 
 	if degraded := addWatchRecursive(sm.watchAddFunc(watcher), sess.worktree, matcher); degraded != "" {
 		_ = watcher.Close()
 
-		sm.recordDegradedBinding(key, t, sess, degraded, prevRetries+1, now)
+		sm.recordDegradedBinding(key, t, sess, degraded, prevRetries+1, now, cfgSnapshot, builtinFP)
 
 		return
 	}
@@ -262,22 +273,26 @@ func (sm *SessionManager) createBinding(ctx context.Context, t *config.TriggerCo
 	bctx, cancel := context.WithCancel(ctx)
 
 	b := &watchBinding{
-		triggerName: t.Name,
-		sessionID:   sess.id,
-		worktree:    sess.worktree,
-		fingerprint: triggerFingerprint(t),
-		watcher:     watcher,
-		changed:     make(map[string]bool),
-		cancel:      cancel,
+		triggerName:        t.Name,
+		sessionID:          sess.id,
+		worktree:           sess.worktree,
+		fingerprint:        triggerFingerprint(t),
+		builtinFingerprint: builtinFP,
+		watcher:            watcher,
+		matcher:            matcher,
+		changed:            make(map[string]bool),
+		cancel:             cancel,
 		// Re-adopt an existing reactor (tagged TriggerID/TriggerReactor) so
 		// ensure-reviewer reuse survives a daemon restart or binding recreation
 		// instead of spawning a duplicate.
 		reactorID: sm.findReactor(t.Name, sess.id),
 	}
 
-	sm.triggers.mu.Lock()
-	sm.triggers.bindings[key] = b
-	sm.triggers.mu.Unlock()
+	if !sm.publishWatchBinding(cfgSnapshot, key, b) {
+		cancel()
+		_ = watcher.Close()
+		return
+	}
 
 	go sm.runBinding(bctx, t.Name, b, matcher)
 
@@ -289,7 +304,8 @@ func (sm *SessionManager) createBinding(ctx context.Context, t *config.TriggerCo
 // prior degraded binding already closed its watcher and never started one, and a
 // prior healthy binding for this key is only ever recreated after teardown — so
 // the reconcile loop simply recreates this entry once nextRetryAt passes.
-func (sm *SessionManager) recordDegradedBinding(key string, t *config.TriggerConfig, sess watchSession, reason string, attempt int, now time.Time) {
+func (sm *SessionManager) recordDegradedBinding(key string, t *config.TriggerConfig, sess watchSession, reason string, attempt int, now time.Time, cfgSnapshot *config.Config, builtinFP string) {
+	runtimeCfg := cfgSnapshot.TriggersRuntime
 	b := &watchBinding{
 		triggerName: t.Name,
 		sessionID:   sess.id,
@@ -298,21 +314,110 @@ func (sm *SessionManager) recordDegradedBinding(key string, t *config.TriggerCon
 		// binding is recreated by the backoff path (retryDue), not the
 		// definition-changed path — otherwise an empty fingerprint would read as
 		// "definition changed" and recreate immediately, bypassing the backoff.
-		fingerprint: triggerFingerprint(t),
-		changed:     make(map[string]bool),
-		reactorID:   sm.findReactor(t.Name, sess.id),
-		degraded:    reason,
-		retryCount:  attempt,
-		nextRetryAt: now.Add(sm.watchRetryBackoff(attempt)),
+		fingerprint:        triggerFingerprint(t),
+		builtinFingerprint: builtinFP,
+		changed:            make(map[string]bool),
+		reactorID:          sm.findReactor(t.Name, sess.id),
+		degraded:           reason,
+		retryCount:         attempt,
+		nextRetryAt: now.Add(watchRetryBackoff(attempt,
+			runtimeCfg.WatchRetryBaseBackoffDuration(), runtimeCfg.WatchRetryMaxBackoffDuration())),
 	}
 
 	sm.log.Warn("trigger: watcher degraded, will retry",
 		"trigger", t.Name, "reason", reason,
 		"attempt", attempt, "retry_at", b.nextRetryAt.Format(time.RFC3339))
 
+	sm.publishWatchBinding(cfgSnapshot, key, b)
+}
+
+// publishWatchBinding closes the reload race between a slow filesystem walk and
+// applyConfig. The final map insertion happens while the config generation is
+// pinned under sm.mu; an old-generation builder simply declines to publish and
+// the next reconcile creates the current binding.
+func (sm *SessionManager) publishWatchBinding(cfgSnapshot *config.Config, key string, b *watchBinding) bool {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	if sm.cfg != cfgSnapshot {
+		return false
+	}
+
 	sm.triggers.mu.Lock()
 	sm.triggers.bindings[key] = b
 	sm.triggers.mu.Unlock()
+
+	return true
+}
+
+// updateWatchBindingBuiltinIgnores swaps the daemon-wide ignore policy on one
+// live binding without replacing its fsnotify watcher. Event handling is paused
+// behind policyMu while the matcher and watched directory set move together;
+// fsnotify continues queueing events, so the generation swap has no blind gap.
+func (sm *SessionManager) updateWatchBindingBuiltinIgnores(cfgSnapshot *config.Config, b *watchBinding, builtinIgnores []string, builtinFP string) {
+	if b == nil {
+		return
+	}
+
+	b.policyMu.Lock()
+	defer b.policyMu.Unlock()
+
+	// A stale reconcile that began before a newer reload must not overwrite the
+	// newer policy after waiting for this binding lock.
+	if sm.Config() != cfgSnapshot {
+		return
+	}
+
+	b.bmu.Lock()
+	if b.canceled {
+		b.bmu.Unlock()
+		return
+	}
+	matcher := b.matcher
+	b.bmu.Unlock()
+
+	if matcher != nil && b.watcher != nil {
+		matcher.setBuiltinIgnores(builtinIgnores)
+		sm.reconcileWatchDirs(b, matcher)
+
+		// Drop changes collected under the old policy that the new matcher now
+		// suppresses. Newly-unignored paths remain event-driven; the queued watcher
+		// stream is processed after policyMu is released.
+		b.bmu.Lock()
+		for path := range b.changed {
+			if !matcher.fires(path) {
+				delete(b.changed, path)
+			}
+		}
+		b.builtinFingerprint = builtinFP
+		b.bmu.Unlock()
+		return
+	}
+
+	// Degraded bindings have no live matcher. Stamping the current policy keeps
+	// their normal backoff schedule; creation on retry uses cfgSnapshot itself.
+	b.bmu.Lock()
+	b.builtinFingerprint = builtinFP
+	b.bmu.Unlock()
+}
+
+func (sm *SessionManager) updateActiveWatchBuiltinIgnores(cfgSnapshot *config.Config) {
+	if sm.triggers == nil {
+		return
+	}
+
+	sm.triggers.mu.Lock()
+	bindings := make([]*watchBinding, 0, len(sm.triggers.bindings))
+	for _, b := range sm.triggers.bindings {
+		bindings = append(bindings, b)
+	}
+	sm.triggers.mu.Unlock()
+
+	builtinIgnores := cfgSnapshot.TriggersRuntime.WatchBuiltinIgnores()
+	builtinFP := watchBuiltinFingerprint(builtinIgnores)
+	for _, b := range bindings {
+		sm.updateWatchBindingBuiltinIgnores(cfgSnapshot, b, builtinIgnores, builtinFP)
+	}
 }
 
 // watchAddFunc returns the directory-registration function used when building a
@@ -340,7 +445,9 @@ func (sm *SessionManager) runBinding(ctx context.Context, triggerName string, b 
 				return
 			}
 
+			b.policyMu.RLock()
 			sm.handleWatchEvent(ctx, triggerName, b, matcher, ev, debounce)
+			b.policyMu.RUnlock()
 		case err, ok := <-b.watcher.Errors:
 			if !ok {
 				return
@@ -501,7 +608,8 @@ func (sm *SessionManager) noteChange(ctx context.Context, triggerName string, b 
 // watchFire is the debounce callback: snapshot the coalesced changes, apply the
 // overlap guard, and run the action.
 func (sm *SessionManager) watchFire(ctx context.Context, triggerName string, b *watchBinding) {
-	t := sm.triggerByName(triggerName)
+	cfgSnapshot := sm.Config()
+	t := sm.triggerByNameFromConfig(triggerName, cfgSnapshot)
 	if t == nil || !t.IsWatch() || !t.TriggerEnabled() {
 		return
 	}
@@ -516,7 +624,9 @@ func (sm *SessionManager) watchFire(ctx context.Context, triggerName string, b *
 	// from an event the old matcher collected — the recreated binding takes
 	// over. This also stops the stale binding starting a fresh serialised
 	// action, so its inFlight guard can only clear (see reconcileBindings).
-	if triggerFingerprint(t) != b.fingerprint {
+	definitionFP, builtinFP := b.fingerprints()
+	if triggerFingerprint(t) != definitionFP ||
+		watchBuiltinFingerprint(cfgSnapshot.TriggersRuntime.WatchBuiltinIgnores()) != builtinFP {
 		return
 	}
 
@@ -665,6 +775,7 @@ func addWatchRecursive(add func(string) error, root string, matcher *watchMatche
 // --- matching ---
 
 type watchMatcher struct {
+	mu      sync.RWMutex
 	root    string
 	git     ignore.Matcher // .git/info/exclude + .gitignore files under root
 	builtin ignore.Matcher // always-applied, non-overridable ignores
@@ -698,10 +809,25 @@ func newWatchMatcher(root string, w *config.WatchConfig, builtinIgnores []string
 	return m
 }
 
+func (m *watchMatcher) setBuiltinIgnores(builtinIgnores []string) {
+	if builtinIgnores == nil {
+		builtinIgnores = config.DefaultWatchBuiltinIgnores
+	}
+
+	builtin := append(append([]string(nil), mandatoryWatchIgnores...), builtinIgnores...)
+
+	m.mu.Lock()
+	m.builtin = ignore.Lines(builtin...)
+	m.mu.Unlock()
+}
+
 // reloadGit rebuilds the git ignore matcher (.git/info/exclude + the tree's
 // .gitignore files) from disk. Called when a .gitignore changes; the builtin,
 // user-ignore, and include matchers are config-derived and left untouched.
 func (m *watchMatcher) reloadGit() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	m.git = ignore.Dir(m.root)
 }
 
@@ -718,6 +844,9 @@ func (m *watchMatcher) rel(path string) string {
 // The path names a directory, so directory-only patterns (a trailing "/") are
 // evaluated with isDir=true, exactly as Git would.
 func (m *watchMatcher) ignoredDir(rel string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
 	if rel == "" || rel == "." {
 		return false
 	}
@@ -739,6 +868,9 @@ func (m *watchMatcher) ignoredDir(rel string) bool {
 
 // fires reports whether a changed file path should fire the action.
 func (m *watchMatcher) fires(rel string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
 	if rel == "" || rel == "." {
 		return false
 	}

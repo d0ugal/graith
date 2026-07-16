@@ -46,8 +46,10 @@ func parseScenarioTriggerName(name string) (scenarioID, bare string, ok bool) {
 // automatically). The returned slice is a fresh copy; namespaced names are
 // applied to copies so the stored ScenarioState.Triggers are never mutated.
 func (sm *SessionManager) allTriggers() []config.TriggerConfig {
-	cfg := sm.Config()
+	return sm.allTriggersFromConfig(sm.Config())
+}
 
+func (sm *SessionManager) allTriggersFromConfig(cfg *config.Config) []config.TriggerConfig {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -212,6 +213,26 @@ func (sm *SessionManager) applyConfig(newCfg *config.Config) {
 
 		sm.log.Info("config changed", "key", "lifecycle.input_delay",
 			"old", old.Lifecycle.InputDelayDuration(), "new", delay)
+	}
+
+	// Retune existing PR ref watchers in place. A pending ref event is retimed
+	// from its original last-change timestamp, so neither shortening nor
+	// lengthening the debounce drops the kick (issue #1308).
+	if old.PRWatch.RefDebounceDuration() != newCfg.PRWatch.RefDebounceDuration() {
+		sm.updateActivePRRefWatcherDebounce(newCfg)
+		sm.log.Info("config changed", "key", "pr_watch.advanced.ref_debounce",
+			"old", old.PRWatch.RefDebounceDuration(), "new", newCfg.PRWatch.RefDebounceDuration())
+	}
+
+	oldBuiltinIgnores := old.TriggersRuntime.WatchBuiltinIgnores()
+	newBuiltinIgnores := newCfg.TriggersRuntime.WatchBuiltinIgnores()
+	if !slices.Equal(oldBuiltinIgnores, newBuiltinIgnores) {
+		// Update each live matcher and its directory registrations in place. The
+		// binding keeps receiving fsnotify events while its event loop is briefly
+		// gated, avoiding the teardown/recreate blind spot (issue #1309).
+		sm.updateActiveWatchBuiltinIgnores(newCfg)
+		sm.log.Info("config changed", "key", "triggers.advanced.watch_builtin_ignores",
+			"old", oldBuiltinIgnores, "new", newBuiltinIgnores)
 	}
 
 	// If the PR-comment author-trust config changed, re-evaluate jailed comments

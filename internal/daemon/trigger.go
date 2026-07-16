@@ -507,13 +507,16 @@ func (sm *SessionManager) recordTriggerRun(name string, run TriggerRun) {
 // --- helpers ---
 
 func (sm *SessionManager) triggerByName(name string) *config.TriggerConfig {
+	return sm.triggerByNameFromConfig(name, sm.Config())
+}
+
+func (sm *SessionManager) triggerByNameFromConfig(name string, cfg *config.Config) *config.TriggerConfig {
 	// Scenario-embedded triggers carry a namespaced name and live on the owning
 	// ScenarioState, not in config.
 	if scenarioID, bare, ok := parseScenarioTriggerName(name); ok {
 		return sm.scenarioTriggerByName(scenarioID, bare, name)
 	}
 
-	cfg := sm.Config()
 	for i := range cfg.Triggers {
 		if cfg.Triggers[i].Name == name {
 			t := cfg.Triggers[i]
@@ -539,6 +542,21 @@ func triggerFingerprint(t *config.TriggerConfig) string {
 		// bool or string, so this is unreachable; hash the name defensively
 		// rather than collapse every definition to the same empty hash.
 		b = []byte(t.Name)
+	}
+
+	sum := sha256.Sum256(b)
+
+	return hex.EncodeToString(sum[:8])
+}
+
+// watchBuiltinFingerprint hashes the resolved daemon-wide ignore policy kept
+// alongside a watch trigger's own definition fingerprint. Keeping it separate
+// lets a reload update a live matcher's policy without recreating its fsnotify
+// watcher or dropping queued events.
+func watchBuiltinFingerprint(ignores []string) string {
+	b, err := json.Marshal(ignores)
+	if err != nil {
+		return ""
 	}
 
 	sum := sha256.Sum256(b)

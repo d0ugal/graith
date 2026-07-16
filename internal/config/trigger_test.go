@@ -635,6 +635,29 @@ func TestWatchBuiltinIgnoresCopy(t *testing.T) {
 	}
 }
 
+func TestWatchBuiltinIgnoresExplicitEmpty(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte("[triggers.advanced]\nwatch_builtin_ignores = []\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.TriggersRuntime.Advanced.WatchBuiltinIgnores == nil {
+		t.Fatal("explicit empty watch_builtin_ignores decoded as unset")
+	}
+	if got := cfg.TriggersRuntime.WatchBuiltinIgnores(); len(got) != 0 {
+		t.Fatalf("explicit empty watch_builtin_ignores resolved to %v, want empty", got)
+	}
+
+	if got := (TriggersRuntime{}).WatchBuiltinIgnores(); !slices.Equal(got, DefaultWatchBuiltinIgnores) {
+		t.Fatalf("unset watch_builtin_ignores = %v, want defaults %v", got, DefaultWatchBuiltinIgnores)
+	}
+}
+
 // TestTriggersAdvancedEmbeddedDefaults is the drift guard (epic #1230 pattern):
 // the advanced tuning defaults must live in the embedded default_config.toml, not
 // only as Go fallback literals. It asserts the RAW fields parsed from the embedded

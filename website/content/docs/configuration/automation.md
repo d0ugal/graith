@@ -44,7 +44,11 @@ ref_debounce                   = "750ms"  # coalesce a burst of ref writes from 
 gh_timeout                     = "5s"     # per-command timeout for the daemon's gh invocations
 ```
 
-The loop-lifetime knobs — `base_tick`, `kick_channel_size`, and `ref_reconcile_interval` — are read when the daemon starts, so changing them takes effect on the next daemon restart; the rest apply on the next poll.
+The loop-lifetime knobs — `base_tick`, `kick_channel_size`, and
+`ref_reconcile_interval` — are read when the daemon starts, so changing them
+takes effect on the next daemon restart. Reloading `ref_debounce` retimes
+existing ref watchers (including a pending debounce) immediately; the remaining
+settings are read on the next poll.
 
 ### Near-instant detection
 
@@ -163,7 +167,10 @@ watch_builtin_ignores    = [".git/", ".git", ".hg/", ".svn/", "*.swp", "*.swx", 
 `watch_builtin_ignores` is the daemon-wide set of directories/patterns never
 watched by any file-watch trigger (on top of git ignore rules and per-trigger
 `watch.ignore`). `.git` is always ignored regardless of this list, because a
-watched `.git` churns constantly and creates a feedback loop.
+watched `.git` churns constantly and creates a feedback loop. Set
+`watch_builtin_ignores = []` to clear every optional built-in ignore while
+retaining that mandatory `.git` protection. A config reload updates matchers and
+directory registrations on live bindings without recreating them.
 
 The degraded-watch retry bounds must be positive and
 `watch_retry_base_backoff` must not exceed `watch_retry_max_backoff`; invalid
@@ -171,7 +178,7 @@ bounds are rejected on load or reload rather than creating a retry loop.
 
 The loop-lifetime knobs — `scheduler_tick` and `watch_reconcile_interval` — are
 read when the daemon starts, so changing them takes effect on the next daemon
-restart; the rest apply on the next fire.
+restart; other non-watcher settings apply on the next fire.
 
 ### Headless session actions (planned)
 

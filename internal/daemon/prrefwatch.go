@@ -25,7 +25,7 @@ import (
 // The reconcile cadence and per-watch debounce are now [pr_watch.advanced] config
 // knobs (ref_reconcile_interval / ref_debounce), resolved through the
 // config.PRWatchConfig accessors. The reconcile cadence is read once when the loop
-// starts; the debounce is snapshotted onto each watcher when it is created.
+// starts; the debounce is updated in place on live watchers after config reload.
 
 type prRefWatchState struct {
 	mu       sync.Mutex
@@ -44,14 +44,16 @@ type prRefWatcher struct {
 	worktree  string
 	watcher   *fsnotify.Watcher
 	cancel    context.CancelFunc
-	// debounceDur snapshots pr_watch.advanced.ref_debounce at creation; a
+	// debounceDur is the current pr_watch.advanced.ref_debounce policy. A
 	// non-positive value (e.g. a bare test-constructed watcher) falls back to the
 	// config default in notePRRefChange.
 	debounceDur time.Duration
 
-	bmu      sync.Mutex
-	debounce *time.Timer
-	canceled bool
+	bmu         sync.Mutex
+	debounce    *time.Timer
+	lastChange  time.Time
+	debounceGen uint64
+	canceled    bool
 }
 
 // RunPRRefWatchLoop reconciles per-session git-refs watchers against live
@@ -88,6 +90,8 @@ func (sm *SessionManager) RunPRRefWatchLoop(ctx context.Context) {
 // tears down watchers whose session is gone/stopped/soft-deleted. Locks are
 // released before create/teardown (which lock) to avoid re-entrancy.
 func (sm *SessionManager) reconcilePRRefWatchers(ctx context.Context) {
+	cfgSnapshot := sm.Config()
+	debounce := cfgSnapshot.PRWatch.RefDebounceDuration()
 	desired := sm.prRefEligibleSessions()
 
 	sm.prRefWatch.mu.Lock()
@@ -107,14 +111,15 @@ func (sm *SessionManager) reconcilePRRefWatchers(ctx context.Context) {
 
 	for id, worktree := range desired {
 		sm.prRefWatch.mu.Lock()
-		_, exists := sm.prRefWatch.watchers[id]
+		existing, exists := sm.prRefWatch.watchers[id]
 		sm.prRefWatch.mu.Unlock()
 
 		if exists {
+			sm.updatePRRefWatcherDebounce(cfgSnapshot, existing, debounce)
 			continue
 		}
 
-		sm.createPRRefWatcher(ctx, id, worktree)
+		sm.createPRRefWatcherWithConfig(ctx, id, worktree, cfgSnapshot)
 	}
 }
 
@@ -148,6 +153,10 @@ func (sm *SessionManager) prRefEligibleSessions() map[string]string {
 // resolved or no watch can be added, no watcher is created and the poll covers
 // the session.
 func (sm *SessionManager) createPRRefWatcher(ctx context.Context, id, worktree string) {
+	sm.createPRRefWatcherWithConfig(ctx, id, worktree, sm.Config())
+}
+
+func (sm *SessionManager) createPRRefWatcherWithConfig(ctx context.Context, id, worktree string, cfgSnapshot *config.Config) {
 	dirs := gitRefWatchDirs(worktree)
 	if len(dirs) == 0 {
 		return
@@ -181,13 +190,26 @@ func (sm *SessionManager) createPRRefWatcher(ctx context.Context, id, worktree s
 		worktree:    worktree,
 		watcher:     watcher,
 		cancel:      cancel,
-		debounceDur: sm.Config().PRWatch.RefDebounceDuration(),
+		debounceDur: cfgSnapshot.PRWatch.RefDebounceDuration(),
+	}
+
+	// Publish only if the config generation used to build the watcher is still
+	// current. applyConfig snapshots the watcher map after swapping sm.cfg, so
+	// holding sm.mu for this final fast insertion closes the otherwise possible
+	// gap where an old-generation watcher could appear after the reload update.
+	sm.mu.RLock()
+	if sm.cfg != cfgSnapshot {
+		sm.mu.RUnlock()
+		cancel()
+		_ = watcher.Close()
+		return
 	}
 
 	sm.prRefWatch.mu.Lock()
 	// A concurrent reconcile may have created one already; keep the existing.
 	if _, exists := sm.prRefWatch.watchers[id]; exists {
 		sm.prRefWatch.mu.Unlock()
+		sm.mu.RUnlock()
 		cancel()
 
 		_ = watcher.Close()
@@ -197,6 +219,7 @@ func (sm *SessionManager) createPRRefWatcher(ctx context.Context, id, worktree s
 
 	sm.prRefWatch.watchers[id] = w
 	sm.prRefWatch.mu.Unlock()
+	sm.mu.RUnlock()
 
 	go sm.runPRRefWatcher(wctx, w)
 
@@ -325,22 +348,36 @@ func (sm *SessionManager) notePRRefChange(w *prRefWatcher) {
 		return
 	}
 
-	if w.debounce != nil {
-		w.debounce.Stop()
-	}
-
 	dur := w.debounceDur
 	if dur <= 0 {
 		dur = (config.PRWatchConfig{}).RefDebounceDuration()
 	}
 
-	w.debounce = time.AfterFunc(dur, func() {
+	w.lastChange = time.Now()
+	sm.armPRRefDebounceLocked(w, dur)
+}
+
+// armPRRefDebounceLocked replaces the pending timer without losing its event.
+// debounceGen makes a callback whose Stop lost a race harmless, so a live
+// policy update cannot produce a duplicate kick. Caller holds w.bmu.
+func (sm *SessionManager) armPRRefDebounceLocked(w *prRefWatcher, delay time.Duration) {
+	if w.debounce != nil {
+		w.debounce.Stop()
+	}
+
+	w.debounceGen++
+	gen := w.debounceGen
+
+	w.debounce = time.AfterFunc(max(delay, 0), func() {
 		// Re-check canceled: the timer may fire after teardown stopped it (Stop
 		// returns false once the callback is already scheduled). Mirrors filewatch's
 		// watchFire guard — a post-teardown kick is otherwise harmless (pollKicked
 		// re-validates) but would needlessly burn the kick cooldown / a gh call.
 		w.bmu.Lock()
-		canceled := w.canceled
+		canceled := w.canceled || w.debounceGen != gen
+		if !canceled {
+			w.debounce = nil
+		}
 		w.bmu.Unlock()
 
 		if canceled {
@@ -349,6 +386,51 @@ func (sm *SessionManager) notePRRefChange(w *prRefWatcher) {
 
 		sm.kickPRWatch(w.sessionID)
 	})
+}
+
+// updatePRRefWatcherDebounce retimes an active watcher's pending event against
+// its original last-change time. Shortening can fire immediately; lengthening
+// preserves the event and extends only its quiet window. cfgSnapshot guards
+// against an older reconcile overwriting a newer applyConfig update.
+func (sm *SessionManager) updatePRRefWatcherDebounce(cfgSnapshot *config.Config, w *prRefWatcher, dur time.Duration) {
+	if w == nil {
+		return
+	}
+
+	w.bmu.Lock()
+	defer w.bmu.Unlock()
+
+	if sm.Config() != cfgSnapshot || w.canceled {
+		return
+	}
+
+	w.debounceDur = dur
+	if w.debounce == nil || w.lastChange.IsZero() {
+		return
+	}
+
+	sm.armPRRefDebounceLocked(w, dur-time.Since(w.lastChange))
+}
+
+// updateActivePRRefWatcherDebounce applies a freshly-published config to every
+// existing watcher. Watchers created concurrently either publish before the
+// config swap and appear in this snapshot, or fail their generation check.
+func (sm *SessionManager) updateActivePRRefWatcherDebounce(cfgSnapshot *config.Config) {
+	if sm.prRefWatch == nil {
+		return
+	}
+
+	sm.prRefWatch.mu.Lock()
+	watchers := make([]*prRefWatcher, 0, len(sm.prRefWatch.watchers))
+	for _, w := range sm.prRefWatch.watchers {
+		watchers = append(watchers, w)
+	}
+	sm.prRefWatch.mu.Unlock()
+
+	dur := cfgSnapshot.PRWatch.RefDebounceDuration()
+	for _, w := range watchers {
+		sm.updatePRRefWatcherDebounce(cfgSnapshot, w, dur)
+	}
 }
 
 // kickPRWatch asks RunPRWatchLoop to poll a session immediately. Non-blocking: a

@@ -234,7 +234,15 @@ func TestFileWatch_EndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	b := &watchBinding{triggerName: "wf", sessionID: "src", worktree: worktree, fingerprint: triggerFingerprint(&trig), watcher: w, changed: make(map[string]bool)}
+	b := &watchBinding{
+		triggerName:        "wf",
+		sessionID:          "src",
+		worktree:           worktree,
+		fingerprint:        triggerFingerprint(&trig),
+		builtinFingerprint: watchBuiltinFingerprint(sm.cfg.TriggersRuntime.WatchBuiltinIgnores()),
+		watcher:            w,
+		changed:            make(map[string]bool),
+	}
 	matcher := newWatchMatcher(worktree, trig.Watch, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -360,6 +368,84 @@ func TestReconcileBindings_HotReload(t *testing.T) {
 	sm.teardownAllBindings()
 }
 
+func TestWatchBuiltinIgnoresReloadUpdatesLiveBinding(t *testing.T) {
+	worktree := t.TempDir()
+	cacheDir := filepath.Join(worktree, "cache")
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	trig := config.TriggerConfig{
+		Name:   "bide",
+		Watch:  &config.WatchConfig{Role: "implementer", Debounce: "50ms"},
+		Action: config.ActionConfig{Type: config.ActionMessage, Body: "x", Deliver: config.DeliverConfig{Topic: "blether"}},
+	}
+	sm := newTriggerTestSM(t, trig)
+	sm.cfg.TriggersRuntime.Advanced.WatchBuiltinIgnores = []string{"cache/", "*.swp"}
+	sm.state.Sessions["src"] = &SessionState{ID: "src", Name: "canny", Status: StatusRunning, ScenarioRole: "implementer", WorktreePath: worktree}
+
+	ctx := context.Background()
+	sm.reconcileBindings(ctx, sm.allTriggers(), time.Now())
+	t.Cleanup(sm.teardownAllBindings)
+
+	key := bindingKey("bide", "src")
+	b := sm.triggers.bindings[key]
+	if b == nil || b.matcher == nil {
+		t.Fatal("expected live binding with matcher")
+	}
+
+	watching := func(path string) bool {
+		for _, watched := range b.watcher.WatchList() {
+			if filepath.Clean(watched) == filepath.Clean(path) {
+				return true
+			}
+		}
+		return false
+	}
+
+	if watching(cacheDir) {
+		t.Fatal("initial builtin ignore should prune cache directory")
+	}
+	if b.matcher.fires("notes.swp") {
+		t.Fatal("initial builtin ignore should suppress *.swp")
+	}
+
+	// Explicit [] means only the mandatory .git ignore. The same binding and
+	// fsnotify watcher are updated in place, and the formerly-pruned directory
+	// is added before event handling resumes.
+	cleared := *sm.Config()
+	cleared.TriggersRuntime.Advanced.WatchBuiltinIgnores = []string{}
+	sm.applyConfig(&cleared)
+
+	if got := sm.triggers.bindings[key]; got != b {
+		t.Fatal("clearing builtin ignores recreated the live binding")
+	}
+	if !watching(cacheDir) {
+		t.Fatal("clear-to-empty did not add the formerly ignored directory to the live watcher")
+	}
+	if !b.matcher.fires("notes.swp") {
+		t.Fatal("clear-to-empty left the old *.swp matcher bound")
+	}
+	if b.matcher.fires(".git/config") {
+		t.Fatal("mandatory .git ignore must survive clear-to-empty")
+	}
+
+	// Adding ignores again updates the same matcher and prunes its watch set.
+	added := cleared
+	added.TriggersRuntime.Advanced.WatchBuiltinIgnores = []string{"cache/", "*.log"}
+	sm.applyConfig(&added)
+
+	if got := sm.triggers.bindings[key]; got != b {
+		t.Fatal("adding builtin ignores recreated the live binding")
+	}
+	if watching(cacheDir) {
+		t.Fatal("added directory ignore was not pruned from the live watcher")
+	}
+	if b.matcher.fires("notes.log") {
+		t.Fatal("added *.log ignore was not applied to the live matcher")
+	}
+}
+
 // TestWatchFire_StaleGenerationDoesNotFire asserts the generation guard: a
 // binding whose stored fingerprint no longer matches the current definition
 // must not fire the (new) action from events the old matcher collected. Without
@@ -378,11 +464,12 @@ func TestWatchFire_StaleGenerationDoesNotFire(t *testing.T) {
 	// A binding stamped with a fingerprint that does NOT match the live config
 	// stands in for a stale generation mid-reload.
 	b := &watchBinding{
-		triggerName: "thrawn",
-		sessionID:   "src",
-		worktree:    worktree,
-		fingerprint: "stalegeneration",
-		changed:     map[string]bool{"main.go": true},
+		triggerName:        "thrawn",
+		sessionID:          "src",
+		worktree:           worktree,
+		fingerprint:        "stalegeneration",
+		builtinFingerprint: watchBuiltinFingerprint(sm.cfg.TriggersRuntime.WatchBuiltinIgnores()),
+		changed:            map[string]bool{"main.go": true},
 	}
 
 	sm.watchFire(context.Background(), "thrawn", b)
@@ -680,7 +767,8 @@ func TestRecordDegradedBinding_Recovers(t *testing.T) {
 	sess := watchSession{id: "src", name: "ben", worktree: worktree}
 
 	t0 := time.Now()
-	sm.recordDegradedBinding(key, &sm.cfg.Triggers[0], sess, "fsnotify.NewWatcher failed: too many open files", 1, t0)
+	builtinFP := watchBuiltinFingerprint(sm.cfg.TriggersRuntime.WatchBuiltinIgnores())
+	sm.recordDegradedBinding(key, &sm.cfg.Triggers[0], sess, "fsnotify.NewWatcher failed: too many open files", 1, t0, sm.cfg, builtinFP)
 
 	b := sm.triggers.bindings[key]
 	if b == nil || b.degraded == "" || b.watcher != nil || b.cancel != nil {

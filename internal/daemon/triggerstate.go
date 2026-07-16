@@ -40,21 +40,24 @@ type triggerState struct {
 // watchBinding is one (watch trigger, bound source session) pair. Not persisted:
 // rebuilt from live sessions on reconcile.
 type watchBinding struct {
-	bmu         sync.Mutex // guards changed/debounce/inFlight (per-binding)
-	triggerName string
-	sessionID   string
-	worktree    string
-	fingerprint string // definition fingerprint; a change recreates the binding
-	watcher     *fsnotify.Watcher
-	debounce    *time.Timer
-	changed     map[string]bool // coalesced changed paths since last fire
-	inFlight    bool            // command action in flight for this binding
-	reactorID   string          // ensure-reviewer session owned by this binding
-	degraded    string          // watcher failure/limit reason ("" once healthy)
-	retryCount  int             // consecutive degraded (re)creation attempts (drives backoff)
-	nextRetryAt time.Time       // when a degraded binding is next retried (zero when healthy)
-	canceled    bool            // set on teardown; a pending debounce callback checks it
-	cancel      func()          // stops the binding's event goroutine
+	bmu                sync.Mutex   // guards changed/debounce/inFlight/fingerprints (per-binding)
+	policyMu           sync.RWMutex // serialises matcher policy swaps with event handling
+	triggerName        string
+	sessionID          string
+	worktree           string
+	fingerprint        string // definition fingerprint; a change recreates the binding
+	builtinFingerprint string // resolved daemon-wide ignore policy fingerprint
+	watcher            *fsnotify.Watcher
+	matcher            *watchMatcher
+	debounce           *time.Timer
+	changed            map[string]bool // coalesced changed paths since last fire
+	inFlight           bool            // command action in flight for this binding
+	reactorID          string          // ensure-reviewer session owned by this binding
+	degraded           string          // watcher failure/limit reason ("" once healthy)
+	retryCount         int             // consecutive degraded (re)creation attempts (drives backoff)
+	nextRetryAt        time.Time       // when a degraded binding is next retried (zero when healthy)
+	canceled           bool            // set on teardown; a pending debounce callback checks it
+	cancel             func()          // stops the binding's event goroutine
 }
 
 // actionInFlight reports whether a serialised action (command or
@@ -65,6 +68,13 @@ func (b *watchBinding) actionInFlight() bool {
 	defer b.bmu.Unlock()
 
 	return b.inFlight
+}
+
+func (b *watchBinding) fingerprints() (definition, builtin string) {
+	b.bmu.Lock()
+	defer b.bmu.Unlock()
+
+	return b.fingerprint, b.builtinFingerprint
 }
 
 func newTriggerState() *triggerState {
