@@ -1211,6 +1211,42 @@ func TestHandleHookReport(t *testing.T) {
 		}
 	})
 
+	// The hook-authority windows are configurable via [detection] (#1241): a
+	// custom config must drive AuthoritativeUntil, not the old hard-coded 30s/30m.
+	t.Run("config drives hook-authority windows", func(t *testing.T) {
+		cfg := config.Default()
+		cfg.Detection.HookActivityWindow = "90s"
+		cfg.Detection.HookTerminalWindow = "2h"
+		sm := newSMWithConfig(t, cfg)
+		sm.state.Sessions["sess1"] = &SessionState{
+			ID: "sess1", Name: "braw", Status: StatusRunning,
+		}
+
+		sm.HandleHookReport(protocol.StatusReportMsg{
+			SessionID: "sess1", Event: "PreToolUse", ToolName: "Bash",
+		})
+
+		sm.mu.RLock()
+		activity := time.Until(sm.hookReports["sess1"].AuthoritativeUntil)
+		sm.mu.RUnlock()
+
+		if activity < 89*time.Second || activity > 91*time.Second {
+			t.Errorf("activity AuthoritativeUntil delta = %v, want ~90s from config", activity)
+		}
+
+		sm.HandleHookReport(protocol.StatusReportMsg{
+			SessionID: "sess1", Event: "Stop",
+		})
+
+		sm.mu.RLock()
+		terminal := time.Until(sm.hookReports["sess1"].AuthoritativeUntil)
+		sm.mu.RUnlock()
+
+		if terminal < 2*time.Hour-time.Minute || terminal > 2*time.Hour+time.Minute {
+			t.Errorf("terminal AuthoritativeUntil delta = %v, want ~2h from config", terminal)
+		}
+	})
+
 	t.Run("approval event", func(t *testing.T) {
 		sm := newTestSessionManager(t)
 		sm.state.Sessions["sess1"] = &SessionState{

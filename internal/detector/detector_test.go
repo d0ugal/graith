@@ -278,6 +278,84 @@ func TestDetect_OutputRecency(t *testing.T) {
 	}
 }
 
+func TestDetectWithRecentWindow(t *testing.T) {
+	d := New("claude")
+	content := "thrawn croft output filling the screen\n"
+
+	tests := []struct {
+		name      string
+		content   string
+		outputAge time.Duration
+		window    time.Duration
+		want      AgentStatus
+	}{
+		{
+			"output within a custom wider window infers active",
+			content,
+			4 * time.Second, // stale for the 3s default, fresh for a 10s window
+			10 * time.Second,
+			StatusActive,
+		},
+		{
+			"output outside a custom narrower window stays unknown",
+			content,
+			2 * time.Second, // fresh for the 3s default, stale for a 1s window
+			time.Second,
+			StatusUnknown,
+		},
+		{
+			"zero window disables the recency fallback",
+			content,
+			time.Millisecond, // very recent, but the fallback is off
+			0,
+			StatusUnknown,
+		},
+		{
+			"negative window disables the recency fallback",
+			content,
+			time.Millisecond,
+			-1,
+			StatusUnknown,
+		},
+		{
+			"busy pattern beats a disabled window",
+			"⠋ Working\nctrl+c to interrupt\n",
+			time.Hour,
+			0,
+			StatusActive,
+		},
+		{
+			"ready pattern beats the window",
+			"output done\n❯\n",
+			time.Millisecond,
+			10 * time.Second,
+			StatusReady,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := d.DetectWithRecentWindow(tt.content, tt.outputAge, tt.window); got != tt.want {
+				t.Errorf("DetectWithRecentWindow() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestDetect_UsesDefaultWindow guards that the convenience Detect wrapper still
+// applies the package-default recent-output window.
+func TestDetect_UsesDefaultWindow(t *testing.T) {
+	d := New("claude")
+	content := "thrawn croft output filling the screen\n"
+
+	if got := d.Detect(content, RecentOutputThreshold-time.Millisecond); got != StatusActive {
+		t.Errorf("Detect() just under default window = %v, want active", got)
+	}
+
+	if got := d.Detect(content, RecentOutputThreshold); got != StatusUnknown {
+		t.Errorf("Detect() at default window = %v, want unknown", got)
+	}
+}
+
 func TestStripANSI(t *testing.T) {
 	tests := []struct {
 		name  string

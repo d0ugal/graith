@@ -236,6 +236,44 @@ func TestPublicLoopsUseInjectedClocksAndStop(t *testing.T) {
 		assertLoopStopped(t, done, first.stopped, second.stopped)
 	})
 
+	t.Run("detection intervals come from config", func(t *testing.T) {
+		// #1241: the scan and fetch tickers must be built from [detection]
+		// scan_interval / fetch_interval, not hard-coded 500ms / 5m.
+		cfg := config.Default()
+		cfg.Detection.ScanInterval = "250ms"
+		cfg.Detection.FetchInterval = "2m"
+		sm := newSMWithConfig(t, cfg)
+
+		durations := make(chan time.Duration, 2)
+		sm.newLoopTicker = func(d time.Duration) loopTicker {
+			durations <- d
+			return newManualLoopTicker()
+		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		done := make(chan struct{})
+
+		go func() {
+			sm.RunDetectionLoop(ctx)
+			close(done)
+		}()
+
+		scan, fetch := <-durations, <-durations
+
+		cancel()
+		<-done
+
+		if scan != 250*time.Millisecond {
+			t.Errorf("scan ticker interval = %v, want 250ms", scan)
+		}
+
+		if fetch != 2*time.Minute {
+			t.Errorf("fetch ticker interval = %v, want 2m", fetch)
+		}
+	})
+
 	t.Run("purge", func(t *testing.T) {
 		sm := newTestSessionManager(t)
 		timer := newManualLoopTimer()

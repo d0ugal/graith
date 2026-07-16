@@ -101,6 +101,22 @@ max_concurrent = 3       # max agent spawns in their startup window at once (< 1
 startup_timeout = "3m"   # kill+restart a session stuck with no output past this ("0" disables the watchdog)
 settle_timeout = "10s"   # how long a launch holds its slot waiting for first output ("0" => release right after spawn)
 
+# Detection & status-classification policy: the timing that governs how the
+# daemon scans PTY scrollback, refreshes remote refs, and decides agent status
+# (active/ready/approval). Empty or non-positive values fall back to the
+# defaults shown. Hook reports stay authoritative over PTY scraping for the
+# matching hook_* window. See issue #1241.
+[detection]
+scan_interval = "500ms"        # how often PTY scrollback is scanned for agent status
+fetch_interval = "5m"          # how often `git fetch` refreshes remote tracking refs
+fetch_timeout = "30s"          # per-repo `git fetch` timeout (a slow remote can't stall the pass)
+silent_threshold = "20s"       # zero PTY output past this warns the session is silent (#1087)
+adopted_grace = "60s"          # after daemon-upgrade adoption, keep prior status for this window ("0" disables)
+recent_output_window = "3s"    # recent PTY output alone implies "active" when scraping is inconclusive ("0" disables)
+hook_start_window = "5s"       # SessionStart hook stays authoritative for this long
+hook_activity_window = "30s"   # tool-use hooks (prompt/pre/post) stay authoritative for this long
+hook_terminal_window = "30m"   # ready/approval hooks (Stop, idle, permission) stay authoritative for this long
+
 # Update check: `gr list` and `gr doctor` query GitHub for a newer graith release
 # and cache the result. Disable for downstream forks, packaged/offline installs,
 # or to avoid the network call entirely. Never runs for a "dev" build.

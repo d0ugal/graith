@@ -49,10 +49,11 @@ type Config struct {
 	Remote           RemoteConfig       `toml:"remote"`
 	Input            InputConfig        `toml:"input"`
 	Agents           map[string]Agent   `toml:"agents"`
-	Triggers         []TriggerConfig    `toml:"trigger"`  // [[trigger]] array
-	TriggersRuntime  TriggersRuntime    `toml:"triggers"` // [triggers] table (daemon-wide settings)
-	Headless         HeadlessConfig     `toml:"headless"` // [headless] table (issue #1075)
-	Updates          UpdatesConfig      `toml:"updates"`  // [updates] table (issue #1253)
+	Triggers         []TriggerConfig    `toml:"trigger"`   // [[trigger]] array
+	TriggersRuntime  TriggersRuntime    `toml:"triggers"`  // [triggers] table (daemon-wide settings)
+	Headless         HeadlessConfig     `toml:"headless"`  // [headless] table (issue #1075)
+	Updates          UpdatesConfig      `toml:"updates"`   // [updates] table (issue #1253)
+	Detection        DetectionConfig    `toml:"detection"` // [detection] table (issue #1241)
 }
 
 // UpdatesConfig is the [updates] block controlling the GitHub release check
@@ -667,6 +668,134 @@ func (l LaunchConfig) SettleTimeoutDuration() time.Duration {
 	d, err := ParseDurationWithDays(l.SettleTimeout)
 	if err != nil || d < 0 {
 		return LaunchSettleTimeoutDefault
+	}
+
+	return d
+}
+
+// DetectionConfig is the [detection] block gathering the agent-detection and
+// status-classification timing policy that was previously spread as fixed
+// constants across the daemon and detector packages (issue #1241). Every field
+// is optional: an empty or unparseable value falls back to the matching
+// default constant, preserving the historical behaviour.
+type DetectionConfig struct {
+	// ScanInterval is how often the detection loop scans PTY scrollback to
+	// classify low-risk agent status (active/ready). Empty uses the default
+	// (DetectionScanIntervalDefault).
+	ScanInterval string `toml:"scan_interval"`
+	// FetchInterval is how often the detection loop refreshes remote tracking
+	// refs (`git fetch`) so the diverged-from-base count stays fresh. Empty uses
+	// the default (DetectionFetchIntervalDefault).
+	FetchInterval string `toml:"fetch_interval"`
+	// FetchTimeout bounds a single per-repo `git fetch` so a slow or hung remote
+	// can't stall the fetch pass for other sessions. Empty uses the default
+	// (DetectionFetchTimeoutDefault).
+	FetchTimeout string `toml:"fetch_timeout"`
+	// SilentThreshold is how long a running session's PTY may produce zero
+	// output before the daemon warns it is silent (issue #1087). Empty uses the
+	// default (DetectionSilentThresholdDefault).
+	SilentThreshold string `toml:"silent_threshold"`
+	// AdoptedGrace is the window after daemon-upgrade PTY adoption during which
+	// an unknown detection result falls back to the previous status instead of
+	// clobbering it. Empty uses the default (DetectionAdoptedGraceDefault).
+	AdoptedGrace string `toml:"adopted_grace"`
+	// RecentOutputWindow is the age below which recent PTY output alone implies
+	// the agent is active when pattern matching is inconclusive. Empty uses the
+	// default (DetectionRecentOutputWindowDefault).
+	RecentOutputWindow string `toml:"recent_output_window"`
+	// HookStartWindow is how long a SessionStart hook report stays authoritative
+	// over PTY scraping. Empty uses the default (DetectionHookStartWindowDefault).
+	HookStartWindow string `toml:"hook_start_window"`
+	// HookActivityWindow is how long a tool-use hook report (UserPromptSubmit,
+	// PreToolUse, PostToolUse) stays authoritative. Empty uses the default
+	// (DetectionHookActivityWindowDefault).
+	HookActivityWindow string `toml:"hook_activity_window"`
+	// HookTerminalWindow is how long a terminal hook report (ready/approval:
+	// Stop, idle_prompt, permission_prompt, PermissionRequest) stays
+	// authoritative. Empty uses the default (DetectionHookTerminalWindowDefault).
+	HookTerminalWindow string `toml:"hook_terminal_window"`
+}
+
+// Detection timing defaults. Each mirrors the fixed constant that governed the
+// behaviour before issue #1241 made the policy configurable.
+const (
+	DetectionScanIntervalDefault       = 500 * time.Millisecond
+	DetectionFetchIntervalDefault      = 5 * time.Minute
+	DetectionFetchTimeoutDefault       = 30 * time.Second
+	DetectionSilentThresholdDefault    = 20 * time.Second
+	DetectionAdoptedGraceDefault       = 60 * time.Second
+	DetectionRecentOutputWindowDefault = 3 * time.Second
+	DetectionHookStartWindowDefault    = 5 * time.Second
+	DetectionHookActivityWindowDefault = 30 * time.Second
+	DetectionHookTerminalWindowDefault = 30 * time.Minute
+)
+
+// ScanIntervalDuration returns the PTY scan cadence, or the default when unset,
+// unparseable, or non-positive (a zero/negative scan interval would busy-loop).
+func (d DetectionConfig) ScanIntervalDuration() time.Duration {
+	return positiveDurationOrDefault(d.ScanInterval, DetectionScanIntervalDefault)
+}
+
+// FetchIntervalDuration returns the remote-fetch cadence, or the default when
+// unset, unparseable, or non-positive.
+func (d DetectionConfig) FetchIntervalDuration() time.Duration {
+	return positiveDurationOrDefault(d.FetchInterval, DetectionFetchIntervalDefault)
+}
+
+// FetchTimeoutDuration returns the per-repo fetch timeout, or the default when
+// unset, unparseable, or non-positive.
+func (d DetectionConfig) FetchTimeoutDuration() time.Duration {
+	return positiveDurationOrDefault(d.FetchTimeout, DetectionFetchTimeoutDefault)
+}
+
+// SilentThresholdDuration returns the zero-output warning window. Empty or
+// unparseable uses the default; a non-positive value keeps the default because
+// a session is never past a "zero" threshold in a meaningful way.
+func (d DetectionConfig) SilentThresholdDuration() time.Duration {
+	return positiveDurationOrDefault(d.SilentThreshold, DetectionSilentThresholdDefault)
+}
+
+// AdoptedGraceDuration returns the adopted-session fallback window, or the
+// default when unset or unparseable. A "0" disables the fallback.
+func (d DetectionConfig) AdoptedGraceDuration() time.Duration {
+	return durationOrDefault(d.AdoptedGrace, DetectionAdoptedGraceDefault)
+}
+
+// RecentOutputWindowDuration returns the recent-output-implies-active window,
+// or the default when unset or unparseable. A "0" disables the fallback.
+func (d DetectionConfig) RecentOutputWindowDuration() time.Duration {
+	return durationOrDefault(d.RecentOutputWindow, DetectionRecentOutputWindowDefault)
+}
+
+// HookStartWindowDuration returns the SessionStart hook-authority window, or
+// the default when unset, unparseable, or non-positive.
+func (d DetectionConfig) HookStartWindowDuration() time.Duration {
+	return positiveDurationOrDefault(d.HookStartWindow, DetectionHookStartWindowDefault)
+}
+
+// HookActivityWindowDuration returns the tool-use hook-authority window, or the
+// default when unset, unparseable, or non-positive.
+func (d DetectionConfig) HookActivityWindowDuration() time.Duration {
+	return positiveDurationOrDefault(d.HookActivityWindow, DetectionHookActivityWindowDefault)
+}
+
+// HookTerminalWindowDuration returns the ready/approval hook-authority window,
+// or the default when unset, unparseable, or non-positive.
+func (d DetectionConfig) HookTerminalWindowDuration() time.Duration {
+	return positiveDurationOrDefault(d.HookTerminalWindow, DetectionHookTerminalWindowDefault)
+}
+
+// positiveDurationOrDefault parses a duration string, returning def when it is
+// empty, unparseable, or non-positive. Used for windows where a zero or
+// negative value has no sensible meaning (cadences, timeouts, authority spans).
+func positiveDurationOrDefault(s string, def time.Duration) time.Duration {
+	if s == "" {
+		return def
+	}
+
+	d, err := ParseDurationWithDays(s)
+	if err != nil || d <= 0 {
+		return def
 	}
 
 	return d

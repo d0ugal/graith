@@ -168,9 +168,18 @@ const RecentOutputThreshold = 3 * time.Second
 const OutputAgeUnknown = time.Duration(-1)
 
 // Detect returns the detected status based on terminal content and how
-// recently the PTY produced output. Pass OutputAgeUnknown if timing is
-// not available.
+// recently the PTY produced output, using the package-default recent-output
+// window (RecentOutputThreshold). Pass OutputAgeUnknown if timing is not
+// available.
 func (d *Detector) Detect(content string, outputAge time.Duration) AgentStatus {
+	return d.DetectWithRecentWindow(content, outputAge, RecentOutputThreshold)
+}
+
+// DetectWithRecentWindow is Detect with a caller-supplied recent-output window
+// so the daemon can honour the configurable [detection] recent_output_window
+// (issue #1241). A recentWindow <= 0 disables the output-recency fallback: an
+// inconclusive scrape then stays StatusUnknown regardless of output age.
+func (d *Detector) DetectWithRecentWindow(content string, outputAge, recentWindow time.Duration) AgentStatus {
 	if d.IsBusy(content) {
 		return StatusActive
 	}
@@ -179,7 +188,7 @@ func (d *Detector) Detect(content string, outputAge time.Duration) AgentStatus {
 		return StatusReady
 	}
 
-	if outputAge >= 0 && outputAge < RecentOutputThreshold {
+	if recentWindow > 0 && outputAge >= 0 && outputAge < recentWindow {
 		return StatusActive
 	}
 
