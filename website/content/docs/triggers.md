@@ -229,6 +229,15 @@ usual `{name}`/`{date}`/`{datetime}`/`{fire_time}`).
 The tracker is **read-only** — graith never writes back to it (no closing issues,
 no comments). Reaping never hard-deletes.
 
+**Security — issue text is fed to an autonomous agent.** The issue title and body
+are expanded verbatim into the spawned agent's prompt. On a public repo, anyone
+who can open or edit an issue can therefore inject instructions into an agent
+that has write access to a worktree. Unlike PR comments (which graith jails
+behind an author-trust gate), issue bodies have **no trust gate** in v1. Only run
+the tracker against repos/issues you trust, scope it tightly with `active_labels`
+and/or `assignee` to a trusted set, and keep the agent sandbox enabled. An
+author-trust gate for issues is a possible follow-up.
+
 ## Delivery
 
 `[trigger.action.deliver]` routes action output. Fields are templated at fire

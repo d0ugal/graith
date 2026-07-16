@@ -30,29 +30,60 @@ type issueRef struct {
 	labels []string
 }
 
-// trackerSession is one live (running or stopped, not soft-deleted) session owned
-// by a tracker trigger.
+// trackerSession is one non-soft-deleted session owned by a tracker trigger. It
+// carries enough status for the reconcile planner to dedup (running/creating/
+// stopped/errored all count as "exists") without acting incorrectly on a
+// half-created or already-finished session.
 type trackerSession struct {
 	id       string
 	issueKey string
-	running  bool
+	status   SessionStatus
+	// completedCleanly marks a session that self-exited with code 0 — its work is
+	// done, so it is not auto-resumed even while its issue stays active (avoids
+	// resurrecting a one-shot agent every poll).
+	completedCleanly bool
 }
+
+func (s trackerSession) running() bool  { return s.status == StatusRunning }
+func (s trackerSession) creating() bool { return s.status == StatusCreating }
+
+// live reports whether the session occupies a concurrency slot (running now or
+// creating, i.e. about to run).
+func (s trackerSession) live() bool { return s.running() || s.creating() }
 
 // trackerReconcilePlan is the reconcile decision for one tracker trigger.
 type trackerReconcilePlan struct {
 	spawn  []issueRef // active issues with no live session
-	resume []string   // session IDs: active issue whose session is stopped
+	resume []string   // session IDs: active issue whose (non-completed) session is stopped/errored
 	reap   []string   // session IDs: obsolete issue past the grace window
+}
+
+// trackerReapWillAct reports whether applying the reap mode to a session would
+// actually change its state. It keeps the concurrency accounting honest: a reap
+// the executor won't perform (reap=none, or reap=stop on an already-stopped
+// session) must not free a slot.
+func trackerReapWillAct(mode string, s trackerSession) bool {
+	switch mode {
+	case config.TrackerReapNone:
+		return false
+	case config.TrackerReapDelete:
+		return true // SoftDelete works on running/stopped/errored
+	default: // stop
+		return s.running()
+	}
 }
 
 // reconcileTracker computes the spawn/resume/reap plan for one tracker trigger.
 // It is a pure function so the reconcile logic is exhaustively unit-testable.
 //
 //	active        — issues currently in the active state (from the poll)
-//	existing      — this trigger's live sessions (running or stopped)
+//	existing      — this trigger's sessions (running/creating/stopped/errored)
 //	obsoleteSince — per-issue first-seen-obsolete timestamps (issueKey -> time)
 //	grace         — how long an issue must stay inactive before its session is reaped
-//	maxConcurrent — cap on running tracker sessions (0 = unlimited); bounds spawn+resume
+//	maxConcurrent — cap on live tracker sessions (0 = unlimited); bounds spawn+resume
+//	reapMode      — stop | delete | none; the planner must know it so a no-op reap
+//	                (reap=none, or stop on an already-stopped session) doesn't wrongly
+//	                free a concurrency slot
 //	now           — current time
 //
 // It returns the plan, the refreshed obsoleteSince map (rebuilt from the current
@@ -64,6 +95,7 @@ func reconcileTracker(
 	obsoleteSince map[string]time.Time,
 	grace time.Duration,
 	maxConcurrent int,
+	reapMode string,
 	now time.Time,
 ) (trackerReconcilePlan, map[string]time.Time, int) {
 	activeSet := make(map[string]bool, len(active))
@@ -71,32 +103,27 @@ func reconcileTracker(
 		activeSet[iss.key] = true
 	}
 
+	// existingByKey dedups by issue, deterministically preferring a running (then
+	// creating) session over a stopped/errored one when duplicates somehow exist.
 	existingByKey := make(map[string]trackerSession, len(existing))
 	for _, s := range existing {
-		// If two sessions somehow share a key, the last wins for dedup; both are
-		// still considered for reap in the loop below.
-		existingByKey[s.issueKey] = s
+		cur, ok := existingByKey[s.issueKey]
+		if !ok || (!cur.live() && s.live()) {
+			existingByKey[s.issueKey] = s
+		}
 	}
 
 	var plan trackerReconcilePlan
 
 	newGrace := make(map[string]time.Time)
+	reaped := make(map[string]bool)
 
-	// runningRemaining counts sessions that will be running after this pass, used
-	// to enforce the concurrency cap on spawns/resumes.
-	runningRemaining := 0
-
+	// Pass 1: reap decisions for obsolete issues.
 	for _, s := range existing {
 		if activeSet[s.issueKey] {
-			// Still active: clears any obsolete mark; counts toward the cap if running.
-			if s.running {
-				runningRemaining++
-			}
-
-			continue
+			continue // active: handled in the spawn/resume pass; clears any grace mark
 		}
 
-		// Obsolete: track since when, reap once past the grace window.
 		firstSeen, ok := obsoleteSince[s.issueKey]
 		if !ok {
 			firstSeen = now
@@ -104,39 +131,53 @@ func reconcileTracker(
 
 		newGrace[s.issueKey] = firstSeen
 
-		if now.Sub(firstSeen) >= grace {
-			plan.reap = append(plan.reap, s.id)
-			continue // being reaped: does not count toward the cap
+		// A creating session can't be cleanly reaped mid-flight — hold it.
+		if s.creating() {
+			continue
 		}
 
-		// Held within grace: a running session still occupies a slot.
-		if s.running {
-			runningRemaining++
+		if now.Sub(firstSeen) >= grace && trackerReapWillAct(reapMode, s) {
+			plan.reap = append(plan.reap, s.id)
+			reaped[s.id] = true
 		}
 	}
 
+	// Pass 2: count slots occupied after the planned reaps.
+	occupied := 0
+
+	for _, s := range existing {
+		if !reaped[s.id] && s.live() {
+			occupied++
+		}
+	}
+
+	// Pass 3: spawn/resume active issues that have no live session, up to the cap.
 	capped := 0
 
 	for _, iss := range active {
 		s, ok := existingByKey[iss.key]
-		if ok && s.running {
-			continue // already has a running session
+		if ok && s.live() {
+			continue // already running or being created
 		}
 
-		if maxConcurrent > 0 && runningRemaining >= maxConcurrent {
+		if ok && s.completedCleanly {
+			continue // finished its work; don't resurrect it while the issue lingers
+		}
+
+		if maxConcurrent > 0 && occupied >= maxConcurrent {
 			capped++
 			continue
 		}
 
 		if ok {
-			// Stopped session for a (re-)active issue: resume it rather than spawn
-			// a duplicate — mirrors the ensure-reactor auto-resume.
+			// Stopped/errored session for a (re-)active issue: resume it rather than
+			// spawn a duplicate — mirrors the ensure-reactor auto-resume.
 			plan.resume = append(plan.resume, s.id)
 		} else {
 			plan.spawn = append(plan.spawn, iss)
 		}
 
-		runningRemaining++
+		occupied++
 	}
 
 	return plan, newGrace, capped
@@ -160,7 +201,7 @@ func (sm *SessionManager) actionTracker(ctx context.Context, t *config.TriggerCo
 		return "", fmt.Errorf("tracker action requires action.tracker.repo")
 	}
 
-	active, err := sm.fetchTrackerIssues(ctx, tc, repo)
+	active, truncated, err := sm.fetchTrackerIssues(ctx, tc, repo)
 	if err != nil {
 		return "", err
 	}
@@ -168,8 +209,19 @@ func (sm *SessionManager) actionTracker(ctx context.Context, t *config.TriggerCo
 	existing := sm.trackerSessions(t.Name)
 	obsoleteSince := sm.trackerObsoleteSnapshot(t.Name)
 
-	plan, newGrace, capped := reconcileTracker(active, existing, obsoleteSince, tc.GraceDuration(), tc.MaxConcurrent, time.Now())
+	plan, newGrace, capped := reconcileTracker(active, existing, obsoleteSince, tc.GraceDuration(), tc.MaxConcurrent, tc.ReapMode(), time.Now())
 	sm.setTrackerObsolete(t.Name, newGrace)
+
+	// A capped issue list is not a complete picture: an active issue beyond the
+	// fetch limit would look obsolete and be wrongly reaped. Never infer
+	// inactivity from a truncated read — skip reaps this pass (spawns are safe).
+	if truncated && len(plan.reap) > 0 {
+		sm.log.Warn("tracker: issue list hit the fetch limit; skipping reaps this pass",
+			"trigger", t.Name, "limit", tc.LimitOr(), "skipped_reaps", len(plan.reap))
+		plan.reap = nil
+	}
+
+	var failures []string
 
 	spawned := 0
 
@@ -177,6 +229,8 @@ func (sm *SessionManager) actionTracker(ctx context.Context, t *config.TriggerCo
 		//nolint:contextcheck // spawns a PTY-backed session that outlives the fire ctx (matches actionSession).
 		if serr := sm.spawnTrackerSession(t, iss, orchestratorID, repo); serr != nil {
 			sm.log.Warn("tracker: spawn failed", "trigger", t.Name, "issue", iss.key, "err", serr)
+			failures = append(failures, fmt.Sprintf("spawn %s: %v", iss.key, serr))
+
 			continue
 		}
 
@@ -189,6 +243,8 @@ func (sm *SessionManager) actionTracker(ctx context.Context, t *config.TriggerCo
 		//nolint:contextcheck // Resume runs its own session lifecycle, detached from the fire ctx.
 		if _, rerr := sm.Resume(id, 24, 80); rerr != nil {
 			sm.log.Warn("tracker: resume failed", "trigger", t.Name, "session", id, "err", rerr)
+			failures = append(failures, fmt.Sprintf("resume %s: %v", id, rerr))
+
 			continue
 		}
 
@@ -210,6 +266,12 @@ func (sm *SessionManager) actionTracker(ctx context.Context, t *config.TriggerCo
 
 	if t.Action.Deliver != (config.DeliverConfig{}) {
 		sm.deliver(ctx, t.Action.Deliver, fmt.Sprintf("Tracker %q: %s", t.Name, summary), repo, sm.triggerVars(t, fc))
+	}
+
+	// Surface per-item failures so the run is recorded as errored (LastError,
+	// notify) rather than silently reported as a clean reconcile.
+	if len(failures) > 0 {
+		return summary, fmt.Errorf("%d reconcile action(s) failed: %s", len(failures), strings.Join(failures, "; "))
 	}
 
 	return summary, nil
@@ -239,12 +301,27 @@ func (sm *SessionManager) spawnTrackerSession(t *config.TriggerConfig, iss issue
 
 // reapTrackerSession applies the configured reap policy to an obsolete session.
 // It returns true when it changed the session's state, so a no-op (already
-// stopped under reap=stop, or reap=none) isn't counted or retried noisily.
+// stopped under reap=stop, reap=none, or a protected session) isn't counted or
+// retried noisily. Starred and system sessions are never reaped (mirrors
+// SoftDelete's guard, extended to the stop path); reap=delete is refused when
+// soft delete is disabled so it can never become an immediate hard purge.
 func (sm *SessionManager) reapTrackerSession(id, mode string) bool {
 	switch mode {
 	case config.TrackerReapNone:
 		return false
 	case config.TrackerReapDelete:
+		if sm.cfg.Delete.RetentionDuration() <= 0 {
+			// SoftDelete with retention<=0 would produce an already-expired
+			// tombstone the purge loop hard-deletes — a hard purge in disguise.
+			// Never destroy: skip. (Config validation also rejects this combo.)
+			sm.log.Warn("tracker: reap=delete skipped (soft delete disabled, retention=0)", "session", id)
+			return false
+		}
+
+		if sm.reapProtected(id) {
+			return false // starred/system: SoftDelete would error anyway
+		}
+
 		if _, err := sm.SoftDelete(id); err != nil {
 			sm.log.Warn("tracker: reap (delete) failed", "session", id, "err", err)
 			return false
@@ -252,11 +329,11 @@ func (sm *SessionManager) reapTrackerSession(id, mode string) bool {
 
 		return true
 	default: // stop
-		if !sm.sessionRunning(id) {
-			return false // already stopped: nothing to reap
+		if !sm.reapStopEligible(id) {
+			return false // not running, starred, or system: nothing to (or must not) reap
 		}
 
-		if err := sm.Stop(id); err != nil {
+		if err := sm.stopWithReason(id, StopReasonUser, "tracker-reap"); err != nil {
 			sm.log.Warn("tracker: reap (stop) failed", "session", id, "err", err)
 			return false
 		}
@@ -265,18 +342,35 @@ func (sm *SessionManager) reapTrackerSession(id, mode string) bool {
 	}
 }
 
-// sessionRunning reports whether a session exists and is currently running.
-func (sm *SessionManager) sessionRunning(id string) bool {
+// reapProtected reports whether a session must not be reaped (starred or system).
+func (sm *SessionManager) reapProtected(id string) bool {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 
 	s, ok := sm.state.Sessions[id]
 
-	return ok && s.Status == StatusRunning
+	return ok && (s.Starred || IsSystemSession(s))
 }
 
-// trackerSessions returns the live (running or stopped, non-soft-deleted)
-// sessions this tracker trigger owns, keyed by their issue tag.
+// reapStopEligible reports whether a session can be stopped by a reap: it must be
+// running and neither starred nor a system session (re-checked under the lock at
+// apply time, since a human could star it between planning and application).
+func (sm *SessionManager) reapStopEligible(id string) bool {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	s, ok := sm.state.Sessions[id]
+	if !ok || s.Status != StatusRunning {
+		return false
+	}
+
+	return !s.Starred && !IsSystemSession(s)
+}
+
+// trackerSessions returns the non-soft-deleted sessions this tracker trigger
+// owns, tagged by their issue key. It includes creating and errored sessions so
+// reconcile dedup survives a restart mid-create (a StatusCreating session is
+// marked StatusErrored on reload) — a second poll must not double-spawn.
 func (sm *SessionManager) trackerSessions(triggerName string) []trackerSession {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
@@ -288,18 +382,33 @@ func (sm *SessionManager) trackerSessions(triggerName string) []trackerSession {
 			continue
 		}
 
-		if s.Status != StatusRunning && s.Status != StatusStopped {
-			continue // creating / errored — not yet a reconcilable session
+		switch s.Status {
+		case StatusRunning, StatusStopped, StatusCreating, StatusErrored:
+		default:
+			continue
 		}
 
 		out = append(out, trackerSession{
-			id:       id,
-			issueKey: s.TrackerIssue,
-			running:  s.Status == StatusRunning,
+			id:               id,
+			issueKey:         s.TrackerIssue,
+			status:           s.Status,
+			completedCleanly: trackerCompletedCleanly(s),
 		})
 	}
 
 	return out
+}
+
+// trackerCompletedCleanly reports whether a stopped session finished its work on
+// its own (self-exit with code 0) — the same "success" test autoCleanupStopped
+// uses: a process that ended without the daemon asking is tagged StopReasonCrash,
+// so that bucket at exit 0 is a clean completion (not a user stop / idle / crash).
+func trackerCompletedCleanly(s *SessionState) bool {
+	if s.Status != StatusStopped || s.StopReason != StopReasonCrash {
+		return false
+	}
+
+	return s.ExitCode != nil && *s.ExitCode == 0
 }
 
 // trackerObsoleteSnapshot copies the current obsolete-since timestamps for a
@@ -355,14 +464,24 @@ func trackerIssueVars(triggerName string, iss issueRef) config.TriggerVars {
 	}
 }
 
-// trackerSessionName builds a stable, bounded session name for an issue.
+// trackerSessionName builds a bounded session name for an issue. The numeric
+// suffix is always preserved (the trigger-name prefix is truncated instead), so
+// two different issues can never collapse to the same name after truncation.
 func trackerSessionName(triggerName string, number int) string {
-	base := fmt.Sprintf("%s-%d", triggerName, number)
-	if len(base) > 40 {
-		base = base[:40]
+	const maxLen = 40
+
+	suffix := fmt.Sprintf("-%d", number)
+
+	keep := maxLen - len(suffix)
+	if keep < 0 {
+		keep = 0
 	}
 
-	return base
+	if len(triggerName) > keep {
+		triggerName = triggerName[:keep]
+	}
+
+	return triggerName + suffix
 }
 
 // --- provider: GitHub Issues (v1) ---
@@ -378,37 +497,41 @@ type ghIssue struct {
 	} `json:"labels"`
 }
 
-// fetchTrackerIssues polls the configured provider for its active issues.
-func (sm *SessionManager) fetchTrackerIssues(ctx context.Context, tc *config.TrackerConfig, repo string) ([]issueRef, error) {
+// fetchTrackerIssues polls the configured provider for its active issues. The
+// truncated flag reports that the provider hit the fetch limit — the caller must
+// not infer inactivity (reap) from a capped, incomplete read.
+func (sm *SessionManager) fetchTrackerIssues(ctx context.Context, tc *config.TrackerConfig, repo string) (issues []issueRef, truncated bool, err error) {
 	switch tc.ProviderOr() {
 	case config.TrackerProviderGitHub:
 		return sm.fetchGitHubIssues(ctx, tc, repo)
 	default:
-		return nil, fmt.Errorf("tracker provider %q is not supported", tc.ProviderOr())
+		return nil, false, fmt.Errorf("tracker provider %q is not supported", tc.ProviderOr())
 	}
 }
 
 // fetchGitHubIssues lists the repo's active issues via the `gh` CLI, reusing the
-// pr_watch reader's short-timeout, prompt-disabled runner.
-func (sm *SessionManager) fetchGitHubIssues(ctx context.Context, tc *config.TrackerConfig, repo string) ([]issueRef, error) {
+// pr_watch reader's short-timeout, prompt-disabled runner. truncated is true when
+// the raw result hit the fetch limit (so the caller skips reaps that pass).
+func (sm *SessionManager) fetchGitHubIssues(ctx context.Context, tc *config.TrackerConfig, repo string) (issues []issueRef, truncated bool, err error) {
 	if !ghAvailable() {
-		return nil, fmt.Errorf("gh CLI not found on PATH")
+		return nil, false, fmt.Errorf("gh CLI not found on PATH")
 	}
 
 	slug, ok := repoSlug(repo)
 	if !ok {
-		return nil, fmt.Errorf("no GitHub remote for %q", repo)
+		return nil, false, fmt.Errorf("no GitHub remote for %q", repo)
 	}
 
 	cctx, cancel := context.WithTimeout(ctx, ghTimeout)
 	defer cancel()
 
+	limit := tc.LimitOr()
 	args := []string{
 		"issue", "list",
 		"--repo", slug,
 		"--state", tc.ActiveStateOr(),
 		"--json", "number,title,body,url,labels",
-		"--limit", fmt.Sprintf("%d", tc.LimitOr()),
+		"--limit", fmt.Sprintf("%d", limit),
 	}
 
 	// gh's --label is AND (issue must have every label); the config's active_labels
@@ -420,15 +543,20 @@ func (sm *SessionManager) fetchGitHubIssues(ctx context.Context, tc *config.Trac
 
 	out, err := ghRunner(cctx, repo, args...)
 	if err != nil {
-		return nil, fmt.Errorf("gh issue list: %w", err)
+		return nil, false, fmt.Errorf("gh issue list: %w", err)
 	}
 
 	refs, err := parseGitHubIssues(out, slug)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
-	return filterIssuesByLabels(refs, tc.ActiveLabels), nil
+	// The limit is applied by gh BEFORE the client-side label filter, so a full
+	// page means the label-matching active set may be incomplete — treat it as
+	// truncated so the caller doesn't reap on a partial view.
+	truncated = len(refs) >= limit
+
+	return filterIssuesByLabels(refs, tc.ActiveLabels), truncated, nil
 }
 
 // filterIssuesByLabels keeps issues that carry at least one of the given labels.

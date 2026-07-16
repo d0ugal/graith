@@ -177,8 +177,9 @@ inbox = "orchestrator"
 ```
 
 **New template vars** (`config.TriggerVars`): `{issue_number}`, `{issue_title}`,
-`{issue_body}`, `{issue_url}`, `{issue_labels}` — empty for non-tracker triggers,
-following the existing unknown-token-is-error discipline. The prompt is expanded
+`{issue_body}`, `{issue_url}`, `{issue_labels}`. They live in the shared
+`TriggerVars` struct, so they are *known* tokens that expand to empty outside a
+tracker prompt (a genuinely unknown token still errors). The prompt is expanded
 per-issue at spawn time.
 
 **Session tag.** `SessionState.TrackerIssue` (and `CreateOpts.TrackerIssue`),
@@ -208,7 +209,41 @@ for that reason.
 
 ## Consensus
 
-(none yet — to be reviewed via the ship-it tribunal.)
+Reviewed by an independent three-model tribunal (Claude, Codex, a Cursor model)
+against the implementation. No critical bugs in the core reconcile design; the
+framework reuse and pure-function extraction were endorsed. The following
+findings were folded in before merge:
+
+- **Never reap on a truncated poll.** `gh issue list --limit` is a cap, not a
+  completeness guarantee — an active issue beyond the page would look obsolete and
+  be reaped. `fetchTrackerIssues` now reports whether the read hit the limit, and
+  the executor skips *all* reaps on a truncated pass (spawns are still safe).
+- **`reap = "delete"` can never become a hard purge.** `SoftDelete` with
+  `retention <= 0` produces an already-expired tombstone the purge loop
+  hard-deletes. Config validation now rejects `reap = "delete"` when
+  `[delete] retention <= 0`, and the executor guards it at runtime too.
+- **Starred/system sessions are never reaped in *any* mode.** `SoftDelete`
+  already guarded them; the `stop` path now re-checks `Starred`/`IsSystemSession`
+  under the lock at apply time.
+- **Concurrency accounting is reap-mode aware.** The planner is passed the reap
+  mode so a no-op reap (`reap = "none"`, or `stop` on an already-stopped session)
+  doesn't wrongly free a `max_concurrent` slot.
+- **Dedup survives a restart mid-create.** `trackerSessions` now includes
+  `creating` (a reservation — dedup, don't act) and `errored` (resume) sessions,
+  so a `StatusCreating` session marked `errored` on reload can't be double-spawned.
+- **A cleanly-completed session isn't resurrected.** A session that self-exited
+  with code 0 is not auto-resumed while its issue lingers (avoids a
+  resume/exit loop for one-shot agents).
+- **`overlap = "allow"` is rejected for tracker actions** (concurrent reconciles
+  could double-spawn or reap a stale view); the default `skip` serialises them.
+- **Session names can't collide** — the numeric suffix is always preserved
+  (the trigger-name prefix is truncated instead).
+- **Partial failures surface** — per-item spawn/resume/reap errors are joined and
+  returned so the run records `LastError` instead of reporting a clean reconcile.
+- **Prompt-injection surface documented** — untrusted issue bodies are fed to the
+  agent with no trust gate (unlike PR comments); the docs warn to scope with
+  `active_labels`/`assignee` and keep the sandbox on. An author-trust gate is a
+  noted follow-up (see Open questions).
 
 ## Other Notes
 
@@ -263,5 +298,14 @@ for that reason.
 - **Per-state concurrency lanes** — deferred to #603.
 - **Delivering per-issue events** (spawned/reaped notifications) vs a single
   reconcile summary — v1 delivers the summary only.
+- **Author-trust gate for issue bodies.** v1 feeds the untrusted issue body to
+  the agent with only `active_labels`/`assignee` scoping and a doc warning. A
+  follow-up could reuse the `pr_watch` author-trust config (allowlist / trusted
+  associations) to gate which issues spawn work, closing the prompt-injection
+  surface for public repos.
+- **Server-side vs client-side label filtering.** v1 fetches by state (capped by
+  `limit`) then OR-filters labels client-side, and disables reaping when the fetch
+  is truncated. A follow-up could fetch per-label server-side (or paginate) so the
+  active set is complete even on large backlogs.
 </content>
 </invoke>
