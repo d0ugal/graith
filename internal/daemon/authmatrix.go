@@ -89,6 +89,7 @@ var remoteMessagePolicy = map[string]remotePolicy{
 	"store_list":         remoteHumanRW, // store contents may be sensitive: human + sessions, not guests
 	"store_get":          remoteHumanRW, // reads a document body; same sensitivity as store_list
 	"attach":             remoteHumanRW,
+	"attach_convert":     remoteHumanRW, // convert a headless session to interactive on attach (#1137)
 	"detach":             remoteHumanRW,
 	"resize":             remoteHumanRW,
 	"type":               remoteHumanRW,

@@ -582,6 +582,11 @@ const (
 	// line (issue #1104); a deleted session is removed from state, so its exit
 	// is ignored and never reaches the "session exited" log path.
 	StopReasonDelete = "delete"
+	// StopReasonConvert labels the headless process stop that
+	// ConvertToInteractive performs before relaunching the session as an
+	// interactive PTY (headless convert-on-attach, issue #1075/#1137). The stop
+	// is caused by graith, not a crash, so it must not be attributed as one.
+	StopReasonConvert = "convert"
 )
 
 // mapSessionEndReason maps Claude's raw SessionEnd reason onto one of graith's

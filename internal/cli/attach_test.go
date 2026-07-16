@@ -1,14 +1,28 @@
 package cli
 
 import (
+	"io"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/d0ugal/graith/internal/client"
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/output"
 	"github.com/d0ugal/graith/internal/protocol"
 )
+
+// withDiscardOutput points the package-level out writer at io.Discard so tests
+// that call out.Printf (e.g. confirmConvert's prompt) don't panic on a nil
+// writer or spam test output. Restores the previous writer on cleanup.
+func withDiscardOutput(t *testing.T) {
+	t.Helper()
+
+	orig := out
+	out = output.NewWithWriter(false, io.Discard)
+
+	t.Cleanup(func() { out = orig })
+}
 
 func TestOrderAgents(t *testing.T) {
 	agents := map[string]config.Agent{
@@ -314,5 +328,72 @@ func TestRunAttachByIDRejectsInsideGraithCov(t *testing.T) {
 
 	if !strings.Contains(err.Error(), "nested sessions are not supported") {
 		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// TestConfirmConvertYesFlag: --yes (attachYes) skips the prompt entirely.
+func TestConfirmConvertYesFlag(t *testing.T) {
+	withDiscardOutput(t)
+
+	orig := attachYes
+	attachYes = true
+
+	defer func() { attachYes = orig }()
+
+	if !confirmConvert("braw") {
+		t.Fatal("confirmConvert should return true when --yes is set")
+	}
+}
+
+// TestConfirmConvertPromptAnswers exercises the interactive y/N prompt.
+func TestConfirmConvertPromptAnswers(t *testing.T) {
+	withDiscardOutput(t)
+
+	orig := attachYes
+	attachYes = false
+
+	defer func() { attachYes = orig }()
+
+	tests := []struct {
+		answer string
+		want   bool
+	}{
+		{"y\n", true},
+		{"yes\n", true},
+		{"Y\n", true},
+		{"n\n", false},
+		{"\n", false},
+		{"bide\n", false},
+	}
+
+	for _, tc := range tests {
+		var got bool
+
+		withStdinPipe(t, tc.answer, func() {
+			got = confirmConvert("braw")
+		})
+
+		if got != tc.want {
+			t.Errorf("answer %q: got %v, want %v", tc.answer, got, tc.want)
+		}
+	}
+}
+
+// TestConfirmConvertEOFDeclines: a closed / non-answering stdin is a decline,
+// so a convert never restarts a session unattended.
+func TestConfirmConvertEOFDeclines(t *testing.T) {
+	withDiscardOutput(t)
+
+	orig := attachYes
+	attachYes = false
+
+	defer func() { attachYes = orig }()
+
+	var got bool
+
+	withStdinPipe(t, "", func() { got = confirmConvert("braw") })
+
+	if got {
+		t.Fatal("confirmConvert should decline on EOF")
 	}
 }
