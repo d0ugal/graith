@@ -185,7 +185,11 @@ func (s *MsgStore) Unrelease(id string) (bool, error) {
 	return n > 0, nil
 }
 
-// getJailedLocked is GetJailed without taking the mutex (caller holds it).
+// getJailedLocked runs the single-row jail lookup without taking s.mu. It is
+// safe under a held lock (MarkReleased calls it while holding s.mu) and safe
+// lock-free (GetJailed calls it directly, like the other read-only queries) —
+// the "Locked" suffix means it does no locking of its own, not that a caller
+// must hold the mutex.
 func (s *MsgStore) getJailedLocked(id string) (JailedComment, bool, error) {
 	rows, err := s.db.Query(`SELECT `+jailCols+` FROM jailed_comments WHERE id = ?`, id)
 	if err != nil {
