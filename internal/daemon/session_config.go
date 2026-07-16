@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/d0ugal/graith/internal/agent/transcript"
 	"github.com/d0ugal/graith/internal/approvals"
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/git"
@@ -57,6 +58,14 @@ func (sm *SessionManager) applyConfig(newCfg *config.Config) {
 	if old.Tools != newCfg.Tools {
 		tools.Configure(newCfg.Tools.Resolved())
 		sm.log.Info("config changed", "key", "tools")
+	}
+
+	// Re-apply the transcript scanner buffer caps so a changed [transcript] block
+	// takes effect on reload without a daemon restart (issue #1250). Like the
+	// tools resolver, the caps are process-global, so this runs outside sm.mu.
+	if old.Transcript != newCfg.Transcript {
+		transcript.Configure(newCfg.Transcript.MaxLineBytesOrDefault(), newCfg.Transcript.MaxMetadataLineBytesOrDefault())
+		sm.log.Info("config changed", "key", "transcript")
 	}
 
 	if old.DefaultAgent != newCfg.DefaultAgent {

@@ -17,15 +17,17 @@ import (
 	grpty "github.com/d0ugal/graith/internal/pty"
 )
 
-// maxLineBytes bounds a single stream-json line. A default bufio.Scanner caps
-// tokens at 64KB; stream-json lines carrying large tool outputs or base64
+// defaultMaxLineBytes bounds a single stream-json line. A default bufio.Scanner
+// caps tokens at 64KB; stream-json lines carrying large tool outputs or base64
 // images exceed that, so we raise the limit (matching the transcript reader's
-// 16MiB ceiling in internal/agent/transcript/claude.go).
-const maxLineBytes = 16 * 1024 * 1024
+// 16MiB ceiling in internal/agent/transcript/claude.go). Configurable per
+// session via Opts.MaxLineBytes (issue #1250); this is the fallback default.
+const defaultMaxLineBytes = 16 * 1024 * 1024
 
-// controlTimeout bounds how long a synchronous control request waits for its
-// matching control_response before failing (never blocks forever).
-const controlTimeout = 30 * time.Second
+// defaultControlTimeout bounds how long a synchronous control request waits for
+// its matching control_response before failing (never blocks forever).
+// Configurable via Opts.ControlTimeout (issue #1250).
+const defaultControlTimeout = 30 * time.Second
 
 // Opts configures a headless session launch. It mirrors the fields
 // pty.SessionOpts needs, plus the initial prompt and approval callback.
@@ -37,6 +39,19 @@ type Opts struct {
 	Env        map[string]string
 	LogPath    string
 	MaxLogSize int64
+
+	// Processing limits (issue #1250). Each is optional: a zero/non-positive
+	// value falls back to the matching package default, so direct callers and
+	// tests that leave them unset keep the historical behaviour.
+	//
+	// MaxLineBytes bounds a single stream-json line read from stdout.
+	// ControlTimeout bounds a synchronous control request round-trip.
+	// InterruptTimeout bounds the interrupt control round-trip.
+	// PreviewBytes bounds the scrollback tail rendered by the preview/snapshot.
+	MaxLineBytes     int
+	ControlTimeout   time.Duration
+	InterruptTimeout time.Duration
+	PreviewBytes     int
 
 	// Prompt is the initial turn, sent as a stream-json user message on stdin
 	// right after launch (the control-channel launch takes no positional
@@ -72,6 +87,13 @@ type Session struct {
 
 	controlEnabled bool // launched with the stdin control channel
 	onPermission   func(PermissionRequest) PermissionDecision
+
+	// Resolved processing limits (issue #1250); set once in New from Opts with
+	// package-default fallbacks, then read-only.
+	maxLineBytes     int
+	controlTimeout   time.Duration
+	interruptTimeout time.Duration
+	previewBytes     int
 
 	writeMu        sync.Mutex  // serialises all writes to stdin (NDJSON lines)
 	stdinClosed    atomic.Bool // set once stdin is closed; new writes bail
@@ -171,12 +193,17 @@ func New(opts Opts) (*Session, error) {
 		scrollback:     sb,
 		controlEnabled: opts.Control,
 		onPermission:   opts.OnPermission,
-		status:         StatusActive,
-		createdAt:      time.Now(),
-		pending:        make(map[string]chan controlResult),
-		done:           make(chan struct{}),
-		readDone:       make(chan struct{}),
-		stderrDone:     make(chan struct{}),
+		maxLineBytes:   intOrDefault(opts.MaxLineBytes, defaultMaxLineBytes),
+		controlTimeout: durationOrDefault(opts.ControlTimeout, defaultControlTimeout),
+		interruptTimeout: durationOrDefault(
+			opts.InterruptTimeout, defaultInterruptControlTimeout),
+		previewBytes: intOrDefault(opts.PreviewBytes, defaultScreenPreviewBytes),
+		status:       StatusActive,
+		createdAt:    time.Now(),
+		pending:      make(map[string]chan controlResult),
+		done:         make(chan struct{}),
+		readDone:     make(chan struct{}),
+		stderrDone:   make(chan struct{}),
 	}
 
 	go s.drainStderr(stderr)
@@ -209,7 +236,7 @@ func (s *Session) readLoop(stdout io.Reader) {
 	)
 
 	for {
-		line, err = readLine(r, maxLineBytes)
+		line, err = readLine(r, s.maxLineBytes)
 		if len(line) > 0 {
 			s.handleLine(line)
 		}
@@ -308,11 +335,11 @@ func (s *Session) handlePermission(ev event) {
 
 // --- control protocol -------------------------------------------------------
 
-// interruptControlTimeout bounds the interrupt control round-trip. It is much
-// shorter than controlTimeout: a caller interrupting an agent wants a prompt
+// defaultInterruptControlTimeout bounds the interrupt control round-trip. It is
+// much shorter than the control timeout: a caller interrupting an agent wants a prompt
 // answer, and if the control channel is wedged we want to fall back to SIGINT
 // quickly rather than block the daemon for 30s.
-const interruptControlTimeout = 5 * time.Second
+const defaultInterruptControlTimeout = 5 * time.Second
 
 // Interrupt interrupts the running agent. With the control channel enabled it
 // issues an `interrupt` control request (clean, acknowledged), falling back to a
@@ -322,7 +349,7 @@ const interruptControlTimeout = 5 * time.Second
 // compatibility (the control interrupt is a single acknowledged request).
 func (s *Session) Interrupt(_ int, _ time.Duration) error {
 	if s.controlEnabled && !s.Exited() {
-		if _, err := s.controlWithTimeout(controlSubtype{Subtype: "interrupt"}, interruptControlTimeout); err == nil {
+		if _, err := s.controlWithTimeout(controlSubtype{Subtype: "interrupt"}, s.interruptTimeout); err == nil {
 			return nil
 		}
 		// fall through to SIGINT on any control failure
@@ -357,7 +384,7 @@ func (s *Session) ContextUsage() (json.RawMessage, error) {
 // control sends a control request and waits for its matching response using the
 // default control timeout.
 func (s *Session) control(request any) (json.RawMessage, error) {
-	return s.controlWithTimeout(request, controlTimeout)
+	return s.controlWithTimeout(request, s.controlTimeout)
 }
 
 // controlWithTimeout sends a control request and waits up to timeout for its
@@ -784,7 +811,7 @@ func (s *Session) drainStderr(stderr io.Reader) {
 
 	r := bufio.NewReader(stderr)
 	for {
-		line, err := readLine(r, maxLineBytes)
+		line, err := readLine(r, s.maxLineBytes)
 		if len(line) > 0 {
 			out := append([]byte("[stderr] "), line...)
 			out = append(out, '\n')

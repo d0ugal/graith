@@ -13,8 +13,12 @@ draft: false
 
 ```toml
 [headless]
-experimental = false  # master gate: headless is inert unless this is on
-default      = false  # once enabled, whether new sessions go headless by default
+experimental = false        # master gate: headless is inert unless this is on
+default = false             # once enabled, whether new sessions go headless by default
+max_line_bytes = 16777216   # cap on a single stream-json line (16 MiB)
+control_timeout = "30s"     # how long a control request waits for its response
+interrupt_timeout = "5s"    # interrupt round-trip before falling through to SIGINT
+preview_bytes = 16384       # scrollback tail rendered by the overlay / screen_preview (16 KiB)
 ```
 
 `experimental` is the master switch. While it is off, headless is inert and sessions use the PTY driver. It is gated because the underlying control protocol is undocumented and may change between Claude Code releases. Trigger-spawned headless sessions are not implemented yet; see [Automation → Headless session actions]({{< relref "automation.md#headless-session-actions-planned" >}}).
@@ -25,6 +29,8 @@ v1 is **Claude-only** and **one-shot** (one prompt, run to completion, exit). On
 preserving the conversation, worktree, branch, and environment. Pass `--yes` to
 skip the confirmation. Use `gr logs -f` to inspect a headless session read-only
 without converting it (see [Session Lifecycle → Headless sessions]({{< relref "/docs/sessions.md#headless-sessions" >}})).
+
+The remaining keys are processing limits that rarely need tuning. `max_line_bytes` caps a single stream-json line (large tool outputs and base64 images exceed the 64 KiB scanner default). `control_timeout` bounds how long a synchronous control request waits for its response; `interrupt_timeout` is the much shorter interrupt round-trip before graith falls back to SIGINT. `preview_bytes` bounds the scrollback tail rendered by the overlay preview and the `screen_preview` control message. A zero or non-positive value falls back to the default shown.
 
 A headless session drives Claude Code over its stdin control protocol, giving graith a clean interrupt and inline tool-approval handling. It has no human to answer prompts, so its approval policy must be **non-blocking**: `yolo` auto-allows, a non-blocking `[approvals]` backend decides, and anything that would queue for a human is denied (escalated once to the orchestrator inbox). See [Session Lifecycle → Headless sessions]({{< relref "/docs/sessions.md#headless-sessions" >}}).
 
@@ -194,3 +200,28 @@ remote_pairing_timeout   = "11m"    # wait for the remote human to approve `gr p
 ```
 
 An unset field keeps its built-in default (shown above). A value that is set but unparseable, or that is zero or negative, is rejected at config load. The `remote_*` fields apply only to remote-daemon connections (see [Orchestrator & remote access]({{< relref "/docs/configuration/access.md" >}})); the others apply to the local daemon and attach recovery.
+
+## Migration
+
+`gr migrate` hands a session's conversation to a different agent in place. After starting the target agent, the daemon waits `health_window` to confirm it survived startup before declaring the migration successful; if the new agent exits immediately (a bad auth/config), the migration reverts to the original agent. Raise the window to tolerate a slow agent boot, lower it to revert faster.
+
+```toml
+[migration]
+health_window = "1.5s"  # startup-health confirmation window for the migrated-to agent
+```
+
+An empty, unparseable, or non-positive value falls back to the default (1.5s); a set-but-unparseable or non-positive value is rejected at config load.
+
+## Transcript reading
+
+Migration and cross-agent fork build a neutral Markdown context document from the source agent's on-disk transcript and hand it to the target agent. The `[transcript]` block bounds both the rendered document size and the scanner buffers used to read the transcript files. These rarely need tuning; raise them for unusually large transcripts or individual lines.
+
+```toml
+[transcript]
+max_context_bytes = 262144         # size budget for the rendered context; older turns elided to fit (256 KiB)
+max_tool_output_bytes = 4096       # cap on each rendered tool-output block (4 KiB)
+max_line_bytes = 16777216          # scanner buffer cap for a transcript line when reading turns/usage (16 MiB)
+max_metadata_line_bytes = 4194304  # scanner buffer cap for Codex rollout metadata scans (cwd/id) (4 MiB)
+```
+
+A zero or non-positive value falls back to the default shown; a negative value is rejected at config load. The scanner buffer caps (`max_line_bytes`, `max_metadata_line_bytes`) are applied process-wide and re-read on config reload, so a change takes effect without a daemon restart.

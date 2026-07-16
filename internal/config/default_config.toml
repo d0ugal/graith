@@ -194,6 +194,24 @@ remote_dial_timeout = "10s"       # bounds the TCP dial to a paired remote daemo
 remote_handshake_timeout = "15s"  # bounds the remote handshake + proof-of-possession
 remote_pairing_timeout = "11m"    # how long to wait for the remote human to approve pairing
 
+# Cross-agent conversation migration (`gr migrate`). health_window is how long
+# the daemon waits after starting the target agent to confirm it survived startup
+# before declaring the migration successful; a longer window tolerates a slow
+# agent boot, a shorter one reverts faster. Empty/non-positive => default (issue
+# #1250).
+[migration]
+health_window = "1.5s"    # startup-health confirmation window for the migrated-to agent
+
+# On-disk transcript reader/renderer used by migration and fork to build the
+# neutral context document handed to the target agent (issue #1250). The *_bytes
+# limits bound rendering size and scanner buffers; raise them for very large
+# transcripts or lines. A zero/non-positive value falls back to the default.
+[transcript]
+max_context_bytes = 262144         # size budget for the rendered context; older turns elided to fit (256 KiB)
+max_tool_output_bytes = 4096       # cap on each rendered tool-output block (4 KiB)
+max_line_bytes = 16777216          # scanner buffer cap for a transcript line when reading turns/usage (16 MiB)
+max_metadata_line_bytes = 4194304  # scanner buffer cap for Codex rollout metadata scans (cwd/id) (4 MiB)
+
 # Soft delete: `gr delete` marks a session deleted and keeps its worktree and
 # state for the retention window so it can be recovered with `gr restore`. The
 # daemon purges soft-deleted sessions after the window elapses. `gr purge`
@@ -505,10 +523,15 @@ require_pairing = true    # require per-device pairing for human-level rights; f
 # interactive PTY; graith parses the typed event stream for status and captures
 # the run's cost/token usage. v1 is one-shot, requires a prompt, and is
 # incompatible with the sandbox. Inert unless experimental = true. Per-agent
-# support is `headless_capable`.
-# [headless]
-# experimental = false   # master gate; headless does nothing unless true
-# default      = false   # once enabled, whether new sessions go headless by default
+# support is `headless_capable`. The processing limits (issue #1250) rarely need
+# tuning; a zero/non-positive value falls back to the default shown.
+[headless]
+experimental = false        # master gate; headless does nothing unless true
+default = false             # once enabled, whether new sessions go headless by default
+max_line_bytes = 16777216   # cap on a single stream-json line (16 MiB; large tool outputs/base64)
+control_timeout = "30s"     # how long a control request waits for its control_response
+interrupt_timeout = "5s"    # interrupt round-trip before falling through to SIGINT
+preview_bytes = 16384       # scrollback tail rendered by the overlay/screen_preview (16 KiB)
 
 # Agent definitions. The map key (e.g. "claude") is the agent type name.
 # Each agent needs at minimum: command, args

@@ -179,7 +179,7 @@ func TestReadLineMaxLineBytesNoHang(t *testing.T) {
 	long := strings.Repeat("z", 200*1024)
 	r := bufio.NewReaderSize(strings.NewReader(long+"\n"), 64*1024)
 
-	got, err := readLine(r, maxLineBytes)
+	got, err := readLine(r, defaultMaxLineBytes)
 	if err != nil {
 		t.Fatalf("readLine err = %v, want nil", err)
 	}

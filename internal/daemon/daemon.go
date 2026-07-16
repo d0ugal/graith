@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/d0ugal/graith/internal/agent/transcript"
 	"github.com/d0ugal/graith/internal/atomicfile"
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
@@ -167,6 +168,12 @@ func NewSessionManager(cfg *config.Config, paths config.Paths, log *slog.Logger)
 		startedAt:          time.Now(),
 	}
 	sm.pushDispatch = sm.newPushDispatch()
+
+	// Install the transcript scanner buffer caps process-globally (mirrors
+	// tools.Configure). Reads use these on the migrate/fork/token paths; the
+	// reload path (applyConfig) re-applies them so a changed [transcript] block
+	// takes effect without a daemon restart (issue #1250).
+	transcript.Configure(cfg.Transcript.MaxLineBytesOrDefault(), cfg.Transcript.MaxMetadataLineBytesOrDefault())
 
 	return sm
 }

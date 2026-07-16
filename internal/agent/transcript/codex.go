@@ -305,7 +305,7 @@ func codexRolloutCwd(path string) (string, bool) {
 	defer func() { _ = f.Close() }()
 
 	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	sc.Buffer(make([]byte, 0, 64*1024), maxMetadataLineBytes())
 
 	for i := 0; sc.Scan() && i < 5; i++ { // session_meta is at the top
 		var line codexLine
@@ -334,7 +334,7 @@ func CodexRolloutID(path string) (string, bool) {
 	defer func() { _ = f.Close() }()
 
 	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	sc.Buffer(make([]byte, 0, 64*1024), maxMetadataLineBytes())
 
 	for i := 0; sc.Scan() && i < 5; i++ {
 		var line codexLine
@@ -397,7 +397,7 @@ func (codexReader) usage(path string) (Usage, error) {
 	)
 
 	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+	sc.Buffer(make([]byte, 0, 64*1024), maxLineBytes())
 
 	for sc.Scan() {
 		raw := bytes.TrimSpace(sc.Bytes())
@@ -539,7 +539,7 @@ func (codexReader) read(path string) ([]Turn, int, error) {
 	dropped := 0
 
 	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+	sc.Buffer(make([]byte, 0, 64*1024), maxLineBytes())
 
 	for sc.Scan() {
 		raw := bytes.TrimSpace(sc.Bytes())

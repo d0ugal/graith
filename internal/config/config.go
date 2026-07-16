@@ -61,6 +61,8 @@ type Config struct {
 	Connection       ConnectionConfig   `toml:"connection"`       // [connection] table (issue #1242)
 	TokenAccounting  TokenAccounting    `toml:"token_accounting"` // [token_accounting] table (issue #1244)
 	ResourceMonitor  ResourceMonitor    `toml:"resource_monitor"` // [resource_monitor] table (issue #1244)
+	Migration        MigrationConfig    `toml:"migration"`        // [migration] table (issue #1250)
+	Transcript       TranscriptConfig   `toml:"transcript"`       // [transcript] table (issue #1250)
 }
 
 // ConfigReloadDebounceDefault is the quiet period the config-file watcher waits
@@ -343,9 +345,148 @@ func (c ConnectionConfig) RemotePairingTimeoutDuration() time.Duration {
 // protocol it uses is an SDK-internal contract, so v1 is opt-in and
 // experimental. Default, when Experimental is on, decides whether new sessions
 // go headless without an explicit --headless.
+//
+// The remaining fields make the headless driver's processing limits tunable
+// (issue #1250). Each is optional: an empty/zero/non-positive value falls back
+// to the matching default constant, preserving historical behaviour.
 type HeadlessConfig struct {
 	Experimental bool `toml:"experimental"`
 	Default      bool `toml:"default"`
+	// MaxLineBytes bounds a single stream-json line read from the agent's stdout.
+	// Large tool outputs or base64 images exceed the 64KiB default scanner token,
+	// so the driver raises the cap. 0/negative uses HeadlessMaxLineBytesDefault.
+	MaxLineBytes int `toml:"max_line_bytes"`
+	// ControlTimeout bounds how long a synchronous control request waits for its
+	// matching control_response before failing. Empty/unparseable/non-positive
+	// uses HeadlessControlTimeoutDefault.
+	ControlTimeout string `toml:"control_timeout"`
+	// InterruptTimeout bounds the interrupt control round-trip; it is much shorter
+	// than ControlTimeout because a caller interrupting an agent wants a prompt
+	// fall-through to SIGINT. Empty/unparseable/non-positive uses
+	// HeadlessInterruptTimeoutDefault.
+	InterruptTimeout string `toml:"interrupt_timeout"`
+	// PreviewBytes bounds how much scrollback tail the overlay preview and
+	// screen_preview control message render. 0/negative uses
+	// HeadlessPreviewBytesDefault.
+	PreviewBytes int `toml:"preview_bytes"`
+}
+
+// Headless processing-limit defaults. Each mirrors the fixed constant that
+// governed the behaviour before issue #1250 made the limits configurable.
+const (
+	HeadlessMaxLineBytesDefault     = 16 * 1024 * 1024
+	HeadlessControlTimeoutDefault   = 30 * time.Second
+	HeadlessInterruptTimeoutDefault = 5 * time.Second
+	HeadlessPreviewBytesDefault     = 16 * 1024
+)
+
+// MaxLineBytesOrDefault returns the stream-json line cap, or the default when
+// unset or non-positive.
+func (h HeadlessConfig) MaxLineBytesOrDefault() int {
+	return positiveIntOrDefault(h.MaxLineBytes, HeadlessMaxLineBytesDefault)
+}
+
+// ControlTimeoutDuration returns the control-request timeout, or the default
+// when unset, unparseable, or non-positive.
+func (h HeadlessConfig) ControlTimeoutDuration() time.Duration {
+	return positiveDurationOrDefault(h.ControlTimeout, HeadlessControlTimeoutDefault)
+}
+
+// InterruptTimeoutDuration returns the interrupt round-trip timeout, or the
+// default when unset, unparseable, or non-positive.
+func (h HeadlessConfig) InterruptTimeoutDuration() time.Duration {
+	return positiveDurationOrDefault(h.InterruptTimeout, HeadlessInterruptTimeoutDefault)
+}
+
+// PreviewBytesOrDefault returns the preview tail cap, or the default when unset
+// or non-positive.
+func (h HeadlessConfig) PreviewBytesOrDefault() int {
+	return positiveIntOrDefault(h.PreviewBytes, HeadlessPreviewBytesDefault)
+}
+
+// MigrationHealthWindowDefault is how long Migrate waits to confirm the target
+// agent survived startup before declaring the migration successful, used when
+// [migration] health_window is unset (issue #1250).
+const MigrationHealthWindowDefault = 1500 * time.Millisecond
+
+// MigrationConfig is the [migration] block tuning the cross-agent conversation
+// migration (issue #1250). HealthWindow is optional: empty, unparseable, or
+// non-positive falls back to MigrationHealthWindowDefault.
+type MigrationConfig struct {
+	// HealthWindow is how long Migrate waits to confirm the target agent survived
+	// startup before declaring the migration successful. Empty/unparseable/
+	// non-positive uses MigrationHealthWindowDefault.
+	HealthWindow string `toml:"health_window"`
+}
+
+// HealthWindowDuration returns the migration startup-health window, or the
+// default when unset, unparseable, or non-positive.
+func (m MigrationConfig) HealthWindowDuration() time.Duration {
+	return positiveDurationOrDefault(m.HealthWindow, MigrationHealthWindowDefault)
+}
+
+// Transcript processing-limit defaults. Each mirrors the fixed constant that
+// governed the transcript reader/renderer before issue #1250.
+const (
+	TranscriptMaxContextBytesDefault    = 256 * 1024
+	TranscriptMaxToolOutputBytesDefault = 4 * 1024
+	TranscriptMaxLineBytesDefault       = 16 * 1024 * 1024
+	TranscriptMaxMetadataBytesDefault   = 4 * 1024 * 1024
+)
+
+// TranscriptConfig is the [transcript] block tuning the on-disk agent-transcript
+// reader and renderer used by migration and fork (issue #1250). Every field is
+// optional: a zero/non-positive value falls back to the matching default.
+type TranscriptConfig struct {
+	// MaxContextBytes is the approximate size budget for the rendered migration/
+	// fork context document; older turns are elided to fit. 0/negative uses
+	// TranscriptMaxContextBytesDefault.
+	MaxContextBytes int `toml:"max_context_bytes"`
+	// MaxToolOutputBytes caps each rendered tool-output block. 0/negative uses
+	// TranscriptMaxToolOutputBytesDefault.
+	MaxToolOutputBytes int `toml:"max_tool_output_bytes"`
+	// MaxLineBytes is the scanner buffer cap for a single transcript line while
+	// reading turns or summing usage (large tool outputs / base64 exceed the
+	// 64KiB default). 0/negative uses TranscriptMaxLineBytesDefault.
+	MaxLineBytes int `toml:"max_line_bytes"`
+	// MaxMetadataLineBytes is the scanner buffer cap for the small metadata-only
+	// scans (Codex rollout cwd / session-id lookup). 0/negative uses
+	// TranscriptMaxMetadataBytesDefault.
+	MaxMetadataLineBytes int `toml:"max_metadata_line_bytes"`
+}
+
+// MaxContextBytesOrDefault returns the rendered-context byte budget, or the
+// default when unset or non-positive.
+func (t TranscriptConfig) MaxContextBytesOrDefault() int {
+	return positiveIntOrDefault(t.MaxContextBytes, TranscriptMaxContextBytesDefault)
+}
+
+// MaxToolOutputBytesOrDefault returns the per-tool-output cap, or the default
+// when unset or non-positive.
+func (t TranscriptConfig) MaxToolOutputBytesOrDefault() int {
+	return positiveIntOrDefault(t.MaxToolOutputBytes, TranscriptMaxToolOutputBytesDefault)
+}
+
+// MaxLineBytesOrDefault returns the transcript-line scanner cap, or the default
+// when unset or non-positive.
+func (t TranscriptConfig) MaxLineBytesOrDefault() int {
+	return positiveIntOrDefault(t.MaxLineBytes, TranscriptMaxLineBytesDefault)
+}
+
+// MaxMetadataLineBytesOrDefault returns the metadata-scan scanner cap, or the
+// default when unset or non-positive.
+func (t TranscriptConfig) MaxMetadataLineBytesOrDefault() int {
+	return positiveIntOrDefault(t.MaxMetadataLineBytes, TranscriptMaxMetadataBytesDefault)
+}
+
+// positiveIntOrDefault returns def when n is zero or negative; otherwise n. Used
+// for byte-size limits where a zero/negative value has no sensible meaning.
+func positiveIntOrDefault(n, def int) int {
+	if n <= 0 {
+		return def
+	}
+
+	return n
 }
 
 type Overlay struct {
@@ -3156,6 +3297,46 @@ func (c *Config) Validate() error {
 			errs = append(errs, fmt.Errorf("%s %q: %w", f.name, f.val, err))
 		} else if d <= 0 {
 			errs = append(errs, fmt.Errorf("%s %q: must be greater than zero", f.name, f.val))
+		}
+	}
+
+	// [headless] control_timeout / interrupt_timeout and [migration]
+	// health_window: a non-empty but unparseable or non-positive duration must
+	// fail loudly rather than silently falling back to its accessor default
+	// (issue #1250). A zero/negative timeout or health window has no sensible
+	// meaning for these round-trips/waits.
+	for _, f := range []struct{ name, val string }{
+		{"headless.control_timeout", c.Headless.ControlTimeout},
+		{"headless.interrupt_timeout", c.Headless.InterruptTimeout},
+		{"migration.health_window", c.Migration.HealthWindow},
+	} {
+		if strings.TrimSpace(f.val) == "" {
+			continue
+		}
+
+		if d, err := ParseDurationWithDays(f.val); err != nil {
+			errs = append(errs, fmt.Errorf("%s %q: %w", f.name, f.val, err))
+		} else if d <= 0 {
+			errs = append(errs, fmt.Errorf("%s %q: must be a positive duration", f.name, f.val))
+		}
+	}
+
+	// [headless] and [transcript] byte-size limits: a negative value is a config
+	// error (a zero means "use the default"). Guards against a typo silently
+	// disabling a safety cap (issue #1250).
+	for _, f := range []struct {
+		name string
+		val  int
+	}{
+		{"headless.max_line_bytes", c.Headless.MaxLineBytes},
+		{"headless.preview_bytes", c.Headless.PreviewBytes},
+		{"transcript.max_context_bytes", c.Transcript.MaxContextBytes},
+		{"transcript.max_tool_output_bytes", c.Transcript.MaxToolOutputBytes},
+		{"transcript.max_line_bytes", c.Transcript.MaxLineBytes},
+		{"transcript.max_metadata_line_bytes", c.Transcript.MaxMetadataLineBytes},
+	} {
+		if f.val < 0 {
+			errs = append(errs, fmt.Errorf("%s %d: must not be negative", f.name, f.val))
 		}
 	}
 

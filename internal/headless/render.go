@@ -7,19 +7,21 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"time"
 
 	grpty "github.com/d0ugal/graith/internal/pty"
 )
 
-// screenPreviewBytes bounds how much scrollback tail the preview/snapshot
-// renders — enough for a useful glimpse, not the whole log.
-const screenPreviewBytes = 16 * 1024
+// defaultScreenPreviewBytes bounds how much scrollback tail the preview/snapshot
+// renders — enough for a useful glimpse, not the whole log. Configurable per
+// session via Opts.PreviewBytes (issue #1250); this is the fallback default.
+const defaultScreenPreviewBytes = 16 * 1024
 
 // ScreenPreview returns a plain-text tail of the rendered scrollback. A
 // headless session has no terminal screen emulator, so the overlay preview and
 // the screen_preview control message degrade to the recent rendered output.
 func (s *Session) ScreenPreview() string {
-	tail, err := s.scrollback.TailBytes(screenPreviewBytes)
+	tail, err := s.scrollback.TailBytes(int64(s.previewBytes))
 	if err != nil {
 		return ""
 	}
@@ -182,4 +184,24 @@ func controlToolName(raw json.RawMessage) string {
 
 func asExitError(err error, target **exec.ExitError) bool {
 	return errors.As(err, target)
+}
+
+// intOrDefault returns def when n is zero or negative; otherwise n. Used to
+// resolve optional byte-size limits from Opts (issue #1250).
+func intOrDefault(n, def int) int {
+	if n <= 0 {
+		return def
+	}
+
+	return n
+}
+
+// durationOrDefault returns def when d is zero or negative; otherwise d. Used to
+// resolve optional timeouts from Opts (issue #1250).
+func durationOrDefault(d, def time.Duration) time.Duration {
+	if d <= 0 {
+		return def
+	}
+
+	return d
 }
