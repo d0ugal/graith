@@ -660,9 +660,21 @@ Anthropic ships and tests. Rejected.
    `gr new --headless` (validated against Claude at creation, no silent fallback),
    `[headless] experimental`/`default`, `[agents.*] headless_capable`, selection
    at the five launch sites.
-4. **Interrupt + approvals over control protocol — ~3d.** `interrupt`; inbound
-   `can_use_tool` → existing approval decision logic; `yolo` auto-allow; the
-   non-blocking-backend rule (deny/timeout instead of a `human` hang).
+4. **Interrupt + approvals over control protocol — ~3d.** *(Implemented, issue
+   #1136.)* `interrupt`; inbound `can_use_tool` → existing approval decision
+   logic (`SubmitHeadlessApproval`); `yolo` auto-allow; the non-blocking-backend
+   rule (deny + one-time orchestrator escalation instead of a `human` hang). The
+   launch turns on the control channel (`--input-format stream-json
+   --permission-prompt-tool stdio`), delivers the prompt as an initial stdin user
+   message, and closes stdin on the terminal `result` so the one-shot process
+   still exits. **Correction from the original sketch, pinned to claude 2.1.211:**
+   `--permission-prompt-tool` is a valid *hidden* flag; and control-frame
+   request-ids are *asymmetric* — an inbound `control_request` carries
+   `request_id` at the top level, but a `control_response` nests `request_id` and
+   a `success`/`error` subtype inside its `response` object (payload one level
+   deeper). A guarded real-Claude test (`GRAITH_HEADLESS_REAL_CLAUDE=1`) exercises
+   the full round-trip (prompt → `can_use_tool` → allow → tool runs → clean
+   `result` → exit).
 5. **Convert-to-interactive on attach — ~4d.** Detect headless target,
    confirmation prompt, transactional driver swap (`interrupt` → settle → close →
    `--resume` in PTY, atomic under lock with rollback), flip `DriverKind`. New

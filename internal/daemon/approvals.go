@@ -9,6 +9,7 @@ import (
 
 	"github.com/d0ugal/graith/internal/approvals"
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/headless"
 	"github.com/d0ugal/graith/internal/protocol"
 )
 
@@ -111,6 +112,113 @@ func (sm *SessionManager) SubmitApproval(ctx context.Context, req protocol.Appro
 		sm.cancelApproval(req.RequestID)
 		return protocol.ApprovalDecisionMsg{Decision: "allow"}
 	}
+}
+
+// headlessPermissionFunc returns the OnPermission callback a headless session
+// uses to answer inbound can_use_tool control requests. It bridges the headless
+// PermissionRequest/Decision types to the daemon's approval decision logic via
+// SubmitHeadlessApproval (issue #1136).
+func (sm *SessionManager) headlessPermissionFunc(sessionID string) func(headless.PermissionRequest) headless.PermissionDecision {
+	return func(req headless.PermissionRequest) headless.PermissionDecision {
+		decision := sm.SubmitHeadlessApproval(context.Background(), protocol.ApprovalRequestMsg{
+			RequestID: req.RequestID,
+			SessionID: sessionID,
+			ToolName:  req.ToolName,
+			ToolInput: string(req.Input),
+		})
+
+		return headless.PermissionDecision{
+			Allow:  approvals.Normalise(decision.Decision) == approvals.DecisionAllow,
+			Reason: decision.Reason,
+		}
+	}
+}
+
+// SubmitHeadlessApproval resolves a can_use_tool decision for a headless session
+// over the control protocol. Unlike SubmitApproval it never queues for a human:
+// a headless session is fire-and-forget, so a policy that would defer to a human
+// is resolved by *denying* (the non-blocking-backend rule from the design),
+// escalating once to the orchestrator inbox so the deny is visible.
+//
+// Resolution order mirrors SubmitApproval's non-human path: a yolo session
+// auto-allows via the auto backend; a disabled approval gate allows; a
+// configured non-blocking backend (auto/external/builtin/localmost) decides;
+// anything that would fall through to the human queue is denied.
+func (sm *SessionManager) SubmitHeadlessApproval(ctx context.Context, req protocol.ApprovalRequestMsg) protocol.ApprovalDecisionMsg {
+	sm.mu.RLock()
+	approvalsCfg := sm.cfg.Approvals
+
+	yolo := false
+	if sess, ok := sm.state.Sessions[req.SessionID]; ok {
+		yolo = sess.Yolo
+	}
+
+	sm.mu.RUnlock()
+
+	if yolo {
+		if decision, handled := sm.decideWithBackend(ctx, req, approvals.BackendAuto, approvalsCfg); handled {
+			sm.log.Info("headless approval auto-decided (yolo)",
+				"request_id", req.RequestID, "session", req.SessionID,
+				"tool", req.ToolName, "decision", decision.Decision)
+
+			return decision
+		}
+	}
+
+	// Gate disabled → allow (the operator opted out of gating). Mirrors
+	// SubmitApproval; for headless there is no injected hook to omit, but the
+	// semantics are the same.
+	if !approvalsCfg.HookEnabled() {
+		return protocol.ApprovalDecisionMsg{Decision: approvals.DecisionAllow}
+	}
+
+	if decision, handled := sm.tryApprovalBackend(ctx, req, approvalsCfg); handled {
+		return decision
+	}
+
+	// Non-blocking rule: a headless session has no human to answer, so a policy
+	// that would queue for one is denied rather than left to hang. Surface it
+	// once to the orchestrator so a silent deny doesn't strand the agent.
+	//nolint:contextcheck // the escalation is a durable orchestrator notice whose delivery (and any auto-resume) must outlive this approval request, so it deliberately does not inherit the request ctx.
+	sm.escalateHeadlessDenyOnce(req)
+
+	return protocol.ApprovalDecisionMsg{
+		Decision: approvals.DecisionBlock,
+		Reason:   "headless session: tool approval requires a human, which a headless session has none of — denied (configure a non-blocking approvals backend or yolo)",
+	}
+}
+
+// escalateHeadlessDenyOnce posts a one-time notice to the orchestrator inbox the
+// first time a headless session's tool approval is denied for want of a
+// non-blocking backend. Escalating once per session avoids flooding the inbox
+// when an agent retries the same blocked tool.
+func (sm *SessionManager) escalateHeadlessDenyOnce(req protocol.ApprovalRequestMsg) {
+	sm.mu.Lock()
+
+	if sm.headlessEscalated[req.SessionID] {
+		sm.mu.Unlock()
+
+		return
+	}
+
+	sm.headlessEscalated[req.SessionID] = true
+
+	sessName := req.SessionID
+	if sess, ok := sm.state.Sessions[req.SessionID]; ok && sess.Name != "" {
+		sessName = sess.Name
+	}
+
+	orchID := sm.findOrchestratorID()
+	sm.mu.Unlock()
+
+	if orchID == "" {
+		return
+	}
+
+	body := fmt.Sprintf(
+		"Headless session %q was denied a %q tool call: its approval policy would need a human, which headless sessions can't wait on. Set a non-blocking approvals backend (auto/external) or run it yolo.",
+		sessName, req.ToolName)
+	_ = sm.notifyFromDaemon(orchID, body)
 }
 
 // RespondToApproval delivers a user decision to a waiting approval request.

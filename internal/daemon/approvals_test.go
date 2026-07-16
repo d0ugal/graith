@@ -546,3 +546,148 @@ func TestApprovalsConfigDirPrefersConfigOverride(t *testing.T) {
 		t.Errorf("approvalsConfigDir() with blank override = %q, want %q (should fall back)", got, want)
 	}
 }
+
+// --- headless (non-blocking) approvals (issue #1136) ------------------------
+
+// TestSubmitHeadlessApprovalYoloAllows: a yolo headless session auto-allows
+// every can_use_tool via the auto backend, never queuing.
+func TestSubmitHeadlessApprovalYoloAllows(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	sm.mu.Lock()
+	sm.state.Sessions["braw"] = &SessionState{Name: "bonnie-session", Yolo: true}
+	sm.mu.Unlock()
+
+	decision := sm.SubmitHeadlessApproval(context.Background(), protocol.ApprovalRequestMsg{
+		RequestID: "neep", SessionID: "braw", ToolName: "Bash",
+	})
+
+	if decision.Decision != "allow" {
+		t.Fatalf("yolo headless session should allow, got %q (%s)", decision.Decision, decision.Reason)
+	}
+}
+
+// TestSubmitHeadlessApprovalGateDisabledAllows: with the approval gate off, a
+// headless session allows (the operator opted out of gating).
+func TestSubmitHeadlessApprovalGateDisabledAllows(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	disabled := false
+	sm.cfg.Approvals.Enabled = &disabled
+
+	sm.mu.Lock()
+	sm.state.Sessions["braw"] = &SessionState{Name: "bonnie-session"}
+	sm.mu.Unlock()
+
+	decision := sm.SubmitHeadlessApproval(context.Background(), protocol.ApprovalRequestMsg{
+		RequestID: "neep", SessionID: "braw", ToolName: "Bash",
+	})
+
+	if decision.Decision != "allow" {
+		t.Fatalf("disabled gate should allow, got %q", decision.Decision)
+	}
+}
+
+// TestSubmitHeadlessApprovalAutoBackendAllows: an explicit non-blocking auto
+// backend decides without a human.
+func TestSubmitHeadlessApprovalAutoBackendAllows(t *testing.T) {
+	sm := newTestSessionManager(t)
+	sm.cfg.Approvals.Backend = "auto"
+
+	sm.mu.Lock()
+	sm.state.Sessions["braw"] = &SessionState{Name: "bonnie-session"}
+	sm.mu.Unlock()
+
+	decision := sm.SubmitHeadlessApproval(context.Background(), protocol.ApprovalRequestMsg{
+		RequestID: "neep", SessionID: "braw", ToolName: "Bash",
+	})
+
+	if decision.Decision != "allow" {
+		t.Fatalf("auto backend should allow, got %q", decision.Decision)
+	}
+}
+
+// TestSubmitHeadlessApprovalNonBlockingDeny: the default (prompt) backend would
+// queue for a human. A headless session has none, so it must DENY promptly
+// rather than block — the non-blocking-backend rule. This test would hang under
+// the interactive SubmitApproval; it must return immediately here.
+func TestSubmitHeadlessApprovalNonBlockingDeny(t *testing.T) {
+	sm := newTestSessionManager(t)
+	// Default backend resolves to prompt (human queue).
+
+	sm.mu.Lock()
+	sm.state.Sessions["braw"] = &SessionState{Name: "bonnie-session"}
+	sm.mu.Unlock()
+
+	done := make(chan protocol.ApprovalDecisionMsg, 1)
+	go func() {
+		done <- sm.SubmitHeadlessApproval(context.Background(), protocol.ApprovalRequestMsg{
+			RequestID: "neep", SessionID: "braw", ToolName: "Bash",
+		})
+	}()
+
+	select {
+	case decision := <-done:
+		if decision.Decision != "block" {
+			t.Fatalf("headless human-queue resolution should deny, got %q", decision.Decision)
+		}
+
+		if !strings.Contains(decision.Reason, "human") {
+			t.Fatalf("deny reason should explain the human-backend rule, got %q", decision.Reason)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("SubmitHeadlessApproval blocked — it must never queue for a human")
+	}
+}
+
+// TestSubmitHeadlessApprovalEscalatesOnce: a non-blocking deny posts exactly one
+// notice to the orchestrator inbox per session, even across repeated denies.
+func TestSubmitHeadlessApprovalEscalatesOnce(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	// Use a per-test DB so the assertion isn't polluted by messages left by
+	// earlier runs (sm.paths.MessagesDB is not run-isolated).
+	store, err := NewMsgStore(filepath.Join(t.TempDir(), "messages.db"))
+	if err != nil {
+		t.Fatalf("NewMsgStore: %v", err)
+	}
+
+	t.Cleanup(func() { _ = store.Close() })
+
+	sm.messages = store
+
+	sm.mu.Lock()
+	sm.state.Sessions["ben"] = &SessionState{Name: "ben-orch", SystemKind: SystemKindOrchestrator}
+	sm.state.Sessions["braw"] = &SessionState{Name: "bonnie-session"}
+	sm.mu.Unlock()
+
+	for range 3 {
+		sm.SubmitHeadlessApproval(context.Background(), protocol.ApprovalRequestMsg{
+			RequestID: "neep", SessionID: "braw", ToolName: "Write",
+		})
+	}
+
+	msgs, err := store.Read("inbox:ben", "ben", false, "")
+	if err != nil {
+		t.Fatalf("Read orchestrator inbox: %v", err)
+	}
+
+	// Count only the escalation notices (the inbox may also carry resume-path
+	// noise for the driver-less test orchestrator). Exactly one proves the
+	// once-per-session guard across the three denies.
+	var escalations int
+
+	for _, m := range msgs {
+		if strings.Contains(m.Body, "was denied") && strings.Contains(m.Body, "bonnie-session") {
+			escalations++
+
+			if !strings.Contains(m.Body, "Write") {
+				t.Fatalf("escalation body missing tool name: %q", m.Body)
+			}
+		}
+	}
+
+	if escalations != 1 {
+		t.Fatalf("expected exactly one escalation across repeated denies, got %d", escalations)
+	}
+}

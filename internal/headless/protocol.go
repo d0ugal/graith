@@ -3,17 +3,20 @@
 // parses the typed event stream for status and the terminal result cost/usage
 // envelope. See docs/design/2026-07-13-headless-stream-json-design.md (#1075).
 //
-// v1 runs the validated one-shot form: a positional `-p <prompt>` with
-// stream-json output, which Claude runs to a terminal result and exits.
-// The reader (event → status, result envelope, scrollback rendering) is the
-// live v1 surface. The stdin *control protocol* here (interrupt,
-// get_context_usage, can_use_tool approvals) additionally requires
-// `--input-format stream-json`, which v1 does not pass — so those control paths
-// are present but dormant until the deferred bidirectional-control phase wires
-// them. The control protocol is an SDK-internal contract, not a documented CLI
-// API, so everything is written defensively (unknown message types ignored,
+// v1 runs the one-shot control-channel form: `claude -p --output-format
+// stream-json --input-format stream-json --verbose --permission-prompt-tool
+// stdio`. The prompt is delivered as an initial stdin user message (not a
+// positional arg), the stdin channel stays open for the turn so graith can
+// issue an `interrupt` control request and answer inbound `can_use_tool`
+// permission asks, and stdin is closed on the terminal `result` so the process
+// exits (preserving one-shot semantics). See issue #1136 (Phase 4).
+//
+// The control protocol is an SDK-internal contract, not a documented CLI API,
+// so everything is written defensively (unknown message types ignored,
 // malformed data lines skipped) and the whole feature is gated behind an
-// experimental flag by the daemon.
+// experimental flag by the daemon. The wire shapes here are pinned to the forms
+// empirically verified against claude 2.1.211 — notably the *asymmetric*
+// request-id placement (see below).
 package headless
 
 import (
@@ -35,6 +38,13 @@ const (
 
 // event is a single stream-json line. Only the fields graith consumes are
 // decoded; the rest of each line is kept raw for rendering.
+//
+// Control-frame request ids are ASYMMETRIC (verified against claude 2.1.211):
+//   - An inbound control_request (CLI→graith, e.g. can_use_tool) carries
+//     request_id at the TOP LEVEL — this RequestID field.
+//   - A control_response (CLI→graith, e.g. the interrupt reply) nests
+//     request_id (and a success/error subtype) INSIDE "response"; see
+//     controlResponse below, decoded from the Response raw field.
 type event struct {
 	Type      string          `json:"type"`
 	Subtype   string          `json:"subtype"`
@@ -50,10 +60,34 @@ type event struct {
 	Usage       json.RawMessage `json:"usage"`
 	ResultText  string          `json:"result"`
 
-	// control protocol fields (type == "control_request"/"control_response")
+	// control protocol fields (type == "control_request"/"control_response").
+	// RequestID is the top-level id of an inbound control_request; a
+	// control_response's id lives inside Response (see controlResponse).
 	RequestID string          `json:"request_id"`
 	Request   json.RawMessage `json:"request"`
 	Response  json.RawMessage `json:"response"`
+}
+
+// controlResponse is the CLI's reply to a control request, decoded from an
+// event's "response" object. request_id and the protocol-level success/error
+// subtype are nested here (NOT at the event top level); the actual payload is
+// one level deeper in Payload (e.g. {"still_queued":[]} for interrupt).
+//
+//	{"type":"control_response","response":{"subtype":"success",
+//	 "request_id":"req-1","response":{...payload...}}}
+type controlResponse struct {
+	Subtype   string          `json:"subtype"` // "success" | "error"
+	RequestID string          `json:"request_id"`
+	Payload   json.RawMessage `json:"response"`
+	Error     string          `json:"error"`
+}
+
+// canUseToolRequest is the body of an inbound can_use_tool control request: the
+// CLI asking graith to approve a tool call.
+type canUseToolRequest struct {
+	Subtype  string          `json:"subtype"`
+	ToolName string          `json:"tool_name"`
+	Input    json.RawMessage `json:"input"`
 }
 
 // assistantMessage is the nested `message` of an assistant event, decoded only

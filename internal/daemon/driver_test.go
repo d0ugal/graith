@@ -130,11 +130,16 @@ func TestHeadlessCapableEnabled(t *testing.T) {
 }
 
 func TestHeadlessArgs(t *testing.T) {
-	// "braw" stands in for the task prompt; agent args carry the session id.
-	got := headlessArgs([]string{"--session-id", "canny"}, "review the braw diff")
+	// The prompt is no longer positional (it is delivered as a stdin user
+	// message); the control-channel launch flags precede the agent args, which
+	// carry the session id.
+	got := headlessArgs([]string{"--session-id", "canny"})
 	want := []string{
-		"-p", "review the braw diff",
-		"--output-format", "stream-json", "--verbose",
+		"-p",
+		"--output-format", "stream-json",
+		"--input-format", "stream-json",
+		"--verbose",
+		"--permission-prompt-tool", "stdio",
 		"--session-id", "canny",
 	}
 
@@ -142,9 +147,13 @@ func TestHeadlessArgs(t *testing.T) {
 		t.Fatalf("headlessArgs = %v, want %v", got, want)
 	}
 
-	// The prompt must come through as a single argv element (never re-split),
-	// so a prompt with spaces stays intact.
-	if got[1] != "review the braw diff" {
-		t.Fatalf("prompt arg = %q, want it intact", got[1])
+	// The control channel and stdio permission routing are load-bearing for
+	// Phase 4 (interrupt + approvals): assert both flags are present.
+	if !slices.Contains(got, "--input-format") {
+		t.Fatal("headlessArgs must enable the stdin control channel (--input-format stream-json)")
+	}
+
+	if !slices.Contains(got, "--permission-prompt-tool") {
+		t.Fatal("headlessArgs must route permissions over stdio (--permission-prompt-tool stdio)")
 	}
 }

@@ -28,7 +28,7 @@ func newBareSession(t *testing.T) *Session {
 		id:         "braw",
 		scrollback: sb,
 		status:     StatusActive,
-		pending:    make(map[string]chan json.RawMessage),
+		pending:    make(map[string]chan controlResult),
 		done:       make(chan struct{}),
 		readDone:   make(chan struct{}),
 	}
@@ -237,21 +237,37 @@ func TestDetachClearsAllWriters(t *testing.T) {
 	}
 }
 
-func TestDeliverResponse(t *testing.T) {
+// controlResponseLine builds the CLI's nested control_response wire form: the
+// request_id and success/error subtype are inside "response", with the payload
+// one level deeper (matching claude 2.1.211).
+func controlResponseLine(subtype, id, payload string) json.RawMessage {
+	inner := payload
+	if inner == "" {
+		inner = "{}"
+	}
+
+	return json.RawMessage(`{"subtype":"` + subtype + `","request_id":"` + id + `","response":` + inner + `}`)
+}
+
+func TestDeliverControlResponse(t *testing.T) {
 	t.Parallel()
 
 	s := newBareSession(t)
 
-	ch := make(chan json.RawMessage, 1)
+	ch := make(chan controlResult, 1)
 	s.pending["req-1"] = ch
 
-	body := json.RawMessage(`{"ok":true}`)
-	s.deliverResponse("req-1", body)
+	s.deliverControlResponse(controlResponseLine("success", "req-1", `{"ok":true}`))
 
 	select {
 	case got := <-ch:
-		if string(got) != string(body) {
-			t.Fatalf("delivered %s, want %s", got, body)
+		payload, err := got.unwrap()
+		if err != nil {
+			t.Fatalf("unwrap: %v", err)
+		}
+
+		if string(payload) != `{"ok":true}` {
+			t.Fatalf("delivered payload %s, want {\"ok\":true}", payload)
 		}
 	default:
 		t.Fatal("response was not delivered to the waiter")
@@ -262,22 +278,40 @@ func TestDeliverResponse(t *testing.T) {
 	}
 }
 
-func TestDeliverResponseEmptyIDMarksDegraded(t *testing.T) {
+func TestDeliverControlResponseErrorSubtype(t *testing.T) {
 	t.Parallel()
 
 	s := newBareSession(t)
-	s.deliverResponse("", json.RawMessage(`{}`))
 
-	if !s.Snapshot().Degraded {
-		t.Fatal("empty request id should mark the session degraded")
+	ch := make(chan controlResult, 1)
+	s.pending["req-1"] = ch
+
+	// An error subtype must surface as an error to the waiter, not a payload.
+	s.deliverControlResponse(json.RawMessage(`{"subtype":"error","request_id":"req-1","error":"thrawn"}`))
+
+	res := <-ch
+	if _, err := res.unwrap(); err == nil {
+		t.Fatal("error subtype should unwrap to an error")
 	}
 }
 
-func TestDeliverResponseUnmatchedIDTolerated(t *testing.T) {
+func TestDeliverControlResponseEmptyIDMarksDegraded(t *testing.T) {
 	t.Parallel()
 
 	s := newBareSession(t)
-	s.deliverResponse("nae-such", json.RawMessage(`{}`)) // must not panic
+	// A nested response missing request_id is a malformed control frame.
+	s.deliverControlResponse(json.RawMessage(`{"subtype":"success","response":{}}`))
+
+	if !s.Snapshot().Degraded {
+		t.Fatal("missing request id should mark the session degraded")
+	}
+}
+
+func TestDeliverControlResponseUnmatchedIDTolerated(t *testing.T) {
+	t.Parallel()
+
+	s := newBareSession(t)
+	s.deliverControlResponse(controlResponseLine("success", "nae-such", "")) // must not panic
 
 	if s.Snapshot().Degraded {
 		t.Fatal("an unmatched id is tolerated, not degraded")
@@ -288,7 +322,7 @@ func TestControlAfterExitErrors(t *testing.T) {
 	t.Parallel()
 
 	s := &Session{
-		pending:  make(map[string]chan json.RawMessage),
+		pending:  make(map[string]chan controlResult),
 		done:     make(chan struct{}),
 		readDone: make(chan struct{}),
 		exited:   true,
@@ -549,9 +583,11 @@ func TestEndToEndControlRoundTrip(t *testing.T) {
 	t.Parallel()
 
 	// The fake reads graith's control_request, then replies with a matching
-	// control_response. The first control request graith sends is deterministic
-	// ("req-1"), which lets the fake reply without parsing the id.
-	script := `IFS= read -r line; printf '%s\n' '{"type":"control_response","request_id":"req-1","response":{"tokens":42}}'`
+	// control_response in the real NESTED shape (request_id + subtype inside
+	// "response", payload one level deeper). The first control request graith
+	// sends is deterministic ("req-1"), which lets the fake reply without
+	// parsing the id.
+	script := `IFS= read -r line; printf '%s\n' '{"type":"control_response","response":{"subtype":"success","request_id":"req-1","response":{"tokens":42}}}'`
 
 	s := startFake(t, script, nil)
 
@@ -561,10 +597,120 @@ func TestEndToEndControlRoundTrip(t *testing.T) {
 	}
 
 	if !strings.Contains(string(resp), "42") {
-		t.Fatalf("control response = %s, want it to contain 42", resp)
+		t.Fatalf("control response payload = %s, want it to contain 42", resp)
 	}
 
 	waitDone(t, s, 10*time.Second)
+}
+
+func TestEndToEndControlErrorResponse(t *testing.T) {
+	t.Parallel()
+
+	// A protocol-level error subtype must surface as an error from the control
+	// call, not a nil payload.
+	script := `IFS= read -r line; printf '%s\n' '{"type":"control_response","response":{"subtype":"error","request_id":"req-1","error":"dreich"}}'`
+
+	s := startFake(t, script, nil)
+
+	if _, err := s.ContextUsage(); err == nil {
+		t.Fatal("ContextUsage should error when the CLI returns an error subtype")
+	}
+
+	waitDone(t, s, 10*time.Second)
+}
+
+func TestControlInterruptOverChannel(t *testing.T) {
+	t.Parallel()
+
+	// With the control channel enabled, Interrupt issues an `interrupt` control
+	// request. The fake echoes graith's request to stderr (→ scrollback,
+	// verbatim) and replies with a matching nested control_response, so we can
+	// assert both that graith sent it and that it round-tripped without falling
+	// back to a signal.
+	script := `IFS= read -r line; printf 'SENT %s\n' "$line" >&2; ` +
+		`printf '%s\n' '{"type":"control_response","response":{"subtype":"success","request_id":"req-1","response":{"still_queued":[]}}}'`
+
+	s, err := New(Opts{
+		ID:      "canny",
+		Command: "sh",
+		Args:    []string{"-c", script},
+		Dir:     t.TempDir(),
+		LogPath: filepath.Join(t.TempDir(), "scroll.log"),
+		Control: true,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	t.Cleanup(s.Close)
+
+	if err := s.Interrupt(1, time.Second); err != nil {
+		t.Fatalf("Interrupt over the control channel: %v", err)
+	}
+
+	waitDone(t, s, 10*time.Second)
+
+	if preview := s.ScreenPreview(); !strings.Contains(preview, `"subtype":"interrupt"`) {
+		t.Fatalf("expected an interrupt control_request in scrollback:\n%s", preview)
+	}
+
+	if s.Snapshot().Degraded {
+		t.Fatal("a clean interrupt round-trip should not be degraded")
+	}
+}
+
+func TestInterruptFallsBackToSignalWithoutControl(t *testing.T) {
+	t.Parallel()
+
+	// A session launched WITHOUT the control channel (Control:false) has no
+	// stdin control path, so Interrupt must SIGINT the process group. A `sleep`
+	// with a SIGINT trap that prints then exits proves the signal landed.
+	s := startFake(t, `trap 'printf "INT\n"; exit 0' INT; sleep 30`, nil)
+
+	// Give the trap a moment to install before signalling.
+	time.Sleep(200 * time.Millisecond)
+
+	if err := s.Interrupt(1, time.Second); err != nil {
+		t.Fatalf("Interrupt (signal path): %v", err)
+	}
+
+	waitDone(t, s, 10*time.Second)
+
+	if !s.Exited() {
+		t.Fatal("session should have exited after a SIGINT interrupt")
+	}
+}
+
+func TestClosesStdinOnResult(t *testing.T) {
+	t.Parallel()
+
+	// With the control channel, stdin is held open for the turn then closed on
+	// the terminal result so the CLI sees EOF and exits. This fake blocks
+	// reading stdin *after* emitting the result; it can only terminate once
+	// graith closes stdin (read returns EOF), proving close-on-result fired.
+	script := `printf '%s\n' '{"type":"result","is_error":false,"num_turns":1,"result":"bonnie"}'; ` +
+		`IFS= read -r _ || true`
+
+	s, err := New(Opts{
+		ID:      "braw",
+		Command: "sh",
+		Args:    []string{"-c", script},
+		Dir:     t.TempDir(),
+		LogPath: filepath.Join(t.TempDir(), "scroll.log"),
+		Control: true,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	t.Cleanup(s.Close)
+
+	waitDone(t, s, 10*time.Second)
+
+	// After the result, further writes must fail (stdin is closed).
+	if err := s.WriteInput([]byte("too late")); err == nil {
+		t.Fatal("WriteInput after result should fail: stdin is closed")
+	}
 }
 
 func TestScrollbackFile(t *testing.T) {

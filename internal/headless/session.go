@@ -26,7 +26,7 @@ const maxLineBytes = 16 * 1024 * 1024
 const controlTimeout = 30 * time.Second
 
 // Opts configures a headless session launch. It mirrors the fields
-// pty.SessionOpts needs, plus the approval callback.
+// pty.SessionOpts needs, plus the initial prompt and approval callback.
 type Opts struct {
 	ID         string
 	Command    string
@@ -35,6 +35,17 @@ type Opts struct {
 	Env        map[string]string
 	LogPath    string
 	MaxLogSize int64
+
+	// Prompt is the initial turn, sent as a stream-json user message on stdin
+	// right after launch (the control-channel launch takes no positional
+	// prompt). Empty is allowed but a one-shot run then has nothing to do.
+	Prompt string
+
+	// Control reports whether the process was launched with the stdin control
+	// channel (`--input-format stream-json`). When true, Interrupt issues an
+	// `interrupt` control request and stdin is closed on the terminal result so
+	// the one-shot process exits; when false, Interrupt falls back to SIGINT.
+	Control bool
 
 	// OnPermission is invoked for each inbound can_use_tool request. If nil,
 	// every tool request is denied (fail-closed — a headless session must not
@@ -52,9 +63,12 @@ type Session struct {
 	stdin      io.WriteCloser
 	scrollback *grpty.Scrollback
 
-	onPermission func(PermissionRequest) PermissionDecision
+	controlEnabled bool // launched with the stdin control channel
+	onPermission   func(PermissionRequest) PermissionDecision
 
-	writeMu sync.Mutex // serialises all writes to stdin (NDJSON lines)
+	writeMu        sync.Mutex // serialises all writes to stdin (NDJSON lines)
+	stdinClosed    bool       // set under writeMu once stdin is closed
+	stdinCloseOnce sync.Once  // one-shot: close stdin on the terminal result
 
 	createdAt time.Time // set once at New; immutable
 
@@ -74,7 +88,7 @@ type Session struct {
 
 	reqMu   sync.Mutex
 	reqSeq  int
-	pending map[string]chan json.RawMessage // request_id -> response body
+	pending map[string]chan controlResult // request_id -> control result
 
 	done       chan struct{}
 	readDone   chan struct{}
@@ -144,22 +158,34 @@ func New(opts Opts) (*Session, error) {
 	}
 
 	s := &Session{
-		id:           opts.ID,
-		cmd:          cmd,
-		stdin:        stdin,
-		scrollback:   sb,
-		onPermission: opts.OnPermission,
-		status:       StatusActive,
-		createdAt:    time.Now(),
-		pending:      make(map[string]chan json.RawMessage),
-		done:         make(chan struct{}),
-		readDone:     make(chan struct{}),
-		stderrDone:   make(chan struct{}),
+		id:             opts.ID,
+		cmd:            cmd,
+		stdin:          stdin,
+		scrollback:     sb,
+		controlEnabled: opts.Control,
+		onPermission:   opts.OnPermission,
+		status:         StatusActive,
+		createdAt:      time.Now(),
+		pending:        make(map[string]chan controlResult),
+		done:           make(chan struct{}),
+		readDone:       make(chan struct{}),
+		stderrDone:     make(chan struct{}),
 	}
 
 	go s.drainStderr(stderr)
 	go s.readLoop(stdout)
 	go s.waitLoop()
+
+	// Deliver the initial turn as a stream-json user message. With the control
+	// channel the CLI takes no positional prompt, so this is how the one-shot
+	// run gets its work. A write failure here is non-fatal: it surfaces via the
+	// scrollback/exit path rather than failing the launch (the process is
+	// already running and owned by the goroutines above).
+	if opts.Prompt != "" {
+		if err := s.WriteInput([]byte(opts.Prompt)); err != nil {
+			s.scrollbackBanner("[graith] failed to send initial prompt: " + err.Error())
+		}
+	}
 
 	return s, nil
 }
@@ -207,8 +233,12 @@ func (s *Session) handleLine(line []byte) {
 	switch ev.Type {
 	case "result":
 		s.setResult(ev)
+		// One-shot: the terminal result ends the turn. With the control channel
+		// stdin was held open for interrupt/approvals; close it now so the CLI
+		// sees EOF and exits (verified against claude 2.1.211).
+		s.closeStdinAfterResult()
 	case "control_response":
-		s.deliverResponse(ev.RequestID, ev.Response)
+		s.deliverControlResponse(ev.Response)
 	case "control_request":
 		if controlSubtypeOf(ev.Request) == "can_use_tool" {
 			go s.handlePermission(ev)
@@ -218,28 +248,46 @@ func (s *Session) handleLine(line []byte) {
 
 // handlePermission answers an inbound can_use_tool request via the approval
 // callback (fail-closed deny if none), writing a control_response on stdin.
+//
+// The reply shape is the nested control_response form verified against claude
+// 2.1.211: the protocol-level subtype ("success") and request_id wrap an inner
+// "response" carrying the decision. An allow must echo the (possibly modified)
+// tool input back as updatedInput; a deny carries a human-readable message.
 func (s *Session) handlePermission(ev event) {
+	var body canUseToolRequest
+
+	_ = json.Unmarshal(ev.Request, &body) // tolerate absence; fields default
+
 	decision := PermissionDecision{Allow: false, Reason: "headless: no approval backend"}
 	if s.onPermission != nil {
 		decision = s.onPermission(PermissionRequest{
 			RequestID: ev.RequestID,
 			ToolName:  controlToolName(ev.Request),
-			Input:     ev.Request,
+			Input:     body.Input,
 		})
 	}
 
-	behavior := "deny"
+	inner := map[string]any{}
 	if decision.Allow {
-		behavior = "allow"
+		inner["behavior"] = "allow"
+		// updatedInput is required on allow; echo the original input back
+		// unchanged (graith does not rewrite tool arguments).
+		if len(body.Input) > 0 {
+			inner["updatedInput"] = json.RawMessage(body.Input)
+		} else {
+			inner["updatedInput"] = map[string]any{}
+		}
+	} else {
+		inner["behavior"] = "deny"
+		inner["message"] = decision.Reason
 	}
 
 	resp := map[string]any{
-		"type":       "control_response",
-		"request_id": ev.RequestID,
+		"type": "control_response",
 		"response": map[string]any{
-			"subtype":  "can_use_tool",
-			"behavior": behavior,
-			"message":  decision.Reason,
+			"subtype":    "success",
+			"request_id": ev.RequestID,
+			"response":   inner,
 		},
 	}
 	if err := s.writeJSON(resp); err != nil {
@@ -249,14 +297,32 @@ func (s *Session) handlePermission(ev event) {
 
 // --- control protocol -------------------------------------------------------
 
-// Interrupt interrupts the running agent. In v1 one-shot mode the CLI is
-// launched without `--input-format stream-json`, so there is no stdin control
-// channel to carry an `interrupt` control request (it would just time out) —
-// Interrupt therefore sends SIGINT to the process group. The count/delay
-// arguments exist only for SessionDriver compatibility. (When the bidirectional
-// control channel is enabled in a later phase, this becomes a control request —
-// see sendControlInterrupt.)
+// interruptControlTimeout bounds the interrupt control round-trip. It is much
+// shorter than controlTimeout: a caller interrupting an agent wants a prompt
+// answer, and if the control channel is wedged we want to fall back to SIGINT
+// quickly rather than block the daemon for 30s.
+const interruptControlTimeout = 5 * time.Second
+
+// Interrupt interrupts the running agent. With the control channel enabled it
+// issues an `interrupt` control request (clean, acknowledged), falling back to a
+// SIGINT to the process group if the control round-trip fails (channel wedged,
+// timed out, or process already exited). Without the control channel it sends
+// SIGINT directly. The count/delay arguments exist only for SessionDriver
+// compatibility (the control interrupt is a single acknowledged request).
 func (s *Session) Interrupt(_ int, _ time.Duration) error {
+	if s.controlEnabled && !s.Exited() {
+		if _, err := s.controlWithTimeout(controlSubtype{Subtype: "interrupt"}, interruptControlTimeout); err == nil {
+			return nil
+		}
+		// fall through to SIGINT on any control failure
+	}
+
+	return s.signalInterrupt()
+}
+
+// signalInterrupt sends SIGINT to the process group (the SessionDriver fallback
+// and the non-control path).
+func (s *Session) signalInterrupt() error {
 	pid := s.ProcessPID()
 	if pid == 0 {
 		return nil
@@ -266,13 +332,21 @@ func (s *Session) Interrupt(_ int, _ time.Duration) error {
 }
 
 // ContextUsage issues a get_context_usage control request and returns the raw
-// response body.
+// response payload.
 func (s *Session) ContextUsage() (json.RawMessage, error) {
 	return s.control(controlSubtype{Subtype: "get_context_usage"})
 }
 
-// control sends a control request and waits for its matching response.
+// control sends a control request and waits for its matching response using the
+// default control timeout.
 func (s *Session) control(request any) (json.RawMessage, error) {
+	return s.controlWithTimeout(request, controlTimeout)
+}
+
+// controlWithTimeout sends a control request and waits up to timeout for its
+// matching control_response. It returns the inner response payload, or an error
+// on protocol-level failure (subtype=="error"), timeout, or process exit.
+func (s *Session) controlWithTimeout(request any, timeout time.Duration) (json.RawMessage, error) {
 	if s.Exited() {
 		return nil, fmt.Errorf("headless session has exited")
 	}
@@ -280,7 +354,7 @@ func (s *Session) control(request any) (json.RawMessage, error) {
 	s.reqMu.Lock()
 	s.reqSeq++
 	id := "req-" + strconv.Itoa(s.reqSeq)
-	ch := make(chan json.RawMessage, 1)
+	ch := make(chan controlResult, 1)
 	s.pending[id] = ch
 	s.reqMu.Unlock()
 
@@ -295,41 +369,69 @@ func (s *Session) control(request any) (json.RawMessage, error) {
 	}
 
 	select {
-	case resp := <-ch:
-		return resp, nil
+	case res := <-ch:
+		return res.unwrap()
 	case <-s.done:
 		// The response and process-exit can become ready together (the read loop
 		// delivers on ch just before waitLoop closes done). Prefer a response
 		// that already arrived over reporting the exit.
 		select {
-		case resp := <-ch:
-			return resp, nil
+		case res := <-ch:
+			return res.unwrap()
 		default:
 			return nil, fmt.Errorf("headless session exited before control response")
 		}
-	case <-time.After(controlTimeout):
+	case <-time.After(timeout):
 		return nil, fmt.Errorf("timeout waiting for control response %q", id)
 	}
 }
 
-// deliverResponse routes a control_response to the waiter registered for its id.
-func (s *Session) deliverResponse(id string, body json.RawMessage) {
-	if id == "" {
+// controlResult carries a decoded control_response to a waiting caller: either a
+// payload (subtype=="success") or an error message (subtype=="error").
+type controlResult struct {
+	payload json.RawMessage
+	errMsg  string
+}
+
+func (r controlResult) unwrap() (json.RawMessage, error) {
+	if r.errMsg != "" {
+		return nil, fmt.Errorf("control request failed: %s", r.errMsg)
+	}
+
+	return r.payload, nil
+}
+
+// deliverControlResponse decodes a CLI control_response (the nested form: the
+// request_id and success/error subtype live inside the "response" object) and
+// routes it to the waiter registered for its id. A response with no id is a
+// malformed control frame and marks the session degraded; an unmatched id is
+// tolerated (a late/duplicate reply after the waiter gave up).
+func (s *Session) deliverControlResponse(raw json.RawMessage) {
+	var cr controlResponse
+	if err := json.Unmarshal(raw, &cr); err != nil || cr.RequestID == "" {
 		s.markDegraded()
 
 		return
 	}
 
 	s.reqMu.Lock()
-	ch, ok := s.pending[id]
+	ch, ok := s.pending[cr.RequestID]
 	s.reqMu.Unlock()
 
 	if !ok {
 		return // unmatched/duplicate id — tolerated, not fatal
 	}
 
+	res := controlResult{payload: cr.Payload}
+	if cr.Subtype == "error" {
+		res.errMsg = cr.Error
+		if res.errMsg == "" {
+			res.errMsg = "control request returned error"
+		}
+	}
+
 	select {
-	case ch <- body:
+	case ch <- res:
 	default:
 	}
 }
@@ -369,9 +471,40 @@ func (s *Session) writeJSON(v any) error {
 		return fmt.Errorf("headless session has exited")
 	}
 
+	if s.stdinClosed {
+		return fmt.Errorf("headless session stdin is closed")
+	}
+
 	_, err = s.stdin.Write(b)
 
 	return err
+}
+
+// closeStdinAfterResult closes stdin exactly once, on the terminal result, so
+// the one-shot CLI sees EOF and exits. It is a no-op when there is no control
+// channel (stdin was never a message channel) or no stdin handle. The close is
+// serialised under writeMu so it can't race an in-flight control/permission
+// write, and stdinClosed makes subsequent writes fail cleanly rather than
+// erroring on a closed pipe.
+func (s *Session) closeStdinAfterResult() {
+	if !s.controlEnabled || s.stdin == nil {
+		return
+	}
+
+	s.stdinCloseOnce.Do(func() {
+		s.writeMu.Lock()
+		defer s.writeMu.Unlock()
+
+		s.stdinClosed = true
+		_ = s.stdin.Close()
+	})
+}
+
+// scrollbackBanner writes a graith-authored line verbatim to the scrollback (and
+// attached writers), for surfacing internal errors that have no stream-json
+// event of their own.
+func (s *Session) scrollbackBanner(msg string) {
+	s.appendScrollback([]byte(msg))
 }
 
 // --- SessionDriver: lifecycle ----------------------------------------------
@@ -452,7 +585,17 @@ func (s *Session) ForceKill() error {
 }
 
 func (s *Session) Close() {
-	_ = s.stdin.Close()
+	// Close stdin under the same serialisation as closeStdinAfterResult so a
+	// teardown can't race an in-flight control write or double-close the pipe.
+	s.stdinCloseOnce.Do(func() {
+		s.writeMu.Lock()
+		defer s.writeMu.Unlock()
+
+		s.stdinClosed = true
+		if s.stdin != nil {
+			_ = s.stdin.Close()
+		}
+	})
 	// Wait for both output drains before closing scrollback, so a late stderr
 	// banner can't race scrollback.Close (drainStderr writes to it).
 	<-s.readDone

@@ -132,21 +132,38 @@ Resume → restart process in existing worktree.
 
 **Headless sessions** (experimental): a session's transport is a persisted
 `DriverKind` (`"pty"` | `"headless"`), resolved once at creation. `headless = true`
-/ `gr new --headless` runs the agent via Claude Code's stream-json mode
-(`claude -p --output-format stream-json`) instead of an interactive PTY, for
-fire-and-forget sessions no human will attach to (tribunal judges, trigger
-briefings) — graith parses the typed event stream for status and captures the
-run's cost/token usage from the result envelope (surfacing to `gr list` is a
-planned follow-up). v1 is Claude-only and one-shot: it requires a prompt, is
-incompatible with the sandbox, implies `--background`, and cannot be resumed once
-it exits. Gated behind `[headless] experimental` (inert unless on); `[headless]
-default` and per-agent `[agents.<name>] headless_capable` are the other inputs.
-The headless engine lives in `internal/headless` and satisfies
-`daemon.SessionDriver`. `gr attach` on a headless session is refused with a
-pointer to `gr logs -f` (read-only). Planned follow-ups (issue #1075):
-convert-to-interactive on attach (`claude --resume` in a PTY), control-protocol
-interrupt/approvals wiring, cost/usage enrichment, and `[trigger.action]
-headless`. See `docs/design/2026-07-13-headless-stream-json-design.md`.
+/ `gr new --headless` runs the agent via Claude Code's stream-json mode instead
+of an interactive PTY, for fire-and-forget sessions no human will attach to
+(tribunal judges, trigger briefings) — graith parses the typed event stream for
+status and captures the run's cost/token usage from the result envelope
+(surfacing to `gr list` is a planned follow-up). v1 is Claude-only and one-shot:
+it requires a prompt, is incompatible with the sandbox, implies `--background`,
+and cannot be resumed once it exits. Gated behind `[headless] experimental`
+(inert unless on); `[headless] default` and per-agent `[agents.<name>]
+headless_capable` are the other inputs. The headless engine lives in
+`internal/headless` and satisfies `daemon.SessionDriver`. `gr attach` on a
+headless session is refused with a pointer to `gr logs -f` (read-only).
+
+The launch uses the stdin control channel — `claude -p --output-format
+stream-json --input-format stream-json --verbose --permission-prompt-tool stdio`
+(issue #1136). The prompt is delivered as an initial stream-json user message
+(not a positional arg); stdin stays open for the turn so graith can issue an
+`interrupt` control request and answer inbound `can_use_tool` permission asks,
+and is closed on the terminal `result` so the one-shot process exits. **Wire
+shapes are pinned to what was verified against claude 2.1.211** — notably the
+*asymmetric* request-id placement: an inbound `control_request` carries
+`request_id` at the top level, but a `control_response` nests `request_id` (and a
+`success`/`error` subtype) inside its `response` object, with the payload one
+level deeper. `Interrupt` sends the control request when the channel is live and
+falls back to SIGINT if it fails. Approvals reuse the existing `[approvals]`
+decision core via `SubmitHeadlessApproval`, which is **non-blocking**: yolo
+auto-allows, a configured non-blocking backend (auto/external/builtin/localmost)
+decides, and anything that would queue for a human is *denied* (a headless
+session has no human to answer) — escalating once to the orchestrator inbox so
+the deny is visible. Remaining follow-ups (issue #1075):
+convert-to-interactive on attach (`claude --resume` in a PTY), cost/usage
+enrichment surfacing, and `[trigger.action] headless`. See
+`docs/design/2026-07-13-headless-stream-json-design.md`.
 
 **Delete is soft by default** (`SessionManager.SoftDelete`): `gr delete` stops the
 agent and marks the session deleted (a `DeletedAt`/`ExpiresAt` marker on

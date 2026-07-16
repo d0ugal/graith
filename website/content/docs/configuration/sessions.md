@@ -23,6 +23,8 @@ v1 is **Claude-only** and **one-shot** (one prompt, run to completion, exit). On
 
 `gr attach` on a headless session is not supported yet; use `gr logs -f` to inspect one read-only (see [Session Lifecycle → Headless sessions]({{< relref "/docs/sessions.md#headless-sessions" >}})). Convert-to-interactive on attach is planned.
 
+A headless session drives Claude Code over its stdin control protocol, giving graith a clean interrupt and inline tool-approval handling. It has no human to answer prompts, so its approval policy must be **non-blocking**: `yolo` auto-allows, a non-blocking `[approvals]` backend decides, and anything that would queue for a human is denied (escalated once to the orchestrator inbox). See [Session Lifecycle → Headless sessions]({{< relref "/docs/sessions.md#headless-sessions" >}}).
+
 ## Delete retention
 
 ```toml

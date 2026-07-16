@@ -104,16 +104,28 @@ func resolveDriverKind(explicit bool, agent config.Agent, hc config.HeadlessConf
 	}
 }
 
-// headlessArgs builds the argv for a v1 one-shot headless launch:
+// headlessArgs builds the argv for a v1 one-shot headless launch with the
+// stdin control channel (issue #1136):
 //
-//	claude -p <prompt> --output-format stream-json --verbose <agentArgs...>
+//	claude -p --output-format stream-json --input-format stream-json \
+//	       --verbose --permission-prompt-tool stdio <agentArgs...>
 //
-// This is the empirically-validated one-shot form (positional prompt, no
-// --input-format / control protocol): Claude runs the prompt to a terminal
-// result and exits, emitting the typed event stream graith parses. agentArgs
-// carries the agent's own template-expanded args (e.g. --session-id <id>).
-func headlessArgs(agentArgs []string, prompt string) []string {
-	args := []string{"-p", prompt, "--output-format", "stream-json", "--verbose"}
+// --input-format stream-json turns stdin into the message/control channel:
+// graith delivers the prompt as an initial user message (not a positional arg),
+// issues `interrupt` control requests, and answers inbound `can_use_tool`
+// permission asks routed by --permission-prompt-tool stdio. The CLI still runs
+// one turn to a terminal result; graith closes stdin on that result so the
+// process exits (one-shot semantics preserved). agentArgs carries the agent's
+// own template-expanded args (e.g. --session-id <id>). These forms are pinned to
+// what was verified against claude 2.1.211 (see the headless design doc).
+func headlessArgs(agentArgs []string) []string {
+	args := []string{
+		"-p",
+		"--output-format", "stream-json",
+		"--input-format", "stream-json",
+		"--verbose",
+		"--permission-prompt-tool", "stdio",
+	}
 
 	return append(args, agentArgs...)
 }

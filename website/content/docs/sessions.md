@@ -55,6 +55,16 @@ supported yet — use `gr logs -f` to watch it read-only. Convert-to-interactive
 on attach (relaunching in a PTY via `claude --resume <session-id>`, preserving
 history) is a planned follow-up (issue #1075).
 
+**Interrupts and approvals.** A headless session runs over Claude Code's stdin
+control protocol, so graith can cleanly `interrupt` an in-flight turn (rather
+than firing terminal signals) and answer tool-permission prompts inline. Because
+a headless session has no human to answer, its approval policy must be
+**non-blocking**: a `yolo` session auto-allows, a non-blocking `[approvals]`
+backend (`auto`/`external`/`builtin`/`localmost`) decides, and any policy that
+would otherwise wait for a human is **denied** — with a one-time notice posted to
+the orchestrator inbox. Set a non-blocking backend (or run it `--yolo`) for a
+headless session that needs to use gated tools.
+
 ## Attachment
 
 ```bash

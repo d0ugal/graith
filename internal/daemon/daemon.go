@@ -70,6 +70,7 @@ type SessionManager struct {
 	attachedClients    map[string]*attachedClient
 	hookReports        map[string]hookReport
 	pendingApprovals   map[string]*pendingApproval
+	headlessEscalated  map[string]bool                // session ID → orchestrator already escalated once (headless non-blocking deny)
 	tokenIndex         map[string]string              // token → session ID (reverse lookup)
 	humanToken         string                         // local human credential, loaded at startup
 	saveStateFault     func() error                   // test-only saveState fault injection; nil in production
@@ -141,6 +142,7 @@ func NewSessionManager(cfg *config.Config, paths config.Paths, log *slog.Logger)
 		attachedClients:    make(map[string]*attachedClient),
 		hookReports:        make(map[string]hookReport),
 		pendingApprovals:   make(map[string]*pendingApproval),
+		headlessEscalated:  make(map[string]bool),
 		tokenIndex:         make(map[string]string),
 		pendingPairings:    make(map[string]*pendingPairing),
 		pairWaiters:        make(map[string]chan pairApproval),
@@ -1391,7 +1393,10 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	}
 
 	if driverKind == DriverHeadless {
-		expandedArgs = headlessArgs(expandedArgs, prompt)
+		// The prompt is delivered as an initial stdin user message by the
+		// headless driver (the control-channel launch takes no positional
+		// prompt), so it is not appended to argv here.
+		expandedArgs = headlessArgs(expandedArgs)
 	} else if prompt != "" {
 		expandedArgs = append(expandedArgs, prompt)
 	}
@@ -1624,13 +1629,16 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 
 	if driverKind == DriverHeadless {
 		ptySess, err = headless.New(headless.Opts{
-			ID:         id,
-			Command:    command,
-			Args:       finalArgs,
-			Dir:        worktreePath,
-			Env:        env,
-			LogPath:    logPath,
-			MaxLogSize: 100 * 1024 * 1024,
+			ID:           id,
+			Command:      command,
+			Args:         finalArgs,
+			Dir:          worktreePath,
+			Env:          env,
+			LogPath:      logPath,
+			MaxLogSize:   100 * 1024 * 1024,
+			Prompt:       prompt,
+			Control:      true,
+			OnPermission: sm.headlessPermissionFunc(id),
 		})
 	} else {
 		ptySess, err = grpty.NewSession(grpty.SessionOpts{
