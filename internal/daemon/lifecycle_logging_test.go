@@ -210,6 +210,7 @@ func TestWatchSessionExitLogFields(t *testing.T) {
 	if rec["stop_reason"] != StopReasonUser {
 		t.Errorf("stop_reason = %v, want %q", rec["stop_reason"], StopReasonUser)
 	}
+
 	if rec["exit_category"] != "exit-clean" || rec["signal_source"] != "none" {
 		t.Errorf("exit_category/signal_source = %v/%v, want exit-clean/none",
 			rec["exit_category"], rec["signal_source"])

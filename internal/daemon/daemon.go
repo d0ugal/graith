@@ -2503,6 +2503,7 @@ func (sm *SessionManager) startWatcher(id string, sess SessionDriver) {
 	case sm.resourceKick <- struct{}{}:
 	default:
 	}
+
 	go func() {
 		defer sm.watchers.Done()
 
@@ -2625,13 +2626,16 @@ func (sm *SessionManager) watchSession(id string, sess SessionDriver) {
 		if stateDeleted {
 			sm.discardResourceSamples(id)
 		}
+
 		sm.log.Info("ignoring stale session exit", "id", id, "exit_code", sess.ExitCode())
+
 		return
 	}
 
 	if deleted {
 		sm.discardResourceSamples(id)
 		sm.log.Info("ignoring exit for deleted session", "id", id, "exit_code", sess.ExitCode())
+
 		return
 	}
 
@@ -2650,7 +2654,9 @@ func (sm *SessionManager) watchSession(id string, sess SessionDriver) {
 	if sig := sess.ExitSignal(); sig != 0 {
 		logAttrs = append(logAttrs, "signal", sig.String())
 	}
+
 	category, signalSource := classifyExit(sess.ExitCode(), sess.ExitSignal(), signalRequest)
+
 	logAttrs = append(logAttrs, "exit_category", category, "signal_source", signalSource)
 	if signalRequest != nil {
 		logAttrs = append(logAttrs,
@@ -5257,6 +5263,7 @@ func (sm *SessionManager) logStopping(id, name, reason, initiator string, sess S
 		pid = sess.ProcessPID()
 		pgid = sess.Pgid()
 	}
+
 	sm.recordSignalRequest(id, pid, syscall.SIGTERM, initiator)
 
 	sm.logStoppingPID(id, name, reason, initiator, pid, pgid)

@@ -12,6 +12,7 @@ func TestOpenFDCounts(t *testing.T) {
 	if got[os.Getpid()] <= 0 {
 		t.Fatalf("openFDCounts(self) = %#v", got)
 	}
+
 	if _, ok := got[4_000_000]; ok {
 		t.Errorf("openFDCounts included missing PID: %#v", got)
 	}
