@@ -4,8 +4,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/d0ugal/graith/internal/cronx"
 	"github.com/fsnotify/fsnotify"
-	"github.com/robfig/cron/v3"
 )
 
 // triggerState is the daemon-owned, in-memory runtime state for triggers. Its
@@ -16,9 +16,9 @@ type triggerState struct {
 	mu sync.Mutex
 
 	// schedule source (keyed by trigger name)
-	cron     map[string]cron.Schedule // parsed cron schedule (cron triggers only)
-	nextFire map[string]time.Time     // in-memory next-fire cursor
-	inFlight map[string]int           // per-definition in-flight fire count (overlap guard)
+	cron     map[string]cronx.Schedule // parsed cron schedule (cron triggers only)
+	nextFire map[string]time.Time      // in-memory next-fire cursor
+	inFlight map[string]int            // per-definition in-flight fire count (overlap guard)
 
 	// rate-limit log, keyed by name (schedule) or binding key (watch)
 	rateLog map[string][]time.Time
@@ -69,7 +69,7 @@ func (b *watchBinding) actionInFlight() bool {
 
 func newTriggerState() *triggerState {
 	return &triggerState{
-		cron:            make(map[string]cron.Schedule),
+		cron:            make(map[string]cronx.Schedule),
 		nextFire:        make(map[string]time.Time),
 		inFlight:        make(map[string]int),
 		rateLog:         make(map[string][]time.Time),

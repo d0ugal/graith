@@ -147,6 +147,34 @@ func TestArmSchedule(t *testing.T) {
 	}
 }
 
+// TestArmSchedule_UnreachableCronIsDormant guards the fire-storm regression: a
+// cron with no reachable next fire (e.g. "0 0 30 2 *" — Feb never has a 30th)
+// must arm a zero cursor and be recorded as an error, and dueSchedules must
+// treat that zero cursor as never-due rather than firing every tick.
+func TestArmSchedule_UnreachableCronIsDormant(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	trig := config.TriggerConfig{
+		Name:     "thrawn",
+		Schedule: &config.ScheduleConfig{Cron: "0 0 30 2 *"},
+		Action:   config.ActionConfig{Type: config.ActionMessage, Body: "x", Deliver: config.DeliverConfig{Topic: "t"}},
+	}
+	sm := newTriggerTestSM(t, trig)
+	sm.armSchedule(&trig, &TriggerRuntimeState{Name: "thrawn"}, now)
+
+	if next := sm.triggers.nextFire["thrawn"]; !next.IsZero() {
+		t.Errorf("unreachable cron should arm a zero cursor, got %v", next)
+	}
+
+	if rt := sm.getTriggerRuntime("thrawn"); rt == nil || rt.LastError == "" {
+		t.Error("unreachable cron should record a trigger error")
+	}
+	// The bug: a zero cursor is not After(now), so without the guard it would
+	// report due on every tick. It must not fire.
+	if due := sm.dueSchedules(now); len(due) != 0 {
+		t.Fatalf("dormant cron fired: %v", due)
+	}
+}
+
 func TestReconcileSchedules_Prune(t *testing.T) {
 	trig := config.TriggerConfig{Name: "keep", Schedule: &config.ScheduleConfig{Cron: "@daily"}, Action: config.ActionConfig{Type: config.ActionMessage, Body: "x", Deliver: config.DeliverConfig{Topic: "t"}}}
 	sm := newTriggerTestSM(t, trig)
