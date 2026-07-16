@@ -185,7 +185,7 @@ func renderMCPLogs(w io.Writer, resp protocol.MCPLogsResponse) {
 
 // registerMCPCmd registers this command on rootCmd. Called from registerCommands.
 func registerMCPCmd() {
-	mcpLogsCmd.Flags().IntVarP(&mcpLogsLines, "lines", "n", 300, "number of lines to show per log")
+	mcpLogsCmd.Flags().IntVarP(&mcpLogsLines, "lines", "n", 0, "number of lines to show per log (0 = server default, [limits] log_lines)")
 	mcpCmd.AddCommand(mcpListCmd)
 	mcpCmd.AddCommand(mcpRestartCmd)
 	mcpCmd.AddCommand(mcpLogsCmd)

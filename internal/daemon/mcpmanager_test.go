@@ -924,7 +924,7 @@ func TestTailFileLargeDropsPartialFirstLine(t *testing.T) {
 
 	_ = f.Close()
 
-	got, err := tailFile(path, 5)
+	got, err := tailFile(path, 5, 0)
 	if err != nil {
 		t.Fatalf("tailFile() error = %v", err)
 	}
@@ -1049,6 +1049,46 @@ func TestMCPManagerLogFiles(t *testing.T) {
 	}
 }
 
+// TestMCPManagerLogFilesUsesConfiguredDefault guards issue #1252: when a caller
+// asks for lines <= 0, LogFiles falls back to the configured [limits] log_lines
+// default (was a hard-coded 300), so raising or lowering the config changes how
+// much the MCP log reader returns.
+func TestMCPManagerLogFilesUsesConfiguredDefault(t *testing.T) {
+	logDir := t.TempDir()
+	cfg := &config.Config{
+		MCPServers: []config.MCPServerConfig{{Name: "ken", Command: "cat"}},
+	}
+	cfg.Limits.LogLines = 2 // custom small default
+
+	mgr := NewMCPManager(cfg, nil, logDir, slog.Default())
+	defer mgr.Shutdown()
+
+	mcpDir := filepath.Join(logDir, "mcp")
+	if err := os.MkdirAll(mcpDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	// Five lines on disk; the configured default (2) should bound the read.
+	body := "l1\nl2\nl3\nl4\nl5\n"
+	if err := os.WriteFile(filepath.Join(mcpDir, "ken-sess1-ken.log"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	files, err := mgr.LogFiles("ken", 0)
+	if err != nil {
+		t.Fatalf("LogFiles() error = %v", err)
+	}
+
+	if len(files) != 1 {
+		t.Fatalf("expected 1 log file, got %d", len(files))
+	}
+
+	got := strings.Count(strings.TrimRight(files[0].Content, "\n"), "\n") + 1
+	if got != 2 {
+		t.Errorf("LogFiles(lines=0) returned %d lines, want configured default 2 (%q)", got, files[0].Content)
+	}
+}
+
 // TestMCPManagerLogFilesPrefixCollision: a server whose name is a prefix of
 // another's ("graith" vs "graith-x") must not pick up the other's logs.
 func TestMCPManagerLogFilesPrefixCollision(t *testing.T) {
@@ -1140,7 +1180,7 @@ func TestTailFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := tailFile(path, 3)
+	got, err := tailFile(path, 3, 0)
 	if err != nil {
 		t.Fatalf("tailFile() error = %v", err)
 	}
@@ -1151,13 +1191,59 @@ func TestTailFile(t *testing.T) {
 	}
 
 	// Asking for more lines than exist returns everything.
-	all, err := tailFile(path, 100)
+	all, err := tailFile(path, 100, 0)
 	if err != nil {
 		t.Fatalf("tailFile(100) error = %v", err)
 	}
 
 	if strings.Count(all, "\n") != 10 {
 		t.Errorf("expected 10 lines, got %d", strings.Count(all, "\n"))
+	}
+}
+
+// TestTailFileMaxReadBound guards issue #1252: a small maxRead caps how many
+// trailing bytes are read, so lines that fall outside that window are dropped
+// even when more are requested. The cap is now a parameter (was a fixed 1 MiB
+// local const).
+func TestTailFileMaxReadBound(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "loch.log")
+
+	// Ten 8-byte lines ("line NN\n"); 80 bytes total.
+	var sb strings.Builder
+	for i := 10; i <= 19; i++ {
+		fmt.Fprintf(&sb, "line %d\n", i)
+	}
+
+	if err := os.WriteFile(path, []byte(sb.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// A 20-byte read window can hold at most the final ~2 whole lines even though
+	// 100 are requested; the partial leading fragment is dropped.
+	got, err := tailFile(path, 100, 20)
+	if err != nil {
+		t.Fatalf("tailFile() error = %v", err)
+	}
+
+	lines := strings.Count(strings.TrimRight(got, "\n"), "\n") + 1
+	if lines >= 10 {
+		t.Errorf("maxRead=20 returned %d lines (%q), want the read window to drop earlier lines", lines, got)
+	}
+
+	if !strings.Contains(got, "line 19") {
+		t.Errorf("final line missing from bounded read: %q", got)
+	}
+
+	// A non-positive maxRead falls back to the config default (reads everything
+	// for this tiny file).
+	all, err := tailFile(path, 100, 0)
+	if err != nil {
+		t.Fatalf("tailFile(maxRead=0) error = %v", err)
+	}
+
+	if strings.Count(all, "\n") != 10 {
+		t.Errorf("maxRead=0 (default) returned %d lines, want all 10", strings.Count(all, "\n"))
 	}
 }
 
@@ -1169,7 +1255,7 @@ func TestTailFileEmpty(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := tailFile(path, 10)
+	got, err := tailFile(path, 10, 0)
 	if err != nil {
 		t.Fatalf("tailFile() error = %v", err)
 	}

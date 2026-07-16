@@ -13,11 +13,6 @@ import (
 	"github.com/d0ugal/graith/internal/protocol"
 )
 
-// approvalDisplayLimit caps the tool input shown in the approval overlay and
-// broadcast to attached clients. The full input is still evaluated by backends
-// (it travels in ApprovalRequestMsg.ToolInput); only the display copy is cut.
-const approvalDisplayLimit = 500
-
 type pendingApproval struct {
 	Info       protocol.ApprovalInfo
 	ResponseCh chan protocol.ApprovalDecisionMsg
@@ -78,7 +73,7 @@ func (sm *SessionManager) SubmitApproval(ctx context.Context, req protocol.Appro
 		SessionID:   req.SessionID,
 		SessionName: sess.Name,
 		ToolName:    req.ToolName,
-		ToolInput:   truncateForDisplay(req.ToolInput),
+		ToolInput:   truncateForDisplay(req.ToolInput, sm.cfg.Limits.ApprovalDisplayBytesOrDefault()),
 		Agent:       sess.Agent,
 		RepoName:    sess.RepoName,
 		RequestedAt: time.Now().UTC().Format(time.RFC3339),
@@ -459,16 +454,21 @@ func (sm *SessionManager) decideWithBackend(ctx context.Context, req protocol.Ap
 	}
 }
 
-// truncateForDisplay caps a tool-input string for the approval overlay. The
-// untruncated value is still what backends evaluate; this only affects what is
-// shown to and broadcast to attached clients. The cut backs off to a rune
-// boundary so a multi-byte character is never split into a mojibake tail.
-func truncateForDisplay(s string) string {
-	if len(s) <= approvalDisplayLimit {
+// truncateForDisplay caps a tool-input string for the approval overlay at limit
+// bytes. The untruncated value is still what backends evaluate; this only
+// affects what is shown to and broadcast to attached clients. The cut backs off
+// to a rune boundary so a multi-byte character is never split into a mojibake
+// tail. A limit < 1 falls back to the config default (issue #1252).
+func truncateForDisplay(s string, limit int) string {
+	if limit < 1 {
+		limit = config.LimitsApprovalDisplayBytesDefault
+	}
+
+	if len(s) <= limit {
 		return s
 	}
 
-	cut := approvalDisplayLimit
+	cut := limit
 	for cut > 0 && !utf8.RuneStart(s[cut]) {
 		cut--
 	}

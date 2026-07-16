@@ -3,9 +3,11 @@ package daemon
 import (
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
 	grpty "github.com/d0ugal/graith/internal/pty"
 )
@@ -80,6 +82,37 @@ func TestMatchWriterTrailingEmptyGuard(t *testing.T) {
 		}
 	default:
 		t.Fatal("expected a blank line to match ^$")
+	}
+}
+
+// TestMatchWriterMaxBufBounded guards issue #1252: the partial-line buffer must
+// stay within the configured maxBuf, so a long stream without a newline can't
+// grow it without limit. The cap is now config-driven (matchWriter.maxBuf)
+// rather than a fixed 64 KiB constant.
+func TestMatchWriterMaxBufBounded(t *testing.T) {
+	ch := make(chan string, 1)
+	mw := &matchWriter{re: regexp.MustCompile("never-matches"), matchCh: ch, maxBuf: 16}
+
+	// Write far more than maxBuf with no newline: the retained buffer must be
+	// trimmed to the tail, never the full input.
+	_, _ = mw.Write([]byte(strings.Repeat("a", 1000)))
+
+	if len(mw.buf) > 16 {
+		t.Fatalf("buffer grew to %d bytes, want <= maxBuf (16)", len(mw.buf))
+	}
+}
+
+// TestMatchWriterMaxBufZeroFallsBackToDefault confirms a zero-valued matchWriter
+// (maxBuf unset) still bounds its buffer using the config default, so a caller
+// that forgets to set maxBuf stays safe.
+func TestMatchWriterMaxBufZeroFallsBackToDefault(t *testing.T) {
+	ch := make(chan string, 1)
+	mw := &matchWriter{re: regexp.MustCompile("never-matches"), matchCh: ch}
+
+	_, _ = mw.Write([]byte(strings.Repeat("a", config.LimitsWaitBufferBytesDefault+4096)))
+
+	if len(mw.buf) > config.LimitsWaitBufferBytesDefault {
+		t.Fatalf("buffer grew to %d bytes, want <= default (%d)", len(mw.buf), config.LimitsWaitBufferBytesDefault)
 	}
 }
 

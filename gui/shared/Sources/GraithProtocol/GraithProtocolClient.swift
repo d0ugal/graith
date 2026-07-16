@@ -57,6 +57,14 @@ public struct AttachSession: Sendable {
 /// The same client serves the local macOS daemon (`.unix`) and remote tailnet
 /// daemons (`.remote` + TLS); only the ``GraithTransport`` differs.
 public actor GraithProtocolClient {
+    /// Default number of scrollback lines a one-shot log peek requests. Kept as a
+    /// single shared constant so every GUI log peek (the shared client and the
+    /// macOS peek sheet) agrees on one value instead of drifting apart; it
+    /// mirrors the daemon's `[limits] log_lines` default (issue #1252). Passing
+    /// 0 to the daemon would defer to its configured limit, but the GUI can't
+    /// read that config yet, so this compile-time default stands in.
+    public static let defaultLogLines = 300
+
     public let transport: GraithTransport
 
     private let profile: String
@@ -235,7 +243,7 @@ public actor GraithProtocolClient {
     /// closes. `follow` is intentionally not supported here — this is the
     /// one-shot peek the mobile session view uses. Added for the iOS adapter
     /// (#628).
-    public func logs(sessionID: String, lines: Int = 300,
+    public func logs(sessionID: String, lines: Int = GraithProtocolClient.defaultLogLines,
                      timeoutSeconds: Double = 30, maxBytes: Int = 4 * 1024 * 1024) async throws -> String {
         let conn = try await newConnection()
         let dataStream = conn.dataStream

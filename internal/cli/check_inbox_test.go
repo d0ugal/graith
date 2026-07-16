@@ -33,7 +33,7 @@ func TestFormatInboxSystemMessageRecommendsAll(t *testing.T) {
 	msg := formatInboxSystemMessage([]inboxMessage{
 		{SenderName: "Ailsa", Body: "braw news"},
 		{SenderName: "graith notifications", Body: "CI is green", System: true},
-	})
+	}, 0)
 
 	if !strings.Contains(msg, "gr msg inbox --all") {
 		t.Errorf("hint must recommend --all (messages are pre-acked by the hook); got:\n%s", msg)
@@ -55,6 +55,38 @@ func TestFormatInboxSystemMessageRecommendsAll(t *testing.T) {
 	if !strings.Contains(msg, "2 unread message(s)") {
 		t.Errorf("count should reflect number of messages; got:\n%s", msg)
 	}
+}
+
+// TestFormatInboxSystemMessagePreviewTruncation guards issue #1252: the preview
+// is bounded by the configurable byte cap, and a value < 1 falls back to the
+// config default.
+func TestFormatInboxSystemMessagePreviewTruncation(t *testing.T) {
+	long := strings.Repeat("z", 5000)
+
+	// A small custom cap truncates and appends the ellipsis.
+	small := formatInboxSystemMessage([]inboxMessage{{SenderName: "Ailsa", Body: long}}, 50)
+	if !strings.HasSuffix(small, "...") {
+		t.Errorf("expected truncation ellipsis with a small cap; got tail %q", tail(small, 8))
+	}
+
+	// The default cap (via 0) keeps more than the small cap but still truncates a
+	// 5000-byte body.
+	def := formatInboxSystemMessage([]inboxMessage{{SenderName: "Ailsa", Body: long}}, 0)
+	if !strings.HasSuffix(def, "...") {
+		t.Errorf("expected truncation ellipsis at the default cap; got tail %q", tail(def, 8))
+	}
+
+	if len(def) <= len(small) {
+		t.Errorf("default cap (%d) should retain more than the small cap (%d)", len(def), len(small))
+	}
+}
+
+func tail(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+
+	return s[len(s)-n:]
 }
 
 // fakeFrameReader feeds a scripted sequence of frames (and optional terminal

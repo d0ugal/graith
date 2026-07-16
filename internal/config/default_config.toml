@@ -143,6 +143,19 @@ batch_size = 8          # max sessions (re)parsed per tick (bounds work on a lar
 sample_interval = "30s"  # how often each session's process group is snapshotted
 sample_history = 5       # how many recent samples are retained per session
 
+# Output, log, wait, and display limits: the user-visible truncation caps that
+# were formerly duplicated as unrelated constants across the daemon, CLI, and
+# MCP manager (issue #1252). Each value is a plain count; the unit is in the key
+# name (lines, bytes, runes). A value < 1 falls back to the default shown.
+[limits]
+log_lines             = 300      # default trailing lines for `gr logs`, `gr mcp logs`, attach replay, MCP log reads (when no -n)
+wait_scan_lines       = 500      # scrollback lines `gr wait --contains` scans for an already-present match
+wait_buffer_bytes     = 65536    # partial-line buffer cap in the live `gr wait` matcher (64 KiB)
+mcp_log_read_bytes    = 1048576  # max trailing bytes read from an MCP log file before splitting into lines (1 MiB)
+approval_display_bytes = 500     # tool input shown in the approval overlay (full input still evaluated by backends)
+last_message_runes    = 2000     # agent's final Stop message the status hook forwards (counted in runes)
+inbox_preview_bytes   = 1000     # unread-inbox preview injected into a session's SessionStart hook context
+
 # Update check: `gr list` and `gr doctor` query GitHub for a newer graith release
 # and cache the result. Disable for downstream forks, packaged/offline installs,
 # or to avoid the network call entirely. Never runs for a "dev" build.

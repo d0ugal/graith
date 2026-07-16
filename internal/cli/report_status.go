@@ -32,14 +32,14 @@ type hookStdin struct {
 	LastAssistantMsg string `json:"last_assistant_message"`
 }
 
-// maxLastMessageRunes bounds the last_assistant_message the CLI forwards to the
-// daemon. It's the agent's full final output — we want a snippet, not an
-// unbounded control frame — so truncate it before it hits the wire.
-const maxLastMessageRunes = 2000
-
 // truncateRunes returns s bounded to at most maxRunes runes, cutting on a rune
-// boundary so a multi-byte character is never split.
+// boundary so a multi-byte character is never split. A maxRunes < 1 falls back
+// to the config default (issue #1252).
 func truncateRunes(s string, maxRunes int) string {
+	if maxRunes < 1 {
+		maxRunes = config.LimitsLastMessageRunesDefault
+	}
+
 	r := []rune(s)
 	if len(r) <= maxRunes {
 		return s
@@ -55,7 +55,7 @@ func truncateRunes(s string, maxRunes int) string {
 // approval, everything else -> no status change). This is deliberately coupled
 // with the daemon's subtype-aware switch: an empty/unparsed subtype must map to
 // no status change there, not to approval.
-func buildStatusReport(sessionID, event, toolFlag string, stdin hookStdin, parsed bool) protocol.StatusReportMsg {
+func buildStatusReport(sessionID, event, toolFlag string, stdin hookStdin, parsed bool, maxLastMessageRunes int) protocol.StatusReportMsg {
 	msg := protocol.StatusReportMsg{
 		SessionID: sessionID,
 		Event:     event,
@@ -132,7 +132,7 @@ var reportStatusCmd = &cobra.Command{
 		case <-time.After(100 * time.Millisecond):
 		}
 
-		msg := buildStatusReport(sessionID, event, reportTool, stdin.data, stdin.parsed)
+		msg := buildStatusReport(sessionID, event, reportTool, stdin.data, stdin.parsed, cfg.Limits.LastMessageRunesOrDefault())
 
 		hookPaths, err := config.ResolvePaths()
 		if err != nil {

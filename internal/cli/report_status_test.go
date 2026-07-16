@@ -4,7 +4,13 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/d0ugal/graith/internal/config"
 )
+
+// maxLastMessageRunes is the default last-message rune cap, used across these
+// tests since the constant moved into the [limits] config section (issue #1252).
+const maxLastMessageRunes = config.LimitsLastMessageRunesDefault
 
 // TestHookStdinDecodesNotificationType verifies the notification subtype field
 // decodes off the hook payload.
@@ -25,7 +31,7 @@ func TestHookStdinDecodesNotificationType(t *testing.T) {
 
 func TestBuildStatusReport(t *testing.T) {
 	t.Run("forwards parsed notification subtype", func(t *testing.T) {
-		msg := buildStatusReport("ken", "Notification", "", hookStdin{NotificationType: "permission_prompt"}, true)
+		msg := buildStatusReport("ken", "Notification", "", hookStdin{NotificationType: "permission_prompt"}, true, maxLastMessageRunes)
 
 		if msg.NotificationType != "permission_prompt" {
 			t.Errorf("NotificationType = %q, want %q", msg.NotificationType, "permission_prompt")
@@ -40,7 +46,7 @@ func TestBuildStatusReport(t *testing.T) {
 	// the daemon leaves status unchanged, instead of the old behaviour where a
 	// bare Notification was mapped to approval.
 	t.Run("unparsed forwards empty subtype", func(t *testing.T) {
-		msg := buildStatusReport("haar", "Notification", "", hookStdin{NotificationType: "idle_prompt"}, false)
+		msg := buildStatusReport("haar", "Notification", "", hookStdin{NotificationType: "idle_prompt"}, false, maxLastMessageRunes)
 
 		if msg.NotificationType != "" {
 			t.Errorf("NotificationType = %q, want empty when unparsed", msg.NotificationType)
@@ -48,7 +54,7 @@ func TestBuildStatusReport(t *testing.T) {
 	})
 
 	t.Run("tool flag takes precedence over stdin tool", func(t *testing.T) {
-		msg := buildStatusReport("braw", "PreToolUse", "Bash", hookStdin{ToolName: "Edit"}, true)
+		msg := buildStatusReport("braw", "PreToolUse", "Bash", hookStdin{ToolName: "Edit"}, true, maxLastMessageRunes)
 
 		if msg.ToolName != "Bash" {
 			t.Errorf("ToolName = %q, want flag value %q", msg.ToolName, "Bash")
@@ -56,7 +62,7 @@ func TestBuildStatusReport(t *testing.T) {
 	})
 
 	t.Run("stdin tool fills empty flag", func(t *testing.T) {
-		msg := buildStatusReport("bonnie", "PreToolUse", "", hookStdin{ToolName: "Write"}, true)
+		msg := buildStatusReport("bonnie", "PreToolUse", "", hookStdin{ToolName: "Write"}, true, maxLastMessageRunes)
 
 		if msg.ToolName != "Write" {
 			t.Errorf("ToolName = %q, want stdin value %q", msg.ToolName, "Write")
@@ -81,7 +87,7 @@ func TestBuildStatusReportCompaction(t *testing.T) {
 	// PreCompact carries a trigger; it must flow onto the message unchanged.
 	data := decodeHookStdin(t, `{"trigger":"auto"}`)
 
-	msg := buildStatusReport("braw", "PreCompact", "", data, true)
+	msg := buildStatusReport("braw", "PreCompact", "", data, true, maxLastMessageRunes)
 
 	if msg.Event != "PreCompact" {
 		t.Errorf("Event = %q, want PreCompact", msg.Event)
@@ -99,7 +105,7 @@ func TestBuildStatusReportCompaction(t *testing.T) {
 func TestBuildStatusReportSubagent(t *testing.T) {
 	data := decodeHookStdin(t, `{"agent_id":"bairn-1","agent_type":"canny"}`)
 
-	msg := buildStatusReport("braw", "SubagentStart", "", data, true)
+	msg := buildStatusReport("braw", "SubagentStart", "", data, true, maxLastMessageRunes)
 
 	if msg.AgentID != "bairn-1" {
 		t.Errorf("AgentID = %q, want bairn-1", msg.AgentID)
@@ -113,7 +119,7 @@ func TestBuildStatusReportSubagent(t *testing.T) {
 func TestBuildStatusReportUnparsedDropsNewFields(t *testing.T) {
 	// When stdin didn't parse within the 100ms budget, the compaction/sub-agent
 	// fields stay empty (nothing to carry).
-	msg := buildStatusReport("braw", "PostCompact", "", hookStdin{}, false)
+	msg := buildStatusReport("braw", "PostCompact", "", hookStdin{}, false, maxLastMessageRunes)
 
 	if msg.Trigger != "" || msg.AgentID != "" || msg.AgentType != "" {
 		t.Errorf("unparsed stdin leaked fields: %+v", msg)
@@ -134,6 +140,15 @@ func TestTruncateRunes(t *testing.T) {
 		got := truncateRunes(in, maxLastMessageRunes)
 		if len([]rune(got)) != maxLastMessageRunes {
 			t.Errorf("truncated length = %d runes, want %d", len([]rune(got)), maxLastMessageRunes)
+		}
+	})
+
+	// Issue #1252: a maxRunes < 1 falls back to the config default rather than
+	// truncating everything to nothing.
+	t.Run("non-positive bound uses the config default", func(t *testing.T) {
+		in := strings.Repeat("a", maxLastMessageRunes+500)
+		if got := truncateRunes(in, 0); len([]rune(got)) != maxLastMessageRunes {
+			t.Errorf("truncateRunes(_, 0) = %d runes, want default %d", len([]rune(got)), maxLastMessageRunes)
 		}
 	})
 
@@ -192,7 +207,7 @@ func TestHookStdinParse(t *testing.T) {
 
 	t.Run("Stop message via buildStatusReport is truncated", func(t *testing.T) {
 		long := strings.Repeat("x", maxLastMessageRunes+123)
-		msg := buildStatusReport("braw", "Stop", "", hookStdin{LastAssistantMsg: long}, true)
+		msg := buildStatusReport("braw", "Stop", "", hookStdin{LastAssistantMsg: long}, true, maxLastMessageRunes)
 
 		if len([]rune(msg.LastMessage)) != maxLastMessageRunes {
 			t.Errorf("LastMessage = %d runes, want capped at %d", len([]rune(msg.LastMessage)), maxLastMessageRunes)
