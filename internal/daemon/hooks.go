@@ -133,7 +133,9 @@ func (sm *SessionManager) generateClaudeSettings(sessionID string, yolo bool) (s
 	// A yolo session always installs the PreToolUse approval hook so its tool
 	// calls route through the daemon's auto-approve backend (and any future
 	// dangerous-command blocklist), even when global approval gating is off.
-	hookEnabled := sm.cfg.Approvals.HookEnabled() || yolo
+	// Snapshot the config once so hook generation can't race a concurrent
+	// applyConfig (issue #1287).
+	hookEnabled := sm.Config().Approvals.HookEnabled() || yolo
 
 	events := []string{
 		"SessionStart",
@@ -418,7 +420,8 @@ type codexHookEvent struct {
 // path (issue #1135), so a headless codex session gets MCP without hooks.
 func (sm *SessionManager) injectCodexHooks(sessionID string, yolo bool) (extraArgs []string, extraEnv map[string]string, err error) {
 	grBin := shellQuote(resolveGrBin())
-	hookEnabled := sm.cfg.Approvals.HookEnabled() || yolo
+	// Snapshot the config once so hook generation can't race applyConfig (#1287).
+	hookEnabled := sm.Config().Approvals.HookEnabled() || yolo
 
 	events := []codexHookEvent{
 		{event: "SessionStart", commands: []string{
@@ -616,7 +619,11 @@ func (sm *SessionManager) injectCursorHooks(sessionID, worktreePath string, yolo
 		return nil, nil, nil
 	}
 
-	if agent, ok := sm.cfg.Agents["cursor"]; !ok || agent.PreTrustWorkspaceEnabled() {
+	// Snapshot the config once so hook generation reads a single generation and
+	// can't race a concurrent applyConfig (issue #1287).
+	cfg := sm.Config()
+
+	if agent, ok := cfg.Agents["cursor"]; !ok || agent.PreTrustWorkspaceEnabled() {
 		if err := preTrustCursorWorkspace(worktreePath); err != nil {
 			sm.log.Warn("failed to pre-trust cursor workspace", "session_id", sessionID, "err", err)
 		}
@@ -656,7 +663,7 @@ func (sm *SessionManager) injectCursorHooks(sessionID, worktreePath string, yolo
 		},
 	}
 
-	if sm.cfg.Approvals.HookEnabled() || yolo {
+	if cfg.Approvals.HookEnabled() || yolo {
 		hooks.Hooks["preToolUse"] = []hookEntry{
 			{Command: quoted + " approve-request"},
 		}

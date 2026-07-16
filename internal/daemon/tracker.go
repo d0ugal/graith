@@ -314,7 +314,9 @@ func (sm *SessionManager) reapTrackerSession(id, mode string) bool {
 	case config.TrackerReapNone:
 		return false
 	case config.TrackerReapDelete:
-		if sm.cfg.Delete.RetentionDuration() <= 0 {
+		// reapTrackerSession runs lock-free from the tracker-fire loop, so read
+		// retention from a snapshot rather than racing a config reload (#1287).
+		if sm.Config().Delete.RetentionDuration() <= 0 {
 			// SoftDelete with retention<=0 would produce an already-expired
 			// tombstone the purge loop hard-deletes — a hard purge in disguise.
 			// Never destroy: skip. (Config validation also rejects this combo.)

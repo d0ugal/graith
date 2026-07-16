@@ -83,7 +83,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 
 	preUsername := cfgSnapshot.GitHubUsername
 	if preUsername == "" && sourceRepoPath != "" {
-		ctx, cancel := context.WithTimeout(context.Background(), sm.cfg.Git.UsernameTimeoutDuration())
+		ctx, cancel := context.WithTimeout(context.Background(), cfgSnapshot.Git.UsernameTimeoutDuration())
 		preUsername, _ = git.DiscoverGitHubUsername(ctx, sourceRepoPath)
 
 		cancel()
@@ -319,8 +319,8 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 
 		rendered := conv.Render(transcript.RenderOptions{
 			Kind:          transcript.RenderFork,
-			MaxBytes:      sm.cfg.Transcript.MaxContextBytesOrDefault(),
-			MaxToolOutput: sm.cfg.Transcript.MaxToolOutputBytesOrDefault(),
+			MaxBytes:      cfgSnapshot.Transcript.MaxContextBytesOrDefault(),
+			MaxToolOutput: cfgSnapshot.Transcript.MaxToolOutputBytesOrDefault(),
 		})
 
 		tmpDir, err := sm.repoTmpDir(repoRoot)
@@ -351,7 +351,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 		seedPrompt = transcript.BuildForkSeedPrompt(srcAgent, forkContextPath)
 	}
 
-	gitCtx, gitCancel := context.WithTimeout(context.Background(), sm.cfg.Git.FetchTimeoutDuration())
+	gitCtx, gitCancel := context.WithTimeout(context.Background(), cfgSnapshot.Git.FetchTimeoutDuration())
 	defer gitCancel()
 
 	if len(sourceForkIncludes) > 0 {
@@ -621,7 +621,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 	// Pre-spawn time for native session-id capture (see Create).
 	startedAt := time.Now()
 
-	lc := sm.Config().Lifecycle
+	lc := cfgSnapshot.Lifecycle
 
 	ptySess, err := grpty.NewSession(grpty.SessionOpts{
 		ID:         id,

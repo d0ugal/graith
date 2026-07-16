@@ -225,26 +225,31 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 	go func() { _ = srv.Serve(ctx) }()
 
 	// Optional tailnet-facing remote control surface (design §A). Off by
-	// default; the local Unix socket above is unaffected when disabled.
-	if sm.cfg.Remote.Enabled {
-		if len(sm.cfg.Remote.AllowTailnetUsers) == 0 {
+	// default; the local Unix socket above is unaffected when disabled. srv.Serve
+	// is already accepting clients (and the config watcher starts below), so read
+	// [remote] from one snapshot — a concurrent reload must not tear these reads
+	// or split the detached serveRemote goroutine across config generations
+	// (issue #1287).
+	remoteCfg := sm.Config().Remote
+	if remoteCfg.Enabled {
+		if len(remoteCfg.AllowTailnetUsers) == 0 {
 			log.Warn("[remote] enabled with empty allow_tailnet_users — all remote connections denied (Gate 1 fail-closed)")
 		}
 
 		certPath := filepath.Join(paths.DataDir, "remote-tls.crt")
 		keyPath := filepath.Join(paths.DataDir, "remote-tls.key")
 
-		if cert, pin, tErr := loadOrCreateRemoteTLS(certPath, keyPath, sm.cfg.Remote.Hostname, time.Now()); tErr != nil {
+		if cert, pin, tErr := loadOrCreateRemoteTLS(certPath, keyPath, remoteCfg.Hostname, time.Now()); tErr != nil {
 			log.Error("[remote] TLS setup failed; remote surface disabled", "err", tErr)
-		} else if rl, rErr := newRemoteListener(ctx, sm.cfg.Remote, paths.DataDir); rErr != nil {
+		} else if rl, rErr := newRemoteListener(ctx, remoteCfg, paths.DataDir); rErr != nil {
 			log.Error("[remote] listener setup failed; remote surface disabled", "err", rErr)
 		} else {
 			sm.remoteTLSPin = pin
 
-			log.Info("[remote] starting control surface", "mode", sm.cfg.Remote.Mode, "port", sm.cfg.Remote.Port, "tls_spki", pin)
+			log.Info("[remote] starting control surface", "mode", remoteCfg.Mode, "port", remoteCfg.Port, "tls_spki", pin)
 
 			go func() {
-				if err := sm.serveRemote(ctx, rl, sm.cfg.Remote, cert); err != nil {
+				if err := sm.serveRemote(ctx, rl, remoteCfg, cert); err != nil {
 					log.Error("[remote] control surface failed", "err", err)
 				}
 			}()

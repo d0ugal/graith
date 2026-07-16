@@ -102,6 +102,10 @@ func (sm *SessionManager) runGitPullTick(ctx context.Context) {
 }
 
 func (sm *SessionManager) pullIfClean(ctx context.Context, repoPath string) (bool, error) {
+	// Take a single config snapshot for the whole operation so the fetch and
+	// merge timeouts can never race a concurrent applyConfig (issue #1287).
+	cfg := sm.Config()
+
 	isBare, err := git.RunOutputContext(ctx, repoPath, "rev-parse", "--is-bare-repository")
 	if err != nil {
 		return false, fmt.Errorf("checking bare: %w", err)
@@ -175,7 +179,7 @@ func (sm *SessionManager) pullIfClean(ctx context.Context, repoPath string) (boo
 		return false, fmt.Errorf("capturing old HEAD: %w", err)
 	}
 
-	fetchCtx, fetchCancel := context.WithTimeout(ctx, sm.cfg.Git.FetchTimeoutDuration())
+	fetchCtx, fetchCancel := context.WithTimeout(ctx, cfg.Git.FetchTimeoutDuration())
 	defer fetchCancel()
 
 	_, fetchStderr, err := git.RunContextEnv(fetchCtx, repoPath, gitNoPromptEnv, "-c", "core.hooksPath=/dev/null", "fetch", "--", remote)
@@ -244,7 +248,7 @@ func (sm *SessionManager) pullIfClean(ctx context.Context, repoPath string) (boo
 		return false, nil
 	}
 
-	mergeCtx, mergeCancel := context.WithTimeout(ctx, sm.cfg.Git.MergeTimeoutDuration())
+	mergeCtx, mergeCancel := context.WithTimeout(ctx, cfg.Git.MergeTimeoutDuration())
 	defer mergeCancel()
 
 	_, stderr, err := git.RunContextEnv(mergeCtx, repoPath, gitNoPromptEnv, "-c", "core.hooksPath=/dev/null", "merge", "--ff-only", "--quiet", "--", mergeTarget)

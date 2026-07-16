@@ -216,12 +216,14 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 		snapAgent = sessSnap.Agent
 	}
 
-	cfgUsername := sm.cfg.GitHubUsername
+	preLockCfg := sm.cfg
+	cfgUsername := preLockCfg.GitHubUsername
+
 	sm.mu.RUnlock()
 
 	preUsername := cfgUsername
 	if preUsername == "" && snapRepoPath != "" {
-		ctx, cancel := context.WithTimeout(context.Background(), sm.cfg.Git.UsernameTimeoutDuration())
+		ctx, cancel := context.WithTimeout(context.Background(), preLockCfg.Git.UsernameTimeoutDuration())
 		preUsername, _ = git.DiscoverGitHubUsername(ctx, snapRepoPath)
 
 		cancel()
