@@ -58,6 +58,14 @@ public struct SpaceDragTracker {
         self.directionHysteresis = max(1, directionHysteresis)
     }
 
+    /// Build from the user-tunable `TerminalGestureConfig` (issue #1255).
+    public init(config: TerminalGestureConfig) {
+        self.init(activationThreshold: config.spaceActivationThreshold,
+                  initialRepeatDelay: config.spaceInitialRepeatDelay,
+                  repeatInterval: config.spaceRepeatInterval,
+                  directionHysteresis: config.spaceDirectionHysteresis)
+    }
+
     /// Begin a fresh drag (call on gesture `.began`).
     public mutating func begin() {
         heldDirection = nil

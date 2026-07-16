@@ -552,6 +552,42 @@ func testFrameCodec() {
     check(buf.isEmpty, "decode consumes exactly one frame")
 }
 
+// MARK: - Tunable gesture physics (issue #1255)
+
+func testGestureConfig() {
+    section("TerminalGestureConfig — tunable gesture physics (#1255)")
+
+    // Defaults match the values the app previously hard-coded.
+    let d = TerminalGestureConfig.default
+    check(d.scrollFriction == 4.5 && d.spaceActivationThreshold == 22 && d.selectionLongPressDuration == 0.3,
+          "defaults match the shipped hard-coded values")
+
+    // Absent UserDefaults keys fall back to the defaults.
+    let suite = "graith.gesture.smoke.strath"
+    let defaults = UserDefaults(suiteName: suite)!
+    defaults.removePersistentDomain(forName: suite)
+    check(TerminalGestureConfig(userDefaults: defaults) == .default, "empty user defaults ⇒ defaults")
+
+    // A present override wins; other keys still inherit; a bad value is clamped.
+    defaults.set(9.0, forKey: TerminalGestureConfig.Key.scrollFriction)
+    defaults.set(0.0, forKey: TerminalGestureConfig.Key.spaceActivationThreshold)
+    let loaded = TerminalGestureConfig(userDefaults: defaults)
+    check(loaded.scrollFriction == 9.0, "present key overrides the default")
+    check(loaded.spaceActivationThreshold == 1, "out-of-range override is clamped to the floor")
+    check(loaded.scrollSpringStiffness == TerminalGestureConfig.default.scrollSpringStiffness,
+          "untouched keys inherit the default")
+    defaults.removePersistentDomain(forName: suite)
+
+    // The convenience inits thread config into the pure controllers, and the
+    // rubber-band constant stays a platform invariant (not sourced from config).
+    let cfg = TerminalGestureConfig(scrollFriction: 6, spaceActivationThreshold: 30)
+    let controller = TerminalScrollController(config: cfg, cellHeight: 20)
+    check(controller.friction == 6 && controller.rubberBandConstant == 0.55,
+          "scroll controller takes config friction; rubber-band stays invariant")
+    let tracker = SpaceDragTracker(config: cfg)
+    check(tracker.activationThreshold == 30, "space tracker takes config activation threshold")
+}
+
 // MARK: - Entry point
 
 @main
@@ -570,6 +606,7 @@ struct Smoke {
             try await testRealAdapters()
             testSpaceDrag()
             testScroll()
+            testGestureConfig()
             testRepoPickerSelection()
             testFrameCodec()
         } catch {

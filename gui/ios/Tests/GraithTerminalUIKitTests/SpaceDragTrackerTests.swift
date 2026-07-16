@@ -141,4 +141,19 @@ final class SpaceDragTrackerTests: XCTestCase {
         let tracker = SpaceDragTracker(repeatInterval: 0)
         XCTAssertGreaterThan(tracker.repeatInterval, 0)
     }
+
+    func testConfigInitMapsTunables() {
+        // The config-based convenience init (#1255) threads the user-tunable
+        // space-drag values straight through to the tracker's fields.
+        let config = TerminalGestureConfig(
+            spaceActivationThreshold: 30,
+            spaceInitialRepeatDelay: 0.7,
+            spaceRepeatInterval: 0.2,
+            spaceDirectionHysteresis: 2)
+        let tracker = SpaceDragTracker(config: config)
+        XCTAssertEqual(tracker.activationThreshold, 30)
+        XCTAssertEqual(tracker.initialRepeatDelay, 0.7, accuracy: 0.0001)
+        XCTAssertEqual(tracker.repeatInterval, 0.2, accuracy: 0.0001)
+        XCTAssertEqual(tracker.directionHysteresis, 2)
+    }
 }
