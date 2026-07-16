@@ -232,7 +232,7 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 
 	preUsername := cfgUsername
 	if preUsername == "" && snapRepoPath != "" {
-		ctx, cancel := context.WithTimeout(context.Background(), gitUsernameTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), sm.cfg.Git.UsernameTimeoutDuration())
 		preUsername, _ = git.DiscoverGitHubUsername(ctx, snapRepoPath)
 
 		cancel()

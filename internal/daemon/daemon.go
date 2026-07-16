@@ -23,12 +23,6 @@ import (
 	"github.com/fsnotify/fsnotify"
 )
 
-const (
-	gitFetchTimeout    = 2 * time.Minute
-	gitMergeTimeout    = 2 * time.Minute
-	gitUsernameTimeout = 15 * time.Second
-)
-
 // gitPullStartupDelay is how long the git-pull loop waits after the daemon
 // starts before its first tick. A daemon (re)start re-execs the loop from
 // scratch, so waiting a full interval first would leave maintenance repos stale

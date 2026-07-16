@@ -133,6 +133,32 @@ repository = "d0ugal/graith" # GitHub "owner/repo" whose latest release is check
 interval = "1h"             # how long a cached result stays fresh
 timeout = "5s"              # HTTP request timeout for the release check
 
+# External tool executables. graith shells out to a handful of binaries; by
+# default they are looked up on PATH by their conventional name (or, for ps and
+# lsof, their conventional absolute path). Override any of them to support
+# Nix/custom-PATH installs, wrapper binaries, or alternate shells. A value may
+# be a bare command name resolved on PATH ("git", "hub") or an absolute/relative
+# path to a specific binary. Only values you set here are validated at startup
+# (an explicit path must exist and be executable; a bare name must be on PATH);
+# unset entries keep the defaults shown below and are looked up when first used.
+# [tools]
+# git       = "git"            # git executable
+# gh        = "gh"             # GitHub CLI executable
+# shell     = "sh"             # shell for notification/trigger commands (`<shell> -c ...`)
+# osascript = "osascript"      # macOS desktop-notification helper
+# ps        = "/bin/ps"        # process-listing binary
+# lsof      = "/usr/sbin/lsof" # open-files listing binary (macOS FD sampling)
+
+# Git operation timeouts. These bound individual git operations run during
+# session lifecycle. Slower repositories, large fetches, or high-latency remotes
+# can legitimately exceed the defaults. Distinct from [git_pull], which tunes the
+# background maintenance-pull loop. A value that is set but unparseable, zero, or
+# negative is rejected at config load.
+[git]
+fetch_timeout = "2m"      # bounds a single `git fetch` on create/fork/pull
+merge_timeout = "2m"      # bounds a fast-forward merge in the git-pull loop
+username_timeout = "15s"  # bounds GitHub-username discovery (may invoke `gh`)
+
 # Soft delete: `gr delete` marks a session deleted and keeps its worktree and
 # state for the retention window so it can be recovered with `gr restore`. The
 # daemon purges soft-deleted sessions after the window elapses. `gr purge`

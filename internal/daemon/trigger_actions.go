@@ -15,6 +15,7 @@ import (
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/d0ugal/graith/internal/sandbox"
 	"github.com/d0ugal/graith/internal/scenariofile"
+	"github.com/d0ugal/graith/internal/tools"
 )
 
 const triggerCommandOutputCap = 4096
@@ -52,7 +53,7 @@ func (sm *SessionManager) actionCommand(ctx context.Context, t *config.TriggerCo
 	}
 
 	cmdStr := t.Action.Command
-	name, args := "sh", []string{"-c", cmdStr}
+	name, args := tools.Shell(), []string{"-c", cmdStr}
 
 	// For a read-only watch command, writes go to a per-run scratch dir; the
 	// process still runs (cwd) in the worktree so it can read the code.

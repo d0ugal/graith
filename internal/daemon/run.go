@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/tools"
 )
 
 // cleanupLegacyDaemon stops an old daemon that may be listening on the
@@ -81,6 +82,11 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 	defer func() { _ = logFile.Close() }()
 
 	log := slog.New(slog.NewJSONHandler(logFile, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+	// Install the configured external-tool resolver before anything shells out
+	// to git/gh/ps/etc. Validation already ran at config load, so this only fills
+	// defaults for unset fields (issue #1238).
+	tools.Configure(cfg.Tools.Resolved())
 
 	sm := NewSessionManager(cfg, paths, log)
 	sm.configFile = configFile

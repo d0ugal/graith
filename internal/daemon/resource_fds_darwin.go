@@ -7,10 +7,12 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+
+	"github.com/d0ugal/graith/internal/tools"
 )
 
 var lsofOutput = func(pids string) ([]byte, error) {
-	return exec.Command("/usr/sbin/lsof", "-nP", "-a", "-p", pids, "-Fpf").Output()
+	return exec.Command(tools.Lsof(), "-nP", "-a", "-p", pids, "-Fpf").Output()
 }
 
 // macOS does not expose per-process descriptors through /proc. One lsof call

@@ -14,6 +14,7 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/git"
 	"github.com/d0ugal/graith/internal/sandbox"
+	"github.com/d0ugal/graith/internal/tools"
 )
 
 // ReloadConfig loads the config from disk and swaps it in, logging what changed.
@@ -48,6 +49,15 @@ func (sm *SessionManager) applyConfig(newCfg *config.Config) {
 		sm.launch.resize(newCfg.Launch.MaxConcurrentOrDefault())
 	}
 	sm.mu.Unlock()
+
+	// Re-install the external-tool resolver so a changed [tools] block takes
+	// effect on reload without a daemon restart (git timeouts are read live from
+	// sm.cfg, so they need no explicit re-apply). The resolver is process-global,
+	// so this runs outside sm.mu.
+	if old.Tools != newCfg.Tools {
+		tools.Configure(newCfg.Tools.Resolved())
+		sm.log.Info("config changed", "key", "tools")
+	}
 
 	if old.DefaultAgent != newCfg.DefaultAgent {
 		sm.log.Info("config changed", "key", "default_agent", "old", old.DefaultAgent, "new", newCfg.DefaultAgent)

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/d0ugal/graith/internal/tools"
 )
 
 const resourceSampleHistory = 5
@@ -18,7 +20,7 @@ const resourceSampleHistory = 5
 var resourceSampleInterval = 30 * time.Second
 
 var processListOutput = func() ([]byte, error) {
-	cmd := exec.Command("/bin/ps", "-axo", "pid=,pgid=,rss=,%cpu=,comm=")
+	cmd := exec.Command(tools.PS(), "-axo", "pid=,pgid=,rss=,%cpu=,comm=")
 	cmd.Env = append(cmd.Environ(), "LC_ALL=C")
 
 	return cmd.Output()

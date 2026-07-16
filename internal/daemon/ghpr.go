@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/d0ugal/graith/internal/git"
+	"github.com/d0ugal/graith/internal/tools"
 )
 
 // ghpr.go is the GitHub reader for the PR-watch loop. It shells out to the `gh`
@@ -85,7 +86,7 @@ type ghUser struct {
 
 // ghRunner runs a gh command and returns trimmed stdout. Swapped in tests.
 var ghRunner = func(ctx context.Context, dir string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "gh", args...)
+	cmd := exec.CommandContext(ctx, tools.GH(), args...)
 	if dir != "" {
 		cmd.Dir = dir
 	}
@@ -98,7 +99,7 @@ var ghRunner = func(ctx context.Context, dir string, args ...string) (string, er
 
 // ghAvailable reports whether the gh binary is on PATH.
 func ghAvailable() bool {
-	_, err := exec.LookPath("gh")
+	_, err := exec.LookPath(tools.GH())
 	return err == nil
 }
 

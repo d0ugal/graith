@@ -105,7 +105,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 
 	preUsername := preLockCfg.GitHubUsername
 	if preUsername == "" && preRepoRoot != "" && !inPlace {
-		ctx, cancel := context.WithTimeout(context.Background(), gitUsernameTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), sm.cfg.Git.UsernameTimeoutDuration())
 		preUsername, _ = git.DiscoverGitHubUsername(ctx, preRepoRoot)
 
 		cancel()
@@ -409,7 +409,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 
 	// Git worktree setup (default path only — includes fetch which can block).
 	if repoRoot != "" && !isMirror && !inPlace {
-		gitCtx, gitCancel := context.WithTimeout(context.Background(), gitFetchTimeout)
+		gitCtx, gitCancel := context.WithTimeout(context.Background(), sm.cfg.Git.FetchTimeoutDuration())
 		defer gitCancel()
 
 		branchPrefix, _ := config.Expand(cfgSnapshot.BranchPrefix, config.TemplateVars{Username: preUsername})

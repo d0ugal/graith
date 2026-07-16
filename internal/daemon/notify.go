@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"runtime"
 	"time"
+
+	"github.com/d0ugal/graith/internal/tools"
 )
 
 func (sm *SessionManager) onAgentStatusChange(sessionID, sessionName, oldStatus, newStatus string) {
@@ -261,7 +263,7 @@ func (sm *SessionManager) sendNotification(sessionName, status, command string) 
 
 	if command != "" {
 		go func() {
-			cmd := exec.Command("sh", "-c", command)
+			cmd := exec.Command(tools.Shell(), "-c", command)
 
 			cmd.Env = append(os.Environ(),
 				"GRAITH_SESSION_NAME="+sessionName,
@@ -279,7 +281,7 @@ func (sm *SessionManager) sendNotification(sessionName, status, command string) 
 	if runtime.GOOS == "darwin" {
 		script := fmt.Sprintf(`display notification %q with title %q`, message, title)
 		go func() {
-			if err := exec.Command("osascript", "-e", script).Run(); err != nil {
+			if err := exec.Command(tools.OSAScript(), "-e", script).Run(); err != nil {
 				sm.log.Error("osascript notification failed", "err", err)
 			}
 		}()

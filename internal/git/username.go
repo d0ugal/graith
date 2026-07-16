@@ -6,6 +6,8 @@ import (
 	"net/url"
 	"os/exec"
 	"strings"
+
+	"github.com/d0ugal/graith/internal/tools"
 )
 
 func DiscoverGitHubUsername(ctx context.Context, repoPath string) (string, error) {
@@ -27,11 +29,11 @@ func DiscoverGitHubUsername(ctx context.Context, repoPath string) (string, error
 }
 
 func ghCLIUsername(ctx context.Context) (string, error) {
-	if _, err := exec.LookPath("gh"); err != nil {
+	if _, err := exec.LookPath(tools.GH()); err != nil {
 		return "", err
 	}
 
-	cmd := exec.CommandContext(ctx, "gh", "api", "user", "--jq", ".login")
+	cmd := exec.CommandContext(ctx, tools.GH(), "api", "user", "--jq", ".login")
 
 	out, err := cmd.Output()
 	if err != nil {

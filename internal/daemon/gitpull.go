@@ -175,7 +175,7 @@ func (sm *SessionManager) pullIfClean(ctx context.Context, repoPath string) (boo
 		return false, fmt.Errorf("capturing old HEAD: %w", err)
 	}
 
-	fetchCtx, fetchCancel := context.WithTimeout(ctx, gitFetchTimeout)
+	fetchCtx, fetchCancel := context.WithTimeout(ctx, sm.cfg.Git.FetchTimeoutDuration())
 	defer fetchCancel()
 
 	_, fetchStderr, err := git.RunContextEnv(fetchCtx, repoPath, gitNoPromptEnv, "-c", "core.hooksPath=/dev/null", "fetch", "--", remote)
@@ -244,7 +244,7 @@ func (sm *SessionManager) pullIfClean(ctx context.Context, repoPath string) (boo
 		return false, nil
 	}
 
-	mergeCtx, mergeCancel := context.WithTimeout(ctx, gitMergeTimeout)
+	mergeCtx, mergeCancel := context.WithTimeout(ctx, sm.cfg.Git.MergeTimeoutDuration())
 	defer mergeCancel()
 
 	_, stderr, err := git.RunContextEnv(mergeCtx, repoPath, gitNoPromptEnv, "-c", "core.hooksPath=/dev/null", "merge", "--ff-only", "--quiet", "--", mergeTarget)
