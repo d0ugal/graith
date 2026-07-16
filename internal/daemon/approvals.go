@@ -140,10 +140,14 @@ func (sm *SessionManager) headlessPermissionFunc(sessionID string) func(headless
 // is resolved by *denying* (the non-blocking-backend rule from the design),
 // escalating once to the orchestrator inbox so the deny is visible.
 //
-// Resolution order mirrors SubmitApproval's non-human path: a yolo session
-// auto-allows via the auto backend; a disabled approval gate allows; a
-// configured non-blocking backend (auto/external/builtin/localmost) decides;
-// anything that would fall through to the human queue is denied.
+// It is **fail-closed**: a headless session always has `--permission-prompt-tool
+// stdio` installed and is never sandboxed (v1 rejects headless + sandbox), so —
+// unlike the interactive path, where a disabled gate means no interception and
+// the sandbox is the guardrail — a disabled gate here must NOT blanket-allow.
+// Resolution is exactly the design's rule: a yolo session auto-allows via the
+// auto backend; a configured non-blocking backend (auto/external/builtin/
+// localmost) gives a definitive allow/block; everything else — including the
+// default (prompt/human) backend and an unconfigured gate — is denied.
 func (sm *SessionManager) SubmitHeadlessApproval(ctx context.Context, req protocol.ApprovalRequestMsg) protocol.ApprovalDecisionMsg {
 	sm.mu.RLock()
 	approvalsCfg := sm.cfg.Approvals
@@ -155,8 +159,15 @@ func (sm *SessionManager) SubmitHeadlessApproval(ctx context.Context, req protoc
 
 	sm.mu.RUnlock()
 
+	// Bound the backend decision so a hung backend can't stall the agent turn
+	// forever. Most backends self-bound (command/localmost at 5s, auto is
+	// instant), but a caller-side deadline is the backstop the interactive path
+	// gets from its own timeout/queue.
+	tctx, cancel := context.WithTimeout(ctx, approvalsCfg.TimeoutDuration())
+	defer cancel()
+
 	if yolo {
-		if decision, handled := sm.decideWithBackend(ctx, req, approvals.BackendAuto, approvalsCfg); handled {
+		if decision, handled := sm.decideWithBackend(tctx, req, approvals.BackendAuto, approvalsCfg); handled {
 			sm.log.Info("headless approval auto-decided (yolo)",
 				"request_id", req.RequestID, "session", req.SessionID,
 				"tool", req.ToolName, "decision", decision.Decision)
@@ -165,26 +176,20 @@ func (sm *SessionManager) SubmitHeadlessApproval(ctx context.Context, req protoc
 		}
 	}
 
-	// Gate disabled → allow (the operator opted out of gating). Mirrors
-	// SubmitApproval; for headless there is no injected hook to omit, but the
-	// semantics are the same.
-	if !approvalsCfg.HookEnabled() {
-		return protocol.ApprovalDecisionMsg{Decision: approvals.DecisionAllow}
-	}
-
-	if decision, handled := sm.tryApprovalBackend(ctx, req, approvalsCfg); handled {
+	if decision, handled := sm.tryApprovalBackend(tctx, req, approvalsCfg); handled {
 		return decision
 	}
 
 	// Non-blocking rule: a headless session has no human to answer, so a policy
-	// that would queue for one is denied rather than left to hang. Surface it
-	// once to the orchestrator so a silent deny doesn't strand the agent.
+	// that would queue for one (or no non-blocking backend at all) is denied
+	// rather than left to hang or silently allowed. Surface it once to the
+	// orchestrator so a silent deny doesn't strand the agent.
 	//nolint:contextcheck // the escalation is a durable orchestrator notice whose delivery (and any auto-resume) must outlive this approval request, so it deliberately does not inherit the request ctx.
 	sm.escalateHeadlessDenyOnce(req)
 
 	return protocol.ApprovalDecisionMsg{
 		Decision: approvals.DecisionBlock,
-		Reason:   "headless session: tool approval requires a human, which a headless session has none of — denied (configure a non-blocking approvals backend or yolo)",
+		Reason:   "headless session: no non-blocking approval backend gave a decision, and a headless session has no human to ask — denied (configure a non-blocking approvals backend, e.g. auto/external, or run the session with --yolo)",
 	}
 }
 
@@ -192,6 +197,12 @@ func (sm *SessionManager) SubmitHeadlessApproval(ctx context.Context, req protoc
 // first time a headless session's tool approval is denied for want of a
 // non-blocking backend. Escalating once per session avoids flooding the inbox
 // when an agent retries the same blocked tool.
+//
+// The "escalated" flag is set only after a *successful* delivery: if there is no
+// orchestrator yet, or the message store is unavailable, or the publish fails, a
+// later deny retries rather than losing the notice permanently. Sequential
+// can_use_tool asks (the CLI blocks on each) make a duplicate-send race
+// effectively impossible, so the plain check-then-set is sufficient.
 func (sm *SessionManager) escalateHeadlessDenyOnce(req protocol.ApprovalRequestMsg) {
 	sm.mu.Lock()
 
@@ -200,8 +211,6 @@ func (sm *SessionManager) escalateHeadlessDenyOnce(req protocol.ApprovalRequestM
 
 		return
 	}
-
-	sm.headlessEscalated[req.SessionID] = true
 
 	sessName := req.SessionID
 	if sess, ok := sm.state.Sessions[req.SessionID]; ok && sess.Name != "" {
@@ -212,13 +221,19 @@ func (sm *SessionManager) escalateHeadlessDenyOnce(req protocol.ApprovalRequestM
 	sm.mu.Unlock()
 
 	if orchID == "" {
-		return
+		return // no orchestrator to notify yet — retry on a later deny
 	}
 
 	body := fmt.Sprintf(
-		"Headless session %q was denied a %q tool call: its approval policy would need a human, which headless sessions can't wait on. Set a non-blocking approvals backend (auto/external) or run it yolo.",
+		"Headless session %q was denied a %q tool call: no non-blocking approval backend gave a decision, and a headless session has no human to ask. Set a non-blocking approvals backend (auto/external) or run it with --yolo.",
 		sessName, req.ToolName)
-	_ = sm.notifyFromDaemon(orchID, body)
+	if err := sm.notifyFromDaemon(orchID, body); err != nil {
+		return // delivery failed — leave unmarked so a later deny retries
+	}
+
+	sm.mu.Lock()
+	sm.headlessEscalated[req.SessionID] = true
+	sm.mu.Unlock()
 }
 
 // RespondToApproval delivers a user decision to a waiting approval request.

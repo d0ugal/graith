@@ -567,9 +567,11 @@ func TestSubmitHeadlessApprovalYoloAllows(t *testing.T) {
 	}
 }
 
-// TestSubmitHeadlessApprovalGateDisabledAllows: with the approval gate off, a
-// headless session allows (the operator opted out of gating).
-func TestSubmitHeadlessApprovalGateDisabledAllows(t *testing.T) {
+// TestSubmitHeadlessApprovalGateDisabledDenies: a headless session is fail-closed
+// — it always installs stdio permission routing and is never sandboxed, so a
+// disabled/unset approval gate must NOT blanket-allow (unlike the interactive
+// path). With no yolo and no non-blocking backend, it denies.
+func TestSubmitHeadlessApprovalGateDisabledDenies(t *testing.T) {
 	sm := newTestSessionManager(t)
 
 	disabled := false
@@ -583,8 +585,50 @@ func TestSubmitHeadlessApprovalGateDisabledAllows(t *testing.T) {
 		RequestID: "neep", SessionID: "braw", ToolName: "Bash",
 	})
 
+	if decision.Decision != "block" {
+		t.Fatalf("disabled gate should fail closed (deny) for headless, got %q", decision.Decision)
+	}
+}
+
+// TestSubmitHeadlessApprovalDefaultGateDenies: the daemon default (Enabled unset,
+// backend prompt) must also deny, not allow — this is the fail-open case Codex
+// flagged. A headless session with no explicit approval config gets no free
+// pass.
+func TestSubmitHeadlessApprovalDefaultGateDenies(t *testing.T) {
+	sm := newTestSessionManager(t)
+	sm.cfg.Approvals.Enabled = nil // daemon default: gate unset
+
+	sm.mu.Lock()
+	sm.state.Sessions["braw"] = &SessionState{Name: "bonnie-session"}
+	sm.mu.Unlock()
+
+	decision := sm.SubmitHeadlessApproval(context.Background(), protocol.ApprovalRequestMsg{
+		RequestID: "neep", SessionID: "braw", ToolName: "Write",
+	})
+
+	if decision.Decision != "block" {
+		t.Fatalf("unset gate should fail closed for headless, got %q", decision.Decision)
+	}
+}
+
+// TestSubmitHeadlessApprovalBackendDecidesEvenWhenGateUnset: a configured
+// non-blocking backend still decides even with the gate unset — the way to let a
+// headless session use tools without yolo.
+func TestSubmitHeadlessApprovalBackendDecidesEvenWhenGateUnset(t *testing.T) {
+	sm := newTestSessionManager(t)
+	sm.cfg.Approvals.Enabled = nil
+	sm.cfg.Approvals.Backend = "auto"
+
+	sm.mu.Lock()
+	sm.state.Sessions["braw"] = &SessionState{Name: "bonnie-session"}
+	sm.mu.Unlock()
+
+	decision := sm.SubmitHeadlessApproval(context.Background(), protocol.ApprovalRequestMsg{
+		RequestID: "neep", SessionID: "braw", ToolName: "Bash",
+	})
+
 	if decision.Decision != "allow" {
-		t.Fatalf("disabled gate should allow, got %q", decision.Decision)
+		t.Fatalf("a configured auto backend should allow even with gate unset, got %q", decision.Decision)
 	}
 }
 
