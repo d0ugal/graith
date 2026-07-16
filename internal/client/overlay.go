@@ -151,6 +151,11 @@ var (
 	colorYellow  = lipgloss.Color("#FFD75F")
 	colorPreview = lipgloss.Color("#555555")
 	colorPanel   = lipgloss.Color("#1a1a1a")
+	// colorSelectBg is the background of the highlighted row in the picker, so
+	// the whole selected line stands out rather than just the "> " cursor. Dark
+	// and purple-tinted to echo the accent used for the selected name and the
+	// active view label.
+	colorSelectBg = lipgloss.Color("#2f2b45")
 )
 
 type sessionItem struct {
@@ -685,15 +690,56 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 
 	line := b.String()
 
-	if selected {
-		line = lipgloss.NewStyle().Bold(true).Render(line)
-	}
-
 	if width > 0 && lipgloss.Width(line) > width {
 		line = ansi.Truncate(line, width, "")
 	}
 
+	if selected {
+		line = highlightSelectedRow(line, width)
+	}
+
 	_, _ = fmt.Fprint(w, line)
+}
+
+// highlightSelectedRow makes the picker's selected row stand out by giving the
+// whole line a subtle background (and keeping it bold), so the eye doesn't have
+// to trace the "> " cursor across a wide terminal to find the current row.
+//
+// A plain background wrap won't do: each column is pre-rendered with its own
+// foreground style and ends in a full SGR reset ("\x1b[m"), which also clears
+// the background — so the highlight would stop at the first styled segment. We
+// pad the line to the full width and re-open the background after every reset
+// so it spans the whole row.
+func highlightSelectedRow(line string, width int) string {
+	open := selectRowOpen()
+	if open == "" {
+		// No-color profile (e.g. redirected output): nothing to highlight.
+		return line
+	}
+
+	if width > 0 {
+		if vis := lipgloss.Width(line); vis < width {
+			line += strings.Repeat(" ", width-vis)
+		}
+	}
+
+	line = strings.ReplaceAll(line, "\x1b[0m", "\x1b[0m"+open)
+	line = strings.ReplaceAll(line, "\x1b[m", "\x1b[m"+open)
+
+	return open + line + "\x1b[0m"
+}
+
+// selectRowOpen returns the SGR sequence that opens the selected-row style
+// (bold + background), derived through lipgloss so it honours the active color
+// profile (truecolor is downsampled on limited terminals). Returns "" when the
+// profile emits no color at all.
+func selectRowOpen() string {
+	probe := lipgloss.NewStyle().Bold(true).Background(colorSelectBg).Render("x")
+	if i := strings.IndexByte(probe, 'x'); i > 0 {
+		return probe[:i]
+	}
+
+	return ""
 }
 
 type previewMsg struct {

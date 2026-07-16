@@ -3178,12 +3178,33 @@ func TestCompactDelegate_RenderSelectedVsUnselected(t *testing.T) {
 	d.Render(&selectedBuf, l, 1, items[1])
 	d.Render(&unselectedBuf, l, 2, items[2])
 
-	if !strings.Contains(selectedBuf.String(), ">") {
+	selected := selectedBuf.String()
+	unselected := unselectedBuf.String()
+
+	if !strings.Contains(selected, ">") {
 		t.Error("selected item should contain '>'")
 	}
 
-	if strings.Contains(unselectedBuf.String(), ">") {
+	if strings.Contains(unselected, ">") {
 		t.Error("unselected item should not contain '>'")
+	}
+
+	// The selected row is highlighted with a full-width background so the whole
+	// line stands out, not just the "> " cursor. The background SGR must be
+	// present on the selected row and absent from the unselected one, and the
+	// highlight must span the full list width.
+	if open := selectRowOpen(); open != "" {
+		if !strings.Contains(selected, open) {
+			t.Errorf("selected row should carry the highlight background %q, got %q", open, selected)
+		}
+
+		if strings.Contains(unselected, open) {
+			t.Errorf("unselected row should not carry the highlight background, got %q", unselected)
+		}
+
+		if vis := lipgloss.Width(selected); vis != l.Width() {
+			t.Errorf("selected row highlight should span the full width %d, got visible width %d", l.Width(), vis)
+		}
 	}
 }
 
