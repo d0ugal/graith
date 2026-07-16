@@ -32,7 +32,17 @@ func detectPromptInjection(agentName string) promptInjectionMethod {
 }
 
 func (sm *SessionManager) injectPrompt(agentName, worktreePath string) (extraArgs []string, err error) {
-	prompt := sm.Config().AgentPrompt
+	return promptInjectionArgs(agentName, sm.Config().AgentPrompt, worktreePath)
+}
+
+// promptInjectionArgs adapts an already-assembled prompt to the injection
+// mechanism the named agent actually supports, returning the launch args (and
+// performing any side effects such as writing a Cursor rule file). It is the
+// single agent-aware seam shared by ordinary sessions (injectPrompt) and the
+// orchestrator (buildOrchestratorPrompt) so that a non-Claude agent never gets
+// launched with Claude's --append-system-prompt flag. An empty prompt or an
+// agent with no supported injection method yields no args.
+func promptInjectionArgs(agentName, prompt, worktreePath string) (extraArgs []string, err error) {
 	if prompt == "" {
 		return nil, nil
 	}

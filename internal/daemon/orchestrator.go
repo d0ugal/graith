@@ -153,7 +153,12 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 		return SessionState{}, fmt.Errorf("expand orchestrator agent args: %w", err)
 	}
 
-	promptArgs := sm.buildOrchestratorPrompt(agentName, orchCfg, cfgSnap.AvailableRepoPaths(), cfgSnap.Notifications.Enabled)
+	promptArgs, err := sm.buildOrchestratorPrompt(agentName, orchCfg, cfgSnap.AvailableRepoPaths(), cfgSnap.Notifications.Enabled, scratchDir)
+	if err != nil {
+		sm.rollbackOrchestratorCreate(id)
+		return SessionState{}, fmt.Errorf("build orchestrator prompt: %w", err)
+	}
+
 	expandedArgs = append(expandedArgs, promptArgs...)
 
 	logPath := filepath.Join(sm.paths.LogDir, id+".log")
@@ -289,11 +294,16 @@ func (sm *SessionManager) rollbackOrchestratorCreate(id string) {
 	_ = os.Remove(sm.safehouseFragmentPath(id))
 }
 
-func (sm *SessionManager) buildOrchestratorPrompt(agentName string, orchCfg config.OrchestratorConfig, repoPaths []string, notifyEnabled bool) []string {
-	if agentName != "claude" {
-		return nil
-	}
-
+// buildOrchestratorPrompt assembles the orchestrator's system prompt from
+// config (inline prompt, prompt_file, available repos, notifications) and then
+// routes it through the agent-aware promptInjectionArgs adapter so that a
+// Codex, Cursor, or custom orchestrator agent receives the injection mechanism
+// it actually supports instead of Claude's --append-system-prompt flag. For
+// Cursor the rule file is written under worktreePath (the orchestrator scratch
+// dir); an agent with no supported injection method silently gets no prompt
+// args. It returns an error only when a side-effecting injection (e.g. writing
+// the Cursor rule) fails.
+func (sm *SessionManager) buildOrchestratorPrompt(agentName string, orchCfg config.OrchestratorConfig, repoPaths []string, notifyEnabled bool, worktreePath string) ([]string, error) {
 	prompt := orchCfg.Prompt
 
 	if orchCfg.PromptFile != "" {
@@ -327,11 +337,7 @@ func (sm *SessionManager) buildOrchestratorPrompt(agentName string, orchCfg conf
 		prompt += orchestratorNotificationsSection()
 	}
 
-	if prompt == "" {
-		return nil
-	}
-
-	return []string{"--append-system-prompt", prompt}
+	return promptInjectionArgs(agentName, prompt, worktreePath)
 }
 
 // orchestratorNotificationsSection tells the orchestrator it can proactively
