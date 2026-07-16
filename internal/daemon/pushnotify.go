@@ -15,11 +15,6 @@ import (
 	"github.com/d0ugal/graith/internal/tools"
 )
 
-// pushCoalesceWindow is the window within which an identical (title+message+
-// priority) push notification is dropped as a duplicate, to coalesce rapid-fire
-// events (e.g. a flapping check firing the same alert repeatedly).
-const pushCoalesceWindow = 30 * time.Second
-
 // pushNotification is a proactive user-facing notification requested via
 // `gr notify` or a trigger's notify_on_complete.
 type pushNotification struct {
@@ -126,6 +121,7 @@ func (sm *SessionManager) SendPushNotification(n pushNotification) (bool, string
 	}
 
 	notifCfg := sm.Config().Notifications
+	coalesceWindow := notifCfg.Timing.CoalesceWindowDuration()
 	key := priority + "|" + title + "|" + message
 	now := time.Now()
 
@@ -141,7 +137,7 @@ func (sm *SessionManager) SendPushNotification(n pushNotification) (bool, string
 		sm.pushCoalesce = make(map[string]time.Time)
 	}
 
-	prunePushCoalesce(sm.pushCoalesce, now, pushCoalesceWindow)
+	prunePushCoalesce(sm.pushCoalesce, now, coalesceWindow)
 
 	res := evaluatePushGate(pushGateInput{
 		cfg:            notifCfg,
@@ -149,7 +145,7 @@ func (sm *SessionManager) SendPushNotification(n pushNotification) (bool, string
 		now:            now,
 		recent:         sm.pushLog,
 		coalesceAt:     sm.pushCoalesce[key],
-		coalesceWindow: pushCoalesceWindow,
+		coalesceWindow: coalesceWindow,
 	})
 
 	if !res.deliver {
@@ -226,10 +222,14 @@ func removeOneTimestamp(log []time.Time, t time.Time) []time.Time {
 // available here, so it is resolved by dispatchCommandBackend at call sites that
 // hold the config. This indirection keeps evaluatePushGate pure and testable;
 // production wiring sets sm.pushDispatch in Run.
+//
+// It is only reached when no dispatch closure is installed (never in production,
+// where Run sets sm.pushDispatch to newPushDispatch), so it uses the default
+// dispatch timeout rather than the configured one.
 func defaultPushDispatch(backend, title, message, priority string) error {
 	switch backend {
 	case "macos":
-		return dispatchMacNotification(title, message, priority)
+		return dispatchMacNotification(title, message, priority, config.NotifyDispatchTimeoutDefault)
 	default:
 		// "command" needs the configured command string; it is dispatched via the
 		// closure installed on sm.pushDispatch (see newPushDispatch). Reaching here
@@ -242,26 +242,24 @@ func defaultPushDispatch(backend, title, message, priority string) error {
 // resolving the "command" backend against the live config each call.
 func (sm *SessionManager) newPushDispatch() func(backend, title, message, priority string) error {
 	return func(backend, title, message, priority string) error {
+		notifCfg := sm.Config().Notifications
+		timeout := notifCfg.Timing.DispatchTimeoutDuration()
+
 		switch backend {
 		case "macos":
-			return dispatchMacNotification(title, message, priority)
+			return dispatchMacNotification(title, message, priority, timeout)
 		case "command":
-			cmdStr := strings.TrimSpace(sm.Config().Notifications.Command)
+			cmdStr := strings.TrimSpace(notifCfg.Command)
 			if cmdStr == "" {
 				return errors.New("backend=\"command\" but no command configured")
 			}
 
-			return dispatchCommandBackend(cmdStr, title, message, priority)
+			return dispatchCommandBackend(cmdStr, title, message, priority, timeout)
 		default:
 			return fmt.Errorf("push backend %q not available", backend)
 		}
 	}
 }
-
-// pushDispatchTimeout bounds a single backend dispatch. SendPushNotification is
-// called synchronously from the handler (and from trigger-completion
-// goroutines), so a hung osascript/command must not block the caller forever.
-const pushDispatchTimeout = 15 * time.Second
 
 // dispatchMacNotification shows a macOS desktop notification. On non-darwin
 // hosts it is a no-op error so the caller reports the backend as unavailable
@@ -273,13 +271,13 @@ const pushDispatchTimeout = 15 * time.Second
 // Settings > Notifications. If the helper isn't installed — or is installed but
 // fails — it falls back to osascript, whose notifications show up under "Script
 // Editor" but still reach the user (graceful degradation, issue #1094).
-func dispatchMacNotification(title, message, priority string) error {
+func dispatchMacNotification(title, message, priority string, timeout time.Duration) error {
 	if runtime.GOOS != "darwin" {
 		return fmt.Errorf("macos backend requires macOS (running on %s)", runtime.GOOS)
 	}
 
 	if exe, ok := findMacNotifierApp(); ok {
-		err := dispatchViaNotifierApp(exe, title, message, priority)
+		err := dispatchViaNotifierApp(exe, title, message, priority, timeout)
 		if err == nil {
 			return nil
 		}
@@ -296,7 +294,7 @@ func dispatchMacNotification(title, message, priority string) error {
 		// notification still reaches the user.
 	}
 
-	return dispatchViaOsascript(title, message, priority)
+	return dispatchViaOsascript(title, message, priority, timeout)
 }
 
 // macNotifierExecutable is the path, relative to the .app bundle root, of the
@@ -409,8 +407,8 @@ func resolveNotifierExecutable(path string) (string, bool) {
 // back; the dedicated notifierDeniedExitCode is mapped to
 // errNotifierPermissionDenied so the caller can suppress the fallback for an
 // explicit user opt-out.
-func dispatchViaNotifierApp(exe, title, message, priority string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), pushDispatchTimeout)
+func dispatchViaNotifierApp(exe, title, message, priority string, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	err := exec.CommandContext(ctx, exe, title, message, priority).Run()
@@ -429,13 +427,13 @@ func dispatchViaNotifierApp(exe, title, message, priority string) error {
 // dispatchViaOsascript shows a notification via osascript. High-priority
 // notifications play a sound. This is the fallback when the bundled helper
 // isn't available.
-func dispatchViaOsascript(title, message, priority string) error {
+func dispatchViaOsascript(title, message, priority string, timeout time.Duration) error {
 	script := fmt.Sprintf("display notification %s with title %s", osaQuote(message), osaQuote(title))
 	if priority == config.NotifyPriorityHigh {
 		script += " sound name " + osaQuote("Ping")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), pushDispatchTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	if err := exec.CommandContext(ctx, tools.OSAScript(), "-e", script).Run(); err != nil {
@@ -461,9 +459,10 @@ func osaQuote(s string) string {
 
 // dispatchCommandBackend runs the configured shell command with GRAITH_NOTIFY_*
 // env vars, mirroring the status-change custom-command escape hatch. It is
-// bounded by pushDispatchTimeout so a hung command can't wedge the caller.
-func dispatchCommandBackend(command, title, message, priority string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), pushDispatchTimeout)
+// bounded by the configured dispatch timeout so a hung command can't wedge the
+// caller.
+func dispatchCommandBackend(command, title, message, priority string, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, tools.Shell(), "-c", command)

@@ -121,7 +121,8 @@ func (sm *SessionManager) notifyInbox(targetID, senderID, senderName string) {
 	}
 
 	if sm.HasAttachedClient(targetID) {
-		ptySess.WaitForUserIdle(10*time.Second, 2*time.Minute)
+		timing := sm.Config().Notifications.Timing
+		ptySess.WaitForUserIdle(timing.InboxIdleTimeoutDuration(), timing.InboxMaxWaitDuration())
 	}
 
 	if err := ptySess.WriteInputAndSubmit([]byte(hint)); err != nil {
@@ -166,10 +167,12 @@ func (sm *SessionManager) notifyUnreadInbox(sessionID string) {
 		return
 	}
 
+	timing := sm.Config().Notifications.Timing
+
 	sm.mu.Lock()
 
 	last, ok := sm.lastInboxNotifyAt[sessionID]
-	if ok && time.Since(last) < 30*time.Second {
+	if ok && time.Since(last) < timing.InboxCooldownDuration() {
 		sm.mu.Unlock()
 		return
 	}
@@ -183,9 +186,9 @@ func (sm *SessionManager) notifyUnreadInbox(sessionID string) {
 	}
 
 	if sm.HasAttachedClient(sessionID) {
-		ptySess.WaitForUserIdle(10*time.Second, 2*time.Minute)
+		ptySess.WaitForUserIdle(timing.InboxIdleTimeoutDuration(), timing.InboxMaxWaitDuration())
 	} else {
-		time.Sleep(5 * time.Second)
+		time.Sleep(timing.InboxDetachedDelayDuration())
 	}
 
 	count := sm.messages.TotalUnread(sessionID)
