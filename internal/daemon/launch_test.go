@@ -258,11 +258,8 @@ func TestReleaseLaunchSlotWhenSettledFirstOutput(t *testing.T) {
 
 func TestReleaseLaunchSlotWhenSettledTimeout(t *testing.T) {
 	// Short settle timeout, silent session: the slot must free on the timeout.
-	launchSlotPollInterval = 20 * time.Millisecond
-
-	t.Cleanup(func() { launchSlotPollInterval = 100 * time.Millisecond })
-
-	sm := newLaunchTestSM(t, config.LaunchConfig{MaxConcurrent: 1, SettleTimeout: "300ms"})
+	// The shrunk slot_poll_interval comes from config, not a global.
+	sm := newLaunchTestSM(t, config.LaunchConfig{MaxConcurrent: 1, SettleTimeout: "300ms", SlotPollInterval: "20ms"})
 
 	slot, err := sm.launch.acquire(context.Background())
 	if err != nil {
@@ -490,7 +487,7 @@ func TestCheckStuckLaunchesRestartsAndMarksFresh(t *testing.T) {
 }
 
 func TestRecoverStuckLaunchBudgetExhausted(t *testing.T) {
-	sm := newLaunchTestSM(t, config.LaunchConfig{StartupTimeout: "2m"})
+	sm := newLaunchTestSM(t, config.LaunchConfig{StartupTimeout: "2m", MaxRestarts: config.LaunchMaxRestartsDefault})
 
 	restarted := false
 	sm.restartStuck = func(string, uint16, uint16) error { restarted = true; return nil }
@@ -499,12 +496,12 @@ func TestRecoverStuckLaunchBudgetExhausted(t *testing.T) {
 	sm.state.Sessions["thrawn"] = &SessionState{
 		ID: "thrawn", Name: "thrawn", Status: StatusRunning,
 		AgentStatus: "unknown", StatusChangedAt: time.Now().Add(-5 * time.Minute),
-		StuckRestarts: maxStuckRestarts,
+		StuckRestarts: config.LaunchMaxRestartsDefault,
 	}
 	sm.sessions["thrawn"] = pty
 
 	sm.recoverStuckLaunch(stuckSession{
-		id: "thrawn", name: "thrawn", attempts: maxStuckRestarts, pty: pty,
+		id: "thrawn", name: "thrawn", attempts: config.LaunchMaxRestartsDefault, pty: pty,
 	}, 2*time.Minute)
 
 	if restarted {

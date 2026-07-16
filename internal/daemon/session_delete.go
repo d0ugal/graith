@@ -8,6 +8,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/d0ugal/graith/internal/config"
 	grpty "github.com/d0ugal/graith/internal/pty"
 )
 
@@ -711,10 +712,16 @@ func (sm *SessionManager) collectDescendants(rootID string) []string {
 }
 
 // killProcessGroup sends SIGTERM to the process group led by pid, waits up to
-// 5 seconds for the group to exit, then sends SIGKILL if still alive.
-func killProcessGroup(pid int) error {
+// grace for the group to exit, then sends SIGKILL if still alive. A non-positive
+// grace falls back to the built-in default (the daemon passes the [lifecycle]
+// process_kill_grace policy). The escalation ORDER (SIGTERM → SIGKILL) is fixed.
+func killProcessGroup(pid int, grace time.Duration) error {
 	if pid <= 1 {
 		return fmt.Errorf("refusing to signal pid %d", pid)
+	}
+
+	if grace <= 0 {
+		grace = config.ProcessKillGraceDefault
 	}
 
 	pgid := -pid
@@ -726,7 +733,7 @@ func killProcessGroup(pid int) error {
 		return fmt.Errorf("SIGTERM to pgid %d: %w", pgid, err)
 	}
 
-	deadline := time.After(5 * time.Second)
+	deadline := time.After(grace)
 
 	tick := time.NewTicker(100 * time.Millisecond)
 	defer tick.Stop()
@@ -766,7 +773,7 @@ func (sm *SessionManager) killVerifiedProcess(pid int, startTime int64) (killed 
 		return false, fmt.Errorf("PID %d identity mismatch (recorded=%d, current=%d)", pid, startTime, current)
 	}
 
-	err = killProcessGroup(pid)
+	err = killProcessGroup(pid, sm.Config().Lifecycle.ProcessKillGraceDuration())
 
 	return err == nil, err
 }
@@ -801,6 +808,8 @@ func (sm *SessionManager) cleanupOrphanedProcesses() {
 	}
 	sm.mu.Unlock()
 
+	grace := sm.Config().Lifecycle.ProcessKillGraceDuration()
+
 	for _, c := range candidates {
 		verified := c.pidStartTime != 0
 		if verified {
@@ -813,7 +822,7 @@ func (sm *SessionManager) cleanupOrphanedProcesses() {
 		if verified {
 			sm.log.Warn("killing orphaned process group",
 				"id", c.id, "pid", c.pid)
-			err := killProcessGroup(c.pid)
+			err := killProcessGroup(c.pid, grace)
 
 			sm.mu.Lock()
 			if sess := sm.state.Sessions[c.id]; sess != nil {

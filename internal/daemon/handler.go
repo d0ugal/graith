@@ -68,8 +68,12 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 		// attachedReadOnly drops this connection's input frames when the current
 		// attach was requested read-only (issue #31). Set on attach, cleared on
 		// detach; it is the server-side backstop to the client's input gate.
-		attachedReadOnly       bool
-		clientRows, clientCols uint16 = 24, 80
+		attachedReadOnly bool
+		// The default geometry used until the client reports its own (or for a
+		// session created over a connection that never sends geometry) comes from
+		// the [lifecycle] policy.
+		clientRows = sm.Config().Lifecycle.DefaultRowsOrDefault()
+		clientCols = sm.Config().Lifecycle.DefaultColsOrDefault()
 		// poppedDeviceID is the device ID proven via proof-of-possession on this
 		// connection (set once a valid auth_proof is received); empty means the
 		// remote caller has not completed PoP and stays roleNone.

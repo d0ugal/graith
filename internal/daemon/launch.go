@@ -8,22 +8,6 @@ import (
 	"github.com/d0ugal/graith/internal/detector"
 )
 
-// maxStuckRestarts caps how many consecutive startup-watchdog restarts a single
-// session may receive before it is marked errored instead of being restarted
-// again. This prevents a restart storm for a session that is fundamentally
-// broken (as opposed to merely losing a launch race). The counter resets to 0
-// once the session produces output (see resetStuckRestartsLocked).
-const maxStuckRestarts = 3
-
-// watchdogInterval is how often the startup watchdog scans for stuck sessions.
-// It is a var so tests can shrink it.
-var watchdogInterval = 15 * time.Second
-
-// launchSlotPollInterval is how often releaseLaunchSlotWhenSettled polls a
-// freshly-spawned session for its first output. It is a var so tests can shrink
-// it.
-var launchSlotPollInterval = 100 * time.Millisecond
-
 // launchThrottle bounds how many agent spawns may be in their startup window at
 // once (#1092). A slot is acquired just before the PTY spawn and held across the
 // heavyweight agent-init window — released only when the session produces its
@@ -155,9 +139,9 @@ func (sm *SessionManager) releaseLaunchSlotWhenSettled(slot launchSlot, id, name
 		return
 	}
 
-	// Read the poll interval here, in the caller's goroutine, so a test that
-	// swaps the global (and restores it via cleanup) never races the reader.
-	poll := launchSlotPollInterval
+	// Read the poll interval here, in the caller's goroutine, so the background
+	// goroutine never races a concurrent config reload.
+	poll := sm.Config().Launch.SlotPollIntervalDuration()
 
 	// Deliberately NOT tracked by sm.watchers: this goroutine only releases a
 	// throttle slot and logs — no post-exit state work — and it always
@@ -211,7 +195,7 @@ func (sm *SessionManager) releaseLaunchSlotWhenSettled(slot launchSlot, id, name
 // "unknown" past the configured startup_timeout — and restarts them fresh
 // (#1092). The timeout is re-read each tick so config reloads take effect.
 func (sm *SessionManager) RunStartupWatchdogLoop(ctx context.Context) {
-	ticker := time.NewTicker(watchdogInterval)
+	ticker := time.NewTicker(sm.Config().Launch.WatchdogIntervalDuration())
 	defer ticker.Stop()
 
 	for {
@@ -353,7 +337,9 @@ func (sm *SessionManager) recoverStuckLaunch(st stuckSession, timeout time.Durat
 		return
 	}
 
-	giveUp := s.StuckRestarts >= maxStuckRestarts
+	// sm.mu is held here, so sm.cfg is read directly rather than via Config()
+	// (which would take the read lock and deadlock).
+	giveUp := s.StuckRestarts >= sm.cfg.Launch.MaxRestartsOrDefault()
 	if giveUp {
 		s.StopReason = StopReasonWatchdog
 		s.Status = StatusErrored
@@ -388,9 +374,10 @@ func (sm *SessionManager) recoverStuckLaunch(st stuckSession, timeout time.Durat
 
 	sm.log.Warn("startup watchdog restarting stuck session", logCtx...)
 
-	// Restart kills the live PTY, waits for exit, then resumes. Use a small
+	// Restart kills the live PTY, waits for exit, then resumes. Use the configured
 	// default geometry; the client resizes on attach.
-	if err := sm.doRestartStuck(st.id, 24, 80); err != nil {
+	lc := sm.Config().Lifecycle
+	if err := sm.doRestartStuck(st.id, lc.DefaultRowsOrDefault(), lc.DefaultColsOrDefault()); err != nil {
 		sm.log.Error("startup watchdog failed to restart stuck session", "id", st.id, "err", err)
 		return
 	}

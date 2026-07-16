@@ -64,6 +64,7 @@ type Config struct {
 	Migration        MigrationConfig    `toml:"migration"`        // [migration] table (issue #1250)
 	Transcript       TranscriptConfig   `toml:"transcript"`       // [transcript] table (issue #1250)
 	Limits           LimitsConfig       `toml:"limits"`           // [limits] table (issue #1252)
+	Lifecycle        LifecycleConfig    `toml:"lifecycle"`        // [lifecycle] table (issue #1243)
 }
 
 // ConfigReloadDebounceDefault is the quiet period the config-file watcher waits
@@ -755,6 +756,22 @@ func (r RemoteConfig) Validate() error {
 	return nil
 }
 
+// validatePositiveDurationField appends an error when val is set but does not
+// parse or is non-positive. An empty val is accepted (means "use the default").
+// Shared by the lifecycle/launch validation so a set-but-invalid cadence or wait
+// fails at load rather than silently falling back to the accessor default.
+func validatePositiveDurationField(errs *[]error, name, val string) {
+	if strings.TrimSpace(val) == "" {
+		return
+	}
+
+	if d, err := ParseDurationWithDays(val); err != nil {
+		*errs = append(*errs, fmt.Errorf("%s %q: %w", name, val, err))
+	} else if d <= 0 {
+		*errs = append(*errs, fmt.Errorf("%s %q: must be greater than zero", name, val))
+	}
+}
+
 // validateBoundedDuration reports a hard error if s is set but does not parse or
 // falls outside [min, max]. An empty s is accepted (means "use the default").
 func validateBoundedDuration(field, s string, minDur, maxDur time.Duration) error {
@@ -995,14 +1012,35 @@ type LaunchConfig struct {
 	// the session's first output before releasing it anyway. Empty uses the
 	// default (LaunchSettleTimeoutDefault); "0" releases immediately after spawn.
 	SettleTimeout string `toml:"settle_timeout"`
+	// MaxRestarts caps how many consecutive startup-watchdog restarts a single
+	// session may receive before it is marked errored instead of restarted again,
+	// preventing a restart storm for a fundamentally-broken session (#1092). The
+	// counter resets once the session produces output. Values < 1 fall back to the
+	// default (LaunchMaxRestartsDefault). To turn the watchdog off entirely, set
+	// startup_timeout to "0" rather than dropping this to zero.
+	MaxRestarts int `toml:"max_restarts"`
+	// WatchdogInterval is how often the startup watchdog scans for stuck sessions.
+	// Empty, unparseable, or non-positive uses the default
+	// (LaunchWatchdogIntervalDefault); a zero cadence would busy-loop. Read once
+	// when the watchdog loop starts, so a change takes effect on the next daemon
+	// (re)start.
+	WatchdogInterval string `toml:"watchdog_interval"`
+	// SlotPollInterval is how often a held throttle slot polls a freshly-spawned
+	// session for its first output before releasing. Empty, unparseable, or
+	// non-positive uses the default (LaunchSlotPollIntervalDefault); a zero cadence
+	// would busy-loop.
+	SlotPollInterval string `toml:"slot_poll_interval"`
 }
 
 // Launch tuning defaults. MaxConcurrent defaults to 3 because the #1092
 // evidence showed ~4 concurrent startups completing fine while the 5th stalled.
 const (
-	LaunchMaxConcurrentDefault  = 3
-	LaunchStartupTimeoutDefault = 3 * time.Minute
-	LaunchSettleTimeoutDefault  = 10 * time.Second
+	LaunchMaxConcurrentDefault    = 3
+	LaunchStartupTimeoutDefault   = 3 * time.Minute
+	LaunchSettleTimeoutDefault    = 10 * time.Second
+	LaunchMaxRestartsDefault      = 3
+	LaunchWatchdogIntervalDefault = 15 * time.Second
+	LaunchSlotPollIntervalDefault = 100 * time.Millisecond
 )
 
 // MaxConcurrentOrDefault returns the configured concurrency, clamped to a
@@ -1044,6 +1082,215 @@ func (l LaunchConfig) SettleTimeoutDuration() time.Duration {
 	}
 
 	return d
+}
+
+// MaxRestartsOrDefault returns the stuck-launch restart budget, or the default
+// when < 1 (mirrors MaxConcurrentOrDefault). The watchdog is disabled via
+// startup_timeout = "0", not by zeroing this.
+func (l LaunchConfig) MaxRestartsOrDefault() int {
+	if l.MaxRestarts < 1 {
+		return LaunchMaxRestartsDefault
+	}
+
+	return l.MaxRestarts
+}
+
+// WatchdogIntervalDuration returns the watchdog scan cadence, or the default
+// when unset, unparseable, or non-positive (a zero cadence would busy-loop).
+func (l LaunchConfig) WatchdogIntervalDuration() time.Duration {
+	return positiveDurationOrDefault(l.WatchdogInterval, LaunchWatchdogIntervalDefault)
+}
+
+// SlotPollIntervalDuration returns the settle poll cadence, or the default when
+// unset, unparseable, or non-positive (a zero cadence would busy-loop).
+func (l LaunchConfig) SlotPollIntervalDuration() time.Duration {
+	return positiveDurationOrDefault(l.SlotPollInterval, LaunchSlotPollIntervalDefault)
+}
+
+// LifecycleConfig is the [lifecycle] block gathering the session-lifecycle and
+// PTY policy that was previously spread as fixed constants and bare literals
+// across the daemon, headless, and pty packages (issue #1243): the
+// convert-to-interactive signal-escalation waits, the headless interrupt
+// round-trip, mass-exit detection, the process-teardown grace, adopted-PTY
+// babysit timing, scrollback hydration, terminal-input pacing, the default
+// launch geometry, and the per-session log cap.
+//
+// The signal-escalation ORDER (interrupt → SIGTERM → SIGKILL) stays a code
+// invariant; only the wait durations between steps are tunable here. Every field
+// is optional: an empty/unparseable/out-of-range value falls back to the matching
+// default constant, preserving the historical behaviour. Geometry and log/
+// hydration limits apply only to sessions launched (or adopted) after the change;
+// running sessions keep the geometry and caps they started with.
+type LifecycleConfig struct {
+	// ConvertSettleTimeout bounds how long ConvertToInteractive waits for an
+	// interrupted headless process to settle and exit before escalating to
+	// SIGTERM. Empty or non-positive uses the default (ConvertSettleTimeoutDefault).
+	ConvertSettleTimeout string `toml:"convert_settle_timeout"`
+	// ConvertKillTimeout bounds the SIGTERM step before the final SIGKILL. Empty
+	// or non-positive uses the default (ConvertKillTimeoutDefault).
+	ConvertKillTimeout string `toml:"convert_kill_timeout"`
+	// ConvertForceKillTimeout bounds the final wait after SIGKILL so a process
+	// whose Done() never closes can't stall the convert forever. Empty or
+	// non-positive uses the default (ConvertForceKillTimeoutDefault).
+	ConvertForceKillTimeout string `toml:"convert_force_kill_timeout"`
+	// MassExitWindow is the rolling window over which many near-simultaneous
+	// session exits are counted as a likely external signal (OOM killer/jetsam).
+	// Empty or non-positive uses the default (MassExitWindowDefault).
+	MassExitWindow string `toml:"mass_exit_window"`
+	// MassExitThreshold is how many exits within MassExitWindow trigger the
+	// mass-exit warning. Values < 1 fall back to the default (MassExitThresholdDefault).
+	MassExitThreshold int `toml:"mass_exit_threshold"`
+	// ProcessKillGrace is how long killProcessGroup waits after SIGTERM before
+	// sending SIGKILL to a session's process group. Empty or non-positive uses the
+	// default (ProcessKillGraceDefault).
+	ProcessKillGrace string `toml:"process_kill_grace"`
+	// AdoptedTimeout is the safety deadline the adopted-PTY babysit loop applies
+	// when it cannot verify process identity by start time. Empty or non-positive
+	// uses the default (AdoptedTimeoutDefault). Applies to sessions adopted after
+	// the change (daemon upgrade).
+	AdoptedTimeout string `toml:"adopted_timeout"`
+	// AdoptedPollInterval is how often the adopted-PTY babysit loop polls for
+	// process exit. Empty or non-positive uses the default
+	// (AdoptedPollIntervalDefault); a zero cadence would busy-loop.
+	AdoptedPollInterval string `toml:"adopted_poll_interval"`
+	// ScrollbackHydrationBytes is how many bytes of the scrollback tail are
+	// replayed into an adopted session's virtual screen at adopt time. Values < 0
+	// fall back to the default (ScrollbackHydrationBytesDefault); "0" disables
+	// hydration.
+	ScrollbackHydrationBytes int `toml:"scrollback_hydration_bytes"`
+	// InputDelay is the pause between writing text and the submit carriage return
+	// in WriteInputAndSubmit, so a TUI doesn't treat text+CR as a paste. Empty,
+	// unparseable, or non-positive uses the default (InputDelayDefault) — a zero
+	// pause would defeat the paste guard. Applies to sessions launched after the
+	// change.
+	InputDelay string `toml:"input_delay"`
+	// DefaultCols / DefaultRows are the terminal geometry used by daemon launch
+	// paths (watchdog restart, orchestrator, scenarios, triggers, adoption) when
+	// no client geometry is available. Values < 1 fall back to the defaults
+	// (DefaultColsDefault / DefaultRowsDefault). Applies to sessions launched
+	// after the change; an attaching client resizes to its real geometry.
+	DefaultCols int `toml:"default_cols"`
+	DefaultRows int `toml:"default_rows"`
+	// MaxLogBytes caps the per-session scrollback log file. Values < 0 fall back
+	// to the default (MaxLogBytesDefault); "0" means unlimited. Applies to sessions
+	// launched (or adopted) after the change.
+	MaxLogBytes int64 `toml:"max_log_bytes"`
+}
+
+// Lifecycle policy defaults. Each mirrors the fixed constant or bare literal
+// that governed the behaviour before issue #1243 made the policy configurable.
+const (
+	ConvertSettleTimeoutDefault     = 5 * time.Second
+	ConvertKillTimeoutDefault       = 3 * time.Second
+	ConvertForceKillTimeoutDefault  = 3 * time.Second
+	MassExitWindowDefault           = 2 * time.Second
+	MassExitThresholdDefault        = 5
+	ProcessKillGraceDefault         = 5 * time.Second
+	AdoptedTimeoutDefault           = 24 * time.Hour
+	AdoptedPollIntervalDefault      = time.Second
+	ScrollbackHydrationBytesDefault = 128 * 1024
+	InputDelayDefault               = 50 * time.Millisecond
+	DefaultColsDefault              = 80
+	DefaultRowsDefault              = 24
+	MaxLogBytesDefault              = 100 * 1024 * 1024
+)
+
+// ConvertSettleTimeoutDuration returns the interrupt→settle wait, or the default
+// when unset, unparseable, or non-positive.
+func (l LifecycleConfig) ConvertSettleTimeoutDuration() time.Duration {
+	return positiveDurationOrDefault(l.ConvertSettleTimeout, ConvertSettleTimeoutDefault)
+}
+
+// ConvertKillTimeoutDuration returns the SIGTERM-step wait, or the default when
+// unset, unparseable, or non-positive.
+func (l LifecycleConfig) ConvertKillTimeoutDuration() time.Duration {
+	return positiveDurationOrDefault(l.ConvertKillTimeout, ConvertKillTimeoutDefault)
+}
+
+// ConvertForceKillTimeoutDuration returns the post-SIGKILL wait, or the default
+// when unset, unparseable, or non-positive.
+func (l LifecycleConfig) ConvertForceKillTimeoutDuration() time.Duration {
+	return positiveDurationOrDefault(l.ConvertForceKillTimeout, ConvertForceKillTimeoutDefault)
+}
+
+// MassExitWindowDuration returns the mass-exit detection window, or the default
+// when unset, unparseable, or non-positive.
+func (l LifecycleConfig) MassExitWindowDuration() time.Duration {
+	return positiveDurationOrDefault(l.MassExitWindow, MassExitWindowDefault)
+}
+
+// MassExitThresholdOrDefault returns the mass-exit exit-count threshold, or the
+// default when < 1 (a zero threshold has no meaningful trigger).
+func (l LifecycleConfig) MassExitThresholdOrDefault() int {
+	if l.MassExitThreshold < 1 {
+		return MassExitThresholdDefault
+	}
+
+	return l.MassExitThreshold
+}
+
+// ProcessKillGraceDuration returns the SIGTERM→SIGKILL grace, or the default
+// when unset, unparseable, or non-positive.
+func (l LifecycleConfig) ProcessKillGraceDuration() time.Duration {
+	return positiveDurationOrDefault(l.ProcessKillGrace, ProcessKillGraceDefault)
+}
+
+// AdoptedTimeoutDuration returns the adopted-PTY safety deadline, or the default
+// when unset, unparseable, or non-positive.
+func (l LifecycleConfig) AdoptedTimeoutDuration() time.Duration {
+	return positiveDurationOrDefault(l.AdoptedTimeout, AdoptedTimeoutDefault)
+}
+
+// AdoptedPollIntervalDuration returns the adopted-PTY poll cadence, or the
+// default when unset, unparseable, or non-positive (a zero cadence would busy-loop).
+func (l LifecycleConfig) AdoptedPollIntervalDuration() time.Duration {
+	return positiveDurationOrDefault(l.AdoptedPollInterval, AdoptedPollIntervalDefault)
+}
+
+// ScrollbackHydrationBytesOrDefault returns the adopt-time hydration size. A
+// value < 0 means "use the default"; "0" is honoured (disable hydration).
+func (l LifecycleConfig) ScrollbackHydrationBytesOrDefault() int {
+	if l.ScrollbackHydrationBytes < 0 {
+		return ScrollbackHydrationBytesDefault
+	}
+
+	return l.ScrollbackHydrationBytes
+}
+
+// InputDelayDuration returns the type-then-submit pause, or the default when
+// unset, unparseable, or non-positive (a zero pause would defeat the paste guard).
+func (l LifecycleConfig) InputDelayDuration() time.Duration {
+	return positiveDurationOrDefault(l.InputDelay, InputDelayDefault)
+}
+
+// DefaultColsOrDefault returns the default launch column count, or the default
+// when < 1.
+func (l LifecycleConfig) DefaultColsOrDefault() uint16 {
+	if l.DefaultCols < 1 {
+		return DefaultColsDefault
+	}
+
+	return uint16(l.DefaultCols) //nolint:gosec // G115: validated < 1 above; a config typo far exceeding uint16 is clamped at load by Validate.
+}
+
+// DefaultRowsOrDefault returns the default launch row count, or the default when < 1.
+func (l LifecycleConfig) DefaultRowsOrDefault() uint16 {
+	if l.DefaultRows < 1 {
+		return DefaultRowsDefault
+	}
+
+	return uint16(l.DefaultRows) //nolint:gosec // G115: validated < 1 above; a config typo far exceeding uint16 is clamped at load by Validate.
+}
+
+// MaxLogBytesOrDefault returns the per-session log cap. A value < 0 means "use
+// the default"; "0" is honoured (unlimited, as the scrollback writer treats a
+// non-positive cap as no limit).
+func (l LifecycleConfig) MaxLogBytesOrDefault() int64 {
+	if l.MaxLogBytes < 0 {
+		return MaxLogBytesDefault
+	}
+
+	return l.MaxLogBytes
 }
 
 // DetectionConfig is the [detection] block gathering the agent-detection and
@@ -3918,6 +4165,41 @@ func (c *Config) Validate() error {
 			errs = append(errs, fmt.Errorf("%s %q: %w", f.name, f.val, err))
 		} else if d <= 0 {
 			errs = append(errs, fmt.Errorf("%s %q: must be greater than zero", f.name, f.val))
+		}
+	}
+
+	// [launch] watchdog/slot cadences and [lifecycle] escalation waits: a
+	// non-empty but unparseable or non-positive value must fail loudly rather than
+	// silently falling back to the accessor default. The signal-escalation ORDER
+	// is a code invariant; these only bound the waits between steps. A zero/
+	// negative wait would either escalate instantly (skipping a gentler stop) or
+	// busy-loop a poll.
+	for _, f := range []struct{ name, val string }{
+		{"launch.watchdog_interval", c.Launch.WatchdogInterval},
+		{"launch.slot_poll_interval", c.Launch.SlotPollInterval},
+		{"lifecycle.convert_settle_timeout", c.Lifecycle.ConvertSettleTimeout},
+		{"lifecycle.convert_kill_timeout", c.Lifecycle.ConvertKillTimeout},
+		{"lifecycle.convert_force_kill_timeout", c.Lifecycle.ConvertForceKillTimeout},
+		{"lifecycle.mass_exit_window", c.Lifecycle.MassExitWindow},
+		{"lifecycle.process_kill_grace", c.Lifecycle.ProcessKillGrace},
+		{"lifecycle.adopted_timeout", c.Lifecycle.AdoptedTimeout},
+		{"lifecycle.adopted_poll_interval", c.Lifecycle.AdoptedPollInterval},
+		{"lifecycle.input_delay", c.Lifecycle.InputDelay},
+	} {
+		validatePositiveDurationField(&errs, f.name, f.val)
+	}
+
+	// [lifecycle] default geometry must fit a terminal winsize (uint16). A value
+	// beyond that would silently wrap when narrowed, so reject it at load.
+	for _, f := range []struct {
+		name string
+		val  int
+	}{
+		{"lifecycle.default_cols", c.Lifecycle.DefaultCols},
+		{"lifecycle.default_rows", c.Lifecycle.DefaultRows},
+	} {
+		if f.val > 65535 {
+			errs = append(errs, fmt.Errorf("%s %d: must be at most 65535", f.name, f.val))
 		}
 	}
 
