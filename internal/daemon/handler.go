@@ -2,12 +2,10 @@ package daemon
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net"
-	"os"
 	"reflect"
 	"sync"
 	"time"
@@ -51,6 +49,15 @@ const (
 // tailnet listener) and carries the tailnet identity for remote connections;
 // it is threaded to resolveAuth so authorization is origin-aware. The zero
 // ConnOrigin{} is a local connection, preserving the existing trust model.
+//
+// The control-message dispatch below is a thin router: most cases delegate to a
+// handle* function grouped by concern in handler_lifecycle.go /
+// handler_messaging.go / handler_scenario.go / handler_trigger.go /
+// handler_todo.go / handler_query.go. Cases that mutate connection-local state
+// (attach/detach/resize/handshake), block the read loop, or return from the
+// loop (logs --follow, wait, msg_inbox/sub, approval_request, mcp_connect,
+// upgrade, pair_request) stay inline here because they are coupled to this
+// connection's lifecycle.
 func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm *SessionManager, log *slog.Logger) {
 	reader := protocol.NewFrameReader(conn)
 	writer := &safeFrameWriter{writer: protocol.NewFrameWriter(conn)}
@@ -276,252 +283,40 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				}()
 
 			case "pair_approve":
-				if auth.role != roleLocalHuman {
-					sendControl("error", protocol.ErrorMsg{Message: "pairing approval is local-only"})
-					continue
-				}
-
-				pa, ok := decodePayload[protocol.PairApproveMsg](msg, sendControl, "invalid pair_approve")
-				if !ok {
-					continue
-				}
-
-				// A device paired while require_pairing=false gets the read-only
-				// guest role (design §B.2).
-				readOnly := !sm.Config().Remote.RequirePairing
-
-				deviceID, token, err := sm.ApprovePairing(pa.RequestID, readOnly, time.Now())
-				if err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-					continue
-				}
-
-				log.Info("device paired", "device", deviceID, "read_only", readOnly)
-				sendControl("pair_approved", protocol.PairResponseMsg{DeviceID: deviceID, ClientToken: token, DaemonProfile: sm.paths.Profile, TLSPinSPKI: sm.remoteTLSPin})
+				handlePairApprove(sm, auth, sendControl, msg, log)
 
 			case "pair_list":
-				if auth.role != roleLocalHuman {
-					sendControl("error", protocol.ErrorMsg{Message: "pair list is local-only"})
-					continue
-				}
-
-				pending, paired := sm.ListPairings()
-				resp := protocol.PairListResponseMsg{}
-
-				for _, p := range pending {
-					resp.Pending = append(resp.Pending, protocol.PairPending{
-						RequestID:   p.RequestID,
-						DeviceLabel: p.DeviceLabel,
-						TailnetUser: p.Identity.User,
-						TailnetNode: p.Identity.Node,
-						RequestedAt: p.RequestedAt.Format(time.RFC3339),
-					})
-				}
-
-				for _, d := range paired {
-					lastSeen := ""
-					if !d.LastSeenAt.IsZero() {
-						lastSeen = d.LastSeenAt.Format(time.RFC3339)
-					}
-
-					resp.Paired = append(resp.Paired, protocol.PairedDeviceInfo{
-						DeviceID:    d.ID,
-						Label:       d.Label,
-						TailnetUser: d.TailnetUser,
-						TailnetNode: d.TailnetNode,
-						CreatedAt:   d.CreatedAt.Format(time.RFC3339),
-						LastSeenAt:  lastSeen,
-					})
-				}
-
-				sendControl("pair_list", resp)
+				handlePairList(sm, auth, sendControl)
 
 			case "pair_revoke":
-				if auth.role != roleLocalHuman {
-					sendControl("error", protocol.ErrorMsg{Message: "pair revoke is local-only"})
-					continue
-				}
-
-				pv, ok := decodePayload[protocol.PairRevokeMsg](msg, sendControl, "invalid pair_revoke")
-				if !ok {
-					continue
-				}
-
-				n, err := sm.RevokeDevice(pv.DeviceID)
-				if err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-					continue
-				}
-
-				log.Info("device revoked", "device", pv.DeviceID, "connections_closed", n)
-				sendControl("pair_revoked", protocol.PairRevokeMsg{DeviceID: pv.DeviceID})
+				handlePairRevoke(sm, auth, sendControl, msg, log)
 
 			case "approval_subscribe":
-				// Register this connection to receive approval notifications
-				// without attaching to a session (design §C.6). Human operators
-				// only. Cleaned up on disconnect.
-				if !auth.isHuman() {
-					sendControl("error", protocol.ErrorMsg{Message: "approval_subscribe requires a human operator"})
-					continue
-				}
-
-				sm.AddApprovalSubscriber(conn, sendControl)
-				// Send the current pending set immediately so the subscriber
-				// starts with fleet state, not just future changes.
-				sendControl("approval_notification", protocol.ApprovalNotificationMsg{Pending: sm.PendingApprovals()})
+				handleApprovalSubscribe(sm, auth, sendControl, conn)
 
 			case "repo_list":
-				// Return the repos the daemon knows about so a remote client can
-				// offer a picker (it has no local cwd — design §C.4).
-				sendControl("repo_list", protocol.RepoListResponseMsg{Repos: sm.availableRepos()})
+				handleRepoList(sm, sendControl)
 
 			case "store_list":
-				// Read-only document-store listing for the GUI browser (#902).
-				// Human-only: the matrix (remoteHumanRW) admits sessions, but a
-				// session must not use the unsandboxed daemon to read across the
-				// per-repo store isolation the sandbox enforces (agents read their
-				// own store via the filesystem, not this RPC). isHuman() also
-				// excludes read-only guests. Mirrors approval_subscribe/notify.
-				if !auth.isHuman() {
-					sendControl("error", protocol.ErrorMsg{Message: "store browsing requires a human operator"})
-					continue
-				}
-
-				sl, ok := decodePayload[protocol.StoreListMsg](msg, sendControl, "invalid store_list message")
-				if !ok {
-					continue
-				}
-
-				entries, err := listStoreEntries(sm.paths.DataDir, sl.Repo, sl.Shared, sl.Prefix)
-				if err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-					continue
-				}
-
-				sendControl("store_list", protocol.StoreListResponseMsg{Entries: entries})
+				handleStoreList(sm, auth, sendControl, msg)
 
 			case "store_get":
-				// Read-only document fetch for the GUI browser (#902). Human-only
-				// for the same reason as store_list — a session token must not be
-				// able to read another repo's store (or, via a planted symlink in
-				// a writable store, arbitrary daemon-readable files) through the
-				// unsandboxed daemon.
-				if !auth.isHuman() {
-					sendControl("error", protocol.ErrorMsg{Message: "store browsing requires a human operator"})
-					continue
-				}
-
-				sg, ok := decodePayload[protocol.StoreGetMsg](msg, sendControl, "invalid store_get message")
-				if !ok {
-					continue
-				}
-
-				resp, err := getStoreDocument(sm.paths.DataDir, sg.Repo, sg.Shared, sg.Key)
-				if err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-					continue
-				}
-
-				sendControl("store_get", resp)
+				handleStoreGet(sm, auth, sendControl, msg)
 
 			case "list":
-				var lm protocol.ListMsg
-
-				_ = protocol.DecodePayload(msg, &lm) // empty/legacy payload → live sessions
-
-				sessions := sm.List()
-				cfg := sm.Config()
-
-				infos := make([]protocol.SessionInfo, 0, len(sessions))
-				for _, s := range sessions {
-					if s.IsSoftDeleted() != lm.Deleted {
-						continue
-					}
-
-					infos = append(infos, toSessionInfo(s, cfg, sm.getHookReport(s.ID)))
-				}
-
-				sm.fillTodoCounts(infos)
-				sendControl("session_list", protocol.SessionListMsg{Sessions: infos})
+				handleList(sm, sendControl, msg)
 
 			case "create":
-				c, ok := decodePayload[protocol.CreateMsg](msg, sendControl, "invalid create message")
-				if !ok {
-					continue
-				}
-
-				if auth.authenticated {
-					c.ParentID = auth.sessionID
-				}
-
-				agentName := c.Agent
-				if agentName == "" {
-					agentName = sm.Config().DefaultAgent
-				}
-
-				//nolint:contextcheck // session lifecycle is intentionally detached from the client connection: sessions must survive client disconnect (see architecture note), so Create uses its own bounded background timeouts rather than the request ctx.
-				sess, err := sm.Create(CreateOpts{
-					Name:                c.Name,
-					AgentName:           agentName,
-					RepoPath:            c.RepoPath,
-					BaseBranch:          c.Base,
-					Prompt:              c.Prompt,
-					Model:               c.Model,
-					Codex:               codexOptsFromMsg(c.Codex),
-					ParentID:            c.ParentID,
-					NoRepo:              c.NoRepo,
-					Mirror:              c.Mirror,
-					AgentHooks:          c.AgentHooks,
-					InPlace:             c.InPlace,
-					AllowConcurrent:     c.AllowConcurrent,
-					SkipModelValidation: c.SkipModelValidation,
-					Yolo:                c.Yolo,
-					Headless:            c.Headless,
-					NoFetch:             c.NoFetch,
-					Rows:                clientRows,
-					Cols:                clientCols,
-				})
-				if err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-				} else {
-					sendControl("created", toSessionInfo(sess, sm.Config(), sm.getHookReport(sess.ID)))
-				}
+				//nolint:contextcheck // session-lifecycle work is intentionally detached from the client connection: it uses its own bounded background timeouts so it survives client disconnect, not the request ctx.
+				handleCreate(sm, auth, sendControl, msg, clientRows, clientCols)
 
 			case "fork":
-				f, ok := decodePayload[protocol.ForkMsg](msg, sendControl, "invalid fork message")
-				if !ok {
-					continue
-				}
-
-				if !auth.authorizeTarget(sm, f.SourceSessionID, authSelfOrDescendant, sendControl) {
-					continue
-				}
-
-				//nolint:contextcheck // session lifecycle is intentionally detached from the client connection: forked sessions must survive client disconnect, so Fork uses its own bounded background timeouts rather than the request ctx.
-				sess, err := sm.ForkWithAgent(f.Name, f.SourceSessionID, f.Agent, f.Model, clientRows, clientCols)
-				if err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-				} else {
-					sendControl("created", toSessionInfo(sess, sm.Config(), sm.getHookReport(sess.ID)))
-				}
+				//nolint:contextcheck // session-lifecycle work is intentionally detached from the client connection: it uses its own bounded background timeouts so it survives client disconnect, not the request ctx.
+				handleFork(sm, auth, sendControl, msg, clientRows, clientCols)
 
 			case "migrate":
-				m, ok := decodePayload[protocol.MigrateMsg](msg, sendControl, "invalid migrate message")
-				if !ok {
-					continue
-				}
-
-				if !auth.authorizeTarget(sm, m.SessionID, authSelfOrDescendant, sendControl) {
-					continue
-				}
-
-				//nolint:contextcheck // session lifecycle is intentionally detached from the client connection: migration must survive client disconnect, so Migrate uses its own bounded background timeouts rather than the request ctx.
-				sess, err := sm.Migrate(m.SessionID, m.Agent, m.Model, clientRows, clientCols)
-				if err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-				} else {
-					sendControl("migrated", toSessionInfo(sess, sm.Config(), sm.getHookReport(sess.ID)))
-				}
+				//nolint:contextcheck // session-lifecycle work is intentionally detached from the client connection: it uses its own bounded background timeouts so it survives client disconnect, not the request ctx.
+				handleMigrate(sm, auth, sendControl, msg, clientRows, clientCols)
 
 			case "attach":
 				a, ok := decodePayload[protocol.AttachMsg](msg, sendControl, "invalid attach message")
@@ -626,22 +421,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				ptySess.Attach(attachedDataWriter)
 
 			case "attach_convert":
-				ac, ok := decodePayload[protocol.AttachConvertMsg](msg, sendControl, "invalid attach_convert message")
-				if !ok {
-					continue
-				}
-
-				if !auth.authorizeTarget(sm, ac.SessionID, authSelfOrDescendant, sendControl) {
-					continue
-				}
-
-				//nolint:contextcheck // session lifecycle is intentionally detached from the client connection: the relaunched PTY must survive client disconnect, so ConvertToInteractive uses its own bounded background timeouts rather than the request ctx.
-				sess, err := sm.ConvertToInteractive(ac.SessionID, clientRows, clientCols)
-				if err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-				} else {
-					sendControl("converted", toSessionInfo(sess, sm.Config(), sm.getHookReport(sess.ID)))
-				}
+				//nolint:contextcheck // session-lifecycle work is intentionally detached from the client connection: it uses its own bounded background timeouts so it survives client disconnect, not the request ctx.
+				handleAttachConvert(sm, auth, sendControl, msg, clientRows, clientCols)
 
 			case "detach":
 				if attachedSessionID != "" {
@@ -689,184 +470,27 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					"stopped", "stopped", sm.StopWithChildren, sm.Stop)
 
 			case "rename":
-				r, ok := decodePayload[protocol.RenameMsg](msg, sendControl, "invalid rename message")
-				if !ok {
-					continue
-				}
-
-				if !auth.authorizeTarget(sm, r.SessionID, authSelfOrDescendant, sendControl) {
-					continue
-				}
-
-				if err := sm.Rename(r.SessionID, r.NewName); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-				} else {
-					sendControl("renamed", struct {
-						SessionID string `json:"session_id"`
-						NewName   string `json:"new_name"`
-					}{r.SessionID, r.NewName})
-				}
+				handleRename(sm, auth, sendControl, msg)
 
 			case "update":
-				u, ok := decodePayload[protocol.UpdateMsg](msg, sendControl, "invalid update message")
-				if !ok {
-					continue
-				}
-				// Authorize the update. The caller must have authority over the
-				// target session, and — when adopting a new parent — over that
-				// parent too. This prevents a session from reparenting an
-				// unrelated session under itself to manufacture a descendant
-				// relationship and bypass the descendant-based auth model.
-				// Clearing the parent ("") removes the session from its
-				// ancestors' authority, so it is treated as a privileged
-				// reparent: only the orchestrator and the human CLI may orphan a
-				// session, otherwise a child could orphan itself to escape its
-				// parent's control. The orchestrator and human CLI are exempt
-				// from the target/new-parent checks via checkTarget.
-				sm.mu.RLock()
-
-				authErr := auth.checkTarget(sm, u.SessionID, authSelfOrDescendant)
-				if authErr == nil && u.ParentID != nil {
-					if *u.ParentID == "" {
-						if auth.authenticated && !auth.isOrchestrator(sm) {
-							authErr = errors.New("not authorized: only the orchestrator may orphan a session")
-						}
-					} else {
-						authErr = auth.checkTarget(sm, *u.ParentID, authSelfOrDescendant)
-					}
-				}
-
-				sm.mu.RUnlock()
-
-				if authErr != nil {
-					sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
-					continue
-				}
-
-				if err := sm.Update(u.SessionID, u.Name, u.ParentID); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-				} else {
-					sendControl("updated", struct {
-						SessionID string `json:"session_id"`
-					}{u.SessionID})
-				}
+				handleUpdate(sm, auth, sendControl, msg)
 
 			case "star":
-				s, ok := decodePayload[protocol.StarMsg](msg, sendControl, "invalid star message")
-				if !ok {
-					continue
-				}
-
-				if !auth.authorizeTarget(sm, s.SessionID, authSelfOrDescendant, sendControl) {
-					continue
-				}
-
-				if err := sm.Star(s.SessionID); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-				} else {
-					sendControl("starred", struct {
-						SessionID string `json:"session_id"`
-					}{s.SessionID})
-				}
+				handleStar(sm, auth, sendControl, msg)
 
 			case "unstar":
-				u, ok := decodePayload[protocol.UnstarMsg](msg, sendControl, "invalid unstar message")
-				if !ok {
-					continue
-				}
-
-				if !auth.authorizeTarget(sm, u.SessionID, authSelfOrDescendant, sendControl) {
-					continue
-				}
-
-				if err := sm.Unstar(u.SessionID); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-				} else {
-					sendControl("unstarred", struct {
-						SessionID string `json:"session_id"`
-					}{u.SessionID})
-				}
+				handleUnstar(sm, auth, sendControl, msg)
 
 			case "set_status":
-				m, ok := decodePayload[protocol.SetStatusMsg](msg, sendControl, "invalid set_status message")
-				if !ok {
-					continue
-				}
-
-				if auth.authenticated {
-					m.SessionID = auth.sessionID
-				}
-
-				if !auth.authorizeTarget(sm, m.SessionID, authSelfOnly, sendControl) {
-					continue
-				}
-
-				if m.Clear {
-					if err := sm.ClearSummary(m.SessionID); err != nil {
-						sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-					} else {
-						sendControl("status_set", protocol.StatusSetMsg{SessionID: m.SessionID})
-					}
-				} else {
-					if err := sm.SetSummary(m.SessionID, m.Text, m.TTLSeconds); err != nil {
-						sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-					} else {
-						sendControl("status_set", protocol.StatusSetMsg{SessionID: m.SessionID})
-					}
-				}
+				handleSetStatus(sm, auth, sendControl, msg)
 
 			case "resume":
-				r, ok := decodePayload[protocol.ResumeMsg](msg, sendControl, "invalid resume message")
-				if !ok {
-					continue
-				}
-
-				if !auth.authorizeTarget(sm, r.SessionID, authSelfOrDescendant, sendControl) {
-					continue
-				}
-
-				//nolint:contextcheck // session lifecycle is intentionally detached from the client connection: resume must survive client disconnect, so Resume uses its own bounded background timeouts rather than the request ctx.
-				sess, err := sm.Resume(r.SessionID, clientRows, clientCols)
-				if err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-				} else {
-					sendControl("resumed", toSessionInfo(sess, sm.Config(), sm.getHookReport(sess.ID)))
-				}
+				//nolint:contextcheck // session-lifecycle work is intentionally detached from the client connection: it uses its own bounded background timeouts so it survives client disconnect, not the request ctx.
+				handleResume(sm, auth, sendControl, msg, clientRows, clientCols)
 
 			case "restart":
-				r, ok := decodePayload[protocol.RestartMsg](msg, sendControl, "invalid restart message")
-				if !ok {
-					continue
-				}
-
-				sm.log.Debug("control request",
-					"op", "restart", "caller", auth.describe(),
-					"target", r.SessionID, "children", r.Children)
-
-				if !auth.authorizeTarget(sm, r.SessionID, authSelfOrDescendant, sendControl) {
-					continue
-				}
-
-				if r.Children {
-					//nolint:contextcheck // session lifecycle is intentionally detached from the client connection: restart must survive client disconnect, so RestartWithChildren uses its own bounded background timeouts rather than the request ctx.
-					restarted, err := sm.RestartWithChildren(r.SessionID, r.ExcludeRoot, clientRows, clientCols)
-					if err != nil {
-						sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-					} else {
-						sendControl("restarted", struct {
-							SessionID string   `json:"session_id"`
-							Restarted []string `json:"restarted"`
-						}{r.SessionID, restarted})
-					}
-				} else {
-					//nolint:contextcheck // session lifecycle is intentionally detached from the client connection: restart must survive client disconnect, so Restart uses its own bounded background timeouts rather than the request ctx.
-					sess, err := sm.Restart(r.SessionID, clientRows, clientCols)
-					if err != nil {
-						sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-					} else {
-						sendControl("restarted", toSessionInfo(sess, sm.Config(), sm.getHookReport(sess.ID)))
-					}
-				}
+				//nolint:contextcheck // session-lifecycle work is intentionally detached from the client connection: it uses its own bounded background timeouts so it survives client disconnect, not the request ctx.
+				handleRestart(sm, auth, sendControl, msg, clientRows, clientCols)
 
 			case "logs":
 				l, ok := decodePayload[protocol.LogsMsg](msg, sendControl, "invalid logs message")
@@ -956,48 +580,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				}
 
 			case "msg_pub":
-				m, ok := decodePayload[protocol.MsgPubMsg](msg, sendControl, "invalid msg_pub message")
-				if !ok {
-					continue
-				}
-
-				// Sender identity is forced by role so it can't be spoofed. A
-				// session publishes as itself; the local human (CLI) may address
-				// on behalf of a named session (trusted local use); a remote
-				// human publishes as its device and CANNOT claim to be a session.
-				switch auth.role {
-				case roleSession, roleOrchestrator:
-					m.SenderID = auth.sessionID
-					if sess, ok := sm.Get(auth.sessionID); ok {
-						m.SenderName = sess.Name
-					}
-				case roleLocalHuman:
-					if m.SenderID != "" {
-						if sess, ok := sm.Get(m.SenderID); ok {
-							m.SenderName = sess.Name
-						}
-					}
-				case roleRemoteHuman:
-					m.SenderID = "device:" + auth.deviceID
-					m.SenderName = "remote device"
-				default:
-					sendControl("error", protocol.ErrorMsg{Message: "not authorized to publish"})
-					continue
-				}
-
-				published, err := sm.messages.Publish(PublishOpts{Stream: m.Stream, SenderID: m.SenderID, SenderName: m.SenderName, Body: m.Body, ThreadID: m.ThreadID, ReplyTo: m.ReplyTo})
-				if err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-				} else {
-					sendControl("msg_published", published)
-
-					if !m.Quiet {
-						if targetID, isInbox := parseInboxStream(m.Stream); isInbox {
-							//nolint:contextcheck // launched as a detached goroutine that may auto-resume a stopped session; it must outlive this request, so it deliberately does not inherit the connection ctx.
-							go sm.notifyInbox(targetID, m.SenderID, m.SenderName)
-						}
-					}
-				}
+				//nolint:contextcheck // session-lifecycle work is intentionally detached from the client connection: it uses its own bounded background timeouts so it survives client disconnect, not the request ctx.
+				handleMsgPub(sm, auth, sendControl, msg)
 
 			case "msg_inbox":
 				m, ok := decodePayload[protocol.MsgInboxMsg](msg, sendControl, "invalid msg_inbox message")
@@ -1040,216 +624,23 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				}
 
 			case "msg_ack":
-				m, ok := decodePayload[protocol.MsgAckMsg](msg, sendControl, "invalid msg_ack message")
-				if !ok {
-					continue
-				}
-
-				if auth.authenticated {
-					m.Subscriber = auth.sessionID
-					if _, isInbox := parseInboxStream(m.Stream); isInbox {
-						sendControl("error", protocol.ErrorMsg{
-							Message: "inbox streams cannot be acked via msg_ack; use gr msg inbox --ack instead",
-						})
-
-						continue
-					}
-				}
-
-				if err := sm.messages.AckLatest(m.Stream, m.Subscriber); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-				} else {
-					sendControl("msg_acked", struct{}{})
-				}
+				handleMsgAck(sm, auth, sendControl, msg)
 
 			case "msg_topics":
-				m, ok := decodePayload[protocol.MsgTopicsMsg](msg, sendControl, "invalid msg_topics message")
-				if !ok {
-					continue
-				}
-
-				if auth.authenticated {
-					m.Subscriber = auth.sessionID
-				}
-
-				streams, err := sm.messages.ListStreams(m.Subscriber, m.IncludeSystem)
-				if err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-				} else {
-					if auth.authenticated {
-						filtered := streams[:0]
-						for _, s := range streams {
-							if _, isInbox := parseInboxStream(s.Name); !isInbox {
-								filtered = append(filtered, s)
-							}
-						}
-
-						streams = filtered
-					}
-
-					sendControl("msg_topics_list", struct {
-						Streams []StreamInfo `json:"streams"`
-					}{streams})
-				}
+				handleMsgTopics(sm, auth, sendControl, msg)
 
 			case "msg_conversation":
-				m, ok := decodePayload[protocol.MsgConversationMsg](msg, sendControl, "invalid msg_conversation message")
-				if !ok {
-					continue
-				}
-				// Authorise the target session. The self-or-descendant rule lets
-				// the human CLI (unauthenticated), the session itself, an ancestor
-				// agent, or the orchestrator read the conversation. The by-sender
-				// filter inside Conversation keeps the cross-inbox scan safe: for
-				// the target session, outbound results are limited to messages it
-				// authored, plus everything in its own inbox.
-				if !auth.authorizeTarget(sm, m.SessionID, authSelfOrDescendant, sendControl) {
-					continue
-				}
-
-				if sm.messages == nil {
-					sendControl("msg_conversation_list", protocol.MsgConversationListMsg{})
-					continue
-				}
-				// Clamp the limit: default unset/non-positive to a sensible page
-				// size, and cap large values so a client can't ask the daemon to
-				// sort an unbounded result set (local perf/DoS footgun).
-				const maxConversationLimit = 2000
-
-				limit := m.Limit
-				if limit <= 0 {
-					limit = 500
-				}
-
-				if limit > maxConversationLimit {
-					limit = maxConversationLimit
-				}
-
-				convo, err := sm.messages.Conversation(m.SessionID, limit)
-				if err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-					continue
-				}
-
-				out := make([]protocol.ConversationMessage, len(convo))
-				for i, cm := range convo {
-					out[i] = protocol.ConversationMessage{
-						ID:         cm.ID,
-						Seq:        cm.Seq,
-						Stream:     cm.Stream,
-						SenderID:   cm.SenderID,
-						SenderName: cm.SenderName,
-						Body:       cm.Body,
-						ThreadID:   cm.ThreadID,
-						ReplyTo:    cm.ReplyTo,
-						CreatedAt:  cm.CreatedAt,
-						System:     cm.System,
-					}
-				}
-
-				sendControl("msg_conversation_list", protocol.MsgConversationListMsg{Messages: out})
+				handleMsgConversation(sm, auth, sendControl, msg)
 
 			case "msg_jail_list":
-				m, ok := decodePayload[protocol.MsgJailListMsg](msg, sendControl, "invalid msg_jail_list message")
-				if !ok {
-					continue
-				}
-
-				if sm.messages == nil {
-					sendControl("msg_jail_list", protocol.MsgJailListResponse{})
-					continue
-				}
-
-				jailed, err := sm.messages.ListJailed(m.IncludeReleased)
-				if err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-					continue
-				}
-
-				// list is a metadata-only summary — the raw untrusted body is
-				// never included here (even for the human), so an agent that
-				// merely lists the jail can't be injected via a body dump. The
-				// body is fetched deliberately via `show`, gated below.
-				sendControl("msg_jail_list", protocol.MsgJailListResponse{Jailed: jailedToWire(jailed, false)})
+				handleMsgJailList(sm, sendControl, msg)
 
 			case "msg_jail_show":
-				m, ok := decodePayload[protocol.MsgJailShowMsg](msg, sendControl, "invalid msg_jail_show message")
-				if !ok {
-					continue
-				}
-
-				if sm.messages == nil {
-					sendControl("error", protocol.ErrorMsg{Message: "no jailed comments"})
-					continue
-				}
-
-				j, found, err := sm.messages.GetJailed(m.ID)
-				if err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-					continue
-				}
-
-				if !found {
-					sendControl("error", protocol.ErrorMsg{Message: "no jailed comment with id " + m.ID})
-					continue
-				}
-
-				// The raw body is quarantined untrusted content: reveal it only
-				// to a release-authorized role (human/orchestrator). An ordinary
-				// agent/guest gets the metadata with the body withheld, so `show`
-				// can never be used to inject the payload the trust gate blocked.
-				sendControl("msg_jail_show", protocol.MsgJailShowResponse{Jailed: jailedOneToWire(j, auth.mayReadJailBody(sm))})
+				handleMsgJailShow(sm, auth, sendControl, msg)
 
 			case "msg_jail_release":
-				m, ok := decodePayload[protocol.MsgJailReleaseMsg](msg, sendControl, "invalid msg_jail_release message")
-				if !ok {
-					continue
-				}
-
-				// Release delivers quarantined untrusted content to a working
-				// agent, so it is restricted to a human operator or the
-				// orchestrator — a plain agent session is rejected (issue #1082).
-				if !auth.authorizeJailRelease(sm, sendControl) {
-					continue
-				}
-
-				var (
-					released []JailedComment
-					err      error
-				)
-
-				switch {
-				case m.All:
-					if m.Author == "" {
-						sendControl("error", protocol.ErrorMsg{Message: "--all requires --author <login>"})
-						continue
-					}
-
-					//nolint:contextcheck // ReleaseJailed(ByAuthor) delivers via notifyFromDaemon, whose auto-resume is detached and must outlive this request, so it deliberately does not inherit the connection ctx.
-					released, err = sm.ReleaseJailedByAuthor(m.Author)
-				case m.ID != "":
-					var one JailedComment
-
-					//nolint:contextcheck // ReleaseJailed delivers via notifyFromDaemon, whose auto-resume is detached and must outlive this request, so it deliberately does not inherit the connection ctx.
-					one, err = sm.ReleaseJailed(m.ID)
-					if err == nil {
-						released = []JailedComment{one}
-					}
-				default:
-					sendControl("error", protocol.ErrorMsg{Message: "specify a jail id, or --all --author <login>"})
-					continue
-				}
-
-				if err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-					continue
-				}
-
-				// A release is authorized to see bodies (it's the human/
-				// orchestrator) and echoes back what was delivered — include the
-				// body. --all is best-effort (ReleaseJailedByAuthor continues past
-				// a per-item failure), so Released reflects exactly what went out.
-				sendControl("msg_jail_release", protocol.MsgJailReleaseResponse{Released: jailedToWire(released, true)})
+				//nolint:contextcheck // session-lifecycle work is intentionally detached from the client connection: it uses its own bounded background timeouts so it survives client disconnect, not the request ctx.
+				handleMsgJailRelease(sm, auth, sendControl, msg)
 
 			case "approval_request":
 				req, ok := decodePayload[protocol.ApprovalRequestMsg](msg, sendControl, "invalid approval_request")
@@ -1293,86 +684,16 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				return
 
 			case "approval_respond":
-				if auth.authenticated {
-					sendControl("error", protocol.ErrorMsg{Message: "operation not permitted for agent sessions"})
-					continue
-				}
-
-				resp, ok := decodePayload[protocol.ApprovalRespondMsg](msg, sendControl, "invalid approval_respond")
-				if !ok {
-					continue
-				}
-
-				if err := sm.RespondToApproval(resp.RequestID, resp.Decision, resp.Reason); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-				} else {
-					sendControl("approval_responded", struct{}{})
-				}
+				handleApprovalRespond(sm, auth, sendControl, msg)
 
 			case "approval_list":
-				pending := sm.PendingApprovals()
-				sendControl("approval_notification", protocol.ApprovalNotificationMsg{
-					Pending: pending,
-				})
+				handleApprovalList(sm, sendControl)
 
 			case "type":
-				t, ok := decodePayload[protocol.TypeMsg](msg, sendControl, "invalid type message")
-				if !ok {
-					continue
-				}
-
-				if !auth.authorizeTarget(sm, t.SessionID, authSelfOrDescendant, sendControl) {
-					continue
-				}
-
-				pty, ok := sm.GetPTY(t.SessionID)
-				if !ok {
-					sendControl("error", protocol.ErrorMsg{Message: "session not found"})
-					continue
-				}
-
-				if sm.HasAttachedClient(t.SessionID) {
-					if !pty.WaitForUserIdle(typeIdleTimeout, typeMaxWait) {
-						log.Warn("gr type: max wait expired, injecting while user may still be active",
-							"session", t.SessionID)
-					}
-				}
-
-				var writeErr error
-				if t.NoNewline {
-					writeErr = pty.WriteInput([]byte(t.Input))
-				} else {
-					writeErr = pty.WriteInputAndSubmit([]byte(t.Input))
-				}
-
-				if writeErr != nil {
-					sendControl("error", protocol.ErrorMsg{Message: "write failed: " + writeErr.Error()})
-					continue
-				}
-
-				pty.Poke()
-				sendControl("typed", struct {
-					SessionID string `json:"session_id"`
-				}{t.SessionID})
+				handleType(sm, auth, sendControl, msg, log)
 
 			case "interrupt":
-				in, ok := decodePayload[protocol.InterruptMsg](msg, sendControl, "invalid interrupt message")
-				if !ok {
-					continue
-				}
-
-				if !auth.authorizeTarget(sm, in.SessionID, authSelfOrDescendant, sendControl) {
-					continue
-				}
-
-				if err := sm.InterruptSession(in.SessionID); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-					continue
-				}
-
-				sendControl("interrupted", struct {
-					SessionID string `json:"session_id"`
-				}{in.SessionID})
+				handleInterrupt(sm, auth, sendControl, msg)
 
 			case "resize":
 				var r protocol.ResizeMsg
@@ -1387,175 +708,29 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				}
 
 			case "screen_preview":
-				sp, ok := decodePayload[protocol.ScreenPreviewMsg](msg, sendControl, "invalid screen_preview message")
-				if !ok {
-					continue
-				}
-
-				if !auth.authorizeTarget(sm, sp.SessionID, authSelfOrDescendant, sendControl) {
-					continue
-				}
-
-				ptySess, ok := sm.GetPTY(sp.SessionID)
-				if !ok {
-					sendControl("error", protocol.ErrorMsg{Message: "session not found"})
-					continue
-				}
-
-				sendControl("screen_preview_response", protocol.ScreenPreviewResponseMsg{
-					SessionID: sp.SessionID,
-					Preview:   ptySess.ScreenPreview(),
-				})
+				handleScreenPreview(sm, auth, sendControl, msg)
 
 			case "screen_snapshot":
-				ss, ok := decodePayload[protocol.ScreenSnapshotMsg](msg, sendControl, "invalid screen_snapshot message")
-				if !ok {
-					continue
-				}
-
-				if !auth.authorizeTarget(sm, ss.SessionID, authSelfOrDescendant, sendControl) {
-					continue
-				}
-
-				ptySess, ok := sm.GetPTY(ss.SessionID)
-				if !ok {
-					sendControl("error", protocol.ErrorMsg{Message: "session not found"})
-					continue
-				}
-
-				snap := ptySess.ScreenSnapshot()
-				sendControl("screen_snapshot_response", protocol.ScreenSnapshotResponseMsg{
-					SessionID:     ss.SessionID,
-					Frame:         snap.Frame,
-					CursorX:       snap.CursorX,
-					CursorY:       snap.CursorY,
-					CursorVisible: snap.CursorVisible,
-					Cols:          snap.Cols,
-					Rows:          snap.Rows,
-				})
+				handleScreenSnapshot(sm, auth, sendControl, msg)
 
 			case "reload":
-				if auth.authenticated {
-					sendControl("error", protocol.ErrorMsg{Message: "operation not permitted for agent sessions"})
-					continue
-				}
-
-				//nolint:contextcheck // applyConfig may spawn a detached orchestrator goroutine (context.Background) that must outlive this reload request, so it deliberately does not inherit the connection ctx.
-				if err := sm.ReloadConfig(); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-				} else {
-					sendControl("reloaded", struct{}{})
-				}
+				//nolint:contextcheck // session-lifecycle work is intentionally detached from the client connection: it uses its own bounded background timeouts so it survives client disconnect, not the request ctx.
+				handleReload(sm, auth, sendControl)
 
 			case "status":
-				sr, ok := decodePayload[protocol.StatusRequestMsg](msg, sendControl, "invalid status message")
-				if !ok {
-					continue
-				}
-
-				if !auth.authorizeTarget(sm, sr.SessionID, authSelfOrDescendant, sendControl) {
-					continue
-				}
-
-				sess, ok := sm.Get(sr.SessionID)
-				if !ok {
-					sendControl("error", protocol.ErrorMsg{Message: "session not found"})
-					continue
-				}
-
-				unread := 0
-				if sm.messages != nil {
-					unread = sm.messages.TotalUnread(sr.SessionID)
-				}
-
-				fleet := sm.fleetSummary()
-				sendControl("status_response", protocol.StatusResponseMsg{
-					Session:     toSessionInfo(sess, sm.Config(), sm.getHookReport(sess.ID)),
-					UnreadCount: unread,
-					Fleet:       fleet,
-				})
+				handleStatus(sm, auth, sendControl, msg)
 
 			case "status_report":
-				sr, ok := decodePayload[protocol.StatusReportMsg](msg, sendControl, "invalid status_report")
-				if !ok {
-					continue
-				}
-
-				if auth.authenticated {
-					sr.SessionID = auth.sessionID
-				}
-
-				if !auth.authorizeTarget(sm, sr.SessionID, authSelfOnly, sendControl) {
-					continue
-				}
-
-				sm.HandleHookReport(sr)
-				sendControl("status_reported", struct{}{})
+				handleStatusReport(sm, auth, sendControl, msg)
 
 			case "diagnostics":
-				diag := sm.Diagnostics()
-				diag.DaemonVersion = version.Version
-				sendControl("diagnostics", diag)
+				handleDiagnostics(sm, sendControl)
 
 			case "config":
-				// Redact env-map secrets before rendering: this payload can cross
-				// the tailnet to a paired human and is readable by any local
-				// session (incl. a sandboxed agent that can't read the file
-				// itself), so raw MCP/agent env values must not leave the daemon.
-				cfg := config.RedactSecrets(sm.Config())
-
-				tomlBytes, err := config.EffectiveTOML(cfg)
-				if err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: "render config: " + err.Error()})
-					continue
-				}
-
-				diff, err := config.DiffFromDefaults(cfg, "effective")
-				if err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: "diff config: " + err.Error()})
-					continue
-				}
-
-				configPath := sm.paths.ConfigFile
-
-				// Only treat the config as absent on an explicit "does not exist".
-				// Any other stat error (e.g. EACCES) means we can't tell — the
-				// daemon did load a config, so don't claim it's running on defaults.
-				_, statErr := os.Stat(configPath)
-				configExists := statErr == nil || !errors.Is(statErr, os.ErrNotExist)
-
-				sendControl("config_response", protocol.ConfigResponseMsg{
-					EffectiveTOML:    string(tomlBytes),
-					DiffFromDefaults: diff,
-					ConfigPath:       configPath,
-					ConfigExists:     configExists,
-				})
+				handleConfig(sm, sendControl)
 
 			case "gc":
-				var g protocol.GCMsg
-				if err := protocol.DecodePayload(msg, &g); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: "invalid gc message"})
-					continue
-				}
-
-				orphans := sm.RunGC(g.Force, time.Now())
-
-				infos := make([]protocol.GCOrphanInfo, 0, len(orphans))
-				for _, o := range orphans {
-					infos = append(infos, protocol.GCOrphanInfo{
-						Type:              o.Type,
-						Path:              o.Path,
-						ID:                o.ID,
-						IsGitWorktree:     o.IsGitWorktree,
-						HasDirtyFiles:     o.HasDirtyFiles,
-						DirtyUndetermined: o.dirtyUndetermined,
-						Removed:           o.Removed,
-						Skipped:           o.Skipped,
-						Reason:            o.Reason,
-					})
-				}
-
-				sendControl("gc_result", protocol.GCResultMsg{DryRun: !g.Force, Orphans: infos})
+				handleGC(sm, sendControl, msg)
 
 			case "mcp_connect":
 				mc, ok := decodePayload[protocol.MCPConnectMsg](msg, sendControl, "invalid mcp_connect")
@@ -1686,347 +861,76 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				return
 
 			case "mcp_list":
-				// read-only: no auth gate (like trigger_list/scenario_list)
-				if sm.mcpManager == nil {
-					sendControl("mcp_list", protocol.MCPListResponse{})
-					continue
-				}
-
-				sendControl("mcp_list", protocol.MCPListResponse{Servers: sm.mcpManager.List()})
+				handleMCPList(sm, sendControl)
 
 			case "mcp_restart":
-				mr, ok := decodePayload[protocol.MCPRestartMsg](msg, sendControl, "invalid mcp_restart message")
-				if !ok {
-					continue
-				}
-
-				if !auth.authorizeTriggerOp(sm, sendControl) {
-					continue
-				}
-
-				if sm.mcpManager == nil {
-					sendControl("error", protocol.ErrorMsg{Message: "MCP manager not initialized"})
-					continue
-				}
-
-				stopped, err := sm.mcpManager.Restart(mr.Name)
-				if err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-				} else {
-					sendControl("mcp_restart", protocol.MCPRestartResponse{Name: mr.Name, Stopped: stopped})
-				}
+				handleMCPRestart(sm, auth, sendControl, msg)
 
 			case "mcp_logs":
-				ml, ok := decodePayload[protocol.MCPLogsMsg](msg, sendControl, "invalid mcp_logs message")
-				if !ok {
-					continue
-				}
-
-				if sm.mcpManager == nil {
-					sendControl("error", protocol.ErrorMsg{Message: "MCP manager not initialized"})
-					continue
-				}
-
-				files, err := sm.mcpManager.LogFiles(ml.Name, ml.Lines)
-				if err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-				} else {
-					sendControl("mcp_logs", protocol.MCPLogsResponse{Name: ml.Name, Files: files})
-				}
+				handleMCPLogs(sm, sendControl, msg)
 
 			case "scenario_start":
-				s, ok := decodePayload[protocol.ScenarioStartMsg](msg, sendControl, "invalid scenario_start message")
-				if !ok {
-					continue
-				}
-
-				if !auth.authenticated {
-					sendControl("error", protocol.ErrorMsg{Message: "scenario_start requires authentication"})
-					continue
-				}
-
-				s.CallerSessionID = auth.sessionID
-
-				//nolint:contextcheck // session lifecycle is intentionally detached from the client connection: scenario sessions must survive client disconnect, so StartScenario uses its own bounded background timeouts rather than the request ctx.
-				scenario, err := sm.StartScenario(s, clientRows, clientCols)
-				if err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-				} else {
-					record, _ := sm.ScenarioStatus(scenario.Name)
-					sendControl("scenario_started", record)
-				}
+				//nolint:contextcheck // session-lifecycle work is intentionally detached from the client connection: it uses its own bounded background timeouts so it survives client disconnect, not the request ctx.
+				handleScenarioStart(sm, auth, sendControl, msg, clientRows, clientCols)
 
 			case "scenario_stop":
-				s, ok := decodePayload[protocol.ScenarioStopMsg](msg, sendControl, "invalid scenario_stop message")
-				if !ok {
-					continue
-				}
-
-				sm.log.Debug("control request",
-					"op", "scenario_stop", "caller", auth.describe(), "scenario", s.Name)
-
-				if !auth.authorizeScenarioOp(sm, s.Name, sendControl) {
-					continue
-				}
-
-				stopped, err := sm.StopScenario(s.Name)
-				if err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-				} else {
-					sendControl("scenario_stopped", struct {
-						Name    string   `json:"name"`
-						Stopped []string `json:"stopped"`
-					}{s.Name, stopped})
-				}
+				handleScenarioStop(sm, auth, sendControl, msg)
 
 			case "scenario_delete":
-				s, ok := decodePayload[protocol.ScenarioDeleteMsg](msg, sendControl, "invalid scenario_delete message")
-				if !ok {
-					continue
-				}
-
-				sm.log.Debug("control request",
-					"op", "scenario_delete", "caller", auth.describe(), "scenario", s.Name)
-
-				if !auth.authorizeScenarioOp(sm, s.Name, sendControl) {
-					continue
-				}
-
-				deleted, err := sm.DeleteScenario(s.Name)
-				if err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-				} else {
-					sendControl("scenario_deleted", struct {
-						Name    string   `json:"name"`
-						Deleted []string `json:"deleted"`
-					}{s.Name, deleted})
-				}
+				handleScenarioDelete(sm, auth, sendControl, msg)
 
 			case "scenario_status":
-				s, ok := decodePayload[protocol.ScenarioStatusMsg](msg, sendControl, "invalid scenario_status message")
-				if !ok {
-					continue
-				}
-
-				record, err := sm.ScenarioStatus(s.Name)
-				if err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-				} else {
-					sendControl("scenario_status", protocol.ScenarioStatusResponse{Scenario: *record})
-				}
+				handleScenarioStatus(sm, sendControl, msg)
 
 			case "trigger_list":
-				// read-only: no auth gate (like scenario_list/status)
-				sendControl("trigger_list", protocol.TriggerListResponse{Triggers: sm.TriggerList()})
+				handleTriggerList(sm, sendControl)
 
 			case "trigger_status":
-				s, ok := decodePayload[protocol.TriggerStatusMsg](msg, sendControl, "invalid trigger_status message")
-				if !ok {
-					continue
-				}
-
-				rec, err := sm.TriggerStatus(s.Name)
-				if err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-				} else {
-					sendControl("trigger_status", protocol.TriggerStatusResponse{Trigger: rec})
-				}
+				handleTriggerStatus(sm, sendControl, msg)
 
 			case "trigger_run":
-				s, ok := decodePayload[protocol.TriggerRunMsg](msg, sendControl, "invalid trigger_run message")
-				if !ok {
-					continue
-				}
-
-				if !auth.authorizeTriggerOp(sm, sendControl) {
-					continue
-				}
-
-				if err := sm.TriggerRunNow(ctx, s.Name); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-				} else {
-					sendControl("trigger_run", struct {
-						Name string `json:"name"`
-					}{s.Name})
-				}
+				handleTriggerRun(ctx, sm, auth, sendControl, msg)
 
 			case "trigger_pause":
-				s, ok := decodePayload[protocol.TriggerPauseMsg](msg, sendControl, "invalid trigger_pause message")
-				if !ok {
-					continue
-				}
-
-				if !auth.authorizeTriggerOp(sm, sendControl) {
-					continue
-				}
-
-				if err := sm.TriggerPause(s.Name, s.Pause); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-				} else {
-					sendControl("trigger_pause", struct {
-						Name  string `json:"name"`
-						Pause bool   `json:"pause"`
-					}{s.Name, s.Pause})
-				}
+				handleTriggerPause(sm, auth, sendControl, msg)
 
 			case "notify":
-				n, ok := decodePayload[protocol.NotifyMsg](msg, sendControl, "invalid notify message")
-				if !ok {
-					continue
-				}
-
-				if !auth.authorizeNotify(sm, sendControl) {
-					continue
-				}
-
-				delivered, reason := sm.SendPushNotification(pushNotification{
-					Title:    n.Title,
-					Message:  n.Message,
-					Priority: n.Priority,
-				})
-				sendControl("notify_response", protocol.NotifyResponse{Delivered: delivered, Reason: reason})
+				handleNotify(sm, auth, sendControl, msg)
 
 			case "scenario_resume":
-				s, ok := decodePayload[protocol.ScenarioResumeMsg](msg, sendControl, "invalid scenario_resume message")
-				if !ok {
-					continue
-				}
-
-				if !auth.authorizeScenarioOp(sm, s.Name, sendControl) {
-					continue
-				}
-
-				//nolint:contextcheck // session lifecycle is intentionally detached from the client connection: resumed scenario sessions must survive client disconnect, so ResumeScenario uses its own bounded background timeouts rather than the request ctx.
-				resumed, err := sm.ResumeScenario(s.Name, clientRows, clientCols)
-				if err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-				} else {
-					sendControl("scenario_resumed", struct {
-						Name    string   `json:"name"`
-						Resumed []string `json:"resumed"`
-					}{s.Name, resumed})
-				}
+				//nolint:contextcheck // session-lifecycle work is intentionally detached from the client connection: it uses its own bounded background timeouts so it survives client disconnect, not the request ctx.
+				handleScenarioResume(sm, auth, sendControl, msg, clientRows, clientCols)
 
 			case "todo_add":
-				m, ok := decodePayload[protocol.TodoAddMsg](msg, sendControl, "invalid todo_add message")
-				if !ok {
-					continue
-				}
-
-				if item, err := sm.TodoAddOp(auth, m); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-				} else {
-					sendControl("todo", protocol.TodoResponse{Item: item})
-				}
+				handleTodoAdd(sm, auth, sendControl, msg)
 
 			case "todo_list":
-				m, ok := decodePayload[protocol.TodoListMsg](msg, sendControl, "invalid todo_list message")
-				if !ok {
-					continue
-				}
-
-				if items, err := sm.TodoListOp(auth, m); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-				} else {
-					sendControl("todo_list", protocol.TodoListResponse{Items: items})
-				}
+				handleTodoList(sm, auth, sendControl, msg)
 
 			case "todo_claim":
-				m, ok := decodePayload[protocol.TodoClaimMsg](msg, sendControl, "invalid todo_claim message")
-				if !ok {
-					continue
-				}
-
-				if resp, err := sm.TodoClaimOp(auth, m); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-				} else {
-					sendControl("todo_claim", resp)
-				}
+				handleTodoClaim(sm, auth, sendControl, msg)
 
 			case "todo_transition":
-				m, ok := decodePayload[protocol.TodoTransitionMsg](msg, sendControl, "invalid todo_transition message")
-				if !ok {
-					continue
-				}
-
-				if item, err := sm.TodoTransitionOp(auth, m); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-				} else {
-					sendControl("todo", protocol.TodoResponse{Item: item})
-				}
+				handleTodoTransition(sm, auth, sendControl, msg)
 
 			case "todo_update":
-				m, ok := decodePayload[protocol.TodoUpdateMsg](msg, sendControl, "invalid todo_update message")
-				if !ok {
-					continue
-				}
-
-				if item, err := sm.TodoUpdateOp(auth, m); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-				} else {
-					sendControl("todo", protocol.TodoResponse{Item: item})
-				}
+				handleTodoUpdate(sm, auth, sendControl, msg)
 
 			case "todo_assign":
-				m, ok := decodePayload[protocol.TodoAssignMsg](msg, sendControl, "invalid todo_assign message")
-				if !ok {
-					continue
-				}
-
-				if item, err := sm.TodoAssignOp(auth, m); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-				} else {
-					sendControl("todo", protocol.TodoResponse{Item: item})
-				}
+				handleTodoAssign(sm, auth, sendControl, msg)
 
 			case "todo_remove":
-				m, ok := decodePayload[protocol.TodoRemoveMsg](msg, sendControl, "invalid todo_remove message")
-				if !ok {
-					continue
-				}
-
-				if err := sm.TodoRemoveOp(auth, m); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-				} else {
-					sendControl("todo_removed", protocol.TodoRemoveMsg{ID: m.ID})
-				}
+				handleTodoRemove(sm, auth, sendControl, msg)
 
 			case "todo_export":
-				m, ok := decodePayload[protocol.TodoExportMsg](msg, sendControl, "invalid todo_export message")
-				if !ok {
-					continue
-				}
-
-				if key, err := sm.TodoExportOp(auth, m); err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-				} else {
-					sendControl("todo_export", protocol.TodoExportResponse{Key: key})
-				}
+				handleTodoExport(sm, auth, sendControl, msg)
 
 			case "scenario_add":
-				s, ok := decodePayload[protocol.ScenarioAddMsg](msg, sendControl, "invalid scenario_add message")
-				if !ok {
-					continue
-				}
-
-				if !auth.authorizeScenarioOp(sm, s.Name, sendControl) {
-					continue
-				}
-
-				//nolint:contextcheck // session lifecycle is intentionally detached from the client connection: the added session must survive client disconnect, so AddToScenario uses its own bounded background timeouts rather than the request ctx.
-				sess, err := sm.AddToScenario(s.Name, s.Session, clientRows, clientCols)
-				if err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-				} else {
-					sendControl("scenario_added", struct {
-						Name      string `json:"name"`
-						SessionID string `json:"session_id"`
-					}{s.Name, sess.ID})
-				}
+				//nolint:contextcheck // session-lifecycle work is intentionally detached from the client connection: it uses its own bounded background timeouts so it survives client disconnect, not the request ctx.
+				handleScenarioAdd(sm, auth, sendControl, msg, clientRows, clientCols)
 
 			case "scenario_list":
-				records := sm.ListScenarios()
-				sendControl("scenario_list", protocol.ScenarioListResponse{Scenarios: records})
+				handleScenarioList(sm, sendControl)
 
 			case "upgrade":
 				if auth.authenticated {
@@ -2162,209 +1066,6 @@ func (ac authContext) mayReadJailBody(sm *SessionManager) bool {
 	sm.mu.RUnlock()
 
 	return err == nil
-}
-
-// lifecycleRequest holds the fields shared by the stop and delete control
-// messages, both of which target a session (optionally with descendants).
-type lifecycleRequest struct {
-	SessionID   string
-	Children    bool
-	ExcludeRoot bool
-}
-
-// handleDelete authorizes and dispatches a delete request. It chooses soft vs
-// hard delete on the daemon side (soft when !Purge and retention > 0) and
-// replies with a DeleteResultMsg carrying the soft/hard outcome and, for a soft
-// delete, the computed expiry — enough for the CLI to render "Recoverable
-// until …" vs "Deleted".
-func handleDelete(sm *SessionManager, auth authContext, sendControl func(string, any), d protocol.DeleteMsg) {
-	sm.log.Debug("control request",
-		"op", "delete", "caller", auth.describe(),
-		"target", d.SessionID, "children", d.Children, "purge", d.Purge)
-
-	sm.mu.RLock()
-	authErr := auth.checkTarget(sm, d.SessionID, authSelfOrDescendant)
-	sm.mu.RUnlock()
-
-	if authErr != nil {
-		sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
-		return
-	}
-
-	// Three-way routing, owned by the daemon (the CLI only forwards intent via
-	// Purge):
-	//   Purge              -> hard delete (gr purge)
-	//   !Purge && ret > 0  -> soft delete (gr delete, recoverable)
-	//   !Purge && ret == 0 -> reject: gr delete never destroys, so with soft
-	//                         delete disabled there is nothing safe to do.
-	if !d.Purge && sm.Config().Delete.RetentionDuration() <= 0 {
-		sendControl("error", protocol.ErrorMsg{Message: "soft delete is disabled (retention=0); use gr purge"})
-		return
-	}
-
-	soft := !d.Purge
-
-	if d.Children {
-		handleDeleteChildren(sm, sendControl, d, soft)
-		return
-	}
-
-	if soft {
-		snap, err := sm.SoftDelete(d.SessionID)
-		if err != nil {
-			sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-			return
-		}
-
-		sendControl("deleted", softDeleteResult(snap))
-
-		return
-	}
-
-	// Hard delete (gr purge): capture the name before the session is removed.
-	name := sm.sessionName(d.SessionID)
-
-	if err := sm.Delete(d.SessionID); err != nil {
-		sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-		return
-	}
-
-	sendControl("deleted", protocol.DeleteResultMsg{SessionID: d.SessionID, Name: name, Soft: false})
-}
-
-// handleDeleteChildren runs the with-children delete (soft or hard) and replies
-// with a DeleteResultMsg whose Affected list carries the per-descendant outcome.
-func handleDeleteChildren(sm *SessionManager, sendControl func(string, any), d protocol.DeleteMsg, soft bool) {
-	var (
-		affected []string
-		err      error
-	)
-
-	if soft {
-		affected, err = sm.SoftDeleteWithChildren(d.SessionID, d.ExcludeRoot)
-	} else {
-		affected, err = sm.DeleteWithChildren(d.SessionID, d.ExcludeRoot)
-	}
-
-	if err != nil {
-		sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-		return
-	}
-
-	result := protocol.DeleteResultMsg{SessionID: d.SessionID, Soft: soft}
-	for _, id := range affected {
-		if soft {
-			result.Affected = append(result.Affected, softDeleteResult(sm.sessionSnapshot(id)))
-		} else {
-			result.Affected = append(result.Affected, protocol.DeleteResultMsg{SessionID: id, Soft: false})
-		}
-	}
-
-	sendControl("deleted", result)
-}
-
-// softDeleteResult builds the delete response for a soft-deleted session,
-// reading its frozen DeletedAt/ExpiresAt off the session state.
-func softDeleteResult(s SessionState) protocol.DeleteResultMsg {
-	r := protocol.DeleteResultMsg{SessionID: s.ID, Name: s.Name, Soft: true}
-	if s.DeletedAt != nil {
-		r.DeletedAt = s.DeletedAt.Format(time.RFC3339)
-	}
-
-	if s.ExpiresAt != nil {
-		r.ExpiresAt = s.ExpiresAt.Format(time.RFC3339)
-	}
-
-	return r
-}
-
-// handleRestore authorizes and dispatches a restore request, restoring either a
-// single soft-deleted session or (with Children) the whole soft-deleted subtree.
-func handleRestore(sm *SessionManager, auth authContext, sendControl func(string, any), r protocol.RestoreMsg) {
-	sm.mu.RLock()
-	authErr := auth.checkTarget(sm, r.SessionID, authSelfOrDescendant)
-	sm.mu.RUnlock()
-
-	if authErr != nil {
-		sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
-		return
-	}
-
-	cfg := sm.Config()
-
-	if r.Children {
-		sessions, err := sm.RestoreWithChildren(r.SessionID)
-		if err != nil {
-			sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-			return
-		}
-
-		result := protocol.RestoreResultMsg{}
-		for _, s := range sessions {
-			result.Sessions = append(result.Sessions, toSessionInfo(s, cfg, sm.getHookReport(s.ID)))
-		}
-
-		sendControl("restored", result)
-
-		return
-	}
-
-	sess, err := sm.Restore(r.SessionID)
-	if err != nil {
-		sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-		return
-	}
-
-	result := protocol.RestoreResultMsg{
-		Sessions:           []protocol.SessionInfo{toSessionInfo(sess, cfg, sm.getHookReport(sess.ID))},
-		DeletedDescendants: sm.softDeletedDescendantCount(sess.ID),
-	}
-
-	sendControl("restored", result)
-}
-
-// handleSessionLifecycle implements the shared stop/delete dispatch: authorize
-// the target, then run either the with-children batch operation or the single
-// operation and report the result. event is the success message type
-// ("stopped"/"deleted") and resultKey is the JSON field holding the affected
-// session names for the with-children response.
-func handleSessionLifecycle(
-	sm *SessionManager,
-	auth authContext,
-	sendControl func(string, any),
-	req lifecycleRequest,
-	event, resultKey string,
-	batchFn func(sessionID string, excludeRoot bool) ([]string, error),
-	singleFn func(sessionID string) error,
-) {
-	sm.mu.RLock()
-	authErr := auth.checkTarget(sm, req.SessionID, authSelfOrDescendant)
-	sm.mu.RUnlock()
-
-	if authErr != nil {
-		sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
-		return
-	}
-
-	if req.Children {
-		affected, err := batchFn(req.SessionID, req.ExcludeRoot)
-		if err != nil {
-			sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-		} else {
-			sendControl(event, map[string]any{
-				"session_id": req.SessionID,
-				resultKey:    affected,
-			})
-		}
-	} else {
-		if err := singleFn(req.SessionID); err != nil {
-			sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-		} else {
-			sendControl(event, map[string]any{
-				"session_id": req.SessionID,
-			})
-		}
-	}
 }
 
 // safeFrameWriter wraps a FrameWriter with a mutex so multiple goroutines
