@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.68.9](https://github.com/d0ugal/graith/compare/v0.68.8...v0.68.9) (2026-07-16)
+
+
+### Documentation
+
+* **design:** address design-review findings on todo list doc ([e7f9125](https://github.com/d0ugal/graith/commit/e7f9125113f9ad62c1badccbd0ebeff41d3c8c16))
+* **design:** commit all phases (no deferrals) + replace scenario task-done ([2cbb19d](https://github.com/d0ugal/graith/commit/2cbb19d449d6c7efddd26caf1f27c3c5cb32b56b))
+* **design:** todo list as a first-class feature ([#591](https://github.com/d0ugal/graith/issues/591)) ([d4ba1dc](https://github.com/d0ugal/graith/commit/d4ba1dc34224dda0f719849eb9ff15617f775b09))
+
 ## [0.68.8](https://github.com/d0ugal/graith/compare/v0.68.7...v0.68.8) (2026-07-16)
 
 
