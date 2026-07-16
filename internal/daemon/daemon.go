@@ -96,12 +96,15 @@ type SessionManager struct {
 	// diagnostic (running with a live PTY but zero output past the threshold),
 	// so the Warn fires once per PTY lifetime rather than every detection tick.
 	// Cleared when a session (re)spawns a PTY so a restart can warn afresh.
-	silentWarned map[string]bool
-	prWatch      *prWatchState
-	prRefWatch   *prRefWatchState
-	triggers     *triggerState
-	tokens       *tokenCache
-	launch       *launchThrottle
+	silentWarned    map[string]bool
+	prWatch         *prWatchState
+	prRefWatch      *prRefWatchState
+	triggers        *triggerState
+	tokens          *tokenCache
+	launch          *launchThrottle
+	resourceMu      sync.Mutex
+	resourceSamples map[string][]ResourceSample
+	resourceKick    chan struct{}
 
 	// restartStuck is the startup watchdog's recovery action; nil in production
 	// (falls back to Restart). Tests override it to observe watchdog decisions
@@ -157,6 +160,8 @@ func NewSessionManager(cfg *config.Config, paths config.Paths, log *slog.Logger)
 		triggers:           newTriggerState(),
 		tokens:             newTokenCache(),
 		launch:             newLaunchThrottle(cfg.Launch.MaxConcurrentOrDefault()),
+		resourceSamples:    make(map[string][]ResourceSample),
+		resourceKick:       make(chan struct{}, 1),
 		cfg:                cfg,
 		paths:              paths,
 		log:                log,
@@ -2490,6 +2495,12 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 // (state writes, status publish) to finish during shutdown.
 func (sm *SessionManager) startWatcher(id string, sess SessionDriver) {
 	sm.watchers.Add(1)
+	// Ask the monitor for a baseline promptly; the buffered kick coalesces a
+	// burst of launches into one process-table scan.
+	select {
+	case sm.resourceKick <- struct{}{}:
+	default:
+	}
 	go func() {
 		defer sm.watchers.Done()
 
@@ -2626,6 +2637,8 @@ func (sm *SessionManager) watchSession(id string, sess SessionDriver) {
 	if sig := sess.ExitSignal(); sig != 0 {
 		logAttrs = append(logAttrs, "signal", sig.String())
 	}
+	category, signalSource := classifyExit(stopReason, sess.ExitCode(), sess.ExitSignal())
+	logAttrs = append(logAttrs, "exit_category", category, "signal_source", signalSource)
 
 	if rss := sess.PeakRSSBytes(); rss > 0 && sess.ExitCode() != 0 {
 		// peak_rss_mb comes from the waited child's rusage, which is the direct
@@ -2636,6 +2649,7 @@ func (sm *SessionManager) watchSession(id string, sess SessionDriver) {
 	}
 
 	sm.log.Info("session exited", logAttrs...)
+	sm.logAbnormalExitReport(id, name, stopReason, sess)
 
 	sm.onAgentStatusChange(id, name, "running", "stopped")
 
@@ -7502,6 +7516,7 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 
 	go sm.RunDetectionLoop(ctx)
 	go sm.RunStartupWatchdogLoop(ctx)
+	go sm.RunResourceMonitorLoop(ctx)
 	go sm.RunMessageCleanupLoop(ctx)
 	go sm.RunGitPullLoop(ctx)
 	go sm.RunPRWatchLoop(ctx)
