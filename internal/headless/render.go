@@ -16,8 +16,8 @@ import (
 const screenPreviewBytes = 16 * 1024
 
 // ScreenPreview returns a plain-text tail of the rendered scrollback. A
-// headless session has no vt10x screen, so the overlay preview and the
-// screen_preview control message degrade to the recent rendered output.
+// headless session has no terminal screen emulator, so the overlay preview and
+// the screen_preview control message degrade to the recent rendered output.
 func (s *Session) ScreenPreview() string {
 	tail, err := s.scrollback.TailBytes(screenPreviewBytes)
 	if err != nil {

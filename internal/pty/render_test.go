@@ -3,12 +3,22 @@ package pty
 import (
 	"strings"
 	"testing"
-
-	"github.com/hinshun/vt10x"
 )
 
+// newRenderTestTerm builds a Terminal for a render test and registers its
+// cleanup so the emulator's drain goroutine is stopped when the test ends.
+func newRenderTestTerm(t *testing.T, cols, rows int) Terminal {
+	t.Helper()
+
+	term := newTerminal(cols, rows)
+
+	t.Cleanup(func() { _ = term.Close() })
+
+	return term
+}
+
 func TestRenderFramePlainText(t *testing.T) {
-	vt := vt10x.New(vt10x.WithSize(10, 3))
+	vt := newRenderTestTerm(t, 10, 3)
 	_, _ = vt.Write([]byte("braw!"))
 
 	frame := renderFrame(vt)
@@ -26,7 +36,7 @@ func TestRenderFramePlainText(t *testing.T) {
 }
 
 func TestRenderFrameColors(t *testing.T) {
-	vt := vt10x.New(vt10x.WithSize(20, 3))
+	vt := newRenderTestTerm(t, 20, 3)
 	_, _ = vt.Write([]byte("\x1b[31mred\x1b[0m normal"))
 
 	frame := renderFrame(vt)
@@ -44,7 +54,7 @@ func TestRenderFrameColors(t *testing.T) {
 }
 
 func TestRenderFrameBold(t *testing.T) {
-	vt := vt10x.New(vt10x.WithSize(20, 2))
+	vt := newRenderTestTerm(t, 20, 2)
 	_, _ = vt.Write([]byte("\x1b[1mbold\x1b[0m"))
 
 	frame := renderFrame(vt)
@@ -54,7 +64,7 @@ func TestRenderFrameBold(t *testing.T) {
 }
 
 func TestRenderFrame256Color(t *testing.T) {
-	vt := vt10x.New(vt10x.WithSize(20, 2))
+	vt := newRenderTestTerm(t, 20, 2)
 	_, _ = vt.Write([]byte("\x1b[38;5;208morange\x1b[0m"))
 
 	frame := renderFrame(vt)
@@ -64,8 +74,8 @@ func TestRenderFrame256Color(t *testing.T) {
 }
 
 func TestRenderFrameCursorPosition(t *testing.T) {
-	vt := vt10x.New(vt10x.WithSize(20, 5))
-	_, _ = vt.Write([]byte("line1\nline2"))
+	vt := newRenderTestTerm(t, 20, 5)
+	_, _ = vt.Write([]byte("line1\r\nline2"))
 
 	frame := renderFrame(vt)
 	if frame.CursorY < 1 {
@@ -74,7 +84,7 @@ func TestRenderFrameCursorPosition(t *testing.T) {
 }
 
 func TestRenderFrameRows(t *testing.T) {
-	vt := vt10x.New(vt10x.WithSize(10, 4))
+	vt := newRenderTestTerm(t, 10, 4)
 	_, _ = vt.Write([]byte("abc"))
 
 	frame := renderFrame(vt)
@@ -86,7 +96,7 @@ func TestRenderFrameRows(t *testing.T) {
 }
 
 func TestRenderPreviewPlainText(t *testing.T) {
-	vt := vt10x.New(vt10x.WithSize(10, 3))
+	vt := newRenderTestTerm(t, 10, 3)
 	_, _ = vt.Write([]byte("braw!"))
 
 	preview := renderPreview(vt)
@@ -100,7 +110,7 @@ func TestRenderPreviewPlainText(t *testing.T) {
 }
 
 func TestRenderPreviewStripsColors(t *testing.T) {
-	vt := vt10x.New(vt10x.WithSize(20, 3))
+	vt := newRenderTestTerm(t, 20, 3)
 	_, _ = vt.Write([]byte("\x1b[31mred text\x1b[0m"))
 
 	preview := renderPreview(vt)
@@ -114,7 +124,7 @@ func TestRenderPreviewStripsColors(t *testing.T) {
 }
 
 func TestRenderPreviewTrimsTrailingSpaces(t *testing.T) {
-	vt := vt10x.New(vt10x.WithSize(20, 2))
+	vt := newRenderTestTerm(t, 20, 2)
 	_, _ = vt.Write([]byte("hi"))
 
 	preview := renderPreview(vt)
