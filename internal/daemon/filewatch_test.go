@@ -520,6 +520,62 @@ func TestWatchRetryBackoffConfigurable(t *testing.T) {
 	}
 }
 
+func TestWatchRetryBackoffDefensiveBounds(t *testing.T) {
+	tests := []struct {
+		name          string
+		retry         int
+		base, maxBack time.Duration
+		want          time.Duration
+	}{
+		{"first attempt capped when base exceeds max", 1, 10 * time.Second, 4 * time.Second, 4 * time.Second},
+		{"later attempt stays capped when base exceeds max", 3, 10 * time.Second, 4 * time.Second, 4 * time.Second},
+		{"zero bounds retain positive floor", 1, 0, 0, time.Second},
+		{"negative bounds retain positive floor", 1, -time.Second, -time.Second, time.Second},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := watchRetryBackoff(tt.retry, tt.base, tt.maxBack); got != tt.want {
+				t.Errorf("watchRetryBackoff() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestDegradedBindingInvalidConfigKeepsRetryFloor proves the runtime accessor
+// fail-safe prevents a degraded binding from retrying on every reconcile tick,
+// even when a test or embedding caller bypasses load-time validation.
+func TestDegradedBindingInvalidConfigKeepsRetryFloor(t *testing.T) {
+	worktree := t.TempDir()
+	trig := config.TriggerConfig{
+		Name:   "canny",
+		Watch:  &config.WatchConfig{Role: "implementer"},
+		Action: config.ActionConfig{Type: config.ActionMessage, Body: "braw", Deliver: config.DeliverConfig{Topic: "blether"}},
+	}
+	sm := newTriggerTestSM(t, trig)
+	sm.cfg.TriggersRuntime.Advanced.WatchRetryBaseBackoff = "0s"
+	sm.cfg.TriggersRuntime.Advanced.WatchRetryMaxBackoff = "-1s"
+	sm.state.Sessions["src"] = &SessionState{ID: "src", Name: "ben", Status: StatusRunning, ScenarioRole: "implementer", WorktreePath: worktree}
+
+	key := bindingKey("canny", "src")
+	sess := watchSession{id: "src", name: "ben", worktree: worktree}
+	t0 := time.Now()
+	sm.recordDegradedBinding(key, &sm.cfg.Triggers[0], sess, "watch limit exhausted", 1, t0)
+
+	first := sm.triggers.bindings[key]
+	if first == nil {
+		t.Fatal("recordDegradedBinding did not create a binding")
+	}
+	if !first.nextRetryAt.After(t0.Add(2 * time.Second)) {
+		t.Fatalf("invalid direct config produced no positive retry floor: next=%v", first.nextRetryAt)
+	}
+
+	sm.reconcileBindings(context.Background(), sm.allTriggers(), t0.Add(2*time.Second))
+	if got := sm.triggers.bindings[key]; got != first || got.retryCount != 1 {
+		t.Fatalf("binding retried before defensive backoff elapsed: %+v", got)
+	}
+}
+
 // TestReconcileBindings_DegradedRecovers is the #1029 regression: a binding that
 // degrades (watch limit exhausted) must retry on a backoff and recover on its
 // own once the limit clears — without the source session restarting.

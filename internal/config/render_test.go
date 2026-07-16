@@ -3,6 +3,8 @@ package config
 import (
 	"strings"
 	"testing"
+
+	"github.com/pelletier/go-toml/v2"
 )
 
 func TestEffectiveTOMLRendersConfig(t *testing.T) {
@@ -17,6 +19,52 @@ func TestEffectiveTOMLRendersConfig(t *testing.T) {
 
 	if !strings.Contains(string(data), "[sandbox]") {
 		t.Errorf("expected a [sandbox] table in rendered defaults:\n%s", data)
+	}
+}
+
+func TestEffectiveTOMLResolvesPairingDefaults(t *testing.T) {
+	cfg := Default()
+	cfg.Remote.MaxPendingPairings = 0
+	cfg.Remote.PendingPairingTTL = ""
+	cfg.Remote.PairFallbackCount = 0
+	cfg.Remote.PairFallbackWindow = ""
+
+	data, err := EffectiveTOML(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var rendered Config
+	if err := toml.Unmarshal(data, &rendered); err != nil {
+		t.Fatalf("rendered TOML does not parse: %v", err)
+	}
+
+	if rendered.Remote.MaxPendingPairings != RemoteMaxPendingPairingsDefault ||
+		rendered.Remote.PendingPairingTTL != "10m" ||
+		rendered.Remote.PairFallbackCount != RemotePairFallbackCountDefault ||
+		rendered.Remote.PairFallbackWindow != "1m" {
+		t.Errorf("rendered pairing policy still contains sentinels: %+v", rendered.Remote)
+	}
+
+	if cfg.Remote.MaxPendingPairings != 0 || cfg.Remote.PendingPairingTTL != "" ||
+		cfg.Remote.PairFallbackCount != 0 || cfg.Remote.PairFallbackWindow != "" {
+		t.Fatal("EffectiveTOML mutated its input")
+	}
+}
+
+func TestDiffFromDefaultsTreatsPairingSentinelsAsEffectiveDefaults(t *testing.T) {
+	cfg := Default()
+	cfg.Remote.MaxPendingPairings = 0
+	cfg.Remote.PendingPairingTTL = ""
+	cfg.Remote.PairFallbackCount = 0
+	cfg.Remote.PairFallbackWindow = ""
+
+	diff, err := DiffFromDefaults(cfg, "effective")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if diff != "" {
+		t.Errorf("effective sentinels should match defaults, got diff:\n%s", diff)
 	}
 }
 

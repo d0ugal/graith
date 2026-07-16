@@ -576,7 +576,7 @@ func (sm *SessionManager) handleOrchestratorExit(ctx context.Context, id string)
 		backoffLevel = 0
 	}
 
-	delay := restartCfg.DelayForLevel(backoffLevel)
+	delay := orchestratorRestartDelay(restartCfg, backoffLevel)
 
 	sm.mu.Lock()
 	if s, ok := sm.state.Sessions[id]; ok {
@@ -634,6 +634,19 @@ func (sm *SessionManager) handleOrchestratorExit(ctx context.Context, id string)
 	} else {
 		sm.log.Info("orchestrator auto-restarted", "id", id)
 	}
+}
+
+// orchestratorRestartDelay is the supervisor's final safety floor. Config load
+// rejects non-positive restart policy, and the accessors fall back defensively,
+// but a directly-constructed or mutated config must still never create an
+// immediate restart loop.
+func orchestratorRestartDelay(cfg config.OrchestratorRestartConfig, level int) time.Duration {
+	delay := cfg.DelayForLevel(level)
+	if delay <= 0 {
+		return config.OrchestratorInitialBackoffDefault
+	}
+
+	return delay
 }
 
 func (sm *SessionManager) notifyOrchestratorExit(id string) {

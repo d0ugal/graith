@@ -902,8 +902,10 @@ var orchestratorDefaultSchedule = []time.Duration{
 }
 
 // parsedSchedule parses the explicit Schedule entries, dropping any that fail to
-// parse or are negative. It returns nil when Schedule is empty or nothing valid
-// survives, signalling geometric mode to callers.
+// parse or are non-positive. Validate rejects those values on load; filtering
+// here is the defensive fallback for directly-constructed configs so a restart
+// can never be scheduled without a positive delay. It returns nil when Schedule
+// is empty or nothing valid survives, signalling geometric mode to callers.
 func (r OrchestratorRestartConfig) parsedSchedule() []time.Duration {
 	if len(r.Schedule) == 0 {
 		return nil
@@ -913,7 +915,7 @@ func (r OrchestratorRestartConfig) parsedSchedule() []time.Duration {
 
 	for _, s := range r.Schedule {
 		d, err := ParseDurationWithDays(s)
-		if err != nil || d < 0 {
+		if err != nil || d <= 0 {
 			continue
 		}
 
@@ -955,8 +957,8 @@ func (r OrchestratorRestartConfig) DelayForLevel(level int) time.Duration {
 		return orchestratorDefaultSchedule[idx]
 	}
 
-	initial := durationOrDefault(r.InitialBackoff, OrchestratorInitialBackoffDefault)
-	maxDelay := durationOrDefault(r.MaxBackoff, OrchestratorMaxBackoffDefault)
+	initial := positiveDurationOrDefault(r.InitialBackoff, OrchestratorInitialBackoffDefault)
+	maxDelay := positiveDurationOrDefault(r.MaxBackoff, OrchestratorMaxBackoffDefault)
 
 	mult := r.Multiplier
 	if mult <= 1 {
@@ -979,9 +981,10 @@ func (r OrchestratorRestartConfig) DelayForLevel(level int) time.Duration {
 }
 
 // StableResetDuration is how long a run must last before its exit resets the
-// backoff level. Empty or unparseable uses OrchestratorStableResetDefault.
+// backoff level. Empty, unparseable, or non-positive uses
+// OrchestratorStableResetDefault.
 func (r OrchestratorRestartConfig) StableResetDuration() time.Duration {
-	return durationOrDefault(r.StableReset, OrchestratorStableResetDefault)
+	return positiveDurationOrDefault(r.StableReset, OrchestratorStableResetDefault)
 }
 
 // FreshStartThresholdOrDefault returns the consecutive-restart count that
@@ -995,7 +998,8 @@ func (r OrchestratorRestartConfig) FreshStartThresholdOrDefault() int {
 }
 
 // durationOrDefault parses a duration string, returning def when it is empty,
-// unparseable, or negative.
+// unparseable, or negative. A parsed zero is preserved for the fields that use
+// it as an explicit disable sentinel.
 func durationOrDefault(s string, def time.Duration) time.Duration {
 	if s == "" {
 		return def
@@ -1958,10 +1962,10 @@ func (p PRWatchConfig) MaxNotifications() int {
 }
 
 // The accessors below resolve the [pr_watch.advanced] tuning knobs, each falling
-// back to the daemon's historical default when unset (or non-positive / invalid).
-// Keeping the default in one place here — not in the daemon — mirrors the poll/
-// debounce accessors above and keeps the embedded default_config.toml free to omit
-// the keys (so the Go fallback stays authoritative; see issue #1228).
+// back to the daemon's historical default when unset, non-positive, or invalid.
+// The embedded default_config.toml materializes the same values so config
+// inspection and runtime behavior cannot drift; these fallbacks protect callers
+// that construct Config values directly.
 
 // BaseTickDuration is the base poll-loop cadence. Default 15s. A zero or
 // negative value falls back to the default so the poll loop can never construct
@@ -1981,7 +1985,7 @@ func (p PRWatchConfig) BatchSize() int {
 
 // NoPRNegativeCacheDuration is the no-PR re-resolve interval. Default 5m.
 func (p PRWatchConfig) NoPRNegativeCacheDuration() time.Duration {
-	return parseDurationOr(p.Advanced.NoPRNegativeCache, 5*time.Minute)
+	return positiveDurationOrDefault(p.Advanced.NoPRNegativeCache, 5*time.Minute)
 }
 
 // CommentBodyMaxBytes is the per-comment body truncation cap. Default 1024.
@@ -2004,7 +2008,7 @@ func (p PRWatchConfig) NotificationRateLimit() int {
 
 // NotificationRateWindowDuration is the per-session rate-limit window. Default 30m.
 func (p PRWatchConfig) NotificationRateWindowDuration() time.Duration {
-	return parseDurationOr(p.Advanced.NotificationRateWindow, 30*time.Minute)
+	return positiveDurationOrDefault(p.Advanced.NotificationRateWindow, 30*time.Minute)
 }
 
 // UntrustedAuthorPromptRate caps untrusted-author trust prompts per window. Default 5.
@@ -2018,7 +2022,7 @@ func (p PRWatchConfig) UntrustedAuthorPromptRate() int {
 
 // UntrustedAuthorPromptWindowDuration is the trust-prompt rate window. Default 30m.
 func (p PRWatchConfig) UntrustedAuthorPromptWindowDuration() time.Duration {
-	return parseDurationOr(p.Advanced.UntrustedAuthorPromptWindow, 30*time.Minute)
+	return positiveDurationOrDefault(p.Advanced.UntrustedAuthorPromptWindow, 30*time.Minute)
 }
 
 // MaxPromptedAuthors bounds the persisted surfaced-authors set. Default 5000.
@@ -2033,7 +2037,7 @@ func (p PRWatchConfig) MaxPromptedAuthors() int {
 // KickCooldownDuration is the min interval between git-ref-triggered polls of one
 // session. Default 3s.
 func (p PRWatchConfig) KickCooldownDuration() time.Duration {
-	return parseDurationOr(p.Advanced.KickCooldown, 3*time.Second)
+	return positiveDurationOrDefault(p.Advanced.KickCooldown, 3*time.Second)
 }
 
 // KickChannelSize is the buffered kick-channel capacity. Default 64.
@@ -2048,7 +2052,7 @@ func (p PRWatchConfig) KickChannelSize() int {
 // KickedNoPRBackoffDuration is the short re-poll delay after a kicked no-PR miss.
 // Default 20s.
 func (p PRWatchConfig) KickedNoPRBackoffDuration() time.Duration {
-	return parseDurationOr(p.Advanced.KickedNoPRBackoff, 20*time.Second)
+	return positiveDurationOrDefault(p.Advanced.KickedNoPRBackoff, 20*time.Second)
 }
 
 // RefReconcileIntervalDuration is the git-ref watcher reconcile cadence. Default
@@ -2060,12 +2064,12 @@ func (p PRWatchConfig) RefReconcileIntervalDuration() time.Duration {
 
 // RefDebounceDuration coalesces a burst of ref writes into one kick. Default 750ms.
 func (p PRWatchConfig) RefDebounceDuration() time.Duration {
-	return parseDurationOr(p.Advanced.RefDebounce, 750*time.Millisecond)
+	return positiveDurationOrDefault(p.Advanced.RefDebounce, 750*time.Millisecond)
 }
 
 // GHTimeoutDuration is the per-`gh`-command timeout. Default 5s.
 func (p PRWatchConfig) GHTimeoutDuration() time.Duration {
-	return parseDurationOr(p.Advanced.GHTimeout, 5*time.Second)
+	return positiveDurationOrDefault(p.Advanced.GHTimeout, 5*time.Second)
 }
 
 type RepoConfig struct {
@@ -4164,10 +4168,10 @@ func ValidateIncludes(mainRepoPath string, includes []string) error {
 
 // validateMessagesLimits checks the [messages] operational limits (issue #1249):
 // each configured cap must be positive and at or below its hard safety ceiling,
-// the conversation page size must not exceed the conversation max limit, and the
-// busy timeout must be a positive duration within its ceiling. A non-positive
-// (or, for durations, unparseable/empty) value is left to the accessor default —
-// only an explicitly-out-of-range value fails loudly.
+// an explicitly configured conversation page size must not exceed the
+// conversation max limit, and the busy timeout must be a positive duration
+// within its ceiling. A non-positive integer is left to the accessor default;
+// Load derives that default from a lowered conversation max before validation.
 func (c *Config) validateMessagesLimits() []error {
 	var errs []error
 
@@ -4188,16 +4192,10 @@ func (c *Config) validateMessagesLimits() []error {
 		}
 	}
 
-	// A page size larger than the max limit is contradictory (a page could never
-	// be served in full). Compare the effective values (unset fields resolve to
-	// their defaults) but before the accessor's own clamp-to-max, so the
-	// contradiction surfaces here instead of being silently absorbed.
-	page := m.ConversationPageSize
-	if page < 1 {
-		page = MessagesConversationPageSizeDefault
-	}
-
-	if maxLimit := m.ConversationMaxLimitOrDefault(); page > maxLimit {
+	// A positive page size larger than the max limit is an explicit contradiction
+	// (a page could never be served in full). The zero value means "derive the
+	// default" and is safely clamped by ConversationPageSizeOrDefault.
+	if page, maxLimit := m.ConversationPageSize, m.ConversationMaxLimitOrDefault(); page > 0 && page > maxLimit {
 		errs = append(errs, fmt.Errorf("messages.conversation_page_size %d: must not exceed conversation_max_limit %d", page, maxLimit))
 	}
 
@@ -4333,6 +4331,15 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	// An explicit orchestrator agent is another agent-name reference and must be
+	// checked against the same final built-in/user merged map. Empty keeps the
+	// normal inheritance from default_agent.
+	if c.Orchestrator.Agent != "" {
+		if _, ok := c.Agents[c.Orchestrator.Agent]; !ok {
+			errs = append(errs, fmt.Errorf("orchestrator.agent %q: no matching [agents.%s] entry", c.Orchestrator.Agent, c.Orchestrator.Agent))
+		}
+	}
+
 	seen := make(map[string]bool, len(c.MCPServers))
 	for _, s := range c.MCPServers {
 		switch {
@@ -4447,27 +4454,64 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	// [orchestrator.restart]: a non-empty but unparseable duration must fail
-	// loudly rather than silently falling back to the accessor default (mirrors
-	// delete.retention). Schedule entries are validated too; a bad entry is
-	// otherwise silently skipped by parsedSchedule.
+	// Advanced PR-watch durations all pace polling, anti-flood windows, command
+	// deadlines, or ref-event coalescing. None has a documented zero-disable
+	// contract, so reject non-positive values on load/reload and keep the
+	// accessor fallbacks only as a defence for directly-constructed configs.
+	for _, f := range []struct{ name, val string }{
+		{"pr_watch.advanced.base_tick", c.PRWatch.Advanced.BaseTick},
+		{"pr_watch.advanced.no_pr_negative_cache", c.PRWatch.Advanced.NoPRNegativeCache},
+		{"pr_watch.advanced.notification_rate_window", c.PRWatch.Advanced.NotificationRateWindow},
+		{"pr_watch.advanced.untrusted_author_prompt_window", c.PRWatch.Advanced.UntrustedAuthorPromptWindow},
+		{"pr_watch.advanced.kick_cooldown", c.PRWatch.Advanced.KickCooldown},
+		{"pr_watch.advanced.kicked_no_pr_backoff", c.PRWatch.Advanced.KickedNoPRBackoff},
+		{"pr_watch.advanced.ref_reconcile_interval", c.PRWatch.Advanced.RefReconcileInterval},
+		{"pr_watch.advanced.ref_debounce", c.PRWatch.Advanced.RefDebounce},
+		{"pr_watch.advanced.gh_timeout", c.PRWatch.Advanced.GHTimeout},
+	} {
+		validatePositiveDurationField(&errs, f.name, f.val)
+	}
+
+	// [orchestrator.restart]: every configured duration must be positive. In
+	// geometric mode the initial delay cannot exceed its cap; explicit schedule
+	// entries must be nondecreasing so later crashes never reduce the restart
+	// floor. Accessors retain positive fallbacks for direct struct construction.
 	rc := c.Orchestrator.Restart
 	for _, f := range []struct{ name, val string }{
 		{"orchestrator.restart.initial_backoff", rc.InitialBackoff},
 		{"orchestrator.restart.max_backoff", rc.MaxBackoff},
 		{"orchestrator.restart.stable_reset", rc.StableReset},
 	} {
-		if strings.TrimSpace(f.val) != "" {
-			if _, err := ParseDurationWithDays(f.val); err != nil {
-				errs = append(errs, fmt.Errorf("%s %q: %w", f.name, f.val, err))
-			}
-		}
+		validatePositiveDurationField(&errs, f.name, f.val)
 	}
 
+	initial, initialErr := ParseDurationWithDays(rc.InitialBackoff)
+	maxBackoff, maxErr := ParseDurationWithDays(rc.MaxBackoff)
+	if strings.TrimSpace(rc.InitialBackoff) != "" && strings.TrimSpace(rc.MaxBackoff) != "" &&
+		initialErr == nil && maxErr == nil && initial > 0 && maxBackoff > 0 && initial > maxBackoff {
+		errs = append(errs, fmt.Errorf("orchestrator.restart.initial_backoff %q: must not exceed max_backoff %q", rc.InitialBackoff, rc.MaxBackoff))
+	}
+
+	var previous time.Duration
+	havePrevious := false
 	for i, s := range rc.Schedule {
-		if _, err := ParseDurationWithDays(s); err != nil {
+		d, err := ParseDurationWithDays(s)
+		if err != nil {
 			errs = append(errs, fmt.Errorf("orchestrator.restart.schedule[%d] %q: %w", i, s, err))
+			continue
 		}
+
+		if d <= 0 {
+			errs = append(errs, fmt.Errorf("orchestrator.restart.schedule[%d] %q: must be greater than zero", i, s))
+			continue
+		}
+
+		if havePrevious && d < previous {
+			errs = append(errs, fmt.Errorf("orchestrator.restart.schedule[%d] %q: must not be less than the previous delay %s", i, s, previous))
+		}
+
+		previous = d
+		havePrevious = true
 	}
 
 	// [updates]: a non-empty but unparseable interval/timeout must fail loudly
@@ -4760,6 +4804,7 @@ func Load(path string) (*Config, error) {
 	}
 
 	cfg.Agents = mergeAgents(defaultAgents, cfg.Agents)
+	applyConversationLimitDefaults(cfg, data)
 
 	// Resolve relative [tools] paths against the directory holding config.toml so
 	// validation and every execution site use the identical absolute path (issue
@@ -4809,6 +4854,20 @@ func applyPRWatchCommentCompat(cfg *Config, data []byte) {
 	}
 
 	cfg.PRWatch.NotifyPRComments = true
+}
+
+// applyConversationLimitDefaults derives the page-size default after applying
+// a sparse user overlay. The embedded page size is 500, but when a user lowers
+// only conversation_max_limit, the inherited default must clamp to that new
+// maximum. A positive explicit page size remains untouched so Validate can
+// reject an intentional contradiction. Non-positive values retain their
+// documented "use the default" semantics and are materialized here too.
+func applyConversationLimitDefaults(cfg *Config, data []byte) {
+	if tomlHasKey(data, "messages", "conversation_page_size") && cfg.Messages.ConversationPageSize > 0 {
+		return
+	}
+
+	cfg.Messages.ConversationPageSize = cfg.Messages.ConversationPageSizeOrDefault()
 }
 
 // tomlHasKey reports whether the raw TOML sets table.key. It distinguishes an

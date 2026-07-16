@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/aymanbagabas/go-udiff"
 	"github.com/pelletier/go-toml/v2"
@@ -61,7 +62,7 @@ func maskValues(m map[string]string) map[string]string {
 // (built-in defaults overlaid with the user's file). This is what `gr config
 // show` prints and what the GUI's config viewer displays.
 func EffectiveTOML(cfg *Config) ([]byte, error) {
-	data, err := toml.Marshal(cfg)
+	data, err := toml.Marshal(resolveRenderedDefaults(cfg))
 	if err != nil {
 		return nil, fmt.Errorf("marshal config: %w", err)
 	}
@@ -69,19 +70,42 @@ func EffectiveTOML(cfg *Config) ([]byte, error) {
 	return data, nil
 }
 
+// resolveRenderedDefaults materializes accessor-backed sentinel defaults before
+// effective output is marshaled. Runtime callers defensively accept zero/empty
+// pairing-policy fields as "use the default"; config show/diff must display the
+// policy that actually runs rather than those internal sentinels.
+func resolveRenderedDefaults(cfg *Config) *Config {
+	c := *cfg
+
+	if c.Remote.MaxPendingPairings == 0 {
+		c.Remote.MaxPendingPairings = RemoteMaxPendingPairingsDefault
+	}
+	if strings.TrimSpace(c.Remote.PendingPairingTTL) == "" {
+		c.Remote.PendingPairingTTL = "10m"
+	}
+	if c.Remote.PairFallbackCount == 0 {
+		c.Remote.PairFallbackCount = RemotePairFallbackCountDefault
+	}
+	if strings.TrimSpace(c.Remote.PairFallbackWindow) == "" {
+		c.Remote.PairFallbackWindow = "1m"
+	}
+
+	return &c
+}
+
 // DiffFromDefaults returns a unified diff (built-in defaults → cfg) of the two
 // TOML renderings. toLabel names the "to" side in the diff header (e.g. the
 // config file path, or "effective"). An empty return means cfg is byte-for-byte
 // identical to the built-in defaults.
 func DiffFromDefaults(cfg *Config, toLabel string) (string, error) {
-	defaultBytes, err := toml.Marshal(Default())
+	defaultBytes, err := EffectiveTOML(Default())
 	if err != nil {
-		return "", fmt.Errorf("marshal defaults: %w", err)
+		return "", fmt.Errorf("render defaults: %w", err)
 	}
 
-	cfgBytes, err := toml.Marshal(cfg)
+	cfgBytes, err := EffectiveTOML(cfg)
 	if err != nil {
-		return "", fmt.Errorf("marshal config: %w", err)
+		return "", fmt.Errorf("render config: %w", err)
 	}
 
 	return udiff.Unified("defaults", toLabel, string(defaultBytes), string(cfgBytes)), nil

@@ -414,6 +414,26 @@ func TestHandleOrchestratorExit_BackoffScheduling_Cov(t *testing.T) {
 	}
 }
 
+func TestOrchestratorRestartDelayKeepsPositiveSupervisorFloor(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  config.OrchestratorRestartConfig
+	}{
+		{"zero schedule", config.OrchestratorRestartConfig{Schedule: []string{"0s"}}},
+		{"negative schedule", config.OrchestratorRestartConfig{Schedule: []string{"-1s"}}},
+		{"zero geometric bounds", config.OrchestratorRestartConfig{Schedule: []string{}, InitialBackoff: "0s", MaxBackoff: "0s"}},
+		{"negative stable reset does not affect delay", config.OrchestratorRestartConfig{Schedule: []string{"-1s"}, StableReset: "-1s"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := orchestratorRestartDelay(tt.cfg, 0); got <= 0 {
+				t.Errorf("orchestratorRestartDelay() = %v, want positive delay", got)
+			}
+		})
+	}
+}
+
 // TestHandleOrchestratorExit_RestartConfig is a regression test for the restart
 // policy being configurable (#1239): a custom stable_reset window and a custom
 // fresh-start threshold must drive the backoff/reset behaviour instead of the

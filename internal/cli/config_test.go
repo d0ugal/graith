@@ -132,7 +132,7 @@ func TestConfigShowRoundTrips(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	data, err := toml.Marshal(effectiveCfg)
+	data, err := config.EffectiveTOML(effectiveCfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,6 +148,14 @@ func TestConfigShowRoundTrips(t *testing.T) {
 
 	if roundTripped.Agents["claude"].Command != "claude" {
 		t.Error("claude agent not preserved through round-trip")
+	}
+
+	remote := roundTripped.Remote
+	if remote.MaxPendingPairings != config.RemoteMaxPendingPairingsDefault ||
+		remote.PendingPairingTTL != "10m" ||
+		remote.PairFallbackCount != config.RemotePairFallbackCountDefault ||
+		remote.PairFallbackWindow != "1m" {
+		t.Errorf("config show pairing policy = %+v, want resolved runtime defaults", remote)
 	}
 }
 

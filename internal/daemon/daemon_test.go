@@ -2291,6 +2291,86 @@ func TestReloadConfigInvalidFile(t *testing.T) {
 	}
 }
 
+func TestReloadConfigConversationMaxDerivesAndRollsBack(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte("[messages]\nconversation_max_limit = 100\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	sm := newTestSessionManager(t)
+	sm.configFile = path
+	if err := sm.ReloadConfig(); err != nil {
+		t.Fatalf("ReloadConfig() = %v", err)
+	}
+	if got := sm.Config().Messages.ConversationPageSize; got != 100 {
+		t.Fatalf("derived page size after reload = %d, want 100", got)
+	}
+
+	if err := os.WriteFile(path, []byte("[messages]\nconversation_page_size = 101\nconversation_max_limit = 100\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := sm.ReloadConfig(); err == nil || !strings.Contains(err.Error(), "must not exceed conversation_max_limit") {
+		t.Fatalf("contradictory reload = %v, want validation error", err)
+	}
+	if got := sm.Config().Messages.ConversationPageSize; got != 100 {
+		t.Errorf("failed reload replaced live page size with %d, want prior 100", got)
+	}
+}
+
+func TestReloadConfigRejectsRemovedOrchestratorAgent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	withAgent := "[orchestrator]\nagent = \"bespoke\"\n\n[agents.bespoke]\ncommand = \"canny-agent\"\n"
+	if err := os.WriteFile(path, []byte(withAgent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	sm := newTestSessionManager(t)
+	sm.configFile = path
+	if err := sm.ReloadConfig(); err != nil {
+		t.Fatalf("initial ReloadConfig() = %v", err)
+	}
+
+	if err := os.WriteFile(path, []byte("[orchestrator]\nagent = \"bespoke\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := sm.ReloadConfig(); err == nil || !strings.Contains(err.Error(), "orchestrator.agent") || !strings.Contains(err.Error(), "bespoke") {
+		t.Fatalf("reload after agent removal = %v, want actionable validation error", err)
+	}
+	if _, ok := sm.Config().Agents["bespoke"]; !ok {
+		t.Error("failed reload replaced the prior config generation")
+	}
+}
+
+func TestReloadConfigRejectsUnsafeTimingPolicies(t *testing.T) {
+	tests := []struct {
+		name, body, wantErr string
+	}{
+		{"orchestrator restart", "[orchestrator.restart]\ninitial_backoff = \"0s\"\n", "orchestrator.restart.initial_backoff"},
+		{"PR anti-flood window", "[pr_watch.advanced]\nnotification_rate_window = \"0s\"\n", "pr_watch.advanced.notification_rate_window"},
+		{"degraded watch retry", "[triggers.advanced]\nwatch_retry_base_backoff = \"0s\"\n", "triggers.advanced.watch_retry_base_backoff"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.toml")
+			if err := os.WriteFile(path, []byte(tt.body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			sm := newTestSessionManager(t)
+			sm.configFile = path
+			before := sm.cfg
+			err := sm.ReloadConfig()
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("ReloadConfig() = %v, want error containing %q", err, tt.wantErr)
+			}
+			if sm.cfg != before {
+				t.Error("failed validation replaced the live config")
+			}
+		})
+	}
+}
+
 func TestToSessionInfoMirror(t *testing.T) {
 	sess := SessionState{
 		ID:           "abc123",

@@ -549,6 +549,56 @@ func TestTriggersAdvancedOverrides(t *testing.T) {
 	}
 }
 
+func TestWatchRetryBackoffConfigSafety(t *testing.T) {
+	fields := []struct {
+		name string
+		set  func(*TriggersAdvancedConfig, string)
+		get  func(TriggersRuntime) time.Duration
+		def  time.Duration
+	}{
+		{"watch_retry_base_backoff", func(a *TriggersAdvancedConfig, v string) { a.WatchRetryBaseBackoff = v }, TriggersRuntime.WatchRetryBaseBackoffDuration, defaultWatchRetryBase},
+		{"watch_retry_max_backoff", func(a *TriggersAdvancedConfig, v string) { a.WatchRetryMaxBackoff = v }, TriggersRuntime.WatchRetryMaxBackoffDuration, defaultWatchRetryMax},
+	}
+
+	for _, field := range fields {
+		t.Run(field.name, func(t *testing.T) {
+			for _, bad := range []string{"0s", "-1ns"} {
+				var direct TriggersRuntime
+				field.set(&direct.Advanced, bad)
+				if got := field.get(direct); got != field.def {
+					t.Errorf("accessor(%q) = %v, want defensive default %v", bad, got, field.def)
+				}
+
+				cfg := Default()
+				field.set(&cfg.TriggersRuntime.Advanced, bad)
+				err := cfg.Validate()
+				if err == nil || !strings.Contains(err.Error(), "triggers.advanced."+field.name) {
+					t.Errorf("Validate(%q) = %v, want field-specific error", bad, err)
+				}
+			}
+		})
+	}
+
+	t.Run("base greater than max rejected", func(t *testing.T) {
+		cfg := Default()
+		cfg.TriggersRuntime.Advanced.WatchRetryBaseBackoff = "2s"
+		cfg.TriggersRuntime.Advanced.WatchRetryMaxBackoff = "1s"
+		err := cfg.Validate()
+		if err == nil || !strings.Contains(err.Error(), "must not exceed watch_retry_max_backoff") {
+			t.Fatalf("Validate() = %v, want incoherent-bound error", err)
+		}
+	})
+
+	t.Run("equal positive bounds pass", func(t *testing.T) {
+		cfg := Default()
+		cfg.TriggersRuntime.Advanced.WatchRetryBaseBackoff = "1ns"
+		cfg.TriggersRuntime.Advanced.WatchRetryMaxBackoff = "1ns"
+		if err := cfg.Validate(); err != nil {
+			t.Fatalf("Validate() = %v, want nil at equality boundary", err)
+		}
+	})
+}
+
 // TestTriggersTickerCadencesRejectNonPositive proves the two advanced trigger
 // cadences that feed time.NewTicker fall back to their defaults for "0", "0s",
 // and negative durations, so the scheduler and file-watch reconcile loops can

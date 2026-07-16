@@ -286,3 +286,60 @@ sweep_interval = "15s"
 		t.Errorf("todo max note = %d, want %d (default preserved)", got, TodoMaxNoteDefault)
 	}
 }
+
+func TestLoadConversationMaxDerivesPageSize(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+
+	load := func(t *testing.T, body string) (*Config, error) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return Load(path)
+	}
+
+	tests := []struct {
+		name     string
+		body     string
+		wantPage int
+		wantErr  string
+	}{
+		{"lower max derives inherited page", "[messages]\nconversation_max_limit = 100\n", 100, ""},
+		{"equal explicit page accepted", "[messages]\nconversation_page_size = 100\nconversation_max_limit = 100\n", 100, ""},
+		{"zero page keeps derived-default semantics", "[messages]\nconversation_page_size = 0\nconversation_max_limit = 100\n", 100, ""},
+		{"negative page keeps derived-default semantics", "[messages]\nconversation_page_size = -1\nconversation_max_limit = 100\n", 100, ""},
+		{"explicit contradiction rejected", "[messages]\nconversation_page_size = 101\nconversation_max_limit = 100\n", 0, "must not exceed conversation_max_limit"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := load(t, tt.body)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("Load() = %v, want error containing %q", err, tt.wantErr)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("Load() = %v", err)
+			}
+			if cfg.Messages.ConversationPageSize != tt.wantPage {
+				t.Errorf("raw derived page = %d, want %d", cfg.Messages.ConversationPageSize, tt.wantPage)
+			}
+			if got := cfg.Messages.ConversationPageSizeOrDefault(); got != tt.wantPage {
+				t.Errorf("effective derived page = %d, want %d", got, tt.wantPage)
+			}
+		})
+	}
+
+	// Re-read the same path with a tighter maximum to cover the reload path: the
+	// inherited page default is derived afresh for each generation.
+	cfg, err := load(t, "[messages]\nconversation_max_limit = 75\n")
+	if err != nil {
+		t.Fatalf("reload Load() = %v", err)
+	}
+	if cfg.Messages.ConversationPageSize != 75 {
+		t.Errorf("reloaded raw page = %d, want 75", cfg.Messages.ConversationPageSize)
+	}
+}

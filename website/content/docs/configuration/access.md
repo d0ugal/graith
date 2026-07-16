@@ -20,6 +20,8 @@ prompt_file  = ""       # or read from file
 ```
 
 See [Orchestrator]({{< relref "/docs/orchestrator.md" >}}) for details.
+An explicit `agent` must name a configured `[agents.<name>]` entry; an empty
+value continues to inherit `default_agent`.
 
 ### Restart policy
 
@@ -35,7 +37,7 @@ stable_reset          = "60s"  # a run lasting at least this long resets the bac
 fresh_start_threshold = 3      # after this many consecutive restarts, relaunch the agent fresh (new session id)
 ```
 
-There are two backoff modes. By default an explicit **`schedule`** lists the delay for each attempt, with the final entry repeating for every attempt beyond its length — this preserves graith's historical backoff curve. Setting `schedule = []` switches to **geometric** backoff computed as `initial_backoff × multiplier` each attempt, capped at `max_backoff`. The defaults are chosen so an unconfigured daemon behaves exactly as before.
+There are two backoff modes. By default an explicit **`schedule`** lists the delay for each attempt, with the final entry repeating for every attempt beyond its length — this preserves graith's historical backoff curve. Schedule entries must be positive and nondecreasing. Setting `schedule = []` switches to **geometric** backoff computed as `initial_backoff × multiplier` each attempt, capped at `max_backoff`; `initial_backoff`, `max_backoff`, and `stable_reset` must be positive, and the initial delay must not exceed the maximum. Invalid policies are rejected on load or reload. The defaults are chosen so an unconfigured daemon behaves exactly as before.
 
 ## Remote access
 
@@ -52,13 +54,13 @@ require_pairing     = true           # require per-device pairing for human-leve
 # tags              = ["tag:graith"] # tsnet ACL tags applied to the node (tsnet mode)
 # allow_tailnet_users = ["you@example.com"]  # WhoIs allowlist; "tag:"-prefixed entries opt tagged nodes in
 # pair_request_rate = "5/min"        # anti-flood limit on pending pair requests ("<n>/<sec|min|hour>")
-# max_pending_pairings = 16          # cap on unapproved pair requests outstanding at once (1-1024)
-# pending_pairing_ttl  = "10m"       # how long an unapproved pair request lives before it expires (1m-24h)
-# pair_fallback_count  = 5           # rate count applied when pair_request_rate is unset (1-1000)
-# pair_fallback_window = "1m"        # rate window applied when pair_request_rate is unset (1s-24h)
+max_pending_pairings = 16           # cap on unapproved pair requests outstanding at once (1-1024)
+pending_pairing_ttl  = "10m"        # how long an unapproved pair request lives before it expires (1m-24h)
+pair_fallback_count  = 5            # rate count applied when pair_request_rate is unset (1-1000)
+pair_fallback_window = "1m"         # rate window applied when pair_request_rate is unset (1s-24h)
 ```
 
-Pairing policy limits keep the historically-fixed values as defaults and are clamped to safe bounds: a value of `0`/empty means "use the default", and an out-of-bounds value in an enabled block is a hard config-load error. `pair_request_rate` is the primary anti-flood knob; when it is unset the `pair_fallback_count`/`pair_fallback_window` rate applies.
+Pairing policy limits keep the historically-fixed values as defaults and are clamped to safe bounds: a value of `0`/empty means "use the displayed default", and effective config output resolves those sentinels to the values above. An out-of-bounds value in an enabled block is a hard config-load error. `pair_request_rate` is the primary anti-flood knob; when it is unset the `pair_fallback_count`/`pair_fallback_window` rate applies.
 
 Access is gated in two layers: a WhoIs **allowlist** (`allow_tailnet_users` — who on the tailnet may connect at all) and per-device **pairing** (`require_pairing` — each device proves possession of a paired key before it gets human-level rights).
 

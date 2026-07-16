@@ -1046,9 +1046,29 @@ func TestGateRateLimit_Configured(t *testing.T) {
 	}
 }
 
+func TestGateRateLimitNonPositiveWindowStillLimitsImmediateEvent(t *testing.T) {
+	for _, bad := range []string{"0s", "-1s"} {
+		t.Run(bad, func(t *testing.T) {
+			sm := newPRWatchSM()
+			cfg := &config.PRWatchConfig{
+				Debounce: "0s", MaxNotificationsPerPR: 100,
+				Advanced: config.PRWatchAdvancedConfig{NotificationRateLimit: 1, NotificationRateWindow: bad},
+			}
+			cur := &prWatchCursor{failing: map[string]bool{}}
+			if reason, ok := sm.gate(cfg, "canny", cur, false); !ok {
+				t.Fatalf("first event denied: %s", reason)
+			}
+			if reason, ok := sm.gate(cfg, "canny", cur, false); ok || reason != "rate-limited" {
+				t.Fatalf("second immediate event = (%q, %v), want rate-limited", reason, ok)
+			}
+		})
+	}
+}
+
 // TestAllowKick_ConfiguredCooldown proves the kick cooldown honours
 // [pr_watch.advanced] kick_cooldown. A large cooldown suppresses the second kick;
-// a zero cooldown allows back-to-back kicks (which the old 3s constant forbade).
+// an invalid direct zero retains the positive default instead of disabling the
+// anti-thrash cooldown.
 func TestAllowKick_ConfiguredCooldown(t *testing.T) {
 	sm := newPRWatchSM()
 
@@ -1063,11 +1083,11 @@ func TestAllowKick_ConfiguredCooldown(t *testing.T) {
 
 	zero := &config.PRWatchConfig{Advanced: config.PRWatchAdvancedConfig{KickCooldown: "0s"}}
 	if !sm.allowKick(zero, "canny2") {
-		t.Error("a zero cooldown should allow the first kick")
+		t.Error("a zero cooldown fallback should allow the first kick")
 	}
 
-	if !sm.allowKick(zero, "canny2") {
-		t.Error("a zero cooldown should allow a back-to-back second kick")
+	if sm.allowKick(zero, "canny2") {
+		t.Error("a zero cooldown fallback should suppress a back-to-back second kick")
 	}
 }
 
@@ -2171,6 +2191,26 @@ func TestPromptUntrustedAuthors_RateLimited(t *testing.T) {
 
 	if sm.state.PRWatchPromptedAuthors["scunner"] {
 		t.Error("rate-limited author should not be recorded (so it can surface later)")
+	}
+}
+
+func TestAuthorPromptNonPositiveWindowStillLimitsImmediateEvent(t *testing.T) {
+	for _, bad := range []string{"0s", "-1s"} {
+		t.Run(bad, func(t *testing.T) {
+			sm := newPRWatchSM()
+			cfg := &config.PRWatchConfig{Advanced: config.PRWatchAdvancedConfig{
+				UntrustedAuthorPromptRate: 1, UntrustedAuthorPromptWindow: bad,
+			}}
+
+			sm.prWatch.mu.Lock()
+			first := sm.allowAuthorPrompt(cfg)
+			second := sm.allowAuthorPrompt(cfg)
+			sm.prWatch.mu.Unlock()
+
+			if !first || second {
+				t.Errorf("allowAuthorPrompt first=%v second=%v, want true then false", first, second)
+			}
+		})
 	}
 }
 

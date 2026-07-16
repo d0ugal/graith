@@ -142,7 +142,13 @@ hook_terminal_window = "30m"    # ready / approval hooks (Stop, idle, permission
 
 **Scraping fallbacks.** `silent_threshold` is how long a running session may produce zero PTY output before the daemon logs a "silent session" warning. `recent_output_window` treats a session that produced output very recently as `active` even when the scraped text is inconclusive; `adopted_grace` keeps a session's previous status for a short window after a daemon upgrade re-attaches to a surviving agent, so a freshly adopted PTY isn't misread as `unknown`. Setting either window to `"0"` disables that fallback.
 
-Empty or non-positive values fall back to the defaults shown above. These values are read live on each detection pass (and each hook report), so a config reload (`SIGHUP` / edit-and-save) takes effect without restarting the daemon; `scan_interval` and `fetch_interval` set the loop tickers at startup, so changing those two requires a `gr daemon restart`.
+Empty, invalid, or non-positive values fall back to the defaults shown above,
+except that exactly `"0"` intentionally disables `adopted_grace` and
+`recent_output_window`; negative values for those two still fall back. These
+values are read live on each detection pass (and each hook report), so a config
+reload (`SIGHUP` / edit-and-save) takes effect without restarting the daemon;
+`scan_interval` and `fetch_interval` set the loop tickers at startup, so changing
+those two requires a `gr daemon restart`.
 
 ## Token accounting
 

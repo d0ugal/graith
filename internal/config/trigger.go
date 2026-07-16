@@ -507,13 +507,13 @@ func (r TriggersRuntime) WatchReconcileIntervalDuration() time.Duration {
 // WatchRetryBaseBackoffDuration is the first-retry delay for a degraded file-watch
 // binding. Default 5s.
 func (r TriggersRuntime) WatchRetryBaseBackoffDuration() time.Duration {
-	return parseDurationOr(r.Advanced.WatchRetryBaseBackoff, defaultWatchRetryBase)
+	return positiveDurationOrDefault(r.Advanced.WatchRetryBaseBackoff, defaultWatchRetryBase)
 }
 
 // WatchRetryMaxBackoffDuration caps the exponential degraded-binding backoff.
 // Default 5m.
 func (r TriggersRuntime) WatchRetryMaxBackoffDuration() time.Duration {
-	return parseDurationOr(r.Advanced.WatchRetryMaxBackoff, defaultWatchRetryMax)
+	return positiveDurationOrDefault(r.Advanced.WatchRetryMaxBackoff, defaultWatchRetryMax)
 }
 
 // WatchBuiltinIgnores returns the daemon-wide watch ignore list, defaulting to
@@ -542,6 +542,20 @@ func (r TriggersRuntime) CommandOutputCap() int {
 // Config.Validate. Rules follow docs/design/2026-07-11-triggers-design.md.
 func (c *Config) validateTriggers() []error {
 	var errs []error
+
+	// A degraded watcher must always wait before retrying, and its first delay
+	// must fit under the configured cap. Reject unsafe values at load/reload while
+	// retaining positive accessor defaults for directly-constructed configs.
+	advanced := c.TriggersRuntime.Advanced
+	validatePositiveDurationField(&errs, "triggers.advanced.watch_retry_base_backoff", advanced.WatchRetryBaseBackoff)
+	validatePositiveDurationField(&errs, "triggers.advanced.watch_retry_max_backoff", advanced.WatchRetryMaxBackoff)
+
+	base, baseErr := ParseDurationWithDays(advanced.WatchRetryBaseBackoff)
+	maxBackoff, maxErr := ParseDurationWithDays(advanced.WatchRetryMaxBackoff)
+	if strings.TrimSpace(advanced.WatchRetryBaseBackoff) != "" && strings.TrimSpace(advanced.WatchRetryMaxBackoff) != "" &&
+		baseErr == nil && maxErr == nil && base > 0 && maxBackoff > 0 && base > maxBackoff {
+		errs = append(errs, fmt.Errorf("triggers.advanced.watch_retry_base_backoff %q: must not exceed watch_retry_max_backoff %q", advanced.WatchRetryBaseBackoff, advanced.WatchRetryMaxBackoff))
+	}
 
 	seen := make(map[string]bool)
 

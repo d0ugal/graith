@@ -23,7 +23,7 @@ debounce                 = "2m"   # minimum cooldown between notifications to a 
 
 ### Advanced watcher tuning
 
-The `[pr_watch.advanced]` table exposes the low-level policy knobs that pace the watch loop and its git-ref accelerator. Every key is optional and falls back to the default shown, so omitting the table keeps the built-in behaviour. Tune these only to trade off `gh` load, detection latency, notification retention, and the untrusted-author prompt surface.
+The `[pr_watch.advanced]` table exposes the low-level policy knobs that pace the watch loop and its git-ref accelerator. Every key is optional and falls back to the default shown, so omitting the table keeps the built-in behaviour. Duration overrides in this block must be positive; zero does not disable its anti-flood or coalescing windows. Tune these only to trade off `gh` load, detection latency, notification retention, and the untrusted-author prompt surface.
 
 ```toml
 [pr_watch.advanced]
@@ -154,8 +154,8 @@ degraded-binding recovery, and notification size.
 scheduler_tick           = "1s"     # trigger scheduler loop cadence (cron granularity is 1 minute)
 run_history_max          = 20       # per-trigger runs retained in persisted history
 watch_reconcile_interval = "2s"     # how often file-watch bindings are reconciled against live sessions
-watch_retry_base_backoff = "5s"     # first-retry delay for a degraded file-watch binding (then exponential)
-watch_retry_max_backoff  = "5m"     # cap on the degraded-binding retry backoff
+watch_retry_base_backoff = "5s"     # positive first-retry delay for a degraded file-watch binding (then exponential)
+watch_retry_max_backoff  = "5m"     # positive cap on retry backoff; must be >= the base
 command_output_cap       = 4096     # bytes of a command action's captured output kept (rest truncated)
 watch_builtin_ignores    = [".git/", ".git", ".hg/", ".svn/", "*.swp", "*.swx", "4913", ".DS_Store"]
 ```
@@ -164,6 +164,10 @@ watch_builtin_ignores    = [".git/", ".git", ".hg/", ".svn/", "*.swp", "*.swx", 
 watched by any file-watch trigger (on top of git ignore rules and per-trigger
 `watch.ignore`). `.git` is always ignored regardless of this list, because a
 watched `.git` churns constantly and creates a feedback loop.
+
+The degraded-watch retry bounds must be positive and
+`watch_retry_base_backoff` must not exceed `watch_retry_max_backoff`; invalid
+bounds are rejected on load or reload rather than creating a retry loop.
 
 The loop-lifetime knobs — `scheduler_tick` and `watch_reconcile_interval` — are
 read when the daemon starts, so changing them takes effect on the next daemon

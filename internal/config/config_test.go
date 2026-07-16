@@ -1066,6 +1066,65 @@ func TestValidateDefaultAgent(t *testing.T) {
 	})
 }
 
+// TestValidateOrchestratorAgent covers membership validation against the final
+// merged agent map. It mirrors default_agent validation while preserving the
+// empty override's inheritance semantics.
+func TestValidateOrchestratorAgent(t *testing.T) {
+	write := func(t *testing.T, body string) string {
+		t.Helper()
+
+		p := filepath.Join(t.TempDir(), "config.toml")
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		return p
+	}
+
+	tests := []struct {
+		name    string
+		body    string
+		wantErr string
+	}{
+		{"empty inherits default", "[orchestrator]\nagent = \"\"\n", ""},
+		{"built-in agent", "[orchestrator]\nagent = \"codex\"\n", ""},
+		{"custom agent", "[orchestrator]\nagent = \"bespoke\"\n\n[agents.bespoke]\ncommand = \"my-agent\"\n", ""},
+		{"unknown agent", "[orchestrator]\nagent = \"ghaist\"\n", "ghaist"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Load(write(t, tt.body))
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Load() = %v, want nil", err)
+				}
+				return
+			}
+
+			if err == nil || !strings.Contains(err.Error(), "orchestrator.agent") || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("Load() = %v, want actionable orchestrator.agent error containing %q", err, tt.wantErr)
+			}
+		})
+	}
+
+	t.Run("removing custom agent fails on reload", func(t *testing.T) {
+		path := write(t, "[orchestrator]\nagent = \"bespoke\"\n\n[agents.bespoke]\ncommand = \"my-agent\"\n")
+		if _, err := Load(path); err != nil {
+			t.Fatalf("initial Load() = %v", err)
+		}
+
+		if err := os.WriteFile(path, []byte("[orchestrator]\nagent = \"bespoke\"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		_, err := Load(path)
+		if err == nil || !strings.Contains(err.Error(), "orchestrator.agent") || !strings.Contains(err.Error(), "bespoke") {
+			t.Fatalf("reload Load() = %v, want missing bespoke orchestrator.agent error", err)
+		}
+	})
+}
+
 func TestLoadAgentExplicitEmptyArgs(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.toml")
@@ -2421,6 +2480,19 @@ func TestOrchestratorRestartDelayForLevel(t *testing.T) {
 		}
 	})
 
+	t.Run("non-positive direct values keep a positive restart floor", func(t *testing.T) {
+		cases := []OrchestratorRestartConfig{
+			{Schedule: []string{"0s"}},
+			{Schedule: []string{"-1s"}},
+			{Schedule: []string{"0s", "-1s"}, InitialBackoff: "0s", MaxBackoff: "-1s"},
+		}
+		for _, r := range cases {
+			if got := r.DelayForLevel(0); got <= 0 {
+				t.Errorf("DelayForLevel(0) = %v, want a positive defensive floor", got)
+			}
+		}
+	})
+
 	t.Run("geometric mode computes and caps at max", func(t *testing.T) {
 		r := OrchestratorRestartConfig{
 			InitialBackoff: "1s",
@@ -2503,6 +2575,15 @@ func TestOrchestratorRestartStableReset(t *testing.T) {
 			t.Errorf("StableResetDuration = %v, want default", got)
 		}
 	})
+
+	for _, bad := range []string{"0", "0s", "-1s"} {
+		t.Run("non-positive "+bad+" falls back to default", func(t *testing.T) {
+			r := OrchestratorRestartConfig{StableReset: bad}
+			if got := r.StableResetDuration(); got != OrchestratorStableResetDefault {
+				t.Errorf("StableResetDuration(%q) = %v, want default", bad, got)
+			}
+		})
+	}
 }
 
 func TestOrchestratorRestartFreshStartThreshold(t *testing.T) {
@@ -2562,6 +2643,46 @@ func TestOrchestratorRestartValidate(t *testing.T) {
 		}}}
 		if err := c.Validate(); err != nil {
 			t.Errorf("unexpected validation error: %v", err)
+		}
+	})
+
+	t.Run("non-positive and incoherent policies are rejected", func(t *testing.T) {
+		tests := []struct {
+			name    string
+			mutate  func(*OrchestratorRestartConfig)
+			wantErr string
+		}{
+			{"initial zero", func(r *OrchestratorRestartConfig) { r.InitialBackoff = "0s" }, "initial_backoff"},
+			{"initial negative", func(r *OrchestratorRestartConfig) { r.InitialBackoff = "-1s" }, "initial_backoff"},
+			{"max zero", func(r *OrchestratorRestartConfig) { r.MaxBackoff = "0s" }, "max_backoff"},
+			{"max negative", func(r *OrchestratorRestartConfig) { r.MaxBackoff = "-1s" }, "max_backoff"},
+			{"stable zero", func(r *OrchestratorRestartConfig) { r.StableReset = "0s" }, "stable_reset"},
+			{"stable negative", func(r *OrchestratorRestartConfig) { r.StableReset = "-1s" }, "stable_reset"},
+			{"schedule zero", func(r *OrchestratorRestartConfig) { r.Schedule = []string{"0s"} }, "schedule[0]"},
+			{"schedule negative", func(r *OrchestratorRestartConfig) { r.Schedule = []string{"-1s"} }, "schedule[0]"},
+			{"schedule decreases", func(r *OrchestratorRestartConfig) { r.Schedule = []string{"2s", "1s"} }, "previous delay"},
+			{"initial exceeds max", func(r *OrchestratorRestartConfig) { r.InitialBackoff, r.MaxBackoff = "3s", "2s" }, "must not exceed max_backoff"},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				cfg := Default()
+				tt.mutate(&cfg.Orchestrator.Restart)
+				err := cfg.Validate()
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("Validate() = %v, want error containing %q", err, tt.wantErr)
+				}
+			})
+		}
+	})
+
+	t.Run("coherent equality boundaries pass", func(t *testing.T) {
+		cfg := Default()
+		cfg.Orchestrator.Restart.InitialBackoff = "2s"
+		cfg.Orchestrator.Restart.MaxBackoff = "2s"
+		cfg.Orchestrator.Restart.Schedule = []string{"1s", "1s"}
+		if err := cfg.Validate(); err != nil {
+			t.Fatalf("Validate() = %v, want nil at equality boundaries", err)
 		}
 	})
 }
@@ -3053,6 +3174,19 @@ func TestRemoteConfigValidation(t *testing.T) {
 
 		if !r.RequirePairing {
 			t.Error("default remote.require_pairing should be true")
+		}
+
+		if r.MaxPendingPairings != RemoteMaxPendingPairingsDefault {
+			t.Errorf("default remote.max_pending_pairings = %d, want %d", r.MaxPendingPairings, RemoteMaxPendingPairingsDefault)
+		}
+		if r.PendingPairingTTL != "10m" {
+			t.Errorf("default remote.pending_pairing_ttl = %q, want 10m", r.PendingPairingTTL)
+		}
+		if r.PairFallbackCount != RemotePairFallbackCountDefault {
+			t.Errorf("default remote.pair_fallback_count = %d, want %d", r.PairFallbackCount, RemotePairFallbackCountDefault)
+		}
+		if r.PairFallbackWindow != "1m" {
+			t.Errorf("default remote.pair_fallback_window = %q, want 1m", r.PairFallbackWindow)
 		}
 
 		if err := r.Validate(); err != nil {

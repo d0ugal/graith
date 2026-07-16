@@ -140,9 +140,10 @@ max_log_bytes = 104857600          # per-session scrollback log cap in bytes (< 
 
 # Detection & status-classification policy: the timing that governs how the
 # daemon scans PTY scrollback, refreshes remote refs, and decides agent status
-# (active/ready/approval). Empty or non-positive values fall back to the
-# defaults shown. Hook reports stay authoritative over PTY scraping for the
-# matching hook_* window. See issue #1241.
+# (active/ready/approval). Empty, invalid, or non-positive values fall back to
+# the defaults shown, except that exactly "0" disables adopted_grace and
+# recent_output_window as documented below. Hook reports stay authoritative
+# over PTY scraping for the matching hook_* window. See issue #1241.
 [detection]
 scan_interval = "500ms"        # how often PTY scrollback is scanned for agent status
 fetch_interval = "5m"          # how often `git fetch` refreshes remote tracking refs
@@ -290,13 +291,15 @@ orphan_min_age = "5m"        # minimum age before an orphaned worktree/scratch d
 # bound retention of the on-disk log (both default off — kept forever). The rest
 # were fixed literals before issue #1249: the conversation paging bounds, the
 # jail listing cap, the pub/sub subscriber buffer, and the SQLite busy/operation
-# timeout. conversation_page_size must not exceed conversation_max_limit.
+# timeout. An explicit conversation_page_size must not exceed
+# conversation_max_limit; when only the maximum is lowered, the inherited page
+# size is derived down to that maximum.
 # subscriber_buffer and busy_timeout are fixed at daemon start (restart-only);
 # the paging bounds and jail cap are read per-request (reloadable).
 [messages]
 # max_age = "30d"          # delete messages older than this ("" or "0" keeps them forever)
 # max_per_stream = 5000    # keep at most this many messages per stream (0 keeps all)
-conversation_page_size = 500   # page size when a conversation request omits a limit (< 1 => 500; <= max limit)
+conversation_page_size = 500   # page size when a request omits a limit (< 1 => default, clamped to max limit)
 conversation_max_limit = 2000  # hard cap on messages a single conversation sorts (< 1 => 2000; ceiling 100000)
 jail_list_limit = 2000         # max quarantined comments a jail listing returns (< 1 => 2000; ceiling 100000)
 subscriber_buffer = 64         # per-subscriber pub/sub channel capacity (< 1 => 64; ceiling 65536)
@@ -364,7 +367,8 @@ notify_untrusted_authors = true  # message the orchestrator once per new untrust
 # Advanced watcher tuning. These are the low-level policy defaults the daemon
 # applies; they are stated here (not only in code) so `gr config show/diff/reset`
 # describe the full effective behaviour. Tune them to trade off gh load, detection
-# latency, notification retention, and the untrusted-author prompt surface. The
+# latency, notification retention, and the untrusted-author prompt surface. All
+# duration values in this advanced block must be positive. The
 # loop-lifetime knobs (base_tick, kick_channel_size, ref_reconcile_interval) take
 # effect on the next daemon (re)start.
 [pr_watch.advanced]
@@ -567,10 +571,11 @@ prompt_file = ""
 
 # How the daemon auto-restarts the orchestrator after it exits unexpectedly
 # (crash/watchdog — never after a user, idle, or shutdown stop). By default an
-# explicit schedule preserves graith's historical backoff curve. To use
-# geometric backoff instead, set schedule = [] and tune the knobs below.
+# explicit schedule preserves graith's historical backoff curve. Schedule
+# entries must be positive and nondecreasing. To use geometric backoff instead,
+# set schedule = [] and tune the positive knobs below (initial <= max).
 [orchestrator.restart]
-schedule = ["2s", "4s", "8s", "16s", "32s", "60s", "300s"]  # per-attempt delays; the last value repeats. Set to [] to use the geometric knobs.
+schedule = ["2s", "4s", "8s", "16s", "32s", "60s", "300s"]  # positive, nondecreasing per-attempt delays; the last value repeats. Set to [] for geometric mode.
 initial_backoff = "2s"    # geometric mode: first restart delay (used only when schedule = [])
 max_backoff = "300s"      # geometric mode: cap on the restart delay
 multiplier = 2.0          # geometric mode: each delay = previous × this (<= 1 => default 2.0)
@@ -585,10 +590,10 @@ mode = "tsnet"            # transport: "tsnet" (embedded Tailscale) or "interfac
 port = 4823               # TCP port the listener binds
 require_pairing = true    # require per-device pairing for human-level rights; false is read-only and UNSAFE
 # pair_request_rate = "5/min"     # anti-flood rate on pending pair requests ("<n>/<sec|min|hour>")
-# max_pending_pairings = 16       # cap on unapproved pair requests outstanding at once (1-1024)
-# pending_pairing_ttl  = "10m"    # how long an unapproved pair request lives (1m-24h)
-# pair_fallback_count  = 5        # rate count used when pair_request_rate is unset (1-1000)
-# pair_fallback_window = "1m"     # rate window used when pair_request_rate is unset (1s-24h)
+max_pending_pairings = 16        # cap on unapproved pair requests outstanding at once (1-1024; 0 uses this default)
+pending_pairing_ttl  = "10m"     # how long an unapproved pair request lives (1m-24h; empty uses this default)
+pair_fallback_count  = 5         # rate count used when pair_request_rate is unset (1-1000; 0 uses this default)
+pair_fallback_window = "1m"      # rate window used when pair_request_rate is unset (1s-24h; empty uses this default)
 
 # [orchestrator.sandbox]
 # Extra filesystem access for the orchestrator only.
@@ -839,8 +844,8 @@ write_dirs = ["~/.gemini"]
 scheduler_tick           = "1s"     # trigger scheduler loop cadence (cron granularity is 1 minute)
 run_history_max          = 20       # per-trigger runs retained in persisted history
 watch_reconcile_interval = "2s"     # how often file-watch bindings are reconciled against live sessions
-watch_retry_base_backoff = "5s"     # first-retry delay for a degraded file-watch binding (then exponential)
-watch_retry_max_backoff  = "5m"     # cap on the degraded-binding retry backoff
+watch_retry_base_backoff = "5s"     # positive first-retry delay for a degraded file-watch binding (then exponential)
+watch_retry_max_backoff  = "5m"     # positive cap on retry backoff; must be >= the base
 command_output_cap       = 4096     # bytes of a command action's captured output kept (rest truncated)
 # watch_builtin_ignores: daemon-wide dirs/patterns never watched (".git" is always
 # ignored regardless). Unset uses the default below.
