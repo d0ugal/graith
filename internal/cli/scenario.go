@@ -31,15 +31,17 @@ type scenarioFileMeta struct {
 }
 
 type scenarioFileSession struct {
-	Name       string `toml:"name"`
-	Repo       string `toml:"repo"`
-	Agent      string `toml:"agent"`
-	Model      string `toml:"model"`
-	Base       string `toml:"base"`
-	Role       string `toml:"role"`
-	Task       string `toml:"task"`
-	AgentHooks *bool  `toml:"agent_hooks"`
-	Shared     bool   `toml:"shared"`
+	Name       string   `toml:"name"`
+	Repo       string   `toml:"repo"`
+	Agent      string   `toml:"agent"`
+	Model      string   `toml:"model"`
+	Base       string   `toml:"base"`
+	Role       string   `toml:"role"`
+	Task       string   `toml:"task"`
+	AgentHooks *bool    `toml:"agent_hooks"`
+	Shared     bool     `toml:"shared"`
+	Includes   []string `toml:"includes"`
+	Star       bool     `toml:"star"`
 }
 
 func scenariosDir() string {
@@ -135,6 +137,15 @@ func buildSessionInputs(sf *scenarioFile) ([]protocol.ScenarioSessionInput, erro
 		}
 
 		repo := config.ExpandPath(s.Repo)
+
+		var includes []string
+		if len(s.Includes) > 0 {
+			includes = make([]string, len(s.Includes))
+			for j, inc := range s.Includes {
+				includes[j] = config.ExpandPath(inc)
+			}
+		}
+
 		sessions[i] = protocol.ScenarioSessionInput{
 			Name:       s.Name,
 			Repo:       repo,
@@ -145,6 +156,8 @@ func buildSessionInputs(sf *scenarioFile) ([]protocol.ScenarioSessionInput, erro
 			Task:       s.Task,
 			AgentHooks: s.AgentHooks == nil || *s.AgentHooks,
 			Shared:     s.Shared,
+			Includes:   includes,
+			Star:       s.Star,
 		}
 	}
 

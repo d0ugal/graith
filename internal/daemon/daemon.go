@@ -795,6 +795,31 @@ func (sm *SessionManager) repoStoreDir(repoRoot string) (string, error) {
 // CreateOpts holds the parameters for SessionManager.Create. Using a struct
 // keeps call sites self-documenting and lets new options default to their
 // zero value without breaking existing callers.
+// mergeIncludes combines the repo-config includes with any per-session extra
+// includes (e.g. from a scenario file), preserving order and dropping
+// duplicates that resolve to the same path. Repo-config includes come first.
+func mergeIncludes(repoIncludes, extra []string) []string {
+	if len(repoIncludes) == 0 && len(extra) == 0 {
+		return nil
+	}
+
+	merged := make([]string, 0, len(repoIncludes)+len(extra))
+	seen := make(map[string]bool, len(repoIncludes)+len(extra))
+
+	for _, inc := range append(append([]string{}, repoIncludes...), extra...) {
+		key := config.ResolvePath(inc)
+		if seen[key] {
+			continue
+		}
+
+		seen[key] = true
+
+		merged = append(merged, inc)
+	}
+
+	return merged
+}
+
 type CreateOpts struct {
 	// ID, when non-empty, is the session ID to use instead of generating a
 	// fresh one. It must match the generated ID format (8 lowercase hex chars)
@@ -842,6 +867,13 @@ type CreateOpts struct {
 	// IdleTimeoutSecs overrides the agent-default idle-stop window for this
 	// session (seconds; 0 = agent default).
 	IdleTimeoutSecs int
+	// Includes attaches extra worktrees to the session in addition to any
+	// configured on the repo's [[repos]] entry. Merged with (and deduplicated
+	// against) the repo config includes. Used by scenarios (issue #1046).
+	Includes []string
+	// Starred creates the session already starred, protecting it from an
+	// accidental manual `gr delete`. Used by scenarios (issue #1046).
+	Starred bool
 }
 
 // Create starts a new agent session, either in a git worktree, in-place
@@ -1019,7 +1051,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 			return SessionState{}, fmt.Errorf("repo root %q is not configured in [[repos]] — add it to config to use --in-place", repoRoot)
 		}
 
-		if len(rc.Includes) > 0 {
+		if len(rc.Includes) > 0 || len(opts.Includes) > 0 {
 			sm.mu.Unlock()
 			return SessionState{}, fmt.Errorf("repo %q has includes configured — drop --in-place to create an includes session with worktrees", repoRoot)
 		}
@@ -1073,10 +1105,9 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 
 		sessionDir := filepath.Join(sm.paths.DataDir, "worktrees", repoName, repoHash(repoRoot), id)
 
-		if len(rc.Includes) > 0 {
+		rcIncludes = mergeIncludes(rc.Includes, opts.Includes)
+		if len(rcIncludes) > 0 {
 			worktreePath = filepath.Join(sessionDir, repoName)
-			rcIncludes = make([]string, len(rc.Includes))
-			copy(rcIncludes, rc.Includes)
 		} else {
 			worktreePath = sessionDir
 		}
@@ -1620,6 +1651,10 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	sessState.DriverKind = driverKind
 	sessState.Status = StatusRunning
 	sessState.StatusChangedAt = time.Now()
+
+	if opts.Starred {
+		sessState.Starred = true
+	}
 
 	sessState.PID = ptySess.ProcessPID()
 	if st, err := grpty.ProcessStartTime(sessState.PID); err == nil {

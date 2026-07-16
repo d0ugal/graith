@@ -72,6 +72,8 @@ agent_hooks = false
 | `task` | no | — | Task/prompt sent to the agent on start |
 | `agent_hooks` | no | `true` | Enable agent hooks (check-inbox, etc.) |
 | `shared` | no | `false` | Reuse an existing running session by name |
+| `includes` | no | — | Extra worktrees to attach, in addition to any inherited from the repo's `[[repos]]` config (`~` expanded; deduplicated against repo-config includes) |
+| `star` | no | `false` | Create the session already starred, protecting it from an accidental manual `gr delete` |
 
 Unknown fields are rejected — typos produce a parse error rather than being silently ignored.
 
@@ -79,6 +81,16 @@ Unknown fields are rejected — typos produce a parse error rather than being si
 session instead of creating a new one. The named session must already be
 running. Shared sessions participate in the scenario (receive manifests, appear
 in status) but are never stopped or deleted by scenario lifecycle operations.
+
+**Extra worktrees:** `includes` attaches additional repo worktrees to the
+session (the same mechanism as the repo-level `includes` config), so an agent
+can see and edit sibling repos. Paths are merged with — and deduplicated
+against — any includes configured on the repo's `[[repos]]` entry.
+
+**Starred sessions:** `star = true` creates the session already starred. A
+starred session is protected from an accidental manual `gr delete` (and bulk
+sweeps). Note `shared = true` only shields a session from scenario
+stop/delete, not from a manual `gr delete` — use `star` for that.
 
 ### `[[trigger]]` blocks (scenario-embedded triggers)
 

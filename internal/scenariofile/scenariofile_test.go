@@ -57,6 +57,49 @@ shared = true
 	}
 }
 
+func TestParse_IncludesAndStar(t *testing.T) {
+	data := []byte(`
+version = 1
+[scenario]
+name = "strath"
+[[sessions]]
+name = "ben"
+repo = "~/Code/croft"
+includes = ["~/Code/bothy", "~/Code/glen"]
+star = true
+[[sessions]]
+name = "canny"
+repo = "~/Code/whin"
+`)
+
+	sf, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	inputs, err := SessionInputs(sf)
+	if err != nil {
+		t.Fatalf("SessionInputs: %v", err)
+	}
+
+	if got := inputs[0].Includes; len(got) != 2 || got[0] != "~/Code/bothy" || got[1] != "~/Code/glen" {
+		t.Errorf("includes = %v", got)
+	}
+
+	if !inputs[0].Star {
+		t.Error("ben should be starred")
+	}
+
+	// Defaults: no includes, not starred.
+	if len(inputs[1].Includes) != 0 {
+		t.Errorf("canny includes = %v, want none", inputs[1].Includes)
+	}
+
+	if inputs[1].Star {
+		t.Error("canny should not be starred by default")
+	}
+}
+
 func TestParse_Invalid(t *testing.T) {
 	cases := []struct {
 		name string
