@@ -288,8 +288,25 @@ func (sm *SessionManager) injectClaudeHooks(sessionID string, yolo bool, mcpServ
 	return extraArgs, nil, nil
 }
 
+// codexBareKeyRe matches MCP server names that can be represented as a TOML
+// bare key inside a Codex `-c mcp_servers.<name>.…` override path. Codex's
+// `-c key=value` override parser splits the dotted key path on `.` and does
+// NOT honour quoting or backslash-escaping of a segment (verified against
+// Codex CLI 0.144.5: `mcp_servers."foo.bar".command`, `…'foo.bar'…`, and
+// `…foo\.bar…` all still split at the dot). So a name containing a `.` would
+// nest under the wrong table and, worse, fail Codex config loading outright —
+// preventing the whole session from starting. Any name outside this charset is
+// skipped rather than emitted, so one ill-named server can't break the launch.
+// The auto-injected `graith` server and typical names are always representable;
+// this only affects a user who names a server with a dot or other special
+// character. (The Claude path handles any name because it uses the name as a
+// JSON map key, so this restriction is Codex-specific.)
+var codexBareKeyRe = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
 // codexMCPServerArgs builds the per-session `-c` config overrides that point
 // each daemon-managed MCP server at `gr mcp-proxy <name>` for a Codex session.
+// It returns the args plus the names of any servers skipped because their name
+// can't be represented as a Codex override key (see codexBareKeyRe).
 //
 // It deliberately overrides only `command` and `args` (mirroring the Claude
 // --mcp-config which sets the same two fields). Using `-c` overrides rather
@@ -301,24 +318,29 @@ func (sm *SessionManager) injectClaudeHooks(sessionID string, yolo bool, mcpServ
 // Values are JSON-encoded, which is also valid TOML for a string
 // (`"…"`) and a string array (`["…","…"]`), the two value kinds Codex's
 // `-c key=value` override parser accepts here.
-func codexMCPServerArgs(mcpServers []config.MCPServerConfig) ([]string, error) {
+func codexMCPServerArgs(mcpServers []config.MCPServerConfig) (args, skipped []string, err error) {
 	if len(mcpServers) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	grBin := resolveGrBin()
 
 	cmdVal, err := json.Marshal(grBin)
 	if err != nil {
-		return nil, fmt.Errorf("marshal mcp command: %w", err)
+		return nil, nil, fmt.Errorf("marshal mcp command: %w", err)
 	}
 
-	args := make([]string, 0, len(mcpServers)*4)
+	args = make([]string, 0, len(mcpServers)*4)
 
 	for _, s := range mcpServers {
+		if !codexBareKeyRe.MatchString(s.Name) {
+			skipped = append(skipped, s.Name)
+			continue
+		}
+
 		proxyArgs, err := json.Marshal([]string{"mcp-proxy", s.Name})
 		if err != nil {
-			return nil, fmt.Errorf("marshal mcp args for %q: %w", s.Name, err)
+			return nil, nil, fmt.Errorf("marshal mcp args for %q: %w", s.Name, err)
 		}
 
 		args = append(args,
@@ -327,7 +349,7 @@ func codexMCPServerArgs(mcpServers []config.MCPServerConfig) ([]string, error) {
 		)
 	}
 
-	return args, nil
+	return args, skipped, nil
 }
 
 // injectCodexHooks generates per-event hook scripts for a Codex session and
@@ -381,12 +403,17 @@ func (sm *SessionManager) injectCodexHooks(sessionID string, yolo bool, mcpServe
 		"CODEX_HOOKS_DIR": hooksDir,
 	}
 
-	extraArgs, err = codexMCPServerArgs(mcpServers)
+	extraArgs, skipped, err := codexMCPServerArgs(mcpServers)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	sm.log.Info("injected codex hooks", "session_id", sessionID, "hooks_dir", hooksDir, "mcp_servers", len(mcpServers))
+	if len(skipped) > 0 {
+		sm.log.Warn("skipped codex mcp servers with names not representable as codex config keys",
+			"session_id", sessionID, "servers", skipped)
+	}
+
+	sm.log.Info("injected codex hooks", "session_id", sessionID, "hooks_dir", hooksDir, "mcp_servers", len(mcpServers)-len(skipped))
 
 	return extraArgs, extraEnv, nil
 }

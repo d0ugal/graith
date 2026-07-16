@@ -464,18 +464,22 @@ func TestCodexHookScriptContent(t *testing.T) {
 // server pointing command/args at `gr mcp-proxy <name>`, JSON-encoded so the
 // values are valid TOML, and in stable slice order.
 func TestCodexMCPServerArgs(t *testing.T) {
-	if got, err := codexMCPServerArgs(nil); err != nil || got != nil {
-		t.Fatalf("codexMCPServerArgs(nil) = (%v, %v), want (nil, nil)", got, err)
+	if args, skipped, err := codexMCPServerArgs(nil); err != nil || args != nil || skipped != nil {
+		t.Fatalf("codexMCPServerArgs(nil) = (%v, %v, %v), want (nil, nil, nil)", args, skipped, err)
 	}
 
 	servers := []config.MCPServerConfig{
 		{Name: "graith", Command: "/usr/bin/gr", Args: []string{"mcp"}},
-		{Name: "chrome", Command: "npx", Args: []string{"chrome-mcp"}, Env: map[string]string{"DISPLAY": ":0"}},
+		{Name: "chrome-devtools", Command: "npx", Args: []string{"chrome-mcp"}, Env: map[string]string{"DISPLAY": ":0"}},
 	}
 
-	args, err := codexMCPServerArgs(servers)
+	args, skipped, err := codexMCPServerArgs(servers)
 	if err != nil {
 		t.Fatalf("codexMCPServerArgs() error = %v", err)
+	}
+
+	if len(skipped) != 0 {
+		t.Errorf("skipped = %v, want none for bare-key names", skipped)
 	}
 
 	grBin := resolveGrBin()
@@ -484,8 +488,8 @@ func TestCodexMCPServerArgs(t *testing.T) {
 	want := []string{
 		"-c", "mcp_servers.graith.command=" + string(cmdVal),
 		"-c", `mcp_servers.graith.args=["mcp-proxy","graith"]`,
-		"-c", "mcp_servers.chrome.command=" + string(cmdVal),
-		"-c", `mcp_servers.chrome.args=["mcp-proxy","chrome"]`,
+		"-c", "mcp_servers.chrome-devtools.command=" + string(cmdVal),
+		"-c", `mcp_servers.chrome-devtools.args=["mcp-proxy","chrome-devtools"]`,
 	}
 
 	if len(args) != len(want) {
@@ -495,6 +499,55 @@ func TestCodexMCPServerArgs(t *testing.T) {
 	for i := range want {
 		if args[i] != want[i] {
 			t.Errorf("args[%d] = %q, want %q", i, args[i], want[i])
+		}
+	}
+}
+
+// TestCodexMCPServerArgsSkipsUnrepresentableNames is a regression test for the
+// tribunal finding (all three judges): a server name containing a `.` (or any
+// non-TOML-bare-key char) breaks Codex's dotted `-c` key path and, unquoted,
+// fails Codex config loading — taking the whole session down. Such names must
+// be skipped (and reported) rather than emitted, while valid names still pass.
+func TestCodexMCPServerArgsSkipsUnrepresentableNames(t *testing.T) {
+	servers := []config.MCPServerConfig{
+		{Name: "graith", Command: "/usr/bin/gr", Args: []string{"mcp"}},
+		{Name: "foo.bar", Command: "npx", Args: []string{"dotted"}},
+		{Name: "has space", Command: "npx", Args: []string{"spaced"}},
+		{Name: "bad\"quote", Command: "npx", Args: []string{"quoted"}},
+		{Name: "under_score-ok", Command: "npx", Args: []string{"fine"}},
+	}
+
+	args, skipped, err := codexMCPServerArgs(servers)
+	if err != nil {
+		t.Fatalf("codexMCPServerArgs() error = %v", err)
+	}
+
+	wantSkipped := []string{"foo.bar", "has space", `bad"quote`}
+	if len(skipped) != len(wantSkipped) {
+		t.Fatalf("skipped = %v, want %v", skipped, wantSkipped)
+	}
+
+	for i := range wantSkipped {
+		if skipped[i] != wantSkipped[i] {
+			t.Errorf("skipped[%d] = %q, want %q", i, skipped[i], wantSkipped[i])
+		}
+	}
+
+	// Only the two representable names emit overrides: 2 servers × 4 args each.
+	if len(args) != 8 {
+		t.Fatalf("args = %v, want 8 (graith + under_score-ok)", args)
+	}
+
+	joined := strings.Join(args, " ")
+	for _, bad := range []string{"foo.bar", "has space", `bad"quote`} {
+		if strings.Contains(joined, "mcp_servers."+bad) {
+			t.Errorf("args unexpectedly contain skipped name %q: %v", bad, args)
+		}
+	}
+
+	for _, ok := range []string{"graith", "under_score-ok"} {
+		if !strings.Contains(joined, "mcp_servers."+ok+".command=") {
+			t.Errorf("args missing representable server %q: %v", ok, args)
 		}
 	}
 }
