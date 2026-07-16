@@ -56,23 +56,14 @@ linters:
 
   settings:
     dupl:
-      # Flag token sequences duplicated across ≥100 tokens. Test files use
-      # intentional setup boilerplate, so they are excluded below.
+      # Flag token sequences duplicated across ≥100 tokens, in both production
+      # and test code.
       threshold: 100
     gosec:
       # Allow some security warnings
       excludes:
         - G204  # Subprocess launched with variable - inputs are validated and sanitized
         - G304  # Potential file inclusion via variable - path is validated and comes from trusted config
-
-  exclusions:
-    rules:
-      # Test files use intentional setup boilerplate (table fixtures, repeated
-      # daemon/session scaffolding) that dupl flags as clones. Only source-file
-      # duplication is worth deduplicating.
-      - linters:
-          - dupl
-        path: _test\.go
 
 formatters:
   enable:

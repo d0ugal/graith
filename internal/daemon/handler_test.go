@@ -2175,15 +2175,19 @@ func TestAttachAutoResumesErroredSession(t *testing.T) {
 	assertAttachAutoResumes(t, "errored-test", StatusErrored)
 }
 
-func TestAttachCreatingSessionReturnsStatusError(t *testing.T) {
+// assertAttachStatusError seeds a session in the given transient status and
+// asserts that attaching to it is rejected with an error mentioning wantMsg.
+func assertAttachStatusError(t *testing.T, name string, status SessionStatus, wantMsg string) {
+	t.Helper()
+
 	h := newTestHarness(t)
 
 	h.sm.mu.Lock()
 	h.sm.state.Sessions["s1"] = &SessionState{
 		ID:        "s1",
-		Name:      "creating-test",
+		Name:      name,
 		Agent:     "claude",
-		Status:    StatusCreating,
+		Status:    status,
 		CreatedAt: time.Now().UTC(),
 	}
 	h.sm.mu.Unlock()
@@ -2196,35 +2200,17 @@ func TestAttachCreatingSessionReturnsStatusError(t *testing.T) {
 
 	_ = protocol.DecodePayload(env, &e)
 
-	if !strings.Contains(e.Message, "being created") {
-		t.Errorf("error = %q, want it to mention 'being created'", e.Message)
+	if !strings.Contains(e.Message, wantMsg) {
+		t.Errorf("error = %q, want it to mention %q", e.Message, wantMsg)
 	}
 }
 
+func TestAttachCreatingSessionReturnsStatusError(t *testing.T) {
+	assertAttachStatusError(t, "creating-test", StatusCreating, "being created")
+}
+
 func TestAttachDeletingSessionReturnsStatusError(t *testing.T) {
-	h := newTestHarness(t)
-
-	h.sm.mu.Lock()
-	h.sm.state.Sessions["s1"] = &SessionState{
-		ID:        "s1",
-		Name:      "deleting-test",
-		Agent:     "claude",
-		Status:    StatusDeleting,
-		CreatedAt: time.Now().UTC(),
-	}
-	h.sm.mu.Unlock()
-
-	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "s1"})
-
-	env := h.expectType(t, "error")
-
-	var e protocol.ErrorMsg
-
-	_ = protocol.DecodePayload(env, &e)
-
-	if !strings.Contains(e.Message, "being deleted") {
-		t.Errorf("error = %q, want it to mention 'being deleted'", e.Message)
-	}
+	assertAttachStatusError(t, "deleting-test", StatusDeleting, "being deleted")
 }
 
 func TestResumeForInbox_SkipsNonStoppedSession(t *testing.T) {

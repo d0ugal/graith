@@ -151,49 +151,38 @@ func TestBuildScenarioRecord(t *testing.T) {
 	}
 }
 
-func TestBuildScenarioRecordAllRunning(t *testing.T) {
-	sm := newTestSessionManager(t)
-
-	sm.mu.Lock()
-	sm.state.Sessions["braw-s1"] = &SessionState{ID: "braw-s1", Name: "braw-a", Status: StatusRunning}
-	sm.state.Sessions["bonnie-s2"] = &SessionState{ID: "bonnie-s2", Name: "bonnie-b", Status: StatusRunning}
-	sm.state.Scenarios["sc-braw"] = &ScenarioState{
-		ID:         "sc-braw",
-		Name:       "strath-neep",
-		SessionIDs: []string{"braw-s1", "bonnie-s2"},
-		Sessions: []ScenarioSession{
-			{Name: "braw-a"},
-			{Name: "bonnie-b"},
-		},
+func TestBuildScenarioRecordAggregateStatus(t *testing.T) {
+	tests := []struct {
+		name          string
+		sessionStatus SessionStatus
+		wantStatus    string
+	}{
+		{"all running", StatusRunning, "running"},
+		{"all stopped", StatusStopped, "stopped"},
 	}
-	record := sm.buildScenarioRecord(sm.state.Scenarios["sc-braw"])
-	sm.mu.Unlock()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sm := newTestSessionManager(t)
 
-	if record.Status != "running" {
-		t.Errorf("status = %q, want %q", record.Status, "running")
-	}
-}
+			sm.mu.Lock()
+			sm.state.Sessions["braw-s1"] = &SessionState{ID: "braw-s1", Name: "braw-a", Status: tt.sessionStatus}
+			sm.state.Sessions["bonnie-s2"] = &SessionState{ID: "bonnie-s2", Name: "bonnie-b", Status: tt.sessionStatus}
+			sm.state.Scenarios["sc-braw"] = &ScenarioState{
+				ID:         "sc-braw",
+				Name:       "strath-neep",
+				SessionIDs: []string{"braw-s1", "bonnie-s2"},
+				Sessions: []ScenarioSession{
+					{Name: "braw-a"},
+					{Name: "bonnie-b"},
+				},
+			}
+			record := sm.buildScenarioRecord(sm.state.Scenarios["sc-braw"])
+			sm.mu.Unlock()
 
-func TestBuildScenarioRecordAllStopped(t *testing.T) {
-	sm := newTestSessionManager(t)
-
-	sm.mu.Lock()
-	sm.state.Sessions["braw-s1"] = &SessionState{ID: "braw-s1", Name: "braw-a", Status: StatusStopped}
-	sm.state.Sessions["bonnie-s2"] = &SessionState{ID: "bonnie-s2", Name: "bonnie-b", Status: StatusStopped}
-	sm.state.Scenarios["sc-braw"] = &ScenarioState{
-		ID:         "sc-braw",
-		Name:       "strath-neep",
-		SessionIDs: []string{"braw-s1", "bonnie-s2"},
-		Sessions: []ScenarioSession{
-			{Name: "braw-a"},
-			{Name: "bonnie-b"},
-		},
-	}
-	record := sm.buildScenarioRecord(sm.state.Scenarios["sc-braw"])
-	sm.mu.Unlock()
-
-	if record.Status != "stopped" {
-		t.Errorf("status = %q, want %q", record.Status, "stopped")
+			if record.Status != tt.wantStatus {
+				t.Errorf("status = %q, want %q", record.Status, tt.wantStatus)
+			}
+		})
 	}
 }
 

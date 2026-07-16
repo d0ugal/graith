@@ -596,62 +596,67 @@ func TestArgsNeedForkSourceID(t *testing.T) {
 	}
 }
 
-func TestCaptureNativeSessionIDNoOverwrite(t *testing.T) {
-	sm := newMigrateTestManager(t)
-	root := t.TempDir()
-	cwd := t.TempDir()
-	writeCodexRollout(t, root, "scraped-id", cwd, time.Now())
-
-	// Session already has a good id — capture must never clobber it.
-	sm.state.Sessions["bonnie"] = &SessionState{
-		ID: "bonnie", Name: "bonnie-bothy", Agent: "codex",
-		AgentSessionID: "kept-id", PID: 7,
-		Status: StatusRunning, WorktreePath: cwd,
+// TestCaptureNativeSessionIDGuards covers the cases where captureNativeSessionID
+// must leave AgentSessionID untouched despite a scrapeable rollout file existing:
+// an already-populated id, a stale process generation, and a non-scrape agent.
+func TestCaptureNativeSessionIDGuards(t *testing.T) {
+	tests := []struct {
+		name           string
+		agent          string
+		initialAgentID string
+		storedPID      int
+		expectedPID    int
+		wantAgentID    string
+		reason         string
+	}{
+		{
+			name:           "no overwrite of existing id",
+			agent:          "codex",
+			initialAgentID: "kept-id",
+			storedPID:      7,
+			expectedPID:    7,
+			wantAgentID:    "kept-id",
+			reason:         "must not overwrite",
+		},
+		{
+			// A later start replaced the process generation: stored PID != expectedPID.
+			name:           "stale process generation",
+			agent:          "codex",
+			initialAgentID: "",
+			storedPID:      999,
+			expectedPID:    111,
+			wantAgentID:    "",
+			reason:         "stale generation must not write",
+		},
+		{
+			// claude is forced, never scraped: capture is a no-op even if a file exists.
+			name:           "non-scrape agent",
+			agent:          "claude",
+			initialAgentID: "",
+			storedPID:      1,
+			expectedPID:    1,
+			wantAgentID:    "",
+			reason:         "claude is not scraped",
+		},
 	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sm := newMigrateTestManager(t)
+			root := t.TempDir()
+			cwd := t.TempDir()
+			writeCodexRollout(t, root, "scraped-id", cwd, time.Now())
 
-	sm.captureNativeSessionID("bonnie", "codex", cwd, root, time.Now().Add(-time.Minute), 7, 0)
+			sm.state.Sessions["bonnie"] = &SessionState{
+				ID: "bonnie", Name: "bonnie-bothy", Agent: tt.agent,
+				AgentSessionID: tt.initialAgentID, PID: tt.storedPID,
+				Status: StatusRunning, WorktreePath: cwd,
+			}
 
-	if got := sm.state.Sessions["bonnie"].AgentSessionID; got != "kept-id" {
-		t.Fatalf("AgentSessionID = %q; want kept-id (must not overwrite)", got)
-	}
-}
+			sm.captureNativeSessionID("bonnie", tt.agent, cwd, root, time.Now().Add(-time.Minute), tt.expectedPID, 0)
 
-func TestCaptureNativeSessionIDGenerationMismatch(t *testing.T) {
-	sm := newMigrateTestManager(t)
-	root := t.TempDir()
-	cwd := t.TempDir()
-	writeCodexRollout(t, root, "auld-gen-id", cwd, time.Now())
-
-	// A later start replaced the process generation: stored PID != expectedPID.
-	sm.state.Sessions["auld"] = &SessionState{
-		ID: "auld", Name: "auld-bothy", Agent: "codex",
-		AgentSessionID: "", PID: 999,
-		Status: StatusRunning, WorktreePath: cwd,
-	}
-
-	sm.captureNativeSessionID("auld", "codex", cwd, root, time.Now().Add(-time.Minute), 111, 0)
-
-	if got := sm.state.Sessions["auld"].AgentSessionID; got != "" {
-		t.Fatalf("AgentSessionID = %q; want empty (stale generation must not write)", got)
-	}
-}
-
-func TestCaptureNativeSessionIDNonScrapeAgent(t *testing.T) {
-	sm := newMigrateTestManager(t)
-	root := t.TempDir()
-	cwd := t.TempDir()
-	writeCodexRollout(t, root, "neep-id", cwd, time.Now())
-
-	// claude is forced, never scraped: capture is a no-op even if a file exists.
-	sm.state.Sessions["neep"] = &SessionState{
-		ID: "neep", Name: "neep-bothy", Agent: "claude",
-		AgentSessionID: "", PID: 1,
-		Status: StatusRunning, WorktreePath: cwd,
-	}
-
-	sm.captureNativeSessionID("neep", "claude", cwd, root, time.Now().Add(-time.Minute), 1, 0)
-
-	if got := sm.state.Sessions["neep"].AgentSessionID; got != "" {
-		t.Fatalf("AgentSessionID = %q; want empty (claude is not scraped)", got)
+			if got := sm.state.Sessions["bonnie"].AgentSessionID; got != tt.wantAgentID {
+				t.Fatalf("AgentSessionID = %q; want %q (%s)", got, tt.wantAgentID, tt.reason)
+			}
+		})
 	}
 }

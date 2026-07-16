@@ -149,7 +149,12 @@ func TestPrefixKeyOverlayKittyProtocol(t *testing.T) {
 	}
 }
 
-func TestPrefixKeyDetach(t *testing.T) {
+// assertPrefixKeyResult runs the passthrough loop while the daemon streams data
+// frames, injects a ctrl+b prefix immediately followed by key (in a single
+// read), and asserts the loop exits with want.
+func assertPrefixKeyResult(t *testing.T, key byte, want PassthroughResult) {
+	t.Helper()
+
 	clientConn, daemonConn := net.Pipe()
 	defer func() { _ = daemonConn.Close() }()
 
@@ -172,15 +177,19 @@ func TestPrefixKeyDetach(t *testing.T) {
 	go func() {
 		time.Sleep(50 * time.Millisecond)
 
-		_, _ = stdinW.Write([]byte{0x02, 'd'}) // ctrl+b d in one read
+		_, _ = stdinW.Write([]byte{0x02, key}) // ctrl+b <key> in one read
 	}()
 
 	ctx := context.Background()
 	result := c.runPassthroughLoop(ctx, testOpts, stdinR, stdout, nil)
 
-	if result != ResultDetached {
-		t.Fatalf("expected ResultDetached (%d), got %d", ResultDetached, result)
+	if result != want {
+		t.Fatalf("expected result %d, got %d", want, result)
 	}
+}
+
+func TestPrefixKeyDetach(t *testing.T) {
+	assertPrefixKeyResult(t, 'd', ResultDetached)
 }
 
 func TestPrefixKeyDetachKittyProtocol(t *testing.T) {
@@ -404,37 +413,7 @@ func TestProcessKittyPrefix(t *testing.T) {
 }
 
 func TestPrefixKeyShell(t *testing.T) {
-	clientConn, daemonConn := net.Pipe()
-	defer func() { _ = daemonConn.Close() }()
-
-	c := newTestClient(clientConn)
-
-	go func() {
-		writer := protocol.NewFrameWriter(daemonConn)
-		for {
-			if err := writer.WriteFrame(protocol.ChannelData, []byte("x")); err != nil {
-				return
-			}
-
-			time.Sleep(10 * time.Millisecond)
-		}
-	}()
-
-	stdinR, stdinW := io.Pipe()
-	stdout := &lockedWriter{}
-
-	go func() {
-		time.Sleep(50 * time.Millisecond)
-
-		_, _ = stdinW.Write([]byte{0x02, 's'})
-	}()
-
-	ctx := context.Background()
-	result := c.runPassthroughLoop(ctx, testOpts, stdinR, stdout, nil)
-
-	if result != ResultShell {
-		t.Fatalf("expected ResultShell (%d), got %d", ResultShell, result)
-	}
+	assertPrefixKeyResult(t, 's', ResultShell)
 }
 
 func TestDisconnectDetection(t *testing.T) {
