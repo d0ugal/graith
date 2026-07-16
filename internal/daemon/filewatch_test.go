@@ -647,7 +647,8 @@ func TestDegradedBindingInvalidConfigKeepsRetryFloor(t *testing.T) {
 	key := bindingKey("canny", "src")
 	sess := watchSession{id: "src", name: "ben", worktree: worktree}
 	t0 := time.Now()
-	sm.recordDegradedBinding(key, &sm.cfg.Triggers[0], sess, "watch limit exhausted", 1, t0)
+	builtinFP := watchBuiltinFingerprint(sm.cfg.TriggersRuntime.WatchBuiltinIgnores())
+	sm.recordDegradedBinding(key, &sm.cfg.Triggers[0], sess, "watch limit exhausted", 1, t0, sm.cfg, builtinFP)
 
 	first := sm.triggers.bindings[key]
 	if first == nil {
