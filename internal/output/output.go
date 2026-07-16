@@ -54,10 +54,12 @@ func (w *Writer) Error(err error) {
 			Error string `json:"error"`
 		}
 
-		if encErr := json.NewEncoder(w.errOut).Encode(jsonErr{Error: err.Error()}); encErr != nil {
-			// The JSON encode can only fail on a write error to errOut; fall
-			// back to a plain-text line so the error is still surfaced.
-			_, _ = fmt.Fprintf(w.errOut, "error: %v\n", err)
+		// Marshal first (a single-string payload can never fail), then write.
+		// A write error is unrecoverable and, crucially, we must NOT fall back
+		// to a plain-text line in JSON mode — that could append non-JSON after
+		// a partial JSON write and break a machine consumer of --json output.
+		if b, mErr := json.Marshal(jsonErr{Error: err.Error()}); mErr == nil {
+			_, _ = w.errOut.Write(append(b, '\n'))
 		}
 
 		return
