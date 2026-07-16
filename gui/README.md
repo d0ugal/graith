@@ -68,7 +68,7 @@ make -C gui ios DEVICE="iPhone Air" ios-run   # pick a device
 
 # shared core
 make -C gui shared-build
-make -C gui shared-test          # unit tests (run outside the sandbox; test-clt for CLT-only)
+make -C gui shared-test          # unit tests (sandbox-safe; test-clt for CLT-only)
 
 make -C gui build                # all three; `make -C gui help` for everything
 ```

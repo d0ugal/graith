@@ -31,7 +31,8 @@ go test -race ./...        # with race detector (CI runs this)
 go test ./internal/daemon/ # single package
 ```
 
-Unit tests live next to the code (`*_test.go`). There are 60 test files across all packages. Use `t.TempDir()` for fixtures -- never hardcode paths.
+Unit tests live next to the code using the plain `<file>_test.go` convention.
+Use `t.TempDir()` for fixtures -- never hardcode paths.
 
 ### Integration tests
 
@@ -89,7 +90,7 @@ make fmt        # format only
 Locally, at minimum:
 
 ```bash
-gofmt -w ./...  # format modified files
+gofmt -w path/to/modified.go  # format modified Go files
 go vet ./...    # static analysis
 ```
 

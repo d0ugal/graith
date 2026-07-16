@@ -28,6 +28,8 @@ go vet ./...
 
 Run `gofmt -w` on every modified Go file. `make lint-only` runs the CI
 golangci-lint configuration through Docker; `make lint` may rewrite files.
+After rebuilding daemon code, run `gr daemon restart`; see the contributing
+guide's development workflow for client/daemon testing details.
 
 For focused work, run the affected package tests during iteration, then widen
 verification in proportion to the change. Protocol, handler, process-lifecycle,
@@ -78,8 +80,8 @@ before assuming behavior from documentation.
   fails on the old behavior and passes with the fix.
 - Test behavior and failure modes, not line coverage: invalid input, rollback,
   cancellation, authorization, persistence, and races matter.
-- Keep overall Go statement coverage at or above 80% and avoid unjustified
-  coverage regressions.
+- Keep overall Go statement coverage high (about 80% is the target) and avoid
+  unjustified regressions; CI reports the delta against the base branch.
 - Use `t.TempDir()` instead of fixed filesystem paths.
 - Human-readable test fixtures use old Scots words rather than `foo`/`test`:
   for example `braw`, `canny`, `dreich`, `blether`, `croft`, `bothy`, `bairn`,
@@ -131,6 +133,7 @@ or fixtures by hand. See
 When a command, flag, config key, environment variable, security boundary, or
 lifecycle changes, update the matching page under `website/content/docs/` in
 the same change. `AGENTS.md` and design docs are not substitutes for user docs.
+See [`website/AGENTS.md`](website/AGENTS.md) for the Hugo authoring rules.
 
 ### Design docs
 
@@ -154,7 +157,7 @@ and advance the document status only as review and implementation occur.
 - Avoid slow I/O, process waits, git operations, or callbacks while holding the
   session-manager lock. Follow existing reserve/act/commit/rollback patterns.
 
-Subsystem-specific details and design links live in the scoped daemon guide.
+Subsystem-specific details and design links live in the scoped guides.
 
 ## Documentation pointers
 

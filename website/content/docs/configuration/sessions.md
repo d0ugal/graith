@@ -9,7 +9,7 @@ draft: false
 
 ## Headless sessions
 
-**Experimental.** A headless session runs the agent in Claude Code's stream-json mode instead of an interactive PTY — for fire-and-forget sessions no human will attach to (tribunal judges, trigger briefings). graith parses the typed event stream, so `gr logs -f` renders it and the run's cost/token usage is captured from the result envelope. v1 is Claude-only, one-shot, requires a prompt, and is **incompatible with the sandbox** (headless requires `sandbox.enabled = false`, or a per-agent sandbox that resolves to disabled).
+**Experimental.** A headless session runs the agent in Claude Code's stream-json mode instead of an interactive PTY — for fire-and-forget work such as review judges and one-shot helpers. graith parses the typed event stream, so `gr logs -f` renders it and the run's cost/token usage is captured from the result envelope. v1 is Claude-only, one-shot, requires a prompt, and is **incompatible with the sandbox** (headless requires `sandbox.enabled = false`, or a per-agent sandbox that resolves to disabled).
 
 ```toml
 [headless]
@@ -17,11 +17,14 @@ experimental = false  # master gate: headless is inert unless this is on
 default      = false  # once enabled, whether new sessions go headless by default
 ```
 
-`experimental` is the master switch. While it is off, headless is inert: `gr new --headless` and `[trigger.action] headless = true` have no effect. It is gated because the underlying control protocol is undocumented and may change between Claude Code releases.
+`experimental` is the master switch. While it is off, headless is inert and sessions use the PTY driver. It is gated because the underlying control protocol is undocumented and may change between Claude Code releases. Trigger-spawned headless sessions are not implemented yet; see [Automation → Headless session actions]({{< relref "automation.md#headless-session-actions-planned" >}}).
 
 v1 is **Claude-only** and **one-shot** (one prompt, run to completion, exit). Only agents marked `headless_capable = true` can run headless — see [Agent definitions]({{< relref "agents.md#agent-definitions" >}}). Requesting headless for an agent that can't do it is an error, not a silent fallback to PTY.
 
-`gr attach` on a headless session is not supported yet; use `gr logs -f` to inspect one read-only (see [Session Lifecycle → Headless sessions]({{< relref "/docs/sessions.md#headless-sessions" >}})). Convert-to-interactive on attach is planned.
+`gr attach` on a headless session offers to convert it to an interactive PTY,
+preserving the conversation, worktree, branch, and environment. Pass `--yes` to
+skip the confirmation. Use `gr logs -f` to inspect a headless session read-only
+without converting it (see [Session Lifecycle → Headless sessions]({{< relref "/docs/sessions.md#headless-sessions" >}})).
 
 A headless session drives Claude Code over its stdin control protocol, giving graith a clean interrupt and inline tool-approval handling. It has no human to answer prompts, so its approval policy must be **non-blocking**: `yolo` auto-allows, a non-blocking `[approvals]` backend decides, and anything that would queue for a human is denied (escalated once to the orchestrator inbox). See [Session Lifecycle → Headless sessions]({{< relref "/docs/sessions.md#headless-sessions" >}}).
 
@@ -32,7 +35,7 @@ A headless session drives Claude Code over its stdin control protocol, giving gr
 retention = "24h"  # how long soft-deleted sessions are kept before purge
 ```
 
-`gr delete` is a soft delete: it stops the agent and hides the session but keeps its worktree, branch, and state for this window, so `gr restore` can bring it back. A background loop hard-deletes sessions once their retention expires. Setting `retention = "0"` makes soft delete keep sessions **forever** (never auto-purged) — it does not turn `gr delete` into a destructive delete. `gr purge` is the only immediate, destructive verb; it bypasses the window.
+`gr delete` is a soft delete: it stops the agent and hides the session but keeps its worktree, branch, and state for this window, so `gr restore` can bring it back. A background loop hard-deletes sessions once their retention expires. Setting `retention = "0"` disables soft delete, so `gr delete` refuses and directs the user to `gr purge`; it never silently becomes destructive. `gr purge` is the only immediate, destructive verb.
 
 ## Git pull
 

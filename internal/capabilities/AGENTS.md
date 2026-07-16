@@ -32,5 +32,5 @@ The update command rewrites the marker-delimited capability table in
 `gui/shared/Tests/GraithSessionKitTests/Fixtures/capability_manifest.json`.
 Commit both with the source manifest.
 
-Run `make -C gui shared-test` when GUI states or affordances change. This needs
-to run outside a sandbox that blocks Xcode tooling.
+Run `make -C gui shared-test` when GUI states or affordances change. Shared
+Swift tests are safe inside the graith sandbox when full Xcode is available.
