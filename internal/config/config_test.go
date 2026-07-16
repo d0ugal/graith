@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -2099,6 +2100,207 @@ write_dirs = ["~/.config/graith", "/tmp/extra"]
 
 		if len(cfg.Orchestrator.Sandbox.WriteDirs) != 2 {
 			t.Errorf("WriteDirs len = %d, want 2", len(cfg.Orchestrator.Sandbox.WriteDirs))
+		}
+	})
+}
+
+func TestOrchestratorRestartDelayForLevel(t *testing.T) {
+	t.Run("zero config preserves the historical schedule", func(t *testing.T) {
+		var r OrchestratorRestartConfig
+
+		want := []time.Duration{
+			2 * time.Second,
+			4 * time.Second,
+			8 * time.Second,
+			16 * time.Second,
+			32 * time.Second,
+			60 * time.Second,
+			300 * time.Second,
+		}
+		for level, w := range want {
+			if got := r.DelayForLevel(level); got != w {
+				t.Errorf("level %d: DelayForLevel = %v, want %v", level, got, w)
+			}
+		}
+	})
+
+	t.Run("levels past the schedule repeat the last entry", func(t *testing.T) {
+		var r OrchestratorRestartConfig
+		if got := r.DelayForLevel(99); got != 300*time.Second {
+			t.Errorf("DelayForLevel(99) = %v, want 300s", got)
+		}
+	})
+
+	t.Run("negative level is clamped to zero", func(t *testing.T) {
+		var r OrchestratorRestartConfig
+		if got := r.DelayForLevel(-5); got != 2*time.Second {
+			t.Errorf("DelayForLevel(-5) = %v, want 2s", got)
+		}
+	})
+
+	t.Run("explicit schedule wins over geometric knobs", func(t *testing.T) {
+		r := OrchestratorRestartConfig{
+			Schedule:       []string{"1s", "5s", "10s"},
+			InitialBackoff: "2s",
+			Multiplier:     3,
+		}
+
+		want := []time.Duration{time.Second, 5 * time.Second, 10 * time.Second, 10 * time.Second}
+		for level, w := range want {
+			if got := r.DelayForLevel(level); got != w {
+				t.Errorf("level %d: DelayForLevel = %v, want %v", level, got, w)
+			}
+		}
+	})
+
+	t.Run("unparseable schedule entries are skipped", func(t *testing.T) {
+		r := OrchestratorRestartConfig{Schedule: []string{"nope", "5s", "bad"}}
+		if got := r.DelayForLevel(0); got != 5*time.Second {
+			t.Errorf("DelayForLevel(0) = %v, want 5s (only valid entry)", got)
+		}
+	})
+
+	t.Run("geometric mode computes and caps at max", func(t *testing.T) {
+		r := OrchestratorRestartConfig{
+			InitialBackoff: "1s",
+			MaxBackoff:     "10s",
+			Multiplier:     2,
+		}
+
+		want := []time.Duration{
+			1 * time.Second,
+			2 * time.Second,
+			4 * time.Second,
+			8 * time.Second,
+			10 * time.Second, // 16s capped to 10s
+			10 * time.Second,
+		}
+		for level, w := range want {
+			if got := r.DelayForLevel(level); got != w {
+				t.Errorf("level %d: DelayForLevel = %v, want %v", level, got, w)
+			}
+		}
+	})
+
+	t.Run("setting only one geometric knob switches off the historical schedule", func(t *testing.T) {
+		// Multiplier set, initial/max default: pure doubling from 2s capped at 300s.
+		r := OrchestratorRestartConfig{Multiplier: 2}
+		if got := r.DelayForLevel(5); got != 64*time.Second {
+			t.Errorf("DelayForLevel(5) = %v, want 64s (geometric, not historical 60s)", got)
+		}
+	})
+
+	t.Run("non-positive multiplier falls back to default", func(t *testing.T) {
+		r := OrchestratorRestartConfig{InitialBackoff: "1s", Multiplier: 0.5}
+		if got := r.DelayForLevel(1); got != 2*time.Second {
+			t.Errorf("DelayForLevel(1) = %v, want 2s (default multiplier 2)", got)
+		}
+	})
+}
+
+// TestDefaultConfigRestartPreservesHistoricalBehaviour locks in that the shipped
+// embedded default config reproduces graith's pre-config restart behaviour
+// exactly (issue #1239 "sensible defaults preserved").
+func TestDefaultConfigRestartPreservesHistoricalBehaviour(t *testing.T) {
+	rc := Default().Orchestrator.Restart
+
+	wantSecs := []int{2, 4, 8, 16, 32, 60, 300}
+	for level, secs := range wantSecs {
+		want := time.Duration(secs) * time.Second
+		if got := rc.DelayForLevel(level); got != want {
+			t.Errorf("level %d: DelayForLevel = %v, want %v", level, got, want)
+		}
+	}
+
+	if got := rc.StableResetDuration(); got != 60*time.Second {
+		t.Errorf("default StableResetDuration = %v, want 60s", got)
+	}
+
+	if got := rc.FreshStartThresholdOrDefault(); got != 3 {
+		t.Errorf("default FreshStartThreshold = %d, want 3", got)
+	}
+}
+
+func TestOrchestratorRestartStableReset(t *testing.T) {
+	t.Run("empty uses default", func(t *testing.T) {
+		var r OrchestratorRestartConfig
+		if got := r.StableResetDuration(); got != OrchestratorStableResetDefault {
+			t.Errorf("StableResetDuration = %v, want %v", got, OrchestratorStableResetDefault)
+		}
+	})
+
+	t.Run("configured value is used", func(t *testing.T) {
+		r := OrchestratorRestartConfig{StableReset: "5m"}
+		if got := r.StableResetDuration(); got != 5*time.Minute {
+			t.Errorf("StableResetDuration = %v, want 5m", got)
+		}
+	})
+
+	t.Run("unparseable falls back to default", func(t *testing.T) {
+		r := OrchestratorRestartConfig{StableReset: "notaduration"}
+		if got := r.StableResetDuration(); got != OrchestratorStableResetDefault {
+			t.Errorf("StableResetDuration = %v, want default", got)
+		}
+	})
+}
+
+func TestOrchestratorRestartFreshStartThreshold(t *testing.T) {
+	cases := []struct {
+		name string
+		in   int
+		want int
+	}{
+		{"zero uses default", 0, OrchestratorFreshStartThresholdDefault},
+		{"negative uses default", -1, OrchestratorFreshStartThresholdDefault},
+		{"positive is used", 7, 7},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := OrchestratorRestartConfig{FreshStartThreshold: tc.in}
+			if got := r.FreshStartThresholdOrDefault(); got != tc.want {
+				t.Errorf("FreshStartThresholdOrDefault = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestOrchestratorRestartValidate(t *testing.T) {
+	t.Run("bad durations and schedule entries are reported", func(t *testing.T) {
+		c := &Config{Orchestrator: OrchestratorConfig{Restart: OrchestratorRestartConfig{
+			InitialBackoff: "notaduration",
+			MaxBackoff:     "alsobad",
+			StableReset:    "nope",
+			Schedule:       []string{"2s", "wut"},
+		}}}
+
+		err := c.Validate()
+		if err == nil {
+			t.Fatal("expected validation error for bad restart config")
+		}
+
+		for _, want := range []string{
+			"orchestrator.restart.initial_backoff",
+			"orchestrator.restart.max_backoff",
+			"orchestrator.restart.stable_reset",
+			"orchestrator.restart.schedule[1]",
+		} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error %q missing mention of %q", err.Error(), want)
+			}
+		}
+	})
+
+	t.Run("valid restart config passes", func(t *testing.T) {
+		c := &Config{Orchestrator: OrchestratorConfig{Restart: OrchestratorRestartConfig{
+			InitialBackoff:      "2s",
+			MaxBackoff:          "300s",
+			Multiplier:          2,
+			Schedule:            []string{"2s", "4s"},
+			StableReset:         "60s",
+			FreshStartThreshold: 3,
+		}}}
+		if err := c.Validate(); err != nil {
+			t.Errorf("unexpected validation error: %v", err)
 		}
 	})
 }

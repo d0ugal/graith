@@ -21,6 +21,22 @@ prompt_file  = ""       # or read from file
 
 See [Orchestrator]({{< relref "/docs/orchestrator.md" >}}) for details.
 
+### Restart policy
+
+When the orchestrator exits unexpectedly (a crash or startup-watchdog kill — never a user, idle, or shutdown stop) the daemon auto-restarts it with a backoff that grows after each failure and resets once a run stays up long enough. Tune it with `[orchestrator.restart]`:
+
+```toml
+[orchestrator.restart]
+schedule              = ["2s", "4s", "8s", "16s", "32s", "60s", "300s"]  # per-attempt delays; the last value repeats. Set to [] to use the geometric knobs below.
+initial_backoff       = "2s"   # geometric mode: first restart delay (used only when schedule = [])
+max_backoff           = "300s" # geometric mode: cap on the restart delay
+multiplier            = 2.0    # geometric mode: each delay = previous × this
+stable_reset          = "60s"  # a run lasting at least this long resets the backoff to its first step
+fresh_start_threshold = 3      # after this many consecutive restarts, relaunch the agent fresh (new session id)
+```
+
+There are two backoff modes. By default an explicit **`schedule`** lists the delay for each attempt, with the final entry repeating for every attempt beyond its length — this preserves graith's historical backoff curve. Setting `schedule = []` switches to **geometric** backoff computed as `initial_backoff × multiplier` each attempt, capped at `max_backoff`. The defaults are chosen so an unconfigured daemon behaves exactly as before.
+
 ## Remote access
 
 An optional control listener that lets you reach the daemon from another device over your [Tailscale](https://tailscale.com) tailnet. **Disabled by default and fail-closed**: when enabled, an invalid `[remote]` block is a hard config-load error rather than a silent downgrade.

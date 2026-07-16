@@ -272,6 +272,18 @@ Your power comes from the graith control plane:
 # Path to a file whose contents are appended to the prompt above (empty = none).
 prompt_file = ""
 
+# How the daemon auto-restarts the orchestrator after it exits unexpectedly
+# (crash/watchdog — never after a user, idle, or shutdown stop). By default an
+# explicit schedule preserves graith's historical backoff curve. To use
+# geometric backoff instead, set schedule = [] and tune the knobs below.
+[orchestrator.restart]
+schedule = ["2s", "4s", "8s", "16s", "32s", "60s", "300s"]  # per-attempt delays; the last value repeats. Set to [] to use the geometric knobs.
+initial_backoff = "2s"    # geometric mode: first restart delay (used only when schedule = [])
+max_backoff = "300s"      # geometric mode: cap on the restart delay
+multiplier = 2.0          # geometric mode: each delay = previous × this (<= 1 => default 2.0)
+stable_reset = "60s"      # a run lasting at least this long resets the backoff level to 0
+fresh_start_threshold = 3 # after this many consecutive restarts, relaunch the agent fresh (new session id)
+
 [remote]
 # Optional tailnet-facing control listener. Disabled by default and fail-closed:
 # when enabled, an invalid block is a hard config-load error.
