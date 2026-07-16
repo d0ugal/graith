@@ -27,46 +27,11 @@ type configPRWatch = config.PRWatchConfig
 // with neither lock held (snapshot under sm.mu.RLock → release → gh → re-lock to
 // write back), so the loop never blocks gr list.
 
-const (
-	prWatchTick      = 15 * time.Second // base loop cadence; per-session gating below
-	prWatchBatchCap  = 3                // max sessions polled per tick
-	prNoPRNegCache   = 5 * time.Minute  // re-resolve a branch with no PR at most this often
-	prCommentMaxBody = 1024             // truncate each comment body to this many bytes
-
-	// prAuthorPromptRate / prAuthorPromptWindow bound the untrusted-author trust
-	// prompt: at most prAuthorPromptRate messages to the orchestrator per rolling
-	// window, so a busy public PR churning distinct drive-by commenters can't
-	// flood it. The persisted once-per-author dedup is the primary limiter; this
-	// is the anti-flood backstop.
-	prAuthorPromptRate   = 5
-	prAuthorPromptWindow = 30 * time.Minute
-
-	// maxPRWatchPromptedAuthors bounds the persisted set of surfaced authors so it
-	// can't grow without limit. Well above any plausible distinct-commenter count;
-	// once full, new authors are surfaced (rate-limited) but not recorded, so they
-	// may be re-surfaced — a bounded, self-limiting degradation rather than
-	// unbounded state growth.
-	maxPRWatchPromptedAuthors = 5000
-
-	// prKickCooldown is the minimum interval between git-refs-triggered immediate
-	// polls of one session. A push/commit can churn several ref files in quick
-	// succession; the ref watcher already debounces, and this is the belt-and-braces
-	// backstop so a burst can't drive repeated gh invocations for one session. Well
-	// below any poll cadence, so it only suppresses truly back-to-back kicks.
-	prKickCooldown = 3 * time.Second
-
-	// prKickChanCap bounds the buffered kick channel. Kicks are best-effort (a
-	// dropped kick just means the ordinary poll cadence catches the change), so a
-	// full channel is a non-blocking drop, not a stall.
-	prKickChanCap = 64
-
-	// prKickedNoPRBackoff is the re-poll delay after a *kicked* poll finds no PR
-	// (vs prNoPRNegCache for a timer-driven miss). A kick fires right after a push,
-	// which is typically moments before `gh pr create`, so the PR usually appears
-	// within seconds; a short backoff lets the timer catch it instead of parking the
-	// session on the multi-minute negative cache.
-	prKickedNoPRBackoff = 20 * time.Second
-)
+// The tuning literals that formerly lived here (base tick, batch cap, negative
+// cache, comment body cap, untrusted-author prompt rate/window, prompted-author
+// cap, kick cooldown/channel size/backoff) are now [pr_watch.advanced] config
+// knobs resolved through config.PRWatchConfig accessors, so an operator can trade
+// off load, latency, retention, and prompt-injection surface without a rebuild.
 
 // prWatchCursor records what the loop has already told a session, so it notifies
 // only on genuinely new state. Per-surface comment cursors are required because
@@ -102,7 +67,7 @@ type prWatchState struct {
 	// flood across many sessions/PRs is still bounded. Guarded by mu.
 	authorPromptLog []time.Time
 	// lastKick records the last git-refs-triggered immediate poll per session, for
-	// the prKickCooldown backstop. Guarded by mu.
+	// the kick-cooldown backstop. Guarded by mu.
 	lastKick map[string]time.Time
 	// kick carries session IDs whose git refs just changed (push/commit/checkout),
 	// so RunPRWatchLoop polls them immediately instead of on the next tick. Fed by
@@ -111,7 +76,13 @@ type prWatchState struct {
 	kick chan string
 }
 
-func newPRWatchState() *prWatchState {
+// newPRWatchState builds the watch bookkeeping. kickChanCap sizes the buffered
+// kick channel (config knob, default via config when <= 0).
+func newPRWatchState(kickChanCap int) *prWatchState {
+	if kickChanCap <= 0 {
+		kickChanCap = (config.PRWatchConfig{}).KickChannelSize()
+	}
+
 	return &prWatchState{
 		cursors:    make(map[string]*prWatchCursor),
 		lastSent:   make(map[string]time.Time),
@@ -119,7 +90,7 @@ func newPRWatchState() *prWatchState {
 		pollBranch: make(map[string]string),
 		rateLog:    make(map[string][]time.Time),
 		lastKick:   make(map[string]time.Time),
-		kick:       make(chan string, prKickChanCap),
+		kick:       make(chan string, kickChanCap),
 	}
 }
 
@@ -149,7 +120,9 @@ func (sm *SessionManager) RunPRWatchLoop(ctx context.Context) {
 		go sm.RunPRRefWatchLoop(ctx)
 	}
 
-	ticker := time.NewTicker(prWatchTick)
+	// Cadence is read once at loop start; changing base_tick takes effect on the
+	// next daemon (re)start, like the other loop-lifetime knobs.
+	ticker := time.NewTicker(sm.Config().PRWatch.BaseTickDuration())
 	defer ticker.Stop()
 
 	for {
@@ -179,10 +152,10 @@ func (sm *SessionManager) RunPRWatchLoop(ctx context.Context) {
 // ordinary tick. It re-snapshots the session off-lock, reconciles the poll branch
 // (so a fresh checkout is matched right away), and funnels through the unchanged
 // pollSession — so a kick only changes WHEN a poll happens, never WHAT it does.
-// A per-session cooldown (prKickCooldown) collapses a burst of ref writes into a
+// A per-session cooldown (kick_cooldown) collapses a burst of ref writes into a
 // single poll.
 func (sm *SessionManager) pollKicked(ctx context.Context, cfg *configPRWatch, id string) {
-	if !sm.allowKick(id) {
+	if !sm.allowKick(cfg, id) {
 		return
 	}
 
@@ -195,12 +168,12 @@ func (sm *SessionManager) pollKicked(ctx context.Context, cfg *configPRWatch, id
 }
 
 // allowKick applies the per-session kick cooldown, recording the time on success.
-func (sm *SessionManager) allowKick(id string) bool {
+func (sm *SessionManager) allowKick(cfg *configPRWatch, id string) bool {
 	sm.prWatch.mu.Lock()
 	defer sm.prWatch.mu.Unlock()
 
 	now := time.Now()
-	if last, ok := sm.prWatch.lastKick[id]; ok && now.Sub(last) < prKickCooldown {
+	if last, ok := sm.prWatch.lastKick[id]; ok && now.Sub(last) < cfg.KickCooldownDuration() {
 		return false
 	}
 
@@ -242,7 +215,7 @@ func (sm *SessionManager) runPRWatchTick(ctx context.Context, cfg *configPRWatch
 
 	polled := 0
 	for _, t := range targets {
-		if polled >= prWatchBatchCap {
+		if polled >= cfg.BatchSize() {
 			break
 		}
 
@@ -407,11 +380,11 @@ func (sm *SessionManager) pollSession(ctx context.Context, cfg *configPRWatch, t
 	slug, ok := repoSlug(t.worktreePath)
 	if !ok {
 		// Non-GitHub remote — back off hard (negative cache).
-		sm.schedulePoll(t.id, prNoPRNegCache)
+		sm.schedulePoll(t.id, cfg.NoPRNegativeCacheDuration())
 		return
 	}
 
-	d, found, err := resolvePR(ctx, slug, t.branch, t.worktreePath)
+	d, found, err := resolvePR(ctx, slug, t.branch, t.worktreePath, cfg.GHTimeoutDuration())
 	if err != nil {
 		// Transient (network/timeout/auth) — keep last-known, retry next pending cadence.
 		sm.schedulePoll(t.id, cfg.PollPendingDuration())
@@ -428,9 +401,9 @@ func (sm *SessionManager) pollSession(ctx context.Context, cfg *configPRWatch, t
 		// baseline. Use a short backoff so the timer re-checks promptly and catches the
 		// just-created PR; a timer-driven miss still uses the full negative cache.
 		if kicked {
-			sm.schedulePoll(t.id, prKickedNoPRBackoff)
+			sm.schedulePoll(t.id, cfg.KickedNoPRBackoffDuration())
 		} else {
-			sm.schedulePoll(t.id, prNoPRNegCache)
+			sm.schedulePoll(t.id, cfg.NoPRNegativeCacheDuration())
 		}
 
 		return
@@ -850,12 +823,12 @@ func (sm *SessionManager) diffAndBuild(cfg *configPRWatch, t prWatchTarget, slug
 //     re-evaluated every poll.
 func (sm *SessionManager) deliverTrustedComments(
 	cfg *configPRWatch, t prWatchTarget, cur *prWatchCursor, out *[]string,
-	body func(prWatchTarget, prData, []ghComment) string,
+	body func(*configPRWatch, prWatchTarget, prData, []ghComment) string,
 	d prData, trusted, dropped []ghComment, cursor, maxNew int64,
 ) int64 {
 	if len(trusted) > 0 {
 		if _, ok := sm.gate(cfg, t.id, cur, false); ok {
-			*out = append(*out, body(t, d, trusted))
+			*out = append(*out, body(cfg, t, d, trusted))
 			return maxInt64(cursor, maxNew)
 		}
 
@@ -1028,7 +1001,7 @@ func (sm *SessionManager) promptUntrustedAuthors(cfg *configPRWatch, t prWatchTa
 		return
 	}
 
-	if !sm.allowAuthorPrompt() {
+	if !sm.allowAuthorPrompt(cfg) {
 		if sm.log != nil {
 			sm.log.Debug("pr-watch: untrusted-author prompt rate-limited",
 				"session", t.id, "pr", d.Number, "authors", len(fresh))
@@ -1052,7 +1025,7 @@ func (sm *SessionManager) promptUntrustedAuthors(cfg *configPRWatch, t prWatchTa
 		return
 	}
 
-	sm.recordPromptedAuthors(fresh)
+	sm.recordPromptedAuthors(cfg, fresh)
 }
 
 // freshUntrustedAuthors returns the subset of authors not already in the
@@ -1078,9 +1051,9 @@ func (sm *SessionManager) freshUntrustedAuthors(authors []untrustedAuthor) []unt
 
 // allowAuthorPrompt applies the rolling anti-flood rate-limit for trust prompts,
 // recording this send's timestamp on success. Held under sm.prWatch.mu.
-func (sm *SessionManager) allowAuthorPrompt() bool {
+func (sm *SessionManager) allowAuthorPrompt(cfg *configPRWatch) bool {
 	now := time.Now()
-	window := now.Add(-prAuthorPromptWindow)
+	window := now.Add(-cfg.UntrustedAuthorPromptWindowDuration())
 
 	var recent []time.Time
 
@@ -1090,7 +1063,7 @@ func (sm *SessionManager) allowAuthorPrompt() bool {
 		}
 	}
 
-	if len(recent) >= prAuthorPromptRate {
+	if len(recent) >= cfg.UntrustedAuthorPromptRate() {
 		sm.prWatch.authorPromptLog = recent
 		return false
 	}
@@ -1101,9 +1074,9 @@ func (sm *SessionManager) allowAuthorPrompt() bool {
 }
 
 // recordPromptedAuthors adds surfaced authors to the persisted set (bounded by
-// maxPRWatchPromptedAuthors) and saves the state, so the once-per-author prompt
+// max_prompted_authors) and saves the state, so the once-per-author prompt
 // survives a daemon restart. Written under sm.mu.
-func (sm *SessionManager) recordPromptedAuthors(authors []untrustedAuthor) {
+func (sm *SessionManager) recordPromptedAuthors(cfg *configPRWatch, authors []untrustedAuthor) {
 	sm.mu.Lock()
 
 	if sm.state == nil {
@@ -1115,13 +1088,14 @@ func (sm *SessionManager) recordPromptedAuthors(authors []untrustedAuthor) {
 		sm.state.PRWatchPromptedAuthors = make(map[string]bool)
 	}
 
+	maxAuthors := cfg.MaxPromptedAuthors()
 	recorded := false
 
 	for _, a := range authors {
-		if len(sm.state.PRWatchPromptedAuthors) >= maxPRWatchPromptedAuthors {
+		if len(sm.state.PRWatchPromptedAuthors) >= maxAuthors {
 			if sm.log != nil {
 				sm.log.Warn("pr-watch: prompted-authors set full; not recording (may re-surface)",
-					"cap", maxPRWatchPromptedAuthors)
+					"cap", maxAuthors)
 			}
 
 			break
@@ -1215,8 +1189,9 @@ func (sm *SessionManager) gate(cfg *configPRWatch, id string, cur *prWatchCursor
 	if !directive && cur.notifyCount >= cfg.MaxNotifications() {
 		return "cap", false
 	}
-	// Rolling rate-limit: at most 5 per 30 minutes.
-	window := now.Add(-30 * time.Minute)
+	// Rolling rate-limit (defaults: at most 5 per 30 minutes; tunable via
+	// notification_rate_limit / notification_rate_window).
+	window := now.Add(-cfg.NotificationRateWindowDuration())
 
 	var recent []time.Time
 
@@ -1226,7 +1201,7 @@ func (sm *SessionManager) gate(cfg *configPRWatch, id string, cur *prWatchCursor
 		}
 	}
 
-	if len(recent) >= 5 {
+	if len(recent) >= cfg.NotificationRateLimit() {
 		sm.prWatch.rateLog[id] = recent
 		return "rate-limited", false
 	}
@@ -1368,24 +1343,24 @@ func reviewDecisionBody(t prWatchTarget, d prData) string {
 
 // reviewCommentBody frames inline code-review comments (the pulls/{n}/comments
 // surface) — feedback anchored to a specific file and line.
-func reviewCommentBody(t prWatchTarget, d prData, comments []ghComment) string {
+func reviewCommentBody(cfg *configPRWatch, t prWatchTarget, d prData, comments []ghComment) string {
 	header := fmt.Sprintf("New review activity on PR #%d (%s) — %d new inline code-review "+
 		"comment(s). These are review comments left on specific lines of the diff.",
 		d.Number, t.branch, len(comments))
 
-	return commentAwarenessBody(header, d, comments)
+	return commentAwarenessBody(cfg, header, d, comments)
 }
 
 // prCommentBody frames regular conversation comments on the PR thread (the
 // issues/{n}/comments surface) — issue-style comments not tied to a line of
 // code. Kept distinct from reviewCommentBody so the agent can tell inline
 // review feedback apart from a general thread comment.
-func prCommentBody(t prWatchTarget, d prData, comments []ghComment) string {
+func prCommentBody(cfg *configPRWatch, t prWatchTarget, d prData, comments []ghComment) string {
 	header := fmt.Sprintf("New conversation activity on PR #%d (%s) — %d new PR comment(s). "+
 		"These are issue-style comments on the PR conversation thread, not inline code review.",
 		d.Number, t.branch, len(comments))
 
-	return commentAwarenessBody(header, d, comments)
+	return commentAwarenessBody(cfg, header, d, comments)
 }
 
 // commentAwarenessBody renders the shared body for a batch of PR comments: the
@@ -1394,7 +1369,7 @@ func prCommentBody(t prWatchTarget, d prData, comments []ghComment) string {
 // location), and a pointer to fetch the full thread. Both comment classes share
 // the awareness framing (§3a of the design): a comment is human intent that may
 // not be actionable, never an imperative.
-func commentAwarenessBody(header string, d prData, comments []ghComment) string {
+func commentAwarenessBody(cfg *configPRWatch, header string, d prData, comments []ghComment) string {
 	var b strings.Builder
 
 	b.WriteString(header)
@@ -1403,13 +1378,15 @@ func commentAwarenessBody(header string, d prData, comments []ghComment) string 
 		"If a change is warranted, make it and push; if a reply is warranted, reply on the PR; " +
 		"otherwise leave it.\n")
 
+	maxBody := cfg.CommentBodyMaxBytes()
+
 	for _, c := range comments {
 		loc := ""
 		if c.Path != "" {
 			loc = fmt.Sprintf(" on %s:%d", c.Path, c.Line)
 		}
 
-		fmt.Fprintf(&b, "\n— @%s%s: %s", c.User.Login, loc, truncate(c.Body, prCommentMaxBody))
+		fmt.Fprintf(&b, "\n— @%s%s: %s", c.User.Login, loc, truncate(c.Body, maxBody))
 	}
 
 	fmt.Fprintf(&b, "\n\nFull thread: `gh pr view %d --comments`.", d.Number)

@@ -136,7 +136,7 @@ func TestFetchChecksAggregate(t *testing.T) {
 				return c.json, nil
 			}
 
-			state, fail, pending, passed, total := fetchChecks(context.Background(), "croft/loch", 1, "")
+			state, fail, pending, passed, total := fetchChecks(context.Background(), "croft/loch", 1, "", 0)
 			if state != c.wantState {
 				t.Errorf("state = %q, want %q", state, c.wantState)
 			}
@@ -168,7 +168,7 @@ func TestFetchCommentsSlurpFlattensPages(t *testing.T) {
 		return `[[{"id":1,"user":{"login":"ailsa"},"body":"a"}],[{"id":2,"user":{"login":"hamish"},"body":"b"}]]`, nil
 	}
 
-	comments, ok := fetchComments(context.Background(), "croft/loch", 1, "", "issues")
+	comments, ok := fetchComments(context.Background(), "croft/loch", 1, "", "issues", 0)
 	if !ok {
 		t.Fatal("expected ok=true")
 	}
@@ -196,7 +196,7 @@ func TestFetchCommentsDecodesAuthorAssociation(t *testing.T) {
 		]]`, nil
 	}
 
-	comments, ok := fetchComments(context.Background(), "croft/loch", 1, "", "issues")
+	comments, ok := fetchComments(context.Background(), "croft/loch", 1, "", "issues", 0)
 	if !ok {
 		t.Fatal("expected ok=true")
 	}
@@ -222,7 +222,7 @@ func TestFetchCommentsDegradedReportsNotOK(t *testing.T) {
 		return "", context.DeadlineExceeded
 	}
 
-	comments, ok := fetchComments(context.Background(), "croft/loch", 1, "", "issues")
+	comments, ok := fetchComments(context.Background(), "croft/loch", 1, "", "issues", 0)
 	if ok {
 		t.Error("degraded fetch should report ok=false")
 	}
@@ -246,7 +246,7 @@ func TestResolvePRParsesMergeable(t *testing.T) {
 		return `[]`, nil // checks/comments
 	}
 
-	d, found, err := resolvePR(context.Background(), "croft/loch", "bide", "")
+	d, found, err := resolvePR(context.Background(), "croft/loch", "bide", "", 0)
 	if err != nil || !found {
 		t.Fatalf("expected found PR, got found=%v err=%v", found, err)
 	}
@@ -264,7 +264,7 @@ func TestResolvePRNoPR(t *testing.T) {
 		return `[]`, nil
 	}
 
-	_, found, err := resolvePR(context.Background(), "croft/loch", "bide", "")
+	_, found, err := resolvePR(context.Background(), "croft/loch", "bide", "", 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -338,7 +338,7 @@ func TestResolvePR_ErrorPaths_Cov(t *testing.T) {
 		return "", errors.New("gh boom")
 	}
 
-	if _, _, err := resolvePR(context.Background(), "croft/loch", "bide", ""); err == nil {
+	if _, _, err := resolvePR(context.Background(), "croft/loch", "bide", "", 0); err == nil {
 		t.Error("expected error when gh pr list fails")
 	}
 
@@ -347,7 +347,7 @@ func TestResolvePR_ErrorPaths_Cov(t *testing.T) {
 		return "not json", nil
 	}
 
-	if _, _, err := resolvePR(context.Background(), "croft/loch", "bide", ""); err == nil {
+	if _, _, err := resolvePR(context.Background(), "croft/loch", "bide", "", 0); err == nil {
 		t.Error("expected parse error for malformed pr list JSON")
 	}
 }
@@ -361,7 +361,7 @@ func TestFetchChecks_Degraded_Cov(t *testing.T) {
 		return "", errors.New("no checks")
 	}
 
-	if state, fail, _, _, total := fetchChecks(context.Background(), "croft/loch", 1, ""); state != "" || fail != nil || total != 0 {
+	if state, fail, _, _, total := fetchChecks(context.Background(), "croft/loch", 1, "", 0); state != "" || fail != nil || total != 0 {
 		t.Errorf("error+empty output should give ('',nil,total=0), got (%q,%v,total=%d)", state, fail, total)
 	}
 
@@ -370,7 +370,7 @@ func TestFetchChecks_Degraded_Cov(t *testing.T) {
 		return "{bad", nil
 	}
 
-	if state, _, _, _, _ := fetchChecks(context.Background(), "croft/loch", 1, ""); state != "" {
+	if state, _, _, _, _ := fetchChecks(context.Background(), "croft/loch", 1, "", 0); state != "" {
 		t.Errorf("malformed checks JSON should give '', got %q", state)
 	}
 
@@ -379,7 +379,7 @@ func TestFetchChecks_Degraded_Cov(t *testing.T) {
 		return "[]", nil
 	}
 
-	if state, fail, _, _, total := fetchChecks(context.Background(), "croft/loch", 1, ""); state != "" || fail != nil || total != 0 {
+	if state, fail, _, _, total := fetchChecks(context.Background(), "croft/loch", 1, "", 0); state != "" || fail != nil || total != 0 {
 		t.Errorf("empty checks should give ('',nil,total=0), got (%q,%v,total=%d)", state, fail, total)
 	}
 
@@ -388,7 +388,7 @@ func TestFetchChecks_Degraded_Cov(t *testing.T) {
 		return `[{"name":"build","bucket":"fail"}]`, errors.New("exit 1")
 	}
 
-	if state, fail, _, passed, total := fetchChecks(context.Background(), "croft/loch", 1, ""); state != "failing" || len(fail) != 1 || passed != 0 || total != 1 {
+	if state, fail, _, passed, total := fetchChecks(context.Background(), "croft/loch", 1, "", 0); state != "failing" || len(fail) != 1 || passed != 0 || total != 1 {
 		t.Errorf("failing checks should still parse despite exit 1, got (%q,%v,passed=%d,total=%d)", state, fail, passed, total)
 	}
 }
@@ -402,7 +402,7 @@ func TestFetchComments_EmptyAndBad_Cov(t *testing.T) {
 		return "", nil
 	}
 
-	if comments, ok := fetchComments(context.Background(), "croft/loch", 1, "", "issues"); !ok || comments != nil {
+	if comments, ok := fetchComments(context.Background(), "croft/loch", 1, "", "issues", 0); !ok || comments != nil {
 		t.Errorf("empty output should be (nil,true), got (%v,%v)", comments, ok)
 	}
 
@@ -411,7 +411,7 @@ func TestFetchComments_EmptyAndBad_Cov(t *testing.T) {
 		return "not json", nil
 	}
 
-	if comments, ok := fetchComments(context.Background(), "croft/loch", 1, "", "pulls"); ok || comments != nil {
+	if comments, ok := fetchComments(context.Background(), "croft/loch", 1, "", "pulls", 0); ok || comments != nil {
 		t.Errorf("bad JSON should be (nil,false), got (%v,%v)", comments, ok)
 	}
 }

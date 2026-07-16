@@ -16,7 +16,7 @@ import (
 
 func newPRWatchSM() *SessionManager {
 	return &SessionManager{
-		prWatch:    newPRWatchState(),
+		prWatch:    newPRWatchState(0),
 		prRefWatch: newPRRefWatchState(),
 		log:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
@@ -1024,6 +1024,103 @@ func TestGateRateLimit(t *testing.T) {
 	}
 }
 
+// TestGateRateLimit_Configured proves the per-session rate limit honours the
+// [pr_watch.advanced] notification_rate_limit knob rather than the old hard-coded 5.
+func TestGateRateLimit_Configured(t *testing.T) {
+	sm := newPRWatchSM()
+	cfg := &config.PRWatchConfig{
+		Enabled: true, Debounce: "0s", MaxNotificationsPerPR: 100,
+		Advanced: config.PRWatchAdvancedConfig{NotificationRateLimit: 2, NotificationRateWindow: "30m"},
+	}
+	cur := &prWatchCursor{failing: map[string]bool{}}
+	allowed := 0
+
+	for i := 0; i < 10; i++ {
+		if _, ok := sm.gate(cfg, "fash", cur, false); ok {
+			allowed++
+		}
+	}
+
+	if allowed != 2 {
+		t.Errorf("configured rate-limit should allow 2 per window, allowed %d", allowed)
+	}
+}
+
+// TestAllowKick_ConfiguredCooldown proves the kick cooldown honours
+// [pr_watch.advanced] kick_cooldown. A large cooldown suppresses the second kick;
+// a zero cooldown allows back-to-back kicks (which the old 3s constant forbade).
+func TestAllowKick_ConfiguredCooldown(t *testing.T) {
+	sm := newPRWatchSM()
+
+	long := &config.PRWatchConfig{Advanced: config.PRWatchAdvancedConfig{KickCooldown: "1h"}}
+	if !sm.allowKick(long, "braw1") {
+		t.Fatal("first kick should be allowed")
+	}
+
+	if sm.allowKick(long, "braw1") {
+		t.Error("second kick within a 1h cooldown should be suppressed")
+	}
+
+	zero := &config.PRWatchConfig{Advanced: config.PRWatchAdvancedConfig{KickCooldown: "0s"}}
+	if !sm.allowKick(zero, "canny2") {
+		t.Error("a zero cooldown should allow the first kick")
+	}
+
+	if !sm.allowKick(zero, "canny2") {
+		t.Error("a zero cooldown should allow a back-to-back second kick")
+	}
+}
+
+// TestRunPRWatchTick_ConfiguredBatchSize proves runPRWatchTick caps polls at the
+// configured batch_size, not the old hard-coded 3. Mirrors TestRunPRWatchTick_
+// BatchCap_Cov's real-session setup (non-GitHub remote → each polled session just
+// negative-caches, no network).
+func TestRunPRWatchTick_ConfiguredBatchSize(t *testing.T) {
+	tmp := t.TempDir()
+	cloneDir := tmp + "/clone"
+
+	gitRun(t, "", "init", "--initial-branch=main", cloneDir)
+	gitRun(t, cloneDir, "remote", "add", "origin", "git@example.com:croft/loch.git")
+
+	sm := newPRWatchCovSM()
+	for _, id := range []string{"a", "b", "c", "d", "e"} {
+		sm.state.Sessions[id] = &SessionState{
+			ID: id, Name: id, Status: StatusRunning,
+			RepoPath: cloneDir, WorktreePath: cloneDir, Branch: "canny-feature",
+		}
+	}
+
+	cfg := &config.PRWatchConfig{Enabled: true, Advanced: config.PRWatchAdvancedConfig{BatchSize: 2}}
+	sm.runPRWatchTick(context.Background(), cfg)
+
+	sm.prWatch.mu.Lock()
+	polled := len(sm.prWatch.nextPoll)
+	sm.prWatch.mu.Unlock()
+
+	if polled != 2 {
+		t.Errorf("configured batch_size=2 should poll 2 per tick, polled %d", polled)
+	}
+}
+
+// TestCommentBody_ConfiguredMaxBytes proves the delivered comment body is truncated
+// to [pr_watch.advanced] comment_body_max_bytes rather than the old 1024.
+func TestCommentBody_ConfiguredMaxBytes(t *testing.T) {
+	cfg := &config.PRWatchConfig{Advanced: config.PRWatchAdvancedConfig{CommentBodyMaxBytes: 8}}
+	t1 := prWatchTarget{id: "braw", branch: "braw"}
+	long := "abcdefghijklmnopqrstuvwxyz"
+	body := reviewCommentBody(cfg, t1, prData{Number: 3}, []ghComment{
+		{User: ghUser{Login: "ailsa"}, Body: long},
+	})
+
+	if !strings.Contains(body, "abcdefgh…") {
+		t.Errorf("body should truncate to 8 bytes + ellipsis, got: %q", body)
+	}
+
+	if strings.Contains(body, "abcdefghi") {
+		t.Errorf("body should not exceed the configured 8-byte cap, got: %q", body)
+	}
+}
+
 func TestDiffAndBuild_PrimeDefersOnCommentFetchFailure(t *testing.T) {
 	// If the comment fetch degraded on the priming poll, we must NOT baseline the
 	// comment cursor at 0 and must not mark primed — otherwise the next good poll
@@ -1119,7 +1216,7 @@ func TestGateDirectiveBypassesCap(t *testing.T) {
 func newPRWatchCovSM() *SessionManager {
 	return &SessionManager{
 		state:   NewState(),
-		prWatch: newPRWatchState(),
+		prWatch: newPRWatchState(0),
 		cfg:     &config.Config{},
 		log:     slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
 	}
@@ -1326,7 +1423,7 @@ func TestPollSession_NonGitHubBacksOff_Cov(t *testing.T) {
 		t.Fatal("non-GitHub remote should schedule a back-off poll")
 	}
 
-	if next.Before(time.Now().Add(prNoPRNegCache - time.Minute)) {
+	if next.Before(time.Now().Add((config.PRWatchConfig{}).NoPRNegativeCacheDuration() - time.Minute)) {
 		t.Errorf("non-GitHub remote should get the long negative-cache back-off, got %v", next)
 	}
 }
@@ -1421,7 +1518,7 @@ func TestPollSession_NoPRClearsState_Cov(t *testing.T) {
 		t.Fatal("no-PR poll should schedule a back-off poll")
 	}
 
-	if next.Before(before.Add(prNoPRNegCache - time.Minute)) {
+	if next.Before(before.Add((config.PRWatchConfig{}).NoPRNegativeCacheDuration() - time.Minute)) {
 		t.Errorf("no-PR poll should apply the long negative-cache back-off, got %v", next)
 	}
 }
@@ -1504,13 +1601,13 @@ func TestRunPRWatchTick_BatchCap_Cov(t *testing.T) {
 	cfg := &config.PRWatchConfig{Enabled: true}
 	sm.runPRWatchTick(context.Background(), cfg)
 
-	// At most prWatchBatchCap sessions should have been polled (scheduled).
+	// At most the default batch size of sessions should have been polled (scheduled).
 	sm.prWatch.mu.Lock()
 	polled := len(sm.prWatch.nextPoll)
 	sm.prWatch.mu.Unlock()
 
-	if polled != prWatchBatchCap {
-		t.Errorf("runPRWatchTick should poll at most %d per tick, polled %d", prWatchBatchCap, polled)
+	if polled != (config.PRWatchConfig{}).BatchSize() {
+		t.Errorf("runPRWatchTick should poll at most %d per tick, polled %d", (config.PRWatchConfig{}).BatchSize(), polled)
 	}
 }
 
@@ -1785,7 +1882,7 @@ func newPromptSM(t *testing.T) (*SessionManager, string) {
 
 	orchID := "ben-orch"
 	sm := &SessionManager{
-		prWatch:  newPRWatchState(),
+		prWatch:  newPRWatchState(0),
 		log:      slog.New(slog.NewTextHandler(io.Discard, nil)),
 		messages: ms,
 		state: &State{
@@ -2056,7 +2153,7 @@ func TestPromptUntrustedAuthors_RateLimited(t *testing.T) {
 	sm.prWatch.mu.Lock()
 
 	now := time.Now()
-	for i := 0; i < prAuthorPromptRate; i++ {
+	for i := 0; i < (config.PRWatchConfig{}).UntrustedAuthorPromptRate(); i++ {
 		sm.prWatch.authorPromptLog = append(sm.prWatch.authorPromptLog, now)
 	}
 	sm.prWatch.mu.Unlock()
@@ -2084,24 +2181,24 @@ func TestRecordPromptedAuthors_Bounded(t *testing.T) {
 	sm, _ := newPromptSM(t)
 
 	// Fill to the cap.
-	for i := 0; i < maxPRWatchPromptedAuthors; i++ {
+	for i := 0; i < (config.PRWatchConfig{}).MaxPromptedAuthors(); i++ {
 		sm.state.PRWatchPromptedAuthors[fmt.Sprintf("whin-%d", i)] = true
 	}
 
-	sm.recordPromptedAuthors([]untrustedAuthor{{login: "scunner"}})
+	sm.recordPromptedAuthors(&config.PRWatchConfig{}, []untrustedAuthor{{login: "scunner"}})
 
 	if sm.state.PRWatchPromptedAuthors["scunner"] {
 		t.Error("a new author must not be recorded once the set is at capacity")
 	}
 
-	if len(sm.state.PRWatchPromptedAuthors) != maxPRWatchPromptedAuthors {
-		t.Errorf("set size should stay at the cap %d, got %d", maxPRWatchPromptedAuthors, len(sm.state.PRWatchPromptedAuthors))
+	if len(sm.state.PRWatchPromptedAuthors) != (config.PRWatchConfig{}).MaxPromptedAuthors() {
+		t.Errorf("set size should stay at the cap %d, got %d", (config.PRWatchConfig{}).MaxPromptedAuthors(), len(sm.state.PRWatchPromptedAuthors))
 	}
 }
 
 // TestRecordPromptedAuthors_NilStateNoop guards the defensive nil-state path.
 func TestRecordPromptedAuthors_NilStateNoop(t *testing.T) {
-	sm := &SessionManager{prWatch: newPRWatchState(), log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	sm := &SessionManager{prWatch: newPRWatchState(0), log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	// Must not panic with a nil state.
-	sm.recordPromptedAuthors([]untrustedAuthor{{login: "scunner"}})
+	sm.recordPromptedAuthors(&config.PRWatchConfig{}, []untrustedAuthor{{login: "scunner"}})
 }

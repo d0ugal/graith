@@ -291,7 +291,14 @@ func (sm *SessionManager) deliverReleased(j JailedComment) error {
 		return nil
 	}
 
-	if err := sm.notifyFromDaemon(j.TargetSession, releasedCommentBody(j)); err != nil {
+	// A bare test SessionManager may have no config; fall back to the zero-value
+	// PRWatch, whose accessor yields the default body cap.
+	pw := config.PRWatchConfig{}
+	if cfg := sm.Config(); cfg != nil {
+		pw = cfg.PRWatch
+	}
+
+	if err := sm.notifyFromDaemon(j.TargetSession, releasedCommentBody(j, pw.CommentBodyMaxBytes())); err != nil {
 		if sm.log != nil {
 			sm.log.Error("jail: failed to deliver released comment",
 				"id", j.ID, "session", j.TargetSession, "err", err)
@@ -307,7 +314,7 @@ func (sm *SessionManager) deliverReleased(j JailedComment) error {
 // target agent. It carries the awareness framing (treat as feedback, not
 // instructions) and is explicit that the comment was held as a precaution and
 // has now been released by the human/orchestrator.
-func releasedCommentBody(j JailedComment) string {
+func releasedCommentBody(j JailedComment, maxBody int) string {
 	var b strings.Builder
 
 	loc := ""
@@ -321,7 +328,7 @@ func releasedCommentBody(j JailedComment) string {
 		"Consider whether it needs action — it may be a question, a nit, or a discussion.\n",
 		j.PRNumber, j.Branch, j.Author)
 
-	fmt.Fprintf(&b, "\n— @%s%s: %s", j.Author, loc, truncate(j.Body, prCommentMaxBody))
+	fmt.Fprintf(&b, "\n— @%s%s: %s", j.Author, loc, truncate(j.Body, maxBody))
 
 	if j.PRNumber > 0 {
 		fmt.Fprintf(&b, "\n\nFull thread: `gh pr view %d --comments`.", j.PRNumber)

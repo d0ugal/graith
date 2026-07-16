@@ -19,7 +19,22 @@ import (
 // calls run with a short timeout and GH_PROMPT_DISABLED so the daemon's gh can
 // never block on interactive auth.
 
+// ghTimeout is the default per-command timeout for the daemon's gh invocations.
+// The pr_watch reader threads a configurable timeout (pr_watch.advanced.gh_timeout)
+// through resolvePR/fetchChecks/fetchComments; this constant is the fallback when
+// a caller passes a non-positive value, and is used directly by the issue tracker
+// (tracker.go), which deliberately reuses the pr_watch reader's short timeout.
 const ghTimeout = 5 * time.Second
+
+// ghTimeoutOr resolves a caller-supplied timeout, falling back to ghTimeout when
+// it is non-positive (e.g. an unset/zero value from a test or a default config).
+func ghTimeoutOr(timeout time.Duration) time.Duration {
+	if timeout <= 0 {
+		return ghTimeout
+	}
+
+	return timeout
+}
 
 // prData is the resolved PR plus its CI and comment state for one poll.
 type prData struct {
@@ -159,8 +174,10 @@ type prCheck struct {
 
 // resolvePR finds the PR for a branch and fills in CI + comment state. It
 // returns ok=false (no error) when there is simply no PR for the branch.
-func resolvePR(ctx context.Context, slug, branch, worktreePath string) (prData, bool, error) {
-	cctx, cancel := context.WithTimeout(ctx, ghTimeout)
+func resolvePR(ctx context.Context, slug, branch, worktreePath string, timeout time.Duration) (prData, bool, error) {
+	timeout = ghTimeoutOr(timeout)
+
+	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	out, err := ghRunner(cctx, worktreePath,
@@ -193,12 +210,12 @@ func resolvePR(ctx context.Context, slug, branch, worktreePath string) (prData, 
 	// CI checks + comments — only meaningful while the PR is open.
 	d.CommentsOK = true
 	if d.State == "open" || d.State == "draft" {
-		d.CIState, d.FailingChecks, d.CIPending, d.CIPassed, d.CITotal = fetchChecks(ctx, slug, it.Number, worktreePath)
+		d.CIState, d.FailingChecks, d.CIPending, d.CIPassed, d.CITotal = fetchChecks(ctx, slug, it.Number, worktreePath, timeout)
 
 		var issueOK, reviewOK bool
 
-		d.IssueComments, issueOK = fetchComments(ctx, slug, it.Number, worktreePath, "issues")
-		d.ReviewComments, reviewOK = fetchComments(ctx, slug, it.Number, worktreePath, "pulls")
+		d.IssueComments, issueOK = fetchComments(ctx, slug, it.Number, worktreePath, "issues", timeout)
+		d.ReviewComments, reviewOK = fetchComments(ctx, slug, it.Number, worktreePath, "pulls", timeout)
 		d.CommentsOK = issueOK && reviewOK
 	}
 
@@ -232,8 +249,8 @@ func normalizePRState(state string, isDraft bool) string {
 // check has finished. passed/total are surfaced so the display can show
 // progress ("16/22"); total == 0 means no count is available (degraded read or
 // no checks).
-func fetchChecks(ctx context.Context, slug string, number int, worktreePath string) (state string, failing []string, pending, passed, total int) {
-	cctx, cancel := context.WithTimeout(ctx, ghTimeout)
+func fetchChecks(ctx context.Context, slug string, number int, worktreePath string, timeout time.Duration) (state string, failing []string, pending, passed, total int) {
+	cctx, cancel := context.WithTimeout(ctx, ghTimeoutOr(timeout))
 	defer cancel()
 
 	out, err := ghRunner(cctx, worktreePath,
@@ -305,8 +322,8 @@ func ciBucket(c prCheck) string {
 // bool is false if the fetch degraded (error or unparseable), so the caller can
 // avoid priming a cursor from a partial read. An empty-but-ok result is
 // (nil, true).
-func fetchComments(ctx context.Context, slug string, number int, worktreePath, surface string) ([]ghComment, bool) {
-	cctx, cancel := context.WithTimeout(ctx, ghTimeout)
+func fetchComments(ctx context.Context, slug string, number int, worktreePath, surface string, timeout time.Duration) ([]ghComment, bool) {
+	cctx, cancel := context.WithTimeout(ctx, ghTimeoutOr(timeout))
 	defer cancel()
 
 	path := fmt.Sprintf("repos/%s/%s/%d/comments?per_page=100", slug, surface, number)

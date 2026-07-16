@@ -338,7 +338,7 @@ type State struct {
 	// PR-watch loop has already surfaced to the orchestrator (the trust prompt),
 	// so a given author is surfaced at most once ever. Keyed by lower-cased login,
 	// global (matching the global comment allowlist). Persisted so the once-only
-	// guarantee survives a daemon restart. Bounded (see maxPRWatchPromptedAuthors)
+	// guarantee survives a daemon restart. Bounded (see PRWatchConfig.MaxPromptedAuthors)
 	// so it can't grow without limit on a busy public repo.
 	PRWatchPromptedAuthors map[string]bool `json:"pr_watch_prompted_authors,omitempty"`
 }

@@ -21,6 +21,31 @@ poll_pending             = "1m"   # poll interval while checks are still running
 debounce                 = "2m"   # minimum cooldown between notifications to a session
 ```
 
+### Advanced watcher tuning
+
+The `[pr_watch.advanced]` table exposes the low-level policy knobs that pace the watch loop and its git-ref accelerator. Every key is optional and falls back to the default shown, so omitting the table keeps the built-in behaviour. Tune these only to trade off `gh` load, detection latency, notification retention, and the untrusted-author prompt surface.
+
+```toml
+[pr_watch.advanced]
+base_tick                      = "15s"    # base poll-loop cadence (per-session gating paces gh below it)
+batch_size                     = 3        # max sessions polled per tick (bounds gh load on a large fleet)
+no_pr_negative_cache           = "5m"     # re-resolve a branch with no PR at most this often
+comment_body_max_bytes         = 1024     # truncate each delivered comment body to this many bytes
+notification_rate_limit        = 5        # per-session rolling notification cap (anti-thrash backstop)
+notification_rate_window       = "30m"    # rolling window for notification_rate_limit
+untrusted_author_prompt_rate   = 5        # max untrusted-author trust prompts to the orchestrator per window
+untrusted_author_prompt_window = "30m"    # rolling window for untrusted_author_prompt_rate
+max_prompted_authors           = 5000     # cap on the persisted set of already-surfaced untrusted authors
+kick_cooldown                  = "3s"     # min interval between git-ref-triggered polls of one session
+kick_channel_size              = 64       # buffered kick-channel capacity (a full channel drops the kick)
+kicked_no_pr_backoff           = "20s"    # short re-poll delay after a kicked poll finds no PR yet
+ref_reconcile_interval         = "2s"     # how often the git-ref watcher set is reconciled against sessions
+ref_debounce                   = "750ms"  # coalesce a burst of ref writes from one push/commit into one kick
+gh_timeout                     = "5s"     # per-command timeout for the daemon's gh invocations
+```
+
+The loop-lifetime knobs — `base_tick`, `kick_channel_size`, and `ref_reconcile_interval` — are read when the daemon starts, so changing them takes effect on the next daemon restart; the rest apply on the next poll.
+
 ### Near-instant detection
 
 The GitHub poll runs on a timer, so on its own a freshly pushed PR would only be picked up on the next tick. To make detection near-instant, the daemon also puts a lightweight local file watch on each running session's git refs (`HEAD`, `refs/`, and the reflogs — never the object store). When a `git push`, commit, or checkout touches them, it triggers an immediate PR re-check for that session instead of waiting for the poll. The poll stays on as the always-on fallback, so a push from outside the worktree — or a platform where the file watch degrades — is still caught on the next cycle. There is nothing to configure: the watch turns on and off with `[pr_watch] enabled` and needs no extra permissions.

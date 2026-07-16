@@ -909,6 +909,66 @@ type PRWatchConfig struct {
 	// the untrusted comment body. False disables the prompt entirely (silent drop,
 	// still logged).
 	NotifyUntrustedAuthors bool `toml:"notify_untrusted_authors"`
+	// Advanced holds the low-level watcher-tuning knobs (loop cadence, batch size,
+	// caches, rate limits, ref-watch timing, gh timeout). Every field is optional
+	// and falls back to a sensible default via the accessors below, so a config
+	// that omits [pr_watch.advanced] entirely behaves exactly as before. Expose
+	// these only for operators who need to trade off load, latency, retention, and
+	// prompt-injection surface — the defaults suit ordinary use.
+	Advanced PRWatchAdvancedConfig `toml:"advanced"`
+}
+
+// PRWatchAdvancedConfig carries the advanced tuning for the PR/CI watch loop and
+// its git-ref accelerator. These were formerly hard-coded policy literals in the
+// daemon; they are surfaced here so an operator can tune load, latency, retention,
+// and the untrusted-author prompt-injection surface without a rebuild. Every field
+// is optional: an unset (zero) value resolves to the documented default through the
+// PRWatchConfig accessors, so leaving [pr_watch.advanced] out is a no-op.
+type PRWatchAdvancedConfig struct {
+	// BaseTick is the base poll-loop cadence (per-session gating paces the actual
+	// gh calls below it). Default 15s. Applied when the watch loop starts.
+	BaseTick string `toml:"base_tick"`
+	// BatchSize caps how many sessions are polled per tick, bounding gh load on a
+	// large fleet. Default 3.
+	BatchSize int `toml:"batch_size"`
+	// NoPRNegativeCache is how long a branch with no PR is left before re-resolving
+	// on the ordinary timer. Default 5m.
+	NoPRNegativeCache string `toml:"no_pr_negative_cache"`
+	// CommentBodyMaxBytes truncates each delivered PR-comment body to this many
+	// bytes, bounding notification size. Default 1024.
+	CommentBodyMaxBytes int `toml:"comment_body_max_bytes"`
+	// NotificationRateLimit / NotificationRateWindow are the per-session rolling
+	// anti-thrash backstop: at most this many notifications per window to one
+	// session. Defaults 5 per 30m.
+	NotificationRateLimit  int    `toml:"notification_rate_limit"`
+	NotificationRateWindow string `toml:"notification_rate_window"`
+	// UntrustedAuthorPromptRate / UntrustedAuthorPromptWindow bound the untrusted
+	// comment-author trust prompt to the orchestrator (a security surface — a busy
+	// public PR churning drive-by commenters must not flood it). Defaults 5 per 30m.
+	UntrustedAuthorPromptRate   int    `toml:"untrusted_author_prompt_rate"`
+	UntrustedAuthorPromptWindow string `toml:"untrusted_author_prompt_window"`
+	// MaxPromptedAuthors bounds the persisted set of already-surfaced untrusted
+	// authors so it can't grow without limit. Default 5000.
+	MaxPromptedAuthors int `toml:"max_prompted_authors"`
+	// KickCooldown is the minimum interval between git-ref-triggered immediate polls
+	// of one session (belt-and-braces over the ref-watch debounce). Default 3s.
+	KickCooldown string `toml:"kick_cooldown"`
+	// KickChannelSize is the buffered kick-channel capacity; a full channel drops
+	// the (best-effort) kick. Default 64. Applied when the watch state is built.
+	KickChannelSize int `toml:"kick_channel_size"`
+	// KickedNoPRBackoff is the short re-poll delay after a kicked poll finds no PR
+	// yet (a push is usually moments before `gh pr create`), instead of parking on
+	// the full negative cache. Default 20s.
+	KickedNoPRBackoff string `toml:"kicked_no_pr_backoff"`
+	// RefReconcileInterval is how often the git-ref watcher set is reconciled
+	// against live sessions. Default 2s. Applied when the ref-watch loop starts.
+	RefReconcileInterval string `toml:"ref_reconcile_interval"`
+	// RefDebounce coalesces the burst of ref/reflog writes one push/commit/checkout
+	// produces into a single kick. Default 750ms.
+	RefDebounce string `toml:"ref_debounce"`
+	// GHTimeout is the per-command timeout for the daemon's `gh` invocations, so a
+	// hung gh can never stall the loop. Default 5s.
+	GHTimeout string `toml:"gh_timeout"`
 }
 
 // DefaultTrustedAssociations is the trusted author_association set used when
@@ -998,6 +1058,113 @@ func (p PRWatchConfig) MaxNotifications() int {
 	}
 
 	return p.MaxNotificationsPerPR
+}
+
+// The accessors below resolve the [pr_watch.advanced] tuning knobs, each falling
+// back to the daemon's historical default when unset (or non-positive / invalid).
+// Keeping the default in one place here — not in the daemon — mirrors the poll/
+// debounce accessors above and keeps the embedded default_config.toml free to omit
+// the keys (so the Go fallback stays authoritative; see issue #1228).
+
+// BaseTickDuration is the base poll-loop cadence. Default 15s.
+func (p PRWatchConfig) BaseTickDuration() time.Duration {
+	return parseDurationOr(p.Advanced.BaseTick, 15*time.Second)
+}
+
+// BatchSize caps sessions polled per tick. Default 3.
+func (p PRWatchConfig) BatchSize() int {
+	if p.Advanced.BatchSize <= 0 {
+		return 3
+	}
+
+	return p.Advanced.BatchSize
+}
+
+// NoPRNegativeCacheDuration is the no-PR re-resolve interval. Default 5m.
+func (p PRWatchConfig) NoPRNegativeCacheDuration() time.Duration {
+	return parseDurationOr(p.Advanced.NoPRNegativeCache, 5*time.Minute)
+}
+
+// CommentBodyMaxBytes is the per-comment body truncation cap. Default 1024.
+func (p PRWatchConfig) CommentBodyMaxBytes() int {
+	if p.Advanced.CommentBodyMaxBytes <= 0 {
+		return 1024
+	}
+
+	return p.Advanced.CommentBodyMaxBytes
+}
+
+// NotificationRateLimit is the per-session rolling notification cap. Default 5.
+func (p PRWatchConfig) NotificationRateLimit() int {
+	if p.Advanced.NotificationRateLimit <= 0 {
+		return 5
+	}
+
+	return p.Advanced.NotificationRateLimit
+}
+
+// NotificationRateWindowDuration is the per-session rate-limit window. Default 30m.
+func (p PRWatchConfig) NotificationRateWindowDuration() time.Duration {
+	return parseDurationOr(p.Advanced.NotificationRateWindow, 30*time.Minute)
+}
+
+// UntrustedAuthorPromptRate caps untrusted-author trust prompts per window. Default 5.
+func (p PRWatchConfig) UntrustedAuthorPromptRate() int {
+	if p.Advanced.UntrustedAuthorPromptRate <= 0 {
+		return 5
+	}
+
+	return p.Advanced.UntrustedAuthorPromptRate
+}
+
+// UntrustedAuthorPromptWindowDuration is the trust-prompt rate window. Default 30m.
+func (p PRWatchConfig) UntrustedAuthorPromptWindowDuration() time.Duration {
+	return parseDurationOr(p.Advanced.UntrustedAuthorPromptWindow, 30*time.Minute)
+}
+
+// MaxPromptedAuthors bounds the persisted surfaced-authors set. Default 5000.
+func (p PRWatchConfig) MaxPromptedAuthors() int {
+	if p.Advanced.MaxPromptedAuthors <= 0 {
+		return 5000
+	}
+
+	return p.Advanced.MaxPromptedAuthors
+}
+
+// KickCooldownDuration is the min interval between git-ref-triggered polls of one
+// session. Default 3s.
+func (p PRWatchConfig) KickCooldownDuration() time.Duration {
+	return parseDurationOr(p.Advanced.KickCooldown, 3*time.Second)
+}
+
+// KickChannelSize is the buffered kick-channel capacity. Default 64.
+func (p PRWatchConfig) KickChannelSize() int {
+	if p.Advanced.KickChannelSize <= 0 {
+		return 64
+	}
+
+	return p.Advanced.KickChannelSize
+}
+
+// KickedNoPRBackoffDuration is the short re-poll delay after a kicked no-PR miss.
+// Default 20s.
+func (p PRWatchConfig) KickedNoPRBackoffDuration() time.Duration {
+	return parseDurationOr(p.Advanced.KickedNoPRBackoff, 20*time.Second)
+}
+
+// RefReconcileIntervalDuration is the git-ref watcher reconcile cadence. Default 2s.
+func (p PRWatchConfig) RefReconcileIntervalDuration() time.Duration {
+	return parseDurationOr(p.Advanced.RefReconcileInterval, 2*time.Second)
+}
+
+// RefDebounceDuration coalesces a burst of ref writes into one kick. Default 750ms.
+func (p PRWatchConfig) RefDebounceDuration() time.Duration {
+	return parseDurationOr(p.Advanced.RefDebounce, 750*time.Millisecond)
+}
+
+// GHTimeoutDuration is the per-`gh`-command timeout. Default 5s.
+func (p PRWatchConfig) GHTimeoutDuration() time.Duration {
+	return parseDurationOr(p.Advanced.GHTimeout, 5*time.Second)
 }
 
 type RepoConfig struct {

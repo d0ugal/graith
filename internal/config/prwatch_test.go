@@ -140,6 +140,128 @@ func TestPRWatchDurations(t *testing.T) {
 	}
 }
 
+// TestPRWatchAdvancedAccessorDefaults covers the [pr_watch.advanced] accessor
+// fail-safes: a zero-value config (direct struct construction, no TOML) resolves
+// every advanced knob to its documented default. These are the runtime fail-safes
+// that back the embedded default_config.toml values (asserted separately by
+// TestPRWatchAdvancedEmbeddedDefaults).
+func TestPRWatchAdvancedAccessorDefaults(t *testing.T) {
+	var p PRWatchConfig // zero value: no [pr_watch.advanced] set
+
+	checks := []struct {
+		name string
+		got  any
+		want any
+	}{
+		{"base_tick", p.BaseTickDuration(), 15 * time.Second},
+		{"batch_size", p.BatchSize(), 3},
+		{"no_pr_negative_cache", p.NoPRNegativeCacheDuration(), 5 * time.Minute},
+		{"comment_body_max_bytes", p.CommentBodyMaxBytes(), 1024},
+		{"notification_rate_limit", p.NotificationRateLimit(), 5},
+		{"notification_rate_window", p.NotificationRateWindowDuration(), 30 * time.Minute},
+		{"untrusted_author_prompt_rate", p.UntrustedAuthorPromptRate(), 5},
+		{"untrusted_author_prompt_window", p.UntrustedAuthorPromptWindowDuration(), 30 * time.Minute},
+		{"max_prompted_authors", p.MaxPromptedAuthors(), 5000},
+		{"kick_cooldown", p.KickCooldownDuration(), 3 * time.Second},
+		{"kick_channel_size", p.KickChannelSize(), 64},
+		{"kicked_no_pr_backoff", p.KickedNoPRBackoffDuration(), 20 * time.Second},
+		{"ref_reconcile_interval", p.RefReconcileIntervalDuration(), 2 * time.Second},
+		{"ref_debounce", p.RefDebounceDuration(), 750 * time.Millisecond},
+		{"gh_timeout", p.GHTimeoutDuration(), 5 * time.Second},
+	}
+
+	for _, c := range checks {
+		if c.got != c.want {
+			t.Errorf("%s default = %v, want %v", c.name, c.got, c.want)
+		}
+	}
+}
+
+// TestPRWatchAdvancedEmbeddedDefaults is the drift guard (epic #1230 pattern): the
+// advanced tuning defaults must live in the embedded default_config.toml, not only
+// as Go fallback literals — otherwise `gr config show/diff/reset` would omit them.
+// It asserts the RAW fields parsed from the embedded TOML (not just the accessors,
+// which pass whether the value comes from TOML or the Go fallback).
+func TestPRWatchAdvancedEmbeddedDefaults(t *testing.T) {
+	a := Default().PRWatch.Advanced
+
+	strChecks := map[string]struct{ got, want string }{
+		"base_tick":                      {a.BaseTick, "15s"},
+		"no_pr_negative_cache":           {a.NoPRNegativeCache, "5m"},
+		"notification_rate_window":       {a.NotificationRateWindow, "30m"},
+		"untrusted_author_prompt_window": {a.UntrustedAuthorPromptWindow, "30m"},
+		"kick_cooldown":                  {a.KickCooldown, "3s"},
+		"kicked_no_pr_backoff":           {a.KickedNoPRBackoff, "20s"},
+		"ref_reconcile_interval":         {a.RefReconcileInterval, "2s"},
+		"ref_debounce":                   {a.RefDebounce, "750ms"},
+		"gh_timeout":                     {a.GHTimeout, "5s"},
+	}
+	for name, c := range strChecks {
+		if c.got != c.want {
+			t.Errorf("Default().PRWatch.Advanced.%s = %q, want %q (missing from default_config.toml?)", name, c.got, c.want)
+		}
+	}
+
+	intChecks := map[string]struct{ got, want int }{
+		"batch_size":                   {a.BatchSize, 3},
+		"comment_body_max_bytes":       {a.CommentBodyMaxBytes, 1024},
+		"notification_rate_limit":      {a.NotificationRateLimit, 5},
+		"untrusted_author_prompt_rate": {a.UntrustedAuthorPromptRate, 5},
+		"max_prompted_authors":         {a.MaxPromptedAuthors, 5000},
+		"kick_channel_size":            {a.KickChannelSize, 64},
+	}
+	for name, c := range intChecks {
+		if c.got != c.want {
+			t.Errorf("Default().PRWatch.Advanced.%s = %d, want %d (missing from default_config.toml?)", name, c.got, c.want)
+		}
+	}
+}
+
+// TestPRWatchAdvancedParsing covers parsing an explicit [pr_watch.advanced] block
+// through Load(): set values override, and the accessors reflect the overrides.
+func TestPRWatchAdvancedParsing(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+
+	body := "[pr_watch]\nenabled = true\n\n[pr_watch.advanced]\n" +
+		"base_tick = \"45s\"\nbatch_size = 7\ngh_timeout = \"9s\"\n" +
+		"comment_body_max_bytes = 256\nkick_channel_size = 8\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	pw := cfg.PRWatch
+	if got := pw.BaseTickDuration(); got != 45*time.Second {
+		t.Errorf("BaseTickDuration = %v, want 45s", got)
+	}
+
+	if got := pw.BatchSize(); got != 7 {
+		t.Errorf("BatchSize = %d, want 7", got)
+	}
+
+	if got := pw.GHTimeoutDuration(); got != 9*time.Second {
+		t.Errorf("GHTimeoutDuration = %v, want 9s", got)
+	}
+
+	if got := pw.CommentBodyMaxBytes(); got != 256 {
+		t.Errorf("CommentBodyMaxBytes = %d, want 256", got)
+	}
+
+	if got := pw.KickChannelSize(); got != 8 {
+		t.Errorf("KickChannelSize = %d, want 8", got)
+	}
+
+	// An unset advanced key in the same block still resolves to its default.
+	if got := pw.RefDebounceDuration(); got != 750*time.Millisecond {
+		t.Errorf("RefDebounceDuration (unset) = %v, want 750ms", got)
+	}
+}
+
 // TestTrustedAssociationSet covers the author-trust association accessor: the
 // default set when a nil (unset) list, upper-case normalisation of a
 // hand-written config, whitespace trimming, and that a present-but-empty list
