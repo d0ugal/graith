@@ -59,7 +59,7 @@ func controlOp(c controlConn, msgType string, payload any) error {
 // the attach loop's best-effort reattach behaviour: a failed reattach leaves
 // info unchanged and the loop reports the trouble on its next passthrough.
 func attachDecode(c controlConn, sessionID string, info *protocol.SessionInfo) {
-	_ = c.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+	_ = c.SendControl("attach", attachMsg(sessionID))
 
 	resp, _ := c.ReadControlResponse()
 

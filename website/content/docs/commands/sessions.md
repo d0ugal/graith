@@ -75,6 +75,19 @@ Attach to a session. If no name is given, opens the session picker overlay.
 | Flag | Description |
 |------|-------------|
 | `-y, --yes` | Skip the convert-to-interactive confirmation when attaching to a headless session |
+| `--read-only` | Observe without sending input: stream output but block the keyboard |
+
+### Read-only attach
+
+`gr attach --read-only <name>` attaches as an **observer**: the session's output
+streams to your terminal, but keystrokes are never forwarded to the agent — so
+you can watch a session work without risk of an accidental keypress. A
+persistent `🔒 READ-ONLY` indicator shows the mode. The prefix key (default
+`ctrl+b`) still works, so you can detach, open the session picker, or switch
+sessions; only input to the agent is blocked. Input is gated both in the client
+and, as a backstop, in the daemon, so a read-only attach cannot inject input
+even if the client misbehaves. Read-only mode applies for the whole attach
+session, including any sessions you switch to via the picker.
 
 A **headless** session has no PTY to stream, so `gr attach` on one **converts it
 to interactive**: graith stops the headless process and relaunches the session

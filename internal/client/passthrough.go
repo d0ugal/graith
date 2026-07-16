@@ -233,6 +233,12 @@ type PassthroughOpts struct {
 	DragArrowKeys bool
 	// DragArrowThreshold is the cells-per-arrow drag distance; <1 uses the default.
 	DragArrowThreshold int
+	// ReadOnly gates all keystroke input: the client streams PTY output but never
+	// forwards typed bytes to the daemon, so an observer can watch a session
+	// without risk of injecting input (issue #31). Prefix-key actions (detach,
+	// session switching, overlays) still work; only data sent to the agent is
+	// suppressed. A persistent indicator shows the mode.
+	ReadOnly bool
 }
 
 type StatusBarCfg struct {
@@ -252,10 +258,17 @@ func (c *Client) RunPassthrough(ctx context.Context, opts PassthroughOpts) Passt
 
 	var sb *statusBarState
 
-	if opts.StatusBar != nil && opts.Info != nil {
+	// Read-only mode always shows a status bar as its persistent indicator, even
+	// when the status bar is otherwise disabled (issue #31).
+	if (opts.StatusBar != nil || opts.ReadOnly) && opts.Info != nil {
 		w, h := 80, 24
 		if tw, th, err := term.GetSize(fd); err == nil {
 			w, h = tw, th
+		}
+
+		position := "bottom"
+		if opts.StatusBar != nil {
+			position = opts.StatusBar.Position
 		}
 
 		sb = &statusBarState{
@@ -263,7 +276,8 @@ func (c *Client) RunPassthrough(ctx context.Context, opts PassthroughOpts) Passt
 			info:      newStatusBarInfo(*opts.Info, 0, protocol.FleetSummary{}),
 			rows:      h,
 			cols:      w,
-			position:  opts.StatusBar.Position,
+			position:  position,
+			readOnly:  opts.ReadOnly,
 		}
 		_ = c.SendControl("resize", protocol.ResizeMsg{
 			Cols: uint16(w),
@@ -374,6 +388,18 @@ func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, s
 
 	prefixByte := keys.Prefix
 	hasKitty := kittyCtrlSeq(prefixByte) != nil
+
+	// sendInput forwards keystrokes to the daemon, except in read-only mode where
+	// all input is dropped so an observer can't inject anything (issue #31).
+	// Prefix-key actions (detach, overlays, session switching) bypass this — they
+	// never reach the agent.
+	sendInput := func(b []byte) {
+		if opts.ReadOnly {
+			return
+		}
+
+		_ = c.SendData(b)
+	}
 
 	var dragArrow *dragArrowState
 	if opts.DragArrowKeys {
@@ -513,7 +539,7 @@ func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, s
 
 					switch key {
 					case prefixByte:
-						_ = c.SendData([]byte{prefixByte})
+						sendInput([]byte{prefixByte})
 					case keys.Detach:
 						setResult(ResultDetached)
 						return
@@ -557,7 +583,7 @@ func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, s
 						setResult(ResultScrollMode)
 						return
 					default:
-						_ = c.SendData([]byte{prefixByte, key})
+						sendInput([]byte{prefixByte, key})
 					}
 
 					i += skip
@@ -568,7 +594,7 @@ func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, s
 
 				if input[i] == prefixByte {
 					if i > sendStart {
-						_ = c.SendData(input[sendStart:i])
+						sendInput(input[sendStart:i])
 					}
 
 					prefixSeen = true
@@ -582,7 +608,7 @@ func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, s
 			}
 
 			if sendStart < n && !prefixSeen {
-				_ = c.SendData(input[sendStart:n])
+				sendInput(input[sendStart:n])
 			}
 		}
 	}()

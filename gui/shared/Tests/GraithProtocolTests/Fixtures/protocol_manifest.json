@@ -202,6 +202,13 @@
             "kind": "string"
           },
           "optional": false
+        },
+        {
+          "name": "read_only",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": true
         }
       ]
     },

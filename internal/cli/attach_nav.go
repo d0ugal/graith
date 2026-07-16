@@ -103,7 +103,7 @@ func reconnectLoop(
 			continue
 		}
 
-		_ = c.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+		_ = c.SendControl("attach", attachMsg(sessionID))
 
 		resp, err := c.ReadControlResponse()
 		if err != nil {

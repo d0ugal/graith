@@ -63,8 +63,12 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 	writer := &safeFrameWriter{writer: protocol.NewFrameWriter(conn)}
 
 	var (
-		attachedSessionID      string
-		attachedDataWriter     *frameDataWriter
+		attachedSessionID  string
+		attachedDataWriter *frameDataWriter
+		// attachedReadOnly drops this connection's input frames when the current
+		// attach was requested read-only (issue #31). Set on attach, cleared on
+		// detach; it is the server-side backstop to the client's input gate.
+		attachedReadOnly       bool
 		clientRows, clientCols uint16 = 24, 80
 		// poppedDeviceID is the device ID proven via proof-of-possession on this
 		// connection (set once a valid auth_proof is received); empty means the
@@ -383,6 +387,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 
 				attachedSessionID = a.SessionID
 				attachedDataWriter = &frameDataWriter{writer: writer}
+				attachedReadOnly = a.ReadOnly
 
 				sm.KickAttachedClient(a.SessionID)
 				sm.SetAttachedClient(a.SessionID, conn,
@@ -434,6 +439,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 
 					attachedSessionID = ""
 					attachedDataWriter = nil
+					attachedReadOnly = false
 				}
 
 				sendControl("detached", protocol.DetachedMsg{Reason: "user"})
@@ -955,6 +961,13 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 			}
 
 		case protocol.ChannelData:
+			// Read-only attaches never inject input — drop the frame outright so a
+			// read-only observer cannot mutate the session even if a client fails to
+			// gate input locally (issue #31).
+			if attachedReadOnly {
+				continue
+			}
+
 			if attachedSessionID != "" && sm.IsAttachedClient(attachedSessionID, conn) {
 				if pty, ok := sm.GetPTY(attachedSessionID); ok {
 					pty.NotifyUserInput()
