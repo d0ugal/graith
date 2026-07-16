@@ -15,5 +15,6 @@ func openFDCounts(pids []int) map[int]int {
 			counts[pid] = len(entries)
 		}
 	}
+
 	return counts
 }

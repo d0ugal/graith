@@ -20,6 +20,7 @@ var resourceSampleInterval = 30 * time.Second
 var processListOutput = func() ([]byte, error) {
 	cmd := exec.Command("/bin/ps", "-axo", "pid=,pgid=,rss=,%cpu=,comm=")
 	cmd.Env = append(cmd.Environ(), "LC_ALL=C")
+
 	return cmd.Output()
 }
 
@@ -75,7 +76,9 @@ func (sm *SessionManager) RunResourceMonitorLoop(ctx context.Context) {
 
 func (sm *SessionManager) sampleSessionResources() {
 	now := time.Now()
+
 	sm.mu.RLock()
+
 	targets := make(map[int]struct {
 		id, name string
 	}, len(sm.sessions))
@@ -88,13 +91,16 @@ func (sm *SessionManager) sampleSessionResources() {
 			if !sm.resourceSampleDue(id, now) {
 				continue
 			}
+
 			name := id
 			if state := sm.state.Sessions[id]; state != nil {
 				name = state.Name
 			}
+
 			targets[pgid] = struct{ id, name string }{id, name}
 		}
 	}
+
 	sm.mu.RUnlock()
 
 	if len(targets) == 0 {
@@ -108,13 +114,16 @@ func (sm *SessionManager) sampleSessionResources() {
 	}
 
 	groups := make(map[int][]processResource, len(targets))
+
 	var pids []int
+
 	for _, proc := range procs {
 		if _, ok := targets[proc.pgid]; ok {
 			groups[proc.pgid] = append(groups[proc.pgid], proc)
 			pids = append(pids, proc.pid)
 		}
 	}
+
 	fdCounts := fdCountReader(pids)
 
 	for pgid, target := range targets {
@@ -124,29 +133,37 @@ func (sm *SessionManager) sampleSessionResources() {
 		}
 
 		sample := ResourceSample{At: now.UTC(), OpenFDs: 0, ProcessCount: len(members)}
+
 		var topRSS int64
+
 		for _, proc := range members {
 			sample.RSSMB += proc.rssKB
 			sample.CPUPercent += proc.cpu
 			sample.ProcessIDs = append(sample.ProcessIDs, proc.pid)
+
 			if n, ok := fdCounts[proc.pid]; ok {
 				sample.OpenFDs += n
 			} else {
 				sample.FDsPartial = true
 			}
+
 			if proc.rssKB > topRSS {
 				topRSS, sample.TopProcess = proc.rssKB, proc.command
 			}
 		}
+
 		sample.RSSMB /= 1024
+
 		sm.resourceMu.Lock()
 		if sm.resourceSamples == nil {
 			sm.resourceSamples = make(map[string][]ResourceSample)
 		}
+
 		history := append(sm.resourceSamples[target.id], sample)
 		if len(history) > resourceSampleHistory {
 			history = history[len(history)-resourceSampleHistory:]
 		}
+
 		sm.resourceSamples[target.id] = history
 		sm.resourceMu.Unlock()
 
@@ -160,7 +177,9 @@ func (sm *SessionManager) sampleSessionResources() {
 func (sm *SessionManager) resourceSampleDue(id string, now time.Time) bool {
 	sm.resourceMu.Lock()
 	defer sm.resourceMu.Unlock()
+
 	history := sm.resourceSamples[id]
+
 	return len(history) == 0 || now.Sub(history[len(history)-1].At) >= resourceSampleInterval
 }
 
@@ -174,10 +193,12 @@ func (sm *SessionManager) recordSignalRequest(id string, pid int, signal syscall
 	if pid <= 0 {
 		return
 	}
+
 	sm.resourceMu.Lock()
 	if sm.signalRequests == nil {
 		sm.signalRequests = make(map[string]signalRequest)
 	}
+
 	sm.signalRequests[id] = signalRequest{
 		PID: pid, Signal: signal, Initiator: initiator, At: time.Now().UTC(),
 	}
@@ -187,11 +208,14 @@ func (sm *SessionManager) recordSignalRequest(id string, pid int, signal syscall
 func (sm *SessionManager) takeSignalRequest(id string, pid int) *signalRequest {
 	sm.resourceMu.Lock()
 	defer sm.resourceMu.Unlock()
+
 	request, ok := sm.signalRequests[id]
 	if !ok || request.PID != pid {
 		return nil
 	}
+
 	delete(sm.signalRequests, id)
+
 	return &request
 }
 
@@ -201,6 +225,7 @@ func (sm *SessionManager) takeResourceSamples(id string, pid int) []ResourceSamp
 
 	history := sm.resourceSamples[id]
 	delete(sm.resourceSamples, id)
+
 	if len(history) == 0 || pid == 0 {
 		return history
 	}
@@ -208,6 +233,7 @@ func (sm *SessionManager) takeResourceSamples(id string, pid int) []ResourceSamp
 	// Do not attach samples from an older process generation after a rapid
 	// restart. The group leader PID is present in every valid sample.
 	var matching []ResourceSample
+
 	for i := range history {
 		for _, samplePID := range history[i].ProcessIDs {
 			if samplePID == pid {
@@ -216,6 +242,7 @@ func (sm *SessionManager) takeResourceSamples(id string, pid int) []ResourceSamp
 			}
 		}
 	}
+
 	return matching
 }
 
@@ -243,12 +270,14 @@ func (sm *SessionManager) logAbnormalExitReport(
 	sm.mu.RLock()
 	state := sm.state.Sessions[id]
 	attached := sm.attachedClients[id] != nil
+
 	pendingApprovals := 0
 	for _, approval := range sm.pendingApprovals {
 		if approval.Info.SessionID == id {
 			pendingApprovals++
 		}
 	}
+
 	sandboxed, sandboxBackend := false, ""
 	if state != nil {
 		sandboxed = state.Sandboxed
@@ -256,6 +285,7 @@ func (sm *SessionManager) logAbnormalExitReport(
 			sandboxBackend = state.SandboxConfig.Backend
 		}
 	}
+
 	sm.mu.RUnlock()
 
 	category, signalSource := classifyExit(sess.ExitCode(), sess.ExitSignal(), signalRequest)
@@ -271,8 +301,10 @@ func (sm *SessionManager) logAbnormalExitReport(
 	}
 
 	var mcpStatuses []mcpCrashStatus
+
 	if sm.mcpManager != nil {
 		prefix := id + "-"
+
 		for _, server := range sm.mcpManager.List() {
 			for _, conn := range server.Connections {
 				if strings.HasPrefix(conn.ProxyID, prefix) {
@@ -316,11 +348,14 @@ func classifyExit(exitCode int, signal syscall.Signal, request *signalRequest) (
 		if request != nil && request.Signal == signal {
 			return "signal-after-graith-request", "graith-requested"
 		}
+
 		return "signal-external-or-unknown", "external-or-unknown"
 	}
+
 	if exitCode != 0 {
 		return "exit-nonzero", "none"
 	}
+
 	return "exit-clean", "none"
 }
 
@@ -329,27 +364,33 @@ func readProcessResources() ([]processResource, error) {
 	if err != nil {
 		return nil, fmt.Errorf("ps: %w", err)
 	}
+
 	return parseProcessResources(string(out)), nil
 }
 
 func parseProcessResources(out string) []processResource {
 	var resources []processResource
+
 	for _, line := range strings.Split(out, "\n") {
 		fields := strings.Fields(line)
 		if len(fields) < 5 {
 			continue
 		}
+
 		pid, err1 := strconv.Atoi(fields[0])
 		pgid, err2 := strconv.Atoi(fields[1])
 		rss, err3 := strconv.ParseInt(fields[2], 10, 64)
+
 		cpu, err4 := strconv.ParseFloat(fields[3], 64)
 		if err1 != nil || err2 != nil || err3 != nil || err4 != nil {
 			continue
 		}
+
 		resources = append(resources, processResource{
 			pid: pid, pgid: pgid, rssKB: rss, cpu: cpu,
 			command: strings.Join(fields[4:], " "),
 		})
 	}
+
 	return resources
 }

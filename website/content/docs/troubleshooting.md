@@ -251,7 +251,10 @@ gr delete --repo my-project --stopped -f
 
 ### Check daemon logs
 
-The daemon logs to `~/.local/share/graith/daemon.log` in JSON format (slog). Tail it:
+The daemon log is the first place to look when a session stops unexpectedly. By
+default it is `~/.local/share/graith/daemon.log` (JSON/slog); if `data_dir` is
+set to `~/.graith`, it is `~/.graith/daemon.log`. `gr doctor` prints the active
+data directory. Tail the default log with:
 
 ```bash
 tail -f ~/.local/share/graith/daemon.log | jq .
@@ -279,18 +282,73 @@ the log alone:
   log the same line with an `-orphan` initiator suffix.
 - **`session exited`** — the process is gone. `stop_reason` attributes the exit
   (`crash`, `user`, `idle`, `shutdown`, `watchdog`), and `pid`/`pgid` support
-  OS-level signal forensics. When present, `peak_rss_mb` is labelled with
+  OS-level signal forensics. `exit_category` separates a non-zero exit from a
+  signal, and `signal_source` says whether graith had a matching, PID-bound
+  signal request or whether the sender is external or unknown. When present,
+  `peak_rss_mb` is labelled with
   `peak_rss_proc` (`agent` or `sandbox-wrapper`) so a small wrapper RSS isn't
   mistaken for the agent's footprint. When Claude reports a clean shutdown via
   its `SessionEnd` hook, a process-ending reason (`logout` / `prompt_input_exit`)
   is attributed as `user` rather than falling back to `crash`; `/clear` and
   `/resume` are logical-session transitions that don't end the process, and any
   other (or unobserved) reason still falls back to `crash`.
+- **`session abnormal exit report`** — a single high-density record emitted for
+  a crash. `resource_samples` contains up to five 30-second process-group
+  snapshots (`rss_mb`, `cpu_percent`, `open_fds`, `process_count`, and
+  `top_process`), so it includes the agent and tools below a sandbox wrapper.
+  `fds_partial: true` means at least one short-lived or inaccessible process
+  could not be counted. The report also records `last_output_age_ms`,
+  `observed_lifetime_ms`, `sandbox_backend`, `sandbox_diagnostic`, attachment
+  state, pending approvals, unread messages, and the health of session-scoped
+  MCP processes.
+
+The most useful exit fields are:
+
+| Field | Interpretation |
+|---|---|
+| `stop_reason` | Lifecycle intent. `crash` means no clean or daemon-controlled stop reason was observed; it does not by itself identify the killer. |
+| `exit_code` | The ordinary process exit status. A non-zero value with no `signal` usually indicates an agent or wrapper error. |
+| `signal` | Signal reported by `wait(2)`, such as `terminated` (SIGTERM) or `killed` (SIGKILL). |
+| `exit_category` | `signal-after-graith-request`, `signal-external-or-unknown`, `exit-nonzero`, or `exit-clean`. |
+| `signal_source` | `graith-requested` only when the signal and process generation match a logged daemon request; otherwise `external-or-unknown`. The OS does not normally expose the sender through `wait(2)`. |
+| `signal_request_initiator` | Daemon code path that requested the matching signal, for example `user-stop`, `idle-loop`, `restart`, `delete`, or `shutdown`. |
+| `peak_rss_mb` / `peak_rss_proc` | Peak RSS for graith's direct child. With a sandbox this can be only the wrapper; use `resource_samples[].rss_mb` for the whole process group. |
+
+Common patterns:
+
+- `signal=terminated`, `signal_source=graith-requested`, and a preceding
+  `stopping session` record means graith requested the stop. The `reason` and
+  `initiator` fields explain why.
+- `signal=terminated` with `signal_source=external-or-unknown` and no preceding
+  `stopping session` means the daemon did not record sending SIGTERM. Check the
+  host's process manager, administrator actions, and OS logs. Multiple sessions
+  ending at nearly the same time strongly suggests a shared external event.
+- `signal=killed` plus rapidly rising process-group `rss_mb` is consistent with
+  resource exhaustion, but is not proof of OOM. Check Linux kernel/OOM logs or
+  macOS memory-pressure logs to confirm it.
+- `exit_category=exit-nonzero` with no signal usually means the agent or sandbox
+  wrapper exited itself. Inspect the session scrollback and nearby daemon log
+  entries for its error.
+- A sandboxed crash whose `sandbox_diagnostic` points at Seatbelt may be a policy
+  denial. On macOS, correlate the timestamp with
+  `gr sandbox watch --recent 5m <session>`; safehouse has no separate structured
+  wrapper exit-reason API.
+- A large `last_output_age_ms` with flat resource samples points toward a hung
+  or idle process; high CPU, increasing file descriptors, or a growing process
+  count points toward runaway work or a leak.
 
 Trace one session end to end:
 
 ```bash
 jq 'select(.id == "<session-id>" or .session_id == "<session-id>")' \
+  ~/.local/share/graith/daemon.log
+```
+
+For a custom `data_dir`, replace the path above (for example with
+`~/.graith/daemon.log`). To compare crashes that happened together:
+
+```bash
+jq 'select(.msg == "session exited" or .msg == "session abnormal exit report")' \
   ~/.local/share/graith/daemon.log
 ```
 
