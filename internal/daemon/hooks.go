@@ -288,9 +288,52 @@ func (sm *SessionManager) injectClaudeHooks(sessionID string, yolo bool, mcpServ
 	return extraArgs, nil, nil
 }
 
+// codexMCPServerArgs builds the per-session `-c` config overrides that point
+// each daemon-managed MCP server at `gr mcp-proxy <name>` for a Codex session.
+//
+// It deliberately overrides only `command` and `args` (mirroring the Claude
+// --mcp-config which sets the same two fields). Using `-c` overrides rather
+// than writing a full config file leaves any user-supplied per-server Codex
+// controls — `startup_timeout_sec`, `tool_timeout_sec`, `enabled`,
+// enabled/disabled tools, per-tool approval mode — intact and merged, rather
+// than flattening every server to graith's command/args/env shape.
+//
+// Values are JSON-encoded, which is also valid TOML for a string
+// (`"…"`) and a string array (`["…","…"]`), the two value kinds Codex's
+// `-c key=value` override parser accepts here.
+func codexMCPServerArgs(mcpServers []config.MCPServerConfig) ([]string, error) {
+	if len(mcpServers) == 0 {
+		return nil, nil
+	}
+
+	grBin := resolveGrBin()
+
+	cmdVal, err := json.Marshal(grBin)
+	if err != nil {
+		return nil, fmt.Errorf("marshal mcp command: %w", err)
+	}
+
+	args := make([]string, 0, len(mcpServers)*4)
+
+	for _, s := range mcpServers {
+		proxyArgs, err := json.Marshal([]string{"mcp-proxy", s.Name})
+		if err != nil {
+			return nil, fmt.Errorf("marshal mcp args for %q: %w", s.Name, err)
+		}
+
+		args = append(args,
+			"-c", fmt.Sprintf("mcp_servers.%s.command=%s", s.Name, cmdVal),
+			"-c", fmt.Sprintf("mcp_servers.%s.args=%s", s.Name, proxyArgs),
+		)
+	}
+
+	return args, nil
+}
+
 // injectCodexHooks generates per-event hook scripts for a Codex session and
-// returns extra env vars (including CODEX_HOOKS_DIR) to add to the agent launch.
-func (sm *SessionManager) injectCodexHooks(sessionID string, yolo bool) (extraArgs []string, extraEnv map[string]string, err error) {
+// returns extra args (per-session MCP server `-c` overrides) plus extra env
+// vars (including CODEX_HOOKS_DIR) to add to the agent launch.
+func (sm *SessionManager) injectCodexHooks(sessionID string, yolo bool, mcpServers []config.MCPServerConfig) (extraArgs []string, extraEnv map[string]string, err error) {
 	dir := sm.hookDir(sessionID)
 	grBin := resolveGrBin()
 
@@ -338,9 +381,14 @@ func (sm *SessionManager) injectCodexHooks(sessionID string, yolo bool) (extraAr
 		"CODEX_HOOKS_DIR": hooksDir,
 	}
 
-	sm.log.Info("injected codex hooks", "session_id", sessionID, "hooks_dir", hooksDir)
+	extraArgs, err = codexMCPServerArgs(mcpServers)
+	if err != nil {
+		return nil, nil, err
+	}
 
-	return nil, extraEnv, nil
+	sm.log.Info("injected codex hooks", "session_id", sessionID, "hooks_dir", hooksDir, "mcp_servers", len(mcpServers))
+
+	return extraArgs, extraEnv, nil
 }
 
 // graithMCPServer returns the auto-injected graith MCP server config.
@@ -509,7 +557,7 @@ func (sm *SessionManager) injectHooks(agentName, sessionID, worktreePath string,
 	case "claude":
 		return sm.injectClaudeHooks(sessionID, yolo, mcpServers)
 	case "codex":
-		return sm.injectCodexHooks(sessionID, yolo)
+		return sm.injectCodexHooks(sessionID, yolo, mcpServers)
 	case "cursor":
 		return sm.injectCursorHooks(sessionID, worktreePath, yolo)
 	default:

@@ -69,6 +69,22 @@ disabled = true    # disable for this agent
 command = "/path/to/extra-tools"
 ```
 
+### How servers reach each agent
+
+graith injects the resolved server set (the auto-injected `graith` server plus
+your global and per-agent servers) into the agent at launch, pointing each one
+at `gr mcp-proxy <name>` so the daemon supervises the real process:
+
+- **Claude** — a generated `--mcp-config` file.
+- **Codex** — per-session `-c mcp_servers.<name>.command=…` / `.args=…`
+  config overrides. Because these are overrides (not a full config file), any
+  extra Codex per-server controls you set in `~/.codex/config.toml` — such as
+  `startup_timeout_sec`, `tool_timeout_sec`, `enabled`, enabled/disabled tools,
+  or per-tool approval mode — are preserved and merged.
+
+Agents without MCP injection support (e.g. `cursor`, `opencode`) don't receive
+these servers automatically.
+
 ## Managing MCP servers
 
 The daemon supervises one MCP server process per proxy connection, started

@@ -339,7 +339,7 @@ func TestInjectCodexHooks(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 	sessionID := "kirk-codex-01"
 
-	extraArgs, extraEnv, err := sm.injectCodexHooks(sessionID, false)
+	extraArgs, extraEnv, err := sm.injectCodexHooks(sessionID, false, nil)
 	if err != nil {
 		t.Fatalf("injectCodexHooks() error = %v", err)
 	}
@@ -404,7 +404,7 @@ func TestCodexHookScriptContent(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 	sessionID := "kirk-codex-02"
 
-	_, _, err := sm.injectCodexHooks(sessionID, false)
+	_, _, err := sm.injectCodexHooks(sessionID, false, nil)
 	if err != nil {
 		t.Fatalf("injectCodexHooks() error = %v", err)
 	}
@@ -457,6 +457,109 @@ func TestCodexHookScriptContent(t *testing.T) {
 				t.Errorf("codex hook %q does not contain report-status; content = %q", filename, content)
 			}
 		}
+	}
+}
+
+// TestCodexMCPServerArgs verifies the helper emits a `-c` override pair per
+// server pointing command/args at `gr mcp-proxy <name>`, JSON-encoded so the
+// values are valid TOML, and in stable slice order.
+func TestCodexMCPServerArgs(t *testing.T) {
+	if got, err := codexMCPServerArgs(nil); err != nil || got != nil {
+		t.Fatalf("codexMCPServerArgs(nil) = (%v, %v), want (nil, nil)", got, err)
+	}
+
+	servers := []config.MCPServerConfig{
+		{Name: "graith", Command: "/usr/bin/gr", Args: []string{"mcp"}},
+		{Name: "chrome", Command: "npx", Args: []string{"chrome-mcp"}, Env: map[string]string{"DISPLAY": ":0"}},
+	}
+
+	args, err := codexMCPServerArgs(servers)
+	if err != nil {
+		t.Fatalf("codexMCPServerArgs() error = %v", err)
+	}
+
+	grBin := resolveGrBin()
+	cmdVal, _ := json.Marshal(grBin)
+
+	want := []string{
+		"-c", "mcp_servers.graith.command=" + string(cmdVal),
+		"-c", `mcp_servers.graith.args=["mcp-proxy","graith"]`,
+		"-c", "mcp_servers.chrome.command=" + string(cmdVal),
+		"-c", `mcp_servers.chrome.args=["mcp-proxy","chrome"]`,
+	}
+
+	if len(args) != len(want) {
+		t.Fatalf("args = %v, want %v", args, want)
+	}
+
+	for i := range want {
+		if args[i] != want[i] {
+			t.Errorf("args[%d] = %q, want %q", i, args[i], want[i])
+		}
+	}
+}
+
+// TestInjectCodexHooksWithMCPServers is the regression test for issue #1184:
+// Codex sessions must receive daemon-managed MCP servers as `-c` overrides,
+// not silently drop them. It also confirms CODEX_HOOKS_DIR is still returned.
+func TestInjectCodexHooksWithMCPServers(t *testing.T) {
+	sm := newTestSessionManagerWithDataDir(t)
+	sessionID := "kirk-codex-mcp"
+
+	servers := []config.MCPServerConfig{
+		{Name: "graith", Command: "/usr/bin/gr", Args: []string{"mcp"}},
+		{Name: "chrome", Command: "npx", Args: []string{"chrome-mcp"}},
+	}
+
+	extraArgs, extraEnv, err := sm.injectCodexHooks(sessionID, false, servers)
+	if err != nil {
+		t.Fatalf("injectCodexHooks() error = %v", err)
+	}
+
+	if _, ok := extraEnv["CODEX_HOOKS_DIR"]; !ok {
+		t.Error("extraEnv missing CODEX_HOOKS_DIR")
+	}
+
+	if len(extraArgs) != len(servers)*4 {
+		t.Fatalf("extraArgs = %v, want %d elements", extraArgs, len(servers)*4)
+	}
+
+	joined := strings.Join(extraArgs, " ")
+	for _, name := range []string{"graith", "chrome"} {
+		if !strings.Contains(joined, "mcp_servers."+name+".command=") {
+			t.Errorf("extraArgs missing command override for %q: %v", name, extraArgs)
+		}
+
+		if !strings.Contains(joined, `mcp_servers.`+name+`.args=["mcp-proxy","`+name+`"]`) {
+			t.Errorf("extraArgs missing args override for %q: %v", name, extraArgs)
+		}
+	}
+}
+
+// TestInjectHooksCodexPassesMCPServers verifies the dispatcher forwards the
+// resolved MCP servers into the Codex path (they were dropped before #1184).
+func TestInjectHooksCodexPassesMCPServers(t *testing.T) {
+	sm := newTestSessionManagerWithDataDir(t)
+
+	servers := []config.MCPServerConfig{
+		{Name: "graith", Command: "/usr/bin/gr", Args: []string{"mcp"}},
+	}
+
+	args, env, err := sm.injectHooks("codex", "kirk-codex-dispatch", "", false, servers)
+	if err != nil {
+		t.Fatalf("injectHooks(codex) error = %v", err)
+	}
+
+	if _, ok := env["CODEX_HOOKS_DIR"]; !ok {
+		t.Error("injectHooks(codex) missing CODEX_HOOKS_DIR")
+	}
+
+	if len(args) != 4 {
+		t.Fatalf("injectHooks(codex) args = %v, want 4 (one -c pair per field)", args)
+	}
+
+	if !strings.Contains(strings.Join(args, " "), "mcp_servers.graith.command=") {
+		t.Errorf("injectHooks(codex) args missing graith MCP override: %v", args)
 	}
 }
 
@@ -585,7 +688,7 @@ func TestCodexHookScriptsEscapeSingleQuotes(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 	sessionID := "kirk-codex-quote"
 
-	_, _, err := sm.injectCodexHooks(sessionID, false)
+	_, _, err := sm.injectCodexHooks(sessionID, false, nil)
 	if err != nil {
 		t.Fatalf("injectCodexHooks() error = %v", err)
 	}
@@ -1220,7 +1323,7 @@ func TestInjectCodexHooksYoloInstallsPermissionRequest(t *testing.T) {
 	disabled := false
 	sm.cfg.Approvals.Enabled = &disabled
 
-	_, extraEnv, err := sm.injectCodexHooks("bonnie-codex-yolo", true)
+	_, extraEnv, err := sm.injectCodexHooks("bonnie-codex-yolo", true, nil)
 	if err != nil {
 		t.Fatalf("injectCodexHooks() error = %v", err)
 	}
@@ -1265,7 +1368,7 @@ func TestInjectCodexHooksApprovalsDisabled(t *testing.T) {
 	disabled := false
 	sm.cfg.Approvals.Enabled = &disabled
 
-	_, extraEnv, err := sm.injectCodexHooks("thrawn-codex-no-approve", false)
+	_, extraEnv, err := sm.injectCodexHooks("thrawn-codex-no-approve", false, nil)
 	if err != nil {
 		t.Fatalf("injectCodexHooks() error = %v", err)
 	}
