@@ -32,6 +32,20 @@ When `[orchestrator] agent` is left empty, the orchestrator inherits the top-lev
 
 When enabled, the orchestrator session is created automatically and accessible via `ctrl+b o`.
 
+## Starting fresh
+
+Delete the orchestrator to discard its current conversation and recreate it
+from the current configuration:
+
+```bash
+gr delete orchestrator
+```
+
+Unlike ordinary sessions, this is an immediate reset rather than a recoverable
+soft delete. When `[orchestrator] enabled = true`, the daemon recreates a fresh
+orchestrator within a few seconds, using the currently configured agent, model,
+and prompt. Use `gr stop orchestrator` when you want it to remain stopped.
+
 ## Capabilities
 
 The orchestrator runs in a scratch directory with no repo. It manages other sessions through `gr` commands:

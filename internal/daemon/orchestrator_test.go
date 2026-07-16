@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -30,6 +31,7 @@ func newOrchTestSM(t *testing.T) *SessionManager {
 			StateFile: filepath.Join(dir, "state.json"),
 		},
 		orchestratorExitCh: make(chan string, 4),
+		orchestratorKickCh: make(chan struct{}, 1),
 		log:                slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
 	}
 }
@@ -495,6 +497,140 @@ func TestEnsureOrchestratorCreatesWhenEnabledButFails_Cov2(t *testing.T) {
 
 	if id := sm.findOrchestratorID(); id != "" {
 		t.Fatalf("failed createOrchestrator must not leave a session, got %q", id)
+	}
+}
+
+func TestReconcileOrchestratorPresenceAfterDelete(t *testing.T) {
+	sm := newOrchTestSM(t)
+	sm.cfg.Orchestrator.Enabled = true
+	sm.state.Sessions["auld-orch"] = &SessionState{
+		ID:         "auld-orch",
+		Name:       OrchestratorSessionName,
+		SystemKind: SystemKindOrchestrator,
+		Status:     StatusStopped,
+	}
+
+	if err := sm.Delete("auld-orch"); err != nil {
+		t.Fatalf("delete orchestrator: %v", err)
+	}
+
+	created := 0
+	sm.reconcileOrchestratorPresenceWith(context.Background(), func(context.Context) (SessionState, error) {
+		created++
+		fresh := &SessionState{
+			ID:         "fresh-orch",
+			Name:       OrchestratorSessionName,
+			SystemKind: SystemKindOrchestrator,
+			Status:     StatusRunning,
+		}
+		sm.mu.Lock()
+		sm.state.Sessions[fresh.ID] = fresh
+		sm.mu.Unlock()
+
+		return cloneSessionState(fresh), nil
+	})
+
+	if created != 1 {
+		t.Fatalf("create calls = %d, want 1", created)
+	}
+
+	if got := sm.findOrchestratorID(); got != "fresh-orch" {
+		t.Fatalf("reconciled orchestrator ID = %q, want fresh-orch", got)
+	}
+
+	// A later tick sees the replacement and must not create another one.
+	sm.reconcileOrchestratorPresenceWith(context.Background(), func(context.Context) (SessionState, error) {
+		created++
+		return SessionState{}, nil
+	})
+
+	if created != 1 {
+		t.Fatalf("existing replacement triggered another create; calls = %d", created)
+	}
+}
+
+func TestDeleteKicksOrchestratorReconcileLoop(t *testing.T) {
+	sm := newOrchTestSM(t)
+	sm.cfg.Orchestrator.Enabled = true
+	sm.state.Sessions["auld-orch"] = &SessionState{
+		ID:         "auld-orch",
+		Name:       OrchestratorSessionName,
+		SystemKind: SystemKindOrchestrator,
+		Status:     StatusStopped,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		runOrchestratorReconcileLoop(ctx, sm.orchestratorKickCh, func(context.Context) {
+			sm.reconcileOrchestratorPresenceWith(ctx, func(context.Context) (SessionState, error) {
+				fresh := &SessionState{
+					ID:         "fresh-orch",
+					Name:       OrchestratorSessionName,
+					SystemKind: SystemKindOrchestrator,
+					Status:     StatusRunning,
+				}
+				sm.mu.Lock()
+				sm.state.Sessions[fresh.ID] = fresh
+				sm.mu.Unlock()
+
+				return cloneSessionState(fresh), nil
+			})
+		})
+		close(done)
+	}()
+
+	if err := sm.Delete("auld-orch"); err != nil {
+		t.Fatalf("delete orchestrator: %v", err)
+	}
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		sm.mu.RLock()
+		got := sm.findOrchestratorID()
+		sm.mu.RUnlock()
+
+		if got == "fresh-orch" {
+			break
+		}
+
+		if time.Now().After(deadline) {
+			t.Fatal("orchestrator was not recreated after delete kick")
+		}
+
+		time.Sleep(time.Millisecond)
+	}
+
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("orchestrator reconcile loop did not stop after cancellation")
+	}
+}
+
+func TestFailedDeleteDoesNotKickOrchestratorReconcile(t *testing.T) {
+	sm := newOrchTestSM(t)
+	sm.cfg.Orchestrator.Enabled = true
+	sm.state.Sessions["thrawn-orch"] = &SessionState{
+		ID:         "thrawn-orch",
+		Name:       OrchestratorSessionName,
+		SystemKind: SystemKindOrchestrator,
+		Status:     StatusStopped,
+	}
+	sm.saveStateFault = func() error { return fmt.Errorf("dreich disk") }
+
+	if err := sm.Delete("thrawn-orch"); err == nil {
+		t.Fatal("delete should fail when its state commit fails")
+	}
+
+	select {
+	case <-sm.orchestratorKickCh:
+		t.Fatal("failed delete must not kick orchestrator recreation")
+	default:
 	}
 }
 

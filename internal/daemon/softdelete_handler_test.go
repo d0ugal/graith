@@ -85,6 +85,55 @@ func TestHandleDeleteSoftDefault(t *testing.T) {
 	}
 }
 
+func TestHandleDeleteOrchestratorIsFreshReset(t *testing.T) {
+	cfg := config.Default()
+	cfg.Orchestrator.Enabled = true
+	h := newTestHarnessWithConfig(t, cfg)
+	h.addStoppedSession(t, "auld-orch", OrchestratorSessionName, 0, "")
+
+	h.sm.mu.Lock()
+	h.sm.state.Sessions["auld-orch"].SystemKind = SystemKindOrchestrator
+	h.sm.mu.Unlock()
+
+	h.sendControl(t, "delete", protocol.DeleteMsg{SessionID: "auld-orch"})
+
+	env := h.readControlMsg(t)
+	if env.Type != "deleted" {
+		t.Fatalf("expected deleted, got %q", env.Type)
+	}
+
+	var r protocol.DeleteResultMsg
+	if err := protocol.DecodePayload(env, &r); err != nil {
+		t.Fatal(err)
+	}
+
+	if r.Soft {
+		t.Error("orchestrator delete should be an immediate reset, not a soft delete")
+	}
+
+	if _, ok := h.sm.Get("auld-orch"); ok {
+		t.Error("old orchestrator should be removed so reconciliation can replace it")
+	}
+}
+
+func TestHandleDeleteOrchestratorWorksWhenRetentionZero(t *testing.T) {
+	cfg := zeroRetentionConfig()
+	cfg.Orchestrator.Enabled = true
+	h := newTestHarnessWithConfig(t, cfg)
+	h.addStoppedSession(t, "canny-orch", OrchestratorSessionName, 0, "")
+
+	h.sm.mu.Lock()
+	h.sm.state.Sessions["canny-orch"].SystemKind = SystemKindOrchestrator
+	h.sm.mu.Unlock()
+
+	h.sendControl(t, "delete", protocol.DeleteMsg{SessionID: "canny-orch"})
+	h.expectType(t, "deleted")
+
+	if _, ok := h.sm.Get("canny-orch"); ok {
+		t.Error("orchestrator reset should not depend on soft-delete retention")
+	}
+}
+
 func TestHandleRestore(t *testing.T) {
 	h := newTestHarness(t)
 	h.addStoppedSession(t, "bide-id", "bide", 0, "")

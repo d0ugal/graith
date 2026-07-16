@@ -24,7 +24,11 @@ func (sm *SessionManager) Delete(id string) error {
 		return fmt.Errorf("session %q not found", id)
 	}
 
-	if IsSystemSession(sessState) && sm.systemSessionEnabledInConfig(sessState) {
+	// The orchestrator is declarative: deleting it is a request to discard the
+	// current instance, and the presence reconciler will create a fresh one when
+	// it remains enabled in config. Keep unknown/future system kinds fail-closed
+	// until their ownership and recreation semantics are defined explicitly.
+	if IsSystemSession(sessState) && sessState.SystemKind != SystemKindOrchestrator && sm.systemSessionEnabledInConfig(sessState) {
 		sm.mu.Unlock()
 		return fmt.Errorf("session %q is a system session managed by config.toml — disable it there and reload before deleting", sessState.Name)
 	}
@@ -276,6 +280,13 @@ func (sm *SessionManager) Delete(id string) error {
 
 	if hasClient {
 		ac.kick()
+	}
+
+	// Reconcile only after the state removal has committed and its tombstone is
+	// gone. A failed delete must never race a replacement against startup's
+	// pending-delete recovery, which removes the same shared orchestrator tree.
+	if err == nil && sessSystemKind == SystemKindOrchestrator {
+		sm.notifyOrchestratorReconcile()
 	}
 
 	return err

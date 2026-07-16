@@ -33,7 +33,8 @@ var deleteCmd = &cobra.Command{
 	Long: "Soft-delete a session: stop its agent and hide it, but keep its worktree, branch, " +
 		"and state for the retention window so `gr restore` can recover it. Use `gr purge` to " +
 		"delete immediately and irrecoverably. When soft delete is disabled (`retention = \"0\"`), " +
-		"`gr delete` is rejected — use `gr purge`.",
+		"`gr delete` is rejected — use `gr purge`. The config-managed orchestrator is an exception: deleting it " +
+		"immediately resets it, and the daemon creates a fresh replacement when it remains enabled.",
 	Args:              selfChildrenBatchArgs(&deleteSelf, &deleteChildren, &deleteBatch),
 	ValidArgsFunction: completeSessionNames,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -100,8 +101,9 @@ func resolveDeleteTarget(c *client.Client, args []string, children bool) (sessio
 	return session.ID, false, nil
 }
 
-// sendDelete sends a delete control message (soft when purge is false, hard when
-// true) and renders the daemon's DeleteResultMsg response.
+// sendDelete sends a delete control message and renders the daemon's
+// DeleteResultMsg response. Purge requests are hard deletes; ordinary requests
+// are soft except when the daemon identifies a config-managed reset.
 func sendDelete(c *client.Client, sessionID string, children, excludeRoot, purge bool) error {
 	_ = c.SendControl("delete", protocol.DeleteMsg{
 		SessionID:   sessionID,
@@ -131,15 +133,16 @@ func sendDelete(c *client.Client, sessionID string, children, excludeRoot, purge
 		return out.JSON(result)
 	}
 
-	printDeleteResult(result, children)
+	printDeleteResult(result, children, purge)
 
 	return nil
 }
 
 // printDeleteResult renders the delete outcome: a soft delete shows the
-// recovery deadline and the commands to restore or purge; a hard delete (or
-// --children batch) reports counts.
-func printDeleteResult(r protocol.DeleteResultMsg, children bool) {
+// recovery deadline and the commands to restore or purge; a purge reports
+// permanent removal; and a daemon-routed hard reset (currently the
+// config-managed orchestrator) reports automatic recreation.
+func printDeleteResult(r protocol.DeleteResultMsg, children, purge bool) {
 	if children {
 		soft := 0
 
@@ -163,10 +166,13 @@ func printDeleteResult(r protocol.DeleteResultMsg, children bool) {
 		name = r.SessionID
 	}
 
-	// A non-soft result only ever comes from `gr purge` (gr delete is always soft
-	// or an error), so this is the purge success line.
 	if !r.Soft {
-		out.Printf("Purged %s (permanently)\n", name)
+		if purge {
+			out.Printf("Purged %s (permanently)\n", name)
+		} else {
+			out.Printf("Deleted %s. A fresh config-managed session will be created automatically.\n", name)
+		}
+
 		return
 	}
 

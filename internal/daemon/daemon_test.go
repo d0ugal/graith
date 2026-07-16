@@ -3311,7 +3311,7 @@ func TestDeleteInPlaceLeavesState(t *testing.T) {
 	}
 }
 
-func TestDeleteSystemSessionRejectedWhenEnabled(t *testing.T) {
+func TestDeleteOrchestratorAllowedWhenEnabled(t *testing.T) {
 	sm := newTestSessionManager(t)
 	sm.cfg.Orchestrator.Enabled = true
 
@@ -3323,13 +3323,12 @@ func TestDeleteSystemSessionRejectedWhenEnabled(t *testing.T) {
 		CreatedAt:  time.Now().UTC(),
 	}
 
-	err := sm.Delete("orch1")
-	if err == nil {
-		t.Fatal("expected error deleting an enabled system session")
+	if err := sm.Delete("orch1"); err != nil {
+		t.Fatalf("delete of enabled orchestrator should succeed: %v", err)
 	}
 
-	if _, ok := sm.state.Sessions["orch1"]; !ok {
-		t.Error("session should remain in state when delete is rejected")
+	if _, ok := sm.state.Sessions["orch1"]; ok {
+		t.Error("orchestrator should be removed from state after delete")
 	}
 }
 

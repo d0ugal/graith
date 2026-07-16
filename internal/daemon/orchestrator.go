@@ -24,11 +24,11 @@ func (sm *SessionManager) orchestratorTmpDir() string {
 }
 
 // systemSessionEnabledInConfig reports whether the config feature that owns this
-// system session is currently enabled. A system session whose feature has been
-// disabled in config is an orphan (the daemon no longer manages it) and may be
-// deleted directly; an enabled one is daemon-managed and must be turned off in
-// config.toml first. Callers must hold sm.mu (read or write) so the sm.cfg
-// pointer read is race-free.
+// system session is currently enabled. It protects system sessions from being
+// placed in recoverable trash, which would leave their declarative name present
+// and block reconciliation. A direct orchestrator delete instead takes the
+// explicit hard-reset path in handleDelete. Callers must hold sm.mu (read or
+// write) so the sm.cfg pointer read is race-free.
 func (sm *SessionManager) systemSessionEnabledInConfig(s *SessionState) bool {
 	switch s.SystemKind {
 	case SystemKindOrchestrator:
@@ -405,11 +405,7 @@ func (sm *SessionManager) ensureOrchestrator(ctx context.Context) {
 
 	switch {
 	case orchID == "":
-		sm.log.Info("creating orchestrator session")
-
-		if _, err := sm.createOrchestrator(ctx); err != nil {
-			sm.log.Error("failed to create orchestrator", "err", err)
-		}
+		sm.reconcileOrchestratorPresence(ctx)
 
 	case orchStatus == StatusRunning && hasLivePTY:
 		sm.log.Info("orchestrator already running", "id", orchID)
@@ -455,6 +451,76 @@ func (sm *SessionManager) ensureOrchestrator(ctx context.Context) {
 		if _, err := sm.Resume(orchID, defRows, defCols); err != nil {
 			sm.log.Error("failed to resume orchestrator", "id", orchID, "err", err)
 		}
+	}
+}
+
+// reconcileOrchestratorPresence recreates the declarative orchestrator when it
+// is enabled but absent. It deliberately does nothing to an existing stopped
+// orchestrator: explicit stops are preserved until the daemon starts again or
+// the user resumes the session.
+func (sm *SessionManager) reconcileOrchestratorPresence(ctx context.Context) {
+	sm.reconcileOrchestratorPresenceWith(ctx, sm.createOrchestrator)
+}
+
+// reconcileOrchestratorPresenceWith contains the presence decision behind an
+// injectable creation boundary so the delete/recreate behavior can be tested
+// without requiring a sandbox backend in CI.
+func (sm *SessionManager) reconcileOrchestratorPresenceWith(
+	ctx context.Context,
+	create func(context.Context) (SessionState, error),
+) {
+	sm.mu.RLock()
+	enabled := sm.cfg.Orchestrator.Enabled
+	orchID := sm.findOrchestratorID()
+	sm.mu.RUnlock()
+
+	if !enabled || orchID != "" {
+		return
+	}
+
+	sm.log.Info("creating missing orchestrator session")
+
+	if _, err := create(ctx); err != nil {
+		sm.log.Error("failed to create orchestrator", "err", err)
+	}
+}
+
+// RunOrchestratorReconcileLoop restores the config-managed orchestrator after a
+// successful delete emits a presence kick. Crash restarts remain in
+// orchestratorSupervisor so their backoff cannot delay a deliberate reset.
+func (sm *SessionManager) RunOrchestratorReconcileLoop(ctx context.Context) {
+	runOrchestratorReconcileLoop(
+		ctx,
+		sm.orchestratorKickCh,
+		sm.reconcileOrchestratorPresence,
+	)
+}
+
+func runOrchestratorReconcileLoop(
+	ctx context.Context,
+	kicks <-chan struct{},
+	reconcile func(context.Context),
+) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-kicks:
+			reconcile(ctx)
+		}
+	}
+}
+
+func (sm *SessionManager) notifyOrchestratorReconcile() {
+	if sm.orchestratorKickCh == nil {
+		return
+	}
+
+	select {
+	case sm.orchestratorKickCh <- struct{}{}:
+	default:
+		// Presence kicks are level-triggered: one queued wake-up is enough to
+		// observe the latest config and session state.
 	}
 }
 

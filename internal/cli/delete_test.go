@@ -276,7 +276,7 @@ func TestFormatDeleteDeadline(t *testing.T) {
 
 // TestPrintDeleteResult covers the soft vs purge success lines.
 func TestPrintDeleteResult(t *testing.T) {
-	capture := func(r protocol.DeleteResultMsg, children bool) string {
+	capture := func(r protocol.DeleteResultMsg, children, purge bool) string {
 		orig := out
 
 		t.Cleanup(func() { out = orig })
@@ -285,7 +285,7 @@ func TestPrintDeleteResult(t *testing.T) {
 
 		out = output.NewWithWriter(false, &buf)
 
-		printDeleteResult(r, children)
+		printDeleteResult(r, children, purge)
 
 		return buf.String()
 	}
@@ -295,7 +295,7 @@ func TestPrintDeleteResult(t *testing.T) {
 
 		got := capture(protocol.DeleteResultMsg{
 			SessionID: "id", Name: "braw", Soft: true, ExpiresAt: expires,
-		}, false)
+		}, false, false)
 
 		if !strings.Contains(got, "Soft-deleted braw") || !strings.Contains(got, "gr purge braw") {
 			t.Errorf("soft output missing expected text:\n%s", got)
@@ -303,10 +303,22 @@ func TestPrintDeleteResult(t *testing.T) {
 	})
 
 	t.Run("purge single", func(t *testing.T) {
-		got := capture(protocol.DeleteResultMsg{SessionID: "id", Name: "auld", Soft: false}, false)
+		got := capture(protocol.DeleteResultMsg{SessionID: "id", Name: "auld", Soft: false}, false, true)
 
 		if !strings.Contains(got, "Purged auld") {
 			t.Errorf("purge output = %q, want 'Purged auld'", got)
+		}
+	})
+
+	t.Run("config-managed reset", func(t *testing.T) {
+		got := capture(protocol.DeleteResultMsg{SessionID: "id", Name: "orchestrator", Soft: false}, false, false)
+
+		if !strings.Contains(got, "Deleted orchestrator") || !strings.Contains(got, "created automatically") {
+			t.Errorf("reset output missing expected text:\n%s", got)
+		}
+
+		if strings.Contains(got, "Purged") {
+			t.Errorf("reset output must not call the operation a purge:\n%s", got)
 		}
 	})
 }
