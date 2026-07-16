@@ -1451,30 +1451,47 @@ func (rc RepoConfig) Validate() error {
 		return fmt.Errorf("repo %q: singleton and allow_concurrent cannot both be set", rc.Path)
 	}
 
-	if len(rc.Includes) == 0 {
+	if err := ValidateIncludes(rc.Path, rc.Includes); err != nil {
+		return fmt.Errorf("repo %q: %w", rc.Path, err)
+	}
+
+	return nil
+}
+
+// ValidateIncludes checks a set of include paths against the main repo for the
+// collisions that would break the worktree/env-var layout: an include equal to
+// the main repo, duplicate basenames (across the main repo and the includes),
+// and generated GRAITH_INCLUDE_* env-var name collisions. Included worktrees and
+// their env vars are keyed by basename, so these must be unique. Used both by
+// repo-config validation and by the session-create path for scenario-supplied
+// includes (issue #1046), so both surfaces reject the same footguns up front
+// rather than failing with a low-level git error mid-setup.
+func ValidateIncludes(mainRepoPath string, includes []string) error {
+	if len(includes) == 0 {
 		return nil
 	}
 
-	mainBase := strings.ToLower(filepath.Base(ResolvePath(rc.Path)))
-	basenames := map[string]string{mainBase: rc.Path}
+	mainResolved := ResolvePath(mainRepoPath)
+	mainBase := strings.ToLower(filepath.Base(mainResolved))
+	basenames := map[string]string{mainBase: mainRepoPath}
 	envNames := map[string]string{}
 
-	for _, inc := range rc.Includes {
+	for _, inc := range includes {
 		resolved := ResolvePath(inc)
-		if resolved == ResolvePath(rc.Path) {
-			return fmt.Errorf("repo %q: cannot include itself", rc.Path)
+		if resolved == mainResolved {
+			return fmt.Errorf("cannot include itself")
 		}
 
 		base := strings.ToLower(filepath.Base(resolved))
 		if prev, ok := basenames[base]; ok {
-			return fmt.Errorf("repo %q: duplicate basename %q from %q and %q", rc.Path, base, prev, inc)
+			return fmt.Errorf("duplicate basename %q from %q and %q", base, prev, inc)
 		}
 
 		basenames[base] = inc
 
 		envName := IncludeEnvVarName(filepath.Base(resolved))
 		if prev, ok := envNames[envName]; ok {
-			return fmt.Errorf("repo %q: env var collision %s from %q and %q", rc.Path, envName, prev, inc)
+			return fmt.Errorf("env var collision %s from %q and %q", envName, prev, inc)
 		}
 
 		envNames[envName] = inc
