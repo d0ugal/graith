@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -172,16 +173,11 @@ func (sm *SessionManager) Delete(id string) error {
 
 		if !ptySess.Exited() {
 			sm.logStopping(id, sm.sessionName(id), StopReasonDelete, "delete", ptySess)
-
-			_ = ptySess.Kill()
-			select {
-			case <-ptySess.Done():
-			case <-time.After(5 * time.Second):
-				_ = ptySess.ForceKill()
-			}
 		}
 
-		ptySess.Close()
+		if err := sm.teardownLiveDriver(context.Background(), ptySess); err != nil {
+			sm.log.Warn("live driver did not finish during delete", "id", id, "err", err)
+		}
 	} else if orphanPID > 0 {
 		sm.logStoppingPID(id, sm.sessionName(id), StopReasonDelete, "delete-orphan", orphanPID, orphanPID)
 
@@ -425,16 +421,11 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 
 			if !s.ptySess.Exited() {
 				sm.logStopping(s.id, s.name, StopReasonDelete, "delete-children", s.ptySess)
-
-				_ = s.ptySess.Kill()
-				select {
-				case <-s.ptySess.Done():
-				case <-time.After(5 * time.Second):
-					_ = s.ptySess.ForceKill()
-				}
 			}
 
-			s.ptySess.Close()
+			if err := sm.teardownLiveDriver(context.Background(), s.ptySess); err != nil {
+				sm.log.Warn("live driver did not finish during bulk delete", "id", s.id, "err", err)
+			}
 		} else if s.pid > 0 {
 			sm.logStoppingPID(s.id, s.name, StopReasonDelete, "delete-children-orphan", s.pid, s.pid)
 
@@ -552,16 +543,11 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 
 				if !s.ptySess.Exited() {
 					sm.logStopping(s.id, s.name, StopReasonDelete, "delete-children-sweep", s.ptySess)
-
-					_ = s.ptySess.Kill()
-					select {
-					case <-s.ptySess.Done():
-					case <-time.After(5 * time.Second):
-						_ = s.ptySess.ForceKill()
-					}
 				}
 
-				s.ptySess.Close()
+				if err := sm.teardownLiveDriver(context.Background(), s.ptySess); err != nil {
+					sm.log.Warn("late live driver did not finish during bulk delete", "id", s.id, "err", err)
+				}
 			}
 		}
 

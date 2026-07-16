@@ -1,15 +1,237 @@
 package daemon
 
 import (
+	"context"
 	"log/slog"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
 
 	"github.com/d0ugal/graith/internal/config"
 )
+
+type teardownFakeDriver struct {
+	SessionDriver
+
+	mu          sync.Mutex
+	done        chan struct{}
+	doneOnce    sync.Once
+	exitOnForce bool
+	killAt      time.Time
+	forceAt     time.Time
+	kills       int
+	forces      int
+	closes      int
+	detaches    int
+}
+
+func newTeardownFakeDriver(exitOnForce bool) *teardownFakeDriver {
+	return &teardownFakeDriver{done: make(chan struct{}), exitOnForce: exitOnForce}
+}
+
+func (d *teardownFakeDriver) ProcessPID() int       { return 4242 }
+func (d *teardownFakeDriver) Pgid() int             { return 4242 }
+func (d *teardownFakeDriver) Done() <-chan struct{} { return d.done }
+func (d *teardownFakeDriver) ExitCode() int         { return 137 }
+func (d *teardownFakeDriver) BytesRead() int64      { return 0 }
+func (d *teardownFakeDriver) Exited() bool {
+	select {
+	case <-d.done:
+		return true
+	default:
+		return false
+	}
+}
+func (d *teardownFakeDriver) Kill() error {
+	d.mu.Lock()
+	d.kills++
+	d.killAt = time.Now()
+	d.mu.Unlock()
+	return nil
+}
+func (d *teardownFakeDriver) ForceKill() error {
+	d.mu.Lock()
+	d.forces++
+	d.forceAt = time.Now()
+	exit := d.exitOnForce
+	d.mu.Unlock()
+	if exit {
+		d.doneOnce.Do(func() { close(d.done) })
+	}
+	return nil
+}
+func (d *teardownFakeDriver) Close() {
+	d.mu.Lock()
+	d.closes++
+	d.mu.Unlock()
+}
+func (d *teardownFakeDriver) Detach() {
+	d.mu.Lock()
+	d.detaches++
+	d.mu.Unlock()
+}
+
+func (d *teardownFakeDriver) teardownStats() (kills, forces, closes int, termToKill time.Duration) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.kills, d.forces, d.closes, d.forceAt.Sub(d.killAt)
+}
+
+func newLiveDriverLifecycleTestManager(t *testing.T, grace time.Duration) *SessionManager {
+	t.Helper()
+	dir := t.TempDir()
+	cfg := config.Default()
+	cfg.Lifecycle.ProcessKillGrace = grace.String()
+
+	sm := NewSessionManager(cfg, config.Paths{
+		DataDir:    dir,
+		LogDir:     filepath.Join(dir, "logs"),
+		RuntimeDir: filepath.Join(dir, "runtime"),
+		StateFile:  filepath.Join(dir, "state.json"),
+	}, quietLogger())
+	if err := os.MkdirAll(sm.paths.LogDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return sm
+}
+
+func assertFakeDriverEscalated(t *testing.T, driver *teardownFakeDriver, grace time.Duration) {
+	t.Helper()
+	kills, forces, closes, termToKill := driver.teardownStats()
+	if kills != 1 || forces != 1 || closes != 1 {
+		t.Fatalf("teardown calls TERM=%d KILL=%d Close=%d, want 1/1/1", kills, forces, closes)
+	}
+	if termToKill < grace*3/4 {
+		t.Fatalf("TERM→KILL delay = %v, want configured grace %v", termToKill, grace)
+	}
+}
+
+func TestTeardownLiveDriverUsesConfiguredGrace(t *testing.T) {
+	const grace = 40 * time.Millisecond
+	sm := newLiveDriverLifecycleTestManager(t, grace)
+	driver := newTeardownFakeDriver(true)
+
+	if err := sm.teardownLiveDriver(context.Background(), driver); err != nil {
+		t.Fatalf("teardownLiveDriver: %v", err)
+	}
+	assertFakeDriverEscalated(t, driver, grace)
+}
+
+func TestTeardownLiveDriverBoundsPostKillCompletion(t *testing.T) {
+	const grace = 25 * time.Millisecond
+	sm := newLiveDriverLifecycleTestManager(t, grace)
+	driver := newTeardownFakeDriver(false)
+	start := time.Now()
+
+	err := sm.teardownLiveDriver(context.Background(), driver)
+	if err == nil || !strings.Contains(err.Error(), "after SIGKILL") {
+		t.Fatalf("teardown error = %v, want bounded post-KILL failure", err)
+	}
+	if elapsed := time.Since(start); elapsed < 2*grace*3/4 || elapsed > time.Second {
+		t.Fatalf("teardown elapsed = %v, want two bounded grace phases", elapsed)
+	}
+	kills, forces, closes, _ := driver.teardownStats()
+	if kills != 1 || forces != 1 || closes != 0 {
+		t.Fatalf("wedged teardown calls TERM=%d KILL=%d Close=%d, want 1/1/0", kills, forces, closes)
+	}
+}
+
+func TestHardDeleteUsesLiveDriverTeardownPolicy(t *testing.T) {
+	const grace = 25 * time.Millisecond
+	sm := newLiveDriverLifecycleTestManager(t, grace)
+	driver := newTeardownFakeDriver(true)
+	sm.state.Sessions["braw-delete"] = &SessionState{
+		ID: "braw-delete", Name: "braw-delete", Status: StatusRunning, InPlace: true,
+	}
+	sm.sessions["braw-delete"] = driver
+
+	if err := sm.Delete("braw-delete"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	assertFakeDriverEscalated(t, driver, grace)
+}
+
+func TestSoftDeleteUsesLiveDriverTeardownPolicy(t *testing.T) {
+	const grace = 25 * time.Millisecond
+	sm := newLiveDriverLifecycleTestManager(t, grace)
+	driver := newTeardownFakeDriver(true)
+	sm.state.Sessions["canny-delete"] = &SessionState{
+		ID: "canny-delete", Name: "canny-delete", Status: StatusRunning, InPlace: true,
+	}
+	sm.sessions["canny-delete"] = driver
+
+	if _, err := sm.SoftDelete("canny-delete"); err != nil {
+		t.Fatalf("SoftDelete: %v", err)
+	}
+	assertFakeDriverEscalated(t, driver, grace)
+}
+
+func TestShutdownUsesLiveDriverTeardownPolicy(t *testing.T) {
+	const grace = 25 * time.Millisecond
+	sm := newLiveDriverLifecycleTestManager(t, grace)
+	driver := newTeardownFakeDriver(true)
+	sm.state.Sessions["dreich-shutdown"] = &SessionState{
+		ID: "dreich-shutdown", Name: "dreich-shutdown", Status: StatusRunning,
+	}
+	sm.sessions["dreich-shutdown"] = driver
+
+	sm.StopAll(context.Background())
+	assertFakeDriverEscalated(t, driver, grace)
+}
+
+func TestRestartUsesLiveDriverTeardownPolicy(t *testing.T) {
+	const grace = 25 * time.Millisecond
+	sm := newLiveDriverLifecycleTestManager(t, grace)
+	driver := newTeardownFakeDriver(true)
+	sm.state.Sessions["thrawn-restart"] = &SessionState{
+		ID: "thrawn-restart", Name: "thrawn-restart", Agent: "missing-agent", Status: StatusRunning,
+	}
+	sm.sessions["thrawn-restart"] = driver
+
+	if _, err := sm.Restart("thrawn-restart", 24, 80); err == nil {
+		t.Fatal("Restart should fail after teardown because the test agent is missing")
+	}
+	assertFakeDriverEscalated(t, driver, grace)
+}
+
+func TestMigrateUsesLiveDriverTeardownPolicy(t *testing.T) {
+	const grace = 25 * time.Millisecond
+	sm := newMigrateTestManager(t)
+	sm.cfg.Lifecycle.ProcessKillGrace = grace.String()
+	sm.cfg.Migration.HealthWindow = "50ms"
+	driver := newTeardownFakeDriver(true)
+	repo := initTempGitRepo(t)
+
+	claudeRoot := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", claudeRoot)
+	t.Setenv("CODEX_HOME", t.TempDir())
+	const sid = "33333333-4444-5555-6666-777777777777"
+	projDir := filepath.Join(claudeRoot, "projects", "-migrate-live")
+	if err := os.MkdirAll(projDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projDir, sid+".jsonl"), []byte(
+		`{"type":"user","uuid":"u1","parentUuid":"","message":{"role":"user","content":"bide in the bothy"}}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	sm.state.Sessions["bothy-migrate"] = &SessionState{
+		ID: "bothy-migrate", Name: "bothy-migrate", Agent: "claude", AgentSessionID: sid,
+		Status: StatusRunning, WorktreePath: repo, RepoPath: repo, CreatedAt: time.Now(),
+	}
+	sm.sessions["bothy-migrate"] = driver
+
+	if _, err := sm.Migrate("bothy-migrate", "codex", "", 24, 80); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	t.Cleanup(func() { stopRunnableOrchestrator(t, sm, "bothy-migrate") })
+	assertFakeDriverEscalated(t, driver, grace)
+}
 
 // TestKillProcessGroupHonoursGrace proves the [lifecycle] process_kill_grace
 // drives the SIGTERM→SIGKILL escalation: a process group that ignores SIGTERM is

@@ -154,16 +154,12 @@ func (sm *SessionManager) SoftDelete(id string) (SessionState, error) {
 
 		if !ptySess.Exited() {
 			sm.logStopping(id, sm.sessionName(id), StopReasonDelete, "soft-delete", ptySess)
-
-			_ = ptySess.Kill()
-			select {
-			case <-ptySess.Done():
-			case <-time.After(5 * time.Second):
-				_ = ptySess.ForceKill()
-			}
 		}
 
-		ptySess.Close()
+		if err := sm.teardownLiveDriver(context.Background(), ptySess); err != nil {
+			sm.log.Warn("live driver did not finish during soft delete", "id", id, "err", err)
+			killedOK = false
+		}
 	} else if orphanPID > 0 {
 		sm.logStoppingPID(id, sm.sessionName(id), StopReasonDelete, "soft-delete-orphan", orphanPID, orphanPID)
 

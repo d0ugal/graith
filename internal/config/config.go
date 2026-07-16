@@ -1170,41 +1170,44 @@ func (l LaunchConfig) SlotPollIntervalDuration() time.Duration {
 //
 // The signal-escalation ORDER (interrupt → SIGTERM → SIGKILL) stays a code
 // invariant; only the wait durations between steps are tunable here. Every field
-// is optional: an empty/unparseable/out-of-range value falls back to the matching
-// default constant, preserving the historical behaviour. Geometry and log/
+// is optional: an empty value uses the matching default constant, preserving the
+// historical behaviour. Explicit unparseable or non-positive durations are
+// rejected by Config.Validate; the accessors retain defensive defaults for
+// programmatically constructed config. Geometry and log/
 // hydration limits apply only to sessions launched (or adopted) after the change;
 // running sessions keep the geometry and caps they started with.
 type LifecycleConfig struct {
 	// ConvertSettleTimeout bounds how long ConvertToInteractive waits for an
 	// interrupted headless process to settle and exit before escalating to
-	// SIGTERM. Empty or non-positive uses the default (ConvertSettleTimeoutDefault).
+	// SIGTERM. Unset uses the default; an explicitly non-positive value is invalid.
 	ConvertSettleTimeout string `toml:"convert_settle_timeout"`
-	// ConvertKillTimeout bounds the SIGTERM step before the final SIGKILL. Empty
-	// or non-positive uses the default (ConvertKillTimeoutDefault).
+	// ConvertKillTimeout bounds the SIGTERM step before the final SIGKILL. Unset
+	// uses the default; an explicitly non-positive value is invalid.
 	ConvertKillTimeout string `toml:"convert_kill_timeout"`
 	// ConvertForceKillTimeout bounds the final wait after SIGKILL so a process
-	// whose Done() never closes can't stall the convert forever. Empty or
-	// non-positive uses the default (ConvertForceKillTimeoutDefault).
+	// whose Done() never closes can't stall the convert forever. Unset uses the
+	// default; an explicitly non-positive value is invalid.
 	ConvertForceKillTimeout string `toml:"convert_force_kill_timeout"`
 	// MassExitWindow is the rolling window over which many near-simultaneous
 	// session exits are counted as a likely external signal (OOM killer/jetsam).
-	// Empty or non-positive uses the default (MassExitWindowDefault).
+	// Unset uses the default; an explicitly non-positive value is invalid.
 	MassExitWindow string `toml:"mass_exit_window"`
 	// MassExitThreshold is how many exits within MassExitWindow trigger the
 	// mass-exit warning. Values < 1 fall back to the default (MassExitThresholdDefault).
 	MassExitThreshold int `toml:"mass_exit_threshold"`
 	// ProcessKillGrace is how long killProcessGroup waits after SIGTERM before
-	// sending SIGKILL to a session's process group. Empty or non-positive uses the
-	// default (ProcessKillGraceDefault).
+	// sending SIGKILL to a session's process group or live driver. A second
+	// grace-bounded wait after SIGKILL prevents teardown from hanging. Unset uses
+	// the default; an explicitly non-positive value is invalid.
 	ProcessKillGrace string `toml:"process_kill_grace"`
 	// AdoptedTimeout is the safety deadline the adopted-PTY babysit loop applies
-	// when it cannot verify process identity by start time. Empty or non-positive
-	// uses the default (AdoptedTimeoutDefault). Applies to sessions adopted after
+	// when it cannot verify process identity by start time. Unset uses the default;
+	// an explicitly non-positive value is invalid. Applies to sessions adopted after
 	// the change (daemon upgrade).
 	AdoptedTimeout string `toml:"adopted_timeout"`
 	// AdoptedPollInterval is how often the adopted-PTY babysit loop polls for
-	// process exit. Empty or non-positive uses the default
-	// (AdoptedPollIntervalDefault); a zero cadence would busy-loop.
+	// process exit. Unset uses the default; an explicitly non-positive value is
+	// invalid because a zero cadence would busy-loop.
 	AdoptedPollInterval string `toml:"adopted_poll_interval"`
 	// ScrollbackHydrationBytes is how many bytes of the scrollback tail are
 	// replayed into an adopted session's virtual screen at adopt time. Values < 0
@@ -1212,10 +1215,9 @@ type LifecycleConfig struct {
 	// hydration.
 	ScrollbackHydrationBytes int `toml:"scrollback_hydration_bytes"`
 	// InputDelay is the pause between writing text and the submit carriage return
-	// in WriteInputAndSubmit, so a TUI doesn't treat text+CR as a paste. Empty,
-	// unparseable, or non-positive uses the default (InputDelayDefault) — a zero
-	// pause would defeat the paste guard. Applies to sessions launched after the
-	// change.
+	// in WriteInputAndSubmit, so a TUI doesn't treat text+CR as a paste. Unset uses
+	// the default; an explicitly non-positive value is invalid because a zero
+	// pause would defeat the paste guard. Applies to sessions launched after the change.
 	InputDelay string `toml:"input_delay"`
 	// DefaultCols / DefaultRows are the terminal geometry used by daemon launch
 	// paths (watchdog restart, orchestrator, scenarios, triggers, adoption) when
@@ -1282,8 +1284,9 @@ func (l LifecycleConfig) MassExitThresholdOrDefault() int {
 	return l.MassExitThreshold
 }
 
-// ProcessKillGraceDuration returns the SIGTERM→SIGKILL grace, or the default
-// when unset, unparseable, or non-positive.
+// ProcessKillGraceDuration returns the SIGTERM→SIGKILL grace. Unset uses the
+// default; invalid/non-positive input also falls back defensively for callers
+// that construct Config programmatically (Config.Validate rejects it on load).
 func (l LifecycleConfig) ProcessKillGraceDuration() time.Duration {
 	return positiveDurationOrDefault(l.ProcessKillGrace, ProcessKillGraceDefault)
 }

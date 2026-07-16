@@ -328,9 +328,11 @@ func TestLifecycleValidation(t *testing.T) {
 		{"convert_kill_timeout zero", func(c *Config) { c.Lifecycle.ConvertKillTimeout = "0" }},
 		{"mass_exit_window zero", func(c *Config) { c.Lifecycle.MassExitWindow = "0" }},
 		{"process_kill_grace unparseable", func(c *Config) { c.Lifecycle.ProcessKillGrace = "thrawn" }},
+		{"process_kill_grace negative", func(c *Config) { c.Lifecycle.ProcessKillGrace = "-1s" }},
 		{"adopted_timeout zero", func(c *Config) { c.Lifecycle.AdoptedTimeout = "0" }},
 		{"adopted_poll_interval zero", func(c *Config) { c.Lifecycle.AdoptedPollInterval = "0" }},
 		{"input_delay zero", func(c *Config) { c.Lifecycle.InputDelay = "0" }},
+		{"input_delay negative", func(c *Config) { c.Lifecycle.InputDelay = "-1ms" }},
 		{"default_cols too large", func(c *Config) { c.Lifecycle.DefaultCols = 70000 }},
 		{"default_rows too large", func(c *Config) { c.Lifecycle.DefaultRows = 70000 }},
 	}

@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"crypto/rand"
 	"errors"
 	"fmt"
@@ -131,12 +132,10 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 
 		sm.logStopping(id, sm.sessionName(id), StopReasonUser, "migrate", ptySess)
 
-		if err := ptySess.Kill(); err != nil {
+		if err := sm.teardownLiveDriver(context.Background(), ptySess); err != nil {
 			_ = os.RemoveAll(contextDir)
 			return SessionState{}, fmt.Errorf("stop source agent: %w", err)
 		}
-
-		<-ptySess.Done()
 		sm.mu.Lock()
 		if s, ok := sm.state.Sessions[id]; ok && s.Status == StatusRunning {
 			ec := ptySess.ExitCode()
@@ -221,6 +220,7 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 
 	if startErr != nil {
 		// Ensure the (likely dead) target process is fully stopped before restore.
+		var targetStopErr error
 		if p, ok := sm.GetPTY(id); ok && !p.Exited() {
 			// Record the reason on state before the kill so the "session exited"
 			// line agrees with the "stopping session" line — a successful target
@@ -233,8 +233,7 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 			sm.mu.Unlock()
 
 			sm.logStopping(id, sm.sessionName(id), StopReasonUser, "migrate-revert", p)
-			_ = p.Kill()
-			<-p.Done()
+			targetStopErr = sm.teardownLiveDriver(context.Background(), p)
 		}
 		// Revert to the original agent, keeping MigratedFrom so a both-failed
 		// terminal state stays recoverable.
@@ -251,6 +250,12 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 			_ = sm.saveState()
 		}
 		sm.mu.Unlock()
+
+		if targetStopErr != nil {
+			return SessionState{}, fmt.Errorf(
+				"migrate to %q failed (%w) and its driver could not be stopped (%v); original %q left stopped, rendered context at %s",
+				targetAgent, startErr, targetStopErr, srcAgent, contextPath)
+		}
 
 		if _, rerr := sm.resumeWithSummary(id, rows, cols, "Restored after failed migrate to "+targetAgent); rerr != nil {
 			// Both agents failed: leave the session Stopped with the original

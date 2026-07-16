@@ -99,17 +99,17 @@ convert_kill_timeout       = "3s"      # SIGTERM step before the final SIGKILL d
 convert_force_kill_timeout = "3s"      # final wait after SIGKILL so a wedged process can't stall the convert
 mass_exit_window           = "2s"      # window over which many near-simultaneous exits are flagged as an external signal
 mass_exit_threshold        = 5         # exits within mass_exit_window that trigger the OOM/jetsam warning (< 1 => default)
-process_kill_grace         = "5s"      # wait after SIGTERM before SIGKILL when killing a session's process group
+process_kill_grace         = "5s"      # live-session TERM→KILL grace and bounded post-KILL completion wait
 adopted_timeout            = "24h"     # safety deadline for the adopted-PTY babysit loop when identity can't be verified
 adopted_poll_interval      = "1s"      # how often the adopted-PTY babysit loop polls for process exit
 scrollback_hydration_bytes = 131072    # bytes of scrollback tail replayed into an adopted session's screen (< 0 => default; "0" disables)
-input_delay                = "50ms"    # pause between typed text and the submit carriage return (non-positive => default)
+input_delay                = "50ms"    # pause between typed text and the submit carriage return (must be positive when set)
 default_cols               = 80        # default terminal columns for daemon launch paths with no client geometry (< 1 => default)
 default_rows               = 24        # default terminal rows for daemon launch paths with no client geometry (< 1 => default)
 max_log_bytes              = 104857600 # per-session scrollback log cap in bytes (< 0 => default; "0" => unlimited)
 ```
 
-**Escalation waits.** `convert_settle_timeout`, `convert_kill_timeout`, and `convert_force_kill_timeout` bound the three steps of stopping a headless process when converting it to interactive (`gr attach` on a headless session). `process_kill_grace` is how long a session's process group is given after `SIGTERM` before `SIGKILL`. (The headless control-channel interrupt round-trip is tuned separately by `[headless]` `interrupt_timeout`.)
+**Escalation waits.** `convert_settle_timeout`, `convert_kill_timeout`, and `convert_force_kill_timeout` separately bound the three steps of stopping a headless process when converting it to interactive (`gr attach` on a headless session). For live session drivers, `process_kill_grace` is the wait after `SIGTERM` before `SIGKILL` during hard delete, soft delete, daemon shutdown, migration, and restart; graith also bounds the final completion wait after `SIGKILL` by the same duration. Ordinary `gr stop` remains a non-blocking `SIGTERM` request. MCP/server process waits are separate lifecycle policies. (The headless control-channel interrupt round-trip is tuned separately by `[headless]` `interrupt_timeout`.)
 
 **Mass-exit detection.** When `mass_exit_threshold` sessions exit within `mass_exit_window`, the daemon logs a warning — this usually means an external signal (the OOM killer or macOS jetsam) is killing processes, not a graith bug.
 
@@ -117,7 +117,7 @@ max_log_bytes              = 104857600 # per-session scrollback log cap in bytes
 
 **Geometry & log cap.** `default_cols`/`default_rows` are the terminal geometry used by daemon launch paths that have no attaching client (the watchdog restart, the orchestrator, scenarios, triggers, and adoption); an attaching client immediately resizes to its real geometry. `max_log_bytes` caps the per-session scrollback log file (`"0"` means unlimited).
 
-Empty or non-positive duration values fall back to the defaults shown (a zero wait would either escalate instantly or busy-loop a poll); an out-of-range or unparseable value is rejected at config load. **Geometry, hydration, and the log cap apply only to sessions launched (or adopted) after the change** — a running session keeps the geometry and caps it started with. The escalation waits and `input_delay` are read at each use, so a config reload takes effect on the next operation.
+An empty/unset duration uses the default shown. Any duration that is explicitly unparseable, zero, or negative is rejected at config load. **Geometry, hydration, and the log cap apply only to sessions launched (or adopted) after the change** — a running session keeps the geometry and caps it started with. The escalation waits and `input_delay` are read at each use, so a config reload takes effect on the next operation.
 
 ## Detection & status classification
 

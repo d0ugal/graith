@@ -119,8 +119,8 @@ slot_poll_interval = "100ms" # how often a held launch slot polls a fresh sessio
 # adopted-PTY babysit timing, scrollback hydration, terminal-input pacing, the
 # default launch geometry, and the per-session log cap. The signal-escalation
 # ORDER (interrupt -> SIGTERM -> SIGKILL) is a code invariant; only the waits
-# between steps are tunable. Duration fields fall back to the defaults shown when
-# empty or non-positive (a zero wait would escalate instantly or busy-loop).
+# between steps are tunable. An empty/unset duration uses the default shown; an
+# explicitly unparseable, zero, or negative duration is rejected at config load.
 # Geometry, hydration, and the log cap apply only to sessions launched or adopted
 # after the change. See issue #1243.
 [lifecycle]
@@ -129,11 +129,11 @@ convert_kill_timeout = "3s"        # SIGTERM step before the final SIGKILL durin
 convert_force_kill_timeout = "3s"  # final wait after SIGKILL so a wedged process can't stall the convert
 mass_exit_window = "2s"            # window over which many near-simultaneous exits are flagged as an external signal
 mass_exit_threshold = 5            # exits within mass_exit_window that trigger the OOM/jetsam warning (< 1 => default)
-process_kill_grace = "5s"          # wait after SIGTERM before SIGKILL when killing a session's process group
+process_kill_grace = "5s"          # live-session TERM->KILL grace and bounded post-KILL completion wait
 adopted_timeout = "24h"            # safety deadline for the adopted-PTY babysit loop when identity can't be verified
 adopted_poll_interval = "1s"       # how often the adopted-PTY babysit loop polls for process exit
 scrollback_hydration_bytes = 131072 # bytes of scrollback tail replayed into an adopted session's screen (< 0 => default; "0" disables)
-input_delay = "50ms"               # pause between typed text and the submit carriage return (non-positive => default)
+input_delay = "50ms"               # pause between typed text and the submit carriage return (must be positive when set)
 default_cols = 80                  # default terminal columns for daemon launch paths with no client geometry (< 1 => default)
 default_rows = 24                  # default terminal rows for daemon launch paths with no client geometry (< 1 => default)
 max_log_bytes = 104857600          # per-session scrollback log cap in bytes (< 0 => default; "0" => unlimited)

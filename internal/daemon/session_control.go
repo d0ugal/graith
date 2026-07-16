@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"fmt"
 	"time"
 )
@@ -309,21 +310,14 @@ func (sm *SessionManager) restartWithReason(id string, rows, cols uint16, stopRe
 
 		sm.logStopping(id, sm.sessionName(id), stopReason, initiator, ptySess)
 
-		if err := ptySess.Kill(); err != nil {
+		if err := sm.teardownLiveDriver(context.Background(), ptySess); err != nil {
 			return SessionState{}, fmt.Errorf("stop session: %w", err)
 		}
 
-		<-ptySess.Done()
-
-		// Close the old PTY so its Ptmx fd and scrollback file handle are
-		// released promptly at restart time. The stale watcher for this PTY also
-		// closes it once it observes the exit (watchSession documents double-close
-		// as safe), but closing here makes the release deterministic. The new PTY
-		// (spawned by resume below) reopens the same scrollback log in append
-		// mode, so post-restart output is preserved.
+		// teardownLiveDriver closes the old PTY once its bounded escalation has
+		// completed. The stale watcher may safely double-close it.
 		sm.log.Info("restart: old pty stopped, closing", "session_id", id,
 			"old_output_bytes", ptySess.BytesRead())
-		ptySess.Close()
 
 		sm.mu.Lock()
 		if s, ok := sm.state.Sessions[id]; ok && s.Status == StatusRunning {

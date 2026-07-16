@@ -480,10 +480,9 @@ func (sm *SessionManager) getHookReport(sessionID string) *hookReport {
 	return nil
 }
 
-// StopAll gracefully terminates all running sessions concurrently.
-// Each session gets up to 5 seconds to exit after SIGTERM before being
-// force-killed. Sessions are waited on in parallel so the total wait
-// time is bounded by the slowest session, not the sum.
+// StopAll terminates all running session drivers concurrently using the shared
+// configured TERM→KILL policy. Sessions are waited on in parallel so the total
+// wait is bounded by the slowest session, not the sum.
 func (sm *SessionManager) StopAll(ctx context.Context) {
 	sm.mu.Lock()
 	for id, s := range sm.state.Sessions {
@@ -520,42 +519,38 @@ func (sm *SessionManager) StopAll(ctx context.Context) {
 	}
 	sm.mu.Unlock()
 
-	for _, s := range sessions {
-		if !s.sess.Exited() {
-			sm.logStopping(s.id, s.name, StopReasonShutdown, "shutdown", s.sess)
-			_ = s.sess.Kill()
-		}
-	}
-
 	var wg sync.WaitGroup
 	for _, s := range sessions {
 		wg.Add(1)
-		go func(id string, sess SessionDriver) {
+		go func(id, name string, sess SessionDriver) {
 			defer wg.Done()
 
-			select {
-			case <-sess.Done():
-			case <-ctx.Done():
-				sm.log.Warn("shutdown context expired, force killing session", "id", id)
-
-				_ = sess.ForceKill()
-			case <-time.After(5 * time.Second):
-				sm.log.Warn("force killing session", "id", id)
-
-				_ = sess.ForceKill()
+			if !sess.Exited() {
+				sm.logStopping(id, name, StopReasonShutdown, "shutdown", sess)
 			}
-		}(s.id, s.sess)
+			if err := sm.teardownLiveDriver(ctx, sess); err != nil {
+				sm.log.Warn("live driver did not finish during shutdown", "id", id, "err", err)
+			}
+		}(s.id, s.name, s.sess)
 	}
 
 	wg.Wait()
 
-	// Wait for the exit watchers to finish their post-exit work (state writes
-	// and status publishes). Every killed session above has now exited, so the
-	// watchers can proceed and will not block. This guarantees no watcher is
-	// still writing state or publishing to the message store after StopAll
-	// returns, which matters when the caller then closes the message store or
-	// removes the data dir.
-	sm.watchers.Wait()
+	// Give exit watchers a final grace-bounded window for state writes and status
+	// publishes. Normally every driver above has completed and this returns
+	// immediately; a pathological driver whose Done never closes cannot wedge
+	// daemon shutdown here either.
+	watchersDone := make(chan struct{})
+	go func() {
+		sm.watchers.Wait()
+		close(watchersDone)
+	}()
+
+	select {
+	case <-watchersDone:
+	case <-time.After(sm.Config().Lifecycle.ProcessKillGraceDuration()):
+		sm.log.Warn("session exit watchers did not finish within shutdown grace")
+	}
 }
 
 func (sm *SessionManager) RunMessageCleanupLoop(ctx context.Context) {
