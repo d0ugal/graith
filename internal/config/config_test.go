@@ -549,6 +549,7 @@ idle_timeout = "0"
 func TestLoadConfigApprovalTimeouts(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.toml")
+
 	toml := `
 [approvals]
 backend = "command"
@@ -556,6 +557,7 @@ command = "graith-approver"
 command_timeout = "8s"
 localmost_timeout = "12s"
 `
+
 	if err := os.WriteFile(cfgPath, []byte(toml), 0o600); err != nil {
 		t.Fatal(err)
 	}
