@@ -215,3 +215,62 @@ func TestStopDriverForConvertEscalates(t *testing.T) {
 		t.Fatalf("driver should have been force-killed")
 	}
 }
+
+// TestConvertStaleWatcherDoesNotClobber locks in the trickiest concurrency
+// invariant of the swap: when the interrupted headless process exits, its
+// now-stale exit watcher must NOT overwrite the freshly-converted session's
+// state. It reproduces convert's key moves — remove the driver from the map and
+// promote the session to the new (pty/running) generation under the lock — then
+// lets the old driver exit so its watcher fires, and asserts the post-convert
+// state survives.
+func TestConvertStaleWatcherDoesNotClobber(t *testing.T) {
+	sm := convertTestManager(t)
+	driver := startConvertFake(t, sm, "braw", "trap 'exit 0' INT; sleep 30")
+
+	sm.sessions["braw"] = driver
+	sm.state.Sessions["braw"] = &SessionState{
+		ID:         "braw",
+		Name:       "braw",
+		Status:     StatusRunning,
+		DriverKind: DriverHeadless,
+	}
+
+	// The watcher registered at launch, now waiting on the old driver's exit.
+	sm.startWatcher("braw", driver)
+
+	// Convert's swap: drop the old driver from the map (staling its watcher) and
+	// promote the session to the new interactive generation.
+	sm.mu.Lock()
+	delete(sm.sessions, "braw")
+	s := sm.state.Sessions["braw"]
+	s.DriverKind = DriverPTY
+	s.Status = StatusRunning
+	sm.mu.Unlock()
+
+	// Let the old headless process exit so its watcher fires and takes the stale
+	// path.
+	_ = driver.Interrupt(1, 0)
+
+	watchersDone := make(chan struct{})
+
+	go func() {
+		sm.watchers.Wait()
+		close(watchersDone)
+	}()
+
+	select {
+	case <-watchersDone:
+	case <-time.After(4 * time.Second):
+		t.Fatalf("stale watcher did not finish")
+	}
+
+	// The watcher saw itself stale and left the converted state untouched.
+	got := sm.state.Sessions["braw"]
+	if got.DriverKind != DriverPTY {
+		t.Fatalf("DriverKind = %q, want pty (stale watcher clobbered it)", got.DriverKind)
+	}
+
+	if got.Status != StatusRunning {
+		t.Fatalf("Status = %q, want running (stale watcher clobbered it)", got.Status)
+	}
+}

@@ -261,12 +261,25 @@ func attachWithConvert(c *client.Client, sessionID string) (protocol.SessionInfo
 				return info, false, fmt.Errorf("convert failed: %s", e.Message)
 			}
 
+			// Require the expected success type rather than treating any non-error
+			// reply as success — a malformed/unexpected control frame shouldn't
+			// advance the handshake.
+			if convResp.Type != "converted" {
+				return info, false, fmt.Errorf("unexpected response to attach_convert: %q", convResp.Type)
+			}
+
 			converted = true
 			// Loop back and attach to the now-interactive session.
 
-		default:
-			_ = protocol.DecodePayload(resp, &info)
+		case "attached":
+			if err := protocol.DecodePayload(resp, &info); err != nil {
+				return info, false, fmt.Errorf("decode attach response: %w", err)
+			}
+
 			return info, true, nil
+
+		default:
+			return info, false, fmt.Errorf("unexpected response to attach: %q", resp.Type)
 		}
 	}
 }
@@ -459,6 +472,31 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 			restoreScreen(overlayResult.SessionID)
 			_ = nc.SendControl("attach", protocol.AttachMsg{SessionID: overlayResult.SessionID})
 			attachResp, _ := nc.ReadControlResponse()
+
+			// Switching to a headless session from the overlay can't convert
+			// inline — conversion needs an interactive confirmation we can't safely
+			// prompt for mid-loop (the terminal is between raw-mode passthroughs).
+			// Rather than fall through to a dead passthrough on a connection the
+			// daemon never attached, point the user at `gr attach <name>` (which
+			// does convert) and reattach to the current session.
+			if attachResp.Type == "convert_required" {
+				var cr protocol.ConvertRequiredMsg
+
+				_ = protocol.DecodePayload(attachResp, &cr)
+				out.Printf("%q is a headless session — run `gr attach %s` to convert it to interactive.\n", cr.Name, cr.Name)
+
+				restoreScreen(sessionID)
+				_ = nc.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+				reResp, _ := nc.ReadControlResponse()
+				_ = protocol.DecodePayload(reResp, &info)
+
+				opts.SessionID = sessionID
+				opts.Info = &info
+				c = nc
+
+				continue
+			}
+
 			_ = protocol.DecodePayload(attachResp, &info)
 
 			prevSessionID = sessionID
