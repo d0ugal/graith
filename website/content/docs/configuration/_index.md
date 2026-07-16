@@ -50,6 +50,8 @@ allowed_repo_paths = []                   # restrict which repo paths the daemon
 
 A multiline string injected into the agent's environment. For Claude, it is passed via `--append-system-prompt`. For Cursor, it is written to `.cursor/rules/graith.mdc`. For Codex, it is passed as a per-session `-c developer_instructions=...` config override (never written to a repository `AGENTS.md`). Other agents (OpenCode, Agy) do not currently support prompt injection. Teaches agents how to use `gr status`, `gr msg`, `gr store`, and other graith primitives. Set `inject_prompt = false` on a per-agent basis to disable.
 
+For Codex specifically, `developer_instructions` is a single-valued config key, so graith's override **replaces** (does not append to) any `developer_instructions` you have set in `~/.codex/config.toml`, a project `.codex/config.toml`, or a selected profile — the CLI override is the highest-precedence layer. If you rely on your own Codex `developer_instructions`, set `inject_prompt = false` under `[agents.codex]` to keep them and skip graith's injection.
+
 ### `allowed_repo_paths`
 
 When non-empty, the daemon rejects `--repo` / `-C` paths that are not under one of these prefixes. Paths support `~` expansion and are resolved to absolute paths before comparison. These paths also feed the repo autocomplete in the create-session form (`ctrl+b c` or `n` in the overlay) — each path is scanned one level deep for git repositories.

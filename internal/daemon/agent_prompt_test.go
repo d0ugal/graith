@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/pelletier/go-toml/v2"
 )
 
 func TestDetectPromptInjection(t *testing.T) {
@@ -144,10 +145,14 @@ func TestInjectPrompt_Codex(t *testing.T) {
 	}
 }
 
-// TestCodexDeveloperInstructionsArgs_RoundTrip guards the JSON-encoding choice:
-// a prompt that would otherwise be misparsed by Codex's TOML-first `-c` parser
-// (a lone scalar, an array-looking line, embedded quotes/newlines) must survive
-// verbatim as a quoted string.
+// TestCodexDeveloperInstructionsArgs_RoundTrip guards the JSON-encoding choice
+// against Codex's actual `-c key=value` parser: Codex parses the value as TOML
+// (falling back to a bare string), so it decodes the value the way this test's
+// TOML decode does. A prompt that would otherwise be misparsed as a TOML scalar
+// (a lone number/bool, an array-looking line) or that embeds quotes/newlines
+// must survive verbatim. We decode the emitted value BOTH as JSON (proving it's
+// a well-formed encoding) and as a TOML basic string via the same parser family
+// Codex uses (proving Codex reconstructs the exact prompt).
 func TestCodexDeveloperInstructionsArgs_RoundTrip(t *testing.T) {
 	prompts := []string{
 		"42",
@@ -156,6 +161,7 @@ func TestCodexDeveloperInstructionsArgs_RoundTrip(t *testing.T) {
 		"line one\nline two\twith tab",
 		`he said "braw" and 'canny'`,
 		"trailing space and =equals= signs",
+		config.Default().AgentPrompt, // the real multi-line prompt
 	}
 
 	for _, prompt := range prompts {
@@ -164,15 +170,33 @@ func TestCodexDeveloperInstructionsArgs_RoundTrip(t *testing.T) {
 			t.Fatalf("codexDeveloperInstructionsArgs(%q) = %v", prompt, args)
 		}
 
+		if !strings.HasPrefix(args[1], `developer_instructions="`) {
+			t.Errorf("value should be a quoted string: %q", args[1])
+		}
+
 		encoded := strings.TrimPrefix(args[1], "developer_instructions=")
 
-		var decoded string
-		if err := json.Unmarshal([]byte(encoded), &decoded); err != nil {
+		var jsonDecoded string
+		if err := json.Unmarshal([]byte(encoded), &jsonDecoded); err != nil {
 			t.Fatalf("value for %q is not valid JSON: %v", prompt, err)
 		}
 
-		if decoded != prompt {
-			t.Errorf("round-trip mismatch: got %q, want %q", decoded, prompt)
+		if jsonDecoded != prompt {
+			t.Errorf("JSON round-trip mismatch: got %q, want %q", jsonDecoded, prompt)
+		}
+
+		// Codex wraps the value as `_x_ = <value>` and parses it as TOML. Mirror
+		// that here: a JSON string literal must also be a valid TOML basic string
+		// decoding back to the original prompt.
+		var tomlDoc struct {
+			Value string `toml:"developer_instructions"`
+		}
+		if err := toml.Unmarshal([]byte(args[1]), &tomlDoc); err != nil {
+			t.Fatalf("value for %q does not parse as TOML: %v", prompt, err)
+		}
+
+		if tomlDoc.Value != prompt {
+			t.Errorf("TOML round-trip mismatch: got %q, want %q", tomlDoc.Value, prompt)
 		}
 	}
 }
