@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/d0ugal/graith/internal/tools"
 )
 
 func TestParseDenialLine(t *testing.T) {
@@ -284,8 +286,8 @@ func TestProcessTree(t *testing.T) {
 	t.Parallel()
 
 	run := func(name string, args []string) (string, error) {
-		if name != psCommand {
-			t.Errorf("run command = %q, want %q", name, psCommand)
+		if name != tools.PS() {
+			t.Errorf("run command = %q, want %q", name, tools.PS())
 		}
 
 		if !containsArg(args, "-axo") {
@@ -303,6 +305,46 @@ func TestProcessTree(t *testing.T) {
 	want := map[int]bool{100: true, 200: true, 300: true}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("processTree() = %v, want %v", got, want)
+	}
+}
+
+// TestDenialProcessResolutionUsesReloadedToolsPS proves both denial process
+// resolution paths consult the process-wide tools resolver at execution time.
+// In particular, a long-lived SessionMatcher must not capture the ps path when
+// it is constructed: the next TTL refresh observes a reloaded [tools].ps.
+func TestDenialProcessResolutionUsesReloadedToolsPS(t *testing.T) {
+	tools.Reset()
+	t.Cleanup(tools.Reset)
+
+	var commands []string
+	run := func(name string, _ []string) (string, error) {
+		commands = append(commands, name)
+
+		return "100 1\n200 100\n300 200\n", nil
+	}
+
+	tools.Configure(tools.Config{PS: "/croft/bin/ps-once"})
+	if _, err := processTree(100, run); err != nil {
+		t.Fatalf("processTree() error = %v", err)
+	}
+
+	clk := &fakeClock{t: time.Unix(1000, 0)}
+	m := newSessionMatcher(100, run, clk.now)
+
+	tools.Configure(tools.Config{PS: "/bothy/bin/ps-live"})
+	if !m.Matches(200) {
+		t.Fatal("Matches(200) = false, want true")
+	}
+
+	tools.Configure(tools.Config{PS: "/strath/bin/ps-reloaded"})
+	clk.advance(2 * sessionMatcherTTL)
+	if !m.Matches(300) {
+		t.Fatal("Matches(300) = false after reload, want true")
+	}
+
+	want := []string{"/croft/bin/ps-once", "/bothy/bin/ps-live", "/strath/bin/ps-reloaded"}
+	if !reflect.DeepEqual(commands, want) {
+		t.Fatalf("ps commands = %v, want %v", commands, want)
 	}
 }
 
